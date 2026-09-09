@@ -184,135 +184,166 @@ func New(w Weights, threshold int) *Scorer {
 // the caller treats scoring as advisory and fail-open.
 func (s *Scorer) Score(in Input) Verdict {
 	v := Verdict{SPF: AuthNone, DKIM: AuthNone, DMARC: AuthNone}
-	// Load the tuning once so the whole verdict uses one coherent snapshot even if
-	// settings are hot-swapped mid-scoring. An unconfigured Scorer falls back to the
-	// defaults.
+	cfg := s.scoringConfig()
+
+	s.scoreSPF(&v, in, cfg)
+	validDKIM := s.scoreDKIM(&v, in, cfg)
+	s.scoreDMARC(&v, in, cfg, validDKIM)
+	s.scoreDNSBL(&v, in, cfg)
+	s.scoreContent(&v, in, cfg)
+
+	v.Spam = v.Score >= cfg.Threshold
+	s.applyAccess(&v, in)
+	return v
+}
+
+// scoringConfig loads the tuning once so the whole verdict uses one coherent
+// snapshot even if settings are hot-swapped mid-scoring, and fills in the
+// built-in defaults for whatever an unconfigured or partially-set Config leaves
+// unset, so it scores as before.
+func (s *Scorer) scoringConfig() *Config {
 	cfg := s.cfg.Load()
 	if cfg == nil {
 		cfg = &Config{Weights: DefaultWeights, Threshold: DefaultThreshold}
 	}
-	// Resolve the Bayes/SpamAssassin cutoffs from the snapshot, falling back to the
-	// built-in defaults so an unset or partially-set Config scores as before.
-	bayesCutoff := cfg.BayesProb
-	if bayesCutoff <= 0 {
-		bayesCutoff = DefaultBayesProb
+	out := *cfg
+	if out.BayesProb <= 0 {
+		out.BayesProb = DefaultBayesProb
 	}
-	saCutoff := cfg.SAThreshold
-	if saCutoff <= 0 {
-		saCutoff = DefaultSAThreshold
+	if out.SAThreshold <= 0 {
+		out.SAThreshold = DefaultSAThreshold
 	}
+	return &out
+}
 
-	if s.checkSPF != nil && in.ClientIP != nil && in.MailFrom != "" {
-		v.SPF = s.checkSPF(in.ClientIP, in.HeloName, in.MailFrom)
-		switch v.SPF {
-		case AuthFail:
-			v.Score += cfg.Weights.SPFFail
-			v.Reasons = append(v.Reasons, "SPF fail")
-		case AuthSoftFail:
-			v.Score += cfg.Weights.SPFSoftFail
-			v.Reasons = append(v.Reasons, "SPF softfail")
-		}
+// scoreSPF checks the envelope sender against the client's address.
+func (s *Scorer) scoreSPF(v *Verdict, in Input, cfg *Config) {
+	if s.checkSPF == nil || in.ClientIP == nil || in.MailFrom == "" {
+		return
 	}
+	v.SPF = s.checkSPF(in.ClientIP, in.HeloName, in.MailFrom)
+	switch v.SPF {
+	case AuthFail:
+		v.Score += cfg.Weights.SPFFail
+		v.Reasons = append(v.Reasons, "SPF fail")
+	case AuthSoftFail:
+		v.Score += cfg.Weights.SPFSoftFail
+		v.Reasons = append(v.Reasons, "SPF softfail")
+	}
+}
 
+// scoreDKIM verifies the signatures and returns the domains that signed validly,
+// which DMARC alignment is then evaluated against.
+func (s *Scorer) scoreDKIM(v *Verdict, in Input, cfg *Config) []string {
+	if s.checkDKIM == nil || len(in.Raw) == 0 {
+		return nil
+	}
 	var validDKIM []string
-	if s.checkDKIM != nil && len(in.Raw) > 0 {
-		for _, d := range s.checkDKIM(in.Raw) {
-			if d.Valid {
-				validDKIM = append(validDKIM, d.Domain)
-			}
-		}
-		if len(validDKIM) > 0 {
-			v.DKIM = AuthPass
-		} else {
-			v.DKIM = AuthFail
-			v.Score += cfg.Weights.DKIMFail
-			v.Reasons = append(v.Reasons, "no valid DKIM signature")
+	for _, d := range s.checkDKIM(in.Raw) {
+		if d.Valid {
+			validDKIM = append(validDKIM, d.Domain)
 		}
 	}
+	if len(validDKIM) > 0 {
+		v.DKIM = AuthPass
+		return validDKIM
+	}
+	v.DKIM = AuthFail
+	v.Score += cfg.Weights.DKIMFail
+	v.Reasons = append(v.Reasons, "no valid DKIM signature")
+	return nil
+}
 
-	// DMARC: the message passes when an authenticated identifier (SPF or DKIM)
-	// aligns, under the relaxed organizational-domain rule, with the From domain.
-	// Otherwise the domain's published policy decides whether this is a failure.
-	// dmarcReject records a failure under an enforcing policy, the strongest
-	// spoofing signal, so an allowlist override cannot rescue a spoofed sender.
-	dmarcReject := false
-	if s.lookupDMARC != nil && in.FromDomain != "" {
-		policy, ok := s.lookupDMARC(in.FromDomain)
-		switch {
-		case !ok:
-			v.DMARC = AuthNone
-		case dmarcAligned(in.FromDomain, in.MailFrom, v.SPF, validDKIM):
-			v.DMARC = AuthPass
-		default:
-			v.DMARC = AuthFail
-			if policy == "reject" || policy == "quarantine" {
-				v.Score += cfg.Weights.DMARCFail
-				v.Reasons = append(v.Reasons, "DMARC fail (policy "+policy+")")
-				dmarcReject = true
-			}
+// scoreDMARC records whether an authenticated identifier (SPF or DKIM) aligns,
+// under the relaxed organizational-domain rule, with the From domain. Otherwise
+// the domain's published policy decides whether this is a failure. DMARCReject
+// records a failure under an enforcing policy, the strongest spoofing signal, so
+// an allowlist override cannot rescue a spoofed sender.
+func (s *Scorer) scoreDMARC(v *Verdict, in Input, cfg *Config, validDKIM []string) {
+	if s.lookupDMARC == nil || in.FromDomain == "" {
+		return
+	}
+	policy, ok := s.lookupDMARC(in.FromDomain)
+	switch {
+	case !ok:
+		v.DMARC = AuthNone
+	case dmarcAligned(in.FromDomain, in.MailFrom, v.SPF, validDKIM):
+		v.DMARC = AuthPass
+	default:
+		v.DMARC = AuthFail
+		if policy == "reject" || policy == "quarantine" {
+			v.Score += cfg.Weights.DMARCFail
+			v.Reasons = append(v.Reasons, "DMARC fail (policy "+policy+")")
+			v.DMARCReject = true
 		}
 	}
-	v.DMARCReject = dmarcReject
+}
 
-	// DNSBL: a client IP listed on a configured blocklist zone is a strong signal;
-	// each listing zone adds its weight.
-	if s.checkDNSBL != nil && in.ClientIP != nil {
-		for _, zone := range cfg.Zones {
-			if s.checkDNSBL(in.ClientIP, zone) {
-				v.DNSBL = append(v.DNSBL, zone)
-				v.Score += cfg.Weights.DNSBLHit
-				v.Reasons = append(v.Reasons, "listed on DNSBL "+zone)
-			}
+// scoreDNSBL adds a weight per blocklist zone listing the client address, a
+// strong signal.
+func (s *Scorer) scoreDNSBL(v *Verdict, in Input, cfg *Config) {
+	if s.checkDNSBL == nil || in.ClientIP == nil {
+		return
+	}
+	for _, zone := range cfg.Zones {
+		if s.checkDNSBL(in.ClientIP, zone) {
+			v.DNSBL = append(v.DNSBL, zone)
+			v.Score += cfg.Weights.DNSBLHit
+			v.Reasons = append(v.Reasons, "listed on DNSBL "+zone)
 		}
 	}
+}
 
-	// Bayesian content score: only a confident spam probability contributes, so a
-	// weak or unbootstrapped model never condemns mail on content alone.
-	if m := s.model.Load(); m != nil && s.extractText != nil && len(in.Raw) > 0 {
+// scoreContent adds the two content signals: the Bayesian probability, where only
+// a confident spam score contributes so a weak or unbootstrapped model never
+// condemns mail on content alone, and the SpamAssassin rule subset, whose summed
+// score contributes one weight once it crosses the SA threshold, however many
+// rules matched, so the subset never dominates the verdict on its own.
+func (s *Scorer) scoreContent(v *Verdict, in Input, cfg *Config) {
+	if len(in.Raw) == 0 {
+		return
+	}
+	if m := s.model.Load(); m != nil && s.extractText != nil {
 		v.BayesProb = m.Score(s.extractText(in.Raw))
-		if v.BayesProb >= bayesCutoff {
+		if v.BayesProb >= cfg.BayesProb {
 			v.Score += cfg.Weights.BayesSpam
 			v.Reasons = append(v.Reasons, "Bayesian: likely spam")
 		}
 	}
-
-	// SpamAssassin rule subset: the summed score of the rules that fired is one
-	// bounded signal, it contributes a single weight once it crosses the SA
-	// threshold, however many rules matched, so the subset's score never dominates
-	// the verdict on its own.
-	if rs := s.saRules.Load(); rs != nil && len(in.Raw) > 0 {
+	if rs := s.saRules.Load(); rs != nil {
 		v.SAScore, v.SAHits = rs.Evaluate(in.Raw)
-		if v.SAScore >= saCutoff {
+		if v.SAScore >= cfg.SAThreshold {
 			v.Score += cfg.Weights.SARulesHit
 			v.Reasons = append(v.Reasons, fmt.Sprintf("SpamAssassin rules (score %.1f)", v.SAScore))
 		}
 	}
+}
 
-	v.Spam = v.Score >= cfg.Threshold
-
-	// Operator allow/block rules override the verdict last. A blocklisted sender is
-	// always spam; an allowlisted sender is rescued from score-based junking, but a
-	// hard DMARC failure (a spoofing signal) still wins so an allowlisted domain
-	// cannot be abused to bypass authentication. An empty MailFrom (a bounce) is
-	// never matched.
-	if acc := s.access.Load(); acc != nil && in.MailFrom != "" {
-		action := acc.Action(in.MailFrom, in.FromDomain)
-		v.AccessMatched = action != ""
-		v.AccessAction = action
-		switch action {
-		case AccessBlock:
-			v.Spam = true
-			v.Reasons = append(v.Reasons, "blocklisted sender")
-		case AccessAllow:
-			if dmarcReject {
-				v.Reasons = append(v.Reasons, "allowlisted sender (overridden by DMARC failure)")
-			} else {
-				v.Spam = false
-				v.Reasons = append(v.Reasons, "allowlisted sender")
-			}
-		}
+// applyAccess lets the operator's allow/block rules override the verdict last. A
+// blocklisted sender is always spam; an allowlisted sender is rescued from
+// score-based junking, but a hard DMARC failure (a spoofing signal) still wins so
+// an allowlisted domain cannot be abused to bypass authentication. An empty
+// MailFrom (a bounce) is never matched.
+func (s *Scorer) applyAccess(v *Verdict, in Input) {
+	acc := s.access.Load()
+	if acc == nil || in.MailFrom == "" {
+		return
 	}
-	return v
+	action := acc.Action(in.MailFrom, in.FromDomain)
+	v.AccessMatched = action != ""
+	v.AccessAction = action
+	switch action {
+	case AccessBlock:
+		v.Spam = true
+		v.Reasons = append(v.Reasons, "blocklisted sender")
+	case AccessAllow:
+		if v.DMARCReject {
+			v.Reasons = append(v.Reasons, "allowlisted sender (overridden by DMARC failure)")
+			return
+		}
+		v.Spam = false
+		v.Reasons = append(v.Reasons, "allowlisted sender")
+	}
 }
 
 // dmarcAligned reports whether an authenticated identifier aligns with the From

@@ -98,41 +98,87 @@ func (r *Reloader) Run(ctx context.Context, interval time.Duration) {
 // read/parse error is logged and the previous value is kept (fail-safe).
 func (r *Reloader) reloadOnce() []string {
 	var reloaded []string
-	if r.settingsFn != nil {
-		if cfg, ver, ok := r.settingsFn(); ok && ver > r.settingsVer {
-			r.scorer.SetConfig(cfg)
-			r.settingsVer = ver
-			reloaded = append(reloaded, "settings")
-		}
+	if r.reloadSettings() {
+		reloaded = append(reloaded, "settings")
 	}
-	if r.accessFn != nil {
-		if list, h, ok := r.accessFn(); ok && h != r.accessVer {
-			r.scorer.SetAccess(list)
-			r.accessVer = h
-			reloaded = append(reloaded, "access rules")
-		}
+	if r.reloadAccess() {
+		reloaded = append(reloaded, "access rules")
 	}
-	if mod, ok := fileModTime(r.rulesPath); ok && mod.After(r.rulesMod) {
-		switch rs, err := LoadRulesFile(r.rulesPath); {
-		case err != nil:
-			r.log("anti-spam: ruleset reload failed, keeping the current rules: %v", err)
-		case rs != nil:
-			r.scorer.SetRules(rs)
-			r.rulesMod = mod
-			reloaded = append(reloaded, "ruleset")
-		}
+	if r.reloadRules() {
+		reloaded = append(reloaded, "ruleset")
 	}
-	if mod, ok := fileModTime(r.modelPath); ok && mod.After(r.modelMod) {
-		switch m, err := LoadModelFile(r.modelPath); {
-		case err != nil:
-			r.log("anti-spam: model reload failed, keeping the current model: %v", err)
-		case m != nil:
-			r.scorer.SetModel(m)
-			r.modelMod = mod
-			reloaded = append(reloaded, "model")
-		}
+	if r.reloadModel() {
+		reloaded = append(reloaded, "model")
 	}
 	return reloaded
+}
+
+// reloadSettings swaps in the stored scoring settings when their version advanced.
+func (r *Reloader) reloadSettings() bool {
+	if r.settingsFn == nil {
+		return false
+	}
+	cfg, ver, ok := r.settingsFn()
+	if !ok || ver <= r.settingsVer {
+		return false
+	}
+	r.scorer.SetConfig(cfg)
+	r.settingsVer = ver
+	return true
+}
+
+// reloadAccess swaps in the stored allow/block rules when their digest changed.
+func (r *Reloader) reloadAccess() bool {
+	if r.accessFn == nil {
+		return false
+	}
+	list, h, ok := r.accessFn()
+	if !ok || h == r.accessVer {
+		return false
+	}
+	r.scorer.SetAccess(list)
+	r.accessVer = h
+	return true
+}
+
+// reloadRules swaps in the on-disk ruleset when the file changed. A read or parse
+// error keeps the current rules (fail-safe).
+func (r *Reloader) reloadRules() bool {
+	mod, ok := fileModTime(r.rulesPath)
+	if !ok || !mod.After(r.rulesMod) {
+		return false
+	}
+	rs, err := LoadRulesFile(r.rulesPath)
+	if err != nil {
+		r.log("anti-spam: ruleset reload failed, keeping the current rules: %v", err)
+		return false
+	}
+	if rs == nil {
+		return false
+	}
+	r.scorer.SetRules(rs)
+	r.rulesMod = mod
+	return true
+}
+
+// reloadModel swaps in the on-disk Bayes model when the file changed. A read or
+// parse error keeps the current model (fail-safe).
+func (r *Reloader) reloadModel() bool {
+	mod, ok := fileModTime(r.modelPath)
+	if !ok || !mod.After(r.modelMod) {
+		return false
+	}
+	m, err := LoadModelFile(r.modelPath)
+	if err != nil {
+		r.log("anti-spam: model reload failed, keeping the current model: %v", err)
+		return false
+	}
+	if m == nil {
+		return false
+	}
+	r.scorer.SetModel(m)
+	r.modelMod = mod
+	return true
 }
 
 func fileModTime(path string) (time.Time, bool) {

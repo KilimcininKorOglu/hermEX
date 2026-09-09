@@ -79,11 +79,33 @@ func (rs *SARuleSet) RuleCount() (rules, metas int) {
 // require_version, …) are ignored, and an unparseable rule is dropped and counted
 // rather than failing the whole set.
 func ParseSARules(text string) *SARuleSet {
-	type def struct{ kind, name, rest string }
-	var defs []def
-	scores := map[string]float64{}
-	netFlag := map[string]bool{}
+	src := readSADirectives(text)
+	rs := &SARuleSet{}
+	for _, d := range src.defs {
+		rs.compileDef(d, src)
+	}
+	rs.resolveMetas()
+	return rs
+}
 
+// saDef is one rule definition the source declared: its kind keyword, its name,
+// and the body that kind parses.
+type saDef struct{ kind, name, rest string }
+
+// saSource is a .cf file read into its three directive families: the rule
+// definitions, the scores assigned to them, and the names flagged as network
+// rules.
+type saSource struct {
+	defs    []saDef
+	scores  map[string]float64
+	netFlag map[string]bool
+}
+
+// readSADirectives reads the directives one .cf text declares, ignoring the ones
+// this subset does not implement (describe, lang, if/ifplugin/endif,
+// require_version, …).
+func readSADirectives(text string) saSource {
+	src := saSource{scores: map[string]float64{}, netFlag: map[string]bool{}}
 	sc := bufio.NewScanner(strings.NewReader(text))
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	for sc.Scan() {
@@ -92,58 +114,61 @@ func ParseSARules(text string) *SARuleSet {
 			continue
 		}
 		kw, rest, ok := cutField(line)
-		if !ok {
-			continue
-		}
-		switch kw {
-		case "header", "body", "rawbody", "uri", "meta":
-			name, body, ok := cutField(rest)
-			if ok {
-				defs = append(defs, def{kw, name, body})
-			}
-		case "score":
-			if name, vals, ok := cutField(rest); ok {
-				if f, ok := firstScore(vals); ok {
-					scores[name] = f
-				}
-			}
-		case "tflags":
-			if name, flags, ok := cutField(rest); ok {
-				if hasField(flags, "net") {
-					netFlag[name] = true
-				}
-			}
+		if ok {
+			src.readDirective(kw, rest)
 		}
 	}
+	return src
+}
 
-	rs := &SARuleSet{}
-	for _, d := range defs {
-		if netFlag[d.name] {
-			if d.kind == "meta" {
-				rs.DroppedMetas++
-			} else {
-				rs.SkippedRules++
-			}
-			continue
-		}
-		if d.kind == "meta" {
-			m, ok := parseMeta(d.name, d.rest, scores[d.name])
-			if !ok {
-				rs.DroppedMetas++
-				continue
-			}
-			rs.metas = append(rs.metas, m)
-			continue
-		}
-		r, ok := compileRule(d.kind, d.name, d.rest, scores[d.name])
-		if !ok {
-			rs.SkippedRules++
-			continue
-		}
-		rs.rules = append(rs.rules, r)
+// readDirective files one directive under the family its keyword names.
+func (src *saSource) readDirective(kw, rest string) {
+	name, body, ok := cutField(rest)
+	if !ok {
+		return
 	}
-	rs.resolveMetas()
-	return rs
+	switch kw {
+	case "header", "body", "rawbody", "uri", "meta":
+		src.defs = append(src.defs, saDef{kw, name, body})
+	case "score":
+		if f, ok := firstScore(body); ok {
+			src.scores[name] = f
+		}
+	case "tflags":
+		if hasField(body, "net") {
+			src.netFlag[name] = true
+		}
+	}
+}
+
+// compileDef compiles one definition into the set, counting the ones it cannot
+// use: a network rule (this subset performs no DNS lookups) and one that does not
+// parse are both dropped rather than failing the whole file.
+func (rs *SARuleSet) compileDef(d saDef, src saSource) {
+	isMeta := d.kind == "meta"
+	if src.netFlag[d.name] {
+		if isMeta {
+			rs.DroppedMetas++
+			return
+		}
+		rs.SkippedRules++
+		return
+	}
+	if isMeta {
+		m, ok := parseMeta(d.name, d.rest, src.scores[d.name])
+		if !ok {
+			rs.DroppedMetas++
+			return
+		}
+		rs.metas = append(rs.metas, m)
+		return
+	}
+	r, ok := compileRule(d.kind, d.name, d.rest, src.scores[d.name])
+	if !ok {
+		rs.SkippedRules++
+		return
+	}
+	rs.rules = append(rs.rules, r)
 }
 
 // resolveMetas drops every meta that references an unavailable name (a rule that
@@ -156,28 +181,7 @@ func (rs *SARuleSet) resolveMetas() {
 		available[r.name] = true
 	}
 	surviving := make(map[string]bool, len(rs.metas))
-	for {
-		changed := false
-		for _, m := range rs.metas {
-			if surviving[m.name] {
-				continue
-			}
-			ok := true
-			for _, ref := range m.refs {
-				if !available[ref] {
-					ok = false
-					break
-				}
-			}
-			if ok {
-				surviving[m.name] = true
-				available[m.name] = true
-				changed = true
-			}
-		}
-		if !changed {
-			break
-		}
+	for rs.admitResolvableMetas(available, surviving) {
 	}
 	kept := rs.metas[:0]
 	for _, m := range rs.metas {
@@ -192,6 +196,33 @@ func (rs *SARuleSet) resolveMetas() {
 	for _, m := range kept {
 		rs.metaByName[m.name] = m
 	}
+}
+
+// admitResolvableMetas admits every meta whose references are all available, one
+// pass of the fixpoint. It reports whether the pass admitted anything, which is
+// what tells the caller to run another.
+func (rs *SARuleSet) admitResolvableMetas(available, surviving map[string]bool) bool {
+	changed := false
+	for _, m := range rs.metas {
+		if surviving[m.name] || !allAvailable(m.refs, available) {
+			continue
+		}
+		surviving[m.name] = true
+		available[m.name] = true
+		changed = true
+	}
+	return changed
+}
+
+// allAvailable reports whether every referenced name resolves to something the
+// set still holds.
+func allAvailable(refs []string, available map[string]bool) bool {
+	for _, ref := range refs {
+		if !available[ref] {
+			return false
+		}
+	}
+	return true
 }
 
 // Evaluate matches the ruleset against a raw RFC 5322 message and returns the
@@ -212,33 +243,7 @@ func (rs *SARuleSet) Evaluate(raw []byte) (score float64, fired []string) {
 		}
 	}
 
-	memo := make(map[string]float64, len(rs.metas))
-	inProgress := make(map[string]bool, len(rs.metas))
-	var eval func(name string) float64
-	eval = func(name string) float64 {
-		if v, ok := memo[name]; ok {
-			return v
-		}
-		m := rs.metaByName[name]
-		if m == nil { // a rule reference
-			if hits[name] {
-				return 1
-			}
-			return 0
-		}
-		if inProgress[name] { // a meta cycle: treat as not firing
-			return 0
-		}
-		inProgress[name] = true
-		v, err := evalRPN(m.rpn, eval)
-		inProgress[name] = false
-		res := 0.0
-		if err == nil && v != 0 {
-			res = 1
-		}
-		memo[name] = res
-		return res
-	}
+	eval := rs.metaEvaluator(hits)
 	for _, m := range rs.metas {
 		if eval(m.name) != 0 {
 			hits[m.name] = true
@@ -249,6 +254,42 @@ func (rs *SARuleSet) Evaluate(raw []byte) (score float64, fired []string) {
 		}
 	}
 	return score, fired
+}
+
+// metaEvaluator builds the recursive meta evaluator for one message: a name
+// resolves to a meta's own expression, or to whether the rule of that name fired.
+// Results are memoized, and a meta cycle is treated as not firing.
+func (rs *SARuleSet) metaEvaluator(hits map[string]bool) func(name string) float64 {
+	memo := make(map[string]float64, len(rs.metas))
+	inProgress := make(map[string]bool, len(rs.metas))
+	var eval func(name string) float64
+	eval = func(name string) float64 {
+		if v, ok := memo[name]; ok {
+			return v
+		}
+		m := rs.metaByName[name]
+		if m == nil { // a rule reference
+			return boolScore(hits[name])
+		}
+		if inProgress[name] { // a meta cycle: treat as not firing
+			return 0
+		}
+		inProgress[name] = true
+		v, err := evalRPN(m.rpn, eval)
+		inProgress[name] = false
+		res := boolScore(err == nil && v != 0)
+		memo[name] = res
+		return res
+	}
+	return eval
+}
+
+// boolScore renders a fired/not-fired outcome as the 1/0 a meta expression reads.
+func boolScore(fired bool) float64 {
+	if fired {
+		return 1
+	}
+	return 0
 }
 
 // saMessage holds the text surfaces a ruleset matches against, parsed once.

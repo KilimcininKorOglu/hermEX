@@ -2,7 +2,9 @@ package antispam
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
+	"strings"
 )
 
 // sarules_meta.go evaluates SpamAssassin meta-rule expressions: boolean and
@@ -63,80 +65,71 @@ func tokenizeMeta(s string) ([]saTok, error) {
 		switch {
 		case c == ' ' || c == '\t':
 			i++
-		case c >= '0' && c <= '9' || c == '.':
-			j := i
-			for j < len(s) && (s[j] >= '0' && s[j] <= '9' || s[j] == '.') {
-				j++
-			}
-			n, err := strconv.ParseFloat(s[i:j], 64)
+		case isNumberByte(c):
+			tok, next, err := scanMetaNumber(s, i)
 			if err != nil {
 				return nil, err
 			}
-			toks = append(toks, saTok{kind: tokNum, num: n})
-			i = j
+			toks, i = append(toks, tok), next
 		case isNameByte(c):
-			j := i
-			for j < len(s) && isNameByte(s[j]) {
-				j++
-			}
-			toks = append(toks, saTok{kind: tokName, name: s[i:j]})
-			i = j
-		case c == '(' || c == ')':
-			toks = append(toks, saTok{kind: tokOp, op: string(c)})
-			i++
-		case c == '+' || c == '-' || c == '*' || c == '/':
-			toks = append(toks, saTok{kind: tokOp, op: string(c)})
-			i++
-		case c == '&':
-			if i+1 < len(s) && s[i+1] == '&' {
-				toks = append(toks, saTok{kind: tokOp, op: "&&"})
-				i += 2
-			} else {
-				return nil, fmt.Errorf("lone &")
-			}
-		case c == '|':
-			if i+1 < len(s) && s[i+1] == '|' {
-				toks = append(toks, saTok{kind: tokOp, op: "||"})
-				i += 2
-			} else {
-				return nil, fmt.Errorf("lone |")
-			}
-		case c == '!':
-			if i+1 < len(s) && s[i+1] == '=' {
-				toks = append(toks, saTok{kind: tokOp, op: "!="})
-				i += 2
-			} else {
-				toks = append(toks, saTok{kind: tokOp, op: "!"})
-				i++
-			}
-		case c == '=':
-			if i+1 < len(s) && s[i+1] == '=' {
-				toks = append(toks, saTok{kind: tokOp, op: "=="})
-				i += 2
-			} else {
-				return nil, fmt.Errorf("lone =")
-			}
-		case c == '>':
-			if i+1 < len(s) && s[i+1] == '=' {
-				toks = append(toks, saTok{kind: tokOp, op: ">="})
-				i += 2
-			} else {
-				toks = append(toks, saTok{kind: tokOp, op: ">"})
-				i++
-			}
-		case c == '<':
-			if i+1 < len(s) && s[i+1] == '=' {
-				toks = append(toks, saTok{kind: tokOp, op: "<="})
-				i += 2
-			} else {
-				toks = append(toks, saTok{kind: tokOp, op: "<"})
-				i++
-			}
+			tok, next := scanMetaName(s, i)
+			toks, i = append(toks, tok), next
 		default:
-			return nil, fmt.Errorf("bad character %q", c)
+			tok, next, err := scanMetaOperator(s, i)
+			if err != nil {
+				return nil, err
+			}
+			toks, i = append(toks, tok), next
 		}
 	}
 	return toks, nil
+}
+
+// isNumberByte reports whether a byte can open or continue a numeric literal.
+func isNumberByte(b byte) bool { return b >= '0' && b <= '9' || b == '.' }
+
+// scanMetaNumber reads the numeric literal starting at i.
+func scanMetaNumber(s string, i int) (saTok, int, error) {
+	j := i
+	for j < len(s) && isNumberByte(s[j]) {
+		j++
+	}
+	n, err := strconv.ParseFloat(s[i:j], 64)
+	if err != nil {
+		return saTok{}, 0, err
+	}
+	return saTok{kind: tokNum, num: n}, j, nil
+}
+
+// scanMetaName reads the rule/meta name starting at i.
+func scanMetaName(s string, i int) (saTok, int) {
+	j := i
+	for j < len(s) && isNameByte(s[j]) {
+		j++
+	}
+	return saTok{kind: tokName, name: s[i:j]}, j
+}
+
+// metaOperators2 are the two-byte operators, matched before the one-byte ones so
+// "&&" never reads as two "&". A "&", "|" or "=" that does not pair is rejected,
+// because it is not an operator this grammar has on its own.
+var metaOperators2 = []string{"&&", "||", "!=", "==", ">=", "<="}
+
+// metaOperators1 are the one-byte operators, including the grouping parentheses.
+const metaOperators1 = "()+-*/!<>"
+
+// scanMetaOperator reads the operator starting at i.
+func scanMetaOperator(s string, i int) (saTok, int, error) {
+	if i+1 < len(s) {
+		if two := s[i : i+2]; slices.Contains(metaOperators2, two) {
+			return saTok{kind: tokOp, op: two}, i + 2, nil
+		}
+	}
+	c := s[i]
+	if strings.IndexByte(metaOperators1, c) < 0 {
+		return saTok{}, 0, fmt.Errorf("bad character %q", c)
+	}
+	return saTok{kind: tokOp, op: string(c)}, i + 1, nil
 }
 
 func isNameByte(b byte) bool {
@@ -154,6 +147,7 @@ var precedence = map[string]int{
 // right-associative, prefix operator.
 func shuntingYard(toks []saTok) ([]saTok, error) {
 	var out, ops []saTok
+	var err error
 	for _, t := range toks {
 		switch {
 		case t.kind == tokNum || t.kind == tokName:
@@ -161,36 +155,55 @@ func shuntingYard(toks []saTok) ([]saTok, error) {
 		case t.op == "(":
 			ops = append(ops, t)
 		case t.op == ")":
-			for len(ops) > 0 && ops[len(ops)-1].op != "(" {
-				out = append(out, ops[len(ops)-1])
-				ops = ops[:len(ops)-1]
+			if out, ops, err = closeGroup(out, ops); err != nil {
+				return nil, err
 			}
-			if len(ops) == 0 {
-				return nil, fmt.Errorf("unbalanced )")
-			}
-			ops = ops[:len(ops)-1]
 		default: // an operator
-			p, known := precedence[t.op]
-			if !known {
-				return nil, fmt.Errorf("bad operator %q", t.op)
+			if out, ops, err = pushOperator(out, ops, t); err != nil {
+				return nil, err
 			}
-			rightAssoc := t.op == "!"
-			for len(ops) > 0 {
-				top := ops[len(ops)-1]
-				if top.op == "(" {
-					break
-				}
-				tp := precedence[top.op]
-				if tp > p || (tp == p && !rightAssoc) {
-					out = append(out, top)
-					ops = ops[:len(ops)-1]
-				} else {
-					break
-				}
-			}
-			ops = append(ops, t)
 		}
 	}
+	return drainOperators(out, ops)
+}
+
+// closeGroup pops operators to the output until the matching "(", which it
+// discards.
+func closeGroup(out, ops []saTok) ([]saTok, []saTok, error) {
+	for len(ops) > 0 && ops[len(ops)-1].op != "(" {
+		out = append(out, ops[len(ops)-1])
+		ops = ops[:len(ops)-1]
+	}
+	if len(ops) == 0 {
+		return nil, nil, fmt.Errorf("unbalanced )")
+	}
+	return out, ops[:len(ops)-1], nil
+}
+
+// pushOperator pops every operator that binds at least as tightly as t before
+// stacking it. The unary "!" is right-associative, so an equal precedence does
+// not pop.
+func pushOperator(out, ops []saTok, t saTok) ([]saTok, []saTok, error) {
+	p, known := precedence[t.op]
+	if !known {
+		return nil, nil, fmt.Errorf("bad operator %q", t.op)
+	}
+	rightAssoc := t.op == "!"
+	for len(ops) > 0 {
+		top := ops[len(ops)-1]
+		tp, isOp := precedence[top.op]
+		if !isOp || tp < p || (tp == p && rightAssoc) {
+			break
+		}
+		out = append(out, top)
+		ops = ops[:len(ops)-1]
+	}
+	return out, append(ops, t), nil
+}
+
+// drainOperators appends what is left on the operator stack, refusing a group
+// that was never closed.
+func drainOperators(out, ops []saTok) ([]saTok, error) {
 	for len(ops) > 0 {
 		if ops[len(ops)-1].op == "(" {
 			return nil, fmt.Errorf("unbalanced (")
@@ -205,80 +218,90 @@ func shuntingYard(toks []saTok) ([]saTok, error) {
 // numeric value (1 fired, 0 not). A structurally bad expression returns an error,
 // which the caller treats as the meta not firing.
 func evalRPN(rpn []saTok, value func(name string) float64) (float64, error) {
-	var st []float64
-	pop := func() (float64, error) {
-		if len(st) == 0 {
-			return 0, fmt.Errorf("stack underflow")
-		}
-		v := st[len(st)-1]
-		st = st[:len(st)-1]
-		return v, nil
-	}
-	b2f := func(b bool) float64 {
-		if b {
-			return 1
-		}
-		return 0
-	}
+	var st metaStack
 	for _, t := range rpn {
-		switch t.kind {
-		case tokNum:
-			st = append(st, t.num)
-		case tokName:
-			st = append(st, value(t.name))
-		case tokOp:
-			if t.op == "!" {
-				a, err := pop()
-				if err != nil {
-					return 0, err
-				}
-				st = append(st, b2f(a == 0))
-				continue
-			}
-			b, err := pop()
-			if err != nil {
-				return 0, err
-			}
-			a, err := pop()
-			if err != nil {
-				return 0, err
-			}
-			switch t.op {
-			case "&&":
-				st = append(st, b2f(a != 0 && b != 0))
-			case "||":
-				st = append(st, b2f(a != 0 || b != 0))
-			case "==":
-				st = append(st, b2f(a == b))
-			case "!=":
-				st = append(st, b2f(a != b))
-			case "<":
-				st = append(st, b2f(a < b))
-			case ">":
-				st = append(st, b2f(a > b))
-			case "<=":
-				st = append(st, b2f(a <= b))
-			case ">=":
-				st = append(st, b2f(a >= b))
-			case "+":
-				st = append(st, a+b)
-			case "-":
-				st = append(st, a-b)
-			case "*":
-				st = append(st, a*b)
-			case "/":
-				if b == 0 {
-					st = append(st, 0)
-				} else {
-					st = append(st, a/b)
-				}
-			default:
-				return 0, fmt.Errorf("bad operator %q", t.op)
-			}
+		if err := applyMetaToken(&st, t, value); err != nil {
+			return 0, err
 		}
 	}
-	if len(st) != 1 {
+	if len(st.v) != 1 {
 		return 0, fmt.Errorf("malformed expression")
 	}
-	return st[0], nil
+	return st.v[0], nil
+}
+
+// metaStack is the operand stack the RPN machine runs on.
+type metaStack struct{ v []float64 }
+
+// push places one operand on the stack.
+func (s *metaStack) push(x float64) { s.v = append(s.v, x) }
+
+// pop takes the top operand, reporting an expression that asked for more
+// operands than it supplied.
+func (s *metaStack) pop() (float64, error) {
+	if len(s.v) == 0 {
+		return 0, fmt.Errorf("stack underflow")
+	}
+	x := s.v[len(s.v)-1]
+	s.v = s.v[:len(s.v)-1]
+	return x, nil
+}
+
+// binaryMetaOps are the two-operand operators a meta expression may use. Division
+// by zero yields zero rather than an infinity, so one bad rule cannot swamp a
+// score.
+var binaryMetaOps = map[string]func(a, b float64) float64{
+	"&&": func(a, b float64) float64 { return boolScore(a != 0 && b != 0) },
+	"||": func(a, b float64) float64 { return boolScore(a != 0 || b != 0) },
+	"==": func(a, b float64) float64 { return boolScore(a == b) },
+	"!=": func(a, b float64) float64 { return boolScore(a != b) },
+	"<":  func(a, b float64) float64 { return boolScore(a < b) },
+	">":  func(a, b float64) float64 { return boolScore(a > b) },
+	"<=": func(a, b float64) float64 { return boolScore(a <= b) },
+	">=": func(a, b float64) float64 { return boolScore(a >= b) },
+	"+":  func(a, b float64) float64 { return a + b },
+	"-":  func(a, b float64) float64 { return a - b },
+	"*":  func(a, b float64) float64 { return a * b },
+	"/": func(a, b float64) float64 {
+		if b == 0 {
+			return 0
+		}
+		return a / b
+	},
+}
+
+// applyMetaToken runs one RPN token against the stack: a literal and a name push
+// their value, the unary "!" negates the top, and every other operator consumes
+// two operands.
+func applyMetaToken(st *metaStack, t saTok, value func(name string) float64) error {
+	switch t.kind {
+	case tokNum:
+		st.push(t.num)
+		return nil
+	case tokName:
+		st.push(value(t.name))
+		return nil
+	}
+	if t.op == "!" {
+		a, err := st.pop()
+		if err != nil {
+			return err
+		}
+		st.push(boolScore(a == 0))
+		return nil
+	}
+	apply, known := binaryMetaOps[t.op]
+	if !known {
+		return fmt.Errorf("bad operator %q", t.op)
+	}
+	b, err := st.pop()
+	if err != nil {
+		return err
+	}
+	a, err := st.pop()
+	if err != nil {
+		return err
+	}
+	st.push(apply(a, b))
+	return nil
 }
