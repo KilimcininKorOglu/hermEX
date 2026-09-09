@@ -90,47 +90,35 @@ const sampleVCard = "BEGIN:VCARD\r\n" +
 func TestImportMapping(t *testing.T) {
 	r := newResolver()
 	m, err := Import([]byte(sampleVCard), Options{Resolver: r.resolve})
-	if err != nil {
-		t.Fatal(err)
+	mustNoErr(t, err, "import")
+	for _, c := range []struct {
+		tag  mapi.PropTag
+		want string
+		what string
+	}{
+		{mapi.PrMessageClass, "IPM.Contact", "message class"},
+		{mapi.PrDisplayName, "Ada Lovelace", "display name"},
+		{mapi.PrSurname, "Lovelace", "surname"},
+		{mapi.PrGivenName, "Ada", "given name"},
+		{mapi.PrCompanyName, "Analytical Engine", "company"},
+		{mapi.PrDepartmentName, "Research", "department"},
+		{mapi.PrMobileTelephoneNumber, "+1-555-0100", "mobile number"},
+		{mapi.PrBusinessTelephoneNumber, "+1-555-0199", "business number"},
+		{mapi.PrHomeAddressCity, "London", "home city"},
+	} {
+		wantEq(t, str(m, c.tag), c.want, c.what)
 	}
-	if got := str(m, mapi.PrMessageClass); got != "IPM.Contact" {
-		t.Errorf("message class %q, want IPM.Contact", got)
-	}
-	if got := str(m, mapi.PrDisplayName); got != "Ada Lovelace" {
-		t.Errorf("display name %q", got)
-	}
-	if got := str(m, mapi.PrSurname); got != "Lovelace" {
-		t.Errorf("surname %q", got)
-	}
-	if got := str(m, mapi.PrGivenName); got != "Ada" {
-		t.Errorf("given name %q", got)
-	}
-	if got := str(m, mapi.PrCompanyName); got != "Analytical Engine" {
-		t.Errorf("company %q", got)
-	}
-	if got := str(m, mapi.PrDepartmentName); got != "Research" {
-		t.Errorf("department %q", got)
-	}
-	if got := str(m, mapi.PrMobileTelephoneNumber); got != "+1-555-0100" {
-		t.Errorf("mobile %q", got)
-	}
-	if got := str(m, mapi.PrBusinessTelephoneNumber); got != "+1-555-0199" {
-		t.Errorf("business phone %q", got)
-	}
-	if got := str(m, mapi.PrHomeAddressCity); got != "London" {
-		t.Errorf("home city %q", got)
-	}
-	if got := namedVal(t, r, m, mapi.NameEmail1Address); got != "ada@work.test" {
-		t.Errorf("email1 %q", got)
-	}
-	if got := namedVal(t, r, m, mapi.NameEmail2Address); got != "ada@home.test" {
-		t.Errorf("email2 %q", got)
-	}
-	if got := namedVal(t, r, m, mapi.NameWorkAddressStreet); got != "2 Engine Rd" {
-		t.Errorf("work street %q", got)
-	}
-	if got := namedVal(t, r, m, nameVCardUID); got != "ada-0001" {
-		t.Errorf("uid %q", got)
+	for _, c := range []struct {
+		name mapi.PropertyName
+		want string
+		what string
+	}{
+		{mapi.NameEmail1Address, "ada@work.test", "the first email slot"},
+		{mapi.NameEmail2Address, "ada@home.test", "the second email slot"},
+		{mapi.NameWorkAddressStreet, "2 Engine Rd", "the work street"},
+		{nameVCardUID, "ada-0001", "the preserved uid"},
+	} {
+		wantEq(t, namedVal(t, r, m, c.name), c.want, c.what)
 	}
 }
 
