@@ -104,43 +104,41 @@ func TestFlaggedConcreteType(t *testing.T) {
 	tag := mapi.MakeTag(0x1234, mapi.PtLong)
 
 	// Available.
-	p := NewPush(0)
-	if err := p.FlaggedPropVal(tag, mapi.FlaggedPropVal{Flag: mapi.FlaggedAvailable, Value: int32(42)}); err != nil {
-		t.Fatalf("push available: %v", err)
-	}
-	if want := []byte{0x00, 0x2A, 0x00, 0x00, 0x00}; !bytes.Equal(p.Bytes(), want) {
-		t.Fatalf("available bytes = % X, want % X", p.Bytes(), want)
-	}
-	got, err := NewPull(p.Bytes(), 0).FlaggedPropVal(mapi.PtLong)
-	if err != nil || got.Flag != mapi.FlaggedAvailable || got.Value.(int32) != 42 {
-		t.Fatalf("available round-trip = %+v, err %v", got, err)
-	}
+	wire := pushFlagged(t, tag, mapi.FlaggedPropVal{Flag: mapi.FlaggedAvailable, Value: int32(42)}, "available")
+	wantBytes(t, wire, []byte{0x00, 0x2A, 0x00, 0x00, 0x00}, "available bytes")
+	got := pullFlagged(t, wire, mapi.PtLong, "available")
+	wantEq(t, got.Flag, mapi.FlaggedAvailable, "available flag")
+	wantEq(t, got.Value.(int32), int32(42), "available value")
 
 	// Unavailable.
-	p = NewPush(0)
-	if err := p.FlaggedPropVal(tag, mapi.FlaggedPropVal{Flag: mapi.FlaggedUnavailable}); err != nil {
-		t.Fatalf("push unavailable: %v", err)
-	}
-	if want := []byte{0x01}; !bytes.Equal(p.Bytes(), want) {
-		t.Fatalf("unavailable bytes = % X, want % X", p.Bytes(), want)
-	}
-	got, err = NewPull(p.Bytes(), 0).FlaggedPropVal(mapi.PtLong)
-	if err != nil || got.Flag != mapi.FlaggedUnavailable || got.Value != nil {
-		t.Fatalf("unavailable round-trip = %+v, err %v", got, err)
-	}
+	wire = pushFlagged(t, tag, mapi.FlaggedPropVal{Flag: mapi.FlaggedUnavailable}, "unavailable")
+	wantBytes(t, wire, []byte{0x01}, "unavailable bytes")
+	got = pullFlagged(t, wire, mapi.PtLong, "unavailable")
+	wantEq(t, got.Flag, mapi.FlaggedUnavailable, "unavailable flag")
+	wantEq(t, got.Value, nil, "unavailable value")
 
 	// Error.
-	p = NewPush(0)
-	if err := p.FlaggedPropVal(tag, mapi.FlaggedPropVal{Flag: mapi.FlaggedError, Value: uint32(0x8004010F)}); err != nil {
-		t.Fatalf("push error: %v", err)
-	}
-	if want := []byte{0x0A, 0x0F, 0x01, 0x04, 0x80}; !bytes.Equal(p.Bytes(), want) {
-		t.Fatalf("error bytes = % X, want % X", p.Bytes(), want)
-	}
-	got, err = NewPull(p.Bytes(), 0).FlaggedPropVal(mapi.PtLong)
-	if err != nil || got.Flag != mapi.FlaggedError || got.Value.(uint32) != 0x8004010F {
-		t.Fatalf("error round-trip = %+v, err %v", got, err)
-	}
+	wire = pushFlagged(t, tag, mapi.FlaggedPropVal{Flag: mapi.FlaggedError, Value: uint32(0x8004010F)}, "error")
+	wantBytes(t, wire, []byte{0x0A, 0x0F, 0x01, 0x04, 0x80}, "error bytes")
+	got = pullFlagged(t, wire, mapi.PtLong, "error")
+	wantEq(t, got.Flag, mapi.FlaggedError, "error flag")
+	wantEq(t, got.Value.(uint32), uint32(0x8004010F), "error value")
+}
+
+// pushFlagged encodes one flagged property value and returns its bytes.
+func pushFlagged(t *testing.T, tag mapi.PropTag, v mapi.FlaggedPropVal, what string) []byte {
+	t.Helper()
+	p := NewPush(0)
+	mustNoErr(t, p.FlaggedPropVal(tag, v), "push "+what)
+	return p.Bytes()
+}
+
+// pullFlagged decodes one flagged property value of the given type.
+func pullFlagged(t *testing.T, wire []byte, typ mapi.PropType, what string) mapi.FlaggedPropVal {
+	t.Helper()
+	got, err := NewPull(wire, 0).FlaggedPropVal(typ)
+	mustNoErr(t, err, "pull "+what)
+	return got
 }
 
 func TestFlaggedWithType(t *testing.T) {
@@ -148,45 +146,21 @@ func TestFlaggedWithType(t *testing.T) {
 
 	// Available: an explicit type precedes the flag.
 	av := mapi.FlaggedPropVal{Flag: mapi.FlaggedAvailable, Type: mapi.PtLong, Value: int32(7)}
-	p := NewPush(0)
-	if err := p.FlaggedPropVal(tag, av); err != nil {
-		t.Fatalf("push available: %v", err)
-	}
-	if want := []byte{0x03, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00}; !bytes.Equal(p.Bytes(), want) {
-		t.Fatalf("available bytes = % X, want % X", p.Bytes(), want)
-	}
-	got, err := NewPull(p.Bytes(), 0).FlaggedPropVal(mapi.PtUnspecified)
-	if err != nil || got != av {
-		t.Fatalf("available round-trip = %+v, want %+v, err %v", got, av, err)
-	}
+	wire := pushFlagged(t, tag, av, "available")
+	wantBytes(t, wire, []byte{0x03, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00}, "available bytes")
+	wantEq(t, pullFlagged(t, wire, mapi.PtUnspecified, "available"), av, "the available round trip")
 
 	// Error: the wire type is forced to PtError.
 	er := mapi.FlaggedPropVal{Flag: mapi.FlaggedError, Type: mapi.PtError, Value: uint32(5)}
-	p = NewPush(0)
-	if err := p.FlaggedPropVal(tag, er); err != nil {
-		t.Fatalf("push error: %v", err)
-	}
-	if want := []byte{0x0A, 0x00, 0x0A, 0x05, 0x00, 0x00, 0x00}; !bytes.Equal(p.Bytes(), want) {
-		t.Fatalf("error bytes = % X, want % X", p.Bytes(), want)
-	}
-	got, err = NewPull(p.Bytes(), 0).FlaggedPropVal(mapi.PtUnspecified)
-	if err != nil || got != er {
-		t.Fatalf("error round-trip = %+v, want %+v, err %v", got, er, err)
-	}
+	wire = pushFlagged(t, tag, er, "error")
+	wantBytes(t, wire, []byte{0x0A, 0x00, 0x0A, 0x05, 0x00, 0x00, 0x00}, "error bytes")
+	wantEq(t, pullFlagged(t, wire, mapi.PtUnspecified, "error"), er, "the error round trip")
 
 	// Unavailable: the wire type is 0.
 	un := mapi.FlaggedPropVal{Flag: mapi.FlaggedUnavailable}
-	p = NewPush(0)
-	if err := p.FlaggedPropVal(tag, un); err != nil {
-		t.Fatalf("push unavailable: %v", err)
-	}
-	if want := []byte{0x00, 0x00, 0x01}; !bytes.Equal(p.Bytes(), want) {
-		t.Fatalf("unavailable bytes = % X, want % X", p.Bytes(), want)
-	}
-	got, err = NewPull(p.Bytes(), 0).FlaggedPropVal(mapi.PtUnspecified)
-	if err != nil || got != un {
-		t.Fatalf("unavailable round-trip = %+v, want %+v, err %v", got, un, err)
-	}
+	wire = pushFlagged(t, tag, un, "unavailable")
+	wantBytes(t, wire, []byte{0x00, 0x00, 0x01}, "unavailable bytes")
+	wantEq(t, pullFlagged(t, wire, mapi.PtUnspecified, "unavailable"), un, "the unavailable round trip")
 }
 
 func TestFlaggedABKRejected(t *testing.T) {
