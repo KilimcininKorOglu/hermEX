@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/textproto"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -54,35 +53,15 @@ func TestPOP3RetrieveAndDelete(t *testing.T) {
 	send := func(s string) { _, _ = fmt.Fprintf(conn, "%s\r\n", s) }
 	wantOK := func() string {
 		t.Helper()
-		l, err := r.ReadLine()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.HasPrefix(l, "+OK") {
-			t.Fatalf("want +OK, got %q", l)
-		}
-		return l
+		return wantReply(t, r, "+OK")
 	}
 	wantERR := func() {
 		t.Helper()
-		l, err := r.ReadLine()
-		if err != nil || !strings.HasPrefix(l, "-ERR") {
-			t.Fatalf("want -ERR, got %q (err %v)", l, err)
-		}
+		wantReply(t, r, "-ERR")
 	}
 	readLines := func() []string {
 		t.Helper()
-		var lines []string
-		for {
-			l, err := r.ReadLine()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if l == "." {
-				return lines
-			}
-			lines = append(lines, l)
-		}
+		return readMultiline(t, r)
 	}
 
 	wantOK() // greeting
@@ -96,21 +75,25 @@ func TestPOP3RetrieveAndDelete(t *testing.T) {
 	wantOK()
 
 	send("STAT")
-	if l := wantOK(); !strings.HasPrefix(l, "+OK 2 ") {
-		t.Errorf("STAT = %q, want +OK 2 <size>", l)
-	}
+	wantLinePrefix(t, wantOK(), "+OK 2 ", "STAT")
 
 	send("LIST")
 	wantOK()
-	if lines := readLines(); len(lines) != 2 || !strings.HasPrefix(lines[0], "1 ") || !strings.HasPrefix(lines[1], "2 ") {
-		t.Errorf("LIST lines = %v", lines)
+	lines := readLines()
+	if len(lines) != 2 {
+		t.Fatalf("LIST lines = %v, want two", lines)
 	}
+	wantLinePrefix(t, lines[0], "1 ", "the first LIST line")
+	wantLinePrefix(t, lines[1], "2 ", "the second LIST line")
 
 	send("UIDL")
 	wantOK()
-	if lines := readLines(); len(lines) != 2 || lines[0] != "1 1" || lines[1] != "2 2" {
-		t.Errorf("UIDL lines = %v, want [1 1 2 2]", lines)
+	lines = readLines()
+	if len(lines) != 2 {
+		t.Fatalf("UIDL lines = %v, want two", lines)
 	}
+	wantEq(t, lines[0], "1 1", "the first UIDL line")
+	wantEq(t, lines[1], "2 2", "the second UIDL line")
 
 	// RETR 2 returns msgB re-synthesized from the stored object (not byte
 	// identical to arrival). Its body line starting with '.' is dot-stuffed on
@@ -122,12 +105,8 @@ func TestPOP3RetrieveAndDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(body), "Subject: two") {
-		t.Errorf("RETR body missing subject: %q", body)
-	}
-	if !strings.Contains(string(body), ".dotted line") {
-		t.Errorf("RETR body lost dot-prefixed line after de-stuffing: %q", body)
-	}
+	wantContains(t, string(body), "Subject: two", "the retrieved body")
+	wantContains(t, string(body), ".dotted line", "the retrieved body after de-stuffing")
 
 	send("DELE 1")
 	wantOK()
@@ -136,21 +115,27 @@ func TestPOP3RetrieveAndDelete(t *testing.T) {
 	send("QUIT")
 	wantOK()
 
-	// The deletion must be committed: message 1 (UID 1) is gone, UID 2 remains.
-	st2, err := objectstore.Open(path)
+	checkDeletionCommitted(t, path, inbox)
+}
+
+// checkDeletionCommitted asserts the QUIT commit landed: message 1 (UID 1) is
+// gone and UID 2 remains, and the deleted message went to the Recoverable Items
+// dumpster rather than being purged.
+func checkDeletionCommitted(t *testing.T, path string, inbox int64) {
+	t.Helper()
+	st, err := objectstore.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st2.Close()
-	msgs, err := st2.ListMessages(inbox)
+	defer st.Close()
+	msgs, err := st.ListMessages(inbox)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(msgs) != 1 || msgs[0].UID != 2 {
-		t.Errorf("after QUIT, messages = %+v, want only UID 2", msgs)
+	if len(msgs) != 1 {
+		t.Fatalf("after QUIT, messages = %+v, want only UID 2", msgs)
 	}
-	// The POP3-deleted message went to the Recoverable Items dumpster, not purged.
-	if dump, _ := st2.ListSoftDeleted(inbox); len(dump) != 1 {
-		t.Errorf("dumpster has %d items after POP3 DELE+QUIT, want 1 (recoverable)", len(dump))
-	}
+	wantEq(t, msgs[0].UID, uint32(2), "the surviving message's uid")
+	dump, _ := st.ListSoftDeleted(inbox)
+	wantEq(t, len(dump), 1, "dumpster items after POP3 DELE+QUIT (recoverable)")
 }

@@ -52,21 +52,14 @@ func TestStartTLSUpgrade(t *testing.T) {
 	}
 	defer conn.Close()
 	r := textproto.NewReader(bufio.NewReader(conn))
-	if _, _, err := r.ReadResponse(220); err != nil {
-		t.Fatalf("greeting: %v", err)
-	}
+	readCodedReply(t, r, 220, "greeting")
 	send(t, conn, "EHLO client.test\r\n")
-	_, msg, err := r.ReadResponse(250)
-	if err != nil {
-		t.Fatalf("EHLO: %v", err)
-	}
+	msg := readCodedReply(t, r, 250, "EHLO")
 	if !strings.Contains(msg, "STARTTLS") {
 		t.Errorf("EHLO does not advertise STARTTLS:\n%s", msg)
 	}
 	send(t, conn, "STARTTLS\r\n")
-	if _, _, err := r.ReadResponse(220); err != nil {
-		t.Fatalf("STARTTLS: %v", err)
-	}
+	readCodedReply(t, r, 220, "STARTTLS")
 
 	tconn := tls.Client(conn, &tls.Config{RootCAs: certPool(t, certPath), ServerName: "127.0.0.1"})
 	if err := tconn.Handshake(); err != nil {
@@ -74,27 +67,18 @@ func TestStartTLSUpgrade(t *testing.T) {
 	}
 	tr := textproto.NewReader(bufio.NewReader(tconn))
 	_, _ = fmt.Fprint(tconn, "EHLO client.test\r\n")
-	_, msg2, err := tr.ReadResponse(250)
-	if err != nil {
-		t.Fatalf("EHLO over TLS: %v", err)
-	}
+	msg2 := readCodedReply(t, tr, 250, "EHLO over TLS")
 	if strings.Contains(msg2, "STARTTLS") {
 		t.Errorf("STARTTLS still advertised after TLS:\n%s", msg2)
 	}
 	_, _ = fmt.Fprint(tconn, "MAIL FROM:<alice@test>\r\n")
-	if _, _, err := tr.ReadResponse(250); err != nil {
-		t.Fatalf("MAIL over TLS: %v", err)
-	}
+	readCodedReply(t, tr, 250, "MAIL over TLS")
 	_, _ = fmt.Fprint(tconn, "RCPT TO:<bob@test>\r\n")
-	if _, _, err := tr.ReadResponse(250); err != nil {
-		t.Fatalf("RCPT over TLS: %v", err)
-	}
+	readCodedReply(t, tr, 250, "RCPT over TLS")
 	_, _ = fmt.Fprint(tconn, "QUIT\r\n")
 	_, _, _ = tr.ReadResponse(221)
 
-	if sess.from != "alice@test" {
-		t.Errorf("transaction over TLS recorded from=%q, want alice@test", sess.from)
-	}
+	wantEq(t, sess.from, "alice@test", "the envelope sender recorded over TLS")
 }
 
 // TestStartTLSRejectsPipelinedInjection proves a command pipelined behind

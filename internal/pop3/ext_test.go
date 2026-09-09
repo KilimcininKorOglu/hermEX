@@ -20,6 +20,41 @@ import (
 // connected textproto reader plus send/read helpers.
 func dialPOP3(t *testing.T, msg string) (*textproto.Reader, func(string), func() string, func() string, func() []string) {
 	t.Helper()
+	conn := servePOP3(t, msg)
+	r := textproto.NewReader(bufio.NewReader(conn))
+
+	send := func(s string) { _, _ = fmt.Fprintf(conn, "%s\r\n", s) }
+	wantPrefix := func(prefix string) func() string {
+		return func() string {
+			t.Helper()
+			l, err := r.ReadLine()
+			if err != nil || !strings.HasPrefix(l, prefix) {
+				t.Fatalf("want %s, got %q (err %v)", prefix, l, err)
+			}
+			return l
+		}
+	}
+	readLines := func() []string {
+		t.Helper()
+		var lines []string
+		for {
+			l, err := r.ReadLine()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if l == "." {
+				return lines
+			}
+			lines = append(lines, l)
+		}
+	}
+	return r, send, wantPrefix("+OK"), wantPrefix("-ERR"), readLines
+}
+
+// servePOP3 provisions a single-message mailbox, starts a server on it, and
+// returns a connection to that server.
+func servePOP3(t *testing.T, msg string) net.Conn {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "alice")
 	st, err := objectstore.Open(path)
 	if err != nil {
@@ -43,40 +78,7 @@ func dialPOP3(t *testing.T, msg string) (*textproto.Reader, func(string), func()
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	r := textproto.NewReader(bufio.NewReader(conn))
-
-	send := func(s string) { _, _ = fmt.Fprintf(conn, "%s\r\n", s) }
-	wantOK := func() string {
-		t.Helper()
-		l, err := r.ReadLine()
-		if err != nil || !strings.HasPrefix(l, "+OK") {
-			t.Fatalf("want +OK, got %q (err %v)", l, err)
-		}
-		return l
-	}
-	wantERR := func() string {
-		t.Helper()
-		l, err := r.ReadLine()
-		if err != nil || !strings.HasPrefix(l, "-ERR") {
-			t.Fatalf("want -ERR, got %q (err %v)", l, err)
-		}
-		return l
-	}
-	readLines := func() []string {
-		t.Helper()
-		var lines []string
-		for {
-			l, err := r.ReadLine()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if l == "." {
-				return lines
-			}
-			lines = append(lines, l)
-		}
-	}
-	return r, send, wantOK, wantERR, readLines
+	return conn
 }
 
 // TestPOP3CapaAdvertisesExtensions checks the CAPA list advertises every optional

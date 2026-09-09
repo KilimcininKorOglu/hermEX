@@ -302,52 +302,31 @@ func TestServerSMTPUTF8(t *testing.T) {
 func TestServerEnhancedStatusCodes(t *testing.T) {
 	r, conn := dialServer(t, &fakeSession{})
 	// The banner stays bare so its first token is the domain.
-	_, banner, err := r.ReadResponse(220)
-	if err != nil {
-		t.Fatalf("banner: %v", err)
-	}
+	banner := readCodedReply(t, r, 220, "banner")
 	if startsWithEnhanced(banner) {
 		t.Errorf("220 banner carries an enhanced code, want bare: %q", banner)
 	}
 
 	send(t, conn, "EHLO client.test\r\n")
-	_, ehlo, err := r.ReadResponse(250)
-	if err != nil {
-		t.Fatalf("EHLO: %v", err)
-	}
+	ehlo := readCodedReply(t, r, 250, "EHLO")
 	if !strings.Contains(ehlo, "ENHANCEDSTATUSCODES") {
 		t.Errorf("EHLO did not advertise ENHANCEDSTATUSCODES: %q", ehlo)
 	}
 
 	// A bare 250 gains the class default 2.0.0.
 	send(t, conn, "MAIL FROM:<alice@test>\r\n")
-	_, mailMsg, err := r.ReadResponse(250)
-	if err != nil {
-		t.Fatalf("MAIL: %v", err)
-	}
-	if !strings.HasPrefix(mailMsg, "2.0.0 ") {
-		t.Errorf("MAIL reply missing the 2.0.0 enhanced code: %q", mailMsg)
-	}
+	wantReplyPrefix(t, readCodedReply(t, r, 250, "MAIL"), "2.0.0 ", "the MAIL reply's enhanced code")
 
 	// A bare error reply carries the 5.0.0 class default.
 	send(t, conn, "DATA\r\n")
-	_, dataMsg, err := r.ReadResponse(503)
-	if err != nil {
-		t.Fatalf("DATA: %v", err)
-	}
+	dataMsg := readCodedReply(t, r, 503, "DATA")
 	if !startsWithEnhanced(dataMsg) || dataMsg[0] != '5' {
 		t.Errorf("503 reply missing a 5.x.x enhanced code: %q", dataMsg)
 	}
 
 	// A reply that already embeds a specific code is not double-prefixed.
 	send(t, conn, "VRFY bob@test\r\n")
-	_, vrfyMsg, err := r.ReadResponse(252)
-	if err != nil {
-		t.Fatalf("VRFY: %v", err)
-	}
-	if !strings.HasPrefix(vrfyMsg, "2.1.5 ") {
-		t.Errorf("VRFY reply lost or doubled its specific code: %q", vrfyMsg)
-	}
+	wantReplyPrefix(t, readCodedReply(t, r, 252, "VRFY"), "2.1.5 ", "the VRFY reply's specific code")
 }
 
 // TestServerCommandLineLimit proves RFC 5321 §4.5.3.1.4: a command line past

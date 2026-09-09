@@ -5,7 +5,6 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -80,47 +79,30 @@ func TestProcessDueOutboxReleasesDueMessage(t *testing.T) {
 	}
 
 	released, err := releaseOutbox(context.Background(), st, deliver, nil, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if released != 1 {
-		t.Fatalf("released %d, want 1", released)
-	}
+	mustNoErr(t, err, "release the outbox")
+	wantEq(t, released, 1, "released messages")
 
 	// Every recipient, including the blind Bcc, must be delivered to.
 	for _, want := range []string{"to@example.com", "cc@example.com", "bcc@example.com"} {
-		if !slices.Contains(gotRcpts, want) {
-			t.Errorf("delivery recipients %v missing %q", gotRcpts, want)
-		}
+		wantEq(t, slices.Contains(gotRcpts, want), true, "the delivery reaches "+want)
 	}
 	// The delivered bytes carry To and Cc but never the blind Bcc address (which
 	// appears only in the Bcc header, so its absence proves the header was cut).
 	dw := string(gotRaw)
-	if !strings.Contains(dw, "to@example.com") || !strings.Contains(dw, "cc@example.com") {
-		t.Errorf("delivered copy lost To/Cc:\n%s", dw)
-	}
-	if strings.Contains(dw, "bcc@example.com") {
-		t.Errorf("delivered copy leaked the blind Bcc:\n%s", dw)
-	}
+	wantContains(t, dw, "to@example.com", "the delivered copy keeps To")
+	wantContains(t, dw, "cc@example.com", "the delivered copy keeps Cc")
+	wantNotContains(t, dw, "bcc@example.com", "the delivered copy leaks the blind Bcc")
 
 	// The Outbox is cleared and the Sent copy keeps the Bcc record.
-	if n := count(t, st, int64(mapi.PrivateFIDOutbox)); n != 0 {
-		t.Errorf("Outbox has %d after release, want 0", n)
-	}
+	wantEq(t, count(t, st, int64(mapi.PrivateFIDOutbox)), 0, "Outbox messages after the release")
 	sent, err := st.ListMessages(int64(mapi.PrivateFIDSentItems))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, err, "list Sent")
 	if len(sent) != 1 {
 		t.Fatalf("Sent has %d, want 1", len(sent))
 	}
 	sentRaw, err := st.GetMessageRaw(int64(mapi.PrivateFIDSentItems), sent[0].UID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(sentRaw), "bcc@example.com") {
-		t.Errorf("Sent copy should keep the Bcc record:\n%s", sentRaw)
-	}
+	mustNoErr(t, err, "read the Sent copy")
+	wantContains(t, string(sentRaw), "bcc@example.com", "the Sent copy keeps the Bcc record")
 }
 
 // TestProcessDueOutboxSkipsFutureMessage checks that a message whose deferred
@@ -246,32 +228,21 @@ func TestProcessDueOutboxGivesUpAfterMaxAttempts(t *testing.T) {
 	if _, err := releaseOutbox(context.Background(), st, deliver, onGiveUp, time.Now()); err == nil {
 		t.Fatal("the final attempt should report the abandonment")
 	}
-	if gaveUp != 1 {
-		t.Errorf("give-up hook called %d times, want 1", gaveUp)
-	}
-	if !slices.Contains(gotRecipients, "to@example.com") || !slices.Contains(gotRecipients, "bcc@example.com") {
-		t.Errorf("give-up recipients = %v, want every unreached address", gotRecipients)
-	}
-	if !strings.Contains(string(gotRaw), "Subject: scheduled") {
-		t.Error("give-up hook did not receive the message it abandoned")
-	}
-	if n := count(t, st, int64(mapi.PrivateFIDOutbox)); n != 0 {
-		t.Errorf("Outbox still holds %d message(s) after giving up, want 0", n)
-	}
+	wantEq(t, gaveUp, 1, "give-up hook calls")
+	wantEq(t, slices.Contains(gotRecipients, "to@example.com"), true, "the give-up reports the To recipient")
+	wantEq(t, slices.Contains(gotRecipients, "bcc@example.com"), true, "the give-up reports the Bcc recipient")
+	wantContains(t, string(gotRaw), "Subject: scheduled", "the give-up hook receives the abandoned message")
+	wantEq(t, count(t, st, int64(mapi.PrivateFIDOutbox)), 0, "Outbox messages after giving up")
+
 	drafts, err := st.ListMessages(int64(mapi.PrivateFIDDraft))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, err, "list Drafts")
 	if len(drafts) != 1 {
 		t.Fatalf("Drafts holds %d message(s), want the abandoned one", len(drafts))
 	}
 	props, err := st.GetMessageProperties(drafts[0].ID, mapi.PrDeferredSendTime)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := props.Get(mapi.PrDeferredSendTime); ok {
-		t.Error("the Drafts copy is still marked as a scheduled send")
-	}
+	mustNoErr(t, err, "read the Drafts copy's properties")
+	_, stillScheduled := props.Get(mapi.PrDeferredSendTime)
+	wantEq(t, stillScheduled, false, "the Drafts copy is still marked as a scheduled send")
 }
 
 // TestProcessDueOutboxAttemptBudgetIsPerMessage proves one message's failures do

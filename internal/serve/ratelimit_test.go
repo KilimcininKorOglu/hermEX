@@ -53,18 +53,10 @@ func TestRateLimitRefusesPastBurst(t *testing.T) {
 		t.Fatalf("status past the burst = %d, want 429", resp.StatusCode)
 	}
 	retry, err := strconv.Atoi(resp.Header.Get("Retry-After"))
-	if err != nil || retry < 1 {
-		t.Errorf("Retry-After = %q, want a positive number of seconds", resp.Header.Get("Retry-After"))
-	}
-	if got := resp.Header.Get("X-RateLimit-Limit"); got != "2" {
-		t.Errorf("X-RateLimit-Limit = %q, want 2", got)
-	}
-	if got := resp.Header.Get("X-RateLimit-Remaining"); got != "0" {
-		t.Errorf("X-RateLimit-Remaining = %q, want 0", got)
-	}
-	if resp.Header.Get("X-RateLimit-Reset") == "" {
-		t.Error("X-RateLimit-Reset missing on a refusal")
-	}
+	wantEq(t, err == nil && retry >= 1, true, "Retry-After is a positive number of seconds")
+	wantEq(t, resp.Header.Get("X-RateLimit-Limit"), "2", "X-RateLimit-Limit")
+	wantEq(t, resp.Header.Get("X-RateLimit-Remaining"), "0", "X-RateLimit-Remaining")
+	wantEq(t, resp.Header.Get("X-RateLimit-Reset") != "", true, "the refusal carries X-RateLimit-Reset")
 }
 
 // TestRateLimitAdmitsAfterWindow proves a refused client is served again once its

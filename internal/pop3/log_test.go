@@ -90,24 +90,47 @@ func TestInstrumentationLogsConnAndAuth(t *testing.T) {
 	if _, ok := findEvent(events, "conn.accept"); !ok {
 		t.Error("no conn.accept event")
 	}
-	if e, ok := findEvent(events, "auth.ok"); !ok {
-		t.Error("no auth.ok event for the successful login")
-	} else if e.User != "alice" || e.Level != logging.LevelInfo {
-		t.Errorf("auth.ok = user %q level %v, want alice/info", e.User, e.Level)
-	}
-	if e, ok := findEvent(events, "auth.fail"); !ok {
-		t.Error("no auth.fail event for the wrong password")
-	} else if e.User != "bob" || e.Level != logging.LevelWarn {
-		t.Errorf("auth.fail = user %q level %v, want bob/warn", e.User, e.Level)
-	}
+	wantAuthEvent(t, events, "auth.ok", "alice", logging.LevelInfo)
+	wantAuthEvent(t, events, "auth.fail", "bob", logging.LevelWarn)
 
 	// No password may appear anywhere in any rendered event.
+	out := renderEvents(events)
+	wantNoSecret(t, out, "secret")
+	wantNoSecret(t, out, "hunter2")
+}
+
+// wantAuthEvent asserts one auth event was logged with the identity and level it
+// must carry.
+func wantAuthEvent(t *testing.T, events []logging.Event, name, user string, level logging.Level) {
+	t.Helper()
+	e, ok := findEvent(events, name)
+	if !ok {
+		t.Errorf("no %s event", name)
+		return
+	}
+	if e.User != user {
+		t.Errorf("%s user = %q, want %q", name, e.User, user)
+	}
+	if e.Level != level {
+		t.Errorf("%s level = %v, want %v", name, e.Level, level)
+	}
+}
+
+// renderEvents writes every captured event through the stderr sink, which is what
+// an operator would actually see.
+func renderEvents(events []logging.Event) string {
 	var rendered strings.Builder
 	rs := logging.NewStderrSink(&rendered)
 	for _, e := range events {
 		rs.Write(e)
 	}
-	if out := rendered.String(); strings.Contains(out, "secret") || strings.Contains(out, "hunter2") {
-		t.Error("a password leaked into the logged events")
+	return rendered.String()
+}
+
+// wantNoSecret fails the test when a password reached the rendered log.
+func wantNoSecret(t *testing.T, out, secret string) {
+	t.Helper()
+	if strings.Contains(out, secret) {
+		t.Errorf("the password %q leaked into the logged events", secret)
 	}
 }

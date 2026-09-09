@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -273,12 +272,9 @@ func TestTLSHandshakeLogged(t *testing.T) {
 	if !ok {
 		t.Fatal("no tls.handshake event")
 	}
-	if e.Subsystem != logging.TLS {
-		t.Errorf("handshake subsystem = %q, want tls", e.Subsystem)
-	}
-	if e.Fields["version"] == nil || e.Fields["cipher"] == nil {
-		t.Errorf("handshake missing version/cipher: %v", e.Fields)
-	}
+	wantEq(t, e.Subsystem, logging.TLS, "handshake subsystem")
+	wantEq(t, e.Fields["version"] != nil, true, "the handshake event carries a version")
+	wantEq(t, e.Fields["cipher"] != nil, true, "the handshake event carries a cipher")
 }
 
 // TestRequestLoggingEmitsEvent proves the serve middleware records one structured
@@ -322,33 +318,15 @@ func TestRequestLoggingEmitsEvent(t *testing.T) {
 	if e.Name != "http.request" {
 		t.Fatalf("event name = %q, want http.request (middleware did not log)", e.Name)
 	}
-	if e.Subsystem != logging.Webmail {
-		t.Errorf("subsystem = %q, want webmail", e.Subsystem)
-	}
-	if e.User != "alice@hermex.test" {
-		t.Errorf("user = %q, want alice@hermex.test", e.User)
-	}
-	if e.RemoteAddr != "203.0.113.7" {
-		t.Errorf("remote = %q, want the first X-Forwarded-For hop 203.0.113.7", e.RemoteAddr)
-	}
-	if e.RequestID != "req-123" {
-		t.Errorf("request id = %q, want the inbound req-123", e.RequestID)
-	}
-	if e.Fields["method"] != http.MethodGet || e.Fields["path"] != "/mail/inbox" {
-		t.Errorf("method/path = %v/%v, want GET /mail/inbox", e.Fields["method"], e.Fields["path"])
-	}
-	if e.Fields["status"] != http.StatusTeapot {
-		t.Errorf("status = %v, want %d", e.Fields["status"], http.StatusTeapot)
-	}
-	if e.Level != logging.LevelWarn {
-		t.Errorf("level = %v, want warn for a 4xx response", e.Level)
-	}
-	// The password must never appear anywhere in the rendered event.
-	var rendered strings.Builder
-	logging.NewStderrSink(&rendered).Write(e)
-	if strings.Contains(rendered.String(), "hunter2") {
-		t.Error("the request password leaked into the logged event")
-	}
+	wantEq(t, e.Subsystem, logging.Webmail, "subsystem")
+	wantEq(t, e.User, "alice@hermex.test", "user")
+	wantEq(t, e.RemoteAddr, "203.0.113.7", "remote (the first X-Forwarded-For hop)")
+	wantEq(t, e.RequestID, "req-123", "request id (the inbound one)")
+	wantField(t, e, "method", http.MethodGet, "method")
+	wantField(t, e, "path", "/mail/inbox", "path")
+	wantField(t, e, "status", http.StatusTeapot, "status")
+	wantEq(t, e.Level, logging.LevelWarn, "level for a 4xx response")
+	wantNoSecret(t, e, "hunter2")
 }
 
 // writeSelfSignedCert generates an ECDSA P-256 self-signed certificate valid for

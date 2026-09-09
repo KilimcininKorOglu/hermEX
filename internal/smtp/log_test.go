@@ -82,35 +82,26 @@ func TestInstrumentationLogsTransaction(t *testing.T) {
 
 	events := sink.snapshot()
 
-	mustRemote := func(e logging.Event) {
-		if e.RemoteAddr == "" {
-			t.Errorf("%s event has no client address", e.Name)
-		}
+	wantLoggedEvent(t, events, "conn.accept", "", nil)
+	wantLoggedEvent(t, events, "mail.from", "from", "alice@example.com")
+	wantLoggedEvent(t, events, "rcpt.to", "to", "bob@hermex.test")
+	wantLoggedEvent(t, events, "message.accept", "", nil)
+}
+
+// wantLoggedEvent asserts one event was logged, that it carries the client
+// address (so every line traces back to the originating IP), and, when a field is
+// named, that the field carries the expected value.
+func wantLoggedEvent(t *testing.T, events []logging.Event, name, field string, want any) {
+	t.Helper()
+	e, ok := findEvent(events, name)
+	if !ok {
+		t.Errorf("no %s event", name)
+		return
 	}
-	if e, ok := findEvent(events, "conn.accept"); !ok {
-		t.Error("no conn.accept event")
-	} else {
-		mustRemote(e)
+	if e.RemoteAddr == "" {
+		t.Errorf("%s event has no client address", name)
 	}
-	if e, ok := findEvent(events, "mail.from"); !ok {
-		t.Error("no mail.from event")
-	} else {
-		if e.Fields["from"] != "alice@example.com" {
-			t.Errorf("mail.from from = %v, want alice@example.com", e.Fields["from"])
-		}
-		mustRemote(e)
-	}
-	if e, ok := findEvent(events, "rcpt.to"); !ok {
-		t.Error("no rcpt.to event")
-	} else {
-		if e.Fields["to"] != "bob@hermex.test" {
-			t.Errorf("rcpt.to to = %v, want bob@hermex.test", e.Fields["to"])
-		}
-		mustRemote(e)
-	}
-	if e, ok := findEvent(events, "message.accept"); !ok {
-		t.Error("no message.accept event")
-	} else {
-		mustRemote(e)
+	if field != "" && e.Fields[field] != want {
+		t.Errorf("%s %s = %v, want %v", name, field, e.Fields[field], want)
 	}
 }
