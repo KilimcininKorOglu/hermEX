@@ -131,41 +131,56 @@ func ProcessDueOutboxStats(ctx context.Context, st *objectstore.Store, deliver D
 		}
 		stats.Scanned++
 		if !due {
-			stats.Waiting++
-			if attempts, e := releaseAttempts(st, m.ID); e == nil && attempts > 0 {
-				stats.Retrying++
-			}
+			countWaiting(st, &stats, m.ID)
 			continue
 		}
-		// A message stamped as started, yet still scheduled, means the previous pass
-		// died mid-release. Whether the mail went out cannot be known from here, so
-		// neither guess is honest: sending again may duplicate it, filing it to Sent
-		// may hide a message that never left. Hand it back to the sender instead.
-		if started, e := releaseStarted(st, m.ID); e != nil {
-			errs = append(errs, e)
-			continue
-		} else if started {
-			if e := returnAmbiguous(st, onGiveUp, outbox, m); e != nil {
-				errs = append(errs, e)
-			}
-			continue
-		}
-		done, e := releaseMessage(st, deliver, outbox, m, now)
-		if e != nil {
-			errs = append(errs, e)
-		}
-		if done {
-			stats.Released++
-			continue
-		}
-		stats.Failed++
-		stats.Waiting++
-		stats.Retrying++
-		if e := recordFailure(st, onGiveUp, outbox, m, e); e != nil {
-			errs = append(errs, e)
-		}
+		errs = append(errs, processDueMessage(st, deliver, onGiveUp, outbox, m, now, &stats)...)
 	}
 	return stats, errors.Join(errs...)
+}
+
+// countWaiting counts a scheduled message whose time has not come, marking it as
+// retrying when it already carries failed attempts.
+func countWaiting(st *objectstore.Store, stats *Stats, messageID int64) {
+	stats.Waiting++
+	if attempts, err := releaseAttempts(st, messageID); err == nil && attempts > 0 {
+		stats.Retrying++
+	}
+}
+
+// processDueMessage releases one due message and records the outcome in stats.
+func processDueMessage(st *objectstore.Store, deliver DeliverFunc, onGiveUp GiveUpFunc, outbox int64, m objectstore.MessageInfo, now time.Time, stats *Stats) []error {
+	// A message stamped as started, yet still scheduled, means the previous pass
+	// died mid-release. Whether the mail went out cannot be known from here, so
+	// neither guess is honest: sending again may duplicate it, filing it to Sent
+	// may hide a message that never left. Hand it back to the sender instead.
+	started, err := releaseStarted(st, m.ID)
+	if err != nil {
+		return []error{err}
+	}
+	if started {
+		if e := returnAmbiguous(st, onGiveUp, outbox, m); e != nil {
+			return []error{e}
+		}
+		return nil
+	}
+
+	var errs []error
+	done, err := releaseMessage(st, deliver, outbox, m, now)
+	if err != nil {
+		errs = append(errs, err)
+	}
+	if done {
+		stats.Released++
+		return errs
+	}
+	stats.Failed++
+	stats.Waiting++
+	stats.Retrying++
+	if e := recordFailure(st, onGiveUp, outbox, m, err); e != nil {
+		errs = append(errs, e)
+	}
+	return errs
 }
 
 // releaseAttempts reads a message's consecutive-failure count without changing it,
@@ -218,22 +233,7 @@ func releaseMessage(st *objectstore.Store, deliver DeliverFunc, outbox int64, m 
 	// the same as the interactive compose path. External recipients are relayed:
 	// the caller binds this to the full delivery path, not to local delivery alone.
 	if _, err := deliver(recipients, stripBcc(raw), now); err != nil {
-		// Delivery answered, so the outcome is known and the stamp has nothing left
-		// to record. Clearing it keeps an ordinary failure on the retry path instead
-		// of reading as an interrupted release on the next sweep.
-		if e := clearReleaseStarted(st, m.ID); e != nil {
-			return false, errors.Join(err, e)
-		}
-		// A terminal delivery error (the message was quarantined for a virus) drops
-		// the scheduled copy without filing Sent, rather than retrying it forever.
-		var term interface{ TerminalDelivery() bool }
-		if errors.As(err, &term) && term.TerminalDelivery() {
-			if e := st.DeleteMessage(outbox, m.UID); e != nil {
-				return false, e
-			}
-			return true, nil
-		}
-		return false, err
+		return releaseFailed(st, outbox, m, err)
 	}
 	// Delivered. Keep the with-Bcc copy in Sent for the record, then clear the
 	// Outbox. A filing failure is reported but does NOT hold the message in the
@@ -246,6 +246,26 @@ func releaseMessage(st *objectstore.Store, deliver DeliverFunc, outbox int64, m 
 	}
 	if fileErr != nil {
 		return true, fmt.Errorf("delivered but not filed to Sent: %w", fileErr)
+	}
+	return true, nil
+}
+
+// releaseFailed settles a release whose delivery answered with an error. The
+// outcome is known, so the in-flight stamp has nothing left to record: clearing
+// it keeps an ordinary failure on the retry path instead of reading as an
+// interrupted release on the next sweep. A terminal error (the message was
+// quarantined for a virus) drops the scheduled copy without filing Sent, rather
+// than retrying it forever.
+func releaseFailed(st *objectstore.Store, outbox int64, m objectstore.MessageInfo, err error) (done bool, out error) {
+	if e := clearReleaseStarted(st, m.ID); e != nil {
+		return false, errors.Join(err, e)
+	}
+	var term interface{ TerminalDelivery() bool }
+	if !errors.As(err, &term) || !term.TerminalDelivery() {
+		return false, err
+	}
+	if e := st.DeleteMessage(outbox, m.UID); e != nil {
+		return false, e
 	}
 	return true, nil
 }

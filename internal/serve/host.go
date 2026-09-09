@@ -34,8 +34,12 @@ func ValidPublicHost(host string) bool {
 	if !strings.Contains(host, ".") {
 		return false
 	}
-	// Guard the label charset so nothing exotic reaches a URL: letters, digits,
-	// dot and hyphen only.
+	return hostCharsetOK(host)
+}
+
+// hostCharsetOK guards the label charset so nothing exotic reaches a URL:
+// letters, digits, dot and hyphen only.
+func hostCharsetOK(host string) bool {
 	for _, r := range host {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.' || r == '-':

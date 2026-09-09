@@ -85,41 +85,61 @@ func (e *ew) flush() {
 
 func (s *Server) handle(conn net.Conn) {
 	defer func() { _ = conn.Close() }() // closes the upgraded conn after an STLS swap
-	w := &ew{out: bufio.NewWriter(conn)}
-	tp := textproto.NewReader(bufio.NewReader(conn))
 	_, isTLS := conn.(*tls.Conn)
-
-	var mb *mailbox
-	defer func() {
-		if mb != nil {
-			_ = mb.st.Close()
-		}
-	}()
-
-	ok(w, "hermEX POP3 ready")
-
-	var user string
-	// event logs through the server's logger, reading the live user and connection
-	// (both change mid-session: user on login, conn on an STLS upgrade). A nil
-	// logger is a no-op.
-	event := func(level logging.Level, name string, f logging.Fields) {
-		s.Logger.Emit(logging.Event{
-			Level:      level,
-			Subsystem:  logging.POP3,
-			Name:       name,
-			User:       user,
-			RemoteAddr: conn.RemoteAddr().String(),
-			Fields:     f,
-		})
+	c := &pop3Session{
+		s:     s,
+		conn:  conn,
+		w:     &ew{out: bufio.NewWriter(conn)},
+		tp:    textproto.NewReader(bufio.NewReader(conn)),
+		isTLS: isTLS,
 	}
-	event(logging.LevelInfo, "conn.accept", logging.Fields{"tls": isTLS})
+	defer c.closeMailbox()
 
+	ok(c.w, "hermEX POP3 ready")
+	c.event(logging.LevelInfo, "conn.accept", logging.Fields{"tls": isTLS})
+	c.serve()
+}
+
+// pop3Session is one connection's state. The writer, reader and TLS flag change
+// mid-session on an STLS upgrade, and the user changes on login.
+type pop3Session struct {
+	s     *Server
+	conn  net.Conn
+	w     *ew
+	tp    *textproto.Reader
+	isTLS bool
+	user  string
+	mb    *mailbox // nil until authenticated: the AUTHORIZATION/TRANSACTION split
+}
+
+// event logs through the server's logger, reading the session's live user and
+// connection. A nil logger is a no-op.
+func (c *pop3Session) event(level logging.Level, name string, f logging.Fields) {
+	c.s.Logger.Emit(logging.Event{
+		Level:      level,
+		Subsystem:  logging.POP3,
+		Name:       name,
+		User:       c.user,
+		RemoteAddr: c.conn.RemoteAddr().String(),
+		Fields:     f,
+	})
+}
+
+// closeMailbox releases the snapshot the session opened, if any.
+func (c *pop3Session) closeMailbox() {
+	if c.mb != nil {
+		_ = c.mb.st.Close()
+	}
+}
+
+// serve reads and runs commands until the client quits or the link fails.
+func (c *pop3Session) serve() {
 	for {
-		line, err := tp.ReadLine()
+		line, err := c.tp.ReadLine()
 		if err != nil {
 			return // client gone; per RFC no deletions are committed
 		}
-		if w.err != nil {
+		if c.w.err != nil {
 			return // a prior response failed to reach the client; the link is gone
 		}
 		cmd, arg, _ := strings.Cut(line, " ")
@@ -127,107 +147,144 @@ func (s *Server) handle(conn net.Conn) {
 
 		// Per-command audit at debug level, the verb only, never the argument
 		// (PASS's argument is the password).
-		event(logging.LevelDebug, "command", logging.Fields{"cmd": cmd})
-
-		// CAPA (RFC 2449) and LANG (RFC 6856) are valid in both the AUTHORIZATION
-		// and TRANSACTION states, so handle them before the state split.
-		switch cmd {
-		case "CAPA":
-			s.writeCapa(w, isTLS)
-			continue
-		case "LANG":
-			writeLang(w, arg)
-			continue
-		}
-
-		if mb == nil { // AUTHORIZATION state
-			switch cmd {
-			case "USER":
-				user = arg
-				ok(w, "")
-			case "PASS":
-				if m, okAuth := s.finishAuth(w, conn, user, arg); okAuth {
-					mb = m
-				} else {
-					user = ""
-				}
-			case "AUTH":
-				// SASL (RFC 5034): PLAIN and LOGIN, both password mechanisms that
-				// reuse the same Authenticate + privilege gate as USER/PASS.
-				authUser, m, okAuth := s.authSASL(w, tp, conn, arg)
-				if okAuth {
-					user = authUser
-					mb = m
-				}
-			case "UTF8":
-				// RFC 6856: enter UTF-8 mode (valid only in AUTHORIZATION). hermEX
-				// serves the stored message bytes verbatim and never downgrades, so
-				// this is an acknowledgment with no behavior change.
-				ok(w, "UTF-8 mode enabled")
-				event(logging.LevelInfo, "utf8", nil)
-			case "STLS":
-				if s.TLSConfig == nil || isTLS {
-					errLine(w, "STLS not available")
-					continue
-				}
-				if tp.R.Buffered() > 0 {
-					event(logging.LevelWarn, "stls.injection", nil)
-					return // pipelined plaintext behind STLS; abort the connection
-				}
-				ok(w, "begin TLS negotiation")
-				tc := tls.Server(conn, s.TLSConfig)
-				if err := tc.Handshake(); err != nil {
-					return // handshake failed; deferred close fires
-				}
-				conn = tc
-				w = &ew{out: bufio.NewWriter(tc)}
-				tp = textproto.NewReader(bufio.NewReader(tc))
-				isTLS = true
-				user = "" // discard any USER given before TLS
-				event(logging.LevelInfo, "stls", nil)
-			case "QUIT":
-				ok(w, "bye")
-				return
-			default:
-				errLine(w, "command not allowed before authentication")
-			}
-			continue
-		}
-
-		// TRANSACTION state
-		switch cmd {
-		case "STAT":
-			ok(w, fmt.Sprintf("%d %d", mb.count(), mb.totalSize()))
-		case "LIST":
-			mb.list(w, arg, false)
-		case "UIDL":
-			mb.list(w, arg, true)
-		case "TOP":
-			mb.top(w, arg)
-		case "RETR":
-			mb.retr(w, arg)
-		case "DELE":
-			mb.dele(w, arg)
-		case "RSET":
-			for i := range mb.deleted {
-				mb.deleted[i] = false
-			}
-			ok(w, "")
-		case "NOOP":
-			ok(w, "")
-		case "QUIT":
-			if failed := mb.commit(); len(failed) > 0 {
-				event(logging.LevelError, "quit.commit.fail", logging.Fields{
-					"folder": mb.folder,
-					"uids":   failed,
-				})
-			}
-			ok(w, "bye")
+		c.event(logging.LevelDebug, "command", logging.Fields{"cmd": cmd})
+		if c.command(cmd, arg) {
 			return
-		default:
-			errLine(w, "unknown command")
 		}
 	}
+}
+
+// command runs one command, reporting whether the session ends here.
+func (c *pop3Session) command(cmd, arg string) (done bool) {
+	// CAPA (RFC 2449) and LANG (RFC 6856) are valid in both the AUTHORIZATION
+	// and TRANSACTION states, so they are answered before the state split.
+	switch cmd {
+	case "CAPA":
+		c.s.writeCapa(c.w, c.isTLS)
+		return false
+	case "LANG":
+		writeLang(c.w, arg)
+		return false
+	}
+	if c.mb == nil {
+		return c.authCommand(cmd, arg)
+	}
+	return c.transactionCommand(cmd, arg)
+}
+
+// authCommand runs an AUTHORIZATION-state command.
+func (c *pop3Session) authCommand(cmd, arg string) (done bool) {
+	switch cmd {
+	case "USER":
+		c.user = arg
+		ok(c.w, "")
+	case "PASS":
+		c.finishPass(arg)
+	case "AUTH":
+		c.finishSASL(arg)
+	case "UTF8":
+		// RFC 6856: enter UTF-8 mode (valid only in AUTHORIZATION). hermEX
+		// serves the stored message bytes verbatim and never downgrades, so
+		// this is an acknowledgment with no behavior change.
+		ok(c.w, "UTF-8 mode enabled")
+		c.event(logging.LevelInfo, "utf8", nil)
+	case "STLS":
+		return c.startTLS()
+	case "QUIT":
+		ok(c.w, "bye")
+		return true
+	default:
+		errLine(c.w, "command not allowed before authentication")
+	}
+	return false
+}
+
+// finishPass completes a USER/PASS login. A refusal discards the claimed user, so
+// the next attempt starts clean.
+func (c *pop3Session) finishPass(pass string) {
+	m, okAuth := c.s.finishAuth(c.w, c.conn, c.user, pass)
+	if !okAuth {
+		c.user = ""
+		return
+	}
+	c.mb = m
+}
+
+// finishSASL completes an AUTH login (RFC 5034): PLAIN and LOGIN, both password
+// mechanisms that reuse the same Authenticate + privilege gate as USER/PASS.
+func (c *pop3Session) finishSASL(arg string) {
+	authUser, m, okAuth := c.s.authSASL(c.w, c.tp, c.conn, arg)
+	if !okAuth {
+		return
+	}
+	c.user = authUser
+	c.mb = m
+}
+
+// startTLS upgrades the connection in place (RFC 2595), reporting whether the
+// session must end.
+func (c *pop3Session) startTLS() (done bool) {
+	if c.s.TLSConfig == nil || c.isTLS {
+		errLine(c.w, "STLS not available")
+		return false
+	}
+	if c.tp.R.Buffered() > 0 {
+		c.event(logging.LevelWarn, "stls.injection", nil)
+		return true // pipelined plaintext behind STLS; abort the connection
+	}
+	ok(c.w, "begin TLS negotiation")
+	tc := tls.Server(c.conn, c.s.TLSConfig)
+	if err := tc.Handshake(); err != nil {
+		return true // handshake failed; deferred close fires
+	}
+	c.conn = tc
+	c.w = &ew{out: bufio.NewWriter(tc)}
+	c.tp = textproto.NewReader(bufio.NewReader(tc))
+	c.isTLS = true
+	c.user = "" // discard any USER given before TLS
+	c.event(logging.LevelInfo, "stls", nil)
+	return false
+}
+
+// transactionCommands are the TRANSACTION-state commands that act on the mailbox
+// snapshot and leave the session open.
+var transactionCommands = map[string]func(c *pop3Session, arg string){
+	"STAT": func(c *pop3Session, _ string) { ok(c.w, fmt.Sprintf("%d %d", c.mb.count(), c.mb.totalSize())) },
+	"LIST": func(c *pop3Session, arg string) { c.mb.list(c.w, arg, false) },
+	"UIDL": func(c *pop3Session, arg string) { c.mb.list(c.w, arg, true) },
+	"TOP":  func(c *pop3Session, arg string) { c.mb.top(c.w, arg) },
+	"RETR": func(c *pop3Session, arg string) { c.mb.retr(c.w, arg) },
+	"DELE": func(c *pop3Session, arg string) { c.mb.dele(c.w, arg) },
+	"RSET": func(c *pop3Session, _ string) { c.mb.reset(); ok(c.w, "") },
+	"NOOP": func(c *pop3Session, _ string) { ok(c.w, "") },
+}
+
+// transactionCommand runs a TRANSACTION-state command, reporting whether the
+// session ends here (QUIT, which is also where deletions are committed).
+func (c *pop3Session) transactionCommand(cmd, arg string) (done bool) {
+	if cmd == "QUIT" {
+		c.quit()
+		return true
+	}
+	run, known := transactionCommands[cmd]
+	if !known {
+		errLine(c.w, "unknown command")
+		return false
+	}
+	run(c, arg)
+	return false
+}
+
+// quit commits the session's deletions and says goodbye. A commit failure is
+// recorded rather than hidden; the client is told bye either way.
+func (c *pop3Session) quit() {
+	if failed := c.mb.commit(); len(failed) > 0 {
+		c.event(logging.LevelError, "quit.commit.fail", logging.Fields{
+			"folder": c.mb.folder,
+			"uids":   failed,
+		})
+	}
+	ok(c.w, "bye")
 }
 
 // mailbox is a login-time snapshot of a folder's messages plus per-message
@@ -253,6 +310,13 @@ func openMailbox(path string) (*mailbox, error) {
 	}
 	mb.deleted = make([]bool, len(mb.msgs))
 	return mb, nil
+}
+
+// reset clears every deletion mark (RSET, RFC 1939 §5).
+func (mb *mailbox) reset() {
+	for i := range mb.deleted {
+		mb.deleted[i] = false
+	}
 }
 
 func (mb *mailbox) count() int {

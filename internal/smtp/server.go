@@ -983,13 +983,13 @@ func dsnMailParams(arg string) (p MailParams, ok bool) {
 		case "RET":
 			retN++
 			up := strings.ToUpper(v)
-			if up != "FULL" && up != "HDRS" {
+			if !validRET(up) {
 				return MailParams{}, false
 			}
 			p.RET = up
 		case "ENVID":
 			envidN++
-			if len(v) > 100 || !validXtext(v) {
+			if !validEnvID(v) {
 				return MailParams{}, false
 			}
 			p.ENVID = v
@@ -1000,6 +1000,13 @@ func dsnMailParams(arg string) (p MailParams, ok bool) {
 	}
 	return p, true
 }
+
+// validRET reports whether a RET value is one of the two RFC 3461 §4.3 keywords.
+func validRET(up string) bool { return up == "FULL" || up == "HDRS" }
+
+// validEnvID reports whether an ENVID value is a well-formed envelope id
+// (RFC 3461 §4.4: xtext, at most 100 characters).
+func validEnvID(v string) bool { return len(v) <= 100 && validXtext(v) }
 
 // dsnRcptParams parses and validates the RFC 3461 NOTIFY and ORCPT parameters of a
 // RCPT TO argument. ok is false when a value is malformed or either parameter
