@@ -148,13 +148,10 @@ func TestEndToEndConnect(t *testing.T) {
 	url := srv.URL + "/rpc/rpcproxy.dll?testhost:6001"
 
 	outResp, err := http.DefaultClient.Do(mustReq(t, "RPC_OUT_DATA", url, bytes.NewReader(connA1())))
-	if err != nil {
-		t.Fatalf("OUT request: %v", err)
-	}
+	mustNoErr(t, err, "OUT request")
 	defer outResp.Body.Close()
-	if _, err := readPDU(outResp.Body); err != nil { // CONN/A3
-		t.Fatalf("read CONN/A3: %v", err)
-	}
+	_, err = readPDU(outResp.Body) // CONN/A3
+	mustNoErr(t, err, "read CONN/A3")
 
 	pr, pw := io.Pipe()
 	inDone := make(chan error, 1)
@@ -166,51 +163,48 @@ func TestEndToEndConnect(t *testing.T) {
 		inDone <- err
 	}()
 	_, _ = pw.Write(connB1())
-	if _, err := readPDU(outResp.Body); err != nil { // CONN/C2
-		t.Fatalf("read CONN/C2: %v", err)
-	}
+	_, err = readPDU(outResp.Body) // CONN/C2
+	mustNoErr(t, err, "read CONN/C2")
 
 	// Bind the EMSMDB interface.
 	_, _ = pw.Write(buildBindPDU(0x30, EMSMDBUUID, EMSMDBVersion, 0))
-	bindAck, err := readPDU(outResp.Body)
-	if err != nil {
-		t.Fatalf("read bind_ack: %v", err)
-	}
-	if h, _ := ndr.ParseHeader(bindAck); h.Type != ndr.PktBindAck {
-		t.Fatalf("bind reply type = %#x, want BIND_ACK", h.Type)
-	}
+	wantPDUType(t, readReply(t, outResp.Body, "bind_ack"), ndr.PktBindAck, "bind reply")
 
 	// EcDoConnectEx.
 	_, _ = pw.Write(buildRequestPDU(0x31, 0, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"), ndr.PfcFirstFrag|ndr.PfcLastFrag))
-	connResp, err := readPDU(outResp.Body)
-	if err != nil {
-		t.Fatalf("read connect response: %v", err)
-	}
-	if h, _ := ndr.ParseHeader(connResp); h.Type != ndr.PktResponse {
-		t.Fatalf("connect reply type = %#x, want RESPONSE", h.Type)
-	}
+	connResp := readReply(t, outResp.Body, "connect response")
+	wantPDUType(t, connResp, ndr.PktResponse, "connect reply")
 	cxh, result := parseConnectExOut(t, responseStub(t, connResp))
-	if result != ecSuccess || cxh.GUID == (mapi.GUID{}) {
-		t.Fatalf("end-to-end connect = (result %#x, cxh %v), want (0, non-zero)", result, cxh.GUID)
-	}
+	wantEq(t, result, uint32(ecSuccess), "connect result")
+	wantTrue(t, cxh.GUID != (mapi.GUID{}), "the connect reply carries a context handle")
 
 	// EcDoDisconnect.
 	ds := ndr.NewPush()
 	pushCtxHandle(ds, cxh)
 	_, _ = pw.Write(buildRequestPDU(0x32, 0, opEcDoDisconnect, ds.Bytes(), ndr.PfcFirstFrag|ndr.PfcLastFrag))
-	discResp, err := readPDU(outResp.Body)
-	if err != nil {
-		t.Fatalf("read disconnect response: %v", err)
-	}
-	if h, _ := ndr.ParseHeader(discResp); h.Type != ndr.PktResponse {
-		t.Errorf("disconnect reply type = %#x, want RESPONSE", h.Type)
-	}
-	if _, ok := ems.lookup(cxh.GUID); ok {
-		t.Error("session still present after end-to-end disconnect")
-	}
+	wantPDUType(t, readReply(t, outResp.Body, "disconnect response"), ndr.PktResponse, "disconnect reply")
+	_, stillOpen := ems.lookup(cxh.GUID)
+	wantFalse(t, stillOpen, "the session survives an end-to-end disconnect")
 
 	_ = pw.Close()
 	<-inDone
+}
+
+// readReply reads one PDU off the OUT channel, stopping the test when the channel
+// gives nothing.
+func readReply(t *testing.T, body io.Reader, what string) []byte {
+	t.Helper()
+	pdu, err := readPDU(body)
+	mustNoErr(t, err, "read "+what)
+	return pdu
+}
+
+// wantPDUType fails the test unless a PDU carries the expected packet type.
+func wantPDUType(t *testing.T, pdu []byte, typ uint8, what string) {
+	t.Helper()
+	h, err := ndr.ParseHeader(pdu)
+	mustNoErr(t, err, "parse "+what+" header")
+	wantEq(t, h.Type, typ, what+" type")
 }
 
 // TestIdleSessionIsReclaimed proves an abandoned Outlook Anywhere session does

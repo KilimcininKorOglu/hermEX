@@ -62,28 +62,22 @@ func TestParseProxyURL(t *testing.T) {
 // command lists decode back to the documented shapes.
 func TestRTSRoundTrip(t *testing.T) {
 	_, a3, err := parseRTS(buildConnA3(0x10))
-	if err != nil {
-		t.Fatalf("parse A3: %v", err)
-	}
-	if len(a3) != 1 || a3[0].Type != rtsConnectionTimeout {
-		t.Errorf("CONN/A3 commands = %v, want [CONNECTION_TIMEOUT]", a3)
-	}
+	mustNoErr(t, err, "parse CONN/A3")
+	wantCommands(t, a3, "CONN/A3", rtsConnectionTimeout)
+
 	_, c2, err := parseRTS(buildConnC2(0x10, 0x10000))
-	if err != nil {
-		t.Fatalf("parse C2: %v", err)
-	}
-	if len(c2) != 3 || c2[0].Type != rtsVersion || c2[1].Type != rtsReceiveWindowSize || c2[2].Type != rtsConnectionTimeout {
-		t.Errorf("CONN/C2 commands = %v, want [VERSION, RECEIVE_WINDOW_SIZE, CONNECTION_TIMEOUT]", c2)
-	}
-	if c2[1].U32 != 0x10000 {
-		t.Errorf("CONN/C2 window = %#x, want 0x10000", c2[1].U32)
-	}
+	mustNoErr(t, err, "parse CONN/C2")
+	wantCommands(t, c2, "CONN/C2", rtsVersion, rtsReceiveWindowSize, rtsConnectionTimeout)
+	wantEq(t, c2[1].U32, uint32(0x10000), "CONN/C2 window")
+
 	// The cookies helper recovers both cookies from a CONN/A1 in order.
 	_, a1cmds, _ := parseRTS(connA1())
 	ck := cookies(a1cmds)
-	if len(ck) != 2 || ck[0] != testConnCookie || ck[1] != testChanCookie {
-		t.Errorf("cookies(A1) = %v, want [conn, chan]", ck)
+	if len(ck) != 2 {
+		t.Fatalf("cookies(A1) = %v, want two", ck)
 	}
+	wantEq(t, ck[0], testConnCookie, "the connection cookie")
+	wantEq(t, ck[1], testChanCookie, "the channel cookie")
 }
 
 // TestRendezvous proves the dual-channel handshake: an RPC_OUT_DATA request
@@ -99,20 +93,14 @@ func TestRendezvous(t *testing.T) {
 	// Open the OUT channel and read the immediate CONN/A3.
 	outReq, _ := http.NewRequest("RPC_OUT_DATA", url, bytes.NewReader(connA1()))
 	outResp, err := http.DefaultClient.Do(outReq)
-	if err != nil {
-		t.Fatalf("OUT request: %v", err)
-	}
+	mustNoErr(t, err, "OUT request")
 	defer outResp.Body.Close()
-	if outResp.StatusCode != http.StatusOK {
-		t.Fatalf("OUT status = %d, want 200", outResp.StatusCode)
-	}
+	wantEq(t, outResp.StatusCode, http.StatusOK, "OUT status")
+
 	a3, err := readPDU(outResp.Body)
-	if err != nil {
-		t.Fatalf("read CONN/A3: %v", err)
-	}
-	if _, cmds, _ := parseRTS(a3); len(cmds) != 1 || cmds[0].Type != rtsConnectionTimeout {
-		t.Fatalf("first OUT PDU is not CONN/A3: %v", cmds)
-	}
+	mustNoErr(t, err, "read CONN/A3")
+	_, a3cmds, _ := parseRTS(a3)
+	wantCommands(t, a3cmds, "the first OUT PDU", rtsConnectionTimeout)
 
 	// Open the IN channel via a pipe body so it stays open while we read the OUT
 	// stream.
@@ -126,19 +114,14 @@ func TestRendezvous(t *testing.T) {
 		}
 		inDone <- err
 	}()
-	if _, err := pw.Write(connB1()); err != nil {
-		t.Fatalf("write CONN/B1: %v", err)
-	}
+	_, err = pw.Write(connB1())
+	mustNoErr(t, err, "write CONN/B1")
 
 	// The virtual connection is now complete: CONN/C2 must arrive on OUT.
 	c2, err := readPDU(outResp.Body)
-	if err != nil {
-		t.Fatalf("read CONN/C2: %v", err)
-	}
+	mustNoErr(t, err, "read CONN/C2")
 	_, cmds, _ := parseRTS(c2)
-	if len(cmds) != 3 || cmds[0].Type != rtsVersion || cmds[1].Type != rtsReceiveWindowSize || cmds[2].Type != rtsConnectionTimeout {
-		t.Errorf("second OUT PDU is not CONN/C2: %v", cmds)
-	}
+	wantCommands(t, cmds, "the second OUT PDU", rtsVersion, rtsReceiveWindowSize, rtsConnectionTimeout)
 
 	_ = pw.Close()
 	<-inDone

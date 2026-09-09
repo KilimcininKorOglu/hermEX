@@ -125,46 +125,38 @@ func TestRpcExt2CrossExecuteHandle(t *testing.T) {
 
 	// Execute #1: RopLogon -> the logon handle lands in the response handle table.
 	resp, fault := ems.Handle(&Session{}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, logonExecuteBuffer()))
-	if fault != 0 {
-		t.Fatalf("logon EcDoRpcExt2 fault = %#x", fault)
-	}
+	wantEq(t, fault, uint32(0), "logon EcDoRpcExt2 fault")
 	_, pout, result := parseRpcExt2Out(t, resp)
-	if result != ecSuccess {
-		t.Fatalf("logon result = %#x, want ecSuccess", result)
-	}
+	wantEq(t, result, uint32(ecSuccess), "logon result")
 	_, handles, err := oxmapihttp.DecodeExecute(pout)
-	if err != nil {
-		t.Fatalf("decode logon response: %v", err)
+	mustNoErr(t, err, "decode the logon response")
+	if len(handles) != 1 {
+		t.Fatalf("logon handles = %v, want one", handles)
 	}
-	if len(handles) != 1 || handles[0] == 0xFFFFFFFF {
-		t.Fatalf("logon did not mint a handle: %v", handles)
-	}
+	wantTrue(t, handles[0] != 0xFFFFFFFF, "logon mints a handle")
 	logonH := handles[0]
 
 	// Execute #2 on the same context handle: RopOpenFolder(Inbox) reusing the logon
 	// handle the first Execute minted.
 	resp, fault = ems.Handle(&Session{}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, openFolderExecuteBuffer(logonH)))
-	if fault != 0 {
-		t.Fatalf("open-folder EcDoRpcExt2 fault = %#x", fault)
-	}
+	wantEq(t, fault, uint32(0), "open-folder EcDoRpcExt2 fault")
 	_, pout, result = parseRpcExt2Out(t, resp)
-	if result != ecSuccess {
-		t.Fatalf("open-folder EcDoRpcExt2 result = %#x, want ecSuccess", result)
-	}
+	wantEq(t, result, uint32(ecSuccess), "open-folder EcDoRpcExt2 result")
 	rops, handles, err := oxmapihttp.DecodeExecute(pout)
-	if err != nil {
-		t.Fatalf("decode open-folder response: %v", err)
-	}
+	mustNoErr(t, err, "decode the open-folder response")
+
 	rp := ext.NewPull(rops, ext.FlagUTF16)
 	ropID, _ := rp.Uint8()
 	_, _ = rp.Uint8()    // OutputHandleIndex
 	rv, _ := rp.Uint32() // ReturnValue
-	if ropID != 0x02 || rv != ecSuccess {
-		t.Fatalf("open-folder response = (RopId %#x, ReturnValue %#x), want (0x02, 0), the logon handle did not survive into the second Execute", ropID, rv)
+	wantEq(t, ropID, uint8(0x02), "open-folder RopId")
+	// A non-zero return value here means the logon handle did not survive into the
+	// second Execute.
+	wantEq(t, rv, uint32(ecSuccess), "open-folder ReturnValue")
+	if len(handles) != 2 {
+		t.Fatalf("open-folder handles = %v, want two", handles)
 	}
-	if len(handles) != 2 || handles[1] == 0xFFFFFFFF {
-		t.Fatalf("open-folder did not mint a folder handle in slot 1: %v", handles)
-	}
+	wantTrue(t, handles[1] != 0xFFFFFFFF, "open-folder mints a folder handle in slot 1")
 }
 
 // TestRpcExt2UnknownHandleFaults proves EcDoRpcExt2 with an unknown context
