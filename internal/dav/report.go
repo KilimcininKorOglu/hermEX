@@ -145,82 +145,125 @@ func (c *calDataReq) bound(data string) string {
 // (RFC 6578). Each returns 207 Multistatus with the requested vCards.
 func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, caller, mailbox string) {
 	_, user, coll, _ := classify(r.URL.Path)
-	body, err := io.ReadAll(io.LimitReader(r.Body, s.vcardLimit()))
-	if err != nil {
-		s.davError(w, err, http.StatusBadRequest)
+	req, body, ok := s.parseReport(w, r)
+	if !ok {
 		return
 	}
-	var req reportReq
-	if err := xml.Unmarshal(body, &req); err != nil {
-		s.davError(w, err, http.StatusBadRequest)
-		return
-	}
-
 	// Principal-search reports query the directory, not a mailbox store, so they are
 	// answered before any collection is resolved (RFC 3744 §9.3/§9.5).
-	switch req.XMLName.Local {
-	case "principal-property-search":
-		s.reportPrincipalSearch(w, caller, body)
-		return
-	case "principal-search-property-set":
-		reportPrincipalSearchPropSet(w)
-		return
-	case "expand-property":
-		s.reportExpandProperty(w, r, user, body)
+	if s.directoryReport(w, r, caller, user, req.XMLName.Local, body) {
 		return
 	}
-
 	if user == "" {
 		http.Error(w, "not a collection", http.StatusBadRequest)
 		return
 	}
+	target, ok := s.openReportCollection(w, r, mailbox, user, coll)
+	if !ok {
+		return
+	}
+	defer target.st.Close()
+	s.dispatchReport(w, target, req)
+}
+
+// reportTarget is the collection a member-level REPORT runs against.
+type reportTarget struct {
+	st    *objectstore.Store
+	fid   int64
+	isCal bool
+	user  string
+	coll  string
+}
+
+// parseReport reads and unmarshals the REPORT body, returning the raw bytes too
+// for the reports that re-parse them into their own request type.
+func (s *Server) parseReport(w http.ResponseWriter, r *http.Request) (reportReq, []byte, bool) {
+	var req reportReq
+	body, err := io.ReadAll(io.LimitReader(r.Body, s.vcardLimit()))
+	if err != nil {
+		s.davError(w, err, http.StatusBadRequest)
+		return req, nil, false
+	}
+	if err := xml.Unmarshal(body, &req); err != nil {
+		s.davError(w, err, http.StatusBadRequest)
+		return req, nil, false
+	}
+	return req, body, true
+}
+
+// directoryReport answers the reports served from the directory rather than a
+// mailbox store, and reports whether it handled the request.
+func (s *Server) directoryReport(w http.ResponseWriter, r *http.Request, caller, user, name string, body []byte) bool {
+	switch name {
+	case "principal-property-search":
+		s.reportPrincipalSearch(w, caller, body)
+	case "principal-search-property-set":
+		reportPrincipalSearchPropSet(w)
+	case "expand-property":
+		s.reportExpandProperty(w, r, user, body)
+	default:
+		return false
+	}
+	return true
+}
+
+// openReportCollection resolves the target collection from the URL: a calendar path
+// addresses a calendar folder, an address-book path a contacts folder. The named
+// collection ("calendar"/"contacts" or a user-created one) is the folder all members
+// live in. The caller closes the store when ok is true.
+func (s *Server) openReportCollection(w http.ResponseWriter, r *http.Request, mailbox, user, coll string) (reportTarget, bool) {
+	target := reportTarget{
+		isCal: strings.HasPrefix(r.URL.Path, "/dav/calendars/"),
+		user:  user,
+		coll:  coll,
+	}
 	st, err := objectstore.Open(mailbox)
 	if err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
-		return
+		return target, false
 	}
-	defer st.Close()
-
-	// Resolve the target collection from the URL: a calendar path addresses a
-	// calendar folder, an address-book path a contacts folder. The named collection
-	// ("calendar"/"contacts" or a user-created one) is the folder all members live in.
-	isCal := strings.HasPrefix(r.URL.Path, "/dav/calendars/")
-	var fid int64
-	var ok bool
-	if isCal {
-		fid, ok, err = calCollectionFID(st, coll)
-	} else {
-		fid, ok, err = cardCollectionFID(st, coll)
-	}
+	fid, found, err := collectionByKind(st, target.isCal, coll)
 	if err != nil {
+		_ = st.Close()
 		s.davError(w, err, http.StatusInternalServerError)
-		return
+		return target, false
 	}
-	if !ok {
+	if !found {
+		_ = st.Close()
 		http.Error(w, "no such collection", http.StatusNotFound)
-		return
+		return target, false
 	}
+	target.st, target.fid = st, fid
+	return target, true
+}
 
+// dispatchReport runs the member-level report the request body names.
+func (s *Server) dispatchReport(w http.ResponseWriter, t reportTarget, req reportReq) {
 	switch req.XMLName.Local {
 	case "addressbook-multiget":
-		s.reportMultiget(w, st, fid, req.Hrefs, req.AddrData)
+		s.reportMultiget(w, t.st, t.fid, req.Hrefs, req.AddrData)
 	case "addressbook-query":
-		s.reportQueryOrSync(w, st, user, coll, fid, 0, false, req.Filter, req.AddrData)
+		s.reportQueryOrSync(w, t.st, t.user, t.coll, t.fid, 0, false, req.Filter, req.AddrData)
 	case "calendar-multiget":
-		s.reportCalMultiget(w, st, fid, req.Hrefs, req.CalData)
+		s.reportCalMultiget(w, t.st, t.fid, req.Hrefs, req.CalData)
 	case "calendar-query":
-		s.reportCalQueryOrSync(w, st, user, coll, fid, 0, false, req.Filter, req.CalData)
+		s.reportCalQueryOrSync(w, t.st, t.user, t.coll, t.fid, 0, false, req.Filter, req.CalData)
 	case "free-busy-query":
-		s.handleFreeBusy(w, st, fid, req.TimeRange)
+		s.handleFreeBusy(w, t.st, t.fid, req.TimeRange)
 	case "sync-collection":
-		if isCal {
-			s.reportCalQueryOrSync(w, st, user, coll, fid, parseSyncToken(req.SyncToken), true, nil, nil)
-		} else {
-			s.reportQueryOrSync(w, st, user, coll, fid, parseSyncToken(req.SyncToken), true, nil, nil)
-		}
+		s.reportSync(w, t, parseSyncToken(req.SyncToken))
 	default:
 		http.Error(w, "unsupported report", http.StatusForbidden)
 	}
+}
+
+// reportSync runs sync-collection against whichever collection kind the path named.
+func (s *Server) reportSync(w http.ResponseWriter, t reportTarget, since uint64) {
+	if t.isCal {
+		s.reportCalQueryOrSync(w, t.st, t.user, t.coll, t.fid, since, true, nil, nil)
+		return
+	}
+	s.reportQueryOrSync(w, t.st, t.user, t.coll, t.fid, since, true, nil, nil)
 }
 
 // reportMultiget returns address-data for each requested href, with a 404 status
@@ -284,25 +327,34 @@ func (s *Server) reportQueryOrSync(w http.ResponseWriter, st *objectstore.Store,
 		ms.Responses = append(ms.Responses, addressDataResponse(href, o.ChangeNumber, ad.bound(data)))
 	}
 	if sync {
-		// Tombstones: report each contact removed since the client's token as a 404
-		// member so it deletes the vCard locally (RFC 6578).
-		deleted, err := st.DeletedObjectsSince(fid, sinceToken)
-		if err != nil {
+		href := func(id int64) string {
+			return objectPathColl(user, coll, objectName(st, id, ".vcf"))
+		}
+		if err := appendSyncTail(ms, st, fid, sinceToken, href); err != nil {
 			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
-		for _, d := range deleted {
-			href := objectPathColl(user, coll, objectName(st, d.ID, ".vcf"))
-			ms.Responses = append(ms.Responses, msResponse{Href: href, Status: statusNotFound})
-		}
-		syncMax, err := st.FolderObjectsSyncMax(fid)
-		if err != nil {
-			s.davError(w, err, http.StatusInternalServerError)
-			return
-		}
-		ms.SyncToken = syncToken(syncMax)
 	}
 	writeMultistatus(w, ms)
+}
+
+// appendSyncTail closes a sync-collection response: each member removed since the
+// client's token is reported as a 404 tombstone so the client deletes it locally,
+// and the response carries the collection's fresh sync-token (RFC 6578).
+func appendSyncTail(ms *multistatus, st *objectstore.Store, fid int64, sinceToken uint64, href func(id int64) string) error {
+	deleted, err := st.DeletedObjectsSince(fid, sinceToken)
+	if err != nil {
+		return err
+	}
+	for _, d := range deleted {
+		ms.Responses = append(ms.Responses, msResponse{Href: href(d.ID), Status: statusNotFound})
+	}
+	syncMax, err := st.FolderObjectsSyncMax(fid)
+	if err != nil {
+		return err
+	}
+	ms.SyncToken = syncToken(syncMax)
+	return nil
 }
 
 // handleFreeBusy answers a CALDAV:free-busy-query (RFC 4791 §7.10): it aggregates
@@ -427,23 +479,13 @@ func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Sto
 		ms.Responses = append(ms.Responses, calendarDataResponse(href, o.ChangeNumber, cd.bound(data)))
 	}
 	if sync {
-		// Tombstones: report each event removed since the client's token as a 404
-		// member so it deletes the .ics locally (RFC 6578).
-		deleted, err := st.DeletedObjectsSince(fid, sinceToken)
-		if err != nil {
+		href := func(id int64) string {
+			return calObjectPathColl(user, coll, objectName(st, id, ".ics"))
+		}
+		if err := appendSyncTail(ms, st, fid, sinceToken, href); err != nil {
 			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
-		for _, d := range deleted {
-			href := calObjectPathColl(user, coll, objectName(st, d.ID, ".ics"))
-			ms.Responses = append(ms.Responses, msResponse{Href: href, Status: statusNotFound})
-		}
-		syncMax, err := st.FolderObjectsSyncMax(fid)
-		if err != nil {
-			s.davError(w, err, http.StatusInternalServerError)
-			return
-		}
-		ms.SyncToken = syncToken(syncMax)
 	}
 	writeMultistatus(w, ms)
 }

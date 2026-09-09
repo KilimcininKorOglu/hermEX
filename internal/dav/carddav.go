@@ -7,6 +7,7 @@ import (
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcmail"
 	"hermex/internal/oxvcard"
 )
 
@@ -72,27 +73,12 @@ func findObjectByName(st *objectstore.Store, folderID int64, ext, name string) (
 // handleGet serves a contact as a vCard. HEAD returns the same headers with no
 // body.
 func (s *Server) handleGet(w http.ResponseWriter, r *http.Request, mailbox string) {
-	kind, _, coll, name := classify(r.URL.Path)
-	if kind != kindObject {
-		http.Error(w, "not a contact resource", http.StatusMethodNotAllowed)
-		return
-	}
-	st, err := objectstore.Open(mailbox)
-	if err != nil {
-		s.davError(w, err, http.StatusInternalServerError)
+	st, fid, name, ok := s.openObjectCollection(w, r, mailbox, cardTarget, false)
+	if !ok {
 		return
 	}
 	defer st.Close()
 
-	fid, ok, err := cardCollectionFID(st, coll)
-	if err != nil {
-		s.davError(w, err, http.StatusInternalServerError)
-		return
-	}
-	if !ok {
-		http.Error(w, "no such address book", http.StatusNotFound)
-		return
-	}
 	obj, found, err := findObjectByName(st, fid, ".vcf", name)
 	if err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
@@ -126,73 +112,31 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request, mailbox strin
 // If-None-Match: * (create-only) and If-Match (replace-guard), responding 201 on
 // create and 204 on replace with the new ETag.
 func (s *Server) handlePut(w http.ResponseWriter, r *http.Request, mailbox string) {
-	kind, _, coll, name := classify(r.URL.Path)
-	if kind != kindObject {
-		http.Error(w, "not a contact resource", http.StatusMethodNotAllowed)
-		return
-	}
-	if !validObjectName(name) {
-		http.Error(w, "invalid resource name", http.StatusBadRequest)
-		return
-	}
-	st, err := objectstore.Open(mailbox)
-	if err != nil {
-		s.davError(w, err, http.StatusInternalServerError)
+	st, fid, name, ok := s.openObjectCollection(w, r, mailbox, cardTarget, true)
+	if !ok {
 		return
 	}
 	defer st.Close()
 
-	fid, ok, err := cardCollectionFID(st, coll)
-	if err != nil {
-		s.davError(w, err, http.StatusInternalServerError)
-		return
-	}
-	if !ok {
-		http.Error(w, "no such address book", http.StatusNotFound)
-		return
-	}
 	existing, found, err := findObjectByName(st, fid, ".vcf", name)
 	if err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
-	if r.Header.Get("If-None-Match") == "*" && found {
-		http.Error(w, "already exists", http.StatusPreconditionFailed)
+	if failure, status := etagPrecondition(r, existing, found); failure != "" {
+		http.Error(w, failure, status)
 		return
-	}
-	if im := r.Header.Get("If-Match"); im != "" {
-		if !found || im != etag(existing.ChangeNumber) {
-			http.Error(w, "etag mismatch", http.StatusPreconditionFailed)
-			return
-		}
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, s.vcardLimit()))
+	msg, status, err := importVCardBody(st, io.LimitReader(r.Body, s.vcardLimit()), name)
 	if err != nil {
-		s.davError(w, err, http.StatusBadRequest)
+		s.davError(w, err, status)
 		return
 	}
-	msg, err := oxvcard.Import(body, vcardOptions(st))
-	if err != nil {
-		s.davError(w, err, http.StatusBadRequest)
-		return
-	}
-	tag, _, err := resourceNameTag(st, true)
-	if err != nil {
-		s.davError(w, err, http.StatusInternalServerError)
-		return
-	}
-	msg.Props.Set(tag, name)
 
 	// Replace is delete-then-create: the object store has no in-place message
 	// updater, matching how drafts are re-saved.
-	if found {
-		if err := st.DeleteObject(existing.ID); err != nil {
-			s.davError(w, err, http.StatusInternalServerError)
-			return
-		}
-	}
-	if _, err := st.CreateMessage(fid, msg); err != nil {
+	if err := replaceObject(st, fid, msg, existing, found); err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
@@ -203,34 +147,64 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request, mailbox strin
 	}
 	if found {
 		w.WriteHeader(http.StatusNoContent)
-	} else {
-		w.WriteHeader(http.StatusCreated)
+		return
 	}
+	w.WriteHeader(http.StatusCreated)
+}
+
+// importVCardBody reads a PUT body as a vCard and stamps the client-chosen resource
+// name on the message, so a later GET of that URL resolves back to it. On failure it
+// also reports the HTTP status to answer with.
+func importVCardBody(st *objectstore.Store, body io.Reader, name string) (*oxcmail.Message, int, error) {
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		return nil, http.StatusBadRequest, err
+	}
+	msg, err := oxvcard.Import(raw, vcardOptions(st))
+	if err != nil {
+		return nil, http.StatusBadRequest, err
+	}
+	tag, _, err := resourceNameTag(st, true)
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+	msg.Props.Set(tag, name)
+	return msg, 0, nil
+}
+
+// etagPrecondition evaluates the conditional headers an ordinary DAV PUT carries.
+// A non-empty message is the failure to report, at the given status.
+func etagPrecondition(r *http.Request, existing objectstore.FolderObject, found bool) (string, int) {
+	if r.Header.Get("If-None-Match") == "*" && found {
+		return "already exists", http.StatusPreconditionFailed
+	}
+	if im := r.Header.Get("If-Match"); im != "" {
+		if !found || im != etag(existing.ChangeNumber) {
+			return "etag mismatch", http.StatusPreconditionFailed
+		}
+	}
+	return "", 0
+}
+
+// replaceObject stores the new message, first removing the one it replaces.
+func replaceObject(st *objectstore.Store, fid int64, msg *oxcmail.Message, existing objectstore.FolderObject, found bool) error {
+	if found {
+		if err := st.DeleteObject(existing.ID); err != nil {
+			return err
+		}
+	}
+	_, err := st.CreateMessage(fid, msg)
+	return err
 }
 
 // handleDelete removes a contact, honoring If-Match.
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request, mailbox string) {
-	kind, _, coll, name := classify(r.URL.Path)
-	if kind != kindObject {
-		http.Error(w, "not a contact resource", http.StatusMethodNotAllowed)
-		return
-	}
-	st, err := objectstore.Open(mailbox)
-	if err != nil {
-		s.davError(w, err, http.StatusInternalServerError)
+	st, fid, name, ok := s.openObjectCollection(w, r, mailbox, cardTarget, false)
+	if !ok {
 		return
 	}
 	defer st.Close()
 
-	fid, ok, err := cardCollectionFID(st, coll)
-	if err != nil {
-		s.davError(w, err, http.StatusInternalServerError)
-		return
-	}
-	if !ok {
-		http.Error(w, "no such address book", http.StatusNotFound)
-		return
-	}
 	obj, found, err := findObjectByName(st, fid, ".vcf", name)
 	if err != nil {
 		s.davError(w, err, http.StatusInternalServerError)

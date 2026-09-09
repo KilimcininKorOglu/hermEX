@@ -438,80 +438,122 @@ func parseFilterTime(v string) (time.Time, bool) {
 // propTime parses a DTSTART/DTEND value to a UTC instant; allDay marks a VALUE=DATE.
 func propTime(p icalProp) (t time.Time, allDay bool, ok bool) {
 	v := strings.TrimSpace(p.value)
-	if strings.EqualFold(p.param("VALUE"), "DATE") || (len(v) == 8 && !strings.Contains(v, "T")) {
-		if d, err := time.Parse("20060102", v); err == nil {
-			return d.UTC(), true, true
+	if isDateValue(p, v) {
+		d, err := time.Parse("20060102", v)
+		if err != nil {
+			return time.Time{}, false, false
 		}
-		return time.Time{}, false, false
+		return d.UTC(), true, true
 	}
+	if dt, good := parseDateTime(p, v); good {
+		return dt, false, true
+	}
+	return time.Time{}, false, false
+}
+
+// isDateValue reports whether a property value is a date rather than a date-time,
+// either declared with VALUE=DATE or recognizable by its length.
+func isDateValue(p icalProp, v string) bool {
+	return strings.EqualFold(p.param("VALUE"), "DATE") || (len(v) == 8 && !strings.Contains(v, "T"))
+}
+
+// parseDateTime parses a date-time value to a UTC instant, preferring the explicit
+// UTC form, then the property's TZID, then a floating local time.
+func parseDateTime(p icalProp, v string) (time.Time, bool) {
 	if strings.HasSuffix(v, "Z") {
 		if dt, err := time.Parse("20060102T150405Z", v); err == nil {
-			return dt.UTC(), false, true
+			return dt.UTC(), true
 		}
 	}
 	if tzid := p.param("TZID"); tzid != "" {
 		if loc, err := time.LoadLocation(tzid); err == nil {
 			if dt, err := time.ParseInLocation("20060102T150405", v, loc); err == nil {
-				return dt.UTC(), false, true
+				return dt.UTC(), true
 			}
 		}
 	}
 	if dt, err := time.Parse("20060102T150405", v); err == nil {
-		return dt.UTC(), false, true
+		return dt.UTC(), true
 	}
-	return time.Time{}, false, false
+	return time.Time{}, false
 }
 
 // parseDuration parses an RFC 5545 DURATION (weeks/days/hours/minutes/seconds).
 func parseDuration(s string) (time.Duration, bool) {
-	s = strings.TrimSpace(s)
-	neg := false
-	if strings.HasPrefix(s, "-") {
+	body, neg, ok := splitDurationSign(strings.TrimSpace(s))
+	if !ok {
+		return 0, false
+	}
+	d := sumDurationUnits(body)
+	if neg {
+		return -d, true
+	}
+	return d, true
+}
+
+// splitDurationSign strips the optional sign and the mandatory "P" designator,
+// returning the unit sequence that follows.
+func splitDurationSign(s string) (body string, neg, ok bool) {
+	switch {
+	case strings.HasPrefix(s, "-"):
 		neg, s = true, s[1:]
-	} else if strings.HasPrefix(s, "+") {
+	case strings.HasPrefix(s, "+"):
 		s = s[1:]
 	}
 	if !strings.HasPrefix(s, "P") {
-		return 0, false
+		return "", false, false
 	}
-	s = s[1:]
+	return s[1:], neg, true
+}
+
+// sumDurationUnits adds up the "<number><unit>" pairs of a duration body. The "T"
+// designator switches to the time part, where "M" means minutes rather than months.
+func sumDurationUnits(s string) time.Duration {
 	var d time.Duration
 	inTime := false
 	num := ""
 	for i := 0; i < len(s); i++ {
 		ch := s[i]
-		if ch == 'T' {
+		switch {
+		case ch == 'T':
 			inTime = true
-			continue
-		}
-		if ch >= '0' && ch <= '9' {
+		case ch >= '0' && ch <= '9':
 			num += string(ch)
-			continue
-		}
-		n := 0
-		for _, c := range num {
-			n = n*10 + int(c-'0')
-		}
-		num = ""
-		switch ch {
-		case 'W':
-			d += time.Duration(n) * 7 * 24 * time.Hour
-		case 'D':
-			d += time.Duration(n) * 24 * time.Hour
-		case 'H':
-			d += time.Duration(n) * time.Hour
-		case 'M':
-			if inTime {
-				d += time.Duration(n) * time.Minute
-			}
-		case 'S':
-			d += time.Duration(n) * time.Second
+		default:
+			d += durationUnit(ch, parseDigits(num), inTime)
+			num = ""
 		}
 	}
-	if neg {
-		d = -d
+	return d
+}
+
+// durationUnit scales a count by its unit designator; an unknown designator, and a
+// month "M" outside the time part, contribute nothing.
+func durationUnit(unit byte, n int, inTime bool) time.Duration {
+	switch unit {
+	case 'W':
+		return time.Duration(n) * 7 * 24 * time.Hour
+	case 'D':
+		return time.Duration(n) * 24 * time.Hour
+	case 'H':
+		return time.Duration(n) * time.Hour
+	case 'M':
+		if inTime {
+			return time.Duration(n) * time.Minute
+		}
+	case 'S':
+		return time.Duration(n) * time.Second
 	}
-	return d, true
+	return 0
+}
+
+// parseDigits reads an all-digit string as an integer; an empty string is zero.
+func parseDigits(s string) int {
+	n := 0
+	for _, c := range s {
+		n = n*10 + int(c-'0')
+	}
+	return n
 }
 
 // unescapeText reverses RFC 5545/6350 TEXT escaping for matching.

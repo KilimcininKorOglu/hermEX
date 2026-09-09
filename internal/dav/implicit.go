@@ -105,40 +105,58 @@ func organizerMessages(oldEv, newEv *icalNode, newBody, organizer string) []itip
 		return nil
 	}
 	summary := eventSummary(newEv, oldEv)
+	if newEv == nil {
+		// Deletion by the organizer cancels the meeting for every attendee.
+		return cancelMessages(oldEv, organizer, summary, attendeeAddresses(oldAtt))
+	}
+
 	var out []itipMsg
+	if requestTo := requestRecipients(oldEv, newEv, oldAtt, newAtt); len(requestTo) > 0 {
+		out = append(out, itipMsg{method: "REQUEST", recipients: requestTo, body: withMethod(newBody, "REQUEST"), summary: summary})
+	}
+	return append(out, cancelMessages(oldEv, organizer, summary, removedAttendees(oldAtt, newAtt))...)
+}
 
-	if newEv != nil {
-		significant := oldEv == nil || significantlyChanged(oldEv, newEv)
-		var requestTo []string
-		for key, att := range newAtt {
-			if _, retained := oldAtt[key]; !retained || significant {
-				requestTo = append(requestTo, strings.TrimSpace(att.value))
-			}
+// requestRecipients lists the attendees a change must be sent to: newly added ones
+// always, retained ones only when the change was significant.
+func requestRecipients(oldEv, newEv *icalNode, oldAtt, newAtt map[string]icalProp) []string {
+	significant := oldEv == nil || significantlyChanged(oldEv, newEv)
+	var to []string
+	for key, att := range newAtt {
+		if _, retained := oldAtt[key]; !retained || significant {
+			to = append(to, strings.TrimSpace(att.value))
 		}
-		if len(requestTo) > 0 {
-			out = append(out, itipMsg{method: "REQUEST", recipients: requestTo, body: withMethod(newBody, "REQUEST"), summary: summary})
-		}
-		var cancelTo []string
-		for key, att := range oldAtt {
-			if _, kept := newAtt[key]; !kept {
-				cancelTo = append(cancelTo, strings.TrimSpace(att.value))
-			}
-		}
-		if len(cancelTo) > 0 {
-			out = append(out, itipMsg{method: "CANCEL", recipients: cancelTo, body: cancelBody(oldEv, organizer, cancelTo), summary: summary})
-		}
-		return out
 	}
+	return to
+}
 
-	// Deletion by the organizer cancels the meeting for every attendee.
-	var cancelTo []string
-	for _, att := range oldAtt {
-		cancelTo = append(cancelTo, strings.TrimSpace(att.value))
+// removedAttendees lists the addresses dropped from the event, which are cancelled.
+func removedAttendees(oldAtt, newAtt map[string]icalProp) []string {
+	var to []string
+	for key, att := range oldAtt {
+		if _, kept := newAtt[key]; !kept {
+			to = append(to, strings.TrimSpace(att.value))
+		}
 	}
-	if len(cancelTo) > 0 {
-		out = append(out, itipMsg{method: "CANCEL", recipients: cancelTo, body: cancelBody(oldEv, organizer, cancelTo), summary: summary})
+	return to
+}
+
+// attendeeAddresses lists every attendee address.
+func attendeeAddresses(att map[string]icalProp) []string {
+	var to []string
+	for _, a := range att {
+		to = append(to, strings.TrimSpace(a.value))
 	}
-	return out
+	return to
+}
+
+// cancelMessages builds the CANCEL for the given recipients, or nothing when there
+// are none.
+func cancelMessages(oldEv *icalNode, organizer, summary string, to []string) []itipMsg {
+	if len(to) == 0 {
+		return nil
+	}
+	return []itipMsg{{method: "CANCEL", recipients: to, body: cancelBody(oldEv, organizer, to), summary: summary}}
 }
 
 // attendeeMessages builds the REPLY an attendee's change implies: when owner's own

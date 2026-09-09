@@ -161,7 +161,6 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mailbox = target
-	calObject := kind == kindCalObject
 	// The scheduling Inbox/Outbox are routed on their own: the Outbox answers POST
 	// (free-busy / iTIP, RFC 6638 §5) plus discovery, the Inbox answers discovery.
 	// They are dispatched here rather than through the method switch below so an
@@ -169,73 +168,119 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	// handlers, which key off the Contacts folder.
 	switch kind {
 	case kindScheduleOutbox:
-		switch r.Method {
-		case "OPTIONS":
-			s.handleOptions(w, r)
-		case "PROPFIND":
-			s.handlePropfind(w, r, user, mailbox)
-		case http.MethodPost:
-			s.handleOutboxPost(w, r, user)
-		default:
-			w.Header().Set("Allow", "OPTIONS, PROPFIND, POST")
-			http.Error(w, "method not allowed on the scheduling Outbox", http.StatusMethodNotAllowed)
-		}
+		s.routeOutbox(w, r, user, mailbox)
 		return
 	case kindScheduleInbox, kindScheduleInboxObject:
-		switch {
-		case r.Method == "OPTIONS":
-			s.handleOptions(w, r)
-		case r.Method == "PROPFIND":
-			s.handlePropfind(w, r, user, mailbox)
-		case (r.Method == http.MethodGet || r.Method == http.MethodHead) && kind == kindScheduleInboxObject:
-			s.handleScheduleInboxGet(w, r, mailbox)
-		case r.Method == http.MethodDelete && kind == kindScheduleInboxObject:
-			s.handleScheduleInboxDelete(w, r, mailbox)
-		default:
-			w.Header().Set("Allow", "OPTIONS, PROPFIND, GET, DELETE")
-			http.Error(w, "method not allowed on the scheduling Inbox", http.StatusMethodNotAllowed)
-		}
+		s.routeScheduleInbox(w, r, user, mailbox, kind)
 		return
 	}
+	s.routeCollection(w, r, user, mailbox, kind == kindCalObject)
+}
+
+// routeOutbox serves the scheduling Outbox, which answers POST (free-busy and
+// iTIP, RFC 6638 5) plus discovery.
+func (s *Server) routeOutbox(w http.ResponseWriter, r *http.Request, user, mailbox string) {
 	switch r.Method {
 	case "OPTIONS":
 		s.handleOptions(w, r)
 	case "PROPFIND":
 		s.handlePropfind(w, r, user, mailbox)
-	case "REPORT":
-		s.handleReport(w, r, user, mailbox)
-	case http.MethodGet, http.MethodHead:
-		if calObject {
-			s.handleCalGet(w, r, mailbox)
-		} else {
-			s.handleGet(w, r, mailbox)
-		}
-	case http.MethodPut:
-		if calObject {
-			s.handleCalPut(w, r, user, mailbox)
-		} else {
-			s.handlePut(w, r, mailbox)
-		}
-	case http.MethodDelete:
-		if calObject {
-			s.handleCalDelete(w, r, user, mailbox)
-		} else {
-			s.handleDelete(w, r, mailbox)
-		}
-	case "MKCALENDAR":
-		s.handleMkCalendar(w, r, mailbox)
-	case "MKCOL":
-		s.handleMkCol(w, r, mailbox)
-	case "PROPPATCH":
-		s.handleProppatch(w, r, mailbox)
-	case "COPY":
-		s.handleCopyMove(w, r, mailbox, false)
-	case "MOVE":
-		s.handleCopyMove(w, r, mailbox, true)
+	case http.MethodPost:
+		s.handleOutboxPost(w, r, user)
 	default:
+		w.Header().Set("Allow", "OPTIONS, PROPFIND, POST")
+		http.Error(w, "method not allowed on the scheduling Outbox", http.StatusMethodNotAllowed)
+	}
+}
+
+// routeScheduleInbox serves the scheduling Inbox: discovery on the collection,
+// and read or delete on one of its objects.
+func (s *Server) routeScheduleInbox(w http.ResponseWriter, r *http.Request, user, mailbox string, kind resourceKind) {
+	object := kind == kindScheduleInboxObject
+	switch {
+	case r.Method == "OPTIONS":
+		s.handleOptions(w, r)
+	case r.Method == "PROPFIND":
+		s.handlePropfind(w, r, user, mailbox)
+	case object && (r.Method == http.MethodGet || r.Method == http.MethodHead):
+		s.handleScheduleInboxGet(w, r, mailbox)
+	case object && r.Method == http.MethodDelete:
+		s.handleScheduleInboxDelete(w, r, mailbox)
+	default:
+		w.Header().Set("Allow", "OPTIONS, PROPFIND, GET, DELETE")
+		http.Error(w, "method not allowed on the scheduling Inbox", http.StatusMethodNotAllowed)
+	}
+}
+
+// routeCollection serves the ordinary collections. A calendar .ics object goes to
+// the CalDAV handlers, everything else to the CardDAV ones.
+func (s *Server) routeCollection(w http.ResponseWriter, r *http.Request, user, mailbox string, calObject bool) {
+	handle, ok := collectionMethods[r.Method]
+	if !ok {
 		w.Header().Set("Allow", allowMethods)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
 	}
+	handle(s, w, r, user, mailbox, calObject)
+}
+
+// collectionMethod serves one DAV method on an ordinary collection or object.
+// calObject reports whether the path names a calendar .ics object, which decides
+// between the CalDAV and CardDAV handler for the object methods.
+type collectionMethod func(s *Server, w http.ResponseWriter, r *http.Request, user, mailbox string, calObject bool)
+
+// collectionMethods is the method vocabulary routeCollection serves; a method
+// absent from it is answered 405 with the Allow header.
+var collectionMethods = map[string]collectionMethod{
+	"OPTIONS": func(s *Server, w http.ResponseWriter, r *http.Request, _, _ string, _ bool) {
+		s.handleOptions(w, r)
+	},
+	"PROPFIND": func(s *Server, w http.ResponseWriter, r *http.Request, user, mailbox string, _ bool) {
+		s.handlePropfind(w, r, user, mailbox)
+	},
+	"REPORT": func(s *Server, w http.ResponseWriter, r *http.Request, user, mailbox string, _ bool) {
+		s.handleReport(w, r, user, mailbox)
+	},
+	http.MethodGet:  routeObjectRead,
+	http.MethodHead: routeObjectRead,
+	http.MethodPut: func(s *Server, w http.ResponseWriter, r *http.Request, user, mailbox string, calObject bool) {
+		if calObject {
+			s.handleCalPut(w, r, user, mailbox)
+			return
+		}
+		s.handlePut(w, r, mailbox)
+	},
+	http.MethodDelete: func(s *Server, w http.ResponseWriter, r *http.Request, user, mailbox string, calObject bool) {
+		if calObject {
+			s.handleCalDelete(w, r, user, mailbox)
+			return
+		}
+		s.handleDelete(w, r, mailbox)
+	},
+	"MKCALENDAR": func(s *Server, w http.ResponseWriter, r *http.Request, _, mailbox string, _ bool) {
+		s.handleMkCalendar(w, r, mailbox)
+	},
+	"MKCOL": func(s *Server, w http.ResponseWriter, r *http.Request, _, mailbox string, _ bool) {
+		s.handleMkCol(w, r, mailbox)
+	},
+	"PROPPATCH": func(s *Server, w http.ResponseWriter, r *http.Request, _, mailbox string, _ bool) {
+		s.handleProppatch(w, r, mailbox)
+	},
+	"COPY": func(s *Server, w http.ResponseWriter, r *http.Request, _, mailbox string, _ bool) {
+		s.handleCopyMove(w, r, mailbox, false)
+	},
+	"MOVE": func(s *Server, w http.ResponseWriter, r *http.Request, _, mailbox string, _ bool) {
+		s.handleCopyMove(w, r, mailbox, true)
+	},
+}
+
+// routeObjectRead serves GET and HEAD, which share one handler per collection kind.
+func routeObjectRead(s *Server, w http.ResponseWriter, r *http.Request, _, mailbox string, calObject bool) {
+	if calObject {
+		s.handleCalGet(w, r, mailbox)
+		return
+	}
+	s.handleGet(w, r, mailbox)
 }
 
 // allowMethods lists the DAV methods the server implements.
@@ -428,36 +473,51 @@ func classify(p string) (kind resourceKind, user, collection, object string) {
 			return kindPrincipal, parts[2], "", ""
 		}
 	case "addressbooks":
-		switch len(parts) {
-		case 3:
-			return kindHomeSet, parts[2], "", ""
-		case 4:
-			return kindAddressbook, parts[2], parts[3], ""
-		case 5:
-			return kindObject, parts[2], parts[3], parts[4]
-		}
+		return classifyAddressbook(parts)
 	case "calendars":
-		switch len(parts) {
-		case 3:
-			return kindCalHomeSet, parts[2], "", ""
-		case 4:
-			switch parts[3] {
-			case scheduleInboxName:
-				return kindScheduleInbox, parts[2], parts[3], ""
-			case scheduleOutboxName:
-				return kindScheduleOutbox, parts[2], parts[3], ""
-			}
-			return kindCalendar, parts[2], parts[3], ""
-		case 5:
-			switch parts[3] {
-			case scheduleInboxName:
-				return kindScheduleInboxObject, parts[2], parts[3], parts[4]
-			case scheduleOutboxName:
-				// The Outbox holds no addressable members (POST-only).
-				return kindUnknown, "", "", ""
-			}
-			return kindCalObject, parts[2], parts[3], parts[4]
+		return classifyCalendar(parts)
+	}
+	return kindUnknown, "", "", ""
+}
+
+// classifyAddressbook resolves a path under the CardDAV root, whose depth alone
+// names the resource: home set, collection, or object.
+func classifyAddressbook(parts []string) (kind resourceKind, user, collection, object string) {
+	switch len(parts) {
+	case 3:
+		return kindHomeSet, parts[2], "", ""
+	case 4:
+		return kindAddressbook, parts[2], parts[3], ""
+	case 5:
+		return kindObject, parts[2], parts[3], parts[4]
+	}
+	return kindUnknown, "", "", ""
+}
+
+// classifyCalendar resolves a path under the CalDAV root. Depth names the resource
+// as it does for address books, except that the two reserved scheduling collection
+// names are their own kinds (RFC 6638 2.2).
+func classifyCalendar(parts []string) (kind resourceKind, user, collection, object string) {
+	switch len(parts) {
+	case 3:
+		return kindCalHomeSet, parts[2], "", ""
+	case 4:
+		switch parts[3] {
+		case scheduleInboxName:
+			return kindScheduleInbox, parts[2], parts[3], ""
+		case scheduleOutboxName:
+			return kindScheduleOutbox, parts[2], parts[3], ""
 		}
+		return kindCalendar, parts[2], parts[3], ""
+	case 5:
+		switch parts[3] {
+		case scheduleInboxName:
+			return kindScheduleInboxObject, parts[2], parts[3], parts[4]
+		case scheduleOutboxName:
+			// The Outbox holds no addressable members (POST-only).
+			return kindUnknown, "", "", ""
+		}
+		return kindCalObject, parts[2], parts[3], parts[4]
 	}
 	return kindUnknown, "", "", ""
 }

@@ -66,20 +66,13 @@ const displayNameKey = nsDAV + " displayname"
 func (s *Server) handleProppatch(w http.ResponseWriter, r *http.Request, mailbox string) {
 	kind, _, coll, _ := classify(r.URL.Path)
 	isCal := strings.HasPrefix(r.URL.Path, "/dav/calendars/")
-	isCard := strings.HasPrefix(r.URL.Path, "/dav/addressbooks/")
-	if (!isCal && !isCard) || (isCal && kind != kindCalendar) || (isCard && kind != kindAddressbook) {
+	if !proppatchableCollection(kind, isCal, strings.HasPrefix(r.URL.Path, "/dav/addressbooks/")) {
 		http.Error(w, "PROPPATCH is supported only on collections", http.StatusForbidden)
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, s.vcardLimit()))
-	if err != nil {
-		s.davError(w, err, http.StatusBadRequest)
-		return
-	}
-	var pu propUpdate
-	if err := xml.Unmarshal(body, &pu); err != nil {
-		s.davError(w, err, http.StatusBadRequest)
+	pu, ok := s.parsePropUpdate(w, r)
+	if !ok {
 		return
 	}
 
@@ -90,87 +83,137 @@ func (s *Server) handleProppatch(w http.ResponseWriter, r *http.Request, mailbox
 	}
 	defer st.Close()
 
-	var fid int64
-	var ok bool
-	if isCal {
-		fid, ok, err = calCollectionFID(st, coll)
-	} else {
-		fid, ok, err = cardCollectionFID(st, coll)
-	}
+	fid, found, err := collectionByKind(st, isCal, coll)
 	if err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
-	if !ok {
+	if !found {
 		http.Error(w, "no such collection", http.StatusNotFound)
 		return
 	}
 
-	type instruction struct {
-		remove bool
-		key    string
-		node   rawProp
-	}
-	var instrs []instruction
-	var protected []string
-	for _, op := range pu.Ops {
-		remove := op.XMLName.Local == "remove"
-		for _, n := range op.Prop.Nodes {
-			key := propKey(n.XMLName)
-			instrs = append(instrs, instruction{remove: remove, key: key, node: n})
-			if protectedProps[key] {
-				protected = append(protected, key)
-			}
-		}
-	}
-
+	instrs := proppatchInstructions(pu)
 	// Atomic failure: a protected property poisons the whole request.
-	if len(protected) > 0 {
-		var bad, dependent []string
-		for _, in := range instrs {
-			if protectedProps[in.key] {
-				bad = append(bad, propNameElement(in.node.XMLName))
-			} else {
-				dependent = append(dependent, propNameElement(in.node.XMLName))
-			}
-		}
-		resp := msResponse{Href: r.URL.Path}
-		resp.Propstat = append(resp.Propstat, msPropstat{
-			Prop:   msProp{Extra: []byte(strings.Join(bad, ""))},
-			Status: statusForbidden,
-		})
-		if len(dependent) > 0 {
-			resp.Propstat = append(resp.Propstat, msPropstat{
-				Prop:   msProp{Extra: []byte(strings.Join(dependent, ""))},
-				Status: statusFailedDependency,
-			})
-		}
-		writeMultistatus(w, &multistatus{Responses: []msResponse{resp}})
+	if hasProtected(instrs) {
+		writeMultistatus(w, protectedRefusal(r.URL.Path, instrs))
 		return
 	}
 
-	// Apply in document order.
-	var okNames []string
-	for _, in := range instrs {
-		if in.remove {
-			if err := st.RemoveDeadProp(fid, in.key); err != nil {
-				s.davError(w, err, http.StatusInternalServerError)
-				return
-			}
-		} else if err := st.SetDeadProp(fid, in.key, propValueElement(in.node)); err != nil {
-			s.davError(w, err, http.StatusInternalServerError)
-			return
-		}
-		okNames = append(okNames, propNameElement(in.node.XMLName))
+	okNames, err := applyProppatch(st, fid, instrs)
+	if err != nil {
+		s.davError(w, err, http.StatusInternalServerError)
+		return
 	}
-	resp := msResponse{
+	writeMultistatus(w, &multistatus{Responses: []msResponse{{
 		Href: r.URL.Path,
 		Propstat: []msPropstat{{
 			Prop:   msProp{Extra: []byte(strings.Join(okNames, ""))},
 			Status: statusOK,
 		}},
+	}}})
+}
+
+// proppatchableCollection reports whether the path names a collection PROPPATCH may
+// write to. The dead properties live on the collection folder, so an object path or
+// a home set is refused.
+func proppatchableCollection(kind resourceKind, isCal, isCard bool) bool {
+	switch {
+	case isCal:
+		return kind == kindCalendar
+	case isCard:
+		return kind == kindAddressbook
+	default:
+		return false
 	}
-	writeMultistatus(w, &multistatus{Responses: []msResponse{resp}})
+}
+
+// parsePropUpdate reads and unmarshals the PROPPATCH body. On failure the response
+// is already written.
+func (s *Server) parsePropUpdate(w http.ResponseWriter, r *http.Request) (propUpdate, bool) {
+	var pu propUpdate
+	body, err := io.ReadAll(io.LimitReader(r.Body, s.vcardLimit()))
+	if err != nil {
+		s.davError(w, err, http.StatusBadRequest)
+		return pu, false
+	}
+	if err := xml.Unmarshal(body, &pu); err != nil {
+		s.davError(w, err, http.StatusBadRequest)
+		return pu, false
+	}
+	return pu, true
+}
+
+// proppatchInstruction is one set or remove the request asked for.
+type proppatchInstruction struct {
+	remove bool
+	key    string
+	node   rawProp
+}
+
+// proppatchInstructions flattens the request's set/remove operations into one
+// list, in document order, which is the order they are applied in.
+func proppatchInstructions(pu propUpdate) []proppatchInstruction {
+	var instrs []proppatchInstruction
+	for _, op := range pu.Ops {
+		remove := op.XMLName.Local == "remove"
+		for _, n := range op.Prop.Nodes {
+			instrs = append(instrs, proppatchInstruction{remove: remove, key: propKey(n.XMLName), node: n})
+		}
+	}
+	return instrs
+}
+
+// hasProtected reports whether any instruction names a property the server owns.
+func hasProtected(instrs []proppatchInstruction) bool {
+	for _, in := range instrs {
+		if protectedProps[in.key] {
+			return true
+		}
+	}
+	return false
+}
+
+// protectedRefusal builds the multistatus refusing the whole request: the
+// protected properties are forbidden and every other one fails as a dependency.
+func protectedRefusal(href string, instrs []proppatchInstruction) *multistatus {
+	var bad, dependent []string
+	for _, in := range instrs {
+		if protectedProps[in.key] {
+			bad = append(bad, propNameElement(in.node.XMLName))
+		} else {
+			dependent = append(dependent, propNameElement(in.node.XMLName))
+		}
+	}
+	resp := msResponse{Href: href}
+	resp.Propstat = append(resp.Propstat, msPropstat{
+		Prop:   msProp{Extra: []byte(strings.Join(bad, ""))},
+		Status: statusForbidden,
+	})
+	if len(dependent) > 0 {
+		resp.Propstat = append(resp.Propstat, msPropstat{
+			Prop:   msProp{Extra: []byte(strings.Join(dependent, ""))},
+			Status: statusFailedDependency,
+		})
+	}
+	return &multistatus{Responses: []msResponse{resp}}
+}
+
+// applyProppatch writes every instruction to the collection's dead properties and
+// returns the property-name elements the response reports as applied.
+func applyProppatch(st *objectstore.Store, fid int64, instrs []proppatchInstruction) ([]string, error) {
+	var okNames []string
+	for _, in := range instrs {
+		if in.remove {
+			if err := st.RemoveDeadProp(fid, in.key); err != nil {
+				return nil, err
+			}
+		} else if err := st.SetDeadProp(fid, in.key, propValueElement(in.node)); err != nil {
+			return nil, err
+		}
+		okNames = append(okNames, propNameElement(in.node.XMLName))
+	}
+	return okNames, nil
 }
 
 // applyDeadProps attaches a collection's stored dead properties to a PROPFIND prop

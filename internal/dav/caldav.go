@@ -1,6 +1,7 @@
 package dav
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -25,27 +26,12 @@ func icalOptions(st *objectstore.Store) oxcical.Options {
 // handleCalGet serves a calendar object as an iCalendar text. HEAD returns the
 // same headers with no body. It mirrors handleGet for the Calendar folder.
 func (s *Server) handleCalGet(w http.ResponseWriter, r *http.Request, mailbox string) {
-	kind, _, coll, name := classify(r.URL.Path)
-	if kind != kindCalObject {
-		http.Error(w, "not a calendar resource", http.StatusMethodNotAllowed)
-		return
-	}
-	st, err := objectstore.Open(mailbox)
-	if err != nil {
-		s.davError(w, err, http.StatusInternalServerError)
+	st, fid, name, ok := s.openObjectCollection(w, r, mailbox, calTarget, false)
+	if !ok {
 		return
 	}
 	defer st.Close()
 
-	fid, ok, err := calCollectionFID(st, coll)
-	if err != nil {
-		s.davError(w, err, http.StatusInternalServerError)
-		return
-	}
-	if !ok {
-		http.Error(w, "no such calendar", http.StatusNotFound)
-		return
-	}
 	obj, found, err := findObjectByName(st, fid, ".ics", name)
 	if err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
@@ -60,24 +46,10 @@ func (s *Server) handleCalGet(w http.ResponseWriter, r *http.Request, mailbox st
 		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
-	var ics []byte
-	switch {
-	case fid == int64(mapi.PrivateFIDTasks):
-		// The Tasks collection serves VTODO from the shared task model.
-		tk, terr := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
-		if terr != nil {
-			s.davError(w, terr, http.StatusInternalServerError)
-			return
-		}
-		ics = oxcical.ExportVTODO(tk, name, time.Time{})
-	case fid == int64(mapi.PrivateFIDJournal):
-		// The Journal collection serves VJOURNAL from the verbatim stored source.
-		ics = oxcical.ExportVJournal(msg, name)
-	default:
-		if ics, err = oxcical.Export(msg, icalOptions(st)); err != nil {
-			s.davError(w, err, http.StatusInternalServerError)
-			return
-		}
+	ics, err := exportCalObject(st, fid, msg, name)
+	if err != nil {
+		s.davError(w, err, http.StatusInternalServerError)
+		return
 	}
 	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
 	w.Header().Set("ETag", etag(obj.ChangeNumber))
@@ -95,57 +67,41 @@ func (s *Server) handleCalGet(w http.ResponseWriter, r *http.Request, mailbox st
 	_, _ = w.Write(ics)
 }
 
+// exportCalObject serializes a stored object as the iCalendar its collection
+// serves: VTODO from the shared task model in Tasks, VJOURNAL from the verbatim
+// stored source in Journal, and VEVENT elsewhere.
+func exportCalObject(st *objectstore.Store, fid int64, msg *oxcmail.Message, name string) ([]byte, error) {
+	switch fid {
+	case int64(mapi.PrivateFIDTasks):
+		tk, err := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
+		if err != nil {
+			return nil, err
+		}
+		return oxcical.ExportVTODO(tk, name, time.Time{}), nil
+	case int64(mapi.PrivateFIDJournal):
+		return oxcical.ExportVJournal(msg, name), nil
+	}
+	return oxcical.Export(msg, icalOptions(st))
+}
+
 // handleCalPut creates or replaces a calendar object from an iCalendar body. It
 // honors If-None-Match: * (create-only) and If-Match (replace-guard), responding
 // 201 on create and 204 on replace with the new ETag. Mirrors handlePut.
 func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mailbox string) {
-	kind, _, coll, name := classify(r.URL.Path)
-	if kind != kindCalObject {
-		http.Error(w, "not a calendar resource", http.StatusMethodNotAllowed)
-		return
-	}
-	if !validObjectName(name) {
-		http.Error(w, "invalid resource name", http.StatusBadRequest)
-		return
-	}
-	st, err := objectstore.Open(mailbox)
-	if err != nil {
-		s.davError(w, err, http.StatusInternalServerError)
+	st, fid, name, ok := s.openObjectCollection(w, r, mailbox, calTarget, true)
+	if !ok {
 		return
 	}
 	defer st.Close()
 
-	fid, ok, err := calCollectionFID(st, coll)
-	if err != nil {
-		s.davError(w, err, http.StatusInternalServerError)
-		return
-	}
-	if !ok {
-		http.Error(w, "no such calendar", http.StatusNotFound)
-		return
-	}
 	existing, found, err := findObjectByName(st, fid, ".ics", name)
 	if err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
-	if r.Header.Get("If-None-Match") == "*" && found {
-		http.Error(w, "already exists", http.StatusPreconditionFailed)
+	if failure, status := calPutPrecondition(r, existing, found); failure != "" {
+		http.Error(w, failure, status)
 		return
-	}
-	// If-Schedule-Tag-Match is the scheduling-aware precondition (RFC 6638 8.3); when
-	// present it supersedes If-Match so an inconsequential server scheduling change does
-	// not block the PUT.
-	if ism := r.Header.Get("If-Schedule-Tag-Match"); ism != "" {
-		if !found || ism != scheduleTag(existing.ChangeNumber) {
-			http.Error(w, "schedule-tag mismatch", http.StatusPreconditionFailed)
-			return
-		}
-	} else if im := r.Header.Get("If-Match"); im != "" {
-		if !found || im != etag(existing.ChangeNumber) {
-			http.Error(w, "etag mismatch", http.StatusPreconditionFailed)
-			return
-		}
 	}
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, s.icalLimit()))
@@ -153,30 +109,10 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 		s.davError(w, err, http.StatusBadRequest)
 		return
 	}
-	var msg *oxcmail.Message
-	switch {
-	case fid == int64(mapi.PrivateFIDTasks):
-		task, _, ok := oxcical.ParseVTODO(body)
-		if !ok {
-			http.Error(w, "invalid VTODO", http.StatusBadRequest)
-			return
-		}
-		props, perr := oxtask.ToProps(task, st.GetNamedPropIDs)
-		if perr != nil {
-			s.davError(w, perr, http.StatusInternalServerError)
-			return
-		}
-		msg = &oxcmail.Message{Props: props}
-	case fid == int64(mapi.PrivateFIDJournal):
-		if msg, err = oxcical.ImportVJournal(body, icalOptions(st)); err != nil {
-			s.davError(w, err, http.StatusBadRequest)
-			return
-		}
-	default:
-		if msg, err = oxcical.Import(body, icalOptions(st)); err != nil {
-			s.davError(w, err, http.StatusBadRequest)
-			return
-		}
+	msg, status, err := importCalendarBody(st, fid, body)
+	if err != nil {
+		s.davError(w, err, status)
+		return
 	}
 	tag, _, err := resourceNameTag(st, true)
 	if err != nil {
@@ -186,80 +122,128 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 	msg.Props.Set(tag, name)
 
 	// Capture the prior iCalendar before replacing it so implicit scheduling can diff
-	// old against new to decide which attendees to (re-)invite or cancel (RFC 6638
-	// §3). The Tasks (VTODO) and Journal (VJOURNAL) folders never schedule, so the diff
-	// is skipped for them.
-	var oldBody string
-	if found && eventsCollection(fid) {
-		if ob, oerr := calendarData(st, existing.ID); oerr == nil {
-			oldBody = ob
-		}
-	}
+	// old against new to decide which attendees to (re-)invite or cancel (RFC 6638 §3).
+	oldBody := priorCalendarBody(st, fid, existing, found)
 
 	// Replace is delete-then-create: the object store has no in-place updater.
-	if found {
-		if err := st.DeleteObject(existing.ID); err != nil {
-			s.davError(w, err, http.StatusInternalServerError)
-			return
-		}
-	}
-	if _, err := st.CreateMessage(fid, msg); err != nil {
+	if err := replaceObject(st, fid, msg, existing, found); err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 
 	created, _, cerr := findObjectByName(st, fid, ".ics", name)
-	if cerr == nil && created.ChangeNumber != 0 {
-		w.Header().Set("ETag", etag(created.ChangeNumber))
-		// A scheduling object's PUT response also carries the new schedule-tag, which
-		// changes on every direct PUT (RFC 6638 3.2.10 rule 3 / 8.2).
-		if eventsCollection(fid) && isSchedulingBody(string(body)) {
-			w.Header().Set("Schedule-Tag", scheduleTag(created.ChangeNumber))
-		}
-	}
-
-	// Implicit scheduling (RFC 6638 §3): auto-deliver the iTIP this change implies.
-	// The diff is between the re-exported old and new forms, both normalized through
-	// the store, so a synthesized field (e.g. an absent DTEND filled from DTSTART)
-	// cannot read as a spurious change and re-invite everyone. Events-only and
-	// best-effort: the calendar write has committed, so a delivery failure is logged,
-	// never surfaced as a PUT error.
-	if eventsCollection(fid) && cerr == nil {
-		if newBody, nerr := calendarData(st, created.ID); nerr == nil {
-			s.scheduleOnChange(user, oldBody, newBody, false)
-		}
+	if cerr == nil {
+		s.stampCalPutTags(w, st, created, fid, body, user, oldBody)
 	}
 
 	if found {
 		w.WriteHeader(http.StatusNoContent)
-	} else {
-		w.WriteHeader(http.StatusCreated)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+}
+
+// priorCalendarBody returns the iCalendar an object held before a PUT replaced it,
+// the "old" side of the implicit-scheduling diff. The Tasks (VTODO) and Journal
+// (VJOURNAL) folders never schedule, so they report nothing.
+func priorCalendarBody(st *objectstore.Store, fid int64, existing objectstore.FolderObject, found bool) string {
+	if !found || !eventsCollection(fid) {
+		return ""
+	}
+	body, err := calendarData(st, existing.ID)
+	if err != nil {
+		return ""
+	}
+	return body
+}
+
+// stampCalPutTags writes the ETag and, for a scheduling object, the schedule-tag
+// (which changes on every direct PUT, RFC 6638 3.2.10 rule 3 / 8.2), then runs
+// implicit scheduling (RFC 6638 3): the iTIP this change implies is auto-delivered.
+// The diff is between the re-exported old and new forms, both normalized through
+// the store, so a synthesized field (an absent DTEND filled from DTSTART, say)
+// cannot read as a spurious change and re-invite everyone. Events-only and
+// best-effort: the calendar write has committed, so a delivery failure is logged,
+// never surfaced as a PUT error.
+func (s *Server) stampCalPutTags(w http.ResponseWriter, st *objectstore.Store,
+	created objectstore.FolderObject, fid int64, body []byte, user, oldBody string) {
+	if created.ChangeNumber != 0 {
+		w.Header().Set("ETag", etag(created.ChangeNumber))
+		if eventsCollection(fid) && isSchedulingBody(string(body)) {
+			w.Header().Set("Schedule-Tag", scheduleTag(created.ChangeNumber))
+		}
+	}
+	if !eventsCollection(fid) {
+		return
+	}
+	if newBody, err := calendarData(st, created.ID); err == nil {
+		s.scheduleOnChange(user, oldBody, newBody, false)
 	}
 }
 
+// calPutPrecondition evaluates the conditional headers a calendar PUT may carry.
+// If-Schedule-Tag-Match is the scheduling-aware precondition (RFC 6638 8.3); when
+// present it supersedes If-Match, so an inconsequential server scheduling change
+// does not block the PUT. A non-empty message is the failure to report.
+func calPutPrecondition(r *http.Request, existing objectstore.FolderObject, found bool) (string, int) {
+	if r.Header.Get("If-None-Match") == "*" && found {
+		return "already exists", http.StatusPreconditionFailed
+	}
+	if ism := r.Header.Get("If-Schedule-Tag-Match"); ism != "" {
+		if !found || ism != scheduleTag(existing.ChangeNumber) {
+			return "schedule-tag mismatch", http.StatusPreconditionFailed
+		}
+		return "", 0
+	}
+	if im := r.Header.Get("If-Match"); im != "" {
+		if !found || im != etag(existing.ChangeNumber) {
+			return "etag mismatch", http.StatusPreconditionFailed
+		}
+	}
+	return "", 0
+}
+
+// importCalendarBody converts a PUT body into the stored message its collection
+// calls for: a VTODO in Tasks, a VJOURNAL in Journal, and a VEVENT elsewhere. On
+// failure it also reports the HTTP status to answer with.
+func importCalendarBody(st *objectstore.Store, fid int64, body []byte) (*oxcmail.Message, int, error) {
+	switch fid {
+	case int64(mapi.PrivateFIDTasks):
+		task, _, ok := oxcical.ParseVTODO(body)
+		if !ok {
+			return nil, http.StatusBadRequest, errInvalidVTODO
+		}
+		props, err := oxtask.ToProps(task, st.GetNamedPropIDs)
+		if err != nil {
+			return nil, http.StatusInternalServerError, err
+		}
+		return &oxcmail.Message{Props: props}, 0, nil
+	case int64(mapi.PrivateFIDJournal):
+		msg, err := oxcical.ImportVJournal(body, icalOptions(st))
+		if err != nil {
+			return nil, http.StatusBadRequest, err
+		}
+		return msg, 0, nil
+	}
+	msg, err := oxcical.Import(body, icalOptions(st))
+	if err != nil {
+		return nil, http.StatusBadRequest, err
+	}
+	return msg, 0, nil
+}
+
+// errInvalidVTODO is the body a Tasks PUT is refused with when its VTODO does not
+// parse.
+var errInvalidVTODO = errors.New("invalid VTODO")
+
 // handleCalDelete removes a calendar object, honoring If-Match. Mirrors handleDelete.
 func (s *Server) handleCalDelete(w http.ResponseWriter, r *http.Request, user, mailbox string) {
-	kind, _, coll, name := classify(r.URL.Path)
-	if kind != kindCalObject {
-		http.Error(w, "not a calendar resource", http.StatusMethodNotAllowed)
-		return
-	}
-	st, err := objectstore.Open(mailbox)
-	if err != nil {
-		s.davError(w, err, http.StatusInternalServerError)
+	st, fid, name, ok := s.openObjectCollection(w, r, mailbox, calTarget, false)
+	if !ok {
 		return
 	}
 	defer st.Close()
 
-	fid, ok, err := calCollectionFID(st, coll)
-	if err != nil {
-		s.davError(w, err, http.StatusInternalServerError)
-		return
-	}
-	if !ok {
-		http.Error(w, "no such calendar", http.StatusNotFound)
-		return
-	}
 	obj, found, err := findObjectByName(st, fid, ".ics", name)
 	if err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
@@ -269,14 +253,8 @@ func (s *Server) handleCalDelete(w http.ResponseWriter, r *http.Request, user, m
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	// If-Schedule-Tag-Match supersedes If-Match (RFC 6638 8.3).
-	if ism := r.Header.Get("If-Schedule-Tag-Match"); ism != "" {
-		if ism != scheduleTag(obj.ChangeNumber) {
-			http.Error(w, "schedule-tag mismatch", http.StatusPreconditionFailed)
-			return
-		}
-	} else if im := r.Header.Get("If-Match"); im != "" && im != etag(obj.ChangeNumber) {
-		http.Error(w, "etag mismatch", http.StatusPreconditionFailed)
+	if failure, status := calDeletePrecondition(r, obj); failure != "" {
+		http.Error(w, failure, status)
 		return
 	}
 	// Capture the iCalendar before deleting so implicit scheduling can cancel the
@@ -300,6 +278,22 @@ func (s *Server) handleCalDelete(w http.ResponseWriter, r *http.Request, user, m
 		s.scheduleOnChange(user, oldBody, "", scheduleReplyF(r))
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// calDeletePrecondition evaluates the conditional headers a calendar DELETE may
+// carry. If-Schedule-Tag-Match supersedes If-Match (RFC 6638 8.3). A non-empty
+// message is the failure to report, at the given status.
+func calDeletePrecondition(r *http.Request, obj objectstore.FolderObject) (string, int) {
+	if ism := r.Header.Get("If-Schedule-Tag-Match"); ism != "" {
+		if ism != scheduleTag(obj.ChangeNumber) {
+			return "schedule-tag mismatch", http.StatusPreconditionFailed
+		}
+		return "", 0
+	}
+	if im := r.Header.Get("If-Match"); im != "" && im != etag(obj.ChangeNumber) {
+		return "etag mismatch", http.StatusPreconditionFailed
+	}
+	return "", 0
 }
 
 // scheduleReplyF reports whether a request asks to suppress the scheduling reply via

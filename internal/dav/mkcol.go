@@ -30,18 +30,9 @@ func (s *Server) handleMkCol(w http.ResponseWriter, r *http.Request, mailbox str
 // calendar/contacts folder rather than a mail folder. mkcalendar forces the calendar
 // kind; MKCOL infers the kind from the URL home set.
 func (s *Server) makeCollection(w http.ResponseWriter, r *http.Request, mailbox string, mkcalendar bool) {
-	kind, _, coll, _ := classify(r.URL.Path)
-	isCal := strings.HasPrefix(r.URL.Path, "/dav/calendars/")
-	isCard := strings.HasPrefix(r.URL.Path, "/dav/addressbooks/")
-	if mkcalendar && !isCal {
-		http.Error(w, "MKCALENDAR is only valid under the calendar home set", http.StatusForbidden)
-		return
-	}
-	// A scheduling Inbox/Outbox path classifies as its own kind, not kindCalendar, so
-	// the kind check below also rejects MKCALENDAR/MKCOL on the reserved names
-	// (RFC 6638 §2.1/§2.2): a client cannot create a user calendar that shadows them.
-	if coll == "" || (isCal && kind != kindCalendar) || (isCard && kind != kindAddressbook) || (!isCal && !isCard) {
-		http.Error(w, "not a collection path", http.StatusForbidden)
+	isCal, coll, failure := mkcolTarget(r, mkcalendar)
+	if failure != "" {
+		http.Error(w, failure, http.StatusForbidden)
 		return
 	}
 
@@ -52,36 +43,65 @@ func (s *Server) makeCollection(w http.ResponseWriter, r *http.Request, mailbox 
 	}
 	defer st.Close()
 
-	var parent int64
-	var class string
-	var resolve func(*objectstore.Store, string) (int64, bool, error)
-	if isCal {
-		parent, class, resolve = int64(mapi.PrivateFIDCalendar), mapi.ContainerClassAppointment, calCollectionFID
-	} else {
-		parent, class, resolve = int64(mapi.PrivateFIDContacts), mapi.ContainerClassContact, cardCollectionFID
-	}
-
 	// MKCOL/MKCALENDAR on an existing resource (the reserved name or a prior
 	// collection) fails (RFC 4918 §9.3.1, RFC 4791 §5.3.1).
-	if _, ok, err := resolve(st, coll); err != nil {
+	if _, exists, err := collectionByKind(st, isCal, coll); err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
 		return
-	} else if ok {
+	} else if exists {
 		w.Header().Set("Allow", allowMethods)
 		http.Error(w, "collection already exists", http.StatusMethodNotAllowed)
 		return
 	}
 
-	fid, err := st.CreateFolder(&parent, coll)
-	if err != nil {
-		s.davError(w, err, http.StatusInternalServerError)
-		return
-	}
-	// CreateFolder defaults to the mail container class; retype the new folder so
-	// the rest of the system treats it as a calendar/contacts collection.
-	if err := st.SetFolderProperties(fid, mapi.PropertyValues{{Tag: mapi.PrContainerClass, Value: class}}); err != nil {
+	if err := createTypedCollection(st, isCal, coll); err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
+}
+
+// mkcolTarget validates a create request's path and reports which home set it names
+// plus the collection segment to create. A non-empty failure is the 403 message.
+func mkcolTarget(r *http.Request, mkcalendar bool) (isCal bool, coll string, failure string) {
+	kind, _, coll, _ := classify(r.URL.Path)
+	isCal = strings.HasPrefix(r.URL.Path, "/dav/calendars/")
+	isCard := strings.HasPrefix(r.URL.Path, "/dav/addressbooks/")
+	if mkcalendar && !isCal {
+		return false, "", "MKCALENDAR is only valid under the calendar home set"
+	}
+	if !creatableCollection(kind, coll, isCal, isCard) {
+		return false, "", "not a collection path"
+	}
+	return isCal, coll, ""
+}
+
+// creatableCollection reports whether a path names a collection a client may create.
+// A scheduling Inbox/Outbox path classifies as its own kind, not kindCalendar, so
+// this also rejects MKCALENDAR/MKCOL on the reserved names (RFC 6638 §2.1/§2.2): a
+// client cannot create a user calendar that shadows them.
+func creatableCollection(kind resourceKind, coll string, isCal, isCard bool) bool {
+	switch {
+	case coll == "", !isCal && !isCard:
+		return false
+	case isCal:
+		return kind == kindCalendar
+	default:
+		return kind == kindAddressbook
+	}
+}
+
+// createTypedCollection creates the child folder and types it so other protocols see
+// a calendar/contacts folder rather than a mail folder.
+func createTypedCollection(st *objectstore.Store, isCal bool, coll string) error {
+	parent, class := int64(mapi.PrivateFIDContacts), mapi.ContainerClassContact
+	if isCal {
+		parent, class = int64(mapi.PrivateFIDCalendar), mapi.ContainerClassAppointment
+	}
+	fid, err := st.CreateFolder(&parent, coll)
+	if err != nil {
+		return err
+	}
+	// CreateFolder defaults to the mail container class; retype the new folder.
+	return st.SetFolderProperties(fid, mapi.PropertyValues{{Tag: mapi.PrContainerClass, Value: class}})
 }

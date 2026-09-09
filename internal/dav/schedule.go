@@ -100,31 +100,8 @@ func (s *Server) outboxFreeBusy(w http.ResponseWriter, user string, vfb *icalNod
 // and relays external ones when a spool is configured.
 func (s *Server) outboxDeliver(w http.ResponseWriter, user string, root, comp *icalNode, body string) {
 	method := strings.ToUpper(firstPropValue(root, "METHOD"))
-	organizer := firstPropValue(comp, "ORGANIZER")
-	attendees := allPropValues(comp, "ATTENDEE")
-
-	// An attendee-originated method (a reply) is addressed to the organizer; an
-	// organizer-originated one (a request/cancel) to the attendees.
-	var recipients []string
-	switch method {
-	case "REPLY", "REFRESH", "COUNTER":
-		// The Outbox owner must be one of the attendees on whose behalf the reply is
-		// sent, and the organizer is the sole recipient.
-		if !ownerAmong(user, attendees) || organizer == "" {
-			schedulePreconditionFail(w, "valid-organizer", http.StatusForbidden)
-			return
-		}
-		recipients = []string{organizer}
-	default:
-		// valid-organizer (RFC 6638 §5.2.6): the ORGANIZER must be the Outbox owner.
-		if !addrMatchesOwner(user, organizer) {
-			schedulePreconditionFail(w, "valid-organizer", http.StatusForbidden)
-			return
-		}
-		recipients = attendees
-	}
-	if len(recipients) == 0 || method == "" {
-		schedulePreconditionFail(w, "valid-scheduling-message", http.StatusBadRequest)
+	recipients, ok := itipRecipients(w, user, method, comp)
+	if !ok {
 		return
 	}
 
@@ -138,11 +115,49 @@ func (s *Server) outboxDeliver(w http.ResponseWriter, user string, root, comp *i
 		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
+	writeScheduleResponse(w, deliveryResponse(recipients, unresolved))
+}
+
+// itipRecipients resolves who an outbox POST is addressed to and enforces the
+// originator preconditions. An attendee-originated method (a reply) is addressed
+// to the organizer; an organizer-originated one (a request/cancel) to the
+// attendees. On a refusal the response is already written.
+func itipRecipients(w http.ResponseWriter, user, method string, comp *icalNode) ([]string, bool) {
+	organizer := firstPropValue(comp, "ORGANIZER")
+	attendees := allPropValues(comp, "ATTENDEE")
+
+	var recipients []string
+	switch method {
+	case "REPLY", "REFRESH", "COUNTER":
+		// The Outbox owner must be one of the attendees on whose behalf the reply is
+		// sent, and the organizer is the sole recipient.
+		if !ownerAmong(user, attendees) || organizer == "" {
+			schedulePreconditionFail(w, "valid-organizer", http.StatusForbidden)
+			return nil, false
+		}
+		recipients = []string{organizer}
+	default:
+		// valid-organizer (RFC 6638 §5.2.6): the ORGANIZER must be the Outbox owner.
+		if !addrMatchesOwner(user, organizer) {
+			schedulePreconditionFail(w, "valid-organizer", http.StatusForbidden)
+			return nil, false
+		}
+		recipients = attendees
+	}
+	if len(recipients) == 0 || method == "" {
+		schedulePreconditionFail(w, "valid-scheduling-message", http.StatusBadRequest)
+		return nil, false
+	}
+	return recipients, true
+}
+
+// deliveryResponse reports per-recipient status (RFC 6638 5.2): a recipient the
+// submission path could not resolve is reported invalid, every other one succeeds.
+func deliveryResponse(recipients, unresolved []string) *scheduleResponse {
 	bad := make(map[string]bool, len(unresolved))
 	for _, u := range unresolved {
 		bad[strings.ToLower(u)] = true
 	}
-
 	resp := &scheduleResponse{}
 	for _, rcpt := range recipients {
 		if bad[strings.ToLower(stripMailto(rcpt))] {
@@ -154,7 +169,7 @@ func (s *Server) outboxDeliver(w http.ResponseWriter, user string, root, comp *i
 			RequestStatus: "2.0;Success",
 		})
 	}
-	writeScheduleResponse(w, resp)
+	return resp
 }
 
 // buildITIP wraps an iTIP scheduling message as an iMIP email (RFC 6047) addressed
@@ -273,42 +288,87 @@ func busyPeriods(st *objectstore.Store, fid int64, rangeStart, rangeEnd time.Tim
 	if err != nil {
 		return nil, err
 	}
+	win := freeBusyWindow{start: rangeStart, end: rangeEnd, okS: okS, okE: okE}
 	var periods []string
 	for _, o := range objs {
 		data, err := calendarData(st, o.ID)
 		if err != nil {
 			continue
 		}
-		root := parseICalNode(data)
-		if root == nil {
-			continue
-		}
-		for _, ev := range root.kids {
-			if !strings.EqualFold(ev.name, "VEVENT") {
-				continue
-			}
-			// A transparent event does not block time (RFC 4791 §7.10).
-			if tp := ev.propsByName("TRANSP"); len(tp) > 0 && strings.EqualFold(strings.TrimSpace(tp[0].value), "TRANSPARENT") {
-				continue
-			}
-			start, end, ok := eventSpan(ev)
-			if !ok {
-				continue
-			}
-			if (okE && !start.Before(rangeEnd)) || (okS && !end.After(rangeStart)) {
-				continue // outside the requested range
-			}
-			cs, ce := start, end
-			if okS && cs.Before(rangeStart) {
-				cs = rangeStart
-			}
-			if okE && ce.After(rangeEnd) {
-				ce = rangeEnd
-			}
-			periods = append(periods, formatICalUTCZ(cs)+"/"+formatICalUTCZ(ce))
-		}
+		periods = append(periods, objectBusyPeriods(data, win)...)
 	}
 	return periods, nil
+}
+
+// freeBusyWindow is the range a free-busy query asked about. okS/okE mark which
+// bounds are set; an unset bound leaves that side open.
+type freeBusyWindow struct {
+	start, end time.Time
+	okS, okE   bool
+}
+
+// overlaps reports whether an event span falls inside the window.
+func (w freeBusyWindow) overlaps(start, end time.Time) bool {
+	if w.okE && !start.Before(w.end) {
+		return false
+	}
+	if w.okS && !end.After(w.start) {
+		return false
+	}
+	return true
+}
+
+// clamp trims an event span to the window's set bounds.
+func (w freeBusyWindow) clamp(start, end time.Time) (time.Time, time.Time) {
+	if w.okS && start.Before(w.start) {
+		start = w.start
+	}
+	if w.okE && end.After(w.end) {
+		end = w.end
+	}
+	return start, end
+}
+
+// objectBusyPeriods returns the busy PERIOD strings one stored object contributes.
+func objectBusyPeriods(data string, win freeBusyWindow) []string {
+	root := parseICalNode(data)
+	if root == nil {
+		return nil
+	}
+	var periods []string
+	for _, ev := range root.kids {
+		if !strings.EqualFold(ev.name, "VEVENT") {
+			continue
+		}
+		if p, ok := eventBusyPeriod(ev, win); ok {
+			periods = append(periods, p)
+		}
+	}
+	return periods
+}
+
+// eventBusyPeriod renders one VEVENT as the PERIOD it blocks, clamped to the
+// window. It reports false for an event that blocks no time in the window.
+func eventBusyPeriod(ev *icalNode, win freeBusyWindow) (string, bool) {
+	if isTransparent(ev) {
+		return "", false
+	}
+	start, end, ok := eventSpan(ev)
+	if !ok {
+		return "", false
+	}
+	if !win.overlaps(start, end) {
+		return "", false
+	}
+	cs, ce := win.clamp(start, end)
+	return formatICalUTCZ(cs) + "/" + formatICalUTCZ(ce), true
+}
+
+// isTransparent reports whether an event is marked TRANSP:TRANSPARENT, which does
+// not block time (RFC 4791 §7.10).
+func isTransparent(ev *icalNode) bool {
+	tp := ev.propsByName("TRANSP")
+	return len(tp) > 0 && strings.EqualFold(strings.TrimSpace(tp[0].value), "TRANSPARENT")
 }
 
 // firstPropValue returns the value of a component's first property of the given

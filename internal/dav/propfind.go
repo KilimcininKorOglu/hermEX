@@ -21,73 +21,81 @@ func (s *Server) handlePropfind(w http.ResponseWriter, r *http.Request, user, ma
 	}
 	depth := r.Header.Get("Depth")
 
-	var responses []msResponse
-	switch kind {
-	case kindRoot:
-		responses = []msResponse{principalLink(r.URL.Path, pathUser)}
-	case kindPrincipal:
-		responses = []msResponse{principalResponse(pathUser)}
-	case kindHomeSet:
-		responses = []msResponse{homeSetResponse(pathUser)}
-		if depth != "0" {
-			// At the home set, Depth 1 lists the address books it contains (the
-			// well-known Contacts plus any user-created ones), not their members.
-			rs, err := s.allAddressbookCollections(mailbox, pathUser)
-			if err != nil {
-				s.davError(w, err, http.StatusInternalServerError)
-				return
-			}
-			responses = append(responses, rs...)
-		}
-	case kindAddressbook:
-		rs, err := s.addressbookResponses(mailbox, pathUser, coll, depth)
-		if err != nil {
-			s.davError(w, err, http.StatusInternalServerError)
-			return
-		}
-		if rs == nil {
-			http.Error(w, "no such address book", http.StatusNotFound)
-			return
-		}
-		responses = rs
-	case kindCalHomeSet:
-		responses = []msResponse{calHomeSetResponse(pathUser)}
-		if depth != "0" {
-			// At the home set, Depth 1 lists the calendars it contains (the
-			// well-known Calendar plus any user-created ones), not their members.
-			rs, err := s.allCalendarCollections(mailbox, pathUser)
-			if err != nil {
-				s.davError(w, err, http.StatusInternalServerError)
-				return
-			}
-			responses = append(responses, rs...)
-		}
-	case kindCalendar:
-		rs, err := s.calendarResponses(mailbox, pathUser, coll, depth)
-		if err != nil {
-			s.davError(w, err, http.StatusInternalServerError)
-			return
-		}
-		if rs == nil {
-			http.Error(w, "no such calendar", http.StatusNotFound)
-			return
-		}
-		responses = rs
-	case kindScheduleInbox:
-		rs, err := s.scheduleInboxResponses(mailbox, pathUser, depth)
-		if err != nil {
-			s.davError(w, err, http.StatusInternalServerError)
-			return
-		}
-		responses = rs
-	case kindScheduleOutbox:
-		responses = []msResponse{scheduleOutboxResponse(pathUser)}
-	default:
-		http.Error(w, "not found", http.StatusNotFound)
+	responses, missing, err := s.propfindResponses(r, kind, mailbox, pathUser, coll, depth)
+	if err != nil {
+		s.davError(w, err, http.StatusInternalServerError)
+		return
+	}
+	if missing != "" {
+		http.Error(w, missing, http.StatusNotFound)
 		return
 	}
 
 	writeMultistatus(w, &multistatus{Responses: responses})
+}
+
+// propfindResponses builds the multistatus responses one PROPFIND target calls
+// for. A non-empty missing is the 404 text to answer with, for a collection the
+// path names but the mailbox does not hold.
+func (s *Server) propfindResponses(r *http.Request, kind resourceKind, mailbox, pathUser, coll, depth string) ([]msResponse, string, error) {
+	switch kind {
+	case kindRoot:
+		return []msResponse{principalLink(r.URL.Path, pathUser)}, "", nil
+	case kindPrincipal:
+		return []msResponse{principalResponse(pathUser)}, "", nil
+	case kindHomeSet:
+		// At the home set, Depth 1 lists the address books it contains (the
+		// well-known Contacts plus any user-created ones), not their members.
+		return s.homeSetChildren(homeSetResponse(pathUser), depth, func() ([]msResponse, error) {
+			return s.allAddressbookCollections(mailbox, pathUser)
+		})
+	case kindAddressbook:
+		rs, err := s.addressbookResponses(mailbox, pathUser, coll, depth)
+		return foundOrMissing(rs, err, "no such address book")
+	case kindCalHomeSet:
+		// At the home set, Depth 1 lists the calendars it contains (the well-known
+		// Calendar plus any user-created ones), not their members.
+		return s.homeSetChildren(calHomeSetResponse(pathUser), depth, func() ([]msResponse, error) {
+			return s.allCalendarCollections(mailbox, pathUser)
+		})
+	case kindCalendar:
+		rs, err := s.calendarResponses(mailbox, pathUser, coll, depth)
+		return foundOrMissing(rs, err, "no such calendar")
+	case kindScheduleInbox:
+		rs, err := s.scheduleInboxResponses(mailbox, pathUser, depth)
+		if err != nil {
+			return nil, "", err
+		}
+		return rs, "", nil
+	case kindScheduleOutbox:
+		return []msResponse{scheduleOutboxResponse(pathUser)}, "", nil
+	}
+	return nil, "not found", nil
+}
+
+// homeSetChildren answers a home-set PROPFIND: the home set itself, plus the
+// collections it contains when the client asked beyond Depth 0.
+func (s *Server) homeSetChildren(self msResponse, depth string, children func() ([]msResponse, error)) ([]msResponse, string, error) {
+	responses := []msResponse{self}
+	if depth == "0" {
+		return responses, "", nil
+	}
+	rs, err := children()
+	if err != nil {
+		return nil, "", err
+	}
+	return append(responses, rs...), "", nil
+}
+
+// foundOrMissing maps a collection lookup that returned no responses to its 404.
+func foundOrMissing(rs []msResponse, err error, missing string) ([]msResponse, string, error) {
+	if err != nil {
+		return nil, "", err
+	}
+	if rs == nil {
+		return nil, missing, nil
+	}
+	return rs, "", nil
 }
 
 // principalLink answers a root PROPFIND with the current-user-principal, the
