@@ -41,33 +41,26 @@ func TestTrainFromDir(t *testing.T) {
 	dir := t.TempDir()
 	spam := filepath.Join(dir, "spam")
 	ham := filepath.Join(dir, "ham")
-	if err := os.Mkdir(spam, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(ham, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(spam, "1.eml"), []byte("Subject: cheap pills\r\n\r\nbuy now discount viagra"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(ham, "1.eml"), []byte("Subject: meeting\r\n\r\nproject schedule review"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, os.Mkdir(spam, 0o755), "create the spam corpus directory")
+	mustNoErr(t, os.Mkdir(ham, 0o755), "create the ham corpus directory")
+	mustNoErr(t, os.WriteFile(filepath.Join(spam, "1.eml"),
+		[]byte("Subject: cheap pills\r\n\r\nbuy now discount viagra"), 0o644), "write the spam sample")
+	mustNoErr(t, os.WriteFile(filepath.Join(ham, "1.eml"),
+		[]byte("Subject: meeting\r\n\r\nproject schedule review"), 0o644), "write the ham sample")
 
 	m := NewBayesModel()
-	if n, err := TrainFromDir(m, spam, true); err != nil || n != 1 {
-		t.Fatalf("spam train = (%d, %v), want (1, nil)", n, err)
-	}
-	if n, err := TrainFromDir(m, ham, false); err != nil || n != 1 {
-		t.Fatalf("ham train = (%d, %v), want (1, nil)", n, err)
-	}
-	if m.SpamMsgs != 1 || m.HamMsgs != 1 {
-		t.Fatalf("message counts = spam %d ham %d, want 1/1", m.SpamMsgs, m.HamMsgs)
-	}
+	n, err := TrainFromDir(m, spam, true)
+	mustNoErr(t, err, "train on the spam corpus")
+	wantEq(t, n, 1, "spam messages trained")
+	n, err = TrainFromDir(m, ham, false)
+	mustNoErr(t, err, "train on the ham corpus")
+	wantEq(t, n, 1, "ham messages trained")
+
+	wantEq(t, m.SpamMsgs, 1, "the model's spam message count")
+	wantEq(t, m.HamMsgs, 1, "the model's ham message count")
 	// MessageText pulled the subject and body, so spam vocabulary is present.
-	if m.SpamTokens["cheap"] != 1 || m.SpamTokens["viagra"] != 1 {
-		t.Errorf("spam tokens missing subject/body words: %v", m.SpamTokens)
-	}
+	wantEq(t, m.SpamTokens["cheap"], 1, "the subject word in the spam vocabulary")
+	wantEq(t, m.SpamTokens["viagra"], 1, "the body word in the spam vocabulary")
 }
 
 // TestScoreBayesConfidentSpam proves a trained model wired into the Scorer adds
