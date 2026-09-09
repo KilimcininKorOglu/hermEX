@@ -242,62 +242,88 @@ func (w *Worker) ProcessDue(ctx context.Context, now time.Time) (sent int, err e
 		if ctx.Err() != nil {
 			return sent, nil
 		}
-		// Stamp the attempt before handing the message to delivery. A stamp with no
-		// send is recoverable (the sender gets the message back); a send with no
-		// stamp is not, because nothing then stops the next pass from sending it
-		// again. A failure to write the stamp leaves the row untouched and
-		// undelivered, so the pass simply stops.
-		if me := w.Spool.MarkStarted(it.RecipientID, now); me != nil {
-			return sent, me
+		delivered, se := w.attempt(it, now)
+		if se != nil {
+			return sent, se
 		}
-		e := w.deliver(it)
-		if e == nil {
-			// The mail exchanger has the message. Record that before removing the
-			// row, so a failure of either write leaves a state that says "delivered,
-			// settle outstanding" rather than one that reads as never attempted.
-			if de := w.Spool.MarkDelivered(it.RecipientID); de != nil {
-				return sent, de
-			}
-			if se := w.Spool.Sent(it.RecipientID); se != nil {
-				return sent, se
-			}
+		if delivered {
 			sent++
-			w.log(logging.LevelInfo, "relay.sent", it, nil)
-			continue
 		}
-		// Delivery answered, so the outcome is known and the stamp has nothing left
-		// to record. Clearing it returns the row to the ordinary retry path instead
-		// of leaving it looking like an interrupted attempt.
-		if ce := w.Spool.ClearStarted(it.RecipientID); ce != nil {
-			return sent, ce
-		}
-		// Give up on a permanent rejection or once attempts are exhausted; the
-		// sender is told (OnGiveUp) and the recipient settled. Otherwise defer with
-		// an exponential backoff so a transient outage is retried, not lost.
-		if isPermanent(e) || it.Attempts+1 >= w.maxAttempts() {
-			if be := w.giveUp(it, e); be != nil {
-				// The delivery is over and the sender was never told, so settling here
-				// would erase the message with nothing left to recover it from. Keep the
-				// recipient queued instead: it stays on the administrative mail-queue
-				// page, carrying why it is stuck, and the bounce is attempted again on
-				// each expiry until it lands or an operator drops it.
-				if re := w.Spool.Retry(it.RecipientID, now.Add(bounceRetryBackoff), "bounce undeliverable: "+be.Error()); re != nil {
-					return sent, re
-				}
-				w.log(logging.LevelError, "relay.bounce.stuck", it, be)
-				continue
-			}
-			if fe := w.Spool.Fail(it.RecipientID); fe != nil {
-				return sent, fe
-			}
-			continue
-		}
-		if re := w.Spool.Retry(it.RecipientID, now.Add(w.retryDelay(it.Attempts)), e.Error()); re != nil {
-			return sent, re
-		}
-		w.log(logging.LevelWarn, "relay.defer", it, e)
 	}
 	return sent, nil
+}
+
+// attempt delivers one claimed recipient once and settles it. A store error stops
+// the pass and is returned; a delivery failure only defers that recipient.
+func (w *Worker) attempt(it Item, now time.Time) (bool, error) {
+	// Stamp the attempt before handing the message to delivery. A stamp with no
+	// send is recoverable (the sender gets the message back); a send with no
+	// stamp is not, because nothing then stops the next pass from sending it
+	// again. A failure to write the stamp leaves the row untouched and
+	// undelivered, so the pass simply stops.
+	if me := w.Spool.MarkStarted(it.RecipientID, now); me != nil {
+		return false, me
+	}
+	e := w.deliver(it)
+	if e == nil {
+		if se := w.settleDelivered(it); se != nil {
+			return false, se
+		}
+		return true, nil
+	}
+	// Delivery answered, so the outcome is known and the stamp has nothing left
+	// to record. Clearing it returns the row to the ordinary retry path instead
+	// of leaving it looking like an interrupted attempt.
+	if ce := w.Spool.ClearStarted(it.RecipientID); ce != nil {
+		return false, ce
+	}
+	return false, w.settleFailure(it, now, e)
+}
+
+// settleDelivered finishes the bookkeeping for an accepted message. The mail
+// exchanger has it, so that is recorded before the row is removed: a failure of
+// either write then leaves a state that says "delivered, settle outstanding"
+// rather than one that reads as never attempted.
+func (w *Worker) settleDelivered(it Item) error {
+	if de := w.Spool.MarkDelivered(it.RecipientID); de != nil {
+		return de
+	}
+	if se := w.Spool.Sent(it.RecipientID); se != nil {
+		return se
+	}
+	w.log(logging.LevelInfo, "relay.sent", it, nil)
+	return nil
+}
+
+// settleFailure settles a recipient delivery answered with an error: give up on a
+// permanent rejection or once attempts are exhausted, otherwise defer with an
+// exponential backoff so a transient outage is retried, not lost.
+func (w *Worker) settleFailure(it Item, now time.Time, e error) error {
+	if isPermanent(e) || it.Attempts+1 >= w.maxAttempts() {
+		return w.settleGiveUp(it, now, e)
+	}
+	if re := w.Spool.Retry(it.RecipientID, now.Add(w.retryDelay(it.Attempts)), e.Error()); re != nil {
+		return re
+	}
+	w.log(logging.LevelWarn, "relay.defer", it, e)
+	return nil
+}
+
+// settleGiveUp tells the sender (OnGiveUp) and settles the recipient. When the
+// notice itself cannot be delivered the row stays queued instead: settling would
+// erase the message with nothing left to recover it from, so it keeps its place on
+// the administrative mail-queue page, carrying why it is stuck, and the bounce is
+// attempted again on each expiry until it lands or an operator drops it.
+func (w *Worker) settleGiveUp(it Item, now time.Time, e error) error {
+	be := w.giveUp(it, e)
+	if be == nil {
+		return w.Spool.Fail(it.RecipientID)
+	}
+	if re := w.Spool.Retry(it.RecipientID, now.Add(bounceRetryBackoff), "bounce undeliverable: "+be.Error()); re != nil {
+		return re
+	}
+	w.log(logging.LevelError, "relay.bounce.stuck", it, be)
+	return nil
 }
 
 // errInterruptedDelivery is the cause reported to the sender for a delivery whose
@@ -437,28 +463,11 @@ func (w *Worker) deliver(it Item) error {
 	if domain == "" {
 		return fmt.Errorf("recipient %q has no domain", it.Recipient)
 	}
-	route := w.Router
-	if route == nil {
-		route = LookupMX
-	}
-	hosts, err := route(domain)
+	hosts, err := w.mailExchangers(domain)
 	if err != nil {
-		return fmt.Errorf("resolve %s: %w", domain, err)
+		return err
 	}
-	if len(hosts) == 0 {
-		return fmt.Errorf("no mail exchanger for %s", domain)
-	}
-	// Look up the domain's MTA-STS policy once. A lookup failure does not block
-	// mail, it falls back to opportunistic TLS (the pre-MTA-STS behaviour); the
-	// resolver's cache is what carries a published policy through a transient
-	// policy-host outage, so this fallback only fires before a policy is ever seen.
-	var pol *mtasts.Policy
-	if w.Policy != nil {
-		if pol, err = w.Policy(domain); err != nil {
-			w.log(logging.LevelWarn, "mtasts.lookup", it, err)
-			pol = nil
-		}
-	}
+	pol := w.stsPolicy(domain, it)
 	enforce := pol != nil && pol.Mode == mtasts.ModeEnforce
 	var lastErr error
 	for _, host := range hosts {
@@ -472,6 +481,39 @@ func (w *Worker) deliver(it Item) error {
 		}
 	}
 	return lastErr
+}
+
+// mailExchangers resolves a domain to the hosts to try, in priority order.
+func (w *Worker) mailExchangers(domain string) ([]string, error) {
+	route := w.Router
+	if route == nil {
+		route = LookupMX
+	}
+	hosts, err := route(domain)
+	if err != nil {
+		return nil, fmt.Errorf("resolve %s: %w", domain, err)
+	}
+	if len(hosts) == 0 {
+		return nil, fmt.Errorf("no mail exchanger for %s", domain)
+	}
+	return hosts, nil
+}
+
+// stsPolicy looks up a domain's MTA-STS policy once per delivery. A lookup
+// failure does not block mail, it falls back to opportunistic TLS (the
+// pre-MTA-STS behaviour); the resolver's cache is what carries a published policy
+// through a transient policy-host outage, so this fallback only fires before a
+// policy is ever seen.
+func (w *Worker) stsPolicy(domain string, it Item) *mtasts.Policy {
+	if w.Policy == nil {
+		return nil
+	}
+	pol, err := w.Policy(domain)
+	if err != nil {
+		w.log(logging.LevelWarn, "mtasts.lookup", it, err)
+		return nil
+	}
+	return pol
 }
 
 // send delivers one message to one mail exchanger over SMTP. When requireTLS is
@@ -497,67 +539,99 @@ func (w *Worker) send(host string, it Item, requireTLS bool) error {
 	if err := c.Hello(w.heloName(conn.LocalAddr())); err != nil {
 		return err
 	}
-	// DANE (RFC 7672): when a DNSSEC-validating resolver is configured and this
-	// mail exchanger publishes usable secure TLSA records, TLS is mandatory and
-	// the certificate is authenticated against those records. A TLSA lookup error
-	// (e.g. a bogus/SERVFAIL response) fails the host rather than downgrading.
-	var daneRecs []dane.Record
-	if w.DANE != nil {
-		recs, applicable, err := w.DANE.LookupTLSA(host, 25)
-		if err != nil {
-			// A bogus (DNSSEC-invalid) TLSA answer is a reportable TLS-RPT failure
-			// (RFC 8460 dnssec-invalid); a transient lookup error is not (RFC 8460
-			// 4.3.4) and only defers delivery.
-			if errors.Is(err, dane.ErrBogus) {
-				w.recordTLS(it, host, tlsrpt.PolicyTypeTLSA, tlsrpt.ResultDNSSECInvalid)
-			}
-			return err
-		}
-		if applicable {
-			daneRecs = recs
-		}
+	if err := w.negotiateTLS(c, host, it, requireTLS); err != nil {
+		return err
 	}
-	// MTA-STS enforce (RFC 8461): the certificate is validated against host (which
-	// already matched the policy), and a server that does not offer STARTTLS is
-	// refused rather than used in the clear. Otherwise STARTTLS is opportunistic
-	// (RFC 7435): encrypt when advertised, accepting any certificate, since the
-	// alternative is cleartext and encryption without authentication is still better.
-	//
-	// policyType labels each recorded TLS-RPT session (RFC 8460) by the policy that
-	// governed the attempt: DANE TLSA, MTA-STS enforce, or neither.
-	policyType := tlsrpt.PolicyTypeNoPolicy
-	switch {
-	case len(daneRecs) > 0:
-		policyType = tlsrpt.PolicyTypeTLSA
-	case requireTLS:
-		policyType = tlsrpt.PolicyTypeSTS
+	return sendMessage(c, it, host)
+}
+
+// negotiateTLS applies the transport security the recipient's domain calls for.
+// MTA-STS enforce (RFC 8461): the certificate is validated against host (which
+// already matched the policy), and a server that does not offer STARTTLS is
+// refused rather than used in the clear. Otherwise STARTTLS is opportunistic
+// (RFC 7435): encrypt when advertised, accepting any certificate, since the
+// alternative is cleartext and encryption without authentication is still better.
+func (w *Worker) negotiateTLS(c *smtp.Client, host string, it Item, requireTLS bool) error {
+	daneRecs, err := w.lookupTLSA(host, it)
+	if err != nil {
+		return err
 	}
+	policyType := tlsPolicyType(daneRecs, requireTLS)
 	if ok, _ := c.Extension("STARTTLS"); ok {
-		cfg := &tls.Config{ServerName: host, InsecureSkipVerify: !requireTLS} // #nosec G402 -- opportunistic STARTTLS, verification is on when requireTLS and off only for best-effort delivery
-		if len(daneRecs) > 0 {
-			// Authenticate against the TLSA records instead of the PKIX trust
-			// store: skip the default verification and match the presented chain
-			// in VerifyConnection (RFC 7672 §3).
-			cfg = &tls.Config{
-				ServerName:         host,
-				InsecureSkipVerify: true, // #nosec G402 -- DANE TLSA path, PKIX skipped and the presented chain is checked in VerifyConnection (RFC 7672)
-				VerifyConnection: func(cs tls.ConnectionState) error {
-					return dane.Match(daneRecs, cs.PeerCertificates, host)
-				},
-			}
-		}
-		if err := c.StartTLS(cfg); err != nil {
+		if err := c.StartTLS(tlsConfigFor(host, daneRecs, requireTLS)); err != nil {
 			w.recordTLS(it, host, policyType, tlsrpt.Classify(err))
 			return err
 		}
 		w.recordTLS(it, host, policyType, "")
-	} else if requireTLS {
+		return nil
+	}
+	if requireTLS {
 		w.recordTLS(it, host, tlsrpt.PolicyTypeSTS, tlsrpt.ResultStartTLSNotSupported)
 		return fmt.Errorf("mtasts: %s requires STARTTLS but %s does not offer it", domainPart(it.Recipient), host)
-	} else if len(daneRecs) > 0 {
+	}
+	if len(daneRecs) > 0 {
 		w.recordTLS(it, host, tlsrpt.PolicyTypeTLSA, tlsrpt.ResultStartTLSNotSupported)
 		return fmt.Errorf("dane: %s publishes TLSA records but %s does not offer STARTTLS", domainPart(it.Recipient), host)
 	}
+	return nil
+}
+
+// lookupTLSA reads a mail exchanger's DANE records (RFC 7672): when a
+// DNSSEC-validating resolver is configured and the host publishes usable secure
+// TLSA records, TLS is mandatory and the certificate is authenticated against
+// them. A TLSA lookup error (e.g. a bogus/SERVFAIL response) fails the host rather
+// than downgrading.
+func (w *Worker) lookupTLSA(host string, it Item) ([]dane.Record, error) {
+	if w.DANE == nil {
+		return nil, nil
+	}
+	recs, applicable, err := w.DANE.LookupTLSA(host, 25)
+	if err != nil {
+		// A bogus (DNSSEC-invalid) TLSA answer is a reportable TLS-RPT failure
+		// (RFC 8460 dnssec-invalid); a transient lookup error is not (RFC 8460
+		// 4.3.4) and only defers delivery.
+		if errors.Is(err, dane.ErrBogus) {
+			w.recordTLS(it, host, tlsrpt.PolicyTypeTLSA, tlsrpt.ResultDNSSECInvalid)
+		}
+		return nil, err
+	}
+	if !applicable {
+		return nil, nil
+	}
+	return recs, nil
+}
+
+// tlsPolicyType labels a recorded TLS-RPT session (RFC 8460) by the policy that
+// governed the attempt: DANE TLSA, MTA-STS enforce, or neither.
+func tlsPolicyType(daneRecs []dane.Record, requireTLS bool) string {
+	switch {
+	case len(daneRecs) > 0:
+		return tlsrpt.PolicyTypeTLSA
+	case requireTLS:
+		return tlsrpt.PolicyTypeSTS
+	}
+	return tlsrpt.PolicyTypeNoPolicy
+}
+
+// tlsConfigFor builds the STARTTLS config for one attempt. With TLSA records the
+// certificate is authenticated against them instead of the PKIX trust store: the
+// default verification is skipped and the presented chain is matched in
+// VerifyConnection (RFC 7672 §3).
+func tlsConfigFor(host string, daneRecs []dane.Record, requireTLS bool) *tls.Config {
+	if len(daneRecs) > 0 {
+		return &tls.Config{
+			ServerName:         host,
+			InsecureSkipVerify: true, // #nosec G402 -- DANE TLSA path, PKIX skipped and the presented chain is checked in VerifyConnection (RFC 7672)
+			VerifyConnection: func(cs tls.ConnectionState) error {
+				return dane.Match(daneRecs, cs.PeerCertificates, host)
+			},
+		}
+	}
+	return &tls.Config{ServerName: host, InsecureSkipVerify: !requireTLS} // #nosec G402 -- opportunistic STARTTLS, verification is on when requireTLS and off only for best-effort delivery
+}
+
+// sendMessage runs the SMTP transaction: envelope, data, and a polite QUIT.
+func sendMessage(c *smtp.Client, it Item, host string) error {
 	// RFC 6531 §3.5: an internationalized message MUST NOT be sent to a mail
 	// exchanger that does not offer SMTPUTF8. net/smtp adds the keyword whenever
 	// the server advertises it, but it never checks the address, so without this
