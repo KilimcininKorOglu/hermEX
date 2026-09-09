@@ -126,30 +126,36 @@ func serializeGlobset(rs rangeSet) []byte {
 		out = pushCmd(out, stackLen, frontGC[:stackLen])
 	}
 	for _, nd := range nodes {
-		loGC := mapi.ValueToGC(nd.lo)
-		if nd.hi == nd.lo {
-			// Pushing to depth 6 makes the decoder auto-emit this singleton
-			// and auto-pop the frame, so no explicit pop is needed.
-			out = pushCmd(out, 6-stackLen, loGC[stackLen:6])
-			continue
-		}
-		hiGC := mapi.ValueToGC(nd.hi)
-		i := stackLen
-		for i < 6 && loGC[i] == hiGC[i] {
-			i++
-		}
-		if i > stackLen {
-			out = pushCmd(out, i-stackLen, loGC[stackLen:i])
-		}
-		out = rangeCmd(out, loGC[i:6], hiGC[i:6])
-		if i > stackLen {
-			out = append(out, glbPop)
-		}
+		out = appendNodeUnder(out, nd, stackLen)
 	}
 	if stackLen != 0 {
 		out = append(out, glbPop)
 	}
 	return append(out, glbEnd)
+}
+
+// appendNodeUnder emits one range under the global prefix already pushed to
+// stackLen bytes. A singleton pushes to depth 6, which makes the decoder
+// auto-emit it and auto-pop the frame, so no explicit pop is needed; a wider
+// range folds its own inner prefix before the range command.
+func appendNodeUnder(out []byte, nd rangeNode, stackLen int) []byte {
+	loGC := mapi.ValueToGC(nd.lo)
+	if nd.hi == nd.lo {
+		return pushCmd(out, 6-stackLen, loGC[stackLen:6])
+	}
+	hiGC := mapi.ValueToGC(nd.hi)
+	i := stackLen
+	for i < 6 && loGC[i] == hiGC[i] {
+		i++
+	}
+	if i > stackLen {
+		out = pushCmd(out, i-stackLen, loGC[stackLen:i])
+	}
+	out = rangeCmd(out, loGC[i:6], hiGC[i:6])
+	if i > stackLen {
+		out = append(out, glbPop)
+	}
+	return out
 }
 
 // pushCmd writes a "push N" command: the length byte (1..6) then the N common
@@ -175,105 +181,149 @@ func rangeCmd(out []byte, lo, hi []byte) []byte {
 // appended in wire order without coalescing. A truncated or malformed stream
 // stops at the current offset rather than panicking.
 func deserializeGlobset(data []byte) (rangeSet, int) {
-	var rs rangeSet
-	type frame struct {
-		n     int
-		bytes [6]byte
-	}
-	var stack []frame
-	common := func() (mapi.GlobCnt, int) {
-		var gc mapi.GlobCnt
-		t := 0
-		for _, f := range stack {
-			copy(gc[t:], f.bytes[:f.n])
-			t += f.n
+	d := globsetDecoder{data: data}
+	for d.off < len(data) {
+		cmd := data[d.off]
+		d.off++
+		if d.command(cmd) {
+			return d.rs, d.off
 		}
-		return gc, t
 	}
-	off := 0
-	for off < len(data) {
-		cmd := data[off]
-		off++
-		switch {
-		case cmd == glbEnd:
-			return rs, off
-		case cmd >= 0x01 && cmd <= 0x06:
-			n := int(cmd)
-			if off+n > len(data) {
-				return rs, off
-			}
-			_, cur := common()
-			if cur+n > 6 {
-				return rs, off
-			}
-			var f frame
-			f.n = n
-			copy(f.bytes[:], data[off:off+n])
-			off += n
-			stack = append(stack, f)
-			if cur+n == 6 {
-				gc, _ := common()
-				x := mapi.GCToValue(gc)
-				rs.appendRaw(x, x)
-				stack = stack[:len(stack)-1]
-			}
-		case cmd == glbBitmask:
-			gc, cur := common()
-			if cur != 5 || off+2 > len(data) {
-				return rs, off
-			}
-			start := data[off]
-			mask := data[off+1]
-			off += 2
-			gc[5] = start
-			low := mapi.GCToValue(gc)
-			// The base value is always present; bit i (0..7) represents
-			// low+i+1. A set bit extends the pending range; a clear bit flushes
-			// it.
-			pendActive := true
-			pendLo, pendHi := low, low
-			for i := range 8 {
-				if mask&(1<<uint(i)) == 0 {
-					if pendActive {
-						rs.appendRaw(pendLo, pendHi)
-						pendActive = false
-					}
-					continue
-				}
-				if pendActive {
-					pendHi++
-				} else {
-					v := low + uint64(i) + 1
-					pendLo, pendHi = v, v
-					pendActive = true
-				}
-			}
+	return d.rs, d.off
+}
+
+// globFrame is one pushed run of common bytes.
+type globFrame struct {
+	n     int
+	bytes [6]byte
+}
+
+// globsetDecoder holds the decode state: the cursor, the common-byte stack, and
+// the ranges read so far.
+type globsetDecoder struct {
+	data  []byte
+	off   int
+	stack []globFrame
+	rs    rangeSet
+}
+
+// common assembles the GLOBCNT prefix the stack currently holds, and its length.
+func (d *globsetDecoder) common() (mapi.GlobCnt, int) {
+	var gc mapi.GlobCnt
+	t := 0
+	for _, f := range d.stack {
+		copy(gc[t:], f.bytes[:f.n])
+		t += f.n
+	}
+	return gc, t
+}
+
+// command runs one GLOBSET command, reporting whether the stream ends here:
+// either the end command, or a truncated/malformed one, which stops at the
+// current offset rather than panicking.
+func (d *globsetDecoder) command(cmd byte) (stop bool) {
+	switch {
+	case cmd >= 0x01 && cmd <= 0x06:
+		return d.push(int(cmd))
+	case cmd == glbBitmask:
+		return d.bitmask()
+	case cmd == glbPop:
+		d.pop()
+		return false
+	case cmd == glbRange:
+		return d.readRange()
+	}
+	return true // glbEnd, and anything unrecognized
+}
+
+// push reads a run of n common bytes. At depth 6 the frame names one value, so
+// the decoder emits it and pops the frame at once.
+func (d *globsetDecoder) push(n int) (stop bool) {
+	if d.off+n > len(d.data) {
+		return true
+	}
+	_, cur := d.common()
+	if cur+n > 6 {
+		return true
+	}
+	var f globFrame
+	f.n = n
+	copy(f.bytes[:], d.data[d.off:d.off+n])
+	d.off += n
+	d.stack = append(d.stack, f)
+	if cur+n == 6 {
+		gc, _ := d.common()
+		x := mapi.GCToValue(gc)
+		d.rs.appendRaw(x, x)
+		d.pop()
+	}
+	return false
+}
+
+// pop drops the innermost common-byte frame.
+func (d *globsetDecoder) pop() {
+	if len(d.stack) > 0 {
+		d.stack = d.stack[:len(d.stack)-1]
+	}
+}
+
+// bitmask reads the decode-only bitmask command: a base low byte plus eight bits
+// of successors.
+func (d *globsetDecoder) bitmask() (stop bool) {
+	gc, cur := d.common()
+	if cur != 5 || d.off+2 > len(d.data) {
+		return true
+	}
+	gc[5] = d.data[d.off]
+	mask := d.data[d.off+1]
+	d.off += 2
+	d.rs.appendBitmask(mapi.GCToValue(gc), mask)
+	return false
+}
+
+// readRange reads a range command: the low tail then the high tail, each filling
+// the bytes the common prefix left.
+func (d *globsetDecoder) readRange() (stop bool) {
+	gc, cur := d.common()
+	if cur > 6 {
+		return true
+	}
+	cnt := 6 - cur
+	if d.off+2*cnt > len(d.data) {
+		return true
+	}
+	loGC, hiGC := gc, gc
+	copy(loGC[cur:], d.data[d.off:d.off+cnt])
+	d.off += cnt
+	copy(hiGC[cur:], d.data[d.off:d.off+cnt])
+	d.off += cnt
+	d.rs.appendRaw(mapi.GCToValue(loGC), mapi.GCToValue(hiGC))
+	return false
+}
+
+// appendBitmask appends the ranges one bitmask byte encodes. The base value is
+// always present; bit i (0..7) represents low+i+1. A set bit extends the pending
+// range; a clear bit flushes it.
+func (rs *rangeSet) appendBitmask(low uint64, mask byte) {
+	pendActive := true
+	pendLo, pendHi := low, low
+	for i := range 8 {
+		if mask&(1<<uint(i)) == 0 {
 			if pendActive {
 				rs.appendRaw(pendLo, pendHi)
+				pendActive = false
 			}
-		case cmd == glbPop:
-			if len(stack) > 0 {
-				stack = stack[:len(stack)-1]
-			}
-		case cmd == glbRange:
-			gc, cur := common()
-			if cur > 6 {
-				return rs, off
-			}
-			cnt := 6 - cur
-			if off+2*cnt > len(data) {
-				return rs, off
-			}
-			loGC := gc
-			hiGC := gc
-			copy(loGC[cur:], data[off:off+cnt])
-			off += cnt
-			copy(hiGC[cur:], data[off:off+cnt])
-			off += cnt
-			rs.appendRaw(mapi.GCToValue(loGC), mapi.GCToValue(hiGC))
-		default:
-			return rs, off
+			continue
 		}
+		if pendActive {
+			pendHi++
+			continue
+		}
+		v := low + uint64(i) + 1
+		pendLo, pendHi = v, v
+		pendActive = true
 	}
-	return rs, off
+	if pendActive {
+		rs.appendRaw(pendLo, pendHi)
+	}
 }

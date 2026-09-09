@@ -116,7 +116,7 @@ func (s *State) Serialize() ([]StreamProp, error) {
 		return nil
 	}
 
-	if s.given != nil && (s.typ == ContentsDown || s.typ == HierarchyDown || (s.typ == ContentsUp && !s.given.Empty())) {
+	if s.emitsGiven() {
 		if err := emit(metaTagIdsetGiven1, s.given); err != nil {
 			return nil, err
 		}
@@ -124,15 +124,39 @@ func (s *State) Serialize() ([]StreamProp, error) {
 	if err := emit(metaTagCnsetSeen, s.seen); err != nil {
 		return nil, err
 	}
-	if s.seenFAI != nil && (s.typ == ContentsDown || s.typ == ContentsUp) {
+	if s.emitsSeenFAI() {
 		if err := emit(metaTagCnsetSeenFAI, s.seenFAI); err != nil {
 			return nil, err
 		}
 	}
-	if s.read != nil && (s.typ == ContentsDown || (s.typ == ContentsUp && !s.read.Empty())) {
+	if s.emitsRead() {
 		if err := emit(metaTagCnsetRead, s.read); err != nil {
 			return nil, err
 		}
 	}
 	return out, nil
+}
+
+// emitsGiven reports whether the given set is emitted: a download carries its
+// full state, an upload only a non-empty set.
+func (s *State) emitsGiven() bool {
+	if s.given == nil {
+		return false
+	}
+	return s.typ == ContentsDown || s.typ == HierarchyDown || (s.typ == ContentsUp && !s.given.Empty())
+}
+
+// emitsSeenFAI reports whether the FAI seen set is emitted: only a contents sync
+// carries one, in either direction.
+func (s *State) emitsSeenFAI() bool {
+	return s.seenFAI != nil && (s.typ == ContentsDown || s.typ == ContentsUp)
+}
+
+// emitsRead reports whether the read set is emitted: a contents download carries
+// its full state, a contents upload only a non-empty set.
+func (s *State) emitsRead() bool {
+	if s.read == nil {
+		return false
+	}
+	return s.typ == ContentsDown || (s.typ == ContentsUp && !s.read.Empty())
 }

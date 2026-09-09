@@ -45,116 +45,122 @@ var errUnsupportedFXType = fmt.Errorf("ics: property type has no FastTransfer en
 func encodeProp(p StreamProp) (header, body []byte, err error) {
 	typ := p.Tag.Type()
 	propid := p.Tag.ID()
-	wireType := typ
-	if typ == mapi.PtString8 || typ == mapi.PtUnicode {
-		if propid == propIDMessageCls {
-			wireType = mapi.PtString8
-		} else {
-			wireType = mapi.PtUnicode
-		}
-	}
+	wireType := fxWireType(typ, propid)
 
 	header = binary.LittleEndian.AppendUint32(header, uint32(propid)<<16|uint32(wireType))
 	if propid >= 0x8000 {
 		if p.Name == nil {
 			return nil, nil, fmt.Errorf("ics: named property %s missing PropertyName", p.Tag)
 		}
-		header, err = appendName(header, *p.Name)
-		if err != nil {
+		if header, err = appendName(header, *p.Name); err != nil {
 			return nil, nil, err
 		}
 	}
 
-	switch wireType {
-	case mapi.PtShort:
-		v, err := asVal[int16](p.Value)
+	if write, ok := fxValueWriters[wireType]; ok {
+		return write(header, p.Value)
+	}
+	if isMultivalue(wireType) {
+		if header, err = appendMV(header, wireType, p.Value); err != nil {
+			return nil, nil, err
+		}
+		return header, nil, nil
+	}
+	return nil, nil, fmt.Errorf("%w: %s", errUnsupportedFXType, typ)
+}
+
+// fxWireType is the type a property is written as: strings go out UTF-16LE (the
+// FORCE_UNICODE convention real clients negotiate), except PR_MESSAGE_CLASS which
+// is always PT_STRING8. Every other type is written as itself.
+func fxWireType(typ mapi.PropType, propid uint16) mapi.PropType {
+	if typ != mapi.PtString8 && typ != mapi.PtUnicode {
+		return typ
+	}
+	if propid == propIDMessageCls {
+		return mapi.PtString8
+	}
+	return mapi.PtUnicode
+}
+
+// fxValueWriter appends one property value to the element header and returns it
+// with the optional tearable body (the raw bytes of a string or binary value).
+type fxValueWriter func(header []byte, v any) (hdr, body []byte, err error)
+
+// fxTyped adapts a typed writer to the untyped table entry, refusing a value that
+// is not the Go type the property type calls for.
+func fxTyped[T any](write func(header []byte, x T) ([]byte, []byte, error)) fxValueWriter {
+	return func(header []byte, v any) ([]byte, []byte, error) {
+		x, err := asVal[T](v)
 		if err != nil {
 			return nil, nil, err
 		}
-		// #nosec G115 -- the signed and unsigned views of the same 16 bits
-		header = binary.LittleEndian.AppendUint16(header, uint16(v))
-	case mapi.PtLong, mapi.PtError:
-		header, err = appendU32Val(header, p.Value, typ)
-		if err != nil {
-			return nil, nil, err
-		}
-	case mapi.PtFloat:
-		v, err := asVal[float32](p.Value)
-		if err != nil {
-			return nil, nil, err
-		}
-		header = binary.LittleEndian.AppendUint32(header, math.Float32bits(v))
-	case mapi.PtDouble, mapi.PtAppTime:
-		v, err := asVal[float64](p.Value)
-		if err != nil {
-			return nil, nil, err
-		}
-		header = binary.LittleEndian.AppendUint64(header, math.Float64bits(v))
-	case mapi.PtBoolean:
-		v, err := asVal[bool](p.Value)
-		if err != nil {
-			return nil, nil, err
-		}
+		return write(header, x)
+	}
+}
+
+// fxValueWriters is the fixed-type vocabulary the FastTransfer encoder writes. A
+// type absent from it is either a multivalue or unsupported on this wire.
+var fxValueWriters = map[mapi.PropType]fxValueWriter{
+	mapi.PtShort: fxTyped(func(h []byte, x int16) ([]byte, []byte, error) {
+		return binary.LittleEndian.AppendUint16(h, uint16(x)), nil, nil // #nosec G115 -- the signed and unsigned views of the same 16 bits
+	}),
+	mapi.PtLong: func(h []byte, v any) ([]byte, []byte, error) {
+		h, err := appendU32Val(h, v, mapi.PtLong)
+		return h, nil, err
+	},
+	mapi.PtError: func(h []byte, v any) ([]byte, []byte, error) {
+		h, err := appendU32Val(h, v, mapi.PtError)
+		return h, nil, err
+	},
+	mapi.PtFloat: fxTyped(func(h []byte, x float32) ([]byte, []byte, error) {
+		return binary.LittleEndian.AppendUint32(h, math.Float32bits(x)), nil, nil
+	}),
+	mapi.PtDouble:  fxDouble,
+	mapi.PtAppTime: fxDouble,
+	mapi.PtBoolean: fxTyped(func(h []byte, x bool) ([]byte, []byte, error) {
 		var b uint16
-		if v {
+		if x {
 			b = 1
 		}
-		header = binary.LittleEndian.AppendUint16(header, b) // PT_BOOLEAN is 2 bytes on the FX wire
-	case mapi.PtCurrency, mapi.PtI8:
-		v, err := asVal[int64](p.Value)
-		if err != nil {
-			return nil, nil, err
-		}
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		header = binary.LittleEndian.AppendUint64(header, uint64(v))
-	case mapi.PtSysTime:
-		v, err := asVal[uint64](p.Value)
-		if err != nil {
-			return nil, nil, err
-		}
-		header = binary.LittleEndian.AppendUint64(header, v)
-	case mapi.PtCLSID:
-		v, err := asVal[mapi.GUID](p.Value)
-		if err != nil {
-			return nil, nil, err
-		}
-		f := v.Flat()
-		header = append(header, f[:]...)
-	case mapi.PtUnicode:
-		s, err := asVal[string](p.Value)
-		if err != nil {
-			return nil, nil, err
-		}
-		body = encodeUTF16(s)
-		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
-		header = binary.LittleEndian.AppendUint32(header, uint32(len(body)))
-	case mapi.PtString8:
-		s, err := asVal[string](p.Value)
-		if err != nil {
-			return nil, nil, err
-		}
-		body = append([]byte(s), 0) // code-page bytes + NUL; length includes the NUL
-		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
-		header = binary.LittleEndian.AppendUint32(header, uint32(len(body)))
-	case mapi.PtBinary, mapi.PtObject:
-		b, err := asVal[[]byte](p.Value)
-		if err != nil {
-			return nil, nil, err
-		}
-		body = b
-		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
-		header = binary.LittleEndian.AppendUint32(header, uint32(len(b)))
-	default:
-		if isMultivalue(wireType) {
-			header, err = appendMV(header, wireType, p.Value)
-			if err != nil {
-				return nil, nil, err
-			}
-			return header, nil, nil
-		}
-		return nil, nil, fmt.Errorf("%w: %s", errUnsupportedFXType, typ)
-	}
-	return header, body, nil
+		return binary.LittleEndian.AppendUint16(h, b), nil, nil // PT_BOOLEAN is 2 bytes on the FX wire
+	}),
+	mapi.PtCurrency: fxInt64,
+	mapi.PtI8:       fxInt64,
+	mapi.PtSysTime: fxTyped(func(h []byte, x uint64) ([]byte, []byte, error) {
+		return binary.LittleEndian.AppendUint64(h, x), nil, nil
+	}),
+	mapi.PtCLSID: fxTyped(func(h []byte, x mapi.GUID) ([]byte, []byte, error) {
+		f := x.Flat()
+		return append(h, f[:]...), nil, nil
+	}),
+	mapi.PtUnicode: fxTyped(func(h []byte, s string) ([]byte, []byte, error) {
+		return appendTearable(h, encodeUTF16(s))
+	}),
+	mapi.PtString8: fxTyped(func(h []byte, s string) ([]byte, []byte, error) {
+		return appendTearable(h, append([]byte(s), 0)) // code-page bytes + NUL; length includes the NUL
+	}),
+	mapi.PtBinary: fxBinary,
+	mapi.PtObject: fxBinary,
+}
+
+// fxDouble, fxInt64 and fxBinary back the types that share one encoding.
+var (
+	fxDouble = fxTyped(func(h []byte, x float64) ([]byte, []byte, error) {
+		return binary.LittleEndian.AppendUint64(h, math.Float64bits(x)), nil, nil
+	})
+	fxInt64 = fxTyped(func(h []byte, x int64) ([]byte, []byte, error) {
+		return binary.LittleEndian.AppendUint64(h, uint64(x)), nil, nil // #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	})
+	fxBinary = fxTyped(func(h []byte, b []byte) ([]byte, []byte, error) {
+		return appendTearable(h, b)
+	})
+)
+
+// appendTearable writes a tearable value: its length in the header, the bytes as
+// the body a chunk boundary may fall inside.
+func appendTearable(header, body []byte) ([]byte, []byte, error) {
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
+	return binary.LittleEndian.AppendUint32(header, uint32(len(body))), body, nil
 }
 
 // decodeElement reads one element from the front of b. complete is false (and
@@ -211,70 +217,98 @@ func decodeElement(b []byte) (it Item, consumed int, complete bool, err error) {
 // decodeValue reads a single value body of the given type. ok is false on a
 // short read (incomplete), err is set only for a type with no stream form.
 func decodeValue(b []byte, typ mapi.PropType) (val any, consumed int, ok bool, err error) {
-	r := reader{b: b}
-	switch typ {
-	case mapi.PtShort:
-		v, ok := r.u16()
-		// #nosec G115 -- the signed and unsigned views of the same 16 bits
-		return int16(v), r.pos, ok, nil
-	case mapi.PtLong:
-		v, ok := r.u32()
-		// #nosec G115 -- the signed and unsigned views of the same 32 bits
-		return int32(v), r.pos, ok, nil
-	case mapi.PtError:
-		v, ok := r.u32()
-		return v, r.pos, ok, nil
-	case mapi.PtFloat:
-		v, ok := r.u32()
-		return math.Float32frombits(v), r.pos, ok, nil
-	case mapi.PtDouble, mapi.PtAppTime:
-		v, ok := r.u64()
-		return math.Float64frombits(v), r.pos, ok, nil
-	case mapi.PtBoolean:
-		v, ok := r.u16()
-		return v != 0, r.pos, ok, nil
-	case mapi.PtCurrency, mapi.PtI8:
-		v, ok := r.u64()
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		return int64(v), r.pos, ok, nil
-	case mapi.PtSysTime:
-		v, ok := r.u64()
-		return v, r.pos, ok, nil
-	case mapi.PtCLSID:
-		raw, ok := r.bytes(16)
-		if !ok {
-			return nil, 0, false, nil
-		}
-		var f mapi.FlatUID
-		copy(f[:], raw)
-		return f.GUID(), r.pos, true, nil
-	case mapi.PtUnicode:
-		raw, ok := r.lenPrefixed()
-		if !ok {
-			return nil, 0, false, nil
-		}
-		return decodeUTF16(raw), r.pos, true, nil
-	case mapi.PtString8:
-		raw, ok := r.lenPrefixed()
-		if !ok {
-			return nil, 0, false, nil
-		}
-		return string(trimNUL(raw)), r.pos, true, nil
-	case mapi.PtBinary, mapi.PtObject:
-		raw, ok := r.lenPrefixed()
-		if !ok {
-			return nil, 0, false, nil
-		}
-		out := make([]byte, len(raw)) // always non-nil, even for a zero-length value
-		copy(out, raw)
-		return out, r.pos, true, nil
-	default:
+	read, known := fxValueReaders[typ]
+	if !known {
 		if isMultivalue(typ) {
 			return decodeMV(b, typ)
 		}
 		return nil, 0, false, fmt.Errorf("%w: %s", errUnsupportedFXType, typ)
 	}
+	r := reader{b: b}
+	val, ok = read(&r)
+	if !ok {
+		return nil, 0, false, nil
+	}
+	return val, r.pos, true, nil
 }
+
+// fxValueReader reads one fixed-type value body off the cursor. ok is false on a
+// short read, which the caller answers by buffering more bytes and retrying.
+type fxValueReader func(r *reader) (any, bool)
+
+// fxValueReaders is the fixed-type vocabulary the FastTransfer decoder reads. A
+// type absent from it is either a multivalue or unsupported on this wire.
+var fxValueReaders = map[mapi.PropType]fxValueReader{
+	mapi.PtShort: func(r *reader) (any, bool) {
+		v, ok := r.u16()
+		return int16(v), ok // #nosec G115 -- the signed and unsigned views of the same 16 bits
+	},
+	mapi.PtLong: func(r *reader) (any, bool) {
+		v, ok := r.u32()
+		return int32(v), ok // #nosec G115 -- the signed and unsigned views of the same 32 bits
+	},
+	mapi.PtError: func(r *reader) (any, bool) { return r.u32() },
+	mapi.PtFloat: func(r *reader) (any, bool) {
+		v, ok := r.u32()
+		return math.Float32frombits(v), ok
+	},
+	mapi.PtDouble:  fxReadDouble,
+	mapi.PtAppTime: fxReadDouble,
+	mapi.PtBoolean: func(r *reader) (any, bool) {
+		v, ok := r.u16()
+		return v != 0, ok
+	},
+	mapi.PtCurrency: fxReadInt64,
+	mapi.PtI8:       fxReadInt64,
+	mapi.PtSysTime:  func(r *reader) (any, bool) { return r.u64() },
+	mapi.PtCLSID: func(r *reader) (any, bool) {
+		raw, ok := r.bytes(16)
+		if !ok {
+			return nil, false
+		}
+		var f mapi.FlatUID
+		copy(f[:], raw)
+		return f.GUID(), true
+	},
+	mapi.PtUnicode: func(r *reader) (any, bool) {
+		raw, ok := r.lenPrefixed()
+		if !ok {
+			return nil, false
+		}
+		return decodeUTF16(raw), true
+	},
+	mapi.PtString8: func(r *reader) (any, bool) {
+		raw, ok := r.lenPrefixed()
+		if !ok {
+			return nil, false
+		}
+		return string(trimNUL(raw)), true
+	},
+	mapi.PtBinary: fxReadBinary,
+	mapi.PtObject: fxReadBinary,
+}
+
+// fxReadDouble, fxReadInt64 and fxReadBinary back the types that share one
+// encoding.
+var (
+	fxReadDouble fxValueReader = func(r *reader) (any, bool) {
+		v, ok := r.u64()
+		return math.Float64frombits(v), ok
+	}
+	fxReadInt64 fxValueReader = func(r *reader) (any, bool) {
+		v, ok := r.u64()
+		return int64(v), ok // #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	}
+	fxReadBinary fxValueReader = func(r *reader) (any, bool) {
+		raw, ok := r.lenPrefixed()
+		if !ok {
+			return nil, false
+		}
+		out := make([]byte, len(raw)) // always non-nil, even for a zero-length value
+		copy(out, raw)
+		return out, true
+	}
+)
 
 // reader is a cursor over a byte slice; each read reports ok=false (without
 // advancing) when fewer bytes remain than requested.
