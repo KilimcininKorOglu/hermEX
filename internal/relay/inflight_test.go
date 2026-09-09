@@ -18,9 +18,7 @@ func TestSettleFailureDoesNotRedeliver(t *testing.T) {
 	sp := openSpool(t)
 	t0 := time.Unix(3_000_000, 0)
 	raw := []byte("From: alice@local\r\nSubject: out\r\n\r\nhi bob\r\n")
-	if err := sp.Enqueue("alice@local", []string{"bob@remote"}, raw, t0); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, sp.Enqueue("alice@local", []string{"bob@remote"}, raw, t0), "enqueue")
 
 	w := &Worker{
 		Spool:    sp,
@@ -32,39 +30,33 @@ func TestSettleFailureDoesNotRedeliver(t *testing.T) {
 	// First pass: deliver, then simulate the settle never landing by marking the
 	// row delivered and leaving it in place, which is exactly the state a failed
 	// Sent leaves behind.
-	items, err := sp.Claim(t0, 10)
-	if err != nil || len(items) != 1 {
-		t.Fatalf("claim: %v (%d items)", err, len(items))
-	}
-	it := items[0]
-	if err := sp.MarkStarted(it.RecipientID, t0); err != nil {
-		t.Fatal(err)
-	}
-	if err := w.deliver(it); err != nil {
-		t.Fatalf("deliver: %v", err)
-	}
-	if err := sp.MarkDelivered(it.RecipientID); err != nil {
-		t.Fatal(err)
-	}
-	if got := len(sink.recorded()); got != 1 {
-		t.Fatalf("sink recorded %d messages after the first delivery, want 1", got)
-	}
+	it := claimOne(t, sp, t0)
+	mustNoErr(t, sp.MarkStarted(it.RecipientID, t0), "mark started")
+	mustNoErr(t, w.deliver(it), "deliver")
+	mustNoErr(t, sp.MarkDelivered(it.RecipientID), "mark delivered")
+	wantEq(t, len(sink.recorded()), 1, "messages the sink recorded after the first delivery")
 
 	// Second pass, the one that used to duplicate the message.
-	if _, err := w.ProcessDue(context.Background(), t0.Add(time.Minute)); err != nil {
-		t.Fatalf("second pass: %v", err)
-	}
-	if got := len(sink.recorded()); got != 1 {
-		t.Errorf("the recipient received the message %d times; a settle failure must not redeliver", got)
-	}
+	_, err := w.ProcessDue(context.Background(), t0.Add(time.Minute))
+	mustNoErr(t, err, "second pass")
+	wantEq(t, len(sink.recorded()), 1, "messages the recipient received (a settle failure must not redeliver)")
+
 	// The bookkeeping is finished on that pass, so the queue is empty.
 	queued, err := sp.List()
-	if err != nil {
-		t.Fatal(err)
+	mustNoErr(t, err, "list the queue")
+	wantEq(t, len(queued), 0, "recipients left after the settle was retried")
+}
+
+// claimOne claims the single recipient a test seeded, stopping the test when the
+// spool offers anything else.
+func claimOne(t *testing.T, sp *Spool, now time.Time) Item {
+	t.Helper()
+	items, err := sp.Claim(now, 10)
+	mustNoErr(t, err, "claim")
+	if len(items) != 1 {
+		t.Fatalf("claimed %d items, want 1", len(items))
 	}
-	if len(queued) != 0 {
-		t.Errorf("spool still holds %d recipient(s) after the settle was retried", len(queued))
-	}
+	return items[0]
 }
 
 // TestInterruptedDeliveryGoesBackToTheSender covers the other half: an attempt
@@ -75,18 +67,11 @@ func TestInterruptedDeliveryGoesBackToTheSender(t *testing.T) {
 	sink, addr := startSink(t)
 	sp := openSpool(t)
 	t0 := time.Unix(3_000_000, 0)
-	if err := sp.Enqueue("alice@local", []string{"bob@remote"},
-		[]byte("From: alice@local\r\nSubject: out\r\n\r\nhi bob\r\n"), t0); err != nil {
-		t.Fatal(err)
-	}
-	items, err := sp.Claim(t0, 10)
-	if err != nil || len(items) != 1 {
-		t.Fatalf("claim: %v (%d items)", err, len(items))
-	}
+	mustNoErr(t, sp.Enqueue("alice@local", []string{"bob@remote"},
+		[]byte("From: alice@local\r\nSubject: out\r\n\r\nhi bob\r\n"), t0), "enqueue")
+	it := claimOne(t, sp, t0)
 	// A process that died between the stamp and the settle leaves exactly this.
-	if err := sp.MarkStarted(items[0].RecipientID, t0); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, sp.MarkStarted(it.RecipientID, t0), "mark started")
 
 	var told []string
 	w := &Worker{
@@ -99,22 +84,17 @@ func TestInterruptedDeliveryGoesBackToTheSender(t *testing.T) {
 			return nil
 		},
 	}
-	if _, err := w.ProcessDue(context.Background(), t0.Add(time.Minute)); err != nil {
-		t.Fatalf("process: %v", err)
+	_, err := w.ProcessDue(context.Background(), t0.Add(time.Minute))
+	mustNoErr(t, err, "process")
+	wantEq(t, len(sink.recorded()), 0, "messages at the sink (an interrupted delivery must not be sent again)")
+	if len(told) != 1 {
+		t.Fatalf("the sender was told %d times, want once: %v", len(told), told)
 	}
-	if got := len(sink.recorded()); got != 0 {
-		t.Errorf("an interrupted delivery was sent again (%d message(s) at the sink)", got)
-	}
-	if len(told) != 1 || told[0] != "bob@remote" {
-		t.Errorf("the sender was not told about the interrupted delivery: %v", told)
-	}
+	wantEq(t, told[0], "bob@remote", "the recipient the sender was told about")
+
 	queued, err := sp.List()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(queued) != 0 {
-		t.Errorf("the interrupted recipient is still queued (%d)", len(queued))
-	}
+	mustNoErr(t, err, "list the queue")
+	wantEq(t, len(queued), 0, "recipients left queued after the sender was told")
 }
 
 // TestFailedDeliveryClearsTheStamp keeps ordinary retries ordinary: a delivery
@@ -165,17 +145,10 @@ func TestFailedDeliveryClearsTheStamp(t *testing.T) {
 func TestInterruptedBounceStuckClearsStampAndBacksOff(t *testing.T) {
 	sp := openSpool(t)
 	t0 := time.Unix(3_000_000, 0)
-	if err := sp.Enqueue("alice@local", []string{"bob@remote"},
-		[]byte("From: alice@local\r\nSubject: out\r\n\r\nhi bob\r\n"), t0); err != nil {
-		t.Fatal(err)
-	}
-	items, err := sp.Claim(t0, 10)
-	if err != nil || len(items) != 1 {
-		t.Fatalf("claim: %v (%d items)", err, len(items))
-	}
-	if err := sp.MarkStarted(items[0].RecipientID, t0); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, sp.Enqueue("alice@local", []string{"bob@remote"},
+		[]byte("From: alice@local\r\nSubject: out\r\n\r\nhi bob\r\n"), t0), "enqueue")
+	it := claimOne(t, sp, t0)
+	mustNoErr(t, sp.MarkStarted(it.RecipientID, t0), "mark started")
 
 	var gaveUp int
 	w := &Worker{
@@ -186,29 +159,19 @@ func TestInterruptedBounceStuckClearsStampAndBacksOff(t *testing.T) {
 		OnGiveUp: func(Item, error) error { gaveUp++; return errors.New("bounce undeliverable") },
 	}
 
-	if _, err := w.ProcessDue(context.Background(), t0.Add(time.Minute)); err != nil {
-		t.Fatalf("first pass: %v", err)
-	}
-	if gaveUp != 1 {
-		t.Fatalf("first pass gave up %d times, want 1", gaveUp)
-	}
+	_, err := w.ProcessDue(context.Background(), t0.Add(time.Minute))
+	mustNoErr(t, err, "first pass")
+	wantEq(t, gaveUp, 1, "give-ups after the first pass")
 
 	// Second pass well before the 6h backoff expires: the row must be untouched.
-	if _, err := w.ProcessDue(context.Background(), t0.Add(2*time.Minute)); err != nil {
-		t.Fatalf("second pass: %v", err)
-	}
-	if gaveUp != 1 {
-		t.Errorf("the stuck bounce was reprocessed before its backoff (%d give-ups); the stamp was not cleared", gaveUp)
-	}
+	_, err = w.ProcessDue(context.Background(), t0.Add(2*time.Minute))
+	mustNoErr(t, err, "second pass")
+	wantEq(t, gaveUp, 1, "give-ups after the second pass (the stamp must have been cleared)")
 
 	queued, err := sp.List()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, err, "list the queue")
 	if len(queued) != 1 {
 		t.Fatalf("spool holds %d recipient(s), want the deferred bounce", len(queued))
 	}
-	if queued[0].Interrupted {
-		t.Error("the stuck bounce is still marked interrupted; the in-flight stamp was not cleared")
-	}
+	wantFalse(t, queued[0].Interrupted, "the stuck bounce is still marked interrupted")
 }

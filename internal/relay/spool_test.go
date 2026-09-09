@@ -26,48 +26,42 @@ func TestSpoolBaselineAdoption(t *testing.T) {
 
 	// Create the spool the pre-migration way: raw tables, no version stamp.
 	raw, err := sql.Open("sqlite", dsn(path))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, err, "open the raw database")
 	for _, stmt := range []string{
 		`CREATE TABLE messages (id INTEGER PRIMARY KEY, envelope_from TEXT NOT NULL, body BLOB NOT NULL, enqueued_at INTEGER NOT NULL)`,
 		`CREATE TABLE recipients (id INTEGER PRIMARY KEY, message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE, recipient TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_attempt INTEGER NOT NULL, last_error TEXT NOT NULL DEFAULT '')`,
 		`CREATE INDEX recipients_due ON recipients(next_attempt)`,
 		`INSERT INTO messages (envelope_from, body, enqueued_at) VALUES ('a@x.test', 'hi', 1)`,
 	} {
-		if _, err := raw.Exec(stmt); err != nil {
-			t.Fatalf("seed pre-migration spool: %v", err)
-		}
+		_, err := raw.Exec(stmt)
+		mustNoErr(t, err, "seed the pre-migration spool")
 	}
 	var v int
-	if err := raw.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 0 {
-		t.Fatalf("seeded user_version = %d (err %v), want 0", v, err)
-	}
+	mustNoErr(t, raw.QueryRow("PRAGMA user_version").Scan(&v), "read the seeded user_version")
+	wantEq(t, v, 0, "the seeded user_version")
 	raw.Close()
 
 	// Opening through the spool adopts the baseline and records the version.
 	s, err := Open(path)
-	if err != nil {
-		t.Fatalf("open existing spool: %v", err)
-	}
+	mustNoErr(t, err, "open the existing spool")
 	defer s.Close()
-	// Adoption records the baseline, then every pending migration applies in turn,
-	// so the spool ends at the newest version the binary carries. Computed from the
-	// migration set rather than hardcoded: a new migration must not require editing
-	// this assertion to keep passing.
-	want := 0
+	wantEq(t, mustCount(t, s, "PRAGMA user_version"), newestSpoolVersion(), "user_version after adoption")
+	wantEq(t, mustCount(t, s, "SELECT COUNT(*) FROM messages"), 1,
+		"messages after adoption (adoption must not disturb data)")
+}
+
+// newestSpoolVersion is the version a freshly migrated spool ends at: adoption
+// records the baseline, then every pending migration applies in turn. It is
+// computed from the migration set rather than hardcoded, so a new migration does
+// not require editing an assertion to keep it passing.
+func newestSpoolVersion() int {
+	newest := 0
 	for _, m := range spoolMigrations {
-		if m.Version > want {
-			want = m.Version
+		if m.Version > newest {
+			newest = m.Version
 		}
 	}
-	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != want {
-		t.Fatalf("user_version after adoption = %d (err %v), want %d", v, err, want)
-	}
-	var n int
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM messages").Scan(&n); err != nil || n != 1 {
-		t.Fatalf("messages after adoption = %d (err %v), want 1, adoption must not disturb data", n, err)
-	}
+	return newest
 }
 
 // TestSpoolListRetryDelete proves the administrative mail-queue projection and
@@ -78,28 +72,36 @@ func TestSpoolListRetryDelete(t *testing.T) {
 	s := openSpool(t)
 	t0 := time.Unix(2_000_000, 0)
 	body := []byte("From: a@local\r\nSubject: hi\r\n\r\nbody\r\n")
-	if err := s.Enqueue("a@local", []string{"x@remote", "y@remote"}, body, t0); err != nil {
-		t.Fatalf("enqueue: %v", err)
-	}
+	mustNoErr(t, s.Enqueue("a@local", []string{"x@remote", "y@remote"}, body, t0), "enqueue")
+
 	// Defer x far into the future with a recorded error (a transient failure).
 	due, _ := s.Claim(t0, 10)
-	var xID, yID int64
-	for _, it := range due {
+	xID, yID := recipientIDs(due)
+	future := t0.Add(time.Hour)
+	mustNoErr(t, s.Retry(xID, future, "451 greylisted"), "defer x")
+
+	checkQueueEntry(t, s, xID, body, future)
+	checkRetryNow(t, s, xID, yID, t0)
+	checkQueueDelete(t, s, xID, yID)
+}
+
+// recipientIDs maps the two seeded recipients to their spool ids.
+func recipientIDs(items []Item) (xID, yID int64) {
+	for _, it := range items {
 		if it.Recipient == "x@remote" {
 			xID = it.RecipientID
-		} else {
-			yID = it.RecipientID
+			continue
 		}
+		yID = it.RecipientID
 	}
-	future := t0.Add(time.Hour)
-	if err := s.Retry(xID, future, "451 greylisted"); err != nil {
-		t.Fatalf("retry: %v", err)
-	}
+	return xID, yID
+}
 
+// checkQueueEntry asserts the administrative projection of a deferred recipient.
+func checkQueueEntry(t *testing.T, s *Spool, xID int64, body []byte, future time.Time) {
+	t.Helper()
 	list, err := s.List()
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
+	mustNoErr(t, err, "list the queue")
 	if len(list) != 2 {
 		t.Fatalf("List returned %d entries, want 2", len(list))
 	}
@@ -109,53 +111,53 @@ func TestSpoolListRetryDelete(t *testing.T) {
 			x = e
 		}
 	}
-	if x.From != "a@local" || x.Recipient != "x@remote" {
-		t.Errorf("entry envelope wrong: from=%q rcpt=%q", x.From, x.Recipient)
-	}
-	if x.Attempts != 1 || x.LastError != "451 greylisted" {
-		t.Errorf("entry history wrong: attempts=%d err=%q", x.Attempts, x.LastError)
-	}
-	if x.Size != len(body) {
-		t.Errorf("entry size = %d, want %d", x.Size, len(body))
-	}
-	if !x.NextAttempt.Equal(future.UTC()) {
-		t.Errorf("entry next-attempt = %v, want %v", x.NextAttempt, future.UTC())
-	}
+	wantEq(t, x.From, "a@local", "entry envelope from")
+	wantEq(t, x.Recipient, "x@remote", "entry recipient")
+	wantEq(t, x.Attempts, 1, "entry attempt count")
+	wantEq(t, x.LastError, "451 greylisted", "entry last error")
+	wantEq(t, x.Size, len(body), "entry size")
+	wantTrue(t, x.NextAttempt.Equal(future.UTC()), "entry next-attempt is the deferred time")
+}
 
-	// x is not yet due; RetryNow makes it claimable immediately, keeping its history.
-	if got, _ := s.Claim(t0, 10); len(got) != 1 || got[0].RecipientID != yID {
-		t.Fatalf("before flush only y is due, got %d items", len(got))
+// checkRetryNow asserts that a not-yet-due recipient becomes claimable at once,
+// keeping its history.
+func checkRetryNow(t *testing.T, s *Spool, xID, yID int64, t0 time.Time) {
+	t.Helper()
+	before, _ := s.Claim(t0, 10)
+	if len(before) != 1 {
+		t.Fatalf("before flush %d items are due, want only y", len(before))
 	}
-	if err := s.RetryNow(xID, t0); err != nil {
-		t.Fatalf("retry-now: %v", err)
+	wantEq(t, before[0].RecipientID, yID, "the only due recipient before the flush")
+
+	mustNoErr(t, s.RetryNow(xID, t0), "retry-now")
+	after, _ := s.Claim(t0, 10)
+	if len(after) != 2 {
+		t.Fatalf("after flush %d items are due, want both", len(after))
 	}
-	got, _ := s.Claim(t0, 10)
-	if len(got) != 2 {
-		t.Fatalf("after flush both are due, got %d", len(got))
-	}
-	for _, it := range got {
-		if it.RecipientID == xID && it.Attempts != 1 {
-			t.Errorf("flush reset the attempt count to %d, want 1 (history kept)", it.Attempts)
+	for _, it := range after {
+		if it.RecipientID == xID {
+			wantEq(t, it.Attempts, 1, "the attempt count the flush kept")
 		}
 	}
+}
 
-	// Delete x: it vanishes, the body survives for y, then deleting y drops the body.
-	if err := s.Delete(xID); err != nil {
-		t.Fatalf("delete x: %v", err)
+// checkQueueDelete asserts a recipient can be dropped without a bounce, that the
+// shared body survives until the last one is gone, and that a repeat delete is a
+// no-op.
+func checkQueueDelete(t *testing.T, s *Spool, xID, yID int64) {
+	t.Helper()
+	mustNoErr(t, s.Delete(xID), "delete x")
+	list, _ := s.List()
+	if len(list) != 1 {
+		t.Fatalf("after deleting x the queue holds %d entries, want only y", len(list))
 	}
-	if list, _ := s.List(); len(list) != 1 || list[0].RecipientID != yID {
-		t.Fatalf("after deleting x, List should hold only y")
-	}
-	if err := s.Delete(yID); err != nil {
-		t.Fatalf("delete y: %v", err)
-	}
-	if list, _ := s.List(); len(list) != 0 {
-		t.Fatalf("after deleting all recipients the queue should be empty, got %d", len(list))
-	}
-	// A second delete of a gone recipient is a no-op, not an error.
-	if err := s.Delete(xID); err != nil {
-		t.Errorf("deleting an already-gone recipient should be a no-op, got %v", err)
-	}
+	wantEq(t, list[0].RecipientID, yID, "the remaining recipient")
+
+	mustNoErr(t, s.Delete(yID), "delete y")
+	list, _ = s.List()
+	wantEq(t, len(list), 0, "queue entries after deleting every recipient")
+
+	mustNoErr(t, s.Delete(xID), "delete an already-gone recipient")
 }
 
 // TestSpoolPerRecipientLifecycle proves the core durability contract: a
@@ -167,70 +169,49 @@ func TestSpoolPerRecipientLifecycle(t *testing.T) {
 	t0 := time.Unix(1_000_000, 0)
 	body := []byte("From: a@local\r\nSubject: hi\r\n\r\nbody\r\n")
 
-	if err := s.Enqueue("a@local", []string{"x@remote", "y@remote"}, body, t0); err != nil {
-		t.Fatalf("enqueue: %v", err)
-	}
+	mustNoErr(t, s.Enqueue("a@local", []string{"x@remote", "y@remote"}, body, t0), "enqueue")
 
 	due, err := s.Claim(t0, 10)
-	if err != nil {
-		t.Fatalf("claim: %v", err)
-	}
+	mustNoErr(t, err, "claim")
 	if len(due) != 2 {
 		t.Fatalf("claimed %d items, want 2 (one per recipient)", len(due))
 	}
 	byRcpt := map[string]Item{}
 	for _, it := range due {
-		if it.From != "a@local" {
-			t.Errorf("item From = %q, want a@local", it.From)
-		}
-		if !bytes.Equal(it.Body, body) {
-			t.Errorf("item Body not preserved for %s", it.Recipient)
-		}
-		if it.Attempts != 0 {
-			t.Errorf("fresh item Attempts = %d, want 0", it.Attempts)
-		}
+		wantEq(t, it.From, "a@local", "item envelope from")
+		wantTrue(t, bytes.Equal(it.Body, body), "the body of the item for "+it.Recipient)
+		wantEq(t, it.Attempts, 0, "a fresh item's attempt count")
 		byRcpt[it.Recipient] = it
 	}
 
 	// Settle x as sent. y must remain claimable with the body intact, the shared
 	// message row may not be dropped while a recipient still references it.
-	if err := s.Sent(byRcpt["x@remote"].RecipientID); err != nil {
-		t.Fatalf("sent x: %v", err)
-	}
+	mustNoErr(t, s.Sent(byRcpt["x@remote"].RecipientID), "settle x as sent")
 	after, err := s.Claim(t0, 10)
-	if err != nil {
-		t.Fatalf("claim after sent: %v", err)
+	mustNoErr(t, err, "claim after settling x")
+	if len(after) != 1 {
+		t.Fatalf("after settling x, %d items are claimable, want only y@remote", len(after))
 	}
-	if len(after) != 1 || after[0].Recipient != "y@remote" {
-		t.Fatalf("after settling x, claim = %v, want only y@remote", after)
-	}
-	if !bytes.Equal(after[0].Body, body) {
-		t.Error("body lost after a sibling recipient was settled")
-	}
+	wantEq(t, after[0].Recipient, "y@remote", "the remaining claimable recipient")
+	wantTrue(t, bytes.Equal(after[0].Body, body), "the body after a sibling recipient was settled")
 
 	// Defer y by an hour: it must drop out of the now-claim and reappear later
 	// with an incremented attempt count.
-	if err := s.Retry(after[0].RecipientID, t0.Add(time.Hour), "452 try later"); err != nil {
-		t.Fatalf("retry y: %v", err)
-	}
-	if now, _ := s.Claim(t0, 10); len(now) != 0 {
-		t.Errorf("a deferred recipient is still claimable now: %v", now)
-	}
+	mustNoErr(t, s.Retry(after[0].RecipientID, t0.Add(time.Hour), "452 try later"), "defer y")
+	now, _ := s.Claim(t0, 10)
+	wantEq(t, len(now), 0, "items claimable now after y was deferred")
+
 	later, err := s.Claim(t0.Add(time.Hour), 10)
-	if err != nil {
-		t.Fatalf("claim later: %v", err)
+	mustNoErr(t, err, "claim an hour later")
+	if len(later) != 1 {
+		t.Fatalf("an hour later %d items are claimable, want one", len(later))
 	}
-	if len(later) != 1 || later[0].Attempts != 1 {
-		t.Fatalf("after retry, later claim = %v, want one item with Attempts=1", later)
-	}
+	wantEq(t, later[0].Attempts, 1, "the deferred item's attempt count")
 
 	// Settling the last recipient drops the message body too.
-	if err := s.Sent(later[0].RecipientID); err != nil {
-		t.Fatalf("sent y: %v", err)
-	}
-	if final, _ := s.Claim(t0.Add(2*time.Hour), 10); len(final) != 0 {
-		t.Errorf("spool not empty after all recipients settled: %v", final)
-	}
+	mustNoErr(t, s.Sent(later[0].RecipientID), "settle y as sent")
+	final, _ := s.Claim(t0.Add(2*time.Hour), 10)
+	wantEq(t, len(final), 0, "items left after every recipient settled")
 }
 
 // TestSpoolDurableAcrossReopen proves the spool survives a process restart: a

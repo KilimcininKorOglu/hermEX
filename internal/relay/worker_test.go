@@ -300,9 +300,7 @@ func TestWorkerRetriesTransientFailure(t *testing.T) {
 	sink, addr := startSink(t)
 	sp := openSpool(t)
 	t0 := time.Unix(4_000_000, 0)
-	if err := sp.Enqueue("alice@local", []string{"bob@remote"}, []byte("raw body\r\n"), t0); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, sp.Enqueue("alice@local", []string{"bob@remote"}, []byte("raw body\r\n"), t0), "enqueue")
 
 	var calls int
 	w := &Worker{
@@ -319,27 +317,24 @@ func TestWorkerRetriesTransientFailure(t *testing.T) {
 	}
 
 	// First pass: the dial fails, so the recipient is deferred, not delivered.
-	if sent, err := w.ProcessDue(context.Background(), t0); err != nil || sent != 0 {
-		t.Fatalf("first pass: sent=%d err=%v, want 0, nil", sent, err)
-	}
-	if len(sink.recorded()) != 0 {
-		t.Fatal("nothing should reach the sink on a failed dial")
-	}
+	sent, err := w.ProcessDue(context.Background(), t0)
+	mustNoErr(t, err, "first pass")
+	wantEq(t, sent, 0, "deliveries on the failed-dial pass")
+	wantEq(t, len(sink.recorded()), 0, "messages at the sink after a failed dial")
+
 	// It is not due again until the backoff elapses.
-	if sent, _ := w.ProcessDue(context.Background(), t0.Add(time.Minute)); sent != 0 {
-		t.Errorf("a deferred recipient was delivered before its backoff elapsed")
-	}
+	early, _ := w.ProcessDue(context.Background(), t0.Add(time.Minute))
+	wantEq(t, early, 0, "deliveries before the backoff elapsed")
+
 	// After the backoff, the retry succeeds.
-	sent, err := w.ProcessDue(context.Background(), t0.Add(time.Hour))
-	if err != nil {
-		t.Fatalf("retry pass: %v", err)
+	sent, err = w.ProcessDue(context.Background(), t0.Add(time.Hour))
+	mustNoErr(t, err, "retry pass")
+	wantEq(t, sent, 1, "deliveries on the retry pass")
+	got := sink.recorded()
+	if len(got) != 1 {
+		t.Fatalf("sink holds %d messages after the retry, want one", len(got))
 	}
-	if sent != 1 {
-		t.Fatalf("retry delivered %d, want 1", sent)
-	}
-	if got := sink.recorded(); len(got) != 1 || got[0].rcpt[0] != "bob@remote" {
-		t.Fatalf("sink after retry = %v, want one message to bob@remote", got)
-	}
+	wantEq(t, got[0].rcpt[0], "bob@remote", "the recipient the sink received")
 }
 
 // TestWorkerBouncesPermanentFailure proves a permanent (5xx) rejection is not

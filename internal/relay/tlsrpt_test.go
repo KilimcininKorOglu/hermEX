@@ -50,46 +50,36 @@ func TestTLSReportAggregates(t *testing.T) {
 	record(t, sp, day, "remote.example", tlsrpt.PolicyTypeSTS, "mx2.remote.example", "")
 
 	rep, err := sp.TLSReport(day, "remote.example", "hermEX", "tls@hermex.test", "rep-1")
-	if err != nil {
-		t.Fatalf("TLSReport: %v", err)
-	}
+	mustNoErr(t, err, "build the report")
 	if rep == nil {
 		t.Fatal("report is nil, want recorded sessions")
 	}
-	if rep.OrganizationName != "hermEX" || rep.ContactInfo != "tls@hermex.test" || rep.ReportID != "rep-1" {
-		t.Errorf("report identity = %+v", rep)
-	}
-	if !rep.DateRange.Start.Equal(time.Date(2026, 6, 27, 0, 0, 0, 0, time.UTC)) {
-		t.Errorf("date-range start = %v, want midnight UTC of the covered day", rep.DateRange.Start)
-	}
-	if !rep.DateRange.End.Equal(time.Date(2026, 6, 27, 23, 59, 59, 0, time.UTC)) {
-		t.Errorf("date-range end = %v, want 23:59:59 UTC", rep.DateRange.End)
-	}
+	wantEq(t, rep.OrganizationName, "hermEX", "report organization")
+	wantEq(t, rep.ContactInfo, "tls@hermex.test", "report contact")
+	wantEq(t, rep.ReportID, "rep-1", "report id")
+	wantTrue(t, rep.DateRange.Start.Equal(time.Date(2026, 6, 27, 0, 0, 0, 0, time.UTC)),
+		"date-range start is midnight UTC of the covered day")
+	wantTrue(t, rep.DateRange.End.Equal(time.Date(2026, 6, 27, 23, 59, 59, 0, time.UTC)),
+		"date-range end is 23:59:59 UTC")
 	if len(rep.Policies) != 2 {
 		t.Fatalf("report has %d policies, want 2", len(rep.Policies))
 	}
 
 	mx1 := findPolicy(t, rep, "mx1.remote.example")
-	if mx1.Policy.PolicyType != tlsrpt.PolicyTypeTLSA {
-		t.Errorf("mx1 policy-type = %q, want tlsa", mx1.Policy.PolicyType)
+	wantEq(t, mx1.Policy.PolicyType, tlsrpt.PolicyTypeTLSA, "mx1 policy type")
+	wantEq(t, mx1.Summary.TotalSuccessful, 2, "mx1 successful sessions")
+	wantEq(t, mx1.Summary.TotalFailure, 1, "mx1 failed sessions")
+	if len(mx1.FailureDetails) != 1 {
+		t.Fatalf("mx1 has %d failure details, want 1", len(mx1.FailureDetails))
 	}
-	if mx1.Summary.TotalSuccessful != 2 || mx1.Summary.TotalFailure != 1 {
-		t.Errorf("mx1 summary = %+v, want 2 success 1 failure", mx1.Summary)
-	}
-	if len(mx1.FailureDetails) != 1 ||
-		mx1.FailureDetails[0].ResultType != tlsrpt.ResultCertificateExpired ||
-		mx1.FailureDetails[0].FailedSessionCount != 1 ||
-		mx1.FailureDetails[0].ReceivingMXHostname != "mx1.remote.example" {
-		t.Errorf("mx1 failure details = %+v", mx1.FailureDetails)
-	}
+	wantEq(t, mx1.FailureDetails[0].ResultType, tlsrpt.ResultCertificateExpired, "mx1 failure result type")
+	wantEq(t, mx1.FailureDetails[0].FailedSessionCount, 1, "mx1 failed session count")
+	wantEq(t, mx1.FailureDetails[0].ReceivingMXHostname, "mx1.remote.example", "mx1 failure host")
 
 	mx2 := findPolicy(t, rep, "mx2.remote.example")
-	if mx2.Summary.TotalSuccessful != 1 || mx2.Summary.TotalFailure != 0 {
-		t.Errorf("mx2 summary = %+v, want 1 success 0 failure", mx2.Summary)
-	}
-	if len(mx2.FailureDetails) != 0 {
-		t.Errorf("mx2 has failure details with no failures: %+v", mx2.FailureDetails)
-	}
+	wantEq(t, mx2.Summary.TotalSuccessful, 1, "mx2 successful sessions")
+	wantEq(t, mx2.Summary.TotalFailure, 0, "mx2 failed sessions")
+	wantEq(t, len(mx2.FailureDetails), 0, "mx2 failure details")
 }
 
 // TestTLSReportEmpty proves a day or domain with no recorded sessions yields a
