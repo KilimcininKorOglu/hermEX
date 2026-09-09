@@ -38,23 +38,24 @@ func (msg *Part) Extract(s Section) ([]byte, bool) {
 	case "MIME":
 		return target.raw[:target.bodyOffset], true
 	case "HEADER":
-		hdr := target
-		if target.MsgBody != nil {
-			hdr = target.MsgBody // message/rfc822: the encapsulated header
-		}
-		return hdr.raw[:hdr.bodyOffset], true
+		return headerOf(target), true
 	case "TEXT":
-		body := target
-		if target.MsgBody != nil {
-			body = target.MsgBody
-		}
-		return body.raw[body.bodyOffset:], true
+		return bodyOf(target), true
 	case "HEADER.FIELDS":
 		return filterFields(headerOf(target), s.Fields, false), true
 	case "HEADER.FIELDS.NOT":
 		return filterFields(headerOf(target), s.Fields, true), true
 	}
 	return nil, false
+}
+
+// bodyOf returns the body bytes a TEXT specifier applies to: the encapsulated
+// message's body for a message/rfc822 part, otherwise the part's own body.
+func bodyOf(p *Part) []byte {
+	if p.MsgBody != nil {
+		return p.MsgBody.raw[p.MsgBody.bodyOffset:]
+	}
+	return p.raw[p.bodyOffset:]
 }
 
 // headerOf returns the header bytes (including the trailing blank line) to which
@@ -81,34 +82,48 @@ func (msg *Part) PartAt(path []int) (*Part, bool) {
 func navigate(msg *Part, path []int) (*Part, bool) {
 	cur := msg
 	for i, n := range path {
-		if n < 1 {
+		next, ok := descend(cur, n, i == len(path)-1)
+		if !ok {
 			return nil, false
 		}
-		switch {
-		case len(cur.Children) > 0: // multipart
-			if n > len(cur.Children) {
-				return nil, false
-			}
-			cur = cur.Children[n-1]
-		case cur.MsgBody != nil: // message/rfc822: descend into the encapsulated message
-			enc := cur.MsgBody
-			if len(enc.Children) > 0 {
-				if n > len(enc.Children) {
-					return nil, false
-				}
-				cur = enc.Children[n-1]
-			} else if n == 1 {
-				cur = enc
-			} else {
-				return nil, false
-			}
-		default: // single-part: only "1" is valid, and only as the final step
-			if n != 1 || i != len(path)-1 {
-				return nil, false
-			}
-		}
+		cur = next
 	}
 	return cur, true
+}
+
+// descend takes one step of a part path. last marks the final step, the only
+// place a single-part "1" may appear.
+func descend(cur *Part, n int, last bool) (*Part, bool) {
+	if n < 1 {
+		return nil, false
+	}
+	switch {
+	case len(cur.Children) > 0: // multipart
+		return childAt(cur.Children, n)
+	case cur.MsgBody != nil: // message/rfc822: descend into the encapsulated message
+		enc := cur.MsgBody
+		if len(enc.Children) > 0 {
+			return childAt(enc.Children, n)
+		}
+		if n == 1 {
+			return enc, true
+		}
+		return nil, false
+	}
+	// single-part: only "1" is valid, and only as the final step
+	if n != 1 || !last {
+		return nil, false
+	}
+	return cur, true
+}
+
+// childAt returns the nth (1-based) child, or ok=false when the path runs past
+// what the part holds.
+func childAt(children []*Part, n int) (*Part, bool) {
+	if n > len(children) {
+		return nil, false
+	}
+	return children[n-1], true
 }
 
 // filterFields returns the header lines whose field name is (exclude=false) or

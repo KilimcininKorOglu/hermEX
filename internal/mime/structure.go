@@ -84,19 +84,7 @@ func parseEntity(raw []byte, depth int) *Part {
 		Size:       len(body),
 	}
 
-	mediaType, ctParams := parseMediaType(header.Get("Content-Type"), defaultContentType)
-	p.Type, p.Subtype = splitMediaType(mediaType)
-	p.Params = ctParams
-	if enc := strings.TrimSpace(header.Get("Content-Transfer-Encoding")); enc != "" {
-		p.Encoding = strings.ToLower(enc)
-	}
-	p.ID = strings.TrimSpace(header.Get("Content-ID"))
-	p.Description = strings.TrimSpace(header.Get("Content-Description"))
-	if disp := header.Get("Content-Disposition"); disp != "" {
-		dispType, dispParams := parseMediaType(disp, "")
-		p.Disposition = dispType
-		p.DispParams = dispParams
-	}
+	p.readContentHeaders(header)
 
 	switch {
 	case p.Type == "multipart" && p.Params["boundary"] != "" && depth < maxNestingDepth:
@@ -115,6 +103,23 @@ func parseEntity(raw []byte, depth int) *Part {
 		}
 	}
 	return p
+}
+
+// readContentHeaders fills the part's content metadata from its header block:
+// the media type and its parameters, the transfer encoding, the identity fields,
+// and the disposition.
+func (p *Part) readContentHeaders(header textproto.MIMEHeader) {
+	mediaType, ctParams := parseMediaType(header.Get("Content-Type"), defaultContentType)
+	p.Type, p.Subtype = splitMediaType(mediaType)
+	p.Params = ctParams
+	if enc := strings.TrimSpace(header.Get("Content-Transfer-Encoding")); enc != "" {
+		p.Encoding = strings.ToLower(enc)
+	}
+	p.ID = strings.TrimSpace(header.Get("Content-ID"))
+	p.Description = strings.TrimSpace(header.Get("Content-Description"))
+	if disp := header.Get("Content-Disposition"); disp != "" {
+		p.Disposition, p.DispParams = parseMediaType(disp, "")
+	}
 }
 
 // headerEnd returns the index at which an entity's body begins: just past the
@@ -180,19 +185,7 @@ func lineCount(body []byte) int {
 // delimiter (RFC 2046 §5.1.1) and is excluded, as are the preamble and epilogue.
 func splitParts(body []byte, boundary string) [][]byte {
 	dash := []byte("--" + boundary)
-	var delims []int
-	for i := 0; i+len(dash) <= len(body); {
-		j := bytes.Index(body[i:], dash)
-		if j < 0 {
-			break
-		}
-		pos := i + j
-		// A delimiter is recognized only at the start of a line.
-		if pos == 0 || (pos >= 2 && body[pos-2] == '\r' && body[pos-1] == '\n') {
-			delims = append(delims, pos)
-		}
-		i = pos + len(dash)
-	}
+	delims := findDelimiters(body, dash)
 
 	var parts [][]byte
 	for k, pos := range delims {
@@ -207,16 +200,41 @@ func splitParts(body []byte, boundary string) [][]byte {
 			continue
 		}
 		partStart := after + nl + 2
-		partEnd := len(body)
-		if k+1 < len(delims) {
-			partEnd = delims[k+1]
-			if partEnd >= 2 && body[partEnd-2] == '\r' && body[partEnd-1] == '\n' {
-				partEnd -= 2 // the CRLF before the next boundary is the delimiter's
-			}
-		}
+		partEnd := partEndAt(body, delims, k)
 		if partStart <= partEnd {
 			parts = append(parts, body[partStart:partEnd])
 		}
 	}
 	return parts
+}
+
+// findDelimiters returns the offsets of every boundary delimiter in a multipart
+// body. A delimiter is recognized only at the start of a line.
+func findDelimiters(body, dash []byte) []int {
+	var delims []int
+	for i := 0; i+len(dash) <= len(body); {
+		j := bytes.Index(body[i:], dash)
+		if j < 0 {
+			break
+		}
+		pos := i + j
+		if pos == 0 || (pos >= 2 && body[pos-2] == '\r' && body[pos-1] == '\n') {
+			delims = append(delims, pos)
+		}
+		i = pos + len(dash)
+	}
+	return delims
+}
+
+// partEndAt returns where the part opened by the kth delimiter ends: at the next
+// delimiter, minus the CRLF that belongs to it, or at the end of the body.
+func partEndAt(body []byte, delims []int, k int) int {
+	if k+1 >= len(delims) {
+		return len(body)
+	}
+	end := delims[k+1]
+	if end >= 2 && body[end-2] == '\r' && body[end-1] == '\n' {
+		end -= 2 // the CRLF before the next boundary is the delimiter's
+	}
+	return end
 }
