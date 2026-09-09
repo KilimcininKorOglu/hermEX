@@ -50,68 +50,102 @@ func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 	class := meetingClass(cal, vev)
 	p.Set(mapi.PrMessageClass, class)
 
-	// A meeting's ORGANIZER becomes the representing identity (so a response can
-	// address its REPLY back) and its ATTENDEE list becomes the recipient bags, so the
-	// invitee set round-trips through the MAPI store for every protocol (single-data)
-	// and lets implicit scheduling diff who is invited. A plain appointment with
-	// neither is left untouched; a response's ATTENDEE is the responder (carried via
-	// the sender identity), not an invitee, so it is not stored as a recipient.
-	atts := vev.propLines("ATTENDEE")
-	if class != "IPM.Appointment" || len(atts) > 0 {
-		setOrganizer(p, vev.prop("ORGANIZER"))
-	}
-	if !strings.HasPrefix(class, "IPM.Schedule.Meeting.Resp") {
-		importAttendees(msg, atts)
-	}
-
-	uid := strings.TrimSpace(vev.propText("UID"))
-	if uid == "" {
-		uid = generatedUID(vev)
-	}
+	importIdentity(msg, vev, class)
 	if uidTag != 0 {
-		p.Set(uidTag, uid)
+		p.Set(uidTag, importedUID(vev))
 	}
 	setIf(p, mapi.PrSubject, vev.propText("SUMMARY"))
 
-	// Recurring events round-trip verbatim; store only what listing needs. A series
-	// master (carrying RRULE) also gets the MS-OXOCAL AppointmentRecurrencePattern
-	// blob Outlook reads in PidLidAppointmentRecur; an override (RECURRENCE-ID only)
-	// is an exception instance and carries no series pattern.
+	// Recurring events round-trip verbatim; store only what listing needs.
 	if vev.prop("RRULE") != nil || vev.prop("RECURRENCE-ID") != nil {
-		p.Set(mapi.PrIcalOriginal, append([]byte(nil), raw...))
-		var start time.Time
-		if l := vev.prop("DTSTART"); l != nil {
-			if t, _, ok := parseICalTime(l); ok {
-				start = t
-				setNamedTime(p, named, mapi.NameAppointmentStartWhole, t)
-			}
-		}
-		if rrule := vev.prop("RRULE"); rrule != nil && !start.IsZero() {
-			if blob, err := recurrence.FromRRule(rrule.value, start); err == nil {
-				if tag, ok := named[mapi.NameAppointmentRecur]; ok {
-					p.Set(tag, blob)
-				}
-			}
-		}
+		importRecurring(p, named, vev, raw)
 		return msg, nil
 	}
 
 	// Non-recurring: full property synthesis.
 	setIf(p, mapi.PrBody, vev.propText("DESCRIPTION"))
 	setNamedStr(p, named, mapi.NameAppointmentLocation, vev.propText("LOCATION"))
+	importTimes(p, named, vev)
+	importClassification(p, named, vev)
+	importAlarm(p, named, vev)
+	return msg, nil
+}
 
+// importIdentity stores the meeting's participants. A meeting's ORGANIZER becomes
+// the representing identity (so a response can address its REPLY back) and its
+// ATTENDEE list becomes the recipient bags, so the invitee set round-trips through
+// the MAPI store for every protocol (single-data) and lets implicit scheduling diff
+// who is invited. A plain appointment with neither is left untouched; a response's
+// ATTENDEE is the responder (carried via the sender identity), not an invitee, so
+// it is not stored as a recipient.
+func importIdentity(msg *oxcmail.Message, vev *icomp, class string) {
+	atts := vev.propLines("ATTENDEE")
+	if class != "IPM.Appointment" || len(atts) > 0 {
+		setOrganizer(&msg.Props, vev.prop("ORGANIZER"))
+	}
+	if !strings.HasPrefix(class, "IPM.Schedule.Meeting.Resp") {
+		importAttendees(msg, atts)
+	}
+}
+
+// importedUID returns the event's stored UID, deriving a stable one when the body
+// carries none.
+func importedUID(vev *icomp) string {
+	if uid := strings.TrimSpace(vev.propText("UID")); uid != "" {
+		return uid
+	}
+	return generatedUID(vev)
+}
+
+// importRecurring preserves a recurring event's body verbatim and stores what
+// listing needs. A series master (carrying RRULE) also gets the MS-OXOCAL
+// AppointmentRecurrencePattern blob Outlook reads in PidLidAppointmentRecur; an
+// override (RECURRENCE-ID only) is an exception instance and carries no series
+// pattern.
+func importRecurring(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag, vev *icomp, raw []byte) {
+	p.Set(mapi.PrIcalOriginal, append([]byte(nil), raw...))
+	var start time.Time
 	if l := vev.prop("DTSTART"); l != nil {
-		if start, allDay, ok := parseICalTime(l); ok {
-			setNamedTime(p, named, mapi.NameAppointmentStartWhole, start)
-			if end, ok := eventEnd(vev, start, allDay); ok {
-				setNamedTime(p, named, mapi.NameAppointmentEndWhole, end)
-			}
-			if allDay {
-				setNamedBool(p, named, mapi.NameAppointmentSubType, true)
-			}
+		if t, _, ok := parseICalTime(l); ok {
+			start = t
+			setNamedTime(p, named, mapi.NameAppointmentStartWhole, t)
 		}
 	}
+	rrule := vev.prop("RRULE")
+	if rrule == nil || start.IsZero() {
+		return
+	}
+	blob, err := recurrence.FromRRule(rrule.value, start)
+	if err != nil {
+		return
+	}
+	if tag, ok := named[mapi.NameAppointmentRecur]; ok {
+		p.Set(tag, blob)
+	}
+}
 
+// importTimes stores the event's span, marking an all-day event as such.
+func importTimes(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag, vev *icomp) {
+	l := vev.prop("DTSTART")
+	if l == nil {
+		return
+	}
+	start, allDay, ok := parseICalTime(l)
+	if !ok {
+		return
+	}
+	setNamedTime(p, named, mapi.NameAppointmentStartWhole, start)
+	if end, ok := eventEnd(vev, start, allDay); ok {
+		setNamedTime(p, named, mapi.NameAppointmentEndWhole, end)
+	}
+	if allDay {
+		setNamedBool(p, named, mapi.NameAppointmentSubType, true)
+	}
+}
+
+// importClassification stores how the event is filed: whether it takes time, how
+// private it is, how urgent, and which revision it is.
+func importClassification(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag, vev *icomp) {
 	setNamedLong(p, named, mapi.NameBusyStatus, busyStatus(vev))
 	if c := vev.propText("CLASS"); c != "" {
 		p.Set(mapi.PrSensitivity, classSensitivity(c))
@@ -124,13 +158,20 @@ func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 	if n, err := strconv.ParseInt(strings.TrimSpace(vev.propText("SEQUENCE")), 10, 32); err == nil {
 		setNamedLong(p, named, mapi.NameAppointmentSequence, int32(n))
 	}
-	if al := vev.sub("VALARM"); al != nil {
-		if mins, ok := alarmMinutes(al); ok {
-			setNamedBool(p, named, mapi.NameReminderSet, true)
-			setNamedLong(p, named, mapi.NameReminderDelta, mins)
-		}
+}
+
+// importAlarm stores the reminder a VALARM asks for.
+func importAlarm(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag, vev *icomp) {
+	al := vev.sub("VALARM")
+	if al == nil {
+		return
 	}
-	return msg, nil
+	mins, ok := alarmMinutes(al)
+	if !ok {
+		return
+	}
+	setNamedBool(p, named, mapi.NameReminderSet, true)
+	setNamedLong(p, named, mapi.NameReminderDelta, mins)
 }
 
 // meetingClass derives the MAPI message class from the iCalendar METHOD (RFC 5546

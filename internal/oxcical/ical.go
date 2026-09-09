@@ -41,11 +41,7 @@ const maxNestingDepth = 20
 // unfolded first (RFC 5545 §3.1); BEGIN/END pairs nest sub-components up to
 // maxNestingDepth.
 func parseICal(raw []byte) (*icomp, error) {
-	var stack []*icomp
-	var root *icomp
-	// depth counts every open BEGIN, including those past the bound, so that a
-	// matching END pops the same level it opened.
-	depth := 0
+	var p icalParser
 	for _, line := range unfold(raw) {
 		if line == "" {
 			continue
@@ -53,36 +49,70 @@ func parseICal(raw []byte) (*icomp, error) {
 		name, params, value := splitLine(line)
 		switch strings.ToUpper(name) {
 		case "BEGIN":
-			depth++
-			if depth > maxNestingDepth {
-				continue
-			}
-			c := &icomp{name: strings.ToUpper(strings.TrimSpace(value))}
-			if len(stack) > 0 {
-				top := stack[len(stack)-1]
-				top.comps = append(top.comps, c)
-			} else if root == nil {
-				root = c
-			}
-			stack = append(stack, c)
+			p.begin(value)
 		case "END":
-			if depth <= maxNestingDepth && len(stack) > 0 {
-				stack = stack[:len(stack)-1]
-			}
-			if depth > 0 {
-				depth--
-			}
+			p.end()
 		default:
-			if depth <= maxNestingDepth && len(stack) > 0 {
-				top := stack[len(stack)-1]
-				top.props = append(top.props, iline{name: strings.ToUpper(name), params: params, value: value})
-			}
+			p.property(iline{name: strings.ToUpper(name), params: params, value: value})
 		}
 	}
-	if root == nil {
+	if p.root == nil {
 		return nil, errNoCalendar
 	}
-	return root, nil
+	return p.root, nil
+}
+
+// icalParser builds the component tree as the logical lines are read.
+type icalParser struct {
+	stack []*icomp
+	root  *icomp
+	// depth counts every open BEGIN, including those past the bound, so that a
+	// matching END pops the same level it opened.
+	depth int
+}
+
+// top is the component currently being filled, or nil outside any component.
+func (p *icalParser) top() *icomp {
+	if len(p.stack) == 0 {
+		return nil
+	}
+	return p.stack[len(p.stack)-1]
+}
+
+// begin opens a component. One past the nesting bound is counted but not built, so
+// everything it would contain is dropped.
+func (p *icalParser) begin(value string) {
+	p.depth++
+	if p.depth > maxNestingDepth {
+		return
+	}
+	c := &icomp{name: strings.ToUpper(strings.TrimSpace(value))}
+	if top := p.top(); top != nil {
+		top.comps = append(top.comps, c)
+	} else if p.root == nil {
+		p.root = c
+	}
+	p.stack = append(p.stack, c)
+}
+
+// end closes the component the matching BEGIN opened.
+func (p *icalParser) end() {
+	if p.depth <= maxNestingDepth && len(p.stack) > 0 {
+		p.stack = p.stack[:len(p.stack)-1]
+	}
+	if p.depth > 0 {
+		p.depth--
+	}
+}
+
+// property files a content line on the component being filled.
+func (p *icalParser) property(l iline) {
+	if p.depth > maxNestingDepth {
+		return
+	}
+	if top := p.top(); top != nil {
+		top.props = append(top.props, l)
+	}
 }
 
 // unfold splits raw into logical lines, joining RFC 5545 continuation lines (a
@@ -203,32 +233,48 @@ func (c *icomp) sub(name string) *icomp {
 // parse failure.
 func parseICalTime(l *iline) (t time.Time, allDay bool, ok bool) {
 	v := strings.TrimSpace(l.value)
-	if strings.EqualFold(l.param("VALUE"), "DATE") || (len(v) == 8 && !strings.Contains(v, "T")) {
+	if isDateOnly(l, v) {
 		d, err := time.Parse("20060102", v)
 		if err != nil {
 			return time.Time{}, false, false
 		}
 		return d.UTC(), true, true
 	}
+	dt, ok := parseICalDateTime(l, v)
+	if !ok {
+		return time.Time{}, false, false
+	}
+	return dt, false, true
+}
+
+// isDateOnly reports whether a property value is a date rather than a date-time,
+// either declared with VALUE=DATE or recognizable by its length.
+func isDateOnly(l *iline, v string) bool {
+	return strings.EqualFold(l.param("VALUE"), "DATE") || (len(v) == 8 && !strings.Contains(v, "T"))
+}
+
+// parseICalDateTime resolves a date-time value to a UTC instant: a trailing Z is
+// UTC, then the property's TZID, then a floating value read as UTC.
+func parseICalDateTime(l *iline, v string) (time.Time, bool) {
 	if strings.HasSuffix(v, "Z") {
 		dt, err := time.Parse("20060102T150405Z", v)
 		if err != nil {
-			return time.Time{}, false, false
+			return time.Time{}, false
 		}
-		return dt.UTC(), false, true
+		return dt.UTC(), true
 	}
 	if tzid := l.param("TZID"); tzid != "" {
 		if loc, err := time.LoadLocation(tzid); err == nil {
 			if dt, err := time.ParseInLocation("20060102T150405", v, loc); err == nil {
-				return dt.UTC(), false, true
+				return dt.UTC(), true
 			}
 		}
 	}
 	dt, err := time.Parse("20060102T150405", v)
 	if err != nil {
-		return time.Time{}, false, false
+		return time.Time{}, false
 	}
-	return dt.UTC(), false, true
+	return dt.UTC(), true
 }
 
 // formatICalUTC renders a UTC instant as an iCalendar DATE-TIME with a Z suffix.
@@ -240,8 +286,20 @@ func formatICalDate(t time.Time) string { return t.UTC().Format("20060102") }
 // parseICalDuration parses an RFC 5545 DURATION (e.g. "PT15M", "-PT1H30M", "P1D",
 // "P1W") into a signed Go duration. Month/year designators are not supported.
 func parseICalDuration(s string) (time.Duration, bool) {
-	s = strings.TrimSpace(s)
-	neg := false
+	body, neg, ok := splitDurationSign(strings.TrimSpace(s))
+	if !ok {
+		return 0, false
+	}
+	d := sumDurationUnits(body)
+	if neg {
+		return -d, true
+	}
+	return d, true
+}
+
+// splitDurationSign strips the optional sign and the mandatory "P" designator,
+// returning the unit sequence that follows.
+func splitDurationSign(s string) (body string, neg, ok bool) {
 	switch {
 	case strings.HasPrefix(s, "-"):
 		neg, s = true, s[1:]
@@ -249,43 +307,51 @@ func parseICalDuration(s string) (time.Duration, bool) {
 		s = s[1:]
 	}
 	if !strings.HasPrefix(s, "P") {
-		return 0, false
+		return "", false, false
 	}
-	s = s[1:]
+	return s[1:], neg, true
+}
+
+// sumDurationUnits adds up the "<number><unit>" pairs of a duration body. The "T"
+// designator switches to the time part, where "M" means minutes rather than months.
+func sumDurationUnits(s string) time.Duration {
 	var d time.Duration
 	inTime := false
 	num := ""
 	for i := 0; i < len(s); i++ {
 		ch := s[i]
-		if ch == 'T' {
+		switch {
+		case ch == 'T':
 			inTime = true
-			continue
-		}
-		if ch >= '0' && ch <= '9' {
+		case ch >= '0' && ch <= '9':
 			num += string(ch)
-			continue
-		}
-		n, _ := strconv.Atoi(num)
-		num = ""
-		switch ch {
-		case 'W':
-			d += time.Duration(n) * 7 * 24 * time.Hour
-		case 'D':
-			d += time.Duration(n) * 24 * time.Hour
-		case 'H':
-			d += time.Duration(n) * time.Hour
-		case 'M':
-			if inTime {
-				d += time.Duration(n) * time.Minute
-			}
-		case 'S':
-			d += time.Duration(n) * time.Second
+		default:
+			n, _ := strconv.Atoi(num)
+			d += durationUnit(ch, n, inTime)
+			num = ""
 		}
 	}
-	if neg {
-		d = -d
+	return d
+}
+
+// durationUnit scales a count by its unit designator. Month and year designators
+// are not supported, and an "M" outside the time part contributes nothing.
+func durationUnit(unit byte, n int, inTime bool) time.Duration {
+	switch unit {
+	case 'W':
+		return time.Duration(n) * 7 * 24 * time.Hour
+	case 'D':
+		return time.Duration(n) * 24 * time.Hour
+	case 'H':
+		return time.Duration(n) * time.Hour
+	case 'M':
+		if inTime {
+			return time.Duration(n) * time.Minute
+		}
+	case 'S':
+		return time.Duration(n) * time.Second
 	}
-	return d, true
+	return 0
 }
 
 // unescapeValue reverses RFC 5545 TEXT escaping: \\ \, \; and \n/\N (newline).

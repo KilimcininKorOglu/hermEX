@@ -18,29 +18,11 @@ func LimitRecurrenceSet(ical []byte, rangeStart, rangeEnd time.Time) ([]byte, bo
 	if err != nil {
 		return nil, false
 	}
-	var master *icomp
-	hasOverride := false
-	for _, c := range cal.comps {
-		if c.name != "VEVENT" {
-			continue
-		}
-		if c.prop("RECURRENCE-ID") != nil {
-			hasOverride = true
-		} else if c.prop("RRULE") != nil {
-			master = c
-		}
-	}
+	master, hasOverride := findSeriesMaster(cal)
 	if master == nil || !hasOverride {
 		return nil, false
 	}
-	var masterDur time.Duration
-	if ds := master.prop("DTSTART"); ds != nil {
-		if s, allDay, ok := parseICalTime(ds); ok {
-			if e, eok := eventEnd(master, s, allDay); eok {
-				masterDur = e.Sub(s)
-			}
-		}
-	}
+	masterDur := componentDuration(master)
 
 	b := &builder{}
 	b.add("BEGIN:VCALENDAR")
@@ -55,6 +37,39 @@ func LimitRecurrenceSet(ical []byte, rangeStart, rangeEnd time.Time) ([]byte, bo
 	}
 	b.add("END:VCALENDAR")
 	return b.buf.Bytes(), true
+}
+
+// findSeriesMaster returns the recurring master and whether the object carries any
+// RECURRENCE-ID override to trim.
+func findSeriesMaster(cal *icomp) (master *icomp, hasOverride bool) {
+	for _, c := range cal.comps {
+		if c.name != "VEVENT" {
+			continue
+		}
+		if c.prop("RECURRENCE-ID") != nil {
+			hasOverride = true
+		} else if c.prop("RRULE") != nil {
+			master = c
+		}
+	}
+	return master, hasOverride
+}
+
+// componentDuration is how long a component lasts, zero when its span is unreadable.
+func componentDuration(c *icomp) time.Duration {
+	ds := c.prop("DTSTART")
+	if ds == nil {
+		return 0
+	}
+	s, allDay, ok := parseICalTime(ds)
+	if !ok {
+		return 0
+	}
+	e, eok := eventEnd(c, s, allDay)
+	if !eok {
+		return 0
+	}
+	return e.Sub(s)
 }
 
 // overrideImpacts reports whether an overridden VEVENT impacts [rangeStart, rangeEnd):
@@ -99,14 +114,7 @@ func LimitFreeBusySet(ical []byte, rangeStart, rangeEnd time.Time) ([]byte, bool
 	if err != nil {
 		return nil, false
 	}
-	hasFB := false
-	for _, c := range cal.comps {
-		if c.name == "VFREEBUSY" {
-			hasFB = true
-			break
-		}
-	}
-	if !hasFB {
+	if !hasComponent(cal, "VFREEBUSY") {
 		return nil, false
 	}
 	b := &builder{}
@@ -119,23 +127,40 @@ func LimitFreeBusySet(ical []byte, rangeStart, rangeEnd time.Time) ([]byte, bool
 			writeComponent(b, c)
 			continue
 		}
-		b.add("BEGIN:VFREEBUSY")
-		for _, l := range c.props {
-			if l.name != "FREEBUSY" {
-				b.add(renderIline(l))
-				continue
-			}
-			if kept := filterFreeBusyPeriods(l.value, rangeStart, rangeEnd); kept != "" {
-				b.add(renderIline(iline{name: "FREEBUSY", params: l.params, value: kept}))
-			}
-		}
-		for _, sub := range c.comps {
-			writeComponent(b, sub)
-		}
-		b.add("END:VFREEBUSY")
+		writeTrimmedFreeBusy(b, c, rangeStart, rangeEnd)
 	}
 	b.add("END:VCALENDAR")
 	return b.buf.Bytes(), true
+}
+
+// hasComponent reports whether the object carries a component of the given name.
+func hasComponent(cal *icomp, name string) bool {
+	for _, c := range cal.comps {
+		if c.name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// writeTrimmedFreeBusy emits one VFREEBUSY carrying only the periods that intersect
+// the range. A FREEBUSY property whose periods all fall outside it is dropped;
+// other properties are untouched.
+func writeTrimmedFreeBusy(b *builder, c *icomp, rangeStart, rangeEnd time.Time) {
+	b.add("BEGIN:VFREEBUSY")
+	for _, l := range c.props {
+		if l.name != "FREEBUSY" {
+			b.add(renderIline(l))
+			continue
+		}
+		if kept := filterFreeBusyPeriods(l.value, rangeStart, rangeEnd); kept != "" {
+			b.add(renderIline(iline{name: "FREEBUSY", params: l.params, value: kept}))
+		}
+	}
+	for _, sub := range c.comps {
+		writeComponent(b, sub)
+	}
+	b.add("END:VFREEBUSY")
 }
 
 // filterFreeBusyPeriods keeps the comma-separated FREEBUSY periods that intersect

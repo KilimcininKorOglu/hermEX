@@ -72,41 +72,45 @@ func parseRRule(value string) (Recurrence, bool) {
 		if !ok {
 			continue
 		}
-		switch strings.ToUpper(strings.TrimSpace(key)) {
-		case "FREQ":
-			r.Freq = strings.ToUpper(strings.TrimSpace(val))
-		case "INTERVAL":
-			if n, err := strconv.Atoi(val); err == nil && n > 0 {
-				r.Interval = n
-			}
-		case "COUNT":
-			if n, err := strconv.Atoi(val); err == nil && n > 0 {
-				r.Count = n
-			}
-		case "UNTIL":
-			if t, ok := parseRRuleUntil(val); ok {
-				r.Until = t
-			}
-		case "BYDAY":
-			r.Weekdays, r.SetPos = parseByDay(val)
-		case "BYMONTHDAY":
-			if n, err := strconv.Atoi(val); err == nil {
-				r.MonthDay = n
-			}
-		case "BYMONTH":
-			if n, err := strconv.Atoi(val); err == nil {
-				r.Month = n
-			}
-		case "BYSETPOS":
-			if n, err := strconv.Atoi(val); err == nil {
-				r.SetPos = n
-			}
+		if apply, known := rruleParts[strings.ToUpper(strings.TrimSpace(key))]; known {
+			apply(&r, val)
 		}
 	}
 	if r.Freq == "" {
 		return Recurrence{}, false
 	}
 	return r, true
+}
+
+// rruleParts is the RRULE parameter vocabulary. A part the table does not name is
+// ignored, so an unrecognized refinement never rejects the rule carrying it.
+var rruleParts = map[string]func(*Recurrence, string){
+	"FREQ":     func(r *Recurrence, v string) { r.Freq = strings.ToUpper(strings.TrimSpace(v)) },
+	"INTERVAL": func(r *Recurrence, v string) { setPositiveInt(v, &r.Interval) },
+	"COUNT":    func(r *Recurrence, v string) { setPositiveInt(v, &r.Count) },
+	"UNTIL": func(r *Recurrence, v string) {
+		if t, ok := parseRRuleUntil(v); ok {
+			r.Until = t
+		}
+	},
+	"BYDAY":      func(r *Recurrence, v string) { r.Weekdays, r.SetPos = parseByDay(v) },
+	"BYMONTHDAY": func(r *Recurrence, v string) { setInt(v, &r.MonthDay) },
+	"BYMONTH":    func(r *Recurrence, v string) { setInt(v, &r.Month) },
+	"BYSETPOS":   func(r *Recurrence, v string) { setInt(v, &r.SetPos) },
+}
+
+// setInt stores an integer parameter, leaving the field alone when it does not parse.
+func setInt(v string, dst *int) {
+	if n, err := strconv.Atoi(v); err == nil {
+		*dst = n
+	}
+}
+
+// setPositiveInt stores a count-like parameter, which is meaningless at zero or below.
+func setPositiveInt(v string, dst *int) {
+	if n, err := strconv.Atoi(v); err == nil && n > 0 {
+		*dst = n
+	}
 }
 
 // Occurrences enumerates the instance start instants of a recurrence that fall within
@@ -122,29 +126,16 @@ func (r Recurrence) Occurrences(seriesStart, windowStart, windowEnd time.Time, l
 		limit = 4096
 	}
 	interval := max(r.Interval, 1)
-	var out []time.Time
-	emitted := 0 // counts series occurrences toward COUNT, including pre-window ones
-	add := func(t time.Time) bool {
-		if r.Count > 0 && emitted >= r.Count {
-			return false
-		}
-		if !r.Until.IsZero() && t.After(r.Until) {
-			return false
-		}
-		emitted++
-		if !t.Before(windowStart) && t.Before(windowEnd) {
-			out = append(out, t)
-		}
-		return true
-	}
+	sink := &occurrenceSink{count: r.Count, until: r.Until, windowStart: windowStart, windowEnd: windowEnd}
+	add := sink.add
 
 	switch strings.ToUpper(strings.TrimSpace(r.Freq)) {
 	case "WEEKLY":
 		if len(r.Weekdays) > 0 {
 			r.weeklyByDay(seriesStart, windowEnd, interval, limit, add)
-		} else {
-			r.step(windowEnd, limit, add, func(i int) time.Time { return seriesStart.AddDate(0, 0, 7*interval*i) })
+			break
 		}
+		r.step(windowEnd, limit, add, func(i int) time.Time { return seriesStart.AddDate(0, 0, 7*interval*i) })
 	case "DAILY":
 		r.step(windowEnd, limit, add, func(i int) time.Time { return seriesStart.AddDate(0, 0, interval*i) })
 	case "MONTHLY":
@@ -152,7 +143,32 @@ func (r Recurrence) Occurrences(seriesStart, windowStart, windowEnd time.Time, l
 	case "YEARLY":
 		r.step(windowEnd, limit, add, func(i int) time.Time { return seriesStart.AddDate(interval*i, 0, 0) })
 	}
-	return out
+	return sink.out
+}
+
+// occurrenceSink collects the instances an expansion produces, applying the
+// series-wide COUNT and UNTIL bounds and keeping only what falls in the window.
+type occurrenceSink struct {
+	count                  int
+	until                  time.Time
+	windowStart, windowEnd time.Time
+	emitted                int // counts series occurrences toward COUNT, including pre-window ones
+	out                    []time.Time
+}
+
+// add offers one instance to the sink, reporting false once the series is over.
+func (s *occurrenceSink) add(t time.Time) bool {
+	if s.count > 0 && s.emitted >= s.count {
+		return false
+	}
+	if !s.until.IsZero() && t.After(s.until) {
+		return false
+	}
+	s.emitted++
+	if !t.Before(s.windowStart) && t.Before(s.windowEnd) {
+		s.out = append(s.out, t)
+	}
+	return true
 }
 
 // step walks i = 0, 1, 2, ... feeding gen(i) into add until add stops (COUNT/UNTIL),
@@ -173,12 +189,7 @@ func (r Recurrence) step(windowEnd time.Time, limit int, add func(time.Time) boo
 // the week of seriesStart), every listed weekday on or after seriesStart is an
 // instance, at seriesStart's clock time.
 func (r Recurrence) weeklyByDay(seriesStart, windowEnd time.Time, interval, limit int, add func(time.Time) bool) {
-	want := map[time.Weekday]bool{}
-	for _, d := range r.Weekdays {
-		if wd, ok := weekdayToken(d); ok {
-			want[wd] = true
-		}
-	}
+	want := wantedWeekdays(r.Weekdays)
 	if len(want) == 0 {
 		return
 	}
@@ -186,27 +197,48 @@ func (r Recurrence) weeklyByDay(seriesStart, windowEnd time.Time, interval, limi
 	scanned := 0
 	for period := range limit {
 		base := weekStart.AddDate(0, 0, 7*interval*period)
-		for off := range 7 {
-			day := base.AddDate(0, 0, off)
-			if !want[day.Weekday()] {
-				continue
-			}
-			inst := time.Date(day.Year(), day.Month(), day.Day(),
-				seriesStart.Hour(), seriesStart.Minute(), seriesStart.Second(), 0, seriesStart.Location())
-			if inst.Before(seriesStart) {
-				continue
-			}
-			if !add(inst) {
-				return
-			}
-			if scanned++; scanned >= limit {
-				return
-			}
+		if !weekInstances(base, seriesStart, want, limit, &scanned, add) {
+			return
 		}
 		if base.After(windowEnd) {
 			return
 		}
 	}
+}
+
+// wantedWeekdays resolves the BYDAY tokens to the weekdays they name.
+func wantedWeekdays(tokens []string) map[time.Weekday]bool {
+	want := map[time.Weekday]bool{}
+	for _, d := range tokens {
+		if wd, ok := weekdayToken(d); ok {
+			want[wd] = true
+		}
+	}
+	return want
+}
+
+// weekInstances feeds one week's matching days into add, at seriesStart's clock
+// time. It reports false once the expansion must stop, either because the series
+// ended or because the scan limit was reached.
+func weekInstances(base, seriesStart time.Time, want map[time.Weekday]bool, limit int, scanned *int, add func(time.Time) bool) bool {
+	for off := range 7 {
+		day := base.AddDate(0, 0, off)
+		if !want[day.Weekday()] {
+			continue
+		}
+		inst := time.Date(day.Year(), day.Month(), day.Day(),
+			seriesStart.Hour(), seriesStart.Minute(), seriesStart.Second(), 0, seriesStart.Location())
+		if inst.Before(seriesStart) {
+			continue
+		}
+		if !add(inst) {
+			return false
+		}
+		if *scanned++; *scanned >= limit {
+			return false
+		}
+	}
+	return true
 }
 
 // weekStartMonday returns midnight of the Monday of t's week, in t's location.

@@ -21,16 +21,8 @@ func Export(msg *oxcmail.Message, opt Options) ([]byte, error) {
 	// identity; a plain appointment emits none of that, so its output is unchanged.
 	partstat := responsePartStat(getStr(p, mapi.PrMessageClass))
 
-	// A recurring event preserved verbatim is returned unchanged, but only when
-	// rendering the appointment itself. A response synthesizes a REPLY below;
-	// returning the preserved REQUEST verbatim would send the invitation back to the
-	// organizer instead of the attendee's reply.
-	if partstat == "" {
-		if v, ok := p.Get(mapi.PrIcalOriginal); ok {
-			if raw, ok := v.([]byte); ok && len(raw) > 0 {
-				return raw, nil
-			}
-		}
+	if raw, ok := verbatimICal(p, partstat); ok {
+		return raw, nil
 	}
 
 	named, err := namedTags(opt, false)
@@ -50,22 +42,55 @@ func Export(msg *oxcmail.Message, opt Options) ([]byte, error) {
 		b.add("METHOD:REPLY")
 	}
 	b.add("BEGIN:VEVENT")
+	b.line("UID", eventUID(p, uidTag))
+	exportSchedule(b, p, named)
+	exportClassification(b, p, named)
+	exportAlarm(b, p, named)
+	exportIdentity(b, msg, partstat)
+	b.add("END:VEVENT")
+	b.add("END:VCALENDAR")
+	return b.buf.Bytes(), nil
+}
 
-	uid := ""
-	if uidTag != 0 {
-		uid = getStr(p, uidTag)
+// verbatimICal returns the iCalendar a recurring event preserved unchanged, but
+// only when rendering the appointment itself. A response synthesizes a REPLY;
+// returning the preserved REQUEST verbatim would send the invitation back to the
+// organizer instead of the attendee's reply.
+func verbatimICal(p *mapi.PropertyValues, partstat string) ([]byte, bool) {
+	if partstat != "" {
+		return nil, false
 	}
-	if uid == "" {
-		uid = "hermex-event"
+	v, ok := p.Get(mapi.PrIcalOriginal)
+	if !ok {
+		return nil, false
 	}
-	b.line("UID", uid)
+	raw, ok := v.([]byte)
+	if !ok || len(raw) == 0 {
+		return nil, false
+	}
+	return raw, true
+}
 
+// eventUID returns the stored iCalendar UID, or a constant fallback so the VEVENT
+// always carries the property RFC 5545 §3.8.4.7 requires.
+func eventUID(p *mapi.PropertyValues, uidTag mapi.PropTag) string {
+	if uidTag == 0 {
+		return "hermex-event"
+	}
+	if uid := getStr(p, uidTag); uid != "" {
+		return uid
+	}
+	return "hermex-event"
+}
+
+// exportSchedule emits the event's stamp, text and time span. DTSTAMP is required
+// (RFC 5545 §3.8.7.2); the start is a stable, deterministic stamp for a synthesized
+// event.
+func exportSchedule(b *builder, p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag) {
 	allDay := namedBool(p, named, mapi.NameAppointmentSubType)
 	start, hasStart := namedTime(p, named, mapi.NameAppointmentStartWhole)
 	end, hasEnd := namedTime(p, named, mapi.NameAppointmentEndWhole)
 
-	// DTSTAMP is required (RFC 5545 §3.8.7.2); the start is a stable, deterministic
-	// stamp for a synthesized event.
 	if hasStart {
 		b.add("DTSTAMP:" + formatICalUTC(start))
 	}
@@ -78,67 +103,90 @@ func Export(msg *oxcmail.Message, opt Options) ([]byte, error) {
 	if hasEnd {
 		b.add(dtLine("DTEND", end, allDay))
 	}
+}
+
+// exportClassification emits how the event is filed: whether it takes time, how
+// private it is, how urgent, and which revision it is.
+func exportClassification(b *builder, p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag) {
 	if busy, ok := namedLong(p, named, mapi.NameBusyStatus); ok {
-		// TRANSP says whether the event takes the attendee's time, which is what a
-		// VFREEBUSY reader aggregates. Working elsewhere does not, so exporting it
-		// as opaque would block a whole home office day for every CalDAV client.
-		if mapi.BusyStatusOccupies(busy) {
-			b.add("TRANSP:OPAQUE")
-		} else {
-			b.add("TRANSP:TRANSPARENT")
+		b.add(transpLine(busy))
+	}
+	if s, ok := propInt32(p, mapi.PrSensitivity); ok {
+		if c := sensitivityClass(s); c != "" {
+			b.add("CLASS:" + c)
 		}
 	}
-	if v, ok := p.Get(mapi.PrSensitivity); ok {
-		if s, ok := v.(int32); ok {
-			if c := sensitivityClass(s); c != "" {
-				b.add("CLASS:" + c)
-			}
-		}
-	}
-	if v, ok := p.Get(mapi.PrImportance); ok {
-		if imp, ok := v.(int32); ok {
-			b.line("PRIORITY", strconv.Itoa(int(importancePriority(imp))))
-		}
+	if imp, ok := propInt32(p, mapi.PrImportance); ok {
+		b.line("PRIORITY", strconv.Itoa(int(importancePriority(imp))))
 	}
 	if seq, ok := namedLong(p, named, mapi.NameAppointmentSequence); ok {
 		b.line("SEQUENCE", strconv.Itoa(int(seq)))
 	}
-	if namedBool(p, named, mapi.NameReminderSet) {
-		if delta, ok := namedLong(p, named, mapi.NameReminderDelta); ok {
-			b.add("BEGIN:VALARM")
-			b.add("ACTION:DISPLAY")
-			b.add("TRIGGER:-PT" + strconv.Itoa(int(delta)) + "M")
-			b.add("END:VALARM")
-		}
-	}
+}
 
-	// iTIP REPLY identity (RFC 5546 §3.2.3): the organizer being answered and the
-	// one responding attendee, the response carried as the attendee's PARTSTAT.
+// transpLine renders TRANSP, which says whether the event takes the attendee's
+// time, the thing a VFREEBUSY reader aggregates. Working elsewhere does not, so
+// exporting it as opaque would block a whole home office day for every CalDAV
+// client.
+func transpLine(busy int32) string {
+	if mapi.BusyStatusOccupies(busy) {
+		return "TRANSP:OPAQUE"
+	}
+	return "TRANSP:TRANSPARENT"
+}
+
+// exportAlarm emits the display reminder a stored delta asks for.
+func exportAlarm(b *builder, p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag) {
+	if !namedBool(p, named, mapi.NameReminderSet) {
+		return
+	}
+	delta, ok := namedLong(p, named, mapi.NameReminderDelta)
+	if !ok {
+		return
+	}
+	b.add("BEGIN:VALARM")
+	b.add("ACTION:DISPLAY")
+	b.add("TRIGGER:-PT" + strconv.Itoa(int(delta)) + "M")
+	b.add("END:VALARM")
+}
+
+// exportIdentity emits the ORGANIZER and ATTENDEE lines. For a response that is the
+// iTIP REPLY identity (RFC 5546 §3.2.3): the organizer being answered and the one
+// responding attendee, the response carried as the attendee's PARTSTAT. For a
+// meeting appointment it is the organizer plus the full stored recipient list, so
+// the invitee set round-trips for CalDAV clients and stays visible to every
+// protocol (single-data). A plain appointment has no recipients and emits neither.
+func exportIdentity(b *builder, msg *oxcmail.Message, partstat string) {
+	p := &msg.Props
 	if partstat != "" {
-		if v := mailtoParams(p, mapi.PrSentRepresentingSmtpAddress, mapi.PrSentRepresentingName, ""); v != "" {
-			b.add("ORGANIZER" + v)
-		}
-		if v := mailtoParams(p, mapi.PrSenderSmtpAddress, mapi.PrSenderName, partstat); v != "" {
-			b.add("ATTENDEE" + v)
-		}
-	} else if len(msg.Recipients) > 0 {
-		// A meeting appointment re-emits its ORGANIZER and the full ATTENDEE list from
-		// the stored recipients, so the invitee set round-trips for CalDAV clients and
-		// stays visible to every protocol (single-data). A plain appointment has no
-		// recipients and emits neither.
-		if v := mailtoParams(p, mapi.PrSentRepresentingSmtpAddress, mapi.PrSentRepresentingName, ""); v != "" {
-			b.add("ORGANIZER" + v)
-		}
-		for i := range msg.Recipients {
-			if v := mailtoParams(&msg.Recipients[i], mapi.PrSmtpAddress, mapi.PrDisplayName, ""); v != "" {
-				b.add("ATTENDEE" + v)
-			}
+		addParams(b, "ORGANIZER", mailtoParams(p, mapi.PrSentRepresentingSmtpAddress, mapi.PrSentRepresentingName, ""))
+		addParams(b, "ATTENDEE", mailtoParams(p, mapi.PrSenderSmtpAddress, mapi.PrSenderName, partstat))
+		return
+	}
+	if len(msg.Recipients) == 0 {
+		return
+	}
+	addParams(b, "ORGANIZER", mailtoParams(p, mapi.PrSentRepresentingSmtpAddress, mapi.PrSentRepresentingName, ""))
+	for i := range msg.Recipients {
+		addParams(b, "ATTENDEE", mailtoParams(&msg.Recipients[i], mapi.PrSmtpAddress, mapi.PrDisplayName, ""))
+	}
+}
+
+// addParams emits a property line only when the identity rendered to something.
+func addParams(b *builder, name, params string) {
+	if params != "" {
+		b.add(name + params)
+	}
+}
+
+// propInt32 returns a PtLong property's value (ok false when absent or another type).
+func propInt32(p *mapi.PropertyValues, tag mapi.PropTag) (int32, bool) {
+	if v, ok := p.Get(tag); ok {
+		if n, ok := v.(int32); ok {
+			return n, true
 		}
 	}
-
-	b.add("END:VEVENT")
-	b.add("END:VCALENDAR")
-	return b.buf.Bytes(), nil
+	return 0, false
 }
 
 // responsePartStat maps a meeting-response message class to the iCalendar PARTSTAT

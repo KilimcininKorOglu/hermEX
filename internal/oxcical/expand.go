@@ -17,22 +17,7 @@ func ExpandRecurrence(ical []byte, rangeStart, rangeEnd time.Time) ([]byte, bool
 	if err != nil {
 		return nil, false
 	}
-	var master *icomp
-	overrides := map[string]*icomp{}
-	for _, c := range cal.comps {
-		if c.name != "VEVENT" {
-			continue
-		}
-		if rid := c.prop("RECURRENCE-ID"); rid != nil {
-			if t, _, ok := parseICalTime(rid); ok {
-				overrides[instantKey(t)] = c
-			}
-			continue
-		}
-		if c.prop("RRULE") != nil {
-			master = c
-		}
-	}
+	master, overrides := splitSeries(cal)
 	if master == nil {
 		return nil, false
 	}
@@ -49,16 +34,7 @@ func ExpandRecurrence(ical []byte, rangeStart, rangeEnd time.Time) ([]byte, bool
 	if !rok {
 		return nil, false
 	}
-
-	skip := map[string]bool{}
-	for _, l := range master.propLines("EXDATE") {
-		for v := range strings.SplitSeq(l.value, ",") {
-			ex := iline{name: "EXDATE", params: l.params, value: strings.TrimSpace(v)}
-			if t, _, ok := parseICalTime(&ex); ok {
-				skip[instantKey(t)] = true
-			}
-		}
-	}
+	skip := excludedInstants(master)
 
 	b := &builder{}
 	b.add("BEGIN:VCALENDAR")
@@ -77,6 +53,41 @@ func ExpandRecurrence(ical []byte, rangeStart, rangeEnd time.Time) ([]byte, bool
 	}
 	b.add("END:VCALENDAR")
 	return b.buf.Bytes(), true
+}
+
+// splitSeries separates the series master (the VEVENT carrying RRULE) from the
+// RECURRENCE-ID overrides, keyed by the occurrence each one replaces.
+func splitSeries(cal *icomp) (master *icomp, overrides map[string]*icomp) {
+	overrides = map[string]*icomp{}
+	for _, c := range cal.comps {
+		if c.name != "VEVENT" {
+			continue
+		}
+		if rid := c.prop("RECURRENCE-ID"); rid != nil {
+			if t, _, ok := parseICalTime(rid); ok {
+				overrides[instantKey(t)] = c
+			}
+			continue
+		}
+		if c.prop("RRULE") != nil {
+			master = c
+		}
+	}
+	return master, overrides
+}
+
+// excludedInstants collects the occurrences the master's EXDATE lines remove.
+func excludedInstants(master *icomp) map[string]bool {
+	skip := map[string]bool{}
+	for _, l := range master.propLines("EXDATE") {
+		for v := range strings.SplitSeq(l.value, ",") {
+			ex := iline{name: "EXDATE", params: l.params, value: strings.TrimSpace(v)}
+			if t, _, ok := parseICalTime(&ex); ok {
+				skip[instantKey(t)] = true
+			}
+		}
+	}
+	return skip
 }
 
 // instantKey normalizes an instant to a UTC comparison key, so an EXDATE or a
