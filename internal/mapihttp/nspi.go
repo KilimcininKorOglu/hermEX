@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"hermex/internal/logging"
+	"hermex/internal/nspi"
 )
 
 // serveNspi authenticates and dispatches the NSPI endpoint (/mapi/nspi) by the
@@ -35,35 +36,50 @@ func (s *Server) serveNspi(w http.ResponseWriter, r *http.Request) {
 		s.nspiBind(w, r, user)
 	case "Unbind":
 		s.nspiUnbind(w, r)
-	case "GetSpecialTable":
-		s.nspiOp(w, r, user, "GetSpecialTable", s.nsp.GetSpecialTable)
-	case "QueryRows":
-		s.nspiOpAuth(w, r, user, "QueryRows", s.nsp.QueryRows)
-	case "UpdateStat":
-		s.nspiOpAuth(w, r, user, "UpdateStat", s.nsp.UpdateStat)
-	case "QueryColumns":
-		s.nspiOp(w, r, user, "QueryColumns", s.nsp.QueryColumns)
-	case "ResolveNames":
-		s.nspiOpAuth(w, r, user, "ResolveNames", s.nsp.ResolveNamesW)
-	case "DNToMId":
-		s.nspiOpAuth(w, r, user, "DNToMId", s.nsp.DNToMId)
-	case "GetMatches":
-		s.nspiOpAuth(w, r, user, "GetMatches", s.nsp.GetMatches)
-	case "GetProps":
-		s.nspiOpAuth(w, r, user, "GetProps", s.nsp.GetProps)
-	case "GetPropList":
-		s.nspiOpAuth(w, r, user, "GetPropList", s.nsp.GetPropList)
-	case "SeekEntries":
-		s.nspiOpAuth(w, r, user, "SeekEntries", s.nsp.SeekEntries)
-	case "CompareMIds":
-		s.nspiOpAuth(w, r, user, "CompareMIds", s.nsp.CompareMids)
-	case "ResortRestriction":
-		s.nspiOpAuth(w, r, user, "ResortRestriction", s.nsp.ResortRestriction)
-	case "ModLinkAtt":
-		s.nspiOpAuth(w, r, user, "ModLinkAtt", s.nsp.ModLinkAtt)
 	default:
-		writeRespError(w, r, reqType, rcInvalidReqType)
+		s.nspiDispatch(w, r, user, reqType)
 	}
+}
+
+// nspiPublicOps are the address-book ops that serve the same answer to everyone:
+// the static column set and the special table.
+var nspiPublicOps = map[string]func(*nspi.Server, []byte) []byte{
+	"GetSpecialTable": (*nspi.Server).GetSpecialTable,
+	"QueryColumns":    (*nspi.Server).QueryColumns,
+}
+
+// nspiAuthedOps are the address-book ops scoped to the caller: the entries they
+// may return depend on who is asking, and the delegate write op needs the
+// identity for its owner-only access check.
+var nspiAuthedOps = map[string]func(*nspi.Server, []byte, string) []byte{
+	"QueryRows":         (*nspi.Server).QueryRows,
+	"UpdateStat":        (*nspi.Server).UpdateStat,
+	"ResolveNames":      (*nspi.Server).ResolveNamesW,
+	"DNToMId":           (*nspi.Server).DNToMId,
+	"GetMatches":        (*nspi.Server).GetMatches,
+	"GetProps":          (*nspi.Server).GetProps,
+	"GetPropList":       (*nspi.Server).GetPropList,
+	"SeekEntries":       (*nspi.Server).SeekEntries,
+	"CompareMIds":       (*nspi.Server).CompareMids,
+	"ResortRestriction": (*nspi.Server).ResortRestriction,
+	"ModLinkAtt":        (*nspi.Server).ModLinkAtt,
+}
+
+// nspiDispatch runs a sequenced address-book op. A request type in neither table
+// is refused as an invalid request type.
+func (s *Server) nspiDispatch(w http.ResponseWriter, r *http.Request, user, reqType string) {
+	if op, ok := nspiPublicOps[reqType]; ok {
+		s.nspiOp(w, r, user, reqType, func(body []byte) []byte { return op(s.nsp, body) })
+		return
+	}
+	op, ok := nspiAuthedOps[reqType]
+	if !ok {
+		writeRespError(w, r, reqType, rcInvalidReqType)
+		return
+	}
+	s.nspiOpAuth(w, r, user, reqType, func(body []byte, caller string) []byte {
+		return op(s.nsp, body, caller)
+	})
 }
 
 // nspiOp runs a sequenced NSPI op whose handler needs only the request body. It

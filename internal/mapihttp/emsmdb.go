@@ -50,11 +50,22 @@ func (s *Server) serveEmsmdb(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess := &session{user: user, mailbox: mailbox}
-	// Log the MAPI session lifecycle (logon/logoff); the high-frequency Execute
-	// batch is left to the request-level http.request log to avoid flooding.
-	if reqType == "Connect" || reqType == "Disconnect" {
-		s.mapiEvent(r, logging.LevelInfo, logging.ROP, "session", user, logging.Fields{"req": reqType})
+	s.logSessionEvent(r, user, reqType)
+	s.emsDispatch(w, r, sess, reqType)
+}
+
+// logSessionEvent records the MAPI session lifecycle (logon/logoff); the
+// high-frequency Execute batch is left to the request-level http.request log to
+// avoid flooding.
+func (s *Server) logSessionEvent(r *http.Request, user, reqType string) {
+	if reqType != "Connect" && reqType != "Disconnect" {
+		return
 	}
+	s.mapiEvent(r, logging.LevelInfo, logging.ROP, "session", user, logging.Fields{"req": reqType})
+}
+
+// emsDispatch runs the request the X-RequestType header names.
+func (s *Server) emsDispatch(w http.ResponseWriter, r *http.Request, sess *session, reqType string) {
 	switch reqType {
 	case "Connect":
 		s.emsConnect(w, r, sess)

@@ -83,30 +83,33 @@ func pollPOP3(s Store, deliver Deliverer, cfg directory.FetchmailEntry, now time
 	}
 	delivered := 0
 	for _, n := range sortedKeys(uids) {
-		uid := uids[n]
-		if seen[uid] {
+		if seen[uids[n]] {
 			continue
 		}
-		raw, err := c.retr(n)
-		if err != nil {
-			return delivered, err
-		}
-		if err := deliver(cfg.Mailbox, raw, now); err != nil {
+		if err := deliverPOP3(c, s, deliver, cfg, n, uids[n], now); err != nil {
 			return delivered, err
 		}
 		delivered++
-		// Record (or delete) immediately after each delivery, never after the loop: a
-		// failure on a later message must not re-deliver the ones already handled. This
-		// mirrors the IMAP path, which marks each \Seen in place.
-		if cfg.Keep {
-			if err := s.MarkFetchmailSeen(cfg.ID, []string{uid}); err != nil {
-				return delivered, err
-			}
-		} else if err := c.dele(n); err != nil {
-			return delivered, err
-		}
 	}
 	return delivered, nil
+}
+
+// deliverPOP3 fetches one message, files it, and settles it at the source. The
+// record (or delete) happens immediately after the delivery, never after the
+// loop: a failure on a later message must not re-deliver the ones already
+// handled. This mirrors the IMAP path, which marks each \Seen in place.
+func deliverPOP3(c *pop3Conn, s Store, deliver Deliverer, cfg directory.FetchmailEntry, n int, uid string, now time.Time) error {
+	raw, err := c.retr(n)
+	if err != nil {
+		return err
+	}
+	if err := deliver(cfg.Mailbox, raw, now); err != nil {
+		return err
+	}
+	if cfg.Keep {
+		return s.MarkFetchmailSeen(cfg.ID, []string{uid})
+	}
+	return c.dele(n)
 }
 
 // pollIMAP fetches new mail from an IMAP source. A kept account searches UNSEEN (or ALL
@@ -134,23 +137,28 @@ func pollIMAP(deliver Deliverer, cfg directory.FetchmailEntry, now time.Time) (i
 	}
 	delivered := 0
 	for _, uid := range uids {
-		raw, err := c.fetchBody(uid)
-		if err != nil {
-			return delivered, err
-		}
-		if err := deliver(cfg.Mailbox, raw, now); err != nil {
+		if err := deliverIMAP(c, deliver, cfg, uid, now); err != nil {
 			return delivered, err
 		}
 		delivered++
-		if cfg.Keep {
-			if err := c.markSeen(uid); err != nil {
-				return delivered, err
-			}
-		} else if err := c.deleteMessage(uid); err != nil {
-			return delivered, err
-		}
 	}
 	return delivered, nil
+}
+
+// deliverIMAP fetches one message, files it, and settles it at the source: a kept
+// account marks it \Seen so the next poll skips it, a non-kept one deletes it.
+func deliverIMAP(c *imapConn, deliver Deliverer, cfg directory.FetchmailEntry, uid string, now time.Time) error {
+	raw, err := c.fetchBody(uid)
+	if err != nil {
+		return err
+	}
+	if err := deliver(cfg.Mailbox, raw, now); err != nil {
+		return err
+	}
+	if cfg.Keep {
+		return c.markSeen(uid)
+	}
+	return c.deleteMessage(uid)
 }
 
 // sortedKeys returns the map's integer keys in ascending order, so POP3 messages are
