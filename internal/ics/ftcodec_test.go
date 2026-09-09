@@ -139,28 +139,19 @@ func TestCodepageFlagDecode(t *testing.T) {
 func TestNamedPropInline(t *testing.T) {
 	g := mapi.GUID{Data1: 0x11223344, Data2: 0x5566, Data3: 0x7788, Data4: [8]byte{1, 2, 3, 4, 5, 6, 7, 8}}
 
-	idName := &mapi.PropertyName{Kind: mapi.MnidID, GUID: g, LID: 0x1234}
-	wire := encodeOne(t, StreamProp{Tag: tag(0x8005, mapi.PtLong), Name: idName, Value: int32(7)})
+	idName := mapi.PropertyName{Kind: mapi.MnidID, GUID: g, LID: 0x1234}
+	wire := encodeOne(t, StreamProp{Tag: tag(0x8005, mapi.PtLong), Name: &idName, Value: int32(7)})
 	// propdef(4) + GUID(16) + kind(1) + LID(4) + value(4) = 29 bytes.
-	if len(wire) != 29 || wire[20] != mapi.MnidID {
-		t.Fatalf("MnidID named-prop wire %x", wire)
-	}
-	it := decodeOne(t, wire)
-	if it.Prop.Name == nil || it.Prop.Name.Kind != mapi.MnidID || it.Prop.Name.LID != 0x1234 || it.Prop.Name.GUID != g {
-		t.Fatalf("MnidID name decode: %+v", it.Prop.Name)
-	}
+	wantEq(t, len(wire), 29, "the MnidID element's length")
+	wantEq(t, wire[20], mapi.MnidID, "the MnidID kind byte")
+	wantName(t, decodeOne(t, wire).Prop.Name, idName, "the decoded MnidID name")
 
-	strName := &mapi.PropertyName{Kind: mapi.MnidString, GUID: g, Name: "AB"}
-	wire = encodeOne(t, StreamProp{Tag: tag(0x8006, mapi.PtLong), Name: strName, Value: int32(9)})
+	strName := mapi.PropertyName{Kind: mapi.MnidString, GUID: g, Name: "AB"}
+	wire = encodeOne(t, StreamProp{Tag: tag(0x8006, mapi.PtLong), Name: &strName, Value: int32(9)})
 	// name is "AB" UTF-16LE + 00 00, with NO length prefix.
-	wantName := []byte{0x41, 0x00, 0x42, 0x00, 0x00, 0x00}
-	if !bytes.Contains(wire, wantName) {
-		t.Fatalf("MnidString name not naked double-NUL UTF-16: %x", wire)
-	}
-	it = decodeOne(t, wire)
-	if it.Prop.Name == nil || it.Prop.Name.Kind != mapi.MnidString || it.Prop.Name.Name != "AB" {
-		t.Fatalf("MnidString name decode: %+v", it.Prop.Name)
-	}
+	naked := []byte{0x41, 0x00, 0x42, 0x00, 0x00, 0x00}
+	wantEq(t, bytes.Contains(wire, naked), true, "the MnidString name is naked double-NUL UTF-16")
+	wantName(t, decodeOne(t, wire).Prop.Name, strName, "the decoded MnidString name")
 }
 
 // TestMarkerRoundTrip verifies a marker word decodes as a marker, not a propdef.
