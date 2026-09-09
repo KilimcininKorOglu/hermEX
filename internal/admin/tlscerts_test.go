@@ -184,44 +184,34 @@ func TestMTASTSSettingsForm(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	// Enable in testing mode → saved, and the panel renders the MTA-STS form back.
-	on := htmxPOST(t, ts, "/admin/ui/mtasts", session, csrf, url.Values{
+	on := wantBody(t, htmxPOST(t, ts, "/admin/ui/mtasts", session, csrf, url.Values{
 		"mtasts_enabled": {"on"}, "mtasts_mode": {"testing"}, "mtasts_max_age": {"86400"},
-	})
-	ob, _ := io.ReadAll(on.Body)
-	on.Body.Close()
-	if d.mtastsSettings == nil || !d.mtastsSettings.Enabled || d.mtastsSettings.Mode != "testing" || d.mtastsSettings.MaxAge != 86400 {
-		t.Fatalf("testing save = %+v, want enabled testing 86400", d.mtastsSettings)
+	}), http.StatusOK, "save testing mode")
+	if d.mtastsSettings == nil {
+		t.Fatal("testing mode saved nothing")
 	}
-	if !strings.Contains(string(ob), "MTA-STS policy publishing") {
-		t.Error("panel did not render the MTA-STS form after saving")
-	}
+	wantTrue(t, d.mtastsSettings.Enabled, "publishing is enabled")
+	wantEq(t, d.mtastsSettings.Mode, "testing", "stored mode")
+	wantEq(t, d.mtastsSettings.MaxAge, 86400, "stored max age")
+	wantContains(t, on, "MTA-STS policy publishing", "the panel renders the form back")
 
 	// Enforce WITHOUT the confirmation is rejected and does not flip the stored mode.
-	bad := htmxPOST(t, ts, "/admin/ui/mtasts", session, csrf, url.Values{
+	bad := wantBody(t, htmxPOST(t, ts, "/admin/ui/mtasts", session, csrf, url.Values{
 		"mtasts_enabled": {"on"}, "mtasts_mode": {"enforce"}, "mtasts_max_age": {"86400"},
-	})
-	bb, _ := io.ReadAll(bad.Body)
-	bad.Body.Close()
-	if !strings.Contains(string(bb), "refuse mail") {
-		t.Errorf("enforce without confirmation not rejected; got: %s", bb)
-	}
-	if d.mtastsSettings.Mode == "enforce" {
-		t.Error("enforce was saved without the confirmation")
-	}
+	}), http.StatusOK, "unconfirmed enforce")
+	wantContains(t, bad, "refuse mail", "unconfirmed enforce is refused with its consequence")
+	wantEq(t, d.mtastsSettings.Mode, "testing", "the stored mode after an unconfirmed enforce")
 
 	// Enforce WITH the confirmation is saved.
 	ok := htmxPOST(t, ts, "/admin/ui/mtasts", session, csrf, url.Values{
 		"mtasts_enabled": {"on"}, "mtasts_mode": {"enforce"}, "mtasts_max_age": {"604800"}, "mtasts_enforce_confirm": {"on"},
 	})
 	ok.Body.Close()
-	if d.mtastsSettings.Mode != "enforce" || d.mtastsSettings.MaxAge != 604800 {
-		t.Errorf("confirmed enforce save = %+v, want enforce 604800", d.mtastsSettings)
-	}
+	wantEq(t, d.mtastsSettings.Mode, "enforce", "the stored mode after a confirmed enforce")
+	wantEq(t, d.mtastsSettings.MaxAge, 604800, "the stored max age after a confirmed enforce")
 
 	// Disabling carries no gate.
 	off := htmxPOST(t, ts, "/admin/ui/mtasts", session, csrf, url.Values{"mtasts_mode": {"testing"}})
 	off.Body.Close()
-	if d.mtastsSettings.Enabled {
-		t.Errorf("after disable = %+v, want disabled", d.mtastsSettings)
-	}
+	wantFalse(t, d.mtastsSettings.Enabled, "publishing after the disable")
 }

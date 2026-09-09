@@ -35,13 +35,9 @@ func TestMailQueueManage(t *testing.T) {
 	ts, root := mailqServer(t, d)
 
 	sp, err := relay.Open(filepath.Join(root, "relay.sqlite3"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := sp.Enqueue("boss@local.test", []string{"ext@remote.test"},
-		[]byte("Subject: hi\r\n\r\nbody"), time.Unix(1700000000, 0)); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, err, "open the relay spool")
+	mustNoErr(t, sp.Enqueue("boss@local.test", []string{"ext@remote.test"},
+		[]byte("Subject: hi\r\n\r\nbody"), time.Unix(1700000000, 0)), "enqueue")
 	entries, _ := sp.List()
 	if len(entries) != 1 {
 		t.Fatalf("seeded %d entries, want 1", len(entries))
@@ -52,44 +48,30 @@ func TestMailQueueManage(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	// The page lists the queued delivery.
-	resp := authedGET(t, ts, "/admin/ui/mailq", session)
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "ext@remote.test") {
-		t.Fatalf("page (%d) missing the queued recipient:\n%s", resp.StatusCode, body)
-	}
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/mailq", session), http.StatusOK, "mail queue page")
+	wantContains(t, page, "ext@remote.test", "the page lists the queued recipient")
 
 	// JSON lists it too.
-	resp = authedGET(t, ts, "/admin/mailq", session)
+	resp := authedGET(t, ts, "/admin/mailq", session)
 	var got []struct {
 		Recipient string `json:"Recipient"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
-		t.Fatalf("decode mailq JSON: %v", err)
-	}
+	err = json.NewDecoder(resp.Body).Decode(&got)
 	resp.Body.Close()
-	if len(got) != 1 || got[0].Recipient != "ext@remote.test" {
-		t.Errorf("JSON queue = %+v, want one entry to ext@remote.test", got)
-	}
+	mustNoErr(t, err, "decode mailq JSON")
+	wantEq(t, len(got), 1, "queued entries in JSON")
+	wantEq(t, got[0].Recipient, "ext@remote.test", "the JSON entry's recipient")
 
 	// Flush leaves the entry queued (it is not delivered, just made due).
-	resp = htmxPOST(t, ts, "/admin/ui/mailq/retry", session, csrf, url.Values{"id": {id}})
-	body, _ = io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if !strings.Contains(string(body), "ext@remote.test") {
-		t.Errorf("flush should leave the entry queued:\n%s", body)
-	}
+	flushed := wantBody(t, htmxPOST(t, ts, "/admin/ui/mailq/retry", session, csrf, url.Values{"id": {id}}),
+		http.StatusOK, "flush")
+	wantContains(t, flushed, "ext@remote.test", "flush leaves the entry queued")
 
 	// Delete drops it; the panel shows the empty state.
-	resp = htmxPOST(t, ts, "/admin/ui/mailq/delete", session, csrf, url.Values{"id": {id}})
-	body, _ = io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if strings.Contains(string(body), "ext@remote.test") {
-		t.Errorf("entry still listed after delete:\n%s", body)
-	}
-	if !strings.Contains(string(body), "queue is empty") {
-		t.Errorf("empty-state not shown after deleting the only entry:\n%s", body)
-	}
+	deleted := wantBody(t, htmxPOST(t, ts, "/admin/ui/mailq/delete", session, csrf, url.Values{"id": {id}}),
+		http.StatusOK, "delete")
+	wantNotContains(t, deleted, "ext@remote.test", "the deleted entry stops being listed")
+	wantContains(t, deleted, "queue is empty", "the empty state shows after the last entry goes")
 }
 
 // authedMailqDo issues a state-changing JSON request (session + double-submit

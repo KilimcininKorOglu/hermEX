@@ -413,36 +413,29 @@ func TestPerformBayesRetrain(t *testing.T) {
 	mbox := filepath.Join(tmp, "alice")
 
 	st, err := objectstore.Open(mbox)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, err, "open mailbox")
 	when := time.Now()
-	if _, err := st.AppendMessage(int64(mapi.PrivateFIDJunk), []byte("Subject: cheap pills\r\n\r\nbuy now discount viagra"), when, 0); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("Subject: meeting\r\n\r\nproject schedule review"), when, 0); err != nil {
-		t.Fatal(err)
-	}
+	_, err = st.AppendMessage(int64(mapi.PrivateFIDJunk), []byte("Subject: cheap pills\r\n\r\nbuy now discount viagra"), when, 0)
+	mustNoErr(t, err, "append the junk message")
+	_, err = st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("Subject: meeting\r\n\r\nproject schedule review"), when, 0)
+	mustNoErr(t, err, "append the inbox message")
 	st.Close()
 
 	d := &fakeDir{maildirs: []string{mbox}}
 	s := NewServer(d, fakePaths{root: tmp}, []byte("secret"))
 
 	msg, err := s.performBayesRetrain()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(msg, "1 spam") || !strings.Contains(msg, "1 ham") {
-		t.Errorf("retrain summary = %q, want 1 spam + 1 ham", msg)
-	}
+	mustNoErr(t, err, "retrain")
+	wantContains(t, msg, "1 spam", "the summary counts the junk message as spam")
+	wantContains(t, msg, "1 ham", "the summary counts the inbox message as ham")
 
 	model, err := antispam.LoadModelFile(fakePaths{root: tmp}.AntispamModelPath())
-	if err != nil || model == nil {
-		t.Fatalf("model file = (%v, %v), want a trained model", model, err)
+	mustNoErr(t, err, "load the written model")
+	if model == nil {
+		t.Fatal("model file holds no model")
 	}
-	if model.SpamMsgs != 1 || model.HamMsgs != 1 {
-		t.Errorf("model counts = spam %d ham %d, want 1/1", model.SpamMsgs, model.HamMsgs)
-	}
+	wantEq(t, model.SpamMsgs, 1, "trained spam messages")
+	wantEq(t, model.HamMsgs, 1, "trained ham messages")
 }
 
 // seedFolder appends n messages carrying body to a mailbox folder.

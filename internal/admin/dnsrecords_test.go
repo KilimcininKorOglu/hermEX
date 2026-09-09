@@ -31,62 +31,105 @@ func TestPrescribeDomainDNS(t *testing.T) {
 	// With MTA-STS publishing off, its records must be absent, their host serves no
 	// policy yet, so prescribing them would point senders at a 404.
 	for _, lbl := range []string{"MTA-STS host", "MTA-STS", "TLS reporting"} {
-		if _, ok := by[lbl]; ok {
-			t.Errorf("%q present with MTA-STS disabled", lbl)
-		}
+		wantNoRecord(t, by, lbl)
 	}
 
 	// MX must carry a priority and point inbound mail at the server host.
-	if r := by["MX"]; r.Type != "MX" || r.Name != "tenant.com" || r.Value != "10 "+host {
-		t.Errorf("MX = %+v, want type MX at apex valued '10 %s'", r, host)
-	}
+	wantRecord(t, by, "MX", "MX", "tenant.com", "10 "+host)
 	// SPF authorizes the MX host; the "mx" mechanism covers the server so no
 	// separate include is needed.
-	if r := by["SPF"]; r.Type != "TXT" || !strings.HasPrefix(r.Value, "v=spf1") {
-		t.Errorf("SPF = %+v, want a v=spf1 TXT record", r)
-	}
+	wantRecordPrefix(t, by, "SPF", "TXT", "v=spf1")
 	// The DKIM row publishes exactly what the signer generated, name and value
 	// verbatim, so the operator copies the real key, not a guess.
-	if r := by["DKIM"]; r.Name != "hermex._domainkey.tenant.com" || r.Value != "v=DKIM1; k=rsa; p=ABC" {
-		t.Errorf("DKIM = %+v, want the generated record name and value verbatim", r)
-	}
+	wantRecordName(t, by, "DKIM", "hermex._domainkey.tenant.com")
+	wantRecordValue(t, by, "DKIM", "v=DKIM1; k=rsa; p=ABC")
 	// DMARC must target _dmarc.<domain> and declare an enforcing policy.
-	if r := by["DMARC"]; r.Type != "TXT" || r.Name != "_dmarc.tenant.com" || !strings.Contains(r.Value, "v=DMARC1") {
-		t.Errorf("DMARC = %+v, want a _dmarc TXT carrying v=DMARC1", r)
-	}
+	wantRecordName(t, by, "DMARC", "_dmarc.tenant.com")
+	wantRecordContains(t, by, "DMARC", "TXT", "v=DMARC1")
 	// The mail-host CNAME points IMAP/POP3/SMTP clients at the server and, in ACME
 	// mode, lets it obtain a certificate for mail.<domain>.
-	if r := by["Mail host"]; r.Type != "CNAME" || r.Name != "mail.tenant.com" || r.Value != host {
-		t.Errorf("Mail host = %+v, want a CNAME at mail.tenant.com to %s", r, host)
-	}
+	wantRecord(t, by, "Mail host", "CNAME", "mail.tenant.com", host)
 	// Autodiscover/Autoconfig CNAMEs must point at the server host or clients can't
 	// find their settings.
-	for _, lbl := range []string{"Autodiscover", "Autoconfig"} {
-		if r := by[lbl]; r.Type != "CNAME" || r.Value != host {
-			t.Errorf("%s = %+v, want a CNAME to %s", lbl, r, host)
-		}
-	}
-	// The SRV fallback must advertise autodiscovery on 443 at the server host.
-	if r := by["Autodiscover SRV"]; r.Type != "SRV" || !strings.HasSuffix(r.Value, "443 "+host) {
-		t.Errorf("Autodiscover SRV = %+v, want '... 443 %s'", r, host)
-	}
-	// The client-autoconfiguration SRV records must advertise the secure ports at the
-	// server host so clients connect over TLS, not in the clear.
+	wantRecordValue(t, by, "Autodiscover", host)
+	wantRecordType(t, by, "Autodiscover", "CNAME")
+	wantRecordValue(t, by, "Autoconfig", host)
+	wantRecordType(t, by, "Autoconfig", "CNAME")
+	// The SRV fallback must advertise autodiscovery on 443 at the server host, and
+	// the client-autoconfiguration SRV records must advertise the secure ports there
+	// too, so clients connect over TLS, not in the clear.
 	for _, c := range []struct{ label, suffix string }{
+		{"Autodiscover SRV", "443 " + host},
 		{"IMAP SRV", "993 " + host},
 		{"POP3 SRV", "995 " + host},
 		{"Submission SRV", "587 " + host},
 		{"CalDAV SRV", "443 " + host},
 		{"CardDAV SRV", "443 " + host},
 	} {
-		if r := by[c.label]; r.Type != "SRV" || !strings.HasSuffix(r.Value, c.suffix) {
-			t.Errorf("%s = %+v, want an SRV ending '%s'", c.label, r, c.suffix)
-		}
+		wantRecordSuffix(t, by, c.label, "SRV", c.suffix)
 	}
 	// The DAV TXT advertises the well-known DAV path.
-	if r := by["DAV TXT"]; r.Type != "TXT" || r.Value != "path=/dav" {
-		t.Errorf("DAV TXT = %+v, want a TXT valued path=/dav", r)
+	wantRecordType(t, by, "DAV TXT", "TXT")
+	wantRecordValue(t, by, "DAV TXT", "path=/dav")
+}
+
+// wantNoRecord fails the test when the prescription carries a record it must not.
+func wantNoRecord(t *testing.T, by map[string]prescribedRecord, label string) {
+	t.Helper()
+	if _, ok := by[label]; ok {
+		t.Errorf("%q present, want absent", label)
 	}
+}
+
+// wantRecordType asserts a prescribed record's DNS type.
+func wantRecordType(t *testing.T, by map[string]prescribedRecord, label, typ string) {
+	t.Helper()
+	wantEq(t, by[label].Type, typ, label+" type")
+}
+
+// wantRecordName asserts the owner name a prescribed record is published at.
+func wantRecordName(t *testing.T, by map[string]prescribedRecord, label, name string) {
+	t.Helper()
+	wantEq(t, by[label].Name, name, label+" name")
+}
+
+// wantRecordValue asserts a prescribed record's exact value.
+func wantRecordValue(t *testing.T, by map[string]prescribedRecord, label, value string) {
+	t.Helper()
+	wantEq(t, by[label].Value, value, label+" value")
+}
+
+// wantRecord asserts a prescribed record's type, owner name and exact value.
+func wantRecord(t *testing.T, by map[string]prescribedRecord, label, typ, name, value string) {
+	t.Helper()
+	wantRecordType(t, by, label, typ)
+	wantRecordName(t, by, label, name)
+	wantRecordValue(t, by, label, value)
+}
+
+// wantRecordPrefix asserts a record's type and that its value begins with prefix.
+func wantRecordPrefix(t *testing.T, by map[string]prescribedRecord, label, typ, prefix string) {
+	t.Helper()
+	wantRecordType(t, by, label, typ)
+	if !strings.HasPrefix(by[label].Value, prefix) {
+		t.Errorf("%s value = %q, want it to begin with %q", label, by[label].Value, prefix)
+	}
+}
+
+// wantRecordSuffix asserts a record's type and that its value ends with suffix.
+func wantRecordSuffix(t *testing.T, by map[string]prescribedRecord, label, typ, suffix string) {
+	t.Helper()
+	wantRecordType(t, by, label, typ)
+	if !strings.HasSuffix(by[label].Value, suffix) {
+		t.Errorf("%s value = %q, want it to end with %q", label, by[label].Value, suffix)
+	}
+}
+
+// wantRecordContains asserts a record's type and that its value carries sub.
+func wantRecordContains(t *testing.T, by map[string]prescribedRecord, label, typ, sub string) {
+	t.Helper()
+	wantRecordType(t, by, label, typ)
+	wantContains(t, by[label].Value, sub, label+" value")
 }
 
 // TestPrescribeDomainDNSWithoutDKIMKey proves the prescription stays complete
@@ -118,19 +161,15 @@ func TestPrescribeDomainDNSWithMTASTS(t *testing.T) {
 		directory.MTASTSSettings{Enabled: true, Mode: "testing", MaxAge: 86400})
 	by := byLabel(recs)
 
-	if r := by["MTA-STS host"]; r.Type != "CNAME" || r.Name != "mta-sts.tenant.com" || r.Value != "mail.hermex.test" {
-		t.Errorf("MTA-STS host = %+v, want a CNAME at mta-sts.tenant.com to the server", r)
-	}
-	r := by["MTA-STS"]
-	if r.Type != "TXT" || r.Name != "_mta-sts.tenant.com" || !strings.HasPrefix(r.Value, "v=STSv1; id=") {
-		t.Fatalf("MTA-STS = %+v, want a _mta-sts TXT carrying v=STSv1; id=", r)
-	}
-	if id := strings.TrimPrefix(r.Value, "v=STSv1; id="); len(id) != 32 {
-		t.Errorf("policy id = %q (len %d), want a 32-char fingerprint", id, len(id))
-	}
-	if r := by["TLS reporting"]; r.Type != "TXT" || r.Name != "_smtp._tls.tenant.com" || !strings.Contains(r.Value, "v=TLSRPTv1") {
-		t.Errorf("TLS reporting = %+v, want a _smtp._tls TXT carrying v=TLSRPTv1", r)
-	}
+	wantRecord(t, by, "MTA-STS host", "CNAME", "mta-sts.tenant.com", "mail.hermex.test")
+
+	wantRecordName(t, by, "MTA-STS", "_mta-sts.tenant.com")
+	wantRecordPrefix(t, by, "MTA-STS", "TXT", "v=STSv1; id=")
+	id := strings.TrimPrefix(by["MTA-STS"].Value, "v=STSv1; id=")
+	wantEq(t, len(id), 32, "policy id length")
+
+	wantRecordName(t, by, "TLS reporting", "_smtp._tls.tenant.com")
+	wantRecordContains(t, by, "TLS reporting", "TXT", "v=TLSRPTv1")
 }
 
 // TestDomainDetailShowsDNSRecords proves the prescription actually reaches the

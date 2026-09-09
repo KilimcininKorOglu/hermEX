@@ -2,7 +2,6 @@ package admin
 
 import (
 	"database/sql"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -71,43 +70,71 @@ func openTestDB(t *testing.T) *sql.DB {
 // role, then proves login, whoami, and the domain listing work end-to-end (and
 // a wrong password is refused against the stored hash).
 func TestAdminServerIntegration(t *testing.T) {
-	db := openTestDB(t)
-	dir := directory.NewSQL(db)
-	if err := dir.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	for _, tbl := range []string{"altnames", "aliases", "admin_roles", "users", "domains"} {
-		if _, err := db.Exec("DELETE FROM " + tbl); err != nil {
-			t.Fatalf("clean %s: %v", tbl, err)
-		}
-	}
-
+	dir := seedIntegrationDirectory(t)
 	root := t.TempDir()
-	if _, err := dir.CreateDomain("hermex.test", root+"/dom"); err != nil {
-		t.Fatal(err)
-	}
-	uid, err := dir.CreateUser("boss@hermex.test", "s3cret", root+"/boss")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := dir.GrantAdminRole(uid, directory.AdminSystem, 0); err != nil {
-		t.Fatal(err)
-	}
-
 	ts := httptest.NewServer(NewServer(dir, fakePaths{root: root}, []byte("integration-secret")).Handler())
 	t.Cleanup(ts.Close)
 
-	// 1. Login with the real credentials issues a session cookie.
-	resp, err := http.Post(ts.URL+"/admin/login", "application/json",
-		strings.NewReader(`{"login":"boss@hermex.test","password":"s3cret"}`))
-	if err != nil {
-		t.Fatal(err)
+	session, csrf := loginBoss(t, ts)
+
+	// whoami reports the real identity and system role.
+	who := wantBody(t, authedGET(t, ts, "/admin/whoami", session), http.StatusOK, "whoami")
+	wantContains(t, who, "boss@hermex.test", "whoami reports the login")
+	wantContains(t, who, "system", "whoami reports the system role")
+
+	// The listings return what was provisioned.
+	dom := wantBody(t, authedGET(t, ts, "/admin/domains", session), http.StatusOK, "domains")
+	wantContains(t, dom, "hermex.test", "the domain listing carries the provisioned domain")
+	usr := wantBody(t, authedGET(t, ts, "/admin/users", session), http.StatusOK, "users")
+	wantContains(t, usr, "boss@hermex.test", "the user listing carries the admin account")
+
+	// A wrong password is refused against the stored hash.
+	wantStatus(t, postBossLogin(t, ts, "wrong"), http.StatusUnauthorized, "wrong-password login")
+
+	checkAPICreateUser(t, ts, dir, session, csrf)
+	checkLDAPConfigRoundTrip(t, ts, session, csrf)
+	checkPasswordReset(t, ts, dir, session, csrf)
+	checkRoleGrantRevoke(t, ts, dir, session, csrf)
+}
+
+// seedIntegrationDirectory prepares a clean directory holding one domain and one
+// system-admin account.
+func seedIntegrationDirectory(t *testing.T) *directory.SQLDirectory {
+	t.Helper()
+	db := openTestDB(t)
+	dir := directory.NewSQL(db)
+	mustNoErr(t, dir.EnsureSchema(), "ensure schema")
+	for _, tbl := range []string{"altnames", "aliases", "admin_roles", "users", "domains"} {
+		_, err := db.Exec("DELETE FROM " + tbl)
+		mustNoErr(t, err, "clean "+tbl)
 	}
-	resp.Body.Close()
+	root := t.TempDir()
+	_, err := dir.CreateDomain("hermex.test", root+"/dom")
+	mustNoErr(t, err, "create domain")
+	uid, err := dir.CreateUser("boss@hermex.test", "s3cret", root+"/boss")
+	mustNoErr(t, err, "create admin user")
+	mustNoErr(t, dir.GrantAdminRole(uid, directory.AdminSystem, 0), "grant system role")
+	return dir
+}
+
+// postBossLogin submits the admin login form for the seeded account.
+func postBossLogin(t *testing.T, ts *httptest.Server, password string) *http.Response {
+	t.Helper()
+	resp, err := http.Post(ts.URL+"/admin/login", "application/json",
+		strings.NewReader(`{"login":"boss@hermex.test","password":"`+password+`"}`))
+	mustNoErr(t, err, "post login")
+	return resp
+}
+
+// loginBoss logs in with the real credentials and returns the issued session and
+// CSRF cookie values.
+func loginBoss(t *testing.T, ts *httptest.Server) (session, csrf string) {
+	t.Helper()
+	resp := postBossLogin(t, ts, "s3cret")
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("login status %d, want 200", resp.StatusCode)
 	}
-	var session, csrf string
 	for _, sc := range resp.Header["Set-Cookie"] {
 		if strings.HasPrefix(sc, sessionCookie+"=") {
 			session = cookieValue(sc, sessionCookie)
@@ -119,138 +146,73 @@ func TestAdminServerIntegration(t *testing.T) {
 	if session == "" || csrf == "" {
 		t.Fatal("login set no session/CSRF cookie")
 	}
+	return session, csrf
+}
 
-	// 2. whoami reports the real identity and system role.
-	who := authedGET(t, ts, "/admin/whoami", session)
-	defer who.Body.Close()
-	if who.StatusCode != http.StatusOK {
-		t.Fatalf("whoami status %d, want 200", who.StatusCode)
-	}
-	whoBody, _ := io.ReadAll(who.Body)
-	if !strings.Contains(string(whoBody), "boss@hermex.test") || !strings.Contains(string(whoBody), "system") {
-		t.Errorf("whoami body = %s, want the login and the system role", whoBody)
-	}
+// checkAPICreateUser provisions a user through the API (a state-changing request
+// with CSRF) and confirms it lands in the directory, proving the create path and
+// the config-derived maildir end-to-end.
+func checkAPICreateUser(t *testing.T, ts *httptest.Server, dir *directory.SQLDirectory, session, csrf string) {
+	t.Helper()
+	cr := authedPOST(t, ts, "/admin/users", session, csrf, `{"email":"intern@hermex.test","password":"pw2"}`)
+	wantStatus(t, cr, http.StatusCreated, "API create-user")
+	_, ok, _ := dir.UserID("intern@hermex.test")
+	wantTrue(t, ok, "the API-created user lands in the directory")
+}
 
-	// 3. The domain listing returns the provisioned domain.
-	dom := authedGET(t, ts, "/admin/domains", session)
-	defer dom.Body.Close()
-	if dom.StatusCode != http.StatusOK {
-		t.Fatalf("domains status %d, want 200", dom.StatusCode)
-	}
-	domBody, _ := io.ReadAll(dom.Body)
-	if !strings.Contains(string(domBody), "hermex.test") {
-		t.Errorf("domains body = %s, want hermex.test", domBody)
-	}
-
-	// 4. The user listing returns the provisioned admin account.
-	usr := authedGET(t, ts, "/admin/users", session)
-	defer usr.Body.Close()
-	if usr.StatusCode != http.StatusOK {
-		t.Fatalf("users status %d, want 200", usr.StatusCode)
-	}
-	usrBody, _ := io.ReadAll(usr.Body)
-	if !strings.Contains(string(usrBody), "boss@hermex.test") {
-		t.Errorf("users body = %s, want boss@hermex.test", usrBody)
-	}
-
-	// 5. A wrong password is refused against the stored hash.
-	bad, err := http.Post(ts.URL+"/admin/login", "application/json",
-		strings.NewReader(`{"login":"boss@hermex.test","password":"wrong"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	bad.Body.Close()
-	if bad.StatusCode != http.StatusUnauthorized {
-		t.Errorf("wrong-password login = %d, want 401", bad.StatusCode)
-	}
-
-	// 6. Provision a new user through the API (a state-changing request with CSRF)
-	// and confirm it lands in the directory, proving the create path and the
-	// config-derived maildir end-to-end.
-	cr := authedPOST(t, ts, "/admin/users", session, csrf,
-		`{"email":"intern@hermex.test","password":"pw2"}`)
-	cr.Body.Close()
-	if cr.StatusCode != http.StatusCreated {
-		t.Fatalf("API create-user status %d, want 201", cr.StatusCode)
-	}
-	if _, ok, _ := dir.UserID("intern@hermex.test"); !ok {
-		t.Error("the API-created user did not land in the directory")
-	}
-
-	// 7. Set then read an org's LDAP config through the API (real ldap_config
-	// table); the read must not echo the bind password.
+// checkLDAPConfigRoundTrip sets then reads an org's LDAP config through the API
+// (real ldap_config table); the read must not echo the bind password.
+func checkLDAPConfigRoundTrip(t *testing.T, ts *httptest.Server, session, csrf string) {
+	t.Helper()
 	put := authedPUT(t, ts, "/admin/orgs/5/ldap", session, csrf,
 		`{"URI":"ldaps://dc.hermex.test","BindDN":"cn=svc","BindPassword":"topsecret","BaseDN":"dc=hermex,dc=test"}`)
-	put.Body.Close()
-	if put.StatusCode != http.StatusNoContent {
-		t.Fatalf("put ldap status %d, want 204", put.StatusCode)
-	}
-	got := authedGET(t, ts, "/admin/orgs/5/ldap", session)
-	defer got.Body.Close()
-	if got.StatusCode != http.StatusOK {
-		t.Fatalf("get ldap status %d, want 200", got.StatusCode)
-	}
-	ldapBody, _ := io.ReadAll(got.Body)
-	if !strings.Contains(string(ldapBody), "ldaps://dc.hermex.test") {
-		t.Errorf("ldap body = %s, want the stored URI", ldapBody)
-	}
-	if strings.Contains(string(ldapBody), "topsecret") {
-		t.Errorf("the bind password leaked from the real config: %s", ldapBody)
-	}
+	wantStatus(t, put, http.StatusNoContent, "put ldap")
+	body := wantBody(t, authedGET(t, ts, "/admin/orgs/5/ldap", session), http.StatusOK, "get ldap")
+	wantContains(t, body, "ldaps://dc.hermex.test", "the read carries the stored URI")
+	wantNotContains(t, body, "topsecret", "the bind password stays out of the read")
+}
 
-	// 8. Reset the new user's password through the API; the new password must
-	// authenticate against the real hash and the old one must not.
-	pwReset := authedPOST(t, ts, "/admin/users/intern@hermex.test/password", session, csrf,
-		`{"password":"pw3"}`)
-	pwReset.Body.Close()
-	if pwReset.StatusCode != http.StatusNoContent {
-		t.Fatalf("password reset status %d, want 204", pwReset.StatusCode)
-	}
-	// The reset stored the new hash and flagged the account for a forced change.
-	// The strict Authenticate now denies a flagged account, so verify the stored
-	// hash via the lenient path and assert the strict path refuses it even with the
-	// correct password, that refusal is what locks the temporary password out of
-	// every client protocol until the user changes it.
-	if _, ok := dir.AuthenticateAllowingPasswordChange("intern@hermex.test", "pw3"); !ok {
-		t.Error("the API-reset password does not authenticate via the lenient path")
-	}
-	if _, ok := dir.Authenticate("intern@hermex.test", "pw3"); ok {
-		t.Error("a must-change account must be denied by the strict Authenticate path")
-	}
-	if _, ok := dir.Authenticate("intern@hermex.test", "pw2"); ok {
-		t.Error("the old password still authenticates after a reset")
-	}
-	// An admin reset must flag the account so the user is forced to change the
-	// temporary password on next login.
-	if u, ok, _ := dir.GetUser("intern@hermex.test"); !ok || !u.MustChangePassword {
-		t.Error("an admin password reset must set must_change_password")
-	}
+// checkPasswordReset resets the new user's password through the API. The reset
+// stores the new hash and flags the account for a forced change: the strict
+// Authenticate denies a flagged account, so the stored hash is verified through the
+// lenient path, and the strict path must refuse even the correct password. That
+// refusal is what locks the temporary password out of every client protocol until
+// the user changes it.
+func checkPasswordReset(t *testing.T, ts *httptest.Server, dir *directory.SQLDirectory, session, csrf string) {
+	t.Helper()
+	reset := authedPOST(t, ts, "/admin/users/intern@hermex.test/password", session, csrf, `{"password":"pw3"}`)
+	wantStatus(t, reset, http.StatusNoContent, "password reset")
 
-	// 9. Grant then revoke an admin role through the API against the real
-	// admin_roles table, and confirm an unknown role tier is rejected.
+	_, lenient := dir.AuthenticateAllowingPasswordChange("intern@hermex.test", "pw3")
+	wantTrue(t, lenient, "the reset password authenticates through the lenient path")
+	_, strict := dir.Authenticate("intern@hermex.test", "pw3")
+	wantFalse(t, strict, "the strict path denies a must-change account")
+	_, old := dir.Authenticate("intern@hermex.test", "pw2")
+	wantFalse(t, old, "the old password stops authenticating after a reset")
+
+	u, found, _ := dir.GetUser("intern@hermex.test")
+	wantTrue(t, found && u.MustChangePassword, "an admin reset sets must_change_password")
+}
+
+// checkRoleGrantRevoke grants then revokes an admin role through the API against
+// the real admin_roles table, and confirms an unknown role tier is rejected.
+func checkRoleGrantRevoke(t *testing.T, ts *httptest.Server, dir *directory.SQLDirectory, session, csrf string) {
+	t.Helper()
 	internUID, ok, _ := dir.UserID("intern@hermex.test")
 	if !ok {
 		t.Fatal("the intern user vanished")
 	}
 	grant := authedPOST(t, ts, "/admin/users/intern@hermex.test/roles", session, csrf, `{"role":"org","scopeID":5}`)
-	grant.Body.Close()
-	if grant.StatusCode != http.StatusNoContent {
-		t.Fatalf("grant role status %d, want 204", grant.StatusCode)
-	}
-	if roles, _ := dir.AdminRoles(internUID); len(roles) != 1 || roles[0].Role != directory.AdminOrg || roles[0].ScopeID != 5 {
-		t.Errorf("after grant, roles = %+v, want one org:5", roles)
-	}
+	wantStatus(t, grant, http.StatusNoContent, "grant role")
+	granted, _ := dir.AdminRoles(internUID)
+	wantEq(t, len(granted), 1, "role count after grant")
+	wantTrue(t, granted[0].Role == directory.AdminOrg && granted[0].ScopeID == 5, "the granted role is org:5")
+
 	revoke := authedDELETE(t, ts, "/admin/users/intern@hermex.test/roles", session, csrf, `{"role":"org","scopeID":5}`)
-	revoke.Body.Close()
-	if revoke.StatusCode != http.StatusNoContent {
-		t.Fatalf("revoke role status %d, want 204", revoke.StatusCode)
-	}
-	if roles, _ := dir.AdminRoles(internUID); len(roles) != 0 {
-		t.Errorf("after revoke, roles = %+v, want none", roles)
-	}
+	wantStatus(t, revoke, http.StatusNoContent, "revoke role")
+	left, _ := dir.AdminRoles(internUID)
+	wantEq(t, len(left), 0, "role count after revoke")
+
 	badRole := authedPOST(t, ts, "/admin/users/intern@hermex.test/roles", session, csrf, `{"role":"wizard"}`)
-	badRole.Body.Close()
-	if badRole.StatusCode != http.StatusBadRequest {
-		t.Errorf("granting an unknown role tier = %d, want 400", badRole.StatusCode)
-	}
+	wantStatus(t, badRole, http.StatusBadRequest, "granting an unknown role tier")
 }

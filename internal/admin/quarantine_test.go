@@ -1,11 +1,10 @@
 package admin
 
 import (
-	"io"
+	"net/http"
 	"net/url"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -24,16 +23,12 @@ func TestQuarantineListReleaseDelete(t *testing.T) {
 	mbox := filepath.Join(tmp, "alice")
 
 	st, err := objectstore.Open(mbox)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, err, "open mailbox")
 	when := time.Now()
-	if _, err := st.AppendMessage(int64(mapi.PrivateFIDJunk), []byte("Subject: spam one\r\n\r\nbuy now"), when, 0); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AppendMessage(int64(mapi.PrivateFIDJunk), []byte("Subject: spam two\r\n\r\ndiscount"), when, 0); err != nil {
-		t.Fatal(err)
-	}
+	_, err = st.AppendMessage(int64(mapi.PrivateFIDJunk), []byte("Subject: spam one\r\n\r\nbuy now"), when, 0)
+	mustNoErr(t, err, "append the first junk message")
+	_, err = st.AppendMessage(int64(mapi.PrivateFIDJunk), []byte("Subject: spam two\r\n\r\ndiscount"), when, 0)
+	mustNoErr(t, err, "append the second junk message")
 	junk, _ := st.ListMessages(int64(mapi.PrivateFIDJunk))
 	st.Close()
 	if len(junk) != 2 {
@@ -51,42 +46,38 @@ func TestQuarantineListReleaseDelete(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	// List shows both Junk messages by subject (metadata only).
-	resp := authedGET(t, ts, "/admin/ui/users/alice@test/quarantine", session)
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if page := string(body); !strings.Contains(page, "spam one") || !strings.Contains(page, "spam two") {
-		t.Fatalf("quarantine list missing seeded subjects:\n%s", page)
-	}
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/users/alice@test/quarantine", session),
+		http.StatusOK, "quarantine list")
+	wantContains(t, page, "spam one", "the list carries the first seeded subject")
+	wantContains(t, page, "spam two", "the list carries the second seeded subject")
 
 	// Release the first message → it leaves Junk and lands in the inbox.
 	rel := htmxPOST(t, ts, "/admin/ui/users/alice@test/quarantine/release", session, csrf,
 		url.Values{"uid": {strconv.FormatUint(uint64(releaseUID), 10)}})
 	rel.Body.Close()
 
-	st2, _ := objectstore.Open(mbox)
-	junkAfter, _ := st2.ListMessages(int64(mapi.PrivateFIDJunk))
-	inboxAfter, _ := st2.ListMessages(int64(mapi.PrivateFIDInbox))
-	st2.Close()
-	if len(junkAfter) != 1 {
-		t.Errorf("after release Junk has %d, want 1", len(junkAfter))
-	}
-	if len(inboxAfter) != 1 || inboxAfter[0].Subject != "spam one" {
-		t.Errorf("released message must be in the inbox; inbox=%+v", inboxAfter)
-	}
+	junkAfter, inboxAfter := junkAndInbox(t, mbox)
+	wantEq(t, len(junkAfter), 1, "Junk messages after the release")
+	wantEq(t, len(inboxAfter), 1, "inbox messages after the release")
+	wantEq(t, inboxAfter[0].Subject, "spam one", "the released message's subject in the inbox")
 
 	// Delete the remaining message → gone from Junk, inbox untouched.
 	del := htmxPOST(t, ts, "/admin/ui/users/alice@test/quarantine/delete", session, csrf,
 		url.Values{"uid": {strconv.FormatUint(uint64(deleteUID), 10)}})
 	del.Body.Close()
 
-	st3, _ := objectstore.Open(mbox)
-	junkFinal, _ := st3.ListMessages(int64(mapi.PrivateFIDJunk))
-	inboxFinal, _ := st3.ListMessages(int64(mapi.PrivateFIDInbox))
-	st3.Close()
-	if len(junkFinal) != 0 {
-		t.Errorf("after delete Junk has %d, want 0", len(junkFinal))
-	}
-	if len(inboxFinal) != 1 {
-		t.Errorf("delete must not touch the inbox: inbox has %d, want 1", len(inboxFinal))
-	}
+	junkFinal, inboxFinal := junkAndInbox(t, mbox)
+	wantEq(t, len(junkFinal), 0, "Junk messages after the delete")
+	wantEq(t, len(inboxFinal), 1, "inbox messages after the delete (it must not be touched)")
+}
+
+// junkAndInbox reopens a mailbox and lists what its Junk and inbox hold.
+func junkAndInbox(t *testing.T, mbox string) (junk, inbox []objectstore.MessageInfo) {
+	t.Helper()
+	st, err := objectstore.Open(mbox)
+	mustNoErr(t, err, "reopen mailbox")
+	defer st.Close()
+	junk, _ = st.ListMessages(int64(mapi.PrivateFIDJunk))
+	inbox, _ = st.ListMessages(int64(mapi.PrivateFIDInbox))
+	return junk, inbox
 }

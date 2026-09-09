@@ -153,22 +153,23 @@ func TestUISaveDefaults(t *testing.T) {
 	resp := htmxPUT(t, ts, "/admin/ui/defaults", session, csrf, url.Values{
 		"maxUser": {"50"}, "lang": {"tr"}, "pop3_imap": {"on"}, "web": {"on"}, "storagemb": {"100"},
 	})
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("save defaults status %d, want 200", resp.StatusCode)
-	}
+	body := wantBody(t, resp, http.StatusOK, "save defaults")
+	wantContains(t, body, `class="ok"`, "the save is acknowledged")
+
 	cd := d.createDefaults[0]
-	if cd.Domain.MaxUser != 50 || cd.User.Lang == nil || *cd.User.Lang != "tr" {
-		t.Errorf("stored maxUser/lang = %d / %v, want 50 / tr", cd.Domain.MaxUser, cd.User.Lang)
+	wantEq(t, cd.Domain.MaxUser, int64(50), "stored maxUser")
+	wantEq(t, deref(cd.User.Lang), "tr", "stored lang")
+	wantEq(t, deref(cd.User.POP3IMAP), true, "a checked toggle stores true")
+	wantEq(t, deref(cd.User.SMTP), false, "an unchecked toggle stores false")
+	wantEq(t, deref(cd.User.StorageKB), int64(100*1024), "stored storage quota in KiB")
+}
+
+// deref reads an optional stored field, reporting the zero value when unset so an
+// assertion names the value that differs rather than a nil check.
+func deref[T any](p *T) T {
+	if p == nil {
+		var zero T
+		return zero
 	}
-	if cd.User.POP3IMAP == nil || !*cd.User.POP3IMAP || cd.User.SMTP == nil || *cd.User.SMTP {
-		t.Errorf("toggles = POP3IMAP %v / SMTP %v, want true / false", cd.User.POP3IMAP, cd.User.SMTP)
-	}
-	if cd.User.StorageKB == nil || *cd.User.StorageKB != 100*1024 {
-		t.Errorf("storage = %v, want 102400 KiB", cd.User.StorageKB)
-	}
-	if !strings.Contains(string(body), `class="ok"`) {
-		t.Errorf("save response = %s, want a success acknowledgement", body)
-	}
+	return *p
 }

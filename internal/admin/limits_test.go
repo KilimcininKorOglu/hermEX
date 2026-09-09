@@ -17,30 +17,16 @@ func TestLimitsPageRenders(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/limits", session)
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("limits page = %d, want 200", resp.StatusCode)
-	}
-	page := string(body)
-	if !strings.Contains(page, "Protocol size limits") || !strings.Contains(page, "IMAP maximum literal") || !strings.Contains(page, "value=\"50\"") {
-		t.Errorf("limits page missing expected content/default:\n%s", page)
-	}
-	if !strings.Contains(page, "EWS maximum SOAP request") || !strings.Contains(page, "value=\"8\"") {
-		t.Errorf("limits page missing the EWS limit/default:\n%s", page)
-	}
-	if !strings.Contains(page, "ActiveSync maximum request") || !strings.Contains(page, "value=\"4\"") {
-		t.Errorf("limits page missing the ActiveSync limit/default:\n%s", page)
-	}
-	if !strings.Contains(page, "CalDAV maximum iCalendar") || !strings.Contains(page, "CardDAV maximum vCard") {
-		t.Errorf("limits page missing the DAV limits:\n%s", page)
-	}
-	if !strings.Contains(page, "Webmail maximum request") || !strings.Contains(page, `name="webmail_request_mb" value="40"`) {
-		t.Errorf("limits page missing the webmail limit/default:\n%s", page)
-	}
-	if !strings.Contains(page, "MAPI/HTTP maximum request") || !strings.Contains(page, `name="mapi_request_mb" value="32"`) {
-		t.Errorf("limits page missing the MAPI/HTTP limit/default:\n%s", page)
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/limits", session), http.StatusOK, "limits page")
+	for _, want := range []string{
+		"Protocol size limits", "IMAP maximum literal", `value="50"`,
+		"EWS maximum SOAP request", `value="8"`,
+		"ActiveSync maximum request", `value="4"`,
+		"CalDAV maximum iCalendar", "CardDAV maximum vCard",
+		"Webmail maximum request", `name="webmail_request_mb" value="40"`,
+		"MAPI/HTTP maximum request", `name="mapi_request_mb" value="32"`,
+	} {
+		wantContains(t, page, want, "the limits page carries its fields and built-in defaults")
 	}
 }
 
@@ -56,24 +42,20 @@ func TestSaveLimits(t *testing.T) {
 		"dav_ical_mb": {"3"}, "dav_vcard_mb": {"5"}, "webmail_request_mb": {"20"},
 		"mapi_request_mb": {"16"}, "freebusy_max_targets": {"25"}, "webmail_preview_mb": {"6"},
 	})
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Size limits saved") {
-		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", resp.StatusCode, body)
-	}
-	if !d.sizeLimitsFound || d.sizeLimits.IMAPLiteralBytes != 10*1024*1024 || d.sizeLimits.EWSRequestBytes != 4*1024*1024 ||
-		d.sizeLimits.ActiveSyncRequestBytes != 2*1024*1024 || d.sizeLimits.DAVICalBytes != 3*1024*1024 ||
-		d.sizeLimits.DAVVCardBytes != 5*1024*1024 || d.sizeLimits.WebmailRequestBytes != 20*1024*1024 ||
-		d.sizeLimits.MapiRequestBytes != 16*1024*1024 {
-		t.Errorf("limits not persisted as bytes: found=%v %+v", d.sizeLimitsFound, d.sizeLimits)
-	}
+	body := wantBody(t, resp, http.StatusOK, "save limits")
+	wantContains(t, body, "Size limits saved", "the save is acknowledged")
+
+	wantTrue(t, d.sizeLimitsFound, "the limits reach the directory")
+	wantEq(t, d.sizeLimits.IMAPLiteralBytes, int64(10*1024*1024), "IMAP literal bytes")
+	wantEq(t, d.sizeLimits.EWSRequestBytes, int64(4*1024*1024), "EWS request bytes")
+	wantEq(t, d.sizeLimits.ActiveSyncRequestBytes, int64(2*1024*1024), "ActiveSync request bytes")
+	wantEq(t, d.sizeLimits.DAVICalBytes, int64(3*1024*1024), "DAV iCalendar bytes")
+	wantEq(t, d.sizeLimits.DAVVCardBytes, int64(5*1024*1024), "DAV vCard bytes")
+	wantEq(t, d.sizeLimits.WebmailRequestBytes, int64(20*1024*1024), "webmail request bytes")
+	wantEq(t, d.sizeLimits.MapiRequestBytes, int64(16*1024*1024), "MAPI request bytes")
+	wantEq(t, d.sizeLimits.WebmailPreviewMaxBytes, int64(6*1024*1024), "inline preview bytes")
 	// The free/busy cap is a count, so it must persist unscaled by the megabyte factor.
-	if d.sizeLimits.FreeBusyMaxTargets != 25 {
-		t.Errorf("free/busy target cap = %d, want 25 (a count, not a size)", d.sizeLimits.FreeBusyMaxTargets)
-	}
-	if d.sizeLimits.WebmailPreviewMaxBytes != 6*1024*1024 {
-		t.Errorf("inline preview cap = %d, want %d", d.sizeLimits.WebmailPreviewMaxBytes, 6*1024*1024)
-	}
+	wantEq(t, d.sizeLimits.FreeBusyMaxTargets, int64(25), "free/busy target cap")
 }
 
 // TestSaveLimitsRejectsBadValues proves a sub-1 MB limit is rejected and nothing persists.

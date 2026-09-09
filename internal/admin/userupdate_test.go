@@ -31,21 +31,19 @@ func TestUpdateUserLeavesOmittedFieldsAlone(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := authedReq(t, ts, "PUT", "/admin/users/alice@hermex.test", session, csrf, `{"status":1}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204", resp.StatusCode)
-	}
+	wantStatus(t, resp, http.StatusNoContent, "partial update")
 
 	got := d.updateUser
-	if got.Status != 1 {
-		t.Errorf("status = %d, want the requested 1", got.Status)
-	}
-	if !got.POP3IMAP || !got.SMTP || !got.ChgPasswd || !got.Web || !got.EAS || !got.DAV {
-		t.Errorf("protocol flags = %+v, want every one left enabled", got)
-	}
-	if got.Lang != "tr" || got.Timezone != "Europe/Istanbul" || got.Homeserver != 2 {
-		t.Errorf("scalar fields = %q/%q/%d, want the stored tr/Europe/Istanbul/2", got.Lang, got.Timezone, got.Homeserver)
-	}
+	wantEq(t, got.Status, 1, "the requested status")
+	wantTrue(t, got.POP3IMAP, "POP3/IMAP stays enabled")
+	wantTrue(t, got.SMTP, "SMTP stays enabled")
+	wantTrue(t, got.ChgPasswd, "password change stays enabled")
+	wantTrue(t, got.Web, "webmail stays enabled")
+	wantTrue(t, got.EAS, "ActiveSync stays enabled")
+	wantTrue(t, got.DAV, "DAV stays enabled")
+	wantEq(t, got.Lang, "tr", "the stored lang")
+	wantEq(t, got.Timezone, "Europe/Istanbul", "the stored timezone")
+	wantEq(t, got.Homeserver, 2, "the stored homeserver")
 }
 
 // TestUpdateUserStillRevokesWhenAsked is the negative control: an explicit false

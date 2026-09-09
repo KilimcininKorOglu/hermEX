@@ -2,11 +2,9 @@ package admin
 
 import (
 	"encoding/json"
-	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"hermex/internal/directory"
@@ -59,33 +57,21 @@ func TestLiveStatusProbe(t *testing.T) {
 	ts := statusServer(t, d, targets)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/status", session)
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status page = %d, want 200", resp.StatusCode)
-	}
-	page := string(body)
-	if !strings.Contains(page, "imap") || !strings.Contains(page, "Up") {
-		t.Errorf("page missing healthy imap/Up:\n%s", page)
-	}
-	if !strings.Contains(page, "mta") || !strings.Contains(page, "Down") {
-		t.Errorf("page missing down mta/Down:\n%s", page)
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/status", session), http.StatusOK, "status page")
+	for _, want := range []string{"imap", "Up", "mta", "Down"} {
+		wantContains(t, page, want, "the page reports each daemon and its state")
 	}
 
-	resp = authedGET(t, ts, "/admin/status", session)
+	resp := authedGET(t, ts, "/admin/status", session)
 	var got []struct{ Name, Status string }
-	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
-		t.Fatalf("decode status JSON: %v", err)
-	}
+	err = json.NewDecoder(resp.Body).Decode(&got)
 	resp.Body.Close()
+	mustNoErr(t, err, "decode status JSON")
 	byName := map[string]string{}
 	for _, r := range got {
 		byName[r.Name] = r.Status
 	}
-	if byName["imap"] != "Up" {
-		t.Errorf("imap status = %q, want Up", byName["imap"])
-	}
+	wantEq(t, byName["imap"], "Up", "the reachable daemon's status")
 	if byName["mta"] != "Down" {
 		t.Errorf("mta status = %q, want Down", byName["mta"])
 	}

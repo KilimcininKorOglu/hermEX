@@ -36,49 +36,25 @@ func TestAdminNamedRolesCRUD(t *testing.T) {
 	if created.ID == 0 {
 		t.Fatal("create returned id 0")
 	}
+	path := "/admin/roles/" + itoa(created.ID)
 
-	get := authedGET(t, ts, "/admin/roles/"+itoa(created.ID), session)
-	gotBody, _ := io.ReadAll(get.Body)
-	get.Body.Close()
-	if get.StatusCode != http.StatusOK {
-		t.Fatalf("get status %d, want 200", get.StatusCode)
-	}
+	got := wantBody(t, authedGET(t, ts, path, session), http.StatusOK, "get role")
 	for _, want := range []string{"Helpdesk", "ResetPasswd", "DomainAdmin"} {
-		if !strings.Contains(string(gotBody), want) {
-			t.Errorf("get body missing %q: %s", want, gotBody)
-		}
+		wantContains(t, got, want, "the read carries what was created")
 	}
 
-	list := authedGET(t, ts, "/admin/roles", session)
-	listBody, _ := io.ReadAll(list.Body)
-	list.Body.Close()
-	if list.StatusCode != http.StatusOK || !strings.Contains(string(listBody), "Helpdesk") {
-		t.Fatalf("list status %d body %s", list.StatusCode, listBody)
-	}
+	list := wantBody(t, authedGET(t, ts, "/admin/roles", session), http.StatusOK, "list roles")
+	wantContains(t, list, "Helpdesk", "the listing carries the created role")
 
-	upd := authedPUT(t, ts, "/admin/roles/"+itoa(created.ID), session, csrf,
+	upd := authedPUT(t, ts, path, session, csrf,
 		`{"name":"Helpdesk RO","description":"","permissions":[{"name":"SystemAdminRO","params":""}],"userIDs":[]}`)
-	upd.Body.Close()
-	if upd.StatusCode != http.StatusNoContent {
-		t.Fatalf("update status %d, want 204", upd.StatusCode)
-	}
-	get2 := authedGET(t, ts, "/admin/roles/"+itoa(created.ID), session)
-	g2, _ := io.ReadAll(get2.Body)
-	get2.Body.Close()
-	if !strings.Contains(string(g2), "Helpdesk RO") || !strings.Contains(string(g2), "SystemAdminRO") {
-		t.Errorf("after update body = %s", g2)
-	}
+	wantStatus(t, upd, http.StatusNoContent, "update role")
+	updated := wantBody(t, authedGET(t, ts, path, session), http.StatusOK, "get after update")
+	wantContains(t, updated, "Helpdesk RO", "the update replaced the name")
+	wantContains(t, updated, "SystemAdminRO", "the update replaced the permissions")
 
-	del := authedDELETE(t, ts, "/admin/roles/"+itoa(created.ID), session, csrf, "")
-	del.Body.Close()
-	if del.StatusCode != http.StatusNoContent {
-		t.Fatalf("delete status %d, want 204", del.StatusCode)
-	}
-	gone := authedGET(t, ts, "/admin/roles/"+itoa(created.ID), session)
-	gone.Body.Close()
-	if gone.StatusCode != http.StatusNotFound {
-		t.Errorf("get after delete status %d, want 404", gone.StatusCode)
-	}
+	wantStatus(t, authedDELETE(t, ts, path, session, csrf, ""), http.StatusNoContent, "delete role")
+	wantStatus(t, authedGET(t, ts, path, session), http.StatusNotFound, "get after delete")
 }
 
 // TestAdminRolePermissionsCatalog proves the editor catalog lists every

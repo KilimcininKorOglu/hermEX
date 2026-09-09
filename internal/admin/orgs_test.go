@@ -34,11 +34,8 @@ func TestAdminOrgCRUD(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := authedPOST(t, ts, "/admin/orgs", session, csrf, `{"name":"Acme","description":"The Acme org"}`)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("create status %d, want 201", resp.StatusCode)
-	}
+	create := authedPOST(t, ts, "/admin/orgs", session, csrf, `{"name":"Acme","description":"The Acme org"}`)
+	wantStatus(t, create, http.StatusCreated, "create org")
 	if len(d.orgs) != 1 {
 		t.Fatalf("org not stored: %v", d.orgs)
 	}
@@ -47,43 +44,21 @@ func TestAdminOrgCRUD(t *testing.T) {
 		id = k
 	}
 
-	list := authedGET(t, ts, "/admin/orgs", session)
-	lbody, _ := io.ReadAll(list.Body)
-	list.Body.Close()
-	if !strings.Contains(string(lbody), "Acme") {
-		t.Errorf("list missing the org: %s", lbody)
-	}
-
-	get := authedGET(t, ts, "/admin/orgs/"+itoa(id), session)
-	gbody, _ := io.ReadAll(get.Body)
-	get.Body.Close()
-	if get.StatusCode != http.StatusOK || !strings.Contains(string(gbody), "The Acme org") {
-		t.Errorf("get = %d %s", get.StatusCode, gbody)
-	}
+	list := wantBody(t, authedGET(t, ts, "/admin/orgs", session), http.StatusOK, "list orgs")
+	wantContains(t, list, "Acme", "the listing carries the created org")
+	get := wantBody(t, authedGET(t, ts, "/admin/orgs/"+itoa(id), session), http.StatusOK, "get org")
+	wantContains(t, get, "The Acme org", "the read carries the stored description")
 
 	upd := authedPUT(t, ts, "/admin/orgs/"+itoa(id), session, csrf, `{"name":"Acme Inc","description":"renamed"}`)
-	upd.Body.Close()
-	if upd.StatusCode != http.StatusNoContent {
-		t.Fatalf("update status %d, want 204", upd.StatusCode)
-	}
-	if d.orgs[id].Name != "Acme Inc" {
-		t.Errorf("org not updated: %+v", d.orgs[id])
-	}
+	wantStatus(t, upd, http.StatusNoContent, "update org")
+	wantEq(t, d.orgs[id].Name, "Acme Inc", "the stored name after the update")
 
 	del := authedDELETE(t, ts, "/admin/orgs/"+itoa(id), session, csrf, "")
-	del.Body.Close()
-	if del.StatusCode != http.StatusNoContent {
-		t.Fatalf("delete status %d, want 204", del.StatusCode)
-	}
-	if len(d.orgs) != 0 {
-		t.Errorf("org not deleted: %v", d.orgs)
-	}
+	wantStatus(t, del, http.StatusNoContent, "delete org")
+	wantEq(t, len(d.orgs), 0, "stored orgs after the delete")
 
 	missing := authedGET(t, ts, "/admin/orgs/"+itoa(id), session)
-	missing.Body.Close()
-	if missing.StatusCode != http.StatusNotFound {
-		t.Errorf("get of a deleted org = %d, want 404", missing.StatusCode)
-	}
+	wantStatus(t, missing, http.StatusNotFound, "get of a deleted org")
 }
 
 // TestAdminDeleteOrgZeroRefused proves deleting the reserved organizationless id
