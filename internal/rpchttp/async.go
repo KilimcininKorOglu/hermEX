@@ -152,35 +152,48 @@ func (a *AsyncEMSMDB) asyncWaitEx(sess *Session, stub []byte) ([]byte, uint32) {
 // connection that carries no Execute traffic, so that window does not arise in practice.
 func (a *AsyncEMSMDB) parkAndReply(s *emsmdbSession, vc *vconn, callID uint32, contextID uint16, maxFrag int) {
 	defer s.waiting.Store(false)
-	deadline := time.Now().Add(a.waitInterval)
-	flagsOut := uint32(0)
-	// Register the session's mailbox for a push wake before the first poll, so a
-	// change that lands during the wait wakes it at once. A nil waker (push disabled)
-	// or a session with no opened store leaves wake nil, falling back to the cadence.
-	var wake <-chan struct{}
-	if a.waker != nil && s.rop != nil {
-		ch, cancel := a.waker.Register(s.rop.MailboxDir())
-		defer cancel()
-		wake = ch
+	wake, cancel := a.registerWake(s)
+	defer cancel()
+
+	flagsOut, ok := a.waitForChange(s, vc, wake)
+	if !ok {
+		return // the connection tore down; abandon the parked reply
 	}
+	for _, pdu := range fragmentResponse(callID, contextID, pushAsyncWaitExOut(flagsOut, ecSuccess), maxFrag) {
+		vc.send(pdu)
+	}
+}
+
+// registerWake registers the session's mailbox for a push wake before the first
+// poll, so a change that lands during the wait wakes it at once. A nil waker (push
+// disabled) or a session with no opened store yields a nil channel, which falls
+// back to the polling cadence.
+func (a *AsyncEMSMDB) registerWake(s *emsmdbSession) (<-chan struct{}, func()) {
+	if a.waker == nil || s.rop == nil {
+		return nil, func() {}
+	}
+	return a.waker.Register(s.rop.MailboxDir())
+}
+
+// waitForChange polls (and waits on the push wake) until the mailbox changes or
+// the wait interval expires, returning the flags the reply carries. ok is false
+// when the connection tore down, which abandons the reply.
+func (a *AsyncEMSMDB) waitForChange(s *emsmdbSession, vc *vconn, wake <-chan struct{}) (uint32, bool) {
+	deadline := time.Now().Add(a.waitInterval)
 	for {
 		if s.rop != nil && s.rop.PollForChange() {
-			flagsOut = flagNotificationPending
-			break
+			return flagNotificationPending, true
 		}
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
-			break // timeout: flags_out stays 0
+			return 0, true // timeout: flags_out stays 0
 		}
 		select {
 		case <-vc.closed:
-			return // the connection tore down; abandon the parked reply
+			return 0, false
 		case <-wake:
 			// a push wake, loop and PollForChange observes the change
 		case <-time.After(min(a.cadence, remaining)):
 		}
-	}
-	for _, pdu := range fragmentResponse(callID, contextID, pushAsyncWaitExOut(flagsOut, ecSuccess), maxFrag) {
-		vc.send(pdu)
 	}
 }

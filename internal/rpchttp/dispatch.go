@@ -140,34 +140,9 @@ const (
 // handleRequest reassembles a (possibly fragmented) request, dispatches it to
 // the bound interface, and fragments the response to the negotiated frag size.
 func (d *Dispatcher) handleRequest(sess *Session, h ndr.Header, req *ndr.Request) [][]byte {
-	stub := req.Stub
-	first := h.Flags&ndr.PfcFirstFrag != 0
-	last := h.Flags&ndr.PfcLastFrag != 0
-	if !first || !last {
-		if sess.reasm == nil {
-			sess.reasm = make(map[uint32][]byte)
-		}
-		if first {
-			if len(sess.reasm) >= maxPendingCalls {
-				// Refusing the new call keeps the ones already in flight, which is the
-				// friendlier half to drop when a client is over the ceiling.
-				return [][]byte{ndr.FrameFault(h.CallID, req.ContextID, ndr.FaultProtoError)}
-			}
-			sess.reasm[h.CallID] = append([]byte(nil), stub...)
-		} else {
-			sess.reasm[h.CallID] = append(sess.reasm[h.CallID], stub...)
-		}
-		if len(sess.reasm[h.CallID]) > maxReassembledStub {
-			// Drop what has accumulated: the call is over, and holding it would keep
-			// exactly the memory the cap exists to release.
-			delete(sess.reasm, h.CallID)
-			return [][]byte{ndr.FrameFault(h.CallID, req.ContextID, ndr.FaultProtoError)}
-		}
-		if !last {
-			return nil // await the remaining fragments
-		}
-		stub = sess.reasm[h.CallID]
-		delete(sess.reasm, h.CallID)
+	stub, replies, complete := reassembleStub(sess, h, req)
+	if !complete {
+		return replies
 	}
 
 	ri := sess.contexts[req.ContextID]
@@ -186,6 +161,41 @@ func (d *Dispatcher) handleRequest(sess *Session, h ndr.Header, req *ndr.Request
 		return [][]byte{ndr.FrameFault(h.CallID, req.ContextID, fault)}
 	}
 	return fragmentResponse(h.CallID, req.ContextID, out, sess.maxFrag)
+}
+
+// reassembleStub joins a fragmented request's stub. complete is false while more
+// fragments are awaited, or when the call was refused, in which case replies
+// carries what must go back now.
+func reassembleStub(sess *Session, h ndr.Header, req *ndr.Request) (stub []byte, replies [][]byte, complete bool) {
+	first := h.Flags&ndr.PfcFirstFrag != 0
+	last := h.Flags&ndr.PfcLastFrag != 0
+	if first && last {
+		return req.Stub, nil, true
+	}
+	if sess.reasm == nil {
+		sess.reasm = make(map[uint32][]byte)
+	}
+	if !first {
+		sess.reasm[h.CallID] = append(sess.reasm[h.CallID], req.Stub...)
+	} else if len(sess.reasm) >= maxPendingCalls {
+		// Refusing the new call keeps the ones already in flight, which is the
+		// friendlier half to drop when a client is over the ceiling.
+		return nil, [][]byte{ndr.FrameFault(h.CallID, req.ContextID, ndr.FaultProtoError)}, false
+	} else {
+		sess.reasm[h.CallID] = append([]byte(nil), req.Stub...)
+	}
+	if len(sess.reasm[h.CallID]) > maxReassembledStub {
+		// Drop what has accumulated: the call is over, and holding it would keep
+		// exactly the memory the cap exists to release.
+		delete(sess.reasm, h.CallID)
+		return nil, [][]byte{ndr.FrameFault(h.CallID, req.ContextID, ndr.FaultProtoError)}, false
+	}
+	if !last {
+		return nil, nil, false // await the remaining fragments
+	}
+	stub = sess.reasm[h.CallID]
+	delete(sess.reasm, h.CallID)
+	return stub, nil, true
 }
 
 // faultParked is the sentinel an interface handler returns to signal that it has

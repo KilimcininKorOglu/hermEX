@@ -278,62 +278,92 @@ type connectExIn struct {
 // szUserDN string, the scalar parameters, and the (discarded) AUX-in buffer.
 func pullConnectEx(stub []byte) (*connectExIn, error) {
 	p := ndr.NewPull(stub)
-	size, err := p.Uint32() // userdn max_count
+	dn, err := pullUserDN(p)
 	if err != nil {
 		return nil, err
 	}
-	offset, err := p.Uint32()
-	if err != nil {
+	r := &connectExIn{userDN: dn}
+	if err := pullConnectExScalars(p, r); err != nil {
 		return nil, err
 	}
-	length, err := p.Uint32()
-	if err != nil {
-		return nil, err
-	}
-	if offset != 0 || length > size || length > 1024 {
-		return nil, ndr.ErrFormat
-	}
-	dn, err := p.Raw(int(length))
-	if err != nil {
-		return nil, err
-	}
-	r := &connectExIn{userDN: trimNUL(dn)}
-	if r.flags, err = p.Uint32(); err != nil {
-		return nil, err
-	}
-	for _, f := range []*uint32{new(uint32), new(uint32)} { // conmod, limit
-		if *f, err = p.Uint32(); err != nil {
-			return nil, err
-		}
-	}
-	if r.cpid, err = p.Uint32(); err != nil {
-		return nil, err
-	}
-	for range 3 { // lcid_string, lcid_sort, cxr_link
-		if _, err = p.Uint32(); err != nil {
-			return nil, err
-		}
-	}
-	if _, err = p.Uint16(); err != nil { // cnvt_cps
-		return nil, err
-	}
-	for i := range r.clientVers {
-		if r.clientVers[i], err = p.Uint16(); err != nil {
-			return nil, err
-		}
-	}
-	if r.timestamp, err = p.Uint32(); err != nil {
-		return nil, err
-	}
-	// AUX-in: conformant byte array + redundant length (discarded for v1).
-	auxSize, err := p.Uint32()
-	if err != nil {
-		return nil, err
-	}
-	if _, err = p.Raw(int(auxSize)); err != nil {
+	if err := skipAuxIn(p); err != nil {
 		return nil, err
 	}
 	return r, nil // cb_auxin / cb_auxout follow but are not needed
+}
+
+// pullUserDN decodes the conformant-varying szUserDN string that opens the
+// request stub.
+func pullUserDN(p *ndr.Pull) (string, error) {
+	size, err := p.Uint32() // max_count
+	if err != nil {
+		return "", err
+	}
+	offset, err := p.Uint32()
+	if err != nil {
+		return "", err
+	}
+	length, err := p.Uint32()
+	if err != nil {
+		return "", err
+	}
+	if offset != 0 || length > size || length > 1024 {
+		return "", ndr.ErrFormat
+	}
+	dn, err := p.Raw(int(length))
+	if err != nil {
+		return "", err
+	}
+	return trimNUL(dn), nil
+}
+
+// pullConnectExScalars decodes the scalar parameters that follow the user DN,
+// skipping the ones the server does not act on.
+func pullConnectExScalars(p *ndr.Pull, r *connectExIn) error {
+	var err error
+	if r.flags, err = p.Uint32(); err != nil {
+		return err
+	}
+	if err = skipUint32(p, 2); err != nil { // conmod, limit
+		return err
+	}
+	if r.cpid, err = p.Uint32(); err != nil {
+		return err
+	}
+	if err = skipUint32(p, 3); err != nil { // lcid_string, lcid_sort, cxr_link
+		return err
+	}
+	if _, err = p.Uint16(); err != nil { // cnvt_cps
+		return err
+	}
+	for i := range r.clientVers {
+		if r.clientVers[i], err = p.Uint16(); err != nil {
+			return err
+		}
+	}
+	r.timestamp, err = p.Uint32()
+	return err
+}
+
+// skipUint32 discards n 32-bit fields the server does not act on.
+func skipUint32(p *ndr.Pull, n int) error {
+	for range n {
+		if _, err := p.Uint32(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// skipAuxIn discards the AUX-in buffer: a conformant byte array plus a redundant
+// length, neither of which v1 reads.
+func skipAuxIn(p *ndr.Pull) error {
+	auxSize, err := p.Uint32()
+	if err != nil {
+		return err
+	}
+	_, err = p.Raw(int(auxSize))
+	return err
 }
 
 // pushConnectExOut marshals the EcDoConnectEx response ([MS-OXCRPC] 2.2.2.2.2):

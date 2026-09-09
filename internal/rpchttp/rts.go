@@ -64,46 +64,63 @@ func parseRTS(pdu []byte) (flags uint16, cmds []rtsCommand, err error) {
 		return flags, nil, err
 	}
 	for range num {
-		var c rtsCommand
-		if c.Type, err = p.Uint32(); err != nil {
-			return flags, cmds, err
-		}
-		switch c.Type {
-		case rtsCookie, rtsAssociationGroupID:
-			if c.GUID, err = p.GUID(); err != nil {
-				return flags, cmds, err
-			}
-		case rtsReceiveWindowSize, rtsConnectionTimeout, rtsChannelLifetime,
-			rtsClientKeepalive, rtsVersion, rtsDestination, rtsPingTrafficSentNotif:
-			if c.U32, err = p.Uint32(); err != nil {
-				return flags, cmds, err
-			}
-		case rtsFlowControlAck: // bytes_received + available_window + channel_cookie
-			if _, err = p.Uint32(); err != nil {
-				return flags, cmds, err
-			}
-			if _, err = p.Uint32(); err != nil {
-				return flags, cmds, err
-			}
-			if _, err = p.GUID(); err != nil {
-				return flags, cmds, err
-			}
-		case rtsEmpty, rtsANCE, rtsNegativeANCE:
-			// no body
-		case rtsPadding:
-			n, perr := p.Uint32()
-			if perr != nil {
-				return flags, cmds, perr
-			}
-			if _, err = p.Raw(int(n)); err != nil {
-				return flags, cmds, err
-			}
-		default:
-			return flags, cmds, ndr.ErrFormat
+		c, cerr := pullRTSCommand(p)
+		if cerr != nil {
+			return flags, cmds, cerr
 		}
 		cmds = append(cmds, c)
 	}
 	return flags, cmds, nil
+}
+
+// pullRTSCommand decodes one RTS command: its type, then the body that type
+// carries. An unrecognised type is refused rather than guessed at.
+func pullRTSCommand(p *ndr.Pull) (rtsCommand, error) {
+	var c rtsCommand
+	typ, err := p.Uint32()
+	if err != nil {
+		return c, err
+	}
+	c.Type = typ
+	switch typ {
+	case rtsCookie, rtsAssociationGroupID:
+		c.GUID, err = p.GUID()
+	case rtsReceiveWindowSize, rtsConnectionTimeout, rtsChannelLifetime,
+		rtsClientKeepalive, rtsVersion, rtsDestination, rtsPingTrafficSentNotif:
+		c.U32, err = p.Uint32()
+	case rtsFlowControlAck:
+		err = skipFlowControlAck(p)
+	case rtsEmpty, rtsANCE, rtsNegativeANCE:
+		// no body
+	case rtsPadding:
+		err = skipRTSPadding(p)
+	default:
+		err = ndr.ErrFormat
+	}
+	return c, err
+}
+
+// skipFlowControlAck discards a FLOW_CONTROL_ACK body: bytes_received plus
+// available_window plus the channel cookie.
+func skipFlowControlAck(p *ndr.Pull) error {
+	if _, err := p.Uint32(); err != nil {
+		return err
+	}
+	if _, err := p.Uint32(); err != nil {
+		return err
+	}
+	_, err := p.GUID()
+	return err
+}
+
+// skipRTSPadding discards a PADDING body: a length and that many filler bytes.
+func skipRTSPadding(p *ndr.Pull) error {
+	n, err := p.Uint32()
+	if err != nil {
+		return err
+	}
+	_, err = p.Raw(int(n))
+	return err
 }
 
 // cookies returns the COOKIE command GUIDs in order. CONN/A1 and CONN/B1 both

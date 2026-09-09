@@ -73,41 +73,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // streams every queued PDU back as a chunked response until the connection tears
 // down.
 func (s *Server) serveOut(w http.ResponseWriter, r *http.Request, user, mailbox string) {
-	host, port, ok := parseProxyURL(r)
+	open, ok := s.openChannel(w, r, user, mailbox, "CONN/A1")
 	if !ok {
-		http.Error(w, "bad rpcproxy url", http.StatusBadRequest)
 		return
 	}
-	pdu, err := readPDU(r.Body)
-	if err != nil {
-		http.Error(w, "bad CONN/A1", http.StatusBadRequest)
-		return
-	}
-	hdr, err := ndr.ParseHeader(pdu)
-	if err != nil {
-		http.Error(w, "bad CONN/A1 header", http.StatusBadRequest)
-		return
-	}
-	_, cmds, err := parseRTS(pdu)
-	if err != nil {
-		http.Error(w, "bad CONN/A1 rts", http.StatusBadRequest)
-		return
-	}
-	ck := cookies(cmds)
-	if len(ck) < 1 {
-		http.Error(w, "CONN/A1 missing cookie", http.StatusBadRequest)
-		return
-	}
-	key := vconnKey(ck[0], host, port)
-	vc := s.getOrCreate(key, user, mailbox, serve.ClientAddr(r))
-	if vc == nil {
-		http.Error(w, "too many connections", http.StatusServiceUnavailable)
-		return
-	}
-	vc.mu.Lock()
-	vc.windowSize = receiveWindowSize(cmds)
-	window := vc.windowSize
-	vc.mu.Unlock()
+	open.vc.mu.Lock()
+	open.vc.windowSize = receiveWindowSize(open.cmds)
+	window := open.vc.windowSize
+	open.vc.mu.Unlock()
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -118,27 +91,32 @@ func (s *Server) serveOut(w http.ResponseWriter, r *http.Request, user, mailbox 
 	w.WriteHeader(http.StatusOK)
 
 	// CONN/A3 acknowledges the OUT channel immediately.
-	if _, err := w.Write(buildConnA3(hdr.CallID)); err != nil {
-		s.teardown(key)
+	if _, err := w.Write(buildConnA3(open.hdr.CallID)); err != nil {
+		s.teardown(open.key)
 		return
 	}
 	flusher.Flush()
 
-	if vc.markReady("out") {
-		vc.send(buildConnC2(hdr.CallID, window))
+	if open.vc.markReady("out") {
+		open.vc.send(buildConnC2(open.hdr.CallID, window))
 	}
+	s.streamOut(w, r, flusher, open)
+}
 
+// streamOut writes every queued PDU back on the OUT channel until the request
+// context ends or the virtual connection tears down.
+func (s *Server) streamOut(w http.ResponseWriter, r *http.Request, flusher http.Flusher, open channelOpen) {
 	ctx := r.Context()
 	for {
 		select {
 		case <-ctx.Done():
-			s.teardown(key)
+			s.teardown(open.key)
 			return
-		case <-vc.closed:
+		case <-open.vc.closed:
 			return
-		case b := <-vc.out:
+		case b := <-open.vc.out:
 			if _, err := w.Write(b); err != nil {
-				s.teardown(key)
+				s.teardown(open.key)
 				return
 			}
 			flusher.Flush()
@@ -146,73 +124,99 @@ func (s *Server) serveOut(w http.ResponseWriter, r *http.Request, user, mailbox 
 	}
 }
 
+// channelOpen is the virtual connection an opening CONN PDU joined, plus what
+// that PDU carried.
+type channelOpen struct {
+	key  string
+	vc   *vconn
+	hdr  ndr.Header
+	cmds []rtsCommand
+}
+
+// openChannel consumes the opening CONN PDU a channel begins with (CONN/A1 on the
+// OUT channel, CONN/B1 on the IN channel) and joins or starts the virtual
+// connection it names. On a refusal the response is already written.
+func (s *Server) openChannel(w http.ResponseWriter, r *http.Request, user, mailbox, what string) (channelOpen, bool) {
+	var open channelOpen
+	host, port, ok := parseProxyURL(r)
+	if !ok {
+		http.Error(w, "bad rpcproxy url", http.StatusBadRequest)
+		return open, false
+	}
+	pdu, err := readPDU(r.Body)
+	if err != nil {
+		http.Error(w, "bad "+what, http.StatusBadRequest)
+		return open, false
+	}
+	if open.hdr, err = ndr.ParseHeader(pdu); err != nil {
+		http.Error(w, "bad "+what+" header", http.StatusBadRequest)
+		return open, false
+	}
+	if _, open.cmds, err = parseRTS(pdu); err != nil {
+		http.Error(w, "bad "+what+" rts", http.StatusBadRequest)
+		return open, false
+	}
+	ck := cookies(open.cmds)
+	if len(ck) < 1 {
+		http.Error(w, what+" missing cookie", http.StatusBadRequest)
+		return open, false
+	}
+	open.key = vconnKey(ck[0], host, port)
+	open.vc = s.getOrCreate(open.key, user, mailbox, serve.ClientAddr(r))
+	if open.vc == nil {
+		http.Error(w, "too many connections", http.StatusServiceUnavailable)
+		return open, false
+	}
+	return open, true
+}
+
 // serveIn handles the long-lived RPC_IN_DATA request: it consumes the opening
 // CONN/B1, joins the virtual connection (emitting CONN/C2 once both channels are
 // present), then reads PDUs from the request body, forwarding connection-
 // oriented PDUs to the dispatch and queueing any replies on the OUT channel.
 func (s *Server) serveIn(w http.ResponseWriter, r *http.Request, user, mailbox string) {
-	host, port, ok := parseProxyURL(r)
+	open, ok := s.openChannel(w, r, user, mailbox, "CONN/B1")
 	if !ok {
-		http.Error(w, "bad rpcproxy url", http.StatusBadRequest)
 		return
 	}
-	pdu, err := readPDU(r.Body)
-	if err != nil {
-		http.Error(w, "bad CONN/B1", http.StatusBadRequest)
-		return
-	}
-	hdr, err := ndr.ParseHeader(pdu)
-	if err != nil {
-		http.Error(w, "bad CONN/B1 header", http.StatusBadRequest)
-		return
-	}
-	_, cmds, err := parseRTS(pdu)
-	if err != nil {
-		http.Error(w, "bad CONN/B1 rts", http.StatusBadRequest)
-		return
-	}
-	ck := cookies(cmds)
-	if len(ck) < 1 {
-		http.Error(w, "CONN/B1 missing cookie", http.StatusBadRequest)
-		return
-	}
-	key := vconnKey(ck[0], host, port)
-	vc := s.getOrCreate(key, user, mailbox, serve.ClientAddr(r))
-	if vc == nil {
-		http.Error(w, "too many connections", http.StatusServiceUnavailable)
-		return
+	if open.vc.markReady("in") {
+		open.vc.mu.Lock()
+		window := open.vc.windowSize
+		open.vc.mu.Unlock()
+		open.vc.send(buildConnC2(open.hdr.CallID, window))
 	}
 
-	if vc.markReady("in") {
-		vc.mu.Lock()
-		window := vc.windowSize
-		vc.mu.Unlock()
-		vc.send(buildConnC2(hdr.CallID, window))
-	}
+	s.readIn(r, open.vc)
+	s.teardown(open.key)
 
+	w.Header().Set("Content-Type", "application/rpc")
+	w.WriteHeader(http.StatusOK)
+}
+
+// readIn reads PDUs off the IN channel until the client closes it or the request
+// context ends, forwarding connection-oriented PDUs to the dispatch and queueing
+// any replies on the OUT channel.
+func (s *Server) readIn(r *http.Request, vc *vconn) {
 	ctx := r.Context()
 	for ctx.Err() == nil {
 		pdu, err := readPDU(r.Body)
 		if err != nil {
-			break // EOF or the client closed the IN channel
+			return // EOF or the client closed the IN channel
 		}
 		ph, err := ndr.ParseHeader(pdu)
 		if err != nil {
-			break
+			return
 		}
 		if ph.Type == ndr.PktRTS {
 			continue // keep-alive / flow-control: nothing to do for v1
 		}
-		if s.cfg.Dispatch != nil {
-			for _, reply := range s.cfg.Dispatch(vc.sess, pdu) {
-				vc.send(reply)
-			}
+		if s.cfg.Dispatch == nil {
+			continue
+		}
+		for _, reply := range s.cfg.Dispatch(vc.sess, pdu) {
+			vc.send(reply)
 		}
 	}
-	s.teardown(key)
-
-	w.Header().Set("Content-Type", "application/rpc")
-	w.WriteHeader(http.StatusOK)
 }
 
 // parseProxyURL extracts the proxied "host:port" from the rpcproxy query string
