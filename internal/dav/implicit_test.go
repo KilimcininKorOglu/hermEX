@@ -43,6 +43,41 @@ func recipientsHave(recipients []string, addr string) bool {
 	return false
 }
 
+// wantMethod fails the test unless the broker produced a message with the given
+// method, and returns it for the assertions that read its contents.
+func wantMethod(t *testing.T, msgs []itipMsg, method string) itipMsg {
+	t.Helper()
+	m, ok := msgsTo(msgs, method)
+	if !ok {
+		t.Fatalf("no %s among %+v", method, msgs)
+	}
+	return m
+}
+
+// wantRecipient fails the test unless addr is among the message's recipients.
+func wantRecipient(t *testing.T, m itipMsg, addr, what string) {
+	t.Helper()
+	if !recipientsHave(m.recipients, addr) {
+		t.Errorf("%s: %s missing from %s recipients %v", what, addr, m.method, m.recipients)
+	}
+}
+
+// wantNoRecipient fails the test when addr is among the message's recipients.
+func wantNoRecipient(t *testing.T, m itipMsg, addr, what string) {
+	t.Helper()
+	if recipientsHave(m.recipients, addr) {
+		t.Errorf("%s: %s present in %s recipients %v", what, addr, m.method, m.recipients)
+	}
+}
+
+// wantNoMessages fails the test unless the broker produced nothing at all.
+func wantNoMessages(t *testing.T, msgs []itipMsg, what string) {
+	t.Helper()
+	if len(msgs) != 0 {
+		t.Errorf("%s: produced %d messages, want 0: %+v", what, len(msgs), msgs)
+	}
+}
+
 // TestSchedulingBrokerOrganizer exercises the organizer-side broker: invites on
 // create, the significant-change resend guard, added/removed attendees, deletion, and
 // the SCHEDULE-AGENT=CLIENT opt-out (RFC 6638 §3 / RFC 5546 §2.1.4).
@@ -58,84 +93,59 @@ func TestSchedulingBrokerOrganizer(t *testing.T) {
 
 	t.Run("create invites every attendee", func(t *testing.T) {
 		msgs := schedulingMessages(alice, "", mtg("Plan", "20260701T140000Z", 0, bob, carol))
-		req, ok := msgsTo(msgs, "REQUEST")
-		if !ok {
-			t.Fatalf("create produced no REQUEST: %+v", msgs)
-		}
-		if !recipientsHave(req.recipients, bob) || !recipientsHave(req.recipients, carol) {
-			t.Errorf("REQUEST recipients %v, want bob+carol", req.recipients)
-		}
-		if !strings.Contains(req.body, "METHOD:REQUEST") {
-			t.Errorf("REQUEST body lacks METHOD:REQUEST")
-		}
+		req := wantMethod(t, msgs, "REQUEST")
+		wantRecipient(t, req, bob, "create invites bob")
+		wantRecipient(t, req, carol, "create invites carol")
+		wantContains(t, req.body, "METHOD:REQUEST", "REQUEST body carries its method")
 	})
 
 	t.Run("unchanged re-put sends nothing", func(t *testing.T) {
 		body := mtg("Plan", "20260701T140000Z", 0, bob)
-		if msgs := schedulingMessages(alice, body, body); len(msgs) != 0 {
-			t.Errorf("unchanged re-PUT produced %d messages, want 0: %+v", len(msgs), msgs)
-		}
+		wantNoMessages(t, schedulingMessages(alice, body, body), "unchanged re-PUT")
 	})
 
 	t.Run("time change re-invites retained attendee", func(t *testing.T) {
 		old := mtg("Plan", "20260701T140000Z", 0, bob)
 		neu := mtg("Plan", "20260701T160000Z", 1, bob)
-		req, ok := msgsTo(schedulingMessages(alice, old, neu), "REQUEST")
-		if !ok || !recipientsHave(req.recipients, bob) {
-			t.Errorf("time change did not re-invite bob")
-		}
+		req := wantMethod(t, schedulingMessages(alice, old, neu), "REQUEST")
+		wantRecipient(t, req, bob, "time change re-invites bob")
 	})
 
 	t.Run("summary-only change skips retained attendee", func(t *testing.T) {
 		old := mtg("Plan", "20260701T140000Z", 0, bob)
 		neu := mtg("Plan v2", "20260701T140000Z", 0, bob)
-		if msgs := schedulingMessages(alice, old, neu); len(msgs) != 0 {
-			t.Errorf("insignificant change produced %d messages, want 0: %+v", len(msgs), msgs)
-		}
+		wantNoMessages(t, schedulingMessages(alice, old, neu), "insignificant change")
 	})
 
 	t.Run("added attendee invited, retained not", func(t *testing.T) {
 		old := mtg("Plan", "20260701T140000Z", 0, bob)
 		neu := mtg("Plan", "20260701T140000Z", 0, bob, carol)
-		req, ok := msgsTo(schedulingMessages(alice, old, neu), "REQUEST")
-		if !ok || !recipientsHave(req.recipients, carol) {
-			t.Fatalf("added attendee carol not invited")
-		}
-		if recipientsHave(req.recipients, bob) {
-			t.Errorf("retained attendee bob re-invited on an insignificant change")
-		}
+		req := wantMethod(t, schedulingMessages(alice, old, neu), "REQUEST")
+		wantRecipient(t, req, carol, "added attendee is invited")
+		wantNoRecipient(t, req, bob, "retained attendee is not re-invited on an insignificant change")
 	})
 
 	t.Run("removed attendee cancelled", func(t *testing.T) {
 		old := mtg("Plan", "20260701T140000Z", 0, bob, carol)
 		neu := mtg("Plan", "20260701T140000Z", 0, bob)
-		cancel, ok := msgsTo(schedulingMessages(alice, old, neu), "CANCEL")
-		if !ok || !recipientsHave(cancel.recipients, carol) {
-			t.Errorf("removed attendee carol not cancelled")
-		}
-		if recipientsHave(cancel.recipients, bob) {
-			t.Errorf("retained attendee bob wrongly cancelled")
-		}
+		cancel := wantMethod(t, schedulingMessages(alice, old, neu), "CANCEL")
+		wantRecipient(t, cancel, carol, "removed attendee is cancelled")
+		wantNoRecipient(t, cancel, bob, "retained attendee is not cancelled")
 	})
 
 	t.Run("delete cancels all attendees", func(t *testing.T) {
 		old := mtg("Plan", "20260701T140000Z", 0, bob, carol)
-		cancel, ok := msgsTo(schedulingMessages(alice, old, ""), "CANCEL")
-		if !ok || !recipientsHave(cancel.recipients, bob) || !recipientsHave(cancel.recipients, carol) {
-			t.Errorf("delete did not cancel all attendees: %+v", cancel)
-		}
-		if !strings.Contains(cancel.body, "STATUS:CANCELLED") {
-			t.Errorf("CANCEL body lacks STATUS:CANCELLED")
-		}
+		cancel := wantMethod(t, schedulingMessages(alice, old, ""), "CANCEL")
+		wantRecipient(t, cancel, bob, "delete cancels bob")
+		wantRecipient(t, cancel, carol, "delete cancels carol")
+		wantContains(t, cancel.body, "STATUS:CANCELLED", "CANCEL body marks the event cancelled")
 	})
 
 	t.Run("schedule-agent client excluded", func(t *testing.T) {
 		body := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:m-1\r\nDTSTART:20260701T140000Z\r\n" +
 			"ORGANIZER:mailto:" + alice + "\r\nATTENDEE;SCHEDULE-AGENT=CLIENT:mailto:" + bob + "\r\n" +
 			"END:VEVENT\r\nEND:VCALENDAR\r\n"
-		if msgs := schedulingMessages(alice, "", body); len(msgs) != 0 {
-			t.Errorf("SCHEDULE-AGENT=CLIENT attendee was scheduled: %+v", msgs)
-		}
+		wantNoMessages(t, schedulingMessages(alice, "", body), "SCHEDULE-AGENT=CLIENT attendee")
 	})
 }
 

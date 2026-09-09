@@ -414,48 +414,36 @@ func TestCalProppatch(t *testing.T) {
 	ts := davServerCal(t)
 	cal := calURL("")
 
+	propfind := func() string {
+		_, out := doFull(t, ts, "PROPFIND", cal, "", map[string]string{"Depth": "0"})
+		return out
+	}
+
 	setColor := `<d:propertyupdate xmlns:d="DAV:" xmlns:x="http://apple.com/ns/ical/">` +
 		`<d:set><d:prop><x:calendar-color>#FF2968</x:calendar-color></d:prop></d:set></d:propertyupdate>`
 	resp, out := doFull(t, ts, "PROPPATCH", cal, setColor, nil)
-	if resp.StatusCode != http.StatusMultiStatus {
-		t.Fatalf("PROPPATCH status %d, want 207\n%s", resp.StatusCode, out)
-	}
-	if !strings.Contains(out, "calendar-color") || !strings.Contains(out, "200 OK") {
-		t.Errorf("PROPPATCH did not report the property as set\n%s", out)
-	}
-
-	_, out = doFull(t, ts, "PROPFIND", cal, "", map[string]string{"Depth": "0"})
-	if !strings.Contains(out, "#FF2968") {
-		t.Errorf("PROPFIND did not round-trip the stored dead property\n%s", out)
-	}
+	wantStatus(t, resp, http.StatusMultiStatus, "PROPPATCH")
+	wantContains(t, out, "calendar-color", "PROPPATCH names the property it set")
+	wantContains(t, out, "200 OK", "PROPPATCH reports the property as set")
+	wantContains(t, propfind(), "#FF2968", "PROPFIND round-trips the stored dead property")
 
 	setEtag := `<d:propertyupdate xmlns:d="DAV:"><d:set><d:prop><d:getetag>x</d:getetag></d:prop></d:set></d:propertyupdate>`
 	resp, out = doFull(t, ts, "PROPPATCH", cal, setEtag, nil)
-	if resp.StatusCode != http.StatusMultiStatus {
-		t.Fatalf("protected PROPPATCH status %d, want 207\n%s", resp.StatusCode, out)
-	}
-	if !strings.Contains(out, "403 Forbidden") {
-		t.Errorf("protected property was not rejected with 403\n%s", out)
-	}
+	wantStatus(t, resp, http.StatusMultiStatus, "protected PROPPATCH")
+	wantContains(t, out, "403 Forbidden", "protected property is rejected")
 
 	setName := `<d:propertyupdate xmlns:d="DAV:"><d:set><d:prop><d:displayname>Work Cal</d:displayname></d:prop></d:set></d:propertyupdate>`
-	if resp, _ := doFull(t, ts, "PROPPATCH", cal, setName, nil); resp.StatusCode != http.StatusMultiStatus {
-		t.Fatalf("displayname PROPPATCH status %d, want 207", resp.StatusCode)
-	}
-	_, out = doFull(t, ts, "PROPFIND", cal, "", map[string]string{"Depth": "0"})
-	if !strings.Contains(out, "Work Cal") || strings.Contains(out, ">Calendar<") {
-		t.Errorf("PROPFIND did not replace the default displayname with the stored one\n%s", out)
-	}
+	resp, _ = doFull(t, ts, "PROPPATCH", cal, setName, nil)
+	wantStatus(t, resp, http.StatusMultiStatus, "displayname PROPPATCH")
+	out = propfind()
+	wantContains(t, out, "Work Cal", "PROPFIND serves the stored displayname")
+	wantNotContains(t, out, ">Calendar<", "PROPFIND drops the default displayname")
 
 	rmColor := `<d:propertyupdate xmlns:d="DAV:" xmlns:x="http://apple.com/ns/ical/">` +
 		`<d:remove><d:prop><x:calendar-color/></d:prop></d:remove></d:propertyupdate>`
-	if resp, _ := doFull(t, ts, "PROPPATCH", cal, rmColor, nil); resp.StatusCode != http.StatusMultiStatus {
-		t.Fatalf("remove PROPPATCH status %d, want 207", resp.StatusCode)
-	}
-	_, out = doFull(t, ts, "PROPFIND", cal, "", map[string]string{"Depth": "0"})
-	if strings.Contains(out, "#FF2968") {
-		t.Errorf("removed dead property is still present\n%s", out)
-	}
+	resp, _ = doFull(t, ts, "PROPPATCH", cal, rmColor, nil)
+	wantStatus(t, resp, http.StatusMultiStatus, "remove PROPPATCH")
+	wantNotContains(t, propfind(), "#FF2968", "removed dead property is gone")
 }
 
 // TestCalCopyMove confirms COPY duplicates an event into another calendar (keeping
