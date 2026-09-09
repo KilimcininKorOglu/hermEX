@@ -15,15 +15,7 @@ type PropSelect struct {
 // VERSION) is dropped, so the result MAY be invalid per RFC 6350 when the client did
 // not request the required properties. ok is false when no card is present.
 func SelectAddressData(raw []byte, props []PropSelect, allProp bool) ([]byte, bool) {
-	keep := map[string]bool{}
-	noval := map[string]bool{}
-	for _, p := range props {
-		up := strings.ToUpper(strings.TrimSpace(p.Name))
-		keep[up] = true
-		if p.NoValue {
-			noval[up] = true
-		}
-	}
+	keep, noval := selectedProps(props)
 	b := &builder{}
 	in := false
 	seen := false
@@ -34,30 +26,51 @@ func SelectAddressData(raw []byte, props []PropSelect, allProp bool) ([]byte, bo
 		name, _, value := splitLine(line)
 		up := strings.ToUpper(name)
 		switch {
-		case up == "BEGIN" && strings.EqualFold(value, "VCARD"):
+		case isCardBoundary(up, "BEGIN", value):
 			in, seen = true, true
 			b.add(line)
-			continue
-		case up == "END" && strings.EqualFold(value, "VCARD"):
+		case isCardBoundary(up, "END", value):
 			b.add(line)
 			in = false
-			continue
-		case !in:
-			continue
+		case in && selected(up, keep, allProp):
+			b.add(selectedLine(line, noval[up]))
 		}
-		if !allProp && !keep[up] {
-			continue
-		}
-		if noval[up] {
-			if i := indexNameColon(line); i >= 0 {
-				b.add(line[:i+1])
-				continue
-			}
-		}
-		b.add(line)
 	}
 	if !seen {
 		return nil, false
 	}
 	return b.buf.Bytes(), true
+}
+
+// selected reports whether a property is served: every one when the client asked
+// for allprop, otherwise the ones it named.
+func selected(name string, keep map[string]bool, allProp bool) bool {
+	return allProp || keep[name]
+}
+
+// selectedProps splits the requested properties into the set to keep and the
+// subset whose value the client asked to be omitted.
+func selectedProps(props []PropSelect) (keep, noval map[string]bool) {
+	keep, noval = map[string]bool{}, map[string]bool{}
+	for _, p := range props {
+		up := strings.ToUpper(strings.TrimSpace(p.Name))
+		keep[up] = true
+		if p.NoValue {
+			noval[up] = true
+		}
+	}
+	return keep, noval
+}
+
+// selectedLine renders one kept content line: whole, or truncated at the colon
+// when the client asked for the name without its value.
+func selectedLine(line string, noValue bool) string {
+	if !noValue {
+		return line
+	}
+	i := indexNameColon(line)
+	if i < 0 {
+		return line
+	}
+	return line[:i+1]
 }

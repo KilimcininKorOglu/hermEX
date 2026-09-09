@@ -45,6 +45,26 @@ func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 	p := &msg.Props
 	p.Set(mapi.PrMessageClass, "IPM.Contact")
 
+	importIdentity(p, card)
+	importOrganization(p, card)
+	importContactPoints(p, card)
+	importAddresses(p, card, named)
+	importEmails(p, card, named)
+	if l := card.get("IMPP"); l != nil {
+		setNamed(p, named, mapi.NameInstantMessagingAddress, l.text())
+	}
+	importKeywords(p, card, opt)
+	if uidTag != 0 {
+		p.Set(uidTag, importedUID(card))
+	}
+	importPhoto(msg, card, named)
+
+	return msg, nil
+}
+
+// importIdentity stores who the contact is: the display name, the structured
+// name's parts, the nickname and the birthday.
+func importIdentity(p *mapi.PropertyValues, card *vcard) {
 	if l := card.get("FN"); l != nil {
 		p.Set(mapi.PrDisplayName, l.text())
 	}
@@ -58,6 +78,15 @@ func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 	if l := card.get("NICKNAME"); l != nil {
 		setIf(p, mapi.PrNickname, l.text())
 	}
+	if l := card.get("BDAY"); l != nil {
+		if nt, ok := parseBirthday(l.text()); ok {
+			p.Set(mapi.PrBirthday, nt)
+		}
+	}
+}
+
+// importOrganization stores where the contact works and what they are noted as.
+func importOrganization(p *mapi.PropertyValues, card *vcard) {
 	if l := card.get("TITLE"); l != nil {
 		setIf(p, mapi.PrTitle, l.text())
 	}
@@ -71,46 +100,47 @@ func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 	if l := card.get("NOTE"); l != nil {
 		setIf(p, mapi.PrBody, l.text())
 	}
-	if l := card.get("BDAY"); l != nil {
-		if nt, ok := parseBirthday(l.text()); ok {
-			p.Set(mapi.PrBirthday, nt)
-		}
-	}
+}
+
+// importContactPoints stores the pages and telephone numbers the card lists.
+func importContactPoints(p *mapi.PropertyValues, card *vcard) {
 	for _, l := range card.all("URL") {
 		if l.hasType("home") {
 			setIf(p, mapi.PrPersonalHomePage, l.text())
-		} else {
-			setIf(p, mapi.PrBusinessHomePage, l.text())
+			continue
 		}
+		setIf(p, mapi.PrBusinessHomePage, l.text())
 	}
 	for _, l := range card.all("TEL") {
 		if tag := telTag(l.types()); tag != 0 {
 			setIf(p, tag, l.text())
 		}
 	}
-	importAddresses(p, card, named)
-	importEmails(p, card, named)
-	if l := card.get("IMPP"); l != nil {
-		setNamed(p, named, mapi.NameInstantMessagingAddress, l.text())
-	}
-	if cats := importCategories(card); len(cats) > 0 {
-		if tag, err := resolveOne(opt, mapi.NameKeywords, mapi.PtMvUnicode, true); err == nil && tag != 0 {
-			p.Set(tag, cats)
-		}
-	}
-	if uidTag != 0 {
-		uid := ""
-		if l := card.get("UID"); l != nil {
-			uid = strings.TrimSpace(l.text())
-		}
-		if uid == "" {
-			uid = generatedUID(card)
-		}
-		p.Set(uidTag, uid)
-	}
-	importPhoto(msg, card, named)
+}
 
-	return msg, nil
+// importKeywords stores the CATEGORIES list, when the card carries one and the
+// named property resolves.
+func importKeywords(p *mapi.PropertyValues, card *vcard, opt Options) {
+	cats := importCategories(card)
+	if len(cats) == 0 {
+		return
+	}
+	tag, err := resolveOne(opt, mapi.NameKeywords, mapi.PtMvUnicode, true)
+	if err != nil || tag == 0 {
+		return
+	}
+	p.Set(tag, cats)
+}
+
+// importedUID returns the card's stable identity, deriving one when it carries
+// no UID.
+func importedUID(card *vcard) string {
+	if l := card.get("UID"); l != nil {
+		if uid := strings.TrimSpace(l.text()); uid != "" {
+			return uid
+		}
+	}
+	return generatedUID(card)
 }
 
 // setIf sets a string property only when the value is non-empty.

@@ -22,33 +22,34 @@ type vcard struct {
 // parseVCard parses the first BEGIN:VCARD…END:VCARD block in raw. Lines are
 // unfolded first (RFC 6350 §3.2). It returns an error if no card is present.
 func parseVCard(raw []byte) (*vcard, error) {
-	logical := unfold(raw)
 	c := &vcard{}
 	in := false
-	for _, line := range logical {
+	for _, line := range unfold(raw) {
 		if line == "" {
 			continue
 		}
 		name, params, value := splitLine(line)
 		upper := strings.ToUpper(name)
 		switch {
-		case upper == "BEGIN" && strings.EqualFold(value, "VCARD"):
+		case isCardBoundary(upper, "BEGIN", value):
 			in = true
-			continue
-		case upper == "END" && strings.EqualFold(value, "VCARD"):
+		case isCardBoundary(upper, "END", value):
 			if in {
 				return c, nil
 			}
-			continue
-		case !in:
-			continue
+		case in:
+			c.lines = append(c.lines, vline{name: upper, params: params, value: value})
 		}
-		c.lines = append(c.lines, vline{name: upper, params: params, value: value})
 	}
 	if !in || len(c.lines) == 0 {
 		return nil, errNoCard
 	}
 	return c, nil
+}
+
+// isCardBoundary reports whether a content line opens or closes a card.
+func isCardBoundary(name, boundary, value string) bool {
+	return name == boundary && strings.EqualFold(value, "VCARD")
 }
 
 // unfold splits raw into logical lines, joining RFC 6350 continuation lines (a

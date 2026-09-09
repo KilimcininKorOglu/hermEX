@@ -31,16 +31,28 @@ func Export(msg *oxcmail.Message, opt Options) ([]byte, error) {
 	b.add("BEGIN:VCARD")
 	b.add("VERSION:4.0")
 
-	// FN is mandatory; fall back to the assembled name or a placeholder.
-	fn := getStr(p, mapi.PrDisplayName)
-	if fn == "" {
-		fn = strings.TrimSpace(getStr(p, mapi.PrGivenName) + " " + getStr(p, mapi.PrSurname))
+	exportIdentity(b, p)
+	exportPhones(b, p)
+	exportAddresses(b, p, named)
+	exportEmails(b, p, named)
+	if tag, ok := named[mapi.NameInstantMessagingAddress]; ok {
+		addLine(b, "IMPP", getStr(p, tag))
 	}
-	if fn == "" {
-		fn = "Unknown"
+	exportURLs(b, p)
+	exportCategories(b, p, catTag)
+	exportPhoto(b, msg)
+	if uidTag != 0 {
+		addLine(b, "UID", getStr(p, uidTag))
 	}
-	b.line("FN", fn)
 
+	b.add("END:VCARD")
+	return b.buf.Bytes(), nil
+}
+
+// exportIdentity emits who the contact is: the mandatory FN, the structured
+// name, the organization, and the notes and birthday.
+func exportIdentity(b *builder, p *mapi.PropertyValues) {
+	b.line("FN", displayName(p))
 	if n := structured(
 		getStr(p, mapi.PrSurname), getStr(p, mapi.PrGivenName), getStr(p, mapi.PrMiddleName),
 		getStr(p, mapi.PrDisplayNamePrefix), getStr(p, mapi.PrGeneration),
@@ -59,22 +71,18 @@ func Export(msg *oxcmail.Message, opt Options) ([]byte, error) {
 			b.line("BDAY", mapi.NTTimeToUnix(nt).UTC().Format("2006-01-02"))
 		}
 	}
+}
 
-	exportPhones(b, p)
-	exportAddresses(b, p, named)
-	exportEmails(b, p, named)
-	if tag, ok := named[mapi.NameInstantMessagingAddress]; ok {
-		addLine(b, "IMPP", getStr(p, tag))
+// displayName is the FN value: vCard requires one, so it falls back to the
+// assembled name and then to a placeholder.
+func displayName(p *mapi.PropertyValues) string {
+	if fn := getStr(p, mapi.PrDisplayName); fn != "" {
+		return fn
 	}
-	exportURLs(b, p)
-	exportCategories(b, p, catTag)
-	exportPhoto(b, msg)
-	if uidTag != 0 {
-		addLine(b, "UID", getStr(p, uidTag))
+	if fn := strings.TrimSpace(getStr(p, mapi.PrGivenName) + " " + getStr(p, mapi.PrSurname)); fn != "" {
+		return fn
 	}
-
-	b.add("END:VCARD")
-	return b.buf.Bytes(), nil
+	return "Unknown"
 }
 
 // phoneType pairs a telephone proptag with the TYPE parameter Export emits.
