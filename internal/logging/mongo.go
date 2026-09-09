@@ -127,66 +127,92 @@ func (s *MongoSink) run() {
 	defer t.Stop()
 	batch := make([]Event, 0, mongoBatchSize)
 
-	flush := func() {
-		// Nothing buffered and nothing spilled, no reason to touch the store.
-		if len(batch) == 0 && !s.hasSpill {
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), mongoWriteTimeout)
-		defer cancel()
-		// Lazily open the connection; while the store is down this fails, so the
-		// batch is spilled and the connection is retried on the next flush.
-		if s.ins == nil {
-			ins, err := s.connect(ctx)
-			if err != nil {
-				if len(batch) > 0 {
-					s.spill(batch)
-					batch = batch[:0]
-				}
-				return
-			}
-			s.ins = ins
-		}
-		if len(batch) > 0 {
-			docs := make([]any, len(batch))
-			for i, e := range batch {
-				docs[i] = toDoc(e)
-			}
-			if err := s.ins.InsertMany(ctx, docs); err != nil {
-				s.spill(batch) // transient write failure, preserve and replay later
-				batch = batch[:0]
-				return
-			}
-			batch = batch[:0]
-		}
-		s.replaySpill() // connected and caught up, drain anything spilled earlier
-	}
-
 	for {
 		select {
 		case e := <-s.in:
-			batch = append(batch, e)
-			if len(batch) >= mongoBatchSize {
-				flush()
-			}
+			s.buffer(&batch, e)
 		case <-t.C:
-			flush()
+			s.flush(&batch)
 		case <-s.closing:
-			// Drain everything still buffered, then make a final flush.
-			for {
-				select {
-				case e := <-s.in:
-					batch = append(batch, e)
-					if len(batch) >= mongoBatchSize {
-						flush()
-					}
-				default:
-					flush()
-					return
-				}
-			}
+			s.drain(&batch)
+			return
 		}
 	}
+}
+
+// buffer appends one event, flushing once the batch is full.
+func (s *MongoSink) buffer(batch *[]Event, e Event) {
+	*batch = append(*batch, e)
+	if len(*batch) >= mongoBatchSize {
+		s.flush(batch)
+	}
+}
+
+// drain empties everything still buffered at shutdown, then makes a final flush.
+func (s *MongoSink) drain(batch *[]Event) {
+	for {
+		select {
+		case e := <-s.in:
+			s.buffer(batch, e)
+		default:
+			s.flush(batch)
+			return
+		}
+	}
+}
+
+// flush writes the buffered batch and replays anything spilled earlier.
+func (s *MongoSink) flush(batch *[]Event) {
+	// Nothing buffered and nothing spilled, no reason to touch the store.
+	if len(*batch) == 0 && !s.hasSpill {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), mongoWriteTimeout)
+	defer cancel()
+	if !s.ensureConnected(ctx, batch) {
+		return
+	}
+	if !s.insertBatch(ctx, batch) {
+		return
+	}
+	s.replaySpill() // connected and caught up, drain anything spilled earlier
+}
+
+// ensureConnected lazily opens the connection. While the store is down this fails, so
+// the batch is spilled and the connection is retried on the next flush.
+func (s *MongoSink) ensureConnected(ctx context.Context, batch *[]Event) bool {
+	if s.ins != nil {
+		return true
+	}
+	ins, err := s.connect(ctx)
+	if err != nil {
+		if len(*batch) > 0 {
+			s.spill(*batch)
+			*batch = (*batch)[:0]
+		}
+		return false
+	}
+	s.ins = ins
+	return true
+}
+
+// insertBatch writes the buffered events, spilling them for a later replay when the
+// write fails.
+func (s *MongoSink) insertBatch(ctx context.Context, batch *[]Event) bool {
+	if len(*batch) == 0 {
+		return true
+	}
+	docs := make([]any, len(*batch))
+	for i, e := range *batch {
+		docs[i] = toDoc(e)
+	}
+	if err := s.ins.InsertMany(ctx, docs); err != nil {
+		s.spill(*batch) // transient write failure, preserve and replay later
+		*batch = (*batch)[:0]
+		return false
+	}
+	*batch = (*batch)[:0]
+	return true
 }
 
 // Close stops the writer (flushing buffered events) and disconnects the client,

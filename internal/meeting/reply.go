@@ -32,48 +32,65 @@ import (
 // unauthorized REPLY is left as an ordinary email the organizer can read, not a
 // delivery failure.
 func ProcessReply(st *objectstore.Store, sender string, messageID int64) (bool, error) {
-	// The delivery pass hands an object-store message id; the raw read is keyed by
-	// IMAP UID, and the two diverge as soon as a mailbox holds any non-mail object
-	// (a calendar item consumes an id but no UID). Resolving one to the other is
-	// what makes tracking work in a mailbox that has ever held an appointment.
-	uidOf, ok, err := st.MessageUIDByID(int64(mapi.PrivateFIDInbox), messageID)
-	if err != nil || !ok {
-		return false, nil
-	}
-	raw, err := st.GetMessageRaw(int64(mapi.PrivateFIDInbox), uidOf)
-	if err != nil {
-		return false, nil
-	}
-	ics := findCalendarPart(mime.ParseStructure(raw))
-	if ics == nil {
+	ics, ok := inboxCalendarPart(st, messageID)
+	if !ok {
 		return false, nil
 	}
 	if !strings.EqualFold(strings.TrimSpace(icalLine(ics, "METHOD")), "REPLY") {
 		return false, nil
 	}
-	uid := strings.TrimSpace(icalLine(ics, "UID"))
-	attendee, partstat := parseAttendee(ics)
-	if uid == "" || attendee == "" {
-		return false, nil
-	}
-	// An empty envelope sender (a bounce, or a locally injected message that
-	// carries none) proves nothing either, so it updates no tracking.
-	from := strings.ToLower(strings.TrimSpace(sender))
-	if from == "" || from != strings.ToLower(strings.TrimSpace(attendee)) {
+	uid, attendee, resp, ok := authorizedReply(ics, sender)
+	if !ok {
 		return false, nil
 	}
 	tags, err := ResolveTags(st)
 	if err != nil {
 		return false, nil
 	}
-	resp := partstatResponse(partstat)
-	if resp == 0 {
-		return false, nil
-	}
 	// Report the failure rather than swallowing it: the REPLY was understood and
 	// authorized, so "handled" is true, but the tracking write is the whole point
 	// and losing it silently leaves the organizer with a stale Tracking tab.
 	return true, ApplyReply(st, tags, uid, attendee, resp)
+}
+
+// inboxCalendarPart reads the delivered message and returns its calendar body.
+func inboxCalendarPart(st *objectstore.Store, messageID int64) ([]byte, bool) {
+	// The delivery pass hands an object-store message id; the raw read is keyed by
+	// IMAP UID, and the two diverge as soon as a mailbox holds any non-mail object
+	// (a calendar item consumes an id but no UID). Resolving one to the other is
+	// what makes tracking work in a mailbox that has ever held an appointment.
+	uidOf, ok, err := st.MessageUIDByID(int64(mapi.PrivateFIDInbox), messageID)
+	if err != nil || !ok {
+		return nil, false
+	}
+	raw, err := st.GetMessageRaw(int64(mapi.PrivateFIDInbox), uidOf)
+	if err != nil {
+		return nil, false
+	}
+	ics := findCalendarPart(mime.ParseStructure(raw))
+	return ics, ics != nil
+}
+
+// authorizedReply reads the REPLY's UID, attendee and response status. It reports ok
+// only when the envelope sender is the attendee the body answers for, because the
+// ATTENDEE line alone says who the message claims to answer for.
+func authorizedReply(ics []byte, sender string) (uid, attendee string, resp int32, ok bool) {
+	uid = strings.TrimSpace(icalLine(ics, "UID"))
+	attendee, partstat := parseAttendee(ics)
+	if uid == "" || attendee == "" {
+		return "", "", 0, false
+	}
+	// An empty envelope sender (a bounce, or a locally injected message that
+	// carries none) proves nothing either, so it updates no tracking.
+	from := strings.ToLower(strings.TrimSpace(sender))
+	if from == "" || from != strings.ToLower(strings.TrimSpace(attendee)) {
+		return "", "", 0, false
+	}
+	resp = partstatResponse(partstat)
+	if resp == 0 {
+		return "", "", 0, false
+	}
+	return uid, attendee, resp, true
 }
 
 // findCalendarPart returns the decoded text/calendar (or .ics) body, or nil.

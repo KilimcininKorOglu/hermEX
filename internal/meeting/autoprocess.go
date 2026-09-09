@@ -128,30 +128,35 @@ func hasConflict(st *objectstore.Store, req *oxcmail.Message, t apptTags) (bool,
 		if err != nil {
 			continue
 		}
-		// The request's own prior booking is not a conflict with itself: a meeting
-		// update re-sends the same iCal UID, and accepting it updates that appointment
-		// in place rather than double-booking against it. The booking path dedups on
-		// the same UID; the conflict check must too.
-		if reqUID != "" && propStr(pv, t.uid) == reqUID {
-			continue
-		}
-		if boolVal(pv, t.recur) {
-			continue // recurring master: no instance expansion (documented gap)
-		}
-		if !mapi.BusyStatusOccupies(longVal(pv, t.busy)) {
-			continue // free, and working elsewhere, do not block
-		}
-		start, ok1 := ntTime(pv, t.start)
-		end, ok2 := ntTime(pv, t.end)
-		if !ok1 || !ok2 {
-			continue
-		}
-		// Overlap, not containment.
-		if start.Before(reqEnd) && end.After(reqStart) {
+		if blocksWindow(pv, t, reqUID, reqStart, reqEnd) {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// blocksWindow reports whether one calendar object occupies the request's window.
+func blocksWindow(pv mapi.PropertyValues, t apptTags, reqUID string, reqStart, reqEnd time.Time) bool {
+	// The request's own prior booking is not a conflict with itself: a meeting
+	// update re-sends the same iCal UID, and accepting it updates that appointment
+	// in place rather than double-booking against it. The booking path dedups on
+	// the same UID; the conflict check must too.
+	if reqUID != "" && propStr(pv, t.uid) == reqUID {
+		return false
+	}
+	if boolVal(pv, t.recur) {
+		return false // recurring master: no instance expansion (documented gap)
+	}
+	if !mapi.BusyStatusOccupies(longVal(pv, t.busy)) {
+		return false // free, and working elsewhere, do not block
+	}
+	start, ok1 := ntTime(pv, t.start)
+	end, ok2 := ntTime(pv, t.end)
+	if !ok1 || !ok2 {
+		return false
+	}
+	// Overlap, not containment.
+	return start.Before(reqEnd) && end.After(reqStart)
 }
 
 // ntTime reads a PtSysTime property (stored as an NT timestamp) as a UTC time.

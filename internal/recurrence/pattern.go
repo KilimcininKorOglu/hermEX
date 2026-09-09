@@ -96,6 +96,20 @@ const maxRRuleInterval = math.MaxUint32 / (7 * 24 * 60)
 // the pattern cannot carry.
 var ErrInvalidRRule = errors.New("recurrence: invalid RRULE")
 
+// rruleFields maps an RRULE parameter name to the setter that folds its value into
+// the parsed rrule. A parameter with no entry is ignored, so a client extension does
+// not fail the whole rule.
+var rruleFields = map[string]func(*rrule, string) error{
+	"FREQ":       setFreq,
+	"INTERVAL":   setInterval,
+	"COUNT":      setCount,
+	"UNTIL":      setUntil,
+	"BYDAY":      setByDayParam,
+	"BYMONTHDAY": setMonthDayParam,
+	"BYMONTH":    setMonthParam,
+	"BYSETPOS":   setSetPosParam,
+}
+
 // parseRRule parses an RRULE value (the text after "RRULE:") into the local rrule. A
 // value with no FREQ, or an INTERVAL or COUNT the pattern cannot represent, is
 // rejected.
@@ -106,49 +120,85 @@ func parseRRule(value string) (rrule, error) {
 		if !ok {
 			continue
 		}
-		switch strings.ToUpper(strings.TrimSpace(key)) {
-		case "FREQ":
-			r.Freq = strings.ToUpper(strings.TrimSpace(val))
-		case "INTERVAL":
-			n, err := strconv.Atoi(val)
-			if err == nil && n > maxRRuleInterval {
-				return rrule{}, fmt.Errorf("%w: INTERVAL %d exceeds %d", ErrInvalidRRule, n, maxRRuleInterval)
-			}
-			if err == nil && n > 0 {
-				r.Interval = n
-			}
-		case "COUNT":
-			n, err := strconv.Atoi(val)
-			if err == nil && n > math.MaxUint32 {
-				return rrule{}, fmt.Errorf("%w: COUNT %d exceeds %d", ErrInvalidRRule, n, uint32(math.MaxUint32))
-			}
-			if err == nil && n > 0 {
-				r.Count = n
-			}
-		case "UNTIL":
-			if t, ok := parseRRuleUntil(val); ok {
-				r.Until = t
-			}
-		case "BYDAY":
-			r.Weekdays, r.SetPos = parseByDay(val)
-		case "BYMONTHDAY":
-			if n, err := strconv.Atoi(val); err == nil {
-				r.MonthDay = n
-			}
-		case "BYMONTH":
-			if n, err := strconv.Atoi(val); err == nil {
-				r.Month = n
-			}
-		case "BYSETPOS":
-			if n, err := strconv.Atoi(val); err == nil {
-				r.SetPos = n
-			}
+		set, known := rruleFields[strings.ToUpper(strings.TrimSpace(key))]
+		if !known {
+			continue
+		}
+		if err := set(&r, val); err != nil {
+			return rrule{}, err
 		}
 	}
 	if r.Freq == "" {
 		return rrule{}, fmt.Errorf("%w: no FREQ", ErrInvalidRRule)
 	}
 	return r, nil
+}
+
+// setFreq stores the FREQ token.
+func setFreq(r *rrule, val string) error {
+	r.Freq = strings.ToUpper(strings.TrimSpace(val))
+	return nil
+}
+
+// setInterval stores INTERVAL, rejecting a value wider than the pattern fields carry.
+func setInterval(r *rrule, val string) error {
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		return nil
+	}
+	if n > maxRRuleInterval {
+		return fmt.Errorf("%w: INTERVAL %d exceeds %d", ErrInvalidRRule, n, maxRRuleInterval)
+	}
+	if n > 0 {
+		r.Interval = n
+	}
+	return nil
+}
+
+// setCount stores COUNT, rejecting a value the 32-bit OccurrenceCount cannot carry.
+func setCount(r *rrule, val string) error {
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		return nil
+	}
+	if n > math.MaxUint32 {
+		return fmt.Errorf("%w: COUNT %d exceeds %d", ErrInvalidRRule, n, uint32(math.MaxUint32))
+	}
+	if n > 0 {
+		r.Count = n
+	}
+	return nil
+}
+
+// setUntil stores UNTIL when it parses as one of the three RRULE date forms.
+func setUntil(r *rrule, val string) error {
+	if t, ok := parseRRuleUntil(val); ok {
+		r.Until = t
+	}
+	return nil
+}
+
+// setByDayParam stores the BYDAY weekday tokens and any ordinal prefix.
+func setByDayParam(r *rrule, val string) error {
+	r.Weekdays, r.SetPos = parseByDay(val)
+	return nil
+}
+
+// setMonthDayParam stores BYMONTHDAY.
+func setMonthDayParam(r *rrule, val string) error { return setInt(&r.MonthDay, val) }
+
+// setMonthParam stores BYMONTH.
+func setMonthParam(r *rrule, val string) error { return setInt(&r.Month, val) }
+
+// setSetPosParam stores BYSETPOS.
+func setSetPosParam(r *rrule, val string) error { return setInt(&r.SetPos, val) }
+
+// setInt stores an integer parameter, ignoring a value that is not an integer.
+func setInt(dst *int, val string) error {
+	if n, err := strconv.Atoi(val); err == nil {
+		*dst = n
+	}
+	return nil
 }
 
 // parseByDay splits a BYDAY value into its weekday tokens, returning any single
@@ -250,43 +300,76 @@ func UnmarshalBinary(b []byte) (Pattern, error) {
 	return p, nil
 }
 
+// rruleFreqs maps a pattern RecurFrequency to the function that fills the RRULE
+// frequency, interval and day pins. A frequency with no entry is not decodable.
+var rruleFreqs = map[uint16]func(Pattern, *rrule){
+	FreqDaily:   dailyRRule,
+	FreqWeekly:  weeklyRRule,
+	FreqMonthly: monthlyRRule,
+	FreqYearly:  yearlyRRule,
+}
+
 // toRRule maps the parsed Pattern back to an RRULE string.
 func (p Pattern) toRRule() (string, bool) {
-	var r rrule
-	switch p.RecurFrequency {
-	case FreqDaily:
-		r.Freq = "DAILY"
-		if p.Period%1440 == 0 {
-			r.Interval = int(p.Period / 1440)
-		}
-	case FreqWeekly:
-		r.Freq = "WEEKLY"
-		r.Interval = int(p.Period)
-		r.Weekdays = bitmaskWeekdays(p.DayOfWeek)
-	case FreqMonthly:
-		r.Freq = "MONTHLY"
-		r.Interval = int(p.Period)
-		if p.PatternType == PatternMonthNth {
-			r.Weekdays = bitmaskWeekdays(p.DayOfWeek)
-			r.SetPos = setPosFromWeek(p.WeekOfMonth)
-		} else {
-			r.MonthDay = int(p.DayOfMonth)
-		}
-	case FreqYearly:
-		r.Freq = "YEARLY"
-		r.Interval = int(p.Period / 12)
-		if p.PatternType == PatternMonthNth {
-			r.Weekdays = bitmaskWeekdays(p.DayOfWeek)
-			r.SetPos = setPosFromWeek(p.WeekOfMonth)
-		} else {
-			r.MonthDay = int(p.DayOfMonth)
-		}
-	default:
+	fill, known := rruleFreqs[p.RecurFrequency]
+	if !known {
 		return "", false
 	}
+	var r rrule
+	fill(p, &r)
 	if r.Interval <= 0 {
 		r.Interval = 1
 	}
+	if !p.applyEndRange(&r) {
+		return "", false
+	}
+	return rruleString(r), true
+}
+
+// dailyRRule fills a daily rule; the period is minutes, so it maps back to days only
+// when it divides evenly.
+func dailyRRule(p Pattern, r *rrule) {
+	r.Freq = "DAILY"
+	if p.Period%1440 == 0 {
+		r.Interval = int(p.Period / 1440)
+	}
+}
+
+// weeklyRRule fills a weekly rule from the period in weeks and the weekday bitmask.
+func weeklyRRule(p Pattern, r *rrule) {
+	r.Freq = "WEEKLY"
+	r.Interval = int(p.Period)
+	r.Weekdays = bitmaskWeekdays(p.DayOfWeek)
+}
+
+// monthlyRRule fills a monthly rule from the period in months.
+func monthlyRRule(p Pattern, r *rrule) {
+	r.Freq = "MONTHLY"
+	r.Interval = int(p.Period)
+	p.fillDayPins(r)
+}
+
+// yearlyRRule fills a yearly rule; the period is months, so the interval is years.
+func yearlyRRule(p Pattern, r *rrule) {
+	r.Freq = "YEARLY"
+	r.Interval = int(p.Period / 12)
+	p.fillDayPins(r)
+}
+
+// fillDayPins writes the day pins a monthly or yearly pattern carries: the nth-weekday
+// shape emits BYDAY plus BYSETPOS, every other shape emits BYMONTHDAY.
+func (p Pattern) fillDayPins(r *rrule) {
+	if p.PatternType == PatternMonthNth {
+		r.Weekdays = bitmaskWeekdays(p.DayOfWeek)
+		r.SetPos = setPosFromWeek(p.WeekOfMonth)
+		return
+	}
+	r.MonthDay = int(p.DayOfMonth)
+}
+
+// applyEndRange folds the pattern's end range into the rule, reporting false for an
+// EndType this package does not decode.
+func (p Pattern) applyEndRange(r *rrule) bool {
 	switch p.EndType {
 	case EndAfterDate:
 		if p.EndDate != 0 && p.EndDate != noEndDate {
@@ -300,9 +383,9 @@ func (p Pattern) toRRule() (string, bool) {
 		// UNTIL: a series the author meant to run forever would stop at a date
 		// they never chose.
 	default:
-		return "", false
+		return false
 	}
-	return rruleString(r), true
+	return true
 }
 
 // rruleString renders the local rrule to its RRULE text form.
@@ -396,75 +479,97 @@ func FromRRule(rruleText string, seriesStart time.Time) ([]byte, error) {
 	return p.MarshalBinary(), nil
 }
 
+// patternFreqs maps an RRULE FREQ to the function that fills the frequency-specific
+// pattern fields. A FREQ with no entry is not encodable.
+var patternFreqs = map[string]func(*Pattern, rrule, time.Time){
+	"DAILY":   dailyPattern,
+	"WEEKLY":  weeklyPattern,
+	"MONTHLY": monthlyPattern,
+	"YEARLY":  yearlyPattern,
+}
+
 // patternFromRecurrence maps the parsed RRULE to a Pattern.
 func patternFromRecurrence(r rrule, start time.Time) (Pattern, error) {
+	fill, known := patternFreqs[r.Freq]
+	if !known {
+		return Pattern{}, fmt.Errorf("recurrence: unsupported FREQ %q", r.Freq)
+	}
 	p := Pattern{
 		FirstDOW:  0, // Sunday
 		StartDate: minutesSince1601(start),
 	}
-	switch r.Freq {
-	case "DAILY":
-		p.RecurFrequency = FreqDaily
-		p.PatternType = PatternDay
-		// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
-		periodMinutes := uint32(max(r.Interval, 1)) * 24 * 60
-		p.Period = periodMinutes
-		p.FirstDateTime = p.StartDate % periodMinutes
-	case "WEEKLY":
-		p.RecurFrequency = FreqWeekly
-		p.PatternType = PatternWeek
-		// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
-		p.Period = uint32(max(r.Interval, 1)) // weeks
+	fill(&p, r, start)
+	setEndRange(&p, r)
+	return p, nil
+}
+
+// dailyPattern fills the daily fields; the period is minutes per interval.
+func dailyPattern(p *Pattern, r rrule, _ time.Time) {
+	p.RecurFrequency = FreqDaily
+	p.PatternType = PatternDay
+	periodMinutes := intervalPeriod(r) * 24 * 60
+	p.Period = periodMinutes
+	p.FirstDateTime = p.StartDate % periodMinutes
+}
+
+// weeklyPattern fills the weekly fields, defaulting the weekday mask to the series
+// start weekday when the rule names none.
+func weeklyPattern(p *Pattern, r rrule, start time.Time) {
+	p.RecurFrequency = FreqWeekly
+	p.PatternType = PatternWeek
+	p.Period = intervalPeriod(r) // weeks
+	// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
+	p.DayOfWeek = uint32(weekdayBitmask(r.Weekdays))
+	if p.DayOfWeek == 0 {
+		p.DayOfWeek = 1 << uint(start.Weekday()) // default to the start weekday
+	}
+	p.FirstDateTime = weeklyFirstDateTime(start, p.Period)
+}
+
+// monthlyPattern fills the monthly fields; the period is months per interval.
+func monthlyPattern(p *Pattern, r rrule, start time.Time) {
+	p.RecurFrequency = FreqMonthly
+	setDayPins(p, r, start)
+	p.Period = intervalPeriod(r) // months
+	p.FirstDateTime = monthlyFirstDateTime(start, p.Period)
+}
+
+// yearlyPattern fills the yearly fields; the period is twelve months per interval.
+func yearlyPattern(p *Pattern, r rrule, start time.Time) {
+	p.RecurFrequency = FreqYearly
+	setDayPins(p, r, start)
+	p.Period = intervalPeriod(r) * 12 // months per interval
+	p.FirstDateTime = monthlyFirstDateTime(start, p.Period)
+}
+
+// setDayPins writes the day pins a monthly or yearly rule carries: a BYDAY rule
+// becomes the nth-weekday shape, every other rule pins a day of month (falling back
+// to the series start day).
+func setDayPins(p *Pattern, r rrule, start time.Time) {
+	if len(r.Weekdays) > 0 {
+		p.PatternType = PatternMonthNth
 		// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
 		p.DayOfWeek = uint32(weekdayBitmask(r.Weekdays))
-		if p.DayOfWeek == 0 {
-			p.DayOfWeek = 1 << uint(start.Weekday()) // default to the start weekday
-		}
-		p.FirstDateTime = weeklyFirstDateTime(start, p.Period)
-	case "MONTHLY":
-		p.RecurFrequency = FreqMonthly
-		if len(r.Weekdays) > 0 {
-			p.PatternType = PatternMonthNth
-			// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
-			p.DayOfWeek = uint32(weekdayBitmask(r.Weekdays))
-			p.WeekOfMonth = weekOfMonthFromSetPos(r.SetPos)
-		} else {
-			p.PatternType = PatternMonth
-			if r.MonthDay != 0 {
-				// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
-				p.DayOfMonth = uint32(r.MonthDay)
-			} else {
-				// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
-				p.DayOfMonth = uint32(start.Day())
-			}
-		}
-		// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
-		p.Period = uint32(max(r.Interval, 1)) // months
-		p.FirstDateTime = monthlyFirstDateTime(start, p.Period)
-	case "YEARLY":
-		p.RecurFrequency = FreqYearly
-		if len(r.Weekdays) > 0 {
-			p.PatternType = PatternMonthNth
-			// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
-			p.DayOfWeek = uint32(weekdayBitmask(r.Weekdays))
-			p.WeekOfMonth = weekOfMonthFromSetPos(r.SetPos)
-		} else {
-			p.PatternType = PatternMonth
-			if r.MonthDay != 0 {
-				// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
-				p.DayOfMonth = uint32(r.MonthDay)
-			} else {
-				// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
-				p.DayOfMonth = uint32(start.Day())
-			}
-		}
-		// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
-		p.Period = uint32(max(r.Interval, 1)) * 12 // months per interval
-		p.FirstDateTime = monthlyFirstDateTime(start, p.Period)
-	default:
-		return Pattern{}, fmt.Errorf("recurrence: unsupported FREQ %q", r.Freq)
+		p.WeekOfMonth = weekOfMonthFromSetPos(r.SetPos)
+		return
 	}
+	p.PatternType = PatternMonth
+	day := r.MonthDay
+	if day == 0 {
+		day = start.Day()
+	}
+	// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
+	p.DayOfMonth = uint32(day)
+}
 
+// intervalPeriod returns the rule's INTERVAL as the pattern's period unit, never zero.
+func intervalPeriod(r rrule) uint32 {
+	// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
+	return uint32(max(r.Interval, 1))
+}
+
+// setEndRange writes the end bound: an UNTIL date, a COUNT, or the open-ended range.
+func setEndRange(p *Pattern, r rrule) {
 	switch {
 	case !r.Until.IsZero():
 		p.EndType = EndAfterDate
@@ -480,7 +585,6 @@ func patternFromRecurrence(r rrule, start time.Time) (Pattern, error) {
 		p.OccurrenceCount = 0xA
 		p.EndDate = noEndDate
 	}
-	return p, nil
 }
 
 // MarshalBinary encodes the Pattern as the MS-OXOCAL RecurrencePattern bytes

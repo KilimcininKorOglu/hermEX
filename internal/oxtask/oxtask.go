@@ -108,103 +108,176 @@ func ToProps(t Task, resolve Resolver) (mapi.PropertyValues, error) {
 		return nil, err
 	}
 	var p mapi.PropertyValues
-	p.Set(mapi.PrMessageClass, MessageClass)
-	p.Set(mapi.PrSubject, t.Subject)
-	p.Set(mapi.PrBody, t.Body)
+	w := taskWriter{p: &p, ids: ids}
+	w.writeCore(t)
+	w.writeSchedule(t)
+	w.writeProgress(t)
+	w.writeReminder(t)
+	w.writeCategories(t)
+	w.writeRecurrence(t)
+	w.writeAssignment(t)
+	return p, nil
+}
+
+// taskWriter accumulates a task's properties. Every named-property write is skipped
+// when the store allocated no id for that name.
+type taskWriter struct {
+	p   *mapi.PropertyValues
+	ids []uint16
+}
+
+// time writes a named PtSysTime property, skipping an unset instant.
+func (w taskWriter) time(idx int, when time.Time) {
+	if w.ids[idx] != 0 && !when.IsZero() {
+		w.p.Set(mapi.MakeTag(w.ids[idx], mapi.PtSysTime), mapi.UnixToNTTime(when))
+	}
+}
+
+// boolean writes a named PtBoolean property.
+func (w taskWriter) boolean(idx int, v bool) {
+	if w.ids[idx] != 0 {
+		w.p.Set(mapi.MakeTag(w.ids[idx], mapi.PtBoolean), v)
+	}
+}
+
+// long writes a named PtLong property.
+func (w taskWriter) long(idx int, v int32) {
+	if w.ids[idx] != 0 {
+		w.p.Set(mapi.MakeTag(w.ids[idx], mapi.PtLong), v)
+	}
+}
+
+// double writes a named PtDouble property.
+func (w taskWriter) double(idx int, v float64) {
+	if w.ids[idx] != 0 {
+		w.p.Set(mapi.MakeTag(w.ids[idx], mapi.PtDouble), v)
+	}
+}
+
+// text writes a named PtUnicode property, skipping an empty value.
+func (w taskWriter) text(idx int, s string) {
+	if s != "" && w.ids[idx] != 0 {
+		w.p.Set(mapi.MakeTag(w.ids[idx], mapi.PtUnicode), s)
+	}
+}
+
+// writeCore writes the message class, the subject/body and the two handling levels.
+func (w taskWriter) writeCore(t Task) {
+	w.p.Set(mapi.PrMessageClass, MessageClass)
+	w.p.Set(mapi.PrSubject, t.Subject)
+	w.p.Set(mapi.PrBody, t.Body)
 	if t.Importance >= 0 && fitsLong(t.Importance) {
 		// #nosec G115 -- the guard on the same line refuses a value the property cannot carry
-		p.Set(mapi.PrImportance, int32(t.Importance))
+		w.p.Set(mapi.PrImportance, int32(t.Importance))
 	}
 	if t.Sensitivity >= 0 && fitsLong(t.Sensitivity) {
 		// #nosec G115 -- the guard on the same line refuses a value the property cannot carry
-		p.Set(mapi.PrSensitivity, int32(t.Sensitivity))
+		w.p.Set(mapi.PrSensitivity, int32(t.Sensitivity))
 	}
-	setTime := func(idx int, when time.Time) {
-		if ids[idx] != 0 && !when.IsZero() {
-			p.Set(mapi.MakeTag(ids[idx], mapi.PtSysTime), mapi.UnixToNTTime(when))
-		}
+}
+
+// writeSchedule writes the start and due instants to both the task-specific and the
+// common date properties.
+func (w taskWriter) writeSchedule(t Task) {
+	w.time(idxStartDate, t.Start)
+	w.time(idxCommonStart, t.Start)
+	w.time(idxDueDate, t.Due)
+	w.time(idxCommonEnd, t.Due)
+}
+
+// writeProgress writes the completion flag, the status, the percentage and the
+// completion date.
+func (w taskWriter) writeProgress(t Task) {
+	w.boolean(idxComplete, t.Complete)
+	w.long(idxStatus, taskStatus(t))
+	w.double(idxPercent, taskPercent(t))
+	if t.Complete {
+		w.time(idxDateCompleted, t.DateCompleted)
 	}
-	setBool := func(idx int, v bool) {
-		if ids[idx] != 0 {
-			p.Set(mapi.MakeTag(ids[idx], mapi.PtBoolean), v)
-		}
-	}
-	setTime(idxStartDate, t.Start)
-	setTime(idxCommonStart, t.Start)
-	setTime(idxDueDate, t.Due)
-	setTime(idxCommonEnd, t.Due)
-	setBool(idxComplete, t.Complete)
-	if ids[idxStatus] != 0 {
-		// Status takes precedence when set; otherwise derive from Complete.
-		status := int32(0)
-		if t.Status >= 0 && fitsLong(t.Status) {
-			// #nosec G115 -- the guard on the same line refuses a value the property cannot carry
-			status = int32(t.Status)
-		} else if t.Complete {
-			status = 2 // olComplete
-		}
-		p.Set(mapi.MakeTag(ids[idxStatus], mapi.PtLong), status)
-	}
-	if ids[idxPercent] != 0 {
-		// Percent takes precedence when set; otherwise derive from Complete.
-		pct := 0.0
-		if t.PercentComplete >= 0 {
-			pct = t.PercentComplete
-		} else if t.Complete {
-			pct = 1.0
-		}
-		p.Set(mapi.MakeTag(ids[idxPercent], mapi.PtDouble), pct)
+}
+
+// taskStatus is the status to store: the model's own value when set, otherwise
+// derived from Complete.
+func taskStatus(t Task) int32 {
+	if t.Status >= 0 && fitsLong(t.Status) {
+		// #nosec G115 -- the guard on the line above refuses a value the property cannot carry
+		return int32(t.Status)
 	}
 	if t.Complete {
-		setTime(idxDateCompleted, t.DateCompleted)
+		return 2 // olComplete
 	}
-	setBool(idxReminderSet, t.ReminderSet)
+	return 0
+}
+
+// taskPercent is the percentage to store: the model's own value when set, otherwise
+// derived from Complete.
+func taskPercent(t Task) float64 {
+	if t.PercentComplete >= 0 {
+		return t.PercentComplete
+	}
+	if t.Complete {
+		return 1.0
+	}
+	return 0
+}
+
+// writeReminder writes the reminder flag, plus the instant when one is set.
+func (w taskWriter) writeReminder(t Task) {
+	w.boolean(idxReminderSet, t.ReminderSet)
 	if t.ReminderSet {
-		setTime(idxReminderTime, t.ReminderTime)
+		w.time(idxReminderTime, t.ReminderTime)
 	}
-	if len(t.Categories) > 0 && ids[idxKeywords] != 0 {
-		p.Set(mapi.MakeTag(ids[idxKeywords], mapi.PtMvUnicode), t.Categories)
+}
+
+// writeCategories writes the keyword list when the task carries one.
+func (w taskWriter) writeCategories(t Task) {
+	if len(t.Categories) > 0 && w.ids[idxKeywords] != 0 {
+		w.p.Set(mapi.MakeTag(w.ids[idxKeywords], mapi.PtMvUnicode), t.Categories)
 	}
-	if t.RecurrenceRule != "" && ids[idxRecurrenceRule] != 0 {
-		p.Set(mapi.MakeTag(ids[idxRecurrenceRule], mapi.PtUnicode), t.RecurrenceRule)
+}
+
+// writeRecurrence writes the RRULE text and the MS-OXOCAL RecurrencePattern blob
+// Outlook reads for a recurring task. The series anchor is the task start (falling
+// back to the due date so a due-only recurring task still emits a valid blob); a blob
+// is emitted only when the anchor is set.
+func (w taskWriter) writeRecurrence(t Task) {
+	if t.RecurrenceRule == "" {
+		return
 	}
-	// The MS-OXOCAL RecurrencePattern blob Outlook reads for a recurring task. The
-	// series anchor is the task start (fall back to due/now so a due-only recurring
-	// task still emits a valid blob); a blob is emitted only when the anchor is set.
-	if t.RecurrenceRule != "" && ids[idxTaskRecurrence] != 0 {
-		anchor := t.Start
-		if anchor.IsZero() {
-			anchor = t.Due
-		}
-		if !anchor.IsZero() {
-			if blob, err := recurrence.FromRRule(t.RecurrenceRule, anchor); err == nil {
-				p.Set(mapi.MakeTag(ids[idxTaskRecurrence], mapi.PtBinary), blob)
-			}
-		}
+	w.text(idxRecurrenceRule, t.RecurrenceRule)
+	if w.ids[idxTaskRecurrence] == 0 {
+		return
 	}
-	if t.Owner != "" && ids[idxOwner] != 0 {
-		p.Set(mapi.MakeTag(ids[idxOwner], mapi.PtUnicode), t.Owner)
+	anchor := t.Start
+	if anchor.IsZero() {
+		anchor = t.Due
 	}
-	if t.Assigner != "" && ids[idxAssigner] != 0 {
-		p.Set(mapi.MakeTag(ids[idxAssigner], mapi.PtUnicode), t.Assigner)
+	if anchor.IsZero() {
+		return
 	}
-	if ids[idxAcceptanceState] != 0 {
-		// AcceptanceState takes precedence when set; otherwise 0 (not assigned) is
-		// the default Outlook writes for an unassigned task.
-		state := int32(0)
-		if t.AcceptanceState >= 0 && fitsLong(t.AcceptanceState) {
-			// #nosec G115 -- the guard on the same line refuses a value the property cannot carry
-			state = int32(t.AcceptanceState)
-		}
-		p.Set(mapi.MakeTag(ids[idxAcceptanceState], mapi.PtLong), state)
+	if blob, err := recurrence.FromRRule(t.RecurrenceRule, anchor); err == nil {
+		w.p.Set(mapi.MakeTag(w.ids[idxTaskRecurrence], mapi.PtBinary), blob)
 	}
-	if ids[idxFCreator] != 0 {
-		p.Set(mapi.MakeTag(ids[idxFCreator], mapi.PtBoolean), t.FCreator)
+}
+
+// writeAssignment writes the assignment fields: the current keeper, the last
+// assigner, the acceptance state, the creator flag and the last update instant.
+func (w taskWriter) writeAssignment(t Task) {
+	w.text(idxOwner, t.Owner)
+	w.text(idxAssigner, t.Assigner)
+	w.long(idxAcceptanceState, taskAcceptance(t))
+	w.boolean(idxFCreator, t.FCreator)
+	w.time(idxLastUpdate, t.LastUpdate)
+}
+
+// taskAcceptance is the acceptance state to store: the model's own value when set,
+// otherwise 0 (not assigned), the default Outlook writes for an unassigned task.
+func taskAcceptance(t Task) int32 {
+	if t.AcceptanceState >= 0 && fitsLong(t.AcceptanceState) {
+		// #nosec G115 -- the guard on the line above refuses a value the property cannot carry
+		return int32(t.AcceptanceState)
 	}
-	if ids[idxLastUpdate] != 0 && !t.LastUpdate.IsZero() {
-		p.Set(mapi.MakeTag(ids[idxLastUpdate], mapi.PtSysTime), mapi.UnixToNTTime(t.LastUpdate))
-	}
-	return p, nil
+	return 0
 }
 
 // FromProps reads a task from a message's properties.
@@ -213,66 +286,113 @@ func FromProps(props mapi.PropertyValues, resolve Resolver) (Task, error) {
 	if err != nil {
 		return Task{}, err
 	}
+	r := taskReader{props: props, ids: ids}
 	t := New()
-	t.Subject = strProp(props, mapi.PrSubject)
-	t.Body = strProp(props, mapi.PrBody)
-	if v, ok := longProp(props, mapi.PrImportance); ok {
+	r.readCore(&t)
+	r.readSchedule(&t)
+	r.readProgress(&t)
+	r.readCategories(&t)
+	r.readRecurrence(&t)
+	r.readAssignment(&t)
+	return t, nil
+}
+
+// taskReader reads a task's properties. A named property the store has no id for
+// reads as absent.
+type taskReader struct {
+	props mapi.PropertyValues
+	ids   []uint16
+}
+
+// named returns the tag of a named property, or 0 when the store has no id for it.
+func (r taskReader) named(idx int, ty mapi.PropType) mapi.PropTag {
+	if r.ids[idx] == 0 {
+		return 0
+	}
+	return mapi.MakeTag(r.ids[idx], ty)
+}
+
+// readCore reads the subject, the body and the two handling levels.
+func (r taskReader) readCore(t *Task) {
+	t.Subject = strProp(r.props, mapi.PrSubject)
+	t.Body = strProp(r.props, mapi.PrBody)
+	if v, ok := longProp(r.props, mapi.PrImportance); ok {
 		t.Importance = v
 	}
-	if v, ok := longProp(props, mapi.PrSensitivity); ok {
+	if v, ok := longProp(r.props, mapi.PrSensitivity); ok {
 		t.Sensitivity = v
 	}
-	named := func(idx int, ty mapi.PropType) mapi.PropTag {
-		if ids[idx] == 0 {
-			return 0
-		}
-		return mapi.MakeTag(ids[idx], ty)
-	}
-	// Prefer the task-specific date, fall back to the common one.
-	t.Start = firstTime(props, named(idxStartDate, mapi.PtSysTime), named(idxCommonStart, mapi.PtSysTime))
-	t.Due = firstTime(props, named(idxDueDate, mapi.PtSysTime), named(idxCommonEnd, mapi.PtSysTime))
-	t.Complete = boolProp(props, named(idxComplete, mapi.PtBoolean))
-	t.DateCompleted = timeProp(props, named(idxDateCompleted, mapi.PtSysTime))
-	t.ReminderSet = boolProp(props, named(idxReminderSet, mapi.PtBoolean))
-	t.ReminderTime = timeProp(props, named(idxReminderTime, mapi.PtSysTime))
-	if v, ok := longProp(props, named(idxStatus, mapi.PtLong)); ok {
+}
+
+// readSchedule reads the start, the due date and the reminder, preferring the
+// task-specific date and falling back to the common one.
+func (r taskReader) readSchedule(t *Task) {
+	t.Start = firstTime(r.props, r.named(idxStartDate, mapi.PtSysTime), r.named(idxCommonStart, mapi.PtSysTime))
+	t.Due = firstTime(r.props, r.named(idxDueDate, mapi.PtSysTime), r.named(idxCommonEnd, mapi.PtSysTime))
+	t.ReminderSet = boolProp(r.props, r.named(idxReminderSet, mapi.PtBoolean))
+	t.ReminderTime = timeProp(r.props, r.named(idxReminderTime, mapi.PtSysTime))
+}
+
+// readProgress reads the completion flag, the completion date, the status and the
+// percentage.
+func (r taskReader) readProgress(t *Task) {
+	t.Complete = boolProp(r.props, r.named(idxComplete, mapi.PtBoolean))
+	t.DateCompleted = timeProp(r.props, r.named(idxDateCompleted, mapi.PtSysTime))
+	if v, ok := longProp(r.props, r.named(idxStatus, mapi.PtLong)); ok {
 		t.Status = v
 	}
-	if v, ok := props.Get(named(idxPercent, mapi.PtDouble)); ok {
-		if pct, ok := v.(float64); ok {
-			t.PercentComplete = pct
-		}
+	if pct, ok := typedProp[float64](r.props, r.named(idxPercent, mapi.PtDouble)); ok {
+		t.PercentComplete = pct
 	}
-	if v, ok := props.Get(named(idxKeywords, mapi.PtMvUnicode)); ok {
-		if cats, ok := v.([]string); ok {
-			t.Categories = cats
-		}
+}
+
+// readCategories reads the keyword list.
+func (r taskReader) readCategories(t *Task) {
+	if cats, ok := typedProp[[]string](r.props, r.named(idxKeywords, mapi.PtMvUnicode)); ok {
+		t.Categories = cats
 	}
-	if v, ok := props.Get(named(idxRecurrenceRule, mapi.PtUnicode)); ok {
-		if s, ok := v.(string); ok {
-			t.RecurrenceRule = s
-		}
+}
+
+// readRecurrence reads the stored RRULE text. When none is stored (a MAPI client
+// authored the task and wrote only the MS-OXOCAL blob), it decodes the blob back to
+// the RRULE so the EAS/webmail paths read the same recurrence a MAPI client wrote.
+func (r taskReader) readRecurrence(t *Task) {
+	if s, ok := typedProp[string](r.props, r.named(idxRecurrenceRule, mapi.PtUnicode)); ok {
+		t.RecurrenceRule = s
 	}
-	// When no RRULE text is stored (a MAPI client authored the task and wrote only the
-	// MS-OXOCAL blob), decode the blob back to the RRULE so the EAS/webmail paths read
-	// the same recurrence a MAPI client wrote.
-	if t.RecurrenceRule == "" {
-		if v, ok := props.Get(named(idxTaskRecurrence, mapi.PtBinary)); ok {
-			if blob, ok := v.([]byte); ok {
-				if rrule, ok := recurrence.ToRRule(blob); ok {
-					t.RecurrenceRule = rrule
-				}
-			}
-		}
+	if t.RecurrenceRule != "" {
+		return
 	}
-	t.Owner = strProp(props, named(idxOwner, mapi.PtUnicode))
-	t.Assigner = strProp(props, named(idxAssigner, mapi.PtUnicode))
-	if v, ok := longProp(props, named(idxAcceptanceState, mapi.PtLong)); ok {
+	blob, ok := typedProp[[]byte](r.props, r.named(idxTaskRecurrence, mapi.PtBinary))
+	if !ok {
+		return
+	}
+	if rule, ok := recurrence.ToRRule(blob); ok {
+		t.RecurrenceRule = rule
+	}
+}
+
+// readAssignment reads the current keeper, the last assigner, the acceptance state,
+// the creator flag and the last update instant.
+func (r taskReader) readAssignment(t *Task) {
+	t.Owner = strProp(r.props, r.named(idxOwner, mapi.PtUnicode))
+	t.Assigner = strProp(r.props, r.named(idxAssigner, mapi.PtUnicode))
+	if v, ok := longProp(r.props, r.named(idxAcceptanceState, mapi.PtLong)); ok {
 		t.AcceptanceState = v
 	}
-	t.FCreator = boolProp(props, named(idxFCreator, mapi.PtBoolean))
-	t.LastUpdate = timeProp(props, named(idxLastUpdate, mapi.PtSysTime))
-	return t, nil
+	t.FCreator = boolProp(r.props, r.named(idxFCreator, mapi.PtBoolean))
+	t.LastUpdate = timeProp(r.props, r.named(idxLastUpdate, mapi.PtSysTime))
+}
+
+// typedProp returns a property's value when it is present and carries type T.
+func typedProp[T any](p mapi.PropertyValues, tag mapi.PropTag) (T, bool) {
+	if v, ok := p.Get(tag); ok {
+		if tv, ok := v.(T); ok {
+			return tv, true
+		}
+	}
+	var zero T
+	return zero, false
 }
 
 func strProp(p mapi.PropertyValues, tag mapi.PropTag) string {

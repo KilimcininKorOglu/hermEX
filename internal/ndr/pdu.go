@@ -166,6 +166,16 @@ func pushHeader(p *Push, h Header) {
 // pullHeader reads the 16-byte NCACN header, rejecting non-RPC-5 and big-endian
 // peers (the NDR primitives are little-endian only).
 func pullHeader(p *Pull) (Header, error) {
+	h, err := pullHeaderPrefix(p)
+	if err != nil {
+		return h, err
+	}
+	return pullHeaderLengths(p, h)
+}
+
+// pullHeaderPrefix reads the version, the PDU type and flags, and the data
+// representation, rejecting a non-RPC-5 or big-endian peer.
+func pullHeaderPrefix(p *Pull) (Header, error) {
 	var h Header
 	vers, err := p.Uint8()
 	if err != nil {
@@ -190,6 +200,13 @@ func pullHeader(p *Pull) (Header, error) {
 	if drep[0]&0x10 == 0 {
 		return h, ErrBigEndian
 	}
+	return h, nil
+}
+
+// pullHeaderLengths reads the fragment length, the auth length and the call id onto
+// the header the prefix produced.
+func pullHeaderLengths(p *Pull, h Header) (Header, error) {
+	var err error
 	if h.FragLen, err = p.Uint16(); err != nil {
 		return h, err
 	}
