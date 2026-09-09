@@ -1,7 +1,6 @@
 package oxcical
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -24,30 +23,22 @@ func TestVTODORoundTrip(t *testing.T) {
 	}
 	ics := ExportVTODO(in, "task-1@hermex.test", time.Time{})
 	s := string(ics)
-	if !strings.Contains(s, "BEGIN:VTODO") || !strings.Contains(s, "SUMMARY:Ship release") {
-		t.Fatalf("VTODO missing core fields:\n%s", s)
-	}
-	if !strings.Contains(s, "STATUS:COMPLETED") || !strings.Contains(s, "DUE:20260701T170000Z") {
-		t.Errorf("VTODO missing status/due:\n%s", s)
-	}
+	wantContains(t, s, "BEGIN:VTODO", "the export opens a VTODO")
+	wantContains(t, s, "SUMMARY:Ship release", "the export carries the subject")
+	wantContains(t, s, "STATUS:COMPLETED", "the export carries the completion status")
+	wantContains(t, s, "DUE:20260701T170000Z", "the export carries the due date")
 
 	out, uid, ok := ParseVTODO(ics)
 	if !ok {
 		t.Fatal("ParseVTODO returned ok=false")
 	}
-	if uid != "task-1@hermex.test" {
-		t.Errorf("uid = %q", uid)
-	}
-	if out.Subject != in.Subject || out.Body != in.Body {
-		t.Errorf("subject/body = %q/%q", out.Subject, out.Body)
-	}
-	if !out.Due.Equal(in.Due) || !out.Start.Equal(in.Start) {
-		t.Errorf("start/due = %v / %v", out.Start, out.Due)
-	}
-	if !out.Complete || out.Importance != 2 {
-		t.Errorf("complete=%v importance=%d", out.Complete, out.Importance)
-	}
-	if len(out.Categories) != 2 || out.Categories[0] != "Work" {
-		t.Errorf("categories = %v", out.Categories)
-	}
+	wantEq(t, uid, "task-1@hermex.test", "parsed uid")
+	wantEq(t, out.Subject, in.Subject, "parsed subject")
+	wantEq(t, out.Body, in.Body, "parsed body")
+	wantTime(t, out.Start, in.Start, "parsed start")
+	wantTime(t, out.Due, in.Due, "parsed due")
+	wantTrue(t, out.Complete, "the task parses back as complete")
+	wantEq(t, out.Importance, 2, "parsed importance")
+	wantEq(t, len(out.Categories), 2, "parsed category count")
+	wantEq(t, out.Categories[0], "Work", "the first parsed category")
 }

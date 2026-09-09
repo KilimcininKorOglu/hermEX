@@ -302,12 +302,8 @@ func TestAttendeeRoundTrip(t *testing.T) {
 		"END:VEVENT\r\nEND:VCALENDAR\r\n"
 
 	msg, err := Import([]byte(ics), r.opt())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := str(msg, mapi.PrSentRepresentingSmtpAddress); got != "alice@hermex.test" {
-		t.Errorf("organizer smtp = %q, want alice@hermex.test", got)
-	}
+	mustNoErr(t, err, "import")
+	wantEq(t, str(msg, mapi.PrSentRepresentingSmtpAddress), "alice@hermex.test", "the stored organizer")
 	if len(msg.Recipients) != 2 {
 		t.Fatalf("imported %d recipients, want 2", len(msg.Recipients))
 	}
@@ -315,29 +311,16 @@ func TestAttendeeRoundTrip(t *testing.T) {
 	for _, rcpt := range msg.Recipients {
 		addrs[recipSmtp(rcpt)] = true
 	}
-	for _, want := range []string{"bob@hermex.test", "carol@hermex.test"} {
-		if !addrs[want] {
-			t.Errorf("attendee %q not imported as a recipient; got %v", want, addrs)
-		}
-	}
+	wantTrue(t, addrs["bob@hermex.test"], "bob is stored as a recipient")
+	wantTrue(t, addrs["carol@hermex.test"], "carol is stored as a recipient")
 
 	out, err := Export(msg, r.opt())
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, err, "export")
 	s := string(out)
-	for _, want := range []string{
-		"ORGANIZER:mailto:alice@hermex.test",
-		"mailto:bob@hermex.test",
-		"mailto:carol@hermex.test",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("export missing %q\n%s", want, s)
-		}
-	}
-	if n := strings.Count(s, "ATTENDEE"); n != 2 {
-		t.Errorf("export has %d ATTENDEE lines, want 2\n%s", n, s)
-	}
+	wantContains(t, s, "ORGANIZER:mailto:alice@hermex.test", "the export re-emits the organizer")
+	wantContains(t, s, "mailto:bob@hermex.test", "the export re-emits bob")
+	wantContains(t, s, "mailto:carol@hermex.test", "the export re-emits carol")
+	wantEq(t, strings.Count(s, "ATTENDEE"), 2, "ATTENDEE lines in the export")
 }
 
 // recipSmtp returns a recipient bag's SMTP address.
@@ -357,35 +340,21 @@ func recipSmtp(rcpt mapi.PropertyValues) string {
 func TestRoundTripTimed(t *testing.T) {
 	r := newResolver()
 	msg, err := Import([]byte(timedICS), r.opt())
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, err, "import")
 	out, err := Export(msg, r.opt())
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, err, "export")
 	cal, err := parseICal(out)
-	if err != nil {
-		t.Fatalf("re-parse: %v\n%s", err, out)
-	}
+	mustNoErr(t, err, "re-parse the export")
 	vev := cal.sub("VEVENT")
 	if vev == nil {
 		t.Fatalf("no VEVENT in export\n%s", out)
 	}
-	checks := map[string]string{
-		"UID": "ev-1", "SUMMARY": "Standup", "DESCRIPTION": "Daily sync", "LOCATION": "Room 5",
-	}
-	for name, want := range checks {
-		if got := vev.propText(name); got != want {
-			t.Errorf("%s = %q, want %q", name, got, want)
-		}
-	}
-	if l := vev.prop("DTSTART"); l == nil || l.value != "20260612T090000Z" {
-		t.Errorf("DTSTART = %v, want 20260612T090000Z", l)
-	}
-	if l := vev.prop("DTEND"); l == nil || l.value != "20260612T093000Z" {
-		t.Errorf("DTEND = %v, want 20260612T093000Z", l)
-	}
+	wantProp(t, vev, "UID", "ev-1")
+	wantProp(t, vev, "SUMMARY", "Standup")
+	wantProp(t, vev, "DESCRIPTION", "Daily sync")
+	wantProp(t, vev, "LOCATION", "Room 5")
+	wantPropValue(t, vev, "DTSTART", "20260612T090000Z")
+	wantPropValue(t, vev, "DTEND", "20260612T093000Z")
 }
 
 // TestTimezoneToUTC is the tzdata landmine guard: a TZID-bearing local time must
@@ -450,16 +419,13 @@ func TestRecurringVerbatim(t *testing.T) {
 	if !ok {
 		t.Fatal("recurring event did not set PrIcalOriginal")
 	}
-	if raw, _ := v.([]byte); string(raw) != recICS {
-		t.Errorf("PrIcalOriginal not the verbatim source")
-	}
-	if got := str(msg, mapi.PrSubject); got != "Weekly" {
-		t.Errorf("minimal subject %q, want Weekly", got)
-	}
+	raw, _ := v.([]byte)
+	wantEq(t, string(raw), recICS, "the preserved source")
+	wantEq(t, str(msg, mapi.PrSubject), "Weekly", "the listing subject")
+
 	// The series master emits the MS-OXOCAL RecurrencePattern blob a MAPI client
 	// (Outlook) reads for the weekly Friday series.
-	recurTag := r.tag(mapi.NameAppointmentRecur, mapi.PtBinary)
-	blob, ok := msg.Props.Get(recurTag)
+	blob, ok := msg.Props.Get(r.tag(mapi.NameAppointmentRecur, mapi.PtBinary))
 	if !ok {
 		t.Fatal("recurring event did not set PidLidAppointmentRecur blob")
 	}
@@ -467,19 +433,12 @@ func TestRecurringVerbatim(t *testing.T) {
 	if len(b) < 8 {
 		t.Fatalf("RecurrencePattern blob too short: %d bytes", len(b))
 	}
-	if got := uint16(b[0]) | uint16(b[1])<<8; got != 0x3004 {
-		t.Errorf("blob ReaderVersion = %#x, want 0x3004", got)
-	}
-	if got := uint16(b[4]) | uint16(b[5])<<8; got != 0x200B {
-		t.Errorf("RecurFrequency = %#x, want 0x200B (weekly)", got)
-	}
+	wantEq(t, uint16(b[0])|uint16(b[1])<<8, uint16(0x3004), "blob ReaderVersion")
+	wantEq(t, uint16(b[4])|uint16(b[5])<<8, uint16(0x200B), "RecurFrequency (weekly)")
+
 	out, err := Export(msg, r.opt())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(out) != recICS {
-		t.Errorf("recurring export not verbatim:\n%s", out)
-	}
+	mustNoErr(t, err, "export")
+	wantEq(t, string(out), recICS, "the re-served body")
 }
 
 // TestImportSemantics pins the PRIORITY/CLASS/TRANSP/VALARM mappings (intent: a

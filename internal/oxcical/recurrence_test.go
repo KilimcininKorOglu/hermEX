@@ -16,18 +16,14 @@ func TestParseRecurrence(t *testing.T) {
 	if !ok {
 		t.Fatal("ParseRecurrence failed on a valid recurring VEVENT")
 	}
-	if !start.Equal(time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)) {
-		t.Errorf("start = %v", start)
-	}
-	if !end.Equal(time.Date(2026, 6, 1, 9, 30, 0, 0, time.UTC)) {
-		t.Errorf("end = %v", end)
-	}
-	if rec.Freq != "WEEKLY" || rec.Interval != 2 || rec.Count != 10 {
-		t.Errorf("rec = %+v", rec)
-	}
-	if len(rec.Weekdays) != 3 || rec.Weekdays[0] != "MO" || rec.Weekdays[2] != "FR" {
-		t.Errorf("weekdays = %v", rec.Weekdays)
-	}
+	wantTime(t, start, time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC), "series start")
+	wantTime(t, end, time.Date(2026, 6, 1, 9, 30, 0, 0, time.UTC), "series end")
+	wantEq(t, rec.Freq, "WEEKLY", "frequency")
+	wantEq(t, rec.Interval, 2, "interval")
+	wantEq(t, rec.Count, 10, "count")
+	wantEq(t, len(rec.Weekdays), 3, "weekday count")
+	wantEq(t, rec.Weekdays[0], "MO", "first weekday")
+	wantEq(t, rec.Weekdays[2], "FR", "last weekday")
 
 	monthly := []byte("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20260601T100000Z\r\n" +
 		"RRULE:FREQ=MONTHLY;BYDAY=2TU;UNTIL=20261231T000000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
@@ -35,15 +31,13 @@ func TestParseRecurrence(t *testing.T) {
 	if !ok {
 		t.Fatal("ParseRecurrence failed on the monthly rule")
 	}
-	if rec2.Freq != "MONTHLY" || rec2.SetPos != 2 || len(rec2.Weekdays) != 1 || rec2.Weekdays[0] != "TU" {
-		t.Errorf("monthly rec = %+v", rec2)
-	}
-	if rec2.Until.IsZero() {
-		t.Error("UNTIL was not parsed")
-	}
+	wantEq(t, rec2.Freq, "MONTHLY", "monthly frequency")
+	wantEq(t, rec2.SetPos, 2, "the nth-weekday ordinal")
+	wantEq(t, len(rec2.Weekdays), 1, "monthly weekday count")
+	wantEq(t, rec2.Weekdays[0], "TU", "monthly weekday")
+	wantFalse(t, rec2.Until.IsZero(), "UNTIL is parsed")
 
 	noRule := []byte("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20260601T090000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
-	if _, _, _, ok := ParseRecurrence(noRule); ok {
-		t.Error("a VEVENT without RRULE should not parse as a recurrence")
-	}
+	_, _, _, ok = ParseRecurrence(noRule)
+	wantFalse(t, ok, "a VEVENT without RRULE parses as a recurrence")
 }
