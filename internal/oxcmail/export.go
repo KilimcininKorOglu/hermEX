@@ -36,86 +36,60 @@ func Export(msg *Message, opt Options) ([]byte, error) {
 	var b bytes.Buffer
 	writeMailHead(&b, msg)
 
-	// Separate inline (HTML-referenced) attachments from regular ones: inline
-	// images join the HTML body in a multipart/related, regular attachments wrap
-	// everything in a multipart/mixed.
-	var inline, regular []Attachment
-	for _, att := range msg.Attachments {
-		if isInlineAttachment(att) {
-			inline = append(inline, att)
-		} else {
-			regular = append(regular, att)
-		}
-	}
+	inline, regular := splitAttachments(msg.Attachments)
 
 	// The innermost unit is the body, wrapped in multipart/related when it has
-	// inline images.
+	// inline images and then in multipart/mixed when regular attachments follow.
 	innerHdr, innerBytes, err := renderBody(msg, opt)
 	if err != nil {
 		return nil, err
 	}
 	if len(inline) > 0 {
-		innerHdr, innerBytes, err = renderRelated(innerHdr, innerBytes, inline)
+		innerHdr, innerBytes, err = wrapMultipart("related", innerHdr, innerBytes, inline)
 		if err != nil {
 			return nil, err
 		}
 	}
-
-	if len(regular) == 0 {
-		writeHeaderFields(&b, innerHdr)
-		b.WriteString("\r\n")
-		b.Write(innerBytes)
-		return b.Bytes(), nil
+	if len(regular) > 0 {
+		innerHdr, innerBytes, err = wrapMultipart("mixed", innerHdr, innerBytes, regular)
+		if err != nil {
+			return nil, err
+		}
 	}
+	writeHeaderFields(&b, innerHdr)
+	b.WriteString("\r\n")
+	b.Write(innerBytes)
+	return b.Bytes(), nil
+}
 
-	// Regular attachments wrap the inner unit in multipart/mixed.
+// splitAttachments separates inline (HTML-referenced) attachments from regular
+// ones: inline images join the HTML body in a multipart/related, regular
+// attachments wrap everything in a multipart/mixed.
+func splitAttachments(atts []Attachment) (inline, regular []Attachment) {
+	for _, att := range atts {
+		if isInlineAttachment(att) {
+			inline = append(inline, att)
+			continue
+		}
+		regular = append(regular, att)
+	}
+	return inline, regular
+}
+
+// wrapMultipart wraps a rendered part and a list of attachments in a multipart of
+// the given subtype, returning the wrapper's header and body.
+func wrapMultipart(subtype string, innerHdr textproto.MIMEHeader, innerBytes []byte, atts []Attachment) (textproto.MIMEHeader, []byte, error) {
 	var parts bytes.Buffer
 	mw := multipart.NewWriter(&parts)
 	iw, err := mw.CreatePart(innerHdr)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if _, err := iw.Write(innerBytes); err != nil {
-		return nil, err
-	}
-	for _, att := range regular {
-		ah, adata := renderAttachment(att)
-		aw, err := mw.CreatePart(ah)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := aw.Write(adata); err != nil {
-			return nil, err
-		}
-	}
-	if err := mw.Close(); err != nil {
-		return nil, err
-	}
-	writeField(&b, "Content-Type", "multipart/mixed; boundary=\""+mw.Boundary()+"\"")
-	b.WriteString("\r\n")
-	b.Write(parts.Bytes())
-	return b.Bytes(), nil
-}
-
-// renderRelated wraps the body part and the inline attachments in a
-// multipart/related part (HTML body with its referenced images).
-func renderRelated(bodyHdr textproto.MIMEHeader, bodyBytes []byte, inline []Attachment) (textproto.MIMEHeader, []byte, error) {
-	var parts bytes.Buffer
-	mw := multipart.NewWriter(&parts)
-	bw, err := mw.CreatePart(bodyHdr)
-	if err != nil {
 		return nil, nil, err
 	}
-	if _, err := bw.Write(bodyBytes); err != nil {
-		return nil, nil, err
-	}
-	for _, att := range inline {
-		ah, adata := renderAttachment(att)
-		aw, err := mw.CreatePart(ah)
-		if err != nil {
-			return nil, nil, err
-		}
-		if _, err := aw.Write(adata); err != nil {
+	for _, att := range atts {
+		if err := writeAttachmentPart(mw, att); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -123,8 +97,19 @@ func renderRelated(bodyHdr textproto.MIMEHeader, bodyBytes []byte, inline []Atta
 		return nil, nil, err
 	}
 	h := textproto.MIMEHeader{}
-	h.Set("Content-Type", "multipart/related; boundary=\""+mw.Boundary()+"\"")
+	h.Set("Content-Type", "multipart/"+subtype+"; boundary=\""+mw.Boundary()+"\"")
 	return h, parts.Bytes(), nil
+}
+
+// writeAttachmentPart renders one attachment into an open multipart writer.
+func writeAttachmentPart(mw *multipart.Writer, att Attachment) error {
+	ah, adata := renderAttachment(att)
+	aw, err := mw.CreatePart(ah)
+	if err != nil {
+		return err
+	}
+	_, err = aw.Write(adata)
+	return err
 }
 
 // isInlineAttachment reports whether an attachment is an HTML-referenced inline
@@ -312,69 +297,88 @@ func encodeBase64(data []byte) []byte {
 // header order of the MS-OXCMAIL export path.
 func writeMailHead(b *bytes.Buffer, msg *Message) {
 	writeField(b, "MIME-Version", "1.0")
+	writeOriginatorFields(b, msg)
+	writeRecipientFields(b, msg)
+	writeHandlingFields(b, msg)
+	if v, ok := propUint64(msg.Props, mapi.PrClientSubmitTime); ok {
+		writeField(b, "Date", mapi.NTTimeToUnix(v).UTC().Format(dateLayout))
+	}
+	writeField(b, "Subject", encodeText(subjectText(msg.Props)))
+	writeThreadFields(b, msg)
+	writePreservedHeaders(b, msg)
+}
 
-	// From carries the sent-representing identity.
+// writeOriginatorFields emits From, which carries the sent-representing identity,
+// and Sender, which is emitted only when it differs from the representing address.
+func writeOriginatorFields(b *bytes.Buffer, msg *Message) {
 	if from := identityAddress(msg.Props, representingTags); from != "" {
 		writeField(b, "From", from)
 	}
-	// Sender is emitted only when it differs from the representing address.
 	senderSMTP := propString(msg.Props, mapi.PrSenderSmtpAddress)
 	reprSMTP := propString(msg.Props, mapi.PrSentRepresentingSmtpAddress)
-	if senderSMTP != "" && !strings.EqualFold(senderSMTP, reprSMTP) {
-		if s := identityAddress(msg.Props, senderTags); s != "" {
-			writeField(b, "Sender", s)
+	if senderSMTP == "" || strings.EqualFold(senderSMTP, reprSMTP) {
+		return
+	}
+	if s := identityAddress(msg.Props, senderTags); s != "" {
+		writeField(b, "Sender", s)
+	}
+}
+
+// writeRecipientFields emits the three address lists from the stored recipients.
+func writeRecipientFields(b *bytes.Buffer, msg *Message) {
+	for _, r := range []struct {
+		field string
+		kind  int32
+	}{
+		{"To", mapi.RecipTo},
+		{"Cc", mapi.RecipCc},
+		{"Bcc", mapi.RecipBcc},
+	} {
+		if list := recipientList(msg, r.kind); list != "" {
+			writeField(b, r.field, list)
 		}
 	}
+}
 
-	if to := recipientList(msg, mapi.RecipTo); to != "" {
-		writeField(b, "To", to)
-	}
-	if cc := recipientList(msg, mapi.RecipCc); cc != "" {
-		writeField(b, "Cc", cc)
-	}
-	if bcc := recipientList(msg, mapi.RecipBcc); bcc != "" {
-		writeField(b, "Bcc", bcc)
-	}
-
+// writeHandlingFields emits how the message asks to be handled: its importance,
+// its sensitivity, and any read receipt. A requested read receipt re-emits
+// Disposition-Notification-To from the read-receipt identity, falling back to the
+// sender then the representing identity, as the export path does.
+func writeHandlingFields(b *bytes.Buffer, msg *Message) {
 	if v, ok := propInt32(msg.Props, mapi.PrImportance); ok {
 		writeField(b, "Importance", importanceText(v))
 	}
 	if v, ok := propInt32(msg.Props, mapi.PrSensitivity); ok {
 		writeField(b, "Sensitivity", sensitivityText(v))
 	}
-
-	// A requested read receipt re-emits Disposition-Notification-To from the
-	// read-receipt identity, falling back to the sender then the representing
-	// identity, as the export path does.
-	if requested, _ := propBool(msg.Props, mapi.PrReadReceiptRequested); requested {
-		for _, t := range []addrTags{readReceiptTags, senderTags, representingTags} {
-			if addr := identityAddress(msg.Props, t); addr != "" {
-				writeField(b, "Disposition-Notification-To", addr)
-				break
-			}
+	if requested, _ := propBool(msg.Props, mapi.PrReadReceiptRequested); !requested {
+		return
+	}
+	for _, t := range []addrTags{readReceiptTags, senderTags, representingTags} {
+		if addr := identityAddress(msg.Props, t); addr != "" {
+			writeField(b, "Disposition-Notification-To", addr)
+			return
 		}
 	}
+}
 
-	if v, ok := propUint64(msg.Props, mapi.PrClientSubmitTime); ok {
-		writeField(b, "Date", mapi.NTTimeToUnix(v).UTC().Format(dateLayout))
-	}
-
-	writeField(b, "Subject", encodeText(subjectText(msg.Props)))
-
+// writeThreadFields emits the conversation and threading identity.
+func writeThreadFields(b *bytes.Buffer, msg *Message) {
 	if topic := propString(msg.Props, mapi.PrConversationTopic); topic != "" {
 		writeField(b, "Thread-Topic", encodeText(topic))
 	}
-	if id := propString(msg.Props, mapi.PrInternetMessageID); id != "" {
-		writeField(b, "Message-ID", id)
+	for _, f := range []struct {
+		field string
+		tag   mapi.PropTag
+	}{
+		{"Message-ID", mapi.PrInternetMessageID},
+		{"References", mapi.PrInternetReferences},
+		{"In-Reply-To", mapi.PrInReplyToID},
+	} {
+		if v := propString(msg.Props, f.tag); v != "" {
+			writeField(b, f.field, v)
+		}
 	}
-	if refs := propString(msg.Props, mapi.PrInternetReferences); refs != "" {
-		writeField(b, "References", refs)
-	}
-	if irt := propString(msg.Props, mapi.PrInReplyToID); irt != "" {
-		writeField(b, "In-Reply-To", irt)
-	}
-
-	writePreservedHeaders(b, msg)
 }
 
 // preservedHeaderPrefixes are the inbound header families Export re-emits verbatim

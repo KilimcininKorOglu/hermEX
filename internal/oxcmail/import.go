@@ -96,15 +96,31 @@ var (
 // MS-OXCMAIL header-to-property mapping. The From header populates the
 // sent-representing identity (not the sender), and Sender populates the sender.
 func enumMailHead(hdr textproto.MIMEHeader, msg *Message) {
+	importOriginators(hdr, msg)
+	importRecipients(hdr, msg)
+	importThreadFields(hdr, msg)
+	importHandlingFields(hdr, msg)
+	importImportance(hdr, msg)
+	if v := hdr.Get("Subject"); v != "" {
+		parseSubject(v, &msg.Props)
+	}
+}
+
+// importOriginators fills the two originator identities.
+func importOriginators(hdr textproto.MIMEHeader, msg *Message) {
 	if v := hdr.Get("From"); v != "" {
 		parseAddress(v, representingTags, &msg.Props)
 	}
 	if v := hdr.Get("Sender"); v != "" {
 		parseAddress(v, senderTags, &msg.Props)
 	}
-	// PR_DISPLAY_TO/CC carry the recipient lists as message-level strings (the raw
-	// header, names and addresses), so a rule's "to"/"cc" condition can match them:
-	// restrictions evaluate the message property bag, not the recipient sub-objects.
+}
+
+// importRecipients fills the recipient bags and the message-level address lists.
+// PR_DISPLAY_TO/CC carry those lists as strings (the raw header, names and
+// addresses), so a rule's "to"/"cc" condition can match them: restrictions
+// evaluate the message property bag, not the recipient sub-objects.
+func importRecipients(hdr textproto.MIMEHeader, msg *Message) {
 	if to := strings.Join(hdr.Values("To"), ", "); to != "" {
 		msg.Props.Set(mapi.PrDisplayTo, to)
 	}
@@ -120,50 +136,65 @@ func enumMailHead(hdr textproto.MIMEHeader, msg *Message) {
 	for _, v := range hdr.Values("Bcc") {
 		parseAddresses(v, mapi.RecipBcc, msg)
 	}
-	if v := hdr.Get("Message-ID"); v != "" {
-		msg.Props.Set(mapi.PrInternetMessageID, v)
+}
+
+// importThreadFields fills the message identity and threading properties.
+func importThreadFields(hdr textproto.MIMEHeader, msg *Message) {
+	for _, f := range []struct {
+		field string
+		tag   mapi.PropTag
+	}{
+		{"Message-ID", mapi.PrInternetMessageID},
+		{"References", mapi.PrInternetReferences},
+		{"In-Reply-To", mapi.PrInReplyToID},
+	} {
+		if v := hdr.Get(f.field); v != "" {
+			msg.Props.Set(f.tag, v)
+		}
 	}
 	if v := hdr.Get("Date"); v != "" {
 		if t, err := mail.ParseDate(v); err == nil {
 			msg.Props.Set(mapi.PrClientSubmitTime, mapi.UnixToNTTime(t))
 		}
 	}
-	if v := hdr.Get("References"); v != "" {
-		msg.Props.Set(mapi.PrInternetReferences, v)
+	if v := hdr.Get("Thread-Topic"); v != "" {
+		msg.Props.Set(mapi.PrConversationTopic, decodeHeaderWord(v))
 	}
-	if v := hdr.Get("In-Reply-To"); v != "" {
-		msg.Props.Set(mapi.PrInReplyToID, v)
-	}
+}
+
+// importHandlingFields fills how the message asks to be handled. A read-receipt
+// request (Disposition-Notification-To) sets the request flags and parses the
+// notification address into the read-receipt identity, which export re-emits.
+func importHandlingFields(hdr textproto.MIMEHeader, msg *Message) {
 	if v := hdr.Get("Sensitivity"); v != "" {
 		msg.Props.Set(mapi.PrSensitivity, parseSensitivity(v))
 	}
-	// A read-receipt request (Disposition-Notification-To) sets the request
-	// flags and parses the notification address into the read-receipt identity,
-	// which export re-emits.
 	if v := hdr.Get("Disposition-Notification-To"); v != "" {
 		msg.Props.Set(mapi.PrReadReceiptRequested, true)
 		msg.Props.Set(mapi.PrNonReceiptNotificationRequested, true)
 		parseAddress(v, readReceiptTags, &msg.Props)
 	}
-	// Priority: a later header overwrites an earlier one. They are applied
-	// weakest-source-first so the MAPI-native Importance header wins a conflict.
-	if v := hdr.Get("X-Priority"); v != "" {
-		msg.Props.Set(mapi.PrImportance, parseXPriority(v))
-	}
-	if v := hdr.Get("Priority"); v != "" {
-		msg.Props.Set(mapi.PrImportance, parsePriority(v))
-	}
-	if v := hdr.Get("X-MSMail-Priority"); v != "" {
-		msg.Props.Set(mapi.PrImportance, parseImportance(v))
-	}
-	if v := hdr.Get("Importance"); v != "" {
-		msg.Props.Set(mapi.PrImportance, parseImportance(v))
-	}
-	if v := hdr.Get("Subject"); v != "" {
-		parseSubject(v, &msg.Props)
-	}
-	if v := hdr.Get("Thread-Topic"); v != "" {
-		msg.Props.Set(mapi.PrConversationTopic, decodeHeaderWord(v))
+}
+
+// importanceHeaders are the priority headers a message may carry, weakest source
+// first: a later one overwrites an earlier one, so the MAPI-native Importance
+// header wins a conflict.
+var importanceHeaders = []struct {
+	field string
+	parse func(string) int32
+}{
+	{"X-Priority", parseXPriority},
+	{"Priority", parsePriority},
+	{"X-MSMail-Priority", parseImportance},
+	{"Importance", parseImportance},
+}
+
+// importImportance fills PR_IMPORTANCE from whichever priority headers are present.
+func importImportance(hdr textproto.MIMEHeader, msg *Message) {
+	for _, h := range importanceHeaders {
+		if v := hdr.Get(h.field); v != "" {
+			msg.Props.Set(mapi.PrImportance, h.parse(v))
+		}
 	}
 }
 
@@ -527,57 +558,83 @@ func selectParts(part *mime.Part, info *bodyParts, level int) {
 		return
 	}
 	if len(part.Children) == 0 {
-		switch {
-		case part.Type == "text" && part.Subtype == "plain":
-			info.plain = part
-		case part.Type == "text" && part.Subtype == "html":
-			info.htmls = append(info.htmls, part)
-		case part.Type == "text" && part.Subtype == "enriched":
-			info.enriched = part
-		case part.Type == "text" && part.Subtype == "calendar":
-			info.calendar = part
-		}
+		selectLeafPart(part, info)
 		return
 	}
 	if level >= maxBodyDepth {
 		return
 	}
-	level++
+	selectChildParts(part, info, level+1)
+}
+
+// selectLeafPart files a leaf part under the body type it carries. A non-text part
+// is an attachment candidate, not a body part.
+func selectLeafPart(part *mime.Part, info *bodyParts) {
+	if part.Type != "text" {
+		return
+	}
+	switch part.Subtype {
+	case "plain":
+		info.plain = part
+	case "html":
+		info.htmls = append(info.htmls, part)
+	case "enriched":
+		info.enriched = part
+	case "calendar":
+		info.calendar = part
+	}
+}
+
+// selectChildParts walks a multipart's children. An alternative takes the best of
+// each body type among them; any other multipart takes the first of each, joining
+// the HTML parts only when the first child was itself HTML.
+func selectChildParts(part *mime.Part, info *bodyParts, level int) {
 	alt := part.Type == "multipart" && part.Subtype == "alternative"
 	hjoinEnabled := false
 	for idx, child := range part.Children {
 		var cld bodyParts
 		selectParts(child, &cld, level)
 		if alt {
-			if cld.plain != nil {
-				info.plain = cld.plain
-			}
-			if len(cld.htmls) > 0 {
-				info.htmls = cld.htmls
-			}
-			if cld.enriched != nil {
-				info.enriched = cld.enriched
-			}
-			if cld.calendar != nil {
-				info.calendar = cld.calendar
-			}
+			takeBestBody(info, cld)
 			continue
 		}
 		if idx == 0 && len(cld.htmls) > 0 {
 			hjoinEnabled = true
 		}
-		if cld.plain != nil && info.plain == nil {
-			info.plain = cld.plain
-		}
-		if hjoinEnabled {
-			info.htmls = append(info.htmls, cld.htmls...)
-		}
-		if cld.enriched != nil && info.enriched == nil {
-			info.enriched = cld.enriched
-		}
-		if cld.calendar != nil && info.calendar == nil {
-			info.calendar = cld.calendar
-		}
+		takeFirstBody(info, cld, hjoinEnabled)
+	}
+}
+
+// takeBestBody lets a later alternative replace what an earlier one offered.
+func takeBestBody(info *bodyParts, cld bodyParts) {
+	if cld.plain != nil {
+		info.plain = cld.plain
+	}
+	if len(cld.htmls) > 0 {
+		info.htmls = cld.htmls
+	}
+	if cld.enriched != nil {
+		info.enriched = cld.enriched
+	}
+	if cld.calendar != nil {
+		info.calendar = cld.calendar
+	}
+}
+
+// takeFirstBody keeps the first part of each body type, appending HTML parts when
+// HTML joining is in effect.
+func takeFirstBody(info *bodyParts, cld bodyParts, hjoinEnabled bool) {
+	if cld.plain != nil && info.plain == nil {
+		info.plain = cld.plain
+	}
+	if hjoinEnabled {
+		info.htmls = append(info.htmls, cld.htmls...)
+	}
+	if cld.enriched != nil && info.enriched == nil {
+		info.enriched = cld.enriched
+	}
+	if cld.calendar != nil && info.calendar == nil {
+		info.calendar = cld.calendar
 	}
 }
 
