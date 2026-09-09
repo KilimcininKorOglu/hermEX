@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/directory"
 	"hermex/internal/logging"
 	"hermex/internal/serve"
 )
@@ -274,12 +275,22 @@ func (s *Server) dashboardCounts(userID int64) (dashboardCount, error) {
 			out.users++
 		}
 	}
+	out.aliases = countAliasesIn(aliases, names)
+	return out, nil
+}
+
+// countAliasesIn counts the aliases whose address belongs to one of the named
+// domains. Aliases carry no domain id, so they are matched by the domain part of
+// the alias address.
+func countAliasesIn(aliases []directory.AliasInfo, names map[string]bool) int {
+	n := 0
 	for _, a := range aliases {
-		if at := strings.LastIndex(a.Alias, "@"); at >= 0 && names[strings.ToLower(a.Alias[at+1:])] {
-			out.aliases++
+		at := strings.LastIndex(a.Alias, "@")
+		if at >= 0 && names[strings.ToLower(a.Alias[at+1:])] {
+			n++
 		}
 	}
-	return out, nil
+	return n
 }
 
 // handleUILogout clears the session, a valid CSRF form token is required, and

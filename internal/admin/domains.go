@@ -123,32 +123,28 @@ func (s *Server) handleUpdateDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	upd := directory.DomainUpdate{
-		Status: cur.Status, MaxUser: cur.MaxUser, Title: cur.Title,
-		Address: cur.Address, AdminName: cur.AdminName, Tel: cur.Tel,
-	}
-	if req.Status != nil {
-		upd.Status = *req.Status
-	}
-	if req.MaxUser != nil {
-		upd.MaxUser = *req.MaxUser
-	}
-	if req.Title != nil {
-		upd.Title = *req.Title
-	}
-	if req.Address != nil {
-		upd.Address = *req.Address
-	}
-	if req.AdminName != nil {
-		upd.AdminName = *req.AdminName
-	}
-	if req.Tel != nil {
-		upd.Tel = *req.Tel
+		Status:    orKeep(req.Status, cur.Status),
+		MaxUser:   orKeep(req.MaxUser, cur.MaxUser),
+		Title:     orKeep(req.Title, cur.Title),
+		Address:   orKeep(req.Address, cur.Address),
+		AdminName: orKeep(req.AdminName, cur.AdminName),
+		Tel:       orKeep(req.Tel, cur.Tel),
 	}
 	if _, err := s.dir.UpdateDomain(id, upd); err != nil {
 		s.fail(w, "could not update domain", err, http.StatusBadRequest)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// orKeep resolves one field of a read-merge update: the requested value when the
+// request carried the field, and the current one when it did not, so a partial
+// update never zeroes the rest.
+func orKeep[T any](requested *T, current T) T {
+	if requested == nil {
+		return current
+	}
+	return *requested
 }
 
 // handleCreateDomain provisions a domain (system administrators only); its

@@ -169,11 +169,8 @@ func (s *Server) handleUISaveLimits(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.uiAuthorized(w, r); !ok {
 		return
 	}
-	imapMB, ewsMB, easMB := formInt(r, "imap_literal_mb"), formInt(r, "ews_request_mb"), formInt(r, "activesync_request_mb")
-	icalMB, vcardMB := formInt(r, "dav_ical_mb"), formInt(r, "dav_vcard_mb")
-	webMB, mapiMB := formInt(r, "webmail_request_mb"), formInt(r, "mapi_request_mb")
-	previewMB := formInt(r, "webmail_preview_mb")
-	if imapMB < 1 || ewsMB < 1 || easMB < 1 || icalMB < 1 || vcardMB < 1 || webMB < 1 || mapiMB < 1 || previewMB < 1 {
+	mb, ok := readSizeLimitMB(r)
+	if !ok {
 		s.render(w, "limits-panel", s.limitsPageData(r, "Each limit must be at least 1 MB; settings not saved."))
 		return
 	}
@@ -185,15 +182,15 @@ func (s *Server) handleUISaveLimits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limits := directory.SizeLimits{
-		IMAPLiteralBytes:       int64(imapMB) * 1024 * 1024,
-		EWSRequestBytes:        int64(ewsMB) * 1024 * 1024,
-		ActiveSyncRequestBytes: int64(easMB) * 1024 * 1024,
-		DAVICalBytes:           int64(icalMB) * 1024 * 1024,
-		DAVVCardBytes:          int64(vcardMB) * 1024 * 1024,
-		WebmailRequestBytes:    int64(webMB) * 1024 * 1024,
-		MapiRequestBytes:       int64(mapiMB) * 1024 * 1024,
+		IMAPLiteralBytes:       megabytes(mb["imap_literal_mb"]),
+		EWSRequestBytes:        megabytes(mb["ews_request_mb"]),
+		ActiveSyncRequestBytes: megabytes(mb["activesync_request_mb"]),
+		DAVICalBytes:           megabytes(mb["dav_ical_mb"]),
+		DAVVCardBytes:          megabytes(mb["dav_vcard_mb"]),
+		WebmailRequestBytes:    megabytes(mb["webmail_request_mb"]),
+		MapiRequestBytes:       megabytes(mb["mapi_request_mb"]),
 		FreeBusyMaxTargets:     int64(fbTargets),
-		WebmailPreviewMaxBytes: int64(previewMB) * 1024 * 1024,
+		WebmailPreviewMaxBytes: megabytes(mb["webmail_preview_mb"]),
 	}
 	if err := s.dir.SetSizeLimits(limits); err != nil {
 		s.render(w, "limits-panel", s.limitsPageData(r, s.notice("Could not save the size limits.", err)))
@@ -201,6 +198,28 @@ func (s *Server) handleUISaveLimits(w http.ResponseWriter, r *http.Request) {
 	}
 	s.render(w, "limits-panel", s.limitsPageData(r, "Size limits saved. Each protocol applies its own within a minute, no restart."))
 }
+
+// sizeLimitFields are the megabyte-valued limits the form carries.
+var sizeLimitFields = [...]string{
+	"imap_literal_mb", "ews_request_mb", "activesync_request_mb", "dav_ical_mb",
+	"dav_vcard_mb", "webmail_request_mb", "mapi_request_mb", "webmail_preview_mb",
+}
+
+// readSizeLimitMB reads every megabyte field, reporting false when any is below 1.
+func readSizeLimitMB(r *http.Request) (map[string]int, bool) {
+	mb := make(map[string]int, len(sizeLimitFields))
+	for _, name := range sizeLimitFields {
+		v := formInt(r, name)
+		if v < 1 {
+			return nil, false
+		}
+		mb[name] = v
+	}
+	return mb, true
+}
+
+// megabytes converts a limit entered in whole MB to the bytes it is stored as.
+func megabytes(mb int) int64 { return int64(mb) * 1024 * 1024 }
 
 // fillFetchPolicy sets the fetch worker's source policy on a page-data map. The
 // default is the worker's own: internal source addresses refused.
