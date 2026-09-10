@@ -24,6 +24,13 @@ type createItemRequest struct {
 		Accept            []meetingResponse `xml:"AcceptItem"`
 		TentativelyAccept []meetingResponse `xml:"TentativelyAcceptItem"`
 		Decline           []meetingResponse `xml:"DeclineItem"`
+		// The smart-response types ([MS-OXWSMSG] ReplyToItemType and its siblings).
+		// A client sends one of these instead of a plain Message when the user
+		// replies to or forwards a message; saving such a draft is the common case,
+		// and dropping the element would store nothing and report nothing.
+		ReplyToItem    []smartResponse `xml:"ReplyToItem"`
+		ReplyAllToItem []smartResponse `xml:"ReplyAllToItem"`
+		ForwardItem    []smartResponse `xml:"ForwardItem"`
 	} `xml:"Items"`
 }
 
@@ -36,6 +43,30 @@ type createMessage struct {
 	ToRecipients  mailboxList `xml:"ToRecipients"`
 	CcRecipients  mailboxList `xml:"CcRecipients"`
 	BccRecipients mailboxList `xml:"BccRecipients"`
+	// From is the identity the client chose to write as. It is authorized before it
+	// is used, never trusted as sent.
+	From struct {
+		Mailbox mailboxEntry `xml:"Mailbox"`
+	} `xml:"From"`
+}
+
+// smartResponse is one reply or forward item. Outlook for Mac nests a full Message
+// element inside the smart-response element, while the published schema puts the
+// message fields on the element itself; both shapes are read, and the nested one wins
+// when it is present.
+type smartResponse struct {
+	ReferenceItemID refID          `xml:"ReferenceItemId"`
+	Message         *createMessage `xml:"Message"`
+	createMessage                  // the flat shape: the message fields on the element itself
+}
+
+// message returns the message body a smart response carries, preferring the nested
+// Message element over the fields written directly on the smart-response element.
+func (s smartResponse) message() createMessage {
+	if s.Message != nil {
+		return *s.Message
+	}
+	return s.createMessage
 }
 
 type mailboxList struct {
@@ -79,32 +110,59 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *ses
 	send := disp == "SendOnly" || disp == "SendAndSaveCopy"
 	save := disp == "SaveOnly" || disp == "SendAndSaveCopy"
 
+	msgs := s.createMessages(st, sess, req, disp, send, save)
+	msgs = append(msgs, s.createMeetingResponses(sess, req, send)...)
+	writeResponse(w, createItemResponse{Messages: msgs})
+}
+
+// createMessages stores every message-shaped item in the request: a plain Message and the
+// smart-response elements a client sends when the user replies to or forwards a message.
+// A reply or forward stores the same IPM.Note, so its body takes the same path.
+func (s *Server) createMessages(st *objectstore.Store, sess *session, req createItemRequest,
+	disp string, send, save bool) []itemResponseMessage {
 	var msgs []itemResponseMessage
 	for _, m := range req.Items.Messages {
 		msgs = append(msgs, s.createOneItem(st, sess, m, disp, send, save))
 	}
+	for _, list := range [][]smartResponse{req.Items.ReplyToItem, req.Items.ReplyAllToItem, req.Items.ForwardItem} {
+		for _, sr := range list {
+			msgs = append(msgs, s.createOneItem(st, sess, sr.message(), disp, send, save))
+		}
+	}
+	return msgs
+}
 
-	// Meeting responses ([MS-OXWSMTGS]): an Accept/Tentative/Decline answers the
-	// referenced meeting request, updating the attendee's calendar and the request,
-	// and (when the disposition sends) notifying the organizer with an iTIP REPLY.
-	for _, mr := range req.Items.Accept {
-		msgs = append(msgs, s.meetingRespond(sess, mr.ReferenceItemID, meeting.ResponseAccepted, send))
+// createMeetingResponses answers the meeting responses in the request ([MS-OXWSMTGS]): an
+// Accept/Tentative/Decline updates the attendee's calendar and the referenced request, and
+// (when the disposition sends) notifies the organizer with an iTIP REPLY.
+func (s *Server) createMeetingResponses(sess *session, req createItemRequest, send bool) []itemResponseMessage {
+	var msgs []itemResponseMessage
+	for _, r := range []struct {
+		items    []meetingResponse
+		response int32
+	}{
+		{req.Items.Accept, meeting.ResponseAccepted},
+		{req.Items.TentativelyAccept, meeting.ResponseTentative},
+		{req.Items.Decline, meeting.ResponseDeclined},
+	} {
+		for _, mr := range r.items {
+			msgs = append(msgs, s.meetingRespond(sess, mr.ReferenceItemID, r.response, send))
+		}
 	}
-	for _, mr := range req.Items.TentativelyAccept {
-		msgs = append(msgs, s.meetingRespond(sess, mr.ReferenceItemID, meeting.ResponseTentative, send))
-	}
-	for _, mr := range req.Items.Decline {
-		msgs = append(msgs, s.meetingRespond(sess, mr.ReferenceItemID, meeting.ResponseDeclined, send))
-	}
-	writeResponse(w, createItemResponse{Messages: msgs})
+	return msgs
 }
 
 // createOneItem builds one outgoing message, sends it when the disposition asks,
 // and files the copy the disposition asks for.
 func (s *Server) createOneItem(st *objectstore.Store, sess *session, m createMessage,
 	disp string, send, save bool) itemResponseMessage {
+	representing, sender, ok := s.resolveSender(sess.user, m.From.Mailbox.EmailAddress)
+	if !ok {
+		return itemError("ErrorAccessDenied")
+	}
 	out := oxews.BuildOutgoing(oxews.OutgoingInput{
-		From:      sess.user,
+		From:      representing,
+		Sender:    sender,
 		Subject:   m.Subject,
 		Body:      m.Body.Content,
 		BodyType:  m.Body.Type,

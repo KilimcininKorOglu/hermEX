@@ -13,7 +13,11 @@ import (
 // only To/Cc recipient bags so Bcc never appears on the wire; the handler
 // delivers to the Bcc addresses separately.
 type OutgoingInput struct {
-	From      string
+	From string
+	// Sender is the real authenticated author. It is written only when it differs
+	// from From, which is what makes oxcmail.Export emit a Sender header ("on behalf
+	// of"); an empty or identical value leaves the message with one originator.
+	Sender    string
 	Subject   string
 	Body      string
 	BodyType  string // "Text" or "HTML"
@@ -34,6 +38,11 @@ func BuildOutgoing(in OutgoingInput) *oxcmail.Message {
 		props.Set(mapi.PrSentRepresentingSmtpAddress, in.From)
 		props.Set(mapi.PrSentRepresentingEmailAddress, in.From)
 		props.Set(mapi.PrSentRepresentingAddrType, "SMTP")
+	}
+	if in.Sender != "" && !strings.EqualFold(in.Sender, in.From) {
+		props.Set(mapi.PrSenderSmtpAddress, in.Sender)
+		props.Set(mapi.PrSenderEmailAddress, in.Sender)
+		props.Set(mapi.PrSenderAddrType, "SMTP")
 	}
 	oxcmail.SetSubject(&props, in.Subject)
 	props.Set(mapi.PrClientSubmitTime, mapi.UnixToNTTime(in.Sent))
