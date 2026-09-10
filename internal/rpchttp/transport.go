@@ -92,7 +92,7 @@ func (s *Server) serveOut(w http.ResponseWriter, r *http.Request, user, mailbox 
 
 	// CONN/A3 acknowledges the OUT channel immediately.
 	if _, err := w.Write(buildConnA3(open.hdr.CallID)); err != nil {
-		s.teardown(open.key)
+		s.teardown(open.key, open.vc)
 		return
 	}
 	flusher.Flush()
@@ -110,13 +110,13 @@ func (s *Server) streamOut(w http.ResponseWriter, r *http.Request, flusher http.
 	for {
 		select {
 		case <-ctx.Done():
-			s.teardown(open.key)
+			s.teardown(open.key, open.vc)
 			return
 		case <-open.vc.closed:
 			return
 		case b := <-open.vc.out:
 			if _, err := w.Write(b); err != nil {
-				s.teardown(open.key)
+				s.teardown(open.key, open.vc)
 				return
 			}
 			flusher.Flush()
@@ -187,7 +187,7 @@ func (s *Server) serveIn(w http.ResponseWriter, r *http.Request, user, mailbox s
 	}
 
 	s.readIn(r, open.vc)
-	s.teardown(open.key)
+	s.teardown(open.key, open.vc)
 
 	w.Header().Set("Content-Type", "application/rpc")
 	w.WriteHeader(http.StatusOK)

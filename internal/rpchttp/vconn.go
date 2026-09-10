@@ -86,6 +86,18 @@ func (vc *vconn) close() {
 	vc.once.Do(func() { close(vc.closed) })
 }
 
+// isClosed reports whether the virtual connection has already torn down. A closed
+// connection stays in the table until its own teardown runs, so a channel joining
+// by key must not take it.
+func (vc *vconn) isClosed() bool {
+	select {
+	case <-vc.closed:
+		return true
+	default:
+		return false
+	}
+}
+
 // vconnKey is the table key both channels rendezvous on: the connection cookie,
 // the proxied port, and the host, lowercased (matching the reference's join key).
 func vconnKey(connCookie mapi.GUID, host, port string) string {
@@ -100,17 +112,27 @@ const maxVirtualConnections = 4096
 
 // getOrCreate returns the virtual connection for key, creating it (with a fresh
 // Session seeded from the authenticated identity and originating client address) on
-// first use. It returns nil when the connection table is full, which the caller
-// answers with a service-unavailable rather than admitting an unbounded table.
+// first use. A registered but already closed connection is replaced, because its
+// channel loops have stopped and a joining channel would find a dead connection.
+// It returns nil when the connection table is full, which the caller answers with a
+// service-unavailable rather than admitting an unbounded table.
 func (s *Server) getOrCreate(key, user, mailbox, remoteAddr string) *vconn {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if vc, ok := s.conns[key]; ok {
-		return vc
+	existing, ok := s.conns[key]
+	if ok && !existing.isClosed() {
+		return existing
 	}
-	if len(s.conns) >= maxVirtualConnections {
+	if !ok && len(s.conns) >= maxVirtualConnections {
 		return nil
 	}
+	vc := newVconn(key, user, mailbox, remoteAddr)
+	s.conns[key] = vc
+	return vc
+}
+
+// newVconn builds one virtual connection and its session.
+func newVconn(key, user, mailbox, remoteAddr string) *vconn {
 	vc := &vconn{
 		key:    key,
 		sess:   &Session{User: user, Mailbox: mailbox, RemoteAddr: remoteAddr},
@@ -118,19 +140,21 @@ func (s *Server) getOrCreate(key, user, mailbox, remoteAddr string) *vconn {
 		closed: make(chan struct{}),
 	}
 	vc.sess.vc = vc // the back-ref a parked long-poll uses to reply on the OUT channel
-	s.conns[key] = vc
 	return vc
 }
 
-// teardown closes the virtual connection and removes it from the table.
-func (s *Server) teardown(key string) {
+// teardown closes the caller's virtual connection and removes it from the table.
+// The table entry is dropped only when it still holds THIS connection: the IN and
+// OUT channels tear down independently, so a client may already have registered a
+// replacement under the same key, and deleting by key alone would kill it.
+func (s *Server) teardown(key string, vc *vconn) {
+	if vc == nil {
+		return
+	}
 	s.mu.Lock()
-	vc, ok := s.conns[key]
-	if ok {
+	if s.conns[key] == vc {
 		delete(s.conns, key)
 	}
 	s.mu.Unlock()
-	if ok {
-		vc.close()
-	}
+	vc.close()
 }
