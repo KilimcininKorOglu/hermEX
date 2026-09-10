@@ -1,0 +1,122 @@
+package oxcical
+
+import (
+	"strings"
+	"time"
+)
+
+// Span is one instance of a recurring object: the half-open interval it occupies.
+type Span struct {
+	Start, End time.Time
+}
+
+// OccurrencesIn returns the spans a stored recurring object occupies within
+// [rangeStart, rangeEnd), honoring EXDATE, RECURRENCE-ID overrides (an override's
+// own time replaces the generated instance) and an override cancelled with
+// STATUS:CANCELLED. ok is false when the object carries no series master, so the
+// caller reads the item's own stored start and end instead.
+//
+// TRANSP is not read: an instance counts as occupied whenever the item does, which
+// is the busy status the caller already holds for the object as a whole.
+func OccurrencesIn(ical []byte, rangeStart, rangeEnd time.Time) ([]Span, bool) {
+	cal, err := parseICal(ical)
+	if err != nil {
+		return nil, false
+	}
+	master, overrides := splitSeries(cal)
+	s, ok := seriesShape(master)
+	if !ok {
+		return nil, false
+	}
+	skip := excludedInstants(master)
+	out := overrideSpans(overrides, skip, s.dur, rangeStart, rangeEnd)
+	for _, t := range s.rec.Occurrences(s.start.UTC(), rangeStart, rangeEnd, 4096) {
+		key := instantKey(t)
+		if skip[key] {
+			continue
+		}
+		if _, overridden := overrides[key]; overridden {
+			continue // already tested at its own time
+		}
+		if span := (Span{Start: t, End: t.Add(s.dur)}); overlapsRange(span.Start, span.End, rangeStart, rangeEnd) {
+			out = append(out, span)
+		}
+	}
+	return out, true
+}
+
+// series is what an expansion needs from the master: its first start, one
+// instance's duration, and the parsed rule.
+type series struct {
+	start time.Time
+	dur   time.Duration
+	rec   Recurrence
+}
+
+// seriesShape reads the master's expansion inputs. ok is false when the component
+// is not a readable series, so the caller answers "not a series" rather than
+// expanding nothing.
+func seriesShape(master *icomp) (series, bool) {
+	if master == nil {
+		return series{}, false
+	}
+	start, allDay, ok := parseICalTime(master.prop("DTSTART"))
+	if !ok {
+		return series{}, false
+	}
+	rrule := master.prop("RRULE")
+	if rrule == nil {
+		return series{}, false
+	}
+	rec, ok := parseRRule(rrule.value)
+	if !ok {
+		return series{}, false
+	}
+	end, eok := eventEnd(master, start, allDay)
+	if !eok {
+		end = start
+	}
+	return series{start: start, dur: end.Sub(start), rec: rec}, true
+}
+
+// overrideSpans returns the spans the object's overrides occupy in the window. An
+// override carries its own time and may sit anywhere, including outside the span
+// its generated instant would have had, so each one is tested directly rather than
+// through the enumeration.
+func overrideSpans(overrides map[string]*icomp, skip map[string]bool, dur time.Duration, rangeStart, rangeEnd time.Time) []Span {
+	var out []Span
+	for key, ov := range overrides {
+		if skip[key] {
+			continue
+		}
+		at, _, ok := parseICalTime(ov.prop("RECURRENCE-ID"))
+		if !ok {
+			continue
+		}
+		if span, live := instanceSpan(ov, at, dur); live && overlapsRange(span.Start, span.End, rangeStart, rangeEnd) {
+			out = append(out, span)
+		}
+	}
+	return out
+}
+
+// instanceSpan resolves one instance to the interval it occupies: the override's
+// own span when there is one, else the generated instant plus the series duration.
+// live is false for an instance whose override cancels it.
+func instanceSpan(override *icomp, at time.Time, dur time.Duration) (Span, bool) {
+	if override == nil {
+		return Span{Start: at, End: at.Add(dur)}, true
+	}
+	if strings.EqualFold(strings.TrimSpace(override.propText("STATUS")), "CANCELLED") {
+		return Span{}, false
+	}
+	s, allDay, ok := parseICalTime(override.prop("DTSTART"))
+	if !ok {
+		return Span{Start: at, End: at.Add(dur)}, true
+	}
+	e, eok := eventEnd(override, s, allDay)
+	if !eok {
+		e = s.Add(dur)
+	}
+	return Span{Start: s, End: e}, true
+}

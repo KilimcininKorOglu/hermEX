@@ -6,6 +6,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcical"
 	"hermex/internal/oxcmail"
 	"hermex/internal/relay"
 )
@@ -103,11 +104,10 @@ func decideResponse(st *objectstore.Store, req *oxcmail.Message, cfg objectstore
 }
 
 // hasConflict reports whether the request's time window overlaps an existing busy
-// appointment in the Calendar. Conflict detection is blind to recurring series: a
-// recurring master is skipped (no instance expansion), so auto-accept can double-book
-// against a recurring appointment, a known v1 gap shared with the free/busy view.
-// Only a Busy or out-of-office appointment is a hard conflict; free and tentative are
-// not.
+// appointment in the Calendar. A recurring appointment is expanded into the
+// instances that fall in the window, so a series occupies the days it actually
+// occupies. Only a Busy or out-of-office appointment is a hard conflict; free and
+// tentative are not.
 func hasConflict(st *objectstore.Store, req *oxcmail.Message, t apptTags) (bool, error) {
 	reqStart, ok1 := ntTime(req.Props, t.start)
 	reqEnd, ok2 := ntTime(req.Props, t.end)
@@ -132,7 +132,49 @@ func hasConflict(st *objectstore.Store, req *oxcmail.Message, t apptTags) (bool,
 			return true, nil
 		}
 	}
+	return seriesConflict(st, t, reqUID, reqStart, reqEnd)
+}
+
+// seriesConflict reports whether a recurring appointment occupies the request's
+// window. A series master carries its FIRST instance's start, so the window query
+// cannot find it: the recurring items are listed on their own and expanded.
+func seriesConflict(st *objectstore.Store, t apptTags, reqUID string, reqStart, reqEnd time.Time) (bool, error) {
+	objs, err := st.ListFolderObjectsWithFlag(int64(mapi.PrivateFIDCalendar), t.recur)
+	if err != nil {
+		return false, err
+	}
+	for _, obj := range objs {
+		pv, err := st.GetMessageProperties(obj.ID, t.busy, t.uid, mapi.PrIcalOriginal)
+		if err != nil {
+			continue
+		}
+		if propStr(pv, t.uid) == reqUID && reqUID != "" {
+			continue // the request's own series is not a conflict with itself
+		}
+		if !mapi.BusyStatusOccupies(longVal(pv, t.busy)) {
+			continue
+		}
+		if seriesOccupies(pv, reqStart, reqEnd) {
+			return true, nil
+		}
+	}
 	return false, nil
+}
+
+// seriesOccupies reports whether a stored recurring object has an instance in the
+// window. An object whose body cannot be expanded occupies nothing here: its own
+// start and end were already tested by the window scan.
+func seriesOccupies(pv mapi.PropertyValues, reqStart, reqEnd time.Time) bool {
+	v, ok := pv.Get(mapi.PrIcalOriginal)
+	if !ok {
+		return false
+	}
+	raw, ok := v.([]byte)
+	if !ok {
+		return false
+	}
+	spans, ok := oxcical.OccurrencesIn(raw, reqStart, reqEnd)
+	return ok && len(spans) > 0
 }
 
 // blocksWindow reports whether one calendar object occupies the request's window.
@@ -145,7 +187,7 @@ func blocksWindow(pv mapi.PropertyValues, t apptTags, reqUID string, reqStart, r
 		return false
 	}
 	if boolVal(pv, t.recur) {
-		return false // recurring master: no instance expansion (documented gap)
+		return false // a recurring appointment is judged by seriesConflict, on its instances
 	}
 	if !mapi.BusyStatusOccupies(longVal(pv, t.busy)) {
 		return false // free, and working elsewhere, do not block

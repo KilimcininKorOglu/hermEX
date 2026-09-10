@@ -204,6 +204,39 @@ func (s *Store) FolderMessageChangeNumbers(folderID int64) (map[int64]uint64, er
 	return out, rows.Err()
 }
 
+// ListFolderObjectsWithFlag returns the folder's live, non-associated objects whose
+// boolean property is set. A PtBoolean value is stored as 0 or 1 in the propval
+// column, so the store answers the question rather than the caller reading the
+// property back one object at a time.
+//
+// It exists for the recurring appointments a window query cannot find: a series
+// master carries its FIRST instance's start, so a master whose series reaches into
+// a window still falls outside ListFolderObjectsInWindow's range.
+func (s *Store) ListFolderObjectsWithFlag(folderID int64, tag mapi.PropTag) ([]FolderObject, error) {
+	rows, err := s.objdb.Query(
+		`SELECT m.message_id, m.change_number
+		   FROM messages m
+		   JOIN message_properties p ON p.message_id = m.message_id AND p.proptag = ?
+		  WHERE m.parent_fid = ? AND m.is_deleted = 0 AND m.is_associated = 0
+		    AND p.propval <> 0
+		  ORDER BY m.message_id`,
+		int64(uint32(tag)), folderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FolderObject
+	for rows.Next() {
+		var id, cn int64
+		if err := rows.Scan(&id, &cn); err != nil {
+			return nil, err
+		}
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		out = append(out, FolderObject{ID: id, ChangeNumber: uint64(cn)})
+	}
+	return out, rows.Err()
+}
+
 // FindAssociatedByClass returns the id of the folder's associated (FAI) message
 // carrying the given message class, the way a configuration item is addressed:
 // nobody holds an id for it, so it is found by what it is. ok is false when the
