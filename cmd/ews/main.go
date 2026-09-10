@@ -37,27 +37,7 @@ func main() {
 	cfgPath := flag.String("config", "/etc/hermex/config.json", "path to the JSON config file")
 	flag.Parse()
 
-	cfg, err := config.Load(*cfgPath)
-	if err != nil {
-		log.Fatalf("hermex-ews: %v", err)
-	}
-	db, err := sql.Open("mysql", cfg.DatabaseDSN)
-	if err != nil {
-		log.Fatalf("hermex-ews: open directory: %v", err)
-	}
-	if err := db.Ping(); err != nil {
-		log.Fatalf("hermex-ews: directory unreachable: %v", err)
-	}
-	dir := directory.NewSQL(db)
-	// At-rest wrapping for the private keys the directory stores (DKIM signing
-	// keys, uploaded TLS keys). An unset secret leaves them in plaintext and says
-	// so on startup.
-	dir.SetKeySecret(cfg.KeyWrapSecret())
-	if err := dir.EnsureSchema(); err != nil {
-		log.Fatalf("hermex-ews: schema: %v", err)
-	}
-	dir.SetLDAPVerifier(ldapauth.New())
-	logger, logClose := logging.Build("hermex-ews", cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
+	cfg, db, dir, logger, logClose := openDirectory(*cfgPath)
 	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
 	mta.SetDefaultLogger(logger)         // post-delivery pass failures route to the central log
 
@@ -80,21 +60,13 @@ func main() {
 	go authlimit.RunMaintenance("hermex-ews", logger, srv.Limiter, dir.GetLoginLockoutSettings)
 	srv.SetNotify(notify.EnableConsumer(cfg.NotifyURL, cfg.NotifySecret, logger))
 	srv.Pub = publicfolder.New(cfg) // per-domain public folders rooted at HomedirFor
-	// Enqueue external recipients of sent items into the shared relay spool the
-	// MTA drains; without it EWS would send local-only.
-	spool, err := relay.Open(cfg.RelaySpoolPath())
-	if err != nil {
-		log.Fatalf("hermex-ews: open relay spool: %v", err)
-	}
+	spool := openSpool(cfg)
 	srv.Spool = spool
 	// EWS SOAP request-body cap: read at startup and re-read every minute so an admin's
 	// change applies without a restart; 0 keeps the built-in default.
 	applyEWSSizeLimit(logger, dir.GetSizeLimits, ews.SetMaxRequestBody, ews.SetMaxFreeBusyTargets)
 	go runEWSSizeMaintenance(logger, dir.GetSizeLimits, ews.SetMaxRequestBody, ews.SetMaxFreeBusyTargets)
-	addr := cfg.EWSAddr
-	if addr == "" {
-		addr = ":8080"
-	}
+	addr := orDefault(cfg.EWSAddr, ":8080")
 	// Outbound abuse limiting: this daemon queues external mail through
 	// DeliverAndRelay, so a compromised account must meet the same per-account
 	// recipient cap SMTP submission enforces. It starts disabled and follows the
@@ -112,9 +84,67 @@ func main() {
 	httpLimiter := httplimit.NewLimiter()
 	httplimit.Apply("hermex-ews", logger, httpLimiter, dir.GetHTTPRateLimitSettings)
 	go httplimit.RunMaintenance("hermex-ews", logger, httpLimiter, dir.GetHTTPRateLimitSettings)
-	// TLS certificates come from the provider: the config-file cert as a fallback,
-	// overridden by an admin-uploaded cert the provider polls for, so a renewal
-	// applies without a restart.
+	provider := startTLS(cfg, dir, logger)
+	hs, err := serve.New(addr, srv.Handler(), provider, logger, logging.EWS, httpLimiter)
+	if err != nil {
+		log.Fatalf("hermex-ews: %v", err)
+	}
+
+	logger.Info(logging.System, "daemon.startup", logging.Fields{"daemon": "ews", "addr": addr})
+	log.Printf("hermex-ews listening on %s", addr)
+	runUntilSignal(cfg, db, provider, srv, hs, spool.Close, logClose)
+}
+
+// orDefault returns v, or fallback when v is empty.
+func orDefault(v, fallback string) string {
+	if v == "" {
+		return fallback
+	}
+	return v
+}
+
+// openDirectory loads the config, opens the directory database and builds the
+// logger. Every failure here is fatal: the daemon cannot serve a mailbox without the
+// accounts behind it.
+func openDirectory(cfgPath string) (*config.Config, *sql.DB, *directory.SQLDirectory, *logging.Logger, func() error) {
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		log.Fatalf("hermex-ews: %v", err)
+	}
+	db, err := sql.Open("mysql", cfg.DatabaseDSN)
+	if err != nil {
+		log.Fatalf("hermex-ews: open directory: %v", err)
+	}
+	if err := db.Ping(); err != nil {
+		log.Fatalf("hermex-ews: directory unreachable: %v", err)
+	}
+	dir := directory.NewSQL(db)
+	// At-rest wrapping for the private keys the directory stores (DKIM signing
+	// keys, uploaded TLS keys). An unset secret leaves them in plaintext and says
+	// so on startup.
+	dir.SetKeySecret(cfg.KeyWrapSecret())
+	if err := dir.EnsureSchema(); err != nil {
+		log.Fatalf("hermex-ews: schema: %v", err)
+	}
+	dir.SetLDAPVerifier(ldapauth.New())
+	logger, logClose := logging.Build("hermex-ews", cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
+	return cfg, db, dir, logger, logClose
+}
+
+// openSpool opens the shared relay spool the MTA drains. External recipients of sent
+// items are enqueued there; without it EWS would send local-only.
+func openSpool(cfg *config.Config) *relay.Spool {
+	spool, err := relay.Open(cfg.RelaySpoolPath())
+	if err != nil {
+		log.Fatalf("hermex-ews: open relay spool: %v", err)
+	}
+	return spool
+}
+
+// startTLS resolves the serving certificate: the config-file cert as a fallback,
+// overridden by an admin-uploaded cert the provider polls for, so a renewal applies
+// without a restart.
+func startTLS(cfg *config.Config, dir *directory.SQLDirectory, logger *logging.Logger) *tlscert.Provider {
 	provider, err := tlscert.New(cfg, dir, logger)
 	if err != nil {
 		log.Fatalf("hermex-ews: tls: %v", err)
@@ -122,13 +152,12 @@ func main() {
 	if provider.TLSEnabled() {
 		go provider.RunMaintenance()
 	}
-	hs, err := serve.New(addr, srv.Handler(), provider, logger, logging.EWS, httpLimiter)
-	if err != nil {
-		log.Fatalf("hermex-ews: %v", err)
-	}
+	return provider
+}
 
-	logger.Info(logging.System, "daemon.startup", logging.Fields{"daemon": "ews", "addr": addr})
-
+// runUntilSignal starts the subscription sweep and serves until a shutdown signal
+// arrives, then drains the server and runs the cleanups in order.
+func runUntilSignal(cfg *config.Config, db *sql.DB, provider *tlscert.Provider, srv *ews.Server, hs lifecycle.Component, cleanups ...func() error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	// Drop expired notification subscriptions. A pull or streaming subscription has
@@ -136,7 +165,6 @@ func main() {
 	// the registry for the life of the process, holding a snapshot as large as the
 	// mailbox.
 	go srv.RunSubscriptionSweep(ctx)
-	log.Printf("hermex-ews listening on %s", addr)
 	checks := []health.Check{{Name: "directory", Probe: db.PingContext}}
 	if provider.TLSEnabled() {
 		// Report the serving certificate's remaining validity, so a renewal that
@@ -145,7 +173,8 @@ func main() {
 	}
 	comps := append([]lifecycle.Component{hs},
 		health.Components(cfg.HealthAddr, "ews", checks...)...)
-	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, spool.Close, logClose, db.Close); err != nil {
+	cleanups = append(cleanups, db.Close)
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, cleanups...); err != nil {
 		log.Fatalf("hermex-ews: %v", err)
 	}
 }

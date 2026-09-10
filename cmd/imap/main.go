@@ -35,37 +35,10 @@ func main() {
 	cfgPath := flag.String("config", "/etc/hermex/config.json", "path to the JSON config file")
 	flag.Parse()
 
-	cfg, err := config.Load(*cfgPath)
-	if err != nil {
-		log.Fatalf("hermex-imap: %v", err)
-	}
-	db, err := sql.Open("mysql", cfg.DatabaseDSN)
-	if err != nil {
-		log.Fatalf("hermex-imap: open directory: %v", err)
-	}
-	if err := db.Ping(); err != nil {
-		log.Fatalf("hermex-imap: directory unreachable: %v", err)
-	}
-	dir := directory.NewSQL(db)
-	// At-rest wrapping for the private keys the directory stores (DKIM signing
-	// keys, uploaded TLS keys). An unset secret leaves them in plaintext and says
-	// so on startup.
-	dir.SetKeySecret(cfg.KeyWrapSecret())
-	if err := dir.EnsureSchema(); err != nil {
-		log.Fatalf("hermex-imap: schema: %v", err)
-	}
-	dir.SetLDAPVerifier(ldapauth.New())
-	logger, logClose := logging.Build("hermex-imap", cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
+	cfg, db, dir, logger, logClose := openDirectory(*cfgPath)
 	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
 
-	addr := cfg.IMAPAddr
-	if addr == "" {
-		addr = ":143"
-	}
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		log.Fatalf("hermex-imap: listen %s: %v", addr, err)
-	}
+	addr, ln := listenIMAP(cfg)
 	// Push notifications: publish this daemon's own mailbox writes, and subscribe so
 	// an IDLE-ing client wakes the instant its mailbox changes instead of on the IDLE
 	// poll cadence. No-ops when notify_url is empty.
@@ -86,9 +59,60 @@ func main() {
 	// change applies without a restart; 0 keeps the built-in default.
 	applyIMAPSizeLimit(logger, dir.GetSizeLimits, srv.SetMaxLiteralSize)
 	go runIMAPSizeMaintenance(logger, dir.GetSizeLimits, srv.SetMaxLiteralSize)
-	// TLS certificates come from the provider: the config-file cert as a fallback,
-	// overridden by an admin-uploaded cert the provider polls for, so a renewal
-	// applies without a restart.
+	provider := startTLS(cfg, dir, logger, srv)
+	srv.AddListener(ln)
+	log.Printf("hermex-imap listening on %s", addr)
+	addImplicitTLS(cfg, provider, srv)
+
+	logger.Info(logging.System, "daemon.startup", logging.Fields{"daemon": "imap", "addr": addr})
+	runUntilSignal(cfg, db, provider, srv, logClose)
+}
+
+// openDirectory loads the config, opens the directory database and builds the
+// logger. Every failure here is fatal: the daemon cannot serve a mailbox without
+// the accounts behind it.
+func openDirectory(cfgPath string) (*config.Config, *sql.DB, *directory.SQLDirectory, *logging.Logger, func() error) {
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		log.Fatalf("hermex-imap: %v", err)
+	}
+	db, err := sql.Open("mysql", cfg.DatabaseDSN)
+	if err != nil {
+		log.Fatalf("hermex-imap: open directory: %v", err)
+	}
+	if err := db.Ping(); err != nil {
+		log.Fatalf("hermex-imap: directory unreachable: %v", err)
+	}
+	dir := directory.NewSQL(db)
+	// At-rest wrapping for the private keys the directory stores (DKIM signing
+	// keys, uploaded TLS keys). An unset secret leaves them in plaintext and says
+	// so on startup.
+	dir.SetKeySecret(cfg.KeyWrapSecret())
+	if err := dir.EnsureSchema(); err != nil {
+		log.Fatalf("hermex-imap: schema: %v", err)
+	}
+	dir.SetLDAPVerifier(ldapauth.New())
+	logger, logClose := logging.Build("hermex-imap", cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
+	return cfg, db, dir, logger, logClose
+}
+
+// listenIMAP opens the plaintext listener on the configured address.
+func listenIMAP(cfg *config.Config) (string, net.Listener) {
+	addr := cfg.IMAPAddr
+	if addr == "" {
+		addr = ":143"
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatalf("hermex-imap: listen %s: %v", addr, err)
+	}
+	return addr, ln
+}
+
+// startTLS resolves the serving certificate: the config-file cert as a fallback,
+// overridden by an admin-uploaded cert the provider polls for, so a renewal applies
+// without a restart.
+func startTLS(cfg *config.Config, dir *directory.SQLDirectory, logger *logging.Logger, srv *imap.Server) *tlscert.Provider {
 	provider, err := tlscert.New(cfg, dir, logger)
 	if err != nil {
 		log.Fatalf("hermex-imap: tls: %v", err)
@@ -98,22 +122,26 @@ func main() {
 		srv.TLSConfig = tc // enables STARTTLS on the plaintext listener
 		go provider.RunMaintenance()
 	}
-	srv.AddListener(ln)
-	log.Printf("hermex-imap listening on %s", addr)
+	return provider
+}
 
-	// Optional implicit-TLS listener (e.g. :993) served alongside the plaintext
-	// one; the stateless server handles both concurrently.
-	if provider.TLSEnabled() && cfg.IMAPSAddr != "" {
-		tln, err := serve.TLSListener(cfg.IMAPSAddr, provider)
-		if err != nil {
-			log.Fatalf("hermex-imap: implicit TLS on %s: %v", cfg.IMAPSAddr, err)
-		}
-		srv.AddListener(tln)
-		log.Printf("hermex-imap listening on %s (implicit TLS)", cfg.IMAPSAddr)
+// addImplicitTLS serves the optional implicit-TLS listener (e.g. :993) alongside the
+// plaintext one; the stateless server handles both concurrently.
+func addImplicitTLS(cfg *config.Config, provider *tlscert.Provider, srv *imap.Server) {
+	if !provider.TLSEnabled() || cfg.IMAPSAddr == "" {
+		return
 	}
+	tln, err := serve.TLSListener(cfg.IMAPSAddr, provider)
+	if err != nil {
+		log.Fatalf("hermex-imap: implicit TLS on %s: %v", cfg.IMAPSAddr, err)
+	}
+	srv.AddListener(tln)
+	log.Printf("hermex-imap listening on %s (implicit TLS)", cfg.IMAPSAddr)
+}
 
-	logger.Info(logging.System, "daemon.startup", logging.Fields{"daemon": "imap", "addr": addr})
-
+// runUntilSignal serves until a shutdown signal arrives, then drains the server and
+// closes the log sink and the directory database.
+func runUntilSignal(cfg *config.Config, db *sql.DB, provider *tlscert.Provider, srv *imap.Server, logClose func() error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	checks := []health.Check{{Name: "directory", Probe: db.PingContext}}

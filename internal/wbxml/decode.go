@@ -109,37 +109,55 @@ func (r *reader) element(page *byte, depth int) (*Node, error) {
 	if depth > maxNestingDepth {
 		return nil, ErrTooDeep
 	}
+	if err := r.skipSwitchPages(page); err != nil {
+		return nil, err
+	}
+	n, hasContent, err := r.startTag(*page)
+	if err != nil || !hasContent {
+		return n, err
+	}
+	return r.readContent(n, page, depth)
+}
+
+// skipSwitchPages consumes the leading SWITCH_PAGE tokens, leaving page on the last
+// code page they name.
+func (r *reader) skipSwitchPages(page *byte) error {
 	for {
 		b, err := r.peek()
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if b != gSwitchPage {
-			break
+			return nil
 		}
 		r.off++
 		p, err := r.readByte()
 		if err != nil {
-			return nil, err
+			return err
 		}
 		*page = p
 	}
+}
 
+// startTag reads the element's tag byte, rejecting the tokens that cannot open an
+// element, and reports whether the element carries content.
+func (r *reader) startTag(page byte) (*Node, bool, error) {
 	tok, err := r.readByte()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if tok&cbAttributes != 0 {
-		return nil, ErrFormat
+		return nil, false, ErrFormat
 	}
 	if tok == gEnd || tok == gStrI || tok == gOpaque {
-		return nil, ErrFormat
+		return nil, false, ErrFormat
 	}
-	n := &Node{Tag: Tag(uint16(*page)<<8 | uint16(tok&tokenMask))}
-	if tok&cbContent == 0 {
-		return n, nil
-	}
+	return &Node{Tag: Tag(uint16(page)<<8 | uint16(tok&tokenMask))}, tok&cbContent != 0, nil
+}
 
+// readContent reads the element's content items up to the matching END: inline
+// strings, opaque data, and nested elements.
+func (r *reader) readContent(n *Node, page *byte, depth int) (*Node, error) {
 	for {
 		b, err := r.peek()
 		if err != nil {
@@ -151,28 +169,49 @@ func (r *reader) element(page *byte, depth int) (*Node, error) {
 			return n, nil
 		case gStrI:
 			r.off++
-			s, err := r.cstr()
-			if err != nil {
-				return nil, err
-			}
-			n.Text += s
+			err = r.readString(n)
 		case gOpaque:
 			r.off++
-			l, err := r.mbUint()
-			if err != nil {
-				return nil, err
-			}
-			data, err := r.take(int(l))
-			if err != nil {
-				return nil, err
-			}
-			n.Opaque = append(n.Opaque, data...)
+			err = r.readOpaque(n)
 		default:
-			child, err := r.element(page, depth+1)
-			if err != nil {
-				return nil, err
-			}
-			n.Children = append(n.Children, child)
+			err = r.readChild(n, page, depth)
+		}
+		if err != nil {
+			return nil, err
 		}
 	}
+}
+
+// readString appends one inline string to the element's text.
+func (r *reader) readString(n *Node) error {
+	s, err := r.cstr()
+	if err != nil {
+		return err
+	}
+	n.Text += s
+	return nil
+}
+
+// readOpaque appends one length-prefixed opaque item to the element.
+func (r *reader) readOpaque(n *Node) error {
+	l, err := r.mbUint()
+	if err != nil {
+		return err
+	}
+	data, err := r.take(int(l))
+	if err != nil {
+		return err
+	}
+	n.Opaque = append(n.Opaque, data...)
+	return nil
+}
+
+// readChild parses one nested element and appends it.
+func (r *reader) readChild(n *Node, page *byte, depth int) error {
+	child, err := r.element(page, depth+1)
+	if err != nil {
+		return err
+	}
+	n.Children = append(n.Children, child)
+	return nil
 }

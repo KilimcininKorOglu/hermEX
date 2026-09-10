@@ -13,6 +13,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -256,24 +257,11 @@ func (c *Consumer) run() {
 // backoff. On a reconnect (not the first connect) it fires a catch-up wake before
 // reading, since events that landed while the stream was down were missed.
 func (c *Consumer) stream(first bool) (connected bool) {
-	req, err := http.NewRequestWithContext(c.ctx, http.MethodGet, c.endpoint, nil)
-	if err != nil {
-		return false
-	}
-	if c.secret != "" {
-		req.Header.Set("Authorization", "Bearer "+c.secret)
-	}
-	resp, err := c.client.Do(req)
-	if err != nil {
+	resp, ok := c.open()
+	if !ok {
 		return false
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		if c.logger != nil {
-			c.logger.Warn(logging.Notify, "consumer.stream.status", logging.Fields{"status": resp.StatusCode})
-		}
-		return false
-	}
 	if c.logger != nil {
 		c.logger.Info(logging.Notify, "consumer.connected", logging.Fields{"notify": c.endpoint})
 	}
@@ -283,28 +271,63 @@ func (c *Consumer) stream(first bool) (connected bool) {
 	if !first {
 		c.wakeAll()
 	}
-	sc := bufio.NewScanner(resp.Body)
+	c.readEvents(resp.Body)
+	return true
+}
+
+// open dials the relay's SSE endpoint, reporting whether the stream established. A
+// caller that gets ok=false must not read or close the body.
+func (c *Consumer) open() (*http.Response, bool) {
+	req, err := http.NewRequestWithContext(c.ctx, http.MethodGet, c.endpoint, nil)
+	if err != nil {
+		return nil, false
+	}
+	if c.secret != "" {
+		req.Header.Set("Authorization", "Bearer "+c.secret)
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, false
+	}
+	if resp.StatusCode != http.StatusOK {
+		if c.logger != nil {
+			c.logger.Warn(logging.Notify, "consumer.stream.status", logging.Fields{"status": resp.StatusCode})
+		}
+		_ = resp.Body.Close()
+		return nil, false
+	}
+	return resp, true
+}
+
+// readEvents dispatches every event on the open stream until it drops.
+func (c *Consumer) readEvents(body io.Reader) {
+	sc := bufio.NewScanner(body)
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
 	for sc.Scan() {
-		data, ok := strings.CutPrefix(sc.Text(), "data: ")
-		if !ok {
-			continue
-		}
-		var ev notifyd.Event
-		if err := json.Unmarshal([]byte(data), &ev); err != nil {
-			continue
-		}
-		if c.logger != nil {
-			c.logger.Debug(logging.Notify, "consumer.event", logging.Fields{"mailbox": ev.Mailbox, "op": ev.Op})
-		}
-		c.wake(ev.Mailbox)
+		c.dispatchLine(sc.Text())
 	}
 	// The scan ended (the stream dropped); the reason is informational only, the
 	// reconnect loop handles it either way.
 	if err := sc.Err(); err != nil && c.logger != nil {
 		c.logger.Debug(logging.Notify, "consumer.stream.end", logging.Fields{"err": err.Error()})
 	}
-	return true
+}
+
+// dispatchLine wakes the waiters on one SSE data line, ignoring a line that is not
+// a well-formed event.
+func (c *Consumer) dispatchLine(line string) {
+	data, ok := strings.CutPrefix(line, "data: ")
+	if !ok {
+		return
+	}
+	var ev notifyd.Event
+	if err := json.Unmarshal([]byte(data), &ev); err != nil {
+		return
+	}
+	if c.logger != nil {
+		c.logger.Debug(logging.Notify, "consumer.event", logging.Fields{"mailbox": ev.Mailbox, "op": ev.Op})
+	}
+	c.wake(ev.Mailbox)
 }
 
 // --- Daemon wiring helpers ---

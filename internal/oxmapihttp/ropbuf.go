@@ -34,46 +34,72 @@ var ErrMalformed = errors.New("oxmapihttp: malformed ROP buffer")
 // handle table. The payload is deobfuscated (XorMagic) then decompressed
 // (LZXPRESS) as the header flags direct.
 func DecodeExecute(in []byte) (rops []byte, handles []uint32, err error) {
-	if len(in) < 8 {
-		return nil, nil, ErrMalformed
+	rb, err := ropBuffer(in)
+	if err != nil {
+		return nil, nil, err
 	}
-	flags := binary.LittleEndian.Uint16(in[2:])
-	size := int(binary.LittleEndian.Uint16(in[4:]))
-	sizeActual := int(binary.LittleEndian.Uint16(in[6:]))
-	if flags&rheFlagLast == 0 {
-		return nil, nil, ErrMalformed // only a single, final header is supported
-	}
-	if size == 0 || 8+size > len(in) {
-		return nil, nil, ErrMalformed
-	}
-	if sizeActual == 0 || sizeActual > maxROPBuffer {
-		return nil, nil, ErrMalformed
-	}
-	payload := in[8 : 8+size]
+	return splitROPBuffer(rb)
+}
 
-	if flags&rheFlagXorMagic != 0 {
-		de := make([]byte, len(payload))
-		for i, b := range payload {
-			de[i] = b ^ xorMagic
-		}
-		payload = de
+// ropBuffer unwraps the RPC_HEADER_EXT envelope: it validates the header, then
+// deobfuscates (XorMagic) and decompresses (LZXPRESS) the payload as the flags
+// direct, returning the ROP buffer the client sent.
+func ropBuffer(in []byte) ([]byte, error) {
+	flags, payload, sizeActual, err := header(in)
+	if err != nil {
+		return nil, err
 	}
-
-	var rb []byte
+	payload = deobfuscate(payload, flags)
 	if flags&rheFlagCompressed != 0 {
 		dec, derr := lzxpress.Decompress(payload, sizeActual)
 		if derr != nil || len(dec) < sizeActual {
-			return nil, nil, ErrMalformed
+			return nil, ErrMalformed
 		}
-		rb = dec[:sizeActual]
-	} else {
-		if sizeActual > len(payload) {
-			return nil, nil, ErrMalformed
-		}
-		rb = payload[:sizeActual]
+		return dec[:sizeActual], nil
 	}
+	if sizeActual > len(payload) {
+		return nil, ErrMalformed
+	}
+	return payload[:sizeActual], nil
+}
 
-	// ROP buffer: RopSize(uint16, inclusive of itself) | ROP commands | handle table.
+// header validates the RPC_HEADER_EXT and returns its flags, the payload it frames,
+// and the decompressed size the payload expands to.
+func header(in []byte) (flags uint16, payload []byte, sizeActual int, err error) {
+	if len(in) < 8 {
+		return 0, nil, 0, ErrMalformed
+	}
+	flags = binary.LittleEndian.Uint16(in[2:])
+	size := int(binary.LittleEndian.Uint16(in[4:]))
+	sizeActual = int(binary.LittleEndian.Uint16(in[6:]))
+	if flags&rheFlagLast == 0 {
+		return 0, nil, 0, ErrMalformed // only a single, final header is supported
+	}
+	if size == 0 || 8+size > len(in) {
+		return 0, nil, 0, ErrMalformed
+	}
+	if sizeActual == 0 || sizeActual > maxROPBuffer {
+		return 0, nil, 0, ErrMalformed
+	}
+	return flags, in[8 : 8+size], sizeActual, nil
+}
+
+// deobfuscate undoes the XorMagic obfuscation when the flags declare it, and
+// otherwise returns the payload as it stands.
+func deobfuscate(payload []byte, flags uint16) []byte {
+	if flags&rheFlagXorMagic == 0 {
+		return payload
+	}
+	de := make([]byte, len(payload))
+	for i, b := range payload {
+		de[i] = b ^ xorMagic
+	}
+	return de
+}
+
+// splitROPBuffer splits the ROP buffer into its two regions:
+// RopSize(uint16, inclusive of itself) | ROP commands | handle table.
+func splitROPBuffer(rb []byte) (rops []byte, handles []uint32, err error) {
 	if len(rb) < 2 {
 		return nil, nil, ErrMalformed
 	}

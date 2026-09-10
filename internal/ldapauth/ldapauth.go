@@ -143,35 +143,53 @@ func (v *Verifier) Sync(cfg directory.LDAPConfig) ([]SyncedUser, error) {
 	}
 	out := make([]SyncedUser, 0, len(res.Entries))
 	for _, e := range res.Entries {
-		login := e.GetAttributeValue(attr)
-		if login == "" {
+		su, ok := syncedUser(e, attr, profile)
+		if !ok {
 			continue
-		}
-		id := e.GetRawAttributeValue("objectGUID")
-		if len(id) == 0 {
-			id = e.GetRawAttributeValue("entryUUID")
-		}
-		if len(id) == 0 {
-			continue
-		}
-		su := SyncedUser{Username: login, ExternID: id, DN: e.DN}
-		for key, a := range profile {
-			if key == directory.LDAPPhotoFieldKey {
-				if raw := e.GetRawAttributeValue(a); len(raw) > 0 {
-					su.Photo = raw
-				}
-				continue
-			}
-			if val := e.GetAttributeValue(a); val != "" {
-				if su.Fields == nil {
-					su.Fields = make(map[string]string)
-				}
-				su.Fields[key] = val
-			}
 		}
 		out = append(out, su)
 	}
 	return out, nil
+}
+
+// syncedUser reads one directory entry. An entry with no login, or with no stable
+// identifier to bind its externid to, is skipped.
+func syncedUser(e *ldap.Entry, attr string, profile map[string]string) (SyncedUser, bool) {
+	login := e.GetAttributeValue(attr)
+	if login == "" {
+		return SyncedUser{}, false
+	}
+	id := e.GetRawAttributeValue("objectGUID")
+	if len(id) == 0 {
+		id = e.GetRawAttributeValue("entryUUID")
+	}
+	if len(id) == 0 {
+		return SyncedUser{}, false
+	}
+	su := SyncedUser{Username: login, ExternID: id, DN: e.DN}
+	readProfile(&su, e, profile)
+	return su, true
+}
+
+// readProfile fills the entry's enabled profile fields, routing the portrait to its
+// own field rather than the string map.
+func readProfile(su *SyncedUser, e *ldap.Entry, profile map[string]string) {
+	for key, a := range profile {
+		if key == directory.LDAPPhotoFieldKey {
+			if raw := e.GetRawAttributeValue(a); len(raw) > 0 {
+				su.Photo = raw
+			}
+			continue
+		}
+		val := e.GetAttributeValue(a)
+		if val == "" {
+			continue
+		}
+		if su.Fields == nil {
+			su.Fields = make(map[string]string)
+		}
+		su.Fields[key] = val
+	}
 }
 
 // SyncedGroup is one mail-bearing group discovered in the directory: its address,

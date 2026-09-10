@@ -54,10 +54,7 @@ func (f Func) Shutdown(ctx context.Context) error { return f.ShutdownFn(ctx) }
 // meaningful error: a genuine Start failure, otherwise the first Shutdown or
 // cleanup error.
 func Run(ctx context.Context, timeout time.Duration, components []Component, cleanups ...func() error) error {
-	errc := make(chan error, len(components))
-	for _, c := range components {
-		go func() { errc <- c.Start() }()
-	}
+	errc := startAll(components)
 
 	var runErr error
 	select {
@@ -68,6 +65,30 @@ func Run(ctx context.Context, timeout time.Duration, components []Component, cle
 		runErr = err
 	}
 
+	shutErrs := shutdownAll(components, timeout)
+
+	// Cleanups run strictly after every Shutdown has returned (drain-then-close).
+	for _, cl := range cleanups {
+		keepFirst(&runErr, cl())
+	}
+	for _, err := range shutErrs {
+		keepFirst(&runErr, err)
+	}
+	return runErr
+}
+
+// startAll starts every component, reporting each Start return on the channel.
+func startAll(components []Component) <-chan error {
+	errc := make(chan error, len(components))
+	for _, c := range components {
+		go func() { errc <- c.Start() }()
+	}
+	return errc
+}
+
+// shutdownAll shuts every component down concurrently under a fresh timeout-bounded
+// context, and returns once all of them have.
+func shutdownAll(components []Component, timeout time.Duration) []error {
 	shutCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -79,17 +100,13 @@ func Run(ctx context.Context, timeout time.Duration, components []Component, cle
 		})
 	}
 	wg.Wait()
+	return shutErrs
+}
 
-	// Cleanups run strictly after every Shutdown has returned (drain-then-close).
-	for _, cl := range cleanups {
-		if err := cl(); err != nil && runErr == nil {
-			runErr = err
-		}
+// keepFirst records err only while no error has been recorded, so Run reports the
+// first meaningful failure rather than the last.
+func keepFirst(dst *error, err error) {
+	if err != nil && *dst == nil {
+		*dst = err
 	}
-	for _, err := range shutErrs {
-		if err != nil && runErr == nil {
-			runErr = err
-		}
-	}
-	return runErr
 }

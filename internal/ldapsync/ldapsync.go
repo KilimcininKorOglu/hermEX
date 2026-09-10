@@ -38,8 +38,25 @@ func Run(cfg directory.LDAPConfig, syncer Syncer, store Store, maildirFor func(s
 	if err != nil {
 		return "", err
 	}
-	dnToEmail := make(map[string]string, len(users))
-	var created, updated int
+	dnToEmail, created, updated := syncUsers(users, store, maildirFor, logf)
+	summary := fmt.Sprintf("Synced %d directory entries: %d created, %d updated.", len(users), created, updated)
+
+	if !cfg.SyncGroups {
+		return summary, nil
+	}
+	groups, err := syncer.SyncGroups(cfg)
+	if err != nil {
+		return summary, err
+	}
+	synced, gc, gu := syncGroups(groups, dnToEmail, store, logf)
+	pruned := pruneMastered(synced, store)
+	return summary + fmt.Sprintf(" Groups: %d created, %d updated, %d pruned (of %d).", gc, gu, pruned, len(groups)), nil
+}
+
+// syncUsers applies each account to the local directory, returning the DN-to-login
+// map the group pass resolves members through, and the created/updated counts.
+func syncUsers(users []ldapauth.SyncedUser, store Store, maildirFor func(string) string, logf func(string, ...any)) (dnToEmail map[string]string, created, updated int) {
+	dnToEmail = make(map[string]string, len(users))
 	for _, u := range users {
 		maildir := maildirFor(u.Username)
 		isNew, err := store.UpsertLDAPUser(u.Username, u.ExternID, maildir)
@@ -55,46 +72,41 @@ func Run(cfg directory.LDAPConfig, syncer Syncer, store Store, maildirFor func(s
 		if u.DN != "" {
 			dnToEmail[strings.ToLower(u.DN)] = u.Username
 		}
-		// Profile string fields into the directory; the portrait into the mailbox
-		// store (after the upsert, so the maildir exists). Either failing is logged,
-		// not fatal: the account itself is already synced.
-		if len(u.Fields) > 0 {
-			if _, err := store.ApplyLDAPProfile(u.Username, u.Fields); err != nil {
-				logf("%s profile: %v", u.Username, err)
-			}
-		}
-		if len(u.Photo) > 0 && maildir != "" {
-			if st, err := objectstore.Open(maildir); err != nil {
-				logf("%s photo: %v", u.Username, err)
-			} else {
-				if err := st.SetUserPhoto(u.Photo); err != nil {
-					logf("%s photo: %v", u.Username, err)
-				}
-				_ = st.Close()
-			}
-		}
+		applyProfile(u, maildir, store, logf)
 	}
-	summary := fmt.Sprintf("Synced %d directory entries: %d created, %d updated.", len(users), created, updated)
+	return dnToEmail, created, updated
+}
 
-	if !cfg.SyncGroups {
-		return summary, nil
+// applyProfile writes the profile string fields into the directory and the portrait
+// into the mailbox store (after the upsert, so the maildir exists). Either failing is
+// logged, not fatal: the account itself is already synced.
+func applyProfile(u ldapauth.SyncedUser, maildir string, store Store, logf func(string, ...any)) {
+	if len(u.Fields) > 0 {
+		if _, err := store.ApplyLDAPProfile(u.Username, u.Fields); err != nil {
+			logf("%s profile: %v", u.Username, err)
+		}
 	}
-	groups, err := syncer.SyncGroups(cfg)
+	if len(u.Photo) == 0 || maildir == "" {
+		return
+	}
+	st, err := objectstore.Open(maildir)
 	if err != nil {
-		return summary, err
+		logf("%s photo: %v", u.Username, err)
+		return
 	}
-	synced := make(map[string]bool, len(groups))
-	var gc, gu int
+	if err := st.SetUserPhoto(u.Photo); err != nil {
+		logf("%s photo: %v", u.Username, err)
+	}
+	_ = st.Close()
+}
+
+// syncGroups applies the directory's mail-bearing groups as LDAP-mastered lists,
+// returning the set of list names it synced and the created/updated counts.
+func syncGroups(groups []ldapauth.SyncedGroup, dnToEmail map[string]string, store Store, logf func(string, ...any)) (synced map[string]bool, created, updated int) {
+	synced = make(map[string]bool, len(groups))
 	for _, g := range groups {
 		owner := dnToEmail[strings.ToLower(g.OwnerDN)] // "" if none/unresolved
-		members := make([]string, 0, len(g.MemberDNs))
-		for _, mdn := range g.MemberDNs {
-			if email := dnToEmail[strings.ToLower(mdn)]; email != "" {
-				members = append(members, email)
-			} else {
-				logf("group %s: member %q is not a synced user, skipped", g.Mail, mdn)
-			}
-		}
+		members := resolveMembers(g, dnToEmail, logf)
 		isNew, err := store.UpsertLDAPGroup(g.Mail, []byte(strings.ToLower(g.Mail)), owner, members)
 		if err != nil {
 			logf("skip group %s: %v", g.Mail, err)
@@ -102,21 +114,43 @@ func Run(cfg directory.LDAPConfig, syncer Syncer, store Store, maildirFor func(s
 		}
 		synced[strings.ToLower(g.Mail)] = true
 		if isNew {
-			gc++
+			created++
 		} else {
-			gu++
+			updated++
 		}
 	}
-	// Prune mastered lists no longer present in the directory.
-	var pruned int
-	if lists, err := store.ListMLists(); err == nil {
-		for _, l := range lists {
-			if l.LDAPMastered && !synced[strings.ToLower(l.Listname)] {
-				if _, err := store.DeleteMList(l.Listname); err == nil {
-					pruned++
-				}
-			}
+	return synced, created, updated
+}
+
+// resolveMembers maps a group's member DNs to synced logins, reporting each member
+// the downsync did not bring in.
+func resolveMembers(g ldapauth.SyncedGroup, dnToEmail map[string]string, logf func(string, ...any)) []string {
+	members := make([]string, 0, len(g.MemberDNs))
+	for _, mdn := range g.MemberDNs {
+		email := dnToEmail[strings.ToLower(mdn)]
+		if email == "" {
+			logf("group %s: member %q is not a synced user, skipped", g.Mail, mdn)
+			continue
+		}
+		members = append(members, email)
+	}
+	return members
+}
+
+// pruneMastered deletes the mastered lists no longer present in the directory.
+func pruneMastered(synced map[string]bool, store Store) int {
+	lists, err := store.ListMLists()
+	if err != nil {
+		return 0
+	}
+	pruned := 0
+	for _, l := range lists {
+		if !l.LDAPMastered || synced[strings.ToLower(l.Listname)] {
+			continue
+		}
+		if _, err := store.DeleteMList(l.Listname); err == nil {
+			pruned++
 		}
 	}
-	return summary + fmt.Sprintf(" Groups: %d created, %d updated, %d pruned (of %d).", gc, gu, pruned, len(groups)), nil
+	return pruned
 }
