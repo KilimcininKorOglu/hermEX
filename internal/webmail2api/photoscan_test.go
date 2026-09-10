@@ -80,7 +80,7 @@ func contactHasPhoto(t *testing.T, mbox, id string) bool {
 	if err != nil {
 		t.Fatalf("open contact %d: %v", mid, err)
 	}
-	_, _, has := contactPhotoAttachment(msg)
+	_, _, has := objectstore.ContactPhotoAttachment(msg)
 	return has
 }
 

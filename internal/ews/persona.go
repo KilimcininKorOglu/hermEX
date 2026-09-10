@@ -200,6 +200,46 @@ func newPersona(displayName, address string) personaOut {
 	}
 }
 
+// galPersona builds the persona of an address-book entry at an exact address, or
+// nil. A hidden address has no persona to report, the same as an address absent
+// from the directory.
+func (s *Server) galPersona(sess *session, target string) *personaOut {
+	gal, ok := s.accounts.(directory.GAL)
+	if !ok {
+		return nil
+	}
+	entries, err := gal.SearchGAL(sess.user, target, personaSearchLimit)
+	if err != nil {
+		return nil
+	}
+	for _, e := range directory.VisibleGAL(entries) {
+		if strings.EqualFold(e.Address, target) {
+			p := newPersona(e.DisplayName, e.Address)
+			return &p
+		}
+	}
+	return nil
+}
+
+// contactPersona builds the persona of the caller's own contact at an address, or
+// nil. The store is the caller's own mailbox, so this exposes no other mailbox.
+func contactPersona(mailbox, target string) *personaOut {
+	if mailbox == "" {
+		return nil
+	}
+	st, err := objectstore.Open(mailbox)
+	if err != nil {
+		return nil
+	}
+	defer st.Close()
+	m, ok, err := st.ContactByAddress(target)
+	if err != nil || !ok {
+		return nil
+	}
+	p := newPersona(m.DisplayName, m.Address)
+	return &p
+}
+
 // splitName separates a display name into its given name and surname on the
 // first space. It yields neither for a name that carries no space, because a
 // directory that holds only an address would otherwise report that address as
@@ -227,21 +267,11 @@ func (s *Server) handleGetPersona(w http.ResponseWriter, inner []byte, sess *ses
 		writeResponse(w, getPersonaResponse{ResponseClass: "Error", ResponseCode: "ErrorInvalidArgument", MessageText: "EmailAddress is required"})
 		return
 	}
-	var found *personaOut
-	if gal, ok := s.accounts.(directory.GAL); ok {
-		entries, err := gal.SearchGAL(sess.user, target, personaSearchLimit)
-		// A hidden address has no persona to report: it answers ErrorPersonNotFound
-		// below, the same as an address absent from the directory.
-		entries = directory.VisibleGAL(entries)
-		if err == nil {
-			for _, e := range entries {
-				if strings.EqualFold(e.Address, target) {
-					p := newPersona(e.DisplayName, e.Address)
-					found = &p
-					break
-				}
-			}
-		}
+	found := s.galPersona(sess, target)
+	if found == nil {
+		// FindPeople offers the caller's own contacts as personas, so GetPersona
+		// answers for them too; a client asks for the persona it was just given.
+		found = contactPersona(sess.mailbox, target)
 	}
 	if found == nil {
 		writeResponse(w, getPersonaResponse{ResponseClass: "Error", ResponseCode: "ErrorPersonNotFound", MessageText: "No persona found for the specified email address"})

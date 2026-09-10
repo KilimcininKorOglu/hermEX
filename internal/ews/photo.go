@@ -49,13 +49,23 @@ func (s *Server) handleGetUserPhoto(w http.ResponseWriter, inner []byte, sess *s
 	})
 }
 
-// userPhoto resolves a target address to its mailbox and returns its portrait
-// bytes, or nil when none. The caller's own mailbox is served directly; others
-// resolve through the GAL (which carries the store path).
+// userPhoto resolves a target address to its portrait bytes, or nil when there is
+// none. The caller's own mailbox is served directly; another mailbox resolves
+// through the GAL (which carries the store path); an address the GAL does not
+// answer for falls back to the caller's own Contacts folder, which is where the
+// picture of an external correspondent lives.
 func (s *Server) userPhoto(email string, sess *session) []byte {
 	if email == "" || strings.EqualFold(email, sess.user) {
 		return storePhoto(sess.mailbox)
 	}
+	if photo := s.galPhoto(email, sess); photo != nil {
+		return photo
+	}
+	return contactPhoto(sess.mailbox, email)
+}
+
+// galPhoto returns the portrait of the address-book user at an address, or nil.
+func (s *Server) galPhoto(email string, sess *session) []byte {
 	gal, ok := s.accounts.(directory.GAL)
 	if !ok {
 		return nil
@@ -70,6 +80,23 @@ func (s *Server) userPhoto(email string, sess *session) []byte {
 		}
 	}
 	return nil
+}
+
+// contactPhoto returns the picture the caller saved on their own contact card for
+// an address, or nil. The store read is the caller's own mailbox, so this reports
+// nothing the caller does not already hold, and it says nothing about whether the
+// address exists in the directory.
+func contactPhoto(mailbox, email string) []byte {
+	if mailbox == "" {
+		return nil
+	}
+	st, err := objectstore.Open(mailbox)
+	if err != nil {
+		return nil
+	}
+	defer st.Close()
+	photo, _ := st.ContactPhotoFor(email)
+	return photo
 }
 
 // storePhoto opens a mailbox and returns its portrait bytes, or nil.

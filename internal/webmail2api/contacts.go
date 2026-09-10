@@ -655,28 +655,6 @@ func hasPictureTag(st *objectstore.Store, create bool) (mapi.PropTag, error) {
 	return mapi.PropTag(uint32(ids[0])<<16 | uint32(mapi.PtBoolean)), nil
 }
 
-// contactPhotoAttachment scans a contact's attachments for the one carrying
-// PrAttachmentContactPhoto (the contact's photo) and returns its attach number
-// and image bytes. ok is false when the contact has no photo.
-func contactPhotoAttachment(msg *oxcmail.Message) (attachNum int32, data []byte, ok bool) {
-	for _, att := range msg.Attachments {
-		if v, has := att.Props.Get(mapi.PrAttachmentContactPhoto); has {
-			if b, isBool := v.(bool); isBool && b {
-				if d, isBytes := att.Props.Get(mapi.PrAttachDataBin); isBytes {
-					if raw, isRaw := d.([]byte); isRaw {
-						if n, has := att.Props.Get(mapi.PrAttachNum); has {
-							if num, isInt := n.(int32); isInt {
-								return num, raw, true
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-	return 0, nil, false
-}
-
 // handleGetContactPhoto streams the contact's photo attachment bytes. JPEG is
 // the canonical format; the content type defaults to image/jpeg.
 func (s *Server) handleGetContactPhoto(w http.ResponseWriter, r *http.Request) {
@@ -695,7 +673,7 @@ func (s *Server) handleGetContactPhoto(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such contact"})
 		return
 	}
-	_, data, has := contactPhotoAttachment(msg)
+	_, data, has := objectstore.ContactPhotoAttachment(msg)
 	if !has {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no photo"})
 		return
@@ -727,7 +705,7 @@ func (s *Server) handleSetContactPhoto(w http.ResponseWriter, r *http.Request) {
 	defer st.Close()
 	// Drop an existing photo first so the contact has at most one photo.
 	if msg, err := st.OpenMessage(id); err == nil {
-		if num, _, has := contactPhotoAttachment(msg); has {
+		if num, _, has := objectstore.ContactPhotoAttachment(msg); has {
 			// #nosec G115 -- the signed and unsigned views of the same 32 bits
 			_ = st.DeleteAttachment(id, uint32(num))
 		}
@@ -805,7 +783,7 @@ func (s *Server) handleDeleteContactPhoto(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such contact"})
 		return
 	}
-	if num, _, has := contactPhotoAttachment(msg); has {
+	if num, _, has := objectstore.ContactPhotoAttachment(msg); has {
 		// #nosec G115 -- the signed and unsigned views of the same 32 bits
 		_ = st.DeleteAttachment(id, uint32(num))
 	}

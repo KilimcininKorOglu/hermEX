@@ -25,20 +25,29 @@ var contactEmailNames = []mapi.PropertyName{
 // resolved without allocation (create=false), so a mailbox that has never stored a
 // contact e-mail resolves no ids and reports false without scanning the folder.
 func (s *Store) ContactHasAddress(address string) (bool, error) {
+	_, ok, err := s.contactIDForAddress(address)
+	return ok, err
+}
+
+// contactIDForAddress returns the id of the contact carrying the given e-mail
+// address in any of its three e-mail slots. It walks the folder object by object,
+// so it costs the size of the address book; the callers ask it once per address,
+// not once per keystroke (SearchContacts is the query-side path).
+func (s *Store) contactIDForAddress(address string) (int64, bool, error) {
 	want := normalizeContactAddress(address)
 	if want == "" {
-		return false, nil
+		return 0, false, nil
 	}
 	tags, err := s.contactEmailTags()
 	if err != nil {
-		return false, err
+		return 0, false, err
 	}
 	if len(tags) == 0 {
-		return false, nil // no contact e-mail named ids allocated, so nothing to match
+		return 0, false, nil // no contact e-mail named ids allocated, so nothing to match
 	}
 	objs, err := s.ListFolderObjects(int64(mapi.PrivateFIDContacts))
 	if err != nil {
-		return false, err
+		return 0, false, err
 	}
 	for _, obj := range objs {
 		pv, err := s.GetMessageProperties(obj.ID, tags...)
@@ -46,10 +55,30 @@ func (s *Store) ContactHasAddress(address string) (bool, error) {
 			continue
 		}
 		if bagHasAddress(pv, tags, want) {
-			return true, nil
+			return obj.ID, true, nil
 		}
 	}
-	return false, nil
+	return 0, false, nil
+}
+
+// ContactByAddress returns the mailbox's contact carrying the given e-mail
+// address, as the same name-plus-address pair an autocomplete match reports. The
+// address reported is the one asked for, because that is the slot that matched.
+// ok is false when no contact carries it.
+func (s *Store) ContactByAddress(address string) (ContactMatch, bool, error) {
+	id, ok, err := s.contactIDForAddress(address)
+	if err != nil || !ok {
+		return ContactMatch{}, false, err
+	}
+	m := ContactMatch{Address: strings.TrimSpace(address)}
+	pv, err := s.GetMessageProperties(id, mapi.PrDisplayName)
+	if err != nil {
+		return m, true, nil // the address matched; the name is what could not be read
+	}
+	if v, has := pv.Get(mapi.PrDisplayName); has {
+		m.DisplayName, _ = v.(string)
+	}
+	return m, true, nil
 }
 
 // contactEmailTags resolves this store's tags for a contact's three e-mail
