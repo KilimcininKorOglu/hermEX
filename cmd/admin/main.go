@@ -66,7 +66,8 @@ type command struct {
 }
 
 var commands = []command{
-	{name: "ensure-schema", run: func(*cmdContext) { fmt.Println("schema ensured") }},
+	{name: "ensure-schema", note: "apply pending directory migrations; every daemon does this at startup too",
+		run: func(*cmdContext) { fmt.Println("schema ensured") }},
 	{name: "create-domain", args: "<domainname>", minArgs: 2, maxArgs: 2, run: runCreateDomain},
 	{name: "create-user", args: "<email> <password>", minArgs: 3, maxArgs: 3, run: runCreateUser},
 	{name: "create-alias", args: "<alias-address> <user-email>", minArgs: 3, maxArgs: 3, run: runCreateAlias},
@@ -92,10 +93,12 @@ var commands = []command{
 		minArgs: 2, maxArgs: 2, run: func(c *cmdContext) { exportDKIM(c.dir, c.args[1]) }},
 	{name: "ldap-sync", args: "<org-id>", note: "import the org's LDAP/AD accounts into the directory",
 		minArgs: 2, maxArgs: 2, run: runLDAPSync},
-	{name: "grant-admin", args: "<email> <system|org|domain> [scope-id]", minArgs: 3, maxArgs: 4, run: runGrantAdmin},
+	{name: "grant-admin", args: "<email> <system|org|domain> [scope-id]",
+		note:    "give the account an admin role; scope-id is the org or domain id, omitted for system",
+		minArgs: 3, maxArgs: 4, run: runGrantAdmin},
 	{name: "list-sessions", args: "<email>", note: "the account's live webmail and panel sessions",
 		minArgs: 2, maxArgs: 2, run: func(c *cmdContext) { listSessions(c.dir, c.args[1]) }},
-	{name: "revoke-sessions", args: "<email>", note: "end every one of them; compromise response",
+	{name: "revoke-sessions", args: "<email>", note: "end every live session of the account; compromise response",
 		minArgs: 2, maxArgs: 2, run: func(c *cmdContext) { revokeSessions(c.dir, c.args[1]) }},
 	{name: "serve", note: "run the admin API HTTP server", run: runServe},
 }
