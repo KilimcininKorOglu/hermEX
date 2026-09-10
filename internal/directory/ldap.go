@@ -37,6 +37,10 @@ type LDAPConfig struct {
 	// pulled from LDAP and the attribute each reads from (keyed by the field keys in
 	// LDAPProfileFields). Empty means only the account's existence and login sync.
 	SyncFields map[string]LDAPSyncField
+	// AliasAttr is the directory attribute an account's additional addresses are read
+	// from (Active Directory publishes them as proxyAddresses). Empty leaves aliases
+	// alone; set, the directory OWNS the account's alias set and each sync replaces it.
+	AliasAttr string
 	// SyncGroups enables syncing LDAP/AD groups into distribution lists. GroupBaseDN
 	// narrows the group search (empty = BaseDN); GroupFilter is an extra LDAP filter
 	// ANDed with the mail-bearing-group match (empty = none).
@@ -67,6 +71,7 @@ type LDAPSyncField struct {
 // keys decode to their zero value, so older rows stay valid.
 type ldapSyncConfig struct {
 	Fields        map[string]LDAPSyncField `json:"fields,omitempty"`
+	AliasAttr     string                   `json:"aliasAttr,omitempty"`
 	SyncGroups    bool                     `json:"syncGroups,omitempty"`
 	GroupBaseDN   string                   `json:"groupBaseDN,omitempty"`
 	GroupFilter   string                   `json:"groupFilter,omitempty"`
@@ -177,6 +182,7 @@ func (d *SQLDirectory) GetLDAPConfig(orgID int64) (cfg LDAPConfig, ok bool, err 
 			return LDAPConfig{}, false, fmt.Errorf("directory: malformed ldap sync_config: %w", err)
 		}
 		cfg.SyncFields = sc.Fields
+		cfg.AliasAttr = sc.AliasAttr
 		cfg.SyncGroups = sc.SyncGroups
 		cfg.GroupBaseDN = sc.GroupBaseDN
 		cfg.GroupFilter = sc.GroupFilter
@@ -276,13 +282,12 @@ func (d *SQLDirectory) SetLDAPConfig(orgID int64, cfg LDAPConfig) error {
 // but logins stores no document at all.
 func marshalSyncConfig(cfg LDAPConfig) (any, error) {
 	sc := ldapSyncConfig{
-		Fields: cfg.SyncFields, SyncGroups: cfg.SyncGroups, GroupBaseDN: cfg.GroupBaseDN, GroupFilter: cfg.GroupFilter,
+		Fields: cfg.SyncFields, AliasAttr: cfg.AliasAttr,
+		SyncGroups: cfg.SyncGroups, GroupBaseDN: cfg.GroupBaseDN, GroupFilter: cfg.GroupFilter,
 		SyncContacts: cfg.SyncContacts, ContactBaseDN: cfg.ContactBaseDN, ContactFilter: cfg.ContactFilter,
 		ContactDomain: cfg.ContactDomain,
 	}
-	empty := len(sc.Fields) == 0 && !sc.SyncGroups && sc.GroupBaseDN == "" && sc.GroupFilter == "" &&
-		!sc.SyncContacts && sc.ContactBaseDN == "" && sc.ContactFilter == "" && sc.ContactDomain == ""
-	if empty {
+	if sc.isEmpty() {
 		return nil, nil
 	}
 	b, err := json.Marshal(sc)
@@ -290,4 +295,16 @@ func marshalSyncConfig(cfg LDAPConfig) (any, error) {
 		return nil, err
 	}
 	return string(b), nil
+}
+
+// isEmpty reports whether every optional downsync setting is at its zero value, in which
+// case the column stays NULL rather than holding a document that configures nothing.
+func (sc ldapSyncConfig) isEmpty() bool {
+	strs := []string{sc.AliasAttr, sc.GroupBaseDN, sc.GroupFilter, sc.ContactBaseDN, sc.ContactFilter, sc.ContactDomain}
+	for _, s := range strs {
+		if s != "" {
+			return false
+		}
+	}
+	return len(sc.Fields) == 0 && !sc.SyncGroups && !sc.SyncContacts
 }

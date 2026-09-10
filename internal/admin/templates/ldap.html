@@ -40,6 +40,13 @@
 </div>
 {{end}}
 </fieldset>
+<fieldset class="ldap-aliases">
+<legend>Alias sync</legend>
+<label>Alias attribute (optional)
+<input type="text" name="alias_attr" value="{{.Config.AliasAttr}}" placeholder="proxyAddresses">
+</label>
+<p class="hint">The account's additional addresses are read from this attribute; an <code>smtp:</code> prefix is stripped and other schemes are ignored. While it is set the directory OWNS each account's alias set: every sync replaces it, so an alias added here by hand is removed. An address outside your domains, or already in use, is skipped and reported in the sync result.</p>
+</fieldset>
 <fieldset class="ldap-groups">
 <legend>Group sync</legend>
 <label class="check"><input type="checkbox" name="syncgroups" {{if .Config.SyncGroups}}checked{{end}}> Sync groups into distribution lists</label>

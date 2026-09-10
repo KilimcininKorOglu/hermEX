@@ -25,6 +25,7 @@ type Syncer interface {
 type Store interface {
 	UpsertLDAPUser(username string, externid []byte, maildir string) (bool, error)
 	ApplyLDAPProfile(username string, values map[string]string) (bool, error)
+	SyncAliasesFor(username string, aliases []string) (skipped []string, found bool, err error)
 	UpsertLDAPGroup(listname string, externid []byte, owner string, members []string) (bool, error)
 	ListMLists() ([]directory.MListInfo, error)
 	DeleteMList(listname string) (bool, error)
@@ -43,7 +44,7 @@ func Run(cfg directory.LDAPConfig, syncer Syncer, store Store, maildirFor func(s
 	if err != nil {
 		return "", err
 	}
-	dnToEmail, created, updated := syncUsers(users, store, maildirFor, logf)
+	dnToEmail, created, updated := syncUsers(users, cfg, store, maildirFor, logf)
 	summary := fmt.Sprintf("Synced %d directory entries: %d created, %d updated.", len(users), created, updated)
 
 	groupSummary, err := runGroupPass(cfg, syncer, store, dnToEmail, logf)
@@ -90,7 +91,7 @@ func runContactPass(cfg directory.LDAPConfig, syncer Syncer, store Store, logf f
 
 // syncUsers applies each account to the local directory, returning the DN-to-login
 // map the group pass resolves members through, and the created/updated counts.
-func syncUsers(users []ldapauth.SyncedUser, store Store, maildirFor func(string) string, logf func(string, ...any)) (dnToEmail map[string]string, created, updated int) {
+func syncUsers(users []ldapauth.SyncedUser, cfg directory.LDAPConfig, store Store, maildirFor func(string) string, logf func(string, ...any)) (dnToEmail map[string]string, created, updated int) {
 	dnToEmail = make(map[string]string, len(users))
 	for _, u := range users {
 		maildir := maildirFor(u.Username)
@@ -108,8 +109,28 @@ func syncUsers(users []ldapauth.SyncedUser, store Store, maildirFor func(string)
 			dnToEmail[strings.ToLower(u.DN)] = u.Username
 		}
 		applyProfile(u, maildir, store, logf)
+		applyAliases(u, cfg, store, logf)
 	}
 	return dnToEmail, created, updated
+}
+
+// applyAliases replaces the account's aliases with the ones the directory publishes, after
+// the upsert so the account exists to alias. It runs only while an alias attribute is
+// configured, because a disabled alias sync must never remove an alias an operator added by
+// hand. An address the directory owns but this server cannot bind is skipped and reported,
+// not fatal: the account itself is already synced.
+func applyAliases(u ldapauth.SyncedUser, cfg directory.LDAPConfig, store Store, logf func(string, ...any)) {
+	if cfg.AliasAttr == "" {
+		return
+	}
+	skipped, _, err := store.SyncAliasesFor(u.Username, u.Aliases)
+	if err != nil {
+		logf("%s aliases: %v", u.Username, err)
+		return
+	}
+	for _, a := range skipped {
+		logf("%s alias %s skipped: not a local address, or already in use", u.Username, a)
+	}
 }
 
 // applyProfile writes the profile string fields into the directory and the portrait

@@ -1118,34 +1118,55 @@ func (d *SQLDirectory) ListAliasesFor(username string) ([]string, error) {
 // user existed. The replace runs in one transaction; the aliasname UNIQUE key
 // rejects an address already in use, rolling the change back.
 func (d *SQLDirectory) SetAliasesFor(username string, aliases []string) (bool, error) {
+	_, found, err := d.replaceAliases(username, aliases, false)
+	return found, err
+}
+
+// SyncAliasesFor replaces a user's aliases the way SetAliasesFor does, but skips an address
+// the checks reject instead of failing the whole set, and returns the skipped ones for the
+// caller to report. The LDAP downsync uses it: a directory listing one address that is not
+// in a local domain, or that already belongs to another account, must not cost the account
+// every other alias it publishes.
+func (d *SQLDirectory) SyncAliasesFor(username string, aliases []string) (skipped []string, found bool, err error) {
+	return d.replaceAliases(username, aliases, true)
+}
+
+// replaceAliases is the shared body: it clears the user's aliases and re-inserts the given
+// set inside one transaction. skipRejected decides what a failed check does, abort the whole
+// replace or skip that one address.
+func (d *SQLDirectory) replaceAliases(username string, aliases []string, skipRejected bool) (skipped []string, found bool, err error) {
 	username = strings.ToLower(strings.TrimSpace(username))
 	var id int64
-	err := d.db.QueryRow(`SELECT id FROM users WHERE username = ?`, username).Scan(&id)
+	err = d.db.QueryRow(`SELECT id FROM users WHERE username = ?`, username).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	tx, err := d.db.Begin()
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	defer tx.Rollback()
 	// Clear first, then validate: the user's current aliases are being replaced,
 	// so they must not count as collisions against themselves.
 	if _, err := tx.Exec(`DELETE FROM aliases WHERE mainname = ?`, username); err != nil {
-		return false, err
+		return nil, false, err
 	}
 	for _, a := range normalizedAliases(aliases) {
 		if err := checkAlias(tx, a, username); err != nil {
-			return false, err
+			if !skipRejected {
+				return nil, false, err
+			}
+			skipped = append(skipped, a)
+			continue
 		}
 		if _, err := tx.Exec(`INSERT INTO aliases (aliasname, mainname) VALUES (?, ?)`, a, username); err != nil {
-			return false, err
+			return nil, false, err
 		}
 	}
-	return true, tx.Commit()
+	return skipped, true, tx.Commit()
 }
 
 // normalizedAliases lowercases and trims the requested aliases, dropping empties

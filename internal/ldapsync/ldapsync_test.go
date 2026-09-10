@@ -23,6 +23,7 @@ func (f *fakeSyncer) SyncContacts(directory.LDAPConfig) ([]ldapauth.SyncedContac
 
 type fakeStore struct {
 	profiles        map[string]map[string]string
+	aliases         map[string][]string
 	groupOwner      map[string]string
 	groupMembers    map[string][]string
 	mastered        []directory.MListInfo
@@ -47,6 +48,13 @@ func (f *fakeStore) UpsertLDAPGroup(list string, _ []byte, owner string, members
 	}
 	f.groupOwner[list], f.groupMembers[list] = owner, members
 	return true, nil
+}
+func (f *fakeStore) SyncAliasesFor(username string, aliases []string) ([]string, bool, error) {
+	if f.aliases == nil {
+		f.aliases = map[string][]string{}
+	}
+	f.aliases[username] = aliases
+	return nil, true, nil
 }
 func (f *fakeStore) ListMLists() ([]directory.MListInfo, error) { return f.mastered, nil }
 func (f *fakeStore) DeleteMList(list string) (bool, error) {
@@ -101,6 +109,41 @@ func TestRunUsersAndGroups(t *testing.T) {
 	}
 	if len(store.deleted) != 1 || store.deleted[0] != "old@hermex.test" {
 		t.Errorf("pruned = %v, want [old@hermex.test]", store.deleted)
+	}
+}
+
+// TestRunAppliesAliases proves the addresses the directory publishes reach the account once
+// an alias attribute is configured.
+func TestRunAppliesAliases(t *testing.T) {
+	syncer := &fakeSyncer{users: []ldapauth.SyncedUser{
+		{Username: "alice@hermex.test", Aliases: []string{"sales@hermex.test"}},
+	}}
+	store := &fakeStore{}
+
+	cfg := directory.LDAPConfig{AliasAttr: "proxyAddresses"}
+	if _, err := Run(cfg, syncer, store, func(string) string { return "" }, func(string, ...any) {}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := store.aliases["alice@hermex.test"]; len(got) != 1 || got[0] != "sales@hermex.test" {
+		t.Errorf("applied aliases = %v, want [sales@hermex.test]", got)
+	}
+}
+
+// TestRunLeavesAliasesAloneWhenUnconfigured is the load-bearing guard: a downsync with no
+// alias attribute must not touch the alias set, or it would delete every alias an operator
+// added by hand.
+func TestRunLeavesAliasesAloneWhenUnconfigured(t *testing.T) {
+	syncer := &fakeSyncer{users: []ldapauth.SyncedUser{{Username: "alice@hermex.test"}}}
+	store := &fakeStore{}
+
+	if _, err := Run(directory.LDAPConfig{}, syncer, store,
+		func(string) string { return "" }, func(string, ...any) {}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, touched := store.aliases["alice@hermex.test"]; touched {
+		t.Error("the alias set was replaced while no alias attribute is configured")
 	}
 }
 

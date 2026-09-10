@@ -216,6 +216,82 @@ func TestSyncGroups(t *testing.T) {
 	}
 }
 
+// aliasEntry builds a user entry carrying the given raw alias attribute values.
+func aliasEntry(values ...string) *ldap.Entry {
+	e := dirEntry("uid=alice,dc=hermex,dc=test", "alice@hermex.test", []byte{0x01})
+	e.Attributes = append(e.Attributes, &ldap.EntryAttribute{Name: "proxyAddresses", Values: values})
+	return e
+}
+
+// aliasCfg is a configuration that reads aliases from proxyAddresses.
+var aliasCfg = directory.LDAPConfig{
+	BaseDN: "dc=hermex,dc=test", UsernameAttr: "mail", StartTLS: true, AliasAttr: "proxyAddresses",
+}
+
+// syncedAliases runs one downsync over an entry and returns the account's aliases.
+func syncedAliases(t *testing.T, cfg directory.LDAPConfig, e *ldap.Entry) []string {
+	t.Helper()
+	fc := &fakeConn{searchRes: &ldap.SearchResult{Entries: []*ldap.Entry{e}}}
+	users, err := verifierWith(fc).Sync(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(users) != 1 {
+		t.Fatalf("Sync returned %d users, want 1", len(users))
+	}
+	return users[0].Aliases
+}
+
+// TestSyncStripsTheSMTPPrefix proves a secondary proxy address reaches the account as a
+// plain lower-cased address.
+func TestSyncStripsTheSMTPPrefix(t *testing.T) {
+	got := syncedAliases(t, aliasCfg, aliasEntry("smtp:Sales@Hermex.Test"))
+
+	if len(got) != 1 || got[0] != "sales@hermex.test" {
+		t.Errorf("aliases = %v, want [sales@hermex.test] lower-cased", got)
+	}
+}
+
+// TestSyncAcceptsTheUppercasePrefix proves the primary proxy address, which Active Directory
+// marks with an uppercase SMTP:, is taken as an alias too when it differs from the login.
+func TestSyncAcceptsTheUppercasePrefix(t *testing.T) {
+	got := syncedAliases(t, aliasCfg, aliasEntry("SMTP:office@hermex.test"))
+
+	if len(got) != 1 || got[0] != "office@hermex.test" {
+		t.Errorf("aliases = %v, want [office@hermex.test]", got)
+	}
+}
+
+// TestSyncDropsNonMailSchemes is the load-bearing filter: a directory publishes x500 and sip
+// addresses in the same attribute, and neither is a mail address.
+func TestSyncDropsNonMailSchemes(t *testing.T) {
+	got := syncedAliases(t, aliasCfg, aliasEntry("x500:/o=org/cn=alice", "sip:alice@hermex.test"))
+
+	if len(got) != 0 {
+		t.Errorf("aliases = %v, want none: only smtp values are addresses", got)
+	}
+}
+
+// TestSyncDropsTheAccountsOwnAddress proves the login is not synced back as an alias of
+// itself, which the alias checks would refuse anyway.
+func TestSyncDropsTheAccountsOwnAddress(t *testing.T) {
+	got := syncedAliases(t, aliasCfg, aliasEntry("SMTP:Alice@Hermex.Test"))
+
+	if len(got) != 0 {
+		t.Errorf("aliases = %v, want none: that is the account's own address", got)
+	}
+}
+
+// TestSyncReadsNoAliasesWhenUnconfigured proves an empty alias attribute leaves the account's
+// aliases untouched, because the downsync reports none to apply.
+func TestSyncReadsNoAliasesWhenUnconfigured(t *testing.T) {
+	got := syncedAliases(t, cfg, aliasEntry("smtp:sales@hermex.test"))
+
+	if len(got) != 0 {
+		t.Errorf("aliases = %v, want none while no alias attribute is configured", got)
+	}
+}
+
 // contactEntry builds a mail contact search entry with an address, a display name and
 // (optionally) a binary objectGUID.
 func contactEntry(dn, mail, displayName string, guid []byte) *ldap.Entry {

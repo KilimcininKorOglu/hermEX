@@ -116,6 +116,7 @@ type SyncedUser struct {
 	DN       string            // the entry's distinguished name, for group membership
 	Fields   map[string]string // enabled profile string fields, key (not attr) -> value
 	Photo    []byte            // the enabled binary portrait, nil when not synced/empty
+	Aliases  []string          // the account's additional addresses, empty when not synced
 }
 
 // Sync lists the directory's accounts for downsync into the local directory: it
@@ -135,6 +136,9 @@ func (v *Verifier) Sync(cfg directory.LDAPConfig) ([]SyncedUser, error) {
 	for _, a := range profile {
 		want = append(want, a)
 	}
+	if cfg.AliasAttr != "" {
+		want = append(want, cfg.AliasAttr)
+	}
 	res, err := c.Search(ldap.NewSearchRequest(
 		cfg.BaseDN, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
 		fmt.Sprintf("(%s=*)", attr), want, nil))
@@ -147,6 +151,7 @@ func (v *Verifier) Sync(cfg directory.LDAPConfig) ([]SyncedUser, error) {
 		if !ok {
 			continue
 		}
+		su.Aliases = aliasAddresses(e.GetAttributeValues(cfg.AliasAttr), su.Username)
 		out = append(out, su)
 	}
 	return out, nil
@@ -169,6 +174,39 @@ func syncedUser(e *ldap.Entry, attr string, profile map[string]string) (SyncedUs
 	su := SyncedUser{Username: login, ExternID: id, DN: e.DN}
 	readProfile(&su, e, profile)
 	return su, true
+}
+
+// aliasAddresses turns raw alias attribute values into deliverable addresses. Active
+// Directory publishes proxyAddresses as scheme-prefixed values ("SMTP:" for the primary
+// address, "smtp:" for the others, plus non-mail schemes such as "x500:" and "sip:"), so a
+// value carrying a scheme is kept only when that scheme is smtp, and the address itself is
+// lower-cased. The account's own login is dropped: it is the address, not an alias of it.
+func aliasAddresses(values []string, login string) []string {
+	login = strings.ToLower(strings.TrimSpace(login))
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		addr, ok := aliasAddress(v)
+		if !ok || addr == login {
+			continue
+		}
+		out = append(out, addr)
+	}
+	return out
+}
+
+// aliasAddress strips an smtp: scheme from one alias value and lower-cases the address,
+// reporting false for a value carrying any other scheme.
+func aliasAddress(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	scheme, rest, found := strings.Cut(value, ":")
+	if !found {
+		return strings.ToLower(value), value != ""
+	}
+	if !strings.EqualFold(scheme, "smtp") {
+		return "", false
+	}
+	addr := strings.ToLower(rest)
+	return addr, addr != ""
 }
 
 // readProfile fills the entry's enabled profile fields, routing the portrait to its

@@ -86,6 +86,7 @@ type Directory interface {
 	SetLDAPConfig(orgID int64, cfg directory.LDAPConfig) error
 	UpsertLDAPUser(username string, externid []byte, maildir string) (created bool, err error)
 	ApplyLDAPProfile(username string, values map[string]string) (bool, error)
+	SyncAliasesFor(username string, aliases []string) (skipped []string, found bool, err error)
 	UpsertLDAPGroup(listname string, externid []byte, owner string, members []string) (created bool, err error)
 	UpsertLDAPContact(email string, externid []byte, displayName, domain string) (created bool, err error)
 	DeleteLDAPContact(email string) (bool, error)

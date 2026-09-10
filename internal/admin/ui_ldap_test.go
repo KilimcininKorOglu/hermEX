@@ -127,6 +127,24 @@ func TestUISaveLDAPSyncSettings(t *testing.T) {
 	}
 }
 
+// TestUISaveLDAPAliasAttribute proves the alias attribute persists, so a panel-configured
+// alias sync reaches the downsync.
+func TestUISaveLDAPAliasAttribute(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/ldap", session, csrf, url.Values{
+		"uri": {"ldap://x:389"}, "bind_dn": {"cn=svc"}, "base_dn": {"ou=p"}, "username_attr": {"mail"},
+		"alias_attr": {"proxyAddresses"},
+	})
+	resp.Body.Close()
+
+	if got := d.ldap[0]; got.AliasAttr != "proxyAddresses" {
+		t.Errorf("alias attribute = %q, want proxyAddresses", got.AliasAttr)
+	}
+}
+
 // TestUISaveLDAPContactSettings proves the contact-sync settings persist, so an operator
 // configuring contact sync in the panel reaches the sync with a filing domain.
 func TestUISaveLDAPContactSettings(t *testing.T) {

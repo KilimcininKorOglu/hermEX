@@ -802,6 +802,10 @@ func (f *fakeDir) SetAliasesFor(username string, aliases []string) (bool, error)
 	f.setAliasesUser, f.setAliases = username, aliases
 	return !f.aliasesMissing, nil
 }
+func (f *fakeDir) SyncAliasesFor(username string, aliases []string) ([]string, bool, error) {
+	f.setAliasesUser, f.setAliases = username, aliases
+	return nil, !f.aliasesMissing, nil
+}
 func (f *fakeDir) GetForward(string) (directory.ForwardInfo, bool, error) {
 	return f.forward, f.forwardSet, nil
 }

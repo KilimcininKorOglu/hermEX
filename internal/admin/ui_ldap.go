@@ -94,6 +94,7 @@ func (s *Server) handleUISaveLDAP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	cfg.SyncFields = syncFields
+	cfg.AliasAttr = strings.TrimSpace(r.PostFormValue("alias_attr"))
 	cfg.SyncGroups = r.PostFormValue("syncgroups") != ""
 	cfg.GroupBaseDN = r.PostFormValue("group_base_dn")
 	cfg.GroupFilter = r.PostFormValue("group_filter")
