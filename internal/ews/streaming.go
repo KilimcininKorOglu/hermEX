@@ -37,11 +37,19 @@ type getStreamingEventsResponse struct {
 }
 
 type getStreamingEventsResponseMessage struct {
-	ResponseClass    string         `xml:"ResponseClass,attr"`
-	ResponseCode     string         `xml:"ResponseCode"`
-	Notifications    []notification `xml:"Notifications>Notification,omitempty"`
+	ResponseClass string `xml:"ResponseClass,attr"`
+	ResponseCode  string `xml:"ResponseCode"`
+	// Notifications is a pointer, not a slice with a nested path: a nested path
+	// writes the parent element even when the slice is empty, and a chunk that
+	// carries no notification omits the element entirely.
+	Notifications    *notifications `xml:"Notifications,omitempty"`
 	ErrorSubs        *errorSubs     `xml:"ErrorSubscriptionIds,omitempty"`
 	ConnectionStatus string         `xml:"ConnectionStatus,omitempty"`
+}
+
+// notifications is the <m:Notifications> array.
+type notifications struct {
+	Items []notification `xml:"Notification"`
 }
 
 type errorSubs struct {
@@ -275,8 +283,9 @@ func (s *Server) streamChunk(ids []string) (getStreamingEventsResponseMessage, [
 		notifs = append(notifs, pollOneForStream(id, sub))
 		live = append(live, id)
 	}
-	msg := getStreamingEventsResponseMessage{
-		ResponseClass: "Success", ResponseCode: "NoError", Notifications: notifs,
+	msg := getStreamingEventsResponseMessage{ResponseClass: "Success", ResponseCode: "NoError"}
+	if len(notifs) > 0 {
+		msg.Notifications = &notifications{Items: notifs}
 	}
 	if len(gone) > 0 {
 		msg.ResponseClass = "Error"

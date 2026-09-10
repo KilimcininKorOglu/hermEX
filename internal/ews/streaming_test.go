@@ -158,6 +158,27 @@ func TestGetStreamingEventsAllInvalid(t *testing.T) {
 	}
 }
 
+// TestStreamChunkOmitsAnEmptyNotifications proves a chunk that carries no
+// notification omits the Notifications element, which is what the operation's
+// own documented responses do. A nested slice path would write an empty
+// <Notifications> element on every opening, closing and refusal chunk.
+func TestStreamChunkOmitsAnEmptyNotifications(t *testing.T) {
+	_, ts, _ := streamServer(t)
+
+	refusal := streamPost(t, ts, []string{"Zm9vYmFyMDA="}, 1) // refused: no notification
+	if strings.Contains(refusal, "<Notifications>") {
+		t.Errorf("a refusal must carry no Notifications element: %s", refusal)
+	}
+
+	srv2, ts2, path := streamServer(t)
+	sess := &session{user: testUser, mailbox: path}
+	id := subscribe(t, srv2, sess, subscribeInner(true, "", "CreatedEvent"))
+	held := streamPost(t, ts2, []string{id}, 1)
+	if !strings.Contains(held, "<Notifications>") {
+		t.Errorf("a heartbeat chunk must still carry its Notifications element: %s", held)
+	}
+}
+
 // TestStreamChunkReportsALostSubscription is the mid-stream unit case: a
 // subscription that vanished while the connection was held is named in
 // ErrorSubscriptionIds on the very chunk that notices it, and drops out of the
@@ -178,8 +199,8 @@ func TestStreamChunkReportsALostSubscription(t *testing.T) {
 	if len(live) != 1 || live[0] != id {
 		t.Errorf("live = %v, want only the surviving subscription", live)
 	}
-	if len(msg.Notifications) != 1 {
-		t.Errorf("notifications = %d, want 1 (the surviving subscription)", len(msg.Notifications))
+	if msg.Notifications == nil || len(msg.Notifications.Items) != 1 {
+		t.Errorf("notifications = %+v, want 1 (the surviving subscription)", msg.Notifications)
 	}
 }
 
