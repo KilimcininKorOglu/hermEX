@@ -250,20 +250,114 @@ func file(st *objectstore.Store, req *oxcmail.Message, tags Tags, response int32
 	cal.Set(tags.State, asfMeeting|asfReceived)
 	cal.Set(tags.Busy, meetingBusy(response))
 
-	if existing, ok := findCalendarByUID(st, tags.UID, uidOf(req.Props, tags)); ok {
-		return existing, st.ModifyMessageProperties(existing, cal)
+	existing, ok := findCalendarByUID(st, tags.UID, uidOf(req.Props, tags))
+	if !ok {
+		// Nothing to fold an occurrence into: the attendee was invited to this
+		// instance alone, so it becomes its own appointment.
+		return st.CreateMessage(int64(mapi.PrivateFIDCalendar), &oxcmail.Message{Props: cal})
 	}
-	return st.CreateMessage(int64(mapi.PrivateFIDCalendar), &oxcmail.Message{Props: cal})
+	if done, err := foldOccurrence(st, existing, req); done {
+		return existing, err
+	}
+	return existing, st.ModifyMessageProperties(existing, cal)
+}
+
+// foldOccurrence folds an update for ONE instance of a series into the stored
+// series, rather than letting it overwrite the series it shares a UID with. A
+// series and its exceptions are one calendar object, so the update belongs inside
+// the stored object as an override; writing its properties over the master would
+// replace the series body with a single instance and move the series start.
+//
+// done is false when the request is not an occurrence update, or the stored item is
+// not a series, so the caller files it the usual way. A stored series the update
+// cannot be folded into is left untouched and the failure is recorded, because
+// destroying the series is the thing this avoids.
+func foldOccurrence(st *objectstore.Store, existing int64, req *oxcmail.Message) (done bool, err error) {
+	update, ok := icalOf(req.Props)
+	if !ok {
+		return false, nil
+	}
+	if _, isOccurrence := oxcical.OccurrenceInstant(update); !isOccurrence {
+		return false, nil
+	}
+	stored, ok := storedICal(st, existing)
+	if !ok {
+		return false, nil
+	}
+	merged, ok := oxcical.MergeOverride(stored, update)
+	if !ok {
+		st.LogSwallowedError("meeting.fold-occurrence", errFoldRefused)
+		return true, nil // the stored series stays as it is
+	}
+	return true, st.ModifyMessageProperties(existing, mapi.PropertyValues{
+		{Tag: mapi.PrIcalOriginal, Value: merged},
+	})
+}
+
+// errFoldRefused reports an occurrence update that could not be folded into the
+// series it names.
+var errFoldRefused = errors.New("meeting: occurrence update does not fold into the stored series")
+
+// icalOf returns the verbatim iCalendar a recurring scheduling message carries.
+func icalOf(props mapi.PropertyValues) ([]byte, bool) {
+	v, ok := props.Get(mapi.PrIcalOriginal)
+	if !ok {
+		return nil, false
+	}
+	raw, ok := v.([]byte)
+	return raw, ok && len(raw) > 0
+}
+
+// storedICal reads the verbatim iCalendar of a stored calendar item.
+func storedICal(st *objectstore.Store, id int64) ([]byte, bool) {
+	pv, err := st.GetMessageProperties(id, mapi.PrIcalOriginal)
+	if err != nil {
+		st.LogSwallowedError("meeting.read-stored-ical", err)
+		return nil, false
+	}
+	return icalOf(pv)
 }
 
 // removeAppointment deletes the Calendar appointment a prior accept or tentative
 // filed for the meeting request, matched by its iCalendar UID. A request with no
 // filed appointment (or no UID) removes nothing.
 func removeAppointment(st *objectstore.Store, req *oxcmail.Message, tags Tags) error {
-	if existing, ok := findCalendarByUID(st, tags.UID, uidOf(req.Props, tags)); ok {
-		return st.DeleteObject(existing)
+	existing, ok := findCalendarByUID(st, tags.UID, uidOf(req.Props, tags))
+	if !ok {
+		return nil
 	}
-	return nil
+	if done, err := cancelOccurrence(st, existing, req); done {
+		return err
+	}
+	return st.DeleteObject(existing)
+}
+
+// cancelOccurrence excludes ONE instance from a stored series instead of deleting
+// the appointment: a cancellation for one occurrence carries the series UID, so
+// deleting what that UID matches would take the whole series with it.
+//
+// done is false when the cancellation is not for one occurrence, or the stored item
+// is not a series, so the caller deletes the appointment as before.
+func cancelOccurrence(st *objectstore.Store, existing int64, req *oxcmail.Message) (done bool, err error) {
+	cancel, ok := icalOf(req.Props)
+	if !ok {
+		return false, nil
+	}
+	at, isOccurrence := oxcical.OccurrenceInstant(cancel)
+	if !isOccurrence {
+		return false, nil
+	}
+	stored, ok := storedICal(st, existing)
+	if !ok {
+		return false, nil
+	}
+	trimmed, ok := oxcical.CancelOccurrence(stored, at)
+	if !ok {
+		return false, nil // not a series: the stored item IS that occurrence
+	}
+	return true, st.ModifyMessageProperties(existing, mapi.PropertyValues{
+		{Tag: mapi.PrIcalOriginal, Value: trimmed},
+	})
 }
 
 // uidOf reads the iCalendar UID a scheduling message carries, or "".
