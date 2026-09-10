@@ -403,7 +403,7 @@ func (s *Store) applyRulesToMessage(folderID int64, m MessageInfo, rules []Rule,
 	acted := false
 	var eff InboxRuleActions
 	for _, r := range rules {
-		if !r.Enabled() {
+		if !runnableRule(r, oofActive) {
 			continue
 		}
 		if !evalRestriction(r.Condition, props) {
@@ -420,6 +420,23 @@ func (s *Store) applyRulesToMessage(folderID int64, m MessageInfo, rules []Rule,
 		}
 	}
 	return acted, eff, nil
+}
+
+// runnableRule reports whether a rule may run against a message, reading the three
+// PidTagRuleState bits that decide it (MS-OXORULE section 2.2.4):
+//
+//   - ST_ENABLED must be set, or the rule is switched off.
+//   - ST_ERROR marks a rule whose last evaluation failed. A client sets it, and the rule
+//     stays out until the client clears it, because re-running a rule known to be broken
+//     would repeat the failure on every message.
+//   - ST_ONLY_WHEN_OOF holds the rule back until the mailbox is out of office. Outlook
+//     sets it on a rule the user wants only while away, and running it otherwise would
+//     act on mail the user is there to read.
+func runnableRule(r Rule, oofActive bool) bool {
+	if !r.Enabled() || r.State&mapi.RuleStateError != 0 {
+		return false
+	}
+	return oofActive || r.State&mapi.RuleStateOnlyWhenOOF == 0
 }
 
 // applyRuleActions applies a matched rule's action blocks to a message in
