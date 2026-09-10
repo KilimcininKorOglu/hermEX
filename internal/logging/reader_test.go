@@ -67,62 +67,28 @@ func TestReaderPruneOlderThan(t *testing.T) {
 // removed while the ordinary indexes survive, so a stale window cannot override the
 // operator's pruning-based retention. Skips without the dev container's mongo.
 func TestReaderDropLegacyTTLIndex(t *testing.T) {
-	uri := os.Getenv("HERMEX_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("HERMEX_TEST_MONGO_URI not set (needs the dev container's mongo)")
-	}
+	uri := mustMongoURI(t)
 	const db = "hermex_logttldroptest"
 	bg := context.Background()
-
-	raw, err := mongo.Connect(options.Client().ApplyURI(uri))
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	defer func() { _ = raw.Disconnect(bg) }()
-	_ = raw.Database(db).Drop(bg)
-	defer func() { _ = raw.Database(db).Drop(bg) }()
+	raw := openTestMongo(t, bg, uri, db)
 
 	coll := raw.Database(db).Collection("logs")
 	// A legacy TTL index plus an ordinary filter index, the way an older build left it.
-	if _, err := coll.Indexes().CreateMany(bg, []mongo.IndexModel{
+	_, err := coll.Indexes().CreateMany(bg, []mongo.IndexModel{
 		{Keys: bson.D{{Key: "ts", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(86400)},
 		{Keys: bson.D{{Key: "subsystem", Value: 1}, {Key: "ts", Value: -1}}},
-	}); err != nil {
-		t.Fatalf("seed indexes: %v", err)
-	}
+	})
+	mustNoErr(t, err, "seed indexes")
 
 	reader, err := NewReader(uri, db)
-	if err != nil {
-		t.Fatalf("NewReader: %v", err)
-	}
+	mustNoErr(t, err, "NewReader")
 	defer reader.Close()
 
-	if err := reader.DropLegacyTTLIndex(bg); err != nil {
-		t.Fatalf("DropLegacyTTLIndex: %v", err)
-	}
+	mustNoErr(t, reader.DropLegacyTTLIndex(bg), "DropLegacyTTLIndex")
 	// Idempotent: a second call with no TTL index left must also succeed.
-	if err := reader.DropLegacyTTLIndex(bg); err != nil {
-		t.Fatalf("DropLegacyTTLIndex (second call): %v", err)
-	}
+	mustNoErr(t, reader.DropLegacyTTLIndex(bg), "DropLegacyTTLIndex (second call)")
 
-	cur, err := coll.Indexes().List(bg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var idx []bson.M
-	if err := cur.All(bg, &idx); err != nil {
-		t.Fatal(err)
-	}
-	hasSubsystem := false
-	for _, m := range idx {
-		if _, ok := m["expireAfterSeconds"]; ok {
-			t.Errorf("a TTL index survived the drop: %v", m)
-		}
-		if name, _ := m["name"].(string); name == "subsystem_1_ts_-1" {
-			hasSubsystem = true
-		}
-	}
-	if !hasSubsystem {
-		t.Errorf("the ordinary subsystem index was dropped; indexes = %v", idx)
-	}
+	idx := listIndexes(t, bg, coll)
+	wantNoTTLIndex(t, idx, "the indexes after the drop")
+	wantTrue(t, hasIndexNamed(idx, "subsystem_1_ts_-1"), "the ordinary subsystem index survived the drop")
 }

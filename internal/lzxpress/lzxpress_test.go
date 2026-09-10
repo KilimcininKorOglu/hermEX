@@ -71,18 +71,22 @@ func TestCompressDeterministicVectors(t *testing.T) {
 // TestRoundTrip confirms Compress emits a stream the (oracle-anchored)
 // Decompress reads back exactly, and that compressible inputs actually shrink.
 func TestRoundTrip(t *testing.T) {
-	seq := make([]byte, 256)
-	for i := range seq {
-		seq[i] = byte(i)
+	// The inputs a compressor must actually shrink; the rest are degenerate sizes
+	// or barely compressible, so only the round-trip is asserted for them.
+	compressible := map[string]bool{"run300a": true, "run70000a": true, "mixed": true, "seqseq": true}
+	for name, in := range roundTripInputs() {
+		comp, ok := checkRoundTrip(t, name, in)
+		if ok && compressible[name] {
+			checkShrinks(t, name, in, comp)
+		}
 	}
-	// deterministic pseudo-random buffer (incompressible-ish)
-	rnd := make([]byte, 5000)
-	s := uint32(0x12345678)
-	for i := range rnd {
-		s = s*1664525 + 1013904223
-		rnd[i] = byte(s >> 24)
-	}
-	inputs := map[string][]byte{
+}
+
+// roundTripInputs is the round-trip input set: the degenerate sizes, runs that
+// exercise the long length escapes, and a barely compressible buffer.
+func roundTripInputs() map[string][]byte {
+	seq := byteSequence()
+	return map[string][]byte{
 		"empty":      nil,
 		"one":        {0x42},
 		"two":        {0x01, 0x02},
@@ -91,23 +95,51 @@ func TestRoundTrip(t *testing.T) {
 		"run70000a":  bytes.Repeat([]byte("a"), 70000), // exercises the >=255 uint16 length path
 		"seqseq":     append(append([]byte{}, seq...), seq...),
 		"mixed":      bytes.Repeat([]byte("Hello, hello, HELLO world! "), 64),
-		"random5000": rnd,
+		"random5000": pseudoRandom(5000),
 	}
-	for name, in := range inputs {
-		comp := Compress(in)
-		got, err := Decompress(comp, len(in))
-		if err != nil {
-			t.Errorf("%s: Decompress(Compress) error: %v", name, err)
-			continue
-		}
-		if !bytes.Equal(got, in) {
-			t.Errorf("%s: round-trip mismatch (%d in, %d comp, %d out)", name, len(in), len(comp), len(got))
-		}
-		if name == "run300a" || name == "run70000a" || name == "mixed" || name == "seqseq" {
-			if len(comp) >= len(in) {
-				t.Errorf("%s: compressed %d >= input %d (expected to shrink)", name, len(comp), len(in))
-			}
-		}
+}
+
+// byteSequence returns the 256 distinct byte values in order.
+func byteSequence() []byte {
+	seq := make([]byte, 256)
+	for i := range seq {
+		seq[i] = byte(i)
+	}
+	return seq
+}
+
+// pseudoRandom returns a deterministic buffer with no repeated runs to match.
+func pseudoRandom(n int) []byte {
+	out := make([]byte, n)
+	s := uint32(0x12345678)
+	for i := range out {
+		s = s*1664525 + 1013904223
+		out[i] = byte(s >> 24)
+	}
+	return out
+}
+
+// checkRoundTrip proves Decompress reads back exactly what Compress emitted. It
+// returns the compressed form and whether the stream decoded at all.
+func checkRoundTrip(t *testing.T, name string, in []byte) ([]byte, bool) {
+	t.Helper()
+	comp := Compress(in)
+	got, err := Decompress(comp, len(in))
+	if err != nil {
+		t.Errorf("%s: Decompress(Compress) error: %v", name, err)
+		return comp, false
+	}
+	if !bytes.Equal(got, in) {
+		t.Errorf("%s: round-trip mismatch (%d in, %d comp, %d out)", name, len(in), len(comp), len(got))
+	}
+	return comp, true
+}
+
+// checkShrinks proves a compressible input came out smaller than it went in.
+func checkShrinks(t *testing.T, name string, in, comp []byte) {
+	t.Helper()
+	if len(comp) >= len(in) {
+		t.Errorf("%s: compressed %d >= input %d (expected to shrink)", name, len(comp), len(in))
 	}
 }
 

@@ -106,63 +106,33 @@ func TestMongoSinkWriteNeverBlocks(t *testing.T) {
 // since retention is enforced by the admin's pruning, not a TTL. It skips without
 // the env, so the host quick-feedback run is unaffected.
 func TestMongoSinkIntegration(t *testing.T) {
-	uri := os.Getenv("HERMEX_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("HERMEX_TEST_MONGO_URI not set (needs the dev container's mongo)")
-	}
+	uri := mustMongoURI(t)
 	const db = "hermex_logtest"
 	bg := context.Background()
-
-	raw, err := mongo.Connect(options.Client().ApplyURI(uri))
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	defer func() { _ = raw.Disconnect(bg) }()
-	_ = raw.Database(db).Drop(bg) // clean slate
-	defer func() { _ = raw.Database(db).Drop(bg) }()
+	raw := openTestMongo(t, bg, uri, db)
 
 	sink, err := NewMongoSink(uri, db, "")
-	if err != nil {
-		t.Fatalf("NewMongoSink: %v", err)
-	}
+	mustNoErr(t, err, "NewMongoSink")
 	sink.Write(Event{
 		Time: time.Now().UTC(), Level: LevelInfo, Subsystem: IMAP, Name: "auth.ok",
 		User: "alice@hermex.test", RemoteAddr: "10.0.0.1", Fields: Fields{"folder": "INBOX"},
 	})
 	ctx, cancel := context.WithTimeout(bg, 5*time.Second)
 	defer cancel()
-	if err := sink.Close(ctx); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	mustNoErr(t, sink.Close(ctx), "Close")
 
 	coll := raw.Database(db).Collection("logs")
 	var got mongoDoc
-	if err := coll.FindOne(ctx, bson.D{{Key: "event", Value: "auth.ok"}}).Decode(&got); err != nil {
-		t.Fatalf("read the event back: %v", err)
-	}
-	if got.User != "alice@hermex.test" || got.Subsystem != "imap" || got.Level != "info" {
-		t.Errorf("stored doc = %+v, want imap/info/alice", got)
-	}
-	if got.Fields["folder"] != "INBOX" {
-		t.Errorf("stored fields = %v, want folder=INBOX", got.Fields)
-	}
+	err = coll.FindOne(ctx, bson.D{{Key: "event", Value: "auth.ok"}}).Decode(&got)
+	mustNoErr(t, err, "read the event back")
+	wantEq(t, got.User, "alice@hermex.test", "the stored user")
+	wantEq(t, got.Subsystem, "imap", "the stored subsystem")
+	wantEq(t, got.Level, "info", "the stored level")
+	wantEq(t, got.Fields["folder"], any("INBOX"), "the stored folder field")
 
-	cur, err := coll.Indexes().List(ctx)
-	if err != nil {
-		t.Fatalf("list indexes: %v", err)
-	}
-	var idx []bson.M
-	if err := cur.All(ctx, &idx); err != nil {
-		t.Fatal(err)
-	}
-	if len(idx) < 4 {
-		t.Errorf("got %d indexes, want >= 4 (3 filter indexes + _id, no TTL)", len(idx))
-	}
-	for _, m := range idx {
-		if _, ok := m["expireAfterSeconds"]; ok {
-			t.Errorf("a TTL index exists: %v, retention is prune-based, no TTL must be created", m)
-		}
-	}
+	idx := listIndexes(t, ctx, coll)
+	wantTrue(t, len(idx) >= 4, "the 3 filter indexes plus _id exist")
+	wantNoTTLIndex(t, idx, "the sink's indexes")
 }
 
 // TestMongoSinkCreatesNoTTLIndex proves the sink never creates a TTL index:
