@@ -1,0 +1,13 @@
+-- Per-domain catch-all mailbox: the account that receives mail addressed to a local part
+-- this domain does not have. NULL, the default, keeps the current behaviour, which refuses
+-- an unknown recipient with a 550.
+--
+-- The column holds a users.id and carries no foreign key, because the read joins users and
+-- an id left behind by a deleted account therefore resolves to no catch-all at all. The
+-- account deletion path clears the column as well, so the admin panel never offers a
+-- deleted account as the catch-all.
+--
+-- The catch-all applies to DELIVERY only. Authentication and every address-to-mailbox
+-- lookup outside delivery stay exact, or an unknown address would log in with the
+-- catch-all account's password. Idempotent ADD COLUMN (MariaDB ADD COLUMN IF NOT EXISTS).
+ALTER TABLE domains ADD COLUMN IF NOT EXISTS catchall_user_id BIGINT DEFAULT NULL;

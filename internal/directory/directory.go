@@ -31,6 +31,15 @@ type Accounts interface {
 	Resolve(address string) (mailboxPath string, ok bool)
 }
 
+// CatchAllResolver optionally resolves an address no account owns to the mailbox its
+// domain collects unknown recipients in. It is a DELIVERY-only lookup: a directory that
+// answers here must still refuse the same address everywhere else, or an unknown local part
+// would authenticate as the catch-all account and read its mailbox. A directory that does
+// not implement it leaves an unknown recipient refused.
+type CatchAllResolver interface {
+	ResolveCatchAll(address string) (mailboxPath string, ok bool)
+}
+
 // Authenticator verifies a user's credentials and yields their mailbox store
 // path. ok is false when the user is unknown or the password is wrong.
 type Authenticator interface {

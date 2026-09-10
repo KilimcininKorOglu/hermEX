@@ -116,6 +116,8 @@ func (s *Server) handleUIDomainDetail(w http.ResponseWriter, r *http.Request) {
 		"AVScanOutbound":     avOut,
 	}
 	maps.Copy(data, s.dkimData(dd.Name))
+	catchAll, _, _ := s.dir.GetDomainCatchAll(dd.Name)
+	data["CatchAll"] = catchAll
 	gw, gwFound, gwErr := s.dir.GetSMTPGateway(dd.Name)
 	data["Gateway"] = gatewayViewOf(gw, gwFound && gwErr == nil)
 	data["GatewayOverride"] = gwFound && gwErr == nil

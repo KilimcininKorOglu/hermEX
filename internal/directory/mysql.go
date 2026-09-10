@@ -1019,6 +1019,10 @@ func (d *SQLDirectory) deleteUserRows(username string) error {
 		// fetchmail.mailbox is likewise a plain string; removing the entries
 		// cascades their fetchmail_seen rows.
 		`DELETE FROM fetchmail WHERE mailbox = ?`,
+		// domains.catchall_user_id carries no FK, so clear it here; a domain left
+		// pointing at a deleted account would offer it in the panel.
+		`UPDATE domains SET catchall_user_id = NULL
+		   WHERE catchall_user_id = (SELECT id FROM users WHERE username = ?)`,
 		// Last: the user row, whose foreign keys carry away everything keyed to it.
 		`DELETE FROM users WHERE username = ?`,
 	}

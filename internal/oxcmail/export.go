@@ -384,8 +384,11 @@ func writeThreadFields(b *bytes.Buffer, msg *Message) {
 // preservedHeaderPrefixes are the inbound header families Export re-emits verbatim
 // from the stored arrival headers, because the structured export reconstructs the
 // message from MAPI properties and does not otherwise reproduce them. X-Spam-*
-// carries the anti-spam verdict, which a client filters on.
-var preservedHeaderPrefixes = []string{"x-spam-"}
+// carries the anti-spam verdict, which a client filters on. Delivered-To names the
+// envelope recipient, which for a message filed into a catch-all mailbox appears in no
+// other header, so losing it would leave the reader unable to tell which address the
+// message reached.
+var preservedHeaderPrefixes = []string{"x-spam-", "delivered-to"}
 
 // isPreservedHeader reports whether a header name belongs to a preserved family.
 func isPreservedHeader(name string) bool {

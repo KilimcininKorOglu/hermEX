@@ -43,6 +43,8 @@ type Directory interface {
 	UpdateDomain(id int64, u directory.DomainUpdate) (bool, error)
 	PurgeDomain(domainID int64, deleteFiles bool) (bool, error)
 	GetDomainAVScan(domain string) (inbound, outbound bool, err error)
+	GetDomainCatchAll(domain string) (address string, found bool, err error)
+	SetDomainCatchAll(domain, address string) error
 	SetDomainAVScan(domain string, inbound, outbound bool) error
 	ListQuarantine(domainIDs []int64, all bool, limit int) ([]directory.QuarantineRecord, error)
 	CreateUser(username, password, maildir string) (int64, error)
@@ -474,6 +476,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/dkim/enable", s.handleUIDKIMEnable)
 	mux.HandleFunc("POST /admin/ui/domains/{domainID}/dkim/delete", s.handleUIDKIMDelete)
 	mux.HandleFunc("GET /admin/ui/domains/{domainID}/dkim/output", s.handleUIDKIMOutput)
+	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/catchall", s.handleUISaveDomainCatchAll)
 	mux.HandleFunc("POST /admin/ui/domains/{domainID}/gateway", s.handleUISaveDomainGateway)
 	mux.HandleFunc("POST /admin/ui/domains/{domainID}/gateway/delete", s.handleUIDeleteDomainGateway)
 	mux.HandleFunc("GET /admin/ui/domains/{domainID}/dnscheck", s.handleUIDomainDNS)

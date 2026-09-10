@@ -140,6 +140,19 @@
 <button type="submit">Save antivirus</button>
 </form>
 
+<h2>Catch-all mailbox</h2>
+<p class="hint">Mail addressed to a local part this domain does not have is delivered to this mailbox instead of being refused. It applies to delivery only: an unknown address still cannot sign in, and it appears in no address book. The delivered message carries a Delivered-To header naming the address it was sent to. Leave it unset to keep refusing unknown recipients.</p>
+<form class="catchall-form" hx-put="/admin/ui/domains/{{.Domain.ID}}/catchall" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>Mailbox
+<select name="catchall">
+<option value="">(none, refuse unknown recipients)</option>
+{{range .DomainUsers}}<option value="{{.Username}}"{{if eq .Username $.CatchAll}} selected{{end}}>{{.Username}}</option>{{end}}
+</select>
+</label>
+<button type="submit">Save catch-all</button>
+</form>
+
 <h2>Outbound gateway</h2>
 <p class="hint">Mail whose sender is in this domain is handed to this server instead of the global gateway. Leave it unset to follow the global setting.</p>
 {{template "domain-gateway-panel" .}}

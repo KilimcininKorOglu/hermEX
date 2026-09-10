@@ -166,6 +166,10 @@ func logPassFailure(pass, subject string, fields logging.Fields, cause any) {
 type target struct {
 	addr string
 	path string
+	// catchAll marks a recipient no account owns, filed into its domain's catch-all
+	// mailbox. The delivered message records the address, because that address need
+	// not appear in any header of the message itself.
+	catchAll bool
 }
 
 // Mail records the envelope sender. On an authenticated submission it first
@@ -316,6 +320,14 @@ func (s *session) routeRecipient(to, notify, orcpt string) error {
 	if path, ok := s.accounts.Resolve(to); ok {
 		return s.routeLocal(to, path)
 	}
+	// A domain may collect the local parts it does not have in one mailbox. This is
+	// the only place that fallback applies: every other address lookup, authentication
+	// above all, stays exact.
+	if catch, ok := s.accounts.(directory.CatchAllResolver); ok {
+		if path, ok := catch.ResolveCatchAll(to); ok {
+			return s.routeCatchAll(to, path)
+		}
+	}
 	if s.authUser == "" {
 		return &smtp.PermError{Message: fmt.Sprintf("relay denied for <%s>", to)}
 	}
@@ -352,6 +364,17 @@ func (s *session) routeLocal(to, path string) error {
 		return &smtp.TempError{Message: "4.7.1 greylisted, please retry shortly"}
 	}
 	s.targets = append(s.targets, target{addr: to, path: path})
+	return nil
+}
+
+// routeCatchAll accepts a recipient no account owns, filing it into its domain's catch-all
+// mailbox. It takes the same quota and greylist decisions as an ordinary local recipient,
+// and marks the target so the delivered message records the address it was sent to.
+func (s *session) routeCatchAll(to, path string) error {
+	if err := s.routeLocal(to, path); err != nil {
+		return err
+	}
+	s.targets[len(s.targets)-1].catchAll = true
 	return nil
 }
 
@@ -546,6 +569,7 @@ func (s *session) recordVerdict(v antispam.Verdict, ip net.IP, reasons string, r
 func (s *session) deliverTargets(sc scoring, received time.Time) error {
 	for _, t := range s.targets {
 		tRaw, tFolder := s.recipientFiling(t, sc)
+		tRaw = markCatchAll(t, tRaw)
 		if err := deliver(s.accounts, s.from, t.addr, t.path, tRaw, received, tFolder); err != nil {
 			s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "delivery.fail", User: t.addr, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from}, Err: err.Error()})
 			// A store failure is transient (the mailbox is there, the disk or the
@@ -557,6 +581,33 @@ func (s *session) deliverTargets(sc scoring, received time.Time) error {
 		s.logger.Emit(logging.Event{Level: logging.LevelInfo, Subsystem: logging.MTA, Name: "delivery.ok", User: t.addr, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from}})
 	}
 	return nil
+}
+
+// markCatchAll prepends a Delivered-To header naming the envelope recipient to a message
+// filed into a catch-all mailbox, because that address owns no account and need not appear
+// in any header the sender wrote. An ordinary recipient is returned unchanged, so the
+// header marks exactly the deliveries whose address would otherwise be lost.
+//
+// An address that is not printable ASCII is left unmarked: a byte below space would end the
+// header line and let the rest of the address start a header of the sender's choosing.
+func markCatchAll(t target, raw []byte) []byte {
+	if !t.catchAll || !printableAddress(t.addr) {
+		return raw
+	}
+	return append([]byte("Delivered-To: "+t.addr+"\r\n"), raw...)
+}
+
+// printableAddress reports whether an address is safe to place in a header value.
+func printableAddress(addr string) bool {
+	if addr == "" {
+		return false
+	}
+	for i := range len(addr) {
+		if addr[i] <= ' ' || addr[i] > '~' {
+			return false
+		}
+	}
+	return true
 }
 
 // recipientFiling applies the per-recipient overrides, which re-decide only this
