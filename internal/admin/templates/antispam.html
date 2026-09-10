@@ -29,6 +29,9 @@
 <h2>Outbound delivery retry</h2>
 {{template "relay-panel" .}}
 
+<h2>Outbound gateway</h2>
+{{template "gateway-panel" .}}
+
 <h2>Quarantine digest</h2>
 {{template "digest-panel" .}}
 </main>
@@ -83,6 +86,34 @@
 <button type="submit">Save settings</button>
 </form>
 </div>{{end}}
+
+{{define "gateway-panel"}}<div id="gateway-panel">
+{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+<p>Outgoing mail is normally delivered straight to each recipient domain's mail exchangers. With a gateway configured, every message is handed to that one server instead, which is what a network that blocks outbound port 25 requires. A domain can override this on its own page.</p>
+<p class="hint">MTA-STS, DANE and TLS reporting describe a recipient domain's own mail exchangers, so they do not apply to a gateway connection; the transport below is what protects it.</p>
+<form hx-post="/admin/ui/antispam/gateway" hx-target="#gateway-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+{{template "gateway-fields" .Gateway}}
+<button type="submit">Save gateway</button>
+</form>
+<form hx-post="/admin/ui/antispam/gateway/delete" hx-target="#gateway-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<button type="submit" class="danger" hx-confirm="Remove the outbound gateway? Mail is delivered directly to each recipient's mail exchangers again.">Remove gateway</button>
+</form>
+</div>{{end}}
+
+{{define "gateway-fields"}}
+<label class="check"><input type="checkbox" name="enabled" value="1"{{if .Enabled}} checked{{end}}> Send outgoing mail through this gateway</label>
+<p>Host: <input type="text" name="host" value="{{.Host}}" size="30" placeholder="smtp.provider.example"></p>
+<p>Port: <input type="number" name="port" value="{{.Port}}" min="1" max="65535"></p>
+<p>Transport:
+<select name="encryption">
+<option value="starttls"{{if eq .Encryption "starttls"}} selected{{end}}>STARTTLS (required)</option>
+<option value="tls"{{if eq .Encryption "tls"}} selected{{end}}>Implicit TLS</option>
+<option value="none"{{if eq .Encryption "none"}} selected{{end}}>None (cleartext)</option>
+</select>
+</p>
+<p>Username: <input type="text" name="username" value="{{.Username}}" size="30"></p>
+<p>Password: <input type="password" name="password" value="" size="30" autocomplete="new-password"> <span class="hint">{{if .HasPassword}}A password is stored; leave empty to keep it.{{else}}No password stored.{{end}}</span></p>
+{{end}}
 
 {{define "outbound-panel"}}<div id="outbound-panel">
 {{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}

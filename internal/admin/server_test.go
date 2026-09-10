@@ -66,6 +66,7 @@ type fakeDir struct {
 	autoReplyFound     bool
 	relay              directory.RelaySettings
 	relayFound         bool
+	gateways           map[string]directory.SMTPGateway
 	digest             directory.DigestSettings
 	digestFound        bool
 	dkimSelector       string
@@ -577,6 +578,22 @@ func (f *fakeDir) GetOutboundSettings() (directory.OutboundSettings, bool, error
 }
 func (f *fakeDir) GetRelaySettings() (directory.RelaySettings, bool, error) {
 	return f.relay, f.relayFound, nil
+}
+func (f *fakeDir) GetSMTPGateway(domain string) (directory.SMTPGateway, bool, error) {
+	g, ok := f.gateways[domain]
+	return g, ok, nil
+}
+func (f *fakeDir) SetSMTPGateway(domain string, g directory.SMTPGateway) error {
+	if f.gateways == nil {
+		f.gateways = map[string]directory.SMTPGateway{}
+	}
+	f.gateways[domain] = g
+	return nil
+}
+func (f *fakeDir) DeleteSMTPGateway(domain string) (bool, error) {
+	_, ok := f.gateways[domain]
+	delete(f.gateways, domain)
+	return ok, nil
 }
 func (f *fakeDir) SetRelaySettings(s directory.RelaySettings) error {
 	f.relay, f.relayFound = s, true

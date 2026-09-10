@@ -116,6 +116,9 @@ func (s *Server) handleUIDomainDetail(w http.ResponseWriter, r *http.Request) {
 		"AVScanOutbound":     avOut,
 	}
 	maps.Copy(data, s.dkimData(dd.Name))
+	gw, gwFound, gwErr := s.dir.GetSMTPGateway(dd.Name)
+	data["Gateway"] = gatewayViewOf(gw, gwFound && gwErr == nil)
+	data["GatewayOverride"] = gwFound && gwErr == nil
 	// Prescribe the DNS records the domain owner must publish, reusing the DKIM
 	// record already merged above (empty when no key exists yet) and adding the
 	// MTA-STS/TLSRPT records when publishing is enabled.

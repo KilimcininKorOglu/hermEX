@@ -94,6 +94,7 @@ func (s *Server) antispamPageData(r *http.Request, notice string) map[string]any
 	s.addOutboundSettings(data)
 	data["AutoReplyPrefix"] = s.autoReplyPrefix()
 	s.addRelaySettings(data)
+	s.addGatewaySettings(data)
 	s.addDigestSettings(data)
 	return data
 }

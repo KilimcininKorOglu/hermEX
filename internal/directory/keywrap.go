@@ -22,8 +22,9 @@ const wrapPrefix = "enc:v1:"
 // value moved from one key column to another fails to open rather than being
 // silently accepted as the other kind of key.
 const (
-	wrapDKIM = "dkim-private-key"
-	wrapTLS  = "tls-private-key"
+	wrapDKIM    = "dkim-private-key"
+	wrapTLS     = "tls-private-key"
+	wrapGateway = "smtp-gateway-password"
 )
 
 // SetKeySecret installs the at-rest wrapping secret for the private keys this

@@ -471,6 +471,7 @@ func (d *mtaDaemon) relayLoop() lifecycle.Component {
 	// Outbound delivery retry policy (base backoff and max attempts): read at startup
 	// and re-read every minute so an admin's change applies without a restart.
 	applyRelaySettings(dir, logger, relayWorker)
+	applyGatewaySettings(dir, logger, relayWorker)
 	go runRelayMaintenance(dir, logger, relayWorker)
 	// Joined on shutdown for the same reason as the send-later sweep: an in-flight
 	// pass that settles a delivered recipient must finish before spool.Close runs,
@@ -765,13 +766,51 @@ func applyRelaySettings(dir *directory.SQLDirectory, logger *logging.Logger, w *
 	w.SetRetryPolicy(time.Duration(s.BackoffSeconds)*time.Second, s.MaxAttempts)
 }
 
-// runRelayMaintenance re-applies the outbound retry policy every minute so an admin
-// change takes effect without a restart. It runs until the process exits.
+// applyGatewaySettings reads the stored outbound gateway (smart-host) configuration and
+// installs it on the relay worker: the row keyed by the empty domain is the global default
+// and every other row overrides it for that sending domain. A read error leaves the
+// installed configuration unchanged, so a settings failure never silently returns outbound
+// mail to direct delivery.
+func applyGatewaySettings(dir *directory.SQLDirectory, logger *logging.Logger, w *relay.Worker) {
+	stored, err := dir.ListSMTPGateways()
+	if err != nil {
+		logging.SettingsReadFailed(logger, daemonName, "smtp gateway", "leaving the outbound gateway unchanged", err)
+		return
+	}
+	var global *relay.Gateway
+	perDomain := make(map[string]relay.Gateway, len(stored))
+	for domain, g := range stored {
+		gw := relayGateway(g)
+		if domain == directory.GlobalGateway {
+			global = &gw
+			continue
+		}
+		perDomain[domain] = gw
+	}
+	w.SetGateways(global, perDomain)
+}
+
+// relayGateway converts a stored gateway into the relay's own shape, translating the
+// encryption mode into the two transport flags the worker acts on.
+func relayGateway(g directory.SMTPGateway) relay.Gateway {
+	return relay.Gateway{
+		Host:            g.Host,
+		Port:            g.Port,
+		ImplicitTLS:     g.Encryption == directory.GatewayImplicitTLS,
+		RequireSTARTTLS: g.Encryption == directory.GatewaySTARTTLS,
+		Username:        g.Username,
+		Password:        g.Password,
+	}
+}
+
+// runRelayMaintenance re-applies the outbound retry policy and gateway configuration every
+// minute so an admin change takes effect without a restart. It runs until the process exits.
 func runRelayMaintenance(dir *directory.SQLDirectory, logger *logging.Logger, w *relay.Worker) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for range tick.C {
 		applyRelaySettings(dir, logger, w)
+		applyGatewaySettings(dir, logger, w)
 	}
 }
 

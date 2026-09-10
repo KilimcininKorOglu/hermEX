@@ -138,6 +138,9 @@ type Directory interface {
 	SetOutboundSettings(directory.OutboundSettings) error
 	GetAutoReplySettings() (directory.AutoReplySettings, bool, error)
 	SetAutoReplySettings(directory.AutoReplySettings) error
+	GetSMTPGateway(domain string) (directory.SMTPGateway, bool, error)
+	SetSMTPGateway(domain string, g directory.SMTPGateway) error
+	DeleteSMTPGateway(domain string) (bool, error)
 	GetRelaySettings() (directory.RelaySettings, bool, error)
 	SetRelaySettings(directory.RelaySettings) error
 	GetDigestSettings() (directory.DigestSettings, bool, error)
@@ -417,6 +420,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/antispam/outbound", s.handleUISaveOutbound)
 	mux.HandleFunc("POST /admin/ui/antispam/autoreply", s.handleUISaveAutoReply)
 	mux.HandleFunc("POST /admin/ui/antispam/relay", s.handleUISaveRelay)
+	mux.HandleFunc("POST /admin/ui/antispam/gateway", s.handleUISaveGateway)
+	mux.HandleFunc("POST /admin/ui/antispam/gateway/delete", s.handleUIDeleteGateway)
 	mux.HandleFunc("POST /admin/ui/antispam/digest", s.handleUISaveDigest)
 	mux.HandleFunc("GET /admin/ui/spam-history", s.handleUISpamHistory)
 	mux.HandleFunc("POST /admin/ui/spam-history/retention", s.handleUISaveSpamRetention)
@@ -468,6 +473,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/dkim/enable", s.handleUIDKIMEnable)
 	mux.HandleFunc("POST /admin/ui/domains/{domainID}/dkim/delete", s.handleUIDKIMDelete)
 	mux.HandleFunc("GET /admin/ui/domains/{domainID}/dkim/output", s.handleUIDKIMOutput)
+	mux.HandleFunc("POST /admin/ui/domains/{domainID}/gateway", s.handleUISaveDomainGateway)
+	mux.HandleFunc("POST /admin/ui/domains/{domainID}/gateway/delete", s.handleUIDeleteDomainGateway)
 	mux.HandleFunc("GET /admin/ui/domains/{domainID}/dnscheck", s.handleUIDomainDNS)
 	mux.HandleFunc("POST /admin/ui/domains/{domainID}/purge", s.handleUIPurgeDomain)
 	mux.HandleFunc("GET /admin/ui/aliases", s.handleUIAliases)

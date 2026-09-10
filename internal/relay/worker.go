@@ -12,6 +12,7 @@ import (
 	"net/textproto"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -116,6 +117,64 @@ type Worker struct {
 	// restart; 0 means "fall back to the Backoff/MaxAttempts fields, then the default".
 	backoffOverride     atomic.Int64
 	maxAttemptsOverride atomic.Int64
+
+	// GatewayDialer opens a connection to a gateway's "host:port"; nil dials TCP with
+	// the worker's dial timeout. Injected so tests can redirect a gateway to a local
+	// listener. It is separate from Dialer because that one takes a mail exchanger
+	// host and supplies port 25 itself.
+	GatewayDialer func(addr string) (net.Conn, error)
+
+	// gateways holds the operator's outbound gateway configuration, installed by
+	// SetGateways. It is read atomically by the single Run goroutine, so the MTA's
+	// settings poll can change the gateway while delivery runs, with no restart.
+	gateways atomic.Pointer[gatewaySet]
+}
+
+// Gateway is an outbound SMTP gateway (smart-host): the server outgoing mail is handed to
+// instead of the recipient domain's own mail exchangers. The transport is expressed as two
+// flags rather than a mode name, so this package needs no vocabulary from the settings
+// store: ImplicitTLS wraps the connection in TLS from the first byte, RequireSTARTTLS
+// demands a validated upgrade on a plain connection, and both false sends in the clear.
+// Username empty means no AUTH.
+type Gateway struct {
+	Host            string
+	Port            int
+	ImplicitTLS     bool
+	RequireSTARTTLS bool
+	Username        string
+	Password        string
+}
+
+// gatewaySet is one installed configuration: the default every sending domain uses and the
+// per-domain overrides, keyed by lower-cased sending domain.
+type gatewaySet struct {
+	global    *Gateway
+	perDomain map[string]Gateway
+}
+
+// SetGateways installs the outbound gateway configuration: global is the default (nil for
+// none) and perDomain overrides it for mail whose envelope sender is in that domain. It is
+// safe to call concurrently with Run. Calling it with a nil global and no overrides returns
+// every delivery to the direct mail-exchanger path.
+func (w *Worker) SetGateways(global *Gateway, perDomain map[string]Gateway) {
+	w.gateways.Store(&gatewaySet{global: global, perDomain: perDomain})
+}
+
+// gatewayFor returns the gateway a message from senderDomain must be delivered through. A
+// domain override wins over the global gateway; an empty sender domain (a bounce carries a
+// null sender) uses the global one.
+func (w *Worker) gatewayFor(senderDomain string) (Gateway, bool) {
+	set := w.gateways.Load()
+	if set == nil {
+		return Gateway{}, false
+	}
+	if gw, ok := set.perDomain[strings.ToLower(senderDomain)]; ok {
+		return gw, true
+	}
+	if set.global == nil {
+		return Gateway{}, false
+	}
+	return *set.global, true
 }
 
 // SetRetryPolicy installs the operator's retry tuning: the base backoff before the
@@ -463,6 +522,12 @@ func (w *Worker) deliver(it Item) error {
 	if domain == "" {
 		return fmt.Errorf("recipient %q has no domain", it.Recipient)
 	}
+	// An outbound gateway replaces the whole mail-exchanger path: the operator has
+	// decided every message leaves through this one server, so there is no MX to
+	// resolve and no recipient-domain TLS policy that could describe it.
+	if gw, ok := w.gatewayFor(domainPart(it.From)); ok {
+		return w.sendVia(gw, it)
+	}
 	hosts, err := w.mailExchangers(domain)
 	if err != nil {
 		return err
@@ -543,6 +608,72 @@ func (w *Worker) send(host string, it Item, requireTLS bool) error {
 		return err
 	}
 	return sendMessage(c, it, host)
+}
+
+// sendVia delivers one item through the configured outbound gateway. The recipient
+// domain's MTA-STS policy, its TLSA records and TLS-RPT reporting are all deliberately not
+// consulted here: they describe that domain's own mail exchangers, and this connection goes
+// to the operator's relay instead. Transport security comes from the gateway's own setting,
+// and starttls is both mandatory and certificate-validated, so a gateway that stops
+// offering it fails the delivery rather than sending the mail in the clear.
+func (w *Worker) sendVia(gw Gateway, it Item) error {
+	addr := net.JoinHostPort(gw.Host, strconv.Itoa(gw.Port))
+	conn, err := w.dialGateway(addr)
+	if err != nil {
+		return err
+	}
+	_ = conn.SetDeadline(time.Now().Add(sessionTimeout))
+	if gw.ImplicitTLS {
+		conn = tls.Client(conn, &tls.Config{ServerName: gw.Host, MinVersion: tls.VersionTLS12})
+	}
+	c, err := smtp.NewClient(conn, gw.Host)
+	if err != nil {
+		return errors.Join(err, conn.Close())
+	}
+	defer c.Close()
+
+	if err := c.Hello(w.heloName(conn.LocalAddr())); err != nil {
+		return err
+	}
+	if err := gatewayTLS(c, gw); err != nil {
+		return err
+	}
+	if err := gatewayAuth(c, gw); err != nil {
+		return err
+	}
+	return sendMessage(c, it, gw.Host)
+}
+
+// dialGateway opens the connection to a gateway address, using the injected dialer when a
+// test supplied one.
+func (w *Worker) dialGateway(addr string) (net.Conn, error) {
+	if w.GatewayDialer != nil {
+		return w.GatewayDialer(addr)
+	}
+	return net.DialTimeout("tcp", addr, dialTimeout)
+}
+
+// gatewayTLS upgrades a starttls gateway connection, requiring the upgrade and validating
+// the certificate. An implicit-TLS connection is already encrypted and a none gateway is a
+// deliberate cleartext choice, so both are left alone.
+func gatewayTLS(c *smtp.Client, gw Gateway) error {
+	if !gw.RequireSTARTTLS {
+		return nil
+	}
+	if ok, _ := c.Extension("STARTTLS"); !ok {
+		return fmt.Errorf("gateway %s does not offer STARTTLS", gw.Host)
+	}
+	return c.StartTLS(&tls.Config{ServerName: gw.Host, MinVersion: tls.VersionTLS12})
+}
+
+// gatewayAuth authenticates to the gateway when a username is configured. PLAIN is refused
+// by net/smtp on an unencrypted connection, which is the behaviour wanted: a none gateway
+// with credentials would otherwise put the password on the wire in the clear.
+func gatewayAuth(c *smtp.Client, gw Gateway) error {
+	if gw.Username == "" {
+		return nil
+	}
+	return c.Auth(smtp.PlainAuth("", gw.Username, gw.Password, gw.Host))
 }
 
 // negotiateTLS applies the transport security the recipient's domain calls for.
