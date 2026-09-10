@@ -13,12 +13,14 @@ package dkimsign
 import (
 	"bytes"
 	"crypto"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"net/mail"
 	"strings"
 
@@ -138,11 +140,33 @@ func parsePrivateKey(privPEM []byte) (crypto.Signer, error) {
 	return signer, nil
 }
 
-// GenerateKey creates a fresh RSA-2048 DKIM keypair and returns the PEM-encoded private
-// key to store and the TXT record value to publish at {selector}._domainkey.{domain}.
-// Generating a key does not enable signing: the operator publishes the record, then
-// enables the key as a separate step.
-func GenerateKey() (privPEM []byte, dnsTXT string, err error) {
+// The DKIM key algorithms hermEX can generate, named as they appear in the k= tag of the
+// published TXT record (RFC 6376 section 3.6.1). RSA is the interoperable default; Ed25519
+// (RFC 8463) produces a far shorter record but is not yet verified by every receiver, so
+// it is a deliberate operator choice rather than the default.
+const (
+	KeyRSA     = "rsa"
+	KeyEd25519 = "ed25519"
+)
+
+// GenerateKey creates a fresh DKIM keypair of the given algorithm (KeyRSA when empty) and
+// returns the PEM-encoded private key to store and the TXT record value to publish at
+// {selector}._domainkey.{domain}. Generating a key does not enable signing: the operator
+// publishes the record, then enables the key as a separate step.
+func GenerateKey(keyType string) (privPEM []byte, dnsTXT string, err error) {
+	switch keyType {
+	case "", KeyRSA:
+		return generateRSAKey()
+	case KeyEd25519:
+		return generateEd25519Key()
+	default:
+		return nil, "", fmt.Errorf("dkimsign: unsupported key type %q", keyType)
+	}
+}
+
+// generateRSAKey mints an RSA-2048 keypair. The public key travels in the record as a
+// base64 PKIX DER structure, which is what a verifier parses for k=rsa.
+func generateRSAKey() (privPEM []byte, dnsTXT string, err error) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, "", err
@@ -153,4 +177,32 @@ func GenerateKey() (privPEM []byte, dnsTXT string, err error) {
 		return nil, "", err
 	}
 	return privPEM, "v=DKIM1; k=rsa; p=" + base64.StdEncoding.EncodeToString(pubDER), nil
+}
+
+// generateEd25519Key mints an Ed25519 keypair. Unlike RSA, RFC 8463 puts the RAW 32-byte
+// public key in p=, not a DER structure, and a verifier rejects any other length.
+func generateEd25519Key() (privPEM []byte, dnsTXT string, err error) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, "", err
+	}
+	privDER, err := x509.MarshalPKCS8PrivateKey(priv)
+	if err != nil {
+		return nil, "", err
+	}
+	privPEM = pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privDER})
+	return privPEM, "v=DKIM1; k=ed25519; p=" + base64.StdEncoding.EncodeToString(pub), nil
+}
+
+// PublicKeyPayload returns the p= value of a generated TXT record, the base64 public key
+// on its own. It parses what GenerateKey produced, so the record grammar stays in one
+// package. An empty string means the record carries no p= tag.
+func PublicKeyPayload(dnsTXT string) string {
+	for tag := range strings.SplitSeq(dnsTXT, ";") {
+		tag = strings.TrimSpace(tag)
+		if after, ok := strings.CutPrefix(tag, "p="); ok {
+			return after
+		}
+	}
+	return ""
 }

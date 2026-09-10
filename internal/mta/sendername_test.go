@@ -72,7 +72,7 @@ func (k senderKeys) DKIMKey(domain string) ([]byte, string, bool, error) {
 // a non-ASCII (Turkish) name round-trips through the signed bytes. The rewrite touches
 // the display name only, so DKIM/SPF/DMARC alignment (the domain) is unchanged.
 func TestRewriteFromThenSignVerifies(t *testing.T) {
-	privPEM, dnsTXT, err := dkimsign.GenerateKey()
+	privPEM, dnsTXT, err := dkimsign.GenerateKey(dkimsign.KeyRSA)
 	if err != nil {
 		t.Fatal(err)
 	}

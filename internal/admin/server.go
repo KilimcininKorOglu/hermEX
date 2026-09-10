@@ -464,6 +464,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/domains/{domainID}/dkim/generate", s.handleUIDKIMGenerate)
 	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/dkim/enable", s.handleUIDKIMEnable)
 	mux.HandleFunc("POST /admin/ui/domains/{domainID}/dkim/delete", s.handleUIDKIMDelete)
+	mux.HandleFunc("GET /admin/ui/domains/{domainID}/dkim/output", s.handleUIDKIMOutput)
 	mux.HandleFunc("GET /admin/ui/domains/{domainID}/dnscheck", s.handleUIDomainDNS)
 	mux.HandleFunc("POST /admin/ui/domains/{domainID}/purge", s.handleUIPurgeDomain)
 	mux.HandleFunc("GET /admin/ui/aliases", s.handleUIAliases)

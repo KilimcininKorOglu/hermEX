@@ -36,9 +36,10 @@ type dnsReport struct {
 // checkDomainDNS resolves the mail-relevant DNS records for a domain and reports
 // what was found. It is a read-only diagnostic over the supplied resolver, it
 // reports the live records rather than comparing against an expected target, so
-// every result reflects real DNS state.
-func checkDomainDNS(ctx context.Context, r dnsResolver, domain, hostname string) dnsReport {
-	c := &dnsChecker{ctx: ctx, r: r, domain: domain, rep: dnsReport{Domain: domain}}
+// every result reflects real DNS state. selector is the domain's stored DKIM selector,
+// so the check queries the name the domain's own key publishes under.
+func checkDomainDNS(ctx context.Context, r dnsResolver, domain, hostname, selector string) dnsReport {
+	c := &dnsChecker{ctx: ctx, r: r, domain: domain, selector: selector, rep: dnsReport{Domain: domain}}
 	c.checkReachability(hostname)
 	c.checkMX()
 	c.checkAuth()
@@ -49,10 +50,11 @@ func checkDomainDNS(ctx context.Context, r dnsResolver, domain, hostname string)
 
 // dnsChecker accumulates a domain's health report one record class at a time.
 type dnsChecker struct {
-	ctx    context.Context
-	r      dnsResolver
-	domain string
-	rep    dnsReport
+	ctx      context.Context
+	r        dnsResolver
+	domain   string
+	selector string
+	rep      dnsReport
 }
 
 // add records one result.
@@ -115,11 +117,15 @@ func (c *dnsChecker) checkMX() {
 }
 
 // checkAuth reports the SPF/DKIM/DMARC triad. The DKIM signing key is published as
-// a TXT record at the server's selector, which prescribeDomainDNS instructs the
+// a TXT record at the domain's own selector, which prescribeDomainDNS instructs the
 // owner to create, so the health check verifies the same record it prescribes.
 func (c *dnsChecker) checkAuth() {
 	c.txt("SPF", c.domain, "v=spf1", "no v=spf1 TXT record")
-	dkimName := dkimSelector + "._domainkey." + c.domain
+	selector := c.selector
+	if selector == "" {
+		selector = dkimSelector
+	}
+	dkimName := selector + "._domainkey." + c.domain
 	c.txt("DKIM", dkimName, "v=DKIM1", "no v=DKIM1 TXT record at "+dkimName)
 	c.txt("DMARC", "_dmarc."+c.domain, "v=DMARC1", "no _dmarc TXT record")
 }
@@ -222,7 +228,7 @@ func (s *Server) handleGetDomainDNS(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	writeJSON(w, checkDomainDNS(ctx, s.resolver, name, s.paths.ServerHostname()))
+	writeJSON(w, checkDomainDNS(ctx, s.resolver, name, s.paths.ServerHostname(), s.dkimSelectorOf(name)))
 }
 
 // handleUIDomainDNS runs the DNS health check and returns the report partial for
@@ -237,5 +243,5 @@ func (s *Server) handleUIDomainDNS(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	s.render(w, "dns-report", checkDomainDNS(ctx, s.resolver, name, s.paths.ServerHostname()))
+	s.render(w, "dns-report", checkDomainDNS(ctx, s.resolver, name, s.paths.ServerHostname(), s.dkimSelectorOf(name)))
 }

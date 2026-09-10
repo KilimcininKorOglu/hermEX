@@ -81,7 +81,7 @@ func reportItem(rep dnsReport, label string) (dnsCheckItem, bool) {
 // TestCheckDomainDNS proves the check reports each resolved record (with the
 // trailing dot stripped) and flags a missing one rather than erroring.
 func TestCheckDomainDNS(t *testing.T) {
-	rep := checkDomainDNS(context.Background(), acmeResolver(), "acme.test", "mail.acme.test")
+	rep := checkDomainDNS(context.Background(), acmeResolver(), "acme.test", "mail.acme.test", dkimSelector)
 
 	want := map[string]struct {
 		ok     bool
@@ -117,10 +117,29 @@ func TestCheckDomainDNS(t *testing.T) {
 	}
 }
 
+// TestCheckDomainDNSUsesTheStoredSelector is the load-bearing test for a custom selector:
+// the check must query the name the domain's own key publishes under, not the default one,
+// or a domain that renamed its selector reads as having no DKIM record at all.
+func TestCheckDomainDNSUsesTheStoredSelector(t *testing.T) {
+	r := acmeResolver()
+	r.txt["s2024._domainkey.acme.test"] = []string{"v=DKIM1; k=ed25519; p=AAAA"}
+	delete(r.txt, "hermex._domainkey.acme.test")
+
+	rep := checkDomainDNS(context.Background(), r, "acme.test", "mail.acme.test", "s2024")
+
+	it, ok := reportItem(rep, "DKIM")
+	if !ok {
+		t.Fatal("report missing the DKIM item")
+	}
+	if !it.OK {
+		t.Errorf("DKIM = not found (%q), want the record at the stored selector", it.Detail)
+	}
+}
+
 // TestCheckDomainDNSAllMissing proves a domain with no records reports every item
 // as missing rather than failing.
 func TestCheckDomainDNSAllMissing(t *testing.T) {
-	rep := checkDomainDNS(context.Background(), fakeResolver{}, "ghost.test", "mail.ghost.test")
+	rep := checkDomainDNS(context.Background(), fakeResolver{}, "ghost.test", "mail.ghost.test", dkimSelector)
 	if len(rep.Items) == 0 {
 		t.Fatal("empty report")
 	}

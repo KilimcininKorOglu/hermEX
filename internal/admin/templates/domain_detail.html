@@ -176,13 +176,21 @@
 {{if .DKIMHasKey}}
 <p>Status: <strong>{{if .DKIMEnabled}}enabled, outbound mail from this domain is signed{{else}}not signing, key generated, publish the record then enable{{end}}</strong> (selector {{.DKIMSelector}}).</p>
 <p>Publish this TXT record:</p>
-<p class="hint">Name: <code>{{.DKIMRecordName}}</code></p>
-<pre class="dns-record">{{.DKIMPublicTXT}}</pre>
+<label>Output mode
+<select name="mode" hx-get="/admin/ui/domains/{{.Domain.ID}}/dkim/output" hx-target="#dkim-output" hx-swap="outerHTML">
+<option value="record">DNS record line</option>
+<option value="txt">TXT value</option>
+<option value="key">Public key only</option>
+</select>
+</label>
+{{template "dkim-output" .}}
 <form hx-put="/admin/ui/domains/{{.Domain.ID}}/dkim/enable" hx-target="#dkim-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <input type="hidden" name="enabled" value="{{if .DKIMEnabled}}0{{else}}1{{end}}">
 <button type="submit">{{if .DKIMEnabled}}Disable signing{{else}}Enable signing{{end}}</button>
 </form>
 <form hx-post="/admin/ui/domains/{{.Domain.ID}}/dkim/generate" hx-target="#dkim-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>Key type <select name="keytype"><option value="rsa">rsa</option><option value="ed25519">ed25519</option></select></label>
+<label>Selector <input type="text" name="selector" value="{{.DKIMSelector}}" placeholder="hermex"></label>
 <button type="submit" hx-confirm="Regenerate this domain's DKIM key? Signing stops until you publish the new record and enable it again.">Regenerate key</button>
 </form>
 <form hx-post="/admin/ui/domains/{{.Domain.ID}}/dkim/delete" hx-target="#dkim-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
@@ -191,9 +199,16 @@
 {{else}}
 <p>No DKIM key for this domain.</p>
 <form hx-post="/admin/ui/domains/{{.Domain.ID}}/dkim/generate" hx-target="#dkim-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>Key type <select name="keytype"><option value="rsa">rsa</option><option value="ed25519">ed25519</option></select></label>
+<label>Selector <input type="text" name="selector" placeholder="hermex"></label>
 <button type="submit">Generate key</button>
 </form>
 {{end}}
+</div>{{end}}
+
+{{define "dkim-output"}}<div id="dkim-output">
+<p class="hint">Name: <code>{{.DKIMRecordName}}</code></p>
+<pre class="dns-record">{{.DKIMOutput}}</pre>
 </div>{{end}}
 
 {{define "dns-report"}}<table class="grid">
