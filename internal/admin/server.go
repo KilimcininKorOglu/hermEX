@@ -129,6 +129,8 @@ type Directory interface {
 	SetSizeLimits(directory.SizeLimits) error
 	GetHTTPRateLimitSettings() (directory.HTTPRateLimitSettings, bool, error)
 	SetHTTPRateLimitSettings(directory.HTTPRateLimitSettings) error
+	GetConnLimitSettings() (directory.ConnLimitSettings, bool, error)
+	SetConnLimitSettings(directory.ConnLimitSettings) error
 	GetLoginLockoutSettings() (directory.LoginLockoutSettings, bool, error)
 	SetLoginLockoutSettings(directory.LoginLockoutSettings) error
 	GetFetchSettings() (directory.FetchSettings, bool, error)
@@ -433,6 +435,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/ui/limits", s.handleUILimits)
 	mux.HandleFunc("POST /admin/ui/limits", s.handleUISaveLimits)
 	mux.HandleFunc("POST /admin/ui/limits/requestrate", s.handleUISaveHTTPRateLimit)
+	mux.HandleFunc("POST /admin/ui/limits/connections", s.handleUISaveConnLimit)
 	mux.HandleFunc("POST /admin/ui/limits/loginlockout", s.handleUISaveLoginLockout)
 	mux.HandleFunc("POST /admin/ui/limits/fetchpolicy", s.handleUISaveFetchPolicy)
 	mux.HandleFunc("GET /admin/ui/settings", s.handleUISettings)

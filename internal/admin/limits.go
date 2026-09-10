@@ -39,6 +39,7 @@ func (s *Server) limitsPageData(r *http.Request, notice string) map[string]any {
 	data := map[string]any{"Nav": "limits", "Notice": notice, "CSRF": csrfCookieValue(r)}
 	s.fillSizeLimits(data)
 	s.fillHTTPRateLimit(data)
+	s.fillConnLimit(data)
 	s.fillLoginLockout(data)
 	s.fillFetchPolicy(data)
 	return data
@@ -130,6 +131,51 @@ func (s *Server) handleUISaveHTTPRateLimit(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	s.render(w, "http-ratelimit-panel", s.limitsPageData(r, "Request-rate settings saved. Every HTTP daemon applies them within a minute, no restart."))
+}
+
+// defaultConnMaxTotal and defaultConnMaxPerClient mirror the limiter's own built-in
+// values (1000 connections per daemon, 20 per client address), shown on the page
+// until an operator saves one.
+const (
+	defaultConnMaxTotal     = 1000
+	defaultConnMaxPerClient = 20
+)
+
+// fillConnLimit sets the concurrent-connection cap's toggle and tunables on a
+// page-data map, using the stored values or the limiter's built-in defaults
+// (disabled). Shared by the Limits page and the unified Settings page.
+func (s *Server) fillConnLimit(data map[string]any) {
+	data["ConnLimitEnabled"] = false
+	data["ConnMaxTotal"], data["ConnMaxPerClient"] = defaultConnMaxTotal, defaultConnMaxPerClient
+	if st, found, err := s.dir.GetConnLimitSettings(); err == nil && found {
+		data["ConnLimitEnabled"] = st.Enabled
+		data["ConnMaxTotal"] = st.MaxTotal
+		data["ConnMaxPerClient"] = st.MaxPerClient
+	}
+}
+
+// handleUISaveConnLimit persists the concurrent-connection cap. Every IMAP, POP3
+// and SMTP daemon applies the change within about a minute, no restart. A value
+// below 1 is rejected so the cap is never configured to admit no connection.
+func (s *Server) handleUISaveConnLimit(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	total, perClient := formInt(r, "conn_max_total"), formInt(r, "conn_max_per_client")
+	if total < 1 || perClient < 1 {
+		s.render(w, "conn-limit-panel", s.limitsPageData(r, "Both connection caps must be at least 1; settings not saved."))
+		return
+	}
+	st := directory.ConnLimitSettings{
+		Enabled:      r.FormValue("enabled") == "1",
+		MaxTotal:     total,
+		MaxPerClient: perClient,
+	}
+	if err := s.dir.SetConnLimitSettings(st); err != nil {
+		s.render(w, "conn-limit-panel", s.limitsPageData(r, s.notice("Could not save the connection caps.", err)))
+		return
+	}
+	s.render(w, "conn-limit-panel", s.limitsPageData(r, "Connection caps saved. Every IMAP, POP3 and SMTP daemon applies them within a minute, no restart."))
 }
 
 // fillSizeLimits sets each protocol's cap (in whole MB) on a page-data map, using the

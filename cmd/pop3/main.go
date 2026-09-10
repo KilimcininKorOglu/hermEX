@@ -16,6 +16,7 @@ import (
 
 	"hermex/internal/authlimit"
 	"hermex/internal/config"
+	"hermex/internal/connlimit"
 	"hermex/internal/directory"
 	"hermex/internal/health"
 	"hermex/internal/ldapauth"
@@ -41,6 +42,13 @@ func main() {
 	// loosen it when legitimate users are being locked out, without a restart.
 	authlimit.Apply("hermex-pop3", logger, srv.Limiter, dir.GetLoginLockoutSettings)
 	go authlimit.RunMaintenance("hermex-pop3", logger, srv.Limiter, dir.GetLoginLockoutSettings)
+	// Concurrent-connection cap: read the stored tuning at startup and re-read it
+	// every minute, so an operator can bound the daemon during a connection flood
+	// without a restart. It starts disabled until an operator turns it on.
+	conns := connlimit.New()
+	connlimit.Apply("hermex-pop3", logger, conns, dir.GetConnLimitSettings)
+	go connlimit.RunMaintenance("hermex-pop3", logger, conns, dir.GetConnLimitSettings)
+	srv.SetConnLimiter(conns)
 	provider := startTLS(cfg, dir, logger, srv)
 	srv.AddListener(ln)
 	log.Printf("hermex-pop3 listening on %s", addr)

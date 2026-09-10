@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"hermex/internal/authlimit"
+	"hermex/internal/connlimit"
 	"hermex/internal/directory"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
@@ -86,6 +87,30 @@ func (s *Server) SetMaxLiteralSize(n int64) {
 		n = 0
 	}
 	s.maxLiteral.Store(n)
+}
+
+// SetConnLimiter caps how many connections this daemon serves at once, in total
+// and per client address. A refused connection is told with an untagged BYE, the
+// greeting RFC 3501 gives a server that will not serve the connection, and then
+// closed. A nil limiter leaves the server uncapped.
+func (s *Server) SetConnLimiter(l *connlimit.Limiter) {
+	if l == nil {
+		return
+	}
+	gate, refuse := connlimit.Gate(l, "* BYE hermEX: too many connections\r\n", s.logConnRefused)
+	s.conns.SetGate(gate, refuse)
+}
+
+// logConnRefused records a connection the cap refused, naming which cap it was so
+// an operator can tell a full daemon from one busy client.
+func (s *Server) logConnRefused(remote string, why connlimit.Reason) {
+	s.Logger.Emit(logging.Event{
+		Level:      logging.LevelWarn,
+		Subsystem:  logging.IMAP,
+		Name:       "conn.refused",
+		RemoteAddr: remote,
+		Fields:     logging.Fields{"cap": string(why)},
+	})
 }
 
 // event emits a log event for this connection through the server's logger, tagged

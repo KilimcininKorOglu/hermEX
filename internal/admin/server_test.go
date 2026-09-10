@@ -50,6 +50,8 @@ type fakeDir struct {
 	rateLimitFound     bool
 	httpRateLimit      directory.HTTPRateLimitSettings
 	httpRateLimitFound bool
+	connLimit          directory.ConnLimitSettings
+	connLimitFound     bool
 	loginLockout       directory.LoginLockoutSettings
 	loginLockoutFound  bool
 	messageSize        directory.MessageSizeSettings
@@ -529,6 +531,13 @@ func (f *fakeDir) GetHTTPRateLimitSettings() (directory.HTTPRateLimitSettings, b
 }
 func (f *fakeDir) SetHTTPRateLimitSettings(s directory.HTTPRateLimitSettings) error {
 	f.httpRateLimit, f.httpRateLimitFound = s, true
+	return nil
+}
+func (f *fakeDir) GetConnLimitSettings() (directory.ConnLimitSettings, bool, error) {
+	return f.connLimit, f.connLimitFound, nil
+}
+func (f *fakeDir) SetConnLimitSettings(s directory.ConnLimitSettings) error {
+	f.connLimit, f.connLimitFound = s, true
 	return nil
 }
 func (f *fakeDir) GetLoginLockoutSettings() (directory.LoginLockoutSettings, bool, error) {

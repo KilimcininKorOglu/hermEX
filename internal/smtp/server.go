@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"hermex/internal/connlimit"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 )
@@ -97,6 +98,32 @@ func (s *Server) Serve(l net.Listener) error { return s.conns.Serve(l, s.handle)
 
 // Shutdown stops accepting and drains in-flight sessions within ctx's deadline.
 func (s *Server) Shutdown(ctx context.Context) error { return s.conns.Shutdown(ctx) }
+
+// SetConnLimiter caps how many connections this daemon serves at once, in total
+// and per client address. A refused connection is told with a 421 greeting, the
+// reply RFC 5321 gives when the service is not available and the channel is
+// closing, so a sending MTA retries later instead of bouncing the mail. A nil
+// limiter leaves the server uncapped.
+func (s *Server) SetConnLimiter(l *connlimit.Limiter) {
+	if l == nil {
+		return
+	}
+	line := fmt.Sprintf("421 %s Service not available, too many connections\r\n", s.hostname())
+	gate, refuse := connlimit.Gate(l, line, s.logConnRefused)
+	s.conns.SetGate(gate, refuse)
+}
+
+// logConnRefused records a connection the cap refused, naming which cap it was so
+// an operator can tell a full daemon from one busy client.
+func (s *Server) logConnRefused(remote string, why connlimit.Reason) {
+	s.Logger.Emit(logging.Event{
+		Level:      logging.LevelWarn,
+		Subsystem:  logging.SMTP,
+		Name:       "conn.refused",
+		RemoteAddr: remote,
+		Fields:     logging.Fields{"cap": string(why)},
+	})
+}
 
 func (s *Server) hostname() string {
 	if s.Hostname != "" {

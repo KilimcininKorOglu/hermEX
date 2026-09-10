@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"hermex/internal/authlimit"
+	"hermex/internal/connlimit"
 	"hermex/internal/directory"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
@@ -49,6 +50,30 @@ func (s *Server) Serve(l net.Listener) error { return s.conns.Serve(l, s.handle)
 
 // Shutdown stops accepting and drains in-flight sessions within ctx's deadline.
 func (s *Server) Shutdown(ctx context.Context) error { return s.conns.Shutdown(ctx) }
+
+// SetConnLimiter caps how many connections this daemon serves at once, in total
+// and per client address. A refused connection is told with an -ERR greeting, the
+// refusal RFC 1939 gives a server that will not serve the connection, and then
+// closed. A nil limiter leaves the server uncapped.
+func (s *Server) SetConnLimiter(l *connlimit.Limiter) {
+	if l == nil {
+		return
+	}
+	gate, refuse := connlimit.Gate(l, "-ERR too many connections\r\n", s.logConnRefused)
+	s.conns.SetGate(gate, refuse)
+}
+
+// logConnRefused records a connection the cap refused, naming which cap it was so
+// an operator can tell a full daemon from one busy client.
+func (s *Server) logConnRefused(remote string, why connlimit.Reason) {
+	s.Logger.Emit(logging.Event{
+		Level:      logging.LevelWarn,
+		Subsystem:  logging.POP3,
+		Name:       "conn.refused",
+		RemoteAddr: remote,
+		Fields:     logging.Fields{"cap": string(why)},
+	})
+}
 
 // ew wraps the response bufio.Writer and records the first write error. The POP3
 // response helpers stay linear (no error return threaded through every line), and

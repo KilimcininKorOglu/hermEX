@@ -17,6 +17,7 @@ import (
 
 	"hermex/internal/authlimit"
 	"hermex/internal/config"
+	"hermex/internal/connlimit"
 	"hermex/internal/directory"
 	"hermex/internal/health"
 	"hermex/internal/imap"
@@ -54,6 +55,13 @@ func main() {
 	// loosen it when legitimate users are being locked out, without a restart.
 	authlimit.Apply("hermex-imap", logger, srv.Limiter, dir.GetLoginLockoutSettings)
 	go authlimit.RunMaintenance("hermex-imap", logger, srv.Limiter, dir.GetLoginLockoutSettings)
+	// Concurrent-connection cap: read the stored tuning at startup and re-read it
+	// every minute, so an operator can bound the daemon during a connection flood
+	// without a restart. It starts disabled until an operator turns it on.
+	conns := connlimit.New()
+	connlimit.Apply("hermex-imap", logger, conns, dir.GetConnLimitSettings)
+	go connlimit.RunMaintenance("hermex-imap", logger, conns, dir.GetConnLimitSettings)
+	srv.SetConnLimiter(conns)
 	srv.SetNotify(notify.EnableConsumer(cfg.NotifyURL, cfg.NotifySecret, logger))
 	// IMAP literal size cap: read at startup and re-read every minute so an admin's
 	// change applies without a restart; 0 keeps the built-in default.

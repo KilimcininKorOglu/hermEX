@@ -22,6 +22,22 @@ type ConnGroup struct {
 	listeners []net.Listener
 	draining  bool
 	handlers  sync.WaitGroup
+	gate      Gate
+	refuse    func(net.Conn)
+}
+
+// Gate decides whether a newly accepted connection may be served. It returns the
+// release to call once the handler has returned, and ok=false to refuse the
+// connection. A nil gate admits everything.
+type Gate func(net.Conn) (release func(), ok bool)
+
+// SetGate installs the admission gate and the refusal writer used when the gate
+// says no. refuse owns the connection it is given: it writes whatever the protocol
+// says and closes it. Call SetGate before Start.
+func (g *ConnGroup) SetGate(gate Gate, refuse func(net.Conn)) {
+	g.mu.Lock()
+	g.gate, g.refuse = gate, refuse
+	g.mu.Unlock()
 }
 
 // AddListener registers l to be served by Start. Call it before Start.
@@ -71,13 +87,50 @@ func (g *ConnGroup) Serve(l net.Listener, handle func(net.Conn)) error {
 			g.mu.Unlock()
 			return nc.Close() // rejecting a late connection during shutdown; nil unless the close failed
 		}
+		gate, refuse := g.gate, g.refuse
 		g.handlers.Add(1)
 		g.mu.Unlock()
+
+		release, admitted := admit(gate, nc)
+		if !admitted {
+			// The refusal writes to the connection, so it runs on its own goroutine:
+			// a client that never reads would otherwise stall the accept loop. It is
+			// still tracked, so Shutdown waits for it.
+			go func() {
+				defer g.handlers.Done()
+				refuseConn(refuse, nc)
+			}()
+			continue
+		}
 		go func() {
 			defer g.handlers.Done()
+			defer release()
 			handle(nc)
 		}()
 	}
+}
+
+// admit asks the gate whether a connection may be served. A nil gate admits
+// everything with a no-op release.
+func admit(gate Gate, nc net.Conn) (release func(), ok bool) {
+	if gate == nil {
+		return func() {}, true
+	}
+	release, ok = gate(nc)
+	if ok && release == nil {
+		release = func() {}
+	}
+	return release, ok
+}
+
+// refuseConn hands a refused connection to the refusal writer, and closes it
+// itself when there is none.
+func refuseConn(refuse func(net.Conn), nc net.Conn) {
+	if refuse == nil {
+		_ = nc.Close()
+		return
+	}
+	refuse(nc)
 }
 
 func (g *ConnGroup) isDraining() bool {

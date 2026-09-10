@@ -7,6 +7,8 @@
 {{template "limits-panel" .}}
 <h1>Request rate</h1>
 {{template "http-ratelimit-panel" .}}
+<h1>Concurrent connections</h1>
+{{template "conn-limit-panel" .}}
 <h1>Login lockout</h1>
 {{template "loginlockout-panel" .}}
 <h1>Mail fetching</h1>
@@ -38,6 +40,17 @@
 <label class="check"><input type="checkbox" name="enabled" value="1"{{if .HTTPRateEnabled}} checked{{end}}> Enable request rate limiting</label>
 <p>Burst (requests per window): <input type="number" name="http_burst" value="{{.HTTPRateBurst}}" min="1"></p>
 <p>Window (seconds): <input type="number" name="http_window" value="{{.HTTPRateWindow}}" min="1"></p>
+<button type="submit">Save settings</button>
+</form>
+</div>{{end}}
+
+{{define "conn-limit-panel"}}<div id="conn-limit-panel">
+{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+<p>The connection cap is <strong>{{if .ConnLimitEnabled}}on{{else}}off{{end}}</strong>. When on, a daemon serves at most the total number of connections at once, and one client address holds at most its own share. A refused connection is told why in the protocol's own greeting (IMAP <code>* BYE</code>, POP3 <code>-ERR</code>, SMTP <code>421</code>, which makes a sending server retry later rather than bounce the mail) and then closed. It covers IMAP, POP3 and SMTP; each daemon counts on its own. Keep the per-client figure generous: a desktop mail client holds several connections at once, and one address is often a whole office behind a NAT.</p>
+<form hx-post="/admin/ui/limits/connections" hx-target="#conn-limit-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label class="check"><input type="checkbox" name="enabled" value="1"{{if .ConnLimitEnabled}} checked{{end}}> Enable the connection cap</label>
+<p>Connections per daemon: <input type="number" name="conn_max_total" value="{{.ConnMaxTotal}}" min="1"></p>
+<p>Connections per client address: <input type="number" name="conn_max_per_client" value="{{.ConnMaxPerClient}}" min="1"></p>
 <button type="submit">Save settings</button>
 </form>
 </div>{{end}}

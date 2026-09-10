@@ -22,6 +22,7 @@ import (
 	"hermex/internal/antispam"
 	"hermex/internal/authlimit"
 	"hermex/internal/config"
+	"hermex/internal/connlimit"
 	"hermex/internal/dane"
 	"hermex/internal/directory"
 	"hermex/internal/dkimsign"
@@ -329,6 +330,14 @@ func (d *mtaDaemon) startServer(scorer *antispam.Scorer, lim limiters, addr stri
 	// The built-in ceiling holds from the first accepted connection, so a settings
 	// read that fails at startup still leaves inbound DATA bounded.
 	srv.SetMaxSize(directory.DefaultMaxInboundBytes)
+	// Concurrent-connection cap: read the stored tuning at startup and re-read it
+	// every minute, so an operator can bound the daemon during a connection flood
+	// without a restart. It starts disabled until an operator turns it on, and a
+	// refused sender is answered 421 so the mail is retried rather than bounced.
+	conns := connlimit.New()
+	connlimit.Apply(daemonName, logger, conns, dir.GetConnLimitSettings)
+	go connlimit.RunMaintenance(daemonName, logger, conns, dir.GetConnLimitSettings)
+	srv.SetConnLimiter(conns)
 	// TLS certificates come from the provider: the config-file cert as a fallback,
 	// overridden by an admin-uploaded cert the provider polls for, so a renewal
 	// applies without a restart.
