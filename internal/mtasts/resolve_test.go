@@ -29,33 +29,29 @@ func TestResolverLookup(t *testing.T) {
 	}
 
 	p, err := r.Lookup("example.com")
-	if err != nil || p == nil || p.Mode != ModeEnforce {
-		t.Fatalf("Lookup(policy domain) = %v, %v", p, err)
+	mustNoErr(t, err, "Lookup(policy domain)")
+	if p == nil {
+		t.Fatal("Lookup(policy domain) returned no policy")
 	}
+	wantEq(t, p.Mode, ModeEnforce, "the policy mode")
+
 	// Cached for max_age: a second lookup touches no network.
-	if _, err := r.Lookup("example.com"); err != nil {
-		t.Fatal(err)
-	}
-	if txtCalls != 1 || fetchCalls != 1 {
-		t.Errorf("second lookup re-probed: txt=%d fetch=%d, want 1/1", txtCalls, fetchCalls)
-	}
+	_, err = r.Lookup("example.com")
+	mustNoErr(t, err, "the second lookup")
+	wantEq(t, txtCalls, 1, "the TXT probes after a cached lookup")
+	wantEq(t, fetchCalls, 1, "the policy fetches after a cached lookup")
 
 	// A domain without a TXT record yields no policy and never fetches.
-	if p, err := r.Lookup("plain.example"); err != nil || p != nil {
-		t.Errorf("Lookup(no policy) = %v, %v; want nil, nil", p, err)
-	}
-	if fetchCalls != 1 {
-		t.Errorf("a domain with no TXT record still fetched: %d", fetchCalls)
-	}
+	plain, err := r.Lookup("plain.example")
+	mustNoErr(t, err, "Lookup(no policy)")
+	wantNoPolicy(t, plain, "the policy of a domain with no TXT record")
+	wantEq(t, fetchCalls, 1, "the policy fetches after a domain with no TXT record")
 
 	// After max_age the policy is re-fetched.
 	now = now.Add(86401 * time.Second)
-	if _, err := r.Lookup("example.com"); err != nil {
-		t.Fatal(err)
-	}
-	if fetchCalls != 2 {
-		t.Errorf("expired policy not re-fetched: fetch=%d, want 2", fetchCalls)
-	}
+	_, err = r.Lookup("example.com")
+	mustNoErr(t, err, "the lookup after max_age")
+	wantEq(t, fetchCalls, 2, "the policy fetches once max_age expired")
 }
 
 // TestResolverFetchError proves a fetch failure is surfaced as transient, not

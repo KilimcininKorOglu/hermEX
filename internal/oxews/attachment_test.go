@@ -2,7 +2,6 @@ package oxews
 
 import (
 	"encoding/xml"
-	"strings"
 	"testing"
 
 	"hermex/internal/mapi"
@@ -39,15 +38,9 @@ func TestEmbeddedAttachmentRoutedAsItemAttachment(t *testing.T) {
 	if list == nil {
 		t.Fatal("BuildAttachments returned nil")
 	}
-	if len(list.Items) != 1 {
-		t.Fatalf("ItemAttachments = %d, want 1", len(list.Items))
-	}
-	if len(list.Files) != 1 {
-		t.Errorf("FileAttachments = %d, want 1", len(list.Files))
-	}
-	if ct := list.Items[0].ContentType; ct != "message/rfc822" {
-		t.Errorf("ItemAttachment ContentType = %q, want message/rfc822", ct)
-	}
+	mustCount(t, len(list.Items), 1, "the ItemAttachments")
+	wantEq(t, len(list.Files), 1, "the FileAttachments")
+	wantEq(t, list.Items[0].ContentType, "message/rfc822", "the ItemAttachment ContentType")
 	if list.Items[0].Message != nil {
 		t.Error("metadata-list ItemAttachment must not carry the nested item")
 	}
@@ -57,26 +50,18 @@ func TestEmbeddedAttachmentRoutedAsItemAttachment(t *testing.T) {
 	if ia.Message == nil {
 		t.Fatal("BuildItemAttachmentContent produced no nested message item")
 	}
-	if ia.Message.Subject != "Inner Subject" {
-		t.Errorf("nested item subject = %q, want \"Inner Subject\"", ia.Message.Subject)
+	wantEq(t, ia.Message.Subject, "Inner Subject", "the nested item subject")
+	if ia.Message.Body == nil {
+		t.Fatal("the nested item carries no body")
 	}
-	if ia.Message.Body == nil || !strings.Contains(ia.Message.Body.Content, "Inner body line.") {
-		t.Errorf("nested item body = %+v, want it to contain \"Inner body line.\"", ia.Message.Body)
-	}
+	wantContains(t, ia.Message.Body.Content, "Inner body line.", "the nested item body")
 
 	// Wire form: <ItemAttachment> with a nested <Message>, not a <FileAttachment>.
 	out, err := xml.Marshal(struct {
 		XMLName xml.Name `xml:"Attachments"`
 		AttachmentList
 	}{AttachmentList: AttachmentList{Items: []ItemAttachment{ia}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	xmlStr := string(out)
-	if !strings.Contains(xmlStr, "<ItemAttachment>") {
-		t.Errorf("marshaled attachment is not an ItemAttachment: %s", xmlStr)
-	}
-	if !strings.Contains(xmlStr, "Inner Subject") {
-		t.Errorf("nested item subject missing from wire form: %s", xmlStr)
-	}
+	mustNoErr(t, err, "marshal the attachment list")
+	wantContains(t, string(out), "<ItemAttachment>", "the marshaled attachment")
+	wantContains(t, string(out), "Inner Subject", "the marshaled nested item")
 }

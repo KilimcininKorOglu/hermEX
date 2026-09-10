@@ -147,24 +147,9 @@ func (o orderedMaildirs) Maildirs() ([]string, error) { return o.paths, nil }
 func TestSweepOutboxesStopsOnShutdown(t *testing.T) {
 	root := t.TempDir()
 	accounts := orderedMaildirs{}
+	due := time.Now().Add(-time.Minute)
 	for _, name := range []string{"a", "b", "c", "d", "e"} {
-		dir := filepath.Join(root, name)
-		st, err := objectstore.Open(dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		raw := "From: " + name + "@hermex.test\r\nTo: sink@hermex.test\r\nSubject: s\r\n\r\nbody\r\n"
-		info, err := st.AppendMessage(int64(mapi.PrivateFIDOutbox), []byte(raw), time.Unix(1, 0), objectstore.FlagSeen)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := st.SetMessageProperties(info.ID, mapi.PropertyValues{
-			{Tag: mapi.PrDeferredSendTime, Value: mapi.UnixToNTTime(time.Now().Add(-time.Minute))},
-		}); err != nil {
-			t.Fatal(err)
-		}
-		st.Close()
-		accounts.paths = append(accounts.paths, dir)
+		accounts.paths = append(accounts.paths, scheduleFor(t, root, name, due))
 	}
 
 	// A mailbox that has never been opened, listed LAST so the sweep can only
@@ -190,9 +175,18 @@ func TestSweepOutboxesStopsOnShutdown(t *testing.T) {
 		t.Error("the sweep opened a further mailbox after the shutdown signal; on a large deployment it would outlast the drain deadline")
 	}
 	// The rest are untouched, still scheduled for the next start.
-	waiting := 0
-	for _, path := range accounts.paths {
-		if path == unvisited {
+	if waiting := outboxTotal(t, accounts.paths, unvisited); waiting != 4 {
+		t.Errorf("%d messages are still scheduled, want 4 (only the in-flight one released)", waiting)
+	}
+}
+
+// outboxTotal counts what is left in every listed mailbox's Outbox, skipping the
+// mailbox the sweep was never supposed to open.
+func outboxTotal(t *testing.T, paths []string, skip string) int {
+	t.Helper()
+	total := 0
+	for _, path := range paths {
+		if path == skip {
 			continue
 		}
 		st, err := objectstore.Open(path)
@@ -204,11 +198,9 @@ func TestSweepOutboxesStopsOnShutdown(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		waiting += len(msgs)
+		total += len(msgs)
 	}
-	if waiting != 4 {
-		t.Errorf("%d messages are still scheduled, want 4 (only the in-flight one released)", waiting)
-	}
+	return total
 }
 
 // sweepSink records the events one send-later sweep emits.
