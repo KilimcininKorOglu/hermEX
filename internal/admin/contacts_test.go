@@ -121,3 +121,26 @@ func TestUIContactsListRenders(t *testing.T) {
 		}
 	}
 }
+
+// TestUIContactsListShowsTheLDAPID proves the page shows which contacts the directory
+// sync owns, which is the difference between a record an operator may edit and one the
+// next sync would overwrite.
+func TestUIContactsListShowsTheLDAPID(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		contacts: []directory.ContactInfo{
+			{Address: "synced@partner.example", DisplayName: "Synced", Domain: "hermex.test", LDAPID: "aabbccdd"},
+		},
+		domains: []directory.DomainInfo{{Name: "hermex.test"}},
+	}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+
+	resp := authedGET(t, ts, "/admin/ui/contacts", session)
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if !strings.Contains(string(body), "aabbccdd") {
+		t.Errorf("contacts page missing the LDAP id column value:\n%s", body)
+	}
+}

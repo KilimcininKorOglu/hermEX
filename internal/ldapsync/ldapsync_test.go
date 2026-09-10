@@ -8,21 +8,29 @@ import (
 )
 
 type fakeSyncer struct {
-	users  []ldapauth.SyncedUser
-	groups []ldapauth.SyncedGroup
+	users    []ldapauth.SyncedUser
+	groups   []ldapauth.SyncedGroup
+	contacts []ldapauth.SyncedContact
 }
 
 func (f *fakeSyncer) Sync(directory.LDAPConfig) ([]ldapauth.SyncedUser, error) { return f.users, nil }
 func (f *fakeSyncer) SyncGroups(directory.LDAPConfig) ([]ldapauth.SyncedGroup, error) {
 	return f.groups, nil
 }
+func (f *fakeSyncer) SyncContacts(directory.LDAPConfig) ([]ldapauth.SyncedContact, error) {
+	return f.contacts, nil
+}
 
 type fakeStore struct {
-	profiles     map[string]map[string]string
-	groupOwner   map[string]string
-	groupMembers map[string][]string
-	mastered     []directory.MListInfo
-	deleted      []string
+	profiles        map[string]map[string]string
+	groupOwner      map[string]string
+	groupMembers    map[string][]string
+	mastered        []directory.MListInfo
+	deleted         []string
+	contacts        []directory.ContactInfo
+	upsertedNames   map[string]string
+	contactDomain   string
+	deletedContacts []string
 }
 
 func (f *fakeStore) UpsertLDAPUser(string, []byte, string) (bool, error) { return true, nil }
@@ -43,6 +51,19 @@ func (f *fakeStore) UpsertLDAPGroup(list string, _ []byte, owner string, members
 func (f *fakeStore) ListMLists() ([]directory.MListInfo, error) { return f.mastered, nil }
 func (f *fakeStore) DeleteMList(list string) (bool, error) {
 	f.deleted = append(f.deleted, list)
+	return true, nil
+}
+func (f *fakeStore) UpsertLDAPContact(email string, _ []byte, displayName, domain string) (bool, error) {
+	if f.upsertedNames == nil {
+		f.upsertedNames = map[string]string{}
+	}
+	f.upsertedNames[email] = displayName
+	f.contactDomain = domain
+	return true, nil
+}
+func (f *fakeStore) ListContacts() ([]directory.ContactInfo, error) { return f.contacts, nil }
+func (f *fakeStore) DeleteLDAPContact(email string) (bool, error) {
+	f.deletedContacts = append(f.deletedContacts, email)
 	return true, nil
 }
 
@@ -80,5 +101,100 @@ func TestRunUsersAndGroups(t *testing.T) {
 	}
 	if len(store.deleted) != 1 || store.deleted[0] != "old@hermex.test" {
 		t.Errorf("pruned = %v, want [old@hermex.test]", store.deleted)
+	}
+}
+
+// contactRun performs a contact-only downsync over the given syncer and store.
+func contactRun(t *testing.T, syncer *fakeSyncer, store *fakeStore) {
+	t.Helper()
+	cfg := directory.LDAPConfig{SyncContacts: true, ContactDomain: "hermex.test"}
+	if _, err := Run(cfg, syncer, store,
+		func(string) string { return "" }, func(string, ...any) {}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRunSyncsContacts proves a directory contact reaches the local address book with its
+// display name.
+func TestRunSyncsContacts(t *testing.T) {
+	syncer := &fakeSyncer{contacts: []ldapauth.SyncedContact{
+		{Mail: "partner@remote.test", DisplayName: "Partner Inc", ExternID: []byte{1, 2}},
+	}}
+	store := &fakeStore{}
+
+	contactRun(t, syncer, store)
+
+	if store.upsertedNames["partner@remote.test"] != "Partner Inc" {
+		t.Errorf("upserted = %v, want partner@remote.test with its display name", store.upsertedNames)
+	}
+}
+
+// TestRunFilesContactsUnderTheConfiguredDomain proves the filing domain reaches the store:
+// a contact's own address is external, so it cannot supply one.
+func TestRunFilesContactsUnderTheConfiguredDomain(t *testing.T) {
+	syncer := &fakeSyncer{contacts: []ldapauth.SyncedContact{
+		{Mail: "partner@remote.test", DisplayName: "Partner Inc", ExternID: []byte{1}},
+	}}
+	store := &fakeStore{}
+
+	contactRun(t, syncer, store)
+
+	if store.contactDomain != "hermex.test" {
+		t.Errorf("filing domain = %q, want hermex.test", store.contactDomain)
+	}
+}
+
+// TestRunRefusesContactSyncWithoutADomain proves an enabled contact sync with no filing
+// domain is an error rather than a silent no-op, because a contact cannot be filed at all
+// without one.
+func TestRunRefusesContactSyncWithoutADomain(t *testing.T) {
+	_, err := Run(directory.LDAPConfig{SyncContacts: true}, &fakeSyncer{}, &fakeStore{},
+		func(string) string { return "" }, func(string, ...any) {})
+
+	if err == nil {
+		t.Error("contact sync with no filing domain must be an error")
+	}
+}
+
+// TestRunPrunesAContactGoneFromLDAP is the load-bearing prune case: a contact the directory
+// no longer publishes must not linger in the GAL.
+func TestRunPrunesAContactGoneFromLDAP(t *testing.T) {
+	store := &fakeStore{contacts: []directory.ContactInfo{
+		{Address: "old@remote.test", LDAPID: "aabb"},
+	}}
+
+	contactRun(t, &fakeSyncer{}, store)
+
+	if len(store.deletedContacts) != 1 || store.deletedContacts[0] != "old@remote.test" {
+		t.Errorf("pruned = %v, want [old@remote.test]", store.deletedContacts)
+	}
+}
+
+// TestRunKeepsAHandMadeContact proves the prune pass never touches a contact an operator
+// created, which carries no LDAP id.
+func TestRunKeepsAHandMadeContact(t *testing.T) {
+	store := &fakeStore{contacts: []directory.ContactInfo{
+		{Address: "local@remote.test"},
+	}}
+
+	contactRun(t, &fakeSyncer{}, store)
+
+	if len(store.deletedContacts) != 0 {
+		t.Errorf("pruned = %v, want nothing: a contact with no LDAP id is locally managed", store.deletedContacts)
+	}
+}
+
+// TestRunSkipsContactsWhenDisabled proves the pass does not run, and prunes nothing, while
+// contact sync is off.
+func TestRunSkipsContactsWhenDisabled(t *testing.T) {
+	store := &fakeStore{contacts: []directory.ContactInfo{{Address: "old@remote.test", LDAPID: "aabb"}}}
+
+	if _, err := Run(directory.LDAPConfig{}, &fakeSyncer{}, store,
+		func(string) string { return "" }, func(string, ...any) {}); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(store.deletedContacts) != 0 {
+		t.Errorf("pruned = %v, want nothing while contact sync is off", store.deletedContacts)
 	}
 }

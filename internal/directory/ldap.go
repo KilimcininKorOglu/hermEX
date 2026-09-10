@@ -43,6 +43,16 @@ type LDAPConfig struct {
 	SyncGroups  bool
 	GroupBaseDN string
 	GroupFilter string
+	// SyncContacts enables syncing LDAP/AD mail contacts into org mail contacts, the
+	// GAL entries for external addresses. ContactBaseDN narrows the contact search
+	// (empty = BaseDN); ContactFilter replaces the mail-bearing-contact match
+	// (empty = the standard one). ContactDomain is the local domain synced contacts
+	// are filed under: a contact's own address is external, so it cannot supply one,
+	// and contact sync does not run without it.
+	SyncContacts  bool
+	ContactBaseDN string
+	ContactFilter string
+	ContactDomain string
 }
 
 // LDAPSyncField is one profile attribute's per-org downsync setting: whether it is
@@ -56,10 +66,14 @@ type LDAPSyncField struct {
 // ldapSyncConfig is the JSON document persisted in ldap_config.sync_config; absent
 // keys decode to their zero value, so older rows stay valid.
 type ldapSyncConfig struct {
-	Fields      map[string]LDAPSyncField `json:"fields,omitempty"`
-	SyncGroups  bool                     `json:"syncGroups,omitempty"`
-	GroupBaseDN string                   `json:"groupBaseDN,omitempty"`
-	GroupFilter string                   `json:"groupFilter,omitempty"`
+	Fields        map[string]LDAPSyncField `json:"fields,omitempty"`
+	SyncGroups    bool                     `json:"syncGroups,omitempty"`
+	GroupBaseDN   string                   `json:"groupBaseDN,omitempty"`
+	GroupFilter   string                   `json:"groupFilter,omitempty"`
+	SyncContacts  bool                     `json:"syncContacts,omitempty"`
+	ContactBaseDN string                   `json:"contactBaseDN,omitempty"`
+	ContactFilter string                   `json:"contactFilter,omitempty"`
+	ContactDomain string                   `json:"contactDomain,omitempty"`
 }
 
 // ldapProfileField is one syncable AD/LDAP profile attribute and where its value
@@ -166,6 +180,10 @@ func (d *SQLDirectory) GetLDAPConfig(orgID int64) (cfg LDAPConfig, ok bool, err 
 		cfg.SyncGroups = sc.SyncGroups
 		cfg.GroupBaseDN = sc.GroupBaseDN
 		cfg.GroupFilter = sc.GroupFilter
+		cfg.SyncContacts = sc.SyncContacts
+		cfg.ContactBaseDN = sc.ContactBaseDN
+		cfg.ContactFilter = sc.ContactFilter
+		cfg.ContactDomain = sc.ContactDomain
 	}
 	return cfg, true, nil
 }
@@ -241,19 +259,35 @@ func (d *SQLDirectory) SetLDAPConfig(orgID int64, cfg LDAPConfig) error {
 	if cfg.StartTLS {
 		startTLS = 1
 	}
-	var syncJSON any
-	sc := ldapSyncConfig{Fields: cfg.SyncFields, SyncGroups: cfg.SyncGroups, GroupBaseDN: cfg.GroupBaseDN, GroupFilter: cfg.GroupFilter}
-	if len(sc.Fields) > 0 || sc.SyncGroups || sc.GroupBaseDN != "" || sc.GroupFilter != "" {
-		b, err := json.Marshal(sc)
-		if err != nil {
-			return err
-		}
-		syncJSON = string(b)
+	syncJSON, err := marshalSyncConfig(cfg)
+	if err != nil {
+		return err
 	}
-	_, err := d.db.Exec(
+	_, err = d.db.Exec(
 		`REPLACE INTO ldap_config
 			(org_id, uri, start_tls, bind_dn, bind_password, base_dn, username_attr, sync_config)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		orgID, cfg.URI, startTLS, cfg.BindDN, cfg.BindPassword, cfg.BaseDN, cfg.UsernameAttr, syncJSON)
 	return err
+}
+
+// marshalSyncConfig encodes the optional downsync settings for the sync_config column,
+// returning nil when every one of them is at its zero value so an org that syncs nothing
+// but logins stores no document at all.
+func marshalSyncConfig(cfg LDAPConfig) (any, error) {
+	sc := ldapSyncConfig{
+		Fields: cfg.SyncFields, SyncGroups: cfg.SyncGroups, GroupBaseDN: cfg.GroupBaseDN, GroupFilter: cfg.GroupFilter,
+		SyncContacts: cfg.SyncContacts, ContactBaseDN: cfg.ContactBaseDN, ContactFilter: cfg.ContactFilter,
+		ContactDomain: cfg.ContactDomain,
+	}
+	empty := len(sc.Fields) == 0 && !sc.SyncGroups && sc.GroupBaseDN == "" && sc.GroupFilter == "" &&
+		!sc.SyncContacts && sc.ContactBaseDN == "" && sc.ContactFilter == "" && sc.ContactDomain == ""
+	if empty {
+		return nil, nil
+	}
+	b, err := json.Marshal(sc)
+	if err != nil {
+		return nil, err
+	}
+	return string(b), nil
 }

@@ -216,6 +216,86 @@ func TestSyncGroups(t *testing.T) {
 	}
 }
 
+// contactEntry builds a mail contact search entry with an address, a display name and
+// (optionally) a binary objectGUID.
+func contactEntry(dn, mail, displayName string, guid []byte) *ldap.Entry {
+	attrs := []*ldap.EntryAttribute{
+		{Name: "mail", Values: []string{mail}, ByteValues: [][]byte{[]byte(mail)}},
+		{Name: "displayName", Values: []string{displayName}},
+	}
+	if guid != nil {
+		attrs = append(attrs, &ldap.EntryAttribute{Name: "objectGUID", ByteValues: [][]byte{guid}})
+	}
+	return &ldap.Entry{DN: dn, Attributes: attrs}
+}
+
+// contactCfg is a configuration with contact sync enabled.
+var contactCfg = directory.LDAPConfig{BaseDN: "dc=hermex,dc=test", UsernameAttr: "mail", SyncContacts: true, StartTLS: true}
+
+// TestSyncContacts proves contact sync returns each mail-bearing contact's address,
+// display name and stable identifier.
+func TestSyncContacts(t *testing.T) {
+	guid := []byte{0x11, 0x22}
+	fc := &fakeConn{searchRes: &ldap.SearchResult{Entries: []*ldap.Entry{
+		contactEntry("cn=partner,dc=hermex,dc=test", "partner@remote.test", "Partner Inc", guid),
+	}}}
+
+	contacts, err := verifierWith(fc).SyncContacts(contactCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(contacts) != 1 {
+		t.Fatalf("SyncContacts returned %d, want 1", len(contacts))
+	}
+	if contacts[0].Mail != "partner@remote.test" || contacts[0].DisplayName != "Partner Inc" || !bytes.Equal(contacts[0].ExternID, guid) {
+		t.Errorf("contact = %+v, want partner@remote.test / Partner Inc / the objectGUID", contacts[0])
+	}
+}
+
+// TestSyncContactsSkipsAnEntryWithNoIdentifier proves an entry with no stable identifier
+// is skipped: there is nothing to bind its externid to, so a later sync could not match it
+// again.
+func TestSyncContactsSkipsAnEntryWithNoIdentifier(t *testing.T) {
+	fc := &fakeConn{searchRes: &ldap.SearchResult{Entries: []*ldap.Entry{
+		contactEntry("cn=noid,dc=hermex,dc=test", "noid@remote.test", "No Id", nil),
+	}}}
+
+	contacts, _ := verifierWith(fc).SyncContacts(contactCfg)
+
+	if len(contacts) != 0 {
+		t.Errorf("contacts = %+v, want none: the entry carries no stable identifier", contacts)
+	}
+}
+
+// TestSyncContactsFallsBackToCN proves a contact with no displayName is named by its cn,
+// so it does not land in the address book as a bare address.
+func TestSyncContactsFallsBackToCN(t *testing.T) {
+	e := &ldap.Entry{DN: "cn=partner,dc=hermex,dc=test", Attributes: []*ldap.EntryAttribute{
+		{Name: "mail", Values: []string{"partner@remote.test"}},
+		{Name: "cn", Values: []string{"Partner Inc"}},
+		{Name: "objectGUID", ByteValues: [][]byte{{0x33}}},
+	}}
+	fc := &fakeConn{searchRes: &ldap.SearchResult{Entries: []*ldap.Entry{e}}}
+
+	contacts, _ := verifierWith(fc).SyncContacts(contactCfg)
+
+	if len(contacts) != 1 || contacts[0].DisplayName != "Partner Inc" {
+		t.Errorf("contacts = %+v, want the cn as the display name", contacts)
+	}
+}
+
+// TestSyncContactsDisabledIsANoOp proves contact sync opens no connection while it is off.
+func TestSyncContactsDisabledIsANoOp(t *testing.T) {
+	fc := &fakeConn{searchRes: &ldap.SearchResult{}}
+
+	got, _ := verifierWith(fc).SyncContacts(directory.LDAPConfig{})
+
+	if got != nil {
+		t.Errorf("SyncContacts disabled = %v, want nil (no-op)", got)
+	}
+}
+
 // TestVerifyRefusesPlaintextTransport proves a configuration that would bind in
 // the clear never reaches the directory. Verifying a password means binding as
 // the user, so a plain session would put every LDAP-mastered account's real

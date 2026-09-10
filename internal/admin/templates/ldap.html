@@ -50,6 +50,23 @@
 <input type="text" name="group_filter" value="{{.Config.GroupFilter}}" placeholder="(&amp;(objectClass=group)(mail=*))">
 </label>
 </fieldset>
+<fieldset class="ldap-contacts">
+<legend>Contact sync</legend>
+<label class="check"><input type="checkbox" name="synccontacts" {{if .Config.SyncContacts}}checked{{end}}> Sync mail contacts into the address book</label>
+<label>Filing domain
+<select name="contact_domain">
+<option value="">(choose a domain)</option>
+{{range .Domains}}<option value="{{.Name}}" {{if eq .Name $.Config.ContactDomain}}selected{{end}}>{{.Name}}</option>{{end}}
+</select>
+</label>
+<p class="hint">A synced contact's own address is external, so it is filed under one of your domains. Contact sync does not run without this.</p>
+<label>Contact search base (optional)
+<input type="text" name="contact_base_dn" value="{{.Config.ContactBaseDN}}" placeholder="ou=contacts,dc=example,dc=com">
+</label>
+<label>Contact filter (optional)
+<input type="text" name="contact_filter" value="{{.Config.ContactFilter}}" placeholder="(&amp;(objectClass=contact)(mail=*))">
+</label>
+</fieldset>
 <button type="submit">Save configuration</button>
 </form>
 <form class="sync-form" hx-post="/admin/ui/ldap/sync" hx-target="#ldap-panel" hx-swap="outerHTML"

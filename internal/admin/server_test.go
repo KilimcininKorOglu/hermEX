@@ -133,6 +133,8 @@ type fakeDir struct {
 	grantedRole, revokedRole      string
 	grantedScope, revokedScope    int64
 	upsertedUsers                 []string
+	upsertedContacts              []string
+	deletedContacts               []string
 	upsertNew                     bool
 	createErr                     error
 
@@ -426,6 +428,14 @@ func (f *fakeDir) UpsertLDAPUser(username string, _ []byte, _ string) (bool, err
 func (f *fakeDir) ApplyLDAPProfile(_ string, _ map[string]string) (bool, error) { return true, nil }
 func (f *fakeDir) UpsertLDAPGroup(_ string, _ []byte, _ string, _ []string) (bool, error) {
 	return false, nil
+}
+func (f *fakeDir) UpsertLDAPContact(email string, _ []byte, _, _ string) (bool, error) {
+	f.upsertedContacts = append(f.upsertedContacts, email)
+	return false, nil
+}
+func (f *fakeDir) DeleteLDAPContact(email string) (bool, error) {
+	f.deletedContacts = append(f.deletedContacts, email)
+	return true, nil
 }
 func (f *fakeDir) CreateTask(taskType, params, createdBy string) (int64, error) {
 	id := int64(len(f.tasks) + 1)

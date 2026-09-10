@@ -246,7 +246,7 @@ func runListContacts(c *cmdContext) {
 		log.Fatalf("hermex-admin: %v", err)
 	}
 	for _, ct := range contacts {
-		fmt.Printf("%s\t%s\t%s\n", ct.Address, ct.DisplayName, ct.Domain)
+		fmt.Printf("%s\t%s\t%s\t%s\n", ct.Address, ct.DisplayName, ct.Domain, ct.LDAPID)
 	}
 }
 

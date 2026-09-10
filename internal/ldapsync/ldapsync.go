@@ -5,6 +5,7 @@
 package ldapsync
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -13,10 +14,11 @@ import (
 	"hermex/internal/objectstore"
 )
 
-// Syncer reads accounts and groups from the directory.
+// Syncer reads accounts, groups and mail contacts from the directory.
 type Syncer interface {
 	Sync(directory.LDAPConfig) ([]ldapauth.SyncedUser, error)
 	SyncGroups(directory.LDAPConfig) ([]ldapauth.SyncedGroup, error)
+	SyncContacts(directory.LDAPConfig) ([]ldapauth.SyncedContact, error)
 }
 
 // Store applies the downsync to the local directory.
@@ -26,13 +28,16 @@ type Store interface {
 	UpsertLDAPGroup(listname string, externid []byte, owner string, members []string) (bool, error)
 	ListMLists() ([]directory.MListInfo, error)
 	DeleteMList(listname string) (bool, error)
+	UpsertLDAPContact(email string, externid []byte, displayName, domain string) (bool, error)
+	ListContacts() ([]directory.ContactInfo, error)
+	DeleteLDAPContact(email string) (bool, error)
 }
 
 // Run performs a full downsync: each account's existence, optional profile fields
 // and portrait, and (when enabled) the directory's mail-bearing groups into
-// LDAP-mastered distribution lists. maildirFor maps a login to its mailbox path;
-// logf records non-fatal per-entry problems (a skipped account, an unresolved
-// member). It returns a one-line summary.
+// LDAP-mastered distribution lists and its mail contacts into org mail contacts.
+// maildirFor maps a login to its mailbox path; logf records non-fatal per-entry
+// problems (a skipped account, an unresolved member). It returns a one-line summary.
 func Run(cfg directory.LDAPConfig, syncer Syncer, store Store, maildirFor func(string) string, logf func(string, ...any)) (string, error) {
 	users, err := syncer.Sync(cfg)
 	if err != nil {
@@ -41,16 +46,46 @@ func Run(cfg directory.LDAPConfig, syncer Syncer, store Store, maildirFor func(s
 	dnToEmail, created, updated := syncUsers(users, store, maildirFor, logf)
 	summary := fmt.Sprintf("Synced %d directory entries: %d created, %d updated.", len(users), created, updated)
 
-	if !cfg.SyncGroups {
-		return summary, nil
-	}
-	groups, err := syncer.SyncGroups(cfg)
+	groupSummary, err := runGroupPass(cfg, syncer, store, dnToEmail, logf)
+	summary += groupSummary
 	if err != nil {
 		return summary, err
 	}
-	synced, gc, gu := syncGroups(groups, dnToEmail, store, logf)
+	contactSummary, err := runContactPass(cfg, syncer, store, logf)
+	return summary + contactSummary, err
+}
+
+// runGroupPass syncs the directory's groups when group sync is enabled, returning the
+// summary fragment to append. An empty fragment means the pass did not run.
+func runGroupPass(cfg directory.LDAPConfig, syncer Syncer, store Store, dnToEmail map[string]string, logf func(string, ...any)) (string, error) {
+	if !cfg.SyncGroups {
+		return "", nil
+	}
+	groups, err := syncer.SyncGroups(cfg)
+	if err != nil {
+		return "", err
+	}
+	synced, created, updated := syncGroups(groups, dnToEmail, store, logf)
 	pruned := pruneMastered(synced, store)
-	return summary + fmt.Sprintf(" Groups: %d created, %d updated, %d pruned (of %d).", gc, gu, pruned, len(groups)), nil
+	return fmt.Sprintf(" Groups: %d created, %d updated, %d pruned (of %d).", created, updated, pruned, len(groups)), nil
+}
+
+// runContactPass syncs the directory's mail contacts when contact sync is enabled,
+// returning the summary fragment to append.
+func runContactPass(cfg directory.LDAPConfig, syncer Syncer, store Store, logf func(string, ...any)) (string, error) {
+	if !cfg.SyncContacts {
+		return "", nil
+	}
+	if strings.TrimSpace(cfg.ContactDomain) == "" {
+		return "", errors.New("ldapsync: contact sync needs a filing domain")
+	}
+	contacts, err := syncer.SyncContacts(cfg)
+	if err != nil {
+		return "", err
+	}
+	synced, created, updated := syncContacts(contacts, cfg.ContactDomain, store, logf)
+	pruned := pruneContacts(synced, store)
+	return fmt.Sprintf(" Contacts: %d created, %d updated, %d pruned (of %d).", created, updated, pruned, len(contacts)), nil
 }
 
 // syncUsers applies each account to the local directory, returning the DN-to-login
@@ -135,6 +170,47 @@ func resolveMembers(g ldapauth.SyncedGroup, dnToEmail map[string]string, logf fu
 		members = append(members, email)
 	}
 	return members
+}
+
+// syncContacts applies the directory's mail contacts as LDAP-mastered org contacts,
+// returning the set of addresses it synced and the created/updated counts. An address the
+// local directory already holds as something else (a mailbox user, a list) is logged and
+// skipped rather than converted.
+func syncContacts(contacts []ldapauth.SyncedContact, domain string, store Store, logf func(string, ...any)) (synced map[string]bool, created, updated int) {
+	synced = make(map[string]bool, len(contacts))
+	for _, c := range contacts {
+		isNew, err := store.UpsertLDAPContact(c.Mail, c.ExternID, c.DisplayName, domain)
+		if err != nil {
+			logf("skip contact %s: %v", c.Mail, err)
+			continue
+		}
+		synced[strings.ToLower(c.Mail)] = true
+		if isNew {
+			created++
+		} else {
+			updated++
+		}
+	}
+	return synced, created, updated
+}
+
+// pruneContacts deletes the mastered contacts no longer present in the directory. A
+// contact with no LDAP id was made by hand and is never pruned.
+func pruneContacts(synced map[string]bool, store Store) int {
+	contacts, err := store.ListContacts()
+	if err != nil {
+		return 0
+	}
+	pruned := 0
+	for _, c := range contacts {
+		if c.LDAPID == "" || synced[strings.ToLower(c.Address)] {
+			continue
+		}
+		if _, err := store.DeleteLDAPContact(c.Address); err == nil {
+			pruned++
+		}
+	}
+	return pruned
 }
 
 // pruneMastered deletes the mastered lists no longer present in the directory.

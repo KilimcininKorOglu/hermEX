@@ -20,10 +20,10 @@
 {{define "contacts-panel"}}<div id="contacts-panel">
 {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
 <table class="grid">
-<thead><tr><th>Name</th><th>Address</th><th>Domain</th><th></th></tr></thead>
+<thead><tr><th>Name</th><th>Address</th><th>Domain</th><th>LDAP ID</th><th></th></tr></thead>
 <tbody>
-{{range .Contacts}}<tr><td><form class="inline-edit" hx-put="/admin/ui/contacts/{{.Address}}" hx-target="#contacts-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'><input type="text" name="displayname" value="{{.DisplayName}}"><button type="submit">Save</button></form></td><td>{{.Address}}</td><td>{{.Domain}}</td><td><form class="delete-form" hx-post="/admin/ui/contacts/{{.Address}}/delete" hx-target="#contacts-panel" hx-swap="outerHTML" hx-confirm="Delete {{.Address}}? This cannot be undone." hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'><button type="submit" class="danger">Delete</button></form></td></tr>
-{{else}}<tr><td colspan="4" class="empty">No contacts yet.</td></tr>
+{{range .Contacts}}<tr><td><form class="inline-edit" hx-put="/admin/ui/contacts/{{.Address}}" hx-target="#contacts-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'><input type="text" name="displayname" value="{{.DisplayName}}"><button type="submit">Save</button></form></td><td>{{.Address}}</td><td>{{.Domain}}</td><td><code>{{.LDAPID}}</code></td><td><form class="delete-form" hx-post="/admin/ui/contacts/{{.Address}}/delete" hx-target="#contacts-panel" hx-swap="outerHTML" hx-confirm="Delete {{.Address}}? This cannot be undone." hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'><button type="submit" class="danger">Delete</button></form></td></tr>
+{{else}}<tr><td colspan="5" class="empty">No contacts yet.</td></tr>
 {{end}}
 </tbody>
 </table>

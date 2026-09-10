@@ -40,6 +40,7 @@ func (s *Server) ldapPanelData(r *http.Request, saved bool, syncResult, errMsg s
 		s := cfg.SyncFields[f.Key]
 		fields = append(fields, ldapFieldView{Key: f.Key, DefaultAttr: f.DefaultAttr, Attr: s.Attr, Enabled: s.Enabled})
 	}
+	domains, _ := s.dir.ListDomains()
 	data := map[string]any{
 		"Nav":             "ldap",
 		"CSRF":            csrfCookieValue(r),
@@ -47,6 +48,7 @@ func (s *Server) ldapPanelData(r *http.Request, saved bool, syncResult, errMsg s
 		"BindPasswordSet": bindSet,
 		"Saved":           saved,
 		"Fields":          fields,
+		"Domains":         domains,
 	}
 	if syncResult != "" {
 		data["SyncResult"] = syncResult
@@ -95,6 +97,10 @@ func (s *Server) handleUISaveLDAP(w http.ResponseWriter, r *http.Request) {
 	cfg.SyncGroups = r.PostFormValue("syncgroups") != ""
 	cfg.GroupBaseDN = r.PostFormValue("group_base_dn")
 	cfg.GroupFilter = r.PostFormValue("group_filter")
+	cfg.SyncContacts = r.PostFormValue("synccontacts") != ""
+	cfg.ContactBaseDN = r.PostFormValue("contact_base_dn")
+	cfg.ContactFilter = r.PostFormValue("contact_filter")
+	cfg.ContactDomain = r.PostFormValue("contact_domain")
 	if err := s.dir.SetLDAPConfig(defaultOrgID, cfg); err != nil {
 		msg := "Could not save the configuration."
 		if errors.Is(err, directory.ErrInsecureLDAP) {

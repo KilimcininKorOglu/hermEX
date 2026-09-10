@@ -48,10 +48,10 @@
 
 <h2>Contacts</h2>
 <table class="grid">
-<thead><tr><th>Address</th><th>Display name</th></tr></thead>
+<thead><tr><th>Address</th><th>Display name</th><th>LDAP ID</th></tr></thead>
 <tbody>
-{{range .DomainContacts}}<tr><td>{{.Address}}</td><td>{{.DisplayName}}</td></tr>
-{{else}}<tr><td colspan="2" class="empty">No contacts.</td></tr>{{end}}
+{{range .DomainContacts}}<tr><td>{{.Address}}</td><td>{{.DisplayName}}</td><td><code>{{.LDAPID}}</code></td></tr>
+{{else}}<tr><td colspan="3" class="empty">No contacts.</td></tr>{{end}}
 </tbody>
 </table>
 

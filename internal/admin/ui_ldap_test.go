@@ -14,9 +14,10 @@ import (
 
 // fakeSyncer is a scripted LDAPSyncer for the Directory Sync tests.
 type fakeSyncer struct {
-	users  []ldapauth.SyncedUser
-	groups []ldapauth.SyncedGroup
-	err    error
+	users    []ldapauth.SyncedUser
+	groups   []ldapauth.SyncedGroup
+	contacts []ldapauth.SyncedContact
+	err      error
 }
 
 func (f *fakeSyncer) Sync(directory.LDAPConfig) ([]ldapauth.SyncedUser, error) {
@@ -24,6 +25,9 @@ func (f *fakeSyncer) Sync(directory.LDAPConfig) ([]ldapauth.SyncedUser, error) {
 }
 func (f *fakeSyncer) SyncGroups(directory.LDAPConfig) ([]ldapauth.SyncedGroup, error) {
 	return f.groups, nil
+}
+func (f *fakeSyncer) SyncContacts(directory.LDAPConfig) ([]ldapauth.SyncedContact, error) {
+	return f.contacts, nil
 }
 
 func adminServerWithSyncer(t *testing.T, d Directory, syncer LDAPSyncer) *httptest.Server {
@@ -120,6 +124,30 @@ func TestUISaveLDAPSyncSettings(t *testing.T) {
 	if !got.SyncGroups || got.GroupBaseDN != "ou=groups,dc=x" || got.GroupFilter != "(objectClass=group)" {
 		t.Errorf("group settings = syncGroups=%v base=%q filter=%q, want the form values",
 			got.SyncGroups, got.GroupBaseDN, got.GroupFilter)
+	}
+}
+
+// TestUISaveLDAPContactSettings proves the contact-sync settings persist, so an operator
+// configuring contact sync in the panel reaches the sync with a filing domain.
+func TestUISaveLDAPContactSettings(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/ldap", session, csrf, url.Values{
+		"uri": {"ldap://x:389"}, "bind_dn": {"cn=svc"}, "base_dn": {"ou=p"}, "username_attr": {"mail"},
+		"synccontacts":    {"on"},
+		"contact_base_dn": {"ou=contacts,dc=x"},
+		"contact_filter":  {"(objectClass=contact)"},
+		"contact_domain":  {"hermex.test"},
+	})
+	resp.Body.Close()
+
+	got := d.ldap[0]
+	if !got.SyncContacts || got.ContactBaseDN != "ou=contacts,dc=x" ||
+		got.ContactFilter != "(objectClass=contact)" || got.ContactDomain != "hermex.test" {
+		t.Errorf("contact settings = syncContacts=%v base=%q filter=%q domain=%q, want the form values",
+			got.SyncContacts, got.ContactBaseDN, got.ContactFilter, got.ContactDomain)
 	}
 }
 

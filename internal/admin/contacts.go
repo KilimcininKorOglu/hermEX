@@ -1,8 +1,11 @@
 package admin
 
 import (
+	"errors"
 	"net/http"
 	"strings"
+
+	"hermex/internal/directory"
 )
 
 // handleUIContacts renders the org mail-contacts management page (system
@@ -47,13 +50,20 @@ func (s *Server) handleUIUpdateContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var errMsg string
-	if found, err := s.dir.UpdateContact(r.PathValue("email"), r.PostFormValue("displayname")); err != nil {
+	switch found, err := s.dir.UpdateContact(r.PathValue("email"), r.PostFormValue("displayname")); {
+	case errors.Is(err, directory.ErrLDAPMasteredContact):
+		errMsg = masteredContactNotice
+	case err != nil:
 		errMsg = s.notice("Could not update contact.", err)
-	} else if !found {
+	case !found:
 		errMsg = "No such contact."
 	}
 	s.renderContactsPanel(w, r, errMsg)
 }
+
+// masteredContactNotice explains why an edit of an LDAP-synced contact is refused. The
+// directory owns the record, so a local change would last only until the next sync.
+const masteredContactNotice = "This contact is synced from the LDAP directory. Change it there, or turn contact sync off first."
 
 // handleUIDeleteContact deletes an org mail contact named in the path and returns
 // the refreshed panel for htmx to swap in.
@@ -62,7 +72,10 @@ func (s *Server) handleUIDeleteContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var errMsg string
-	if _, err := s.dir.DeleteContact(r.PathValue("email")); err != nil {
+	switch _, err := s.dir.DeleteContact(r.PathValue("email")); {
+	case errors.Is(err, directory.ErrLDAPMasteredContact):
+		errMsg = masteredContactNotice
+	case err != nil:
 		errMsg = s.notice("Could not delete contact.", err)
 	}
 	s.renderContactsPanel(w, r, errMsg)

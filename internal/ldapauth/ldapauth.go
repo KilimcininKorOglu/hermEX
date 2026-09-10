@@ -245,6 +245,77 @@ func (v *Verifier) SyncGroups(cfg directory.LDAPConfig) ([]SyncedGroup, error) {
 	return out, nil
 }
 
+// SyncedContact is one mail-bearing contact discovered in the directory: its address,
+// its display name, and the directory's stable identifier for it. A contact is a GAL
+// entry for an external address; it owns no mailbox and never logs in.
+type SyncedContact struct {
+	Mail        string
+	DisplayName string
+	ExternID    []byte
+}
+
+// SyncContacts lists the directory's mail contacts for downsync into local org mail
+// contacts: it searches under the contact base (or the login base) with the configured
+// filter (default: mail-bearing contact objects) and returns each contact's address,
+// display name and stable identifier. An entry with no address, or with no stable
+// identifier to bind its externid to, is skipped. Returns nil when contact sync is
+// disabled.
+func (v *Verifier) SyncContacts(cfg directory.LDAPConfig) ([]SyncedContact, error) {
+	if !cfg.SyncContacts {
+		return nil, nil
+	}
+	c, err := v.connect(cfg)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+
+	base := cfg.ContactBaseDN
+	if base == "" {
+		base = cfg.BaseDN
+	}
+	filter := strings.TrimSpace(cfg.ContactFilter)
+	if filter == "" {
+		filter = "(&(objectClass=contact)(mail=*))"
+	}
+	res, err := c.Search(ldap.NewSearchRequest(
+		base, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
+		filter, []string{"mail", "displayName", "cn", "objectGUID", "entryUUID"}, nil))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SyncedContact, 0, len(res.Entries))
+	for _, e := range res.Entries {
+		sc, ok := syncedContact(e)
+		if !ok {
+			continue
+		}
+		out = append(out, sc)
+	}
+	return out, nil
+}
+
+// syncedContact reads one contact entry, taking the display name from displayName and
+// falling back to cn. It reports false for an entry the downsync cannot file.
+func syncedContact(e *ldap.Entry) (SyncedContact, bool) {
+	mail := e.GetAttributeValue("mail")
+	if mail == "" {
+		return SyncedContact{}, false // no address, nothing to put in the GAL
+	}
+	id := e.GetRawAttributeValue("objectGUID")
+	if len(id) == 0 {
+		id = e.GetRawAttributeValue("entryUUID")
+	}
+	if len(id) == 0 {
+		return SyncedContact{}, false
+	}
+	name := e.GetAttributeValue("displayName")
+	if name == "" {
+		name = e.GetAttributeValue("cn")
+	}
+	return SyncedContact{Mail: mail, DisplayName: name, ExternID: id}, true
+}
+
 // hostOf extracts the host (for the TLS ServerName) from an LDAP URI.
 func hostOf(uri string) (string, error) {
 	u, err := url.Parse(uri)
