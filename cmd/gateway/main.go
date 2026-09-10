@@ -19,6 +19,7 @@ import (
 	"database/sql"
 	"flag"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -46,49 +47,11 @@ func main() {
 	}
 
 	gw := resolveGateway(cfg)
-
-	// Both EWS and ActiveSync serve /autodiscover/autodiscover.xml; the gateway
-	// routes it to EWS for the Outlook-desktop settings. Mobile (ActiveSync)
-	// autodiscover via the gateway would need request-body inspection and is not
-	// wired here.
-	h, err := gateway.Handler([]gateway.Route{
-		{Prefix: "/mapi/", Target: gw.backendMapi},
-		{Prefix: "/rpc/", Target: gw.backendMapi},
-		{Prefix: "/rpcwithcert/", Target: gw.backendMapi},
-		{Prefix: "/ews/", Target: gw.backendEws},
-		{Prefix: "/autodiscover/", Target: gw.backendEws},
-		{Prefix: "/microsoft-server-activesync", Target: gw.backendActiveSync},
-		{Prefix: "/.well-known/carddav", Target: gw.backendDav},
-		{Prefix: "/.well-known/caldav", Target: gw.backendDav},
-		{Prefix: "/dav/", Target: gw.backendDav},
-		{Prefix: "/", Target: gw.backendWebmail},
-	})
-	if err != nil {
-		log.Fatalf("hermex-gateway: %v", err)
-	}
-
+	h := routeHandler(gw)
 	addr := gw.addr
 	logger, logClose := logging.Build("hermex-gateway", cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 
-	// The gateway's database connection is used only for the TLS certificate store:
-	// it serves an admin-uploaded certificate, and picks up a renewal, at the front
-	// door without a restart, falling back to the config-file certificate when the
-	// store has none. The connection is opened lazily (no startup Ping): if the
-	// directory is unreachable when the gateway starts, it still comes up on the
-	// config-file certificate and the provider's poll adopts the store once it
-	// returns, the front door must not be held hostage to the cert store at boot.
-	db, err := sql.Open("mysql", cfg.DatabaseDSN)
-	if err != nil {
-		log.Fatalf("hermex-gateway: open directory: %v", err)
-	}
-	dir := directory.NewSQL(db)
-	// At-rest wrapping for the private keys the directory stores (DKIM signing
-	// keys, uploaded TLS keys). An unset secret leaves them in plaintext and says
-	// so on startup.
-	dir.SetKeySecret(cfg.KeyWrapSecret())
-	if err := dir.EnsureSchema(); err != nil {
-		log.Fatalf("hermex-gateway: schema: %v", err)
-	}
+	db, dir := openCertStore(cfg)
 	// Serve this server's own MTA-STS policy for mta-sts.<domain> requests before
 	// proxying everything else; the front door is the HTTPS host the policy lives on.
 	h = withMTASTS(cfg, dir, h)
@@ -133,4 +96,54 @@ func main() {
 	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-gateway: %v", err)
 	}
+}
+
+// routeHandler builds the longest-prefix proxy handler for every protocol the
+// front door fronts.
+//
+// Both EWS and ActiveSync serve /autodiscover/autodiscover.xml; the gateway routes
+// it to EWS for the Outlook-desktop settings. Mobile (ActiveSync) autodiscover via
+// the gateway would need request-body inspection and is not wired here.
+func routeHandler(gw gatewaySettings) http.Handler {
+	h, err := gateway.Handler([]gateway.Route{
+		{Prefix: "/mapi/", Target: gw.backendMapi},
+		{Prefix: "/rpc/", Target: gw.backendMapi},
+		{Prefix: "/rpcwithcert/", Target: gw.backendMapi},
+		{Prefix: "/ews/", Target: gw.backendEws},
+		{Prefix: "/autodiscover/", Target: gw.backendEws},
+		{Prefix: "/microsoft-server-activesync", Target: gw.backendActiveSync},
+		{Prefix: "/.well-known/carddav", Target: gw.backendDav},
+		{Prefix: "/.well-known/caldav", Target: gw.backendDav},
+		{Prefix: "/dav/", Target: gw.backendDav},
+		{Prefix: "/", Target: gw.backendWebmail},
+	})
+	if err != nil {
+		log.Fatalf("hermex-gateway: %v", err)
+	}
+	return h
+}
+
+// openCertStore opens the directory the TLS certificate store lives in.
+//
+// The gateway's database connection is used only for that store: it serves an
+// admin-uploaded certificate, and picks up a renewal, at the front door without a
+// restart, falling back to the config-file certificate when the store has none. The
+// connection is opened lazily (no startup Ping): if the directory is unreachable when
+// the gateway starts, it still comes up on the config-file certificate and the
+// provider's poll adopts the store once it returns, the front door must not be held
+// hostage to the cert store at boot.
+func openCertStore(cfg *config.Config) (*sql.DB, *directory.SQLDirectory) {
+	db, err := sql.Open("mysql", cfg.DatabaseDSN)
+	if err != nil {
+		log.Fatalf("hermex-gateway: open directory: %v", err)
+	}
+	dir := directory.NewSQL(db)
+	// At-rest wrapping for the private keys the directory stores (DKIM signing
+	// keys, uploaded TLS keys). An unset secret leaves them in plaintext and says
+	// so on startup.
+	dir.SetKeySecret(cfg.KeyWrapSecret())
+	if err := dir.EnsureSchema(); err != nil {
+		log.Fatalf("hermex-gateway: schema: %v", err)
+	}
+	return db, dir
 }

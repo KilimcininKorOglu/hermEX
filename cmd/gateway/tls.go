@@ -89,9 +89,7 @@ func acmeMaintain(acme *tlscert.ACMEProvider, dir *directory.SQLDirectory, hostn
 func mirrorACMECerts(acme *tlscert.ACMEProvider, dir *directory.SQLDirectory, names []string, logger *logging.Logger) {
 	existing, err := dir.ListTLSCerts()
 	if err != nil {
-		if logger != nil {
-			logger.Warn(logging.TLS, "acme.mirror", logging.Fields{"detail": "could not read the certificate store", "error": err.Error()})
-		}
+		warnMirror(logger, "could not read the certificate store", "", err)
 		return
 	}
 	have := make(map[string]int64, len(existing))
@@ -99,26 +97,41 @@ func mirrorACMECerts(acme *tlscert.ACMEProvider, dir *directory.SQLDirectory, na
 		have[c.Name] = c.NotAfter
 	}
 	for _, name := range names {
-		certPEM, keyPEM, notAfter, ok, err := acme.LoadObtainedCert(context.Background(), name)
-		if err != nil {
-			if logger != nil {
-				logger.Warn(logging.TLS, "acme.mirror", logging.Fields{"detail": "could not read an obtained certificate", "name": name, "error": err.Error()})
-			}
-			continue
-		}
-		if !ok || have[name] == notAfter {
-			continue
-		}
-		if err := dir.SetTLSCert(name, string(certPEM), string(keyPEM), notAfter); err != nil {
-			if logger != nil {
-				logger.Warn(logging.TLS, "acme.mirror", logging.Fields{"detail": "could not store a mirrored certificate", "name": name, "error": err.Error()})
-			}
-			continue
-		}
-		if logger != nil {
-			logger.Info(logging.TLS, "acme.mirror", logging.Fields{"detail": "mirrored an ACME certificate to the store", "name": name})
-		}
+		mirrorOneCert(acme, dir, name, have[name], logger)
 	}
+}
+
+// mirrorOneCert copies one obtained certificate into the store, skipping a name whose
+// stored expiry already matches.
+func mirrorOneCert(acme *tlscert.ACMEProvider, dir *directory.SQLDirectory, name string, storedNotAfter int64, logger *logging.Logger) {
+	certPEM, keyPEM, notAfter, ok, err := acme.LoadObtainedCert(context.Background(), name)
+	if err != nil {
+		warnMirror(logger, "could not read an obtained certificate", name, err)
+		return
+	}
+	if !ok || storedNotAfter == notAfter {
+		return
+	}
+	if err := dir.SetTLSCert(name, string(certPEM), string(keyPEM), notAfter); err != nil {
+		warnMirror(logger, "could not store a mirrored certificate", name, err)
+		return
+	}
+	if logger != nil {
+		logger.Info(logging.TLS, "acme.mirror", logging.Fields{"detail": "mirrored an ACME certificate to the store", "name": name})
+	}
+}
+
+// warnMirror records a mirror failure, naming the certificate when the failure is
+// about one.
+func warnMirror(logger *logging.Logger, detail, name string, err error) {
+	if logger == nil {
+		return
+	}
+	fields := logging.Fields{"detail": detail, "error": err.Error()}
+	if name != "" {
+		fields["name"] = name
+	}
+	logger.Warn(logging.TLS, "acme.mirror", fields)
 }
 
 // acmeNames is the host-name allowlist the gateway obtains certificates for, read

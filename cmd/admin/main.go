@@ -455,38 +455,10 @@ func adminHealthChecks(db pinger, provider *tlscert.Provider) []health.Check {
 // once here so its stale window cannot override the operator's setting. It returns when
 // ctx is cancelled.
 func runLogRetention(ctx context.Context, dir *directory.SQLDirectory, reader *logging.Reader, seedDays int) {
-	dropCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	if err := reader.DropLegacyTTLIndex(dropCtx); err != nil {
-		log.Printf("hermex-admin: drop legacy log TTL index: %v", err)
-	}
-	cancel()
+	dropLegacyTTL(ctx, reader)
+	seedLogRetention(dir, seedDays)
 
-	if _, found, err := dir.GetLogRetentionDays(); err == nil && !found {
-		if err := dir.SetLogRetentionDays(seedDays); err != nil {
-			log.Printf("hermex-admin: seed log retention: %v", err)
-		}
-	}
-
-	prune := func() {
-		days, _, err := dir.GetLogRetentionDays()
-		if err != nil {
-			log.Printf("hermex-admin: read log retention: %v", err)
-			return
-		}
-		if days <= 0 {
-			return // keep forever, never prune
-		}
-		cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
-		pruneCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-		if n, err := reader.PruneOlderThan(pruneCtx, cutoff); err != nil {
-			log.Printf("hermex-admin: prune logs: %v", err)
-		} else if n > 0 {
-			log.Printf("hermex-admin: pruned %d log events older than %d days", n, days)
-		}
-	}
-
-	prune() // apply immediately at startup
+	pruneLogs(ctx, dir, reader) // apply immediately at startup
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
 	for {
@@ -494,8 +466,50 @@ func runLogRetention(ctx context.Context, dir *directory.SQLDirectory, reader *l
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			prune()
+			pruneLogs(ctx, dir, reader)
 		}
+	}
+}
+
+// dropLegacyTTL removes the Mongo TTL index earlier builds expired logs with, so its
+// stale window cannot override the operator's setting.
+func dropLegacyTTL(ctx context.Context, reader *logging.Reader) {
+	dropCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := reader.DropLegacyTTLIndex(dropCtx); err != nil {
+		log.Printf("hermex-admin: drop legacy log TTL index: %v", err)
+	}
+}
+
+// seedLogRetention writes the config value into the directory once, so an existing
+// deployment keeps its behaviour and the admin panel is the source of truth after.
+func seedLogRetention(dir *directory.SQLDirectory, seedDays int) {
+	if _, found, err := dir.GetLogRetentionDays(); err != nil || found {
+		return
+	}
+	if err := dir.SetLogRetentionDays(seedDays); err != nil {
+		log.Printf("hermex-admin: seed log retention: %v", err)
+	}
+}
+
+// pruneLogs deletes the events older than the stored window. A window of zero or less
+// means keep forever, so nothing is pruned.
+func pruneLogs(ctx context.Context, dir *directory.SQLDirectory, reader *logging.Reader) {
+	days, _, err := dir.GetLogRetentionDays()
+	if err != nil {
+		log.Printf("hermex-admin: read log retention: %v", err)
+		return
+	}
+	if days <= 0 {
+		return // keep forever, never prune
+	}
+	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	pruneCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if n, err := reader.PruneOlderThan(pruneCtx, cutoff); err != nil {
+		log.Printf("hermex-admin: prune logs: %v", err)
+	} else if n > 0 {
+		log.Printf("hermex-admin: pruned %d log events older than %d days", n, days)
 	}
 }
 
@@ -636,41 +650,67 @@ func resolveMaildirs(dir *directory.SQLDirectory, target string) []string {
 // running an importer. It works on a live mailbox: the databases are snapshotted
 // inside a read transaction rather than copied as files.
 func backupMail(dir *directory.SQLDirectory, cfg *config.Config, target, dest string) {
-	// sources pairs each store directory with its path relative to the data root,
-	// which is where it is written under dest.
-	type source struct{ dir, rel string }
-	var sources []source
+	sources := backupSources(dir, cfg, target)
+	done, opened := copyStores(sources, dest)
+	if opened == 0 && len(sources) > 0 {
+		log.Fatalf("hermex-admin: no mailbox opened; the first was %s. Run this where the mailbox paths resolve.", sources[0].dir)
+	}
+	fmt.Printf("backed up %d of %d mailbox(es) to %s\n", done, len(sources), dest)
+	failed := done < len(sources)
+	// A full-mailbox backup also captures the data_dir artifacts that mailbox stores
+	// do not hold. A single-mailbox backup skips them: they are shared, not part of
+	// one account.
+	if target == "all" && !backupSharedArtifacts(cfg, dest) {
+		failed = true
+	}
+	if failed {
+		// The exit status is what a scheduled run checks, so a partial backup must
+		// not look like a clean one.
+		os.Exit(1)
+	}
+}
 
-	if target == "all" {
-		maildirs, err := dir.AllMaildirs()
-		if err != nil {
-			log.Fatalf("hermex-admin: list mailboxes: %v", err)
-		}
-		for _, md := range maildirs {
-			sources = append(sources, source{md, backupRel(cfg, md)})
-		}
-		domains, err := dir.ListDomains()
-		if err != nil {
-			log.Fatalf("hermex-admin: list domains: %v", err)
-		}
-		for _, d := range domains {
-			// A domain has a public store only once something is filed in it, so an
-			// absent directory is normal rather than a fault.
-			home := cfg.HomedirFor(d.Name)
-			if _, err := os.Stat(filepath.Join(home, "objects.sqlite3")); err != nil {
-				continue
-			}
-			sources = append(sources, source{home, backupRel(cfg, home)})
-		}
-	} else {
+// backupSource pairs a store directory with its path relative to the data root,
+// which is where it is written under dest.
+type backupSource struct{ dir, rel string }
+
+// backupSources lists the stores the target covers: one mailbox, or every mailbox
+// plus every domain's public store.
+func backupSources(dir *directory.SQLDirectory, cfg *config.Config, target string) []backupSource {
+	if target != "all" {
 		maildir, ok := dir.Resolve(target)
 		if !ok {
 			log.Fatalf("hermex-admin: unknown or unreceivable mailbox: %s", target)
 		}
-		sources = append(sources, source{maildir, backupRel(cfg, maildir)})
+		return []backupSource{{maildir, backupRel(cfg, maildir)}}
 	}
+	maildirs, err := dir.AllMaildirs()
+	if err != nil {
+		log.Fatalf("hermex-admin: list mailboxes: %v", err)
+	}
+	sources := make([]backupSource, 0, len(maildirs))
+	for _, md := range maildirs {
+		sources = append(sources, backupSource{md, backupRel(cfg, md)})
+	}
+	domains, err := dir.ListDomains()
+	if err != nil {
+		log.Fatalf("hermex-admin: list domains: %v", err)
+	}
+	for _, d := range domains {
+		// A domain has a public store only once something is filed in it, so an
+		// absent directory is normal rather than a fault.
+		home := cfg.HomedirFor(d.Name)
+		if _, err := os.Stat(filepath.Join(home, "objects.sqlite3")); err != nil {
+			continue
+		}
+		sources = append(sources, backupSource{home, backupRel(cfg, home)})
+	}
+	return sources
+}
 
-	var done, opened int
+// copyStores snapshots every listed store under dest, reporting how many were
+// written and how many could be opened at all.
+func copyStores(sources []backupSource, dest string) (done, opened int) {
 	for _, src := range sources {
 		store, err := objectstore.OpenExisting(src.dir)
 		if err != nil {
@@ -688,34 +728,27 @@ func backupMail(dir *directory.SQLDirectory, cfg *config.Config, target, dest st
 		}
 		done++
 	}
-	if opened == 0 && len(sources) > 0 {
-		log.Fatalf("hermex-admin: no mailbox opened; the first was %s. Run this where the mailbox paths resolve.", sources[0].dir)
+	return done, opened
+}
+
+// backupSharedArtifacts captures the data_dir artifacts no mailbox store holds: the
+// relay spool (external mail already accepted with a 250 but not yet delivered) and
+// the quarantine .eml samples the restored directory rows reference. Without these a
+// data_dir loss silently drops accepted outbound mail and leaves quarantine rows
+// dangling. It reports whether both were written.
+func backupSharedArtifacts(cfg *config.Config, dest string) bool {
+	ok := true
+	if err := backupSpool(cfg, filepath.Join(dest, "relay.sqlite3")); err != nil {
+		log.Printf("hermex-admin: back up relay spool: %v", err)
+		ok = false
+	} else {
+		fmt.Printf("backed up the relay spool to %s\n", filepath.Join(dest, "relay.sqlite3"))
 	}
-	fmt.Printf("backed up %d of %d mailbox(es) to %s\n", done, len(sources), dest)
-	failed := done < len(sources)
-	// A full-mailbox backup also captures the data_dir artifacts that mailbox stores
-	// do not hold: the relay spool (external mail already accepted with a 250 but not
-	// yet delivered) and the quarantine .eml samples the restored directory rows
-	// reference. Without these a data_dir loss silently drops accepted outbound mail
-	// and leaves quarantine rows dangling. A single-mailbox backup skips them: they
-	// are shared, not part of one account.
-	if target == "all" {
-		if err := backupSpool(cfg, filepath.Join(dest, "relay.sqlite3")); err != nil {
-			log.Printf("hermex-admin: back up relay spool: %v", err)
-			failed = true
-		} else {
-			fmt.Printf("backed up the relay spool to %s\n", filepath.Join(dest, "relay.sqlite3"))
-		}
-		if err := backupQuarantine(cfg, filepath.Join(dest, "quarantine")); err != nil {
-			log.Printf("hermex-admin: back up quarantine: %v", err)
-			failed = true
-		}
+	if err := backupQuarantine(cfg, filepath.Join(dest, "quarantine")); err != nil {
+		log.Printf("hermex-admin: back up quarantine: %v", err)
+		ok = false
 	}
-	if failed {
-		// The exit status is what a scheduled run checks, so a partial backup must
-		// not look like a clean one.
-		os.Exit(1)
-	}
+	return ok
 }
 
 // backupSpool writes a consistent snapshot of the relay spool into dest via the

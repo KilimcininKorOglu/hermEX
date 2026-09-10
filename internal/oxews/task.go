@@ -46,6 +46,18 @@ func BuildTask(t oxtask.Task, meta ItemMeta) Task {
 	if t.Body != "" {
 		out.Body = &Body{BodyType: "Text", Content: t.Body}
 	}
+	if len(t.Categories) > 0 {
+		out.Categories = &Categories{String: t.Categories}
+	}
+	setTaskHandling(&out, t)
+	setTaskDates(&out, t)
+	setTaskProgress(&out, t)
+	return out
+}
+
+// setTaskHandling writes the importance and sensitivity names, each omitted while
+// the model leaves it unset.
+func setTaskHandling(out *Task, t oxtask.Task) {
 	if t.Importance >= 0 {
 		// #nosec G115 -- ToProps bounds the model's integers at this width before they are stored
 		out.Importance = importanceName(int32(t.Importance))
@@ -54,9 +66,11 @@ func BuildTask(t oxtask.Task, meta ItemMeta) Task {
 		// #nosec G115 -- ToProps bounds the model's integers at this width before they are stored
 		out.Sensitivity = sensitivityName(int32(t.Sensitivity))
 	}
-	if len(t.Categories) > 0 {
-		out.Categories = &Categories{String: t.Categories}
-	}
+}
+
+// setTaskDates writes the start, due and reminder instants, each omitted while it is
+// unset.
+func setTaskDates(out *Task, t oxtask.Task) {
 	if !t.Start.IsZero() {
 		out.StartDate = t.Start.UTC().Format(ewsTime)
 	}
@@ -66,14 +80,17 @@ func BuildTask(t oxtask.Task, meta ItemMeta) Task {
 	if t.ReminderSet && !t.ReminderTime.IsZero() {
 		out.ReminderDueBy = t.ReminderTime.UTC().Format(ewsTime)
 	}
-	if t.Complete {
-		out.PercentComplete = 100
-		out.Status = "Completed"
-		if !t.DateCompleted.IsZero() {
-			out.CompleteDate = t.DateCompleted.UTC().Format(ewsTime)
-		}
-	} else {
+}
+
+// setTaskProgress writes the completion state a client shows in its task list.
+func setTaskProgress(out *Task, t oxtask.Task) {
+	if !t.Complete {
 		out.Status = "NotStarted"
+		return
 	}
-	return out
+	out.PercentComplete = 100
+	out.Status = "Completed"
+	if !t.DateCompleted.IsZero() {
+		out.CompleteDate = t.DateCompleted.UTC().Format(ewsTime)
+	}
 }

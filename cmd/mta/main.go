@@ -68,7 +68,40 @@ func main() {
 	cfgPath := flag.String("config", "/etc/hermex/config.json", "path to the JSON config file")
 	flag.Parse()
 
-	cfg, err := config.Load(*cfgPath)
+	d := openDaemon(*cfgPath)
+	d.wireDelivery()
+	addr, ln := d.listen()
+	scorer := d.startScoring()
+	lim := d.startLimiters(scorer)
+	d.wireRuleHooks(lim)
+	srv, provider := d.startServer(scorer, lim, addr, ln)
+	comps := []lifecycle.Component{srv, d.sendLaterLoop(), d.relayLoop()}
+	d.run(provider, comps, addr)
+}
+
+// mtaDaemon carries the handles every setup step of main shares.
+type mtaDaemon struct {
+	cfg      *config.Config
+	db       *sql.DB
+	dir      *directory.SQLDirectory
+	logger   *logging.Logger
+	logClose func() error
+	spool    *relay.Spool
+}
+
+// limiters is the set of abuse controls the SMTP backend and the delivery hooks
+// share.
+type limiters struct {
+	greylist *mta.Greylister
+	rate     *mta.RateLimiter
+	outbound *mta.OutboundLimiter
+	login    *authlimit.Limiter
+}
+
+// openDaemon loads the config, opens the directory database and builds the logger.
+// Every failure here is fatal: the daemon cannot deliver without any of them.
+func openDaemon(cfgPath string) *mtaDaemon {
+	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		log.Fatalf("hermex-mta: %v", err)
 	}
@@ -91,25 +124,31 @@ func main() {
 	logger, logClose := logging.Build(daemonName, cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
 	mta.SetDefaultLogger(logger)         // post-delivery pass failures route to the central log
+	return &mtaDaemon{cfg: cfg, db: db, dir: dir, logger: logger, logClose: logClose}
+}
 
+// wireDelivery opens the relay spool and installs the delivery-path hooks: push
+// notification, virus scanning and the two meeting hooks.
+func (d *mtaDaemon) wireDelivery() {
 	// Push notifications: publish every delivery's mailbox write to the relay so a
 	// recipient's parked notification long-poll (in another daemon) wakes the instant
 	// the mail lands. A no-op when notify_url is empty.
-	notify.EnableProducer(cfg.NotifyURL, cfg.NotifySecret, logger)
+	notify.EnableProducer(d.cfg.NotifyURL, d.cfg.NotifySecret, d.logger)
 
 	// Antivirus: install the package-level scanner from clamd_addr (a no-op when
 	// unset), so delivery scans inbound intake and authenticated submission.
-	mta.EnableScanning(cfg.ClamdAddr, dir, cfg.QuarantinePath, cfg.Hostname, logger)
+	mta.EnableScanning(d.cfg.ClamdAddr, d.dir, d.cfg.QuarantinePath, d.cfg.Hostname, d.logger)
 
 	// The outbound relay spool holds external recipients of authenticated
 	// submissions until the relay worker delivers them. A single spool serves all
 	// users; it lives under the data root alongside the mailbox stores.
-	spool, err := relay.Open(cfg.RelaySpoolPath())
+	spool, err := relay.Open(d.cfg.RelaySpoolPath())
 	if err != nil {
 		log.Fatalf("hermex-mta: open relay spool: %v", err)
 	}
 	// DKIM-sign outbound mail with the sending domain's enabled key as it is spooled.
-	spool.Signer = &dkimsign.Signer{Keys: dir, Logger: logger}
+	spool.Signer = &dkimsign.Signer{Keys: d.dir, Logger: d.logger}
+	d.spool = spool
 
 	// Automatic meeting-request processing runs at delivery for mailboxes configured
 	// for it (resource rooms, auto-accepting users). Wired here, not in the mta
@@ -118,14 +157,17 @@ func main() {
 	// external organizer is not, auto-relaying machine-generated replies to arbitrary
 	// external addresses is a backscatter vector, gated separately like the
 	// out-of-office reply.
-	mta.OnMeetingRequest = meetingHook(meeting.AutoProcess, logger)
+	mta.OnMeetingRequest = meetingHook(meeting.AutoProcess, d.logger)
 	// An inbound iTIP REPLY updates the organizer's calendar event so the
 	// TrackingTab reflects attendee responses; best-effort, delivery-independent.
 	mta.OnMeetingReply = func(st *objectstore.Store, sender string, msgID int64) (bool, error) {
 		return meeting.ProcessReply(st, sender, msgID)
 	}
+}
 
-	addr := cfg.SMTPAddr
+// listen opens the plaintext SMTP listener on the configured address.
+func (d *mtaDaemon) listen() (string, net.Listener) {
+	addr := d.cfg.SMTPAddr
 	if addr == "" {
 		addr = ":25"
 	}
@@ -133,7 +175,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("hermex-mta: listen %s: %v", addr, err)
 	}
+	return addr, ln
+}
 
+// startScoring builds the spam scorer from the stored settings, model and rules,
+// and starts the reloader that applies an operator's edits without a restart.
+func (d *mtaDaemon) startScoring() *antispam.Scorer {
+	dir, cfg := d.dir, d.cfg
 	scorer := antispam.New(antispam.DefaultWeights, antispam.DefaultThreshold)
 	// Settings (weights, threshold, DNSBL zones) live in the database, seeded from
 	// the built-in defaults on first run; the database is then the source of truth.
@@ -182,6 +230,14 @@ func main() {
 		return list, h, true
 	})
 	go reloader.Run(context.Background(), time.Minute)
+	return scorer
+}
+
+// startLimiters starts the four abuse controls, each reading its own DB-backed
+// settings at startup and re-reading them on a poll so an operator's change applies
+// without a restart.
+func (d *mtaDaemon) startLimiters(scorer *antispam.Scorer) limiters {
+	dir, logger := d.dir, d.logger
 	// Greylisting defers a first-contact triplet so a legitimate MTA retries. It
 	// starts disabled; the admin toggle is read at startup and hot-reloaded, and the
 	// triplet table is pruned periodically to stay bounded.
@@ -207,43 +263,57 @@ func main() {
 	loginLimiter := authlimit.New(0, 0, 0)
 	authlimit.Apply(daemonName, logger, loginLimiter, dir.GetLoginLockoutSettings)
 	go authlimit.RunMaintenance(daemonName, logger, loginLimiter, dir.GetLoginLockoutSettings)
+	return limiters{greylist: greylister, rate: rateLimiter, outbound: outboundLimiter, login: loginLimiter}
+}
 
+// wireRuleHooks wires the delivery-time inbox-rule sends to the relay spool and
+// starts the spam-history retention pass.
+func (d *mtaDaemon) wireRuleHooks(lim limiters) {
 	// Wire delivery-time inbox-rule forwarding to the relay spool, gated by the
 	// outbound abuse limiter (the per-user cap). Wired here, not in the mta package,
 	// to keep the store free of any send dependency (like OnMeetingRequest). The
 	// envelope sender is the forwarding owner so bounces return to them and the relay
 	// DKIM path signs for their domain; the loop/backscatter guards already ran.
-	mta.OnRuleForward = ruleHook("forward", outboundLimiter, spool.Enqueue, logger)
+	mta.OnRuleForward = ruleHook("forward", lim.outbound, d.spool.Enqueue, d.logger)
 	// Reject bounces and vacation auto-replies a delivery-time inbox rule generated:
 	// enqueued from the owning mailbox (DKIM domain) under the same outbound cap. The
 	// store built the bytes and applied the backscatter/loop guards.
-	mta.OnRuleSend = ruleHook("send", outboundLimiter, spool.Enqueue, logger)
+	mta.OnRuleSend = ruleHook("send", lim.outbound, d.spool.Enqueue, d.logger)
 	// Spam-history retention: how many of the most recent scored verdicts the
 	// spam_history table keeps. It is read at startup and re-read every minute so an
 	// admin's change applies without a restart.
-	applySpamHistorySettings(dir, logger)
-	go runSpamHistoryMaintenance(dir, logger)
-	// The three background loops in this daemon must each run in one process at a
-	// time, and none of them leases the work it picks up: a second sweeper
-	// re-delivers a scheduled message, a second drainer re-delivers a spooled
-	// recipient, a second digest pass re-reads a watermark its sibling has not
-	// advanced yet and mails the summary twice. A named advisory lock in the shared
-	// directory database enforces it across instances. It is taken per pass, so an
-	// instance that dies mid-pass drops its connection, the server frees the lock,
-	// and another instance takes over on its next tick.
-	lockPass := func(name string) func() (func(), bool) {
-		return func() (func(), bool) {
-			release, ok, err := dir.TryLock(context.Background(), name)
-			if err != nil {
-				// Do not proceed unguarded: a directory that cannot answer is also a
-				// directory that cannot deliver, and running anyway risks duplicates.
-				logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "worker.lock.fail",
-					Fields: logging.Fields{"lock": name}, Err: err.Error()})
-				return nil, false
-			}
-			return release, ok
+	applySpamHistorySettings(d.dir, d.logger)
+	go runSpamHistoryMaintenance(d.dir, d.logger)
+}
+
+// lockPass returns the guard a background loop takes before each pass.
+//
+// The three background loops in this daemon must each run in one process at a
+// time, and none of them leases the work it picks up: a second sweeper
+// re-delivers a scheduled message, a second drainer re-delivers a spooled
+// recipient, a second digest pass re-reads a watermark its sibling has not
+// advanced yet and mails the summary twice. A named advisory lock in the shared
+// directory database enforces it across instances. It is taken per pass, so an
+// instance that dies mid-pass drops its connection, the server frees the lock,
+// and another instance takes over on its next tick.
+func (d *mtaDaemon) lockPass(name string) func() (func(), bool) {
+	return func() (func(), bool) {
+		release, ok, err := d.dir.TryLock(context.Background(), name)
+		if err != nil {
+			// Do not proceed unguarded: a directory that cannot answer is also a
+			// directory that cannot deliver, and running anyway risks duplicates.
+			d.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "worker.lock.fail",
+				Fields: logging.Fields{"lock": name}, Err: err.Error()})
+			return nil, false
 		}
+		return release, ok
 	}
+}
+
+// startServer starts the quarantine digest and builds the SMTP server: the size
+// limits, the serving certificate, and both listeners.
+func (d *mtaDaemon) startServer(scorer *antispam.Scorer, lim limiters, addr string, ln net.Listener) (*smtp.Server, *tlscert.Provider) {
+	dir, cfg, logger := d.dir, d.cfg, d.logger
 	// Quarantine digest: deliver each user a periodic summary of newly quarantined
 	// mail with signed one-click release links. It needs a shared signing secret (the
 	// webmail release endpoint verifies the same key); without one nothing can be
@@ -254,8 +324,8 @@ func main() {
 	// active by a panel reading the toggle alone, and no goroutine existed to
 	// report otherwise. It now starts, sees the same toggle, and says on every run
 	// that it cannot send.
-	go runDigest(dir, []byte(cfg.DigestSecret), cfg.Hostname, lockPass(directory.LockDigest), logger)
-	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer, History: dir, Greylist: greylister, RateLimit: rateLimiter, Thresholds: dir, RecipientAccess: dir, Outbound: outboundLimiter, Limiter: loginLimiter}, Hostname: cfg.Hostname, Logger: logger}
+	go runDigest(dir, []byte(cfg.DigestSecret), cfg.Hostname, d.lockPass(directory.LockDigest), logger)
+	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: d.spool, Logger: logger, Scorer: scorer, History: dir, Greylist: lim.greylist, RateLimit: lim.rate, Thresholds: dir, RecipientAccess: dir, Outbound: lim.outbound, Limiter: lim.login}, Hostname: cfg.Hostname, Logger: logger}
 	// The built-in ceiling holds from the first accepted connection, so a settings
 	// read that fails at startup still leaves inbound DATA bounded.
 	srv.SetMaxSize(directory.DefaultMaxInboundBytes)
@@ -281,18 +351,27 @@ func main() {
 	mta.StartMessageSizeLimit(daemonName, logger, dir.GetMessageSizeSettings)
 	srv.AddListener(ln)
 	log.Printf("hermex-mta listening on %s", addr)
+	d.addImplicitTLS(srv, provider)
+	return srv, provider
+}
 
-	// Optional implicit-TLS listener (e.g. :465) served alongside the plaintext
-	// one; the stateless server handles both concurrently.
-	if provider.TLSEnabled() && cfg.SMTPSAddr != "" {
-		tln, err := serve.TLSListener(cfg.SMTPSAddr, provider)
-		if err != nil {
-			log.Fatalf("hermex-mta: implicit TLS on %s: %v", cfg.SMTPSAddr, err)
-		}
-		srv.AddListener(tln)
-		log.Printf("hermex-mta listening on %s (implicit TLS)", cfg.SMTPSAddr)
+// addImplicitTLS serves the optional implicit-TLS listener (e.g. :465) alongside
+// the plaintext one; the stateless server handles both concurrently.
+func (d *mtaDaemon) addImplicitTLS(srv *smtp.Server, provider *tlscert.Provider) {
+	if !provider.TLSEnabled() || d.cfg.SMTPSAddr == "" {
+		return
 	}
+	tln, err := serve.TLSListener(d.cfg.SMTPSAddr, provider)
+	if err != nil {
+		log.Fatalf("hermex-mta: implicit TLS on %s: %v", d.cfg.SMTPSAddr, err)
+	}
+	srv.AddListener(tln)
+	log.Printf("hermex-mta listening on %s (implicit TLS)", d.cfg.SMTPSAddr)
+}
 
+// sendLaterLoop builds the scheduled-send release loop.
+func (d *mtaDaemon) sendLaterLoop() lifecycle.Component {
+	dir, cfg, logger, spool := d.dir, d.cfg, d.logger, d.spool
 	// Release scheduled (send-later) messages from every mailbox's Outbox. This
 	// runs in the always-on MTA so it survives webmail restarts. It is a lifecycle
 	// component so shutdown cancels its loop alongside draining the SMTP server.
@@ -325,10 +404,14 @@ func main() {
 	// lifecycle.Loop, not lifecycle.Func: shutdown must wait for the sweep to
 	// return, because the cleanups that follow close the spool and the directory
 	// database this loop delivers through.
-	sendLater := lifecycle.Loop(func(ctx context.Context) {
-		runSendLater(ctx, dir, deliver, onGiveUp, lockPass(directory.LockSendLater), sendLaterInterval, logger)
+	return lifecycle.Loop(func(ctx context.Context) {
+		runSendLater(ctx, dir, deliver, onGiveUp, d.lockPass(directory.LockSendLater), sendLaterInterval, logger)
 	})
+}
 
+// relayLoop builds the outbound relay drain loop.
+func (d *mtaDaemon) relayLoop() lifecycle.Component {
+	dir, cfg, logger, spool := d.dir, d.cfg, d.logger, d.spool
 	// Drain the outbound relay spool: deliver each authenticated submission's
 	// external recipients to their mail exchangers, retrying transient failures.
 	// Like the send-later sweep this is a single always-on loop, cancelled on
@@ -337,7 +420,7 @@ func main() {
 		Spool:    spool,
 		HeloName: cfg.Hostname,
 		Logger:   logger,
-		Guard:    lockPass(directory.LockRelayDrain),
+		Guard:    d.lockPass(directory.LockRelayDrain),
 		// Honor recipients' published MTA-STS policies (RFC 8461): a domain in
 		// enforce mode gets validated TLS to a policy-listed MX or no delivery. This
 		// only changes behavior for domains that opt in by publishing a policy.
@@ -392,21 +475,24 @@ func main() {
 	// Joined on shutdown for the same reason as the send-later sweep: an in-flight
 	// pass that settles a delivered recipient must finish before spool.Close runs,
 	// or the settle fails and the next start re-delivers an already-sent message.
-	relayLoop := lifecycle.Loop(func(ctx context.Context) { relayWorker.Run(ctx, relayInterval) })
+	return lifecycle.Loop(func(ctx context.Context) { relayWorker.Run(ctx, relayInterval) })
+}
 
-	logger.Info(logging.System, "daemon.startup", logging.Fields{"daemon": "mta", "addr": addr})
+// run serves until a shutdown signal arrives, then drains every component and
+// closes the spool, the log sink and the directory database.
+func (d *mtaDaemon) run(provider *tlscert.Provider, comps []lifecycle.Component, addr string) {
+	d.logger.Info(logging.System, "daemon.startup", logging.Fields{"daemon": "mta", "addr": addr})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	checks := []health.Check{{Name: "directory", Probe: db.PingContext}}
+	checks := []health.Check{{Name: "directory", Probe: d.db.PingContext}}
 	if provider.TLSEnabled() {
 		// Report the serving certificate's remaining validity, so a renewal that
 		// failed shows as degraded before clients start failing handshakes.
 		checks = append(checks, tlscert.ExpiryCheck(provider))
 	}
-	comps := append([]lifecycle.Component{srv, sendLater, relayLoop},
-		health.Components(cfg.HealthAddr, "mta", checks...)...)
-	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, spool.Close, logClose, db.Close); err != nil {
+	comps = append(comps, health.Components(d.cfg.HealthAddr, "mta", checks...)...)
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, d.spool.Close, d.logClose, d.db.Close); err != nil {
 		log.Fatalf("hermex-mta: %v", err)
 	}
 }
@@ -837,50 +923,68 @@ func sweepOutboxes(ctx context.Context, dir directory.MailboxLister, deliver spo
 		if ctx.Err() != nil {
 			return
 		}
-		st, err := objectstore.Open(path)
-		if err != nil {
-			log.Printf("hermex-mta send-later: open %s: %v", path, err)
-			continue
-		}
-		mbCtx, cancelMailbox := context.WithTimeout(ctx, perMailboxSweepBudget)
-		stats, err := spooler.ProcessDueOutboxStats(mbCtx, st, deliver, onGiveUp, time.Now())
-		budgetSpent := mbCtx.Err() != nil && ctx.Err() == nil
-		cancelMailbox()
-		_ = st.Close()
-		if budgetSpent {
-			mailboxesOverBudget++
-			logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.MTA,
-				Name: "sendlater.budget", Fields: logging.Fields{"mailbox": path, "released": stats.Released}})
-		}
-		total.Scanned += stats.Scanned
-		total.Released += stats.Released
-		total.Failed += stats.Failed
-		total.Waiting += stats.Waiting
-		total.Retrying += stats.Retrying
-		if err != nil {
-			mailboxesFailed++
-			log.Printf("hermex-mta send-later: %s: %v", path, err)
-			logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "sendlater.error", Fields: logging.Fields{"mailbox": path}, Err: err.Error()})
-		}
-		if stats.Released > 0 {
-			log.Printf("hermex-mta send-later: released %d scheduled message(s) from %s", stats.Released, path)
-			logger.Info(logging.MTA, "sendlater.release", logging.Fields{"count": stats.Released, "mailbox": path})
-		}
+		stats, failed, overBudget := sweepMailbox(ctx, path, deliver, onGiveUp, logger)
+		addStats(&total, stats)
+		mailboxesFailed += failed
+		mailboxesOverBudget += overBudget
 	}
-	// One summary per sweep. The per-mailbox lines above only appear when something
-	// happened, so without this a backlog that is merely growing, rather than
-	// failing, leaves no trace at all: nothing is released and nothing errors while
-	// the queue fills. Waiting is the depth reading, retrying is where a stuck send
-	// shows up before it exhausts its budget.
+	logSweep(logger, len(maildirs), mailboxesFailed, mailboxesOverBudget, total)
+}
+
+// sweepMailbox releases one mailbox's due scheduled sends, reporting whether the
+// pass failed and whether it spent its whole per-mailbox time budget.
+func sweepMailbox(ctx context.Context, path string, deliver spooler.DeliverFunc, onGiveUp spooler.GiveUpFunc, logger *logging.Logger) (stats spooler.Stats, failed, overBudget int) {
+	st, err := objectstore.Open(path)
+	if err != nil {
+		log.Printf("hermex-mta send-later: open %s: %v", path, err)
+		return stats, 0, 0
+	}
+	mbCtx, cancelMailbox := context.WithTimeout(ctx, perMailboxSweepBudget)
+	stats, err = spooler.ProcessDueOutboxStats(mbCtx, st, deliver, onGiveUp, time.Now())
+	budgetSpent := mbCtx.Err() != nil && ctx.Err() == nil
+	cancelMailbox()
+	_ = st.Close()
+	if budgetSpent {
+		overBudget = 1
+		logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.MTA,
+			Name: "sendlater.budget", Fields: logging.Fields{"mailbox": path, "released": stats.Released}})
+	}
+	if err != nil {
+		failed = 1
+		log.Printf("hermex-mta send-later: %s: %v", path, err)
+		logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "sendlater.error", Fields: logging.Fields{"mailbox": path}, Err: err.Error()})
+	}
+	if stats.Released > 0 {
+		log.Printf("hermex-mta send-later: released %d scheduled message(s) from %s", stats.Released, path)
+		logger.Info(logging.MTA, "sendlater.release", logging.Fields{"count": stats.Released, "mailbox": path})
+	}
+	return stats, failed, overBudget
+}
+
+// addStats folds one mailbox's counters into the sweep total.
+func addStats(total *spooler.Stats, s spooler.Stats) {
+	total.Scanned += s.Scanned
+	total.Released += s.Released
+	total.Failed += s.Failed
+	total.Waiting += s.Waiting
+	total.Retrying += s.Retrying
+}
+
+// logSweep records one summary per sweep. The per-mailbox lines only appear when
+// something happened, so without this a backlog that is merely growing, rather than
+// failing, leaves no trace at all: nothing is released and nothing errors while the
+// queue fills. Waiting is the depth reading, retrying is where a stuck send shows up
+// before it exhausts its budget.
+func logSweep(logger *logging.Logger, mailboxes, failed, overBudget int, total spooler.Stats) {
 	level := logging.LevelInfo
-	if mailboxesFailed > 0 || mailboxesOverBudget > 0 {
+	if failed > 0 || overBudget > 0 {
 		level = logging.LevelWarn
 	}
 	logger.Emit(logging.Event{
 		Level: level, Subsystem: logging.MTA, Name: "sendlater.sweep",
 		Fields: logging.Fields{
-			"mailboxes": len(maildirs), "mailboxes_failed": mailboxesFailed,
-			"mailboxes_over_budget": mailboxesOverBudget,
+			"mailboxes": mailboxes, "mailboxes_failed": failed,
+			"mailboxes_over_budget": overBudget,
 			"scanned":               total.Scanned, "released": total.Released, "failed": total.Failed,
 			"waiting": total.Waiting, "retrying": total.Retrying,
 		},

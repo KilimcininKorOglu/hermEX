@@ -34,8 +34,17 @@ type Policy struct {
 // unless the policy is withdrawing (mode none), at least one mx pattern. Unknown
 // keys are ignored, as the RFC requires for forward compatibility.
 func Parse(text string) (*Policy, error) {
-	var p Policy
-	var version string
+	p, version := parseLines(text)
+	if err := validate(p, version); err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+// parseLines reads the policy's key/value lines, returning the fields it recognises
+// plus the declared version. Unknown keys are ignored, as the RFC requires for
+// forward compatibility.
+func parseLines(text string) (p Policy, version string) {
 	for line := range strings.SplitSeq(text, "\n") {
 		key, val, ok := strings.Cut(strings.TrimRight(line, "\r"), ":")
 		if !ok {
@@ -55,21 +64,28 @@ func Parse(text string) (*Policy, error) {
 			p.MaxAge, _ = strconv.Atoi(val)
 		}
 	}
+	return p, version
+}
+
+// validate refuses a policy this sender will not honour: a wrong version, an unknown
+// mode, a policy that names no mx patterns while it is not withdrawing, or a cache
+// lifetime that is not a positive number of seconds.
+func validate(p Policy, version string) error {
 	if version != "STSv1" {
-		return nil, fmt.Errorf("mtasts: unsupported or missing version %q", version)
+		return fmt.Errorf("mtasts: unsupported or missing version %q", version)
 	}
 	switch p.Mode {
 	case ModeEnforce, ModeTesting, ModeNone:
 	default:
-		return nil, fmt.Errorf("mtasts: unknown mode %q", p.Mode)
+		return fmt.Errorf("mtasts: unknown mode %q", p.Mode)
 	}
 	if p.Mode != ModeNone && len(p.MX) == 0 {
-		return nil, fmt.Errorf("mtasts: policy declares no mx patterns")
+		return fmt.Errorf("mtasts: policy declares no mx patterns")
 	}
 	if p.MaxAge <= 0 {
-		return nil, fmt.Errorf("mtasts: max_age must be a positive number of seconds")
+		return fmt.Errorf("mtasts: max_age must be a positive number of seconds")
 	}
-	return &p, nil
+	return nil
 }
 
 // Build serializes a policy to mta-sts.txt form (RFC 8461 §3.2): CRLF-separated
