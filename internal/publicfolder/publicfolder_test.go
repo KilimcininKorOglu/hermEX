@@ -50,82 +50,75 @@ func names(fs []Folder) []string {
 func TestVisibleFoldersACLAndTenantIsolation(t *testing.T) {
 	svc := New(fakePaths{root: t.TempDir()})
 
-	// A domain with no public store: nothing visible, no error, the feature is
-	// simply absent rather than auto-provisioned by a read.
-	if got, err := svc.VisibleFolders("nobody@unprov.test"); err != nil || got != nil {
-		t.Fatalf("un-provisioned domain VisibleFolders = %v, %v; want nil, nil", got, err)
-	}
-
-	// Provision local.test and build the tree the way an administrator would:
-	// Announcements visible to anyone (and postable by poster), Staff visible only
-	// to poster.
-	if err := svc.Provision("local.test"); err != nil {
-		t.Fatal(err)
-	}
-	st, err := svc.OpenForDomain("local.test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	announce, err := st.CreateFolder(nil, "Announcements")
-	if err != nil {
-		t.Fatal(err)
-	}
-	staff, err := st.CreateFolder(nil, "Staff")
-	if err != nil {
-		t.Fatal(err)
-	}
-	grantAnyone(t, st, announce, mapi.FrightsVisible|mapi.FrightsReadAny)
-	grantUser(t, st, announce, "poster@local.test", mapi.FrightsVisible|mapi.FrightsReadAny|mapi.FrightsCreate)
-	grantUser(t, st, staff, "poster@local.test", mapi.FrightsVisible|mapi.FrightsReadAny|mapi.FrightsCreate)
-	st.Close()
+	checkUnprovisionedDomain(t, svc)
+	seedLocalTree(t, svc)
 
 	// Reader holds no explicit grant: sees only the anyone-granted Announcements,
 	// never Staff (which has no anyone grant).
-	r, err := svc.VisibleFolders("reader@local.test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := names(r); len(got) != 1 || got[0] != "Announcements" {
-		t.Errorf("reader sees %v, want [Announcements] only", got)
-	}
+	wantNames(t, visibleTo(t, svc, "reader@local.test"), []string{"Announcements"},
+		"what a reader with no explicit grant sees")
 
 	// Poster holds explicit grants: sees both, with post rights on Announcements.
-	p, err := svc.VisibleFolders("poster@local.test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := names(p); len(got) != 2 {
-		t.Errorf("poster sees %v, want both Announcements and Staff", got)
-	}
-	for _, f := range p {
-		if f.DisplayName == "Announcements" && f.Rights&mapi.FrightsCreate == 0 {
-			t.Errorf("poster lacks the post right on Announcements: rights=%#x", f.Rights)
-		}
-	}
+	poster := visibleTo(t, svc, "poster@local.test")
+	wantNames(t, poster, []string{"Announcements", "Staff"}, "what a poster with explicit grants sees")
+	wantPostRight(t, poster, "Announcements")
 
-	// Tenant isolation: provision a second domain with its OWN folder, then confirm
-	// a caller in that domain sees only their domain's folder and never local.test's
-	// tree, even though local.test's store exists on disk. The domain is derived
-	// from the caller's address, so there is no path that opens another tenant's store.
-	if err := svc.Provision("other.test"); err != nil {
-		t.Fatal(err)
-	}
-	ost, err := svc.OpenForDomain("other.test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	other, err := ost.CreateFolder(nil, "OtherAnnounce")
-	if err != nil {
-		t.Fatal(err)
-	}
-	grantAnyone(t, ost, other, mapi.FrightsVisible|mapi.FrightsReadAny)
-	ost.Close()
+	seedOtherTree(t, svc)
+	// Tenant isolation: the second domain's caller sees only their domain's folder
+	// and never local.test's tree, even though local.test's store exists on disk. The
+	// domain is derived from the caller's address, so there is no path that opens
+	// another tenant's store.
+	wantNames(t, visibleTo(t, svc, "intruder@other.test"), []string{"OtherAnnounce"},
+		"what an other.test caller sees")
+}
 
-	o, err := svc.VisibleFolders("intruder@other.test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := names(o); len(got) != 1 || got[0] != "OtherAnnounce" {
-		t.Errorf("cross-tenant routing leak: other.test caller sees %v, want [OtherAnnounce] only", got)
-	}
+// checkUnprovisionedDomain proves a domain with no public store yields nothing and no
+// error: the feature is simply absent rather than auto-provisioned by a read.
+func checkUnprovisionedDomain(t *testing.T, svc *Service) {
+	t.Helper()
+	got, err := svc.VisibleFolders("nobody@unprov.test")
+	mustNoErr(t, err, "VisibleFolders on an un-provisioned domain")
+	wantEq(t, len(got), 0, "what an un-provisioned domain sees")
+}
+
+// seedLocalTree provisions local.test and builds the tree the way an administrator
+// would: Announcements visible to anyone (and postable by poster), Staff visible only
+// to poster.
+func seedLocalTree(t *testing.T, svc *Service) {
+	t.Helper()
+	mustNoErr(t, svc.Provision("local.test"), "Provision(local.test)")
+	st, err := svc.OpenForDomain("local.test")
+	mustNoErr(t, err, "OpenForDomain(local.test)")
+	defer st.Close()
+	announce := createFolder(t, st, "Announcements")
+	staff := createFolder(t, st, "Staff")
+	grantAnyone(t, st, announce, mapi.FrightsVisible|mapi.FrightsReadAny)
+	grantUser(t, st, announce, "poster@local.test", mapi.FrightsVisible|mapi.FrightsReadAny|mapi.FrightsCreate)
+	grantUser(t, st, staff, "poster@local.test", mapi.FrightsVisible|mapi.FrightsReadAny|mapi.FrightsCreate)
+}
+
+// seedOtherTree provisions a second domain with its own anyone-visible folder.
+func seedOtherTree(t *testing.T, svc *Service) {
+	t.Helper()
+	mustNoErr(t, svc.Provision("other.test"), "Provision(other.test)")
+	st, err := svc.OpenForDomain("other.test")
+	mustNoErr(t, err, "OpenForDomain(other.test)")
+	defer st.Close()
+	grantAnyone(t, st, createFolder(t, st, "OtherAnnounce"), mapi.FrightsVisible|mapi.FrightsReadAny)
+}
+
+// createFolder adds one public folder to a domain's store.
+func createFolder(t *testing.T, st *objectstore.Store, name string) int64 {
+	t.Helper()
+	fid, err := st.CreateFolder(nil, name)
+	mustNoErr(t, err, "CreateFolder("+name+")")
+	return fid
+}
+
+// visibleTo lists the folders one caller sees.
+func visibleTo(t *testing.T, svc *Service, caller string) []Folder {
+	t.Helper()
+	fs, err := svc.VisibleFolders(caller)
+	mustNoErr(t, err, "VisibleFolders("+caller+")")
+	return fs
 }

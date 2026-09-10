@@ -165,12 +165,27 @@ func TestTLSConfigHandshake(t *testing.T) {
 		t.Error("SessionTicketsDisabled = true, want session resumption enabled")
 	}
 
+	addr := serveTLS(t, cfg)
+	client, err := tls.Dial("tcp", addr, &tls.Config{RootCAs: certPool(t, certPath), ServerName: "localhost"})
+	if err != nil {
+		t.Fatalf("dial (trusting configured cert): %v", err)
+	}
+	defer client.Close()
+	if v := client.ConnectionState().Version; v < tls.VersionTLS12 {
+		t.Errorf("negotiated version = %#x, want >= TLS 1.2", v)
+	}
+}
+
+// serveTLS listens on a loopback port with the built config and drives the server
+// side of one handshake, returning the dial address.
+func serveTLS(t *testing.T, cfg *tls.Config) string {
+	t.Helper()
 	rawLn, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 	ln := tls.NewListener(rawLn, cfg)
-	defer ln.Close()
+	t.Cleanup(func() { _ = ln.Close() })
 	go func() {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -179,7 +194,13 @@ func TestTLSConfigHandshake(t *testing.T) {
 		defer conn.Close()
 		_ = conn.(*tls.Conn).Handshake() // drive the server side of the handshake
 	}()
+	return ln.Addr().String()
+}
 
+// certPool trusts exactly the configured certificate, so the handshake proves the
+// builder served it rather than some other chain.
+func certPool(t *testing.T, certPath string) *x509.CertPool {
+	t.Helper()
 	pemBytes, err := os.ReadFile(certPath)
 	if err != nil {
 		t.Fatalf("read cert: %v", err)
@@ -188,14 +209,7 @@ func TestTLSConfigHandshake(t *testing.T) {
 	if !pool.AppendCertsFromPEM(pemBytes) {
 		t.Fatal("AppendCertsFromPEM: no cert added")
 	}
-	client, err := tls.Dial("tcp", ln.Addr().String(), &tls.Config{RootCAs: pool, ServerName: "localhost"})
-	if err != nil {
-		t.Fatalf("dial (trusting configured cert): %v", err)
-	}
-	defer client.Close()
-	if v := client.ConnectionState().Version; v < tls.VersionTLS12 {
-		t.Errorf("negotiated version = %#x, want >= TLS 1.2", v)
-	}
+	return pool
 }
 
 // writeSelfSignedCert generates an ECDSA P-256 self-signed certificate valid for

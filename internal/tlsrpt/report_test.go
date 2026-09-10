@@ -34,45 +34,63 @@ func TestReportJSON(t *testing.T) {
 		}},
 	}
 
+	// Decode into a generic map to assert the wire field names, not Go names.
+	m := reportMap(t, rep)
+	for _, key := range []string{"organization-name", "date-range", "contact-info", "report-id", "policies"} {
+		wantField(t, m, key)
+	}
+	dr := m["date-range"].(map[string]any)
+	wantValue(t, dr["start-datetime"], "2016-04-01T00:00:00Z", "start-datetime (RFC 3339 UTC)")
+
+	pol := m["policies"].([]any)[0].(map[string]any)
+	policy := pol["policy"].(map[string]any)
+	wantValue(t, policy["policy-type"], PolicyTypeSTS, "policy-type")
+	// policy-string is empty here and must be omitted, not rendered as null.
+	wantNoField(t, policy, "policy-string")
+
+	summary := pol["summary"].(map[string]any)
+	wantValue(t, summary["total-successful-session-count"], 5326.0, "total-successful-session-count")
+	fd := pol["failure-details"].([]any)[0].(map[string]any)
+	wantValue(t, fd["result-type"], ResultCertificateExpired, "result-type")
+	wantValue(t, fd["failed-session-count"], 100.0, "failed-session-count")
+}
+
+// reportMap renders a report and decodes it into a generic map, so an assertion
+// names the wire field rather than the Go field.
+func reportMap(t *testing.T, rep *Report) map[string]any {
+	t.Helper()
 	b, err := rep.JSON()
 	if err != nil {
 		t.Fatalf("JSON: %v", err)
 	}
-
-	// Decode into a generic map to assert the wire field names, not Go names.
 	var m map[string]any
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	for _, key := range []string{"organization-name", "date-range", "contact-info", "report-id", "policies"} {
-		if _, ok := m[key]; !ok {
-			t.Errorf("report JSON missing field %q", key)
-		}
-	}
-	dr := m["date-range"].(map[string]any)
-	if got := dr["start-datetime"]; got != "2016-04-01T00:00:00Z" {
-		t.Errorf("start-datetime = %v, want RFC 3339 UTC 2016-04-01T00:00:00Z", got)
-	}
+	return m
+}
 
-	pol := m["policies"].([]any)[0].(map[string]any)
-	policy := pol["policy"].(map[string]any)
-	if policy["policy-type"] != PolicyTypeSTS {
-		t.Errorf("policy-type = %v, want %q", policy["policy-type"], PolicyTypeSTS)
+// wantField fails the test unless the object carries the field.
+func wantField(t *testing.T, m map[string]any, key string) {
+	t.Helper()
+	if _, ok := m[key]; !ok {
+		t.Errorf("report JSON missing field %q", key)
 	}
-	// policy-string is empty here and must be omitted, not rendered as null.
-	if _, ok := policy["policy-string"]; ok {
-		t.Error("empty policy-string must be omitted from the JSON")
+}
+
+// wantNoField fails the test unless the field is omitted entirely.
+func wantNoField(t *testing.T, m map[string]any, key string) {
+	t.Helper()
+	if _, ok := m[key]; ok {
+		t.Errorf("empty %s must be omitted from the JSON", key)
 	}
-	summary := pol["summary"].(map[string]any)
-	if summary["total-successful-session-count"].(float64) != 5326 {
-		t.Errorf("total-successful-session-count = %v, want 5326", summary["total-successful-session-count"])
-	}
-	fd := pol["failure-details"].([]any)[0].(map[string]any)
-	if fd["result-type"] != ResultCertificateExpired {
-		t.Errorf("result-type = %v, want %q", fd["result-type"], ResultCertificateExpired)
-	}
-	if fd["failed-session-count"].(float64) != 100 {
-		t.Errorf("failed-session-count = %v, want 100", fd["failed-session-count"])
+}
+
+// wantValue fails the test unless the decoded field equals what the caller expected.
+func wantValue(t *testing.T, got, want any, what string) {
+	t.Helper()
+	if got != want {
+		t.Errorf("%s = %v, want %v", what, got, want)
 	}
 }
 

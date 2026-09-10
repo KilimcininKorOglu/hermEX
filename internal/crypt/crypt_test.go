@@ -94,32 +94,50 @@ func TestStoredHashesFromTheOldLibraryStillVerify(t *testing.T) {
 // TestNewSHA512RoundTrips proves a freshly generated hash carries its work
 // factor, uses a full salt, and matches exactly its own password.
 func TestNewSHA512RoundTrips(t *testing.T) {
-	h, err := NewSHA512("s3cret", 1000)
-	if err != nil {
-		t.Fatal(err)
-	}
+	h := mustHash(t, "s3cret", 1000)
 	if !strings.HasPrefix(h, "$6$rounds=1000$") {
 		t.Errorf("hash = %q, want an explicit rounds section", h)
 	}
-	salt, rounds, explicit, ok := parseSHA512(h)
-	if !ok || !explicit || rounds != 1000 || len(salt) != sha512SaltLenMax {
-		t.Errorf("parsed salt=%q rounds=%d explicit=%v ok=%v", salt, rounds, explicit, ok)
-	}
-	if !Verify("s3cret", h) || Verify("s3cre", h) {
-		t.Error("the fresh hash did not match exactly its own password")
-	}
+	checkParsedFactor(t, h)
+	checkMatchesOnlyItsOwn(t, h, "s3cret", "s3cre")
 
 	// At the scheme default the rounds section is omitted, which is what makes a
 	// hash comparable with one written by any other crypt(3).
-	def, err := NewSHA512("s3cret", SHA512RoundsDefault)
-	if err != nil {
-		t.Fatal(err)
-	}
+	def := mustHash(t, "s3cret", SHA512RoundsDefault)
 	if strings.Contains(def, "rounds=") {
 		t.Errorf("hash at the scheme default = %q, want no rounds section", def)
 	}
 	if !Verify("s3cret", def) {
 		t.Error("the default-factor hash does not verify")
+	}
+}
+
+// mustHash generates one hash at the given work factor.
+func mustHash(t *testing.T, password string, rounds int) string {
+	t.Helper()
+	h, err := NewSHA512(password, rounds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
+// checkParsedFactor proves the generated hash carries its work factor and a full
+// salt, the two the re-hash decision reads back.
+func checkParsedFactor(t *testing.T, h string) {
+	t.Helper()
+	salt, rounds, explicit, ok := parseSHA512(h)
+	if !ok || !explicit || rounds != 1000 || len(salt) != sha512SaltLenMax {
+		t.Errorf("parsed salt=%q rounds=%d explicit=%v ok=%v", salt, rounds, explicit, ok)
+	}
+}
+
+// checkMatchesOnlyItsOwn proves the hash verifies its own password and refuses a
+// near miss.
+func checkMatchesOnlyItsOwn(t *testing.T, h, password, near string) {
+	t.Helper()
+	if !Verify(password, h) || Verify(near, h) {
+		t.Error("the fresh hash did not match exactly its own password")
 	}
 }
 
