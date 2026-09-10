@@ -97,9 +97,12 @@ func TestGetStreamingEventsMultiSub(t *testing.T) {
 	}
 }
 
-// TestGetStreamingEventsMixedValidInvalid confirms one invalid id among valid
-// ones is reported in ErrorSubscriptionIds while the valid subscriptions still
-// stream (an Error response class coexisting with a live stream).
+// TestGetStreamingEventsMixedValidInvalid confirms one invalid id fails the whole
+// call: the response names it in ErrorSubscriptionIds, reports the connection
+// Closed, and streams nothing, even though another named subscription is live.
+// The documented GetStreamingEvents error response pairs ErrorInvalidSubscription
+// with ConnectionStatus Closed, and the operation confirms each subscription id
+// before it streams.
 func TestGetStreamingEventsMixedValidInvalid(t *testing.T) {
 	srv, ts, path := streamServer(t)
 	sess := &session{user: testUser, mailbox: path}
@@ -109,11 +112,14 @@ func TestGetStreamingEventsMixedValidInvalid(t *testing.T) {
 	if !strings.Contains(body, "ErrorInvalidSubscription") {
 		t.Errorf("the unknown id must be reported in ErrorSubscriptionIds: %s", body)
 	}
-	if !strings.Contains(body, "StatusEvent") {
-		t.Errorf("the valid subscription must keep streaming despite the invalid one: %s", body)
-	}
 	if !strings.Contains(body, ">Closed</ConnectionStatus>") {
-		t.Errorf("stream must still close at the window: %s", body)
+		t.Errorf("an invalid subscription must report the connection Closed: %s", body)
+	}
+	if strings.Contains(body, ">OK</ConnectionStatus>") {
+		t.Errorf("a refused call must never report the connection OK: %s", body)
+	}
+	if strings.Contains(body, "StatusEvent") {
+		t.Errorf("a refused call must stream nothing: %s", body)
 	}
 }
 
@@ -135,7 +141,9 @@ func TestGetStreamingEventsHeartbeat(t *testing.T) {
 
 // TestGetStreamingEventsAllInvalid confirms a stream over only unknown
 // subscriptions reports them in ErrorSubscriptionIds and closes immediately
-// rather than holding an idle connection open.
+// rather than holding an idle connection open. The error message itself carries
+// the Closed status: a client that reads connection state rather than the
+// response code otherwise sees no reason to subscribe anew.
 func TestGetStreamingEventsAllInvalid(t *testing.T) {
 	_, ts, _ := streamServer(t)
 	body := streamPost(t, ts, []string{"Zm9vYmFyMDA="}, 1) // well-formed but unknown
@@ -144,6 +152,63 @@ func TestGetStreamingEventsAllInvalid(t *testing.T) {
 	}
 	if !strings.Contains(body, ">Closed</ConnectionStatus>") {
 		t.Errorf("a stream with no live subscription must close immediately: %s", body)
+	}
+	if strings.Contains(body, ">OK</ConnectionStatus>") {
+		t.Errorf("the refusal must not report the connection OK anywhere: %s", body)
+	}
+}
+
+// TestStreamChunkReportsALostSubscription is the mid-stream unit case: a
+// subscription that vanished while the connection was held is named in
+// ErrorSubscriptionIds on the very chunk that notices it, and drops out of the
+// watched set, while the live one keeps its Notification.
+func TestStreamChunkReportsALostSubscription(t *testing.T) {
+	srv, _, path := streamServer(t)
+	sess := &session{user: testUser, mailbox: path}
+	id := subscribe(t, srv, sess, subscribeInner(true, "", "CreatedEvent"))
+
+	msg, live := srv.streamChunk([]string{id, "Zm9vYmFyMDA="})
+
+	if msg.ResponseClass != "Error" || msg.ResponseCode != "ErrorInvalidSubscription" {
+		t.Errorf("chunk = %s/%s, want Error/ErrorInvalidSubscription", msg.ResponseClass, msg.ResponseCode)
+	}
+	if msg.ErrorSubs == nil || len(msg.ErrorSubs.IDs) != 1 || msg.ErrorSubs.IDs[0] != "Zm9vYmFyMDA=" {
+		t.Errorf("ErrorSubscriptionIds = %+v, want the lost id", msg.ErrorSubs)
+	}
+	if len(live) != 1 || live[0] != id {
+		t.Errorf("live = %v, want only the surviving subscription", live)
+	}
+	if len(msg.Notifications) != 1 {
+		t.Errorf("notifications = %d, want 1 (the surviving subscription)", len(msg.Notifications))
+	}
+}
+
+// TestStreamClosesWhenItsLastSubscriptionIsLost proves the held connection ends as
+// soon as nothing is left to watch: the subscription is live when the stream
+// opens and its lifetime passes during the stream, so the loop reports it and
+// closes long before the connection window would.
+func TestStreamClosesWhenItsLastSubscriptionIsLost(t *testing.T) {
+	srv, ts, path := streamServer(t)
+	srv.streamWindow = 2 * time.Second
+	sess := &session{user: testUser, mailbox: path}
+	id := subscribe(t, srv, sess, subscribeInner(true, "", "CreatedEvent"))
+	srv.subMu.Lock()
+	srv.subs[id].created = time.Now()
+	srv.subs[id].timeout = 60 * time.Millisecond // live on entry, gone a few ticks later
+	srv.subMu.Unlock()
+
+	start := time.Now()
+	body := streamPost(t, ts, []string{id}, 1)
+	elapsed := time.Since(start)
+
+	if !strings.Contains(body, "ErrorInvalidSubscription") {
+		t.Errorf("the lost subscription must be reported on the stream: %s", body)
+	}
+	if !strings.Contains(body, ">Closed</ConnectionStatus>") {
+		t.Errorf("the stream must report the connection Closed: %s", body)
+	}
+	if elapsed > 1500*time.Millisecond {
+		t.Errorf("the stream held for %v, want a close as soon as the last subscription was lost", elapsed)
 	}
 }
 

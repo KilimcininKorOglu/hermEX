@@ -52,11 +52,15 @@ type errorSubs struct {
 
 // handleGetStreamingEvents answers GetStreamingEvents (MS-OXWSNTIF streaming): it
 // holds the connection open and writes a sequence of GetStreamingEventsResponse
-// envelopes, an initial one carrying ConnectionStatus=OK (and any invalid
-// subscription ids), then a continuation every interval with the polled events
-// (or a StatusEvent heartbeat when idle), then a final one with
-// ConnectionStatus=Closed when the connection timeout expires. The response is
-// chunked (no Content-Length), which the gateway forwards incrementally.
+// envelopes, an initial one carrying ConnectionStatus=OK, then a continuation
+// every interval with the polled events (or a StatusEvent heartbeat when idle),
+// then a final one carrying ConnectionStatus=Closed when the connection timeout
+// expires. The response is chunked (no Content-Length), which the gateway
+// forwards incrementally.
+//
+// A subscription id the server will not stream fails the whole call: the response
+// is a single ErrorInvalidSubscription message naming it, with
+// ConnectionStatus=Closed, and nothing is streamed.
 func (s *Server) handleGetStreamingEvents(w http.ResponseWriter, r *http.Request, inner []byte, sess *session) {
 	var req getStreamingEventsRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
@@ -72,11 +76,15 @@ func (s *Server) handleGetStreamingEvents(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
 	rc := http.NewResponseController(w)
 
-	if !writeStreamChunk(w, rc, streamEnvelope(streamOpening(bad)), true) {
+	if len(bad) > 0 {
+		writeStreamChunk(w, rc, streamEnvelope(invalidSubscriptions(bad)), true)
+		return
+	}
+	if !writeStreamChunk(w, rc, streamEnvelope(openingMessage()), true) {
 		return
 	}
 
-	// No live subscription → close immediately rather than hold an idle connection.
+	// No subscription named → close immediately rather than hold an idle connection.
 	if len(valid) == 0 {
 		writeStreamChunk(w, rc, streamEnvelope(closedMessage()), false)
 		return
@@ -118,18 +126,27 @@ func (s *Server) streamUntilClosed(w http.ResponseWriter, r *http.Request, rc *h
 	}
 	ctx := r.Context()
 	for {
-		if !writeStreamChunk(w, rc, s.streamNotifications(valid), false) {
+		msg, live := s.streamChunk(valid)
+		valid = live
+		// The connection is done when the window has passed or nothing is left to
+		// watch. Reporting it on this chunk puts the closing signal on the same
+		// message as the fault that caused it.
+		closing := len(valid) == 0 || !time.Now().Before(deadline)
+		msg.ConnectionStatus = "OK"
+		if closing {
+			msg.ConnectionStatus = "Closed"
+		}
+		if !writeStreamChunk(w, rc, streamEnvelope(msg), false) {
 			return // client gone (write/flush failed)
 		}
-		if !time.Now().Before(deadline) {
-			writeStreamChunk(w, rc, streamEnvelope(closedMessage()), false)
+		if closing {
 			return
 		}
 		select {
 		case <-ctx.Done():
 			return // client disconnected: no Closed chunk
 		case <-wake:
-			// a push wake, loop and streamNotifications emits the change
+			// a push wake, loop and streamChunk emits the change
 		case <-ticker.C:
 		}
 	}
@@ -151,18 +168,25 @@ func (s *Server) streamCadence(connectionTimeout int) (interval, window time.Dur
 	return interval, window
 }
 
-// streamOpening builds the first chunk's response message, which reports any
-// subscription id the request named that this server will not stream.
-func streamOpening(bad []string) getStreamingEventsResponseMessage {
-	msg := getStreamingEventsResponseMessage{
+// openingMessage builds the first chunk's response message for a request whose
+// every subscription is live: the stream is open.
+func openingMessage() getStreamingEventsResponseMessage {
+	return getStreamingEventsResponseMessage{
 		ResponseClass: "Success", ResponseCode: "NoError", ConnectionStatus: "OK",
 	}
-	if len(bad) > 0 {
-		msg.ResponseClass = "Error"
-		msg.ResponseCode = "ErrorInvalidSubscription"
-		msg.ErrorSubs = &errorSubs{IDs: bad}
+}
+
+// invalidSubscriptions builds the refusal a request naming a subscription this
+// server will not stream receives: the ids in ErrorSubscriptionIds and
+// ConnectionStatus=Closed, because a subscription that is gone never becomes
+// valid again and the client must subscribe anew.
+func invalidSubscriptions(bad []string) getStreamingEventsResponseMessage {
+	return getStreamingEventsResponseMessage{
+		ResponseClass:    "Error",
+		ResponseCode:     "ErrorInvalidSubscription",
+		ErrorSubs:        &errorSubs{IDs: bad},
+		ConnectionStatus: "Closed",
 	}
-	return msg
 }
 
 // streamWakes registers a push wake for each distinct mailbox among the given
@@ -208,37 +232,58 @@ func (s *Server) streamWakes(ids []string) (<-chan struct{}, func()) {
 
 // --- helpers ---
 
-// streamSubValid reports whether a subscription exists and belongs to the user,
-// evicting it first if it has expired (the lazy-expiry sweep, run on entry).
-func (s *Server) streamSubValid(id, user string) bool {
+// liveSub returns the subscription at an id, or nil when it is gone. An entry
+// whose lifetime has passed is evicted here and reported gone, so the expiry rule
+// does not depend on the periodic sweep having run.
+func (s *Server) liveSub(id string) *ewsSubscription {
 	s.subMu.Lock()
 	defer s.subMu.Unlock()
 	sub, ok := s.subs[id]
-	if ok && time.Since(sub.created) > sub.timeout {
-		delete(s.subs, id)
-		ok = false
+	if !ok {
+		return nil
 	}
-	return ok && sub.user == user
+	if time.Since(sub.created) > sub.timeout {
+		delete(s.subs, id)
+		return nil
+	}
+	return sub
 }
 
-// streamNotifications polls every still-live subscription and builds one
-// continuation response, a Notification per subscription (its events, or a
-// StatusEvent heartbeat when idle).
-func (s *Server) streamNotifications(ids []string) getStreamingEventsResponse {
+// streamSubValid reports whether a subscription is live and belongs to the user.
+func (s *Server) streamSubValid(id, user string) bool {
+	sub := s.liveSub(id)
+	return sub != nil && sub.user == user
+}
+
+// streamChunk polls every still-live subscription and builds one continuation
+// message, a Notification per subscription (its events, or a StatusEvent
+// heartbeat when idle). It also returns the ids that are still live: one that
+// disappeared mid-stream (an Unsubscribe, or its lifetime passing) is named in
+// ErrorSubscriptionIds on this same chunk and dropped from the watched set, so
+// the client learns of the fault where it happens rather than from a later
+// message carrying no detail.
+func (s *Server) streamChunk(ids []string) (getStreamingEventsResponseMessage, []string) {
 	var notifs []notification
+	var gone []string
+	live := make([]string, 0, len(ids))
 	for _, id := range ids {
-		s.subMu.Lock()
-		sub := s.subs[id]
-		s.subMu.Unlock()
+		sub := s.liveSub(id)
 		if sub == nil {
-			continue // unsubscribed mid-stream
+			gone = append(gone, id)
+			continue
 		}
 		notifs = append(notifs, pollOneForStream(id, sub))
+		live = append(live, id)
 	}
-	return getStreamingEventsResponse{Messages: []getStreamingEventsResponseMessage{{
-		ResponseClass: "Success", ResponseCode: "NoError",
-		Notifications: notifs, ConnectionStatus: "OK",
-	}}}
+	msg := getStreamingEventsResponseMessage{
+		ResponseClass: "Success", ResponseCode: "NoError", Notifications: notifs,
+	}
+	if len(gone) > 0 {
+		msg.ResponseClass = "Error"
+		msg.ResponseCode = "ErrorInvalidSubscription"
+		msg.ErrorSubs = &errorSubs{IDs: gone}
+	}
+	return msg, live
 }
 
 // pollOneForStream polls one subscription under its lock and returns its
