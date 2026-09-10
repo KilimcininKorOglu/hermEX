@@ -60,3 +60,28 @@ func TestImportCalendarMerge(t *testing.T) {
 	wantEq(t, propString(msg3.Props, mapi.PrMessageClass), "IPM.Note", "class with no importer")
 	wantEq(t, len(msg3.Attachments), 1, "attachments with no importer (the unparsed text/calendar part)")
 }
+
+// TestImportCarriesTheVerbatimCalendar is what a delivered recurring invitation
+// needs. A recurring event is preserved as bytes rather than synthesized, so an
+// overlay that dropped those bytes would store the series as its first instance
+// alone and every reader serving the stored body would show one event.
+func TestImportCarriesTheVerbatimCalendar(t *testing.T) {
+	body := []byte("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nRRULE:FREQ=WEEKLY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+	recurring := func([]byte) (mapi.PropertyValues, error) {
+		return mapi.PropertyValues{
+			{Tag: mapi.PrMessageClass, Value: "IPM.Schedule.Meeting.Request"},
+			{Tag: mapi.PrIcalOriginal, Value: body},
+		}, nil
+	}
+
+	msg, err := Import([]byte(meetingMail), Options{CalendarImporter: recurring})
+	mustNoErr(t, err, "import a recurring invitation")
+
+	v, ok := msg.Props.Get(mapi.PrIcalOriginal)
+	if !ok {
+		t.Fatal("the delivered message lost the series' verbatim iCalendar")
+	}
+	if raw, _ := v.([]byte); !bytes.Equal(raw, body) {
+		t.Errorf("verbatim iCalendar = %q, want the bytes the invitation carried", raw)
+	}
+}

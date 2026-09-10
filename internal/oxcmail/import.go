@@ -459,10 +459,22 @@ func mergeCalendar(msg *Message, part *mime.Part, calImport CalendarImporter) {
 		return
 	}
 	for _, pv := range calProps {
-		if pv.Tag == mapi.PrMessageClass || pv.Tag.ID() >= 0x8000 {
+		if calendarPropCarried(pv.Tag) {
 			msg.Props.Set(pv.Tag, pv.Value)
 		}
 	}
+}
+
+// calendarPropCarried reports whether a property the calendar importer produced is
+// overlaid onto the delivered message: the message class, every named appointment
+// property, and the verbatim iCalendar of a recurring object.
+//
+// The verbatim body is not optional. A recurring event is preserved as bytes rather
+// than synthesized, so a delivered series that dropped it would be stored as its
+// first instance alone, and every reader that serves the stored body would show one
+// event where the series is.
+func calendarPropCarried(tag mapi.PropTag) bool {
+	return tag == mapi.PrMessageClass || tag == mapi.PrIcalOriginal || tag.ID() >= 0x8000
 }
 
 // walkAttachments turns every non-body leaf part into an attachment, mirroring
