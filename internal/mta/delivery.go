@@ -787,6 +787,11 @@ func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from strin
 		}
 		unresolved = stuck
 	}
+	// The message is out. A mailbox this was sent in the name of keeps its own record
+	// when it asked for one, so everyone with access to it sees what went out. It runs
+	// last, and reports rather than returns a failure, because the mail has already
+	// left and nothing here can take it back.
+	fileRepresentedCopy(accounts, from, localRaw, received)
 	return append(unresolved, refused...), nil
 }
 
