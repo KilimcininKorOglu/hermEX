@@ -50,6 +50,57 @@ func TestIndexFormat(t *testing.T) {
 	}
 }
 
+// TestIDFromPartsMatchesID proves the two entry points agree for every branch of
+// the derivation. A protocol grouping from the stored threading properties must
+// reach the same id as one grouping from the wire form, or the same message lands
+// in two different conversations depending on the client that asks.
+func TestIDFromPartsMatchesID(t *testing.T) {
+	for _, c := range []struct {
+		name       string
+		raw        string
+		references string
+		inReplyTo  string
+		messageID  string
+		subject    string
+	}{
+		{
+			name:       "references wins",
+			raw:        "Message-Id: <reply@x>\r\nIn-Reply-To: <mid@x>\r\nReferences: <root@x> <mid@x>\r\nSubject: Re: Weekly sync\r\n\r\nbody\r\n",
+			references: "<root@x> <mid@x>", inReplyTo: "<mid@x>", messageID: "<reply@x>", subject: "Re: Weekly sync",
+		},
+		{
+			name:      "in-reply-to when there are no references",
+			raw:       "Message-Id: <reply@x>\r\nIn-Reply-To: <root@x>\r\nSubject: Re: Weekly sync\r\n\r\nbody\r\n",
+			inReplyTo: "<root@x>", messageID: "<reply@x>", subject: "Re: Weekly sync",
+		},
+		{
+			name:      "own message id when the message starts a thread",
+			raw:       "Message-Id: <root@x>\r\nSubject: Weekly sync\r\n\r\nbody\r\n",
+			messageID: "<root@x>", subject: "Weekly sync",
+		},
+		{
+			name:    "subject fallback when the message carries no threading header",
+			raw:     "Subject: Weekly sync\r\n\r\nbody\r\n",
+			subject: "Weekly sync",
+		},
+		{
+			// The header is RFC 2047 encoded on the wire and decoded in the stored
+			// subject property, so the derivation has to decode before it normalizes.
+			name:    "subject fallback with an encoded-word subject",
+			raw:     "Subject: =?utf-8?q?Haftal=C4=B1k_toplant=C4=B1?=\r\n\r\nbody\r\n",
+			subject: "Haftalık toplantı",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			fromRaw := ID([]byte(c.raw))
+			fromParts := IDFromParts(c.references, c.inReplyTo, c.messageID, c.subject)
+			if !bytes.Equal(fromRaw, fromParts) {
+				t.Errorf("ID(raw) = %x, IDFromParts = %x, want equal", fromRaw, fromParts)
+			}
+		})
+	}
+}
+
 // TestNormalizeSubject proves the reply and forward prefixes are stripped and the
 // subject is lowercased.
 func TestNormalizeSubject(t *testing.T) {

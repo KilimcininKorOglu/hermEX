@@ -5,13 +5,11 @@ import (
 	"encoding/xml"
 	"net/http"
 	"net/mail"
-	"net/textproto"
 	"sort"
 	"strings"
 	"time"
 
 	"hermex/internal/conversation"
-	"hermex/internal/mime"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxews"
 )
@@ -19,17 +17,12 @@ import (
 // Conversation operations (MS-OXWSCONV) expose the thread-grouped view of a
 // mailbox. The grouping reuses internal/conversation (the same id ActiveSync's
 // conversation view emits), so a thread has one identity across protocols. The
-// conversation id is not stored, so each request re-derives it by reading the
-// candidate messages' headers; that scan is bounded by conversationScanCap to keep
-// an unbounded mailbox from stalling a request.
-
-// conversationScanCap bounds how many messages a single conversation request reads.
-// A folder larger than this is scanned only up to the cap (the response notes the
-// truncation is not surfaced to the client; the cap is a safety bound, not paging).
-const conversationScanCap = 2000
+// conversation id is not stored as a property; it is derived from the threading
+// properties the store already holds for every message, so grouping reads indexed
+// rows rather than each message's wire form.
 
 // convMember is one message belonging to a conversation, with the sender display
-// name and internet message id read from its headers.
+// name and internet message id the store holds for it.
 type convMember struct {
 	folderID          int64
 	info              objectstore.MessageInfo
@@ -37,33 +30,39 @@ type convMember struct {
 	internetMessageID string
 }
 
-// conversationGroups scans the given folders, derives each message's conversation
-// id from its headers, and groups members by base64 conversation id. The scan
-// stops at conversationScanCap.
+// conversationGroups groups the given folders' messages by base64 conversation id.
+//
+// The id is derived from the RFC 5322 threading properties Import stored with each
+// message, batch-read one query per folder, plus the subject and originator the
+// IMAP index already carries. Reading the wire form instead would cost a file read
+// per message and, on a pruned cache, a full re-synthesis through oxcmail.Export
+// that also rewrites the cache: a conversation request must not pay that for every
+// candidate message, and a mailbox spanning more messages than a scan cap would
+// then have to silently drop the members past it.
 func conversationGroups(st *objectstore.Store, folderIDs []int64) map[string][]convMember {
 	groups := map[string][]convMember{}
-	scanned := 0
 	for _, fid := range folderIDs {
 		infos, err := st.ListMessages(fid)
 		if err != nil {
 			continue
 		}
+		ids := make([]int64, len(infos))
+		for i, info := range infos {
+			ids[i] = info.ID
+		}
+		headers, err := st.ConversationThreading(ids)
+		if err != nil {
+			continue
+		}
 		for _, info := range infos {
-			if scanned >= conversationScanCap {
-				return groups
-			}
-			scanned++
-			raw, err := st.GetMessageRaw(fid, info.UID)
-			if err != nil {
-				continue
-			}
-			h := mime.ParseStructure(raw).Header()
-			id := base64.StdEncoding.EncodeToString(conversation.ID(raw))
+			th := headers[info.ID]
+			id := base64.StdEncoding.EncodeToString(
+				conversation.IDFromParts(th.References, th.InReplyTo, th.MessageID, info.Subject))
 			groups[id] = append(groups[id], convMember{
 				folderID:          fid,
 				info:              info,
-				sender:            headerFromDisplay(h),
-				internetMessageID: strings.TrimSpace(h.Get("Message-Id")),
+				sender:            senderDisplay(info.Sender),
+				internetMessageID: th.MessageID,
 			})
 		}
 	}
@@ -84,17 +83,18 @@ func allFolderIDs(st *objectstore.Store) []int64 {
 	return ids
 }
 
-// headerFromDisplay extracts a message's From display name, falling back to the
-// address.
-func headerFromDisplay(h textproto.MIMEHeader) string {
-	from := strings.TrimSpace(h.Get("From"))
-	if addr, err := mail.ParseAddress(from); err == nil {
+// senderDisplay extracts the display name from the originator the index stores
+// ("Name <addr>"), falling back to the address, which is what a conversation's
+// UniqueSenders list carries.
+func senderDisplay(sender string) string {
+	sender = strings.TrimSpace(sender)
+	if addr, err := mail.ParseAddress(sender); err == nil {
 		if addr.Name != "" {
 			return addr.Name
 		}
 		return addr.Address
 	}
-	return from
+	return sender
 }
 
 // --- FindConversation ---
