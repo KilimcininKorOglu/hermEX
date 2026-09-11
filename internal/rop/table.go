@@ -361,7 +361,7 @@ func (t *tableState) rowKeyProps(store *objectstore.Store, baseIdx int, tags []m
 	case tableAttachment:
 		return t.attachments[baseIdx], nil
 	default:
-		return store.GetMessageProperties(t.messages[baseIdx].ID, tags...)
+		return store.GetMessageProperties(t.messageIDs[baseIdx], tags...)
 	}
 }
 

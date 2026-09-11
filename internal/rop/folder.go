@@ -33,14 +33,14 @@ const tableStatusComplete uint8 = 0x00
 type tableState struct {
 	kind         tableKind
 	columns      []mapi.PropTag
-	messages     []objectstore.MessageInfo // tableContents base rows
-	folders      []objectstore.FolderInfo  // tableHierarchy base rows
-	attachments  []mapi.PropertyValues     // tableAttachment base rows (attachment property bags)
-	permissions  []mapi.PropertyValues     // tablePermission base rows (member property bags)
-	rules        []mapi.PropertyValues     // tableRules base rows (rule property bags)
-	sortKeys     []sortKey                 // RopSortTable order; empty = store order
-	restriction  *mapi.Restriction         // RopRestrict filter; nil = no filter
-	view         []int                     // base-row indices in display order; nil = identity
+	messageIDs   []int64                  // tableContents base rows, addressed by store id
+	folders      []objectstore.FolderInfo // tableHierarchy base rows
+	attachments  []mapi.PropertyValues    // tableAttachment base rows (attachment property bags)
+	permissions  []mapi.PropertyValues    // tablePermission base rows (member property bags)
+	rules        []mapi.PropertyValues    // tableRules base rows (rule property bags)
+	sortKeys     []sortKey                // RopSortTable order; empty = store order
+	restriction  *mapi.Restriction        // RopRestrict filter; nil = no filter
+	view         []int                    // base-row indices in display order; nil = identity
 	cursor       int
 	bookmarks    map[uint16]int // named cursor positions keyed by bookmark index
 	nextBookmark uint16
@@ -58,7 +58,7 @@ func (t *tableState) baseCount() int {
 	case tableRules:
 		return len(t.rules)
 	default:
-		return len(t.messages)
+		return len(t.messageIDs)
 	}
 }
 
@@ -136,7 +136,7 @@ func (t *tableState) attachmentRow(base int) mapi.PropertyValues {
 // messageRow projects one contents row, synthesizing the message's EID when the
 // column set asks for it.
 func (t *tableState) messageRow(store *objectstore.Store, base int) (mapi.PropertyValues, error) {
-	mid := t.messages[base].ID
+	mid := t.messageIDs[base]
 	props, err := store.GetMessageProperties(mid, t.columns...)
 	if err != nil {
 		return nil, err
@@ -224,14 +224,17 @@ func (s *Session) ropGetContentsTable(p *ext.Pull, out *ext.Push, handles []uint
 		writeErr(out, ropGetContentsTable, ohindex, ecAccessDenied)
 		return true
 	}
+	// Only the ids are snapshotted: a row's values are read from the store when
+	// RopQueryRows serves it, so the index row's subject, sender and preview would
+	// be built for every message in the folder and never read.
 	var (
-		msgs []objectstore.MessageInfo
-		err  error
+		ids []int64
+		err error
 	)
 	if tableFlags&tableFlagSoftDeletes != 0 {
-		msgs, err = folder.store.ListSoftDeletedInfo(folder.folderID)
+		ids, err = folder.store.ListSoftDeletedIDs(folder.folderID)
 	} else {
-		msgs, err = folder.store.ListMessages(folder.folderID)
+		ids, err = folder.store.ListMessageIDs(folder.folderID)
 	}
 	if err != nil {
 		writeErr(out, ropGetContentsTable, ohindex, ecError)
@@ -240,7 +243,7 @@ func (s *Session) ropGetContentsTable(p *ext.Pull, out *ext.Push, handles []uint
 	h := s.alloc(&object{
 		kind:  kindTable,
 		store: folder.store,
-		table: &tableState{kind: tableContents, messages: msgs},
+		table: &tableState{kind: tableContents, messageIDs: ids},
 	})
 	setHandle(handles, ohindex, h)
 
@@ -248,7 +251,7 @@ func (s *Session) ropGetContentsTable(p *ext.Pull, out *ext.Push, handles []uint
 	out.Uint8(ohindex)
 	out.Uint32(ecSuccess)
 	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
-	out.Uint32(uint32(len(msgs))) // RowCount
+	out.Uint32(uint32(len(ids))) // RowCount
 	return true
 }
 
