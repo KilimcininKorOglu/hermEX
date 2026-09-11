@@ -49,16 +49,32 @@ func delegationOut(owner string, d delegationJSON) map[string]any {
 	}
 }
 
-// mirrorDelegates writes the grantee list to the store's delegate list so a
-// delegate actually passes the shared-mailbox open gate (callerMayOpenShared).
+// mirrorDelegates writes the three store lists a delegation implies, because each
+// grants a different thing and only the store lists are consulted at send time. The
+// delegate list is the shared-mailbox open gate (callerMayOpenShared) and grants no
+// send of its own; the send-as list puts only this mailbox on the message; the
+// send-on-behalf list puts this mailbox in From and the delegate in Sender. A
+// delegation whose two flags are both off therefore grants access and no send.
 func mirrorDelegates(st *objectstore.Store, dels []delegationJSON) {
 	grantees := make([]string, 0, len(dels))
+	sendAs := make([]string, 0, len(dels))
+	onBehalf := make([]string, 0, len(dels))
 	for _, d := range dels {
-		if g := strings.TrimSpace(d.Grantee); g != "" {
-			grantees = append(grantees, g)
+		g := strings.TrimSpace(d.Grantee)
+		if g == "" {
+			continue
+		}
+		grantees = append(grantees, g)
+		if d.CanSendAs {
+			sendAs = append(sendAs, g)
+		}
+		if d.CanSendOnBehalf {
+			onBehalf = append(onBehalf, g)
 		}
 	}
 	_ = st.SetDelegates(grantees)
+	_ = st.SetSendAs(sendAs)
+	_ = st.SetSendOnBehalf(onBehalf)
 }
 
 func (s *Server) handleGetDelegations(w http.ResponseWriter, r *http.Request) {

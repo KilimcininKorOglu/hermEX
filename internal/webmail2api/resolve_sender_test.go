@@ -8,29 +8,41 @@ import (
 	"hermex/internal/objectstore"
 )
 
-// TestResolveSenderAuthorizes proves the send-as gate: the caller sends as
-// themselves freely, as another mailbox only with a positively-confirmed
-// send-as grant (represented with the caller kept in Sender), and never as an
-// ungranted address.
-func TestResolveSenderAuthorizes(t *testing.T) {
-	team := t.TempDir() // a mailbox that grants alice send-as
-	st, err := objectstore.Open(team)
+// grantingBox provisions a mailbox that extends alice one of the two send grants.
+func grantingBox(t *testing.T, onBehalf bool) string {
+	t.Helper()
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
 	if err != nil {
-		t.Fatalf("open team store: %v", err)
+		t.Fatalf("open store: %v", err)
 	}
-	if err := st.SetSendAs([]string{"alice@hermex.test"}); err != nil {
-		t.Fatalf("set send-as: %v", err)
+	defer st.Close()
+	grant := st.SetSendAs
+	if onBehalf {
+		grant = st.SetSendOnBehalf
 	}
-	st.Close()
+	if err := grant([]string{"alice@hermex.test"}); err != nil {
+		t.Fatalf("set grant: %v", err)
+	}
+	return dir
+}
 
-	other := t.TempDir() // a mailbox that grants nothing
-	if st2, err := objectstore.Open(other); err == nil {
-		st2.Close()
+// TestResolveSenderAuthorizes proves the send gate: the caller sends as themselves
+// freely, as another mailbox only with a positively-confirmed grant, and never as an
+// ungranted address. The two grants differ on the wire: a send-as grant names only
+// the represented mailbox, an on-behalf grant names the caller in Sender as well.
+func TestResolveSenderAuthorizes(t *testing.T) {
+	team := grantingBox(t, false) // grants alice send-as
+	desk := grantingBox(t, true)  // grants alice send-on-behalf-of
+	other := t.TempDir()          // grants nothing
+	if st, err := objectstore.Open(other); err == nil {
+		st.Close()
 	}
 
 	accounts := directory.StaticAccounts{
 		"alice@hermex.test": {MailboxPath: t.TempDir()},
 		"team@hermex.test":  {Shared: true, MailboxPath: team},
+		"desk@hermex.test":  {Shared: true, MailboxPath: desk},
 		"other@hermex.test": {Shared: true, MailboxPath: other},
 	}
 	srv := NewServer(accounts, accounts, nil, "mail.hermex.test", []byte("s"), "", false)
@@ -44,7 +56,10 @@ func TestResolveSenderAuthorizes(t *testing.T) {
 	}{
 		{"empty is self", "", "alice@hermex.test", "alice@hermex.test", true},
 		{"explicit self", "alice@hermex.test", "alice@hermex.test", "alice@hermex.test", true},
-		{"granted send-as keeps caller in Sender", "team@hermex.test", "team@hermex.test", "alice@hermex.test", true},
+		// A send-as grant names ONLY the represented mailbox: keeping the caller in
+		// Sender would disclose them on a message the grant says is the mailbox's own.
+		{"granted send-as names only the mailbox", "team@hermex.test", "team@hermex.test", "team@hermex.test", true},
+		{"granted on-behalf keeps caller in Sender", "desk@hermex.test", "desk@hermex.test", "alice@hermex.test", true},
 		{"ungranted mailbox denied", "other@hermex.test", "", "", false},
 		{"unknown address denied", "ghost@hermex.test", "", "", false},
 	}

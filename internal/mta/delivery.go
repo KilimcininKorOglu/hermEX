@@ -23,6 +23,7 @@ import (
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/relay"
+	"hermex/internal/sendas"
 	"hermex/internal/smtp"
 )
 
@@ -206,65 +207,7 @@ func (s *session) Mail(from string, params smtp.MailParams) error {
 // send-as permission. The send-as path fails closed: only a grant that can be
 // positively confirmed lets an authenticated user put another mailbox in the From.
 func (s *session) authorizedSender(from string) bool {
-	want := strings.ToLower(strings.TrimSpace(from))
-	ids := s.identities()
-	if containsFold(ids, want) {
-		return true
-	}
-	return s.grantedSendAs(want, ids)
-}
-
-// grantedSendAs reports whether one of the authenticated user's identities appears
-// in the send-as list of the mailbox that owns from. It fails closed: an address
-// that resolves to no local mailbox, a store that will not open, or an unreadable
-// list denies the grant rather than risking a forged sender.
-func (s *session) grantedSendAs(from string, ids []string) bool {
-	path, ok := s.accounts.Resolve(from)
-	if !ok {
-		return false
-	}
-	st, err := objectstore.Open(path)
-	if err != nil {
-		return false
-	}
-	defer st.Close()
-	list, err := st.GetSendAs()
-	if err != nil {
-		return false
-	}
-	for _, g := range list {
-		if containsFold(ids, strings.ToLower(strings.TrimSpace(g))) {
-			return true
-		}
-	}
-	return false
-}
-
-// containsFold reports whether want (already lowercased) equals any address in
-// list, compared case-insensitively after trimming.
-func containsFold(list []string, want string) bool {
-	for _, a := range list {
-		if strings.ToLower(strings.TrimSpace(a)) == want {
-			return true
-		}
-	}
-	return false
-}
-
-// identities returns the addresses the authenticated user may send as. It fails
-// closed exactly like the webmail compose gate: when the directory cannot
-// enumerate identities, the user may still send as themselves but as no one
-// else.
-func (s *session) identities() []string {
-	id, ok := s.accounts.(directory.Identifier)
-	if !ok {
-		return []string{s.authUser}
-	}
-	addrs, err := id.Identities(s.authUser)
-	if err != nil || len(addrs) == 0 {
-		return []string{s.authUser}
-	}
-	return addrs
+	return sendas.Allows(s.accounts, s.authUser, from)
 }
 
 // Rcpt routes one recipient. A recipient that resolves to a local mailbox is

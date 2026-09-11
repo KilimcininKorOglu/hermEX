@@ -119,13 +119,28 @@ func TestCreateItemWithoutAFromUsesTheCaller(t *testing.T) {
 // grantServer builds an EWS server with a second mailbox that granted the test user
 // send-as, and returns the server plus the test user's mailbox directory.
 func grantServer(t *testing.T, other string) (*httptest.Server, string) {
+	return grantingServer(t, other, false)
+}
+
+// onBehalfServer is grantServer with a send-on-behalf-of grant instead of send-as.
+func onBehalfServer(t *testing.T, other string) (*httptest.Server, string) {
+	return grantingServer(t, other, true)
+}
+
+// grantingServer builds an EWS server whose second mailbox extends the test user one
+// of the two send grants.
+func grantingServer(t *testing.T, other string, onBehalf bool) (*httptest.Server, string) {
 	t.Helper()
 	dir, otherDir := t.TempDir(), t.TempDir()
 	st, err := objectstore.Open(otherDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSendAs([]string{testUser}); err != nil {
+	grant := st.SetSendAs
+	if onBehalf {
+		grant = st.SetSendOnBehalf
+	}
+	if err := grant([]string{testUser}); err != nil {
 		t.Fatal(err)
 	}
 	_ = st.Close()
@@ -151,15 +166,29 @@ func TestCreateItemAcceptsAGrantedSendAs(t *testing.T) {
 	}
 }
 
-// TestGrantedSendAsWritesASenderHeader proves the recipient is told who actually wrote the
-// message: representing and sender differ, so oxcmail emits a Sender header.
-func TestGrantedSendAsWritesASenderHeader(t *testing.T) {
+// TestGrantedOnBehalfWritesASenderHeader proves the recipient is told who actually wrote
+// the message: an on-behalf grant leaves representing and sender different, so oxcmail
+// emits a Sender header.
+func TestGrantedOnBehalfWritesASenderHeader(t *testing.T) {
+	ts, dir := onBehalfServer(t, "desk@hermex.test")
+
+	soapPost(t, ts, draftFromRequest("desk@hermex.test"), true)
+
+	if raw := draftRaw(t, dir); !strings.Contains(raw, "Sender:") {
+		t.Errorf("a send-on-behalf carries no Sender header:\n%s", raw)
+	}
+}
+
+// TestGrantedSendAsWritesNoSenderHeader is the distinction between the two grants. A
+// send-as grant says the message is the represented mailbox's own, so naming the caller
+// in Sender would disclose a person the grant deliberately keeps off the message.
+func TestGrantedSendAsWritesNoSenderHeader(t *testing.T) {
 	ts, dir := grantServer(t, "team@hermex.test")
 
 	soapPost(t, ts, draftFromRequest("team@hermex.test"), true)
 
-	if raw := draftRaw(t, dir); !strings.Contains(raw, "Sender:") {
-		t.Errorf("a send-on-behalf carries no Sender header:\n%s", raw)
+	if raw := draftRaw(t, dir); strings.Contains(raw, "Sender:") {
+		t.Errorf("a send-as carries a Sender header, disclosing the caller:\n%s", raw)
 	}
 }
 

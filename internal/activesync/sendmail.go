@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
+	"hermex/internal/sendas"
 	"hermex/internal/wbxml"
 )
 
@@ -95,70 +95,20 @@ func (s *Server) fileSentCopy(sess *session, r *http.Request, cm composeMail) {
 var errUnauthorizedFrom = errors.New("message From not authorized for caller")
 
 // authorizedFrom reports whether the authenticated caller may put the message's
-// From header on the wire. It fails closed like the MTA send-as gate
-// (internal/mta/delivery.go): an absent or unparseable From is allowed (there is
-// no identity to forge and delivery keeps the caller as sender), the caller's own
-// address or an alias is allowed, and any other address is allowed only when the
-// mailbox that owns it has granted the caller a send-as permission.
+// From header on the wire. An absent or unparseable From is allowed: there is no
+// identity to forge and delivery keeps the caller as sender. Any address is decided
+// by internal/sendas, shared with the other three surfaces that accept a
+// client-chosen From, because a gate that drifts between them is a forgery waiting
+// on whichever one drifted.
+//
+// The device composed the MIME itself, so the Sender header is already whatever it
+// wrote: this decides the permission, not the headers.
 func (s *Server) authorizedFrom(caller string, mime []byte) bool {
 	from, ok := parseFromAddress(mime)
 	if !ok {
 		return true
 	}
-	ids := s.callerIdentities(caller)
-	want := strings.ToLower(strings.TrimSpace(from))
-	if containsFold(ids, want) {
-		return true
-	}
-	return s.grantedSendAs(want, ids)
-}
-
-// callerIdentities returns the caller's own address plus any directory aliases.
-func (s *Server) callerIdentities(caller string) []string {
-	ids := []string{caller}
-	if idr, ok := s.accounts.(directory.Identifier); ok {
-		if addrs, err := idr.Identities(caller); err == nil && len(addrs) > 0 {
-			ids = addrs
-		}
-	}
-	return ids
-}
-
-// grantedSendAs reports whether one of the caller's identities appears in the
-// send-as list of the mailbox that owns from. It fails closed: an address that
-// resolves to no local mailbox, a store that will not open, or an unreadable list
-// denies the grant rather than risking a forged From.
-func (s *Server) grantedSendAs(from string, ids []string) bool {
-	path, ok := s.accounts.Resolve(from)
-	if !ok {
-		return false
-	}
-	st, err := objectstore.Open(path)
-	if err != nil {
-		return false
-	}
-	defer st.Close()
-	list, err := st.GetSendAs()
-	if err != nil {
-		return false
-	}
-	for _, g := range list {
-		if containsFold(ids, strings.ToLower(strings.TrimSpace(g))) {
-			return true
-		}
-	}
-	return false
-}
-
-// containsFold reports whether want (already lowercased) equals any address in
-// list, compared case-insensitively after trimming.
-func containsFold(list []string, want string) bool {
-	for _, a := range list {
-		if strings.ToLower(strings.TrimSpace(a)) == want {
-			return true
-		}
-	}
-	return false
+	return sendas.Allows(s.accounts, caller, from)
 }
 
 // parseFromAddress extracts the bare address from a message's From header, or

@@ -14,12 +14,12 @@ import (
 	"strings"
 	"time"
 
-	"hermex/internal/directory"
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcmail"
+	"hermex/internal/sendas"
 )
 
 // mailAttachment is the SPA's MailAttachment (filename, content type, base64 body).
@@ -377,71 +377,18 @@ func rawFromAddress(raw []byte) (string, bool) {
 }
 
 // resolveSender authorizes the caller's chosen From identity and returns the
-// address to represent plus the real authenticated sender. It mirrors the MTA's
-// send-as gate (internal/mta/delivery.go) exactly, because /mail/send never
-// traverses the authenticated SMTP path where that gate runs: an empty or
-// self-matching want sends as the caller; any other address is allowed only when
-// it is one of the caller's directory identities (an alias) or when the mailbox
-// that owns it has granted the caller a send-as permission. It fails closed,
-// an unresolvable owner, an unopenable store, or an unreadable list denies the
-// identity rather than risking a forged From. representing is the authorized
-// From; sender is always the real caller so oxcmail emits a Sender header (RFC
-// 5322 "on behalf of") whenever the two differ.
+// address to represent plus the address to name in Sender. /mail/send never
+// traverses the authenticated SMTP path where the envelope gate runs, so this is
+// what keeps a caller from writing mail under somebody else's identity. The
+// decision lives in internal/sendas, shared with the other three surfaces that
+// accept a client-chosen From, because a gate that drifts between them is a
+// forgery waiting on whichever one drifted.
+//
+// oxcmail writes a Sender header only when the two differ, so a send-as grant
+// returns them equal and an on-behalf grant returns the caller in sender.
 func (s *Server) resolveSender(caller, want string) (representing, sender string, ok bool) {
-	want = strings.TrimSpace(want)
-	if want == "" || strings.EqualFold(want, caller) {
-		return caller, caller, true
-	}
-	// An alias of the caller: send as it directly, with no Sender header.
-	if id, isID := s.accounts.(directory.Identifier); isID {
-		if addrs, err := id.Identities(caller); err == nil {
-			for _, a := range addrs {
-				if strings.EqualFold(strings.TrimSpace(a), want) {
-					return want, want, true
-				}
-			}
-		}
-	}
-	// A send-as grant from the mailbox that owns want: represent that mailbox,
-	// but keep the real caller in Sender so the recipient sees "caller on behalf".
-	if s.grantedSendAs(caller, want) {
-		return want, caller, true
-	}
-	return "", "", false
-}
-
-// grantedSendAs reports whether caller appears in the send-as list of the mailbox
-// that owns want. It fails closed identically to the MTA gate: any resolution,
-// open, or read failure denies the grant.
-func (s *Server) grantedSendAs(caller, want string) bool {
-	path, ok := s.accounts.Resolve(want)
-	if !ok {
-		return false
-	}
-	st, err := objectstore.Open(path)
-	if err != nil {
-		return false
-	}
-	defer st.Close()
-	list, err := st.GetSendAs()
-	if err != nil {
-		return false
-	}
-	ids := []string{caller}
-	if idr, isID := s.accounts.(directory.Identifier); isID {
-		if addrs, aerr := idr.Identities(caller); aerr == nil && len(addrs) > 0 {
-			ids = addrs
-		}
-	}
-	for _, g := range list {
-		g = strings.ToLower(strings.TrimSpace(g))
-		for _, id := range ids {
-			if strings.EqualFold(strings.TrimSpace(id), g) {
-				return true
-			}
-		}
-	}
-	return false
+	representing, sender, g := sendas.Resolve(s.accounts, caller, want)
+	return representing, sender, g != sendas.GrantNone
 }
 
 // buildOutgoing maps the send fields onto a MAPI message and exports it to RFC

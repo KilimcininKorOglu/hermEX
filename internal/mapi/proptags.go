@@ -134,6 +134,14 @@ const (
 	// by one EWS client round-trips byte-identically to the next. Per-mailbox (a
 	// store property) like the other per-user settings.
 	PrUserConfigurations = PropTag(0x677E001F) // PtUnicode
+	// PrAbSendOnBehalf is the provider-defined store-root property (0x677F) holding
+	// the mailbox's send-on-behalf-of list, the addresses permitted to send mail that
+	// names this mailbox in From while naming the real sender in Sender, as a JSON
+	// array of SMTP addresses. It is the grant PrAbSendAs is NOT: a send-as grant puts
+	// only this mailbox on the message, and an on-behalf grant puts both. Per-mailbox
+	// (a store property) like PrAbDelegates, which stays the access gate and grants no
+	// send of its own.
+	PrAbSendOnBehalf = PropTag(0x677F001F) // PtUnicode
 )
 
 // Large message/attachment content property tags. These hold bodies and
