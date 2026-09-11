@@ -403,6 +403,9 @@ func (t *tableState) rebuildView(store *objectstore.Store) error {
 // touches a row many times.
 func (t *tableState) keyProps(store *objectstore.Store, n int) ([]mapi.PropertyValues, error) {
 	tags := t.viewTags()
+	if t.kind == tableContents {
+		return t.contentsKeyProps(store, n, tags)
+	}
 	bags := make([]mapi.PropertyValues, n)
 	for i := range n {
 		b, err := t.rowKeyProps(store, i, tags)
@@ -410,6 +413,23 @@ func (t *tableState) keyProps(store *objectstore.Store, n int) ([]mapi.PropertyV
 			return nil, err
 		}
 		bags[i] = b
+	}
+	return bags, nil
+}
+
+// contentsKeyProps reads the filter and sort properties for every row of a
+// contents table in one batched read. A folder's rows all want the same few tags,
+// and a contents table is the only kind large enough for a query per row to
+// matter; the other kinds keep the per-row path. A row the batch has no entry for
+// gets the zero bag, which is what an absent property set reads as.
+func (t *tableState) contentsKeyProps(store *objectstore.Store, n int, tags []mapi.PropTag) ([]mapi.PropertyValues, error) {
+	byID, err := store.MessagePropertiesBatch(t.messageIDs[:n], tags)
+	if err != nil {
+		return nil, err
+	}
+	bags := make([]mapi.PropertyValues, n)
+	for i := range n {
+		bags[i] = byID[t.messageIDs[i]]
 	}
 	return bags, nil
 }
