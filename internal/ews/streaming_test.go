@@ -205,18 +205,22 @@ func TestStreamChunkReportsALostSubscription(t *testing.T) {
 }
 
 // TestStreamClosesWhenItsLastSubscriptionIsLost proves the held connection ends as
-// soon as nothing is left to watch: the subscription is live when the stream
-// opens and its lifetime passes during the stream, so the loop reports it and
-// closes long before the connection window would.
+// soon as nothing is left to watch: the subscription is live when the stream opens
+// and the client unsubscribes during it, so the loop reports it and closes long
+// before the connection window would.
+//
+// The subscription is dropped by Unsubscribe rather than by expiry, because a
+// streaming poll restarts the idle timeout: a subscription the stream is reading
+// from cannot go idle underneath it.
 func TestStreamClosesWhenItsLastSubscriptionIsLost(t *testing.T) {
 	srv, ts, path := streamServer(t)
 	srv.streamWindow = 2 * time.Second
 	sess := &session{user: testUser, mailbox: path}
 	id := subscribe(t, srv, sess, subscribeInner(true, "", "CreatedEvent"))
-	srv.subMu.Lock()
-	srv.subs[id].created = time.Now()
-	srv.subs[id].timeout = 60 * time.Millisecond // live on entry, gone a few ticks later
-	srv.subMu.Unlock()
+	go func() {
+		time.Sleep(60 * time.Millisecond)
+		srv.removeSubscription(id, testUser)
+	}()
 
 	start := time.Now()
 	body := streamPost(t, ts, []string{id}, 1)
@@ -233,14 +237,15 @@ func TestStreamClosesWhenItsLastSubscriptionIsLost(t *testing.T) {
 	}
 }
 
-// TestGetStreamingEventsExpiryOnEntry confirms the entry sweep evicts an expired
-// subscription (closing the streaming-sub eviction gap) and reports it invalid.
+// TestGetStreamingEventsExpiryOnEntry confirms the entry sweep evicts a subscription
+// idle past its timeout (closing the streaming-sub eviction gap) and reports it
+// invalid.
 func TestGetStreamingEventsExpiryOnEntry(t *testing.T) {
 	srv, ts, path := streamServer(t)
 	sess := &session{user: testUser, mailbox: path}
 	id := subscribe(t, srv, sess, subscribeInner(true, "", "CreatedEvent"))
 	srv.subMu.Lock()
-	srv.subs[id].created = time.Now().Add(-2 * time.Hour)
+	srv.subs[id].lastAccess = time.Now().Add(-2 * time.Hour)
 	srv.subMu.Unlock()
 
 	body := streamPost(t, ts, []string{id}, 1)
@@ -252,5 +257,35 @@ func TestGetStreamingEventsExpiryOnEntry(t *testing.T) {
 	srv.subMu.Unlock()
 	if present {
 		t.Error("the streaming entry sweep must evict the expired subscription")
+	}
+}
+
+// TestAStreamingSubscriptionSurvivesItsConnections is the load-bearing case: a
+// streaming subscription outlives the individual GetStreamingEvents connection,
+// because the client reconnects with the same id after every connection timeout.
+// Answering the reconnect ErrorInvalidSubscription stops the client's push, and a
+// client that does not re-subscribe on that error never syncs again.
+func TestAStreamingSubscriptionSurvivesItsConnections(t *testing.T) {
+	srv, ts, path := streamServer(t)
+	sess := &session{user: testUser, mailbox: path}
+	id := subscribe(t, srv, sess, subscribeInner(true, "", "CreatedEvent"))
+
+	// The subscription is older than its timeout, but every connection uses it.
+	srv.subMu.Lock()
+	srv.subs[id].created = time.Now().Add(-8 * time.Hour)
+	srv.subs[id].timeout = time.Minute
+	srv.subMu.Unlock()
+
+	for i := range 3 {
+		body := streamPost(t, ts, []string{id}, 1)
+		if strings.Contains(body, "ErrorInvalidSubscription") {
+			t.Fatalf("connection %d was refused, but the subscription is in use: %s", i+1, body)
+		}
+	}
+	srv.subMu.Lock()
+	_, present := srv.subs[id]
+	srv.subMu.Unlock()
+	if !present {
+		t.Error("the subscription must survive its streaming connections")
 	}
 }

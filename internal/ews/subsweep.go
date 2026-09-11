@@ -10,8 +10,9 @@ import (
 // most a minute.
 const subSweepInterval = time.Minute
 
-// SweepSubscriptions drops every subscription whose lifetime has passed and
-// returns how many it removed.
+// SweepSubscriptions drops every subscription that has been idle longer than its
+// timeout and returns how many it removed. A subscription a client still uses is
+// never idle, so the sweep leaves it alone.
 //
 // A pull or streaming subscription has no worker of its own: it was evicted only
 // when a later request happened to name it, so one created by a client that then
@@ -25,7 +26,7 @@ func (s *Server) SweepSubscriptions(now time.Time) int {
 	defer s.subMu.Unlock()
 	removed := 0
 	for id, sub := range s.subs {
-		if now.Sub(sub.created) <= sub.timeout {
+		if !sub.expired(now) {
 			continue
 		}
 		delete(s.subs, id)

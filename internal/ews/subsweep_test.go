@@ -15,16 +15,18 @@ func sweepServer() *Server {
 	return NewServer(accs, accs, "mail.hermex.test")
 }
 
-// addSub puts one subscription in the registry with the given age.
-func addSub(s *Server, id string, age, timeout time.Duration, done chan struct{}) {
+// addSub puts one subscription in the registry, last used idle ago.
+func addSub(s *Server, id string, idle, timeout time.Duration, done chan struct{}) {
 	s.subMu.Lock()
 	defer s.subMu.Unlock()
+	now := time.Now()
 	s.subs[id] = &ewsSubscription{
-		user:    testUser,
-		mailbox: "/tmp/nowhere",
-		created: time.Now().Add(-age),
-		timeout: timeout,
-		done:    done,
+		user:       testUser,
+		mailbox:    "/tmp/nowhere",
+		created:    now.Add(-idle),
+		lastAccess: now.Add(-idle),
+		timeout:    timeout,
+		done:       done,
 	}
 }
 
@@ -68,21 +70,42 @@ func TestTheSweepStopsAPushWorker(t *testing.T) {
 	}
 }
 
-// TestTheSweepIsExactAtTheBoundary keeps a subscription for the whole lifetime it
-// was promised, because a client polling on its own deadline must not find it
+// TestTheSweepIsExactAtTheBoundary keeps a subscription for the whole idle period
+// it was promised, because a client polling on its own deadline must not find it
 // gone early.
 func TestTheSweepIsExactAtTheBoundary(t *testing.T) {
 	s := sweepServer()
-	created := time.Now()
+	used := time.Now()
 	s.subMu.Lock()
-	s.subs["edge"] = &ewsSubscription{user: testUser, created: created, timeout: 30 * time.Minute}
+	s.subs["edge"] = &ewsSubscription{user: testUser, created: used, lastAccess: used, timeout: 30 * time.Minute}
 	s.subMu.Unlock()
 
-	if n := s.SweepSubscriptions(created.Add(30 * time.Minute)); n != 0 {
+	if n := s.SweepSubscriptions(used.Add(30 * time.Minute)); n != 0 {
 		t.Errorf("swept %d at exactly the deadline, want 0", n)
 	}
-	if n := s.SweepSubscriptions(created.Add(30*time.Minute + time.Nanosecond)); n != 1 {
+	if n := s.SweepSubscriptions(used.Add(30*time.Minute + time.Nanosecond)); n != 1 {
 		t.Errorf("swept %d one nanosecond past the deadline, want 1", n)
+	}
+}
+
+// TestTheSweepKeepsASubscriptionInUse is the load-bearing case: the timeout is how
+// long a subscription may stay IDLE, not how long it may live. A client that keeps
+// polling must keep its subscription, whatever its age, or its sync stops with no
+// notice.
+func TestTheSweepKeepsASubscriptionInUse(t *testing.T) {
+	s := sweepServer()
+	now := time.Now()
+	s.subMu.Lock()
+	s.subs["busy"] = &ewsSubscription{
+		user:       testUser,
+		created:    now.Add(-8 * time.Hour), // subscribed long ago
+		lastAccess: now.Add(-time.Minute),   // and used a minute ago
+		timeout:    30 * time.Minute,
+	}
+	s.subMu.Unlock()
+
+	if n := s.SweepSubscriptions(now); n != 0 {
+		t.Errorf("swept %d, want 0: the subscription was used a minute ago", n)
 	}
 }
 

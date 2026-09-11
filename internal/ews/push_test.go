@@ -67,6 +67,63 @@ func TestPushSubscribeDelivers(t *testing.T) {
 	}
 }
 
+// TestADeliveredPushRestartsTheTimeout is the load-bearing case for the push path:
+// a subscription whose callback keeps taking notifications is in use, so its timeout
+// restarts on each delivery. Dropping it on a fixed deadline instead stops the
+// client's push with no notice and no error to react to.
+func TestADeliveredPushRestartsTheTimeout(t *testing.T) {
+	srv, sess, path := subServer(t)
+	srv.pushAllowInternal = true
+	waker := &fakeStreamWaker{chans: map[string]chan struct{}{}}
+	srv.waker = waker
+
+	got := make(chan struct{}, 4)
+	cb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		_, _ = io.WriteString(w, notificationResult("OK"))
+		select {
+		case got <- struct{}{}:
+		default:
+		}
+	}))
+	defer cb.Close()
+
+	id := subscribe(t, srv, sess, pushSubscribeInner(cb.URL+"/cb"))
+	// The subscription is older than its timeout before the delivery lands.
+	srv.subMu.Lock()
+	srv.subs[id].lastAccess = time.Now().Add(-2 * time.Hour)
+	srv.subMu.Unlock()
+
+	seedInbox(t, path, "push me")
+	waker.fire(path)
+
+	select {
+	case <-got:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the push worker did not POST to the callback within 3s")
+	}
+
+	// The callback answered before the worker recorded the delivery, so wait for the
+	// refresh rather than reading it the instant the handler ran.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		srv.subMu.Lock()
+		sub, present := srv.subs[id]
+		srv.subMu.Unlock()
+		if !present {
+			t.Fatal("the subscription was dropped although its callback took the notification")
+		}
+		if sub.idleSince(time.Now()) <= time.Minute {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("idle for %v after a delivered callback, want the timeout restarted",
+				sub.idleSince(time.Now()))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 // TestPushUnsubscribeOnClientRequest proves a callback answering Unsubscribe stops
 // the worker and drops the subscription.
 func TestPushUnsubscribeOnClientRequest(t *testing.T) {

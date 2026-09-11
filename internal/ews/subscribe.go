@@ -31,6 +31,17 @@ type ewsSubscription struct {
 	timeout    time.Duration              // from the SubscriptionId
 	snap       map[int64]map[int64]uint64 // folderID → (messageID → change number)
 
+	// lastAccess is when the subscription was last used, and the instant timeout is
+	// measured from. The timeout is how long a subscription may stay IDLE, not how
+	// long it may live: [MS-OXWSNTIF] resets the timer on a successful GetEvents, a
+	// streaming client's activity is its GetStreamingEvents connection, and a push
+	// subscription's is a delivered callback. Measuring from created instead drops a
+	// subscription that a client is still using, and a client that reads that as
+	// "this subscription is gone" without re-subscribing stops syncing.
+	// accessMu guards it alone, so a refresh never waits on the poll lock (mu).
+	accessMu   sync.Mutex
+	lastAccess time.Time
+
 	// Push-subscription fields (MS-OXWSNTIF PushSubscriptionRequest). A push sub
 	// has no client poll: a background worker POSTs SendNotification to callbackURL
 	// on a change (or every statusFreq as a heartbeat). done is closed when the
@@ -61,6 +72,25 @@ const (
 	errSubInvalid subError = "ErrorInvalidSubscription"
 	errSubAccess  subError = "ErrorAccessDenied"
 )
+
+// touch records that the subscription was just used, restarting its idle timeout.
+func (sub *ewsSubscription) touch() {
+	sub.accessMu.Lock()
+	sub.lastAccess = time.Now()
+	sub.accessMu.Unlock()
+}
+
+// idleSince reports how long the subscription has gone unused.
+func (sub *ewsSubscription) idleSince(now time.Time) time.Duration {
+	sub.accessMu.Lock()
+	defer sub.accessMu.Unlock()
+	return now.Sub(sub.lastAccess)
+}
+
+// expired reports whether the subscription has been idle longer than its timeout.
+func (sub *ewsSubscription) expired(now time.Time) bool {
+	return sub.idleSince(now) > sub.timeout
+}
 
 // maxSubscriptionTimeoutMin is the upper bound [MS-OXWSNTIF] 2.2.4.24 puts on a
 // pull subscription's Timeout, in minutes (24 hours).
@@ -281,6 +311,7 @@ func (s *Server) registerSubscription(sess *session, streaming, allFolders bool,
 	s.subSeq++
 	// #nosec G115 -- the timeout is clamped to the spec ceiling before it reaches here
 	id := encodeSubscriptionID(s.subSeq, uint32(timeoutMin))
+	now := time.Now()
 	s.subs[id] = &ewsSubscription{
 		user:       sess.user,
 		mailbox:    sess.mailbox,
@@ -288,7 +319,8 @@ func (s *Server) registerSubscription(sess *session, streaming, allFolders bool,
 		allFolders: allFolders,
 		folderIDs:  folderIDs,
 		want:       want,
-		created:    time.Now(),
+		created:    now,
+		lastAccess: now,
 		timeout:    time.Duration(timeoutMin) * time.Minute,
 		snap:       snap,
 	}
@@ -318,7 +350,7 @@ func (s *Server) removeSubscription(id, user string) bool {
 func (s *Server) getEvents(id, user string) (getEventsResponseMessage, error) {
 	s.subMu.Lock()
 	sub, ok := s.subs[id]
-	if ok && time.Since(sub.created) > sub.timeout {
+	if ok && sub.expired(time.Now()) {
 		delete(s.subs, id)
 		ok = false
 	}
@@ -329,6 +361,9 @@ func (s *Server) getEvents(id, user string) (getEventsResponseMessage, error) {
 	if sub.user != user {
 		return getEventsResponseMessage{}, errSubAccess
 	}
+	// The call succeeded for its owner, so the subscription is not idle. Restart the
+	// timeout before the poll, so a slow poll does not count against the client.
+	sub.touch()
 
 	// Hold the per-subscription lock across read-snapshot → diff → advance so two
 	// concurrent GetEvents cannot double-drain or race the snapshot advance.

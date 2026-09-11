@@ -240,9 +240,11 @@ func (s *Server) streamWakes(ids []string) (<-chan struct{}, func()) {
 
 // --- helpers ---
 
-// liveSub returns the subscription at an id, or nil when it is gone. An entry
-// whose lifetime has passed is evicted here and reported gone, so the expiry rule
-// does not depend on the periodic sweep having run.
+// liveSub returns the subscription at an id, or nil when it is gone. An entry idle
+// longer than its timeout is evicted here and reported gone, so the expiry rule does
+// not depend on the periodic sweep having run. A live one is touched: a streaming
+// client's activity IS this call, and a subscription it keeps reading from must not
+// be dropped underneath it.
 func (s *Server) liveSub(id string) *ewsSubscription {
 	s.subMu.Lock()
 	defer s.subMu.Unlock()
@@ -250,10 +252,11 @@ func (s *Server) liveSub(id string) *ewsSubscription {
 	if !ok {
 		return nil
 	}
-	if time.Since(sub.created) > sub.timeout {
+	if sub.expired(time.Now()) {
 		delete(s.subs, id)
 		return nil
 	}
+	sub.touch()
 	return sub
 }
 

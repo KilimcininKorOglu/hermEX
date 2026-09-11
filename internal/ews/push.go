@@ -106,20 +106,21 @@ func (s *Server) handlePushSubscribe(w http.ResponseWriter, req *pushSubscriptio
 }
 
 // registerPushSubscription stores a push subscription and starts its worker. It
-// uses a 30-minute registry lifetime, like pull; the worker honors the same as its
-// own deadline.
+// uses a 30-minute idle timeout, like pull; the worker honors the same one.
 func (s *Server) registerPushSubscription(sess *session, allFolders bool, folderIDs []int64, want eventWants, callbackURL string, statusMin int, snap map[int64]map[int64]uint64) string {
 	const timeoutMin = 30
 	s.subMu.Lock()
 	s.subSeq++
 	id := encodeSubscriptionID(s.subSeq, uint32(timeoutMin))
+	now := time.Now()
 	sub := &ewsSubscription{
 		user:        sess.user,
 		mailbox:     sess.mailbox,
 		allFolders:  allFolders,
 		folderIDs:   folderIDs,
 		want:        want,
-		created:     time.Now(),
+		created:     now,
+		lastAccess:  now,
 		timeout:     timeoutMin * time.Minute,
 		snap:        snap,
 		push:        true,
@@ -136,8 +137,15 @@ func (s *Server) registerPushSubscription(sess *session, allFolders bool, folder
 
 // pushWorker delivers SendNotification callbacks for one push subscription. It wakes
 // on a relay push (immediate) or every statusFreq (the fallback poll + heartbeat),
-// stops when the subscription is dropped (done), when its lifetime expires, when the
-// client answers Unsubscribe, or after pushMaxFailures consecutive POST failures.
+// stops when the subscription is dropped (done), when it has been idle longer than
+// its timeout, when the client answers Unsubscribe, or after pushMaxFailures
+// consecutive POST failures.
+//
+// The idle check runs on the ticker rather than on a one-shot timer, because a
+// delivered callback restarts the timeout: a subscription whose callback keeps
+// accepting notifications is in use, and cancelling it on a fixed deadline stops
+// the client's push with no notice. An abandoned callback still reclaims it, through
+// the failure budget.
 func (s *Server) pushWorker(id string, sub *ewsSubscription) {
 	var wake <-chan struct{}
 	if s.waker != nil {
@@ -147,23 +155,22 @@ func (s *Server) pushWorker(id string, sub *ewsSubscription) {
 	}
 	ticker := time.NewTicker(sub.statusFreq)
 	defer ticker.Stop()
-	lifetime := time.NewTimer(sub.timeout)
-	defer lifetime.Stop()
 
 	failures := 0
 	for {
 		select {
 		case <-sub.done:
 			return // dropped (Unsubscribe handler or another stop path)
-		case <-lifetime.C:
-			s.removeSubscription(id, sub.user)
-			return
 		case <-wake:
 			if !s.pushPollAndSend(id, sub, false, &failures) {
 				s.removeSubscription(id, sub.user)
 				return
 			}
 		case <-ticker.C:
+			if sub.expired(time.Now()) {
+				s.removeSubscription(id, sub.user)
+				return
+			}
 			if !s.pushPollAndSend(id, sub, true, &failures) {
 				s.removeSubscription(id, sub.user)
 				return
@@ -209,5 +216,9 @@ func (s *Server) pushPollAndSend(id string, sub *ewsSubscription, heartbeat bool
 		return *failures < pushMaxFailures
 	}
 	*failures = 0
+	// The callback took the notification, so the subscription is in use. A failed
+	// delivery does NOT touch it, so a callback that stopped answering lets the
+	// subscription go idle and be reclaimed.
+	sub.touch()
 	return keep
 }

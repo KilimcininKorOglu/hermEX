@@ -259,15 +259,15 @@ func TestGetEventsCrossUserDenied(t *testing.T) {
 	}
 }
 
-// TestGetEventsExpired confirms a subscription past its timeout is evicted and
+// TestGetEventsExpired confirms a subscription idle past its timeout is evicted and
 // reported as invalid.
 func TestGetEventsExpired(t *testing.T) {
 	srv, sess, _ := subServer(t)
 	id := subscribe(t, srv, sess, subscribeInner(true, "", "CreatedEvent"))
 
-	// Force expiry by backdating the creation past the timeout.
+	// Force expiry by backdating the last use past the timeout.
 	srv.subMu.Lock()
-	srv.subs[id].created = time.Now().Add(-2 * time.Hour)
+	srv.subs[id].lastAccess = time.Now().Add(-2 * time.Hour)
 	srv.subMu.Unlock()
 
 	if out := getEvents(t, srv, sess, id); !strings.Contains(out, "ErrorInvalidSubscription") {
@@ -278,5 +278,31 @@ func TestGetEventsExpired(t *testing.T) {
 	srv.subMu.Unlock()
 	if present {
 		t.Error("an expired subscription must be evicted")
+	}
+}
+
+// TestGetEventsRestartsTheTimeout is the load-bearing case: [MS-OXWSNTIF] resets a
+// subscription's timeout on a successful GetEvents, so a client that keeps polling
+// keeps its subscription however old it is. Expiring by age instead cuts off a
+// client that was never idle, and a client that does not re-subscribe on that error
+// stops syncing.
+func TestGetEventsRestartsTheTimeout(t *testing.T) {
+	srv, sess, _ := subServer(t)
+	id := subscribe(t, srv, sess, subscribeInner(true, "", "CreatedEvent"))
+
+	// The subscription is old, but it was used a moment ago.
+	srv.subMu.Lock()
+	srv.subs[id].created = time.Now().Add(-8 * time.Hour)
+	srv.subMu.Unlock()
+
+	if out := getEvents(t, srv, sess, id); strings.Contains(out, "ErrorInvalidSubscription") {
+		t.Fatalf("an in-use subscription must not expire from age alone: %s", out)
+	}
+	// The poll itself restarted the timeout.
+	srv.subMu.Lock()
+	idle := srv.subs[id].idleSince(time.Now())
+	srv.subMu.Unlock()
+	if idle > time.Minute {
+		t.Errorf("idle for %v after a successful GetEvents, want the timeout restarted", idle)
 	}
 }
