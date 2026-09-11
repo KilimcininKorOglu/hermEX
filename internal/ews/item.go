@@ -454,8 +454,11 @@ func findBodyPart(p *mime.Part, subtype string) *mime.Part {
 // folder, shared by FindItem and SyncFolderItems. mailbox is the target mailbox SMTP
 // when the folder lives in another mailbox (so the minted item id reopens it later);
 // empty for the caller's own mailbox.
+//
+// The paperclip comes from the index row, not a per-row Store.HasAttachments query:
+// the index column answers the same question and a listing must not pay a store query
+// per row for a value it already carries.
 func itemSummary(st *objectstore.Store, folderID int64, info objectstore.MessageInfo, mailbox string) oxews.Message {
-	hasAttach, _ := st.HasAttachments(info.ID)
 	name, email := splitAddress(info.Sender)
 	return oxews.BuildSummary(oxews.SummaryMeta{
 		ItemID: oxews.EncodeItemID(oxews.ItemID{FolderID: folderID, MessageID: info.ID, UID: info.UID, Mailbox: mailbox}),
@@ -468,7 +471,7 @@ func itemSummary(st *objectstore.Store, folderID int64, info objectstore.Message
 		Received:       info.InternalDate,
 		Size:           int(info.Size),
 		IsRead:         info.Flags&objectstore.FlagSeen != 0,
-		HasAttachments: hasAttach,
+		HasAttachments: info.HasAttachments,
 	})
 }
 

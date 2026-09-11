@@ -110,15 +110,21 @@ func (s *Store) AppendMessage(folderID int64, raw []byte, internalDate time.Time
 	// visible to IMAP/EAS until indexed here, so a consumer woken by that earlier
 	// event would not yet see it. This second wake fires once the index is in place.
 	s.publishChange("create", 0, mid)
+	// Every projection the index row holds is repeated here, so the returned row is
+	// the same row ListMessages would read back. A field left at its zero value is
+	// not "unknown" to a caller, it reads as "this message carries no attachment"
+	// and "this message has no preview", and the caller renders that.
 	return MessageInfo{
 		ID: eid,
 		// #nosec G115 -- an IMAP UID is a 32-bit counter kept in SQLite's signed 64-bit column
-		UID:          uint32(uid),
-		InternalDate: internalDate.UTC(),
-		Size:         int64(len(eml)),
-		Flags:        flags,
-		Subject:      projectSubject(msg.Props),
-		Sender:       projectSender(msg.Props),
+		UID:            uint32(uid),
+		InternalDate:   internalDate.UTC(),
+		Size:           int64(len(eml)),
+		Flags:          flags,
+		Subject:        projectSubject(msg.Props),
+		Sender:         projectSender(msg.Props),
+		Preview:        projectPreview(msg.Props),
+		HasAttachments: projectHasAttachments(msg),
 	}, nil
 }
 

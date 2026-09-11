@@ -235,13 +235,15 @@ func (s *Store) GetAttachmentProperties(attachmentID int64, tags ...mapi.PropTag
 }
 
 // HasAttachments reports whether a message has a real, non-inline attachment: an
-// attachment part that carries no Content-ID. Parts with a Content-ID are inline
-// payloads (typically cid images referenced by the HTML body), which the reader
-// renders in place rather than listing, so they are excluded here to keep the
-// list's paperclip consistent with the reader. An attachment that happens to
-// carry a Content-ID without being referenced is also treated as inline (an
-// accepted approximation that avoids re-parsing the body per row). The query is
-// index-backed by mid_attachments_index and runs once per listed row.
+// attachment the reader would list rather than render in place. An inline picture
+// referenced by the HTML body carries ATT_MHTML_REF in PR_ATTACH_FLAGS, and that
+// flag is the tree's single definition of inline (oxcmail's exporter reads the same
+// one), so it is what this excludes.
+//
+// It MUST stay the same test as projectHasAttachments, which writes the index row's
+// has_attach column, because a message's paperclip is one fact and two surfaces read
+// it: EWS asks this query and webmail reads that column. The query is index-backed
+// by mid_attachments_index.
 func (s *Store) HasAttachments(messageID int64) (bool, error) {
 	var has bool
 	err := s.objdb.QueryRow(
@@ -250,8 +252,9 @@ func (s *Store) HasAttachments(messageID int64) (bool, error) {
 		   WHERE a.message_id = ?
 		     AND NOT EXISTS(
 		       SELECT 1 FROM attachment_properties ap
-		       WHERE ap.attachment_id = a.attachment_id AND ap.proptag = ?))`,
-		messageID, int64(uint32(mapi.PrAttachContentID))).Scan(&has)
+		       WHERE ap.attachment_id = a.attachment_id
+		         AND ap.proptag = ? AND (ap.propval & ?) <> 0))`,
+		messageID, int64(uint32(mapi.PrAttachFlags)), int64(mapi.AttMhtmlRef)).Scan(&has)
 	return has, err
 }
 

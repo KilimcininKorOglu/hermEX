@@ -205,12 +205,17 @@ func (s *Store) ListAllSoftDeleted() ([]SoftDeletedItem, error) {
 		if err != nil {
 			return nil, err
 		}
+		// The message is open here, so every projection the index row would hold is
+		// computed from it. A field left at its zero value reads as a fact to the
+		// caller ("no attachment", "no preview"), not as an unknown.
 		info := MessageInfo{
-			ID:           r.id,
-			Size:         r.size,
-			Subject:      projectSubject(msg.Props),
-			Sender:       projectSender(msg.Props),
-			InternalDate: deliveryTime(msg.Props),
+			ID:             r.id,
+			Size:           r.size,
+			Subject:        projectSubject(msg.Props),
+			Sender:         projectSender(msg.Props),
+			InternalDate:   deliveryTime(msg.Props),
+			Preview:        projectPreview(msg.Props),
+			HasAttachments: projectHasAttachments(msg),
 		}
 		if r.read != 0 {
 			info.Flags |= FlagSeen
