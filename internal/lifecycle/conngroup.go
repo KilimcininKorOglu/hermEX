@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"runtime"
 	"sync"
 )
 
@@ -24,6 +25,58 @@ type ConnGroup struct {
 	handlers  sync.WaitGroup
 	gate      Gate
 	refuse    func(net.Conn)
+	onPanic   func(remote string, v any, stack []byte)
+}
+
+// panicStackBytes bounds the stack trace a recovered panic records. A trace long
+// enough to matter fits well inside it, and a bounded copy keeps one panic from
+// writing a megabyte into the log store.
+const panicStackBytes = 8 << 10
+
+// SetPanicHandler installs the reporter for a panic a connection handler raised.
+// Call it before Start. A nil reporter leaves the panic recorded nowhere, which is
+// why every server that has a logger passes one.
+func (g *ConnGroup) SetPanicHandler(onPanic func(remote string, v any, stack []byte)) {
+	g.mu.Lock()
+	g.onPanic = onPanic
+	g.mu.Unlock()
+}
+
+// guard runs one connection handler, turning a panic into a closed connection and
+// a reported event instead of a dead process.
+//
+// A connection-oriented daemon serves every client from this one goroutine per
+// connection, and Go does not recover a panic for it the way net/http does for an
+// HTTP handler. Without this, one malformed command from one client ends the
+// process and every other client's session with it. The connection is closed,
+// because a handler that panicked left the protocol at an unknown point and cannot
+// answer the next command.
+func (g *ConnGroup) guard(handle func(net.Conn), nc net.Conn) {
+	defer func() {
+		v := recover()
+		if v == nil {
+			return
+		}
+		_ = nc.Close()
+		g.mu.Lock()
+		onPanic := g.onPanic
+		g.mu.Unlock()
+		if onPanic == nil {
+			return
+		}
+		buf := make([]byte, panicStackBytes)
+		buf = buf[:runtime.Stack(buf, false)]
+		onPanic(remoteAddr(nc), v, buf)
+	}()
+	handle(nc)
+}
+
+// remoteAddr names a connection's peer, tolerating a connection with none.
+func remoteAddr(nc net.Conn) string {
+	if a := nc.RemoteAddr(); a != nil {
+		return a.String()
+	}
+	return ""
 }
 
 // Gate decides whether a newly accepted connection may be served. It returns the
@@ -105,7 +158,7 @@ func (g *ConnGroup) Serve(l net.Listener, handle func(net.Conn)) error {
 		go func() {
 			defer g.handlers.Done()
 			defer release()
-			handle(nc)
+			g.guard(handle, nc)
 		}()
 	}
 }

@@ -309,16 +309,21 @@ func binaryLiteral(data []byte) string {
 }
 
 // applyPartial trims data to the requested <start.count> octet window.
+//
+// The window is computed so no value the client can send produces an out-of-range
+// slice: a negative bound or an addition that wraps would panic, and a panic on the
+// FETCH path takes the connection down rather than the command. parsePartial
+// already refuses a negative or over-wide number, and the count is clamped against
+// the remaining bytes instead of added to the start.
 func applyPartial(data []byte, partial *[2]int) []byte {
 	if partial == nil {
 		return data
 	}
 	start, count := partial[0], partial[1]
-	if start >= len(data) {
+	if start < 0 || count < 0 || start >= len(data) {
 		return []byte{}
 	}
-	end := min(start+count, len(data))
-	return data[start:end]
+	return data[start : start+min(count, len(data)-start)]
 }
 
 // --- FETCH item parsing ---
@@ -567,19 +572,25 @@ func parseFieldList(cur *tokenCursor) ([]string, error) {
 	}
 }
 
-// parsePartial parses a "<start.count>" partial specifier.
+// parsePartial parses a "<start.count>" partial specifier. RFC 3501 writes it as
+// `number "." nz-number`, and both are 32-bit unsigned, so both are read at that
+// width: a negative or over-wide value is a protocol error here rather than a
+// number the octet window later computes with.
 func parsePartial(s string) (*[2]int, error) {
 	inner := strings.TrimSuffix(strings.TrimPrefix(s, "<"), ">")
 	a, b, found := strings.Cut(inner, ".")
-	start, err := strconv.Atoi(a)
-	if err != nil || !found {
+	if !found {
 		return nil, fmt.Errorf("%w: bad partial %q", errProtocol, s)
 	}
-	count, err := strconv.Atoi(b)
+	start, err := strconv.ParseUint(a, 10, 32)
 	if err != nil {
 		return nil, fmt.Errorf("%w: bad partial %q", errProtocol, s)
 	}
-	return &[2]int{start, count}, nil
+	count, err := strconv.ParseUint(b, 10, 32)
+	if err != nil {
+		return nil, fmt.Errorf("%w: bad partial %q", errProtocol, s)
+	}
+	return &[2]int{int(start), int(count)}, nil
 }
 
 // sectionString renders a mime.Section back to its BODY[...] inner text.

@@ -156,10 +156,30 @@ func (s *Server) AddListener(l net.Listener) { s.conns.AddListener(l) }
 
 // Start serves every registered listener until Shutdown, satisfying
 // lifecycle.Component.
-func (s *Server) Start() error { return s.conns.Start(s.handle) }
+func (s *Server) Start() error {
+	s.conns.SetPanicHandler(s.logConnPanic)
+	return s.conns.Start(s.handle)
+}
 
 // Serve accepts connections on l until it is closed; tests drive it directly.
-func (s *Server) Serve(l net.Listener) error { return s.conns.Serve(l, s.handle) }
+func (s *Server) Serve(l net.Listener) error {
+	s.conns.SetPanicHandler(s.logConnPanic)
+	return s.conns.Serve(l, s.handle)
+}
+
+// logConnPanic records a panic one connection's handler raised. The connection is
+// already closed by the time this runs; recording it is what keeps the fault from
+// being invisible, because the process no longer dies to announce it.
+func (s *Server) logConnPanic(remote string, v any, stack []byte) {
+	s.Logger.Emit(logging.Event{
+		Level:      logging.LevelError,
+		Subsystem:  logging.IMAP,
+		Name:       "conn.panic",
+		RemoteAddr: remote,
+		Err:        fmt.Sprintf("%v", v),
+		Fields:     logging.Fields{"stack": string(stack)},
+	})
+}
 
 // Shutdown stops accepting and drains in-flight sessions within ctx's deadline.
 func (s *Server) Shutdown(ctx context.Context) error { return s.conns.Shutdown(ctx) }

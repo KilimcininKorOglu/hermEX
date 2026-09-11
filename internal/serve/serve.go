@@ -98,7 +98,11 @@ func New(addr string, h http.Handler, tlsSrc TLSSource, logger *logging.Logger, 
 	// records the handler's real status and a refused request is never compressed.
 	// The security-header stamp sits outermost of the four, so it also covers a
 	// response the limiter refuses before the handler ever runs.
-	handler := securityHeadersMiddleware(logMiddleware(compressMiddleware(rateLimitMiddleware(h, limiter)), logger, subsystem))
+	// The panic recovery sits directly around the handler, inside the access log, so
+	// a panicking request is still logged with the 500 it answered rather than
+	// vanishing from the log the way net/http's own recovery leaves it.
+	handler := securityHeadersMiddleware(logMiddleware(compressMiddleware(
+		rateLimitMiddleware(recoverMiddleware(h, logger, subsystem), limiter)), logger, subsystem))
 	if o.frontDoor {
 		handler = stripForwardedFor(handler)
 	}
