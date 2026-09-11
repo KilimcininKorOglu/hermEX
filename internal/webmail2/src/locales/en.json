@@ -635,13 +635,21 @@
       "allowEditing": "Allow editing",
       "allowEditingDescription": "Delegate can change items, not just read them",
       "sendOnBehalf": "Send on behalf",
-      "sendOnBehalfDescription": "Delegate can send mail on your behalf",
+      "sendOnBehalfDescription": "The message names you in From and the delegate in Sender, so the recipient sees both",
+      "sendAs": "Send as you",
+      "sendAsDescription": "The message names you and nobody else, so the recipient cannot tell the delegate sent it",
       "addDelegate": "Add delegate",
       "emailRequired": "Delegate email is required",
       "added": "Delegate added",
       "addFailed": "Failed to add delegate",
       "removed": "Delegate removed",
-      "removeFailed": "Failed to remove delegate"
+      "removeFailed": "Failed to remove delegate",
+      "copyTitle": "Copy of mail sent in your name",
+      "copySendAs": "Keep a copy of mail sent as you",
+      "copySendAsDescription": "The message also lands in your Sent Items; the delegate keeps their own copy either way",
+      "copySendOnBehalf": "Keep a copy of mail sent on your behalf",
+      "copySendOnBehalfDescription": "The message also lands in your Sent Items; the delegate keeps their own copy either way",
+      "copySaveFailed": "Failed to save the sent-copy settings"
     },
     "privacy": {
       "title": "Privacy & Security",

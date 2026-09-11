@@ -27,6 +27,10 @@ type MailboxStore interface {
 	SetDelegates(maildir string, list []string) error
 	GetSendAs(maildir string) ([]string, error)
 	SetSendAs(maildir string, list []string) error
+	GetSendOnBehalf(maildir string) ([]string, error)
+	SetSendOnBehalf(maildir string, list []string) error
+	GetSentCopyConfig(maildir string) (objectstore.SentCopyConfig, error)
+	SetSentCopyConfig(maildir string, cfg objectstore.SentCopyConfig) error
 	GetMeetingConfig(maildir string) (objectstore.MeetingConfig, error)
 	SetMeetingConfig(maildir string, cfg objectstore.MeetingConfig) error
 	GetStoreOwners(maildir string) ([]string, error)
@@ -133,6 +137,32 @@ func (mailboxStore) GetSendAs(maildir string) ([]string, error) {
 
 func (mailboxStore) SetSendAs(maildir string, list []string) error {
 	return withStore(maildir, func(st *objectstore.Store) error { return st.SetSendAs(list) })
+}
+
+func (mailboxStore) GetSendOnBehalf(maildir string) ([]string, error) {
+	st, err := objectstore.Open(maildir)
+	if err != nil {
+		return nil, err
+	}
+	defer st.Close()
+	return st.GetSendOnBehalf()
+}
+
+func (mailboxStore) SetSendOnBehalf(maildir string, list []string) error {
+	return withStore(maildir, func(st *objectstore.Store) error { return st.SetSendOnBehalf(list) })
+}
+
+func (mailboxStore) GetSentCopyConfig(maildir string) (objectstore.SentCopyConfig, error) {
+	st, err := objectstore.Open(maildir)
+	if err != nil {
+		return objectstore.SentCopyConfig{}, err
+	}
+	defer st.Close()
+	return st.GetSentCopyConfig()
+}
+
+func (mailboxStore) SetSentCopyConfig(maildir string, cfg objectstore.SentCopyConfig) error {
+	return withStore(maildir, func(st *objectstore.Store) error { return st.SetSentCopyConfig(cfg) })
 }
 
 func (mailboxStore) GetMeetingConfig(maildir string) (objectstore.MeetingConfig, error) {

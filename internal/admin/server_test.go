@@ -961,6 +961,14 @@ type fakeStore struct {
 	setSendAsDir string
 	setSendAsVal []string
 
+	sendOnBehalf       map[string][]string
+	setSendOnBehalfDir string
+	setSendOnBehalfVal []string
+
+	sentCopy       map[string]objectstore.SentCopyConfig
+	setSentCopyDir string
+	setSentCopyVal objectstore.SentCopyConfig
+
 	meetingConfig    map[string]objectstore.MeetingConfig
 	setMeetingDir    string
 	setMeetingConfig objectstore.MeetingConfig
@@ -1147,6 +1155,44 @@ func (f *fakeStore) SetSendAs(maildir string, list []string) error {
 	}
 	f.sendAs[maildir] = list
 	f.setSendAsDir, f.setSendAsVal = maildir, list
+	return nil
+}
+
+func (f *fakeStore) GetSendOnBehalf(maildir string) ([]string, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	return f.sendOnBehalf[maildir], nil
+}
+
+func (f *fakeStore) SetSendOnBehalf(maildir string, list []string) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
+	if f.sendOnBehalf == nil {
+		f.sendOnBehalf = map[string][]string{}
+	}
+	f.sendOnBehalf[maildir] = list
+	f.setSendOnBehalfDir, f.setSendOnBehalfVal = maildir, list
+	return nil
+}
+
+func (f *fakeStore) GetSentCopyConfig(maildir string) (objectstore.SentCopyConfig, error) {
+	if f.getErr != nil {
+		return objectstore.SentCopyConfig{}, f.getErr
+	}
+	return f.sentCopy[maildir], nil
+}
+
+func (f *fakeStore) SetSentCopyConfig(maildir string, cfg objectstore.SentCopyConfig) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
+	if f.sentCopy == nil {
+		f.sentCopy = map[string]objectstore.SentCopyConfig{}
+	}
+	f.sentCopy[maildir] = cfg
+	f.setSentCopyDir, f.setSentCopyVal = maildir, cfg
 	return nil
 }
 

@@ -635,13 +635,21 @@
       "allowEditing": "Düzenlemeye izin ver",
       "allowEditingDescription": "Temsilci öğeleri yalnızca okumakla kalmaz, değiştirebilir de",
       "sendOnBehalf": "Adına gönder",
-      "sendOnBehalfDescription": "Temsilci sizin adınıza posta gönderebilir",
+      "sendOnBehalfDescription": "Mesaj From alanında sizi, Sender alanında temsilciyi taşır, alıcı ikisini de görür",
+      "sendAs": "Sizin olarak gönder",
+      "sendAsDescription": "Mesaj yalnızca sizi taşır, alıcı gönderenin temsilci olduğunu anlayamaz",
       "addDelegate": "Temsilci ekle",
       "emailRequired": "Temsilci e-postası gereklidir",
       "added": "Temsilci eklendi",
       "addFailed": "Temsilci eklenemedi",
       "removed": "Temsilci kaldırıldı",
-      "removeFailed": "Temsilci kaldırılamadı"
+      "removeFailed": "Temsilci kaldırılamadı",
+      "copyTitle": "Sizin adınıza gönderilen postanın kopyası",
+      "copySendAs": "Sizin olarak gönderilen postanın kopyasını sakla",
+      "copySendAsDescription": "Mesaj Gönderilenler klasörünüze de düşer, temsilci kendi kopyasını her durumda tutar",
+      "copySendOnBehalf": "Adınıza gönderilen postanın kopyasını sakla",
+      "copySendOnBehalfDescription": "Mesaj Gönderilenler klasörünüze de düşer, temsilci kendi kopyasını her durumda tutar",
+      "copySaveFailed": "Kopya ayarları kaydedilemedi"
     },
     "privacy": {
       "title": "Gizlilik ve Güvenlik",

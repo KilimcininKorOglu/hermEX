@@ -317,6 +317,11 @@ export interface DelegationInput {
   canSendOnBehalf?: boolean
 }
 
+export interface SentCopySettings {
+  forSendAs: boolean
+  forSendOnBehalf: boolean
+}
+
 // ACL entry for folder sharing. Rights is the raw MS-OXCPERM PidTagMemberRights
 // (Frights) bitfield the server stores, carried verbatim so a stored grant
 // round-trips back to its named profile without a lossy letters conversion.
@@ -916,6 +921,17 @@ class API {
 
   async deleteDelegation(id: string): Promise<void> {
     await this.delete(`/delegations/${encodeURIComponent(id)}`)
+  }
+
+  // Sent-copy settings: whether mail another account sends as, or on behalf of,
+  // this mailbox also lands in this mailbox's Sent Items. The sender keeps their
+  // own copy either way.
+  async getSentCopy(): Promise<SentCopySettings> {
+    return this.get<SentCopySettings>('/account/sent-copy')
+  }
+
+  async setSentCopy(settings: SentCopySettings): Promise<SentCopySettings> {
+    return this.put<SentCopySettings>('/account/sent-copy', settings)
   }
 
   // Per-user UI preferences (settings toggles)

@@ -226,6 +226,8 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 	qlimits, qused, _ := s.store.GetQuota(u.Maildir)
 	delegates, _ := s.store.GetDelegates(u.Maildir)
 	sendAs, _ := s.store.GetSendAs(u.Maildir)
+	sendOnBehalf, _ := s.store.GetSendOnBehalf(u.Maildir)
+	sentCopy, _ := s.store.GetSentCopyConfig(u.Maildir)
 	storeOwners, _ := s.store.GetStoreOwners(u.Maildir)
 	meetingCfg, _ := s.store.GetMeetingConfig(u.Maildir)
 	syncPol, _ := s.store.GetSyncPolicy(u.Maildir)
@@ -248,6 +250,8 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 		"Hide":          hideViewOf(props),
 		"Delegates":     strings.Join(delegates, "\n"),
 		"SendAs":        strings.Join(sendAs, "\n"),
+		"SendOnBehalf":  strings.Join(sendOnBehalf, "\n"),
+		"SentCopy":      sentCopy,
 		"StoreOwners":   strings.Join(storeOwners, "\n"),
 		"Meeting":       meetingCfg,
 		"SyncPolicy":    policyView(syncPol),

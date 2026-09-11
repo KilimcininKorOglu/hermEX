@@ -145,7 +145,26 @@
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Users who may send mail as this user, one address per line
 <textarea name="sendas" rows="4" placeholder="assistant@example.com">{{.SendAs}}</textarea></label>
+<p class="hint">The message names this user in From and nobody else, so the recipient cannot tell who sent it.</p>
 <button type="submit">Save send-as</button>
+</form>
+
+<h2>Send on behalf</h2>
+<form class="sendonbehalf-form" hx-put="/admin/ui/users/{{.User.Username}}/sendonbehalf" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>Users who may send mail on this user's behalf, one address per line
+<textarea name="sendonbehalf" rows="4" placeholder="assistant@example.com">{{.SendOnBehalf}}</textarea></label>
+<p class="hint">The message names this user in From and the sender in Sender, so the recipient sees both.</p>
+<button type="submit">Save send-on-behalf</button>
+</form>
+
+<h2>Copy of mail sent in this user's name</h2>
+<form class="sentcopy-form" hx-put="/admin/ui/users/{{.User.Username}}/sentcopy" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label class="check"><input type="checkbox" name="copysendas"{{if .SentCopy.ForSendAs}} checked{{end}}> Keep a copy of mail sent as this user in its Sent Items</label>
+<label class="check"><input type="checkbox" name="copysendonbehalf"{{if .SentCopy.ForSendOnBehalf}} checked{{end}}> Keep a copy of mail sent on this user's behalf in its Sent Items</label>
+<p class="hint">The sender keeps their own copy either way. Without this, a shared mailbox holds no record of what went out in its name.</p>
+<button type="submit">Save sent-copy settings</button>
 </form>
 
 <h2>Additional store owners</h2>

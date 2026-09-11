@@ -239,6 +239,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/delegations", s.handleGetDelegations)
 	mux.HandleFunc("POST /api/v1/delegations", s.handlePostDelegation)
 	mux.HandleFunc("DELETE /api/v1/delegations/{id}", s.handleDeleteDelegation)
+	mux.HandleFunc("GET /api/v1/account/sent-copy", s.handleGetSentCopy)
+	mux.HandleFunc("PUT /api/v1/account/sent-copy", s.handlePutSentCopy)
 	mux.HandleFunc("GET /api/v1/scheduled", s.handleScheduled)
 	mux.HandleFunc("POST /api/v1/scheduled/cancel", s.handleCancelScheduled)
 	mux.HandleFunc("GET /api/v1/search-folders", s.handleGetSearchFolders)

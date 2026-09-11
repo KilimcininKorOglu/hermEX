@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dialog"
 import { toast } from "sonner"
 import api, { type CalendarSettings } from "@/utils/api"
-import type { VacationAutoReply, ClientSession, Delegation, Category, RecipientRule, SignatureEntry, TemplateEntry } from "@/utils/api"
+import type { VacationAutoReply, ClientSession, Delegation, Category, RecipientRule, SentCopySettings, SignatureEntry, TemplateEntry } from "@/utils/api"
 import * as smimeStore from "@/utils/smime"
 import type { CertInfo } from "@/utils/smime"
 import { detectTimeZone, listTimeZones } from "@/utils/timezone"
@@ -942,7 +942,12 @@ export function SettingsPage() {
   const [delEmail, setDelEmail] = useState("")
   const [delWrite, setDelWrite] = useState(false)
   const [delSendOnBehalf, setDelSendOnBehalf] = useState(false)
+  const [delSendAs, setDelSendAs] = useState(false)
   const [delBusy, setDelBusy] = useState(false)
+
+  // Sent-copy: whether mail a delegate sends in this mailbox's name also lands in
+  // this mailbox's Sent Items. Both default off, so an upgrade changes nothing.
+  const [sentCopy, setSentCopy] = useState<SentCopySettings>({ forSendAs: false, forSendOnBehalf: false })
 
   const loadDelegations = useCallback(async () => {
     try {
@@ -953,9 +958,33 @@ export function SettingsPage() {
     }
   }, [])
 
+  const loadSentCopy = useCallback(async () => {
+    try {
+      setSentCopy(await api.getSentCopy())
+    } catch {
+      setSentCopy({ forSendAs: false, forSendOnBehalf: false })
+    }
+  }, [])
+
   useEffect(() => {
     loadDelegations()
-  }, [loadDelegations])
+    loadSentCopy()
+  }, [loadDelegations, loadSentCopy])
+
+  // toggleSentCopy sends the whole object, so changing one flag never drops the
+  // other. The previous value is restored when the save fails, or the switch would
+  // show a setting the server never stored.
+  const toggleSentCopy = async (key: keyof SentCopySettings) => {
+    const prev = sentCopy
+    const next = { ...sentCopy, [key]: !sentCopy[key] }
+    setSentCopy(next)
+    try {
+      setSentCopy(await api.setSentCopy(next))
+    } catch {
+      setSentCopy(prev)
+      toast.error(t("settings.delegates.copySaveFailed"))
+    }
+  }
 
   const handleAddDelegate = async () => {
     const grantee = delEmail.trim().toLowerCase()
@@ -969,11 +998,13 @@ export function SettingsPage() {
         grantee,
         rights: delWrite ? ["read", "write"] : ["read"],
         canSendOnBehalf: delSendOnBehalf,
+        canSendAs: delSendAs,
       })
       toast.success(t("settings.delegates.added"))
       setDelEmail("")
       setDelWrite(false)
       setDelSendOnBehalf(false)
+      setDelSendAs(false)
       await loadDelegations()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("settings.delegates.addFailed"))
@@ -2118,10 +2149,32 @@ export function SettingsPage() {
               checked={delSendOnBehalf}
               onChange={() => setDelSendOnBehalf((v) => !v)}
             />
+            <SettingRow
+              title={t("settings.delegates.sendAs")}
+              description={t("settings.delegates.sendAsDescription")}
+              checked={delSendAs}
+              onChange={() => setDelSendAs((v) => !v)}
+            />
             <Button onClick={handleAddDelegate} disabled={delBusy || !delEmail.trim()}>
               <Plus className="mr-2 h-4 w-4" />
               {t("settings.delegates.addDelegate")}
             </Button>
+          </div>
+          <div className="space-y-1 rounded-lg border p-3">
+            <p className="text-sm font-medium">{t("settings.delegates.copyTitle")}</p>
+            <SettingRow
+              title={t("settings.delegates.copySendAs")}
+              description={t("settings.delegates.copySendAsDescription")}
+              checked={sentCopy.forSendAs}
+              onChange={() => void toggleSentCopy("forSendAs")}
+            />
+            <Separator />
+            <SettingRow
+              title={t("settings.delegates.copySendOnBehalf")}
+              description={t("settings.delegates.copySendOnBehalfDescription")}
+              checked={sentCopy.forSendOnBehalf}
+              onChange={() => void toggleSentCopy("forSendOnBehalf")}
+            />
           </div>
         </div>
       </SettingSection>
