@@ -80,6 +80,13 @@ type fakeSession struct {
 	lastRcpt RcptParams // the parameters of the most recent Rcpt call
 	rcptErr  error      // when set, Rcpt returns it (to exercise the error→reply mapping)
 	dataErr  error      // when set, Data returns it (to exercise the DATA error→reply mapping)
+
+	// dataFrom and dataRcpts record the envelope as each Data call saw it, one
+	// entry per accepted message. The transaction boundary clears from and rcpts
+	// afterwards, so a test about what a single message carried reads these rather
+	// than the live fields.
+	dataFrom  []string
+	dataRcpts [][]string
 }
 
 func (s *fakeSession) Mail(from string, params MailParams) error {
@@ -95,6 +102,8 @@ func (s *fakeSession) Rcpt(to string, params RcptParams) error {
 	return nil
 }
 func (s *fakeSession) Data(r io.Reader) error {
+	s.dataFrom = append(s.dataFrom, s.from)
+	s.dataRcpts = append(s.dataRcpts, append([]string(nil), s.rcpts...))
 	b, err := io.ReadAll(r)
 	s.data = b
 	if err != nil {
@@ -163,11 +172,16 @@ func TestServerTransaction(t *testing.T) {
 	send(t, conn, "QUIT\r\n")
 	expect(t, r, 221)
 
-	if sess.from != "alice@test" {
-		t.Errorf("from = %q, want alice@test", sess.from)
+	// The envelope is read as the Data call saw it, because the completed
+	// transaction clears the session's live from and rcpts.
+	if len(sess.dataRcpts) != 1 {
+		t.Fatalf("the server accepted %d messages, want 1", len(sess.dataRcpts))
 	}
-	if len(sess.rcpts) != 2 || sess.rcpts[0] != "bob@test" || sess.rcpts[1] != "carol@test" {
-		t.Errorf("rcpts = %v", sess.rcpts)
+	if sess.dataFrom[0] != "alice@test" {
+		t.Errorf("from = %q, want alice@test", sess.dataFrom[0])
+	}
+	if got := sess.dataRcpts[0]; len(got) != 2 || got[0] != "bob@test" || got[1] != "carol@test" {
+		t.Errorf("rcpts = %v", got)
 	}
 	// Every accepted message is stamped with a Received: trace header (RFC 5321
 	// §4.4) ahead of the body, recording the helo name, the resolved name and IP,
@@ -484,8 +498,11 @@ func TestServerBDATChunking(t *testing.T) {
 	if !strings.HasSuffix(got, ".Hello, World") {
 		t.Errorf("assembled BDAT body = %q, want it to end with %q", got, ".Hello, World")
 	}
-	if sess.from != "alice@test" || len(sess.rcpts) != 1 || sess.rcpts[0] != "bob@test" {
-		t.Errorf("envelope not captured: from=%q rcpts=%v", sess.from, sess.rcpts)
+	// The envelope is read as the Data call saw it, because the completed BDAT
+	// transaction clears the session's live from and rcpts.
+	if len(sess.dataRcpts) != 1 || sess.dataFrom[0] != "alice@test" ||
+		len(sess.dataRcpts[0]) != 1 || sess.dataRcpts[0][0] != "bob@test" {
+		t.Errorf("envelope not captured: from=%v rcpts=%v", sess.dataFrom, sess.dataRcpts)
 	}
 }
 

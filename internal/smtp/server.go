@@ -307,15 +307,24 @@ func (c *smtpConn) logInternal(err error) {
 // resetTxn clears all envelope and body state at a transaction boundary (a new
 // MAIL, RSET, a completed DATA/BDAT, or a re-greeting), leaving the greeting
 // (greeted/helo) untouched.
+//
+// It resets the backend session as well, because the envelope the backend
+// accumulated (the sender, the routed local recipients, the queued relay
+// recipients, the DSN parameters) belongs to the transaction that is ending. A
+// boundary that clears only this connection's own counters leaves the previous
+// transaction's recipients in the backend, and the next message on the same
+// connection is then delivered and relayed to them too. A sending client reuses
+// one connection for several messages, so that is the ordinary case, not an edge
+// case.
 func (c *smtpConn) resetTxn() {
 	c.hasFrom, c.rcptCount, c.binaryMIME, c.smtputf8 = false, 0, false, false
 	c.bdatBuf, c.bdatErr = nil, false
+	c.sess.Reset()
 }
 
 func (c *smtpConn) cmdHELO(arg string) bool {
 	c.resetTxn()
 	c.greeted, c.helo = true, arg
-	c.sess.Reset()
 	c.reply(250, c.srv.hostname())
 	return true
 }
@@ -323,7 +332,6 @@ func (c *smtpConn) cmdHELO(arg string) bool {
 func (c *smtpConn) cmdEHLO(arg string) bool {
 	c.resetTxn()
 	c.greeted, c.helo = true, arg
-	c.sess.Reset()
 	c.srv.greetEHLO(c.w, arg, c.tls, c.canAuth && c.tls)
 	return true
 }
@@ -353,7 +361,6 @@ func (c *smtpConn) cmdSTARTTLS(string) bool {
 	c.tls = true
 	// RFC 3207: discard all state negotiated before TLS; the client re-issues
 	// EHLO over the secured link.
-	c.sess.Reset()
 	c.resetTxn()
 	c.greeted, c.helo = false, ""
 	c.event(logging.LevelInfo, "starttls", nil)
@@ -386,11 +393,14 @@ func (c *smtpConn) cmdMAIL(arg string) bool {
 		c.reply(code, msg)
 		return true
 	}
+	// Close the previous transaction before this one opens, so the sender the
+	// backend is about to record does not join the recipients of the message
+	// before it.
+	c.resetTxn()
 	if err := c.sess.Mail(addr, mailDSN); err != nil {
 		replySessionErr(c.w, err, c.logInternal)
 		return true
 	}
-	c.resetTxn()
 	c.hasFrom = true
 	// RFC 3030: BODY=BINARYMIME commits the sender to delivering the body over
 	// BDAT; a later DATA in this transaction is then a sequence error.
@@ -579,7 +589,6 @@ func (c *smtpConn) replyBDAT(size int64, last bool, limit int64) {
 }
 
 func (c *smtpConn) cmdRSET(string) bool {
-	c.sess.Reset()
 	c.resetTxn()
 	c.reply(250, "OK")
 	return true
