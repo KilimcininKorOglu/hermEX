@@ -292,6 +292,7 @@ hermex-admin -config config.json <command> [args]
 | `create-domain <domain>`                         | Add a mail domain                                                 |
 | `create-user <email> <password>`                 | Add a mailbox                                                     |
 | `create-alias <alias> <user-email>`              | Point an address at an existing mailbox                           |
+| `set-password <email> <password>`                | Reset a password; forces a change at next login and ends every live session (`--no-force-change`, `--keep-sessions`) |
 | `create-contact <email> <domain> [name]`         | Add an external mail contact to the address list                  |
 | `update-contact <email> <name>`                  | Rename a contact; an empty name clears it                         |
 | `delete-contact <email>`                         | Remove a contact                                                  |
