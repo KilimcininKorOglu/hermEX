@@ -250,10 +250,10 @@
     "noteAdded": "Note added",
     "noteFailed": "Could not save the note",
     "deleteNote": "Delete note",
-    "previewLarge": "Preview ({size})",
-    "downloadSelected": "Download {count} selected",
+    "previewLarge": "Preview ({{size}})",
+    "downloadSelected": "Download {{count}} selected",
     "openInNewTab": "Open in a new tab",
-    "openAttachment": "Open {filename} in a new tab"
+    "openAttachment": "Open {{filename}} in a new tab"
   },
   "compose": {
     "invalidEmail": "Enter a valid email address",
@@ -824,7 +824,7 @@
     "twoFactor": {
       "title": "Two-step verification",
       "description": "Ask for a code from an authenticator app after the password.",
-      "enabledDescription": "On. {count} recovery codes left.",
+      "enabledDescription": "On. {{count}} recovery codes left.",
       "enable": "Turn on",
       "disable": "Turn off",
       "beginFailed": "Could not start the setup.",
@@ -857,7 +857,7 @@
       "revoke": "Revoke",
       "revoked": "The app password was revoked.",
       "revokeFailed": "Could not revoke it.",
-      "lastUsed": "Last used {when}",
+      "lastUsed": "Last used {{when}}",
       "neverUsed": "Never used"
     }
   },
@@ -949,11 +949,11 @@
     "nextWeek": "Next week",
     "reminder": "Reminder",
     "reminderNone": "None",
-    "reminderMinutes": "{n} minutes before",
+    "reminderMinutes": "{{n}} minutes before",
     "print": "Print",
     "firstDayOfWeek": "First day of week",
     "resolution": "Time slot",
-    "resolutionMinutes": "{n} min",
+    "resolutionMinutes": "{{n}} min",
     "busyStatus": "Show as",
     "busyFree": "Free",
     "busyTentative": "Tentative",
@@ -1536,7 +1536,7 @@
     "openCalendar": "Open calendar",
     "openInbox": "Open inbox",
     "openTasks": "Open tasks",
-    "unreadMail": "{count} unread",
+    "unreadMail": "{{count}} unread",
     "noUnread": "Inbox is up to date",
     "noTasks": "No open tasks",
     "quickNote": "Quick note",

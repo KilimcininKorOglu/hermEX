@@ -250,10 +250,10 @@
     "noteAdded": "Not eklendi",
     "noteFailed": "Not kaydedilemedi",
     "deleteNote": "Notu sil",
-    "previewLarge": "Önizle ({size})",
-    "downloadSelected": "Seçili {count} eki indir",
+    "previewLarge": "Önizle ({{size}})",
+    "downloadSelected": "Seçili {{count}} eki indir",
     "openInNewTab": "Yeni sekmede aç",
-    "openAttachment": "{filename} dosyasını yeni sekmede aç"
+    "openAttachment": "{{filename}} dosyasını yeni sekmede aç"
   },
   "compose": {
     "invalidEmail": "Geçerli bir e-posta adresi girin",
@@ -824,7 +824,7 @@
     "twoFactor": {
       "title": "İki adımlı doğrulama",
       "description": "Paroladan sonra authenticator uygulamasından bir kod ister.",
-      "enabledDescription": "Açık. {count} recovery code kaldı.",
+      "enabledDescription": "Açık. {{count}} recovery code kaldı.",
       "enable": "Aç",
       "disable": "Kapat",
       "beginFailed": "Kurulum başlatılamadı.",
@@ -857,7 +857,7 @@
       "revoke": "İptal et",
       "revoked": "App password iptal edildi.",
       "revokeFailed": "İptal edilemedi.",
-      "lastUsed": "Son kullanım {when}",
+      "lastUsed": "Son kullanım {{when}}",
       "neverUsed": "Hiç kullanılmadı"
     }
   },
@@ -949,11 +949,11 @@
     "nextWeek": "Sonraki hafta",
     "reminder": "Hatırlatma",
     "reminderNone": "Yok",
-    "reminderMinutes": "{n} dakika önce",
+    "reminderMinutes": "{{n}} dakika önce",
     "print": "Yazdır",
     "firstDayOfWeek": "Haftanın ilk günü",
     "resolution": "Zaman aralığı",
-    "resolutionMinutes": "{n} dk",
+    "resolutionMinutes": "{{n}} dk",
     "busyStatus": "Göster",
     "busyFree": "Serbest",
     "busyTentative": "Tentatif",
@@ -1536,7 +1536,7 @@
     "openCalendar": "Takvimi aç",
     "openInbox": "Gelen kutusunu aç",
     "openTasks": "Görevleri aç",
-    "unreadMail": "{count} okunmamış",
+    "unreadMail": "{{count}} okunmamış",
     "noUnread": "Gelen kutusu güncel",
     "noTasks": "Açık görev yok",
     "quickNote": "Hızlı not",
