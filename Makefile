@@ -10,6 +10,7 @@
 #   make test PKG=./internal/rop RUN=TestCopyToSubObjects
 #   make test-host PKG=./internal/rop RUN=TestX # host quick feedback (DB tests skip)
 #   make lint PKG=./internal/rop/...            # golangci-lint on the host, not in gate
+#   make bench PKG=./internal/rop BENCH=Table   # benchmarks on the host, not in gate
 #   make audit-deps                             # dependency advisories, host; monthly and pre-release
 #   make up / make down                         # dev environment lifecycle
 
@@ -41,7 +42,11 @@ PKG ?= ./internal/... ./cmd/...
 RUN ?=
 RUNFLAG := $(if $(RUN),-run '$(RUN)',)
 
-.PHONY: all build test test-host test-race vet fmt fmt-check gate lint lint-modernize require-golangci-lint audit-deps require-govulncheck tidy up down images rebuild clean help compose-check dump-db dump-mail restore-db version
+# Benchmark scope. BENCH is a regexp over benchmark names; the default runs every
+# benchmark in PKG.
+BENCH ?= .
+
+.PHONY: all build test test-host test-race bench vet fmt fmt-check gate lint lint-modernize require-golangci-lint audit-deps require-govulncheck tidy up down images rebuild clean help compose-check dump-db dump-mail restore-db version
 
 all: build
 
@@ -65,6 +70,15 @@ test-host:
 ## test-race: race-detector test run in the dev container (same PKG/RUN); needs cgo
 test-race:
 	$(COMPOSE) exec -T -e CGO_ENABLED=1 dev go test -race -count=1 $(RUNFLAG) $(PKG)
+
+## bench: run benchmarks over PKG on the HOST (override BENCH to select them)
+# A host target like test-host and lint, and deliberately not part of gate: a
+# benchmark reports a number rather than passing or failing. `-run '^$$'` keeps the
+# ordinary tests out so the reported time is the benchmark's alone, and -benchmem
+# reports the allocation volume, which is what a change to an in-memory snapshot
+# moves.
+bench:
+	go test -run '^$$' -bench '$(BENCH)' -benchmem $(PKG)
 
 ## vet: go vet in the dev container
 vet:

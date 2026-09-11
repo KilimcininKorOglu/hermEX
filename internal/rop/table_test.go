@@ -375,8 +375,9 @@ func assertFreedBookmarkIsGone(t *testing.T, sess *Session, tableH uint32) {
 }
 
 // openInboxContentsTable walks Logon -> OpenFolder(Inbox) -> GetContentsTable and
-// returns the contents-table handle.
-func openInboxContentsTable(t *testing.T, sess *Session) uint32 {
+// returns the contents-table handle. It takes testing.TB so a benchmark drives the
+// same sequence a test does.
+func openInboxContentsTable(t testing.TB, sess *Session) uint32 {
 	t.Helper()
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
 	logonH := h[0]
