@@ -52,10 +52,10 @@ func addrEmails(as []mime.Address) []string {
 }
 
 // bestBody walks the MIME tree for the richest displayable body, text/html when
-// present, else text/plain, returning the charset-decoded UTF-8 content. The SPA
-// sanitizes it (DOMPurify) and renders with whitespace preserved, so a plain body
-// also displays correctly.
-func bestBody(root *mime.Part) string {
+// present, else text/plain, returning the charset-decoded UTF-8 content and
+// whether that content is HTML. A caller that renders the body in an HTML sink
+// MUST escape it when isHTML is false, because a text body is not markup.
+func bestBody(root *mime.Part) (body string, isHTML bool) {
 	var plain, html string
 	var walk func(p *mime.Part)
 	walk = func(p *mime.Part) {
@@ -69,9 +69,19 @@ func bestBody(root *mime.Part) string {
 	}
 	walk(root)
 	if html != "" {
-		return html
+		return html, true
 	}
-	return plain
+	return plain, false
+}
+
+// bodyTypeName names a body's format for the reader. The reader escapes a "text"
+// body before it renders it, so the name is part of the API contract rather than
+// a hint.
+func bodyTypeName(isHTML bool) string {
+	if isHTML {
+		return "html"
+	}
+	return "text"
 }
 
 // collectBodyPart records the first displayable text part of each subtype. A
@@ -195,6 +205,7 @@ type mailDetailJSON struct {
 	Cc             []string         `json:"cc,omitempty"`
 	Subject        string           `json:"subject"`
 	Body           string           `json:"body"`
+	BodyType       string           `json:"bodyType"` // "html" or "text"; a "text" body is escaped by the reader
 	Preview        string           `json:"preview"`
 	Date           string           `json:"date"`
 	Read           bool             `json:"read"`
@@ -266,8 +277,10 @@ func (s *Server) applySmimeStatus(d *mailDetailJSON, st *objectstore.Store, raw 
 	case d.SmimeEncrypted && isServerMode(st):
 		content, sm := s.smimeOpen(st, raw, d.From)
 		inner := mime.ParseStructure(content)
-		body, inlined := inlineCIDImages(bestBody(inner), inner)
+		innerBody, isHTML := bestBody(inner)
+		body, inlined := inlineCIDImages(innerBody, inner)
 		d.Body = body
+		d.BodyType = bodyTypeName(isHTML)
 		d.Attachments = collectAttachments(inner, inlined)
 		d.HasAttachments = len(d.Attachments) > 0
 		d.SmimeVerified, d.SmimeSignedBy = sm.Verified, sm.SignedBy
@@ -315,13 +328,15 @@ func addFollowupFlag(d *mailDetailJSON, st *objectstore.Store, fid int64, uid ui
 // attachment list. It does NOT touch flags, the caller owns \Seen.
 func buildMailDetail(raw []byte, folder string, uid uint32) mailDetailJSON {
 	root := mime.ParseStructure(raw)
-	body, inlined := inlineCIDImages(bestBody(root), root)
+	content, isHTML := bestBody(root)
+	body, inlined := inlineCIDImages(content, root)
 	d := mailDetailJSON{
-		ID:      messageID(folder, uid),
-		Subject: "(no subject)",
-		Folder:  folder,
-		Body:    body,
-		Size:    len(raw),
+		ID:       messageID(folder, uid),
+		Subject:  "(no subject)",
+		Folder:   folder,
+		Body:     body,
+		BodyType: bodyTypeName(isHTML),
+		Size:     len(raw),
 	}
 	if env, err := mime.ParseEnvelope(raw); err == nil {
 		if env.Subject != "" {

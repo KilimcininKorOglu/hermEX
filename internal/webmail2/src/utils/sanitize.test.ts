@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { sanitizeHTML, sanitizeEmailBody, sanitizeText, sanitizeClipboard, isSafeLinkURL } from './sanitize'
+import { sanitizeHTML, sanitizeEmailBody, sanitizeText, sanitizeClipboard, escapeTextBody, isSafeLinkURL } from './sanitize'
 
 describe('sanitizeHTML', () => {
   it('allows safe HTML tags', () => {
@@ -111,6 +111,24 @@ describe('sanitizeText', () => {
     const input = 'Plain text without HTML'
     const result = sanitizeText(input)
     expect(result).toBe('Plain text without HTML')
+  })
+})
+
+describe('escapeTextBody', () => {
+  // A text/plain message carries no markup. The reader renders it in an HTML
+  // sink, so the sender's own characters have to survive as characters.
+  it("keeps the sender's own markup as text", () => {
+    expect(escapeTextBody('<b>bold</b>')).toBe('&lt;b&gt;bold&lt;/b&gt;')
+  })
+
+  it('keeps an already-escaped sequence readable', () => {
+    expect(escapeTextBody('&lt;test&gt;')).toBe('&amp;lt;test&amp;gt;')
+  })
+
+  // "a < b" is parsed as the start of a tag and the rest of the line disappears
+  // when it is not escaped.
+  it('keeps a comparison from being read as a tag', () => {
+    expect(escapeTextBody('a < b and c > d')).toBe('a &lt; b and c &gt; d')
   })
 })
 

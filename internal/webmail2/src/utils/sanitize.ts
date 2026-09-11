@@ -81,6 +81,16 @@ export function sanitizeEmailBody(dirty: string, blockRemote: boolean): { html: 
 }
 
 /**
+ * Escapes a plain-text body so an HTML sink renders it as the text it is. A
+ * text/plain message is not markup: without this, a sender's literal "<b>x</b>"
+ * renders as bold, "&lt;" displays as "<", and "a < b" is parsed as a tag and
+ * disappears.
+ */
+export function escapeTextBody(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+/**
  * Sanitizes a clipboard or drag payload before it is inserted into an editable
  * surface. A browser drops the raw fragment straight into the live DOM, so an
  * element that fires on insertion (img/onerror, svg/onload) would execute in this
@@ -91,11 +101,7 @@ export function sanitizeClipboard(html: string, text: string): string {
   if (html.trim() !== '') {
     return sanitizeHTML(html)
   }
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\r\n|\r|\n/g, '<br>')
+  return escapeTextBody(text).replace(/\r\n|\r|\n/g, '<br>')
 }
 
 /**

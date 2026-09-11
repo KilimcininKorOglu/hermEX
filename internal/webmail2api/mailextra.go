@@ -595,7 +595,8 @@ func (sc *mailScan) needsBody() bool {
 
 // bodyMatches applies the filters that need the parsed message.
 func (sc *mailScan) bodyMatches(subject, sender string, root *mime.Part) bool {
-	body := strings.ToLower(bestBody(root))
+	content, _ := bestBody(root)
+	body := strings.ToLower(content)
 	if len(sc.kql.To) > 0 && !containsAny(strings.ToLower(recipientsOf(root)), sc.kql.To) {
 		return false
 	}

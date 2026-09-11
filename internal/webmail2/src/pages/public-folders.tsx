@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react"
 import { FolderOpen, ChevronRight, ChevronLeft, Mail as MailIcon } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
-import { sanitizeEmailBody } from "@/utils/sanitize"
+import { escapeTextBody, sanitizeEmailBody } from "@/utils/sanitize"
 import api, { PublicFolder, Mail } from "@/utils/api"
 
 /**
@@ -58,7 +58,8 @@ export function PublicFoldersPage() {
 
   // One message, read-only.
   if (message && folder) {
-    const { html } = sanitizeEmailBody(message.body, true)
+    const body = message.bodyType === "text" ? escapeTextBody(message.body) : message.body
+    const { html } = sanitizeEmailBody(body, true)
     return (
       <div className="flex flex-col h-full">
         <div className="flex items-center gap-2 border-b px-4 py-3">

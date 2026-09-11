@@ -58,6 +58,7 @@ export interface Mail {
   ccNames?: string[] // display name per Cc recipient (same index, "" when unknown)
   subject: string
   body: string
+  bodyType?: string // "html" or "text"; a "text" body must be escaped before it is rendered
   preview: string
   date: string
   read: boolean

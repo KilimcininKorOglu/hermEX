@@ -184,8 +184,11 @@ func matchesIndexCriteria(sf searchFolderJSON, m objectstore.MessageInfo) bool {
 
 // matchesBodyCriteria applies the criteria that need the parsed message.
 func matchesBodyCriteria(sf searchFolderJSON, root *mime.Part) bool {
-	if sf.Body != "" && !containsFolded(bestBody(root), sf.Body) {
-		return false
+	if sf.Body != "" {
+		content, _ := bestBody(root)
+		if !containsFolded(content, sf.Body) {
+			return false
+		}
 	}
 	return !sf.HasAttachment || len(collectAttachments(root, nil)) > 0
 }

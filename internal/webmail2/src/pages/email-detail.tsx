@@ -52,7 +52,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { toast } from "sonner"
-import { sanitizeEmailBody } from "@/utils/sanitize"
+import { escapeTextBody, sanitizeEmailBody } from "@/utils/sanitize"
 import { forwardParams, replyAllParams, replyParams, type QuoteLabels } from "@/utils/replyParams"
 import { MAX_DRAG_BYTES, blobToBase64, setAttachmentDrag } from "@/utils/attachmentDrag"
 import { dragSet, emptySelection, selectOnClick } from "@/utils/attachmentSelection"
@@ -265,7 +265,9 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
           if (result.senderTrusted) setShowImages(true)
           // S/MIME encrypted: a browser-mode reader (key in this browser) decrypts
           // client-side; a server-mode reader's message was already decrypted server-side.
-          let content = result.body
+          // The body is rendered in an HTML sink below, so a text/plain body is
+          // escaped first: the server reports which one it sent in bodyType.
+          let content = result.bodyType === "text" ? escapeTextBody(result.body) : result.body
           // S/MIME signal: the server fills these for cleartext-signed mail, but for
           // a browser-mode encrypted message it never sees the decrypted signed inner,
           // so the client overrides them after decrypting and verifying locally.
@@ -277,9 +279,7 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
               try {
                 const inner = smimeStore.decryptMime(await api.getMessageRaw(result.id))
                 const extracted = smimeStore.extractMimeBody(inner)
-                content = extracted.html
-                  ? extracted.body
-                  : extracted.body.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+                content = extracted.html ? extracted.body : escapeTextBody(extracted.body)
                 // Verify the inner signature in the browser; posting the decrypted
                 // signed content to the server would leak the plaintext.
                 const verdict = smimeStore.verifyMime(inner)
