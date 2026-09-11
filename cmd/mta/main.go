@@ -61,6 +61,42 @@ func senderOf(raw []byte) string {
 	return addrs[0].Address
 }
 
+// recipientsOf reads a message's own addressees from its headers. It is the
+// fallback for a give-up report whose recipient list the spooler could not read
+// off the stored object: the message itself still names who it was for, and a
+// report that names nobody tells the sender nothing. A malformed header list is
+// skipped rather than failing the whole read, because a partial list still names
+// someone.
+func recipientsOf(raw []byte) []string {
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, field := range []string{"To", "Cc", "Bcc"} {
+		list, err := msg.Header.AddressList(field)
+		if err != nil {
+			continue
+		}
+		for _, a := range list {
+			out = append(out, a.Address)
+		}
+	}
+	return out
+}
+
+// reportRecipients decides who a give-up report names. The spooler's list wins,
+// because it comes from the stored object and carries the recipients delivery
+// would have used. An empty list means the spooler could not read that object,
+// and the report loop would then produce nothing at all, so the message's own
+// headers answer instead.
+func reportRecipients(raw []byte, recipients []string) []string {
+	if len(recipients) > 0 {
+		return recipients
+	}
+	return recipientsOf(raw)
+}
+
 // daemonName identifies this process in the central log and in every settings
 // applier's failure record.
 const daemonName = "hermex-mta"
@@ -420,6 +456,7 @@ func (d *mtaDaemon) sendLaterLoop() lifecycle.Component {
 	// abandoned external recipient. One report per recipient, so each carries a
 	// well-formed Final-Recipient.
 	onGiveUp := func(raw []byte, recipients []string, cause error) {
+		recipients = reportRecipients(raw, recipients)
 		from := senderOf(raw)
 		logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "sendlater.giveup",
 			User: from, Fields: logging.Fields{"recipients": len(recipients)}, Err: cause.Error()})
