@@ -22,6 +22,7 @@ import (
 	"hermex/internal/connlimit"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
+	"hermex/internal/netline"
 )
 
 // Backend creates a Session for each accepted connection.
@@ -71,6 +72,10 @@ type Server struct {
 	// held atomically so the MTA's poll can apply an operator's edit while sessions
 	// run, with no restart. Set it via SetMaxSize.
 	maxSize atomic.Int64
+	// maxCommandLine is the cap on ONE line read from the client in bytes (0 = the
+	// built-in defaultMaxCommandLine), held atomically like maxSize so the MTA's
+	// poll can apply an operator's edit while sessions run.
+	maxCommandLine atomic.Int64
 
 	conns lifecycle.ConnGroup
 }
@@ -235,7 +240,7 @@ func (s *Server) handle(conn net.Conn) {
 // a handler abandons the connection.
 func (c *smtpConn) loop() {
 	for {
-		line, err := readCommandLine(c.tp.R)
+		line, err := netline.ReadLine(c.tp.R, c.srv.commandLineLimit())
 		if errors.Is(err, errLineTooLong) {
 			c.reply(500, "5.5.2 line too long")
 			continue
@@ -798,48 +803,36 @@ func (s *Server) greetEHLO(w *ew, arg string, isTLS, authAvailable bool) {
 	w.flush()
 }
 
-// maxCommandLine is the RFC 5321 §4.5.3.1.4 limit on a command line including the
-// trailing CRLF. Commands are tiny, so anything approaching this is malformed or a
-// memory-exhaustion probe; the reader caps the read rather than buffering without
-// bound. The DATA body's per-line limit (§4.5.3.1.6) is deliberately not enforced
-// as a hard reject: major senders routinely exceed 1000 octets and total-size
-// abuse is already bounded by SIZE, so a strict line cap would only break interop.
-const maxCommandLine = 512
+// defaultMaxCommandLine is the RFC 5321 4.5.3.1.4 limit on a command line including
+// the trailing CRLF, and the fallback when no operator limit has been set. Commands
+// are tiny, so anything approaching this is malformed or a memory-exhaustion probe;
+// the reader caps the read rather than buffering without bound. The DATA body's
+// per-line limit (4.5.3.1.6) is deliberately not enforced as a hard reject: major
+// senders routinely exceed 1000 octets and total-size abuse is already bounded by
+// SIZE, so a strict line cap would only break interop.
+const defaultMaxCommandLine = 512
 
-// errLineTooLong is returned by readCommandLine when a command line exceeds
-// maxCommandLine; the caller answers 500 and stays in protocol sync.
-var errLineTooLong = errors.New("smtp: command line too long")
-
-// readCommandLine reads one CRLF-terminated command line from r, enforcing
-// maxCommandLine. It returns the line without the trailing CRLF. When the limit
-// is exceeded it drains the rest of the line and returns errLineTooLong, so the
-// connection stays framed for the next command.
-func readCommandLine(r *bufio.Reader) (string, error) {
-	buf := make([]byte, 0, 128)
-	for {
-		b, err := r.ReadByte()
-		if err != nil {
-			return "", err
-		}
-		if b == '\n' {
-			if n := len(buf); n > 0 && buf[n-1] == '\r' {
-				buf = buf[:n-1]
-			}
-			return string(buf), nil
-		}
-		if len(buf) >= maxCommandLine {
-			// Over the limit: discard the remainder of this line so the next
-			// read starts at a command boundary, then report it.
-			for b != '\n' {
-				if b, err = r.ReadByte(); err != nil {
-					return "", err
-				}
-			}
-			return "", errLineTooLong
-		}
-		buf = append(buf, b)
+// SetMaxCommandLine sets the maximum accepted command line in bytes (0 restores the
+// built-in default). It is safe to call concurrently with active sessions, so an
+// operator's edit applies without a restart.
+func (s *Server) SetMaxCommandLine(n int64) {
+	if n < 0 {
+		n = 0
 	}
+	s.maxCommandLine.Store(n)
 }
+
+// commandLineLimit is the line cap in force right now.
+func (s *Server) commandLineLimit() int {
+	if n := s.maxCommandLine.Load(); n > 0 {
+		return int(n)
+	}
+	return defaultMaxCommandLine
+}
+
+// errLineTooLong is returned when a command line exceeds the cap; the caller
+// answers 500 and stays in protocol sync.
+var errLineTooLong = netline.ErrTooLong
 
 // reply writes a single-line SMTP response and flushes it. The server advertises
 // ENHANCEDSTATUSCODES (RFC 2034), so every 2xx/4xx/5xx reply must lead with an

@@ -26,6 +26,14 @@ type SizeLimits struct {
 	// own when a message opens. A larger one waits for a click, because the preview
 	// downloads the whole file before the reader has asked for it.
 	WebmailPreviewMaxBytes int64
+	// The command-line caps bound ONE line of a connection-oriented protocol: a
+	// command and, on the same reader, a SASL continuation. A client reaches these
+	// readers before it authenticates, so without a cap one that never sends a line
+	// terminator grows the daemon's memory without limit. The IMAP figure is the
+	// generous one, because a long UID set or SEARCH key is legitimate.
+	IMAPCommandLineBytes int64
+	POP3CommandLineBytes int64
+	SMTPCommandLineBytes int64
 }
 
 // GetSizeLimits returns the stored size limits and whether a row has been saved. When
@@ -34,10 +42,12 @@ func (d *SQLDirectory) GetSizeLimits() (SizeLimits, bool, error) {
 	var s SizeLimits
 	err := d.db.QueryRow(
 		`SELECT imap_literal_bytes, ews_request_bytes, activesync_request_bytes, dav_ical_bytes, dav_vcard_bytes,
-		        webmail_request_bytes, mapi_request_bytes, freebusy_max_targets, webmail_preview_max_bytes
+		        webmail_request_bytes, mapi_request_bytes, freebusy_max_targets, webmail_preview_max_bytes,
+		        imap_command_line_bytes, pop3_command_line_bytes, smtp_command_line_bytes
 		   FROM size_limits WHERE id = 1`).
 		Scan(&s.IMAPLiteralBytes, &s.EWSRequestBytes, &s.ActiveSyncRequestBytes, &s.DAVICalBytes, &s.DAVVCardBytes,
-			&s.WebmailRequestBytes, &s.MapiRequestBytes, &s.FreeBusyMaxTargets, &s.WebmailPreviewMaxBytes)
+			&s.WebmailRequestBytes, &s.MapiRequestBytes, &s.FreeBusyMaxTargets, &s.WebmailPreviewMaxBytes,
+			&s.IMAPCommandLineBytes, &s.POP3CommandLineBytes, &s.SMTPCommandLineBytes)
 	if errors.Is(err, sql.ErrNoRows) {
 		return SizeLimits{}, false, nil
 	}
@@ -53,8 +63,9 @@ func (d *SQLDirectory) SetSizeLimits(s SizeLimits) error {
 	_, err := d.db.Exec(
 		`INSERT INTO size_limits
 		   (id, imap_literal_bytes, ews_request_bytes, activesync_request_bytes, dav_ical_bytes, dav_vcard_bytes,
-		    webmail_request_bytes, mapi_request_bytes, freebusy_max_targets, webmail_preview_max_bytes, updated_at)
-		 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		    webmail_request_bytes, mapi_request_bytes, freebusy_max_targets, webmail_preview_max_bytes,
+		    imap_command_line_bytes, pop3_command_line_bytes, smtp_command_line_bytes, updated_at)
+		 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON DUPLICATE KEY UPDATE imap_literal_bytes = VALUES(imap_literal_bytes),
 		   ews_request_bytes = VALUES(ews_request_bytes),
 		   activesync_request_bytes = VALUES(activesync_request_bytes),
@@ -63,9 +74,13 @@ func (d *SQLDirectory) SetSizeLimits(s SizeLimits) error {
 		   mapi_request_bytes = VALUES(mapi_request_bytes),
 		   freebusy_max_targets = VALUES(freebusy_max_targets),
 		   webmail_preview_max_bytes = VALUES(webmail_preview_max_bytes),
+		   imap_command_line_bytes = VALUES(imap_command_line_bytes),
+		   pop3_command_line_bytes = VALUES(pop3_command_line_bytes),
+		   smtp_command_line_bytes = VALUES(smtp_command_line_bytes),
 		   updated_at = VALUES(updated_at)`,
 		s.IMAPLiteralBytes, s.EWSRequestBytes, s.ActiveSyncRequestBytes, s.DAVICalBytes, s.DAVVCardBytes,
 		s.WebmailRequestBytes, s.MapiRequestBytes, s.FreeBusyMaxTargets, s.WebmailPreviewMaxBytes,
+		s.IMAPCommandLineBytes, s.POP3CommandLineBytes, s.SMTPCommandLineBytes,
 		time.Now().UnixMilli())
 	return err
 }

@@ -63,10 +63,14 @@ func main() {
 	go connlimit.RunMaintenance("hermex-imap", logger, conns, dir.GetConnLimitSettings)
 	srv.SetConnLimiter(conns)
 	srv.SetNotify(notify.EnableConsumer(cfg.NotifyURL, cfg.NotifySecret, logger))
-	// IMAP literal size cap: read at startup and re-read every minute so an admin's
-	// change applies without a restart; 0 keeps the built-in default.
-	applyIMAPSizeLimit(logger, dir.GetSizeLimits, srv.SetMaxLiteralSize)
-	go runIMAPSizeMaintenance(logger, dir.GetSizeLimits, srv.SetMaxLiteralSize)
+	// IMAP literal and command-line caps: read at startup and re-read every minute so
+	// an admin's change applies without a restart; 0 keeps the built-in default.
+	applyIMAP := func(s directory.SizeLimits) {
+		srv.SetMaxLiteralSize(s.IMAPLiteralBytes)
+		srv.SetMaxCommandLine(s.IMAPCommandLineBytes)
+	}
+	applyIMAPSizeLimit(logger, dir.GetSizeLimits, applyIMAP)
+	go runIMAPSizeMaintenance(logger, dir.GetSizeLimits, applyIMAP)
 	provider := startTLS(cfg, dir, logger, srv)
 	srv.AddListener(ln)
 	log.Printf("hermex-imap listening on %s", addr)
@@ -165,27 +169,27 @@ func runUntilSignal(cfg *config.Config, db *sql.DB, provider *tlscert.Provider, 
 	}
 }
 
-// applyIMAPSizeLimit reads the stored IMAP literal cap and applies it to the server. A
-// missing row or a read error leaves the cap unchanged, so a settings failure never
-// shrinks the limit unexpectedly.
-func applyIMAPSizeLimit(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setLiteral func(int64)) {
+// applyIMAPSizeLimit reads the stored IMAP caps and applies them to the server. A
+// missing row or a read error leaves them unchanged, so a settings failure never
+// shrinks a limit unexpectedly.
+func applyIMAPSizeLimit(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), apply func(directory.SizeLimits)) {
 	s, found, err := read()
 	if err != nil {
-		logging.SettingsReadFailed(logger, "hermex-imap", "size-limits", "leaving the literal cap unchanged", err)
+		logging.SettingsReadFailed(logger, "hermex-imap", "size-limits", "leaving the IMAP caps unchanged", err)
 		return
 	}
 	if !found {
 		return
 	}
-	setLiteral(s.IMAPLiteralBytes)
+	apply(s)
 }
 
-// runIMAPSizeMaintenance re-applies the IMAP literal cap every minute so an admin
-// change takes effect without a restart. It runs until the process exits.
-func runIMAPSizeMaintenance(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setLiteral func(int64)) {
+// runIMAPSizeMaintenance re-applies the IMAP caps every minute so an admin change
+// takes effect without a restart. It runs until the process exits.
+func runIMAPSizeMaintenance(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), apply func(directory.SizeLimits)) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for range tick.C {
-		applyIMAPSizeLimit(logger, read, setLiteral)
+		applyIMAPSizeLimit(logger, read, apply)
 	}
 }

@@ -197,6 +197,7 @@ func (s *Server) fillSizeLimits(data map[string]any) {
 		fbTargets = sl.FreeBusyMaxTargets
 		previewMB = sl.WebmailPreviewMaxBytes / (1024 * 1024)
 	}
+	s.fillCommandLineLimits(data)
 	data["IMAPLiteralMB"] = imapMB
 	data["EWSRequestMB"] = ewsMB
 	data["ActiveSyncRequestMB"] = easMB
@@ -206,6 +207,28 @@ func (s *Server) fillSizeLimits(data map[string]any) {
 	data["MapiRequestMB"] = mapiMB
 	data["FreeBusyMaxTargets"] = fbTargets
 	data["WebmailPreviewMB"] = previewMB
+}
+
+// defaultIMAPCommandLineBytes, defaultPOP3CommandLineBytes and
+// defaultSMTPCommandLineBytes mirror each daemon's own built-in line cap, shown on
+// the page until an operator saves one.
+const (
+	defaultIMAPCommandLineBytes = 65536
+	defaultPOP3CommandLineBytes = 8192
+	defaultSMTPCommandLineBytes = 512
+)
+
+// fillCommandLineLimits sets the per-protocol command-line caps on a page-data map.
+// They are shown in BYTES, not megabytes: one line of a mail protocol is small, and
+// the SMTP figure is the 512 octets its RFC gives a command line.
+func (s *Server) fillCommandLineLimits(data map[string]any) {
+	imap, pop3, smtp := int64(defaultIMAPCommandLineBytes), int64(defaultPOP3CommandLineBytes), int64(defaultSMTPCommandLineBytes)
+	if sl, found, err := s.dir.GetSizeLimits(); err == nil && found {
+		imap, pop3, smtp = sl.IMAPCommandLineBytes, sl.POP3CommandLineBytes, sl.SMTPCommandLineBytes
+	}
+	data["IMAPCommandLineBytes"] = imap
+	data["POP3CommandLineBytes"] = pop3
+	data["SMTPCommandLineBytes"] = smtp
 }
 
 // handleUISaveLimits persists the protocol size limits (entered in whole MB). Each
@@ -227,6 +250,14 @@ func (s *Server) handleUISaveLimits(w http.ResponseWriter, r *http.Request) {
 		s.render(w, "limits-panel", s.limitsPageData(r, "The free/busy target cap must be at least 1; settings not saved."))
 		return
 	}
+	// The command-line caps are in bytes, so they are read and validated on their
+	// own too. A line shorter than one command is unusable, so the floor is 64.
+	imapLine, pop3Line, smtpLine := formInt(r, "imap_line_bytes"), formInt(r, "pop3_line_bytes"), formInt(r, "smtp_line_bytes")
+	if imapLine < minCommandLineBytes || pop3Line < minCommandLineBytes || smtpLine < minCommandLineBytes {
+		s.render(w, "limits-panel", s.limitsPageData(r,
+			"Each command-line cap must be at least 64 bytes; settings not saved."))
+		return
+	}
 	limits := directory.SizeLimits{
 		IMAPLiteralBytes:       megabytes(mb["imap_literal_mb"]),
 		EWSRequestBytes:        megabytes(mb["ews_request_mb"]),
@@ -237,6 +268,9 @@ func (s *Server) handleUISaveLimits(w http.ResponseWriter, r *http.Request) {
 		MapiRequestBytes:       megabytes(mb["mapi_request_mb"]),
 		FreeBusyMaxTargets:     int64(fbTargets),
 		WebmailPreviewMaxBytes: megabytes(mb["webmail_preview_mb"]),
+		IMAPCommandLineBytes:   int64(imapLine),
+		POP3CommandLineBytes:   int64(pop3Line),
+		SMTPCommandLineBytes:   int64(smtpLine),
 	}
 	if err := s.dir.SetSizeLimits(limits); err != nil {
 		s.render(w, "limits-panel", s.limitsPageData(r, s.notice("Could not save the size limits.", err)))
@@ -244,6 +278,10 @@ func (s *Server) handleUISaveLimits(w http.ResponseWriter, r *http.Request) {
 	}
 	s.render(w, "limits-panel", s.limitsPageData(r, "Size limits saved. Each protocol applies its own within a minute, no restart."))
 }
+
+// minCommandLineBytes is the smallest command-line cap an operator may save: below
+// it no protocol command fits, so the daemon would refuse every client.
+const minCommandLineBytes = 64
 
 // sizeLimitFields are the megabyte-valued limits the form carries.
 var sizeLimitFields = [...]string{

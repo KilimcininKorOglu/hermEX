@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"net/textproto"
 	"strings"
+
+	"hermex/internal/netline"
 )
 
 // Authenticator is an optional Session capability. A session that implements it
@@ -31,9 +33,9 @@ func (s *Server) handleAuth(w *ew, tp *textproto.Reader, arg string, sess Sessio
 	mechanism, initial, _ := strings.Cut(arg, " ")
 	switch strings.ToUpper(mechanism) {
 	case "PLAIN":
-		authPlain(w, tp, initial, auth)
+		authPlain(w, tp, s.commandLineLimit(), initial, auth)
 	case "LOGIN":
-		authLogin(w, tp, initial, auth)
+		authLogin(w, tp, s.commandLineLimit(), initial, auth)
 	default:
 		reply(w, 504, "5.5.4 Unrecognized authentication type")
 	}
@@ -42,8 +44,8 @@ func (s *Server) handleAuth(w *ew, tp *textproto.Reader, arg string, sess Sessio
 // authPlain handles AUTH PLAIN: the credential is a single base64 token decoding
 // to authzid\0authcid\0password (RFC 4616). It may arrive inline or in a
 // continuation line after a 334 challenge.
-func authPlain(w *ew, tp *textproto.Reader, initial string, auth Authenticator) {
-	resp, ok := authResponse(w, tp, initial, "")
+func authPlain(w *ew, tp *textproto.Reader, max int, initial string, auth Authenticator) {
+	resp, ok := authResponse(w, tp, max, initial, "")
 	if !ok {
 		return
 	}
@@ -62,8 +64,8 @@ func authPlain(w *ew, tp *textproto.Reader, initial string, auth Authenticator) 
 
 // authLogin handles AUTH LOGIN: the server prompts for the base64 username then
 // password (the username may arrive inline with the AUTH command).
-func authLogin(w *ew, tp *textproto.Reader, initial string, auth Authenticator) {
-	user, ok := authResponse(w, tp, initial, "VXNlcm5hbWU6") // "Username:"
+func authLogin(w *ew, tp *textproto.Reader, max int, initial string, auth Authenticator) {
+	user, ok := authResponse(w, tp, max, initial, "VXNlcm5hbWU6") // "Username:"
 	if !ok {
 		return
 	}
@@ -72,7 +74,7 @@ func authLogin(w *ew, tp *textproto.Reader, initial string, auth Authenticator) 
 		reply(w, 501, "5.5.2 invalid base64")
 		return
 	}
-	pass, ok := authResponse(w, tp, "", "UGFzc3dvcmQ6") // "Password:"
+	pass, ok := authResponse(w, tp, max, "", "UGFzc3dvcmQ6") // "Password:"
 	if !ok {
 		return
 	}
@@ -87,11 +89,13 @@ func authLogin(w *ew, tp *textproto.Reader, initial string, auth Authenticator) 
 // authResponse returns the client's response token: the inline value when
 // present, else a 334 challenge is sent and the continuation line read. A lone
 // "*" aborts the exchange (RFC 4954).
-func authResponse(w *ew, tp *textproto.Reader, inline, challenge string) (string, bool) {
+func authResponse(w *ew, tp *textproto.Reader, max int, inline, challenge string) (string, bool) {
 	resp := inline
 	if resp == "" {
 		reply(w, 334, challenge)
-		line, err := tp.ReadLine()
+		// The same cap as a command line: this reader is reached before the client
+		// has authenticated.
+		line, err := netline.ReadLine(tp.R, max)
 		if err != nil {
 			return "", false
 		}

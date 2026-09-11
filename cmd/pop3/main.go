@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 
@@ -49,6 +50,10 @@ func main() {
 	connlimit.Apply("hermex-pop3", logger, conns, dir.GetConnLimitSettings)
 	go connlimit.RunMaintenance("hermex-pop3", logger, conns, dir.GetConnLimitSettings)
 	srv.SetConnLimiter(conns)
+	// POP3 command-line cap: read at startup and re-read every minute so an admin's
+	// change applies without a restart; 0 keeps the built-in default.
+	applyPOP3SizeLimit(logger, dir.GetSizeLimits, srv.SetMaxCommandLine)
+	go runPOP3SizeMaintenance(logger, dir.GetSizeLimits, srv.SetMaxCommandLine)
 	provider := startTLS(cfg, dir, logger, srv)
 	srv.AddListener(ln)
 	log.Printf("hermex-pop3 listening on %s", addr)
@@ -127,6 +132,31 @@ func addImplicitTLS(cfg *config.Config, provider *tlscert.Provider, srv *pop3.Se
 	}
 	srv.AddListener(tln)
 	log.Printf("hermex-pop3 listening on %s (implicit TLS)", cfg.POP3SAddr)
+}
+
+// applyPOP3SizeLimit reads the stored POP3 command-line cap and applies it to the
+// server. A missing row or a read error leaves the cap unchanged, so a settings
+// failure never shrinks the limit unexpectedly.
+func applyPOP3SizeLimit(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setLine func(int64)) {
+	s, found, err := read()
+	if err != nil {
+		logging.SettingsReadFailed(logger, "hermex-pop3", "size-limits", "leaving the command-line cap unchanged", err)
+		return
+	}
+	if !found {
+		return
+	}
+	setLine(s.POP3CommandLineBytes)
+}
+
+// runPOP3SizeMaintenance re-applies the cap every minute so an admin change takes
+// effect without a restart. It runs until the process exits.
+func runPOP3SizeMaintenance(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setLine func(int64)) {
+	tick := time.NewTicker(time.Minute)
+	defer tick.Stop()
+	for range tick.C {
+		applyPOP3SizeLimit(logger, read, setLine)
+	}
 }
 
 // runUntilSignal serves until a shutdown signal arrives, then drains the server and

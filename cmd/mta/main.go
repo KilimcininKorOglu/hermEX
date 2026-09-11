@@ -355,6 +355,9 @@ func (d *mtaDaemon) startServer(scorer *antispam.Scorer, lim limiters, addr stri
 	// without a restart; 0 means no limit.
 	applyMessageSizeSettings(dir, logger, srv)
 	go runMessageSizeMaintenance(dir, logger, srv)
+	// SMTP command-line cap: the same poll shape, from the per-protocol size limits.
+	applySMTPLineLimit(logger, dir.GetSizeLimits, srv.SetMaxCommandLine)
+	go runSMTPLineMaintenance(logger, dir.GetSizeLimits, srv.SetMaxCommandLine)
 	// The same limit on the paths that never reach an SMTP session: the send-later
 	// release, and the meeting replies this daemon files.
 	mta.StartMessageSizeLimit(daemonName, logger, dir.GetMessageSizeSettings)
@@ -376,6 +379,31 @@ func (d *mtaDaemon) addImplicitTLS(srv *smtp.Server, provider *tlscert.Provider)
 	}
 	srv.AddListener(tln)
 	log.Printf("hermex-mta listening on %s (implicit TLS)", d.cfg.SMTPSAddr)
+}
+
+// applySMTPLineLimit reads the stored SMTP command-line cap and applies it to the
+// server. A missing row or a read error leaves the cap unchanged, so a settings
+// failure never shrinks the limit unexpectedly.
+func applySMTPLineLimit(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setLine func(int64)) {
+	s, found, err := read()
+	if err != nil {
+		logging.SettingsReadFailed(logger, daemonName, "size-limits", "leaving the command-line cap unchanged", err)
+		return
+	}
+	if !found {
+		return
+	}
+	setLine(s.SMTPCommandLineBytes)
+}
+
+// runSMTPLineMaintenance re-applies the cap every minute so an admin change takes
+// effect without a restart. It runs until the process exits.
+func runSMTPLineMaintenance(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setLine func(int64)) {
+	tick := time.NewTicker(time.Minute)
+	defer tick.Stop()
+	for range tick.C {
+		applySMTPLineLimit(logger, read, setLine)
+	}
 }
 
 // sendLaterLoop builds the scheduled-send release loop.

@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+
+	"hermex/internal/netline"
 )
 
 // defaultMaxLiteralSize caps a single IMAP literal so a hostile client cannot force an
@@ -15,9 +17,19 @@ import (
 // fallback when no operator limit has been set.
 const defaultMaxLiteralSize = 50 << 20 // 50 MiB
 
+// defaultMaxCommandLine caps ONE command line so a client that never sends a line
+// terminator cannot grow the server's memory without limit. It is the fallback when
+// no operator limit has been set, and is generous: a long UID set or SEARCH key is
+// legitimate. A literal's payload is bounded separately by the literal cap.
+const defaultMaxCommandLine = 64 << 10 // 64 KiB
+
 // errProtocol marks a malformed command line (a client/syntax error), as
 // distinct from an I/O error on the connection.
 var errProtocol = errors.New("imap: protocol error")
+
+// errLineTooLong marks a command line past the cap. The rest of the line has
+// already been discarded, so the caller answers BAD and keeps serving.
+var errLineTooLong = fmt.Errorf("%w: command line too long", errProtocol)
 
 // tokenKind classifies a lexed command token.
 type tokenKind uint8
@@ -88,14 +100,63 @@ type commandReader struct {
 	// non-positive value means use defaultMaxLiteralSize. Read live in readLiteral so
 	// an operator's edit applies to an existing connection on its next literal.
 	maxLiteral *atomic.Int64
+	// maxLine points at the server's live command-line cap (bytes); nil or a
+	// non-positive value means use defaultMaxCommandLine. Read live at the start of
+	// each command, so an operator's edit applies to an existing connection.
+	maxLine *atomic.Int64
+	// lineBytes counts the bytes of the command line read so far, reset per command.
+	// A literal's payload is not counted: it carries its own cap.
+	lineBytes int
+}
+
+// readByte reads one byte of the command line and counts it against the line cap.
+// It returns errLineTooLong once the line passes the cap, after discarding the rest
+// of the line, so the connection stays framed for the next command.
+func (r *commandReader) readByte() (byte, error) {
+	b, err := r.br.ReadByte()
+	if err != nil {
+		return 0, err
+	}
+	r.lineBytes++
+	if limit := r.lineLimit(); r.lineBytes > limit {
+		if derr := discardLine(r.br); derr != nil {
+			return 0, derr
+		}
+		return 0, errLineTooLong
+	}
+	return b, nil
+}
+
+// lineLimit is the command-line cap in force right now.
+func (r *commandReader) lineLimit() int {
+	if r.maxLine != nil {
+		if n := r.maxLine.Load(); n > 0 {
+			return int(n)
+		}
+	}
+	return defaultMaxCommandLine
+}
+
+// discardLine reads and drops bytes up to and including the next LF.
+func discardLine(br *bufio.Reader) error {
+	for {
+		b, err := br.ReadByte()
+		if err != nil {
+			return err
+		}
+		if b == '\n' {
+			return nil
+		}
+	}
 }
 
 // readCommand reads and lexes one command line into a flat token slice. The
 // terminating CRLF is consumed and not emitted. An empty line yields no tokens.
 func (r *commandReader) readCommand() ([]token, error) {
 	var toks []token
+	r.lineBytes = 0
 	for {
-		b, err := r.br.ReadByte()
+		b, err := r.readByte()
 		if err != nil {
 			return nil, err
 		}
@@ -150,18 +211,24 @@ func (r *commandReader) readToken(b byte) (token, error) {
 	if err := r.br.UnreadByte(); err != nil {
 		return token{}, err
 	}
-	return token{kind: tAtom, val: r.readAtom()}, nil
+	r.lineBytes-- // the byte is counted again when readAtom re-reads it
+	atom, err := r.readAtom()
+	if err != nil {
+		return token{}, err
+	}
+	return token{kind: tAtom, val: atom}, nil
 }
 
 // readLine reads one raw CRLF-terminated line and returns it without the
 // terminator. It is used for SASL continuation data (a bare base64 line), which
-// is not tokenized as a command.
+// is not tokenized as a command. It carries the same cap as a command line: the
+// client reaches this reader before it authenticates.
 func (r *commandReader) readLine() (string, error) {
-	line, err := r.br.ReadString('\n')
-	if err != nil {
-		return "", err
+	line, err := netline.ReadLine(r.br, r.lineLimit())
+	if errors.Is(err, netline.ErrTooLong) {
+		return "", errLineTooLong
 	}
-	return strings.TrimRight(line, "\r\n"), nil
+	return line, err
 }
 
 // expectLF consumes the LF following a CR.
@@ -188,16 +255,20 @@ func isAtomDelimiter(b byte) bool {
 
 // readAtom reads a maximal run of non-delimiter bytes. It is only called once a
 // non-delimiter byte has been unread, so it always returns a non-empty atom.
-func (r *commandReader) readAtom() string {
+func (r *commandReader) readAtom() (string, error) {
 	var sb strings.Builder
 	for {
-		b, err := r.br.ReadByte()
+		b, err := r.readByte()
 		if err != nil {
-			return sb.String()
+			if errors.Is(err, errLineTooLong) {
+				return "", err
+			}
+			return sb.String(), nil // end of stream: the atom is what was read
 		}
 		if isAtomDelimiter(b) {
 			_ = r.br.UnreadByte() // the ReadByte above succeeded, so this cannot fail
-			return sb.String()
+			r.lineBytes--         // the delimiter is read again by the caller
+			return sb.String(), nil
 		}
 		sb.WriteByte(b)
 	}
@@ -208,7 +279,7 @@ func (r *commandReader) readAtom() string {
 func (r *commandReader) readQuoted() (string, error) {
 	var sb strings.Builder
 	for {
-		b, err := r.br.ReadByte()
+		b, err := r.readByte()
 		if err != nil {
 			return "", err
 		}
@@ -216,7 +287,7 @@ func (r *commandReader) readQuoted() (string, error) {
 		case '"':
 			return sb.String(), nil
 		case '\\':
-			esc, err := r.br.ReadByte()
+			esc, err := r.readByte()
 			if err != nil {
 				return "", err
 			}
@@ -265,7 +336,7 @@ func (r *commandReader) readLiteral() (string, error) {
 func (r *commandReader) readLiteralHeader() (n int, nonSync bool, err error) {
 	var digits strings.Builder
 	for {
-		b, err := r.br.ReadByte()
+		b, err := r.readByte()
 		if err != nil {
 			return 0, false, err
 		}

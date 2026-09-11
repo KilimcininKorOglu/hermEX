@@ -41,6 +41,7 @@ func TestSaveLimits(t *testing.T) {
 		"imap_literal_mb": {"10"}, "ews_request_mb": {"4"}, "activesync_request_mb": {"2"},
 		"dav_ical_mb": {"3"}, "dav_vcard_mb": {"5"}, "webmail_request_mb": {"20"},
 		"mapi_request_mb": {"16"}, "freebusy_max_targets": {"25"}, "webmail_preview_mb": {"6"},
+		"imap_line_bytes": {"32768"}, "pop3_line_bytes": {"4096"}, "smtp_line_bytes": {"1024"},
 	})
 	body := wantBody(t, resp, http.StatusOK, "save limits")
 	wantContains(t, body, "Size limits saved", "the save is acknowledged")
@@ -56,6 +57,29 @@ func TestSaveLimits(t *testing.T) {
 	wantEq(t, d.sizeLimits.WebmailPreviewMaxBytes, int64(6*1024*1024), "inline preview bytes")
 	// The free/busy cap is a count, so it must persist unscaled by the megabyte factor.
 	wantEq(t, d.sizeLimits.FreeBusyMaxTargets, int64(25), "free/busy target cap")
+	// The command-line caps are byte counts, so they persist unscaled too.
+	wantEq(t, d.sizeLimits.IMAPCommandLineBytes, int64(32768), "IMAP command-line bytes")
+	wantEq(t, d.sizeLimits.POP3CommandLineBytes, int64(4096), "POP3 command-line bytes")
+	wantEq(t, d.sizeLimits.SMTPCommandLineBytes, int64(1024), "SMTP command-line bytes")
+}
+
+// TestSaveLimitsRejectsATinyCommandLine proves a cap no command fits in is rejected
+// and nothing persists, because such a daemon would refuse every client.
+func TestSaveLimitsRejectsATinyCommandLine(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/limits", session, csrf, url.Values{
+		"imap_literal_mb": {"10"}, "ews_request_mb": {"4"}, "activesync_request_mb": {"2"},
+		"dav_ical_mb": {"3"}, "dav_vcard_mb": {"5"}, "webmail_request_mb": {"20"},
+		"mapi_request_mb": {"16"}, "freebusy_max_targets": {"25"}, "webmail_preview_mb": {"6"},
+		"imap_line_bytes": {"8"}, "pop3_line_bytes": {"4096"}, "smtp_line_bytes": {"1024"},
+	})
+	body := wantBody(t, resp, http.StatusOK, "save limits with a tiny command-line cap")
+
+	wantContains(t, body, "at least 64 bytes", "the refusal names the floor")
+	wantFalse(t, d.sizeLimitsFound, "nothing is persisted")
 }
 
 // TestSaveLimitsRejectsBadValues proves a sub-1 MB limit is rejected and nothing persists.

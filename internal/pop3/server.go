@@ -11,11 +11,13 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net"
 	"net/textproto"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"hermex/internal/authlimit"
 	"hermex/internal/connlimit"
@@ -23,6 +25,7 @@ import (
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
+	"hermex/internal/netline"
 	"hermex/internal/objectstore"
 )
 
@@ -34,7 +37,36 @@ type Server struct {
 	Logger    *logging.Logger    // central activity log; nil disables logging
 	Limiter   *authlimit.Limiter // failed-login throttle keyed by client IP; nil disables it
 
+	// maxCommandLine is the cap on ONE line read from the client in bytes (0 = the
+	// built-in defaultMaxCommandLine), held atomically so the daemon's poll can
+	// apply an operator's edit while connections run, with no restart.
+	maxCommandLine atomic.Int64
+
 	conns lifecycle.ConnGroup
+}
+
+// defaultMaxCommandLine caps one line read from the client. A POP3 command is short
+// (RFC 1939), but a SASL continuation carries a base64 token, so the default leaves
+// room for one. Without a cap a client that never sends a line terminator grows the
+// daemon's memory without limit, and it reaches this reader before it authenticates.
+const defaultMaxCommandLine = 8 << 10 // 8 KiB
+
+// SetMaxCommandLine sets the maximum accepted line in bytes (0 restores the
+// built-in default). It is safe to call concurrently with active connections, so an
+// operator's edit applies without a restart.
+func (s *Server) SetMaxCommandLine(n int64) {
+	if n < 0 {
+		n = 0
+	}
+	s.maxCommandLine.Store(n)
+}
+
+// commandLineLimit is the line cap in force right now.
+func (s *Server) commandLineLimit() int {
+	if n := s.maxCommandLine.Load(); n > 0 {
+		return int(n)
+	}
+	return defaultMaxCommandLine
 }
 
 // AddListener registers a listener (the plaintext and any implicit-TLS one) for
@@ -160,7 +192,17 @@ func (c *pop3Session) closeMailbox() {
 // serve reads and runs commands until the client quits or the link fails.
 func (c *pop3Session) serve() {
 	for {
-		line, err := c.tp.ReadLine()
+		line, err := netline.ReadLine(c.tp.R, c.s.commandLineLimit())
+		if errors.Is(err, netline.ErrTooLong) {
+			// The rest of the line is already discarded, so the connection is at a
+			// line boundary: tell the client and keep serving.
+			c.event(logging.LevelWarn, "command.too-long", logging.Fields{"limit": c.s.commandLineLimit()})
+			errLine(c.w, "command line too long")
+			if c.w.err != nil {
+				return
+			}
+			continue
+		}
 		if err != nil {
 			return // client gone; per RFC no deletions are committed
 		}
@@ -597,7 +639,7 @@ func (s *Server) authSASL(w *ew, tp *textproto.Reader, conn net.Conn, arg string
 // authPlain handles AUTH PLAIN (RFC 4616): a single base64 token decoding to
 // authzid NUL authcid NUL passwd, inline or after a continuation.
 func (s *Server) authPlain(w *ew, tp *textproto.Reader, conn net.Conn, initial string) (string, *mailbox, bool) {
-	resp, cont := saslResponse(w, tp, initial, "")
+	resp, cont := saslResponse(w, tp, s.commandLineLimit(), initial, "")
 	if !cont {
 		errLine(w, "[AUTH] authentication cancelled")
 		return "", nil, false
@@ -619,7 +661,7 @@ func (s *Server) authPlain(w *ew, tp *textproto.Reader, conn net.Conn, initial s
 // authLogin handles AUTH LOGIN: the server prompts (base64) for the username then
 // the password; the username may arrive inline with the AUTH command.
 func (s *Server) authLogin(w *ew, tp *textproto.Reader, conn net.Conn, initial string) (string, *mailbox, bool) {
-	u, cont := saslResponse(w, tp, initial, "VXNlcm5hbWU6") // base64("Username:")
+	u, cont := saslResponse(w, tp, s.commandLineLimit(), initial, "VXNlcm5hbWU6") // base64("Username:")
 	if !cont {
 		errLine(w, "[AUTH] authentication cancelled")
 		return "", nil, false
@@ -629,7 +671,7 @@ func (s *Server) authLogin(w *ew, tp *textproto.Reader, conn net.Conn, initial s
 		errLine(w, "[AUTH] invalid base64")
 		return "", nil, false
 	}
-	p, cont := saslResponse(w, tp, "", "UGFzc3dvcmQ6") // base64("Password:")
+	p, cont := saslResponse(w, tp, s.commandLineLimit(), "", "UGFzc3dvcmQ6") // base64("Password:")
 	if !cont {
 		errLine(w, "[AUTH] authentication cancelled")
 		return "", nil, false
@@ -647,7 +689,7 @@ func (s *Server) authLogin(w *ew, tp *textproto.Reader, conn net.Conn, initial s
 // saslResponse returns the client's SASL token: the inline value when present (a
 // lone "=" is a zero-length initial response, RFC 5034), otherwise a "+ <challenge>"
 // continuation is sent and the base64 line read. A lone "*" aborts the exchange.
-func saslResponse(w *ew, tp *textproto.Reader, inline, challenge string) (string, bool) {
+func saslResponse(w *ew, tp *textproto.Reader, max int, inline, challenge string) (string, bool) {
 	resp := inline
 	switch resp {
 	case "=":
@@ -655,7 +697,9 @@ func saslResponse(w *ew, tp *textproto.Reader, inline, challenge string) (string
 	case "":
 		w.printf("+ %s\r\n", challenge)
 		w.flush()
-		line, err := tp.ReadLine()
+		// The same cap as a command line: this reader is reached before the client
+		// has authenticated.
+		line, err := netline.ReadLine(tp.R, max)
 		if err != nil {
 			return "", false
 		}

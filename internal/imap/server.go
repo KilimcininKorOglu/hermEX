@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -62,6 +63,10 @@ type Server struct {
 	// operator's edit while connections run, with no restart. Set it via
 	// SetMaxLiteralSize; readLiteral reads it live.
 	maxLiteral atomic.Int64
+	// maxCommandLine is the cap on ONE command line in bytes (0 = the built-in
+	// defaultMaxCommandLine), held atomically like maxLiteral. A literal's payload is
+	// not counted against it, because a literal carries its own cap.
+	maxCommandLine atomic.Int64
 
 	waker notify.Registrar // push wake source for IDLE; nil keeps IDLE on its poll cadence only
 
@@ -87,6 +92,16 @@ func (s *Server) SetMaxLiteralSize(n int64) {
 		n = 0
 	}
 	s.maxLiteral.Store(n)
+}
+
+// SetMaxCommandLine sets the maximum accepted command line in bytes (0 restores the
+// built-in default). It is safe to call concurrently with active connections, so an
+// operator's edit applies without a restart.
+func (s *Server) SetMaxCommandLine(n int64) {
+	if n < 0 {
+		n = 0
+	}
+	s.maxCommandLine.Store(n)
 }
 
 // SetConnLimiter caps how many connections this daemon serves at once, in total
@@ -151,7 +166,10 @@ func (s *Server) Shutdown(ctx context.Context) error { return s.conns.Shutdown(c
 
 func (s *Server) handle(nc net.Conn) {
 	c := &conn{srv: s, bw: bufio.NewWriter(nc), state: stateNotAuth, nc: nc}
-	c.rd = &commandReader{br: bufio.NewReader(nc), bw: c.bw, maxLiteral: &c.srv.maxLiteral}
+	c.rd = &commandReader{
+		br: bufio.NewReader(nc), bw: c.bw,
+		maxLiteral: &c.srv.maxLiteral, maxLine: &c.srv.maxCommandLine,
+	}
 	if _, ok := nc.(*tls.Conn); ok {
 		c.isTLS = true
 	}
@@ -171,6 +189,17 @@ func (s *Server) handle(nc net.Conn) {
 
 	for c.state != stateLogout {
 		toks, err := c.rd.readCommand()
+		if errors.Is(err, errLineTooLong) {
+			// The rest of the line is already discarded, so the connection is at a
+			// command boundary: tell the client and keep serving.
+			c.event(logging.LevelWarn, "command.too-long", logging.Fields{"limit": c.rd.lineLimit()})
+			c.untagged("BAD Command line too long")
+			c.flush()
+			if c.werr != nil {
+				return
+			}
+			continue
+		}
 		if err != nil {
 			return // connection closed or unreadable
 		}
