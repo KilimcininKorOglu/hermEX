@@ -1199,8 +1199,119 @@ export function ComposePage() {
         </div>
       )}
 
-      {/* Recipients */}
+      {/* Recipients. The sender comes first, as Outlook and OWA order it: the
+          identity a message goes out under is the first decision, and a reader
+          who scrolled past it would not notice they were sending as a shared
+          mailbox. */}
       <div className="border-b px-4 py-2 space-y-2">
+        {/* Sender Identity Selector */}
+        <div className="flex items-center gap-2">
+          <span className="min-w-24 shrink-0 text-sm text-muted-foreground flex items-center gap-1">
+            <Mail className="h-3 w-3 shrink-0" />
+            {t("common.from")}:
+          </span>
+          <div className="flex-1 flex items-center gap-2">
+            <DropdownMenu open={showSenderDropdown} onOpenChange={setShowSenderDropdown}>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={cn(
+                    "h-7 text-xs gap-1",
+                    !canSendAsSelected && "border-red-500 text-red-500"
+                  )}
+                >
+                  {selectedSender ? (
+                    <>
+                      <span className="truncate max-w-[150px]">
+                        {selectedSender.displayName || selectedSender.email}
+                      </span>
+                      {selectedSender.type !== 'personal' && (
+                        <Badge variant="secondary" className="text-[10px] h-4 ml-1">
+                          {selectedSender.type === 'send-on-behalf' ? t("compose.onBehalf") : t("compose.sendAs")}
+                        </Badge>
+                      )}
+                    </>
+                  ) : (
+                    <span>{t("compose.selectSender")}</span>
+                  )}
+                  <ChevronDown className="h-3 w-3 ml-1" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-80">
+                <div className="p-2 text-xs text-muted-foreground">
+                  {t("compose.selectSenderIdentity")}
+                </div>
+                <Separator />
+                <div className="max-h-60 overflow-auto">
+                  {senderIdentities.map((identity) => (
+                    <DropdownMenuItem
+                      key={identity.email}
+                      onClick={() => {
+                        setSelectedSender(identity)
+                        setShowSenderDropdown(false)
+                      }}
+                      className={cn(
+                        "flex flex-col items-start py-2 cursor-pointer",
+                        !identity.canSend && "opacity-50"
+                      )}
+                      disabled={!identity.canSend}
+                    >
+                      <div className="flex items-center gap-2 w-full">
+                        <span className="font-medium text-sm">{identity.displayName || identity.email}</span>
+                        {identity.type === 'personal' && (
+                          <Badge variant="default" className="text-[10px] h-4">{t("nav.personal")}</Badge>
+                        )}
+                        {identity.type === 'send-on-behalf' && (
+                          <Badge variant="secondary" className="text-[10px] h-4">{t("compose.onBehalf")}</Badge>
+                        )}
+                        {identity.type === 'send-as' && (
+                          <Badge variant="outline" className="text-[10px] h-4">{t("compose.sendAs")}</Badge>
+                        )}
+                      </div>
+                      {identity.mailboxOwner && (
+                        <span className="text-xs text-muted-foreground">
+                          {t("compose.sharedMailbox", { owner: identity.mailboxOwner })}
+                        </span>
+                      )}
+                      {!identity.canSend && (
+                        <span className="text-xs text-red-500 flex items-center gap-1 mt-1">
+                          <AlertTriangle className="h-3 w-3" />
+                          {t("compose.noSendPermissionShort")}
+                        </span>
+                      )}
+                    </DropdownMenuItem>
+                  ))}
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Show permission error inline */}
+            {sendError && (
+              <div className="flex items-center gap-1 text-xs text-red-500">
+                <AlertTriangle className="h-3 w-3" />
+                <span className="truncate max-w-[200px]">{sendError}</span>
+              </div>
+            )}
+
+            {/* Diagnostics toggle */}
+            {diagnostics.length > 0 && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={() => setShowDiagnostics(!showDiagnostics)}
+                title={t("compose.viewDiagnostics")}
+              >
+                <AlertTriangle className={cn(
+                  "h-4 w-4",
+                  diagnostics.some(d => d.severity === 'error') && "text-red-500"
+                )} />
+              </Button>
+            )}
+          </div>
+        </div>
+
         <div className="flex items-center gap-2">
           {/* The label column is a MINIMUM width, not a fixed one, so a longer
               translation pushes the field instead of running under it. Turkish
@@ -1436,114 +1547,6 @@ export function ComposePage() {
           </div>
         )}
 
-        {/* Sender Identity Selector */}
-        <div className="flex items-center gap-2">
-          <span className="min-w-24 shrink-0 text-sm text-muted-foreground flex items-center gap-1">
-            <Mail className="h-3 w-3 shrink-0" />
-            {t("common.from")}:
-          </span>
-          <div className="flex-1 flex items-center gap-2">
-            <DropdownMenu open={showSenderDropdown} onOpenChange={setShowSenderDropdown}>
-              <DropdownMenuTrigger asChild>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className={cn(
-                    "h-7 text-xs gap-1",
-                    !canSendAsSelected && "border-red-500 text-red-500"
-                  )}
-                >
-                  {selectedSender ? (
-                    <>
-                      <span className="truncate max-w-[150px]">
-                        {selectedSender.displayName || selectedSender.email}
-                      </span>
-                      {selectedSender.type !== 'personal' && (
-                        <Badge variant="secondary" className="text-[10px] h-4 ml-1">
-                          {selectedSender.type === 'send-on-behalf' ? t("compose.onBehalf") : t("compose.sendAs")}
-                        </Badge>
-                      )}
-                    </>
-                  ) : (
-                    <span>{t("compose.selectSender")}</span>
-                  )}
-                  <ChevronDown className="h-3 w-3 ml-1" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-80">
-                <div className="p-2 text-xs text-muted-foreground">
-                  {t("compose.selectSenderIdentity")}
-                </div>
-                <Separator />
-                <div className="max-h-60 overflow-auto">
-                  {senderIdentities.map((identity) => (
-                    <DropdownMenuItem
-                      key={identity.email}
-                      onClick={() => {
-                        setSelectedSender(identity)
-                        setShowSenderDropdown(false)
-                      }}
-                      className={cn(
-                        "flex flex-col items-start py-2 cursor-pointer",
-                        !identity.canSend && "opacity-50"
-                      )}
-                      disabled={!identity.canSend}
-                    >
-                      <div className="flex items-center gap-2 w-full">
-                        <span className="font-medium text-sm">{identity.displayName || identity.email}</span>
-                        {identity.type === 'personal' && (
-                          <Badge variant="default" className="text-[10px] h-4">{t("nav.personal")}</Badge>
-                        )}
-                        {identity.type === 'send-on-behalf' && (
-                          <Badge variant="secondary" className="text-[10px] h-4">{t("compose.onBehalf")}</Badge>
-                        )}
-                        {identity.type === 'send-as' && (
-                          <Badge variant="outline" className="text-[10px] h-4">{t("compose.sendAs")}</Badge>
-                        )}
-                      </div>
-                      {identity.mailboxOwner && (
-                        <span className="text-xs text-muted-foreground">
-                          {t("compose.sharedMailbox", { owner: identity.mailboxOwner })}
-                        </span>
-                      )}
-                      {!identity.canSend && (
-                        <span className="text-xs text-red-500 flex items-center gap-1 mt-1">
-                          <AlertTriangle className="h-3 w-3" />
-                          {t("compose.noSendPermissionShort")}
-                        </span>
-                      )}
-                    </DropdownMenuItem>
-                  ))}
-                </div>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            
-            {/* Show permission error inline */}
-            {sendError && (
-              <div className="flex items-center gap-1 text-xs text-red-500">
-                <AlertTriangle className="h-3 w-3" />
-                <span className="truncate max-w-[200px]">{sendError}</span>
-              </div>
-            )}
-            
-            {/* Diagnostics toggle */}
-            {diagnostics.length > 0 && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                onClick={() => setShowDiagnostics(!showDiagnostics)}
-                title={t("compose.viewDiagnostics")}
-              >
-                <AlertTriangle className={cn(
-                  "h-4 w-4",
-                  diagnostics.some(d => d.severity === 'error') && "text-red-500"
-                )} />
-              </Button>
-            )}
-          </div>
-        </div>
-        
         {/* Diagnostics Panel */}
         {showDiagnostics && diagnostics.length > 0 && (
           <div className="border rounded-md bg-muted/30 p-3 space-y-2">
@@ -1602,34 +1605,47 @@ export function ComposePage() {
         </div>
       </div>
 
-      {/* Formatting Toolbar */}
-      <div className="flex items-center gap-1 border-b px-4 py-1 bg-muted/30">
-        {/* onMouseDown preventDefault keeps focus (and the selection) in the
-            body textarea so applyFormat wraps the selected text instead of
-            inserting a placeholder. */}
-        <Button variant="ghost" size="icon" className="h-8 w-8" title={t("compose.bold")} onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat("bold")}>
-          <Bold className="h-4 w-4" />
-        </Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8" title={t("compose.italic")} onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat("italic")}>
-          <Italic className="h-4 w-4" />
-        </Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8" title={t("compose.underline")} onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat("underline")}>
-          <Underline className="h-4 w-4" />
-        </Button>
-        <Separator orientation="vertical" className="h-6" />
-        <Button variant="ghost" size="icon" className="h-8 w-8" title={t("compose.insertLink")} onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat("link")}>
-          <Link className="h-4 w-4" />
-        </Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8" title={t("compose.bulletList")} onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat("list")}>
-          <List className="h-4 w-4" />
-        </Button>
-        <Button variant="ghost" size="icon" className="h-8 w-8" title={t("compose.insertImageLink")} onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat("image")}>
-          <Image className="h-4 w-4" />
-        </Button>
-        <span className="text-xs text-muted-foreground ml-2">
-          {t("compose.sendTip")}
-        </span>
-      </div>
+      {/* Formatting toolbar, PLAIN-TEXT MODE ONLY. In rich-text mode the editor
+          renders its own toolbar over the contentEditable, so showing this one
+          gave two toolbars, and its buttons write markdown markers into the
+          plain-text body through bodyRef, which does not exist in that mode: the
+          marker landed as literal text at the end of the HTML body. */}
+      {!richTextMode && (
+        <div className="flex items-center gap-1 border-b px-4 py-1 bg-muted/30">
+          {/* onMouseDown preventDefault keeps focus (and the selection) in the
+              body textarea so applyFormat wraps the selected text instead of
+              inserting a placeholder. */}
+          <Button variant="ghost" size="icon" className="h-8 w-8" title={t("compose.bold")} onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat("bold")}>
+            <Bold className="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8" title={t("compose.italic")} onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat("italic")}>
+            <Italic className="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8" title={t("compose.underline")} onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat("underline")}>
+            <Underline className="h-4 w-4" />
+          </Button>
+          <Separator orientation="vertical" className="h-6" />
+          <Button variant="ghost" size="icon" className="h-8 w-8" title={t("compose.insertLink")} onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat("link")}>
+            <Link className="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8" title={t("compose.bulletList")} onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat("list")}>
+            <List className="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8" title={t("compose.insertImageLink")} onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat("image")}>
+            <Image className="h-4 w-4" />
+          </Button>
+          <span className="text-xs text-muted-foreground ml-2">
+            {t("compose.sendTip")}
+          </span>
+        </div>
+      )}
+      {/* The send hint belongs to the page, not to either toolbar, so rich-text
+          mode keeps it. */}
+      {richTextMode && (
+        <div className="border-b px-4 py-1 bg-muted/30">
+          <span className="text-xs text-muted-foreground">{t("compose.sendTip")}</span>
+        </div>
+      )}
 
       {/* Body */}
       <div className="flex-1 overflow-hidden">
