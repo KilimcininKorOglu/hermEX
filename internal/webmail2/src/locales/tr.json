@@ -1,5 +1,6 @@
 {
   "nav": {
+    "today": "Bugün",
     "inbox": "Gelen Kutusu",
     "conversations": "Konuşmalar",
     "search": "Ara",
@@ -84,6 +85,7 @@
     "today": "Bugün",
     "yesterday": "Dün",
     "noResults": "Sonuç bulunamadı",
+    "noSubject": "(konu yok)",
     "retry": "Yeniden dene",
     "open": "Aç",
     "download": "İndir",
@@ -362,7 +364,8 @@
     "attachAppointment": "Randevu ekle",
     "attachTask": "Görev ekle",
     "attachNote": "Not ekle",
-    "itemAttached": "Öğe eklendi"
+    "itemAttached": "Öğe eklendi",
+    "attachFailed": "Eklenemedi"
   },
   "share": {
     "dialogTitle": "Klasörü paylaş",

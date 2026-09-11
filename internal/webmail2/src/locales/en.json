@@ -1,5 +1,6 @@
 {
   "nav": {
+    "today": "Today",
     "inbox": "Inbox",
     "conversations": "Conversations",
     "search": "Search",
@@ -84,6 +85,7 @@
     "today": "Today",
     "yesterday": "Yesterday",
     "noResults": "No results found",
+    "noSubject": "(no subject)",
     "retry": "Retry",
     "open": "Open",
     "download": "Download",
@@ -362,7 +364,8 @@
     "attachAppointment": "Attach appointment",
     "attachTask": "Attach task",
     "attachNote": "Attach note",
-    "itemAttached": "Item attached"
+    "itemAttached": "Item attached",
+    "attachFailed": "Could not attach it"
   },
   "share": {
     "dialogTitle": "Share folder",
