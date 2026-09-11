@@ -1202,7 +1202,11 @@ export function ComposePage() {
       {/* Recipients */}
       <div className="border-b px-4 py-2 space-y-2">
         <div className="flex items-center gap-2">
-          <span className="w-12 text-sm text-muted-foreground">{t("common.to")}:</span>
+          {/* The label column is a MINIMUM width, not a fixed one, so a longer
+              translation pushes the field instead of running under it. Turkish
+              "Gönderen:" plus its icon needs 84px, which a fixed w-12 (48px) cut
+              off. Every row here carries the same class, or they stop lining up. */}
+          <span className="min-w-24 shrink-0 text-sm text-muted-foreground">{t("common.to")}:</span>
           <div className="relative flex flex-1 flex-wrap items-center gap-1 min-h-[32px]">
             {to.map((r) => (
               <Badge key={r.id} variant="secondary" className="gap-1 pr-1.5 py-1">
@@ -1296,7 +1300,7 @@ export function ComposePage() {
 
         {showCc && (
           <div className="flex items-center gap-2">
-            <span className="w-12 text-sm text-muted-foreground">{t("common.cc")}:</span>
+            <span className="min-w-24 shrink-0 text-sm text-muted-foreground">{t("common.cc")}:</span>
             <div className="relative flex flex-1 flex-wrap items-center gap-1 min-h-[32px]">
               {cc.map((r) => (
                 <Badge key={r.id} variant="secondary" className="gap-1 pr-1.5 py-1">
@@ -1365,7 +1369,7 @@ export function ComposePage() {
 
         {showBcc && (
           <div className="flex items-center gap-2">
-            <span className="w-12 text-sm text-muted-foreground">{t("common.bcc")}:</span>
+            <span className="min-w-24 shrink-0 text-sm text-muted-foreground">{t("common.bcc")}:</span>
             <div className="relative flex flex-1 flex-wrap items-center gap-1 min-h-[32px]">
               {bcc.map((r) => (
                 <Badge key={r.id} variant="secondary" className="gap-1 pr-1.5 py-1">
@@ -1434,8 +1438,8 @@ export function ComposePage() {
 
         {/* Sender Identity Selector */}
         <div className="flex items-center gap-2">
-          <span className="w-12 text-sm text-muted-foreground flex items-center gap-1">
-            <Mail className="h-3 w-3" />
+          <span className="min-w-24 shrink-0 text-sm text-muted-foreground flex items-center gap-1">
+            <Mail className="h-3 w-3 shrink-0" />
             {t("common.from")}:
           </span>
           <div className="flex-1 flex items-center gap-2">
@@ -1588,7 +1592,7 @@ export function ComposePage() {
         )}
 
         <div className="flex items-center gap-2">
-          <span className="w-12 text-sm text-muted-foreground">{t("compose.subjectShort")}:</span>
+          <span className="min-w-24 shrink-0 text-sm text-muted-foreground">{t("compose.subjectShort")}:</span>
           <Input
             className="flex-1 border-0 shadow-none focus-visible:ring-0 px-0 py-1 h-8"
             placeholder={t("common.subject")}
