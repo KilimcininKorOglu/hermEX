@@ -115,6 +115,190 @@ interface InboxPageProps {
   folder?: string
 }
 
+interface EmailRowProps {
+  email: Email
+  viewMode: ViewMode
+  columns: MailListColumns
+  selected: boolean
+  previewed: boolean
+  t: (key: string, params?: Record<string, string>) => string
+  onToggleSelect: () => void
+  onOpen: () => void
+  onToggleStar: (e: React.MouseEvent) => void
+  onMarkRead: (e: React.MouseEvent) => void
+  onArchive: () => void
+  onDelete: () => void
+}
+
+// EmailRow lives at module scope on purpose. A component declared inside
+// InboxPage is a NEW component type on every render, so React unmounts every row
+// and mounts a fresh one for any state change, which loses the scroll position
+// and any open row menu. It therefore takes what it needs as props rather than
+// reading the page's own state.
+function EmailRow({
+  email,
+  viewMode,
+  columns,
+  selected,
+  previewed,
+  t,
+  onToggleSelect,
+  onOpen,
+  onToggleStar,
+  onMarkRead,
+  onArchive,
+  onDelete,
+}: EmailRowProps) {
+  // A follow-up flag tints the whole row, not just the small glyph in the flag
+  // column: that column can be switched off, and even with it on a flagged mail
+  // is easy to miss in a full list. A completed flag is not tinted, because the
+  // point of the tint is what still needs doing.
+  const flagged = email.followupStatus === 2
+  const rowSelected = selected || previewed
+  return (
+    <div
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/x-hermex-mail", email.id)
+        e.dataTransfer.effectAllowed = "move"
+      }}
+      className={cn(
+        "group flex cursor-pointer items-center gap-3 transition-all duration-200",
+        viewMode === "list" ? "p-4" : "p-2",
+        // Marker the unread-border CSS rule keys off (gated by the DB-backed
+        // display toggle reflected on <html>); harmless when the toggle is off.
+        !email.read && "hermex-unread",
+        // The tint has to survive hover and selection, so the flagged row carries
+        // its own hover and selected shades rather than falling through to the
+        // accent ones, which would replace it on the first mouseover.
+        flagged
+          ? rowSelected
+            ? "bg-amber-200/70 hover:bg-amber-200 dark:bg-amber-900/50 dark:hover:bg-amber-900/70"
+            : "bg-amber-100/70 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-950/60"
+          : cn(
+              "hover:bg-accent/50",
+              !email.read && viewMode === "list" && "bg-accent/5",
+              selected && "bg-primary/5",
+              previewed && "bg-primary/10"
+            )
+      )}
+      onClick={onOpen}
+    >
+      <Checkbox
+        checked={selected}
+        onCheckedChange={onToggleSelect}
+        onClick={(e) => e.stopPropagation()}
+      />
+
+      <Button
+        variant="ghost"
+        size="icon"
+        className={cn(
+          "h-8 w-8 shrink-0 transition-colors",
+          email.starred ? "text-amber-500" : "text-muted-foreground hover:text-foreground"
+        )}
+        onClick={onToggleStar}
+      >
+        <Star className={cn("h-4 w-4", email.starred && "fill-current")} />
+      </Button>
+
+      <div className={cn("flex-1 min-w-0", viewMode === "compact" && "flex items-center gap-4")}>
+        <div className="flex items-center gap-2">
+          <span className={cn("text-sm", !email.read ? "font-semibold" : "font-normal")}>
+            {viewMode === "list" ? email.from : email.from.split(" ")[0]}
+          </span>
+          {columns.categories && email.labels.slice(0, viewMode === "compact" ? 0 : 1).map((label) => (
+            <Badge key={label} variant="secondary" className="text-[10px] px-1.5 py-0">
+              {label}
+            </Badge>
+          ))}
+        </div>
+        {viewMode === "list" && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span className={cn(!email.read && "text-foreground font-medium")}>
+              {email.subject}
+            </span>
+            {/* A message with no snippet, and one indexed before the column
+                existed, would otherwise render a dangling separator. */}
+            {columns.preview && email.preview && <span className="truncate">- {email.preview}</span>}
+          </div>
+        )}
+      </div>
+
+      <div className={cn("flex items-center gap-2 shrink-0", viewMode === "compact" && "flex-row-reverse")}>
+        {columns.attachment && email.hasAttachments && (
+          <Paperclip className="h-4 w-4 text-muted-foreground" />
+        )}
+        {columns.importance && email.importance === "high" && (
+          <span className="text-red-500 font-bold text-xs" title={t("compose.importanceHigh")}>!</span>
+        )}
+        {columns.importance && email.importance === "low" && (
+          <span className="text-muted-foreground text-xs" title={t("compose.importanceLow")}>↓</span>
+        )}
+        {columns.flag && email.followupStatus === 2 && (
+          <span className="text-red-500 text-xs" title={t("inbox.columns.flag")}>⚑</span>
+        )}
+        {columns.size && (
+          <span className="text-xs text-muted-foreground whitespace-nowrap tabular-nums">
+            {formatSize(email.size)}
+          </span>
+        )}
+        {!email.read && viewMode === "list" && (
+          <span className="h-2 w-2 rounded-full bg-primary" />
+        )}
+        <span className={cn(
+          "text-xs text-muted-foreground whitespace-nowrap",
+          viewMode === "compact" && "w-12 text-right"
+        )}>
+          {formatAbsolute(email.date)}
+        </span>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 opacity-0 group-hover:opacity-100"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={onMarkRead}>
+              <MailOpen className="mr-2 h-4 w-4" />
+              {t("common.markRead")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onToggleStar}>
+              <Star className={cn("mr-2 h-4 w-4", email.starred && "fill-current")} />
+              {email.starred ? t("inbox.removeStar") : t("inbox.addStar")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={(e) => {
+                e.stopPropagation()
+                onArchive()
+              }}
+            >
+              <Archive className="mr-2 h-4 w-4" />
+              {t("common.archive")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="text-destructive"
+              onClick={(e) => {
+                e.stopPropagation()
+                onDelete()
+              }}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              {t("common.delete")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
+  )
+}
+
 export function InboxPage({ folder = "inbox" }: InboxPageProps) {
   const navigate = useNavigate()
   const { t } = useI18n()
@@ -391,159 +575,29 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
   const currentPage = Math.min(page, totalPages - 1)
   const pageEmails = emails
 
-  const EmailRow = ({ email }: { email: Email }) => {
-    // A follow-up flag tints the whole row, not just the small glyph in the flag
-    // column: that column can be switched off, and even with it on a flagged mail
-    // is easy to miss in a full list. A completed flag is not tinted, because the
-    // point of the tint is what still needs doing.
-    const flagged = email.followupStatus === 2
-    const rowSelected = sel.isSelected(email.id) || (previewPane === "right" && selectedId === email.id)
-    return (
-    <div
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData("text/x-hermex-mail", email.id)
-        e.dataTransfer.effectAllowed = "move"
-      }}
-      className={cn(
-        "group flex cursor-pointer items-center gap-3 transition-all duration-200",
-        viewMode === "list" ? "p-4" : "p-2",
-        // Marker the unread-border CSS rule keys off (gated by the DB-backed
-        // display toggle reflected on <html>); harmless when the toggle is off.
-        !email.read && "hermex-unread",
-        // The tint has to survive hover and selection, so the flagged row carries
-        // its own hover and selected shades rather than falling through to the
-        // accent ones, which would replace it on the first mouseover.
-        flagged
-          ? rowSelected
-            ? "bg-amber-200/70 hover:bg-amber-200 dark:bg-amber-900/50 dark:hover:bg-amber-900/70"
-            : "bg-amber-100/70 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-950/60"
-          : cn(
-              "hover:bg-accent/50",
-              !email.read && viewMode === "list" && "bg-accent/5",
-              sel.isSelected(email.id) && "bg-primary/5",
-              previewPane === "right" && selectedId === email.id && "bg-primary/10"
-            )
-      )}
-      onClick={() => {
+  // emailRow binds the page's state and handlers to one row. The row component
+  // itself is at module scope, so binding happens here rather than through a
+  // closure inside it.
+  const emailRow = (email: Email) => (
+    <EmailRow
+      key={email.id}
+      email={email}
+      viewMode={viewMode}
+      columns={columns}
+      selected={sel.isSelected(email.id)}
+      previewed={previewPane === "right" && selectedId === email.id}
+      t={t}
+      onToggleSelect={() => sel.toggle(email.id)}
+      onOpen={() => {
         if (previewPane === "right") setSelectedId(email.id)
         else navigate(`/email/${email.id}`)
       }}
-    >
-      <Checkbox
-        checked={sel.isSelected(email.id)}
-        onCheckedChange={() => sel.toggle(email.id)}
-        onClick={(e) => e.stopPropagation()}
-      />
-
-      <Button
-        variant="ghost"
-        size="icon"
-        className={cn(
-          "h-8 w-8 shrink-0 transition-colors",
-          email.starred ? "text-amber-500" : "text-muted-foreground hover:text-foreground"
-        )}
-        onClick={(e) => toggleStar(email.id, e)}
-      >
-        <Star className={cn("h-4 w-4", email.starred && "fill-current")} />
-      </Button>
-
-      <div className={cn("flex-1 min-w-0", viewMode === "compact" && "flex items-center gap-4")}>
-        <div className="flex items-center gap-2">
-          <span className={cn("text-sm", !email.read ? "font-semibold" : "font-normal")}>
-            {viewMode === "list" ? email.from : email.from.split(" ")[0]}
-          </span>
-          {columns.categories && email.labels.slice(0, viewMode === "compact" ? 0 : 1).map((label) => (
-            <Badge key={label} variant="secondary" className="text-[10px] px-1.5 py-0">
-              {label}
-            </Badge>
-          ))}
-        </div>
-        {viewMode === "list" && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span className={cn(!email.read && "text-foreground font-medium")}>
-              {email.subject}
-            </span>
-            {/* A message with no snippet, and one indexed before the column
-                existed, would otherwise render a dangling separator. */}
-            {columns.preview && email.preview && <span className="truncate">- {email.preview}</span>}
-          </div>
-        )}
-      </div>
-
-      <div className={cn("flex items-center gap-2 shrink-0", viewMode === "compact" && "flex-row-reverse")}>
-        {columns.attachment && email.hasAttachments && (
-          <Paperclip className="h-4 w-4 text-muted-foreground" />
-        )}
-        {columns.importance && email.importance === "high" && (
-          <span className="text-red-500 font-bold text-xs" title={t("compose.importanceHigh")}>!</span>
-        )}
-        {columns.importance && email.importance === "low" && (
-          <span className="text-muted-foreground text-xs" title={t("compose.importanceLow")}>↓</span>
-        )}
-        {columns.flag && email.followupStatus === 2 && (
-          <span className="text-red-500 text-xs" title={t("inbox.columns.flag")}>⚑</span>
-        )}
-        {columns.size && (
-          <span className="text-xs text-muted-foreground whitespace-nowrap tabular-nums">
-            {formatSize(email.size)}
-          </span>
-        )}
-        {!email.read && viewMode === "list" && (
-          <span className="h-2 w-2 rounded-full bg-primary" />
-        )}
-        <span className={cn(
-          "text-xs text-muted-foreground whitespace-nowrap",
-          viewMode === "compact" && "w-12 text-right"
-        )}>
-          {formatAbsolute(email.date)}
-        </span>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 opacity-0 group-hover:opacity-100"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={(e) => markAsRead(email.id, e)}>
-              <MailOpen className="mr-2 h-4 w-4" />
-              {t("common.markRead")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={(e) => toggleStar(email.id, e)}>
-              <Star className={cn("mr-2 h-4 w-4", email.starred && "fill-current")} />
-              {email.starred ? t("inbox.removeStar") : t("inbox.addStar")}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={(e) => {
-                e.stopPropagation()
-                archiveEmails([email.id])
-              }}
-            >
-              <Archive className="mr-2 h-4 w-4" />
-              {t("common.archive")}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="text-destructive"
-              onClick={(e) => {
-                e.stopPropagation()
-                deleteEmails([email.id])
-              }}
-            >
-              <Trash2 className="mr-2 h-4 w-4" />
-              {t("common.delete")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </div>
+      onToggleStar={(e) => toggleStar(email.id, e)}
+      onMarkRead={(e) => markAsRead(email.id, e)}
+      onArchive={() => archiveEmails([email.id])}
+      onDelete={() => deleteEmails([email.id])}
+    />
   )
-  }
 
   return (
     <div className="space-y-4">
@@ -744,9 +798,7 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
                   {/* Expanded: individual email rows */}
                   {expandedThreads.has(thread.key) && (
                     <div className="bg-accent/5">
-                      {thread.messages.map((email) => (
-                        <EmailRow key={email.id} email={email} />
-                      ))}
+                      {thread.messages.map((email) => emailRow(email))}
                     </div>
                   )}
                 </div>
@@ -755,9 +807,7 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
           </div>
         ) : (
           <div className={cn(viewMode === "list" ? "divide-y" : "")}>
-            {pageEmails.map((email) => (
-              <EmailRow key={email.id} email={email} />
-            ))}
+            {pageEmails.map((email) => emailRow(email))}
           </div>
         )}
       </div>

@@ -82,6 +82,63 @@ function detectBrowser(): string {
   return ver ? `${name} ${ver}` : name
 }
 
+// SettingSection and SettingRow live at module scope on purpose. A component
+// declared inside SettingsPage is a NEW component type on every render, so React
+// unmounts the whole settings tree and mounts a fresh one for any state change.
+// The page height then collapses for one frame and the browser clamps the scroll
+// position to the top, which moved the reader away from the control they had just
+// used. Keep every presentational component here, outside the page function.
+function SettingSection({
+  icon: Icon,
+  title,
+  description,
+  children
+}: {
+  icon: React.ElementType
+  title: string
+  description: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="rounded-lg border bg-card">
+      <div className="flex items-center gap-4 p-6 pb-4">
+        <div className="rounded-full bg-muted p-2">
+          <Icon className="h-5 w-5" />
+        </div>
+        <div>
+          <h3 className="font-semibold">{title}</h3>
+          <p className="text-sm text-muted-foreground">{description}</p>
+        </div>
+      </div>
+      <div className="px-6 pb-6">
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function SettingRow({
+  title,
+  description,
+  checked,
+  onChange
+}: {
+  title: string
+  description: string
+  checked: boolean
+  onChange: () => void
+}) {
+  return (
+    <div className="flex items-center justify-between py-3">
+      <div>
+        <p className="font-medium">{title}</p>
+        <p className="text-sm text-muted-foreground">{description}</p>
+      </div>
+      <Switch checked={checked} onCheckedChange={onChange} />
+    </div>
+  )
+}
+
 export function SettingsPage() {
   const { theme, setTheme, resolvedTheme } = useTheme()
   const { user, updatePrefs } = useAuth()
@@ -1025,53 +1082,6 @@ export function SettingsPage() {
       setDelBusy(false)
     }
   }
-
-  const SettingSection = ({
-    icon: Icon,
-    title,
-    description,
-    children
-  }: {
-    icon: React.ElementType
-    title: string
-    description: string
-    children: React.ReactNode
-  }) => (
-    <div className="rounded-lg border bg-card">
-      <div className="flex items-center gap-4 p-6 pb-4">
-        <div className="rounded-full bg-muted p-2">
-          <Icon className="h-5 w-5" />
-        </div>
-        <div>
-          <h3 className="font-semibold">{title}</h3>
-          <p className="text-sm text-muted-foreground">{description}</p>
-        </div>
-      </div>
-      <div className="px-6 pb-6">
-        {children}
-      </div>
-    </div>
-  )
-
-  const SettingRow = ({
-    title,
-    description,
-    checked,
-    onChange
-  }: {
-    title: string
-    description: string
-    checked: boolean
-    onChange: () => void
-  }) => (
-    <div className="flex items-center justify-between py-3">
-      <div>
-        <p className="font-medium">{title}</p>
-        <p className="text-sm text-muted-foreground">{description}</p>
-      </div>
-      <Switch checked={checked} onCheckedChange={onChange} />
-    </div>
-  )
 
   return (
     <div className="space-y-6 max-w-3xl">

@@ -2,6 +2,7 @@ import js from '@eslint/js'
 import globals from 'globals'
 import tsParser from '@typescript-eslint/parser'
 import tsPlugin from '@typescript-eslint/eslint-plugin'
+import react from 'eslint-plugin-react'
 import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
@@ -27,9 +28,13 @@ export default defineConfig([
     },
     plugins: {
       '@typescript-eslint': tsPlugin,
+      react,
       'react-hooks': reactHooks,
       'react-refresh': reactRefresh,
     },
+    // Without this, eslint-plugin-react prints a "React version not specified"
+    // warning on every run, which hides a real one.
+    settings: { react: { version: 'detect' } },
     rules: {
       // TypeScript itself resolves identifiers (JSX runtime, lib types like
       // RequestInit), so the lexical no-undef rule only produces false positives.
@@ -45,6 +50,12 @@ export default defineConfig([
         },
       ],
       'react-hooks/rules-of-hooks': 'error',
+      // A component declared inside another component is a new component type on
+      // every render, so React unmounts and remounts its whole subtree for any
+      // state change. That loses the scroll position, the focus and any open
+      // menu. Only this one rule of eslint-plugin-react is enabled, because the
+      // recommended preset would flag many pre-existing patterns.
+      'react/no-unstable-nested-components': ['error', { allowAsProps: true }],
     },
   },
   {
