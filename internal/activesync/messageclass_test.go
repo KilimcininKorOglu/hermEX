@@ -47,17 +47,24 @@ const encryptedFixture = "From: a@hermex.test\r\n" +
 // encrypted/opaque-signed, and a plain message keeps IPM.Note.
 func TestMessageClassFor(t *testing.T) {
 	cases := []struct {
-		name string
-		raw  string
-		want string
+		name   string
+		stored string
+		raw    string
+		want   string
 	}{
-		{"clear-signed is MultipartSigned", signedFixture, messageClassSMIMEMultipart},
-		{"pkcs7-mime is SMIME", encryptedFixture, messageClassSMIME},
-		{"a plain note keeps IPM.Note", convMsgRoot, messageClassNote},
+		{"clear-signed is MultipartSigned", "", signedFixture, messageClassSMIMEMultipart},
+		{"pkcs7-mime is SMIME", "", encryptedFixture, messageClassSMIME},
+		{"a plain note keeps IPM.Note", "", convMsgRoot, messageClassNote},
+		{"a stored IPM.Note is still refined", messageClassNote, signedFixture, messageClassSMIMEMultipart},
+		// The load-bearing case: a delivered invitation must reach the device as the
+		// scheduling class, or the device shows it as ordinary mail and never offers
+		// Accept / Tentative / Decline.
+		{"a stored scheduling class wins", meetingRequestClass, convMsgRoot, meetingRequestClass},
+		{"a stored cancellation wins", "IPM.Schedule.Meeting.Canceled", convMsgRoot, "IPM.Schedule.Meeting.Canceled"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := messageClassFor([]byte(c.raw)); got != c.want {
+			if got := messageClassFor(c.stored, []byte(c.raw)); got != c.want {
 				t.Errorf("messageClassFor = %q, want %q", got, c.want)
 			}
 		})
@@ -90,7 +97,7 @@ func TestEmailAppDataSMIMEForcesMIME(t *testing.T) {
 	m := objectstore.MessageInfo{UID: 1, Subject: "Signed hello", Sender: "a@hermex.test",
 		InternalDate: time.Date(2026, 6, 27, 9, 0, 0, 0, time.UTC)}
 	pref := bodyPref{typ: bodyTypePlain, mimeSupport: mimeSupportSMIME}
-	data := emailAppData(raw, m, "1", "5", pref)
+	data := emailAppData(mailRender{pref: pref}, raw, m, "1", "5")
 
 	if cls := data.ChildText(wbxml.EMMessageClass); cls != messageClassSMIMEMultipart {
 		t.Errorf("message class = %q, want %q", cls, messageClassSMIMEMultipart)
@@ -119,7 +126,7 @@ func TestEmailAppDataSMIMEClientNoMIME(t *testing.T) {
 	m := objectstore.MessageInfo{UID: 1, Subject: "Signed hello", Sender: "a@hermex.test",
 		InternalDate: time.Date(2026, 6, 27, 9, 0, 0, 0, time.UTC)}
 	pref := bodyPref{typ: bodyTypePlain, mimeSupport: mimeSupportNever}
-	data := emailAppData(raw, m, "1", "5", pref)
+	data := emailAppData(mailRender{pref: pref}, raw, m, "1", "5")
 
 	if cls := data.ChildText(wbxml.EMMessageClass); cls != messageClassSMIMEMultipart {
 		t.Errorf("message class = %q, want %q (the class is reported even without MIME support)", cls, messageClassSMIMEMultipart)
@@ -136,7 +143,7 @@ func TestEmailAppDataPlainUnaffected(t *testing.T) {
 	m := objectstore.MessageInfo{UID: 1, Subject: "Project plan", Sender: "a@hermex.test",
 		InternalDate: time.Date(2026, 6, 27, 9, 0, 0, 0, time.UTC)}
 	pref := bodyPref{typ: bodyTypePlain, mimeSupport: mimeSupportSMIME}
-	data := emailAppData([]byte(convMsgRoot), m, "1", "5", pref)
+	data := emailAppData(mailRender{pref: pref}, []byte(convMsgRoot), m, "1", "5")
 
 	if cls := data.ChildText(wbxml.EMMessageClass); cls != messageClassNote {
 		t.Errorf("plain message class = %q, want %q", cls, messageClassNote)

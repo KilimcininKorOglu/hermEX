@@ -28,14 +28,21 @@ const (
 	mimeSupportAll   = 2
 )
 
-// messageClassFor derives the EAS message class from the raw MIME. A
-// multipart/signed body is clear-signed; an application/pkcs7-mime body is
-// encrypted or opaque-signed; anything else is a plain note. smime.IsSigned keys
-// on the top-level media type, so a PGP/MIME multipart/signed body is also
-// labeled MultipartSigned: forcing full MIME is still the correct handling, the
-// device's signature handler simply finds a PGP signature rather than a PKCS#7
-// one.
-func messageClassFor(raw []byte) string {
+// messageClassFor derives the EAS message class a device is told. The STORED class
+// wins whenever it is something other than the generic note: a meeting request, a
+// response or a cancellation is what the device keys on to treat the message as
+// actionable, and reporting IPM.Note for one hides the invitation.
+//
+// A generic note is then refined from the raw MIME, as before. A multipart/signed
+// body is clear-signed; an application/pkcs7-mime body is encrypted or opaque-signed;
+// anything else stays a plain note. smime.IsSigned keys on the top-level media type,
+// so a PGP/MIME multipart/signed body is also labeled MultipartSigned: forcing full
+// MIME is still the correct handling, the device's signature handler simply finds a
+// PGP signature rather than a PKCS#7 one.
+func messageClassFor(stored string, raw []byte) string {
+	if stored != "" && stored != messageClassNote {
+		return stored
+	}
 	switch {
 	case smime.IsSigned(raw):
 		return messageClassSMIMEMultipart
@@ -45,3 +52,7 @@ func messageClassFor(raw []byte) string {
 		return messageClassNote
 	}
 }
+
+// meetingRequestClass is the stored class a delivered invitation carries. A message
+// with this class gets the MS-ASEMAIL MeetingRequest block.
+const meetingRequestClass = "IPM.Schedule.Meeting.Request"

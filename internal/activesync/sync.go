@@ -106,7 +106,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, sess *sessio
 		return
 	}
 
-	out, err := syncCollections(st, dev, collections)
+	out, err := syncCollections(st, dev, collections, sess.protocol)
 	if err != nil {
 		s.failRequest(w, r, "sync.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
@@ -140,14 +140,15 @@ func (s *Server) waitForSyncChanges(w http.ResponseWriter, r *http.Request, sess
 }
 
 // syncCollections runs every collection in the request through syncCollection and
-// collects their responses in request order.
-func syncCollections(st *objectstore.Store, dev *deviceState, collections *wbxml.Node) ([]*wbxml.Node, error) {
+// collects their responses in request order. protocol is the negotiated version,
+// carried down because a mail item's rendering depends on it.
+func syncCollections(st *objectstore.Store, dev *deviceState, collections *wbxml.Node, protocol string) ([]*wbxml.Node, error) {
 	var out []*wbxml.Node
 	for _, c := range collections.Children {
 		if c.Tag != wbxml.ASCollection {
 			continue
 		}
-		resp, err := syncCollection(st, dev, c)
+		resp, err := syncCollection(st, dev, c, protocol)
 		if err != nil {
 			return nil, err
 		}
@@ -323,7 +324,7 @@ const (
 // syncCollection processes one <Collection>: it primes on sync key 0, rejects a
 // stale key with Status 3, otherwise applies the client's commands and streams
 // the snapshot-diff changes (capped at the window).
-func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node) (*wbxml.Node, error) {
+func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node, protocol string) (*wbxml.Node, error) {
 	collID := c.ChildText(wbxml.ASCollectionID)
 	clientKey := c.ChildText(wbxml.ASSyncKey)
 	window := parseWindow(c.ChildText(wbxml.ASWindowSize))
@@ -368,7 +369,8 @@ func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node) (*wb
 		more = true
 	}
 
-	cmds, err := mailChangeCommands(st, folderID, collID, cstate, pending, parseBodyPref(c))
+	rc := mailRender{st: st, pref: parseBodyPref(c), protocol: protocol}
+	cmds, err := mailChangeCommands(rc, folderID, collID, cstate, pending)
 	if err != nil {
 		return nil, err
 	}
@@ -378,8 +380,9 @@ func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node) (*wb
 
 // mailChangeCommands renders a mail folder's pending changes as Sync commands and
 // records each one in the device snapshot.
-func mailChangeCommands(st *objectstore.Store, folderID int64, collID string, cstate *collectionState,
-	pending []pendingChange, pref bodyPref) ([]*wbxml.Node, error) {
+func mailChangeCommands(rc mailRender, folderID int64, collID string, cstate *collectionState,
+	pending []pendingChange) ([]*wbxml.Node, error) {
+	st := rc.st
 	var cmds []*wbxml.Node
 	for _, ch := range pending {
 		switch ch.kind {
@@ -389,7 +392,7 @@ func mailChangeCommands(st *objectstore.Store, folderID int64, collID string, cs
 				return nil, err
 			}
 			cmds = append(cmds, wbxml.Elem(wbxml.ASAdd,
-				wbxml.Str(wbxml.ASServerID, ch.sid), emailAppData(raw, ch.m, collID, ch.sid, pref)))
+				wbxml.Str(wbxml.ASServerID, ch.sid), emailAppData(rc, raw, ch.m, collID, ch.sid)))
 			cstate.Items[ch.sid] = ch.m.Flags
 		case changeChange:
 			cmds = append(cmds, wbxml.Elem(wbxml.ASChange,
@@ -551,14 +554,28 @@ func parseBodyPref(c *wbxml.Node) bodyPref {
 	return pref
 }
 
+// mailRender carries the per-request context an email ApplicationData needs beyond
+// the message itself: the store its scheduling properties are read from, the client's
+// body preference, and the negotiated protocol version, which decides which
+// identifier a meeting request carries.
+type mailRender struct {
+	st       *objectstore.Store
+	pref     bodyPref
+	protocol string
+}
+
 // emailAppData builds the ApplicationData for an Email-class item: the listing
 // properties from the index, the message body in the requested representation, and,
 // when the message carries attachments, an AirSyncBase Attachments listing whose
-// FileReferences the device fetches through ItemOperations.
-func emailAppData(raw []byte, m objectstore.MessageInfo, collID, serverID string, pref bodyPref) *wbxml.Node {
-	// A signed or encrypted message keeps the generic IPM.Note class in the store;
-	// recover its S/MIME class here so the device hands it to its crypto handler.
-	class := messageClassFor(raw)
+// FileReferences the device fetches through ItemOperations. A delivered invitation
+// also carries the MS-ASEMAIL MeetingRequest block, which is what makes the device
+// offer Accept / Tentative / Decline.
+func emailAppData(rc mailRender, raw []byte, m objectstore.MessageInfo, collID, serverID string) *wbxml.Node {
+	pref := rc.pref
+	// The stored class names a meeting request, a response or a cancellation. A signed
+	// or encrypted message keeps the generic IPM.Note class in the store; recover its
+	// S/MIME class here so the device hands it to its crypto handler.
+	class := messageClassFor(storedMessageClass(rc.st, m.ID), raw)
 	// The cryptographic envelope survives only if the device receives the verbatim
 	// MIME, but a client must have advertised it accepts a MIME body (MIMESupport
 	// >= 1, MS-ASCMD 2.2.3.100) before one is forced on it. A client that did not
@@ -587,7 +604,26 @@ func emailAppData(raw []byte, m objectstore.MessageInfo, collID, serverID string
 			data.Children = append(data.Children, atts)
 		}
 	}
+	if class == meetingRequestClass {
+		if mr := meetingRequestNode(rc.st, m.ID, rc.protocol); mr != nil {
+			data.Children = append(data.Children, mr)
+		}
+	}
 	return data
+}
+
+// storedMessageClass reads one message's stored class. A nil store (a test that
+// renders a message it never filed) reads as no class, so the caller falls back to
+// deriving one from the MIME.
+func storedMessageClass(st *objectstore.Store, messageID int64) string {
+	if st == nil {
+		return ""
+	}
+	pv, err := st.GetMessageProperties(messageID, mapi.PrMessageClass)
+	if err != nil {
+		return ""
+	}
+	return stringProp(pv, mapi.PrMessageClass)
 }
 
 // emailBody renders the AirSyncBase Body in the device's requested representation

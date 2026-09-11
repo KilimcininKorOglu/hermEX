@@ -10,6 +10,7 @@ import (
 	"hermex/internal/mapi"
 	"hermex/internal/mime"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcmail"
 	"hermex/internal/oxews"
 	"hermex/internal/oxtask"
 )
@@ -72,9 +73,10 @@ type getAttachmentResponseMessage struct {
 // element name, so a folder of tasks serializes as <t:Task> and a folder of mail as
 // <t:Message>.
 type itemsWrap struct {
-	Messages  []oxews.Message
-	Tasks     []oxews.Task
-	BaseItems []oxews.Item
+	Messages        []oxews.Message
+	MeetingRequests []oxews.MeetingRequest
+	Tasks           []oxews.Task
+	BaseItems       []oxews.Item
 }
 
 type findItemRoot struct {
@@ -307,25 +309,38 @@ func getOneItem(cache *storeCache, sess *session, itemID string) itemResponseMes
 		elem := buildNoteItem(st, msg.Props, itemID, changeKey)
 		return itemFound(&itemsWrap{BaseItems: []oxews.Item{elem}})
 	}
+	return mailItem(st, id, itemID, changeKey, msg, hasAttach)
+}
+
+// mailItem renders a stored mail item: an ordinary message as <t:Message>, and a
+// delivered invitation as <t:MeetingRequest>, so a client can tell the invitation
+// from ordinary mail and offer Accept / Tentative / Decline.
+func mailItem(st *objectstore.Store, id oxews.ItemID, itemID, changeKey string,
+	msg *oxcmail.Message, hasAttach bool) itemResponseMessage {
 	info, _ := st.MessageByUID(id.FolderID, id.UID)
 	body, bodyType := "", "Text"
 	if raw, err := st.GetMessageRaw(id.FolderID, id.UID); err == nil {
 		body, bodyType = bodyFromRaw(raw)
 	}
-	elem := oxews.BuildItem(msg, oxews.ItemMeta{
+	meta := oxews.ItemMeta{
 		ItemID:         itemID,
 		FolderID:       id.FolderID,
 		MessageID:      id.MessageID,
 		Mailbox:        id.Mailbox,
 		ChangeKey:      changeKey,
+		ItemClass:      itemClass(msg.Props),
 		IsRead:         info.Flags&objectstore.FlagSeen != 0,
 		HasAttachments: hasAttach,
 		Received:       info.InternalDate,
 		Size:           int(info.Size),
 		Body:           body,
 		BodyType:       bodyType,
-	})
-	return itemFound(&itemsWrap{Messages: []oxews.Message{elem}})
+	}
+	if meta.ItemClass == oxews.MeetingRequestClass {
+		mr := oxews.BuildMeetingRequest(msg, meta, meetingMeta(st, msg))
+		return itemFound(&itemsWrap{MeetingRequests: []oxews.MeetingRequest{mr}})
+	}
+	return itemFound(&itemsWrap{Messages: []oxews.Message{oxews.BuildItem(msg, meta)}})
 }
 
 // itemFound builds a GetItem success response message over one rendered item.
@@ -446,6 +461,7 @@ func itemSummary(st *objectstore.Store, folderID int64, info objectstore.Message
 		ItemID: oxews.EncodeItemID(oxews.ItemID{FolderID: folderID, MessageID: info.ID, UID: info.UID, Mailbox: mailbox}),
 		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		ChangeKey:      oxews.ChangeKey(uint64(info.ID)),
+		ItemClass:      storedClass(st, info.ID),
 		Subject:        info.Subject,
 		SenderName:     name,
 		SenderEmail:    email,
@@ -454,6 +470,18 @@ func itemSummary(st *objectstore.Store, folderID int64, info objectstore.Message
 		IsRead:         info.Flags&objectstore.FlagSeen != 0,
 		HasAttachments: hasAttach,
 	})
+}
+
+// storedClass reads one message's class for a listing row. A summary row carries it
+// so a client can tell a meeting request, a response or a cancellation from ordinary
+// mail without opening the item. It costs one property read per row, the same order
+// as the HasAttachments read the same summary already makes.
+func storedClass(st *objectstore.Store, messageID int64) string {
+	pv, err := st.GetMessageProperties(messageID, mapi.PrMessageClass)
+	if err != nil {
+		return ""
+	}
+	return itemClass(pv)
 }
 
 // itemClass returns a stored message's class.

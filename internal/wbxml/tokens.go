@@ -190,6 +190,23 @@ const (
 	EMCc           Tag = 0x0217
 	EMFrom         Tag = 0x0218
 	EMReplyTo      Tag = 0x0219
+	// The MeetingRequest container and its children (MS-ASEMAIL 2.2.2.48), carried on
+	// a delivered invitation so the device can answer it with MeetingResponse. Location
+	// rides the code page 2 tag through 14.1; 16.x carries it under AirSyncBase.
+	EMAllDayEvent       Tag = 0x021A
+	EMDtStamp           Tag = 0x021D
+	EMEndTime           Tag = 0x021E
+	EMInstanceType      Tag = 0x021F
+	EMBusyStatus        Tag = 0x0220
+	EMLocation          Tag = 0x0221
+	EMMeetingRequest    Tag = 0x0222
+	EMOrganizer         Tag = 0x0223
+	EMResponseRequested Tag = 0x0226
+	EMStartTime         Tag = 0x0231
+	EMSensitivity       Tag = 0x0232
+	EMTimeZone          Tag = 0x0233
+	EMGlobalObjId       Tag = 0x0234
+
 	EMThreadTopic  Tag = 0x0235
 	EMInternetCPID Tag = 0x0239
 	EMFlag         Tag = 0x023A
@@ -527,6 +544,10 @@ const (
 const (
 	EM2ConversationId    Tag = 0x1609
 	EM2ConversationIndex Tag = 0x160A
+	// MeetingMessageType (Since 14.1) names what a meeting message is: an initial
+	// request, an update, or an outdated one. It is a required child of the Email
+	// MeetingRequest container from 14.1 onward.
+	EM2MeetingMessageType Tag = 0x1613
 )
 
 // Find command codepage (0x19), MS-ASCMD/MS-ASWBXML (Since 16.1): the unified

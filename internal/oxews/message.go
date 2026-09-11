@@ -14,8 +14,13 @@ const ewsTime = "2006-01-02T15:04:05Z"
 // Message is the EWS <t:Message> element (the ItemType/MessageType subset v1
 // emits). It declares the types namespace once; children inherit it.
 type Message struct {
-	XMLName          xml.Name        `xml:"http://schemas.microsoft.com/exchange/services/2006/types Message"`
-	ItemID           ItemIDElem      `xml:"ItemId"`
+	XMLName xml.Name   `xml:"http://schemas.microsoft.com/exchange/services/2006/types Message"`
+	ItemID  ItemIDElem `xml:"ItemId"`
+	// ItemClass is the stored PidTagMessageClass. It sits between ItemId and Subject
+	// because the ItemType schema is a sequence, and it is how a client tells an
+	// actionable message (a meeting request, a response, a cancellation) from ordinary
+	// mail when the item is served as a plain <t:Message>.
+	ItemClass        string          `xml:"ItemClass,omitempty"`
 	Subject          string          `xml:"Subject,omitempty"`
 	Sensitivity      string          `xml:"Sensitivity,omitempty"`
 	Body             *Body           `xml:"Body,omitempty"`
@@ -70,6 +75,7 @@ type ItemMeta struct {
 	MessageID      int64
 	Mailbox        string // target mailbox SMTP when the item lives in another mailbox; empty for own
 	ChangeKey      string
+	ItemClass      string // stored PidTagMessageClass; omitted from the wire when empty
 	IsRead         bool
 	HasAttachments bool
 	Received       time.Time
@@ -84,6 +90,7 @@ type ItemMeta struct {
 func BuildItem(msg *oxcmail.Message, meta ItemMeta) Message {
 	m := Message{
 		ItemID:         ItemIDElem{ID: meta.ItemID, ChangeKey: meta.ChangeKey},
+		ItemClass:      meta.ItemClass,
 		Subject:        stringProp(msg.Props, mapi.PrSubject),
 		Sensitivity:    sensitivityName(longProp(msg.Props, mapi.PrSensitivity, 0)),
 		Importance:     importanceName(longProp(msg.Props, mapi.PrImportance, 1)),
@@ -122,6 +129,7 @@ func BuildItem(msg *oxcmail.Message, meta ItemMeta) Message {
 type SummaryMeta struct {
 	ItemID         string
 	ChangeKey      string
+	ItemClass      string
 	Subject        string
 	SenderName     string
 	SenderEmail    string
@@ -136,6 +144,7 @@ type SummaryMeta struct {
 func BuildSummary(meta SummaryMeta) Message {
 	m := Message{
 		ItemID:         ItemIDElem{ID: meta.ItemID, ChangeKey: meta.ChangeKey},
+		ItemClass:      meta.ItemClass,
 		Subject:        meta.Subject,
 		HasAttachments: meta.HasAttachments,
 		IsRead:         meta.IsRead,

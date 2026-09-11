@@ -69,7 +69,7 @@ func TestConversationIndexFormat(t *testing.T) {
 func TestEmailAppDataCarriesConversation(t *testing.T) {
 	m := objectstore.MessageInfo{UID: 1, Subject: "Project plan", Sender: "a@hermex.test",
 		InternalDate: time.Date(2026, 6, 15, 9, 0, 0, 0, time.UTC)}
-	data := emailAppData([]byte(convMsgRoot), m, "1", "1", bodyPref{})
+	data := emailAppData(mailRender{}, []byte(convMsgRoot), m, "1", "1")
 
 	cid := data.Child(wbxml.EM2ConversationId)
 	if cid == nil || len(cid.Opaque) != 16 {

@@ -76,7 +76,7 @@ func (s *Server) handleFind(w http.ResponseWriter, r *http.Request, sess *sessio
 		collID := strconv.FormatInt(h.fid, 10)
 		sid := strconv.FormatUint(uint64(h.m.UID), 10)
 		raw, _ := st.GetMessageRaw(h.fid, h.m.UID)
-		appdata := emailAppData(raw, h.m, collID, sid, findPreviewPref)
+		appdata := emailAppData(mailRender{st: st, pref: findPreviewPref, protocol: sess.protocol}, raw, h.m, collID, sid)
 		results = append(results, wbxml.Elem(wbxml.FNDResult,
 			wbxml.Str(wbxml.ASClass, "Email"),
 			wbxml.Str(wbxml.ASServerID, sid),

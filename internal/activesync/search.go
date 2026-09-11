@@ -109,7 +109,7 @@ func (s *Server) handleMailboxSearch(w http.ResponseWriter, store *wbxml.Node, s
 		collID := strconv.FormatInt(h.fid, 10)
 		sid := strconv.FormatUint(uint64(h.m.UID), 10)
 		raw, _ := st.GetMessageRaw(h.fid, h.m.UID)
-		appdata := emailAppData(raw, h.m, collID, sid, pref)
+		appdata := emailAppData(mailRender{st: st, pref: pref, protocol: sess.protocol}, raw, h.m, collID, sid)
 		results = append(results, wbxml.Elem(wbxml.SRResult,
 			wbxml.Str(wbxml.ASClass, "Email"),
 			wbxml.Str(wbxml.SRLongId, collID+":"+sid),
