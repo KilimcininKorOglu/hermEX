@@ -165,6 +165,46 @@ func (s *Store) ListFolders() ([]FolderInfo, error) {
 	return out, nil
 }
 
+// FolderInfoByID reads one folder's info by id, whatever the visible tree shows.
+// ListFolders serves the tree a client browses, so it omits a hidden folder and
+// every folder outside the IPM subtree. A folder addressed BY ID is a different
+// question from that tree: a surface that resolves an id must not report a folder
+// the mailbox holds as absent. ParentID carries the folder's real parent, including
+// one outside the IPM subtree; it is nil only for a folder directly under the
+// subtree, matching ListFolders.
+func (s *Store) FolderInfoByID(folderID int64) (FolderInfo, bool, error) {
+	var parent int64
+	err := s.objdb.QueryRow(
+		`SELECT parent_id FROM folders WHERE folder_id=? AND is_deleted=0`, folderID).Scan(&parent)
+	if errors.Is(err, sql.ErrNoRows) {
+		return FolderInfo{}, false, nil
+	}
+	if err != nil {
+		return FolderInfo{}, false, err
+	}
+	name, err := s.folderDisplayName(folderID)
+	if err != nil {
+		return FolderInfo{}, false, err
+	}
+	sub, err := s.folderSubscribed(folderID)
+	if err != nil {
+		return FolderInfo{}, false, err
+	}
+	fi := FolderInfo{ID: folderID, DisplayName: name, Subscribed: sub}
+	if parent != s.ipmSubtree() {
+		fi.ParentID = &parent
+	}
+	return fi, true, nil
+}
+
+// CountChildFolders counts a folder's live child folders, whatever the visible
+// tree shows. It answers for a folder the tree omits, where counting the listing's
+// rows would report 0 for a folder that has children.
+func (s *Store) CountChildFolders(folderID int64) (int, error) {
+	ids, err := s.childFolderIDs(folderID)
+	return len(ids), err
+}
+
 // RenameFolder moves a folder under newParent (nil for the top level) and sets
 // its display name. It reports ErrNotFound when the folder is missing.
 func (s *Store) RenameFolder(folderID int64, newParent *int64, newName string) error {

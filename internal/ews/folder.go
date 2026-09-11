@@ -449,7 +449,7 @@ func hierarchyDiff(st *objectstore.Store, all []objectstore.FolderInfo, prev []i
 		if prevSet[f.ID] {
 			continue
 		}
-		e, err := buildFolderElem(st, f, all, "")
+		e, err := buildFolderElem(st, f, childCount(all, f.ID), "")
 		if err != nil {
 			return hierarchyChanges{}, err
 		}
@@ -743,11 +743,33 @@ func folderElement(st *objectstore.Store, fid int64, idx map[int64]objectstore.F
 	if fid == mapi.PrivateFIDIPMSubtree || fid == mapi.PrivateFIDRoot {
 		return syntheticRoot(all, mailbox), "", nil
 	}
-	info, ok := idx[fid]
+	if info, ok := idx[fid]; ok {
+		f, err := buildFolderElem(st, info, childCount(all, fid), mailbox)
+		return f, "", err
+	}
+	// The folder is not in the visible tree. It may still exist: ListFolders omits a
+	// hidden folder and every folder outside the IPM subtree, and a client addresses
+	// those by id (Quick Contacts and IM Contacts List are hidden; the Finder folder,
+	// which EWS names searchfolders, hangs off the mailbox root). Reporting them
+	// absent makes a client that resolves the distinguished set retry the same batch
+	// forever. The counts come from the store, because the listing holds no row for it.
+	return folderOutsideTheTree(st, fid, mailbox)
+}
+
+// folderOutsideTheTree renders a folder the visible listing does not carry.
+func folderOutsideTheTree(st *objectstore.Store, fid int64, mailbox string) (oxews.Folder, string, error) {
+	info, ok, err := st.FolderInfoByID(fid)
+	if err != nil {
+		return oxews.Folder{}, "", err
+	}
 	if !ok {
 		return oxews.Folder{}, "ErrorItemNotFound", nil
 	}
-	f, err := buildFolderElem(st, info, all, mailbox)
+	children, err := st.CountChildFolders(fid)
+	if err != nil {
+		return oxews.Folder{}, "", err
+	}
+	f, err := buildFolderElem(st, info, children, mailbox)
 	return f, "", err
 }
 
@@ -757,7 +779,7 @@ func folderElement(st *objectstore.Store, fid int64, idx map[int64]objectstore.F
 func folderElements(st *objectstore.Store, infos, all []objectstore.FolderInfo, mailbox string) ([]oxews.Folder, error) {
 	out := make([]oxews.Folder, 0, len(infos))
 	for _, info := range infos {
-		f, err := buildFolderElem(st, info, all, mailbox)
+		f, err := buildFolderElem(st, info, childCount(all, info.ID), mailbox)
 		if err != nil {
 			return nil, err
 		}
@@ -768,7 +790,7 @@ func folderElements(st *objectstore.Store, infos, all []objectstore.FolderInfo, 
 
 // buildFolderElem renders a folder element with its live item counts and child
 // count. mailbox tags the minted folder ids with the target mailbox (empty for own).
-func buildFolderElem(st *objectstore.Store, info objectstore.FolderInfo, all []objectstore.FolderInfo, mailbox string) (oxews.Folder, error) {
+func buildFolderElem(st *objectstore.Store, info objectstore.FolderInfo, children int, mailbox string) (oxews.Folder, error) {
 	total, unread, err := st.CountMessages(info.ID)
 	if err != nil {
 		return oxews.Folder{}, err
@@ -796,7 +818,7 @@ func buildFolderElem(st *objectstore.Store, info objectstore.FolderInfo, all []o
 		DisplayName:  info.DisplayName,
 		Total:        total,
 		Unread:       unread,
-		Children:     childCount(all, info.ID),
+		Children:     children,
 		Mailbox:      mailbox,
 	}), nil
 }

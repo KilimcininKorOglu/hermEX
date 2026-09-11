@@ -97,4 +97,15 @@ var distinguishedFolders = map[string]int64{
 	"archive":             mapi.PrivateFIDArchive,
 	"conversationhistory": mapi.PrivateFIDConversationHistory,
 	"recipientcache":      mapi.PrivateFIDRecipientCache,
+	// The rest of the built-in hierarchy, by the name EWS gives it. Every mailbox
+	// holds these folders, so answering ErrorFolderNotFound for one names a folder
+	// absent that the client can then see in the folder listing. searchfolders is the
+	// Finder folder, the search-folder root PR_FINDER_ENTRYID points at.
+	"searchfolders":  mapi.PrivateFIDFinder,
+	"syncissues":     mapi.PrivateFIDSyncIssues,
+	"conflicts":      mapi.PrivateFIDConflicts,
+	"localfailures":  mapi.PrivateFIDLocalFailures,
+	"serverfailures": mapi.PrivateFIDServerFailures,
+	"quickcontacts":  mapi.PrivateFIDQuickContacts,
+	"imcontactlist":  mapi.PrivateFIDIMContactList,
 }
