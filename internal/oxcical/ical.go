@@ -231,7 +231,15 @@ func (c *icomp) sub(name string) *icomp {
 // names an IANA zone resolved via time.LoadLocation; otherwise the value is
 // floating and read as UTC (a documented v1 simplification). ok is false on any
 // parse failure.
+//
+// A nil line is one such failure, not a programming error: callers pass the result
+// of prop() straight in, and a component that does not carry the property at all
+// is ordinary inbound data (a VEVENT with RRULE but no DTSTART). Reading it as
+// "unparseable" lets every caller take the branch it already has for a bad value.
 func parseICalTime(l *iline) (t time.Time, allDay bool, ok bool) {
+	if l == nil {
+		return time.Time{}, false, false
+	}
 	v := strings.TrimSpace(l.value)
 	if isDateOnly(l, v) {
 		d, err := time.Parse("20060102", v)
