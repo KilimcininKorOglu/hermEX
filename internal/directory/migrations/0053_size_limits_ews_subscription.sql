@@ -1,0 +1,12 @@
+-- Add the EWS notification-subscription idle timeout to size_limits. It is how
+-- long a subscription may stay unused before the server drops it, in minutes.
+-- [MS-OXWSNTIF] gives a pull subscription a client-supplied Timeout but gives a
+-- streaming subscription none, so the streaming value is the server's policy and
+-- an operator needs to set it: a client gap longer than the timeout (a sleeping
+-- laptop, a roaming network) loses the subscription with no way for the client to
+-- tell, short of subscribing again.
+-- The default matches the daemon's own built-in constant, so applying this
+-- migration changes no deployment's behaviour.
+-- Idempotent ALTER (MariaDB ADD COLUMN IF NOT EXISTS); applied once by the runner
+-- and recorded in schema_migrations.
+ALTER TABLE size_limits ADD COLUMN IF NOT EXISTS ews_subscription_timeout_minutes BIGINT NOT NULL DEFAULT 30;

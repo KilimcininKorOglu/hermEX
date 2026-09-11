@@ -33,6 +33,8 @@
 <p>IMAP maximum command line (bytes): <input type="number" name="imap_line_bytes" value="{{.IMAPCommandLineBytes}}" min="64"></p>
 <p>POP3 maximum command line (bytes): <input type="number" name="pop3_line_bytes" value="{{.POP3CommandLineBytes}}" min="64"></p>
 <p>SMTP maximum command line (bytes): <input type="number" name="smtp_line_bytes" value="{{.SMTPCommandLineBytes}}" min="64"></p>
+<p class="hint">An EWS notification subscription is dropped once it goes unused for this long, so this is in minutes. The timer restarts every time the client uses the subscription, and it is the whole policy for a streaming subscription, whose request carries no timeout of its own. A client away for longer (a sleeping laptop, a roaming network) loses the subscription and cannot tell without subscribing again, so raise it when clients go offline for long stretches. A change applies to new subscriptions; existing ones keep the timeout they were created with.</p>
+<p>EWS subscription timeout (minutes): <input type="number" name="ews_subscription_timeout_min" value="{{.EWSSubscriptionTimeoutMin}}" min="1" max="1440"></p>
 <button type="submit">Save limits</button>
 </form>
 </div>{{end}}

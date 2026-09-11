@@ -34,6 +34,13 @@ type SizeLimits struct {
 	IMAPCommandLineBytes int64
 	POP3CommandLineBytes int64
 	SMTPCommandLineBytes int64
+	// EWSSubscriptionTimeoutMinutes is how long an EWS notification subscription
+	// may stay UNUSED before the server drops it. It is a duration in minutes, not
+	// a size. [MS-OXWSNTIF] lets a pull subscription carry its own Timeout, but
+	// gives a streaming subscription none, so this is the server's policy for the
+	// streaming case: a client gap longer than it loses the subscription, and the
+	// client cannot tell without subscribing again.
+	EWSSubscriptionTimeoutMinutes int64
 }
 
 // GetSizeLimits returns the stored size limits and whether a row has been saved. When
@@ -43,11 +50,13 @@ func (d *SQLDirectory) GetSizeLimits() (SizeLimits, bool, error) {
 	err := d.db.QueryRow(
 		`SELECT imap_literal_bytes, ews_request_bytes, activesync_request_bytes, dav_ical_bytes, dav_vcard_bytes,
 		        webmail_request_bytes, mapi_request_bytes, freebusy_max_targets, webmail_preview_max_bytes,
-		        imap_command_line_bytes, pop3_command_line_bytes, smtp_command_line_bytes
+		        imap_command_line_bytes, pop3_command_line_bytes, smtp_command_line_bytes,
+		        ews_subscription_timeout_minutes
 		   FROM size_limits WHERE id = 1`).
 		Scan(&s.IMAPLiteralBytes, &s.EWSRequestBytes, &s.ActiveSyncRequestBytes, &s.DAVICalBytes, &s.DAVVCardBytes,
 			&s.WebmailRequestBytes, &s.MapiRequestBytes, &s.FreeBusyMaxTargets, &s.WebmailPreviewMaxBytes,
-			&s.IMAPCommandLineBytes, &s.POP3CommandLineBytes, &s.SMTPCommandLineBytes)
+			&s.IMAPCommandLineBytes, &s.POP3CommandLineBytes, &s.SMTPCommandLineBytes,
+			&s.EWSSubscriptionTimeoutMinutes)
 	if errors.Is(err, sql.ErrNoRows) {
 		return SizeLimits{}, false, nil
 	}
@@ -64,8 +73,9 @@ func (d *SQLDirectory) SetSizeLimits(s SizeLimits) error {
 		`INSERT INTO size_limits
 		   (id, imap_literal_bytes, ews_request_bytes, activesync_request_bytes, dav_ical_bytes, dav_vcard_bytes,
 		    webmail_request_bytes, mapi_request_bytes, freebusy_max_targets, webmail_preview_max_bytes,
-		    imap_command_line_bytes, pop3_command_line_bytes, smtp_command_line_bytes, updated_at)
-		 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		    imap_command_line_bytes, pop3_command_line_bytes, smtp_command_line_bytes,
+		    ews_subscription_timeout_minutes, updated_at)
+		 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON DUPLICATE KEY UPDATE imap_literal_bytes = VALUES(imap_literal_bytes),
 		   ews_request_bytes = VALUES(ews_request_bytes),
 		   activesync_request_bytes = VALUES(activesync_request_bytes),
@@ -77,10 +87,12 @@ func (d *SQLDirectory) SetSizeLimits(s SizeLimits) error {
 		   imap_command_line_bytes = VALUES(imap_command_line_bytes),
 		   pop3_command_line_bytes = VALUES(pop3_command_line_bytes),
 		   smtp_command_line_bytes = VALUES(smtp_command_line_bytes),
+		   ews_subscription_timeout_minutes = VALUES(ews_subscription_timeout_minutes),
 		   updated_at = VALUES(updated_at)`,
 		s.IMAPLiteralBytes, s.EWSRequestBytes, s.ActiveSyncRequestBytes, s.DAVICalBytes, s.DAVVCardBytes,
 		s.WebmailRequestBytes, s.MapiRequestBytes, s.FreeBusyMaxTargets, s.WebmailPreviewMaxBytes,
 		s.IMAPCommandLineBytes, s.POP3CommandLineBytes, s.SMTPCommandLineBytes,
+		s.EWSSubscriptionTimeoutMinutes,
 		time.Now().UnixMilli())
 	return err
 }

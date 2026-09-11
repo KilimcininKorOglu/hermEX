@@ -58,6 +58,46 @@ func maxFreeBusyTargets() int {
 	return defaultFreeBusyTargets
 }
 
+// defaultSubscriptionTimeoutMin is how long a notification subscription may stay
+// UNUSED before the server drops it, in minutes, when no operator value is set.
+//
+// [MS-OXWSNTIF] lets a PULL subscription carry its own Timeout, so this is the
+// fallback for a request that names none and the whole policy for a STREAMING
+// subscription, whose request has no Timeout element at all. A client gap longer
+// than this loses the subscription, and the client cannot tell without
+// subscribing again, so an operator whose clients sleep or roam raises it.
+const defaultSubscriptionTimeoutMin = 30
+
+// subTimeoutLimit holds the operator-set subscription idle timeout in minutes
+// (0 = use the default), set by SetSubscriptionTimeout and read when a
+// subscription is registered, so the EWS daemon's poll applies an edit without a
+// restart. The value is read at registration and then rides in the
+// SubscriptionId, so an edit governs NEW subscriptions and leaves existing ones
+// on the timeout they were created with.
+var subTimeoutLimit atomic.Int64
+
+// SetSubscriptionTimeout sets the notification-subscription idle timeout in
+// minutes (0 restores the built-in default). It is safe to call concurrently with
+// request handling, so an operator's edit applies without a restart.
+func SetSubscriptionTimeout(minutes int64) {
+	if minutes < 0 {
+		minutes = 0
+	}
+	subTimeoutLimit.Store(minutes)
+}
+
+// subscriptionTimeoutMin returns the idle timeout in force, in minutes. It is
+// clamped to the [MS-OXWSNTIF] 2.2.4.24 ceiling, because the value also rides in
+// the SubscriptionId as a 32-bit field and an operator typo must not create a
+// subscription the server would keep for longer than the spec allows.
+func subscriptionTimeoutMin() int {
+	n := subTimeoutLimit.Load()
+	if n <= 0 {
+		return defaultSubscriptionTimeoutMin
+	}
+	return min(int(n), maxSubscriptionTimeoutMin)
+}
+
 // EWS XML namespaces (MS-OXWS). Clients are namespace-aware (they match on the
 // URI, not the prefix), so responses declare these as the relevant element's
 // namespace and the exact prefix string does not matter.

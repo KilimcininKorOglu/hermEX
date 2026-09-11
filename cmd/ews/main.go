@@ -64,8 +64,8 @@ func main() {
 	srv.Spool = spool
 	// EWS SOAP request-body cap: read at startup and re-read every minute so an admin's
 	// change applies without a restart; 0 keeps the built-in default.
-	applyEWSSizeLimit(logger, dir.GetSizeLimits, ews.SetMaxRequestBody, ews.SetMaxFreeBusyTargets)
-	go runEWSSizeMaintenance(logger, dir.GetSizeLimits, ews.SetMaxRequestBody, ews.SetMaxFreeBusyTargets)
+	applyEWSSizeLimit(logger, dir.GetSizeLimits, ews.SetMaxRequestBody, ews.SetMaxFreeBusyTargets, ews.SetSubscriptionTimeout)
+	go runEWSSizeMaintenance(logger, dir.GetSizeLimits, ews.SetMaxRequestBody, ews.SetMaxFreeBusyTargets, ews.SetSubscriptionTimeout)
 	addr := orDefault(cfg.EWSAddr, ":8080")
 	// Outbound abuse limiting: this daemon queues external mail through
 	// DeliverAndRelay, so a compromised account must meet the same per-account
@@ -182,7 +182,7 @@ func runUntilSignal(cfg *config.Config, db *sql.DB, provider *tlscert.Provider, 
 // applyEWSSizeLimit reads the stored EWS request-body cap and applies it. A missing row
 // or a read error leaves the cap unchanged, so a settings failure never shrinks it
 // unexpectedly.
-func applyEWSSizeLimit(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody, setFreeBusyTargets func(int64)) {
+func applyEWSSizeLimit(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody, setFreeBusyTargets, setSubTimeout func(int64)) {
 	s, found, err := read()
 	if err != nil {
 		logging.SettingsReadFailed(logger, "hermex-ews", "size-limits", "leaving the request cap unchanged", err)
@@ -193,14 +193,15 @@ func applyEWSSizeLimit(logger *logging.Logger, read func() (directory.SizeLimits
 	}
 	setRequestBody(s.EWSRequestBytes)
 	setFreeBusyTargets(s.FreeBusyMaxTargets)
+	setSubTimeout(s.EWSSubscriptionTimeoutMinutes)
 }
 
 // runEWSSizeMaintenance re-applies the EWS request-body cap every minute so an admin
 // change takes effect without a restart. It runs until the process exits.
-func runEWSSizeMaintenance(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody, setFreeBusyTargets func(int64)) {
+func runEWSSizeMaintenance(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody, setFreeBusyTargets, setSubTimeout func(int64)) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for range tick.C {
-		applyEWSSizeLimit(logger, read, setRequestBody, setFreeBusyTargets)
+		applyEWSSizeLimit(logger, read, setRequestBody, setFreeBusyTargets, setSubTimeout)
 	}
 }

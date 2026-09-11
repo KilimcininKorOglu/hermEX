@@ -42,6 +42,7 @@ func TestSaveLimits(t *testing.T) {
 		"dav_ical_mb": {"3"}, "dav_vcard_mb": {"5"}, "webmail_request_mb": {"20"},
 		"mapi_request_mb": {"16"}, "freebusy_max_targets": {"25"}, "webmail_preview_mb": {"6"},
 		"imap_line_bytes": {"32768"}, "pop3_line_bytes": {"4096"}, "smtp_line_bytes": {"1024"},
+		"ews_subscription_timeout_min": {"720"},
 	})
 	body := wantBody(t, resp, http.StatusOK, "save limits")
 	wantContains(t, body, "Size limits saved", "the save is acknowledged")
@@ -61,6 +62,8 @@ func TestSaveLimits(t *testing.T) {
 	wantEq(t, d.sizeLimits.IMAPCommandLineBytes, int64(32768), "IMAP command-line bytes")
 	wantEq(t, d.sizeLimits.POP3CommandLineBytes, int64(4096), "POP3 command-line bytes")
 	wantEq(t, d.sizeLimits.SMTPCommandLineBytes, int64(1024), "SMTP command-line bytes")
+	// The subscription timeout is a duration in minutes, so it persists unscaled too.
+	wantEq(t, d.sizeLimits.EWSSubscriptionTimeoutMinutes, int64(720), "EWS subscription timeout minutes")
 }
 
 // TestSaveLimitsRejectsATinyCommandLine proves a cap no command fits in is rejected
@@ -75,10 +78,33 @@ func TestSaveLimitsRejectsATinyCommandLine(t *testing.T) {
 		"dav_ical_mb": {"3"}, "dav_vcard_mb": {"5"}, "webmail_request_mb": {"20"},
 		"mapi_request_mb": {"16"}, "freebusy_max_targets": {"25"}, "webmail_preview_mb": {"6"},
 		"imap_line_bytes": {"8"}, "pop3_line_bytes": {"4096"}, "smtp_line_bytes": {"1024"},
+		"ews_subscription_timeout_min": {"30"},
 	})
 	body := wantBody(t, resp, http.StatusOK, "save limits with a tiny command-line cap")
 
 	wantContains(t, body, "at least 64 bytes", "the refusal names the floor")
+	wantFalse(t, d.sizeLimitsFound, "nothing is persisted")
+}
+
+// TestSaveLimitsRejectsAnOutOfRangeSubscriptionTimeout proves the subscription
+// idle timeout is bounded on the way in. [MS-OXWSNTIF] 2.2.4.24 caps it at 1440
+// minutes, and the value also rides in the SubscriptionId as a 32-bit field, so a
+// typo must be refused rather than stored.
+func TestSaveLimitsRejectsAnOutOfRangeSubscriptionTimeout(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/limits", session, csrf, url.Values{
+		"imap_literal_mb": {"10"}, "ews_request_mb": {"4"}, "activesync_request_mb": {"2"},
+		"dav_ical_mb": {"3"}, "dav_vcard_mb": {"5"}, "webmail_request_mb": {"20"},
+		"mapi_request_mb": {"16"}, "freebusy_max_targets": {"25"}, "webmail_preview_mb": {"6"},
+		"imap_line_bytes": {"32768"}, "pop3_line_bytes": {"4096"}, "smtp_line_bytes": {"1024"},
+		"ews_subscription_timeout_min": {"5000"},
+	})
+	body := wantBody(t, resp, http.StatusOK, "save limits with an out-of-range subscription timeout")
+
+	wantContains(t, body, "between 1 and 1440 minutes", "the refusal names the bound")
 	wantFalse(t, d.sizeLimitsFound, "nothing is persisted")
 }
 

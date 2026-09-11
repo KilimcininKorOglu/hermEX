@@ -233,15 +233,33 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, inner []byte, sess *sess
 	// minutes. The value is the client's, and it decides how long the server holds
 	// the subscription: unbounded, it both outlives any session and overflows the
 	// 32-bit field the id carries, so a caller could pin state indefinitely.
-	timeoutMin := min(max(sub.Timeout, 1), maxSubscriptionTimeoutMin)
-	if sub.Timeout <= 0 {
-		timeoutMin = 30 // the default pull timeout
-	}
+	//
+	// A StreamingSubscriptionRequest carries no Timeout element at all, so it never
+	// supplies one and always takes the operator's value. Reading the operator's
+	// value here rather than at sweep time is deliberate: the timeout rides in the
+	// SubscriptionId, so an edit governs new subscriptions and leaves existing ones
+	// on what they were created with.
+	timeoutMin := subscriptionTimeout(streaming, sub.Timeout)
 	id := s.registerSubscription(sess, streaming, allFolders, folderIDs, parseEventWants(sub.EventTypes.Types), timeoutMin, snap)
 
 	writeResponse(w, subscribeResponse{Messages: []subscribeResponseMessage{{
 		ResponseClass: "Success", ResponseCode: "NoError", SubscriptionID: id,
 	}}})
+}
+
+// subscriptionTimeout decides a new subscription's idle timeout, in minutes.
+//
+// A PULL client may name its own Timeout ([MS-OXWSNTIF] 2.2.4.24), and that answer
+// wins, clamped to the spec ceiling: unbounded, it would outlive any session and
+// overflow the 32-bit field the SubscriptionId carries, so a caller could pin
+// server state indefinitely. Everything else takes the operator's value: a
+// StreamingSubscriptionRequest carries no Timeout element at all, and a pull
+// request that names none is asking for the server's default.
+func subscriptionTimeout(streaming bool, requested int) int {
+	if !streaming && requested > 0 {
+		return min(requested, maxSubscriptionTimeoutMin)
+	}
+	return subscriptionTimeoutMin()
 }
 
 // subscriptionFolders resolves the folders a subscription watches. A non-empty

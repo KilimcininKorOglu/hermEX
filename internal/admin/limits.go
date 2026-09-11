@@ -23,6 +23,19 @@ const (
 	// defaultWebmailPreviewMB mirrors webmail2api's built-in inline-preview cap: the
 	// largest attachment the message view previews without being asked.
 	defaultWebmailPreviewMB = 2
+	// defaultEWSSubscriptionTimeoutMin is a duration in minutes, not a size: how
+	// long an EWS notification subscription may stay unused before the server drops
+	// it. It mirrors the EWS daemon's own built-in value.
+	defaultEWSSubscriptionTimeoutMin = 30
+)
+
+// minSubscriptionTimeoutMin and maxSubscriptionTimeoutMin bound the subscription
+// idle timeout an operator may save. [MS-OXWSNTIF] 2.2.4.24 puts the ceiling at
+// 1440 minutes (24 hours), and a timeout under a minute would drop a subscription
+// between one client poll and the next.
+const (
+	minSubscriptionTimeoutMin = 1
+	maxSubscriptionTimeoutMin = 1440
 )
 
 // handleUILimits renders the protocol size-limits page (system admins).
@@ -207,6 +220,18 @@ func (s *Server) fillSizeLimits(data map[string]any) {
 	data["MapiRequestMB"] = mapiMB
 	data["FreeBusyMaxTargets"] = fbTargets
 	data["WebmailPreviewMB"] = previewMB
+	s.fillSubscriptionTimeout(data)
+}
+
+// fillSubscriptionTimeout sets the EWS notification-subscription idle timeout on a
+// page-data map. It is a duration in minutes, so it is filled on its own rather
+// than through the megabyte fields above.
+func (s *Server) fillSubscriptionTimeout(data map[string]any) {
+	mins := int64(defaultEWSSubscriptionTimeoutMin)
+	if sl, found, err := s.dir.GetSizeLimits(); err == nil && found && sl.EWSSubscriptionTimeoutMinutes > 0 {
+		mins = sl.EWSSubscriptionTimeoutMinutes
+	}
+	data["EWSSubscriptionTimeoutMin"] = mins
 }
 
 // defaultIMAPCommandLineBytes, defaultPOP3CommandLineBytes and
@@ -258,6 +283,15 @@ func (s *Server) handleUISaveLimits(w http.ResponseWriter, r *http.Request) {
 			"Each command-line cap must be at least 64 bytes; settings not saved."))
 		return
 	}
+	// A duration in minutes, so it is read and validated on its own too. The
+	// ceiling is the spec's; below the floor a subscription would be dropped
+	// between one client poll and the next.
+	subTimeout := formInt(r, "ews_subscription_timeout_min")
+	if subTimeout < minSubscriptionTimeoutMin || subTimeout > maxSubscriptionTimeoutMin {
+		s.render(w, "limits-panel", s.limitsPageData(r,
+			"The EWS subscription timeout must be between 1 and 1440 minutes; settings not saved."))
+		return
+	}
 	limits := directory.SizeLimits{
 		IMAPLiteralBytes:       megabytes(mb["imap_literal_mb"]),
 		EWSRequestBytes:        megabytes(mb["ews_request_mb"]),
@@ -271,6 +305,8 @@ func (s *Server) handleUISaveLimits(w http.ResponseWriter, r *http.Request) {
 		IMAPCommandLineBytes:   int64(imapLine),
 		POP3CommandLineBytes:   int64(pop3Line),
 		SMTPCommandLineBytes:   int64(smtpLine),
+
+		EWSSubscriptionTimeoutMinutes: int64(subTimeout),
 	}
 	if err := s.dir.SetSizeLimits(limits); err != nil {
 		s.render(w, "limits-panel", s.limitsPageData(r, s.notice("Could not save the size limits.", err)))
