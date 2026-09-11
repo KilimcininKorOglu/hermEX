@@ -421,8 +421,11 @@ func parseContent(root *mime.Part, msg *Message, stamp uint64, calImport Calenda
 			msg.Props.Set(mapi.PrBody, text)
 		}
 	}
-	if len(bp.htmls) == 1 {
+	switch {
+	case len(bp.htmls) == 1:
 		setHTMLBody(msg, bp.htmls[0])
+	case len(bp.htmls) > 1:
+		setJoinedHTMLBody(msg, bp.htmls)
 	}
 	if bp.calendar != nil && calImport != nil {
 		mergeCalendar(msg, bp.calendar, calImport)
@@ -635,12 +638,22 @@ func takeBestBody(info *bodyParts, cld bodyParts) {
 
 // takeFirstBody keeps the first part of each body type, appending HTML parts when
 // HTML joining is in effect.
+//
+// Joining is what hjoinEnabled selects, and it is not what decides whether the
+// message has an HTML body at all: the HTML does not have to sit in the first
+// subpart, so an attachment, a plain part or an inline image can precede it.
+// Without the second branch such a message loses its HTML, the reader falls back
+// to the plain body wrapped in <pre>, and a message with no plain part is left
+// with no body at all.
 func takeFirstBody(info *bodyParts, cld bodyParts, hjoinEnabled bool) {
 	if cld.plain != nil && info.plain == nil {
 		info.plain = cld.plain
 	}
-	if hjoinEnabled {
+	switch {
+	case hjoinEnabled:
 		info.htmls = append(info.htmls, cld.htmls...)
+	case len(info.htmls) == 0:
+		info.htmls = cld.htmls
 	}
 	if cld.enriched != nil && info.enriched == nil {
 		info.enriched = cld.enriched
@@ -680,6 +693,38 @@ func setHTMLBody(msg *Message, part *mime.Part) {
 	}
 	msg.Props.Set(mapi.PrInternetCodepage, cpid)
 	msg.Props.Set(mapi.PrHTML, raw)
+}
+
+// setJoinedHTMLBody stores several HTML parts as one body, in the order the
+// message carries them. A message whose HTML arrives in more than one part used
+// to get no body at all, and its parts were listed as no attachment either,
+// because they count as body parts.
+//
+// Each part is transcoded to UTF-8 and the joined body is labelled UTF-8, since
+// two parts may carry different charsets and one code page cannot label both.
+func setJoinedHTMLBody(msg *Message, parts []*mime.Part) {
+	var joined []byte
+	for _, p := range parts {
+		raw, err := p.DecodedContent()
+		if err != nil {
+			continue
+		}
+		charset := p.Params["charset"]
+		if charset == "" {
+			charset = "us-ascii"
+		}
+		if !utf8.Valid(raw) {
+			raw = []byte(mime.DecodeCharset(raw, charset))
+		}
+		joined = append(joined, raw...)
+	}
+	if len(joined) == 0 {
+		return
+	}
+	// The value is written as int32 because the property is a PtLong: an untyped
+	// constant would be stored as an int and read back as an absent code page.
+	msg.Props.Set(mapi.PrInternetCodepage, int32(cpUTF8))
+	msg.Props.Set(mapi.PrHTML, joined)
 }
 
 // decodeHeaderWord decodes RFC 2047 encoded-words in a header value, leaving
