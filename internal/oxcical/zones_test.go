@@ -150,23 +150,86 @@ func TestImportReportsNothingForVTimezoneRules(t *testing.T) {
 	}
 }
 
-// TestStreamZoneRefusesTransitioningVTimezone fixes the stated limit: a VTIMEZONE
-// whose rules name different offsets describes a transition this package does not
-// evaluate, and one fixed offset would be wrong for half the year, so the zone
-// stays unresolved instead of being guessed.
-func TestStreamZoneRefusesTransitioningVTimezone(t *testing.T) {
-	vtz := "BEGIN:VTIMEZONE\r\nTZID:Acme/Shifting\r\nBEGIN:STANDARD\r\nDTSTART:19701025T030000\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nEND:STANDARD\r\nBEGIN:DAYLIGHT\r\nDTSTART:19700329T020000\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\nEND:DAYLIGHT\r\nEND:VTIMEZONE\r\n"
+// shiftingVTZ is a zone no table knows, described only by its own transition
+// rules: UTC+1 in winter, UTC+2 from the last Sunday in March to the last Sunday
+// in October. It is the shape a client that is neither Outlook nor an IANA-naming
+// client writes.
+const shiftingVTZ = "BEGIN:VTIMEZONE\r\nTZID:Acme/Shifting\r\n" +
+	"BEGIN:STANDARD\r\nDTSTART:19701025T030000\r\nRRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU\r\n" +
+	"TZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\nEND:STANDARD\r\n" +
+	"BEGIN:DAYLIGHT\r\nDTSTART:19700329T020000\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU\r\n" +
+	"TZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\nEND:DAYLIGHT\r\nEND:VTIMEZONE\r\n"
+
+// TestImportEvaluatesVTimezoneTransitions covers a zone that no table names and
+// that changes offset during the year: the rules in the stream are evaluated for
+// the value's own date, so a summer time takes the summer offset. One fixed
+// offset would be wrong for half the year, which is why the rules are read rather
+// than an offset picked.
+func TestImportEvaluatesVTimezoneTransitions(t *testing.T) {
+	r := newResolver()
+	got := importedStart(t, r, zoneCal(";TZID=Acme/Shifting", shiftingVTZ), r.opt())
+	want := time.Date(2026, 8, 11, 8, 30, 0, 0, time.UTC) // 10:30 at +0200
+	if !got.Equal(want) {
+		t.Fatalf("start = %s, want %s", got.Format(time.RFC3339), want.Format(time.RFC3339))
+	}
+}
+
+// TestImportEvaluatesVTimezoneWinterTransition is the other side of the same
+// rules: a January time takes the winter offset, so the transition is really
+// being evaluated rather than one offset being applied to everything.
+func TestImportEvaluatesVTimezoneWinterTransition(t *testing.T) {
+	cal := []byte("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n" + shiftingVTZ +
+		"BEGIN:VEVENT\r\nUID:zone-2\r\nSUMMARY:Winter\r\n" +
+		"DTSTART;TZID=Acme/Shifting:20260114T103000\r\nDTEND;TZID=Acme/Shifting:20260114T113000\r\n" +
+		"END:VEVENT\r\nEND:VCALENDAR\r\n")
+	r := newResolver()
+	got := importedStart(t, r, cal, r.opt())
+	want := time.Date(2026, 1, 14, 9, 30, 0, 0, time.UTC) // 10:30 at +0100
+	if !got.Equal(want) {
+		t.Fatalf("start = %s, want %s", got.Format(time.RFC3339), want.Format(time.RFC3339))
+	}
+}
+
+// TestImportReportsAnUnusableVTimezone keeps the refusal honest: a VTIMEZONE whose
+// rules carry no offset describes nothing, so its times stay unresolved and are
+// reported instead of being read at a guessed offset.
+func TestImportReportsAnUnusableVTimezone(t *testing.T) {
+	vtz := "BEGIN:VTIMEZONE\r\nTZID:Acme/Empty\r\nBEGIN:STANDARD\r\nDTSTART:19700101T000000\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n"
 	var notes []ZoneNote
 	r, opt := zoneOpt(&notes)
-	got := importedStart(t, r, zoneCal(";TZID=Acme/Shifting", vtz), opt)
+	got := importedStart(t, r, zoneCal(";TZID=Acme/Empty", vtz), opt)
 	if !got.Equal(time.Date(2026, 8, 11, 10, 30, 0, 0, time.UTC)) {
 		t.Fatalf("start = %s, want the value read as UTC", got.Format(time.RFC3339))
 	}
-	if _, err := Import(zoneCal(";TZID=Acme/Shifting", vtz), opt); err != nil {
-		t.Fatalf("Import: %v", err)
-	}
 	if len(notes) == 0 {
 		t.Fatal("a VTIMEZONE that could not be resolved was not reported")
+	}
+}
+
+// TestNthWeekdayOf covers the ordinal-weekday arithmetic every transition rule
+// rests on, including the month whose ordinal does not exist.
+func TestNthWeekdayOf(t *testing.T) {
+	cases := []struct {
+		month time.Month
+		wd    time.Weekday
+		nth   int
+		day   int
+		ok    bool
+	}{
+		{time.March, time.Sunday, -1, 29, true},      // last Sunday in March 2026
+		{time.October, time.Sunday, -1, 25, true},    // last Sunday in October 2026
+		{time.March, time.Sunday, 1, 1, true},        // first Sunday in March 2026
+		{time.March, time.Sunday, 2, 8, true},        // second Sunday
+		{time.February, time.Sunday, 5, 0, false},    // February 2026 has four Sundays
+		{time.November, time.Sunday, 5, 29, true},    // November 2026 has five
+		{time.December, time.Thursday, -1, 31, true}, // the year-end wrap
+	}
+	for _, c := range cases {
+		got, ok := nthWeekdayOf(2026, c.month, c.wd, c.nth, 2, 0, 0)
+		if ok != c.ok || (ok && got.Day() != c.day) {
+			t.Errorf("nthWeekdayOf(2026, %v, %v, %d) = %v, %v; want day %d, %v",
+				c.month, c.wd, c.nth, got.Format("2006-01-02"), ok, c.day, c.ok)
+		}
 	}
 }
 

@@ -66,40 +66,42 @@ func (z *ZoneLosses) ZoneIDs() []string {
 // a zone itself. A line whose TZID nothing resolved keeps a nil location and is
 // read as UTC, which is what reportZones tells the caller about.
 func bindZones(root *icomp) {
-	stream := collectStreamZones(root)
-	bindComponent(root, stream, map[string]*time.Location{})
+	bindComponent(root, &zoneResolver{
+		streams: collectVZones(root),
+		named:   map[string]*time.Location{},
+	})
 }
 
-// bindComponent binds the zone of every content line in one component and its
-// sub-components. A VTIMEZONE is skipped whole: the DTSTART inside its STANDARD
-// and DAYLIGHT rules is floating by definition and describes the zone rather than
-// an instant in it.
-func bindComponent(c *icomp, stream, cache map[string]*time.Location) {
-	if c.name == "VTIMEZONE" {
-		return
-	}
-	for i := range c.props {
-		tzid := c.props[i].param("TZID")
-		if tzid == "" {
-			continue
-		}
-		loc, hit := cache[tzid]
-		if !hit {
-			loc = resolveTZID(tzid, stream)
-			cache[tzid] = loc
-		}
-		c.props[i].loc = loc
-	}
-	for _, sub := range c.comps {
-		bindComponent(sub, stream, cache)
-	}
+// zoneResolver answers a TZID for one calendar. A zone named by a table is the
+// same for every line and is resolved once; a zone described only by the stream's
+// own VTIMEZONE depends on when the value falls, because the rules in it switch
+// offset, so that case is answered per value.
+type zoneResolver struct {
+	streams map[string]*vzone
+	named   map[string]*time.Location
 }
 
-// resolveTZID turns a TZID into a location: an IANA name first, then the Windows
-// id Outlook and Exchange write, then a fixed-offset zone taken from the stream's
-// own VTIMEZONE. It returns nil when none of the three answers, because reading
-// the value as UTC and saying so beats storing a guessed instant.
-func resolveTZID(tzid string, stream map[string]*time.Location) *time.Location {
+// locate resolves the zone one content line's value must be read in. It returns
+// nil when nothing resolves the TZID, because reading the value as UTC and saying
+// so beats storing a guessed instant.
+func (zr *zoneResolver) locate(tzid, value string) *time.Location {
+	loc, hit := zr.named[tzid]
+	if !hit {
+		loc = namedZone(tzid)
+		zr.named[tzid] = loc
+	}
+	if loc != nil {
+		return loc
+	}
+	if z := zr.streams[tzid]; z != nil {
+		return z.at(value)
+	}
+	return nil
+}
+
+// namedZone resolves a TZID by name: an IANA name first, then the Windows id
+// Outlook and Exchange write.
+func namedZone(tzid string) *time.Location {
 	if loc, err := time.LoadLocation(tzid); err == nil {
 		return loc
 	}
@@ -108,52 +110,26 @@ func resolveTZID(tzid string, stream map[string]*time.Location) *time.Location {
 			return loc
 		}
 	}
-	return stream[tzid]
-}
-
-// collectStreamZones reads the calendar's own VTIMEZONE components into fixed
-// zones, which is the last resort for a TZID no table knows.
-func collectStreamZones(root *icomp) map[string]*time.Location {
-	out := map[string]*time.Location{}
-	for _, c := range root.comps {
-		if c.name != "VTIMEZONE" {
-			continue
-		}
-		tzid := strings.TrimSpace(c.propText("TZID"))
-		if tzid == "" {
-			continue
-		}
-		if loc := streamZone(tzid, c); loc != nil {
-			out[tzid] = loc
-		}
-	}
-	return out
-}
-
-// streamZone builds a fixed zone from a VTIMEZONE, but only when every rule in it
-// names the same UTC offset. A VTIMEZONE whose STANDARD and DAYLIGHT rules differ
-// describes a transition this package does not evaluate, and one fixed offset
-// would be wrong for half the year, so such a zone stays unresolved and its times
-// are reported. The named tables above cover what Outlook and Exchange write.
-func streamZone(tzid string, vtz *icomp) *time.Location {
-	offsets := map[int]bool{}
-	for _, sub := range vtz.comps {
-		if sub.name != "STANDARD" && sub.name != "DAYLIGHT" {
-			continue
-		}
-		secs, ok := parseUTCOffset(sub.propText("TZOFFSETTO"))
-		if !ok {
-			return nil
-		}
-		offsets[secs] = true
-	}
-	if len(offsets) != 1 {
-		return nil
-	}
-	for secs := range offsets {
-		return time.FixedZone(tzid, secs)
-	}
 	return nil
+}
+
+// bindComponent binds the zone of every content line in one component and its
+// sub-components. A VTIMEZONE is skipped whole: the DTSTART inside its STANDARD
+// and DAYLIGHT rules is floating by definition and describes the zone rather than
+// an instant in it. The line's own value is passed along because a zone described
+// by the stream switches offset during the year.
+func bindComponent(c *icomp, zr *zoneResolver) {
+	if c.name == "VTIMEZONE" {
+		return
+	}
+	for i := range c.props {
+		if tzid := c.props[i].param("TZID"); tzid != "" {
+			c.props[i].loc = zr.locate(tzid, c.props[i].value)
+		}
+	}
+	for _, sub := range c.comps {
+		bindComponent(sub, zr)
+	}
 }
 
 // parseUTCOffset parses an RFC 5545 UTC-OFFSET ("+0200", "-0330", "+013000") into
