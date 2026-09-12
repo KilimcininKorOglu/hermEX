@@ -302,6 +302,7 @@ hermex-admin -config config.json <command> [args]
 | `revoke-sessions <email>`                        | End all of them; the compromise response                          |
 | `ldap-sync <org-id>`                             | Import an org's LDAP/AD accounts into the directory               |
 | `export-dkim <domain>`                           | Write the domain's DKIM private key to stdout                     |
+| `check-mailbox <email\|all> [--repair] [--recover]` | Report store damage; `--repair` rebuilds the IMAP index, `--recover` rebuilds a damaged database and loses the rows on its damaged pages |
 | `sweep-content <email>`                          | Reclaim orphan content files; refuses while the mailbox is in use |
 | `prune-eml <email\|all> [days]`                  | Drop cached wire copies older than N days (default 30)            |
 | `serve`                                          | Run the admin API and panel                                       |

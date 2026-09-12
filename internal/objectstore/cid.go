@@ -2,6 +2,7 @@ package objectstore
 
 import (
 	"crypto/sha3"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"io/fs"
@@ -79,7 +80,7 @@ func (s *Store) sweepOrphanContent() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	referenced, err := s.referencedContentIDs()
+	referenced, err := referencedContentIDs(s.objdb)
 	if err != nil {
 		return 0, err
 	}
@@ -116,8 +117,9 @@ func contentFiles(root string) ([]string, error) {
 }
 
 // referencedContentIDs gathers every content id still referenced by a property in
-// any property table.
-func (s *Store) referencedContentIDs() (map[string]struct{}, error) {
+// any property table. It takes the object database rather than the Store, so the
+// integrity check can ask the same question of a store it has not opened.
+func referencedContentIDs(objdb *sql.DB) (map[string]struct{}, error) {
 	ph := make([]string, len(cidPropTags))
 	args := make([]any, len(cidPropTags))
 	for i, t := range cidPropTags {
@@ -129,7 +131,7 @@ func (s *Store) referencedContentIDs() (map[string]struct{}, error) {
 	for _, table := range propertyTables {
 		// table is an internal constant (propertyTables), never caller input.
 		// #nosec G202 -- table and the placeholder run are internal; every proptag travels as a query argument
-		rows, err := s.objdb.Query(`SELECT propval FROM `+table+` WHERE proptag IN (`+in+`)`, args...)
+		rows, err := objdb.Query(`SELECT propval FROM `+table+` WHERE proptag IN (`+in+`)`, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -183,7 +185,13 @@ func cidString(data []byte) string {
 // cidPath maps a content id to its on-disk file (the "/" in the id becomes a
 // fan-out directory level).
 func (s *Store) cidPath(cid string) string {
-	return filepath.Join(s.dir, "cid", filepath.FromSlash(cid)+".zst")
+	return cidFilePath(s.dir, cid)
+}
+
+// cidFilePath is cidPath for a mailbox directory the caller has not opened as a
+// Store, which is what the integrity check holds.
+func cidFilePath(dir, cid string) string {
+	return filepath.Join(dir, "cid", filepath.FromSlash(cid)+".zst")
 }
 
 // putContent stores data as a content file and returns its content id. If an

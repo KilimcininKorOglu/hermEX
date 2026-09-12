@@ -90,6 +90,11 @@ func (s *Store) indexExistingMessage(folderID, id int64, read bool) error {
 	if err != nil {
 		return err
 	}
+	// The index is written as two rows and a crash can leave the second one behind
+	// on its own, so clear the stale mapping row rather than colliding with it.
+	if _, err := s.idxdb.Exec(`DELETE FROM mapping WHERE message_id=?`, id); err != nil {
+		return err
+	}
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	mid := midString(uint64(id))
 	eml, err := oxcmail.Export(msg, oxcmail.Options{Resolver: s.GetNamedPropIDs})
