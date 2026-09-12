@@ -127,13 +127,32 @@ func (s *Session) ropOpenAttachment(p *ext.Pull, out *ext.Push, handles []uint32
 		writeErr(out, ropOpenAttachment, ohindex, ecNotFound)
 		return true
 	}
-	h := s.alloc(&object{kind: kindAttachment, store: msg.store, attachProps: bag})
+	att := &object{kind: kindAttachment, store: msg.store, attachProps: bag}
+	bindStoredAttachment(att, msg, attachID)
+	h := s.alloc(att)
 	setHandle(handles, ohindex, h)
 
 	out.Uint8(ropOpenAttachment)
 	out.Uint8(ohindex)
 	out.Uint32(ecSuccess)
 	return true
+}
+
+// bindStoredAttachment records the store row an opened attachment came from, so a
+// later write (an embedded message saved back into it) has somewhere to land. A
+// parent that is itself an embedded message has no row of its own, and legacy data
+// with no stored attach number cannot be resolved to one; both leave attachID 0,
+// which keeps the attachment read-only rather than writing to a guessed row.
+func bindStoredAttachment(att, parent *object, attachNum uint32) {
+	if parent.kind != kindMessage {
+		return
+	}
+	aid, err := parent.store.AttachmentIDByNumber(parent.messageID, attachNum)
+	if err != nil {
+		return
+	}
+	att.attachID = aid
+	att.attachParent = parent
 }
 
 // ropCreateAttachment handles RopCreateAttachment ([MS-OXCMSG] 2.2.3.6): it

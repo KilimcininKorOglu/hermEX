@@ -166,8 +166,14 @@ func (s *Session) applySetProperties(out *ext.Push, obj *object, hindex uint8, p
 	case kindAttachWrite:
 		obj.attachW.pendingDeletes = setAllOverridingDeletes(&obj.attachW.pending, obj.attachW.pendingDeletes, propvals)
 	case kindEmbedded:
-		// A composed embedded message buffers its edits in memory; they are exported
-		// into the parent attachment when SaveChangesMessage runs.
+		// An embedded message buffers its edits in memory; they are exported into the
+		// parent attachment when SaveChangesMessage runs. One with nowhere to be saved
+		// is refused here rather than at the save, because a set that reports success
+		// and is then dropped leaves the client believing the value was stored.
+		if !obj.embedded.writable() {
+			writeErr(out, ropSetProperties, hindex, ecAccessDenied)
+			return false
+		}
 		setAll(&obj.embedded.msg.Props, propvals)
 	default:
 		writeErr(out, ropSetProperties, hindex, ecError)
@@ -252,7 +258,7 @@ func (s *Session) ropSaveChangesMessage(p *ext.Pull, out *ext.Push, handles []ui
 	case kindMessage:
 		s.saveOpenedMessage(out, obj, hindex, ihindex2)
 	case kindEmbedded:
-		saveEmbeddedMessage(out, obj, hindex, ihindex2, handleAt(handles, ihindex2))
+		s.saveEmbeddedMessage(out, obj, hindex, ihindex2, handleAt(handles, ihindex2))
 	case kindNewMessage:
 		saveComposedMessage(out, obj, hindex, ihindex2)
 	default:
@@ -334,15 +340,18 @@ func (o *object) hasBufferedChanges() bool {
 	return len(o.pendingProps) > 0 || len(o.pendingDeletes) > 0 || o.touched
 }
 
-// saveEmbeddedMessage persists a composed embedded message by exporting it back
-// into its parent attachment: the export bytes, method, and MIME tag are staged
-// into the attachment's pending bag, which the client's SaveChangesAttachment
-// then writes through the ordinary attachment path. A read-only embedded message
-// (opened over an existing attachment) has no write-back target and cannot be
-// saved.
-func saveEmbeddedMessage(out *ext.Push, obj *object, hindex, ihindex uint8, handle uint32) {
+// saveEmbeddedMessage persists an embedded message by exporting it back into its
+// parent attachment. A composed one (MAPI_CREATE over a new attachment) stages the
+// export bytes, method and MIME tag into the attachment's pending bag, which the
+// client's SaveChangesAttachment then writes through the ordinary attachment path.
+// One opened for modify over a STORED attachment writes that attachment row in
+// place, so an edit to a single encapsulated message does not require rewriting
+// the message that carries it.
+//
+// An embedded message with neither target is read-only and cannot be saved.
+func (s *Session) saveEmbeddedMessage(out *ext.Push, obj *object, hindex, ihindex uint8, handle uint32) {
 	emb := obj.embedded
-	if emb == nil || emb.writeback == nil {
+	if !emb.writable() {
 		writeErr(out, ropSaveChangesMessage, hindex, ecNotSupported)
 		return
 	}
@@ -351,10 +360,52 @@ func saveEmbeddedMessage(out *ext.Push, obj *object, hindex, ihindex uint8, hand
 		writeErr(out, ropSaveChangesMessage, hindex, ecError)
 		return
 	}
-	emb.writeback.pending.Set(mapi.PrAttachMethod, int32(mapi.AttachEmbeddedMsg))
-	emb.writeback.pending.Set(mapi.PrAttachMimeTag, "message/rfc822")
-	emb.writeback.pending.Set(mapi.PrAttachDataBin, raw)
+	if emb.parent != nil {
+		s.saveStoredEmbedded(out, emb.parent, hindex, ihindex, raw)
+		return
+	}
+	setEmbeddedPayload(&emb.writeback.pending, raw)
 	writeSaveChangesOK(out, hindex, ihindex, uint64(handle))
+}
+
+// saveStoredEmbedded writes an edited embedded message back into the stored
+// attachment it was opened from. Editing an existing message requires EditAny on
+// its folder, the same gate saveOpenedMessage applies. The parent message is
+// marked touched so its own save advances the change number: without that the edit
+// is in the store but no already-synced client downloads it, because ICS reports a
+// message as updated only when its change number advances.
+func (s *Session) saveStoredEmbedded(out *ext.Push, att *object, hindex, ihindex uint8, raw []byte) {
+	parent := att.attachParent
+	if s.denyWrite(out, ropSaveChangesMessage, hindex, att.store, parent.folderID, mapi.FrightsEditAny) {
+		return
+	}
+	var props mapi.PropertyValues
+	setEmbeddedPayload(&props, raw)
+	if err := att.store.SetAttachmentProperties(att.attachID, props); err != nil {
+		writeErr(out, ropSaveChangesMessage, hindex, ecError)
+		return
+	}
+	att.attachProps = mergeAttachProps(att.attachProps, props)
+	parent.touched = true
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	writeSaveChangesOK(out, hindex, ihindex, uint64(parent.messageID))
+}
+
+// setEmbeddedPayload stamps the three properties that make an attachment an
+// encapsulated message.
+func setEmbeddedPayload(bag *mapi.PropertyValues, raw []byte) {
+	bag.Set(mapi.PrAttachMethod, int32(mapi.AttachEmbeddedMsg))
+	bag.Set(mapi.PrAttachMimeTag, "message/rfc822")
+	bag.Set(mapi.PrAttachDataBin, raw)
+}
+
+// mergeAttachProps folds a write into the opened attachment's cached bag, so a
+// read through the same handle reports what was just stored.
+func mergeAttachProps(bag, written mapi.PropertyValues) mapi.PropertyValues {
+	for _, tv := range written {
+		bag.Set(tv.Tag, tv.Value)
+	}
+	return bag
 }
 
 // saveComposedMessage persists a message built through the compose handle,

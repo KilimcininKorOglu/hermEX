@@ -69,11 +69,24 @@ type attachWrite struct {
 // message exports itself into on SaveChangesMessage: the export bytes, method, and
 // MIME tag are buffered into the attachment's pending bag, which the client's
 // SaveChangesAttachment then persists through the ordinary attachment write path.
-// It is nil for a read-only embedded message (one opened over an existing
-// attachment), which has no write-back target.
+//
+// parent is the opened attachment object an embedded message opened over a STORED
+// attachment writes itself back into. SaveChangesMessage re-exports the message
+// and writes the attachment row in place. It is set only when the open carried
+// MAPI_MODIFY and the attachment has a store row, so an embedded message under
+// another embedded message (which has no row of its own) stays read-only.
+//
+// With both nil the embedded message is read-only and SetProperties on it is
+// refused, so a client is told the edit cannot be kept at the moment it writes.
 type embeddedMessage struct {
 	msg       *oxcmail.Message
 	writeback *attachWrite
+	parent    *object
+}
+
+// writable reports whether an embedded message has somewhere to be saved.
+func (e *embeddedMessage) writable() bool {
+	return e != nil && (e.writeback != nil || e.parent != nil)
 }
 
 // newAttachment is an attachment staged on a not-yet-persisted compose message.
@@ -104,6 +117,8 @@ type object struct {
 	embedded       *embeddedMessage              // kindEmbedded
 	stream         *streamState                  // kindStream
 	attachProps    mapi.PropertyValues           // kindAttachment
+	attachID       int64                         // kindAttachment: the stored attachment row, 0 when the parent is not a stored message
+	attachParent   *object                       // kindAttachment: the opened parent message, for the write gate and the change-number bump
 	newMsg         *newMessageState              // kindNewMessage
 	fastSrc        fastTransferSource            // kindSync: what GetBuffer drains
 	stateSink      stateStreamSink               // kindSync: what the state-stream ROPs populate

@@ -70,6 +70,28 @@ func (s *Store) CreateAttachment(messageID int64, initialProps mapi.PropertyValu
 	return aid, uint32(next), nil
 }
 
+// AttachmentIDByNumber resolves the attach number a client holds
+// (PidTagAttachNumber) to the stored attachment row it addresses, so a caller can
+// write that attachment in place. The number is resolved to a row rather than a
+// position, so a sibling delete never makes it address the wrong attachment. It
+// reports ErrNotFound when the message has no attachment at that number.
+func (s *Store) AttachmentIDByNumber(messageID int64, attachNum uint32) (int64, error) {
+	var aid int64
+	err := s.objdb.QueryRow(
+		`SELECT a.attachment_id
+		   FROM attachments a
+		   JOIN attachment_properties ap ON ap.attachment_id = a.attachment_id
+		  WHERE a.message_id = ? AND ap.proptag = ? AND ap.propval = ?`,
+		messageID, int64(uint32(mapi.PrAttachNum)), int64(attachNum)).Scan(&aid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, err
+	}
+	return aid, nil
+}
+
 // DeleteAttachment removes the attachment a message holds at a given attach
 // number (PidTagAttachNumber), cascading its property rows. It resolves the
 // number to a stored attachment row rather than a position, so deleting one

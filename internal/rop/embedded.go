@@ -89,7 +89,14 @@ func (s *Session) openStoredEmbedded(out *ext.Push, handles []uint32, ohindex ui
 		writeErr(out, ropOpenEmbeddedMessage, ohindex, ecError)
 		return
 	}
-	s.openEmbeddedResponse(out, handles, ohindex, att.store, &embeddedMessage{msg: emb})
+	// MAPI_MODIFY opens the message for editing: SaveChangesMessage then re-exports
+	// it into the attachment row it came from. Without the flag, or over an
+	// attachment with no store row, the message stays read-only.
+	var parent *object
+	if flags&mapiModify != 0 && att.attachID != 0 {
+		parent = att
+	}
+	s.openEmbeddedResponse(out, handles, ohindex, att.store, &embeddedMessage{msg: emb, parent: parent})
 }
 
 // embeddedPayload reads the attachment's encapsulated bytes and its method, the
