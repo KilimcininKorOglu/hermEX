@@ -38,6 +38,35 @@ func (pv PropertyValues) Get(tag PropTag) (any, bool) {
 	return nil, false
 }
 
+// CharsetSiblingTag returns tag with the other string type and whether tag is a
+// string tag at all. PtString8 and PtUnicode are two charset representations of
+// one value (MS-OXCDATA), so the same property can be stored under either tag,
+// depending on which writer set it.
+func CharsetSiblingTag(tag PropTag) (PropTag, bool) {
+	switch tag.Type() {
+	case PtUnicode:
+		return tag.WithType(PtString8), true
+	case PtString8:
+		return tag.WithType(PtUnicode), true
+	}
+	return tag, false
+}
+
+// GetAnyCharset returns the value stored for tag, falling back to the sibling
+// string type when the exact tag is absent. A client names the string tag it
+// prefers while the stored bag carries the one its writer used, so a lookup that
+// insists on the exact type reads a present property as missing.
+func (pv PropertyValues) GetAnyCharset(tag PropTag) (any, bool) {
+	if v, ok := pv.Get(tag); ok {
+		return v, true
+	}
+	sibling, isString := CharsetSiblingTag(tag)
+	if !isString {
+		return nil, false
+	}
+	return pv.Get(sibling)
+}
+
 // Has reports whether a value is stored for tag.
 func (pv PropertyValues) Has(tag PropTag) bool {
 	_, ok := pv.Get(tag)

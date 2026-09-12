@@ -67,7 +67,8 @@ func evalTyped[T any](v any, props mapi.PropertyValues, eval func(T, mapi.Proper
 // evalExist matches when the message carries the property at all, whatever its
 // value.
 func evalExist(e mapi.ExistRestriction, props mapi.PropertyValues) bool {
-	return props.Has(e.PropTag)
+	_, ok := props.GetAnyCharset(e.PropTag)
+	return ok
 }
 
 // evalLogical evaluates the restriction types that combine other restrictions
@@ -120,7 +121,7 @@ func evalAny(kids []mapi.Restriction, props mapi.PropertyValues) bool {
 // fuzzy level's match kind and case sensitivity. Only string-valued properties
 // participate; a non-string property or value fails the match.
 func evalContent(c mapi.ContentRestriction, props mapi.PropertyValues) bool {
-	v, ok := props.Get(c.PropTag)
+	v, ok := props.GetAnyCharset(c.PropTag)
 	if !ok {
 		return false
 	}
@@ -150,7 +151,7 @@ func evalContent(c mapi.ContentRestriction, props mapi.PropertyValues) bool {
 // Integer-typed values (importance, message size, delivery time) compare
 // numerically; string values compare lexically. A type mismatch fails.
 func evalProperty(pr mapi.PropertyRestriction, props mapi.PropertyValues) bool {
-	have, ok := props.Get(pr.PropTag)
+	have, ok := props.GetAnyCharset(pr.PropTag)
 	if !ok {
 		return false
 	}

@@ -291,7 +291,7 @@ func matchNode(u galUser, res *mapi.Restriction) bool {
 		if !ok {
 			return false
 		}
-		_, present := galUserProps(u).Get(ex.PropTag)
+		_, present := galUserProps(u).GetAnyCharset(ex.PropTag)
 		return present
 	default:
 		// RES_CONTENT and the structural kinds are unevaluated for the GAL.
@@ -331,7 +331,7 @@ func matchProperty(u galUser, pr mapi.PropertyRestriction) bool {
 		token = stripTypePrefix(token)
 		return token != "" && u.matchesToken(token)
 	}
-	got, ok := galUserProps(u).Get(pr.PropTag)
+	got, ok := galUserProps(u).GetAnyCharset(pr.PropTag)
 	if !ok {
 		return false
 	}

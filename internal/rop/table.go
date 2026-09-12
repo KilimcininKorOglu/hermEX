@@ -349,6 +349,19 @@ func (t *tableState) viewTags() []mapi.PropTag {
 	if t.restriction != nil {
 		tags = append(tags, restrictionTags(*t.restriction)...)
 	}
+	return withCharsetSiblings(tags)
+}
+
+// withCharsetSiblings adds, for every string tag, the same property under the
+// other string type. The filter and sort read a value the store may hold under
+// either tag, so fetching only the tag the client named would leave the sibling
+// out of the bag and make a present property read as missing.
+func withCharsetSiblings(tags []mapi.PropTag) []mapi.PropTag {
+	for _, t := range tags {
+		if sibling, isString := mapi.CharsetSiblingTag(t); isString {
+			tags = append(tags, sibling)
+		}
+	}
 	return tags
 }
 
@@ -439,8 +452,8 @@ func (t *tableState) contentsKeyProps(store *objectstore.Store, n int, tags []ma
 // that key and fall through to the next.
 func (t *tableState) compareRows(a, b mapi.PropertyValues) int {
 	for _, k := range t.sortKeys {
-		av, aok := a.Get(k.tag)
-		bv, bok := b.Get(k.tag)
+		av, aok := a.GetAnyCharset(k.tag)
+		bv, bok := b.GetAnyCharset(k.tag)
 		if !aok || !bok {
 			if c, tie := compareAbsent(aok, bok); !tie {
 				return c
@@ -726,7 +739,7 @@ func evalRestriction(r mapi.Restriction, props mapi.PropertyValues) bool {
 		return c.Res == nil || evalRestriction(*c.Res, props)
 	case mapi.ResExist:
 		e, _ := r.Value.(mapi.ExistRestriction)
-		_, present := props.Get(e.PropTag)
+		_, present := props.GetAnyCharset(e.PropTag)
 		return present
 	case mapi.ResProperty:
 		return evalProperty(r.Value.(mapi.PropertyRestriction), props)
@@ -762,7 +775,7 @@ func evalAny(kids []mapi.Restriction, props mapi.PropertyValues) bool {
 // evalProperty applies a relational comparison between a row property and the
 // restriction value. An absent property satisfies no comparison.
 func evalProperty(pr mapi.PropertyRestriction, props mapi.PropertyValues) bool {
-	v, ok := props.Get(pr.PropTag)
+	v, ok := props.GetAnyCharset(pr.PropTag)
 	if !ok {
 		return false
 	}
@@ -787,7 +800,7 @@ func evalProperty(pr mapi.PropertyRestriction, props mapi.PropertyValues) bool {
 // evalContent applies a text content match (full-string, substring, or prefix,
 // optionally case-insensitive). An absent or non-text value matches nothing.
 func evalContent(c mapi.ContentRestriction, props mapi.PropertyValues) bool {
-	v, ok := props.Get(c.PropTag)
+	v, ok := props.GetAnyCharset(c.PropTag)
 	if !ok {
 		return false
 	}
