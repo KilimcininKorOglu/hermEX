@@ -44,6 +44,12 @@ func TestContentsTableRowReadsTheStore(t *testing.T) {
 	}
 	st.Close()
 
+	// The edit moved the folder, so the next Execute carries a TABLE_CHANGED for
+	// the open table. Drain it here, both to assert it and to leave the QueryRows
+	// response below carrying nothing but its own rows.
+	wake, _ := sess.Dispatch(nil, nil)
+	wantTableChanged(t, wake, tableH)
+
 	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
 	_, rows := queryRowsResponse(t, qr, cols)
 	assertSubjects(t, rows, "After")

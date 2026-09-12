@@ -32,6 +32,10 @@ const tableStatusComplete uint8 = 0x00
 // over view, projecting the columns per row.
 type tableState struct {
 	kind         tableKind
+	folderID     int64        // tableContents / tableHierarchy: the folder the table was opened on
+	softDeleted  bool         // tableContents: the table shows the folder's Recoverable Items side
+	notify       bool         // emit a table notification when the folder moves; cleared by NoNotifications
+	signal       *tableSignal // the folder's change baseline the next poll diffs against; nil until seeded
 	columns      []mapi.PropTag
 	messageIDs   []int64                  // tableContents base rows, addressed by store id
 	folders      []objectstore.FolderInfo // tableHierarchy base rows
@@ -200,6 +204,12 @@ func (s *Session) ropOpenFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 // instead of live mail. The server ANDs the raw wire byte with it directly.
 const tableFlagSoftDeletes uint8 = 0x20
 
+// tableFlagNoNotifications is the TableFlags bit ([MS-OXCFOLD] 2.2.1.13.1 and
+// 2.2.1.14.1) a client sets to say it does not want table notifications for the
+// table it is opening. Both Get*Table ROPs carry it in the same position, so one
+// constant serves both.
+const tableFlagNoNotifications uint8 = 0x10
+
 // ropGetContentsTable handles RopGetContentsTable ([MS-OXCFOLD] 2.2.1.14): it
 // snapshots the folder's messages into a new table object and returns the row
 // count. With the SHOW_SOFT_DELETES TableFlags bit set it snapshots the folder's
@@ -231,7 +241,8 @@ func (s *Session) ropGetContentsTable(p *ext.Pull, out *ext.Push, handles []uint
 		ids []int64
 		err error
 	)
-	if tableFlags&tableFlagSoftDeletes != 0 {
+	softDeleted := tableFlags&tableFlagSoftDeletes != 0
+	if softDeleted {
 		ids, err = folder.store.ListSoftDeletedIDs(folder.folderID)
 	} else {
 		ids, err = folder.store.ListMessageIDs(folder.folderID)
@@ -240,11 +251,14 @@ func (s *Session) ropGetContentsTable(p *ext.Pull, out *ext.Push, handles []uint
 		writeErr(out, ropGetContentsTable, ohindex, ecError)
 		return true
 	}
-	h := s.alloc(&object{
-		kind:  kindTable,
-		store: folder.store,
-		table: &tableState{kind: tableContents, messageIDs: ids},
-	})
+	t := &tableState{
+		kind:        tableContents,
+		folderID:    folder.folderID,
+		softDeleted: softDeleted,
+		notify:      tableFlags&tableFlagNoNotifications == 0,
+		messageIDs:  ids,
+	}
+	h := s.alloc(&object{kind: kindTable, store: folder.store, table: t})
 	setHandle(handles, ohindex, h)
 
 	out.Uint8(ropGetContentsTable)

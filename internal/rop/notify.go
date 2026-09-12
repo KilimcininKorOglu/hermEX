@@ -18,7 +18,7 @@ const (
 	fnevObjectMoved    uint16 = 0x0020
 	fnevObjectCopied   uint16 = 0x0040
 	fnevSearchComplete uint16 = 0x0080
-	fnevTableModified  uint16 = 0x0100 // emsmdb-internal; not client-subscribable
+	fnevTableModified  uint16 = 0x0100 // raised for an open table handle, not for a RopRegisterNotification subscription
 
 	nfExtended  uint16 = 0x0400 // server-internal sentinel; never emitted on the wire
 	nfHasTotal  uint16 = 0x1000 // gate: total_count present

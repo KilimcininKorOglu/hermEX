@@ -208,8 +208,8 @@ func (ts *tableState) seekPosition(forward bool, total int) uint8 {
 // snapshots the folder's direct children into a new hierarchy table and returns
 // the row count.
 func (s *Session) ropGetHierarchyTable(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	ohindex, e1 := p.Uint8() // OutputHandleIndex
-	_, e2 := p.Uint8()       // TableFlags
+	ohindex, e1 := p.Uint8()    // OutputHandleIndex
+	tableFlags, e2 := p.Uint8() // TableFlags
 	if e1 != nil || e2 != nil {
 		return false
 	}
@@ -225,7 +225,12 @@ func (s *Session) ropGetHierarchyTable(p *ext.Pull, out *ext.Push, handles []uin
 	h := s.alloc(&object{
 		kind:  kindTable,
 		store: folder.store,
-		table: &tableState{kind: tableHierarchy, folders: children},
+		table: &tableState{
+			kind:     tableHierarchy,
+			folderID: folder.folderID,
+			notify:   tableFlags&tableFlagNoNotifications == 0,
+			folders:  children,
+		},
 	})
 	setHandle(handles, ohindex, h)
 

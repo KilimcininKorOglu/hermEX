@@ -37,12 +37,21 @@ func (s *Session) poll(out *ext.Push) {
 	s.drainNotifications(out)
 }
 
-// enqueueChanges polls every subscription and appends each matching event to the
-// session notify queue. Subscriptions are visited in handle order for a deterministic
-// batch; a folder- or message-scoped one polls its single folder, a whole-store one
-// sweeps every content folder. A store error skips that subscription without advancing
-// its baseline, so the next poll retries the same diff rather than losing a change.
+// enqueueChanges polls every subscription and every open table, and appends each
+// matching event to the session notify queue. Subscriptions are visited in handle
+// order for a deterministic batch; a folder- or message-scoped one polls its single
+// folder, a whole-store one sweeps every content folder. A store error skips that
+// subscription without advancing its baseline, so the next poll retries the same
+// diff rather than losing a change. The table pass follows, and is independent: a
+// table is its own notification target, so it reports whether or not the session
+// holds any subscription.
 func (s *Session) enqueueChanges() {
+	s.enqueueSubscriptionChanges()
+	s.enqueueTableChanges()
+}
+
+// enqueueSubscriptionChanges is the subscription half of enqueueChanges.
+func (s *Session) enqueueSubscriptionChanges() {
 	subs := make([]uint32, 0)
 	for h, o := range s.handles {
 		if o.kind == kindSubscription && o.store != nil {
