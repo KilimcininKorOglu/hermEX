@@ -22,6 +22,7 @@ import (
 	"os"
 	"time"
 
+	"hermex/internal/logging"
 	"hermex/internal/migrate"
 
 	_ "modernc.org/sqlite"
@@ -42,6 +43,9 @@ type Spool struct {
 	// Signer optionally DKIM-signs each message once as it is enqueued, before it fans
 	// out to recipients. nil leaves outbound mail unsigned.
 	Signer Signer
+	// Logger records a spool failure a caller deliberately did not propagate. nil
+	// keeps the spool silent, which is what a short-lived opener wants.
+	Logger *logging.Logger
 }
 
 // Signer DKIM-signs an outbound message body. It must fail open, return the body
@@ -101,14 +105,21 @@ type QueueEntry struct {
 	Interrupted bool
 }
 
+// journalSizeLimit is the size a checkpoint truncates the write-ahead log back
+// to, in bytes. A message row holds the whole body, so one large message writes
+// its whole size into the log, and SQLite never shrinks that file on its own.
+const journalSizeLimit = 8 << 20
+
 // dsn mirrors the object store's connection string: a busy timeout, WAL
-// journaling, enforced foreign keys, and FULL synchronous mode for durability.
+// journaling, enforced foreign keys, FULL synchronous mode for durability, and a
+// bound on the write-ahead log file.
 func dsn(path string) string {
 	return "file:" + path +
 		"?_pragma=busy_timeout(5000)" +
 		"&_pragma=journal_mode(WAL)" +
 		"&_pragma=foreign_keys(1)" +
-		"&_pragma=synchronous(FULL)"
+		"&_pragma=synchronous(FULL)" +
+		fmt.Sprintf("&_pragma=journal_size_limit(%d)", journalSizeLimit)
 }
 
 // Open opens the relay spool at path, creating and initializing it if absent.
@@ -370,5 +381,50 @@ func (s *Spool) settle(recipientID int64) error {
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.truncateWALWhenDrained()
+	return nil
+}
+
+// truncateWALWhenDrained returns the write-ahead log to an empty file once the
+// spool holds no message at all. journal_size_limit alone leaves the log at that
+// bound, which a daemon then carries for its whole life, and a drained spool is
+// the one moment no reader is streaming a message body out of it.
+//
+// The checkpoint runs after the settle is committed, so its failure must not
+// fail the caller: the recipient is already settled and a retry would settle it
+// twice. A refused checkpoint is recorded and the log is truncated at the next
+// drain.
+func (s *Spool) truncateWALWhenDrained() {
+	var messages int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM messages`).Scan(&messages); err != nil {
+		s.logSwallowed("count the queued messages", err)
+		return
+	}
+	if messages != 0 {
+		return
+	}
+	if _, err := s.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		s.logSwallowed("truncate the write-ahead log", err)
+	}
+}
+
+// logSwallowed records a spool failure the caller deliberately did not
+// propagate, so a step that keeps failing does not leave the operator's log
+// showing a clean run. A spool with no logger stays silent.
+func (s *Spool) logSwallowed(op string, err error) {
+	if s.Logger == nil {
+		return
+	}
+	s.Logger.Emit(logging.Event{
+		Level:     logging.LevelWarn,
+		Subsystem: logging.MTA,
+		Name:      "relay.spool_maintenance_failed",
+		Fields: logging.Fields{
+			"operation": op,
+			"error":     err.Error(),
+		},
+	})
 }

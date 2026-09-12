@@ -200,15 +200,29 @@ func (s *Store) logStoreError(op string, err error) {
 // takes; a logical outcome such as ErrNotFound does not belong here.
 func (s *Store) LogSwallowedError(op string, err error) { s.logStoreError(op, err) }
 
+// journalSizeLimit is the size a checkpoint truncates the write-ahead log back
+// to, in bytes. It sits above the ~4 MiB an ordinary run reaches under SQLite's
+// default 1000-page autocheckpoint, so a normal workload never pays a
+// truncation, and a transaction larger than this does not keep its size on disk.
+const journalSizeLimit = 8 << 20
+
 // dsn builds the modernc.org/sqlite connection string with the pragmas applied
 // on every pooled connection: a busy timeout, WAL journaling, enforced foreign
-// keys, and FULL synchronous mode for durability.
+// keys, FULL synchronous mode for durability, and a bound on the write-ahead log
+// file.
+//
+// SQLite never shrinks the log on its own, so without journalSizeLimit the file
+// keeps the size of the largest transaction ever written for as long as any
+// connection stays open. The store offloads every large property value to a
+// content file, so an ordinary run settles well under the bound; the bound is
+// what keeps one oversized transaction from leaving its size behind.
 func dsn(path string) string {
 	return "file:" + path +
 		"?_pragma=busy_timeout(5000)" +
 		"&_pragma=journal_mode(WAL)" +
 		"&_pragma=foreign_keys(1)" +
-		"&_pragma=synchronous(FULL)"
+		"&_pragma=synchronous(FULL)" +
+		fmt.Sprintf("&_pragma=journal_size_limit(%d)", journalSizeLimit)
 }
 
 // Open opens the mailbox rooted at dir, creating and initializing it (and its

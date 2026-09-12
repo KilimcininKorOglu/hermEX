@@ -185,6 +185,9 @@ func (d *mtaDaemon) wireDelivery() {
 	}
 	// DKIM-sign outbound mail with the sending domain's enabled key as it is spooled.
 	spool.Signer = &dkimsign.Signer{Keys: d.dir, Logger: d.logger}
+	// This daemon holds the spool open for its whole life and is the one that
+	// drains it, so its maintenance failures are recorded here.
+	spool.Logger = d.logger
 	d.spool = spool
 
 	// Automatic meeting-request processing runs at delivery for mailboxes configured
