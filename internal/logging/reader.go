@@ -47,6 +47,19 @@ func (r *Reader) Recent(ctx context.Context, subsystem string, limit int64) ([]L
 	if subsystem != "" {
 		filter = bson.D{{Key: "subsystem", Value: subsystem}}
 	}
+	return r.find(ctx, filter, limit)
+}
+
+// RecentByEvent returns the newest events carrying one event name, most recent
+// first, up to limit. An operator surface for a single condition needs this
+// rather than Recent: the condition's own subsystem also carries the ordinary
+// traffic, which pushes a rare event out of any window a page can hold.
+func (r *Reader) RecentByEvent(ctx context.Context, event string, limit int64) ([]LogEntry, error) {
+	return r.find(ctx, bson.D{{Key: "event", Value: event}}, limit)
+}
+
+// find runs one newest-first query and decodes every matching entry.
+func (r *Reader) find(ctx context.Context, filter bson.D, limit int64) ([]LogEntry, error) {
 	cur, err := r.coll.Find(ctx, filter,
 		options.Find().SetSort(bson.D{{Key: "ts", Value: -1}}).SetLimit(limit))
 	if err != nil {

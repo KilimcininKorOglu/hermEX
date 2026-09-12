@@ -13,13 +13,21 @@ import (
 	"hermex/internal/logging"
 )
 
-// fakeLogReader is a scripted LogReader for the log-viewer tests.
+// fakeLogReader is a scripted LogReader for the log-viewer tests. lastEvent
+// records the event name the caller asked for, so a page that must query one
+// condition can be held to it.
 type fakeLogReader struct {
-	entries []logging.LogEntry
-	err     error
+	entries   []logging.LogEntry
+	err       error
+	lastEvent string
 }
 
 func (f *fakeLogReader) Recent(context.Context, string, int64) ([]logging.LogEntry, error) {
+	return f.entries, f.err
+}
+
+func (f *fakeLogReader) RecentByEvent(_ context.Context, event string, _ int64) ([]logging.LogEntry, error) {
+	f.lastEvent = event
 	return f.entries, f.err
 }
 

@@ -197,6 +197,7 @@ type Paths interface {
 // the viewer reports logging as unconfigured when none is set.
 type LogReader interface {
 	Recent(ctx context.Context, subsystem string, limit int64) ([]logging.LogEntry, error)
+	RecentByEvent(ctx context.Context, event string, limit int64) ([]logging.LogEntry, error)
 }
 
 const (
@@ -507,6 +508,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/rooms", s.handleUICreateRoom)
 	mux.HandleFunc("POST /admin/ui/rooms/{email}/delete", s.handleUIDeleteRoom)
 	mux.HandleFunc("GET /admin/ui/logs", s.handleUILogs)
+	mux.HandleFunc("GET /admin/ui/mailbox-failures", s.handleUIMailboxFailures)
 	mux.HandleFunc("GET /admin/ui/ldap", s.handleUILDAP)
 	mux.HandleFunc("POST /admin/ui/ldap", s.handleUISaveLDAP)
 	mux.HandleFunc("POST /admin/ui/ldap/sync", s.handleUISyncLDAP)

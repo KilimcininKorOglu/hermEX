@@ -34,6 +34,13 @@ var indexProbes = []string{
 	`SELECT message_id FROM mapping LIMIT 1`,
 }
 
+// IsPermanentDBFailure reports whether a store failure condemns the mailbox's
+// database. A caller outside this package needs it to tell a mailbox that will
+// not work again until it is repaired from one that is merely busy, out of disk,
+// or waiting on a lock. The delivery path uses it to record an unusable mailbox
+// distinctly while still deferring the message.
+func IsPermanentDBFailure(err error) bool { return permanentDBFailure(err) }
+
 // permanentDBFailure reports whether a SQLite failure condemns the database.
 // Rebuilding discards the whole IMAP index of a mailbox, so only a failure that
 // will not resolve on its own qualifies: a lock, an I/O error or an out-of-memory

@@ -514,7 +514,7 @@ func (s *session) deliverTargets(sc scoring, received time.Time) error {
 		tRaw, tFolder := s.recipientFiling(t, sc)
 		tRaw = markCatchAll(t, tRaw)
 		if err := deliver(s.accounts, s.from, t.addr, t.path, tRaw, received, tFolder); err != nil {
-			s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "delivery.fail", User: t.addr, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from}, Err: err.Error()})
+			s.logDeliveryFailure(t, err)
 			// A store failure is transient (the mailbox is there, the disk or the
 			// database is not answering), so defer rather than reject: a permanent
 			// reply would make the sender bounce mail this server can accept later.
@@ -524,6 +524,20 @@ func (s *session) deliverTargets(sc scoring, received time.Time) error {
 		s.logger.Emit(logging.Event{Level: logging.LevelInfo, Subsystem: logging.MTA, Name: "delivery.ok", User: t.addr, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from}})
 	}
 	return nil
+}
+
+// logDeliveryFailure records a delivery that did not file the message. A
+// database that condemns the mailbox is recorded under its own event as well,
+// because the reply is a deferral either way: the sender retries for days and
+// the operator's only sign is the repeat, which delivery.fail alone does not
+// separate from a disk or lock failure that clears on its own. The mailbox needs
+// a repair pass before any of that mail can land.
+func (s *session) logDeliveryFailure(t target, err error) {
+	s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "delivery.fail", User: t.addr, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from}, Err: err.Error()})
+	if !objectstore.IsPermanentDBFailure(err) {
+		return
+	}
+	s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "delivery.mailbox_unusable", User: t.addr, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "mailbox": t.path}, Err: err.Error()})
 }
 
 // markCatchAll prepends a Delivered-To header naming the envelope recipient to a message

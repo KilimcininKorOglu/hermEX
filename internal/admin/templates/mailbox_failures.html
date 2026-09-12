@@ -1,0 +1,23 @@
+{{define "mailbox_failures.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<h1>Mailbox failures</h1>
+{{if .Disabled}}
+<p class="muted">Central logging is not configured, so these failures cannot be listed.</p>
+{{else}}
+<p class="muted">Each row is a delivery the recipient's own database refused for good. The message was deferred rather than rejected, so the sending server keeps retrying and nothing has bounced yet. Every retry fails the same way until the mailbox is repaired.</p>
+<p class="muted">Report the damage with <code>hermex-admin check-mailbox &lt;address&gt;</code>, which writes nothing and is safe on a running deployment. Repair it with <code>hermex-admin check-mailbox &lt;address&gt; --recover</code>, which rebuilds a damaged database and loses the rows on its damaged pages. Repair refuses while a daemon holds the mailbox open.</p>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<table class="grid">
+<thead><tr><th>Time</th><th>Mailbox</th><th>Client address</th><th>Error</th></tr></thead>
+<tbody>
+{{range .Entries}}<tr><td>{{.Time.Format "2006-01-02 15:04:05"}}</td><td>{{.User}}</td><td>{{.RemoteAddr}}</td><td>{{.Err}}</td></tr>
+{{else}}<tr><td colspan="4" class="empty">No mailbox has refused a delivery.</td></tr>
+{{end}}
+</tbody>
+</table>
+{{end}}
+</main>
+</div>
+{{template "foot" .}}{{end}}
