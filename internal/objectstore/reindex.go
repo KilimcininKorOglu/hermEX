@@ -18,15 +18,26 @@ import (
 // disturbed; a newly indexed message receives a fresh monotonic UID and a
 // freshly re-synthesized eml.
 func (s *Store) ReindexFolder(folderID int64) error {
+	_, err := s.reindexFolder(folderID)
+	return err
+}
+
+// reindexFolder is ReindexFolder with the count of messages it could not index.
+// A message whose stored content cannot be read is SKIPPED rather than aborting
+// the folder, because one unreadable message must not keep every other message
+// out of the index. The caller uses the count to decide whether the index is
+// complete, so the messages that failed are retried instead of being left out for
+// good.
+func (s *Store) reindexFolder(folderID int64) (int, error) {
 	objState, err := scanInt64Map[int](s.objdb,
 		`SELECT message_id, read_state FROM messages WHERE parent_fid=? AND is_deleted=0`, folderID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	idxMid, err := scanInt64Map[string](s.idxdb,
 		`SELECT message_id, mid_string FROM messages WHERE folder_id=?`, folderID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	// Prune index rows whose object is gone.
@@ -35,20 +46,22 @@ func (s *Store) ReindexFolder(folderID int64) error {
 			continue
 		}
 		if err := s.dropIndexRow(id, mid); err != nil {
-			return err
+			return 0, err
 		}
 	}
 
 	// Index object messages missing from the index.
+	failed := 0
 	for id, read := range objState {
 		if _, ok := idxMid[id]; ok {
 			continue
 		}
 		if err := s.indexExistingMessage(folderID, id, read != 0); err != nil {
-			return err
+			s.logIndexMessageSkipped(folderID, id, err)
+			failed++
 		}
 	}
-	return nil
+	return failed, nil
 }
 
 // scanInt64Map reads a two-column query into a map keyed by the first column.

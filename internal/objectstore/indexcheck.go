@@ -15,6 +15,11 @@ import (
 	"hermex/internal/migrate"
 )
 
+// indexMarkerName marks an IMAP index whose fill left messages out. It sits next
+// to the index file rather than inside it, because the fill writes it before the
+// index holds anything and removes it only when every message is indexed.
+const indexMarkerName = ".imapindex.incomplete"
+
 // indexTables are the IMAP index's own tables. The count found in sqlite_master
 // is what separates a fresh index (none of them yet) from a damaged one (some of
 // them lost).
@@ -198,17 +203,87 @@ func (s *Store) mailMessageCount(folders []int64) (int, error) {
 
 // reindexMailFolders projects every mail folder of the object store back into the
 // IMAP index.
+//
+// The marker file is written first and removed only when every message was
+// indexed. A fill that ends with messages missing therefore leaves the marker
+// behind, and the next open runs the fill again instead of reading a structurally
+// valid index as complete and serving the mailbox short for good.
 func (s *Store) reindexMailFolders() error {
+	if err := os.WriteFile(s.indexMarkerPath(), nil, 0o600); err != nil {
+		return err
+	}
 	folders, err := s.mailFolderIDs()
 	if err != nil {
 		return err
 	}
+	failed := 0
 	for _, id := range folders {
-		if err := s.ReindexFolder(id); err != nil {
+		n, err := s.reindexFolder(id)
+		if err != nil {
 			return err
 		}
+		failed += n
+	}
+	if failed > 0 {
+		s.logIndexIncomplete(failed)
+		return nil
+	}
+	return os.Remove(s.indexMarkerPath())
+}
+
+// indexMarkerPath is the file that marks an IMAP index whose fill did not finish.
+func (s *Store) indexMarkerPath() string {
+	return filepath.Join(s.dir, indexMarkerName)
+}
+
+// indexFillPending reports whether the last fill left messages out.
+func (s *Store) indexFillPending() bool {
+	_, err := os.Stat(s.indexMarkerPath())
+	return err == nil
+}
+
+// resumeIndexFill re-runs the fill of an index whose last fill did not finish. It
+// is a no-op on a mailbox held open elsewhere: the marker stays and the next open
+// tries again.
+func (s *Store) resumeIndexFill() error {
+	if err := s.withExclusiveLock(s.reindexMailFolders); err != nil {
+		if errors.Is(err, ErrMailboxBusy) {
+			return nil
+		}
+		return err
 	}
 	return nil
+}
+
+// logIndexIncomplete records an index fill that left messages out. Those messages
+// are invisible to IMAP and POP3 until a later fill indexes them, so the operator
+// needs the count; the per-message reason is recorded separately.
+func (s *Store) logIndexIncomplete(failed int) {
+	s.logger.Emit(logging.Event{
+		Level:     logging.LevelWarn,
+		Subsystem: logging.Store,
+		Name:      "mailbox.index_incomplete",
+		Fields: logging.Fields{
+			"mailbox": s.dir,
+			"failed":  failed,
+		},
+	})
+}
+
+// logIndexMessageSkipped records one message the fill could not index. No message
+// content is recorded, only its store id and the failure.
+func (s *Store) logIndexMessageSkipped(folderID, messageID int64, cause error) {
+	s.logger.Emit(logging.Event{
+		Level:     logging.LevelWarn,
+		Subsystem: logging.Store,
+		Name:      "mailbox.index_message_skipped",
+		Fields: logging.Fields{
+			"mailbox":    s.dir,
+			"folder_id":  folderID,
+			"message_id": messageID,
+			"cause":      cause.Error(),
+		},
+	})
 }
 
 // logIndexRebuildFailed records a rebuild that was needed and did not run, which

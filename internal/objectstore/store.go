@@ -436,26 +436,42 @@ func (s *Store) ensureIndexSchema() error {
 	}
 	switch {
 	case tables == 0:
-		// Fresh index: create the baseline schema and stamp its version. An index
-		// file that was lost outright looks exactly like this, so the mail the
-		// object store already holds is adopted rather than left invisible.
-		if err := s.createIndexBaseline(); err != nil {
-			return err
-		}
-		if err := s.runIndexMigrations(); err != nil {
-			return err
-		}
-		return s.adoptExistingMail()
+		return s.createFreshIndex()
 	case tables < len(indexTables):
 		return s.rebuildIndex(fmt.Errorf("the index holds %d of its %d tables", tables, len(indexTables)))
-	default:
-		if err := s.verifyExistingIndex(); err != nil {
-			return err
-		}
 	}
-	// Fresh and existing indexes converge here: apply any migrations beyond the
-	// baseline once, and refuse an index recorded newer than this binary.
-	return s.runIndexMigrations()
+	if err := s.verifyExistingIndex(); err != nil {
+		return err
+	}
+	return s.finishExistingIndex()
+}
+
+// createFreshIndex creates the baseline schema of an index that holds no tables
+// and stamps its version. An index file that was lost outright looks exactly
+// like a fresh one on disk, so the mail the object store already holds is
+// adopted rather than left invisible.
+func (s *Store) createFreshIndex() error {
+	if err := s.createIndexBaseline(); err != nil {
+		return err
+	}
+	if err := s.runIndexMigrations(); err != nil {
+		return err
+	}
+	return s.adoptExistingMail()
+}
+
+// finishExistingIndex applies any migrations beyond the baseline, refuses an
+// index recorded newer than this binary, and re-runs a fill that left messages
+// out. Without the second step a structurally valid index whose fill failed
+// part way reads as complete, and the mailbox serves short for good.
+func (s *Store) finishExistingIndex() error {
+	if err := s.runIndexMigrations(); err != nil {
+		return err
+	}
+	if !s.indexFillPending() {
+		return nil
+	}
+	return s.resumeIndexFill()
 }
 
 // verifyExistingIndex rebuilds an index whose tables are present but unreadable,
