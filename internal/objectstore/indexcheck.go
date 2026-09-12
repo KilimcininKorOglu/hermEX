@@ -122,8 +122,7 @@ func (s *Store) runIndexMigrations() error {
 // the same time cannot delete the file under each other. A mailbox held open
 // elsewhere reports ErrMailboxBusy rather than rebuilding.
 func (s *Store) rebuildIndex(cause error) error {
-	s.logIndexRebuild(cause)
-	return s.withExclusiveLock(func() error {
+	if err := s.withExclusiveLock(func() error {
 		if err := s.idxdb.Close(); err != nil {
 			return err
 		}
@@ -142,7 +141,12 @@ func (s *Store) rebuildIndex(cause error) error {
 			return err
 		}
 		return s.reindexMailFolders()
-	})
+	}); err != nil {
+		s.logIndexRebuildFailed(cause, err)
+		return err
+	}
+	s.logIndexRebuild(cause)
+	return nil
 }
 
 // deleteIndexFiles removes the index database and its journal companions, so the
@@ -169,8 +173,13 @@ func (s *Store) adoptExistingMail() error {
 	if err != nil || n == 0 {
 		return err
 	}
-	s.logIndexRebuild(fmt.Errorf("the index file was absent while the object store held %d messages", n))
-	return s.withExclusiveLock(s.reindexMailFolders)
+	cause := fmt.Errorf("the index file was absent while the object store held %d messages", n)
+	if err := s.withExclusiveLock(s.reindexMailFolders); err != nil {
+		s.logIndexRebuildFailed(cause, err)
+		return err
+	}
+	s.logIndexRebuild(cause)
+	return nil
 }
 
 // mailMessageCount counts the object-store messages the given folders hold.
@@ -202,9 +211,27 @@ func (s *Store) reindexMailFolders() error {
 	return nil
 }
 
-// logIndexRebuild records that a mailbox lost its IMAP index. Every client
-// resyncs after this, so the operator needs the line to tell a rebuild from a
-// client-side fault, and the cause names which failure condemned the index.
+// logIndexRebuildFailed records a rebuild that was needed and did not run, which
+// is a separate outcome from a rebuild that did. Reporting it as a rebuild would
+// tell the operator the mailbox was repaired when it was not. A mailbox held open
+// elsewhere reports ErrMailboxBusy here, and the next open retries.
+func (s *Store) logIndexRebuildFailed(cause, failure error) {
+	s.logger.Emit(logging.Event{
+		Level:     logging.LevelWarn,
+		Subsystem: logging.Store,
+		Name:      "mailbox.index_rebuild_failed",
+		Fields: logging.Fields{
+			"mailbox": s.dir,
+			"cause":   cause.Error(),
+			"failure": failure.Error(),
+		},
+	})
+}
+
+// logIndexRebuild records that a mailbox lost its IMAP index and that the rebuild
+// finished. Every client resyncs after this, so the operator needs the line to
+// tell a rebuild from a client-side fault, and the cause names which failure
+// condemned the index.
 func (s *Store) logIndexRebuild(cause error) {
 	s.logger.Emit(logging.Event{
 		Level:     logging.LevelWarn,

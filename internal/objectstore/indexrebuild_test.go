@@ -4,9 +4,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 )
 
@@ -122,5 +124,44 @@ func TestPermanentDBFailureSpansOnlyUnrecoverableErrors(t *testing.T) {
 	}
 	if permanentDBFailure(nil) {
 		t.Error("a nil error is classed as permanent")
+	}
+}
+
+// TestRebuildOnABusyMailboxIsNotReportedAsARebuild is the defect this change
+// fixes. The rebuild was recorded before the mailbox lock was taken, so a mailbox
+// held open elsewhere produced a mailbox.index_rebuilt line for a rebuild that
+// never ran, while the open failed. The operator would read the log as a repaired
+// mailbox and see no sign of the one that still needs repair.
+func TestRebuildOnABusyMailboxIsNotReportedAsARebuild(t *testing.T) {
+	dir := t.TempDir()
+	held, err := Open(dir)
+	mustNoErr(t, "open", err)
+	defer held.Close()
+	mustAppendMessage(t, held, int64(mapi.PrivateFIDInbox), checkRaw("one"), time.Unix(1700000000, 0), 0)
+
+	db, err := openIndexDirect(dir)
+	mustNoErr(t, "open the index directly", err)
+	_, err = db.Exec(`DROP TABLE messages`)
+	mustNoErr(t, "drop the messages table", err)
+	mustNoErr(t, "close the direct handle", db.Close())
+
+	sink := &captureSink{}
+	SetDefaultLogger(logging.New(sink))
+	defer SetDefaultLogger(nil)
+
+	second, err := Open(dir)
+	if err == nil {
+		_ = second.Close()
+		t.Fatal("the second open succeeded while the mailbox was held, so the rebuild ran under a shared lock")
+	}
+	if _, ok := sink.find("mailbox.index_rebuilt"); ok {
+		t.Error("a rebuild that never ran was recorded as mailbox.index_rebuilt")
+	}
+	e, ok := sink.find("mailbox.index_rebuild_failed")
+	if !ok {
+		t.Fatal("the mailbox still needing a rebuild was not recorded at all")
+	}
+	if f, _ := e.Fields["failure"].(string); !strings.Contains(f, "open elsewhere") {
+		t.Errorf("failure field = %q, want the busy-mailbox reason", f)
 	}
 }
