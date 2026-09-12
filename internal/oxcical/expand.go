@@ -69,7 +69,7 @@ func excludedInstants(master *icomp) map[string]bool {
 	skip := map[string]bool{}
 	for _, l := range master.propLines("EXDATE") {
 		for v := range strings.SplitSeq(l.value, ",") {
-			ex := iline{name: "EXDATE", params: l.params, value: strings.TrimSpace(v)}
+			ex := iline{name: "EXDATE", params: l.params, value: strings.TrimSpace(v), loc: l.loc}
 			if t, _, ok := parseICalTime(&ex); ok {
 				skip[instantKey(t)] = true
 			}

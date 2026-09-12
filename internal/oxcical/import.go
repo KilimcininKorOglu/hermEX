@@ -25,7 +25,9 @@ const (
 // (carrying RRULE or RECURRENCE-ID) is preserved verbatim in PrIcalOriginal and
 // gets only the minimal listing properties plus, for a series master, the
 // MS-OXOCAL AppointmentRecurrencePattern blob Outlook reads in
-// PidLidAppointmentRecur. Named properties are resolved through opt.Resolver.
+// PidLidAppointmentRecur. Named properties are resolved through opt.Resolver, and
+// any time the stream carries with no usable zone is handed to
+// opt.OnUnresolvedZone before the times are read.
 func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 	cal, err := parseICal(raw)
 	if err != nil {
@@ -35,6 +37,7 @@ func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 	if vev == nil {
 		return nil, errNoEvent
 	}
+	reportZones(cal, opt)
 
 	named, err := namedTags(opt, true)
 	if err != nil {

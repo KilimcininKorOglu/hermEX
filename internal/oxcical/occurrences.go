@@ -132,7 +132,7 @@ func addedInstants(master *icomp) []time.Time {
 			if v == "" || strings.Contains(v, "/") {
 				continue
 			}
-			rd := iline{name: "RDATE", params: l.params, value: v}
+			rd := iline{name: "RDATE", params: l.params, value: v, loc: l.loc}
 			if t, _, ok := parseICalTime(&rd); ok {
 				out = append(out, t)
 			}

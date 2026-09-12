@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcical"
@@ -109,7 +110,7 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 		s.davError(w, err, http.StatusBadRequest)
 		return
 	}
-	msg, status, err := importCalendarBody(st, fid, body)
+	msg, status, err := s.importCalendarBody(st, fid, body)
 	if err != nil {
 		s.davError(w, err, status)
 		return
@@ -206,7 +207,7 @@ func calPutPrecondition(r *http.Request, existing objectstore.FolderObject, foun
 // importCalendarBody converts a PUT body into the stored message its collection
 // calls for: a VTODO in Tasks, a VJOURNAL in Journal, and a VEVENT elsewhere. On
 // failure it also reports the HTTP status to answer with.
-func importCalendarBody(st *objectstore.Store, fid int64, body []byte) (*oxcmail.Message, int, error) {
+func (s *Server) importCalendarBody(st *objectstore.Store, fid int64, body []byte) (*oxcmail.Message, int, error) {
 	switch fid {
 	case int64(mapi.PrivateFIDTasks):
 		task, _, ok := oxcical.ParseVTODO(body)
@@ -225,16 +226,37 @@ func importCalendarBody(st *objectstore.Store, fid int64, body []byte) (*oxcmail
 		}
 		return msg, 0, nil
 	}
-	msg, err := oxcical.Import(body, icalOptions(st))
+	opt := icalOptions(st)
+	var zones oxcical.ZoneLosses
+	opt.OnUnresolvedZone = zones.Add
+	msg, err := oxcical.Import(body, opt)
 	if err != nil {
 		return nil, http.StatusBadRequest, err
 	}
+	s.logZoneLosses(&zones)
 	return msg, 0, nil
 }
 
 // errInvalidVTODO is the body a Tasks PUT is refused with when its VTODO does not
 // parse.
 var errInvalidVTODO = errors.New("invalid VTODO")
+
+// logZoneLosses records a calendar PUT whose times could not be bound to a zone.
+// The write is accepted (the client's own reading of those times is unchanged),
+// but each one is stored as if it were UTC, so the event can sit hours away from
+// the hour its author picked. The zone id is recorded because it is the one fact
+// needed to extend the zone table; no calendar content is.
+func (s *Server) logZoneLosses(z *oxcical.ZoneLosses) {
+	if z.Times() == 0 {
+		return
+	}
+	s.Logger.Emit(logging.Event{
+		Level:     logging.LevelWarn,
+		Subsystem: logging.DAV,
+		Name:      "calendar.zone_unresolved",
+		Fields:    logging.Fields{"zones": z.ZoneIDs(), "times": z.Times()},
+	})
+}
 
 // handleCalDelete removes a calendar object, honoring If-Match. Mirrors handleDelete.
 func (s *Server) handleCalDelete(w http.ResponseWriter, r *http.Request, user, mailbox string) {

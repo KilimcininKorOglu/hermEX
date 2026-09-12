@@ -12,10 +12,18 @@ var errNoCalendar = errors.New("oxcical: no BEGIN:VCALENDAR block")
 
 // iline is one parsed content line: a property name, its parameters (each a list,
 // e.g. TZID=…;VALUE=DATE), and the raw (still-escaped) value text.
+//
+// loc is the zone the line's TZID resolved to, bound once by bindZones while the
+// calendar is parsed. It is nil when the line has no TZID, and also when it has
+// one that nothing could resolve; both cases read the value as UTC. The zone is
+// resolved here rather than in parseICalTime because resolution needs the whole
+// stream (the calendar's own VTIMEZONE components) and a content line has no way
+// back to the calendar that carries it.
 type iline struct {
 	name   string
 	params map[string][]string
 	value  string
+	loc    *time.Location
 }
 
 // icomp is one parsed iCalendar component (VCALENDAR, VEVENT, VTIMEZONE, VALARM,
@@ -59,6 +67,7 @@ func parseICal(raw []byte) (*icomp, error) {
 	if p.root == nil {
 		return nil, errNoCalendar
 	}
+	bindZones(p.root)
 	return p.root, nil
 }
 
@@ -228,9 +237,9 @@ func (c *icomp) sub(name string) *icomp {
 
 // parseICalTime parses a DATE or DATE-TIME property to a UTC instant. allDay is
 // true for a date-only (VALUE=DATE) value. Resolution: a trailing Z is UTC; a TZID
-// names an IANA zone resolved via time.LoadLocation; otherwise the value is
-// floating and read as UTC (a documented v1 simplification). ok is false on any
-// parse failure.
+// uses the zone bindZones resolved for the line; otherwise the value is floating
+// and read as UTC (a documented v1 simplification). ok is false on any parse
+// failure.
 //
 // A nil line is one such failure, not a programming error: callers pass the result
 // of prop() straight in, and a component that does not carry the property at all
@@ -262,7 +271,7 @@ func isDateOnly(l *iline, v string) bool {
 }
 
 // parseICalDateTime resolves a date-time value to a UTC instant: a trailing Z is
-// UTC, then the property's TZID, then a floating value read as UTC.
+// UTC, then the zone bound to the line, then a floating value read as UTC.
 func parseICalDateTime(l *iline, v string) (time.Time, bool) {
 	if strings.HasSuffix(v, "Z") {
 		dt, err := time.Parse("20060102T150405Z", v)
@@ -271,11 +280,9 @@ func parseICalDateTime(l *iline, v string) (time.Time, bool) {
 		}
 		return dt.UTC(), true
 	}
-	if tzid := l.param("TZID"); tzid != "" {
-		if loc, err := time.LoadLocation(tzid); err == nil {
-			if dt, err := time.ParseInLocation("20060102T150405", v, loc); err == nil {
-				return dt.UTC(), true
-			}
+	if l.loc != nil {
+		if dt, err := time.ParseInLocation("20060102T150405", v, l.loc); err == nil {
+			return dt.UTC(), true
 		}
 	}
 	dt, err := time.Parse("20060102T150405", v)

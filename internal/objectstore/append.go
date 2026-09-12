@@ -69,10 +69,15 @@ func (s *Store) AppendMessage(folderID int64, raw []byte, internalDate time.Time
 		// import it directly without a cycle) so Import overlays the scheduling
 		// class and appointment properties onto the stored message.
 		CalendarImporter: func(ical []byte) (mapi.PropertyValues, error) {
-			m, err := oxcical.Import(ical, oxcical.Options{Resolver: s.GetNamedPropIDs})
+			var zones oxcical.ZoneLosses
+			m, err := oxcical.Import(ical, oxcical.Options{
+				Resolver:         s.GetNamedPropIDs,
+				OnUnresolvedZone: zones.Add,
+			})
 			if err != nil {
 				return nil, err
 			}
+			s.logZoneLosses(&zones)
 			return m.Props, nil
 		},
 	}

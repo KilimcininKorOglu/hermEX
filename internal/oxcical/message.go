@@ -11,8 +11,15 @@ type PropIDResolver func(create bool, names []mapi.PropertyName) ([]uint16, erro
 // Options configures a conversion. Resolver supplies named-property ids and is
 // required: an appointment's start/end, location, busy status, subtype, sequence,
 // reminder, and preserved UID are all named properties.
+//
+// OnUnresolvedZone is optional. When set, Import calls it once for every imported
+// date-time that carries no usable zone and is therefore read as UTC, so the
+// operator can see which sender's zone id was not understood instead of only
+// seeing an appointment land at the wrong hour. Leaving it nil keeps the import
+// silent, which is what the conversion-only callers (export paths, tests) want.
 type Options struct {
-	Resolver PropIDResolver
+	Resolver         PropIDResolver
+	OnUnresolvedZone func(ZoneNote)
 }
 
 // namedField is one appointment named property and the type its value takes.
