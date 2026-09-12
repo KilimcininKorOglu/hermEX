@@ -384,26 +384,38 @@ func (s *Spool) settle(recipientID int64) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	s.truncateWALWhenDrained()
+	s.reclaimWhenDrained()
 	return nil
 }
 
-// truncateWALWhenDrained returns the write-ahead log to an empty file once the
-// spool holds no message at all. journal_size_limit alone leaves the log at that
-// bound, which a daemon then carries for its whole life, and a drained spool is
-// the one moment no reader is streaming a message body out of it.
+// reclaimWhenDrained returns the spool database and its write-ahead log to their
+// empty size once the spool holds no message at all. A message row holds the
+// whole body, so both files keep the size of the largest message until something
+// reclaims them: journal_size_limit alone leaves the log at that bound, and
+// SQLite never shrinks the database file without VACUUM.
 //
-// The checkpoint runs after the settle is committed, so its failure must not
-// fail the caller: the recipient is already settled and a retry would settle it
-// twice. A refused checkpoint is recorded and the log is truncated at the next
-// drain.
-func (s *Spool) truncateWALWhenDrained() {
+// A drained spool is the one moment this is safe and cheap. No reader is
+// streaming a message body, the database holds almost no live data, and the
+// exclusive lock VACUUM takes delays nobody because nothing is queued.
+//
+// The order matters. In WAL mode VACUUM rewrites the database into the log, so
+// the file on disk only shrinks once the checkpoint lands; running the
+// checkpoint first would leave the database at its old size.
+//
+// Both steps run after the settle is committed, so a failure must not fail the
+// caller: the recipient is already settled and a retry would settle it twice. A
+// refused step is recorded, and the next drain reclaims the files.
+func (s *Spool) reclaimWhenDrained() {
 	var messages int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM messages`).Scan(&messages); err != nil {
 		s.logSwallowed("count the queued messages", err)
 		return
 	}
 	if messages != 0 {
+		return
+	}
+	if _, err := s.db.Exec(`VACUUM`); err != nil {
+		s.logSwallowed("compact the spool database", err)
 		return
 	}
 	if _, err := s.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
