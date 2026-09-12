@@ -30,7 +30,7 @@ func zonePut(t *testing.T, body []byte) []logging.Event {
 	sink := &scheduleSink{}
 	srv.Logger = logging.New(sink)
 
-	if _, _, err := srv.importCalendarBody(st, int64(mapi.PrivateFIDCalendar), body); err != nil {
+	if _, _, err := srv.importCalendarBody(st, int64(mapi.PrivateFIDCalendar), "alice@hermex.test", body); err != nil {
 		t.Fatalf("import: %v", err)
 	}
 	return sink.events

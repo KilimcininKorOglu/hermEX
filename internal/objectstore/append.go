@@ -73,6 +73,7 @@ func (s *Store) AppendMessage(folderID int64, raw []byte, internalDate time.Time
 			m, err := oxcical.Import(ical, oxcical.Options{
 				Resolver:         s.GetNamedPropIDs,
 				OnUnresolvedZone: zones.Add,
+				DefaultZone:      s.defaultZone,
 			})
 			if err != nil {
 				return nil, err

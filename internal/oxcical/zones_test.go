@@ -102,6 +102,63 @@ func TestImportReportsFloatingTime(t *testing.T) {
 	}
 }
 
+// TestImportReadsAFloatingTimeInTheDefaultZone is the defect for a value that
+// carries no zone at all: RFC 5545 defines it as the reader's own wall clock, so
+// reading it as UTC stores it wrong by the mailbox owner's offset. Istanbul is
+// UTC+3, so 10:30 there is 07:30Z.
+func TestImportReadsAFloatingTimeInTheDefaultZone(t *testing.T) {
+	r := newResolver()
+	opt := r.opt()
+	opt.DefaultZone = mustZone(t, "Europe/Istanbul")
+	got := importedStart(t, r, zoneCal("", ""), opt)
+	want := time.Date(2026, 8, 11, 7, 30, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Fatalf("start = %s, want %s", got.Format(time.RFC3339), want.Format(time.RFC3339))
+	}
+}
+
+// TestDefaultZoneSilencesAFloatingTime pairs with the test above: a floating time
+// read in the reader's own zone is no longer a loss, so it must stop being
+// reported or the log fills with events that name nothing wrong.
+func TestDefaultZoneSilencesAFloatingTime(t *testing.T) {
+	var notes []ZoneNote
+	_, opt := zoneOpt(&notes)
+	opt.DefaultZone = mustZone(t, "Europe/Istanbul")
+	if _, err := Import(zoneCal("", ""), opt); err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if len(notes) != 0 {
+		t.Fatalf("reported %d floating times that were read in the reader's zone: %+v", len(notes), notes)
+	}
+}
+
+// TestDefaultZoneDoesNotCoverAFailedTZID draws the line: the sender named a zone
+// and this package did not understand it. Putting the reader's zone on that value
+// would replace one wrong instant with another that is harder to spot, so the
+// value stays read as UTC and reported.
+func TestDefaultZoneDoesNotCoverAFailedTZID(t *testing.T) {
+	var notes []ZoneNote
+	r, opt := zoneOpt(&notes)
+	opt.DefaultZone = mustZone(t, "Europe/Istanbul")
+	got := importedStart(t, r, zoneCal(";TZID=Mars/Olympus", ""), opt)
+	if !got.Equal(time.Date(2026, 8, 11, 10, 30, 0, 0, time.UTC)) {
+		t.Fatalf("start = %s, want the value read as UTC", got.Format(time.RFC3339))
+	}
+	if len(notes) == 0 {
+		t.Fatal("a TZID nothing resolved was silently given the reader's zone")
+	}
+}
+
+// mustZone loads an IANA zone or fails the test.
+func mustZone(t *testing.T, name string) *time.Location {
+	t.Helper()
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		t.Fatalf("load %s: %v", name, err)
+	}
+	return loc
+}
+
 // TestImportReportsUnresolvableZone covers the case the tables cannot answer: the
 // zone id is reported verbatim, which is the one fact needed to extend the table.
 func TestImportReportsUnresolvableZone(t *testing.T) {

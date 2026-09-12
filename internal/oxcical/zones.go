@@ -186,6 +186,29 @@ func twoDigits(s string) (int, bool) {
 	return n, err == nil
 }
 
+// applyDefaultZone reads every floating time in the calendar in loc, the zone the
+// caller says is the reader's own. A floating value means the reader's local wall
+// clock (RFC 5545 §3.3.5), so without this it is read as UTC and lands wrong by
+// the owner's offset.
+//
+// A line whose TZID failed to resolve is left alone: the sender named a zone, and
+// putting the reader's zone on it would replace one wrong answer with another
+// that is harder to spot. Those stay unresolved and reported.
+func applyDefaultZone(c *icomp, loc *time.Location) {
+	if loc == nil || c.name == "VTIMEZONE" {
+		return
+	}
+	for i := range c.props {
+		l := &c.props[i]
+		if l.loc == nil && l.param("TZID") == "" && isFloatingDateTime(l) {
+			l.loc = loc
+		}
+	}
+	for _, sub := range c.comps {
+		applyDefaultZone(sub, loc)
+	}
+}
+
 // reportZones hands opt.OnUnresolvedZone every date-time in the calendar that is
 // being read as UTC without having said so. Without it the loss is silent: the
 // appointment is stored at the wrong instant and nothing in the log says which

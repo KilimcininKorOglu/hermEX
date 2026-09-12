@@ -1,6 +1,10 @@
 package oxcical
 
-import "hermex/internal/mapi"
+import (
+	"time"
+
+	"hermex/internal/mapi"
+)
 
 // PropIDResolver resolves named properties to store property ids. With create
 // true (used by Import) names not yet known are allocated; the result is parallel
@@ -17,9 +21,17 @@ type PropIDResolver func(create bool, names []mapi.PropertyName) ([]uint16, erro
 // operator can see which sender's zone id was not understood instead of only
 // seeing an appointment land at the wrong hour. Leaving it nil keeps the import
 // silent, which is what the conversion-only callers (export paths, tests) want.
+//
+// DefaultZone is the zone a floating time is read in: a value carrying neither a
+// trailing Z nor a TZID, which RFC 5545 §3.3.5 defines as the reader's own local
+// wall clock. Set it to the mailbox owner's zone. Leaving it nil reads such a
+// value as UTC and reports it, which is wrong by the owner's offset for anyone
+// not at UTC. A TZID that failed to resolve never takes this zone, because a zone
+// the sender named and this package did not understand is not the reader's.
 type Options struct {
 	Resolver         PropIDResolver
 	OnUnresolvedZone func(ZoneNote)
+	DefaultZone      *time.Location
 }
 
 // namedField is one appointment named property and the type its value takes.

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/directory"
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
@@ -110,7 +111,7 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 		s.davError(w, err, http.StatusBadRequest)
 		return
 	}
-	msg, status, err := s.importCalendarBody(st, fid, body)
+	msg, status, err := s.importCalendarBody(st, fid, user, body)
 	if err != nil {
 		s.davError(w, err, status)
 		return
@@ -207,7 +208,7 @@ func calPutPrecondition(r *http.Request, existing objectstore.FolderObject, foun
 // importCalendarBody converts a PUT body into the stored message its collection
 // calls for: a VTODO in Tasks, a VJOURNAL in Journal, and a VEVENT elsewhere. On
 // failure it also reports the HTTP status to answer with.
-func (s *Server) importCalendarBody(st *objectstore.Store, fid int64, body []byte) (*oxcmail.Message, int, error) {
+func (s *Server) importCalendarBody(st *objectstore.Store, fid int64, user string, body []byte) (*oxcmail.Message, int, error) {
 	switch fid {
 	case int64(mapi.PrivateFIDTasks):
 		task, _, ok := oxcical.ParseVTODO(body)
@@ -229,6 +230,9 @@ func (s *Server) importCalendarBody(st *objectstore.Store, fid int64, body []byt
 	opt := icalOptions(st)
 	var zones oxcical.ZoneLosses
 	opt.OnUnresolvedZone = zones.Add
+	// A client may PUT a floating time, which means its own wall clock; the
+	// mailbox owner's zone is this server's reading of that.
+	opt.DefaultZone = directory.UserZone(s.accounts, user)
 	msg, err := oxcical.Import(body, opt)
 	if err != nil {
 		return nil, http.StatusBadRequest, err

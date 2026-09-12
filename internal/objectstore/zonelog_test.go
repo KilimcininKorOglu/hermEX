@@ -27,6 +27,13 @@ func inviteWithZone(tzidParam string) []byte {
 // message plus the events delivery logged.
 func deliverInvite(t *testing.T, raw []byte) (*Store, MessageInfo, *captureSink) {
 	t.Helper()
+	return deliverInviteInZone(t, raw, nil)
+}
+
+// deliverInviteInZone is deliverInvite with the mailbox owner's zone set, the way
+// the delivery path sets it from the directory record.
+func deliverInviteInZone(t *testing.T, raw []byte, zone *time.Location) (*Store, MessageInfo, *captureSink) {
+	t.Helper()
 	st, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatalf("open: %v", err)
@@ -34,6 +41,7 @@ func deliverInvite(t *testing.T, raw []byte) (*Store, MessageInfo, *captureSink)
 	t.Cleanup(func() { st.Close() })
 	sink := &captureSink{}
 	st.logger = logging.New(sink)
+	st.SetDefaultZone(zone)
 
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), raw, time.Now(), 0)
 	if err != nil {
@@ -113,6 +121,41 @@ func wantNoAddresses(t *testing.T, fields logging.Fields) {
 		if s, ok := val.(string); ok && strings.Contains(s, "@") {
 			t.Errorf("field %q carries an address: %q", key, s)
 		}
+	}
+}
+
+// TestDeliveredFloatingInviteUsesTheMailboxZone covers an invitation whose times
+// carry no zone at all. Such a value means the reader's own wall clock, so it
+// belongs in the mailbox owner's zone; stored without one it lands wrong by that
+// owner's offset. Istanbul is UTC+3, so 10:30 there is 07:30Z.
+func TestDeliveredFloatingInviteUsesTheMailboxZone(t *testing.T) {
+	zone, err := time.LoadLocation("Europe/Istanbul")
+	if err != nil {
+		t.Fatalf("load zone: %v", err)
+	}
+	st, info, sink := deliverInviteInZone(t, inviteWithZone(""), zone)
+	got := appointmentStart(t, st, info.ID)
+	want := time.Date(2026, 8, 11, 7, 30, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Fatalf("stored start = %s, want %s", got.Format(time.RFC3339), want.Format(time.RFC3339))
+	}
+	if _, ok := sink.find("calendar.zone_unresolved"); ok {
+		t.Error("a floating time read in the mailbox zone was logged as a loss")
+	}
+}
+
+// TestDeliveredFloatingInviteIsLoggedWithoutAMailboxZone is the other side: with
+// no zone for the mailbox the time is still read as UTC, and that is recorded
+// rather than passing silently.
+func TestDeliveredFloatingInviteIsLoggedWithoutAMailboxZone(t *testing.T) {
+	_, _, sink := deliverInvite(t, inviteWithZone(""))
+	e, ok := sink.find("calendar.zone_unresolved")
+	if !ok {
+		t.Fatal("a floating time read as UTC was not logged")
+	}
+	zones, _ := e.Fields["zones"].([]string)
+	if len(zones) != 1 || zones[0] != "(floating)" {
+		t.Errorf("zones field = %#v, want the floating marker", e.Fields["zones"])
 	}
 }
 

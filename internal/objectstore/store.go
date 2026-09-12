@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
@@ -124,6 +125,11 @@ type Store struct {
 	// logger receives store infrastructure failures (SQL/IO errors); nil
 	// disables logging. Stamped from defaultLogger at Open.
 	logger *logging.Logger
+	// defaultZone is the wall clock a floating iCalendar time in a delivered
+	// message means, which is the mailbox owner's own zone. The store cannot
+	// learn it (it holds a path, not an identity), so the delivering caller sets
+	// it with SetDefaultZone. nil reads such a time as UTC and logs that it did.
+	defaultZone *time.Location
 	// backupHook is a test-only seam invoked by Backup between the two database
 	// snapshots. Production leaves it nil (zero cost); a test sets it to drive a
 	// concurrent append into the skew window and assert the copy stays consistent.
@@ -163,6 +169,14 @@ func (s *Store) ipmSubtree() int64 {
 // handles address the same physical mailbox (as opposed to comparing the
 // *Store pointers, which differ per Open).
 func (s *Store) Dir() string { return s.dir }
+
+// SetDefaultZone names the wall clock a floating iCalendar time in a delivered
+// message means: the mailbox owner's own zone. A floating value carries no zone
+// and RFC 5545 §3.3.5 defines it as the reader's local time, so a message stored
+// without this lands wrong by the owner's offset. Call it right after Open, on
+// the delivery path that knows whose mailbox this is; it is not safe to call
+// while another goroutine is appending.
+func (s *Store) SetDefaultZone(loc *time.Location) { s.defaultZone = loc }
 
 // logStoreError reports a store infrastructure failure (a SQL or filesystem
 // error from the underlying databases or content files) to the central log under

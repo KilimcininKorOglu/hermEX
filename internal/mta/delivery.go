@@ -881,6 +881,10 @@ func deliver(accounts directory.Accounts, from, rcptAddr, path string, raw []byt
 		return err
 	}
 	defer st.Close()
+	// A meeting invitation can carry a floating time, which means the reader's own
+	// wall clock; without the owner's zone it would be stored as UTC and land at
+	// the wrong hour for anyone not at UTC.
+	st.SetDefaultZone(directory.UserZone(accounts, rcptAddr))
 
 	info, err := st.AppendMessage(folder, raw, received, 0)
 	if err != nil {
