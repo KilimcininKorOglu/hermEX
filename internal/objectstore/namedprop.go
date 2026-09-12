@@ -40,7 +40,15 @@ func namedPropKey(n mapi.PropertyName) (string, bool) {
 // allocating new ids (when create is true) for names not seen before. The
 // result is parallel to names; an unknown name with create false, or an
 // unrepresentable name, maps to 0. Allocated ids are stable across reopen.
+//
+// With create false the resolver only reads, so it runs without a transaction.
+// The connection takes its write lock at BEGIN, so wrapping this read would make
+// every caller queue behind any concurrent writer for the busy timeout, and this
+// is one of the most called methods in the store.
 func (s *Store) GetNamedPropIDs(create bool, names []mapi.PropertyName) ([]uint16, error) {
+	if !create {
+		return getNamedPropIDs(s.objdb, false, names)
+	}
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		return nil, err

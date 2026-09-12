@@ -111,14 +111,17 @@ type QueueEntry struct {
 const journalSizeLimit = 8 << 20
 
 // dsn mirrors the object store's connection string: a busy timeout, WAL
-// journaling, enforced foreign keys, FULL synchronous mode for durability, and a
-// bound on the write-ahead log file.
+// journaling, enforced foreign keys, FULL synchronous mode for durability, an
+// immediate transaction lock, and a bound on the write-ahead log file. The
+// object store's dsn explains why each of the last two is there; seven daemons
+// write this one spool, so the lock mode matters here most.
 func dsn(path string) string {
 	return "file:" + path +
 		"?_pragma=busy_timeout(5000)" +
 		"&_pragma=journal_mode(WAL)" +
 		"&_pragma=foreign_keys(1)" +
 		"&_pragma=synchronous(FULL)" +
+		"&_txlock=immediate" +
 		fmt.Sprintf("&_pragma=journal_size_limit(%d)", journalSizeLimit)
 }
 

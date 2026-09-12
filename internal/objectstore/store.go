@@ -216,12 +216,20 @@ const journalSizeLimit = 8 << 20
 // connection stays open. The store offloads every large property value to a
 // content file, so an ordinary run settles well under the bound; the bound is
 // what keeps one oversized transaction from leaving its size behind.
+//
+// _txlock=immediate is what makes busy_timeout apply to a write. A deferred
+// BEGIN takes the write lock lazily on the first write, and SQLite skips the
+// busy handler for that upgrade and returns SQLITE_BUSY at once, so a second
+// writer fails immediately however long the timeout is. Taking the lock at BEGIN
+// puts the wait back where the timeout applies. Under WAL only one writer runs
+// at a time either way, so this costs no write concurrency.
 func dsn(path string) string {
 	return "file:" + path +
 		"?_pragma=busy_timeout(5000)" +
 		"&_pragma=journal_mode(WAL)" +
 		"&_pragma=foreign_keys(1)" +
 		"&_pragma=synchronous(FULL)" +
+		"&_txlock=immediate" +
 		fmt.Sprintf("&_pragma=journal_size_limit(%d)", journalSizeLimit)
 }
 
