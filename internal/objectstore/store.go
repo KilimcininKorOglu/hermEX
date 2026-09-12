@@ -421,38 +421,57 @@ func (s *Store) objectDriver() *migrate.SQLiteDriver {
 	}
 }
 
+// ensureIndexSchema creates the schema on a fresh IMAP index, rebuilds a damaged
+// one from the object store, and refuses an index this binary cannot read. The
+// index is a projection of the object store, so a damaged one is rebuilt rather
+// than reported: the alternative is a mailbox that breaks on every run until
+// someone deletes the file by hand.
 func (s *Store) ensureIndexSchema() error {
-	var name string
-	err := s.idxdb.QueryRow(
-		`SELECT name FROM sqlite_master WHERE type='table' AND name='folders'`).Scan(&name)
+	tables, err := s.indexTableCount()
+	if err != nil {
+		if !permanentDBFailure(err) {
+			return err
+		}
+		return s.rebuildIndex(err)
+	}
 	switch {
-	case err == sql.ErrNoRows:
-		// Fresh index: create the baseline schema and stamp its version.
-		for _, stmt := range indexBaseline {
-			if _, err := s.idxdb.Exec(stmt); err != nil {
-				return fmt.Errorf("exec %q: %w", firstLine(stmt), err)
-			}
-		}
-		// PRAGMA does not accept bound parameters; the value is a trusted constant.
-		if _, err := s.idxdb.Exec(fmt.Sprintf("PRAGMA user_version=%d", indexSchemaVersion)); err != nil {
+	case tables == 0:
+		// Fresh index: create the baseline schema and stamp its version. An index
+		// file that was lost outright looks exactly like this, so the mail the
+		// object store already holds is adopted rather than left invisible.
+		if err := s.createIndexBaseline(); err != nil {
 			return err
 		}
-	case err != nil:
-		return err
+		if err := s.runIndexMigrations(); err != nil {
+			return err
+		}
+		return s.adoptExistingMail()
+	case tables < len(indexTables):
+		return s.rebuildIndex(fmt.Errorf("the index holds %d of its %d tables", tables, len(indexTables)))
 	default:
-		// Existing index: refuse a pre-baseline dev schema; carry the rest forward.
-		var v int
-		if err := s.idxdb.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+		if err := s.verifyExistingIndex(); err != nil {
 			return err
-		}
-		if v < indexSchemaVersion {
-			return fmt.Errorf("schema version %d unsupported (want %d)", v, indexSchemaVersion)
 		}
 	}
 	// Fresh and existing indexes converge here: apply any migrations beyond the
 	// baseline once, and refuse an index recorded newer than this binary.
-	return migrate.Run(context.Background(),
-		&migrate.SQLiteDriver{DB: s.idxdb, Ver: migrate.UserVersion()}, indexSchemaVersion, indexMigrations)
+	return s.runIndexMigrations()
+}
+
+// verifyExistingIndex rebuilds an index whose tables are present but unreadable,
+// and refuses a pre-baseline dev schema.
+func (s *Store) verifyExistingIndex() error {
+	if damage := s.indexDamage(); damage != nil {
+		return s.rebuildIndex(damage)
+	}
+	var v int
+	if err := s.idxdb.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+		return err
+	}
+	if v < indexSchemaVersion {
+		return fmt.Errorf("schema version %d unsupported (want %d)", v, indexSchemaVersion)
+	}
+	return nil
 }
 
 // firstLine returns the first non-blank line of a SQL statement for error

@@ -1,6 +1,7 @@
 package objectstore
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -19,6 +20,12 @@ func removeIndexFiles(t *testing.T, dir string) {
 			t.Fatalf("remove index%s: %v", suffix, err)
 		}
 	}
+}
+
+// openIndexDirect opens the IMAP index file on its own, so a test can damage it
+// the way a lost page or a dropped table would.
+func openIndexDirect(dir string) (*sql.DB, error) {
+	return sql.Open("sqlite", dsn(filepath.Join(dir, indexDBName)))
 }
 
 // TestRepairMailboxRebuildsAnEmptiedIndex is the defect this change fixes. A

@@ -217,14 +217,16 @@ func TestDigestLogsJunkListReadFailure(t *testing.T) {
 	maildir := t.TempDir()
 	appendJunk(t, maildir, "spammy") // provisions the store and seeds a junk message
 
-	// Break the index so Open still succeeds but ListMessages fails: drop the
-	// messages table without touching the recorded schema version, so Open runs no
-	// migration to recreate it.
+	// Break the index so Open still succeeds but ListMessages fails: drop one
+	// column the listing scans. Open's index check reads each table and rebuilds an
+	// index it cannot read, so dropping the whole table would be repaired instead of
+	// observed; a missing column leaves every probe readable and still faults the
+	// listing.
 	db, err := sql.Open("sqlite", filepath.Join(maildir, "imapindex.sqlite3"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`DROP TABLE messages`); err != nil {
+	if _, err := db.Exec(`ALTER TABLE messages DROP COLUMN preview`); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()
