@@ -8,30 +8,19 @@ import (
 // ExpandRecurrence expands a recurring VEVENT into its individual instances within
 // [rangeStart, rangeEnd), for the CalDAV <C:expand> report (RFC 4791 9.6.5): one
 // VEVENT per occurrence with RECURRENCE-ID set, DTSTART/DTEND shifted to the instance,
-// and the recurrence rules (RRULE/RDATE/EXDATE) stripped. EXDATE instances are
-// skipped, and a RECURRENCE-ID override component present in the source replaces the
-// generated instance for that occurrence. ok is false when the object carries no
-// master RRULE, so the caller serves it unchanged.
+// and the recurrence rules (RRULE/RDATE/EXDATE) stripped. RDATE instants are
+// expanded alongside the RRULE ones, EXDATE instances are skipped, and a
+// RECURRENCE-ID override component present in the source replaces the generated
+// instance for that occurrence. ok is false when the object defines no recurrence
+// set at all (neither RRULE nor RDATE), so the caller serves it unchanged.
 func ExpandRecurrence(ical []byte, rangeStart, rangeEnd time.Time) ([]byte, bool) {
 	cal, err := parseICal(ical)
 	if err != nil {
 		return nil, false
 	}
 	master, overrides := splitSeries(cal)
-	if master == nil {
-		return nil, false
-	}
-	start, allDay, sok := parseICalTime(master.prop("DTSTART"))
-	if !sok {
-		return nil, false
-	}
-	end, eok := eventEnd(master, start, allDay)
-	if !eok {
-		end = start
-	}
-	dur := end.Sub(start)
-	rec, rok := parseRRule(master.prop("RRULE").value)
-	if !rok {
+	s, ok := seriesShape(master)
+	if !ok {
 		return nil, false
 	}
 	skip := excludedInstants(master)
@@ -40,23 +29,22 @@ func ExpandRecurrence(ical []byte, rangeStart, rangeEnd time.Time) ([]byte, bool
 	b.add("BEGIN:VCALENDAR")
 	b.add("VERSION:2.0")
 	b.add("PRODID:-//hermEX//CalDAV//EN")
-	for _, t := range rec.Occurrences(start.UTC(), rangeStart, rangeEnd, 4096) {
-		key := instantKey(t)
-		if skip[key] {
-			continue
-		}
-		if ov, ok := overrides[key]; ok {
+	for _, t := range seriesInstants(master, s, skip, rangeStart, rangeEnd) {
+		if ov, ok := overrides[instantKey(t)]; ok {
 			writeComponent(b, ov)
 			continue
 		}
-		writeInstance(b, master, t, t.Add(dur), allDay)
+		writeInstance(b, master, t, t.Add(s.dur), s.allDay)
 	}
 	b.add("END:VCALENDAR")
 	return b.buf.Bytes(), true
 }
 
-// splitSeries separates the series master (the VEVENT carrying RRULE) from the
-// RECURRENCE-ID overrides, keyed by the occurrence each one replaces.
+// splitSeries separates the series master (the VEVENT that carries no
+// RECURRENCE-ID) from the RECURRENCE-ID overrides, keyed by the occurrence each
+// one replaces. A master defines its recurrence set with RRULE, with RDATE, or
+// with both; seriesShape decides whether it defines one at all, so a plain single
+// event is reported as no series there rather than here.
 func splitSeries(cal *icomp) (master *icomp, overrides map[string]*icomp) {
 	overrides = map[string]*icomp{}
 	for _, c := range cal.comps {
@@ -69,7 +57,7 @@ func splitSeries(cal *icomp) (master *icomp, overrides map[string]*icomp) {
 			}
 			continue
 		}
-		if c.prop("RRULE") != nil {
+		if master == nil {
 			master = c
 		}
 	}

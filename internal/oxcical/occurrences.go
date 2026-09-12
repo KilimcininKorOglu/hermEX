@@ -1,6 +1,7 @@
 package oxcical
 
 import (
+	"slices"
 	"strings"
 	"time"
 )
@@ -11,10 +12,11 @@ type Span struct {
 }
 
 // OccurrencesIn returns the spans a stored recurring object occupies within
-// [rangeStart, rangeEnd), honoring EXDATE, RECURRENCE-ID overrides (an override's
-// own time replaces the generated instance) and an override cancelled with
-// STATUS:CANCELLED. ok is false when the object carries no series master, so the
-// caller reads the item's own stored start and end instead.
+// [rangeStart, rangeEnd), honoring RRULE and RDATE together, EXDATE,
+// RECURRENCE-ID overrides (an override's own time replaces the generated
+// instance) and an override cancelled with STATUS:CANCELLED. ok is false when the
+// object defines no recurrence set, so the caller reads the item's own stored
+// start and end instead.
 //
 // TRANSP is not read: an instance counts as occupied whenever the item does, which
 // is the busy status the caller already holds for the object as a whole.
@@ -30,12 +32,8 @@ func OccurrencesIn(ical []byte, rangeStart, rangeEnd time.Time) ([]Span, bool) {
 	}
 	skip := excludedInstants(master)
 	out := overrideSpans(overrides, skip, s.dur, rangeStart, rangeEnd)
-	for _, t := range s.rec.Occurrences(s.start.UTC(), rangeStart, rangeEnd, 4096) {
-		key := instantKey(t)
-		if skip[key] {
-			continue
-		}
-		if _, overridden := overrides[key]; overridden {
+	for _, t := range seriesInstants(master, s, skip, rangeStart, rangeEnd) {
+		if _, overridden := overrides[instantKey(t)]; overridden {
 			continue // already tested at its own time
 		}
 		if span := (Span{Start: t, End: t.Add(s.dur)}); overlapsRange(span.Start, span.End, rangeStart, rangeEnd) {
@@ -45,12 +43,16 @@ func OccurrencesIn(ical []byte, rangeStart, rangeEnd time.Time) ([]Span, bool) {
 	return out, true
 }
 
-// series is what an expansion needs from the master: its first start, one
-// instance's duration, and the parsed rule.
+// series is what an expansion needs from the master: its first start, whether
+// that start is a date without a time, one instance's duration, and the parsed
+// rule. hasRule is false for a series defined by RDATE alone, which carries no
+// RRULE to expand.
 type series struct {
-	start time.Time
-	dur   time.Duration
-	rec   Recurrence
+	start   time.Time
+	allDay  bool
+	dur     time.Duration
+	rec     Recurrence
+	hasRule bool
 }
 
 // seriesShape reads the master's expansion inputs. ok is false when the component
@@ -64,19 +66,79 @@ func seriesShape(master *icomp) (series, bool) {
 	if !ok {
 		return series{}, false
 	}
-	rrule := master.prop("RRULE")
-	if rrule == nil {
-		return series{}, false
-	}
-	rec, ok := parseRRule(rrule.value)
-	if !ok {
+	s := series{start: start, allDay: allDay}
+	switch rrule := master.prop("RRULE"); {
+	case rrule != nil:
+		rec, ok := parseRRule(rrule.value)
+		if !ok {
+			return series{}, false
+		}
+		s.rec, s.hasRule = rec, true
+	case len(addedInstants(master)) == 0:
+		// Neither a rule nor an added date: a single event, not a series.
 		return series{}, false
 	}
 	end, eok := eventEnd(master, start, allDay)
 	if !eok {
 		end = start
 	}
-	return series{start: start, dur: end.Sub(start), rec: rec}, true
+	s.dur = end.Sub(start)
+	return s, true
+}
+
+// seriesInstants returns the instance starts the master defines within
+// [rangeStart, rangeEnd), in chronological order: the RRULE expansion plus every
+// RDATE instant, with the EXDATE instants removed. RFC 5545 section 3.8.5 makes
+// RDATE and RRULE two halves of one recurrence set, and EXDATE removes an
+// instance from either half.
+func seriesInstants(master *icomp, s series, skip map[string]bool, rangeStart, rangeEnd time.Time) []time.Time {
+	var out []time.Time
+	seen := map[string]bool{}
+	add := func(t time.Time) {
+		key := instantKey(t)
+		if skip[key] || seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, t)
+	}
+	inRange := func(t time.Time) bool { return !t.Before(rangeStart) && t.Before(rangeEnd) }
+	if s.hasRule {
+		for _, t := range s.rec.Occurrences(s.start.UTC(), rangeStart, rangeEnd, 4096) {
+			add(t)
+		}
+	} else if inRange(s.start) {
+		// A rule expansion already yields DTSTART; an RDATE-only set states it
+		// once in DTSTART and never repeats it (RFC 5545 section 3.8.5.2).
+		add(s.start)
+	}
+	for _, t := range addedInstants(master) {
+		if inRange(t) {
+			add(t)
+		}
+	}
+	slices.SortFunc(out, func(a, b time.Time) int { return a.Compare(b) })
+	return out
+}
+
+// addedInstants collects the occurrences the master's RDATE lines add. A PERIOD
+// value is not read, because an instance carries the series duration here and a
+// period states a duration of its own.
+func addedInstants(master *icomp) []time.Time {
+	var out []time.Time
+	for _, l := range master.propLines("RDATE") {
+		for v := range strings.SplitSeq(l.value, ",") {
+			v = strings.TrimSpace(v)
+			if v == "" || strings.Contains(v, "/") {
+				continue
+			}
+			rd := iline{name: "RDATE", params: l.params, value: v}
+			if t, _, ok := parseICalTime(&rd); ok {
+				out = append(out, t)
+			}
+		}
+	}
+	return out
 }
 
 // overrideSpans returns the spans the object's overrides occupy in the window. An
