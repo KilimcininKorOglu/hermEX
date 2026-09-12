@@ -64,21 +64,23 @@ func applyObjectClientCommands(st *objectstore.Store, folderID int64, cstate *co
 		return nil
 	}
 	var responses []*wbxml.Node
-	added := map[string]bool{}
+	written := map[string]bool{}
 	for _, cmd := range cmds.Children {
 		switch cmd.Tag {
 		case wbxml.ASAdd:
 			if resp, sid := cls.addObject(st, cmd); resp != nil {
-				added[sid] = true
+				written[sid] = true
 				responses = append(responses, resp)
 			}
 		case wbxml.ASChange:
-			cls.changeObject(st, cmd)
+			if sid := cls.changeObject(st, cmd); sid != "" {
+				written[sid] = true
+			}
 		case wbxml.ASDelete:
 			deleteObject(st, cstate, cmd)
 		}
 	}
-	foldAddedIntoSnapshot(st, cls.folderID, cstate, added)
+	foldClientWritesIntoSnapshot(st, cls.folderID, cstate, written)
 	return responses
 }
 
@@ -106,21 +108,27 @@ func (cls objectClass) addObject(st *objectstore.Store, cmd *wbxml.Node) (*wbxml
 		wbxml.Str(wbxml.ASStatus, strconv.Itoa(syncStatusOK))), sid
 }
 
-// changeObject rewrites one item's properties from a device's Change command.
-func (cls objectClass) changeObject(st *objectstore.Store, cmd *wbxml.Node) {
-	id, err := strconv.ParseInt(cmd.ChildText(wbxml.ASServerID), 10, 64)
+// changeObject rewrites one item's properties from a device's Change command and
+// returns the server id it wrote, so the caller can fold the edit into the device
+// snapshot. It answers an empty id when the command is incomplete or the write fails.
+func (cls objectClass) changeObject(st *objectstore.Store, cmd *wbxml.Node) string {
+	sid := cmd.ChildText(wbxml.ASServerID)
+	id, err := strconv.ParseInt(sid, 10, 64)
 	if err != nil {
-		return
+		return ""
 	}
 	data := cmd.Child(wbxml.ASData)
 	if data == nil {
-		return
+		return ""
 	}
 	props, err := cls.parse(st, data)
 	if err != nil || len(props) == 0 {
-		return
+		return ""
 	}
-	_ = st.SetMessageProperties(id, props)
+	if st.SetMessageProperties(id, props) != nil {
+		return ""
+	}
+	return sid
 }
 
 // deleteObject soft-deletes one item and drops it from the device snapshot.
@@ -135,11 +143,13 @@ func deleteObject(st *objectstore.Store, cstate *collectionState, cmd *wbxml.Nod
 	}
 }
 
-// foldAddedIntoSnapshot records the just-added items at their current change
-// number, so objectChanges does not echo them back as server adds to the device
-// that just created them.
-func foldAddedIntoSnapshot(st *objectstore.Store, folderID int64, cstate *collectionState, added map[string]bool) {
-	if len(added) == 0 {
+// foldClientWritesIntoSnapshot records the items the device just added or changed
+// at their current change number, so objectChanges does not echo them back to the
+// device that wrote them. A Change has to be folded for the same reason an Add
+// does: the write advances the item's change number, and without this the device
+// receives its own edit back on the next Sync.
+func foldClientWritesIntoSnapshot(st *objectstore.Store, folderID int64, cstate *collectionState, written map[string]bool) {
+	if len(written) == 0 {
 		return
 	}
 	objs, err := st.ListFolderObjects(folderID)
@@ -147,7 +157,7 @@ func foldAddedIntoSnapshot(st *objectstore.Store, folderID int64, cstate *collec
 		return
 	}
 	for _, o := range objs {
-		if sid := strconv.FormatInt(o.ID, 10); added[sid] {
+		if sid := strconv.FormatInt(o.ID, 10); written[sid] {
 			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 			cstate.Items[sid] = int64(o.ChangeNumber)
 		}

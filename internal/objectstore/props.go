@@ -63,14 +63,19 @@ func (s *Store) GetFolderProperties(folderID int64, tags ...mapi.PropTag) (mapi.
 	return s.getObjectProps("folder_properties", "folder_id", folderID, tags)
 }
 
-// SetMessageProperties upserts properties on a message. It rebuilds the message's
-// cached wire form, since a property write can change what the message serializes to.
+// SetMessageProperties upserts properties on a message, allocating a fresh change
+// number and waking the change consumers, which is what ModifyMessageProperties
+// does with no deletes.
+//
+// It did neither before, and that was a silent data-visibility failure: ICS content
+// sync reports a message as updated only when its change_number column advances
+// (see GetContentSync), so a property written through here landed in the database
+// and no already-synced client, Outlook, ActiveSync or EWS, ever downloaded it. A
+// rule's tag action, a category, a follow-up flag and a contact photo were all
+// written this way. The callers that write onto a message they just created pay one
+// extra change number for the guarantee, on a message no client has seen yet.
 func (s *Store) SetMessageProperties(messageID int64, props mapi.PropertyValues) error {
-	if err := s.setObjectProps("message_properties", "message_id", messageID, props); err != nil {
-		return err
-	}
-	s.refreshEML(messageID)
-	return nil
+	return s.ModifyMessageProperties(messageID, props)
 }
 
 // GetMessageProperties returns the requested message properties; with no tags
@@ -80,11 +85,11 @@ func (s *Store) GetMessageProperties(messageID int64, tags ...mapi.PropTag) (map
 }
 
 // ModifyMessageProperties upserts properties on an existing message and, in the
-// same transaction, reallocates the message's change number, the in-place-edit
-// counterpart to SetMessageProperties (a pure upsert that leaves the change
-// number untouched). The reference allocates a fresh PidTagChangeNumber on every
-// dirty message save, for a modify exactly as for a create, so an edited-and-
-// resaved message is observed as changed. The load-bearing write is the
+// same transaction, reallocates the message's change number. It also deletes the
+// named properties, which is the only thing SetMessageProperties cannot express.
+// A fresh PidTagChangeNumber is allocated on every dirty message save, for a
+// modify exactly as for a create, so an edited-and-resaved message is observed
+// as changed. The load-bearing write is the
 // messages-row change_number bump: ICS content-sync reports the message as
 // updated only when that column advances, so this is what drives the "updated"
 // branch of GetContentSync. The message_size column is left stale (v1 does not
