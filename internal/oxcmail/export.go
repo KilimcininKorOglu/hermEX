@@ -311,7 +311,15 @@ func writeMailHead(b *bytes.Buffer, msg *Message) {
 // writeOriginatorFields emits From, which carries the sent-representing identity,
 // and Sender, which is emitted only when it differs from the representing address.
 func writeOriginatorFields(b *bytes.Buffer, msg *Message) {
-	if from := identityAddress(msg.Props, representingTags); from != "" {
+	// The representing identity is who the message is from; a message that stores
+	// only a sender is from that sender. Without this fallback such a message went
+	// out with no From header at all, which the CalDAV scheduling path produced for
+	// every iTIP mail it built.
+	from := identityAddress(msg.Props, representingTags)
+	if from == "" {
+		from = identityAddress(msg.Props, senderTags)
+	}
+	if from != "" {
 		writeField(b, "From", from)
 	}
 	senderSMTP := propString(msg.Props, mapi.PrSenderSmtpAddress)

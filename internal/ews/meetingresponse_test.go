@@ -216,6 +216,23 @@ func TestMeetingResponseNotifiesOrganizer(t *testing.T) {
 	if !bytes.Contains(due[0].Body, []byte("METHOD:REPLY")) || !bytes.Contains(due[0].Body, []byte("PARTSTAT=ACCEPTED")) {
 		t.Errorf("reply body is not an iTIP REPLY accept:\n%s", due[0].Body)
 	}
+	// The From header must name the responder. Naming the organizer instead sends
+	// them a reply apparently from themselves, fails DMARC alignment for their
+	// domain, and lets any sender pick the address hermEX emits from by putting it
+	// on the request.
+	if !bytes.Contains(due[0].Body, []byte("From: <"+testUser+">")) {
+		t.Errorf("the reply does not come From the responder %s:\n%s", testUser, headersOf(due[0].Body))
+	}
+	if bytes.Contains(due[0].Body, []byte("From: \"The Boss\"")) || bytes.Contains(due[0].Body, []byte("boss@external.test>\r\nSender")) {
+		t.Errorf("the reply comes From the organizer:\n%s", headersOf(due[0].Body))
+	}
+}
+
+// headersOf returns a message's header block, for a failure message that has to show
+// which identity was written without dumping the whole body.
+func headersOf(raw []byte) string {
+	head, _, _ := bytes.Cut(raw, []byte("\r\n\r\n"))
+	return string(head)
 }
 
 // seedExternalMeetingRequest files a meeting request from an external organizer

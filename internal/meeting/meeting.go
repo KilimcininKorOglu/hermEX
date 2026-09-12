@@ -407,11 +407,24 @@ func notifyOrganizer(st *objectstore.Store, accounts directory.Accounts, spool *
 		return nil
 	}
 
+	organizerName := propStr(req.Props, mapi.PrSentRepresentingName)
+
 	resp := stripInboundCruft(req.Props)
 	resp.Set(mapi.PrMessageClass, responseClass(response))
 	resp.Set(mapi.PrSenderSmtpAddress, sender)
 	resp.Set(mapi.PrSenderEmailAddress, sender)
 	resp.Set(mapi.PrSenderAddrType, "SMTP")
+	// The response is FROM the responder, so the responder is also the representing
+	// identity. Leaving the request's organizer there made the reply's From header
+	// name the organizer: the organizer received a reply apparently from themselves,
+	// it failed DMARC alignment for their domain, and any sender could have hermEX
+	// emit mail from an address of their choosing by putting it on a request.
+	resp.Set(mapi.PrSentRepresentingSmtpAddress, sender)
+	resp.Set(mapi.PrSentRepresentingEmailAddress, sender)
+	resp.Set(mapi.PrSentRepresentingAddrType, "SMTP")
+	// Cleared rather than left: the request's value is the organizer's display name,
+	// and carrying it over would label the responder's own address with it.
+	resp.Set(mapi.PrSentRepresentingName, "")
 	resp.Set(mapi.PrSubject, responsePrefix(response)+propStr(req.Props, mapi.PrSubject))
 	resp.Set(mapi.PrClientSubmitTime, mapi.UnixToNTTime(time.Now()))
 
@@ -420,7 +433,7 @@ func notifyOrganizer(st *objectstore.Store, accounts directory.Accounts, spool *
 		Recipients: []mapi.PropertyValues{{
 			{Tag: mapi.PrRecipientType, Value: int32(mapi.RecipTo)},
 			{Tag: mapi.PrSmtpAddress, Value: organizer},
-			{Tag: mapi.PrDisplayName, Value: propStr(req.Props, mapi.PrSentRepresentingName)},
+			{Tag: mapi.PrDisplayName, Value: organizerName},
 		}},
 	}
 

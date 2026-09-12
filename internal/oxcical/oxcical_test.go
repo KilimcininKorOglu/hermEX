@@ -199,6 +199,9 @@ func TestImportOrganizer(t *testing.T) {
 // TestExportReplyIdentity confirms a meeting-response message exports an iTIP REPLY:
 // a METHOD:REPLY, the organizer being answered, and the responder as the sole
 // attendee carrying the response in PARTSTAT, the inverse of the import mapping.
+// A response is FROM the responder, so it stores the responder as its representing
+// identity and addresses the organizer as its recipient; the export reads the
+// ATTENDEE from the first and the ORGANIZER from the second.
 func TestExportReplyIdentity(t *testing.T) {
 	r := newResolver()
 	_, _ = r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole, nameICalUID}) // allocate named ids, as a writer would
@@ -207,11 +210,15 @@ func TestExportReplyIdentity(t *testing.T) {
 		{Tag: r.tag(mapi.NameAppointmentStartWhole, mapi.PtSysTime), Value: mapi.UnixToNTTime(time.Date(2026, 7, 1, 14, 0, 0, 0, time.UTC))},
 		{Tag: r.tag(nameICalUID, mapi.PtUnicode), Value: "meeting-42"},
 		{Tag: mapi.PrSubject, Value: "Quarterly Review"},
-		{Tag: mapi.PrSentRepresentingSmtpAddress, Value: "organizer@hermex.test"},
-		{Tag: mapi.PrSentRepresentingName, Value: "The Organizer"},
+		{Tag: mapi.PrSentRepresentingSmtpAddress, Value: "alice@hermex.test"},
+		{Tag: mapi.PrSentRepresentingName, Value: "Alice"},
 		{Tag: mapi.PrSenderSmtpAddress, Value: "alice@hermex.test"},
 		{Tag: mapi.PrSenderName, Value: "Alice"},
-	}}
+	}, Recipients: []mapi.PropertyValues{{
+		{Tag: mapi.PrRecipientType, Value: int32(mapi.RecipTo)},
+		{Tag: mapi.PrSmtpAddress, Value: "organizer@hermex.test"},
+		{Tag: mapi.PrDisplayName, Value: "The Organizer"},
+	}}}
 	out, err := Export(msg, r.opt())
 	if err != nil {
 		t.Fatal(err)

@@ -23,11 +23,15 @@ func TestOrganizerIdentityCannotInjectLines(t *testing.T) {
 		{Tag: r.tag(mapi.NameAppointmentStartWhole, mapi.PtSysTime), Value: mapi.UnixToNTTime(time.Date(2026, 7, 1, 14, 0, 0, 0, time.UTC))},
 		{Tag: r.tag(nameICalUID, mapi.PtUnicode), Value: "meeting-42"},
 		{Tag: mapi.PrSubject, Value: "Quarterly Review"},
-		{Tag: mapi.PrSentRepresentingSmtpAddress, Value: "organizer@hermex.test"},
-		{Tag: mapi.PrSentRepresentingName, Value: "Boss\r\nX-INJECTED:organizer"},
-		{Tag: mapi.PrSenderSmtpAddress, Value: "alice@hermex.test\r\nX-INJECTED:attendee"},
+		{Tag: mapi.PrSentRepresentingSmtpAddress, Value: "alice@hermex.test\r\nX-INJECTED:attendee"},
+		{Tag: mapi.PrSentRepresentingName, Value: "Alice"},
+		{Tag: mapi.PrSenderSmtpAddress, Value: "alice@hermex.test"},
 		{Tag: mapi.PrSenderName, Value: "Alice"},
-	}}
+	}, Recipients: []mapi.PropertyValues{{
+		{Tag: mapi.PrRecipientType, Value: int32(mapi.RecipTo)},
+		{Tag: mapi.PrSmtpAddress, Value: "organizer@hermex.test"},
+		{Tag: mapi.PrDisplayName, Value: "Boss\r\nX-INJECTED:organizer"},
+	}}}
 
 	out, err := Export(msg, r.opt())
 	if err != nil {
@@ -50,11 +54,15 @@ func TestOrdinaryIdentitySurvives(t *testing.T) {
 		{Tag: r.tag(mapi.NameAppointmentStartWhole, mapi.PtSysTime), Value: mapi.UnixToNTTime(time.Date(2026, 7, 1, 14, 0, 0, 0, time.UTC))},
 		{Tag: r.tag(nameICalUID, mapi.PtUnicode), Value: "meeting-42"},
 		{Tag: mapi.PrSubject, Value: "Quarterly Review"},
-		{Tag: mapi.PrSentRepresentingSmtpAddress, Value: "organizer@hermex.test"},
-		{Tag: mapi.PrSentRepresentingName, Value: "The Organizer"},
+		{Tag: mapi.PrSentRepresentingSmtpAddress, Value: "alice@hermex.test"},
+		{Tag: mapi.PrSentRepresentingName, Value: "Alice"},
 		{Tag: mapi.PrSenderSmtpAddress, Value: "alice@hermex.test"},
 		{Tag: mapi.PrSenderName, Value: "Alice"},
-	}}
+	}, Recipients: []mapi.PropertyValues{{
+		{Tag: mapi.PrRecipientType, Value: int32(mapi.RecipTo)},
+		{Tag: mapi.PrSmtpAddress, Value: "organizer@hermex.test"},
+		{Tag: mapi.PrDisplayName, Value: "The Organizer"},
+	}}}
 
 	out, err := Export(msg, r.opt())
 	if err != nil {

@@ -156,11 +156,17 @@ func exportAlarm(b *builder, p *mapi.PropertyValues, named map[mapi.PropertyName
 // meeting appointment it is the organizer plus the full stored recipient list, so
 // the invitee set round-trips for CalDAV clients and stays visible to every
 // protocol (single-data). A plain appointment has no recipients and emits neither.
+//
+// A response reads its ATTENDEE from the representing identity, because that is who
+// the message is from, and its ORGANIZER from the message's one recipient, because a
+// response is addressed to the organizer it answers. Reading the ORGANIZER from the
+// representing identity instead made the responder's own address the organizer on an
+// inbound response, and forced a produced response to store the organizer as the
+// representing identity, which then became the mail's From header.
 func exportIdentity(b *builder, msg *oxcmail.Message, partstat string) {
 	p := &msg.Props
 	if partstat != "" {
-		addParams(b, "ORGANIZER", mailtoParams(p, mapi.PrSentRepresentingSmtpAddress, mapi.PrSentRepresentingName, ""))
-		addParams(b, "ATTENDEE", mailtoParams(p, mapi.PrSenderSmtpAddress, mapi.PrSenderName, partstat))
+		exportReplyIdentity(b, msg, partstat)
 		return
 	}
 	if len(msg.Recipients) == 0 {
@@ -170,6 +176,21 @@ func exportIdentity(b *builder, msg *oxcmail.Message, partstat string) {
 	for i := range msg.Recipients {
 		addParams(b, "ATTENDEE", mailtoParams(&msg.Recipients[i], mapi.PrSmtpAddress, mapi.PrDisplayName, ""))
 	}
+}
+
+// exportReplyIdentity emits an iTIP REPLY's ORGANIZER and ATTENDEE. The responder is
+// the representing identity, falling back to the sender for a message that stores
+// only one. The organizer is the first recipient.
+func exportReplyIdentity(b *builder, msg *oxcmail.Message, partstat string) {
+	p := &msg.Props
+	attendee := mailtoParams(p, mapi.PrSentRepresentingSmtpAddress, mapi.PrSentRepresentingName, partstat)
+	if attendee == "" {
+		attendee = mailtoParams(p, mapi.PrSenderSmtpAddress, mapi.PrSenderName, partstat)
+	}
+	if len(msg.Recipients) > 0 {
+		addParams(b, "ORGANIZER", mailtoParams(&msg.Recipients[0], mapi.PrSmtpAddress, mapi.PrDisplayName, ""))
+	}
+	addParams(b, "ATTENDEE", attendee)
 }
 
 // addParams emits a property line only when the identity rendered to something.
