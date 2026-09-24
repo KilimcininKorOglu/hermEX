@@ -1,7 +1,9 @@
 package admin
 
 import (
+	"io"
 	"net/http"
+	"regexp"
 	"testing"
 )
 
@@ -51,5 +53,43 @@ func TestAdminStaticIsCacheable(t *testing.T) {
 	defer resp2.Body.Close()
 	if resp2.StatusCode != http.StatusNotModified {
 		t.Errorf("If-None-Match match status %d, want 304", resp2.StatusCode)
+	}
+}
+
+// TestAdminPagesLinkVersionedAssets proves a page links each static file by a URL
+// carrying its content version, that exactly that URL is cached as immutable, and
+// that an old version keeps the short policy. Without the version a deploy that
+// changes style.css leaves browsers on the old file for the whole max-age.
+func TestAdminPagesLinkVersionedAssets(t *testing.T) {
+	ts := adminServer(t, &fakeDir{})
+	resp, err := http.Get(ts.URL + "/admin/ui/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := regexp.MustCompile(`/admin/static/style\.css\?v=[0-9a-f]{16}`).Find(body)
+	if link == nil {
+		t.Fatalf("the page does not link a versioned style.css:\n%s", body)
+	}
+	if !regexp.MustCompile(`/admin/static/htmx\.min\.js\?v=[0-9a-f]{16}`).Match(body) {
+		t.Error("the page does not link a versioned htmx.min.js")
+	}
+
+	for _, tc := range []struct{ url, want string }{
+		{string(link), "public, max-age=31536000, immutable"},
+		{"/admin/static/style.css?v=0000000000000000", "public, max-age=3600"},
+	} {
+		r, err := http.Get(ts.URL + tc.url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Body.Close()
+		if r.StatusCode != http.StatusOK || r.Header.Get("Cache-Control") != tc.want {
+			t.Errorf("%s: status %d, Cache-Control %q; want 200 and %q", tc.url, r.StatusCode, r.Header.Get("Cache-Control"), tc.want)
+		}
 	}
 }

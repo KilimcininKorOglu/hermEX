@@ -99,8 +99,9 @@ func noStoreAdmin(next http.Handler) http.Handler {
 // hash computed once at startup so a conditional request can be answered without
 // re-hashing.
 type staticAsset struct {
-	data []byte
-	etag string
+	data    []byte
+	etag    string
+	version string // the hash prefix a versioned URL carries
 }
 
 // buildStaticAssets hashes every embedded static file once, keyed by its base
@@ -120,26 +121,40 @@ func buildStaticAssets() map[string]staticAsset {
 		if err != nil {
 			continue
 		}
-		assets[e.Name()] = staticAsset{data: data, etag: fmt.Sprintf(`"%x"`, sha256.Sum256(data))}
+		sum := fmt.Sprintf("%x", sha256.Sum256(data))
+		assets[e.Name()] = staticAsset{data: data, etag: `"` + sum + `"`, version: sum[:assetVersionLen]}
 	}
 	return assets
 }
 
-// staticHandler serves the embedded static assets under /admin/static/. The
-// filenames are not content-hashed, so the assets get a short max-age plus a
-// strong ETag rather than immutable caching: http.ServeContent then answers a
-// matching If-None-Match with 304 and handles Range and HEAD. A zero modTime
-// makes it rely on the ETag alone, never a restart-varying Last-Modified.
+// Cache-Control values for the two ways a static asset is requested. A URL that
+// carries the current content version names bytes that never change, so it is
+// cached for a year without revalidation. Any other URL, unversioned or carrying
+// an old version, names whatever the file holds now, so it keeps a short max-age:
+// caching it as immutable would pin the current bytes under an old version.
+const (
+	staticVersionedCache   = "public, max-age=31536000, immutable"
+	staticUnversionedCache = "public, max-age=3600"
+)
+
+// staticHandler serves the embedded static assets under /admin/static/. Pages
+// link them through assetURL, whose version query makes the versioned URL
+// immutable. Every response also carries a strong ETag, so http.ServeContent
+// answers a matching If-None-Match with 304 and handles Range and HEAD. A zero
+// modTime makes it rely on the ETag alone, never a restart-varying Last-Modified.
 func staticHandler() http.Handler {
-	assets := buildStaticAssets()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/admin/static/")
-		a, ok := assets[name]
+		a, ok := staticAssets[name]
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Cache-Control", "public, max-age=3600")
+		cache := staticUnversionedCache
+		if r.URL.Query().Get("v") == a.version {
+			cache = staticVersionedCache
+		}
+		w.Header().Set("Cache-Control", cache)
 		w.Header().Set("ETag", a.etag)
 		http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(a.data))
 	})
