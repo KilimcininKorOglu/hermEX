@@ -34,7 +34,7 @@ holding `objects.sqlite3` + `imapindex.sqlite3` + `cid/` + `eml/`.
 A single TLS front door (`cmd/gateway`) reverse-proxies every HTTP-based
 protocol by longest-prefix match (`/autodiscover/`, `/ews/`,
 `/microsoft-server-activesync`, `/mapi/`, `/rpc/`, `/rpcwithcert/`, `/dav/`,
-`/.well-known/{cal,card}dav`) and serves the webmail SPA at the catch-all `/`, so
+`/.well-known/{cal,card}dav`, `/tlsrpt` to the MTA) and serves the webmail SPA at the catch-all `/`, so
 the whole stack is reachable behind one FQDN. It terminates TLS from a per-SNI
 certificate store with optional ACME issuance (`internal/tlscert`).
 
@@ -329,7 +329,7 @@ hermex-admin -config config.json <command> [args]
 
 The panel covers domains, users, aliases, mailing lists, delegates, devices, DKIM
 keys, DNS checks, the mail queue, quarantine, inbound DMARC and TLS reports,
-retention and the spam model. It is separate from end-user webmail and is not
+their retention, outbound DMARC report sending, and the spam model. It is separate from end-user webmail and is not
 behind the gateway.
 
 Every daemon can serve a `/healthz` endpoint reporting its dependency state and
@@ -379,7 +379,8 @@ admin panel, not on the command line.
 - **Mailbox store:** `internal/objectstore`, per-mailbox SQLite, addressed by built-in `PrivateFID_*` folder constants, never by name lookup. Opening a mailbox takes a shared advisory lock, so maintenance passes that reclaim storage can tell a live mailbox from an idle one instead of racing a writer.
 - **Auth and accounts:** `internal/directory` backed by MariaDB. Address-book queries are scoped to the caller's organization, or to the caller's own domain when the domain belongs to none.
 - **Second factor:** webmail and the admin panel share one TOTP enrollment per account, with single-use recovery codes. Once an account enables it, the account password stops working on IMAP, POP3, SMTP submission, ActiveSync, DAV, EWS and MAPI/HTTP, and only a per-client app password (minted in webmail) logs in there.
-- **Inbound reports:** DMARC aggregate, DMARC failure and TLS-RPT reports mailed to a hosted domain's `postmaster@` address are delivered as ordinary mail and also stored, then shown domain-scoped on the admin panel's Reports page. A report is stored only when its domain matches the addressed postmaster domain.
+- **Inbound reports:** DMARC aggregate, DMARC failure and TLS-RPT reports mailed to a hosted domain's `postmaster@` address are delivered as ordinary mail and also stored, then shown domain-scoped on the admin panel's Reports page. A report is stored only when its domain matches the addressed postmaster domain. TLS reports posted over HTTPS (RFC 8460) arrive at `https://<hostname>/tlsrpt`, served by the MTA on `mta_http_addr` behind the gateway, and are stored the same way; the prescribed `_smtp._tls` record names both addresses. Each stored report records how it arrived and the DKIM result of a mailed one, because its content is the sender's claim.
+- **Outbound DMARC reports:** when a system administrator turns it on (off by default), the MTA counts inbound mail per From domain that publishes `rua=` and sends each such domain a daily RFC 7489 aggregate report from `noreply@<hostname>` to its `mailto:` addresses. A destination outside the domain's organization must publish the RFC 7489 §7.1 authorization record. The report is DKIM-signed only when the hostname itself has a DKIM key.
 - **Mail construction:** `internal/oxcmail.Export()` is the single path from a MAPI object to MIME bytes; outgoing mail is never hand-rolled. Every send path converges on one delivery function, so the DKIM signer always sees the final bytes.
 - **Inbound filtering:** delivery scores each message through `internal/antispam` (SPF/DKIM/DMARC auth + a Bayes classifier + rules), then narrows the verdict by operator and recipient allow-block tiers. Each DNS-dependent check carries a deadline, since the queried nameserver belongs to the sender.
 - **Antivirus:** delivery streams each message to ClamAV (`internal/antivirus`); a hit is quarantined (`internal/quarantine`) and the recipient plus domain admins are notified. The scan fails open, so a down clamd never blocks mail.
