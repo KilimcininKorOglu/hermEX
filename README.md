@@ -44,15 +44,15 @@ certificate store with optional ACME issuance (`internal/tlscert`).
 |-------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | MAPI core         | `internal/mapi` (property model), `internal/ext` (MS-wire serialization), `internal/ndr` (RPC NDR), `internal/lzxpress` (ROP buffer compression)                                                                                                  |
 | Mailbox store     | `internal/objectstore` (sole store), `internal/ics` (IDSET/GLOBSET sync codec), `internal/publicfolder` (public store)                                                                                                                            |
-| Format conversion | `internal/oxcmail` (MIME to MAPI and back), `internal/oxcical` (iCalendar), `internal/oxvcard` (vCard), `internal/oxtask` (tasks), `internal/recurrence`, `internal/conversation`, `internal/mime`, `internal/smime`                              |
-| Protocol servers  | `internal/{smtp,imap,pop3,dav,activesync,ews,mapihttp,nspi,rop}`, transport codecs `internal/{rpchttp,wbxml,oxews,oxmapihttp}`, `internal/easpolicy`                                                                                              |
-| Mail flow         | `internal/mta` (delivery), `internal/relay` + `internal/spooler` (outbound), `internal/meeting`, `internal/fetchmail`                                                                                                                             |
+| Format conversion | `internal/oxcmail` (MIME to MAPI and back), `internal/oxcical` (iCalendar), `internal/oxvcard` (vCard), `internal/oxtask` (tasks), `internal/oxcfg` (master category list), `internal/recurrence`, `internal/conversation`, `internal/mime`, `internal/smime` |
+| Protocol servers  | `internal/{smtp,imap,pop3,dav,activesync,ews,mapihttp,nspi,rop}`, transport codecs `internal/{rpchttp,wbxml,oxews,oxmapihttp}`, `internal/easpolicy`, `internal/netline` (bounded pre-authentication line reader)                             |
+| Mail flow         | `internal/mta` (delivery), `internal/relay` + `internal/spooler` (outbound), `internal/meeting`, `internal/fetchmail`, `internal/mailreport` (inbound DMARC and TLS report parser)                                                               |
 | Filtering         | `internal/antispam` (SPF/DKIM/DMARC + Bayes + rules), `internal/antivirus` (clamd), `internal/quarantine`                                                                                                                                         |
 | Security & TLS    | `internal/dkimsign`, `internal/mtasts`, `internal/dane`, `internal/tlsrpt`, `internal/tlscert` (per-SNI cert store + ACME), `internal/ssrfguard`                                                                                                  |
-| Abuse control     | `internal/authlimit` (failed-login lockout), `internal/httplimit` (per-client request cap); both are DB-backed and tunable without a restart                                                                                                      |
-| Directory & auth  | `internal/directory` (MariaDB-backed), `internal/ldapauth` + `internal/ldapsync` (AD/LDAP sync)                                                                                                                                                   |
+| Abuse control     | `internal/authlimit` (failed-login lockout), `internal/httplimit` (per-client request cap), `internal/connlimit` (total and per-client connection cap); all DB-backed and tunable without a restart                                             |
+| Directory & auth  | `internal/directory` (MariaDB-backed), `internal/crypt` (password hashing), `internal/totp` (second factor), `internal/sendas` (which `From` a caller may use), `internal/ldapauth` + `internal/ldapsync` (AD/LDAP sync)                         |
 | Notifications     | `internal/notify` (publisher/consumer) + `internal/notifyd` (SSE relay), a wake bus for IDLE/Ping/streaming across daemons                                                                                                                        |
-| Platform          | `internal/config`, `internal/serve` (HTTP daemon base), `internal/lifecycle` (graceful shutdown), `internal/logging` (Mongo sink), `internal/health`, `internal/migrate` (schema runner), `internal/buildinfo` (source stamp), `internal/tlstest` |
+| Platform          | `internal/config`, `internal/serve` (HTTP daemon base), `internal/lifecycle` (graceful shutdown), `internal/logging` (Mongo sink), `internal/health`, `internal/migrate` (schema runner), `internal/buildinfo` (source stamp), test support `internal/tlstest` + `internal/avtest` |
 | Web & admin       | `internal/webmail2` (React SPA) + `internal/webmail2api`, `internal/admin` (operator panel), `internal/gateway` (single-FQDN front door)                                                                                                          |
 
 ## Development
@@ -71,6 +71,10 @@ There is no CI pipeline: `make gate` run locally is the only quality gate.
 | `make test`                   | Full test run in the dev container                                                |
 | `make test-host`              | Host quick-feedback run; DB-backed tests skip                                     |
 | `make test-race`              | Race-detector run in the dev container                                            |
+| `make bench PKG=<pkg>`        | Host benchmarks only (`BENCH=` selects them)                                      |
+| `make lint`                   | golangci-lint v2 on the host; not part of the gate                                |
+| `make lint-modernize`         | Only the `modernize` analyzer, on the host                                        |
+| `make audit-deps`             | `govulncheck` over the Go tree and `npm audit` over the SPA                       |
 | `make fmt`                    | `gofmt -w` over the source tree                                                   |
 | `make fmt-check`              | Fail when any file needs `gofmt`                                                  |
 | `make vet`                    | `go vet`                                                                          |
@@ -79,6 +83,7 @@ There is no CI pipeline: `make gate` run locally is the only quality gate.
 | `make rebuild SVC=<name>`     | Rebuild and restart one service                                                   |
 | `make dump-db`                | Write a compressed dump of the whole directory database                           |
 | `make restore-db DUMP=<file>` | Load a dump back                                                                  |
+| `make dump-mail`              | Write a consistent copy of every mailbox's mail content                           |
 | `make version`                | Report the source state a build would stamp                                       |
 | `make compose-check`          | Validate the compose file syntax                                                  |
 | `make clean`                  | Remove built binaries                                                             |
@@ -137,6 +142,7 @@ npm run test:coverage   # vitest with coverage
 | POP3          | 8141 | 110       |
 | MariaDB       | 8142 | 3306      |
 | IMAP          | 8143 | 143       |
+| Admin panel   | 8144 | 8081      |
 | DAV           | 8145 | 8080      |
 | ActiveSync    | 8146 | 8080      |
 | EWS           | 8147 | 8080      |
@@ -144,8 +150,10 @@ npm run test:coverage   # vitest with coverage
 | Gateway (TLS) | 8149 | 8080      |
 | Webmail2      | 8450 | 8080      |
 
-The database port is published on the loopback interface only, so the dev
-credentials are not reachable from the network.
+SMTP, POP3, IMAP and the gateway publish on every interface. Every other port,
+the database included, is published on the loopback interface only, so the dev
+credentials and the per-protocol HTTP backends are not reachable from the
+network.
 
 Four services are internal-only and expose no host port: **Mongo** (the log
 sink), **ClamAV** (`clamav:3310`, the antivirus engine), **notify** (the SSE push
@@ -153,8 +161,9 @@ relay), and **pebble** (an offline ACME test CA, used only in TLS `acme` mode).
 Nothing `depends_on` them, so the mail path comes up and serves even when any of
 them is down.
 
-`cmd/admin serve` (the operator panel) is not in the default compose; run it
-manually. It listens on `:8081` (config `admin_addr`) and requires `admin_secret`.
+`cmd/admin serve` (the operator panel) runs as the `admin` compose service on
+host port 8144. It listens on `:8081` in the container (config `admin_addr`),
+serves HTTPS, and requires `admin_secret`. Nothing `depends_on` it.
 
 ### Build provenance
 
@@ -305,11 +314,15 @@ hermex-admin -config config.json <command> [args]
 | `check-mailbox <email\|all> [--repair] [--recover]` | Report store damage; `--repair` rebuilds the IMAP index, `--recover` rebuilds a damaged database and loses the rows on its damaged pages |
 | `sweep-content <email>`                          | Reclaim orphan content files; refuses while the mailbox is in use |
 | `prune-eml <email\|all> [days]`                  | Drop cached wire copies older than N days (default 30)            |
+| `backfill-previews <email\|all>`                 | Fill the message-list snippet and attachment flag on older index rows |
+| `move-mail <email> <src> <dst> <uid>... [--copy]` | Relocate messages between two folders of one mailbox             |
+| `backup-mail <email\|all> <dest-dir>`            | Consistent copy of mail content; safe on a live mailbox           |
 | `serve`                                          | Run the admin API and panel                                       |
 
 The panel covers domains, users, aliases, mailing lists, delegates, devices, DKIM
-keys, DNS checks, the mail queue, quarantine, retention and the spam model. It is
-separate from end-user webmail and is not behind the gateway.
+keys, DNS checks, the mail queue, quarantine, inbound DMARC and TLS reports,
+retention and the spam model. It is separate from end-user webmail and is not
+behind the gateway.
 
 Every daemon can serve a `/healthz` endpoint reporting its dependency state and
 its build stamp. It is opt-in per daemon (`health_addr`, empty disables it), and
@@ -348,7 +361,7 @@ admin panel, not on the command line.
 
 | Path        | Purpose                                                                                                                                                 |
 |-------------|---------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `cmd/`      | Service executables (mta, imap, pop3, webmail2, dav, activesync, ews, mapihttp, gateway, notify, admin, fetchmail, antispam-bootstrap, antispam-rules)  |
+| `cmd/`      | Service executables (mta, imap, pop3, webmail2, dav, activesync, ews, mapihttp, gateway, notify, admin, fetchmail, antispam-bootstrap, antispam-rules) and `healthcheck`, the probe binary every container healthcheck runs |
 | `internal/` | Shared libraries: MAPI core, mailbox store, format conversion, protocol servers, mail flow, filtering, security/TLS, directory, notifications, platform |
 | `docker/`   | Dev and service container images                                                                                                                        |
 
@@ -357,6 +370,8 @@ admin panel, not on the command line.
 - **Database:** MariaDB (`email`) via `go-sql-driver/mysql`; password hashing is `crypt_sha512` at a high round count, and a successful login re-hashes a credential stored below the current cost. Tests use a separate, auto-created `hermex_test` database.
 - **Mailbox store:** `internal/objectstore`, per-mailbox SQLite, addressed by built-in `PrivateFID_*` folder constants, never by name lookup. Opening a mailbox takes a shared advisory lock, so maintenance passes that reclaim storage can tell a live mailbox from an idle one instead of racing a writer.
 - **Auth and accounts:** `internal/directory` backed by MariaDB. Address-book queries are scoped to the caller's organization, or to the caller's own domain when the domain belongs to none.
+- **Second factor:** webmail and the admin panel share one TOTP enrollment per account, with single-use recovery codes. Once an account enables it, the account password stops working on IMAP, POP3, SMTP submission, ActiveSync, DAV, EWS and MAPI/HTTP, and only a per-client app password (minted in webmail) logs in there.
+- **Inbound reports:** DMARC aggregate, DMARC failure and TLS-RPT reports mailed to a hosted domain's `postmaster@` address are delivered as ordinary mail and also stored, then shown domain-scoped on the admin panel's Reports page. A report is stored only when its domain matches the addressed postmaster domain.
 - **Mail construction:** `internal/oxcmail.Export()` is the single path from a MAPI object to MIME bytes; outgoing mail is never hand-rolled. Every send path converges on one delivery function, so the DKIM signer always sees the final bytes.
 - **Inbound filtering:** delivery scores each message through `internal/antispam` (SPF/DKIM/DMARC auth + a Bayes classifier + rules), then narrows the verdict by operator and recipient allow-block tiers. Each DNS-dependent check carries a deadline, since the queried nameserver belongs to the sender.
 - **Antivirus:** delivery streams each message to ClamAV (`internal/antivirus`); a hit is quarantined (`internal/quarantine`) and the recipient plus domain admins are notified. The scan fails open, so a down clamd never blocks mail.
