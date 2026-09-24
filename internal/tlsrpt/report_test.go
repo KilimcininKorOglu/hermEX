@@ -94,6 +94,40 @@ func wantValue(t *testing.T, got, want any, what string) {
 	}
 }
 
+// TestPolicyDescriptorReadsBothMXHostForms: RFC 8460 §4.4 describes mx-host as
+// an array of strings and its Appendix B example writes one string, and
+// reporters send both. A report in either form must decode, and one this server
+// writes must keep the single-string form.
+func TestPolicyDescriptorReadsBothMXHostForms(t *testing.T) {
+	for name, tc := range map[string]struct{ json, want string }{
+		"string": {`{"policy-type":"sts","policy-domain":"d.example","mx-host":"*.mx.d.example"}`, "*.mx.d.example"},
+		"array":  {`{"policy-type":"sts","policy-domain":"d.example","mx-host":["mx1.d.example","mx2.d.example"]}`, "mx1.d.example, mx2.d.example"},
+		"absent": {`{"policy-type":"no-policy-found","policy-domain":"d.example"}`, ""},
+		"null":   {`{"policy-type":"sts","policy-domain":"d.example","mx-host":null}`, ""},
+	} {
+		var p PolicyDescriptor
+		if err := json.Unmarshal([]byte(tc.json), &p); err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if p.MXHost != tc.want || p.PolicyDomain != "d.example" {
+			t.Errorf("%s: decoded %+v, want mx-host %q and the policy domain kept", name, p, tc.want)
+		}
+	}
+	var p PolicyDescriptor
+	if err := json.Unmarshal([]byte(`{"policy-type":"sts","mx-host":7}`), &p); err == nil {
+		t.Error("a numeric mx-host decoded without an error")
+	}
+
+	b, err := json.Marshal(PolicyDescriptor{PolicyType: PolicyTypeSTS, PolicyDomain: "d.example", MXHost: "*.mx.d.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"policy-type":"sts","policy-domain":"d.example","mx-host":"*.mx.d.example"}`; string(b) != want {
+		t.Errorf("encoded %s, want %s", b, want)
+	}
+}
+
 // TestReportFailureDetailsOmitted proves a policy block with no failures omits
 // the failure-details array entirely (omitempty), keeping an all-success report
 // compact.

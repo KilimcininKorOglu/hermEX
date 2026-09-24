@@ -2,6 +2,8 @@ package tlsrpt
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -60,6 +62,45 @@ type PolicyDescriptor struct {
 	PolicyString []string `json:"policy-string,omitempty"`
 	PolicyDomain string   `json:"policy-domain"`
 	MXHost       string   `json:"mx-host,omitempty"`
+}
+
+// UnmarshalJSON reads mx-host in both forms reporters send. RFC 8460 §4.4
+// describes it as a JSON array of strings, while the report example in its
+// Appendix B writes one string. Several patterns are joined with ", ". Encoding
+// is unchanged: this server writes the single-string form.
+func (p *PolicyDescriptor) UnmarshalJSON(b []byte) error {
+	type plain PolicyDescriptor
+	var v struct {
+		plain
+		MXHost json.RawMessage `json:"mx-host"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	host, err := mxHostPatterns(v.MXHost)
+	if err != nil {
+		return err
+	}
+	*p = PolicyDescriptor(v.plain)
+	p.MXHost = host
+	return nil
+}
+
+// mxHostPatterns reads an mx-host value written as a string or as an array of
+// strings. An absent or null value is empty.
+func mxHostPatterns(raw json.RawMessage) (string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", nil
+	}
+	var one string
+	if err := json.Unmarshal(raw, &one); err == nil {
+		return one, nil
+	}
+	var many []string
+	if err := json.Unmarshal(raw, &many); err != nil {
+		return "", fmt.Errorf("tlsrpt: mx-host is neither a string nor an array of strings: %w", err)
+	}
+	return strings.Join(many, ", "), nil
 }
 
 // Summary is the per-policy session tally (RFC 8460 §4.4).
