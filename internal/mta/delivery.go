@@ -72,11 +72,12 @@ type Backend struct {
 	RecipientAccess RecipientAccessResolver // per-recipient allow/block rules; nil applies no personal overrides
 	Outbound        *OutboundLimiter        // outbound per-account abuse limiting; nil (or disabled) admits every recipient
 	Limiter         *authlimit.Limiter      // failed-login throttle keyed by client IP; nil disables it
+	Reports         ReportRecorder          // DMARC and TLS reports sent to postmaster; nil stores none
 }
 
 // NewSession implements smtp.Backend.
 func (b *Backend) NewSession(remoteAddr string) (smtp.Session, error) {
-	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer, history: b.History, greylist: b.Greylist, rateLimit: b.RateLimit, thresholds: b.Thresholds, recipAccess: b.RecipientAccess, outbound: b.Outbound, limiter: b.Limiter}, nil
+	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer, history: b.History, greylist: b.Greylist, rateLimit: b.RateLimit, thresholds: b.Thresholds, recipAccess: b.RecipientAccess, outbound: b.Outbound, limiter: b.Limiter, reports: b.Reports}, nil
 }
 
 type session struct {
@@ -92,6 +93,7 @@ type session struct {
 	recipAccess  RecipientAccessResolver
 	outbound     *OutboundLimiter
 	limiter      *authlimit.Limiter
+	reports      ReportRecorder
 	from         string
 	targets      []target             // local recipients, filed into mailboxes
 	relayTargets []relay.DSNRecipient // external recipients (with DSN params), spooled for outbound relay
@@ -435,7 +437,13 @@ func (s *session) Data(r io.Reader) error {
 	if err := s.deliverTargets(sc, received); err != nil {
 		return err
 	}
-	return s.queueRelay(raw, received)
+	if err := s.queueRelay(raw, received); err != nil {
+		return err
+	}
+	// Last, so a report is stored only for a message the sender is told was
+	// accepted; a deferred message comes back and is read then.
+	s.ingestReports(raw, received)
+	return nil
 }
 
 // avVerdict runs the antivirus gate, which precedes spam scoring and filing. A

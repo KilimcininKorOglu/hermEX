@@ -365,7 +365,7 @@ func (d *mtaDaemon) startServer(scorer *antispam.Scorer, lim limiters, addr stri
 	// report otherwise. It now starts, sees the same toggle, and says on every run
 	// that it cannot send.
 	go runDigest(dir, []byte(cfg.DigestSecret), cfg.Hostname, d.lockPass(directory.LockDigest), logger)
-	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: d.spool, Logger: logger, Scorer: scorer, History: dir, Greylist: lim.greylist, RateLimit: lim.rate, Thresholds: dir, RecipientAccess: dir, Outbound: lim.outbound, Limiter: lim.login}, Hostname: cfg.Hostname, Logger: logger}
+	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: d.spool, Logger: logger, Scorer: scorer, History: dir, Greylist: lim.greylist, RateLimit: lim.rate, Thresholds: dir, RecipientAccess: dir, Outbound: lim.outbound, Limiter: lim.login, Reports: dir}, Hostname: cfg.Hostname, Logger: logger}
 	// The built-in ceiling holds from the first accepted connection, so a settings
 	// read that fails at startup still leaves inbound DATA bounded.
 	srv.SetMaxSize(directory.DefaultMaxInboundBytes)
