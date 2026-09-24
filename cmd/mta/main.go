@@ -125,6 +125,7 @@ type mtaDaemon struct {
 	logger   *logging.Logger
 	logClose func() error
 	spool    *relay.Spool
+	dmarc    *dmarcSwitch
 }
 
 // limiters is the set of abuse controls the SMTP backend and the delivery hooks
@@ -190,6 +191,13 @@ func (d *mtaDaemon) wireDelivery() {
 	// drains it, so its maintenance failures are recorded here.
 	spool.Logger = d.logger
 	d.spool = spool
+
+	// DMARC aggregate reports to the domains whose mail arrives here: off until an
+	// operator turns them on, read at startup and re-read every minute. The switch
+	// gates both the counting at delivery and the daily send.
+	d.dmarc = &dmarcSwitch{}
+	applyDMARCReportSetting(d.logger, d.dir.GetDMARCReportSettings, d.dmarc.on.Store)
+	go runDMARCReportMaintenance(d.logger, d.dir.GetDMARCReportSettings, d.dmarc.on.Store)
 
 	// Automatic meeting-request processing runs at delivery for mailboxes configured
 	// for it (resource rooms, auto-accepting users). Wired here, not in the mta
@@ -366,7 +374,7 @@ func (d *mtaDaemon) startServer(scorer *antispam.Scorer, lim limiters, addr stri
 	// report otherwise. It now starts, sees the same toggle, and says on every run
 	// that it cannot send.
 	go runDigest(dir, []byte(cfg.DigestSecret), cfg.Hostname, d.lockPass(directory.LockDigest), logger)
-	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: d.spool, Logger: logger, Scorer: scorer, History: dir, Greylist: lim.greylist, RateLimit: lim.rate, Thresholds: dir, RecipientAccess: dir, Outbound: lim.outbound, Limiter: lim.login, Reports: dir}, Hostname: cfg.Hostname, Logger: logger}
+	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: d.spool, Logger: logger, Scorer: scorer, History: dir, Greylist: lim.greylist, RateLimit: lim.rate, Thresholds: dir, RecipientAccess: dir, Outbound: lim.outbound, Limiter: lim.login, Reports: dir, DMARC: gatedDMARC{sw: d.dmarc, rec: d.spool}}, Hostname: cfg.Hostname, Logger: logger}
 	// The built-in ceiling holds from the first accepted connection, so a settings
 	// read that fails at startup still leaves inbound DATA bounded.
 	srv.SetMaxSize(directory.DefaultMaxInboundBytes)
@@ -520,6 +528,11 @@ func (d *mtaDaemon) relayLoop() lifecycle.Component {
 		ReportOrg:     cfg.Hostname,
 		ReportContact: "mailto:postmaster@" + cfg.Hostname,
 		ReportDomain:  cfg.Hostname,
+		// DMARC aggregate reports (RFC 7489 §7.2) ride the same daily pass, sent from
+		// noreply@<hostname> to the mailto: addresses a reported domain publishes.
+		DMARCLookup:    lookupDMARCRecord,
+		DMARCLookupTXT: lookupTXT,
+		DMARCEnabled:   d.dmarc.Enabled,
 		// When the worker abandons an external recipient, return a non-delivery
 		// report to the (local, authenticated) sender through the local delivery
 		// path, so a failed send is reported rather than lost silently.

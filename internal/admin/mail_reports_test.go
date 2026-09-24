@@ -268,3 +268,39 @@ func TestUIReportRetentionRequiresSystem(t *testing.T) {
 		t.Errorf("the panel does not show the saved window:\n%s", body)
 	}
 }
+
+// TestUIDMARCSendingRequiresSystemAndReadsTheWholeForm: sending reports about
+// every domain's senders is a system decision, so a domain administrator is
+// refused. An unchecked box sends no value, so a form without it switches the
+// setting off rather than leaving it on.
+func TestUIDMARCSendingRequiresSystemAndReadsTheWholeForm(t *testing.T) {
+	on := url.Values{"enabled": {"1"}}
+
+	scoped := reportsDir(directory.AdminRole{Role: directory.AdminDomain, ScopeID: 1})
+	ts := adminServer(t, scoped)
+	session, csrf := loginCookies(t, ts)
+	resp := htmxPOST(t, ts, "/admin/ui/reports/dmarc-sending", session, csrf, on)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden || scoped.reports.dmarcSending.Enabled {
+		t.Errorf("domain admin: status %d, enabled %v; want 403 and off", resp.StatusCode, scoped.reports.dmarcSending.Enabled)
+	}
+
+	system := reportsDir(directory.AdminRole{Role: directory.AdminSystem})
+	ts = adminServer(t, system)
+	session, csrf = loginCookies(t, ts)
+	resp = htmxPOST(t, ts, "/admin/ui/reports/dmarc-sending", session, csrf, on)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !system.reports.dmarcSending.Enabled {
+		t.Fatalf("system admin: status %d, enabled %v; want 200 and on", resp.StatusCode, system.reports.dmarcSending.Enabled)
+	}
+	if !strings.Contains(string(body), `value="1" checked`) {
+		t.Errorf("the panel does not show the setting on:\n%s", body)
+	}
+
+	resp = htmxPOST(t, ts, "/admin/ui/reports/dmarc-sending", session, csrf, url.Values{})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || system.reports.dmarcSending.Enabled {
+		t.Errorf("unchecked box: status %d, enabled %v; want 200 and off", resp.StatusCode, system.reports.dmarcSending.Enabled)
+	}
+}

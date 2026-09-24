@@ -99,6 +99,8 @@
 {{if .CanEdit}}
 <h2>Retention</h2>
 {{template "report-retention-panel" .}}
+<h2>Sending DMARC reports</h2>
+{{template "dmarc-sending-panel" .}}
 {{end}}
 </main>
 </div>
@@ -111,5 +113,14 @@
 <p>DMARC aggregate and TLS reports, days: <input type="number" name="aggregate_days" value="{{.AggregateDays}}" min="0"></p>
 <p>DMARC failure reports, days: <input type="number" name="failure_days" value="{{.FailureDays}}" min="0"></p>
 <button type="submit">Save retention</button>
+</form>
+</div>{{end}}
+
+{{define "dmarc-sending-panel"}}<div id="dmarc-sending-panel">
+{{if .DMARCNotice}}<p class="ok">{{.DMARCNotice}}</p>{{end}}
+<p>When this is on, the server counts the mail it receives from each domain that asks for DMARC aggregate reports, and once a day sends that domain a report to the mailto: addresses its DMARC record names. A report lists the addresses that sent mail claiming the domain, and how each one authenticated. It is sent from noreply at the server's hostname, and it is DKIM-signed only when that hostname has a DKIM key.</p>
+<form hx-post="/admin/ui/reports/dmarc-sending" hx-target="#dmarc-sending-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<p><label><input type="checkbox" name="enabled" value="1"{{if .DMARCSending}} checked{{end}}> Send DMARC aggregate reports</label></p>
+<button type="submit">Save</button>
 </form>
 </div>{{end}}

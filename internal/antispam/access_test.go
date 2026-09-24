@@ -63,7 +63,7 @@ func TestAccessAllowDoesNotOverrideDMARCReject(t *testing.T) {
 	s := &Scorer{
 		checkSPF:    func(net.IP, string, string) AuthResult { return AuthFail },
 		checkDKIM:   func([]byte) []DKIMResult { return nil },
-		lookupDMARC: func(string) (string, bool) { return "reject", true },
+		lookupDMARC: func(string) (DMARCPolicy, bool) { return DMARCPolicy{Policy: "reject"}, true },
 	}
 	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: 1})
 	s.SetAccess(NewAccessList(map[string]string{"partner.example": AccessAllow}))
@@ -146,7 +146,7 @@ func TestVerdictDMARCReject(t *testing.T) {
 		s := &Scorer{
 			checkSPF:    func(net.IP, string, string) AuthResult { return AuthFail },
 			checkDKIM:   func([]byte) []DKIMResult { return nil },
-			lookupDMARC: func(string) (string, bool) { return policy, true },
+			lookupDMARC: func(string) (DMARCPolicy, bool) { return DMARCPolicy{Policy: policy}, true },
 		}
 		s.SetConfig(&Config{Weights: DefaultWeights, Threshold: 1})
 		return s

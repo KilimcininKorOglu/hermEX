@@ -89,10 +89,10 @@ func realDKIM(raw []byte) []DKIMResult {
 	return out
 }
 
-// realDMARC fetches the From domain's published DMARC policy. ok is false when no
+// realDMARC fetches the From domain's published DMARC record. ok is false when no
 // record exists (or the lookup errors, including outrunning its deadline), which
 // the scorer treats as no policy.
-func realDMARC(domain string) (policy string, ok bool) {
+func realDMARC(domain string) (DMARCPolicy, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), dnsTimeout)
 	defer cancel()
 	// The library prefixes _dmarc. itself, so the callback resolves the name it is
@@ -102,9 +102,14 @@ func realDMARC(domain string) (policy string, ok bool) {
 		LookupTXT: func(name string) ([]string, error) { return resolver.LookupTXT(ctx, name) },
 	})
 	if err != nil || rec == nil {
-		return "", false
+		return DMARCPolicy{}, false
 	}
-	return string(rec.Policy), true
+	return DMARCPolicy{
+		Policy:     string(rec.Policy),
+		StrictDKIM: rec.DKIMAlignment == dmarc.AlignmentStrict,
+		StrictSPF:  rec.SPFAlignment == dmarc.AlignmentStrict,
+		Reports:    len(rec.ReportURIAggregate) > 0,
+	}, true
 }
 
 // realDNSBL reports whether the client IP is listed on a DNS blocklist zone. A

@@ -73,11 +73,12 @@ type Backend struct {
 	Outbound        *OutboundLimiter        // outbound per-account abuse limiting; nil (or disabled) admits every recipient
 	Limiter         *authlimit.Limiter      // failed-login throttle keyed by client IP; nil disables it
 	Reports         ReportRecorder          // DMARC and TLS reports sent to postmaster; nil stores none
+	DMARC           DMARCRecorder           // counts for the DMARC aggregate reports this server sends; nil counts nothing
 }
 
 // NewSession implements smtp.Backend.
 func (b *Backend) NewSession(remoteAddr string) (smtp.Session, error) {
-	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer, history: b.History, greylist: b.Greylist, rateLimit: b.RateLimit, thresholds: b.Thresholds, recipAccess: b.RecipientAccess, outbound: b.Outbound, limiter: b.Limiter, reports: b.Reports}, nil
+	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer, history: b.History, greylist: b.Greylist, rateLimit: b.RateLimit, thresholds: b.Thresholds, recipAccess: b.RecipientAccess, outbound: b.Outbound, limiter: b.Limiter, reports: b.Reports, dmarc: b.DMARC}, nil
 }
 
 type session struct {
@@ -94,6 +95,7 @@ type session struct {
 	outbound     *OutboundLimiter
 	limiter      *authlimit.Limiter
 	reports      ReportRecorder
+	dmarc        DMARCRecorder
 	from         string
 	targets      []target             // local recipients, filed into mailboxes
 	relayTargets []relay.DSNRecipient // external recipients (with DSN params), spooled for outbound relay
@@ -497,6 +499,7 @@ func (s *session) scoreInbound(raw []byte, received time.Time) scoring {
 		s.logger.Emit(logging.Event{Level: logging.LevelInfo, Subsystem: logging.MTA, Name: "spam.scored", RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "score": sc.verdict.Score, "spam": sc.verdict.Spam, "reasons": reasons}})
 	}
 	s.recordVerdict(sc.verdict, ip, reasons, received)
+	s.recordDMARC(sc, ip, received)
 	return sc
 }
 

@@ -58,6 +58,8 @@ type Directory interface {
 	TLSSummary(f directory.ReportFilter) ([]directory.TLSPolicySummary, error)
 	GetMailReportSettings() (directory.MailReportSettings, bool, error)
 	SetMailReportSettings(directory.MailReportSettings) error
+	GetDMARCReportSettings() (directory.DMARCReportSettings, bool, error)
+	SetDMARCReportSettings(directory.DMARCReportSettings) error
 	CreateUser(username, password, maildir string) (int64, error)
 	SetPassword(username, password string) (bool, error)
 	RequirePasswordChange(username string, required bool) (bool, error)
@@ -434,6 +436,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/ui/reports/tlsrpt/{id}", s.handleUITLSReport)
 	mux.HandleFunc("GET /admin/ui/reports/failure/{id}", s.handleUIDMARCFailure)
 	mux.HandleFunc("POST /admin/ui/reports/retention", s.handleUISaveMailReportRetention)
+	mux.HandleFunc("POST /admin/ui/reports/dmarc-sending", s.handleUISaveDMARCSending)
 	mux.HandleFunc("GET /admin/ui/status", s.handleUIStatus)
 	mux.HandleFunc("GET /admin/ui/status/panel", s.handleUIStatusPanel)
 	mux.HandleFunc("GET /admin/ui/taskq", s.handleUITaskq)

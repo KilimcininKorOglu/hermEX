@@ -68,13 +68,13 @@ func TestSPFIsBounded(t *testing.T) {
 // resolves with a bare net.LookupTXT and carries no deadline at all.
 func TestDMARCIsBounded(t *testing.T) {
 	boundedChecks(t, 200*time.Millisecond)
-	var policy string
+	var policy DMARCPolicy
 	var ok bool
 	mustReturnWithin(t, 5*time.Second, "realDMARC", func() {
 		policy, ok = realDMARC("sender.invalid")
 	})
 	if ok {
-		t.Errorf("an unanswerable DMARC lookup reported a policy %q", policy)
+		t.Errorf("an unanswerable DMARC lookup reported a policy %+v", policy)
 	}
 }
 

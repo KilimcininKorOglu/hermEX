@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"mime"
 	"mime/multipart"
 	"net/textproto"
@@ -140,19 +141,39 @@ func (w *Worker) deliverReportMail(uri, policyDomain string, report *tlsrpt.Repo
 // carrying a short human-readable note and the gzip-compressed report as an
 // application/tlsrpt+gzip attachment named per the RFC's convention.
 func buildReportMail(fromDomain, toAddr, policyDomain string, r *tlsrpt.Report, gz []byte) ([]byte, error) {
-	from := "tlsrpt-noreply@" + fromDomain
-	filename := fmt.Sprintf("%s!%s!%d!%d.json.gz", fromDomain, policyDomain, r.DateRange.Start.Unix(), r.DateRange.End.Unix())
+	return reportMail{
+		from:        "tlsrpt-noreply@" + fromDomain,
+		fromName:    "TLS Report",
+		to:          toAddr,
+		subject:     fmt.Sprintf("Report Domain: %s Submitter: %s Report-ID: %s", policyDomain, fromDomain, r.ReportID),
+		messageID:   r.ReportID,
+		note:        fmt.Sprintf("This is an aggregate TLS report from %s for %s.\r\n", fromDomain, policyDomain),
+		contentType: "application/tlsrpt+gzip",
+		filename:    fmt.Sprintf("%s!%s!%d!%d.json.gz", fromDomain, policyDomain, r.DateRange.Start.Unix(), r.DateRange.End.Unix()),
+		payload:     gz,
+	}.build()
+}
 
+// reportMail is one machine-generated report email: a short human-readable note
+// and the compressed report as an attachment. TLS and DMARC reports share it and
+// differ only in these fields.
+type reportMail struct {
+	from, fromName, to, subject, messageID, note string
+	contentType, filename                        string
+	payload                                      []byte
+}
+
+// build renders the email as a multipart/mixed message.
+func (m reportMail) build() ([]byte, error) {
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
 
 	var h bytes.Buffer
-	fmt.Fprintf(&h, "From: TLS Report <%s>\r\n", from)
-	fmt.Fprintf(&h, "To: %s\r\n", toAddr)
-	subject := fmt.Sprintf("Report Domain: %s Submitter: %s Report-ID: %s", policyDomain, fromDomain, r.ReportID)
-	fmt.Fprintf(&h, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", subject))
+	fmt.Fprintf(&h, "From: %s <%s>\r\n", m.fromName, m.from)
+	fmt.Fprintf(&h, "To: %s\r\n", m.to)
+	fmt.Fprintf(&h, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", m.subject))
 	fmt.Fprintf(&h, "Date: %s\r\n", time.Now().UTC().Format(time.RFC1123Z))
-	fmt.Fprintf(&h, "Message-ID: <%s>\r\n", r.ReportID)
+	fmt.Fprintf(&h, "Message-ID: <%s>\r\n", m.messageID)
 	h.WriteString("MIME-Version: 1.0\r\n")
 	h.WriteString("Auto-Submitted: auto-generated\r\n")
 	fmt.Fprintf(&h, "Content-Type: multipart/mixed; boundary=%q\r\n\r\n", mw.Boundary())
@@ -161,19 +182,19 @@ func buildReportMail(fromDomain, toAddr, policyDomain string, r *tlsrpt.Report, 
 	if err != nil {
 		return nil, err
 	}
-	if _, err := fmt.Fprintf(note, "This is an aggregate TLS report from %s for %s.\r\n", fromDomain, policyDomain); err != nil {
+	if _, err := io.WriteString(note, m.note); err != nil {
 		return nil, err
 	}
 
 	att, err := mw.CreatePart(textproto.MIMEHeader{
-		"Content-Type":              {"application/tlsrpt+gzip"},
+		"Content-Type":              {m.contentType},
 		"Content-Transfer-Encoding": {"base64"},
-		"Content-Disposition":       {fmt.Sprintf("attachment; filename=%q", filename)},
+		"Content-Disposition":       {fmt.Sprintf("attachment; filename=%q", m.filename)},
 	})
 	if err != nil {
 		return nil, err
 	}
-	if err := writeBase64(att, gz); err != nil {
+	if err := writeBase64(att, m.payload); err != nil {
 		return nil, err
 	}
 	if err := mw.Close(); err != nil {

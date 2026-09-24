@@ -17,6 +17,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/emersion/go-msgauth/dmarc"
+
 	"hermex/internal/dane"
 	"hermex/internal/logging"
 	"hermex/internal/mtasts"
@@ -107,6 +109,17 @@ type Worker struct {
 	ReportOrg     string
 	ReportContact string
 	ReportDomain  string
+
+	// DMARC aggregate reporting (RFC 7489 §7.2) shares the daily pass and the
+	// identifying fields above. DMARCLookup fetches a policy domain's published
+	// record when its report is built; nil disables the DMARC pass. DMARCLookupTXT
+	// resolves the external destination authorization records (§7.1); nil refuses
+	// every destination outside the policy domain's organization. DMARCEnabled
+	// reports the operator setting; nil means on, and while it is off no report is
+	// sent but old counters are still pruned.
+	DMARCLookup    func(domain string) (*dmarc.Record, error)
+	DMARCLookupTXT func(name string) ([]string, error)
+	DMARCEnabled   func() bool
 	// lastReportDay is the UTC date (dayFormat) the daily pass last ran for; it is
 	// touched only by the single Run goroutine, so it needs no synchronization.
 	lastReportDay string
@@ -252,14 +265,15 @@ func (w *Worker) guardedPass(ctx context.Context) {
 	w.maybeDailyReport(ctx, time.Now())
 }
 
-// maybeDailyReport sends the previous UTC day's TLS-RPT aggregate reports once per
-// calendar day. It is a no-op until the reporting half is wired (nil TLSResolver).
-// On the first tick after start it runs for yesterday too; MarkReported makes that
-// idempotent, so a frequently-restarted process still dispatches exactly one report
-// per (day, domain) rather than skipping or duplicating. It runs under the drain
-// guard (its caller holds it), so only one instance dispatches.
+// maybeDailyReport sends the previous UTC day's TLS-RPT and DMARC aggregate
+// reports once per calendar day. Each kind is a no-op until its reporting half is
+// wired (nil TLSResolver, nil DMARCLookup). On the first tick after start it runs
+// for yesterday too; the per-kind reported marks make that idempotent, so a
+// frequently-restarted process still dispatches exactly one report per (day,
+// domain) rather than skipping or duplicating. It runs under the drain guard (its
+// caller holds it), so only one instance dispatches.
 func (w *Worker) maybeDailyReport(ctx context.Context, now time.Time) {
-	if w.TLSResolver == nil {
+	if w.TLSResolver == nil && w.DMARCLookup == nil {
 		return
 	}
 	today := now.UTC().Format(dayFormat)
@@ -267,11 +281,23 @@ func (w *Worker) maybeDailyReport(ctx context.Context, now time.Time) {
 		return
 	}
 	w.lastReportDay = today
-	if err := w.sendTLSReports(ctx, now.UTC().AddDate(0, 0, -1)); err != nil && w.Logger != nil {
-		w.Logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "tlsrpt.report.fail", Err: err.Error()})
+	day, cutoff := now.UTC().AddDate(0, 0, -1), now.UTC().AddDate(0, 0, -7)
+	if w.TLSResolver != nil {
+		w.dailyTLSReports(ctx, day, cutoff)
 	}
-	if err := w.Spool.PruneTLSReports(now.UTC().AddDate(0, 0, -7)); err != nil && w.Logger != nil {
-		w.Logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "tlsrpt.prune.fail", Err: err.Error()})
+	if w.DMARCLookup != nil {
+		w.dailyDMARCReports(ctx, day, cutoff)
+	}
+}
+
+// dailyTLSReports sends the given day's TLS-RPT reports and prunes counters older
+// than cutoff.
+func (w *Worker) dailyTLSReports(ctx context.Context, day, cutoff time.Time) {
+	if err := w.sendTLSReports(ctx, day); err != nil {
+		w.logPass("tlsrpt.report.fail", err)
+	}
+	if err := w.Spool.PruneTLSReports(cutoff); err != nil {
+		w.logPass("tlsrpt.prune.fail", err)
 	}
 }
 

@@ -578,6 +578,7 @@ type fakeReports struct {
 	lastFilter    directory.ReportFilter
 	settings      directory.MailReportSettings
 	settingsFound bool
+	dmarcSending  directory.DMARCReportSettings
 }
 
 func inReportScope(f directory.ReportFilter, domainID int64) bool {
@@ -655,6 +656,13 @@ func (f *fakeDir) GetMailReportSettings() (directory.MailReportSettings, bool, e
 }
 func (f *fakeDir) SetMailReportSettings(s directory.MailReportSettings) error {
 	f.reports.settings, f.reports.settingsFound = s, true
+	return nil
+}
+func (f *fakeDir) GetDMARCReportSettings() (directory.DMARCReportSettings, bool, error) {
+	return f.reports.dmarcSending, true, nil
+}
+func (f *fakeDir) SetDMARCReportSettings(s directory.DMARCReportSettings) error {
+	f.reports.dmarcSending = s
 	return nil
 }
 func (f *fakeDir) GetSizeLimits() (directory.SizeLimits, bool, error) {

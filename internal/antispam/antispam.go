@@ -94,17 +94,37 @@ type Verdict struct {
 	// quarantine), the strongest spoofing signal. No allow rule, operator or
 	// per-recipient, may rescue such a message from the score-based verdict.
 	DMARCReject bool
-	DNSBL       []string // the blocklist zones that listed the client IP
-	BayesProb   float64  // the Bayesian model's spam probability (0..1); 0 when not run
-	SAScore     float64  // the summed score of the SpamAssassin rules that fired; 0 when not run
-	SAHits      []string // the names of the SpamAssassin rules that fired
-	Reasons     []string
+	// DKIMResults are every signature checked, valid or not, in message order. A
+	// DMARC aggregate report lists them as the raw results behind its verdict.
+	DKIMResults []DKIMResult
+	// DMARCDKIMAligned and DMARCSPFAligned are the two identifier alignments DMARC
+	// evaluated (RFC 7489 §3.1), each honouring the record's adkim/aspf mode. Both
+	// are false when the From domain publishes no record.
+	DMARCDKIMAligned bool
+	DMARCSPFAligned  bool
+	// DMARCReports reports that the From domain's record asks for aggregate reports
+	// (it names at least one rua= address).
+	DMARCReports bool
+	DNSBL        []string // the blocklist zones that listed the client IP
+	BayesProb    float64  // the Bayesian model's spam probability (0..1); 0 when not run
+	SAScore      float64  // the summed score of the SpamAssassin rules that fired; 0 when not run
+	SAHits       []string // the names of the SpamAssassin rules that fired
+	Reasons      []string
 }
 
 // DKIMResult is one verified DKIM signature's claiming domain and validity.
 type DKIMResult struct {
 	Domain string
 	Valid  bool
+}
+
+// DMARCPolicy is the part of a domain's published DMARC record (RFC 7489 §6.3)
+// the scorer reads.
+type DMARCPolicy struct {
+	Policy     string // the p= disposition: none, quarantine or reject
+	StrictDKIM bool   // adkim=s: a DKIM domain must equal the From domain
+	StrictSPF  bool   // aspf=s: the SPF domain must equal the From domain
+	Reports    bool   // the record names at least one rua= aggregate report address
 }
 
 // Config is the Scorer's hot-swappable tuning: the signal weights, the spam
@@ -137,7 +157,7 @@ type Scorer struct {
 	access      atomic.Pointer[AccessList]
 	checkSPF    func(ip net.IP, helo, mailFrom string) AuthResult
 	checkDKIM   func(raw []byte) []DKIMResult
-	lookupDMARC func(domain string) (policy string, ok bool)
+	lookupDMARC func(domain string) (DMARCPolicy, bool)
 	checkDNSBL  func(ip net.IP, zone string) bool
 	extractText func(raw []byte) string
 }
@@ -243,7 +263,8 @@ func (s *Scorer) scoreDKIM(v *Verdict, in Input, cfg *Config) []string {
 		return nil
 	}
 	var validDKIM []string
-	for _, d := range s.checkDKIM(in.Raw) {
+	v.DKIMResults = s.checkDKIM(in.Raw)
+	for _, d := range v.DKIMResults {
 		if d.Valid {
 			validDKIM = append(validDKIM, d.Domain)
 		}
@@ -259,28 +280,33 @@ func (s *Scorer) scoreDKIM(v *Verdict, in Input, cfg *Config) []string {
 	return nil
 }
 
-// scoreDMARC records whether an authenticated identifier (SPF or DKIM) aligns,
-// under the relaxed organizational-domain rule, with the From domain. Otherwise
-// the domain's published policy decides whether this is a failure. DMARCReject
+// scoreDMARC records whether an authenticated identifier (SPF or DKIM) aligns
+// with the From domain, under the alignment mode the domain's record names
+// (relaxed, the organizational domain, unless adkim/aspf ask for strict).
+// Otherwise the published policy decides whether this is a failure. DMARCReject
 // records a failure under an enforcing policy, the strongest spoofing signal, so
 // an allowlist override cannot rescue a spoofed sender.
 func (s *Scorer) scoreDMARC(v *Verdict, in Input, cfg *Config, validDKIM []string) {
 	if s.lookupDMARC == nil || in.FromDomain == "" {
 		return
 	}
-	policy, ok := s.lookupDMARC(in.FromDomain)
-	switch {
-	case !ok:
+	pol, ok := s.lookupDMARC(in.FromDomain)
+	if !ok {
 		v.DMARC = AuthNone
-	case dmarcAligned(in.FromDomain, in.MailFrom, v.SPF, validDKIM):
+		return
+	}
+	v.DMARCReports = pol.Reports
+	v.DMARCDKIMAligned = dkimAligned(in.FromDomain, validDKIM, pol.StrictDKIM)
+	v.DMARCSPFAligned = spfAligned(in.FromDomain, in.MailFrom, v.SPF, pol.StrictSPF)
+	if v.DMARCDKIMAligned || v.DMARCSPFAligned {
 		v.DMARC = AuthPass
-	default:
-		v.DMARC = AuthFail
-		if policy == "reject" || policy == "quarantine" {
-			v.Score += cfg.Weights.DMARCFail
-			v.Reasons = append(v.Reasons, "DMARC fail (policy "+policy+")")
-			v.DMARCReject = true
-		}
+		return
+	}
+	v.DMARC = AuthFail
+	if pol.Policy == "reject" || pol.Policy == "quarantine" {
+		v.Score += cfg.Weights.DMARCFail
+		v.Reasons = append(v.Reasons, "DMARC fail (policy "+pol.Policy+")")
+		v.DMARCReject = true
 	}
 }
 
@@ -351,24 +377,35 @@ func (s *Scorer) applyAccess(v *Verdict, in Input) {
 	}
 }
 
-// dmarcAligned reports whether an authenticated identifier aligns with the From
-// domain under DMARC relaxed alignment: a passing SPF on a MailFrom that shares
-// the From domain's organizational domain, or a valid DKIM signature whose domain
-// does.
-func dmarcAligned(fromDomain, mailFrom string, spf AuthResult, validDKIM []string) bool {
-	fromOrg := orgDomain(fromDomain)
-	if fromOrg == "" {
-		return false
-	}
-	if spf == AuthPass && orgDomain(domainOf(mailFrom)) == fromOrg {
-		return true
-	}
+// dkimAligned reports whether a valid DKIM signature's domain aligns with the From
+// domain (RFC 7489 §3.1.1).
+func dkimAligned(fromDomain string, validDKIM []string, strict bool) bool {
 	for _, d := range validDKIM {
-		if orgDomain(d) == fromOrg {
+		if identifierAligned(fromDomain, d, strict) {
 			return true
 		}
 	}
 	return false
+}
+
+// spfAligned reports whether a passing SPF check on the envelope sender aligns
+// with the From domain (RFC 7489 §3.1.2).
+func spfAligned(fromDomain, mailFrom string, spf AuthResult, strict bool) bool {
+	return spf == AuthPass && identifierAligned(fromDomain, domainOf(mailFrom), strict)
+}
+
+// identifierAligned compares an authenticated domain with the From domain: equal
+// names in strict mode, equal organizational domains (eTLD+1) in relaxed mode.
+func identifierAligned(fromDomain, authDomain string, strict bool) bool {
+	from := strings.ToLower(strings.TrimSpace(fromDomain))
+	auth := strings.ToLower(strings.TrimSpace(authDomain))
+	if from == "" || auth == "" {
+		return false
+	}
+	if strict {
+		return from == auth
+	}
+	return orgDomain(from) == orgDomain(auth)
 }
 
 // orgDomain returns a domain's organizational domain (eTLD+1), the unit DMARC

@@ -93,6 +93,7 @@ func (s *Server) handleUIReports(w http.ResponseWriter, r *http.Request) {
 	if cl, ok := s.uiClaims(r); ok && s.isSystemAdmin(cl.UserID) {
 		data["CanEdit"] = true
 		s.fillMailReportRetention(data)
+		s.fillDMARCSending(data)
 	}
 	data["Error"] = strings.Join(problems, " ")
 	s.render(w, "reports.html", data)
@@ -365,4 +366,34 @@ func (s *Server) handleUISaveMailReportRetention(w http.ResponseWriter, r *http.
 	s.fillMailReportRetention(data)
 	data["Notice"] = "Report retention saved; the sweep deletes expired reports within a minute, no restart."
 	s.render(w, "report-retention-panel", data)
+}
+
+// fillDMARCSending sets the DMARC aggregate report sending switch on a page-data
+// map. A missing row reads as off, the setting's default.
+func (s *Server) fillDMARCSending(data map[string]any) {
+	stored, _, err := s.dir.GetDMARCReportSettings()
+	if err != nil {
+		data["DMARCNotice"] = s.notice("Could not read the DMARC sending setting; it is shown as off.", err)
+	}
+	data["DMARCSending"] = err == nil && stored.Enabled
+}
+
+// handleUISaveDMARCSending switches the DMARC aggregate report sending on or off.
+// The form is read as the whole setting: an unchecked box sends no value, which
+// means off. The MTA applies the change within about a minute, no restart.
+func (s *Server) handleUISaveDMARCSending(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	on := r.FormValue("enabled") != ""
+	data := map[string]any{"CSRF": csrfCookieValue(r)}
+	if err := s.dir.SetDMARCReportSettings(directory.DMARCReportSettings{Enabled: on}); err != nil {
+		s.fillDMARCSending(data)
+		data["DMARCNotice"] = s.notice("Could not save the DMARC sending setting.", err)
+		s.render(w, "dmarc-sending-panel", data)
+		return
+	}
+	s.fillDMARCSending(data)
+	data["DMARCNotice"] = "DMARC report sending saved; the mail server applies it within a minute, no restart."
+	s.render(w, "dmarc-sending-panel", data)
 }

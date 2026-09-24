@@ -119,7 +119,7 @@ func TestScoreDMARCFailEnforced(t *testing.T) {
 	s := &Scorer{
 		checkSPF:    func(net.IP, string, string) AuthResult { return AuthFail },
 		checkDKIM:   func([]byte) []DKIMResult { return nil },
-		lookupDMARC: func(string) (string, bool) { return "reject", true },
+		lookupDMARC: func(string) (DMARCPolicy, bool) { return DMARCPolicy{Policy: "reject"}, true },
 	}
 	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: 5})
 	v := s.Score(Input{Raw: []byte("x"), ClientIP: net.IPv4(1, 2, 3, 4), MailFrom: "a@evil.example", FromDomain: "bank.example"})
@@ -138,12 +138,56 @@ func TestScoreDMARCFailEnforced(t *testing.T) {
 func TestScoreDMARCAlignedPass(t *testing.T) {
 	s := &Scorer{
 		checkDKIM:   func([]byte) []DKIMResult { return []DKIMResult{{Domain: "mail.bank.example", Valid: true}} },
-		lookupDMARC: func(string) (string, bool) { return "reject", true },
+		lookupDMARC: func(string) (DMARCPolicy, bool) { return DMARCPolicy{Policy: "reject"}, true },
 	}
 	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: 100})
 	v := s.Score(Input{Raw: []byte("x"), FromDomain: "bank.example"})
 	if v.DMARC != AuthPass {
 		t.Errorf("DMARC = %s, want pass (DKIM aligned by organizational domain)", v.DMARC)
+	}
+}
+
+// alignmentScorer returns a scorer whose checks answer with a verified subdomain
+// signature, a failed foreign one, the given SPF result and the given policy.
+func alignmentScorer(pol DMARCPolicy, spf AuthResult) *Scorer {
+	s := &Scorer{
+		checkSPF: func(net.IP, string, string) AuthResult { return spf },
+		checkDKIM: func([]byte) []DKIMResult {
+			return []DKIMResult{{Domain: "mail.bank.example", Valid: true}, {Domain: "other.example", Valid: false}}
+		},
+		lookupDMARC: func(string) (DMARCPolicy, bool) { return pol, true },
+	}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: 100})
+	return s
+}
+
+// alignmentInput is a message from bank.example whose envelope is in the same domain.
+var alignmentInput = Input{Raw: []byte("x"), ClientIP: net.IPv4(1, 2, 3, 4), MailFrom: "a@bank.example", FromDomain: "bank.example"}
+
+// TestScoreDMARCAlignmentRelaxed proves the verdict carries each alignment on its
+// own, every checked signature, and whether the record asks for reports. An
+// aggregate report is built from these fields, so a wrong one is a wrong report.
+func TestScoreDMARCAlignmentRelaxed(t *testing.T) {
+	v := alignmentScorer(DMARCPolicy{Policy: "none", Reports: true}, AuthPass).Score(alignmentInput)
+	if !v.DMARCDKIMAligned || !v.DMARCSPFAligned || !v.DMARCReports || v.DMARC != AuthPass {
+		t.Errorf("relaxed = %+v, want both aligned, reports requested, pass", v)
+	}
+	if len(v.DKIMResults) != 2 {
+		t.Errorf("DKIMResults = %v, want both signatures, the failed one included", v.DKIMResults)
+	}
+}
+
+// TestScoreDMARCAlignmentStrict proves adkim=s and aspf=s are honoured: a
+// subdomain signature does not align under strict DKIM, and SPF on the exact From
+// domain aligns under strict SPF.
+func TestScoreDMARCAlignmentStrict(t *testing.T) {
+	v := alignmentScorer(DMARCPolicy{Policy: "none", StrictDKIM: true}, AuthFail).Score(alignmentInput)
+	if v.DMARCDKIMAligned || v.DMARCSPFAligned || v.DMARC != AuthFail || v.DMARCReports {
+		t.Errorf("strict DKIM, SPF fail = %+v, want neither aligned and fail", v)
+	}
+	v = alignmentScorer(DMARCPolicy{Policy: "none", StrictSPF: true}, AuthPass).Score(alignmentInput)
+	if !v.DMARCSPFAligned {
+		t.Errorf("strict SPF on the exact From domain = %+v, want aligned", v)
 	}
 }
 
