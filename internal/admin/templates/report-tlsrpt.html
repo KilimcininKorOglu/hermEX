@@ -1,0 +1,41 @@
+{{define "report-tlsrpt.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<p><a href="/admin/ui/reports?kind=tlsrpt">Reports</a></p>
+<h1>TLS report</h1>
+<table class="grid">
+<tbody>
+<tr><th>Domain</th><td>{{.R.Domain}}</td></tr>
+<tr><th>Reporter</th><td>{{.R.OrgName}} ({{.R.Contact}})</td></tr>
+<tr><th>Report ID</th><td>{{.R.ReportID}}</td></tr>
+<tr><th>Period</th><td>{{.Period}}</td></tr>
+<tr><th>Sessions</th><td>{{.R.Total}} ({{.R.Failed}} failed)</td></tr>
+<tr><th>Received</th><td>{{.Received}} from {{.R.MailFrom}} ({{.R.RemoteAddr}})</td></tr>
+</tbody>
+</table>
+<p class="hint">The report is the reporter's claim. The sender and client address above are what this server saw when the report arrived.</p>
+
+{{range .R.Policies}}
+<h2>Policy {{.PolicyType}} for {{.PolicyDomain}}{{if .MXHost}} ({{.MXHost}}){{end}}</h2>
+<p>{{.Success}} successful sessions, {{.Failure}} failed sessions.</p>
+<table class="grid">
+<thead><tr><th>Result</th><th>Sessions</th><th>Sending MTA</th><th>Receiving MX</th><th>Receiving IP</th><th>Reason</th></tr></thead>
+<tbody>
+{{range .FailureDetails}}<tr>
+<td>{{.ResultType}}</td>
+<td>{{.FailedSessionCount}}</td>
+<td>{{.SendingMTAIP}}</td>
+<td>{{.ReceivingMXHostname}}</td>
+<td>{{.ReceivingIP}}</td>
+<td>{{.FailureReasonCode}}</td>
+</tr>
+{{else}}<tr><td colspan="6" class="empty">No failure details.</td></tr>
+{{end}}
+</tbody>
+</table>
+{{else}}<p class="muted">The report has no policies.</p>
+{{end}}
+</main>
+</div>
+{{template "foot" .}}{{end}}

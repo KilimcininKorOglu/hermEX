@@ -1,0 +1,26 @@
+{{define "report-failure.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<p><a href="/admin/ui/reports?kind=failure">Reports</a></p>
+<h1>DMARC failure report</h1>
+<table class="grid">
+<tbody>
+<tr><th>Domain</th><td>{{.R.Domain}}</td></tr>
+<tr><th>Failure</th><td>{{.R.AuthFailure}}</td></tr>
+<tr><th>Source IP</th><td>{{.R.SourceIP}}</td></tr>
+<tr><th>Arrival</th><td>{{.Arrival}}</td></tr>
+<tr><th>Original sender</th><td>{{.R.OriginalMailFrom}}</td></tr>
+<tr><th>Original recipient</th><td>{{.R.OriginalRcptTo}}</td></tr>
+<tr><th>DKIM domain</th><td>{{.R.DKIMDomain}}</td></tr>
+<tr><th>Delivery result</th><td>{{.R.DeliveryResult}}</td></tr>
+<tr><th>Authentication results</th><td><small>{{.R.AuthenticationResults}}</small></td></tr>
+<tr><th>Received</th><td>{{.Received}} from {{.R.MailFrom}} ({{.R.RemoteAddr}})</td></tr>
+</tbody>
+</table>
+<p class="hint">The report is the reporter's claim. The sender and client address above are what this server saw when the report arrived. Only the failed message's headers are stored, never its body.</p>
+<h2>Original headers</h2>
+<pre class="report-headers">{{.R.OriginalHeaders}}</pre>
+</main>
+</div>
+{{template "foot" .}}{{end}}

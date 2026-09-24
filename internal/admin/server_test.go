@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -42,6 +43,7 @@ type fakeDir struct {
 	avInbound          bool
 	avOutbound         bool
 	quarantine         []directory.QuarantineRecord
+	reports            fakeReports
 	senderRules        []directory.SenderRule
 	greylistOn         bool
 	greylistTimings    directory.GreylistTimings
@@ -561,6 +563,98 @@ func (f *fakeDir) SetDomainAVScan(_ string, inbound, outbound bool) error {
 }
 func (f *fakeDir) ListQuarantine([]int64, bool, int) ([]directory.QuarantineRecord, error) {
 	return f.quarantine, nil
+}
+
+// fakeReports holds the stored reports. The list and summary methods apply the
+// filter's domain scope the way the directory's queries do, and record the last
+// filter they were given.
+type fakeReports struct {
+	dmarc         []directory.DMARCReport
+	tls           []directory.TLSReport
+	failures      []directory.DMARCFailure
+	dmarcSummary  []directory.DMARCSourceSummary
+	tlsSummary    []directory.TLSPolicySummary
+	lastFilter    directory.ReportFilter
+	settings      directory.MailReportSettings
+	settingsFound bool
+}
+
+func inReportScope(f directory.ReportFilter, domainID int64) bool {
+	return f.All || slices.Contains(f.DomainIDs, domainID)
+}
+
+func (f *fakeDir) ListDMARCReports(fl directory.ReportFilter) ([]directory.ReportListing, error) {
+	f.reports.lastFilter = fl
+	var out []directory.ReportListing
+	for _, r := range f.reports.dmarc {
+		if inReportScope(fl, r.DomainID) {
+			out = append(out, r.ReportListing)
+		}
+	}
+	return out, nil
+}
+func (f *fakeDir) ListTLSReports(fl directory.ReportFilter) ([]directory.ReportListing, error) {
+	f.reports.lastFilter = fl
+	var out []directory.ReportListing
+	for _, r := range f.reports.tls {
+		if inReportScope(fl, r.DomainID) {
+			out = append(out, r.ReportListing)
+		}
+	}
+	return out, nil
+}
+func (f *fakeDir) ListDMARCFailures(fl directory.ReportFilter) ([]directory.DMARCFailure, error) {
+	f.reports.lastFilter = fl
+	var out []directory.DMARCFailure
+	for _, r := range f.reports.failures {
+		if inReportScope(fl, r.DomainID) {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+func (f *fakeDir) GetDMARCReport(id int64) (directory.DMARCReport, bool, error) {
+	for _, r := range f.reports.dmarc {
+		if r.ID == id {
+			return r, true, nil
+		}
+	}
+	return directory.DMARCReport{}, false, nil
+}
+func (f *fakeDir) GetTLSReport(id int64) (directory.TLSReport, bool, error) {
+	for _, r := range f.reports.tls {
+		if r.ID == id {
+			return r, true, nil
+		}
+	}
+	return directory.TLSReport{}, false, nil
+}
+func (f *fakeDir) GetDMARCFailure(id int64) (directory.DMARCFailure, bool, error) {
+	for _, r := range f.reports.failures {
+		if r.ID == id {
+			return r, true, nil
+		}
+	}
+	return directory.DMARCFailure{}, false, nil
+}
+func (f *fakeDir) DMARCSummary(fl directory.ReportFilter) ([]directory.DMARCSourceSummary, error) {
+	if !fl.All && len(fl.DomainIDs) == 0 {
+		return nil, nil
+	}
+	return f.reports.dmarcSummary, nil
+}
+func (f *fakeDir) TLSSummary(fl directory.ReportFilter) ([]directory.TLSPolicySummary, error) {
+	if !fl.All && len(fl.DomainIDs) == 0 {
+		return nil, nil
+	}
+	return f.reports.tlsSummary, nil
+}
+func (f *fakeDir) GetMailReportSettings() (directory.MailReportSettings, bool, error) {
+	return f.reports.settings, f.reports.settingsFound, nil
+}
+func (f *fakeDir) SetMailReportSettings(s directory.MailReportSettings) error {
+	f.reports.settings, f.reports.settingsFound = s, true
+	return nil
 }
 func (f *fakeDir) GetSizeLimits() (directory.SizeLimits, bool, error) {
 	return f.sizeLimits, f.sizeLimitsFound, nil

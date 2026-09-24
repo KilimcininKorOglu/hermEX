@@ -417,6 +417,8 @@ func runServe(c *cmdContext) {
 	}
 	// Enforce the operator's Recoverable Items retention window across mailboxes.
 	go runRecoverableRetention(ctx, dir)
+	// Delete the stored DMARC and TLS reports older than their retention window.
+	go runMailReportRetention(ctx, dir)
 	go runAdminSessionPrune(ctx, dir)
 	log.Printf("hermex-admin serving the admin API on %s", addr)
 	// The same liveness and readiness contract every other daemon serves. This
@@ -533,6 +535,31 @@ func runRecoverableRetention(ctx context.Context, dir *directory.SQLDirectory) {
 			log.Printf("hermex-admin: sweep recoverable items: %v", err)
 		} else if n > 0 {
 			log.Printf("hermex-admin: purged %d expired recoverable items", n)
+		}
+	}
+	sweep() // apply immediately at startup
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			sweep()
+		}
+	}
+}
+
+// runMailReportRetention deletes the stored DMARC and TLS reports older than the
+// operator's retention windows every minute. PruneMailReports reads the windows on
+// each run, so an admin-panel change applies without a restart. It returns when
+// ctx is cancelled.
+func runMailReportRetention(ctx context.Context, dir *directory.SQLDirectory) {
+	sweep := func() {
+		if n, err := dir.PruneMailReports(time.Now()); err != nil {
+			log.Printf("hermex-admin: prune mail reports: %v", err)
+		} else if n > 0 {
+			log.Printf("hermex-admin: deleted %d expired mail reports", n)
 		}
 	}
 	sweep() // apply immediately at startup

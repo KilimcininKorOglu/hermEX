@@ -267,3 +267,26 @@ table.grid td.empty { color: var(--muted); text-align: center; }
 #settab-delivery:checked ~ .tabpanel.delivery,
 #settab-limits:checked ~ .tabpanel.limits,
 #settab-retention:checked ~ .tabpanel.retention { display: block; }
+
+/* Report page tabs: the same bar, with a link per tab because each tab is its own
+   query. */
+.tabbar a {
+	padding: 0.55rem 1rem;
+	margin-bottom: -1px;
+	color: var(--muted);
+	font-weight: 500;
+	border-bottom: 2px solid transparent;
+}
+.tabbar a:hover { color: var(--ink); text-decoration: none; }
+.tabbar a.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+pre.report-headers {
+	background: var(--panel);
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	padding: 0.85rem;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	word-break: break-all;
+	font-size: 0.8rem;
+}

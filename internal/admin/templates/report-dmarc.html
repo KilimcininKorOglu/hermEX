@@ -1,0 +1,41 @@
+{{define "report-dmarc.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<p><a href="/admin/ui/reports?kind=dmarc">Reports</a></p>
+<h1>DMARC aggregate report</h1>
+<table class="grid">
+<tbody>
+<tr><th>Domain</th><td>{{.R.Domain}}</td></tr>
+<tr><th>Reporter</th><td>{{.R.OrgName}} &lt;{{.R.ReporterEmail}}&gt;</td></tr>
+<tr><th>Report ID</th><td>{{.R.ReportID}}</td></tr>
+<tr><th>Period</th><td>{{.Period}}</td></tr>
+<tr><th>Published policy</th><td>p={{.R.PolicyP}} sp={{.R.PolicySP}} pct={{.R.PolicyPct}} adkim={{.R.ADKIM}} aspf={{.R.ASPF}}</td></tr>
+<tr><th>Messages</th><td>{{.R.Total}} ({{.R.Failed}} failed DKIM and SPF)</td></tr>
+<tr><th>Received</th><td>{{.Received}} from {{.R.MailFrom}} ({{.R.RemoteAddr}})</td></tr>
+</tbody>
+</table>
+<p class="hint">The report is the reporter's claim. The sender and client address above are what this server saw when the report arrived.</p>
+
+<h2>Records</h2>
+<table class="grid">
+<thead><tr><th>Source IP</th><th>Messages</th><th>Disposition</th><th>DKIM</th><th>SPF</th><th>From domain</th><th>Envelope from</th><th>DKIM results</th><th>SPF results</th></tr></thead>
+<tbody>
+{{range .R.Records}}<tr>
+<td>{{.SourceIP}}</td>
+<td>{{.Count}}</td>
+<td>{{.Disposition}}</td>
+<td>{{.DKIM}}</td>
+<td>{{.SPF}}</td>
+<td>{{.HeaderFrom}}</td>
+<td>{{.EnvelopeFrom}}</td>
+<td><small>{{.DKIMResults}}</small></td>
+<td><small>{{.SPFResults}}</small></td>
+</tr>
+{{else}}<tr><td colspan="9" class="empty">The report has no records.</td></tr>
+{{end}}
+</tbody>
+</table>
+</main>
+</div>
+{{template "foot" .}}{{end}}

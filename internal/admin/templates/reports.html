@@ -1,0 +1,114 @@
+{{define "reports.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<h1>Reports</h1>
+<p class="hint">Reports other mail servers send to a hosted domain's postmaster address: DMARC aggregate reports, TLS reports (RFC 8460) and DMARC failure reports. A report is stored only for the domain it was addressed to. A system administrator sees every domain's reports, a domain administrator only their domains'.</p>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<nav class="tabbar">
+<a href="/admin/ui/reports?kind=dmarc" class="{{if eq .Kind "dmarc"}}active{{end}}">DMARC aggregate</a>
+<a href="/admin/ui/reports?kind=tlsrpt" class="{{if eq .Kind "tlsrpt"}}active{{end}}">TLS</a>
+<a href="/admin/ui/reports?kind=failure" class="{{if eq .Kind "failure"}}active{{end}}">DMARC failure</a>
+</nav>
+<form class="create-form" method="get" action="/admin/ui/reports">
+<input type="hidden" name="kind" value="{{.Kind}}">
+<select name="domain">
+<option value="">All domains</option>
+{{range .Domains}}<option value="{{.ID}}"{{if eq (print .ID) $.DomainID}} selected{{end}}>{{.Name}}</option>
+{{end}}</select>
+<input type="date" name="from" value="{{.From}}" title="From">
+<input type="date" name="to" value="{{.To}}" title="To (inclusive)">
+<button type="submit">Filter</button>
+</form>
+
+{{if eq .Kind "failure"}}
+<table class="grid">
+<thead><tr><th>Received</th><th>Domain</th><th>Source IP</th><th>Failure</th><th>Original sender</th><th>DKIM domain</th></tr></thead>
+<tbody>
+{{range .Failures}}<tr>
+<td><a href="/admin/ui/reports/failure/{{.ID}}">{{.Received}}</a></td>
+<td>{{.Domain}}</td>
+<td>{{.SourceIP}}</td>
+<td>{{.AuthFailure}}</td>
+<td>{{.OriginalMailFrom}}</td>
+<td>{{.DKIMDomain}}</td>
+</tr>
+{{else}}<tr><td colspan="6" class="empty">No failure reports in this period.</td></tr>
+{{end}}
+</tbody>
+</table>
+{{else}}
+<h2>Summary</h2>
+{{if eq .Kind "tlsrpt"}}
+<table class="grid">
+<thead><tr><th>Domain</th><th>Policy domain</th><th>Policy</th><th>MX host</th><th>Successful sessions</th><th>Failed sessions</th></tr></thead>
+<tbody>
+{{range .TLSSummary}}<tr>
+<td>{{.Domain}}</td>
+<td>{{.PolicyDomain}}</td>
+<td>{{.PolicyType}}</td>
+<td>{{.MXHost}}</td>
+<td>{{.Success}}</td>
+<td>{{.Failure}}</td>
+</tr>
+{{else}}<tr><td colspan="6" class="empty">No TLS reports in this period.</td></tr>
+{{end}}
+</tbody>
+</table>
+{{else}}
+<table class="grid">
+<thead><tr><th>Domain</th><th>From domain</th><th>Source IP</th><th>Messages</th><th>DMARC pass</th><th>DKIM pass</th><th>SPF pass</th><th>Quarantined</th><th>Rejected</th></tr></thead>
+<tbody>
+{{range .DMARCSummary}}<tr>
+<td>{{.Domain}}</td>
+<td>{{.HeaderFrom}}</td>
+<td>{{.SourceIP}}</td>
+<td>{{.Messages}}</td>
+<td>{{.DMARCPass}}</td>
+<td>{{.DKIMPass}}</td>
+<td>{{.SPFPass}}</td>
+<td>{{.Quarantined}}</td>
+<td>{{.Rejected}}</td>
+</tr>
+{{else}}<tr><td colspan="9" class="empty">No DMARC aggregate reports in this period.</td></tr>
+{{end}}
+</tbody>
+</table>
+{{end}}
+
+<h2>Reports</h2>
+<table class="grid">
+<thead><tr><th>Period</th><th>Domain</th><th>Reporter</th><th>Report ID</th><th>Received</th><th>{{if eq .Kind "tlsrpt"}}Sessions{{else}}Messages{{end}}</th><th>Failed</th></tr></thead>
+<tbody>
+{{range .Reports}}<tr>
+<td><a href="/admin/ui/reports/{{$.Kind}}/{{.ID}}">{{.Period}}</a></td>
+<td>{{.Domain}}</td>
+<td>{{.OrgName}}</td>
+<td>{{.ReportID}}</td>
+<td>{{.Received}}</td>
+<td>{{.Total}}</td>
+<td>{{.Failed}}</td>
+</tr>
+{{else}}<tr><td colspan="7" class="empty">No reports in this period.</td></tr>
+{{end}}
+</tbody>
+</table>
+{{end}}
+
+{{if .CanEdit}}
+<h2>Retention</h2>
+{{template "report-retention-panel" .}}
+{{end}}
+</main>
+</div>
+{{template "foot" .}}{{end}}
+
+{{define "report-retention-panel"}}<div id="report-retention-panel">
+{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+<p>Reports are deleted once they are older than their retention window, counted from the time they arrived. 0 keeps them forever. A failure report carries the failed message's headers, which are personal data, so keep it for a shorter time.</p>
+<form hx-post="/admin/ui/reports/retention" hx-target="#report-retention-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<p>DMARC aggregate and TLS reports, days: <input type="number" name="aggregate_days" value="{{.AggregateDays}}" min="0"></p>
+<p>DMARC failure reports, days: <input type="number" name="failure_days" value="{{.FailureDays}}" min="0"></p>
+<button type="submit">Save retention</button>
+</form>
+</div>{{end}}

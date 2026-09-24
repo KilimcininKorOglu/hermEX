@@ -47,6 +47,16 @@ type Directory interface {
 	SetDomainCatchAll(domain, address string) error
 	SetDomainAVScan(domain string, inbound, outbound bool) error
 	ListQuarantine(domainIDs []int64, all bool, limit int) ([]directory.QuarantineRecord, error)
+	ListDMARCReports(f directory.ReportFilter) ([]directory.ReportListing, error)
+	ListTLSReports(f directory.ReportFilter) ([]directory.ReportListing, error)
+	ListDMARCFailures(f directory.ReportFilter) ([]directory.DMARCFailure, error)
+	GetDMARCReport(id int64) (directory.DMARCReport, bool, error)
+	GetTLSReport(id int64) (directory.TLSReport, bool, error)
+	GetDMARCFailure(id int64) (directory.DMARCFailure, bool, error)
+	DMARCSummary(f directory.ReportFilter) ([]directory.DMARCSourceSummary, error)
+	TLSSummary(f directory.ReportFilter) ([]directory.TLSPolicySummary, error)
+	GetMailReportSettings() (directory.MailReportSettings, bool, error)
+	SetMailReportSettings(directory.MailReportSettings) error
 	CreateUser(username, password, maildir string) (int64, error)
 	SetPassword(username, password string) (bool, error)
 	RequirePasswordChange(username string, required bool) (bool, error)
@@ -418,6 +428,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/mailq/retry", s.handleUIMailqRetry)
 	mux.HandleFunc("POST /admin/ui/mailq/delete", s.handleUIMailqDelete)
 	mux.HandleFunc("GET /admin/ui/avquarantine", s.handleUIAVQuarantine)
+	mux.HandleFunc("GET /admin/ui/reports", s.handleUIReports)
+	mux.HandleFunc("GET /admin/ui/reports/dmarc/{id}", s.handleUIDMARCReport)
+	mux.HandleFunc("GET /admin/ui/reports/tlsrpt/{id}", s.handleUITLSReport)
+	mux.HandleFunc("GET /admin/ui/reports/failure/{id}", s.handleUIDMARCFailure)
+	mux.HandleFunc("POST /admin/ui/reports/retention", s.handleUISaveMailReportRetention)
 	mux.HandleFunc("GET /admin/ui/status", s.handleUIStatus)
 	mux.HandleFunc("GET /admin/ui/status/panel", s.handleUIStatusPanel)
 	mux.HandleFunc("GET /admin/ui/taskq", s.handleUITaskq)
