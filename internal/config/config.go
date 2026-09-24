@@ -21,6 +21,7 @@ type Config struct {
 	DataPartitions []string `json:"data_partitions"` // optional mailbox-placement pool; empty spreads nothing (all mailboxes under DataDir)
 	Hostname       string   `json:"hostname"`        // announced in protocol greetings
 	SMTPAddr       string   `json:"smtp_addr"`       // MTA listen address (default ":25")
+	MTAHTTPAddr    string   `json:"mta_http_addr"`   // MTA HTTP listen address for TLS reports posted over HTTPS (RFC 8460), reached through the gateway's /tlsrpt route; empty disables it
 	POP3Addr       string   `json:"pop3_addr"`       // POP3 listen address (default ":110")
 	IMAPAddr       string   `json:"imap_addr"`       // IMAP listen address (default ":143")
 	WebmailAddr    string   `json:"webmail_addr"`    // webmail HTTP listen address (default ":8080")
@@ -53,6 +54,7 @@ type Config struct {
 	GatewayBackendActiveSync string `json:"gateway_backend_activesync"` // ActiveSync backend base URL (default "http://activesync:8080")
 	GatewayBackendDAV        string `json:"gateway_backend_dav"`        // CalDAV/CardDAV backend base URL (default "http://dav:8080")
 	GatewayBackendWebmail    string `json:"gateway_backend_webmail"`    // webmail backend base URL (default "http://webmail:8080")
+	GatewayBackendMta        string `json:"gateway_backend_mta"`        // MTA HTTP backend base URL for posted TLS reports (default "http://mta:8080")
 	ACMEStorage              string `json:"acme_storage"`               // CertMagic state dir in acme mode (default DataDir/acme)
 	ACMECARoot               string `json:"acme_ca_root"`               // PEM bundle trusting a private ACME CA (dev/pebble only; empty = system roots)
 

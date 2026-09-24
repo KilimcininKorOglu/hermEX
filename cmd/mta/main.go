@@ -113,6 +113,7 @@ func main() {
 	d.wireRuleHooks(lim)
 	srv, provider := d.startServer(scorer, lim, addr, ln)
 	comps := []lifecycle.Component{srv, d.sendLaterLoop(), d.relayLoop()}
+	comps = append(comps, d.reportEndpoint(provider)...)
 	d.run(provider, comps, addr)
 }
 

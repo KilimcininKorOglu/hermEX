@@ -13,6 +13,7 @@ type gatewaySettings struct {
 	backendActiveSync string
 	backendDav        string
 	backendWebmail    string
+	backendMta        string
 }
 
 // resolveGateway reads the gateway routing settings from the shared config,
@@ -27,6 +28,7 @@ func resolveGateway(cfg *config.Config) gatewaySettings {
 		backendActiveSync: orDefault(cfg.GatewayBackendActiveSync, "http://activesync:8080"),
 		backendDav:        orDefault(cfg.GatewayBackendDAV, "http://dav:8080"),
 		backendWebmail:    orDefault(cfg.GatewayBackendWebmail, "http://webmail2:8080"),
+		backendMta:        orDefault(cfg.GatewayBackendMta, "http://mta:8080"),
 	}
 }
 

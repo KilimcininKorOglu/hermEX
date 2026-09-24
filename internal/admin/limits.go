@@ -27,6 +27,8 @@ const (
 	// long an EWS notification subscription may stay unused before the server drops
 	// it. It mirrors the EWS daemon's own built-in value.
 	defaultEWSSubscriptionTimeoutMin = 30
+	// defaultTLSReportMB mirrors the MTA's built-in cap on an HTTPS TLS report body.
+	defaultTLSReportMB = directory.DefaultTLSReportBytes >> 20
 )
 
 // minSubscriptionTimeoutMin and maxSubscriptionTimeoutMin bound the subscription
@@ -199,7 +201,9 @@ func (s *Server) fillSizeLimits(data map[string]any) {
 	icalMB, vcardMB := int64(defaultDAVICalMB), int64(defaultDAVVCardMB)
 	webMB, mapiMB := int64(defaultWebmailRequestMB), int64(defaultMapiRequestMB)
 	fbTargets, previewMB := int64(defaultFreeBusyTargets), int64(defaultWebmailPreviewMB)
+	tlsReportMB := int64(defaultTLSReportMB)
 	if sl, found, err := s.dir.GetSizeLimits(); err == nil && found {
+		tlsReportMB = sl.TLSReportBytes / (1024 * 1024)
 		imapMB = sl.IMAPLiteralBytes / (1024 * 1024)
 		ewsMB = sl.EWSRequestBytes / (1024 * 1024)
 		easMB = sl.ActiveSyncRequestBytes / (1024 * 1024)
@@ -220,6 +224,7 @@ func (s *Server) fillSizeLimits(data map[string]any) {
 	data["MapiRequestMB"] = mapiMB
 	data["FreeBusyMaxTargets"] = fbTargets
 	data["WebmailPreviewMB"] = previewMB
+	data["TLSReportMB"] = tlsReportMB
 	s.fillSubscriptionTimeout(data)
 }
 
@@ -302,6 +307,7 @@ func (s *Server) handleUISaveLimits(w http.ResponseWriter, r *http.Request) {
 		MapiRequestBytes:       megabytes(mb["mapi_request_mb"]),
 		FreeBusyMaxTargets:     int64(fbTargets),
 		WebmailPreviewMaxBytes: megabytes(mb["webmail_preview_mb"]),
+		TLSReportBytes:         megabytes(mb["tlsrpt_mb"]),
 		IMAPCommandLineBytes:   int64(imapLine),
 		POP3CommandLineBytes:   int64(pop3Line),
 		SMTPCommandLineBytes:   int64(smtpLine),
@@ -322,7 +328,7 @@ const minCommandLineBytes = 64
 // sizeLimitFields are the megabyte-valued limits the form carries.
 var sizeLimitFields = [...]string{
 	"imap_literal_mb", "ews_request_mb", "activesync_request_mb", "dav_ical_mb",
-	"dav_vcard_mb", "webmail_request_mb", "mapi_request_mb", "webmail_preview_mb",
+	"dav_vcard_mb", "webmail_request_mb", "mapi_request_mb", "webmail_preview_mb", "tlsrpt_mb",
 }
 
 // readSizeLimitMB reads every megabyte field, reporting false when any is below 1.

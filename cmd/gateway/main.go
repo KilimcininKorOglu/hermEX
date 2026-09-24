@@ -115,6 +115,9 @@ func routeHandler(gw gatewaySettings) http.Handler {
 		{Prefix: "/.well-known/carddav", Target: gw.backendDav},
 		{Prefix: "/.well-known/caldav", Target: gw.backendDav},
 		{Prefix: "/dav/", Target: gw.backendDav},
+		// TLS reports posted over HTTPS (RFC 8460 §3), the rua=https: target the
+		// admin panel prescribes in each domain's _smtp._tls record.
+		{Prefix: "/tlsrpt", Target: gw.backendMta},
 		{Prefix: "/", Target: gw.backendWebmail},
 	})
 	if err != nil {

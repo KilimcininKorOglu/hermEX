@@ -80,9 +80,15 @@ func (s *session) postmasterDomains() map[string]bool {
 }
 
 // reportDomain returns the one domain the report speaks for, when that domain is
-// one the message was addressed to. A report that names no domain, or several
-// different ones, is not accepted.
+// one the message was addressed to.
 func reportDomain(res mailreport.Result, addressed map[string]bool) (string, bool) {
+	domain, ok := soleDomain(res)
+	return domain, ok && addressed[domain]
+}
+
+// soleDomain returns the one domain the report speaks for. A report that names no
+// domain, or several different ones, speaks for none.
+func soleDomain(res mailreport.Result) (string, bool) {
 	names := res.Domains()
 	if len(names) == 0 || names[0] == "" {
 		return "", false
@@ -92,41 +98,63 @@ func reportDomain(res mailreport.Result, addressed map[string]bool) (string, boo
 			return "", false
 		}
 	}
-	return names[0], addressed[names[0]]
+	return names[0], true
+}
+
+// storeOutcome is what storing one report came to.
+type storeOutcome int
+
+const (
+	reportStored storeOutcome = iota
+	reportDuplicate
+	reportNotHosted
+	reportStoreFailed
+)
+
+// storeReport writes the report under its domain. reportNotHosted means the
+// domain is not one this server hosts; err is set for it and for a failed store.
+func storeReport(rec ReportRecorder, res mailreport.Result, domain string, src directory.ReportSource) (storeOutcome, error) {
+	id, found, err := rec.DomainID(domain)
+	if err != nil {
+		return reportStoreFailed, err
+	}
+	if !found {
+		return reportNotHosted, notHosted(domain)
+	}
+	src.DomainID = id
+	switch res.Kind {
+	case mailreport.KindDMARCAggregate:
+		_, err = rec.StoreDMARCAggregate(src, res.Aggregate)
+	case mailreport.KindTLS:
+		_, err = rec.StoreTLSReport(src, res.TLS)
+	case mailreport.KindDMARCFailure:
+		_, err = rec.StoreDMARCFailure(src, res.Failure)
+	}
+	switch {
+	case errors.Is(err, directory.ErrDuplicateReport):
+		return reportDuplicate, nil
+	case err != nil:
+		return reportStoreFailed, err
+	}
+	return reportStored, nil
 }
 
 // storeReport writes the report under its domain and records the outcome.
 func (s *session) storeReport(res mailreport.Result, domain string, src directory.ReportSource) {
 	fields := logging.Fields{"kind": string(res.Kind), "report_id": res.ReportID()}
-	id, found, err := s.reports.DomainID(domain)
-	if err != nil || !found {
-		s.emitReport(logging.LevelError, "report.store_failed", domain, fields, notHosted(err, domain))
-		return
-	}
-	src.DomainID = id
-	switch res.Kind {
-	case mailreport.KindDMARCAggregate:
-		_, err = s.reports.StoreDMARCAggregate(src, res.Aggregate)
-	case mailreport.KindTLS:
-		_, err = s.reports.StoreTLSReport(src, res.TLS)
-	case mailreport.KindDMARCFailure:
-		_, err = s.reports.StoreDMARCFailure(src, res.Failure)
-	}
-	switch {
-	case errors.Is(err, directory.ErrDuplicateReport):
+	outcome, err := storeReport(s.reports, res, domain, src)
+	switch outcome {
+	case reportDuplicate:
 		s.emitReport(logging.LevelInfo, "report.duplicate", domain, fields, nil)
-	case err != nil:
+	case reportNotHosted, reportStoreFailed:
 		s.emitReport(logging.LevelError, "report.store_failed", domain, fields, err)
 	default:
 		s.emitReport(logging.LevelInfo, "report.stored", domain, fields, nil)
 	}
 }
 
-// notHosted names the reason a domain id could not be resolved.
-func notHosted(err error, domain string) error {
-	if err != nil {
-		return err
-	}
+// notHosted names a report domain this server does not host.
+func notHosted(domain string) error {
 	return errors.New("the domain " + domain + " is not hosted here")
 }
 

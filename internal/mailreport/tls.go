@@ -16,6 +16,27 @@ func parseTLSPart(p *mime.Part) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	return parseTLSDocument(data)
+}
+
+// ParseTLS reads a TLS report that arrived outside mail: the body of an RFC 8460
+// §3 HTTPS POST. gzipped selects the application/tlsrpt+gzip form, which is
+// decompressed under the same bound as a mailed report.
+func ParseTLS(body []byte, gzipped bool) (Result, error) {
+	data := body
+	if gzipped {
+		var err error
+		if data, err = gunzip(body); err != nil {
+			return Result{}, err
+		}
+	} else if len(data) > maxReportBytes {
+		return Result{}, ErrTooLarge
+	}
+	return parseTLSDocument(data)
+}
+
+// parseTLSDocument decodes a TLS report's JSON document and applies the row bound.
+func parseTLSDocument(data []byte) (Result, error) {
 	var rep tlsrpt.Report
 	if err := json.Unmarshal(data, &rep); err != nil {
 		return Result{}, fmt.Errorf("mailreport: TLS report JSON: %w", err)

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"hermex/internal/directory"
+	"hermex/internal/tlsrpt"
 )
 
 // byLabel indexes a prescription by record class for assertion.
@@ -168,8 +169,15 @@ func TestPrescribeDomainDNSWithMTASTS(t *testing.T) {
 	id := strings.TrimPrefix(by["MTA-STS"].Value, "v=STSv1; id=")
 	wantEq(t, len(id), 32, "policy id length")
 
-	wantRecordName(t, by, "TLS reporting", "_smtp._tls.tenant.com")
-	wantRecordContains(t, by, "TLS reporting", "TXT", "v=TLSRPTv1")
+	wantRecord(t, by, "TLS reporting", "TXT", "_smtp._tls.tenant.com",
+		"v=TLSRPTv1; rua=mailto:postmaster@tenant.com,https://mail.hermex.test/tlsrpt")
+	// The record must read back as both reporting addresses under the same parser
+	// this server's own reporter uses, or a sender reading it would drop one.
+	pol, err := tlsrpt.Parse(by["TLS reporting"].Value)
+	if err != nil {
+		t.Fatalf("the prescribed record does not parse: %v", err)
+	}
+	wantEq(t, strings.Join(pol.RUAs, " "), "mailto:postmaster@tenant.com https://mail.hermex.test/tlsrpt", "reporting addresses")
 }
 
 // TestDomainDetailShowsDNSRecords proves the prescription actually reaches the

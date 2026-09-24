@@ -29,6 +29,7 @@
 <p>MAPI/HTTP maximum request (MB): <input type="number" name="mapi_request_mb" value="{{.MapiRequestMB}}" min="1"></p>
 <p>Free/busy maximum mailboxes per request: <input type="number" name="freebusy_max_targets" value="{{.FreeBusyMaxTargets}}" min="1"></p>
 <p>Webmail inline attachment preview (MB): <input type="number" name="webmail_preview_mb" value="{{.WebmailPreviewMB}}" min="1"></p>
+<p>TLS report upload over HTTPS (MB, as sent, gzipped or not): <input type="number" name="tlsrpt_mb" value="{{.TLSReportMB}}" min="1"></p>
 <p class="hint">A command line is one line a client sends before anything is stored, so these are in bytes, not megabytes. Without a cap a client that never ends its line grows the daemon's memory, and it reaches these readers before it logs in. Keep the IMAP figure generous: a long UID set or SEARCH is legitimate.</p>
 <p>IMAP maximum command line (bytes): <input type="number" name="imap_line_bytes" value="{{.IMAPCommandLineBytes}}" min="64"></p>
 <p>POP3 maximum command line (bytes): <input type="number" name="pop3_line_bytes" value="{{.POP3CommandLineBytes}}" min="64"></p>

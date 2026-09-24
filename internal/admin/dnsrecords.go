@@ -92,8 +92,8 @@ func prescribeDomainDNS(domain, hostname, dkimName, dkimValue string, sts direct
 			prescribedRecord{Label: "MTA-STS", Name: "_mta-sts." + domain, Type: "TXT", Value: "v=STSv1; id=" + id,
 				Note: "Signals that this domain publishes an MTA-STS policy; senders re-fetch when the id changes, so republish this record after changing the policy mode or max age."},
 			prescribedRecord{Label: "TLS reporting", Name: "_smtp._tls." + domain, Type: "TXT",
-				Value: "v=TLSRPTv1; rua=mailto:postmaster@" + domain,
-				Note:  "Asks senders to report TLS problems delivering to this domain (RFC 8460); point rua at any mailbox you watch."},
+				Value: "v=TLSRPTv1; rua=mailto:postmaster@" + domain + ",https://" + hostname + "/tlsrpt",
+				Note:  "Asks senders to report TLS problems delivering to this domain (RFC 8460), by mail to the postmaster address or posted over HTTPS; this server stores both. A sender reports to each address, and the second copy of a report is recognised and dropped."},
 		)
 	}
 	return recs

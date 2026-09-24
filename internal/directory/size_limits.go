@@ -41,7 +41,14 @@ type SizeLimits struct {
 	// streaming case: a client gap longer than it loses the subscription, and the
 	// client cannot tell without subscribing again.
 	EWSSubscriptionTimeoutMinutes int64
+	// TLSReportBytes bounds the body of an RFC 8460 HTTPS report POST as it
+	// arrives, gzipped or not. Anyone may post to that endpoint.
+	TLSReportBytes int64
 }
+
+// DefaultTLSReportBytes is the MTA's built-in TLS report body cap, in force until
+// an operator saves one.
+const DefaultTLSReportBytes = 8 << 20
 
 // GetSizeLimits returns the stored size limits and whether a row has been saved. When
 // none has, found is false and each caller keeps its server's built-in default.
@@ -51,12 +58,12 @@ func (d *SQLDirectory) GetSizeLimits() (SizeLimits, bool, error) {
 		`SELECT imap_literal_bytes, ews_request_bytes, activesync_request_bytes, dav_ical_bytes, dav_vcard_bytes,
 		        webmail_request_bytes, mapi_request_bytes, freebusy_max_targets, webmail_preview_max_bytes,
 		        imap_command_line_bytes, pop3_command_line_bytes, smtp_command_line_bytes,
-		        ews_subscription_timeout_minutes
+		        ews_subscription_timeout_minutes, tlsrpt_report_bytes
 		   FROM size_limits WHERE id = 1`).
 		Scan(&s.IMAPLiteralBytes, &s.EWSRequestBytes, &s.ActiveSyncRequestBytes, &s.DAVICalBytes, &s.DAVVCardBytes,
 			&s.WebmailRequestBytes, &s.MapiRequestBytes, &s.FreeBusyMaxTargets, &s.WebmailPreviewMaxBytes,
 			&s.IMAPCommandLineBytes, &s.POP3CommandLineBytes, &s.SMTPCommandLineBytes,
-			&s.EWSSubscriptionTimeoutMinutes)
+			&s.EWSSubscriptionTimeoutMinutes, &s.TLSReportBytes)
 	if errors.Is(err, sql.ErrNoRows) {
 		return SizeLimits{}, false, nil
 	}
@@ -74,8 +81,8 @@ func (d *SQLDirectory) SetSizeLimits(s SizeLimits) error {
 		   (id, imap_literal_bytes, ews_request_bytes, activesync_request_bytes, dav_ical_bytes, dav_vcard_bytes,
 		    webmail_request_bytes, mapi_request_bytes, freebusy_max_targets, webmail_preview_max_bytes,
 		    imap_command_line_bytes, pop3_command_line_bytes, smtp_command_line_bytes,
-		    ews_subscription_timeout_minutes, updated_at)
-		 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		    ews_subscription_timeout_minutes, tlsrpt_report_bytes, updated_at)
+		 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON DUPLICATE KEY UPDATE imap_literal_bytes = VALUES(imap_literal_bytes),
 		   ews_request_bytes = VALUES(ews_request_bytes),
 		   activesync_request_bytes = VALUES(activesync_request_bytes),
@@ -88,11 +95,12 @@ func (d *SQLDirectory) SetSizeLimits(s SizeLimits) error {
 		   pop3_command_line_bytes = VALUES(pop3_command_line_bytes),
 		   smtp_command_line_bytes = VALUES(smtp_command_line_bytes),
 		   ews_subscription_timeout_minutes = VALUES(ews_subscription_timeout_minutes),
+		   tlsrpt_report_bytes = VALUES(tlsrpt_report_bytes),
 		   updated_at = VALUES(updated_at)`,
 		s.IMAPLiteralBytes, s.EWSRequestBytes, s.ActiveSyncRequestBytes, s.DAVICalBytes, s.DAVVCardBytes,
 		s.WebmailRequestBytes, s.MapiRequestBytes, s.FreeBusyMaxTargets, s.WebmailPreviewMaxBytes,
 		s.IMAPCommandLineBytes, s.POP3CommandLineBytes, s.SMTPCommandLineBytes,
-		s.EWSSubscriptionTimeoutMinutes,
+		s.EWSSubscriptionTimeoutMinutes, s.TLSReportBytes,
 		time.Now().UnixMilli())
 	return err
 }

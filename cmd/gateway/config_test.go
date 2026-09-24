@@ -20,6 +20,7 @@ func TestResolveGatewayDefaults(t *testing.T) {
 		backendActiveSync: "http://activesync:8080",
 		backendDav:        "http://dav:8080",
 		backendWebmail:    "http://webmail2:8080",
+		backendMta:        "http://mta:8080",
 	}
 	if gw != want {
 		t.Errorf("resolveGateway(empty) = %+v, want %+v", gw, want)
@@ -39,6 +40,7 @@ func TestResolveGatewayFromConfig(t *testing.T) {
 		GatewayBackendActiveSync: "https://activesync:8080",
 		GatewayBackendDAV:        "https://dav:8080",
 		GatewayBackendWebmail:    "https://webmail:8080",
+		GatewayBackendMta:        "https://mta:8080",
 	}
 	gw := resolveGateway(cfg)
 	want := gatewaySettings{
@@ -48,6 +50,7 @@ func TestResolveGatewayFromConfig(t *testing.T) {
 		backendActiveSync: "https://activesync:8080",
 		backendDav:        "https://dav:8080",
 		backendWebmail:    "https://webmail:8080",
+		backendMta:        "https://mta:8080",
 	}
 	if gw != want {
 		t.Errorf("resolveGateway(configured) = %+v, want %+v", gw, want)
