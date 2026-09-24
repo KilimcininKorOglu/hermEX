@@ -56,6 +56,9 @@ func Handler(service, version string, started time.Time, checks ...Check) http.H
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
+		// The status is a live reading (uptime, each probe's result); a cached copy
+		// would show a daemon healthy after it failed.
+		w.Header().Set("Cache-Control", "no-store")
 		if !st.OK {
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}

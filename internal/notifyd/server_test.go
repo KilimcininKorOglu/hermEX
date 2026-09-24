@@ -35,6 +35,9 @@ func openStream(t *testing.T, ts *httptest.Server, bearer string) *http.Response
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("stream status = %d, want 200", resp.StatusCode)
 	}
+	if cc := resp.Header.Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("stream Cache-Control = %q, want no-store", cc)
+	}
 	return resp
 }
 

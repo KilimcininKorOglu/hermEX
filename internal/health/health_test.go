@@ -37,6 +37,9 @@ func TestHandlerHealthy(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store: the status is a live reading", cc)
+	}
 	var st Status
 	if err := json.NewDecoder(rec.Body).Decode(&st); err != nil {
 		t.Fatal(err)

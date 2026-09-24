@@ -133,7 +133,8 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer s.unregister(ch)
 
 	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
+	// no-store: an event stream is never a cacheable body.
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 	if err := rc.Flush(); err != nil { // surface the headers immediately so the consumer knows it is connected
