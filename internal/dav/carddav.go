@@ -70,6 +70,12 @@ func findObjectByName(st *objectstore.Store, folderID int64, ext, name string) (
 	return objectstore.FolderObject{}, false, nil
 }
 
+// objectCacheControl marks a GET of one calendar or contact object uncacheable.
+// The body is the account's own data, and a browser or proxy that kept it could
+// hand it to a later user. The ETag stays: DAV clients use it for sync and
+// If-Match, not for HTTP caching.
+const objectCacheControl = "no-store"
+
 // handleGet serves a contact as a vCard. HEAD returns the same headers with no
 // body.
 func (s *Server) handleGet(w http.ResponseWriter, r *http.Request, mailbox string) {
@@ -100,6 +106,7 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request, mailbox strin
 	}
 	w.Header().Set("Content-Type", "text/vcard; charset=utf-8")
 	w.Header().Set("ETag", etag(obj.ChangeNumber))
+	w.Header().Set("Cache-Control", objectCacheControl)
 	if r.Method == http.MethodHead {
 		w.WriteHeader(http.StatusOK)
 		return

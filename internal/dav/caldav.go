@@ -55,6 +55,7 @@ func (s *Server) handleCalGet(w http.ResponseWriter, r *http.Request, mailbox st
 	}
 	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
 	w.Header().Set("ETag", etag(obj.ChangeNumber))
+	w.Header().Set("Cache-Control", objectCacheControl)
 	// A scheduling object (one carrying an ORGANIZER, stored with recipients) also
 	// reports its CALDAV:schedule-tag (RFC 6638 8.2); a plain appointment does not.
 	if eventsCollection(fid) && msgIsScheduling(msg) {

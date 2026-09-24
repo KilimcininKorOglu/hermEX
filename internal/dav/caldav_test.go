@@ -129,6 +129,9 @@ func TestCalPutGetRoundTrip(t *testing.T) {
 	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/calendar") {
 		t.Errorf("GET content-type %q", ct)
 	}
+	if cc := resp.Header.Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("GET Cache-Control %q, want no-store", cc)
+	}
 	for _, want := range []string{"BEGIN:VCALENDAR", "SUMMARY:Planning", "DTSTART:20260615T140000Z", "END:VCALENDAR"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("GET body missing %q\n%s", want, body)

@@ -55,6 +55,11 @@ func TestPutGetRoundTrip(t *testing.T) {
 	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/vcard") {
 		t.Errorf("GET content-type %q", ct)
 	}
+	// The vCard is the account's own data: no browser or proxy may keep it, and
+	// the ETag stays for sync.
+	if cc := resp.Header.Get("Cache-Control"); cc != "no-store" || resp.Header.Get("ETag") == "" {
+		t.Errorf("GET Cache-Control %q, ETag %q; want no-store and an ETag", cc, resp.Header.Get("ETag"))
+	}
 	for _, want := range []string{"BEGIN:VCARD", "FN:Ada Lovelace", "ada@analytical.test", "END:VCARD"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("GET body missing %q\n%s", want, body)

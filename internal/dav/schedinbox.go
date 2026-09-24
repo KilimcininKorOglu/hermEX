@@ -131,6 +131,7 @@ func (s *Server) handleScheduleInboxGet(w http.ResponseWriter, r *http.Request, 
 	body := withMethod(string(ics), itipMethodForClass(messageStringProp(msg.Props, mapi.PrMessageClass)))
 	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
 	w.Header().Set("ETag", etag(it.changeNumber))
+	w.Header().Set("Cache-Control", objectCacheControl)
 	if r.Method == http.MethodHead {
 		w.WriteHeader(http.StatusOK)
 		return
