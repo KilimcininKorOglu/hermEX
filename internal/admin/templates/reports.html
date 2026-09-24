@@ -5,7 +5,8 @@
 <h1>Reports</h1>
 <p class="hint">Reports other mail servers send to a hosted domain's postmaster address: DMARC aggregate reports, TLS reports (RFC 8460) and DMARC failure reports. A report is stored only for the domain it was addressed to. A system administrator sees every domain's reports, a domain administrator only their domains'.</p>
 {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
-<nav class="tabbar">
+{{range .PostmasterWarnings}}{{if .List}}<p class="warn">postmaster@{{.Domain}} is a distribution list. The list delivers a report to its members, so <strong>no report for {{.Domain}} is stored</strong>. Point postmaster@{{.Domain}} at a mailbox with an alias instead.</p>{{else}}<p class="warn">postmaster@{{.Domain}} does not resolve to a mailbox, so a report sent to it is refused and <strong>no report for {{.Domain}} is stored</strong>. Create a postmaster alias for {{.Domain}}.</p>{{end}}
+{{end}}<nav class="tabbar">
 <a href="/admin/ui/reports?kind=dmarc" class="{{if eq .Kind "dmarc"}}active{{end}}">DMARC aggregate</a>
 <a href="/admin/ui/reports?kind=tlsrpt" class="{{if eq .Kind "tlsrpt"}}active{{end}}">TLS</a>
 <a href="/admin/ui/reports?kind=failure" class="{{if eq .Kind "failure"}}active{{end}}">DMARC failure</a>

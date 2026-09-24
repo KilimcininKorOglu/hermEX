@@ -45,6 +45,7 @@ type Directory interface {
 	GetDomainAVScan(domain string) (inbound, outbound bool, err error)
 	GetDomainCatchAll(domain string) (address string, found bool, err error)
 	SetDomainCatchAll(domain, address string) error
+	Resolve(address string) (mailboxPath string, ok bool)
 	SetDomainAVScan(domain string, inbound, outbound bool) error
 	ListQuarantine(domainIDs []int64, all bool, limit int) ([]directory.QuarantineRecord, error)
 	ListDMARCReports(f directory.ReportFilter) ([]directory.ReportListing, error)

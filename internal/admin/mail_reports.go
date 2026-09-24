@@ -80,6 +80,13 @@ func (s *Server) handleUIReports(w http.ResponseWriter, r *http.Request) {
 		problems = append(problems, s.notice("Could not read the domains.", err))
 	}
 	data["Domains"] = domains
+	if err == nil {
+		warnings, werr := s.postmasterWarnings(domains)
+		if werr != nil {
+			problems = append(problems, s.notice("Could not check the postmaster addresses.", werr))
+		}
+		data["PostmasterWarnings"] = warnings
+	}
 	if err := s.fillReports(data, kind, filter); err != nil {
 		problems = append(problems, s.notice("Could not read the reports.", err))
 	}
@@ -144,6 +151,51 @@ func (s *Server) reportDomains(all bool, ids map[int64]bool) ([]directory.Domain
 		return nil, err
 	}
 	return slices.DeleteFunc(domains, func(d directory.DomainInfo) bool { return !all && !ids[d.ID] }), nil
+}
+
+// postmasterWarning names a domain whose postmaster address cannot receive a
+// report that gets stored.
+type postmasterWarning struct {
+	Domain string
+	// List reports that the address is a distribution list. The list delivers to
+	// its members, so the message never reaches a postmaster recipient and the
+	// report in it is not stored.
+	List bool
+}
+
+// postmasterWarnings checks postmaster@<domain> for each domain in the order
+// RCPT resolves it: a distribution list first, then a mailbox, alias or
+// alternate name, then the domain's catch-all. A report is stored only for mail
+// delivered to a postmaster recipient, so an address that resolves to none of
+// them is refused at RCPT and the report never arrives.
+func (s *Server) postmasterWarnings(domains []directory.DomainInfo) ([]postmasterWarning, error) {
+	lists, err := s.dir.ListMLists()
+	if err != nil {
+		return nil, err
+	}
+	isList := make(map[string]bool, len(lists))
+	for _, l := range lists {
+		isList[strings.ToLower(l.Listname)] = true
+	}
+	var out []postmasterWarning
+	for _, d := range domains {
+		addr := "postmaster@" + strings.ToLower(d.Name)
+		if isList[addr] {
+			out = append(out, postmasterWarning{Domain: d.Name, List: true})
+			continue
+		}
+		if _, ok := s.dir.Resolve(addr); ok {
+			continue
+		}
+		_, catchAll, err := s.dir.GetDomainCatchAll(d.Name)
+		if err != nil {
+			return nil, err
+		}
+		if !catchAll {
+			out = append(out, postmasterWarning{Domain: d.Name})
+		}
+	}
+	return out, nil
 }
 
 // fillReports reads one tab's summary and list into the page data.

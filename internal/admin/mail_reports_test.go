@@ -175,6 +175,39 @@ func TestUIReportsSummaryRenders(t *testing.T) {
 	}
 }
 
+// TestUIReportsWarnWhenPostmasterCannotReceive: a report is stored only for mail
+// delivered to a postmaster recipient, so the page names each domain whose
+// postmaster address is refused at RCPT or expands to a list's members. An
+// address that resolves, directly or through the catch-all, raises no warning.
+func TestUIReportsWarnWhenPostmasterCannotReceive(t *testing.T) {
+	d := reportsDir(directory.AdminRole{Role: directory.AdminSystem})
+	d.domains = []directory.DomainInfo{
+		{ID: 1, Name: "alias.test"}, {ID: 2, Name: "catch.test"},
+		{ID: 3, Name: "list.test"}, {ID: 4, Name: "none.test"},
+	}
+	d.resolvable = map[string]bool{"postmaster@alias.test": true}
+	d.catchAll = map[string]string{"catch.test": "box@catch.test"}
+	d.mlists = []directory.MListInfo{{ID: 1, Listname: "Postmaster@List.test"}}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+
+	status, page := getPage(t, ts, "/admin/ui/reports", session)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	if !strings.Contains(page, "postmaster@list.test is a distribution list") {
+		t.Error("the page does not warn about the list postmaster")
+	}
+	if !strings.Contains(page, "postmaster@none.test does not resolve") {
+		t.Error("the page does not warn about the unresolvable postmaster")
+	}
+	for _, fine := range []string{"postmaster@alias.test", "postmaster@catch.test"} {
+		if strings.Contains(page, fine) {
+			t.Errorf("the page warns about %s, which receives reports", fine)
+		}
+	}
+}
+
 // TestUIReportRetentionRequiresSystem: the retention window deletes every
 // domain's reports, so only a full system administrator may change it.
 func TestUIReportRetentionRequiresSystem(t *testing.T) {

@@ -72,6 +72,7 @@ type fakeDir struct {
 	relayFound         bool
 	gateways           map[string]directory.SMTPGateway
 	catchAll           map[string]string
+	resolvable         map[string]bool
 	digest             directory.DigestSettings
 	digestFound        bool
 	dkimSelector       string
@@ -909,6 +910,12 @@ func (f *fakeDir) SetAliasesFor(username string, aliases []string) (bool, error)
 func (f *fakeDir) GetDomainCatchAll(domain string) (string, bool, error) {
 	addr, ok := f.catchAll[domain]
 	return addr, ok, nil
+}
+func (f *fakeDir) Resolve(address string) (string, bool) {
+	if f.resolvable[address] {
+		return "/data/" + address, true
+	}
+	return "", false
 }
 func (f *fakeDir) SetDomainCatchAll(domain, address string) error {
 	if f.catchAll == nil {
