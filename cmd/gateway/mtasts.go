@@ -79,6 +79,11 @@ func serveMTASTSPolicy(w http.ResponseWriter, cfg *config.Config, dir mtastsDire
 		MaxAge: settings.MaxAge,
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	// A sender caches the policy itself for max_age and re-fetches when the
+	// _mta-sts id changes (RFC 8461 §3.3). An HTTP cache in between that answered
+	// that re-fetch with the old body would pin the sender to the old policy under
+	// the new id, so every fetch must reach this server.
+	w.Header().Set("Cache-Control", "no-cache")
 	// Final response body; a write failure means the client is gone, with no recourse.
 	_, _ = io.WriteString(w, mtasts.Build(policy))
 }

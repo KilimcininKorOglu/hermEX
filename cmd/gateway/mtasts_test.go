@@ -68,6 +68,11 @@ func TestMTASTSServesPolicyForActiveDomain(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
 		t.Errorf("Content-Type = %q, want text/plain", ct)
 	}
+	// Every fetch must reach this server, or a sender re-fetching after an id
+	// change could be answered with the old policy by a cache in between.
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
+		t.Errorf("Cache-Control = %q, want no-cache", cc)
+	}
 }
 
 // TestMTASTSDisabledIs404 proves a deployment that has not enabled publishing serves
