@@ -120,6 +120,10 @@ type Worker struct {
 	DMARCLookup    func(domain string) (*dmarc.Record, error)
 	DMARCLookupTXT func(name string) ([]string, error)
 	DMARCEnabled   func() bool
+	// DMARCSignable reports whether the hostname the reports are sent from has an
+	// enabled DKIM key. The pass sends either way; when it has none, it records that
+	// the reports go out unsigned. nil skips the check.
+	DMARCSignable func() (bool, error)
 	// lastReportDay is the UTC date (dayFormat) the daily pass last ran for; it is
 	// touched only by the single Run goroutine, so it needs no synchronization.
 	lastReportDay string

@@ -38,6 +38,9 @@ func (w *Worker) sendDMARCReports(ctx context.Context, day time.Time) error {
 	if err != nil {
 		return err
 	}
+	if len(domains) > 0 {
+		w.checkDMARCSigning(len(domains))
+	}
 	for _, domain := range domains {
 		if ctx.Err() != nil {
 			return nil
@@ -260,6 +263,25 @@ func buildDMARCReportMail(submitter, toAddr string, agg *mailreport.Aggregate, g
 		filename:    fmt.Sprintf("%s!%s!%d!%d.xml.gz", submitter, agg.Domain, agg.Begin.Unix(), agg.End.Unix()),
 		payload:     gz,
 	}.build()
+}
+
+// checkDMARCSigning records, once per pass, that the reports about to be sent go
+// out without a DKIM signature because the hostname they are sent from has no
+// enabled key. Such a report still reaches most receivers, but one that checks
+// DMARC on it can discard it, so the operator needs to know.
+func (w *Worker) checkDMARCSigning(domains int) {
+	if w.DMARCSignable == nil || w.Logger == nil {
+		return
+	}
+	ok, err := w.DMARCSignable()
+	switch {
+	case err != nil:
+		w.Logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "dmarc.signing.check_failed",
+			Fields: logging.Fields{"hostname": w.ReportDomain}, Err: err.Error()})
+	case !ok:
+		w.Logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.MTA, Name: "dmarc.report.unsigned",
+			Fields: logging.Fields{"hostname": w.ReportDomain, "domains": domains}})
+	}
 }
 
 // logPass records a failure of a whole daily report pass.

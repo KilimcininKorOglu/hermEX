@@ -8,11 +8,13 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/emersion/go-msgauth/dmarc"
 
+	"hermex/internal/logging"
 	"hermex/internal/mailreport"
 	"hermex/internal/mime"
 )
@@ -289,4 +291,56 @@ func TestDMARCReportAttachmentIsGzipXML(t *testing.T) {
 	if !bytes.HasPrefix(doc, []byte("<?xml")) {
 		t.Errorf("attachment is not an XML document: %.60s", doc)
 	}
+}
+
+// TestDMARCReportUnsignedIsLogged proves a pass that sends reports records once
+// that they go out unsigned when the hostname has no DKIM key, records a failed
+// key lookup, stays silent when a key exists, and still sends in every case.
+func TestDMARCReportUnsignedIsLogged(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		found bool
+		err   error
+		want  string
+	}{
+		{"no key", false, nil, "dmarc.report.unsigned"},
+		{"lookup fails", false, errors.New("db down"), "dmarc.signing.check_failed"},
+		{"key", true, nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sp := openSpool(t)
+			seedDMARC(t, sp)
+			sink := &eventSink{}
+			w := dmarcWorker(sp, "v=DMARC1; p=none; rua=mailto:dmarc@example.test")
+			w.Logger = logging.New(sink)
+			w.DMARCSignable = func() (bool, error) { return tc.found, tc.err }
+			if err := w.sendDMARCReports(context.Background(), reportDay); err != nil {
+				t.Fatal(err)
+			}
+			var names []string
+			for _, e := range sink.events {
+				names = append(names, e.Name)
+			}
+			if got := strings.Join(names, ","); got != tc.want {
+				t.Errorf("events = %q, want %q", got, tc.want)
+			}
+			queued, err := sp.List()
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantEq(t, len(queued), 1, "reports queued")
+		})
+	}
+}
+
+// eventSink collects the events a test's logger emits.
+type eventSink struct {
+	mu     sync.Mutex
+	events []logging.Event
+}
+
+func (s *eventSink) Write(e logging.Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, e)
 }

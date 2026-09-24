@@ -533,6 +533,10 @@ func (d *mtaDaemon) relayLoop() lifecycle.Component {
 		DMARCLookup:    lookupDMARCRecord,
 		DMARCLookupTXT: lookupTXT,
 		DMARCEnabled:   d.dmarc.Enabled,
+		DMARCSignable: func() (bool, error) {
+			_, _, found, err := dir.DKIMKey(cfg.Hostname)
+			return found, err
+		},
 		// When the worker abandons an external recipient, return a non-delivery
 		// report to the (local, authenticated) sender through the local delivery
 		// path, so a failed send is reported rather than lost silently.
