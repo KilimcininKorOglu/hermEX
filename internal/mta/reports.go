@@ -33,7 +33,11 @@ const reportMailbox = "postmaster"
 // A report is accepted only for the domain it was addressed to. Anyone can send
 // mail to a postmaster address, and a report naming a different domain would put
 // the sender's numbers on that domain's page.
-func (s *session) ingestReports(raw []byte, received time.Time) {
+//
+// sc is the message's spam scoring. Its DKIM result is stored with the report, so
+// the panel can show whether the reporter signed the message; an unscored message
+// stores no result rather than a failure.
+func (s *session) ingestReports(raw []byte, received time.Time, sc scoring) {
 	if s.reports == nil || s.authUser != "" {
 		return
 	}
@@ -55,7 +59,11 @@ func (s *session) ingestReports(raw []byte, received time.Time) {
 			logging.Fields{"kind": string(res.Kind), "report_domains": strings.Join(res.Domains(), ",")}, nil)
 		return
 	}
-	s.storeReport(res, domain, received)
+	src := directory.ReportSource{ReceivedAt: received.Unix(), Via: directory.ViaMail, MailFrom: s.from, RemoteAddr: s.remoteAddr}
+	if sc.scored {
+		src.SenderDKIM, src.SenderDKIMDomains = string(sc.verdict.DKIM), sc.verdict.DKIMDomains
+	}
+	s.storeReport(res, domain, src)
 }
 
 // postmasterDomains returns the domains whose postmaster address the message was
@@ -88,14 +96,14 @@ func reportDomain(res mailreport.Result, addressed map[string]bool) (string, boo
 }
 
 // storeReport writes the report under its domain and records the outcome.
-func (s *session) storeReport(res mailreport.Result, domain string, received time.Time) {
+func (s *session) storeReport(res mailreport.Result, domain string, src directory.ReportSource) {
 	fields := logging.Fields{"kind": string(res.Kind), "report_id": res.ReportID()}
 	id, found, err := s.reports.DomainID(domain)
 	if err != nil || !found {
 		s.emitReport(logging.LevelError, "report.store_failed", domain, fields, notHosted(err, domain))
 		return
 	}
-	src := directory.ReportSource{DomainID: id, ReceivedAt: received.Unix(), MailFrom: s.from, RemoteAddr: s.remoteAddr}
+	src.DomainID = id
 	switch res.Kind {
 	case mailreport.KindDMARCAggregate:
 		_, err = s.reports.StoreDMARCAggregate(src, res.Aggregate)

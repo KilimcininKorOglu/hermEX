@@ -54,6 +54,23 @@ func TestScoreSPFFailAndNoDKIM(t *testing.T) {
 	}
 }
 
+// TestVerdictNamesOnlyVerifiedSigners: DKIMDomains is who vouched for the
+// message, so a signature that failed to verify must not appear in it.
+func TestVerdictNamesOnlyVerifiedSigners(t *testing.T) {
+	s := &Scorer{checkDKIM: func([]byte) []DKIMResult {
+		return []DKIMResult{{Domain: "forged.test", Valid: false}, {Domain: "a.test", Valid: true}, {Domain: "b.test", Valid: true}}
+	}}
+	v := s.Score(Input{Raw: []byte("x")})
+	if v.DKIM != AuthPass || strings.Join(v.DKIMDomains, ",") != "a.test,b.test" {
+		t.Errorf("DKIM = %s %v, want pass [a.test b.test]", v.DKIM, v.DKIMDomains)
+	}
+
+	s.checkDKIM = func([]byte) []DKIMResult { return []DKIMResult{{Domain: "forged.test", Valid: false}} }
+	if v := s.Score(Input{Raw: []byte("x")}); v.DKIM != AuthFail || v.DKIMDomains != nil {
+		t.Errorf("DKIM = %s %v, want fail with no domains", v.DKIM, v.DKIMDomains)
+	}
+}
+
 // TestScoreSoftFail proves a softfail contributes its (smaller) weight.
 func TestScoreSoftFail(t *testing.T) {
 	v := newTestScorer(AuthSoftFail, true).Score(Input{Raw: []byte("x"), ClientIP: net.IPv4(1, 2, 3, 4), MailFrom: "a@x"})

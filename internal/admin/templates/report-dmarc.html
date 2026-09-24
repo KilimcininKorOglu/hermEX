@@ -12,10 +12,9 @@
 <tr><th>Period</th><td>{{.Period}}</td></tr>
 <tr><th>Published policy</th><td>p={{.R.PolicyP}} sp={{.R.PolicySP}} pct={{.R.PolicyPct}} adkim={{.R.ADKIM}} aspf={{.R.ASPF}}</td></tr>
 <tr><th>Messages</th><td>{{.R.Total}} ({{.R.Failed}} failed DKIM and SPF)</td></tr>
-<tr><th>Received</th><td>{{.Received}} from {{.R.MailFrom}} ({{.R.RemoteAddr}})</td></tr>
-</tbody>
+{{template "report-sender" .}}</tbody>
 </table>
-<p class="hint">The report is the reporter's claim. The sender and client address above are what this server saw when the report arrived.</p>
+<p class="hint">The report is the reporter's claim. How it arrived and the DKIM result above are what this server saw. A valid signature proves which domain sent the report, not that its numbers are true.</p>
 
 <h2>Records</h2>
 <table class="grid">

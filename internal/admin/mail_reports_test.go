@@ -147,6 +147,36 @@ func TestUIReportDetailOutsideScopeIs404(t *testing.T) {
 	}
 }
 
+// TestUIReportDetailShowsHowTheReportArrived: the detail page states whether the
+// carrying message's DKIM signature verified and for which domain, and a report
+// that came over HTTPS says so instead of naming a mail sender.
+func TestUIReportDetailShowsHowTheReportArrived(t *testing.T) {
+	d := reportsDir(directory.AdminRole{Role: directory.AdminSystem})
+	d.reports.tls[0].ReportSender = directory.ReportSender{Via: directory.ViaMail, MailFrom: "tls@reporter.example",
+		RemoteAddr: "192.0.2.5:25", SenderDKIM: "pass", SenderDKIMDomains: "reporter.example"}
+	d.reports.tls[1].ReportSender = directory.ReportSender{Via: directory.ViaHTTPS, RemoteAddr: "198.51.100.8"}
+	d.reports.dmarc[0].ReportSender = directory.ReportSender{Via: directory.ViaMail, SenderDKIM: "fail"}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+
+	for path, want := range map[string][]string{
+		"/admin/ui/reports/tlsrpt/1":  {"by mail from tls@reporter.example", "verified</span>, signed by reporter.example"},
+		"/admin/ui/reports/tlsrpt/2":  {"over HTTPS (198.51.100.8)", "HTTPS carries no signature"},
+		"/admin/ui/reports/dmarc/1":   {"no valid signature"},
+		"/admin/ui/reports/failure/1": {"not checked"},
+	} {
+		status, page := getPage(t, ts, path, session)
+		if status != http.StatusOK {
+			t.Fatalf("%s: status = %d, want 200", path, status)
+		}
+		for _, w := range want {
+			if !strings.Contains(page, w) {
+				t.Errorf("%s: the page lacks %q", path, w)
+			}
+		}
+	}
+}
+
 // TestUIReportsSummaryRenders: a system administrator's page carries the summary
 // totals above the list, and the retention form.
 func TestUIReportsSummaryRenders(t *testing.T) {

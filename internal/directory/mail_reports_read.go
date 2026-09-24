@@ -112,17 +112,40 @@ func (d *SQLDirectory) queryListings(q string, args []any) ([]ReportListing, err
 	return out, rows.Err()
 }
 
+// ReportSender is how a stored report reached this server and what could be
+// verified about the sender, as the detail pages show it.
+type ReportSender struct {
+	Via        string
+	MailFrom   string
+	RemoteAddr string
+	// SenderDKIM is pass, fail or none, empty when the carrying message was not
+	// checked; SenderDKIMDomains lists the verified signing domains, comma-separated.
+	SenderDKIM        string
+	SenderDKIMDomains string
+}
+
+// senderColumns selects the ReportSender columns of the report table aliased
+// alias, in scanTargets order.
+func senderColumns(alias string) string {
+	return alias + ".via, " + alias + ".mail_from, " + alias + ".remote_addr, " +
+		alias + ".sender_dkim, " + alias + ".sender_dkim_domains"
+}
+
+// scanTargets returns the ReportSender fields in senderColumns order.
+func (s *ReportSender) scanTargets() []any {
+	return []any{&s.Via, &s.MailFrom, &s.RemoteAddr, &s.SenderDKIM, &s.SenderDKIMDomains}
+}
+
 // DMARCReport is one aggregate report with its records, for the detail page.
 type DMARCReport struct {
 	ReportListing
+	ReportSender
 	ReporterEmail string
 	PolicyP       string
 	PolicySP      string
 	PolicyPct     string
 	ADKIM         string
 	ASPF          string
-	MailFrom      string
-	RemoteAddr    string
 	Records       []DMARCRecordRow
 }
 
@@ -145,10 +168,10 @@ func (d *SQLDirectory) GetDMARCReport(id int64) (DMARCReport, bool, error) {
 	var r DMARCReport
 	err := d.db.QueryRow(
 		`SELECT p.id, p.domain_id, COALESCE(dm.domainname, ''), p.org_name, p.report_id, p.date_begin, p.date_end,
-		   p.received_at, p.reporter_email, p.policy_p, p.policy_sp, p.policy_pct, p.adkim, p.aspf, p.mail_from, p.remote_addr
+		   p.received_at, p.reporter_email, p.policy_p, p.policy_sp, p.policy_pct, p.adkim, p.aspf, `+senderColumns("p")+`
 		 FROM dmarc_reports p LEFT JOIN domains dm ON dm.id = p.domain_id WHERE p.id = ?`, id).Scan(
-		&r.ID, &r.DomainID, &r.Domain, &r.OrgName, &r.ReportID, &r.Begin, &r.End, &r.ReceivedAt,
-		&r.ReporterEmail, &r.PolicyP, &r.PolicySP, &r.PolicyPct, &r.ADKIM, &r.ASPF, &r.MailFrom, &r.RemoteAddr)
+		append([]any{&r.ID, &r.DomainID, &r.Domain, &r.OrgName, &r.ReportID, &r.Begin, &r.End, &r.ReceivedAt,
+			&r.ReporterEmail, &r.PolicyP, &r.PolicySP, &r.PolicyPct, &r.ADKIM, &r.ASPF}, r.scanTargets()...)...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DMARCReport{}, false, nil
 	}
@@ -191,10 +214,9 @@ func (d *SQLDirectory) dmarcRecords(reportID int64) ([]DMARCRecordRow, error) {
 // TLSReport is one TLS report with its policies, for the detail page.
 type TLSReport struct {
 	ReportListing
-	Contact    string
-	MailFrom   string
-	RemoteAddr string
-	Policies   []TLSPolicyRow
+	ReportSender
+	Contact  string
+	Policies []TLSPolicyRow
 }
 
 // TLSPolicyRow is one stored policy block of a TLS report.
@@ -213,10 +235,10 @@ func (d *SQLDirectory) GetTLSReport(id int64) (TLSReport, bool, error) {
 	var r TLSReport
 	err := d.db.QueryRow(
 		`SELECT p.id, p.domain_id, COALESCE(dm.domainname, ''), p.org_name, p.report_id, p.date_begin, p.date_end,
-		   p.received_at, p.contact, p.mail_from, p.remote_addr
+		   p.received_at, p.contact, `+senderColumns("p")+`
 		 FROM tlsrpt_reports p LEFT JOIN domains dm ON dm.id = p.domain_id WHERE p.id = ?`, id).Scan(
-		&r.ID, &r.DomainID, &r.Domain, &r.OrgName, &r.ReportID, &r.Begin, &r.End, &r.ReceivedAt,
-		&r.Contact, &r.MailFrom, &r.RemoteAddr)
+		append([]any{&r.ID, &r.DomainID, &r.Domain, &r.OrgName, &r.ReportID, &r.Begin, &r.End, &r.ReceivedAt,
+			&r.Contact}, r.scanTargets()...)...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return TLSReport{}, false, nil
 	}
@@ -272,15 +294,19 @@ type DMARCFailure struct {
 	DeliveryResult        string
 	AuthenticationResults string
 	OriginalHeaders       string
-	MailFrom              string
-	RemoteAddr            string
+	ReportSender
 }
+
+// failureColumns selects a failure report's columns in scanFailure order.
+var failureColumns = `f.id, f.domain_id, COALESCE(dm.domainname, ''), f.received_at, f.arrival_date, f.source_ip,
+	   f.auth_failure, f.original_mail_from, f.original_rcpt_to, f.dkim_domain, f.delivery_result,
+	   f.authentication_results, f.original_headers, ` + senderColumns("f")
 
 func scanFailure(s rowScanner) (DMARCFailure, error) {
 	var f DMARCFailure
-	err := s.Scan(&f.ID, &f.DomainID, &f.Domain, &f.ReceivedAt, &f.ArrivalDate, &f.SourceIP, &f.AuthFailure,
+	err := s.Scan(append([]any{&f.ID, &f.DomainID, &f.Domain, &f.ReceivedAt, &f.ArrivalDate, &f.SourceIP, &f.AuthFailure,
 		&f.OriginalMailFrom, &f.OriginalRcptTo, &f.DKIMDomain, &f.DeliveryResult, &f.AuthenticationResults,
-		&f.OriginalHeaders, &f.MailFrom, &f.RemoteAddr)
+		&f.OriginalHeaders}, f.scanTargets()...)...)
 	return f, err
 }
 
@@ -293,9 +319,7 @@ func (d *SQLDirectory) ListDMARCFailures(f ReportFilter) ([]DMARCFailure, error)
 		return nil, nil
 	}
 	rows, err := d.db.Query(
-		`SELECT f.id, f.domain_id, COALESCE(dm.domainname, ''), f.received_at, f.arrival_date, f.source_ip,
-		   f.auth_failure, f.original_mail_from, f.original_rcpt_to, f.dkim_domain, f.delivery_result,
-		   f.authentication_results, f.original_headers, f.mail_from, f.remote_addr
+		`SELECT `+failureColumns+`
 		 FROM dmarc_failure_reports f
 		 LEFT JOIN domains dm ON dm.id = f.domain_id
 		 WHERE (? OR FIND_IN_SET(f.domain_id, ?) > 0) AND f.received_at >= ? AND (? = 0 OR f.received_at < ?)
@@ -319,9 +343,7 @@ func (d *SQLDirectory) ListDMARCFailures(f ReportFilter) ([]DMARCFailure, error)
 // checks DomainID against the admin's scope before showing it.
 func (d *SQLDirectory) GetDMARCFailure(id int64) (DMARCFailure, bool, error) {
 	rec, err := scanFailure(d.db.QueryRow(
-		`SELECT f.id, f.domain_id, COALESCE(dm.domainname, ''), f.received_at, f.arrival_date, f.source_ip,
-		   f.auth_failure, f.original_mail_from, f.original_rcpt_to, f.dkim_domain, f.delivery_result,
-		   f.authentication_results, f.original_headers, f.mail_from, f.remote_addr
+		`SELECT `+failureColumns+`
 		 FROM dmarc_failure_reports f
 		 LEFT JOIN domains dm ON dm.id = f.domain_id WHERE f.id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {

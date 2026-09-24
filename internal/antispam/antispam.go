@@ -85,7 +85,11 @@ type Verdict struct {
 	AccessAction string
 	SPF          AuthResult
 	DKIM         AuthResult
-	DMARC        AuthResult
+	// DKIMDomains are the d= domains of the signatures that verified, in message
+	// order. A caller that needs to know who vouched for a message reads them here
+	// instead of verifying the signatures a second time.
+	DKIMDomains []string
+	DMARC       AuthResult
 	// DMARCReject reports a DMARC failure under an enforcing policy (reject or
 	// quarantine), the strongest spoofing signal. No allow rule, operator or
 	// per-recipient, may rescue such a message from the score-based verdict.
@@ -246,6 +250,7 @@ func (s *Scorer) scoreDKIM(v *Verdict, in Input, cfg *Config) []string {
 	}
 	if len(validDKIM) > 0 {
 		v.DKIM = AuthPass
+		v.DKIMDomains = validDKIM
 		return validDKIM
 	}
 	v.DKIM = AuthFail

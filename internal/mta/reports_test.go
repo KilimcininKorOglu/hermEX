@@ -3,9 +3,11 @@ package mta
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
+	"hermex/internal/antispam"
 	"hermex/internal/directory"
 	"hermex/internal/logging"
 	"hermex/internal/mailreport"
@@ -102,11 +104,32 @@ func TestAReportToPostmasterIsDeliveredAndStored(t *testing.T) {
 	wantEq(t, "the stored domain id", src.DomainID, int64(7))
 	wantEq(t, "the stored sender", src.MailFrom, "tls@reporter.example")
 	wantEq(t, "the stored client address", src.RemoteAddr, "198.51.100.1:25")
+	wantEq(t, "the stored transport", src.Via, directory.ViaMail)
+	// No scorer ran, so there is no DKIM result to store, and none is invented.
+	wantEq(t, "the stored DKIM result of an unchecked message", src.SenderDKIM, "")
 	e, ok := r.eventNamed("report.stored")
 	if !ok {
 		t.Fatal("no report.stored event")
 	}
 	wantEq(t, "the event's mailbox", e.User, "postmaster@hermex.test")
+}
+
+// TestAReportKeepsTheCarryingMessagesDKIMResult: a report is the sender's claim,
+// so the store records whether the message that carried it was signed and by
+// whom, from the one verification the scorer already ran.
+func TestAReportKeepsTheCarryingMessagesDKIMResult(t *testing.T) {
+	r := newReportRig(t)
+	scorer := &recordingScorer{verdict: antispam.Verdict{DKIM: antispam.AuthPass, DKIMDomains: []string{"reporter.example"}}}
+	r.backend.Scorer = scorer
+	deliverBody(t, r.backend, "198.51.100.1:25", "tls@reporter.example", "postmaster@hermex.test", tlsReportMail("hermex.test"))
+
+	if len(r.reports.stored) != 1 {
+		t.Fatalf("stored reports = %d, want 1", len(r.reports.stored))
+	}
+	src := r.reports.stored[0]
+	wantEq(t, "the stored DKIM result", src.SenderDKIM, "pass")
+	wantEq(t, "the stored signing domains", strings.Join(src.SenderDKIMDomains, ","), "reporter.example")
+	wantEq(t, "scorer calls", scorer.calls, 1)
 }
 
 // TestAReportToAnotherRecipientIsNotStored keeps ordinary mailboxes out of it: a

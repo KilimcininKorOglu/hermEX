@@ -442,7 +442,7 @@ func (s *session) Data(r io.Reader) error {
 	}
 	// Last, so a report is stored only for a message the sender is told was
 	// accepted; a deferred message comes back and is read then.
-	s.ingestReports(raw, received)
+	s.ingestReports(raw, received, sc)
 	return nil
 }
 

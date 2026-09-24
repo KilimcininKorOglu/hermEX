@@ -15,10 +15,9 @@
 <tr><th>DKIM domain</th><td>{{.R.DKIMDomain}}</td></tr>
 <tr><th>Delivery result</th><td>{{.R.DeliveryResult}}</td></tr>
 <tr><th>Authentication results</th><td><small>{{.R.AuthenticationResults}}</small></td></tr>
-<tr><th>Received</th><td>{{.Received}} from {{.R.MailFrom}} ({{.R.RemoteAddr}})</td></tr>
-</tbody>
+{{template "report-sender" .}}</tbody>
 </table>
-<p class="hint">The report is the reporter's claim. The sender and client address above are what this server saw when the report arrived. Only the failed message's headers are stored, never its body.</p>
+<p class="hint">The report is the reporter's claim. How it arrived and the DKIM result above are what this server saw. A valid signature proves which domain sent the report, not that its contents are true. Only the failed message's headers are stored, never its body.</p>
 <h2>Original headers</h2>
 <pre class="report-headers">{{.R.OriginalHeaders}}</pre>
 </main>

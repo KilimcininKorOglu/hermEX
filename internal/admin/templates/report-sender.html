@@ -1,0 +1,6 @@
+{{/* The rows every report detail page shows about how the report arrived. A
+DKIM result of "fail" covers an unsigned message as well as a signature that did
+not verify; an empty result means the message was not checked. */}}
+{{define "report-sender"}}<tr><th>Received</th><td>{{.Received}} {{if eq .R.Via "https"}}over HTTPS{{else}}by mail from {{.R.MailFrom}}{{end}} ({{.R.RemoteAddr}})</td></tr>
+<tr><th>Sender DKIM</th><td>{{if eq .R.Via "https"}}not applicable, HTTPS carries no signature{{else if eq .R.SenderDKIM "pass"}}<span class="ok">verified</span>, signed by {{.R.SenderDKIMDomains}}{{else if eq .R.SenderDKIM "fail"}}<span class="error">no valid signature</span>{{else}}not checked{{end}}</td></tr>
+{{end}}

@@ -15,14 +15,33 @@ import (
 var ErrDuplicateReport = errors.New("directory: the report is already stored")
 
 // ReportSource is where a stored report came from. DomainID is the hosted domain
-// the report speaks for, which scopes it in the admin panel; MailFrom and
-// RemoteAddr record who delivered it, because a report is the sender's claim and
-// nothing more.
+// the report speaks for, which scopes it in the admin panel; the rest records who
+// delivered it and what this server could verify about them, because a report is
+// the sender's claim and nothing more.
 type ReportSource struct {
 	DomainID   int64
 	ReceivedAt int64
+	// Via is ViaMail or ViaHTTPS.
+	Via        string
 	MailFrom   string
 	RemoteAddr string
+	// SenderDKIM is the DKIM result of the message that carried the report (pass,
+	// fail or none), empty when it was not checked or the report came over HTTPS.
+	SenderDKIM string
+	// SenderDKIMDomains are the d= domains of the carrying message's signatures
+	// that verified.
+	SenderDKIMDomains []string
+}
+
+// The two ways a report reaches this server.
+const (
+	ViaMail  = "mail"
+	ViaHTTPS = "https"
+)
+
+// dkimDomains joins the verified signing domains for storage.
+func (s ReportSource) dkimDomains() string {
+	return capString(strings.Join(s.SenderDKIMDomains, ","), 512)
 }
 
 // StoreDMARCAggregate stores an aggregate report and its records in one
@@ -38,11 +57,13 @@ func (d *SQLDirectory) StoreDMARCAggregate(src ReportSource, a *mailreport.Aggre
 	}
 	res, err := tx.Exec(
 		`INSERT INTO dmarc_reports (domain_id, org_name, report_id, reporter_email, date_begin, date_end,
-		   policy_p, policy_sp, policy_pct, adkim, aspf, received_at, mail_from, remote_addr)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		   policy_p, policy_sp, policy_pct, adkim, aspf, received_at, mail_from, remote_addr,
+		   via, sender_dkim, sender_dkim_domains)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		src.DomainID, capString(a.OrgName, 255), capString(a.ReportID, 255), capString(a.Email, 320),
 		a.Begin.Unix(), a.End.Unix(), capString(a.P, 16), capString(a.SP, 16), capString(a.Pct, 8),
-		capString(a.ADKIM, 8), capString(a.ASPF, 8), src.ReceivedAt, capString(src.MailFrom, 320), capString(src.RemoteAddr, 64))
+		capString(a.ADKIM, 8), capString(a.ASPF, 8), src.ReceivedAt, capString(src.MailFrom, 320), capString(src.RemoteAddr, 64),
+		capString(src.Via, 8), capString(src.SenderDKIM, 8), src.dkimDomains())
 	if err != nil {
 		return 0, err
 	}
@@ -103,10 +124,11 @@ func (d *SQLDirectory) StoreTLSReport(src ReportSource, r *tlsrpt.Report) (int64
 	}
 	res, err := tx.Exec(
 		`INSERT INTO tlsrpt_reports (domain_id, org_name, report_id, contact, date_begin, date_end,
-		   received_at, mail_from, remote_addr)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		   received_at, mail_from, remote_addr, via, sender_dkim, sender_dkim_domains)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		src.DomainID, capString(r.OrganizationName, 255), capString(r.ReportID, 255), capString(r.ContactInfo, 320),
-		r.DateRange.Start.Unix(), r.DateRange.End.Unix(), src.ReceivedAt, capString(src.MailFrom, 320), capString(src.RemoteAddr, 64))
+		r.DateRange.Start.Unix(), r.DateRange.End.Unix(), src.ReceivedAt, capString(src.MailFrom, 320), capString(src.RemoteAddr, 64),
+		capString(src.Via, 8), capString(src.SenderDKIM, 8), src.dkimDomains())
 	if err != nil {
 		return 0, err
 	}
@@ -154,12 +176,13 @@ func (d *SQLDirectory) StoreDMARCFailure(src ReportSource, f *mailreport.Failure
 	res, err := d.db.Exec(
 		`INSERT INTO dmarc_failure_reports (domain_id, received_at, arrival_date, source_ip, auth_failure,
 		   original_mail_from, original_rcpt_to, dkim_domain, delivery_result, authentication_results,
-		   original_headers, mail_from, remote_addr)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		   original_headers, mail_from, remote_addr, via, sender_dkim, sender_dkim_domains)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		src.DomainID, src.ReceivedAt, arrival, capString(f.SourceIP, 64), capString(f.AuthFailure, 64),
 		capString(f.OriginalMailFrom, 320), capString(f.OriginalRcptTo, 4096), capString(f.DKIMDomain, 255),
 		capString(f.DeliveryResult, 64), capString(f.AuthenticationResults, 8192), f.OriginalHeaders,
-		capString(src.MailFrom, 320), capString(src.RemoteAddr, 64))
+		capString(src.MailFrom, 320), capString(src.RemoteAddr, 64),
+		capString(src.Via, 8), capString(src.SenderDKIM, 8), src.dkimDomains())
 	if err != nil {
 		return 0, err
 	}

@@ -45,7 +45,16 @@ func sampleTLS(reportID string, begin time.Time) *tlsrpt.Report {
 }
 
 func source(domainID int64, received time.Time) ReportSource {
-	return ReportSource{DomainID: domainID, ReceivedAt: received.Unix(), MailFrom: "noreply@google.com", RemoteAddr: "192.0.2.50:25"}
+	return ReportSource{DomainID: domainID, ReceivedAt: received.Unix(), Via: ViaMail, MailFrom: "noreply@google.com",
+		RemoteAddr: "192.0.2.50:25", SenderDKIM: "pass", SenderDKIMDomains: []string{"google.com", "gmail.com"}}
+}
+
+// wantSender checks that a report read back carries the source it was stored with.
+func wantSender(t *testing.T, got ReportSender) {
+	t.Helper()
+	want := ReportSender{Via: ViaMail, MailFrom: "noreply@google.com", RemoteAddr: "192.0.2.50:25",
+		SenderDKIM: "pass", SenderDKIMDomains: "google.com,gmail.com"}
+	wantEq(t, "the stored sender", got, want)
 }
 
 func TestDMARCAggregateRoundTrip(t *testing.T) {
@@ -65,6 +74,7 @@ func TestDMARCAggregateRoundTrip(t *testing.T) {
 	wantEq(t, "the DKIM results line", r.Records[0].DKIMResults, "acme.test/s1=pass")
 	wantEq(t, "the message total", r.Total, int64(14))
 	wantEq(t, "the failed messages", r.Failed, int64(4))
+	wantSender(t, r.ReportSender)
 }
 
 // TestAResentReportIsStoredOnce holds the duplicate rule: a reporter that is not
@@ -104,6 +114,7 @@ func TestTLSReportRoundTrip(t *testing.T) {
 	wantEq(t, "the policy count", len(r.Policies), 1)
 	wantEq(t, "the failed sessions", r.Failed, int64(2))
 	wantEq(t, "the failure detail", r.Policies[0].FailureDetails[0].ResultType, "certificate-expired")
+	wantSender(t, r.ReportSender)
 }
 
 func TestDMARCFailureRoundTrip(t *testing.T) {
@@ -120,6 +131,7 @@ func TestDMARCFailureRoundTrip(t *testing.T) {
 	wantEq(t, "the source", got.SourceIP, "198.51.100.3")
 	wantEq(t, "the arrival", got.ArrivalDate, reportDay1.Unix())
 	wantEq(t, "the headers", got.OriginalHeaders, "Subject: hi\r\n\r\n")
+	wantSender(t, got.ReportSender)
 }
 
 // TestReportListsFollowTheAdminScope is the tenant boundary of the report pages: a
