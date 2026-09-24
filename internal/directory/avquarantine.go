@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"unicode/utf8"
 )
 
 // QuarantineEntry is the metadata for a message the antivirus scanner held. The
@@ -151,10 +152,15 @@ func scanQuarantine(s rowScanner) (QuarantineRecord, error) {
 	return r, nil
 }
 
-// capString caps s to at most n bytes for a VARCHAR-bounded column.
+// capString caps s to at most n bytes for a VARCHAR-bounded column. The cut backs
+// off to the start of a character, because a cut inside a multi-byte character
+// leaves invalid UTF-8 and MariaDB then refuses the whole row.
 func capString(s string, n int) string {
-	if len(s) > n {
-		return s[:n]
+	if len(s) <= n {
+		return s
 	}
-	return s
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }

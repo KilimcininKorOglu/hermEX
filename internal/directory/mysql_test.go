@@ -68,7 +68,7 @@ func cleanTables(t *testing.T, db *sql.DB) {
 	t.Helper()
 	for _, tbl := range []string{"app_passwords", "user_totp_recovery", "user_totp", "altnames", "aliases", "forwards", "fetchmail_seen", "fetchmail", "admin_roles", "user_roles", "role_permissions", "roles", "associations", "specifieds", "mlists", "users", "domains", "orgs", "ldap_config", "sync_policy", "create_defaults", "active_sessions", "webmail_sessions", "admin_sessions", "push_subscriptions", "dkim_keys", "tls_certs", "smtp_gateways", "conn_limit_settings",
 		"dmarc_report_records", "dmarc_reports", "tlsrpt_report_policies", "tlsrpt_reports", "dmarc_failure_reports",
-		"mail_report_settings"} {
+		"mail_report_settings", "av_quarantine"} {
 		if _, err := db.Exec("DELETE FROM " + tbl); err != nil {
 			t.Fatalf("clean %s: %v", tbl, err)
 		}
