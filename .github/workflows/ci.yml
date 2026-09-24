@@ -1,0 +1,139 @@
+name: CI
+
+# The Go gate and the SPA checks block a merge. golangci-lint and the dependency
+# audit only report: a lint sweep is its own reviewed commit, and an advisory
+# published overnight is not a reason to fail an unrelated change.
+#
+# Every step goes through the Makefile or the SPA's own npm scripts, the same
+# commands a developer runs, so CI and a local run cannot drift apart.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A newer push to the same ref makes the older run's verdict irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go-gate:
+    name: Go gate (fmt-check + vet + test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # The same images the dev compose stack runs, so the DB-backed suites see the
+    # same server versions. clamd is left out on purpose: loading its signatures
+    # takes minutes, and the one live-scan test skips without HERMEX_TEST_CLAMD_ADDR.
+    services:
+      db:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: hermexstack
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping: 1})'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      HERMEX_TEST_MYSQL_DSN: root:hermexstack@tcp(127.0.0.1:3306)/hermex_test?charset=utf8mb4
+      HERMEX_TEST_MONGO_URI: mongodb://127.0.0.1:27017
+      # Match the dev image: modernc.org/sqlite is pure Go, so the gate builds
+      # without cgo.
+      CGO_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # The S/MIME interop tests skip without openssl. Fail here instead of letting
+      # them turn into no-ops, as the dev image does.
+      - name: Require openssl
+        run: openssl version
+      - name: make gate-host
+        run: make gate-host
+
+  spa:
+    name: Webmail2 SPA (build + lint + typecheck + test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: internal/webmail2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: internal/webmail2/package-lock.json
+      # The prebuild script runs `npm ci`, so the build installs the dependencies
+      # the later checks need.
+      - name: Build
+        run: npm run build
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test
+
+  lint:
+    name: golangci-lint (report only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    env:
+      CGO_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # .golangci.yml declares version "2". Pin the release so a new linter in a
+      # later release cannot change the report without a commit here.
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+      - name: make lint
+        run: make lint
+
+  audit:
+    name: Dependency audit (report only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+      # -k runs the npm scan even when the Go scan reports a finding.
+      - name: make audit-deps
+        run: make -k audit-deps

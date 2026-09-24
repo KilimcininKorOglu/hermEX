@@ -1,7 +1,7 @@
 // Package buildinfo carries the source state a binary was built from, so an
 // operator can tell what is actually running.
 //
-// With no CI and no tags, the running binary is the only evidence of what is
+// With no CI-built images and no tags, the running binary is the only evidence of what is
 // deployed. The container images build from a context with .git excluded and with
 // -buildvcs=false, which is right for build hygiene but removes the toolchain's
 // automatic stamping, so the values are injected at link time instead:

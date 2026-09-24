@@ -46,7 +46,7 @@ RUNFLAG := $(if $(RUN),-run '$(RUN)',)
 # benchmark in PKG.
 BENCH ?= .
 
-.PHONY: all build test test-host test-race bench vet fmt fmt-check gate lint lint-modernize require-golangci-lint audit-deps require-govulncheck tidy up down images rebuild clean help compose-check dump-db dump-mail restore-db version
+.PHONY: all build test test-host test-race bench vet fmt fmt-check gate gate-host lint lint-modernize require-golangci-lint audit-deps audit-go audit-npm require-govulncheck tidy up down images rebuild clean help compose-check dump-db dump-mail restore-db version
 
 all: build
 
@@ -97,6 +97,17 @@ fmt-check:
 ## gate: fmt-check + vet + full test, the pre-commit gate
 gate: fmt-check vet test
 
+## gate-host: the same three checks on the HOST toolchain, what CI runs
+# CI has no dev container to exec into, so it runs the toolchain directly and
+# starts MariaDB and Mongo as service containers. Set the HERMEX_TEST_* variables
+# the dev container sets, or the DB-backed tests skip and this proves less than
+# `gate`. Locally, `gate` stays the pre-commit gate.
+gate-host:
+	@out="$$(gofmt -l internal cmd)"; \
+	if [ -n "$$out" ]; then echo "gofmt needed on:"; echo "$$out"; exit 1; fi
+	go vet ./internal/... ./cmd/...
+	go test -count=1 $(RUNFLAG) $(PKG)
+
 ## lint: golangci-lint over PKG, on the HOST (deliberately not part of gate)
 # This is a host target like test-host: the dev image carries the Go toolchain
 # only, so there is no golangci-lint inside the container to exec into. Lint stays
@@ -121,20 +132,24 @@ require-golangci-lint:
 		exit 2; }
 
 ## audit-deps: check both dependency trees against published advisories (HOST)
-# There is no CI and no bot watching this repository, so the window between a CVE
-# being published and this project hearing about it is exactly as long as the gap
-# between runs of this target. Run it before every release and at least monthly;
-# it is deliberately not part of `gate`, because an advisory published overnight
-# is not a reason to block an unrelated commit, and because it reaches the network
-# while the gate must not.
+# CI runs this on every push to main and every pull request, as a report that
+# never fails the build. Nothing else watches this repository, so run it before
+# every release too. It is deliberately not part of `gate`, because an advisory
+# published overnight is not a reason to block an unrelated commit, and because it
+# reaches the network while the gate must not.
 #
 # Go and npm are both covered: the SPA bundle an operator serves is built from the
 # npm tree, so scanning only go.mod would leave the code that runs in a user's
 # browser unwatched. govulncheck reports only advisories that reach a symbol this
 # code actually calls, so a finding here is a real reachable path, not a version
-# match.
-audit-deps: require-govulncheck
+# match. The two scans are separate prerequisites, so `make -k audit-deps` still
+# runs the npm scan when the Go scan reports a finding.
+audit-deps: audit-go audit-npm
+
+audit-go: require-govulncheck
 	govulncheck ./internal/... ./cmd/...
+
+audit-npm:
 	cd internal/webmail2 && npm audit
 
 # Report the missing tool and how to get it, matching require-golangci-lint.

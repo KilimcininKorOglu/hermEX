@@ -2,7 +2,8 @@ version: "2"
 
 # Report everything. The defaults cap a run at 50 issues per linter and 3 per
 # distinct message, which silently hides the rest: a run can report "3 issues"
-# when thirty remain, and there is no CI here to catch what the cap swallowed.
+# when thirty remain, and the CI lint job only reports, so a capped run there
+# would hide the rest just as silently.
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

@@ -35,8 +35,8 @@ func captureStderr(t *testing.T, fn func()) string {
 	return out
 }
 
-// TestBuildAnnouncesTheRunningBuild is the whole point of the stamp. With no CI and
-// no tags, a running container carried no marker of the source it was built from,
+// TestBuildAnnouncesTheRunningBuild is the whole point of the stamp. With no
+// CI-built images and no tags, a running container carried no marker of the source it was built from,
 // so after an incident or a rollback there was no way to answer whether a fix had
 // actually shipped. Every daemon builds its logger through this one call, so the
 // answer is now recorded once per start, to stderr and to the queryable store the

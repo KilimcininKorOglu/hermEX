@@ -60,7 +60,14 @@ certificate store with optional ACME issuance (`internal/tlscert`).
 Development is Docker-based and driven entirely through the `Makefile`, which
 wraps `docker compose` and runs the toolchain in the dev container (the host Go
 toolchain has no MariaDB, so DB-backed tests skip and silently hide failures).
-There is no CI pipeline: `make gate` run locally is the only quality gate.
+Run `make gate` locally before every commit.
+
+CI (`.github/workflows/ci.yml`) runs on every push to `main` and every pull
+request. Two jobs block: the Go gate (`make gate-host`, the same fmt-check, vet
+and test on the runner's toolchain, with MariaDB and MongoDB as service
+containers) and the webmail2 SPA checks (build, lint, typecheck, test).
+golangci-lint and the dependency audit run beside them as reports that never
+fail the build. The live clamd test skips in CI.
 
 | Target                        | What it does                                                                      |
 |-------------------------------|-----------------------------------------------------------------------------------|
@@ -68,6 +75,7 @@ There is no CI pipeline: `make gate` run locally is the only quality gate.
 | `make down`                   | Stop the dev environment                                                          |
 | `make build`                  | Compile every command binary into `bin/`                                          |
 | `make gate`                   | `fmt-check` + `vet` + full test, the pre-commit gate                              |
+| `make gate-host`              | The same checks on the host toolchain, what CI runs                               |
 | `make test`                   | Full test run in the dev container                                                |
 | `make test-host`              | Host quick-feedback run; DB-backed tests skip                                     |
 | `make test-race`              | Race-detector run in the dev container                                            |
