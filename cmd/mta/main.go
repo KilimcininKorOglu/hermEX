@@ -199,19 +199,8 @@ func (d *mtaDaemon) wireDelivery() {
 	applyDMARCReportSetting(d.logger, d.dir.GetDMARCReportSettings, d.dmarc.on.Store)
 	go runDMARCReportMaintenance(d.logger, d.dir.GetDMARCReportSettings, d.dmarc.on.Store)
 
-	// Automatic meeting-request processing runs at delivery for mailboxes configured
-	// for it (resource rooms, auto-accepting users). Wired here, not in the mta
-	// package, to break the meeting→mta import cycle. The organizer notification is
-	// kept local-only (a nil spool): an internal organizer is notified, while an
-	// external organizer is not, auto-relaying machine-generated replies to arbitrary
-	// external addresses is a backscatter vector, gated separately like the
-	// out-of-office reply.
-	mta.OnMeetingRequest = meetingHook(meeting.AutoProcess, d.logger)
-	// An inbound iTIP REPLY updates the organizer's calendar event so the
-	// TrackingTab reflects attendee responses; best-effort, delivery-independent.
-	mta.OnMeetingReply = func(st *objectstore.Store, sender string, msgID int64) (bool, error) {
-		return meeting.ProcessReply(st, sender, msgID)
-	}
+	// Automatic meeting-request processing and REPLY tracking run at delivery.
+	meeting.InstallDeliveryHooks(d.logger)
 }
 
 // listen opens the plaintext SMTP listener on the configured address.
@@ -669,30 +658,6 @@ func ruleHook(kind string, limiter *mta.OutboundLimiter, enqueue enqueueFunc, lo
 				Name: "rule." + kind + ".enqueue", User: owner,
 				Fields: logging.Fields{"recipients": len(to)}, Err: err.Error()})
 		}
-	}
-}
-
-// autoProcessFunc is the meeting auto-processing pass, taken as a parameter so the
-// hook's reporting can be exercised without a live store.
-type autoProcessFunc func(*objectstore.Store, directory.Accounts, *relay.Spool, string, int64) (bool, error)
-
-// meetingHook builds the delivery-time meeting auto-processing hook. A failure is
-// swallowed on purpose (delivery already succeeded), so this reports it to the
-// central sink: without that line the organizer is silently never told the request
-// was accepted or declined, and nothing in the operator's log says why.
-func meetingHook(auto autoProcessFunc, logger *logging.Logger) func(*objectstore.Store, directory.Accounts, string, int64) bool {
-	return func(st *objectstore.Store, accounts directory.Accounts, recipient string, msgID int64) bool {
-		handled, err := auto(st, accounts, nil, recipient, msgID)
-		if err != nil {
-			logger.Emit(logging.Event{
-				Level:     logging.LevelError,
-				Subsystem: logging.MTA,
-				Name:      "meeting.autoprocess.fail",
-				User:      recipient,
-				Err:       err.Error(),
-			})
-		}
-		return handled
 	}
 }
 

@@ -1,4 +1,4 @@
-package main
+package meeting
 
 import (
 	"errors"
@@ -7,6 +7,7 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/logging"
+	"hermex/internal/mta"
 	"hermex/internal/objectstore"
 	"hermex/internal/relay"
 )
@@ -35,7 +36,7 @@ func TestMeetingHookRecordsFailure(t *testing.T) {
 		return false, errors.New("directory unavailable")
 	}
 
-	hook := meetingHook(failing, logging.New(sink))
+	hook := requestHook(failing, logging.New(sink))
 	if handled := hook(nil, nil, "room@hermex.test", 42); handled {
 		t.Errorf("a failed pass reported the request as handled")
 	}
@@ -56,6 +57,31 @@ func TestMeetingHookRecordsFailure(t *testing.T) {
 	t.Errorf("the auto-process failure never reached the central sink; events = %+v", sink.events)
 }
 
+// TestInstalledHooksProcessALocalInvite delivers an invitation the way a webmail,
+// EWS, ActiveSync, DAV or MAPI send reaches a local mailbox, through
+// mta.DeliverAndRelay in that daemon's own process. Only cmd/mta used to install
+// the hooks, so an auto-accepting mailbox left such an invitation unanswered.
+func TestInstalledHooksProcessALocalInvite(t *testing.T) {
+	st, tags, accounts := apSetup(t, objectstore.MeetingConfig{AutoAccept: true})
+	request, reply := mta.OnMeetingRequest, mta.OnMeetingReply
+	t.Cleanup(func() { mta.OnMeetingRequest, mta.OnMeetingReply = request, reply })
+	InstallDeliveryHooks(logging.New(&hookSink{}))
+
+	invite := []byte("From: organizer@hermex.test\r\nTo: room@hermex.test\r\nSubject: Sync\r\n" +
+		"MIME-Version: 1.0\r\nContent-Type: text/calendar; method=REQUEST; charset=UTF-8\r\n\r\n" +
+		"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//test//EN\r\nMETHOD:REQUEST\r\n" +
+		"BEGIN:VEVENT\r\nUID:local-invite-1\r\nDTSTAMP:20260619T090000Z\r\n" +
+		"DTSTART:20260620T100000Z\r\nDTEND:20260620T110000Z\r\nSUMMARY:Sync\r\n" +
+		"ORGANIZER:mailto:organizer@hermex.test\r\nATTENDEE:mailto:room@hermex.test\r\n" +
+		"END:VEVENT\r\nEND:VCALENDAR\r\n")
+	if _, err := mta.DeliverAndRelay(accounts, nil, "organizer@hermex.test", []string{"room@hermex.test"}, invite, apBase); err != nil {
+		t.Fatal(err)
+	}
+	if got := calBusyStatuses(t, st, tags); len(got) != 1 || got[0] != busyBusy {
+		t.Errorf("calendar busy statuses = %v, want the invitation accepted", got)
+	}
+}
+
 // TestMeetingHookStaysQuietOnSuccess is the control: an ordinary pass must not
 // report anything.
 func TestMeetingHookStaysQuietOnSuccess(t *testing.T) {
@@ -64,7 +90,7 @@ func TestMeetingHookStaysQuietOnSuccess(t *testing.T) {
 		return true, nil
 	}
 
-	hook := meetingHook(ok, logging.New(sink))
+	hook := requestHook(ok, logging.New(sink))
 	if handled := hook(nil, nil, "room@hermex.test", 42); !handled {
 		t.Errorf("a successful pass did not report the request as handled")
 	}

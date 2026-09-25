@@ -24,6 +24,7 @@ import (
 	"hermex/internal/ldapauth"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
+	"hermex/internal/meeting"
 	"hermex/internal/mta"
 	"hermex/internal/notify"
 	"hermex/internal/objectstore"
@@ -73,6 +74,9 @@ func main() {
 	// stored settings without a restart.
 	mta.StartOutboundLimiter("hermex-ews", logger, dir.GetOutboundSettings)
 	mta.StartAutoReply("hermex-ews", logger, dir.GetAutoReplySettings)
+	// A meeting message this daemon delivers to a local mailbox gets the same
+	// delivery-time processing the MTA applies.
+	meeting.InstallDeliveryHooks(logger)
 	// The operator's inbound message size limit applies to this daemon's sends
 	// too: SMTP refuses an oversized message during DATA, and nothing here ever
 	// reaches an SMTP session.
