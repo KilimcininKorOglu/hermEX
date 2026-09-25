@@ -75,9 +75,16 @@ func isOrganizer(st *objectstore.Store, props mapi.PropertyValues, caller string
 }
 
 // storedSequence is the meeting revision the appointment records, 0 when it
-// records none.
+// records none. A series keeps its revision only in the iCalendar stored verbatim,
+// because the import synthesizes no properties for a recurring event beyond what a
+// listing needs, so both places are read and the higher one wins.
 func storedSequence(st *objectstore.Store, props mapi.PropertyValues) int {
 	n, _ := propInt32(props, namedLongTag(st, mapi.NameAppointmentSequence))
+	if v, ok := props.Get(mapi.PrIcalOriginal); ok {
+		if raw, ok := v.([]byte); ok {
+			return max(int(n), oxcical.Sequence(raw, nil))
+		}
+	}
 	return int(n)
 }
 

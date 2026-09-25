@@ -228,3 +228,19 @@ func TestLegacyMeetingKeepsItsWireUID(t *testing.T) {
 		`{"summary":"Old","start":"2026-09-02T09:00:00Z","end":"2026-09-02T10:00:00Z","attendees":["bob@hermex.test"],"sendInvite":true}`), http.StatusOK)
 	wantContains(t, "legacy request", lastOf(t, folderMail(t, bob, int64(mapi.PrivateFIDInbox)), 1), "UID:"+strconv.FormatInt(id, 10))
 }
+
+// TestSeriesUpdateAdvancesTheRevision resends an edited series twice. A series
+// keeps its revision only in its stored iCalendar, which the revision was never
+// read from, so every resend went out at SEQUENCE:1 and an attendee's client
+// took the second as no newer than the first.
+func TestSeriesUpdateAdvancesTheRevision(t *testing.T) {
+	do, _, bob := meetingHarness(t)
+	id := createEvent(t, do, `{"summary":"Standup","start":"2026-09-07T06:00:00Z","end":"2026-09-07T06:30:00Z",`+
+		`"recurrence":"FREQ=DAILY;COUNT=3","attendees":["bob@hermex.test"],"sendInvite":true}`)
+	for _, summary := range []string{"Standup moved", "Standup moved again"} {
+		wantStatus(t, "update", do(http.MethodPut, "/api/v1/calendar/events/"+strconv.FormatInt(id, 10),
+			`{"summary":"`+summary+`","start":"2026-09-07T06:00:00Z","end":"2026-09-07T06:30:00Z",`+
+				`"recurrence":"FREQ=DAILY;COUNT=3","attendees":["bob@hermex.test"],"sendInvite":true}`), http.StatusOK)
+	}
+	wantContains(t, "second resend", lastOf(t, folderMail(t, bob, int64(mapi.PrivateFIDInbox)), 3), "SEQUENCE:2")
+}
