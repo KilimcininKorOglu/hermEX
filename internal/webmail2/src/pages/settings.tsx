@@ -349,12 +349,14 @@ export function SettingsPage() {
   }, [])
 
   const handleTimezoneChange = async (tz: string) => {
+    const prev = timezone
     setTimezone(tz)
     try {
       await api.updateProfile({ timezone: tz })
       updatePrefs({ timezone: tz })
       toast.success(t("settings.appearance.timezoneSaved"))
     } catch (err) {
+      setTimezone(prev)
       toast.error(err instanceof Error ? err.message : t("settings.appearance.timezoneSaveFailed"))
     }
   }
