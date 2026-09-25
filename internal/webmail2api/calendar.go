@@ -700,8 +700,12 @@ func (s *Server) handleCreateEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	// The invitation goes out after the meeting is stored and is best-effort: a
 	// delivery failure leaves the event saved.
-	if in.SendInvite && organizer != "" {
+	switch {
+	case organizer == "":
+	case in.SendInvite:
 		s.sendInvitation(st, id, organizer, "meeting-request", in)
+	default:
+		markInvited(st, id, false)
 	}
 	in.UID = strconv.FormatInt(id, 10)
 	writeJSON(w, http.StatusOK, in)

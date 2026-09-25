@@ -95,11 +95,48 @@ func storedSequence(st *objectstore.Store, props mapi.PropertyValues) int {
 // namedLongTag resolves a PtLong named property the store already allocated, 0
 // when it never did.
 func namedLongTag(st *objectstore.Store, name mapi.PropertyName) mapi.PropTag {
-	ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{name})
+	return resolveNamedTag(st, false, name, mapi.PtLong)
+}
+
+// resolveNamedTag resolves a named property of the given type, allocating it when
+// create is set; 0 when it cannot be resolved.
+func resolveNamedTag(st *objectstore.Store, create bool, name mapi.PropertyName, typ mapi.PropType) mapi.PropTag {
+	ids, err := st.GetNamedPropIDs(create, []mapi.PropertyName{name})
 	if err != nil || len(ids) != 1 || ids[0] == 0 {
 		return 0
 	}
-	return mapi.MakeTag(ids[0], mapi.PtLong)
+	return mapi.MakeTag(ids[0], typ)
+}
+
+// markInvited records on the stored meeting whether its request went out
+// (PidLidFInvited, MS-OXOCAL). A meeting saved without sending is marked false, so
+// deleting it later tells nobody about a meeting they never received; a sent one is
+// marked true and is never marked false again.
+func markInvited(st *objectstore.Store, id int64, sent bool) {
+	tag := resolveNamedTag(st, true, mapi.NameFInvited, mapi.PtBoolean)
+	if tag == 0 {
+		logError("meeting-invited", errors.New("webmail2api: PidLidFInvited could not be allocated"), logging.Fields{"id": id})
+		return
+	}
+	var props mapi.PropertyValues
+	props.Set(tag, sent)
+	if err := st.ModifyMessageProperties(id, props); err != nil {
+		logError("meeting-invited", err, logging.Fields{"id": id})
+	}
+}
+
+// neverInvited reports whether the stored meeting records that its request was
+// never sent. A meeting that records nothing either way (one another client
+// organized, or one saved before this was recorded) counts as sent, so its
+// attendees still hear about a cancellation.
+func neverInvited(st *objectstore.Store, props mapi.PropertyValues) bool {
+	tag := resolveNamedTag(st, false, mapi.NameFInvited, mapi.PtBoolean)
+	if tag == 0 {
+		return false
+	}
+	v, ok := props.Get(tag)
+	sent, isBool := v.(bool)
+	return ok && isBool && !sent
 }
 
 // meetingBody renders the stored appointment as the iCalendar its attendees hold,
@@ -174,6 +211,9 @@ func (s *Server) sendInvitation(st *objectstore.Store, id int64, organizer, kind
 			err = s.sendMeetingMail(st, id, organizer, meetingMail{
 				method: "REQUEST", subject: propStr(props, mapi.PrSubject), text: inviteTextBody(e), kind: kind, calendar: req,
 			})
+			if err == nil {
+				markInvited(st, id, true)
+			}
 		}
 	}
 	if err != nil && !errors.Is(err, errNoAttendees) {
@@ -207,7 +247,7 @@ func (p *pendingMail) send(s *Server, st *objectstore.Store) {
 // cancellation sent for a meeting that then failed to delete cannot be recalled.
 func prepareCancellation(st *objectstore.Store, id int64, caller string) *pendingMail {
 	ical, props, err := meetingBody(st, id)
-	if err != nil || !isAppointment(props) || !isOrganizer(st, props, caller) {
+	if err != nil || !isAppointment(props) || !isOrganizer(st, props, caller) || neverInvited(st, props) {
 		return nil
 	}
 	to := meetingRecipients(st, id, caller)

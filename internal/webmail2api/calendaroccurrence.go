@@ -95,7 +95,7 @@ func (s *Server) editOccurrence(w http.ResponseWriter, r *http.Request, ch occur
 }
 
 // editSeries rewrites a stored series from its iCalendar after the change edited
-// it. When caller organizes the meeting, the revision advances in the stored
+// it. When caller organizes the meeting and its request went out, the revision advances in the stored
 // series and the message that tells the attendees is returned, prepared from the
 // object in memory and sent by the caller only once the write succeeded.
 func editSeries(st *objectstore.Store, id int64, caller string, ch occurrenceChange) (*pendingMail, error) {
@@ -113,7 +113,7 @@ func editSeries(st *objectstore.Store, id int64, caller string, ch occurrenceCha
 		return nil, errNoSuchEvent
 	}
 	var notice *pendingMail
-	if ch.method != "" && isOrganizer(st, stored.Props, caller) {
+	if ch.method != "" && isOrganizer(st, stored.Props, caller) && !neverInvited(st, stored.Props) {
 		edited, notice = ch.announce(st, id, stored.Props, raw, edited, caller)
 	}
 	return notice, rewriteEvent(st, id, edited, oxcical.Options{Resolver: st.GetNamedPropIDs})

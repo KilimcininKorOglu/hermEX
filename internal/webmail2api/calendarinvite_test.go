@@ -211,9 +211,35 @@ func TestLegacyMeetingCancelsUnderItsWireUID(t *testing.T) {
 func TestCancellationDropsInjectedLines(t *testing.T) {
 	do, alice, _ := meetingHarness(t)
 	id := createEvent(t, do, `{"summary":"`+injectedSummary+`","start":"2026-09-01T10:00:00Z",`+
-		`"end":"2026-09-01T11:00:00Z","attendees":["bob@hermex.test"]}`)
+		`"end":"2026-09-01T11:00:00Z","attendees":["bob@hermex.test"],"sendInvite":true}`)
 	deleteEvent(t, do, strconv.FormatInt(id, 10))
-	wantNoInjectedLines(t, lastOf(t, folderMail(t, alice, int64(mapi.PrivateFIDSentItems)), 1))
+	wantNoInjectedLines(t, lastOf(t, folderMail(t, alice, int64(mapi.PrivateFIDSentItems)), 2))
+}
+
+// TestUnsentMeetingDeleteSendsNothing saves a meeting without sending it, then
+// deletes it. Its attendees used to receive a cancellation for a meeting they
+// never received. Once a later save sends the request, a deletion cancels it.
+func TestUnsentMeetingDeleteSendsNothing(t *testing.T) {
+	do, alice, bob := meetingHarness(t)
+	unsent := `{"summary":"Draft","start":"2026-09-04T09:00:00Z","end":"2026-09-04T10:00:00Z","attendees":["bob@hermex.test"]}`
+	deleteEvent(t, do, strconv.FormatInt(createEvent(t, do, unsent), 10))
+	wantEq(t, "bob's inbox after the unsent meeting", len(folderMail(t, bob, int64(mapi.PrivateFIDInbox))), 0)
+	wantEq(t, "alice's Sent Items", len(folderMail(t, alice, int64(mapi.PrivateFIDSentItems))), 0)
+
+	id := createEvent(t, do, unsent)
+	wantStatus(t, "send", do(http.MethodPut, "/api/v1/calendar/events/"+strconv.FormatInt(id, 10),
+		strings.TrimSuffix(unsent, "}")+`,"sendInvite":true}`), http.StatusOK)
+	deleteEvent(t, do, strconv.FormatInt(id, 10))
+	wantContains(t, "cancellation of the sent meeting", lastOf(t, folderMail(t, bob, int64(mapi.PrivateFIDInbox)), 2), "METHOD:CANCEL")
+}
+
+// TestUnsentSeriesOccurrenceDeleteSendsNothing removes an instance of a series
+// that was saved without sending: nobody holds the series to cancel it in.
+func TestUnsentSeriesOccurrenceDeleteSendsNothing(t *testing.T) {
+	do, _, bob := meetingHarness(t)
+	id := createEvent(t, do, strings.Replace(seriesBody, `,"sendInvite":true`, "", 1))
+	wantStatus(t, "delete occurrence", do(http.MethodDelete, occurrencePath(id)+"?at=2026-09-08T06:00:00Z", ""), http.StatusOK)
+	wantEq(t, "bob's inbox", len(folderMail(t, bob, int64(mapi.PrivateFIDInbox))), 0)
 }
 
 // TestLegacyMeetingKeepsItsWireUID resends a meeting organized before invitations

@@ -124,6 +124,7 @@ var (
 	NameAppointmentStateFlags = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8217} // PtLong, asfMeeting|asfReceived|asfCanceled
 	NameResponseStatus        = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8218} // PtLong, respTentative/Accepted/Declined
 	NameAppointmentReplyTime  = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8220} // PtSysTime, when the attendee responded
+	NameFInvited              = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8229} // PtBoolean, a meeting request was sent; never reset once true
 
 	// Reminder named properties (PSETID_Common), VALARM maps here.
 	NameReminderDelta = PropertyName{Kind: MnidID, GUID: PsetidCommon, LID: 0x8501} // PtLong, minutes before start
