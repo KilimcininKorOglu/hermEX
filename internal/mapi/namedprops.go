@@ -165,6 +165,9 @@ var (
 	// iCalendar UID; v1 keeps the UID as a string property instead (the wrapped
 	// binary encoding is deferred), so this is reserved for that later work.
 	NameGlobalObjectId = PropertyName{Kind: MnidID, GUID: PsetidMeeting, LID: 0x0003} // PtBinary
+	// NameMeetingType (PidLidMeetingType, MS-OXOCAL 2.2.6.5) says what a meeting
+	// message is to its meeting; mtgOutOfDate marks one a newer message superseded.
+	NameMeetingType = PropertyName{Kind: MnidID, GUID: PsetidMeeting, LID: 0x0026} // PtLong
 
 	// NameICalUID preserves the iCalendar UID as a named string (PS_PUBLIC_STRINGS),
 	// the v1 stand-in for the binary global object id, the stable identity that

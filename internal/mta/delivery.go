@@ -935,6 +935,9 @@ func deliver(accounts directory.Accounts, from, rcptAddr, path string, raw []byt
 	// calendar event so the TrackingTab reflects it; best-effort, never fails
 	// delivery, and runs after the OOF pass so a REPLY never triggers an auto-reply.
 	autoProcessReply(st, from, info)
+	// A cancellation from a meeting's organizer marks the meeting cancelled in the
+	// attendee's calendar; best-effort like the REPLY pass.
+	autoProcessCancel(st, from, info)
 	return nil
 }
 
@@ -952,6 +955,14 @@ var OnMeetingRequest func(st *objectstore.Store, accounts directory.Accounts, re
 // sender is the delivered message's envelope sender, so the processor can refuse
 // a REPLY that claims to speak for an attendee who did not send it.
 var OnMeetingReply func(st *objectstore.Store, sender string, messageID int64) (bool, error)
+
+// OnMeetingCancel, when set, applies an inbound iTIP CANCEL on the attendee's side:
+// it marks the cancelled meeting, or the one instance the cancellation names, as
+// cancelled in the attendee's calendar. sender is the envelope sender, so the
+// processor can refuse a cancellation that does not come from the organizer.
+// Wired by the meeting package; the indirection breaks the meeting→mta import
+// cycle.
+var OnMeetingCancel func(st *objectstore.Store, sender string, messageID int64) (bool, error)
 
 // autoProcessMeeting runs the registered meeting-request processor (if any) on a
 // just-delivered message, swallowing any panic exactly like the other delivery-time
@@ -972,23 +983,36 @@ func autoProcessMeeting(accounts directory.Accounts, st *objectstore.Store, reci
 }
 
 // autoProcessReply runs the registered inbound-REPLY processor (if any) on a
-// just-delivered message, panic-swallowed like the request pass: a misbehaving
-// processor must never fail delivery. It reports whether a REPLY was handled.
+// just-delivered message. The reply itself is delivered either way; what can fail
+// here is the tracking write on the organizer's event, and that failure is
+// invisible to everyone (the organizer just sees an attendee who never answered)
+// unless it is logged.
 func autoProcessReply(st *objectstore.Store, sender string, m objectstore.MessageInfo) {
+	runSenderPass("meeting-reply", OnMeetingReply, st, sender, m)
+}
+
+// autoProcessCancel runs the registered inbound-CANCEL processor (if any) on a
+// just-delivered message. A failed calendar write leaves the attendee holding a
+// meeting that no longer takes place, so it is logged like the REPLY pass.
+func autoProcessCancel(st *objectstore.Store, sender string, m objectstore.MessageInfo) {
+	runSenderPass("meeting-cancel", OnMeetingCancel, st, sender, m)
+}
+
+// runSenderPass runs one delivery-time pass keyed by the envelope sender,
+// panic-swallowed like the request pass: a misbehaving processor must never fail
+// delivery. A failure it reports is recorded under name.
+func runSenderPass(name string, pass func(*objectstore.Store, string, int64) (bool, error), st *objectstore.Store, sender string, m objectstore.MessageInfo) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("mta: meeting-reply process panicked for uid %d, skipped: %v", m.UID, r)
-			logPassFailure("meeting-reply", "", logging.Fields{"uid": m.UID}, r)
+			log.Printf("mta: %s pass panicked for uid %d, skipped: %v", name, m.UID, r)
+			logPassFailure(name, "", logging.Fields{"uid": m.UID}, r)
 		}
 	}()
-	if OnMeetingReply == nil {
+	if pass == nil {
 		return
 	}
-	// The reply itself is delivered either way; what can fail here is the tracking
-	// write on the organizer's event, and that failure is invisible to everyone
-	// (the organizer just sees an attendee who never answered) unless it is logged.
-	if _, err := OnMeetingReply(st, sender, m.ID); err != nil {
-		logPassFailure("meeting-reply", "", logging.Fields{"uid": m.UID}, err)
+	if _, err := pass(st, sender, m.ID); err != nil {
+		logPassFailure(name, "", logging.Fields{"uid": m.UID}, err)
 	}
 }
 

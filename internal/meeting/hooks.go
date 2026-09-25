@@ -9,7 +9,8 @@ import (
 )
 
 // InstallDeliveryHooks wires this package's delivery-time passes into mta: the
-// automatic meeting-request processing and the organizer-side REPLY tracking.
+// automatic meeting-request processing, the organizer-side REPLY tracking and the
+// attendee-side CANCEL processing.
 // Every daemon that delivers mail to a local mailbox must call it, because each one
 // reaches mta.Deliver on its own; a daemon that does not leaves an invitation, a
 // response or a cancellation sent through it unprocessed at the recipient. The
@@ -17,6 +18,7 @@ import (
 func InstallDeliveryHooks(logger *logging.Logger) {
 	mta.OnMeetingRequest = requestHook(AutoProcess, logger)
 	mta.OnMeetingReply = ProcessReply
+	mta.OnMeetingCancel = ProcessCancellation
 }
 
 // autoProcessFunc is the meeting auto-processing pass, taken as a parameter so the

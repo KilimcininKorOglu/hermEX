@@ -259,6 +259,11 @@ const (
 	// PrResponseRequested is set by a meeting organizer that wants attendees to
 	// reply; an explicit false suppresses the response notification.
 	PrResponseRequested = PropTag(0x0063000B) // PtBoolean
+
+	// PrProcessed (PidTagProcessed, MS-OXOCAL 2.2.5.7) marks a received meeting
+	// message the client has already applied to the calendar, so it is not applied
+	// twice.
+	PrProcessed = PropTag(0x7D01000B) // PtBoolean
 )
 
 // Read-receipt (MDN) property tags. A Disposition-Notification-To header sets
