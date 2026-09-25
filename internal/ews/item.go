@@ -294,22 +294,21 @@ func getOneItem(cache *storeCache, sess *session, itemID string) itemResponseMes
 		return itemError("ErrorItemNotFound")
 	}
 	hasAttach, _ := st.HasAttachments(id.MessageID)
-	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-	changeKey := oxews.ChangeKey(uint64(id.MessageID))
+	key := changeKey(st, id.MessageID)
 	switch itemClass(msg.Props) {
 	case oxtask.MessageClass:
 		// A task is rendered as <t:Task> from its shared properties, not the mail
 		// MIME path (a task has no RFC822 form).
 		tk, _ := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
-		elem := oxews.BuildTask(tk, oxews.ItemMeta{ItemID: itemID, ChangeKey: changeKey, HasAttachments: hasAttach})
+		elem := oxews.BuildTask(tk, oxews.ItemMeta{ItemID: itemID, ChangeKey: key, HasAttachments: hasAttach})
 		return itemFound(&itemsWrap{Tasks: []oxews.Task{elem}})
 	case oxews.NoteClass:
 		// A sticky note is rendered as a base <t:Item> (EWS has no Note type) from
 		// its shared properties.
-		elem := buildNoteItem(st, msg.Props, itemID, changeKey)
+		elem := buildNoteItem(st, msg.Props, itemID, key)
 		return itemFound(&itemsWrap{BaseItems: []oxews.Item{elem}})
 	}
-	return mailItem(st, id, itemID, changeKey, msg, hasAttach)
+	return mailItem(st, id, itemID, key, msg, hasAttach)
 }
 
 // mailItem renders a stored mail item: an ordinary message as <t:Message>, and a
@@ -461,9 +460,8 @@ func findBodyPart(p *mime.Part, subtype string) *mime.Part {
 func itemSummary(st *objectstore.Store, folderID int64, info objectstore.MessageInfo, mailbox string) oxews.Message {
 	name, email := splitAddress(info.Sender)
 	return oxews.BuildSummary(oxews.SummaryMeta{
-		ItemID: oxews.EncodeItemID(oxews.ItemID{FolderID: folderID, MessageID: info.ID, UID: info.UID, Mailbox: mailbox}),
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		ChangeKey:      oxews.ChangeKey(uint64(info.ID)),
+		ItemID:         oxews.EncodeItemID(oxews.ItemID{FolderID: folderID, MessageID: info.ID, UID: info.UID, Mailbox: mailbox}),
+		ChangeKey:      changeKey(st, info.ID),
 		ItemClass:      storedClass(st, info.ID),
 		Subject:        info.Subject,
 		SenderName:     name,
@@ -502,9 +500,8 @@ func itemClass(props mapi.PropertyValues) string {
 // complete summary is acceptable.
 func taskSummary(st *objectstore.Store, folderID, objectID int64, mailbox string) oxews.Task {
 	meta := oxews.ItemMeta{
-		ItemID: oxews.EncodeItemID(oxews.ItemID{FolderID: folderID, MessageID: objectID, Mailbox: mailbox}),
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		ChangeKey: oxews.ChangeKey(uint64(objectID)),
+		ItemID:    oxews.EncodeItemID(oxews.ItemID{FolderID: folderID, MessageID: objectID, Mailbox: mailbox}),
+		ChangeKey: changeKey(st, objectID),
 	}
 	if msg, err := st.OpenMessage(objectID); err == nil {
 		tk, _ := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
@@ -527,12 +524,11 @@ func buildNoteItem(st *objectstore.Store, props mapi.PropertyValues, itemID, cha
 // noteSummary builds a <t:Item> for FindItem on the Notes folder from a stored object.
 func noteSummary(st *objectstore.Store, folderID, objectID int64, mailbox string) oxews.Item {
 	itemID := oxews.EncodeItemID(oxews.ItemID{FolderID: folderID, MessageID: objectID, Mailbox: mailbox})
-	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-	changeKey := oxews.ChangeKey(uint64(objectID))
+	key := changeKey(st, objectID)
 	if msg, err := st.OpenMessage(objectID); err == nil {
-		return buildNoteItem(st, msg.Props, itemID, changeKey)
+		return buildNoteItem(st, msg.Props, itemID, key)
 	}
-	return oxews.Item{ItemID: oxews.ItemIDElem{ID: itemID, ChangeKey: changeKey}, ItemClass: oxews.NoteClass}
+	return oxews.Item{ItemID: oxews.ItemIDElem{ID: itemID, ChangeKey: key}, ItemClass: oxews.NoteClass}
 }
 
 // strProp reads a string (or []byte text) property as a string.

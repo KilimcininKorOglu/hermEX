@@ -101,9 +101,8 @@ func (s *Server) markOneAsJunk(cache *storeCache, sess *session, itemID string, 
 			return markJunkErr("ErrorItemNotFound")
 		}
 		resp.MovedItemID = &movedItemID{
-			ID: oxews.EncodeItemID(oxews.ItemID{FolderID: target, MessageID: moved.ID, UID: moved.UID}),
-			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-			ChangeKey: oxews.ChangeKey(uint64(moved.ID)),
+			ID:        oxews.EncodeItemID(oxews.ItemID{FolderID: target, MessageID: moved.ID, UID: moved.UID}),
+			ChangeKey: changeKey(st, moved.ID),
 		}
 	}
 	return resp

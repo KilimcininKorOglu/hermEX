@@ -153,8 +153,7 @@ func (s *Server) updateOne(cache *storeCache, sess *session, ch itemChangeReq, d
 	}
 	return itemResponseMessage{
 		ResponseClass: "Success", ResponseCode: "NoError",
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		Items: &itemsWrap{Messages: []oxews.Message{{ItemID: oxews.ItemIDElem{ID: newID, ChangeKey: oxews.ChangeKey(uint64(id.MessageID))}}}},
+		Items: &itemsWrap{Messages: []oxews.Message{{ItemID: oxews.ItemIDElem{ID: newID, ChangeKey: changeKey(st, id.MessageID)}}}},
 	}
 }
 
@@ -448,8 +447,7 @@ func moveCopyOne(cache *storeCache, sess *session, dest moveCopyDest, itemID str
 	newID := oxews.EncodeItemID(oxews.ItemID{FolderID: dest.fid, MessageID: info.ID, UID: info.UID, Mailbox: dest.mailbox})
 	return itemResponseMessage{
 		ResponseClass: "Success", ResponseCode: "NoError",
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		Items: &itemsWrap{Messages: []oxews.Message{{ItemID: oxews.ItemIDElem{ID: newID, ChangeKey: oxews.ChangeKey(uint64(info.ID))}}}},
+		Items: &itemsWrap{Messages: []oxews.Message{{ItemID: oxews.ItemIDElem{ID: newID, ChangeKey: changeKey(dest.st, info.ID)}}}},
 	}
 }
 

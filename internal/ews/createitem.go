@@ -218,8 +218,7 @@ func fileCreatedItem(st *objectstore.Store, raw []byte, disp string, items *item
 		return
 	}
 	id := oxews.EncodeItemID(oxews.ItemID{FolderID: folder, MessageID: info.ID, UID: info.UID})
-	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-	items.Messages = []oxews.Message{{ItemID: oxews.ItemIDElem{ID: id, ChangeKey: oxews.ChangeKey(uint64(info.ID))}}}
+	items.Messages = []oxews.Message{{ItemID: oxews.ItemIDElem{ID: id, ChangeKey: changeKey(st, info.ID)}}}
 }
 
 // itemError builds an error response message with the given EWS response code.

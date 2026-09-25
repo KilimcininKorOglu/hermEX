@@ -96,8 +96,7 @@ func (s *Server) deleteOneAttachment(cache *storeCache, sess *session, attachID 
 	return deleteAttachmentResponseMessage{
 		ResponseClass: "Success",
 		ResponseCode:  "NoError",
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		RootItemID: &rootItemID{RootItemID: rootID, RootItemChangeKey: oxews.ChangeKey(uint64(mid))},
+		RootItemID:    &rootItemID{RootItemID: rootID, RootItemChangeKey: changeKey(st, mid)},
 	}
 }
 
