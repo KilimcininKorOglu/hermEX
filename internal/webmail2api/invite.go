@@ -4,10 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/mail"
 	"strings"
 	"time"
 
+	"hermex/internal/itip"
 	"hermex/internal/logging"
 	"hermex/internal/meeting"
 	"hermex/internal/mime"
@@ -217,45 +217,57 @@ func (s *Server) handleRSVP(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": req.Response + "ed"})
 }
 
+// errBadCounter reports a counter-proposal that cannot be written: no organizer
+// address, a time that does not parse, or a meeting UID that would break its line.
+var errBadCounter = errors.New("webmail2api: the counter-proposal cannot be built")
+
+// buildCounterRequest renders the METHOD:COUNTER iTIP message (RFC 5546 3.2.7) in
+// which proposer asks organizer to move the meeting e names to e's start and end.
+// Every value that reaches a content line is checked or escaped first: the
+// organizer, UID and summary come from a mail anyone can send, and the times from
+// the client.
 func buildCounterRequest(proposer, organizer string, e eventJSON) ([]byte, error) {
-	addr := strings.TrimSpace(organizer)
-	if parsed, err := mail.ParseAddress(addr); err == nil {
-		addr = parsed.Address
-	}
-	if addr == "" {
-		return nil, fmt.Errorf("no organizer address")
+	to := cleanAddresses([]string{organizer})
+	start, err1 := counterTime(e.Start, e.AllDay)
+	end, err2 := counterTime(e.End, e.AllDay)
+	if len(to) == 0 || errors.Join(err1, err2) != nil || strings.ContainsAny(e.UID, "\r\n") {
+		return nil, errBadCounter
 	}
 	var cal strings.Builder
 	cal.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//webmail2//EN\r\nMETHOD:COUNTER\r\nBEGIN:VEVENT\r\n")
 	fmt.Fprintf(&cal, "UID:%s\r\n", uidOrGenerated(e.UID))
-	fmt.Fprintf(&cal, "SUMMARY:%s\r\n", e.Summary)
-	fmt.Fprintf(&cal, "DTSTART%s\r\n", toICalTime(e.Start, e.AllDay))
-	if e.End != "" {
-		fmt.Fprintf(&cal, "DTEND%s\r\n", toICalTime(e.End, e.AllDay))
+	fmt.Fprintf(&cal, "DTSTAMP:%s\r\n", time.Now().UTC().Format("20060102T150405Z"))
+	fmt.Fprintf(&cal, "SUMMARY:%s\r\n", icalText(e.Summary))
+	fmt.Fprintf(&cal, "DTSTART%s\r\n", start)
+	if end != "" {
+		fmt.Fprintf(&cal, "DTEND%s\r\n", end)
 	}
-	fmt.Fprintf(&cal, "ORGANIZER;CN=%s:mailto:%s\r\n", organizer, organizer)
-	fmt.Fprintf(&cal, "ATTENDEE;CN=%s;ROLE=REQ-PARTICIPANT:mailto:%s\r\n", proposer, proposer)
+	fmt.Fprintf(&cal, "ORGANIZER:mailto:%s\r\n", to[0])
+	fmt.Fprintf(&cal, "ATTENDEE;ROLE=REQ-PARTICIPANT:mailto:%s\r\n", proposer)
 	cal.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
+	return itip.Message(itip.Mail{
+		From: proposer, To: to, Subject: headerSafe("Proposed new time: " + e.Summary),
+		Text:     fmt.Sprintf("%s proposed a new time for: %s\r\nProposed: %s", proposer, e.Summary, e.Start),
+		Calendar: []byte(cal.String()), Method: "COUNTER",
+	})
+}
 
-	textBody := fmt.Sprintf("%s proposed a new time for: %s\r\nProposed: %s", proposer, e.Summary, e.Start)
-	boundary := "hermex-counter-" + randomHex()
-	var b strings.Builder
-	fmt.Fprintf(&b, "From: %s\r\n", proposer)
-	fmt.Fprintf(&b, "To: %s\r\n", addr)
-	fmt.Fprintf(&b, "Subject: Proposed new time: %s\r\n", e.Summary)
-	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().UTC().Format(time.RFC1123Z))
-	fmt.Fprintf(&b, "Message-ID: <%s@hermex>\r\n", randomHex())
-	b.WriteString("MIME-Version: 1.0\r\n")
-	fmt.Fprintf(&b, "Content-Type: multipart/mixed; boundary=%q\r\n\r\n", boundary)
-	fmt.Fprintf(&b, "--%s\r\n", boundary)
-	b.WriteString("Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
-	b.WriteString(textBody)
-	b.WriteString("\r\n")
-	fmt.Fprintf(&b, "--%s\r\n", boundary)
-	b.WriteString("Content-Type: text/calendar; method=COUNTER; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
-	b.WriteString(cal.String())
-	fmt.Fprintf(&b, "\r\n--%s--\r\n", boundary)
-	return []byte(b.String()), nil
+// counterTime renders a proposed time as the tail of a DTSTART or DTEND line. A
+// value that does not parse is refused rather than written through, because it
+// comes from the client and would otherwise land on the line verbatim. An empty
+// value is no time.
+func counterTime(v string, allDay bool) (string, error) {
+	if v == "" {
+		return "", nil
+	}
+	layout := time.RFC3339
+	if allDay {
+		layout = "2006-01-02"
+	}
+	if _, err := time.Parse(layout, v); err != nil {
+		return "", err
+	}
+	return toICalTime(v, allDay), nil
 }
 
 // handleProposeTime lets an invitee propose a new time for a meeting: it reads
