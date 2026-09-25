@@ -303,22 +303,28 @@ function gridSettingsOf(res: CalendarSettings): GridSettings {
 
 function useGridSettings() {
   const [grid, setGrid] = useState<GridSettings>(DEFAULT_GRID)
+  // stored is the whole settings object the server returned. The PUT replaces
+  // the whole object, so a grid change is written on top of it; null means the
+  // read failed and nothing is persisted, because writing the grid defaults
+  // would overwrite the working days and event defaults set in settings.
+  const stored = useRef<CalendarSettings | null>(null)
   useEffect(() => {
     api.getCalendarSettings()
-      .then((res) => setGrid(gridSettingsOf(res)))
+      .then((res) => {
+        stored.current = res
+        setGrid(gridSettingsOf(res))
+      })
       .catch(() => {
         /* keep the defaults when settings are unavailable */
       })
   }, [])
-  // saveGrid applies the change in-session at once, then persists the full
-  // settings object. The workDays/defaultDuration/defaultReminder fields are
-  // managed in settings and carried here as defaults.
+  // saveGrid applies the change in-session at once, then persists it.
   const saveGrid = (next: GridSettings) => {
     setGrid(next)
-    api.setCalendarSettings({
-      ...next,
-      workDays: [1, 2, 3, 4, 5], defaultDuration: 30, defaultReminder: 15,
-    }).catch(() => {
+    if (!stored.current) return
+    const merged = { ...stored.current, ...next }
+    stored.current = merged
+    api.setCalendarSettings(merged).catch(() => {
       /* best-effort: the grid keeps the chosen values in-session */
     })
   }
