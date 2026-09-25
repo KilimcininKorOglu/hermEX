@@ -209,6 +209,36 @@ func TestExportOutlookSeries(t *testing.T) {
 	}
 }
 
+// TestExportOverrideCarriesItsExceptionBody exports a modified occurrence's own body
+// from its exception attachment ([MS-OXCICAL] RECURRENCE-ID). Before, an override
+// carried only the ExceptionInfo fields, so the text the organizer wrote for that
+// one occurrence never reached an attendee.
+func TestExportOverrideCarriesItsExceptionBody(t *testing.T) {
+	r := meetingResolver()
+	pacific := mustZone(t, "America/Los_Angeles")
+	start := time.Date(2008, 2, 9, 14, 0, 0, 0, pacific)
+	msg := outlookMeeting(r, "IPM.Schedule.Meeting.Request", start, start.Add(3*time.Hour),
+		mapi.TaggedPropVal{Tag: r.tag(mapi.NameAppointmentRecur, mapi.PtBinary), Value: mustHex(t, specSeriesBlob)})
+	msg.Props = append(msg.Props, zoneDef(r, mapi.NameAppointmentTimeZoneDefRecur, pacific, start))
+	embedded := "Subject: Status\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nMoved to Sunday this time.\r\n"
+	msg.Attachments = []oxcmail.Attachment{{Props: mapi.PropertyValues{
+		{Tag: mapi.PrAttachMethod, Value: int32(mapi.AttachEmbeddedMsg)},
+		{Tag: mapi.PrAttachmentFlags, Value: int32(mapi.AttachmentFlagException)},
+		{Tag: mapi.PrExceptionReplaceTime, Value: mapi.UnixToNTTime(time.Date(2008, 5, 10, 14, 0, 0, 0, pacific))},
+		{Tag: mapi.PrAttachDataBin, Value: []byte(embedded)},
+	}}}
+
+	s := exportString(t, msg, r)
+	_, rest, _ := strings.Cut(s, "RECURRENCE-ID;TZID=America/Los_Angeles:20080510T140000")
+	moved, _, _ := strings.Cut(rest, "END:VEVENT")
+	if !strings.Contains(moved, "DESCRIPTION:Moved to Sunday this time.") {
+		t.Errorf("the moved occurrence lacks its own body:\n%s", s)
+	}
+	if strings.Count(s, "DESCRIPTION:") != 1 {
+		t.Errorf("the body reached another occurrence:\n%s", s)
+	}
+}
+
 // TestExportSeriesExcludesADeletedDay excludes a deleted occurrence at the series'
 // own time of day, read from the start when the pattern records none.
 func TestExportSeriesExcludesADeletedDay(t *testing.T) {

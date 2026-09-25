@@ -381,7 +381,18 @@ const (
 	// marks an attachment as the contact's photo (ContactPicture.jpg). Outlook
 	// and the GAL read the photo from the attachment carrying this flag.
 	PrAttachmentContactPhoto = PropTag(0x7FFF000B) // PtBoolean
+	// PrAttachmentFlags (PidTagAttachmentFlags, [MS-OXCMSG] 2.2.2.23) marks an
+	// attachment's special handling; AttachmentFlagException is a recurring
+	// appointment's exception.
+	PrAttachmentFlags = PropTag(0x7FFD0003) // PtLong
+	// PrExceptionReplaceTime (PidTagExceptionReplaceTime, [MS-OXOCAL] 2.2.10.1.6)
+	// is the UTC start the occurrence an exception attachment replaces would have had.
+	PrExceptionReplaceTime = PropTag(0x7FF90040) // PtSysTime
 )
+
+// AttachmentFlagException is the PidTagAttachmentFlags bit of an exception
+// attachment on a recurring appointment ([MS-OXOCAL] 2.2.10.1.2, afException).
+const AttachmentFlagException = 0x2
 
 // Attachment method (PR_ATTACH_METHOD) and flag (PR_ATTACH_FLAGS) values.
 const (

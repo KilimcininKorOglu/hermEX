@@ -115,6 +115,9 @@ type eventExport struct {
 	series   *recurrence.AppointmentPattern
 	rrule    string
 	zoned    bool // times are written as wall clocks with a TZID and a VTIMEZONE
+	// exceptionBodies holds the body of each exception attachment of a series,
+	// keyed by the UTC start (Unix seconds) of the occurrence it replaces.
+	exceptionBodies map[int64]string
 }
 
 // newEventExport reads what the object is. A tentative response flagged as a
@@ -193,6 +196,48 @@ func (e *eventExport) findSeries() {
 		return
 	}
 	e.rrule = rule
+	e.exceptionBodies = exceptionBodies(e.msg.Attachments)
+}
+
+// exceptionBodies reads the body of every exception attachment ([MS-OXOCAL]
+// 2.2.10.1: an embedded message with the afException attachment flag), keyed by the
+// UTC start of the occurrence it replaces. The embedded message is stored as its
+// RFC 5322 form, so its body is what survives of it. An attachment that cannot be
+// read is left out, and its occurrence exports from its ExceptionInfo alone.
+func exceptionBodies(atts []oxcmail.Attachment) map[int64]string {
+	bodies := map[int64]string{}
+	for _, att := range atts {
+		replaced, raw, ok := exceptionAttachment(att.Props)
+		if !ok {
+			continue
+		}
+		emb, err := oxcmail.Import(raw, oxcmail.Options{})
+		if err != nil {
+			continue
+		}
+		if body := getStr(&emb.Props, mapi.PrBody); body != "" {
+			bodies[replaced.Unix()] = body
+		}
+	}
+	return bodies
+}
+
+// exceptionAttachment reads an exception attachment: the UTC start of the occurrence
+// it replaces and its embedded message. ok is false for any other attachment.
+func exceptionAttachment(p mapi.PropertyValues) (replaced time.Time, raw []byte, ok bool) {
+	flags, _ := p.Get(mapi.PrAttachmentFlags)
+	method, _ := p.Get(mapi.PrAttachMethod)
+	if f, _ := flags.(int32); f&mapi.AttachmentFlagException == 0 || method != int32(mapi.AttachEmbeddedMsg) {
+		return time.Time{}, nil, false
+	}
+	replace, _ := p.Get(mapi.PrExceptionReplaceTime)
+	nt, isTime := replace.(uint64)
+	data, _ := p.Get(mapi.PrAttachDataBin)
+	raw, _ = data.([]byte)
+	if !isTime || len(raw) == 0 {
+		return time.Time{}, nil, false
+	}
+	return mapi.NTTimeToUnix(nt), raw, true
 }
 
 // wallZone is the zone the stored wall clocks are read in: the named zone, else the
@@ -372,15 +417,19 @@ func (e *eventExport) writeOverrides(b *builder) {
 }
 
 // writeOverride emits one modified occurrence: its original start as the
-// RECURRENCE-ID, its own span, and the subject, location and busy status it changes
-// or the series' own.
+// RECURRENCE-ID, its own span, the subject, location and busy status it changes or
+// the series' own, and the body of its exception attachment when it has one
+// ([MS-OXCICAL] RECURRENCE-ID: the remaining properties come from the embedded
+// message).
 func (e *eventExport) writeOverride(b *builder, ex *recurrence.Exception) {
 	loc := e.wallZone()
+	original := recurrence.WallClock(ex.OriginalStart, loc)
 	b.add("BEGIN:VEVENT")
 	b.line("UID", e.uid)
 	b.add("DTSTAMP:" + formatICalUTC(e.start))
-	b.add(e.timeLine("RECURRENCE-ID", recurrence.WallClock(ex.OriginalStart, loc)))
+	b.add(e.timeLine("RECURRENCE-ID", original))
 	addLine(b, "SUMMARY", overridden(ex, recurrence.OverrideSubject, ex.Subject, getStr(e.p, mapi.PrSubject)))
+	addLine(b, "DESCRIPTION", e.exceptionBodies[original.Unix()])
 	addLine(b, "LOCATION", overridden(ex, recurrence.OverrideLocation, ex.Location, namedStr(e.p, e.named, mapi.NameAppointmentLocation)))
 	b.add(e.timeLine("DTSTART", recurrence.WallClock(ex.Start, loc)))
 	b.add(e.timeLine("DTEND", recurrence.WallClock(ex.End, loc)))
