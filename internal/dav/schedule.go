@@ -6,13 +6,13 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
+	"hermex/internal/itip"
 	"hermex/internal/mapi"
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
-	"hermex/internal/oxcmail"
-	"sync/atomic"
 )
 
 // CalDAV scheduling (RFC 6638). The scheduling Outbox accepts a POST carrying an
@@ -174,22 +174,9 @@ func deliveryResponse(recipients, unresolved []string) *scheduleResponse {
 
 // buildITIP wraps an iTIP scheduling message as an iMIP email (RFC 6047) addressed
 // from the originator to the recipients, carrying the iCalendar as a text/calendar
-// part with its METHOD. The MIME is produced by oxcmail.Export, never hand-rolled.
+// part with its METHOD.
 func buildITIP(originator string, recipients []string, subject, body, method string) ([]byte, error) {
-	msg := &oxcmail.Message{Props: mapi.PropertyValues{
-		{Tag: mapi.PrSubject, Value: subject},
-		{Tag: mapi.PrSenderSmtpAddress, Value: originator},
-		{Tag: mapi.PrSenderEmailAddress, Value: originator},
-		{Tag: mapi.PrSenderAddrType, Value: "SMTP"},
-	}}
-	for _, rcpt := range recipients {
-		msg.Recipients = append(msg.Recipients, mapi.PropertyValues{
-			{Tag: mapi.PrRecipientType, Value: int32(mapi.RecipTo)},
-			{Tag: mapi.PrSmtpAddress, Value: stripMailto(rcpt)},
-		})
-	}
-	oxcmail.EnsureMessageID(&msg.Props)
-	return oxcmail.Export(msg, oxcmail.Options{CalendarBody: []byte(body), CalendarMethod: method})
+	return itip.Message(itip.Mail{From: originator, To: recipients, Subject: subject, Calendar: []byte(body), Method: method})
 }
 
 // allPropValues returns the values of every property of the given name in a
