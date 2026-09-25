@@ -62,22 +62,18 @@ export function Layout() {
   // so they never swallow ordinary typing):
   //   c → compose, / → focus the header search, g t → Today, g i → Inbox, g c → Calendar.
   useEffect(() => {
+    const actions = new Map<string, () => void>(Object.entries({
+      c: () => navigate("/compose"),
+      "/": () => document.querySelector<HTMLInputElement>('[aria-label="search"]')?.focus(),
+      "?": () =>
+        alert("Keyboard shortcuts\n\nc - Compose\n/ - Focus search\nj / ↓ - Next message\nk / ↑ - Previous message\nEnter - Open message"),
+    }))
     const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null
-      const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)
-      if (typing) return
-      if (e.metaKey || e.ctrlKey || e.altKey) return
-      if (e.key === "c") {
-        e.preventDefault()
-        navigate("/compose")
-      } else if (e.key === "/") {
-        e.preventDefault()
-        const s = document.querySelector<HTMLInputElement>('[aria-label="search"]')
-        s?.focus()
-      } else if (e.key === "?") {
-        e.preventDefault()
-        alert("Keyboard shortcuts\n\nc - Compose\n/ - Focus search\nj / ↓ - Next message\nk / ↑ - Previous message\nEnter - Open message")
-      }
+      if (isTypingTarget(e.target) || e.metaKey || e.ctrlKey || e.altKey) return
+      const action = actions.get(e.key)
+      if (!action) return
+      e.preventDefault()
+      action()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
@@ -121,4 +117,11 @@ export function Layout() {
       <ReminderOverlay />
     </div>
   )
+}
+
+// isTypingTarget reports whether a key event lands in a text field or an
+// editable region, where a single-letter shortcut must not fire.
+function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null
+  return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)
 }
