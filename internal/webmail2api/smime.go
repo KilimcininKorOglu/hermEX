@@ -35,8 +35,8 @@ func (s *Server) handleRecipientCert(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, nil)
 		return
 	}
-	st, err := objectstore.Open(maildir)
-	if err != nil {
+	st, ok := openOtherMailbox(maildir, "recipient-cert-open", address)
+	if !ok {
 		writeJSON(w, http.StatusOK, nil)
 		return
 	}

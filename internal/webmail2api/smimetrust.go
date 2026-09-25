@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"hermex/internal/objectstore"
 	"hermex/internal/smime"
 )
 
@@ -49,8 +48,8 @@ func (s *Server) publishedCert(address string) (der []byte, ok bool) {
 	if !ok {
 		return nil, false
 	}
-	st, err := objectstore.Open(maildir)
-	if err != nil {
+	st, ok := openOtherMailbox(maildir, "published-cert-open", address)
+	if !ok {
 		return nil, false
 	}
 	defer st.Close()

@@ -73,8 +73,8 @@ func (s *Server) recallFromRecipient(addr, messageID, sender string) string {
 	if !ok {
 		return "unavailable" // external or unknown recipient: out of our reach
 	}
-	rst, err := objectstore.Open(path)
-	if err != nil {
+	rst, ok := openOtherMailbox(path, "recall-open", addr)
+	if !ok {
 		return "unavailable"
 	}
 	defer rst.Close()

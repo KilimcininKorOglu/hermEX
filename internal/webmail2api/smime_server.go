@@ -102,8 +102,8 @@ func (s *Server) recipientCert(addr string) (*x509.Certificate, bool) {
 	if !ok {
 		return nil, false
 	}
-	st, err := objectstore.Open(maildir)
-	if err != nil {
+	st, ok := openOtherMailbox(maildir, "recipient-cert-open", addr)
+	if !ok {
 		return nil, false
 	}
 	defer st.Close()

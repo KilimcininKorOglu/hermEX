@@ -1,17 +1,16 @@
 package webmail2api
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
-	"fmt"
 	"hermex/internal/directory"
 	"hermex/internal/ews"
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
-	"hermex/internal/objectstore"
-	"sync/atomic"
 )
 
 // roomLister is the optional directory capability that lists bookable resource
@@ -110,8 +109,8 @@ func (s *Server) busyFor(c sessionClaims, email string, start, end time.Time) []
 	if !ok {
 		return []busyJSON{}
 	}
-	st, err := objectstore.Open(targetPath)
-	if err != nil {
+	st, ok := openOtherMailbox(targetPath, "freebusy-open", email)
+	if !ok {
 		return []busyJSON{}
 	}
 	defer st.Close()

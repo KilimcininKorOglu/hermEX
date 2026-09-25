@@ -14,7 +14,6 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
-	"hermex/internal/objectstore"
 	"hermex/internal/ssrfguard"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
@@ -298,9 +297,8 @@ func (s *Server) inboxTotal(email string) (int, bool) {
 	if !ok {
 		return 0, false
 	}
-	st, err := objectstore.Open(path)
-	if err != nil {
-		logError("push-inbox-open", err, logging.Fields{"user": email})
+	st, ok := openOtherMailbox(path, "push-inbox-open", email)
+	if !ok {
 		return 0, false
 	}
 	defer st.Close()

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/quarantine"
@@ -48,8 +49,15 @@ func (s *Server) handleQuarantineRelease(w http.ResponseWriter, r *http.Request)
 		writeQuarantinePage(w, http.StatusNotFound, "Not found", "This mailbox could not be found.", "")
 		return
 	}
-	st, err := objectstore.Open(maildir)
+	// A release link reaches the mailbox without a session, so it must never
+	// provision one: only an existing store can hold the quarantined message.
+	st, err := objectstore.OpenExisting(maildir)
+	if errors.Is(err, objectstore.ErrNotProvisioned) {
+		writeQuarantinePage(w, http.StatusNotFound, "Not found", "This mailbox could not be found.", "")
+		return
+	}
 	if err != nil {
+		logError("quarantine-release-open", err, logging.Fields{"mailbox": claims.Mailbox})
 		writeQuarantinePage(w, http.StatusServiceUnavailable, "Unavailable",
 			"Your mailbox is temporarily unavailable. Please try again later.", "")
 		return

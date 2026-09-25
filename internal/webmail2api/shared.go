@@ -1,10 +1,12 @@
 package webmail2api
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -68,8 +70,15 @@ func (s *Server) openShared(w http.ResponseWriter, caller, want string) (*mailbo
 // permission in the store itself, so a stale directory grant cannot open a
 // mailbox the store no longer shares.
 func openSharedStore(w http.ResponseWriter, b directory.SharedMailbox, caller string) (*mailboxCtx, bool) {
-	st, err := objectstore.Open(b.StorePath)
+	// The shared mailbox belongs to someone else, so opening it must never
+	// provision it.
+	st, err := objectstore.OpenExisting(b.StorePath)
+	if errors.Is(err, objectstore.ErrNotProvisioned) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return nil, false
+	}
 	if err != nil {
+		logError("shared-mailbox-open", err, logging.Fields{"mailbox": b.Address})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return nil, false
 	}
