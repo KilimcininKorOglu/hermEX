@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/mail"
 	"slices"
 	"strconv"
 	"strings"
@@ -12,7 +11,6 @@ import (
 
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
-	"hermex/internal/mta"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcical"
 )
@@ -795,38 +793,18 @@ func (s *Server) handleDeleteEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
+	// The organizer's deletion cancels the meeting for its attendees; an
+	// attendee's deletion of their own copy tells nobody.
+	var cancel *pendingMail
 	if c, ok := s.session(r); ok {
-		s.cancelMeetingIfAttended(st, id, c.Email)
+		cancel = prepareCancellation(st, id, c.Email)
 	}
 	if err := st.DeleteObject(id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not delete event"})
 		return
 	}
+	cancel.send(s, st)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
-// cancelMeetingIfAttended emails a METHOD:CANCEL iTIP notice when the event
-// being deleted has attendees, so the recipients' clients drop it. It runs
-// before the delete and is best-effort: a delivery failure still lets the
-// organizer delete their own copy.
-func (s *Server) cancelMeetingIfAttended(st *objectstore.Store, id int64, organizer string) {
-	addrs := attendeeAddresses(st, id)
-	if len(addrs) == 0 {
-		return
-	}
-	summary := ""
-	if pv, err := st.GetMessageProperties(id, mapi.PrSubject); err == nil {
-		summary = propStr(pv, mapi.PrSubject)
-	}
-	raw, rec, err := buildCancellationRequest(organizer,
-		eventJSON{UID: strconv.FormatInt(id, 10), Summary: summary, Attendees: addrs})
-	if err != nil {
-		return
-	}
-	if _, err := mta.DeliverAndRelay(s.accounts, s.spool, organizer, rec, raw, time.Now()); err != nil {
-		logError("send-meeting-cancellation", err, logging.Fields{"user": organizer})
-	}
-	fileSentCopy(st, raw, organizer, "meeting-cancellation")
 }
 
 // attendeeAddresses lists the SMTP addresses an event's recipients carry.
@@ -950,61 +928,6 @@ func (s *Server) handleDeleteCalendar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
-// buildCancellationRequest renders a METHOD:CANCEL iTIP message (RFC 5546 §3.7):
-// the organizer cancels a meeting, telling each attendee it is off. The iCalendar
-// carries the original UID with STATUS:CANCELLED; the MIME body is a plain-text
-// notice plus the text/calendar;method=CANCEL part. Returns the raw message and
-// the deduplicated attendee address list.
-func buildCancellationRequest(organizer string, e eventJSON) ([]byte, []string, error) {
-	recipients := make([]string, 0, len(e.Attendees))
-	seen := map[string]bool{}
-	for _, a := range e.Attendees {
-		addr := strings.TrimSpace(a)
-		if parsed, err := mail.ParseAddress(addr); err == nil {
-			addr = parsed.Address
-		}
-		addr = strings.ToLower(addr)
-		if addr == "" || seen[addr] || addr == strings.ToLower(organizer) {
-			continue
-		}
-		seen[addr] = true
-		recipients = append(recipients, addr)
-	}
-	if len(recipients) == 0 {
-		return nil, nil, fmt.Errorf("no attendees")
-	}
-	var cal strings.Builder
-	cal.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//webmail2//EN\r\nMETHOD:CANCEL\r\nBEGIN:VEVENT\r\n")
-	fmt.Fprintf(&cal, "UID:%s\r\n", uidOrGenerated(e.UID))
-	fmt.Fprintf(&cal, "SUMMARY:%s\r\n", icalText(e.Summary))
-	fmt.Fprintf(&cal, "DTSTART%s\r\n", toICalTime(e.Start, e.AllDay))
-	fmt.Fprintf(&cal, "STATUS:CANCELLED\r\n")
-	fmt.Fprintf(&cal, "ORGANIZER;CN=%s:mailto:%s\r\n", organizer, organizer)
-	for _, a := range recipients {
-		fmt.Fprintf(&cal, "ATTENDEE;CN=%s:mailto:%s\r\n", a, a)
-	}
-	cal.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
-	textBody := fmt.Sprintf("Cancelled: %s", e.Summary)
-	boundary := "hermex-cancel-" + randomHex()
-	var b strings.Builder
-	fmt.Fprintf(&b, "From: %s\r\n", organizer)
-	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(recipients, ", "))
-	fmt.Fprintf(&b, "Subject: Cancelled: %s\r\n", headerSafe(e.Summary))
-	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().UTC().Format(time.RFC1123Z))
-	fmt.Fprintf(&b, "Message-ID: <%s@hermex>\r\n", randomHex())
-	b.WriteString("MIME-Version: 1.0\r\n")
-	fmt.Fprintf(&b, "Content-Type: multipart/mixed; boundary=%q\r\n\r\n", boundary)
-	fmt.Fprintf(&b, "--%s\r\n", boundary)
-	b.WriteString("Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
-	b.WriteString(textBody)
-	b.WriteString("\r\n")
-	fmt.Fprintf(&b, "--%s\r\n", boundary)
-	b.WriteString("Content-Type: text/calendar; method=CANCEL; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
-	b.WriteString(cal.String())
-	fmt.Fprintf(&b, "\r\n--%s--\r\n", boundary)
-	return []byte(b.String()), recipients, nil
 }
 
 // uidOrGenerated returns the event's UID, minting one when empty so an invite

@@ -127,10 +127,20 @@ func TestInvitationUpdateAdvancesTheRevision(t *testing.T) {
 // externally; a line break there spliced in headers of the sender's choosing.
 func TestInvitationDropsInjectedLines(t *testing.T) {
 	do, alice, bob := meetingHarness(t)
-	createEvent(t, do, `{"summary":"Sync\r\nReply-To: attacker@evil.example","start":"2026-09-01T10:00:00Z",`+
+	createEvent(t, do, `{"summary":"`+injectedSummary+`","start":"2026-09-01T10:00:00Z",`+
 		`"end":"2026-09-01T11:00:00Z","attendees":["bob@hermex.test","a@b.example\r\nBcc: attacker@evil.example"],"sendInvite":true}`)
 
-	sent := lastOf(t, folderMail(t, alice, int64(mapi.PrivateFIDSentItems)), 1)
+	wantNoInjectedLines(t, lastOf(t, folderMail(t, alice, int64(mapi.PrivateFIDSentItems)), 1))
+	lastOf(t, folderMail(t, bob, int64(mapi.PrivateFIDInbox)), 1)
+}
+
+// injectedSummary is an event summary that tries to add header lines.
+const injectedSummary = `Sync\r\nReply-To: attacker@evil.example`
+
+// wantNoInjectedLines fails when a line an attendee or summary tried to splice in
+// reached the header block or the iCalendar of a scheduling mail.
+func wantNoInjectedLines(t *testing.T, sent string) {
+	t.Helper()
 	header, _, _ := strings.Cut(sent, "\r\n\r\n")
 	for line := range strings.SplitSeq(header, "\r\n") {
 		low := strings.ToLower(line)
@@ -139,9 +149,71 @@ func TestInvitationDropsInjectedLines(t *testing.T) {
 		}
 	}
 	if strings.Contains(sent, "a@b.example") || bytes.Contains([]byte(sent), []byte("SUMMARY:Sync\r\nReply-To")) {
-		t.Errorf("an injected line reached the invitation:\n%s", sent)
+		t.Errorf("an injected line reached the scheduling mail:\n%s", sent)
 	}
-	lastOf(t, folderMail(t, bob, int64(mapi.PrivateFIDInbox)), 1)
+}
+
+// seedEvent stores an event in alice's calendar directly, as another client or an
+// earlier release left it.
+func seedEvent(t *testing.T, dir string, e eventJSON, organizer string) int64 {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open alice", err)
+	defer st.Close()
+	id, err := storeEvent(st, e, int64(mapi.PrivateFIDCalendar), organizer)
+	mustNoErr(t, "seed event", err)
+	return id
+}
+
+// TestOrganizerDeleteCancelsUnderTheStoredUID deletes a meeting alice organizes.
+// The cancellation used to name the meeting by alice's message id, which matched
+// nothing bob held, and carried an empty DTSTART and no revision.
+func TestOrganizerDeleteCancelsUnderTheStoredUID(t *testing.T) {
+	do, alice, bob := meetingHarness(t)
+	id := createEvent(t, do, `{"summary":"Review","start":"2026-09-08T09:00:00Z","end":"2026-09-08T10:00:00Z",`+
+		`"attendees":["bob@hermex.test"],"sendInvite":true}`)
+	uid := storedMeetingUID(t, alice, id)
+	deleteEvent(t, do, strconv.FormatInt(id, 10))
+
+	cancel := lastOf(t, folderMail(t, bob, int64(mapi.PrivateFIDInbox)), 2)
+	for _, want := range []string{"METHOD:CANCEL", "UID:" + uid, "STATUS:CANCELLED", "SEQUENCE:1", "DTSTART:20260908T090000Z"} {
+		wantContains(t, "cancellation", cancel, want)
+	}
+	wantContains(t, "alice's Sent copy", lastOf(t, folderMail(t, alice, int64(mapi.PrivateFIDSentItems)), 2), "METHOD:CANCEL")
+}
+
+// TestAttendeeDeleteSendsNothing deletes a meeting someone else organizes. An
+// attendee removing their own copy used to mail a cancellation to every other
+// attendee in the organizer's name.
+func TestAttendeeDeleteSendsNothing(t *testing.T) {
+	do, alice, bob := meetingHarness(t)
+	id := seedEvent(t, alice, eventJSON{Summary: "Theirs", Start: "2026-09-03T09:00:00Z", End: "2026-09-03T10:00:00Z",
+		Attendees: []string{"alice@hermex.test", "bob@hermex.test"}}, "carol@hermex.test")
+	deleteEvent(t, do, strconv.FormatInt(id, 10))
+
+	wantEq(t, "bob's inbox", len(folderMail(t, bob, int64(mapi.PrivateFIDInbox))), 0)
+	wantEq(t, "alice's Sent Items", len(folderMail(t, alice, int64(mapi.PrivateFIDSentItems))), 0)
+}
+
+// TestLegacyMeetingCancelsUnderItsWireUID deletes a meeting organized before
+// invitations carried the stored UID: its attendees hold it under the message id.
+func TestLegacyMeetingCancelsUnderItsWireUID(t *testing.T) {
+	do, alice, bob := meetingHarness(t)
+	id := seedEvent(t, alice, eventJSON{Summary: "Old", Start: "2026-09-02T09:00:00Z", End: "2026-09-02T10:00:00Z",
+		Attendees: []string{"bob@hermex.test"}}, "")
+	deleteEvent(t, do, strconv.FormatInt(id, 10))
+	wantContains(t, "legacy cancellation", lastOf(t, folderMail(t, bob, int64(mapi.PrivateFIDInbox)), 1),
+		"UID:"+strconv.FormatInt(id, 10))
+}
+
+// TestCancellationDropsInjectedLines is the summary injection defect on the
+// cancellation path, which relays to external attendees as well.
+func TestCancellationDropsInjectedLines(t *testing.T) {
+	do, alice, _ := meetingHarness(t)
+	id := createEvent(t, do, `{"summary":"`+injectedSummary+`","start":"2026-09-01T10:00:00Z",`+
+		`"end":"2026-09-01T11:00:00Z","attendees":["bob@hermex.test"]}`)
+	deleteEvent(t, do, strconv.FormatInt(id, 10))
+	wantNoInjectedLines(t, lastOf(t, folderMail(t, alice, int64(mapi.PrivateFIDSentItems)), 1))
 }
 
 // TestLegacyMeetingKeepsItsWireUID resends a meeting organized before invitations
@@ -149,12 +221,8 @@ func TestInvitationDropsInjectedLines(t *testing.T) {
 // invitation named, so every later message must name it the same way.
 func TestLegacyMeetingKeepsItsWireUID(t *testing.T) {
 	do, alice, bob := meetingHarness(t)
-	st, err := objectstore.Open(alice)
-	mustNoErr(t, "open alice", err)
-	id, err := storeEvent(st, eventJSON{Summary: "Old", Start: "2026-09-02T09:00:00Z", End: "2026-09-02T10:00:00Z",
-		Attendees: []string{"bob@hermex.test"}}, int64(mapi.PrivateFIDCalendar), "")
-	st.Close()
-	mustNoErr(t, "seed legacy meeting", err)
+	id := seedEvent(t, alice, eventJSON{Summary: "Old", Start: "2026-09-02T09:00:00Z", End: "2026-09-02T10:00:00Z",
+		Attendees: []string{"bob@hermex.test"}}, "")
 
 	wantStatus(t, "update", do(http.MethodPut, "/api/v1/calendar/events/"+strconv.FormatInt(id, 10),
 		`{"summary":"Old","start":"2026-09-02T09:00:00Z","end":"2026-09-02T10:00:00Z","attendees":["bob@hermex.test"],"sendInvite":true}`), http.StatusOK)

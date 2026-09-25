@@ -116,17 +116,29 @@ type meetingMail struct {
 	calendar                    []byte
 }
 
-// sendMeetingMail sends a scheduling message from the organizer to the meeting's
-// attendees and files the Sent copy. The meeting is already stored when this runs,
-// so the caller treats a failure as best-effort: it is recorded, and the stored
-// change stands.
-func (s *Server) sendMeetingMail(st *objectstore.Store, id int64, organizer string, m meetingMail) error {
+// meetingRecipients lists the attendees a scheduling message about the stored
+// meeting goes to: every attendee that parses as an address, the organizer left out.
+func meetingRecipients(st *objectstore.Store, id int64, organizer string) []string {
 	var to []string
 	for _, a := range cleanAddresses(attendeeAddresses(st, id)) {
 		if !strings.EqualFold(a, organizer) {
 			to = append(to, a)
 		}
 	}
+	return to
+}
+
+// sendMeetingMail sends a scheduling message from the organizer to the meeting's
+// attendees and files the Sent copy. The meeting is already stored when this runs,
+// so the caller treats a failure as best-effort: it is recorded, and the stored
+// change stands.
+func (s *Server) sendMeetingMail(st *objectstore.Store, id int64, organizer string, m meetingMail) error {
+	return s.deliverMeetingMail(st, organizer, meetingRecipients(st, id, organizer), m)
+}
+
+// deliverMeetingMail sends a scheduling message to the given attendees and files
+// the Sent copy.
+func (s *Server) deliverMeetingMail(st *objectstore.Store, organizer string, to []string, m meetingMail) error {
 	if len(to) == 0 {
 		return errNoAttendees
 	}
@@ -156,6 +168,46 @@ func (s *Server) sendInvitation(st *objectstore.Store, id int64, organizer, kind
 	if err != nil && !errors.Is(err, errNoAttendees) {
 		logError("send-"+kind, err, logging.Fields{"user": organizer})
 	}
+}
+
+// pendingMail is a scheduling message prepared before the change it announces is
+// stored, and sent only once it is.
+type pendingMail struct {
+	organizer string
+	to        []string
+	mail      meetingMail
+}
+
+// send delivers a prepared message. A failure is recorded and not returned: the
+// change it announces is already stored.
+func (p *pendingMail) send(s *Server, st *objectstore.Store) {
+	if p == nil {
+		return
+	}
+	if err := s.deliverMeetingMail(st, p.organizer, p.to, p.mail); err != nil && !errors.Is(err, errNoAttendees) {
+		logError("send-"+p.mail.kind, err, logging.Fields{"user": p.organizer})
+	}
+}
+
+// prepareCancellation builds the METHOD:CANCEL the organizer's deletion of a
+// meeting sends its attendees, or nil when there is nothing to send: caller does
+// not organize it, or it has nobody to tell. It is prepared before the deletion,
+// because the deleted meeting can no longer be read, and sent after it, because a
+// cancellation sent for a meeting that then failed to delete cannot be recalled.
+func prepareCancellation(st *objectstore.Store, id int64, caller string) *pendingMail {
+	ical, props, err := meetingBody(st, id)
+	if err != nil || !isAppointment(props) || !isOrganizer(st, props, caller) {
+		return nil
+	}
+	to := meetingRecipients(st, id, caller)
+	body, ok := oxcical.CancelBody(ical, storedSequence(st, props)+1)
+	if len(to) == 0 || !ok {
+		return nil
+	}
+	subject := "Canceled: " + propStr(props, mapi.PrSubject)
+	return &pendingMail{organizer: caller, to: to, mail: meetingMail{
+		method: "CANCEL", subject: subject, text: subject, kind: "meeting-cancellation", calendar: body,
+	}}
 }
 
 // inviteTextBody renders the plain-text body the invitee reads if their client
