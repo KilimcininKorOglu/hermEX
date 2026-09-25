@@ -612,7 +612,8 @@ function useCalendarEditor(loadCalendars: () => Promise<void>) {
   }
 
   const save = async () => {
-    const input = { name: form.name, description: form.description || undefined, color: form.color || DEFAULT_COLOR }
+    // The description is always sent: an empty one clears the stored one.
+    const input = { name: form.name, description: form.description, color: form.color || DEFAULT_COLOR }
     if (mode === "create") {
       await api.createCalendar(input)
       toast.success(t("calendar.calendarCreated"))

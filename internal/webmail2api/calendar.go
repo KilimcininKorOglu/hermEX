@@ -58,6 +58,21 @@ type calendarJSON struct {
 	Name      string `json:"name"`
 	Color     string `json:"color,omitempty"`
 	IsDefault bool   `json:"isDefault,omitempty"`
+	// Description is the folder comment (PidTagComment). On an update, nil
+	// leaves the stored description alone and "" clears it.
+	Description *string `json:"description,omitempty"`
+}
+
+// descriptionOf reads a calendar folder's description, nil when it has none.
+func descriptionOf(st *objectstore.Store, folderID int64) *string {
+	props, err := st.GetFolderProperties(folderID, mapi.PrComment)
+	if err != nil {
+		return nil
+	}
+	if d := propStr(props, mapi.PrComment); d != "" {
+		return &d
+	}
+	return nil
 }
 
 // webmailNamespace is hermEX webmail's private named-property GUID namespace.
@@ -155,10 +170,11 @@ func listCalendars(st *objectstore.Store) []calendarJSON {
 		}
 	}
 	out := []calendarJSON{{
-		ID:        "calendar",
-		Name:      defName,
-		Color:     colorOf(st, mapi.PrivateFIDCalendar, colorTag),
-		IsDefault: true,
+		ID:          "calendar",
+		Name:        defName,
+		Color:       colorOf(st, mapi.PrivateFIDCalendar, colorTag),
+		IsDefault:   true,
+		Description: descriptionOf(st, mapi.PrivateFIDCalendar),
 	}}
 	folders, err := st.ListFolders()
 	if err != nil {
@@ -173,9 +189,10 @@ func listCalendars(st *objectstore.Store) []calendarJSON {
 			continue
 		}
 		out = append(out, calendarJSON{
-			ID:    strconv.FormatInt(f.ID, 10),
-			Name:  f.DisplayName,
-			Color: colorOf(st, f.ID, colorTag),
+			ID:          strconv.FormatInt(f.ID, 10),
+			Name:        f.DisplayName,
+			Color:       colorOf(st, f.ID, colorTag),
+			Description: descriptionOf(st, f.ID),
 		})
 	}
 	return out
@@ -774,19 +791,31 @@ func (s *Server) handleCreateCalendar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// CreateFolder seeds IPF.Note; overwrite the container class so the folder is a
-	// real calendar, and store the chosen color.
-	props := mapi.PropertyValues{{Tag: mapi.PrContainerClass, Value: mapi.ContainerClassAppointment}}
-	if colorTag, _ := calendarColorTag(st, true); colorTag != 0 && in.Color != "" {
-		props = append(props, mapi.TaggedPropVal{Tag: colorTag, Value: in.Color})
-	}
+	// real calendar, and store the chosen color and description.
+	props := append(mapi.PropertyValues{{Tag: mapi.PrContainerClass, Value: mapi.ContainerClassAppointment}}, calendarProps(st, in)...)
 	if err := st.SetFolderProperties(fid, props); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not configure calendar"})
 		return
 	}
-	writeJSON(w, http.StatusOK, calendarJSON{ID: strconv.FormatInt(fid, 10), Name: in.Name, Color: in.Color})
+	writeJSON(w, http.StatusOK, calendarJSON{ID: strconv.FormatInt(fid, 10), Name: in.Name, Color: in.Color, Description: in.Description})
 }
 
-// handleUpdateCalendar renames and recolors a calendar (PATCH; fields are optional).
+// calendarProps returns the color and description properties a calendar
+// create or update writes: the color when one is given, and the description
+// when the request carries one ("" clears it).
+func calendarProps(st *objectstore.Store, in calendarJSON) mapi.PropertyValues {
+	var props mapi.PropertyValues
+	if colorTag, _ := calendarColorTag(st, true); colorTag != 0 && in.Color != "" {
+		props = append(props, mapi.TaggedPropVal{Tag: colorTag, Value: in.Color})
+	}
+	if in.Description != nil {
+		props = append(props, mapi.TaggedPropVal{Tag: mapi.PrComment, Value: *in.Description})
+	}
+	return props
+}
+
+// handleUpdateCalendar renames, recolors and describes a calendar (PATCH;
+// fields are optional).
 func (s *Server) handleUpdateCalendar(w http.ResponseWriter, r *http.Request) {
 	var in calendarJSON
 	if err := decodeJSON(r, &in); err != nil {
@@ -806,15 +835,13 @@ func (s *Server) handleUpdateCalendar(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if in.Color != "" {
-		if colorTag, _ := calendarColorTag(st, true); colorTag != 0 {
-			if err := st.SetFolderProperties(fid, mapi.PropertyValues{{Tag: colorTag, Value: in.Color}}); err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not recolor calendar"})
-				return
-			}
+	if props := calendarProps(st, in); len(props) > 0 {
+		if err := st.SetFolderProperties(fid, props); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not update calendar"})
+			return
 		}
 	}
-	writeJSON(w, http.StatusOK, calendarJSON{ID: id, Name: in.Name, Color: in.Color, IsDefault: id == "calendar"})
+	writeJSON(w, http.StatusOK, calendarJSON{ID: id, Name: in.Name, Color: in.Color, IsDefault: id == "calendar", Description: in.Description})
 }
 
 // handleDeleteCalendar deletes a calendar and its events. The built-in default

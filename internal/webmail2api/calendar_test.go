@@ -321,3 +321,27 @@ func TestMeetingRequestRejectsHeaderInjection(t *testing.T) {
 		}
 	}
 }
+
+// TestCalendarDescriptionRoundTrip proves a calendar keeps the description the
+// user gave it: create stores it, a rename leaves it, and an empty one clears it.
+func TestCalendarDescriptionRoundTrip(t *testing.T) {
+	do, _ := apiHarness(t)
+	created := okBody[calendarJSON](t, "create", do(http.MethodPost, "/api/v1/calendar/calendars", `{"name":"Team","description":"Shared rota"}`))
+	description := func(what string) string {
+		list := okBody[struct{ Calendars []calendarJSON }](t, what, do(http.MethodGet, "/api/v1/calendar/calendars", ""))
+		for _, c := range list.Calendars {
+			if c.ID == created.ID && c.Description != nil {
+				return *c.Description
+			}
+		}
+		return ""
+	}
+	wantEq(t, "description after create", description("list after create"), "Shared rota")
+
+	path := "/api/v1/calendar/calendars/" + created.ID
+	wantStatus(t, "rename", do(http.MethodPatch, path, `{"name":"Team A"}`), http.StatusOK)
+	wantEq(t, "description after rename", description("list after rename"), "Shared rota")
+
+	wantStatus(t, "clear", do(http.MethodPatch, path, `{"name":"Team A","description":""}`), http.StatusOK)
+	wantEq(t, "description after clear", description("list after clear"), "")
+}
