@@ -162,7 +162,7 @@ export function isUnlocked(): boolean {
 }
 
 /** lock clears the in-memory key. */
-export function lock(): void {
+function lock(): void {
   unlockedKey = null
   unlockedCertPem = null
 }
@@ -227,7 +227,7 @@ export function extractMimeBody(mime: string): { html: boolean; body: string } {
 }
 
 /** requireUnlocked returns the in-memory key/cert or throws. */
-export function requireUnlocked(): { key: forge.pki.rsa.PrivateKey; cert: forge.pki.Certificate } {
+function requireUnlocked(): { key: forge.pki.rsa.PrivateKey; cert: forge.pki.Certificate } {
   if (!unlockedKey || !unlockedCertPem) throw new Error("unlock your S/MIME certificate first")
   return { key: unlockedKey, cert: forge.pki.certificateFromPem(unlockedCertPem) }
 }

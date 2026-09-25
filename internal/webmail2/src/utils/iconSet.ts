@@ -5,7 +5,7 @@
 // keeps lucide's default thin stroke, Classic thickens it. The choice is applied
 // as a data attribute on <html> that index.css keys off; the authoritative value
 // lives in the DB-backed appearance settings.
-export type IconSet = "breeze" | "classic"
+type IconSet = "breeze" | "classic"
 
 // applyIconSet reflects the chosen set onto the document root so the CSS rule
 // that adjusts lucide's stroke-width takes effect app-wide, live.

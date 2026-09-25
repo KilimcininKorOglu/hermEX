@@ -18,7 +18,7 @@ function ownerQuery(owner: string | undefined, sep: '?' | '&'): string {
 // MeResponse is the session probe. A session that has cleared the password but
 // not the second factor is authenticated and carries secondFactorRequired, and
 // describes nothing else about the mailbox.
-export interface MeResponse {
+interface MeResponse {
   authenticated: boolean
   email?: string
   isAdmin?: boolean
@@ -108,7 +108,7 @@ export interface MailAttachment {
 // RecallResult summarizes a recall attempt: how many recipient copies were
 // pulled, the total recipients tried, and the per-recipient outcome
 // ("recalled" | "read" | "unavailable").
-export interface RecallResult {
+interface RecallResult {
   id: string
   recalled: number
   total: number
@@ -124,7 +124,7 @@ export interface AttachmentInfo {
   index: number
 }
 
-export interface SendMailRequest {
+interface SendMailRequest {
   to: string[]
   cc?: string[]
   bcc?: string[]
@@ -177,7 +177,7 @@ export interface CalendarEvent {
   tracking?: { email: string; response: number }[] // per-attendee PidLidResponseStatus: 0=none, 2=tentative, 3=accepted, 4=declined
 }
 
-export type CalendarEventInput = Omit<CalendarEvent, "uid"> & { uid?: string }
+type CalendarEventInput = Omit<CalendarEvent, "uid"> & { uid?: string }
 
 // Reminder is one due reminder the server computed (appointment or task); the
 // popup lists these and snoozes/dismisses them by id.
@@ -197,7 +197,7 @@ export interface Calendar {
   isDefault?: boolean
 }
 
-export type CalendarInput = Pick<Calendar, "name" | "description" | "color">
+type CalendarInput = Pick<Calendar, "name" | "description" | "color">
 
 export interface Room {
   email: string
@@ -205,7 +205,7 @@ export interface Room {
   capacity?: number
 }
 
-export interface BusyInterval {
+interface BusyInterval {
   start: string // RFC3339 UTC
   end: string // RFC3339 UTC
 }
@@ -247,7 +247,7 @@ export interface Note {
   linkedMessageId?: string
 }
 
-export type NoteInput = { title: string; body: string; color?: number; linkedMessageId?: string }
+type NoteInput = { title: string; body: string; color?: number; linkedMessageId?: string }
 
 // CalendarSettings is the DB-backed calendar display + defaults (per-user).
 export interface CalendarSettings {
@@ -275,7 +275,7 @@ export interface MailListColumns {
 
 // AppearanceSettings is the DB-backed display settings (theme, language,
 // date/time format, name order, unread/widget-panel toggles).
-export interface AppearanceSettings {
+interface AppearanceSettings {
   theme: string // "light" | "dark" | "system"
   language: string // "en" | "tr" | "system"
   dateFormat: string // "iso" | "dmy" | "mdy"
@@ -311,7 +311,7 @@ export interface Delegation {
   createdAt: string
 }
 
-export interface DelegationInput {
+interface DelegationInput {
   grantee: string
   rights: string[]
   canSendAs?: boolean
@@ -332,7 +332,7 @@ export interface ACLEntry {
 }
 
 // MS-OXCPERM Frights bits ([MS-OXCPERM] 2.2.7), matching internal/mapi/permission.go.
-export const FRIGHTS = {
+const FRIGHTS = {
   ReadAny: 0x0001,
   Create: 0x0002,
   EditOwned: 0x0008,
@@ -361,8 +361,6 @@ export const FOLDER_RIGHTS = [
   { key: "Owner", bit: FRIGHTS.Owner },
   { key: "Visible", bit: FRIGHTS.Visible },
 ] as const
-
-export type FolderRightKey = typeof FOLDER_RIGHTS[number]["key"]
 
 // The canonical Outlook permission profiles ([MS-OXCPERM] role table), each a
 // fixed union of Frights bits identical to the mapi.Rights* presets. A stored
@@ -394,7 +392,7 @@ export function profileToRights(profile: FolderProfile): number | undefined {
   return FOLDER_PROFILES.find(p => p.value === profile)?.rights
 }
 
-export interface SMIMECertInfo {
+interface SMIMECertInfo {
   subject: string
   issuer: string
   notBefore: string
@@ -412,7 +410,7 @@ export interface DirectoryEntry {
 }
 
 // UserProfile is the caller's own editable directory profile.
-export interface UserProfile {
+interface UserProfile {
   email?: string
   email2?: string
   email3?: string
@@ -468,12 +466,12 @@ export interface MeetingInvite {
   organizer?: string
 }
 
-export interface AuthLoginRequest {
+interface AuthLoginRequest {
   email: string
   password: string
 }
 
-export interface AuthLoginResponse {
+interface AuthLoginResponse {
   expiresIn?: number
 }
 
@@ -492,7 +490,7 @@ export interface Filter {
 }
 
 // FilterField mirrors semcore.RuleConditionKind.
-export type FilterField =
+type FilterField =
   | 'from'
   | 'to'
   | 'cc'
@@ -507,7 +505,7 @@ export type FilterField =
   | 'oof'
 
 // FilterOperator mirrors semcore.RuleMatchType.
-export type FilterOperator = 'contains' | 'equals' | 'startsWith' | 'endsWith' | 'matches'
+type FilterOperator = 'contains' | 'equals' | 'startsWith' | 'endsWith' | 'matches'
 
 export interface FilterCondition {
   field: FilterField
@@ -518,7 +516,7 @@ export interface FilterCondition {
 
 // FilterActionType mirrors semcore.RuleActionKind.String(). The full vocabulary
 // is represented so rules created in Outlook/admin round-trip without loss.
-export type FilterActionType =
+type FilterActionType =
   | 'moveToFolder'
   | 'copyToFolder'
   | 'delete'
@@ -558,7 +556,7 @@ export interface FilterInput {
 
 // RwzImportResult is the JSON returned by POST /api/v1/filters/import: how many
 // rules were created and what could not be represented (Outlook .rwz import).
-export interface RwzImportResult {
+interface RwzImportResult {
   imported: number
   skippedRules: number
   skippedElements: number
@@ -599,7 +597,7 @@ export interface ClientSession {
   user_agent: string
 }
 
-export interface PushSubscription {
+interface PushSubscription {
   endpoint: string
   keys: {
     p256dh: string
@@ -607,7 +605,7 @@ export interface PushSubscription {
   }
 }
 
-export interface SearchResponse {
+interface SearchResponse {
   emails: Mail[]
   /** How many results came back, which is not how many exist when truncated. */
   total: number
@@ -638,9 +636,9 @@ export interface SearchFolder {
 }
 
 /** SearchFolderInput is the create/update payload (no server-assigned id). */
-export type SearchFolderInput = Omit<SearchFolder, 'id'>
+type SearchFolderInput = Omit<SearchFolder, 'id'>
 
-export interface ThreadsResponse {
+interface ThreadsResponse {
   threads: Thread[]
 }
 

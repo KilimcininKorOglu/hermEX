@@ -129,5 +129,3 @@ export function ThreadsPage() {
     </div>
   )
 }
-
-export default ThreadsPage

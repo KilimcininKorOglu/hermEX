@@ -2,8 +2,8 @@
 // dialog (reference MailOptions*): importance, sensitivity, and tracking. Kept
 // as a small helper so the compose toolbar can flag when any option is active.
 
-export type Importance = "low" | "normal" | "high"
-export type Sensitivity = "normal" | "personal" | "private" | "confidential"
+type Importance = "low" | "normal" | "high"
+type Sensitivity = "normal" | "personal" | "private" | "confidential"
 
 export interface MailOptionsState {
   importance: Importance

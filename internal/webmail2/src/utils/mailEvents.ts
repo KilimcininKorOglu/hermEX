@@ -54,7 +54,7 @@ function closeConnectionIfIdle() {
 }
 
 // subscribeMailEvents registers a listener and returns an unsubscribe function.
-export function subscribeMailEvents(listener: Listener): () => void {
+function subscribeMailEvents(listener: Listener): () => void {
   listeners.add(listener)
   openConnection()
   return () => {
