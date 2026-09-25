@@ -114,8 +114,9 @@ export function ComposePage() {
   const [cc, setCc] = useState<Recipient[]>([])
   const [bcc, setBcc] = useState<Recipient[]>([])
   const [isFullscreen, setIsFullscreen] = useState(false)
+  // lastSaved is the time the draft was last stored, and only a draft save that
+  // the server answered sets it.
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
-  const [isSaving, setIsSaving] = useState(false)
   
   // Sender identity state
   const [senderIdentities, setSenderIdentities] = useState<SenderIdentity[]>([])
@@ -238,7 +239,6 @@ export function ComposePage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const bodyRef = useRef<HTMLTextAreaElement>(null)
   const richTextRef = useRef<{ getHTML: () => string; setHTML: (html: string) => void } | null>(null)
-  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   // richTextMode follows the user's preference; HTML bodies are sent when true.
   const [richTextMode, setRichTextMode] = useState(false)
   
@@ -809,28 +809,6 @@ export function ComposePage() {
     return (bytes / (1024 * 1024)).toFixed(1) + " MB"
   }
 
-  const handleAutoSave = useCallback(() => {
-    if (subject || body || to.length > 0 || attachments.length > 0) {
-      setIsSaving(true)
-      setTimeout(() => {
-        setLastSaved(new Date())
-        setIsSaving(false)
-      }, 500)
-    }
-  }, [subject, body, to, attachments])
-
-  useEffect(() => {
-    if (autoSaveTimerRef.current) {
-      clearTimeout(autoSaveTimerRef.current)
-    }
-    autoSaveTimerRef.current = setTimeout(handleAutoSave, 3000)
-    return () => {
-      if (autoSaveTimerRef.current) {
-        clearTimeout(autoSaveTimerRef.current)
-      }
-    }
-  }, [subject, body, to, attachments, handleAutoSave])
-
   // The shortcut calls the send of the LATEST render through a ref. A listener
   // bound to one render's handleSend sends that render's recipients, attachments
   // and options, so a Cc added after the last edit of To, Subject or Body was
@@ -1043,6 +1021,7 @@ export function ComposePage() {
           from: senderEmail,
         })
         if (res?.id) setDraftId(res.id)
+        setLastSaved(new Date())
       } catch {
         /* best-effort: a failed autosave must not interrupt composing */
       }
@@ -1087,7 +1066,7 @@ export function ComposePage() {
           <span className="font-medium">{t("compose.newMessage")}</span>
           {lastSaved && (
             <span className="flex items-center gap-1 text-xs text-muted-foreground ml-2">
-              {isSaving ? (
+              {savingDraft ? (
                 <>
                   <Clock className="h-3 w-3 animate-pulse" />
                   {t("common.saving")}
