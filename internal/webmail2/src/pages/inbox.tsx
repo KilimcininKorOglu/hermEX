@@ -28,7 +28,7 @@ import { EmailDetailPage } from "@/pages/email-detail"
 import { useI18n } from "@/hooks/useI18n"
 import { formatAbsolute } from "@/utils/date"
 import { getCookie, setCookie } from "@/utils/cookies"
-import { getShortcutMode } from "@/utils/shortcutMode"
+import { emptyListKey, formatSize, listKeysActive, nextListIndex, rowTone, type ViewMode } from "@/utils/inboxList"
 import { getMailColumns } from "@/utils/mailListColumns"
 import type { MailListColumns } from "@/utils/api"
 import { cn } from "@/lib/utils"
@@ -88,15 +88,6 @@ function toEmail(mail: Mail): Email {
   }
 }
 
-// formatSize renders a message size as a compact human-readable string
-// (reference the mail-list Size column). Bytes below 1 KB show as "< 1 KB".
-function formatSize(bytes: number): string {
-  if (!bytes || bytes < 1024) return "< 1 KB"
-  const kb = bytes / 1024
-  if (kb < 1024) return `${Math.round(kb)} KB`
-  return `${(kb / 1024).toFixed(1)} MB`
-}
-
 interface ThreadGroup {
   key: string
   subject: string
@@ -106,7 +97,6 @@ interface ThreadGroup {
   unread: number
 }
 
-type ViewMode = "list" | "compact"
 type ViewType = "list" | "conversations"
 type SortOption = "date" | "from" | "subject"
 type SortDir = "asc" | "desc"
@@ -130,6 +120,144 @@ interface EmailRowProps {
   onDelete: () => void
 }
 
+type TFunc = (key: string, params?: Record<string, string>) => string
+
+// RowSender shows the sender and, in the list view, the first category.
+function RowSender({ email, viewMode, columns }: { email: Email; viewMode: ViewMode; columns: MailListColumns }) {
+  const list = viewMode === "list"
+  return (
+    <div className="flex items-center gap-2">
+      <span className={cn("text-sm", !email.read ? "font-semibold" : "font-normal")}>
+        {list ? email.from : email.from.split(" ")[0]}
+      </span>
+      {columns.categories && email.labels.slice(0, list ? 1 : 0).map((label) => (
+        <Badge key={label} variant="secondary" className="text-[10px] px-1.5 py-0">
+          {label}
+        </Badge>
+      ))}
+    </div>
+  )
+}
+
+// RowSubject shows the subject and the preview snippet (list view only).
+function RowSubject({ email, columns }: { email: Email; columns: MailListColumns }) {
+  return (
+    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <span className={cn(!email.read && "text-foreground font-medium")}>
+        {email.subject}
+      </span>
+      {/* A message with no snippet, and one indexed before the column
+          existed, would otherwise render a dangling separator. */}
+      {columns.preview && email.preview && <span className="truncate">- {email.preview}</span>}
+    </div>
+  )
+}
+
+// ImportanceMark shows a high or low importance glyph.
+function ImportanceMark({ importance, t }: { importance?: string; t: TFunc }) {
+  if (importance === "high") {
+    return <span className="text-red-500 font-bold text-xs" title={t("compose.importanceHigh")}>!</span>
+  }
+  if (importance === "low") {
+    return <span className="text-muted-foreground text-xs" title={t("compose.importanceLow")}>↓</span>
+  }
+  return null
+}
+
+// RowIndicators shows the attachment, importance, flag and size columns.
+function RowIndicators({ email, columns, t }: { email: Email; columns: MailListColumns; t: TFunc }) {
+  return (
+    <>
+      {columns.attachment && email.hasAttachments && (
+        <Paperclip className="h-4 w-4 text-muted-foreground" />
+      )}
+      {columns.importance && <ImportanceMark importance={email.importance} t={t} />}
+      {columns.flag && email.followupStatus === 2 && (
+        <span className="text-red-500 text-xs" title={t("inbox.columns.flag")}>⚑</span>
+      )}
+      {columns.size && (
+        <span className="text-xs text-muted-foreground whitespace-nowrap tabular-nums">
+          {formatSize(email.size)}
+        </span>
+      )}
+    </>
+  )
+}
+
+// RowDate shows the unread dot (list view) and the received date.
+function RowDate({ email, viewMode }: { email: Email; viewMode: ViewMode }) {
+  return (
+    <>
+      {!email.read && viewMode === "list" && (
+        <span className="h-2 w-2 rounded-full bg-primary" />
+      )}
+      <span className={cn(
+        "text-xs text-muted-foreground whitespace-nowrap",
+        viewMode === "compact" && "w-12 text-right"
+      )}>
+        {formatAbsolute(email.date)}
+      </span>
+    </>
+  )
+}
+
+// stopThen runs action without letting the click reach the row.
+const stopThen = (action: () => void) => (e: React.MouseEvent) => {
+  e.stopPropagation()
+  action()
+}
+
+// RowMenu is a message row's actions menu.
+function RowMenu({
+  starred,
+  t,
+  onMarkRead,
+  onToggleStar,
+  onArchive,
+  onDelete,
+}: {
+  starred: boolean
+  t: TFunc
+  onMarkRead: (e: React.MouseEvent) => void
+  onToggleStar: (e: React.MouseEvent) => void
+  onArchive: () => void
+  onDelete: () => void
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 opacity-0 group-hover:opacity-100"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={onMarkRead}>
+          <MailOpen className="mr-2 h-4 w-4" />
+          {t("common.markRead")}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={onToggleStar}>
+          <Star className={cn("mr-2 h-4 w-4", starred && "fill-current")} />
+          {starred ? t("inbox.removeStar") : t("inbox.addStar")}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={stopThen(onArchive)}>
+          <Archive className="mr-2 h-4 w-4" />
+          {t("common.archive")}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem className="text-destructive" onClick={stopThen(onDelete)}>
+          <Trash2 className="mr-2 h-4 w-4" />
+          {t("common.delete")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 // EmailRow lives at module scope on purpose. A component declared inside
 // InboxPage is a NEW component type on every render, so React unmounts every row
 // and mounts a fresh one for any state change, which loses the scroll position
@@ -149,12 +277,10 @@ function EmailRow({
   onArchive,
   onDelete,
 }: EmailRowProps) {
-  // A follow-up flag tints the whole row, not just the small glyph in the flag
-  // column: that column can be switched off, and even with it on a flagged mail
-  // is easy to miss in a full list. A completed flag is not tinted, because the
-  // point of the tint is what still needs doing.
+  // A completed follow-up flag is not tinted, because the point of the tint is
+  // what still needs doing.
   const flagged = email.followupStatus === 2
-  const rowSelected = selected || previewed
+  const compact = viewMode === "compact"
   return (
     <div
       draggable
@@ -164,23 +290,11 @@ function EmailRow({
       }}
       className={cn(
         "group flex cursor-pointer items-center gap-3 transition-all duration-200",
-        viewMode === "list" ? "p-4" : "p-2",
+        compact ? "p-2" : "p-4",
         // Marker the unread-border CSS rule keys off (gated by the DB-backed
         // display toggle reflected on <html>); harmless when the toggle is off.
         !email.read && "hermex-unread",
-        // The tint has to survive hover and selection, so the flagged row carries
-        // its own hover and selected shades rather than falling through to the
-        // accent ones, which would replace it on the first mouseover.
-        flagged
-          ? rowSelected
-            ? "bg-amber-200/70 hover:bg-amber-200 dark:bg-amber-900/50 dark:hover:bg-amber-900/70"
-            : "bg-amber-100/70 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-950/60"
-          : cn(
-              "hover:bg-accent/50",
-              !email.read && viewMode === "list" && "bg-accent/5",
-              selected && "bg-primary/5",
-              previewed && "bg-primary/10"
-            )
+        rowTone({ read: email.read, flagged, viewMode, selected, previewed })
       )}
       onClick={onOpen}
     >
@@ -202,99 +316,480 @@ function EmailRow({
         <Star className={cn("h-4 w-4", email.starred && "fill-current")} />
       </Button>
 
-      <div className={cn("flex-1 min-w-0", viewMode === "compact" && "flex items-center gap-4")}>
-        <div className="flex items-center gap-2">
-          <span className={cn("text-sm", !email.read ? "font-semibold" : "font-normal")}>
-            {viewMode === "list" ? email.from : email.from.split(" ")[0]}
-          </span>
-          {columns.categories && email.labels.slice(0, viewMode === "compact" ? 0 : 1).map((label) => (
-            <Badge key={label} variant="secondary" className="text-[10px] px-1.5 py-0">
-              {label}
-            </Badge>
-          ))}
-        </div>
-        {viewMode === "list" && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span className={cn(!email.read && "text-foreground font-medium")}>
-              {email.subject}
-            </span>
-            {/* A message with no snippet, and one indexed before the column
-                existed, would otherwise render a dangling separator. */}
-            {columns.preview && email.preview && <span className="truncate">- {email.preview}</span>}
-          </div>
-        )}
+      <div className={cn("flex-1 min-w-0", compact && "flex items-center gap-4")}>
+        <RowSender email={email} viewMode={viewMode} columns={columns} />
+        {!compact && <RowSubject email={email} columns={columns} />}
       </div>
 
-      <div className={cn("flex items-center gap-2 shrink-0", viewMode === "compact" && "flex-row-reverse")}>
-        {columns.attachment && email.hasAttachments && (
-          <Paperclip className="h-4 w-4 text-muted-foreground" />
-        )}
-        {columns.importance && email.importance === "high" && (
-          <span className="text-red-500 font-bold text-xs" title={t("compose.importanceHigh")}>!</span>
-        )}
-        {columns.importance && email.importance === "low" && (
-          <span className="text-muted-foreground text-xs" title={t("compose.importanceLow")}>↓</span>
-        )}
-        {columns.flag && email.followupStatus === 2 && (
-          <span className="text-red-500 text-xs" title={t("inbox.columns.flag")}>⚑</span>
-        )}
-        {columns.size && (
-          <span className="text-xs text-muted-foreground whitespace-nowrap tabular-nums">
-            {formatSize(email.size)}
-          </span>
-        )}
-        {!email.read && viewMode === "list" && (
-          <span className="h-2 w-2 rounded-full bg-primary" />
-        )}
-        <span className={cn(
-          "text-xs text-muted-foreground whitespace-nowrap",
-          viewMode === "compact" && "w-12 text-right"
-        )}>
-          {formatAbsolute(email.date)}
-        </span>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 opacity-0 group-hover:opacity-100"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={onMarkRead}>
-              <MailOpen className="mr-2 h-4 w-4" />
-              {t("common.markRead")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={onToggleStar}>
-              <Star className={cn("mr-2 h-4 w-4", email.starred && "fill-current")} />
-              {email.starred ? t("inbox.removeStar") : t("inbox.addStar")}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={(e) => {
-                e.stopPropagation()
-                onArchive()
-              }}
-            >
-              <Archive className="mr-2 h-4 w-4" />
-              {t("common.archive")}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="text-destructive"
-              onClick={(e) => {
-                e.stopPropagation()
-                onDelete()
-              }}
-            >
-              <Trash2 className="mr-2 h-4 w-4" />
-              {t("common.delete")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+      <div className={cn("flex items-center gap-2 shrink-0", compact && "flex-row-reverse")}>
+        <RowIndicators email={email} columns={columns} t={t} />
+        <RowDate email={email} viewMode={viewMode} />
+        <RowMenu
+          starred={email.starred}
+          t={t}
+          onMarkRead={onMarkRead}
+          onToggleStar={onToggleStar}
+          onArchive={onArchive}
+          onDelete={onDelete}
+        />
       </div>
+    </div>
+  )
+}
+
+// useListKeys binds j/k list navigation: j → next email, k → previous, Enter →
+// open. Ignored while typing in an input/textarea so ordinary text entry never
+// hijacks the keys.
+function useListKeys(emails: Email[], selectedId: string | null, select: (id: string) => void) {
+  const navigate = useNavigate()
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!listKeysActive(e) || emails.length === 0) return
+      const idx = selectedId ? emails.findIndex((em) => em.id === selectedId) : -1
+      const next = nextListIndex(e.key, idx, emails.length)
+      if (next !== null) {
+        e.preventDefault()
+        select(emails[next].id)
+        return
+      }
+      if (e.key === "Enter" && selectedId) {
+        e.preventDefault()
+        navigate(`/email/${selectedId}`)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [emails, selectedId, navigate, select])
+}
+
+// useThreadGroups fetches the grouped inbox while the conversations view is
+// open. Conversations are grouped server-side; the list view is server-paged so
+// the current page alone is not enough.
+function useThreadGroups(viewType: ViewType): ThreadGroup[] {
+  const [threadGroups, setThreadGroups] = useState<ThreadGroup[]>([])
+  useEffect(() => {
+    if (viewType !== "conversations") return
+    let cancelled = false
+    api.getThreads()
+      .then((res) => {
+        if (cancelled) return
+        setThreadGroups((res.threads ?? []).map((th) => ({
+          key: th.key,
+          subject: th.subject,
+          messages: th.messages.map(toEmail),
+          participants: th.participants,
+          lastDate: th.lastDate,
+          unread: th.unread,
+        })))
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [viewType])
+  return threadGroups
+}
+
+// readDataUrl reads a file as a data: URL.
+function readDataUrl(file: File): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
+// FolderActions are the mark-all-read, import and refresh buttons shown while
+// nothing is selected.
+function FolderActions({
+  loading,
+  t,
+  onMarkAllRead,
+  onImport,
+  onRefresh,
+}: {
+  loading: boolean
+  t: TFunc
+  onMarkAllRead: () => void
+  onImport: (file: File) => void
+  onRefresh: () => void
+}) {
+  const importInputRef = useRef<HTMLInputElement>(null)
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".eml,message/rfc822"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          e.target.value = ""
+          if (file) onImport(file)
+        }}
+      />
+      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onMarkAllRead} title={t("inbox.markAllRead")}>
+        <CheckCheck className="h-4 w-4" />
+      </Button>
+      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => importInputRef.current?.click()} title={t("inbox.import")}>
+        <Upload className="h-4 w-4" />
+      </Button>
+      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onRefresh}>
+        <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+      </Button>
+    </div>
+  )
+}
+
+// SortMenu picks the sort column and direction.
+function SortMenu({
+  sortBy,
+  sortDir,
+  t,
+  onSortBy,
+  onToggleDir,
+}: {
+  sortBy: SortOption
+  sortDir: SortDir
+  t: TFunc
+  onSortBy: (s: SortOption) => void
+  onToggleDir: () => void
+}) {
+  const options: [SortOption, string][] = [
+    ["date", t("common.date")],
+    ["from", t("inbox.sender")],
+    ["subject", t("common.subject")],
+  ]
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-8 w-8" title={t("inbox.sort")}>
+          <ArrowUpDown className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {options.map(([value, label]) => (
+          <DropdownMenuItem key={value} onClick={() => onSortBy(value)}>
+            {label} {sortBy === value && "✓"}
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={onToggleDir}>
+          {sortDir === "asc" ? t("inbox.ascending") : t("inbox.descending")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+// DensityToggle switches between the comfortable and the compact row density.
+function DensityToggle({ viewMode, onChange }: { viewMode: ViewMode; onChange: (m: ViewMode) => void }) {
+  return (
+    <div className="flex border rounded-md">
+      <Button
+        variant={viewMode === "list" ? "secondary" : "ghost"}
+        size="icon"
+        className="h-8 w-8 rounded-r-none"
+        onClick={() => onChange("list")}
+      >
+        <List className="h-4 w-4" />
+      </Button>
+      <Button
+        variant={viewMode === "compact" ? "secondary" : "ghost"}
+        size="icon"
+        className="h-8 w-8 rounded-l-none"
+        onClick={() => onChange("compact")}
+      >
+        <LayoutGrid className="h-4 w-4" />
+      </Button>
+    </div>
+  )
+}
+
+// ToggleButton is an icon button shown pressed while on.
+function ToggleButton({ on, title, icon: Icon, onClick }: { on: boolean; title: string; icon: React.ElementType; onClick: () => void }) {
+  return (
+    <Button
+      variant={on ? "secondary" : "ghost"}
+      size="icon"
+      className="h-8 w-8"
+      title={title}
+      onClick={onClick}
+    >
+      <Icon className="h-4 w-4" />
+    </Button>
+  )
+}
+
+// ListSkeleton is the message list while it loads.
+function ListSkeleton({ viewMode }: { viewMode: ViewMode }) {
+  const list = viewMode === "list"
+  return (
+    <div className={cn(list ? "divide-y" : "")}>
+      {[1, 2, 3, 4, 5].map((i) => (
+        <div key={i} className={cn("flex items-start gap-4", list ? "p-4" : "p-2")}>
+          <Skeleton className="h-4 w-4" />
+          <Skeleton className="h-4 w-4" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-4 w-32" />
+            {list && <Skeleton className="h-3 w-full" />}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// EmptyNotice is a centred icon with a title and an optional line under it.
+function EmptyNotice({ icon: Icon, title, text }: { icon: React.ElementType; title: string; text?: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-16 text-center">
+      <div className="rounded-full bg-muted p-4">
+        <Icon className="h-8 w-8 text-muted-foreground" />
+      </div>
+      <h3 className="mt-4 text-lg font-semibold">{title}</h3>
+      {text && <p className="text-sm text-muted-foreground">{text}</p>}
+    </div>
+  )
+}
+
+// ThreadItem is one conversation: a header that expands to its message rows.
+function ThreadItem({
+  thread,
+  expanded,
+  t,
+  onToggle,
+  renderRow,
+}: {
+  thread: ThreadGroup
+  expanded: boolean
+  t: TFunc
+  onToggle: () => void
+  renderRow: (email: Email) => React.ReactNode
+}) {
+  const count = thread.messages.length
+  const unread = thread.unread > 0
+  return (
+    <div>
+      {/* Thread header, click to expand */}
+      <div
+        className="flex cursor-pointer items-center gap-3 p-4 hover:bg-accent/50 transition-all"
+        onClick={onToggle}
+      >
+        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0">
+          {expanded ? (
+            <ChevronDown className="h-4 w-4" />
+          ) : (
+            <ChevronRightIcon className="h-4 w-4" />
+          )}
+        </Button>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className={cn("text-sm font-semibold truncate", unread && "text-foreground")}>
+              {thread.subject || t("common.noSubject")}
+            </span>
+            {unread && (
+              <span className="h-2 w-2 rounded-full bg-primary shrink-0" />
+            )}
+          </div>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground truncate">
+            <span>{thread.participants.join(", ")}</span>
+            <span>·</span>
+            <span>{count} {t(count === 1 ? "threads.messageCount" : "threads.messagesCount", { count: String(count) })}</span>
+          </div>
+        </div>
+
+        <span className="text-xs text-muted-foreground shrink-0">
+          {formatAbsolute(thread.lastDate)}
+        </span>
+      </div>
+
+      {/* Expanded: individual email rows */}
+      {expanded && (
+        <div className="bg-accent/5">
+          {thread.messages.map((email) => renderRow(email))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ThreadList is the conversations view.
+function ThreadList({
+  threads,
+  t,
+  renderRow,
+}: {
+  threads: ThreadGroup[]
+  t: TFunc
+  renderRow: (email: Email) => React.ReactNode
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const toggle = (key: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+  if (threads.length === 0) {
+    return (
+      <div className="divide-y">
+        <EmptyNotice icon={MessagesSquare} title={t("threads.noConversations")} />
+      </div>
+    )
+  }
+  return (
+    <div className="divide-y">
+      {threads.map((thread) => (
+        <ThreadItem
+          key={thread.key}
+          thread={thread}
+          expanded={expanded.has(thread.key)}
+          t={t}
+          onToggle={() => toggle(thread.key)}
+          renderRow={renderRow}
+        />
+      ))}
+    </div>
+  )
+}
+
+// InfiniteFooter shows the loaded count and the sentinel the observer watches.
+function InfiniteFooter({
+  loaded,
+  total,
+  loadingMore,
+  sentinelRef,
+  t,
+}: {
+  loaded: number
+  total: number
+  loadingMore: boolean
+  sentinelRef: React.RefObject<HTMLDivElement | null>
+  t: TFunc
+}) {
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <span className="text-sm text-muted-foreground">
+        {t("inbox.loadedCount", { loaded: String(loaded), total: String(total) })}
+      </span>
+      {/* Sentinel: the observer loads the next block when this scrolls in. */}
+      <div ref={sentinelRef} className="h-1 w-full" />
+      {loadingMore && (
+        <span className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          {t("inbox.loadingMore")}
+        </span>
+      )}
+    </div>
+  )
+}
+
+// PagerFooter shows the message count and the previous/next page buttons.
+function PagerFooter({
+  total,
+  currentPage,
+  totalPages,
+  t,
+  onPage,
+}: {
+  total: number
+  currentPage: number
+  totalPages: number
+  t: TFunc
+  onPage: (update: (p: number) => number) => void
+}) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-sm text-muted-foreground">
+        {t(total !== 1 ? "inbox.messagesCount" : "inbox.messageCount", { count: String(total) })}
+        {totalPages > 1 && ` · ${t("inbox.pageOf", { current: String(currentPage + 1), total: String(totalPages) })}`}
+      </span>
+      <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="icon"
+          disabled={currentPage <= 0}
+          onClick={() => onPage((p) => Math.max(0, p - 1))}
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="outline"
+          size="icon"
+          disabled={currentPage >= totalPages - 1}
+          onClick={() => onPage((p) => Math.min(totalPages - 1, p + 1))}
+        >
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// MessageListBody shows the list while it loads, the empty notice, the
+// conversations view, or the current page of message rows.
+function MessageListBody({
+  loading,
+  viewMode,
+  total,
+  emptyKey,
+  viewType,
+  threads,
+  emails,
+  t,
+  renderRow,
+}: {
+  loading: boolean
+  viewMode: ViewMode
+  total: number
+  emptyKey: string
+  viewType: ViewType
+  threads: ThreadGroup[]
+  emails: Email[]
+  t: TFunc
+  renderRow: (email: Email) => React.ReactNode
+}) {
+  if (loading) return <ListSkeleton viewMode={viewMode} />
+  if (total === 0) return <EmptyNotice icon={Filter} title={t("inbox.noEmails")} text={t(emptyKey)} />
+  if (viewType === "conversations") return <ThreadList threads={threads} t={t} renderRow={renderRow} />
+  return (
+    <div className={cn(viewMode === "list" ? "divide-y" : "")}>
+      {emails.map((email) => renderRow(email))}
+    </div>
+  )
+}
+
+// InboxWelcome shows the welcome banner on the inbox until it is dismissed. Its
+// closed state lives in a client-readable cookie (the web UI uses cookies, not
+// localStorage), so it stays dismissed across visits.
+function InboxWelcome({ folder }: { folder: string }) {
+  const [show, setShow] = useState(() => getCookie("hermex-welcome-dismissed") !== "1")
+  if (!show || folder !== "inbox") return null
+  return <WelcomeBanner onDismiss={() => { setCookie("hermex-welcome-dismissed", "1"); setShow(false) }} />
+}
+
+// UnreadBadge shows the folder's unread count on the unfiltered view.
+function UnreadBadge({ count, activeFilter, t }: { count: number; activeFilter: string; t: TFunc }) {
+  if (count <= 0 || activeFilter !== "all") return null
+  return (
+    <Badge variant="secondary" className="ml-2">
+      {t("inbox.unreadCount", { count: String(count) })}
+    </Badge>
+  )
+}
+
+// PreviewPane reads the selected message beside the list.
+function PreviewPane({ selectedId, t }: { selectedId: string | null; t: TFunc }) {
+  return (
+    <div className="min-w-0 flex-1 rounded-lg border bg-card overflow-auto max-h-[calc(100vh-9rem)]">
+      {selectedId ? (
+        <EmailDetailPage id={selectedId} embedded />
+      ) : (
+        <div className="p-12 text-center text-sm text-muted-foreground">{t("inbox.selectMessage")}</div>
+      )}
     </div>
   )
 }
@@ -338,7 +833,6 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
     if (p === "none") setSelectedId(null)
   }
   const [viewType, setViewType] = useState<ViewType>("list")
-  const [expandedThreads, setExpandedThreads] = useState<Set<string>>(new Set())
   const [sortBy, setSortBy] = useState<SortOption>("date")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
   const [page, setPage] = useState(0)
@@ -387,72 +881,14 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
     return () => window.removeEventListener("hermex:mail-changed", onChanged)
   }, [refreshInbox])
 
-  // The welcome banner stays dismissed across visits: its closed state lives in a
-  // client-readable cookie (the web UI uses cookies, not localStorage).
-  const [showWelcome, setShowWelcome] = useState(() => getCookie("hermex-welcome-dismissed") !== "1")
-
   // Derive the displayed list from the shared inbox state. The starred view is
   // the same inbox dataset filtered to flagged messages.
   // inboxEmails is already the server page for the current folder/filter/sort.
   const emails: Email[] = useMemo(() => inboxEmails.map(toEmail), [inboxEmails])
 
-  // j/k list navigation: j → next email, k → previous, Enter → open. Ignored while
-  // typing in an input/textarea so ordinary text entry never hijacks the keys.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (getShortcutMode() === "off") return
-      const el = e.target as HTMLElement | null
-      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return
-      if (e.metaKey || e.ctrlKey || e.altKey) return
-      if (emails.length === 0) return
-      const idx = selectedId ? emails.findIndex((em) => em.id === selectedId) : -1
-      if (e.key === "j" || e.key === "ArrowDown") {
-        e.preventDefault()
-        const next = idx < 0 ? 0 : Math.min(idx + 1, emails.length - 1)
-        setSelectedId(emails[next].id)
-      } else if (e.key === "k" || e.key === "ArrowUp") {
-        e.preventDefault()
-        const prev = idx < 0 ? 0 : Math.max(idx - 1, 0)
-        setSelectedId(emails[prev].id)
-      } else if (e.key === "Enter" && selectedId) {
-        e.preventDefault()
-        navigate(`/email/${selectedId}`)
-      }
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [emails, selectedId, navigate])
+  useListKeys(emails, selectedId, setSelectedId)
 
-  // Conversations are grouped server-side; the list view is server-paged so the
-  // current page alone is not enough. Fetch the grouped inbox when the view opens.
-  const [threadGroups, setThreadGroups] = useState<ThreadGroup[]>([])
-  useEffect(() => {
-    if (viewType !== "conversations") return
-    let cancelled = false
-    api.getThreads()
-      .then((res) => {
-        if (cancelled) return
-        setThreadGroups((res.threads ?? []).map((th) => ({
-          key: th.key,
-          subject: th.subject,
-          messages: th.messages.map(toEmail),
-          participants: th.participants,
-          lastDate: th.lastDate,
-          unread: th.unread,
-        })))
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [viewType])
-
-  const toggleThread = (key: string) => {
-    setExpandedThreads((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
+  const threadGroups = useThreadGroups(viewType)
 
   const allIds = emails.map((e) => e.id)
 
@@ -547,18 +983,9 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
     }
   }
 
-  const importInputRef = useRef<HTMLInputElement>(null)
-  const onImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ""
-    if (!file) return
+  const onImportFile = async (file: File) => {
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onload = () => resolve(reader.result as string)
-        reader.onerror = () => reject(reader.error)
-        reader.readAsDataURL(file)
-      })
+      const dataUrl = await readDataUrl(file)
       const base64 = dataUrl.split(",")[1] ?? ""
       await api.importEml(base64, folder === "starred" ? "inbox" : folder)
       refreshInbox()
@@ -601,9 +1028,7 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
 
   return (
     <div className="space-y-4">
-      {showWelcome && folder === "inbox" && (
-        <WelcomeBanner onDismiss={() => { setCookie("hermex-welcome-dismissed", "1"); setShowWelcome(false) }} />
-      )}
+      <InboxWelcome folder={folder} />
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <Checkbox
@@ -614,31 +1039,16 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
           {sel.count > 0 ? (
             <BulkActionBar ids={sel.ids} actions={bulkActions} onClear={sel.clear} />
           ) : (
-            <div className="flex items-center gap-1">
-              <input
-                ref={importInputRef}
-                type="file"
-                accept=".eml,message/rfc822"
-                className="hidden"
-                onChange={onImportFile}
-              />
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleMarkAllRead} title={t("inbox.markAllRead")}>
-                <CheckCheck className="h-4 w-4" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => importInputRef.current?.click()} title={t("inbox.import")}>
-                <Upload className="h-4 w-4" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleRefresh}>
-                <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-              </Button>
-            </div>
+            <FolderActions
+              loading={loading}
+              t={t}
+              onMarkAllRead={handleMarkAllRead}
+              onImport={(file) => void onImportFile(file)}
+              onRefresh={handleRefresh}
+            />
           )}
 
-          {unreadCount > 0 && activeFilter === "all" && (
-            <Badge variant="secondary" className="ml-2">
-              {t("inbox.unreadCount", { count: String(unreadCount) })}
-            </Badge>
-          )}
+          <UnreadBadge count={unreadCount} activeFilter={activeFilter} t={t} />
         </div>
 
         <div className="flex items-center gap-2">
@@ -652,67 +1062,29 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
 
           <Separator orientation="vertical" className="h-6" />
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8" title={t("inbox.sort")}>
-                <ArrowUpDown className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setSortBy("date")}>
-                {t("common.date")} {sortBy === "date" && "✓"}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSortBy("from")}>
-                {t("inbox.sender")} {sortBy === "from" && "✓"}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSortBy("subject")}>
-                {t("common.subject")} {sortBy === "subject" && "✓"}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}>
-                {sortDir === "asc" ? t("inbox.ascending") : t("inbox.descending")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <SortMenu
+            sortBy={sortBy}
+            sortDir={sortDir}
+            t={t}
+            onSortBy={setSortBy}
+            onToggleDir={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+          />
 
-          <div className="flex border rounded-md">
-            <Button
-              variant={viewMode === "list" ? "secondary" : "ghost"}
-              size="icon"
-              className="h-8 w-8 rounded-r-none"
-              onClick={() => setViewMode("list")}
-            >
-              <List className="h-4 w-4" />
-            </Button>
-            <Button
-              variant={viewMode === "compact" ? "secondary" : "ghost"}
-              size="icon"
-              className="h-8 w-8 rounded-l-none"
-              onClick={() => setViewMode("compact")}
-            >
-              <LayoutGrid className="h-4 w-4" />
-            </Button>
-          </div>
+          <DensityToggle viewMode={viewMode} onChange={setViewMode} />
 
-          <Button
-            variant={viewType === "conversations" ? "secondary" : "ghost"}
-            size="icon"
-            className="h-8 w-8"
+          <ToggleButton
+            on={viewType === "conversations"}
             title={t("inbox.conversations")}
+            icon={MessagesSquare}
             onClick={() => setViewType((v) => (v === "list" ? "conversations" : "list"))}
-          >
-            <MessagesSquare className="h-4 w-4" />
-          </Button>
+          />
 
-          <Button
-            variant={previewPane === "right" ? "secondary" : "ghost"}
-            size="icon"
-            className="h-8 w-8"
+          <ToggleButton
+            on={previewPane === "right"}
             title={t("inbox.previewPane")}
+            icon={PanelRight}
             onClick={() => setPreview(previewPane === "right" ? "none" : "right")}
-          >
-            <PanelRight className="h-4 w-4" />
-          </Button>
+          />
         </div>
       </div>
 
@@ -722,146 +1094,32 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
         "rounded-lg border bg-card",
         viewMode === "compact" && "divide-y"
       )}>
-        {loading ? (
-          <div className={cn(viewMode === "list" ? "divide-y" : "")}>
-            {[1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className={cn("flex items-start gap-4", viewMode === "list" ? "p-4" : "p-2")}>
-                <Skeleton className="h-4 w-4" />
-                <Skeleton className="h-4 w-4" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-32" />
-                  {viewMode === "list" && <Skeleton className="h-3 w-full" />}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : inboxTotal === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="rounded-full bg-muted p-4">
-              <Filter className="h-8 w-8 text-muted-foreground" />
-            </div>
-            <h3 className="mt-4 text-lg font-semibold">{t("inbox.noEmails")}</h3>
-            <p className="text-sm text-muted-foreground">
-              {folder === "starred" || activeFilter === "starred"
-                ? t("inbox.noStarredMessages")
-                : activeFilter === "unread"
-                ? t("inbox.noUnreadMessages")
-                : t("inbox.inboxEmpty")}
-            </p>
-          </div>
-        ) : viewType === "conversations" ? (
-          <div className="divide-y">
-            {threadGroups.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <div className="rounded-full bg-muted p-4">
-                  <MessagesSquare className="h-8 w-8 text-muted-foreground" />
-                </div>
-                <h3 className="mt-4 text-lg font-semibold">{t("threads.noConversations")}</h3>
-              </div>
-            ) : (
-              threadGroups.map((thread) => (
-                <div key={thread.key}>
-                  {/* Thread header, click to expand */}
-                  <div
-                    className="flex cursor-pointer items-center gap-3 p-4 hover:bg-accent/50 transition-all"
-                    onClick={() => toggleThread(thread.key)}
-                  >
-                    <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0">
-                      {expandedThreads.has(thread.key) ? (
-                        <ChevronDown className="h-4 w-4" />
-                      ) : (
-                        <ChevronRightIcon className="h-4 w-4" />
-                      )}
-                    </Button>
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className={cn("text-sm font-semibold truncate", thread.unread > 0 && "text-foreground")}>
-                          {thread.subject || t("common.noSubject")}
-                        </span>
-                        {thread.unread > 0 && (
-                          <span className="h-2 w-2 rounded-full bg-primary shrink-0" />
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground truncate">
-                        <span>{thread.participants.join(", ")}</span>
-                        <span>·</span>
-                        <span>{thread.messages.length} {thread.messages.length === 1 ? t("threads.messageCount", { count: String(thread.messages.length) }) : t("threads.messagesCount", { count: String(thread.messages.length) })}</span>
-                      </div>
-                    </div>
-
-                    <span className="text-xs text-muted-foreground shrink-0">
-                      {formatAbsolute(thread.lastDate)}
-                    </span>
-                  </div>
-
-                  {/* Expanded: individual email rows */}
-                  {expandedThreads.has(thread.key) && (
-                    <div className="bg-accent/5">
-                      {thread.messages.map((email) => emailRow(email))}
-                    </div>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-        ) : (
-          <div className={cn(viewMode === "list" ? "divide-y" : "")}>
-            {pageEmails.map((email) => emailRow(email))}
-          </div>
-        )}
+        <MessageListBody
+          loading={loading}
+          viewMode={viewMode}
+          total={inboxTotal}
+          emptyKey={emptyListKey(folder, activeFilter)}
+          viewType={viewType}
+          threads={threadGroups}
+          emails={pageEmails}
+          t={t}
+          renderRow={emailRow}
+        />
       </div>
 
       {inboxNavMode === "infinite" ? (
-        <div className="flex flex-col items-center gap-2">
-          <span className="text-sm text-muted-foreground">
-            {t("inbox.loadedCount", { loaded: String(pageEmails.length), total: String(inboxTotal) })}
-          </span>
-          {/* Sentinel: the observer loads the next block when this scrolls in. */}
-          <div ref={loadMoreRef} className="h-1 w-full" />
-          {inboxLoadingMore && (
-            <span className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              {t("inbox.loadingMore")}
-            </span>
-          )}
-        </div>
+        <InfiniteFooter
+          loaded={pageEmails.length}
+          total={inboxTotal}
+          loadingMore={inboxLoadingMore}
+          sentinelRef={loadMoreRef}
+          t={t}
+        />
       ) : (
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">
-            {t(inboxTotal !== 1 ? "inbox.messagesCount" : "inbox.messageCount", { count: String(inboxTotal) })}
-            {totalPages > 1 && ` · ${t("inbox.pageOf", { current: String(currentPage + 1), total: String(totalPages) })}`}
-          </span>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="icon"
-              disabled={currentPage <= 0}
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              disabled={currentPage >= totalPages - 1}
-              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
+        <PagerFooter total={inboxTotal} currentPage={currentPage} totalPages={totalPages} t={t} onPage={setPage} />
       )}
         </div>
-        {previewPane === "right" && (
-          <div className="min-w-0 flex-1 rounded-lg border bg-card overflow-auto max-h-[calc(100vh-9rem)]">
-            {selectedId ? (
-              <EmailDetailPage id={selectedId} embedded />
-            ) : (
-              <div className="p-12 text-center text-sm text-muted-foreground">{t("inbox.selectMessage")}</div>
-            )}
-          </div>
-        )}
+        {previewPane === "right" && <PreviewPane selectedId={selectedId} t={t} />}
       </div>
     </div>
   )
