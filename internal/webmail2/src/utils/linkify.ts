@@ -41,12 +41,8 @@ function insideAnchor(node: Node): boolean {
   return false
 }
 
-/**
- * linkifyNode replaces every bare URL and e-mail address in the element's text
- * nodes with an anchor, in place.
- */
-export function linkifyNode(root: Element | DocumentFragment): void {
-  const doc = root.ownerDocument ?? document
+/** linkTargets collects the text nodes under root that hold a linkable token. */
+function linkTargets(doc: Document, root: Element | DocumentFragment): Text[] {
   const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT)
   const targets: Text[] = []
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
@@ -54,29 +50,48 @@ export function linkifyNode(root: Element | DocumentFragment): void {
     if (!insideAnchor(text) && URL_PATTERN.test(text.data)) targets.push(text)
     URL_PATTERN.lastIndex = 0
   }
+  return targets
+}
 
-  for (const text of targets) {
-    const frag = doc.createDocumentFragment()
-    let last = 0
-    for (const m of text.data.matchAll(URL_PATTERN)) {
-      const start = m.index ?? 0
-      let token = m[0]
-      const trailing = TRAILING_PUNCTUATION.exec(token)
-      if (trailing) token = token.slice(0, token.length - trailing[0].length)
-      const href = token ? hrefFor(token) : null
-      if (!href) continue
+/** linkToken strips trailing punctuation from a match and returns the text to link and its href. */
+function linkToken(match: string): { token: string; href: string } | null {
+  const trailing = TRAILING_PUNCTUATION.exec(match)
+  const token = trailing ? match.slice(0, match.length - trailing[0].length) : match
+  const href = token ? hrefFor(token) : null
+  return href ? { token, href } : null
+}
 
-      if (start > last) frag.appendChild(doc.createTextNode(text.data.slice(last, start)))
-      const a = doc.createElement('a')
-      a.setAttribute('href', href)
-      a.textContent = token
-      frag.appendChild(a)
-      last = start + token.length
-    }
-    if (last === 0) continue
-    if (last < text.data.length) frag.appendChild(doc.createTextNode(text.data.slice(last)))
-    text.parentNode?.replaceChild(frag, text)
+/**
+ * linkifyText replaces one text node with a fragment of text and anchors. A node
+ * whose matches all reduce to nothing linkable is left untouched.
+ */
+function linkifyText(doc: Document, text: Text): void {
+  const frag = doc.createDocumentFragment()
+  let last = 0
+  for (const m of text.data.matchAll(URL_PATTERN)) {
+    const start = m.index ?? 0
+    const link = linkToken(m[0])
+    if (!link) continue
+
+    if (start > last) frag.appendChild(doc.createTextNode(text.data.slice(last, start)))
+    const a = doc.createElement('a')
+    a.setAttribute('href', link.href)
+    a.textContent = link.token
+    frag.appendChild(a)
+    last = start + link.token.length
   }
+  if (last === 0) return
+  if (last < text.data.length) frag.appendChild(doc.createTextNode(text.data.slice(last)))
+  text.parentNode?.replaceChild(frag, text)
+}
+
+/**
+ * linkifyNode replaces every bare URL and e-mail address in the element's text
+ * nodes with an anchor, in place.
+ */
+export function linkifyNode(root: Element | DocumentFragment): void {
+  const doc = root.ownerDocument ?? document
+  for (const text of linkTargets(doc, root)) linkifyText(doc, text)
 }
 
 /** linkifyHTML returns the fragment with its bare URLs and addresses linkified. */
