@@ -23,9 +23,11 @@ CMDS    := mta imap pop3 webmail2 dav activesync ews mapihttp gateway notify adm
 # .git excluded and with VCS stamping off, so without this a deployed binary
 # carries no marker of where it came from. The -dirty suffix is not cosmetic: a
 # bare sha on a binary built from a modified tree claims a source state that was
-# never built.
+# never built. `git status --porcelain` is the test rather than `git diff --quiet`,
+# because the latter compares the work tree with the index only and so misses a
+# staged change and a new file that is not ignored, both of which the build compiles.
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
-GIT_DIRTY  := $(shell git diff --quiet 2>/dev/null || echo -dirty)
+GIT_DIRTY  := $(shell test -z "$$(git status --porcelain 2>/dev/null)" || echo -dirty)
 export HERMEX_COMMIT     := $(GIT_COMMIT)$(GIT_DIRTY)
 export HERMEX_BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -X hermex/internal/buildinfo.Commit=$(HERMEX_COMMIT) -X hermex/internal/buildinfo.BuildTime=$(HERMEX_BUILD_TIME)
