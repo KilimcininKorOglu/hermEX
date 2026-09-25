@@ -301,6 +301,12 @@ const (
 	PrRecipientFlags          = PropTag(0x5FFD0003) // PtLong
 	PrRowid                   = PropTag(0x30000003) // PtLong (PidTagRowid, recipient row id)
 	PrSendRichInfo            = PropTag(0x3A40000B) // PtBoolean (PidTagSendRichInfo)
+
+	// An attendee's pending counter proposal on the organizer's meeting ([MS-OXOCAL]
+	// 2.2.4.10.4 to 2.2.4.10.6): whether it proposed a new time, and the UTC span.
+	PrRecipientProposed          = PropTag(0x5FE1000B) // PtBoolean
+	PrRecipientProposedStartTime = PropTag(0x5FE30040) // PtSysTime
+	PrRecipientProposedEndTime   = PropTag(0x5FE40040) // PtSysTime
 )
 
 // Address-book container proptags (NSPI GetSpecialTable, [MS-OXNSPI] / [MS-OXOABK]).

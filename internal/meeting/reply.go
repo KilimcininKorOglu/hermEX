@@ -8,11 +8,11 @@ import (
 	"hermex/internal/objectstore"
 )
 
-// ProcessReply processes an inbound iTIP REPLY on the organizer's side: it reads
-// the delivered message, extracts the text/calendar part, and if it is a
-// METHOD:REPLY it parses the responder's PARTSTAT and updates that attendee's
-// PidLidResponseStatus on the organizer's calendar event (matched by the REPLY's
-// iCalendar UID). It reports whether a REPLY was handled.
+// ProcessReply processes an inbound iTIP REPLY or COUNTER on the organizer's side:
+// it reads the delivered message, extracts the text/calendar part, parses the
+// responder's PARTSTAT and updates that attendee's PidLidResponseStatus on the
+// organizer's calendar event (matched by the iCalendar UID). A COUNTER also records
+// the time the attendee proposes. It reports whether a response was handled.
 //
 // sender is the delivered message's envelope sender. The ATTENDEE line is body
 // content, so it says only who the message CLAIMS to answer for: without this
@@ -36,10 +36,11 @@ func ProcessReply(st *objectstore.Store, sender string, messageID int64) (bool, 
 	if !ok {
 		return false, nil
 	}
-	if !strings.EqualFold(strings.TrimSpace(icalLine(ics, "METHOD")), "REPLY") {
+	fallback, ok := responseMethods[strings.ToUpper(strings.TrimSpace(icalLine(ics, "METHOD")))]
+	if !ok {
 		return false, nil
 	}
-	uid, attendee, resp, ok := authorizedReply(ics, sender)
+	uid, attendee, resp, ok := authorizedReply(ics, sender, fallback)
 	if !ok {
 		return false, nil
 	}
@@ -50,7 +51,20 @@ func ProcessReply(st *objectstore.Store, sender string, messageID int64) (bool, 
 	// Report the failure rather than swallowing it: the REPLY was understood and
 	// authorized, so "handled" is true, but the tracking write is the whole point
 	// and losing it silently leaves the organizer with a stale Tracking tab.
-	return true, ApplyReply(st, tags, uid, attendee, resp)
+	proposal, err := readProposal(st, messageID)
+	if err != nil {
+		return true, err
+	}
+	return true, ApplyReply(st, tags, uid, attendee, resp, proposal)
+}
+
+// responseMethods are the iTIP methods an attendee answers with, each with the
+// response status that stands when the ATTENDEE carries no PARTSTAT. A COUNTER is a
+// tentative response proposing a new time ([MS-OXCICAL] METHOD table), and RFC 5546
+// §3.2.7 does not require it to name a PARTSTAT; a REPLY without one says nothing.
+var responseMethods = map[string]int32{
+	"REPLY":   0,
+	"COUNTER": ResponseTentative,
 }
 
 // inboxCalendarPart reads the delivered message and returns its calendar body.
@@ -73,8 +87,9 @@ func inboxCalendarPart(st *objectstore.Store, messageID int64) ([]byte, bool) {
 
 // authorizedReply reads the REPLY's UID, attendee and response status. It reports ok
 // only when the envelope sender is the attendee the body answers for, because the
-// ATTENDEE line alone says who the message claims to answer for.
-func authorizedReply(ics []byte, sender string) (uid, attendee string, resp int32, ok bool) {
+// ATTENDEE line alone says who the message claims to answer for. fallback is the
+// response that stands when the ATTENDEE names no PARTSTAT (0: none).
+func authorizedReply(ics []byte, sender string, fallback int32) (uid, attendee string, resp int32, ok bool) {
 	uid = strings.TrimSpace(icalLine(ics, "UID"))
 	attendee, partstat := parseAttendee(ics)
 	if uid == "" || attendee == "" {
@@ -87,6 +102,9 @@ func authorizedReply(ics []byte, sender string) (uid, attendee string, resp int3
 		return "", "", 0, false
 	}
 	resp = partstatResponse(partstat)
+	if resp == 0 {
+		resp = fallback
+	}
 	if resp == 0 {
 		return "", "", 0, false
 	}

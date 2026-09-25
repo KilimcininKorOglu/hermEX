@@ -521,26 +521,41 @@ func findCalendarByUID(st *objectstore.Store, uidTag mapi.PropTag, uid string) (
 // the organizer's calendar event by the REPLY's iCalendar UID, finds the attendee
 // (recipient) by SMTP address, and updates that recipient's PidLidResponseStatus
 // to the response the attendee sent (accepted/tentative/declined). This is the
-// data the organizer's TrackingTab reads. It is a no-op (returns nil) when the
-// event or the attendee is not found, so a stray REPLY never fails delivery.
-func ApplyReply(st *objectstore.Store, tags Tags, uid, attendeeEmail string, response int32) error {
+// data the organizer's TrackingTab reads. A counter proposal (p non-nil) is also
+// recorded on the attendee and the meeting, and a plain response withdraws an
+// earlier one (trackProposal). It is a no-op (returns nil) when the event or the
+// attendee is not found, so a stray REPLY never fails delivery.
+func ApplyReply(st *objectstore.Store, tags Tags, uid, attendeeEmail string, response int32, p *Proposal) error {
 	eventID, ok := findCalendarByUID(st, tags.UID, uid)
 	if !ok {
 		return nil
 	}
+	recipID, ok, err := attendeeRecipient(st, eventID, attendeeEmail)
+	if err != nil || !ok {
+		return err
+	}
+	var props mapi.PropertyValues
+	props.Set(tags.Resp, response)
+	if err := st.SetRecipientProperties(recipID, props); err != nil {
+		return err
+	}
+	return trackProposal(st, eventID, recipID, p)
+}
+
+// attendeeRecipient finds the recipient row of the meeting whose SMTP address is
+// the attendee's.
+func attendeeRecipient(st *objectstore.Store, eventID int64, attendeeEmail string) (int64, bool, error) {
 	recipients, err := st.ListRecipients(eventID)
 	if err != nil {
-		return err
+		return 0, false, err
 	}
 	target := strings.ToLower(strings.TrimSpace(attendeeEmail))
 	for _, r := range recipients {
 		if strings.ToLower(strings.TrimSpace(r.SmtpAddress)) == target && target != "" {
-			var props mapi.PropertyValues
-			props.Set(tags.Resp, response)
-			return st.SetRecipientProperties(r.ID, props)
+			return r.ID, true, nil
 		}
 	}
-	return nil
+	return 0, false, nil
 }
 
 // propStr reads a string-valued property, or "".

@@ -131,6 +131,10 @@ var (
 	NameAppointmentCounterProposal    = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8257} // PtBoolean
 	NameAppointmentProposedStartWhole = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8250} // PtSysTime
 	NameAppointmentProposedEndWhole   = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8251} // PtSysTime
+	// NameAppointmentProposalNumber (PidLidAppointmentProposalNumber, MS-OXOCAL
+	// 2.2.4.6) counts the attendees whose counter proposals the organizer has not
+	// answered yet.
+	NameAppointmentProposalNumber = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8259} // PtLong
 
 	// Reminder named properties (PSETID_Common), VALARM maps here.
 	NameReminderDelta = PropertyName{Kind: MnidID, GUID: PsetidCommon, LID: 0x8501} // PtLong, minutes before start
