@@ -490,19 +490,19 @@ type NotesEditor = ReturnType<typeof useNotes>
 function useInviteActions(email: EmailDetail | null, invite: MeetingInvite | null) {
   const { t } = useI18n()
   const [rsvpStatus, setRsvpStatus] = useState<string | null>(null)
-  const [rsvpBusy, setRsvpBusy] = useState(false)
+  // One gate for every answer: an RSVP and a counter-proposal both answer the
+  // same invite, so neither may start while the other is in flight.
+  const { busy, begin, end } = useBusyGate()
   // Propose-new-time: a dialog where the invitee picks a proposed start/end and
   // emails a METHOD:COUNTER iTIP to the organizer.
   const [proposeOpen, setProposeOpen] = useState(false)
   const [proposeStart, setProposeStart] = useState("")
   const [proposeEnd, setProposeEnd] = useState("")
-  const [proposeBusy, setProposeBusy] = useState(false)
 
   // handleRsvp responds to a meeting invite. Accept/tentative add the event to
   // the user's calendar; decline removes it.
   const handleRsvp = async (response: "accept" | "tentative" | "decline") => {
-    if (!email) return
-    setRsvpBusy(true)
+    if (!email || !begin()) return
     try {
       await api.rsvp(email.id, response)
       setRsvpStatus(response)
@@ -515,7 +515,7 @@ function useInviteActions(email: EmailDetail | null, invite: MeetingInvite | nul
     } catch {
       toast.error(t("emailDetail.failedToRsvp"))
     } finally {
-      setRsvpBusy(false)
+      end()
     }
   }
 
@@ -530,8 +530,7 @@ function useInviteActions(email: EmailDetail | null, invite: MeetingInvite | nul
 
   // handleProposeTime emails the counter-proposal to the organizer.
   const handleProposeTime = async () => {
-    if (!email || !proposeStart) return
-    setProposeBusy(true)
+    if (!email || !proposeStart || !begin()) return
     try {
       const range = proposalRange(proposeStart, proposeEnd)
       await api.proposeTime(email.id, range.start, range.end)
@@ -540,13 +539,13 @@ function useInviteActions(email: EmailDetail | null, invite: MeetingInvite | nul
     } catch {
       toast.error(t("emailDetail.failedToPropose"))
     } finally {
-      setProposeBusy(false)
+      end()
     }
   }
 
   return {
-    rsvpStatus, rsvpBusy, handleRsvp, openPropose, handleProposeTime,
-    proposeOpen, setProposeOpen, proposeStart, setProposeStart, proposeEnd, setProposeEnd, proposeBusy,
+    rsvpStatus, rsvpBusy: busy, handleRsvp, openPropose, handleProposeTime,
+    proposeOpen, setProposeOpen, proposeStart, setProposeStart, proposeEnd, setProposeEnd, proposeBusy: busy,
   }
 }
 
