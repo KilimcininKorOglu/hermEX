@@ -69,13 +69,27 @@ function numberText(n: number | undefined, keep: (n: number) => boolean): string
   return n != null && keep(n) ? String(n) : ""
 }
 
-// eventFormOf fills the editor from a stored event.
+// eventKey identifies one listed row: a series lists one row per instance under
+// the series' uid, so the instance's occurrence tells them apart.
+export function eventKey(ev: CalendarEvent): string {
+  return ev.occurrence ? `${ev.uid}@${ev.occurrence}` : ev.uid
+}
+
+// seriesSpan is the span the editor edits: the series' own first span for an
+// instance row, else the event's.
+function seriesSpan(ev: CalendarEvent): { start: string; end?: string } {
+  return ev.seriesStart ? { start: ev.seriesStart, end: ev.seriesEnd } : { start: ev.start, end: ev.end }
+}
+
+// eventFormOf fills the editor from a stored event. An instance of a series
+// opens the series, so its times are the series' first ones.
 export function eventFormOf(ev: CalendarEvent): EventForm {
   const allDay = !!ev.allDay
+  const span = seriesSpan(ev)
   return {
     summary: ev.summary,
-    start: inputValue(allDay, ev.start),
-    end: ev.end ? inputValue(allDay, ev.end) : "",
+    start: inputValue(allDay, span.start),
+    end: span.end ? inputValue(allDay, span.end) : "",
     allDay,
     location: ev.location ?? "",
     description: ev.description ?? "",

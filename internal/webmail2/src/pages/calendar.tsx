@@ -36,6 +36,7 @@ import {
   emptyEventForm,
   eventFormError,
   eventFormOf,
+  eventKey,
   eventPayload,
   movedEventPayload,
   parseAttendees,
@@ -479,11 +480,15 @@ function useEventEditor(load: () => Promise<void>) {
     }
   }
 
-  const confirmDelete = async () => {
+  // confirmDelete removes the target: only its instance when one is true and the
+  // target is an instance of a series, else the whole event.
+  const confirmDelete = async (one: boolean) => {
     if (!deleteTarget || busy) return
     if (!beginMutation()) return
     try {
-      await api.deleteCalendarEvent(deleteTarget.uid)
+      await (one && deleteTarget.occurrence
+        ? api.deleteCalendarOccurrence(deleteTarget.uid, deleteTarget.occurrence)
+        : api.deleteCalendarEvent(deleteTarget.uid))
       toast.success(t("calendar.eventDeleted"))
       setDeleteTarget(null)
       await load()
@@ -494,11 +499,14 @@ function useEventEditor(load: () => Promise<void>) {
     }
   }
 
-  // moveEvent commits a drag-move/resize: PUT the event with the new start/end
-  // (preserving its other fields) and reload. Best-effort: a failure toasts.
+  // moveEvent commits a drag-move/resize and reloads: an instance of a series
+  // moves alone, any other event is saved with the new start/end and its other
+  // fields kept. Best-effort: a failure toasts.
   const moveEvent = async (ev: CalendarEvent, start: Date, end: Date) => {
     try {
-      await api.updateCalendarEvent(ev.uid, movedEventPayload(ev, start, end))
+      await (ev.occurrence
+        ? api.moveCalendarOccurrence(ev.uid, ev.occurrence, start.toISOString(), end.toISOString())
+        : api.updateCalendarEvent(ev.uid, movedEventPayload(ev, start, end)))
       await load()
     } catch (err) {
       toast.error(errorText(err, t("calendar.saveFailed")))
@@ -508,7 +516,9 @@ function useEventEditor(load: () => Promise<void>) {
 
   return {
     dialogOpen, setDialogOpen, editingUID, editingTracking, form, setForm, busy, submit,
-    openCreate, openCreateOn, openEdit, deleteTarget, setDeleteTarget, confirmDelete, moveEvent,
+    openCreate, openCreateOn, openEdit, deleteTarget, setDeleteTarget, moveEvent,
+    confirmDeleteAll: () => confirmDelete(false),
+    confirmDeleteOne: () => confirmDelete(true),
   }
 }
 
@@ -716,14 +726,7 @@ export function CalendarPage() {
       />
       <EventDialog editor={editor} calendars={data.calendars} rooms={data.rooms} categories={data.allCategories} />
       <FreeBusyDialog freeBusy={freeBusy} />
-      <ConfirmDeleteDialog
-        open={editor.deleteTarget !== null}
-        title={t("calendar.deleteEvent")}
-        description={t("calendar.deleteConfirm", { name: editor.deleteTarget?.summary ?? "" })}
-        busy={editor.busy}
-        onCancel={() => editor.setDeleteTarget(null)}
-        onConfirm={editor.confirmDelete}
-      />
+      <EventDeleteDialog editor={editor} />
       <CalendarDialog calEditor={calEditor} />
       <ConfirmDeleteDialog
         open={calEditor.deleteTarget !== null}
@@ -1055,7 +1058,7 @@ function MonthDayCell({ day, inMonth, isToday, events, eventColor, editor }: {
       <div className="mt-0.5 space-y-0.5">
         {events.slice(0, 3).map((ev) => (
           <button
-            key={ev.uid}
+            key={eventKey(ev)}
             className="block w-full truncate rounded bg-primary/10 px-1 py-0.5 text-left text-xs text-foreground hover:bg-primary/20"
             style={colorBorder(eventColor(ev))}
             onClick={(e) => { e.stopPropagation(); editor.openEdit(ev) }}
@@ -1151,7 +1154,7 @@ function AgendaView({ events, eventColor, editor }: Pick<ViewProps, "events" | "
           <h2 className="mb-2 text-sm font-semibold text-muted-foreground">{group.day}</h2>
           <div className="rounded-lg border bg-card divide-y">
             {group.items.map((ev) => (
-              <AgendaRow key={ev.uid} ev={ev} color={eventColor(ev)} editor={editor} />
+              <AgendaRow key={eventKey(ev)} ev={ev} color={eventColor(ev)} editor={editor} />
             ))}
           </div>
         </div>
@@ -1589,13 +1592,35 @@ function FreeBusyResults({ results }: { results: UserFreeBusy[] }) {
   )
 }
 
-function ConfirmDeleteDialog({ open, title, description, busy, onCancel, onConfirm }: {
+// EventDeleteDialog confirms an event delete, offering an instance of a series
+// the choice between that instance and the whole series.
+function EventDeleteDialog({ editor }: { editor: EventEditor }) {
+  const { t } = useI18n()
+  const target = editor.deleteTarget
+  return (
+    <ConfirmDeleteDialog
+      open={target !== null}
+      title={t("calendar.deleteEvent")}
+      description={t("calendar.deleteConfirm", { name: target?.summary ?? "" })}
+      busy={editor.busy}
+      onCancel={() => editor.setDeleteTarget(null)}
+      onConfirm={editor.confirmDeleteAll}
+      onConfirmOne={target?.occurrence ? editor.confirmDeleteOne : undefined}
+    />
+  )
+}
+
+// ConfirmDeleteDialog asks before a delete. With onConfirmOne, the target is an
+// instance of a series: the dialog offers deleting that instance alone, and the
+// confirm button deletes the whole series.
+function ConfirmDeleteDialog({ open, title, description, busy, onCancel, onConfirm, onConfirmOne }: {
   open: boolean
   title: string
   description: string
   busy: boolean
   onCancel: () => void
   onConfirm: () => void
+  onConfirmOne?: () => void
 }) {
   const { t } = useI18n()
   return (
@@ -1609,9 +1634,14 @@ function ConfirmDeleteDialog({ open, title, description, busy, onCancel, onConfi
           <Button variant="outline" onClick={onCancel} disabled={busy}>
             {t("common.cancel")}
           </Button>
+          {onConfirmOne && (
+            <Button variant="outline" onClick={onConfirmOne} disabled={busy}>
+              {t("calendar.deleteThisOccurrence")}
+            </Button>
+          )}
           <Button variant="destructive" onClick={onConfirm} disabled={busy}>
             <Trash2 className="mr-2 h-4 w-4" />
-            {t("common.delete")}
+            {onConfirmOne ? t("calendar.deleteWholeSeries") : t("common.delete")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1879,7 +1909,7 @@ function DayTimeGrid(props: {
               <div key={key} className="min-h-7 border-l px-1 py-0.5">
                 {allDay.map((ev) => (
                   <button
-                    key={ev.uid}
+                    key={eventKey(ev)}
                     onClick={() => props.onOpenEvent(ev)}
                     className="block w-full truncate rounded bg-primary/15 px-1 py-0.5 text-left text-xs"
                     style={props.eventColor(ev) ? { borderLeft: `3px solid ${props.eventColor(ev)}` } : undefined}
@@ -1955,7 +1985,7 @@ function DayTimeGrid(props: {
                   {timed.map((ev) => {
                     // When this event is being dragged, render at the tentative
                     // position; otherwise at its stored start/end.
-                    const active = eventDrag && eventDrag.ev.uid === ev.uid
+                    const active = eventDrag && eventKey(eventDrag.ev) === eventKey(ev)
                     const startMin = active ? eventDrag!.startMin : eventTopMinutes(ev, day)
                     const endMin = active ? eventDrag!.endMin : startMin + eventHeightMinutes(ev, day)
                     const top = startMin * PX_PER_MINUTE - offset
@@ -1963,7 +1993,7 @@ function DayTimeGrid(props: {
                     if (top + height <= 0 || top >= gridHeight) return null // event in a hidden hour
                     return (
                       <div
-                        key={ev.uid}
+                        key={eventKey(ev)}
                         role="button"
                         tabIndex={0}
                         className={`absolute left-0.5 right-0.5 cursor-move overflow-hidden rounded bg-primary/20 px-1 py-0.5 text-left text-[11px] hover:bg-primary/30 ${active ? "ring-2 ring-primary" : ""}`}

@@ -925,6 +925,8 @@
     "check": "Kontrol Et",
     "deleteEvent": "Etkinliği Sil",
     "deleteConfirm": "\"{{name}}\" silinsin mi? Bu geri alınamaz.",
+    "deleteThisOccurrence": "Yalnız bu tekrar",
+    "deleteWholeSeries": "Tüm seri",
     "calendars": "Takvimler",
     "calendar": "Takvim",
     "addCalendar": "Takvim ekle",

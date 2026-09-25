@@ -925,6 +925,8 @@
     "check": "Check",
     "deleteEvent": "Delete Event",
     "deleteConfirm": "Delete \"{{name}}\"? This cannot be undone.",
+    "deleteThisOccurrence": "This occurrence only",
+    "deleteWholeSeries": "Whole series",
     "calendars": "Calendars",
     "calendar": "Calendar",
     "addCalendar": "Add calendar",

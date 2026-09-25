@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { emptyEventForm, eventFormError, eventFormOf, eventPayload, movedEventPayload, parseAttendees, pickerWindow, recurrenceToForm, splitRooms, withoutRoom, withRoom } from "./eventForm"
+import { emptyEventForm, eventFormError, eventFormOf, eventKey, eventPayload, movedEventPayload, parseAttendees, pickerWindow, recurrenceToForm, splitRooms, withoutRoom, withRoom } from "./eventForm"
 
 const localISO = (h: number, m: number) => new Date(2026, 8, 25, h, m).toISOString()
 
@@ -35,9 +35,26 @@ describe("eventFormOf", () => {
     })
   })
 
+  it("opens an instance of a series at the series' own first span", () => {
+    const form = eventFormOf({
+      uid: "5", summary: "Standup", start: localISO(14, 0), end: localISO(14, 30), recurrence: "FREQ=DAILY",
+      occurrence: localISO(9, 0), seriesStart: localISO(9, 0), seriesEnd: localISO(9, 30),
+    })
+    expect(form.start).toBe("2026-09-25T09:00")
+    expect(form.end).toBe("2026-09-25T09:30")
+  })
+
   it("reads an all-day event as dates and absent or neutral values as empty", () => {
     const form = eventFormOf({ uid: "2", summary: "Holiday", start: "2026-09-25", allDay: true, reminderMinutes: 0, sensitivity: 0 })
     expect(form).toEqual({ ...emptyEventForm(), summary: "Holiday", start: "2026-09-25", allDay: true })
+  })
+})
+
+describe("eventKey", () => {
+  it("tells the instances of one series apart and keeps a single event's uid", () => {
+    expect(eventKey({ uid: "5", summary: "s", start: "x", occurrence: "2026-03-30T07:00:00Z" })).toBe("5@2026-03-30T07:00:00Z")
+    expect(eventKey({ uid: "5", summary: "s", start: "x", occurrence: "2026-03-31T07:00:00Z" })).toBe("5@2026-03-31T07:00:00Z")
+    expect(eventKey({ uid: "6", summary: "s", start: "x" })).toBe("6")
   })
 })
 

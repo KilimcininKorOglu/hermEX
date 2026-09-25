@@ -190,6 +190,11 @@ export interface CalendarEvent {
   sensitivity?: number // PR_SENSITIVITY: 0=normal, 2=private, 3=confidential
   categories?: string[] // PidNameKeywords, the shared category list
   tracking?: { email: string; response: number }[] // per-attendee PidLidResponseStatus: 0=none, 2=tentative, 3=accepted, 4=declined
+  // Set on the rows a windowed listing expands a series into: the instance's
+  // generated instant (its RECURRENCE-ID) and the series' own first span.
+  occurrence?: string
+  seriesStart?: string
+  seriesEnd?: string
 }
 
 type CalendarEventInput = Omit<CalendarEvent, "uid"> & { uid?: string }
@@ -1635,6 +1640,17 @@ class API {
 
   async deleteCalendarEvent(uid: string): Promise<void> {
     await this.delete(`/calendar/events/${encodeURIComponent(uid)}`)
+  }
+
+  // moveCalendarOccurrence moves one instance of a series, named by the instant a
+  // listing reported as its occurrence; the other instances stay.
+  async moveCalendarOccurrence(uid: string, occurrence: string, start: string, end: string): Promise<void> {
+    await this.put(`/calendar/events/${encodeURIComponent(uid)}/occurrence`, { occurrence, start, end })
+  }
+
+  // deleteCalendarOccurrence removes one instance of a series.
+  async deleteCalendarOccurrence(uid: string, occurrence: string): Promise<void> {
+    await this.delete(`/calendar/events/${encodeURIComponent(uid)}/occurrence?at=${encodeURIComponent(occurrence)}`)
   }
 
   // Calendar management (multi-calendar)
