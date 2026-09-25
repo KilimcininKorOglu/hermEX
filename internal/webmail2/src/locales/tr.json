@@ -863,6 +863,14 @@
       "revokeFailed": "İptal edilemedi.",
       "lastUsed": "Son kullanım {{when}}",
       "neverUsed": "Hiç kullanılmadı"
+    },
+    "meeting": {
+      "title": "Toplantılar",
+      "description": "Posta kutunuzun aldığı toplantı postalarını nasıl işlediği",
+      "processCancellations": "Toplantı iptallerini işle",
+      "processCancellationsDescription": "Organizatör bir toplantıyı ya da bir tekrarını iptal ettiğinde, takviminizde iptal edildi olarak işaretle ve zamanı boş göster. Öğeyi siz kaldırırsınız.",
+      "removeRequest": "Yanıtlanan toplantı isteklerini sil",
+      "removeRequestDescription": "Yanıtladığınız toplantı isteğini Silinmiş Öğeler klasörüne taşı"
     }
   },
   "calendar": {

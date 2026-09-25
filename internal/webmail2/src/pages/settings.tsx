@@ -9,6 +9,7 @@ import { AccountSection, PushSection, SessionsSection } from "@/components/setti
 import { AppearanceSection } from "@/components/settings/appearance-section"
 import { AutoReplySection } from "@/components/settings/auto-reply-section"
 import { DelegatesSection } from "@/components/settings/delegates-section"
+import { MeetingSection } from "@/components/settings/meeting-section"
 import {
   AboutSection,
   AdvancedSection,
@@ -55,6 +56,7 @@ export function SettingsPage() {
       <NotificationsSection prefs={prefs} />
       <CompositionSection prefs={prefs} />
       <AutoReplySection />
+      <MeetingSection />
       <SignatureSection />
       <TemplateSection />
       <CategoriesSection />

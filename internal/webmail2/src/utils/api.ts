@@ -583,6 +583,13 @@ interface RwzImportResult {
   notes?: string[]
 }
 
+// MeetingSettings mirrors /api/v1/settings/meeting: whether answering a request
+// files it away, and whether a delivered cancellation marks the meeting cancelled.
+export interface MeetingSettings {
+  removeRequestOnResponse: boolean
+  processCancellations: boolean
+}
+
 // VacationAutoReply mirrors the backend /api/v1/vacation contract
 // (internal/api/vacation.go VacationConfig): snake_case JSON keys, with
 // `message` as the reply body and RFC3339 date strings.
@@ -1427,6 +1434,15 @@ class API {
 
   async deleteVacation(): Promise<void> {
     await this.delete('/vacation')
+  }
+
+  // Meeting handling settings the user owns (the operator keeps automatic acceptance).
+  async getMeetingSettings(): Promise<MeetingSettings> {
+    return this.get<MeetingSettings>('/settings/meeting')
+  }
+
+  async setMeetingSettings(settings: MeetingSettings): Promise<MeetingSettings> {
+    return this.put<MeetingSettings>('/settings/meeting', settings)
   }
 
   // Search

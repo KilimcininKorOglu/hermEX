@@ -863,6 +863,14 @@
       "revokeFailed": "Could not revoke it.",
       "lastUsed": "Last used {{when}}",
       "neverUsed": "Never used"
+    },
+    "meeting": {
+      "title": "Meetings",
+      "description": "How your mailbox handles the meeting mail it receives",
+      "processCancellations": "Process meeting cancellations",
+      "processCancellationsDescription": "When an organizer cancels a meeting or one of its occurrences, mark it cancelled in your calendar and show the time as free. You remove it yourself.",
+      "removeRequest": "Delete answered meeting requests",
+      "removeRequestDescription": "Move a meeting request to Deleted Items once you have answered it"
     }
   },
   "calendar": {
