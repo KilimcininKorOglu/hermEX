@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useCallback, useEffect } from 'rea
 import api from '../utils/api'
 import { setDisplayTimeZone } from '../utils/date'
 import { getCookie, setCookie, deleteCookie } from '../utils/cookies'
+import { forgetIdentity } from '../utils/smimeIdentity'
 
 interface UserPrefs {
   onboarded?: boolean
@@ -170,6 +171,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       console.error('Logout request failed:', err)
     }
+    // The unlocked S/MIME key is this account's; the next sign-in in this page
+    // must not sign or decrypt with it.
+    forgetIdentity()
     setUser(null)
     setIsAuthenticated(false)
     api.setToken(null)

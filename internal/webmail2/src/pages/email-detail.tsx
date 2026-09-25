@@ -76,6 +76,7 @@ import { cn } from "@/lib/utils"
 import api from "@/utils/api"
 import type { MeetingInvite, AttachmentInfo, Mail as MailMessage, Note } from "@/utils/api"
 import * as smimeStore from "@/utils/smime"
+import { hasIdentity as hasBrowserSmime } from "@/utils/smimeIdentity"
 import { formatAbsolute, withTz } from "@/utils/date"
 import { getShortcutMode } from "@/utils/shortcutMode"
 import { useAuth } from "@/contexts/AuthContext"
@@ -162,7 +163,7 @@ async function decryptedView(result: MailMessage, base: BodyView): Promise<BodyV
 // bodyView returns the body the reader renders. The body goes into an HTML
 // sink, so a text/plain body is escaped first: the server reports which one it
 // sent in bodyType. An S/MIME encrypted message is decrypted client-side by a
-// browser-mode reader (key in this browser); a server-mode reader's message was
+// browser-mode reader (key unlocked in this page); a server-mode reader's message was
 // already decrypted server-side.
 async function bodyView(result: MailMessage, t: TFunc): Promise<BodyView> {
   const base: BodyView = {
@@ -171,7 +172,7 @@ async function bodyView(result: MailMessage, t: TFunc): Promise<BodyView> {
     smimeVerified: result.smimeVerified,
     smimeSignedBy: result.smimeSignedBy,
   }
-  if (!result.smimeEncrypted || !(await smimeStore.hasIdentity())) return base
+  if (!result.smimeEncrypted || !(await hasBrowserSmime())) return base
   if (!smimeStore.isUnlocked()) return { ...base, content: `<p>${t("emailDetail.smimeLockedBody")}</p>` }
   try {
     return await decryptedView(result, base)

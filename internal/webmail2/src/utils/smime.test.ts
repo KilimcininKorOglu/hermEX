@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest"
 import forge from "node-forge"
-import { encryptMime, verifyMime } from "./smime"
+import { encryptMime, isUnlocked, lock, readP12, restoreKey, signMime, verifyMime } from "./smime"
 
 // One throwaway identity for the whole file: key generation is the slow part.
 let key: forge.pki.rsa.PrivateKey
@@ -56,6 +56,31 @@ describe("verifyMime", () => {
   it("reports an unreadable signature as not verified", () => {
     const broken = signed(content, "b1").replace(/(base64\r\n\r\n)[^\r]+/, "$1AAAA")
     expect(verifyMime(broken)).toEqual({ verified: false, signedBy: "", signerCert: "" })
+  })
+})
+
+// p12Of packs the test identity into a password-protected .p12 file.
+function p12Of(password: string): ArrayBuffer {
+  const der = forge.asn1.toDer(forge.pkcs12.toPkcs12Asn1(key, cert, password, { algorithm: "3des" })).getBytes()
+  return Uint8Array.from(der, (c) => c.charCodeAt(0)).buffer
+}
+
+// The vault carries the key out of the .p12 as PKCS#8; a key restored from it
+// must be the same key, or every signature made after an unlock fails.
+describe("readP12 and restoreKey", () => {
+  it("restores a key that signs verifiably", () => {
+    const { content, info } = readP12(p12Of("pw"), "pw")
+    expect(info.subject).toContain("ada@hermex.test")
+    lock()
+    restoreKey(content)
+    expect(isUnlocked()).toBe(true)
+    const inner = signMime("From: ada@hermex.test\r\nContent-Type: text/plain\r\n\r\nhello")
+    expect(verifyMime(inner.slice(inner.indexOf("Content-Type: multipart/signed")))).toMatchObject({ verified: true })
+    lock()
+  })
+
+  it("refuses the wrong .p12 password", () => {
+    expect(() => readP12(p12Of("pw"), "other")).toThrow()
   })
 })
 

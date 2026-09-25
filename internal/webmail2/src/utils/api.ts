@@ -1,3 +1,5 @@
+import type { VaultEnvelope } from './smimeVault'
+
 const API_URL = window.location.origin + '/api/v1'
 
 // maxBulkExport mirrors the server cap on a single bulk EML export; the UI warns
@@ -424,6 +426,7 @@ export interface SMIMECertInfo {
   fingerprint: string
   hasPrivateKey?: boolean
   mode?: string // "browser" | "server"
+  hasVault?: boolean
 }
 
 export interface DirectoryEntry {
@@ -1786,9 +1789,17 @@ class API {
     return this.get<{ hasKeys: false } | SMIMECertInfo>('/smime/certificate')
   }
 
-  /** Browser mode: publishes the user's PUBLIC certificate (PEM). The key stays in the browser. */
-  async uploadSMIMECertificate(cert: string): Promise<SMIMECertInfo> {
-    return this.post<SMIMECertInfo>('/smime/certificate', { mode: 'browser', cert })
+  /**
+   * Browser mode: publishes the user's PUBLIC certificate (PEM) with the key
+   * sealed in the browser under the user's password. The server cannot open it.
+   */
+  async uploadSMIMECertificate(cert: string, vault: VaultEnvelope): Promise<SMIMECertInfo> {
+    return this.post<SMIMECertInfo>('/smime/certificate', { mode: 'browser', cert, vault })
+  }
+
+  /** Browser mode: returns the caller's sealed S/MIME key. */
+  async getSMIMEVault(): Promise<VaultEnvelope> {
+    return this.get<VaultEnvelope>('/smime/vault')
   }
 
   /** Server mode: uploads the .p12 (base64) and its password; the server stores the key at rest. */

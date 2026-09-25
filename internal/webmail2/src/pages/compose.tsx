@@ -56,6 +56,7 @@ import { draftSession } from "@/utils/draftSession"
 import { DRAG_TYPE, fileFromDrag } from "@/utils/attachmentDrag"
 import { taskToVTodo, noteToText, safeItemName } from "@/utils/attachItem"
 import * as smimeStore from "@/utils/smime"
+import { hasIdentity as hasBrowserSmime } from "@/utils/smimeIdentity"
 import { mailOptionsActive } from "@/utils/mailOptions"
 import { draftRecipients, prefillFromDraft, prefillFromParams } from "@/utils/composePrefill"
 import {
@@ -846,7 +847,7 @@ function useSend(state: ComposeState) {
   // is in this browser; it explains a refusal itself.
   const smimeReady = async (scheduled: boolean): Promise<{ ok: boolean; browserSmime: boolean }> => {
     const o = state.options
-    const browserSmime = (o.sign || o.encrypt) && (await smimeStore.hasIdentity())
+    const browserSmime = (o.sign || o.encrypt) && (await hasBrowserSmime())
     const block = smimeBlock({ sign: o.sign, encrypt: o.encrypt, scheduled, browserKey: browserSmime, unlocked: smimeStore.isUnlocked() })
     if (block) toast.error(t(block))
     return { ok: !block, browserSmime }
