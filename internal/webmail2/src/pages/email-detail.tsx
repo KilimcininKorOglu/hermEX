@@ -558,11 +558,10 @@ function useInlineReply(email: EmailDetail | null) {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const [body, setBody] = useState("")
-  const [busy, setBusy] = useState(false)
+  const { busy, begin, end } = useBusyGate()
 
   const send = async () => {
-    if (!email || !body.trim()) return
-    setBusy(true)
+    if (!email || !body.trim() || !begin()) return
     try {
       await api.sendMail({ to: [email.fromEmail], subject: replySubject(email.subject), body, is_html: false })
       toast.success(t("emailDetail.replySent"))
@@ -571,7 +570,7 @@ function useInlineReply(email: EmailDetail | null) {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("emailDetail.replyFailed"))
     } finally {
-      setBusy(false)
+      end()
     }
   }
 
