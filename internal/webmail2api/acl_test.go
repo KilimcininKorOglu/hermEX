@@ -1,6 +1,8 @@
 package webmail2api
 
 import (
+	"net/http"
+	"strconv"
 	"testing"
 
 	"hermex/internal/mapi"
@@ -48,4 +50,23 @@ func TestFolderDescendants(t *testing.T) {
 	if leaf := folderDescendants(folders, 4); len(leaf) != 0 {
 		t.Errorf("descendants(leaf 4) = %v, want none", leaf)
 	}
+}
+
+// TestACLResolvesCalendars proves the share dialog of the calendar page reaches
+// a folder: it names the default calendar "calendar" and a created calendar by
+// its folder id. A folder id that is not a calendar stays unresolved.
+func TestACLResolvesCalendars(t *testing.T) {
+	do, dir := apiHarness(t)
+	created := okBody[calendarJSON](t, "create calendar", do(http.MethodPost, "/api/v1/calendar/calendars", `{"name":"Team"}`))
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open mailbox", err)
+	mailFolder, err := st.CreateFolder(nil, "Projects")
+	st.Close()
+	mustNoErr(t, "create mail folder", err)
+
+	for _, name := range []string{"calendar", created.ID} {
+		got := okBody[map[string]any](t, "acl of "+name, do(http.MethodGet, "/api/v1/mailboxes/alice@hermex.test/"+name+"/acl", ""))
+		wantEq(t, "mailbox", got["mailbox"], any(name))
+	}
+	wantStatus(t, "acl of a mail folder id", do(http.MethodGet, "/api/v1/mailboxes/alice@hermex.test/"+strconv.FormatInt(mailFolder, 10)+"/acl", ""), http.StatusNotFound)
 }

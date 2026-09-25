@@ -2,6 +2,7 @@ package webmail2api
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"hermex/internal/directory"
@@ -57,13 +58,35 @@ func (s *Server) aclStore(w http.ResponseWriter, r *http.Request, c sessionClaim
 	return st, true
 }
 
-// aclFolderID resolves the {mailbox} path segment (a folder slug or display name)
-// to a folder id.
+// aclFolderID resolves the {mailbox} path segment (a folder slug, a calendar id
+// or a display name) to a folder id.
 func aclFolderID(st *objectstore.Store, name string) (int64, bool) {
 	if fid, ok := folderFID(strings.ToLower(name)); ok {
 		return fid, true
 	}
+	if fid, ok := calendarACLFolder(st, name); ok {
+		return fid, true
+	}
 	return folderByName(st, name)
+}
+
+// calendarACLFolder resolves a calendar the way the calendar page names it:
+// "calendar" for the default calendar, and the folder id for a calendar the
+// user created. A numeric id resolves only to a calendar folder, so it cannot
+// address a mail folder by number.
+func calendarACLFolder(st *objectstore.Store, id string) (int64, bool) {
+	if id == "calendar" {
+		return mapi.PrivateFIDCalendar, true
+	}
+	fid, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	props, err := st.GetFolderProperties(fid, mapi.PrContainerClass)
+	if err != nil || !strings.EqualFold(propStr(props, mapi.PrContainerClass), mapi.ContainerClassAppointment) {
+		return 0, false
+	}
+	return fid, true
 }
 
 func (s *Server) handleGetACL(w http.ResponseWriter, r *http.Request) {
