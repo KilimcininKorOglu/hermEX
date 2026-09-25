@@ -322,6 +322,11 @@ func openKind(dir string, seedBuiltins bool, kind storeKind) (*Store, error) {
 		_ = s.Close()
 		return nil, err
 	}
+	// Runs once both schemas are in place, because the conversion writes through
+	// the same paths as any other edit.
+	if seedBuiltins && kind == storePrivate {
+		s.upgradeLegacyTasks()
+	}
 	return s, nil
 }
 
