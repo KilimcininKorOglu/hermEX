@@ -1229,7 +1229,9 @@ function EventDialog({ editor, calendars, rooms, categories }: {
   const tracking = editor.editingUID ? editor.editingTracking ?? [] : []
   return (
     <Dialog open={editor.dialogOpen} onOpenChange={editor.setDialogOpen}>
-      <DialogContent>
+      {/* The event form is taller than a laptop viewport; scroll it so its
+          buttons stay reachable. */}
+      <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{editor.editingUID ? t("calendar.editEvent") : t("calendar.newEvent")}</DialogTitle>
           <DialogDescription>{t("calendar.dialogDescription")}</DialogDescription>
