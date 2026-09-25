@@ -144,14 +144,7 @@ export function AttendeePicker({ value, onChange, window: win, placeholder }: At
                     <AvatarImage src={r.photo ? api.avatarUrl(r.email) : ""} alt={r.email} />
                     <AvatarFallback className="text-[10px]">{initialsOf(r.name || r.email)}</AvatarFallback>
                   </Avatar>
-                  {win && win.start && (
-                    <span
-                      className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-popover ${
-                        status === "busy" ? "bg-red-500" : status === "free" ? "bg-green-500" : "bg-muted-foreground/40"
-                      }`}
-                      title={status === "busy" ? t("attendee.busy") : status === "free" ? t("attendee.free") : t("attendee.unknown")}
-                    />
-                  )}
+                  {win?.start && <FreeBusyDot status={status} label={t(freeBusyLabel(status))} />}
                 </div>
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{r.name || r.email}</p>
@@ -163,5 +156,26 @@ export function AttendeePicker({ value, onChange, window: win, placeholder }: At
         </div>
       )}
     </div>
+  )
+}
+
+// freeBusyLabel returns the i18n key naming an attendee's free/busy status.
+function freeBusyLabel(status: string): string {
+  if (status === "busy" || status === "free") return `attendee.${status}`
+  return "attendee.unknown"
+}
+
+// freeBusyColor holds the dot colour per status; anything else reads as unknown.
+const freeBusyColor: Record<string, string> = { busy: "bg-red-500", free: "bg-green-500" }
+
+// FreeBusyDot marks an attendee avatar with their free/busy status for the event window.
+function FreeBusyDot({ status, label }: { status: string; label: string }) {
+  return (
+    <span
+      className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-popover ${
+        freeBusyColor[status] ?? "bg-muted-foreground/40"
+      }`}
+      title={label}
+    />
   )
 }
