@@ -16,6 +16,57 @@ interface Branding {
   version: string
 }
 
+// brandStyle paints an element in the tenant's primary colour, when one is set.
+function brandStyle(branding: Branding | null) {
+  return branding?.primary_color ? { backgroundColor: branding.primary_color } : undefined
+}
+
+// BrandMark shows the tenant logo, or the default mark in the tenant colour.
+function BrandMark({ branding, appName }: { branding: Branding | null; appName: string }) {
+  if (branding?.logo_url) {
+    return (
+      <img
+        src={branding.logo_url}
+        alt={appName}
+        className="w-16 h-16 rounded-2xl object-contain mx-auto mb-4"
+      />
+    )
+  }
+  return (
+    <div
+      className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4"
+      style={brandStyle(branding)}
+    >
+      <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+      </svg>
+    </div>
+  )
+}
+
+// LoginHeader shows the brand mark, the app name and the tagline.
+function LoginHeader({ branding, appName }: { branding: Branding | null; appName: string }) {
+  const { t } = useI18n()
+  return (
+    <div className="text-center mb-8">
+      <BrandMark branding={branding} appName={appName} />
+      <h1 className="text-2xl font-bold text-gray-900">{appName}</h1>
+      <p className="text-gray-500 mt-1">{branding?.tagline || t('login.subtitle')}</p>
+    </div>
+  )
+}
+
+// LoginFooter shows the tenant footer text and the server version.
+function LoginFooter({ branding, appName }: { branding: Branding | null; appName: string }) {
+  const version = shownVersion(branding?.version)
+  return (
+    <p className="text-center text-xs text-gray-400 mt-4">
+      {branding?.footer_text || appName}
+      {version && <span className="font-mono ml-1">{version}</span>}
+    </p>
+  )
+}
+
 export function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -50,7 +101,6 @@ export function LoginPage() {
   }, [host])
 
   const appName = branding?.app_name || 'hermEX'
-  const version = shownVersion(branding?.version)
   useEffect(() => {
     document.title = `${appName} ${t('login.webmail')}`
   }, [appName, t])
@@ -80,26 +130,7 @@ export function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
       <div className="max-w-md w-full mx-4">
         <div className="bg-white rounded-2xl shadow-xl p-8">
-          <div className="text-center mb-8">
-            {branding?.logo_url ? (
-              <img
-                src={branding.logo_url}
-                alt={appName}
-                className="w-16 h-16 rounded-2xl object-contain mx-auto mb-4"
-              />
-            ) : (
-              <div
-                className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4"
-                style={branding?.primary_color ? { backgroundColor: branding.primary_color } : undefined}
-              >
-                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                </svg>
-              </div>
-            )}
-            <h1 className="text-2xl font-bold text-gray-900">{appName}</h1>
-            <p className="text-gray-500 mt-1">{branding?.tagline || t('login.subtitle')}</p>
-          </div>
+          <LoginHeader branding={branding} appName={appName} />
 
           <form onSubmit={handleSubmit} className="space-y-6">
             {error && (
@@ -141,7 +172,7 @@ export function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              style={branding?.primary_color ? { backgroundColor: branding.primary_color } : undefined}
+              style={brandStyle(branding)}
               className="w-full bg-indigo-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-indigo-700 focus:ring-4 focus:ring-indigo-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? t('login.signingIn') : t('login.signIn')}
@@ -149,10 +180,7 @@ export function LoginPage() {
           </form>
         </div>
 
-        <p className="text-center text-xs text-gray-400 mt-4">
-          {branding?.footer_text || appName}
-          {version && <span className="font-mono ml-1">{version}</span>}
-        </p>
+        <LoginFooter branding={branding} appName={appName} />
       </div>
     </div>
   )
