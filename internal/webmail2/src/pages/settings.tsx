@@ -450,54 +450,76 @@ export function SettingsPage() {
     }
   }
 
-  const handleFirstDayChange = async (d: number) => {
+  // saveCalChange stores one calendar setting the control already shows. A failed
+  // save puts the control back, so the page never shows a value that was not
+  // stored, and reports the failure.
+  const saveCalChange = async (
+    next: Partial<CalendarSettings>,
+    revert: () => void,
+    keys: { saved?: string; failed: string },
+  ) => {
+    try {
+      await saveCalSettings(next)
+      if (keys.saved) toast.success(t(keys.saved))
+    } catch (err) {
+      revert()
+      toast.error(err instanceof Error ? err.message : t(keys.failed))
+    }
+  }
+
+  const handleFirstDayChange = (d: number) => {
+    const prev = firstDayOfWeek
     setFirstDayOfWeek(d)
-    try {
-      await saveCalSettings({ firstDayOfWeek: d, resolution, workDayStart, workDayEnd, showNonWorkingHours })
-      toast.success(t("settings.appearance.firstDaySaved"))
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("settings.appearance.firstDaySaveFailed"))
-    }
+    return saveCalChange({ firstDayOfWeek: d }, () => setFirstDayOfWeek(prev), {
+      saved: "settings.appearance.firstDaySaved", failed: "settings.appearance.firstDaySaveFailed",
+    })
   }
 
-  const handleResolutionChange = async (r: number) => {
+  const handleResolutionChange = (r: number) => {
+    const prev = resolution
     setResolution(r)
-    try {
-      await saveCalSettings({ firstDayOfWeek, resolution: r, workDayStart, workDayEnd, showNonWorkingHours })
-      toast.success(t("settings.appearance.resolutionSaved"))
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("settings.appearance.resolutionSaveFailed"))
-    }
+    return saveCalChange({ resolution: r }, () => setResolution(prev), {
+      saved: "settings.appearance.resolutionSaved", failed: "settings.appearance.resolutionSaveFailed",
+    })
   }
 
-  const handleWorkDayStartChange = async (h: number) => {
+  const WORK_HOURS_KEYS = { saved: "settings.appearance.workHoursSaved", failed: "settings.appearance.workHoursSaveFailed" }
+  const SETTING_KEYS = { failed: "settings.settingSaveFailed" }
+
+  const handleWorkDayStartChange = (h: number) => {
+    const prev = workDayStart
     setWorkDayStart(h)
-    try {
-      await saveCalSettings({ firstDayOfWeek, resolution, workDayStart: h, workDayEnd, showNonWorkingHours })
-      toast.success(t("settings.appearance.workHoursSaved"))
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("settings.appearance.workHoursSaveFailed"))
-    }
+    return saveCalChange({ workDayStart: h }, () => setWorkDayStart(prev), WORK_HOURS_KEYS)
   }
 
-  const handleWorkDayEndChange = async (h: number) => {
+  const handleWorkDayEndChange = (h: number) => {
+    const prev = workDayEnd
     setWorkDayEnd(h)
-    try {
-      await saveCalSettings({ firstDayOfWeek, resolution, workDayStart, workDayEnd: h, showNonWorkingHours })
-      toast.success(t("settings.appearance.workHoursSaved"))
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("settings.appearance.workHoursSaveFailed"))
-    }
+    return saveCalChange({ workDayEnd: h }, () => setWorkDayEnd(prev), WORK_HOURS_KEYS)
   }
 
-  const handleShowNonWorkingChange = async (show: boolean) => {
+  const handleShowNonWorkingChange = (show: boolean) => {
+    const prev = showNonWorkingHours
     setShowNonWorkingHours(show)
-    try {
-      await saveCalSettings({ firstDayOfWeek, resolution, workDayStart, workDayEnd, showNonWorkingHours: show })
-      toast.success(t("settings.appearance.workHoursSaved"))
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("settings.appearance.workHoursSaveFailed"))
-    }
+    return saveCalChange({ showNonWorkingHours: show }, () => setShowNonWorkingHours(prev), WORK_HOURS_KEYS)
+  }
+
+  const handleWorkDaysChange = (days: number[]) => {
+    const prev = workDays
+    setWorkDays(days)
+    return saveCalChange({ workDays: days }, () => setWorkDays(prev), SETTING_KEYS)
+  }
+
+  const handleDefaultDurationChange = (m: number) => {
+    const prev = defaultDuration
+    setDefaultDuration(m)
+    return saveCalChange({ defaultDuration: m }, () => setDefaultDuration(prev), SETTING_KEYS)
+  }
+
+  const handleDefaultReminderChange = (m: number) => {
+    const prev = defaultReminder
+    setDefaultReminder(m)
+    return saveCalChange({ defaultReminder: m }, () => setDefaultReminder(prev), SETTING_KEYS)
   }
 
   const handleSaveProfile = async () => {
@@ -1590,11 +1612,7 @@ export function SettingsPage() {
                     type="button"
                     title={label}
                     className={`h-8 w-8 rounded text-xs ${on ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}
-                    onClick={() => {
-                      const next = on ? workDays.filter((d) => d !== idx) : [...workDays, idx]
-                      setWorkDays(next)
-                      void saveCalSettings({ workDays: next })
-                    }}
+                    onClick={() => void handleWorkDaysChange(on ? workDays.filter((d) => d !== idx) : [...workDays, idx])}
                   >
                     {label.charAt(0)}
                   </button>
@@ -1610,7 +1628,7 @@ export function SettingsPage() {
             </div>
             <select
               value={String(defaultDuration)}
-              onChange={(e) => { const v = Number(e.target.value); setDefaultDuration(v); void saveCalSettings({ defaultDuration: v }) }}
+              onChange={(e) => void handleDefaultDurationChange(Number(e.target.value))}
               className="max-w-[16rem] rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
             >
               {[15, 30, 45, 60, 90].map((m) => (
@@ -1626,7 +1644,7 @@ export function SettingsPage() {
             </div>
             <select
               value={String(defaultReminder)}
-              onChange={(e) => { const v = Number(e.target.value); setDefaultReminder(v); void saveCalSettings({ defaultReminder: v }) }}
+              onChange={(e) => void handleDefaultReminderChange(Number(e.target.value))}
               className="max-w-[16rem] rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
             >
               <option value="0">{t("settings.appearance.noReminder")}</option>
