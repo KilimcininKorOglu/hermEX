@@ -26,7 +26,7 @@ type taskJSON struct {
 	Due         string   `json:"due,omitempty"`
 	Status      int      `json:"status"`             // 0 not started, 1 in progress, 2 complete, 3 waiting, 4 deferred
 	Percent     int      `json:"percent"`            // 0..100 (% complete)
-	Priority    int      `json:"priority,omitempty"` // 0=low, 1=normal, 2=high (PR_IMPORTANCE)
+	Priority    *int     `json:"priority,omitempty"` // 0=low, 1=normal, 2=high (PR_IMPORTANCE); absent when unset
 	Reminder    bool     `json:"reminder,omitempty"` // PidLidReminderSet
 	Categories  []string `json:"categories,omitempty"`
 	Recurrence  string   `json:"recurrence,omitempty"`  // RRULE string (FREQ=DAILY/WEEKLY/MONTHLY/YEARLY;...)
@@ -103,7 +103,9 @@ func jsonToTask(in taskJSON) oxtask.Task {
 	t := oxtask.New()
 	t.Subject = in.Summary
 	t.Body = in.Description
-	t.Importance = in.Priority
+	if in.Priority != nil {
+		t.Importance = *in.Priority
+	}
 	t.ReminderSet = in.Reminder
 	t.Categories = in.Categories
 	t.RecurrenceRule = in.Recurrence
@@ -141,13 +143,21 @@ func taskToJSON(t oxtask.Task) taskJSON {
 	j := taskJSON{
 		Summary:     t.Subject,
 		Description: t.Body,
-		Priority:    t.Importance,
 		Reminder:    t.ReminderSet,
 		Categories:  t.Categories,
 		Recurrence:  t.RecurrenceRule,
 		Owner:       t.Owner,
 		Assigner:    t.Assigner,
-		AcceptState: t.AcceptanceState,
+	}
+	// The model marks an unset importance and acceptance state with -1, which is
+	// no value the SPA offers, so an unset field is left out and the SPA applies
+	// its own default.
+	if t.Importance >= 0 {
+		priority := t.Importance
+		j.Priority = &priority
+	}
+	if t.AcceptanceState > 0 {
+		j.AcceptState = t.AcceptanceState
 	}
 	if t.Status >= 0 {
 		j.Status = t.Status

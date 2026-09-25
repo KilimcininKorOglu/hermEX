@@ -20,13 +20,40 @@ func TestTaskRichFieldsRoundTrip(t *testing.T) {
 	wantEq(t, "description", c.Description, "Q3 numbers")
 	wantEq(t, "start", c.Start, "2026-07-01")
 	wantEq(t, "due", c.Due, "2026-07-15")
-	wantEq(t, "priority", c.Priority, 2)
+	wantPriority(t, c, 2)
 	wantEq(t, "status", c.Status, 1)
 	wantEq(t, "percent", c.Percent, 40)
 	wantEq(t, "recurrence", c.Recurrence, "FREQ=WEEKLY;INTERVAL=2;COUNT=5")
 	wantEq(t, "reminder", c.Reminder, true)
 	if len(c.Categories) != 2 || c.Categories[0] != "Urgent" || c.Categories[1] != "Finance" {
 		t.Errorf("categories = %v, want [Urgent Finance]", c.Categories)
+	}
+}
+
+// wantPriority holds a listed task's priority to want.
+func wantPriority(t *testing.T, c taskJSON, want int) {
+	t.Helper()
+	if c.Priority == nil || *c.Priority != want {
+		t.Errorf("priority = %v, want %d", c.Priority, want)
+	}
+}
+
+// TestTaskPriorityLowAndUnset sends a Low priority back as 0 rather than
+// dropping it, leaves an unset priority out rather than sending -1, and keeps a
+// stored priority when an edit names none.
+func TestTaskPriorityLowAndUnset(t *testing.T) {
+	do, _ := apiHarness(t)
+	low := okBody[taskJSON](t, "create low", do(http.MethodPost, "/api/v1/tasks", `{"summary":"Low","priority":0}`))
+	wantPriority(t, listOneTask(t, do, "list low"), 0)
+
+	okBody[taskJSON](t, "edit without priority", do(http.MethodPut, "/api/v1/tasks/"+low.UID, `{"summary":"Low 2"}`))
+	wantPriority(t, listOneTask(t, do, "list after edit"), 0)
+
+	wantStatus(t, "delete", do(http.MethodDelete, "/api/v1/tasks/"+low.UID, ""), http.StatusOK)
+	okBody[taskJSON](t, "create unset", do(http.MethodPost, "/api/v1/tasks", `{"summary":"Unset"}`))
+	c := listOneTask(t, do, "list unset")
+	if c.Priority != nil || c.AcceptState != 0 {
+		t.Errorf("unset task lists priority %v and acceptState %d, want both absent", c.Priority, c.AcceptState)
 	}
 }
 

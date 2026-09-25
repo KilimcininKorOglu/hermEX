@@ -50,7 +50,10 @@ func mergeTaskEdit(prev, edit oxtask.Task) oxtask.Task {
 	prev.Complete = edit.Complete
 	prev.Due = edit.Due
 	prev.Start = edit.Start
-	prev.Importance = edit.Importance
+	// An edit that names no priority keeps the stored one.
+	if edit.Importance >= 0 {
+		prev.Importance = edit.Importance
+	}
 	prev.ReminderSet = edit.ReminderSet
 	prev.Categories = edit.Categories
 	prev.Status = edit.Status
