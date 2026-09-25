@@ -413,17 +413,32 @@ func (s *Server) handleUpdateContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
-	// Replace: delete the old object, store the new (its id changes).
-	if old, err := strconv.ParseInt(r.PathValue("id"), 10, 64); err == nil {
-		_ = st.DeleteObject(old)
-	}
-	id, err := storeContact(st, in)
+	id, err := saveContactEdit(st, r.PathValue("id"), in)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save contact"})
 		return
 	}
 	in.ID = strconv.FormatInt(id, 10)
 	writeJSON(w, http.StatusOK, map[string]any{"contact": in, "status": "ok"})
+}
+
+// saveContactEdit stores an edit of the contact named by rawID: in place when it
+// is a stored contact of the same kind, and otherwise by replacing it, which
+// gives the contact a new id.
+func saveContactEdit(st *objectstore.Store, rawID string, c contactJSON) (int64, error) {
+	old, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil {
+		return storeContact(st, c)
+	}
+	done, err := updateContactInPlace(st, old, c)
+	if done {
+		return old, err
+	}
+	// A kind change replaces the contact. The old object may already be gone
+	// (a stale id), and the edit is stored either way, so its delete error is
+	// not the caller's failure.
+	_ = st.DeleteObject(old)
+	return storeContact(st, c)
 }
 
 func (s *Server) handleDeleteContact(w http.ResponseWriter, r *http.Request) {
@@ -526,7 +541,9 @@ func storeContact(st *objectstore.Store, c contactJSON) (int64, error) {
 	}
 	// oxvcard's vCard path does not carry anniversary/assistant/manager/office, so
 	// set them directly as MAPI props after the import (the organizer's rich fields).
-	setRichContactProps(st, id, c)
+	if rich := richContactProps(st, c); len(rich) > 0 {
+		_ = st.SetMessageProperties(id, rich)
+	}
 	// Categories ride the shared PidNameKeywords named prop (the same list every
 	// protocol reads). Empty list clears any prior categories on a replace.
 	_ = st.SetCategories(id, c.Categories)
@@ -544,11 +561,11 @@ func anniversaryOf(msg *oxcmail.Message) string {
 	return ""
 }
 
-// setRichContactProps stamps the contact's assistant/manager/office/anniversary
-// onto the stored message, the fields oxvcard's vCard import does not map. Empty
-// values are skipped. Anniversary is a PtSysTime (UnixToNTTime uint64). Billing is
-// a PSETID_Common named prop (PidLidBilling), resolved per-store.
-func setRichContactProps(st *objectstore.Store, id int64, c contactJSON) {
+// richContactProps returns the contact's assistant/manager/office/anniversary,
+// the fields oxvcard's vCard import does not map. Empty values are skipped.
+// Anniversary is a PtSysTime (UnixToNTTime uint64). Billing is a PSETID_Common
+// named prop (PidLidBilling), resolved per-store.
+func richContactProps(st *objectstore.Store, c contactJSON) mapi.PropertyValues {
 	var props mapi.PropertyValues
 	for _, f := range []struct {
 		tag   mapi.PropTag
@@ -565,9 +582,105 @@ func setRichContactProps(st *objectstore.Store, id int64, c contactJSON) {
 	setAnniversary(&props, c.Anniversary)
 	setNamedString(&props, st, billingTag, c.Billing)
 	setNamedString(&props, st, fileAsTag, c.FileAs)
-	if len(props) > 0 {
-		_ = st.SetMessageProperties(id, props)
+	return props
+}
+
+// contactProps builds every stored property of a contact from its JSON form:
+// the oxvcard import of its vCard plus the fields that import does not map.
+func contactProps(st *objectstore.Store, c contactJSON) (mapi.PropertyValues, error) {
+	msg, err := oxvcard.Import(buildVCard(c), oxvcard.Options{Resolver: st.GetNamedPropIDs})
+	if err != nil {
+		return nil, err
 	}
+	props := msg.Props
+	for _, p := range richContactProps(st, c) {
+		props.Set(p.Tag, p.Value)
+	}
+	return props, nil
+}
+
+// managedContactTags returns every property the webmail contact editor can set,
+// found by building a contact with every field filled. An edit that leaves one
+// of these out has cleared that field; any other property on the stored contact
+// belongs to another client (or to the photo) and is left alone.
+func managedContactTags(st *objectstore.Store) (map[mapi.PropTag]bool, error) {
+	full := contactJSON{
+		Name: "x", Prefix: "x", FirstName: "x", MiddleName: "x", LastName: "x", Suffix: "x",
+		Email: "a@x.invalid", Email2: "b@x.invalid", Email3: "c@x.invalid",
+		Phone: "x", Company: "x", JobTitle: "x", Department: "x", MobilePhone: "x", HomePhone: "x",
+		BusinessFax: "x", Birthday: "2000-01-02", Nickname: "x", FileAs: "x", Profession: "x", Spouse: "x",
+		HomeStreet: "x", HomeCity: "x", HomeState: "x", HomePostal: "x", HomeCountry: "x",
+		WorkStreet: "x", WorkCity: "x", WorkState: "x", WorkPostal: "x", WorkCountry: "x",
+		OtherStreet: "x", OtherCity: "x", OtherState: "x", OtherPostal: "x", OtherCountry: "x",
+		IMAddress: "x", WebPage: "x", Anniversary: "2000-01-02", Billing: "x", Assistant: "x",
+		Manager: "x", Office: "x",
+	}
+	props, err := contactProps(st, full)
+	if err != nil {
+		return nil, err
+	}
+	tags := make(map[mapi.PropTag]bool, len(props))
+	for _, p := range props {
+		tags[p.Tag] = true
+	}
+	return tags, nil
+}
+
+// clearedTags returns the managed tags an edit's property set leaves out.
+func clearedTags(managed map[mapi.PropTag]bool, props mapi.PropertyValues) []mapi.PropTag {
+	var out []mapi.PropTag
+	for tag := range managed {
+		if !props.Has(tag) {
+			out = append(out, tag)
+		}
+	}
+	return out
+}
+
+// updateContactInPlace writes an edit onto the stored contact id, keeping its
+// id, its photo and every property the editor does not model, which a
+// delete-and-recreate would drop. It reports false, having changed nothing, when
+// id is not a stored contact of the same kind (a contact turned into a group or
+// back), which the caller then replaces.
+func updateContactInPlace(st *objectstore.Store, id int64, c contactJSON) (bool, error) {
+	msg, err := st.OpenMessage(id)
+	if err != nil {
+		return false, nil
+	}
+	class := propString(msg, mapi.PrMessageClass)
+	if c.IsGroup {
+		if class != "IPM.DistList" {
+			return false, nil
+		}
+		return true, updateDistList(st, id, c)
+	}
+	if !strings.EqualFold(class, "IPM.Contact") {
+		return false, nil
+	}
+	props, err := contactProps(st, c)
+	if err != nil {
+		return true, err
+	}
+	managed, err := managedContactTags(st)
+	if err != nil {
+		return true, err
+	}
+	if err := st.ModifyMessageProperties(id, props, clearedTags(managed, props)...); err != nil {
+		return true, err
+	}
+	return true, st.SetCategories(id, c.Categories)
+}
+
+// updateDistList rewrites a contact group's name and members in place.
+func updateDistList(st *objectstore.Store, id int64, c contactJSON) error {
+	b, err := json.Marshal(distListBody{Members: c.Members})
+	if err != nil {
+		return err
+	}
+	var props mapi.PropertyValues
+	props.Set(mapi.PrSubject, c.Name)
+	props.Set(mapi.PrBody, string(b))
+	return st.SetMessageProperties(id, props)
 }
 
 // setIfPresent stamps a string property, skipping an empty value.

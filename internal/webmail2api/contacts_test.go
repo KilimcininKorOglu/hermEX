@@ -6,12 +6,16 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"hermex/internal/avtest"
 	"hermex/internal/directory"
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxvcard"
 )
 
 // TestContactRichFieldsRoundTrip proves the rich contact fields (mobile/home
@@ -312,5 +316,74 @@ func TestVCardTypedFieldIgnoresOtherTypes(t *testing.T) {
 		if got := vcardTypedField(vcf, c.name, c.typ); got != c.want {
 			t.Errorf("%s TYPE=%s = %q, want %q", c.name, c.typ, got, c.want)
 		}
+	}
+}
+
+// TestContactEditKeepsIdPhotoAndForeignProperties pins that a webmail edit is
+// written onto the stored contact: its id stays, its photo stays, a property
+// another client set and the editor does not model stays, a field the edit
+// clears is removed, and a field the edit adds is stored.
+func TestContactEditKeepsIdPhotoAndForeignProperties(t *testing.T) {
+	withScanner(t, avtest.Clean)
+	srv, token, mbox := importHarness(t)
+	id := createContact(t, srv, token)
+	if rec := putPhoto(t, srv, token, id, []byte("an ordinary photo")); rec.Code != http.StatusOK {
+		t.Fatalf("photo = %d: %s", rec.Code, rec.Body.String())
+	}
+	// PidTagHobbies (MS-OXPROPS), a contact property the webmail editor has no field for.
+	hobbies := mapi.PropTag(0x3A43001F)
+	mid, _ := strconv.ParseInt(id, 10, 64)
+	setOnStore(t, mbox, mid, hobbies, "chess")
+
+	edit := func(body string) contactJSON {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/contacts/"+id, strings.NewReader(body))
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		out := okBody[struct {
+			Contact contactJSON `json:"contact"`
+		}](t, "edit", rec)
+		return out.Contact
+	}
+	edit(`{"name":"Bob","email":"bob@example.org","jobTitle":"Engineer","homeCity":"Ankara"}`)
+	got := edit(`{"name":"Bob","email":"bob@example.org","homeCity":"Izmir"}`)
+
+	if got.ID != id {
+		t.Errorf("edit returned id %q, want the contact's own id %q", got.ID, id)
+	}
+	if !contactHasPhoto(t, mbox, id) {
+		t.Error("the edit dropped the contact's photo")
+	}
+	st, err := objectstore.Open(mbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	msg, err := st.OpenMessage(mid)
+	if err != nil {
+		t.Fatalf("open contact: %v", err)
+	}
+	if v := propString(msg, hobbies); v != "chess" {
+		t.Errorf("hobbies = %q, want the other client's value kept", v)
+	}
+	c, _ := contactFromMessage(st, mid, msg, oxvcard.Options{Resolver: st.GetNamedPropIDs})
+	if c.JobTitle != "" || c.HomeCity != "Izmir" {
+		t.Errorf("jobTitle = %q, homeCity = %q; want the cleared title gone and the new city stored", c.JobTitle, c.HomeCity)
+	}
+}
+
+// setOnStore writes one string property onto a stored message.
+func setOnStore(t *testing.T, mbox string, id int64, tag mapi.PropTag, value string) {
+	t.Helper()
+	st, err := objectstore.Open(mbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	var props mapi.PropertyValues
+	props.Set(tag, value)
+	if err := st.SetMessageProperties(id, props); err != nil {
+		t.Fatal(err)
 	}
 }
