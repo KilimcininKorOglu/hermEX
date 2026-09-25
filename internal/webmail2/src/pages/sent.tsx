@@ -18,6 +18,7 @@ import api from "@/utils/api"
 import type { Mail } from "@/utils/api"
 import { useBulkSelection } from "@/hooks/useBulkSelection"
 import { BulkActionBar } from "@/components/bulk-action-bar"
+import { splitAddress } from "@/utils/address"
 
 interface Email {
   id: string
@@ -29,15 +30,6 @@ interface Email {
   read: boolean
   starred: boolean
   hasAttachments: boolean
-}
-
-// splitAddress turns "Name <addr@x>" or "addr@x" into {name, email}.
-function splitAddress(value: string): { name: string; email: string } {
-  const parts = value.split("<")
-  if (parts.length > 1) {
-    return { name: parts[0].trim() || parts[1].replace(">", "").trim(), email: parts[1].replace(">", "").trim() }
-  }
-  return { name: value, email: value }
 }
 
 export function SentPage() {

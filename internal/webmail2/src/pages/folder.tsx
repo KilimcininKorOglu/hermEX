@@ -25,6 +25,7 @@ import api from "@/utils/api"
 import type { Mail } from "@/utils/api"
 import { useBulkSelection } from "@/hooks/useBulkSelection"
 import { BulkActionBar, type BulkAction } from "@/components/bulk-action-bar"
+import { splitAddress } from "@/utils/address"
 
 interface FolderEmail {
   id: string
@@ -35,16 +36,6 @@ interface FolderEmail {
   date: string
   read: boolean
   starred: boolean
-}
-
-// splitAddress turns "Name <addr@x>" or "addr@x" into {name, email}.
-function splitAddress(value: string): { name: string; email: string } {
-  const parts = value.split("<")
-  if (parts.length > 1) {
-    const email = parts[1].replace(">", "").trim()
-    return { name: parts[0].trim() || email, email }
-  }
-  return { name: value, email: value }
 }
 
 export function FolderPage() {

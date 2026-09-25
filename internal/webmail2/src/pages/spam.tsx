@@ -25,6 +25,7 @@ import api from "@/utils/api"
 import type { Mail } from "@/utils/api"
 import { useBulkSelection } from "@/hooks/useBulkSelection"
 import { BulkActionBar, type BulkAction } from "@/components/bulk-action-bar"
+import { splitAddress } from "@/utils/address"
 
 interface SpamEmail {
   id: string
@@ -34,15 +35,6 @@ interface SpamEmail {
   preview: string
   date: string
   read: boolean
-}
-
-function splitAddress(value: string): { name: string; email: string } {
-  const parts = value.split("<")
-  if (parts.length > 1) {
-    const email = parts[1].replace(">", "").trim()
-    return { name: parts[0].trim() || email, email }
-  }
-  return { name: value, email: value }
 }
 
 export function SpamPage() {
