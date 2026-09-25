@@ -341,15 +341,16 @@ export function SettingsPage() {
   }
 
   // saveAppearance persists the full appearance settings object (DB-backed). The
-  // theme is also pushed through useTheme so it applies immediately and the
-  // language through changeLocale so the UI re-translates.
-  const saveAppearance = (next: typeof appearance) => {
+  // theme belongs to useTheme, which every theme control on the page writes, so
+  // the record carries its current value rather than the one read at load. The
+  // language goes through changeLocale so the UI re-translates.
+  const saveAppearance = (changed: typeof appearance) => {
     if (!loaded.appearance) {
       toast.error(t("settings.notLoaded"))
       return
     }
+    const next = { ...changed, theme }
     setAppearance(next)
-    if (next.theme !== theme) setTheme(next.theme as "light" | "dark" | "system")
     if (next.language !== "system") changeLocale(next.language)
     // Mirror the shortcut mode to its cookie so the key hooks pick it up live.
     setShortcutMode(next.shortcutMode as ShortcutMode)
@@ -1310,8 +1311,8 @@ export function SettingsPage() {
               <p className="text-sm text-muted-foreground">{t("settings.appearance.themeDescription")}</p>
             </div>
             <select
-              value={appearance.theme}
-              onChange={(e) => saveAppearance({ ...appearance, theme: e.target.value })}
+              value={theme}
+              onChange={(e) => setTheme(e.target.value as "light" | "dark" | "system")}
               className="max-w-[16rem] rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
             >
               <option value="system">{t("settings.appearance.themeSystem")}</option>
