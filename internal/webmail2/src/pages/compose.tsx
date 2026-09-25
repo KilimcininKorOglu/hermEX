@@ -52,6 +52,7 @@ import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import api, { SenderIdentity, DiagnosticEntry, Contact as ContactType, MailAttachment, SignatureEntry, TemplateEntry, Mail as MailMessage, CalendarEvent, Task, Note } from "@/utils/api"
 import { singleFlight } from "@/utils/singleFlight"
+import { draftSession } from "@/utils/draftSession"
 import { DRAG_TYPE, fileFromDrag } from "@/utils/attachmentDrag"
 import { taskToVTodo, noteToText, safeItemName } from "@/utils/attachItem"
 import * as smimeStore from "@/utils/smime"
@@ -661,12 +662,17 @@ function useDraftSaving(content: MessageContent, recipients: Recipients, sender:
   // lastSaved is the time the draft was last stored, and only a draft save that
   // the server answered sets it.
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
-  const gate = useRef(singleFlight(setSaving))
+  // The session holds the draft id a save answered with, so the next save and a
+  // send read it before React has re-rendered, and it stops saving once a send
+  // begins.
+  const session = useRef(draftSession(singleFlight(setSaving)))
 
-  const store = async () => {
+  // store saves the draft and returns the id the server answered with. A draft
+  // reopened from the Drafts folder is known only to the content state.
+  const store = async (id: string | undefined): Promise<string | undefined> => {
     const { to, cc, bcc } = recipients.lists
     const res = await api.saveDraft({
-      id: content.draftId ?? undefined,
+      id: id ?? content.draftId ?? undefined,
       to: to.map((r) => r.email),
       cc: cc.map((r) => r.email),
       bcc: bcc.map((r) => r.email),
@@ -675,6 +681,7 @@ function useDraftSaving(content: MessageContent, recipients: Recipients, sender:
       from: sender?.email || user?.email || "",
     })
     if (res?.id) content.setDraftId(res.id)
+    return res?.id
   }
 
   const save = async () => {
@@ -682,14 +689,16 @@ function useDraftSaving(content: MessageContent, recipients: Recipients, sender:
       toast.error(t("compose.nothingToSave"))
       return
     }
-    await gate.current.run(async () => {
+    await session.current.save(async (id) => {
       try {
-        await store()
+        const saved = await store(id)
         toast.success(t("compose.draftSaved"))
         navigate("/drafts")
+        return saved
       } catch (err) {
         console.error("Failed to save draft:", err)
         toast.error(t("compose.draftSaveFailed"))
+        return undefined
       }
     })
   }
@@ -698,15 +707,24 @@ function useDraftSaving(content: MessageContent, recipients: Recipients, sender:
   // a browser crash never loses work.
   const autoSave = async () => {
     if (!hasDraftContent(content, recipients.lists)) return
-    await gate.current.run(async () => {
+    await session.current.save(async (id) => {
       try {
-        await store()
+        const saved = await store(id)
         setLastSaved(new Date())
+        return saved
       } catch {
         /* best-effort: a failed autosave must not interrupt composing */
+        return undefined
       }
     })
   }
+
+  // settle stops draft saving for a send, waits for a running save, and returns
+  // the draft id the send must consume.
+  const settle = async (): Promise<string | undefined> => (await session.current.settle()) ?? content.draftId ?? undefined
+  // reopen lets saving resume after a send that failed, so the message is still
+  // autosaved while the user fixes it.
+  const reopen = () => session.current.reopen()
 
   // The interval is armed once and calls the autosave of the latest render. An
   // interval re-armed on every render restarts its minute on each keystroke, so
@@ -720,7 +738,7 @@ function useDraftSaving(content: MessageContent, recipients: Recipients, sender:
     return () => window.clearInterval(id)
   }, [])
 
-  return { saving, lastSaved, save }
+  return { saving, lastSaved, save, settle, reopen }
 }
 
 type DraftSaving = ReturnType<typeof useDraftSaving>
@@ -736,6 +754,7 @@ interface ComposeState {
   richTextMode: boolean
   richTextRef: React.RefObject<RichTextHandle | null>
   scheduledAt: string
+  drafts: Pick<DraftSaving, "settle" | "reopen">
 }
 
 // currentBody is the body as it will be sent: the editor's HTML in rich-text
@@ -744,8 +763,9 @@ function currentBody(s: ComposeState): string {
   return s.richTextMode && s.richTextRef.current ? s.richTextRef.current.getHTML() : s.content.body
 }
 
-// sendPayload builds the send request from the composer.
-async function sendPayload(s: ComposeState, senderEmail: string, sendAt: string | undefined) {
+// sendPayload builds the send request from the composer. draftId is the stored
+// draft the send consumes.
+async function sendPayload(s: ComposeState, senderEmail: string, sendAt: string | undefined, draftId: string | undefined) {
   const { lists } = s.recipients
   const encoded = await encodeAttachments(s.attachments)
   const o = s.options
@@ -763,7 +783,7 @@ async function sendPayload(s: ComposeState, senderEmail: string, sendAt: string 
     sensitivity: o.sensitivity !== "normal" ? o.sensitivity : undefined,
     sendAt,
     is_html: s.richTextMode,
-    draftId: s.content.draftId ?? undefined,
+    draftId,
   }
 }
 
@@ -860,12 +880,14 @@ function useSend(state: ComposeState) {
     if (!ready) return
     const keys = SEND_KEYS[ready.sendAt ? "scheduled" : "now"]
     toast.success(t(keys.start))
+    const draftId = await state.drafts.settle()
     try {
-      const payload = await sendPayload(state, state.senders.selected?.email || user?.email || "", ready.sendAt)
+      const payload = await sendPayload(state, state.senders.selected?.email || user?.email || "", ready.sendAt, draftId)
       await transmit(t, payload, state.options, ready.browserSmime)
       toast.success(t(keys.done))
       navigate(keys.path)
     } catch (err) {
+      state.drafts.reopen()
       console.error("Failed to send email:", err)
       toast.error(err instanceof Error && err.message ? err.message : t(keys.failed))
     }
@@ -946,7 +968,7 @@ export function ComposePage() {
   const formatting = useFormatting(content)
   const sender = useSend({
     content, recipients, senders, diagnostics, attachments: attachments.attachments, options,
-    richTextMode: extras.richTextMode, richTextRef, scheduledAt,
+    richTextMode: extras.richTextMode, richTextRef, scheduledAt, drafts,
   })
 
   const handleDiscard = () => {
