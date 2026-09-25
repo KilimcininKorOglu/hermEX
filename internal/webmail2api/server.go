@@ -145,6 +145,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/account/password", s.handleChangePassword)
 	mux.HandleFunc("GET /api/v1/preferences", s.handleGetPreferences)
 	mux.HandleFunc("PUT /api/v1/preferences", s.handlePutPreferences)
+	mux.HandleFunc("GET /api/v1/settings/meeting", s.handleGetMeetingSettings)
+	mux.HandleFunc("PUT /api/v1/settings/meeting", s.handlePutMeetingSettings)
 	mux.HandleFunc("GET /api/v1/categories", s.handleGetCategories)
 	mux.HandleFunc("PUT /api/v1/categories", s.handlePutCategories)
 	mux.HandleFunc("GET /api/v1/safe-senders", s.handleGetSafeSenders)

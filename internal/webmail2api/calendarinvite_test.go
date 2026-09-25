@@ -313,3 +313,23 @@ func TestOccurrenceMoveUpdatesThatInstance(t *testing.T) {
 	wantContains(t, "bob's series", string(b), "RRULE:FREQ=DAILY;COUNT=3")
 	wantContains(t, "bob's series", string(b), "DTSTART:20260908T090000Z")
 }
+
+// TestMeetingSettingsRoundTrip reads the cancellation setting on as a fresh
+// mailbox's default, turns it off, and proves a PUT that names only one field
+// leaves the other and the operator's automatic acceptance as they were.
+func TestMeetingSettingsRoundTrip(t *testing.T) {
+	do, alice, _ := meetingHarness(t)
+	st := openMailbox(t, alice)
+	mustNoErr(t, "seed operator setting", st.SetMeetingConfig(objectstore.MeetingConfig{AutoAccept: true}))
+
+	got := okBody[meetingSettingsJSON](t, "get", do(http.MethodGet, "/api/v1/settings/meeting", ""))
+	wantEq(t, "default processing", *got.ProcessCancellations, true)
+	okBody[meetingSettingsJSON](t, "put", do(http.MethodPut, "/api/v1/settings/meeting", `{"removeRequestOnResponse":true}`))
+	got = okBody[meetingSettingsJSON](t, "put", do(http.MethodPut, "/api/v1/settings/meeting", `{"processCancellations":false}`))
+	wantEq(t, "processing after PUT", *got.ProcessCancellations, false)
+	wantEq(t, "remove request kept", *got.RemoveRequestOnResponse, true)
+
+	cfg, err := st.GetMeetingConfig()
+	mustNoErr(t, "read config", err)
+	wantEq(t, "stored config", cfg, objectstore.MeetingConfig{AutoAccept: true, RemoveRequestOnResponse: true, LeaveCancellationsUnprocessed: true})
+}
