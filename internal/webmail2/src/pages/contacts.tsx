@@ -844,9 +844,12 @@ export function ContactsPage() {
     if (editingContact) {
       const result = await api.updateContact(editingContact.id, input)
       if (!result.contact) return
+      // The update stores a new object, so the contact continues under the id
+      // the server returns; the old id no longer names anything.
+      const id = result.contact.id
       setContacts(contacts.map((c) =>
         c.id === editingContact.id
-          ? { ...c, ...formData, members: members || [] }
+          ? { ...c, ...formData, id, members: members || [] }
           : c
       ))
       toast.success(t("contacts.contactUpdated"))
