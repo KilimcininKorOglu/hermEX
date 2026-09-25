@@ -578,6 +578,7 @@
       "addNew": "Yeni imza ekle",
       "edit": "İmzayı düzenle",
       "namePlaceholder": "İmza adı (örn. iş, kişisel)",
+      "nameRequired": "İmza adı gereklidir",
       "isHtml": "HTML biçimi"
     },
     "template": {
@@ -593,6 +594,7 @@
       "addNew": "Yeni şablon ekle",
       "edit": "Şablonu düzenle",
       "namePlaceholder": "Şablon adı (örn. takip, giriş)",
+      "nameRequired": "Şablon adı gereklidir",
       "subjectPlaceholder": "Konu satırı (isteğe bağlı)",
       "bodyPlaceholder": "Şablon gövde metni...",
       "bodyPlaceholderHtml": "Şablon gövde HTML...",

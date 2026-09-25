@@ -578,6 +578,7 @@
       "addNew": "Add new signature",
       "edit": "Edit signature",
       "namePlaceholder": "Signature name (e.g. work, personal)",
+      "nameRequired": "Signature name is required",
       "isHtml": "HTML format"
     },
     "template": {
@@ -593,6 +594,7 @@
       "addNew": "Add new template",
       "edit": "Edit template",
       "namePlaceholder": "Template name (e.g. follow-up, intro)",
+      "nameRequired": "Template name is required",
       "subjectPlaceholder": "Subject line (optional)",
       "bodyPlaceholder": "Template body text...",
       "bodyPlaceholderHtml": "Template body HTML...",

@@ -21,6 +21,25 @@ interface SnippetDraft {
 
 const EMPTY_DRAFT: SnippetDraft = { name: "", subject: "", body: "", isHtml: false }
 
+// SaveKeys names the translation keys a save reports through.
+interface SaveKeys {
+  nameRequired: string
+  saved: string
+  saveFailed: string
+}
+
+const signatureSaveKeys: SaveKeys = {
+  nameRequired: "settings.signature.nameRequired",
+  saved: "settings.signature.saved",
+  saveFailed: "settings.signature.saveFailed",
+}
+
+const templateSaveKeys: SaveKeys = {
+  nameRequired: "settings.template.nameRequired",
+  saved: "settings.template.saved",
+  saveFailed: "settings.template.saveFailed",
+}
+
 // useSnippetDraft holds the add/edit form and reads the body from the rich-text
 // editor while the form is in HTML mode.
 function useSnippetDraft() {
@@ -41,17 +60,17 @@ function useSnippetDraft() {
   const body = () => (draft.isHtml && bodyRef.current ? bodyRef.current.getHTML() : draft.body)
 
   // save runs a store call for a named draft and clears the form when it lands.
-  const save = async (store: (name: string, body: string) => Promise<void>, okKey: string, failKey: string, t: (k: string) => string) => {
+  const save = async (store: (name: string, body: string) => Promise<void>, keys: SaveKeys, t: (k: string) => string) => {
     const name = draft.name.trim()
-    if (!name) { setError("Name is required"); return }
+    if (!name) { setError(t(keys.nameRequired)); return }
     setError(null)
     setSaving(true)
     try {
       await store(name, body())
       reset()
-      toast.success(t(okKey))
+      toast.success(t(keys.saved))
     } catch {
-      toast.error(t(failKey))
+      toast.error(t(keys.saveFailed))
     } finally {
       setSaving(false)
     }
@@ -188,7 +207,7 @@ export function SignatureSection() {
   const save = () => form.save(async (name, body) => {
     await api.saveSignature({ name, body, is_html: form.draft.isHtml, ord: 0 })
     setSignatures(await loadSignatures())
-  }, "settings.signature.saved", "settings.signature.saveFailed", t)
+  }, signatureSaveKeys, t)
 
   const remove = async (name: string) => {
     try {
@@ -244,7 +263,7 @@ export function TemplateSection() {
   const save = () => form.save(async (name, body) => {
     await api.saveTemplate({ name, subject: form.draft.subject, body, is_html: form.draft.isHtml })
     setTemplates(await loadTemplates())
-  }, "settings.template.saved", "settings.template.saveFailed", t)
+  }, templateSaveKeys, t)
 
   const remove = async (name: string) => {
     try {
