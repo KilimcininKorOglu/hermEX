@@ -12,6 +12,8 @@
 #   make lint PKG=./internal/rop/...            # golangci-lint on the host, not in gate
 #   make bench PKG=./internal/rop BENCH=Table   # benchmarks on the host, not in gate
 #   make audit-deps                             # dependency advisories, host; monthly and pre-release
+#   make version                                # the release and commit a build would carry
+#   make release VERSION=0.2.0                  # set the next release number (no commit, no tag)
 #   make up / make down                         # dev environment lifecycle
 
 COMPOSE := docker compose -f hermex-compose.yml
@@ -56,7 +58,7 @@ RUNFLAG := $(if $(RUN),-run '$(RUN)',)
 # benchmark in PKG.
 BENCH ?= .
 
-.PHONY: all build test test-host test-race bench vet fmt fmt-check gate gate-host lint lint-modernize require-golangci-lint audit-deps audit-go audit-npm require-govulncheck tidy up down images rebuild clean help compose-check dump-db dump-mail restore-db version
+.PHONY: all build test test-host test-race bench vet fmt fmt-check gate gate-host lint lint-modernize require-golangci-lint audit-deps audit-go audit-npm require-govulncheck tidy up down images rebuild clean help compose-check dump-db dump-mail restore-db version release
 
 all: build
 
@@ -268,6 +270,25 @@ version:
 	@echo "commit     $(HERMEX_COMMIT)"
 	@echo "build time $(HERMEX_BUILD_TIME)"
 	@echo "run as     $(HERMEX_UID):$(HERMEX_GID)"
+
+## release: set the next release number, e.g. make release VERSION=0.2.0
+# Writes VERSION and the webmail's package.json/package-lock.json together, since
+# a test fails the gate when they disagree, and checks them. It stops before git:
+# the changelog, the commit and the v<VERSION> tag are the release process's own
+# steps. A new number must be a plain x.y.z above the current one with no tag yet.
+# If a step fails after VERSION was written, `git restore VERSION
+# internal/webmail2/package.json internal/webmail2/package-lock.json` undoes it.
+release:
+	@echo "$(VERSION)" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$$' || \
+		{ echo "set VERSION=x.y.z (a plain release number, no v prefix)"; exit 2; }
+	@cur="$(HERMEX_VERSION)"; \
+	if [ "$$cur" = "$(VERSION)" ] || [ "$$(printf '%s\n%s\n' "$$cur" "$(VERSION)" | sort -V | tail -1)" != "$(VERSION)" ]; then \
+		echo "VERSION=$(VERSION) is not above the current $$cur"; exit 2; fi
+	@! git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null || { echo "tag v$(VERSION) already exists"; exit 2; }
+	@printf '%s\n' "$(VERSION)" > VERSION
+	cd internal/webmail2 && npm version "$(VERSION)" --no-git-tag-version --allow-same-version
+	$(MAKE) --no-print-directory test-host PKG=./internal/buildinfo RUN=TestVersionFileIsTheOneReleaseNumber
+	@echo "release number set to $(VERSION); next: CHANGELOG.md, commit, tag v$(VERSION)"
 
 ## clean: remove built binaries
 clean:
