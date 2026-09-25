@@ -2,6 +2,7 @@ package webmail2api
 
 import (
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"strconv"
@@ -286,38 +287,23 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
+	id, err := strconv.ParseInt(r.PathValue("uid"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
 	st, _, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
 	defer st.Close()
-	// Merge the SPA's fields onto the stored task so fields it does not surface
-	// (status, percent complete) set by another protocol are not lost.
-	merged := jsonToTask(in)
-	if old, err := strconv.ParseInt(r.PathValue("uid"), 10, 64); err == nil {
-		if msg, err := st.OpenMessage(old); err == nil {
-			if prev, err := oxtask.FromProps(msg.Props, st.GetNamedPropIDs); err == nil {
-				prev.Subject = merged.Subject
-				prev.Body = merged.Body
-				prev.Complete = merged.Complete
-				prev.Due = merged.Due
-				prev.Start = merged.Start
-				prev.Importance = merged.Importance
-				prev.ReminderSet = merged.ReminderSet
-				prev.Categories = merged.Categories
-				prev.Status = merged.Status
-				prev.PercentComplete = merged.PercentComplete
-				prev.RecurrenceRule = merged.RecurrenceRule
-				prev.Owner = merged.Owner
-				prev.Assigner = merged.Assigner
-				prev.AcceptanceState = merged.AcceptanceState
-				merged = prev
-			}
-		}
-		_ = st.DeleteObject(old)
+	merged, err := updateTaskInPlace(st, id, jsonToTask(in))
+	if errors.Is(err, errNoSuchTask) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+		return
 	}
-	id, err := s.storeTask(st, merged)
 	if err != nil {
+		logError("task-update", err, logging.Fields{})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save task"})
 		return
 	}
