@@ -89,6 +89,7 @@ export interface Mail {
   followupStatus?: number // follow-up flag: 0 none, 1 complete, 2 flagged
   followupColor?: number // follow-up flag colour: 1..6 (purple..red)
   followupDue?: string // follow-up due date (RFC3339), empty when unset
+  annotatable?: boolean // the mail has a Message-ID a note can link to (detail read only)
 }
 
 /** RecoverableItem is one message in a folder's Recoverable Items dumpster. */

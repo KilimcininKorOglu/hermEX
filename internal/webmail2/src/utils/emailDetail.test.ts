@@ -26,9 +26,10 @@ describe("emailDetailOf", () => {
       id: "inbox:7", from: "ada@hermex.test", fromEmail: "ada@hermex.test", to: ["bob@hermex.test"], toNames: [], cc: [], ccNames: [],
       subject: "Hi", date: "2026-09-25T10:00:00Z", content: "<p>x</p>", flagged: true, followupStatus: 2, followupColor: 3,
       followupDue: "2026-09-30T10:00:00Z", labels: [], attachments: [], folder: "Inbox", smimeSigned: true, smimeEncrypted: true,
-      smimeVerified: false, smimeSignedBy: "ada@hermex.test",
+      smimeVerified: false, smimeSignedBy: "ada@hermex.test", annotatable: false,
     })
     expect(emailDetailOf({ ...mail, fromName: "Ada" }, { content: "" }).from).toBe("Ada")
+    expect(emailDetailOf({ ...mail, annotatable: true }, { content: "" }).annotatable).toBe(true)
   })
 })
 

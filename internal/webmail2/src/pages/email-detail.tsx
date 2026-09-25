@@ -778,7 +778,9 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
       </div>
       <div className="rounded-lg border bg-card">
         <MessageHeader email={email} categoryColors={prefs.categoryColors} actions={actions} />
-        <NotesPanel notes={message.notes} editor={notes} />
+        {/* A note links to its mail by the Message-ID; a mail without one
+            cannot carry a note, so the panel is not offered. */}
+        {email.annotatable && <NotesPanel notes={message.notes} editor={notes} />}
         {invite && <InvitePanel invite={invite} actions={inviteActions} />}
         <ProposeDialog actions={inviteActions} />
         <Separator className="my-6" />

@@ -224,6 +224,7 @@ type mailDetailJSON struct {
 	FollowupColor  int32            `json:"followupColor,omitempty"`  // 1..6 (purple..red)
 	FollowupDue    string           `json:"followupDue,omitempty"`    // RFC3339, empty when unset
 	Labels         []string         `json:"labels,omitempty"`         // category labels (PidNameKeywords)
+	Annotatable    bool             `json:"annotatable"`              // the mail has a Message-ID a note can link to
 }
 
 // handleMailMessage returns a single message's full detail and marks it read.
@@ -262,6 +263,10 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 	// security-relevant decision stays in tested Go, not client code.
 	d.SenderTrusted = isSafeSender(safeSenders(st), d.From)
 	addStoredProps(&d, st, fid, uid)
+	// A note links to its mail by the Message-ID, so the reader offers one only
+	// where handleCreateMailNote accepts it.
+	_, status, _ := mailLinkFor(st, fid, uid)
+	d.Annotatable = status == 0
 	writeJSON(w, http.StatusOK, d)
 }
 
