@@ -251,7 +251,7 @@ func importAttendees(msg *oxcmail.Message, atts []iline) {
 			continue
 		}
 		rcpt := mapi.PropertyValues{
-			{Tag: mapi.PrRecipientType, Value: int32(mapi.RecipTo)},
+			{Tag: mapi.PrRecipientType, Value: attendeeRecipientType(l)},
 			{Tag: mapi.PrAddrType, Value: "SMTP"},
 			{Tag: mapi.PrEmailAddress, Value: addr},
 			{Tag: mapi.PrSmtpAddress, Value: addr},
@@ -261,6 +261,28 @@ func importAttendees(msg *oxcmail.Message, atts []iline) {
 		}
 		msg.Recipients = append(msg.Recipients, rcpt)
 	}
+}
+
+// attendeeRecipientType maps an ATTENDEE's ROLE and CUTYPE parameters to the
+// recipient type it is stored under ([MS-OXCICAL] 2.1.3.1.1.20.2, the first
+// matching row wins): a required attendee is To, an optional one Cc, and a
+// resource, room or non-participant Bcc.
+func attendeeRecipientType(l iline) int32 {
+	role := strings.ToUpper(l.param("ROLE"))
+	switch role {
+	case "CHAIR", "REQ-PARTICIPANT":
+		return mapi.RecipTo
+	case "OPT-PARTICIPANT":
+		return mapi.RecipCc
+	}
+	switch strings.ToUpper(l.param("CUTYPE")) {
+	case "RESOURCE", "ROOM":
+		return mapi.RecipBcc
+	}
+	if role == "NON-PARTICIPANT" {
+		return mapi.RecipBcc
+	}
+	return mapi.RecipTo
 }
 
 // eventEnd resolves the event end from DTEND, else DTSTART+DURATION, else (for an

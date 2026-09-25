@@ -530,10 +530,10 @@ func (sc *eventScan) busyStatus(id int64) *int {
 	return &n
 }
 
-// addAttendees fills the attendee list and the organizer's tracking view. Each
-// recipient's SMTP address is the attendee list (oxcical stores ATTENDEE as
-// recipients), and its PidLidResponseStatus is the tracking view an inbound
-// REPLY populates.
+// addAttendees fills the required and optional attendee lists and the
+// organizer's tracking view. Each recipient's SMTP address is an attendee
+// (oxcical stores ATTENDEE as recipients, an optional one as Cc), and its
+// PidLidResponseStatus is the tracking view an inbound REPLY populates.
 func (sc *eventScan) addAttendees(e *eventJSON, id int64) {
 	recips, err := sc.st.ListRecipients(id)
 	if err != nil {
@@ -543,13 +543,29 @@ func (sc *eventScan) addAttendees(e *eventJSON, id int64) {
 		if r.SmtpAddress == "" {
 			continue
 		}
-		e.Attendees = append(e.Attendees, r.SmtpAddress)
+		if sc.recipientType(r.ID) == mapi.RecipCc {
+			e.OptionalAttendees = append(e.OptionalAttendees, r.SmtpAddress)
+		} else {
+			e.Attendees = append(e.Attendees, r.SmtpAddress)
+		}
 		if sc.respTag != 0 {
 			e.Tracking = append(e.Tracking, attendeeStatusJSON{
 				Email: r.SmtpAddress, Response: sc.responseStatus(r.ID),
 			})
 		}
 	}
+}
+
+// recipientType reads one attendee's PidTagRecipientType: Cc is an optional
+// attendee ([MS-OXCICAL] 2.1.3.1.1.20.2). It reports 0 when it is unreadable,
+// which files the attendee as required.
+func (sc *eventScan) recipientType(recipientID int64) int32 {
+	pv, err := sc.st.GetRecipientProperties(recipientID, mapi.PrRecipientType)
+	if err != nil {
+		return 0
+	}
+	t, _ := propInt32(pv, mapi.PrRecipientType)
+	return t
 }
 
 // responseStatus reads one attendee's PidLidResponseStatus, reporting 0 (none)

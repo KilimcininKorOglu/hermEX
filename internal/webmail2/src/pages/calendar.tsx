@@ -506,6 +506,7 @@ function useEventEditor(load: () => Promise<void>) {
         location: ev.location,
         description: ev.description,
         attendees: ev.attendees,
+        optionalAttendees: ev.optionalAttendees,
         recurrence: ev.recurrence,
         reminderMinutes: ev.reminderMinutes,
         busyStatus: ev.busyStatus,

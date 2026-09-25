@@ -345,3 +345,22 @@ func TestCalendarDescriptionRoundTrip(t *testing.T) {
 	wantStatus(t, "clear", do(http.MethodPatch, path, `{"name":"Team A","description":""}`), http.StatusOK)
 	wantEq(t, "description after clear", description("list after clear"), "")
 }
+
+// TestCalendarOptionalAttendeesRoundTrip proves an optional attendee is read
+// back as optional, so an edit that sends the event back does not turn it into
+// a required attendee.
+func TestCalendarOptionalAttendeesRoundTrip(t *testing.T) {
+	do, _ := apiHarness(t)
+	wantStatus(t, "create", do(http.MethodPost, "/api/v1/calendar/events",
+		`{"summary":"Review","start":"2026-08-02T09:00:00Z","attendees":["bob@hermex.test"],"optionalAttendees":["carol@hermex.test"]}`), http.StatusOK)
+	listed := listOneEvent(t, do, "list")
+	wantEq(t, "attendees", strings.Join(listed.Attendees, ","), "bob@hermex.test")
+	wantEq(t, "optional attendees", strings.Join(listed.OptionalAttendees, ","), "carol@hermex.test")
+
+	body, err := json.Marshal(listed)
+	mustNoErr(t, "encode event", err)
+	wantStatus(t, "update", do(http.MethodPut, "/api/v1/calendar/events/"+listed.UID, string(body)), http.StatusOK)
+	after := listOneEvent(t, do, "list after update")
+	wantEq(t, "attendees after update", strings.Join(after.Attendees, ","), "bob@hermex.test")
+	wantEq(t, "optional attendees after update", strings.Join(after.OptionalAttendees, ","), "carol@hermex.test")
+}

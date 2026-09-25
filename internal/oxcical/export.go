@@ -174,8 +174,24 @@ func exportIdentity(b *builder, msg *oxcmail.Message, partstat string) {
 	}
 	addParams(b, "ORGANIZER", mailtoParams(p, mapi.PrSentRepresentingSmtpAddress, mapi.PrSentRepresentingName, ""))
 	for i := range msg.Recipients {
-		addParams(b, "ATTENDEE", mailtoParams(&msg.Recipients[i], mapi.PrSmtpAddress, mapi.PrDisplayName, ""))
+		if params := mailtoParams(&msg.Recipients[i], mapi.PrSmtpAddress, mapi.PrDisplayName, ""); params != "" {
+			b.add("ATTENDEE" + attendeeRole(&msg.Recipients[i]) + params)
+		}
 	}
+}
+
+// attendeeRole renders the ROLE parameter of an exported attendee from its
+// recipient type ([MS-OXCICAL] 2.1.3.1.1.20.2.4): OPT-PARTICIPANT for Cc,
+// NON-PARTICIPANT for Bcc, and nothing for a required (To) attendee.
+func attendeeRole(p *mapi.PropertyValues) string {
+	t, _ := propInt32(p, mapi.PrRecipientType)
+	switch t {
+	case mapi.RecipCc:
+		return ";ROLE=OPT-PARTICIPANT"
+	case mapi.RecipBcc:
+		return ";ROLE=NON-PARTICIPANT"
+	}
+	return ""
 }
 
 // exportReplyIdentity emits an iTIP REPLY's ORGANIZER and ATTENDEE. The responder is

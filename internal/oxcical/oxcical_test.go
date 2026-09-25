@@ -483,3 +483,37 @@ func TestNoEvent(t *testing.T) {
 		t.Errorf("err = %v, want errNoEvent", err)
 	}
 }
+
+// TestAttendeeRoleRoundTrip proves an attendee's role survives the store: ROLE
+// and CUTYPE choose the recipient type on import ([MS-OXCICAL] 2.1.3.1.1.20.2),
+// and the recipient type chooses the ROLE on export.
+func TestAttendeeRoleRoundTrip(t *testing.T) {
+	r := newResolver()
+	const ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n" +
+		"BEGIN:VEVENT\r\nUID:m-2\r\nSUMMARY:Review\r\nDTSTART:20260701T140000Z\r\nDTEND:20260701T150000Z\r\n" +
+		"ORGANIZER:mailto:alice@hermex.test\r\n" +
+		"ATTENDEE;ROLE=REQ-PARTICIPANT:mailto:bob@hermex.test\r\n" +
+		"ATTENDEE;ROLE=OPT-PARTICIPANT:mailto:carol@hermex.test\r\n" +
+		"ATTENDEE;CUTYPE=ROOM:mailto:room@hermex.test\r\n" +
+		"ATTENDEE:mailto:dave@hermex.test\r\n" +
+		"END:VEVENT\r\nEND:VCALENDAR\r\n"
+
+	msg, err := Import([]byte(ics), r.opt())
+	mustNoErr(t, err, "import")
+	types := map[string]int32{}
+	for i := range msg.Recipients {
+		v, _ := msg.Recipients[i].Get(mapi.PrRecipientType)
+		types[recipSmtp(msg.Recipients[i])], _ = v.(int32)
+	}
+	wantEq(t, types["bob@hermex.test"], int32(mapi.RecipTo), "a required attendee's recipient type")
+	wantEq(t, types["carol@hermex.test"], int32(mapi.RecipCc), "an optional attendee's recipient type")
+	wantEq(t, types["room@hermex.test"], int32(mapi.RecipBcc), "a room's recipient type")
+	wantEq(t, types["dave@hermex.test"], int32(mapi.RecipTo), "an attendee without a role")
+
+	out, err := Export(msg, r.opt())
+	mustNoErr(t, err, "export")
+	s := string(out)
+	wantContains(t, s, "ATTENDEE;ROLE=OPT-PARTICIPANT:mailto:carol@hermex.test", "the optional attendee's role")
+	wantContains(t, s, "ATTENDEE;ROLE=NON-PARTICIPANT:mailto:room@hermex.test", "the room's role")
+	wantContains(t, s, "ATTENDEE:mailto:bob@hermex.test", "the required attendee without a role")
+}
