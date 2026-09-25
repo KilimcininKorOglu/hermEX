@@ -25,13 +25,26 @@ func counterInvite(t *testing.T, alice string) string {
 }
 
 // TestCounterProposalReachesTheOrganizer proposes a new time for bob's meeting:
-// exactly one proposal reaches bob.
+// exactly one proposal reaches bob, filed as the counter-proposal response his
+// client reads the proposed time from. It used to be filed as a plain message
+// with the calendar as an attachment.
 func TestCounterProposalReachesTheOrganizer(t *testing.T) {
 	do, alice, bob := meetingHarness(t)
 	id := counterInvite(t, alice)
 	wantStatus(t, "propose", do(http.MethodPost, "/api/v1/mail/propose-time",
 		`{"id":"`+id+`","start":"2026-09-08T11:00:00Z","end":"2026-09-08T12:00:00Z"}`), http.StatusOK)
 	lastOf(t, folderMail(t, bob, int64(mapi.PrivateFIDInbox)), 1)
+
+	st := openMailbox(t, bob)
+	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
+	mustNoErr(t, "list bob's inbox", err)
+	msg, err := st.OpenMessage(msgs[0].ID)
+	mustNoErr(t, "open the proposal", err)
+	wantEq(t, "class", propStr(msg.Props, mapi.PrMessageClass), "IPM.Schedule.Meeting.Resp.Tent")
+	v, _ := msg.Props.Get(namedTag(t, st, mapi.NameAppointmentCounterProposal, mapi.PtBoolean))
+	wantEq(t, "counter proposal", v, any(true))
+	start, _ := msg.Props.Get(namedTag(t, st, mapi.NameAppointmentProposedStartWhole, mapi.PtSysTime))
+	wantEq(t, "proposed start", start, any(mapi.UnixToNTTime(time.Date(2026, 9, 8, 11, 0, 0, 0, time.UTC))))
 }
 
 // TestCounterProposalWireForm is the message the proposal sends: built through the

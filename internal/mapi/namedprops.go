@@ -126,6 +126,12 @@ var (
 	NameAppointmentReplyTime  = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8220} // PtSysTime, when the attendee responded
 	NameFInvited              = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8229} // PtBoolean, a meeting request was sent; never reset once true
 
+	// Counter proposal (PSETID_Appointment, MS-OXOCAL 2.2.4.7, 2.2.7.3, 2.2.7.4): a
+	// meeting response proposing a new time, and the UTC span it proposes.
+	NameAppointmentCounterProposal    = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8257} // PtBoolean
+	NameAppointmentProposedStartWhole = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8250} // PtSysTime
+	NameAppointmentProposedEndWhole   = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8251} // PtSysTime
+
 	// Reminder named properties (PSETID_Common), VALARM maps here.
 	NameReminderDelta = PropertyName{Kind: MnidID, GUID: PsetidCommon, LID: 0x8501} // PtLong, minutes before start
 	NameReminderSet   = PropertyName{Kind: MnidID, GUID: PsetidCommon, LID: 0x8503} // PtBoolean

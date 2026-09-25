@@ -243,7 +243,9 @@ func buildCounterRequest(proposer, organizer string, e eventJSON) ([]byte, error
 		fmt.Fprintf(&cal, "DTEND%s\r\n", end)
 	}
 	fmt.Fprintf(&cal, "ORGANIZER:mailto:%s\r\n", to[0])
-	fmt.Fprintf(&cal, "ATTENDEE;ROLE=REQ-PARTICIPANT:mailto:%s\r\n", proposer)
+	// A COUNTER names its one attendee with the tentative response it carries
+	// ([MS-OXCICAL] METHOD).
+	fmt.Fprintf(&cal, "ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=TENTATIVE:mailto:%s\r\n", proposer)
 	cal.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
 	return itip.Message(itip.Mail{
 		From: proposer, To: to, Subject: headerSafe("Proposed new time: " + e.Summary),

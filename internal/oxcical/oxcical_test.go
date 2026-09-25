@@ -148,6 +148,7 @@ func TestImportMethodMessageClass(t *testing.T) {
 		{"reply-accepted", "METHOD:REPLY\r\n", "ATTENDEE;PARTSTAT=ACCEPTED:mailto:a@x.test\r\n", "IPM.Schedule.Meeting.Resp.Pos"},
 		{"reply-declined", "METHOD:REPLY\r\n", "ATTENDEE;PARTSTAT=DECLINED:mailto:a@x.test\r\n", "IPM.Schedule.Meeting.Resp.Neg"},
 		{"reply-tentative", "METHOD:REPLY\r\n", "ATTENDEE;PARTSTAT=TENTATIVE:mailto:a@x.test\r\n", "IPM.Schedule.Meeting.Resp.Tent"},
+		{"counter", "METHOD:COUNTER\r\n", "ATTENDEE;PARTSTAT=TENTATIVE:mailto:a@x.test\r\n", "IPM.Schedule.Meeting.Resp.Tent"},
 		{"publish", "METHOD:PUBLISH\r\n", "", "IPM.Appointment"},
 		{"none", "", "", "IPM.Appointment"},
 	}
@@ -165,6 +166,32 @@ func TestImportMethodMessageClass(t *testing.T) {
 				t.Errorf("class %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestImportCounterProposal is a COUNTER as the organizer receives it. It used to
+// import as a plain appointment, so the organizer saw no response and no proposed
+// time: it is a counter-proposal response carrying the span its DTSTART and DTEND
+// propose.
+func TestImportCounterProposal(t *testing.T) {
+	ics := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:COUNTER\r\nBEGIN:VEVENT\r\nUID:m-1\r\nSUMMARY:Plan\r\n" +
+		"DTSTART:20260612T110000Z\r\nDTEND:20260612T113000Z\r\nORGANIZER:mailto:o@x.test\r\n" +
+		"ATTENDEE;PARTSTAT=TENTATIVE:mailto:a@x.test\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	r := newResolver()
+	msg, err := Import([]byte(ics), r.opt())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.boolVal(msg, mapi.NameAppointmentCounterProposal) {
+		t.Error("the counter proposal flag is not set")
+	}
+	wantStart := mapi.UnixToNTTime(time.Date(2026, 6, 12, 11, 0, 0, 0, time.UTC))
+	if got, ok := r.timeVal(msg, mapi.NameAppointmentProposedStartWhole); !ok || got != wantStart {
+		t.Errorf("proposed start %d (ok=%v), want %d", got, ok, wantStart)
+	}
+	wantEnd := mapi.UnixToNTTime(time.Date(2026, 6, 12, 11, 30, 0, 0, time.UTC))
+	if got, ok := r.timeVal(msg, mapi.NameAppointmentProposedEndWhole); !ok || got != wantEnd {
+		t.Errorf("proposed end %d (ok=%v), want %d", got, ok, wantEnd)
 	}
 }
 

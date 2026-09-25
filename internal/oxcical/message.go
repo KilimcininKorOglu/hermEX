@@ -64,6 +64,9 @@ var appointmentNamed = []namedField{
 	{mapi.NameAppointmentTimeZoneDefStartDisplay, mapi.PtBinary},
 	{mapi.NameAppointmentTimeZoneDefEndDisplay, mapi.PtBinary},
 	{mapi.NameAppointmentTimeZoneDefRecur, mapi.PtBinary},
+	{mapi.NameAppointmentCounterProposal, mapi.PtBoolean},
+	{mapi.NameAppointmentProposedStartWhole, mapi.PtSysTime},
+	{mapi.NameAppointmentProposedEndWhole, mapi.PtSysTime},
 }
 
 // namedTags resolves appointmentNamed to full store proptags. With create the

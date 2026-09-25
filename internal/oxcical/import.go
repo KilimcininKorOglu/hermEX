@@ -59,6 +59,7 @@ func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 		p.Set(uidTag, importedUID(vev))
 	}
 	setIf(p, mapi.PrSubject, vev.propText("SUMMARY"))
+	importCounterProposal(p, named, cal, vev)
 
 	// Recurring events round-trip verbatim; store only what listing needs.
 	if vev.prop("RRULE") != nil || vev.prop("RECURRENCE-ID") != nil {
@@ -250,14 +251,17 @@ func importAlarm(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTa
 
 // meetingClass derives the MAPI message class from the iCalendar METHOD (RFC 5546
 // iTIP). REQUEST and CANCEL are scheduling messages an attendee acts on; a REPLY
-// names the attendee's response in its class suffix (PARTSTAT). PUBLISH, an absent
-// METHOD, or an unrecognized one is a plain appointment, the prior default.
+// names the attendee's response in its class suffix (PARTSTAT); a COUNTER is a
+// tentative response proposing a new time ([MS-OXCICAL] METHOD table). PUBLISH, an
+// absent METHOD, or an unrecognized one is a plain appointment, the prior default.
 func meetingClass(cal, vev *icomp) string {
-	switch strings.ToUpper(strings.TrimSpace(cal.propText("METHOD"))) {
+	switch methodOf(cal) {
 	case "REQUEST":
 		return "IPM.Schedule.Meeting.Request"
 	case "CANCEL":
 		return "IPM.Schedule.Meeting.Canceled"
+	case "COUNTER":
+		return "IPM.Schedule.Meeting.Resp.Tent"
 	case "REPLY":
 		switch strings.ToUpper(strings.TrimSpace(replyPartStat(vev))) {
 		case "DECLINED":
@@ -269,6 +273,33 @@ func meetingClass(cal, vev *icomp) string {
 		}
 	}
 	return "IPM.Appointment"
+}
+
+// methodOf is the calendar's iTIP METHOD, upper-cased.
+func methodOf(cal *icomp) string {
+	return strings.ToUpper(strings.TrimSpace(cal.propText("METHOD")))
+}
+
+// importCounterProposal marks a COUNTER as a counter proposal and stores the span it
+// proposes, which its DTSTART and DTEND carry ([MS-OXCICAL] DTSTART and DTEND).
+// The organizer's client reads the proposal from these properties.
+func importCounterProposal(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag, cal, vev *icomp) {
+	if methodOf(cal) != "COUNTER" {
+		return
+	}
+	setNamedBool(p, named, mapi.NameAppointmentCounterProposal, true)
+	l := vev.prop("DTSTART")
+	if l == nil {
+		return
+	}
+	start, allDay, ok := parseICalTime(l)
+	if !ok {
+		return
+	}
+	setNamedTime(p, named, mapi.NameAppointmentProposedStartWhole, start)
+	if end, ok := eventEnd(vev, start, allDay); ok {
+		setNamedTime(p, named, mapi.NameAppointmentProposedEndWhole, end)
+	}
 }
 
 // replyPartStat returns the PARTSTAT of the reply's attendee line, which names the
