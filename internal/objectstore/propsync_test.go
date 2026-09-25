@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"hermex/internal/mapi"
+	"hermex/internal/oxcmail"
 )
 
 // TestSetMessagePropertiesReachesASyncedClient is the contract every protocol path
@@ -28,6 +29,35 @@ func TestSetMessagePropertiesReachesASyncedClient(t *testing.T) {
 
 	if after := msgCN(t, s, id); after <= before {
 		t.Fatalf("change number stayed at %d after the property write, so no client sees it", after)
+	}
+	res, err := s.GetContentSync(ContentSyncRequest{
+		FolderID: fld, Given: looseSet(uint64(id)), Seen: seen, SeenFAI: nil, Read: nil,
+	})
+	mustNoErr(t, "content sync", err)
+	eqSet(t, "UpdatedMIDs", res.UpdatedMIDs, uint64(id))
+}
+
+// TestRecipientWriteReachesASyncedClient covers a meeting organizer's attendee
+// tracking: the response status and proposed times live on the recipient row, and a
+// write there must advance the message's change number like any property write.
+func TestRecipientWriteReachesASyncedClient(t *testing.T) {
+	s := openSeededStore(t)
+	fld := int64(mapi.PrivateFIDCalendar)
+	id, err := s.CreateMessage(fld, &oxcmail.Message{
+		Props:      mapi.PropertyValues{{Tag: mapi.PrMessageClass, Value: "IPM.Appointment"}},
+		Recipients: []mapi.PropertyValues{{{Tag: mapi.PrSmtpAddress, Value: "bob@hermex.test"}}},
+	})
+	mustNoErr(t, "create the meeting", err)
+	recips, err := s.ListRecipients(id)
+	mustNoErr(t, "list recipients", err)
+
+	before := msgCN(t, s, id)
+	seen := looseSet(before)
+	mustNoErr(t, "set the recipient property",
+		s.SetRecipientProperties(recips[0].ID, mapi.PropertyValues{{Tag: mapi.PrRecipientProposed, Value: true}}))
+
+	if after := msgCN(t, s, id); after <= before {
+		t.Fatalf("change number stayed at %d after the recipient write, so no client sees it", after)
 	}
 	res, err := s.GetContentSync(ContentSyncRequest{
 		FolderID: fld, Given: looseSet(uint64(id)), Seen: seen, SeenFAI: nil, Read: nil,

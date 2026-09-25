@@ -126,16 +126,38 @@ func (s *Store) ModifyMessageProperties(messageID int64, props mapi.PropertyValu
 	return nil
 }
 
-// SetRecipientProperties upserts properties on a recipient. It rebuilds the parent
-// message's cached wire form, since the recipient set is what the To/Cc headers are
-// serialized from.
+// SetRecipientProperties upserts properties on a recipient and, in the same
+// transaction, reallocates the parent message's change number. A recipient row is
+// part of the message a client syncs (a meeting organizer's attendee tracking status
+// and proposed times live there), so a write that left the change number alone
+// reached no already-synced client. It also rebuilds the parent message's cached
+// wire form, since the recipient set is what the To/Cc headers are serialized from.
 func (s *Store) SetRecipientProperties(recipientID int64, props mapi.PropertyValues) error {
-	if err := s.setObjectProps("recipients_properties", "recipient_id", recipientID, props); err != nil {
+	tx, err := s.objdb.Begin()
+	if err != nil {
 		return err
 	}
-	if messageID, ok := s.parentMessage("recipients", "recipient_id", recipientID); ok {
-		s.refreshEML(messageID)
+	defer tx.Rollback()
+	if err := s.insertProps(tx, "recipients_properties", "recipient_id", recipientID, props); err != nil {
+		return err
 	}
+	var messageID int64
+	if err := tx.QueryRow(`SELECT message_id FROM recipients WHERE recipient_id=?`, recipientID).Scan(&messageID); err != nil {
+		return fmt.Errorf("objectstore: recipient %d has no message: %w", recipientID, err)
+	}
+	cn, err := allocateCN(tx)
+	if err != nil {
+		return err
+	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	if _, err := tx.Exec(`UPDATE messages SET change_number=? WHERE message_id=?`, int64(cn), messageID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.refreshEML(messageID)
+	s.publishChange("modify", cn, "")
 	return nil
 }
 
