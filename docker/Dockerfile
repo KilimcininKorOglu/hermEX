@@ -20,10 +20,15 @@ ARG HERMEX_COMMIT=""
 ARG HERMEX_BUILD_TIME=""
 ENV LDFLAGS="-X hermex/internal/buildinfo.Commit=$HERMEX_COMMIT -X hermex/internal/buildinfo.BuildTime=$HERMEX_BUILD_TIME"
 
+# The module and build caches are BuildKit cache mounts, kept across builds. The
+# build time above changes on every build and so re-runs the compile step even for
+# unchanged source; with the build cache mounted, that re-run takes every package
+# from the cache and only links the binaries again.
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
-RUN go build -trimpath -ldflags "$LDFLAGS" -o /out/hermex-mta ./cmd/mta \
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    go build -trimpath -ldflags "$LDFLAGS" -o /out/hermex-mta ./cmd/mta \
  && go build -trimpath -ldflags "$LDFLAGS" -o /out/hermex-pop3 ./cmd/pop3 \
  && go build -trimpath -ldflags "$LDFLAGS" -o /out/hermex-imap ./cmd/imap \
  && go build -trimpath -ldflags "$LDFLAGS" -o /out/hermex-webmail2 ./cmd/webmail2 \
