@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, type CSSProperties, type Dispatch, type ReactNode, type SetStateAction } from "react"
 import { CalendarDays, Plus, MapPin, Clock, Edit, Trash2, MoreHorizontal, Users, Repeat, Bell, Printer, ChevronLeft, ChevronRight, Settings2, Share2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -28,9 +28,25 @@ import {
 } from "@/components/ui/select"
 import { toast } from "sonner"
 import { AttendeePicker } from "@/components/attendee-picker"
+import { CategoryChips, toggledCategories, type CategoryOption } from "@/components/category-chips"
 import { withTz, getDisplayTimeZone } from "@/utils/date"
 import { detectTimeZone } from "@/utils/timezone"
 import api, { type Calendar, type CalendarEvent, type UserFreeBusy, type Room, type CalendarSettings } from "@/utils/api"
+import {
+  emptyEventForm,
+  eventFormError,
+  eventFormOf,
+  eventPayload,
+  parseAttendees,
+  pickerWindow,
+  recurrenceToForm,
+  rfc3339ToLocalInput,
+  splitRooms,
+  withoutRoom,
+  withRoom,
+  type EventForm,
+  type EventPayload,
+} from "@/utils/eventForm"
 import { useI18n } from "@/hooks/useI18n"
 import { useAuth } from "@/contexts/AuthContext"
 import { ShareFolderDialog } from "@/components/share-folder-dialog"
@@ -38,55 +54,25 @@ import { useBusyGate } from "@/hooks/useBusyGate"
 
 type TFunc = (key: string, params?: Record<string, string>) => string
 
-// parseAttendees splits the stored comma/space-separated attendee string into a
-// clean list of addresses.
-function parseAttendees(s: string): string[] {
-  return s
-    .split(/[\s,;]+/)
-    .map((a) => a.trim())
-    .filter(Boolean)
+type CalendarView = "list" | "day" | "week" | "workweek" | "month"
+type TimeGridView = "day" | "week" | "workweek"
+
+const DEFAULT_COLOR = "#3b82f6"
+const CALENDAR_PALETTE = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6", "#8b5cf6", "#ec4899", "#64748b"]
+const REMINDER_MINUTES = [5, 10, 15, 30, 60, 120, 1440]
+const RESOLUTION_MINUTES = [5, 10, 15, 30, 60]
+const RECURRENCE_FREQUENCIES = ["DAILY", "WEEKLY", "MONTHLY", "YEARLY"]
+// GRID_DAYS is the number of day columns each time-grid view shows.
+const GRID_DAYS: Record<TimeGridView, number> = { day: 1, workweek: 5, week: 7 }
+// RESPONSE_KEYS maps an attendee's PidLidResponseStatus to its label.
+const RESPONSE_KEYS: Record<number, string> = { 2: "calendar.respTentative", 3: "calendar.respAccepted", 4: "calendar.respDeclined" }
+
+function isTimeGrid(view: CalendarView): view is TimeGridView {
+  return view === "day" || view === "week" || view === "workweek"
 }
 
-// rfc3339ToLocalInput converts an RFC3339 instant to the value a
-// datetime-local input expects ("YYYY-MM-DDTHH:mm" in local time).
-function rfc3339ToLocalInput(value: string): string {
-  const d = new Date(value)
-  if (isNaN(d.getTime())) return ""
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
-// localInputToRFC3339 converts a datetime-local value to an RFC3339 instant.
-function localInputToRFC3339(value: string): string {
-  const d = new Date(value)
-  return isNaN(d.getTime()) ? "" : d.toISOString()
-}
-
-interface EventForm {
-  summary: string
-  start: string
-  end: string
-  allDay: boolean
-  location: string
-  description: string
-  attendees: string
-  optionalAttendees: string // comma/space-separated optional attendee addresses (OPT-PARTICIPANT)
-  recurrence: string // "" | DAILY | WEEKLY | MONTHLY | YEARLY
-  calendarId: string // target calendar ("calendar" = default)
-  reminder: string // "" = none, else a minute offset ("15", "30", "60", ...)
-  busyStatus: string // "" = default (busy), else "0".."4" (free/tentative/busy/oof/working elsewhere)
-  sensitivity: string // "" = normal, else "2" (private) or "3" (confidential)
-  categories: string[] // selected category names
-  sendInvite: boolean // email a METHOD:REQUEST invite to attendees on create
-}
-
-const emptyForm: EventForm = { summary: "", start: "", end: "", allDay: false, location: "", description: "", attendees: "", optionalAttendees: "", recurrence: "", calendarId: "calendar", reminder: "", busyStatus: "", sensitivity: "", categories: [], sendInvite: false }
-
-// recurrenceToForm maps a stored RRULE value to the form's frequency selector.
-function recurrenceToForm(rrule?: string): string {
-  if (!rrule) return ""
-  const m = /FREQ=([A-Z]+)/.exec(rrule)
-  return m ? m[1] : ""
+function errorText(err: unknown, fallback: string): string {
+  return err instanceof Error ? err.message : fallback
 }
 
 // recurrenceLabel maps a frequency value to its localized label.
@@ -114,6 +100,11 @@ function timeLabel(t: TFunc, ev: CalendarEvent): string {
   if (!ev.end) return s
   const end = new Date(ev.end)
   return isNaN(end.getTime()) ? s : `${s} – ${end.toLocaleTimeString(undefined, opts)}`
+}
+
+// clockTime renders an instant as the local hour and minute.
+function clockTime(value: string): string {
+  return new Date(value).toLocaleTimeString(undefined, withTz({ hour: "2-digit", minute: "2-digit" }))
 }
 
 // dateKey returns a local YYYY-MM-DD key for a Date, used to bucket events
@@ -221,60 +212,15 @@ function rangeLabel(days: Date[]): string {
 
 // moveCursor advances the cursor by one step for the active view: a day for the
 // day view, a week for the work-week/week views, a month for the month view.
-function moveCursor(cursor: Date, view: "list" | "day" | "week" | "workweek" | "month", sign: number): Date {
+function moveCursor(cursor: Date, view: CalendarView, sign: number): Date {
   if (view === "month") return new Date(cursor.getFullYear(), cursor.getMonth() + sign, 1)
   const days = view === "day" ? 1 : 7
   return new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + sign * days)
 }
 
-export function CalendarPage() {
-  const { t } = useI18n()
-  // CalSettings holds the DB-backed calendar display settings (week-start day,
-  // time-grid resolution, working-hours window, non-working-hours visibility),
-  // persisted in the shared webmail settings blob so they survive a reload and
-  // apply cross-device. Defaults are the Exchange values until the settings load.
-  const [firstDayOfWeek, setFirstDayOfWeek] = useState<number>(1)
-  const [resolution, setResolution] = useState<number>(30)
-  const [workDayStart, setWorkDayStart] = useState<number>(9)
-  const [workDayEnd, setWorkDayEnd] = useState<number>(18)
-  const [showNonWorkingHours, setShowNonWorkingHours] = useState<boolean>(true)
-  // saveCalSettings persists the full settings object; the in-session state is
-  // updated optimistically by the individual setters, then this fires the PUT.
-  // The workDays/defaultDuration/defaultReminder fields are managed in settings
-  // and carried here as defaults so a grid-only change never drops them.
-  const saveCalSettings = (next: Partial<CalendarSettings>) => {
-    api.setCalendarSettings({
-      firstDayOfWeek, resolution, workDayStart, workDayEnd, showNonWorkingHours,
-      workDays: [1, 2, 3, 4, 5], defaultDuration: 30, defaultReminder: 15,
-      ...next,
-    }).catch(() => {
-      /* best-effort: the grid keeps the chosen values in-session */
-    })
-  }
-  const setFirstDay = (d: number) => {
-    setFirstDayOfWeek(d)
-    saveCalSettings({ firstDayOfWeek: d, resolution, workDayStart, workDayEnd, showNonWorkingHours })
-  }
-  const setResolutionAndSave = (r: number) => {
-    setResolution(r)
-    saveCalSettings({ firstDayOfWeek, resolution: r, workDayStart, workDayEnd, showNonWorkingHours })
-  }
-  useEffect(() => {
-    api.getCalendarSettings()
-      .then((res) => {
-        setFirstDayOfWeek(res.firstDayOfWeek ?? 1)
-        setResolution(res.resolution ?? 30)
-        setWorkDayStart(res.workDayStart ?? 9)
-        setWorkDayEnd(res.workDayEnd ?? 18)
-        setShowNonWorkingHours(res.showNonWorkingHours ?? true)
-      })
-      .catch(() => {
-        /* keep the defaults when settings are unavailable */
-      })
-  }, [])
-  // weekdayLabels rotated to start on firstDayOfWeek, so the month-grid header
-  // and the time-grid day header columns align with monthMatrix/weekDays.
-  const dayNamesSundayFirst = [
+// weekdayNames returns the localized short weekday names, Sunday first.
+function weekdayNames(t: TFunc): string[] {
+  return [
     t("calendar.weekdays.sun"),
     t("calendar.weekdays.mon"),
     t("calendar.weekdays.tue"),
@@ -283,59 +229,113 @@ export function CalendarPage() {
     t("calendar.weekdays.fri"),
     t("calendar.weekdays.sat"),
   ]
-  const weekdayLabels = [
-    ...dayNamesSundayFirst.slice(firstDayOfWeek),
-    ...dayNamesSundayFirst.slice(0, firstDayOfWeek),
-  ]
+}
+
+// groupByDay groups sorted events by their day label for the agenda view.
+function groupByDay(events: CalendarEvent[]): { day: string; items: CalendarEvent[] }[] {
+  const groups: { day: string; items: CalendarEvent[] }[] = []
+  for (const ev of events) {
+    const key = dayKey(ev.start)
+    const last = groups[groups.length - 1]
+    if (last && last.day === key) last.items.push(ev)
+    else groups.push({ day: key, items: [ev] })
+  }
+  return groups
+}
+
+// bucketByDay buckets events by their local day key for the month grid.
+function bucketByDay(events: CalendarEvent[]): Map<string, CalendarEvent[]> {
+  const byDay = new Map<string, CalendarEvent[]>()
+  for (const ev of events) {
+    const key = eventDayKey(ev)
+    if (!key) continue
+    const bucket = byDay.get(key)
+    if (bucket) bucket.push(ev)
+    else byDay.set(key, [ev])
+  }
+  return byDay
+}
+
+function colorBorder(color: string | undefined): CSSProperties | undefined {
+  return color ? { borderLeft: `3px solid ${color}` } : undefined
+}
+
+// shownEventsOf keeps the events of the calendars the user has toggled
+// visible (all by default); when calendar metadata is unavailable, it keeps
+// everything.
+function shownEventsOf(events: CalendarEvent[], calendars: Calendar[], visibleIds: Set<string>): CalendarEvent[] {
+  if (calendars.length === 0) return events
+  return events.filter((ev) => visibleIds.has(ev.calendarId ?? "calendar"))
+}
+
+// eventColorFor returns the per-calendar color that tints an event in the
+// views; only when more than one calendar exists (a single calendar needs no
+// color distinction).
+function eventColorFor(calendars: Calendar[]): (ev: CalendarEvent) => string | undefined {
+  const colorById = new Map(calendars.map((c) => [c.id, c.color]))
+  return (ev) => (calendars.length > 1 ? (colorById.get(ev.calendarId ?? "calendar") ?? DEFAULT_COLOR) : undefined)
+}
+
+// GridSettings is the DB-backed calendar display settings (week-start day,
+// time-grid resolution, working-hours window, non-working-hours visibility),
+// persisted in the shared webmail settings blob so they survive a reload and
+// apply cross-device.
+interface GridSettings {
+  firstDayOfWeek: number
+  resolution: number
+  workDayStart: number
+  workDayEnd: number
+  showNonWorkingHours: boolean
+}
+
+// DEFAULT_GRID holds the Exchange values the grid uses until the settings load.
+const DEFAULT_GRID: GridSettings = { firstDayOfWeek: 1, resolution: 30, workDayStart: 9, workDayEnd: 18, showNonWorkingHours: true }
+
+function gridSettingsOf(res: CalendarSettings): GridSettings {
+  return {
+    firstDayOfWeek: res.firstDayOfWeek ?? DEFAULT_GRID.firstDayOfWeek,
+    resolution: res.resolution ?? DEFAULT_GRID.resolution,
+    workDayStart: res.workDayStart ?? DEFAULT_GRID.workDayStart,
+    workDayEnd: res.workDayEnd ?? DEFAULT_GRID.workDayEnd,
+    showNonWorkingHours: res.showNonWorkingHours ?? DEFAULT_GRID.showNonWorkingHours,
+  }
+}
+
+function useGridSettings() {
+  const [grid, setGrid] = useState<GridSettings>(DEFAULT_GRID)
+  useEffect(() => {
+    api.getCalendarSettings()
+      .then((res) => setGrid(gridSettingsOf(res)))
+      .catch(() => {
+        /* keep the defaults when settings are unavailable */
+      })
+  }, [])
+  // saveGrid applies the change in-session at once, then persists the full
+  // settings object. The workDays/defaultDuration/defaultReminder fields are
+  // managed in settings and carried here as defaults.
+  const saveGrid = (next: GridSettings) => {
+    setGrid(next)
+    api.setCalendarSettings({
+      ...next,
+      workDays: [1, 2, 3, 4, 5], defaultDuration: 30, defaultReminder: 15,
+    }).catch(() => {
+      /* best-effort: the grid keeps the chosen values in-session */
+    })
+  }
+  return { grid, saveGrid }
+}
+
+// useCalendarData loads the events around the cursor, the calendars with their
+// visibility, and the rooms and categories the event editor offers.
+function useCalendarData(cursor: Date) {
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [loading, setLoading] = useState(true)
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [editingUID, setEditingUID] = useState<string | null>(null)
-  // editingTracking holds the per-attendee response status of the event being
-  // edited, shown read-only as the organizer's TrackingTab. Null when not editing.
-  const [editingTracking, setEditingTracking] = useState<{ email: string; response: number }[] | null>(null)
-  const [form, setForm] = useState<EventForm>(emptyForm)
-  // One mutation at a time: a button's disabled attribute is not the guard,
-  // because a second click can arrive before React re-renders with the new state.
-  const { busy, begin: beginMutation, end: endMutation } = useBusyGate()
-  const [deleteTarget, setDeleteTarget] = useState<CalendarEvent | null>(null)
+  const [calendars, setCalendars] = useState<Calendar[]>([])
+  const [visibleCalendarIds, setVisibleCalendarIds] = useState<Set<string>>(new Set(["default"]))
   const [rooms, setRooms] = useState<Room[]>([])
   // allCategories is the user's master category list (name + color), loaded once
   // so the event form can offer the same palette the mail/settings pages use.
-  const [allCategories, setAllCategories] = useState<{ name: string; color?: string }[]>([])
-
-  // View toggle: agenda list, day/week/work-week time grid, or month grid. cursor
-  // is the displayed month (month view) or the anchor day (day/week/work-week).
-  const [view, setView] = useState<"list" | "day" | "week" | "workweek" | "month">("list")
-  const [cursor, setCursor] = useState(() => new Date())
-
-  // Availability (free/busy) lookup.
-  const [fbOpen, setFbOpen] = useState(false)
-  const [fbEmails, setFbEmails] = useState("")
-  const [fbDate, setFbDate] = useState(() => {
-    const d = new Date()
-    const pad = (n: number) => String(n).padStart(2, "0")
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-  })
-  const [fbLoading, setFbLoading] = useState(false)
-  const [fbResults, setFbResults] = useState<UserFreeBusy[] | null>(null)
-
-  // Multi-calendar state.
-  const { user } = useAuth()
-  const [calendars, setCalendars] = useState<Calendar[]>([])
-  const [visibleCalendarIds, setVisibleCalendarIds] = useState<Set<string>>(new Set(["default"]))
-  const [calDialogOpen, setCalDialogOpen] = useState(false)
-  const [calDialogMode, setCalDialogMode] = useState<"create" | "edit">("create")
-  const [calDialogCal, setCalDialogCal] = useState<Calendar | null>(null)
-  const [calForm, setCalForm] = useState({ name: "", description: "", color: "#3b82f6" })
-  const [calBusy, setCalBusy] = useState(false)
-  const [deleteCalTarget, setDeleteCalTarget] = useState<Calendar | null>(null)
-  const [shareDialogOpen, setShareDialogOpen] = useState(false)
-  // sideBySide renders each visible calendar in its own day/week grid (columns)
-  // instead of overlaying them in one shared grid; only meaningful with 2+ visible
-  // calendars, so the toggle is hidden otherwise.
-  const [sideBySide, setSideBySide] = useState(false)
-  const [shareDialogCal, setShareDialogCal] = useState<Calendar | null>(null)
+  const [allCategories, setAllCategories] = useState<CategoryOption[]>([])
 
   const loadCalendars = useCallback(async () => {
     try {
@@ -387,12 +387,51 @@ export function CalendarPage() {
       .catch(() => setAllCategories([]))
   }, [])
 
-  const openCreate = () => {
-    setEditingUID(null)
-    setEditingTracking(null)
-    setForm(emptyForm)
+  const toggleVisible = (id: string) => {
+    setVisibleCalendarIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  return { events, loading, load, calendars, loadCalendars, visibleCalendarIds, toggleVisible, rooms, allCategories }
+}
+
+// announceCreated reports a new event, warning when a booked room declined.
+function announceCreated(t: TFunc, created: CalendarEvent) {
+  const unbooked = (created as { unbookedRooms?: string[] }).unbookedRooms ?? []
+  if (unbooked.length > 0) {
+    toast.warning(t("calendar.eventCreatedRoomsBusy", { rooms: unbooked.join(", ") }))
+  } else {
+    toast.success(t("calendar.eventCreated"))
+  }
+}
+
+// useEventEditor holds the event dialog, the delete confirmation and the
+// mutations behind them. load refreshes the events after a change.
+function useEventEditor(load: () => Promise<void>) {
+  const { t } = useI18n()
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [editingUID, setEditingUID] = useState<string | null>(null)
+  // editingTracking holds the per-attendee response status of the event being
+  // edited, shown read-only as the organizer's TrackingTab. Null when not editing.
+  const [editingTracking, setEditingTracking] = useState<CalendarEvent["tracking"] | null>(null)
+  const [form, setForm] = useState<EventForm>(emptyEventForm)
+  // One mutation at a time: a button's disabled attribute is not the guard,
+  // because a second click can arrive before React re-renders with the new state.
+  const { busy, begin: beginMutation, end: endMutation } = useBusyGate()
+  const [deleteTarget, setDeleteTarget] = useState<CalendarEvent | null>(null)
+
+  const openWith = (uid: string | null, tracking: CalendarEvent["tracking"] | null, next: EventForm) => {
+    setEditingUID(uid)
+    setEditingTracking(tracking)
+    setForm(next)
     setDialogOpen(true)
   }
+
+  const openCreate = () => openWith(null, null, emptyEventForm())
 
   // openCreateOn opens the new-event dialog prefilled for the clicked grid day.
   // When start/end are supplied (a drag-select time range), the dialog opens with
@@ -400,91 +439,34 @@ export function CalendarPage() {
   const openCreateOn = (day: Date, start?: Date, end?: Date) => {
     const s = start ?? new Date(day.getFullYear(), day.getMonth(), day.getDate(), 9, 0)
     const e = end ?? new Date(s.getFullYear(), s.getMonth(), s.getDate(), s.getHours() + 1, s.getMinutes())
-    setEditingUID(null)
-    setEditingTracking(null)
-    setForm({ ...emptyForm, start: rfc3339ToLocalInput(s.toISOString()), end: rfc3339ToLocalInput(e.toISOString()) })
-    setDialogOpen(true)
+    openWith(null, null, { ...emptyEventForm(), start: rfc3339ToLocalInput(s.toISOString()), end: rfc3339ToLocalInput(e.toISOString()) })
   }
 
-  const openEdit = (ev: CalendarEvent) => {
-    setEditingUID(ev.uid)
-    setEditingTracking(ev.tracking ?? null)
-    setForm({
-      summary: ev.summary,
-      start: ev.allDay ? ev.start.slice(0, 10) : rfc3339ToLocalInput(ev.start),
-      end: ev.end ? (ev.allDay ? ev.end.slice(0, 10) : rfc3339ToLocalInput(ev.end)) : "",
-      allDay: !!ev.allDay,
-      location: ev.location ?? "",
-      description: ev.description ?? "",
-      attendees: (ev.attendees ?? []).join(", "),
-      optionalAttendees: (ev.optionalAttendees ?? []).join(", "),
-      recurrence: recurrenceToForm(ev.recurrence),
-      calendarId: ev.calendarId ?? "calendar",
-      reminder: ev.reminderMinutes ? String(ev.reminderMinutes) : "",
-      busyStatus: ev.busyStatus != null ? String(ev.busyStatus) : "",
-      sensitivity: ev.sensitivity != null && ev.sensitivity > 0 ? String(ev.sensitivity) : "",
-      categories: ev.categories ?? [],
-      sendInvite: false,
-    })
-    setDialogOpen(true)
+  const openEdit = (ev: CalendarEvent) => openWith(ev.uid, ev.tracking ?? null, eventFormOf(ev))
+
+  const save = async (payload: EventPayload) => {
+    if (editingUID) {
+      await api.updateCalendarEvent(editingUID, payload)
+      toast.success(t("calendar.eventUpdated"))
+      return
+    }
+    announceCreated(t, await api.createCalendarEvent(payload))
   }
 
   const submit = async () => {
-    if (!form.summary.trim()) {
-      toast.error(t("calendar.titleRequired"))
+    const problem = eventFormError(form)
+    if (problem) {
+      toast.error(t(problem))
       return
     }
-    if (!form.start) {
-      toast.error(t("calendar.startRequired"))
-      return
-    }
-    const attendees = form.attendees
-      .split(/[\s,;]+/)
-      .map((a) => a.trim())
-      .filter(Boolean)
-    const optionalAttendees = form.optionalAttendees
-      .split(/[\s,;]+/)
-      .map((a) => a.trim())
-      .filter(Boolean)
-    const payload = {
-      summary: form.summary.trim(),
-      start: form.allDay ? form.start : localInputToRFC3339(form.start),
-      end: form.end ? (form.allDay ? form.end : localInputToRFC3339(form.end)) : undefined,
-      allDay: form.allDay || undefined,
-      location: form.location || undefined,
-      description: form.description || undefined,
-      attendees: attendees.length > 0 ? attendees : undefined,
-      optionalAttendees: optionalAttendees.length > 0 ? optionalAttendees : undefined,
-      recurrence: form.recurrence ? `FREQ=${form.recurrence}` : undefined,
-      calendarId: form.calendarId || "calendar",
-      reminderMinutes: form.reminder ? Number(form.reminder) : undefined,
-      busyStatus: form.busyStatus ? Number(form.busyStatus) : undefined,
-      sensitivity: form.sensitivity ? Number(form.sensitivity) : undefined,
-      categories: form.categories.length > 0 ? form.categories : undefined,
-      sendInvite: form.sendInvite || undefined,
-      // Anchor timed events to the user's zone so recurrences keep their wall
-      // time across DST (stored as DTSTART;TZID + VTIMEZONE). All-day events stay
-      // floating dates.
-      timezone: form.allDay ? undefined : (getDisplayTimeZone() || detectTimeZone()),
-    }
+    const payload = eventPayload(form, getDisplayTimeZone() || detectTimeZone())
     if (!beginMutation()) return
     try {
-      if (editingUID) {
-        await api.updateCalendarEvent(editingUID, payload)
-        toast.success(t("calendar.eventUpdated"))
-      } else {
-        const created = await api.createCalendarEvent(payload)
-        const unbooked = (created as { unbookedRooms?: string[] }).unbookedRooms
-        if (unbooked && unbooked.length > 0) {
-          toast.warning(t("calendar.eventCreatedRoomsBusy", { rooms: unbooked.join(", ") }))
-        } else {
-          toast.success(t("calendar.eventCreated"))
-        }
-      }
+      await save(payload)
       setDialogOpen(false)
       await load()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("calendar.saveFailed"))
+      toast.error(errorText(err, t("calendar.saveFailed")))
     } finally {
       endMutation()
     }
@@ -499,7 +481,7 @@ export function CalendarPage() {
       setDeleteTarget(null)
       await load()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("calendar.deleteFailed"))
+      toast.error(errorText(err, t("calendar.deleteFailed")))
     } finally {
       endMutation()
     }
@@ -526,1017 +508,1194 @@ export function CalendarPage() {
       })
       await load()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("calendar.saveFailed"))
+      toast.error(errorText(err, t("calendar.saveFailed")))
       await load()
     }
   }
 
-  const submitCalDialog = async () => {
-    if (!calForm.name.trim()) {
-      toast.error(t("calendar.calendarNameRequired"))
-      return
-    }
-    setCalBusy(true)
-    try {
-      if (calDialogMode === "create") {
-        await api.createCalendar({ name: calForm.name, description: calForm.description || undefined, color: calForm.color || "#3b82f6" })
-        toast.success(t("calendar.calendarCreated"))
-      } else if (calDialogCal) {
-        await api.updateCalendar(calDialogCal.id, { name: calForm.name, description: calForm.description || undefined, color: calForm.color || "#3b82f6" })
-        toast.success(t("calendar.calendarUpdated"))
-      }
-      setCalDialogOpen(false)
-      await loadCalendars()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("calendar.calendarSaveFailed"))
-    } finally {
-      setCalBusy(false)
-    }
+  return {
+    dialogOpen, setDialogOpen, editingUID, editingTracking, form, setForm, busy, submit,
+    openCreate, openCreateOn, openEdit, deleteTarget, setDeleteTarget, confirmDelete, moveEvent,
+  }
+}
+
+type EventEditor = ReturnType<typeof useEventEditor>
+
+// freeBusyError returns the i18n key of the first reason a free/busy lookup
+// cannot run, or null when it can.
+function freeBusyError(emails: string[], date: string): string | null {
+  if (emails.length === 0) return "calendar.enterEmail"
+  if (!date) return "calendar.pickDate"
+  return null
+}
+
+// useFreeBusy holds the availability lookup dialog.
+function useFreeBusy() {
+  const { t } = useI18n()
+  const [open, setOpen] = useState(false)
+  const [emails, setEmails] = useState("")
+  const [date, setDate] = useState(() => dateKey(new Date()))
+  const [loading, setLoading] = useState(false)
+  const [results, setResults] = useState<UserFreeBusy[] | null>(null)
+
+  const show = () => {
+    setResults(null)
+    setOpen(true)
   }
 
-  const confirmDeleteCalendar = async () => {
-    if (!deleteCalTarget || calBusy) return
-    setCalBusy(true)
-    try {
-      await api.deleteCalendar(deleteCalTarget.id)
-      toast.success(t("calendar.calendarDeleted"))
-      setDeleteCalTarget(null)
-      await loadCalendars()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("calendar.calendarDeleteFailed"))
-    } finally {
-      setCalBusy(false)
-    }
-  }
-
-  const checkAvailability = async () => {
-    const emails = fbEmails
-      .split(/[\s,;]+/)
-      .map((e) => e.trim())
-      .filter(Boolean)
-    if (emails.length === 0) {
-      toast.error(t("calendar.enterEmail"))
-      return
-    }
-    if (!fbDate) {
-      toast.error(t("calendar.pickDate"))
+  const check = async () => {
+    const list = parseAttendees(emails)
+    const problem = freeBusyError(list, date)
+    if (problem) {
+      toast.error(t(problem))
       return
     }
     // Query the whole local day.
-    const dayStart = new Date(`${fbDate}T00:00:00`)
+    const dayStart = new Date(`${date}T00:00:00`)
     const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000)
-    setFbLoading(true)
-    setFbResults(null)
+    setLoading(true)
+    setResults(null)
     try {
-      const res = await api.getFreeBusy(emails, dayStart.toISOString(), dayEnd.toISOString())
-      setFbResults(res.freeBusy ?? [])
+      const res = await api.getFreeBusy(list, dayStart.toISOString(), dayEnd.toISOString())
+      setResults(res.freeBusy ?? [])
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("calendar.availabilityFailed"))
+      toast.error(errorText(err, t("calendar.availabilityFailed")))
     } finally {
-      setFbLoading(false)
+      setLoading(false)
     }
   }
 
-  // Only show events from calendars the user has toggled visible (all by
-  // default); when calendar metadata is unavailable, show everything.
-  const shownEvents =
-    calendars.length === 0
-      ? events
-      : events.filter((ev) => visibleCalendarIds.has(ev.calendarId ?? "calendar"))
+  return { open, setOpen, show, emails, setEmails, date, setDate, loading, results, check }
+}
 
-  // Per-calendar color for an event, to tint it in the views; only when more than
-  // one calendar exists (a single calendar needs no color distinction).
-  const calColorById = new Map(calendars.map((c) => [c.id, c.color]))
-  const eventColor = (ev: CalendarEvent): string | undefined =>
-    calendars.length > 1 ? (calColorById.get(ev.calendarId ?? "calendar") ?? "#3b82f6") : undefined
+type FreeBusy = ReturnType<typeof useFreeBusy>
 
-  // Group sorted events by day for the agenda view.
-  const groups: { day: string; items: CalendarEvent[] }[] = []
-  for (const ev of shownEvents) {
-    const key = dayKey(ev.start)
-    const last = groups[groups.length - 1]
-    if (last && last.day === key) last.items.push(ev)
-    else groups.push({ day: key, items: [ev] })
+interface CalendarFormState {
+  name: string
+  description: string
+  color: string
+}
+
+const EMPTY_CALENDAR_FORM: CalendarFormState = { name: "", description: "", color: DEFAULT_COLOR }
+
+// useCalendarEditor holds the calendar create/edit dialog and the calendar
+// delete confirmation. loadCalendars refreshes the list after a change.
+function useCalendarEditor(loadCalendars: () => Promise<void>) {
+  const { t } = useI18n()
+  const [open, setOpen] = useState(false)
+  const [mode, setMode] = useState<"create" | "edit">("create")
+  const [target, setTarget] = useState<Calendar | null>(null)
+  const [form, setForm] = useState<CalendarFormState>(EMPTY_CALENDAR_FORM)
+  const [busy, setBusy] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<Calendar | null>(null)
+
+  const openNew = () => {
+    setMode("create")
+    setTarget(null)
+    setForm(EMPTY_CALENDAR_FORM)
+    setOpen(true)
   }
 
-  // Bucket events by local day key for the month grid.
-  const eventsByDay = new Map<string, CalendarEvent[]>()
-  for (const ev of shownEvents) {
-    const key = eventDayKey(ev)
-    if (!key) continue
-    const bucket = eventsByDay.get(key)
-    if (bucket) bucket.push(ev)
-    else eventsByDay.set(key, [ev])
+  const openEdit = (cal: Calendar) => {
+    setMode("edit")
+    setTarget(cal)
+    setForm({ name: cal.name, description: cal.description ?? "", color: cal.color ?? DEFAULT_COLOR })
+    setOpen(true)
   }
 
-  const monthDays = monthMatrix(cursor, firstDayOfWeek)
-  const todayKey = dateKey(new Date())
-  const monthLabel = cursor.toLocaleDateString(undefined, { month: "long", year: "numeric" })
+  const save = async () => {
+    const input = { name: form.name, description: form.description || undefined, color: form.color || DEFAULT_COLOR }
+    if (mode === "create") {
+      await api.createCalendar(input)
+      toast.success(t("calendar.calendarCreated"))
+    } else if (target) {
+      await api.updateCalendar(target.id, input)
+      toast.success(t("calendar.calendarUpdated"))
+    }
+  }
 
-  // The attendee string holds both people and booked rooms; split them so the
-  // event form shows rooms as their own chips instead of mixing resource
-  // mailboxes into the people picker. The saved value keeps including rooms.
-  const roomEmailSet = new Set(rooms.map((r) => r.email.toLowerCase()))
-  const formAttendeeList = parseAttendees(form.attendees)
-  const peopleAttendees = formAttendeeList.filter((e) => !roomEmailSet.has(e.toLowerCase()))
-  const selectedRooms = rooms.filter((r) =>
-    formAttendeeList.some((e) => e.toLowerCase() === r.email.toLowerCase()),
-  )
+  const submit = async () => {
+    if (!form.name.trim()) {
+      toast.error(t("calendar.calendarNameRequired"))
+      return
+    }
+    setBusy(true)
+    try {
+      await save()
+      setOpen(false)
+      await loadCalendars()
+    } catch (err) {
+      toast.error(errorText(err, t("calendar.calendarSaveFailed")))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteTarget || busy) return
+    setBusy(true)
+    try {
+      await api.deleteCalendar(deleteTarget.id)
+      toast.success(t("calendar.calendarDeleted"))
+      setDeleteTarget(null)
+      await loadCalendars()
+    } catch (err) {
+      toast.error(errorText(err, t("calendar.calendarDeleteFailed")))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return { open, setOpen, mode, form, setForm, busy, submit, openNew, openEdit, deleteTarget, setDeleteTarget, confirmDelete }
+}
+
+type CalendarEditor = ReturnType<typeof useCalendarEditor>
+
+export function CalendarPage() {
+  const { t } = useI18n()
+  const { user } = useAuth()
+  const { grid, saveGrid } = useGridSettings()
+  // View toggle: agenda list, day/week/work-week time grid, or month grid. cursor
+  // is the displayed month (month view) or the anchor day (day/week/work-week).
+  const [view, setView] = useState<CalendarView>("list")
+  const [cursor, setCursor] = useState(() => new Date())
+  // sideBySide renders each visible calendar in its own day/week grid (columns)
+  // instead of overlaying them in one shared grid; only meaningful with 2+ visible
+  // calendars, so the toggle is hidden otherwise.
+  const [sideBySide, setSideBySide] = useState(false)
+  const [shareCal, setShareCal] = useState<Calendar | null>(null)
+  const data = useCalendarData(cursor)
+  const editor = useEventEditor(data.load)
+  const freeBusy = useFreeBusy()
+  const calEditor = useCalendarEditor(data.loadCalendars)
+
+  const dayNames = weekdayNames(t)
+  // weekdayLabels rotated to start on firstDayOfWeek, so the month-grid header
+  // and the time-grid day header columns align with monthMatrix/weekDays.
+  const weekdayLabels = [...dayNames.slice(grid.firstDayOfWeek), ...dayNames.slice(0, grid.firstDayOfWeek)]
+  const visibleCalendars = data.calendars.filter((c) => data.visibleCalendarIds.has(c.id))
+  const shownEvents = shownEventsOf(data.events, data.calendars, data.visibleCalendarIds)
+  const eventColor = eventColorFor(data.calendars)
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between" data-print="hide">
-        <div className="flex items-center gap-2">
-          <CalendarDays className="h-6 w-6 text-primary" />
-          <h1 className="text-2xl font-bold">{t("nav.calendar")}</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          <Select value={view} onValueChange={(v) => setView(v as typeof view)}>
-            <SelectTrigger className="w-36">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="day">{t("calendar.day")}</SelectItem>
-              <SelectItem value="workweek">{t("calendar.workweek")}</SelectItem>
-              <SelectItem value="week">{t("calendar.week")}</SelectItem>
-              <SelectItem value="month">{t("calendar.month")}</SelectItem>
-              <SelectItem value="list">{t("calendar.list")}</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={String(firstDayOfWeek)} onValueChange={(v) => setFirstDay(Number(v))}>
-            <SelectTrigger className="w-28" aria-label={t("calendar.firstDayOfWeek")} title={t("calendar.firstDayOfWeek")}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {dayNamesSundayFirst.map((label, idx) => (
-                <SelectItem key={idx} value={String(idx)}>{label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={String(resolution)} onValueChange={(v) => setResolutionAndSave(Number(v))}>
-            <SelectTrigger className="w-24" aria-label={t("calendar.resolution")} title={t("calendar.resolution")}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {[5, 10, 15, 30, 60].map((m) => (
-                <SelectItem key={m} value={String(m)}>{t("calendar.resolutionMinutes", { n: String(m) })}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button variant="outline" onClick={() => { setFbResults(null); setFbOpen(true) }}>
-            <Users className="mr-2 h-4 w-4" />
-            {t("calendar.availability")}
-          </Button>
-          {calendars.filter((c) => visibleCalendarIds.has(c.id)).length >= 2 && (view === "day" || view === "week" || view === "workweek") && (
-            <Button
-              variant={sideBySide ? "secondary" : "outline"}
-              onClick={() => setSideBySide((s) => !s)}
-              title={t("calendar.sideBySide")}
-              aria-pressed={sideBySide}
-            >
-              {t("calendar.sideBySide")}
-            </Button>
-          )}
-          <input
-            type="date"
-            aria-label={t("calendar.jumpToDate")}
-            title={t("calendar.jumpToDate")}
-            value={dateKey(cursor)}
-            onChange={(e) => {
-              const d = new Date(e.target.value)
-              if (!isNaN(d.getTime())) setCursor(d)
-            }}
-            className="rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/20"
-          />
-          <Button variant="outline" onClick={() => window.print()} title={t("calendar.print")}>
-            <Printer className="h-4 w-4" />
-          </Button>
-          <Button onClick={openCreate}>
-            <Plus className="mr-2 h-4 w-4" />
-            {t("calendar.newEvent")}
-          </Button>
-        </div>
-      </div>
-
-      {/* Calendar overlay sidebar: list of calendars with visibility toggles */}
-      {calendars.length > 0 && (
-        <div className="flex items-center gap-2 flex-wrap" data-print="hide">
-          <span className="text-sm text-muted-foreground">{t("calendar.calendars")}:</span>
-          {calendars.map((cal) => {
-            const visible = visibleCalendarIds.has(cal.id)
-            return (
-              <div
-                key={cal.id}
-                className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-sm border transition-colors cursor-pointer ${
-                  visible ? "opacity-100" : "opacity-50"
-                }`}
-                style={{ borderColor: cal.color ?? "#3b82f6", color: cal.color ?? "#3b82f6", backgroundColor: visible ? `${cal.color ?? "#3b82f6"}15` : "transparent" }}
-                onClick={() => {
-                  setVisibleCalendarIds((prev) => {
-                    const next = new Set(prev)
-                    if (next.has(cal.id)) next.delete(cal.id)
-                    else next.add(cal.id)
-                    return next
-                  })
-                }}
-                title={cal.description}
-              >
-                <span
-                  className="h-2 w-2 rounded-full shrink-0"
-                  style={{ backgroundColor: cal.color ?? "#3b82f6" }}
-                />
-                <span className="truncate max-w-24">{cal.name}</span>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-5 w-5 ml-1 p-0 opacity-50 hover:opacity-100"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <Settings2 className="h-3 w-3" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      onClick={() => {
-                        setCalDialogMode("edit")
-                        setCalDialogCal(cal)
-                        setCalForm({ name: cal.name, description: cal.description ?? "", color: cal.color ?? "#3b82f6" })
-                        setCalDialogOpen(true)
-                      }}
-                    >
-                      <Edit className="mr-2 h-4 w-4" />
-                      {t("common.edit")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => {
-                        setShareDialogCal(cal)
-                        setShareDialogOpen(true)
-                      }}
-                    >
-                      <Share2 className="mr-2 h-4 w-4" />
-                      {t("share.dialogTitle")}
-                    </DropdownMenuItem>
-                    {!cal.isDefault && (
-                      <DropdownMenuItem
-                        className="text-destructive"
-                        onClick={() => setDeleteCalTarget(cal)}
-                      >
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        {t("common.delete")}
-                      </DropdownMenuItem>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            )
-          })}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs"
-            onClick={() => {
-              setCalDialogMode("create")
-              setCalDialogCal(null)
-              setCalForm({ name: "", description: "", color: "#3b82f6" })
-              setCalDialogOpen(true)
-            }}
-          >
-            <Plus className="h-3 w-3 mr-1" />
-            {t("calendar.addCalendar")}
-          </Button>
-        </div>
+      <CalendarToolbar
+        view={view}
+        onView={setView}
+        grid={grid}
+        onGrid={saveGrid}
+        dayNames={dayNames}
+        cursor={cursor}
+        onCursor={setCursor}
+        onAvailability={freeBusy.show}
+        showSideBySide={visibleCalendars.length >= 2 && isTimeGrid(view)}
+        sideBySide={sideBySide}
+        onToggleSideBySide={() => setSideBySide((s) => !s)}
+        onCreate={editor.openCreate}
+      />
+      {data.calendars.length > 0 && (
+        <CalendarChips
+          calendars={data.calendars}
+          visibleIds={data.visibleCalendarIds}
+          onToggle={data.toggleVisible}
+          onEdit={calEditor.openEdit}
+          onShare={setShareCal}
+          onDelete={calEditor.setDeleteTarget}
+          onAdd={calEditor.openNew}
+        />
       )}
-
-      {loading ? (
-        <p className="text-sm text-muted-foreground py-8 text-center">{t("common.loading")}</p>
-      ) : view === "month" ? (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">{monthLabel}</h2>
-            <div className="flex items-center gap-1" data-print="hide">
-              <Button variant="outline" size="sm" onClick={() => setCursor(new Date())}>
-                {t("common.today")}
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                aria-label={t("calendar.previousMonth")}
-                onClick={() => setCursor((c) => new Date(c.getFullYear(), c.getMonth() - 1, 1))}
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                aria-label={t("calendar.nextMonth")}
-                onClick={() => setCursor((c) => new Date(c.getFullYear(), c.getMonth() + 1, 1))}
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-          <div className="overflow-hidden rounded-lg border bg-card">
-            <div className="grid grid-cols-7 border-b bg-muted/30 text-center text-xs font-medium text-muted-foreground">
-              {weekdayLabels.map((label) => (
-                <div key={label} className="py-2">{label}</div>
-              ))}
-            </div>
-            <div className="grid grid-cols-7">
-              {monthDays.map((day) => {
-                const key = dateKey(day)
-                const inMonth = day.getMonth() === cursor.getMonth()
-                const isToday = key === todayKey
-                const dayEvents = eventsByDay.get(key) ?? []
-                return (
-                  <div
-                    key={key}
-                    className={`min-h-24 cursor-pointer border-b border-r p-1 transition-colors last:border-r-0 hover:bg-accent/50 ${inMonth ? "" : "bg-muted/20 text-muted-foreground"}`}
-                    onClick={() => openCreateOn(day)}
-                  >
-                    <div className="flex justify-end">
-                      <span
-                        className={`flex h-6 w-6 items-center justify-center rounded-full text-xs ${isToday ? "bg-primary font-semibold text-primary-foreground" : dayEvents.length > 0 ? "font-semibold" : ""}`}
-                      >
-                        {day.getDate()}
-                      </span>
-                    </div>
-                    <div className="mt-0.5 space-y-0.5">
-                      {dayEvents.slice(0, 3).map((ev) => (
-                        <button
-                          key={ev.uid}
-                          className="block w-full truncate rounded bg-primary/10 px-1 py-0.5 text-left text-xs text-foreground hover:bg-primary/20"
-                          style={eventColor(ev) ? { borderLeft: `3px solid ${eventColor(ev)}` } : undefined}
-                          onClick={(e) => { e.stopPropagation(); openEdit(ev) }}
-                          title={ev.summary}
-                        >
-                          {!ev.allDay && (
-                            <span className="mr-1 text-muted-foreground">
-                              {new Date(ev.start).toLocaleTimeString(undefined, withTz({ hour: "2-digit", minute: "2-digit" }))}
-                            </span>
-                          )}
-                          {ev.summary}
-                        </button>
-                      ))}
-                      {dayEvents.length > 3 && (
-                        <p className="px-1 text-xs text-muted-foreground">{t("calendar.moreEvents", { count: String(dayEvents.length - 3) })}</p>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </div>
-      ) : view === "day" || view === "week" || view === "workweek" ? (() => {
-        const days = view === "day" ? weekDays(cursor, 1, firstDayOfWeek) : view === "workweek" ? weekDays(cursor, 5, firstDayOfWeek) : weekDays(cursor, 7, firstDayOfWeek)
-        // In side-by-side mode (2+ visible calendars), render one grid per visible
-        // calendar, each filtered to its own events; otherwise overlay all visible
-        // calendars in a single shared grid.
-        const sideBySideCals = calendars.filter((c) => visibleCalendarIds.has(c.id))
-        const grid = (evs: CalendarEvent[], label: string) => (
-          <DayTimeGrid
-            days={days}
-            label={label}
-            prevLabel={t(view === "day" ? "calendar.previousDay" : "calendar.previousWeek")}
-            nextLabel={t(view === "day" ? "calendar.nextDay" : "calendar.nextWeek")}
-            todayLabel={t("common.today")}
-            onPrev={() => setCursor((c) => moveCursor(c, view, -1))}
-            onNext={() => setCursor((c) => moveCursor(c, view, +1))}
-            onToday={() => setCursor(new Date())}
-            weekdayLabels={weekdayLabels}
-            firstDayOfWeek={firstDayOfWeek}
-            resolution={resolution}
-            workDayStart={workDayStart}
-            workDayEnd={workDayEnd}
-            showNonWorkingHours={showNonWorkingHours}
-            events={evs}
-            eventColor={eventColor}
-            todayKey={todayKey}
-            onOpenEvent={openEdit}
-            onCreateOn={openCreateOn}
-            onMoveEvent={moveEvent}
-          />
-        )
-        if (sideBySide && sideBySideCals.length >= 2) {
-          return (
-            <div className="flex gap-4 overflow-x-auto pb-2">
-              {sideBySideCals.map((cal) => (
-                <div key={cal.id} className="min-w-[20rem] flex-1">
-                  {grid(
-                    shownEvents.filter((ev) => (ev.calendarId ?? "calendar") === cal.id),
-                    `${rangeLabel(days)} - ${cal.name}`,
-                  )}
-                </div>
-              ))}
-            </div>
-          )
-        }
-        return grid(shownEvents, rangeLabel(days))
-      })()
-       : events.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <div className="rounded-full bg-muted p-4">
-            <CalendarDays className="h-8 w-8 text-muted-foreground" />
-          </div>
-          <h3 className="mt-4 text-lg font-medium">{t("calendar.noEvents")}</h3>
-          <p className="text-muted-foreground mt-1">{t("calendar.noEventsHint")}</p>
-          <Button className="mt-4" onClick={openCreate}>
-            <Plus className="mr-2 h-4 w-4" />
-            {t("calendar.newEvent")}
-          </Button>
-        </div>
-      ) : (
-        <div className="space-y-6">
-          {groups.map((group) => (
-            <div key={group.day}>
-              <h2 className="mb-2 text-sm font-semibold text-muted-foreground">{group.day}</h2>
-              <div className="rounded-lg border bg-card divide-y">
-                {group.items.map((ev) => (
-                  <div key={ev.uid} className="flex items-start gap-4 p-4 hover:bg-accent/50 transition-colors">
-                    {eventColor(ev) && (
-                      <div className="w-1 self-stretch rounded-full" style={{ backgroundColor: eventColor(ev) }} aria-hidden />
-                    )}
-                    <div className="flex w-24 shrink-0 items-center gap-1 text-sm text-muted-foreground">
-                      <Clock className="h-3.5 w-3.5" />
-                      {timeLabel(t, ev)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{ev.summary}</p>
-                      {ev.location && (
-                        <p className="flex items-center gap-1 text-sm text-muted-foreground">
-                          <MapPin className="h-3.5 w-3.5" />
-                          {ev.location}
-                        </p>
-                      )}
-                      {ev.recurrence && (
-                        <p className="flex items-center gap-1 text-sm text-muted-foreground">
-                          <Repeat className="h-3.5 w-3.5" />
-                          {recurrenceLabel(t, recurrenceToForm(ev.recurrence))}
-                        </p>
-                      )}
-                      {ev.reminderMinutes && ev.reminderMinutes > 0 && (
-                        <p className="flex items-center gap-1 text-sm text-muted-foreground">
-                          <Bell className="h-3.5 w-3.5" />
-                          {t("calendar.reminderMinutes", { n: String(ev.reminderMinutes) })}
-                        </p>
-                      )}
-                      {ev.description && (
-                        <p className="text-sm text-muted-foreground truncate">{ev.description}</p>
-                      )}
-                    </div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => openEdit(ev)}>
-                          <Edit className="mr-2 h-4 w-4" />
-                          {t("common.edit")}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem className="text-destructive" onClick={() => setDeleteTarget(ev)}>
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          {t("common.delete")}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Create / edit dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{editingUID ? t("calendar.editEvent") : t("calendar.newEvent")}</DialogTitle>
-            <DialogDescription>{t("calendar.dialogDescription")}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label htmlFor="ev-summary">{t("calendar.title")}</Label>
-              <Input
-                id="ev-summary"
-                value={form.summary}
-                onChange={(e) => setForm({ ...form, summary: e.target.value })}
-                placeholder={t("calendar.titlePlaceholder")}
-              />
-            </div>
-            {calendars.length > 1 && (
-              <div className="space-y-2">
-                <Label htmlFor="ev-calendar">{t("calendar.calendar")}</Label>
-                <Select
-                  value={form.calendarId}
-                  onValueChange={(value) => setForm({ ...form, calendarId: value })}
-                >
-                  <SelectTrigger id="ev-calendar">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {calendars.map((cal) => (
-                      <SelectItem key={cal.id} value={cal.id}>
-                        {cal.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            <div className="flex items-center justify-between">
-              <Label htmlFor="ev-allday">{t("calendar.allDay")}</Label>
-              <Switch
-                id="ev-allday"
-                checked={form.allDay}
-                onCheckedChange={(checked) => setForm({ ...form, allDay: checked })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ev-recurrence">{t("calendar.repeat")}</Label>
-              <Select
-                value={form.recurrence}
-                onValueChange={(value) => setForm({ ...form, recurrence: value === "none" ? "" : value })}
-              >
-                <SelectTrigger id="ev-recurrence">
-                  <SelectValue placeholder={t("calendar.recurrence.none")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">{recurrenceLabel(t, "")}</SelectItem>
-                  <SelectItem value="DAILY">{recurrenceLabel(t, "DAILY")}</SelectItem>
-                  <SelectItem value="WEEKLY">{recurrenceLabel(t, "WEEKLY")}</SelectItem>
-                  <SelectItem value="MONTHLY">{recurrenceLabel(t, "MONTHLY")}</SelectItem>
-                  <SelectItem value="YEARLY">{recurrenceLabel(t, "YEARLY")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ev-reminder">{t("calendar.reminder")}</Label>
-              <Select
-                value={form.reminder}
-                onValueChange={(value) => setForm({ ...form, reminder: value === "none" ? "" : value })}
-              >
-                <SelectTrigger id="ev-reminder">
-                  <SelectValue placeholder={t("calendar.reminderNone")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">{t("calendar.reminderNone")}</SelectItem>
-                  {[5, 10, 15, 30, 60, 120, 1440].map((m) => (
-                    <SelectItem key={m} value={String(m)}>{t("calendar.reminderMinutes", { n: String(m) })}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ev-busy">{t("calendar.busyStatus")}</Label>
-              <Select
-                value={form.busyStatus || "2"}
-                onValueChange={(value) => setForm({ ...form, busyStatus: value })}
-              >
-                <SelectTrigger id="ev-busy">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="0">{t("calendar.busyFree")}</SelectItem>
-                  <SelectItem value="1">{t("calendar.busyTentative")}</SelectItem>
-                  <SelectItem value="2">{t("calendar.busyBusy")}</SelectItem>
-                  <SelectItem value="3">{t("calendar.busyOof")}</SelectItem>
-                  <SelectItem value="4">{t("calendar.busyWorkingElsewhere")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ev-sens">{t("calendar.sensitivity")}</Label>
-              <Select
-                value={form.sensitivity || "0"}
-                onValueChange={(value) => setForm({ ...form, sensitivity: value === "0" ? "" : value })}
-              >
-                <SelectTrigger id="ev-sens">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="0">{t("calendar.sensitivityNormal")}</SelectItem>
-                  <SelectItem value="2">{t("calendar.sensitivityPrivate")}</SelectItem>
-                  <SelectItem value="3">{t("calendar.sensitivityConfidential")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {allCategories.length > 0 && (
-              <div className="space-y-2">
-                <Label>{t("calendar.categories")}</Label>
-                <div className="flex flex-wrap gap-1.5">
-                  {allCategories.map((cat) => {
-                    const on = form.categories.includes(cat.name)
-                    return (
-                      <button
-                        key={cat.name}
-                        type="button"
-                        className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${on ? "opacity-100" : "opacity-50"}`}
-                        style={{
-                          borderColor: cat.color ?? "#3b82f6",
-                          color: cat.color ?? "#3b82f6",
-                          backgroundColor: on ? `${cat.color ?? "#3b82f6"}15` : "transparent",
-                        }}
-                        onClick={() =>
-                          setForm((prev) => ({
-                            ...prev,
-                            categories: on
-                              ? prev.categories.filter((c) => c !== cat.name)
-                              : [...prev.categories, cat.name],
-                          }))
-                        }
-                      >
-                        {cat.name}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-            {editingUID && editingTracking && editingTracking.length > 0 && (
-              <div className="space-y-2">
-                <Label>{t("calendar.tracking")}</Label>
-                <ul className="rounded-md border divide-y text-sm">
-                  {editingTracking.map((tr) => (
-                    <li key={tr.email} className="flex items-center justify-between px-3 py-1.5">
-                      <span className="truncate">{tr.email}</span>
-                      <span className="shrink-0 text-muted-foreground">
-                        {tr.response === 3
-                          ? t("calendar.respAccepted")
-                          : tr.response === 2
-                            ? t("calendar.respTentative")
-                            : tr.response === 4
-                              ? t("calendar.respDeclined")
-                              : t("calendar.respNone")}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="ev-start">{t("calendar.start")}</Label>
-                <Input
-                  id="ev-start"
-                  type={form.allDay ? "date" : "datetime-local"}
-                  value={form.start}
-                  onChange={(e) => setForm({ ...form, start: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="ev-end">{t("calendar.end")}</Label>
-                <Input
-                  id="ev-end"
-                  type={form.allDay ? "date" : "datetime-local"}
-                  value={form.end}
-                  onChange={(e) => setForm({ ...form, end: e.target.value })}
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ev-location">{t("calendar.location")}</Label>
-              <Input
-                id="ev-location"
-                value={form.location}
-                onChange={(e) => setForm({ ...form, location: e.target.value })}
-                placeholder={t("common.optional")}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="ev-desc">{t("calendar.description")}</Label>
-              <Textarea
-                id="ev-desc"
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-                rows={3}
-                placeholder={t("common.optional")}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>{t("calendar.attendees")}</Label>
-              <AttendeePicker
-                value={peopleAttendees}
-                onChange={(emails) =>
-                  setForm({ ...form, attendees: [...emails, ...selectedRooms.map((r) => r.email)].join(", ") })
-                }
-                window={
-                  form.start && !form.allDay
-                    ? {
-                        start: localInputToRFC3339(form.start),
-                        end: form.end
-                          ? localInputToRFC3339(form.end)
-                          : new Date(new Date(form.start).getTime() + 60 * 60 * 1000).toISOString(),
-                      }
-                    : undefined
-                }
-              />
-              <p className="text-xs text-muted-foreground">
-                {t("calendar.attendeesHint")}
-              </p>
-              {/* Optional attendees (OPT-PARTICIPANT): a separate picker so the
-                  organizer can distinguish required from optional invitees. */}
-              <Label className="pt-1 text-xs text-muted-foreground">{t("calendar.optionalAttendees")}</Label>
-              <AttendeePicker
-                value={parseAttendees(form.optionalAttendees)}
-                onChange={(emails) => setForm({ ...form, optionalAttendees: emails.join(", ") })}
-                window={
-                  form.start && !form.allDay
-                    ? {
-                        start: localInputToRFC3339(form.start),
-                        end: form.end
-                          ? localInputToRFC3339(form.end)
-                          : new Date(new Date(form.start).getTime() + 60 * 60 * 1000).toISOString(),
-                      }
-                    : undefined
-                }
-              />
-              {/* Send a METHOD:REQUEST meeting invite to the attendees on create. */}
-              <div className="flex items-center justify-between pt-1">
-                <Label htmlFor="ev-invite" className="text-sm font-normal cursor-pointer">
-                  {t("calendar.sendInvite")}
-                </Label>
-                <Switch
-                  id="ev-invite"
-                  checked={form.sendInvite}
-                  onCheckedChange={(checked) => setForm({ ...form, sendInvite: checked })}
-                />
-              </div>
-              {form.sendInvite && (
-                <p className="text-xs text-muted-foreground">{t("calendar.sendInviteHint")}</p>
-              )}
-            </div>
-            {rooms.length > 0 && (
-              <div className="space-y-2">
-                <Label htmlFor="ev-room">{t("calendar.room")}</Label>
-                <Select
-                  value=""
-                  onValueChange={(email) => {
-                    const room = rooms.find((r) => r.email === email)
-                    if (!room) return
-                    setForm((prev) => {
-                      const list = prev.attendees
-                        .split(/[\s,;]+/)
-                        .map((a) => a.trim())
-                        .filter(Boolean)
-                      if (!list.includes(room.email)) list.push(room.email)
-                      return { ...prev, attendees: list.join(", "), location: prev.location || room.name }
-                    })
-                  }}
-                >
-                  <SelectTrigger id="ev-room">
-                    <SelectValue placeholder={t("calendar.addRoom")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {rooms.map((room) => (
-                      <SelectItem key={room.email} value={room.email}>
-                        {room.name}
-                        {room.capacity ? ` ${t("calendar.roomSeats", { count: String(room.capacity) })}` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {selectedRooms.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {selectedRooms.map((room) => (
-                      <span
-                        key={room.email}
-                        className="inline-flex items-center gap-1 rounded-md bg-secondary px-2 py-0.5 text-xs"
-                      >
-                        {room.name}
-                        {room.capacity ? ` ${t("calendar.roomSeats", { count: String(room.capacity) })}` : ""}
-                        <button
-                          type="button"
-                          className="text-muted-foreground hover:text-foreground"
-                          aria-label={`${t("common.remove")} ${room.name}`}
-                          onClick={() =>
-                            setForm((prev) => ({
-                              ...prev,
-                              attendees: parseAttendees(prev.attendees)
-                                .filter((e) => e.toLowerCase() !== room.email.toLowerCase())
-                                .join(", "),
-                            }))
-                          }
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <p className="text-xs text-muted-foreground">
-                  {t("calendar.roomHint")}
-                </p>
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={busy}>
-              {t("common.cancel")}
-            </Button>
-            <Button onClick={submit} disabled={busy}>
-              {editingUID ? t("common.save") : t("common.create")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Availability (free/busy) lookup */}
-      <Dialog open={fbOpen} onOpenChange={setFbOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("calendar.checkAvailability")}</DialogTitle>
-            <DialogDescription>
-              {t("calendar.availabilityDescription")}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label>{t("calendar.people")}</Label>
-              <AttendeePicker
-                value={parseAttendees(fbEmails)}
-                onChange={(emails) => setFbEmails(emails.join(", "))}
-                placeholder={t("calendar.searchNameEmail")}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="fb-date">{t("common.date")}</Label>
-              <Input
-                id="fb-date"
-                type="date"
-                value={fbDate}
-                onChange={(e) => setFbDate(e.target.value)}
-              />
-            </div>
-            {fbResults && (
-              <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
-                {fbResults.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">{t("common.noResults")}</p>
-                ) : (
-                  fbResults.map((r) => (
-                    <div key={r.user}>
-                      <p className="text-sm font-medium">{r.user}</p>
-                      {r.busy.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">{t("calendar.freeAllDay")}</p>
-                      ) : (
-                        <ul className="mt-1 space-y-0.5">
-                          {r.busy.map((b, i) => (
-                            <li key={i} className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                              <Clock className="h-3.5 w-3.5" />
-                              {new Date(b.start).toLocaleTimeString(undefined, withTz({ hour: "2-digit", minute: "2-digit" }))}
-                              {" – "}
-                              {new Date(b.end).toLocaleTimeString(undefined, withTz({ hour: "2-digit", minute: "2-digit" }))}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setFbOpen(false)} disabled={fbLoading}>
-              {t("common.close")}
-            </Button>
-            <Button onClick={checkAvailability} disabled={fbLoading}>
-              {fbLoading ? t("calendar.checking") : t("calendar.check")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete confirmation */}
-      <Dialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("calendar.deleteEvent")}</DialogTitle>
-            <DialogDescription>{t("calendar.deleteConfirm", { name: deleteTarget?.summary ?? "" })}</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={busy}>
-              {t("common.cancel")}
-            </Button>
-            <Button variant="destructive" onClick={confirmDelete} disabled={busy}>
-              <Trash2 className="mr-2 h-4 w-4" />
-              {t("common.delete")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Calendar create/edit dialog */}
-      <Dialog open={calDialogOpen} onOpenChange={setCalDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {calDialogMode === "create" ? t("calendar.newCalendar") : t("calendar.editCalendar")}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label htmlFor="cal-name">{t("calendar.calendarName")}</Label>
-              <Input
-                id="cal-name"
-                value={calForm.name}
-                onChange={(e) => setCalForm({ ...calForm, name: e.target.value })}
-                placeholder={t("calendar.calendarNamePlaceholder")}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="cal-desc">{t("calendar.description")}</Label>
-              <Input
-                id="cal-desc"
-                value={calForm.description}
-                onChange={(e) => setCalForm({ ...calForm, description: e.target.value })}
-                placeholder={t("common.optional")}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="cal-color">{t("calendar.color")}</Label>
-              <div className="flex items-center gap-3">
-                <input
-                  id="cal-color"
-                  type="color"
-                  value={calForm.color}
-                  onChange={(e) => setCalForm({ ...calForm, color: e.target.value })}
-                  className="h-9 w-14 rounded border cursor-pointer p-0.5"
-                />
-                <Input
-                  value={calForm.color}
-                  onChange={(e) => setCalForm({ ...calForm, color: e.target.value })}
-                  placeholder="#3b82f6"
-                  className="font-mono"
-                />
-              </div>
-              {/* Color scheme palette: quick-pick swatches for the calendar color. */}
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {["#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6", "#8b5cf6", "#ec4899", "#64748b"].map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    aria-label={c}
-                    onClick={() => setCalForm({ ...calForm, color: c })}
-                    className={`h-6 w-6 rounded-full border-2 transition-transform hover:scale-110 ${calForm.color.toLowerCase() === c ? "border-foreground" : "border-transparent"}`}
-                    style={{ backgroundColor: c }}
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCalDialogOpen(false)} disabled={calBusy}>
-              {t("common.cancel")}
-            </Button>
-            <Button onClick={submitCalDialog} disabled={calBusy}>
-              {calDialogMode === "create" ? t("common.create") : t("common.save")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Calendar delete confirmation */}
-      <Dialog open={deleteCalTarget !== null} onOpenChange={(open) => { if (!open) setDeleteCalTarget(null) }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("calendar.deleteCalendar")}</DialogTitle>
-            <DialogDescription>
-              {t("calendar.deleteCalendarConfirm", { name: deleteCalTarget?.name ?? "" })}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteCalTarget(null)} disabled={calBusy}>
-              {t("common.cancel")}
-            </Button>
-            <Button variant="destructive" onClick={confirmDeleteCalendar} disabled={calBusy}>
-              <Trash2 className="mr-2 h-4 w-4" />
-              {t("common.delete")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Calendar sharing dialog */}
-      {shareDialogCal && (
+      <CalendarBody
+        loading={data.loading}
+        view={view}
+        hasEvents={data.events.length > 0}
+        cursor={cursor}
+        setCursor={setCursor}
+        grid={grid}
+        weekdayLabels={weekdayLabels}
+        events={shownEvents}
+        eventColor={eventColor}
+        editor={editor}
+        sideBySide={sideBySide}
+        visibleCalendars={visibleCalendars}
+      />
+      <EventDialog editor={editor} calendars={data.calendars} rooms={data.rooms} categories={data.allCategories} />
+      <FreeBusyDialog freeBusy={freeBusy} />
+      <ConfirmDeleteDialog
+        open={editor.deleteTarget !== null}
+        title={t("calendar.deleteEvent")}
+        description={t("calendar.deleteConfirm", { name: editor.deleteTarget?.summary ?? "" })}
+        busy={editor.busy}
+        onCancel={() => editor.setDeleteTarget(null)}
+        onConfirm={editor.confirmDelete}
+      />
+      <CalendarDialog calEditor={calEditor} />
+      <ConfirmDeleteDialog
+        open={calEditor.deleteTarget !== null}
+        title={t("calendar.deleteCalendar")}
+        description={t("calendar.deleteCalendarConfirm", { name: calEditor.deleteTarget?.name ?? "" })}
+        busy={calEditor.busy}
+        onCancel={() => calEditor.setDeleteTarget(null)}
+        onConfirm={calEditor.confirmDelete}
+      />
+      {shareCal && (
         <ShareFolderDialog
-          open={shareDialogOpen}
+          open
           onOpenChange={(open) => {
-            setShareDialogOpen(open)
-            if (!open) setShareDialogCal(null)
+            if (!open) setShareCal(null)
           }}
-          folderName={shareDialogCal.id}
-          folderLabel={shareDialogCal.name}
+          folderName={shareCal.id}
+          folderLabel={shareCal.name}
           owner={user?.email ?? ""}
           isOwner={true}
         />
       )}
+    </div>
+  )
+}
+
+function CalendarToolbar(props: {
+  view: CalendarView
+  onView: (view: CalendarView) => void
+  grid: GridSettings
+  onGrid: (next: GridSettings) => void
+  dayNames: string[]
+  cursor: Date
+  onCursor: (d: Date) => void
+  onAvailability: () => void
+  showSideBySide: boolean
+  sideBySide: boolean
+  onToggleSideBySide: () => void
+  onCreate: () => void
+}) {
+  const { t } = useI18n()
+  const { grid, onGrid } = props
+  return (
+    <div className="flex items-center justify-between" data-print="hide">
+      <div className="flex items-center gap-2">
+        <CalendarDays className="h-6 w-6 text-primary" />
+        <h1 className="text-2xl font-bold">{t("nav.calendar")}</h1>
+      </div>
+      <div className="flex items-center gap-2">
+        <Select value={props.view} onValueChange={(v) => props.onView(v as CalendarView)}>
+          <SelectTrigger className="w-36">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="day">{t("calendar.day")}</SelectItem>
+            <SelectItem value="workweek">{t("calendar.workweek")}</SelectItem>
+            <SelectItem value="week">{t("calendar.week")}</SelectItem>
+            <SelectItem value="month">{t("calendar.month")}</SelectItem>
+            <SelectItem value="list">{t("calendar.list")}</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={String(grid.firstDayOfWeek)} onValueChange={(v) => onGrid({ ...grid, firstDayOfWeek: Number(v) })}>
+          <SelectTrigger className="w-28" aria-label={t("calendar.firstDayOfWeek")} title={t("calendar.firstDayOfWeek")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {props.dayNames.map((label, idx) => (
+              <SelectItem key={idx} value={String(idx)}>{label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={String(grid.resolution)} onValueChange={(v) => onGrid({ ...grid, resolution: Number(v) })}>
+          <SelectTrigger className="w-24" aria-label={t("calendar.resolution")} title={t("calendar.resolution")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {RESOLUTION_MINUTES.map((m) => (
+              <SelectItem key={m} value={String(m)}>{t("calendar.resolutionMinutes", { n: String(m) })}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button variant="outline" onClick={props.onAvailability}>
+          <Users className="mr-2 h-4 w-4" />
+          {t("calendar.availability")}
+        </Button>
+        {props.showSideBySide && (
+          <Button
+            variant={props.sideBySide ? "secondary" : "outline"}
+            onClick={props.onToggleSideBySide}
+            title={t("calendar.sideBySide")}
+            aria-pressed={props.sideBySide}
+          >
+            {t("calendar.sideBySide")}
+          </Button>
+        )}
+        <input
+          type="date"
+          aria-label={t("calendar.jumpToDate")}
+          title={t("calendar.jumpToDate")}
+          value={dateKey(props.cursor)}
+          onChange={(e) => {
+            const d = new Date(e.target.value)
+            if (!isNaN(d.getTime())) props.onCursor(d)
+          }}
+          className="rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+        />
+        <Button variant="outline" onClick={() => window.print()} title={t("calendar.print")}>
+          <Printer className="h-4 w-4" />
+        </Button>
+        <Button onClick={props.onCreate}>
+          <Plus className="mr-2 h-4 w-4" />
+          {t("calendar.newEvent")}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// CalendarChips is the calendar overlay bar: every calendar as a chip that
+// toggles its visibility, with a menu to edit, share or delete it.
+function CalendarChips(props: {
+  calendars: Calendar[]
+  visibleIds: Set<string>
+  onToggle: (id: string) => void
+  onEdit: (cal: Calendar) => void
+  onShare: (cal: Calendar) => void
+  onDelete: (cal: Calendar) => void
+  onAdd: () => void
+}) {
+  const { t } = useI18n()
+  return (
+    <div className="flex items-center gap-2 flex-wrap" data-print="hide">
+      <span className="text-sm text-muted-foreground">{t("calendar.calendars")}:</span>
+      {props.calendars.map((cal) => (
+        <CalendarChip
+          key={cal.id}
+          cal={cal}
+          visible={props.visibleIds.has(cal.id)}
+          onToggle={() => props.onToggle(cal.id)}
+          onEdit={() => props.onEdit(cal)}
+          onShare={() => props.onShare(cal)}
+          onDelete={() => props.onDelete(cal)}
+        />
+      ))}
+      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={props.onAdd}>
+        <Plus className="h-3 w-3 mr-1" />
+        {t("calendar.addCalendar")}
+      </Button>
+    </div>
+  )
+}
+
+function CalendarChip({ cal, visible, onToggle, onEdit, onShare, onDelete }: {
+  cal: Calendar
+  visible: boolean
+  onToggle: () => void
+  onEdit: () => void
+  onShare: () => void
+  onDelete: () => void
+}) {
+  const { t } = useI18n()
+  const color = cal.color ?? DEFAULT_COLOR
+  return (
+    <div
+      className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-sm border transition-colors cursor-pointer ${
+        visible ? "opacity-100" : "opacity-50"
+      }`}
+      style={{ borderColor: color, color, backgroundColor: visible ? `${color}15` : "transparent" }}
+      onClick={onToggle}
+      title={cal.description}
+    >
+      <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
+      <span className="truncate max-w-24">{cal.name}</span>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-5 w-5 ml-1 p-0 opacity-50 hover:opacity-100"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Settings2 className="h-3 w-3" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={onEdit}>
+            <Edit className="mr-2 h-4 w-4" />
+            {t("common.edit")}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onShare}>
+            <Share2 className="mr-2 h-4 w-4" />
+            {t("share.dialogTitle")}
+          </DropdownMenuItem>
+          {!cal.isDefault && (
+            <DropdownMenuItem className="text-destructive" onClick={onDelete}>
+              <Trash2 className="mr-2 h-4 w-4" />
+              {t("common.delete")}
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
+}
+
+// ViewProps is what every calendar view reads: the cursor, the display
+// settings, the visible events and the editor that opens or moves them.
+interface ViewProps {
+  cursor: Date
+  setCursor: Dispatch<SetStateAction<Date>>
+  grid: GridSettings
+  weekdayLabels: string[]
+  events: CalendarEvent[]
+  eventColor: (ev: CalendarEvent) => string | undefined
+  editor: EventEditor
+}
+
+function CalendarBody(props: ViewProps & {
+  loading: boolean
+  view: CalendarView
+  hasEvents: boolean
+  sideBySide: boolean
+  visibleCalendars: Calendar[]
+}) {
+  const { t } = useI18n()
+  const { loading, view, hasEvents, sideBySide, visibleCalendars, ...viewProps } = props
+  if (loading) return <p className="text-sm text-muted-foreground py-8 text-center">{t("common.loading")}</p>
+  if (view === "month") return <MonthView {...viewProps} />
+  if (isTimeGrid(view)) return <TimeGridBody {...viewProps} view={view} sideBySide={sideBySide} visibleCalendars={visibleCalendars} />
+  if (!hasEvents) return <NoEvents onCreate={props.editor.openCreate} />
+  return <AgendaView events={props.events} eventColor={props.eventColor} editor={props.editor} />
+}
+
+// PeriodNav is the heading of a month or time-grid view with its today,
+// previous and next buttons.
+function PeriodNav({ label, prevLabel, nextLabel, onPrev, onNext, onToday }: {
+  label: string
+  prevLabel: string
+  nextLabel: string
+  onPrev: () => void
+  onNext: () => void
+  onToday: () => void
+}) {
+  const { t } = useI18n()
+  return (
+    <div className="flex items-center justify-between">
+      <h2 className="text-lg font-semibold">{label}</h2>
+      <div className="flex items-center gap-1" data-print="hide">
+        <Button variant="outline" size="sm" onClick={onToday}>
+          {t("common.today")}
+        </Button>
+        <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={prevLabel} onClick={onPrev}>
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={nextLabel} onClick={onNext}>
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function MonthView({ cursor, setCursor, grid, weekdayLabels, events, eventColor, editor }: ViewProps) {
+  const { t } = useI18n()
+  const eventsByDay = bucketByDay(events)
+  const todayKey = dateKey(new Date())
+  return (
+    <div className="space-y-3">
+      <PeriodNav
+        label={cursor.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
+        prevLabel={t("calendar.previousMonth")}
+        nextLabel={t("calendar.nextMonth")}
+        onPrev={() => setCursor((c) => new Date(c.getFullYear(), c.getMonth() - 1, 1))}
+        onNext={() => setCursor((c) => new Date(c.getFullYear(), c.getMonth() + 1, 1))}
+        onToday={() => setCursor(new Date())}
+      />
+      <div className="overflow-hidden rounded-lg border bg-card">
+        <div className="grid grid-cols-7 border-b bg-muted/30 text-center text-xs font-medium text-muted-foreground">
+          {weekdayLabels.map((label) => (
+            <div key={label} className="py-2">{label}</div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7">
+          {monthMatrix(cursor, grid.firstDayOfWeek).map((day) => {
+            const key = dateKey(day)
+            return (
+              <MonthDayCell
+                key={key}
+                day={day}
+                inMonth={day.getMonth() === cursor.getMonth()}
+                isToday={key === todayKey}
+                events={eventsByDay.get(key) ?? []}
+                eventColor={eventColor}
+                editor={editor}
+              />
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function dayNumberClass(isToday: boolean, hasEvents: boolean): string {
+  if (isToday) return "bg-primary font-semibold text-primary-foreground"
+  return hasEvents ? "font-semibold" : ""
+}
+
+// MonthDayCell is one day of the month grid: the day number and up to three
+// events. A click on the empty cell opens the new-event dialog on that day.
+function MonthDayCell({ day, inMonth, isToday, events, eventColor, editor }: {
+  day: Date
+  inMonth: boolean
+  isToday: boolean
+  events: CalendarEvent[]
+  eventColor: (ev: CalendarEvent) => string | undefined
+  editor: EventEditor
+}) {
+  const { t } = useI18n()
+  return (
+    <div
+      className={`min-h-24 cursor-pointer border-b border-r p-1 transition-colors last:border-r-0 hover:bg-accent/50 ${inMonth ? "" : "bg-muted/20 text-muted-foreground"}`}
+      onClick={() => editor.openCreateOn(day)}
+    >
+      <div className="flex justify-end">
+        <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs ${dayNumberClass(isToday, events.length > 0)}`}>
+          {day.getDate()}
+        </span>
+      </div>
+      <div className="mt-0.5 space-y-0.5">
+        {events.slice(0, 3).map((ev) => (
+          <button
+            key={ev.uid}
+            className="block w-full truncate rounded bg-primary/10 px-1 py-0.5 text-left text-xs text-foreground hover:bg-primary/20"
+            style={colorBorder(eventColor(ev))}
+            onClick={(e) => { e.stopPropagation(); editor.openEdit(ev) }}
+            title={ev.summary}
+          >
+            {!ev.allDay && <span className="mr-1 text-muted-foreground">{clockTime(ev.start)}</span>}
+            {ev.summary}
+          </button>
+        ))}
+        {events.length > 3 && (
+          <p className="px-1 text-xs text-muted-foreground">{t("calendar.moreEvents", { count: String(events.length - 3) })}</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// TimeGridBody renders the day/work-week/week time grid. In side-by-side mode
+// (2+ visible calendars) it renders one grid per visible calendar, each
+// filtered to its own events; otherwise it overlays all visible calendars in a
+// single shared grid.
+function TimeGridBody({ view, cursor, setCursor, grid, weekdayLabels, events, eventColor, editor, sideBySide, visibleCalendars }: ViewProps & {
+  view: TimeGridView
+  sideBySide: boolean
+  visibleCalendars: Calendar[]
+}) {
+  const { t } = useI18n()
+  const days = weekDays(cursor, GRID_DAYS[view], grid.firstDayOfWeek)
+  const todayKey = dateKey(new Date())
+  const renderGrid = (evs: CalendarEvent[], label: string) => (
+    <DayTimeGrid
+      days={days}
+      label={label}
+      prevLabel={t(view === "day" ? "calendar.previousDay" : "calendar.previousWeek")}
+      nextLabel={t(view === "day" ? "calendar.nextDay" : "calendar.nextWeek")}
+      todayLabel={t("common.today")}
+      onPrev={() => setCursor((c) => moveCursor(c, view, -1))}
+      onNext={() => setCursor((c) => moveCursor(c, view, +1))}
+      onToday={() => setCursor(new Date())}
+      weekdayLabels={weekdayLabels}
+      firstDayOfWeek={grid.firstDayOfWeek}
+      resolution={grid.resolution}
+      workDayStart={grid.workDayStart}
+      workDayEnd={grid.workDayEnd}
+      showNonWorkingHours={grid.showNonWorkingHours}
+      events={evs}
+      eventColor={eventColor}
+      todayKey={todayKey}
+      onOpenEvent={editor.openEdit}
+      onCreateOn={editor.openCreateOn}
+      onMoveEvent={editor.moveEvent}
+    />
+  )
+  if (sideBySide && visibleCalendars.length >= 2) {
+    return (
+      <div className="flex gap-4 overflow-x-auto pb-2">
+        {visibleCalendars.map((cal) => (
+          <div key={cal.id} className="min-w-[20rem] flex-1">
+            {renderGrid(
+              events.filter((ev) => (ev.calendarId ?? "calendar") === cal.id),
+              `${rangeLabel(days)} - ${cal.name}`,
+            )}
+          </div>
+        ))}
+      </div>
+    )
+  }
+  return renderGrid(events, rangeLabel(days))
+}
+
+function NoEvents({ onCreate }: { onCreate: () => void }) {
+  const { t } = useI18n()
+  return (
+    <div className="flex flex-col items-center justify-center py-16 text-center">
+      <div className="rounded-full bg-muted p-4">
+        <CalendarDays className="h-8 w-8 text-muted-foreground" />
+      </div>
+      <h3 className="mt-4 text-lg font-medium">{t("calendar.noEvents")}</h3>
+      <p className="text-muted-foreground mt-1">{t("calendar.noEventsHint")}</p>
+      <Button className="mt-4" onClick={onCreate}>
+        <Plus className="mr-2 h-4 w-4" />
+        {t("calendar.newEvent")}
+      </Button>
+    </div>
+  )
+}
+
+function AgendaView({ events, eventColor, editor }: Pick<ViewProps, "events" | "eventColor" | "editor">) {
+  return (
+    <div className="space-y-6">
+      {groupByDay(events).map((group) => (
+        <div key={group.day}>
+          <h2 className="mb-2 text-sm font-semibold text-muted-foreground">{group.day}</h2>
+          <div className="rounded-lg border bg-card divide-y">
+            {group.items.map((ev) => (
+              <AgendaRow key={ev.uid} ev={ev} color={eventColor(ev)} editor={editor} />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function AgendaDetail({ icon: Icon, children }: { icon: typeof MapPin; children: ReactNode }) {
+  return (
+    <p className="flex items-center gap-1 text-sm text-muted-foreground">
+      <Icon className="h-3.5 w-3.5" />
+      {children}
+    </p>
+  )
+}
+
+function AgendaRow({ ev, color, editor }: { ev: CalendarEvent; color: string | undefined; editor: EventEditor }) {
+  const { t } = useI18n()
+  const reminder = ev.reminderMinutes ?? 0
+  return (
+    <div className="flex items-start gap-4 p-4 hover:bg-accent/50 transition-colors">
+      {color && <div className="w-1 self-stretch rounded-full" style={{ backgroundColor: color }} aria-hidden />}
+      <div className="flex w-24 shrink-0 items-center gap-1 text-sm text-muted-foreground">
+        <Clock className="h-3.5 w-3.5" />
+        {timeLabel(t, ev)}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="font-medium truncate">{ev.summary}</p>
+        {ev.location && <AgendaDetail icon={MapPin}>{ev.location}</AgendaDetail>}
+        {ev.recurrence && <AgendaDetail icon={Repeat}>{recurrenceLabel(t, recurrenceToForm(ev.recurrence))}</AgendaDetail>}
+        {reminder > 0 && <AgendaDetail icon={Bell}>{t("calendar.reminderMinutes", { n: String(reminder) })}</AgendaDetail>}
+        {ev.description && <p className="text-sm text-muted-foreground truncate">{ev.description}</p>}
+      </div>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-8 w-8">
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={() => editor.openEdit(ev)}>
+            <Edit className="mr-2 h-4 w-4" />
+            {t("common.edit")}
+          </DropdownMenuItem>
+          <DropdownMenuItem className="text-destructive" onClick={() => editor.setDeleteTarget(ev)}>
+            <Trash2 className="mr-2 h-4 w-4" />
+            {t("common.delete")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
+}
+
+// FieldProps is what an event dialog section reads and writes.
+interface FieldProps {
+  form: EventForm
+  update: (patch: Partial<EventForm>) => void
+}
+
+function EventDialog({ editor, calendars, rooms, categories }: {
+  editor: EventEditor
+  calendars: Calendar[]
+  rooms: Room[]
+  categories: CategoryOption[]
+}) {
+  const { t } = useI18n()
+  const { form, setForm } = editor
+  const update = (patch: Partial<EventForm>) => setForm((prev) => ({ ...prev, ...patch }))
+  const tracking = editor.editingUID ? editor.editingTracking ?? [] : []
+  return (
+    <Dialog open={editor.dialogOpen} onOpenChange={editor.setDialogOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{editor.editingUID ? t("calendar.editEvent") : t("calendar.newEvent")}</DialogTitle>
+          <DialogDescription>{t("calendar.dialogDescription")}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-2">
+            <Label htmlFor="ev-summary">{t("calendar.title")}</Label>
+            <Input
+              id="ev-summary"
+              value={form.summary}
+              onChange={(e) => update({ summary: e.target.value })}
+              placeholder={t("calendar.titlePlaceholder")}
+            />
+          </div>
+          {calendars.length > 1 && <CalendarField form={form} update={update} calendars={calendars} />}
+          <div className="flex items-center justify-between">
+            <Label htmlFor="ev-allday">{t("calendar.allDay")}</Label>
+            <Switch id="ev-allday" checked={form.allDay} onCheckedChange={(checked) => update({ allDay: checked })} />
+          </div>
+          <EventOptionFields form={form} update={update} />
+          {categories.length > 0 && (
+            <div className="space-y-2">
+              <Label>{t("calendar.categories")}</Label>
+              <CategoryChips
+                categories={categories}
+                selected={form.categories}
+                onToggle={(name, on) => setForm((prev) => ({ ...prev, categories: toggledCategories(prev.categories, name, on) }))}
+              />
+            </div>
+          )}
+          {tracking.length > 0 && <TrackingList tracking={tracking} />}
+          <EventTimeFields form={form} update={update} />
+          <AttendeeFields form={form} update={update} rooms={rooms} />
+          {rooms.length > 0 && <RoomPicker form={form} setForm={setForm} rooms={rooms} />}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => editor.setDialogOpen(false)} disabled={editor.busy}>
+            {t("common.cancel")}
+          </Button>
+          <Button onClick={editor.submit} disabled={editor.busy}>
+            {editor.editingUID ? t("common.save") : t("common.create")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function CalendarField({ form, update, calendars }: FieldProps & { calendars: Calendar[] }) {
+  const { t } = useI18n()
+  return (
+    <div className="space-y-2">
+      <Label htmlFor="ev-calendar">{t("calendar.calendar")}</Label>
+      <Select value={form.calendarId} onValueChange={(value) => update({ calendarId: value })}>
+        <SelectTrigger id="ev-calendar">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {calendars.map((cal) => (
+            <SelectItem key={cal.id} value={cal.id}>
+              {cal.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  )
+}
+
+// noneToEmpty maps a select's "none" sentinel back to the form's empty value.
+function noneToEmpty(value: string): string {
+  return value === "none" ? "" : value
+}
+
+// EventOptionFields holds the repeat, reminder, show-as and sensitivity
+// selects.
+function EventOptionFields({ form, update }: FieldProps) {
+  const { t } = useI18n()
+  return (
+    <>
+      <div className="space-y-2">
+        <Label htmlFor="ev-recurrence">{t("calendar.repeat")}</Label>
+        <Select value={form.recurrence} onValueChange={(value) => update({ recurrence: noneToEmpty(value) })}>
+          <SelectTrigger id="ev-recurrence">
+            <SelectValue placeholder={t("calendar.recurrence.none")} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">{recurrenceLabel(t, "")}</SelectItem>
+            {RECURRENCE_FREQUENCIES.map((freq) => (
+              <SelectItem key={freq} value={freq}>{recurrenceLabel(t, freq)}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="ev-reminder">{t("calendar.reminder")}</Label>
+        <Select value={form.reminder} onValueChange={(value) => update({ reminder: noneToEmpty(value) })}>
+          <SelectTrigger id="ev-reminder">
+            <SelectValue placeholder={t("calendar.reminderNone")} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">{t("calendar.reminderNone")}</SelectItem>
+            {REMINDER_MINUTES.map((m) => (
+              <SelectItem key={m} value={String(m)}>{t("calendar.reminderMinutes", { n: String(m) })}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="ev-busy">{t("calendar.busyStatus")}</Label>
+        <Select value={form.busyStatus || "2"} onValueChange={(value) => update({ busyStatus: value })}>
+          <SelectTrigger id="ev-busy">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="0">{t("calendar.busyFree")}</SelectItem>
+            <SelectItem value="1">{t("calendar.busyTentative")}</SelectItem>
+            <SelectItem value="2">{t("calendar.busyBusy")}</SelectItem>
+            <SelectItem value="3">{t("calendar.busyOof")}</SelectItem>
+            <SelectItem value="4">{t("calendar.busyWorkingElsewhere")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="ev-sens">{t("calendar.sensitivity")}</Label>
+        <Select value={form.sensitivity || "0"} onValueChange={(value) => update({ sensitivity: value === "0" ? "" : value })}>
+          <SelectTrigger id="ev-sens">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="0">{t("calendar.sensitivityNormal")}</SelectItem>
+            <SelectItem value="2">{t("calendar.sensitivityPrivate")}</SelectItem>
+            <SelectItem value="3">{t("calendar.sensitivityConfidential")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    </>
+  )
+}
+
+// TrackingList shows the organizer each attendee's response to the meeting.
+function TrackingList({ tracking }: { tracking: NonNullable<CalendarEvent["tracking"]> }) {
+  const { t } = useI18n()
+  return (
+    <div className="space-y-2">
+      <Label>{t("calendar.tracking")}</Label>
+      <ul className="rounded-md border divide-y text-sm">
+        {tracking.map((tr) => (
+          <li key={tr.email} className="flex items-center justify-between px-3 py-1.5">
+            <span className="truncate">{tr.email}</span>
+            <span className="shrink-0 text-muted-foreground">{t(RESPONSE_KEYS[tr.response] ?? "calendar.respNone")}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+// EventTimeFields holds the start and end inputs plus the location and
+// description.
+function EventTimeFields({ form, update }: FieldProps) {
+  const { t } = useI18n()
+  const inputType = form.allDay ? "date" : "datetime-local"
+  return (
+    <>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor="ev-start">{t("calendar.start")}</Label>
+          <Input id="ev-start" type={inputType} value={form.start} onChange={(e) => update({ start: e.target.value })} />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="ev-end">{t("calendar.end")}</Label>
+          <Input id="ev-end" type={inputType} value={form.end} onChange={(e) => update({ end: e.target.value })} />
+        </div>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="ev-location">{t("calendar.location")}</Label>
+        <Input
+          id="ev-location"
+          value={form.location}
+          onChange={(e) => update({ location: e.target.value })}
+          placeholder={t("common.optional")}
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="ev-desc">{t("calendar.description")}</Label>
+        <Textarea
+          id="ev-desc"
+          value={form.description}
+          onChange={(e) => update({ description: e.target.value })}
+          rows={3}
+          placeholder={t("common.optional")}
+        />
+      </div>
+    </>
+  )
+}
+
+// AttendeeFields holds the required and optional attendee pickers and the
+// invite switch. Booked rooms stay out of the people picker.
+function AttendeeFields({ form, update, rooms }: FieldProps & { rooms: Room[] }) {
+  const { t } = useI18n()
+  const { people, selectedRooms } = splitRooms(form.attendees, rooms)
+  const busyWindow = pickerWindow(form)
+  return (
+    <div className="space-y-2">
+      <Label>{t("calendar.attendees")}</Label>
+      <AttendeePicker
+        value={people}
+        onChange={(emails) => update({ attendees: [...emails, ...selectedRooms.map((r) => r.email)].join(", ") })}
+        window={busyWindow}
+      />
+      <p className="text-xs text-muted-foreground">
+        {t("calendar.attendeesHint")}
+      </p>
+      {/* Optional attendees (OPT-PARTICIPANT): a separate picker so the
+          organizer can distinguish required from optional invitees. */}
+      <Label className="pt-1 text-xs text-muted-foreground">{t("calendar.optionalAttendees")}</Label>
+      <AttendeePicker
+        value={parseAttendees(form.optionalAttendees)}
+        onChange={(emails) => update({ optionalAttendees: emails.join(", ") })}
+        window={busyWindow}
+      />
+      {/* Send a METHOD:REQUEST meeting invite to the attendees on save. */}
+      <div className="flex items-center justify-between pt-1">
+        <Label htmlFor="ev-invite" className="text-sm font-normal cursor-pointer">
+          {t("calendar.sendInvite")}
+        </Label>
+        <Switch id="ev-invite" checked={form.sendInvite} onCheckedChange={(checked) => update({ sendInvite: checked })} />
+      </div>
+      {form.sendInvite && <p className="text-xs text-muted-foreground">{t("calendar.sendInviteHint")}</p>}
+    </div>
+  )
+}
+
+function roomLabel(t: TFunc, room: Room): string {
+  return room.capacity ? `${room.name} ${t("calendar.roomSeats", { count: String(room.capacity) })}` : room.name
+}
+
+// RoomPicker books a room as an attendee and lists the booked rooms as chips.
+function RoomPicker({ form, setForm, rooms }: {
+  form: EventForm
+  setForm: Dispatch<SetStateAction<EventForm>>
+  rooms: Room[]
+}) {
+  const { t } = useI18n()
+  const { selectedRooms } = splitRooms(form.attendees, rooms)
+  const book = (email: string) => {
+    const room = rooms.find((r) => r.email === email)
+    if (room) setForm((prev) => withRoom(prev, room))
+  }
+  return (
+    <div className="space-y-2">
+      <Label htmlFor="ev-room">{t("calendar.room")}</Label>
+      <Select value="" onValueChange={book}>
+        <SelectTrigger id="ev-room">
+          <SelectValue placeholder={t("calendar.addRoom")} />
+        </SelectTrigger>
+        <SelectContent>
+          {rooms.map((room) => (
+            <SelectItem key={room.email} value={room.email}>
+              {roomLabel(t, room)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {selectedRooms.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {selectedRooms.map((room) => (
+            <span key={room.email} className="inline-flex items-center gap-1 rounded-md bg-secondary px-2 py-0.5 text-xs">
+              {roomLabel(t, room)}
+              <button
+                type="button"
+                className="text-muted-foreground hover:text-foreground"
+                aria-label={`${t("common.remove")} ${room.name}`}
+                onClick={() => setForm((prev) => withoutRoom(prev, room))}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <p className="text-xs text-muted-foreground">
+        {t("calendar.roomHint")}
+      </p>
+    </div>
+  )
+}
+
+// FreeBusyDialog looks up when the named people are busy on one day.
+function FreeBusyDialog({ freeBusy }: { freeBusy: FreeBusy }) {
+  const { t } = useI18n()
+  return (
+    <Dialog open={freeBusy.open} onOpenChange={freeBusy.setOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t("calendar.checkAvailability")}</DialogTitle>
+          <DialogDescription>
+            {t("calendar.availabilityDescription")}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-2">
+            <Label>{t("calendar.people")}</Label>
+            <AttendeePicker
+              value={parseAttendees(freeBusy.emails)}
+              onChange={(emails) => freeBusy.setEmails(emails.join(", "))}
+              placeholder={t("calendar.searchNameEmail")}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="fb-date">{t("common.date")}</Label>
+            <Input id="fb-date" type="date" value={freeBusy.date} onChange={(e) => freeBusy.setDate(e.target.value)} />
+          </div>
+          {freeBusy.results && <FreeBusyResults results={freeBusy.results} />}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => freeBusy.setOpen(false)} disabled={freeBusy.loading}>
+            {t("common.close")}
+          </Button>
+          <Button onClick={freeBusy.check} disabled={freeBusy.loading}>
+            {freeBusy.loading ? t("calendar.checking") : t("calendar.check")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function FreeBusyResults({ results }: { results: UserFreeBusy[] }) {
+  const { t } = useI18n()
+  return (
+    <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+      {results.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{t("common.noResults")}</p>
+      ) : (
+        results.map((r) => (
+          <div key={r.user}>
+            <p className="text-sm font-medium">{r.user}</p>
+            {r.busy.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{t("calendar.freeAllDay")}</p>
+            ) : (
+              <ul className="mt-1 space-y-0.5">
+                {r.busy.map((b, i) => (
+                  <li key={i} className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                    <Clock className="h-3.5 w-3.5" />
+                    {clockTime(b.start)}
+                    {" – "}
+                    {clockTime(b.end)}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))
+      )}
+    </div>
+  )
+}
+
+function ConfirmDeleteDialog({ open, title, description, busy, onCancel, onConfirm }: {
+  open: boolean
+  title: string
+  description: string
+  busy: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const { t } = useI18n()
+  return (
+    <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel() }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel} disabled={busy}>
+            {t("common.cancel")}
+          </Button>
+          <Button variant="destructive" onClick={onConfirm} disabled={busy}>
+            <Trash2 className="mr-2 h-4 w-4" />
+            {t("common.delete")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// CalendarDialog creates a calendar or edits one's name, description and color.
+function CalendarDialog({ calEditor }: { calEditor: CalendarEditor }) {
+  const { t } = useI18n()
+  const { form, setForm } = calEditor
+  const creating = calEditor.mode === "create"
+  return (
+    <Dialog open={calEditor.open} onOpenChange={calEditor.setOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            {creating ? t("calendar.newCalendar") : t("calendar.editCalendar")}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-2">
+            <Label htmlFor="cal-name">{t("calendar.calendarName")}</Label>
+            <Input
+              id="cal-name"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder={t("calendar.calendarNamePlaceholder")}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="cal-desc">{t("calendar.description")}</Label>
+            <Input
+              id="cal-desc"
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              placeholder={t("common.optional")}
+            />
+          </div>
+          <ColorField value={form.color} onChange={(color) => setForm({ ...form, color })} />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => calEditor.setOpen(false)} disabled={calEditor.busy}>
+            {t("common.cancel")}
+          </Button>
+          <Button onClick={calEditor.submit} disabled={calEditor.busy}>
+            {creating ? t("common.create") : t("common.save")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ColorField({ value, onChange }: { value: string; onChange: (color: string) => void }) {
+  const { t } = useI18n()
+  return (
+    <div className="space-y-2">
+      <Label htmlFor="cal-color">{t("calendar.color")}</Label>
+      <div className="flex items-center gap-3">
+        <input
+          id="cal-color"
+          type="color"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="h-9 w-14 rounded border cursor-pointer p-0.5"
+        />
+        <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={DEFAULT_COLOR} className="font-mono" />
+      </div>
+      {/* Color scheme palette: quick-pick swatches for the calendar color. */}
+      <div className="flex flex-wrap gap-1.5 pt-1">
+        {CALENDAR_PALETTE.map((c) => (
+          <button
+            key={c}
+            type="button"
+            aria-label={c}
+            onClick={() => onChange(c)}
+            className={`h-6 w-6 rounded-full border-2 transition-transform hover:scale-110 ${value.toLowerCase() === c ? "border-foreground" : "border-transparent"}`}
+            style={{ backgroundColor: c }}
+          />
+        ))}
+      </div>
     </div>
   )
 }
