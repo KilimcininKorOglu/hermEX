@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { getShortcutMode, basicEnabled, extendedEnabled, type ShortcutMode } from "@/utils/shortcutMode"
+import { getShortcutMode, type ShortcutMode } from "@/utils/shortcutMode"
+import { shortcutAction } from "@/utils/globalShortcuts"
 
 export function useKeyboardShortcuts() {
   const navigate = useNavigate()
@@ -15,88 +16,13 @@ export function useKeyboardShortcuts() {
   }, [])
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (mode === "off") return
     // Ignore if typing in an input
-    if (
-      e.target instanceof HTMLInputElement ||
-      e.target instanceof HTMLTextAreaElement
-    ) {
-      return
-    }
-
-    const key = e.key.toLowerCase()
-    const ctrl = e.ctrlKey || e.metaKey
-    const shift = e.shiftKey
-    const basic = basicEnabled(mode)
-    const extended = extendedEnabled(mode)
-
-    // Navigation shortcuts (g + letter)
-    if (key === "g" && !ctrl) {
-      // Wait for next key
-      return
-    }
-
-    // Basic shortcuts: compose, inbox, search, help, close.
-    if (basic && ctrl && key === "n") {
-      e.preventDefault()
-      navigate("/compose")
-      return
-    }
-
-    if (basic && ctrl && shift && key === "i") {
-      e.preventDefault()
-      navigate("/inbox")
-      return
-    }
-
-    if (basic && key === "/" && !ctrl) {
-      e.preventDefault()
-      navigate("/search")
-      return
-    }
-
-    // Extended shortcuts: direct folder navigation (Ctrl+1..4).
-    if (extended && ctrl && key === "1") {
-      e.preventDefault()
-      navigate("/inbox")
-      return
-    }
-
-    if (extended && ctrl && key === "2") {
-      e.preventDefault()
-      navigate("/sent")
-      return
-    }
-
-    if (extended && ctrl && key === "3") {
-      e.preventDefault()
-      navigate("/drafts")
-      return
-    }
-
-    if (extended && ctrl && key === "4") {
-      e.preventDefault()
-      navigate("/trash")
-      return
-    }
-
-    if (basic && ctrl && key === "k") {
-      e.preventDefault()
-      navigate("/search")
-      return
-    }
-
-    if (basic && key === "?" && shift) {
-      e.preventDefault()
-      // Toggle shortcuts dialog
-      document.dispatchEvent(new CustomEvent("toggle-shortcuts"))
-      return
-    }
-
-    if (basic && key === "escape") {
-      document.dispatchEvent(new CustomEvent("close-dialogs"))
-      return
-    }
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+    const action = shortcutAction(mode, { key: e.key, ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey })
+    if (!action) return
+    if (action.preventDefault) e.preventDefault()
+    if ("navigate" in action) navigate(action.navigate)
+    else document.dispatchEvent(new CustomEvent(action.event))
   }, [navigate, mode])
 
   useEffect(() => {
