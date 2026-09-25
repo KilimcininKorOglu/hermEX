@@ -203,6 +203,7 @@ type mailDetailJSON struct {
 	FromName       string           `json:"fromName"`
 	To             []string         `json:"to"`
 	Cc             []string         `json:"cc,omitempty"`
+	Bcc            []string         `json:"bcc,omitempty"` // present on the author's own copy (a draft)
 	Subject        string           `json:"subject"`
 	Body           string           `json:"body"`
 	BodyType       string           `json:"bodyType"` // "html" or "text"; a "text" body is escaped by the reader
@@ -362,6 +363,7 @@ func buildMailDetail(raw []byte, folder string, uid uint32) mailDetailJSON {
 		}
 		d.To = addrEmails(env.To)
 		d.Cc = addrEmails(env.Cc)
+		d.Bcc = addrEmails(env.Bcc)
 		if !env.Date.IsZero() {
 			d.Date = env.Date.Format(time.RFC3339)
 		}

@@ -337,7 +337,7 @@ func (s *Server) handleMailDraft(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a valid email address: " + bad})
 		return
 	}
-	raw, err := s.buildOutgoing(c.Email, c.Email, sendRequest{To: req.To, Cc: req.Cc, Bcc: req.Bcc, Subject: req.Subject, Body: req.Body})
+	raw, err := s.buildDraft(c.Email, sendRequest{To: req.To, Cc: req.Cc, Bcc: req.Bcc, Subject: req.Subject, Body: req.Body})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not build the draft"})
 		return
@@ -391,11 +391,34 @@ func (s *Server) resolveSender(caller, want string) (representing, sender string
 	return representing, sender, g != sendas.GrantNone
 }
 
-// buildOutgoing maps the send fields onto a MAPI message and exports it to RFC
-// 5322 bytes via oxcmail, mirroring the server-rendered webmail's compose path.
-// representing is the authorized From identity; sender is the real authenticated
-// caller. When they differ (send-on-behalf) oxcmail emits a Sender header.
+// buildOutgoing exports the composed message to the RFC 5322 bytes that are
+// sent. It carries no Bcc header: a Bcc recipient reaches the envelope only, so
+// the other recipients never learn of it.
 func (s *Server) buildOutgoing(representing, sender string, req sendRequest) ([]byte, error) {
+	msg, err := s.outgoingMessage(representing, sender, req)
+	if err != nil {
+		return nil, err
+	}
+	return oxcmail.Export(msg, oxcmail.Options{})
+}
+
+// buildDraft exports a draft. A draft is the author's own copy and nobody
+// receives it, so it keeps the Bcc list the send leaves out; without it the
+// reopened draft has lost its Bcc recipients.
+func (s *Server) buildDraft(author string, req sendRequest) ([]byte, error) {
+	msg, err := s.outgoingMessage(author, author, req)
+	if err != nil {
+		return nil, err
+	}
+	msg.Recipients = append(msg.Recipients, rcptBags(req.Bcc, mapi.RecipBcc)...)
+	return oxcmail.Export(msg, oxcmail.Options{})
+}
+
+// outgoingMessage maps the send fields onto a MAPI message, mirroring the
+// server-rendered webmail's compose path. representing is the authorized From
+// identity; sender is the real authenticated caller. When they differ
+// (send-on-behalf) oxcmail emits a Sender header.
+func (s *Server) outgoingMessage(representing, sender string, req sendRequest) (*oxcmail.Message, error) {
 	var props mapi.PropertyValues
 	props.Set(mapi.PrMessageClass, "IPM.Note")
 	props.Set(mapi.PrSentRepresentingSmtpAddress, representing)
@@ -439,7 +462,7 @@ func (s *Server) buildOutgoing(representing, sender string, req sendRequest) ([]
 		return nil, err
 	}
 	msg.Attachments = append(msg.Attachments, attachments...)
-	return oxcmail.Export(msg, oxcmail.Options{})
+	return msg, nil
 }
 
 // setSendOptions stamps the compose options that only set a property when they
