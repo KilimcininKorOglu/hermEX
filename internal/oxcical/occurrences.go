@@ -191,6 +191,37 @@ func overrideInstances(overrides map[string]*icomp, skip map[string]bool, dur ti
 	return out
 }
 
+// CancelledInstancesIn returns the instances of a stored series within
+// [rangeStart, rangeEnd) that an override cancels with STATUS:CANCELLED, each at
+// the span the override gives it. InstancesIn leaves them out, because a
+// cancelled instance occupies no time; a view that shows what was cancelled reads
+// them here. An instance an EXDATE removes is gone rather than cancelled, so it is
+// not returned. The result is empty when the object is not a series.
+func CancelledInstancesIn(ical []byte, rangeStart, rangeEnd time.Time) []Instance {
+	cal, err := parseICal(ical)
+	if err != nil {
+		return nil
+	}
+	master, overrides := splitSeries(cal)
+	s, ok := seriesShape(master)
+	if !ok {
+		return nil
+	}
+	skip := excludedInstants(master)
+	var out []Instance
+	for key, ov := range overrides {
+		at, _, ok := parseICalTime(ov.prop("RECURRENCE-ID"))
+		if skip[key] || !ok || !isCancelledComp(ov) {
+			continue
+		}
+		if span := overrideSpan(ov, at, s.dur); overlapsRange(span.Start, span.End, rangeStart, rangeEnd) {
+			out = append(out, Instance{At: at, Span: span})
+		}
+	}
+	slices.SortFunc(out, func(a, b Instance) int { return a.Start.Compare(b.Start) })
+	return out
+}
+
 // instanceSpan resolves one instance to the interval it occupies: the override's
 // own span when there is one, else the generated instant plus the series duration.
 // live is false for an instance whose override cancels it.
@@ -198,16 +229,28 @@ func instanceSpan(override *icomp, at time.Time, dur time.Duration) (Span, bool)
 	if override == nil {
 		return Span{Start: at, End: at.Add(dur)}, true
 	}
-	if strings.EqualFold(strings.TrimSpace(override.propText("STATUS")), "CANCELLED") {
+	if isCancelledComp(override) {
 		return Span{}, false
 	}
+	return overrideSpan(override, at, dur), true
+}
+
+// isCancelledComp reports whether a component carries STATUS:CANCELLED.
+func isCancelledComp(c *icomp) bool {
+	return strings.EqualFold(strings.TrimSpace(c.propText("STATUS")), "CANCELLED")
+}
+
+// overrideSpan is the interval an override gives its instance: its own start and
+// end, falling back to the generated instant and the series duration for what it
+// does not state.
+func overrideSpan(override *icomp, at time.Time, dur time.Duration) Span {
 	s, allDay, ok := parseICalTime(override.prop("DTSTART"))
 	if !ok {
-		return Span{Start: at, End: at.Add(dur)}, true
+		return Span{Start: at, End: at.Add(dur)}
 	}
 	e, eok := eventEnd(override, s, allDay)
 	if !eok {
 		e = s.Add(dur)
 	}
-	return Span{Start: s, End: e}, true
+	return Span{Start: s, End: e}
 }

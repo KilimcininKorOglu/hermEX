@@ -2,6 +2,7 @@ package webmail2api
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -128,21 +129,35 @@ func icalParam(params, name string) string {
 
 // expandedRows turns a series into one row per instance in [start, end), each
 // carrying the instance's span and generated instant and the series' own first
-// span. A single event is returned as it is.
+// span. An instance its organizer cancelled is listed too, marked cancelled, so
+// the user sees what was called off until they remove it. A single event is
+// returned as it is.
 func expandedRows(e eventJSON, ics []byte, start, end time.Time) []eventJSON {
 	insts, ok := oxcical.InstancesIn(ics, start, end)
 	if !ok {
 		return []eventJSON{e}
 	}
-	out := make([]eventJSON, 0, len(insts))
+	cancelled := oxcical.CancelledInstancesIn(ics, start, end)
+	out := make([]eventJSON, 0, len(insts)+len(cancelled))
 	for _, in := range insts {
-		row := e
-		row.SeriesStart, row.SeriesEnd = e.Start, e.End
-		row.Start, row.End = spanText(in.Start, e.AllDay), spanText(in.End, e.AllDay)
-		row.Occurrence = in.At.UTC().Format(time.RFC3339)
+		out = append(out, instanceRow(e, in))
+	}
+	for _, in := range cancelled {
+		row := instanceRow(e, in)
+		row.Canceled = true
 		out = append(out, row)
 	}
+	slices.SortFunc(out, func(a, b eventJSON) int { return strings.Compare(a.Start, b.Start) })
 	return out
+}
+
+// instanceRow is the row for one instance of the series e describes.
+func instanceRow(e eventJSON, in oxcical.Instance) eventJSON {
+	row := e
+	row.SeriesStart, row.SeriesEnd = e.Start, e.End
+	row.Start, row.End = spanText(in.Start, e.AllDay), spanText(in.End, e.AllDay)
+	row.Occurrence = in.At.UTC().Format(time.RFC3339)
+	return row
 }
 
 // spanText renders an instance boundary the way the event's own start is

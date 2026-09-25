@@ -51,6 +51,10 @@ type eventJSON struct {
 	Occurrence  string `json:"occurrence,omitempty"`
 	SeriesStart string `json:"seriesStart,omitempty"`
 	SeriesEnd   string `json:"seriesEnd,omitempty"`
+	// Canceled marks a meeting, or one instance of a series, its organizer
+	// called off. The item stays until the user removes it, and it occupies no
+	// time. It is read-only: the server sets it from the delivered cancellation.
+	Canceled bool `json:"canceled,omitempty"`
 }
 
 // attendeeStatusJSON is one attendee's response status for the organizer's
@@ -473,6 +477,7 @@ type eventScan struct {
 	opt      oxcical.Options
 	busyTag  mapi.PropTag
 	respTag  mapi.PropTag
+	stateTag mapi.PropTag
 	windowed bool
 	startTag mapi.PropTag
 	endTag   mapi.PropTag
@@ -496,6 +501,9 @@ func newEventWindowScan(st *objectstore.Store, r *http.Request) *eventScan {
 	// respTag resolves PidLidResponseStatus once; the organizer's TrackingTab
 	// reads each attendee's response from its recipient row.
 	sc.respTag, _ = responseStatusTag(st, false)
+	// stateTag resolves PidLidAppointmentStateFlags once; its cancelled bit marks a
+	// meeting its organizer called off.
+	sc.stateTag = namedLongTag(st, mapi.NameAppointmentStateFlags)
 	sc.start, sc.end, sc.windowed = eventWindow(r)
 	if !sc.windowed {
 		return sc
@@ -572,6 +580,8 @@ func (sc *eventScan) event(id int64, calendarID string) (eventJSON, []byte, bool
 	e.UID = strconv.FormatInt(id, 10)
 	e.CalendarID = calendarID
 	e.BusyStatus = sc.busyStatus(id)
+	flags, _ := propInt32(msg.Props, sc.stateTag)
+	e.Canceled = sc.stateTag != 0 && flags&asfCanceled != 0
 	// Categories are the shared PidNameKeywords list, read directly.
 	if cats, err := sc.st.GetCategories(id); err == nil && len(cats) > 0 {
 		e.Categories = cats

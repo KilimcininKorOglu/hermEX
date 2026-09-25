@@ -15,9 +15,13 @@ import (
 	"hermex/internal/oxcical"
 )
 
-// asfReceived is the PidLidAppointmentStateFlags bit (MS-OXOCAL 2.2.1.10) that
-// marks an appointment received as an invitation rather than organized here.
-const asfReceived int32 = 0x2
+// PidLidAppointmentStateFlags bits (MS-OXOCAL 2.2.1.10): asfReceived marks an
+// appointment received as an invitation rather than organized here, and
+// asfCanceled a meeting its organizer cancelled.
+const (
+	asfReceived int32 = 0x2
+	asfCanceled int32 = 0x4
+)
 
 // errNoAttendees reports a scheduling message that has nobody to go to.
 var errNoAttendees = errors.New("webmail2api: the meeting has no attendees")
