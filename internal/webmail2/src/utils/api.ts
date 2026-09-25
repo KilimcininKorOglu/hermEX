@@ -155,6 +155,9 @@ interface SendMailRequest {
   // is_html, when true, indicates the body is an HTML document to be sent
   // with Content-Type: text/html. When false or absent, body is sent as text/plain.
   is_html?: boolean
+  // draftId names the draft the message was composed from; the server removes
+  // it once the message is sent or scheduled.
+  draftId?: string
 }
 
 // ScheduledMailItem is one pending/failed "send later" message in the Scheduled view.
@@ -1763,8 +1766,8 @@ class API {
   }
 
   /** Relays a client-built (signed/encrypted) raw message; recipients are supplied separately. */
-  async sendRawMail(raw: string, to: string[], cc: string[], bcc: string[]): Promise<void> {
-    await this.post('/mail/send-raw', { raw, to, cc, bcc })
+  async sendRawMail(raw: string, to: string[], cc: string[], bcc: string[], draftId?: string): Promise<void> {
+    await this.post('/mail/send-raw', { raw, to, cc, bcc, draftId })
   }
 
   /** Fetches a recipient's published S/MIME public certificate (PEM) for encryption, or null. */

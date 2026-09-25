@@ -46,6 +46,7 @@ type sendRequest struct {
 	SignMessage            bool             `json:"signMessage"`    // server-mode S/MIME sign
 	EncryptMessage         bool             `json:"encryptMessage"` // server-mode S/MIME encrypt
 	From                   string           `json:"from"`           // chosen sender identity (send-as / on-behalf); empty = self
+	DraftID                string           `json:"draftId"`        // the draft this message was composed from, removed once it is sent
 }
 
 // badAttachmentError reports an attachment whose body could not be decoded. It is
@@ -116,7 +117,7 @@ func (s *Server) handleMailSend(w http.ResponseWriter, r *http.Request) {
 	// Scheduled (send-later): file the built message in the Outbox with a deferred
 	// send time; the release worker delivers it when due.
 	if req.SendAt != "" {
-		s.scheduleSend(w, c, raw, req.SendAt)
+		s.scheduleSend(w, c, raw, req.SendAt, req.DraftID)
 		return
 	}
 
@@ -128,12 +129,35 @@ func (s *Server) handleMailSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// File a Sent copy (best-effort; a delivered message is not lost if this fails).
-	if st, err := objectstore.Open(c.Mailbox); err == nil {
-		fileSentCopy(st, raw, c.Email, "mail")
-		_ = st.Close()
-	}
+	afterSend(c, raw, req.DraftID, "mail")
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// afterSend files the Sent copy of a delivered message and removes the draft it
+// was composed from. The message is already delivered, so neither step fails the
+// request; a failure is recorded instead, because a retry would send it twice.
+func afterSend(c sessionClaims, raw []byte, draftID, kind string) {
+	st, err := objectstore.Open(c.Mailbox)
+	if err != nil {
+		logError("file-sent-copy", err, logging.Fields{"user": c.Email, "kind": kind})
+		return
+	}
+	defer st.Close()
+	fileSentCopy(st, raw, c.Email, kind)
+	removeSentDraft(st, draftID, c.Email)
+}
+
+// removeSentDraft deletes the draft a sent message was composed from, so the
+// message does not stay in Drafts as if it were still unsent. Only an id in the
+// caller's own Drafts folder is acted on; an empty id means no draft.
+func removeSentDraft(st *objectstore.Store, draftID, user string) {
+	folder, uid, ok := parseMessageID(draftID)
+	if !ok || folder != "drafts" {
+		return
+	}
+	if err := st.DeleteMessage(int64(mapi.PrivateFIDDraft), uid); err != nil {
+		logError("remove-sent-draft", err, logging.Fields{"user": user})
+	}
 }
 
 // validRecipients collects the envelope recipients, refusing an unusable
@@ -173,7 +197,7 @@ func (s *Server) signOutgoing(w http.ResponseWriter, c sessionClaims, raw []byte
 
 // scheduleSend files a built message in the Outbox with a deferred send time;
 // the release worker delivers it when due. It answers the client itself.
-func (s *Server) scheduleSend(w http.ResponseWriter, c sessionClaims, raw []byte, sendAt string) {
+func (s *Server) scheduleSend(w http.ResponseWriter, c sessionClaims, raw []byte, sendAt, draftID string) {
 	st, err := objectstore.Open(c.Mailbox)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
@@ -185,6 +209,8 @@ func (s *Server) scheduleSend(w http.ResponseWriter, c sessionClaims, raw []byte
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not schedule the message"})
 		return
 	}
+	// The Outbox now holds the message, so the draft it came from is done.
+	removeSentDraft(st, draftID, c.Email)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "scheduled": true})
 }
 
@@ -269,10 +295,11 @@ func (s *Server) handleMailSendRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Raw string   `json:"raw"`
-		To  []string `json:"to"`
-		Cc  []string `json:"cc"`
-		Bcc []string `json:"bcc"`
+		Raw     string   `json:"raw"`
+		To      []string `json:"to"`
+		Cc      []string `json:"cc"`
+		Bcc     []string `json:"bcc"`
+		DraftID string   `json:"draftId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
@@ -306,10 +333,7 @@ func (s *Server) handleMailSendRaw(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delivery failed"})
 		return
 	}
-	if st, err := objectstore.Open(c.Mailbox); err == nil {
-		fileSentCopy(st, raw, c.Email, "mail-raw")
-		_ = st.Close()
-	}
+	afterSend(c, raw, req.DraftID, "mail-raw")
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

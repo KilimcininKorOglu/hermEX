@@ -930,6 +930,7 @@ export function ComposePage() {
         sensitivity: sensitivity !== "normal" ? sensitivity : undefined,
         sendAt: sendAtISO,
         is_html: richTextMode,
+        draftId: draftId ?? undefined,
       }
       if (useBrowserSmime) {
         // Build the MIME server-side, then sign and/or encrypt it in the browser
@@ -951,7 +952,7 @@ export function ComposePage() {
           }
           mime = smimeStore.encryptMime(mime, certs)
         }
-        await api.sendRawMail(btoa(mime), sendPayload.to, sendPayload.cc, sendPayload.bcc)
+        await api.sendRawMail(btoa(mime), sendPayload.to, sendPayload.cc, sendPayload.bcc, sendPayload.draftId)
       } else if (signMessage || encryptMessage) {
         // Server-mode: the server holds the key and signs/encrypts on delivery.
         await api.sendMail({ ...sendPayload, signMessage, encryptMessage })
