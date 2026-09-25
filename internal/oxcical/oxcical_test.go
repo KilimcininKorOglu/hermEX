@@ -448,6 +448,24 @@ func TestRecurringVerbatim(t *testing.T) {
 	wantEq(t, string(out), recICS, "the re-served body")
 }
 
+// TestSeriesMasterIsMarkedRecurring pins PidLidRecurring on a series master and
+// only there: a reader finds a series whose first instance lies before its window
+// by this flag, and an override is one instance, not a series.
+func TestSeriesMasterIsMarkedRecurring(t *testing.T) {
+	const master = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:r-2\r\nSUMMARY:Daily\r\n" +
+		"DTSTART:20260612T090000Z\r\nRRULE:FREQ=DAILY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	const override = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:r-2\r\nSUMMARY:Moved\r\n" +
+		"RECURRENCE-ID:20260613T090000Z\r\nDTSTART:20260613T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	r := newResolver()
+	for body, want := range map[string]bool{master: true, override: false} {
+		msg, err := Import([]byte(body), r.opt())
+		mustNoErr(t, err, "import")
+		if got := r.boolVal(msg, mapi.NameRecurring); got != want {
+			t.Errorf("PidLidRecurring = %v, want %v for\n%s", got, want, body)
+		}
+	}
+}
+
 // TestImportSemantics pins the PRIORITY/CLASS/TRANSP/VALARM mappings (intent: a
 // wrong mapping would silently change an event's importance, privacy, or alarm).
 func TestImportSemantics(t *testing.T) {

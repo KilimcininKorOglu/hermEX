@@ -102,10 +102,10 @@ func importedUID(vev *icomp) string {
 }
 
 // importRecurring preserves a recurring event's body verbatim and stores what
-// listing needs. A series master (carrying RRULE) also gets the MS-OXOCAL
-// AppointmentRecurrencePattern blob Outlook reads in PidLidAppointmentRecur; an
-// override (RECURRENCE-ID only) is an exception instance and carries no series
-// pattern.
+// listing needs. A series master (carrying RRULE) is also marked PidLidRecurring
+// and gets the MS-OXOCAL AppointmentRecurrencePattern blob Outlook reads in
+// PidLidAppointmentRecur; an override (RECURRENCE-ID only) is an exception
+// instance and carries neither.
 func importRecurring(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag, vev *icomp, raw []byte) {
 	p.Set(mapi.PrIcalOriginal, append([]byte(nil), raw...))
 	var start time.Time
@@ -116,7 +116,13 @@ func importRecurring(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.Pr
 		}
 	}
 	rrule := vev.prop("RRULE")
-	if rrule == nil || start.IsZero() {
+	if rrule == nil {
+		return
+	}
+	// PidLidRecurring marks the series master, which is how a reader finds a
+	// series whose first instance lies before the window it asks about.
+	setNamedBool(p, named, mapi.NameRecurring, true)
+	if start.IsZero() {
 		return
 	}
 	blob, err := recurrence.FromRRule(rrule.value, start)

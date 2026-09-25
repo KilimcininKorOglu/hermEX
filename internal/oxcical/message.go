@@ -58,6 +58,7 @@ var appointmentNamed = []namedField{
 	{mapi.NameReminderSet, mapi.PtBoolean},
 	{mapi.NameReminderDelta, mapi.PtLong},
 	{mapi.NameAppointmentRecur, mapi.PtBinary},
+	{mapi.NameRecurring, mapi.PtBoolean},
 }
 
 // namedTags resolves appointmentNamed to full store proptags. With create the

@@ -6,6 +6,7 @@ import (
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcical"
 	"hermex/internal/oxcmail"
 )
 
@@ -78,6 +79,27 @@ func TestSeriesInstanceIsAConflict(t *testing.T) {
 
 	if !conflicts(t, st, tags, req) {
 		t.Error("a request on a later instance of a series was not reported in conflict")
+	}
+}
+
+// TestImportedSeriesIsAConflict stores the series the way CalDAV and webmail do,
+// through the iCalendar import, rather than hand-setting the recurring flag. A
+// series imported without PidLidRecurring was invisible to the check, so a
+// meeting request on a later instance auto-accepted into a double booking.
+func TestImportedSeriesIsAConflict(t *testing.T) {
+	st, tags := conflictStore(t)
+	msg, err := oxcical.Import([]byte(weeklySeries), oxcical.Options{Resolver: st.GetNamedPropIDs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg.Props.Set(tags.busy, int32(mapi.BusyBusy))
+	if _, err := st.CreateMessage(int64(mapi.PrivateFIDCalendar), msg); err != nil {
+		t.Fatal(err)
+	}
+
+	req := requestFor(tags, "new-1", time.Date(2026, 3, 16, 17, 0, 0, 0, time.UTC))
+	if !conflicts(t, st, tags, req) {
+		t.Error("a request on a later instance of an imported series was not reported in conflict")
 	}
 }
 
