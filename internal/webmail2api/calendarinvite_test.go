@@ -280,3 +280,36 @@ func TestAttendeeOccurrenceDeleteSendsNothing(t *testing.T) {
 	wantStatus(t, "delete occurrence", do(http.MethodDelete, occurrencePath(id)+"?at=2026-09-08T06:00:00Z", ""), http.StatusOK)
 	wantEq(t, "bob's inbox", len(folderMail(t, bob, int64(mapi.PrivateFIDInbox))), 0)
 }
+
+// TestOccurrenceMoveUpdatesThatInstance moves the second instance of a series
+// alice organizes. It used to change alice's calendar and tell nobody; now bob
+// receives a request for that instance alone, and accepting it folds the move
+// into his copy of the series.
+func TestOccurrenceMoveUpdatesThatInstance(t *testing.T) {
+	do, alice, bob := meetingHarness(t)
+	id := createEvent(t, do, seriesBody)
+	st := openMailbox(t, bob)
+	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
+	mustNoErr(t, "list bob's inbox", err)
+	appt, err := meeting.Respond(st, directory.StaticAccounts{}, nil, "bob@hermex.test", msgs[0].ID, meeting.ResponseAccepted, false)
+	mustNoErr(t, "accept the series", err)
+
+	wantStatus(t, "move occurrence", do(http.MethodPut, occurrencePath(id), `{"occurrence":"2026-09-08T06:00:00Z",`+
+		`"start":"2026-09-08T09:00:00Z","end":"2026-09-08T09:30:00Z"}`), http.StatusOK)
+	update := lastOf(t, folderMail(t, bob, int64(mapi.PrivateFIDInbox)), 2)
+	for _, want := range []string{"METHOD:REQUEST", "UID:" + storedMeetingUID(t, alice, id), "RECURRENCE-ID:20260908T060000Z",
+		"DTSTART:20260908T090000Z", "SEQUENCE:1"} {
+		wantContains(t, "occurrence request", update, want)
+	}
+
+	msgs, err = st.ListMessages(int64(mapi.PrivateFIDInbox))
+	mustNoErr(t, "list bob's inbox", err)
+	_, err = meeting.Respond(st, directory.StaticAccounts{}, nil, "bob@hermex.test", msgs[1].ID, meeting.ResponseAccepted, false)
+	mustNoErr(t, "accept the move", err)
+	stored, err := st.OpenMessage(appt)
+	mustNoErr(t, "open bob's series", err)
+	ical, _ := stored.Props.Get(mapi.PrIcalOriginal)
+	b, _ := ical.([]byte)
+	wantContains(t, "bob's series", string(b), "RRULE:FREQ=DAILY;COUNT=3")
+	wantContains(t, "bob's series", string(b), "DTSTART:20260908T090000Z")
+}

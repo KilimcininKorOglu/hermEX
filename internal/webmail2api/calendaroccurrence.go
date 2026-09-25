@@ -35,7 +35,7 @@ func (s *Server) handleMoveOccurrence(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	s.editOccurrence(w, r, occurrenceChange{at: at, edit: func(raw []byte) ([]byte, bool) {
+	s.editOccurrence(w, r, occurrenceChange{at: at, method: "REQUEST", edit: func(raw []byte) ([]byte, bool) {
 		return oxcical.MoveOccurrence(raw, at, start, end)
 	}})
 }
@@ -119,18 +119,23 @@ func editSeries(st *objectstore.Store, id int64, caller string, ch occurrenceCha
 	return notice, rewriteEvent(st, id, edited, oxcical.Options{Resolver: st.GetNamedPropIDs})
 }
 
-// announce advances the series revision in the edited object and prepares the
-// single-instance message for the attendees. A cancellation describes the
-// instance as it stood before the edit removed it. It returns the edited object
-// unchanged and no message when there is nobody to tell or nothing to render.
+// announce advances the revision in the edited object and prepares the
+// single-instance message for the attendees. A cancellation advances the series
+// revision and describes the instance as it stood before the edit removed it; an
+// update advances the moved instance's own revision past the series' and
+// describes the instance as edited. It returns the edited object unchanged and no
+// message when there is nobody to tell or nothing to render.
 func (ch occurrenceChange) announce(st *objectstore.Store, id int64, props mapi.PropertyValues, before, edited []byte, organizer string) ([]byte, *pendingMail) {
 	to := meetingRecipients(st, id, organizer)
-	seq := oxcical.Sequence(edited, nil) + 1
-	revised, ok := oxcical.SetSequence(edited, seq, nil)
+	revised, seq, ok := ch.revise(edited)
 	if len(to) == 0 || !ok {
 		return edited, nil
 	}
-	body, ok := oxcical.InstanceBody(before, ch.at, ch.method, seq)
+	source := before
+	if ch.method != "CANCEL" {
+		source = revised
+	}
+	body, ok := oxcical.InstanceBody(source, ch.at, ch.method, seq)
 	if !ok {
 		return edited, nil
 	}
@@ -139,8 +144,28 @@ func (ch occurrenceChange) announce(st *objectstore.Store, id int64, props mapi.
 			body = withUID
 		}
 	}
-	subject := "Canceled: " + propStr(props, mapi.PrSubject)
-	return revised, &pendingMail{organizer: organizer, to: to, mail: meetingMail{
-		method: ch.method, subject: subject, text: subject, kind: "meeting-occurrence-cancellation", calendar: body,
-	}}
+	return revised, &pendingMail{organizer: organizer, to: to, mail: ch.mail(propStr(props, mapi.PrSubject), body)}
+}
+
+// revise writes the next revision into the edited object: the series' for a
+// cancellation, the instance's own for an update, which must pass the series'
+// because the instance started from the series master.
+func (ch occurrenceChange) revise(edited []byte) ([]byte, int, bool) {
+	if ch.method == "CANCEL" {
+		seq := oxcical.Sequence(edited, nil) + 1
+		revised, ok := oxcical.SetSequence(edited, seq, nil)
+		return revised, seq, ok
+	}
+	seq := max(oxcical.Sequence(edited, nil), oxcical.Sequence(edited, &ch.at)) + 1
+	revised, ok := oxcical.SetSequence(edited, seq, &ch.at)
+	return revised, seq, ok
+}
+
+// mail is the scheduling message the change sends, under the meeting's subject.
+func (ch occurrenceChange) mail(subject string, body []byte) meetingMail {
+	if ch.method == "CANCEL" {
+		subject = "Canceled: " + subject
+		return meetingMail{method: ch.method, subject: subject, text: subject, kind: "meeting-occurrence-cancellation", calendar: body}
+	}
+	return meetingMail{method: ch.method, subject: subject, text: subject, kind: "meeting-occurrence-update", calendar: body}
 }
