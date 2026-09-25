@@ -11,6 +11,16 @@ function ownerQuery(owner: string | undefined, sep: '?' | '&'): string {
   return owner ? `${sep}owner=${encodeURIComponent(owner)}` : ''
 }
 
+// queryString encodes the parameters that carry a value, in the given order. An
+// absent value or an empty string is left out; a number is kept even when it is 0.
+export function queryString(params: Record<string, string | number | undefined>): string {
+  const out = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== '') out.set(key, String(value))
+  }
+  return out.toString()
+}
+
 // ============================================================================
 // Type Definitions
 // ============================================================================
@@ -993,15 +1003,14 @@ class API {
     owner?: string,
     opts?: { page?: number; pageSize?: number; sort?: string; dir?: string; filter?: string }
   ): Promise<{ emails?: Mail[]; total?: number; unread?: number }> {
-    const params = new URLSearchParams()
-    const o = owner ?? this.mailboxOwner
-    if (o) params.set('owner', o)
-    if (opts?.page != null) params.set('page', String(opts.page))
-    if (opts?.pageSize != null) params.set('pageSize', String(opts.pageSize))
-    if (opts?.sort) params.set('sort', opts.sort)
-    if (opts?.dir) params.set('dir', opts.dir)
-    if (opts?.filter) params.set('filter', opts.filter)
-    const qs = params.toString()
+    const qs = queryString({
+      owner: owner ?? this.mailboxOwner,
+      page: opts?.page,
+      pageSize: opts?.pageSize,
+      sort: opts?.sort,
+      dir: opts?.dir,
+      filter: opts?.filter,
+    })
     return this.get<{ emails?: Mail[]; total?: number; unread?: number }>(`/mail/${folder}${qs ? '?' + qs : ''}`)
   }
 

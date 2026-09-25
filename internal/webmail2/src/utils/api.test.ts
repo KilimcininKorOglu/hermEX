@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import API from './api'
+import API, { queryString } from './api'
 
 describe('API Error Handling', () => {
   beforeEach(() => {
@@ -498,5 +498,23 @@ describe('API Error Handling', () => {
         })
       )
     })
+  })
+})
+
+describe('getMail query', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('sends only the options that carry a value, and keeps page 0', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ emails: [] }), { headers: { 'Content-Type': 'application/json' } }))
+    globalThis.fetch = fetchMock
+    await API.getMail('inbox', 'shared@hermex.test', { page: 0, pageSize: 50, sort: 'date', dir: '', filter: undefined })
+    const url = String(fetchMock.mock.calls[0][0])
+    expect(url.endsWith('/mail/inbox?owner=shared%40hermex.test&page=0&pageSize=50&sort=date')).toBe(true)
+  })
+
+  it('sends no query string when nothing is set', () => {
+    expect(queryString({ owner: undefined, page: undefined, sort: '' })).toBe('')
   })
 })
