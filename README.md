@@ -92,7 +92,8 @@ fail the build. The live clamd test skips in CI.
 | `make dump-db`                | Write a compressed dump of the whole directory database                           |
 | `make restore-db DUMP=<file>` | Load a dump back                                                                  |
 | `make dump-mail`              | Write a consistent copy of every mailbox's mail content                           |
-| `make version`                | Report the source state a build would stamp                                       |
+| `make version`                | Report the release and commit a build would carry                                 |
+| `make release VERSION=x.y.z`  | Set the next release number in `VERSION` and the webmail manifests                |
 | `make compose-check`          | Validate the compose file syntax                                                  |
 | `make clean`                  | Remove built binaries                                                             |
 | `make help`                   | List every target                                                                 |
@@ -173,17 +174,37 @@ them is down.
 host port 8144. It listens on `:8081` in the container (config `admin_addr`),
 serves HTTPS, and requires `admin_secret`. Nothing `depends_on` it.
 
-### Build provenance
+### Versioning and build provenance
+
+hermEX carries one release number, a plain `x.y.z` in the `VERSION` file at the
+repository root. Releases are tagged `vx.y.z`. Every binary links in that number
+together with the commit and the build time, and shows it as:
+
+| Build | Shown as |
+|-------|----------|
+| The tagged release commit, clean tree | `0.1.0 (adeff8a)` |
+| Any other commit | `0.1.0-dev+adeff8a` |
+| A tree with uncommitted changes | `0.1.0-dev+adeff8a-dirty` |
+
+That one value appears on each daemon's health endpoint (the admin panel's live
+status view), in its `process.start` log event, under the admin panel sidebar, and
+in the webmail login footer and About page. The webmail's `package.json` carries
+the same number, and a test fails the gate when the two disagree. The Exchange
+protocol versions that EWS and ActiveSync announce to clients are wire values and
+do not follow it.
 
 The container images build from a context that excludes `.git`, so the toolchain
-records nothing about the source. The commit and build time are injected at link
-time instead, and every daemon reports them on startup and on its health
-endpoint, which is what the admin panel's live status view shows. The `Makefile`
-is what supplies those values, so build images with `make images` or
+records nothing about the source. The Dockerfile reads `VERSION` from the build
+context, and the `Makefile` supplies the commit, the build time and whether the
+build is the tagged release. Build images with `make images` or
 `make rebuild SVC=<service>`; a bare `docker compose build` produces binaries that
-report an unknown build. A tree with uncommitted changes is stamped with a
-`-dirty` suffix, since a bare commit id would claim a source state that was never
-built. `make version` prints the values a build would stamp right now.
+report the release number with an unknown commit. `make version` prints what a
+build would carry right now.
+
+To cut a release, `make release VERSION=x.y.z` writes the new number to `VERSION`
+and the webmail manifests and checks them. It refuses a number that is not above
+the current one or that is already tagged. The changelog entry in `CHANGELOG.md`,
+the commit and the `vx.y.z` tag follow as separate steps.
 
 ## Configuration
 
