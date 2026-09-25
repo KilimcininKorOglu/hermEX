@@ -3,6 +3,8 @@ package admin
 import (
 	"embed"
 	"html/template"
+
+	"hermex/internal/buildinfo"
 )
 
 // templateFS holds the admin UI HTML templates compiled into the binary.
@@ -21,8 +23,12 @@ var staticFS embed.FS
 var staticAssets = buildStaticAssets()
 
 // tmpl is the parsed admin UI template set. A parse failure is a build-time bug,
-// so it panics.
-var tmpl = template.Must(template.New("").Funcs(template.FuncMap{"asset": assetURL}).ParseFS(templateFS, "templates/*.html"))
+// so it panics. "version" is the panel binary's own release and commit, shown
+// under the sidebar so an operator can tell which build the panel runs.
+var tmpl = template.Must(template.New("").Funcs(template.FuncMap{
+	"asset":   assetURL,
+	"version": buildinfo.Display,
+}).ParseFS(templateFS, "templates/*.html"))
 
 // assetVersionLen is how many hex digits of the content hash an asset URL
 // carries: enough that two builds of one file never share a version.

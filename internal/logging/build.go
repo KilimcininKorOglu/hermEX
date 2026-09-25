@@ -106,6 +106,6 @@ func Build(daemon, mongoURI, database, spillDir string) (*Logger, func() error) 
 func announce(l *Logger, daemon string) {
 	l.Emit(Event{
 		Level: LevelInfo, Subsystem: System, Name: "process.start",
-		Fields: Fields{"daemon": daemon, "commit": buildinfo.Revision(), "built": buildinfo.Built()},
+		Fields: Fields{"daemon": daemon, "version": buildinfo.Display(), "commit": buildinfo.Revision(), "built": buildinfo.Built()},
 	})
 }

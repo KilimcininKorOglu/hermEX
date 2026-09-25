@@ -30,7 +30,15 @@ GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 GIT_DIRTY  := $(shell test -z "$$(git status --porcelain 2>/dev/null)" || echo -dirty)
 export HERMEX_COMMIT     := $(GIT_COMMIT)$(GIT_DIRTY)
 export HERMEX_BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-LDFLAGS := -X hermex/internal/buildinfo.Commit=$(HERMEX_COMMIT) -X hermex/internal/buildinfo.BuildTime=$(HERMEX_BUILD_TIME)
+
+# The release number has one source, the VERSION file; `make release` is how it
+# changes. A build is that release only when it runs on the exact commit tagged
+# v<VERSION> with a clean tree; every other build reports itself as work toward the
+# next one (buildinfo.Display). The Dockerfile reads VERSION from the build context
+# itself, so HERMEX_TAGGED is the only part compose has to pass through.
+HERMEX_VERSION := $(shell cat VERSION)
+export HERMEX_TAGGED := $(if $(GIT_DIRTY),,$(shell git describe --exact-match --tags --match 'v$(HERMEX_VERSION)' HEAD >/dev/null 2>&1 && echo true))
+LDFLAGS := -X hermex/internal/buildinfo.SemVer=$(HERMEX_VERSION) -X hermex/internal/buildinfo.Tagged=$(HERMEX_TAGGED) -X hermex/internal/buildinfo.Commit=$(HERMEX_COMMIT) -X hermex/internal/buildinfo.BuildTime=$(HERMEX_BUILD_TIME)
 
 # The identity the mail daemons run as. They must not run as root, and the id has
 # to be this user's: the mail data is a bind mount owned on the host, so a fixed
@@ -253,8 +261,10 @@ restore-db:
 compose-check:
 	$(COMPOSE) config -q
 
-## version: report the source state this Makefile would stamp into a build
+## version: report the release and source state this Makefile would stamp into a build
 version:
+	@echo "version    $(HERMEX_VERSION)"
+	@echo "shown as   $(if $(HERMEX_TAGGED),$(HERMEX_VERSION) ($(HERMEX_COMMIT)),$(HERMEX_VERSION)-dev+$(HERMEX_COMMIT))"
 	@echo "commit     $(HERMEX_COMMIT)"
 	@echo "build time $(HERMEX_BUILD_TIME)"
 	@echo "run as     $(HERMEX_UID):$(HERMEX_GID)"

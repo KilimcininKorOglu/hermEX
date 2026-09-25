@@ -37,6 +37,32 @@ func TestUnstampedBuildIsHonest(t *testing.T) {
 	}
 }
 
+// TestDisplayFormats pins the version string every surface shows. A tagged build is
+// the release itself; anything else is work on the way to the next one and must
+// never read as the release, even when the commit is unknown.
+func TestDisplayFormats(t *testing.T) {
+	cases := []struct {
+		name, semver, tagged, commit, want string
+	}{
+		{"tagged release", "0.1.0", "true", "adeff8a", "0.1.0 (adeff8a)"},
+		{"untagged build", "0.1.0", "", "adeff8a", "0.1.0-dev+adeff8a"},
+		{"dirty build", "0.1.0", "", "adeff8a-dirty", "0.1.0-dev+adeff8a-dirty"},
+		{"no commit", "0.1.0", "true", "", "0.1.0-dev"},
+		{"no release number", "", "", "adeff8a", "adeff8a"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			stamp(t, c.commit, "")
+			oldSemVer, oldTagged := SemVer, Tagged
+			SemVer, Tagged = c.semver, c.tagged
+			t.Cleanup(func() { SemVer, Tagged = oldSemVer, oldTagged })
+			if got := Display(); got != c.want {
+				t.Errorf("Display() = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
 // TestDirtyMarkerSurvives proves the -dirty suffix is carried through rather than
 // trimmed. A bare sha on a binary built from a modified tree claims a source state
 // that was never built, which is worse than reporting nothing.

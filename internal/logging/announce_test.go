@@ -42,9 +42,9 @@ func captureStderr(t *testing.T, fn func()) string {
 // answer is now recorded once per start, to stderr and to the queryable store the
 // admin panel reads.
 func TestBuildAnnouncesTheRunningBuild(t *testing.T) {
-	oldCommit, oldBuilt := buildinfo.Commit, buildinfo.BuildTime
-	buildinfo.Commit, buildinfo.BuildTime = "abc1234-dirty", "2026-01-02T03:04:05Z"
-	defer func() { buildinfo.Commit, buildinfo.BuildTime = oldCommit, oldBuilt }()
+	oldCommit, oldBuilt, oldSemVer := buildinfo.Commit, buildinfo.BuildTime, buildinfo.SemVer
+	buildinfo.Commit, buildinfo.BuildTime, buildinfo.SemVer = "abc1234-dirty", "2026-01-02T03:04:05Z", "0.1.0"
+	defer func() { buildinfo.Commit, buildinfo.BuildTime, buildinfo.SemVer = oldCommit, oldBuilt, oldSemVer }()
 
 	out := captureStderr(t, func() {
 		_, closeFn := logging.Build("hermex-mta", "", "db", "")
@@ -56,7 +56,7 @@ func TestBuildAnnouncesTheRunningBuild(t *testing.T) {
 	if !strings.Contains(out, "process.start") {
 		t.Fatalf("no startup event was recorded:\n%s", out)
 	}
-	for _, want := range []string{"hermex-mta", "abc1234-dirty", "2026-01-02T03:04:05Z"} {
+	for _, want := range []string{"hermex-mta", "0.1.0-dev+abc1234-dirty", "2026-01-02T03:04:05Z"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the startup event does not carry %q:\n%s", want, out)
 		}

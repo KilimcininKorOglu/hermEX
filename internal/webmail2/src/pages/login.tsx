@@ -2,6 +2,7 @@ import { useState, useEffect, type FormEvent } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useI18n } from '@/hooks/useI18n'
+import { shownVersion } from '@/utils/serverVersion'
 
 interface Branding {
   app_name: string
@@ -9,8 +10,9 @@ interface Branding {
   primary_color: string
   tagline: string
   footer_text: string
-  // Build stamp from the server. Not tenant-configurable, and reported as
-  // "unknown" by a binary that was not stamped, which the footer then omits.
+  // The server's version (release number and commit). Not tenant-configurable,
+  // and reported as "unknown" by a binary that was not stamped, which
+  // shownVersion then omits.
   version: string
 }
 
@@ -48,9 +50,7 @@ export function LoginPage() {
   }, [host])
 
   const appName = branding?.app_name || 'hermEX'
-  // An unstamped binary reports "unknown", which says nothing useful in a footer,
-  // so the version is left out entirely rather than rendered as a non-answer.
-  const version = branding?.version && branding.version !== 'unknown' ? branding.version : ''
+  const version = shownVersion(branding?.version)
   useEffect(() => {
     document.title = `${appName} ${t('login.webmail')}`
   }, [appName, t])

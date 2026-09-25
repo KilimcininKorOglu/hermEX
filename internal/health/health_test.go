@@ -165,14 +165,14 @@ func statusFrom(t *testing.T, addr string, comps []lifecycle.Component) Status {
 // daemons are still on an older binary after a rolling restart, which is the
 // question schema compatibility turns on when they share one database.
 func TestComponentsReportTheBuildVersion(t *testing.T) {
-	old := buildinfo.Commit
-	buildinfo.Commit = "abc1234-dirty"
-	defer func() { buildinfo.Commit = old }()
+	oldCommit, oldSemVer := buildinfo.Commit, buildinfo.SemVer
+	buildinfo.Commit, buildinfo.SemVer = "abc1234-dirty", "0.1.0"
+	defer func() { buildinfo.Commit, buildinfo.SemVer = oldCommit, oldSemVer }()
 
 	addr := freeAddr(t)
 	st := statusFrom(t, addr, Components(addr, "imap"))
-	if st.Version != "abc1234-dirty" {
-		t.Errorf("version = %q, want the binary's own stamp", st.Version)
+	if st.Version != "0.1.0-dev+abc1234-dirty" {
+		t.Errorf("version = %q, want the binary's own release and stamp", st.Version)
 	}
 	if st.Service != "imap" {
 		t.Errorf("service = %q, want imap", st.Service)
@@ -183,9 +183,9 @@ func TestComponentsReportTheBuildVersion(t *testing.T) {
 // says so rather than answering with an empty string, which reads as a value the
 // operator is meant to compare against another daemon's.
 func TestComponentsReportAnUnstampedBuildHonestly(t *testing.T) {
-	old := buildinfo.Commit
-	buildinfo.Commit = ""
-	defer func() { buildinfo.Commit = old }()
+	oldCommit, oldSemVer := buildinfo.Commit, buildinfo.SemVer
+	buildinfo.Commit, buildinfo.SemVer = "", ""
+	defer func() { buildinfo.Commit, buildinfo.SemVer = oldCommit, oldSemVer }()
 
 	addr := freeAddr(t)
 	if st := statusFrom(t, addr, Components(addr, "imap")); st.Version == "" {

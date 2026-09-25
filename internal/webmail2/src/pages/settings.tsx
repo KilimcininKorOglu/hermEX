@@ -3,6 +3,7 @@ import { Moon, Sun, Bell, Shield, ShieldCheck, Palette, Keyboard, Mail, Globe, L
 import { useTheme } from "@/components/theme-provider"
 import { useAuth } from "@/contexts/AuthContext"
 import { useI18n } from "@/hooks/useI18n"
+import { useServerVersion } from "@/hooks/useServerVersion"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -30,7 +31,6 @@ import { applyIconSet } from "@/utils/iconSet"
 import { defaultMailColumns, setMailColumns } from "@/utils/mailListColumns"
 import { applyUnreadBorder } from "@/utils/displayPrefs"
 import { setInboxNavigation, clampPageSize, DEFAULT_PAGE_SIZE, MIN_PAGE_SIZE, MAX_PAGE_SIZE, type InboxNavMode } from "@/utils/inboxNavigation"
-import pkg from "../../package.json"
 import { enablePushNotifications, disablePushNotifications, pushSupported } from "@/utils/push"
 import { RichTextEditor } from "@/components/RichTextEditor"
 import { SecondFactorCard } from "@/components/settings/second-factor-card"
@@ -143,6 +143,7 @@ export function SettingsPage() {
   const { theme, setTheme, resolvedTheme } = useTheme()
   const { user, updatePrefs } = useAuth()
   const { t, changeLocale } = useI18n()
+  const serverVersion = useServerVersion()
 
   // Profile photo (self-service avatar). avatarVersion cache-busts the <img>
   // after an upload/removal so the new photo shows immediately.
@@ -2516,7 +2517,7 @@ export function SettingsPage() {
           <dt className="font-medium">{t("settings.about.application")}</dt>
           <dd className="text-muted-foreground">hermEX Webmail</dd>
           <dt className="font-medium">{t("settings.about.version")}</dt>
-          <dd className="text-muted-foreground">{pkg.version}</dd>
+          <dd className="text-muted-foreground">{serverVersion}</dd>
           <dt className="font-medium">{t("settings.about.signedInVia")}</dt>
           <dd className="text-muted-foreground">{t("settings.about.password")}</dd>
           <dt className="font-medium">{t("settings.about.browser")}</dt>
@@ -2714,7 +2715,7 @@ export function SettingsPage() {
       </Dialog>
 
       <div className="text-center text-sm text-muted-foreground pb-8 space-y-2">
-        <p>hermEX Webmail v1.0.0</p>
+        <p>hermEX Webmail {serverVersion}</p>
         <p>{t("settings.footer.tagline")}</p>
         <Button
           variant="outline"

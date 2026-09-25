@@ -1,27 +1,50 @@
-// Package buildinfo carries the source state a binary was built from, so an
-// operator can tell what is actually running.
+// Package buildinfo carries the release and the source state a binary was built
+// from, so an operator can tell what is actually running.
 //
-// With no CI-built images and no tags, the running binary is the only evidence of what is
-// deployed. The container images build from a context with .git excluded and with
+// The release number has one source, the VERSION file at the repository root. The
+// container images build from a context with .git excluded and with
 // -buildvcs=false, which is right for build hygiene but removes the toolchain's
-// automatic stamping, so the values are injected at link time instead:
+// automatic stamping, so every value is injected at link time instead:
 //
-//	go build -ldflags "-X hermex/internal/buildinfo.Commit=<sha> -X hermex/internal/buildinfo.BuildTime=<rfc3339>"
+//	go build -ldflags "-X hermex/internal/buildinfo.SemVer=<x.y.z> -X hermex/internal/buildinfo.Tagged=true -X hermex/internal/buildinfo.Commit=<sha> -X hermex/internal/buildinfo.BuildTime=<rfc3339>"
 //
-// The Makefile does this for every build it drives. A binary built any other way
-// falls back to whatever the toolchain recorded, and reports "unknown" when there
-// is nothing to report, which is honest rather than misleading.
+// The Makefile does this for every build it drives, and the Dockerfile reads VERSION
+// itself. A binary built any other way falls back to whatever the toolchain recorded,
+// and reports "unknown" when there is nothing to report, which is honest rather than
+// misleading.
 package buildinfo
 
 import "runtime/debug"
 
-// Commit and BuildTime are set at link time. Commit carries a "-dirty" suffix when
-// the tree had uncommitted changes, since a bare sha would otherwise claim a source
-// state the binary was not built from.
+// SemVer is the release number from the VERSION file. Tagged is "true" when the
+// build ran on the exact commit tagged v<SemVer> with a clean tree, which is what
+// makes it that release rather than work on the way to the next one. Commit carries
+// a "-dirty" suffix when the tree had uncommitted changes, since a bare sha would
+// otherwise claim a source state the binary was not built from.
 var (
+	SemVer    = ""
+	Tagged    = ""
 	Commit    = ""
 	BuildTime = ""
 )
+
+// Display returns the version every surface shows: "0.1.0 (adeff8a)" for a tagged
+// release build, "0.1.0-dev+adeff8a" for any other build, with the commit's "-dirty"
+// suffix carried through. A build with no release number reports the commit alone,
+// and one with no commit reports "0.1.0-dev", which never reads as a release.
+func Display() string {
+	rev := Revision()
+	switch {
+	case SemVer == "":
+		return rev
+	case rev == unknown:
+		return SemVer + "-dev"
+	case Tagged == "true":
+		return SemVer + " (" + rev + ")"
+	default:
+		return SemVer + "-dev+" + rev
+	}
+}
 
 // unknown is what every accessor reports when there is nothing recorded.
 const unknown = "unknown"

@@ -106,7 +106,8 @@ func (c *component) Shutdown(ctx context.Context) error { return c.srv.Shutdown(
 // from this call, which a main makes at startup. checks are the daemon's
 // readiness probes (typically a directory database ping).
 //
-// The reported version is the binary's own source stamp, read here rather than
+// The reported version is the binary's own release and source stamp
+// (buildinfo.Display), read here rather than
 // taken as a parameter so no daemon can be added without one. That is what the
 // admin Live monitor's Version column shows, and the reason it exists: during a
 // rolling restart the daemons share one database, and which of them are still on
@@ -115,5 +116,5 @@ func Components(addr, service string, checks ...Check) []lifecycle.Component {
 	if addr == "" {
 		return nil
 	}
-	return []lifecycle.Component{Component(addr, Handler(service, buildinfo.Revision(), time.Now(), checks...))}
+	return []lifecycle.Component{Component(addr, Handler(service, buildinfo.Display(), time.Now(), checks...))}
 }

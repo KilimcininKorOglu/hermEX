@@ -59,9 +59,9 @@ func TestHandleBrandingPerDomain(t *testing.T) {
 // TestBrandingCarriesTheBuildStamp proves the login footer gets a real version to
 // render, and that a tenant cannot overwrite it with a version it is not running.
 func TestBrandingCarriesTheBuildStamp(t *testing.T) {
-	old := buildinfo.Commit
-	buildinfo.Commit = "abc1234-dirty"
-	defer func() { buildinfo.Commit = old }()
+	oldCommit, oldSemVer, oldTagged := buildinfo.Commit, buildinfo.SemVer, buildinfo.Tagged
+	buildinfo.Commit, buildinfo.SemVer, buildinfo.Tagged = "abc1234", "0.1.0", "true"
+	defer func() { buildinfo.Commit, buildinfo.SemVer, buildinfo.Tagged = oldCommit, oldSemVer, oldTagged }()
 
 	auth := brandingAuth{
 		StaticAccounts: directory.StaticAccounts{},
@@ -82,7 +82,7 @@ func TestBrandingCarriesTheBuildStamp(t *testing.T) {
 	}
 	// A domain that customized nothing still gets the stamp, since the footer
 	// renders it for every tenant.
-	if b := get("other.test"); b["version"] != "abc1234-dirty" {
+	if b := get("other.test"); b["version"] != "0.1.0 (abc1234)" {
 		t.Errorf("default version = %v, want the build stamp", b["version"])
 	}
 	// A branded domain gets its own footer text and the same stamp.
@@ -90,7 +90,7 @@ func TestBrandingCarriesTheBuildStamp(t *testing.T) {
 	if b["footer_text"] != "Acme" {
 		t.Errorf("footer_text = %v, want the tenant value", b["footer_text"])
 	}
-	if b["version"] != "abc1234-dirty" {
+	if b["version"] != "0.1.0 (abc1234)" {
 		t.Errorf("branded version = %v, want the build stamp, not a tenant value", b["version"])
 	}
 }

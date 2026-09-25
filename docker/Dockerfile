@@ -12,13 +12,17 @@ ENV CGO_ENABLED=0 GOFLAGS=-buildvcs=false
 
 # The build context excludes .git (see .dockerignore) and -buildvcs=false turns off
 # the toolchain's automatic VCS stamping, so nothing would record what these
-# binaries were built from. With no CI and no tags the running binary is the only
-# evidence of what is deployed, so the source state is injected at link time
-# instead. The Makefile supplies both values; a build driven any other way falls
-# back to the package defaults and reports "unknown" rather than something false.
+# binaries were built from. No registry publishes these images, so the running
+# binary is the only evidence of what is deployed, and the source state is injected
+# at link time instead. The Makefile supplies these values; a build driven any
+# other way falls back to the package defaults and reports "unknown" rather than
+# something false.
+# The release number is not an argument: it is read from the VERSION file in the
+# build context below, so even a bare `docker compose build` carries the right one.
 ARG HERMEX_COMMIT=""
 ARG HERMEX_BUILD_TIME=""
-ENV LDFLAGS="-X hermex/internal/buildinfo.Commit=$HERMEX_COMMIT -X hermex/internal/buildinfo.BuildTime=$HERMEX_BUILD_TIME"
+ARG HERMEX_TAGGED=""
+ENV LDFLAGS="-X hermex/internal/buildinfo.Commit=$HERMEX_COMMIT -X hermex/internal/buildinfo.BuildTime=$HERMEX_BUILD_TIME -X hermex/internal/buildinfo.Tagged=$HERMEX_TAGGED"
 
 # The module and build caches are BuildKit cache mounts, kept across builds. The
 # build time above changes on every build and so re-runs the compile step even for
@@ -28,7 +32,8 @@ COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    go build -trimpath -ldflags "$LDFLAGS" -o /out/hermex-mta ./cmd/mta \
+    export LDFLAGS="$LDFLAGS -X hermex/internal/buildinfo.SemVer=$(cat VERSION)" \
+ && go build -trimpath -ldflags "$LDFLAGS" -o /out/hermex-mta ./cmd/mta \
  && go build -trimpath -ldflags "$LDFLAGS" -o /out/hermex-pop3 ./cmd/pop3 \
  && go build -trimpath -ldflags "$LDFLAGS" -o /out/hermex-imap ./cmd/imap \
  && go build -trimpath -ldflags "$LDFLAGS" -o /out/hermex-webmail2 ./cmd/webmail2 \

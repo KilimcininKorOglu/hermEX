@@ -28,6 +28,7 @@ x-hermex-build: &hermex-build
   args:
     HERMEX_COMMIT: "${HERMEX_COMMIT-}"
     HERMEX_BUILD_TIME: "${HERMEX_BUILD_TIME-}"
+    HERMEX_TAGGED: "${HERMEX_TAGGED-}"
 
 services:
   db:
