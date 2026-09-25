@@ -62,9 +62,16 @@ func seriesShape(master *icomp) (series, bool) {
 	if master == nil {
 		return series{}, false
 	}
-	start, allDay, ok := parseICalTime(master.prop("DTSTART"))
+	dtstart := master.prop("DTSTART")
+	start, allDay, ok := parseICalTime(dtstart)
 	if !ok {
 		return series{}, false
+	}
+	if !allDay && dtstart.loc != nil {
+		// A rule repeats on the wall clock of the zone DTSTART names (RFC 5545
+		// section 3.3.10), so the instants are generated there: 09:00 stays 09:00
+		// across a daylight saving switch rather than keeping its UTC offset.
+		start = start.In(dtstart.loc)
 	}
 	s := series{start: start, allDay: allDay}
 	switch rrule := master.prop("RRULE"); {
@@ -104,7 +111,7 @@ func seriesInstants(master *icomp, s series, skip map[string]bool, rangeStart, r
 	}
 	inRange := func(t time.Time) bool { return !t.Before(rangeStart) && t.Before(rangeEnd) }
 	if s.hasRule {
-		for _, t := range s.rec.Occurrences(s.start.UTC(), rangeStart, rangeEnd, 4096) {
+		for _, t := range s.rec.Occurrences(s.start, rangeStart, rangeEnd, 4096) {
 			add(t)
 		}
 	} else if inRange(s.start) {

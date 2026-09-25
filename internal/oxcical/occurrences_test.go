@@ -1,6 +1,7 @@
 package oxcical
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -30,6 +31,33 @@ func TestOccurrencesInFindsTheInstanceInTheWindow(t *testing.T) {
 	}
 	if !spans[0].Start.Equal(day(16, 17)) || !spans[0].End.Equal(day(16, 18)) {
 		t.Errorf("span = %v, want 17:00 to 18:00", spans[0])
+	}
+}
+
+// berlinDaily is a daily 09:00 Berlin standup starting before the 29 March 2026
+// switch to summer time.
+const berlinDaily = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:dst-1\r\nSUMMARY:Standup\r\n" +
+	"DTSTART;TZID=Europe/Berlin:20260327T090000\r\nDTEND;TZID=Europe/Berlin:20260327T093000\r\n" +
+	"RRULE:FREQ=DAILY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+
+// TestOccurrencesInKeepsTheZoneWallClock holds a zoned series at its wall time on
+// both sides of a daylight saving switch: 09:00 Berlin is 08:00 UTC in winter and
+// 07:00 UTC in summer. Expanding on UTC would keep 08:00 UTC, which is 10:00 in
+// Berlin after the switch.
+func TestOccurrencesInKeepsTheZoneWallClock(t *testing.T) {
+	spans := spansIn(t, berlinDaily, day(28, 0), day(31, 0))
+	want := []time.Time{day(28, 8), day(29, 7), day(30, 7)}
+	if len(spans) != len(want) {
+		t.Fatalf("spans = %v, want %v", spans, want)
+	}
+	for i, s := range spans {
+		if !s.Start.Equal(want[i]) {
+			t.Errorf("instance %d starts %v, want %v", i, s.Start.UTC(), want[i])
+		}
+	}
+	expanded, ok := ExpandRecurrence([]byte(berlinDaily), day(30, 0), day(31, 0))
+	if !ok || !strings.Contains(string(expanded), "DTSTART:20260330T070000Z") {
+		t.Errorf("CalDAV expansion misplaces the summer instance:\n%s", expanded)
 	}
 }
 
