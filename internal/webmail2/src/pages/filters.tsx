@@ -703,15 +703,9 @@ export function FiltersPage() {
         await api.updateFilter(editingId, draft)
         toast.success(t("filters.toast.updated"))
       } else {
-        // Create does not accept `enabled` (new filters are enabled by
-        // default) and the backend rejects unknown JSON fields.
-        await api.createFilter({
-          name: draft.name,
-          matchAll: draft.matchAll,
-          conditions: draft.conditions,
-          exceptions: draft.exceptions,
-          actions: draft.actions,
-        })
+        // Send the whole draft: the create handler stores the body as given,
+        // so an absent `enabled` would store the new filter disabled.
+        await api.createFilter(draft)
         toast.success(t("filters.toast.created"))
       }
       setDialogOpen(false)
