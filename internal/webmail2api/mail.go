@@ -222,6 +222,7 @@ type mailDetailJSON struct {
 	FollowupStatus int32            `json:"followupStatus,omitempty"` // 0 none, 1 complete, 2 flagged
 	FollowupColor  int32            `json:"followupColor,omitempty"`  // 1..6 (purple..red)
 	FollowupDue    string           `json:"followupDue,omitempty"`    // RFC3339, empty when unset
+	Labels         []string         `json:"labels,omitempty"`         // category labels (PidNameKeywords)
 }
 
 // handleMailMessage returns a single message's full detail and marks it read.
@@ -259,7 +260,7 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 	// match is computed server-side (against the shared allowlist) so the
 	// security-relevant decision stays in tested Go, not client code.
 	d.SenderTrusted = isSafeSender(safeSenders(st), d.From)
-	addFollowupFlag(&d, st, fid, uid)
+	addStoredProps(&d, st, fid, uid)
 	writeJSON(w, http.StatusOK, d)
 }
 
@@ -305,14 +306,24 @@ func markReadOnOpen(d *mailDetailJSON, mb *mailboxCtx, fid int64, uid uint32) {
 	}
 }
 
-// addFollowupFlag surfaces the rich follow-up flag (colour + due date +
-// complete) so the reading view can show more than the plain \Flagged star.
-func addFollowupFlag(d *mailDetailJSON, st *objectstore.Store, fid int64, uid uint32) {
+// addStoredProps surfaces what the stored message carries beyond its wire
+// form: the rich follow-up flag and the category labels (PidNameKeywords), so
+// a label set in the reader or by another client shows on the next read.
+func addStoredProps(d *mailDetailJSON, st *objectstore.Store, fid int64, uid uint32) {
 	m, err := st.MessageByUID(fid, uid)
 	if err != nil {
 		return
 	}
-	f, err := st.GetFollowupFlag(m.ID)
+	addFollowupFlag(d, st, m.ID)
+	if cats, err := st.GetCategories(m.ID); err == nil {
+		d.Labels = cats
+	}
+}
+
+// addFollowupFlag surfaces the rich follow-up flag (colour + due date +
+// complete) so the reading view can show more than the plain \Flagged star.
+func addFollowupFlag(d *mailDetailJSON, st *objectstore.Store, messageID int64) {
+	f, err := st.GetFollowupFlag(messageID)
 	if err != nil {
 		return
 	}
