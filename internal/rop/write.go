@@ -864,11 +864,18 @@ func (s *Session) deliverComposed(st *objectstore.Store, nm *newMessageState, re
 	stampSubmitIdentity(&props, representing, sender, ownerIDs)
 	oxcmail.EnsureMessageID(&props)
 
-	msg := &oxcmail.Message{Props: props, Recipients: wire}
+	// The attachments are read from the saved message, which holds every one the
+	// client created, whether before or after its first save.
+	saved, err := st.OpenMessage(nm.savedID)
+	if err != nil {
+		return nil, err
+	}
+	msg := &oxcmail.Message{Props: props, Recipients: wire, Attachments: saved.Attachments}
 	opt, err := meetingCalendar(st, msg)
 	if err != nil {
 		return nil, err
 	}
+	msg.Attachments = mailAttachments(saved.Attachments)
 	raw, err := oxcmail.Export(msg, opt)
 	if err != nil {
 		return nil, err
@@ -897,11 +904,27 @@ func meetingCalendar(st *objectstore.Store, msg *oxcmail.Message) (oxcmail.Optio
 			attendees[i].Set(mapi.PrSmtpAddress, addr)
 		}
 	}
-	ical, err := oxcical.Export(&oxcmail.Message{Props: msg.Props, Recipients: attendees}, oxcical.Options{Resolver: st.GetNamedPropIDs})
+	ical, err := oxcical.Export(&oxcmail.Message{Props: msg.Props, Recipients: attendees, Attachments: msg.Attachments}, oxcical.Options{Resolver: st.GetNamedPropIDs})
 	if err != nil {
 		return oxcmail.Options{}, err
 	}
 	return oxcmail.Options{CalendarBody: ical, CalendarMethod: oxcical.Method(ical)}, nil
+}
+
+// mailAttachments drops the exception attachments of a recurring meeting. Such an
+// attachment is a hidden copy of one modified occurrence ([MS-OXOCAL] 2.2.10.1),
+// which the iCalendar part carries as an override, so it is not a file the
+// recipient was sent.
+func mailAttachments(atts []oxcmail.Attachment) []oxcmail.Attachment {
+	out := make([]oxcmail.Attachment, 0, len(atts))
+	for _, a := range atts {
+		flags, _ := a.Props.Get(mapi.PrAttachmentFlags)
+		if f, _ := flags.(int32); f&mapi.AttachmentFlagException != 0 {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
 }
 
 // recipientSMTP extracts a routable SMTP address from a recipient bag: the
