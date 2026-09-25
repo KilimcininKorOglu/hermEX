@@ -99,6 +99,18 @@ func (zr *zoneResolver) locate(tzid, value string) *time.Location {
 	return nil
 }
 
+// ZoneByID resolves a TZID by name the way an imported calendar's TZID is
+// resolved: an IANA name first, then the Windows id Outlook and Exchange write.
+// It returns nil for a name neither table knows, and for "" and "Local", which
+// time.LoadLocation reads as UTC and as the server's own zone rather than as a
+// zone the client named.
+func ZoneByID(tzid string) *time.Location {
+	if tzid == "" || tzid == "Local" {
+		return nil
+	}
+	return namedZone(tzid)
+}
+
 // namedZone resolves a TZID by name: an IANA name first, then the Windows id
 // Outlook and Exchange write.
 func namedZone(tzid string) *time.Location {

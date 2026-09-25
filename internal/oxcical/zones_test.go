@@ -291,14 +291,39 @@ func TestNthWeekdayOf(t *testing.T) {
 }
 
 // TestWindowsZonesLoad requires every mapped IANA name to load, so a typo in the
-// table fails here instead of shifting an appointment by an hour in production.
+// table fails here instead of shifting an appointment by an hour in production,
+// and requires every key to resolve whatever case a TZID arrives in.
 func TestWindowsZonesLoad(t *testing.T) {
 	for win, iana := range windowsZones {
-		if win != strings.ToLower(win) {
-			t.Errorf("key %q is not lower-case, so the lookup can never hit it", win)
-		}
 		if _, err := time.LoadLocation(iana); err != nil {
 			t.Errorf("%s -> %s: %v", win, iana, err)
+		}
+		for _, spelling := range []string{win, strings.ToLower(win), strings.ToUpper(win)} {
+			if got, ok := ianaForWindows(spelling); !ok || got != iana {
+				t.Errorf("ianaForWindows(%q) = %q, %v; want %q", spelling, got, ok, iana)
+			}
+		}
+	}
+}
+
+// TestWindowsZoneFor covers the reverse lookup the time zone definition's
+// KeyName comes from: the canonical Windows spelling, one fixed answer for an
+// IANA zone two Windows ids share, and a refusal for a zone the table lacks.
+func TestWindowsZoneFor(t *testing.T) {
+	cases := []struct {
+		iana string
+		want string
+		ok   bool
+	}{
+		{"Europe/Berlin", "W. Europe Standard Time", true},
+		{"Europe/Istanbul", "Turkey Standard Time", true},
+		{"Asia/Novosibirsk", "N. Central Asia Standard Time", true},
+		{"Europe/Amsterdam", "", false},
+	}
+	for _, c := range cases {
+		got, ok := WindowsZoneFor(c.iana)
+		if got != c.want || ok != c.ok {
+			t.Errorf("WindowsZoneFor(%q) = %q, %v; want %q, %v", c.iana, got, ok, c.want, c.ok)
 		}
 	}
 }
