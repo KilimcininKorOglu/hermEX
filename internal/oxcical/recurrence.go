@@ -116,9 +116,12 @@ func setPositiveInt(v string, dst *int) {
 // Occurrences enumerates the instance start instants of a recurrence that fall within
 // [windowStart, windowEnd), given the series' first start (seriesStart, the master
 // DTSTART). It honors INTERVAL, COUNT, and UNTIL, plus BYDAY for a weekly rule (each
-// listed weekday). The nth-weekday refinements (ordinal BYDAY / BYSETPOS / BYMONTHDAY)
-// are not applied, so such a rule expands on its base frequency only. limit bounds the
-// total instances scanned, a safety stop for an open-ended (no COUNT/UNTIL) rule.
+// listed weekday). A monthly or yearly rule applies its day pins: BYMONTHDAY (a
+// negative value counts from the month's end), BYDAY with an ordinal or BYSETPOS
+// (the nth of the listed weekdays, such as the second Tuesday or the last weekday),
+// and BYMONTH for a yearly rule. A month that lacks the pinned day (the 31st in
+// April) has no instance, per RFC 5545. limit bounds the periods scanned, a safety
+// stop for an open-ended (no COUNT/UNTIL) rule.
 // Each returned instant carries seriesStart's clock time. EXDATE and RECURRENCE-ID
 // overrides are the caller's concern (it holds the full component).
 func (r Recurrence) Occurrences(seriesStart, windowStart, windowEnd time.Time, limit int) []time.Time {
@@ -139,11 +142,96 @@ func (r Recurrence) Occurrences(seriesStart, windowStart, windowEnd time.Time, l
 	case "DAILY":
 		r.step(windowEnd, limit, add, func(i int) time.Time { return seriesStart.AddDate(0, 0, interval*i) })
 	case "MONTHLY":
-		r.step(windowEnd, limit, add, func(i int) time.Time { return seriesStart.AddDate(0, interval*i, 0) })
+		r.monthly(seriesStart, seriesStart.Month(), interval, windowEnd, limit, add)
 	case "YEARLY":
-		r.step(windowEnd, limit, add, func(i int) time.Time { return seriesStart.AddDate(interval*i, 0, 0) })
+		month := seriesStart.Month()
+		if r.Month >= 1 && r.Month <= 12 {
+			month = time.Month(r.Month)
+		}
+		r.monthly(seriesStart, month, 12*interval, windowEnd, limit, add)
 	}
 	return sink.out
+}
+
+// monthly walks one month per period, every months months from firstMonth of the
+// series' first year, feeding the month's pinned days into add. It stops once the
+// series ends, the period passes windowEnd, or the limit is reached.
+func (r Recurrence) monthly(seriesStart time.Time, firstMonth time.Month, months int, windowEnd time.Time, limit int, add func(time.Time) bool) {
+	loc := seriesStart.Location()
+	for period := range limit {
+		first := time.Date(seriesStart.Year(), firstMonth+time.Month(months*period), 1, 0, 0, 0, 0, loc)
+		for _, day := range r.monthDays(first, seriesStart) {
+			inst := time.Date(day.Year(), day.Month(), day.Day(),
+				seriesStart.Hour(), seriesStart.Minute(), seriesStart.Second(), 0, loc)
+			if inst.Before(seriesStart) {
+				continue
+			}
+			if !add(inst) {
+				return
+			}
+		}
+		if first.After(windowEnd) {
+			return
+		}
+	}
+}
+
+// monthDays returns the days of the month starting at first that the rule's day pins
+// select, in date order.
+func (r Recurrence) monthDays(first, seriesStart time.Time) []time.Time {
+	if len(r.Weekdays) == 0 {
+		day := r.MonthDay
+		if day == 0 {
+			day = seriesStart.Day()
+		}
+		if d, ok := monthDay(first, day); ok {
+			return []time.Time{d}
+		}
+		return nil
+	}
+	days := weekdaysInMonth(first, wantedWeekdays(r.Weekdays))
+	if r.SetPos == 0 {
+		return days
+	}
+	return pickSetPos(days, r.SetPos)
+}
+
+// monthDay resolves a BYMONTHDAY value in the month starting at first; a negative
+// value counts back from the last day. ok is false when the month has no such day.
+func monthDay(first time.Time, day int) (time.Time, bool) {
+	length := first.AddDate(0, 1, -1).Day()
+	if day < 0 {
+		day = length + day + 1
+	}
+	if day < 1 || day > length {
+		return time.Time{}, false
+	}
+	return first.AddDate(0, 0, day-1), true
+}
+
+// weekdaysInMonth lists the days of the month starting at first that fall on a wanted
+// weekday.
+func weekdaysInMonth(first time.Time, want map[time.Weekday]bool) []time.Time {
+	var days []time.Time
+	for d := first; d.Month() == first.Month(); d = d.AddDate(0, 0, 1) {
+		if want[d.Weekday()] {
+			days = append(days, d)
+		}
+	}
+	return days
+}
+
+// pickSetPos selects the pos-th day (1-based, or counted from the end when negative),
+// or nothing when the month has fewer.
+func pickSetPos(days []time.Time, pos int) []time.Time {
+	i := pos - 1
+	if pos < 0 {
+		i = len(days) + pos
+	}
+	if i < 0 || i >= len(days) {
+		return nil
+	}
+	return days[i : i+1]
 }
 
 // occurrenceSink collects the instances an expansion produces, applying the
