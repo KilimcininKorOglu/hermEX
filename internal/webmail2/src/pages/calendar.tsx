@@ -37,6 +37,7 @@ import {
   eventFormError,
   eventFormOf,
   eventPayload,
+  movedEventPayload,
   parseAttendees,
   pickerWindow,
   recurrenceToForm,
@@ -497,22 +498,7 @@ function useEventEditor(load: () => Promise<void>) {
   // (preserving its other fields) and reload. Best-effort: a failure toasts.
   const moveEvent = async (ev: CalendarEvent, start: Date, end: Date) => {
     try {
-      await api.updateCalendarEvent(ev.uid, {
-        summary: ev.summary,
-        start: start.toISOString(),
-        end: end.toISOString(),
-        allDay: ev.allDay,
-        calendarId: ev.calendarId ?? "calendar",
-        location: ev.location,
-        description: ev.description,
-        attendees: ev.attendees,
-        optionalAttendees: ev.optionalAttendees,
-        recurrence: ev.recurrence,
-        reminderMinutes: ev.reminderMinutes,
-        busyStatus: ev.busyStatus,
-        sensitivity: ev.sensitivity,
-        categories: ev.categories,
-      })
+      await api.updateCalendarEvent(ev.uid, movedEventPayload(ev, start, end))
       await load()
     } catch (err) {
       toast.error(errorText(err, t("calendar.saveFailed")))

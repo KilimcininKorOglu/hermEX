@@ -1,7 +1,25 @@
 import { describe, expect, it } from "vitest"
-import { emptyEventForm, eventFormError, eventFormOf, eventPayload, parseAttendees, pickerWindow, recurrenceToForm, splitRooms, withoutRoom, withRoom } from "./eventForm"
+import { emptyEventForm, eventFormError, eventFormOf, eventPayload, movedEventPayload, parseAttendees, pickerWindow, recurrenceToForm, splitRooms, withoutRoom, withRoom } from "./eventForm"
 
 const localISO = (h: number, m: number) => new Date(2026, 8, 25, h, m).toISOString()
+
+describe("movedEventPayload", () => {
+  it("moves the event to the new window and keeps its zone and other fields", () => {
+    const ev = {
+      uid: "7", summary: "Standup", start: localISO(9, 0), end: localISO(9, 30), recurrence: "FREQ=DAILY",
+      timezone: "Europe/Istanbul", attendees: ["a@hermex.test"], categories: ["Red"], reminderMinutes: 10,
+      organizer: "alice@hermex.test", tracking: [{ email: "a@hermex.test", response: 3 }],
+    }
+    const start = new Date(2026, 8, 25, 10, 0)
+    const end = new Date(2026, 8, 25, 10, 30)
+    expect(movedEventPayload(ev, start, end)).toEqual({
+      summary: "Standup", start: start.toISOString(), end: end.toISOString(), allDay: undefined, calendarId: "calendar",
+      location: undefined, description: undefined, attendees: ["a@hermex.test"], optionalAttendees: undefined,
+      recurrence: "FREQ=DAILY", reminderMinutes: 10, busyStatus: undefined, sensitivity: undefined, categories: ["Red"],
+      timezone: "Europe/Istanbul",
+    })
+  })
+})
 
 describe("eventFormOf", () => {
   it("fills a timed event's inputs in local time and keeps every field", () => {

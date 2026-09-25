@@ -145,6 +145,30 @@ function numberOrUndefined(s: string): number | undefined {
   return s ? Number(s) : undefined
 }
 
+// movedEventPayload builds the update body for a drag-move or resize: the
+// stored event with the new start and end. It keeps the event's time zone,
+// because a timed event saved without one loses the zone that holds a
+// recurrence at the same wall time across DST.
+export function movedEventPayload(ev: CalendarEvent, start: Date, end: Date): EventPayload {
+  return {
+    summary: ev.summary,
+    start: start.toISOString(),
+    end: end.toISOString(),
+    allDay: ev.allDay,
+    calendarId: ev.calendarId ?? "calendar",
+    location: ev.location,
+    description: ev.description,
+    attendees: ev.attendees,
+    optionalAttendees: ev.optionalAttendees,
+    recurrence: ev.recurrence,
+    reminderMinutes: ev.reminderMinutes,
+    busyStatus: ev.busyStatus,
+    sensitivity: ev.sensitivity,
+    categories: ev.categories,
+    timezone: ev.timezone,
+  }
+}
+
 // eventPayload builds the create/update body from the form. timezone anchors a
 // timed event to the user's zone so a recurrence keeps its wall time across
 // DST; an all-day event stays a floating date.
