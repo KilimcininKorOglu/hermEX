@@ -592,7 +592,9 @@ function useCalendarEditor(loadCalendars: () => Promise<void>) {
   const [mode, setMode] = useState<"create" | "edit">("create")
   const [target, setTarget] = useState<Calendar | null>(null)
   const [form, setForm] = useState<CalendarFormState>(EMPTY_CALENDAR_FORM)
-  const [busy, setBusy] = useState(false)
+  // One mutation at a time: a second click can arrive before React re-renders
+  // with the disabled button, and a second create is a duplicate calendar.
+  const { busy, begin: beginMutation, end: endMutation } = useBusyGate()
   const [deleteTarget, setDeleteTarget] = useState<Calendar | null>(null)
 
   const openNew = () => {
@@ -625,7 +627,7 @@ function useCalendarEditor(loadCalendars: () => Promise<void>) {
       toast.error(t("calendar.calendarNameRequired"))
       return
     }
-    setBusy(true)
+    if (!beginMutation()) return
     try {
       await save()
       setOpen(false)
@@ -633,13 +635,13 @@ function useCalendarEditor(loadCalendars: () => Promise<void>) {
     } catch (err) {
       toast.error(errorText(err, t("calendar.calendarSaveFailed")))
     } finally {
-      setBusy(false)
+      endMutation()
     }
   }
 
   const confirmDelete = async () => {
-    if (!deleteTarget || busy) return
-    setBusy(true)
+    if (!deleteTarget) return
+    if (!beginMutation()) return
     try {
       await api.deleteCalendar(deleteTarget.id)
       toast.success(t("calendar.calendarDeleted"))
@@ -648,7 +650,7 @@ function useCalendarEditor(loadCalendars: () => Promise<void>) {
     } catch (err) {
       toast.error(errorText(err, t("calendar.calendarDeleteFailed")))
     } finally {
-      setBusy(false)
+      endMutation()
     }
   }
 
