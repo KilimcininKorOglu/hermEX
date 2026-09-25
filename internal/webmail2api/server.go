@@ -201,6 +201,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/calendar/events/{uid}", s.handleUpdateEvent)
 	mux.HandleFunc("DELETE /api/v1/calendar/events/{uid}", s.handleDeleteEvent)
 	mux.HandleFunc("GET /api/v1/calendar/events/{uid}/ics", s.handleExportEvent)
+	mux.HandleFunc("PUT /api/v1/calendar/events/{uid}/occurrence", s.handleMoveOccurrence)
+	mux.HandleFunc("DELETE /api/v1/calendar/events/{uid}/occurrence", s.handleDeleteOccurrence)
 	mux.HandleFunc("GET /api/v1/calendar/calendars", s.handleGetCalendars)
 	mux.HandleFunc("POST /api/v1/calendar/calendars", s.handleCreateCalendar)
 	mux.HandleFunc("PATCH /api/v1/calendar/calendars/{id}", s.handleUpdateCalendar)
