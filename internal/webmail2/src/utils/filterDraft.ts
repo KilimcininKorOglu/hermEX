@@ -37,6 +37,20 @@ export function draftOf(filter: Filter): FilterInput {
   }
 }
 
+// toggledInput is the update body that flips a filter's enabled state. The
+// update handler replaces the whole stored filter, so every other field,
+// exceptions included, is sent back unchanged.
+export function toggledInput(filter: Filter): FilterInput {
+  return {
+    name: filter.name,
+    enabled: !filter.enabled,
+    matchAll: filter.matchAll,
+    conditions: filter.conditions,
+    exceptions: filter.exceptions,
+    actions: filter.actions,
+  }
+}
+
 const blank = (s?: string): boolean => !s?.trim()
 
 // conditionError returns the i18n key of the first problem in one condition row.

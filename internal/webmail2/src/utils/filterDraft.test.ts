@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { FilterAction, FilterCondition, FilterInput } from "@/utils/api"
-import { draftOf, emptyAction, emptyCondition, validateDraft } from "./filterDraft"
+import { draftOf, emptyAction, emptyCondition, toggledInput, validateDraft } from "./filterDraft"
 
 const cond = (patch: Partial<FilterCondition>): FilterCondition => ({ ...emptyCondition(), value: "x", ...patch })
 const draft = (patch: Partial<FilterInput>): FilterInput => ({
@@ -77,5 +77,18 @@ describe("draftOf", () => {
   it("gives an empty rule one blank condition and action row", () => {
     const d = draftOf({ id: "f1", name: "R", enabled: false, matchAll: false, conditions: [], actions: [] } as never)
     expect(d).toEqual({ name: "R", enabled: false, matchAll: false, conditions: [emptyCondition()], exceptions: [], actions: [emptyAction()] })
+  })
+})
+
+describe("toggledInput", () => {
+  it("flips enabled and sends every other field back, exceptions included", () => {
+    const filter = {
+      id: "f1", name: "R", enabled: true, matchAll: false, priority: 2,
+      conditions: [cond({})], exceptions: [cond({ value: "skip" })], actions: [{ type: "markRead" as const }],
+    }
+    expect(toggledInput(filter)).toEqual({
+      name: "R", enabled: false, matchAll: false,
+      conditions: filter.conditions, exceptions: filter.exceptions, actions: filter.actions,
+    })
   })
 })

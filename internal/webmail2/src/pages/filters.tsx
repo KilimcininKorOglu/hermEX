@@ -26,7 +26,7 @@ import { useI18n } from "@/hooks/useI18n"
 import api from "@/utils/api"
 import type { Filter, FilterCondition, FilterAction, FilterInput } from "@/utils/api"
 import { useBusyGate } from "@/hooks/useBusyGate"
-import { LEVEL_FIELDS, VALUELESS_FIELDS, draftOf, emptyAction, emptyCondition, emptyDraft, validateDraft } from "@/utils/filterDraft"
+import { LEVEL_FIELDS, VALUELESS_FIELDS, draftOf, emptyAction, emptyCondition, emptyDraft, toggledInput, validateDraft } from "@/utils/filterDraft"
 
 // RUN_FOLDERS are the folders a manual filter run may sweep, matching the slugs the
 // API resolves.
@@ -719,15 +719,7 @@ export function FiltersPage() {
 
   const handleToggle = async (filter: Filter) => {
     try {
-      // Send the full filter: the update handler overwrites matchAll with
-      // the request value, so a partial body would silently reset it.
-      await api.updateFilter(filter.id, {
-        name: filter.name,
-        enabled: !filter.enabled,
-        matchAll: filter.matchAll,
-        conditions: filter.conditions,
-        actions: filter.actions,
-      })
+      await api.updateFilter(filter.id, toggledInput(filter))
       await loadFilters()
     } catch {
       toast.error(t("filters.toast.updateFailed"))
