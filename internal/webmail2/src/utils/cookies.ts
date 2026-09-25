@@ -1,5 +1,5 @@
-// Cookie-backed client storage. The web UI must NOT use localStorage/
-// sessionStorage (see .project/AGENT_DIRECTIVES.md §8.1); client-readable
+// Cookie-backed client storage. The web UI must NOT use localStorage,
+// sessionStorage or IndexedDB; client-readable
 // preferences (language, theme, timezone, session marker, recent searches)
 // live in cookies. The auth JWT itself stays in a separate HttpOnly cookie the
 // client cannot read, these helpers are for non-sensitive readable state only.
