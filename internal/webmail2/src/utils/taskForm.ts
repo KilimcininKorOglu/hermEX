@@ -21,19 +21,12 @@ export const emptyTaskForm: TaskForm = { summary: "", start: "", due: "", status
 // taskFormOf fills the edit form from a stored task, with the defaults for an
 // absent field (priority 1 is Normal).
 export function taskFormOf(task: Task): TaskForm {
-  return {
-    summary: task.summary,
-    start: task.start ?? "",
-    due: task.due ?? "",
-    status: task.status ?? 0,
-    percent: task.percent ?? 0,
-    priority: task.priority ?? 1,
-    reminder: task.reminder ?? false,
-    categories: task.categories ?? [],
-    recurrence: task.recurrence ?? "",
-    owner: task.owner ?? "",
-    description: task.description ?? "",
+  const form: TaskForm = { ...emptyTaskForm, categories: [] }
+  for (const key of Object.keys(emptyTaskForm) as (keyof TaskForm)[]) {
+    const value = task[key]
+    if (value !== undefined && value !== null) Object.assign(form, { [key]: value })
   }
+  return form
 }
 
 // taskInputOf builds the update payload from the edit form. Empty text fields
