@@ -66,7 +66,7 @@ func (s *Session) ropTransportSend(_ *ext.Pull, out *ext.Push, handles []uint32,
 	if !ok {
 		return true
 	}
-	if _, err := s.deliverComposed(obj.newMsg, representing, sender); err != nil {
+	if _, err := s.deliverComposed(obj.store, obj.newMsg, representing, sender); err != nil {
 		writeErr(out, ropTransportSend, hindex, noRecipientOrError(err))
 		return true
 	}

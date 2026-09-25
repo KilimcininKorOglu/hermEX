@@ -10,6 +10,7 @@ import (
 	"hermex/internal/mapi"
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcical"
 	"hermex/internal/oxcmail"
 )
 
@@ -757,7 +758,7 @@ func (s *Session) ropSubmitMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 		return true
 	}
 	nm := obj.newMsg
-	raw, err := s.deliverComposed(nm, representing, sender)
+	raw, err := s.deliverComposed(obj.store, nm, representing, sender)
 	if err != nil {
 		writeErr(out, ropSubmitMessage, hindex, noRecipientOrError(err))
 		return true
@@ -828,8 +829,14 @@ var errNoRecipient = errors.New("rop: no routable recipient")
 // non-empty sender adds the on-behalf Sender), and returns the delivered raw bytes. It
 // reports errNoRecipient when nothing is routable; the caller maps that (and any
 // export/deliver fault) to its own ROP error code. The caller has already verified
-// nm.saved, nm.savedID, and s.accounts.
-func (s *Session) deliverComposed(nm *newMessageState, representing, sender string) ([]byte, error) {
+// nm.saved, nm.savedID, and s.accounts. st is the store the message was composed
+// in, whose named-property ids its properties carry.
+//
+// A meeting message (IPM.Schedule.Meeting.*) also carries its iCalendar as a
+// text/calendar alternative ([MS-OXCICAL]), because a recipient outside this server
+// reads a request, a response, a counter proposal or a cancellation from that part
+// alone. Without it the message arrives as a plain mail.
+func (s *Session) deliverComposed(st *objectstore.Store, nm *newMessageState, representing, sender string) ([]byte, error) {
 	var recipients []string
 	wire := make([]mapi.PropertyValues, 0, len(nm.recipients))
 	for _, bag := range nm.recipients {
@@ -857,7 +864,12 @@ func (s *Session) deliverComposed(nm *newMessageState, representing, sender stri
 	stampSubmitIdentity(&props, representing, sender, ownerIDs)
 	oxcmail.EnsureMessageID(&props)
 
-	raw, err := oxcmail.Export(&oxcmail.Message{Props: props, Recipients: wire}, oxcmail.Options{})
+	msg := &oxcmail.Message{Props: props, Recipients: wire}
+	opt, err := meetingCalendar(st, msg)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := oxcmail.Export(msg, opt)
 	if err != nil {
 		return nil, err
 	}
@@ -865,6 +877,31 @@ func (s *Session) deliverComposed(nm *newMessageState, representing, sender stri
 		return nil, err
 	}
 	return raw, nil
+}
+
+// meetingCalendar returns the export options that attach a meeting message's
+// iCalendar, and empty options for any other message. The attendees are the wire
+// recipients (To and Cc), so a Bcc recipient stays out of the calendar part as it
+// stays out of the headers, and each carries the SMTP address routing resolved for
+// it. An export failure fails the submit rather than sending the meeting as a plain
+// mail the recipient cannot act on.
+func meetingCalendar(st *objectstore.Store, msg *oxcmail.Message) (oxcmail.Options, error) {
+	class, _ := msg.Props.Get(mapi.PrMessageClass)
+	if c, _ := class.(string); !strings.HasPrefix(c, "IPM.Schedule.Meeting.") {
+		return oxcmail.Options{}, nil
+	}
+	attendees := make([]mapi.PropertyValues, len(msg.Recipients))
+	for i, bag := range msg.Recipients {
+		attendees[i] = append(mapi.PropertyValues(nil), bag...)
+		if addr := recipientSMTP(bag); addr != "" {
+			attendees[i].Set(mapi.PrSmtpAddress, addr)
+		}
+	}
+	ical, err := oxcical.Export(&oxcmail.Message{Props: msg.Props, Recipients: attendees}, oxcical.Options{Resolver: st.GetNamedPropIDs})
+	if err != nil {
+		return oxcmail.Options{}, err
+	}
+	return oxcmail.Options{CalendarBody: ical, CalendarMethod: oxcical.Method(ical)}, nil
 }
 
 // recipientSMTP extracts a routable SMTP address from a recipient bag: the
