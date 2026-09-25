@@ -26,6 +26,7 @@ import { useI18n } from "@/hooks/useI18n"
 import api from "@/utils/api"
 import type { Filter, FilterCondition, FilterAction, FilterInput } from "@/utils/api"
 import { useBusyGate } from "@/hooks/useBusyGate"
+import { LEVEL_FIELDS, VALUELESS_FIELDS, draftOf, emptyAction, emptyCondition, emptyDraft, validateDraft } from "@/utils/filterDraft"
 
 // RUN_FOLDERS are the folders a manual filter run may sweep, matching the slugs the
 // API resolves.
@@ -47,11 +48,6 @@ const conditionFields = (t: TFunc): { value: FilterCondition["field"]; label: st
   { value: "sensitivity", label: t("filters.field.sensitivity") },
   { value: "oof", label: t("filters.field.oof") },
 ]
-
-// Condition fields that take no value: a flag/out-of-office test, or an importance/
-// sensitivity level chosen from a fixed list rather than typed.
-const VALUELESS_FIELDS = new Set<FilterCondition["field"]>(["flag", "oof"])
-const LEVEL_FIELDS = new Set<FilterCondition["field"]>(["importance", "sensitivity"])
 
 // The fixed level options offered for importance and sensitivity conditions.
 const levelOptions = (
@@ -99,28 +95,6 @@ const actionTypes = (t: TFunc): { value: FilterAction["type"]; label: string }[]
   { value: "stop", label: t("filters.action.stop") },
   { value: "vacation", label: t("filters.action.vacation") },
 ]
-
-// Action types whose forward/redirect address lives in forwardTo.
-const FORWARD_TYPES = new Set<FilterAction["type"]>(["forward", "forwardAsAttachment", "redirect"])
-
-function emptyCondition(): FilterCondition {
-  return { field: "from", operator: "contains", value: "" }
-}
-
-function emptyAction(): FilterAction {
-  return { type: "moveToFolder", target: "" }
-}
-
-function emptyDraft(): FilterInput {
-  return {
-    name: "",
-    enabled: true,
-    matchAll: true,
-    conditions: [emptyCondition()],
-    exceptions: [],
-    actions: [emptyAction()],
-  }
-}
 
 // ConditionRows renders the editable field/operator/value rows shared by a rule's
 // conditions and its exceptions. Importance/sensitivity pick a level from a list,
@@ -211,6 +185,384 @@ function ConditionRows({
         )
       })}
     </>
+  )
+}
+
+type ActionTextKey = "target" | "forwardTo" | "message" | "headerName" | "headerValue" | "flagName"
+
+interface ActionTextInput {
+  key: ActionTextKey
+  placeholder: string
+  className: string
+}
+
+const WIDE = "min-w-[140px] flex-1"
+const NARROW = "w-[150px]"
+
+// ACTION_INPUTS lists, per action type, the text inputs its row shows, in order.
+const ACTION_INPUTS: Partial<Record<FilterAction["type"], ActionTextInput[]>> = {
+  moveToFolder: [{ key: "target", placeholder: "filters.targetFolderPlaceholder", className: WIDE }],
+  copyToFolder: [{ key: "target", placeholder: "filters.targetFolderPlaceholder", className: WIDE }],
+  forward: [{ key: "forwardTo", placeholder: "filters.destinationPlaceholder", className: WIDE }],
+  forwardAsAttachment: [{ key: "forwardTo", placeholder: "filters.destinationPlaceholder", className: WIDE }],
+  redirect: [{ key: "forwardTo", placeholder: "filters.destinationPlaceholder", className: WIDE }],
+  reject: [{ key: "message", placeholder: "filters.rejectionPlaceholder", className: WIDE }],
+  vacation: [{ key: "message", placeholder: "filters.autoReplyPlaceholder", className: WIDE }],
+  categorize: [{ key: "target", placeholder: "filters.categoriesPlaceholder", className: WIDE }],
+  addHeader: [
+    { key: "headerName", placeholder: "filters.headerNamePlaceholder", className: NARROW },
+    { key: "headerValue", placeholder: "filters.headerValuePlaceholder", className: "min-w-[120px] flex-1" },
+  ],
+  deleteHeader: [{ key: "headerName", placeholder: "filters.headerNamePlaceholder", className: NARROW }],
+  flag: [{ key: "flagName", placeholder: "filters.flagNamePlaceholder", className: NARROW }],
+}
+
+// ActionRow edits one action: its type and the fields that type takes.
+function ActionRow({
+  action,
+  removable,
+  onUpdate,
+  onRemove,
+  t,
+}: {
+  action: FilterAction
+  removable: boolean
+  onUpdate: (patch: Partial<FilterAction>) => void
+  onRemove: () => void
+  t: TFunc
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Select
+        value={action.type}
+        onValueChange={(v) =>
+          onUpdate({ type: v as FilterAction["type"] })
+        }
+      >
+        <SelectTrigger className="w-[160px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {actionTypes(t).map((a) => (
+            <SelectItem key={a.value} value={a.value}>
+              {a.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {(ACTION_INPUTS[action.type] ?? []).map((input) => (
+        <Input
+          key={input.key}
+          className={input.className}
+          placeholder={t(input.placeholder)}
+          value={action[input.key] ?? ""}
+          onChange={(e) => onUpdate({ [input.key]: e.target.value })}
+        />
+      ))}
+      {action.type === "flag" && (
+        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Switch
+            checked={action.clearFlag ?? false}
+            onCheckedChange={(v) => onUpdate({ clearFlag: v })}
+          />
+          {t("filters.clear")}
+        </label>
+      )}
+      {removable && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={onRemove}
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      )}
+    </div>
+  )
+}
+
+// SectionTitle is an editor section label with an Add button.
+function SectionTitle({ label, onAdd, t }: { label: string; onAdd: () => void; t: TFunc }) {
+  return (
+    <div className="flex items-center justify-between">
+      <Label>{label}</Label>
+      <Button variant="outline" size="sm" onClick={onAdd}>
+        <Plus className="h-4 w-4 mr-1" />
+        {t("common.add")}
+      </Button>
+    </div>
+  )
+}
+
+// filterSummary describes a filter as its match mode and its row counts.
+function filterSummary(filter: Filter, t: TFunc): string {
+  return t(filter.matchAll ? "filters.summaryAll" : "filters.summaryAny", {
+    conditionCount: String(filter.conditions.length),
+    conditionWord: t(
+      filter.conditions.length !== 1
+        ? "filters.conditionPlural"
+        : "filters.conditionSingular"
+    ),
+    actionCount: String(filter.actions.length),
+    actionWord: t(
+      filter.actions.length !== 1
+        ? "filters.actionPlural"
+        : "filters.actionSingular"
+    ),
+  })
+}
+
+interface FilterCardActions {
+  onMove: (index: number, dir: -1 | 1) => void
+  onToggle: (filter: Filter) => void
+  onRun: (filterId: string) => void
+  onEdit: (filter: Filter) => void
+  onDelete: (filter: Filter) => void
+}
+
+// FilterCard is one saved filter with its order, enable, run, edit and delete controls.
+function FilterCard({
+  filter,
+  index,
+  count,
+  running,
+  actions,
+  t,
+}: {
+  filter: Filter
+  index: number
+  count: number
+  running: boolean
+  actions: FilterCardActions
+  t: TFunc
+}) {
+  return (
+    <div className="rounded-lg border bg-card p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            disabled={index === 0}
+            onClick={() => actions.onMove(index, -1)}
+            title={t("filters.moveUp")}
+          >
+            <ArrowUp className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            disabled={index === count - 1}
+            onClick={() => actions.onMove(index, 1)}
+            title={t("filters.moveDown")}
+          >
+            <ArrowDown className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="font-medium">{filter.name}</span>
+            {!filter.enabled && (
+              <Badge variant="secondary" className="text-[10px]">
+                {t("filters.disabled")}
+              </Badge>
+            )}
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {filterSummary(filter, t)}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Switch
+            checked={filter.enabled}
+            onCheckedChange={() => actions.onToggle(filter)}
+          />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            disabled={running || !filter.enabled}
+            title={t("filters.runThis")}
+            onClick={() => actions.onRun(filter.id)}
+          >
+            <Play className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => actions.onEdit(filter)}
+          >
+            <Pencil className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-destructive"
+            onClick={() => actions.onDelete(filter)}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// FilterList shows skeletons while loading, the empty state, or the filter cards.
+function FilterList({
+  loading,
+  filters,
+  running,
+  actions,
+  t,
+}: {
+  loading: boolean
+  filters: Filter[]
+  running: boolean
+  actions: FilterCardActions
+  t: TFunc
+}) {
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        {[1, 2].map((i) => (
+          <div key={i} className="rounded-lg border p-4">
+            <Skeleton className="h-5 w-48" />
+            <Skeleton className="mt-2 h-3 w-full" />
+          </div>
+        ))}
+      </div>
+    )
+  }
+  if (filters.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <div className="rounded-full bg-muted p-4">
+          <FilterIcon className="h-8 w-8 text-muted-foreground" />
+        </div>
+        <h3 className="mt-4 text-lg font-semibold">{t("filters.empty.title")}</h3>
+        <p className="text-sm text-muted-foreground">
+          {t("filters.empty.description")}
+        </p>
+      </div>
+    )
+  }
+  return (
+    <div className="space-y-3">
+      {filters.map((filter, index) => (
+        <FilterCard
+          key={filter.id}
+          filter={filter}
+          index={index}
+          count={filters.length}
+          running={running}
+          actions={actions}
+          t={t}
+        />
+      ))}
+    </div>
+  )
+}
+
+// FilterEditor edits a draft filter's name, match mode, conditions, exceptions
+// and actions.
+function FilterEditor({
+  draft,
+  setDraft,
+  t,
+}: {
+  draft: FilterInput
+  setDraft: React.Dispatch<React.SetStateAction<FilterInput>>
+  t: TFunc
+}) {
+  const exceptions = draft.exceptions ?? []
+  const patchRow = <T,>(rows: T[], index: number, patch: Partial<T>): T[] =>
+    rows.map((row, i) => (i === index ? { ...row, ...patch } : row))
+  const dropRow = <T,>(rows: T[], index: number): T[] => rows.filter((_, i) => i !== index)
+  return (
+    <div className="space-y-5">
+      <div className="space-y-2">
+        <Label htmlFor="filter-name">{t("common.name")}</Label>
+        <Input
+          id="filter-name"
+          value={draft.name}
+          onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+          placeholder={t("filters.namePlaceholder")}
+        />
+      </div>
+
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="font-medium">{t("filters.matchAllConditions")}</p>
+          <p className="text-sm text-muted-foreground">
+            {t("filters.matchAllHint")}
+          </p>
+        </div>
+        <Switch
+          checked={draft.matchAll}
+          onCheckedChange={(v) => setDraft({ ...draft, matchAll: v })}
+        />
+      </div>
+
+      {/* Conditions */}
+      <div className="space-y-3">
+        <SectionTitle
+          label={t("filters.conditions")}
+          onAdd={() => setDraft({ ...draft, conditions: [...draft.conditions, emptyCondition()] })}
+          t={t}
+        />
+        <ConditionRows
+          conditions={draft.conditions}
+          onUpdate={(index, patch) => setDraft((d) => ({ ...d, conditions: patchRow(d.conditions, index, patch) }))}
+          onRemove={(index) => setDraft((d) => ({ ...d, conditions: dropRow(d.conditions, index) }))}
+          allowEmpty={false}
+          t={t}
+        />
+      </div>
+
+      {/* Exceptions: the rule does NOT fire if any exception matches (optional) */}
+      <div className="space-y-3">
+        <SectionTitle
+          label={t("filters.exceptions")}
+          onAdd={() => setDraft({ ...draft, exceptions: [...exceptions, emptyCondition()] })}
+          t={t}
+        />
+        {exceptions.length === 0 ? (
+          <p className="text-xs text-muted-foreground">{t("filters.noExceptions")}</p>
+        ) : (
+          <ConditionRows
+            conditions={exceptions}
+            onUpdate={(index, patch) => setDraft((d) => ({ ...d, exceptions: patchRow(d.exceptions ?? [], index, patch) }))}
+            onRemove={(index) => setDraft((d) => ({ ...d, exceptions: dropRow(d.exceptions ?? [], index) }))}
+            allowEmpty={true}
+            t={t}
+          />
+        )}
+      </div>
+
+      {/* Actions */}
+      <div className="space-y-3">
+        <SectionTitle
+          label={t("common.actions")}
+          onAdd={() => setDraft({ ...draft, actions: [...draft.actions, emptyAction()] })}
+          t={t}
+        />
+        {draft.actions.map((action, i) => (
+          <ActionRow
+            key={i}
+            action={action}
+            removable={draft.actions.length > 1}
+            onUpdate={(patch) => setDraft((d) => ({ ...d, actions: patchRow(d.actions, i, patch) }))}
+            onRemove={() => setDraft({ ...draft, actions: dropRow(draft.actions, i) })}
+            t={t}
+          />
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -335,87 +687,14 @@ export function FiltersPage() {
 
   const openEdit = (filter: Filter) => {
     setEditingId(filter.id)
-    setDraft({
-      name: filter.name,
-      enabled: filter.enabled,
-      matchAll: filter.matchAll,
-      conditions: filter.conditions.length ? filter.conditions : [emptyCondition()],
-      exceptions: filter.exceptions ?? [],
-      actions: filter.actions.length ? filter.actions : [emptyAction()],
-    })
+    setDraft(draftOf(filter))
     setDialogOpen(true)
   }
 
-  const updateCondition = (index: number, patch: Partial<FilterCondition>) => {
-    setDraft((d) => ({
-      ...d,
-      conditions: d.conditions.map((c, i) => (i === index ? { ...c, ...patch } : c)),
-    }))
-  }
-
-  const removeCondition = (index: number) => {
-    setDraft((d) => ({ ...d, conditions: d.conditions.filter((_, i) => i !== index) }))
-  }
-
-  const updateException = (index: number, patch: Partial<FilterCondition>) => {
-    setDraft((d) => ({
-      ...d,
-      exceptions: (d.exceptions ?? []).map((c, i) => (i === index ? { ...c, ...patch } : c)),
-    }))
-  }
-
-  const removeException = (index: number) => {
-    setDraft((d) => ({ ...d, exceptions: (d.exceptions ?? []).filter((_, i) => i !== index) }))
-  }
-
-  const updateAction = (index: number, patch: Partial<FilterAction>) => {
-    setDraft((d) => ({
-      ...d,
-      actions: d.actions.map((a, i) => (i === index ? { ...a, ...patch } : a)),
-    }))
-  }
-
-  const validate = (): string | null => {
-    if (!draft.name.trim()) return t("filters.validation.nameRequired")
-    if (draft.conditions.length === 0) return t("filters.validation.conditionRequired")
-    // Exceptions are optional, but any present row must be as complete as a condition.
-    for (const c of [...draft.conditions, ...(draft.exceptions ?? [])]) {
-      // flag/out-of-office take no value; importance/sensitivity default to a level.
-      if (!VALUELESS_FIELDS.has(c.field) && !LEVEL_FIELDS.has(c.field) && !c.value.trim()) {
-        return t("filters.validation.conditionValue")
-      }
-      if (c.field === "header" && !c.headerName?.trim()) {
-        return t("filters.validation.headerName")
-      }
-    }
-    if (draft.actions.length === 0) return t("filters.validation.actionRequired")
-    for (const a of draft.actions) {
-      if ((a.type === "moveToFolder" || a.type === "copyToFolder") && !a.target?.trim()) {
-        return t("filters.validation.targetFolder")
-      }
-      if (FORWARD_TYPES.has(a.type) && !a.forwardTo?.trim()) {
-        return t("filters.validation.destinationAddress")
-      }
-      if (a.type === "reject" && !a.message?.trim()) {
-        return t("filters.validation.rejectMessage")
-      }
-      if (a.type === "addHeader" && (!a.headerName?.trim() || !a.headerValue?.trim())) {
-        return t("filters.validation.addHeaderFields")
-      }
-      if (a.type === "deleteHeader" && !a.headerName?.trim()) {
-        return t("filters.validation.deleteHeaderName")
-      }
-      if (a.type === "flag" && !a.flagName?.trim()) {
-        return t("filters.validation.flagName")
-      }
-    }
-    return null
-  }
-
   const handleSave = async () => {
-    const error = validate()
+    const error = validateDraft(draft)
     if (error) {
-      toast.error(error)
+      toast.error(t(error))
       return
     }
     if (!beginMutation()) return
@@ -546,115 +825,13 @@ export function FiltersPage() {
         </div>
       </div>
 
-      {loading ? (
-        <div className="space-y-3">
-          {[1, 2].map((i) => (
-            <div key={i} className="rounded-lg border p-4">
-              <Skeleton className="h-5 w-48" />
-              <Skeleton className="mt-2 h-3 w-full" />
-            </div>
-          ))}
-        </div>
-      ) : filters.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <div className="rounded-full bg-muted p-4">
-            <FilterIcon className="h-8 w-8 text-muted-foreground" />
-          </div>
-          <h3 className="mt-4 text-lg font-semibold">{t("filters.empty.title")}</h3>
-          <p className="text-sm text-muted-foreground">
-            {t("filters.empty.description")}
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {filters.map((filter, index) => (
-            <div key={filter.id} className="rounded-lg border bg-card p-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex flex-col">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    disabled={index === 0}
-                    onClick={() => moveFilter(index, -1)}
-                    title={t("filters.moveUp")}
-                  >
-                    <ArrowUp className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    disabled={index === filters.length - 1}
-                    onClick={() => moveFilter(index, 1)}
-                    title={t("filters.moveDown")}
-                  >
-                    <ArrowDown className="h-4 w-4" />
-                  </Button>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">{filter.name}</span>
-                    {!filter.enabled && (
-                      <Badge variant="secondary" className="text-[10px]">
-                        {t("filters.disabled")}
-                      </Badge>
-                    )}
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t(filter.matchAll ? "filters.summaryAll" : "filters.summaryAny", {
-                      conditionCount: String(filter.conditions.length),
-                      conditionWord: t(
-                        filter.conditions.length !== 1
-                          ? "filters.conditionPlural"
-                          : "filters.conditionSingular"
-                      ),
-                      actionCount: String(filter.actions.length),
-                      actionWord: t(
-                        filter.actions.length !== 1
-                          ? "filters.actionPlural"
-                          : "filters.actionSingular"
-                      ),
-                    })}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <Switch
-                    checked={filter.enabled}
-                    onCheckedChange={() => handleToggle(filter)}
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    disabled={running || !filter.enabled}
-                    title={t("filters.runThis")}
-                    onClick={() => handleRunNow(filter.id)}
-                  >
-                    <Play className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() => openEdit(filter)}
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-destructive"
-                    onClick={() => setDeleteTarget(filter)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      <FilterList
+        loading={loading}
+        filters={filters}
+        running={running}
+        actions={{ onMove: moveFilter, onToggle: handleToggle, onRun: handleRunNow, onEdit: openEdit, onDelete: setDeleteTarget }}
+        t={t}
+      />
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
@@ -665,208 +842,7 @@ export function FiltersPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-5">
-            <div className="space-y-2">
-              <Label htmlFor="filter-name">{t("common.name")}</Label>
-              <Input
-                id="filter-name"
-                value={draft.name}
-                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                placeholder={t("filters.namePlaceholder")}
-              />
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium">{t("filters.matchAllConditions")}</p>
-                <p className="text-sm text-muted-foreground">
-                  {t("filters.matchAllHint")}
-                </p>
-              </div>
-              <Switch
-                checked={draft.matchAll}
-                onCheckedChange={(v) => setDraft({ ...draft, matchAll: v })}
-              />
-            </div>
-
-            {/* Conditions */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label>{t("filters.conditions")}</Label>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    setDraft({ ...draft, conditions: [...draft.conditions, emptyCondition()] })
-                  }
-                >
-                  <Plus className="h-4 w-4 mr-1" />
-                  {t("common.add")}
-                </Button>
-              </div>
-              <ConditionRows
-                conditions={draft.conditions}
-                onUpdate={updateCondition}
-                onRemove={removeCondition}
-                allowEmpty={false}
-                t={t}
-              />
-            </div>
-
-            {/* Exceptions: the rule does NOT fire if any exception matches (optional) */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label>{t("filters.exceptions")}</Label>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    setDraft({ ...draft, exceptions: [...(draft.exceptions ?? []), emptyCondition()] })
-                  }
-                >
-                  <Plus className="h-4 w-4 mr-1" />
-                  {t("common.add")}
-                </Button>
-              </div>
-              {(draft.exceptions ?? []).length === 0 ? (
-                <p className="text-xs text-muted-foreground">{t("filters.noExceptions")}</p>
-              ) : (
-                <ConditionRows
-                  conditions={draft.exceptions ?? []}
-                  onUpdate={updateException}
-                  onRemove={removeException}
-                  allowEmpty={true}
-                  t={t}
-                />
-              )}
-            </div>
-
-            {/* Actions */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label>{t("common.actions")}</Label>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    setDraft({ ...draft, actions: [...draft.actions, emptyAction()] })
-                  }
-                >
-                  <Plus className="h-4 w-4 mr-1" />
-                  {t("common.add")}
-                </Button>
-              </div>
-              {draft.actions.map((action, i) => (
-                <div key={i} className="flex flex-wrap items-center gap-2">
-                  <Select
-                    value={action.type}
-                    onValueChange={(v) =>
-                      updateAction(i, { type: v as FilterAction["type"] })
-                    }
-                  >
-                    <SelectTrigger className="w-[160px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {actionTypes(t).map((a) => (
-                        <SelectItem key={a.value} value={a.value}>
-                          {a.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {(action.type === "moveToFolder" || action.type === "copyToFolder") && (
-                    <Input
-                      className="min-w-[140px] flex-1"
-                      placeholder={t("filters.targetFolderPlaceholder")}
-                      value={action.target ?? ""}
-                      onChange={(e) => updateAction(i, { target: e.target.value })}
-                    />
-                  )}
-                  {FORWARD_TYPES.has(action.type) && (
-                    <Input
-                      className="min-w-[140px] flex-1"
-                      placeholder={t("filters.destinationPlaceholder")}
-                      value={action.forwardTo ?? ""}
-                      onChange={(e) => updateAction(i, { forwardTo: e.target.value })}
-                    />
-                  )}
-                  {action.type === "reject" && (
-                    <Input
-                      className="min-w-[140px] flex-1"
-                      placeholder={t("filters.rejectionPlaceholder")}
-                      value={action.message ?? ""}
-                      onChange={(e) => updateAction(i, { message: e.target.value })}
-                    />
-                  )}
-                  {action.type === "vacation" && (
-                    <Input
-                      className="min-w-[140px] flex-1"
-                      placeholder={t("filters.autoReplyPlaceholder")}
-                      value={action.message ?? ""}
-                      onChange={(e) => updateAction(i, { message: e.target.value })}
-                    />
-                  )}
-                  {action.type === "categorize" && (
-                    <Input
-                      className="min-w-[140px] flex-1"
-                      placeholder={t("filters.categoriesPlaceholder")}
-                      value={action.target ?? ""}
-                      onChange={(e) => updateAction(i, { target: e.target.value })}
-                    />
-                  )}
-                  {(action.type === "addHeader" || action.type === "deleteHeader") && (
-                    <Input
-                      className="w-[150px]"
-                      placeholder={t("filters.headerNamePlaceholder")}
-                      value={action.headerName ?? ""}
-                      onChange={(e) => updateAction(i, { headerName: e.target.value })}
-                    />
-                  )}
-                  {action.type === "addHeader" && (
-                    <Input
-                      className="min-w-[120px] flex-1"
-                      placeholder={t("filters.headerValuePlaceholder")}
-                      value={action.headerValue ?? ""}
-                      onChange={(e) => updateAction(i, { headerValue: e.target.value })}
-                    />
-                  )}
-                  {action.type === "flag" && (
-                    <>
-                      <Input
-                        className="w-[150px]"
-                        placeholder={t("filters.flagNamePlaceholder")}
-                        value={action.flagName ?? ""}
-                        onChange={(e) => updateAction(i, { flagName: e.target.value })}
-                      />
-                      <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Switch
-                          checked={action.clearFlag ?? false}
-                          onCheckedChange={(v) => updateAction(i, { clearFlag: v })}
-                        />
-                        {t("filters.clear")}
-                      </label>
-                    </>
-                  )}
-                  {draft.actions.length > 1 && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() =>
-                        setDraft({
-                          ...draft,
-                          actions: draft.actions.filter((_, idx) => idx !== i),
-                        })
-                      }
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
+          <FilterEditor draft={draft} setDraft={setDraft} t={t} />
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>
