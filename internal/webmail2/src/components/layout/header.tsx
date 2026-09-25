@@ -153,41 +153,7 @@ export function Header({ onMenuToggle, sidebarCollapsed }: HeaderProps) {
           </Button>
 
           {/* Notifications */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="relative">
-                <Bell className="h-5 w-5" />
-                {notifications.length > 0 && (
-                  <Badge className="absolute -right-1 -top-1 h-5 w-5 p-0 flex items-center justify-center text-[10px]">
-                    {notifications.length}
-                  </Badge>
-                )}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-80">
-              <DropdownMenuLabel>{t("header.notifications")}</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <div className="max-h-80 overflow-y-auto">
-                {notifications.length === 0 ? (
-                  <div className="p-4 text-center text-sm text-muted-foreground">
-                    {t("header.noNotifications")}
-                  </div>
-                ) : (
-                  notifications.map((n) => (
-                    <DropdownMenuItem
-                      key={n.id}
-                      className="flex flex-col items-start gap-1 p-3 cursor-pointer"
-                      onClick={() => navigate(`/email/${n.id}`)}
-                    >
-                      <span className="font-medium text-sm truncate w-full">{n.subject || t("header.noSubject")}</span>
-                      <span className="text-xs text-muted-foreground truncate w-full">{t("header.fromLabel", { from: n.from })}</span>
-                      <span className="text-xs text-muted-foreground">{n.date}</span>
-                    </DropdownMenuItem>
-                  ))
-                )}
-              </div>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <NotificationsMenu notifications={notifications} />
 
           {/* User Profile */}
           <DropdownMenu>
@@ -227,5 +193,49 @@ export function Header({ onMenuToggle, sidebarCollapsed }: HeaderProps) {
         </div>
       </div>
     </header>
+  )
+}
+
+// NotificationsMenu lists the newest unread inbox messages behind the bell, with
+// a count badge while any are unread.
+function NotificationsMenu({ notifications }: { notifications: Notification[] }) {
+  const { t } = useI18n()
+  const navigate = useNavigate()
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="relative">
+          <Bell className="h-5 w-5" />
+          {notifications.length > 0 && (
+            <Badge className="absolute -right-1 -top-1 h-5 w-5 p-0 flex items-center justify-center text-[10px]">
+              {notifications.length}
+            </Badge>
+          )}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-80">
+        <DropdownMenuLabel>{t("header.notifications")}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <div className="max-h-80 overflow-y-auto">
+          {notifications.length === 0 ? (
+            <div className="p-4 text-center text-sm text-muted-foreground">
+              {t("header.noNotifications")}
+            </div>
+          ) : (
+            notifications.map((n) => (
+              <DropdownMenuItem
+                key={n.id}
+                className="flex flex-col items-start gap-1 p-3 cursor-pointer"
+                onClick={() => navigate(`/email/${n.id}`)}
+              >
+                <span className="font-medium text-sm truncate w-full">{n.subject || t("header.noSubject")}</span>
+                <span className="text-xs text-muted-foreground truncate w-full">{t("header.fromLabel", { from: n.from })}</span>
+                <span className="text-xs text-muted-foreground">{n.date}</span>
+              </DropdownMenuItem>
+            ))
+          )}
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
