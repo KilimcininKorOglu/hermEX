@@ -588,7 +588,9 @@ function ContactDialog({
   const group = form.is_group
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      {/* The full field set is taller than a screen, so the dialog scrolls and
+          its buttons stay reachable. */}
+      <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {editing ? t("contacts.editContact") : t("contacts.addContact")}
