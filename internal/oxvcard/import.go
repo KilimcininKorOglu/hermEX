@@ -256,7 +256,9 @@ func importCategories(card *vcard) []string {
 }
 
 // importPhoto decodes an inline base64 PHOTO into a contact-photo attachment and
-// sets the has-picture flag. A non-inline (URI) photo is left out.
+// sets the has-picture flag. A non-inline (URI) photo is left out. The attachment
+// is the hidden, flagged ContactPicture.jpg of MS-OXOCNTC 2.2.1.8, the one every
+// other surface reads as the contact's picture.
 func importPhoto(msg *oxcmail.Message, card *vcard, named map[mapi.PropertyName]mapi.PropTag) {
 	l := card.get("PHOTO")
 	if l == nil {
@@ -269,6 +271,12 @@ func importPhoto(msg *oxcmail.Message, card *vcard, named map[mapi.PropertyName]
 	att := oxcmail.Attachment{Props: mapi.PropertyValues{}}
 	att.Props.Set(mapi.PrAttachMethod, int32(mapi.AttachByValue))
 	att.Props.Set(mapi.PrAttachDataBin, data)
+	att.Props.Set(mapi.PrAttachFilename, photoFilename)
+	att.Props.Set(mapi.PrAttachLongFilename, photoFilename)
+	att.Props.Set(mapi.PrAttachExtension, ".jpg")
+	att.Props.Set(mapi.PrDisplayName, photoFilename)
+	att.Props.Set(mapi.PrRenderingPosition, int32(-1))
+	att.Props.Set(mapi.PrAttachmentContactPhoto, true)
 	msg.Attachments = append(msg.Attachments, att)
 	if tag, ok := named[mapi.NameHasPicture]; ok {
 		msg.Props.Set(tag, true)

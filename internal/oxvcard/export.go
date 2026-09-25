@@ -171,13 +171,14 @@ func exportCategories(b *builder, p *mapi.PropertyValues, catTag mapi.PropTag) {
 	b.add("CATEGORIES:" + strings.Join(escaped, ","))
 }
 
-// exportPhoto emits the first attachment as an inline base64 PHOTO, sniffing the
+// exportPhoto emits the contact's photo as an inline base64 PHOTO, sniffing the
 // image type from the data.
 func exportPhoto(b *builder, msg *oxcmail.Message) {
-	if len(msg.Attachments) == 0 {
+	att, ok := PhotoAttachment(msg)
+	if !ok {
 		return
 	}
-	v, ok := msg.Attachments[0].Props.Get(mapi.PrAttachDataBin)
+	v, ok := att.Props.Get(mapi.PrAttachDataBin)
 	if !ok {
 		return
 	}
