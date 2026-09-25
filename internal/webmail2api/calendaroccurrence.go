@@ -127,7 +127,7 @@ func editSeries(st *objectstore.Store, id int64, caller string, ch occurrenceCha
 // message when there is nobody to tell or nothing to render.
 func (ch occurrenceChange) announce(st *objectstore.Store, id int64, props mapi.PropertyValues, before, edited []byte, organizer string) ([]byte, *pendingMail) {
 	to := meetingRecipients(st, id, organizer)
-	revised, seq, ok := ch.revise(edited)
+	revised, seq, ok := ch.revise(before, edited)
 	if len(to) == 0 || !ok {
 		return edited, nil
 	}
@@ -148,16 +148,17 @@ func (ch occurrenceChange) announce(st *objectstore.Store, id int64, props mapi.
 }
 
 // revise writes the next revision into the edited object: the series' for a
-// cancellation, the instance's own for an update, which must pass the series'
-// because the instance started from the series master.
-func (ch occurrenceChange) revise(edited []byte) ([]byte, int, bool) {
+// cancellation, the instance's own for an update. Either must pass both the
+// series' revision and the one the instance carried before the edit, because an
+// attendee compares the message against whichever of the two it holds for that
+// instance, and a cancellation removes the override that carried the latter.
+func (ch occurrenceChange) revise(before, edited []byte) ([]byte, int, bool) {
+	seq := max(oxcical.Sequence(before, nil), oxcical.Sequence(before, &ch.at)) + 1
+	at := &ch.at
 	if ch.method == "CANCEL" {
-		seq := oxcical.Sequence(edited, nil) + 1
-		revised, ok := oxcical.SetSequence(edited, seq, nil)
-		return revised, seq, ok
+		at = nil
 	}
-	seq := max(oxcical.Sequence(edited, nil), oxcical.Sequence(edited, &ch.at)) + 1
-	revised, ok := oxcical.SetSequence(edited, seq, &ch.at)
+	revised, ok := oxcical.SetSequence(edited, seq, at)
 	return revised, seq, ok
 }
 

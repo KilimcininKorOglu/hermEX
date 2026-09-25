@@ -333,3 +333,19 @@ func TestMeetingSettingsRoundTrip(t *testing.T) {
 	mustNoErr(t, "read config", err)
 	wantEq(t, "stored config", cfg, objectstore.MeetingConfig{AutoAccept: true, RemoveRequestOnResponse: true, LeaveCancellationsUnprocessed: true})
 }
+
+// TestMovedOccurrenceDeleteOutranksTheMove moves an instance twice and then deletes
+// it. The cancellation used to take its revision from the series alone, below the
+// one the moved instance carried, so the attendee read it as older than the move.
+func TestMovedOccurrenceDeleteOutranksTheMove(t *testing.T) {
+	do, _, bob := meetingHarness(t)
+	id := createEvent(t, do, seriesBody)
+	for _, start := range []string{"09:00", "10:00"} {
+		wantStatus(t, "move occurrence", do(http.MethodPut, occurrencePath(id), `{"occurrence":"2026-09-08T06:00:00Z",`+
+			`"start":"2026-09-08T`+start+`:00Z","end":"2026-09-08T`+start+`:30Z"}`), http.StatusOK)
+	}
+	wantStatus(t, "delete occurrence", do(http.MethodDelete, occurrencePath(id)+"?at=2026-09-08T06:00:00Z", ""), http.StatusOK)
+	msgs := folderMail(t, bob, int64(mapi.PrivateFIDInbox))
+	wantContains(t, "second move", msgs[2], "SEQUENCE:2")
+	wantContains(t, "cancellation", lastOf(t, msgs, 4), "SEQUENCE:3")
+}
