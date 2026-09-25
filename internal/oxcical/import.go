@@ -115,6 +115,10 @@ func importRecurring(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.Pr
 			setNamedTime(p, named, mapi.NameAppointmentStartWhole, t)
 		}
 	}
+	loc := eventZone(vev)
+	if loc != nil && !start.IsZero() {
+		writeDisplayZones(p, named, loc, start)
+	}
 	rrule := vev.prop("RRULE")
 	if rrule == nil {
 		return
@@ -124,6 +128,13 @@ func importRecurring(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.Pr
 	setNamedBool(p, named, mapi.NameRecurring, true)
 	if start.IsZero() {
 		return
+	}
+	if loc != nil {
+		// The pattern's dates and times are read in the zone PidLidTimeZoneStruct
+		// names ([MS-OXOCAL] 2.2.1.44.1), so they are computed on that zone's wall
+		// clock rather than on UTC.
+		start = start.In(loc)
+		writeSeriesZone(p, named, loc, start)
 	}
 	blob, err := recurrence.FromRRule(rrule.value, start)
 	if err != nil {
@@ -150,6 +161,59 @@ func importTimes(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTa
 	}
 	if allDay {
 		setNamedBool(p, named, mapi.NameAppointmentSubType, true)
+		return
+	}
+	if loc := eventZone(vev); loc != nil {
+		writeDisplayZones(p, named, loc, start)
+	}
+}
+
+// eventZone returns the zone the event's DTSTART names, or nil for a date, a UTC
+// or floating value, and a TZID only the stream's own VTIMEZONE describes: the
+// Outlook time zone properties need the zone's full rules, which only a named
+// zone carries.
+func eventZone(vev *icomp) *time.Location {
+	l := vev.prop("DTSTART")
+	if l == nil || isDateOnly(l, strings.TrimSpace(l.value)) {
+		return nil
+	}
+	return ZoneByID(l.param("TZID"))
+}
+
+// zoneKeyName is the KeyName a time zone definition carries: the Windows id
+// Outlook matches against its registry, or the IANA name for a zone that has none.
+func zoneKeyName(loc *time.Location) string {
+	if win, ok := WindowsZoneFor(loc.String()); ok {
+		return win
+	}
+	return loc.String()
+}
+
+// writeDisplayZones stores the zone a client shows the start and end in
+// ([MS-OXOCAL] 2.2.1.42 and 2.2.1.43).
+func writeDisplayZones(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag, loc *time.Location, start time.Time) {
+	def := tzDefinitionBlob(zoneKeyName(loc), zoneReg(loc, start), tzRuleEffective)
+	setNamedValue(p, named, mapi.NameAppointmentTimeZoneDefStartDisplay, def)
+	setNamedValue(p, named, mapi.NameAppointmentTimeZoneDefEndDisplay, def)
+}
+
+// writeSeriesZone stores the zone a series converts its times by: the legacy
+// TZREG with its description ([MS-OXOCAL] 2.2.1.39 and 2.2.1.40) and the
+// definition Outlook 2007 and later read ([MS-OXOCAL] 2.2.1.41), kept in step
+// by carrying the same rule.
+func writeSeriesZone(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag, loc *time.Location, start time.Time) {
+	reg := zoneReg(loc, start)
+	key := zoneKeyName(loc)
+	setNamedValue(p, named, mapi.NameTimeZoneStruct, tzStructBlob(reg))
+	setNamedValue(p, named, mapi.NameTimeZoneDescription, key)
+	setNamedValue(p, named, mapi.NameAppointmentTimeZoneDefRecur, tzDefinitionBlob(key, reg, tzRuleEffective|tzRuleRecurCurrent))
+}
+
+// setNamedValue stores a value under a resolved named property, skipping a name
+// the store allocated no id for.
+func setNamedValue(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag, name mapi.PropertyName, v any) {
+	if tag, ok := named[name]; ok {
+		p.Set(tag, v)
 	}
 }
 

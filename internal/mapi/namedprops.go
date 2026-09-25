@@ -108,6 +108,16 @@ var (
 	// companion PrIcalOriginal is the model-layer shape; this is the wire blob.
 	NameAppointmentRecur = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8216}
 
+	// Appointment time zone (PSETID_Appointment, MS-OXOCAL 2.2.1.39-2.2.1.43). The
+	// TimeZoneStruct is the legacy TZREG of a recurring series; the three
+	// definitions are TZDEFINITION blobs, the Recur one for a series and the two
+	// Display ones for the start and end a client shows.
+	NameTimeZoneStruct                     = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8233} // PtBinary
+	NameTimeZoneDescription                = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8234} // PtUnicode
+	NameAppointmentTimeZoneDefStartDisplay = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x825E} // PtBinary
+	NameAppointmentTimeZoneDefEndDisplay   = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x825F} // PtBinary
+	NameAppointmentTimeZoneDefRecur        = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8260} // PtBinary
+
 	// Meeting-workflow named properties (PSETID_Appointment). An attendee's
 	// response to a meeting request stamps these on both the request and the
 	// resulting calendar item.
