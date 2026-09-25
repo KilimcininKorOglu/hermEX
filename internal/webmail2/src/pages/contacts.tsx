@@ -790,13 +790,10 @@ export function ContactsPage() {
     try {
       const result = await api.getContacts()
       if (result.contacts) {
-        // Convert API contacts to local format with empty labels
+        // Keep every field the server returned: the editor fills from this
+        // record, and an update replaces the stored contact with what it sends.
         const loadedContacts: Contact[] = result.contacts.map((c: ApiContact) => ({
-          id: c.id,
-          name: c.name,
-          email: c.email,
-          phone: c.phone,
-          company: c.company,
+          ...c,
           labels: c.labels || [],
           is_group: c.is_group || false,
           members: c.members || [],
