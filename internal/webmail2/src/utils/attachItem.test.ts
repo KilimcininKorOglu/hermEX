@@ -44,6 +44,28 @@ describe("taskToVTodo", () => {
     expect(ics).toContain("DUE;VALUE=DATE:20260301")
     expect(ics).toContain("SUMMARY:a\\; b\\, c")
   })
+  it("emits every optional property in order, clamps the percent, and skips an unparseable date", () => {
+    const ics = taskToVTodo({
+      ...baseTask,
+      description: "notes",
+      start: "2026-02-10T14:00:00Z",
+      due: "not-a-date",
+      status: 1,
+      percent: 140,
+      recurrence: "FREQ=WEEKLY",
+      categories: ["Work", "a,b"],
+    })
+    expect(ics.split("\r\n").slice(6, 13)).toEqual([
+      "DESCRIPTION:notes",
+      "DTSTART:20260210T140000Z",
+      "STATUS:IN-PROCESS",
+      "PRIORITY:5",
+      "PERCENT-COMPLETE:100",
+      "RRULE:FREQ=WEEKLY",
+      "CATEGORIES:Work,a\\,b",
+    ])
+    expect(ics).not.toContain("DUE")
+  })
 })
 
 describe("noteToText", () => {

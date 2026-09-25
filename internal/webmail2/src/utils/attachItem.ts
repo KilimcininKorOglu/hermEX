@@ -48,6 +48,24 @@ function taskPriority(t: Task): number {
   }
 }
 
+// icalDateLine renders one date property, with VALUE=DATE for a bare date, or
+// nothing when the value is absent or unparseable.
+function icalDateLine(name: string, v: string | undefined): string[] {
+  if (!v) return []
+  const d = icalDateTime(v)
+  if (!d.value) return []
+  return [d.isDate ? `${name};VALUE=DATE:${d.value}` : `${name}:${d.value}`]
+}
+
+// optionalTaskLines renders the VTODO properties a task may leave out.
+function optionalTaskLines(t: Task): string[] {
+  const lines: string[] = []
+  if (typeof t.percent === "number") lines.push(`PERCENT-COMPLETE:${Math.max(0, Math.min(100, t.percent))}`)
+  if (t.recurrence) lines.push(`RRULE:${t.recurrence}`)
+  if (t.categories && t.categories.length) lines.push(`CATEGORIES:${t.categories.map(escapeICalText).join(",")}`)
+  return lines
+}
+
 // taskToVTodo renders a task as a single-VTODO VCALENDAR document.
 export function taskToVTodo(t: Task): string {
   const lines: string[] = [
@@ -59,19 +77,10 @@ export function taskToVTodo(t: Task): string {
     `SUMMARY:${escapeICalText(t.summary || "")}`,
   ]
   if (t.description) lines.push(`DESCRIPTION:${escapeICalText(t.description)}`)
-  if (t.start) {
-    const s = icalDateTime(t.start)
-    if (s.value) lines.push(s.isDate ? `DTSTART;VALUE=DATE:${s.value}` : `DTSTART:${s.value}`)
-  }
-  if (t.due) {
-    const d = icalDateTime(t.due)
-    if (d.value) lines.push(d.isDate ? `DUE;VALUE=DATE:${d.value}` : `DUE:${d.value}`)
-  }
+  lines.push(...icalDateLine("DTSTART", t.start), ...icalDateLine("DUE", t.due))
   lines.push(`STATUS:${taskStatus(t)}`)
   lines.push(`PRIORITY:${taskPriority(t)}`)
-  if (typeof t.percent === "number") lines.push(`PERCENT-COMPLETE:${Math.max(0, Math.min(100, t.percent))}`)
-  if (t.recurrence) lines.push(`RRULE:${t.recurrence}`)
-  if (t.categories && t.categories.length) lines.push(`CATEGORIES:${t.categories.map(escapeICalText).join(",")}`)
+  lines.push(...optionalTaskLines(t))
   lines.push("END:VTODO", "END:VCALENDAR")
   return lines.join("\r\n") + "\r\n"
 }
