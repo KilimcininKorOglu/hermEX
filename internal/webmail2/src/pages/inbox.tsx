@@ -595,7 +595,7 @@ function ThreadItem({
           <div className="flex items-center gap-2 text-xs text-muted-foreground truncate">
             <span>{thread.participants.join(", ")}</span>
             <span>·</span>
-            <span>{count} {t(count === 1 ? "threads.messageCount" : "threads.messagesCount", { count: String(count) })}</span>
+            <span>{t(count === 1 ? "threads.messageCount" : "threads.messagesCount", { count: String(count) })}</span>
           </div>
         </div>
 
