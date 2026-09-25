@@ -29,3 +29,20 @@ export function prefillFromParams(params: URLSearchParams): ComposePrefill {
 export function prefillFromDraft(body: string | undefined): string {
   return sanitizeHTML(body || '')
 }
+
+// DraftRecipient is one address chip the composer shows for a reopened draft.
+export interface DraftRecipient {
+  id: string
+  name: string
+  email: string
+}
+
+// draftRecipients turns one of a stored draft's address lists into composer
+// chips. Every list is read, not only To: a list the composer does not load is
+// sent back empty on the next save and the draft loses it.
+export function draftRecipients(list: string[] | undefined, field: 'to' | 'cc' | 'bcc'): DraftRecipient[] {
+  return (list ?? [])
+    .map((a) => a.trim())
+    .filter(Boolean)
+    .map((email, idx) => ({ id: `draft-${field}-${idx}-${email}`, name: email, email }))
+}

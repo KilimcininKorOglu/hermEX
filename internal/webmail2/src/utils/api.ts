@@ -66,6 +66,7 @@ export interface Mail {
   toNames?: string[] // display name per recipient (same index, "" when unknown)
   cc?: string[] // bare Cc addresses
   ccNames?: string[] // display name per Cc recipient (same index, "" when unknown)
+  bcc?: string[] // bare Bcc addresses; only the author's own copy (a draft) carries them
   subject: string
   body: string
   bodyType?: string // "html" or "text"; a "text" body must be escaped before it is rendered

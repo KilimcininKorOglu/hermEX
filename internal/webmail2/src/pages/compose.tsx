@@ -55,7 +55,7 @@ import { DRAG_TYPE, fileFromDrag } from "@/utils/attachmentDrag"
 import { taskToVTodo, noteToText, safeItemName } from "@/utils/attachItem"
 import * as smimeStore from "@/utils/smime"
 import { mailOptionsActive } from "@/utils/mailOptions"
-import { prefillFromDraft, prefillFromParams } from "@/utils/composePrefill"
+import { draftRecipients, prefillFromDraft, prefillFromParams } from "@/utils/composePrefill"
 import { useAuth } from "@/contexts/AuthContext"
 import { useMailbox } from "@/contexts/MailboxContext"
 import { useI18n } from "@/hooks/useI18n"
@@ -393,13 +393,12 @@ export function ComposePage() {
         setDraftId(msg.id || draftParam)
         setSubject(msg.subject || "")
         setBody(prefillFromDraft(msg.body))
-        if (Array.isArray(msg.to)) {
-          const recipients = msg.to
-            .map((t) => t.trim())
-            .filter(Boolean)
-            .map((email, idx) => ({ id: `draft-to-${idx}-${email}`, name: email, email }))
-          if (recipients.length > 0) setTo(recipients)
-        }
+        const toList = draftRecipients(msg.to, "to")
+        const ccList = draftRecipients(msg.cc, "cc")
+        const bccList = draftRecipients(msg.bcc, "bcc")
+        if (toList.length > 0) setTo(toList)
+        if (ccList.length > 0) { setCc(ccList); setShowCc(true) }
+        if (bccList.length > 0) { setBcc(bccList); setShowBcc(true) }
       })
       .catch((err) => console.error("Failed to load draft:", err))
     return () => {

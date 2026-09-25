@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { prefillFromDraft, prefillFromParams } from './composePrefill'
+import { draftRecipients, prefillFromDraft, prefillFromParams } from './composePrefill'
 
 // The composer's prefill is a live XSS boundary: the body parameter carries the
 // quoted original of a reply or forward (attacker-controlled HTML from any
@@ -46,5 +46,14 @@ describe('prefillFromDraft', () => {
 
   it('turns a missing body into an empty string rather than undefined', () => {
     expect(prefillFromDraft(undefined)).toBe('')
+  })
+})
+
+describe('draftRecipients', () => {
+  it('turns every address into a chip and skips blanks', () => {
+    expect(draftRecipients([' carol@hermex.test ', ''], 'cc')).toEqual([
+      { id: 'draft-cc-0-carol@hermex.test', name: 'carol@hermex.test', email: 'carol@hermex.test' },
+    ])
+    expect(draftRecipients(undefined, 'bcc')).toEqual([])
   })
 })
