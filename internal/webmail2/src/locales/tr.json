@@ -411,6 +411,7 @@
     "description": "E-posta tercihlerinizi ve hesap ayarlarınızı yönetin.",
     "settingUpdated": "Ayar güncellendi",
     "settingSaveFailed": "Ayar kaydedilemedi",
+    "notLoaded": "Ayarlarınız yüklenemedi, bu yüzden hiçbir şey kaydedilmedi. Sayfayı yeniden yükleyip tekrar deneyin.",
     "disable": "Devre dışı bırak",
     "profilePhoto": {
       "title": "Profil fotoğrafı",

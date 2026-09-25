@@ -233,6 +233,12 @@ export function SettingsPage() {
   // unread/widget-panel toggles), DB-backed via PrWebmailSettings so they survive
   // a new browser (no localStorage). The theme is applied through useTheme; the
   // language through useI18n.changeLocale.
+  // loaded records which settings records were read. Each save below writes its
+  // WHOLE record, so a save before the read answered, or after it failed, would
+  // replace the stored values with this page's defaults.
+  const [loaded, setLoaded] = useState({ appearance: false, calendar: false, preferences: false })
+  const markLoaded = (key: keyof typeof loaded) => setLoaded((prev) => ({ ...prev, [key]: true }))
+
   const [appearance, setAppearance] = useState({
     theme: "system",
     language: "system",
@@ -282,7 +288,9 @@ export function SettingsPage() {
         setWorkDays(s.workDays ?? [1, 2, 3, 4, 5])
         setDefaultDuration(s.defaultDuration ?? 30)
         setDefaultReminder(s.defaultReminder ?? 15)
+        markLoaded("calendar")
       })
+      .catch(() => undefined)
     api.getAppearanceSettings()
       .then((a) => setAppearance({
         theme: a.theme ?? "system",
@@ -304,7 +312,7 @@ export function SettingsPage() {
         inboxPageSize: a.inboxPageSize ?? DEFAULT_PAGE_SIZE,
         mailListColumns: a.mailListColumns ?? defaultMailColumns(),
       }))
-      .then(() => undefined)
+      .then(() => markLoaded("appearance"))
       .catch(() => undefined)
   }, [])
 
@@ -324,16 +332,22 @@ export function SettingsPage() {
   // saveCalSettings merges a partial onto the full calendar state so a one-field
   // change (e.g. firstDayOfWeek) carries the others (resolution, workDays,
   // defaultDuration, defaultReminder) instead of dropping them.
-  const saveCalSettings = (next: Partial<CalendarSettings>) =>
-    api.setCalendarSettings({
+  const saveCalSettings = async (next: Partial<CalendarSettings>) => {
+    if (!loaded.calendar) throw new Error(t("settings.notLoaded"))
+    return api.setCalendarSettings({
       firstDayOfWeek, resolution, workDayStart, workDayEnd, showNonWorkingHours,
       workDays, defaultDuration, defaultReminder, ...next,
     })
+  }
 
   // saveAppearance persists the full appearance settings object (DB-backed). The
   // theme is also pushed through useTheme so it applies immediately and the
   // language through changeLocale so the UI re-translates.
   const saveAppearance = (next: typeof appearance) => {
+    if (!loaded.appearance) {
+      toast.error(t("settings.notLoaded"))
+      return
+    }
     setAppearance(next)
     if (next.theme !== theme) setTheme(next.theme as "light" | "dark" | "system")
     if (next.language !== "system") changeLocale(next.language)
@@ -394,6 +408,7 @@ export function SettingsPage() {
       setDefaultDuration(c.defaultDuration ?? 30)
       setDefaultReminder(c.defaultReminder ?? 15)
       setTheme((a.theme ?? "system") as "light" | "dark" | "system")
+      setLoaded((prev) => ({ ...prev, appearance: true, calendar: true }))
       toast.success(t("settings.reset.settingsReset"))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("settings.reset.resetFailed"))
@@ -678,8 +693,9 @@ export function SettingsPage() {
     let cancelled = false
     api.getPreferences()
       .then((res) => {
-        if (cancelled || !res.preferences) return
-        setSettings((prev) => ({ ...prev, ...res.preferences }))
+        if (cancelled) return
+        if (res.preferences) setSettings((prev) => ({ ...prev, ...res.preferences }))
+        markLoaded("preferences")
       })
       .catch(() => {
         // keep defaults
@@ -690,6 +706,10 @@ export function SettingsPage() {
   }, [])
 
   const handleToggle = async (key: keyof typeof settings) => {
+    if (!loaded.preferences) {
+      toast.error(t("settings.notLoaded"))
+      return
+    }
     const next = { ...settings, [key]: !settings[key] }
     setSettings(next)
     try {

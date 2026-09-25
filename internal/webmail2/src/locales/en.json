@@ -411,6 +411,7 @@
     "description": "Manage your email preferences and account settings.",
     "settingUpdated": "Setting updated",
     "settingSaveFailed": "Failed to save setting",
+    "notLoaded": "Your settings could not be loaded, so nothing was saved. Reload the page and try again.",
     "disable": "Disable",
     "profilePhoto": {
       "title": "Profile photo",
