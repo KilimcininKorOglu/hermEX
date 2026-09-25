@@ -289,7 +289,7 @@ export interface MailListColumns {
 
 // AppearanceSettings is the DB-backed display settings (theme, language,
 // date/time format, name order, unread/widget-panel toggles).
-interface AppearanceSettings {
+export interface AppearanceSettings {
   theme: string // "light" | "dark" | "system"
   language: string // "en" | "tr" | "system"
   dateFormat: string // "iso" | "dmy" | "mdy"
@@ -406,7 +406,7 @@ export function profileToRights(profile: FolderProfile): number | undefined {
   return FOLDER_PROFILES.find(p => p.value === profile)?.rights
 }
 
-interface SMIMECertInfo {
+export interface SMIMECertInfo {
   subject: string
   issuer: string
   notBefore: string
