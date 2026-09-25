@@ -34,16 +34,23 @@ func Export(msg *oxcmail.Message, opt Options) ([]byte, error) {
 		return nil, err
 	}
 
+	// A tentative response flagged as a counter proposal is a COUNTER carrying the
+	// proposed span ([MS-OXCICAL] METHOD table, DTSTART, DTEND).
+	counter := partstat == "TENTATIVE" && namedBool(p, named, mapi.NameAppointmentCounterProposal)
+
 	b := &builder{}
 	b.add("BEGIN:VCALENDAR")
 	b.add("VERSION:2.0")
 	b.add("PRODID:-//hermEX//CalDAV//EN")
-	if partstat != "" {
+	switch {
+	case counter:
+		b.add("METHOD:COUNTER")
+	case partstat != "":
 		b.add("METHOD:REPLY")
 	}
 	b.add("BEGIN:VEVENT")
 	b.line("UID", eventUID(p, uidTag))
-	exportSchedule(b, p, named)
+	exportSchedule(b, p, named, counter)
 	exportClassification(b, p, named)
 	exportAlarm(b, p, named)
 	exportIdentity(b, msg, partstat)
@@ -85,11 +92,15 @@ func eventUID(p *mapi.PropertyValues, uidTag mapi.PropTag) string {
 
 // exportSchedule emits the event's stamp, text and time span. DTSTAMP is required
 // (RFC 5545 §3.8.7.2); the start is a stable, deterministic stamp for a synthesized
-// event.
-func exportSchedule(b *builder, p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag) {
+// event. A counter proposal's span is the one it proposes.
+func exportSchedule(b *builder, p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag, counter bool) {
 	allDay := namedBool(p, named, mapi.NameAppointmentSubType)
-	start, hasStart := namedTime(p, named, mapi.NameAppointmentStartWhole)
-	end, hasEnd := namedTime(p, named, mapi.NameAppointmentEndWhole)
+	startName, endName := mapi.NameAppointmentStartWhole, mapi.NameAppointmentEndWhole
+	if counter {
+		startName, endName = mapi.NameAppointmentProposedStartWhole, mapi.NameAppointmentProposedEndWhole
+	}
+	start, hasStart := namedTime(p, named, startName)
+	end, hasEnd := namedTime(p, named, endName)
 
 	if hasStart {
 		b.add("DTSTAMP:" + formatICalUTC(start))

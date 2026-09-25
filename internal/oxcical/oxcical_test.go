@@ -263,6 +263,44 @@ func TestExportReplyIdentity(t *testing.T) {
 	}
 }
 
+// TestExportCounterProposal renders a counter proposal as Outlook stores it: a
+// tentative response flagged as a proposal. It used to go out as a tentative REPLY
+// with the meeting's own time, so the organizer never saw the time proposed.
+func TestExportCounterProposal(t *testing.T) {
+	r := newResolver()
+	at := func(h int) uint64 { return mapi.UnixToNTTime(time.Date(2026, 7, 1, h, 0, 0, 0, time.UTC)) }
+	_, _ = r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole, mapi.NameAppointmentEndWhole,
+		mapi.NameAppointmentCounterProposal, mapi.NameAppointmentProposedStartWhole, mapi.NameAppointmentProposedEndWhole})
+	msg := &oxcmail.Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: "IPM.Schedule.Meeting.Resp.Tent"},
+		{Tag: r.tag(mapi.NameAppointmentStartWhole, mapi.PtSysTime), Value: at(14)},
+		{Tag: r.tag(mapi.NameAppointmentEndWhole, mapi.PtSysTime), Value: at(15)},
+		{Tag: r.tag(mapi.NameAppointmentCounterProposal, mapi.PtBoolean), Value: true},
+		{Tag: r.tag(mapi.NameAppointmentProposedStartWhole, mapi.PtSysTime), Value: at(16)},
+		{Tag: r.tag(mapi.NameAppointmentProposedEndWhole, mapi.PtSysTime), Value: at(17)},
+		{Tag: mapi.PrSentRepresentingSmtpAddress, Value: "alice@hermex.test"},
+	}, Recipients: []mapi.PropertyValues{{{Tag: mapi.PrSmtpAddress, Value: "organizer@hermex.test"}}}}
+	out, err := Export(msg, r.opt())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	for _, want := range []string{"METHOD:COUNTER", "DTSTART:20260701T160000Z", "DTEND:20260701T170000Z",
+		"ATTENDEE;PARTSTAT=TENTATIVE:mailto:alice@hermex.test"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("counter export missing %q\n%s", want, s)
+		}
+	}
+
+	back, err := Import(out, r.opt())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.boolVal(back, mapi.NameAppointmentCounterProposal) {
+		t.Error("the exported counter does not import back as a counter proposal")
+	}
+}
+
 // TestExportReplyOverridesVerbatim proves a meeting response that carries the
 // verbatim original of a recurring request (PrIcalOriginal) still exports an iTIP
 // REPLY, not the preserved REQUEST: responding to a recurring meeting must answer the
