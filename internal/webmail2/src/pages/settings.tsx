@@ -376,27 +376,40 @@ export function SettingsPage() {
   // theme belongs to useTheme, which every theme control on the page writes, so
   // the record carries its current value rather than the one read at load. The
   // language goes through changeLocale so the UI re-translates.
+  // applyAppearance shows a record at once, before the save answers.
+  const applyAppearance = (rec: typeof appearance) => {
+    setAppearance(rec)
+    if (rec.language !== "system") changeLocale(rec.language)
+    // Mirror the shortcut mode to its cookie so the key hooks pick it up live.
+    setShortcutMode(rec.shortcutMode as ShortcutMode)
+    // Apply the icon set to the document root immediately for a live preview.
+    applyIconSet(rec.iconSet)
+    // Mirror the message-list columns to their cookie so the inbox re-reads live.
+    setMailColumns(rec.mailListColumns)
+    // Reflect the unread-border toggle onto <html> for a live preview.
+    applyUnreadBorder(rec.unreadBorder)
+    // Mirror the inbox navigation mode + page size so MailboxContext re-reads live.
+    setInboxNavigation(rec.inboxNavMode as InboxNavMode, rec.inboxPageSize)
+    // Let app-wide consumers (e.g. the title unread counter) re-read the settings.
+    document.dispatchEvent(new CustomEvent("appearance-changed"))
+  }
+
+  // appearanceSaves numbers the saves, so a failed save restores the record
+  // only while no later change has replaced it.
+  const appearanceSaves = useRef(0)
   const saveAppearance = (changed: typeof appearance) => {
     if (!loaded.appearance) {
       toast.error(t("settings.notLoaded"))
       return
     }
+    const prev = appearance
     const next = { ...changed, theme }
-    setAppearance(next)
-    if (next.language !== "system") changeLocale(next.language)
-    // Mirror the shortcut mode to its cookie so the key hooks pick it up live.
-    setShortcutMode(next.shortcutMode as ShortcutMode)
-    // Apply the icon set to the document root immediately for a live preview.
-    applyIconSet(next.iconSet)
-    // Mirror the message-list columns to their cookie so the inbox re-reads live.
-    setMailColumns(next.mailListColumns)
-    // Reflect the unread-border toggle onto <html> for a live preview.
-    applyUnreadBorder(next.unreadBorder)
-    // Mirror the inbox navigation mode + page size so MailboxContext re-reads live.
-    setInboxNavigation(next.inboxNavMode as InboxNavMode, next.inboxPageSize)
-    // Let app-wide consumers (e.g. the title unread counter) re-read the settings.
-    document.dispatchEvent(new CustomEvent("appearance-changed"))
-    api.setAppearanceSettings(next).catch(() => undefined)
+    const seq = ++appearanceSaves.current
+    applyAppearance(next)
+    api.setAppearanceSettings(next).catch(() => {
+      if (seq === appearanceSaves.current) applyAppearance(prev)
+      toast.error(t("settings.settingSaveFailed"))
+    })
   }
 
   // handleResetSettings drops every webmail2-owned settings key, then reloads the
