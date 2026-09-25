@@ -682,11 +682,15 @@ export function SettingsPage() {
     }
   }
 
+  // handleSmimeDelete removes the server record first. A failed server delete then
+  // leaves the published certificate and the browser key both in place, instead of
+  // reporting success while the server still holds the certificate (and, in server
+  // mode, the private key).
   const handleSmimeDelete = async () => {
     setSmimeDeleting(true)
     try {
+      await api.deleteSMIMECertificate()
       await smimeStore.removeIdentity()
-      await api.deleteSMIMECertificate().catch(() => {})
       setSmimeCert(null)
       setSmimeMode(null)
       setSmimeUnlocked(false)
