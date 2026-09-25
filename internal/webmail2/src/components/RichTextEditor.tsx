@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo, forwardRef, useImperativeHandle } from "react"
+import { useRef, useLayoutEffect, useMemo, forwardRef, useImperativeHandle } from "react"
 import { Bold, Italic, Underline, Link } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { isSafeLinkURL, sanitizeClipboard, sanitizeHTML } from "@/utils/sanitize"
@@ -65,17 +65,30 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       },
     }))
 
-    // Sync external value changes (e.g., when editing a different signature)
-    useEffect(() => {
-      if (editorRef.current && editorRef.current.innerHTML !== safeValue) {
-        editorRef.current.innerHTML = safeValue
-      }
-    }, [safeValue])
+    // The markup this editor last reported. A caller that feeds every edit back as
+    // the value must not have it written into the DOM again: that replaces the node
+    // the caret sits in and moves the caret to the start.
+    const reported = useRef<string | null>(null)
+
+    // The DOM is written here only, never through a React prop, so a re-render
+    // cannot rewrite what the user is typing. A new value from outside (another
+    // signature, a loaded draft) still replaces the content.
+    useLayoutEffect(() => {
+      const el = editorRef.current
+      if (!el || value === reported.current) return
+      if (el.innerHTML !== safeValue) el.innerHTML = safeValue
+    }, [value, safeValue])
+
+    const report = () => {
+      const html = editorRef.current?.innerHTML ?? ""
+      reported.current = html
+      onChange(html)
+    }
 
     const execCmd = (cmd: string, val?: string) => {
       document.execCommand(cmd, false, val)
       editorRef.current?.focus()
-      onChange(editorRef.current?.innerHTML ?? "")
+      report()
     }
 
     const handleLink = () => {
@@ -85,9 +98,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       if (url && isSafeLinkURL(url)) execCmd("createLink", url)
     }
 
-    const handleInput = () => {
-      onChange(editorRef.current?.innerHTML ?? "")
-    }
+    const handleInput = report
 
     // Bare URLs and addresses become links when the field is left, not while it is
     // typed in: replacing the text node the caret sits in would move the caret, and
@@ -97,7 +108,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       if (!el) return
       const before = el.innerHTML
       linkifyNode(el)
-      if (el.innerHTML !== before) onChange(el.innerHTML)
+      if (el.innerHTML !== before) report()
     }
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -114,7 +125,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       html = await withPastedImages(html, data)
       editorRef.current?.focus()
       document.execCommand("insertHTML", false, html)
-      onChange(editorRef.current?.innerHTML ?? "")
+      report()
     }
 
     // withPastedImages fills the pictures the markup could not supply. A paste
@@ -228,9 +239,6 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           onPaste={handlePaste}
           onDrop={handleDrop}
           suppressContentEditableWarning
-          // safeValue is sanitizeHTML(value) (see its useMemo above), the one sanitizer every mail-derived HTML sink goes through.
-          // nosemgrep: typescript.react.security.audit.react-dangerouslysetinnerhtml.react-dangerouslysetinnerhtml
-          dangerouslySetInnerHTML={{ __html: safeValue }}
           data-placeholder={placeholder}
         />
         <style>{`

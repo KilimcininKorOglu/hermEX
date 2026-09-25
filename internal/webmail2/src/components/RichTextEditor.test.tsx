@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { act } from 'react'
+import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { RichTextEditor } from './RichTextEditor'
 
@@ -23,8 +23,8 @@ function editorHTML(container: HTMLElement): string {
 describe('RichTextEditor', () => {
   afterEach(() => vi.restoreAllMocks())
 
-  // The editor writes its value straight into a live contentEditable, through
-  // dangerouslySetInnerHTML and through an innerHTML assignment. It has several
+  // The editor writes its value straight into a live contentEditable through an
+  // innerHTML assignment. It has several
   // callers (the composer, the signature editor, the template editor) and the
   // value always comes from the server, so the sanitization belongs here: a sink
   // that relies on each caller remembering grows the hole back every time someone
@@ -69,6 +69,24 @@ describe('RichTextEditor', () => {
       root.render(<RichTextEditor value={'<img src=x onerror="alert(1)">'} onChange={() => {}} />)
     })
     expect(editorHTML(container)).not.toContain('onerror')
+    act(() => root.unmount())
+    container.remove()
+  })
+
+  // A caller feeds every edit back as the value (the composer does). Writing that
+  // value back into the DOM replaces the node the caret sits in and puts the caret
+  // at the start, so each typed character landed before the previous one.
+  it('leaves the typed content in place when the value it reported comes back', () => {
+    function Controlled() {
+      const [value, setValue] = useState('')
+      return <RichTextEditor value={value} onChange={setValue} />
+    }
+    const { container, root } = mount(<Controlled />)
+    const editor = container.querySelector('[contenteditable]') as HTMLElement
+    const typed = document.createTextNode('a')
+    editor.appendChild(typed)
+    act(() => editor.dispatchEvent(new Event('input', { bubbles: true })))
+    expect(editor.firstChild).toBe(typed)
     act(() => root.unmount())
     container.remove()
   })
