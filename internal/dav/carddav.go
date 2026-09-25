@@ -3,6 +3,7 @@ package dav
 import (
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 
 	"hermex/internal/mapi"
@@ -141,9 +142,7 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request, mailbox strin
 		return
 	}
 
-	// Replace is delete-then-create: the object store has no in-place message
-	// updater, matching how drafts are re-saved.
-	if err := replaceObject(st, fid, msg, existing, found); err != nil {
+	if err := replaceContact(st, fid, msg, existing, found); err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
@@ -193,15 +192,87 @@ func etagPrecondition(r *http.Request, existing objectstore.FolderObject, found 
 	return "", 0
 }
 
-// replaceObject stores the new message, first removing the one it replaces.
-func replaceObject(st *objectstore.Store, fid int64, msg *oxcmail.Message, existing objectstore.FolderObject, found bool) error {
-	if found {
-		if err := st.DeleteObject(existing.ID); err != nil {
+// replaceContact stores a vCard PUT in place. A card with a PHOTO replaces the
+// contact's picture. A card without one keeps the stored picture and its
+// has-picture flag, because a client that cannot carry a photo would otherwise
+// erase the one Outlook or webmail set.
+func replaceContact(st *objectstore.Store, fid int64, msg *oxcmail.Message, existing objectstore.FolderObject, found bool) error {
+	managed, err := oxvcard.ManagedTags(vcardOptions(st))
+	if err != nil {
+		return err
+	}
+	if found && len(msg.Attachments) == 0 {
+		if id := hasPictureID(st); id != 0 {
+			managed = slices.DeleteFunc(managed, func(tag mapi.PropTag) bool { return tag.ID() == id })
+		}
+	}
+	if err := replaceObject(st, fid, msg, existing, found, managed); err != nil || !found {
+		return err
+	}
+	return replacePhoto(st, existing.ID, msg.Attachments)
+}
+
+// hasPictureID is the store's id for PidLidHasPicture, or 0 when it has none.
+func hasPictureID(st *objectstore.Store) uint16 {
+	ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{mapi.NameHasPicture})
+	if err != nil || len(ids) != 1 {
+		return 0
+	}
+	return ids[0]
+}
+
+// replacePhoto swaps the contact's stored picture for the one a card carries. A
+// card without a photo leaves the stored one alone.
+func replacePhoto(st *objectstore.Store, id int64, photos []oxcmail.Attachment) error {
+	if len(photos) == 0 {
+		return nil
+	}
+	stored, err := st.OpenMessage(id)
+	if err != nil {
+		return err
+	}
+	if num, ok := storedPhotoNum(stored); ok {
+		if err := st.DeleteAttachment(id, num); err != nil {
 			return err
 		}
 	}
-	_, err := st.CreateMessage(fid, msg)
-	return err
+	for _, att := range photos {
+		if _, _, err := st.CreateAttachment(id, att.Props); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// storedPhotoNum is the attachment number of a stored contact's picture.
+func storedPhotoNum(stored *oxcmail.Message) (uint32, bool) {
+	att, ok := oxvcard.PhotoAttachment(stored)
+	if !ok {
+		return 0, false
+	}
+	v, _ := att.Props.Get(mapi.PrAttachNum)
+	n, ok := v.(int32)
+	// #nosec G115 -- the signed and unsigned views of the same 32 bits
+	return uint32(n), ok
+}
+
+// replaceObject stores a PUT body. With no object under the name it creates one.
+// Otherwise it writes the body over the existing object, which keeps its message
+// id and every property and attachment the body's format does not model: the
+// managed properties the body sets are replaced and those it no longer sets are
+// removed.
+func replaceObject(st *objectstore.Store, fid int64, msg *oxcmail.Message, existing objectstore.FolderObject, found bool, managed []mapi.PropTag) error {
+	if !found {
+		_, err := st.CreateMessage(fid, msg)
+		return err
+	}
+	var absent []mapi.PropTag
+	for _, tag := range managed {
+		if !msg.Props.Has(tag) {
+			absent = append(absent, tag)
+		}
+	}
+	return st.ModifyMessageProperties(existing.ID, msg.Props, absent...)
 }
 
 // handleDelete removes a contact, honoring If-Match.

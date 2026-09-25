@@ -51,6 +51,25 @@ func TestManagedTagsAreWhatImportWrites(t *testing.T) {
 	}
 }
 
+// TestJournalManagedTagsAreWhatImportVJournalWrites holds JournalManagedTags
+// equal to the tags a full VJOURNAL produces, for the same reason.
+func TestJournalManagedTagsAreWhatImportVJournalWrites(t *testing.T) {
+	r := newResolver()
+	msg, err := ImportVJournal([]byte("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VJOURNAL\r\nUID:j-1\r\n"+
+		"SUMMARY:Call\r\nDESCRIPTION:Notes\r\nEND:VJOURNAL\r\nEND:VCALENDAR\r\n"), r.opt())
+	mustNoErr(t, err, "import")
+	managed, err := JournalManagedTags(r.opt())
+	mustNoErr(t, err, "managed tags")
+	if len(managed) != len(msg.Props) {
+		t.Errorf("JournalManagedTags holds %d tags, the full journal writes %d", len(managed), len(msg.Props))
+	}
+	for _, pv := range msg.Props {
+		if !slices.Contains(managed, pv.Tag) {
+			t.Errorf("ImportVJournal writes %#x, which JournalManagedTags leaves out", uint32(pv.Tag))
+		}
+	}
+}
+
 // TestManagedTagsAllocateNothing keeps the lookup read-only: asking which tags are
 // managed must not allocate named properties in the store.
 func TestManagedTagsAllocateNothing(t *testing.T) {

@@ -46,3 +46,17 @@ func ManagedTags(opt Options) ([]mapi.PropTag, error) {
 	}
 	return out, nil
 }
+
+// JournalManagedTags is ManagedTags for ImportVJournal: the tags it can write,
+// resolved without allocating.
+func JournalManagedTags(opt Options) ([]mapi.PropTag, error) {
+	uidTag, err := resolveOne(opt, nameICalUID, mapi.PtUnicode, false)
+	if err != nil {
+		return nil, err
+	}
+	out := []mapi.PropTag{mapi.PrMessageClass, mapi.PrSubject, mapi.PrBody, mapi.PrIcalOriginal}
+	if uidTag != 0 {
+		out = append(out, uidTag)
+	}
+	return out, nil
+}

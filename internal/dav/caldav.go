@@ -128,8 +128,7 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 	// old against new to decide which attendees to (re-)invite or cancel (RFC 6638 §3).
 	oldBody := priorCalendarBody(st, fid, existing, found)
 
-	// Replace is delete-then-create: the object store has no in-place updater.
-	if err := replaceObject(st, fid, msg, existing, found); err != nil {
+	if err := replaceCalObject(st, fid, msg, existing, found); err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
@@ -144,6 +143,32 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
+}
+
+// replaceCalObject stores a calendar PUT in place, managing the properties the
+// collection's format writes. An event also takes the body's attendees; the
+// stored attendees that stay keep their response status.
+func replaceCalObject(st *objectstore.Store, fid int64, msg *oxcmail.Message, existing objectstore.FolderObject, found bool) error {
+	managed, err := calManagedTags(st, fid)
+	if err != nil {
+		return err
+	}
+	if err := replaceObject(st, fid, msg, existing, found, managed); err != nil || !found || !eventsCollection(fid) {
+		return err
+	}
+	return st.ReplaceRecipients(existing.ID, msg.Recipients)
+}
+
+// calManagedTags is the set of tags the import of fid's format can write: the
+// task model in Tasks, the journal import in Journal, the event import elsewhere.
+func calManagedTags(st *objectstore.Store, fid int64) ([]mapi.PropTag, error) {
+	switch fid {
+	case int64(mapi.PrivateFIDTasks):
+		return oxtask.ManagedTags(st.GetNamedPropIDs)
+	case int64(mapi.PrivateFIDJournal):
+		return oxcical.JournalManagedTags(icalOptions(st))
+	}
+	return oxcical.ManagedTags(icalOptions(st))
 }
 
 // priorCalendarBody returns the iCalendar an object held before a PUT replaced it,
