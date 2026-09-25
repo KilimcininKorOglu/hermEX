@@ -874,6 +874,7 @@
     }
   },
   "calendar": {
+    "canceled": "İptal edildi",
     "recurrence": {
       "none": "Tekrarlanmaz",
       "daily": "Günlük",

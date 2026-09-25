@@ -874,6 +874,7 @@
     }
   },
   "calendar": {
+    "canceled": "Canceled",
     "recurrence": {
       "none": "Does not repeat",
       "daily": "Daily",

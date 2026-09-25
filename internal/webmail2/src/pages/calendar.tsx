@@ -29,6 +29,7 @@ import {
 import { toast } from "sonner"
 import { AttendeePicker } from "@/components/attendee-picker"
 import { CategoryChips, toggledCategories, type CategoryOption } from "@/components/category-chips"
+import { EventTitle, eventTitleText } from "@/components/event-title"
 import { withTz, getDisplayTimeZone } from "@/utils/date"
 import { detectTimeZone } from "@/utils/timezone"
 import api, { type Calendar, type CalendarEvent, type UserFreeBusy, type Room, type CalendarSettings } from "@/utils/api"
@@ -1062,10 +1063,10 @@ function MonthDayCell({ day, inMonth, isToday, events, eventColor, editor }: {
             className="block w-full truncate rounded bg-primary/10 px-1 py-0.5 text-left text-xs text-foreground hover:bg-primary/20"
             style={colorBorder(eventColor(ev))}
             onClick={(e) => { e.stopPropagation(); editor.openEdit(ev) }}
-            title={ev.summary}
+            title={eventTitleText(ev, t("calendar.canceled"))}
           >
             {!ev.allDay && <span className="mr-1 text-muted-foreground">{clockTime(ev.start)}</span>}
-            {ev.summary}
+            <EventTitle ev={ev} />
           </button>
         ))}
         {events.length > 3 && (
@@ -1183,7 +1184,7 @@ function AgendaRow({ ev, color, editor }: { ev: CalendarEvent; color: string | u
         {timeLabel(t, ev)}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="font-medium truncate">{ev.summary}</p>
+        <p className="font-medium truncate"><EventTitle ev={ev} /></p>
         {ev.location && <AgendaDetail icon={MapPin}>{ev.location}</AgendaDetail>}
         {ev.recurrence && <AgendaDetail icon={Repeat}>{recurrenceLabel(t, recurrenceToForm(ev.recurrence))}</AgendaDetail>}
         {reminder > 0 && <AgendaDetail icon={Bell}>{t("calendar.reminderMinutes", { n: String(reminder) })}</AgendaDetail>}
@@ -1913,9 +1914,9 @@ function DayTimeGrid(props: {
                     onClick={() => props.onOpenEvent(ev)}
                     className="block w-full truncate rounded bg-primary/15 px-1 py-0.5 text-left text-xs"
                     style={props.eventColor(ev) ? { borderLeft: `3px solid ${props.eventColor(ev)}` } : undefined}
-                    title={ev.summary}
+                    title={eventTitleText(ev, t("calendar.canceled"))}
                   >
-                    {ev.summary}
+                    <EventTitle ev={ev} />
                   </button>
                 ))}
               </div>
@@ -2017,9 +2018,9 @@ function DayTimeGrid(props: {
                           const dy = Math.abs(e.clientY - Number(el.dataset.downY ?? e.clientY))
                           if (dx < 4 && dy < 4) props.onOpenEvent(ev) // a click, not a drag
                         }}
-                        title={`${ev.summary} ${timeLabel(t, ev)}`}
+                        title={`${eventTitleText(ev, t("calendar.canceled"))} ${timeLabel(t, ev)}`}
                       >
-                        <div className="truncate font-medium">{ev.summary}</div>
+                        <div className="truncate font-medium"><EventTitle ev={ev} /></div>
                         <div className="truncate text-muted-foreground">
                           {new Date(ev.start).toLocaleTimeString(undefined, withTz({ hour: "2-digit", minute: "2-digit" }))}
                         </div>

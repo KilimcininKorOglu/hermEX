@@ -195,6 +195,9 @@ export interface CalendarEvent {
   occurrence?: string
   seriesStart?: string
   seriesEnd?: string
+  // Read-only: the organizer cancelled the meeting, or this instance of it. It
+  // stays in the calendar, occupying no time, until the user removes it.
+  canceled?: boolean
 }
 
 type CalendarEventInput = Omit<CalendarEvent, "uid"> & { uid?: string }
