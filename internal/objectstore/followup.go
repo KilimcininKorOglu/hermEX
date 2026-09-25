@@ -1,6 +1,8 @@
 package objectstore
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"hermex/internal/mapi"
@@ -179,6 +181,62 @@ func (s *Store) GetCategories(messageID int64) ([]string, error) {
 		}
 	}
 	return nil, nil
+}
+
+// categoriesChunk bounds the ids one CategoriesOf query binds, well under
+// SQLite's host-parameter limit.
+const categoriesChunk = 500
+
+// CategoriesOf reads the category lists of several messages, keyed by message
+// id. A message without categories has no entry. It costs one query per chunk of
+// ids, so a page of the message list reads its labels without a query per row.
+func (s *Store) CategoriesOf(messageIDs []int64) (map[int64][]string, error) {
+	out := make(map[int64][]string)
+	if len(messageIDs) == 0 {
+		return out, nil
+	}
+	tag, ok, err := s.namedProptag(mapi.NameKeywords, mapi.PtMvUnicode, false)
+	if err != nil || !ok {
+		return out, err
+	}
+	for start := 0; start < len(messageIDs); start += categoriesChunk {
+		end := min(start+categoriesChunk, len(messageIDs))
+		if err := s.readCategories(tag, messageIDs[start:end], out); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// readCategories adds the category lists of one chunk of messages to out.
+func (s *Store) readCategories(tag mapi.PropTag, ids []int64, out map[int64][]string) error {
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, int64(uint32(tag)))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	// #nosec G202 -- the concatenated text is a run of "?" placeholders; every value is bound
+	rows, err := s.objdb.Query(`SELECT message_id, propval FROM message_properties WHERE proptag=? AND message_id IN (`+placeholders+`)`, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var col any
+		if err := rows.Scan(&id, &col); err != nil {
+			return err
+		}
+		val, err := s.loadPropval(tag, col)
+		if err != nil {
+			return fmt.Errorf("objectstore: decode categories of %d: %w", id, err)
+		}
+		if cats, ok := val.([]string); ok && len(cats) > 0 {
+			out[id] = cats
+		}
+	}
+	return rows.Err()
 }
 
 // SetCategories writes a message's category list (PidNameKeywords) as a

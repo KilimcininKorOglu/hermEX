@@ -615,17 +615,18 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 
 // mailJSON is the SPA's Mail shape (camelCase) for a folder-listing row.
 type mailJSON struct {
-	ID             string `json:"id"`
-	From           string `json:"from"`
-	FromName       string `json:"fromName"`
-	Subject        string `json:"subject"`
-	Preview        string `json:"preview"`
-	Date           string `json:"date"`
-	Read           bool   `json:"read"`
-	Starred        bool   `json:"starred"`
-	Folder         string `json:"folder"`
-	HasAttachments bool   `json:"hasAttachments"`
-	Size           int    `json:"size"`
+	ID             string   `json:"id"`
+	From           string   `json:"from"`
+	FromName       string   `json:"fromName"`
+	Subject        string   `json:"subject"`
+	Preview        string   `json:"preview"`
+	Date           string   `json:"date"`
+	Read           bool     `json:"read"`
+	Starred        bool     `json:"starred"`
+	Folder         string   `json:"folder"`
+	HasAttachments bool     `json:"hasAttachments"`
+	Size           int      `json:"size"`
+	Labels         []string `json:"labels,omitempty"`
 }
 
 // folderFID maps the SPA's folder slugs to well-known private folder ids.
@@ -688,15 +689,33 @@ func (s *Server) handleMailFolder(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list failed"})
 		return
 	}
-	emails := make([]mailJSON, 0, len(page.Messages))
-	for _, m := range page.Messages {
-		emails = append(emails, mailRow(folder, m))
-	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"emails": emails,
+		"emails": labelledRows(mb.st, folder, page.Messages),
 		"total":  page.Total,
 		"unread": page.Unread,
 	})
+}
+
+// labelledRows projects a page of stored messages onto mail rows carrying their
+// labels. The labels of the whole page come from one batch read. A failed read is
+// recorded and the rows are served without labels, because a list the user cannot
+// open is worse than one missing its labels.
+func labelledRows(st *objectstore.Store, folder string, msgs []objectstore.MessageInfo) []mailJSON {
+	ids := make([]int64, 0, len(msgs))
+	for _, m := range msgs {
+		ids = append(ids, m.ID)
+	}
+	labels, err := st.CategoriesOf(ids)
+	if err != nil {
+		st.LogSwallowedError("mail.list_labels", err)
+	}
+	rows := make([]mailJSON, 0, len(msgs))
+	for _, m := range msgs {
+		row := mailRow(folder, m)
+		row.Labels = labels[m.ID]
+		rows = append(rows, row)
+	}
+	return rows
 }
 
 // mailRow projects a stored message onto the SPA's mail row shape.

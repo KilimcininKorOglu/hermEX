@@ -1,6 +1,8 @@
 package objectstore
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -94,6 +96,44 @@ func TestCategoriesRoundTrip(t *testing.T) {
 	if len(got) != 2 || got[0] != "Work" || got[1] != "Personal" {
 		t.Errorf("categories = %v, want %v", got, want)
 	}
+}
+
+// TestCategoriesOfReadsSeveralMessages checks the batch read the message list
+// uses: every labelled message maps to its own labels, and a message without
+// labels, or with a cleared list, has no entry.
+func TestCategoriesOfReadsSeveralMessages(t *testing.T) {
+	s := openSeededStore(t)
+	ids := appendPlainMessages(t, s, 3)
+	if got, err := s.CategoriesOf(ids); err != nil || len(got) != 0 {
+		t.Fatalf("categories before any label = %v, %v; want none", got, err)
+	}
+	for i, cats := range [][]string{{"Work"}, {}, {"Red", "Blue"}} {
+		if err := s.SetCategories(ids[i], cats); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.CategoriesOf(ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary := fmt.Sprintf("%d %s %s", len(got), strings.Join(got[ids[0]], ","), strings.Join(got[ids[2]], ","))
+	if summary != "2 Work Red,Blue" {
+		t.Errorf("categories = %v, want Work on %d and Red,Blue on %d only", got, ids[0], ids[2])
+	}
+}
+
+// appendPlainMessages files n minimal messages in the inbox and returns their ids.
+func appendPlainMessages(t *testing.T, s *Store, n int) []int64 {
+	t.Helper()
+	ids := make([]int64, 0, n)
+	for range n {
+		info, err := s.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("From: a@b.test\r\nSubject: z\r\n\r\nbody"), time.Unix(1700000000, 0), 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, info.ID)
+	}
+	return ids
 }
 
 // messageFlagged reports the IMAP \Flagged bit for a message id, read back
