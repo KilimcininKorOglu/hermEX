@@ -58,6 +58,29 @@ func globalObjectUID(goid []byte) string {
 	return strings.ToUpper(hex.EncodeToString(clean))
 }
 
+// goidClassID opens every global object id ([MS-OXCICAL] UID, Byte Array ID).
+var goidClassID = []byte{0x04, 0x00, 0x00, 0x00, 0x82, 0x00, 0xE0, 0x00, 0x74, 0xC5, 0xB7, 0x10, 0x1A, 0x82, 0xE0, 0x08}
+
+// GlobalObjectID is the inverse of the UID export: the global object id of the whole
+// meeting a UID names, the value a MAPI client stores in PidLidGlobalObjectId on the
+// organizer's meeting. A UID that is the hex of an id is decoded with its instance
+// date cleared; any other UID is wrapped behind the vCal-Uid marker ([MS-OXCICAL]
+// UID, import of a ThirdPartyGlobalId). It returns nil for an empty UID.
+func GlobalObjectID(uid string) []byte {
+	if uid == "" {
+		return nil
+	}
+	if b, err := hex.DecodeString(uid); err == nil && len(b) >= goidDataOffset && bytes.HasPrefix(b, goidClassID) {
+		clear(b[goidDateOffset : goidDateOffset+4])
+		return b
+	}
+	data := append(bytes.Clone(vcalUIDMarker), uid...)
+	goid := make([]byte, goidDataOffset, goidDataOffset+len(data))
+	copy(goid, goidClassID)
+	binary.LittleEndian.PutUint32(goid[goidSizeOffset:], uint32(len(data))) // #nosec G115 -- a UID is a line of text
+	return append(goid, data...)
+}
+
 // goidInstanceDate reads the instance date a global object id carries for a
 // message about one occurrence. ok is false for the id of a whole meeting, whose
 // date bytes are zero.

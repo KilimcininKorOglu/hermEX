@@ -278,7 +278,10 @@ func (s *Store) FindAssociatedByClass(folderID int64, class string) (int64, bool
 // iCalendar UID), so the cost has to follow the answer rather than the size of
 // the calendar. Ties go to the lowest id, which is the oldest object, matching
 // what a scan in id order returned.
-func (s *Store) FindObjectByProperty(folderID int64, tag mapi.PropTag, value string) (int64, bool, error) {
+//
+// value is a string for a string property and a []byte for a binary one, the two
+// shapes the column stores inline (a meeting's global object id is the binary one).
+func (s *Store) FindObjectByProperty(folderID int64, tag mapi.PropTag, value any) (int64, bool, error) {
 	var id int64
 	err := s.objdb.QueryRow(
 		`SELECT m.message_id

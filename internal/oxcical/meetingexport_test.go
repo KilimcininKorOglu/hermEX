@@ -1,6 +1,7 @@
 package oxcical
 
 import (
+	"bytes"
 	"encoding/binary"
 	"strings"
 	"testing"
@@ -157,6 +158,7 @@ func TestExportReplaceTimeWins(t *testing.T) {
 func TestExportForeignUIDRoundTrips(t *testing.T) {
 	uid := "event-7@calendar.example"
 	goid := make([]byte, goidDataOffset, goidDataOffset+len(vcalUIDMarker)+len(uid))
+	copy(goid, goidClassID)
 	binary.LittleEndian.PutUint32(goid[goidSizeOffset:], uint32(len(vcalUIDMarker)+len(uid)))
 	goid = append(append(goid, vcalUIDMarker...), uid...)
 	if got := globalObjectUID(goid); got != uid {
@@ -164,6 +166,24 @@ func TestExportForeignUIDRoundTrips(t *testing.T) {
 	}
 	if got := globalObjectUID(goid[:20]); got != "" {
 		t.Errorf("a cut id exported UID %q", got)
+	}
+	if got := GlobalObjectID(uid); !bytes.Equal(got, goid[:len(got)]) || len(got) != len(goid) {
+		t.Errorf("GlobalObjectID(%q) = %X, want %X", uid, got, goid)
+	}
+}
+
+// TestGlobalObjectIDInvertsTheUID maps an exported UID back to the id of the whole
+// meeting, clearing the instance date an occurrence's id carries.
+func TestGlobalObjectIDInvertsTheUID(t *testing.T) {
+	if got := globalObjectUID(GlobalObjectID(specUID)); got != specUID {
+		t.Errorf("round trip = %q, want %q", got, specUID)
+	}
+	fromInstance := GlobalObjectID(strings.ToLower(specInstanceGOID))
+	if !bytes.Equal(fromInstance, mustHex(t, specUID)) {
+		t.Errorf("an instance id maps to %X, want the whole meeting's", fromInstance)
+	}
+	if GlobalObjectID("") != nil {
+		t.Error("an empty UID names an id")
 	}
 }
 

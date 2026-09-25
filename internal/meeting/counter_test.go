@@ -6,6 +6,7 @@ import (
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcical"
 )
 
 // deliverCounter appends an iTIP COUNTER from attendee proposing 16:00 to 17:00 on
@@ -106,6 +107,32 @@ func TestCounterIsTrackedOnTheOrganizersMeeting(t *testing.T) {
 	got := readProposalState(t, st, recipID)
 	if got.rowProposed || got.eventFlag || got.eventProposed != 0 {
 		t.Errorf("after accepting = %+v, want the proposal withdrawn", got)
+	}
+}
+
+// TestResponseFindsAMeetingByItsGlobalObjectID covers a meeting organized in
+// Outlook, which stores its identity as PidLidGlobalObjectId and no iCalendar UID.
+// The attendee's response names the UID exported from that id; before, the lookup
+// read the UID property only, so such a response updated nothing.
+func TestResponseFindsAMeetingByItsGlobalObjectID(t *testing.T) {
+	const uid = "040000008200E00074C5B7101A82E00800000000" + "00D0E5A6C0D5DC01" +
+		"0000000000000000" + "10000000" + "0123456789ABCDEF0123456789ABCDEF"
+	st, tags, recipID := organizerWithEvent(t, "", "bob@hermex.test")
+	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameGlobalObjectId})
+	if err != nil {
+		t.Fatal(err)
+	}
+	goid := mapi.PropertyValues{{Tag: mapi.MakeTag(ids[0], mapi.PtBinary), Value: oxcical.GlobalObjectID(uid)}}
+	if err := st.SetMessageProperties(eventOf(t, st), goid); err != nil {
+		t.Fatal(err)
+	}
+
+	mustProcess(t, st, deliverCounter(t, st, uid, "bob@hermex.test", "TENTATIVE"))
+	if got := responseOf(t, st, tags, recipID); got != ResponseTentative {
+		t.Errorf("tracking status = %d, want tentative", got)
+	}
+	if !readProposalState(t, st, recipID).rowProposed {
+		t.Error("the proposal was not recorded")
 	}
 }
 
