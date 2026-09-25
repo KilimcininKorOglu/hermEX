@@ -39,11 +39,13 @@ function bytesToBase64(bytes: ArrayBuffer): string {
   return btoa(bin)
 }
 
-// serverCert returns the certificate the server holds in server mode, or null.
-async function serverCert(): Promise<CertInfo | null> {
+// serverIdentity returns the certificate the server holds and where its key
+// lives, or null when the server holds none. A browser-mode certificate is
+// still published when its key is in another browser.
+async function serverIdentity(): Promise<{ info: CertInfo; mode: SmimeMode } | null> {
   const res = await api.getSMIMECertificate()
-  if ("hasKeys" in res || res.mode !== "server") return null
-  return certFields(res)
+  if ("hasKeys" in res) return null
+  return { info: certFields(res), mode: res.mode === "server" ? "server" : "browser" }
 }
 
 // useSmime manages the S/MIME identity. "browser" mode keeps the key in THIS
@@ -55,32 +57,37 @@ function useSmime() {
   const [cert, setCert] = useState<CertInfo | null>(null)
   const [mode, setMode] = useState<SmimeMode | null>(null)
   const [unlocked, setUnlocked] = useState(false)
+  // local reports whether the key is in this browser.
+  const [local, setLocal] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
-  const show = (next: CertInfo | null, nextMode: SmimeMode | null, isUnlocked: boolean) => {
+  const show = useCallback((next: CertInfo | null, nextMode: SmimeMode | null, isUnlocked: boolean, isLocal: boolean) => {
     setCert(next)
     setMode(next ? nextMode : null)
     setUnlocked(isUnlocked)
-  }
+    setLocal(isLocal)
+  }, [])
 
+  // load shows the key held in this browser, else the certificate the server
+  // publishes, which may belong to a key in another browser.
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const local = await smimeStore.storedCertInfo()
-      if (local) {
-        setCert(local); setMode("browser"); setUnlocked(smimeStore.isUnlocked())
+      const stored = await smimeStore.storedCertInfo()
+      if (stored) {
+        show(stored, "browser", smimeStore.isUnlocked(), true)
       } else {
-        const remote = await serverCert()
-        setCert(remote); setMode(remote ? "server" : null); setUnlocked(remote !== null)
+        const remote = await serverIdentity()
+        show(remote?.info ?? null, remote?.mode ?? null, remote?.mode === "server", false)
       }
     } catch {
-      setCert(null); setMode(null)
+      show(null, null, false, false)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [show])
 
   useEffect(() => { void load() }, [load])
 
@@ -91,12 +98,12 @@ function useSmime() {
       const bytes = await file.arrayBuffer()
       if (target === "server") {
         // Server mode: send the .p12 + its password; the server stores the key.
-        show(certFields(await api.uploadServerSMIME(bytesToBase64(bytes), password)), "server", true)
+        show(certFields(await api.uploadServerSMIME(bytesToBase64(bytes), password)), "server", true, false)
       } else {
         // Browser mode: store the key in IndexedDB, publish only the public cert.
         const { info, certPem } = await smimeStore.importP12(bytes, password)
         await api.uploadSMIMECertificate(certPem)
-        show(info, "browser", true)
+        show(info, "browser", true, true)
       }
       toast.success(t("settings.privacy.smimeCertSaved"))
       return true
@@ -132,7 +139,7 @@ function useSmime() {
     try {
       await api.deleteSMIMECertificate()
       await smimeStore.removeIdentity()
-      show(null, null, false)
+      show(null, null, false, false)
       toast.success(t("settings.privacy.smimeCertDeleted"))
       return true
     } catch {
@@ -143,7 +150,7 @@ function useSmime() {
     }
   }
 
-  return { cert, mode, unlocked, loading, saving, deleting, importP12, unlock, remove }
+  return { cert, mode, unlocked, local, loading, saving, deleting, importP12, unlock, remove }
 }
 
 type Smime = ReturnType<typeof useSmime>
@@ -151,6 +158,7 @@ type Smime = ReturnType<typeof useSmime>
 // smimeBadgeKey is the i18n key of where the key lives and whether it is ready.
 function smimeBadgeKey(s: Smime): string {
   if (s.mode === "server") return "settings.privacy.smimeServerBadge"
+  if (!s.local) return "settings.privacy.smimeElsewhereBadge"
   return s.unlocked ? "settings.privacy.smimeUnlockedBadge" : "settings.privacy.smimeLockedBadge"
 }
 
@@ -335,7 +343,7 @@ type OpenDialog = "import" | "unlock" | "delete" | null
 
 function SmimeActions({ smime, onOpen }: { smime: Smime; onOpen: (d: OpenDialog) => void }) {
   const { t } = useI18n()
-  const locked = smime.cert !== null && smime.mode === "browser" && !smime.unlocked
+  const locked = smime.cert !== null && smime.local && !smime.unlocked
   return (
     <div className="flex items-center gap-2 ml-4">
       {locked && (

@@ -704,6 +704,7 @@
       "smimeUnlockedBadge": "unlocked",
       "smimeLockedBadge": "locked",
       "smimeServerBadge": "on the server",
+      "smimeElsewhereBadge": "key in another browser",
       "smimeStorageLabel": "Where to store your private key",
       "smimeStoreBrowser": "This browser",
       "smimeStoreBrowserHint": "Key never leaves this browser; works only here.",

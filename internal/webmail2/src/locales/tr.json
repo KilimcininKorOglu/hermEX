@@ -704,6 +704,7 @@
       "smimeUnlockedBadge": "açık",
       "smimeLockedBadge": "kilitli",
       "smimeServerBadge": "sunucuda",
+      "smimeElsewhereBadge": "anahtar başka bir tarayıcıda",
       "smimeStorageLabel": "Private key'in nerede saklansın",
       "smimeStoreBrowser": "Bu tarayıcı",
       "smimeStoreBrowserHint": "Key bu tarayıcıdan çıkmaz; yalnızca burada çalışır.",
