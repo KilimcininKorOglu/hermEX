@@ -43,6 +43,8 @@ describe('sanitizeHTML', () => {
     ['script', '<script src="https://evil.com/x.js"></script>'],
   ])('forbids %s even with attributes', (tag, payload) => {
     const result = sanitizeHTML(payload + '<p>content</p>')
+    // tag comes from the fixed it.each table above, never from input.
+    // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
     expect(result).not.toMatch(new RegExp('<' + tag, 'i'))
     expect(result).not.toContain('evil.com')
     expect(result).toContain('<p>content</p>')

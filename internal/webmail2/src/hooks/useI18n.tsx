@@ -64,6 +64,9 @@ function useI18nState(): I18nContextValue {
       let value: unknown = messages
 
       for (const k of keys) {
+        // Only the local cursor is reassigned: the loop reads nested keys of the
+        // loaded locale and never writes to an object, so it cannot touch a prototype.
+        // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop.prototype-pollution-loop
         value = (value as Record<string, unknown>)?.[k]
         if (value === undefined) return key
       }

@@ -228,6 +228,8 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           onPaste={handlePaste}
           onDrop={handleDrop}
           suppressContentEditableWarning
+          // safeValue is sanitizeHTML(value) (see its useMemo above), the one sanitizer every mail-derived HTML sink goes through.
+          // nosemgrep: typescript.react.security.audit.react-dangerouslysetinnerhtml.react-dangerouslysetinnerhtml
           dangerouslySetInnerHTML={{ __html: safeValue }}
           data-placeholder={placeholder}
         />
