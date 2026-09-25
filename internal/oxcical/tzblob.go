@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"time"
 	"unicode/utf16"
+
+	"hermex/internal/mapi"
 )
 
 // The TZRule flags of [MS-OXOCAL] 2.2.1.41.1: the rule a recurring series
@@ -99,6 +101,43 @@ func tzDefinitionBlob(keyName string, r tzReg, flags uint16) []byte {
 	b.Write([]byte{0x02, 0x01})
 	writeLE(&b, uint16(0x003E), flags, uint16(1), [14]byte{}, r.bias, r.standardBias, r.daylightBias, r.standardDate, r.daylightDate)
 	return b.Bytes()
+}
+
+// DisplayZone returns the zone a stored appointment's start is shown in: the zone
+// its PidLidAppointmentTimeZoneDefinitionStartDisplay names by KeyName, resolved
+// as a Windows id or an IANA name. It returns nil when the property is absent or
+// names a zone neither table knows.
+func DisplayZone(props mapi.PropertyValues, opt Options) *time.Location {
+	tag, err := resolveOne(opt, mapi.NameAppointmentTimeZoneDefStartDisplay, mapi.PtBinary, false)
+	if err != nil || tag == 0 {
+		return nil
+	}
+	v, ok := props.Get(tag)
+	if !ok {
+		return nil
+	}
+	blob, ok := v.([]byte)
+	if !ok {
+		return nil
+	}
+	return ZoneByID(tzDefinitionKeyName(blob))
+}
+
+// tzDefinitionKeyName reads the KeyName of a TZDEFINITION ([MS-OXOCAL]
+// 2.2.1.41), or "" when the header carries none or is cut short.
+func tzDefinitionKeyName(b []byte) string {
+	if len(b) < 8 || binary.LittleEndian.Uint16(b[4:6])&tzDefinitionValidKeyName == 0 {
+		return ""
+	}
+	n := int(binary.LittleEndian.Uint16(b[6:8]))
+	if len(b) < 8+2*n {
+		return ""
+	}
+	units := make([]uint16, n)
+	for i := range units {
+		units[i] = binary.LittleEndian.Uint16(b[8+2*i:])
+	}
+	return string(utf16.Decode(units))
 }
 
 // writeLE appends each value in little-endian byte order. Every value is a

@@ -106,6 +106,25 @@ func TestImportWritesNoZoneForUnzonedTimes(t *testing.T) {
 	}
 }
 
+// TestDisplayZoneReadsTheStoredZone reads back the zone an import stored under
+// its Windows name, and nothing from an event that stored none.
+func TestDisplayZoneReadsTheStoredZone(t *testing.T) {
+	const zoned = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:tz-3\r\nSUMMARY:x\r\n" +
+		"DTSTART;TZID=Europe/Berlin:20260612T090000\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	r := newResolver()
+	msg, err := Import([]byte(zoned), r.opt())
+	mustNoErr(t, err, "import")
+	if loc := DisplayZone(msg.Props, r.opt()); loc == nil || loc.String() != "Europe/Berlin" {
+		t.Errorf("DisplayZone = %v, want Europe/Berlin", loc)
+	}
+	if loc := DisplayZone(nil, r.opt()); loc != nil {
+		t.Errorf("DisplayZone of an empty bag = %v, want nil", loc)
+	}
+	if name := tzDefinitionKeyName([]byte{0x02, 0x01, 0x30, 0x00, 0x02, 0x00, 0x15}); name != "" {
+		t.Errorf("a cut header yields %q, want nothing", name)
+	}
+}
+
 // ruleFlags reads the flags of the one rule in a stored time zone definition.
 func ruleFlags(t *testing.T, r *resolver, msg *oxcmail.Message, name mapi.PropertyName) uint16 {
 	t.Helper()

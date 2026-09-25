@@ -21,6 +21,27 @@ type Span struct {
 // TRANSP is not read: an instance counts as occupied whenever the item does, which
 // is the busy status the caller already holds for the object as a whole.
 func OccurrencesIn(ical []byte, rangeStart, rangeEnd time.Time) ([]Span, bool) {
+	insts, ok := InstancesIn(ical, rangeStart, rangeEnd)
+	if !ok {
+		return nil, false
+	}
+	out := make([]Span, len(insts))
+	for i, in := range insts {
+		out[i] = in.Span
+	}
+	return out, true
+}
+
+// Instance is one occurrence of a recurring object: the instant the series
+// generates for it, which is its RECURRENCE-ID and names it for an override or a
+// cancellation, and the span it occupies, which an override may have moved.
+type Instance struct {
+	At time.Time
+	Span
+}
+
+// InstancesIn is OccurrencesIn with each span's generated instant, in start order.
+func InstancesIn(ical []byte, rangeStart, rangeEnd time.Time) ([]Instance, bool) {
 	cal, err := parseICal(ical)
 	if err != nil {
 		return nil, false
@@ -31,15 +52,16 @@ func OccurrencesIn(ical []byte, rangeStart, rangeEnd time.Time) ([]Span, bool) {
 		return nil, false
 	}
 	skip := excludedInstants(master)
-	out := overrideSpans(overrides, skip, s.dur, rangeStart, rangeEnd)
+	out := overrideInstances(overrides, skip, s.dur, rangeStart, rangeEnd)
 	for _, t := range seriesInstants(master, s, skip, rangeStart, rangeEnd) {
 		if _, overridden := overrides[instantKey(t)]; overridden {
 			continue // already tested at its own time
 		}
 		if span := (Span{Start: t, End: t.Add(s.dur)}); overlapsRange(span.Start, span.End, rangeStart, rangeEnd) {
-			out = append(out, span)
+			out = append(out, Instance{At: t, Span: span})
 		}
 	}
+	slices.SortFunc(out, func(a, b Instance) int { return a.Start.Compare(b.Start) })
 	return out, true
 }
 
@@ -148,12 +170,12 @@ func addedInstants(master *icomp) []time.Time {
 	return out
 }
 
-// overrideSpans returns the spans the object's overrides occupy in the window. An
-// override carries its own time and may sit anywhere, including outside the span
-// its generated instant would have had, so each one is tested directly rather than
-// through the enumeration.
-func overrideSpans(overrides map[string]*icomp, skip map[string]bool, dur time.Duration, rangeStart, rangeEnd time.Time) []Span {
-	var out []Span
+// overrideInstances returns the instances the object's overrides occupy in the
+// window. An override carries its own time and may sit anywhere, including outside
+// the span its generated instant would have had, so each one is tested directly
+// rather than through the enumeration.
+func overrideInstances(overrides map[string]*icomp, skip map[string]bool, dur time.Duration, rangeStart, rangeEnd time.Time) []Instance {
+	var out []Instance
 	for key, ov := range overrides {
 		if skip[key] {
 			continue
@@ -163,7 +185,7 @@ func overrideSpans(overrides map[string]*icomp, skip map[string]bool, dur time.D
 			continue
 		}
 		if span, live := instanceSpan(ov, at, dur); live && overlapsRange(span.Start, span.End, rangeStart, rangeEnd) {
-			out = append(out, span)
+			out = append(out, Instance{At: at, Span: span})
 		}
 	}
 	return out

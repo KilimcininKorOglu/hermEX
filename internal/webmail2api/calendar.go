@@ -42,6 +42,15 @@ type eventJSON struct {
 	OptionalAttendees []string             `json:"optionalAttendees,omitempty"` // optional attendees (ROLE=OPT-PARTICIPANT); required default for Attendees
 	SendInvite        bool                 `json:"sendInvite,omitempty"`        // when true on create, email a METHOD:REQUEST iTIP invite to the attendees
 	Tracking          []attendeeStatusJSON `json:"tracking,omitempty"`          // per-attendee response status (the organizer's TrackingTab), read from the recipients' PidLidResponseStatus
+	Recurrence        string               `json:"recurrence,omitempty"`        // the RRULE value, e.g. "FREQ=WEEKLY"
+	Timezone          string               `json:"timezone,omitempty"`          // IANA zone a timed event's wall clock is kept in
+	// Occurrence, SeriesStart and SeriesEnd are set on the rows a windowed listing
+	// expands a series into: Occurrence is the instance's generated instant (its
+	// RECURRENCE-ID), and SeriesStart and SeriesEnd are the series' own first span,
+	// which is what an edit of the whole series starts from.
+	Occurrence  string `json:"occurrence,omitempty"`
+	SeriesStart string `json:"seriesStart,omitempty"`
+	SeriesEnd   string `json:"seriesEnd,omitempty"`
 }
 
 // attendeeStatusJSON is one attendee's response status for the organizer's
@@ -259,12 +268,18 @@ func icalText(s string) string {
 // buildICal renders a minimal VEVENT for the proven oxcical import path.
 func buildICal(e eventJSON) []byte {
 	var b strings.Builder
-	b.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//webmail2//EN\r\nBEGIN:VEVENT\r\n")
+	b.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//webmail2//EN\r\n")
+	loc := eventLocation(e)
+	writeVTimezone(&b, loc, e.Start)
+	b.WriteString("BEGIN:VEVENT\r\n")
 	fmt.Fprintf(&b, "UID:%s\r\n", e.UID)
 	fmt.Fprintf(&b, "SUMMARY:%s\r\n", icalText(e.Summary))
-	fmt.Fprintf(&b, "DTSTART%s\r\n", toICalTime(e.Start, e.AllDay))
+	fmt.Fprintf(&b, "DTSTART%s\r\n", icalTimeIn(e.Start, e.AllDay, loc))
 	if e.End != "" {
-		fmt.Fprintf(&b, "DTEND%s\r\n", toICalTime(e.End, e.AllDay))
+		fmt.Fprintf(&b, "DTEND%s\r\n", icalTimeIn(e.End, e.AllDay, loc))
+	}
+	if validRRule(e.Recurrence) {
+		fmt.Fprintf(&b, "RRULE:%s\r\n", e.Recurrence)
 	}
 	for _, a := range e.Attendees {
 		fmt.Fprintf(&b, "ATTENDEE;CN=%s;ROLE=REQ-PARTICIPANT:mailto:%s\r\n", a, a)
@@ -315,11 +330,24 @@ func icalClass(sensitivity *int) string {
 	return ""
 }
 
-// icalProp returns a property's value and the part of the key after its name
-// (the parameters), ignoring folding.
+// icalProp returns a property's value in the first VEVENT (its alarm included)
+// and the part of the key after its name (the parameters), ignoring folding. Lines
+// outside the event are skipped, because a VTIMEZONE ahead of it carries DTSTART
+// lines of its own.
 func icalProp(ics []byte, name string) (value, params string) {
+	inEvent := false
 	for line := range strings.SplitSeq(string(ics), "\n") {
 		line = strings.TrimRight(line, "\r")
+		if strings.EqualFold(line, "BEGIN:VEVENT") {
+			inEvent = true
+			continue
+		}
+		if !inEvent {
+			continue
+		}
+		if strings.EqualFold(line, "END:VEVENT") {
+			break
+		}
 		key, val, found := strings.Cut(line, ":")
 		if !found {
 			continue
@@ -343,13 +371,8 @@ func icalToEvent(ics []byte, id int64) eventJSON {
 	e.Summary, _ = icalProp(ics, "SUMMARY")
 	e.Description, _ = icalProp(ics, "DESCRIPTION")
 	e.Location, _ = icalProp(ics, "LOCATION")
-	if v, p := icalProp(ics, "DTSTART"); v != "" {
-		e.Start, e.AllDay = fromICalTime(v)
-		_ = p
-	}
-	if v, _ := icalProp(ics, "DTEND"); v != "" {
-		e.End, _ = fromICalTime(v)
-	}
+	e.Recurrence, _ = icalProp(ics, "RRULE")
+	icalSpan(ics, &e)
 	if v, _ := icalProp(ics, "TRIGGER"); v != "" {
 		// A VALARM trigger is an iCal duration like "-PT15M"; the lead time in
 		// minutes is its absolute value (oxcical emits "-PT<n>M").
@@ -421,11 +444,7 @@ func (s *Server) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		for _, o := range objs {
-			e, ok := win.event(o.ID, cal.ID)
-			if !ok {
-				continue
-			}
-			events = append(events, e)
+			events = append(events, win.rows(o.ID, cal.ID)...)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"events": events})
@@ -441,6 +460,7 @@ type eventScan struct {
 	windowed bool
 	startTag mapi.PropTag
 	endTag   mapi.PropTag
+	recurTag mapi.PropTag
 	start    time.Time
 	end      time.Time
 }
@@ -464,38 +484,72 @@ func newEventWindowScan(st *objectstore.Store, r *http.Request) *eventScan {
 	if !sc.windowed {
 		return sc
 	}
-	ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{mapi.NameAppointmentStartWhole, mapi.NameAppointmentEndWhole})
-	if err != nil || len(ids) != 2 {
+	ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{mapi.NameAppointmentStartWhole, mapi.NameAppointmentEndWhole, mapi.NameRecurring})
+	if err != nil || len(ids) != 3 || ids[0] == 0 || ids[1] == 0 {
 		sc.windowed = false // cannot resolve the time tags; fail open to full export
 		return sc
 	}
 	sc.startTag = mapi.MakeTag(ids[0], mapi.PtSysTime)
 	sc.endTag = mapi.MakeTag(ids[1], mapi.PtSysTime)
+	if ids[2] != 0 {
+		sc.recurTag = mapi.MakeTag(ids[2], mapi.PtBoolean)
+	}
 	return sc
 }
 
 // list enumerates one calendar folder, applying the window in the store when
 // there is one. Reading each object's properties back to compare two times
-// costs a query per object and grows with the calendar, not with the answer.
+// costs a query per object and grows with the calendar, not with the answer. A
+// series master carries its first instance's times, so the series are added
+// whole and the window is applied to their expanded instances instead.
 func (sc *eventScan) list(fid int64) ([]objectstore.FolderObject, error) {
-	if sc.windowed {
-		return sc.st.ListFolderObjectsInWindow(fid, sc.startTag, sc.endTag, sc.start, sc.end)
+	if !sc.windowed {
+		return sc.st.ListFolderObjects(fid)
 	}
-	return sc.st.ListFolderObjects(fid)
+	objs, err := sc.st.ListFolderObjectsInWindow(fid, sc.startTag, sc.endTag, sc.start, sc.end)
+	if err != nil || sc.recurTag == 0 {
+		return objs, err
+	}
+	series, err := sc.st.ListFolderObjectsWithFlag(fid, sc.recurTag)
+	if err != nil {
+		return nil, err
+	}
+	return mergeFolderObjects(objs, series), nil
 }
 
-// event renders one stored appointment, reporting false when it cannot be
-// exported.
-func (sc *eventScan) event(id int64, calendarID string) (eventJSON, bool) {
+// rows renders one stored appointment: the event itself, or in a windowed
+// listing each of a series' instances in the window. It is empty when the
+// appointment cannot be exported.
+func (sc *eventScan) rows(id int64, calendarID string) []eventJSON {
+	e, ics, ok := sc.event(id, calendarID)
+	if !ok {
+		return nil
+	}
+	if !sc.windowed {
+		return []eventJSON{e}
+	}
+	return expandedRows(e, ics, sc.start, sc.end)
+}
+
+// event renders one stored appointment and the iCalendar it was read from,
+// reporting false when it cannot be exported.
+func (sc *eventScan) event(id int64, calendarID string) (eventJSON, []byte, bool) {
 	msg, err := sc.st.OpenMessage(id)
 	if err != nil {
-		return eventJSON{}, false
+		return eventJSON{}, nil, false
 	}
 	ics, err := oxcical.Export(msg, sc.opt)
 	if err != nil {
-		return eventJSON{}, false
+		return eventJSON{}, nil, false
 	}
 	e := icalToEvent(ics, id)
+	if e.Timezone == "" && !e.AllDay {
+		// A single event is exported in UTC, so its zone is read from the display
+		// time zone import stored beside it.
+		if loc := oxcical.DisplayZone(msg.Props, sc.opt); loc != nil {
+			e.Timezone = loc.String()
+		}
+	}
 	// The SPA addresses an event by its message id (delete and update parse it
 	// back to a store id); the iCalendar UID is the meeting identity, not a store
 	// handle, so the message id - not icalToEvent's UID - is surfaced.
@@ -507,7 +561,7 @@ func (sc *eventScan) event(id int64, calendarID string) (eventJSON, bool) {
 		e.Categories = cats
 	}
 	sc.addAttendees(&e, id)
-	return e, true
+	return e, ics, true
 }
 
 // busyStatus reads PidLidBusyStatus directly so every value survives the
@@ -597,9 +651,8 @@ func eventWindow(r *http.Request) (start, end time.Time, windowed bool) {
 }
 
 func (s *Server) handleCreateEvent(w http.ResponseWriter, r *http.Request) {
-	var in eventJSON
-	if err := decodeJSON(r, &in); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+	in, ok := decodeEvent(w, r)
+	if !ok {
 		return
 	}
 	st, _, ok := s.openStore(w, r)
@@ -636,9 +689,8 @@ func (s *Server) handleCreateEvent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateEvent(w http.ResponseWriter, r *http.Request) {
-	var in eventJSON
-	if err := decodeJSON(r, &in); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+	in, ok := decodeEvent(w, r)
+	if !ok {
 		return
 	}
 	st, _, ok := s.openStore(w, r)
