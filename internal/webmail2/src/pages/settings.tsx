@@ -139,6 +139,38 @@ function SettingRow({
   )
 }
 
+// PageSizeInput edits the inbox page size as text and saves it only when the
+// field is left or Enter is pressed. A save per keystroke clamps every partial
+// value, so typing "25" first stored "2" as the minimum and the digits that
+// followed built on it. The parent keys it by the stored value, so a stored
+// change starts a fresh draft.
+function PageSizeInput({ value, onCommit }: { value: number; onCommit: (n: number) => void }) {
+  const [draft, setDraft] = useState(String(value))
+  const commit = () => {
+    const n = Number(draft)
+    if (draft.trim() === "" || !Number.isFinite(n)) {
+      setDraft(String(value))
+      return
+    }
+    const next = clampPageSize(n)
+    setDraft(String(next))
+    if (next !== value) onCommit(next)
+  }
+  return (
+    <input
+      type="number"
+      min={MIN_PAGE_SIZE}
+      max={MAX_PAGE_SIZE}
+      step={10}
+      className="w-24 rounded-md border bg-background px-3 py-2 text-sm"
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === "Enter") commit() }}
+    />
+  )
+}
+
 export function SettingsPage() {
   const { theme, setTheme, resolvedTheme } = useTheme()
   const { user, updatePrefs } = useAuth()
@@ -2459,14 +2491,10 @@ export function SettingsPage() {
             <p className="font-medium">{t("settings.inboxNav.pageSize")}</p>
             <p className="text-sm text-muted-foreground">{t("settings.inboxNav.pageSizeDescription")}</p>
           </div>
-          <input
-            type="number"
-            min={MIN_PAGE_SIZE}
-            max={MAX_PAGE_SIZE}
-            step={10}
-            className="w-24 rounded-md border bg-background px-3 py-2 text-sm"
+          <PageSizeInput
+            key={appearance.inboxPageSize}
             value={appearance.inboxPageSize}
-            onChange={(e) => saveAppearance({ ...appearance, inboxPageSize: clampPageSize(Number(e.target.value)) })}
+            onCommit={(n) => saveAppearance({ ...appearance, inboxPageSize: n })}
           />
         </div>
       </SettingSection>
