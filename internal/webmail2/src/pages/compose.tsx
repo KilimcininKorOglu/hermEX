@@ -832,16 +832,24 @@ export function ComposePage() {
     }
   }, [subject, body, to, attachments, handleAutoSave])
 
+  // The shortcut calls the send of the LATEST render through a ref. A listener
+  // bound to one render's handleSend sends that render's recipients, attachments
+  // and options, so a Cc added after the last edit of To, Subject or Body was
+  // dropped from a Ctrl+Enter send.
+  const sendShortcutRef = useRef<() => void>(() => undefined)
+  useEffect(() => {
+    sendShortcutRef.current = () => handleSend()
+  })
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault()
-        handleSend()
+        sendShortcutRef.current()
       }
     }
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [to, subject, body])
+  }, [])
 
   // Check if selected sender can send
   const canSendAsSelected = selectedSender?.canSend ?? true
