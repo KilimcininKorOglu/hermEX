@@ -18,34 +18,64 @@ var errNoSuchEvent = errors.New("webmail2api: no such event")
 // attachment another client stored. Only the properties the iCalendar import
 // manages are replaced, and those the edit no longer sets are removed. A series
 // keeps its cancelled and moved instances while its first start and rule stay
-// the same. The appointment moves when the editor names another calendar. It
-// returns the event's iCalendar UID.
-func updateEventInPlace(st *objectstore.Store, id int64, in eventJSON) (string, error) {
+// the same. The appointment moves when the editor names another calendar.
+//
+// caller is the signed-in user. It reports whether caller organizes the meeting;
+// when they do and the edit is to be sent, the meeting revision advances so the
+// attendees' clients take the resent request as newer than the one they hold.
+func updateEventInPlace(st *objectstore.Store, id int64, in eventJSON, caller string) (bool, error) {
 	stored, err := st.OpenMessage(id)
 	if errors.Is(err, objectstore.ErrNotFound) || (err == nil && !isAppointment(stored.Props)) {
-		return "", errNoSuchEvent
+		return false, errNoSuchEvent
 	}
 	if err != nil {
-		return "", err
+		return false, err
 	}
 	opt := oxcical.Options{Resolver: st.GetNamedPropIDs}
-	in.UID = storedICalUID(st, stored.Props)
-	ics := buildICal(in)
-	if raw, ok := stored.Props.Get(mapi.PrIcalOriginal); ok {
+	organizes := isOrganizer(st, stored.Props, caller)
+	ics := editedICal(st, id, stored.Props, in, caller, organizes && in.SendInvite)
+	if err := rewriteEvent(st, id, ics, opt); err != nil {
+		return false, err
+	}
+	if err := applyBusyStatus(st, id, in); err != nil {
+		return false, err
+	}
+	if err := st.SetCategories(id, in.Categories); err != nil {
+		return false, err
+	}
+	return organizes, moveToCalendar(st, id, calendarFolderID(in.CalendarID))
+}
+
+// editedICal renders the edited event under its stored UID and organizer, carrying
+// the series' exceptions over. bump advances the meeting revision, for an edit the
+// organizer is about to send.
+func editedICal(st *objectstore.Store, id int64, props mapi.PropertyValues, in eventJSON, caller string, bump bool) []byte {
+	seq := storedSequence(st, props)
+	if bump {
+		seq++
+	}
+	in.UID = storedICalUID(st, props)
+	ics := buildICal(in, eventOrganizer(st, id, props, in, caller), seq)
+	if raw, ok := props.Get(mapi.PrIcalOriginal); ok {
 		if b, ok := raw.([]byte); ok {
 			ics = oxcical.CarryExceptions(b, ics)
 		}
 	}
-	if err := rewriteEvent(st, id, ics, opt); err != nil {
-		return "", err
+	return ics
+}
+
+// eventOrganizer is the organizer an edited event records: the one it already
+// names, none for a meeting organized before this webmail recorded one (so its
+// attendees keep the identity they hold), else the signed-in user once the event
+// has anyone to meet.
+func eventOrganizer(st *objectstore.Store, id int64, props mapi.PropertyValues, in eventJSON, caller string) string {
+	if org := organizerOf(props); org != "" {
+		return org
 	}
-	if err := applyBusyStatus(st, id, in); err != nil {
-		return "", err
+	if isLegacyMeeting(st, id, props) || !hasAttendees(in) {
+		return ""
 	}
-	if err := st.SetCategories(id, in.Categories); err != nil {
-		return "", err
-	}
-	return in.UID, moveToCalendar(st, id, calendarFolderID(in.CalendarID))
+	return caller
 }
 
 // rewriteEvent imports ics and writes it over the stored appointment: the managed

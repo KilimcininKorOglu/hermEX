@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/mail"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -266,8 +267,10 @@ func icalText(s string) string {
 	return b.String()
 }
 
-// buildICal renders a minimal VEVENT for the proven oxcical import path.
-func buildICal(e eventJSON) []byte {
+// buildICal renders a minimal VEVENT for the proven oxcical import path. organizer
+// names the meeting's organizer (empty for an appointment, or for a meeting
+// organized before this webmail recorded one), and seq is the meeting revision.
+func buildICal(e eventJSON, organizer string, seq int) []byte {
 	var b strings.Builder
 	b.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//webmail2//EN\r\n")
 	loc := eventLocation(e)
@@ -282,18 +285,32 @@ func buildICal(e eventJSON) []byte {
 	if validRRule(e.Recurrence) {
 		fmt.Fprintf(&b, "RRULE:%s\r\n", e.Recurrence)
 	}
-	for _, a := range e.Attendees {
-		fmt.Fprintf(&b, "ATTENDEE;CN=%s;ROLE=REQ-PARTICIPANT:mailto:%s\r\n", a, a)
+	fmt.Fprintf(&b, "SEQUENCE:%d\r\n", seq)
+	if organizer != "" {
+		fmt.Fprintf(&b, "ORGANIZER:mailto:%s\r\n", organizer)
 	}
-	for _, a := range e.OptionalAttendees {
-		fmt.Fprintf(&b, "ATTENDEE;CN=%s;ROLE=OPT-PARTICIPANT:mailto:%s\r\n", a, a)
-	}
+	writeAttendees(&b, e)
 	writeICalText(&b, "DESCRIPTION:%s\r\n", e.Description)
 	writeICalText(&b, "LOCATION:%s\r\n", e.Location)
 	writeICalAlarm(&b, e.ReminderMinutes)
 	b.WriteString(icalClass(e.Sensitivity))
 	b.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
 	return []byte(b.String())
+}
+
+// writeAttendees writes an ATTENDEE line for each attendee that parses as an
+// address, required ones first. An optional attendee who is also required is
+// written once, as required.
+func writeAttendees(b *strings.Builder, e eventJSON) {
+	required := cleanAddresses(e.Attendees)
+	for _, a := range required {
+		fmt.Fprintf(b, "ATTENDEE;CN=%s;ROLE=REQ-PARTICIPANT;RSVP=TRUE:mailto:%s\r\n", a, a)
+	}
+	for _, a := range cleanAddresses(e.OptionalAttendees) {
+		if !slices.Contains(required, a) {
+			fmt.Fprintf(b, "ATTENDEE;CN=%s;ROLE=OPT-PARTICIPANT;RSVP=TRUE:mailto:%s\r\n", a, a)
+		}
+	}
 }
 
 // writeICalText emits one escaped text property, skipping an empty value.
@@ -661,31 +678,24 @@ func (s *Server) handleCreateEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
-	uid, err := storeEvent(st, in, calendarFolderID(in.CalendarID))
+	// A meeting records its organizer, the signed-in user; an appointment with
+	// nobody to meet records none.
+	organizer := ""
+	if c, ok := s.session(r); ok && hasAttendees(in) {
+		organizer = c.Email
+	}
+	id, err := storeEvent(st, in, calendarFolderID(in.CalendarID), organizer)
 	if err != nil {
 		logError("calendar-save", err, logging.Fields{"calendar": in.CalendarID})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save event"})
 		return
 	}
-	in.UID = uid
-	// An organizer who sends an invite emails a METHOD:REQUEST iTIP message to the
-	// attendees; the recipients' clients (and hermEX's own RSVP path) offer
-	// accept/tentative/decline. Best-effort: a delivery failure still leaves the
-	// event saved, and the in.UID carries the meeting identity.
-	if in.SendInvite && len(in.Attendees) > 0 {
-		c, ok := s.session(r)
-		organizer := ""
-		if ok {
-			organizer = c.Email
-		}
-		in.UID = uidOrGenerated(in.UID)
-		if raw, recipients, berr := buildMeetingRequest(organizer, in); berr == nil && organizer != "" {
-			if _, derr := mta.DeliverAndRelay(s.accounts, s.spool, organizer, recipients, raw, time.Now()); derr == nil {
-				// File a Sent copy so the organizer sees the outgoing invite.
-				fileSentCopy(st, raw, organizer, "meeting-request")
-			}
-		}
+	// The invitation goes out after the meeting is stored and is best-effort: a
+	// delivery failure leaves the event saved.
+	if in.SendInvite && organizer != "" {
+		s.sendInvitation(st, id, organizer, "meeting-request", in)
 	}
+	in.UID = strconv.FormatInt(id, 10)
 	writeJSON(w, http.StatusOK, in)
 }
 
@@ -704,7 +714,11 @@ func (s *Server) handleUpdateEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
-	icalUID, err := updateEventInPlace(st, id, in)
+	caller := ""
+	if c, ok := s.session(r); ok {
+		caller = c.Email
+	}
+	organizes, err := updateEventInPlace(st, id, in, caller)
 	if errors.Is(err, errNoSuchEvent) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such event"})
 		return
@@ -714,33 +728,13 @@ func (s *Server) handleUpdateEvent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save event"})
 		return
 	}
-	// An organizer editing a meeting can resend the METHOD:REQUEST so invitees see
-	// the new time and details, under the meeting's own UID so their clients update
+	// An organizer editing a meeting can resend it so the attendees' clients update
 	// the meeting they hold. Best-effort like the create path.
-	if in.SendInvite && len(in.Attendees) > 0 {
-		in.UID = icalUID
-		s.resendInvite(r, st, in)
+	if in.SendInvite && organizes {
+		s.sendInvitation(st, id, caller, "meeting-update", in)
 	}
 	in.UID = strconv.FormatInt(id, 10)
 	writeJSON(w, http.StatusOK, in)
-}
-
-// resendInvite emails the updated METHOD:REQUEST to the attendees and files the
-// Sent copy.
-func (s *Server) resendInvite(r *http.Request, st *objectstore.Store, in eventJSON) {
-	c, ok := s.session(r)
-	if !ok {
-		return
-	}
-	raw, recipients, err := buildMeetingRequest(c.Email, in)
-	if err != nil {
-		return
-	}
-	if _, err := mta.DeliverAndRelay(s.accounts, s.spool, c.Email, recipients, raw, time.Now()); err != nil {
-		logError("send-meeting-update", err, logging.Fields{"user": c.Email})
-		return
-	}
-	fileSentCopy(st, raw, c.Email, "meeting-update")
 }
 
 // handleExportEvent streams a single calendar event as an iCalendar (.ics)
@@ -958,116 +952,6 @@ func (s *Server) handleDeleteCalendar(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-// buildMeetingRequest renders a METHOD:REQUEST iTIP invite wrapped in an RFC 5322
-// MIME message addressed to the attendees. The body is a plain-text summary plus
-// the full iCalendar as a text/calendar;method=REQUEST part, the shape an invitee
-// client parses to offer accept/tentative/decline (the RSVP path hermEX already
-// serves). The organizer is the authenticated sender. It returns the raw MIME and
-// the deduplicated attendee address list (the recipients).
-func buildMeetingRequest(organizer string, e eventJSON) ([]byte, []string, error) {
-	recipients, optionalSet := inviteRecipients(organizer, e)
-	if len(recipients) == 0 {
-		return nil, nil, fmt.Errorf("no attendees")
-	}
-	cal := inviteCalendar(organizer, e, recipients, optionalSet)
-	textBody := inviteTextBody(e)
-
-	boundary := "hermex-invite-" + randomHex()
-	var b strings.Builder
-	fmt.Fprintf(&b, "From: %s\r\n", organizer)
-	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(recipients, ", "))
-	fmt.Fprintf(&b, "Subject: %s\r\n", headerSafe(e.Summary))
-	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().UTC().Format(time.RFC1123Z))
-	fmt.Fprintf(&b, "Message-ID: <%s@hermex>\r\n", randomHex())
-	b.WriteString("MIME-Version: 1.0\r\n")
-	fmt.Fprintf(&b, "Content-Type: multipart/mixed; boundary=%q\r\n\r\n", boundary)
-	fmt.Fprintf(&b, "--%s\r\n", boundary)
-	b.WriteString("Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
-	b.WriteString(textBody)
-	b.WriteString("\r\n")
-	fmt.Fprintf(&b, "--%s\r\n", boundary)
-	b.WriteString("Content-Type: text/calendar; method=REQUEST; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
-	b.WriteString(cal)
-	fmt.Fprintf(&b, "\r\n--%s--\r\n", boundary)
-	return []byte(b.String()), recipients, nil
-}
-
-// inviteRecipients deduplicates the attendee addresses (required and optional)
-// down to bare SMTP, and reports which of them are OPT-PARTICIPANT.
-//
-// An address that does not parse is dropped rather than carried forward. It
-// reaches the invite's To header and the iCal ATTENDEE line, so an entry holding
-// a line break would splice headers of the organizer's choosing into a message
-// the server relays externally, or end the header block and push the rest into
-// the body.
-func inviteRecipients(organizer string, e eventJSON) ([]string, map[string]bool) {
-	recipients := make([]string, 0, len(e.Attendees)+len(e.OptionalAttendees))
-	optionalSet := map[string]bool{}
-	seen := map[string]bool{}
-	add := func(list []string, optional bool) {
-		for _, a := range list {
-			parsed, err := mail.ParseAddress(strings.TrimSpace(a))
-			if err != nil {
-				continue
-			}
-			addr := strings.ToLower(parsed.Address)
-			if addr == "" || seen[addr] || addr == strings.ToLower(organizer) {
-				continue
-			}
-			seen[addr] = true
-			if optional {
-				optionalSet[addr] = true
-			}
-			recipients = append(recipients, addr)
-		}
-	}
-	add(e.Attendees, false)
-	add(e.OptionalAttendees, true)
-	return recipients, optionalSet
-}
-
-// inviteCalendar renders the iCalendar: METHOD:REQUEST at the VCALENDAR level,
-// ORGANIZER set, and an ATTENDEE per recipient (RSVP=TRUE so the invitee client
-// offers a response).
-func inviteCalendar(organizer string, e eventJSON, recipients []string, optionalSet map[string]bool) string {
-	var cal strings.Builder
-	cal.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//webmail2//EN\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\n")
-	fmt.Fprintf(&cal, "UID:%s\r\n", uidOrGenerated(e.UID))
-	fmt.Fprintf(&cal, "SUMMARY:%s\r\n", icalText(e.Summary))
-	fmt.Fprintf(&cal, "DTSTART%s\r\n", toICalTime(e.Start, e.AllDay))
-	if e.End != "" {
-		fmt.Fprintf(&cal, "DTEND%s\r\n", toICalTime(e.End, e.AllDay))
-	}
-	writeICalText(&cal, "LOCATION:%s\r\n", e.Location)
-	fmt.Fprintf(&cal, "ORGANIZER;CN=%s:mailto:%s\r\n", organizer, organizer)
-	for _, a := range recipients {
-		role := "REQ-PARTICIPANT"
-		if optionalSet[a] {
-			role = "OPT-PARTICIPANT"
-		}
-		fmt.Fprintf(&cal, "ATTENDEE;CN=%s;ROLE=%s;RSVP=TRUE:mailto:%s\r\n", a, role, a)
-	}
-	cal.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
-	return cal.String()
-}
-
-// inviteTextBody renders the plain-text body the invitee reads if their client
-// does not render the calendar part.
-func inviteTextBody(e eventJSON) string {
-	when := "When: " + e.Start
-	if e.End != "" {
-		when += " - " + e.End
-	}
-	parts := []string{e.Summary, "", when}
-	if e.Location != "" {
-		parts = append(parts, "Where: "+e.Location)
-	}
-	if e.Description != "" {
-		parts = append(parts, "", e.Description)
-	}
-	return strings.Join(parts, "\r\n")
-}
-
 // buildCancellationRequest renders a METHOD:CANCEL iTIP message (RFC 5546 §3.7):
 // the organizer cancels a meeting, telling each attendee it is off. The iCalendar
 // carries the original UID with STATUS:CANCELLED; the MIME body is a plain-text
@@ -1132,17 +1016,19 @@ func uidOrGenerated(uid string) string {
 	return randomHex() + "@hermex"
 }
 
-func storeEvent(st *objectstore.Store, e eventJSON, folderID int64) (string, error) {
+// storeEvent files a new event and returns its message id. organizer names the
+// meeting's organizer, empty for an appointment with nobody to meet.
+func storeEvent(st *objectstore.Store, e eventJSON, folderID int64, organizer string) (int64, error) {
 	if e.UID == "" {
 		e.UID = randomHex() + "@hermex"
 	}
-	msg, err := oxcical.Import(buildICal(e), oxcical.Options{Resolver: st.GetNamedPropIDs})
+	msg, err := oxcical.Import(buildICal(e, organizer, 0), oxcical.Options{Resolver: st.GetNamedPropIDs})
 	if err != nil {
-		return "", err
+		return 0, err
 	}
 	id, err := st.CreateMessage(folderID, msg)
 	if err != nil {
-		return "", err
+		return 0, err
 	}
 	// The event is stored; a busy status that fails to land must not report the
 	// create as failed, or a retry stores it twice.
@@ -1155,5 +1041,5 @@ func storeEvent(st *objectstore.Store, e eventJSON, folderID int64) (string, err
 	if len(e.Categories) > 0 {
 		_ = st.SetCategories(id, e.Categories)
 	}
-	return strconv.FormatInt(id, 10), nil
+	return id, nil
 }

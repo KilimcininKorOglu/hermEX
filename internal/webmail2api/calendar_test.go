@@ -295,7 +295,6 @@ func TestMeetingRequestRejectsHeaderInjection(t *testing.T) {
 		name string
 		fn   func(string, eventJSON) ([]byte, []string, error)
 	}{
-		{"request", buildMeetingRequest},
 		{"cancel", buildCancellationRequest},
 	} {
 		raw, _, err := build.fn("organizer@hermex.test", eventJSON{

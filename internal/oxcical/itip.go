@@ -29,6 +29,22 @@ func WithMethod(ical []byte, method string) ([]byte, bool) {
 	return b.buf.Bytes(), true
 }
 
+// WithUID returns the object with every VEVENT's UID set to uid, for a meeting its
+// attendees already hold under a different identity than the stored one. ok is
+// false when the object does not parse.
+func WithUID(ical []byte, uid string) ([]byte, bool) {
+	cal, err := parseICal(ical)
+	if err != nil {
+		return nil, false
+	}
+	for _, c := range cal.comps {
+		if c.name == "VEVENT" {
+			setProp(c, "UID", escapeValue(uid))
+		}
+	}
+	return renderCalendar(cal), true
+}
+
 // CancelBody renders a METHOD:CANCEL for the whole meeting the object describes: its
 // time zones and its primary VEVENT (the series master, or the event itself) marked
 // STATUS:CANCELLED at sequence seq. The overrides are left out, because a
@@ -136,6 +152,11 @@ func SetSequence(ical []byte, seq int, at *time.Time) ([]byte, bool) {
 		return nil, false
 	}
 	setProp(target, "SEQUENCE", strconv.Itoa(seq))
+	return renderCalendar(cal), true
+}
+
+// renderCalendar serializes a parsed calendar as it stands.
+func renderCalendar(cal *icomp) []byte {
 	b := &builder{}
 	b.add("BEGIN:VCALENDAR")
 	for _, l := range cal.props {
@@ -145,7 +166,7 @@ func SetSequence(ical []byte, seq int, at *time.Time) ([]byte, bool) {
 		writeComponent(b, c)
 	}
 	b.add("END:VCALENDAR")
-	return b.buf.Bytes(), true
+	return b.buf.Bytes()
 }
 
 // parseSeries parses a stored series and reads its master's expansion inputs.
