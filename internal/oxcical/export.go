@@ -9,23 +9,22 @@ import (
 	"hermex/internal/oxcmail"
 )
 
-// Export renders an IPM.Appointment message as an iCalendar object. A recurring
-// event preserved verbatim (PrIcalOriginal) is returned unchanged; otherwise a
-// VEVENT is synthesized from the stored MAPI properties. Named properties are
-// resolved through opt.Resolver with create=false, so a property never stored
-// simply does not appear.
+// Export renders a calendar object or a meeting message as an iCalendar object. A
+// plain appointment preserved verbatim (PrIcalOriginal) is returned unchanged;
+// otherwise a VEVENT is synthesized from the stored MAPI properties. A meeting
+// message carries the iTIP METHOD its class names ([MS-OXCICAL] METHOD table).
+// Named properties are resolved through opt.Resolver with create=false, so a
+// property never stored simply does not appear.
 func Export(msg *oxcmail.Message, opt Options) ([]byte, error) {
 	p := &msg.Props
-
-	// A meeting response carries an iTIP METHOD:REPLY with organizer/attendee
-	// identity; a plain appointment emits none of that, so its output is unchanged.
-	partstat := responsePartStat(getStr(p, mapi.PrMessageClass))
-
-	if raw, ok := verbatimICal(p, partstat); ok {
-		return raw, nil
+	class := getStr(p, mapi.PrMessageClass)
+	if classMethod(class) == "" {
+		if raw, ok := storedICal(p); ok {
+			return raw, nil
+		}
 	}
 
-	named, err := namedTags(opt, false)
+	named, err := resolveFields(opt, exportFields, false)
 	if err != nil {
 		return nil, err
 	}
@@ -33,40 +32,15 @@ func Export(msg *oxcmail.Message, opt Options) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	// A tentative response flagged as a counter proposal is a COUNTER carrying the
-	// proposed span ([MS-OXCICAL] METHOD table, DTSTART, DTEND).
-	counter := partstat == "TENTATIVE" && namedBool(p, named, mapi.NameAppointmentCounterProposal)
-
-	b := &builder{}
-	b.add("BEGIN:VCALENDAR")
-	b.add("VERSION:2.0")
-	b.add("PRODID:-//hermEX//CalDAV//EN")
-	switch {
-	case counter:
-		b.add("METHOD:COUNTER")
-	case partstat != "":
-		b.add("METHOD:REPLY")
+	e := newEventExport(msg, named, uidTag, class)
+	if raw, ok := e.verbatimMeeting(); ok {
+		return raw, nil
 	}
-	b.add("BEGIN:VEVENT")
-	b.line("UID", eventUID(p, uidTag))
-	exportSchedule(b, p, named, counter)
-	exportClassification(b, p, named)
-	exportAlarm(b, p, named)
-	exportIdentity(b, msg, partstat)
-	b.add("END:VEVENT")
-	b.add("END:VCALENDAR")
-	return b.buf.Bytes(), nil
+	return e.render(), nil
 }
 
-// verbatimICal returns the iCalendar a recurring event preserved unchanged, but
-// only when rendering the appointment itself. A response synthesizes a REPLY;
-// returning the preserved REQUEST verbatim would send the invitation back to the
-// organizer instead of the attendee's reply.
-func verbatimICal(p *mapi.PropertyValues, partstat string) ([]byte, bool) {
-	if partstat != "" {
-		return nil, false
-	}
+// storedICal returns the iCalendar a recurring event preserved unchanged.
+func storedICal(p *mapi.PropertyValues) ([]byte, bool) {
 	v, ok := p.Get(mapi.PrIcalOriginal)
 	if !ok {
 		return nil, false
@@ -78,42 +52,35 @@ func verbatimICal(p *mapi.PropertyValues, partstat string) ([]byte, bool) {
 	return raw, true
 }
 
-// eventUID returns the stored iCalendar UID, or a constant fallback so the VEVENT
-// always carries the property RFC 5545 §3.8.4.7 requires.
-func eventUID(p *mapi.PropertyValues, uidTag mapi.PropTag) string {
-	if uidTag == 0 {
-		return "hermex-event"
+// classMethod maps a meeting message class to the iTIP METHOD it exports as
+// ([MS-OXCICAL] METHOD table): REQUEST, CANCEL, or REPLY for any response. A
+// counter proposal is a response too, told apart by a property (see
+// newEventExport). Every other class is a plain calendar object and exports none.
+func classMethod(class string) string {
+	switch {
+	case responsePartStat(class) != "":
+		return "REPLY"
+	case class == "IPM.Schedule.Meeting.Request":
+		return "REQUEST"
+	case class == "IPM.Schedule.Meeting.Canceled":
+		return "CANCEL"
 	}
-	if uid := getStr(p, uidTag); uid != "" {
+	return ""
+}
+
+// eventUID returns the stored iCalendar UID, else the one the MAPI global object id
+// exports as, else a constant fallback so the VEVENT always carries the property
+// RFC 5545 §3.8.4.7 requires.
+func eventUID(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag, uidTag mapi.PropTag) string {
+	if uidTag != 0 {
+		if uid := getStr(p, uidTag); uid != "" {
+			return uid
+		}
+	}
+	if uid := globalObjectUID(namedBytes(p, named, mapi.NameGlobalObjectId)); uid != "" {
 		return uid
 	}
 	return "hermex-event"
-}
-
-// exportSchedule emits the event's stamp, text and time span. DTSTAMP is required
-// (RFC 5545 §3.8.7.2); the start is a stable, deterministic stamp for a synthesized
-// event. A counter proposal's span is the one it proposes.
-func exportSchedule(b *builder, p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag, counter bool) {
-	allDay := namedBool(p, named, mapi.NameAppointmentSubType)
-	startName, endName := mapi.NameAppointmentStartWhole, mapi.NameAppointmentEndWhole
-	if counter {
-		startName, endName = mapi.NameAppointmentProposedStartWhole, mapi.NameAppointmentProposedEndWhole
-	}
-	start, hasStart := namedTime(p, named, startName)
-	end, hasEnd := namedTime(p, named, endName)
-
-	if hasStart {
-		b.add("DTSTAMP:" + formatICalUTC(start))
-	}
-	addLine(b, "SUMMARY", getStr(p, mapi.PrSubject))
-	addLine(b, "DESCRIPTION", getStr(p, mapi.PrBody))
-	addLine(b, "LOCATION", namedStr(p, named, mapi.NameAppointmentLocation))
-	if hasStart {
-		b.add(dtLine("DTSTART", start, allDay))
-	}
-	if hasEnd {
-		b.add(dtLine("DTEND", end, allDay))
-	}
 }
 
 // exportClassification emits how the event is filed: whether it takes time, how

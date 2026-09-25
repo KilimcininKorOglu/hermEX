@@ -29,6 +29,17 @@ func WithMethod(ical []byte, method string) ([]byte, bool) {
 	return b.buf.Bytes(), true
 }
 
+// Method returns the iTIP METHOD an iCalendar object carries, upper-cased, or ""
+// when it carries none or does not parse. A mail that carries the object states the
+// same method on its text/calendar part.
+func Method(ical []byte) string {
+	cal, err := parseICal(ical)
+	if err != nil {
+		return ""
+	}
+	return methodOf(cal)
+}
+
 // WithUID returns the object with every VEVENT's UID set to uid, for a meeting its
 // attendees already hold under a different identity than the stored one. ok is
 // false when the object does not parse.

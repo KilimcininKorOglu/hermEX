@@ -168,10 +168,16 @@ var (
 	// is the model-layer shape; this is the wire blob for a MAPI client.
 	NameTaskRecurrence = PropertyName{Kind: MnidID, GUID: PsetidTask, LID: 0x8416}
 
-	// Meeting named properties (PSETID_Meeting). The global object id carries the
-	// iCalendar UID; v1 keeps the UID as a string property instead (the wrapped
-	// binary encoding is deferred), so this is reserved for that later work.
+	// Meeting named properties (PSETID_Meeting). The global object id is the
+	// identity a MAPI client (Outlook) gives a meeting and the iCalendar UID export
+	// derives from it ([MS-OXCICAL] UID); the stores this server writes keep the UID
+	// as a string property instead (NameICalUID). Bytes 16 to 19 name the instance
+	// date of a message about one occurrence.
 	NameGlobalObjectId = PropertyName{Kind: MnidID, GUID: PsetidMeeting, LID: 0x0003} // PtBinary
+	// NameExceptionReplaceTime (PidLidExceptionReplaceTime, PSETID_Appointment/0x8228)
+	// is the UTC original start of the occurrence an exception replaces, the value an
+	// iCalendar RECURRENCE-ID carries.
+	NameExceptionReplaceTime = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8228} // PtSysTime
 	// NameMeetingType (PidLidMeetingType, MS-OXOCAL 2.2.6.5) says what a meeting
 	// message is to its meeting; mtgOutOfDate marks one a newer message superseded.
 	NameMeetingType = PropertyName{Kind: MnidID, GUID: PsetidMeeting, LID: 0x0026} // PtLong

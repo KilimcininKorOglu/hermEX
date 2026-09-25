@@ -70,21 +70,6 @@ func isScheduleMeeting(class string) bool {
 	return strings.HasPrefix(class, "IPM.Schedule.Meeting")
 }
 
-// itipMethodForClass maps a meeting message class to the iTIP METHOD its served
-// iCalendar must carry (RFC 5546): a request is REQUEST, a cancellation CANCEL, a
-// response REPLY. Without a METHOD a client rejects the object as a non-scheduling
-// resource.
-func itipMethodForClass(class string) string {
-	switch {
-	case strings.HasPrefix(class, "IPM.Schedule.Meeting.Resp"):
-		return "REPLY"
-	case class == "IPM.Schedule.Meeting.Canceled":
-		return "CANCEL"
-	default:
-		return "REQUEST"
-	}
-}
-
 // findInboxItem returns the member whose resource name matches, scanning the current
 // view so resolution and membership are checked together (the inbox URL space cannot
 // reach a message that is not a delivered meeting request).
@@ -98,7 +83,8 @@ func findInboxItem(items []inboxItem, name string) (inboxItem, bool) {
 }
 
 // handleScheduleInboxGet serves a scheduling Inbox member as its iTIP iCalendar,
-// re-exported from the stored meeting message with the METHOD its class implies.
+// re-exported from the stored meeting message; the export writes the METHOD its
+// class implies (a COUNTER for a counter proposal, not a plain REPLY).
 func (s *Server) handleScheduleInboxGet(w http.ResponseWriter, r *http.Request, mailbox string) {
 	_, _, _, name := classify(r.URL.Path)
 	st, err := objectstore.Open(mailbox)
@@ -128,7 +114,6 @@ func (s *Server) handleScheduleInboxGet(w http.ResponseWriter, r *http.Request, 
 		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
-	body := withMethod(string(ics), itipMethodForClass(messageStringProp(msg.Props, mapi.PrMessageClass)))
 	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
 	w.Header().Set("ETag", etag(it.changeNumber))
 	w.Header().Set("Cache-Control", objectCacheControl)
@@ -136,7 +121,9 @@ func (s *Server) handleScheduleInboxGet(w http.ResponseWriter, r *http.Request, 
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	_, _ = w.Write([]byte(body)) // final response body; a failed write means the client is gone
+	// Final response body; a write failure means the client is gone, with no recourse.
+	// #nosec G705 -- the daemon stamps X-Content-Type-Options: nosniff and the Content-Type is set explicitly, so the bytes are never interpreted as a document
+	_, _ = w.Write(ics)
 }
 
 // handleScheduleInboxDelete removes a scheduling Inbox member, soft-deleting the
@@ -169,14 +156,4 @@ func (s *Server) handleScheduleInboxDelete(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// messageStringProp returns a string-valued property of a message, or "".
-func messageStringProp(p mapi.PropertyValues, tag mapi.PropTag) string {
-	if v, ok := p.Get(tag); ok {
-		if s, ok := v.(string); ok {
-			return s
-		}
-	}
-	return ""
 }

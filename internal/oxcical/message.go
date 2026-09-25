@@ -74,16 +74,22 @@ var appointmentNamed = []namedField{
 // written maps to nothing and is absent from the result. The returned map keys are
 // PropertyNames; callers look up the tags they need.
 func namedTags(opt Options, create bool) (map[mapi.PropertyName]mapi.PropTag, error) {
-	names := make([]mapi.PropertyName, len(appointmentNamed))
-	for i, f := range appointmentNamed {
+	return resolveFields(opt, appointmentNamed, create)
+}
+
+// resolveFields resolves a set of named fields to full store proptags, keyed by
+// PropertyName; a name the store has no id for is absent from the result.
+func resolveFields(opt Options, fields []namedField, create bool) (map[mapi.PropertyName]mapi.PropTag, error) {
+	names := make([]mapi.PropertyName, len(fields))
+	for i, f := range fields {
 		names[i] = f.name
 	}
 	ids, err := opt.Resolver(create, names)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[mapi.PropertyName]mapi.PropTag, len(appointmentNamed))
-	for i, f := range appointmentNamed {
+	out := make(map[mapi.PropertyName]mapi.PropTag, len(fields))
+	for i, f := range fields {
 		if ids[i] != 0 {
 			out[f.name] = mapi.PropTag(uint32(ids[i])<<16 | uint32(f.typ))
 		}
