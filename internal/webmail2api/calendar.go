@@ -1,6 +1,7 @@
 package webmail2api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/mail"
@@ -693,35 +694,53 @@ func (s *Server) handleUpdateEvent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	id, err := strconv.ParseInt(r.PathValue("uid"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
 	st, _, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
 	defer st.Close()
-	// Delete by message id (folder-agnostic) then re-create in the target calendar,
-	// so editing an event - including moving it to another calendar - just works.
-	if old, err := strconv.ParseInt(r.PathValue("uid"), 10, 64); err == nil {
-		_ = st.DeleteObject(old)
+	icalUID, err := updateEventInPlace(st, id, in)
+	if errors.Is(err, errNoSuchEvent) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such event"})
+		return
 	}
-	uid, err := storeEvent(st, in, calendarFolderID(in.CalendarID))
 	if err != nil {
+		logError("calendar-update", err, logging.Fields{"calendar": in.CalendarID})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save event"})
 		return
 	}
-	in.UID = uid
 	// An organizer editing a meeting can resend the METHOD:REQUEST so invitees see
-	// the new time/details (SendInvite on update). Best-effort like the create path.
+	// the new time and details, under the meeting's own UID so their clients update
+	// the meeting they hold. Best-effort like the create path.
 	if in.SendInvite && len(in.Attendees) > 0 {
-		if c, ok := s.session(r); ok {
-			in.UID = uidOrGenerated(in.UID)
-			if raw, recipients, berr := buildMeetingRequest(c.Email, in); berr == nil {
-				if _, derr := mta.DeliverAndRelay(s.accounts, s.spool, c.Email, recipients, raw, time.Now()); derr == nil {
-					fileSentCopy(st, raw, c.Email, "meeting-update")
-				}
-			}
-		}
+		in.UID = icalUID
+		s.resendInvite(r, st, in)
 	}
+	in.UID = strconv.FormatInt(id, 10)
 	writeJSON(w, http.StatusOK, in)
+}
+
+// resendInvite emails the updated METHOD:REQUEST to the attendees and files the
+// Sent copy.
+func (s *Server) resendInvite(r *http.Request, st *objectstore.Store, in eventJSON) {
+	c, ok := s.session(r)
+	if !ok {
+		return
+	}
+	raw, recipients, err := buildMeetingRequest(c.Email, in)
+	if err != nil {
+		return
+	}
+	if _, err := mta.DeliverAndRelay(s.accounts, s.spool, c.Email, recipients, raw, time.Now()); err != nil {
+		logError("send-meeting-update", err, logging.Fields{"user": c.Email})
+		return
+	}
+	fileSentCopy(st, raw, c.Email, "meeting-update")
 }
 
 // handleExportEvent streams a single calendar event as an iCalendar (.ics)
@@ -1125,16 +1144,10 @@ func storeEvent(st *objectstore.Store, e eventJSON, folderID int64) (string, err
 	if err != nil {
 		return "", err
 	}
-	// BusyStatus is set directly as a named prop because the iCal TRANSP/STATUS
-	// path oxcical imports from cannot express all four values (oof has no iCal
-	// mapping); the SPA's choice is authoritative, so override the import default.
-	if e.BusyStatus != nil && fitsMAPILong(*e.BusyStatus) {
-		if tag, err := busyStatusTag(st, true); err == nil && tag != 0 {
-			var props mapi.PropertyValues
-			// #nosec G115 -- the fitsMAPILong guard on the same line refuses a value the property cannot carry
-			props.Set(tag, int32(*e.BusyStatus))
-			_ = st.SetMessageProperties(id, props)
-		}
+	// The event is stored; a busy status that fails to land must not report the
+	// create as failed, or a retry stores it twice.
+	if err := applyBusyStatus(st, id, e); err != nil {
+		st.LogSwallowedError("calendar.busy_status", err)
 	}
 	// Categories ride the shared PidNameKeywords named prop (the same list every
 	// protocol reads), set directly rather than through the iCal CATEGORIES path
