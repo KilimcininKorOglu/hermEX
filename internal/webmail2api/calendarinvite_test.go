@@ -244,3 +244,39 @@ func TestSeriesUpdateAdvancesTheRevision(t *testing.T) {
 	}
 	wantContains(t, "second resend", lastOf(t, folderMail(t, bob, int64(mapi.PrivateFIDInbox)), 3), "SEQUENCE:2")
 }
+
+// seriesBody is a daily three-instance meeting alice organizes with bob.
+const seriesBody = `{"summary":"Standup","start":"2026-09-07T06:00:00Z","end":"2026-09-07T06:30:00Z",` +
+	`"recurrence":"FREQ=DAILY;COUNT=3","attendees":["bob@hermex.test"],"sendInvite":true}`
+
+// TestOccurrenceDeleteCancelsThatInstance deletes the second instance of a series
+// alice organizes. It used to change alice's calendar and tell nobody, so bob kept
+// attending an instance that no longer took place.
+func TestOccurrenceDeleteCancelsThatInstance(t *testing.T) {
+	do, alice, bob := meetingHarness(t)
+	id := createEvent(t, do, seriesBody)
+	wantStatus(t, "delete occurrence", do(http.MethodDelete, occurrencePath(id)+"?at=2026-09-08T06:00:00Z", ""), http.StatusOK)
+
+	cancel := lastOf(t, folderMail(t, bob, int64(mapi.PrivateFIDInbox)), 2)
+	for _, want := range []string{"METHOD:CANCEL", "UID:" + storedMeetingUID(t, alice, id), "RECURRENCE-ID:20260908T060000Z",
+		"STATUS:CANCELLED", "SEQUENCE:1"} {
+		wantContains(t, "occurrence cancellation", cancel, want)
+	}
+	if strings.Contains(cancel, "RRULE") {
+		t.Errorf("the occurrence cancellation carries the series rule, so it reads as cancelling the whole series:\n%s", cancel)
+	}
+	st := openMailbox(t, alice)
+	msg, err := st.OpenMessage(id)
+	mustNoErr(t, "open alice's series", err)
+	wantEq(t, "alice's revision", storedSequence(st, msg.Props), 1)
+}
+
+// TestAttendeeOccurrenceDeleteSendsNothing deletes an instance of a series someone
+// else organizes: only the attendee's own copy changes.
+func TestAttendeeOccurrenceDeleteSendsNothing(t *testing.T) {
+	do, alice, bob := meetingHarness(t)
+	id := seedEvent(t, alice, eventJSON{Summary: "Theirs", Start: "2026-09-07T06:00:00Z", End: "2026-09-07T06:30:00Z",
+		Recurrence: "FREQ=DAILY;COUNT=3", Attendees: []string{"alice@hermex.test", "bob@hermex.test"}}, "carol@hermex.test")
+	wantStatus(t, "delete occurrence", do(http.MethodDelete, occurrencePath(id)+"?at=2026-09-08T06:00:00Z", ""), http.StatusOK)
+	wantEq(t, "bob's inbox", len(folderMail(t, bob, int64(mapi.PrivateFIDInbox))), 0)
+}
