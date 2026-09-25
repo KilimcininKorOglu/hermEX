@@ -38,7 +38,18 @@ func (s *Store) indexMessage(folderID, messageID int64, mid string, msg *oxcmail
 		return 0, err
 	}
 	defer tx.Rollback()
+	uid, err := s.indexMessageTx(tx, folderID, messageID, mid, msg, wireSize, received, flags)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return uid, nil
+}
 
+// indexMessageTx writes indexMessage's rows within the caller's index transaction.
+func (s *Store) indexMessageTx(tx *sql.Tx, folderID, messageID int64, mid string, msg *oxcmail.Message, wireSize int64, received time.Time, flags int64) (int64, error) {
 	if err := s.ensureIndexFolder(tx, folderID); err != nil {
 		return 0, err
 	}
@@ -79,9 +90,6 @@ func (s *Store) indexMessage(folderID, messageID int64, mid string, msg *oxcmail
 	if _, err := tx.Exec(
 		`INSERT INTO mapping (message_id, mid_string, flag_string) VALUES (?, ?, NULL)`,
 		messageID, mid); err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 	return uid, nil

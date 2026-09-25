@@ -63,6 +63,16 @@ func (s *Store) recordVanishedAndDrop(messageID int64) error {
 	if err != nil {
 		return err
 	}
+	if err := vanishIndexRow(tx, fid, uid, messageID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// vanishIndexRow records the expunge of a message's UID in the QRESYNC ledger with
+// a fresh modseq and drops its index and mapping rows, within the caller's index
+// transaction.
+func vanishIndexRow(tx *sql.Tx, fid, uid, messageID int64) error {
 	ms, err := nextModSeq(tx, fid)
 	if err != nil {
 		return err
@@ -76,10 +86,8 @@ func (s *Store) recordVanishedAndDrop(messageID int64) error {
 	if _, err := tx.Exec(`DELETE FROM messages WHERE message_id=?`, messageID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM mapping WHERE message_id=?`, messageID); err != nil {
-		return err
-	}
-	return tx.Commit()
+	_, err = tx.Exec(`DELETE FROM mapping WHERE message_id=?`, messageID)
+	return err
 }
 
 // VanishedSince returns the UIDs expunged from a folder with a vanish-modseq greater
