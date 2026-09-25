@@ -1028,10 +1028,17 @@ export function ComposePage() {
     })
   }
 
+  // The interval is armed once and calls the autosave of the latest render. An
+  // interval re-armed on every render restarts its minute on each keystroke, so
+  // a user who kept typing was never autosaved at all.
+  const autoSaveRef = useRef<() => void>(() => undefined)
   useEffect(() => {
-    const id = window.setInterval(autoSaveDraft, 60000)
-    return () => window.clearInterval(id)
+    autoSaveRef.current = () => void autoSaveDraft()
   })
+  useEffect(() => {
+    const id = window.setInterval(() => autoSaveRef.current(), 60000)
+    return () => window.clearInterval(id)
+  }, [])
 
   const handleDiscard = () => {
     if (subject || body || to.length > 0) {
