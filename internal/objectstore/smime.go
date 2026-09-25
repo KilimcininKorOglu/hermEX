@@ -14,19 +14,25 @@ import (
 // property, mirroring how webmail settings are stored, no bespoke table.
 type SmimeIdentity struct {
 	// Mode is "server" (the encrypted P12 below holds the key, the server signs
-	// and decrypts) or "browser" (only Cert is set; the private key lives in the
-	// user's browser and the server never holds it).
+	// and decrypts) or "browser" (the private key is used only in the user's
+	// browser and the server can never open it).
 	Mode string
 	P12  []byte
 	Cert []byte
+	// Vault is a browser-mode identity sealed in the browser under the user's
+	// password: the envelope the browser wrote, which the server stores and
+	// returns to its owner but holds no key to open. Empty for a browser-mode
+	// identity whose key was kept in one browser only.
+	Vault []byte
 }
 
 // identityBlob is the JSON shape persisted in PrSmimeIdentity; json encodes
 // []byte fields as base64.
 type identityBlob struct {
-	Mode string `json:"mode,omitempty"`
-	P12  []byte `json:"p12"`
-	Cert []byte `json:"cert"`
+	Mode  string `json:"mode,omitempty"`
+	P12   []byte `json:"p12"`
+	Cert  []byte `json:"cert"`
+	Vault []byte `json:"vault,omitempty"`
 }
 
 // SetSmimeIdentity stores the user's S/MIME identity, replacing any previous one.
@@ -65,7 +71,7 @@ func (s *Store) GetSmimeIdentity() (id SmimeIdentity, ok bool, err error) {
 			mode = "browser"
 		}
 	}
-	return SmimeIdentity{Mode: mode, P12: b.P12, Cert: b.Cert}, true, nil
+	return SmimeIdentity{Mode: mode, P12: b.P12, Cert: b.Cert, Vault: b.Vault}, true, nil
 }
 
 // ClearSmimeIdentity removes the stored S/MIME identity.

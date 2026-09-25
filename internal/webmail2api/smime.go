@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"net/http"
 	"strings"
@@ -103,12 +104,14 @@ func (s *Server) handleGetSmimeCert(w http.ResponseWriter, r *http.Request) {
 	}
 	info := certInfo(cert)
 	info["mode"] = id.Mode
+	info["hasVault"] = len(id.Vault) > 0
 	writeJSON(w, http.StatusOK, info)
 }
 
 // handleUploadSmimeCert publishes the caller's S/MIME PUBLIC certificate (PEM or
-// DER). The matching private key stays in the browser and is never sent; a
-// request carrying a private key is rejected.
+// DER). In browser mode the matching private key is never sent in the clear: it
+// stays in the browser, or arrives sealed in a vault the server cannot open. A
+// request carrying a raw private key is rejected.
 func (s *Server) handleUploadSmimeCert(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.session(r)
 	if !ok {
@@ -116,11 +119,12 @@ func (s *Server) handleUploadSmimeCert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Mode       string `json:"mode"`       // "server" stores the key here; otherwise browser mode
-		Cert       string `json:"cert"`       // browser mode: the PUBLIC certificate (PEM/DER)
-		Key        string `json:"key"`        // never accepted: a raw key must not be sent
-		P12        string `json:"p12"`        // server mode: the PKCS#12, base64
-		Passphrase string `json:"passphrase"` // server mode: the .p12 password
+		Mode       string          `json:"mode"`       // "server" stores the key here; otherwise browser mode
+		Cert       string          `json:"cert"`       // browser mode: the PUBLIC certificate (PEM/DER)
+		Vault      json.RawMessage `json:"vault"`      // browser mode: the identity sealed under the user's password
+		Key        string          `json:"key"`        // never accepted: a raw key must not be sent
+		P12        string          `json:"p12"`        // server mode: the PKCS#12, base64
+		Passphrase string          `json:"passphrase"` // server mode: the .p12 password
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
@@ -141,9 +145,13 @@ func (s *Server) handleUploadSmimeCert(w http.ResponseWriter, r *http.Request) {
 		s.storeServerIdentity(w, st, req.P12, req.Passphrase)
 		return
 	}
+	storeBrowserIdentity(w, st, req.Cert, req.Vault)
+}
 
-	// Browser mode: publish only the public certificate; the key stays in the browser.
-	der, err := parseCertDER([]byte(req.Cert))
+// storeBrowserIdentity publishes the public certificate and, when the browser
+// sent one, stores the sealed vault beside it. It answers the client itself.
+func storeBrowserIdentity(w http.ResponseWriter, st *objectstore.Store, certText string, vault []byte) {
+	der, err := parseCertDER([]byte(certText))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid certificate"})
 		return
@@ -153,7 +161,14 @@ func (s *Server) handleUploadSmimeCert(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid certificate"})
 		return
 	}
-	if err := st.SetSmimeIdentity(objectstore.SmimeIdentity{Mode: "browser", Cert: cert.Raw}); err != nil {
+	var sealed []byte
+	if len(vault) > 0 {
+		if sealed, err = validVault(vault); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid key vault"})
+			return
+		}
+	}
+	if err := st.SetSmimeIdentity(objectstore.SmimeIdentity{Mode: "browser", Cert: cert.Raw, Vault: sealed}); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not publish the certificate"})
 		return
 	}

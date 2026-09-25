@@ -33,6 +33,19 @@ func TestSmimeIdentityRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSmimeVaultRoundTrip checks that a browser-mode identity keeps the sealed
+// vault stored beside its certificate.
+func TestSmimeVaultRoundTrip(t *testing.T) {
+	s := openSeededStore(t)
+	vaulted := SmimeIdentity{Mode: "browser", Cert: []byte("cert"), Vault: []byte(`{"v":1}`)}
+	mustNoErr(t, "store a vaulted identity", s.SetSmimeIdentity(vaulted))
+	got, _, err := s.GetSmimeIdentity()
+	mustNoErr(t, "read the vaulted identity", err)
+	if got.Mode != "browser" || !bytes.Equal(got.Vault, vaulted.Vault) {
+		t.Errorf("vaulted identity = %+v, want browser mode with its vault", got)
+	}
+}
+
 // TestRecipientCertStore checks the address→certificate store: put, case-
 // insensitive get, list, and delete.
 func TestRecipientCertStore(t *testing.T) {

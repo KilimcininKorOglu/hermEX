@@ -266,6 +266,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/smime/certificate", s.handleGetSmimeCert)
 	mux.HandleFunc("POST /api/v1/smime/certificate", s.handleUploadSmimeCert)
 	mux.HandleFunc("DELETE /api/v1/smime/certificate", s.handleDeleteSmimeCert)
+	mux.HandleFunc("GET /api/v1/smime/vault", s.handleGetSmimeVault)
 	mux.HandleFunc("GET /api/v1/smime/recipient", s.handleRecipientCert)
 	mux.HandleFunc("POST /api/v1/smime/verify-signer", s.handleVerifySmimeSigner)
 	mux.HandleFunc("GET /api/v1/branding", s.handleBranding)
