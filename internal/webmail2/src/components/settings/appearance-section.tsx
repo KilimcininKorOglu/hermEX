@@ -4,11 +4,10 @@ import { useTheme } from "@/components/theme-provider"
 import { useI18n } from "@/hooks/useI18n"
 import type { DisplaySettings } from "@/hooks/useDisplaySettings"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { detectTimeZone, listTimeZones } from "@/utils/timezone"
 import { CalendarControls } from "./calendar-controls"
-import { CheckboxField, FieldRow, SelectField, SettingRow, SettingSection } from "./setting-layout"
+import { CheckboxField, FieldRow, SelectField, SettingRow, SettingSection, TextDraftInput } from "./setting-layout"
 
 type Theme = "light" | "dark" | "system"
 
@@ -198,9 +197,10 @@ function LayoutFields({ display }: { display: DisplaySettings }) {
       />
       <Separator />
       <FieldRow title={t("settings.appearance.autoCc")} description={t("settings.appearance.autoCcDescription")}>
-        <Input
+        <TextDraftInput
+          key={appearance.autoCc}
           value={appearance.autoCc}
-          onChange={(e) => saveAppearance({ autoCc: e.target.value })}
+          onCommit={(autoCc) => saveAppearance({ autoCc })}
           placeholder="cc@example.test, boss@example.test"
           className="max-w-[16rem]"
         />

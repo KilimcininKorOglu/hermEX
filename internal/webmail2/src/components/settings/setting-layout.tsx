@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { clampPageSize, MAX_PAGE_SIZE, MIN_PAGE_SIZE } from "@/utils/inboxNavigation"
 
@@ -164,6 +165,37 @@ export function PageSizeInput({ value, onCommit }: { value: number; onCommit: (n
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => { if (e.key === "Enter") commit() }}
+    />
+  )
+}
+
+// TextDraftInput edits a text setting and saves it only when the field is left
+// or Enter is pressed, so typing a value sends one save instead of one per
+// keystroke, which could also land out of order and store a partial value. The
+// parent keys it by the stored value, so a stored change starts a fresh draft.
+export function TextDraftInput({
+  value,
+  onCommit,
+  placeholder,
+  className,
+}: {
+  value: string
+  onCommit: (value: string) => void
+  placeholder?: string
+  className?: string
+}) {
+  const [draft, setDraft] = useState(value)
+  const commit = () => {
+    if (draft !== value) onCommit(draft)
+  }
+  return (
+    <Input
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === "Enter") commit() }}
+      placeholder={placeholder}
+      className={className}
     />
   )
 }
