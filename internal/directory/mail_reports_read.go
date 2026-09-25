@@ -124,14 +124,15 @@ type ReportSender struct {
 	SenderDKIMDomains string
 }
 
-// senderColumns selects the ReportSender columns of the report table aliased
-// alias, in scanTargets order.
-func senderColumns(alias string) string {
-	return alias + ".via, " + alias + ".mail_from, " + alias + ".remote_addr, " +
-		alias + ".sender_dkim, " + alias + ".sender_dkim_domains"
-}
+// The ReportSender columns in scanTargets order, one list per table alias the
+// queries use. They are constants so every query stays a concatenation of
+// literals, with no value that could reach the SQL text.
+const (
+	senderColumnsP = "p.via, p.mail_from, p.remote_addr, p.sender_dkim, p.sender_dkim_domains"
+	senderColumnsF = "f.via, f.mail_from, f.remote_addr, f.sender_dkim, f.sender_dkim_domains"
+)
 
-// scanTargets returns the ReportSender fields in senderColumns order.
+// scanTargets returns the ReportSender fields in senderColumnsP/F order.
 func (s *ReportSender) scanTargets() []any {
 	return []any{&s.Via, &s.MailFrom, &s.RemoteAddr, &s.SenderDKIM, &s.SenderDKIMDomains}
 }
@@ -168,7 +169,7 @@ func (d *SQLDirectory) GetDMARCReport(id int64) (DMARCReport, bool, error) {
 	var r DMARCReport
 	err := d.db.QueryRow(
 		`SELECT p.id, p.domain_id, COALESCE(dm.domainname, ''), p.org_name, p.report_id, p.date_begin, p.date_end,
-		   p.received_at, p.reporter_email, p.policy_p, p.policy_sp, p.policy_pct, p.adkim, p.aspf, `+senderColumns("p")+`
+		   p.received_at, p.reporter_email, p.policy_p, p.policy_sp, p.policy_pct, p.adkim, p.aspf, `+senderColumnsP+`
 		 FROM dmarc_reports p LEFT JOIN domains dm ON dm.id = p.domain_id WHERE p.id = ?`, id).Scan(
 		append([]any{&r.ID, &r.DomainID, &r.Domain, &r.OrgName, &r.ReportID, &r.Begin, &r.End, &r.ReceivedAt,
 			&r.ReporterEmail, &r.PolicyP, &r.PolicySP, &r.PolicyPct, &r.ADKIM, &r.ASPF}, r.scanTargets()...)...)
@@ -235,7 +236,7 @@ func (d *SQLDirectory) GetTLSReport(id int64) (TLSReport, bool, error) {
 	var r TLSReport
 	err := d.db.QueryRow(
 		`SELECT p.id, p.domain_id, COALESCE(dm.domainname, ''), p.org_name, p.report_id, p.date_begin, p.date_end,
-		   p.received_at, p.contact, `+senderColumns("p")+`
+		   p.received_at, p.contact, `+senderColumnsP+`
 		 FROM tlsrpt_reports p LEFT JOIN domains dm ON dm.id = p.domain_id WHERE p.id = ?`, id).Scan(
 		append([]any{&r.ID, &r.DomainID, &r.Domain, &r.OrgName, &r.ReportID, &r.Begin, &r.End, &r.ReceivedAt,
 			&r.Contact}, r.scanTargets()...)...)
@@ -298,9 +299,9 @@ type DMARCFailure struct {
 }
 
 // failureColumns selects a failure report's columns in scanFailure order.
-var failureColumns = `f.id, f.domain_id, COALESCE(dm.domainname, ''), f.received_at, f.arrival_date, f.source_ip,
+const failureColumns = `f.id, f.domain_id, COALESCE(dm.domainname, ''), f.received_at, f.arrival_date, f.source_ip,
 	   f.auth_failure, f.original_mail_from, f.original_rcpt_to, f.dkim_domain, f.delivery_result,
-	   f.authentication_results, f.original_headers, ` + senderColumns("f")
+	   f.authentication_results, f.original_headers, ` + senderColumnsF
 
 func scanFailure(s rowScanner) (DMARCFailure, error) {
 	var f DMARCFailure
