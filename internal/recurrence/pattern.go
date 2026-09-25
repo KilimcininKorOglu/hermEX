@@ -311,6 +311,12 @@ var rruleFreqs = map[uint16]func(Pattern, *rrule){
 
 // toRRule maps the parsed Pattern back to an RRULE string.
 func (p Pattern) toRRule() (string, bool) {
+	return p.rrule(time.Time{})
+}
+
+// rrule maps the Pattern to an RRULE string. A non-zero until replaces the UNTIL an
+// end-by-date pattern would otherwise take from its EndDate.
+func (p Pattern) rrule(until time.Time) (string, bool) {
 	fill, known := rruleFreqs[p.RecurFrequency]
 	if !known {
 		return "", false
@@ -322,6 +328,9 @@ func (p Pattern) toRRule() (string, bool) {
 	}
 	if !p.applyEndRange(&r) {
 		return "", false
+	}
+	if p.EndType == EndAfterDate && !until.IsZero() {
+		r.Until = until
 	}
 	return rruleString(r), true
 }
