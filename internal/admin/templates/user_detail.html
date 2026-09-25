@@ -184,6 +184,8 @@
 <p class="hint">Automatic processing requires "Accept conflict-free meeting requests". With it unchecked the mailbox does no automatic processing, so the two decline options have no effect on their own.</p>
 <label class="check"><input type="checkbox" name="removerequest"{{if .Meeting.RemoveRequestOnResponse}} checked{{end}}> Move the request mail to Deleted Items once it has been answered</label>
 <p class="hint">This applies to every response, whether a person made it or automatic processing did. It is independent of the three options above.</p>
+<label class="check"><input type="checkbox" name="processcancellations"{{if not .Meeting.LeaveCancellationsUnprocessed}} checked{{end}}> Mark a meeting cancelled in the calendar when its cancellation arrives</label>
+<p class="hint">The meeting stays in the calendar, marked cancelled and shown as free, until the user removes it. Only a cancellation from the meeting's organizer that is not older than the calendar's copy is applied.</p>
 <button type="submit">Save meeting settings</button>
 </form>
 

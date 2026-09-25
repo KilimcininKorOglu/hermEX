@@ -77,7 +77,8 @@ func TestUIUserDetailShowsMeeting(t *testing.T) {
 	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
-	for _, want := range []string{"Meeting requests", `name="autoaccept" checked`, `name="declinerecurring"`, `name="removerequest"`} {
+	for _, want := range []string{"Meeting requests", `name="autoaccept" checked`, `name="declinerecurring"`, `name="removerequest"`,
+		`name="processcancellations" checked`} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("detail page meeting section missing %q", want)
 		}
@@ -103,6 +104,7 @@ func TestUIUserMeeting(t *testing.T) {
 	}
 	want := objectstore.MeetingConfig{
 		AutoAccept: true, DeclineRecurring: false, DeclineConflict: true, RemoveRequestOnResponse: true,
+		LeaveCancellationsUnprocessed: true, // processcancellations omitted, so unchecked
 	}
 	if store.setMeetingConfig != want {
 		t.Errorf("stored meeting = %+v, want %+v", store.setMeetingConfig, want)
@@ -110,5 +112,24 @@ func TestUIUserMeeting(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "Saved") {
 		t.Errorf("ui meeting save did not report success:\n%s", body)
+	}
+}
+
+// TestUIUserMeetingProcessesCancellations proves a checked cancellation box stores
+// the default, processing cancellations, and the JSON API carries the setting.
+func TestUIUserMeetingProcessesCancellations(t *testing.T) {
+	store := &fakeStore{}
+	ts := adminServerStore(t, folderUserDir(), store)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/meeting", session, csrf, url.Values{"processcancellations": {"on"}})
+	resp.Body.Close()
+	if store.setMeetingConfig != (objectstore.MeetingConfig{}) {
+		t.Errorf("stored meeting = %+v, want the zero config", store.setMeetingConfig)
+	}
+	put := authedPUT(t, ts, "/admin/users/alice@hermex.test/meeting", session, csrf, `{"leaveCancellationsUnprocessed":true}`)
+	put.Body.Close()
+	if !store.setMeetingConfig.LeaveCancellationsUnprocessed {
+		t.Errorf("JSON PUT stored %+v, want cancellations left unprocessed", store.setMeetingConfig)
 	}
 }

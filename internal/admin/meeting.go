@@ -9,12 +9,15 @@ import (
 
 // meetingPayload is the JSON shape of a mailbox's meeting-request handling
 // configuration: accept conflict-free requests (the master), decline recurring or
-// conflicting ones, and whether answering a request also files it away.
+// conflicting ones, whether answering a request also files it away, and whether
+// delivered cancellations are left for the user instead of applied. Every field
+// defaults to false, so a client that omits one asks for the default behaviour.
 type meetingPayload struct {
-	AutoAccept              bool `json:"autoAccept"`
-	DeclineRecurring        bool `json:"declineRecurring"`
-	DeclineConflict         bool `json:"declineConflict"`
-	RemoveRequestOnResponse bool `json:"removeRequestOnResponse"`
+	AutoAccept                    bool `json:"autoAccept"`
+	DeclineRecurring              bool `json:"declineRecurring"`
+	DeclineConflict               bool `json:"declineConflict"`
+	RemoveRequestOnResponse       bool `json:"removeRequestOnResponse"`
+	LeaveCancellationsUnprocessed bool `json:"leaveCancellationsUnprocessed"`
 }
 
 // handleGetUserMeeting returns a user's automatic meeting-processing settings (system
@@ -29,12 +32,7 @@ func (s *Server) handleGetUserMeeting(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "could not read meeting config", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, meetingPayload{
-		AutoAccept:              cfg.AutoAccept,
-		DeclineRecurring:        cfg.DeclineRecurring,
-		DeclineConflict:         cfg.DeclineConflict,
-		RemoveRequestOnResponse: cfg.RemoveRequestOnResponse,
-	})
+	writeJSON(w, meetingPayload(cfg))
 }
 
 // handleSetUserMeeting replaces a user's automatic meeting-processing settings (system
@@ -49,12 +47,7 @@ func (s *Server) handleSetUserMeeting(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	if err := s.store.SetMeetingConfig(maildir, objectstore.MeetingConfig{
-		AutoAccept:              in.AutoAccept,
-		DeclineRecurring:        in.DeclineRecurring,
-		DeclineConflict:         in.DeclineConflict,
-		RemoveRequestOnResponse: in.RemoveRequestOnResponse,
-	}); err != nil {
+	if err := s.store.SetMeetingConfig(maildir, objectstore.MeetingConfig(in)); err != nil {
 		s.fail(w, "could not set meeting config", err, http.StatusInternalServerError)
 		return
 	}
@@ -80,6 +73,8 @@ func (s *Server) handleUIUserMeeting(w http.ResponseWriter, r *http.Request) {
 			DeclineRecurring:        r.PostFormValue("declinerecurring") != "",
 			DeclineConflict:         r.PostFormValue("declineconflict") != "",
 			RemoveRequestOnResponse: r.PostFormValue("removerequest") != "",
+			// The form asks the positive question, so an unchecked box is the exception.
+			LeaveCancellationsUnprocessed: r.PostFormValue("processcancellations") == "",
 		}
 		if err := s.store.SetMeetingConfig(u.Maildir, cfg); err != nil {
 			data["Error"] = s.notice("Could not save meeting settings.", err)
