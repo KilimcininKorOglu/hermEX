@@ -4,6 +4,8 @@ import (
 	"encoding/xml"
 	"errors"
 	"net/http"
+	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -204,42 +206,61 @@ func applyReadFlag(st *objectstore.Store, id oxews.ItemID, fields []setItemField
 	return nil
 }
 
-// rewriteItem applies the content updates and stores the result in place of the
-// original, returning the new message. The stored form is rebuilt through
-// oxcmail.Export, the one proven outbound path, so an edited draft serializes
-// exactly as a composed one does.
-//
-// The message is replaced rather than patched because a stored message is its
-// serialized bytes; the same delete-then-append the webmail draft autosave uses.
-// The new id is returned to the client in the response, so the client follows
-// the message rather than holding an id that no longer resolves.
+// rewriteItem applies the content updates to the stored message in place and
+// returns its index row. Only the properties the updates changed are written or
+// removed, so every other property and every attachment stays, and the message
+// keeps its id. The recipients are rewritten when an update names a recipient
+// class. The message is then indexed again under a new uid, because an IMAP
+// client treats a uid's content as immutable and would otherwise keep serving
+// the old subject and body; the new uid reaches the client in the response.
 func rewriteItem(st *objectstore.Store, id oxews.ItemID, fields []setItemField) (objectstore.MessageInfo, error) {
 	msg, err := st.OpenMessage(id.MessageID)
 	if err != nil {
 		return objectstore.MessageInfo{}, err
 	}
+	stored := slices.Clone(msg.Props)
 	for _, sf := range fields {
 		applyField(msg, sf)
 	}
 	oxcmail.EnsureMessageID(&msg.Props)
-	raw, err := oxcmail.Export(msg, oxcmail.Options{Resolver: st.GetNamedPropIDs})
-	if err != nil {
+	set, removed := changedProps(stored, msg.Props)
+	if err := st.ModifyMessageProperties(id.MessageID, set, removed...); err != nil {
 		return objectstore.MessageInfo{}, err
 	}
-	flags, date := int64(0), time.Now()
-	if info, err := st.MessageByUID(id.FolderID, id.UID); err == nil {
-		flags, date = info.Flags, info.InternalDate
+	if namesRecipients(fields) {
+		if err := st.ReplaceRecipients(id.MessageID, msg.Recipients); err != nil {
+			return objectstore.MessageInfo{}, err
+		}
 	}
-	// The replacement is filed before the original is dropped, so a failure
-	// between the two leaves a duplicate rather than nothing at all.
-	info, err := st.AppendMessage(id.FolderID, raw, date, flags)
-	if err != nil {
-		return objectstore.MessageInfo{}, err
+	return st.ReindexMessage(id.MessageID)
+}
+
+// changedProps compares a message's properties before and after the updates:
+// set holds each property that is new or holds a new value, removed each tag
+// the updates dropped.
+func changedProps(before, after mapi.PropertyValues) (set mapi.PropertyValues, removed []mapi.PropTag) {
+	for _, pv := range after {
+		if old, ok := before.Get(pv.Tag); !ok || !reflect.DeepEqual(old, pv.Value) {
+			set = append(set, pv)
+		}
 	}
-	if err := st.DeleteMessage(id.FolderID, id.UID); err != nil {
-		return objectstore.MessageInfo{}, err
+	for _, pv := range before {
+		if !after.Has(pv.Tag) {
+			removed = append(removed, pv.Tag)
+		}
 	}
-	return info, nil
+	return set, removed
+}
+
+// namesRecipients reports whether an update replaces a recipient class.
+func namesRecipients(fields []setItemField) bool {
+	for _, sf := range fields {
+		switch sf.FieldURI.URI {
+		case fieldTo, fieldCc, fieldBcc:
+			return true
+		}
+	}
+	return false
 }
 
 // applyField writes one update onto the stored message.

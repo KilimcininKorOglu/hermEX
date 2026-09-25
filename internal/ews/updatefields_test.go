@@ -214,8 +214,8 @@ func TestUpdateItemStillMarksRead(t *testing.T) {
 }
 
 // TestUpdateItemReturnsTheNewItemID keeps the client able to follow the message.
-// The rewrite stores a new message, so the old id no longer resolves and the
-// response has to carry the one that does.
+// The edit indexes the message under a new uid, so the old id no longer resolves
+// and the response has to carry the one that does.
 func TestUpdateItemReturnsTheNewItemID(t *testing.T) {
 	ts, _ := seededWithMessage(t, draftMessage)
 	_, fi := soapPost(t, ts, findItemReq("inbox"), true)
