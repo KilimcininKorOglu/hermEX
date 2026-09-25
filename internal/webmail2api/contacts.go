@@ -221,10 +221,11 @@ func vcardAll(vcf []byte, name string) []string {
 // vcardTypedField extracts a property value whose TYPE parameter matches typeParam
 // (e.g. "CELL" for TEL;TYPE=CELL). An empty typeParam matches the bare property
 // with no TYPE, so the business TEL (no params) is distinct from the mobile/home
-// ones oxvcard emits with TYPE.
+// ones oxvcard emits with TYPE. A value of another type never answers, because
+// the editor writes every field back and would store that value under this
+// type too.
 func vcardTypedField(vcf []byte, name, typeParam string) string {
 	want := strings.ToUpper(typeParam)
-	bare := ""
 	for line := range strings.SplitSeq(string(vcf), "\n") {
 		line = strings.TrimRight(line, "\r")
 		key, val, found := strings.Cut(line, ":")
@@ -246,11 +247,8 @@ func vcardTypedField(vcf []byte, name, typeParam string) string {
 		if want != "" && strings.Contains(strings.ToUpper(params), "TYPE="+want) {
 			return val
 		}
-		if bare == "" {
-			bare = val
-		}
 	}
-	return bare
+	return ""
 }
 
 func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {

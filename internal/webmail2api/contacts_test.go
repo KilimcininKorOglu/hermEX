@@ -66,8 +66,12 @@ func TestContactRichFieldsRoundTrip(t *testing.T) {
 		"homeCountry": c.HomeCountry, "otherStreet": c.OtherStreet, "otherCity": c.OtherCity,
 		"otherPostal": c.OtherPostal, "otherCountry": c.OtherCountry,
 		"imAddress": c.IMAddress, "webPage": c.WebPage,
+		// The contact has no work address, so the work fields stay empty rather
+		// than repeating the home or other address.
+		"workStreet": c.WorkStreet, "workCity": c.WorkCity, "workCountry": c.WorkCountry,
 	}
 	want := map[string]string{
+		"workStreet": "", "workCity": "", "workCountry": "",
 		"name": "Ada Lovelace", "prefix": "Dr.", "firstName": "Ada",
 		"middleName": "Augusta", "lastName": "Lovelace", "suffix": "Jr.",
 		"email": "ada@analytical.test", "email2": "ada@home.test",
@@ -287,4 +291,26 @@ func TestContactExportDistributionList(t *testing.T) {
 		do(http.MethodPost, "/api/v1/contacts", `{"name":"Solo","email":"solo@hermex.test"}`))
 	wantStatus(t, "expand a regular contact",
 		do(http.MethodGet, "/api/v1/contacts/"+solo.Contact.ID+"/expand", ""), http.StatusBadRequest)
+}
+
+// TestVCardTypedFieldIgnoresOtherTypes pins that a typed lookup never answers
+// with a value of another type: a contact with only a mobile number has no
+// business, home or fax number, and one with only a home address has no work
+// or other address.
+func TestVCardTypedFieldIgnoresOtherTypes(t *testing.T) {
+	vcf := []byte("BEGIN:VCARD\r\nVERSION:4.0\r\nTEL;TYPE=CELL:+1 555 0101\r\nADR;TYPE=HOME:;;1 Main;Ankara;;06000;TR\r\nEND:VCARD\r\n")
+	cases := []struct{ name, typ, want string }{
+		{"TEL", "CELL", "+1 555 0101"},
+		{"TEL", "WORK", ""},
+		{"TEL", "HOME", ""},
+		{"TEL", "FAX", ""},
+		{"ADR", "HOME", ";;1 Main;Ankara;;06000;TR"},
+		{"ADR", "WORK", ""},
+		{"ADR", "OTHER", ""},
+	}
+	for _, c := range cases {
+		if got := vcardTypedField(vcf, c.name, c.typ); got != c.want {
+			t.Errorf("%s TYPE=%s = %q, want %q", c.name, c.typ, got, c.want)
+		}
+	}
 }
