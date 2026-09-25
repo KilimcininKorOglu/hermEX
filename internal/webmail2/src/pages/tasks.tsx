@@ -23,6 +23,7 @@ import { toast } from "sonner"
 import api, { type Task, type TaskInput } from "@/utils/api"
 import { useI18n } from "@/hooks/useI18n"
 import { useBusyGate } from "@/hooks/useBusyGate"
+import { CategoryChips, toggledCategories, type CategoryOption } from "@/components/category-chips"
 import { dateInputValue, emptyTaskForm, taskFormOf, taskInputOf, type TaskForm } from "@/utils/taskForm"
 
 function dueLabel(due?: string): string {
@@ -32,7 +33,7 @@ function dueLabel(due?: string): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
 }
 
-type Category = { name: string; color?: string }
+type Category = CategoryOption
 
 // TaskFlagMenu quick-sets a task's due date, or clears it.
 function TaskFlagMenu({ task, onFlag }: { task: Task; onFlag: (task: Task, when: string) => void }) {
@@ -155,28 +156,7 @@ function CategoryPicker({
   return (
     <div className="space-y-2">
       <Label>{t("tasks.categories")}</Label>
-      <div className="flex flex-wrap gap-1.5">
-        {categories.map((cat) => {
-          const on = selected.includes(cat.name)
-          const color = cat.color ?? "#3b82f6"
-          return (
-            <button
-              key={cat.name}
-              type="button"
-              className="rounded-full border px-2.5 py-0.5 text-xs transition-colors"
-              style={{
-                borderColor: color,
-                color,
-                backgroundColor: on ? `${color}15` : "transparent",
-                opacity: on ? 1 : 0.5,
-              }}
-              onClick={() => onToggle(cat.name, on)}
-            >
-              {cat.name}
-            </button>
-          )
-        })}
-      </div>
+      <CategoryChips categories={categories} selected={selected} onToggle={onToggle} />
     </div>
   )
 }
@@ -215,9 +195,7 @@ function TaskEditDialog({
   const toggleCategory = (name: string, on: boolean) =>
     setForm((prev) => ({
       ...prev,
-      categories: on
-        ? prev.categories.filter((c) => c !== name)
-        : [...prev.categories, name],
+      categories: toggledCategories(prev.categories, name, on),
     }))
   return (
     <Dialog open={editing !== null} onOpenChange={(open) => { if (!open) onClose() }}>
