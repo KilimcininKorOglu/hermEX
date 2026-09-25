@@ -321,7 +321,16 @@ export function verifyMime(
   // silently fails extraction and the signature reads as invalid.
   const m = ctRaw.match(/boundary="?([^";]+)"?/i)
   if (!m) return null
-  const dashB = "--" + m[1]
+  const parts = signedParts(body, "--" + m[1])
+  if (!parts) return null
+  return verifyDetached(parts.signedContent, parts.sigDer)
+}
+
+/**
+ * signedParts cuts a multipart/signed body at its boundary into the exact signed
+ * bytes and the decoded signature, or null when the first part is missing.
+ */
+function signedParts(body: string, dashB: string): { signedContent: string; sigDer: string } | null {
   const startMarker = dashB + "\r\n"
   const i1 = body.indexOf(startMarker)
   if (i1 < 0) return null
@@ -335,7 +344,15 @@ export function verifyMime(
   const i3 = body.indexOf("\r\n" + dashB, sigStart)
   const sigPart = body.slice(sigStart, i3 < 0 ? undefined : i3)
   const { headers: sh, body: sb } = parseEntity(sigPart)
-  const sigDer = decodeCTE(sb, sh["content-transfer-encoding"] || "base64")
+  return { signedContent, sigDer: decodeCTE(sb, sh["content-transfer-encoding"] || "base64") }
+}
+
+/** verifyDetached RSA-verifies SHA-256(signedContent) against a detached PKCS#7 signature. */
+function verifyDetached(
+  signedContent: string,
+  sigDer: string,
+): { verified: boolean; signedBy: string; signerCert: string } {
+  const failed = { verified: false, signedBy: "", signerCert: "" }
   try {
     const p7 = forge.pkcs7.messageFromAsn1(forge.asn1.fromDer(sigDer)) as unknown as {
       certificates: forge.pki.Certificate[]
@@ -343,7 +360,7 @@ export function verifyMime(
     }
     const cert = p7.certificates[0]
     const sig = p7.rawCapture.signature
-    if (!cert || !sig) return { verified: false, signedBy: "", signerCert: "" }
+    if (!cert || !sig) return failed
     const md = forge.md.sha256.create()
     md.update(signedContent)
     const verified = (cert.publicKey as forge.pki.rsa.PublicKey).verify(md.digest().bytes(), sig)
@@ -354,13 +371,34 @@ export function verifyMime(
       signerCert: forge.util.encode64(der),
     }
   } catch {
-    return { verified: false, signedBy: "", signerCert: "" }
+    return failed
   }
 }
 
 /** crlf canonicalizes line endings to CRLF, as S/MIME signing requires. */
 function crlf(s: string): string {
   return s.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n")
+}
+
+/** headerKind classifies one header line; MIME-Version belongs to neither side. */
+function headerKind(line: string): "id" | "content" | null {
+  const name = line.slice(0, line.indexOf(":")).toLowerCase().trim()
+  if (name === "mime-version") return null
+  return name.startsWith("content-") ? "content" : "id"
+}
+
+/**
+ * partitionHeaders sorts header lines into identity and Content-* lines. A folded
+ * continuation line follows the kept header it continues.
+ */
+function partitionHeaders(lines: string[]): { id: string[]; content: string[] } {
+  const out = { id: [] as string[], content: [] as string[] }
+  let cur: "id" | "content" | null = null
+  for (const line of lines) {
+    if (!(/^[ \t]/.test(line) && cur)) cur = headerKind(line)
+    if (cur) out[cur].push(line)
+  }
+  return out
 }
 
 /**
@@ -375,28 +413,7 @@ function splitIdentity(raw: string): { identity: string; inner: string } {
   if (cut < 0) return { identity: raw, inner: "" }
   const headerBlock = raw.slice(0, cut)
   const body = raw.slice(cut + sep.length)
-  const lines = headerBlock.split(/\r\n|\n/)
-  const idLines: string[] = []
-  const contentLines: string[] = []
-  let cur: "id" | "content" | null = null
-  for (const line of lines) {
-    if (/^[ \t]/.test(line) && cur) {
-      ;(cur === "content" ? contentLines : idLines).push(line)
-      continue
-    }
-    const name = line.slice(0, line.indexOf(":")).toLowerCase().trim()
-    if (name === "mime-version") {
-      cur = null
-      continue
-    }
-    if (name.startsWith("content-")) {
-      cur = "content"
-      contentLines.push(line)
-    } else {
-      cur = "id"
-      idLines.push(line)
-    }
-  }
+  const { id: idLines, content: contentLines } = partitionHeaders(headerBlock.split(/\r\n|\n/))
   const identity = idLines.length ? idLines.join("\r\n") + "\r\n" : ""
   const inner = (contentLines.length ? contentLines.join("\r\n") + "\r\n" : "") + "\r\n" + body
   return { identity, inner }
