@@ -80,6 +80,7 @@ import { formatAbsolute, withTz } from "@/utils/date"
 import { getShortcutMode } from "@/utils/shortcutMode"
 import { useAuth } from "@/contexts/AuthContext"
 import { useMailbox } from "@/contexts/MailboxContext"
+import { useBusyGate } from "@/hooks/useBusyGate"
 import { useI18n } from "@/hooks/useI18n"
 
 type TFunc = (key: string, params?: Record<string, string>) => string
@@ -449,14 +450,13 @@ function useNotes(email: EmailDetail | null, setNotes: (notes: Note[]) => void) 
   const { t } = useI18n()
   const [draft, setDraft] = useState("")
   const [open, setOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
+  const { busy, begin, end } = useBusyGate()
 
   const reload = async (mailId: string) => setNotes((await api.getMailNotes(mailId)).notes ?? [])
 
   const add = async () => {
     const body = draft.trim()
-    if (!body || !email) return
-    setBusy(true)
+    if (!body || !email || !begin()) return
     try {
       await api.addMailNote(email.id, { title: email.subject || "", body })
       await reload(email.id)
@@ -466,7 +466,7 @@ function useNotes(email: EmailDetail | null, setNotes: (notes: Note[]) => void) 
     } catch {
       toast.error(t("emailDetail.noteFailed"))
     } finally {
-      setBusy(false)
+      end()
     }
   }
 
