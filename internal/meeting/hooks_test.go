@@ -57,15 +57,22 @@ func TestMeetingHookRecordsFailure(t *testing.T) {
 	t.Errorf("the auto-process failure never reached the central sink; events = %+v", sink.events)
 }
 
+// useDeliveryHooks installs the delivery hooks for one test and puts back the ones
+// installed before it, all three, so no later test delivers with them.
+func useDeliveryHooks(t *testing.T) {
+	t.Helper()
+	request, reply, cancel := mta.OnMeetingRequest, mta.OnMeetingReply, mta.OnMeetingCancel
+	t.Cleanup(func() { mta.OnMeetingRequest, mta.OnMeetingReply, mta.OnMeetingCancel = request, reply, cancel })
+	InstallDeliveryHooks(logging.New(&hookSink{}))
+}
+
 // TestInstalledHooksProcessALocalInvite delivers an invitation the way a webmail,
 // EWS, ActiveSync, DAV or MAPI send reaches a local mailbox, through
 // mta.DeliverAndRelay in that daemon's own process. Only cmd/mta used to install
 // the hooks, so an auto-accepting mailbox left such an invitation unanswered.
 func TestInstalledHooksProcessALocalInvite(t *testing.T) {
 	st, tags, accounts := apSetup(t, objectstore.MeetingConfig{AutoAccept: true})
-	request, reply := mta.OnMeetingRequest, mta.OnMeetingReply
-	t.Cleanup(func() { mta.OnMeetingRequest, mta.OnMeetingReply = request, reply })
-	InstallDeliveryHooks(logging.New(&hookSink{}))
+	useDeliveryHooks(t)
 
 	invite := []byte("From: organizer@hermex.test\r\nTo: room@hermex.test\r\nSubject: Sync\r\n" +
 		"MIME-Version: 1.0\r\nContent-Type: text/calendar; method=REQUEST; charset=UTF-8\r\n\r\n" +

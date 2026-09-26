@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"hermex/internal/directory"
-	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
@@ -20,9 +19,7 @@ func cancelHarness(t *testing.T, cfg objectstore.MeetingConfig) (*objectstore.St
 	t.Helper()
 	cfg.AutoAccept = true
 	st, _, accounts := apSetup(t, cfg)
-	request, reply, cancel := mta.OnMeetingRequest, mta.OnMeetingReply, mta.OnMeetingCancel
-	t.Cleanup(func() { mta.OnMeetingRequest, mta.OnMeetingReply, mta.OnMeetingCancel = request, reply, cancel })
-	InstallDeliveryHooks(logging.New(&hookSink{}))
+	useDeliveryHooks(t)
 	return st, accounts
 }
 
