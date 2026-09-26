@@ -63,7 +63,8 @@ func (s *Server) handleSetUserStoreOwners(w http.ResponseWriter, r *http.Request
 // form (one address per line) and returns the refreshed status panel. Each owner must
 // name a real user; an unknown address is reported rather than stored as a dead grant.
 func (s *Server) handleUIUserStoreOwners(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.uiAuthorized(w, r); !ok {
+	cl, ok := s.uiAuthorized(w, r)
+	if !ok {
 		return
 	}
 	u, ok, err := s.dir.GetUser(r.PathValue("email"))
@@ -76,7 +77,7 @@ func (s *Server) handleUIUserStoreOwners(w http.ResponseWriter, r *http.Request)
 	default:
 		grantees := strings.Fields(r.PostFormValue("storeowners"))
 		list, bad, gErr := s.canonicalGrantees(grantees)
-		outOfScope, inScope := s.addressScopeError(s.adminPerms(claimsOf(r).UserID), grantees)
+		outOfScope, inScope := s.addressScopeError(s.adminPerms(cl.UserID), grantees)
 		switch {
 		case !inScope:
 			data["Error"] = scopeRefusal("store owner", outOfScope)

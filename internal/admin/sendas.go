@@ -125,7 +125,8 @@ func (s *Server) saveGrantList(w http.ResponseWriter, r *http.Request, kind stri
 // saveGrantListForm saves one grant list from the detail form, where the addresses
 // arrive one per line, and returns the refreshed status panel.
 func (s *Server) saveGrantListForm(w http.ResponseWriter, r *http.Request, kind, field string, set func(string, []string) error) {
-	if _, ok := s.uiAuthorized(w, r); !ok {
+	cl, ok := s.uiAuthorized(w, r)
+	if !ok {
 		return
 	}
 	u, ok, err := s.dir.GetUser(r.PathValue("email"))
@@ -137,7 +138,7 @@ func (s *Server) saveGrantListForm(w http.ResponseWriter, r *http.Request, kind,
 		data["Error"] = "No such user."
 	default:
 		grantees := strings.Fields(r.PostFormValue(field))
-		if msg := s.storeGrantList(r, u.Maildir, kind, grantees, set); msg != "" {
+		if msg := s.storeGrantList(cl.UserID, u.Maildir, kind, grantees, set); msg != "" {
 			data["Error"] = msg
 		} else {
 			data["Saved"] = true
@@ -149,9 +150,9 @@ func (s *Server) saveGrantListForm(w http.ResponseWriter, r *http.Request, kind,
 // storeGrantList canonicalizes the grantees, checks the caller may grant to each of
 // them, and stores the list. It returns the message to show the operator, or "" when
 // the list was stored.
-func (s *Server) storeGrantList(r *http.Request, maildir, kind string, grantees []string, set func(string, []string) error) string {
+func (s *Server) storeGrantList(adminID int64, maildir, kind string, grantees []string, set func(string, []string) error) string {
 	list, bad, gErr := s.canonicalGrantees(grantees)
-	outOfScope, inScope := s.addressScopeError(s.adminPerms(claimsOf(r).UserID), grantees)
+	outOfScope, inScope := s.addressScopeError(s.adminPerms(adminID), grantees)
 	switch {
 	case !inScope:
 		return scopeRefusal(kind+" grantee", outOfScope)

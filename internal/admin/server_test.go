@@ -218,8 +218,13 @@ func (f *fakeDir) AdminRoles(int64) ([]directory.AdminRole, error) { return f.ro
 // EffectivePermissions mirrors the real resolver's union bridge: any explicitly
 // scripted named-role permissions in f.perms, plus the equivalents of the tier
 // grants in f.roles. Tests script f.roles for the legacy path and f.perms to
-// exercise the read-only and capability permissions.
-func (f *fakeDir) EffectivePermissions(int64) ([]directory.Permission, error) {
+// exercise the read-only and capability permissions. The grants belong to the one
+// scripted user, so a handler that asks for somebody else's (such as user 0 from an
+// empty request context) gets none, as it would from the real directory.
+func (f *fakeDir) EffectivePermissions(userID int64) ([]directory.Permission, error) {
+	if userID != f.uid {
+		return nil, nil
+	}
 	seen := map[directory.Permission]bool{}
 	var out []directory.Permission
 	add := func(p directory.Permission) {

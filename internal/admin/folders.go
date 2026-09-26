@@ -246,7 +246,8 @@ func (s *Server) handleUIFolderPerms(w http.ResponseWriter, r *http.Request) {
 // handleUISetFolderPerm grants or updates a member's rights on the selected folder
 // from the panel's add form and re-renders the panel.
 func (s *Server) handleUISetFolderPerm(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.uiAuthorized(w, r); !ok {
+	cl, ok := s.uiAuthorized(w, r)
+	if !ok {
 		return
 	}
 	u, ok := s.uiFolderUser(w, r)
@@ -257,7 +258,7 @@ func (s *Server) handleUISetFolderPerm(w http.ResponseWriter, r *http.Request) {
 	rights, _ := strconv.ParseUint(r.PostFormValue("rights"), 10, 32)
 	username := r.PostFormValue("username")
 	member, memberOK, mErr := s.canonicalMember(username)
-	outOfScope, inScope := s.addressScopeError(s.adminPerms(claimsOf(r).UserID), []string{username})
+	outOfScope, inScope := s.addressScopeError(s.adminPerms(cl.UserID), []string{username})
 	errMsg := ""
 	switch {
 	case !inScope:
