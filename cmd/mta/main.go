@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"flag"
 	"fmt"
 	"hash/fnv"
@@ -1033,10 +1034,19 @@ func sweepOutboxes(ctx context.Context, dir directory.MailboxOwnerLister, bind r
 	logSweep(logger, len(maildirs), mailboxesFailed, mailboxesOverBudget, total)
 }
 
+// openOutboxStore opens a mailbox for the send-later sweep. It never creates one:
+// the directory lists every account, and a mailbox nothing was ever delivered to
+// has no Outbox to release. A variable so a test can see which mailboxes a sweep
+// reached.
+var openOutboxStore = objectstore.OpenExisting
+
 // sweepMailbox releases one mailbox's due scheduled sends, reporting whether the
 // pass failed and whether it spent its whole per-mailbox time budget.
 func sweepMailbox(ctx context.Context, path string, deliver spooler.DeliverFunc, onGiveUp spooler.GiveUpFunc, logger *logging.Logger) (stats spooler.Stats, failed, overBudget int) {
-	st, err := objectstore.Open(path)
+	st, err := openOutboxStore(path)
+	if errors.Is(err, objectstore.ErrNotProvisioned) {
+		return stats, 0, 0
+	}
 	if err != nil {
 		log.Printf("hermex-mta send-later: open %s: %v", path, err)
 		return stats, 0, 0

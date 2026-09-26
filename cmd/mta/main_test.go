@@ -160,11 +160,17 @@ func TestSweepOutboxesStopsOnShutdown(t *testing.T) {
 		accounts.paths = append(accounts.paths, scheduleFor(t, root, name, due))
 	}
 
-	// A mailbox that has never been opened, listed LAST so the sweep can only
-	// reach it by continuing past the signal. Opening a store provisions it, so
-	// whether this directory exists afterwards says whether the sweep kept walking.
-	unvisited := filepath.Join(root, "unvisited")
+	// A further mailbox, listed LAST so the sweep can only reach it by continuing
+	// past the signal. Whether the sweep opened it says whether it kept walking.
+	unvisited := scheduleFor(t, root, "unvisited", due)
 	accounts.paths = append(accounts.paths, unvisited)
+	opened := map[string]bool{}
+	restore := openOutboxStore
+	openOutboxStore = func(path string) (*objectstore.Store, error) {
+		opened[path] = true
+		return restore(path)
+	}
+	t.Cleanup(func() { openOutboxStore = restore })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	sends := 0
@@ -179,7 +185,7 @@ func TestSweepOutboxesStopsOnShutdown(t *testing.T) {
 	if sends != 1 {
 		t.Errorf("the sweep released %d messages after the shutdown signal, want 1", sends)
 	}
-	if _, err := os.Stat(unvisited); err == nil {
+	if opened[unvisited] {
 		t.Error("the sweep opened a further mailbox after the shutdown signal; on a large deployment it would outlast the drain deadline")
 	}
 	// The rest are untouched, still scheduled for the next start.
@@ -563,5 +569,23 @@ func TestSendLaterGiveUpReachesTheScheduler(t *testing.T) {
 	}
 	if n := folderCount(t, sharedDir, int64(mapi.PrivateFIDInbox)); n != 0 {
 		t.Errorf("the shared mailbox received %d reports, want none", n)
+	}
+}
+
+// TestSweepDoesNotCreateAMailbox sweeps a directory that lists an account nothing
+// was ever delivered to. The sweep must not create its store: only delivery
+// provisions a mailbox, and it has no Outbox to release anyway.
+func TestSweepDoesNotCreateAMailbox(t *testing.T) {
+	fresh := filepath.Join(t.TempDir(), "fresh")
+	accounts := directory.StaticAccounts{"fresh@hermex.test": {MailboxPath: fresh}}
+	sink := &sweepSink{}
+	sweepOutboxes(context.Background(), accounts, bindAll(func([]string, []byte, time.Time) ([]string, bool, error) {
+		return nil, true, nil
+	}), logging.New(sink))
+	if _, err := os.Stat(fresh); err == nil {
+		t.Error("the sweep created a mailbox that was never provisioned")
+	}
+	if e, ok := sink.find("sendlater.sweep"); ok && e.Level != logging.LevelInfo {
+		t.Errorf("an unprovisioned mailbox made the sweep report %q", e.Level)
 	}
 }
