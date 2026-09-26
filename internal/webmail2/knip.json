@@ -1,4 +1,4 @@
 {
-  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "$schema": "./knip.schema.json",
   "entry": ["public/sw.js"]
 }
