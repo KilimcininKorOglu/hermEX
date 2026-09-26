@@ -17,7 +17,7 @@ import { openVault, sealVault, type VaultContent } from "./smimeVault"
  * client's copy in this browser, or nowhere (server mode, no identity, or an old
  * copy in another browser).
  */
-export type KeyPlace = "vault" | "legacy" | "none"
+type KeyPlace ="vault" | "legacy" | "none"
 
 // The answer is kept for the page's life and dropped whenever it can change here.
 let place: Promise<KeyPlace> | null = null
@@ -34,7 +34,7 @@ async function findKey(): Promise<KeyPlace> {
 }
 
 /** keyPlace reports where the browser-mode key is. */
-export function keyPlace(): Promise<KeyPlace> {
+function keyPlace(): Promise<KeyPlace> {
   if (!place) {
     place = findKey().catch((err: unknown) => {
       place = null
