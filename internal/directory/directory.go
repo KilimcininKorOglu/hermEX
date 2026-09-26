@@ -119,6 +119,19 @@ type MailboxLister interface {
 	Maildirs() ([]string, error)
 }
 
+// MailboxOwner is one mailbox the directory knows, with the account that owns it.
+type MailboxOwner struct {
+	Address   string // the owning account's login address
+	StorePath string // its object-store directory
+}
+
+// MailboxOwnerLister enumerates the same mailboxes as MailboxLister, each with its
+// owner. The send-later spooler needs the owner, because a scheduled message is
+// sent by the account whose Outbox holds it, whatever its From header names.
+type MailboxOwnerLister interface {
+	MailboxOwners() ([]MailboxOwner, error)
+}
+
 // SharedMailbox is a shared mailbox: a mailbox-bearing account with no
 // interactive login, whose contents other users reach by permission grant.
 type SharedMailbox struct {
@@ -316,6 +329,27 @@ func (a StaticAccounts) Maildirs() ([]string, error) {
 		}
 		seen[acc.MailboxPath] = true
 		out = append(out, acc.MailboxPath)
+	}
+	return out, nil
+}
+
+// MailboxOwners implements MailboxOwnerLister. Several addresses may share one
+// mailbox; the first in address order owns it, so the answer is stable.
+func (a StaticAccounts) MailboxOwners() ([]MailboxOwner, error) {
+	addrs := make([]string, 0, len(a))
+	for addr := range a {
+		addrs = append(addrs, addr)
+	}
+	sort.Strings(addrs)
+	seen := make(map[string]bool, len(a))
+	out := make([]MailboxOwner, 0, len(a))
+	for _, addr := range addrs {
+		path := a[addr].MailboxPath
+		if path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		out = append(out, MailboxOwner{Address: addr, StorePath: path})
 	}
 	return out, nil
 }

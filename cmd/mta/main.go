@@ -44,23 +44,6 @@ import (
 	"hermex/internal/tlsrpt"
 )
 
-// senderOf returns the envelope sender for a released Outbox message: the
-// address in its From header. The spooler hands the worker only the recipients
-// and the raw message, so the return-path an out-of-office auto-reply targets is
-// recovered from the message itself. An unparseable or missing From yields "",
-// which the delivery path treats as a null return-path (no auto-reply).
-func senderOf(raw []byte) string {
-	msg, err := mail.ReadMessage(bytes.NewReader(raw))
-	if err != nil {
-		return ""
-	}
-	addrs, err := msg.Header.AddressList("From")
-	if err != nil || len(addrs) == 0 {
-		return ""
-	}
-	return addrs[0].Address
-}
-
 // recipientsOf reads a message's own addressees from its headers. It is the
 // fallback for a give-up report whose recipient list the spooler could not read
 // off the stored object: the message itself still names who it was for, and a
@@ -449,39 +432,58 @@ func (d *mtaDaemon) sendLaterLoop() lifecycle.Component {
 	// Release scheduled (send-later) messages from every mailbox's Outbox. This
 	// runs in the always-on MTA so it survives webmail restarts. It is a lifecycle
 	// component so shutdown cancels its loop alongside draining the SMTP server.
-	deliver := func(recipients []string, raw []byte, when time.Time) ([]string, error) {
-		return mta.DeliverAndRelay(dir, spool, senderOf(raw), recipients, raw, when)
-	}
-	// When the spooler abandons a scheduled send it moves the message back to
-	// Drafts; tell the sender why, the same way the relay worker reports an
-	// abandoned external recipient. One report per recipient, so each carries a
-	// well-formed Final-Recipient.
-	onGiveUp := func(raw []byte, recipients []string, cause error) {
-		recipients = reportRecipients(raw, recipients)
-		from := senderOf(raw)
-		logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "sendlater.giveup",
-			User: from, Fields: logging.Fields{"recipients": len(recipients)}, Err: cause.Error()})
-		if from == "" {
-			return
-		}
-		for _, rcpt := range recipients {
-			report, err := mta.Bounce(cfg.Hostname, from, rcpt, cause.Error(), time.Now())
-			if err != nil {
-				logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "sendlater.bounce.build", User: from, Fields: logging.Fields{"recipient": rcpt}, Err: err.Error()})
-				continue
-			}
-			unresolved, err := mta.Deliver(dir, "", []string{from}, report, time.Now())
-			if err != nil || len(unresolved) > 0 {
-				logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "sendlater.bounce.undelivered", User: from, Fields: logging.Fields{"recipient": rcpt}})
-			}
-		}
-	}
+	//
+	// A scheduled message is sent by the account whose Outbox holds it, the same
+	// envelope an immediate send from that account uses, whatever its From header
+	// names. A message scheduled in a shared mailbox's name is then charged to the
+	// person who scheduled it, the shared mailbox keeps its copy when it asked for
+	// one, and a give-up report reaches the person who scheduled it.
+	bind := sendAsOwner(dir, spool, cfg.Hostname, logger)
 	// lifecycle.Loop, not lifecycle.Func: shutdown must wait for the sweep to
 	// return, because the cleanups that follow close the spool and the directory
 	// database this loop delivers through.
 	return lifecycle.Loop(func(ctx context.Context) {
-		runSendLater(ctx, dir, deliver, onGiveUp, d.lockPass(directory.LockSendLater), sendLaterInterval, logger)
+		runSendLater(ctx, dir, bind, d.lockPass(directory.LockSendLater), sendLaterInterval, logger)
 	})
+}
+
+// releaseFor binds the send-later release callbacks to the account whose Outbox a
+// sweep is releasing.
+type releaseFor func(owner string) (spooler.DeliverFunc, spooler.GiveUpFunc)
+
+// sendAsOwner binds each mailbox's release to the full delivery path, sent as the
+// mailbox's owner, and its give-up report to that owner.
+func sendAsOwner(dir directory.Accounts, spool *relay.Spool, hostname string, logger *logging.Logger) releaseFor {
+	return func(owner string) (spooler.DeliverFunc, spooler.GiveUpFunc) {
+		deliver := func(recipients []string, raw []byte, when time.Time) ([]string, bool, error) {
+			return mta.SendAndRelay(dir, spool, owner, recipients, raw, when)
+		}
+		onGiveUp := func(raw []byte, recipients []string, cause error) {
+			reportSendLaterGiveUp(dir, hostname, logger, owner, raw, recipients, cause)
+		}
+		return deliver, onGiveUp
+	}
+}
+
+// reportSendLaterGiveUp tells the account that scheduled a send why the spooler
+// abandoned it and moved it back to Drafts, the same way the relay worker reports
+// an abandoned external recipient. One report per recipient, so each carries a
+// well-formed Final-Recipient.
+func reportSendLaterGiveUp(dir directory.Accounts, hostname string, logger *logging.Logger, owner string, raw []byte, recipients []string, cause error) {
+	recipients = reportRecipients(raw, recipients)
+	logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "sendlater.giveup",
+		User: owner, Fields: logging.Fields{"recipients": len(recipients)}, Err: cause.Error()})
+	for _, rcpt := range recipients {
+		report, err := mta.Bounce(hostname, owner, rcpt, cause.Error(), time.Now())
+		if err != nil {
+			logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "sendlater.bounce.build", User: owner, Fields: logging.Fields{"recipient": rcpt}, Err: err.Error()})
+			continue
+		}
+		unresolved, err := mta.Deliver(dir, "", []string{owner}, report, time.Now())
+		if err != nil || len(unresolved) > 0 {
+			logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "sendlater.bounce.undelivered", User: owner, Fields: logging.Fields{"recipient": rcpt}})
+		}
+	}
 }
 
 // relayLoop builds the outbound relay drain loop.
@@ -976,7 +978,7 @@ const relayInterval = 15 * time.Second
 // window between its delivery and its removal from the Outbox. guard enforces
 // that across instances, and a process it refuses simply waits for the next tick.
 // A nil guard runs every sweep, the single-instance behaviour.
-func runSendLater(ctx context.Context, dir directory.MailboxLister, deliver spooler.DeliverFunc, onGiveUp spooler.GiveUpFunc, guard func() (func(), bool), interval time.Duration, logger *logging.Logger) {
+func runSendLater(ctx context.Context, dir directory.MailboxOwnerLister, bind releaseFor, guard func() (func(), bool), interval time.Duration, logger *logging.Logger) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -984,7 +986,7 @@ func runSendLater(ctx context.Context, dir directory.MailboxLister, deliver spoo
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			guardedSweep(ctx, dir, deliver, onGiveUp, guard, logger)
+			guardedSweep(ctx, dir, bind, guard, logger)
 		}
 	}
 }
@@ -992,7 +994,7 @@ func runSendLater(ctx context.Context, dir directory.MailboxLister, deliver spoo
 // guardedSweep runs one sweep while holding the guard's permission, and skips the
 // sweep entirely when the guard refuses, because another instance is sweeping the
 // same mailboxes right now.
-func guardedSweep(ctx context.Context, dir directory.MailboxLister, deliver spooler.DeliverFunc, onGiveUp spooler.GiveUpFunc, guard func() (func(), bool), logger *logging.Logger) {
+func guardedSweep(ctx context.Context, dir directory.MailboxOwnerLister, bind releaseFor, guard func() (func(), bool), logger *logging.Logger) {
 	if guard != nil {
 		release, ok := guard()
 		if !ok {
@@ -1000,21 +1002,21 @@ func guardedSweep(ctx context.Context, dir directory.MailboxLister, deliver spoo
 		}
 		defer release()
 	}
-	sweepOutboxes(ctx, dir, deliver, onGiveUp, logger)
+	sweepOutboxes(ctx, dir, bind, logger)
 }
 
 // sweepOutboxes runs one pass: it opens each known mailbox and releases its due
-// scheduled sends. Per-mailbox failures are logged and skipped so one bad
-// mailbox cannot stall the rest.
-func sweepOutboxes(ctx context.Context, dir directory.MailboxLister, deliver spooler.DeliverFunc, onGiveUp spooler.GiveUpFunc, logger *logging.Logger) {
-	maildirs, err := dir.Maildirs()
+// scheduled sends as the mailbox's owner. Per-mailbox failures are logged and
+// skipped so one bad mailbox cannot stall the rest.
+func sweepOutboxes(ctx context.Context, dir directory.MailboxOwnerLister, bind releaseFor, logger *logging.Logger) {
+	maildirs, err := dir.MailboxOwners()
 	if err != nil {
 		log.Printf("hermex-mta send-later: list mailboxes: %v", err)
 		return
 	}
 	var total spooler.Stats
 	mailboxesFailed, mailboxesOverBudget := 0, 0
-	for _, path := range maildirs {
+	for _, mb := range maildirs {
 		// Stop between mailboxes on shutdown. ProcessDueOutbox already returns at
 		// once when cancelled, but without this the sweep would still open and close
 		// a store for every remaining mailbox, which on a large deployment is the
@@ -1022,7 +1024,8 @@ func sweepOutboxes(ctx context.Context, dir directory.MailboxLister, deliver spo
 		if ctx.Err() != nil {
 			return
 		}
-		stats, failed, overBudget := sweepMailbox(ctx, path, deliver, onGiveUp, logger)
+		deliver, onGiveUp := bind(mb.Address)
+		stats, failed, overBudget := sweepMailbox(ctx, mb.StorePath, deliver, onGiveUp, logger)
 		addStats(&total, stats)
 		mailboxesFailed += failed
 		mailboxesOverBudget += overBudget

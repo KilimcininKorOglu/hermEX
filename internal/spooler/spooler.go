@@ -21,9 +21,12 @@ import (
 
 // DeliverFunc delivers a message to its recipients, returning any addresses that
 // could not be delivered locally and a transport error. The caller binds it to the
-// full delivery path, so external recipients are relayed too. It mirrors mta.Deliver with the account directory already bound, so the
-// spooler need not depend on the transport package.
-type DeliverFunc func(recipients []string, raw []byte, when time.Time) (unresolved []string, err error)
+// full delivery path and to the account whose Outbox is swept, so external
+// recipients are relayed too and the message is sent as that account. It mirrors
+// mta.SendAndRelay with the directory already bound, so the spooler need not depend
+// on the transport package. keepOwnCopy is false when the mailbox the message was
+// sent in the name of filed the only copy, and no Sent copy is then filed here.
+type DeliverFunc func(recipients []string, raw []byte, when time.Time) (unresolved []string, keepOwnCopy bool, err error)
 
 // GiveUpFunc reports a scheduled send the spooler has abandoned after
 // maxReleaseAttempts consecutive failures: the wire copy, the recipients it never
@@ -232,15 +235,20 @@ func releaseMessage(st *objectstore.Store, deliver DeliverFunc, outbox int64, m 
 	// Deliver with the Bcc header removed; unresolved local recipients are ignored,
 	// the same as the interactive compose path. External recipients are relayed:
 	// the caller binds this to the full delivery path, not to local delivery alone.
-	if _, err := deliver(recipients, stripBcc(raw), now); err != nil {
+	_, keepOwnCopy, err := deliver(recipients, stripBcc(raw), now)
+	if err != nil {
 		return releaseFailed(st, outbox, m, err)
 	}
-	// Delivered. Keep the with-Bcc copy in Sent for the record, then clear the
+	// Delivered. Keep the with-Bcc copy in Sent for the record, unless the mailbox
+	// the message was sent in the name of filed the only copy, then clear the
 	// Outbox. A filing failure is reported but does NOT hold the message in the
 	// Outbox: the mail is already out, and leaving it scheduled would re-deliver
 	// it to every recipient on the next sweep, once every sweep, forever. Losing
 	// the Sent copy is the lesser harm, and it is logged.
-	fileErr := fileToSent(st, raw, now)
+	var fileErr error
+	if keepOwnCopy {
+		fileErr = fileToSent(st, raw, now)
+	}
 	if err := st.DeleteMessage(outbox, m.UID); err != nil {
 		return false, errors.Join(fileErr, err)
 	}

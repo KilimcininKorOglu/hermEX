@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -251,13 +252,12 @@ func wantSeededStore(t *testing.T, path string) {
 	}
 }
 
-// TestSQLDirectoryMaildirs checks that MailboxLister enumerates the store paths
-// of active user mailboxes, the set the send-later spooler scans, and skips a
-// suspended account, so the worker never releases mail on a disabled user's
-// behalf.
-func TestSQLDirectoryMaildirs(t *testing.T) {
+// mailboxListFixture provisions alice and bob plus a suspended carol, the set
+// both mailbox listings are checked against, and returns the two active maildirs.
+func mailboxListFixture(t *testing.T) (d *SQLDirectory, aliceDir, bobDir string) {
+	t.Helper()
 	db := openTestDB(t)
-	d := NewSQL(db)
+	d = NewSQL(db)
 	if err := d.EnsureSchema(); err != nil {
 		t.Fatal(err)
 	}
@@ -267,8 +267,8 @@ func TestSQLDirectoryMaildirs(t *testing.T) {
 	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "domains", "hermex.test")); err != nil {
 		t.Fatal(err)
 	}
-	aliceDir := filepath.Join(root, "users", "hermex.test", "alice")
-	bobDir := filepath.Join(root, "users", "hermex.test", "bob")
+	aliceDir = filepath.Join(root, "users", "hermex.test", "alice")
+	bobDir = filepath.Join(root, "users", "hermex.test", "bob")
 	carolDir := filepath.Join(root, "users", "hermex.test", "carol")
 	for addr, dir := range map[string]string{
 		"alice@hermex.test": aliceDir,
@@ -283,7 +283,15 @@ func TestSQLDirectoryMaildirs(t *testing.T) {
 	if _, err := db.Exec(`UPDATE users SET address_status = ? WHERE username = ?`, afUserSuspended, "carol@hermex.test"); err != nil {
 		t.Fatal(err)
 	}
+	return d, aliceDir, bobDir
+}
 
+// TestSQLDirectoryMaildirs checks that MailboxLister enumerates the store paths
+// of active user mailboxes, the set the send-later spooler scans, and skips a
+// suspended account, so the worker never releases mail on a disabled user's
+// behalf.
+func TestSQLDirectoryMaildirs(t *testing.T) {
+	d, aliceDir, bobDir := mailboxListFixture(t)
 	got, err := d.Maildirs()
 	if err != nil {
 		t.Fatal(err)
@@ -296,6 +304,24 @@ func TestSQLDirectoryMaildirs(t *testing.T) {
 		if !want[p] {
 			t.Errorf("unexpected maildir %q (a suspended account leaked into the scan set)", p)
 		}
+	}
+}
+
+// TestSQLDirectoryMailboxOwners checks the owner listing covers the same mailboxes
+// as Maildirs, each with its account, because the send-later spooler sends as the
+// account whose Outbox it sweeps.
+func TestSQLDirectoryMailboxOwners(t *testing.T) {
+	d, aliceDir, bobDir := mailboxListFixture(t)
+	owners, err := d.MailboxOwners()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []MailboxOwner{
+		{Address: "alice@hermex.test", StorePath: aliceDir},
+		{Address: "bob@hermex.test", StorePath: bobDir},
+	}
+	if !slices.Equal(owners, want) {
+		t.Errorf("MailboxOwners = %v, want %v", owners, want)
 	}
 }
 

@@ -20,7 +20,7 @@ func TestInterruptedReleaseIsNotDeliveredTwice(t *testing.T) {
 	scheduleOutbox(t, st, time.Now().Add(-time.Minute))
 
 	sends := 0
-	crashAfterSending := func([]string, []byte, time.Time) ([]string, error) {
+	crashAfterSending := func([]string, []byte, time.Time) ([]string, bool, error) {
 		sends++
 		// The mail is out. Everything after this point in the release, including the
 		// Outbox removal, is what the crash skips.
@@ -65,9 +65,9 @@ func TestFailedDeliveryStillRetries(t *testing.T) {
 	scheduleOutbox(t, st, time.Now().Add(-time.Minute))
 
 	attempts := 0
-	failing := func([]string, []byte, time.Time) ([]string, error) {
+	failing := func([]string, []byte, time.Time) ([]string, bool, error) {
 		attempts++
-		return nil, errors.New("mailbox temporarily unavailable")
+		return nil, true, errors.New("mailbox temporarily unavailable")
 	}
 	for range 3 {
 		if _, err := releaseOutbox(context.Background(), st, failing, nil, time.Now()); err == nil {
@@ -93,9 +93,9 @@ func TestSuccessfulReleaseLeavesNoStamp(t *testing.T) {
 	scheduleOutbox(t, st, time.Now().Add(-time.Minute))
 
 	sends := 0
-	ok := func([]string, []byte, time.Time) ([]string, error) {
+	ok := func([]string, []byte, time.Time) ([]string, bool, error) {
 		sends++
-		return nil, nil
+		return nil, true, nil
 	}
 	released, err := releaseOutbox(context.Background(), st, ok, nil, time.Now())
 	if err != nil || released != 1 {

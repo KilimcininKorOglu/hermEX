@@ -362,6 +362,41 @@ SELECT DISTINCT u.maildir
 	return out, rows.Err()
 }
 
+// MailboxOwners implements MailboxOwnerLister over the accounts Maildirs lists,
+// each mailbox with the account that owns it. A maildir recorded on two accounts
+// is listed once, under the first username.
+func (d *SQLDirectory) MailboxOwners() ([]MailboxOwner, error) {
+	const q = `
+SELECT u.username, u.maildir
+  FROM users u JOIN domains d ON u.domain_id = d.id
+ WHERE u.maildir <> ''
+   AND u.display_type = ?
+   AND (u.address_status & ?) = ?
+   AND (u.address_status & ?) = 0
+   AND d.domain_status = 0
+ ORDER BY u.username`
+	rows, err := d.db.Query(q, dtMailuser, afUserMask, afUserNormal, afDomainMask)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	seen := map[string]bool{}
+	var out []MailboxOwner
+	for rows.Next() {
+		var username, maildir string
+		if err := rows.Scan(&username, &maildir); err != nil {
+			return nil, err
+		}
+		path := d.storePath(maildir)
+		if seen[path] {
+			continue
+		}
+		seen[path] = true
+		out = append(out, MailboxOwner{Address: username, StorePath: path})
+	}
+	return out, rows.Err()
+}
+
 // SharedMailboxes implements SharedMailboxLister: the address and store path of
 // every shared mailbox visible to caller (see galScopePredicate): a mailbox user
 // (DT_MAILUSER) in an active domain whose address_status carries the shared bit.

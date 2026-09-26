@@ -15,6 +15,7 @@ import (
 	"hermex/internal/mapi"
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
+	"hermex/internal/spooler"
 )
 
 // TestSweepOutboxesDeliversDueScheduledSend is a light integration test of the
@@ -52,11 +53,7 @@ func TestSweepOutboxesDeliversDueScheduledSend(t *testing.T) {
 		"alice@hermex.test": {MailboxPath: aliceDir},
 		"bob@hermex.test":   {MailboxPath: bobDir},
 	}
-	deliver := func(recipients []string, raw []byte, when time.Time) ([]string, error) {
-		return mta.Deliver(accounts, senderOf(raw), recipients, raw, when)
-	}
-
-	sweepOutboxes(context.Background(), accounts, deliver, nil, nil)
+	sweepOutboxes(context.Background(), accounts, sendAsOwner(accounts, nil, "mail.hermex.test", logging.New(&sweepSink{})), nil)
 
 	if n := folderCount(t, aliceDir, int64(mapi.PrivateFIDOutbox)); n != 0 {
 		t.Errorf("alice Outbox has %d after sweep, want 0 (released)", n)
@@ -108,12 +105,12 @@ func TestGuardedSweepRefusalLeavesTheOutboxAlone(t *testing.T) {
 
 	accounts := directory.StaticAccounts{"alice@hermex.test": {MailboxPath: aliceDir}}
 	delivered := 0
-	deliver := func(recipients []string, raw []byte, when time.Time) ([]string, error) {
+	deliver := func(recipients []string, raw []byte, when time.Time) ([]string, bool, error) {
 		delivered++
-		return nil, nil
+		return nil, true, nil
 	}
 
-	guardedSweep(context.Background(), accounts, deliver, nil, func() (func(), bool) { return nil, false }, nil)
+	guardedSweep(context.Background(), accounts, bindAll(deliver), func() (func(), bool) { return nil, false }, nil)
 	if delivered != 0 {
 		t.Errorf("a refused sweep delivered %d message(s), want none", delivered)
 	}
@@ -123,7 +120,7 @@ func TestGuardedSweepRefusalLeavesTheOutboxAlone(t *testing.T) {
 
 	// Permitted: the sweep runs and hands the permission back.
 	released := 0
-	guardedSweep(context.Background(), accounts, deliver, nil, func() (func(), bool) { return func() { released++ }, true }, nil)
+	guardedSweep(context.Background(), accounts, bindAll(deliver), func() (func(), bool) { return func() { released++ }, true }, nil)
 	if delivered != 1 {
 		t.Errorf("a permitted sweep delivered %d message(s), want 1", delivered)
 	}
@@ -137,7 +134,18 @@ func TestGuardedSweepRefusalLeavesTheOutboxAlone(t *testing.T) {
 // depends on which mailbox the sweep reaches first cannot use it.
 type orderedMaildirs struct{ paths []string }
 
-func (o orderedMaildirs) Maildirs() ([]string, error) { return o.paths, nil }
+func (o orderedMaildirs) MailboxOwners() ([]directory.MailboxOwner, error) {
+	out := make([]directory.MailboxOwner, len(o.paths))
+	for i, p := range o.paths {
+		out[i] = directory.MailboxOwner{Address: filepath.Base(p) + "@hermex.test", StorePath: p}
+	}
+	return out, nil
+}
+
+// bindAll hands every mailbox's release the same delivery and no give-up report.
+func bindAll(deliver spooler.DeliverFunc) releaseFor {
+	return func(string) (spooler.DeliverFunc, spooler.GiveUpFunc) { return deliver, nil }
+}
 
 // TestSweepOutboxesStopsOnShutdown proves the send-later sweep abandons its walk
 // when the daemon is shutting down. The sweep opens one mailbox store after
@@ -160,13 +168,13 @@ func TestSweepOutboxesStopsOnShutdown(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	sends := 0
-	deliver := func([]string, []byte, time.Time) ([]string, error) {
+	deliver := func([]string, []byte, time.Time) ([]string, bool, error) {
 		sends++
 		// The shutdown signal arrives during the first mailbox's release.
 		cancel()
-		return nil, nil
+		return nil, true, nil
 	}
-	sweepOutboxes(ctx, accounts, deliver, nil, nil)
+	sweepOutboxes(ctx, accounts, bindAll(deliver), nil)
 
 	if sends != 1 {
 		t.Errorf("the sweep released %d messages after the shutdown signal, want 1", sends)
@@ -261,9 +269,9 @@ func TestSweepEmitsQueueDepth(t *testing.T) {
 		"later2@hermex.test": {MailboxPath: scheduleFor(t, root, "later2", time.Now().Add(time.Hour))},
 	}
 	sink := &sweepSink{}
-	deliver := func([]string, []byte, time.Time) ([]string, error) { return nil, nil }
+	deliver := func([]string, []byte, time.Time) ([]string, bool, error) { return nil, true, nil }
 
-	sweepOutboxes(context.Background(), accounts, deliver, nil, logging.New(sink))
+	sweepOutboxes(context.Background(), accounts, bindAll(deliver), logging.New(sink))
 
 	e, ok := sink.find("sendlater.sweep")
 	if !ok {
@@ -292,11 +300,11 @@ func TestSweepReportsFailuresAndRetries(t *testing.T) {
 		"stuck@hermex.test": {MailboxPath: scheduleFor(t, root, "stuck", time.Now().Add(-time.Minute))},
 	}
 	sink := &sweepSink{}
-	failing := func([]string, []byte, time.Time) ([]string, error) {
-		return nil, errors.New("recipient mailbox unavailable")
+	failing := func([]string, []byte, time.Time) ([]string, bool, error) {
+		return nil, true, errors.New("recipient mailbox unavailable")
 	}
 
-	sweepOutboxes(context.Background(), accounts, failing, nil, logging.New(sink))
+	sweepOutboxes(context.Background(), accounts, bindAll(failing), logging.New(sink))
 
 	e, ok := sink.find("sendlater.sweep")
 	if !ok {
@@ -344,7 +352,7 @@ func TestSlowMailboxDoesNotStarveTheRest(t *testing.T) {
 	sink := &sweepSink{}
 	var mu sync.Mutex
 	served := map[string]int{}
-	deliver := func(_ []string, raw []byte, _ time.Time) ([]string, error) {
+	deliver := func(_ []string, raw []byte, _ time.Time) ([]string, bool, error) {
 		mu.Lock()
 		who := "fast"
 		if strings.Contains(string(raw), "slow@hermex.test") {
@@ -354,10 +362,10 @@ func TestSlowMailboxDoesNotStarveTheRest(t *testing.T) {
 		}
 		served[who]++
 		mu.Unlock()
-		return nil, nil
+		return nil, true, nil
 	}
 
-	sweepOutboxes(context.Background(), accounts, deliver, nil, logging.New(sink))
+	sweepOutboxes(context.Background(), accounts, bindAll(deliver), logging.New(sink))
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -469,5 +477,91 @@ func TestDigestOnceRunsOnlyUnderTheLock(t *testing.T) {
 	refused := func() (func(), bool) { return nil, false }
 	if _, ran := digestOnce(runner, refused); ran {
 		t.Error("the pass ran without the lock")
+	}
+}
+
+// sharedScheduleWorld provisions alice and a shared mailbox that grants her
+// send-as with cfg as its sent-copy setting, and queues a due message in alice's
+// Outbox that names the shared mailbox in From.
+func sharedScheduleWorld(t *testing.T, cfg objectstore.SentCopyConfig) (accounts directory.StaticAccounts, aliceDir, sharedDir string) {
+	t.Helper()
+	root := t.TempDir()
+	aliceDir, sharedDir = filepath.Join(root, "alice"), filepath.Join(root, "shared")
+	shared, err := objectstore.Open(sharedDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := shared.SetSendAs([]string{"alice@hermex.test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := shared.SetSentCopyConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	shared.Close()
+	alice, err := objectstore.Open(aliceDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer alice.Close()
+	raw := "From: shared@hermex.test\r\nTo: shared@hermex.test\r\nSubject: team\r\n\r\nbody\r\n"
+	info, err := alice.AppendMessage(int64(mapi.PrivateFIDOutbox), []byte(raw), time.Unix(1, 0), objectstore.FlagSeen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := alice.SetMessageProperties(info.ID, mapi.PropertyValues{
+		{Tag: mapi.PrDeferredSendTime, Value: mapi.UnixToNTTime(time.Now().Add(-time.Minute))},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return directory.StaticAccounts{
+		"alice@hermex.test":  {MailboxPath: aliceDir},
+		"shared@hermex.test": {Shared: true, MailboxPath: sharedDir},
+	}, aliceDir, sharedDir
+}
+
+// TestScheduledSendInASharedNameIsSentByTheScheduler releases a message alice
+// scheduled in a shared mailbox's name. It is sent as alice, the account whose
+// Outbox holds it, so the shared mailbox is a represented mailbox: it keeps its
+// copy when it asked for one, and with the exclusive setting alice keeps none. The
+// envelope used to be the From header, which made the shared mailbox the sender.
+func TestScheduledSendInASharedNameIsSentByTheScheduler(t *testing.T) {
+	for _, c := range []struct {
+		name       string
+		cfg        objectstore.SentCopyConfig
+		aliceSent  int
+		sharedSent int
+	}{
+		{"copy", objectstore.SentCopyConfig{ForSendAs: true}, 1, 1},
+		{"exclusive", objectstore.SentCopyConfig{ForSendAs: true, Exclusive: true}, 0, 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			accounts, aliceDir, sharedDir := sharedScheduleWorld(t, c.cfg)
+			sweepOutboxes(context.Background(), accounts, sendAsOwner(accounts, nil, "mail.hermex.test", logging.New(&sweepSink{})), nil)
+			if n := folderCount(t, aliceDir, int64(mapi.PrivateFIDOutbox)); n != 0 {
+				t.Fatalf("alice Outbox has %d after the sweep, want the message released", n)
+			}
+			if n := folderCount(t, aliceDir, int64(mapi.PrivateFIDSentItems)); n != c.aliceSent {
+				t.Errorf("alice Sent has %d, want %d", n, c.aliceSent)
+			}
+			if n := folderCount(t, sharedDir, int64(mapi.PrivateFIDSentItems)); n != c.sharedSent {
+				t.Errorf("shared Sent has %d, want %d", n, c.sharedSent)
+			}
+		})
+	}
+}
+
+// TestSendLaterGiveUpReachesTheScheduler abandons a message scheduled in a shared
+// mailbox's name. The report goes to the account that scheduled it, not to the
+// shared mailbox its From header names, where nobody may be watching.
+func TestSendLaterGiveUpReachesTheScheduler(t *testing.T) {
+	accounts, aliceDir, sharedDir := sharedScheduleWorld(t, objectstore.SentCopyConfig{})
+	raw := []byte("From: shared@hermex.test\r\nTo: bob@hermex.test\r\nSubject: team\r\n\r\nbody\r\n")
+	reportSendLaterGiveUp(accounts, "mail.hermex.test", logging.New(&sweepSink{}), "alice@hermex.test",
+		raw, []string{"bob@hermex.test"}, errors.New("recipient refused"))
+	if n := folderCount(t, aliceDir, int64(mapi.PrivateFIDInbox)); n != 1 {
+		t.Errorf("alice Inbox has %d reports, want 1", n)
+	}
+	if n := folderCount(t, sharedDir, int64(mapi.PrivateFIDInbox)); n != 0 {
+		t.Errorf("the shared mailbox received %d reports, want none", n)
 	}
 }

@@ -72,10 +72,10 @@ func TestProcessDueOutboxReleasesDueMessage(t *testing.T) {
 
 	var gotRcpts []string
 	var gotRaw []byte
-	deliver := func(rcpts []string, raw []byte, when time.Time) ([]string, error) {
+	deliver := func(rcpts []string, raw []byte, when time.Time) ([]string, bool, error) {
 		gotRcpts = slices.Clone(rcpts)
 		gotRaw = slices.Clone(raw)
-		return nil, nil
+		return nil, true, nil
 	}
 
 	released, err := releaseOutbox(context.Background(), st, deliver, nil, time.Now())
@@ -112,9 +112,9 @@ func TestProcessDueOutboxSkipsFutureMessage(t *testing.T) {
 	scheduleOutbox(t, st, time.Now().Add(time.Hour))
 
 	called := false
-	deliver := func(rcpts []string, raw []byte, when time.Time) ([]string, error) {
+	deliver := func(rcpts []string, raw []byte, when time.Time) ([]string, bool, error) {
 		called = true
-		return nil, nil
+		return nil, true, nil
 	}
 	released, err := releaseOutbox(context.Background(), st, deliver, nil, time.Now())
 	if err != nil {
@@ -135,8 +135,8 @@ func TestProcessDueOutboxKeepsOnDeliverError(t *testing.T) {
 	st := openStore(t)
 	scheduleOutbox(t, st, time.Now().Add(-time.Minute))
 
-	deliver := func(rcpts []string, raw []byte, when time.Time) ([]string, error) {
-		return nil, errors.New("transport unavailable")
+	deliver := func(rcpts []string, raw []byte, when time.Time) ([]string, bool, error) {
+		return nil, true, errors.New("transport unavailable")
 	}
 	released, err := releaseOutbox(context.Background(), st, deliver, nil, time.Now())
 	if released != 0 {
@@ -169,9 +169,9 @@ func TestProcessDueOutboxNeverRedeliversWhenFilingFails(t *testing.T) {
 	t.Cleanup(func() { fileToSent = restore })
 
 	deliveries := 0
-	deliver := func(rcpts []string, raw []byte, when time.Time) ([]string, error) {
+	deliver := func(rcpts []string, raw []byte, when time.Time) ([]string, bool, error) {
 		deliveries++
-		return nil, nil
+		return nil, true, nil
 	}
 	released, err := releaseOutbox(context.Background(), st, deliver, nil, time.Now())
 	if released != 1 {
@@ -201,8 +201,8 @@ func TestProcessDueOutboxGivesUpAfterMaxAttempts(t *testing.T) {
 	st := openStore(t)
 	scheduleOutbox(t, st, time.Now().Add(-time.Minute))
 
-	deliver := func(rcpts []string, raw []byte, when time.Time) ([]string, error) {
-		return nil, errors.New("transport unavailable")
+	deliver := func(rcpts []string, raw []byte, when time.Time) ([]string, bool, error) {
+		return nil, true, errors.New("transport unavailable")
 	}
 	var gaveUp int
 	var gotRecipients []string
@@ -255,11 +255,11 @@ func TestProcessDueOutboxAttemptBudgetIsPerMessage(t *testing.T) {
 
 	// Fail everything for one sweep short of the budget, then let one through.
 	fail := true
-	deliver := func(rcpts []string, raw []byte, when time.Time) ([]string, error) {
+	deliver := func(rcpts []string, raw []byte, when time.Time) ([]string, bool, error) {
 		if fail {
-			return nil, errors.New("transport unavailable")
+			return nil, true, errors.New("transport unavailable")
 		}
-		return nil, nil
+		return nil, true, nil
 	}
 	for range maxReleaseAttempts - 1 {
 		_, _ = releaseOutbox(context.Background(), st, deliver, nil, time.Now())
