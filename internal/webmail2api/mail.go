@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/mime"
 	"hermex/internal/objectstore"
@@ -606,6 +607,7 @@ func (s *Server) handleMailDelete(w http.ResponseWriter, r *http.Request) {
 		_, err = st.MoveMessage(fid, uid, mapi.PrivateFIDDeletedItems)
 	}
 	if err != nil {
+		logError("delete-mail", err, logging.Fields{"folder": fid})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delete failed"})
 		return
 	}
