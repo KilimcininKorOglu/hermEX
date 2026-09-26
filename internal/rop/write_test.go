@@ -2,6 +2,7 @@ package rop
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"hermex/internal/directory"
@@ -412,6 +413,88 @@ func inboxCount(t *testing.T, dir string) int {
 // hasFromOwner reports whether the message header block carries a From line that
 // names owner, the proof that submit stamped (and Export emitted) the sender
 // identity rather than shipping a From-less message.
+// submitFromShared submits a message the owner composed in their own store with
+// shared@ as the representing address, after grant ran on shared@'s store, and
+// returns the copy delivered to alice.
+func submitFromShared(t *testing.T, grant func(*objectstore.Store) error) []byte {
+	t.Helper()
+	ownerDir, aliceDir, sharedDir := t.TempDir(), t.TempDir(), t.TempDir()
+	accounts := directory.StaticAccounts{
+		"owner@hermex.test":  {MailboxPath: ownerDir},
+		"alice@hermex.test":  {MailboxPath: aliceDir},
+		"shared@hermex.test": {MailboxPath: sharedDir},
+	}
+	shared, err := objectstore.Open(sharedDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := grant(shared); err != nil {
+		t.Fatal(err)
+	}
+	shared.Close()
+
+	sess := NewSession(ownerDir, accounts, "owner@hermex.test")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	_, h = sess.Dispatch(buildCreateMessage(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))), []uint32{logonH, 0xFFFFFFFF})
+	msgH := h[1]
+	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+		{Tag: mapi.PrSubject, Value: "From the team"},
+		{Tag: mapi.PrBody, Value: "hello"},
+		{Tag: mapi.PrSentRepresentingSmtpAddress, Value: "shared@hermex.test"},
+		{Tag: mapi.PrSentRepresentingEmailAddress, Value: "shared@hermex.test"},
+		{Tag: mapi.PrSentRepresentingAddrType, Value: "SMTP"},
+	}), []uint32{msgH})
+	toRow := buildSMTPRecipientRow(0, mapi.RecipTo, "alice@hermex.test", "Alice")
+	sess.Dispatch(buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), []uint32{msgH})
+	sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
+	sub, _ := sess.Dispatch(buildSubmitMessage(0), []uint32{msgH})
+	p := ext.NewPull(sub, ext.FlagUTF16)
+	mustU8(t, p, "RopId")
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("SubmitMessage ReturnValue = %#x", ec)
+	}
+	return firstInboxRaw(t, aliceDir)
+}
+
+// headerLine returns the first header line that starts with name.
+func headerLine(raw []byte, name string) string {
+	for line := range bytes.SplitSeq(raw, []byte("\r\n")) {
+		if len(line) == 0 {
+			break
+		}
+		if bytes.HasPrefix(line, []byte(name)) {
+			return string(line)
+		}
+	}
+	return ""
+}
+
+// TestSubmitHonorsSendGrants submits from Outlook with another mailbox in From.
+// The From decision is the one every other surface uses: a send-as grant sends as
+// that mailbox alone, a send-on-behalf grant names the owner in Sender, and no grant
+// falls back to the owner (TestSubmitOverwritesForgedRepresenting).
+func TestSubmitHonorsSendGrants(t *testing.T) {
+	grantee := []string{"owner@hermex.test"}
+	raw := submitFromShared(t, func(st *objectstore.Store) error { return st.SetSendAs(grantee) })
+	if from := headerLine(raw, "From:"); !strings.Contains(from, "shared@hermex.test") {
+		t.Errorf("send-as: From = %q, want the shared mailbox", from)
+	}
+	if sender := headerLine(raw, "Sender:"); sender != "" {
+		t.Errorf("send-as: the message discloses the real sender: %q", sender)
+	}
+
+	raw = submitFromShared(t, func(st *objectstore.Store) error { return st.SetSendOnBehalf(grantee) })
+	if from := headerLine(raw, "From:"); !strings.Contains(from, "shared@hermex.test") {
+		t.Errorf("on-behalf: From = %q, want the shared mailbox", from)
+	}
+	if sender := headerLine(raw, "Sender:"); !strings.Contains(sender, "owner@hermex.test") {
+		t.Errorf("on-behalf: Sender = %q, want the owner", sender)
+	}
+}
+
 func hasFromOwner(raw []byte, owner string) bool {
 	for line := range bytes.SplitSeq(raw, []byte("\r\n")) {
 		if len(line) == 0 {

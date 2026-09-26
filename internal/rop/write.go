@@ -12,6 +12,7 @@ import (
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcical"
 	"hermex/internal/oxcmail"
+	"hermex/internal/sendas"
 )
 
 // RECIPIENT_ROW flags ([MS-OXCDATA] 2.8.3.1 RecipientFlags). The low three bits
@@ -854,14 +855,10 @@ func (s *Session) deliverComposed(st *objectstore.Store, nm *newMessageState, re
 	// the representing identity, so an unstamped message ships From-less and is
 	// rejected downstream. Copy the bag first so the in-memory draft is untouched.
 	props := append(mapi.PropertyValues(nil), nm.props...)
-	// On an owner submit the client may legitimately name one of the owner's own
-	// aliases as From; resolve that identity set so a foreign representing address
-	// is overwritten rather than trusted.
-	var ownerIDs []string
 	if sender == "" {
-		ownerIDs = s.ownerIdentities()
+		representing, sender = s.ownerSubmitIdentity(props)
 	}
-	stampSubmitIdentity(&props, representing, sender, ownerIDs)
+	stampSubmitIdentity(&props, representing, sender)
 	oxcmail.EnsureMessageID(&props)
 
 	// The attachments are read from the saved message, which holds every one the
@@ -949,24 +946,30 @@ func recipientSMTP(bag mapi.PropertyValues) string {
 	return ""
 }
 
-// stampSubmitIdentity fixes the representing/sender identities and submit time on a
-// message about to be exported. An owner send (sender == "") keeps the client's
-// representing address only when it is one of the owner's own identities (ownerIDs,
-// the primary plus aliases); an unset, empty, or foreign address is overwritten with
-// the owner's own address, so a client cannot put another user in the From. A delegate
-// send-on-behalf (sender != "") FORCES both identities, overwriting whatever the client
-// supplied: the representing identity is the mailbox owner (the From) and the sender is
-// the delegate (the Sender). Export emits a Sender header whenever the two differ,
-// producing the "<delegate> on behalf of <owner>" form.
-func stampSubmitIdentity(props *mapi.PropertyValues, representing, sender string, ownerIDs []string) {
-	if sender == "" {
-		if representing != "" && !ownerMayRepresent(props, ownerIDs) {
-			setRepresenting(props, representing)
-		}
-	} else {
-		setRepresenting(props, representing)
-		setSender(props, sender)
+// ownerSubmitIdentity decides the From of a message the owner submits from their
+// own store. The client may name the owner, one of the owner's aliases, or a
+// mailbox that granted the owner send-as or send-on-behalf; the decision is
+// sendas.Resolve, the one every other surface that accepts a client-chosen From
+// uses. An address the owner holds no claim to is replaced with the owner's own,
+// never trusted, so a client cannot put another user in the From.
+func (s *Session) ownerSubmitIdentity(props mapi.PropertyValues) (representing, sender string) {
+	v, _ := props.Get(mapi.PrSentRepresentingSmtpAddress)
+	want, _ := v.(string)
+	representing, sender, g := sendas.Resolve(s.accounts, s.owner, want)
+	if g == sendas.GrantNone {
+		return s.owner, s.owner
 	}
+	return representing, sender
+}
+
+// stampSubmitIdentity fixes the representing/sender identities and submit time on a
+// message about to be exported, overwriting whatever the client supplied: the
+// representing identity is the From and the sender the Sender. Export emits a Sender
+// header whenever the two differ, producing the "<sender> on behalf of
+// <representing>" form of a delegate or on-behalf send.
+func stampSubmitIdentity(props *mapi.PropertyValues, representing, sender string) {
+	setRepresenting(props, representing)
+	setSender(props, sender)
 	if _, ok := props.Get(mapi.PrClientSubmitTime); !ok {
 		props.Set(mapi.PrClientSubmitTime, mapi.UnixToNTTime(time.Now()))
 	}
@@ -984,28 +987,6 @@ func setSender(props *mapi.PropertyValues, addr string) {
 	props.Set(mapi.PrSenderSmtpAddress, addr)
 	props.Set(mapi.PrSenderEmailAddress, addr)
 	props.Set(mapi.PrSenderAddrType, "SMTP")
-}
-
-// ownerMayRepresent reports whether the message's current representing address is
-// one the owner is entitled to name in From: a non-empty PR_SENT_REPRESENTING_SMTP_
-// ADDRESS matching one of ownerIDs (the owner's primary plus aliases, case-insensitive).
-// An unset, empty, or foreign address returns false so the caller overwrites it with
-// the owner's own address.
-func ownerMayRepresent(props *mapi.PropertyValues, ownerIDs []string) bool {
-	v, ok := props.Get(mapi.PrSentRepresentingSmtpAddress)
-	if !ok {
-		return false
-	}
-	cur, _ := v.(string)
-	if cur == "" {
-		return false
-	}
-	for _, id := range ownerIDs {
-		if strings.EqualFold(strings.TrimSpace(id), strings.TrimSpace(cur)) {
-			return true
-		}
-	}
-	return false
 }
 
 // scanUploadedMessage scans the attachment content of a message a client just
