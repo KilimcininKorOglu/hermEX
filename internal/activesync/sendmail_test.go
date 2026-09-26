@@ -346,3 +346,35 @@ func TestSmartReplyURLQuerySource(t *testing.T) {
 		t.Errorf("source verb = %d (present=%v), want %d", v, ok, mapi.NoteVerbReplyToSender)
 	}
 }
+
+// TestSendMailLeavesTheOnlyCopyToAnExclusiveMailbox sends as bob, who granted alice
+// send-as, files his own copy and asks for it to be the only one: alice's Sent Items
+// stays empty although the device asked for a copy.
+func TestSendMailLeavesTheOnlyCopyToAnExclusiveMailbox(t *testing.T) {
+	ts, aliceDir, bobDir := sendServer(t)
+	st, err := objectstore.Open(bobDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSendAs([]string{testUser}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSentCopyConfig(objectstore.SentCopyConfig{ForSendAs: true, Exclusive: true}); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	asBob := "From: bob@hermex.test\r\nTo: bob@hermex.test\r\nSubject: team\r\n" +
+		"Date: Mon, 15 Jun 2026 09:00:00 +0000\r\nMessage-ID: <x1@hermex.test>\r\n\r\nhi\r\n"
+	sm := wbxml.Elem(wbxml.CMSendMail,
+		wbxml.Empty(wbxml.CMSaveInSentItems),
+		wbxml.Opaque(wbxml.CMMIME, []byte(asBob)))
+	if resp, out := postRaw(t, ts, "SendMail", wbxml.Marshal(sm)); resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d: %s", resp.StatusCode, out)
+	}
+	if n := folderCount(t, aliceDir, int64(mapi.PrivateFIDSentItems)); n != 0 {
+		t.Errorf("alice's Sent has %d messages, want none", n)
+	}
+	if n := folderCount(t, bobDir, int64(mapi.PrivateFIDSentItems)); n != 1 {
+		t.Errorf("bob's Sent has %d messages, want his copy", n)
+	}
+}

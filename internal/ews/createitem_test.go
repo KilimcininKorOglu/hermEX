@@ -132,3 +132,51 @@ func TestResolveNames(t *testing.T) {
 		t.Errorf("no-match resolve should warn no results: %s", none)
 	}
 }
+
+// TestCreateItemLeavesTheOnlyCopyToAnExclusiveMailbox sends as a mailbox that files
+// its own copy and asks for it to be the only one: the caller's Sent Items stays
+// empty on SendAndSaveCopy, and the represented mailbox holds the copy.
+func TestCreateItemLeavesTheOnlyCopyToAnExclusiveMailbox(t *testing.T) {
+	dir, sharedDir := t.TempDir(), t.TempDir()
+	shared, err := objectstore.Open(sharedDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := shared.SetSendAs([]string{testUser}); err != nil {
+		t.Fatal(err)
+	}
+	if err := shared.SetSentCopyConfig(objectstore.SentCopyConfig{ForSendAs: true, Exclusive: true}); err != nil {
+		t.Fatal(err)
+	}
+	shared.Close()
+	if st, err := objectstore.Open(dir); err == nil {
+		st.Close()
+	}
+	accs := directory.StaticAccounts{
+		testUser:             {Password: testPass, MailboxPath: dir},
+		"shared@hermex.test": {Shared: true, MailboxPath: sharedDir},
+	}
+	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
+	t.Cleanup(ts.Close)
+
+	req := wrapRequest(`<CreateItem MessageDisposition="SendAndSaveCopy" xmlns="` + nsMessages + `">` +
+		`<Items><t:Message xmlns:t="` + nsTypes + `">` +
+		`<t:Subject>team</t:Subject><t:Body BodyType="Text">hi</t:Body>` +
+		`<t:ToRecipients><t:Mailbox><t:EmailAddress>` + testUser + `</t:EmailAddress></t:Mailbox></t:ToRecipients>` +
+		`<t:From><t:Mailbox><t:EmailAddress>shared@hermex.test</t:EmailAddress></t:Mailbox></t:From>` +
+		`</t:Message></Items></CreateItem>`)
+	if _, out := soapPost(t, ts, req, true); !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Fatalf("not success: %s", out)
+	}
+	for d, want := range map[string]int{dir: 0, sharedDir: 1} {
+		st, err := objectstore.Open(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sent, _ := st.ListMessages(int64(mapi.PrivateFIDSentItems))
+		st.Close()
+		if len(sent) != want {
+			t.Errorf("%s Sent Items holds %d, want %d", d, len(sent), want)
+		}
+	}
+}

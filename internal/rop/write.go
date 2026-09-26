@@ -759,17 +759,21 @@ func (s *Session) ropSubmitMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 		return true
 	}
 	nm := obj.newMsg
-	raw, err := s.deliverComposed(obj.store, nm, representing, sender)
+	raw, keepOwnCopy, err := s.deliverComposed(obj.store, nm, representing, sender)
 	if err != nil {
 		writeErr(out, ropSubmitMessage, hindex, noRecipientOrError(err))
 		return true
 	}
 	// Delivery has succeeded. The Sent Items copy is filed in the mailbox the message
 	// was sent from, for a send-on-behalf submit that is the principal's mailbox, not
-	// the delegate's (a deliberate v1 default). Filing the copy and consuming the
-	// source draft are best-effort follow-up, a failure here must not re-fail a
-	// message that has already gone out (which would make the client resend it).
-	_, _ = obj.store.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, time.Now(), int64(objectstore.FlagSeen))
+	// the delegate's (a deliberate v1 default), and none is filed when the mailbox the
+	// message was sent in the name of filed the only copy. Filing the copy and
+	// consuming the source draft are best-effort follow-up, a failure here must not
+	// re-fail a message that has already gone out (which would make the client resend
+	// it).
+	if keepOwnCopy {
+		_, _ = obj.store.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, time.Now(), int64(objectstore.FlagSeen))
+	}
 	_ = obj.store.DeleteObject(nm.savedID)
 	nm.saved = false // the saved message is gone; a re-submit must not re-send
 
@@ -827,7 +831,9 @@ var errNoRecipient = errors.New("rop: no routable recipient")
 // oxcmail.Export writes a Bcc header for any RecipBcc bag, so leaving Bcc in the
 // wire copy would disclose blind recipients to the To/Cc readers), stamps the
 // representing and sender identities the caller resolved (representing is the From; a
-// non-empty sender adds the on-behalf Sender), and returns the delivered raw bytes. It
+// non-empty sender adds the on-behalf Sender), and returns the delivered raw bytes and
+// whether the submitter keeps a Sent copy (false when the mailbox the message was sent
+// in the name of filed the only one). It
 // reports errNoRecipient when nothing is routable; the caller maps that (and any
 // export/deliver fault) to its own ROP error code. The caller has already verified
 // nm.saved, nm.savedID, and s.accounts. st is the store the message was composed
@@ -837,7 +843,7 @@ var errNoRecipient = errors.New("rop: no routable recipient")
 // text/calendar alternative ([MS-OXCICAL]), because a recipient outside this server
 // reads a request, a response, a counter proposal or a cancellation from that part
 // alone. Without it the message arrives as a plain mail.
-func (s *Session) deliverComposed(st *objectstore.Store, nm *newMessageState, representing, sender string) ([]byte, error) {
+func (s *Session) deliverComposed(st *objectstore.Store, nm *newMessageState, representing, sender string) (raw []byte, keepOwnCopy bool, err error) {
 	var recipients []string
 	wire := make([]mapi.PropertyValues, 0, len(nm.recipients))
 	for _, bag := range nm.recipients {
@@ -849,7 +855,7 @@ func (s *Session) deliverComposed(st *objectstore.Store, nm *newMessageState, re
 		}
 	}
 	if len(recipients) == 0 {
-		return nil, errNoRecipient
+		return nil, false, errNoRecipient
 	}
 	// Stamp the representing/sender identities + submit time: Export derives From from
 	// the representing identity, so an unstamped message ships From-less and is
@@ -865,22 +871,23 @@ func (s *Session) deliverComposed(st *objectstore.Store, nm *newMessageState, re
 	// client created, whether before or after its first save.
 	saved, err := st.OpenMessage(nm.savedID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	msg := &oxcmail.Message{Props: props, Recipients: wire, Attachments: saved.Attachments}
 	opt, err := meetingCalendar(st, msg)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	msg.Attachments = mailAttachments(saved.Attachments)
-	raw, err := oxcmail.Export(msg, opt)
+	raw, err = oxcmail.Export(msg, opt)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	if _, err := mta.DeliverAndRelay(s.accounts, s.spool, s.owner, recipients, raw, time.Now()); err != nil {
-		return nil, err
+	_, keepOwnCopy, err = mta.SendAndRelay(s.accounts, s.spool, s.owner, recipients, raw, time.Now())
+	if err != nil {
+		return nil, false, err
 	}
-	return raw, nil
+	return raw, keepOwnCopy, nil
 }
 
 // meetingCalendar returns the export options that attach a meeting message's

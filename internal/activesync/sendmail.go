@@ -51,11 +51,14 @@ func (s *Server) handleSendMail(w http.ResponseWriter, r *http.Request, sess *se
 
 	// Deliver with Bcc stripped so recipients never see the blind list; the
 	// saved copy keeps the full headers for the sender's record.
-	if _, err := mta.DeliverAndRelay(s.accounts, s.Spool, sess.user, recipients, stripBcc(cm.mime), time.Now()); err != nil {
+	_, keepOwnCopy, err := mta.SendAndRelay(s.accounts, s.Spool, sess.user, recipients, stripBcc(cm.mime), time.Now())
+	if err != nil {
 		s.failRequest(w, r, "sendmail.delivery.fail", err, http.StatusInternalServerError, "delivery failed")
 		return
 	}
 
+	// The mailbox the message was sent in the name of may have filed the only copy.
+	cm.saveToSent = cm.saveToSent && keepOwnCopy
 	s.fileSentCopy(sess, r, cm)
 	w.WriteHeader(http.StatusOK)
 }

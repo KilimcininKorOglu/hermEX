@@ -119,11 +119,13 @@ func (s *Server) sendOne(cache *storeCache, sess *session, itemID string, save b
 	if err != nil {
 		return itemError("ErrorInternalServerError")
 	}
-	if _, err := mta.DeliverAndRelay(s.accounts, s.Spool, sess.user, recips, raw, time.Now()); err != nil {
+	_, keepOwnCopy, err := mta.SendAndRelay(s.accounts, s.Spool, sess.user, recips, raw, time.Now())
+	if err != nil {
 		return itemError("ErrorInternalServerError")
 	}
 
-	if err := consumeDraft(st, id, raw, save, saveFID); err != nil {
+	// The mailbox the message was sent in the name of may have filed the only copy.
+	if err := consumeDraft(st, id, raw, save && keepOwnCopy, saveFID); err != nil {
 		return itemError("ErrorInternalServerError")
 	}
 	return itemResponseMessage{ResponseClass: "Success", ResponseCode: "NoError"}

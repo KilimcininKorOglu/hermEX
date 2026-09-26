@@ -66,7 +66,9 @@ func (s *Session) ropTransportSend(_ *ext.Pull, out *ext.Push, handles []uint32,
 	if !ok {
 		return true
 	}
-	if _, err := s.deliverComposed(obj.store, obj.newMsg, representing, sender); err != nil {
+	// The client files its own Sent copy after TransportSend, so the server has none
+	// to withhold.
+	if _, _, err := s.deliverComposed(obj.store, obj.newMsg, representing, sender); err != nil {
 		writeErr(out, ropTransportSend, hindex, noRecipientOrError(err))
 		return true
 	}

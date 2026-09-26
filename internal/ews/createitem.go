@@ -176,9 +176,12 @@ func (s *Server) createOneItem(st *objectstore.Store, sess *session, m createMes
 		return itemError("ErrorInternalServerError")
 	}
 	if send {
-		if code := s.sendCreatedItem(sess, m, raw); code != "" {
+		code, keepOwnCopy := s.sendCreatedItem(sess, m, raw)
+		if code != "" {
 			return itemError(code)
 		}
+		// The mailbox the message was sent in the name of may have filed the only copy.
+		save = save && keepOwnCopy
 	}
 	// Every successful CreateItemResponseMessage carries an <m:Items> container,
 	// clients reject its absence. It is empty for SendOnly (nothing is persisted)
@@ -192,16 +195,18 @@ func (s *Server) createOneItem(st *objectstore.Store, sess *session, m createMes
 }
 
 // sendCreatedItem relays one built message to its recipients, reporting the
-// response code refusing the send; an empty code means it went out.
-func (s *Server) sendCreatedItem(sess *session, m createMessage, raw []byte) string {
+// response code refusing the send; an empty code means it went out. keepOwnCopy is
+// false when the mailbox the message was sent in the name of filed the only copy.
+func (s *Server) sendCreatedItem(sess *session, m createMessage, raw []byte) (code string, keepOwnCopy bool) {
 	recips := recipientEmails(m)
 	if len(recips) == 0 {
-		return "ErrorInvalidRecipients"
+		return "ErrorInvalidRecipients", false
 	}
-	if _, err := mta.DeliverAndRelay(s.accounts, s.Spool, sess.user, recips, raw, time.Now()); err != nil {
-		return "ErrorInternalServerError"
+	_, keepOwnCopy, err := mta.SendAndRelay(s.accounts, s.Spool, sess.user, recips, raw, time.Now())
+	if err != nil {
+		return "ErrorInternalServerError", false
 	}
-	return ""
+	return "", keepOwnCopy
 }
 
 // fileCreatedItem stores the copy the disposition asks for: a draft for SaveOnly,

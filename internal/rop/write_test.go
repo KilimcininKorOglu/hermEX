@@ -415,10 +415,11 @@ func inboxCount(t *testing.T, dir string) int {
 // identity rather than shipping a From-less message.
 // submitFromShared submits a message the owner composed in their own store with
 // shared@ as the representing address, after grant ran on shared@'s store, and
-// returns the copy delivered to alice.
-func submitFromShared(t *testing.T, grant func(*objectstore.Store) error) []byte {
+// returns the copy delivered to alice with the owner's and shared@'s mailboxes.
+func submitFromShared(t *testing.T, grant func(*objectstore.Store) error) (raw []byte, ownerDir, sharedDir string) {
 	t.Helper()
-	ownerDir, aliceDir, sharedDir := t.TempDir(), t.TempDir(), t.TempDir()
+	ownerDir, sharedDir = t.TempDir(), t.TempDir()
+	aliceDir := t.TempDir()
 	accounts := directory.StaticAccounts{
 		"owner@hermex.test":  {MailboxPath: ownerDir},
 		"alice@hermex.test":  {MailboxPath: aliceDir},
@@ -456,7 +457,7 @@ func submitFromShared(t *testing.T, grant func(*objectstore.Store) error) []byte
 	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
 		t.Fatalf("SubmitMessage ReturnValue = %#x", ec)
 	}
-	return firstInboxRaw(t, aliceDir)
+	return firstInboxRaw(t, aliceDir), ownerDir, sharedDir
 }
 
 // headerLine returns the first header line that starts with name.
@@ -478,7 +479,7 @@ func headerLine(raw []byte, name string) string {
 // falls back to the owner (TestSubmitOverwritesForgedRepresenting).
 func TestSubmitHonorsSendGrants(t *testing.T) {
 	grantee := []string{"owner@hermex.test"}
-	raw := submitFromShared(t, func(st *objectstore.Store) error { return st.SetSendAs(grantee) })
+	raw, _, _ := submitFromShared(t, func(st *objectstore.Store) error { return st.SetSendAs(grantee) })
 	if from := headerLine(raw, "From:"); !strings.Contains(from, "shared@hermex.test") {
 		t.Errorf("send-as: From = %q, want the shared mailbox", from)
 	}
@@ -486,12 +487,30 @@ func TestSubmitHonorsSendGrants(t *testing.T) {
 		t.Errorf("send-as: the message discloses the real sender: %q", sender)
 	}
 
-	raw = submitFromShared(t, func(st *objectstore.Store) error { return st.SetSendOnBehalf(grantee) })
+	raw, _, _ = submitFromShared(t, func(st *objectstore.Store) error { return st.SetSendOnBehalf(grantee) })
 	if from := headerLine(raw, "From:"); !strings.Contains(from, "shared@hermex.test") {
 		t.Errorf("on-behalf: From = %q, want the shared mailbox", from)
 	}
 	if sender := headerLine(raw, "Sender:"); !strings.Contains(sender, "owner@hermex.test") {
 		t.Errorf("on-behalf: Sender = %q, want the owner", sender)
+	}
+}
+
+// TestSubmitLeavesTheOnlyCopyToAnExclusiveMailbox submits as a mailbox that files
+// its own copy and asks for it to be the only one: the submitter's Sent Items stays
+// empty, and the represented mailbox holds the copy.
+func TestSubmitLeavesTheOnlyCopyToAnExclusiveMailbox(t *testing.T) {
+	_, ownerDir, sharedDir := submitFromShared(t, func(st *objectstore.Store) error {
+		if err := st.SetSendAs([]string{"owner@hermex.test"}); err != nil {
+			return err
+		}
+		return st.SetSentCopyConfig(objectstore.SentCopyConfig{ForSendAs: true, Exclusive: true})
+	})
+	if n := sentItemsCount(t, ownerDir); n != 0 {
+		t.Errorf("the submitter's Sent Items holds %d messages, want none", n)
+	}
+	if n := sentItemsCount(t, sharedDir); n != 1 {
+		t.Errorf("the shared mailbox's Sent Items holds %d messages, want its copy", n)
 	}
 }
 
