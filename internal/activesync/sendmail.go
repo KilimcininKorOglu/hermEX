@@ -86,7 +86,9 @@ func (s *Server) fileSentCopy(sess *session, r *http.Request, cm composeMail) {
 	}
 	defer func() { _ = st.Close() }()
 	if cm.saveToSent {
-		_, _ = st.AppendMessage(int64(mapi.PrivateFIDSentItems), cm.mime, time.Now(), objectstore.FlagSeen)
+		if _, err := st.AppendMessage(int64(mapi.PrivateFIDSentItems), cm.mime, time.Now(), objectstore.FlagSeen); err != nil {
+			st.LogSwallowedError("activesync.sent-copy", err)
+		}
 	}
 	if needMark {
 		markReplyForwardSource(st, srcFolder, srcItem, forward)
