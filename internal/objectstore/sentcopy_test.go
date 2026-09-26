@@ -17,14 +17,15 @@ func TestSentCopyConfigRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ForSendAs || cfg.ForSendOnBehalf {
-		t.Errorf("an unset config read as %+v, want both false", cfg)
+	if cfg != (SentCopyConfig{}) {
+		t.Errorf("an unset config read as %+v, want all false", cfg)
 	}
 
 	for _, want := range []SentCopyConfig{
 		{ForSendAs: true},
 		{ForSendOnBehalf: true},
 		{ForSendAs: true, ForSendOnBehalf: true},
+		{ForSendAs: true, Exclusive: true},
 		{},
 	} {
 		if err := st.SetSentCopyConfig(want); err != nil {
