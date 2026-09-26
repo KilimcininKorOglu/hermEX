@@ -1,6 +1,7 @@
 package objectstore
 
 import (
+	"reflect"
 	"strings"
 
 	"hermex/internal/mapi"
@@ -168,6 +169,38 @@ func evalProperty(pr mapi.PropertyRestriction, props mapi.PropertyValues) bool {
 	if !ok {
 		return false
 	}
+	if pr.PropTag.Type().IsMultivalue() {
+		return evalMultivalueProperty(pr, have)
+	}
+	return compareProperty(have, pr)
+}
+
+// evalMultivalueProperty compares a multivalued property against a single value:
+// EQ matches when one of the values equals it, NE when none does. An ordering
+// operator has no meaning against a list and matches nothing.
+func evalMultivalueProperty(pr mapi.PropertyRestriction, have any) bool {
+	if pr.Relop != mapi.RelopEQ && pr.Relop != mapi.RelopNE {
+		return false
+	}
+	list := reflect.ValueOf(have)
+	if list.Kind() != reflect.Slice {
+		return false
+	}
+	eq := pr
+	eq.Relop = mapi.RelopEQ
+	found := false
+	for i := range list.Len() {
+		if compareProperty(list.Index(i).Interface(), eq) {
+			found = true
+			break
+		}
+	}
+	return found == (pr.Relop == mapi.RelopEQ)
+}
+
+// compareProperty applies the relational operator to one value. Integer values
+// compare numerically and string values lexically; a type mismatch fails.
+func compareProperty(have any, pr mapi.PropertyRestriction) bool {
 	if hn, hok := toInt64(have); hok {
 		if wn, wok := toInt64(pr.PropVal.Value); wok {
 			return applyRelop(cmpInt64(hn, wn), pr.Relop)

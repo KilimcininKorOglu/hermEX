@@ -3,6 +3,7 @@ package rop
 import (
 	"bytes"
 	"cmp"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -640,7 +641,7 @@ func restrictionSupported(r mapi.Restriction) bool {
 		return true
 	case mapi.ResProperty:
 		pr, _ := r.Value.(mapi.PropertyRestriction)
-		return relopSupported(pr.Relop)
+		return propertyRestrictionSupported(pr)
 	case mapi.ResContent:
 		c, _ := r.Value.(mapi.ContentRestriction)
 		return contentRestrictionSupported(c)
@@ -660,6 +661,16 @@ func allRestrictionsSupported(kids []mapi.Restriction) bool {
 		}
 	}
 	return true
+}
+
+// propertyRestrictionSupported reports whether a property restriction is one this
+// server evaluates. A multivalued property takes EQ and NE only, because an
+// ordering has no meaning against a list of values.
+func propertyRestrictionSupported(pr mapi.PropertyRestriction) bool {
+	if pr.PropTag.Type().IsMultivalue() {
+		return pr.Relop == mapi.RelopEQ || pr.Relop == mapi.RelopNE
+	}
+	return relopSupported(pr.Relop)
 }
 
 // relopSupported reports whether a property restriction's relational operator is
@@ -787,6 +798,9 @@ func evalProperty(pr mapi.PropertyRestriction, props mapi.PropertyValues) bool {
 	if !ok {
 		return false
 	}
+	if pr.PropTag.Type().IsMultivalue() {
+		return evalMultivalueProperty(pr, v)
+	}
 	c := compareValues(v, pr.PropVal.Value)
 	switch pr.Relop {
 	case mapi.RelopLT:
@@ -803,6 +817,37 @@ func evalProperty(pr mapi.PropertyRestriction, props mapi.PropertyValues) bool {
 		return c != 0
 	}
 	return false
+}
+
+// evalMultivalueProperty compares a multivalued property against a single value:
+// EQ matches when one of the values equals it, NE when none does. An ordering
+// operator has no meaning against a list and matches nothing, and a value of
+// another type never counts as equal.
+func evalMultivalueProperty(pr mapi.PropertyRestriction, v any) bool {
+	if pr.Relop != mapi.RelopEQ && pr.Relop != mapi.RelopNE {
+		return false
+	}
+	list := reflect.ValueOf(v)
+	if list.Kind() != reflect.Slice {
+		return false
+	}
+	found := false
+	for i := range list.Len() {
+		if c, ok := compareSameKind(list.Index(i).Interface(), pr.PropVal.Value); ok && c == 0 {
+			found = true
+			break
+		}
+	}
+	return found == (pr.Relop == mapi.RelopEQ)
+}
+
+// compareSameKind orders two values that compare as numbers or as text, and
+// reports false for a pair that does not.
+func compareSameKind(a, b any) (int, bool) {
+	if r, ok := compareNumbers(a, b); ok {
+		return r, true
+	}
+	return compareTextual(a, b)
 }
 
 // evalContent applies a text content match (full-string, substring, or prefix,

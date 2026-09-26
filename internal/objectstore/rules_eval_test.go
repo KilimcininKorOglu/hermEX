@@ -174,6 +174,36 @@ func TestEvalContentMultivalued(t *testing.T) {
 	}
 }
 
+// TestEvalPropertyMultivalued compares a multivalued property against one value:
+// EQ matches when a value equals it, NE when none does, and an ordering operator
+// matches nothing.
+func TestEvalPropertyMultivalued(t *testing.T) {
+	keywords := mapi.MakeTag(0x8001, mapi.PtMvUnicode)
+	bag := mapi.PropertyValues{{Tag: keywords, Value: []string{"Blue", "Project X"}}}
+	prop := func(relop mapi.Relop, want string) mapi.Restriction {
+		return mapi.Restriction{Type: mapi.ResProperty, Value: mapi.PropertyRestriction{
+			Relop: relop, PropTag: keywords,
+			PropVal: mapi.TaggedPropVal{Tag: keywords.WithType(mapi.PtUnicode), Value: want}}}
+	}
+	cases := []struct {
+		name  string
+		relop mapi.Relop
+		want  string
+		match bool
+	}{
+		{"eq second value", mapi.RelopEQ, "Project X", true},
+		{"eq no value", mapi.RelopEQ, "Red", false},
+		{"ne no value", mapi.RelopNE, "Red", true},
+		{"ne one value", mapi.RelopNE, "Blue", false},
+		{"ordering refused", mapi.RelopGT, "A", false},
+	}
+	for _, c := range cases {
+		if got := evalRestriction(prop(c.relop, c.want), bag); got != c.match {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.match)
+		}
+	}
+}
+
 // deliverTo files a raw RFC822 message into a folder and returns its index info,
 // running the same Import path delivery uses so the property bag under test is
 // exactly the one production rules see.

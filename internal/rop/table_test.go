@@ -594,6 +594,42 @@ func TestRestrictContentMultivalued(t *testing.T) {
 	}
 }
 
+// TestRestrictPropertyMultivalued compares a multivalued property against one
+// value. EQ matches when a value equals it and NE when none does. A value of
+// another type is not equal, and an ordering operator is refused.
+func TestRestrictPropertyMultivalued(t *testing.T) {
+	keywords := mapi.MakeTag(0x8001, mapi.PtMvUnicode)
+	row := mapi.PropertyValues{{Tag: keywords, Value: []string{"Blue", "Project X"}}}
+	prop := func(relop mapi.Relop, want any) mapi.Restriction {
+		return mapi.Restriction{Type: mapi.ResProperty, Value: mapi.PropertyRestriction{
+			Relop: relop, PropTag: keywords,
+			PropVal: mapi.TaggedPropVal{Tag: keywords.WithType(mapi.PtUnicode), Value: want},
+		}}
+	}
+	for _, c := range []struct {
+		name  string
+		relop mapi.Relop
+		want  any
+		match bool
+	}{
+		{"eq second value", mapi.RelopEQ, "Project X", true},
+		{"eq no value", mapi.RelopEQ, "Red", false},
+		{"eq other type", mapi.RelopEQ, int32(7), false},
+		{"ne no value", mapi.RelopNE, "Red", true},
+		{"ne one value", mapi.RelopNE, "Blue", false},
+	} {
+		if !restrictionSupported(prop(c.relop, c.want)) {
+			t.Fatalf("%s: RopRestrict refuses the restriction", c.name)
+		}
+		if got := evalRestriction(prop(c.relop, c.want), row); got != c.match {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.match)
+		}
+	}
+	if restrictionSupported(prop(mapi.RelopGT, "A")) {
+		t.Error("an ordering operator on a multivalued property was accepted")
+	}
+}
+
 // TestRestrictNot covers the boolean tree: NOT(subject == Banana) keeps the rest.
 func TestRestrictNot(t *testing.T) {
 	dir := t.TempDir()
