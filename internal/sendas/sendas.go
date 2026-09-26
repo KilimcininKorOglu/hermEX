@@ -101,7 +101,9 @@ func grantOf(accounts directory.Accounts, want string, ids []string) Grant {
 	if !ok {
 		return GrantNone
 	}
-	st, err := objectstore.Open(path)
+	// A mailbox that was never provisioned holds no grants, and a read must not
+	// create it.
+	st, err := objectstore.OpenExisting(path)
 	if err != nil {
 		return GrantNone
 	}

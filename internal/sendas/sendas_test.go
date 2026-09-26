@@ -143,3 +143,20 @@ func TestAnUnopenableMailboxDeniesTheGrant(t *testing.T) {
 		t.Errorf("grant = %v, want none: an unopenable store must deny", g)
 	}
 }
+
+// TestResolveLeavesAnUnprovisionedMailboxAlone asks for the identity of an account
+// whose mailbox was never created. It grants nothing, and asking must not create
+// the mailbox, because only delivery provisions one.
+func TestResolveLeavesAnUnprovisionedMailboxAlone(t *testing.T) {
+	dir := t.TempDir()
+	accounts := directory.StaticAccounts{
+		caller:             {MailboxPath: t.TempDir()},
+		"team@hermex.test": {MailboxPath: dir},
+	}
+	if _, _, g := Resolve(accounts, caller, "team@hermex.test"); g != GrantNone {
+		t.Errorf("grant = %v, want none", g)
+	}
+	if _, err := objectstore.OpenExisting(dir); err == nil {
+		t.Error("resolving the identity created the mailbox")
+	}
+}
