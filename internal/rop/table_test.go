@@ -562,6 +562,35 @@ func TestRestrictContentSubstring(t *testing.T) {
 	assertSubjects(t, rows, "Weekly Report A", "report B")
 }
 
+// TestRestrictContentMultivalued filters on a multivalued string property, the
+// way a category view restricts the Keywords property: a row matches when any
+// one of its values does.
+func TestRestrictContentMultivalued(t *testing.T) {
+	keywords := mapi.MakeTag(0x8001, mapi.PtMvUnicode)
+	row := mapi.PropertyValues{{Tag: keywords, Value: []string{"Blue", "Project X"}}}
+	content := func(fuzzy uint32, needle string) mapi.Restriction {
+		return mapi.Restriction{Type: mapi.ResContent, Value: mapi.ContentRestriction{
+			FuzzyLevel: fuzzy, PropTag: keywords,
+			PropVal: mapi.TaggedPropVal{Tag: keywords.WithType(mapi.PtUnicode), Value: needle},
+		}}
+	}
+	for _, c := range []struct {
+		name  string
+		fuzzy uint32
+		ndl   string
+		want  bool
+	}{
+		{"second value", fuzzyFullString, "Project X", true},
+		{"first value ignorecase", fuzzyFullString | fuzzyIgnoreCase, "blue", true},
+		{"prefix of one value", fuzzyPrefix, "Proj", true},
+		{"no value", fuzzyFullString, "Red", false},
+	} {
+		if got := evalRestriction(content(c.fuzzy, c.ndl), row); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 // TestRestrictNot covers the boolean tree: NOT(subject == Banana) keeps the rest.
 func TestRestrictNot(t *testing.T) {
 	dir := t.TempDir()

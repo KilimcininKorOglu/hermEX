@@ -145,6 +145,35 @@ func TestEvalContentFuzzyKinds(t *testing.T) {
 	}
 }
 
+// TestEvalContentMultivalued checks a content condition on a multivalued string
+// property, the shape of a category condition on the Keywords property: it
+// matches when any one value matches, and fails when none does.
+func TestEvalContentMultivalued(t *testing.T) {
+	keywords := mapi.MakeTag(0x8001, mapi.PtMvUnicode)
+	bag := mapi.PropertyValues{{Tag: keywords, Value: []string{"Blue", "Project X"}}}
+	content := func(fuzzy uint32, needle string) mapi.Restriction {
+		return mapi.Restriction{Type: mapi.ResContent, Value: mapi.ContentRestriction{
+			FuzzyLevel: fuzzy, PropTag: keywords,
+			PropVal: mapi.TaggedPropVal{Tag: keywords.WithType(mapi.PtUnicode), Value: needle}}}
+	}
+	cases := []struct {
+		name  string
+		fuzzy uint32
+		ndl   string
+		want  bool
+	}{
+		{"second value full string", flFullString, "Project X", true},
+		{"first value ignorecase", flFullString | flIgnoreCase, "blue", true},
+		{"substring of one value", flSubstring, "ject", true},
+		{"no value matches", flFullString, "Red", false},
+	}
+	for _, c := range cases {
+		if got := evalRestriction(content(c.fuzzy, c.ndl), bag); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 // deliverTo files a raw RFC822 message into a folder and returns its index info,
 // running the same Import path delivery uses so the property bag under test is
 // exactly the one production rules see.

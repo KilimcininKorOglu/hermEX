@@ -119,13 +119,11 @@ func evalAny(kids []mapi.Restriction, props mapi.PropertyValues) bool {
 
 // evalContent matches a string property against the search value with the
 // fuzzy level's match kind and case sensitivity. Only string-valued properties
-// participate; a non-string property or value fails the match.
+// participate; a non-string property or value fails the match. A multivalued
+// string property matches when any one of its values does, so a condition on
+// the Keywords property matches a message filed under that category.
 func evalContent(c mapi.ContentRestriction, props mapi.PropertyValues) bool {
 	v, ok := props.GetAnyCharset(c.PropTag)
-	if !ok {
-		return false
-	}
-	hay, ok := v.(string)
 	if !ok {
 		return false
 	}
@@ -133,11 +131,26 @@ func evalContent(c mapi.ContentRestriction, props mapi.PropertyValues) bool {
 	if !ok {
 		return false
 	}
-	if c.FuzzyLevel&flIgnoreCase != 0 {
+	switch hay := v.(type) {
+	case string:
+		return contentMatches(hay, needle, c.FuzzyLevel)
+	case []string:
+		for _, one := range hay {
+			if contentMatches(one, needle, c.FuzzyLevel) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// contentMatches applies one fuzzy level to one string value.
+func contentMatches(hay, needle string, fuzzyLevel uint32) bool {
+	if fuzzyLevel&flIgnoreCase != 0 {
 		hay = strings.ToLower(hay)
 		needle = strings.ToLower(needle)
 	}
-	switch c.FuzzyLevel & 0x0000FFFF {
+	switch fuzzyLevel & 0x0000FFFF {
 	case flFullString:
 		return hay == needle
 	case flPrefix:

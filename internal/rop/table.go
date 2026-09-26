@@ -803,21 +803,37 @@ func evalProperty(pr mapi.PropertyRestriction, props mapi.PropertyValues) bool {
 }
 
 // evalContent applies a text content match (full-string, substring, or prefix,
-// optionally case-insensitive). An absent or non-text value matches nothing.
+// optionally case-insensitive). A multivalued string property matches when any
+// one of its values does, which is how a category filter tests the Keywords
+// property. An absent or non-text value matches nothing.
 func evalContent(c mapi.ContentRestriction, props mapi.PropertyValues) bool {
 	v, ok := props.GetAnyCharset(c.PropTag)
 	if !ok {
 		return false
 	}
-	row, ok1 := v.(string)
-	want, ok2 := c.PropVal.Value.(string)
-	if !ok1 || !ok2 {
+	want, ok := c.PropVal.Value.(string)
+	if !ok {
 		return false
 	}
-	if c.FuzzyLevel&fuzzyIgnoreCase != 0 {
+	switch row := v.(type) {
+	case string:
+		return contentMatches(row, want, c.FuzzyLevel)
+	case []string:
+		for _, one := range row {
+			if contentMatches(one, want, c.FuzzyLevel) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// contentMatches applies one fuzzy level to one string value.
+func contentMatches(row, want string, fuzzyLevel uint32) bool {
+	if fuzzyLevel&fuzzyIgnoreCase != 0 {
 		row, want = strings.ToLower(row), strings.ToLower(want)
 	}
-	switch c.FuzzyLevel & 0xFFFF {
+	switch fuzzyLevel & 0xFFFF {
 	case fuzzySubString:
 		return strings.Contains(row, want)
 	case fuzzyPrefix:
