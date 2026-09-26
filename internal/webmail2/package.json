@@ -8,7 +8,8 @@
   },
   "scripts": {
     "dev": "vite",
-    "prebuild": "npm ci --prefer-offline --no-audit --no-fund",
+    "postinstall": "node -e \"require('fs').writeFileSync('node_modules/go.mod', 'module hermex/webmail2-node-modules\\n')\"",
+    "prebuild":"npm ci --prefer-offline --no-audit --no-fund",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext js,jsx,ts,tsx --report-unused-disable-directives --max-warnings 0",
