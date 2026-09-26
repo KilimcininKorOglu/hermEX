@@ -29,31 +29,38 @@ import (
 // the caller as the envelope sender, and an on-behalf send additionally names the
 // caller in Sender. That is the same distinction the two settings are written in
 // terms of.
-func fileRepresentedCopy(accounts directory.Accounts, envelopeFrom string, raw []byte, sent time.Time) {
+//
+// only reports that the represented mailbox asked for its copy to be the only one
+// and the copy was written, so the caller files none in the sender's own mailbox. It
+// is never true when the copy failed, so a failure cannot leave the message filed
+// nowhere.
+func fileRepresentedCopy(accounts directory.Accounts, envelopeFrom string, raw []byte, sent time.Time) (only bool) {
 	path, onBehalf, ok := representedMailbox(accounts, envelopeFrom, raw)
 	if !ok {
-		return
+		return false
 	}
 	st, err := objectstore.OpenExisting(path)
 	if err != nil {
 		logSentCopy(envelopeFrom, "open", err)
-		return
+		return false
 	}
 	defer st.Close()
 
 	cfg, err := st.GetSentCopyConfig()
 	if err != nil {
 		st.LogSwallowedError("mta.sent-copy-config", err)
-		return
+		return false
 	}
 	if (onBehalf && !cfg.ForSendOnBehalf) || (!onBehalf && !cfg.ForSendAs) {
-		return
+		return false
 	}
 	// The mailbox filed it itself, so it is already read: nobody there composed it and
 	// an unread count that grows with every delegate send would be noise.
 	if _, err := st.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, sent, objectstore.FlagSeen); err != nil {
 		st.LogSwallowedError("mta.sent-copy-file", err)
+		return false
 	}
+	return cfg.Exclusive
 }
 
 // representedMailbox reports the maildir of the mailbox a message was sent in the

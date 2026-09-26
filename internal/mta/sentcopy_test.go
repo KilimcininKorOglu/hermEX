@@ -161,6 +161,45 @@ func TestAnUnreachableMailboxCostsALogLine(t *testing.T) {
 		},
 		idents: map[string][]string{"alice@test": {"alice@test"}},
 	}
-	// It must return, not panic and not block.
-	fileRepresentedCopy(accounts, "alice@test", representedMessage("gone@test", false), time.Now())
+	// It must return, not panic and not block, and never tell the caller to drop the
+	// sender's own copy.
+	if fileRepresentedCopy(accounts, "alice@test", representedMessage("gone@test", false), time.Now()) {
+		t.Error("an unwritten copy was reported as the only one")
+	}
+}
+
+// TestExclusiveReportsTheOnlyCopy checks the exclusive setting: once the represented
+// mailbox has filed its copy, the caller is told to file none for the sender. Without
+// the setting, or when the mailbox took no copy, the sender keeps theirs.
+func TestExclusiveReportsTheOnlyCopy(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		cfg  objectstore.SentCopyConfig
+		only bool
+	}{
+		{"copy and exclusive", objectstore.SentCopyConfig{ForSendAs: true, Exclusive: true}, true},
+		{"copy only", objectstore.SentCopyConfig{ForSendAs: true}, false},
+		{"exclusive without copy", objectstore.SentCopyConfig{Exclusive: true}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			accounts, _, _ := sentCopyWorld(t, c.cfg)
+			if got := fileRepresentedCopy(accounts, "alice@test", representedMessage("shared@test", false), time.Now()); got != c.only {
+				t.Errorf("only = %v, want %v", got, c.only)
+			}
+		})
+	}
+}
+
+// TestSendAndRelayKeepsTheOwnCopyByDefault drives the exported entry: an ordinary
+// send keeps the sender's copy, and an exclusive represented send does not.
+func TestSendAndRelayKeepsTheOwnCopyByDefault(t *testing.T) {
+	accounts, _, _ := sentCopyWorld(t, objectstore.SentCopyConfig{ForSendAs: true, Exclusive: true})
+	own := []byte("From: alice@test\r\nTo: alice@test\r\nSubject: own\r\n\r\nbody\r\n")
+	if _, keep, err := SendAndRelay(accounts, nil, "alice@test", []string{"alice@test"}, own, time.Now()); err != nil || !keep {
+		t.Errorf("own send: keep = %v, err = %v; want the sender's copy kept", keep, err)
+	}
+	represented := []byte("From: shared@test\r\nTo: alice@test\r\nSubject: in its name\r\n\r\nbody\r\n")
+	if _, keep, err := SendAndRelay(accounts, nil, "alice@test", []string{"alice@test"}, represented, time.Now()); err != nil || keep {
+		t.Errorf("exclusive send: keep = %v, err = %v; want no sender copy", keep, err)
+	}
 }

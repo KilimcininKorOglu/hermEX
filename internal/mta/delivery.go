@@ -764,6 +764,32 @@ func Deliver(accounts directory.Accounts, from string, recipients []string, raw 
 // The returned unresolved holds only the genuinely undeliverable, a user-unknown
 // in a local domain, or (when spool is nil) every external address.
 func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from string, recipients []string, raw []byte, received time.Time) (unresolved []string, err error) {
+	unresolved, _, err = SendAndRelay(accounts, spool, from, recipients, raw, received)
+	return unresolved, err
+}
+
+// SendAndRelay is DeliverAndRelay for a path that files the sender's own Sent copy
+// itself. keepOwnCopy is false when the mailbox the message was sent in the name of
+// filed the only copy (its SentCopyConfig.Exclusive), and the caller then files none;
+// it is true on every other send, and on every failure, so a failure cannot leave the
+// message filed nowhere.
+func SendAndRelay(accounts directory.Accounts, spool *relay.Spool, from string, recipients []string, raw []byte, received time.Time) (unresolved []string, keepOwnCopy bool, err error) {
+	unresolved, localRaw, err := deliverAndRelay(accounts, spool, from, recipients, raw, received)
+	if err != nil {
+		return unresolved, true, err
+	}
+	// The message is out. A mailbox this was sent in the name of keeps its own record
+	// when it asked for one, so everyone with access to it sees what went out. It runs
+	// last, and reports rather than returns a failure, because the mail has already
+	// left and nothing here can take it back.
+	only := fileRepresentedCopy(accounts, from, localRaw, received)
+	return unresolved, !only, nil
+}
+
+// deliverAndRelay is the body of DeliverAndRelay up to the represented mailbox's
+// copy. localRaw is the copy local recipients received, which is what that copy
+// files.
+func deliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from string, recipients []string, raw []byte, received time.Time) (unresolved []string, localRaw []byte, err error) {
 	// Antivirus on the authenticated submission path (webmail, EWS, ROP, ActiveSync,
 	// SMTP MSA via the send-later worker, and the local->local leg). A hit is
 	// quarantined and the sender plus admins notified, and the send is blocked so no
@@ -772,13 +798,13 @@ func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from strin
 	// DATA; every other submission path arrives here instead, so the cap is applied
 	// once at the point they all converge on.
 	if overMessageSize(raw) {
-		return recipients, ErrMessageTooLarge
+		return recipients, nil, ErrMessageTooLarge
 	}
 	if scanMessage(accounts, avSubmission, from, recipients, raw, received) == avHandled {
-		return nil, ErrVirusBlocked
+		return nil, nil, ErrVirusBlocked
 	}
 	if err := overSendQuota(accounts, from); err != nil {
-		return recipients, err
+		return recipients, nil, err
 	}
 	// Outbound abuse limiting for every client that does not go through SMTP
 	// submission (webmail, EWS, ActiveSync, ROP, DAV scheduling, send-later): the
@@ -787,7 +813,7 @@ func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from strin
 	// delivered on refusal, an API send fails whole rather than half.
 	if spool != nil {
 		if err := limitOutbound(accounts, from, recipients); err != nil {
-			return recipients, err
+			return recipients, nil, err
 		}
 	}
 	// A distribution-list recipient expands to its members before delivery; a list
@@ -803,21 +829,16 @@ func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from strin
 	localRaw, relayRaw := outgoingCopies(accounts, from, raw)
 	unresolved, err = Deliver(accounts, from, leaves, localRaw, received)
 	if err != nil {
-		return append(unresolved, refused...), err
+		return append(unresolved, refused...), nil, err
 	}
 	if spool != nil && len(unresolved) > 0 {
 		stuck, e := relayUnresolved(accounts, spool, from, unresolved, relayRaw, received)
 		if e != nil {
-			return append(stuck, refused...), e
+			return append(stuck, refused...), nil, e
 		}
 		unresolved = stuck
 	}
-	// The message is out. A mailbox this was sent in the name of keeps its own record
-	// when it asked for one, so everyone with access to it sees what went out. It runs
-	// last, and reports rather than returns a failure, because the mail has already
-	// left and nothing here can take it back.
-	fileRepresentedCopy(accounts, from, localRaw, received)
-	return append(unresolved, refused...), nil
+	return append(unresolved, refused...), localRaw, nil
 }
 
 // outgoingCopies applies the per-tenant outgoing display name: the From display
