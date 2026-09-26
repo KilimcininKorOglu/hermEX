@@ -585,6 +585,9 @@ func TestRestrictContentMultivalued(t *testing.T) {
 		{"prefix of one value", fuzzyPrefix, "Proj", true},
 		{"no value", fuzzyFullString, "Red", false},
 	} {
+		if !restrictionSupported(content(c.fuzzy, c.ndl)) {
+			t.Fatalf("%s: RopRestrict refuses the restriction", c.name)
+		}
 		if got := evalRestriction(content(c.fuzzy, c.ndl), row); got != c.want {
 			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
 		}

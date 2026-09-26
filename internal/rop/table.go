@@ -674,11 +674,14 @@ func relopSupported(relop mapi.Relop) bool {
 }
 
 // contentRestrictionSupported reports whether a content restriction is one this
-// server evaluates: text-only, and a fuzzy level no stronger than IGNORECASE
-// over full-string, substring or prefix matching.
+// server evaluates: text-only (a single string or a list of strings), and a
+// fuzzy level no stronger than IGNORECASE over full-string, substring or prefix
+// matching.
 func contentRestrictionSupported(c mapi.ContentRestriction) bool {
-	if c.PropTag.Type() != mapi.PtUnicode && c.PropTag.Type() != mapi.PtString8 {
-		return false // v1 content matching is text-only
+	switch c.PropTag.Type() {
+	case mapi.PtUnicode, mapi.PtString8, mapi.PtMvUnicode, mapi.PtMvString8:
+	default:
+		return false // content matching is text-only
 	}
 	if c.FuzzyLevel&^(0xFFFF|fuzzyIgnoreCase) != 0 {
 		return false // a fuzzy flag beyond IGNORECASE (IGNORENONSPACE / LOOSE)
