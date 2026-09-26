@@ -163,7 +163,8 @@
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label class="check"><input type="checkbox" name="copysendas"{{if .SentCopy.ForSendAs}} checked{{end}}> Keep a copy of mail sent as this user in its Sent Items</label>
 <label class="check"><input type="checkbox" name="copysendonbehalf"{{if .SentCopy.ForSendOnBehalf}} checked{{end}}> Keep a copy of mail sent on this user's behalf in its Sent Items</label>
-<p class="hint">The sender keeps their own copy either way. Without this, a shared mailbox holds no record of what went out in its name.</p>
+<label class="check"><input type="checkbox" name="copyexclusive"{{if .SentCopy.Exclusive}} checked{{end}}> Make this copy the only one (the sender keeps none)</label>
+<p class="hint">The sender keeps their own copy unless the last option is on. Without a copy here, a shared mailbox holds no record of what went out in its name. The last option has no effect unless one of the first two filed a copy, and a sender's mail client that saves its own copy (IMAP) still does.</p>
 <button type="submit">Save sent-copy settings</button>
 </form>
 

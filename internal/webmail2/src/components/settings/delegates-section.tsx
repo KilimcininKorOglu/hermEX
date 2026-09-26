@@ -9,7 +9,7 @@ import { useI18n } from "@/hooks/useI18n"
 import api, { type Delegation, type SentCopySettings } from "@/utils/api"
 import { SettingRow, SettingSection } from "./setting-layout"
 
-const NO_SENT_COPY: SentCopySettings = { forSendAs: false, forSendOnBehalf: false }
+const NO_SENT_COPY: SentCopySettings = { forSendAs: false, forSendOnBehalf: false, exclusive: false }
 
 interface Grant {
   write: boolean
@@ -190,6 +190,13 @@ function SentCopyOptions() {
         description={t("settings.delegates.copySendOnBehalfDescription")}
         checked={sentCopy.forSendOnBehalf}
         onChange={() => void toggle("forSendOnBehalf")}
+      />
+      <Separator />
+      <SettingRow
+        title={t("settings.delegates.copyExclusive")}
+        description={t("settings.delegates.copyExclusiveDescription")}
+        checked={sentCopy.exclusive}
+        onChange={() => void toggle("exclusive")}
       />
     </div>
   )

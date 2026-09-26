@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"hermex/internal/directory"
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
 
@@ -23,6 +24,13 @@ func sentCopyHarness(t *testing.T) requestFunc {
 	accounts := directory.StaticAccounts{
 		"alice@hermex.test": {Password: "pw", MailboxPath: dir},
 	}
+	return loginAs(t, accounts, "alice@hermex.test")
+}
+
+// loginAs signs user (password "pw") in and returns a browser that keeps the
+// session cookie.
+func loginAs(t *testing.T, accounts directory.StaticAccounts, user string) requestFunc {
+	t.Helper()
 	srv := NewServer(accounts, accounts, nil, "mail.hermex.test", []byte("sent-copy-secret"), "", false)
 	var jar []*http.Cookie
 	do := requestFunc(func(method, target, body string) *httptest.ResponseRecorder {
@@ -44,7 +52,7 @@ func sentCopyHarness(t *testing.T) requestFunc {
 		return rec
 	})
 	if rec := do(http.MethodPost, "/api/v1/auth/login",
-		`{"email":"alice@hermex.test","password":"pw"}`); rec.Code != http.StatusOK {
+		`{"email":"`+user+`","password":"pw"}`); rec.Code != http.StatusOK {
 		t.Fatalf("login = %d", rec.Code)
 	}
 	return do
@@ -69,14 +77,15 @@ func readSentCopy(t *testing.T, rec *httptest.ResponseRecorder) sentCopyJSON {
 func TestSentCopySettingRoundTrips(t *testing.T) {
 	do := sentCopyHarness(t)
 
-	if got := readSentCopy(t, do(http.MethodGet, "/api/v1/account/sent-copy", "")); got.ForSendAs || got.ForSendOnBehalf {
-		t.Errorf("an unconfigured mailbox reads as %+v, want both off", got)
+	if got := readSentCopy(t, do(http.MethodGet, "/api/v1/account/sent-copy", "")); got != (sentCopyJSON{}) {
+		t.Errorf("an unconfigured mailbox reads as %+v, want all off", got)
 	}
 
 	for _, want := range []sentCopyJSON{
 		{ForSendAs: true},
 		{ForSendAs: true, ForSendOnBehalf: true},
 		{ForSendOnBehalf: true},
+		{ForSendAs: true, Exclusive: true},
 		{},
 	} {
 		body, _ := json.Marshal(want)
@@ -112,5 +121,62 @@ func TestSentCopyNeedsASession(t *testing.T) {
 		if rec.Code != http.StatusUnauthorized {
 			t.Errorf("%s without a session = %d, want 401", c.method, rec.Code)
 		}
+	}
+}
+
+// exclusiveSharedMailbox provisions alice and a shared mailbox that grants her
+// send-as, files its own copy and asks for it to be the only one.
+func exclusiveSharedMailbox(t *testing.T) (accounts directory.StaticAccounts, aliceDir, sharedDir string) {
+	t.Helper()
+	aliceDir, sharedDir = t.TempDir(), t.TempDir()
+	if st, err := objectstore.Open(aliceDir); err == nil {
+		st.Close()
+	}
+	shared, err := objectstore.Open(sharedDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shared.Close()
+	if err := shared.SetSendAs([]string{"alice@hermex.test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := shared.SetSentCopyConfig(objectstore.SentCopyConfig{ForSendAs: true, Exclusive: true}); err != nil {
+		t.Fatal(err)
+	}
+	return directory.StaticAccounts{
+		"alice@hermex.test":  {Password: "pw", MailboxPath: aliceDir},
+		"shared@hermex.test": {Shared: true, MailboxPath: sharedDir},
+	}, aliceDir, sharedDir
+}
+
+// sentItems counts the messages in a mailbox's Sent Items.
+func sentItems(t *testing.T, dir string) int {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	msgs, err := st.ListMessages(int64(mapi.PrivateFIDSentItems))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(msgs)
+}
+
+// TestSendLeavesTheOnlyCopyToAnExclusiveMailbox sends as a shared mailbox that files
+// its own copy and asks for it to be the only one: alice's Sent Items stays empty.
+func TestSendLeavesTheOnlyCopyToAnExclusiveMailbox(t *testing.T) {
+	accounts, aliceDir, sharedDir := exclusiveSharedMailbox(t)
+	do := loginAs(t, accounts, "alice@hermex.test")
+	if rec := do(http.MethodPost, "/api/v1/mail/send",
+		`{"from":"shared@hermex.test","to":["shared@hermex.test"],"subject":"team","body":"hi"}`); rec.Code != http.StatusOK {
+		t.Fatalf("send = %d: %s", rec.Code, rec.Body.String())
+	}
+	if n := sentItems(t, aliceDir); n != 0 {
+		t.Errorf("alice's Sent Items holds %d, want none", n)
+	}
+	if n := sentItems(t, sharedDir); n != 1 {
+		t.Errorf("the shared mailbox's Sent Items holds %d, want its copy", n)
 	}
 }

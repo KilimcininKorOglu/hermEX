@@ -121,7 +121,8 @@ func (s *Server) handleMailSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := mta.DeliverAndRelay(s.accounts, s.spool, c.Email, recipients, raw, time.Now()); err != nil {
+	_, keepOwnCopy, err := mta.SendAndRelay(s.accounts, s.spool, c.Email, recipients, raw, time.Now())
+	if err != nil {
 		// Delivery errors carry mailbox filesystem paths and database driver text;
 		// they belong in the log, not in a response to the browser.
 		logError("send-mail", err, logging.Fields{"user": c.Email})
@@ -129,21 +130,25 @@ func (s *Server) handleMailSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	afterSend(c, raw, req.DraftID, "mail")
+	afterSend(c, raw, req.DraftID, "mail", keepOwnCopy)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // afterSend files the Sent copy of a delivered message and removes the draft it
-// was composed from. The message is already delivered, so neither step fails the
-// request; a failure is recorded instead, because a retry would send it twice.
-func afterSend(c sessionClaims, raw []byte, draftID, kind string) {
+// was composed from. keepOwnCopy is false when the mailbox the message was sent in
+// the name of filed the only copy, and no Sent copy is then filed here. The message
+// is already delivered, so neither step fails the request; a failure is recorded
+// instead, because a retry would send it twice.
+func afterSend(c sessionClaims, raw []byte, draftID, kind string, keepOwnCopy bool) {
 	st, err := objectstore.Open(c.Mailbox)
 	if err != nil {
 		logError("file-sent-copy", err, logging.Fields{"user": c.Email, "kind": kind})
 		return
 	}
 	defer st.Close()
-	fileSentCopy(st, raw, c.Email, kind)
+	if keepOwnCopy {
+		fileSentCopy(st, raw, c.Email, kind)
+	}
 	removeSentDraft(st, draftID, c.Email)
 }
 
@@ -328,12 +333,13 @@ func (s *Server) handleMailSendRaw(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, err := mta.DeliverAndRelay(s.accounts, s.spool, c.Email, recipients, raw, time.Now()); err != nil {
+	_, keepOwnCopy, err := mta.SendAndRelay(s.accounts, s.spool, c.Email, recipients, raw, time.Now())
+	if err != nil {
 		logError("send-raw", err, logging.Fields{"user": c.Email})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delivery failed"})
 		return
 	}
-	afterSend(c, raw, req.DraftID, "mail-raw")
+	afterSend(c, raw, req.DraftID, "mail-raw", keepOwnCopy)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

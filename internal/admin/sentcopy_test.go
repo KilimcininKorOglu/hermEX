@@ -102,7 +102,7 @@ func TestUIUserDetailShowsSendOnBehalfAndSentCopy(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	for _, want := range []string{
 		"<h2>Send on behalf</h2>", `name="sendonbehalf"`, "carol@hermex.test",
-		`name="copysendonbehalf" checked`,
+		`name="copysendonbehalf" checked`, `name="copyexclusive"`,
 	} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("detail page missing %q", want)
@@ -126,12 +126,13 @@ func TestUIUserSentCopy(t *testing.T) {
 
 	resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/sentcopy", session, csrf, url.Values{
 		"copysendonbehalf": {"on"},
+		"copyexclusive":    {"on"},
 	})
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("ui sent-copy save status %d, want 200", resp.StatusCode)
 	}
-	want := objectstore.SentCopyConfig{ForSendOnBehalf: true}
+	want := objectstore.SentCopyConfig{ForSendOnBehalf: true, Exclusive: true}
 	if store.setSentCopyVal != want {
 		t.Errorf("stored sent-copy = %+v, want %+v (the unchecked box turns its setting off)",
 			store.setSentCopyVal, want)

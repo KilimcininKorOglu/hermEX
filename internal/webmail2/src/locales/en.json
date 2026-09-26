@@ -652,9 +652,11 @@
       "removeFailed": "Failed to remove delegate",
       "copyTitle": "Copy of mail sent in your name",
       "copySendAs": "Keep a copy of mail sent as you",
-      "copySendAsDescription": "The message also lands in your Sent Items; the delegate keeps their own copy either way",
+      "copySendAsDescription": "The message also lands in your Sent Items; the delegate keeps their own copy too",
       "copySendOnBehalf": "Keep a copy of mail sent on your behalf",
-      "copySendOnBehalfDescription": "The message also lands in your Sent Items; the delegate keeps their own copy either way",
+      "copySendOnBehalfDescription": "The message also lands in your Sent Items; the delegate keeps their own copy too",
+      "copyExclusive": "Keep the only copy",
+      "copyExclusiveDescription": "Once a copy lands in your Sent Items, the delegate keeps none. A mail client that saves its own copy still does",
       "copySaveFailed": "Failed to save the sent-copy settings"
     },
     "privacy": {

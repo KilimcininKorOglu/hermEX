@@ -11,9 +11,12 @@ import (
 // message sent as this mailbox, and whether one sent on its behalf, also lands in its
 // own Sent Items. Without it the only copy is in the sender's own Sent Items, so
 // nobody else with access to a shared mailbox sees what went out in its name.
+//
+// Exclusive makes this mailbox's copy the only one: the sender then keeps none.
 type sentCopyPayload struct {
 	ForSendAs       bool `json:"forSendAs"`
 	ForSendOnBehalf bool `json:"forSendOnBehalf"`
+	Exclusive       bool `json:"exclusive"`
 }
 
 // handleGetUserSentCopy returns a user's sent-copy configuration.
@@ -27,7 +30,7 @@ func (s *Server) handleGetUserSentCopy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "could not read sent-copy config", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, sentCopyPayload{ForSendAs: cfg.ForSendAs, ForSendOnBehalf: cfg.ForSendOnBehalf})
+	writeJSON(w, sentCopyPayload(cfg))
 }
 
 // handleSetUserSentCopy replaces a user's sent-copy configuration.
@@ -41,15 +44,14 @@ func (s *Server) handleSetUserSentCopy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	cfg := objectstore.SentCopyConfig{ForSendAs: in.ForSendAs, ForSendOnBehalf: in.ForSendOnBehalf}
-	if err := s.store.SetSentCopyConfig(maildir, cfg); err != nil {
+	if err := s.store.SetSentCopyConfig(maildir, objectstore.SentCopyConfig(in)); err != nil {
 		s.fail(w, "could not set sent-copy config", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleUIUserSentCopy saves the two sent-copy checkboxes from the detail form and
+// handleUIUserSentCopy saves the sent-copy checkboxes from the detail form and
 // returns the refreshed status panel.
 func (s *Server) handleUIUserSentCopy(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.uiAuthorized(w, r); !ok {
@@ -66,6 +68,7 @@ func (s *Server) handleUIUserSentCopy(w http.ResponseWriter, r *http.Request) {
 		cfg := objectstore.SentCopyConfig{
 			ForSendAs:       r.PostFormValue("copysendas") != "",
 			ForSendOnBehalf: r.PostFormValue("copysendonbehalf") != "",
+			Exclusive:       r.PostFormValue("copyexclusive") != "",
 		}
 		if err := s.store.SetSentCopyConfig(u.Maildir, cfg); err != nil {
 			data["Error"] = s.notice("Could not save sent-copy settings.", err)

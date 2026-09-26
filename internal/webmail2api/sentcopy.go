@@ -9,10 +9,12 @@ import (
 
 // sentCopyJSON is the SPA's sent-copy shape: whether a message another account sends
 // as this mailbox, and whether one it sends on this mailbox's behalf, also lands in
-// this mailbox's Sent Items. The sender keeps their own copy either way.
+// this mailbox's Sent Items, and whether that copy is then the only one (the sender
+// keeps none).
 type sentCopyJSON struct {
 	ForSendAs       bool `json:"forSendAs"`
 	ForSendOnBehalf bool `json:"forSendOnBehalf"`
+	Exclusive       bool `json:"exclusive"`
 }
 
 func (s *Server) handleGetSentCopy(w http.ResponseWriter, r *http.Request) {
@@ -32,11 +34,11 @@ func (s *Server) handleGetSentCopy(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read"})
 		return
 	}
-	writeJSON(w, http.StatusOK, sentCopyJSON{ForSendAs: cfg.ForSendAs, ForSendOnBehalf: cfg.ForSendOnBehalf})
+	writeJSON(w, http.StatusOK, sentCopyJSON(cfg))
 }
 
-// handlePutSentCopy replaces both flags at once. The client sends the whole object, so
-// a change to one never drops the other.
+// handlePutSentCopy replaces every flag at once. The client sends the whole object, so
+// a change to one never drops the others.
 func (s *Server) handlePutSentCopy(w http.ResponseWriter, r *http.Request) {
 	var in sentCopyJSON
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
@@ -54,8 +56,7 @@ func (s *Server) handlePutSentCopy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
-	cfg := objectstore.SentCopyConfig{ForSendAs: in.ForSendAs, ForSendOnBehalf: in.ForSendOnBehalf}
-	if err := st.SetSentCopyConfig(cfg); err != nil {
+	if err := st.SetSentCopyConfig(objectstore.SentCopyConfig(in)); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save"})
 		return
 	}

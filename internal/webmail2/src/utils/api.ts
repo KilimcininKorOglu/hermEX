@@ -346,6 +346,8 @@ interface DelegationInput {
 export interface SentCopySettings {
   forSendAs: boolean
   forSendOnBehalf: boolean
+  // exclusive makes this mailbox's copy the only one: the sender keeps none.
+  exclusive: boolean
 }
 
 // ACL entry for folder sharing. Rights is the raw MS-OXCPERM PidTagMemberRights
