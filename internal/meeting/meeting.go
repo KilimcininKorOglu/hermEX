@@ -394,10 +394,13 @@ func stripInboundCruft(props mapi.PropertyValues) mapi.PropertyValues {
 }
 
 // notifyOrganizer sends the organizer an iTIP REPLY for the response: the request is
-// reshaped into a response message (re-classed, sent as the responder while keeping
-// the organizer as the representing identity so oxcical's REPLY names them), rendered
-// to an iCalendar REPLY carried as a text/calendar part, and routed like any
-// submission. An organizer that did not request a response is not told.
+// reshaped into a response message (re-classed, with the responder as both the sender
+// and the representing identity, so the From header and the REPLY's ATTENDEE name the
+// responder and the one recipient, the organizer, becomes the ORGANIZER), rendered to
+// an iCalendar REPLY carried as a text/calendar part, and routed like any submission.
+// sender is the mailbox that answers, the address the request reached it at when the
+// server answers automatically. An organizer that did not request a response is not
+// told.
 func notifyOrganizer(st *objectstore.Store, accounts directory.Accounts, spool *relay.Spool, sender string, req *oxcmail.Message, response int32) error {
 	organizer := propStr(req.Props, mapi.PrSentRepresentingSmtpAddress)
 	if organizer == "" {
