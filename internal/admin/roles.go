@@ -10,7 +10,7 @@ import (
 func (s *Server) resolveUser(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	uid, found, err := s.dir.UserID(r.PathValue("email"))
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return 0, false
 	}
 	if !found {
@@ -34,7 +34,7 @@ func (s *Server) handleListRoles(w http.ResponseWriter, r *http.Request) {
 	}
 	roles, err := s.dir.AdminRoles(uid)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, roles)
@@ -70,7 +70,7 @@ func (s *Server) handleRevokeRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.dir.RevokeAdminRole(uid, req.Role, req.ScopeID); err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -209,7 +209,7 @@ func (s *Server) resolveDomainName(w http.ResponseWriter, r *http.Request) (stri
 	}
 	dd, found, err := s.dir.GetDomain(id)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return "", false
 	}
 	if !found {

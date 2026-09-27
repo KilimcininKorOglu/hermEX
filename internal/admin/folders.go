@@ -60,7 +60,7 @@ type folderMemberJSON struct {
 func (s *Server) resolveMaildir(w http.ResponseWriter, r *http.Request) (string, bool) {
 	u, ok, err := s.dir.GetUser(r.PathValue("email"))
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return "", false
 	}
 	if !ok {
@@ -98,7 +98,7 @@ func (s *Server) handleListUserFolders(w http.ResponseWriter, r *http.Request) {
 	}
 	folders, err := s.store.ListFolders(maildir)
 	if err != nil {
-		http.Error(w, "could not read folders", http.StatusInternalServerError)
+		s.fail(w, "could not read folders", err, http.StatusInternalServerError)
 		return
 	}
 	out := make([]folderJSON, 0, len(folders))
@@ -122,7 +122,7 @@ func (s *Server) handleListFolderPermissions(w http.ResponseWriter, r *http.Requ
 	}
 	perms, err := s.store.ListFolderPermissions(maildir, fid)
 	if err != nil {
-		http.Error(w, "could not read permissions", http.StatusInternalServerError)
+		s.fail(w, "could not read permissions", err, http.StatusInternalServerError)
 		return
 	}
 	out := make([]folderMemberJSON, 0, len(perms))
@@ -159,7 +159,7 @@ func (s *Server) handleSetFolderPermission(w http.ResponseWriter, r *http.Reques
 	}
 	member, ok, err := s.canonicalMember(in.Username)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !ok {

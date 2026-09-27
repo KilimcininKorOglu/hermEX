@@ -772,7 +772,7 @@ func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
 	cl := r.Context().Value(ctxKey{}).(claims)
 	roles, err := s.dir.AdminRoles(cl.UserID)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, map[string]any{"login": cl.Login, "roles": roles})

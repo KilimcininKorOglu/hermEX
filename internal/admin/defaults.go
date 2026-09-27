@@ -133,7 +133,7 @@ func (s *Server) handleGetDomainDefaults(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if _, found, derr := s.dir.GetDomain(id); derr != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", derr, http.StatusInternalServerError)
 		return
 	} else if !found {
 		http.Error(w, "no such domain", http.StatusNotFound)
@@ -141,7 +141,7 @@ func (s *Server) handleGetDomainDefaults(w http.ResponseWriter, r *http.Request)
 	}
 	cd, _, err := s.dir.GetCreateDefaults(id)
 	if err != nil {
-		http.Error(w, "could not read create defaults", http.StatusInternalServerError)
+		s.fail(w, "could not read create defaults", err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, cd.User)
@@ -157,7 +157,7 @@ func (s *Server) handleSetDomainDefaults(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if _, found, derr := s.dir.GetDomain(id); derr != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", derr, http.StatusInternalServerError)
 		return
 	} else if !found {
 		http.Error(w, "no such domain", http.StatusNotFound)
@@ -207,7 +207,7 @@ func (s *Server) storeDomainOverride(id int64, u directory.UserCreateDefaults) e
 func (s *Server) handleGetDefaults(w http.ResponseWriter, r *http.Request) {
 	cd, _, err := s.dir.GetCreateDefaults(0)
 	if err != nil {
-		http.Error(w, "could not read create defaults", http.StatusInternalServerError)
+		s.fail(w, "could not read create defaults", err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, cd)

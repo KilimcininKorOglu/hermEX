@@ -15,7 +15,7 @@ func (s *Server) handleGetUserStoreOwners(w http.ResponseWriter, r *http.Request
 	}
 	list, err := s.store.GetStoreOwners(maildir)
 	if err != nil {
-		http.Error(w, "could not read store owners", http.StatusInternalServerError)
+		s.fail(w, "could not read store owners", err, http.StatusInternalServerError)
 		return
 	}
 	if list == nil {
@@ -45,7 +45,7 @@ func (s *Server) handleSetUserStoreOwners(w http.ResponseWriter, r *http.Request
 	}
 	list, bad, err := s.canonicalGrantees(in)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if bad != "" {

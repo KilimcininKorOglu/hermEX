@@ -73,7 +73,7 @@ func (s *Server) handleGetUserSyncPolicy(w http.ResponseWriter, r *http.Request)
 	}
 	p, err := s.store.GetSyncPolicy(maildir)
 	if err != nil {
-		http.Error(w, "could not read sync policy", http.StatusInternalServerError)
+		s.fail(w, "could not read sync policy", err, http.StatusInternalServerError)
 		return
 	}
 	if p == nil {
@@ -143,7 +143,7 @@ func (s *Server) handleUIUserSyncPolicy(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleGetDefaultSyncPolicy(w http.ResponseWriter, r *http.Request) {
 	p, err := s.dir.GetDefaultSyncPolicy()
 	if err != nil {
-		http.Error(w, "could not read default sync policy", http.StatusInternalServerError)
+		s.fail(w, "could not read default sync policy", err, http.StatusInternalServerError)
 		return
 	}
 	if p == nil {
@@ -185,7 +185,7 @@ func (s *Server) handleGetDomainSyncPolicy(w http.ResponseWriter, r *http.Reques
 	}
 	dd, found, err := s.dir.GetDomain(id)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !found {
@@ -194,7 +194,7 @@ func (s *Server) handleGetDomainSyncPolicy(w http.ResponseWriter, r *http.Reques
 	}
 	p, err := s.dir.GetDomainSyncPolicy(dd.Name)
 	if err != nil {
-		http.Error(w, "could not read sync policy", http.StatusInternalServerError)
+		s.fail(w, "could not read sync policy", err, http.StatusInternalServerError)
 		return
 	}
 	if p == nil {
@@ -213,7 +213,7 @@ func (s *Server) handleSetDomainSyncPolicy(w http.ResponseWriter, r *http.Reques
 	}
 	dd, found, err := s.dir.GetDomain(id)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !found {

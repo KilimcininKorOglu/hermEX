@@ -14,7 +14,7 @@ import (
 func (s *Server) handleGetUserQuota(w http.ResponseWriter, r *http.Request) {
 	u, ok, err := s.dir.GetUser(r.PathValue("email"))
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !ok {
@@ -23,7 +23,7 @@ func (s *Server) handleGetUserQuota(w http.ResponseWriter, r *http.Request) {
 	}
 	limits, used, err := s.store.GetQuota(u.Maildir)
 	if err != nil {
-		http.Error(w, "could not read quota", http.StatusInternalServerError)
+		s.fail(w, "could not read quota", err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, map[string]any{
@@ -39,7 +39,7 @@ func (s *Server) handleGetUserQuota(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSetUserQuota(w http.ResponseWriter, r *http.Request) {
 	u, ok, err := s.dir.GetUser(r.PathValue("email"))
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !ok {
@@ -52,7 +52,7 @@ func (s *Server) handleSetUserQuota(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.SetQuota(u.Maildir, q); err != nil {
-		http.Error(w, "could not save quota", http.StatusInternalServerError)
+		s.fail(w, "could not save quota", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

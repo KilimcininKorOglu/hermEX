@@ -78,7 +78,7 @@ func (s *Server) handleUIPublicFolders(w http.ResponseWriter, r *http.Request) {
 	}
 	domains, err := s.dir.ListDomains()
 	if err != nil {
-		http.Error(w, "could not list domains", http.StatusInternalServerError)
+		s.fail(w, "could not list domains", err, http.StatusInternalServerError)
 		return
 	}
 	domain := r.FormValue("domain")
@@ -219,7 +219,7 @@ func (s *Server) handleGetPublicFolders(w http.ResponseWriter, r *http.Request) 
 	}
 	folders, err := s.pub.Folders(domain)
 	if err != nil {
-		http.Error(w, "could not read public folders", http.StatusInternalServerError)
+		s.fail(w, "could not read public folders", err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, publicFoldersJSON(folders))

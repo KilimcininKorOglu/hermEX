@@ -78,7 +78,7 @@ func (s *Server) serveGrantList(w http.ResponseWriter, r *http.Request, kind str
 	}
 	list, err := get(maildir)
 	if err != nil {
-		http.Error(w, "could not read "+kind, http.StatusInternalServerError)
+		s.fail(w, "could not read "+kind, err, http.StatusInternalServerError)
 		return
 	}
 	if list == nil {
@@ -108,7 +108,7 @@ func (s *Server) saveGrantList(w http.ResponseWriter, r *http.Request, kind stri
 	}
 	list, bad, err := s.canonicalGrantees(in)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if bad != "" {

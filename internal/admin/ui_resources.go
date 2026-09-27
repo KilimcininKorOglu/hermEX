@@ -105,7 +105,7 @@ func (s *Server) handleUIDomainDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	dd, found, err := s.dir.GetDomain(id)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !found {

@@ -907,6 +907,9 @@ func (f *fakeDir) EffectiveUserDefaults(int64) (directory.ResolvedUserDefaults, 
 	return f.effectiveUserDefaults, f.readErrs["EffectiveUserDefaults"]
 }
 func (f *fakeDir) ListActiveSessions(int64) ([]directory.SessionRecord, error) {
+	if err := f.readErrs["ListActiveSessions"]; err != nil {
+		return nil, err
+	}
 	return f.activeSessions, f.activeSessionsErr
 }
 func (f *fakeDir) SetCreateDefaults(scopeID int64, cd directory.CreateDefaults) error {

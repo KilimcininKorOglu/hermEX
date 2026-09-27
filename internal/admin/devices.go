@@ -14,7 +14,7 @@ import (
 func (s *Server) handleGetUserDevices(w http.ResponseWriter, r *http.Request) {
 	u, ok, err := s.dir.GetUser(r.PathValue("email"))
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !ok {
@@ -23,7 +23,7 @@ func (s *Server) handleGetUserDevices(w http.ResponseWriter, r *http.Request) {
 	}
 	devs, err := s.store.ListDevices(u.Maildir)
 	if err != nil {
-		http.Error(w, "could not read devices", http.StatusInternalServerError)
+		s.fail(w, "could not read devices", err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, devs)
@@ -53,7 +53,7 @@ func (s *Server) applyDeviceAction(maildir, deviceID, action string) error {
 func (s *Server) handleUserDeviceAction(w http.ResponseWriter, r *http.Request) {
 	u, ok, err := s.dir.GetUser(r.PathValue("email"))
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !ok {

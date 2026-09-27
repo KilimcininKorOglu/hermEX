@@ -15,7 +15,7 @@ import (
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := s.dir.ListUsers()
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if all, ids := s.scopedReadDomains(claimsOf(r).UserID); !all {
@@ -91,7 +91,7 @@ func (s *Server) handleSetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	found, err := s.dir.SetPassword(r.PathValue("email"), req.Password)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !found {
@@ -100,7 +100,7 @@ func (s *Server) handleSetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	// An admin-set password is temporary: force the user to change it on next login.
 	if _, err := s.dir.RequirePasswordChange(r.PathValue("email"), true); err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	// A reset is often the response to a compromise, so it must also end every
@@ -134,7 +134,7 @@ func (s *Server) handleChangeOwnPassword(w http.ResponseWriter, r *http.Request)
 	}
 	found, err := s.dir.SetPassword(login, req.New)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !found {
@@ -152,7 +152,7 @@ func (s *Server) handleChangeOwnPassword(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleGetUser(w http.ResponseWriter, r *http.Request) {
 	u, ok, err := s.dir.GetUser(r.PathValue("email"))
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !ok {
@@ -240,7 +240,7 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	deleteFiles := r.URL.Query().Get("deleteFiles") == "true"
 	found, err := s.dir.DeleteUser(r.PathValue("email"), deleteFiles)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !found {
@@ -255,7 +255,7 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListAltnames(w http.ResponseWriter, r *http.Request) {
 	names, err := s.dir.ListAltnames(r.PathValue("email"))
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if names == nil {
@@ -295,7 +295,7 @@ func (s *Server) handleSetAltnames(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListUserAliases(w http.ResponseWriter, r *http.Request) {
 	aliases, err := s.dir.ListAliasesFor(r.PathValue("email"))
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if aliases == nil {
@@ -382,7 +382,7 @@ func contactProps(in map[string]string) map[uint32]string {
 func (s *Server) handleGetContact(w http.ResponseWriter, r *http.Request) {
 	props, err := s.dir.GetUserProperties(r.PathValue("email"))
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, contactValues(props))

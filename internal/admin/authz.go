@@ -90,7 +90,7 @@ func (s *Server) requireUserScope(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u, found, err := s.dir.GetUser(r.PathValue("email"))
 		if err != nil {
-			http.Error(w, "server error", http.StatusInternalServerError)
+			s.fail(w, "server error", err, http.StatusInternalServerError)
 			return
 		}
 		if !found {
@@ -197,7 +197,7 @@ func (s *Server) requirePasswordScope(next http.HandlerFunc) http.HandlerFunc {
 		}
 		u, found, err := s.dir.GetUser(r.PathValue("email"))
 		if err != nil {
-			http.Error(w, "server error", http.StatusInternalServerError)
+			s.fail(w, "server error", err, http.StatusInternalServerError)
 			return
 		}
 		if !found {

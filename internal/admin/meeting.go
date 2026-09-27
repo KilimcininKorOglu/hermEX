@@ -29,7 +29,7 @@ func (s *Server) handleGetUserMeeting(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg, err := s.store.GetMeetingConfig(maildir)
 	if err != nil {
-		http.Error(w, "could not read meeting config", http.StatusInternalServerError)
+		s.fail(w, "could not read meeting config", err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, meetingPayload(cfg))

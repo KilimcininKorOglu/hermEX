@@ -62,7 +62,7 @@ type orgInput struct {
 func (s *Server) handleListOrgs(w http.ResponseWriter, r *http.Request) {
 	orgs, err := s.dir.ListOrgs()
 	if err != nil {
-		http.Error(w, "could not list organizations", http.StatusInternalServerError)
+		s.fail(w, "could not list organizations", err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, orgs)
@@ -91,7 +91,7 @@ func (s *Server) handleGetOrg(w http.ResponseWriter, r *http.Request) {
 	}
 	org, found, err := s.dir.GetOrg(id)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !found {
@@ -200,7 +200,7 @@ func (s *Server) handleGetLDAP(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg, found, err := s.dir.GetLDAPConfig(orgID)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !found {
@@ -247,7 +247,7 @@ func (s *Server) handlePutLDAP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "the directory URI must be ldaps:// or StartTLS must be enabled", http.StatusBadRequest)
 			return
 		}
-		http.Error(w, "could not save LDAP configuration", http.StatusInternalServerError)
+		s.fail(w, "could not save LDAP configuration", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -324,7 +324,7 @@ func (s *Server) handleUIOrgDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	org, found, err := s.dir.GetOrg(id)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !found {

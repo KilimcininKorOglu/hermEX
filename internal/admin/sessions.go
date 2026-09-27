@@ -74,7 +74,7 @@ func (s *Server) handleUIMobileDevicesPanel(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleGetMobileDevices(w http.ResponseWriter, r *http.Request) {
 	recs, err := s.dir.ListActiveSessions(time.Now().Unix())
 	if err != nil {
-		http.Error(w, "could not read sessions", http.StatusInternalServerError)
+		s.fail(w, "could not read sessions", err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, recs)

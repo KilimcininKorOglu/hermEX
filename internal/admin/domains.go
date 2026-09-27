@@ -49,7 +49,7 @@ func (s *Server) requireSystem(next http.HandlerFunc) http.HandlerFunc {
 func (s *Server) handleListDomains(w http.ResponseWriter, r *http.Request) {
 	domains, err := s.dir.ListDomains()
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if all, ids := s.scopedReadDomains(claimsOf(r).UserID); !all {
@@ -80,7 +80,7 @@ func (s *Server) handleGetDomain(w http.ResponseWriter, r *http.Request) {
 	}
 	dd, ok, err := s.dir.GetDomain(id)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !ok {
@@ -103,7 +103,7 @@ func (s *Server) handleUpdateDomain(w http.ResponseWriter, r *http.Request) {
 	}
 	cur, ok, err := s.dir.GetDomain(id)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !ok {

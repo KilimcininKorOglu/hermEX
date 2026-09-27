@@ -15,7 +15,7 @@ import (
 func (s *Server) handleGetUserOOF(w http.ResponseWriter, r *http.Request) {
 	u, ok, err := s.dir.GetUser(r.PathValue("email"))
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !ok {
@@ -24,7 +24,7 @@ func (s *Server) handleGetUserOOF(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg, err := s.store.GetOOFSettings(u.Maildir)
 	if err != nil {
-		http.Error(w, "could not read out-of-office settings", http.StatusInternalServerError)
+		s.fail(w, "could not read out-of-office settings", err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, cfg)
@@ -37,7 +37,7 @@ func (s *Server) handleGetUserOOF(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSetUserOOF(w http.ResponseWriter, r *http.Request) {
 	u, ok, err := s.dir.GetUser(r.PathValue("email"))
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !ok {
@@ -50,7 +50,7 @@ func (s *Server) handleSetUserOOF(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.SetOOFSettings(u.Maildir, cfg); err != nil {
-		http.Error(w, "could not save out-of-office settings", http.StatusInternalServerError)
+		s.fail(w, "could not save out-of-office settings", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

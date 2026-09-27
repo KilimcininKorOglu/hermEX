@@ -27,7 +27,7 @@ func (s *Server) handleGetUserSentCopy(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg, err := s.store.GetSentCopyConfig(maildir)
 	if err != nil {
-		http.Error(w, "could not read sent-copy config", http.StatusInternalServerError)
+		s.fail(w, "could not read sent-copy config", err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, sentCopyPayload(cfg))

@@ -9,7 +9,7 @@ import (
 func (s *Server) handleListAliases(w http.ResponseWriter, _ *http.Request) {
 	aliases, err := s.dir.ListAliases()
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, aliases)

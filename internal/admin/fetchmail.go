@@ -89,7 +89,7 @@ func (s *Server) ownsFetchmail(mailbox string, id int64) bool {
 func (s *Server) handleListUserFetchmail(w http.ResponseWriter, r *http.Request) {
 	entries, err := s.dir.ListFetchmail(r.PathValue("email"))
 	if err != nil {
-		http.Error(w, "could not list fetchmail", http.StatusInternalServerError)
+		s.fail(w, "could not list fetchmail", err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, fetchmailViews(entries))
@@ -119,7 +119,7 @@ func (s *Server) handleDeleteUserFetchmail(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if _, err := s.dir.DeleteFetchmail(id); err != nil {
-		http.Error(w, "could not delete fetchmail entry", http.StatusInternalServerError)
+		s.fail(w, "could not delete fetchmail entry", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

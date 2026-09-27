@@ -76,7 +76,7 @@ func (s *Server) handleUIRoleDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	role, found, err := s.dir.GetRole(id)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !found {
@@ -216,7 +216,7 @@ func (s *Server) handleUIDeleteRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := s.dir.DeleteRole(id); err != nil {
-		http.Error(w, "could not delete role", http.StatusInternalServerError)
+		s.fail(w, "could not delete role", err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("HX-Redirect", "/admin/ui/roles")

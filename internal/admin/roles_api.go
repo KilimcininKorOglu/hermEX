@@ -52,7 +52,7 @@ type roleInput struct {
 func (s *Server) handleRolesList(w http.ResponseWriter, _ *http.Request) {
 	roles, err := s.dir.ListRoles()
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, roles)
@@ -88,7 +88,7 @@ func (s *Server) handleRoleGet(w http.ResponseWriter, r *http.Request) {
 	}
 	role, found, err := s.dir.GetRole(id)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !found {
@@ -130,7 +130,7 @@ func (s *Server) handleRoleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	found, err := s.dir.DeleteRole(id)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !found {

@@ -165,7 +165,7 @@ func (s *Server) renderMailqPanel(w http.ResponseWriter, r *http.Request, errMsg
 func (s *Server) handleGetMailq(w http.ResponseWriter, r *http.Request) {
 	entries, err := s.mailq.List()
 	if err != nil {
-		http.Error(w, "could not read the mail queue", http.StatusInternalServerError)
+		s.fail(w, "could not read the mail queue", err, http.StatusInternalServerError)
 		return
 	}
 	if entries == nil {
@@ -182,7 +182,7 @@ func (s *Server) handleRetryMailq(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.mailq.RetryNow(id); err != nil {
-		http.Error(w, "could not flush entry", http.StatusInternalServerError)
+		s.fail(w, "could not flush entry", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -196,7 +196,7 @@ func (s *Server) handleDeleteMailq(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.mailq.Delete(id); err != nil {
-		http.Error(w, "could not delete entry", http.StatusInternalServerError)
+		s.fail(w, "could not delete entry", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

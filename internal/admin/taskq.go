@@ -74,7 +74,7 @@ func (s *Server) taskqPanelData() map[string]any {
 func (s *Server) handleGetTaskqStatus(w http.ResponseWriter, r *http.Request) {
 	tasks, err := s.dir.ListTasks(1000)
 	if err != nil {
-		http.Error(w, "could not read tasks", http.StatusInternalServerError)
+		s.fail(w, "could not read tasks", err, http.StatusInternalServerError)
 		return
 	}
 	var pending, running int
