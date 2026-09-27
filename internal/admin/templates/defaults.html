@@ -4,6 +4,7 @@
 <main>
 <h1>Create defaults</h1>
 <p class="hint">Default values pre-filled into the new-domain and new-user forms. They seed each form; an administrator can still change any field before creating.</p>
+{{with index .ReadFailed "defaults"}}<p class="error">{{.}}</p>{{else}}
 <form class="defaults-form" hx-put="/admin/ui/defaults" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <h2>Domain create parameters</h2>
@@ -12,6 +13,7 @@
 {{template "user-create-fields" .Fields}}
 <button type="submit">Save defaults</button>
 </form>
+{{end}}
 <div id="user-status"></div>
 </main>
 </div>

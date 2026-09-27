@@ -841,10 +841,10 @@ func (f *fakeDir) GetDomainSyncPolicy(string) (easpolicy.Policy, error) {
 }
 func (f *fakeDir) GetCreateDefaults(scopeID int64) (directory.CreateDefaults, bool, error) {
 	cd, ok := f.createDefaults[scopeID]
-	return cd, ok, nil
+	return cd, ok, f.readErrs["GetCreateDefaults"]
 }
 func (f *fakeDir) EffectiveUserDefaults(int64) (directory.ResolvedUserDefaults, error) {
-	return f.effectiveUserDefaults, nil
+	return f.effectiveUserDefaults, f.readErrs["EffectiveUserDefaults"]
 }
 func (f *fakeDir) ListActiveSessions(int64) ([]directory.SessionRecord, error) {
 	return f.activeSessions, f.activeSessionsErr

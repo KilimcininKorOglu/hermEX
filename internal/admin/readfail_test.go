@@ -21,6 +21,8 @@ func TestAFailedReadHidesTheFormItFeeds(t *testing.T) {
 		read, path, form, what string
 	}{
 		{"GetDefaultSyncPolicy", "/admin/ui/syncpolicy", `hx-put="/admin/ui/syncpolicy"`, "the default device policy"},
+		{"GetCreateDefaults", "/admin/ui/defaults", `hx-put="/admin/ui/defaults"`, "the create defaults"},
+		{"EffectiveUserDefaults", "/admin/ui/defaults", `hx-put="/admin/ui/defaults"`, "the create defaults"},
 	} {
 		d := &fakeDir{
 			authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},

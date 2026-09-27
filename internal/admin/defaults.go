@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -232,14 +233,15 @@ func (s *Server) handleUIDefaults(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	cd, _, _ := s.dir.GetCreateDefaults(0)
-	rd, _ := s.dir.EffectiveUserDefaults(0)
-	s.render(w, "defaults.html", map[string]any{
-		"Nav":     "defaults",
-		"CSRF":    csrfCookieValue(r),
-		"MaxUser": cd.Domain.MaxUser,
-		"Fields":  userCreateFieldsOf(rd),
-	})
+	cd, _, cdErr := s.dir.GetCreateDefaults(0)
+	rd, rdErr := s.dir.EffectiveUserDefaults(0)
+	failed := readFailures{}
+	data := map[string]any{"Nav": "defaults", "CSRF": csrfCookieValue(r), "ReadFailed": failed}
+	if s.noteRead(failed, "defaults", "the create defaults", errors.Join(cdErr, rdErr)) {
+		data["MaxUser"] = cd.Domain.MaxUser
+		data["Fields"] = userCreateFieldsOf(rd)
+	}
+	s.render(w, "defaults.html", data)
 }
 
 // handleUISaveDefaults saves the system create-defaults from the editor and returns
