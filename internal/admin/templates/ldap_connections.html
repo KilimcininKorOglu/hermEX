@@ -1,0 +1,63 @@
+{{define "ldap_connections.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<header class="page-head"><div><h1>{{t "ldap.title"}}</h1><p class="page-desc">{{t "ldap.desc"}}</p></div></header>
+<div class="stack">
+{{if .CanWrite}}
+<section class="card">
+{{template "card-head" (dict "Icon" "server" "Title" "ldap.addConnectionTitle" "Desc" "ldap.addConnectionDesc")}}
+<form class="form-grid" hx-post="/admin/ui/ldap/connections" hx-target="#ldap-connections-panel" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+{{template "ldap-connection-fields" (dict "Conn" .NewConnection "PasswordSet" false)}}
+<button type="submit"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "plus"}}"/></svg>{{t "ldap.addConnection"}}</button>
+</form>
+</section>
+{{end}}
+{{template "ldap-connections-panel" .}}
+</div>
+</main>
+</div>
+{{template "foot" .}}{{end}}
+
+{{/* ldap-connection-fields is the connection form's inputs. It takes dict "Conn"
+     (a connection view) "PasswordSet" (whether a bind password is stored). */}}
+{{define "ldap-connection-fields"}}
+<label>{{t "ldap.name"}} <input type="text" name="name" value="{{.Conn.Name}}" maxlength="64" required></label>
+<label class="full">{{t "ldap.uri"}} <input type="text" name="uri" value="{{.Conn.URI}}" placeholder="ldaps://dc.example.com:636" required></label>
+<label class="check"><input type="checkbox" name="starttls" {{if .Conn.StartTLS}}checked{{end}}> {{t "ldap.startTLS"}}</label>
+<label>{{t "ldap.bindDN"}}{{template "help" "help.ldap.bindDN"}} <input type="text" name="bind_dn" value="{{.Conn.BindDN}}" placeholder="cn=svc,dc=example,dc=com" autocomplete="off"></label>
+<label>{{t "ldap.bindPassword"}} <input type="password" name="bind_password" placeholder="{{if .PasswordSet}}{{t "ldap.unchanged"}}{{else}}{{t "ldap.unsetParen"}}{{end}}" autocomplete="new-password"></label>
+<label>{{t "ldap.searchBase"}} <input type="text" name="base_dn" value="{{.Conn.BaseDN}}" placeholder="ou=people,dc=example,dc=com"></label>
+<label>{{t "ldap.usernameAttr"}}{{template "help" "help.ldap.usernameAttr"}} <input type="text" name="username_attr" value="{{.Conn.UsernameAttr}}" placeholder="mail"></label>
+{{end}}
+
+{{define "ldap-connections-panel"}}<div id="ldap-connections-panel" class="stack">
+{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
+{{if .System}}
+<section class="card">
+{{template "card-head" (dict "Icon" "server" "Title" "ldap.connectionsTitle" "Desc" "ldap.connectionsDesc")}}
+<table class="grid">
+<thead><tr><th>{{t "ldap.name"}}</th><th>{{t "ldap.uri"}}</th></tr></thead>
+<tbody>
+{{range .Connections}}<tr><td><a href="/admin/ui/ldap/connections/{{.ID}}">{{.Name}}</a></td><td>{{.URI}}</td></tr>
+{{else}}<tr><td colspan="2" class="empty{{if .ConnectionsError}} failed{{end}}">{{t (or .ConnectionsError "ldap.noConnections")}}</td></tr>
+{{end}}
+</tbody>
+</table>
+</section>
+{{end}}
+<section class="card">
+{{template "card-head" (dict "Icon" "globe" "Title" "ldap.bindingsTitle" "Desc" "ldap.bindingsDesc")}}
+<table class="grid">
+<thead><tr><th>{{t "ldap.colDomain"}}</th><th>{{t "ldap.preset"}}</th>{{if .System}}<th>{{t "ldap.connectionTitle"}}</th>{{end}}</tr></thead>
+<tbody>
+{{range .Bindings}}<tr><td><a href="/admin/ui/ldap/bindings/{{.ID}}">{{.Domain}}</a></td><td>{{t .PresetKey}}</td>{{if $.System}}<td>{{.Connection}}</td>{{end}}</tr>
+{{else}}<tr><td colspan="3" class="empty{{if .BindingsError}} failed{{end}}">{{t (or .BindingsError "ldap.noBindings")}}</td></tr>
+{{end}}
+</tbody>
+</table>
+</section>
+</div>{{end}}
+
+{{define "ldap-status"}}<div id="ldap-status">{{template "notice" .Notice}}</div>{{end}}

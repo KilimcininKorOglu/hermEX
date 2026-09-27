@@ -86,9 +86,9 @@ func mustGetOrg(t *testing.T, d *SQLDirectory, id int64) OrgInfo {
 }
 
 // TestDeleteOrgCascade proves DeleteOrg detaches the org's domains (org_id 0,
-// not deleted), removes its org-scoped configuration (LDAP, sync policy,
-// org-admin grants), refuses the reserved id 0, and, the landmine, never
-// touches the global default sync policy stored on org_id 0.
+// not deleted, keeping their directory binding), removes its org-scoped
+// configuration (sync policy, org-admin grants), refuses the reserved id 0, and,
+// the landmine, never touches the global default sync policy stored on org_id 0.
 func TestDeleteOrgCascade(t *testing.T) {
 	d, db := freshDirectory(t)
 
@@ -115,8 +115,9 @@ func TestDeleteOrgCascade(t *testing.T) {
 	mustNoErr(t, "the domain was deleted with its org",
 		db.QueryRow(`SELECT org_id FROM domains WHERE id = ?`, domID).Scan(&domOrg))
 	wantEq(t, "domain org_id after the org delete (detached)", domOrg, int64(0))
-	_, hasLDAP, _ := d.GetLDAPConfig(id)
-	wantEq(t, "org ldap_config survived the org delete", hasLDAP, false)
+	_, bound, err := d.LDAPBindingForDomain(domID)
+	mustNoErr(t, "read the domain's binding", err)
+	wantEq(t, "the detached domain keeps its directory binding", bound, true)
 	wantRows(t, db, "org sync_policy rows after delete", 0, `SELECT COUNT(*) FROM sync_policy WHERE org_id = ?`, id)
 	roles, err := d.AdminRoles(uid)
 	mustNoErr(t, "read admin roles", err)
@@ -135,15 +136,16 @@ func TestDeleteOrgCascade(t *testing.T) {
 	wantEq(t, "DeleteOrg(unknown)", missing, false)
 }
 
-// seedOrgScopedConfig attaches a domain to the org and gives it one row of each
-// org-scoped kind the delete must clear: an LDAP config, a sync policy, and an
-// org-admin grant. It returns the domain and the granted user.
+// seedOrgScopedConfig attaches a domain to the org, binds the domain to a
+// directory connection, and gives the org one row of each org-scoped kind the
+// delete must clear: a sync policy and an org-admin grant. It returns the domain
+// and the granted user.
 func seedOrgScopedConfig(t *testing.T, d *SQLDirectory, db *sql.DB, root string, orgID int64) (domID, uid int64) {
 	t.Helper()
 	domID = mustCreateDomain(t, d, root, "acme.test")
 	_, err := d.AssignDomainToOrg(domID, orgID)
 	mustNoErr(t, "assign domain to org", err)
-	mustNoErr(t, "set ldap config", d.SetLDAPConfig(orgID, LDAPConfig{URI: "ldaps://acme"}))
+	mustBindDomain(t, d, domID, LDAPConnection{Name: "acme", URI: "ldaps://acme"})
 	_, err = db.Exec(`INSERT INTO sync_policy (org_id, policy) VALUES (?, '{}')`, orgID)
 	mustNoErr(t, "insert the org sync policy", err)
 	uid = mustCreateUser(t, d, root, "admin@acme.test", "pw")

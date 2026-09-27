@@ -40,7 +40,10 @@
       "whoMayPost": "Whose mail the list accepts: anyone, the list's own members, senders in the list's domain, or the senders named on the list's page. Anyone (announce) accepts mail the same way as Anyone may post."
     },
     "ldap": {
-      "usernameAttr": "The LDAP attribute a login name is matched against. Empty uses mail."
+      "usernameAttr": "The LDAP attribute a login name is matched against. Empty uses mail.",
+      "bindDN": "The account this server searches the directory with. It reads every entry the sync imports, so give it read access only.",
+      "preset": "A starting mapping for a directory schema. Reset to preset returns the mapping to it.",
+      "baseOverride": "Search only under this entry for this domain's accounts. Empty uses the connection's search base."
     }
   }
 }

@@ -1,0 +1,107 @@
+{{define "ldap_binding.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<header class="page-head">
+<div>
+<nav class="crumbs" aria-label="{{t "userDetail.breadcrumb"}}"><a href="/admin/ui/ldap">{{t "nav.ldap"}}</a><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "chevron-right"}}"/></svg><span>{{.Binding.Domain}}</span></nav>
+<h1>{{.Binding.Domain}}</h1>
+<p class="page-desc">{{t "ldap.bindingDesc"}} {{t "ldap.preset"}}: {{t .PresetKey}}.</p>
+</div>
+</header>
+{{template "ldap-status" .}}
+<div class="stack">
+{{with index .ReadFailed "mapping"}}<p class="error">{{t .}}</p>{{else}}
+<form class="stack" hx-put="/admin/ui/ldap/bindings/{{.Binding.ID}}" hx-target="#ldap-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+{{if .System}}
+<section class="card">
+{{template "card-head" (dict "Icon" "server" "Title" "ldap.mappingTitle" "Desc" "ldap.mappingDesc")}}
+<div class="form-grid">
+<label>{{t "ldap.connectionTitle"}}
+<select name="connection_id">
+{{range .Connections}}<option value="{{.ID}}" {{if eq .ID $.Binding.ConnectionID}}selected{{end}}>{{.Name}}</option>{{end}}
+</select></label>
+<label>{{t "ldap.baseOverride"}}{{template "help" "help.ldap.baseOverride"}} <input type="text" name="base_dn" value="{{.Binding.Mapping.BaseDN}}" placeholder="ou=people,dc=example,dc=com"></label>
+</div>
+</section>
+{{end}}
+
+<section class="card">
+{{template "card-head" (dict "Icon" "contact" "Title" "ldap.fieldsTitle" "Desc" "ldap.fieldsDesc")}}
+<div class="check-grid">
+{{range .Fields}}
+<div class="field-pair">
+<label class="check"><input type="checkbox" name="field_{{.Key}}_enabled" {{if .Enabled}}checked{{end}}> {{t (printf "ldap.field.%s" .Key)}}</label>
+<input type="text" name="field_{{.Key}}_attr" value="{{.Attr}}" placeholder="{{.DefaultAttr}}" aria-label="{{t "ldap.attrFor" (t (printf "ldap.field.%s" .Key))}}">
+</div>
+{{end}}
+</div>
+</section>
+
+<section class="card">
+{{template "card-head" (dict "Icon" "at-sign" "Title" "ldap.aliasTitle" "Desc" "ldap.aliasDesc")}}
+<label>{{t "ldap.aliasAttr"}} <input type="text" name="alias_attr" value="{{.Binding.Mapping.AliasAttr}}" placeholder="proxyAddresses"></label>
+<p class="hint">{{t "ldap.aliasHintBefore"}} <code>smtp:</code> {{t "ldap.aliasHintAfter"}}</p>
+</section>
+
+<div class="card-grid two">
+<section class="card">
+{{template "card-head" (dict "Icon" "users" "Title" "ldap.groupTitle" "Desc" "ldap.groupDesc")}}
+<label class="check"><input type="checkbox" name="syncgroups" {{if .Binding.Mapping.SyncGroups}}checked{{end}}> {{t "ldap.syncGroups"}}</label>
+{{if .System}}
+<label>{{t "ldap.groupBase"}} <input type="text" name="group_base_dn" value="{{.Binding.Mapping.GroupBaseDN}}" placeholder="ou=groups,dc=example,dc=com"></label>
+<label>{{t "ldap.groupFilter"}} <input type="text" name="group_filter" value="{{.Binding.Mapping.GroupFilter}}" placeholder="(&amp;(objectClass=group)(mail=*))"></label>
+{{end}}
+</section>
+
+<section class="card">
+{{template "card-head" (dict "Icon" "contact" "Title" "ldap.contactTitle" "Desc" "ldap.contactDesc")}}
+<label class="check"><input type="checkbox" name="synccontacts" {{if .Binding.Mapping.SyncContacts}}checked{{end}}> {{t "ldap.syncContacts"}}</label>
+{{if .System}}
+<label>{{t "ldap.contactBase"}} <input type="text" name="contact_base_dn" value="{{.Binding.Mapping.ContactBaseDN}}" placeholder="ou=contacts,dc=example,dc=com"></label>
+<label>{{t "ldap.contactFilter"}} <input type="text" name="contact_filter" value="{{.Binding.Mapping.ContactFilter}}" placeholder="(&amp;(objectClass=contact)(mail=*))"></label>
+{{end}}
+</section>
+</div>
+{{if not .System}}<p class="hint">{{t "ldap.systemOnly"}}</p>{{end}}
+
+{{if .CanWrite}}<div><button type="submit">{{t "ldap.save"}}</button></div>{{end}}
+</form>
+{{end}}
+
+{{if .CanWrite}}
+<div class="card-grid two">
+<section class="card">
+{{template "card-head" (dict "Icon" "refresh-cw" "Title" "ldap.syncTitle" "Desc" "ldap.syncDesc")}}
+<form hx-post="/admin/ui/ldap/bindings/{{.Binding.ID}}/sync" hx-target="#ldap-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<button type="submit" class="secondary"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "refresh-cw"}}"/></svg>{{t "ldap.syncNow"}}</button>
+</form>
+</section>
+
+{{if .Binding.Preset}}
+<section class="card">
+{{template "card-head" (dict "Icon" "history" "Title" "ldap.resetTitle" "Desc" "ldap.resetDesc")}}
+<form hx-post="/admin/ui/ldap/bindings/{{.Binding.ID}}/reset" hx-target="#ldap-status" hx-swap="outerHTML"
+      hx-confirm="{{t "ldap.confirmReset" (t .PresetKey)}}" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<button type="submit" class="secondary">{{t "ldap.reset"}}</button>
+</form>
+</section>
+{{end}}
+</div>
+{{end}}
+
+{{if .System}}
+<section class="card danger-zone">
+{{template "card-head" (dict "Icon" "trash-2" "Title" "ldap.unbindTitle" "Desc" "ldap.unbindDesc")}}
+<form class="delete-form" hx-post="/admin/ui/ldap/bindings/{{.Binding.ID}}/delete" hx-target="#ldap-status" hx-swap="outerHTML"
+      hx-confirm="{{t "ldap.confirmUnbind" .Binding.Domain}}" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<button type="submit" class="danger">{{t "ldap.unbind"}}</button>
+</form>
+</section>
+{{end}}
+</div>
+</main>
+</div>
+{{template "foot" .}}{{end}}

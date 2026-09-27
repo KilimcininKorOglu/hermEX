@@ -132,6 +132,17 @@ func stringLiterals(f *ast.File) map[token.Pos]string {
 	return out
 }
 
+// TestLDAPFieldsHaveLabels proves every syncable profile field has a label, since
+// the binding page builds the key at render time where TestTemplateKeysExist
+// cannot see it.
+func TestLDAPFieldsHaveLabels(t *testing.T) {
+	for _, f := range directory.LDAPProfileFields() {
+		if catalogues[defaultLang]["ldap.field."+f.Key] == "" {
+			t.Errorf("profile field %q has no ldap.field label", f.Key)
+		}
+	}
+}
+
 // TestTranslate pins how a message renders: a key with arguments, an argument
 // that is itself a key, the English fallback, and a string that is no key.
 func TestTranslate(t *testing.T) {

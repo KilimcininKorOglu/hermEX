@@ -98,7 +98,6 @@ type fakeDir struct {
 	branding               directory.DomainBranding
 	brandingSet            bool
 	senderInt, senderExt   string
-	ldap                   map[int64]directory.LDAPConfig
 	ldapConns              map[int64]directory.LDAPConnection
 	ldapBindings           map[int64]directory.LDAPBinding
 	defaultSyncPolicy      easpolicy.Policy
@@ -459,20 +458,6 @@ func (f *fakeDir) DeleteOrg(id int64) (bool, error) {
 func (f *fakeDir) AssignDomainToOrg(domainID, orgID int64) (bool, error) {
 	f.assignDomainID, f.assignOrgID = domainID, orgID
 	return !f.assignDomainMissing, nil
-}
-func (f *fakeDir) GetLDAPConfig(orgID int64) (directory.LDAPConfig, bool, error) {
-	if err := f.readErrs["GetLDAPConfig"]; err != nil {
-		return directory.LDAPConfig{}, false, err
-	}
-	c, ok := f.ldap[orgID]
-	return c, ok, nil
-}
-func (f *fakeDir) SetLDAPConfig(orgID int64, cfg directory.LDAPConfig) error {
-	if f.ldap == nil {
-		f.ldap = map[int64]directory.LDAPConfig{}
-	}
-	f.ldap[orgID] = cfg
-	return nil
 }
 func (f *fakeDir) UpsertLDAPUser(username string, _ []byte, _ string) (bool, error) {
 	f.upsertedUsers = append(f.upsertedUsers, username)

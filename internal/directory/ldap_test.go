@@ -91,8 +91,8 @@ func TestLDAPLoginUsesDomainBinding(t *testing.T) {
 		_, err := db.Exec(`UPDATE users SET externid=? WHERE username=?`, []byte{0x01}, u)
 		mustNoErr(t, "master "+u+" in LDAP", err)
 	}
-	mustNoErr(t, "set the organization directory", d.SetLDAPConfig(0,
-		LDAPConfig{URI: "ldaps://org.test", UsernameAttr: "mail"}))
+	_, err := db.Exec(`INSERT INTO ldap_config (org_id, uri, username_attr) VALUES (0, 'ldaps://org.test', 'mail')`)
+	mustNoErr(t, "leave an organization directory row behind", err)
 	mustBindDomain(t, d, aID, LDAPConnection{Name: "a", URI: "ldaps://a-dir.test", UsernameAttr: "mail"})
 	mustBindDomain(t, d, bID, LDAPConnection{Name: "b", URI: "ldaps://b-dir.test", UsernameAttr: "uid"})
 	stub := &stubVerifier{result: true}
@@ -140,61 +140,6 @@ func wantMastered(t *testing.T, d *SQLDirectory, login string) {
 	wantEq(t, login+" exists", ok, true)
 	if len(row.externid) == 0 {
 		t.Errorf("%s carries no externid, so it is not LDAP-mastered", login)
-	}
-}
-
-// TestLDAPConfigRoundTrip stores an organization's LDAP configuration and reads
-// it back, confirms SetLDAPConfig replaces rather than duplicates, and confirms
-// an org with no configuration reports ok=false (so its users fall back to local
-// crypt authentication).
-func TestLDAPConfigRoundTrip(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-
-	if _, ok, err := d.GetLDAPConfig(7); err != nil || ok {
-		t.Fatalf("GetLDAPConfig(unconfigured) = ok %v, err %v; want ok=false", ok, err)
-	}
-
-	want := LDAPConfig{
-		URI:          "ldaps://ad.hermex.test:636",
-		StartTLS:     true,
-		BindDN:       "cn=svc,dc=hermex,dc=test",
-		BindPassword: "s3cret",
-		BaseDN:       "ou=people,dc=hermex,dc=test",
-		UsernameAttr: "userPrincipalName",
-		SyncFields: map[string]LDAPSyncField{
-			"displayName": {Enabled: true},
-			"title":       {Enabled: true, Attr: "jobTitle"},
-		},
-		SyncGroups:  true,
-		GroupBaseDN: "ou=groups,dc=hermex,dc=test",
-		GroupFilter: "(&(objectClass=group)(mail=*))",
-	}
-	if err := d.SetLDAPConfig(7, want); err != nil {
-		t.Fatal(err)
-	}
-	got, ok, err := d.GetLDAPConfig(7)
-	if err != nil || !ok {
-		t.Fatalf("GetLDAPConfig after set: ok %v, err %v", ok, err)
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("round-trip mismatch:\n got %+v\nwant %+v", got, want)
-	}
-
-	// A second Set for the same org replaces the row rather than failing on the
-	// primary key or leaving the old values. The replacement stays encrypted:
-	// SetLDAPConfig refuses a plaintext bind whichever write it is.
-	want.URI = "ldaps://ad2.hermex.test:636"
-	want.StartTLS = false
-	if err := d.SetLDAPConfig(7, want); err != nil {
-		t.Fatal(err)
-	}
-	if got, _, _ := d.GetLDAPConfig(7); !reflect.DeepEqual(got, want) {
-		t.Errorf("replace mismatch:\n got %+v\nwant %+v", got, want)
 	}
 }
 

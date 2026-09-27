@@ -1,0 +1,67 @@
+{{define "ldap_connection.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<header class="page-head">
+<div>
+<nav class="crumbs" aria-label="{{t "userDetail.breadcrumb"}}"><a href="/admin/ui/ldap">{{t "nav.ldap"}}</a><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "chevron-right"}}"/></svg><span>{{with .Connection}}{{.Name}}{{else}}{{t "ldap.connectionTitle"}}{{end}}</span></nav>
+<h1>{{with .Connection}}{{.Name}}{{else}}{{t "ldap.connectionTitle"}}{{end}}</h1>
+</div>
+</header>
+{{template "ldap-status" .}}
+<div class="stack">
+<section class="card">
+{{template "card-head" (dict "Icon" "server" "Title" "ldap.connectionTitle" "Desc" "ldap.connectionDesc")}}
+{{with index .ReadFailed "connection"}}<p class="error">{{t .}}</p>{{else}}
+<form class="form-grid" hx-put="/admin/ui/ldap/connections/{{.ID}}" hx-target="#ldap-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+{{template "ldap-connection-fields" (dict "Conn" .Connection "PasswordSet" .BindPasswordSet)}}
+{{if .CanWrite}}<button type="submit">{{t "ldap.save"}}</button>{{end}}
+</form>
+{{end}}
+</section>
+
+<section class="card">
+{{template "card-head" (dict "Icon" "globe" "Title" "ldap.bindingsTitle" "Desc" "ldap.connBindingsDesc")}}
+{{with index .ReadFailed "bindings"}}<p class="error">{{t .}}</p>{{else}}
+<table class="grid">
+<thead><tr><th>{{t "ldap.colDomain"}}</th><th>{{t "ldap.preset"}}</th></tr></thead>
+<tbody>
+{{range .Bindings}}<tr><td><a href="/admin/ui/ldap/bindings/{{.ID}}">{{.Domain}}</a></td><td>{{t .PresetKey}}</td></tr>
+{{else}}<tr><td colspan="2" class="empty">{{t "ldap.noBindings"}}</td></tr>
+{{end}}
+</tbody>
+</table>
+{{if .CanWrite}}
+<form class="create-form" hx-post="/admin/ui/ldap/connections/{{.ID}}/bindings" hx-target="#ldap-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>{{t "ldap.colDomain"}}
+<select name="domain_id">
+{{range .FreeDomains}}<option value="{{.ID}}">{{.Name}}</option>
+{{else}}<option value="">{{t "ldap.noFreeDomain"}}</option>
+{{end}}
+</select></label>
+<label>{{t "ldap.preset"}}{{template "help" "help.ldap.preset"}}
+<select name="preset">
+<option value="">{{t "ldap.noPreset"}}</option>
+{{range .Presets}}<option value="{{.Name}}">{{t .Key}}</option>{{end}}
+</select></label>
+<button type="submit"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "plus"}}"/></svg>{{t "ldap.bindDomain"}}</button>
+</form>
+{{end}}
+{{end}}
+</section>
+
+{{if and .CanWrite .Connection}}
+<section class="card danger-zone">
+{{template "card-head" (dict "Icon" "trash-2" "Title" "ldap.deleteTitle" "Desc" "ldap.deleteDesc")}}
+<form class="delete-form" hx-post="/admin/ui/ldap/connections/{{.ID}}/delete" hx-target="#ldap-status" hx-swap="outerHTML"
+      hx-confirm="{{t "ldap.confirmDelete" .Connection.Name}}" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<button type="submit" class="danger">{{t "ldap.delete"}}</button>
+</form>
+</section>
+{{end}}
+</div>
+</main>
+</div>
+{{template "foot" .}}{{end}}

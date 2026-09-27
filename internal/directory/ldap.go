@@ -22,10 +22,11 @@ type LDAPVerifier interface {
 // with an externid). Without one, such accounts cannot authenticate.
 func (d *SQLDirectory) SetLDAPVerifier(v LDAPVerifier) { d.verifier = v }
 
-// LDAPConfig is one organization's LDAP/AD bind-to-verify configuration: where
-// the directory lives, how to reach it, the service account that searches for a
-// login's distinguished name, and the attribute a login is matched against. An
-// empty URI means the org has no LDAP directory configured.
+// LDAPConfig is one bound domain's effective LDAP/AD configuration, merged from
+// its connection and its binding (LDAPConfigForDomain, LDAPConfigForBinding):
+// where the directory lives, how to reach it, the service account that searches
+// for a login's distinguished name, the attribute a login is matched against, and
+// the domain's downsync mapping.
 type LDAPConfig struct {
 	URI          string // ldap://host:389 or ldaps://host:636
 	StartTLS     bool   // upgrade a plaintext connection with StartTLS
@@ -55,9 +56,8 @@ type LDAPConfig struct {
 	SyncContacts  bool
 	ContactBaseDN string
 	ContactFilter string
-	// DomainID and Domain name the local domain a binding-resolved configuration
-	// belongs to (zero and empty for an organization-wide ldap_config row). A
-	// downsync creates users and lists only in this domain and files contacts under it.
+	// DomainID and Domain name the bound domain. A downsync creates users and lists
+	// only in this domain and files contacts under it.
 	DomainID int64
 	Domain   string
 }
@@ -174,40 +174,6 @@ func (d *SQLDirectory) ApplyLDAPProfile(username string, values map[string]strin
 	return d.SetUserProperties(username, props)
 }
 
-// GetLDAPConfig returns an organization's LDAP configuration, reporting ok=false
-// when the org has none, in which case its users authenticate against local
-// crypt rather than a directory.
-func (d *SQLDirectory) GetLDAPConfig(orgID int64) (cfg LDAPConfig, ok bool, err error) {
-	var startTLS int
-	var syncJSON sql.NullString
-	err = d.db.QueryRow(
-		`SELECT uri, start_tls, bind_dn, bind_password, base_dn, username_attr, sync_config
-		   FROM ldap_config WHERE org_id = ?`, orgID).Scan(
-		&cfg.URI, &startTLS, &cfg.BindDN, &cfg.BindPassword, &cfg.BaseDN, &cfg.UsernameAttr, &syncJSON)
-	if errors.Is(err, sql.ErrNoRows) {
-		return LDAPConfig{}, false, nil
-	}
-	if err != nil {
-		return LDAPConfig{}, false, err
-	}
-	cfg.StartTLS = startTLS != 0
-	if syncJSON.Valid && syncJSON.String != "" {
-		var sc LDAPMapping
-		if err := json.Unmarshal([]byte(syncJSON.String), &sc); err != nil {
-			return LDAPConfig{}, false, fmt.Errorf("directory: malformed ldap sync_config: %w", err)
-		}
-		cfg.SyncFields = sc.Fields
-		cfg.AliasAttr = sc.AliasAttr
-		cfg.SyncGroups = sc.SyncGroups
-		cfg.GroupBaseDN = sc.GroupBaseDN
-		cfg.GroupFilter = sc.GroupFilter
-		cfg.SyncContacts = sc.SyncContacts
-		cfg.ContactBaseDN = sc.ContactBaseDN
-		cfg.ContactFilter = sc.ContactFilter
-	}
-	return cfg, true, nil
-}
-
 // UpsertLDAPUser records an account discovered in an LDAP downsync: an existing
 // user (matched by username) has its externid set, marking it LDAP-mastered; a
 // new user is created with that externid, an empty local password (it
@@ -266,40 +232,6 @@ func (c LDAPConfig) EncryptedTransport() bool {
 		return true
 	}
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(c.URI)), "ldaps://")
-}
-
-// SetLDAPConfig stores (replacing any existing) an organization's LDAP
-// configuration. A configuration that would bind in the clear is refused; an
-// empty URI is how an operator turns the directory off and is left alone.
-func (d *SQLDirectory) SetLDAPConfig(orgID int64, cfg LDAPConfig) error {
-	if strings.TrimSpace(cfg.URI) != "" && !cfg.EncryptedTransport() {
-		return ErrInsecureLDAP
-	}
-	startTLS := 0
-	if cfg.StartTLS {
-		startTLS = 1
-	}
-	syncJSON, err := marshalSyncConfig(cfg)
-	if err != nil {
-		return err
-	}
-	_, err = d.db.Exec(
-		`REPLACE INTO ldap_config
-			(org_id, uri, start_tls, bind_dn, bind_password, base_dn, username_attr, sync_config)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		orgID, cfg.URI, startTLS, cfg.BindDN, cfg.BindPassword, cfg.BaseDN, cfg.UsernameAttr, syncJSON)
-	return err
-}
-
-// marshalSyncConfig encodes the optional downsync settings for the sync_config column,
-// returning nil when every one of them is at its zero value so an org that syncs nothing
-// but logins stores no document at all.
-func marshalSyncConfig(cfg LDAPConfig) (any, error) {
-	return marshalMapping(LDAPMapping{
-		Fields: cfg.SyncFields, AliasAttr: cfg.AliasAttr,
-		SyncGroups: cfg.SyncGroups, GroupBaseDN: cfg.GroupBaseDN, GroupFilter: cfg.GroupFilter,
-		SyncContacts: cfg.SyncContacts, ContactBaseDN: cfg.ContactBaseDN, ContactFilter: cfg.ContactFilter,
-	})
 }
 
 // marshalMapping encodes a downsync mapping for a sync_config column, returning nil when

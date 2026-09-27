@@ -38,7 +38,10 @@ func TestAFailedReadHidesTheFormItFeeds(t *testing.T) {
 		{"GetDomainSyncPolicy", "/admin/ui/domains/1", `/admin/ui/domains/1/syncpolicy"`, "the device policy of this domain"},
 		{"GetCreateDefaults", "/admin/ui/domains/1", `/admin/ui/domains/1/createdefaults"`, "the create defaults override"},
 		{"GetDomainBranding", "/admin/ui/domains/1", `/admin/ui/domains/1/branding"`, "the login branding"},
-		{"GetLDAPConfig", "/admin/ui/ldap", `hx-post="/admin/ui/ldap"`, "the directory configuration"},
+		{"GetLDAPConnection", "/admin/ui/ldap/connections/1", `hx-put="/admin/ui/ldap/connections/1"`, "the directory connection"},
+		{"ListLDAPBindings", "/admin/ui/ldap/connections/1", `hx-post="/admin/ui/ldap/connections/1/bindings"`, "the bound domains"},
+		{"ListDomains", "/admin/ui/ldap/connections/1", `hx-post="/admin/ui/ldap/connections/1/bindings"`, "the domains"},
+		{"ListLDAPConnections", "/admin/ui/ldap/bindings/1", `hx-put="/admin/ui/ldap/bindings/1"`, "the directory connections"},
 		{"ListOrgs", "/admin/ui/roles/1", `hx-put="/admin/ui/roles/1"`, "the organizations"},
 		{"ListDomains", "/admin/ui/roles/1", `hx-put="/admin/ui/roles/1"`, "the domains"},
 		{"ListUsers", "/admin/ui/roles/1", `hx-put="/admin/ui/roles/1"`, "the users"},
@@ -82,6 +85,8 @@ func TestAFailedReadHidesTheFormItFeeds(t *testing.T) {
 			domainDetail: directory.DomainDetail{ID: 1, Name: "acme.test"},
 			namedRoles:   map[int64]directory.RoleDetail{1: roleDetail(1, "Helpdesk", "", nil, nil)},
 			mlists:       []directory.MListInfo{{Listname: "team@acme.test"}},
+			ldapConns:    map[int64]directory.LDAPConnection{1: {ID: 1, Name: "hq", URI: "ldaps://x"}},
+			ldapBindings: map[int64]directory.LDAPBinding{1: {ID: 1, ConnectionID: 1, DomainID: 1, Domain: "acme.test"}},
 			readErrs:     map[string]error{tc.read: errReadFailed},
 		}
 		ts := adminServer(t, d)

@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -40,201 +39,192 @@ func adminServerWithSyncer(t *testing.T, d Directory, syncer LDAPSyncer) *httpte
 	return ts
 }
 
-// TestUILDAPPage proves the Directory Sync page shows the stored config and
-// never leaks the bind password to the browser.
-func TestUILDAPPage(t *testing.T) {
-	d := &fakeDir{
-		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
-		ldap: map[int64]directory.LDAPConfig{0: {
-			URI: "ldaps://dc.test:636", BindDN: "cn=svc", BindPassword: "topsecret",
-			BaseDN: "ou=people", UsernameAttr: "mail",
-		}},
-	}
+// TestUILDAPOverviewForSystemAdmin proves a system admin sees every connection and
+// every bound domain, and never a bind password.
+func TestUILDAPOverviewForSystemAdmin(t *testing.T) {
+	d := ldapAPIDir(directory.AdminRole{Role: directory.AdminSystem})
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/ldap", session)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("ldap page status %d, want 200", resp.StatusCode)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "ldaps://dc.test:636") {
-		t.Errorf("ldap page missing the stored URI: %s", body)
-	}
-	if strings.Contains(string(body), "topsecret") {
-		t.Errorf("ldap page LEAKED the bind password to the browser")
-	}
-	if !strings.Contains(string(body), "(unchanged)") {
-		t.Errorf("ldap page should mark the password as set: %s", body)
-	}
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/ldap", session), http.StatusOK, "overview")
+	wantContains(t, page, `href="/admin/ui/ldap/connections/1"`, "the first connection is listed")
+	wantContains(t, page, `href="/admin/ui/ldap/connections/2"`, "the second connection is listed")
+	wantContains(t, page, `href="/admin/ui/ldap/bindings/2"`, "every binding is listed")
+	wantContains(t, page, `hx-post="/admin/ui/ldap/connections"`, "the add-connection form is offered")
+	wantNotContains(t, page, "topsecret", "the bind password stays out of the page")
 }
 
-// TestUISaveLDAP proves the form stores the configuration.
-func TestUISaveLDAP(t *testing.T) {
-	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+// TestUILDAPDomainAdminSeesOnlyItsBinding proves a domain admin sees its own
+// domain's binding, no connection, and is refused another domain's binding page and
+// every connection page.
+func TestUILDAPDomainAdminSeesOnlyItsBinding(t *testing.T) {
+	d := ldapAPIDir(directory.AdminRole{Role: directory.AdminDomain, ScopeID: 1})
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/ldap", session), http.StatusOK, "overview")
+	wantContains(t, page, `href="/admin/ui/ldap/bindings/1"`, "the own binding is listed")
+	wantNotContains(t, page, `href="/admin/ui/ldap/bindings/2"`, "the other binding is hidden")
+	wantNotContains(t, page, `href="/admin/ui/ldap/connections/`, "no connection is listed")
+	wantNotContains(t, page, `hx-post="/admin/ui/ldap/connections"`, "no add-connection form")
+
+	own := wantBody(t, authedGET(t, ts, "/admin/ui/ldap/bindings/1", session), http.StatusOK, "own binding")
+	wantContains(t, own, `hx-put="/admin/ui/ldap/bindings/1"`, "the own mapping form is offered")
+	wantNotContains(t, own, `name="group_filter"`, "the system-only filter is not offered")
+	wantNotContains(t, own, `name="connection_id"`, "the connection cannot be changed")
+	wantStatus(t, authedGET(t, ts, "/admin/ui/ldap/bindings/2", session), http.StatusForbidden, "other binding")
+	wantStatus(t, authedGET(t, ts, "/admin/ui/ldap/connections/1", session), http.StatusForbidden, "connection page")
+}
+
+// TestUISaveLDAPBindingKeepsSystemFields proves a domain admin's form save changes
+// the mapping and cannot reach the system-only settings, even when it posts them.
+func TestUISaveLDAPBindingKeepsSystemFields(t *testing.T) {
+	d := ldapAPIDir(directory.AdminRole{Role: directory.AdminDomain, ScopeID: 1})
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/ldap", session, csrf, url.Values{
-		"uri": {"ldap://x:389"}, "starttls": {"on"}, "bind_dn": {"cn=svc"},
-		"bind_password": {"pw"}, "base_dn": {"ou=p"}, "username_attr": {"mail"},
-	})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("save ldap status %d, want 200", resp.StatusCode)
-	}
-	got := d.ldap[0]
-	if got.URI != "ldap://x:389" || !got.StartTLS || got.BindPassword != "pw" || got.UsernameAttr != "mail" {
-		t.Errorf("saved config = %+v, want the form values", got)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "Configuration saved") {
-		t.Errorf("save response missing the confirmation: %s", body)
-	}
+	body := wantBody(t, htmxPUT(t, ts, "/admin/ui/ldap/bindings/1", session, csrf, url.Values{
+		"field_title_enabled": {"on"}, "field_title_attr": {"jobTitle"},
+		"alias_attr": {"proxyAddresses"}, "syncgroups": {"on"},
+		"group_filter": {"(objectClass=*)"}, "base_dn": {"dc=everything"}, "connection_id": {"2"},
+	}), http.StatusOK, "save")
+	wantContains(t, body, "Configuration saved", "the save is confirmed")
+	got := d.ldapBindings[1]
+	wantEq(t, got.Mapping.Fields["title"], directory.LDAPSyncField{Enabled: true, Attr: "jobTitle"}, "the title field")
+	wantEq(t, got.Mapping.AliasAttr, "proxyAddresses", "the alias attribute")
+	wantTrue(t, got.Mapping.SyncGroups, "group sync is on")
+	wantEq(t, got.Mapping.GroupFilter, "(cn=a*)", "the group filter keeps its stored value")
+	wantEq(t, got.Mapping.BaseDN, "ou=a,dc=test", "the base DN keeps its stored value")
+	wantEq(t, got.ConnectionID, int64(1), "the connection keeps its stored value")
 }
 
-// TestUISaveLDAPSyncSettings proves the form persists the profile-field selection
-// (enabled + attribute override) and the group-sync settings, so a panel-configured
-// operator's choices reach the sync.
-func TestUISaveLDAPSyncSettings(t *testing.T) {
-	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+// TestUISaveLDAPBindingRefusesMalformedAttribute proves the form refuses an
+// attribute carrying filter syntax and stores nothing.
+func TestUISaveLDAPBindingRefusesMalformedAttribute(t *testing.T) {
+	d := ldapAPIDir(directory.AdminRole{Role: directory.AdminDomain, ScopeID: 1})
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/ldap", session, csrf, url.Values{
-		"uri": {"ldap://x:389"}, "bind_dn": {"cn=svc"}, "base_dn": {"ou=p"}, "username_attr": {"mail"},
-		"field_displayName_enabled": {"on"},
-		"field_title_enabled":       {"on"},
-		"field_title_attr":          {"jobTitle"},
-		"syncgroups":                {"on"},
-		"group_base_dn":             {"ou=groups,dc=x"},
-		"group_filter":              {"(objectClass=group)"},
-	})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("save status %d, want 200", resp.StatusCode)
-	}
-	got := d.ldap[0]
-	if !got.SyncFields["displayName"].Enabled {
-		t.Error("displayName should be enabled")
-	}
-	if f := got.SyncFields["title"]; !f.Enabled || f.Attr != "jobTitle" {
-		t.Errorf("title field = %+v, want enabled with attr jobTitle", f)
-	}
-	if !got.SyncGroups || got.GroupBaseDN != "ou=groups,dc=x" || got.GroupFilter != "(objectClass=group)" {
-		t.Errorf("group settings = syncGroups=%v base=%q filter=%q, want the form values",
-			got.SyncGroups, got.GroupBaseDN, got.GroupFilter)
-	}
+	body := wantBody(t, htmxPUT(t, ts, "/admin/ui/ldap/bindings/1", session, csrf,
+		url.Values{"alias_attr": {"mail)(uid=*"}}), http.StatusOK, "save")
+	wantContains(t, body, "malformed", "the refusal is reported")
+	wantEq(t, d.ldapBindings[1].Mapping.AliasAttr, "mail", "nothing was stored")
 }
 
-// TestUISaveLDAPAliasAttribute proves the alias attribute persists, so a panel-configured
-// alias sync reaches the downsync.
-func TestUISaveLDAPAliasAttribute(t *testing.T) {
-	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+// TestUISaveLDAPConnectionKeepsPassword proves an empty bind password keeps the
+// stored one while the rest of the form is saved.
+func TestUISaveLDAPConnectionKeepsPassword(t *testing.T) {
+	d := ldapAPIDir(directory.AdminRole{Role: directory.AdminSystem})
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/ldap", session, csrf, url.Values{
-		"uri": {"ldap://x:389"}, "bind_dn": {"cn=svc"}, "base_dn": {"ou=p"}, "username_attr": {"mail"},
-		"alias_attr": {"proxyAddresses"},
-	})
-	resp.Body.Close()
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/ldap/connections/1", session), http.StatusOK, "connection page")
+	wantNotContains(t, page, "topsecret", "the bind password stays out of the page")
+	wantContains(t, page, "(unchanged)", "the page marks the password as set")
 
-	if got := d.ldap[0]; got.AliasAttr != "proxyAddresses" {
-		t.Errorf("alias attribute = %q, want proxyAddresses", got.AliasAttr)
-	}
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/ldap/connections/1", session, csrf, url.Values{
+		"name": {"hq"}, "uri": {"ldaps://dc2.test"}, "bind_dn": {"cn=svc"}, "bind_password": {""},
+	}), http.StatusOK, "save")
+	wantEq(t, d.ldapConns[1].BindPassword, "topsecret", "an empty password keeps the stored one")
+	wantEq(t, d.ldapConns[1].URI, "ldaps://dc2.test", "the URI changes")
 }
 
-// TestUISaveLDAPContactSettings proves the contact-sync settings persist, so an operator
-// configuring contact sync in the panel reaches the sync with a filing domain.
-func TestUISaveLDAPContactSettings(t *testing.T) {
-	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+// TestUISaveLDAPConnectionRefusesWhenUnread proves a save stops when the stored
+// connection cannot be read: an empty bind password keeps the stored one, so the
+// save would store an empty password in its place.
+func TestUISaveLDAPConnectionRefusesWhenUnread(t *testing.T) {
+	d := ldapAPIDir(directory.AdminRole{Role: directory.AdminSystem})
+	d.readErrs = map[string]error{"GetLDAPConnection": errReadFailed}
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/ldap", session, csrf, url.Values{
-		"uri": {"ldap://x:389"}, "bind_dn": {"cn=svc"}, "base_dn": {"ou=p"}, "username_attr": {"mail"},
-		"synccontacts":    {"on"},
-		"contact_base_dn": {"ou=contacts,dc=x"},
-		"contact_filter":  {"(objectClass=contact)"},
-	})
-	resp.Body.Close()
-
-	got := d.ldap[0]
-	if !got.SyncContacts || got.ContactBaseDN != "ou=contacts,dc=x" || got.ContactFilter != "(objectClass=contact)" {
-		t.Errorf("contact settings = syncContacts=%v base=%q filter=%q, want the form values",
-			got.SyncContacts, got.ContactBaseDN, got.ContactFilter)
-	}
-}
-
-// TestUISaveLDAPPreservesPassword proves an empty bind password keeps the stored
-// secret rather than blanking it.
-func TestUISaveLDAPPreservesPassword(t *testing.T) {
-	d := &fakeDir{
-		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
-		ldap: map[int64]directory.LDAPConfig{0: {URI: "old", BindPassword: "kept-secret"}},
-	}
-	ts := adminServer(t, d)
-	session, csrf := loginCookies(t, ts)
-
-	resp := htmxPOST(t, ts, "/admin/ui/ldap", session, csrf,
-		url.Values{"uri": {"new"}, "bind_password": {""}})
-	resp.Body.Close()
-	if got := d.ldap[0]; got.BindPassword != "kept-secret" {
-		t.Errorf("empty password should preserve the stored secret, got %q", got.BindPassword)
-	}
-	if got := d.ldap[0]; got.URI != "new" {
-		t.Errorf("URI should update, got %q", got.URI)
-	}
-}
-
-// TestUISaveLDAPRefusesWhenTheStoredOneCannotBeRead proves a save stops when the
-// stored configuration cannot be read. An empty bind password keeps the stored one,
-// so the save stored an empty password in its place.
-func TestUISaveLDAPRefusesWhenTheStoredOneCannotBeRead(t *testing.T) {
-	d := &fakeDir{
-		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
-		ldap:     map[int64]directory.LDAPConfig{0: {URI: "old", BindPassword: "kept-secret"}},
-		readErrs: map[string]error{"GetLDAPConfig": errReadFailed},
-	}
-	ts := adminServer(t, d)
-	session, csrf := loginCookies(t, ts)
-
-	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/ldap", session, csrf,
-		url.Values{"uri": {"new"}, "starttls": {"on"}, "bind_password": {""}}), http.StatusOK, "save")
+	body := wantBody(t, htmxPUT(t, ts, "/admin/ui/ldap/connections/1", session, csrf, url.Values{
+		"name": {"hq"}, "uri": {"ldaps://new.test"},
+	}), http.StatusOK, "save")
 	wantContains(t, body, "nothing was saved", "the refused save is reported")
-	if got := d.ldap[0]; got.BindPassword != "kept-secret" || got.URI != "old" {
-		t.Errorf("a save after a failed read replaced the stored configuration: %+v", got)
-	}
+	wantEq(t, d.ldapConns[1].URI, "ldaps://dc.test", "the stored connection is unchanged")
 }
 
-// TestUISyncLDAP proves the sync trigger enqueues an async task rather than
-// syncing inline: the response acknowledges the queued task and nothing is
-// upserted until the worker runs it.
-func TestUISyncLDAP(t *testing.T) {
-	d := &fakeDir{
-		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
-		ldap: map[int64]directory.LDAPConfig{0: {URI: "ldap://x"}}, upsertNew: true,
-	}
-	syncer := &fakeSyncer{users: []ldapauth.SyncedUser{{Username: "a@test"}, {Username: "b@test"}}}
-	ts := adminServerWithSyncer(t, d, syncer)
+// TestUICreateLDAPConnection proves the add form stores a connection and opens it,
+// and a plaintext bind is refused.
+func TestUICreateLDAPConnection(t *testing.T) {
+	d := ldapAPIDir(directory.AdminRole{Role: directory.AdminSystem})
+	d.ldapConns = nil
+	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/ldap/sync", session, csrf, url.Values{})
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("sync status %d, want 200", resp.StatusCode)
+	resp := htmxPOST(t, ts, "/admin/ui/ldap/connections", session, csrf, url.Values{
+		"name": {"hq"}, "uri": {"ldaps://dc.test"}, "bind_password": {"pw"},
+	})
+	resp.Body.Close()
+	wantEq(t, resp.Header.Get("HX-Redirect"), "/admin/ui/ldap/connections/1", "the new connection opens")
+	wantEq(t, d.ldapConns[1].BindPassword, "pw", "the password is stored")
+}
+
+// TestUIResetLDAPBindingRestoresPreset proves the reset button brings back the
+// preset mapping, keeps the system-only settings, and reloads the page.
+func TestUIResetLDAPBindingRestoresPreset(t *testing.T) {
+	d := ldapAPIDir(directory.AdminRole{Role: directory.AdminDomain, ScopeID: 1})
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/ldap/bindings/1/reset", session, csrf, url.Values{})
+	resp.Body.Close()
+	wantEq(t, resp.Header.Get("HX-Redirect"), "/admin/ui/ldap/bindings/1", "the page reloads")
+	got := d.ldapBindings[1].Mapping
+	wantEq(t, got.AliasAttr, "proxyAddresses", "the preset alias attribute is back")
+	wantTrue(t, got.Fields["displayName"].Enabled, "the preset fields are back")
+	wantEq(t, got.GroupFilter, "(cn=a*)", "the group filter keeps its stored value")
+}
+
+// TestUISyncLDAPBindingQueuesTask proves the sync button queues one task naming the
+// binding and syncs nothing inline.
+func TestUISyncLDAPBindingQueuesTask(t *testing.T) {
+	d := ldapAPIDir(directory.AdminRole{Role: directory.AdminDomain, ScopeID: 1})
+	ts := adminServerWithSyncer(t, d, &fakeSyncer{users: []ldapauth.SyncedUser{{Username: "a@a.test"}}})
+	session, csrf := loginCookies(t, ts)
+
+	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/ldap/bindings/1/sync", session, csrf, url.Values{}),
+		http.StatusOK, "sync")
+	wantContains(t, body, "queued", "the queued task is acknowledged")
+	if len(d.tasks) != 1 || d.tasks[0].Type != "ldapsync" || d.tasks[0].Params != "1" {
+		t.Errorf("queued tasks = %+v, want one ldapsync task for binding 1", d.tasks)
 	}
-	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "queued") {
-		t.Errorf("sync response should acknowledge the queued task: %s", body)
-	}
-	if len(d.upsertedUsers) != 0 {
-		t.Errorf("enqueue must not sync inline, but upserted %v", d.upsertedUsers)
-	}
-	if len(d.tasks) != 1 || d.tasks[0].Type != "ldapsync" || d.tasks[0].Status != directory.TaskPending {
-		t.Errorf("expected one pending ldapsync task, got %+v", d.tasks)
+	wantEq(t, len(d.upsertedUsers), 0, "accounts synced inline")
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/ldap/bindings/2/sync", session, csrf, url.Values{}),
+		http.StatusForbidden, "sync of another domain")
+}
+
+// TestUISyncLDAPBindingUnavailable proves the sync button reports that sync is
+// unavailable when no syncer is wired, and queues nothing.
+func TestUISyncLDAPBindingUnavailable(t *testing.T) {
+	d := ldapAPIDir(directory.AdminRole{Role: directory.AdminSystem})
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/ldap/bindings/1/sync", session, csrf, url.Values{}),
+		http.StatusOK, "sync")
+	wantContains(t, body, "not available", "the missing syncer is reported")
+	wantEq(t, len(d.tasks), 0, "queued tasks")
+}
+
+// TestUILDAPRendersInBothLanguages proves the three Directory Sync pages render in
+// English and Turkish with no raw catalogue key left on them.
+func TestUILDAPRendersInBothLanguages(t *testing.T) {
+	for lang, want := range map[string]string{"en": "Bound domains", "tr": "Bağlı alan adları"} {
+		d := ldapAPIDir(directory.AdminRole{Role: directory.AdminSystem})
+		d.uiPrefs = map[string]directory.UserPrefs{"admin@hermex.test": {Lang: lang}}
+		ts := adminServer(t, d)
+		session, _ := loginCookies(t, ts)
+		for _, path := range []string{"/admin/ui/ldap", "/admin/ui/ldap/connections/1", "/admin/ui/ldap/bindings/1"} {
+			page := wantBody(t, authedGET(t, ts, path, session), http.StatusOK, lang+" "+path)
+			if path != "/admin/ui/ldap/bindings/1" {
+				wantContains(t, page, want, lang+" "+path+" is translated")
+			}
+			if strings.Contains(page, ">ldap.") || strings.Contains(page, "\"ldap.") {
+				t.Errorf("%s %s shows a raw catalogue key", lang, path)
+			}
+		}
 	}
 }
 
@@ -326,36 +316,5 @@ func TestTaskWorkerRecordsUnreadableBindings(t *testing.T) {
 	}
 	if e, ok := sink.find("panel.fail"); !ok || !strings.Contains(e.Err, errReadFailed.Error()) {
 		t.Errorf("the failed read was not recorded (event %+v)", e)
-	}
-}
-
-// TestUILDAPSyncUnavailable proves the trigger reports gracefully when no syncer
-// is wired.
-func TestUILDAPSyncUnavailable(t *testing.T) {
-	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
-	ts := adminServer(t, d) // no syncer
-	session, csrf := loginCookies(t, ts)
-
-	resp := htmxPOST(t, ts, "/admin/ui/ldap/sync", session, csrf, url.Values{})
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "not available") {
-		t.Errorf("sync should report unavailable when unwired: %s", body)
-	}
-	if len(d.upsertedUsers) != 0 {
-		t.Errorf("an unavailable sync still upserted %v", d.upsertedUsers)
-	}
-}
-
-// TestUILDAPRequiresSystem proves the Directory Sync page is system-admin only.
-func TestUILDAPRequiresSystem(t *testing.T) {
-	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminOrg, ScopeID: 1}}}
-	ts := adminServer(t, d)
-	session, _ := loginCookies(t, ts)
-
-	resp := authedGET(t, ts, "/admin/ui/ldap", session)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("org-admin ldap page = %d, want 403", resp.StatusCode)
 	}
 }

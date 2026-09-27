@@ -40,7 +40,10 @@
       "whoMayPost": "Listenin kimden posta kabul ettiği: herkes, listenin kendi üyeleri, listenin alan adındaki gönderenler veya listenin sayfasında adı geçen gönderenler. Herkes (duyuru), Herkes gönderebilir ile aynı şekilde posta kabul eder."
     },
     "ldap": {
-      "usernameAttr": "Giriş adının karşılaştırıldığı LDAP özniteliği. Boş bırakılırsa mail kullanılır."
+      "usernameAttr": "Giriş adının karşılaştırıldığı LDAP özniteliği. Boş bırakılırsa mail kullanılır.",
+      "bindDN": "Bu sunucunun dizinde arama yaparken kullandığı hesap. Eşitlemenin içe aktardığı her girdiyi okur, bu nedenle yalnızca okuma izni verin.",
+      "preset": "Bir dizin şeması için başlangıç eşlemesi. Hazır ayara dön, eşlemeyi buna geri getirir.",
+      "baseOverride": "Bu alan adının hesaplarını yalnızca bu girdinin altında arar. Boş bırakılırsa bağlantının arama tabanı kullanılır."
     }
   }
 }
