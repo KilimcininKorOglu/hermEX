@@ -124,6 +124,11 @@
       return;
     }
     form.reset();
+    // A reset returns a selector to its first choice, but the fields it fetched
+    // for the choice before stay, so each such selector fetches them again.
+    for (const select of form.querySelectorAll("select[hx-get]")) {
+      select.dispatchEvent(new Event("change"));
+    }
   });
 
   // htmx does not swap an error response, so without this a failed request
