@@ -365,9 +365,21 @@
     "targetDeleteFailed": "Could not remove the daemon.",
     "targetGone": "That daemon is no longer monitored."
   },
+  "account": {
+    "zoneTitle": "Time zone",
+    "zoneDesc": "The panel shows every date and time in this zone. Webmail uses the same setting.",
+    "zone": "Time zone",
+    "useBrowserZone": "Use my browser's zone",
+    "saveZone": "Save time zone",
+    "zoneSaved": "Times are now shown in {0}.",
+    "zoneClearedUTC": "No time zone is set, so times are shown in UTC.",
+    "zoneInvalid": "That is not a known time zone name, for example Europe/Istanbul.",
+    "zoneFailed": "Could not save the time zone.",
+    "zoneUnread": "Could not read your time zone."
+  },
   "changePassword": {
-    "title": "Change password",
-    "desc": "The password of your own account, {0}.",
+    "title": "My account",
+    "desc": "The password and time zone of your own account, {0}.",
     "cardTitle": "New password",
     "cardDesc": "Your current password is required. A change ends every admin panel session of this account, this one included.",
     "current": "Current password",

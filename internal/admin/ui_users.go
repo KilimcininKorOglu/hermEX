@@ -29,19 +29,34 @@ func (s *Server) uiAuthorized(w http.ResponseWriter, r *http.Request) (claims, b
 	return cl, true
 }
 
-// handleUIChangePassword renders the self-service change-password page for any
-// logged-in administrator, it needs no system-admin scope because it only ever
-// affects the caller's own account.
+// handleUIChangePassword renders the self-service account page (password and
+// time zone) for any logged-in administrator. It needs no system-admin scope
+// because it only ever affects the caller's own account.
 func (s *Server) handleUIChangePassword(w http.ResponseWriter, r *http.Request) {
 	cl, ok := s.uiClaims(r)
 	if !ok {
 		http.Redirect(w, r, "/admin/ui/login", http.StatusSeeOther)
 		return
 	}
-	s.render(w, r, "change_password.html", map[string]any{
-		"Nav": "changepassword", "CSRF": csrfCookieValue(r), "Login": cl.Login,
-	})
+	data := map[string]any{"Nav": "changepassword", "CSRF": csrfCookieValue(r), "Login": cl.Login}
+	s.addStoredZone(data, cl.Login)
+	s.render(w, r, "change_password.html", data)
+}
 
+// addStoredZone adds the caller's stored time zone to the account page. A failed
+// read hides the form, because saving the empty field would clear the stored zone.
+func (s *Server) addStoredZone(data map[string]any, login string) {
+	store, ok := s.prefsStore()
+	if !ok {
+		data["ZoneError"] = "account.zoneUnread"
+		return
+	}
+	p, _, err := store.GetUserPrefs(login)
+	if err != nil {
+		data["ZoneError"] = s.notice("account.zoneUnread", err)
+		return
+	}
+	data["Timezone"] = p.Timezone
 }
 
 // handleUIChangePasswordSubmit changes the logged-in admin's own password after

@@ -365,9 +365,21 @@
     "targetDeleteFailed": "Hizmet kaldırılamadı.",
     "targetGone": "Bu hizmet artık izlenmiyor."
   },
+  "account": {
+    "zoneTitle": "Saat dilimi",
+    "zoneDesc": "Panel tüm tarih ve saatleri bu dilimde gösterir. Webmail de aynı ayarı kullanır.",
+    "zone": "Saat dilimi",
+    "useBrowserZone": "Tarayıcımın dilimini kullan",
+    "saveZone": "Saat dilimini kaydet",
+    "zoneSaved": "Saatler artık {0} diliminde gösteriliyor.",
+    "zoneClearedUTC": "Saat dilimi seçilmedi, saatler UTC olarak gösteriliyor.",
+    "zoneInvalid": "Bu bilinen bir saat dilimi adı değil. Örnek: Europe/Istanbul.",
+    "zoneFailed": "Saat dilimi kaydedilemedi.",
+    "zoneUnread": "Saat diliminiz okunamadı."
+  },
   "changePassword": {
-    "title": "Parola değiştir",
-    "desc": "Kendi hesabınızın parolası, {0}.",
+    "title": "Hesabım",
+    "desc": "Kendi hesabınızın parolası ve saat dilimi, {0}.",
     "cardTitle": "Yeni parola",
     "cardDesc": "Geçerli parolanız gerekli. Değişiklik, bu hesabın bu oturum dahil tüm yönetim paneli oturumlarını sonlandırır.",
     "current": "Geçerli parola",

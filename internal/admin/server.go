@@ -414,6 +414,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/logout", s.handleUILogout)
 	mux.HandleFunc("GET /admin/ui/change-password", s.handleUIChangePassword)
 	mux.HandleFunc("PUT /admin/ui/change-password", s.handleUIChangePasswordSubmit)
+	mux.HandleFunc("PUT /admin/ui/account/timezone", s.handleUISaveTimezone)
 	mux.HandleFunc("GET /admin/ui/users", s.handleUIUsers)
 	mux.HandleFunc("POST /admin/ui/users", s.handleUICreateUser)
 	mux.HandleFunc("GET /admin/ui/user-create-fields", s.handleUICreateUserDefaults)

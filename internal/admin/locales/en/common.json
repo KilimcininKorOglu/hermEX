@@ -56,7 +56,7 @@
     "tls": "TLS certificates",
     "logs": "Logs",
     "mailboxFailures": "Mailbox failures",
-    "changePassword": "Change password"
+    "changePassword": "My account"
   },
   "fail": {
     "readHidden": "Could not read {0}. The form is hidden so a save cannot overwrite it.",

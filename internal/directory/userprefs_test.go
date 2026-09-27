@@ -40,7 +40,11 @@ func TestUserPrefsRoundTrip(t *testing.T) {
 	set("follow the browser language", UserPrefsUpdate{Lang: str("")})
 	wantEq(t, "the cleared language", prefs("read the cleared language").Lang, "")
 
-	for _, u := range []UserPrefsUpdate{{Theme: str("blue")}, {Lang: str("de")}} {
+	set("choose a time zone", UserPrefsUpdate{Timezone: str("Europe/Istanbul")})
+	wantEq(t, "the stored time zone", prefs("read the time zone").Timezone, "Europe/Istanbul")
+	set("clear the time zone", UserPrefsUpdate{Timezone: str("")})
+
+	for _, u := range []UserPrefsUpdate{{Theme: str("blue")}, {Lang: str("de")}, {Timezone: str("Mars/Olympus")}, {Timezone: str("Local")}} {
 		if _, err := d.SetUserPrefs("u@acme.test", u); !errors.Is(err, ErrInvalidPref) {
 			t.Errorf("SetUserPrefs(%+v) = %v, want ErrInvalidPref", u, err)
 		}

@@ -50,9 +50,9 @@ func (s *Server) syncPrefs(next http.Handler) http.Handler {
 	})
 }
 
-// applyStoredPrefs brings the theme and language cookies in line with the
-// signed-in caller's users record and returns the request carrying the stored
-// language. A caller who never chose a theme keeps whatever the browser holds; a
+// applyStoredPrefs brings the theme, time zone and language cookies in line with
+// the signed-in caller's users record and returns the request carrying the stored
+// language and time zone. A caller who never chose a theme keeps whatever the browser holds; a
 // caller who never chose a language follows the browser's.
 func (s *Server) applyStoredPrefs(w http.ResponseWriter, r *http.Request) *http.Request {
 	p, ok := s.storedPrefs(r)
@@ -62,6 +62,7 @@ func (s *Server) applyStoredPrefs(w http.ResponseWriter, r *http.Request) *http.
 	if p.Theme != "" && requestCookie(r, themeCookie) != p.Theme {
 		setPrefsCookie(w, themeCookie, p.Theme)
 	}
+	r = syncZoneCookie(w, r, p.Timezone)
 	lang := p.Lang
 	if !supportedLang(lang) {
 		lang = ""
@@ -168,4 +169,45 @@ func (s *Server) answerPrefsSave(w http.ResponseWriter, u directory.UserPrefsUpd
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+// handleUISaveTimezone stores the signed-in operator's time zone in the users
+// record webmail shares, and answers the account page's result line. The account
+// is the session's, never the form's.
+func (s *Server) handleUISaveTimezone(w http.ResponseWriter, r *http.Request) {
+	cl, ok := s.uiClaims(r)
+	if !ok {
+		http.Error(w, "session expired", http.StatusUnauthorized)
+		return
+	}
+	if !validCSRF(r) {
+		http.Error(w, "missing or invalid CSRF token", http.StatusForbidden)
+		return
+	}
+	store, ok := s.prefsStore()
+	if !ok {
+		http.Error(w, "preferences are not supported", http.StatusNotImplemented)
+		return
+	}
+	zone := strings.TrimSpace(r.FormValue("timezone"))
+	found, err := store.SetUserPrefs(cl.Login, directory.UserPrefsUpdate{Timezone: &zone})
+	s.render(w, r, "change-password-result", s.timezoneSaveResult(w, zone, found, err))
+}
+
+// timezoneSaveResult is the result line of a time zone save; a stored zone is
+// also cached in its cookie, so the fragments render in it at once.
+func (s *Server) timezoneSaveResult(w http.ResponseWriter, zone string, found bool, err error) map[string]any {
+	switch {
+	case errors.Is(err, directory.ErrInvalidPref):
+		return map[string]any{"OK": false, "Message": "account.zoneInvalid"}
+	case err != nil:
+		return map[string]any{"OK": false, "Message": s.notice("account.zoneFailed", err)}
+	case !found:
+		return map[string]any{"OK": false, "Message": "account.zoneFailed"}
+	}
+	setPrefsCookie(w, zoneCookie, zone)
+	if zone == "" {
+		return map[string]any{"OK": true, "Message": "account.zoneClearedUTC"}
+	}
+	return map[string]any{"OK": true, "Message": msg("account.zoneSaved", zone)}
 }

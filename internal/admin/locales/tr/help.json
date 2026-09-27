@@ -47,6 +47,9 @@
       "bindDN": "Bu sunucunun dizinde arama yaparken kullandığı hesap. Eşitlemenin içe aktardığı her girdiyi okur, bu nedenle yalnızca okuma izni verin.",
       "preset": "Bir dizin şeması için başlangıç eşlemesi. Hazır ayara dön, eşlemeyi buna geri getirir.",
       "baseOverride": "Bu alan adının hesaplarını yalnızca bu girdinin altında arar. Boş bırakılırsa bağlantının arama tabanı kullanılır."
+    },
+    "account": {
+      "zone": "Diliminizin IANA adı, örneğin Europe/Istanbul. Saatleri UTC olarak görmek için boş bırakın."
     }
   }
 }

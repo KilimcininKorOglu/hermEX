@@ -230,4 +230,22 @@
       setNav(false);
     }
   });
+
+  // The account page's time zone field suggests every zone the browser knows,
+  // and its button fills in the browser's own zone. The server checks the name.
+  const zoneList = document.getElementById("tz-names");
+  if (zoneList && typeof Intl.supportedValuesOf === "function") {
+    for (const name of Intl.supportedValuesOf("timeZone")) {
+      const option = document.createElement("option");
+      option.value = name;
+      zoneList.append(option);
+    }
+  }
+  document.addEventListener("click", (evt) => {
+    const button = evt.target instanceof Element ? evt.target.closest("[data-zone-browser]") : null;
+    const input = button && button.form ? button.form.querySelector("[data-zone-input]") : null;
+    if (input) {
+      input.value = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    }
+  });
 })();

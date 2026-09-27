@@ -931,10 +931,7 @@ func (f *fakeDir) GetUserPrefs(login string) (directory.UserPrefs, bool, error) 
 	return p, ok, nil
 }
 func (f *fakeDir) SetUserPrefs(login string, u directory.UserPrefsUpdate) (bool, error) {
-	if u.Theme != nil && !slices.Contains([]string{"", "light", "dark", "system"}, *u.Theme) {
-		return false, directory.ErrInvalidPref
-	}
-	if u.Lang != nil && *u.Lang != "" && !slices.Contains(directory.UILanguages, *u.Lang) {
+	if !directory.ValidPrefs(u) {
 		return false, directory.ErrInvalidPref
 	}
 	if f.uiPrefs == nil {
@@ -946,6 +943,9 @@ func (f *fakeDir) SetUserPrefs(login string, u directory.UserPrefsUpdate) (bool,
 	}
 	if u.Lang != nil {
 		p.Lang = *u.Lang
+	}
+	if u.Timezone != nil {
+		p.Timezone = *u.Timezone
 	}
 	f.uiPrefs[login] = p
 	return true, nil

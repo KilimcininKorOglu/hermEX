@@ -56,7 +56,7 @@
     "tls": "TLS sertifikaları",
     "logs": "Günlükler",
     "mailboxFailures": "Posta kutusu hataları",
-    "changePassword": "Parola değiştir"
+    "changePassword": "Hesabım"
   },
   "fail": {
     "readHidden": "{0} okunamadı. Kaydetme saklanan değerin üzerine yazmasın diye form gizlendi.",
