@@ -101,6 +101,8 @@ type Directory interface {
 	AssignDomainToOrg(domainID, orgID int64) (bool, error)
 	GetLDAPConfig(orgID int64) (directory.LDAPConfig, bool, error)
 	SetLDAPConfig(orgID int64, cfg directory.LDAPConfig) error
+	ListLDAPBindings(connectionID int64) ([]directory.LDAPBinding, error)
+	LDAPConfigForBinding(bindingID int64) (directory.LDAPConfig, bool, error)
 	UpsertLDAPUser(username string, externid []byte, maildir string) (created bool, err error)
 	ApplyLDAPProfile(username string, values map[string]string) (bool, error)
 	SyncAliasesFor(username string, aliases []string) (skipped []string, found bool, err error)

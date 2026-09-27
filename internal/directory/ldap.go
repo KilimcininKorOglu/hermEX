@@ -50,15 +50,14 @@ type LDAPConfig struct {
 	// SyncContacts enables syncing LDAP/AD mail contacts into org mail contacts, the
 	// GAL entries for external addresses. ContactBaseDN narrows the contact search
 	// (empty = BaseDN); ContactFilter replaces the mail-bearing-contact match
-	// (empty = the standard one). ContactDomain is the local domain synced contacts
-	// are filed under: a contact's own address is external, so it cannot supply one,
-	// and contact sync does not run without it.
+	// (empty = the standard one). Synced contacts are filed under Domain: a contact's
+	// own address is external, so it cannot supply one.
 	SyncContacts  bool
 	ContactBaseDN string
 	ContactFilter string
-	ContactDomain string
 	// DomainID and Domain name the local domain a binding-resolved configuration
-	// belongs to (zero and empty for an organization-wide ldap_config row).
+	// belongs to (zero and empty for an organization-wide ldap_config row). A
+	// downsync creates users and lists only in this domain and files contacts under it.
 	DomainID int64
 	Domain   string
 }
@@ -85,7 +84,6 @@ type LDAPMapping struct {
 	SyncContacts  bool                     `json:"syncContacts,omitempty"`
 	ContactBaseDN string                   `json:"contactBaseDN,omitempty"`
 	ContactFilter string                   `json:"contactFilter,omitempty"`
-	ContactDomain string                   `json:"contactDomain,omitempty"`
 }
 
 // ldapProfileField is one syncable AD/LDAP profile attribute and where its value
@@ -206,7 +204,6 @@ func (d *SQLDirectory) GetLDAPConfig(orgID int64) (cfg LDAPConfig, ok bool, err 
 		cfg.SyncContacts = sc.SyncContacts
 		cfg.ContactBaseDN = sc.ContactBaseDN
 		cfg.ContactFilter = sc.ContactFilter
-		cfg.ContactDomain = sc.ContactDomain
 	}
 	return cfg, true, nil
 }
@@ -302,7 +299,6 @@ func marshalSyncConfig(cfg LDAPConfig) (any, error) {
 		Fields: cfg.SyncFields, AliasAttr: cfg.AliasAttr,
 		SyncGroups: cfg.SyncGroups, GroupBaseDN: cfg.GroupBaseDN, GroupFilter: cfg.GroupFilter,
 		SyncContacts: cfg.SyncContacts, ContactBaseDN: cfg.ContactBaseDN, ContactFilter: cfg.ContactFilter,
-		ContactDomain: cfg.ContactDomain,
 	})
 }
 
@@ -322,7 +318,7 @@ func marshalMapping(sc LDAPMapping) (any, error) {
 // isEmpty reports whether every optional downsync setting is at its zero value, in which
 // case the column stays NULL rather than holding a document that configures nothing.
 func (sc LDAPMapping) isEmpty() bool {
-	strs := []string{sc.BaseDN, sc.AliasAttr, sc.GroupBaseDN, sc.GroupFilter, sc.ContactBaseDN, sc.ContactFilter, sc.ContactDomain}
+	strs := []string{sc.BaseDN, sc.AliasAttr, sc.GroupBaseDN, sc.GroupFilter, sc.ContactBaseDN, sc.ContactFilter}
 	for _, s := range strs {
 		if s != "" {
 			return false

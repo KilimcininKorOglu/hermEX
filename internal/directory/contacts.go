@@ -29,6 +29,10 @@ type ContactInfo struct {
 // that does not survive.
 var ErrLDAPMasteredContact = errors.New("directory: this contact is mastered by the LDAP directory")
 
+// ErrContactInOtherDomain refuses a downsync that would take over a contact filed
+// under a domain other than the one the syncing binding serves.
+var ErrContactInOtherDomain = errors.New("directory: the contact is filed under another domain")
+
 // CreateContact creates an organizational mail contact: a users row
 // (display_type = DT_REMOTE_MAILUSER, no password or maildir, so it cannot log in
 // and owns no mailbox) filed under an existing local domain, plus its
@@ -202,11 +206,19 @@ func scanContacts(rows *sql.Rows) ([]ContactInfo, error) {
 // distribution list) is refused rather than converted, because converting a mailbox
 // account into a GAL entry would take its mailbox away. It reports whether a contact was
 // created.
+//
+// A contact already filed under another domain is refused with
+// ErrContactInOtherDomain: each domain's binding syncs its own contacts, so taking
+// the row over would move it out of the domain whose sync owns it, and that sync
+// would recreate or prune it on its next pass.
 func (d *SQLDirectory) UpsertLDAPContact(email string, externid []byte, displayName, domain string) (created bool, err error) {
 	email = strings.ToLower(strings.TrimSpace(email))
-	id, found, err := d.contactRowID(email)
+	id, filedUnder, found, err := d.contactRowID(email)
 	if err != nil {
 		return false, err
+	}
+	if found && !strings.EqualFold(filedUnder, strings.TrimSpace(domain)) {
+		return false, fmt.Errorf("%w: %q is filed under %s", ErrContactInOtherDomain, email, filedUnder)
 	}
 	if !found {
 		if id, err = d.CreateContact(email, displayName, domain); err != nil {
@@ -224,21 +236,23 @@ func (d *SQLDirectory) UpsertLDAPContact(email string, externid []byte, displayN
 	return false, err
 }
 
-// contactRowID resolves an address to its contact row, refusing an address that exists as
-// something other than a contact.
-func (d *SQLDirectory) contactRowID(email string) (id int64, found bool, err error) {
+// contactRowID resolves an address to its contact row and the domain it is filed
+// under, refusing an address that exists as something other than a contact.
+func (d *SQLDirectory) contactRowID(email string) (id int64, domain string, found bool, err error) {
 	var displayType int
-	err = d.db.QueryRow(`SELECT id, display_type FROM users WHERE username = ?`, email).Scan(&id, &displayType)
+	err = d.db.QueryRow(
+		`SELECT u.id, u.display_type, d.domainname FROM users u JOIN domains d ON d.id = u.domain_id
+		  WHERE u.username = ?`, email).Scan(&id, &displayType, &domain)
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, false, nil
+		return 0, "", false, nil
 	}
 	if err != nil {
-		return 0, false, err
+		return 0, "", false, err
 	}
 	if displayType != dtContact {
-		return 0, false, fmt.Errorf("directory: %q already exists and is not a mail contact", email)
+		return 0, "", false, fmt.Errorf("directory: %q already exists and is not a mail contact", email)
 	}
-	return id, true, nil
+	return id, domain, true, nil
 }
 
 // DeleteLDAPContact removes a contact the downsync owns, used when it disappears from the

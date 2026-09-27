@@ -448,8 +448,7 @@ func effectiveConfig(c LDAPConnection, b LDAPBinding) LDAPConfig {
 		SyncFields: m.Fields, AliasAttr: m.AliasAttr,
 		SyncGroups: m.SyncGroups, GroupBaseDN: m.GroupBaseDN, GroupFilter: m.GroupFilter,
 		SyncContacts: m.SyncContacts, ContactBaseDN: m.ContactBaseDN, ContactFilter: m.ContactFilter,
-		ContactDomain: m.ContactDomain,
-		DomainID:      b.DomainID, Domain: b.Domain,
+		DomainID: b.DomainID, Domain: b.Domain,
 	}
 	if strings.TrimSpace(m.BaseDN) != "" {
 		cfg.BaseDN = m.BaseDN

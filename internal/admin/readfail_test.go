@@ -39,7 +39,6 @@ func TestAFailedReadHidesTheFormItFeeds(t *testing.T) {
 		{"GetCreateDefaults", "/admin/ui/domains/1", `/admin/ui/domains/1/createdefaults"`, "the create defaults override"},
 		{"GetDomainBranding", "/admin/ui/domains/1", `/admin/ui/domains/1/branding"`, "the login branding"},
 		{"GetLDAPConfig", "/admin/ui/ldap", `hx-post="/admin/ui/ldap"`, "the directory configuration"},
-		{"ListDomains", "/admin/ui/ldap", `hx-post="/admin/ui/ldap"`, "the domains"},
 		{"ListOrgs", "/admin/ui/roles/1", `hx-put="/admin/ui/roles/1"`, "the organizations"},
 		{"ListDomains", "/admin/ui/roles/1", `hx-put="/admin/ui/roles/1"`, "the domains"},
 		{"ListUsers", "/admin/ui/roles/1", `hx-put="/admin/ui/roles/1"`, "the users"},

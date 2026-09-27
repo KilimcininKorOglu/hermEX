@@ -158,15 +158,13 @@ func TestUISaveLDAPContactSettings(t *testing.T) {
 		"synccontacts":    {"on"},
 		"contact_base_dn": {"ou=contacts,dc=x"},
 		"contact_filter":  {"(objectClass=contact)"},
-		"contact_domain":  {"hermex.test"},
 	})
 	resp.Body.Close()
 
 	got := d.ldap[0]
-	if !got.SyncContacts || got.ContactBaseDN != "ou=contacts,dc=x" ||
-		got.ContactFilter != "(objectClass=contact)" || got.ContactDomain != "hermex.test" {
-		t.Errorf("contact settings = syncContacts=%v base=%q filter=%q domain=%q, want the form values",
-			got.SyncContacts, got.ContactBaseDN, got.ContactFilter, got.ContactDomain)
+	if !got.SyncContacts || got.ContactBaseDN != "ou=contacts,dc=x" || got.ContactFilter != "(objectClass=contact)" {
+		t.Errorf("contact settings = syncContacts=%v base=%q filter=%q, want the form values",
+			got.SyncContacts, got.ContactBaseDN, got.ContactFilter)
 	}
 }
 
@@ -240,13 +238,25 @@ func TestUISyncLDAP(t *testing.T) {
 	}
 }
 
-// TestTaskWorkerLDAPSync proves the worker claims a pending ldapsync task, runs
-// the real sync (upserting every entry), and records a done status with counts.
-func TestTaskWorkerLDAPSync(t *testing.T) {
-	d := &fakeDir{
-		ldap: map[int64]directory.LDAPConfig{0: {URI: "ldap://x"}}, upsertNew: true,
+// boundFakeDir returns a fake directory with two domains, each bound to one
+// connection (binding 1 = a.test, binding 2 = b.test).
+func boundFakeDir() *fakeDir {
+	return &fakeDir{
+		upsertNew: true,
+		ldapConns: map[int64]directory.LDAPConnection{1: {ID: 1, Name: "hq", URI: "ldaps://x"}},
+		ldapBindings: map[int64]directory.LDAPBinding{
+			1: {ID: 1, ConnectionID: 1, DomainID: 1, Domain: "a.test"},
+			2: {ID: 2, ConnectionID: 1, DomainID: 2, Domain: "b.test"},
+		},
 	}
-	syncer := &fakeSyncer{users: []ldapauth.SyncedUser{{Username: "a@test"}, {Username: "b@test"}}}
+}
+
+// TestTaskWorkerLDAPSync proves the worker claims a pending ldapsync task with no
+// binding named (a legacy task), runs every binding, each upserting only its own
+// domain's entries, and records a done status with counts.
+func TestTaskWorkerLDAPSync(t *testing.T) {
+	d := boundFakeDir()
+	syncer := &fakeSyncer{users: []ldapauth.SyncedUser{{Username: "a@a.test"}, {Username: "b@b.test"}}}
 	srv := NewServer(d, fakePaths{root: t.TempDir()}, []byte("test-secret"))
 	srv.SetLDAPSyncer(syncer)
 
@@ -261,20 +271,44 @@ func TestTaskWorkerLDAPSync(t *testing.T) {
 	if len(d.upsertedUsers) != 2 {
 		t.Errorf("worker upserted %v, want both directory entries", d.upsertedUsers)
 	}
-	if got, ok, _ := d.GetTask(id); !ok || got.Status != directory.TaskDone || !strings.Contains(got.Message, "2 created") {
-		t.Errorf("task = %+v, want done with the counts", got)
+	got, ok, _ := d.GetTask(id)
+	if !ok || got.Status != directory.TaskDone ||
+		!strings.Contains(got.Message, "a.test: Synced 2 directory entries: 1 created") ||
+		!strings.Contains(got.Message, "b.test: Synced 2 directory entries: 1 created") {
+		t.Errorf("task = %+v, want done with each binding's counts", got)
 	}
 	if ran, _ := srv.runNextTask(); ran {
 		t.Errorf("a second runNextTask ran, want the queue empty")
 	}
 }
 
-// TestTaskWorkerRecordsAnUnreadableLDAPConfig proves a sync whose directory
-// configuration could not be read records the read failure. It recorded "no
-// directory is configured", which sends the operator to configure a directory that
-// may already be configured.
-func TestTaskWorkerRecordsAnUnreadableLDAPConfig(t *testing.T) {
-	d := &fakeDir{readErrs: map[string]error{"GetLDAPConfig": errReadFailed}}
+// TestTaskWorkerLDAPSyncOneBinding proves a task naming a binding syncs that binding
+// alone.
+func TestTaskWorkerLDAPSyncOneBinding(t *testing.T) {
+	d := boundFakeDir()
+	syncer := &fakeSyncer{users: []ldapauth.SyncedUser{{Username: "a@a.test"}, {Username: "b@b.test"}}}
+	srv := NewServer(d, fakePaths{root: t.TempDir()}, []byte("test-secret"))
+	srv.SetLDAPSyncer(syncer)
+
+	id, err := d.CreateTask("ldapsync", "2", "admin@test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ran, err := srv.runNextTask(); !ran || err != nil {
+		t.Fatalf("runNextTask ran=%v err=%v, want it to run the task", ran, err)
+	}
+	if len(d.upsertedUsers) != 1 || d.upsertedUsers[0] != "b@b.test" {
+		t.Errorf("worker upserted %v, want only the b.test account", d.upsertedUsers)
+	}
+	if got, _, _ := d.GetTask(id); got.Status != directory.TaskDone || strings.Contains(got.Message, "a.test") {
+		t.Errorf("task = %+v, want done for b.test only", got)
+	}
+}
+
+// TestTaskWorkerRecordsUnreadableBindings proves a sync whose bindings could not be
+// read records the read failure rather than reporting that nothing is bound.
+func TestTaskWorkerRecordsUnreadableBindings(t *testing.T) {
+	d := &fakeDir{readErrs: map[string]error{"ListLDAPBindings": errReadFailed}}
 	sink := &failCaptureSink{}
 	srv := NewServer(d, fakePaths{root: t.TempDir()}, []byte("test-secret"))
 	srv.SetLDAPSyncer(&fakeSyncer{})

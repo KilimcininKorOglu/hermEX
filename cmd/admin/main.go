@@ -97,7 +97,7 @@ var commands = []command{
 		minArgs: 3, maxArgs: 3, run: func(c *cmdContext) { backupMail(c.dir, c.cfg, c.args[1], c.args[2]) }},
 	{name: "export-dkim", args: "<domain>", note: "write the domain's DKIM private key to stdout",
 		minArgs: 2, maxArgs: 2, run: func(c *cmdContext) { exportDKIM(c.dir, c.args[1]) }},
-	{name: "ldap-sync", args: "<org-id>", note: "import the org's LDAP/AD accounts into the directory",
+	{name: "ldap-sync", args: "<connection-id>", note: "import each bound domain's LDAP/AD accounts from the connection",
 		minArgs: 2, maxArgs: 2, run: runLDAPSync},
 	{name: "grant-admin", args: "<email> <system|org|domain> [scope-id]",
 		note:    "give the account an admin role; scope-id is the org or domain id, omitted for system",
@@ -296,23 +296,29 @@ func runPruneEML(c *cmdContext) {
 }
 
 func runLDAPSync(c *cmdContext) {
-	orgID, err := strconv.ParseInt(c.args[1], 10, 64)
+	connID, err := strconv.ParseInt(c.args[1], 10, 64)
 	if err != nil {
-		log.Fatalf("hermex-admin: org id %q: %v", c.args[1], err)
+		log.Fatalf("hermex-admin: connection id %q: %v", c.args[1], err)
 	}
-	lcfg, ok, err := c.dir.GetLDAPConfig(orgID)
+	bindings, err := c.dir.ListLDAPBindings(connID)
 	if err != nil {
-		log.Fatalf("hermex-admin: ldap config: %v", err)
+		log.Fatalf("hermex-admin: ldap bindings: %v", err)
 	}
-	if !ok {
-		log.Fatalf("hermex-admin: organization %d has no LDAP configuration", orgID)
+	if len(bindings) == 0 {
+		log.Fatalf("hermex-admin: LDAP connection %d has no bound domain", connID)
 	}
-	summary, err := ldapsync.Run(lcfg, ldapauth.New(), c.dir, c.cfg.MaildirFor,
+	ids := make([]int64, len(bindings))
+	for i, b := range bindings {
+		ids[i] = b.ID
+	}
+	summary, err := ldapsync.RunBindings(ids, c.dir, ldapauth.New(), c.dir, c.cfg.MaildirFor,
 		func(f string, a ...any) { log.Printf("hermex-admin: "+f, a...) })
+	if summary != "" {
+		fmt.Printf("ldap-sync connection %d: %s\n", connID, summary)
+	}
 	if err != nil {
 		log.Fatalf("hermex-admin: ldap sync: %v", err)
 	}
-	fmt.Printf("ldap-sync org %d: %s\n", orgID, summary)
 }
 
 func runGrantAdmin(c *cmdContext) {

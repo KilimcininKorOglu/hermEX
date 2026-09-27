@@ -5,29 +5,51 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"hermex/internal/directory"
 	"hermex/internal/ldapsync"
 )
 
-// performLDAPSync runs the directory downsync for the default org and returns a
-// human-readable result. A user whose mail domain is not provisioned locally is
-// skipped rather than failing the whole sync. It is shared by the (async) enqueue
-// path and the task worker so there is one sync implementation.
-func (s *Server) performLDAPSync() (string, error) {
+// performLDAPSync runs the directory downsync of the bindings a task names and
+// returns a human-readable result. params is one binding id; an empty params (a task
+// queued before bindings existed) means every binding. Each binding syncs only its
+// own domain. It is shared by the (async) enqueue path and the task worker so there
+// is one sync implementation.
+func (s *Server) performLDAPSync(params string) (string, error) {
 	if s.syncer == nil {
 		return "", errors.New("directory sync is not available")
 	}
-	cfg, ok, err := s.dir.GetLDAPConfig(defaultOrgID)
+	ids, err := s.ldapSyncTargets(params)
 	if err != nil {
-		return "", fmt.Errorf("read the directory configuration: %w", err)
+		return "", err
 	}
-	if !ok {
-		return "", errors.New("no directory is configured")
-	}
-	return ldapsync.Run(cfg, s.syncer, s.dir, s.paths.MaildirFor,
+	return ldapsync.RunBindings(ids, s.dir, s.syncer, s.dir, s.paths.MaildirFor,
 		func(f string, a ...any) { log.Printf("ldapsync: "+f, a...) })
+}
+
+// ldapSyncTargets resolves a sync task's params to the binding ids it covers.
+func (s *Server) ldapSyncTargets(params string) ([]int64, error) {
+	if params != "" {
+		id, err := strconv.ParseInt(params, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("malformed binding id %q: %w", params, err)
+		}
+		return []int64{id}, nil
+	}
+	bindings, err := s.dir.ListLDAPBindings(0)
+	if err != nil {
+		return nil, fmt.Errorf("read the directory bindings: %w", err)
+	}
+	if len(bindings) == 0 {
+		return nil, errors.New("no domain is bound to a directory")
+	}
+	ids := make([]int64, len(bindings))
+	for i, b := range bindings {
+		ids[i] = b.ID
+	}
+	return ids, nil
 }
 
 // runTask executes one claimed task by type, returning its terminal status and a
@@ -35,7 +57,7 @@ func (s *Server) performLDAPSync() (string, error) {
 func (s *Server) runTask(t directory.TaskInfo) (status, message string) {
 	switch t.Type {
 	case "ldapsync":
-		msg, err := s.performLDAPSync()
+		msg, err := s.performLDAPSync(t.Params)
 		if err != nil {
 			return directory.TaskFailed, s.notice("tasks.syncFailed", err)
 		}

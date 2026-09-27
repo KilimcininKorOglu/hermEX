@@ -23,19 +23,15 @@ type ldapFieldView struct {
 	Enabled                bool
 }
 
-// ldapPanelData builds the Directory Sync panel data: the stored config and the
-// domains its contact sync can file under, and an optional saved/sync/error message.
-// The form is hidden when either could not be read: it would show a blank
-// configuration and no filing domain, and a save would store both.
+// ldapPanelData builds the Directory Sync panel data: the stored config and an
+// optional saved/sync/error message. The form is hidden when the config could not be
+// read: it would show a blank configuration, and a save would store it.
 func (s *Server) ldapPanelData(r *http.Request, saved bool, syncResult, errMsg string) map[string]any {
 	failed := readFailures{}
 	data := map[string]any{"Nav": "ldap", "CSRF": csrfCookieValue(r), "Saved": saved, "ReadFailed": failed}
 	cfg, found, cfgErr := s.dir.GetLDAPConfig(defaultOrgID)
-	domains, domErr := s.dir.ListDomains()
-	if s.noteRead(failed, "config", "what.directoryConfig", cfgErr) &&
-		s.noteRead(failed, "config", "what.domains", domErr) {
+	if s.noteRead(failed, "config", "what.directoryConfig", cfgErr) {
 		addLDAPConfig(data, cfg, found)
-		data["Domains"] = domains
 	}
 	if syncResult != "" {
 		data["SyncResult"] = syncResult
@@ -112,7 +108,6 @@ func (s *Server) handleUISaveLDAP(w http.ResponseWriter, r *http.Request) {
 	cfg.SyncContacts = r.PostFormValue("synccontacts") != ""
 	cfg.ContactBaseDN = r.PostFormValue("contact_base_dn")
 	cfg.ContactFilter = r.PostFormValue("contact_filter")
-	cfg.ContactDomain = r.PostFormValue("contact_domain")
 	if err := s.dir.SetLDAPConfig(defaultOrgID, cfg); err != nil {
 		failMsg := "ldap.saveFailed"
 		if errors.Is(err, directory.ErrInsecureLDAP) {

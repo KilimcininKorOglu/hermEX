@@ -99,6 +99,8 @@ type fakeDir struct {
 	brandingSet            bool
 	senderInt, senderExt   string
 	ldap                   map[int64]directory.LDAPConfig
+	ldapConns              map[int64]directory.LDAPConnection
+	ldapBindings           map[int64]directory.LDAPBinding
 	defaultSyncPolicy      easpolicy.Policy
 
 	// domain device-policy override: GetDomainSyncPolicy returns domainSyncPolicy;

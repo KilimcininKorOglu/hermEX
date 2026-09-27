@@ -56,11 +56,6 @@
 <section class="card">
 {{template "card-head" (dict "Icon" "contact" "Title" "ldap.contactTitle" "Desc" "ldap.contactDesc")}}
 <label class="check"><input type="checkbox" name="synccontacts" {{if .Config.SyncContacts}}checked{{end}}> {{t "ldap.syncContacts"}}</label>
-<label>{{t "ldap.filingDomain"}}
-<select name="contact_domain">
-<option value="">{{t "ldap.chooseDomain"}}</option>
-{{range .Domains}}<option value="{{.Name}}" {{if eq .Name $.Config.ContactDomain}}selected{{end}}>{{.Name}}</option>{{end}}
-</select><small>{{t "ldap.filingHint"}}</small></label>
 <label>{{t "ldap.contactBase"}} <input type="text" name="contact_base_dn" value="{{.Config.ContactBaseDN}}" placeholder="ou=contacts,dc=example,dc=com"></label>
 <label>{{t "ldap.contactFilter"}} <input type="text" name="contact_filter" value="{{.Config.ContactFilter}}" placeholder="(&amp;(objectClass=contact)(mail=*))"></label>
 </section>

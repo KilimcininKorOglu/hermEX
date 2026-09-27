@@ -338,7 +338,7 @@ hermex-admin -config config.json <command> [args]
 | `grant-admin <email> <system\|org\|domain> [id]` | Grant an admin role at the given scope                            |
 | `list-sessions <email>`                          | Show the account's live webmail and panel sessions                |
 | `revoke-sessions <email>`                        | End all of them; the compromise response                          |
-| `ldap-sync <org-id>`                             | Import an org's LDAP/AD accounts into the directory               |
+| `ldap-sync <connection-id>`                      | Import each bound domain's LDAP/AD accounts from the connection   |
 | `export-dkim <domain>`                           | Write the domain's DKIM private key to stdout                     |
 | `check-mailbox <email\|all> [--repair] [--recover]` | Report store damage; `--repair` rebuilds the IMAP index, `--recover` rebuilds a damaged database and loses the rows on its damaged pages |
 | `sweep-content <email>`                          | Reclaim orphan content files; refuses while the mailbox is in use |

@@ -80,6 +80,22 @@ func TestUpsertLDAPContactLeavesTheMailboxIntact(t *testing.T) {
 	}
 }
 
+// TestUpsertLDAPContactRefusesOtherDomain proves one domain's sync cannot take over a
+// contact another domain's sync filed, and leaves the row where it was.
+func TestUpsertLDAPContactRefusesOtherDomain(t *testing.T) {
+	d := contactTestDir(t)
+	mustCreateDomain(t, d, t.TempDir(), "other.test")
+	mustUpsertLDAPContact(t, d, "partner@remote.example", "Partner Inc")
+
+	_, err := d.UpsertLDAPContact("partner@remote.example", syncedContactID, "Taken", "other.test")
+
+	wantEq(t, "the takeover is refused", errors.Is(err, ErrContactInOtherDomain), true)
+	got, err := d.ListContacts()
+	mustNoErr(t, "list the contacts", err)
+	wantEq(t, "the contact's domain", got[0].Domain, "hermex.test")
+	wantGALName(t, d, "partner@remote.example", "Partner Inc")
+}
+
 // TestListContactsReportsTheLDAPID proves the listing carries the identifier the admin
 // panel shows, so an operator can tell a synced contact from a hand-made one.
 func TestListContactsReportsTheLDAPID(t *testing.T) {
