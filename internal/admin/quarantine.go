@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -83,23 +84,24 @@ func quarantineUID(r *http.Request) uint32 {
 	return uint32(uid)
 }
 
-// quarantineMutate opens the mailbox store, runs fn against it, and closes it.
+// quarantineMutate runs fn against the existing mailbox store. A mailbox that was
+// never provisioned has no quarantined message to act on, so it is not created.
 func (s *Server) quarantineMutate(maildir string, fn func(*objectstore.Store) error) error {
-	st, err := objectstore.Open(maildir)
-	if err != nil {
-		return err
-	}
-	defer st.Close()
-	return fn(st)
+	return withExistingStore(maildir, fn)
 }
 
 // renderQuarantine reads the user's Junk folder and renders the quarantine panel. A
-// mailbox that cannot be opened (e.g. one that was never provisioned) shows an empty
-// quarantine rather than a failure, a clean mailbox is not an error.
+// mailbox that was never provisioned shows an empty quarantine, and is not created
+// by the read; a store that fails to open is reported.
 func (s *Server) renderQuarantine(w http.ResponseWriter, r *http.Request, email, maildir, csrf string, notice panelNotice) {
 	data := map[string]any{"Email": email, "CSRF": csrf, "Notice": notice}
-	st, err := objectstore.Open(maildir)
+	st, err := objectstore.OpenExisting(maildir)
+	if errors.Is(err, objectstore.ErrNotProvisioned) {
+		s.render(w, r, "quarantine", data)
+		return
+	}
 	if err != nil {
+		data["Error"] = s.notice("userQuarantine.junkUnread", err)
 		s.render(w, r, "quarantine", data)
 		return
 	}

@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 
 	"hermex/internal/antispam"
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -46,7 +48,8 @@ func perMailboxCap(mailboxes int) int {
 // performBayesRetrain rebuilds the Bayesian spam model from every mailbox, the
 // Junk folder as spam, the inbox as ham, and writes it atomically to the path the
 // MTA loads at startup. It is the handler for the "bayes-retrain" task. A mailbox
-// that fails to open is skipped, so one bad store cannot fail the whole retrain.
+// that fails to open is skipped and recorded, so one bad store cannot fail the
+// whole retrain; a mailbox that was never provisioned is skipped, not created.
 func (s *Server) performBayesRetrain() (string, error) {
 	dirs, err := s.dir.Maildirs()
 	if err != nil {
@@ -56,8 +59,13 @@ func (s *Server) performBayesRetrain() (string, error) {
 	limit := perMailboxCap(len(dirs))
 	var nspam, nham, nbox int
 	for _, dir := range dirs {
-		st, err := objectstore.Open(dir)
+		st, err := objectstore.OpenExisting(dir)
+		if errors.Is(err, objectstore.ErrNotProvisioned) {
+			continue
+		}
 		if err != nil {
+			s.logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.Admin,
+				Name: "bayes.mailbox_skipped", Err: err.Error()})
 			continue
 		}
 		nspam += trainFolder(st, model, int64(mapi.PrivateFIDJunk), true, limit)
