@@ -27,6 +27,7 @@
 {{define "role-editor"}}<div id="role-editor" class="flow">
 {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
 {{if .Saved}}<p class="ok">Saved.</p>{{end}}
+{{with index .ReadFailed "editor"}}<p class="error">{{.}}</p>{{else}}
 <form class="stack" hx-put="/admin/ui/roles/{{.Role.ID}}" hx-target="#role-editor" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <section class="card">
@@ -82,4 +83,5 @@
 
 <div><button type="submit">Save role</button></div>
 </form>
+{{end}}
 </div>{{end}}

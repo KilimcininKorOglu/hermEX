@@ -39,10 +39,14 @@ func TestAFailedReadHidesTheFormItFeeds(t *testing.T) {
 		{"GetDomainBranding", "/admin/ui/domains/1", `/admin/ui/domains/1/branding"`, "the login branding"},
 		{"GetLDAPConfig", "/admin/ui/ldap", `hx-post="/admin/ui/ldap"`, "the directory configuration"},
 		{"ListDomains", "/admin/ui/ldap", `hx-post="/admin/ui/ldap"`, "the domains"},
+		{"ListOrgs", "/admin/ui/roles/1", `hx-put="/admin/ui/roles/1"`, "the organizations"},
+		{"ListDomains", "/admin/ui/roles/1", `hx-put="/admin/ui/roles/1"`, "the domains"},
+		{"ListUsers", "/admin/ui/roles/1", `hx-put="/admin/ui/roles/1"`, "the users"},
 	} {
 		d := &fakeDir{
 			authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
 			domainDetail: directory.DomainDetail{ID: 1, Name: "acme.test"},
+			namedRoles:   map[int64]directory.RoleDetail{1: roleDetail(1, "Helpdesk", "", nil, nil)},
 			readErrs:     map[string]error{tc.read: errReadFailed},
 		}
 		ts := adminServer(t, d)

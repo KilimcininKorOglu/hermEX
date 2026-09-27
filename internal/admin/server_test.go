@@ -269,6 +269,9 @@ func (f *fakeDir) ListRoles() ([]directory.RoleInfo, error) {
 }
 
 func (f *fakeDir) GetRole(id int64) (directory.RoleDetail, bool, error) {
+	if err := f.readErrs["GetRole"]; err != nil {
+		return directory.RoleDetail{}, false, err
+	}
 	r, ok := f.namedRoles[id]
 	return r, ok, nil
 }
@@ -333,7 +336,12 @@ func (f *fakeDir) ListDomains() ([]directory.DomainInfo, error) {
 	}
 	return f.domains, nil
 }
-func (f *fakeDir) ListUsers() ([]directory.UserInfo, error) { return f.users, f.listUsersErr }
+func (f *fakeDir) ListUsers() ([]directory.UserInfo, error) {
+	if err := f.readErrs["ListUsers"]; err != nil {
+		return nil, err
+	}
+	return f.users, f.listUsersErr
+}
 func (f *fakeDir) CreateDomain(name, homedir string) (int64, error) {
 	if f.createErr != nil {
 		return 0, f.createErr

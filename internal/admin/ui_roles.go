@@ -82,12 +82,34 @@ func (s *Server) handleUIRoleDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no such role", http.StatusNotFound)
 		return
 	}
-	s.render(w, "role_detail.html", s.roleDetailData(r, role, "", false))
+	s.render(w, "role_detail.html", s.roleDetailData(r, role, nil, "", false))
 }
 
-// roleDetailData builds the role editor's view model with each checkbox's checked
-// state precomputed, so the template only renders.
-func (s *Server) roleDetailData(r *http.Request, role directory.RoleDetail, errMsg string, saved bool) map[string]any {
+// roleDetailData builds the role editor's view model. The save replaces the role's
+// whole permission set and user list with what the form checks, so the editor is
+// hidden when the role or any list it offers could not be read: an organization,
+// domain or user missing from the form would lose its grant on the next save.
+func (s *Server) roleDetailData(r *http.Request, role directory.RoleDetail, roleErr error, errMsg string, saved bool) map[string]any {
+	failed := readFailures{}
+	data := map[string]any{
+		"Nav": "roles", "CSRF": csrfCookieValue(r), "Role": role,
+		"Error": errMsg, "Saved": saved, "ReadFailed": failed,
+	}
+	orgs, orgErr := s.dir.ListOrgs()
+	domains, domErr := s.dir.ListDomains()
+	users, userErr := s.dir.ListUsers()
+	if s.noteRead(failed, "editor", "the role", roleErr) &&
+		s.noteRead(failed, "editor", "the organizations", orgErr) &&
+		s.noteRead(failed, "editor", "the domains", domErr) &&
+		s.noteRead(failed, "editor", "the users", userErr) {
+		addRoleChecks(data, role, orgs, domains, users)
+	}
+	return data
+}
+
+// addRoleChecks adds the role editor's checkboxes to its view model with each
+// checked state precomputed, so the template only renders.
+func addRoleChecks(data map[string]any, role directory.RoleDetail, orgs []directory.OrgInfo, domains []directory.DomainInfo, users []directory.UserInfo) {
 	has := func(name, params string) bool {
 		for _, p := range role.Permissions {
 			if p.Name == name && p.Params == params {
@@ -102,13 +124,11 @@ func (s *Server) roleDetailData(r *http.Request, role directory.RoleDetail, errM
 		{directory.PermDomainPurge, "Purge domains", has(directory.PermDomainPurge, "")},
 		{directory.PermResetPasswd, "Reset user passwords", has(directory.PermResetPasswd, "")},
 	}
-	orgs, _ := s.dir.ListOrgs()
 	orgScopes := []scopeItem{{ID: "*", Label: "All organizations", Checked: has(directory.PermOrgAdmin, "*")}}
 	for _, o := range orgs {
 		id := strconv.FormatInt(o.ID, 10)
 		orgScopes = append(orgScopes, scopeItem{ID: id, Label: o.Name, Checked: has(directory.PermOrgAdmin, id)})
 	}
-	domains, _ := s.dir.ListDomains()
 	domScopes := func(perm string) []scopeItem {
 		out := []scopeItem{{ID: "*", Label: "All domains", Checked: has(perm, "*")}}
 		for _, d := range domains {
@@ -121,23 +141,13 @@ func (s *Server) roleDetailData(r *http.Request, role directory.RoleDetail, errM
 	for _, uid := range role.UserIDs {
 		assigned[uid] = true
 	}
-	users, _ := s.dir.ListUsers()
 	userChecks := make([]userCheck, 0, len(users))
 	for _, u := range users {
 		userChecks = append(userChecks, userCheck{ID: u.ID, Label: u.Username, Assigned: assigned[u.ID]})
 	}
-	return map[string]any{
-		"Nav":         "roles",
-		"CSRF":        csrfCookieValue(r),
-		"Role":        role,
-		"Error":       errMsg,
-		"Saved":       saved,
-		"Caps":        caps,
-		"OrgAdmin":    orgScopes,
-		"DomainAdmin": domScopes(directory.PermDomainAdmin),
-		"DomainRO":    domScopes(directory.PermDomainAdminRO),
-		"Users":       userChecks,
-	}
+	data["Caps"], data["OrgAdmin"], data["Users"] = caps, orgScopes, userChecks
+	data["DomainAdmin"] = domScopes(directory.PermDomainAdmin)
+	data["DomainRO"] = domScopes(directory.PermDomainAdminRO)
 }
 
 // handleUIUpdateRole saves the role editor form: it rebuilds the permission set
@@ -163,16 +173,16 @@ func (s *Server) handleUIUpdateRole(w http.ResponseWriter, r *http.Request) {
 	}
 	found, err := s.dir.UpdateRole(id, r.PostFormValue("name"), r.PostFormValue("description"), rolePermsFromForm(r), userIDs)
 	if err != nil {
-		role, _, _ := s.dir.GetRole(id)
-		s.render(w, "role-editor", s.roleDetailData(r, role, s.notice("Could not save role.", err), false))
+		role, _, roleErr := s.dir.GetRole(id)
+		s.render(w, "role-editor", s.roleDetailData(r, role, roleErr, s.notice("Could not save role.", err), false))
 		return
 	}
 	if !found {
 		http.Error(w, "no such role", http.StatusNotFound)
 		return
 	}
-	role, _, _ := s.dir.GetRole(id)
-	s.render(w, "role-editor", s.roleDetailData(r, role, "", true))
+	role, _, roleErr := s.dir.GetRole(id)
+	s.render(w, "role-editor", s.roleDetailData(r, role, roleErr, "", true))
 }
 
 // rolePermsFromForm rebuilds a role's permission set from the editor checkboxes:

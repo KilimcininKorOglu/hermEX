@@ -115,6 +115,23 @@ func TestUIRoleSave(t *testing.T) {
 	}
 }
 
+// TestUIRoleSaveHidesTheEditorWhenTheRoleCannotBeReread proves the editor a save
+// re-renders is hidden when the saved role cannot be read back. It rendered an
+// empty role with nothing checked, and saving that stripped every grant.
+func TestUIRoleSaveHidesTheEditorWhenTheRoleCannotBeReread(t *testing.T) {
+	d := systemAdminDir()
+	d.namedRoles = map[int64]directory.RoleDetail{1: roleDetail(1, "Helpdesk", "", nil, nil)}
+	d.readErrs = map[string]error{"GetRole": errReadFailed}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	body := wantBody(t, htmxPUT(t, ts, "/admin/ui/roles/1", session, csrf, url.Values{"name": {"Helpdesk"}}), http.StatusOK, "save")
+	wantContains(t, body, "Could not read the role", "the failed read is reported")
+	if strings.Contains(body, `hx-put="/admin/ui/roles/1"`) {
+		t.Errorf("the editor is offered after the role could not be read:\n%s", body)
+	}
+}
+
 // TestUIRoleDelete proves the delete action removes the role and redirects.
 func TestUIRoleDelete(t *testing.T) {
 	d := systemAdminDir()
