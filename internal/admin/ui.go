@@ -184,7 +184,7 @@ func (s *Server) handleUILoginSubmit(w http.ResponseWriter, r *http.Request) {
 	uid, _, ok, err := s.authAdmin(login, r.PostFormValue("password"))
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		s.render(w, "login.html", map[string]any{"Error": "Server error, please try again."})
+		s.render(w, "login.html", map[string]any{"Error": s.notice("Server error, please try again.", err)})
 		return
 	}
 	if !ok {
@@ -197,7 +197,7 @@ func (s *Server) handleUILoginSubmit(w http.ResponseWriter, r *http.Request) {
 	required, err := s.secondFactorRequired(login)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		s.render(w, "login.html", map[string]any{"Error": "Server error, please try again."})
+		s.render(w, "login.html", map[string]any{"Error": s.notice("Server error, please try again.", err)})
 		return
 	}
 	if required {

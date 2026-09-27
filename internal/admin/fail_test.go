@@ -106,6 +106,30 @@ func TestCreateUserRecordsTheRealError(t *testing.T) {
 	}
 }
 
+// TestAnUndecidedSignInIsRecorded proves a sign-in the directory could not decide is
+// recorded, on the JSON login and on the panel login. Both answered a server error
+// and recorded nothing, so the operator's log had no trace of why nobody could sign
+// in.
+func TestAnUndecidedSignInIsRecorded(t *testing.T) {
+	for _, tc := range []struct {
+		name, event string
+		send        func(*testing.T, *httptest.Server, string) int
+	}{
+		{"json", "request.fail", postLogin},
+		{"panel", "panel.fail", postUILogin},
+	} {
+		d := systemAdminDir()
+		d.readErrs = map[string]error{"AdminRoles": errReadFailed}
+		ts, sink := loggingAdminServer(t, d)
+		if code := tc.send(t, ts, "pw"); code != http.StatusInternalServerError {
+			t.Errorf("%s: sign-in status %d, want 500", tc.name, code)
+		}
+		if e, ok := sink.find(tc.event); !ok || e.Err != errReadFailed.Error() {
+			t.Errorf("%s: the failed read was not recorded (event %+v)", tc.name, e)
+		}
+	}
+}
+
 // TestFailMapsStatusToLevel proves a server fault is recorded at error level and a
 // client fault at warn, so a 5xx is not buried among 4xx noise, and that neither
 // spells the internal error out to the client.

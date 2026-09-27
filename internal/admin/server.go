@@ -564,7 +564,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	uid, roles, ok, err := s.authAdmin(req.Login, req.Password)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if !ok {
@@ -577,7 +577,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// cookie they receive reaches the code prompt and nothing else.
 	required, err := s.secondFactorRequired(req.Login)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
 	}
 	if required {
