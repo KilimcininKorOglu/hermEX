@@ -385,6 +385,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /admin/static/", staticHandler())
 	mux.HandleFunc("GET /admin/ui/login", s.handleUILoginPage)
 	mux.HandleFunc("POST /admin/ui/login", s.handleUILoginSubmit)
+	mux.HandleFunc("PUT /admin/ui/prefs", s.handleUISavePrefs)
 	mux.HandleFunc("GET /admin/ui/second-factor", s.handleUISecondFactorPage)
 	mux.HandleFunc("POST /admin/ui/second-factor", s.handleUISecondFactorSubmit)
 	mux.HandleFunc("POST /admin/ui/logout", s.handleUILogout)
@@ -535,7 +536,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/ldap", s.handleUISaveLDAP)
 	mux.HandleFunc("POST /admin/ui/ldap/sync", s.handleUISyncLDAP)
 	mux.HandleFunc("GET /admin/ui/", s.handleUIDashboard)
-	return noStoreAdmin(boundBody(mux))
+	return noStoreAdmin(s.syncThemeCookie(boundBody(mux)))
 }
 
 // handleLogin authenticates an administrator and, on success, sets the session

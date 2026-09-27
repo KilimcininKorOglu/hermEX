@@ -140,11 +140,25 @@
     toast("error", "The server could not be reached.");
   });
 
-  // setTheme applies and remembers the operator's theme choice.
+  // setTheme shows the operator's theme at once and stores it in the users record
+  // webmail shares; the answer also sets the admin_theme cookie theme.js reads. A
+  // failed save puts the previous theme back and says so.
   function setTheme(theme) {
+    const previous = document.documentElement.dataset.theme;
     document.documentElement.dataset.theme = theme;
-    const secure = location.protocol === "https:" ? "; Secure" : "";
-    document.cookie = "admin_theme=" + theme + "; Path=/admin; Max-Age=31536000; SameSite=Lax" + secure;
+    const csrf = /(?:^|;\s*)hermex_admin_csrf=([^;]*)/.exec(document.cookie);
+    fetch("/admin/ui/prefs", {
+      method: "PUT",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": csrf ? decodeURIComponent(csrf[1]) : "" },
+      body: "theme=" + encodeURIComponent(theme),
+    }).then((resp) => {
+      if (!resp.ok) {
+        throw new Error("HTTP " + resp.status);
+      }
+    }).catch(() => {
+      document.documentElement.dataset.theme = previous;
+      toast("error", "The theme could not be saved.");
+    });
   }
 
   // setNav opens or closes the narrow-screen menu.

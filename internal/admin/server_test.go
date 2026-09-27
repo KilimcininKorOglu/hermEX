@@ -21,6 +21,7 @@ type fakeDir struct {
 	authOK             bool
 	password           string // when set, Authenticate accepts only this password (else authOK alone governs)
 	uid                int64
+	uiPrefs            map[string]directory.UserPrefs // interface preferences by login
 	roles              []directory.AdminRole
 	perms              []directory.Permission
 	domains            []directory.DomainInfo
@@ -905,6 +906,27 @@ func (f *fakeDir) GetCreateDefaults(scopeID int64) (directory.CreateDefaults, bo
 }
 func (f *fakeDir) EffectiveUserDefaults(int64) (directory.ResolvedUserDefaults, error) {
 	return f.effectiveUserDefaults, f.readErrs["EffectiveUserDefaults"]
+}
+func (f *fakeDir) GetUserPrefs(login string) (directory.UserPrefs, bool, error) {
+	if err := f.readErrs["GetUserPrefs"]; err != nil {
+		return directory.UserPrefs{}, false, err
+	}
+	p, ok := f.uiPrefs[login]
+	return p, ok, nil
+}
+func (f *fakeDir) SetUserPrefs(login string, u directory.UserPrefsUpdate) (bool, error) {
+	if u.Theme != nil && !slices.Contains([]string{"", "light", "dark", "system"}, *u.Theme) {
+		return false, directory.ErrInvalidPref
+	}
+	if f.uiPrefs == nil {
+		f.uiPrefs = map[string]directory.UserPrefs{}
+	}
+	p := f.uiPrefs[login]
+	if u.Theme != nil {
+		p.Theme = *u.Theme
+	}
+	f.uiPrefs[login] = p
+	return true, nil
 }
 func (f *fakeDir) ListActiveSessions(int64) ([]directory.SessionRecord, error) {
 	if err := f.readErrs["ListActiveSessions"]; err != nil {
