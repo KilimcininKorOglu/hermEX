@@ -432,6 +432,14 @@ const (
 	PrBirthday          = PropTag(0x3A420040) // PtSysTime (PidTagBirthday)
 	PrBusinessHomePage  = PropTag(0x3A51001F) // PtUnicode (PidTagBusinessHomePage)
 	PrPersonalHomePage  = PropTag(0x3A50001F) // PtUnicode (PidTagPersonalHomePage)
+	PrInitials          = PropTag(0x3A0A001F) // PtUnicode (PidTagInitials)
+
+	// Postal address (the default mailing address fields).
+	PrStreetAddress   = PropTag(0x3A29001F) // PtUnicode (PidTagStreetAddress)
+	PrLocality        = PropTag(0x3A27001F) // PtUnicode (PidTagLocality, the city)
+	PrStateOrProvince = PropTag(0x3A28001F) // PtUnicode (PidTagStateOrProvince)
+	PrPostalCode      = PropTag(0x3A2A001F) // PtUnicode (PidTagPostalCode)
+	PrCountry         = PropTag(0x3A26001F) // PtUnicode (PidTagCountry)
 
 	// Telephone numbers.
 	PrBusinessTelephoneNumber  = PropTag(0x3A08001F) // PtUnicode (also the office number)

@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"hermex/internal/mapi"
 )
 
 // stubVerifier is a test LDAPVerifier that records the inputs it was called with
@@ -28,14 +30,14 @@ func (s *stubVerifier) Verify(cfg LDAPConfig, login, password string) (bool, err
 func TestAuthenticateLDAPBranch(t *testing.T) {
 	d, db := freshDirectory(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "hermex.test")
+	domID := mustCreateDomain(t, d, root, "hermex.test")
 	mustCreateUser(t, d, root, "local@hermex.test", "localpass")
 	mustCreateUser(t, d, root, "ext@hermex.test", "ignored-local-hash")
-	// Master ext@ in LDAP (externid set) and give its org a directory config.
+	// Master ext@ in LDAP (externid set) and bind its domain to a connection.
 	_, err := db.Exec(`UPDATE users SET externid=? WHERE username=?`, []byte{0x01, 0x02}, "ext@hermex.test")
 	mustNoErr(t, "master the account in LDAP", err)
-	mustNoErr(t, "set the LDAP config", d.SetLDAPConfig(0,
-		LDAPConfig{URI: "ldaps://ad.hermex.test", BaseDN: "dc=hermex,dc=test", UsernameAttr: "mail"}))
+	mustBindDomain(t, d, domID, LDAPConnection{Name: "hq", URI: "ldaps://ad.hermex.test",
+		BaseDN: "dc=hermex,dc=test", UsernameAttr: "mail"})
 	admits := func(login, password string) bool {
 		t.Helper()
 		_, ok := d.Authenticate(login, password)
@@ -63,6 +65,49 @@ func TestAuthenticateLDAPBranch(t *testing.T) {
 	// 4. A rejecting verifier denies the login.
 	d.SetLDAPVerifier(&stubVerifier{result: false})
 	wantEq(t, "an LDAP login the verifier rejected", admits("ext@hermex.test", "wrong"), false)
+}
+
+// mustBindDomain creates a connection and binds a domain to it.
+func mustBindDomain(t *testing.T, d *SQLDirectory, domainID int64, c LDAPConnection) {
+	t.Helper()
+	cID, err := d.CreateLDAPConnection(c)
+	mustNoErr(t, "create connection "+c.Name, err)
+	_, err = d.CreateLDAPBinding(LDAPBinding{ConnectionID: cID, DomainID: domainID})
+	mustNoErr(t, "bind domain to "+c.Name, err)
+}
+
+// TestLDAPLoginUsesDomainBinding proves an LDAP-mastered login is verified against
+// the connection its own domain is bound to, not the organization's directory or
+// another domain's connection, and is denied when its domain has no binding even
+// though the organization still has a directory configured.
+func TestLDAPLoginUsesDomainBinding(t *testing.T) {
+	d, db := freshDirectory(t)
+	root := t.TempDir()
+	aID := mustCreateDomain(t, d, root, "a.test")
+	bID := mustCreateDomain(t, d, root, "b.test")
+	mustCreateDomain(t, d, root, "c.test")
+	for _, u := range []string{"u@a.test", "u@b.test", "u@c.test"} {
+		mustCreateUser(t, d, root, u, "ignored-local-hash")
+		_, err := db.Exec(`UPDATE users SET externid=? WHERE username=?`, []byte{0x01}, u)
+		mustNoErr(t, "master "+u+" in LDAP", err)
+	}
+	mustNoErr(t, "set the organization directory", d.SetLDAPConfig(0,
+		LDAPConfig{URI: "ldaps://org.test", UsernameAttr: "mail"}))
+	mustBindDomain(t, d, aID, LDAPConnection{Name: "a", URI: "ldaps://a-dir.test", UsernameAttr: "mail"})
+	mustBindDomain(t, d, bID, LDAPConnection{Name: "b", URI: "ldaps://b-dir.test", UsernameAttr: "uid"})
+	stub := &stubVerifier{result: true}
+	d.SetLDAPVerifier(stub)
+
+	for login, uri := range map[string]string{"u@a.test": "ldaps://a-dir.test", "u@b.test": "ldaps://b-dir.test"} {
+		_, ok := d.Authenticate(login, "pw")
+		wantEq(t, login+" is admitted", ok, true)
+		wantEq(t, "the directory "+login+" was verified against", stub.gotCfg.URI, uri)
+		wantEq(t, "the domain of "+login+"'s configuration", stub.gotCfg.Domain, login[2:])
+	}
+	stub.gotCfg = LDAPConfig{}
+	_, ok := d.Authenticate("u@c.test", "pw")
+	wantEq(t, "a login in an unbound domain is admitted", ok, false)
+	wantEq(t, "the verifier was consulted for an unbound domain", stub.gotCfg.URI, "")
 }
 
 // TestUpsertLDAPUser proves a downsync marks an existing user LDAP-mastered (sets
@@ -171,4 +216,42 @@ func TestEnabledProfileSync(t *testing.T) {
 	if got := cfg.EnabledProfileSync(); !reflect.DeepEqual(got, want) {
 		t.Errorf("EnabledProfileSync = %v, want %v", got, want)
 	}
+}
+
+// TestProfileFieldTagsMatchMAPI pins every syncable profile field to the MAPI
+// property it lands in, so a mistyped numeric tag files a value under the wrong
+// property (or none a client reads), and keeps the binary photo last.
+func TestProfileFieldTagsMatchMAPI(t *testing.T) {
+	want := map[string]mapi.PropTag{
+		"displayName":   mapi.PrDisplayName,
+		"givenName":     mapi.PrGivenName,
+		"surname":       mapi.PrSurname,
+		"title":         mapi.PrTitle,
+		"department":    mapi.PrDepartmentName,
+		"company":       mapi.PrCompanyName,
+		"office":        mapi.PrOfficeLocation,
+		"businessPhone": mapi.PrBusinessTelephoneNumber,
+		"mobile":        mapi.PrMobileTelephoneNumber,
+		"streetAddress": mapi.PrStreetAddress,
+		"locality":      mapi.PrLocality,
+		"state":         mapi.PrStateOrProvince,
+		"postalCode":    mapi.PrPostalCode,
+		"country":       mapi.PrCountry,
+		"fax":           mapi.PrBusinessFaxNumber,
+		"homePhone":     mapi.PrHomeTelephoneNumber,
+		"pager":         mapi.PrPagerTelephoneNumber,
+		"initials":      mapi.PrInitials,
+		"description":   mapi.PrComment,
+		"photo":         0,
+	}
+	wantEq(t, "profile field count", len(ldapProfileFields), len(want))
+	for _, f := range ldapProfileFields {
+		tag, ok := want[f.Key]
+		if !ok {
+			t.Errorf("profile field %q has no expected MAPI tag", f.Key)
+			continue
+		}
+		wantEq(t, "the tag of "+f.Key, mapi.PropTag(f.Proptag), tag)
+	}
+	wantEq(t, "the last profile field", ldapProfileFields[len(ldapProfileFields)-1].Key, LDAPPhotoFieldKey)
 }

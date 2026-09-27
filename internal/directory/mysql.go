@@ -68,6 +68,7 @@ func (d *SQLDirectory) EnsureSchema() error {
 	if err := migrate.Run(context.Background(), &migrate.MySQLDriver{DB: d.db}, 0, directoryMigrations); err != nil {
 		return fmt.Errorf("directory: apply schema: %w", err)
 	}
+	d.wrapLDAPBindPasswords()
 	return nil
 }
 
@@ -87,8 +88,8 @@ type loginRow struct {
 	displayType  int
 	domainStatus int
 	externid     []byte // non-nil => the account is mastered in an LDAP directory
-	domainID     int64  // the account's domain (the narrow address-book scope)
-	orgID        int64  // the account's organization (selects its LDAP config)
+	domainID     int64  // the account's domain (address-book scope, selects its LDAP binding)
+	orgID        int64  // the account's organization
 	mustChange   bool   // true => an admin reset requires a forced password change
 }
 
@@ -200,9 +201,9 @@ func (d *SQLDirectory) AuthenticateAllowingPasswordChange(user, password string)
 }
 
 // verifyPassword checks a login's password the way its account is mastered: an
-// account with an externid is verified against its organization's LDAP directory
-// (bind-to-verify), every other account against its stored crypt(3) hash. An
-// LDAP-mastered account whose org has no configured directory, or for which no
+// account with an externid is verified against the LDAP connection its domain is
+// bound to (bind-to-verify), every other account against its stored crypt(3) hash.
+// An LDAP-mastered account whose domain has no binding, or for which no
 // verifier is installed, is denied rather than silently falling back to a local
 // hash it does not own.
 func (d *SQLDirectory) verifyPassword(row loginRow, login, password string) bool {
@@ -216,8 +217,12 @@ func (d *SQLDirectory) verifyPassword(row loginRow, login, password string) bool
 	if d.verifier == nil {
 		return false
 	}
-	cfg, ok, err := d.GetLDAPConfig(row.orgID)
-	if err != nil || !ok {
+	cfg, ok, err := d.LDAPConfigForDomain(row.domainID)
+	if err != nil {
+		log.Printf("directory: could not resolve the LDAP binding of domain %d: %v", row.domainID, err)
+		return false
+	}
+	if !ok {
 		return false
 	}
 	verified, err := d.verifier.Verify(cfg, login, password)

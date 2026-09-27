@@ -57,6 +57,10 @@ type LDAPConfig struct {
 	ContactBaseDN string
 	ContactFilter string
 	ContactDomain string
+	// DomainID and Domain name the local domain a binding-resolved configuration
+	// belongs to (zero and empty for an organization-wide ldap_config row).
+	DomainID int64
+	Domain   string
 }
 
 // LDAPSyncField is one profile attribute's per-org downsync setting: whether it is
@@ -67,9 +71,12 @@ type LDAPSyncField struct {
 	Enabled bool   `json:"enabled"`
 }
 
-// ldapSyncConfig is the JSON document persisted in ldap_config.sync_config; absent
-// keys decode to their zero value, so older rows stay valid.
-type ldapSyncConfig struct {
+// LDAPMapping is the JSON document persisted in ldap_config.sync_config and
+// ldap_bindings.sync_config: one domain's downsync mapping. Absent keys decode to
+// their zero value, so older rows stay valid. BaseDN, set, overrides the
+// connection's search base for that domain (a binding only).
+type LDAPMapping struct {
+	BaseDN        string                   `json:"baseDN,omitempty"`
 	Fields        map[string]LDAPSyncField `json:"fields,omitempty"`
 	AliasAttr     string                   `json:"aliasAttr,omitempty"`
 	SyncGroups    bool                     `json:"syncGroups,omitempty"`
@@ -103,6 +110,16 @@ var ldapProfileFields = []ldapProfileField{
 	{"office", "physicalDeliveryOfficeName", 0x3A19001F},
 	{"businessPhone", "telephoneNumber", 0x3A08001F},
 	{"mobile", "mobile", 0x3A1C001F},
+	{"streetAddress", "streetAddress", 0x3A29001F},
+	{"locality", "l", 0x3A27001F},
+	{"state", "st", 0x3A28001F},
+	{"postalCode", "postalCode", 0x3A2A001F},
+	{"country", "co", 0x3A26001F},
+	{"fax", "facsimileTelephoneNumber", 0x3A24001F},
+	{"homePhone", "homePhone", 0x3A09001F},
+	{"pager", "pager", 0x3A21001F},
+	{"initials", "initials", 0x3A0A001F},
+	{"description", "description", 0x3004001F},
 	{"photo", "thumbnailPhoto", 0},
 }
 
@@ -177,7 +194,7 @@ func (d *SQLDirectory) GetLDAPConfig(orgID int64) (cfg LDAPConfig, ok bool, err 
 	}
 	cfg.StartTLS = startTLS != 0
 	if syncJSON.Valid && syncJSON.String != "" {
-		var sc ldapSyncConfig
+		var sc LDAPMapping
 		if err := json.Unmarshal([]byte(syncJSON.String), &sc); err != nil {
 			return LDAPConfig{}, false, fmt.Errorf("directory: malformed ldap sync_config: %w", err)
 		}
@@ -281,12 +298,17 @@ func (d *SQLDirectory) SetLDAPConfig(orgID int64, cfg LDAPConfig) error {
 // returning nil when every one of them is at its zero value so an org that syncs nothing
 // but logins stores no document at all.
 func marshalSyncConfig(cfg LDAPConfig) (any, error) {
-	sc := ldapSyncConfig{
+	return marshalMapping(LDAPMapping{
 		Fields: cfg.SyncFields, AliasAttr: cfg.AliasAttr,
 		SyncGroups: cfg.SyncGroups, GroupBaseDN: cfg.GroupBaseDN, GroupFilter: cfg.GroupFilter,
 		SyncContacts: cfg.SyncContacts, ContactBaseDN: cfg.ContactBaseDN, ContactFilter: cfg.ContactFilter,
 		ContactDomain: cfg.ContactDomain,
-	}
+	})
+}
+
+// marshalMapping encodes a downsync mapping for a sync_config column, returning nil when
+// it configures nothing so the column stays NULL.
+func marshalMapping(sc LDAPMapping) (any, error) {
 	if sc.isEmpty() {
 		return nil, nil
 	}
@@ -299,8 +321,8 @@ func marshalSyncConfig(cfg LDAPConfig) (any, error) {
 
 // isEmpty reports whether every optional downsync setting is at its zero value, in which
 // case the column stays NULL rather than holding a document that configures nothing.
-func (sc ldapSyncConfig) isEmpty() bool {
-	strs := []string{sc.AliasAttr, sc.GroupBaseDN, sc.GroupFilter, sc.ContactBaseDN, sc.ContactFilter, sc.ContactDomain}
+func (sc LDAPMapping) isEmpty() bool {
+	strs := []string{sc.BaseDN, sc.AliasAttr, sc.GroupBaseDN, sc.GroupFilter, sc.ContactBaseDN, sc.ContactFilter, sc.ContactDomain}
 	for _, s := range strs {
 		if s != "" {
 			return false
