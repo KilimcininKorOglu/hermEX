@@ -72,16 +72,6 @@ func (s *Server) addTLSCertViews(data map[string]any) {
 	data["Certs"] = views
 }
 
-// auditOld is the value an audit entry records as a setting's previous state: the
-// stored value, or "unreadable" when reading it failed, so the entry never claims
-// an empty previous value that was not stored.
-func auditOld(v any, err error) any {
-	if err != nil {
-		return "unreadable"
-	}
-	return v
-}
-
 // handleUITLSSettings saves the certificate mode and ACME account settings. In acme
 // mode the gateway obtains and renews Let's Encrypt certificates automatically; in
 // manual mode it serves operator-uploaded certificates. Switching mode is structural,

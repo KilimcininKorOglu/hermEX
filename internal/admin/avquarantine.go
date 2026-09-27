@@ -99,7 +99,7 @@ func (s *Server) handleUISaveDomainAVScan(w http.ResponseWriter, r *http.Request
 	case !found:
 		data["Error"] = "No such domain."
 	default:
-		oldIn, oldOut, _ := s.dir.GetDomainAVScan(dd.Name)
+		oldIn, oldOut, oldErr := s.dir.GetDomainAVScan(dd.Name)
 		inbound := r.PostFormValue("av_scan_inbound") == "on"
 		outbound := r.PostFormValue("av_scan_outbound") == "on"
 		if err := s.dir.SetDomainAVScan(dd.Name, inbound, outbound); err != nil {
@@ -107,8 +107,8 @@ func (s *Server) handleUISaveDomainAVScan(w http.ResponseWriter, r *http.Request
 		} else {
 			data["Saved"] = true
 			s.auditSettingChange(cl.Login, "av_scan", logging.Fields{
-				"domain": dd.Name, "old_inbound": oldIn, "new_inbound": inbound,
-				"old_outbound": oldOut, "new_outbound": outbound,
+				"domain": dd.Name, "old_inbound": auditOld(oldIn, oldErr), "new_inbound": inbound,
+				"old_outbound": auditOld(oldOut, oldErr), "new_outbound": outbound,
 			})
 		}
 	}

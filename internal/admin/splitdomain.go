@@ -35,13 +35,13 @@ func (s *Server) handleUISaveDomainSplit(w http.ResponseWriter, r *http.Request)
 	case s.paths != nil && strings.EqualFold(host, s.paths.ServerHostname()):
 		data["Error"] = "The split host cannot be this server."
 	default:
-		old, _ := s.dir.SplitRelayHost(dd.Name)
+		old, oldErr := s.dir.SplitRelayHost(dd.Name)
 		if err := s.dir.SetSplitRelayHost(dd.Name, host); err != nil {
 			data["Error"] = s.notice("Could not save the split domain.", err)
 		} else {
 			data["Saved"] = true
 			s.auditSettingChange(cl.Login, "split_domain", logging.Fields{
-				"domain": dd.Name, "old_host": old, "new_host": host,
+				"domain": dd.Name, "old_host": auditOld(old, oldErr), "new_host": host,
 			})
 		}
 	}

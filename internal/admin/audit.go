@@ -21,3 +21,13 @@ func (s *Server) auditSettingChange(actor, setting string, fields logging.Fields
 		Fields:    fields,
 	})
 }
+
+// auditOld is the value an audit entry records as a setting's previous state: the
+// stored value, or "unreadable" when reading it failed, so the entry never claims
+// an empty previous value that was not stored.
+func auditOld(v any, err error) any {
+	if err != nil {
+		return "unreadable"
+	}
+	return v
+}
