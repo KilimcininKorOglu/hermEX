@@ -36,9 +36,9 @@
     });
   });
 
-  // text returns a message the page rendered in the operator's language onto the
-  // root element as data-msg-<name>, with {0} replaced by arg.
-  function text(name, arg) {
+  // pageText returns a message the page rendered in the operator's language onto
+  // the root element as data-msg-<name>, with {0} replaced by arg.
+  function pageText(name, arg) {
     const key = "msg" + name.replace(/(^|-)(\w)/g, (_, _dash, c) => c.toUpperCase());
     const message = document.documentElement.dataset[key] || "";
     return arg === undefined ? message : message.replace("{0}", String(arg));
@@ -68,7 +68,7 @@
     body.textContent = text;
     const close = document.createElement("button");
     close.type = "button";
-    close.setAttribute("aria-label", text("dismiss"));
+    close.setAttribute("aria-label", pageText("dismiss"));
     close.append(glyph("close"));
     close.addEventListener("click", () => item.remove());
     item.append(glyph(kind), body, close);
@@ -142,10 +142,10 @@
   // htmx does not swap an error response, so without this a failed request
   // would change nothing on the page and say nothing.
   document.addEventListener("htmx:responseError", (evt) => {
-    toast("error", text("request-failed", evt.detail.xhr.status));
+    toast("error", pageText("request-failed", evt.detail.xhr.status));
   });
   document.addEventListener("htmx:sendError", () => {
-    toast("error", text("unreachable"));
+    toast("error", pageText("unreachable"));
   });
 
   // savePref stores one interface preference in the users record webmail shares;
@@ -170,7 +170,7 @@
     document.documentElement.dataset.theme = theme;
     savePref("theme", theme).catch(() => {
       document.documentElement.dataset.theme = previous;
-      toast("error", text("theme-failed"));
+      toast("error", pageText("theme-failed"));
     });
   }
 
@@ -183,7 +183,7 @@
     }
     savePref("lang", select.value).then(() => window.location.reload()).catch(() => {
       select.value = document.documentElement.lang;
-      toast("error", text("lang-failed"));
+      toast("error", pageText("lang-failed"));
     });
   });
 
