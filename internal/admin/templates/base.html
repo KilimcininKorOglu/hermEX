@@ -6,10 +6,21 @@
 <title>hermEX Admin</title>
 <link rel="stylesheet" href="{{asset "style.css"}}">
 <script src="{{asset "htmx.min.js"}}"></script>
+<script src="{{asset "admin.js"}}" defer></script>
 </head>
 <body>{{end}}
 
-{{define "foot"}}</body>
+{{define "foot"}}<dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-dialog-title">
+<form method="dialog">
+<h2 id="confirm-dialog-title">Please confirm</h2>
+<p class="confirm-message"></p>
+<div class="dialog-actions">
+<button type="submit" value="cancel" class="secondary" autofocus>Cancel</button>
+<button type="submit" value="confirm" class="danger">Confirm</button>
+</div>
+</form>
+</dialog>
+</body>
 </html>{{end}}
 
 {{define "sidebar"}}<aside class="sidebar">

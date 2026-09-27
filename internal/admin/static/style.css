@@ -281,6 +281,26 @@ table.grid td.empty { color: var(--muted); text-align: center; }
 .tabbar a:hover { color: var(--ink); text-decoration: none; }
 .tabbar a.active { color: var(--accent); border-bottom-color: var(--accent); }
 
+/* The confirm dialog every hx-confirm opens instead of the browser's own. */
+button.secondary { background: var(--panel); color: var(--ink); border: 1px solid var(--border); }
+button.danger { background: var(--error); color: #fff; border: none; }
+
+.confirm-dialog {
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	padding: 1.5rem;
+	width: calc(100% - 2rem);
+	max-width: 420px;
+	color: var(--ink);
+	background: var(--panel);
+	box-shadow: 0 20px 40px rgb(15 23 42 / 0.25);
+}
+.confirm-dialog::backdrop { background: rgb(15 23 42 / 0.45); }
+.confirm-dialog h2 { margin: 0 0 0.5rem; font-size: 1.1rem; }
+.confirm-dialog .confirm-message { margin: 0 0 1.25rem; color: var(--muted); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+.dialog-actions button { padding: 0.55rem 1rem; border-radius: 8px; font-size: 0.95rem; cursor: pointer; }
+
 pre.report-headers {
 	background: var(--panel);
 	border: 1px solid var(--border);
