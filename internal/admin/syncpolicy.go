@@ -270,12 +270,13 @@ func (s *Server) handleUISyncPolicy(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	p, _ := s.dir.GetDefaultSyncPolicy()
-	s.render(w, "syncpolicy.html", map[string]any{
-		"Nav":    "syncpolicy",
-		"CSRF":   csrfCookieValue(r),
-		"Fields": policyView(p),
-	})
+	p, err := s.dir.GetDefaultSyncPolicy()
+	failed := readFailures{}
+	data := map[string]any{"Nav": "syncpolicy", "CSRF": csrfCookieValue(r), "ReadFailed": failed}
+	if s.noteRead(failed, "policy", "the default device policy", err) {
+		data["Fields"] = policyView(p)
+	}
+	s.render(w, "syncpolicy.html", data)
 }
 
 // handleUISaveSyncPolicy saves the server-default device policy from the editor and

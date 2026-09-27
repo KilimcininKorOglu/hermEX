@@ -73,15 +73,18 @@ type fakeDir struct {
 	relayFound         bool
 	gateways           map[string]directory.SMTPGateway
 	gatewayErr         error
-	catchAll           map[string]string
-	resolvable         map[string]bool
-	digest             directory.DigestSettings
-	digestFound        bool
-	dkimSelector       string
-	dkimPublicTXT      string
-	dkimPrivPEM        []byte
-	dkimEnabled        bool
-	dkimFound          bool
+	// readErrs makes the named read method fail, so a test can prove a page
+	// does not render a form from a read that failed.
+	readErrs      map[string]error
+	catchAll      map[string]string
+	resolvable    map[string]bool
+	digest        directory.DigestSettings
+	digestFound   bool
+	dkimSelector  string
+	dkimPublicTXT string
+	dkimPrivPEM   []byte
+	dkimEnabled   bool
+	dkimFound     bool
 
 	tlsCerts       []directory.TLSCertInfo
 	tlsSettings    *directory.TLSSettings
@@ -827,7 +830,7 @@ func (f *fakeDir) SetDomainNameTemplates(_, internal, external string) error {
 	return nil
 }
 func (f *fakeDir) GetDefaultSyncPolicy() (easpolicy.Policy, error) {
-	return f.defaultSyncPolicy, nil
+	return f.defaultSyncPolicy, f.readErrs["GetDefaultSyncPolicy"]
 }
 func (f *fakeDir) SetDefaultSyncPolicy(p easpolicy.Policy) error {
 	f.defaultSyncPolicy = p
