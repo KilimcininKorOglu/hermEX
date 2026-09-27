@@ -46,12 +46,12 @@ func (s *Server) tlsCertsPageData(r *http.Request, notice panelNotice) map[strin
 	data := map[string]any{"Nav": "tls", "CSRF": csrfCookieValue(r), "Notice": notice, "ReadFailed": failed}
 	s.addTLSCertViews(data)
 	settings, _, err := s.dir.GetTLSSettings()
-	if s.noteRead(failed, "mode", "the certificate mode", err) {
+	if s.noteRead(failed, "mode", "what.certMode", err) {
 		data["Mode"], data["ACMEEmail"] = settings.Mode, settings.ACMEEmail
 		data["ACMECAURL"], data["ACMEAgreed"] = settings.ACMECAURL, settings.ACMEAgreed
 	}
 	sts, _, err := s.dir.GetMTASTSSettings()
-	if s.noteRead(failed, "mtasts", "the MTA-STS settings", err) {
+	if s.noteRead(failed, "mtasts", "what.mtasts", err) {
 		data["MTASTSEnabled"], data["MTASTSMode"], data["MTASTSMaxAge"] = sts.Enabled, sts.Mode, sts.MaxAge
 	}
 	return data
@@ -62,7 +62,7 @@ func (s *Server) tlsCertsPageData(r *http.Request, notice panelNotice) map[strin
 func (s *Server) addTLSCertViews(data map[string]any) {
 	infos, err := s.dir.ListTLSCerts()
 	if err != nil {
-		data["CertsError"] = s.notice("Could not read the stored certificates.", err)
+		data["CertsError"] = s.notice("tls.certsUnread", err)
 		return
 	}
 	views := make([]tlsCertView, len(infos))
@@ -95,11 +95,11 @@ func (s *Server) handleUITLSSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if mode == "acme" {
 		if settings.ACMEEmail == "" {
-			s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, errorNotice("ACME mode needs an account email address.")))
+			s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, errorNotice("tls.acmeNoEmail")))
 			return
 		}
 		if !settings.ACMEAgreed {
-			s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, errorNotice("ACME mode requires agreeing to the CA's terms of service.")))
+			s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, errorNotice("tls.acmeNoAgree")))
 			return
 		}
 		// A blank CA URL silently defaults to Let's Encrypt production, so a
@@ -107,16 +107,16 @@ func (s *Server) handleUITLSSettings(w http.ResponseWriter, r *http.Request) {
 		// name. Require an explicit directory URL so the choice of production vs.
 		// staging is deliberate.
 		if settings.ACMECAURL == "" {
-			s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, errorNotice("ACME mode needs an explicit CA directory URL. Leaving it blank would default to Let's Encrypt production and risk its rate limit on a misconfiguration; paste the production or staging directory URL.")))
+			s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, errorNotice("tls.acmeNoURL")))
 			return
 		}
 	}
 	if err := s.dir.SetTLSSettings(settings); err != nil {
-		s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, s.failNotice("Could not save the certificate mode.", err)))
+		s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, s.failNotice("tls.modeFailed", err)))
 		return
 	}
 	s.auditSettingChange(cl.Login, "tls_mode", logging.Fields{"old_mode": auditOld(oldSettings.Mode, oldErr), "new_mode": settings.Mode})
-	s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, okNotice("Saved. Restart the gateway for a mode change to take effect.")))
+	s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, okNotice("tls.modeSaved")))
 }
 
 // handleUIMTASTSSettings saves the MTA-STS publishing settings. When enabled, the
@@ -141,18 +141,18 @@ func (s *Server) handleUIMTASTSSettings(w http.ResponseWriter, r *http.Request) 
 		maxAge = directory.MTASTSDefaultMaxAge
 	}
 	if enabled && mode == "enforce" && r.FormValue("mtasts_enforce_confirm") != "on" {
-		s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, errorNotice("Enforce mode makes senders refuse mail when the MX certificate does not validate. Tick the confirmation box to enable it, or use testing mode first.")))
+		s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, errorNotice("tls.enforceNeedsConfirm")))
 		return
 	}
 	if err := s.dir.SetMTASTSSettings(directory.MTASTSSettings{Enabled: enabled, Mode: mode, MaxAge: maxAge}); err != nil {
-		s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, s.failNotice("Could not save the MTA-STS settings.", err)))
+		s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, s.failNotice("tls.mtastsFailed", err)))
 		return
 	}
 	s.auditSettingChange(cl.Login, "mtasts", logging.Fields{
 		"old_enabled": auditOld(oldSTS.Enabled, oldErr), "new_enabled": enabled,
 		"old_mode": auditOld(oldSTS.Mode, oldErr), "new_mode": mode,
 	})
-	s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, okNotice("Saved MTA-STS publishing. Publish each domain's prescribed mta-sts and _mta-sts records (see the domain page); senders adopt a change on their next fetch.")))
+	s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, okNotice("tls.mtastsSaved")))
 }
 
 // handleUITLSCerts renders the TLS-certificates page (system administrators only).
@@ -179,22 +179,22 @@ func (s *Server) handleUITLSCertUpload(w http.ResponseWriter, r *http.Request) {
 		// validateTLSCert describes the file the operator just pasted (not a pair,
 		// unparseable leaf, already expired), not a server internal, and it is the
 		// only thing telling them what to fix. It is shown rather than sanitized.
-		s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, errorNotice("Upload rejected: "+err.Error())))
+		s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, errorNotice(msg("tls.uploadRejected", err.Error()))))
 		return
 	}
 	if err := s.dir.SetTLSCert(name, certPEM, keyPEM, notAfter); err != nil {
-		s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, s.failNotice("Could not store the certificate.", err)))
+		s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, s.failNotice("tls.storeFailed", err)))
 		return
 	}
 	label := name
 	if label == "" {
-		label = "default"
+		label = "tls.default"
 	}
-	covers := "no SAN host names"
+	stored := msg("tls.storedNoNames", label)
 	if len(dnsNames) > 0 {
-		covers = "covers " + strings.Join(dnsNames, ", ")
+		stored = msg("tls.storedNames", label, strings.Join(dnsNames, ", "))
 	}
-	s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, okNotice(fmt.Sprintf("Stored the %s certificate (%s). Listeners apply it within a minute, no restart.", label, covers))))
+	s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, okNotice(stored)))
 }
 
 // handleUITLSCertDelete removes a stored certificate, after which the listeners
@@ -205,8 +205,8 @@ func (s *Server) handleUITLSCertDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	name := strings.ToLower(strings.TrimSpace(r.FormValue("name")))
 	if err := s.dir.DeleteTLSCert(name); err != nil {
-		s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, s.failNotice("Could not delete the certificate.", err)))
+		s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, s.failNotice("tls.deleteFailed", err)))
 		return
 	}
-	s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, okNotice("Certificate deleted. Listeners fall back to the config-file certificate within a minute.")))
+	s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, okNotice("tls.deleted")))
 }

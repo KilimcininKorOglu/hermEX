@@ -13,7 +13,7 @@ const defaultLogRetentionDaysDisplay = 0
 // read is recorded in failed, since the default would read as keep forever.
 func (s *Server) fillLogRetention(data map[string]any, failed readFailures) {
 	d, found, err := s.dir.GetLogRetentionDays()
-	if !s.noteRead(failed, "log-retention", "the log retention", err) {
+	if !s.noteRead(failed, "log-retention", "what.logRetention", err) {
 		return
 	}
 	days := defaultLogRetentionDaysDisplay
@@ -42,12 +42,12 @@ func (s *Server) handleUISaveLogRetention(w http.ResponseWriter, r *http.Request
 	}
 	days := formInt(r, "log_retention_days")
 	if err := s.dir.SetLogRetentionDays(days); err != nil {
-		s.render(w, r, "log-retention-panel", s.logRetentionPanelData(r, s.failNotice("Could not save the retention setting.", err)))
+		s.render(w, r, "log-retention-panel", s.logRetentionPanelData(r, s.failNotice("settings.retentionFailed", err)))
 		return
 	}
-	msg := "Log retention saved, the admin prunes the log store to match within a minute, no restart."
+	done := "settings.logSaved"
 	if days == 0 {
-		msg = "Log retention set to keep forever, pruning is disabled."
+		done = "settings.logForever"
 	}
-	s.render(w, r, "log-retention-panel", s.logRetentionPanelData(r, okNotice(msg)))
+	s.render(w, r, "log-retention-panel", s.logRetentionPanelData(r, okNotice(done)))
 }

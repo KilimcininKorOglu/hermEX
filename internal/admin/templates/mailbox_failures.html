@@ -2,21 +2,21 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<header class="page-head"><div><h1>Mailbox failures</h1><p class="page-desc">Deliveries a recipient's own database refused for good.</p></div></header>
+<header class="page-head"><div><h1>{{t "mailboxFailures.title"}}</h1><p class="page-desc">{{t "mailboxFailures.desc"}}</p></div></header>
 {{if .Disabled}}
-<section class="card"><p class="empty-note">Central logging is not configured, so these failures cannot be listed.</p></section>
+<section class="card"><p class="empty-note">{{t "mailboxFailures.notConfigured"}}</p></section>
 {{else}}
 <div class="stack">
 <section class="card">
-{{template "card-head" (dict "Icon" "info" "Title" "What to do" "Desc" "Nothing has bounced yet. Each message was deferred rather than rejected, so the sending server keeps retrying, and every retry fails the same way until the mailbox is repaired.")}}
-<p class="hint">Report the damage with <code>hermex-admin check-mailbox &lt;address&gt;</code>, which writes nothing and is safe on a running deployment. Repair it with <code>hermex-admin check-mailbox &lt;address&gt; --recover</code>, which rebuilds a damaged database and loses the rows on its damaged pages. Repair refuses while a daemon holds the mailbox open.</p>
+{{template "card-head" (dict "Icon" "info" "Title" "mailboxFailures.whatTitle" "Desc" "mailboxFailures.whatDesc")}}
+<p class="hint">{{t "mailboxFailures.hintA"}} <code>hermex-admin check-mailbox &lt;address&gt;</code>{{t "mailboxFailures.hintB"}} <code>hermex-admin check-mailbox &lt;address&gt; --recover</code>{{t "mailboxFailures.hintC"}}</p>
 </section>
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
 <table class="grid">
-<thead><tr><th>Time</th><th>Mailbox</th><th>Client address</th><th>Error</th></tr></thead>
+<thead><tr><th>{{t "mailboxFailures.colTime"}}</th><th>{{t "mailboxFailures.colMailbox"}}</th><th>{{t "mailboxFailures.colClient"}}</th><th>{{t "mailboxFailures.colError"}}</th></tr></thead>
 <tbody>
 {{range .Entries}}<tr><td class="nowrap">{{.Time.Format "2006-01-02 15:04:05"}}</td><td>{{.User}}</td><td>{{.RemoteAddr}}</td><td><small>{{.Err}}</small></td></tr>
-{{else}}<tr><td colspan="4" class="empty">No mailbox has refused a delivery.</td></tr>
+{{else}}<tr><td colspan="4" class="empty">{{t "mailboxFailures.none"}}</td></tr>
 {{end}}
 </tbody>
 </table>

@@ -47,7 +47,7 @@ func (s *Server) spamHistoryPageData(r *http.Request, notice panelNotice) map[st
 	}
 	failed := readFailures{}
 	data := map[string]any{
-		"Nav": "spamhistory", "Verdicts": views, "VerdictsError": s.listFailure("the spam history", err),
+		"Nav": "spamhistory", "Verdicts": views, "VerdictsError": s.listFailure("what.spamHistory", err),
 		"Notice": notice, "CSRF": csrfCookieValue(r), "ReadFailed": failed,
 	}
 	s.fillSpamRetention(data, failed)
@@ -60,7 +60,7 @@ func (s *Server) spamHistoryPageData(r *http.Request, notice panelNotice) map[st
 // pages share it.
 func (s *Server) fillSpamRetention(data map[string]any, failed readFailures) {
 	st, found, err := s.dir.GetSpamHistorySettings()
-	if !s.noteRead(failed, "spam-retention", "the spam history retention", err) {
+	if !s.noteRead(failed, "spam-retention", "what.spamRetention", err) {
 		return
 	}
 	retain := defaultSpamHistoryRetainDisplay

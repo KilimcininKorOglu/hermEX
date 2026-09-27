@@ -37,17 +37,17 @@ func (s *Server) runTask(t directory.TaskInfo) (status, message string) {
 	case "ldapsync":
 		msg, err := s.performLDAPSync()
 		if err != nil {
-			return directory.TaskFailed, s.notice("Sync failed.", err)
+			return directory.TaskFailed, s.notice("tasks.syncFailed", err)
 		}
 		return directory.TaskDone, msg
 	case "bayes-retrain":
 		msg, err := s.performBayesRetrain()
 		if err != nil {
-			return directory.TaskFailed, s.notice("Retrain failed.", err)
+			return directory.TaskFailed, s.notice("tasks.retrainFailed", err)
 		}
 		return directory.TaskDone, msg
 	default:
-		return directory.TaskFailed, "unknown task type: " + t.Type
+		return directory.TaskFailed, msg("tasks.unknownType", t.Type)
 	}
 }
 

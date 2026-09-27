@@ -69,7 +69,7 @@ func (s *Server) handleUIMLists(w http.ResponseWriter, r *http.Request) {
 	lists, err := s.dir.ListMLists()
 	s.render(w, r, "mlists.html", map[string]any{
 		"Nav": "mlists", "CSRF": csrfCookieValue(r),
-		"Lists": mlistViewsOf(lists), "ListsError": s.listFailure("the mailing lists", err),
+		"Lists": mlistViewsOf(lists), "ListsError": s.listFailure("what.mlists", err),
 	})
 
 }
@@ -94,7 +94,7 @@ func (s *Server) handleUICreateMList(w http.ResponseWriter, r *http.Request) {
 	}
 	lists, err := s.dir.ListMLists()
 	s.render(w, r, "mlists-panel", map[string]any{
-		"Lists": mlistViewsOf(lists), "ListsError": s.listFailure("the mailing lists", err),
+		"Lists": mlistViewsOf(lists), "ListsError": s.listFailure("what.mlists", err),
 		"Error": errMsg,
 	})
 
@@ -132,11 +132,11 @@ func (s *Server) handleUIMListDetail(w http.ResponseWriter, r *http.Request) {
 	// A save replaces the whole list with the textarea, so a list that could not be
 	// read hides its form: saving the empty textarea would remove every entry.
 	members, err := s.dir.ListMembers(addr)
-	if s.noteRead(failed, "members", "the members", err) {
+	if s.noteRead(failed, "members", "what.members", err) {
 		data["Members"] = strings.Join(members, "\n")
 	}
 	specifieds, err := s.dir.ListSpecifieds(addr)
-	if s.noteRead(failed, "specifieds", "the permitted senders", err) {
+	if s.noteRead(failed, "specifieds", "what.permittedSenders", err) {
 		data["Specifieds"] = strings.Join(specifieds, "\n")
 	}
 	s.render(w, r, "mlist_detail.html", data)

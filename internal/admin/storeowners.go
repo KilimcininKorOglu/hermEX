@@ -80,7 +80,7 @@ func (s *Server) handleUIUserStoreOwners(w http.ResponseWriter, r *http.Request)
 		outOfScope, inScope := s.addressScopeError(s.adminPerms(cl.UserID), grantees)
 		switch {
 		case !inScope:
-			data["Error"] = scopeRefusal("store owner", outOfScope)
+			data["Error"] = scopeRefusalMsg("scope.storeOwner", outOfScope)
 		case gErr != nil:
 			data["Error"] = s.notice(granteesUnread, gErr)
 		case bad != "":

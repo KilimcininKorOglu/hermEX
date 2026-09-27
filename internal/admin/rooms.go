@@ -23,7 +23,7 @@ func (s *Server) handleUIRooms(w http.ResponseWriter, r *http.Request) {
 	rooms, err := s.dir.ListAllRooms()
 	s.render(w, r, "rooms.html", map[string]any{
 		"Nav": "rooms", "CSRF": csrfCookieValue(r),
-		"Rooms": rooms, "RoomsError": s.listFailure("the rooms", err),
+		"Rooms": rooms, "RoomsError": s.listFailure("what.rooms", err),
 	})
 
 }
@@ -76,7 +76,7 @@ func (s *Server) handleUIDeleteRoom(w http.ResponseWriter, r *http.Request) {
 func (s *Server) renderRoomsPanel(w http.ResponseWriter, r *http.Request, errMsg string) {
 	rooms, err := s.dir.ListAllRooms()
 	s.render(w, r, "rooms-panel", map[string]any{
-		"Rooms": rooms, "RoomsError": s.listFailure("the rooms", err),
+		"Rooms": rooms, "RoomsError": s.listFailure("what.rooms", err),
 		"CSRF": csrfCookieValue(r), "Error": errMsg,
 	})
 

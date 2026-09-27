@@ -264,7 +264,7 @@ func (s *Server) handleUIOrgs(w http.ResponseWriter, r *http.Request) {
 	orgs, err := s.dir.ListOrgs()
 	s.render(w, r, "orgs.html", map[string]any{
 		"Nav": "orgs", "CSRF": csrfCookieValue(r),
-		"Orgs": orgs, "OrgsError": s.listFailure("the organizations", err),
+		"Orgs": orgs, "OrgsError": s.listFailure("what.orgs", err),
 	})
 
 }
@@ -283,7 +283,7 @@ func (s *Server) handleUICreateOrg(w http.ResponseWriter, r *http.Request) {
 	}
 	orgs, err := s.dir.ListOrgs()
 	s.render(w, r, "orgs-panel", map[string]any{
-		"Orgs": orgs, "OrgsError": s.listFailure("the organizations", err),
+		"Orgs": orgs, "OrgsError": s.listFailure("what.orgs", err),
 		"Error": errMsg,
 	})
 

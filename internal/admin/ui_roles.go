@@ -44,7 +44,7 @@ func (s *Server) rolesPanelData(r *http.Request, errMsg string) map[string]any {
 		"Nav":        "roles",
 		"CSRF":       csrfCookieValue(r),
 		"Roles":      roles,
-		"RolesError": s.listFailure("the roles", err),
+		"RolesError": s.listFailure("what.roles", err),
 		"Error":      errMsg,
 	}
 }
@@ -99,10 +99,10 @@ func (s *Server) roleDetailData(r *http.Request, role directory.RoleDetail, role
 	orgs, orgErr := s.dir.ListOrgs()
 	domains, domErr := s.dir.ListDomains()
 	users, userErr := s.dir.ListUsers()
-	if s.noteRead(failed, "editor", "the role", roleErr) &&
-		s.noteRead(failed, "editor", "the organizations", orgErr) &&
-		s.noteRead(failed, "editor", "the domains", domErr) &&
-		s.noteRead(failed, "editor", "the users", userErr) {
+	if s.noteRead(failed, "editor", "what.role", roleErr) &&
+		s.noteRead(failed, "editor", "what.orgs", orgErr) &&
+		s.noteRead(failed, "editor", "what.domains", domErr) &&
+		s.noteRead(failed, "editor", "what.users", userErr) {
 		addRoleChecks(data, role, orgs, domains, users)
 	}
 	return data

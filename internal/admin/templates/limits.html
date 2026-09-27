@@ -2,7 +2,7 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<header class="page-head"><div><h1>Limits</h1><p class="page-desc">Size, rate and connection limits for every protocol, and the login lockout. Each daemon applies a change within about a minute, no restart.</p></div></header>
+<header class="page-head"><div><h1>{{t "limits.title"}}</h1><p class="page-desc">{{t "limits.desc"}}</p></div></header>
 <div class="stack">
 {{template "limits-card" .}}
 {{template "http-ratelimit-card" .}}
@@ -18,114 +18,114 @@
      Settings page list the same cards, so a setting reads the same on both. */}}
 
 {{define "limits-card"}}<section class="card">
-{{template "card-head" (dict "Icon" "sliders-horizontal" "Title" "Protocol size limits" "Desc" "The largest request or body each protocol accepts; a larger one is rejected.")}}
+{{template "card-head" (dict "Icon" "sliders-horizontal" "Title" "limits.sizeTitle" "Desc" "limits.sizeDesc")}}
 {{template "limits-panel" .}}
 </section>{{end}}
 
 {{define "http-ratelimit-card"}}<section class="card">
-{{template "card-head" (dict "Icon" "activity" "Title" "Request rate" "Desc" "Caps how many HTTP requests one client address may send within a window.")}}
+{{template "card-head" (dict "Icon" "activity" "Title" "limits.rateTitle" "Desc" "limits.rateDesc")}}
 {{template "http-ratelimit-panel" .}}
 </section>{{end}}
 
 {{define "conn-limit-card"}}<section class="card">
-{{template "card-head" (dict "Icon" "server" "Title" "Concurrent connections" "Desc" "Caps the IMAP, POP3 and SMTP connections a daemon and one client address hold at once.")}}
+{{template "card-head" (dict "Icon" "server" "Title" "limits.connTitle" "Desc" "limits.connDesc")}}
 {{template "conn-limit-panel" .}}
 </section>{{end}}
 
 {{define "loginlockout-card"}}<section class="card">
-{{template "card-head" (dict "Icon" "lock" "Title" "Login lockout" "Desc" "Locks out an account and a client address after repeated failed logins.")}}
+{{template "card-head" (dict "Icon" "lock" "Title" "limits.lockoutTitle" "Desc" "limits.lockoutDesc")}}
 {{template "loginlockout-panel" .}}
 </section>{{end}}
 
 {{define "fetchpolicy-card"}}<section class="card">
-{{template "card-head" (dict "Icon" "download" "Title" "Mail fetching" "Desc" "Whether a fetchmail source may point at an internal address.")}}
+{{template "card-head" (dict "Icon" "download" "Title" "limits.fetchTitle" "Desc" "limits.fetchDesc")}}
 {{template "fetchpolicy-panel" .}}
 </section>{{end}}
 
 {{define "limits-panel"}}<div id="limits-panel">
 {{template "notice" .Notice}}
-{{with index .ReadFailed "limits"}}<p class="error">{{.}}</p>{{else}}
+{{with index .ReadFailed "limits"}}<p class="error">{{t .}}</p>{{else}}
 <form class="form-grid" hx-post="/admin/ui/limits" hx-target="#limits-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>IMAP maximum literal (MB) <input type="number" name="imap_literal_mb" value="{{.IMAPLiteralMB}}" min="1"></label>
-<label>EWS maximum SOAP request (MB) <input type="number" name="ews_request_mb" value="{{.EWSRequestMB}}" min="1"></label>
-<label>ActiveSync maximum request (MB) <input type="number" name="activesync_request_mb" value="{{.ActiveSyncRequestMB}}" min="1"></label>
-<label>MAPI/HTTP maximum request (MB) <input type="number" name="mapi_request_mb" value="{{.MapiRequestMB}}" min="1"></label>
-<label>CalDAV maximum iCalendar PUT (MB) <input type="number" name="dav_ical_mb" value="{{.DAVICalMB}}" min="1"></label>
-<label>CardDAV maximum vCard PUT (MB) <input type="number" name="dav_vcard_mb" value="{{.DAVVCardMB}}" min="1"></label>
-<label>Webmail maximum request (MB) <input type="number" name="webmail_request_mb" value="{{.WebmailRequestMB}}" min="1"></label>
-<label>Webmail inline attachment preview (MB) <input type="number" name="webmail_preview_mb" value="{{.WebmailPreviewMB}}" min="1"></label>
-<label>Free/busy maximum mailboxes per request <input type="number" name="freebusy_max_targets" value="{{.FreeBusyMaxTargets}}" min="1"></label>
-<label>TLS report upload over HTTPS (MB) <input type="number" name="tlsrpt_mb" value="{{.TLSReportMB}}" min="1"><small>As sent, gzipped or not.</small></label>
-<h3 class="full">Command lines</h3>
-<p class="hint">A command line is one line a client sends before anything is stored, so these are in bytes, not megabytes. Without a cap a client that never ends its line grows the daemon's memory, and it reaches these readers before it logs in. Keep the IMAP figure generous: a long UID set or SEARCH is legitimate.</p>
+<label>{{t "limits.imapLiteral"}} <input type="number" name="imap_literal_mb" value="{{.IMAPLiteralMB}}" min="1"></label>
+<label>{{t "limits.ewsRequest"}} <input type="number" name="ews_request_mb" value="{{.EWSRequestMB}}" min="1"></label>
+<label>{{t "limits.easRequest"}} <input type="number" name="activesync_request_mb" value="{{.ActiveSyncRequestMB}}" min="1"></label>
+<label>{{t "limits.mapiRequest"}} <input type="number" name="mapi_request_mb" value="{{.MapiRequestMB}}" min="1"></label>
+<label>{{t "limits.davICal"}} <input type="number" name="dav_ical_mb" value="{{.DAVICalMB}}" min="1"></label>
+<label>{{t "limits.davVCard"}} <input type="number" name="dav_vcard_mb" value="{{.DAVVCardMB}}" min="1"></label>
+<label>{{t "limits.webmailRequest"}} <input type="number" name="webmail_request_mb" value="{{.WebmailRequestMB}}" min="1"></label>
+<label>{{t "limits.webmailPreview"}} <input type="number" name="webmail_preview_mb" value="{{.WebmailPreviewMB}}" min="1"></label>
+<label>{{t "limits.freebusy"}} <input type="number" name="freebusy_max_targets" value="{{.FreeBusyMaxTargets}}" min="1"></label>
+<label>{{t "limits.tlsrpt"}} <input type="number" name="tlsrpt_mb" value="{{.TLSReportMB}}" min="1"><small>{{t "limits.tlsrptHint"}}</small></label>
+<h3 class="full">{{t "limits.commandLines"}}</h3>
+<p class="hint">{{t "limits.commandLinesHint"}}</p>
 <div class="form-grid cols-3">
-<label>IMAP maximum command line (bytes) <input type="number" name="imap_line_bytes" value="{{.IMAPCommandLineBytes}}" min="64"></label>
-<label>POP3 maximum command line (bytes) <input type="number" name="pop3_line_bytes" value="{{.POP3CommandLineBytes}}" min="64"></label>
-<label>SMTP maximum command line (bytes) <input type="number" name="smtp_line_bytes" value="{{.SMTPCommandLineBytes}}" min="64"></label>
+<label>{{t "limits.imapLine"}} <input type="number" name="imap_line_bytes" value="{{.IMAPCommandLineBytes}}" min="64"></label>
+<label>{{t "limits.pop3Line"}} <input type="number" name="pop3_line_bytes" value="{{.POP3CommandLineBytes}}" min="64"></label>
+<label>{{t "limits.smtpLine"}} <input type="number" name="smtp_line_bytes" value="{{.SMTPCommandLineBytes}}" min="64"></label>
 </div>
-<h3 class="full">EWS subscriptions</h3>
-<p class="hint">An EWS notification subscription is dropped once it goes unused for this long, so this is in minutes. The timer restarts every time the client uses the subscription, and it is the whole policy for a streaming subscription, whose request carries no timeout of its own. A client away for longer (a sleeping laptop, a roaming network) loses the subscription and cannot tell without subscribing again, so raise it when clients go offline for long stretches. A change applies to new subscriptions; existing ones keep the timeout they were created with.</p>
-<label>EWS subscription timeout (minutes) <input type="number" name="ews_subscription_timeout_min" value="{{.EWSSubscriptionTimeoutMin}}" min="1" max="1440"></label>
-<button type="submit">Save limits</button>
+<h3 class="full">{{t "limits.ewsSubs"}}</h3>
+<p class="hint">{{t "limits.ewsSubsHint"}}</p>
+<label>{{t "limits.ewsSubsTimeout"}} <input type="number" name="ews_subscription_timeout_min" value="{{.EWSSubscriptionTimeoutMin}}" min="1" max="1440"></label>
+<button type="submit">{{t "limits.saveLimits"}}</button>
 </form>
 {{end}}
 </div>{{end}}
 
 {{define "http-ratelimit-panel"}}<div id="http-ratelimit-panel">
 {{template "notice" .Notice}}
-{{with index .ReadFailed "http-ratelimit"}}<p class="error">{{.}}</p>{{else}}
-<p>Request rate limiting is <strong>{{if .HTTPRateEnabled}}on{{else}}off{{end}}</strong>.</p>
+{{with index .ReadFailed "http-ratelimit"}}<p class="error">{{t .}}</p>{{else}}
+<p>{{t "limits.rateIs"}} <strong>{{if .HTTPRateEnabled}}{{t "antispam.on"}}{{else}}{{t "antispam.off"}}{{end}}</strong>.</p>
 {{end}}
-<p class="hint">When on, a client address that sends more than the burst within the window is answered with 429 and a Retry-After header, so one client cannot exhaust a daemon for everyone else. It covers every HTTP surface (webmail, EWS, ActiveSync, MAPI/HTTP, DAV, this panel and the gateway) and each daemon counts on its own. Keep the burst generous: Outlook and ActiveSync clients issue large legitimate bursts during an initial sync.</p>
+<p class="hint">{{t "limits.rateHint"}}</p>
 {{if not (index .ReadFailed "http-ratelimit")}}
 <form class="form-grid" hx-post="/admin/ui/limits/requestrate" hx-target="#http-ratelimit-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label class="check"><input type="checkbox" name="enabled" value="1"{{if .HTTPRateEnabled}} checked{{end}}> Enable request rate limiting</label>
-<label>Burst (requests per window) <input type="number" name="http_burst" value="{{.HTTPRateBurst}}" min="1"></label>
-<label>Window (seconds) <input type="number" name="http_window" value="{{.HTTPRateWindow}}" min="1"></label>
-<button type="submit">Save settings</button>
+<label class="check"><input type="checkbox" name="enabled" value="1"{{if .HTTPRateEnabled}} checked{{end}}> {{t "limits.enableRate"}}</label>
+<label>{{t "limits.burstRequests"}} <input type="number" name="http_burst" value="{{.HTTPRateBurst}}" min="1"></label>
+<label>{{t "antispam.windowSeconds"}} <input type="number" name="http_window" value="{{.HTTPRateWindow}}" min="1"></label>
+<button type="submit">{{t "antispam.saveSettings"}}</button>
 </form>
 {{end}}
 </div>{{end}}
 
 {{define "conn-limit-panel"}}<div id="conn-limit-panel">
 {{template "notice" .Notice}}
-{{with index .ReadFailed "conn-limit"}}<p class="error">{{.}}</p>{{else}}
-<p>The connection cap is <strong>{{if .ConnLimitEnabled}}on{{else}}off{{end}}</strong>.</p>
+{{with index .ReadFailed "conn-limit"}}<p class="error">{{t .}}</p>{{else}}
+<p>{{t "limits.connIs"}} <strong>{{if .ConnLimitEnabled}}{{t "antispam.on"}}{{else}}{{t "antispam.off"}}{{end}}</strong>.</p>
 {{end}}
-<p class="hint">When on, a daemon serves at most the total number of connections at once, and one client address holds at most its own share. A refused connection is told why in the protocol's own greeting (IMAP <code>* BYE</code>, POP3 <code>-ERR</code>, SMTP <code>421</code>, which makes a sending server retry later rather than bounce the mail) and then closed. It covers IMAP, POP3 and SMTP; each daemon counts on its own. Keep the per-client figure generous: a desktop mail client holds several connections at once, and one address is often a whole office behind a NAT.</p>
+<p class="hint">{{t "limits.connHintA"}} <code>* BYE</code>, POP3 <code>-ERR</code>, SMTP <code>421</code>{{t "limits.connHintB"}}</p>
 {{if not (index .ReadFailed "conn-limit")}}
 <form class="form-grid" hx-post="/admin/ui/limits/connections" hx-target="#conn-limit-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label class="check"><input type="checkbox" name="enabled" value="1"{{if .ConnLimitEnabled}} checked{{end}}> Enable the connection cap</label>
-<label>Connections per daemon <input type="number" name="conn_max_total" value="{{.ConnMaxTotal}}" min="1"></label>
-<label>Connections per client address <input type="number" name="conn_max_per_client" value="{{.ConnMaxPerClient}}" min="1"></label>
-<button type="submit">Save settings</button>
+<label class="check"><input type="checkbox" name="enabled" value="1"{{if .ConnLimitEnabled}} checked{{end}}> {{t "limits.enableConn"}}</label>
+<label>{{t "limits.connTotal"}} <input type="number" name="conn_max_total" value="{{.ConnMaxTotal}}" min="1"></label>
+<label>{{t "limits.connPerClient"}} <input type="number" name="conn_max_per_client" value="{{.ConnMaxPerClient}}" min="1"></label>
+<button type="submit">{{t "antispam.saveSettings"}}</button>
 </form>
 {{end}}
 </div>{{end}}
 
 {{define "loginlockout-panel"}}<div id="loginlockout-panel">
 {{template "notice" .Notice}}
-{{with index .ReadFailed "loginlockout"}}<p class="error">{{.}}</p>{{else}}
-<p>A login that fails <strong>{{.LoginMaxFails}}</strong> times within <strong>{{.LoginWindow}}</strong> seconds is locked out for <strong>{{.LoginLockout}}</strong> seconds.</p>
+{{with index .ReadFailed "loginlockout"}}<p class="error">{{t .}}</p>{{else}}
+<p>{{t "limits.lockoutA"}} <strong>{{.LoginMaxFails}}</strong> {{t "limits.lockoutB"}} <strong>{{.LoginWindow}}</strong> {{t "limits.lockoutC"}} <strong>{{.LoginLockout}}</strong> {{t "limits.lockoutD"}}</p>
 {{end}}
-<p class="hint">This is what makes online password guessing hopeless. It covers webmail, IMAP, POP3 and this panel; each daemon counts on its own, and every attempt counts twice: once against the account and once against the client address. The address is locked out at four times this threshold, since one address is often a whole office behind a NAT. Tighten it during a credential-stuffing wave, loosen it if legitimate users are being locked out. There is no off switch: raise the threshold instead.</p>
+<p class="hint">{{t "limits.lockoutHint"}}</p>
 {{if not (index .ReadFailed "loginlockout")}}
 <form class="form-grid cols-3" hx-post="/admin/ui/limits/loginlockout" hx-target="#loginlockout-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Failures before lockout <input type="number" name="login_max_fails" value="{{.LoginMaxFails}}" min="1"></label>
-<label>Window (seconds) <input type="number" name="login_window" value="{{.LoginWindow}}" min="1"></label>
-<label>Lockout (seconds) <input type="number" name="login_lockout" value="{{.LoginLockout}}" min="1"></label>
-<button type="submit">Save settings</button>
+<label>{{t "limits.failures"}} <input type="number" name="login_max_fails" value="{{.LoginMaxFails}}" min="1"></label>
+<label>{{t "antispam.windowSeconds"}} <input type="number" name="login_window" value="{{.LoginWindow}}" min="1"></label>
+<label>{{t "limits.lockoutSeconds"}} <input type="number" name="login_lockout" value="{{.LoginLockout}}" min="1"></label>
+<button type="submit">{{t "antispam.saveSettings"}}</button>
 </form>
 {{end}}
 </div>{{end}}
 
 {{define "fetchpolicy-panel"}}<div id="fetchpolicy-panel">
 {{template "notice" .Notice}}
-<p class="hint">A fetchmail source is dialled by this server on a schedule, so a source pointed at an internal address reaches services that are not exposed to the network at all. Internal, loopback and link-local source addresses are therefore refused unless you allow them here. Turn this on only if you fetch from a server on your own private network. Domain administrators can create fetchmail entries; only a full system administrator can change this.</p>
-{{with index .ReadFailed "fetchpolicy"}}<p class="error">{{.}}</p>{{else}}
+<p class="hint">{{t "limits.fetchHint"}}</p>
+{{with index .ReadFailed "fetchpolicy"}}<p class="error">{{t .}}</p>{{else}}
 <form hx-post="/admin/ui/limits/fetchpolicy" hx-target="#fetchpolicy-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label class="check"><input type="checkbox" name="fetch_allow_internal" value="1"{{if .FetchAllowInternal}} checked{{end}}> Allow fetchmail sources on internal addresses</label>
-<button type="submit">Save policy</button>
+<label class="check"><input type="checkbox" name="fetch_allow_internal" value="1"{{if .FetchAllowInternal}} checked{{end}}> {{t "limits.fetchAllow"}}</label>
+<button type="submit">{{t "limits.savePolicy"}}</button>
 </form>
 {{end}}
 </div>{{end}}

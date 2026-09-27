@@ -268,7 +268,7 @@ func (s *Server) handleUISetFolderPerm(w http.ResponseWriter, r *http.Request) {
 	errMsg := ""
 	switch {
 	case !inScope:
-		errMsg = scopeRefusal("folder permission member", outOfScope)
+		errMsg = scopeRefusalMsg("scope.folderMember", outOfScope)
 	case mErr != nil:
 		errMsg = s.notice("folderPerms.lookupFailed", mErr)
 	case !memberOK:

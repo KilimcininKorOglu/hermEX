@@ -124,21 +124,21 @@ func (s *Server) handleUISecondFactorSubmit(w http.ResponseWriter, r *http.Reque
 	}
 	serve.SetUser(r, cl.Login)
 	if !validFormCSRF(r) {
-		s.renderCodeForm(w, r, http.StatusForbidden, "Your session expired. Sign in again.")
+		s.renderCodeForm(w, r, http.StatusForbidden, "secondFactor.expired")
 		return
 	}
 	accepted, err := s.spendCode(r, cl.Login, r.PostFormValue("code"))
 	switch {
 	case errors.Is(err, errThrottled):
-		s.renderCodeForm(w, r, http.StatusTooManyRequests, "Too many failed attempts, try again later.")
+		s.renderCodeForm(w, r, http.StatusTooManyRequests, "secondFactor.throttled")
 		return
 	case err != nil:
 		s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.Admin,
 			Name: "second.factor.verify.fail", User: cl.Login, Err: err.Error()})
-		s.renderCodeForm(w, r, http.StatusInternalServerError, "Server error, please try again.")
+		s.renderCodeForm(w, r, http.StatusInternalServerError, "secondFactor.serverError")
 		return
 	case !accepted:
-		s.renderCodeForm(w, r, http.StatusUnauthorized, "That code was not accepted.")
+		s.renderCodeForm(w, r, http.StatusUnauthorized, "secondFactor.rejected")
 		return
 	}
 	session, csrf := s.issueSession(cl.Login, cl.UserID)

@@ -61,7 +61,7 @@ func policyFromForm(r *http.Request) (easpolicy.Policy, error) {
 // the JSON API returns it. It is the operator's input at fault, not the server, so
 // nothing is recorded.
 func invalidPolicy(err error) string {
-	return "Invalid value: " + err.Error() + "."
+	return msg("fail.invalidValue", err.Error())
 }
 
 // handleGetUserSyncPolicy returns a user's per-user device-policy override (system
@@ -282,7 +282,7 @@ func (s *Server) handleUISyncPolicy(w http.ResponseWriter, r *http.Request) {
 	p, err := s.dir.GetDefaultSyncPolicy()
 	failed := readFailures{}
 	data := map[string]any{"Nav": "syncpolicy", "CSRF": csrfCookieValue(r), "ReadFailed": failed}
-	if s.noteRead(failed, "policy", "the default device policy", err) {
+	if s.noteRead(failed, "policy", "what.defaultPolicy", err) {
 		data["Fields"] = policyView(p)
 	}
 	s.render(w, r, "syncpolicy.html", data)

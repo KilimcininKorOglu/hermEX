@@ -153,16 +153,26 @@ func (s *Server) saveGrantListForm(w http.ResponseWriter, r *http.Request, kind,
 func (s *Server) storeGrantList(adminID int64, maildir, kind string, grantees []string, set func(string, []string) error) string {
 	list, bad, gErr := s.canonicalGrantees(grantees)
 	outOfScope, inScope := s.addressScopeError(s.adminPerms(adminID), grantees)
+	kindKey, granteeKey := grantKindKeys(kind)
 	switch {
 	case !inScope:
-		return scopeRefusal(kind+" grantee", outOfScope)
+		return scopeRefusalMsg(granteeKey, outOfScope)
 	case gErr != nil:
 		return s.notice(granteesUnread, gErr)
 	case bad != "":
 		return msg("userDetail.noSuchUserNamed", bad)
 	}
 	if err := set(maildir, list); err != nil {
-		return s.notice(msg("userDetail.saveGrantFailed", kind), err)
+		return s.notice(msg("userDetail.saveGrantFailed", kindKey), err)
 	}
 	return ""
+}
+
+// grantKindKeys returns the catalogue keys naming a grant kind ("send-as" or
+// "send-on-behalf") and a grantee of that kind, for the messages a panel shows.
+func grantKindKeys(kind string) (kindKey, granteeKey string) {
+	if kind == "send-on-behalf" {
+		return "grant.sendOnBehalf", "scope.sendOnBehalfGrantee"
+	}
+	return "grant.sendAs", "scope.sendAsGrantee"
 }

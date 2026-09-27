@@ -237,7 +237,7 @@ func (s *Server) handleUIDefaults(w http.ResponseWriter, r *http.Request) {
 	rd, rdErr := s.dir.EffectiveUserDefaults(0)
 	failed := readFailures{}
 	data := map[string]any{"Nav": "defaults", "CSRF": csrfCookieValue(r), "ReadFailed": failed}
-	if s.noteRead(failed, "defaults", "the create defaults", errors.Join(cdErr, rdErr)) {
+	if s.noteRead(failed, "defaults", "what.createDefaults", errors.Join(cdErr, rdErr)) {
 		data["MaxUser"] = cd.Domain.MaxUser
 		data["Fields"] = userCreateFieldsOf(rd)
 	}

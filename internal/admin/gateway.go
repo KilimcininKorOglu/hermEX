@@ -34,7 +34,7 @@ func gatewayViewOf(g directory.SMTPGateway, found bool) gatewayView {
 // or records under "gateway" that it could not be read.
 func (s *Server) addGatewaySettings(data map[string]any, failed readFailures) {
 	g, found, err := s.dir.GetSMTPGateway(directory.GlobalGateway)
-	if s.noteRead(failed, "gateway", "the outbound gateway", err) {
+	if s.noteRead(failed, "gateway", "what.gateway", err) {
 		data["Gateway"] = gatewayViewOf(g, found)
 	}
 }
@@ -68,16 +68,14 @@ func (s *Server) handleUISaveGateway(w http.ResponseWriter, r *http.Request) {
 	// save: it would store the empty password in its place.
 	stored, _, err := s.dir.GetSMTPGateway(directory.GlobalGateway)
 	if err != nil {
-		s.render(w, r, "gateway-panel", s.antispamPageData(r, s.failNotice("Could not read the stored gateway; nothing was saved.", err)))
+		s.render(w, r, "gateway-panel", s.antispamPageData(r, s.failNotice("antispam.gatewayUnread", err)))
 		return
 	}
 	if err := s.dir.SetSMTPGateway(directory.GlobalGateway, gatewayFromForm(r, stored.Password)); err != nil {
-		s.render(w, r, "gateway-panel", s.antispamPageData(r, s.failNotice("Could not save the gateway.", err)))
+		s.render(w, r, "gateway-panel", s.antispamPageData(r, s.failNotice("antispam.gatewayFailed", err)))
 		return
 	}
-	s.render(w, r, "gateway-panel", s.antispamPageData(r,
-		okNotice("Outbound gateway saved, the MTA applies it within a minute, no restart.")))
-
+	s.render(w, r, "gateway-panel", s.antispamPageData(r, okNotice("antispam.gatewaySaved")))
 }
 
 // handleUIDeleteGateway removes the global gateway, returning every domain that has no
@@ -87,12 +85,10 @@ func (s *Server) handleUIDeleteGateway(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := s.dir.DeleteSMTPGateway(directory.GlobalGateway); err != nil {
-		s.render(w, r, "gateway-panel", s.antispamPageData(r, s.failNotice("Could not remove the gateway.", err)))
+		s.render(w, r, "gateway-panel", s.antispamPageData(r, s.failNotice("antispam.gatewayRemoveFailed", err)))
 		return
 	}
-	s.render(w, r, "gateway-panel", s.antispamPageData(r,
-		okNotice("Outbound gateway removed, mail is delivered directly to each recipient's mail exchangers again.")))
-
+	s.render(w, r, "gateway-panel", s.antispamPageData(r, okNotice("antispam.gatewayRemoved")))
 }
 
 // domainGatewayPanel re-renders one domain's gateway fragment with a notice.
@@ -108,7 +104,7 @@ func (s *Server) domainGatewayPanel(w http.ResponseWriter, r *http.Request, dd d
 // records under "gateway" that it could not be read.
 func (s *Server) addDomainGateway(data map[string]any, failed readFailures, domain string) {
 	g, found, err := s.dir.GetSMTPGateway(domain)
-	if s.noteRead(failed, "gateway", "this domain's gateway", err) {
+	if s.noteRead(failed, "gateway", "what.domainGateway", err) {
 		data["Gateway"], data["GatewayOverride"] = gatewayViewOf(g, found), found
 	}
 }

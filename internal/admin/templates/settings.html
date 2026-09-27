@@ -2,7 +2,7 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<header class="page-head"><div><h1>Settings</h1><p class="page-desc">Every operator-tunable setting in one place. Changes apply automatically within about a minute, no restart.</p></div></header>
+<header class="page-head"><div><h1>{{t "settings.title"}}</h1><p class="page-desc">{{t "settings.desc"}}</p></div></header>
 
 <div class="tabs">
 <input type="radio" name="settab" id="settab-antispam" checked>
@@ -10,10 +10,10 @@
 <input type="radio" name="settab" id="settab-limits">
 <input type="radio" name="settab" id="settab-retention">
 <div class="tabbar">
-<label for="settab-antispam">Anti-spam</label>
-<label for="settab-delivery">Delivery</label>
-<label for="settab-limits">Limits</label>
-<label for="settab-retention">Retention</label>
+<label for="settab-antispam">{{t "settings.tabAntispam"}}</label>
+<label for="settab-delivery">{{t "settings.tabDelivery"}}</label>
+<label for="settab-limits">{{t "settings.tabLimits"}}</label>
+<label for="settab-retention">{{t "settings.tabRetention"}}</label>
 </div>
 
 <div class="tabpanel antispam">
@@ -43,15 +43,15 @@
 
 <div class="tabpanel retention">
 <section class="card">
-{{template "card-head" (dict "Icon" "history" "Title" "Spam history retention" "Desc" "How many scored verdicts the Spam History page keeps.")}}
+{{template "card-head" (dict "Icon" "history" "Title" "settings.spamRetentionTitle" "Desc" "settings.spamRetentionDesc")}}
 {{template "retention-panel" .}}
 </section>
 <section class="card">
-{{template "card-head" (dict "Icon" "scroll-text" "Title" "Central log retention" "Desc" "How long the central log store keeps its events.")}}
+{{template "card-head" (dict "Icon" "scroll-text" "Title" "settings.logRetentionTitle" "Desc" "settings.logRetentionDesc")}}
 {{template "log-retention-panel" .}}
 </section>
 <section class="card">
-{{template "card-head" (dict "Icon" "archive" "Title" "Recoverable Items retention" "Desc" "How long deleted mail stays recoverable.")}}
+{{template "card-head" (dict "Icon" "archive" "Title" "settings.recoverableTitle" "Desc" "settings.recoverableDesc")}}
 {{template "recoverable-retention-panel" .}}
 </section>
 </div>
@@ -62,22 +62,22 @@
 
 {{define "log-retention-panel"}}<div id="log-retention-panel">
 {{template "notice" .Notice}}
-<p class="hint">Central log events older than this many days are pruned by the admin daemon, so the log store never grows unbounded. Use <strong>0</strong> to keep logs forever (pruning disabled).</p>
-{{with index .ReadFailed "log-retention"}}<p class="error">{{.}}</p>{{else}}
+<p class="hint">{{t "settings.logHintA"}} <strong>0</strong> {{t "settings.logHintB"}}</p>
+{{with index .ReadFailed "log-retention"}}<p class="error">{{t .}}</p>{{else}}
 <form class="narrow" hx-post="/admin/ui/log-retention" hx-target="#log-retention-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Days to keep (0 = forever) <input type="number" name="log_retention_days" value="{{.LogRetentionDays}}" min="0"></label>
-<button type="submit">Save log retention</button>
+<label>{{t "settings.daysToKeep"}} <input type="number" name="log_retention_days" value="{{.LogRetentionDays}}" min="0"></label>
+<button type="submit">{{t "settings.saveLogRetention"}}</button>
 </form>
 {{end}}
 </div>{{end}}
 
 {{define "recoverable-retention-panel"}}<div id="recoverable-retention-panel">
 {{template "notice" .Notice}}
-<p class="hint">Soft-deleted mail (the Recoverable Items dumpster) older than this many days is permanently purged by the admin sweep, so deleted items stay recoverable for a bounded window. Use <strong>0</strong> to keep recoverable items forever (auto-purge disabled).</p>
-{{with index .ReadFailed "recoverable-retention"}}<p class="error">{{.}}</p>{{else}}
+<p class="hint">{{t "settings.recoverableHintA"}} <strong>0</strong> {{t "settings.recoverableHintB"}}</p>
+{{with index .ReadFailed "recoverable-retention"}}<p class="error">{{t .}}</p>{{else}}
 <form class="narrow" hx-post="/admin/ui/recoverable-retention" hx-target="#recoverable-retention-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Days to keep (0 = forever) <input type="number" name="recoverable_retention_days" value="{{.RecoverableRetentionDays}}" min="0"></label>
-<button type="submit">Save recoverable retention</button>
+<label>{{t "settings.daysToKeep"}} <input type="number" name="recoverable_retention_days" value="{{.RecoverableRetentionDays}}" min="0"></label>
+<button type="submit">{{t "settings.saveRecoverable"}}</button>
 </form>
 {{end}}
 </div>{{end}}

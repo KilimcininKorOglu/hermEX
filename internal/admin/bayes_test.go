@@ -424,8 +424,9 @@ func TestPerformBayesRetrain(t *testing.T) {
 	d := &fakeDir{maildirs: []string{mbox}}
 	s := NewServer(d, fakePaths{root: tmp}, []byte("secret"))
 
-	msg, err := s.performBayesRetrain()
+	result, err := s.performBayesRetrain()
 	mustNoErr(t, err, "retrain")
+	msg := translate(defaultLang, result)
 	wantContains(t, msg, "1 spam", "the summary counts the junk message as spam")
 	wantContains(t, msg, "1 ham", "the summary counts the inbox message as ham")
 

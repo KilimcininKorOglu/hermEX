@@ -82,7 +82,7 @@ const (
 // using the stored values or the limiter's built-in defaults.
 func (s *Server) fillLoginLockout(data map[string]any, failed readFailures) {
 	st, found, err := s.dir.GetLoginLockoutSettings()
-	if !s.noteRead(failed, "loginlockout", "the login-lockout settings", err) {
+	if !s.noteRead(failed, "loginlockout", "what.loginLockout", err) {
 		return
 	}
 	if !found {
@@ -104,15 +104,15 @@ func (s *Server) handleUISaveLoginLockout(w http.ResponseWriter, r *http.Request
 	fails, window := formInt(r, "login_max_fails"), formInt(r, "login_window")
 	lockout := formInt(r, "login_lockout")
 	if fails < 1 || window < 1 || lockout < 1 {
-		s.render(w, r, "loginlockout-panel", s.limitsPageData(r, errorNotice("Failures, window and lockout must each be at least 1; settings not saved.")))
+		s.render(w, r, "loginlockout-panel", s.limitsPageData(r, errorNotice("limits.lockoutInvalid")))
 		return
 	}
 	st := directory.LoginLockoutSettings{MaxFails: fails, WindowSeconds: window, LockoutSeconds: lockout}
 	if err := s.dir.SetLoginLockoutSettings(st); err != nil {
-		s.render(w, r, "loginlockout-panel", s.limitsPageData(r, s.failNotice("Could not save the login-lockout settings.", err)))
+		s.render(w, r, "loginlockout-panel", s.limitsPageData(r, s.failNotice("limits.lockoutFailed", err)))
 		return
 	}
-	s.render(w, r, "loginlockout-panel", s.limitsPageData(r, okNotice("Login-lockout settings saved. Every login daemon applies them within a minute, no restart.")))
+	s.render(w, r, "loginlockout-panel", s.limitsPageData(r, okNotice("limits.lockoutSaved")))
 }
 
 // defaultHTTPRateBurst and defaultHTTPRateWindow mirror the limiter's own built-in
@@ -127,7 +127,7 @@ const (
 // (disabled). Shared by the Limits page and the unified Settings page.
 func (s *Server) fillHTTPRateLimit(data map[string]any, failed readFailures) {
 	st, found, err := s.dir.GetHTTPRateLimitSettings()
-	if !s.noteRead(failed, "http-ratelimit", "the request-rate settings", err) {
+	if !s.noteRead(failed, "http-ratelimit", "what.requestRate", err) {
 		return
 	}
 	if !found {
@@ -148,7 +148,7 @@ func (s *Server) handleUISaveHTTPRateLimit(w http.ResponseWriter, r *http.Reques
 	}
 	burst, window := formInt(r, "http_burst"), formInt(r, "http_window")
 	if burst < 1 || window < 1 {
-		s.render(w, r, "http-ratelimit-panel", s.limitsPageData(r, errorNotice("Burst and window must each be at least 1; settings not saved.")))
+		s.render(w, r, "http-ratelimit-panel", s.limitsPageData(r, errorNotice("antispam.ratelimitInvalid")))
 		return
 	}
 	st := directory.HTTPRateLimitSettings{
@@ -157,10 +157,10 @@ func (s *Server) handleUISaveHTTPRateLimit(w http.ResponseWriter, r *http.Reques
 		WindowSeconds: window,
 	}
 	if err := s.dir.SetHTTPRateLimitSettings(st); err != nil {
-		s.render(w, r, "http-ratelimit-panel", s.limitsPageData(r, s.failNotice("Could not save the request-rate settings.", err)))
+		s.render(w, r, "http-ratelimit-panel", s.limitsPageData(r, s.failNotice("limits.rateFailed", err)))
 		return
 	}
-	s.render(w, r, "http-ratelimit-panel", s.limitsPageData(r, okNotice("Request-rate settings saved. Every HTTP daemon applies them within a minute, no restart.")))
+	s.render(w, r, "http-ratelimit-panel", s.limitsPageData(r, okNotice("limits.rateSaved")))
 }
 
 // defaultConnMaxTotal and defaultConnMaxPerClient mirror the limiter's own built-in
@@ -176,7 +176,7 @@ const (
 // (disabled). Shared by the Limits page and the unified Settings page.
 func (s *Server) fillConnLimit(data map[string]any, failed readFailures) {
 	st, found, err := s.dir.GetConnLimitSettings()
-	if !s.noteRead(failed, "conn-limit", "the connection caps", err) {
+	if !s.noteRead(failed, "conn-limit", "what.connLimit", err) {
 		return
 	}
 	if !found {
@@ -196,7 +196,7 @@ func (s *Server) handleUISaveConnLimit(w http.ResponseWriter, r *http.Request) {
 	}
 	total, perClient := formInt(r, "conn_max_total"), formInt(r, "conn_max_per_client")
 	if total < 1 || perClient < 1 {
-		s.render(w, r, "conn-limit-panel", s.limitsPageData(r, errorNotice("Both connection caps must be at least 1; settings not saved.")))
+		s.render(w, r, "conn-limit-panel", s.limitsPageData(r, errorNotice("limits.connInvalid")))
 		return
 	}
 	st := directory.ConnLimitSettings{
@@ -205,10 +205,10 @@ func (s *Server) handleUISaveConnLimit(w http.ResponseWriter, r *http.Request) {
 		MaxPerClient: perClient,
 	}
 	if err := s.dir.SetConnLimitSettings(st); err != nil {
-		s.render(w, r, "conn-limit-panel", s.limitsPageData(r, s.failNotice("Could not save the connection caps.", err)))
+		s.render(w, r, "conn-limit-panel", s.limitsPageData(r, s.failNotice("limits.connFailed", err)))
 		return
 	}
-	s.render(w, r, "conn-limit-panel", s.limitsPageData(r, okNotice("Connection caps saved. Every IMAP, POP3 and SMTP daemon applies them within a minute, no restart.")))
+	s.render(w, r, "conn-limit-panel", s.limitsPageData(r, okNotice("limits.connSaved")))
 }
 
 // fillSizeLimits sets each protocol's cap (in whole MB) on a page-data map, using the
@@ -217,7 +217,7 @@ func (s *Server) handleUISaveConnLimit(w http.ResponseWriter, r *http.Request) {
 // field of the form, so a failed read of it is recorded in failed and fills none.
 func (s *Server) fillSizeLimits(data map[string]any, failed readFailures) {
 	sl, found, err := s.dir.GetSizeLimits()
-	if !s.noteRead(failed, "limits", "the size limits", err) {
+	if !s.noteRead(failed, "limits", "what.sizeLimits", err) {
 		return
 	}
 	imapMB, ewsMB, easMB := int64(defaultIMAPLiteralMB), int64(defaultEWSRequestMB), int64(defaultActiveSyncRequestMB)
@@ -293,23 +293,21 @@ func (s *Server) handleUISaveLimits(w http.ResponseWriter, r *http.Request) {
 	}
 	mb, ok := readSizeLimitMB(r)
 	if !ok {
-		s.render(w, r, "limits-panel", s.limitsPageData(r, errorNotice("Each limit must be at least 1 MB; settings not saved.")))
+		s.render(w, r, "limits-panel", s.limitsPageData(r, errorNotice("limits.sizeInvalid")))
 		return
 	}
 	// A count of mailboxes, not a size, so it is validated on its own and never
 	// scaled by the megabyte factor the fields above use.
 	fbTargets := formInt(r, "freebusy_max_targets")
 	if fbTargets < 1 {
-		s.render(w, r, "limits-panel", s.limitsPageData(r, errorNotice("The free/busy target cap must be at least 1; settings not saved.")))
+		s.render(w, r, "limits-panel", s.limitsPageData(r, errorNotice("limits.freebusyInvalid")))
 		return
 	}
 	// The command-line caps are in bytes, so they are read and validated on their
 	// own too. A line shorter than one command is unusable, so the floor is 64.
 	imapLine, pop3Line, smtpLine := formInt(r, "imap_line_bytes"), formInt(r, "pop3_line_bytes"), formInt(r, "smtp_line_bytes")
 	if imapLine < minCommandLineBytes || pop3Line < minCommandLineBytes || smtpLine < minCommandLineBytes {
-		s.render(w, r, "limits-panel", s.limitsPageData(r,
-			errorNotice("Each command-line cap must be at least 64 bytes; settings not saved.")))
-
+		s.render(w, r, "limits-panel", s.limitsPageData(r, errorNotice("limits.lineInvalid")))
 		return
 	}
 	// A duration in minutes, so it is read and validated on its own too. The
@@ -317,9 +315,7 @@ func (s *Server) handleUISaveLimits(w http.ResponseWriter, r *http.Request) {
 	// between one client poll and the next.
 	subTimeout := formInt(r, "ews_subscription_timeout_min")
 	if subTimeout < minSubscriptionTimeoutMin || subTimeout > maxSubscriptionTimeoutMin {
-		s.render(w, r, "limits-panel", s.limitsPageData(r,
-			errorNotice("The EWS subscription timeout must be between 1 and 1440 minutes; settings not saved.")))
-
+		s.render(w, r, "limits-panel", s.limitsPageData(r, errorNotice("limits.subsInvalid")))
 		return
 	}
 	limits := directory.SizeLimits{
@@ -340,10 +336,10 @@ func (s *Server) handleUISaveLimits(w http.ResponseWriter, r *http.Request) {
 		EWSSubscriptionTimeoutMinutes: int64(subTimeout),
 	}
 	if err := s.dir.SetSizeLimits(limits); err != nil {
-		s.render(w, r, "limits-panel", s.limitsPageData(r, s.failNotice("Could not save the size limits.", err)))
+		s.render(w, r, "limits-panel", s.limitsPageData(r, s.failNotice("limits.sizeFailed", err)))
 		return
 	}
-	s.render(w, r, "limits-panel", s.limitsPageData(r, okNotice("Size limits saved. Each protocol applies its own within a minute, no restart.")))
+	s.render(w, r, "limits-panel", s.limitsPageData(r, okNotice("limits.sizeSaved")))
 }
 
 // minCommandLineBytes is the smallest command-line cap an operator may save: below
@@ -376,7 +372,7 @@ func megabytes(mb int) int64 { return int64(mb) * 1024 * 1024 }
 // default is the worker's own: internal source addresses refused.
 func (s *Server) fillFetchPolicy(data map[string]any, failed readFailures) {
 	st, found, err := s.dir.GetFetchSettings()
-	if s.noteRead(failed, "fetchpolicy", "the fetch policy", err) {
+	if s.noteRead(failed, "fetchpolicy", "what.fetchPolicy", err) {
 		data["FetchAllowInternal"] = found && st.AllowInternalSources
 	}
 }
@@ -391,8 +387,8 @@ func (s *Server) handleUISaveFetchPolicy(w http.ResponseWriter, r *http.Request)
 	}
 	st := directory.FetchSettings{AllowInternalSources: r.PostFormValue("fetch_allow_internal") != ""}
 	if err := s.dir.SetFetchSettings(st); err != nil {
-		s.render(w, r, "fetchpolicy-panel", s.limitsPageData(r, s.failNotice("Could not save the fetch policy.", err)))
+		s.render(w, r, "fetchpolicy-panel", s.limitsPageData(r, s.failNotice("limits.fetchFailed", err)))
 		return
 	}
-	s.render(w, r, "fetchpolicy-panel", s.limitsPageData(r, okNotice("Fetch policy saved. The fetch worker applies it within a minute, no restart.")))
+	s.render(w, r, "fetchpolicy-panel", s.limitsPageData(r, okNotice("limits.fetchSaved")))
 }

@@ -344,7 +344,7 @@ func (s *Server) addReportSettings(data map[string]any) {
 // failed.
 func (s *Server) fillMailReportRetention(data map[string]any, failed readFailures) {
 	rs, found, err := s.dir.GetMailReportSettings()
-	if !s.noteRead(failed, "report-retention", "the report retention", err) {
+	if !s.noteRead(failed, "report-retention", "what.reportRetention", err) {
 		return
 	}
 	if !found {
@@ -386,7 +386,7 @@ func (s *Server) handleUISaveMailReportRetention(w http.ResponseWriter, r *http.
 // recorded in failed.
 func (s *Server) fillDMARCSending(data map[string]any, failed readFailures) {
 	stored, found, err := s.dir.GetDMARCReportSettings()
-	if s.noteRead(failed, "dmarc-sending", "the DMARC sending setting", err) {
+	if s.noteRead(failed, "dmarc-sending", "what.dmarcSending", err) {
 		data["DMARCSending"] = found && stored.Enabled
 	}
 }

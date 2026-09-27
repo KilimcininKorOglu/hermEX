@@ -2,9 +2,9 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<header class="page-head"><div><h1>Live status</h1><p class="page-desc">Each daemon's /healthz endpoint, probed live. The table refreshes every 10 seconds.</p></div></header>
+<header class="page-head"><div><h1>{{t "status.title"}}</h1><p class="page-desc">{{t "status.desc"}}</p></div></header>
 <section class="card">
-{{template "card-head" (dict "Icon" "activity" "Title" "Daemons" "Desc" "Up means the daemon answered and its readiness checks passed. Degraded means it answered but a dependency check, such as the directory database, failed. Down means it could not be reached.")}}
+{{template "card-head" (dict "Icon" "activity" "Title" "status.daemonsTitle" "Desc" "status.daemonsDesc")}}
 <div id="status-panel" hx-get="/admin/ui/status/panel" hx-trigger="every 10s" hx-swap="innerHTML">{{template "status-panel" .}}</div>
 </section>
 </main>
@@ -13,17 +13,17 @@
 
 {{define "status-panel"}}
 <table class="grid">
-<thead><tr><th>Service</th><th>Status</th><th>Latency</th><th>Uptime</th><th>Version</th><th>Detail</th></tr></thead>
+<thead><tr><th>{{t "status.colService"}}</th><th>{{t "status.colStatus"}}</th><th>{{t "status.colLatency"}}</th><th>{{t "status.colUptime"}}</th><th>{{t "status.colVersion"}}</th><th>{{t "status.colDetail"}}</th></tr></thead>
 <tbody>
 {{range .Results}}<tr>
 <td>{{.Name}}</td>
-<td>{{if eq .Status "Up"}}<span class="status status-ok">Up</span>{{else if eq .Status "Degraded"}}<span class="status status-warn">Degraded</span>{{else}}<span class="status status-off">{{.Status}}</span>{{end}}</td>
-<td class="nowrap">{{.LatencyMS}} ms</td>
-<td class="nowrap">{{if eq .Status "Down"}}<span class="muted">n/a</span>{{else}}{{.Uptime}} s{{end}}</td>
+<td>{{if eq .Status "Up"}}<span class="status status-ok">{{t "status.up"}}</span>{{else if eq .Status "Degraded"}}<span class="status status-warn">{{t "status.degraded"}}</span>{{else if eq .Status "Down"}}<span class="status status-off">{{t "status.down"}}</span>{{else}}<span class="status status-off">{{.Status}}</span>{{end}}</td>
+<td class="nowrap">{{t "status.latency" .LatencyMS}}</td>
+<td class="nowrap">{{if eq .Status "Down"}}<span class="muted">{{t "status.na"}}</span>{{else}}{{t "status.uptime" .Uptime}}{{end}}</td>
 <td>{{.Version}}</td>
 <td><small>{{.Err}}</small></td>
 </tr>
-{{else}}<tr><td colspan="6" class="empty">{{if .Configured}}No daemons responded.{{else}}No health targets configured.{{end}}</td></tr>
+{{else}}<tr><td colspan="6" class="empty">{{if .Configured}}{{t "status.noResponse"}}{{else}}{{t "status.noTargets"}}{{end}}</td></tr>
 {{end}}
 </tbody>
 </table>

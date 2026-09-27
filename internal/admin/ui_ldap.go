@@ -32,8 +32,8 @@ func (s *Server) ldapPanelData(r *http.Request, saved bool, syncResult, errMsg s
 	data := map[string]any{"Nav": "ldap", "CSRF": csrfCookieValue(r), "Saved": saved, "ReadFailed": failed}
 	cfg, found, cfgErr := s.dir.GetLDAPConfig(defaultOrgID)
 	domains, domErr := s.dir.ListDomains()
-	if s.noteRead(failed, "config", "the directory configuration", cfgErr) &&
-		s.noteRead(failed, "config", "the domains", domErr) {
+	if s.noteRead(failed, "config", "what.directoryConfig", cfgErr) &&
+		s.noteRead(failed, "config", "what.domains", domErr) {
 		addLDAPConfig(data, cfg, found)
 		data["Domains"] = domains
 	}

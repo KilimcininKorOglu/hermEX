@@ -38,8 +38,8 @@ func (s *Server) domainsPanelData(r *http.Request, errMsg string) map[string]any
 		orgNames[o.ID] = o.Name
 	}
 	return map[string]any{
-		"Domains": domains, "DomainsError": s.listFailure("the domains", domainsErr),
-		"OrgNames": orgNames, "OrgsError": s.listFailure("the organizations", orgsErr),
+		"Domains": domains, "DomainsError": s.listFailure("what.domains", domainsErr),
+		"OrgNames": orgNames, "OrgsError": s.listFailure("what.orgs", orgsErr),
 		"Error": errMsg, "CSRF": csrfCookieValue(r),
 	}
 }
@@ -115,7 +115,7 @@ func (s *Server) handleUIDomainDetail(w http.ResponseWriter, r *http.Request) {
 	failed := readFailures{}
 	data := map[string]any{"Nav": "domains", "CSRF": csrfCookieValue(r), "Domain": dd, "ReadFailed": failed}
 	orgs, err := s.dir.ListOrgs()
-	if s.noteRead(failed, "details", "the organizations", err) {
+	if s.noteRead(failed, "details", "what.orgs", err) {
 		data["Orgs"] = orgs
 	}
 	s.addDomainMembers(data, failed, id, dd.Name)
@@ -148,8 +148,8 @@ func (s *Server) addDomainMembers(data map[string]any, failed readFailures, id i
 		data["DomainGroupsError"] = s.notice("domainDetail.groupsUnread", err)
 	}
 	catchAll, _, err := s.dir.GetDomainCatchAll(domain)
-	if s.noteRead(failed, "catchall", "the users of this domain", usersErr) &&
-		s.noteRead(failed, "catchall", "the catch-all mailbox", err) {
+	if s.noteRead(failed, "catchall", "what.domainUsers", usersErr) &&
+		s.noteRead(failed, "catchall", "what.catchall", err) {
 		data["CatchAll"] = catchAll
 	}
 }
@@ -158,19 +158,19 @@ func (s *Server) addDomainMembers(data map[string]any, failed readFailures, id i
 // whose stored value could not be read.
 func (s *Server) addDomainMailHandling(data map[string]any, failed readFailures, domain string) {
 	threshold, err := s.dir.GetDomainSpamThreshold(domain)
-	if s.noteRead(failed, "spam", "the spam threshold", err) {
+	if s.noteRead(failed, "spam", "what.spamThreshold", err) {
 		data["SpamThreshold"] = threshold
 	}
 	avIn, avOut, err := s.dir.GetDomainAVScan(domain)
-	if s.noteRead(failed, "avscan", "the antivirus settings", err) {
+	if s.noteRead(failed, "avscan", "what.avScan", err) {
 		data["AVScanInbound"], data["AVScanOutbound"] = avIn, avOut
 	}
 	host, err := s.dir.SplitRelayHost(domain)
-	if s.noteRead(failed, "split", "the split domain host", err) {
+	if s.noteRead(failed, "split", "what.splitHost", err) {
 		data["SplitRelayHost"] = host
 	}
 	internal, external, err := s.dir.GetDomainNameTemplates(domain)
-	if s.noteRead(failed, "sendername", "the outgoing display name templates", err) {
+	if s.noteRead(failed, "sendername", "what.senderName", err) {
 		data["SenderNameInternal"], data["SenderNameExternal"] = internal, external
 	}
 }
@@ -179,15 +179,15 @@ func (s *Server) addDomainMailHandling(data map[string]any, failed readFailures,
 // stored value could not be read.
 func (s *Server) addDomainPolicies(data map[string]any, failed readFailures, dd directory.DomainDetail) {
 	policy, err := s.dir.GetDomainSyncPolicy(dd.Name)
-	if s.noteRead(failed, "policy", "the device policy of this domain", err) {
+	if s.noteRead(failed, "policy", "what.domainPolicy", err) {
 		data["PolicyFields"] = policyView(policy)
 	}
 	override, _, err := s.dir.GetCreateDefaults(dd.ID)
-	if s.noteRead(failed, "override", "the create defaults override", err) {
+	if s.noteRead(failed, "override", "what.defaultsOverride", err) {
 		data["Override"] = userOverrideViewOf(override.User)
 	}
 	branding, _, err := s.dir.GetDomainBranding(dd.Name)
-	if s.noteRead(failed, "branding", "the login branding", err) {
+	if s.noteRead(failed, "branding", "what.branding", err) {
 		data["Branding"] = branding
 	}
 }
@@ -257,7 +257,7 @@ func (s *Server) handleUIAliases(w http.ResponseWriter, r *http.Request) {
 	aliases, err := s.dir.ListAliases()
 	s.render(w, r, "aliases.html", map[string]any{
 		"Nav": "aliases", "CSRF": csrfCookieValue(r),
-		"Aliases": aliases, "AliasesError": s.listFailure("the aliases", err),
+		"Aliases": aliases, "AliasesError": s.listFailure("what.aliases", err),
 	})
 
 }
@@ -280,7 +280,7 @@ func (s *Server) handleUICreateAlias(w http.ResponseWriter, r *http.Request) {
 	}
 	aliases, err := s.dir.ListAliases()
 	s.render(w, r, "aliases-panel", map[string]any{
-		"Aliases": aliases, "AliasesError": s.listFailure("the aliases", err), "Error": errMsg,
+		"Aliases": aliases, "AliasesError": s.listFailure("what.aliases", err), "Error": errMsg,
 	})
 
 }

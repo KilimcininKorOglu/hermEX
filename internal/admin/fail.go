@@ -84,34 +84,35 @@ func (s *Server) failNotice(msg string, err error) panelNotice {
 type readFailures map[string]string
 
 // noteRead records a failed read of what under section and reports whether the
-// read succeeded. The message is built from what alone; err is recorded
-// server-side, as notice does.
+// read succeeded. what is a "what.*" catalogue key naming the value; the message is
+// built from it alone, and err is recorded server-side, as notice does.
 func (s *Server) noteRead(failed readFailures, section, what string, err error) bool {
 	if err == nil {
 		return true
 	}
-	failed[section] = s.notice("Could not read "+what+". The form is hidden so a save cannot overwrite it.", err)
+	failed[section] = s.notice(msg("fail.readHidden", what), err)
 	return false
 }
 
 // domainUnread is the message a panel shows when the domain its request names could
 // not be read. The panel reports the failed read and records it, rather than a bare
 // server error the operator's log has no trace of.
-const domainUnread = "Could not read the domain."
+const domainUnread = "fail.domainUnread"
 
 // userUnread and granteesUnread are domainUnread's counterparts for the user a
 // panel's request names and for the accounts a grant list names.
 const (
-	userUnread     = "Could not read the user."
-	granteesUnread = "Could not read the grantees."
+	userUnread     = "fail.userUnread"
+	granteesUnread = "fail.granteesUnread"
 )
 
 // listFailure returns the message a table shows in place of its rows when the list
-// could not be read, or "" when the read succeeded. The table must not show a failed
-// read as an empty list; err is recorded server-side, as notice does.
+// could not be read, or "" when the read succeeded. what is a "what.*" catalogue
+// key. The table must not show a failed read as an empty list; err is recorded
+// server-side, as notice does.
 func (s *Server) listFailure(what string, err error) string {
 	if err == nil {
 		return ""
 	}
-	return s.notice("Could not read "+what+".", err)
+	return s.notice(msg("fail.readList", what), err)
 }

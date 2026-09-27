@@ -1,13 +1,13 @@
 {{define "second_factor.html"}}{{template "head" .}}
 <main class="login">
-<div class="login-brand">{{template "brand"}}<div><h1>Two-step verification</h1><p class="page-desc">Enter the code from your authenticator app, or one of your recovery codes.</p></div></div>
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<div class="login-brand">{{template "brand"}}<div><h1>{{t "secondFactor.title"}}</h1><p class="page-desc">{{t "secondFactor.desc"}}</p></div></div>
+{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
 <form method="post" action="/admin/ui/second-factor">
 <input type="hidden" name="_csrf" value="{{.CSRF}}">
-<label>Verification code
+<label>{{t "secondFactor.code"}}
 <input type="text" name="code" autocomplete="one-time-code" required autofocus>
 </label>
-<button type="submit">Verify</button>
+<button type="submit">{{t "secondFactor.verify"}}</button>
 </form>
 </main>
 {{template "foot" .}}{{end}}

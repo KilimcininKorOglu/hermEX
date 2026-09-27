@@ -20,8 +20,8 @@ func (s *Server) handleUIContacts(w http.ResponseWriter, r *http.Request) {
 	domains, domainsErr := s.dir.ListDomains()
 	s.render(w, r, "contacts.html", map[string]any{
 		"Nav": "contacts", "CSRF": csrfCookieValue(r),
-		"Contacts": contacts, "ContactsError": s.listFailure("the contacts", contactsErr),
-		"Domains": domains, "DomainsError": s.listFailure("the domains", domainsErr),
+		"Contacts": contacts, "ContactsError": s.listFailure("what.contacts", contactsErr),
+		"Domains": domains, "DomainsError": s.listFailure("what.domains", domainsErr),
 	})
 
 }
@@ -90,7 +90,7 @@ func (s *Server) handleUIDeleteContact(w http.ResponseWriter, r *http.Request) {
 func (s *Server) renderContactsPanel(w http.ResponseWriter, r *http.Request, errMsg string) {
 	contacts, err := s.dir.ListContacts()
 	s.render(w, r, "contacts-panel", map[string]any{
-		"Contacts": contacts, "ContactsError": s.listFailure("the contacts", err),
+		"Contacts": contacts, "ContactsError": s.listFailure("what.contacts", err),
 		"CSRF": csrfCookieValue(r), "Error": errMsg,
 	})
 

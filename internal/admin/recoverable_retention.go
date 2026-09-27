@@ -12,7 +12,7 @@ import (
 // failed read is recorded in failed rather than shown as the default.
 func (s *Server) fillRecoverableRetention(data map[string]any, failed readFailures) {
 	rs, found, err := s.dir.GetRecoverableSettings()
-	if !s.noteRead(failed, "recoverable-retention", "the Recoverable Items retention", err) {
+	if !s.noteRead(failed, "recoverable-retention", "what.recoverableRetention", err) {
 		return
 	}
 	days := directory.DefaultRecoverableRetentionDays
@@ -41,12 +41,12 @@ func (s *Server) handleUISaveRecoverableRetention(w http.ResponseWriter, r *http
 	}
 	days := formInt(r, "recoverable_retention_days")
 	if err := s.dir.SetRecoverableSettings(directory.RecoverableSettings{RetentionDays: days}); err != nil {
-		s.render(w, r, "recoverable-retention-panel", s.recoverableRetentionPanelData(r, s.failNotice("Could not save the retention setting.", err)))
+		s.render(w, r, "recoverable-retention-panel", s.recoverableRetentionPanelData(r, s.failNotice("settings.retentionFailed", err)))
 		return
 	}
-	msg := "Recoverable Items retention saved; the sweep purges expired items within a minute, no restart."
+	done := "settings.recoverableSaved"
 	if days <= 0 {
-		msg = "Recoverable Items retention set to keep forever; auto-purge is disabled."
+		done = "settings.recoverableForever"
 	}
-	s.render(w, r, "recoverable-retention-panel", s.recoverableRetentionPanelData(r, okNotice(msg)))
+	s.render(w, r, "recoverable-retention-panel", s.recoverableRetentionPanelData(r, okNotice(done)))
 }

@@ -64,22 +64,22 @@ func (s *Server) handleUIChangePasswordSubmit(w http.ResponseWriter, r *http.Req
 	}
 	old, newpw := r.FormValue("old"), r.FormValue("new")
 	if old == "" || newpw == "" {
-		result(false, "The current and a new password are required.")
+		result(false, "changePassword.required")
 		return
 	}
 	if _, authed := s.dir.Authenticate(cl.Login, old); !authed {
-		result(false, "Your current password is incorrect.")
+		result(false, "changePassword.wrongCurrent")
 		return
 	}
 	if _, err := s.dir.SetPassword(cl.Login, newpw); err != nil {
-		result(false, s.notice("Could not change the password.", err))
+		result(false, s.notice("changePassword.failed", err))
 		return
 	}
 	// The old password must stop working everywhere, including on browsers already
 	// signed in with it. This ends the caller's own session too, so their next page
 	// returns them to the sign-in form.
 	s.revokeAllSessions(cl.Login)
-	result(true, "Your password has been changed. Please sign in again.")
+	result(true, "changePassword.changed")
 }
 
 // handleUIUsers renders the users management page (system administrators only).
@@ -92,7 +92,7 @@ func (s *Server) handleUIUsers(w http.ResponseWriter, r *http.Request) {
 		"Nav":        "users",
 		"CSRF":       csrfCookieValue(r),
 		"Users":      users,
-		"UsersError": s.listFailure("the users", err),
+		"UsersError": s.listFailure("what.users", err),
 	}
 	s.addUserCreateForm(data)
 	s.render(w, r, "users.html", data)
@@ -201,7 +201,7 @@ func (s *Server) handleUICreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	users, err := s.dir.ListUsers()
 	s.render(w, r, "users-panel", map[string]any{
-		"Users": users, "UsersError": s.listFailure("the users", err), "Error": errMsg,
+		"Users": users, "UsersError": s.listFailure("what.users", err), "Error": errMsg,
 	})
 
 }
@@ -266,23 +266,23 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 // read is hidden, because saving it would replace the stored value with an empty one.
 func (s *Server) addUserAddressing(data map[string]any, failed readFailures, username string) {
 	altnames, err := s.dir.ListAltnames(username)
-	if s.noteRead(failed, "altnames", "the alternative login names", err) {
+	if s.noteRead(failed, "altnames", "what.altnames", err) {
 		data["Altnames"] = strings.Join(altnames, "\n")
 	}
 	aliases, err := s.dir.ListAliasesFor(username)
-	if s.noteRead(failed, "aliases", "the aliases", err) {
+	if s.noteRead(failed, "aliases", "what.aliases", err) {
 		data["Aliases"] = strings.Join(aliases, "\n")
 	}
 	forward, err := s.forwardViewOf(username)
-	if s.noteRead(failed, "forward", "the forward", err) {
+	if s.noteRead(failed, "forward", "what.forward", err) {
 		data["Forward"] = forward
 	}
 	props, err := s.dir.GetUserProperties(username)
-	if s.noteRead(failed, "properties", "the user properties", err) {
+	if s.noteRead(failed, "properties", "what.properties", err) {
 		data["Contact"], data["Hide"] = contactValues(props), hideViewOf(props)
 	}
 	threshold, err := s.dir.GetUserSpamThreshold(username)
-	if s.noteRead(failed, "spam", "the spam threshold", err) {
+	if s.noteRead(failed, "spam", "what.spamThreshold", err) {
 		data["SpamThreshold"] = threshold
 	}
 }
@@ -292,23 +292,23 @@ func (s *Server) addUserAddressing(data map[string]any, failed readFailures, use
 // device policy. A form whose value could not be read is hidden.
 func (s *Server) addUserMailboxSettings(data map[string]any, failed readFailures, maildir string) {
 	oof, err := s.store.GetOOFSettings(maildir)
-	if s.noteRead(failed, "oof", "the out-of-office settings", err) {
+	if s.noteRead(failed, "oof", "what.oof", err) {
 		data["OOF"] = oofViewOf(oof)
 	}
 	limits, used, err := s.store.GetQuota(maildir)
-	if s.noteRead(failed, "quota", "the quota", err) {
+	if s.noteRead(failed, "quota", "what.quota", err) {
 		data["Quota"] = quotaViewOf(limits, used)
 	}
 	meeting, err := s.store.GetMeetingConfig(maildir)
-	if s.noteRead(failed, "meeting", "the meeting settings", err) {
+	if s.noteRead(failed, "meeting", "what.meeting", err) {
 		data["Meeting"] = meeting
 	}
 	sentCopy, err := s.store.GetSentCopyConfig(maildir)
-	if s.noteRead(failed, "sentcopy", "the sent-copy settings", err) {
+	if s.noteRead(failed, "sentcopy", "what.sentCopy", err) {
 		data["SentCopy"] = sentCopy
 	}
 	policy, err := s.store.GetSyncPolicy(maildir)
-	if s.noteRead(failed, "policy", "the device policy of this user", err) {
+	if s.noteRead(failed, "policy", "what.userPolicy", err) {
 		data["SyncPolicy"] = policyView(policy)
 	}
 }
@@ -321,10 +321,10 @@ func (s *Server) addUserGrants(data map[string]any, failed readFailures, maildir
 		key, section, what string
 		read               func(string) ([]string, error)
 	}{
-		{"Delegates", "delegates", "the delegates", s.store.GetDelegates},
-		{"StoreOwners", "storeowners", "the store owners", s.store.GetStoreOwners},
-		{"SendAs", "sendas", "the send-as grants", s.store.GetSendAs},
-		{"SendOnBehalf", "sendonbehalf", "the send-on-behalf grants", s.store.GetSendOnBehalf},
+		{"Delegates", "delegates", "what.delegates", s.store.GetDelegates},
+		{"StoreOwners", "storeowners", "what.storeOwners", s.store.GetStoreOwners},
+		{"SendAs", "sendas", "what.sendAs", s.store.GetSendAs},
+		{"SendOnBehalf", "sendonbehalf", "what.sendOnBehalf", s.store.GetSendOnBehalf},
 	} {
 		list, err := g.read(maildir)
 		if s.noteRead(failed, g.section, g.what, err) {

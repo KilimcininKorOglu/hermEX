@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -69,7 +68,7 @@ func (s *Server) performBayesRetrain() (string, error) {
 	if err := model.SaveFile(s.paths.AntispamModelPath()); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("Retrained on %d spam + %d ham messages from %d mailboxes.", nspam, nham, nbox), nil
+	return msg("tasks.retrained", strconv.Itoa(nspam), strconv.Itoa(nham), strconv.Itoa(nbox)), nil
 }
 
 // antispamPageData builds the anti-spam page model: the editable scoring settings
@@ -86,7 +85,7 @@ func (s *Server) antispamPageData(r *http.Request, notice panelNotice) map[strin
 		"ReadFailed": failed,
 	}
 	sc, err := s.scoringSettings()
-	if s.noteRead(failed, "scoring", "the scoring settings", err) {
+	if s.noteRead(failed, "scoring", "what.scoring", err) {
 		data["Weights"] = sc.weights
 		data["Threshold"] = sc.threshold
 		data["Zones"] = sc.zones
@@ -146,7 +145,7 @@ func (s *Server) addModelStatus(data map[string]any) {
 	m, err := antispam.LoadModelFile(s.paths.AntispamModelPath())
 	switch {
 	case err != nil:
-		data["ModelError"] = s.notice("Could not read the trained model.", err)
+		data["ModelError"] = s.notice("antispam.modelUnread", err)
 	case m != nil:
 		data["ModelTrained"] = true
 		data["SpamMsgs"] = m.SpamMsgs
@@ -161,11 +160,11 @@ func (s *Server) addRulesStatus(data map[string]any, sc antispamScoring) {
 	data["SAWeight"] = sc.weights.SARulesHit
 	data["SAThreshold"] = sc.saThreshold
 	rs := antispam.EmbeddedRules()
-	saSource := "embedded baseline (seeded on first run)"
+	saSource := "antispam.embeddedBaseline"
 	live, err := antispam.LoadRulesFile(s.paths.AntispamRulesPath())
 	switch {
 	case err != nil:
-		data["RulesError"] = s.notice("Could not read the ruleset in data_dir.", err)
+		data["RulesError"] = s.notice("antispam.rulesUnread", err)
 		return
 	case live != nil:
 		rs, saSource = live, "data_dir/"+antispam.RulesFileName
@@ -183,11 +182,11 @@ func (s *Server) addRulesStatus(data map[string]any, sc antispamScoring) {
 // when none has been saved. Each is recorded in failed when it could not be read.
 func (s *Server) addGreylistSettings(data map[string]any, failed readFailures) {
 	on, err := s.dir.GetGreylistEnabled()
-	if s.noteRead(failed, "greylist", "the greylisting switch", err) {
+	if s.noteRead(failed, "greylist", "what.greylist", err) {
 		data["GreylistEnabled"] = on
 	}
 	t, found, err := s.dir.GetGreylistTimings()
-	if !s.noteRead(failed, "greylist-timings", "the greylist timings", err) {
+	if !s.noteRead(failed, "greylist-timings", "what.greylistTimings", err) {
 		return
 	}
 	if !found {
@@ -206,14 +205,14 @@ func (s *Server) addGreylistSettings(data map[string]any, failed readFailures) {
 // read.
 func (s *Server) addInboundLimits(data map[string]any, failed readFailures) {
 	rl, rlFound, err := s.dir.GetRateLimitSettings()
-	if s.noteRead(failed, "ratelimit", "the rate-limit settings", err) {
+	if s.noteRead(failed, "ratelimit", "what.rateLimit", err) {
 		if !rlFound {
 			rl = directory.RateLimitSettings{Burst: 60, WindowSeconds: 60}
 		}
 		data["RateLimitEnabled"], data["RateLimitBurst"], data["RateLimitWindow"] = rl.Enabled, rl.Burst, rl.WindowSeconds
 	}
 	ms, msFound, err := s.dir.GetMessageSizeSettings()
-	if s.noteRead(failed, "message-size", "the message size limit", err) {
+	if s.noteRead(failed, "message-size", "what.messageSize", err) {
 		if !msFound {
 			ms.MaxInboundBytes = directory.DefaultMaxInboundBytes
 		}
@@ -226,7 +225,7 @@ func (s *Server) addInboundLimits(data map[string]any, failed readFailures) {
 // recorded in failed when it could not be read.
 func (s *Server) addOutboundSettings(data map[string]any, failed readFailures) {
 	ob, found, err := s.dir.GetOutboundSettings()
-	if !s.noteRead(failed, "outbound", "the outbound settings", err) {
+	if !s.noteRead(failed, "outbound", "what.outbound", err) {
 		return
 	}
 	if !found {
@@ -242,7 +241,7 @@ func (s *Server) addOutboundSettings(data map[string]any, failed readFailures) {
 // recorded in failed when it could not be read.
 func (s *Server) addRelaySettings(data map[string]any, failed readFailures) {
 	rs, found, err := s.dir.GetRelaySettings()
-	if !s.noteRead(failed, "relay", "the retry settings", err) {
+	if !s.noteRead(failed, "relay", "what.relay", err) {
 		return
 	}
 	if !found {
@@ -261,7 +260,7 @@ func (s *Server) addRelaySettings(data map[string]any, failed readFailures) {
 func (s *Server) addDigestSettings(data map[string]any, failed readFailures) {
 	data["DigestSigningConfigured"] = s.digestSigning
 	dg, found, err := s.dir.GetDigestSettings()
-	if !s.noteRead(failed, "digest", "the digest settings", err) {
+	if !s.noteRead(failed, "digest", "what.digest", err) {
 		return
 	}
 	if !found {
@@ -280,14 +279,14 @@ func (s *Server) handleUIToggleGreylist(w http.ResponseWriter, r *http.Request) 
 	}
 	on := r.FormValue("enabled") == "1"
 	if err := s.dir.SetGreylistEnabled(on); err != nil {
-		s.render(w, r, "greylist-panel", s.antispamPageData(r, s.failNotice("Could not change greylisting.", err)))
+		s.render(w, r, "greylist-panel", s.antispamPageData(r, s.failNotice("antispam.greylistFailed", err)))
 		return
 	}
-	verb := "disabled"
+	done := "antispam.greylistDisabled"
 	if on {
-		verb = "enabled"
+		done = "antispam.greylistEnabled"
 	}
-	s.render(w, r, "greylist-panel", s.antispamPageData(r, okNotice("Greylisting "+verb+", the MTA applies it within about a minute.")))
+	s.render(w, r, "greylist-panel", s.antispamPageData(r, okNotice(done)))
 }
 
 // handleUISaveGreylistTimings persists the greylist timings (the minimum delay before
@@ -300,15 +299,15 @@ func (s *Server) handleUISaveGreylistTimings(w http.ResponseWriter, r *http.Requ
 	}
 	minDelay, unconfirmedTTL, confirmedTTL := formInt(r, "min_delay"), formInt(r, "unconfirmed_ttl"), formInt(r, "confirmed_ttl")
 	if minDelay < 1 || unconfirmedTTL < 1 || confirmedTTL < 1 {
-		s.render(w, r, "greylist-panel", s.antispamPageData(r, errorNotice("The greylist delay and memory windows must each be at least 1 second; timings not saved.")))
+		s.render(w, r, "greylist-panel", s.antispamPageData(r, errorNotice("antispam.timingsInvalid")))
 		return
 	}
 	t := directory.GreylistTimings{MinDelay: int64(minDelay), UnconfirmedTTL: int64(unconfirmedTTL), ConfirmedTTL: int64(confirmedTTL)}
 	if err := s.dir.SetGreylistTimings(t); err != nil {
-		s.render(w, r, "greylist-panel", s.antispamPageData(r, s.failNotice("Could not save the greylist timings.", err)))
+		s.render(w, r, "greylist-panel", s.antispamPageData(r, s.failNotice("antispam.timingsFailed", err)))
 		return
 	}
-	s.render(w, r, "greylist-panel", s.antispamPageData(r, okNotice("Greylist timings saved, the MTA applies them within a minute, no restart.")))
+	s.render(w, r, "greylist-panel", s.antispamPageData(r, okNotice("antispam.timingsSaved")))
 }
 
 // handleUISaveRateLimit persists the inbound rate-limit settings (enable, burst, and
@@ -321,7 +320,7 @@ func (s *Server) handleUISaveRateLimit(w http.ResponseWriter, r *http.Request) {
 	}
 	burst, window := formInt(r, "burst"), formInt(r, "window")
 	if burst < 1 || window < 1 {
-		s.render(w, r, "ratelimit-panel", s.antispamPageData(r, errorNotice("Burst and window must each be at least 1; settings not saved.")))
+		s.render(w, r, "ratelimit-panel", s.antispamPageData(r, errorNotice("antispam.ratelimitInvalid")))
 		return
 	}
 	st := directory.RateLimitSettings{
@@ -330,10 +329,10 @@ func (s *Server) handleUISaveRateLimit(w http.ResponseWriter, r *http.Request) {
 		WindowSeconds: window,
 	}
 	if err := s.dir.SetRateLimitSettings(st); err != nil {
-		s.render(w, r, "ratelimit-panel", s.antispamPageData(r, s.failNotice("Could not save rate-limit settings.", err)))
+		s.render(w, r, "ratelimit-panel", s.antispamPageData(r, s.failNotice("antispam.ratelimitFailed", err)))
 		return
 	}
-	s.render(w, r, "ratelimit-panel", s.antispamPageData(r, okNotice("Rate-limit settings saved, the MTA applies them within a minute, no restart.")))
+	s.render(w, r, "ratelimit-panel", s.antispamPageData(r, okNotice("antispam.ratelimitSaved")))
 }
 
 // handleUISaveMessageSize persists the inbound message size limit (entered in whole
@@ -345,10 +344,10 @@ func (s *Server) handleUISaveMessageSize(w http.ResponseWriter, r *http.Request)
 	}
 	mb := formInt(r, "max_mb") // megabytes; 0 disables the limit, negatives clamp to 0
 	if err := s.dir.SetMessageSizeSettings(directory.MessageSizeSettings{MaxInboundBytes: int64(mb) * 1024 * 1024}); err != nil {
-		s.render(w, r, "message-size-panel", s.antispamPageData(r, s.failNotice("Could not save the message size limit.", err)))
+		s.render(w, r, "message-size-panel", s.antispamPageData(r, s.failNotice("antispam.sizeFailed", err)))
 		return
 	}
-	s.render(w, r, "message-size-panel", s.antispamPageData(r, okNotice("Message size limit saved, the MTA applies it within a minute, no restart.")))
+	s.render(w, r, "message-size-panel", s.antispamPageData(r, okNotice("antispam.sizeSaved")))
 }
 
 // handleUISaveOutbound persists the outbound-abuse settings (enable, external-recipient
@@ -360,7 +359,7 @@ func (s *Server) handleUISaveOutbound(w http.ResponseWriter, r *http.Request) {
 	}
 	recipientCap, window := formInt(r, "cap"), formInt(r, "window")
 	if recipientCap < 1 || window < 1 {
-		s.render(w, r, "outbound-panel", s.antispamPageData(r, errorNotice("Recipient cap and window must each be at least 1; settings not saved.")))
+		s.render(w, r, "outbound-panel", s.antispamPageData(r, errorNotice("antispam.outboundInvalid")))
 		return
 	}
 	st := directory.OutboundSettings{
@@ -369,10 +368,10 @@ func (s *Server) handleUISaveOutbound(w http.ResponseWriter, r *http.Request) {
 		WindowSeconds: window,
 	}
 	if err := s.dir.SetOutboundSettings(st); err != nil {
-		s.render(w, r, "outbound-panel", s.antispamPageData(r, s.failNotice("Could not save outbound settings.", err)))
+		s.render(w, r, "outbound-panel", s.antispamPageData(r, s.failNotice("antispam.outboundFailed", err)))
 		return
 	}
-	s.render(w, r, "outbound-panel", s.antispamPageData(r, okNotice("Outbound settings saved, the MTA applies them within a minute, no restart.")))
+	s.render(w, r, "outbound-panel", s.antispamPageData(r, okNotice("antispam.outboundSaved")))
 }
 
 // addAutoReplySettings reports the stored out-of-office subject prefix, or the
@@ -381,7 +380,7 @@ func (s *Server) handleUISaveOutbound(w http.ResponseWriter, r *http.Request) {
 // row could not be read.
 func (s *Server) addAutoReplySettings(data map[string]any, failed readFailures) {
 	ar, found, err := s.dir.GetAutoReplySettings()
-	if !s.noteRead(failed, "autoreply", "the auto-reply settings", err) {
+	if !s.noteRead(failed, "autoreply", "what.autoreply", err) {
 		return
 	}
 	prefix := ar.SubjectPrefix
@@ -405,12 +404,10 @@ func (s *Server) handleUISaveAutoReply(w http.ResponseWriter, r *http.Request) {
 		prefix = directory.DefaultAutoReplySubjectPrefix
 	}
 	if err := s.dir.SetAutoReplySettings(directory.AutoReplySettings{SubjectPrefix: prefix}); err != nil {
-		s.render(w, r, "autoreply-panel", s.antispamPageData(r, s.failNotice("Could not save the auto-reply settings.", err)))
+		s.render(w, r, "autoreply-panel", s.antispamPageData(r, s.failNotice("antispam.autoreplyFailed", err)))
 		return
 	}
-	s.render(w, r, "autoreply-panel", s.antispamPageData(r,
-		okNotice("Auto-reply settings saved, the MTA applies them within a minute, no restart.")))
-
+	s.render(w, r, "autoreply-panel", s.antispamPageData(r, okNotice("antispam.autoreplySaved")))
 }
 
 // handleUISaveRelay persists the outbound delivery retry policy (base backoff in
@@ -422,14 +419,14 @@ func (s *Server) handleUISaveRelay(w http.ResponseWriter, r *http.Request) {
 	}
 	backoff, attempts := formInt(r, "backoff"), formInt(r, "attempts")
 	if backoff < 1 || attempts < 1 {
-		s.render(w, r, "relay-panel", s.antispamPageData(r, errorNotice("The backoff and attempts must each be at least 1; settings not saved.")))
+		s.render(w, r, "relay-panel", s.antispamPageData(r, errorNotice("antispam.relayInvalid")))
 		return
 	}
 	if err := s.dir.SetRelaySettings(directory.RelaySettings{BackoffSeconds: backoff, MaxAttempts: attempts}); err != nil {
-		s.render(w, r, "relay-panel", s.antispamPageData(r, s.failNotice("Could not save the relay settings.", err)))
+		s.render(w, r, "relay-panel", s.antispamPageData(r, s.failNotice("antispam.relayFailed", err)))
 		return
 	}
-	s.render(w, r, "relay-panel", s.antispamPageData(r, okNotice("Relay settings saved, the MTA applies them within a minute, no restart.")))
+	s.render(w, r, "relay-panel", s.antispamPageData(r, okNotice("antispam.relaySaved")))
 }
 
 // handleUISaveDigest persists the quarantine-digest settings (enable, interval in
@@ -445,23 +442,23 @@ func (s *Server) handleUISaveDigest(w http.ResponseWriter, r *http.Request) {
 	baseURL := strings.TrimSpace(r.FormValue("base_url"))
 	switch {
 	case interval < 1:
-		s.render(w, r, "digest-panel", s.antispamPageData(r, errorNotice("The interval must be at least 1 hour; settings not saved.")))
+		s.render(w, r, "digest-panel", s.antispamPageData(r, errorNotice("antispam.digestIntervalInvalid")))
 		return
 	case baseURL != "" && !validBaseURL(baseURL):
-		s.render(w, r, "digest-panel", s.antispamPageData(r, errorNotice("The base URL must be a full http(s) address; settings not saved.")))
+		s.render(w, r, "digest-panel", s.antispamPageData(r, errorNotice("antispam.digestURLInvalid")))
 		return
 	case enabled && baseURL == "":
-		s.render(w, r, "digest-panel", s.antispamPageData(r, errorNotice("A base URL is required to enable the digest; settings not saved.")))
+		s.render(w, r, "digest-panel", s.antispamPageData(r, errorNotice("antispam.digestURLRequired")))
 		return
 	}
 	st := directory.DigestSettings{Enabled: enabled, IntervalHours: interval, BaseURL: baseURL}
 	if err := s.dir.SetDigestSettings(st); err != nil {
-		s.render(w, r, "digest-panel", s.antispamPageData(r, s.failNotice("Could not save digest settings.", err)))
+		s.render(w, r, "digest-panel", s.antispamPageData(r, s.failNotice("antispam.digestFailed", err)))
 		return
 	}
-	notice := okNotice("Digest settings saved; the MTA applies them within a minute, no restart.")
+	notice := okNotice("antispam.digestSaved")
 	if enabled && !s.digestSigning {
-		notice = warnNotice("Digest settings saved, but no digest_secret is configured, so nothing will be sent.")
+		notice = warnNotice("antispam.digestNoSecret")
 	}
 	s.render(w, r, "digest-panel", s.antispamPageData(r, notice))
 }
@@ -488,16 +485,16 @@ func (s *Server) handleUISaveAntispamSettings(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if threshold := formInt(r, "threshold"); threshold < 1 {
-		s.render(w, r, "scoring-panel", s.antispamPageData(r, errorNotice("Threshold must be at least 1; settings not saved.")))
+		s.render(w, r, "scoring-panel", s.antispamPageData(r, errorNotice("antispam.thresholdInvalid")))
 		return
 	}
 	bayesProb, saThreshold := formFloat(r, "bayes_prob"), formFloat(r, "sa_threshold")
 	if bayesProb <= 0 || bayesProb > 1 {
-		s.render(w, r, "scoring-panel", s.antispamPageData(r, errorNotice("The Bayes probability cutoff must be between 0 and 1; settings not saved.")))
+		s.render(w, r, "scoring-panel", s.antispamPageData(r, errorNotice("antispam.bayesProbInvalid")))
 		return
 	}
 	if saThreshold <= 0 {
-		s.render(w, r, "scoring-panel", s.antispamPageData(r, errorNotice("The SpamAssassin score threshold must be greater than 0; settings not saved.")))
+		s.render(w, r, "scoring-panel", s.antispamPageData(r, errorNotice("antispam.saThresholdInvalid")))
 		return
 	}
 	st := directory.AntispamSettings{
@@ -514,10 +511,10 @@ func (s *Server) handleUISaveAntispamSettings(w http.ResponseWriter, r *http.Req
 		SAThreshold: saThreshold,
 	}
 	if err := s.dir.SetAntispamSettings(st); err != nil {
-		s.render(w, r, "scoring-panel", s.antispamPageData(r, s.failNotice("Could not save settings.", err)))
+		s.render(w, r, "scoring-panel", s.antispamPageData(r, s.failNotice("antispam.scoringFailed", err)))
 		return
 	}
-	s.render(w, r, "scoring-panel", s.antispamPageData(r, okNotice("Settings saved, the MTA applies them within a minute, no restart.")))
+	s.render(w, r, "scoring-panel", s.antispamPageData(r, okNotice("antispam.scoringSaved")))
 }
 
 // formInt reads a non-negative integer form field, returning 0 when absent or
@@ -557,12 +554,11 @@ func (s *Server) handleUIRetrainBayes(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := s.dir.CreateTask("bayes-retrain", "", cl.Login)
 	if err != nil {
-		s.render(w, r, "antispam-panel", s.antispamPageData(r, s.failNotice("Could not queue the retrain.", err)))
+		s.render(w, r, "antispam-panel", s.antispamPageData(r, s.failNotice("antispam.retrainQueueFailed", err)))
 		return
 	}
 	s.render(w, r, "antispam-panel", s.antispamPageData(r,
-		okNotice(fmt.Sprintf("Retrain queued as task #%d, watch the Task queue for its result.", id))))
-
+		okNotice(msg("antispam.retrainQueued", strconv.FormatInt(id, 10)))))
 }
 
 // trainFolder trains the model on up to limit of a folder's most recent messages

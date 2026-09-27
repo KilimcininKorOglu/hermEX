@@ -65,7 +65,7 @@ func (s *Server) handleUITaskqPanel(w http.ResponseWriter, r *http.Request) {
 // the table on every poll, so it never reads as an empty queue.
 func (s *Server) taskqPanelData() map[string]any {
 	views, err := s.taskViews()
-	return map[string]any{"Tasks": views, "TasksError": s.listFailure("the task queue", err)}
+	return map[string]any{"Tasks": views, "TasksError": s.listFailure("what.taskQueue", err)}
 }
 
 // handleGetTaskqStatus reports whether the worker has work: running tasks and the

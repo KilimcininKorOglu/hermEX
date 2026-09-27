@@ -2,21 +2,21 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<header class="page-head"><div><h1>Logs</h1><p class="page-desc">The most recent events every daemon wrote to the central log store.</p></div></header>
+<header class="page-head"><div><h1>{{t "logs.title"}}</h1><p class="page-desc">{{t "logs.desc"}}</p></div></header>
 {{if .Disabled}}
-<section class="card"><p class="empty-note">Central logging is not configured.</p></section>
+<section class="card"><p class="empty-note">{{t "logs.notConfigured"}}</p></section>
 {{else}}
 <div class="stack">
 <form class="create-form" method="get" action="/admin/ui/logs">
-<label>Subsystem <input type="text" name="subsystem" value="{{.Subsystem}}" placeholder="Filter by subsystem (e.g. imap)"></label>
-<button type="submit" class="secondary"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "filter"}}"/></svg>Filter</button>
+<label>{{t "logs.subsystem"}} <input type="text" name="subsystem" value="{{.Subsystem}}" placeholder="{{t "logs.subsystemPlaceholder"}}"></label>
+<button type="submit" class="secondary"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "filter"}}"/></svg>{{t "logs.filter"}}</button>
 </form>
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
 <table class="grid">
-<thead><tr><th>Time</th><th>Level</th><th>Subsystem</th><th>Event</th><th>User</th><th>Address</th></tr></thead>
+<thead><tr><th>{{t "logs.colTime"}}</th><th>{{t "logs.colLevel"}}</th><th>{{t "logs.subsystem"}}</th><th>{{t "logs.colEvent"}}</th><th>{{t "logs.colUser"}}</th><th>{{t "logs.colAddress"}}</th></tr></thead>
 <tbody>
 {{range .Entries}}<tr><td class="nowrap">{{.Time.Format "2006-01-02 15:04:05"}}</td><td><span class="status{{if eq .Level "error"}} status-off{{else if eq .Level "warn"}} status-warn{{end}}">{{.Level}}</span></td><td>{{.Subsystem}}</td><td>{{.Name}}{{if .Err}}<small>{{.Err}}</small>{{end}}</td><td>{{.User}}</td><td>{{.RemoteAddr}}</td></tr>
-{{else}}<tr><td colspan="6" class="empty">No log events.</td></tr>
+{{else}}<tr><td colspan="6" class="empty">{{t "logs.none"}}</td></tr>
 {{end}}
 </tbody>
 </table>

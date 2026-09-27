@@ -169,6 +169,16 @@ func scopeRefusal(kind, bad string) string {
 	return "forbidden: " + kind + " " + bad + " is outside your administrative domains"
 }
 
+// scopeRefusalMsg is scopeRefusal for a panel: kind is a "scope.*" catalogue key,
+// and the result is a message the template translates. The JSON API keeps
+// scopeRefusal, so its English text is unchanged.
+func scopeRefusalMsg(kind, bad string) string {
+	if bad == "" {
+		return msg("scope.refused", kind)
+	}
+	return msg("scope.refusedNamed", kind, bad)
+}
+
 // requirePurge gates the destructive domain-purge endpoint: a full system admin,
 // or any holder of the DomainPurge capability. No other admin, not even a domain
 // admin of the target, may purge, matching the capability's all-or-nothing scope.
