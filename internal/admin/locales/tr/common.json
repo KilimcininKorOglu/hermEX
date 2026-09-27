@@ -79,6 +79,7 @@
     "sendOnBehalf": "Adına gönder"
   },
   "what": {
+    "healthTargets": "İzlenen hizmetler",
     "scoring": "Puanlama ayarları",
     "greylist": "Gri listeleme anahtarı",
     "greylistTimings": "Gri listeleme süreleri",

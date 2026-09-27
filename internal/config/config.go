@@ -78,11 +78,13 @@ type Config struct {
 	NotifyURL    string `json:"notify_url"`    // base URL producers/consumers reach the notify daemon at (e.g. "http://notify:8080"); empty = push disabled, poll-only
 	NotifySecret string `json:"notify_secret"` // shared bearer secret authenticating publish/subscribe; required to serve the relay, which refuses to start without it
 
-	HealthTargets []HealthTarget `json:"health_targets"` // daemons the admin Live status page probes (each daemon's /healthz URL)
+	// LegacyHealthTargets is read for an upgrade only: the monitored daemons live
+	// in the directory database and are managed on the admin Live status page. The admin server imports this list
+	// once, into an empty table, so an existing deployment keeps its monitor.
+	LegacyHealthTargets []HealthTarget `json:"health_targets"`
 }
 
-// HealthTarget names a daemon and the URL of its /healthz endpoint, probed by the
-// admin Live status page.
+// HealthTarget is one entry of the legacy health_targets list.
 type HealthTarget struct {
 	Name string `json:"name"`
 	URL  string `json:"url"`

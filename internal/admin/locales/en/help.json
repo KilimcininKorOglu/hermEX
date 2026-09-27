@@ -39,6 +39,9 @@
       "type": "Normal delivers to the members you enter on the list's page. Domain delivers to every mailbox of the list's domain.",
       "whoMayPost": "Whose mail the list accepts: anyone, the list's own members, senders in the list's domain, or the senders named on the list's page. Anyone (announce) accepts mail the same way as Anyone may post."
     },
+    "status": {
+      "targetURL": "The daemon's /healthz address as the admin container reaches it, for example http://imap:8090/healthz. The port is the health_addr the daemon listens on."
+    },
     "ldap": {
       "usernameAttr": "The LDAP attribute a login name is matched against. Empty uses mail.",
       "bindDN": "The account this server searches the directory with. It reads every entry the sync imports, so give it read access only.",

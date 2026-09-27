@@ -39,6 +39,9 @@
       "type": "Normal, listenin sayfasında girdiğiniz üyelere teslim eder. Alan adı, listenin alan adındaki her posta kutusuna teslim eder.",
       "whoMayPost": "Listenin kimden posta kabul ettiği: herkes, listenin kendi üyeleri, listenin alan adındaki gönderenler veya listenin sayfasında adı geçen gönderenler. Herkes (duyuru), Herkes gönderebilir ile aynı şekilde posta kabul eder."
     },
+    "status": {
+      "targetURL": "Hizmetin /healthz adresi, admin container'ının ona ulaştığı biçimde. Örnek: http://imap:8090/healthz. Port, hizmetin dinlediği health_addr değeridir."
+    },
     "ldap": {
       "usernameAttr": "Giriş adının karşılaştırıldığı LDAP özniteliği. Boş bırakılırsa mail kullanılır.",
       "bindDN": "Bu sunucunun dizinde arama yaparken kullandığı hesap. Eşitlemenin içe aktardığı her girdiyi okur, bu nedenle yalnızca okuma izni verin.",

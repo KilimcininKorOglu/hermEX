@@ -332,7 +332,7 @@
   },
   "status": {
     "title": "Canlı durum",
-    "desc": "Her hizmetin canlı olarak yoklanan /healthz uç noktası. Tablo 10 saniyede bir yenilenir.",
+    "desc": "Her hizmetin /healthz adresi canlı olarak yoklanır. Tablo 10 saniyede bir yenilenir.",
     "daemonsTitle": "Hizmetler",
     "daemonsDesc": "Çalışıyor, hizmetin yanıt verdiği ve hazırlık denetimlerinin geçtiği anlamına gelir. Sorunlu, yanıt verdiği ancak dizin veritabanı gibi bir bağımlılık denetiminin başarısız olduğu anlamına gelir. Kapalı, hizmete ulaşılamadığı anlamına gelir.",
     "colService": "Hizmet",
@@ -347,8 +347,20 @@
     "latency": "{0} ms",
     "uptime": "{0} sn",
     "na": "yok",
-    "noResponse": "Hiçbir hizmet yanıt vermedi.",
-    "noTargets": "Yapılandırılmış durum denetimi hedefi yok."
+    "noTargets": "İzlenen hizmet yok. Aşağıdan ekleyin.",
+    "targetsTitle": "İzlenen hizmetler",
+    "targetsDesc": "Bu sayfanın yokladığı hizmetler. Değişiklik yeniden başlatma gerekmeden bir sonraki yenilemede uygulanır.",
+    "targetName": "Ad",
+    "targetURL": "Sağlık adresi",
+    "addTarget": "Hizmet ekle",
+    "deleteTarget": "Kaldır",
+    "confirmDeleteTarget": "{0} artık izlenmesin mi?",
+    "noTargetsYet": "Henüz izlenen hizmet yok.",
+    "targetInvalid": "Bir ad ve sunucu adı içeren bir http veya https adresi girin.",
+    "targetExists": "Bu adla bir hizmet zaten izleniyor.",
+    "targetAddFailed": "Hizmet eklenemedi.",
+    "targetDeleteFailed": "Hizmet kaldırılamadı.",
+    "targetGone": "Bu hizmet artık izlenmiyor."
   },
   "changePassword": {
     "title": "Parola değiştir",

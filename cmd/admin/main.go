@@ -357,6 +357,32 @@ func attachLogReader(srv *admin.Server, cfg *config.Config) *logging.Reader {
 }
 
 // runServe runs the admin API HTTP server until the process is signalled.
+// importHealthTargets copies the legacy config.json health_targets list into
+// the directory once, while the table is still empty, so an upgrade keeps the
+// Live status monitor it had. After that the panel owns the list and the config
+// value is ignored.
+func importHealthTargets(dir *directory.SQLDirectory, cfg *config.Config) {
+	if len(cfg.LegacyHealthTargets) == 0 {
+		return
+	}
+	stored, err := dir.ListHealthTargets()
+	if err != nil {
+		log.Printf("hermex-admin: health_targets import skipped, cannot read the stored list: %v", err)
+		return
+	}
+	if len(stored) > 0 {
+		log.Printf("hermex-admin: config.json health_targets is ignored; manage the targets on the Live status page")
+		return
+	}
+	for _, t := range cfg.LegacyHealthTargets {
+		if _, err := dir.AddHealthTarget(directory.HealthTarget{Name: t.Name, URL: t.URL}); err != nil {
+			log.Printf("hermex-admin: health_targets import of %q failed: %v", t.Name, err)
+			continue
+		}
+		log.Printf("hermex-admin: imported health target %q from config.json; remove health_targets from the file", t.Name)
+	}
+}
+
 func runServe(c *cmdContext) {
 	cfg, dir, db := c.cfg, c.dir, c.db
 	if cfg.AdminSecret == "" {
@@ -380,11 +406,7 @@ func runServe(c *cmdContext) {
 	// The panel reports the quarantine digest as unable to send without this,
 	// rather than rendering the stored toggle as if it were the whole story.
 	srv.SetDigestSigning(cfg.DigestSecret != "")
-	var targets []admin.HealthTarget
-	for _, t := range cfg.HealthTargets {
-		targets = append(targets, admin.HealthTarget{Name: t.Name, URL: t.URL})
-	}
-	srv.SetHealthTargets(targets) // enables the Live status monitor
+	importHealthTargets(dir, cfg)
 	logReader := attachLogReader(srv, cfg)
 	cleanups := []func() error{logClose}
 	if logReader != nil {

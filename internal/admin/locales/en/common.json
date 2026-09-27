@@ -79,6 +79,7 @@
     "sendOnBehalf": "send-on-behalf"
   },
   "what": {
+    "healthTargets": "the monitored daemons",
     "scoring": "the scoring settings",
     "greylist": "the greylisting switch",
     "greylistTimings": "the greylist timings",

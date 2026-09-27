@@ -347,8 +347,20 @@
     "latency": "{0} ms",
     "uptime": "{0} s",
     "na": "n/a",
-    "noResponse": "No daemons responded.",
-    "noTargets": "No health targets configured."
+    "noTargets": "No health targets configured. Add one below.",
+    "targetsTitle": "Monitored daemons",
+    "targetsDesc": "The daemons this page probes. A change applies at the next refresh, without a restart.",
+    "targetName": "Name",
+    "targetURL": "Health URL",
+    "addTarget": "Add daemon",
+    "deleteTarget": "Remove",
+    "confirmDeleteTarget": "Stop monitoring {0}?",
+    "noTargetsYet": "No daemons are monitored yet.",
+    "targetInvalid": "Enter a name and an http or https URL with a host.",
+    "targetExists": "A daemon with this name is already monitored.",
+    "targetAddFailed": "Could not add the daemon.",
+    "targetDeleteFailed": "Could not remove the daemon.",
+    "targetGone": "That daemon is no longer monitored."
   },
   "changePassword": {
     "title": "Change password",

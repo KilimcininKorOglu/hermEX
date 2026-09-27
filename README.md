@@ -355,8 +355,9 @@ behind the gateway.
 
 Every daemon can serve a `/healthz` endpoint reporting its dependency state and
 its build stamp. It is opt-in per daemon (`health_addr`, empty disables it), and
-the panel's live status view aggregates whichever endpoints are listed under
-`health_targets`.
+the panel's live status view aggregates the endpoints an operator adds on that
+page. The list is stored in the directory database, so a change applies without
+a restart.
 
 A serving certificate that is within two weeks of expiry is reported two ways: the
 `/healthz` probe marks the daemon degraded, and the certificate poll writes a

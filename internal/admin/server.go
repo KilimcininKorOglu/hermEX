@@ -92,6 +92,9 @@ type Directory interface {
 	UpdateContact(email, displayName string) (bool, error)
 	DeleteContact(email string) (bool, error)
 	ListAllRooms() ([]directory.GALEntry, error)
+	ListHealthTargets() ([]directory.HealthTarget, error)
+	AddHealthTarget(t directory.HealthTarget) (int64, error)
+	DeleteHealthTarget(id int64) (bool, error)
 	CreateRoom(email, displayName, maildir string, capacity int, equipment bool) (int64, error)
 	ListOrgs() ([]directory.OrgInfo, error)
 	GetOrg(id int64) (directory.OrgInfo, bool, error)
@@ -236,17 +239,16 @@ type ctxKey struct{}
 
 // Server answers the admin API. Build one with NewServer.
 type Server struct {
-	dir           Directory
-	paths         Paths
-	secret        []byte
-	logs          LogReader
-	syncer        LDAPSyncer
-	store         MailboxStore
-	limiter       *authlimit.Limiter // failed-login throttle keyed by admin login
-	pub           *publicfolder.Service
-	mailq         MailQueue
-	resolver      dnsResolver
-	healthTargets []HealthTarget
+	dir      Directory
+	paths    Paths
+	secret   []byte
+	logs     LogReader
+	syncer   LDAPSyncer
+	store    MailboxStore
+	limiter  *authlimit.Limiter // failed-login throttle keyed by admin login
+	pub      *publicfolder.Service
+	mailq    MailQueue
+	resolver dnsResolver
 
 	// digestSigning records whether a digest signing secret is configured. The
 	// quarantine digest cannot send a single summary without one, so the panel has
@@ -463,6 +465,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/reports/dmarc-sending", s.handleUISaveDMARCSending)
 	mux.HandleFunc("GET /admin/ui/status", s.handleUIStatus)
 	mux.HandleFunc("GET /admin/ui/status/panel", s.handleUIStatusPanel)
+	mux.HandleFunc("POST /admin/ui/status/targets", s.handleUIAddHealthTarget)
+	mux.HandleFunc("POST /admin/ui/status/targets/{id}/delete", s.handleUIDeleteHealthTarget)
 	mux.HandleFunc("GET /admin/ui/taskq", s.handleUITaskq)
 	mux.HandleFunc("GET /admin/ui/taskq/panel", s.handleUITaskqPanel)
 	mux.HandleFunc("GET /admin/ui/antispam", s.handleUIAntispam)

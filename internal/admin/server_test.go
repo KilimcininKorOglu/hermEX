@@ -22,6 +22,7 @@ type fakeDir struct {
 	password           string // when set, Authenticate accepts only this password (else authOK alone governs)
 	uid                int64
 	uiPrefs            map[string]directory.UserPrefs // interface preferences by login
+	healthTargets      []directory.HealthTarget       // the Live status page's stored targets
 	roles              []directory.AdminRole
 	perms              []directory.Permission
 	domains            []directory.DomainInfo
@@ -893,6 +894,34 @@ func (f *fakeDir) GetCreateDefaults(scopeID int64) (directory.CreateDefaults, bo
 }
 func (f *fakeDir) EffectiveUserDefaults(int64) (directory.ResolvedUserDefaults, error) {
 	return f.effectiveUserDefaults, f.readErrs["EffectiveUserDefaults"]
+}
+func (f *fakeDir) ListHealthTargets() ([]directory.HealthTarget, error) {
+	if err := f.readErrs["ListHealthTargets"]; err != nil {
+		return nil, err
+	}
+	return f.healthTargets, nil
+}
+func (f *fakeDir) AddHealthTarget(t directory.HealthTarget) (int64, error) {
+	if t.Name == "" || t.URL == "" {
+		return 0, directory.ErrInvalidHealthTarget
+	}
+	for _, have := range f.healthTargets {
+		if have.Name == t.Name {
+			return 0, directory.ErrHealthTargetExists
+		}
+	}
+	t.ID = int64(len(f.healthTargets) + 1)
+	f.healthTargets = append(f.healthTargets, t)
+	return t.ID, nil
+}
+func (f *fakeDir) DeleteHealthTarget(id int64) (bool, error) {
+	for i, t := range f.healthTargets {
+		if t.ID == id {
+			f.healthTargets = append(f.healthTargets[:i], f.healthTargets[i+1:]...)
+			return true, nil
+		}
+	}
+	return false, nil
 }
 func (f *fakeDir) GetUserPrefs(login string) (directory.UserPrefs, bool, error) {
 	if err := f.readErrs["GetUserPrefs"]; err != nil {

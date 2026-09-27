@@ -3,10 +3,22 @@
 {{template "sidebar" .}}
 <main>
 <header class="page-head"><div><h1>{{t "status.title"}}</h1><p class="page-desc">{{t "status.desc"}}</p></div></header>
+<div class="stack">
 <section class="card">
 {{template "card-head" (dict "Icon" "activity" "Title" "status.daemonsTitle" "Desc" "status.daemonsDesc")}}
-<div id="status-panel" hx-get="/admin/ui/status/panel" hx-trigger="every 10s" hx-swap="innerHTML">{{template "status-panel" .}}</div>
+<div id="status-panel" hx-get="/admin/ui/status/panel" hx-trigger="every 10s, health-targets-changed from:body" hx-swap="innerHTML">{{template "status-panel" .}}</div>
 </section>
+<section class="card">
+{{template "card-head" (dict "Icon" "settings" "Title" "status.targetsTitle" "Desc" "status.targetsDesc")}}
+<form class="form-grid" data-reset hx-post="/admin/ui/status/targets" hx-target="#status-targets" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>{{t "status.targetName"}} <input type="text" name="name" maxlength="64" placeholder="imap" required></label>
+<label>{{t "status.targetURL"}} {{template "help" "help.status.targetURL"}} <input type="url" name="url" maxlength="512" placeholder="http://imap:8090/healthz" required></label>
+<button type="submit"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "plus"}}"/></svg>{{t "status.addTarget"}}</button>
+</form>
+{{template "status-targets" .}}
+</section>
+</div>
 </main>
 </div>
 {{template "foot" .}}{{end}}
@@ -23,8 +35,20 @@
 <td>{{.Version}}</td>
 <td><small>{{.Err}}</small></td>
 </tr>
-{{else}}<tr><td colspan="6" class="empty">{{if .Configured}}{{t "status.noResponse"}}{{else}}{{t "status.noTargets"}}{{end}}</td></tr>
+{{else}}<tr><td colspan="6" class="empty{{if .ResultsError}} failed{{end}}">{{if .ResultsError}}{{t .ResultsError}}{{else}}{{t "status.noTargets"}}{{end}}</td></tr>
 {{end}}
 </tbody>
 </table>
 {{end}}
+
+{{define "status-targets"}}<div id="status-targets">
+{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
+<table class="grid">
+<thead><tr><th>{{t "status.colService"}}</th><th>{{t "status.targetURL"}}</th><th></th></tr></thead>
+<tbody>
+{{range .Targets}}<tr><td>{{.Name}}</td><td><code>{{.URL}}</code></td><td class="actions"><form hx-post="/admin/ui/status/targets/{{.ID}}/delete" hx-target="#status-targets" hx-swap="outerHTML" hx-confirm="{{t "status.confirmDeleteTarget" .Name}}" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'><button type="submit" class="danger">{{t "status.deleteTarget"}}</button></form></td></tr>
+{{else}}<tr><td colspan="3" class="empty{{if .TargetsError}} failed{{end}}">{{t (or .TargetsError "status.noTargetsYet")}}</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>{{end}}
