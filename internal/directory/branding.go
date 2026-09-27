@@ -14,14 +14,13 @@ type DomainBranding struct {
 	AppName      string `json:"app_name,omitempty"`
 	LogoURL      string `json:"logo_url,omitempty"`
 	PrimaryColor string `json:"primary_color,omitempty"`
-	Tagline      string `json:"tagline,omitempty"`
 	FooterText   string `json:"footer_text,omitempty"`
 }
 
 // Empty reports whether no branding field is set, so an all-blank save clears the
 // column back to NULL and the domain inherits the global default.
 func (b DomainBranding) Empty() bool {
-	return b.AppName == "" && b.LogoURL == "" && b.PrimaryColor == "" && b.Tagline == "" && b.FooterText == ""
+	return b.AppName == "" && b.LogoURL == "" && b.PrimaryColor == "" && b.FooterText == ""
 }
 
 // GetDomainBranding returns a domain's stored branding and whether any is set. A

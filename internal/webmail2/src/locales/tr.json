@@ -1381,7 +1381,6 @@
   },
   "login": {
     "webmail": "Webmail",
-    "subtitle": "Posta kutunuza giriş yapın",
     "emailAddress": "E-posta Adresi",
     "password": "Parola",
     "passwordPlaceholder": "Parolanızı girin",

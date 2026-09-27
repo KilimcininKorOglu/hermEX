@@ -28,7 +28,6 @@ func (s *Server) handleBranding(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{
 		"app_name":      "hermEX",
 		"primary_color": "#4f46e5",
-		"tagline":       "Secure self-hosted email",
 		"footer_text":   "hermEX",
 		"version":       buildinfo.Display(),
 	}
@@ -43,9 +42,6 @@ func (s *Server) handleBranding(w http.ResponseWriter, r *http.Request) {
 			}
 			if b.PrimaryColor != "" {
 				out["primary_color"] = b.PrimaryColor
-			}
-			if b.Tagline != "" {
-				out["tagline"] = b.Tagline
 			}
 			if b.FooterText != "" {
 				out["footer_text"] = b.FooterText

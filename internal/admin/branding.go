@@ -33,7 +33,6 @@ func (s *Server) handleUISaveDomainBranding(w http.ResponseWriter, r *http.Reque
 			AppName:      strings.TrimSpace(r.PostFormValue("app_name")),
 			LogoURL:      strings.TrimSpace(r.PostFormValue("logo_url")),
 			PrimaryColor: strings.TrimSpace(r.PostFormValue("primary_color")),
-			Tagline:      strings.TrimSpace(r.PostFormValue("tagline")),
 			FooterText:   strings.TrimSpace(r.PostFormValue("footer_text")),
 		}
 		if err := s.dir.SetDomainBranding(dd.Name, b); err != nil {

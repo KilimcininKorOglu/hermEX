@@ -21,16 +21,17 @@ func TestUIDomainBrandingSave(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPUT(t, ts, "/admin/ui/domains/1/branding", session, csrf,
 		url.Values{
-			"app_name": {"Acme Mail"}, "primary_color": {"#ff0000"}, "tagline": {"Mail by Acme"},
-			"logo_url": {""}, "footer_text": {""},
+			"app_name": {"Acme Mail"}, "primary_color": {"#ff0000"}, "footer_text": {"Mail by Acme"},
+			"logo_url": {""},
 		})
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("ui domain branding save status %d, want 200", resp.StatusCode)
 	}
-	if !d.brandingSet || d.branding.AppName != "Acme Mail" || d.branding.PrimaryColor != "#ff0000" || d.branding.Tagline != "Mail by Acme" {
-		t.Errorf("save captured branding=%+v set=%v, want Acme Mail / #ff0000 / Mail by Acme", d.branding, d.brandingSet)
+	want := directory.DomainBranding{AppName: "Acme Mail", PrimaryColor: "#ff0000", FooterText: "Mail by Acme"}
+	if !d.brandingSet || d.branding != want {
+		t.Errorf("save captured branding=%+v set=%v, want %+v", d.branding, d.brandingSet, want)
 	}
 	if !strings.Contains(string(body), `class="ok"`) {
 		t.Errorf("save response = %s, want a success acknowledgement", body)

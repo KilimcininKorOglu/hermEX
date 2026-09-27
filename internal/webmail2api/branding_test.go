@@ -54,6 +54,12 @@ func TestHandleBrandingPerDomain(t *testing.T) {
 	if b := get("other.test"); b["app_name"] != "hermEX" {
 		t.Errorf("unknown-host app_name = %v, want the hermEX default", b["app_name"])
 	}
+	// The login page shows no tagline, so none is served, default or branded.
+	for _, domain := range []string{"acme.test", "other.test"} {
+		if v, ok := get(domain)["tagline"]; ok {
+			t.Errorf("branding(%q) serves a tagline %v", domain, v)
+		}
+	}
 }
 
 // TestBrandingCarriesTheBuildStamp proves the login footer gets a real version to

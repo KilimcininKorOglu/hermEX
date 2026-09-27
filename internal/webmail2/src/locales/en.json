@@ -1381,7 +1381,6 @@
   },
   "login": {
     "webmail": "Webmail",
-    "subtitle": "Sign in to your mailbox",
     "emailAddress": "Email Address",
     "password": "Password",
     "passwordPlaceholder": "Enter your password",

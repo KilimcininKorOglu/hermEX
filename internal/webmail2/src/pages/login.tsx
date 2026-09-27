@@ -8,7 +8,6 @@ interface Branding {
   app_name: string
   logo_url: string
   primary_color: string
-  tagline: string
   footer_text: string
   // The server's version (release number and commit). Not tenant-configurable,
   // and reported as "unknown" by a binary that was not stamped, which
@@ -44,14 +43,12 @@ function BrandMark({ branding, appName }: { branding: Branding | null; appName: 
   )
 }
 
-// LoginHeader shows the brand mark, the app name and the tagline.
+// LoginHeader shows the brand mark and the app name.
 function LoginHeader({ branding, appName }: { branding: Branding | null; appName: string }) {
-  const { t } = useI18n()
   return (
     <div className="text-center mb-8">
       <BrandMark branding={branding} appName={appName} />
       <h1 className="text-2xl font-bold text-gray-900">{appName}</h1>
-      <p className="text-gray-500 mt-1">{branding?.tagline || t('login.subtitle')}</p>
     </div>
   )
 }
@@ -86,12 +83,11 @@ export function LoginPage() {
       .then((r) => (r.ok ? r.json() : null))
       .then((b: Branding | null) => {
         // Apply branding when the tenant set ANY customization, not just an
-        // app name, a tenant may override only the logo, tagline, or footer.
+        // app name, a tenant may override only the logo, colour, or footer.
         // The build stamp counts too, since it is served even to a domain that
         // customized nothing.
         const hasBranding =
-          !!b &&
-          (!!b.app_name || !!b.logo_url || !!b.primary_color || !!b.tagline || !!b.footer_text || !!b.version)
+          !!b && (!!b.app_name || !!b.logo_url || !!b.primary_color || !!b.footer_text || !!b.version)
         if (!cancelled) setBranding(hasBranding ? b : null)
       })
       .catch(() => {})
