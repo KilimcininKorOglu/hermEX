@@ -1059,7 +1059,12 @@ func (f *fakeDir) SetMListOwner(listname, owner string) (bool, error) {
 	f.setOwnerUser, f.setOwner = listname, owner
 	return !f.mlistMissing, nil
 }
-func (f *fakeDir) ListContacts() ([]directory.ContactInfo, error) { return f.contacts, nil }
+func (f *fakeDir) ListContacts() ([]directory.ContactInfo, error) {
+	if err := f.readErrs["ListContacts"]; err != nil {
+		return nil, err
+	}
+	return f.contacts, nil
+}
 func (f *fakeDir) ListUsersInDomain(domainID int64) ([]directory.UserInfo, error) {
 	var out []directory.UserInfo
 	for _, u := range f.users {

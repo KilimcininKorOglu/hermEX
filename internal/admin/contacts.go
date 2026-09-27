@@ -10,16 +10,18 @@ import (
 
 // handleUIContacts renders the org mail-contacts management page (system
 // administrators only). It carries the existing domains so the create form can
-// offer them as filing domains.
+// offer them as filing domains; the form is hidden when they could not be read,
+// since it would offer none.
 func (s *Server) handleUIContacts(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	contacts, _ := s.dir.ListContacts()
-	domains, _ := s.dir.ListDomains()
+	contacts, contactsErr := s.dir.ListContacts()
+	domains, domainsErr := s.dir.ListDomains()
 	s.render(w, "contacts.html", map[string]any{
 		"Nav": "contacts", "CSRF": csrfCookieValue(r),
-		"Contacts": contacts, "Domains": domains,
+		"Contacts": contacts, "ContactsError": s.listFailure("the contacts", contactsErr),
+		"Domains": domains, "DomainsError": s.listFailure("the domains", domainsErr),
 	})
 }
 
@@ -85,8 +87,9 @@ func (s *Server) handleUIDeleteContact(w http.ResponseWriter, r *http.Request) {
 // list and an optional error. The CSRF token is carried so the per-row delete
 // forms in the swapped-in fragment keep working.
 func (s *Server) renderContactsPanel(w http.ResponseWriter, r *http.Request, errMsg string) {
-	contacts, _ := s.dir.ListContacts()
+	contacts, err := s.dir.ListContacts()
 	s.render(w, "contacts-panel", map[string]any{
-		"Contacts": contacts, "CSRF": csrfCookieValue(r), "Error": errMsg,
+		"Contacts": contacts, "ContactsError": s.listFailure("the contacts", err),
+		"CSRF": csrfCookieValue(r), "Error": errMsg,
 	})
 }

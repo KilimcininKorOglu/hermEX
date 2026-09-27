@@ -89,6 +89,7 @@ func TestAFailedListReadIsNotShownAsEmpty(t *testing.T) {
 		read, path, reported, absent string
 	}{
 		{"ListAliases", "/admin/ui/aliases", "Could not read the aliases.", "No aliases yet."},
+		{"ListContacts", "/admin/ui/contacts", "Could not read the contacts.", "No contacts yet."},
 	} {
 		d := &fakeDir{
 			authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
@@ -106,6 +107,30 @@ func TestAFailedListReadIsNotShownAsEmpty(t *testing.T) {
 			if strings.Contains(body, tc.absent) {
 				t.Errorf("%s %s: still renders %q after the read failed", tc.read, name, tc.absent)
 			}
+		}
+	}
+}
+
+// TestAFailedChoiceReadHidesTheCreateForm proves a create form whose choices could
+// not be read is not offered. It rendered with no choice to pick, which reads as
+// the directory holding none.
+func TestAFailedChoiceReadHidesTheCreateForm(t *testing.T) {
+	for _, tc := range []struct {
+		read, path, form, reported string
+	}{
+		{"ListDomains", "/admin/ui/contacts", `hx-post="/admin/ui/contacts"`, "Could not read the domains."},
+	} {
+		d := &fakeDir{
+			authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+			readErrs: map[string]error{tc.read: errReadFailed},
+		}
+		ts := adminServer(t, d)
+		session, _ := loginCookies(t, ts)
+
+		page := wantBody(t, authedGET(t, ts, tc.path, session), http.StatusOK, tc.path)
+		wantContains(t, page, tc.reported, tc.read+": the failed read is reported")
+		if strings.Contains(page, tc.form) {
+			t.Errorf("%s: %s offers the create form after the read failed", tc.read, tc.path)
 		}
 	}
 }
