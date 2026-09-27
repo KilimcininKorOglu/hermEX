@@ -21,7 +21,7 @@ type brandingStore interface {
 // global default.
 //
 // The response also carries the version (buildinfo.Display: the release number and
-// the commit it was built from), which the login footer and the settings page render.
+// the commit it was built from), which the settings page renders.
 // It is not tenant-configurable, so a tenant cannot claim to run a build it is not
 // running.
 func (s *Server) handleBranding(w http.ResponseWriter, r *http.Request) {

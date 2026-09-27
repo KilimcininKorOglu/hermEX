@@ -2,17 +2,12 @@ import { useState, useEffect, type FormEvent } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useI18n } from '@/hooks/useI18n'
-import { shownVersion } from '@/utils/serverVersion'
 
 interface Branding {
   app_name: string
   logo_url: string
   primary_color: string
   footer_text: string
-  // The server's version (release number and commit). Not tenant-configurable,
-  // and reported as "unknown" by a binary that was not stamped, which
-  // shownVersion then omits.
-  version: string
 }
 
 // brandStyle paints an element in the tenant's primary colour, when one is set.
@@ -53,15 +48,10 @@ function LoginHeader({ branding, appName }: { branding: Branding | null; appName
   )
 }
 
-// LoginFooter shows the tenant footer text and the server version.
-function LoginFooter({ branding, appName }: { branding: Branding | null; appName: string }) {
-  const version = shownVersion(branding?.version)
-  return (
-    <p className="text-center text-xs text-gray-400 mt-4">
-      {branding?.footer_text || appName}
-      {version && <span className="font-mono ml-1">{version}</span>}
-    </p>
-  )
+// LoginFooter shows the tenant footer text, or the app name. It shows no server
+// version: the sign-in page is public, and the version is on the About page.
+export function LoginFooter({ branding, appName }: { branding: Branding | null; appName: string }) {
+  return <p className="text-center text-xs text-gray-400 mt-4">{branding?.footer_text || appName}</p>
 }
 
 export function LoginPage() {
@@ -84,10 +74,7 @@ export function LoginPage() {
       .then((b: Branding | null) => {
         // Apply branding when the tenant set ANY customization, not just an
         // app name, a tenant may override only the logo, colour, or footer.
-        // The build stamp counts too, since it is served even to a domain that
-        // customized nothing.
-        const hasBranding =
-          !!b && (!!b.app_name || !!b.logo_url || !!b.primary_color || !!b.footer_text || !!b.version)
+        const hasBranding = !!b && (!!b.app_name || !!b.logo_url || !!b.primary_color || !!b.footer_text)
         if (!cancelled) setBranding(hasBranding ? b : null)
       })
       .catch(() => {})
