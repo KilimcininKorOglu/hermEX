@@ -491,7 +491,12 @@ func (f *fakeDir) CreateTask(taskType, params, createdBy string) (int64, error) 
 	})
 	return id, nil
 }
-func (f *fakeDir) ListTasks(int) ([]directory.TaskInfo, error) { return f.tasks, nil }
+func (f *fakeDir) ListTasks(int) ([]directory.TaskInfo, error) {
+	if err := f.readErrs["ListTasks"]; err != nil {
+		return nil, err
+	}
+	return f.tasks, nil
+}
 func (f *fakeDir) GetTask(id int64) (directory.TaskInfo, bool, error) {
 	for _, t := range f.tasks {
 		if t.ID == id {

@@ -49,6 +49,26 @@ func TestTaskqPageAndStatus(t *testing.T) {
 	}
 }
 
+// TestTaskqReadIsNotShownAsEmpty proves the task table reports a failed read, on
+// the page and on the panel the page polls. The poll rendered "No tasks.", and the
+// page showed the failure above a table that also read "No tasks.".
+func TestTaskqReadIsNotShownAsEmpty(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		readErrs: map[string]error{"ListTasks": errReadFailed},
+	}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+
+	for _, path := range []string{"/admin/ui/taskq", "/admin/ui/taskq/panel"} {
+		body := wantBody(t, authedGET(t, ts, path, session), http.StatusOK, path)
+		wantContains(t, body, "Could not read the task queue.", path+": the failed read is reported")
+		if strings.Contains(body, "No tasks.") {
+			t.Errorf("%s: still renders No tasks. after the read failed", path)
+		}
+	}
+}
+
 // TestTaskqRequiresSystem proves an org admin cannot reach the Task queue page.
 func TestTaskqRequiresSystem(t *testing.T) {
 	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminOrg, ScopeID: 1}}}

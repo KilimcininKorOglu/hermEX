@@ -48,12 +48,9 @@ func (s *Server) handleUITaskq(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	views, err := s.taskViews()
-	errMsg := ""
-	if err != nil {
-		errMsg = s.notice("Could not read the task queue.", err)
-	}
-	s.render(w, "taskq.html", map[string]any{"Nav": "taskq", "Tasks": views, "Error": errMsg})
+	data := s.taskqPanelData()
+	data["Nav"] = "taskq"
+	s.render(w, "taskq.html", data)
 }
 
 // handleUITaskqPanel renders just the task table (the page polls it to refresh).
@@ -61,8 +58,14 @@ func (s *Server) handleUITaskqPanel(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	views, _ := s.taskViews()
-	s.render(w, "taskq-panel", map[string]any{"Tasks": views})
+	s.render(w, "taskq-panel", s.taskqPanelData())
+}
+
+// taskqPanelData returns what the task table renders. A failed read is reported in
+// the table on every poll, so it never reads as an empty queue.
+func (s *Server) taskqPanelData() map[string]any {
+	views, err := s.taskViews()
+	return map[string]any{"Tasks": views, "TasksError": s.listFailure("the task queue", err)}
 }
 
 // handleGetTaskqStatus reports whether the worker has work: running tasks and the
