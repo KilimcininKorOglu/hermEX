@@ -65,7 +65,7 @@ func writeSMIMEBody(b *bytes.Buffer, msg *Message, opt Options, clearSigned bool
 		filename = "smime.p7m"
 	}
 	writeField(b, "Content-Type", opaqueContentType(msg, opt, att, filename))
-	writeField(b, "Content-Disposition", `attachment; filename="`+filename+`"`)
+	writeField(b, "Content-Disposition", "attachment"+filenameParam(filename))
 	writeField(b, "Content-Transfer-Encoding", "base64")
 	b.WriteString("\r\n")
 	b.Write(encodeBase64(data))
@@ -82,7 +82,7 @@ func opaqueContentType(msg *Message, opt Options, att Attachment, filename strin
 	if mimeType == "" {
 		mimeType = "application/pkcs7-mime"
 	}
-	return mimeType + `; name="` + filename + `"`
+	return mimeType + nameParam(filename)
 }
 
 // storedContentType reads the PS_INTERNET_HEADERS "Content-Type" named property,

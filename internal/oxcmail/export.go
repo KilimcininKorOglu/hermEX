@@ -238,11 +238,7 @@ func renderAttachment(att Attachment) (textproto.MIMEHeader, []byte) {
 	filename := headerParam(propString(att.Props, mapi.PrAttachLongFilename))
 
 	h := textproto.MIMEHeader{}
-	ct := mimeType
-	if filename != "" {
-		ct += "; name=\"" + filename + "\""
-	}
-	h.Set("Content-Type", ct)
+	h.Set("Content-Type", mimeType+nameParam(filename))
 
 	// RFC 2046 §5.2.1: an encapsulated message (message/*) must use a 7bit,
 	// 8bit, or binary transfer encoding, never base64 or quoted-printable, so
@@ -262,10 +258,7 @@ func renderAttachment(att Attachment) (textproto.MIMEHeader, []byte) {
 	if flags, _ := propInt32(att.Props, mapi.PrAttachFlags); flags&mapi.AttMhtmlRef != 0 {
 		disposition = "inline"
 	}
-	if filename != "" {
-		disposition += "; filename=\"" + filename + "\""
-	}
-	h.Set("Content-Disposition", disposition)
+	h.Set("Content-Disposition", disposition+filenameParam(filename))
 	if cid := headerParam(propString(att.Props, mapi.PrAttachContentID)); cid != "" {
 		h.Set("Content-ID", "<"+cid+">")
 	}
@@ -635,6 +628,43 @@ var headerParamUnsafe = strings.NewReplacer("\r", " ", "\n", " ", `"`, "", `\`, 
 
 // headerParam is headerParamUnsafe applied to one value.
 func headerParam(s string) string { return headerParamUnsafe.Replace(s) }
+
+// nameParam renders a filename as the Content-Type name parameter, "" for no
+// name. A header carries 7-bit text only, so a name outside ASCII is written as
+// an RFC 2047 encoded word, the form mail clients read in this parameter; raw
+// UTF-8 there is shown as mojibake or dropped by a strict reader.
+func nameParam(filename string) string {
+	if filename == "" {
+		return ""
+	}
+	if isASCII(filename) {
+		return `; name="` + filename + `"`
+	}
+	return `; name="` + stdmime.BEncoding.Encode("utf-8", filename) + `"`
+}
+
+// filenameParam renders a filename as the Content-Disposition filename
+// parameter, "" for no name, as RFC 2231 requires for a name outside ASCII.
+func filenameParam(filename string) string {
+	if filename == "" {
+		return ""
+	}
+	if isASCII(filename) {
+		return `; filename="` + filename + `"`
+	}
+	formatted := stdmime.FormatMediaType("x", map[string]string{"filename": filename})
+	return strings.TrimPrefix(formatted, "x")
+}
+
+// isASCII reports whether s holds only 7-bit characters.
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
 
 // propString returns a string-typed property, or "" when absent or not a string.
 func propString(props mapi.PropertyValues, tag mapi.PropTag) string {
