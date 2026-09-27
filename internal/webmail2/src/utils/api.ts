@@ -802,6 +802,13 @@ class API {
     this.mailboxOwner = owner
   }
 
+  // withOwner adds the active shared mailbox to a mail URL a component builds
+  // itself (a download link, an image source), so it reaches the same mailbox the
+  // wrappers do.
+  withOwner(url: string): string {
+    return url + ownerQuery(this.mailboxOwner, url.includes('?') ? '&' : '?')
+  }
+
   async request<T = unknown>(endpoint: string, options: RequestOptions = {}): Promise<T> {
     const url = API_URL + endpoint
 
@@ -1050,7 +1057,7 @@ class API {
     const headers: Record<string, string> = {}
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`
     const res = await fetch(
-      `${API_URL}/mail/attachment?id=${encodeURIComponent(id)}&index=${index}`,
+      this.withOwner(`${API_URL}/mail/attachment?id=${encodeURIComponent(id)}&index=${index}`),
       { headers, credentials: 'include' }
     )
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -1067,23 +1074,23 @@ class API {
 
   // setMailLabels replaces the category labels on a message.
   async setMailLabels(id: string, labels: string[]): Promise<{ id: string; labels: string[] }> {
-    return this.post<{ id: string; labels: string[] }>('/mail/labels', { id, labels })
+    return this.post<{ id: string; labels: string[] }>(this.withOwner('/mail/labels'), { id, labels })
   }
 
   // getInvite reports whether a message is a meeting invite and returns its details.
   async getInvite(id: string): Promise<MeetingInvite> {
-    return this.get<MeetingInvite>(`/mail/invite?id=${encodeURIComponent(id)}`)
+    return this.get<MeetingInvite>(this.withOwner(`/mail/invite?id=${encodeURIComponent(id)}`))
   }
 
   // rsvp responds to a meeting invite; accept/tentative add it to the calendar.
   async rsvp(id: string, response: 'accept' | 'tentative' | 'decline'): Promise<{ status: string }> {
-    return this.post<{ status: string }>('/mail/rsvp', { id, response })
+    return this.post<{ status: string }>(this.withOwner('/mail/rsvp'), { id, response })
   }
 
   // proposeTime emails a METHOD:COUNTER iTIP to the organizer proposing a new
   // start/end for the meeting the invite message carries.
   async proposeTime(id: string, start: string, end: string): Promise<{ status: string }> {
-    return this.post<{ status: string }>('/mail/propose-time', { id, start, end })
+    return this.post<{ status: string }>(this.withOwner('/mail/propose-time'), { id, start, end })
   }
 
   // getCategories returns the user's master category list (name + color).
@@ -1258,7 +1265,7 @@ class API {
   // recipient whose copy is still unread has it removed; read copies and
   // external recipients are reported back as not recalled.
   async recallMail(id: string): Promise<RecallResult> {
-    return this.post<RecallResult>(`/mail/recall?id=${encodeURIComponent(id)}`, {})
+    return this.post<RecallResult>(this.withOwner(`/mail/recall?id=${encodeURIComponent(id)}`), {})
   }
 
   // recoverMail restores a soft-deleted message from the Recoverable Items
@@ -1765,13 +1772,13 @@ class API {
   // opaque id and its Message-ID is read server-side, so the browser never handles
   // it.
   async getMailNotes(mailId: string): Promise<{ notes?: Note[] }> {
-    return this.get<{ notes?: Note[] }>(`/mail/notes?id=${encodeURIComponent(mailId)}`)
+    return this.get<{ notes?: Note[] }>(this.withOwner(`/mail/notes?id=${encodeURIComponent(mailId)}`))
   }
 
   // addMailNote annotates one mail. The mail is named by its opaque id and the
   // link is resolved server-side, so the browser never handles the Message-ID.
   async addMailNote(mailId: string, note: { title?: string; body: string; color?: number }): Promise<Note> {
-    return this.post<Note>('/mail/notes', { id: mailId, ...note })
+    return this.post<Note>(this.withOwner('/mail/notes'), { id: mailId, ...note })
   }
 
   async createNote(note: NoteInput): Promise<Note> {
@@ -1838,7 +1845,7 @@ class API {
   async getMessageRaw(id: string): Promise<string> {
     const headers: Record<string, string> = {}
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`
-    const res = await fetch(`${API_URL}/mail/source?id=${encodeURIComponent(id)}`, { headers, credentials: 'include' })
+    const res = await fetch(this.withOwner(`${API_URL}/mail/source?id=${encodeURIComponent(id)}`), { headers, credentials: 'include' })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     return res.text()
   }

@@ -518,3 +518,38 @@ describe('getMail query', () => {
     expect(queryString({ owner: undefined, page: undefined, sort: '' })).toBe('')
   })
 })
+
+describe('shared mailbox per-message calls', () => {
+  afterEach(() => {
+    API.setMailboxOwner(undefined)
+    vi.restoreAllMocks()
+  })
+
+  // A per-message call in a shared view must name the shared mailbox, or the
+  // server answers from the caller's own mailbox, where the same id is a
+  // different message.
+  it('names the shared mailbox on every per-message call', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({}), { headers: { 'Content-Type': 'application/json' } })))
+    globalThis.fetch = fetchMock
+    API.setMailboxOwner('team@hermex.test')
+    await API.setMailLabels('inbox:1', [])
+    await API.getInvite('inbox:1')
+    await API.rsvp('inbox:1', 'accept')
+    await API.proposeTime('inbox:1', 'a', 'b')
+    await API.recallMail('sent:1')
+    await API.getMailNotes('inbox:1')
+    await API.addMailNote('inbox:1', { body: 'x' })
+    await API.getMessageRaw('inbox:1')
+    for (const call of fetchMock.mock.calls) {
+      expect(String(call[0])).toContain('owner=team%40hermex.test')
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(8)
+  })
+
+  it('leaves a URL alone in the own mailbox', () => {
+    expect(API.withOwner('/api/v1/mail/export?id=inbox%3A1')).toBe('/api/v1/mail/export?id=inbox%3A1')
+    API.setMailboxOwner('team@hermex.test')
+    expect(API.withOwner('/mail/rsvp')).toBe('/mail/rsvp?owner=team%40hermex.test')
+  })
+})

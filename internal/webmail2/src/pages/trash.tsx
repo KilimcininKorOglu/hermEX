@@ -136,7 +136,7 @@ export function TrashPage() {
   const handleBulkDelete = async () => {
     const ids = sel.ids
     try {
-      await Promise.all(ids.map((id) => api.delete(`/mail/delete?id=${encodeURIComponent(id)}`)))
+      await Promise.all(ids.map((id) => api.deleteMail(id)))
       const idSet = new Set(ids)
       setEmails((prev) => prev.filter((e) => !idSet.has(e.id)))
       sel.clear()
@@ -166,7 +166,7 @@ export function TrashPage() {
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
     try {
-      await api.delete(`/mail/delete?id=${id}`)
+      await api.deleteMail(id)
       toast.success(t("trash.deletedPermanently"))
       setEmails(emails.filter((email) => email.id !== id))
     } catch (err) {

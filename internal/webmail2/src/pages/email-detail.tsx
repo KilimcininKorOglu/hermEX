@@ -367,7 +367,7 @@ function useAttachments(email: EmailDetail | null) {
     if (att.size > MAX_DRAG_BYTES) return
     try {
       const res = await fetch(
-        `/api/v1/mail/attachment?id=${encodeURIComponent(email.id)}&index=${att.index}`,
+        api.withOwner(`/api/v1/mail/attachment?id=${encodeURIComponent(email.id)}&index=${att.index}`),
         { credentials: "include" },
       )
       if (!res.ok) return
@@ -430,7 +430,7 @@ function useAttachments(email: EmailDetail | null) {
     if (!email) return
     const indexes = selection.indexes.map((i) => `&index=${i}`).join("")
     const a = document.createElement("a")
-    a.href = `/api/v1/mail/attachments-zip?id=${encodeURIComponent(email.id)}${indexes}`
+    a.href = api.withOwner(`/api/v1/mail/attachments-zip?id=${encodeURIComponent(email.id)}${indexes}`)
     a.download = "attachments.zip"
     document.body.appendChild(a)
     a.click()
@@ -691,14 +691,14 @@ function useMessageActions(email: EmailDetail | null, setEmail: (email: EmailDet
   }
 
   const exportEML = () => run("emailDetail.exportFailed", (m) =>
-    downloadBlob(`/api/v1/mail/export?id=${encodeURIComponent(m.id)}`, (m.subject || "message") + ".eml"))
+    downloadBlob(api.withOwner(`/api/v1/mail/export?id=${encodeURIComponent(m.id)}`), (m.subject || "message") + ".eml"))
 
   // exportICS downloads the message's embedded meeting invite as an .ics file
   // (reference mail "Export as" ICS). Only offered when the message is an
   // invite; the backend serves the calendar part verbatim to keep the iTIP
   // METHOD intact.
   const exportICS = () => run("emailDetail.exportFailed", (m) =>
-    downloadBlob(`/api/v1/mail/export-ics?id=${encodeURIComponent(m.id)}`, (invite?.summary || m.subject || "invite") + ".ics"))
+    downloadBlob(api.withOwner(`/api/v1/mail/export-ics?id=${encodeURIComponent(m.id)}`), (invite?.summary || m.subject || "invite") + ".ics"))
 
   const handleMove = (folder: string, label: string) => run("emailDetail.failedToMove", async (m) => {
     await api.moveMail(m.id, folder)
@@ -884,7 +884,7 @@ function SecondaryActions({ email, actions, prefs, hasInvite, onItemData }: {
   onItemData: () => void
 }) {
   const { t } = useI18n()
-  const openRaw = (kind: "source" | "headers") => window.open(`/api/v1/mail/${kind}?id=${encodeURIComponent(email.id)}`, "_blank")
+  const openRaw = (kind: "source" | "headers") => window.open(api.withOwner(`/api/v1/mail/${kind}?id=${encodeURIComponent(email.id)}`), "_blank")
   return (
     <div className="flex items-center gap-1">
       <FollowupMenu email={email} onFollowup={actions.handleFollowup} />
@@ -1394,7 +1394,7 @@ function AttachmentItem({ emailId, att, prefs, attachments }: {
   attachments: Attachments
 }) {
   const { t } = useI18n()
-  const src = `/api/v1/mail/attachment?id=${encodeURIComponent(emailId)}&index=${att.index}`
+  const src = api.withOwner(`/api/v1/mail/attachment?id=${encodeURIComponent(emailId)}&index=${att.index}`)
   // The server saves rather than renders unless asked, and it only honours the
   // ask for the types it serves as themselves (a PDF or an image). Everything
   // else stays opaque bytes.
