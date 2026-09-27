@@ -51,6 +51,27 @@ func TestDKIMGenerateStoresDisabled(t *testing.T) {
 	}
 }
 
+// TestDKIMPanelReportsAFailedKeyRead proves a failed key read is reported and the
+// panel offers no key controls. It rendered as "No DKIM key for this domain" with a
+// generate form, and generating replaces the stored key the published record names.
+func TestDKIMPanelReportsAFailedKeyRead(t *testing.T) {
+	d := dkimTestDir()
+	d.dkimFound, d.dkimSelector, d.dkimPublicTXT = true, dkimSelector, "v=DKIM1; k=rsa; p=AAAA"
+	d.readErrs = map[string]error{"GetDKIMKeyInfo": errReadFailed}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/domains/1", session), http.StatusOK, "domain page")
+	panel := wantBody(t, htmxPUT(t, ts, "/admin/ui/domains/1/dkim/enable", session, csrf, url.Values{"enabled": {"1"}}), http.StatusOK, "enable")
+	_, output := dkimOutputFragment(t, ts, "/admin/ui/domains/1/dkim/output?mode=txt", session)
+	for name, body := range map[string]string{"domain page": page, "enable": panel, "output": output} {
+		wantContains(t, body, "DKIM key. The key controls are hidden", name+": the failed read is reported")
+		if strings.Contains(body, "/dkim/generate") || strings.Contains(body, "No DKIM key for this domain") {
+			t.Errorf("%s: a failed read offers to generate a key:\n%s", name, body)
+		}
+	}
+}
+
 // dkimOutputFragment fetches the read-only output fragment, which carries no CSRF token
 // because it writes nothing.
 func dkimOutputFragment(t *testing.T, ts *httptest.Server, path, session string) (int, string) {

@@ -280,7 +280,8 @@
 
 {{define "dkim-panel"}}<div id="dkim-panel">
 {{template "notice" .DKIMNotice}}
-{{if .DKIMHasKey}}
+{{if .DKIMError}}<p class="error">{{.DKIMError}}</p>
+{{else if .DKIMHasKey}}
 <p>Status: {{if .DKIMEnabled}}<span class="status status-ok"><strong>enabled, outbound mail from this domain is signed</strong></span>{{else}}<span class="status status-warn"><strong>not signing, key generated, publish the record then enable</strong></span>{{end}} (selector <code>{{.DKIMSelector}}</code>).</p>
 <form>
 <label>Publish this TXT record as
@@ -314,8 +315,10 @@
 </div>{{end}}
 
 {{define "dkim-output"}}<div id="dkim-output">
+{{if .DKIMError}}<p class="error">{{.DKIMError}}</p>{{else}}
 <p class="hint">Name: <code>{{.DKIMRecordName}}</code></p>
 <pre class="dns-record">{{.DKIMOutput}}</pre>
+{{end}}
 </div>{{end}}
 
 {{define "dns-report"}}<table class="grid">

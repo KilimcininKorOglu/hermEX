@@ -18,10 +18,16 @@ const dkimSelector = "hermex"
 
 // dkimData returns a domain's DKIM panel fields: whether a key exists, its selector and
 // enabled state, the TXT value to publish, the record name, and the record rendered in
-// the default output mode. The private key is never included.
+// the default output mode. The private key is never included. A failed read sets
+// DKIMError instead, because the panel would otherwise say the domain has no key and
+// offer to generate one, which replaces a published key and breaks signing.
 func (s *Server) dkimData(domain string) map[string]any {
 	data := map[string]any{"DKIMHasKey": false}
-	info, found, _ := s.dir.GetDKIMKeyInfo(domain)
+	info, found, err := s.dir.GetDKIMKeyInfo(domain)
+	if err != nil {
+		data["DKIMError"] = s.notice("Could not read this domain's DKIM key. The key controls are hidden so a generate cannot replace it.", err)
+		return data
+	}
 	if found {
 		recordName := info.Selector + "._domainkey." + domain
 		data["DKIMHasKey"] = true

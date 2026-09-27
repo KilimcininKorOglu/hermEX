@@ -758,7 +758,7 @@ func (f *fakeDir) SetDKIMEnabled(domain string, enabled bool) error {
 	return nil
 }
 func (f *fakeDir) GetDKIMKeyInfo(domain string) (directory.DKIMKeyInfo, bool, error) {
-	return directory.DKIMKeyInfo{Selector: f.dkimSelector, PublicTXT: f.dkimPublicTXT, Enabled: f.dkimEnabled}, f.dkimFound, nil
+	return directory.DKIMKeyInfo{Selector: f.dkimSelector, PublicTXT: f.dkimPublicTXT, Enabled: f.dkimEnabled}, f.dkimFound, f.readErrs["GetDKIMKeyInfo"]
 }
 func (f *fakeDir) DeleteDKIMKey(domain string) error {
 	f.dkimFound = false
