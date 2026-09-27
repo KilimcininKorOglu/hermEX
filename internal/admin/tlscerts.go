@@ -42,19 +42,44 @@ type tlsCertView struct {
 // tlsCertsPageData builds the TLS-certificates page model: the certificate mode and
 // ACME account settings, the stored certificates, and a notice line.
 func (s *Server) tlsCertsPageData(r *http.Request, notice panelNotice) map[string]any {
-	infos, _ := s.dir.ListTLSCerts()
+	failed := readFailures{}
+	data := map[string]any{"Nav": "tls", "CSRF": csrfCookieValue(r), "Notice": notice, "ReadFailed": failed}
+	s.addTLSCertViews(data)
+	settings, _, err := s.dir.GetTLSSettings()
+	if s.noteRead(failed, "mode", "the certificate mode", err) {
+		data["Mode"], data["ACMEEmail"] = settings.Mode, settings.ACMEEmail
+		data["ACMECAURL"], data["ACMEAgreed"] = settings.ACMECAURL, settings.ACMEAgreed
+	}
+	sts, _, err := s.dir.GetMTASTSSettings()
+	if s.noteRead(failed, "mtasts", "the MTA-STS settings", err) {
+		data["MTASTSEnabled"], data["MTASTSMode"], data["MTASTSMaxAge"] = sts.Enabled, sts.Mode, sts.MaxAge
+	}
+	return data
+}
+
+// addTLSCertViews lists the stored certificates on a page-data map, or reports
+// that they could not be read, which the table must not show as none stored.
+func (s *Server) addTLSCertViews(data map[string]any) {
+	infos, err := s.dir.ListTLSCerts()
+	if err != nil {
+		data["CertsError"] = s.notice("Could not read the stored certificates.", err)
+		return
+	}
 	views := make([]tlsCertView, len(infos))
 	for i, info := range infos {
 		views[i] = tlsCertView{Name: info.Name, Expires: time.UnixMilli(info.NotAfter).UTC().Format("2006-01-02")}
 	}
-	settings, _, _ := s.dir.GetTLSSettings()
-	sts, _, _ := s.dir.GetMTASTSSettings()
-	return map[string]any{
-		"Nav": "tls", "CSRF": csrfCookieValue(r), "Certs": views, "Notice": notice,
-		"Mode": settings.Mode, "ACMEEmail": settings.ACMEEmail,
-		"ACMECAURL": settings.ACMECAURL, "ACMEAgreed": settings.ACMEAgreed,
-		"MTASTSEnabled": sts.Enabled, "MTASTSMode": sts.Mode, "MTASTSMaxAge": sts.MaxAge,
+	data["Certs"] = views
+}
+
+// auditOld is the value an audit entry records as a setting's previous state: the
+// stored value, or "unreadable" when reading it failed, so the entry never claims
+// an empty previous value that was not stored.
+func auditOld(v any, err error) any {
+	if err != nil {
+		return "unreadable"
 	}
+	return v
 }
 
 // handleUITLSSettings saves the certificate mode and ACME account settings. In acme
@@ -67,7 +92,7 @@ func (s *Server) handleUITLSSettings(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	oldSettings, _, _ := s.dir.GetTLSSettings()
+	oldSettings, _, oldErr := s.dir.GetTLSSettings()
 	mode := strings.ToLower(strings.TrimSpace(r.FormValue("mode")))
 	if mode != "acme" {
 		mode = "manual"
@@ -100,7 +125,7 @@ func (s *Server) handleUITLSSettings(w http.ResponseWriter, r *http.Request) {
 		s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, s.failNotice("Could not save the certificate mode.", err)))
 		return
 	}
-	s.auditSettingChange(cl.Login, "tls_mode", logging.Fields{"old_mode": oldSettings.Mode, "new_mode": settings.Mode})
+	s.auditSettingChange(cl.Login, "tls_mode", logging.Fields{"old_mode": auditOld(oldSettings.Mode, oldErr), "new_mode": settings.Mode})
 	s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, okNotice("Saved. Restart the gateway for a mode change to take effect.")))
 }
 
@@ -115,7 +140,7 @@ func (s *Server) handleUIMTASTSSettings(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	oldSTS, _, _ := s.dir.GetMTASTSSettings()
+	oldSTS, _, oldErr := s.dir.GetMTASTSSettings()
 	enabled := r.FormValue("mtasts_enabled") == "on"
 	mode := strings.ToLower(strings.TrimSpace(r.FormValue("mtasts_mode")))
 	if mode != "enforce" && mode != "none" {
@@ -134,8 +159,8 @@ func (s *Server) handleUIMTASTSSettings(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.auditSettingChange(cl.Login, "mtasts", logging.Fields{
-		"old_enabled": oldSTS.Enabled, "new_enabled": enabled,
-		"old_mode": oldSTS.Mode, "new_mode": mode,
+		"old_enabled": auditOld(oldSTS.Enabled, oldErr), "new_enabled": enabled,
+		"old_mode": auditOld(oldSTS.Mode, oldErr), "new_mode": mode,
 	})
 	s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, okNotice("Saved MTA-STS publishing. Publish each domain's prescribed mta-sts and _mta-sts records (see the domain page); senders adopt a change on their next fetch.")))
 }

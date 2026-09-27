@@ -120,6 +120,51 @@ func TestTLSCertUploadStoresAndDelete(t *testing.T) {
 	}
 }
 
+// TestTLSCertListReportsAReadFailure proves a failed certificate read says so in
+// the table. It rendered as "No uploaded certificates", which tells the operator
+// the listeners serve the config-file certificate when that is unknown.
+func TestTLSCertListReportsAReadFailure(t *testing.T) {
+	d := systemAdminDir()
+	d.readErrs = map[string]error{"ListTLSCerts": errReadFailed}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/tls", session), http.StatusOK, "tls page")
+	wantContains(t, page, "Could not read the stored certificates", "the failed read is reported")
+	if strings.Contains(page, "No uploaded certificates") {
+		t.Errorf("a failed read rendered as no stored certificates:\n%s", page)
+	}
+}
+
+// TestTLSSaveAuditsAnUnreadablePriorValue proves a save whose prior value could
+// not be read records that in the audit entry. The entry claimed an empty prior
+// value, which is a state that was never stored.
+func TestTLSSaveAuditsAnUnreadablePriorValue(t *testing.T) {
+	for _, tc := range []struct {
+		read, path string
+		form       url.Values
+		field      string
+	}{
+		{"GetTLSSettings", "/admin/ui/tls/mode", url.Values{"mode": {"manual"}}, "old_mode"},
+		{"GetMTASTSSettings", "/admin/ui/mtasts", url.Values{"mtasts_mode": {"testing"}}, "old_enabled"},
+		{"GetMTASTSSettings", "/admin/ui/mtasts", url.Values{"mtasts_mode": {"testing"}}, "old_mode"},
+	} {
+		d := systemAdminDir()
+		d.readErrs = map[string]error{tc.read: errReadFailed}
+		ts, sink := loggingAdminServer(t, d)
+		session, csrf := loginCookies(t, ts)
+		htmxPOST(t, ts, tc.path, session, csrf, tc.form).Body.Close()
+
+		e, ok := sink.find("setting.change")
+		if !ok {
+			t.Fatalf("%s: the save recorded no setting.change event", tc.path)
+		}
+		if e.Fields[tc.field] != "unreadable" {
+			t.Errorf("%s: %s = %v, want unreadable", tc.path, tc.field, e.Fields[tc.field])
+		}
+	}
+}
+
 // TestTLSSettingsModeSwitch proves the panel saves the certificate mode the gateway
 // reads at startup: acme mode requires an account email, ToS agreement and an explicit
 // CA directory URL (a save missing any of them is rejected and writes nothing, so the

@@ -23,6 +23,8 @@ func TestAFailedReadHidesTheFormItFeeds(t *testing.T) {
 		{"GetDefaultSyncPolicy", "/admin/ui/syncpolicy", `hx-put="/admin/ui/syncpolicy"`, "the default device policy"},
 		{"GetCreateDefaults", "/admin/ui/defaults", `hx-put="/admin/ui/defaults"`, "the create defaults"},
 		{"EffectiveUserDefaults", "/admin/ui/defaults", `hx-put="/admin/ui/defaults"`, "the create defaults"},
+		{"GetTLSSettings", "/admin/ui/tls", `hx-post="/admin/ui/tls/mode"`, "the certificate mode"},
+		{"GetMTASTSSettings", "/admin/ui/tls", `hx-post="/admin/ui/mtasts"`, "the MTA-STS settings"},
 	} {
 		d := &fakeDir{
 			authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},

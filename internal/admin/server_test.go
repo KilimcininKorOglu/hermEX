@@ -774,7 +774,9 @@ func (f *fakeDir) SetTLSCert(name, certPEM, keyPEM string, notAfter int64) error
 	f.tlsCerts = append(f.tlsCerts, directory.TLSCertInfo{Name: name, NotAfter: notAfter})
 	return nil
 }
-func (f *fakeDir) ListTLSCerts() ([]directory.TLSCertInfo, error) { return f.tlsCerts, nil }
+func (f *fakeDir) ListTLSCerts() ([]directory.TLSCertInfo, error) {
+	return f.tlsCerts, f.readErrs["ListTLSCerts"]
+}
 func (f *fakeDir) DeleteTLSCert(name string) error {
 	out := f.tlsCerts[:0]
 	for _, c := range f.tlsCerts {
@@ -786,6 +788,9 @@ func (f *fakeDir) DeleteTLSCert(name string) error {
 	return nil
 }
 func (f *fakeDir) GetTLSSettings() (directory.TLSSettings, bool, error) {
+	if err := f.readErrs["GetTLSSettings"]; err != nil {
+		return directory.TLSSettings{}, false, err
+	}
 	if f.tlsSettings == nil {
 		return directory.TLSSettings{Mode: "manual"}, false, nil
 	}
@@ -796,6 +801,9 @@ func (f *fakeDir) SetTLSSettings(s directory.TLSSettings) error {
 	return nil
 }
 func (f *fakeDir) GetMTASTSSettings() (directory.MTASTSSettings, bool, error) {
+	if err := f.readErrs["GetMTASTSSettings"]; err != nil {
+		return directory.MTASTSSettings{}, false, err
+	}
 	if f.mtastsSettings == nil {
 		return directory.MTASTSSettings{Enabled: false, Mode: "testing", MaxAge: directory.MTASTSDefaultMaxAge}, false, nil
 	}
