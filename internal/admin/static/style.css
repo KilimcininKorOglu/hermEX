@@ -706,6 +706,8 @@ body:has(> .login) {
 	padding: 1rem;
 	background: var(--muted);
 }
+/* Dark mode is black: the page behind the card too, not a grey. */
+[data-theme="dark"] body:has(> .login) { background: var(--background); }
 /* The sign-in card has no sidebar beside it, so it leaves the shell's second
    column and sits in the middle of the page. */
 main.login {
