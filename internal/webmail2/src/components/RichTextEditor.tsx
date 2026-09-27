@@ -1,6 +1,7 @@
-import { useRef, useLayoutEffect, useMemo, forwardRef, useImperativeHandle } from "react"
+import { useRef, useState, useLayoutEffect, useMemo, forwardRef, useImperativeHandle } from "react"
 import { Bold, Italic, Underline, Link } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { LinkDialog } from "@/components/link-dialog"
 import { isSafeLinkURL, sanitizeClipboard, sanitizeHTML } from "@/utils/sanitize"
 import { linkifyHTML, linkifyNode } from "@/utils/linkify"
 import { countMissingImages, fillMissingImages, imageFilesFrom, imagesFragment, readAsDataURL } from "@/utils/pasteImages"
@@ -91,11 +92,41 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       report()
     }
 
+    // The dialog takes focus, and with it the editor's selection, so the range the
+    // link applies to is kept here while the dialog is open.
+    const [linkOpen, setLinkOpen] = useState(false)
+    const linkRange = useRef<Range | null>(null)
+
     const handleLink = () => {
-      const url = window.prompt("URL:")?.trim()
-      // A javascript: href typed here would survive into the sent body, so the
-      // scheme is checked before it ever reaches the document.
-      if (url && isSafeLinkURL(url)) execCmd("createLink", url)
+      const sel = window.getSelection()
+      const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null
+      linkRange.current = range && editorRef.current?.contains(range.commonAncestorContainer) ? range.cloneRange() : null
+      setLinkOpen(true)
+    }
+
+    // insertLink links the kept selection to url, or inserts url as a link at the
+    // caret when nothing was selected. The dialog has already refused a scheme
+    // outside the allowlist; it is checked again because a javascript: href here
+    // would survive into the sent body.
+    const insertLink = (url: string) => {
+      setLinkOpen(false)
+      const el = editorRef.current
+      if (!el || !isSafeLinkURL(url)) return
+      el.focus()
+      const range = linkRange.current
+      const sel = window.getSelection()
+      if (range && sel) {
+        sel.removeAllRanges()
+        sel.addRange(range)
+      }
+      if (range && !range.collapsed) {
+        execCmd("createLink", url)
+        return
+      }
+      const a = document.createElement("a")
+      a.setAttribute("href", url)
+      a.textContent = url
+      execCmd("insertHTML", a.outerHTML)
     }
 
     const handleInput = report
@@ -248,6 +279,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
             content: attr(data-placeholder);
           }
         `}</style>
+        <LinkDialog open={linkOpen} onInsert={insertLink} onCancel={() => setLinkOpen(false)} />
       </div>
     )
   }

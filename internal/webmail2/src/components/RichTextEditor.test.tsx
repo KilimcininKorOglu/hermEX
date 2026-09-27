@@ -1,17 +1,19 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { RichTextEditor } from './RichTextEditor'
+import { I18nProvider } from '@/hooks/useI18n'
 
 // React only allows act() when the environment declares itself a test one.
 ;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-// mount renders node into a detached container and returns both.
+// mount renders node into a detached container and returns both. The editor's
+// link dialog reads its labels through i18n, so the provider wraps every mount.
 function mount(node: React.ReactElement): { container: HTMLElement; root: Root } {
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root = createRoot(container)
-  act(() => root.render(node))
+  act(() => root.render(<I18nProvider>{node}</I18nProvider>))
   return { container, root }
 }
 
@@ -66,7 +68,7 @@ describe('RichTextEditor', () => {
   it('sanitizes a value that arrives after the first render, not just the initial one', () => {
     const { container, root } = mount(<RichTextEditor value="<p>first</p>" onChange={() => {}} />)
     act(() => {
-      root.render(<RichTextEditor value={'<img src=x onerror="alert(1)">'} onChange={() => {}} />)
+      root.render(<I18nProvider><RichTextEditor value={'<img src=x onerror="alert(1)">'} onChange={() => {}} /></I18nProvider>)
     })
     expect(editorHTML(container)).not.toContain('onerror')
     act(() => root.unmount())
@@ -89,6 +91,72 @@ describe('RichTextEditor', () => {
     expect(editor.firstChild).toBe(typed)
     act(() => root.unmount())
     container.remove()
+  })
+
+  describe('link dialog', () => {
+    let exec: ReturnType<typeof vi.fn>
+    beforeEach(() => {
+      exec = vi.fn(() => true)
+      document.execCommand = exec as unknown as typeof document.execCommand
+    })
+
+    // typeInto sets an input's value the way a keystroke does, so React's onChange runs.
+    const typeInto = (input: HTMLInputElement, value: string) => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    }
+
+    // openWithSelection mounts the editor, selects its text and opens the dialog
+    // from the toolbar, returning the dialog's URL field.
+    const openWithSelection = () => {
+      const mounted = mount(<RichTextEditor value="<p>hello</p>" onChange={() => {}} />)
+      const text = mounted.container.querySelector('[contenteditable] p')?.firstChild as Text
+      const range = document.createRange()
+      range.selectNodeContents(text)
+      window.getSelection()?.removeAllRanges()
+      window.getSelection()?.addRange(range)
+      const button = mounted.container.querySelector('button[title="Insert link"]') as HTMLButtonElement
+      act(() => { button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })) })
+      const input = document.getElementById('link-dialog-url') as HTMLInputElement
+      return { ...mounted, input }
+    }
+
+    const submit = (input: HTMLInputElement) => {
+      act(() => { input.form?.requestSubmit() })
+    }
+
+    const close = ({ container, root }: { container: HTMLElement; root: Root }) => {
+      act(() => root.unmount())
+      container.remove()
+    }
+
+    it('links the selected text to a safe address', () => {
+      const mounted = openWithSelection()
+      expect(mounted.input).not.toBeNull()
+      act(() => typeInto(mounted.input, ' https://example.com '))
+      submit(mounted.input)
+      expect(exec).toHaveBeenCalledWith('createLink', false, 'https://example.com')
+      close(mounted)
+    })
+
+    it('refuses a javascript: address and says why, without touching the body', () => {
+      const mounted = openWithSelection()
+      act(() => typeInto(mounted.input, 'javascript:alert(1)'))
+      submit(mounted.input)
+      expect(exec).not.toHaveBeenCalled()
+      expect(document.querySelector('[role="alert"]')).not.toBeNull()
+      close(mounted)
+    })
+
+    it('changes nothing when cancelled', () => {
+      const mounted = openWithSelection()
+      act(() => typeInto(mounted.input, 'https://example.com'))
+      const cancel = Array.from(document.querySelectorAll('button')).find((b) => b.type === 'button' && ['Cancel', 'common.cancel'].includes(b.textContent ?? ''))
+      act(() => { cancel?.click() })
+      expect(exec).not.toHaveBeenCalled()
+      expect(document.getElementById('link-dialog-url')).toBeNull()
+      close(mounted)
+    })
   })
 
   it('keeps the formatting a signature or quoted reply legitimately carries', () => {

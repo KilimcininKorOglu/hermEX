@@ -1570,5 +1570,12 @@
     "submit": "Doğrula",
     "cancel": "Başka bir hesapla giriş yap",
     "invalid": "Bu kod kabul edilmedi."
+  },
+  "editor": {
+    "insertLink": "Link ekle",
+    "linkUrl": "URL",
+    "linkPlaceholder": "https://example.com",
+    "linkInvalid": "Bir web, e-posta ya da telefon adresi girin (http:, https:, mailto: ya da tel:).",
+    "linkInsert": "Ekle"
   }
 }
