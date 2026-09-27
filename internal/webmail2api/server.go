@@ -142,6 +142,7 @@ func (s *Server) Handler() http.Handler {
 	// Settings, profile, preferences, signatures, templates, categories.
 	mux.HandleFunc("GET /api/v1/profile", s.handleGetProfile)
 	mux.HandleFunc("PUT /api/v1/profile", s.handlePutProfile)
+	mux.HandleFunc("PUT /api/v1/account/prefs", s.handlePutPrefs)
 	mux.HandleFunc("POST /api/v1/account/password", s.handleChangePassword)
 	mux.HandleFunc("GET /api/v1/preferences", s.handleGetPreferences)
 	mux.HandleFunc("PUT /api/v1/preferences", s.handlePutPreferences)
@@ -606,7 +607,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 			timezone, locale, mustChange = u.Timezone, u.Lang, u.MustChangePassword
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	me := map[string]any{
 		"authenticated":        true,
 		"email":                c.Email,
 		"isAdmin":              false,
@@ -615,7 +616,13 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		"timezone":             timezone,
 		"locale":               locale,
 		"must_change_password": mustChange,
-	})
+	}
+	// The theme and the welcome banner are the preferences the admin panel shares;
+	// a directory that cannot answer leaves them out and the SPA keeps its cookies.
+	if p, ok := s.callerPrefs(c.Email); ok {
+		me["theme"], me["show_welcome_banner"] = p.Theme, p.ShowWelcome
+	}
+	writeJSON(w, http.StatusOK, me)
 }
 
 // mailJSON is the SPA's Mail shape (camelCase) for a folder-listing row.
