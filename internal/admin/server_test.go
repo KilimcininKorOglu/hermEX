@@ -261,6 +261,9 @@ func (f *fakeDir) EffectivePermissions(userID int64) ([]directory.Permission, er
 }
 
 func (f *fakeDir) ListRoles() ([]directory.RoleInfo, error) {
+	if err := f.readErrs["ListRoles"]; err != nil {
+		return nil, err
+	}
 	out := make([]directory.RoleInfo, 0, len(f.namedRoles))
 	for _, r := range f.namedRoles {
 		out = append(out, r.RoleInfo)

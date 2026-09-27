@@ -93,6 +93,7 @@ func TestAFailedListReadIsNotShownAsEmpty(t *testing.T) {
 		{"ListAllRooms", "/admin/ui/rooms", "Could not read the rooms.", "No rooms yet."},
 		{"ListMLists", "/admin/ui/mlists", "Could not read the mailing lists.", "No mailing lists yet."},
 		{"ListOrgs", "/admin/ui/orgs", "Could not read the organizations.", "No organizations yet."},
+		{"ListRoles", "/admin/ui/roles", "Could not read the roles.", "No roles yet."},
 	} {
 		d := &fakeDir{
 			authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},

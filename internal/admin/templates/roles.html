@@ -25,7 +25,7 @@
 <thead><tr><th>Name</th><th>Description</th><th>Permissions</th><th>Users</th></tr></thead>
 <tbody>
 {{range .Roles}}<tr><td><a href="/admin/ui/roles/{{.ID}}">{{.Name}}</a></td><td>{{.Description}}</td><td>{{.PermCount}}</td><td>{{.UserCount}}</td></tr>
-{{else}}<tr><td colspan="4" class="empty">No roles yet.</td></tr>
+{{else}}<tr><td colspan="4" class="empty{{if .RolesError}} failed{{end}}">{{or .RolesError "No roles yet."}}</td></tr>
 {{end}}
 </tbody>
 </table>

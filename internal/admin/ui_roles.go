@@ -39,12 +39,13 @@ func (s *Server) handleUIRoles(w http.ResponseWriter, r *http.Request) {
 
 // rolesPanelData assembles the roles list and panel state.
 func (s *Server) rolesPanelData(r *http.Request, errMsg string) map[string]any {
-	roles, _ := s.dir.ListRoles()
+	roles, err := s.dir.ListRoles()
 	return map[string]any{
-		"Nav":   "roles",
-		"CSRF":  csrfCookieValue(r),
-		"Roles": roles,
-		"Error": errMsg,
+		"Nav":        "roles",
+		"CSRF":       csrfCookieValue(r),
+		"Roles":      roles,
+		"RolesError": s.listFailure("the roles", err),
+		"Error":      errMsg,
 	}
 }
 
