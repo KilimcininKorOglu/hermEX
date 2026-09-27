@@ -525,7 +525,7 @@ func (f *fakeDir) FinishTask(id int64, status, message string) error {
 }
 func (f *fakeDir) RecentSpamVerdicts(int) ([]directory.SpamVerdict, error) { return f.verdicts, nil }
 func (f *fakeDir) GetSpamHistorySettings() (directory.SpamHistorySettings, bool, error) {
-	return f.spamHistory, f.spamHistoryFound, nil
+	return f.spamHistory, f.spamHistoryFound, f.readErrs["GetSpamHistorySettings"]
 }
 func (f *fakeDir) SetSpamHistorySettings(s directory.SpamHistorySettings) error {
 	f.spamHistory, f.spamHistoryFound = s, true
@@ -729,14 +729,14 @@ func (f *fakeDir) SetSizeLimits(s directory.SizeLimits) error {
 	return nil
 }
 func (f *fakeDir) GetLogRetentionDays() (int, bool, error) {
-	return f.logRetention, f.logRetentionFound, nil
+	return f.logRetention, f.logRetentionFound, f.readErrs["GetLogRetentionDays"]
 }
 func (f *fakeDir) SetLogRetentionDays(days int) error {
 	f.logRetention, f.logRetentionFound = days, true
 	return nil
 }
 func (f *fakeDir) GetRecoverableSettings() (directory.RecoverableSettings, bool, error) {
-	return f.recoverable, f.recoverableFound, nil
+	return f.recoverable, f.recoverableFound, f.readErrs["GetRecoverableSettings"]
 }
 func (f *fakeDir) SetRecoverableSettings(s directory.RecoverableSettings) error {
 	f.recoverable, f.recoverableFound = s, true

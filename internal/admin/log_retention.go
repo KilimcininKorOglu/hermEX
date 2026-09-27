@@ -9,10 +9,15 @@ const defaultLogRetentionDaysDisplay = 0
 
 // fillLogRetention sets the central-log retention window (in days) on a page-data map,
 // using the stored value or the keep-forever default when none has been saved. Shared by
-// the Settings page so its Retention tab can render the log-retention panel.
-func (s *Server) fillLogRetention(data map[string]any) {
+// the Settings page so its Retention tab can render the log-retention panel. A failed
+// read is recorded in failed, since the default would read as keep forever.
+func (s *Server) fillLogRetention(data map[string]any, failed readFailures) {
+	d, found, err := s.dir.GetLogRetentionDays()
+	if !s.noteRead(failed, "log-retention", "the log retention", err) {
+		return
+	}
 	days := defaultLogRetentionDaysDisplay
-	if d, found, err := s.dir.GetLogRetentionDays(); err == nil && found {
+	if found {
 		days = d
 	}
 	data["LogRetentionDays"] = days
@@ -21,8 +26,9 @@ func (s *Server) fillLogRetention(data map[string]any) {
 // logRetentionPanelData builds the model the log-retention panel renders: the stored
 // window (or the keep-forever default) plus the notice and CSRF token its htmx form needs.
 func (s *Server) logRetentionPanelData(r *http.Request, notice panelNotice) map[string]any {
-	data := map[string]any{"Notice": notice, "CSRF": csrfCookieValue(r)}
-	s.fillLogRetention(data)
+	failed := readFailures{}
+	data := map[string]any{"Notice": notice, "CSRF": csrfCookieValue(r), "ReadFailed": failed}
+	s.fillLogRetention(data, failed)
 	return data
 }
 

@@ -8,10 +8,15 @@ import (
 
 // fillRecoverableRetention sets the Recoverable Items retention window (in days) on a
 // page-data map, using the stored value or the Exchange-matching default when none has
-// been saved. Shared by the Settings page so its Retention tab can render the panel.
-func (s *Server) fillRecoverableRetention(data map[string]any) {
+// been saved. Shared by the Settings page so its Retention tab can render the panel. A
+// failed read is recorded in failed rather than shown as the default.
+func (s *Server) fillRecoverableRetention(data map[string]any, failed readFailures) {
+	rs, found, err := s.dir.GetRecoverableSettings()
+	if !s.noteRead(failed, "recoverable-retention", "the Recoverable Items retention", err) {
+		return
+	}
 	days := directory.DefaultRecoverableRetentionDays
-	if rs, found, err := s.dir.GetRecoverableSettings(); err == nil && found {
+	if found {
 		days = rs.RetentionDays
 	}
 	data["RecoverableRetentionDays"] = days
@@ -20,8 +25,9 @@ func (s *Server) fillRecoverableRetention(data map[string]any) {
 // recoverableRetentionPanelData builds the model the panel renders: the stored window
 // (or the default) plus the notice and CSRF token its htmx form needs.
 func (s *Server) recoverableRetentionPanelData(r *http.Request, notice panelNotice) map[string]any {
-	data := map[string]any{"Notice": notice, "CSRF": csrfCookieValue(r)}
-	s.fillRecoverableRetention(data)
+	failed := readFailures{}
+	data := map[string]any{"Notice": notice, "CSRF": csrfCookieValue(r), "ReadFailed": failed}
+	s.fillRecoverableRetention(data, failed)
 	return data
 }
 

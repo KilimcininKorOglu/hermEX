@@ -49,14 +49,29 @@ func (s *Server) spamHistoryPageData(r *http.Request, notice panelNotice) map[st
 			RemoteAddr: v.RemoteAddr, Score: v.Score, Spam: v.Spam, Reasons: v.Reasons,
 		})
 	}
+	failed := readFailures{}
+	data := map[string]any{
+		"Nav": "spamhistory", "Verdicts": views, "Error": errMsg,
+		"Notice": notice, "CSRF": csrfCookieValue(r), "ReadFailed": failed,
+	}
+	s.fillSpamRetention(data, failed)
+	return data
+}
+
+// fillSpamRetention sets the spam-history retention bound on a page-data map: the
+// stored value, or the built-in default when none has been saved. A failed read is
+// recorded in failed rather than shown as the default. The Spam History and Settings
+// pages share it.
+func (s *Server) fillSpamRetention(data map[string]any, failed readFailures) {
+	st, found, err := s.dir.GetSpamHistorySettings()
+	if !s.noteRead(failed, "spam-retention", "the spam history retention", err) {
+		return
+	}
 	retain := defaultSpamHistoryRetainDisplay
-	if st, found, e := s.dir.GetSpamHistorySettings(); e == nil && found {
+	if found {
 		retain = st.Retain
 	}
-	return map[string]any{
-		"Nav": "spamhistory", "Verdicts": views, "Error": errMsg,
-		"Retain": retain, "Notice": notice, "CSRF": csrfCookieValue(r),
-	}
+	data["Retain"] = retain
 }
 
 // handleUISaveSpamRetention persists the spam-history retention bound (how many of

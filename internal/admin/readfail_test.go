@@ -70,6 +70,11 @@ func TestAFailedReadHidesTheFormItFeeds(t *testing.T) {
 		{"GetFetchSettings", "/admin/ui/limits", `/limits/fetchpolicy"`, "the fetch policy"},
 		{"GetSizeLimits", "/admin/ui/settings", `hx-post="/admin/ui/limits"`, "the size limits"},
 		{"GetLoginLockoutSettings", "/admin/ui/settings", `/limits/loginlockout"`, "the login-lockout settings"},
+		{"GetLogRetentionDays", "/admin/ui/settings", `hx-post="/admin/ui/log-retention"`, "the log retention"},
+		{"GetRecoverableSettings", "/admin/ui/settings", `hx-post="/admin/ui/recoverable-retention"`, "the Recoverable Items retention"},
+		{"GetSpamHistorySettings", "/admin/ui/settings", `/spam-history/retention"`, "the spam history retention"},
+		{"GetSpamHistorySettings", "/admin/ui/spam-history", `/spam-history/retention"`, "the spam history retention"},
+		{"GetSpamHistorySettings", "/admin/ui/spam-history", "scored verdicts are kept", "the spam history retention"},
 	} {
 		d := &fakeDir{
 			authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},

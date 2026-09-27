@@ -20,15 +20,11 @@ func (s *Server) handleUISettings(w http.ResponseWriter, r *http.Request) {
 func (s *Server) settingsPageData(r *http.Request, notice panelNotice) map[string]any {
 	data := s.antispamPageData(r, notice)
 	data["Nav"] = "settings"
-	// antispamPageData always sets ReadFailed; the Limits cards record into it too.
-	s.addLimitSettings(data, data["ReadFailed"].(readFailures))
-	s.fillLogRetention(data)
-	s.fillRecoverableRetention(data)
-
-	retain := defaultSpamHistoryRetainDisplay
-	if st, found, err := s.dir.GetSpamHistorySettings(); err == nil && found {
-		retain = st.Retain
-	}
-	data["Retain"] = retain
+	// antispamPageData always sets ReadFailed; the other cards record into it too.
+	failed := data["ReadFailed"].(readFailures)
+	s.addLimitSettings(data, failed)
+	s.fillLogRetention(data, failed)
+	s.fillRecoverableRetention(data, failed)
+	s.fillSpamRetention(data, failed)
 	return data
 }
