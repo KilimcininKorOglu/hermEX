@@ -2,14 +2,14 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<h1>Dashboard</h1>
-<p class="signed-in">Signed in as {{.Login}}.</p>
-{{if .Error}}<p class="err">{{.Error}}</p>{{end}}
-<section class="cards">
-<a class="card" href="/admin/ui/users"><span class="num">{{.UserCount}}</span><span class="label">Users</span></a>
-<a class="card" href="/admin/ui/domains"><span class="num">{{.DomainCount}}</span><span class="label">Domains</span></a>
-<a class="card" href="/admin/ui/aliases"><span class="num">{{.AliasCount}}</span><span class="label">Aliases</span></a>
+<header class="page-head"><div><h1>Dashboard</h1><p class="page-desc">Signed in as {{.Login}}.</p></div></header>
+{{if .Error}}<p class="error">{{.Error}}</p>{{else}}
+<section class="stats">
+<a class="stat" href="/admin/ui/users"><svg class="icon" aria-hidden="true"><use href="{{icon "users"}}"/></svg><span class="num">{{.UserCount}}</span><span class="label">Users</span></a>
+<a class="stat" href="/admin/ui/domains"><svg class="icon" aria-hidden="true"><use href="{{icon "globe"}}"/></svg><span class="num">{{.DomainCount}}</span><span class="label">Domains</span></a>
+<a class="stat" href="/admin/ui/aliases"><svg class="icon" aria-hidden="true"><use href="{{icon "at-sign"}}"/></svg><span class="num">{{.AliasCount}}</span><span class="label">Aliases</span></a>
 </section>
+{{end}}
 </main>
 </div>
 {{template "foot" .}}{{end}}

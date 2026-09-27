@@ -613,21 +613,27 @@ pre.report-headers, pre.dns-record {
 /* ---------- Dashboard ---------- */
 
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 1rem; }
+/* A count card: the label and its icon on top, the count below. The count comes
+   first in the markup, so the grid areas place each part. */
 .stat {
-	display: flex;
-	flex-direction: column;
-	gap: 0.5rem;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	grid-template-areas: "label icon" "num num";
+	align-items: center;
+	gap: 0.75rem;
 	padding: 1.5rem;
 	border: 1px solid var(--border);
 	border-radius: var(--radius-xl);
 	background: var(--card);
+	color: var(--foreground);
 	box-shadow: var(--shadow-sm);
 	text-decoration: none;
 	transition: box-shadow 0.15s, border-color 0.15s;
 }
 a.stat:hover { border-color: var(--ring); box-shadow: var(--shadow); }
-.stat-head { display: flex; align-items: center; justify-content: space-between; color: var(--muted-foreground); font-size: 0.875rem; font-weight: 500; }
-.stat-value { font-size: 1.875rem; font-weight: 700; letter-spacing: -0.025em; line-height: 1; }
+.stat .label { grid-area: label; color: var(--muted-foreground); font-size: 0.875rem; font-weight: 500; }
+.stat .icon { grid-area: icon; color: var(--muted-foreground); }
+.stat .num { grid-area: num; font-size: 1.875rem; font-weight: 700; letter-spacing: -0.025em; line-height: 1; }
 
 /* ---------- Tabs ---------- */
 
