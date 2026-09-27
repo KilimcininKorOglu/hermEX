@@ -165,6 +165,13 @@
     }
   });
 
+  // The sidebar scrolls on its own; a page listed below its fold would open
+  // with its own entry out of sight, so the active entry is brought into view.
+  const activeNav = document.querySelector(".sidebar nav a.active");
+  if (activeNav) {
+    activeNav.scrollIntoView({ block: "nearest" });
+  }
+
   document.addEventListener("keydown", (evt) => {
     if (evt.key === "Escape" && document.body.classList.contains("nav-open")) {
       setNav(false);
