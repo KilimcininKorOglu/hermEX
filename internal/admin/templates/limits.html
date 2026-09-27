@@ -46,15 +46,15 @@
 {{template "notice" .Notice}}
 {{with index .ReadFailed "limits"}}<p class="error">{{t .}}</p>{{else}}
 <form class="form-grid" hx-post="/admin/ui/limits" hx-target="#limits-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>{{t "limits.imapLiteral"}} <input type="number" name="imap_literal_mb" value="{{.IMAPLiteralMB}}" min="1"></label>
+<label>{{t "limits.imapLiteral"}}{{template "help" "help.limits.imapLiteral"}} <input type="number" name="imap_literal_mb" value="{{.IMAPLiteralMB}}" min="1"></label>
 <label>{{t "limits.ewsRequest"}} <input type="number" name="ews_request_mb" value="{{.EWSRequestMB}}" min="1"></label>
 <label>{{t "limits.easRequest"}} <input type="number" name="activesync_request_mb" value="{{.ActiveSyncRequestMB}}" min="1"></label>
 <label>{{t "limits.mapiRequest"}} <input type="number" name="mapi_request_mb" value="{{.MapiRequestMB}}" min="1"></label>
 <label>{{t "limits.davICal"}} <input type="number" name="dav_ical_mb" value="{{.DAVICalMB}}" min="1"></label>
 <label>{{t "limits.davVCard"}} <input type="number" name="dav_vcard_mb" value="{{.DAVVCardMB}}" min="1"></label>
 <label>{{t "limits.webmailRequest"}} <input type="number" name="webmail_request_mb" value="{{.WebmailRequestMB}}" min="1"></label>
-<label>{{t "limits.webmailPreview"}} <input type="number" name="webmail_preview_mb" value="{{.WebmailPreviewMB}}" min="1"></label>
-<label>{{t "limits.freebusy"}} <input type="number" name="freebusy_max_targets" value="{{.FreeBusyMaxTargets}}" min="1"></label>
+<label>{{t "limits.webmailPreview"}}{{template "help" "help.limits.webmailPreview"}} <input type="number" name="webmail_preview_mb" value="{{.WebmailPreviewMB}}" min="1"></label>
+<label>{{t "limits.freebusy"}}{{template "help" "help.limits.freebusy"}} <input type="number" name="freebusy_max_targets" value="{{.FreeBusyMaxTargets}}" min="1"></label>
 <label>{{t "limits.tlsrpt"}} <input type="number" name="tlsrpt_mb" value="{{.TLSReportMB}}" min="1"><small>{{t "limits.tlsrptHint"}}</small></label>
 <h3 class="full">{{t "limits.commandLines"}}</h3>
 <p class="hint">{{t "limits.commandLinesHint"}}</p>

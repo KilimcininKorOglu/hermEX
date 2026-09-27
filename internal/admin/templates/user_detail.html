@@ -71,9 +71,9 @@
 {{template "card-head" (dict "Icon" "hard-drive" "Title" "userDetail.quotaTitle" "Desc" (t "userDetail.quotaUsedDesc" .Quota.UsedMB))}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/quota" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>{{t "userDetail.sendQuota"}} <input type="number" name="sendmb" value="{{.Quota.SendMB}}" min="0"></label>
-<label>{{t "userDetail.receiveQuota"}} <input type="number" name="receivemb" value="{{.Quota.ReceiveMB}}" min="0"></label>
-<label>{{t "userDetail.storageQuota"}} <input type="number" name="storagemb" value="{{.Quota.StorageMB}}" min="0"></label>
+<label>{{t "userDetail.sendQuota"}}{{template "help" "help.quota.send"}} <input type="number" name="sendmb" value="{{.Quota.SendMB}}" min="0"></label>
+<label>{{t "userDetail.receiveQuota"}}{{template "help" "help.quota.receive"}} <input type="number" name="receivemb" value="{{.Quota.ReceiveMB}}" min="0"></label>
+<label>{{t "userDetail.storageQuota"}}{{template "help" "help.quota.storage"}} <input type="number" name="storagemb" value="{{.Quota.StorageMB}}" min="0"></label>
 <button type="submit">{{t "userDetail.saveQuota"}}</button>
 </form>
 {{end}}
@@ -97,10 +97,10 @@
 <form hx-put="/admin/ui/users/{{.User.Username}}/hide" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <div class="checks">
-<label class="check"><input type="checkbox" name="hide_gal"{{if .Hide.GAL}} checked{{end}}> {{t "userDetail.hideGAL"}}</label>
-<label class="check"><input type="checkbox" name="hide_al"{{if .Hide.AL}} checked{{end}}> {{t "userDetail.hideAL"}}</label>
-<label class="check"><input type="checkbox" name="hide_delegate"{{if .Hide.Delegate}} checked{{end}}> {{t "userDetail.hideDelegate"}}</label>
-<label class="check"><input type="checkbox" name="hide_anr"{{if .Hide.ANR}} checked{{end}}> {{t "userDetail.hideANR"}}</label>
+<label class="check"><input type="checkbox" name="hide_gal"{{if .Hide.GAL}} checked{{end}}> {{t "userDetail.hideGAL"}}{{template "help" "help.hide.gal"}}</label>
+<label class="check"><input type="checkbox" name="hide_al"{{if .Hide.AL}} checked{{end}}> {{t "userDetail.hideAL"}}{{template "help" "help.hide.al"}}</label>
+<label class="check"><input type="checkbox" name="hide_delegate"{{if .Hide.Delegate}} checked{{end}}> {{t "userDetail.hideDelegate"}}{{template "help" "help.hide.delegate"}}</label>
+<label class="check"><input type="checkbox" name="hide_anr"{{if .Hide.ANR}} checked{{end}}> {{t "userDetail.hideANR"}}{{template "help" "help.hide.anr"}}</label>
 </div>
 <button type="submit">{{t "userDetail.saveVisibility"}}</button>
 </form>
@@ -139,8 +139,8 @@
 <form class="form-grid" hx-put="/admin/ui/users/{{.User.Username}}/oof" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label class="check"><input type="checkbox" name="enabled"{{if .OOF.Enabled}} checked{{end}}> {{t "userDetail.oofEnabled"}}</label>
-<label>{{t "userDetail.start"}} <input type="datetime-local" name="start" value="{{.OOF.Start}}"></label>
-<label>{{t "userDetail.end"}} <input type="datetime-local" name="end" value="{{.OOF.End}}"></label>
+<label>{{t "userDetail.start"}}{{template "help" "help.oof.start"}} <input type="datetime-local" name="start" value="{{.OOF.Start}}"></label>
+<label>{{t "userDetail.end"}}{{template "help" "help.oof.end"}} <input type="datetime-local" name="end" value="{{.OOF.End}}"></label>
 <label class="full">{{t "userDetail.internalSubject"}} <input type="text" name="internalsubject" value="{{.OOF.InternalSubject}}" placeholder="{{t "userDetail.automaticReply"}}"></label>
 <label class="full">{{t "userDetail.internalReply"}}
 <textarea name="internalreply" rows="4">{{.OOF.InternalReply}}</textarea></label>
@@ -224,12 +224,12 @@
 <label>{{t "userDetail.remoteUser"}} <input type="text" name="srcUser" placeholder="{{t "userDetail.remoteUserPlaceholder"}}" autocomplete="off" required></label>
 <label>{{t "userDetail.remotePassword"}} <input type="password" name="srcPassword" placeholder="{{t "userDetail.remotePasswordPlaceholder"}}" autocomplete="new-password"></label>
 <label>{{t "userDetail.protocol"}} <select name="protocol"><option value="POP3">POP3</option><option value="IMAP">IMAP</option></select></label>
-<label>{{t "userDetail.imapFolder"}} <input type="text" name="srcFolder" placeholder="INBOX"></label>
+<label>{{t "userDetail.imapFolder"}}{{template "help" "help.fetchmail.imapFolder"}} <input type="text" name="srcFolder" placeholder="INBOX"></label>
 <div class="checks">
-<label class="check"><input type="checkbox" name="fetchall"> {{t "userDetail.fetchAll"}}</label>
+<label class="check"><input type="checkbox" name="fetchall"> {{t "userDetail.fetchAll"}}{{template "help" "help.fetchmail.fetchAll"}}</label>
 <label class="check"><input type="checkbox" name="keep"> {{t "userDetail.keepOnServer"}}</label>
 <label class="check"><input type="checkbox" name="useSSL" checked> SSL</label>
-<label class="check"><input type="checkbox" name="sslVerify" checked> {{t "userDetail.verifyCert"}}</label>
+<label class="check"><input type="checkbox" name="sslVerify" checked> {{t "userDetail.verifyCert"}}{{template "help" "help.fetchmail.verifyCert"}}</label>
 <label class="check"><input type="checkbox" name="active" checked> {{t "userDetail.active"}}</label>
 </div>
 <button type="submit"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "plus"}}"/></svg>{{t "userDetail.addAccount"}}</button>

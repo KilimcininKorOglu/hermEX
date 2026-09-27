@@ -31,9 +31,9 @@
 {{define "user-create-fields"}}<div id="user-create-fields" class="create-fields">
 <div class="field-grid">
 <label>{{t "users.language"}} <input type="text" name="lang" value="{{.Lang}}" placeholder="{{t "users.defaultPlaceholder"}}"></label>
-<label>{{t "users.storageQuota"}} <input type="number" name="storagemb" min="0" value="{{.StorageMB}}"></label>
-<label>{{t "users.receiveQuota"}} <input type="number" name="receivemb" min="0" value="{{.ReceiveMB}}"></label>
-<label>{{t "users.sendQuota"}} <input type="number" name="sendmb" min="0" value="{{.SendMB}}"></label>
+<label>{{t "users.storageQuota"}}{{template "help" "help.quota.storage"}} <input type="number" name="storagemb" min="0" value="{{.StorageMB}}"></label>
+<label>{{t "users.receiveQuota"}}{{template "help" "help.quota.receive"}} <input type="number" name="receivemb" min="0" value="{{.ReceiveMB}}"></label>
+<label>{{t "users.sendQuota"}}{{template "help" "help.quota.send"}} <input type="number" name="sendmb" min="0" value="{{.SendMB}}"></label>
 </div>
 <div>
 <p class="field-label">{{t "users.allowedProtocols"}}</p>

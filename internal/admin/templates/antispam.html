@@ -102,8 +102,8 @@
 {{with index .ReadFailed "greylist-timings"}}<p class="error">{{t .}}</p>{{else}}
 <form class="form-grid cols-3" hx-post="/admin/ui/antispam/greylist-timings" hx-target="#greylist-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>{{t "antispam.minDelay"}} <input type="number" name="min_delay" value="{{.GreylistMinDelay}}" min="1"><small>{{t "antispam.minDelayHint"}}</small></label>
-<label>{{t "antispam.unconfirmedTTL"}} <input type="number" name="unconfirmed_ttl" value="{{.GreylistUnconfirmedTTL}}" min="1"></label>
-<label>{{t "antispam.confirmedTTL"}} <input type="number" name="confirmed_ttl" value="{{.GreylistConfirmedTTL}}" min="1"></label>
+<label>{{t "antispam.unconfirmedTTL"}}{{template "help" "help.antispam.unconfirmedTTL"}} <input type="number" name="unconfirmed_ttl" value="{{.GreylistUnconfirmedTTL}}" min="1"></label>
+<label>{{t "antispam.confirmedTTL"}}{{template "help" "help.antispam.confirmedTTL"}} <input type="number" name="confirmed_ttl" value="{{.GreylistConfirmedTTL}}" min="1"></label>
 <button type="submit">{{t "antispam.saveTimings"}}</button>
 </form>
 {{end}}
@@ -119,8 +119,8 @@
 {{if not (index .ReadFailed "digest")}}
 <form class="form-grid" hx-post="/admin/ui/antispam/digest" hx-target="#digest-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label class="check"><input type="checkbox" name="enabled" value="1"{{if .DigestEnabled}} checked{{end}}> {{t "antispam.enableDigest"}}</label>
-<label>{{t "antispam.intervalHours"}} <input type="number" name="interval" value="{{.DigestInterval}}" min="1"></label>
-<label>{{t "antispam.baseURL"}} <input type="url" name="base_url" value="{{.DigestBaseURL}}" placeholder="https://mail.example.com"></label>
+<label>{{t "antispam.intervalHours"}}{{template "help" "help.antispam.digestInterval"}} <input type="number" name="interval" value="{{.DigestInterval}}" min="1"></label>
+<label>{{t "antispam.baseURL"}}{{template "help" "help.antispam.digestBaseURL"}} <input type="url" name="base_url" value="{{.DigestBaseURL}}" placeholder="https://mail.example.com"></label>
 <button type="submit">{{t "antispam.saveSettings"}}</button>
 </form>
 {{end}}
@@ -260,10 +260,10 @@
 </tbody>
 </table>
 </div>
-<label>{{t "antispam.threshold"}} <input type="number" name="threshold" value="{{.Threshold}}" min="1"></label>
-<label>{{t "antispam.bayesProb"}} <input type="number" name="bayes_prob" value="{{.BayesProb}}" min="0" max="1" step="0.01"></label>
-<label>{{t "antispam.saThreshold"}} <input type="number" name="sa_threshold" value="{{.SAThreshold}}" min="0" step="0.1"></label>
-<label class="full">{{t "antispam.zones"}} <input type="text" name="zones" value="{{.Zones}}"></label>
+<label>{{t "antispam.threshold"}}{{template "help" "help.antispam.threshold"}} <input type="number" name="threshold" value="{{.Threshold}}" min="1"></label>
+<label>{{t "antispam.bayesProb"}}{{template "help" "help.antispam.bayesProb"}} <input type="number" name="bayes_prob" value="{{.BayesProb}}" min="0" max="1" step="0.01"></label>
+<label>{{t "antispam.saThreshold"}}{{template "help" "help.antispam.saThreshold"}} <input type="number" name="sa_threshold" value="{{.SAThreshold}}" min="0" step="0.1"></label>
+<label class="full">{{t "antispam.zones"}}{{template "help" "help.antispam.zones"}} <input type="text" name="zones" value="{{.Zones}}"></label>
 <p class="hint">{{t "antispam.scoringHint"}}</p>
 <button type="submit">{{t "antispam.saveSettings"}}</button>
 </form>

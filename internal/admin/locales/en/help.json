@@ -1,0 +1,46 @@
+{
+  "help": {
+    "antispam": {
+      "unconfirmedTTL": "How long a deferred sender is remembered while the server waits for its retry. A retry after this window counts as a new first contact and is deferred again.",
+      "confirmedTTL": "How long a sender that retried and was accepted stays remembered. Its mail is not deferred again during this time.",
+      "digestInterval": "Hours between two summaries for the same mailbox.",
+      "digestBaseURL": "The address users open webmail at. Every release link in the summary starts with it, so it must be a full http(s) URL, and the digest cannot be enabled without it.",
+      "threshold": "A message whose summed score reaches this value is filed to Junk. A domain or user threshold overrides it.",
+      "bayesProb": "The Bayesian model's spam probability at or above which the Bayesian spam weight is added to the score.",
+      "saThreshold": "The summed score of the SpamAssassin rules at or above which the SpamAssassin rules weight is added to the score.",
+      "zones": "The DNS blocklist zones the client IP address is looked up in. A listing adds the DNSBL weight. Leave it empty to turn the check off."
+    },
+    "limits": {
+      "imapLiteral": "The largest literal an IMAP client may send in one command, such as the message it uploads with APPEND.",
+      "webmailPreview": "The largest attachment webmail previews on its own when a message opens. A larger one is previewed only after the reader asks for it.",
+      "freebusy": "How many mailboxes one availability request may look up. Each mailbox costs a full calendar scan, so this limits the work of one request."
+    },
+    "quota": {
+      "storage": "The mailbox size, in MiB, that mail clients see as the quota limit. Nothing is refused when the mailbox grows past it. 0 means no limit.",
+      "receive": "Once the mailbox is larger than this, in MiB, mail sent to it is refused as mailbox full. 0 means no limit.",
+      "send": "Once the mailbox is larger than this, in MiB, the user cannot send mail. 0 means no limit."
+    },
+    "hide": {
+      "gal": "Hides the user from the global address list that Outlook shows.",
+      "al": "Stored now. It takes effect when the server offers address and member lists.",
+      "delegate": "Stored now. It takes effect when the server offers delegate lists.",
+      "anr": "Hides the user from name resolution, so a partial name typed in Outlook does not find them."
+    },
+    "oof": {
+      "start": "Automatic replies start at this time. Leave it empty to start at once.",
+      "end": "Automatic replies stop after this time. Leave it empty to keep them on until they are turned off."
+    },
+    "fetchmail": {
+      "imapFolder": "The folder read on an IMAP source. POP3 has no folders and ignores it.",
+      "fetchAll": "Fetch every message on each poll, not only the new ones. With Keep on server this delivers the same messages again on every poll.",
+      "verifyCert": "Check the source server's TLS certificate. Turn it off only for a server with a self-signed certificate."
+    },
+    "mlists": {
+      "type": "Normal delivers to the members you enter on the list's page. Domain delivers to every mailbox of the list's domain.",
+      "whoMayPost": "Whose mail the list accepts: anyone, the list's own members, senders in the list's domain, or the senders named on the list's page. Anyone (announce) accepts mail the same way as Anyone may post."
+    },
+    "ldap": {
+      "usernameAttr": "The LDAP attribute a login name is matched against. Empty uses mail."
+    }
+  }
+}

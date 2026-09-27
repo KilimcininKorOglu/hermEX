@@ -23,7 +23,7 @@
 <label>{{t "ldap.bindDN"}} <input type="text" name="bind_dn" value="{{.Config.BindDN}}" placeholder="cn=svc,dc=example,dc=com" autocomplete="off"></label>
 <label>{{t "ldap.bindPassword"}} <input type="password" name="bind_password" placeholder="{{if .BindPasswordSet}}{{t "ldap.unchanged"}}{{else}}{{t "ldap.unsetParen"}}{{end}}" autocomplete="new-password"></label>
 <label>{{t "ldap.searchBase"}} <input type="text" name="base_dn" value="{{.Config.BaseDN}}" placeholder="ou=people,dc=example,dc=com"></label>
-<label>{{t "ldap.usernameAttr"}} <input type="text" name="username_attr" value="{{.Config.UsernameAttr}}" placeholder="mail"></label>
+<label>{{t "ldap.usernameAttr"}}{{template "help" "help.ldap.usernameAttr"}} <input type="text" name="username_attr" value="{{.Config.UsernameAttr}}" placeholder="mail"></label>
 </div>
 </section>
 

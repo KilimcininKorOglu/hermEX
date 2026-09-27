@@ -439,6 +439,61 @@ main label.check {
 	font-weight: 400;
 	line-height: 1.4;
 }
+/* A label that carries a help icon keeps its text and the icon on one line: the
+   text and the icon share the first row and every control spans the rows below. */
+main form label:not(.check):has(> .help) {
+	display: grid;
+	grid-template-columns: max-content 1fr;
+	align-items: center;
+	column-gap: 0.375rem;
+	row-gap: 0.5rem;
+}
+main form label:not(.check):has(> .help) > :not(.help) { grid-column: 1 / -1; }
+
+/* help: a "?" icon whose explanation appears above it on hover or keyboard focus.
+   The tip is absolutely positioned, so showing it never moves the layout. */
+.help {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-self: start;
+	vertical-align: middle;
+	color: var(--muted-foreground);
+	cursor: help;
+	border-radius: 9999px;
+}
+.help:hover, .help:focus-visible { color: var(--foreground); }
+.help:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.help-tip {
+	position: absolute;
+	bottom: calc(100% + 0.5rem);
+	left: 50%;
+	z-index: 60;
+	width: max-content;
+	max-width: 280px;
+	padding: 0.5rem 0.625rem;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	background: var(--card);
+	color: var(--foreground);
+	box-shadow: var(--shadow);
+	font-size: 0.8125rem;
+	font-weight: 400;
+	line-height: 1.4;
+	text-align: left;
+	white-space: normal;
+	overflow-wrap: break-word;
+	transform: translateX(-50%);
+	visibility: hidden;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.12s ease;
+}
+.help:hover > .help-tip, .help:focus-visible > .help-tip, .help:focus-within > .help-tip {
+	visibility: visible;
+	opacity: 1;
+}
+
 main form p { margin: 0; }
 main form p input { display: inline-block; width: 8rem; margin-left: 0.5rem; }
 main form > button { align-self: flex-start; }

@@ -237,9 +237,9 @@
 <label>EAS <select name="eas"><option value="">{{t "domainDetail.inherit"}}</option><option value="1"{{if eq .EAS "1"}} selected{{end}}>{{t "userDetail.yes"}}</option><option value="0"{{if eq .EAS "0"}} selected{{end}}>{{t "userDetail.no"}}</option></select></label>
 <label>DAV <select name="dav"><option value="">{{t "domainDetail.inherit"}}</option><option value="1"{{if eq .DAV "1"}} selected{{end}}>{{t "userDetail.yes"}}</option><option value="0"{{if eq .DAV "0"}} selected{{end}}>{{t "userDetail.no"}}</option></select></label>
 {{end}}
-<label>{{t "users.storageQuota"}} <input type="number" name="storagemb" min="0" value="{{.Override.StorageMB}}" placeholder="{{t "domainDetail.inheritParen"}}"></label>
-<label>{{t "users.receiveQuota"}} <input type="number" name="receivemb" min="0" value="{{.Override.ReceiveMB}}" placeholder="{{t "domainDetail.inheritParen"}}"></label>
-<label>{{t "users.sendQuota"}} <input type="number" name="sendmb" min="0" value="{{.Override.SendMB}}" placeholder="{{t "domainDetail.inheritParen"}}"></label>
+<label>{{t "users.storageQuota"}}{{template "help" "help.quota.storage"}} <input type="number" name="storagemb" min="0" value="{{.Override.StorageMB}}" placeholder="{{t "domainDetail.inheritParen"}}"></label>
+<label>{{t "users.receiveQuota"}}{{template "help" "help.quota.receive"}} <input type="number" name="receivemb" min="0" value="{{.Override.ReceiveMB}}" placeholder="{{t "domainDetail.inheritParen"}}"></label>
+<label>{{t "users.sendQuota"}}{{template "help" "help.quota.send"}} <input type="number" name="sendmb" min="0" value="{{.Override.SendMB}}" placeholder="{{t "domainDetail.inheritParen"}}"></label>
 </div>
 <button type="submit">{{t "domainDetail.saveOverride"}}</button>
 </form>

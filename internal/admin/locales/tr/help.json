@@ -1,0 +1,46 @@
+{
+  "help": {
+    "antispam": {
+      "unconfirmedTTL": "Ertelenen bir gönderenin, sunucu yeniden denemesini beklerken ne kadar süre hatırlanacağı. Bu sürenin ardından gelen deneme yeni bir ilk temas sayılır ve yine ertelenir.",
+      "confirmedTTL": "Yeniden deneyip kabul edilen bir gönderenin ne kadar süre hatırlanacağı. Bu süre boyunca postası yeniden ertelenmez.",
+      "digestInterval": "Aynı posta kutusu için iki özet arasındaki saat.",
+      "digestBaseURL": "Kullanıcıların webmail'i açtığı adres. Özetteki her serbest bırakma bağlantısı bu adresle başlar. Bu yüzden tam bir http(s) URL'si olmalıdır ve bu adres olmadan özet açılamaz.",
+      "threshold": "Toplam puanı bu değere ulaşan ileti Gereksiz klasörüne gider. Alan adı veya kullanıcı eşiği bu değerin yerine geçer.",
+      "bayesProb": "Bayes modelinin spam olasılığı bu değere ulaştığında Bayes spam ağırlığı puana eklenir.",
+      "saThreshold": "SpamAssassin kurallarının toplam puanı bu değere ulaştığında SpamAssassin kuralları ağırlığı puana eklenir.",
+      "zones": "İstemcinin IP adresinin arandığı DNS engel listesi bölgeleri. Listede bulunmak DNSBL ağırlığını ekler. Denetimi kapatmak için boş bırakın."
+    },
+    "limits": {
+      "imapLiteral": "Bir IMAP istemcisinin tek komutta gönderebileceği en büyük literal, örneğin APPEND ile yüklediği ileti.",
+      "webmailPreview": "Bir ileti açılınca webmail'in kendiliğinden önizlediği en büyük ek. Daha büyüğü yalnızca okuyucu isteyince önizlenir.",
+      "freebusy": "Tek bir uygunluk isteğinin sorgulayabileceği posta kutusu sayısı. Her posta kutusu tam bir takvim taraması gerektirir. Bu yüzden bu değer tek isteğin işini sınırlar."
+    },
+    "quota": {
+      "storage": "Posta istemcilerinin kota sınırı olarak gördüğü posta kutusu boyutu (MiB). Posta kutusu bunu aşınca hiçbir şey reddedilmez. 0 sınır yok demektir.",
+      "receive": "Posta kutusu bu boyutu (MiB) aşınca ona gönderilen posta, posta kutusu dolu diye reddedilir. 0 sınır yok demektir.",
+      "send": "Posta kutusu bu boyutu (MiB) aşınca kullanıcı posta gönderemez. 0 sınır yok demektir."
+    },
+    "hide": {
+      "gal": "Kullanıcıyı Outlook'un gösterdiği genel adres listesinden gizler.",
+      "al": "Şimdilik yalnızca saklanır. Sunucu adres ve üye listelerini sunduğunda etkili olur.",
+      "delegate": "Şimdilik yalnızca saklanır. Sunucu temsilci listelerini sunduğunda etkili olur.",
+      "anr": "Kullanıcıyı ad çözümlemeden gizler. Outlook'ta adın bir kısmını yazmak onu bulmaz."
+    },
+    "oof": {
+      "start": "Otomatik yanıtlar bu zamanda başlar. Hemen başlaması için boş bırakın.",
+      "end": "Otomatik yanıtlar bu zamandan sonra durur. Kapatılana kadar açık kalması için boş bırakın."
+    },
+    "fetchmail": {
+      "imapFolder": "IMAP kaynağında okunan klasör. POP3'te klasör yoktur, bu alan yok sayılır.",
+      "fetchAll": "Her yoklamada yalnızca yeni iletileri değil, tüm iletileri çeker. Sunucuda sakla açıksa aynı iletiler her yoklamada yeniden teslim edilir.",
+      "verifyCert": "Kaynak sunucunun TLS sertifikasını denetler. Yalnızca kendinden imzalı sertifikası olan bir sunucu için kapatın."
+    },
+    "mlists": {
+      "type": "Normal, listenin sayfasında girdiğiniz üyelere teslim eder. Alan adı, listenin alan adındaki her posta kutusuna teslim eder.",
+      "whoMayPost": "Listenin kimden posta kabul ettiği: herkes, listenin kendi üyeleri, listenin alan adındaki gönderenler veya listenin sayfasında adı geçen gönderenler. Herkes (duyuru), Herkes gönderebilir ile aynı şekilde posta kabul eder."
+    },
+    "ldap": {
+      "usernameAttr": "Giriş adının karşılaştırıldığı LDAP özniteliği. Boş bırakılırsa mail kullanılır."
+    }
+  }
+}

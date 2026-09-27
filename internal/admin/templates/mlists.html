@@ -9,12 +9,12 @@
 <form class="form-grid cols-3" data-reset hx-post="/admin/ui/mlists" hx-target="#mlists-panel" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>{{t "mlists.listAddress"}} <input type="email" name="listname" placeholder="list@example.com" required></label>
-<label>{{t "mlists.type"}}
+<label>{{t "mlists.type"}}{{template "help" "help.mlists.type"}}
 <select name="type">
 <option value="0">{{t "mlists.typeNormal"}}</option>
 <option value="2">{{t "mlists.typeDomain"}}</option>
 </select></label>
-<label>{{t "mlists.whoMayPost"}}
+<label>{{t "mlists.whoMayPost"}}{{template "help" "help.mlists.whoMayPost"}}
 <select name="privilege">
 <option value="0">{{t "mlists.privAnyone"}}</option>
 <option value="1">{{t "mlists.privMembers"}}</option>

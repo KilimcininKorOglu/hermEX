@@ -217,6 +217,14 @@
     activeNav.scrollIntoView({ block: "nearest" });
   }
 
+  // A help icon sits inside a label, and a click on a label toggles or focuses
+  // its control. Reading the explanation must not change a checkbox.
+  document.addEventListener("click", (evt) => {
+    if (evt.target instanceof Element && evt.target.closest(".help")) {
+      evt.preventDefault();
+    }
+  });
+
   document.addEventListener("keydown", (evt) => {
     if (evt.key === "Escape" && document.body.classList.contains("nav-open")) {
       setNav(false);
