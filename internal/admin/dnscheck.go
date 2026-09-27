@@ -226,9 +226,14 @@ func (s *Server) handleGetDomainDNS(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	selector, err := s.dkimSelectorOf(name)
+	if err != nil {
+		s.fail(w, "could not read the DKIM key", err, http.StatusInternalServerError)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	writeJSON(w, checkDomainDNS(ctx, s.resolver, name, s.paths.ServerHostname(), s.dkimSelectorOf(name)))
+	writeJSON(w, checkDomainDNS(ctx, s.resolver, name, s.paths.ServerHostname(), selector))
 }
 
 // handleUIDomainDNS runs the DNS health check and returns the report partial for
@@ -241,7 +246,12 @@ func (s *Server) handleUIDomainDNS(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	selector, err := s.dkimSelectorOf(name)
+	if err != nil {
+		s.render(w, "notice", s.failNotice("Could not read the DKIM key, so the check cannot name its record.", err))
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	s.render(w, "dns-report", checkDomainDNS(ctx, s.resolver, name, s.paths.ServerHostname(), s.dkimSelectorOf(name)))
+	s.render(w, "dns-report", checkDomainDNS(ctx, s.resolver, name, s.paths.ServerHostname(), selector))
 }

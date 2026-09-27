@@ -42,14 +42,19 @@ func (s *Server) dkimData(domain string) map[string]any {
 }
 
 // dkimSelectorOf returns the selector a domain's stored key publishes under, falling back
-// to the default when the domain has no key yet. The DNS health check and the prescribed
-// records both read it, so they name the record the domain's own key actually uses.
-func (s *Server) dkimSelectorOf(domain string) string {
+// to the default when the domain has no key yet. The DNS health check reads it, so it
+// looks up the record the domain's own key actually uses. A failed read is returned, not
+// replaced by the default, because the check would then report a published record under
+// another selector as missing.
+func (s *Server) dkimSelectorOf(domain string) (string, error) {
 	info, found, err := s.dir.GetDKIMKeyInfo(domain)
-	if err != nil || !found || info.Selector == "" {
-		return dkimSelector
+	if err != nil {
+		return "", err
 	}
-	return info.Selector
+	if !found || info.Selector == "" {
+		return dkimSelector, nil
+	}
+	return info.Selector, nil
 }
 
 // dkimSelectorFrom reads the operator's selector from the generate form, falling back to

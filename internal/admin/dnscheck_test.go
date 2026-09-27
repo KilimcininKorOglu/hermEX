@@ -170,6 +170,30 @@ func TestAdminDomainDNSCheck(t *testing.T) {
 	}
 }
 
+// TestDomainDNSCheckReportsAFailedKeyRead proves the check does not run when the
+// DKIM key cannot be read. It fell back to the default selector, so a record the
+// domain publishes under its own selector was reported as missing.
+func TestDomainDNSCheckReportsAFailedKeyRead(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		domainDetail: directory.DomainDetail{ID: 1, Name: "acme.test"},
+		readErrs:     map[string]error{"GetDKIMKeyInfo": errReadFailed},
+	}
+	ts := adminServerDNS(t, d, acmeResolver())
+	session, _ := loginCookies(t, ts)
+
+	api := authedGET(t, ts, "/admin/domains/1/dnscheck", session)
+	api.Body.Close()
+	if api.StatusCode != http.StatusInternalServerError {
+		t.Errorf("json dns check status %d, want 500", api.StatusCode)
+	}
+	ui := wantBody(t, authedGET(t, ts, "/admin/ui/domains/1/dnscheck", session), http.StatusOK, "ui dns check")
+	wantContains(t, ui, "Could not read the DKIM key", "the failed read is reported")
+	if strings.Contains(ui, "mail.acme.test") {
+		t.Errorf("the check ran with a guessed selector:\n%s", ui)
+	}
+}
+
 // TestUIDomainDNSCheck proves the UI endpoint renders the report partial.
 func TestUIDomainDNSCheck(t *testing.T) {
 	d := &fakeDir{
