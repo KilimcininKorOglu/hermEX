@@ -507,6 +507,9 @@ func (d *mtaDaemon) relayLoop() lifecycle.Component {
 		// resolver, authenticate outbound TLS against MX hosts' TLSA records.
 		// Empty leaves DANE off, so delivery stays on opportunistic TLS + MTA-STS.
 		DANE: daneResolver(cfg.DaneResolver),
+		// A split domain's addresses without a mailbox here go to the host the
+		// admin panel names for that domain, read on each delivery.
+		SplitHost: dir.SplitRelayHost,
 		// TLS-RPT (RFC 8460): record each outbound TLS session outcome so the spool
 		// can build the recipient domain's daily aggregate report, then dispatch that
 		// report once per UTC day. The spool is the store, so it doubles as the

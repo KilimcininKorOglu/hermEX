@@ -47,6 +47,8 @@ type Directory interface {
 	SetDomainCatchAll(domain, address string) error
 	Resolve(address string) (mailboxPath string, ok bool)
 	SetDomainAVScan(domain string, inbound, outbound bool) error
+	SplitRelayHost(domain string) (string, error)
+	SetSplitRelayHost(domain, host string) error
 	ListQuarantine(domainIDs []int64, all bool, limit int) ([]directory.QuarantineRecord, error)
 	ListDMARCReports(f directory.ReportFilter) ([]directory.ReportListing, error)
 	ListTLSReports(f directory.ReportFilter) ([]directory.ReportListing, error)
@@ -500,6 +502,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/branding", s.handleUISaveDomainBranding)
 	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/sendername", s.handleUISaveDomainSenderName)
 	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/avscan", s.handleUISaveDomainAVScan)
+	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/split", s.handleUISaveDomainSplit)
 	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/createdefaults", s.handleUISaveDomainDefaults)
 	mux.HandleFunc("POST /admin/ui/domains/{domainID}/dkim/generate", s.handleUIDKIMGenerate)
 	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/dkim/enable", s.handleUIDKIMEnable)

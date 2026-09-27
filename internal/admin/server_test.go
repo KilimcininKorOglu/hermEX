@@ -42,6 +42,7 @@ type fakeDir struct {
 	settingsFound      bool
 	avInbound          bool
 	avOutbound         bool
+	splitHost          string
 	quarantine         []directory.QuarantineRecord
 	reports            fakeReports
 	senderRules        []directory.SenderRule
@@ -565,6 +566,11 @@ func (f *fakeDir) SetMessageSizeSettings(s directory.MessageSizeSettings) error 
 func (f *fakeDir) GetDomainAVScan(string) (bool, bool, error) { return f.avInbound, f.avOutbound, nil }
 func (f *fakeDir) SetDomainAVScan(_ string, inbound, outbound bool) error {
 	f.avInbound, f.avOutbound = inbound, outbound
+	return nil
+}
+func (f *fakeDir) SplitRelayHost(string) (string, error) { return f.splitHost, nil }
+func (f *fakeDir) SetSplitRelayHost(_ string, host string) error {
+	f.splitHost = host
 	return nil
 }
 func (f *fakeDir) ListQuarantine([]int64, bool, int) ([]directory.QuarantineRecord, error) {

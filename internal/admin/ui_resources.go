@@ -118,6 +118,7 @@ func (s *Server) handleUIDomainDetail(w http.ResponseWriter, r *http.Request) {
 	maps.Copy(data, s.dkimData(dd.Name))
 	catchAll, _, _ := s.dir.GetDomainCatchAll(dd.Name)
 	data["CatchAll"] = catchAll
+	data["SplitRelayHost"], _ = s.dir.SplitRelayHost(dd.Name)
 	gw, gwFound, gwErr := s.dir.GetSMTPGateway(dd.Name)
 	data["Gateway"] = gatewayViewOf(gw, gwFound && gwErr == nil)
 	data["GatewayOverride"] = gwFound && gwErr == nil

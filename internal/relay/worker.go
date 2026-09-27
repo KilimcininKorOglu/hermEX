@@ -145,6 +145,13 @@ type Worker struct {
 	// SetGateways. It is read atomically by the single Run goroutine, so the MTA's
 	// settings poll can change the gateway while delivery runs, with no restart.
 	gateways atomic.Pointer[gatewaySet]
+
+	// SplitHost returns the host that serves a split local domain's addresses
+	// without a mailbox here, or "" when the domain is not split; nil means no
+	// domain is split. It is read on every delivery rather than polled, because the
+	// mail exchanger of a split domain is this server, and a delivery that ran on a
+	// stale answer would send the message back here.
+	SplitHost func(domain string) (string, error)
 }
 
 // Gateway is an outbound SMTP gateway (smart-host): the server outgoing mail is handed to
@@ -552,6 +559,12 @@ func (w *Worker) deliver(it Item) error {
 	if domain == "" {
 		return fmt.Errorf("recipient %q has no domain", it.Recipient)
 	}
+	// A split domain's address belongs to the other mail system that shares the
+	// domain, so it goes straight to that host: the domain's MX names this server,
+	// and an outbound gateway would carry the mail outside the organization.
+	if handled, err := w.deliverSplit(domain, it); handled {
+		return err
+	}
 	// An outbound gateway replaces the whole mail-exchanger path: the operator has
 	// decided every message leaves through this one server, so there is no MX to
 	// resolve and no recipient-domain TLS policy that could describe it.
@@ -576,6 +589,23 @@ func (w *Worker) deliver(it Item) error {
 		}
 	}
 	return lastErr
+}
+
+// deliverSplit sends a split domain's recipient to the domain's configured host.
+// handled is false when the domain is not split; a lookup error is handled and
+// defers the delivery.
+func (w *Worker) deliverSplit(domain string, it Item) (handled bool, err error) {
+	if w.SplitHost == nil {
+		return false, nil
+	}
+	host, err := w.SplitHost(domain)
+	if err != nil {
+		return true, fmt.Errorf("split domain %s: %w", domain, err)
+	}
+	if host == "" {
+		return false, nil
+	}
+	return true, w.send(host, it, false)
 }
 
 // mailExchangers resolves a domain to the hosts to try, in priority order.

@@ -219,7 +219,8 @@ func (s *session) authorizedSender(from string) bool {
 // authenticated submission relaying to an external domain: only an authenticated
 // user may relay (no open relay), and only to a domain this server is not
 // authoritative for, an unresolved address in a local domain is a genuine
-// user-unknown that must never be relayed (it would loop straight back).
+// user-unknown that must never be relayed (it would loop straight back), unless
+// the domain is split and another host serves that address.
 func (s *session) Rcpt(to string, params smtp.RcptParams) error {
 	// A distribution-list recipient expands to its members. The posting-privilege
 	// gate refuses here (a 550, no message accepted, no backscatter, exactly like
@@ -278,11 +279,11 @@ func (s *session) routeRecipient(to, notify, orcpt string) error {
 	if s.authUser == "" {
 		return &smtp.PermError{Message: fmt.Sprintf("relay denied for <%s>", to)}
 	}
-	external, err := isExternalDomain(s.accounts, to)
+	relayable, err := isRelayable(s.accounts, to)
 	if err != nil {
 		return s.tempRouteFailure(to, err)
 	}
-	if !external {
+	if !relayable {
 		return &smtp.PermError{Message: fmt.Sprintf("no such user <%s>", to)}
 	}
 	if s.spool == nil {
@@ -337,7 +338,7 @@ func (s *session) routeListMember(m, notify string) {
 		return
 	}
 	if s.spool != nil {
-		if ext, err := isExternalDomain(s.accounts, m); err == nil && ext {
+		if ext, err := isRelayable(s.accounts, m); err == nil && ext {
 			s.relayTargets = append(s.relayTargets, relay.DSNRecipient{Addr: m, Notify: notify})
 		}
 	}
@@ -417,6 +418,24 @@ func isExternalDomain(accounts directory.Accounts, rcpt string) (bool, error) {
 		return false, err
 	}
 	return !local, nil
+}
+
+// isRelayable reports whether an unresolved recipient may leave through the spool:
+// its domain is foreign, or it is a local domain split with another mail system
+// that serves the addresses without a mailbox here. postmaster stays local in a
+// split domain, since RFC 5321 requires this server to accept it.
+func isRelayable(accounts directory.Accounts, rcpt string) (bool, error) {
+	external, err := isExternalDomain(accounts, rcpt)
+	if err != nil || external {
+		return external, err
+	}
+	sd, ok := accounts.(directory.SplitDomains)
+	i := strings.LastIndex(rcpt, "@")
+	if !ok || i <= 0 || strings.EqualFold(rcpt[:i], "postmaster") {
+		return false, nil
+	}
+	host, err := sd.SplitRelayHost(rcpt[i+1:])
+	return host != "", err
 }
 
 func (s *session) Data(r io.Reader) error {
@@ -864,7 +883,7 @@ func relayUnresolved(accounts directory.Accounts, spool *relay.Spool, from strin
 	unresolved []string, relayRaw []byte, received time.Time) ([]string, error) {
 	var external, stuck []string
 	for _, rcpt := range unresolved {
-		if ext, err := isExternalDomain(accounts, rcpt); err == nil && ext {
+		if ext, err := isRelayable(accounts, rcpt); err == nil && ext {
 			external = append(external, rcpt)
 		} else {
 			stuck = append(stuck, rcpt)

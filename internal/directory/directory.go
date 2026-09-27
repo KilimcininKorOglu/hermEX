@@ -159,6 +159,13 @@ type LocalDomains interface {
 	IsLocalDomain(domain string) (bool, error)
 }
 
+// SplitDomains optionally reports the host that serves the addresses of a local
+// domain with no mailbox here (a split domain, shared with another mail system).
+// An empty host means the domain is not split, so such an address is unknown.
+type SplitDomains interface {
+	SplitRelayHost(domain string) (string, error)
+}
+
 // Forward type constants for ForwardInfo.Type ([MS] forward_type): CC keeps a
 // local copy and forwards one, Redirect forwards only with no local copy.
 const (
