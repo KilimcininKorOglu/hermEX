@@ -102,7 +102,11 @@ func (s *Server) handleUIMListDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	addr := r.PathValue("addr")
-	lists, _ := s.dir.ListMLists()
+	lists, err := s.dir.ListMLists()
+	if err != nil {
+		s.fail(w, "server error", err, http.StatusInternalServerError)
+		return
+	}
 	var info *directory.MListInfo
 	for i := range lists {
 		if lists[i].Listname == addr {
@@ -114,15 +118,22 @@ func (s *Server) handleUIMListDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no such list", http.StatusNotFound)
 		return
 	}
-	members, _ := s.dir.ListMembers(addr)
-	specifieds, _ := s.dir.ListSpecifieds(addr)
-	s.render(w, "mlist_detail.html", map[string]any{
-		"Nav": "mlists", "CSRF": csrfCookieValue(r),
-		"List":       mlistViewOf(*info),
-		"Members":    strings.Join(members, "\n"),
-		"Specifieds": strings.Join(specifieds, "\n"),
-		"Owner":      info.Owner,
-	})
+	failed := readFailures{}
+	data := map[string]any{
+		"Nav": "mlists", "CSRF": csrfCookieValue(r), "ReadFailed": failed,
+		"List": mlistViewOf(*info), "Owner": info.Owner,
+	}
+	// A save replaces the whole list with the textarea, so a list that could not be
+	// read hides its form: saving the empty textarea would remove every entry.
+	members, err := s.dir.ListMembers(addr)
+	if s.noteRead(failed, "members", "the members", err) {
+		data["Members"] = strings.Join(members, "\n")
+	}
+	specifieds, err := s.dir.ListSpecifieds(addr)
+	if s.noteRead(failed, "specifieds", "the permitted senders", err) {
+		data["Specifieds"] = strings.Join(specifieds, "\n")
+	}
+	s.render(w, "mlist_detail.html", data)
 }
 
 // handleUIMListMembers saves a list's explicit members from the form and returns

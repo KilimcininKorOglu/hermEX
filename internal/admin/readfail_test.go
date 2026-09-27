@@ -42,11 +42,14 @@ func TestAFailedReadHidesTheFormItFeeds(t *testing.T) {
 		{"ListOrgs", "/admin/ui/roles/1", `hx-put="/admin/ui/roles/1"`, "the organizations"},
 		{"ListDomains", "/admin/ui/roles/1", `hx-put="/admin/ui/roles/1"`, "the domains"},
 		{"ListUsers", "/admin/ui/roles/1", `hx-put="/admin/ui/roles/1"`, "the users"},
+		{"ListMembers", "/admin/ui/mlists/team@acme.test", `/members"`, "the members"},
+		{"ListSpecifieds", "/admin/ui/mlists/team@acme.test", `/specifieds"`, "the permitted senders"},
 	} {
 		d := &fakeDir{
 			authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
 			domainDetail: directory.DomainDetail{ID: 1, Name: "acme.test"},
 			namedRoles:   map[int64]directory.RoleDetail{1: roleDetail(1, "Helpdesk", "", nil, nil)},
+			mlists:       []directory.MListInfo{{Listname: "team@acme.test"}},
 			readErrs:     map[string]error{tc.read: errReadFailed},
 		}
 		ts := adminServer(t, d)
@@ -57,6 +60,24 @@ func TestAFailedReadHidesTheFormItFeeds(t *testing.T) {
 		if strings.Contains(page, tc.form) {
 			t.Errorf("%s: %s offers the form after the read failed", tc.read, tc.path)
 		}
+	}
+}
+
+// TestAFailedListReadIsNotAMissingMailingList proves the mailing list page answers
+// a failed read of the lists as a server error. It answered 404, which tells the
+// operator the list does not exist.
+func TestAFailedListReadIsNotAMissingMailingList(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		mlists:   []directory.MListInfo{{Listname: "team@acme.test"}},
+		readErrs: map[string]error{"ListMLists": errReadFailed},
+	}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+	resp := authedGET(t, ts, "/admin/ui/mlists/team@acme.test", session)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("status %d after a failed read, want 500", resp.StatusCode)
 	}
 }
 

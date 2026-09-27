@@ -13,11 +13,13 @@
 <div class="stack">
 <section class="card">
 {{template "card-head" (dict "Icon" "users" "Title" "Members" "Desc" "One address per line. Applies to normal-type lists; a member may itself be a list.")}}
+{{with index .ReadFailed "members"}}<p class="error">{{.}}</p>{{else}}
 <form hx-put="/admin/ui/mlists/{{.List.Listname}}/members" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Members <textarea name="members" rows="6" placeholder="alice@example.com">{{.Members}}</textarea></label>
 <button type="submit">Save members</button>
 </form>
+{{end}}
 </section>
 
 <div class="card-grid two">
@@ -32,11 +34,13 @@
 
 <section class="card">
 {{template "card-head" (dict "Icon" "shield-check" "Title" "Permitted senders" "Desc" "Used when Who may post is Specified senders. One address or bare domain per line.")}}
+{{with index .ReadFailed "specifieds"}}<p class="error">{{.}}</p>{{else}}
 <form hx-put="/admin/ui/mlists/{{.List.Listname}}/specifieds" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Senders <textarea name="specifieds" rows="4" placeholder="example.com">{{.Specifieds}}</textarea></label>
 <button type="submit">Save permitted senders</button>
 </form>
+{{end}}
 </section>
 </div>
 

@@ -1010,7 +1010,12 @@ func (f *fakeDir) SetForward(username string, forwardType int, destination strin
 	f.setForwardUser, f.setForwardType, f.setForwardDest = username, forwardType, destination
 	return !f.forwardMissing, nil
 }
-func (f *fakeDir) ListMLists() ([]directory.MListInfo, error) { return f.mlists, nil }
+func (f *fakeDir) ListMLists() ([]directory.MListInfo, error) {
+	if err := f.readErrs["ListMLists"]; err != nil {
+		return nil, err
+	}
+	return f.mlists, nil
+}
 func (f *fakeDir) CreateMList(listname string, listType, listPriv int) (int64, error) {
 	if f.createErr != nil {
 		return 0, f.createErr
@@ -1022,7 +1027,9 @@ func (f *fakeDir) DeleteMList(listname string) (bool, error) {
 	f.deletedMList = listname
 	return !f.deleteMListMissing, nil
 }
-func (f *fakeDir) ListMembers(string) ([]string, error) { return f.mlistMembers, nil }
+func (f *fakeDir) ListMembers(string) ([]string, error) {
+	return f.mlistMembers, f.readErrs["ListMembers"]
+}
 func (f *fakeDir) SetMembers(listname string, members []string) (bool, error) {
 	if f.createErr != nil {
 		return false, f.createErr
@@ -1030,7 +1037,9 @@ func (f *fakeDir) SetMembers(listname string, members []string) (bool, error) {
 	f.setMembersUser, f.setMembers = listname, members
 	return !f.mlistMissing, nil
 }
-func (f *fakeDir) ListSpecifieds(string) ([]string, error) { return f.mlistSpecifieds, nil }
+func (f *fakeDir) ListSpecifieds(string) ([]string, error) {
+	return f.mlistSpecifieds, f.readErrs["ListSpecifieds"]
+}
 func (f *fakeDir) SetSpecifieds(listname string, senders []string) (bool, error) {
 	if f.createErr != nil {
 		return false, f.createErr
