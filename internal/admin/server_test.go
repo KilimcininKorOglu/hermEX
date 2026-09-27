@@ -952,6 +952,9 @@ func (f *fakeDir) DeleteFetchmail(id int64) (bool, error) {
 }
 func (f *fakeDir) GetUser(username string) (directory.UserDetail, bool, error) {
 	f.gotUser = username
+	if err := f.readErrs["GetUser"]; err != nil {
+		return directory.UserDetail{}, false, err
+	}
 	if f.knownUsers != nil {
 		u, ok := f.knownUsers[strings.ToLower(strings.TrimSpace(username))]
 		return u, ok, nil

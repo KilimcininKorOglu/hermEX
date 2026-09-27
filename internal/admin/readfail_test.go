@@ -363,6 +363,31 @@ func TestAUserDetailListReadIsNotShownAsEmpty(t *testing.T) {
 	}
 }
 
+// TestAFailedUserReadIsNotAMissingUser proves the user panels a change re-renders
+// report a failed read of the user. They answered "No such user.", which says the
+// account does not exist.
+func TestAFailedUserReadIsNotAMissingUser(t *testing.T) {
+	const user = "/admin/ui/users/bob@acme.test"
+	for _, tc := range []struct {
+		name string
+		send func(ts *httptest.Server, session, csrf string) *http.Response
+	}{
+		{"devices", func(ts *httptest.Server, session, csrf string) *http.Response {
+			return htmxPOST(t, ts, user+"/devices/action", session, csrf, url.Values{"deviceID": {"phone"}, "action": {"resync"}})
+		}},
+		{"folder permissions", func(ts *httptest.Server, session, csrf string) *http.Response {
+			return htmxGET(t, ts, user+"/folder-perms?fid=13", session, csrf)
+		}},
+	} {
+		ts, session, csrf := userDetailReadFailure(t, "GetUser")
+		body := wantBody(t, tc.send(ts, session, csrf), http.StatusOK, tc.name)
+		wantContains(t, body, "Could not read the user.", tc.name+": the failed read is reported")
+		if strings.Contains(body, "No such user.") {
+			t.Errorf("%s: a failed read still reads as a missing user", tc.name)
+		}
+	}
+}
+
 // TestADomainDetailListReadIsNotShownAsEmpty proves the domain detail page reports
 // a list it could not read. The members lists rendered as "No users." and the like,
 // and the DNS records named no DKIM key or left out the MTA-STS records.

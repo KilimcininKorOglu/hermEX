@@ -219,10 +219,15 @@ func (s *Server) renderFolderPerms(w http.ResponseWriter, email, maildir string,
 }
 
 // uiFolderUser resolves the user named in a UI folder request; on failure it renders
-// the panel with an error and reports ok=false.
+// the panel with an error and reports ok=false. A failed read is reported as one,
+// not as a missing user.
 func (s *Server) uiFolderUser(w http.ResponseWriter, r *http.Request) (directory.UserDetail, bool) {
 	u, ok, err := s.dir.GetUser(r.PathValue("email"))
-	if err != nil || !ok {
+	switch {
+	case err != nil:
+		s.render(w, "folder-perms", map[string]any{"Error": s.notice("Could not read the user.", err)})
+		return directory.UserDetail{}, false
+	case !ok:
 		s.render(w, "folder-perms", map[string]any{"Error": "No such user."})
 		return directory.UserDetail{}, false
 	}

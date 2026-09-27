@@ -155,7 +155,12 @@ func (s *Server) handleUIUserDevices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, ok, err := s.dir.GetUser(r.PathValue("email"))
-	if err != nil || !ok {
+	switch {
+	case err != nil:
+		s.renderUserDevices(w, r.PathValue("email"), csrfCookieValue(r), nil,
+			s.notice("Could not read the user.", err), "Could not read the mobile devices.")
+		return
+	case !ok:
 		s.renderUserDevices(w, r.PathValue("email"), csrfCookieValue(r), nil, "No such user.", "")
 		return
 	}
