@@ -572,9 +572,9 @@ type mailRender struct {
 // offer Accept / Tentative / Decline.
 func emailAppData(rc mailRender, raw []byte, m objectstore.MessageInfo, collID, serverID string) *wbxml.Node {
 	pref := rc.pref
-	// The stored class names a meeting request, a response or a cancellation. A signed
-	// or encrypted message keeps the generic IPM.Note class in the store; recover its
-	// S/MIME class here so the device hands it to its crypto handler.
+	// The stored class names a meeting request, a response, a cancellation or an
+	// S/MIME message. A message still stored under the generic IPM.Note class has its
+	// S/MIME class recovered here so the device hands it to its crypto handler.
 	class := messageClassFor(storedMessageClass(rc.st, m.ID), raw)
 	// The cryptographic envelope survives only if the device receives the verbatim
 	// MIME, but a client must have advertised it accepts a MIME body (MIMESupport

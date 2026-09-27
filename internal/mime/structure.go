@@ -68,6 +68,12 @@ func (p *Part) RawHeader() []byte {
 	return p.raw[:p.bodyOffset]
 }
 
+// RawBody returns this entity's body verbatim, still transfer-encoded: every byte
+// after the blank line that ends the header, exactly as stored.
+func (p *Part) RawBody() []byte {
+	return p.raw[p.bodyOffset:]
+}
+
 // parseEntity parses one MIME entity (a message or a body part): its header,
 // then its body, recursing for multipart and message/rfc822 content. depth is
 // the entity's nesting level; at maxNestingDepth the entity is parsed as a leaf

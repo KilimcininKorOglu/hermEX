@@ -2,15 +2,13 @@ package activesync
 
 import "hermex/internal/smime"
 
-// EAS message classes for an email item. The store keeps the generic
-// PidTagMessageClass "IPM.Note" for every delivered message (the MIME->MAPI
-// import does not classify S/MIME), so the S/MIME class is recovered at render
-// time from the message's media type: a clear-signed message is
-// IPM.Note.SMIME.MultipartSigned, an encrypted or opaque-signed one is
-// IPM.Note.SMIME (MS-OXOSMIME 2.1.1). Surfacing the distinct class lets the
-// device hand the message to its S/MIME handler instead of rendering the
-// signature or ciphertext as if it were the body. This is presentation-layer
-// classification, kept local to the protocol that needs it.
+// EAS message classes for an email item. The MIME->MAPI import stores an S/MIME
+// message under its S/MIME class, and a message whose stored class is still the
+// generic "IPM.Note" has the class recovered at render time from its media type:
+// a clear-signed message is IPM.Note.SMIME.MultipartSigned, an encrypted or
+// opaque-signed one is IPM.Note.SMIME (MS-OXOSMIME 2.1.1). Surfacing the distinct
+// class lets the device hand the message to its S/MIME handler instead of
+// rendering the signature or ciphertext as if it were the body.
 const (
 	messageClassNote           = "IPM.Note"
 	messageClassSMIME          = "IPM.Note.SMIME"

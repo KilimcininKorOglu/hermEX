@@ -15,11 +15,12 @@ import (
 // Import parses a raw RFC 5322 / MIME message into a MAPI Message: the
 // header-derived envelope properties, the recipient table, and the body. It
 // implements the MS-OXCMAIL internet-to-MAPI import path for the core property
-// set; the long tail (TNEF, report/DSN/MDN, S/MIME, calendar, named-header
-// passthrough) is not yet handled.
+// set, an S/MIME message in the shape [MS-OXOSMIME] gives it, and a calendar
+// part through opt.CalendarImporter; the long tail (TNEF, report/DSN/MDN,
+// named-header passthrough) is not yet handled.
 //
-// opt.Resolver is reserved: the core property set carries no named properties,
-// so no name-to-id resolution is performed yet.
+// opt.Resolver allocates the named property an opaque S/MIME message keeps its
+// Content-Type in.
 func Import(raw []byte, opt Options) (*Message, error) {
 	root := mime.ParseStructure(raw)
 	msg := &Message{}
@@ -56,6 +57,9 @@ func Import(raw []byte, opt Options) (*Message, error) {
 	msg.Props.Set(mapi.PrCreationTime, stamp)
 
 	parseContent(root, msg, stamp, opt.CalendarImporter)
+	if err := importSMIME(root, msg, stamp, opt); err != nil {
+		return nil, err
+	}
 	return msg, nil
 }
 
