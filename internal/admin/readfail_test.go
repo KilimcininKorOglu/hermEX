@@ -81,6 +81,31 @@ func TestAFailedListReadIsNotAMissingMailingList(t *testing.T) {
 	}
 }
 
+// TestAnOrganizationDomainReadIsNotShownAsNone proves the organization page reports
+// a failed read of the domains, on the page and on the panel a change re-renders.
+// The table read "No domains in this organization." and the add form offered no
+// domain.
+func TestAnOrganizationDomainReadIsNotShownAsNone(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		orgs:     map[int64]directory.OrgInfo{1: {ID: 1, Name: "Acme"}},
+		readErrs: map[string]error{"ListDomains": errReadFailed},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	bodies := map[string]string{
+		"page":  wantBody(t, authedGET(t, ts, "/admin/ui/orgs/1", session), http.StatusOK, "org page"),
+		"panel": wantBody(t, htmxPOST(t, ts, "/admin/ui/orgs/1/domains", session, csrf, url.Values{"domainID": {"x"}}), http.StatusOK, "attach"),
+	}
+	for name, body := range bodies {
+		wantContains(t, body, "Could not read the domains.", name+": the failed read is reported")
+		if strings.Contains(body, "No domains in this organization.") || strings.Contains(body, `/orgs/1/domains"`) {
+			t.Errorf("%s: a failed read renders as an organization with no domains:\n%s", name, body)
+		}
+	}
+}
+
 // userDetailReadFailure is a signed-in system administrator's server whose directory
 // and mailbox store both fail the named read, with bob@acme.test as the user whose
 // detail page is under test. The read fails from after the sign-in, which itself

@@ -46,10 +46,11 @@
 <tbody>
 {{range .Attached}}<tr><td>{{.Name}}</td>
 <td class="actions"><button type="button" class="danger" hx-post="/admin/ui/orgs/{{$.OrgID}}/domains/{{.ID}}/delete" hx-target="#org-domains-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>Remove</button></td></tr>
-{{else}}<tr><td colspan="2" class="empty">No domains in this organization.</td></tr>
+{{else}}<tr><td colspan="2" class="empty{{if .DomainsError}} failed{{end}}">{{if .DomainsError}}{{.DomainsError}}{{else}}No domains in this organization.{{end}}</td></tr>
 {{end}}
 </tbody>
 </table>
+{{if not .DomainsError}}
 <form class="create-form" hx-post="/admin/ui/orgs/{{.OrgID}}/domains" hx-target="#org-domains-panel" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Domain
@@ -60,4 +61,5 @@
 </select></label>
 <button type="submit"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "plus"}}"/></svg>Add domain</button>
 </form>
+{{end}}
 </div>{{end}}

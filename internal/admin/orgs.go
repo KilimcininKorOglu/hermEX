@@ -277,9 +277,11 @@ func (s *Server) handleUICreateOrg(w http.ResponseWriter, r *http.Request) {
 }
 
 // orgDomainsData gathers an org's attached domains and the unassigned domains
-// that can be added to it, for the domains panel on the detail page.
+// that can be added to it, for the domains panel on the detail page. A failed read
+// of the domains is reported in the table, which must not read as an organization
+// with no domains.
 func (s *Server) orgDomainsData(orgID int64, csrf, errMsg string) map[string]any {
-	domains, _ := s.dir.ListDomains()
+	domains, err := s.dir.ListDomains()
 	var attached, available []directory.DomainInfo
 	for _, dm := range domains {
 		switch dm.OrgID {
@@ -289,10 +291,14 @@ func (s *Server) orgDomainsData(orgID int64, csrf, errMsg string) map[string]any
 			available = append(available, dm)
 		}
 	}
-	return map[string]any{
+	data := map[string]any{
 		"OrgID": orgID, "CSRF": csrf,
 		"Attached": attached, "Available": available, "Error": errMsg,
 	}
+	if err != nil {
+		data["DomainsError"] = s.notice("Could not read the domains.", err)
+	}
+	return data
 }
 
 // handleUIOrgDetail renders one organization's management page: edit its name and
