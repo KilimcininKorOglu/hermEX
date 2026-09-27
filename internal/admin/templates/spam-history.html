@@ -2,35 +2,38 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<h1>Spam History</h1>
-<p class="hint">The most recent inbound messages scored at delivery. A message over the threshold (Spam = yes) was filed to the recipient's Junk folder. Reasons list the signals that fired.</p>
+<header class="page-head"><div><h1>Spam History</h1><p class="page-desc">The most recent inbound messages scored at delivery. A message over the threshold was filed to the recipient's Junk folder. Reasons list the signals that fired.</p></div></header>
 {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<div class="stack">
 <table class="grid">
 <thead><tr><th>Time</th><th>From</th><th>Client IP</th><th>Score</th><th>Spam</th><th>Reasons</th></tr></thead>
 <tbody>
 {{range .Verdicts}}<tr>
-<td>{{.Time}}</td>
+<td class="nowrap">{{.Time}}</td>
 <td>{{.MailFrom}}</td>
 <td>{{.RemoteAddr}}</td>
 <td>{{.Score}}</td>
-<td>{{if .Spam}}yes{{else}}no{{end}}</td>
+<td>{{if .Spam}}<span class="status status-off">yes</span>{{else}}<span class="status status-ok">no</span>{{end}}</td>
 <td><small>{{.Reasons}}</small></td>
 </tr>
 {{else}}<tr><td colspan="6" class="empty">No scored messages yet.</td></tr>{{end}}
 </tbody>
 </table>
 
-<h2>Retention</h2>
+<section class="card">
+{{template "card-head" (dict "Icon" "history" "Title" "Retention" "Desc" "How many scored verdicts this page keeps.")}}
 {{template "retention-panel" .}}
+</section>
+</div>
 </main>
 </div>
 {{template "foot" .}}{{end}}
 
 {{define "retention-panel"}}<div id="retention-panel">
 {{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
-<p>The newest <strong>{{.Retain}}</strong> scored verdicts are kept; older rows are pruned automatically as new mail is scored, so the history never grows unbounded.</p>
-<form hx-post="/admin/ui/spam-history/retention" hx-target="#retention-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<p>Verdicts to keep: <input type="number" name="retain" value="{{.Retain}}" min="1"></p>
+<p class="hint">The newest <strong>{{.Retain}}</strong> scored verdicts are kept; older rows are pruned automatically as new mail is scored, so the history never grows unbounded.</p>
+<form class="narrow" hx-post="/admin/ui/spam-history/retention" hx-target="#retention-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>Verdicts to keep <input type="number" name="retain" value="{{.Retain}}" min="1"></label>
 <button type="submit">Save retention</button>
 </form>
 </div>{{end}}

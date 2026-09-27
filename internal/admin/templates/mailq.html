@@ -2,9 +2,10 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<h1>Mail queue</h1>
-<p class="hint">Outbound deliveries awaiting relay. Pending entries have not been attempted yet; deferred ones failed transiently and will retry at the shown time. Flush a deferred entry to retry it now, or delete one to drop it (no bounce is sent).</p>
-<p><button hx-get="/admin/ui/mailq/panel" hx-target="#mailq-panel" hx-swap="innerHTML">Refresh</button></p>
+<header class="page-head">
+<div><h1>Mail queue</h1><p class="page-desc">Outbound deliveries awaiting relay. A pending entry has not been attempted yet; a deferred one failed transiently and retries at the shown time. Flush a deferred entry to retry it now, or delete one to drop it (no bounce is sent).</p></div>
+<div class="page-actions"><button type="button" class="secondary" hx-get="/admin/ui/mailq/panel" hx-target="#mailq-panel" hx-swap="innerHTML"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "refresh-cw"}}"/></svg>Refresh</button></div>
+</header>
 <div id="mailq-panel">{{template "mailq-panel" .}}</div>
 </main>
 </div>
@@ -13,26 +14,22 @@
 {{define "mailq-panel"}}
 {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
 <table class="grid">
-<thead><tr><th>Sender</th><th>Recipient</th><th>Status</th><th>Tries</th><th>Enqueued</th><th>Next retry</th><th>Size</th><th>Last error</th><th></th></tr></thead>
+<thead><tr><th>Message</th><th>Status</th><th>Enqueued</th><th>Last error</th><th></th></tr></thead>
 <tbody>
 {{range .Queue}}<tr>
-<td>{{.From}}</td>
-<td>{{.Recipient}}</td>
-<td>{{.Status}}</td>
-<td>{{.Attempts}}</td>
-<td>{{.Enqueued}}</td>
-<td>{{.NextAttempt}}</td>
-<td>{{.SizeKB}} KB</td>
+<td>{{.Recipient}}<small>from {{.From}}, {{.SizeKB}} KB</small></td>
+<td><span class="status{{if eq .Status "Deferred"}} status-warn{{else if eq .Status "Interrupted"}} status-off{{end}}">{{.Status}}</span><small>{{.Attempts}} {{if eq .Attempts 1}}try{{else}}tries{{end}}</small></td>
+<td class="nowrap">{{.Enqueued}}{{if .NextAttempt}}<small>Next retry {{.NextAttempt}}</small>{{end}}</td>
 <td><small>{{.LastError}}</small></td>
-<td>
-<form class="pf-inline" hx-post="/admin/ui/mailq/retry" hx-target="#mailq-panel" hx-swap="innerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
-<input type="hidden" name="id" value="{{.ID}}"><button type="submit">Flush</button></form>
-<form class="pf-inline" hx-post="/admin/ui/mailq/delete" hx-target="#mailq-panel" hx-swap="innerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'
+<td class="actions">
+<form hx-post="/admin/ui/mailq/retry" hx-target="#mailq-panel" hx-swap="innerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
+<input type="hidden" name="id" value="{{.ID}}"><button type="submit" class="secondary">Flush</button></form>
+<form hx-post="/admin/ui/mailq/delete" hx-target="#mailq-panel" hx-swap="innerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'
       hx-confirm="Delete this queued delivery to {{.Recipient}}? No bounce is sent.">
 <input type="hidden" name="id" value="{{.ID}}"><button type="submit" class="danger">Delete</button></form>
 </td>
 </tr>
-{{else}}<tr><td colspan="9" class="empty">The outbound queue is empty.</td></tr>
+{{else}}<tr><td colspan="5" class="empty">The outbound queue is empty.</td></tr>
 {{end}}
 </tbody>
 </table>

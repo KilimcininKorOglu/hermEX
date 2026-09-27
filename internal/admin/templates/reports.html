@@ -2,32 +2,38 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<h1>Reports</h1>
-<p class="hint">Reports other mail servers send to a hosted domain's postmaster address: DMARC aggregate reports, TLS reports (RFC 8460) and DMARC failure reports. A report is stored only for the domain it was addressed to. A system administrator sees every domain's reports, a domain administrator only their domains'.</p>
+<header class="page-head"><div><h1>Reports</h1><p class="page-desc">Reports other mail servers send to a hosted domain's postmaster address: DMARC aggregate reports, TLS reports (RFC 8460) and DMARC failure reports. A report is stored only for the domain it was addressed to. A system administrator sees every domain's reports, a domain administrator only their domains'.</p></div></header>
 {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
 {{range .PostmasterWarnings}}{{if .List}}<p class="warn">postmaster@{{.Domain}} is a distribution list. The list delivers a report to its members, so <strong>no report for {{.Domain}} is stored</strong>. Point postmaster@{{.Domain}} at a mailbox with an alias instead.</p>{{else}}<p class="warn">postmaster@{{.Domain}} does not resolve to a mailbox, so a report sent to it is refused and <strong>no report for {{.Domain}} is stored</strong>. Create a postmaster alias for {{.Domain}}.</p>{{end}}
-{{end}}<nav class="tabbar">
+{{end}}
+<div class="stack">
+<div class="toolbar-row">
+<nav class="tabbar" aria-label="Report kind">
 <a href="/admin/ui/reports?kind=dmarc" class="{{if eq .Kind "dmarc"}}active{{end}}">DMARC aggregate</a>
 <a href="/admin/ui/reports?kind=tlsrpt" class="{{if eq .Kind "tlsrpt"}}active{{end}}">TLS</a>
 <a href="/admin/ui/reports?kind=failure" class="{{if eq .Kind "failure"}}active{{end}}">DMARC failure</a>
 </nav>
 <form class="create-form" method="get" action="/admin/ui/reports">
 <input type="hidden" name="kind" value="{{.Kind}}">
+<label>Domain
 <select name="domain">
 <option value="">All domains</option>
 {{range .Domains}}<option value="{{.ID}}"{{if eq (print .ID) $.DomainID}} selected{{end}}>{{.Name}}</option>
-{{end}}</select>
-<input type="date" name="from" value="{{.From}}" title="From">
-<input type="date" name="to" value="{{.To}}" title="To (inclusive)">
-<button type="submit">Filter</button>
+{{end}}</select></label>
+<label>From <input type="date" name="from" value="{{.From}}"></label>
+<label>To (inclusive) <input type="date" name="to" value="{{.To}}"></label>
+<button type="submit" class="secondary"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "filter"}}"/></svg>Filter</button>
 </form>
+</div>
 
 {{if eq .Kind "failure"}}
+<section class="card">
+{{template "card-head" (dict "Icon" "triangle-alert" "Title" "Failure reports" "Desc" "One report per message that failed DMARC at the receiver. Open one to see the failed message's headers.")}}
 <table class="grid">
 <thead><tr><th>Received</th><th>Domain</th><th>Source IP</th><th>Failure</th><th>Original sender</th><th>DKIM domain</th></tr></thead>
 <tbody>
 {{range .Failures}}<tr>
-<td><a href="/admin/ui/reports/failure/{{.ID}}">{{.Received}}</a></td>
+<td class="nowrap"><a href="/admin/ui/reports/failure/{{.ID}}">{{.Received}}</a></td>
 <td>{{.Domain}}</td>
 <td>{{.SourceIP}}</td>
 <td>{{.AuthFailure}}</td>
@@ -38,8 +44,10 @@
 {{end}}
 </tbody>
 </table>
+</section>
 {{else}}
-<h2>Summary</h2>
+<section class="card">
+{{template "card-head" (dict "Icon" "chart-column" "Title" "Summary" "Desc" "Every report in the period, added up.")}}
 {{if eq .Kind "tlsrpt"}}
 <table class="grid">
 <thead><tr><th>Domain</th><th>Policy domain</th><th>Policy</th><th>MX host</th><th>Successful sessions</th><th>Failed sessions</th></tr></thead>
@@ -47,7 +55,7 @@
 {{range .TLSSummary}}<tr>
 <td>{{.Domain}}</td>
 <td>{{.PolicyDomain}}</td>
-<td>{{.PolicyType}}</td>
+<td><span class="badge">{{.PolicyType}}</span></td>
 <td>{{.MXHost}}</td>
 <td>{{.Success}}</td>
 <td>{{.Failure}}</td>
@@ -76,8 +84,10 @@
 </tbody>
 </table>
 {{end}}
+</section>
 
-<h2>Reports</h2>
+<section class="card">
+{{template "card-head" (dict "Icon" "list" "Title" "Reports" "Desc" "Each report as it arrived. Open one to see its records.")}}
 <table class="grid">
 <thead><tr><th>Period</th><th>Domain</th><th>Reporter</th><th>Report ID</th><th>Received</th><th>{{if eq .Kind "tlsrpt"}}Sessions{{else}}Messages{{end}}</th><th>Failed</th></tr></thead>
 <tbody>
@@ -85,8 +95,8 @@
 <td><a href="/admin/ui/reports/{{$.Kind}}/{{.ID}}">{{.Period}}</a></td>
 <td>{{.Domain}}</td>
 <td>{{.OrgName}}</td>
-<td>{{.ReportID}}</td>
-<td>{{.Received}}</td>
+<td><code>{{.ReportID}}</code></td>
+<td class="nowrap">{{.Received}}</td>
 <td>{{.Total}}</td>
 <td>{{.Failed}}</td>
 </tr>
@@ -94,33 +104,41 @@
 {{end}}
 </tbody>
 </table>
+</section>
 {{end}}
 
 {{if .CanEdit}}
-<h2>Retention</h2>
+<div class="card-grid two">
+<section class="card">
+{{template "card-head" (dict "Icon" "history" "Title" "Retention" "Desc" "How long stored reports are kept.")}}
 {{template "report-retention-panel" .}}
-<h2>Sending DMARC reports</h2>
+</section>
+<section class="card">
+{{template "card-head" (dict "Icon" "send" "Title" "Sending DMARC reports" "Desc" "Report back to the domains that ask for DMARC aggregate reports.")}}
 {{template "dmarc-sending-panel" .}}
+</section>
+</div>
 {{end}}
+</div>
 </main>
 </div>
 {{template "foot" .}}{{end}}
 
 {{define "report-retention-panel"}}<div id="report-retention-panel">
 {{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
-<p>Reports are deleted once they are older than their retention window, counted from the time they arrived. 0 keeps them forever. A failure report carries the failed message's headers, which are personal data, so keep it for a shorter time.</p>
+<p class="hint">Reports are deleted once they are older than their retention window, counted from the time they arrived. 0 keeps them forever. A failure report carries the failed message's headers, which are personal data, so keep it for a shorter time.</p>
 <form hx-post="/admin/ui/reports/retention" hx-target="#report-retention-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<p>DMARC aggregate and TLS reports, days: <input type="number" name="aggregate_days" value="{{.AggregateDays}}" min="0"></p>
-<p>DMARC failure reports, days: <input type="number" name="failure_days" value="{{.FailureDays}}" min="0"></p>
+<label>DMARC aggregate and TLS reports, days <input type="number" name="aggregate_days" value="{{.AggregateDays}}" min="0"></label>
+<label>DMARC failure reports, days <input type="number" name="failure_days" value="{{.FailureDays}}" min="0"></label>
 <button type="submit">Save retention</button>
 </form>
 </div>{{end}}
 
 {{define "dmarc-sending-panel"}}<div id="dmarc-sending-panel">
 {{if .DMARCNotice}}<p class="ok">{{.DMARCNotice}}</p>{{end}}
-<p>When this is on, the server counts the mail it receives from each domain that asks for DMARC aggregate reports, and once a day sends that domain a report to the mailto: addresses its DMARC record names. A report lists the addresses that sent mail claiming the domain, and how each one authenticated. It is sent from noreply at the server's hostname, and it is DKIM-signed only when that hostname has a DKIM key.</p>
+<p class="hint">When this is on, the server counts the mail it receives from each domain that asks for DMARC aggregate reports, and once a day sends that domain a report to the mailto: addresses its DMARC record names. A report lists the addresses that sent mail claiming the domain, and how each one authenticated. It is sent from noreply at the server's hostname, and it is DKIM-signed only when that hostname has a DKIM key.</p>
 <form hx-post="/admin/ui/reports/dmarc-sending" hx-target="#dmarc-sending-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<p><label><input type="checkbox" name="enabled" value="1"{{if .DMARCSending}} checked{{end}}> Send DMARC aggregate reports</label></p>
+<label class="check"><input type="checkbox" name="enabled" value="1"{{if .DMARCSending}} checked{{end}}> Send DMARC aggregate reports</label>
 <button type="submit">Save</button>
 </form>
 </div>{{end}}

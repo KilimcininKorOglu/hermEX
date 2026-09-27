@@ -2,9 +2,17 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<p><a href="/admin/ui/reports?kind=failure">Reports</a></p>
+<header class="page-head">
+<div>
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/admin/ui/reports?kind=failure">Reports</a><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "chevron-right"}}"/></svg><span>{{.R.SourceIP}}</span></nav>
 <h1>DMARC failure report</h1>
-<table class="grid">
+<p class="page-desc">{{.R.AuthFailure}} failure for {{.R.Domain}}, {{.Arrival}}.</p>
+</div>
+</header>
+<div class="stack">
+<section class="card">
+{{template "card-head" (dict "Icon" "triangle-alert" "Title" "Report" "Desc" "The report is the reporter's claim. How it arrived and the DKIM result below are what this server saw. A valid signature proves which domain sent the report, not that its contents are true.")}}
+<table class="grid kv">
 <tbody>
 <tr><th>Domain</th><td>{{.R.Domain}}</td></tr>
 <tr><th>Failure</th><td>{{.R.AuthFailure}}</td></tr>
@@ -17,9 +25,13 @@
 <tr><th>Authentication results</th><td><small>{{.R.AuthenticationResults}}</small></td></tr>
 {{template "report-sender" .}}</tbody>
 </table>
-<p class="hint">The report is the reporter's claim. How it arrived and the DKIM result above are what this server saw. A valid signature proves which domain sent the report, not that its contents are true. Only the failed message's headers are stored, never its body.</p>
-<h2>Original headers</h2>
+</section>
+
+<section class="card">
+{{template "card-head" (dict "Icon" "scroll-text" "Title" "Original headers" "Desc" "Only the failed message's headers are stored, never its body.")}}
 <pre class="report-headers">{{.R.OriginalHeaders}}</pre>
+</section>
+</div>
 </main>
 </div>
 {{template "foot" .}}{{end}}

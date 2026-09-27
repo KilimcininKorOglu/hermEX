@@ -483,6 +483,8 @@ main form > button { align-self: flex-start; }
 .create-form > label.check { align-self: center; }
 .create-form > button { flex: 0 0 auto; align-self: flex-end; }
 .create-fields { display: flex; flex-direction: column; gap: 1.25rem; }
+/* A form of one or two short numbers does not stretch them across the card. */
+form.narrow > label:not(.check) { max-width: 20rem; }
 .field-label { margin: 0 0 0.75rem; font-size: 0.875rem; font-weight: 500; }
 
 td form, form.inline, form.pf-inline, form.inline-edit {
@@ -554,11 +556,18 @@ table.grid th {
 }
 table.grid tbody tr { transition: background-color 0.15s; }
 table.grid tbody tr:hover { background: hsl(from var(--muted) h s l / 0.5); }
-table.grid tr:last-child td { border-bottom: none; }
+table.grid tbody tr:last-child > * { border-bottom: none; }
 table.grid td.empty { height: 6rem; color: var(--muted-foreground); text-align: center; }
 table.grid td a { font-weight: 500; text-decoration: none; }
 table.grid td a:hover { text-decoration: underline; }
 .card table.grid { box-shadow: none; }
+/* A two-column table of named values: a report's metadata. */
+table.grid.kv th, table.grid.kv td { height: auto; padding: 0.75rem 1rem; vertical-align: top; }
+table.grid.kv th { width: 14rem; white-space: normal; }
+table.grid.kv td { overflow-wrap: anywhere; }
+/* Tabs on the left and a filter on the right of one row. */
+.toolbar-row { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 1rem; }
+.toolbar-row .tabbar { margin: 0; }
 .dns-record { word-break: break-all; }
 table.grid td.dns-label { width: 32%; min-width: 14rem; font-weight: 500; }
 table.grid td.dns-label small { font-weight: 400; line-height: 1.4; }

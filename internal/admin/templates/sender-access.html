@@ -2,10 +2,12 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<h1>Sender allow/block</h1>
-<p class="hint">Rules override spam scoring at delivery: an allowlisted sender skips score-based junking (a forged sender that hard-fails DMARC under an enforcing policy is still junked), a blocklisted sender is always filed to Junk. A pattern is an email address or a bare domain; an exact address beats a domain. Changes apply within about a minute, no restart.</p>
+<header class="page-head"><div><h1>Sender allow/block</h1><p class="page-desc">Rules that override spam scoring at delivery. Changes apply within about a minute, no restart.</p></div></header>
 {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<section class="card">
+{{template "card-head" (dict "Icon" "ban" "Title" "Rules" "Desc" "An allowlisted sender skips score-based junking (a forged sender that hard-fails DMARC under an enforcing policy is still junked); a blocklisted sender is always filed to Junk. A pattern is an address or a bare domain, and an exact address beats a domain.")}}
 {{template "sender-access-panel" .}}
+</section>
 </main>
 </div>
 {{template "foot" .}}{{end}}
@@ -17,20 +19,21 @@
 <tbody>
 {{range .Rules}}<tr>
 <td>{{.Pattern}}</td>
-<td>{{.Action}}</td>
-<td><form hx-post="/admin/ui/sender-access/delete" hx-target="#sender-access-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
+<td>{{if eq .Action "block"}}<span class="status status-off">block</span>{{else}}<span class="status status-ok">{{.Action}}</span>{{end}}</td>
+<td class="actions"><form hx-post="/admin/ui/sender-access/delete" hx-target="#sender-access-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
 <input type="hidden" name="pattern" value="{{.Pattern}}">
-<button type="submit">Remove</button></form></td>
+<button type="submit" class="secondary">Remove</button></form></td>
 </tr>
 {{else}}<tr><td colspan="3" class="empty">No rules.</td></tr>{{end}}
 </tbody>
 </table>
-<form hx-post="/admin/ui/sender-access" hx-target="#sender-access-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<input type="text" name="pattern" placeholder="user@example.com or example.com" size="40" required>
+<form class="create-form" hx-post="/admin/ui/sender-access" hx-target="#sender-access-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>Pattern <input type="text" name="pattern" placeholder="user@example.com or example.com" required></label>
+<label>Action
 <select name="action">
 <option value="allow">allow</option>
 <option value="block">block</option>
-</select>
+</select></label>
 <button type="submit">Add rule</button>
 </form>
 </div>{{end}}

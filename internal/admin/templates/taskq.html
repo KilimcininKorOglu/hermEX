@@ -2,8 +2,7 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<h1>Task queue</h1>
-<p class="hint">Long-running admin operations (such as a directory sync) run here in the background. The table refreshes automatically.</p>
+<header class="page-head"><div><h1>Task queue</h1><p class="page-desc">Long-running admin operations, such as a directory sync, run here in the background. The table refreshes every five seconds.</p></div></header>
 {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
 <div id="taskq-panel" hx-get="/admin/ui/taskq/panel" hx-trigger="every 5s" hx-swap="innerHTML">{{template "taskq-panel" .}}</div>
 </main>
@@ -16,11 +15,11 @@
 <tbody>
 {{range .Tasks}}<tr>
 <td>{{.ID}}</td>
-<td>{{.Type}}</td>
-<td>{{.Status}}</td>
+<td><span class="badge">{{.Type}}</span></td>
+<td><span class="status{{if eq .Status "done"}} status-ok{{else if eq .Status "failed"}} status-off{{else if eq .Status "running"}} status-warn{{end}}">{{.Status}}</span></td>
 <td>{{.CreatedBy}}</td>
-<td>{{.Created}}</td>
-<td>{{.Updated}}</td>
+<td class="nowrap">{{.Created}}</td>
+<td class="nowrap">{{.Updated}}</td>
 <td><small>{{.Message}}</small></td>
 </tr>
 {{else}}<tr><td colspan="7" class="empty">No tasks.</td></tr>{{end}}

@@ -2,22 +2,33 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<p><a href="/admin/ui/reports?kind=tlsrpt">Reports</a></p>
+<header class="page-head">
+<div>
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/admin/ui/reports?kind=tlsrpt">Reports</a><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "chevron-right"}}"/></svg><span>{{.R.ReportID}}</span></nav>
 <h1>TLS report</h1>
-<table class="grid">
+<p class="page-desc">{{.R.OrgName}} about {{.R.Domain}}, {{.Period}}.</p>
+</div>
+</header>
+<div class="stack">
+<section class="card">
+{{template "card-head" (dict "Icon" "file-text" "Title" "Report" "Desc" "The report is the reporter's claim. How it arrived and the DKIM result below are what this server saw. A valid signature proves which domain sent the report, not that its numbers are true.")}}
+<table class="grid kv">
 <tbody>
 <tr><th>Domain</th><td>{{.R.Domain}}</td></tr>
 <tr><th>Reporter</th><td>{{.R.OrgName}} ({{.R.Contact}})</td></tr>
-<tr><th>Report ID</th><td>{{.R.ReportID}}</td></tr>
+<tr><th>Report ID</th><td><code>{{.R.ReportID}}</code></td></tr>
 <tr><th>Period</th><td>{{.Period}}</td></tr>
 <tr><th>Sessions</th><td>{{.R.Total}} ({{.R.Failed}} failed)</td></tr>
 {{template "report-sender" .}}</tbody>
 </table>
-<p class="hint">The report is the reporter's claim. How it arrived and the DKIM result above are what this server saw. A valid signature proves which domain sent the report, not that its numbers are true.</p>
+</section>
 
 {{range .R.Policies}}
-<h2>Policy {{.PolicyType}} for {{.PolicyDomain}}{{if .MXHost}} ({{.MXHost}}){{end}}</h2>
-<p>{{.Success}} successful sessions, {{.Failure}} failed sessions.</p>
+<section class="card">
+<div class="card-head">
+<span class="card-icon"><svg class="icon" aria-hidden="true"><use href="{{icon "lock"}}"/></svg></span>
+<div class="card-title"><h2>Policy {{.PolicyType}} for {{.PolicyDomain}}{{if .MXHost}} ({{.MXHost}}){{end}}</h2><p class="card-desc">{{.Success}} successful sessions, {{.Failure}} failed sessions.</p></div>
+</div>
 <table class="grid">
 <thead><tr><th>Result</th><th>Sessions</th><th>Sending MTA</th><th>Receiving MX</th><th>Receiving IP</th><th>Reason</th></tr></thead>
 <tbody>
@@ -33,8 +44,10 @@
 {{end}}
 </tbody>
 </table>
-{{else}}<p class="muted">The report has no policies.</p>
+</section>
+{{else}}<section class="card"><p class="empty-note">The report has no policies.</p></section>
 {{end}}
+</div>
 </main>
 </div>
 {{template "foot" .}}{{end}}
