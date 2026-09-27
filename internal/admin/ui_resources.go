@@ -9,28 +9,39 @@ import (
 )
 
 // handleUIDomains renders the domains management page (system administrators only).
+// The create form carries the system create-default user limit, so it is hidden
+// when that default could not be read: it would offer 0, and a domain created from
+// it would skip the limit.
 func (s *Server) handleUIDomains(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
 	data := s.domainsPanelData(r, "")
-	def, _, _ := s.dir.GetCreateDefaults(0)
+	def, _, err := s.dir.GetCreateDefaults(0)
 	data["Nav"] = "domains"
 	data["DefaultMaxUser"] = def.Domain.MaxUser
+	if err != nil {
+		data["DefaultsError"] = s.notice("Could not read the create defaults. The form is hidden so a new domain does not skip them.", err)
+	}
 	s.render(w, "domains.html", data)
 }
 
 // domainsPanelData returns what the domains list renders: every domain, the
 // name of each organization by id so a row names its organization rather than
-// a number, and the outcome message of the request.
+// a number, and the outcome message of the request. A failed read of either list
+// is reported rather than shown as no domains or as domains in no organization.
 func (s *Server) domainsPanelData(r *http.Request, errMsg string) map[string]any {
-	domains, _ := s.dir.ListDomains()
-	orgs, _ := s.dir.ListOrgs()
+	domains, domainsErr := s.dir.ListDomains()
+	orgs, orgsErr := s.dir.ListOrgs()
 	orgNames := make(map[int64]string, len(orgs))
 	for _, o := range orgs {
 		orgNames[o.ID] = o.Name
 	}
-	return map[string]any{"Domains": domains, "OrgNames": orgNames, "Error": errMsg, "CSRF": csrfCookieValue(r)}
+	return map[string]any{
+		"Domains": domains, "DomainsError": s.listFailure("the domains", domainsErr),
+		"OrgNames": orgNames, "OrgsError": s.listFailure("the organizations", orgsErr),
+		"Error": errMsg, "CSRF": csrfCookieValue(r),
+	}
 }
 
 // handleUICreateDomain creates a domain from the management form and returns the

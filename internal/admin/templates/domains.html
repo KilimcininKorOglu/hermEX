@@ -6,12 +6,14 @@
 <div class="stack">
 <section class="card">
 {{template "card-head" (dict "Icon" "globe" "Title" "Add a domain" "Desc" "Publish its DNS records from the domain's page once it exists.")}}
+{{with .DefaultsError}}<p class="error">{{.}}</p>{{else}}
 <form class="form-grid" data-reset hx-post="/admin/ui/domains" hx-target="#domains-panel" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Domain name <input type="text" name="name" placeholder="example.com" required></label>
 <label>Maximum users <input type="number" name="maxUser" min="0" value="{{.DefaultMaxUser}}"><small>0 means unlimited.</small></label>
 <button type="submit"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "plus"}}"/></svg>Add domain</button>
 </form>
+{{end}}
 </section>
 {{template "domains-panel" .}}
 </div>
@@ -21,18 +23,19 @@
 
 {{define "domains-panel"}}<div id="domains-panel">
 {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{if and .OrgsError .Domains}}<p class="error">{{.OrgsError}}</p>{{end}}
 <table class="grid">
 <thead><tr><th>Domain</th><th>Organization</th><th>Status</th><th></th></tr></thead>
 <tbody>
 {{range .Domains}}<tr><td><a href="/admin/ui/domains/{{.ID}}">{{.Name}}</a></td>
-<td>{{with index $.OrgNames .OrgID}}{{.}}{{else}}<span class="muted">None</span>{{end}}</td>
+<td>{{with index $.OrgNames .OrgID}}{{.}}{{else}}<span class="muted">{{if and .OrgID $.OrgsError}}Unknown{{else}}None{{end}}</span>{{end}}</td>
 <td>{{if eq .Status 0}}<span class="status status-ok">Active</span>{{else}}<span class="status status-off">Suspended</span>{{end}}</td>
 <td class="actions"><form hx-post="/admin/ui/domains/{{.ID}}/purge" hx-target="#domains-panel" hx-swap="outerHTML"
       hx-confirm="Purge {{.Name}}? This permanently removes the domain and every user, alias, and list in it."
       hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
 <label class="check"><input type="checkbox" name="deleteFiles" value="true"> Delete files</label>
 <button type="submit" class="danger">Purge</button></form></td></tr>
-{{else}}<tr><td colspan="4" class="empty">No domains yet.</td></tr>
+{{else}}<tr><td colspan="4" class="empty{{if .DomainsError}} failed{{end}}">{{or .DomainsError "No domains yet."}}</td></tr>
 {{end}}
 </tbody>
 </table>

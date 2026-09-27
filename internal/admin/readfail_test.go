@@ -94,6 +94,7 @@ func TestAFailedListReadIsNotShownAsEmpty(t *testing.T) {
 		{"ListMLists", "/admin/ui/mlists", "Could not read the mailing lists.", "No mailing lists yet."},
 		{"ListOrgs", "/admin/ui/orgs", "Could not read the organizations.", "No organizations yet."},
 		{"ListRoles", "/admin/ui/roles", "Could not read the roles.", "No roles yet."},
+		{"ListDomains", "/admin/ui/domains", "Could not read the domains.", "No domains yet."},
 	} {
 		d := &fakeDir{
 			authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
@@ -123,6 +124,7 @@ func TestAFailedChoiceReadHidesTheCreateForm(t *testing.T) {
 		read, path, form, reported string
 	}{
 		{"ListDomains", "/admin/ui/contacts", `hx-post="/admin/ui/contacts"`, "Could not read the domains."},
+		{"GetCreateDefaults", "/admin/ui/domains", `hx-post="/admin/ui/domains"`, "Could not read the create defaults."},
 	} {
 		d := &fakeDir{
 			authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
@@ -135,6 +137,31 @@ func TestAFailedChoiceReadHidesTheCreateForm(t *testing.T) {
 		wantContains(t, page, tc.reported, tc.read+": the failed read is reported")
 		if strings.Contains(page, tc.form) {
 			t.Errorf("%s: %s offers the create form after the read failed", tc.read, tc.path)
+		}
+	}
+}
+
+// TestADomainListOrganizationReadIsNotShownAsNone proves the domains list reports a
+// failed read of the organizations, on the page and on the panel a create
+// re-renders. A domain in an organization read "None", which says it is in none.
+func TestADomainListOrganizationReadIsNotShownAsNone(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		domains:  []directory.DomainInfo{{ID: 1, Name: "acme.test", OrgID: 3}},
+		readErrs: map[string]error{"ListOrgs": errReadFailed},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	bodies := map[string]string{
+		"page":  wantBody(t, authedGET(t, ts, "/admin/ui/domains", session), http.StatusOK, "domains page"),
+		"panel": wantBody(t, htmxPOST(t, ts, "/admin/ui/domains", session, csrf, url.Values{}), http.StatusOK, "create"),
+	}
+	for name, body := range bodies {
+		wantContains(t, body, "Could not read the organizations.", name+": the failed read is reported")
+		wantContains(t, body, `<span class="muted">Unknown</span>`, name+": the organization is unknown")
+		if strings.Contains(body, `<span class="muted">None</span>`) {
+			t.Errorf("%s: a domain in an organization reads as in none after the read failed", name)
 		}
 	}
 }
