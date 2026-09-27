@@ -326,6 +326,7 @@ func openKind(dir string, seedBuiltins bool, kind storeKind) (*Store, error) {
 	// the same paths as any other edit.
 	if seedBuiltins && kind == storePrivate {
 		s.upgradeLegacyTasks()
+		s.upgradeSMIMEMessages()
 	}
 	return s, nil
 }
