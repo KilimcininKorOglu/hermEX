@@ -25,7 +25,7 @@
 <thead><tr><th>Domain</th><th>Organization</th><th>Status</th><th></th></tr></thead>
 <tbody>
 {{range .Domains}}<tr><td><a href="/admin/ui/domains/{{.ID}}">{{.Name}}</a></td>
-<td>{{.OrgID}}</td>
+<td>{{with index $.OrgNames .OrgID}}{{.}}{{else}}<span class="muted">None</span>{{end}}</td>
 <td>{{if eq .Status 0}}<span class="status status-ok">Active</span>{{else}}<span class="status status-off">Suspended</span>{{end}}</td>
 <td class="actions"><form hx-post="/admin/ui/domains/{{.ID}}/purge" hx-target="#domains-panel" hx-swap="outerHTML"
       hx-confirm="Purge {{.Name}}? This permanently removes the domain and every user, alias, and list in it."

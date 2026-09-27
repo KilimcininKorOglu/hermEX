@@ -29,6 +29,29 @@ func TestUIDomainsPage(t *testing.T) {
 	}
 }
 
+// TestUIDomainsPageNamesOrganization proves a domain row names the organization
+// it belongs to rather than its numeric id, and says None for a domain outside
+// every organization.
+func TestUIDomainsPageNamesOrganization(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		domains: []directory.DomainInfo{{ID: 1, Name: "acme.test", OrgID: 2}, {ID: 2, Name: "solo.test"}},
+		orgs:    map[int64]directory.OrgInfo{2: {ID: 2, Name: "Acme Group"}},
+	}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+	resp := authedGET(t, ts, "/admin/ui/domains", session)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	s := string(body)
+	if !strings.Contains(s, "<td>Acme Group</td>") {
+		t.Errorf("acme.test row does not name its organization:\n%s", s)
+	}
+	if !strings.Contains(s, `<span class="muted">None</span>`) {
+		t.Errorf("solo.test row does not say it has no organization:\n%s", s)
+	}
+}
+
 // TestUICreateDomain proves the form creates a domain and refreshes the panel.
 func TestUICreateDomain(t *testing.T) {
 	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}

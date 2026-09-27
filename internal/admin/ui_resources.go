@@ -13,12 +13,24 @@ func (s *Server) handleUIDomains(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	domains, _ := s.dir.ListDomains()
+	data := s.domainsPanelData(r, "")
 	def, _, _ := s.dir.GetCreateDefaults(0)
-	s.render(w, "domains.html", map[string]any{
-		"Nav": "domains", "CSRF": csrfCookieValue(r), "Domains": domains,
-		"DefaultMaxUser": def.Domain.MaxUser,
-	})
+	data["Nav"] = "domains"
+	data["DefaultMaxUser"] = def.Domain.MaxUser
+	s.render(w, "domains.html", data)
+}
+
+// domainsPanelData returns what the domains list renders: every domain, the
+// name of each organization by id so a row names its organization rather than
+// a number, and the outcome message of the request.
+func (s *Server) domainsPanelData(r *http.Request, errMsg string) map[string]any {
+	domains, _ := s.dir.ListDomains()
+	orgs, _ := s.dir.ListOrgs()
+	orgNames := make(map[int64]string, len(orgs))
+	for _, o := range orgs {
+		orgNames[o.ID] = o.Name
+	}
+	return map[string]any{"Domains": domains, "OrgNames": orgNames, "Error": errMsg, "CSRF": csrfCookieValue(r)}
 }
 
 // handleUICreateDomain creates a domain from the management form and returns the
@@ -41,8 +53,7 @@ func (s *Server) handleUICreateDomain(w http.ResponseWriter, r *http.Request) {
 			errMsg = s.notice("Created the domain, but could not set the user limit.", err)
 		}
 	}
-	domains, _ := s.dir.ListDomains()
-	s.render(w, "domains-panel", map[string]any{"Domains": domains, "Error": errMsg, "CSRF": csrfCookieValue(r)})
+	s.render(w, "domains-panel", s.domainsPanelData(r, errMsg))
 }
 
 // handleUIPurgeDomain purges a domain from the management page and returns the
@@ -66,8 +77,7 @@ func (s *Server) handleUIPurgeDomain(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	domains, _ := s.dir.ListDomains()
-	s.render(w, "domains-panel", map[string]any{"Domains": domains, "Error": errMsg, "CSRF": csrfCookieValue(r)})
+	s.render(w, "domains-panel", s.domainsPanelData(r, errMsg))
 }
 
 // handleUIDomainDetail renders one domain's management page: edit its status,
