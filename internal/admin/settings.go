@@ -13,15 +13,18 @@ func (s *Server) handleUISettings(w http.ResponseWriter, r *http.Request) {
 }
 
 // settingsPageData merges every settings panel's data into one model. It reuses
-// antispamPageData (scoring, greylist, rate-limit, outbound, relay, digest, message
-// size, model/ruleset status) and adds the protocol size limits, the spam-history
-// retention, and the central-log retention so all panels render on the single page.
+// antispamPageData (scoring, greylist, rate-limit, outbound, relay, gateway, digest,
+// message size, model/ruleset status) and adds the protocol limits, the login
+// lockout, the fetch policy and the retention windows so all panels render on the
+// single page.
 func (s *Server) settingsPageData(r *http.Request, notice string) map[string]any {
 	data := s.antispamPageData(r, notice)
 	data["Nav"] = "settings"
 	s.fillSizeLimits(data)
 	s.fillHTTPRateLimit(data)
 	s.fillConnLimit(data)
+	s.fillLoginLockout(data)
+	s.fillFetchPolicy(data)
 	s.fillLogRetention(data)
 	s.fillRecoverableRetention(data)
 

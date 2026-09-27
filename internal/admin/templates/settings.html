@@ -38,6 +38,8 @@
 {{template "outbound-panel" .}}
 <h2>Outbound delivery retry</h2>
 {{template "relay-panel" .}}
+<h2>Outbound gateway</h2>
+{{template "gateway-panel" .}}
 <h2>Quarantine digest</h2>
 {{template "digest-panel" .}}
 <h2>Out-of-office reply</h2>
@@ -52,6 +54,10 @@
 {{template "http-ratelimit-panel" .}}
 <h2>Concurrent connections</h2>
 {{template "conn-limit-panel" .}}
+<h2>Login lockout</h2>
+{{template "loginlockout-panel" .}}
+<h2>Mail fetching</h2>
+{{template "fetchpolicy-panel" .}}
 </div>
 
 <div class="tabpanel retention">
