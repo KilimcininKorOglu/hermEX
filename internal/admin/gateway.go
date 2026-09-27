@@ -68,15 +68,16 @@ func (s *Server) handleUISaveGateway(w http.ResponseWriter, r *http.Request) {
 	// save: it would store the empty password in its place.
 	stored, _, err := s.dir.GetSMTPGateway(directory.GlobalGateway)
 	if err != nil {
-		s.render(w, "gateway-panel", s.antispamPageData(r, s.failNotice("Could not read the stored gateway; nothing was saved.", err)))
+		s.render(w, r, "gateway-panel", s.antispamPageData(r, s.failNotice("Could not read the stored gateway; nothing was saved.", err)))
 		return
 	}
 	if err := s.dir.SetSMTPGateway(directory.GlobalGateway, gatewayFromForm(r, stored.Password)); err != nil {
-		s.render(w, "gateway-panel", s.antispamPageData(r, s.failNotice("Could not save the gateway.", err)))
+		s.render(w, r, "gateway-panel", s.antispamPageData(r, s.failNotice("Could not save the gateway.", err)))
 		return
 	}
-	s.render(w, "gateway-panel", s.antispamPageData(r,
+	s.render(w, r, "gateway-panel", s.antispamPageData(r,
 		okNotice("Outbound gateway saved, the MTA applies it within a minute, no restart.")))
+
 }
 
 // handleUIDeleteGateway removes the global gateway, returning every domain that has no
@@ -86,11 +87,12 @@ func (s *Server) handleUIDeleteGateway(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := s.dir.DeleteSMTPGateway(directory.GlobalGateway); err != nil {
-		s.render(w, "gateway-panel", s.antispamPageData(r, s.failNotice("Could not remove the gateway.", err)))
+		s.render(w, r, "gateway-panel", s.antispamPageData(r, s.failNotice("Could not remove the gateway.", err)))
 		return
 	}
-	s.render(w, "gateway-panel", s.antispamPageData(r,
+	s.render(w, r, "gateway-panel", s.antispamPageData(r,
 		okNotice("Outbound gateway removed, mail is delivered directly to each recipient's mail exchangers again.")))
+
 }
 
 // domainGatewayPanel re-renders one domain's gateway fragment with a notice.
@@ -99,7 +101,7 @@ func (s *Server) domainGatewayPanel(w http.ResponseWriter, r *http.Request, dd d
 	failed := readFailures{}
 	s.addDomainGateway(data, failed, dd.Name)
 	data["ReadFailed"] = failed
-	s.render(w, "domain-gateway-panel", data)
+	s.render(w, r, "domain-gateway-panel", data)
 }
 
 // addDomainGateway merges one domain's gateway override into a page's data, or

@@ -36,6 +36,14 @@
     });
   });
 
+  // text returns a message the page rendered in the operator's language onto the
+  // root element as data-msg-<name>, with {0} replaced by arg.
+  function text(name, arg) {
+    const key = "msg" + name.replace(/(^|-)(\w)/g, (_, _dash, c) => c.toUpperCase());
+    const message = document.documentElement.dataset[key] || "";
+    return arg === undefined ? message : message.replace("{0}", String(arg));
+  }
+
   // How long a toast stays, by kind. An error stays longer so it can be read.
   const TOAST_MS = { ok: 3500, warn: 6000, error: 8000 };
 
@@ -60,7 +68,7 @@
     body.textContent = text;
     const close = document.createElement("button");
     close.type = "button";
-    close.setAttribute("aria-label", "Dismiss");
+    close.setAttribute("aria-label", text("dismiss"));
     close.append(glyph("close"));
     close.addEventListener("click", () => item.remove());
     item.append(glyph(kind), body, close);
@@ -134,32 +142,50 @@
   // htmx does not swap an error response, so without this a failed request
   // would change nothing on the page and say nothing.
   document.addEventListener("htmx:responseError", (evt) => {
-    toast("error", "The request failed (HTTP " + evt.detail.xhr.status + ").");
+    toast("error", text("request-failed", evt.detail.xhr.status));
   });
   document.addEventListener("htmx:sendError", () => {
-    toast("error", "The server could not be reached.");
+    toast("error", text("unreachable"));
   });
 
-  // setTheme shows the operator's theme at once and stores it in the users record
-  // webmail shares; the answer also sets the admin_theme cookie theme.js reads. A
-  // failed save puts the previous theme back and says so.
+  // savePref stores one interface preference in the users record webmail shares;
+  // the answer also sets the cookie that caches it. It resolves on success and
+  // rejects on any failure.
+  async function savePref(name, value) {
+    const csrf = /(?:^|;\s*)hermex_admin_csrf=([^;]*)/.exec(document.cookie);
+    const resp = await fetch("/admin/ui/prefs", {
+      method: "PUT",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": csrf ? decodeURIComponent(csrf[1]) : "" },
+      body: name + "=" + encodeURIComponent(value),
+    });
+    if (!resp.ok) {
+      throw new Error("HTTP " + resp.status);
+    }
+  }
+
+  // setTheme shows the operator's theme at once and stores it. A failed save puts
+  // the previous theme back and says so.
   function setTheme(theme) {
     const previous = document.documentElement.dataset.theme;
     document.documentElement.dataset.theme = theme;
-    const csrf = /(?:^|;\s*)hermex_admin_csrf=([^;]*)/.exec(document.cookie);
-    fetch("/admin/ui/prefs", {
-      method: "PUT",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": csrf ? decodeURIComponent(csrf[1]) : "" },
-      body: "theme=" + encodeURIComponent(theme),
-    }).then((resp) => {
-      if (!resp.ok) {
-        throw new Error("HTTP " + resp.status);
-      }
-    }).catch(() => {
+    savePref("theme", theme).catch(() => {
       document.documentElement.dataset.theme = previous;
-      toast("error", "The theme could not be saved.");
+      toast("error", text("theme-failed"));
     });
   }
+
+  // The language selector stores the choice and reloads the page, which the
+  // server renders in the new language. A failed save puts the selector back.
+  document.addEventListener("change", (evt) => {
+    const select = evt.target instanceof HTMLSelectElement && evt.target.matches(".lang-select") ? evt.target : null;
+    if (!select) {
+      return;
+    }
+    savePref("lang", select.value).then(() => window.location.reload()).catch(() => {
+      select.value = document.documentElement.lang;
+      toast("error", text("lang-failed"));
+    });
+  });
 
   // setNav opens or closes the narrow-screen menu.
   function setNav(open) {

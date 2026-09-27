@@ -34,7 +34,7 @@ func (s *Server) handleUIRoles(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	s.render(w, "roles.html", s.rolesPanelData(r, ""))
+	s.render(w, r, "roles.html", s.rolesPanelData(r, ""))
 }
 
 // rolesPanelData assembles the roles list and panel state.
@@ -60,7 +60,7 @@ func (s *Server) handleUICreateRole(w http.ResponseWriter, r *http.Request) {
 	if _, err := s.dir.CreateRole(r.PostFormValue("name"), r.PostFormValue("description"), nil, nil); err != nil {
 		errMsg = s.notice("Could not create role.", err)
 	}
-	s.render(w, "roles-panel", s.rolesPanelData(r, errMsg))
+	s.render(w, r, "roles-panel", s.rolesPanelData(r, errMsg))
 }
 
 // handleUIRoleDetail renders one role's editor: identity, the permission
@@ -83,7 +83,7 @@ func (s *Server) handleUIRoleDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no such role", http.StatusNotFound)
 		return
 	}
-	s.render(w, "role_detail.html", s.roleDetailData(r, role, nil, "", false))
+	s.render(w, r, "role_detail.html", s.roleDetailData(r, role, nil, "", false))
 }
 
 // roleDetailData builds the role editor's view model. The save replaces the role's
@@ -175,7 +175,7 @@ func (s *Server) handleUIUpdateRole(w http.ResponseWriter, r *http.Request) {
 	found, err := s.dir.UpdateRole(id, r.PostFormValue("name"), r.PostFormValue("description"), rolePermsFromForm(r), userIDs)
 	if err != nil {
 		role, _, roleErr := s.dir.GetRole(id)
-		s.render(w, "role-editor", s.roleDetailData(r, role, roleErr, s.notice("Could not save role.", err), false))
+		s.render(w, r, "role-editor", s.roleDetailData(r, role, roleErr, s.notice("Could not save role.", err), false))
 		return
 	}
 	if !found {
@@ -183,7 +183,7 @@ func (s *Server) handleUIUpdateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	role, _, roleErr := s.dir.GetRole(id)
-	s.render(w, "role-editor", s.roleDetailData(r, role, roleErr, "", true))
+	s.render(w, r, "role-editor", s.roleDetailData(r, role, roleErr, "", true))
 }
 
 // rolePermsFromForm rebuilds a role's permission set from the editor checkboxes:

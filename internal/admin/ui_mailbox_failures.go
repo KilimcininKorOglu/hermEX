@@ -21,7 +21,7 @@ func (s *Server) handleUIMailboxFailures(w http.ResponseWriter, r *http.Request)
 	data := map[string]any{"Nav": "mailboxfailures", "CSRF": csrfCookieValue(r)}
 	if s.logs == nil {
 		data["Disabled"] = true
-		s.render(w, "mailbox_failures.html", data)
+		s.render(w, r, "mailbox_failures.html", data)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -32,5 +32,5 @@ func (s *Server) handleUIMailboxFailures(w http.ResponseWriter, r *http.Request)
 	} else {
 		data["Entries"] = entries
 	}
-	s.render(w, "mailbox_failures.html", data)
+	s.render(w, r, "mailbox_failures.html", data)
 }

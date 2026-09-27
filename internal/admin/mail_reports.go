@@ -94,7 +94,7 @@ func (s *Server) handleUIReports(w http.ResponseWriter, r *http.Request) {
 		s.addReportSettings(data)
 	}
 	data["Error"] = strings.Join(problems, " ")
-	s.render(w, "reports.html", data)
+	s.render(w, r, "reports.html", data)
 }
 
 // reportFilterFrom builds the directory filter from the page's query: the
@@ -287,10 +287,11 @@ func (s *Server) handleUIDMARCReport(w http.ResponseWriter, r *http.Request) {
 	if !s.reportVisible(w, found, err, all || ids[rep.DomainID]) {
 		return
 	}
-	s.render(w, "report-dmarc.html", map[string]any{
+	s.render(w, r, "report-dmarc.html", map[string]any{
 		"Nav": "reports", "CSRF": csrfCookieValue(r), "R": rep,
 		"Period": reportPeriod(rep.Begin, rep.End), "Received": unixUTC(rep.ReceivedAt),
 	})
+
 }
 
 // handleUITLSReport renders one TLS report with its policies.
@@ -303,10 +304,11 @@ func (s *Server) handleUITLSReport(w http.ResponseWriter, r *http.Request) {
 	if !s.reportVisible(w, found, err, all || ids[rep.DomainID]) {
 		return
 	}
-	s.render(w, "report-tlsrpt.html", map[string]any{
+	s.render(w, r, "report-tlsrpt.html", map[string]any{
 		"Nav": "reports", "CSRF": csrfCookieValue(r), "R": rep,
 		"Period": reportPeriod(rep.Begin, rep.End), "Received": unixUTC(rep.ReceivedAt),
 	})
+
 }
 
 // handleUIDMARCFailure renders one DMARC failure report.
@@ -319,10 +321,11 @@ func (s *Server) handleUIDMARCFailure(w http.ResponseWriter, r *http.Request) {
 	if !s.reportVisible(w, found, err, all || ids[rep.DomainID]) {
 		return
 	}
-	s.render(w, "report-failure.html", map[string]any{
+	s.render(w, r, "report-failure.html", map[string]any{
 		"Nav": "reports", "CSRF": csrfCookieValue(r), "R": rep,
 		"Arrival": unixUTC(rep.ArrivalDate), "Received": unixUTC(rep.ReceivedAt),
 	})
+
 }
 
 // addReportSettings adds the report settings a system administrator may edit to the
@@ -370,12 +373,12 @@ func (s *Server) handleUISaveMailReportRetention(w http.ResponseWriter, r *http.
 	if err := s.dir.SetMailReportSettings(rs); err != nil {
 		s.fillMailReportRetention(data, failed)
 		data["Notice"] = s.failNotice("Could not save the retention setting.", err)
-		s.render(w, "report-retention-panel", data)
+		s.render(w, r, "report-retention-panel", data)
 		return
 	}
 	s.fillMailReportRetention(data, failed)
 	data["Notice"] = okNotice("Report retention saved; the sweep deletes expired reports within a minute, no restart.")
-	s.render(w, "report-retention-panel", data)
+	s.render(w, r, "report-retention-panel", data)
 }
 
 // fillDMARCSending sets the DMARC aggregate report sending switch on a page-data
@@ -401,10 +404,10 @@ func (s *Server) handleUISaveDMARCSending(w http.ResponseWriter, r *http.Request
 	if err := s.dir.SetDMARCReportSettings(directory.DMARCReportSettings{Enabled: on}); err != nil {
 		s.fillDMARCSending(data, failed)
 		data["DMARCNotice"] = s.failNotice("Could not save the DMARC sending setting.", err)
-		s.render(w, "dmarc-sending-panel", data)
+		s.render(w, r, "dmarc-sending-panel", data)
 		return
 	}
 	s.fillDMARCSending(data, failed)
 	data["DMARCNotice"] = okNotice("DMARC report sending saved; the mail server applies it within a minute, no restart.")
-	s.render(w, "dmarc-sending-panel", data)
+	s.render(w, r, "dmarc-sending-panel", data)
 }

@@ -50,7 +50,7 @@ func (s *Server) handleUITaskq(w http.ResponseWriter, r *http.Request) {
 	}
 	data := s.taskqPanelData()
 	data["Nav"] = "taskq"
-	s.render(w, "taskq.html", data)
+	s.render(w, r, "taskq.html", data)
 }
 
 // handleUITaskqPanel renders just the task table (the page polls it to refresh).
@@ -58,7 +58,7 @@ func (s *Server) handleUITaskqPanel(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	s.render(w, "taskq-panel", s.taskqPanelData())
+	s.render(w, r, "taskq-panel", s.taskqPanelData())
 }
 
 // taskqPanelData returns what the task table renders. A failed read is reported in

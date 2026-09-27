@@ -23,7 +23,7 @@ func (s *Server) handleUIDomains(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		data["DefaultsError"] = s.notice("Could not read the create defaults. The form is hidden so a new domain does not skip them.", err)
 	}
-	s.render(w, "domains.html", data)
+	s.render(w, r, "domains.html", data)
 }
 
 // domainsPanelData returns what the domains list renders: every domain, the
@@ -64,7 +64,7 @@ func (s *Server) handleUICreateDomain(w http.ResponseWriter, r *http.Request) {
 			errMsg = s.notice("Created the domain, but could not set the user limit.", err)
 		}
 	}
-	s.render(w, "domains-panel", s.domainsPanelData(r, errMsg))
+	s.render(w, r, "domains-panel", s.domainsPanelData(r, errMsg))
 }
 
 // handleUIPurgeDomain purges a domain from the management page and returns the
@@ -88,7 +88,7 @@ func (s *Server) handleUIPurgeDomain(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	s.render(w, "domains-panel", s.domainsPanelData(r, errMsg))
+	s.render(w, r, "domains-panel", s.domainsPanelData(r, errMsg))
 }
 
 // handleUIDomainDetail renders one domain's management page: edit its status,
@@ -124,7 +124,7 @@ func (s *Server) handleUIDomainDetail(w http.ResponseWriter, r *http.Request) {
 	maps.Copy(data, s.dkimData(dd.Name))
 	s.addDomainGateway(data, failed, dd.Name)
 	s.addDomainDNSRecords(data, dd.Name)
-	s.render(w, "domain_detail.html", data)
+	s.render(w, r, "domain_detail.html", data)
 }
 
 // addDomainMembers lists a domain's users, contacts and groups on its detail page,
@@ -246,7 +246,7 @@ func (s *Server) handleUISaveDomain(w http.ResponseWriter, r *http.Request) {
 			data["Saved"] = true
 		}
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }
 
 // handleUIAliases renders the aliases management page (system administrators only).
@@ -255,10 +255,11 @@ func (s *Server) handleUIAliases(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	aliases, err := s.dir.ListAliases()
-	s.render(w, "aliases.html", map[string]any{
+	s.render(w, r, "aliases.html", map[string]any{
 		"Nav": "aliases", "CSRF": csrfCookieValue(r),
 		"Aliases": aliases, "AliasesError": s.listFailure("the aliases", err),
 	})
+
 }
 
 // handleUICreateAlias creates an alias from the management form and returns the
@@ -278,7 +279,8 @@ func (s *Server) handleUICreateAlias(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	aliases, err := s.dir.ListAliases()
-	s.render(w, "aliases-panel", map[string]any{
+	s.render(w, r, "aliases-panel", map[string]any{
 		"Aliases": aliases, "AliasesError": s.listFailure("the aliases", err), "Error": errMsg,
 	})
+
 }

@@ -59,7 +59,7 @@ func (s *Server) handleUIMobileDevices(w http.ResponseWriter, r *http.Request) {
 	}
 	data := s.sessionsPanelData()
 	data["Nav"], data["CSRF"] = "mobiledevices", csrfCookieValue(r)
-	s.render(w, "mobile_devices.html", data)
+	s.render(w, r, "mobile_devices.html", data)
 }
 
 // handleUIMobileDevicesPanel renders just the session table for the auto-refresh poll.
@@ -67,7 +67,7 @@ func (s *Server) handleUIMobileDevicesPanel(w http.ResponseWriter, r *http.Reque
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	s.render(w, "sessions-panel", s.sessionsPanelData())
+	s.render(w, r, "sessions-panel", s.sessionsPanelData())
 }
 
 // handleGetMobileDevices returns the live sessions as JSON (system admins).

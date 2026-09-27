@@ -67,10 +67,11 @@ func (s *Server) handleUIMLists(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	lists, err := s.dir.ListMLists()
-	s.render(w, "mlists.html", map[string]any{
+	s.render(w, r, "mlists.html", map[string]any{
 		"Nav": "mlists", "CSRF": csrfCookieValue(r),
 		"Lists": mlistViewsOf(lists), "ListsError": s.listFailure("the mailing lists", err),
 	})
+
 }
 
 // handleUICreateMList creates a distribution list from the management form and
@@ -92,10 +93,11 @@ func (s *Server) handleUICreateMList(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	lists, err := s.dir.ListMLists()
-	s.render(w, "mlists-panel", map[string]any{
+	s.render(w, r, "mlists-panel", map[string]any{
 		"Lists": mlistViewsOf(lists), "ListsError": s.listFailure("the mailing lists", err),
 		"Error": errMsg,
 	})
+
 }
 
 // handleUIMListDetail renders a distribution list's management page: its type and
@@ -137,7 +139,7 @@ func (s *Server) handleUIMListDetail(w http.ResponseWriter, r *http.Request) {
 	if s.noteRead(failed, "specifieds", "the permitted senders", err) {
 		data["Specifieds"] = strings.Join(specifieds, "\n")
 	}
-	s.render(w, "mlist_detail.html", data)
+	s.render(w, r, "mlist_detail.html", data)
 }
 
 // handleUIMListMembers saves a list's explicit members from the form and returns
@@ -147,7 +149,7 @@ func (s *Server) handleUIMListMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	found, err := s.dir.SetMembers(r.PathValue("addr"), strings.Fields(r.PostFormValue("members")))
-	s.render(w, "user-status", s.mlistStatus(found, err, "members"))
+	s.render(w, r, "user-status", s.mlistStatus(found, err, "members"))
 }
 
 // handleUIMListSpecifieds saves a list's permitted senders from the form and
@@ -157,7 +159,7 @@ func (s *Server) handleUIMListSpecifieds(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	found, err := s.dir.SetSpecifieds(r.PathValue("addr"), strings.Fields(r.PostFormValue("specifieds")))
-	s.render(w, "user-status", s.mlistStatus(found, err, "permitted senders"))
+	s.render(w, r, "user-status", s.mlistStatus(found, err, "permitted senders"))
 }
 
 // handleUIMListOwner sets or clears a list's owner (the Exchange managedBy
@@ -167,7 +169,7 @@ func (s *Server) handleUIMListOwner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	found, err := s.dir.SetMListOwner(r.PathValue("addr"), r.PostFormValue("owner"))
-	s.render(w, "user-status", s.mlistStatus(found, err, "owner"))
+	s.render(w, r, "user-status", s.mlistStatus(found, err, "owner"))
 }
 
 // handleUIDeleteMList deletes a distribution list and redirects htmx back to the

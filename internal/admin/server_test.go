@@ -918,12 +918,18 @@ func (f *fakeDir) SetUserPrefs(login string, u directory.UserPrefsUpdate) (bool,
 	if u.Theme != nil && !slices.Contains([]string{"", "light", "dark", "system"}, *u.Theme) {
 		return false, directory.ErrInvalidPref
 	}
+	if u.Lang != nil && *u.Lang != "" && !slices.Contains(directory.UILanguages, *u.Lang) {
+		return false, directory.ErrInvalidPref
+	}
 	if f.uiPrefs == nil {
 		f.uiPrefs = map[string]directory.UserPrefs{}
 	}
 	p := f.uiPrefs[login]
 	if u.Theme != nil {
 		p.Theme = *u.Theme
+	}
+	if u.Lang != nil {
+		p.Lang = *u.Lang
 	}
 	f.uiPrefs[login] = p
 	return true, nil

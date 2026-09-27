@@ -144,7 +144,7 @@ func (s *Server) saveGrantListForm(w http.ResponseWriter, r *http.Request, kind,
 			data["Saved"] = true
 		}
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }
 
 // storeGrantList canonicalizes the grantees, checks the caller may grant to each of

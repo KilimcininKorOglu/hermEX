@@ -1,9 +1,9 @@
 {{define "head"}}<!DOCTYPE html>
-<html lang="en">
+<html lang="{{lang}}" data-msg-request-failed="{{t "common.requestFailed"}}" data-msg-unreachable="{{t "common.unreachable"}}" data-msg-theme-failed="{{t "common.themeSaveFailed"}}" data-msg-lang-failed="{{t "common.langSaveFailed"}}" data-msg-dismiss="{{t "common.dismiss"}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>hermEX Admin</title>
+<title>{{t "common.appTitle"}}</title>
 <link rel="icon" type="image/svg+xml" href="{{asset "favicon.svg"}}">
 <script src="{{asset "theme.js"}}"></script>
 <link rel="stylesheet" href="{{asset "style.css"}}">
@@ -21,11 +21,11 @@
 </template>
 <dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-dialog-title">
 <form method="dialog">
-<h2 id="confirm-dialog-title">Are you sure?</h2>
+<h2 id="confirm-dialog-title">{{t "common.confirmTitle"}}</h2>
 <p class="confirm-message"></p>
 <div class="dialog-actions">
-<button type="submit" value="cancel" class="secondary" autofocus>Cancel</button>
-<button type="submit" value="confirm" class="danger">Confirm</button>
+<button type="submit" value="cancel" class="secondary" autofocus>{{t "common.cancel"}}</button>
+<button type="submit" value="confirm" class="danger">{{t "common.confirm"}}</button>
 </div>
 </form>
 </dialog>
@@ -34,75 +34,87 @@
 
 {{/* card-head is the header of a section card: an icon in a circle, the title
      and a one-line description. It takes dict "Icon" "Title" "Desc". */}}
-{{define "card-head"}}<div class="card-head"><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="{{icon .Icon}}"/></svg></span><div class="card-title"><h2>{{.Title}}</h2>{{if .Desc}}<p class="card-desc">{{.Desc}}</p>{{end}}</div></div>{{end}}
+{{define "card-head"}}<div class="card-head"><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="{{icon .Icon}}"/></svg></span><div class="card-title"><h2>{{t .Title}}</h2>{{if .Desc}}<p class="card-desc">{{t .Desc}}</p>{{end}}</div></div>{{end}}
 
 {{/* notice renders a settings panel's panelNotice with its status class: an
      acknowledgement, a caveat or a refusal. It renders nothing for an empty one. */}}
-{{define "notice"}}{{with .}}{{if .Text}}<p class="{{.Kind}}">{{.Text}}</p>{{end}}{{end}}{{end}}
+{{define "notice"}}{{with .}}{{if .Text}}<p class="{{.Kind}}">{{t .Text}}</p>{{end}}{{end}}{{end}}
 
 {{define "brand"}}<img class="brand-mark" src="{{asset "favicon.svg"}}" alt="" width="36" height="36">{{end}}
 
+{{/* nav-link is one sidebar entry. It takes dict "Nav" (the current page)
+     "Key" (the entry's page) "Href" "Icon" "Label" (a catalogue key). */}}
+{{define "nav-link"}}<a href="{{.Href}}" class="{{if eq .Nav .Key}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon .Icon}}"/></svg>{{t .Label}}</a>{{end}}
+
 {{define "sidebar"}}<aside class="sidebar" id="sidebar">
 <div class="brand">{{template "brand"}}<span class="brand-name">hermEX<small>Admin</small></span></div>
-<nav aria-label="Main">
+<nav aria-label="{{t "nav.main"}}">
 <div class="nav-group">
-<p class="nav-label">Overview</p>
-<a href="/admin/ui/" class="{{if eq .Nav "dashboard"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "layout-dashboard"}}"/></svg>Dashboard</a>
-<a href="/admin/ui/status" class="{{if eq .Nav "status"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "activity"}}"/></svg>Live status</a>
+<p class="nav-label">{{t "nav.overview"}}</p>
+{{template "nav-link" dict "Nav" .Nav "Key" "dashboard" "Href" "/admin/ui/" "Icon" "layout-dashboard" "Label" "nav.dashboard"}}
+{{template "nav-link" dict "Nav" .Nav "Key" "status" "Href" "/admin/ui/status" "Icon" "activity" "Label" "nav.status"}}
 </div>
 <div class="nav-group">
-<p class="nav-label">Directory</p>
-<a href="/admin/ui/users" class="{{if eq .Nav "users"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "users"}}"/></svg>Users</a>
-<a href="/admin/ui/orgs" class="{{if eq .Nav "orgs"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "building-2"}}"/></svg>Organizations</a>
-<a href="/admin/ui/domains" class="{{if eq .Nav "domains"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "globe"}}"/></svg>Domains</a>
-<a href="/admin/ui/aliases" class="{{if eq .Nav "aliases"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "at-sign"}}"/></svg>Aliases</a>
-<a href="/admin/ui/mlists" class="{{if eq .Nav "mlists"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "mail-plus"}}"/></svg>Mailing lists</a>
-<a href="/admin/ui/contacts" class="{{if eq .Nav "contacts"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "contact"}}"/></svg>Contacts</a>
-<a href="/admin/ui/rooms" class="{{if eq .Nav "rooms"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "door-open"}}"/></svg>Rooms</a>
-<a href="/admin/ui/public-folders" class="{{if eq .Nav "publicfolders"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "folder-open"}}"/></svg>Public folders</a>
-<a href="/admin/ui/roles" class="{{if eq .Nav "roles"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "shield-check"}}"/></svg>Roles</a>
-<a href="/admin/ui/ldap" class="{{if eq .Nav "ldap"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "folder-sync"}}"/></svg>Directory Sync</a>
+<p class="nav-label">{{t "nav.directory"}}</p>
+{{template "nav-link" dict "Nav" .Nav "Key" "users" "Href" "/admin/ui/users" "Icon" "users" "Label" "nav.users"}}
+{{template "nav-link" dict "Nav" .Nav "Key" "orgs" "Href" "/admin/ui/orgs" "Icon" "building-2" "Label" "nav.orgs"}}
+{{template "nav-link" dict "Nav" .Nav "Key" "domains" "Href" "/admin/ui/domains" "Icon" "globe" "Label" "nav.domains"}}
+{{template "nav-link" dict "Nav" .Nav "Key" "aliases" "Href" "/admin/ui/aliases" "Icon" "at-sign" "Label" "nav.aliases"}}
+{{template "nav-link" dict "Nav" .Nav "Key" "mlists" "Href" "/admin/ui/mlists" "Icon" "mail-plus" "Label" "nav.mlists"}}
+{{template "nav-link" dict "Nav" .Nav "Key" "contacts" "Href" "/admin/ui/contacts" "Icon" "contact" "Label" "nav.contacts"}}
+{{template "nav-link" dict "Nav" .Nav "Key" "rooms" "Href" "/admin/ui/rooms" "Icon" "door-open" "Label" "nav.rooms"}}
+{{template "nav-link" dict "Nav" .Nav "Key" "publicfolders" "Href" "/admin/ui/public-folders" "Icon" "folder-open" "Label" "nav.publicFolders"}}
+{{template "nav-link" dict "Nav" .Nav "Key" "roles" "Href" "/admin/ui/roles" "Icon" "shield-check" "Label" "nav.roles"}}
+{{template "nav-link" dict "Nav" .Nav "Key" "ldap" "Href" "/admin/ui/ldap" "Icon" "folder-sync" "Label" "nav.ldap"}}
 </div>
 <div class="nav-group">
-<p class="nav-label">Mail flow</p>
-<a href="/admin/ui/mailq" class="{{if eq .Nav "mailq"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "send"}}"/></svg>Mail queue</a>
-<a href="/admin/ui/taskq" class="{{if eq .Nav "taskq"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "list-checks"}}"/></svg>Task queue</a>
-<a href="/admin/ui/avquarantine" class="{{if eq .Nav "avquarantine"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "shield-alert"}}"/></svg>Quarantine</a>
-<a href="/admin/ui/spam-history" class="{{if eq .Nav "spamhistory"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "history"}}"/></svg>Spam History</a>
-<a href="/admin/ui/sender-access" class="{{if eq .Nav "senderaccess"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "ban"}}"/></svg>Sender allow/block</a>
-<a href="/admin/ui/reports" class="{{if eq .Nav "reports"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "chart-column"}}"/></svg>Reports</a>
+<p class="nav-label">{{t "nav.mailFlow"}}</p>
+{{template "nav-link" dict "Nav" .Nav "Key" "mailq" "Href" "/admin/ui/mailq" "Icon" "send" "Label" "nav.mailq"}}
+{{template "nav-link" dict "Nav" .Nav "Key" "taskq" "Href" "/admin/ui/taskq" "Icon" "list-checks" "Label" "nav.taskq"}}
+{{template "nav-link" dict "Nav" .Nav "Key" "avquarantine" "Href" "/admin/ui/avquarantine" "Icon" "shield-alert" "Label" "nav.quarantine"}}
+{{template "nav-link" dict "Nav" .Nav "Key" "spamhistory" "Href" "/admin/ui/spam-history" "Icon" "history" "Label" "nav.spamHistory"}}
+{{template "nav-link" dict "Nav" .Nav "Key" "senderaccess" "Href" "/admin/ui/sender-access" "Icon" "ban" "Label" "nav.senderAccess"}}
+{{template "nav-link" dict "Nav" .Nav "Key" "reports" "Href" "/admin/ui/reports" "Icon" "chart-column" "Label" "nav.reports"}}
 </div>
 <div class="nav-group">
-<p class="nav-label">Devices and policy</p>
-<a href="/admin/ui/mobile-devices" class="{{if eq .Nav "mobiledevices"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "smartphone"}}"/></svg>Mobile devices</a>
-<a href="/admin/ui/syncpolicy" class="{{if eq .Nav "syncpolicy"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "shield"}}"/></svg>Sync policy</a>
-<a href="/admin/ui/defaults" class="{{if eq .Nav "defaults"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "sliders-horizontal"}}"/></svg>Defaults</a>
+<p class="nav-label">{{t "nav.devicesPolicy"}}</p>
+{{template "nav-link" dict "Nav" .Nav "Key" "mobiledevices" "Href" "/admin/ui/mobile-devices" "Icon" "smartphone" "Label" "nav.mobileDevices"}}
+{{template "nav-link" dict "Nav" .Nav "Key" "syncpolicy" "Href" "/admin/ui/syncpolicy" "Icon" "shield" "Label" "nav.syncPolicy"}}
+{{template "nav-link" dict "Nav" .Nav "Key" "defaults" "Href" "/admin/ui/defaults" "Icon" "sliders-horizontal" "Label" "nav.defaults"}}
 </div>
 <div class="nav-group">
-<p class="nav-label">System</p>
-<a href="/admin/ui/settings" class="{{if eq .Nav "settings"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "settings"}}"/></svg>Settings</a>
-<a href="/admin/ui/tls" class="{{if eq .Nav "tls"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "lock"}}"/></svg>TLS certificates</a>
-<a href="/admin/ui/logs" class="{{if eq .Nav "logs"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "scroll-text"}}"/></svg>Logs</a>
-<a href="/admin/ui/mailbox-failures" class="{{if eq .Nav "mailboxfailures"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "triangle-alert"}}"/></svg>Mailbox failures</a>
+<p class="nav-label">{{t "nav.system"}}</p>
+{{template "nav-link" dict "Nav" .Nav "Key" "settings" "Href" "/admin/ui/settings" "Icon" "settings" "Label" "nav.settings"}}
+{{template "nav-link" dict "Nav" .Nav "Key" "tls" "Href" "/admin/ui/tls" "Icon" "lock" "Label" "nav.tls"}}
+{{template "nav-link" dict "Nav" .Nav "Key" "logs" "Href" "/admin/ui/logs" "Icon" "scroll-text" "Label" "nav.logs"}}
+{{template "nav-link" dict "Nav" .Nav "Key" "mailboxfailures" "Href" "/admin/ui/mailbox-failures" "Icon" "triangle-alert" "Label" "nav.mailboxFailures"}}
 </div>
 </nav>
 <div class="sidebar-foot">
-<a href="/admin/ui/change-password" class="{{if eq .Nav "changepassword"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "key-round"}}"/></svg>Change password</a>
+{{template "nav-link" dict "Nav" .Nav "Key" "changepassword" "Href" "/admin/ui/change-password" "Icon" "key-round" "Label" "nav.changePassword"}}
 <div class="version">hermEX {{version}}</div>
 </div>
 </aside>
 <div class="backdrop" data-nav-close></div>
 <header class="topbar">
-<button type="button" class="ghost icon-button nav-toggle" aria-controls="sidebar" aria-expanded="false" aria-label="Open the menu"><svg class="icon" aria-hidden="true"><use href="{{icon "menu"}}"/></svg></button>
-<span class="topbar-title">hermEX Admin</span>
+<button type="button" class="ghost icon-button nav-toggle" aria-controls="sidebar" aria-expanded="false" aria-label="{{t "common.openMenu"}}"><svg class="icon" aria-hidden="true"><use href="{{icon "menu"}}"/></svg></button>
+<span class="topbar-title">{{t "common.appTitle"}}</span>
 <div class="topbar-actions">
-<button type="button" class="ghost icon-button theme-toggle" aria-label="Switch between light and dark theme" title="Switch theme">
+{{template "lang-select"}}
+<button type="button" class="ghost icon-button theme-toggle" aria-label="{{t "common.toggleTheme"}}" title="{{t "common.switchTheme"}}">
 <svg class="icon icon-moon" aria-hidden="true"><use href="{{icon "moon"}}"/></svg>
 <svg class="icon icon-sun" aria-hidden="true"><use href="{{icon "sun"}}"/></svg>
 </button>
 <form method="post" action="/admin/ui/logout">
 <input type="hidden" name="_csrf" value="{{.CSRF}}">
-<button type="submit" class="secondary"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "log-out"}}"/></svg>Sign out</button>
+<button type="submit" class="secondary"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "log-out"}}"/></svg>{{t "common.signOut"}}</button>
 </form>
 </div>
 </header>{{end}}
+
+{{/* lang-select switches the interface language. Each language is named in
+     itself, so an operator who cannot read the current one still finds theirs. */}}
+{{define "lang-select"}}<select class="lang-select" aria-label="{{t "common.language"}}" title="{{t "common.language"}}">
+<option value="en"{{if eq lang "en"}} selected{{end}}>English</option>
+<option value="tr"{{if eq lang "tr"}} selected{{end}}>Türkçe</option>
+</select>{{end}}

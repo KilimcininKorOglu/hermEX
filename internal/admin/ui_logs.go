@@ -15,7 +15,7 @@ func (s *Server) handleUILogs(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{"Nav": "logs", "CSRF": csrfCookieValue(r)}
 	if s.logs == nil {
 		data["Disabled"] = true
-		s.render(w, "logs.html", data)
+		s.render(w, r, "logs.html", data)
 		return
 	}
 	sub := r.URL.Query().Get("subsystem")
@@ -28,5 +28,5 @@ func (s *Server) handleUILogs(w http.ResponseWriter, r *http.Request) {
 	} else {
 		data["Entries"] = entries
 	}
-	s.render(w, "logs.html", data)
+	s.render(w, r, "logs.html", data)
 }

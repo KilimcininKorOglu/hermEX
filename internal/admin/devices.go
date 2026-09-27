@@ -157,11 +157,12 @@ func (s *Server) handleUIUserDevices(w http.ResponseWriter, r *http.Request) {
 	u, ok, err := s.dir.GetUser(r.PathValue("email"))
 	switch {
 	case err != nil:
-		s.renderUserDevices(w, r.PathValue("email"), csrfCookieValue(r), nil,
+		s.renderUserDevices(w, r, r.PathValue("email"), csrfCookieValue(r), nil,
 			s.notice("Could not read the user.", err), "Could not read the mobile devices.")
+
 		return
 	case !ok:
-		s.renderUserDevices(w, r.PathValue("email"), csrfCookieValue(r), nil, "No such user.", "")
+		s.renderUserDevices(w, r, r.PathValue("email"), csrfCookieValue(r), nil, "No such user.", "")
 		return
 	}
 	errMsg := ""
@@ -175,18 +176,19 @@ func (s *Server) handleUIUserDevices(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		listErr = s.notice("Could not read the mobile devices.", err)
 	}
-	s.renderUserDevices(w, u.Username, csrfCookieValue(r), devs, errMsg, listErr)
+	s.renderUserDevices(w, r, u.Username, csrfCookieValue(r), devs, errMsg, listErr)
 }
 
 // renderUserDevices renders the mobile-devices panel for htmx after a device
 // action, carrying an optional error message. listErr reports a failed read of the
 // devices, which the table must not show as none.
-func (s *Server) renderUserDevices(w http.ResponseWriter, email, csrf string, devs []activesync.DeviceInfo, errMsg, listErr string) {
-	s.render(w, "user-devices", map[string]any{
+func (s *Server) renderUserDevices(w http.ResponseWriter, r *http.Request, email, csrf string, devs []activesync.DeviceInfo, errMsg, listErr string) {
+	s.render(w, r, "user-devices", map[string]any{
 		"Email":        email,
 		"CSRF":         csrf,
 		"Devices":      deviceViewsOf(devs),
 		"Error":        errMsg,
 		"DevicesError": listErr,
 	})
+
 }

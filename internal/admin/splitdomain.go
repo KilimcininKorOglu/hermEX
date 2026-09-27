@@ -20,7 +20,7 @@ func (s *Server) handleUISaveDomainSplit(w http.ResponseWriter, r *http.Request)
 	id, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64)
 	if err != nil {
 		data["Error"] = "Invalid domain id."
-		s.render(w, "user-status", data)
+		s.render(w, r, "user-status", data)
 		return
 	}
 	host := strings.ToLower(strings.TrimSpace(r.PostFormValue("split_relay_host")))
@@ -45,7 +45,7 @@ func (s *Server) handleUISaveDomainSplit(w http.ResponseWriter, r *http.Request)
 			})
 		}
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }
 
 // validHostname reports whether host is a DNS host name: dot-separated labels of

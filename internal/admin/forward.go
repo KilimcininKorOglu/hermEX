@@ -90,7 +90,7 @@ func (s *Server) handleUIUserForward(w http.ResponseWriter, r *http.Request) {
 	default:
 		data["Saved"] = true
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }
 
 // forwardFromForm reads the forward form: the type select ("" / "cc" / "redirect")

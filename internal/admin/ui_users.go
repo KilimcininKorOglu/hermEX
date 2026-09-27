@@ -38,9 +38,10 @@ func (s *Server) handleUIChangePassword(w http.ResponseWriter, r *http.Request) 
 		http.Redirect(w, r, "/admin/ui/login", http.StatusSeeOther)
 		return
 	}
-	s.render(w, "change_password.html", map[string]any{
+	s.render(w, r, "change_password.html", map[string]any{
 		"Nav": "changepassword", "CSRF": csrfCookieValue(r), "Login": cl.Login,
 	})
+
 }
 
 // handleUIChangePasswordSubmit changes the logged-in admin's own password after
@@ -59,7 +60,7 @@ func (s *Server) handleUIChangePasswordSubmit(w http.ResponseWriter, r *http.Req
 		return
 	}
 	result := func(okFlag bool, msg string) {
-		s.render(w, "change-password-result", map[string]any{"OK": okFlag, "Message": msg})
+		s.render(w, r, "change-password-result", map[string]any{"OK": okFlag, "Message": msg})
 	}
 	old, newpw := r.FormValue("old"), r.FormValue("new")
 	if old == "" || newpw == "" {
@@ -94,7 +95,7 @@ func (s *Server) handleUIUsers(w http.ResponseWriter, r *http.Request) {
 		"UsersError": s.listFailure("the users", err),
 	}
 	s.addUserCreateForm(data)
-	s.render(w, "users.html", data)
+	s.render(w, r, "users.html", data)
 }
 
 // createDefaultsUnread is the message that replaces the new-user fields when the
@@ -166,10 +167,10 @@ func (s *Server) handleUICreateUserDefaults(w http.ResponseWriter, r *http.Reque
 	id, _ := strconv.ParseInt(r.URL.Query().Get("domain"), 10, 64)
 	rd, err := s.dir.EffectiveUserDefaults(id)
 	if err != nil {
-		s.render(w, "user-create-fields-failed", s.notice(createDefaultsUnread, err))
+		s.render(w, r, "user-create-fields-failed", s.notice(createDefaultsUnread, err))
 		return
 	}
-	s.render(w, "user-create-fields", userCreateFieldsOf(rd))
+	s.render(w, r, "user-create-fields", userCreateFieldsOf(rd))
 }
 
 // handleUICreateUser creates a user from the management form and returns the
@@ -199,9 +200,10 @@ func (s *Server) handleUICreateUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	users, err := s.dir.ListUsers()
-	s.render(w, "users-panel", map[string]any{
+	s.render(w, r, "users-panel", map[string]any{
 		"Users": users, "UsersError": s.listFailure("the users", err), "Error": errMsg,
 	})
+
 }
 
 // createUserWithDefaults creates the user, then applies the form's per-user
@@ -255,7 +257,7 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 	s.addUserMailboxSettings(data, failed, u.Maildir)
 	s.addUserGrants(data, failed, u.Maildir)
 	s.addUserLists(data, u)
-	s.render(w, "user_detail.html", data)
+	s.render(w, r, "user_detail.html", data)
 }
 
 // addUserAddressing fills the user detail forms kept in the directory: the
@@ -377,19 +379,19 @@ func (s *Server) handleUIUserContact(w http.ResponseWriter, r *http.Request) {
 	default:
 		data["Saved"] = true
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }
 
 // renderUserRoles re-renders the admin-roles panel for htmx after a grant or
 // revoke, carrying an optional error message. A failed read of the roles is shown in
 // the table, which must not read as a user holding none.
-func (s *Server) renderUserRoles(w http.ResponseWriter, email, csrf string, uid int64, errMsg string) {
+func (s *Server) renderUserRoles(w http.ResponseWriter, r *http.Request, email, csrf string, uid int64, errMsg string) {
 	roles, err := s.dir.AdminRoles(uid)
 	data := map[string]any{"Email": email, "CSRF": csrf, "Roles": roles, "Error": errMsg}
 	if err != nil {
 		data["RolesError"] = s.notice("Could not read the admin roles.", err)
 	}
-	s.render(w, "user-roles", data)
+	s.render(w, r, "user-roles", data)
 }
 
 // handleUIUserGrantRole grants the user an admin role from the detail form and
@@ -407,7 +409,7 @@ func (s *Server) handleUIUserGrantRole(w http.ResponseWriter, r *http.Request) {
 	if err := s.dir.GrantAdminRole(uid, r.PostFormValue("role"), scopeID); err != nil {
 		errMsg = s.notice("Could not grant role.", err)
 	}
-	s.renderUserRoles(w, r.PathValue("email"), csrfCookieValue(r), uid, errMsg)
+	s.renderUserRoles(w, r, r.PathValue("email"), csrfCookieValue(r), uid, errMsg)
 }
 
 // handleUIUserRevokeRole removes one of the user's admin roles and returns the
@@ -425,7 +427,7 @@ func (s *Server) handleUIUserRevokeRole(w http.ResponseWriter, r *http.Request) 
 	if err := s.dir.RevokeAdminRole(uid, r.PostFormValue("role"), scopeID); err != nil {
 		errMsg = s.notice("Could not revoke role.", err)
 	}
-	s.renderUserRoles(w, r.PathValue("email"), csrfCookieValue(r), uid, errMsg)
+	s.renderUserRoles(w, r, r.PathValue("email"), csrfCookieValue(r), uid, errMsg)
 }
 
 // handleUIUserAliases replaces the user's e-mail aliases from the textarea
@@ -445,7 +447,7 @@ func (s *Server) handleUIUserAliases(w http.ResponseWriter, r *http.Request) {
 	default:
 		data["Saved"] = true
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }
 
 // handleUIUserAltnames replaces the user's alternative login names from the
@@ -465,7 +467,7 @@ func (s *Server) handleUIUserAltnames(w http.ResponseWriter, r *http.Request) {
 	default:
 		data["Saved"] = true
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }
 
 // handleUIUserEdit saves the edited account fields and returns the refreshed
@@ -498,7 +500,7 @@ func (s *Server) handleUIUserEdit(w http.ResponseWriter, r *http.Request) {
 	default:
 		data["Saved"] = true
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }
 
 // handleUIUserDelete deletes the user and redirects the browser back to the user

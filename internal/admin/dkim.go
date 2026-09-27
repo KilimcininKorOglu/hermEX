@@ -125,7 +125,7 @@ func dkimKeyTypeFrom(r *http.Request) (string, bool) {
 func (s *Server) dkimPanel(w http.ResponseWriter, r *http.Request, dd directory.DomainDetail, notice panelNotice) {
 	data := map[string]any{"Domain": dd, "CSRF": csrfCookieValue(r), "DKIMNotice": notice}
 	maps.Copy(data, s.dkimData(dd.Name))
-	s.render(w, "dkim-panel", data)
+	s.render(w, r, "dkim-panel", data)
 }
 
 // dkimDomain resolves the {domainID} path value to a domain, writing an error response
@@ -200,7 +200,7 @@ func (s *Server) handleUIDKIMOutput(w http.ResponseWriter, r *http.Request) {
 	publicTXT, _ := data["DKIMPublicTXT"].(string)
 	data["DKIMOutputMode"] = mode
 	data["DKIMOutput"] = dkimOutput(mode, recordName, publicTXT)
-	s.render(w, "dkim-output", data)
+	s.render(w, r, "dkim-output", data)
 }
 
 // handleUIDKIMEnable turns outbound signing on or off for the domain. Enabling is a

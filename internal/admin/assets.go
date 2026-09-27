@@ -3,9 +3,6 @@ package admin
 import (
 	"embed"
 	"errors"
-	"html/template"
-
-	"hermex/internal/buildinfo"
 )
 
 // templateFS holds the admin UI HTML templates compiled into the binary.
@@ -23,15 +20,14 @@ var staticFS embed.FS
 // page links to is always the hash of the bytes the handler serves.
 var staticAssets = buildStaticAssets()
 
-// tmpl is the parsed admin UI template set. A parse failure is a build-time bug,
-// so it panics. "version" is the panel binary's own release and commit, shown
-// under the sidebar so an operator can tell which build the panel runs.
-var tmpl = template.Must(template.New("").Funcs(template.FuncMap{
-	"asset":   assetURL,
-	"icon":    iconURL,
-	"dict":    dict,
-	"version": buildinfo.Display,
-}).ParseFS(templateFS, "templates/*.html"))
+// tmpls holds the parsed admin UI template set of every supported language, each
+// with its "t" function bound to that language. "version" is the panel binary's
+// own release and commit, shown under the sidebar so an operator can tell which
+// build the panel runs.
+var tmpls = parseTemplates()
+
+// tmpl is the English template set.
+var tmpl = tmpls[defaultLang]
 
 // errDictArgs reports a dict call whose arguments are not key and value pairs.
 var errDictArgs = errors.New("dict wants string keys each followed by a value")

@@ -92,10 +92,11 @@ func (s *Server) handleUIStatus(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	s.render(w, "status.html", map[string]any{
+	s.render(w, r, "status.html", map[string]any{
 		"Nav": "status", "CSRF": csrfCookieValue(r),
 		"Results": s.probeHealth(r.Context()), "Configured": len(s.healthTargets) > 0,
 	})
+
 }
 
 // handleUIStatusPanel renders just the status table (the page polls it to refresh
@@ -104,9 +105,10 @@ func (s *Server) handleUIStatusPanel(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	s.render(w, "status-panel", map[string]any{
+	s.render(w, r, "status-panel", map[string]any{
 		"Results": s.probeHealth(r.Context()), "Configured": len(s.healthTargets) > 0,
 	})
+
 }
 
 // handleGetStatus returns the probe results as JSON (system admins).

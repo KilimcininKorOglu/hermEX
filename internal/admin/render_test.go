@@ -36,7 +36,7 @@ func TestRenderFailureIsACleanError(t *testing.T) {
 	srv := renderServer(t, nil)
 
 	rec := httptest.NewRecorder()
-	srv.render(rec, "status.html", brokenStatusData())
+	srv.render(rec, httptest.NewRequest(http.MethodGet, "/admin/ui/status", nil), "status.html", brokenStatusData())
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
@@ -64,7 +64,7 @@ func TestRenderFailureIsRecorded(t *testing.T) {
 	sink := &failCaptureSink{}
 	srv := renderServer(t, sink)
 
-	srv.render(httptest.NewRecorder(), "status.html", brokenStatusData())
+	srv.render(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/admin/ui/status", nil), "status.html", brokenStatusData())
 
 	e, ok := sink.find("render.fail")
 	if !ok {
@@ -86,7 +86,7 @@ func TestRenderFailureIsRecorded(t *testing.T) {
 func TestRenderSucceedsUnchanged(t *testing.T) {
 	srv := renderServer(t, nil)
 	rec := httptest.NewRecorder()
-	srv.render(rec, "status.html", map[string]any{
+	srv.render(rec, httptest.NewRequest(http.MethodGet, "/admin/ui/status", nil), "status.html", map[string]any{
 		"Nav": "status", "Configured": false, "Results": []healthResult{},
 	})
 

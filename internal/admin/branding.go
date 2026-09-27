@@ -19,7 +19,7 @@ func (s *Server) handleUISaveDomainBranding(w http.ResponseWriter, r *http.Reque
 	id, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64)
 	if err != nil {
 		data["Error"] = "Invalid domain id."
-		s.render(w, "user-status", data)
+		s.render(w, r, "user-status", data)
 		return
 	}
 	dd, found, err := s.dir.GetDomain(id)
@@ -41,5 +41,5 @@ func (s *Server) handleUISaveDomainBranding(w http.ResponseWriter, r *http.Reque
 			data["Saved"] = true
 		}
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }

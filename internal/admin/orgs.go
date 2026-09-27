@@ -262,10 +262,11 @@ func (s *Server) handleUIOrgs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orgs, err := s.dir.ListOrgs()
-	s.render(w, "orgs.html", map[string]any{
+	s.render(w, r, "orgs.html", map[string]any{
 		"Nav": "orgs", "CSRF": csrfCookieValue(r),
 		"Orgs": orgs, "OrgsError": s.listFailure("the organizations", err),
 	})
+
 }
 
 // handleUICreateOrg creates an organization from the management form and returns
@@ -281,10 +282,11 @@ func (s *Server) handleUICreateOrg(w http.ResponseWriter, r *http.Request) {
 		errMsg = s.notice("Could not create organization.", err)
 	}
 	orgs, err := s.dir.ListOrgs()
-	s.render(w, "orgs-panel", map[string]any{
+	s.render(w, r, "orgs-panel", map[string]any{
 		"Orgs": orgs, "OrgsError": s.listFailure("the organizations", err),
 		"Error": errMsg,
 	})
+
 }
 
 // orgDomainsData gathers an org's attached domains and the unassigned domains
@@ -334,7 +336,7 @@ func (s *Server) handleUIOrgDetail(w http.ResponseWriter, r *http.Request) {
 	data := s.orgDomainsData(id, csrfCookieValue(r), "")
 	data["Nav"] = "orgs"
 	data["Org"] = org
-	s.render(w, "org_detail.html", data)
+	s.render(w, r, "org_detail.html", data)
 }
 
 // handleUIUpdateOrg saves an org's name and description from the detail form and
@@ -357,7 +359,7 @@ func (s *Server) handleUIUpdateOrg(w http.ResponseWriter, r *http.Request) {
 	default:
 		data["Saved"] = true
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }
 
 // handleUIDeleteOrg deletes an org and redirects htmx back to the organizations
@@ -394,7 +396,7 @@ func (s *Server) handleUIOrgAttachDomain(w http.ResponseWriter, r *http.Request)
 	} else if _, err := s.dir.AssignDomainToOrg(domID, id); err != nil {
 		errMsg = s.notice("Could not attach domain.", err)
 	}
-	s.render(w, "org-domains-panel", s.orgDomainsData(id, csrfCookieValue(r), errMsg))
+	s.render(w, r, "org-domains-panel", s.orgDomainsData(id, csrfCookieValue(r), errMsg))
 }
 
 // handleUIOrgDetachDomain detaches the path domain from the org (org_id 0) and
@@ -413,5 +415,5 @@ func (s *Server) handleUIOrgDetachDomain(w http.ResponseWriter, r *http.Request)
 	} else if _, err := s.dir.AssignDomainToOrg(domID, 0); err != nil {
 		errMsg = s.notice("Could not detach domain.", err)
 	}
-	s.render(w, "org-domains-panel", s.orgDomainsData(id, csrfCookieValue(r), errMsg))
+	s.render(w, r, "org-domains-panel", s.orgDomainsData(id, csrfCookieValue(r), errMsg))
 }

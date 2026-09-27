@@ -135,7 +135,7 @@ func (s *Server) handleUIUserSyncPolicy(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }
 
 // handleGetDefaultSyncPolicy returns the server-wide default device policy (system
@@ -249,7 +249,7 @@ func (s *Server) handleUISaveDomainSyncPolicy(w http.ResponseWriter, r *http.Req
 	id, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64)
 	if err != nil {
 		data["Error"] = "Invalid domain id."
-		s.render(w, "user-status", data)
+		s.render(w, r, "user-status", data)
 		return
 	}
 	dd, found, err := s.dir.GetDomain(id)
@@ -271,7 +271,7 @@ func (s *Server) handleUISaveDomainSyncPolicy(w http.ResponseWriter, r *http.Req
 			}
 		}
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }
 
 // handleUISyncPolicy renders the server-default device-policy editor page.
@@ -285,7 +285,7 @@ func (s *Server) handleUISyncPolicy(w http.ResponseWriter, r *http.Request) {
 	if s.noteRead(failed, "policy", "the default device policy", err) {
 		data["Fields"] = policyView(p)
 	}
-	s.render(w, "syncpolicy.html", data)
+	s.render(w, r, "syncpolicy.html", data)
 }
 
 // handleUISaveSyncPolicy saves the server-default device policy from the editor and
@@ -306,5 +306,5 @@ func (s *Server) handleUISaveSyncPolicy(w http.ResponseWriter, r *http.Request) 
 			data["Saved"] = true
 		}
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }

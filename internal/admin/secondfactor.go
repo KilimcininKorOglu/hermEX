@@ -152,5 +152,5 @@ func (s *Server) renderCodeForm(w http.ResponseWriter, r *http.Request, status i
 	if status != http.StatusOK {
 		w.WriteHeader(status)
 	}
-	s.render(w, "second_factor.html", map[string]any{"Error": errMsg, "CSRF": csrfCookieValue(r)})
+	s.render(w, r, "second_factor.html", map[string]any{"Error": errMsg, "CSRF": csrfCookieValue(r)})
 }

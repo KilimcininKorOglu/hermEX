@@ -82,5 +82,5 @@ func (s *Server) handleUIUserMeeting(w http.ResponseWriter, r *http.Request) {
 			data["Saved"] = true
 		}
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }

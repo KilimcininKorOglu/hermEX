@@ -1,15 +1,15 @@
 {{define "login.html"}}{{template "head" .}}
 <main class="login">
-<div class="login-brand">{{template "brand"}}<div><h1>hermEX Admin</h1><p class="page-desc">Sign in with an administrator account.</p></div></div>
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<div class="login-brand">{{template "brand"}}<div><h1>{{t "common.appTitle"}}</h1><p class="page-desc">{{t "login.desc"}}</p></div></div>
+{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
 <form method="post" action="/admin/ui/login">
-<label>Email
+<label>{{t "login.email"}}
 <input type="email" name="login" autocomplete="username" required autofocus>
 </label>
-<label>Password
+<label>{{t "login.password"}}
 <input type="password" name="password" autocomplete="current-password" required>
 </label>
-<button type="submit">Sign in</button>
+<button type="submit">{{t "login.submit"}}</button>
 </form>
 </main>
 {{template "foot" .}}{{end}}

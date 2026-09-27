@@ -17,7 +17,7 @@ func (s *Server) handleUISaveDomainSenderName(w http.ResponseWriter, r *http.Req
 	id, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64)
 	if err != nil {
 		data["Error"] = "Invalid domain id."
-		s.render(w, "user-status", data)
+		s.render(w, r, "user-status", data)
 		return
 	}
 	dd, found, err := s.dir.GetDomain(id)
@@ -34,5 +34,5 @@ func (s *Server) handleUISaveDomainSenderName(w http.ResponseWriter, r *http.Req
 			data["Saved"] = true
 		}
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }

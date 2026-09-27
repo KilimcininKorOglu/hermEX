@@ -58,7 +58,8 @@ func (s *Server) uiRequireSystemPage(w http.ResponseWriter, r *http.Request) boo
 	return true
 }
 
-// render writes an HTML template response.
+// render writes an HTML template response in the language requestLang picks
+// for r.
 //
 // The template is executed into a buffer first. Executing straight into the
 // response writer commits the 200 and part of the body before a failure partway
@@ -67,9 +68,9 @@ func (s *Server) uiRequireSystemPage(w http.ResponseWriter, r *http.Request) boo
 // 200, which for a management UI is the worst outcome, since a half-rendered form
 // misrepresents state. Buffering costs one page of memory and makes the failure a
 // clean 500 carrying none of the partial render.
-func (s *Server) render(w http.ResponseWriter, name string, data any) {
+func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, data any) {
 	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, name, data); err != nil {
+	if err := tmpls[requestLang(r)].ExecuteTemplate(&buf, name, data); err != nil {
 		s.logger.Emit(logging.Event{
 			Level: logging.LevelError, Subsystem: logging.Admin, Name: "render.fail",
 			Fields: logging.Fields{"template": name}, Err: err.Error(),
@@ -167,7 +168,7 @@ func (s *Server) handleUILoginPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/ui/", http.StatusSeeOther)
 		return
 	}
-	s.render(w, "login.html", nil)
+	s.render(w, r, "login.html", nil)
 }
 
 // handleUILoginSubmit authenticates the login form and, on success, starts a
@@ -178,26 +179,26 @@ func (s *Server) handleUILoginSubmit(w http.ResponseWriter, r *http.Request) {
 	addr := serve.ClientAddr(r)
 	if !s.limiter.Allowed(addr, login) {
 		w.WriteHeader(http.StatusTooManyRequests)
-		s.render(w, "login.html", map[string]any{"Error": "Too many failed attempts, try again later."})
+		s.render(w, r, "login.html", map[string]any{"Error": "login.tooMany"})
 		return
 	}
 	uid, _, ok, err := s.authAdmin(login, r.PostFormValue("password"))
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		s.render(w, "login.html", map[string]any{"Error": s.notice("Server error, please try again.", err)})
+		s.render(w, r, "login.html", map[string]any{"Error": s.notice("login.serverError", err)})
 		return
 	}
 	if !ok {
 		s.limiter.Fail(addr, login)
 		w.WriteHeader(http.StatusUnauthorized)
-		s.render(w, "login.html", map[string]any{"Error": "Invalid email or password."})
+		s.render(w, r, "login.html", map[string]any{"Error": "login.invalid"})
 		return
 	}
 	s.limiter.Succeed(addr, login)
 	required, err := s.secondFactorRequired(login)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		s.render(w, "login.html", map[string]any{"Error": s.notice("Server error, please try again.", err)})
+		s.render(w, r, "login.html", map[string]any{"Error": s.notice("login.serverError", err)})
 		return
 	}
 	if required {
@@ -236,13 +237,14 @@ func (s *Server) handleUIDashboard(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// A failed query must not read as an empty deployment: report it rather
 		// than rendering three confident zeroes.
-		s.render(w, "dashboard.html", map[string]any{
+		s.render(w, r, "dashboard.html", map[string]any{
 			"Nav": "dashboard", "Login": cl.Login, "CSRF": csrfCookieValue(r),
 			"Error": s.notice("Could not read the directory.", err),
 		})
+
 		return
 	}
-	s.render(w, "dashboard.html", map[string]any{
+	s.render(w, r, "dashboard.html", map[string]any{
 		"Nav":         "dashboard",
 		"Login":       cl.Login,
 		"CSRF":        csrfCookieValue(r),
@@ -250,6 +252,7 @@ func (s *Server) handleUIDashboard(w http.ResponseWriter, r *http.Request) {
 		"DomainCount": counts.domains,
 		"AliasCount":  counts.aliases,
 	})
+
 }
 
 // dashboardCount holds the three headline numbers, already scoped.

@@ -95,5 +95,5 @@ func (s *Server) handleUIUserHide(w http.ResponseWriter, r *http.Request) {
 	default:
 		data["Saved"] = true
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }

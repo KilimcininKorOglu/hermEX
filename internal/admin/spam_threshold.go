@@ -41,7 +41,7 @@ func (s *Server) handleUIUserSpamThreshold(w http.ResponseWriter, r *http.Reques
 			data["Saved"] = true
 		}
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }
 
 // handleUIDomainSpamThreshold sets or clears a domain's spam-threshold override from
@@ -73,5 +73,5 @@ func (s *Server) handleUIDomainSpamThreshold(w http.ResponseWriter, r *http.Requ
 			data["Saved"] = true
 		}
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }

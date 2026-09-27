@@ -31,7 +31,7 @@ func (s *Server) handleUISenderAccess(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	s.render(w, "sender-access.html", s.senderAccessData(r, panelNotice{}))
+	s.render(w, r, "sender-access.html", s.senderAccessData(r, panelNotice{}))
 }
 
 // handleUISaveSenderRule adds or flips an allow/block rule. The MTA hot-reloads it
@@ -42,14 +42,14 @@ func (s *Server) handleUISaveSenderRule(w http.ResponseWriter, r *http.Request) 
 	}
 	pattern := strings.TrimSpace(r.FormValue("pattern"))
 	if pattern == "" {
-		s.render(w, "sender-access-panel", s.senderAccessData(r, errorNotice("A pattern (email address or domain) is required.")))
+		s.render(w, r, "sender-access-panel", s.senderAccessData(r, errorNotice("A pattern (email address or domain) is required.")))
 		return
 	}
 	if err := s.dir.SetSenderRule(pattern, r.FormValue("action")); err != nil {
-		s.render(w, "sender-access-panel", s.senderAccessData(r, s.failNotice("Could not save the rule.", err)))
+		s.render(w, r, "sender-access-panel", s.senderAccessData(r, s.failNotice("Could not save the rule.", err)))
 		return
 	}
-	s.render(w, "sender-access-panel", s.senderAccessData(r, okNotice("Rule saved.")))
+	s.render(w, r, "sender-access-panel", s.senderAccessData(r, okNotice("Rule saved.")))
 }
 
 // handleUIDeleteSenderRule removes an allow/block rule.
@@ -58,8 +58,8 @@ func (s *Server) handleUIDeleteSenderRule(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if _, err := s.dir.DeleteSenderRule(strings.TrimSpace(r.FormValue("pattern"))); err != nil {
-		s.render(w, "sender-access-panel", s.senderAccessData(r, s.failNotice("Could not delete the rule.", err)))
+		s.render(w, r, "sender-access-panel", s.senderAccessData(r, s.failNotice("Could not delete the rule.", err)))
 		return
 	}
-	s.render(w, "sender-access-panel", s.senderAccessData(r, okNotice("Rule removed.")))
+	s.render(w, r, "sender-access-panel", s.senderAccessData(r, okNotice("Rule removed.")))
 }

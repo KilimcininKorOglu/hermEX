@@ -154,5 +154,5 @@ func (s *Server) handleUIUserOOF(w http.ResponseWriter, r *http.Request) {
 			data["Saved"] = true
 		}
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }

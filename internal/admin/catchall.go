@@ -24,12 +24,12 @@ func (s *Server) handleUISaveDomainCatchAll(w http.ResponseWriter, r *http.Reque
 	address := strings.TrimSpace(r.PostFormValue("catchall"))
 	if err := s.dir.SetDomainCatchAll(dd.Name, address); err != nil {
 		data["Error"] = s.notice("Could not save the catch-all mailbox.", err)
-		s.render(w, "user-status", data)
+		s.render(w, r, "user-status", data)
 		return
 	}
 	data["Saved"] = true
 	s.auditSettingChange(cl.Login, "catchall", logging.Fields{
 		"domain": dd.Name, "old": auditOld(old, oldErr), "new": address,
 	})
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }

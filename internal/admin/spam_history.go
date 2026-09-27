@@ -29,7 +29,7 @@ func (s *Server) handleUISpamHistory(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	s.render(w, "spam-history.html", s.spamHistoryPageData(r, panelNotice{}))
+	s.render(w, r, "spam-history.html", s.spamHistoryPageData(r, panelNotice{}))
 }
 
 // spamHistoryPageData builds the Spam History page model: the recent verdicts and
@@ -80,12 +80,12 @@ func (s *Server) handleUISaveSpamRetention(w http.ResponseWriter, r *http.Reques
 	}
 	retain := formInt(r, "retain")
 	if retain < 1 {
-		s.render(w, "retention-panel", s.spamHistoryPageData(r, errorNotice("Retention must be at least 1; setting not saved.")))
+		s.render(w, r, "retention-panel", s.spamHistoryPageData(r, errorNotice("Retention must be at least 1; setting not saved.")))
 		return
 	}
 	if err := s.dir.SetSpamHistorySettings(directory.SpamHistorySettings{Retain: retain}); err != nil {
-		s.render(w, "retention-panel", s.spamHistoryPageData(r, s.failNotice("Could not save the retention setting.", err)))
+		s.render(w, r, "retention-panel", s.spamHistoryPageData(r, s.failNotice("Could not save the retention setting.", err)))
 		return
 	}
-	s.render(w, "retention-panel", s.spamHistoryPageData(r, okNotice("Retention saved, the MTA applies it within a minute, no restart.")))
+	s.render(w, r, "retention-panel", s.spamHistoryPageData(r, okNotice("Retention saved, the MTA applies it within a minute, no restart.")))
 }

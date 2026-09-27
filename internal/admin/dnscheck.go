@@ -314,10 +314,10 @@ func (s *Server) handleUIDomainDNS(w http.ResponseWriter, r *http.Request) {
 	}
 	selector, err := s.dkimSelectorOf(name)
 	if err != nil {
-		s.render(w, "notice", s.failNotice("Could not read the DKIM key, so the check cannot name its record.", err))
+		s.render(w, r, "notice", s.failNotice("Could not read the DKIM key, so the check cannot name its record.", err))
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	s.render(w, "dns-report", checkDomainDNS(ctx, s.resolver, name, s.paths.ServerHostname(), selector))
+	s.render(w, r, "dns-report", checkDomainDNS(ctx, s.resolver, name, s.paths.ServerHostname(), selector))
 }

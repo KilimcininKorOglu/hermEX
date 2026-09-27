@@ -9,7 +9,7 @@ func (s *Server) handleUISettings(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	s.render(w, "settings.html", s.settingsPageData(r, panelNotice{}))
+	s.render(w, r, "settings.html", s.settingsPageData(r, panelNotice{}))
 }
 
 // settingsPageData merges every settings panel's data into one model. It reuses

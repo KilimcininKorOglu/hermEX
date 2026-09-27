@@ -200,9 +200,9 @@ func (s *Server) handleRemoveFolderPermission(w http.ResponseWriter, r *http.Req
 // renderFolderPerms lists a folder's permission members and renders the permission
 // panel (the htmx swap target), carrying an optional error message. A zero fid means
 // no folder is selected and the panel renders empty.
-func (s *Server) renderFolderPerms(w http.ResponseWriter, email, maildir string, fid int64, csrf, errMsg string) {
+func (s *Server) renderFolderPerms(w http.ResponseWriter, r *http.Request, email, maildir string, fid int64, csrf, errMsg string) {
 	if fid == 0 {
-		s.render(w, "folder-perms", map[string]any{"Email": email, "CSRF": csrf})
+		s.render(w, r, "folder-perms", map[string]any{"Email": email, "CSRF": csrf})
 		return
 	}
 	perms, err := s.store.ListFolderPermissions(maildir, fid)
@@ -213,9 +213,10 @@ func (s *Server) renderFolderPerms(w http.ResponseWriter, email, maildir string,
 	for _, p := range perms {
 		members = append(members, folderMemberJSON{MemberID: p.MemberID, Name: p.Name, Rights: p.Rights, Level: rightsLevelName(p.Rights)})
 	}
-	s.render(w, "folder-perms", map[string]any{
+	s.render(w, r, "folder-perms", map[string]any{
 		"Email": email, "CSRF": csrf, "FID": fid, "Members": members, "Levels": folderRightsLevels, "Error": errMsg,
 	})
+
 }
 
 // uiFolderUser resolves the user named in a UI folder request; on failure it renders
@@ -225,10 +226,10 @@ func (s *Server) uiFolderUser(w http.ResponseWriter, r *http.Request) (directory
 	u, ok, err := s.dir.GetUser(r.PathValue("email"))
 	switch {
 	case err != nil:
-		s.render(w, "folder-perms", map[string]any{"Error": s.notice("Could not read the user.", err)})
+		s.render(w, r, "folder-perms", map[string]any{"Error": s.notice("Could not read the user.", err)})
 		return directory.UserDetail{}, false
 	case !ok:
-		s.render(w, "folder-perms", map[string]any{"Error": "No such user."})
+		s.render(w, r, "folder-perms", map[string]any{"Error": "No such user."})
 		return directory.UserDetail{}, false
 	}
 	return u, true
@@ -245,7 +246,7 @@ func (s *Server) handleUIFolderPerms(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fid, _ := strconv.ParseInt(r.FormValue("fid"), 10, 64)
-	s.renderFolderPerms(w, u.Username, u.Maildir, fid, csrfCookieValue(r), "")
+	s.renderFolderPerms(w, r, u.Username, u.Maildir, fid, csrfCookieValue(r), "")
 }
 
 // handleUISetFolderPerm grants or updates a member's rights on the selected folder
@@ -277,7 +278,7 @@ func (s *Server) handleUISetFolderPerm(w http.ResponseWriter, r *http.Request) {
 			errMsg = s.notice("Could not grant.", err)
 		}
 	}
-	s.renderFolderPerms(w, u.Username, u.Maildir, fid, csrfCookieValue(r), errMsg)
+	s.renderFolderPerms(w, r, u.Username, u.Maildir, fid, csrfCookieValue(r), errMsg)
 }
 
 // handleUIRemoveFolderPerm drops a member from the selected folder and re-renders the
@@ -296,5 +297,5 @@ func (s *Server) handleUIRemoveFolderPerm(w http.ResponseWriter, r *http.Request
 	if err := s.store.RemoveFolderPermission(u.Maildir, fid, memberID); err != nil {
 		errMsg = s.notice("Could not remove.", err)
 	}
-	s.renderFolderPerms(w, u.Username, u.Maildir, fid, csrfCookieValue(r), errMsg)
+	s.renderFolderPerms(w, r, u.Username, u.Maildir, fid, csrfCookieValue(r), errMsg)
 }

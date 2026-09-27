@@ -109,9 +109,10 @@ func (s *Server) handleUIMailq(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		errMsg = s.notice("Could not read the mail queue.", err)
 	}
-	s.render(w, "mailq.html", map[string]any{
+	s.render(w, r, "mailq.html", map[string]any{
 		"Nav": "mailq", "CSRF": csrfCookieValue(r), "Queue": views, "Error": errMsg,
 	})
+
 }
 
 // handleUIMailqPanel renders just the queue table (refresh / post-action swap).
@@ -156,9 +157,10 @@ func (s *Server) renderMailqPanel(w http.ResponseWriter, r *http.Request, errMsg
 	if err != nil && errMsg == "" {
 		errMsg = s.notice("Could not read the mail queue.", err)
 	}
-	s.render(w, "mailq-panel", map[string]any{
+	s.render(w, r, "mailq-panel", map[string]any{
 		"CSRF": csrfCookieValue(r), "Queue": views, "Error": errMsg,
 	})
+
 }
 
 // handleGetMailq returns the queue as JSON (system admins).

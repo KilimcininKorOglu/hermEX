@@ -30,7 +30,7 @@ func TestUISavePrefsStoresTheTheme(t *testing.T) {
 
 	resp := htmxPUT(t, ts, "/admin/ui/prefs", session, csrf, url.Values{"theme": {"dark"}})
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent || themeCookieOf(resp) != "dark" {
+	if _, langSet := langCookieOf(resp); resp.StatusCode != http.StatusNoContent || themeCookieOf(resp) != "dark" || langSet {
 		t.Fatalf("save = %d, cookie %q, want 204 and the dark cookie", resp.StatusCode, themeCookieOf(resp))
 	}
 	if got := d.uiPrefs["admin@hermex.test"].Theme; got != "dark" {

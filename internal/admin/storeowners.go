@@ -93,5 +93,5 @@ func (s *Server) handleUIUserStoreOwners(w http.ResponseWriter, r *http.Request)
 			}
 		}
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }

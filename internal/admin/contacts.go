@@ -18,11 +18,12 @@ func (s *Server) handleUIContacts(w http.ResponseWriter, r *http.Request) {
 	}
 	contacts, contactsErr := s.dir.ListContacts()
 	domains, domainsErr := s.dir.ListDomains()
-	s.render(w, "contacts.html", map[string]any{
+	s.render(w, r, "contacts.html", map[string]any{
 		"Nav": "contacts", "CSRF": csrfCookieValue(r),
 		"Contacts": contacts, "ContactsError": s.listFailure("the contacts", contactsErr),
 		"Domains": domains, "DomainsError": s.listFailure("the domains", domainsErr),
 	})
+
 }
 
 // handleUICreateContact creates an org mail contact from the management form and
@@ -88,8 +89,9 @@ func (s *Server) handleUIDeleteContact(w http.ResponseWriter, r *http.Request) {
 // forms in the swapped-in fragment keep working.
 func (s *Server) renderContactsPanel(w http.ResponseWriter, r *http.Request, errMsg string) {
 	contacts, err := s.dir.ListContacts()
-	s.render(w, "contacts-panel", map[string]any{
+	s.render(w, r, "contacts-panel", map[string]any{
 		"Contacts": contacts, "ContactsError": s.listFailure("the contacts", err),
 		"CSRF": csrfCookieValue(r), "Error": errMsg,
 	})
+
 }

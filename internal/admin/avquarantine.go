@@ -63,9 +63,10 @@ func (s *Server) handleUIAVQuarantine(w http.ResponseWriter, r *http.Request) {
 			Status:     rec.Status,
 		})
 	}
-	s.render(w, "avquarantine.html", map[string]any{
+	s.render(w, r, "avquarantine.html", map[string]any{
 		"Nav": "avquarantine", "Items": views, "Error": errMsg,
 	})
+
 }
 
 // domainIDList flattens a scopedReadDomains id set into a slice for ListQuarantine.
@@ -89,7 +90,7 @@ func (s *Server) handleUISaveDomainAVScan(w http.ResponseWriter, r *http.Request
 	id, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64)
 	if err != nil {
 		data["Error"] = "Invalid domain id."
-		s.render(w, "user-status", data)
+		s.render(w, r, "user-status", data)
 		return
 	}
 	dd, found, err := s.dir.GetDomain(id)
@@ -112,5 +113,5 @@ func (s *Server) handleUISaveDomainAVScan(w http.ResponseWriter, r *http.Request
 			})
 		}
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }

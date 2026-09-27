@@ -21,10 +21,11 @@ func (s *Server) handleUIRooms(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rooms, err := s.dir.ListAllRooms()
-	s.render(w, "rooms.html", map[string]any{
+	s.render(w, r, "rooms.html", map[string]any{
 		"Nav": "rooms", "CSRF": csrfCookieValue(r),
 		"Rooms": rooms, "RoomsError": s.listFailure("the rooms", err),
 	})
+
 }
 
 // handleUICreateRoom provisions a resource mailbox from the management form (its
@@ -74,8 +75,9 @@ func (s *Server) handleUIDeleteRoom(w http.ResponseWriter, r *http.Request) {
 // swapped-in fragment keep working.
 func (s *Server) renderRoomsPanel(w http.ResponseWriter, r *http.Request, errMsg string) {
 	rooms, err := s.dir.ListAllRooms()
-	s.render(w, "rooms-panel", map[string]any{
+	s.render(w, r, "rooms-panel", map[string]any{
 		"Rooms": rooms, "RoomsError": s.listFailure("the rooms", err),
 		"CSRF": csrfCookieValue(r), "Error": errMsg,
 	})
+
 }

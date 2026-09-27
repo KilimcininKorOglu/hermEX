@@ -13,8 +13,9 @@ import (
 // the first paint. The users record, which webmail shares, is where it is stored.
 const themeCookie = "admin_theme"
 
-// themeCookieMaxAge keeps the cached theme for a year, as the browser-set one did.
-const themeCookieMaxAge = 365 * 24 * 60 * 60
+// prefsCookieMaxAge keeps a cached preference for a year, as the browser-set theme
+// cookie did.
+const prefsCookieMaxAge = 365 * 24 * 60 * 60
 
 // prefsStore returns the directory's preference capability, when it has one.
 func (s *Server) prefsStore() (directory.UserPrefsStore, bool) {
@@ -22,59 +23,108 @@ func (s *Server) prefsStore() (directory.UserPrefsStore, bool) {
 	return store, ok
 }
 
-// setThemeCookie caches theme for static/theme.js; "system" follows the device.
-func setThemeCookie(w http.ResponseWriter, theme string) {
-	// #nosec G124 -- theme.js reads this cookie before the first paint, so it cannot be HttpOnly; it holds only the theme name
+// setPrefsCookie caches one preference for the panel; an empty value clears it.
+func setPrefsCookie(w http.ResponseWriter, name, value string) {
+	maxAge := prefsCookieMaxAge
+	if value == "" {
+		maxAge = -1
+	}
+	// #nosec G124 -- theme.js reads the theme cookie before the first paint, so it cannot be HttpOnly; both cookies hold only a preference name
 	http.SetCookie(w, &http.Cookie{
-		Name: themeCookie, Value: theme, Path: "/admin", MaxAge: themeCookieMaxAge,
+		Name: name, Value: value, Path: "/admin", MaxAge: maxAge,
 		Secure: true, SameSite: http.SameSiteLaxMode,
 	})
 }
 
-// syncThemeCookie wraps the panel so every full page load carries the caller's
-// stored theme in the theme cookie, and a theme chosen in webmail or on another
-// browser shows here from the first paint. A panel fragment (an htmx request)
-// is left alone, since the page around it already applied the theme.
-func (s *Server) syncThemeCookie(next http.Handler) http.Handler {
+// syncPrefs wraps the panel so every full page load renders in the caller's
+// stored language and carries the stored theme and language in their cookies, so
+// a choice made in webmail or on another browser shows here from the first paint.
+// A panel fragment (an htmx request) is left alone: it renders in the language
+// the cookie holds, which the page around it already brought in line.
+func (s *Server) syncPrefs(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/admin/ui/") && r.Header.Get("HX-Request") == "" {
-			s.writeStoredTheme(w, r)
+			r = s.applyStoredPrefs(w, r)
 		}
 		next.ServeHTTP(w, r)
 	})
 }
 
-// writeStoredTheme sets the theme cookie to the signed-in caller's stored theme
-// when the request carries a different one. A caller who never chose a theme
-// keeps whatever the browser holds.
-func (s *Server) writeStoredTheme(w http.ResponseWriter, r *http.Request) {
+// applyStoredPrefs brings the theme and language cookies in line with the
+// signed-in caller's users record and returns the request carrying the stored
+// language. A caller who never chose a theme keeps whatever the browser holds; a
+// caller who never chose a language follows the browser's.
+func (s *Server) applyStoredPrefs(w http.ResponseWriter, r *http.Request) *http.Request {
+	p, ok := s.storedPrefs(r)
+	if !ok {
+		return r
+	}
+	if p.Theme != "" && requestCookie(r, themeCookie) != p.Theme {
+		setPrefsCookie(w, themeCookie, p.Theme)
+	}
+	lang := p.Lang
+	if !supportedLang(lang) {
+		lang = ""
+	}
+	if requestCookie(r, langCookie) != lang {
+		setPrefsCookie(w, langCookie, lang)
+	}
+	if lang == "" {
+		// The cookie this request carried is stale now, so it must not decide.
+		return withLang(r, acceptLanguage(r.Header.Get("Accept-Language")))
+	}
+	return withLang(r, lang)
+}
+
+// storedPrefs reads the signed-in caller's users record; ok is false for a
+// request without a session, a directory without preferences, or a failed read,
+// which is recorded.
+func (s *Server) storedPrefs(r *http.Request) (directory.UserPrefs, bool) {
 	cl, ok := s.uiClaims(r)
 	if !ok {
-		return
+		return directory.UserPrefs{}, false
 	}
 	store, ok := s.prefsStore()
 	if !ok {
-		return
+		return directory.UserPrefs{}, false
 	}
 	p, found, err := store.GetUserPrefs(cl.Login)
 	if err != nil {
 		s.logger.Emit(logging.Event{
 			Level: logging.LevelError, Subsystem: logging.Admin, Name: "prefs.read_fail", Err: err.Error(),
 		})
-		return
+		return directory.UserPrefs{}, false
 	}
-	if !found || p.Theme == "" {
-		return
-	}
-	if c, err := r.Cookie(themeCookie); err == nil && c.Value == p.Theme {
-		return
-	}
-	setThemeCookie(w, p.Theme)
+	return p, found
 }
 
-// handleUISavePrefs stores the signed-in operator's theme in the users record
-// webmail shares. Any panel user may set their own theme, so it asks for a session
-// and the CSRF header only.
+// requestCookie returns the named cookie's value, or "" when the request has none.
+func requestCookie(r *http.Request, name string) string {
+	if c, err := r.Cookie(name); err == nil {
+		return c.Value
+	}
+	return ""
+}
+
+// prefsUpdate reads the theme and language a save names; a field the form does
+// not carry keeps its stored value.
+func prefsUpdate(r *http.Request) directory.UserPrefsUpdate {
+	var u directory.UserPrefsUpdate
+	if err := r.ParseForm(); err != nil {
+		return u
+	}
+	if v, ok := r.PostForm["theme"]; ok && len(v) > 0 {
+		u.Theme = &v[0]
+	}
+	if v, ok := r.PostForm["lang"]; ok && len(v) > 0 {
+		u.Lang = &v[0]
+	}
+	return u
+}
+
+// handleUISavePrefs stores the signed-in operator's theme or language in the users
+// record webmail shares. Any panel user may set their own, so it asks for a
+// session and the CSRF header only.
 func (s *Server) handleUISavePrefs(w http.ResponseWriter, r *http.Request) {
 	cl, ok := s.uiClaims(r)
 	if !ok {
@@ -90,17 +140,32 @@ func (s *Server) handleUISavePrefs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "preferences are not supported", http.StatusNotImplemented)
 		return
 	}
-	theme := r.PostFormValue("theme")
-	found, err := store.SetUserPrefs(cl.Login, directory.UserPrefsUpdate{Theme: &theme})
+	u := prefsUpdate(r)
+	if u.Theme == nil && u.Lang == nil {
+		http.Error(w, "no preference named", http.StatusBadRequest)
+		return
+	}
+	found, err := store.SetUserPrefs(cl.Login, u)
+	s.answerPrefsSave(w, u, found, err)
+}
+
+// answerPrefsSave answers a preference save and, when it was stored, caches the
+// saved values in their cookies.
+func (s *Server) answerPrefsSave(w http.ResponseWriter, u directory.UserPrefsUpdate, found bool, err error) {
 	switch {
 	case errors.Is(err, directory.ErrInvalidPref):
-		http.Error(w, "invalid theme", http.StatusBadRequest)
+		http.Error(w, "invalid preference", http.StatusBadRequest)
 	case err != nil:
-		s.fail(w, "could not save the theme", err, http.StatusInternalServerError)
+		s.fail(w, "could not save the preference", err, http.StatusInternalServerError)
 	case !found:
 		http.Error(w, "no such user", http.StatusNotFound)
 	default:
-		setThemeCookie(w, theme)
+		if u.Theme != nil {
+			setPrefsCookie(w, themeCookie, *u.Theme)
+		}
+		if u.Lang != nil {
+			setPrefsCookie(w, langCookie, *u.Lang)
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

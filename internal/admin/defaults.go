@@ -190,7 +190,7 @@ func (s *Server) handleUISaveDomainDefaults(w http.ResponseWriter, r *http.Reque
 	} else {
 		data["Saved"] = true
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }
 
 // storeDomainOverride writes a domain's user-defaults override, or clears the row
@@ -241,7 +241,7 @@ func (s *Server) handleUIDefaults(w http.ResponseWriter, r *http.Request) {
 		data["MaxUser"] = cd.Domain.MaxUser
 		data["Fields"] = userCreateFieldsOf(rd)
 	}
-	s.render(w, "defaults.html", data)
+	s.render(w, r, "defaults.html", data)
 }
 
 // handleUISaveDefaults saves the system create-defaults from the editor and returns
@@ -256,5 +256,5 @@ func (s *Server) handleUISaveDefaults(w http.ResponseWriter, r *http.Request) {
 	} else {
 		data["Saved"] = true
 	}
-	s.render(w, "user-status", data)
+	s.render(w, r, "user-status", data)
 }

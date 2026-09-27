@@ -57,7 +57,7 @@ func (s *Server) publicFolderViews(domain string) ([]pubFolderView, error) {
 
 // renderPublicPanel renders the folder/grant panel for one domain (the htmx swap
 // target), carrying an optional error. An empty domain renders the panel empty.
-func (s *Server) renderPublicPanel(w http.ResponseWriter, domain, csrf, errMsg string) {
+func (s *Server) renderPublicPanel(w http.ResponseWriter, r *http.Request, domain, csrf, errMsg string) {
 	data := map[string]any{"Domain": domain, "CSRF": csrf, "Levels": folderRightsLevels}
 	if domain != "" {
 		folders, err := s.publicFolderViews(domain)
@@ -67,7 +67,7 @@ func (s *Server) renderPublicPanel(w http.ResponseWriter, domain, csrf, errMsg s
 		data["Folders"] = folders
 	}
 	data["Error"] = errMsg
-	s.render(w, "public-folders-panel", data)
+	s.render(w, r, "public-folders-panel", data)
 }
 
 // handleUIPublicFolders renders the public-folders management page: a domain picker
@@ -93,7 +93,7 @@ func (s *Server) handleUIPublicFolders(w http.ResponseWriter, r *http.Request) {
 		}
 		data["Folders"] = folders
 	}
-	s.render(w, "public_folders.html", data)
+	s.render(w, r, "public_folders.html", data)
 }
 
 // handleUIPublicFoldersPanel renders just the folder/grant panel for the domain the
@@ -102,7 +102,7 @@ func (s *Server) handleUIPublicFoldersPanel(w http.ResponseWriter, r *http.Reque
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	s.renderPublicPanel(w, r.FormValue("domain"), csrfCookieValue(r), "")
+	s.renderPublicPanel(w, r, r.FormValue("domain"), csrfCookieValue(r), "")
 }
 
 // handleUICreatePublicFolder provisions the domain's public store if absent and
@@ -124,7 +124,7 @@ func (s *Server) handleUICreatePublicFolder(w http.ResponseWriter, r *http.Reque
 			errMsg = s.notice("Could not create folder.", err)
 		}
 	}
-	s.renderPublicPanel(w, domain, csrfCookieValue(r), errMsg)
+	s.renderPublicPanel(w, r, domain, csrfCookieValue(r), errMsg)
 }
 
 // handleUIDeletePublicFolder deletes a public folder and re-renders the panel.
@@ -144,7 +144,7 @@ func (s *Server) handleUIDeletePublicFolder(w http.ResponseWriter, r *http.Reque
 			errMsg = s.notice("Could not delete folder.", err)
 		}
 	}
-	s.renderPublicPanel(w, domain, csrfCookieValue(r), errMsg)
+	s.renderPublicPanel(w, r, domain, csrfCookieValue(r), errMsg)
 }
 
 // handleUISetPublicGrant adds or updates a member's rights on a public folder from
@@ -163,7 +163,7 @@ func (s *Server) handleUISetPublicGrant(w http.ResponseWriter, r *http.Request) 
 			errMsg = s.notice("Could not grant.", err)
 		}
 	}
-	s.renderPublicPanel(w, domain, csrfCookieValue(r), errMsg)
+	s.renderPublicPanel(w, r, domain, csrfCookieValue(r), errMsg)
 }
 
 // handleUIRemovePublicGrant drops a member from a public folder and re-renders the
@@ -180,7 +180,7 @@ func (s *Server) handleUIRemovePublicGrant(w http.ResponseWriter, r *http.Reques
 	if err := s.pub.Grant(domain, fid, change); err != nil {
 		errMsg = s.notice("Could not remove grant.", err)
 	}
-	s.renderPublicPanel(w, domain, csrfCookieValue(r), errMsg)
+	s.renderPublicPanel(w, r, domain, csrfCookieValue(r), errMsg)
 }
 
 // publicGrantChange validates a grantee and builds the permission change to add. The

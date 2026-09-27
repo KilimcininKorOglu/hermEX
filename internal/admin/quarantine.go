@@ -31,7 +31,7 @@ func (s *Server) handleUIQuarantine(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.renderQuarantine(w, r.PathValue("email"), maildir, csrfCookieValue(r), panelNotice{})
+	s.renderQuarantine(w, r, r.PathValue("email"), maildir, csrfCookieValue(r), panelNotice{})
 }
 
 // handleUIQuarantineRelease moves a quarantined message from Junk back to the inbox,
@@ -54,7 +54,7 @@ func (s *Server) handleUIQuarantineRelease(w http.ResponseWriter, r *http.Reques
 	}); err != nil {
 		notice = warnNotice("Could not release the message, it may already have been moved.")
 	}
-	s.renderQuarantine(w, r.PathValue("email"), maildir, csrfCookieValue(r), notice)
+	s.renderQuarantine(w, r, r.PathValue("email"), maildir, csrfCookieValue(r), notice)
 }
 
 // handleUIQuarantineDelete permanently deletes a quarantined message and re-renders
@@ -74,7 +74,7 @@ func (s *Server) handleUIQuarantineDelete(w http.ResponseWriter, r *http.Request
 	}); err != nil {
 		notice = warnNotice("Could not delete the message, it may already be gone.")
 	}
-	s.renderQuarantine(w, r.PathValue("email"), maildir, csrfCookieValue(r), notice)
+	s.renderQuarantine(w, r, r.PathValue("email"), maildir, csrfCookieValue(r), notice)
 }
 
 // quarantineUID reads the target message UID from the posted form.
@@ -96,18 +96,18 @@ func (s *Server) quarantineMutate(maildir string, fn func(*objectstore.Store) er
 // renderQuarantine reads the user's Junk folder and renders the quarantine panel. A
 // mailbox that cannot be opened (e.g. one that was never provisioned) shows an empty
 // quarantine rather than a failure, a clean mailbox is not an error.
-func (s *Server) renderQuarantine(w http.ResponseWriter, email, maildir, csrf string, notice panelNotice) {
+func (s *Server) renderQuarantine(w http.ResponseWriter, r *http.Request, email, maildir, csrf string, notice panelNotice) {
 	data := map[string]any{"Email": email, "CSRF": csrf, "Notice": notice}
 	st, err := objectstore.Open(maildir)
 	if err != nil {
-		s.render(w, "quarantine", data)
+		s.render(w, r, "quarantine", data)
 		return
 	}
 	defer st.Close()
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDJunk))
 	if err != nil {
 		data["Error"] = s.notice("Could not read the Junk folder.", err)
-		s.render(w, "quarantine", data)
+		s.render(w, r, "quarantine", data)
 		return
 	}
 	views := make([]quarantineMsg, 0, len(msgs))
@@ -121,5 +121,5 @@ func (s *Server) renderQuarantine(w http.ResponseWriter, email, maildir, csrf st
 		})
 	}
 	data["Messages"] = views
-	s.render(w, "quarantine", data)
+	s.render(w, r, "quarantine", data)
 }
