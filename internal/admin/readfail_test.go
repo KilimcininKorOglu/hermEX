@@ -95,6 +95,7 @@ func TestAFailedListReadIsNotShownAsEmpty(t *testing.T) {
 		{"ListOrgs", "/admin/ui/orgs", "Could not read the organizations.", "No organizations yet."},
 		{"ListRoles", "/admin/ui/roles", "Could not read the roles.", "No roles yet."},
 		{"ListDomains", "/admin/ui/domains", "Could not read the domains.", "No domains yet."},
+		{"ListUsers", "/admin/ui/users", "Could not read the users.", "No users yet."},
 	} {
 		d := &fakeDir{
 			authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
@@ -125,6 +126,8 @@ func TestAFailedChoiceReadHidesTheCreateForm(t *testing.T) {
 	}{
 		{"ListDomains", "/admin/ui/contacts", `hx-post="/admin/ui/contacts"`, "Could not read the domains."},
 		{"GetCreateDefaults", "/admin/ui/domains", `hx-post="/admin/ui/domains"`, "Could not read the create defaults."},
+		{"ListDomains", "/admin/ui/users", `hx-post="/admin/ui/users"`, "Could not read the domains."},
+		{"EffectiveUserDefaults", "/admin/ui/users", `hx-post="/admin/ui/users"`, "Could not read the create defaults."},
 	} {
 		d := &fakeDir{
 			authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
@@ -138,6 +141,35 @@ func TestAFailedChoiceReadHidesTheCreateForm(t *testing.T) {
 		if strings.Contains(page, tc.form) {
 			t.Errorf("%s: %s offers the create form after the read failed", tc.read, tc.path)
 		}
+	}
+}
+
+// TestAFailedDefaultsReadRefusesTheUserCreate proves a new-user form whose domain
+// defaults could not be read creates no user. Picking a domain re-fetched the
+// fields, and a failed read returned them empty, so the user was created with no
+// service and no quota.
+func TestAFailedDefaultsReadRefusesTheUserCreate(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		domainDetail: directory.DomainDetail{ID: 1, Name: "acme.test"},
+		readErrs:     map[string]error{"EffectiveUserDefaults": errReadFailed},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	fields := wantBody(t, authedGET(t, ts, "/admin/ui/user-create-fields?domain=1", session), http.StatusOK, "fields")
+	wantContains(t, fields, "Could not read the create defaults.", "fields: the failed read is reported")
+	wantContains(t, fields, `name="defaults_unread"`, "fields: the form is marked")
+	if strings.Contains(fields, `name="lang"`) {
+		t.Errorf("fields: the failed read still offers the fields:\n%s", fields)
+	}
+
+	panel := wantBody(t, htmxPOST(t, ts, "/admin/ui/users", session, csrf, url.Values{
+		"local": {"new"}, "domain": {"1"}, "password": {"pw"}, "defaults_unread": {"1"},
+	}), http.StatusOK, "create")
+	wantContains(t, panel, "no user was created", "create: the refusal is reported")
+	if d.createdUser != "" {
+		t.Errorf("created %q from a form whose defaults could not be read", d.createdUser)
 	}
 }
 

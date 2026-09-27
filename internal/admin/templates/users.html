@@ -6,6 +6,7 @@
 <div class="stack">
 <section class="card">
 {{template "card-head" (dict "Icon" "user" "Title" "Add a user" "Desc" "Create a mailbox in one of your domains.")}}
+{{with .CreateError}}<p class="error">{{.}}</p>{{else}}
 <form class="form-grid" data-reset hx-post="/admin/ui/users" hx-target="#users-panel" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Address
@@ -19,6 +20,7 @@
 {{template "user-create-fields" .Fields}}
 <button type="submit"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "plus"}}"/></svg>Add user</button>
 </form>
+{{end}}
 </section>
 {{template "users-panel" .}}
 </div>
@@ -46,13 +48,18 @@
 </div>
 </div>{{end}}
 
+{{define "user-create-fields-failed"}}<div id="user-create-fields" class="create-fields">
+<p class="error">{{.}}</p>
+<input type="hidden" name="defaults_unread" value="1">
+</div>{{end}}
+
 {{define "users-panel"}}<div id="users-panel">
 {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
 <table class="grid">
 <thead><tr><th>Email</th><th>Auth</th><th>Status</th></tr></thead>
 <tbody>
 {{range .Users}}<tr><td><a href="/admin/ui/users/{{.Username}}">{{.Username}}</a></td><td><span class="badge">{{if .LDAP}}LDAP{{else}}local{{end}}</span></td><td>{{if eq .Status 0}}<span class="status status-ok">Active</span>{{else}}<span class="status status-off">Suspended</span>{{end}}</td></tr>
-{{else}}<tr><td colspan="3" class="empty">No users yet.</td></tr>
+{{else}}<tr><td colspan="3" class="empty{{if .UsersError}} failed{{end}}">{{or .UsersError "No users yet."}}</td></tr>
 {{end}}
 </tbody>
 </table>

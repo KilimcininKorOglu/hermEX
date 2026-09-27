@@ -86,22 +86,42 @@ func (s *Server) handleUIUsers(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	users, _ := s.dir.ListUsers()
-	domains, _ := s.dir.ListDomains()
-	// The create form pre-fills its per-user defaults for the first domain; the
-	// domain selector re-fetches the fields when the admin picks another.
+	users, err := s.dir.ListUsers()
+	data := map[string]any{
+		"Nav":        "users",
+		"CSRF":       csrfCookieValue(r),
+		"Users":      users,
+		"UsersError": s.listFailure("the users", err),
+	}
+	s.addUserCreateForm(data)
+	s.render(w, "users.html", data)
+}
+
+// createDefaultsUnread is the message that replaces the new-user fields when the
+// effective create defaults could not be read. Those fields would carry no service
+// and no quota, and a user created from them would skip the defaults.
+const createDefaultsUnread = "Could not read the create defaults. The form is hidden so a new user does not skip them."
+
+// addUserCreateForm adds what the create form offers: the domains, and the per-user
+// defaults of the first one, which the domain selector re-fetches when the admin
+// picks another. When either could not be read, CreateError replaces the form.
+func (s *Server) addUserCreateForm(data map[string]any) {
+	domains, err := s.dir.ListDomains()
+	if err != nil {
+		data["CreateError"] = s.notice("Could not read the domains.", err)
+		return
+	}
 	var initDomain int64
 	if len(domains) > 0 {
 		initDomain = domains[0].ID
 	}
-	rd, _ := s.dir.EffectiveUserDefaults(initDomain)
-	s.render(w, "users.html", map[string]any{
-		"Nav":     "users",
-		"CSRF":    csrfCookieValue(r),
-		"Users":   users,
-		"Domains": domains,
-		"Fields":  userCreateFieldsOf(rd),
-	})
+	rd, err := s.dir.EffectiveUserDefaults(initDomain)
+	if err != nil {
+		data["CreateError"] = s.notice(createDefaultsUnread, err)
+		return
+	}
+	data["Domains"] = domains
+	data["Fields"] = userCreateFieldsOf(rd)
 }
 
 // userCreateFields is the new-user form's pre-fillable section: the language, the
@@ -136,13 +156,19 @@ func userCreateFieldsOf(rd directory.ResolvedUserDefaults) userCreateFields {
 }
 
 // handleUICreateUserDefaults returns the new-user form's pre-fillable section for a
-// domain, so the domain selector can re-fill it when changed (htmx GET).
+// domain, so the domain selector can re-fill it when changed (htmx GET). When the
+// domain's defaults could not be read it returns a section that reports it and
+// marks the form, so a create from it is refused rather than made without them.
 func (s *Server) handleUICreateUserDefaults(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
 	id, _ := strconv.ParseInt(r.URL.Query().Get("domain"), 10, 64)
-	rd, _ := s.dir.EffectiveUserDefaults(id)
+	rd, err := s.dir.EffectiveUserDefaults(id)
+	if err != nil {
+		s.render(w, "user-create-fields-failed", s.notice(createDefaultsUnread, err))
+		return
+	}
 	s.render(w, "user-create-fields", userCreateFieldsOf(rd))
 }
 
@@ -159,6 +185,8 @@ func (s *Server) handleUICreateUser(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case local == "" || r.PostFormValue("password") == "":
 		errMsg = "A username and password are required."
+	case r.PostFormValue("defaults_unread") != "":
+		errMsg = "The create defaults of the domain could not be read, so no user was created. Select the domain again."
 	default:
 		dd, found, derr := s.dir.GetDomain(domainID)
 		switch {
@@ -170,8 +198,10 @@ func (s *Server) handleUICreateUser(w http.ResponseWriter, r *http.Request) {
 			errMsg = s.createUserWithDefaults(r, local+"@"+dd.Name)
 		}
 	}
-	users, _ := s.dir.ListUsers()
-	s.render(w, "users-panel", map[string]any{"Users": users, "Error": errMsg})
+	users, err := s.dir.ListUsers()
+	s.render(w, "users-panel", map[string]any{
+		"Users": users, "UsersError": s.listFailure("the users", err), "Error": errMsg,
+	})
 }
 
 // createUserWithDefaults creates the user, then applies the form's per-user
