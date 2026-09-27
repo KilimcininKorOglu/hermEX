@@ -422,6 +422,45 @@ func TestAFailedDomainReadIsRecordedOnSave(t *testing.T) {
 	}
 }
 
+// TestAFailedDomainReadIsNotAMissingDomain proves the DKIM, catch-all and gateway
+// panels answer a failed read of their domain as a server error and record it. They
+// answered 404 "no such domain", which says the domain does not exist, and recorded
+// nothing.
+func TestAFailedDomainReadIsNotAMissingDomain(t *testing.T) {
+	const domain = "/admin/ui/domains/1"
+	for _, tc := range []struct {
+		method, path string
+	}{
+		{"POST", domain + "/dkim/generate"},
+		{"PUT", domain + "/dkim/enable"},
+		{"POST", domain + "/dkim/delete"},
+		{"GET", domain + "/dkim/output"},
+		{"PUT", domain + "/catchall"},
+		{"POST", domain + "/gateway"},
+		{"POST", domain + "/gateway/delete"},
+	} {
+		d := &fakeDir{
+			authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+			readErrs: map[string]error{"GetDomain": errReadFailed},
+		}
+		ts, sink := loggingAdminServer(t, d)
+		session, csrf := loginCookies(t, ts)
+		var resp *http.Response
+		switch tc.method {
+		case "GET":
+			resp = htmxGET(t, ts, tc.path, session, csrf)
+		case "PUT":
+			resp = htmxPUT(t, ts, tc.path, session, csrf, url.Values{})
+		default:
+			resp = htmxPOST(t, ts, tc.path, session, csrf, url.Values{})
+		}
+		wantBody(t, resp, http.StatusInternalServerError, tc.path)
+		if e, ok := sink.find("request.fail"); !ok || e.Err != errReadFailed.Error() {
+			t.Errorf("%s: the failed read was not recorded (event %+v)", tc.path, e)
+		}
+	}
+}
+
 // TestAFailedUserReadIsRecordedOnSave proves a user save panel reports and records a
 // failed read of the user it names, or of a grantee its list names. It answered
 // "Server error." and recorded nothing, so the operator's log had no trace of the

@@ -129,7 +129,8 @@ func (s *Server) dkimPanel(w http.ResponseWriter, r *http.Request, dd directory.
 }
 
 // dkimDomain resolves the {domainID} path value to a domain, writing an error response
-// and returning ok=false when it cannot.
+// and returning ok=false when it cannot. A failed read is a server error and is
+// recorded; only a domain that does not exist is answered as not found.
 func (s *Server) dkimDomain(w http.ResponseWriter, r *http.Request) (directory.DomainDetail, bool) {
 	id, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64)
 	if err != nil {
@@ -137,7 +138,11 @@ func (s *Server) dkimDomain(w http.ResponseWriter, r *http.Request) (directory.D
 		return directory.DomainDetail{}, false
 	}
 	dd, found, err := s.dir.GetDomain(id)
-	if err != nil || !found {
+	if err != nil {
+		s.fail(w, "could not read the domain", err, http.StatusInternalServerError)
+		return directory.DomainDetail{}, false
+	}
+	if !found {
 		http.Error(w, "no such domain", http.StatusNotFound)
 		return directory.DomainDetail{}, false
 	}
