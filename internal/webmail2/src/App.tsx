@@ -32,6 +32,7 @@ import { ForcePasswordChangePage } from "@/pages/force-password"
 import { SecondFactorPage } from "@/pages/second-factor"
 import { firstGate, type Gate } from "@/utils/authGate"
 import { ShortcutsDialog } from "@/components/shortcuts-dialog"
+import { ConfirmProvider } from "@/components/confirm-dialog"
 import { Toaster } from "@/components/ui/sonner"
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts"
 import { LoginPage } from "@/pages/login"
@@ -116,7 +117,7 @@ function AppContent() {
   useKeyboardShortcuts()
 
   return (
-    <>
+    <ConfirmProvider>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route
@@ -187,7 +188,7 @@ function AppContent() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <ShortcutsDialog />
-    </>
+    </ConfirmProvider>
   )
 }
 

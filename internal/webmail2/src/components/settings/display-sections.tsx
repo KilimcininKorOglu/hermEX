@@ -1,6 +1,7 @@
 import { Fragment } from "react"
 import { Columns3, FileText, Info, Keyboard, MoveVertical, Wrench } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { useConfirm } from "@/components/confirm-dialog"
 import { Separator } from "@/components/ui/separator"
 import { useI18n } from "@/hooks/useI18n"
 import type { DisplaySettings } from "@/hooks/useDisplaySettings"
@@ -160,6 +161,7 @@ export function AboutSection({ version }: { version: string }) {
 // browser's notification permission.
 export function SettingsFooter({ version, display }: { version: string; display: DisplaySettings }) {
   const { t } = useI18n()
+  const confirm = useConfirm()
   return (
     <div className="text-center text-sm text-muted-foreground pb-8 space-y-2">
       <p>hermEX Webmail {version}</p>
@@ -169,8 +171,13 @@ export function SettingsFooter({ version, display }: { version: string; display:
         size="sm"
         className="mt-2"
         disabled={display.resetting}
-        onClick={() => {
-          if (window.confirm(t("settings.reset.confirm"))) void display.resetSettings()
+        onClick={async () => {
+          const ok = await confirm({
+            title: t("settings.reset.resetSettings"),
+            message: t("settings.reset.confirm"),
+            destructive: true,
+          })
+          if (ok) void display.resetSettings()
         }}
       >
         {display.resetting ? t("common.loading") : t("settings.reset.resetSettings")}

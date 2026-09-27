@@ -50,6 +50,10 @@ export default defineConfig([
         },
       ],
       'react-hooks/rules-of-hooks': 'error',
+      // The browser's own alert, confirm and prompt block the page and cannot be
+      // styled or translated; ask through the app's dialogs (useConfirm,
+      // LinkDialog) instead.
+      'no-alert': 'error',
       // A component declared inside another component is a new component type on
       // every render, so React unmounts and remounts its whole subtree for any
       // state change. That loses the scroll position, the focus and any open

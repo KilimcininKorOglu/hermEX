@@ -30,6 +30,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { useConfirm } from "@/components/confirm-dialog"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
@@ -956,6 +957,7 @@ export function ComposePage() {
   const [scheduleOpen, setScheduleOpen] = useState(false)
   const [scheduledAt, setScheduledAt] = useState("")
   const richTextRef = useRef<RichTextHandle | null>(null)
+  const confirm = useConfirm()
 
   const senders = useSenderIdentities()
   const diagnostics = useDiagnostics()
@@ -972,13 +974,14 @@ export function ComposePage() {
     richTextMode: extras.richTextMode, richTextRef, scheduledAt, drafts,
   })
 
-  const handleDiscard = () => {
+  const handleDiscard = async () => {
     const { to } = recipients.lists
     if (!(content.subject || content.body || to.length > 0)) {
       navigate("/inbox")
       return
     }
-    if (confirm(t("compose.discardConfirm"))) void drafts.save()
+    const ok = await confirm({ title: t("common.discard"), message: t("compose.discardConfirm") })
+    if (ok) void drafts.save()
   }
 
   return (

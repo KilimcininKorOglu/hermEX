@@ -30,6 +30,7 @@ import {
   StickyNote,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { useConfirm } from "@/components/confirm-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -598,6 +599,7 @@ function useMessageActions(email: EmailDetail | null, setEmail: (email: EmailDet
   // Keep the shared inbox state (sidebar badge, header notifications) in sync
   // with read/flag/label/delete actions taken in the reading view.
   const { patchInbox, removeFromInbox } = useMailbox()
+  const confirm = useConfirm()
 
   // run guards an action on an open message and reports its failure.
   const run = async (failKey: string, action: (m: EmailDetail) => Promise<void>) => {
@@ -617,7 +619,9 @@ function useMessageActions(email: EmailDetail | null, setEmail: (email: EmailDet
   })
 
   const handleRecall = async () => {
-    if (!email || !window.confirm(t("emailDetail.recallConfirm"))) return
+    if (!email) return
+    const ok = await confirm({ title: t("emailDetail.recall"), message: t("emailDetail.recallConfirm") })
+    if (!ok) return
     await run("emailDetail.recallFailed", async (m) => {
       const outcome = recallOutcome(await api.recallMail(m.id))
       toast[outcome.level](t(outcome.key, outcome.params))
