@@ -10,7 +10,7 @@
 <form class="form-grid" data-reset hx-post="/admin/ui/users" hx-target="#users-panel" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Address
-<span class="input-group"><input type="text" name="local" placeholder="username" required><span class="input-addon">@</span>
+<span class="input-group"><input type="text" name="local" placeholder="username" autocomplete="off" required><span class="input-addon">@</span>
 <select name="domain" hx-get="/admin/ui/user-create-fields" hx-target="#user-create-fields" hx-swap="outerHTML" hx-trigger="change">
 {{range .Domains}}<option value="{{.ID}}">{{.Name}}</option>
 {{else}}<option value="">No domains yet</option>
