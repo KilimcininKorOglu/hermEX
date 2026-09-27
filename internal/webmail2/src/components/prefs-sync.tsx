@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react"
 import { useAuth } from "@/contexts/AuthContext"
 import { useI18n } from "@/hooks/useI18n"
-import { isTheme, useTheme } from "@/components/theme-provider"
+import { isTheme, useTheme, type Theme } from "@/components/theme-provider"
 import api, { type AppearanceSettings, type UserPrefs } from "@/utils/api"
 import { getCookie, setCookie } from "@/utils/cookies"
 import { describeError } from "@/utils/errorlog"
@@ -74,6 +74,27 @@ function loadAppearance(): Promise<AppearanceSettings | null> {
   )
 }
 
+// syncTarget returns the account whose preferences still need applying, or null
+// when nobody is fully signed in or this account was already synced.
+function syncTarget(isAuthenticated: boolean, user: { email?: string; secondFactorRequired?: boolean } | null | undefined, synced: string | null): string | null {
+  if (!isAuthenticated || !user?.email || user.secondFactorRequired) return null
+  return synced === user.email ? null : user.email
+}
+
+// applyStored applies the users record's theme, language and banner state. A
+// language this browser chose before the record stored one is left for the
+// adoption to write, so the page does not flip to the browser default first.
+function applyStored(
+  stored: StoredPrefs,
+  browser: BrowserChoices,
+  applyStoredTheme: (theme: Theme) => void,
+  applyStoredLocale: (locale: string) => void,
+) {
+  if (isTheme(stored.theme)) applyStoredTheme(stored.theme)
+  if (stored.locale || !adoptions(stored, browser, undefined).locale) applyStoredLocale(stored.locale ?? "")
+  if (stored.showWelcomeBanner === false) setCookie(WELCOME_COOKIE, "1")
+}
+
 // PrefsSync applies the signed-in user's stored preferences once per sign-in:
 // the theme and language from the users record the admin panel shares, and the
 // app-wide parts of the appearance record. A choice this browser made before the
@@ -86,14 +107,13 @@ export function PrefsSync() {
 
   useEffect(() => {
     if (!isAuthenticated) synced.current = null
-    if (!isAuthenticated || !user?.email || user.secondFactorRequired || synced.current === user.email) return
-    synced.current = user.email
+    const email = syncTarget(isAuthenticated, user, synced.current)
+    if (!email || !user) return
+    synced.current = email
     const stored: StoredPrefs = { theme: user.theme, locale: user.locale, showWelcomeBanner: user.showWelcomeBanner }
     // Read the cookies before the stored values overwrite them.
     const browser = readBrowserChoices()
-    if (isTheme(stored.theme)) applyStoredTheme(stored.theme)
-    if (stored.locale || !adoptions(stored, browser, undefined).locale) applyStoredLocale(stored.locale ?? "")
-    if (stored.showWelcomeBanner === false) setCookie(WELCOME_COOKIE, "1")
+    applyStored(stored, browser, applyStoredTheme, applyStoredLocale)
     loadAppearance()
       .then((s) => {
         const adopt = adoptions(stored, browser, s?.theme)
