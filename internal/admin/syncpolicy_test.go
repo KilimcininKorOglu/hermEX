@@ -210,6 +210,25 @@ func TestUISaveSyncPolicy(t *testing.T) {
 	}
 }
 
+// TestSyncPolicyFormNamesTheRefusedField proves the policy forms say which field holds
+// a value the policy refuses. They answered "Invalid value." alone, which left the
+// operator to find the field among forty.
+func TestSyncPolicyFormNamesTheRefusedField(t *testing.T) {
+	ts := adminServerStore(t, folderUserDir(), &fakeStore{})
+	session, csrf := loginCookies(t, ts)
+	for _, path := range []string{
+		"/admin/ui/syncpolicy",
+		"/admin/ui/domains/1/syncpolicy",
+		"/admin/ui/users/alice@hermex.test/syncpolicy",
+	} {
+		for _, v := range []string{"-1", "1e3"} {
+			resp := htmxPUT(t, ts, path, session, csrf, url.Values{"MinDevicePasswordLength": {v}})
+			body := wantBody(t, resp, http.StatusOK, path)
+			wantContains(t, body, "MinDevicePasswordLength", path+" "+v+": the refused field is named")
+		}
+	}
+}
+
 // TestUIUserDetailShowsSyncPolicy proves the detail page renders the policy editor with
 // the stored override pre-filled.
 func TestUIUserDetailShowsSyncPolicy(t *testing.T) {

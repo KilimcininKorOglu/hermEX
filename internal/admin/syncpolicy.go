@@ -55,6 +55,15 @@ func policyFromForm(r *http.Request) (easpolicy.Policy, error) {
 	return p, nil
 }
 
+// invalidPolicy is the message a policy form shows for a value policyFromForm
+// refused. The error is written by policyFromForm and the policy package and names
+// the offending field, with no driver or filesystem text, so the form shows it as
+// the JSON API returns it. It is the operator's input at fault, not the server, so
+// nothing is recorded.
+func invalidPolicy(err error) string {
+	return "Invalid value: " + err.Error() + "."
+}
+
 // handleGetUserSyncPolicy returns a user's per-user device-policy override (system
 // administrators only); an unset field is simply absent and inherits the default.
 func (s *Server) handleGetUserSyncPolicy(w http.ResponseWriter, r *http.Request) {
@@ -117,7 +126,7 @@ func (s *Server) handleUIUserSyncPolicy(w http.ResponseWriter, r *http.Request) 
 		p, perr := policyFromForm(r)
 		switch {
 		case perr != nil:
-			data["Error"] = s.notice("Invalid value.", perr)
+			data["Error"] = invalidPolicy(perr)
 		default:
 			if err := s.store.SetSyncPolicy(u.Maildir, p); err != nil {
 				data["Error"] = s.notice("Could not save sync policy.", err)
@@ -253,7 +262,7 @@ func (s *Server) handleUISaveDomainSyncPolicy(w http.ResponseWriter, r *http.Req
 		p, perr := policyFromForm(r)
 		switch {
 		case perr != nil:
-			data["Error"] = s.notice("Invalid value.", perr)
+			data["Error"] = invalidPolicy(perr)
 		default:
 			if _, err := s.dir.SetDomainSyncPolicy(dd.Name, p); err != nil {
 				data["Error"] = s.notice("Could not save sync policy.", err)
@@ -289,7 +298,7 @@ func (s *Server) handleUISaveSyncPolicy(w http.ResponseWriter, r *http.Request) 
 	data := map[string]any{}
 	switch {
 	case err != nil:
-		data["Error"] = s.notice("Invalid value.", err)
+		data["Error"] = invalidPolicy(err)
 	default:
 		if err := s.dir.SetDefaultSyncPolicy(p); err != nil {
 			data["Error"] = s.notice("Could not save.", err)
