@@ -122,7 +122,7 @@ const maxImportBytes = 40 << 20
 // handleAttachment streams the Nth attachment of a message (the same walk order
 // collectAttachments assigns).
 func (s *Server) handleAttachment(w http.ResponseWriter, r *http.Request) {
-	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"))
+	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"), accessRead)
 	if !ok {
 		return
 	}
@@ -191,7 +191,7 @@ func isAttachmentPart(p *mime.Part) bool {
 
 // handleExport serves a message as a downloadable .eml file.
 func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
-	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"))
+	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"), accessRead)
 	if !ok {
 		return
 	}
@@ -311,10 +311,9 @@ func uniqueEntryName(used map[string]bool, uid uint32) string {
 }
 
 // handleSource serves a message's raw RFC822 source as inline text/plain, for the
-// "view source / show original" action (own mailbox only, like the other locate-
-// based readers).
+// "view source / show original" action.
 func (s *Server) handleSource(w http.ResponseWriter, r *http.Request) {
-	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"))
+	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"), accessRead)
 	if !ok {
 		return
 	}
@@ -331,9 +330,9 @@ func (s *Server) handleSource(w http.ResponseWriter, r *http.Request) {
 
 // handleHeaders serves only a message's internet (RFC822) header block (the bytes
 // up to the first blank line) as inline text/plain, for a "view internet headers"
-// action distinct from the full source (own mailbox only, like handleSource).
+// action distinct from the full source.
 func (s *Server) handleHeaders(w http.ResponseWriter, r *http.Request) {
-	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"))
+	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"), accessRead)
 	if !ok {
 		return
 	}
@@ -363,9 +362,9 @@ func headerBlock(raw []byte) []byte {
 }
 
 // handleAttachmentsZip streams every attachment of a message as a single .zip
-// (the same walk order handleAttachment indexes). Own mailbox only.
+// (the same walk order handleAttachment indexes).
 func (s *Server) handleAttachmentsZip(w http.ResponseWriter, r *http.Request) {
-	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"))
+	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"), accessRead)
 	if !ok {
 		return
 	}
@@ -458,12 +457,16 @@ func wantedAttachments(values []string, total int) ([]int, error) {
 }
 
 func (s *Server) handleRecover(w http.ResponseWriter, r *http.Request) {
-	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"))
+	mb, fid, uid, ok := s.locateMailbox(w, r, r.URL.Query().Get("id"), accessWrite)
 	if !ok {
 		return
 	}
-	defer st.Close()
-	if _, err := st.MoveMessage(fid, uid, mapi.PrivateFIDInbox); err != nil {
+	defer mb.st.Close()
+	if !mb.writeAllowed(mapi.PrivateFIDInbox) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+	if _, err := mb.st.MoveMessage(fid, uid, mapi.PrivateFIDInbox); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "recover failed"})
 		return
 	}
@@ -480,7 +483,7 @@ func (s *Server) handleLabels(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	st, fid, uid, ok := s.locate(w, r, req.ID)
+	st, fid, uid, ok := s.locate(w, r, req.ID, accessWrite)
 	if !ok {
 		return
 	}

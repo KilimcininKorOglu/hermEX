@@ -12,6 +12,7 @@ import (
 	"hermex/internal/meeting"
 	"hermex/internal/mime"
 	"hermex/internal/mta"
+	"hermex/internal/objectstore"
 )
 
 // findCalendarPart returns the decoded iCalendar (text/calendar or an .ics
@@ -52,7 +53,7 @@ func organizerAddress(v string) string {
 // handleInvite reports whether a message is a meeting invite and, when it is,
 // the details parsed from its embedded iCalendar.
 func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
-	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"))
+	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"), accessRead)
 	if !ok {
 		return
 	}
@@ -86,7 +87,7 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
 // drop the METHOD and other iTIP-only fields). Messages without a calendar part
 // are not invites and return 404.
 func (s *Server) handleExportICS(w http.ResponseWriter, r *http.Request) {
-	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"))
+	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"), accessRead)
 	if !ok {
 		return
 	}
@@ -188,29 +189,26 @@ func (s *Server) handleRSVP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "response must be accept, tentative or decline"})
 		return
 	}
-	c, ok := s.session(r)
-	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-		return
-	}
-	st, fid, uid, ok := s.locate(w, r, req.ID)
+	mb, fid, uid, ok := s.locateMailbox(w, r, req.ID, accessWrite)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer mb.st.Close()
+	st := mb.st
 	info, err := st.MessageByUID(fid, uid)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
 	// This is the reader's own answer, so it also clears the request mail when the
-	// mailbox asked for that.
-	if _, err := meeting.Respond(st, s.accounts, s.spool, c.Email, info.ID, response, true); err != nil {
+	// mailbox asked for that. In a shared mailbox the attendee is the mailbox, not
+	// the delegate answering for it, the same responder EWS names.
+	if _, err := meeting.Respond(st, s.accounts, s.spool, mb.identity(), info.ID, response, true); err != nil {
 		if errors.Is(err, meeting.ErrRequestNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
-		logError("rsvp", err, logging.Fields{"user": c.Email})
+		logError("rsvp", err, logging.Fields{"user": mb.user})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not record the response"})
 		return
 	}
@@ -226,7 +224,7 @@ var errBadCounter = errors.New("webmail2api: the counter-proposal cannot be buil
 // Every value that reaches a content line is checked or escaped first: the
 // organizer, UID and summary come from a mail anyone can send, and the times from
 // the client.
-func buildCounterRequest(proposer, organizer string, e eventJSON) ([]byte, error) {
+func buildCounterRequest(proposer, sender, organizer string, e eventJSON) ([]byte, error) {
 	to := cleanAddresses([]string{organizer})
 	start, err1 := counterTime(e.Start, e.AllDay)
 	end, err2 := counterTime(e.End, e.AllDay)
@@ -248,7 +246,7 @@ func buildCounterRequest(proposer, organizer string, e eventJSON) ([]byte, error
 	fmt.Fprintf(&cal, "ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=TENTATIVE:mailto:%s\r\n", proposer)
 	cal.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
 	return itip.Message(itip.Mail{
-		From: proposer, To: to, Subject: headerSafe("Proposed new time: " + e.Summary),
+		From: proposer, Sender: sender, To: to, Subject: headerSafe("Proposed new time: " + e.Summary),
 		Text:     fmt.Sprintf("%s proposed a new time for: %s\r\nProposed: %s", proposer, e.Summary, e.Start),
 		Calendar: []byte(cal.String()), Method: "COUNTER",
 	})
@@ -291,38 +289,60 @@ func (s *Server) handleProposeTime(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	st, fid, uid, ok := s.locate(w, r, req.ID)
+	mb, fid, uid, ok := s.locateMailbox(w, r, req.ID, accessRead)
 	if !ok {
 		return
 	}
-	defer st.Close()
-	raw, err := st.GetMessageRaw(fid, uid)
+	defer mb.st.Close()
+	// In a shared mailbox the attendee is the mailbox, and the delegate proposes
+	// only under a send-as or send-on-behalf grant, the decision every send path
+	// shares.
+	proposer, sender, allowed := s.resolveSender(c.Email, mb.identity())
+	if !allowed {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+	msg, org, status, reason := counterFor(mb.st, fid, uid, proposer, sender, req.Start, req.End)
+	if status != 0 {
+		writeJSON(w, status, map[string]string{"error": reason})
+		return
+	}
+	_, keepOwnCopy, err := mta.SendAndRelay(s.accounts, s.spool, c.Email, []string{org}, msg, time.Now())
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-		return
-	}
-	ics := findCalendarPart(mime.ParseStructure(raw))
-	if ics == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a meeting invite"})
-		return
-	}
-	e := icalToEvent(ics, 0)
-	e.Start = req.Start
-	e.End = req.End
-	organizer, _ := icalProp(ics, "ORGANIZER")
-	org := organizerAddress(organizer)
-	msg, berr := buildCounterRequest(c.Email, org, e)
-	if berr != nil {
-		logError("build-counter-proposal", berr, logging.Fields{"user": c.Email, "organizer": org})
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not build the counter-proposal"})
-		return
-	}
-	if _, err := mta.DeliverAndRelay(s.accounts, s.spool, c.Email, []string{org}, msg, time.Now()); err != nil {
 		logError("send-counter-proposal", err, logging.Fields{"user": c.Email, "organizer": org})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delivery failed"})
 		return
 	}
-	// File a Sent copy so the invitee sees the outgoing counter-proposal.
-	fileSentCopy(st, msg, c.Email, "counter-proposal")
+	// File a Sent copy so the invitee sees the outgoing counter-proposal. It goes
+	// to the caller's own mailbox, like every other send; a represented mailbox
+	// files its own copy when its settings ask for one.
+	if keepOwnCopy {
+		s.fileCallerSentCopy(mb, c, msg, "counter-proposal")
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "proposed"})
+}
+
+// counterFor builds the counter-proposal answering the invitation at (fid, uid)
+// and names the organizer it goes to. A non-zero status is the failure to report,
+// with the reason to send back.
+func counterFor(st *objectstore.Store, fid int64, uid uint32, proposer, sender, start, end string) (msg []byte, org string, status int, reason string) {
+	raw, err := st.GetMessageRaw(fid, uid)
+	if err != nil {
+		return nil, "", http.StatusNotFound, "not found"
+	}
+	ics := findCalendarPart(mime.ParseStructure(raw))
+	if ics == nil {
+		return nil, "", http.StatusBadRequest, "not a meeting invite"
+	}
+	e := icalToEvent(ics, 0)
+	e.Start = start
+	e.End = end
+	organizer, _ := icalProp(ics, "ORGANIZER")
+	org = organizerAddress(organizer)
+	msg, err = buildCounterRequest(proposer, sender, org, e)
+	if err != nil {
+		logError("build-counter-proposal", err, logging.Fields{"user": sender, "organizer": org})
+		return nil, "", http.StatusBadRequest, "could not build the counter-proposal"
+	}
+	return msg, org, 0, ""
 }

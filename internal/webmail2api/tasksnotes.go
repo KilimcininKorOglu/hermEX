@@ -462,11 +462,18 @@ func setNoteLink(st *objectstore.Store, props *mapi.PropertyValues, messageID st
 // browser never has to know or send it, and a mail that carries none (a draft, an
 // item this server composed) simply has no notes.
 func (s *Server) handleGetMailNotes(w http.ResponseWriter, r *http.Request) {
-	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"))
+	mb, fid, uid, ok := s.locateMailbox(w, r, r.URL.Query().Get("id"), accessRead)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer mb.st.Close()
+	st := mb.st
+	// The notes live in the Notes folder of the same mailbox, which a shared
+	// mailbox gates on its own.
+	if !mb.readAllowed(mapi.PrivateFIDNotes) {
+		writeJSON(w, http.StatusOK, map[string]any{"notes": []noteJSON{}})
+		return
+	}
 	info, err := st.MessageByUID(fid, uid)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -564,11 +571,16 @@ func (s *Server) handleCreateMailNote(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	st, fid, uid, ok := s.locate(w, r, in.ID)
+	mb, fid, uid, ok := s.locateMailbox(w, r, in.ID, accessRead)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer mb.st.Close()
+	st := mb.st
+	if !mb.writeAllowed(mapi.PrivateFIDNotes) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
 	link, status, reason := mailLinkFor(st, fid, uid)
 	if status != 0 {
 		writeJSON(w, status, map[string]string{"error": reason})

@@ -17,19 +17,16 @@ type recallResult struct {
 // caller's copy is deleted from their inbox if still unread (status "recalled"),
 // left untouched if already read ("read"); external or non-local recipients are
 // reported "unavailable". Only the message's own author may recall it: the id must
-// resolve to a message in the caller's own mailbox whose sender is the caller, so a
-// recipient cannot recall a message addressed to them (403).
+// resolve to a message in the mailbox the request names (the caller's own, or a
+// shared one with write access) whose author is that mailbox, so a recipient cannot
+// recall a message addressed to them (403).
 func (s *Server) handleRecall(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.session(r)
-	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-		return
-	}
-	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"))
+	mb, fid, uid, ok := s.locateMailbox(w, r, r.URL.Query().Get("id"), accessWrite)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer mb.st.Close()
+	st := mb.st
 	m, err := st.MessageByUID(fid, uid)
 	if err != nil {
 		// Not a message in the caller's mailbox: they did not send it.
@@ -41,10 +38,11 @@ func (s *Server) handleRecall(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "you can only recall messages you sent"})
 		return
 	}
-	// Authorization: the message's author must be the caller, so a recipient holding
-	// their own copy of the message still cannot recall it.
+	// Authorization: the message's author must be the mailbox it is recalled from
+	// (the caller, or the shared mailbox a delegate sent it as), so a recipient
+	// holding their own copy of the message still cannot recall it.
 	sender := senderOf(msg.Props)
-	if sender == "" || !strings.EqualFold(sender, c.Email) {
+	if sender == "" || !strings.EqualFold(sender, mb.identity()) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "you can only recall messages you sent"})
 		return
 	}

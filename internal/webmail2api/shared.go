@@ -129,3 +129,12 @@ func (mb *mailboxCtx) writeAllowed(fid int64) bool {
 	rights, err := mb.st.ResolvePermission(fid, mb.user)
 	return err == nil && rights&mapi.FrightsDeleteAny != 0
 }
+
+// identity is the address the mailbox acts as: the shared mailbox's own address,
+// or the caller's for the own mailbox.
+func (mb *mailboxCtx) identity() string {
+	if mb.shared {
+		return mb.owner
+	}
+	return mb.user
+}

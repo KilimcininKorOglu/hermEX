@@ -16,9 +16,12 @@ import (
 // Mail is one scheduling message to build. Calendar is the complete iCalendar
 // object and must already carry the METHOD that Method names, because a receiving
 // client reads the method from both places and they must agree. Text is the plain
-// alternative a client without calendar support shows; it may be empty.
+// alternative a client without calendar support shows; it may be empty. Sender,
+// when set, is the delegate who sends on From's behalf; it is written as the
+// Sender header, so the recipient sees who acted for the originator.
 type Mail struct {
 	From     string
+	Sender   string
 	To       []string
 	Subject  string
 	Text     string
@@ -37,6 +40,13 @@ func Message(m Mail) ([]byte, error) {
 		{Tag: mapi.PrSenderAddrType, Value: "SMTP"},
 		{Tag: mapi.PrClientSubmitTime, Value: mapi.UnixToNTTime(time.Now())},
 	}}
+	if m.Sender != "" && !strings.EqualFold(m.Sender, m.From) {
+		msg.Props.Set(mapi.PrSentRepresentingSmtpAddress, m.From)
+		msg.Props.Set(mapi.PrSentRepresentingEmailAddress, m.From)
+		msg.Props.Set(mapi.PrSentRepresentingAddrType, "SMTP")
+		msg.Props.Set(mapi.PrSenderSmtpAddress, m.Sender)
+		msg.Props.Set(mapi.PrSenderEmailAddress, m.Sender)
+	}
 	if m.Text != "" {
 		msg.Props.Set(mapi.PrBody, m.Text)
 	}

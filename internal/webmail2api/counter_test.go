@@ -52,7 +52,7 @@ func TestCounterProposalReachesTheOrganizer(t *testing.T) {
 // COUNTER alternative, and a summary holding a line break reaches neither a header
 // line nor a new iCalendar line.
 func TestCounterProposalWireForm(t *testing.T) {
-	raw, err := buildCounterRequest("alice@hermex.test", "Bob <bob@hermex.test>", eventJSON{UID: "counter-1@test",
+	raw, err := buildCounterRequest("alice@hermex.test", "alice@hermex.test", "Bob <bob@hermex.test>", eventJSON{UID: "counter-1@test",
 		Summary: "Sync\r\nBcc: attacker@evil.example", Start: "2026-09-08T11:00:00Z", End: "2026-09-08T12:00:00Z"})
 	mustNoErr(t, "build", err)
 	msg := string(raw)

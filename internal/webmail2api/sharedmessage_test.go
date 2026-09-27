@@ -1,0 +1,193 @@
+package webmail2api
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"hermex/internal/directory"
+	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
+)
+
+// sharedMessageFixture is a caller with a mailbox of their own and a shared
+// mailbox "team" whose Inbox holds one message at the same uid as the caller's own
+// first message, so an operation that lands in the wrong store is visible.
+type sharedMessageFixture struct {
+	srv           *Server
+	token         string
+	own, shared   string
+	sharedSubject string
+}
+
+func newSharedMessageFixture(t *testing.T, rights uint32, delegate bool) *sharedMessageFixture {
+	t.Helper()
+	f := &sharedMessageFixture{own: t.TempDir(), shared: t.TempDir(), sharedSubject: "team message"}
+	appendInbox(t, f.own, "own message")
+	appendInbox(t, f.shared, f.sharedSubject)
+	st, err := objectstore.Open(f.shared)
+	mustNoErr(t, "open shared", err)
+	defer st.Close()
+	if rights != 0 {
+		mustNoErr(t, "grant", st.ModifyPermissions(int64(mapi.PrivateFIDInbox), false, []objectstore.PermissionChange{
+			{Op: objectstore.PermAdd, Username: "alice@hermex.test", Rights: rights},
+		}))
+	}
+	if delegate {
+		mustNoErr(t, "delegate", st.SetDelegates([]string{"alice@hermex.test"}))
+	}
+	accounts := directory.StaticAccounts{
+		"alice@hermex.test": {Password: "pw", MailboxPath: f.own},
+		"team@hermex.test":  {Shared: true, MailboxPath: f.shared},
+	}
+	secret := []byte("shared-message-test-secret")
+	f.srv = NewServer(accounts, accounts, nil, "mail.hermex.test", secret, "", false)
+	f.token, err = mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: f.own, Exp: time.Now().Add(time.Hour).Unix()})
+	mustNoErr(t, "token", err)
+	return f
+}
+
+func appendInbox(t *testing.T, path, subject string) {
+	t.Helper()
+	st, err := objectstore.Open(path)
+	mustNoErr(t, "open", err)
+	defer st.Close()
+	raw := "From: s@hermex.test\r\nSubject: " + subject + "\r\n\r\nbody"
+	_, err = st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), time.Now(), 0)
+	mustNoErr(t, "append", err)
+}
+
+func (f *sharedMessageFixture) do(method, target, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: f.token})
+	rec := httptest.NewRecorder()
+	f.srv.Handler().ServeHTTP(rec, req)
+	return rec
+}
+
+func inboxCount(t *testing.T, path string) int {
+	t.Helper()
+	st, err := objectstore.Open(path)
+	mustNoErr(t, "open", err)
+	defer st.Close()
+	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
+	mustNoErr(t, "list", err)
+	return len(msgs)
+}
+
+// TestSharedMessageReadsTheSharedMailbox proves a per-message read names the
+// shared mailbox the request carries in ?owner. It used to open the caller's own
+// mailbox and serve the caller's message at the same uid.
+func TestSharedMessageReadsTheSharedMailbox(t *testing.T) {
+	f := newSharedMessageFixture(t, mapi.RightsReviewer, false)
+	rec := f.do(http.MethodGet, "/api/v1/mail/source?id=inbox:1&owner=team@hermex.test", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), f.sharedSubject) {
+		t.Errorf("served a message from another mailbox:\n%s", rec.Body.String())
+	}
+}
+
+// TestSharedMessageDeleteNeedsWrite proves a read-only grantee cannot delete in
+// the shared mailbox, and that the refusal leaves the caller's own mailbox alone.
+func TestSharedMessageDeleteNeedsWrite(t *testing.T) {
+	f := newSharedMessageFixture(t, mapi.RightsReviewer, false)
+	rec := f.do(http.MethodDelete, "/api/v1/mail/delete?id=inbox:1&owner=team@hermex.test", "")
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", rec.Code)
+	}
+	if inboxCount(t, f.shared) != 1 || inboxCount(t, f.own) != 1 {
+		t.Error("a refused delete changed a mailbox")
+	}
+}
+
+// TestSharedMessageDeleteActsOnTheSharedMailbox proves a write grantee deletes
+// the shared message and never the caller's message at the same uid.
+func TestSharedMessageDeleteActsOnTheSharedMailbox(t *testing.T) {
+	f := newSharedMessageFixture(t, mapi.RightsEditor, false)
+	// The message leaves the Inbox for Deleted Items, which needs its own grant.
+	st, err := objectstore.Open(f.shared)
+	mustNoErr(t, "open", err)
+	mustNoErr(t, "grant", st.ModifyPermissions(int64(mapi.PrivateFIDDeletedItems), false, []objectstore.PermissionChange{
+		{Op: objectstore.PermAdd, Username: "alice@hermex.test", Rights: mapi.RightsEditor},
+	}))
+	st.Close()
+	rec := f.do(http.MethodDelete, "/api/v1/mail/delete?id=inbox:1&owner=team@hermex.test", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if inboxCount(t, f.shared) != 0 {
+		t.Error("the shared message is still in the shared Inbox")
+	}
+	if inboxCount(t, f.own) != 1 {
+		t.Error("the delete removed the caller's own message")
+	}
+}
+
+// TestSharedMessageMoveNeedsTheDestination proves a move is refused when the
+// grantee may change the source folder but not the destination.
+func TestSharedMessageMoveNeedsTheDestination(t *testing.T) {
+	f := newSharedMessageFixture(t, mapi.RightsEditor, false)
+	rec := f.do(http.MethodPost, "/api/v1/mail/move?owner=team@hermex.test", `{"id":"inbox:1","to":"junk"}`)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+	if inboxCount(t, f.shared) != 1 {
+		t.Error("a refused move took the message out of the Inbox")
+	}
+}
+
+// TestSharedMessageRefusesADelegateWithoutAGrant proves a delegate, who may open
+// the mailbox, still reads a message only through a grant on its folder.
+func TestSharedMessageRefusesADelegateWithoutAGrant(t *testing.T) {
+	f := newSharedMessageFixture(t, 0, true)
+	rec := f.do(http.MethodGet, "/api/v1/mail/source?id=inbox:1&owner=team@hermex.test", "")
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// grantFolder gives alice rights on one folder of the shared mailbox.
+func (f *sharedMessageFixture) grantFolder(t *testing.T, fid int64, rights uint32) {
+	t.Helper()
+	st, err := objectstore.Open(f.shared)
+	mustNoErr(t, "open", err)
+	defer st.Close()
+	mustNoErr(t, "grant", st.ModifyPermissions(fid, false, []objectstore.PermissionChange{
+		{Op: objectstore.PermAdd, Username: "alice@hermex.test", Rights: rights},
+	}))
+}
+
+// TestSharedRecallIsAuthoredByTheSharedMailbox proves a message the shared
+// mailbox sent is recallable from its Sent Items by a write grantee, because its
+// author is the mailbox the request names, not the delegate.
+func TestSharedRecallIsAuthoredByTheSharedMailbox(t *testing.T) {
+	f := newSharedMessageFixture(t, 0, false)
+	f.grantFolder(t, int64(mapi.PrivateFIDSentItems), mapi.RightsEditor)
+	st, err := objectstore.Open(f.shared)
+	mustNoErr(t, "open", err)
+	raw := "From: team@hermex.test\r\nTo: nobody@example.org\r\nSubject: sent\r\nMessage-ID: <r1@hermex.test>\r\n\r\nbody"
+	_, err = st.AppendMessage(int64(mapi.PrivateFIDSentItems), []byte(raw), time.Now(), objectstore.FlagSeen)
+	st.Close()
+	mustNoErr(t, "append", err)
+	rec := f.do(http.MethodPost, "/api/v1/mail/recall?id=sent:1&owner=team@hermex.test", "")
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestSharedProposalNeedsASendGrant proves a delegate proposes a new meeting time
+// for the shared mailbox only under a send-as or send-on-behalf grant, the same
+// decision every send path takes.
+func TestSharedProposalNeedsASendGrant(t *testing.T) {
+	f := newSharedMessageFixture(t, mapi.RightsEditor, false)
+	body := `{"id":"inbox:1","start":"2026-09-08T11:00:00Z","end":"2026-09-08T12:00:00Z"}`
+	rec := f.do(http.MethodPost, "/api/v1/mail/propose-time?owner=team@hermex.test", body)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+}

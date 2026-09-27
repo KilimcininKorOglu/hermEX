@@ -379,34 +379,65 @@ func buildMailDetail(raw []byte, folder string, uid uint32) mailDetailJSON {
 	return d
 }
 
-// locate resolves a message id to its store, folder id, and uid for a mutating
-// op, writing the error response and reporting false when anything fails. The
-// caller closes the returned store.
-func (s *Server) locate(w http.ResponseWriter, r *http.Request, id string) (*objectstore.Store, int64, uint32, bool) {
-	c, ok := s.session(r)
+// folderAccess is the right a per-message operation needs on the message's
+// folder.
+type folderAccess int
+
+const (
+	accessRead folderAccess = iota
+	accessWrite
+)
+
+// allowed reports whether the caller holds access on folder fid.
+func (mb *mailboxCtx) allowed(fid int64, access folderAccess) bool {
+	if access == accessWrite {
+		return mb.writeAllowed(fid)
+	}
+	return mb.readAllowed(fid)
+}
+
+// locate resolves a message id to its store, folder id, and uid, writing the
+// error response and reporting false when anything fails. The caller closes the
+// returned store.
+func (s *Server) locate(w http.ResponseWriter, r *http.Request, id string, access folderAccess) (*objectstore.Store, int64, uint32, bool) {
+	mb, fid, uid, ok := s.locateMailbox(w, r, id, access)
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return nil, 0, 0, false
 	}
+	return mb.st, fid, uid, true
+}
+
+// locateMailbox resolves a message id in the mailbox the request names: the
+// caller's own, or a shared one named by ?owner= (see openMailbox). The caller
+// must hold access on the message's folder. The caller closes mb.st.
+func (s *Server) locateMailbox(w http.ResponseWriter, r *http.Request, id string, access folderAccess) (*mailboxCtx, int64, uint32, bool) {
 	folder, uid, ok := parseMessageID(id)
 	if !ok {
+		if _, signed := s.session(r); !signed {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return nil, 0, 0, false
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return nil, 0, 0, false
 	}
-	st, err := objectstore.Open(c.Mailbox)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
+	mb, ok := s.openMailbox(w, r)
+	if !ok {
 		return nil, 0, 0, false
 	}
 	// The folder may be a well-known slug or a custom folder's display name; the
 	// store has to be open before a custom folder can be resolved by name.
-	fid, ok := resolveFolder(st, folder)
+	fid, ok := resolveFolder(mb.st, folder)
 	if !ok {
-		_ = st.Close()
+		_ = mb.st.Close()
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown folder"})
 		return nil, 0, 0, false
 	}
-	return st, fid, uid, true
+	if !mb.allowed(fid, access) {
+		_ = mb.st.Close()
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return nil, 0, 0, false
+	}
+	return mb, fid, uid, true
 }
 
 // handleMailFlag sets or clears a message's \Seen or \Flagged flag.
@@ -430,7 +461,7 @@ func (s *Server) handleMailFlag(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown flag"})
 		return
 	}
-	st, fid, uid, ok := s.locate(w, r, req.ID)
+	st, fid, uid, ok := s.locate(w, r, req.ID, accessWrite)
 	if !ok {
 		return
 	}
@@ -467,7 +498,7 @@ func (s *Server) handleMailFollowup(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	st, fid, uid, ok := s.locate(w, r, req.ID)
+	st, fid, uid, ok := s.locate(w, r, req.ID, accessWrite)
 	if !ok {
 		return
 	}
@@ -535,12 +566,16 @@ func (s *Server) handleMailMove(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown target folder"})
 		return
 	}
-	st, fid, uid, ok := s.locate(w, r, req.ID)
+	mb, fid, uid, ok := s.locateMailbox(w, r, req.ID, accessWrite)
 	if !ok {
 		return
 	}
-	defer st.Close()
-	if _, err := st.MoveMessage(fid, uid, dst); err != nil {
+	defer mb.st.Close()
+	if !mb.writeAllowed(dst) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+	if _, err := mb.st.MoveMessage(fid, uid, dst); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "move failed"})
 		return
 	}
@@ -560,14 +595,20 @@ func (s *Server) handleMailCopy(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	st, fid, uid, ok := s.locate(w, r, req.ID)
+	// Copying only reads the source; the destination takes the write.
+	mb, fid, uid, ok := s.locateMailbox(w, r, req.ID, accessRead)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer mb.st.Close()
+	st := mb.st
 	dst, ok := resolveFolder(st, req.To)
 	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown target folder"})
+		return
+	}
+	if !mb.writeAllowed(dst) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
 	if dst == fid {
@@ -595,11 +636,16 @@ func (s *Server) handleMailCopy(w http.ResponseWriter, r *http.Request) {
 // dumpster (soft delete, recoverable until retention purges it), from any other
 // folder it is moved to Deleted Items.
 func (s *Server) handleMailDelete(w http.ResponseWriter, r *http.Request) {
-	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"))
+	mb, fid, uid, ok := s.locateMailbox(w, r, r.URL.Query().Get("id"), accessWrite)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer mb.st.Close()
+	st := mb.st
+	if !mb.writeAllowed(mapi.PrivateFIDDeletedItems) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
 	var err error
 	if fid == mapi.PrivateFIDDeletedItems {
 		err = st.SoftDeleteMessage(fid, uid)

@@ -53,3 +53,19 @@ func fileSentCopy(st *objectstore.Store, raw []byte, user, kind string) {
 		logError("file-sent-copy", err, logging.Fields{"user": user, "kind": kind})
 	}
 }
+
+// fileCallerSentCopy files the Sent copy of a message the caller sent into the
+// caller's own mailbox, which is not mb.st when mb is a shared mailbox.
+func (s *Server) fileCallerSentCopy(mb *mailboxCtx, c sessionClaims, raw []byte, kind string) {
+	if !mb.shared {
+		fileSentCopy(mb.st, raw, c.Email, kind)
+		return
+	}
+	own, err := objectstore.Open(c.Mailbox)
+	if err != nil {
+		logError("file-sent-copy", err, logging.Fields{"user": c.Email, "kind": kind})
+		return
+	}
+	defer own.Close()
+	fileSentCopy(own, raw, c.Email, kind)
+}

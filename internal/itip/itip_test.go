@@ -1,6 +1,7 @@
 package itip
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -32,5 +33,21 @@ func TestMessageCarriesTheSchedulingPart(t *testing.T) {
 	}
 	if !strings.Contains(body, "method=CANCEL") || !strings.Contains(body, "The meeting is canceled.") {
 		t.Errorf("body lacks the calendar method or the text alternative:\n%s", body)
+	}
+}
+
+// TestOnBehalfMessageNamesBothIdentities proves a delegate's scheduling message
+// carries the originator in From and the delegate in Sender.
+func TestOnBehalfMessageNamesBothIdentities(t *testing.T) {
+	raw, err := Message(Mail{
+		From: "erin@hermex.test", Sender: "alice@hermex.test", To: []string{"bob@hermex.test"},
+		Subject: "Proposed", Calendar: []byte("BEGIN:VCALENDAR\r\nMETHOD:COUNTER\r\nEND:VCALENDAR\r\n"), Method: "COUNTER",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := string(raw[:bytes.Index(raw, []byte("\r\n\r\n"))])
+	if !strings.Contains(head, "From: <erin@hermex.test>") || !strings.Contains(head, "Sender: <alice@hermex.test>") {
+		t.Errorf("headers do not name both identities:\n%s", head)
 	}
 }
