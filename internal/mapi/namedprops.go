@@ -12,6 +12,13 @@ var (
 	// PsPublicStrings {00020329-0000-0000-C000-000000000046} is the public string
 	// namespace; the "Keywords" name under it holds a message's categories.
 	PsPublicStrings = GUID{Data1: 0x00020329, Data4: [8]byte{0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}}
+	// PsInternetHeaders {00020386-0000-0000-C000-000000000046} holds internet
+	// header fields a client stores by name. Outlook keeps an opaque S/MIME
+	// message's Content-Type there, parameters and all ([MS-OXOSMIME] 3.1.4.3).
+	PsInternetHeaders = GUID{Data1: 0x00020386, Data4: [8]byte{0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}}
+	// NameInternetContentType is the "Content-Type" header field under
+	// PsInternetHeaders.
+	NameInternetContentType = PropertyName{Kind: MnidString, GUID: PsInternetHeaders, Name: "Content-Type"}
 	// PsetidAddress {00062004-0000-0000-C000-000000000046} holds the contact
 	// (person) named properties: the three email slots, the work address,
 	// file-as, instant-messaging address, and the has-picture flag.

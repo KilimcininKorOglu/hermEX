@@ -29,12 +29,16 @@ const dateLayout = "Mon, 02 Jan 2006 15:04:05 -0700"
 //
 // Body skeletons: text/plain, text/html, or multipart/alternative; when the
 // message has attachments the body is wrapped, with the attachments, in a
-// multipart/mixed. The long tail (related/inline layout, embedded messages,
-// calendar, TNEF, S/MIME) is deferred. opt is currently unused (the core
-// property set carries no named properties).
+// multipart/mixed. An S/MIME message object is rendered from the one attachment
+// that holds its signed or encrypted content ([MS-OXOSMIME]). opt.Resolver is read
+// for the named properties that shape carries.
 func Export(msg *Message, opt Options) ([]byte, error) {
 	var b bytes.Buffer
 	writeMailHead(&b, msg)
+	if isSMIME, clearSigned := smimeShape(msg.Props); isSMIME {
+		writeSMIMEBody(&b, msg, opt, clearSigned)
+		return b.Bytes(), nil
+	}
 
 	inline, regular := splitAttachments(msg.Attachments)
 

@@ -874,12 +874,7 @@ func (s *Session) deliverComposed(st *objectstore.Store, nm *newMessageState, re
 		return nil, false, err
 	}
 	msg := &oxcmail.Message{Props: props, Recipients: wire, Attachments: saved.Attachments}
-	opt, err := meetingCalendar(st, msg)
-	if err != nil {
-		return nil, false, err
-	}
-	msg.Attachments = mailAttachments(saved.Attachments)
-	raw, err = oxcmail.Export(msg, opt)
+	raw, err = exportSubmitted(st, msg)
 	if err != nil {
 		return nil, false, err
 	}
@@ -888,6 +883,27 @@ func (s *Session) deliverComposed(st *objectstore.Store, nm *newMessageState, re
 		return nil, false, err
 	}
 	return raw, keepOwnCopy, nil
+}
+
+// exportSubmitted renders a submitted message as the mail that goes out: a
+// meeting message with its iCalendar, the attachments without a meeting's
+// exceptions, and an S/MIME message only when it is well formed, because Export
+// renders a malformed one as a notice for its stored copy.
+func exportSubmitted(st *objectstore.Store, msg *oxcmail.Message) ([]byte, error) {
+	opt, err := meetingCalendar(st, msg)
+	if err != nil {
+		return nil, err
+	}
+	msg.Attachments = mailAttachments(msg.Attachments)
+	if err := oxcmail.CheckSMIME(msg); err != nil {
+		return nil, err
+	}
+	// An opaque S/MIME message reads its stored Content-Type through the store's
+	// named properties.
+	if opt.Resolver == nil {
+		opt.Resolver = st.GetNamedPropIDs
+	}
+	return oxcmail.Export(msg, opt)
 }
 
 // meetingCalendar returns the export options that attach a meeting message's
