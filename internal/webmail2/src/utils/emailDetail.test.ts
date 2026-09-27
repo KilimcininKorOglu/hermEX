@@ -6,6 +6,7 @@ import {
   proposalRange,
   proposeWindow,
   readerShortcut,
+  recallable,
   recallOutcome,
   replySubject,
   senderInitials,
@@ -44,6 +45,14 @@ describe("followupPatch", () => {
   it("completes or clears, keeping the colour and dropping the due date", () => {
     expect(followupPatch(email, "complete", 5)).toEqual({ flagged: false, followupStatus: 1, followupColor: 3, followupDue: "" })
     expect(followupPatch(email, "clear")).toEqual({ flagged: false, followupStatus: 0, followupColor: 3, followupDue: "" })
+  })
+})
+
+describe("recallable", () => {
+  // The API names the folder by its slug, the part of the id before the colon.
+  it("offers Recall for a message whose id the API files under the sent slug", () => {
+    expect(recallable(emailDetailOf({ ...mail, id: "sent:19", folder: "sent" }, { content: "" }).folder)).toBe(true)
+    expect(recallable(emailDetailOf(mail, { content: "" }).folder)).toBe(false)
   })
 })
 

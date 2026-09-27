@@ -93,6 +93,13 @@ export function followupPatch(email: EmailDetail, action: FollowupAction, color?
   }
 }
 
+// recallable reports whether the reader offers Recall for a message in folder.
+// The API names a message's folder by its slug (the part of the id before the
+// colon), so the Sent folder is "sent", not its display name.
+export function recallable(folder: string): boolean {
+  return folder === "sent"
+}
+
 // RecallOutcome is how the reader reports a recall: the toast level and the
 // i18n key with its parameters.
 export interface RecallOutcome {

@@ -64,6 +64,7 @@ import {
   proposalRange,
   proposeWindow,
   readerShortcut,
+  recallable,
   recallOutcome,
   replySubject,
   senderInitials,
@@ -854,7 +855,7 @@ function PrimaryActions({ email, id, embedded, actions, onReply }: {
       <Button variant="ghost" size="icon" onClick={() => window.open(`/email/${id}`, "_blank", "noopener")} title={t("emailDetail.popOut")}>
         <ExternalLink className="h-4 w-4" />
       </Button>
-      {email.folder === "Sent" && (
+      {recallable(email.folder) && (
         <Button variant="ghost" size="sm" onClick={actions.handleRecall} title={t("emailDetail.recall")}>
           <Undo2 className="h-4 w-4 mr-1" />
           {t("emailDetail.recall")}
