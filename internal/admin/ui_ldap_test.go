@@ -10,6 +10,7 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/ldapauth"
+	"hermex/internal/logging"
 )
 
 // fakeSyncer is a scripted LDAPSyncer for the Directory Sync tests.
@@ -265,6 +266,32 @@ func TestTaskWorkerLDAPSync(t *testing.T) {
 	}
 	if ran, _ := srv.runNextTask(); ran {
 		t.Errorf("a second runNextTask ran, want the queue empty")
+	}
+}
+
+// TestTaskWorkerRecordsAnUnreadableLDAPConfig proves a sync whose directory
+// configuration could not be read records the read failure. It recorded "no
+// directory is configured", which sends the operator to configure a directory that
+// may already be configured.
+func TestTaskWorkerRecordsAnUnreadableLDAPConfig(t *testing.T) {
+	d := &fakeDir{readErrs: map[string]error{"GetLDAPConfig": errReadFailed}}
+	sink := &failCaptureSink{}
+	srv := NewServer(d, fakePaths{root: t.TempDir()}, []byte("test-secret"))
+	srv.SetLDAPSyncer(&fakeSyncer{})
+	srv.SetLogger(logging.New(sink))
+
+	id, err := d.CreateTask("ldapsync", "", "admin@test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ran, err := srv.runNextTask(); !ran || err != nil {
+		t.Fatalf("runNextTask ran=%v err=%v, want it to run the task", ran, err)
+	}
+	if got, ok, _ := d.GetTask(id); !ok || got.Status != directory.TaskFailed {
+		t.Errorf("task = %+v, want failed", got)
+	}
+	if e, ok := sink.find("panel.fail"); !ok || !strings.Contains(e.Err, errReadFailed.Error()) {
+		t.Errorf("the failed read was not recorded (event %+v)", e)
 	}
 }
 

@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -19,7 +20,10 @@ func (s *Server) performLDAPSync() (string, error) {
 		return "", errors.New("directory sync is not available")
 	}
 	cfg, ok, err := s.dir.GetLDAPConfig(defaultOrgID)
-	if err != nil || !ok {
+	if err != nil {
+		return "", fmt.Errorf("read the directory configuration: %w", err)
+	}
+	if !ok {
 		return "", errors.New("no directory is configured")
 	}
 	return ldapsync.Run(cfg, s.syncer, s.dir, s.paths.MaildirFor,
