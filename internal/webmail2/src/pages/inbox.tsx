@@ -27,7 +27,9 @@ import { WelcomeBanner } from "@/components/welcome-banner"
 import { EmailDetailPage } from "@/pages/email-detail"
 import { useI18n } from "@/hooks/useI18n"
 import { formatAbsolute } from "@/utils/date"
-import { getCookie, setCookie } from "@/utils/cookies"
+import { deleteCookie, getCookie, setCookie } from "@/utils/cookies"
+import { useAuth } from "@/contexts/AuthContext"
+import { WELCOME_COOKIE } from "@/components/prefs-sync"
 import { emptyListKey, formatSize, listKeysActive, nextListIndex, rowTone, type ViewMode } from "@/utils/inboxList"
 import { getMailColumns } from "@/utils/mailListColumns"
 import type { MailListColumns } from "@/utils/api"
@@ -762,13 +764,25 @@ function MessageListBody({
   )
 }
 
-// InboxWelcome shows the welcome banner on the inbox until it is dismissed. Its
-// closed state lives in a client-readable cookie (the web UI uses cookies, not
-// localStorage), so it stays dismissed across visits.
+// InboxWelcome shows the welcome banner on the inbox until it is dismissed. The
+// dismissal is stored in the users record, so it holds on every browser, and
+// cached in a cookie.
 function InboxWelcome({ folder }: { folder: string }) {
-  const [show, setShow] = useState(() => getCookie("hermex-welcome-dismissed") !== "1")
-  if (!show || folder !== "inbox") return null
-  return <WelcomeBanner onDismiss={() => { setCookie("hermex-welcome-dismissed", "1"); setShow(false) }} />
+  const { user, updatePrefs } = useAuth()
+  const { t } = useI18n()
+  if (user?.showWelcomeBanner === false || getCookie(WELCOME_COOKIE) === "1" || folder !== "inbox") return null
+  // dismiss hides the banner at once and stores the choice; a failed save shows
+  // the banner again and says so, so it never stays hidden on this browser alone.
+  const dismiss = () => {
+    setCookie(WELCOME_COOKIE, "1")
+    updatePrefs({ showWelcomeBanner: false })
+    api.setUserPrefs({ show_welcome_banner: false }).catch(() => {
+      deleteCookie(WELCOME_COOKIE)
+      updatePrefs({ showWelcomeBanner: true })
+      toast.error(t("settings.settingSaveFailed"))
+    })
+  }
+  return <WelcomeBanner onDismiss={dismiss} />
 }
 
 // UnreadBadge shows the folder's unread count on the unfiltered view.

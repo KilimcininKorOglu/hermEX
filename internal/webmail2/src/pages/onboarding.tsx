@@ -22,7 +22,7 @@ const localeNames: Record<string, string> = {
 // gate does not fire again.
 export function OnboardingPage() {
   const navigate = useNavigate()
-  const { t, locale, changeLocale, supportedLocales } = useI18n()
+  const { t, locale, preference, changeLocale, supportedLocales } = useI18n()
   const { setTheme, theme } = useTheme()
   const { user, updatePrefs } = useAuth()
 
@@ -33,13 +33,10 @@ export function OnboardingPage() {
   const finish = async (chosenTimezone: string) => {
     setSaving(true)
     try {
-      await api.updateProfile({
-        timezone: chosenTimezone,
-        locale,
-        theme,
-        onboarded: true,
-      })
-      updatePrefs({ timezone: chosenTimezone, locale, theme, onboarded: true })
+      // The theme and language were stored when they were picked; the profile
+      // carries the timezone and the onboarding flag.
+      await api.updateProfile({ timezone: chosenTimezone, onboarded: true })
+      updatePrefs({ timezone: chosenTimezone, locale: preference, theme, onboarded: true })
       navigate("/inbox", { replace: true })
     } catch {
       toast.error(t("onboarding.saveFailed"))

@@ -1,12 +1,15 @@
-import { createContext, useContext, useEffect, useState } from "react"
+import { createContext, useContext, useEffect, useRef, useState } from "react"
+import { toast } from "sonner"
 import { getCookie, setCookie } from "@/utils/cookies"
-import { setShortcutMode, type ShortcutMode } from "@/utils/shortcutMode"
-import { applyIconSet } from "@/utils/iconSet"
-import { setMailColumns } from "@/utils/mailListColumns"
-import { applyUnreadBorder } from "@/utils/displayPrefs"
+import { useI18n } from "@/hooks/useI18n"
 import api from "@/utils/api"
 
-type Theme = "dark" | "light" | "system"
+export type Theme = "dark" | "light" | "system"
+
+// isTheme reports whether a stored value names a theme.
+export function isTheme(value: unknown): value is Theme {
+  return value === "dark" || value === "light" || value === "system"
+}
 
 type ThemeProviderProps = {
   children: React.ReactNode
@@ -16,13 +19,17 @@ type ThemeProviderProps = {
 
 type ThemeProviderState = {
   theme: Theme
+  // setTheme applies and stores a theme.
   setTheme: (theme: Theme) => void
+  // applyStoredTheme applies the theme read from the users record without storing it again.
+  applyStoredTheme: (theme: Theme) => void
   resolvedTheme: "dark" | "light"
 }
 
 const initialState: ThemeProviderState = {
   theme: "system",
   setTheme: () => null,
+  applyStoredTheme: () => null,
   resolvedTheme: "light",
 }
 
@@ -34,13 +41,18 @@ export function ThemeProvider({
   storageKey = "webmail-theme",
   ...props
 }: ThemeProviderProps) {
-  // The cookie is a fast cache so the first render lands on the right theme
-  // without a flash; the DB (PrWebmailSettings) is the source of truth and is
-  // synced on mount and on every setTheme.
-  const [theme, setTheme] = useState<Theme>(
-    () => (getCookie(storageKey) as Theme) || defaultTheme
-  )
+  const { t } = useI18n()
+  // The cookie is a cache so the first render, the login page included, lands on
+  // the right theme without a flash; the users record (shared with the admin
+  // panel) is where the theme is stored, applied once the session is known.
+  const [theme, setThemeState] = useState<Theme>(() => {
+    const c = getCookie(storageKey)
+    return isTheme(c) ? c : defaultTheme
+  })
   const [resolvedTheme, setResolvedTheme] = useState<"dark" | "light">("light")
+  // saves numbers the saves, so a failed save restores the theme only while no
+  // later change has replaced it.
+  const saves = useRef(0)
 
   useEffect(() => {
     const root = window.document.documentElement
@@ -59,43 +71,24 @@ export function ThemeProvider({
     setResolvedTheme(resolved)
   }, [theme])
 
-  // On mount, load the persisted theme from the DB so a fresh login on a new
-  // browser picks up the saved preference (the cookie cache may be absent).
-  useEffect(() => {
-    api.getAppearanceSettings()
-      .then((s) => {
-        if (s.theme === "light" || s.theme === "dark" || s.theme === "system") {
-          setTheme(s.theme as Theme)
-        }
-        // Mirror the DB-backed shortcut mode to its cookie so the key hooks read
-        // the right level on a fresh browser (this provider mounts app-wide).
-        if (s.shortcutMode) setShortcutMode(s.shortcutMode as ShortcutMode)
-        // Apply the DB-backed icon set to <html> so glyphs render in the chosen
-        // weight from first paint (this provider mounts app-wide).
-        if (s.iconSet) applyIconSet(s.iconSet)
-        // Mirror the DB-backed message-list columns to their cookie so the inbox
-        // reads the chosen set synchronously on a fresh browser.
-        if (s.mailListColumns) setMailColumns(s.mailListColumns)
-        // Reflect the unread-border toggle onto <html> so index.css draws the
-        // accent border on unread rows app-wide from first paint.
-        applyUnreadBorder(s.unreadBorder)
-      })
-      .catch(() => {
-        /* best-effort: fall back to the cookie/default */
-      })
-  }, [])
+  const applyStoredTheme = (next: Theme) => {
+    setCookie(storageKey, next)
+    setThemeState(next)
+  }
 
   const value = {
     theme,
+    applyStoredTheme,
+    // setTheme shows the theme at once and stores it; a failed save puts the
+    // previous theme back and says so, so the page never shows an unsaved theme.
     setTheme: (next: Theme) => {
-      setCookie(storageKey, next)
-      setTheme(next)
-      // Persist to the DB (best-effort) so the preference survives a new browser.
-      api.getAppearanceSettings()
-        .then((s) => api.setAppearanceSettings({ ...s, theme: next }))
-        .catch(() => {
-          /* best-effort */
-        })
+      const prev = theme
+      const seq = ++saves.current
+      applyStoredTheme(next)
+      api.setUserPrefs({ theme: next }).catch(() => {
+        if (seq === saves.current) applyStoredTheme(prev)
+        toast.error(t("settings.settingSaveFailed"))
+      })
     },
     resolvedTheme,
   }

@@ -39,8 +39,17 @@ interface MeResponse {
   timezone?: string
   locale?: string
   theme?: string
+  show_welcome_banner?: boolean
   must_change_password?: boolean
   second_factor_required?: boolean
+}
+
+// UserPrefs are the interface preferences the admin panel shares: the theme ("" when
+// never chosen), the language ("" to follow the browser) and the welcome banner.
+export interface UserPrefs {
+  theme: string
+  locale: string
+  show_welcome_banner: boolean
 }
 
 // SecondFactorStatus is the caller's own enrollment. pending marks a setup that
@@ -448,7 +457,6 @@ interface UserProfile {
   phone?: string
   timezone?: string
   locale?: string
-  theme?: string
   onboarded?: boolean
   // Read-only storage usage and graduated quota thresholds (absolute bytes,
   // 0 = disabled/unlimited). Surfaced by GET /profile for the storage gauge;
@@ -949,6 +957,11 @@ class API {
   // updateProfile updates the authenticated user's own directory profile fields.
   async updateProfile(profile: UserProfile): Promise<UserProfile> {
     return this.put<UserProfile>('/profile', profile)
+  }
+
+  // setUserPrefs stores the named interface preferences and returns all of them.
+  async setUserPrefs(prefs: Partial<UserPrefs>): Promise<UserPrefs> {
+    return this.put<UserPrefs>('/account/prefs', prefs)
   }
 
   // Self-service delegation (the authenticated user is always the owner)

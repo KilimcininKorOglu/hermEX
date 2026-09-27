@@ -9,6 +9,7 @@ interface UserPrefs {
   timezone?: string
   locale?: string
   theme?: string
+  showWelcomeBanner?: boolean
 }
 
 interface AuthUser extends UserPrefs {
@@ -69,6 +70,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       timezone: me.timezone,
       locale: me.locale,
       theme: me.theme,
+      showWelcomeBanner: me.show_welcome_banner,
       mustChangePassword: me.must_change_password,
       secondFactorRequired: me.second_factor_required,
     })

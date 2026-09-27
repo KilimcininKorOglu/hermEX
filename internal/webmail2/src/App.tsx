@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
 import { useState, useEffect } from "react"
 import api from "@/utils/api"
 import { ThemeProvider } from "@/components/theme-provider"
+import { PrefsSync } from "@/components/prefs-sync"
 import { AuthProvider, useAuth } from "@/contexts/AuthContext"
 import { MailboxProvider } from "@/contexts/MailboxContext"
 import { Layout } from "@/components/layout/layout"
@@ -196,6 +197,7 @@ function App() {
   return (
     <ThemeProvider defaultTheme="system" storageKey="webmail-theme">
       <AuthProvider>
+        <PrefsSync />
         <BrowserRouter>
           <AppContent />
         </BrowserRouter>

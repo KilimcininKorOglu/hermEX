@@ -77,7 +77,7 @@ function TimezoneField({ timezone, onChange }: { timezone: string; onChange: (tz
 
 // DisplayFormatFields are the language and the date, time and name formats.
 function DisplayFormatFields({ display }: { display: DisplaySettings }) {
-  const { t } = useI18n()
+  const { t, preference, changeLocale } = useI18n()
   const { theme, setTheme } = useTheme()
   const { appearance, saveAppearance } = display
   return (
@@ -97,13 +97,13 @@ function DisplayFormatFields({ display }: { display: DisplaySettings }) {
       <SelectField
         title={t("settings.appearance.language")}
         description={t("settings.appearance.languageDescription")}
-        value={appearance.language}
+        value={preference || "system"}
         options={[
           { value: "system", label: t("settings.appearance.languageSystem") },
           { value: "en", label: "English" },
           { value: "tr", label: "Türkçe" },
         ]}
-        onChange={(language) => saveAppearance({ language })}
+        onChange={changeLocale}
       />
       <Separator />
       <SelectField

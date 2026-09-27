@@ -46,7 +46,7 @@ function mirrorAppearance(rec: AppearanceRecord) {
 // replace the stored values with this page's defaults.
 export function useDisplaySettings() {
   const { theme, setTheme } = useTheme()
-  const { t, changeLocale } = useI18n()
+  const { t } = useI18n()
   const [appearance, setAppearance] = useState<AppearanceRecord>(defaultAppearance)
   const [calendar, setCalendar] = useState<CalendarSettings>(DEFAULT_CALENDAR)
   const [loaded, setLoaded] = useState({ appearance: false, calendar: false })
@@ -73,7 +73,6 @@ export function useDisplaySettings() {
   // applyAppearance shows a record at once, before the save answers.
   const applyAppearance = (rec: AppearanceRecord) => {
     setAppearance(rec)
-    if (rec.language !== "system") changeLocale(rec.language)
     mirrorAppearance(rec)
     // Let app-wide consumers (e.g. the title unread counter) re-read the settings.
     document.dispatchEvent(new CustomEvent("appearance-changed"))
