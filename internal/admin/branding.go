@@ -25,7 +25,7 @@ func (s *Server) handleUISaveDomainBranding(w http.ResponseWriter, r *http.Reque
 	dd, found, err := s.dir.GetDomain(id)
 	switch {
 	case err != nil:
-		data["Error"] = "Server error."
+		data["Error"] = s.notice(domainUnread, err)
 	case !found:
 		data["Error"] = "No such domain."
 	default:

@@ -94,6 +94,11 @@ func (s *Server) noteRead(failed readFailures, section, what string, err error) 
 	return false
 }
 
+// domainUnread is the message a panel shows when the domain its request names could
+// not be read. The panel reports the failed read and records it, rather than a bare
+// server error the operator's log has no trace of.
+const domainUnread = "Could not read the domain."
+
 // listFailure returns the message a table shows in place of its rows when the list
 // could not be read, or "" when the read succeeded. The table must not show a failed
 // read as an empty list; err is recorded server-side, as notice does.

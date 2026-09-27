@@ -27,7 +27,7 @@ func (s *Server) handleUISaveDomainSplit(w http.ResponseWriter, r *http.Request)
 	dd, found, err := s.dir.GetDomain(id)
 	switch {
 	case err != nil:
-		data["Error"] = "Server error."
+		data["Error"] = s.notice(domainUnread, err)
 	case !found:
 		data["Error"] = "No such domain."
 	case host != "" && !validHostname(host):

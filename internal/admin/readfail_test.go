@@ -388,6 +388,40 @@ func TestAFailedUserReadIsNotAMissingUser(t *testing.T) {
 	}
 }
 
+// TestAFailedDomainReadIsRecordedOnSave proves a domain save panel reports and
+// records a failed read of the domain it names. It answered "Server error." and
+// recorded nothing, so the operator's log had no trace of the failure.
+func TestAFailedDomainReadIsRecordedOnSave(t *testing.T) {
+	for _, tc := range []struct {
+		method, path string
+		form         url.Values
+	}{
+		{"PUT", "/admin/ui/domains/1/avscan", url.Values{}},
+		{"PUT", "/admin/ui/domains/1/branding", url.Values{}},
+		{"PUT", "/admin/ui/domains/1/sendername", url.Values{}},
+		{"PUT", "/admin/ui/domains/1/spam-threshold", url.Values{}},
+		{"PUT", "/admin/ui/domains/1/split", url.Values{}},
+		{"PUT", "/admin/ui/domains/1/syncpolicy", url.Values{}},
+		{"POST", "/admin/ui/users", url.Values{"local": {"new"}, "domain": {"1"}, "password": {"pw"}}},
+	} {
+		d := &fakeDir{
+			authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+			readErrs: map[string]error{"GetDomain": errReadFailed},
+		}
+		ts, sink := loggingAdminServer(t, d)
+		session, csrf := loginCookies(t, ts)
+		send := htmxPUT
+		if tc.method == "POST" {
+			send = htmxPOST
+		}
+		body := wantBody(t, send(t, ts, tc.path, session, csrf, tc.form), http.StatusOK, tc.path)
+		wantContains(t, body, "Could not read the domain.", tc.path+": the failed read is reported")
+		if e, ok := sink.find("panel.fail"); !ok || e.Err != errReadFailed.Error() {
+			t.Errorf("%s: the failed read was not recorded (event %+v)", tc.path, e)
+		}
+	}
+}
+
 // TestADomainDetailListReadIsNotShownAsEmpty proves the domain detail page reports
 // a list it could not read. The members lists rendered as "No users." and the like,
 // and the DNS records named no DKIM key or left out the MTA-STS records.

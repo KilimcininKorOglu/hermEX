@@ -191,7 +191,7 @@ func (s *Server) handleUICreateUser(w http.ResponseWriter, r *http.Request) {
 		dd, found, derr := s.dir.GetDomain(domainID)
 		switch {
 		case derr != nil:
-			errMsg = "Server error."
+			errMsg = s.notice(domainUnread, derr)
 		case !found:
 			errMsg = "Select a valid domain."
 		default:

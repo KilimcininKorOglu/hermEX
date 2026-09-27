@@ -61,7 +61,7 @@ func (s *Server) handleUIDomainSpamThreshold(w http.ResponseWriter, r *http.Requ
 	th, valid := spamThresholdFromForm(r)
 	switch {
 	case derr != nil:
-		data["Error"] = "Server error."
+		data["Error"] = s.notice(domainUnread, derr)
 	case !found:
 		data["Error"] = "No such domain."
 	case !valid:

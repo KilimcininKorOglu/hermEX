@@ -358,6 +358,9 @@ func (f *fakeDir) PurgeDomain(domainID int64, deleteFiles bool) (bool, error) {
 	return !f.purgeDomainMissing, nil
 }
 func (f *fakeDir) GetDomain(id int64) (directory.DomainDetail, bool, error) {
+	if err := f.readErrs["GetDomain"]; err != nil {
+		return directory.DomainDetail{}, false, err
+	}
 	if f.getDomainMissing {
 		return directory.DomainDetail{}, false, nil
 	}

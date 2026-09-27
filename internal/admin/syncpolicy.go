@@ -246,7 +246,7 @@ func (s *Server) handleUISaveDomainSyncPolicy(w http.ResponseWriter, r *http.Req
 	dd, found, err := s.dir.GetDomain(id)
 	switch {
 	case err != nil:
-		data["Error"] = "Server error."
+		data["Error"] = s.notice(domainUnread, err)
 	case !found:
 		data["Error"] = "No such domain."
 	default:
