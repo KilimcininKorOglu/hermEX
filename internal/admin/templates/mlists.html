@@ -37,7 +37,7 @@
 <thead><tr><th>List</th><th>Type</th><th>Who may post</th></tr></thead>
 <tbody>
 {{range .Lists}}<tr><td><a href="/admin/ui/mlists/{{.Listname}}">{{.Listname}}</a></td><td><span class="badge">{{.TypeLabel}}</span></td><td>{{.PrivLabel}}</td></tr>
-{{else}}<tr><td colspan="3" class="empty">No mailing lists yet.</td></tr>
+{{else}}<tr><td colspan="3" class="empty{{if .ListsError}} failed{{end}}">{{or .ListsError "No mailing lists yet."}}</td></tr>
 {{end}}
 </tbody>
 </table>

@@ -66,9 +66,10 @@ func (s *Server) handleUIMLists(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	lists, _ := s.dir.ListMLists()
+	lists, err := s.dir.ListMLists()
 	s.render(w, "mlists.html", map[string]any{
-		"Nav": "mlists", "CSRF": csrfCookieValue(r), "Lists": mlistViewsOf(lists),
+		"Nav": "mlists", "CSRF": csrfCookieValue(r),
+		"Lists": mlistViewsOf(lists), "ListsError": s.listFailure("the mailing lists", err),
 	})
 }
 
@@ -90,8 +91,11 @@ func (s *Server) handleUICreateMList(w http.ResponseWriter, r *http.Request) {
 			errMsg = s.notice("Could not create list.", err)
 		}
 	}
-	lists, _ := s.dir.ListMLists()
-	s.render(w, "mlists-panel", map[string]any{"Lists": mlistViewsOf(lists), "Error": errMsg})
+	lists, err := s.dir.ListMLists()
+	s.render(w, "mlists-panel", map[string]any{
+		"Lists": mlistViewsOf(lists), "ListsError": s.listFailure("the mailing lists", err),
+		"Error": errMsg,
+	})
 }
 
 // handleUIMListDetail renders a distribution list's management page: its type and
