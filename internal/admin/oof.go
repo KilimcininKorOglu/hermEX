@@ -144,7 +144,7 @@ func (s *Server) handleUIUserOOF(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{}
 	switch {
 	case err != nil:
-		data["Error"] = "Server error."
+		data["Error"] = s.notice(userUnread, err)
 	case !ok:
 		data["Error"] = "No such user."
 	default:

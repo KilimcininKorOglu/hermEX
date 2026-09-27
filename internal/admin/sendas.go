@@ -133,7 +133,7 @@ func (s *Server) saveGrantListForm(w http.ResponseWriter, r *http.Request, kind,
 	data := map[string]any{}
 	switch {
 	case err != nil:
-		data["Error"] = "Server error."
+		data["Error"] = s.notice(userUnread, err)
 	case !ok:
 		data["Error"] = "No such user."
 	default:
@@ -157,7 +157,7 @@ func (s *Server) storeGrantList(adminID int64, maildir, kind string, grantees []
 	case !inScope:
 		return scopeRefusal(kind+" grantee", outOfScope)
 	case gErr != nil:
-		return "Server error."
+		return s.notice(granteesUnread, gErr)
 	case bad != "":
 		return "No such user: " + bad + "."
 	}

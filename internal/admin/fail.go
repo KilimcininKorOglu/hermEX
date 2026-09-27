@@ -99,6 +99,13 @@ func (s *Server) noteRead(failed readFailures, section, what string, err error) 
 // server error the operator's log has no trace of.
 const domainUnread = "Could not read the domain."
 
+// userUnread and granteesUnread are domainUnread's counterparts for the user a
+// panel's request names and for the accounts a grant list names.
+const (
+	userUnread     = "Could not read the user."
+	granteesUnread = "Could not read the grantees."
+)
+
 // listFailure returns the message a table shows in place of its rows when the list
 // could not be read, or "" when the read succeeded. The table must not show a failed
 // read as an empty list; err is recorded server-side, as notice does.

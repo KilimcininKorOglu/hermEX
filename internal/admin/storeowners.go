@@ -71,7 +71,7 @@ func (s *Server) handleUIUserStoreOwners(w http.ResponseWriter, r *http.Request)
 	data := map[string]any{}
 	switch {
 	case err != nil:
-		data["Error"] = "Server error."
+		data["Error"] = s.notice(userUnread, err)
 	case !ok:
 		data["Error"] = "No such user."
 	default:
@@ -82,7 +82,7 @@ func (s *Server) handleUIUserStoreOwners(w http.ResponseWriter, r *http.Request)
 		case !inScope:
 			data["Error"] = scopeRefusal("store owner", outOfScope)
 		case gErr != nil:
-			data["Error"] = "Server error."
+			data["Error"] = s.notice(granteesUnread, gErr)
 		case bad != "":
 			data["Error"] = "No such user: " + bad + "."
 		default:

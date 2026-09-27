@@ -958,6 +958,11 @@ func (f *fakeDir) GetUser(username string) (directory.UserDetail, bool, error) {
 	if err := f.readErrs["GetUser"]; err != nil {
 		return directory.UserDetail{}, false, err
 	}
+	// "GetUser:<address>" fails the read of that one account, so a test can fail a
+	// grantee's read while the mailbox owner still reads.
+	if err := f.readErrs["GetUser:"+username]; err != nil {
+		return directory.UserDetail{}, false, err
+	}
 	if f.knownUsers != nil {
 		u, ok := f.knownUsers[strings.ToLower(strings.TrimSpace(username))]
 		return u, ok, nil

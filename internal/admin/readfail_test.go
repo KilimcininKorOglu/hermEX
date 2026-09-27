@@ -422,6 +422,49 @@ func TestAFailedDomainReadIsRecordedOnSave(t *testing.T) {
 	}
 }
 
+// TestAFailedUserReadIsRecordedOnSave proves a user save panel reports and records a
+// failed read of the user it names, or of a grantee its list names. It answered
+// "Server error." and recorded nothing, so the operator's log had no trace of the
+// failure.
+func TestAFailedUserReadIsRecordedOnSave(t *testing.T) {
+	const user = "/admin/ui/users/bob@acme.test"
+	for _, tc := range []struct {
+		path, field, read, reported string
+	}{
+		{user + "/delegates", "", "GetUser", "Could not read the user."},
+		{user + "/meeting", "", "GetUser", "Could not read the user."},
+		{user + "/oof", "", "GetUser", "Could not read the user."},
+		{user + "/quota", "", "GetUser", "Could not read the user."},
+		{user + "/sentcopy", "", "GetUser", "Could not read the user."},
+		{user + "/syncpolicy", "", "GetUser", "Could not read the user."},
+		{user + "/sendas", "", "GetUser", "Could not read the user."},
+		{user + "/storeowners", "", "GetUser", "Could not read the user."},
+		{user + "/sendas", "sendas", "GetUser:carol@acme.test", "Could not read the grantees."},
+		{user + "/sendonbehalf", "sendonbehalf", "GetUser:carol@acme.test", "Could not read the grantees."},
+		{user + "/storeowners", "storeowners", "GetUser:carol@acme.test", "Could not read the grantees."},
+	} {
+		errs := map[string]error{}
+		d := &fakeDir{
+			authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+			userDetail: directory.UserDetail{ID: 8, Username: "bob@acme.test", Maildir: "/data/bob"},
+			readErrs:   errs,
+		}
+		ts, sink := loggingAdminServer(t, d)
+		session, csrf := loginCookies(t, ts)
+		errs[tc.read] = errReadFailed
+		form := url.Values{}
+		if tc.field != "" {
+			form.Set(tc.field, "carol@acme.test")
+		}
+		name := tc.path + " " + tc.read
+		body := wantBody(t, htmxPUT(t, ts, tc.path, session, csrf, form), http.StatusOK, name)
+		wantContains(t, body, tc.reported, name+": the failed read is reported")
+		if e, ok := sink.find("panel.fail"); !ok || e.Err != errReadFailed.Error() {
+			t.Errorf("%s: the failed read was not recorded (event %+v)", name, e)
+		}
+	}
+}
+
 // TestADomainDetailListReadIsNotShownAsEmpty proves the domain detail page reports
 // a list it could not read. The members lists rendered as "No users." and the like,
 // and the DNS records named no DKIM key or left out the MTA-STS records.
