@@ -21,7 +21,9 @@ func TestBrandingTaglineMigration(t *testing.T) {
 		_, err := db.Exec(`UPDATE domains SET branding_json = ? WHERE domainname = ?`, blob, domain)
 		mustNoErr(t, "store the old blob of "+domain, err)
 	}
-	_, err := db.Exec(`DELETE FROM schema_migrations WHERE version = 59`)
+	// The runner resumes after the highest recorded version, so the migration and
+	// every later one are marked not applied; each of them runs again idempotently.
+	_, err := db.Exec(`DELETE FROM schema_migrations WHERE version >= 59`)
 	mustNoErr(t, "mark the migration as not applied", err)
 	mustNoErr(t, "apply the migration", d.EnsureSchema())
 
