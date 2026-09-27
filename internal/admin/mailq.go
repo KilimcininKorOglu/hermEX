@@ -64,13 +64,13 @@ type mailqView struct {
 	NextAttempt stamp
 	Status      string
 	LastError   string
-	SizeKB      int
+	Size        string
 }
 
 // mailqViews reads the queue and projects each entry for display. An entry that
 // has been attempted (has a recorded error) is "Deferred" and shows its next
 // retry time; one awaiting its first attempt is "Pending".
-func (s *Server) mailqViews(c clock) ([]mailqView, error) {
+func (s *Server) mailqViews(c clock, lang string) ([]mailqView, error) {
 	entries, err := s.mailq.List()
 	if err != nil {
 		return nil, err
@@ -92,7 +92,7 @@ func (s *Server) mailqViews(c clock) ([]mailqView, error) {
 		out = append(out, mailqView{
 			ID: e.RecipientID, From: e.From, Recipient: e.Recipient, Attempts: e.Attempts,
 			Enqueued: c.at(e.EnqueuedAt), NextAttempt: next,
-			Status: status, LastError: e.LastError, SizeKB: (e.Size + 1023) / 1024,
+			Status: status, LastError: e.LastError, Size: sizeMsg(int64(e.Size), lang),
 		})
 	}
 	return out, nil
@@ -104,7 +104,7 @@ func (s *Server) handleUIMailq(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	views, err := s.mailqViews(requestClock(r))
+	views, err := s.mailqViews(requestClock(r), requestLang(r))
 	errMsg := ""
 	if err != nil {
 		errMsg = s.notice("mailq.unread", err)
@@ -153,7 +153,7 @@ func (s *Server) handleUIMailqDelete(w http.ResponseWriter, r *http.Request) {
 // renderMailqPanel renders the queue table partial with the current entries and an
 // optional error banner.
 func (s *Server) renderMailqPanel(w http.ResponseWriter, r *http.Request, errMsg string) {
-	views, err := s.mailqViews(requestClock(r))
+	views, err := s.mailqViews(requestClock(r), requestLang(r))
 	if err != nil && errMsg == "" {
 		errMsg = s.notice("mailq.unread", err)
 	}

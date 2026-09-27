@@ -59,22 +59,23 @@ func (s *Server) handleSetUserQuota(w http.ResponseWriter, r *http.Request) {
 }
 
 // quotaView is the quota section's template model: the limits shown in mebibytes
-// (0 = unlimited) and the current usage, for the user detail page.
+// (0 = unlimited) and the current usage as a size message, for the user detail
+// page.
 type quotaView struct {
 	SendMB    uint32
 	ReceiveMB uint32
 	StorageMB uint32
-	UsedMB    int64
+	Used      string
 }
 
-// quotaViewOf builds the template model, converting the stored KiB limits and the
-// byte usage to MiB for display.
-func quotaViewOf(limits objectstore.QuotaLimits, usedBytes int64) quotaView {
+// quotaViewOf builds the template model, converting the stored KiB limits to MiB
+// for the form and the byte usage to the largest fitting unit in lang.
+func quotaViewOf(limits objectstore.QuotaLimits, usedBytes int64, lang string) quotaView {
 	return quotaView{
 		SendMB:    limits.SendKB / 1024,
 		ReceiveMB: limits.ReceiveKB / 1024,
 		StorageMB: limits.StorageKB / 1024,
-		UsedMB:    usedBytes / (1024 * 1024),
+		Used:      sizeMsg(usedBytes, lang),
 	}
 }
 

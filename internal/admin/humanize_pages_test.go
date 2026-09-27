@@ -49,6 +49,7 @@ func TestMailQueueShowsTheNextRetryAsADistance(t *testing.T) {
 	page := wantBody(t, authedGET(t, ts, "/admin/ui/mailq", session), http.StatusOK, "mail queue")
 	wantContains(t, page, ">3 h ago</time>", "the enqueue time")
 	wantContains(t, page, ">in 10 min</time>", "the next retry")
+	wantContains(t, page, "sender boss@local.test, 19 B", "the size in its largest unit")
 }
 
 // TestTLSCertsShowTheDaysLeft proves a stored certificate shows how many days it

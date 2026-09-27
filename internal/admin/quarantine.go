@@ -16,7 +16,7 @@ type quarantineMsg struct {
 	Date    stamp
 	Sender  string
 	Subject string
-	Size    int64
+	Size    string
 }
 
 // handleUIQuarantine renders a user's Junk folder for admin review: each message's
@@ -110,7 +110,7 @@ func (s *Server) renderQuarantine(w http.ResponseWriter, r *http.Request, email,
 		s.render(w, r, "quarantine", data)
 		return
 	}
-	c := requestClock(r)
+	c, lang := requestClock(r), requestLang(r)
 	views := make([]quarantineMsg, 0, len(msgs))
 	for _, m := range msgs {
 		views = append(views, quarantineMsg{
@@ -118,7 +118,7 @@ func (s *Server) renderQuarantine(w http.ResponseWriter, r *http.Request, email,
 			Date:    c.at(m.InternalDate),
 			Sender:  m.Sender,
 			Subject: m.Subject,
-			Size:    m.Size,
+			Size:    sizeMsg(m.Size, lang),
 		})
 	}
 	data["Messages"] = views

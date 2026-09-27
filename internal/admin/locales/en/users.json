@@ -77,7 +77,7 @@
     "saveAccount": "Save account",
     "quotaTitle": "Storage quota",
     "quotaDesc": "A limit of 0 means unlimited.",
-    "quotaUsedDesc": "Used space: {0} MiB. A limit of 0 means unlimited.",
+    "quotaUsedDesc": "Used space: {0}. A limit of 0 means unlimited.",
     "sendQuota": "Send quota limit (MiB)",
     "receiveQuota": "Receive quota limit (MiB)",
     "storageQuota": "Storage quota and warning (MiB)",

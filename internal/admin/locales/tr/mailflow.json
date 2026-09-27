@@ -7,7 +7,7 @@
     "colStatus": "Durum",
     "colEnqueued": "Kuyruğa alındı",
     "colLastError": "Son hata",
-    "fromSize": "gönderen {0}, {1} KB",
+    "fromSize": "gönderen {0}, {1}",
     "statusPending": "Bekliyor",
     "statusDeferred": "Ertelendi",
     "statusInterrupted": "Kesildi",

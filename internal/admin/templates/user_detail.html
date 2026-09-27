@@ -68,7 +68,7 @@
 {{template "card-head" (dict "Icon" "hard-drive" "Title" "userDetail.quotaTitle" "Desc" "userDetail.quotaDesc")}}
 <p class="error">{{t .}}</p>
 {{else}}
-{{template "card-head" (dict "Icon" "hard-drive" "Title" "userDetail.quotaTitle" "Desc" (t "userDetail.quotaUsedDesc" .Quota.UsedMB))}}
+{{template "card-head" (dict "Icon" "hard-drive" "Title" "userDetail.quotaTitle" "Desc" (t "userDetail.quotaUsedDesc" (t .Quota.Used)))}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/quota" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>{{t "userDetail.sendQuota"}}{{template "help" "help.quota.send"}} <input type="number" name="sendmb" value="{{.Quota.SendMB}}" min="0"></label>
@@ -398,7 +398,7 @@
 <thead><tr><th>{{t "userQuarantine.date"}}</th><th>{{t "userQuarantine.from"}}</th><th>{{t "userQuarantine.subject"}}</th><th>{{t "userQuarantine.size"}}</th><th></th></tr></thead>
 <tbody>
 {{range .Messages}}<tr>
-<td class="nowrap">{{template "when" .Date}}</td><td>{{.Sender}}</td><td>{{.Subject}}</td><td>{{.Size}}</td>
+<td class="nowrap">{{template "when" .Date}}</td><td>{{.Sender}}</td><td>{{.Subject}}</td><td class="nowrap">{{t .Size}}</td>
 <td class="actions">
 <form class="inline" hx-post="/admin/ui/users/{{$.Email}}/quarantine/release" hx-target="#quarantine" hx-swap="innerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
 <input type="hidden" name="uid" value="{{.UID}}"><button type="submit" class="secondary">{{t "userQuarantine.release"}}</button></form>

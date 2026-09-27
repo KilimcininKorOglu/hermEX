@@ -77,7 +77,7 @@
     "saveAccount": "Hesabı kaydet",
     "quotaTitle": "Depolama kotası",
     "quotaDesc": "0 sınırı, sınırsız anlamına gelir.",
-    "quotaUsedDesc": "Kullanılan alan: {0} MiB. 0 sınırı, sınırsız anlamına gelir.",
+    "quotaUsedDesc": "Kullanılan alan: {0}. 0 sınırı, sınırsız anlamına gelir.",
     "sendQuota": "Gönderme kotası sınırı (MiB)",
     "receiveQuota": "Alma kotası sınırı (MiB)",
     "storageQuota": "Depolama kotası ve uyarı (MiB)",

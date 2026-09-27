@@ -269,7 +269,7 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 		"Nav": "users", "CSRF": csrfCookieValue(r), "User": u, "Email": u.Username, "ReadFailed": failed,
 	}
 	s.addUserAddressing(data, failed, u.Username)
-	s.addUserMailboxSettings(data, failed, u.Maildir)
+	s.addUserMailboxSettings(data, failed, u.Maildir, requestLang(r))
 	s.addUserGrants(data, failed, u.Maildir)
 	s.addUserLists(data, u, requestClock(r))
 	s.render(w, r, "user_detail.html", data)
@@ -305,14 +305,14 @@ func (s *Server) addUserAddressing(data map[string]any, failed readFailures, use
 // addUserMailboxSettings fills the user detail forms kept in the mailbox store: the
 // out-of-office reply, the quota, the meeting handling, the sent-copy rule and the
 // device policy. A form whose value could not be read is hidden.
-func (s *Server) addUserMailboxSettings(data map[string]any, failed readFailures, maildir string) {
+func (s *Server) addUserMailboxSettings(data map[string]any, failed readFailures, maildir, lang string) {
 	oof, err := s.store.GetOOFSettings(maildir)
 	if s.noteRead(failed, "oof", "what.oof", err) {
 		data["OOF"] = oofViewOf(oof)
 	}
 	limits, used, err := s.store.GetQuota(maildir)
 	if s.noteRead(failed, "quota", "what.quota", err) {
-		data["Quota"] = quotaViewOf(limits, used)
+		data["Quota"] = quotaViewOf(limits, used, lang)
 	}
 	meeting, err := s.store.GetMeetingConfig(maildir)
 	if s.noteRead(failed, "meeting", "what.meeting", err) {

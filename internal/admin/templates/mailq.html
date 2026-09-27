@@ -17,7 +17,7 @@
 <thead><tr><th>{{t "mailq.colMessage"}}</th><th>{{t "mailq.colStatus"}}</th><th>{{t "mailq.colEnqueued"}}</th><th>{{t "mailq.colLastError"}}</th><th></th></tr></thead>
 <tbody>
 {{range .Queue}}<tr>
-<td>{{.Recipient}}<small>{{t "mailq.fromSize" .From .SizeKB}}</small></td>
+<td>{{.Recipient}}<small>{{t "mailq.fromSize" .From (t .Size)}}</small></td>
 <td><span class="status{{if eq .Status "Deferred"}} status-warn{{else if eq .Status "Interrupted"}} status-off{{end}}">{{if eq .Status "Deferred"}}{{t "mailq.statusDeferred"}}{{else if eq .Status "Interrupted"}}{{t "mailq.statusInterrupted"}}{{else if eq .Status "Pending"}}{{t "mailq.statusPending"}}{{else}}{{.Status}}{{end}}</span><small>{{if eq .Attempts 1}}{{t "mailq.tryOne" .Attempts}}{{else}}{{t "mailq.tryMany" .Attempts}}{{end}}</small></td>
 <td class="nowrap">{{template "when" .Enqueued}}{{if .NextAttempt.ISO}}<small>{{t "mailq.nextRetry"}} {{template "when" .NextAttempt}}</small>{{end}}</td>
 <td><small>{{.LastError}}</small></td>

@@ -7,7 +7,7 @@
     "colStatus": "Status",
     "colEnqueued": "Enqueued",
     "colLastError": "Last error",
-    "fromSize": "from {0}, {1} KB",
+    "fromSize": "sender {0}, {1}",
     "statusPending": "Pending",
     "statusDeferred": "Deferred",
     "statusInterrupted": "Interrupted",

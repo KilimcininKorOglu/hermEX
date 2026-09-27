@@ -89,7 +89,7 @@ func TestAdminUserQuotaRequiresSystem(t *testing.T) {
 }
 
 // TestUIUserDetailShowsQuota proves the detail page renders the storage-quota
-// section with the usage and the limits converted to MiB.
+// section with the usage in its largest unit and the limits in MiB.
 func TestUIUserDetailShowsQuota(t *testing.T) {
 	d := oofUserDir()
 	store := &fakeStore{
@@ -102,7 +102,7 @@ func TestUIUserDetailShowsQuota(t *testing.T) {
 	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
-	for _, want := range []string{"Storage quota", "Used space: 3 MiB", `name="receivemb" value="2"`} {
+	for _, want := range []string{"Storage quota", "Used space: 3 MB", `name="receivemb" value="2"`} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("detail page quota section missing %q", want)
 		}
