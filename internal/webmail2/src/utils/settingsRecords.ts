@@ -85,14 +85,29 @@ export function detectBrowser(ua: string): string {
   return ver ? `${hit.name} ${ver}` : hit.name
 }
 
-// rfc3339ToDate extracts the YYYY-MM-DD part from an RFC3339 string for <input type="date">.
-export function rfc3339ToDate(value?: string): string {
-  return value ? value.slice(0, 10) : ""
+// localDate renders an instant as the YYYY-MM-DD day it falls on in the browser's zone.
+function localDate(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
-// dateToRFC3339 turns a YYYY-MM-DD value into an RFC3339 UTC timestamp, or undefined when empty.
-export function dateToRFC3339(value: string): string | undefined {
-  return value ? `${value}T00:00:00Z` : undefined
+// rfc3339ToDate renders an RFC3339 instant as the local day for <input type="date">.
+// For an end bound, which marks the first instant after the range, it renders
+// the last day the range covers.
+export function rfc3339ToDate(value?: string, endBound = false): string {
+  if (!value) return ""
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return ""
+  return localDate(new Date(d.getTime() - (endBound ? 1 : 0)))
+}
+
+// dateToRFC3339 turns a YYYY-MM-DD day into the RFC3339 instant the day starts
+// in the browser's zone, or undefined when empty. For an end bound it returns
+// the start of the next day, so the chosen day is part of the range.
+export function dateToRFC3339(value: string, endBound = false): string | undefined {
+  if (!value) return undefined
+  const [y, m, d] = value.split("-").map(Number)
+  return new Date(y, m - 1, d + (endBound ? 1 : 0)).toISOString()
 }
 
 // formatStorageBytes renders a byte count with a binary-prefix unit for the

@@ -1600,8 +1600,8 @@
   "help": {
     "label": "More information",
     "autoReplyAudience": "Everyone: every sender gets a reply. Inside my organization only: senders outside it get none. Inside and outside: senders outside your organization get a reply only when they are in your contacts.",
-    "autoReplyStart": "Replies start at 00:00 UTC on this day. Leave it empty to start at once.",
-    "autoReplyEnd": "Replies stop when this day begins, at 00:00 UTC. Leave it empty to keep replying until you turn replies off.",
+    "autoReplyStart": "Replies start when this day begins in your time zone. Leave it empty to start at once.",
+    "autoReplyEnd": "Replies continue through the end of this day. Leave it empty to keep replying until you turn replies off.",
     "appPasswordName": "A name that tells this app password apart in the list, such as the device or program that uses it.",
     "snippetHtml": "On: the body is edited as formatted text (HTML). Off: it is plain text."
   }

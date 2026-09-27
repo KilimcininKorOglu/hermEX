@@ -160,8 +160,8 @@ function DateRange({ vacation, onChange }: VacationEdit) {
           <Input
             id={f.id}
             type="date"
-            value={rfc3339ToDate(vacation[f.key])}
-            onChange={(e) => onChange({ ...vacation, [f.key]: dateToRFC3339(e.target.value) })}
+            value={rfc3339ToDate(vacation[f.key], f.key === "end_date")}
+            onChange={(e) => onChange({ ...vacation, [f.key]: dateToRFC3339(e.target.value, f.key === "end_date") })}
             disabled={!vacation.enabled}
           />
         </div>

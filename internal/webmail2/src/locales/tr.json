@@ -1600,8 +1600,8 @@
   "help": {
     "label": "Daha fazla bilgi",
     "autoReplyAudience": "Herkes: her gönderen yanıt alır. Yalnızca kuruluşumdaki kişiler: kuruluş dışındaki gönderenler yanıt almaz. Kuruluş içindeki ve dışındaki kişiler: kuruluş dışındaki gönderenler yalnızca kişilerinizdeyse yanıt alır.",
-    "autoReplyStart": "Yanıtlar bu günün 00:00 UTC saatinde başlar. Hemen başlaması için boş bırakın.",
-    "autoReplyEnd": "Yanıtlar bu gün başlarken, 00:00 UTC saatinde durur. Siz kapatana kadar yanıt verilmesi için boş bırakın.",
+    "autoReplyStart": "Yanıtlar bu gün, saat diliminizde başladığında başlar. Hemen başlaması için boş bırakın.",
+    "autoReplyEnd": "Yanıtlar bu günün sonuna kadar sürer. Siz kapatana kadar yanıt verilmesi için boş bırakın.",
     "appPasswordName": "Bu uygulama parolasını listede ayırt eden bir ad, örneğin onu kullanan cihaz ya da program.",
     "snippetHtml": "Açık: gövde biçimli metin (HTML) olarak düzenlenir. Kapalı: düz metindir."
   }

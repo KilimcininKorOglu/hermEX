@@ -49,10 +49,21 @@ describe("detectBrowser", () => {
 
 describe("format helpers", () => {
   it("converts between a date input and RFC 3339", () => {
-    expect(rfc3339ToDate("2026-09-25T00:00:00Z")).toBe("2026-09-25")
+    expect(rfc3339ToDate(dateToRFC3339("2026-09-25"))).toBe("2026-09-25")
     expect(rfc3339ToDate(undefined)).toBe("")
-    expect(dateToRFC3339("2026-09-25")).toBe("2026-09-25T00:00:00Z")
     expect(dateToRFC3339("")).toBeUndefined()
+    // A start bound is the local midnight the day begins.
+    expect(new Date(dateToRFC3339("2026-09-25") ?? "").getHours()).toBe(0)
+  })
+
+  it("keeps the chosen end day inside the range", () => {
+    const end = dateToRFC3339("2026-09-25", true) ?? ""
+    const last = new Date(new Date(end).getTime() - 1)
+    expect(last.getDate()).toBe(25)
+    expect(new Date(end).getDate()).toBe(26)
+    expect(rfc3339ToDate(end, true)).toBe("2026-09-25")
+    // A month end rolls over into the next month.
+    expect(rfc3339ToDate(dateToRFC3339("2026-09-30", true), true)).toBe("2026-09-30")
   })
 
   it("renders storage sizes and caps the usage share", () => {
