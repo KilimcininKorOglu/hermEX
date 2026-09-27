@@ -55,6 +55,23 @@ func TestUIChangePasswordSubmit(t *testing.T) {
 	}
 }
 
+// TestUIChangePasswordRecordsAFailedWrite proves a password the directory could not
+// store is reported and recorded. The failure was reported but recorded nowhere, so
+// the operator's log had no trace of it.
+func TestUIChangePasswordRecordsAFailedWrite(t *testing.T) {
+	d := cpFakeDir()
+	d.createErr = errReadFailed
+	ts, sink := loggingAdminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	resp := htmxPUT(t, ts, "/admin/ui/change-password", session, csrf,
+		url.Values{"old": {"pw"}, "new": {"newsecret"}})
+	body := wantBody(t, resp, http.StatusOK, "change password")
+	wantContains(t, body, "Could not change the password.", "the failed write is reported")
+	if e, ok := sink.find("panel.fail"); !ok || e.Err != errReadFailed.Error() {
+		t.Errorf("the failed write was not recorded (event %+v)", e)
+	}
+}
+
 // TestUIChangePasswordWrongCurrent proves a wrong current password reports an
 // error and never touches the stored password.
 func TestUIChangePasswordWrongCurrent(t *testing.T) {

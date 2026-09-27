@@ -71,7 +71,7 @@ func (s *Server) handleUIChangePasswordSubmit(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if _, err := s.dir.SetPassword(cl.Login, newpw); err != nil {
-		result(false, "Could not change the password.")
+		result(false, s.notice("Could not change the password.", err))
 		return
 	}
 	// The old password must stop working everywhere, including on browsers already
