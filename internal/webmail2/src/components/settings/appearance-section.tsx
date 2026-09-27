@@ -201,7 +201,7 @@ function LayoutFields({ display }: { display: DisplaySettings }) {
           key={appearance.autoCc}
           value={appearance.autoCc}
           onCommit={(autoCc) => saveAppearance({ autoCc })}
-          placeholder="cc@example.test, boss@example.test"
+          placeholder={t("settings.appearance.autoCcPlaceholder")}
           className="max-w-[16rem]"
         />
       </FieldRow>

@@ -115,7 +115,8 @@ describe('RichTextEditor', () => {
       range.selectNodeContents(text)
       window.getSelection()?.removeAllRanges()
       window.getSelection()?.addRange(range)
-      const button = mounted.container.querySelector('button[title="Insert link"]') as HTMLButtonElement
+      // The title is the key until the catalogue has loaded.
+      const button = mounted.container.querySelector('button[title="Insert link"], button[title="compose.insertLink"]') as HTMLButtonElement
       act(() => { button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })) })
       const input = document.getElementById('link-dialog-url') as HTMLInputElement
       return { ...mounted, input }

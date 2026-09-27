@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useI18n } from "@/hooks/useI18n"
 import api, { type ClientSession } from "@/utils/api"
-import { disablePushNotifications, enablePushNotifications, pushSupported } from "@/utils/push"
+import { disablePushNotifications, enablePushNotifications, PushError, pushSupported } from "@/utils/push"
 import { SettingSection } from "./setting-layout"
 
 export function PushSection() {
@@ -22,13 +22,13 @@ export function PushSection() {
   const [busy, setBusy] = useState(false)
   const supported = pushSupported()
 
-  const run = async (action: () => Promise<void>, okKey: string, failKey: string, showCause: boolean) => {
+  const run = async (action: () => Promise<void>, okKey: string, failKey: string) => {
     setBusy(true)
     try {
       await action()
       toast.success(t(okKey))
     } catch (err) {
-      toast.error(showCause && err instanceof Error ? err.message : t(failKey))
+      toast.error(t(err instanceof PushError ? err.key : failKey))
     } finally {
       setBusy(false)
     }
@@ -38,14 +38,14 @@ export function PushSection() {
     <SettingSection icon={Bell} title={t("settings.push.title")} description={t("settings.push.description")}>
       <div className="flex flex-wrap items-center gap-2">
         <Button
-          onClick={() => void run(enablePushNotifications, "settings.push.enabled", "settings.push.enableFailed", true)}
+          onClick={() => void run(enablePushNotifications, "settings.push.enabled", "settings.push.enableFailed")}
           disabled={busy || !supported}
         >
           {busy ? t("settings.push.working") : t("settings.push.enable")}
         </Button>
         <Button
           variant="outline"
-          onClick={() => void run(disablePushNotifications, "settings.push.disabled", "settings.push.disableFailed", false)}
+          onClick={() => void run(disablePushNotifications, "settings.push.disabled", "settings.push.disableFailed")}
           disabled={busy || !supported}
         >
           {t("settings.disable")}

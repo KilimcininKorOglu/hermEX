@@ -2,6 +2,7 @@ import { useRef, useState, useLayoutEffect, useMemo, forwardRef, useImperativeHa
 import { Bold, Italic, Underline, Link } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { LinkDialog } from "@/components/link-dialog"
+import { useI18n } from "@/hooks/useI18n"
 import { isSafeLinkURL, sanitizeClipboard, sanitizeHTML } from "@/utils/sanitize"
 import { linkifyHTML, linkifyNode } from "@/utils/linkify"
 import { countMissingImages, fillMissingImages, imageFilesFrom, imagesFragment, readAsDataURL } from "@/utils/pasteImages"
@@ -32,6 +33,46 @@ function placeCaret(x: number, y: number) {
   fromPosition.collapse(true)
   selection.removeAllRanges()
   selection.addRange(fromPosition)
+}
+
+// ToolbarButton is one formatting button. It acts on mouse down and keeps the
+// focus, so the selection it formats stays in the editor.
+function ToolbarButton({ title, onPress, children }: { title: string; onPress: () => void; children: React.ReactNode }) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="h-7 px-2"
+      onMouseDown={(e) => { e.preventDefault(); onPress() }}
+      title={title}
+      aria-label={title}
+    >
+      {children}
+    </Button>
+  )
+}
+
+// EditorToolbar is the formatting toolbar above the editor.
+function EditorToolbar({ onCommand, onLink }: { onCommand: (cmd: string) => void; onLink: () => void }) {
+  const { t } = useI18n()
+  return (
+    <div className="flex items-center gap-1 border rounded-md p-1 bg-muted/50">
+      <ToolbarButton title={t("compose.bold")} onPress={() => onCommand("bold")}>
+        <Bold className="h-3.5 w-3.5" />
+      </ToolbarButton>
+      <ToolbarButton title={t("compose.italic")} onPress={() => onCommand("italic")}>
+        <Italic className="h-3.5 w-3.5" />
+      </ToolbarButton>
+      <ToolbarButton title={t("compose.underline")} onPress={() => onCommand("underline")}>
+        <Underline className="h-3.5 w-3.5" />
+      </ToolbarButton>
+      <div className="w-px h-5 bg-border mx-1" />
+      <ToolbarButton title={t("compose.insertLink")} onPress={onLink}>
+        <Link className="h-3.5 w-3.5" />
+      </ToolbarButton>
+    </div>
+  )
 }
 
 export interface RichTextEditorHandle {
@@ -214,50 +255,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
 
     return (
       <div className="space-y-1">
-        {/* Toolbar */}
-        <div className="flex items-center gap-1 border rounded-md p-1 bg-muted/50">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2"
-            onMouseDown={(e) => { e.preventDefault(); execCmd("bold") }}
-            title="Bold"
-          >
-            <Bold className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2"
-            onMouseDown={(e) => { e.preventDefault(); execCmd("italic") }}
-            title="Italic"
-          >
-            <Italic className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2"
-            onMouseDown={(e) => { e.preventDefault(); execCmd("underline") }}
-            title="Underline"
-          >
-            <Underline className="h-3.5 w-3.5" />
-          </Button>
-          <div className="w-px h-5 bg-border mx-1" />
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2"
-            onMouseDown={(e) => { e.preventDefault(); handleLink() }}
-            title="Insert link"
-          >
-            <Link className="h-3.5 w-3.5" />
-          </Button>
-        </div>
+        <EditorToolbar onCommand={execCmd} onLink={handleLink} />
         {/* Editor */}
         <div
           ref={editorRef}

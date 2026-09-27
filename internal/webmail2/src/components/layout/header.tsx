@@ -85,6 +85,8 @@ export function Header({ onMenuToggle, sidebarCollapsed }: HeaderProps) {
             size="icon"
             className="lg:hidden"
             onClick={onMenuToggle}
+            title={t("header.menu")}
+            aria-label={t("header.menu")}
           >
             <Menu className="h-5 w-5" />
           </Button>
@@ -93,7 +95,7 @@ export function Header({ onMenuToggle, sidebarCollapsed }: HeaderProps) {
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               type="search"
-              aria-label="search"
+              aria-label={t("common.search")}
               placeholder={t("header.searchPlaceholder")}
               className="pl-10 bg-muted/50 border-0 focus:bg-background focus:ring-2 focus:ring-primary/20"
               value={searchQuery}
@@ -133,6 +135,8 @@ export function Header({ onMenuToggle, sidebarCollapsed }: HeaderProps) {
             size="icon"
             className="relative"
             onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+            title={t("header.toggleTheme")}
+            aria-label={t("header.toggleTheme")}
           >
             {resolvedTheme === "dark" ? (
               <Sun className="h-5 w-5" />
@@ -158,7 +162,7 @@ export function Header({ onMenuToggle, sidebarCollapsed }: HeaderProps) {
           {/* User Profile */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="relative h-9 w-9 rounded-full">
+              <Button variant="ghost" className="relative h-9 w-9 rounded-full" title={t("header.account")} aria-label={t("header.account")}>
                 <Avatar className="h-9 w-9 ring-2 ring-primary/20">
                   <AvatarImage src={user?.hasAvatar && email ? api.avatarUrl(email) : ""} alt={email} />
                   <AvatarFallback className="bg-gradient-to-br from-primary to-primary/80 text-primary-foreground font-semibold">
@@ -204,7 +208,7 @@ function NotificationsMenu({ notifications }: { notifications: Notification[] })
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative">
+        <Button variant="ghost" size="icon" className="relative" title={t("header.notifications")} aria-label={t("header.notifications")}>
           <Bell className="h-5 w-5" />
           {notifications.length > 0 && (
             <Badge className="absolute -right-1 -top-1 h-5 w-5 p-0 flex items-center justify-center text-[10px]">

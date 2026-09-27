@@ -1151,14 +1151,14 @@ function ComposeHeader(p: ComposeHeaderProps) {
           selected={p.extras.signature}
           onPick={p.extras.setSignature}
           title={t("compose.signature")}
-          trigger={<span className="text-xs font-serif italic">Sig</span>}
+          trigger={<span className="text-xs font-serif italic">{t("compose.signatureShort")}</span>}
         />
         <EntryPicker
           entries={p.extras.templates}
           selected={p.extras.template}
           onPick={p.extras.setTemplate}
           title={t("compose.template")}
-          trigger={<span className="text-xs font-bold">Tpl</span>}
+          trigger={<span className="text-xs font-bold">{t("compose.templateShort")}</span>}
         />
         <SendButton sender={p.sender} scheduled={!!p.scheduledAt} disabled={!p.canSend} />
       </div>

@@ -289,6 +289,8 @@
     "scheduleSend": "Schedule send",
     "signature": "Signature",
     "template": "Template",
+    "signatureShort": "Sig",
+    "templateShort": "Tpl",
     "scheduleSendAt": "Send at",
     "scheduleClear": "Clear",
     "scheduling": "Schedule",
@@ -508,6 +510,7 @@
       "startupInbox": "Inbox",
       "autoCc": "Auto Cc",
       "autoCcDescription": "Addresses added to Cc on every send (comma-separated).",
+      "autoCcPlaceholder": "cc@example.test, boss@example.test",
       "workDays": "Working days",
       "workDaysDescription": "Days shown as working in the calendar.",
       "defaultDuration": "Default appointment length",
@@ -735,6 +738,8 @@
       "working": "Working...",
       "enable": "Enable push notifications",
       "notSupported": "Not supported in this browser.",
+      "permissionDenied": "Notification permission was denied.",
+      "notConfigured": "Push notifications are not configured on the server.",
       "enabled": "Push notifications enabled",
       "enableFailed": "Failed to enable push notifications",
       "disabled": "Push notifications disabled",
@@ -1387,6 +1392,7 @@
     "emailAddress": "Email Address",
     "password": "Password",
     "passwordPlaceholder": "Enter your password",
+    "emailPlaceholder": "you@example.com",
     "signIn": "Sign In",
     "signingIn": "Signing in...",
     "invalidCredentials": "Invalid email or password",
@@ -1402,7 +1408,18 @@
     "profile": "Profile",
     "accountSettings": "Account Settings",
     "signOut": "Sign Out",
-    "keyboardShortcuts": "Keyboard shortcuts (?)"
+    "keyboardShortcuts": "Keyboard shortcuts (?)",
+    "toggleTheme": "Switch between light and dark theme",
+    "menu": "Menu"
+  },
+  "publicFolders": {
+    "empty": "No public folders available",
+    "emptyFolder": "No messages in this folder",
+    "loadFailed": "Could not load the list.",
+    "messageLoadFailed": "Could not open the message.",
+    "messageOne": "{{count}} message",
+    "messageMany": "{{count}} messages",
+    "unread": "{{count}} unread"
   },
   "sidebar": {
     "sharedMailboxes": "Shared Mailboxes",

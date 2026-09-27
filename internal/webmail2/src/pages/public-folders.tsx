@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react"
 import { FolderOpen, ChevronRight, ChevronLeft, Mail as MailIcon } from "lucide-react"
+import { toast } from "sonner"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useI18n } from "@/hooks/useI18n"
 import { escapeTextBody, sanitizeEmailBody } from "@/utils/sanitize"
 import api, { PublicFolder, Mail } from "@/utils/api"
 
@@ -12,26 +14,31 @@ const skeletons = (
   </div>
 )
 
-// ListBody shows skeletons while loading, an empty notice for no rows, or the rows.
+// ListBody shows skeletons while loading, the failure when the list could not be
+// read, an empty notice for no rows, or the rows. A failed read never shows as an
+// empty list.
 function ListBody({
   loading,
+  failed,
   empty,
   icon: Icon,
   emptyText,
   children,
 }: {
   loading: boolean
+  failed: boolean
   empty: boolean
   icon: React.ElementType
   emptyText: string
   children: React.ReactNode
 }) {
+  const { t } = useI18n()
   if (loading) return skeletons
-  if (empty) {
+  if (failed || empty) {
     return (
       <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
         <Icon className="h-12 w-12 mb-3 opacity-30" />
-        <p className="text-sm">{emptyText}</p>
+        <p className={failed ? "text-sm text-destructive" : "text-sm"}>{failed ? t("publicFolders.loadFailed") : emptyText}</p>
       </div>
     )
   }
@@ -40,9 +47,10 @@ function ListBody({
 
 // BackHeader is a view title with a back button.
 function BackHeader({ onBack, children }: { onBack: () => void; children: React.ReactNode }) {
+  const { t } = useI18n()
   return (
     <div className="flex items-center gap-2 border-b px-4 py-3">
-      <button onClick={onBack} className="p-1 rounded hover:bg-accent" aria-label="Back">
+      <button onClick={onBack} className="p-1 rounded hover:bg-accent" aria-label={t("common.back")} title={t("common.back")}>
         <ChevronLeft className="h-5 w-5" />
       </button>
       {children}
@@ -52,12 +60,13 @@ function BackHeader({ onBack, children }: { onBack: () => void; children: React.
 
 // PublicMessageView shows one public-folder message, read-only.
 function PublicMessageView({ message, onBack }: { message: Mail; onBack: () => void }) {
+  const { t } = useI18n()
   const body = message.bodyType === "text" ? escapeTextBody(message.body) : message.body
   const { html } = sanitizeEmailBody(body, true)
   return (
     <div className="flex flex-col h-full">
       <BackHeader onBack={onBack}>
-        <h1 className="font-semibold truncate">{message.subject || "(no subject)"}</h1>
+        <h1 className="font-semibold truncate">{message.subject || t("common.noSubject")}</h1>
       </BackHeader>
       <div className="flex-1 overflow-y-auto p-4">
         <div className="text-sm text-muted-foreground mb-4">
@@ -73,6 +82,7 @@ function PublicMessageView({ message, onBack }: { message: Mail; onBack: () => v
 
 // MessageRow is one message in a public folder's list.
 function MessageRow({ m, onOpen }: { m: Mail; onOpen: (m: Mail) => void }) {
+  const { t } = useI18n()
   return (
     <button
       onClick={() => onOpen(m)}
@@ -80,7 +90,7 @@ function MessageRow({ m, onOpen }: { m: Mail; onOpen: (m: Mail) => void }) {
     >
       <MailIcon className="h-5 w-5 text-muted-foreground shrink-0" />
       <div className="flex-1 min-w-0">
-        <p className="font-medium truncate">{m.subject || "(no subject)"}</p>
+        <p className="font-medium truncate">{m.subject || t("common.noSubject")}</p>
         <p className="text-xs text-muted-foreground truncate">
           {m.fromName || m.from}
           {m.date ? " - " + new Date(m.date).toLocaleDateString() : ""}
@@ -93,6 +103,8 @@ function MessageRow({ m, onOpen }: { m: Mail; onOpen: (m: Mail) => void }) {
 
 // FolderRow is one public folder in the folder list.
 function FolderRow({ f, onOpen }: { f: PublicFolder; onOpen: (f: PublicFolder) => void }) {
+  const { t } = useI18n()
+  const count = String(f.total)
   return (
     <button
       onClick={() => onOpen(f)}
@@ -102,13 +114,34 @@ function FolderRow({ f, onOpen }: { f: PublicFolder; onOpen: (f: PublicFolder) =
       <div className="flex-1 min-w-0">
         <p className="font-medium truncate">{f.name}</p>
         <p className="text-xs text-muted-foreground truncate">
-          {f.total} message{f.total === 1 ? "" : "s"}
-          {f.unread > 0 ? ` · ${f.unread} unread` : ""}
+          {t(f.total === 1 ? "publicFolders.messageOne" : "publicFolders.messageMany", { count })}
+          {f.unread > 0 ? " · " + t("publicFolders.unread", { count: String(f.unread) }) : ""}
         </p>
       </div>
       <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
     </button>
   )
+}
+
+// useFolderList loads the folders the caller may see and who owns them.
+function useFolderList() {
+  const [folders, setFolders] = useState<PublicFolder[]>([])
+  const [owner, setOwner] = useState("")
+  const [loading, setLoading] = useState(true)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    api.getPublicFolders()
+      .then((res) => {
+        if (cancelled) return
+        setFolders(res.folders ?? [])
+        setOwner(res.owner ?? "")
+      })
+      .catch(() => { if (!cancelled) setFailed(true) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [])
+  return { folders, owner, loading, failed }
 }
 
 /**
@@ -117,42 +150,29 @@ function FolderRow({ f, onOpen }: { f: PublicFolder; onOpen: (f: PublicFolder) =
  * message. Access is gated server-side per the publicfolder service.
  */
 export function PublicFoldersPage() {
-  const [folders, setFolders] = useState<PublicFolder[]>([])
-  const [owner, setOwner] = useState("")
-  const [loading, setLoading] = useState(true)
+  const { t } = useI18n()
+  const list = useFolderList()
   const [folder, setFolder] = useState<PublicFolder | null>(null)
   const [messages, setMessages] = useState<Mail[]>([])
   const [msgLoading, setMsgLoading] = useState(false)
+  const [msgFailed, setMsgFailed] = useState(false)
   const [message, setMessage] = useState<Mail | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    api.getPublicFolders()
-      .then((res) => {
-        if (!cancelled) {
-          setFolders(res.folders ?? [])
-          setOwner(res.owner ?? "")
-        }
-      })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [])
 
   const openFolder = (f: PublicFolder) => {
     setFolder(f)
     setMessage(null)
     setMessages([])
+    setMsgFailed(false)
     setMsgLoading(true)
     api.getPublicFolderMessages(f.id)
       .then((res) => setMessages(res.emails ?? []))
-      .catch(() => {})
+      .catch(() => setMsgFailed(true))
       .finally(() => setMsgLoading(false))
   }
 
   const openMessage = (m: Mail) => {
     if (!folder) return
-    api.getPublicMessage(folder.id, m.id).then(setMessage).catch(() => {})
+    api.getPublicMessage(folder.id, m.id).then(setMessage).catch(() => toast.error(t("publicFolders.messageLoadFailed")))
   }
 
   // One message, read-only.
@@ -169,7 +189,7 @@ export function PublicFoldersPage() {
           <h1 className="font-semibold truncate">{folder.name}</h1>
         </BackHeader>
         <div className="flex-1 overflow-y-auto">
-          <ListBody loading={msgLoading} empty={messages.length === 0} icon={MailIcon} emptyText="No messages in this folder">
+          <ListBody loading={msgLoading} failed={msgFailed} empty={messages.length === 0} icon={MailIcon} emptyText={t("publicFolders.emptyFolder")}>
             {messages.map((m) => (
               <MessageRow key={m.id} m={m} onOpen={openMessage} />
             ))}
@@ -184,12 +204,12 @@ export function PublicFoldersPage() {
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-3 border-b px-4 py-3">
         <FolderOpen className="h-5 w-5 text-muted-foreground" />
-        <h1 className="font-semibold">Public Folders</h1>
-        {owner && <span className="text-xs text-muted-foreground">{owner}</span>}
+        <h1 className="font-semibold">{t("nav.publicFolders")}</h1>
+        {list.owner && <span className="text-xs text-muted-foreground">{list.owner}</span>}
       </div>
       <div className="flex-1 overflow-y-auto">
-        <ListBody loading={loading} empty={folders.length === 0} icon={FolderOpen} emptyText="No public folders available">
-          {folders.map((f) => (
+        <ListBody loading={list.loading} failed={list.failed} empty={list.folders.length === 0} icon={FolderOpen} emptyText={t("publicFolders.empty")}>
+          {list.folders.map((f) => (
             <FolderRow key={f.id} f={f} onOpen={openFolder} />
           ))}
         </ListBody>

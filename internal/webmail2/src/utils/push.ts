@@ -19,17 +19,29 @@ export function pushSupported(): boolean {
   return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window
 }
 
+// PushError is a push setup failure the user can act on; key names its message
+// in the locale catalogue.
+export class PushError extends Error {
+  readonly key: string
+
+  constructor(key: string) {
+    super(key)
+    this.name = "PushError"
+    this.key = key
+  }
+}
+
 // enablePushNotifications registers the service worker, requests permission and
-// subscribes to web push. Throws a friendly error when push is unsupported,
-// denied, or not configured on the server.
+// subscribes to web push. Throws a PushError when push is unsupported, denied,
+// or not configured on the server.
 export async function enablePushNotifications(): Promise<void> {
   if (!pushSupported()) {
-    throw new Error("Push notifications are not supported in this browser")
+    throw new PushError("settings.push.notSupported")
   }
 
   const permission = await Notification.requestPermission()
   if (permission !== "granted") {
-    throw new Error("Notification permission was denied")
+    throw new PushError("settings.push.permissionDenied")
   }
 
   const registration = await navigator.serviceWorker.register("/sw.js")
@@ -40,10 +52,10 @@ export async function enablePushNotifications(): Promise<void> {
     const res = await api.getVapidPublicKey()
     key = res.key
   } catch {
-    throw new Error("Push notifications are not configured on the server")
+    throw new PushError("settings.push.notConfigured")
   }
   if (!key) {
-    throw new Error("Push notifications are not configured on the server")
+    throw new PushError("settings.push.notConfigured")
   }
 
   const subscription = await registration.pushManager.subscribe({
