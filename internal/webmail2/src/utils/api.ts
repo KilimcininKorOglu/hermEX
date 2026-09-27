@@ -1843,9 +1843,23 @@ class API {
 
   /** Fetches a message's raw RFC822 bytes (used to decrypt S/MIME client-side). */
   async getMessageRaw(id: string): Promise<string> {
+    return this.getMessageText('source', id)
+  }
+
+  /** Fetches a message's internet header block, up to the blank line. */
+  async getMessageHeaders(id: string): Promise<string> {
+    return this.getMessageText('headers', id)
+  }
+
+  /** Returns the URL the server serves a message's source or header block at. */
+  messageTextURL(kind: 'source' | 'headers', id: string): string {
+    return this.withOwner(`${API_URL}/mail/${kind}?id=${encodeURIComponent(id)}`)
+  }
+
+  private async getMessageText(kind: 'source' | 'headers', id: string): Promise<string> {
     const headers: Record<string, string> = {}
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`
-    const res = await fetch(this.withOwner(`${API_URL}/mail/source?id=${encodeURIComponent(id)}`), { headers, credentials: 'include' })
+    const res = await fetch(this.messageTextURL(kind, id), { headers, credentials: 'include' })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     return res.text()
   }

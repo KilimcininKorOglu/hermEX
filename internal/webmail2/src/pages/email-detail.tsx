@@ -31,6 +31,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useConfirm } from "@/components/confirm-dialog"
+import { RawTextDialog, type RawTextKind } from "@/components/raw-text-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -889,9 +890,18 @@ function SecondaryActions({ email, actions, prefs, hasInvite, onItemData }: {
   onItemData: () => void
 }) {
   const { t } = useI18n()
-  const openRaw = (kind: "source" | "headers") => window.open(api.withOwner(`/api/v1/mail/${kind}?id=${encodeURIComponent(email.id)}`), "_blank")
+  // The kind outlives the closing, so the dialog keeps its title while it animates out.
+  const [raw, setRaw] = useState<{ kind: RawTextKind; open: boolean }>({ kind: "source", open: false })
+  const openRaw = (kind: RawTextKind) => setRaw({ kind, open: true })
   return (
     <div className="flex items-center gap-1">
+      <RawTextDialog
+        open={raw.open}
+        onOpenChange={(open) => setRaw((r) => ({ ...r, open }))}
+        kind={raw.kind}
+        id={email.id}
+        baseName={email.subject}
+      />
       <FollowupMenu email={email} onFollowup={actions.handleFollowup} />
       <IconAction title={t("common.markUnread")} onClick={actions.handleMarkUnread}>
         <Mail className="h-5 w-5" />

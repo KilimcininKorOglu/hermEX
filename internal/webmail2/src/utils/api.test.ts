@@ -541,10 +541,12 @@ describe('shared mailbox per-message calls', () => {
     await API.getMailNotes('inbox:1')
     await API.addMailNote('inbox:1', { body: 'x' })
     await API.getMessageRaw('inbox:1')
+    await API.getMessageHeaders('inbox:1')
     for (const call of fetchMock.mock.calls) {
       expect(String(call[0])).toContain('owner=team%40hermex.test')
     }
-    expect(fetchMock).toHaveBeenCalledTimes(8)
+    expect(fetchMock).toHaveBeenCalledTimes(9)
+    expect(API.messageTextURL('headers', 'inbox:1')).toContain('owner=team%40hermex.test')
   })
 
   it('leaves a URL alone in the own mailbox', () => {
