@@ -246,8 +246,10 @@ small { color: var(--muted-foreground); font-size: 0.75rem; }
 .card > * + *, [id$="-panel"] > * + *, [id$="-status"] > * + *, .flow > * + * { margin-top: 1rem; }
 /* A table and the form or message beside it never touch, in any container. */
 table.grid + *, * + table.grid { margin-top: 1rem; }
-/* A stack spaces its children with its gap alone, even when it is a panel. */
-.stack > * + * { margin-top: 0; }
+/* A stack spaces its children with its gap alone, even when it is a panel, and a
+   message in it takes no margin of its own. */
+.stack > * + *, .stack > table.grid, .stack > table.grid + * { margin-top: 0; }
+.stack > :is(.ok, .error, .err, .warn) { margin: 0; }
 .card > .card-head + * { margin-top: 1.25rem; }
 .card > h3, [id$="-panel"] > h3 { margin: 1.5rem 0 0; }
 .card > h3 + *, [id$="-panel"] > h3 + * { margin-top: 0.75rem; }
