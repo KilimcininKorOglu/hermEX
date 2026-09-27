@@ -2,15 +2,15 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<header class="page-head"><div><h1>Organizations</h1><p class="page-desc">Groups of domains that share one address book, one LDAP directory and one set of organization administrators.</p></div></header>
+<header class="page-head"><div><h1>{{t "orgs.title"}}</h1><p class="page-desc">{{t "orgs.desc"}}</p></div></header>
 <div class="stack">
 <section class="card">
-{{template "card-head" (dict "Icon" "building-2" "Title" "Add an organization" "Desc" "Attach domains to it from the organization's page once it exists.")}}
+{{template "card-head" (dict "Icon" "building-2" "Title" "orgs.addTitle" "Desc" "orgs.addDesc")}}
 <form class="form-grid" data-reset hx-post="/admin/ui/orgs" hx-target="#orgs-panel" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Name <input type="text" name="name" placeholder="Organization name" maxlength="32" required></label>
-<label>Description <input type="text" name="description" placeholder="Optional"></label>
-<button type="submit"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "plus"}}"/></svg>Add organization</button>
+<label>{{t "orgs.name"}} <input type="text" name="name" placeholder="{{t "orgs.namePlaceholder"}}" maxlength="32" required></label>
+<label>{{t "orgs.description"}} <input type="text" name="description" placeholder="{{t "orgs.optional"}}"></label>
+<button type="submit"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "plus"}}"/></svg>{{t "orgs.add"}}</button>
 </form>
 </section>
 {{template "orgs-panel" .}}
@@ -20,12 +20,12 @@
 {{template "foot" .}}{{end}}
 
 {{define "orgs-panel"}}<div id="orgs-panel">
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
 <table class="grid">
-<thead><tr><th>Name</th><th>Description</th><th>Domains</th></tr></thead>
+<thead><tr><th>{{t "orgs.name"}}</th><th>{{t "orgs.description"}}</th><th>{{t "orgs.colDomains"}}</th></tr></thead>
 <tbody>
 {{range .Orgs}}<tr><td><a href="/admin/ui/orgs/{{.ID}}">{{.Name}}</a></td><td>{{.Description}}</td><td>{{.DomainCount}}</td></tr>
-{{else}}<tr><td colspan="3" class="empty{{if .OrgsError}} failed{{end}}">{{or .OrgsError "No organizations yet."}}</td></tr>
+{{else}}<tr><td colspan="3" class="empty{{if .OrgsError}} failed{{end}}">{{t (or .OrgsError "orgs.none")}}</td></tr>
 {{end}}
 </tbody>
 </table>

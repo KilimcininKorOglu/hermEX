@@ -4,51 +4,51 @@
 <main>
 <header class="page-head">
 <div>
-<nav class="crumbs" aria-label="Breadcrumb"><a href="/admin/ui/mlists">Mailing lists</a><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "chevron-right"}}"/></svg><span>{{.List.Listname}}</span></nav>
+<nav class="crumbs" aria-label="{{t "userDetail.breadcrumb"}}"><a href="/admin/ui/mlists">{{t "nav.mlists"}}</a><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "chevron-right"}}"/></svg><span>{{.List.Listname}}</span></nav>
 <h1>{{.List.Listname}}</h1>
-<p class="page-desc">Type: {{.List.TypeLabel}} &middot; Who may post: {{.List.PrivLabel}}</p>
+<p class="page-desc">{{t "mlistDetail.summary" (t .List.TypeLabel) (t .List.PrivLabel)}}</p>
 </div>
 </header>
 {{template "user-status" .}}
 <div class="stack">
 <section class="card">
-{{template "card-head" (dict "Icon" "users" "Title" "Members" "Desc" "One address per line. Applies to normal-type lists; a member may itself be a list.")}}
-{{with index .ReadFailed "members"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "users" "Title" "mlistDetail.membersTitle" "Desc" "mlistDetail.membersDesc")}}
+{{with index .ReadFailed "members"}}<p class="error">{{t .}}</p>{{else}}
 <form hx-put="/admin/ui/mlists/{{.List.Listname}}/members" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Members <textarea name="members" rows="6" placeholder="alice@example.com">{{.Members}}</textarea></label>
-<button type="submit">Save members</button>
+<label>{{t "mlistDetail.members"}} <textarea name="members" rows="6" placeholder="alice@example.com">{{.Members}}</textarea></label>
+<button type="submit">{{t "mlistDetail.saveMembers"}}</button>
 </form>
 {{end}}
 </section>
 
 <div class="card-grid two">
 <section class="card">
-{{template "card-head" (dict "Icon" "user-cog" "Title" "Owner" "Desc" "The list owner (managedBy); Outlook shows it as the group owner. Leave it empty for none.")}}
+{{template "card-head" (dict "Icon" "user-cog" "Title" "mlistDetail.ownerTitle" "Desc" "mlistDetail.ownerDesc")}}
 <form hx-put="/admin/ui/mlists/{{.List.Listname}}/owner" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Owner <input type="email" name="owner" value="{{.Owner}}" placeholder="owner@example.com"></label>
-<button type="submit">Save owner</button>
+<label>{{t "mlistDetail.owner"}} <input type="email" name="owner" value="{{.Owner}}" placeholder="owner@example.com"></label>
+<button type="submit">{{t "mlistDetail.saveOwner"}}</button>
 </form>
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "shield-check" "Title" "Permitted senders" "Desc" "Used when Who may post is Specified senders. One address or bare domain per line.")}}
-{{with index .ReadFailed "specifieds"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "shield-check" "Title" "mlistDetail.sendersTitle" "Desc" "mlistDetail.sendersDesc")}}
+{{with index .ReadFailed "specifieds"}}<p class="error">{{t .}}</p>{{else}}
 <form hx-put="/admin/ui/mlists/{{.List.Listname}}/specifieds" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Senders <textarea name="specifieds" rows="4" placeholder="example.com">{{.Specifieds}}</textarea></label>
-<button type="submit">Save permitted senders</button>
+<label>{{t "mlistDetail.senders"}} <textarea name="specifieds" rows="4" placeholder="example.com">{{.Specifieds}}</textarea></label>
+<button type="submit">{{t "mlistDetail.saveSenders"}}</button>
 </form>
 {{end}}
 </section>
 </div>
 
 <section class="card danger-zone">
-{{template "card-head" (dict "Icon" "trash-2" "Title" "Delete this list" "Desc" "The list and its members are removed. This cannot be undone.")}}
-<form class="delete-form" hx-post="/admin/ui/mlists/{{.List.Listname}}/delete" hx-confirm="Delete {{.List.Listname}}? This cannot be undone."
+{{template "card-head" (dict "Icon" "trash-2" "Title" "mlistDetail.deleteTitle" "Desc" "mlistDetail.deleteDesc")}}
+<form class="delete-form" hx-post="/admin/ui/mlists/{{.List.Listname}}/delete" hx-confirm="{{t "mlistDetail.confirmDelete" .List.Listname}}"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<button type="submit" class="danger">Delete list</button>
+<button type="submit" class="danger">{{t "mlistDetail.delete"}}</button>
 </form>
 </section>
 </div>

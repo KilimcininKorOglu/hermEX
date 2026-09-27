@@ -184,9 +184,9 @@ func (s *Server) handleUISaveDomainDefaults(w http.ResponseWriter, r *http.Reque
 	id, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64)
 	data := map[string]any{}
 	if err != nil {
-		data["Error"] = "Invalid domain id."
+		data["Error"] = "domains.invalidID"
 	} else if err := s.storeDomainOverride(id, userOverrideFromForm(r)); err != nil {
-		data["Error"] = s.notice("Could not save.", err)
+		data["Error"] = s.notice("userDetail.saveFailed", err)
 	} else {
 		data["Saved"] = true
 	}

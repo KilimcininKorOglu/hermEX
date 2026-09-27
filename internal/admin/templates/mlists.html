@@ -2,27 +2,27 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<header class="page-head"><div><h1>Mailing lists</h1><p class="page-desc">Addresses that deliver one message to many recipients.</p></div></header>
+<header class="page-head"><div><h1>{{t "mlists.title"}}</h1><p class="page-desc">{{t "mlists.desc"}}</p></div></header>
 <div class="stack">
 <section class="card">
-{{template "card-head" (dict "Icon" "mail-plus" "Title" "Add a mailing list" "Desc" "Set its members and owner from the list's page once it exists.")}}
+{{template "card-head" (dict "Icon" "mail-plus" "Title" "mlists.addTitle" "Desc" "mlists.addDesc")}}
 <form class="form-grid cols-3" data-reset hx-post="/admin/ui/mlists" hx-target="#mlists-panel" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>List address <input type="email" name="listname" placeholder="list@example.com" required></label>
-<label>Type
+<label>{{t "mlists.listAddress"}} <input type="email" name="listname" placeholder="list@example.com" required></label>
+<label>{{t "mlists.type"}}
 <select name="type">
-<option value="0">Normal (explicit members)</option>
-<option value="2">Domain (all users)</option>
+<option value="0">{{t "mlists.typeNormal"}}</option>
+<option value="2">{{t "mlists.typeDomain"}}</option>
 </select></label>
-<label>Who may post
+<label>{{t "mlists.whoMayPost"}}
 <select name="privilege">
-<option value="0">Anyone may post</option>
-<option value="1">Members only</option>
-<option value="2">Same domain</option>
-<option value="3">Specified senders</option>
-<option value="4">Anyone (announce)</option>
+<option value="0">{{t "mlists.privAnyone"}}</option>
+<option value="1">{{t "mlists.privMembers"}}</option>
+<option value="2">{{t "mlists.privDomain"}}</option>
+<option value="3">{{t "mlists.privSpecified"}}</option>
+<option value="4">{{t "mlists.privAnnounce"}}</option>
 </select></label>
-<button type="submit"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "plus"}}"/></svg>Add list</button>
+<button type="submit"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "plus"}}"/></svg>{{t "mlists.add"}}</button>
 </form>
 </section>
 {{template "mlists-panel" .}}
@@ -32,12 +32,12 @@
 {{template "foot" .}}{{end}}
 
 {{define "mlists-panel"}}<div id="mlists-panel">
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
 <table class="grid">
-<thead><tr><th>List</th><th>Type</th><th>Who may post</th></tr></thead>
+<thead><tr><th>{{t "mlists.colList"}}</th><th>{{t "mlists.type"}}</th><th>{{t "mlists.whoMayPost"}}</th></tr></thead>
 <tbody>
-{{range .Lists}}<tr><td><a href="/admin/ui/mlists/{{.Listname}}">{{.Listname}}</a></td><td><span class="badge">{{.TypeLabel}}</span></td><td>{{.PrivLabel}}</td></tr>
-{{else}}<tr><td colspan="3" class="empty{{if .ListsError}} failed{{end}}">{{or .ListsError "No mailing lists yet."}}</td></tr>
+{{range .Lists}}<tr><td><a href="/admin/ui/mlists/{{.Listname}}">{{.Listname}}</a></td><td><span class="badge">{{t .TypeLabel}}</span></td><td>{{t .PrivLabel}}</td></tr>
+{{else}}<tr><td colspan="3" class="empty{{if .ListsError}} failed{{end}}">{{t (or .ListsError "mlists.none")}}</td></tr>
 {{end}}
 </tbody>
 </table>

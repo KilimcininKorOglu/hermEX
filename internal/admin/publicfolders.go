@@ -62,7 +62,7 @@ func (s *Server) renderPublicPanel(w http.ResponseWriter, r *http.Request, domai
 	if domain != "" {
 		folders, err := s.publicFolderViews(domain)
 		if err != nil && errMsg == "" {
-			errMsg = s.notice("Could not read public folders.", err)
+			errMsg = s.notice("publicFolders.unread", err)
 		}
 		data["Folders"] = folders
 	}
@@ -89,7 +89,7 @@ func (s *Server) handleUIPublicFolders(w http.ResponseWriter, r *http.Request) {
 	if domain != "" {
 		folders, ferr := s.publicFolderViews(domain)
 		if ferr != nil {
-			data["Error"] = s.notice("Could not read public folders.", ferr)
+			data["Error"] = s.notice("publicFolders.unread", ferr)
 		}
 		data["Folders"] = folders
 	}
@@ -116,12 +116,12 @@ func (s *Server) handleUICreatePublicFolder(w http.ResponseWriter, r *http.Reque
 	errMsg := ""
 	switch {
 	case domain == "":
-		errMsg = "Select a domain first."
+		errMsg = "publicFolders.selectDomainFirst"
 	case name == "":
-		errMsg = "Enter a folder name."
+		errMsg = "publicFolders.enterName"
 	default:
 		if _, err := s.pub.CreateFolder(domain, name); err != nil {
-			errMsg = s.notice("Could not create folder.", err)
+			errMsg = s.notice("publicFolders.createFailed", err)
 		}
 	}
 	s.renderPublicPanel(w, r, domain, csrfCookieValue(r), errMsg)
@@ -139,9 +139,9 @@ func (s *Server) handleUIDeletePublicFolder(w http.ResponseWriter, r *http.Reque
 		// The structural-folder refusal is the service's own rule, not a store
 		// failure, so it keeps its message: it is the reason the operator needs.
 		if errors.Is(err, publicfolder.ErrStructuralFolder) {
-			errMsg = "Cannot delete a structural folder."
+			errMsg = "publicFolders.structural"
 		} else {
-			errMsg = s.notice("Could not delete folder.", err)
+			errMsg = s.notice("publicFolders.deleteFailed", err)
 		}
 	}
 	s.renderPublicPanel(w, r, domain, csrfCookieValue(r), errMsg)
@@ -160,7 +160,7 @@ func (s *Server) handleUISetPublicGrant(w http.ResponseWriter, r *http.Request) 
 	change, errMsg := s.publicGrantChange(domain, r.PostFormValue("grantee"), uint32(rights))
 	if errMsg == "" {
 		if err := s.pub.Grant(domain, fid, change); err != nil {
-			errMsg = s.notice("Could not grant.", err)
+			errMsg = s.notice("publicFolders.grantFailed", err)
 		}
 	}
 	s.renderPublicPanel(w, r, domain, csrfCookieValue(r), errMsg)
@@ -178,7 +178,7 @@ func (s *Server) handleUIRemovePublicGrant(w http.ResponseWriter, r *http.Reques
 	errMsg := ""
 	change := objectstore.PermissionChange{Op: objectstore.PermRemove, MemberID: memberID}
 	if err := s.pub.Grant(domain, fid, change); err != nil {
-		errMsg = s.notice("Could not remove grant.", err)
+		errMsg = s.notice("publicFolders.removeFailed", err)
 	}
 	s.renderPublicPanel(w, r, domain, csrfCookieValue(r), errMsg)
 }
@@ -191,7 +191,7 @@ func (s *Server) handleUIRemovePublicGrant(w http.ResponseWriter, r *http.Reques
 func (s *Server) publicGrantChange(domain, grantee string, rights uint32) (objectstore.PermissionChange, string) {
 	grantee = strings.ToLower(strings.TrimSpace(grantee))
 	if grantee == "" {
-		return objectstore.PermissionChange{}, "Enter a grantee (an address or \"anyone\")."
+		return objectstore.PermissionChange{}, "publicFolders.enterGrantee"
 	}
 	if grantee == anyoneGrantee {
 		return objectstore.PermissionChange{Op: objectstore.PermAdd, MemberID: mapi.MemberIDDefault, Rights: rights}, ""
@@ -200,11 +200,11 @@ func (s *Server) publicGrantChange(domain, grantee string, rights uint32) (objec
 	_, memberDomain, _ := strings.Cut(member, "@")
 	switch {
 	case err != nil:
-		return objectstore.PermissionChange{}, s.notice("Could not look up user.", err)
+		return objectstore.PermissionChange{}, s.notice("publicFolders.lookupFailed", err)
 	case !ok:
-		return objectstore.PermissionChange{}, "No such user. Grant to \"anyone\" or a user's primary address."
+		return objectstore.PermissionChange{}, "publicFolders.noSuchUser"
 	case !strings.EqualFold(memberDomain, domain):
-		return objectstore.PermissionChange{}, "Grant a user in this domain, or \"anyone\"."
+		return objectstore.PermissionChange{}, "publicFolders.otherDomain"
 	}
 	return objectstore.PermissionChange{Op: objectstore.PermAdd, Username: member, Rights: rights}, ""
 }

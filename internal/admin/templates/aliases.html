@@ -2,15 +2,15 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<header class="page-head"><div><h1>Aliases</h1><p class="page-desc">Extra addresses that deliver to an existing mailbox.</p></div></header>
+<header class="page-head"><div><h1>{{t "aliases.title"}}</h1><p class="page-desc">{{t "aliases.desc"}}</p></div></header>
 <div class="stack">
 <section class="card">
-{{template "card-head" (dict "Icon" "at-sign" "Title" "Add an alias" "Desc" "Mail sent to the alias lands in the mailbox it points to.")}}
+{{template "card-head" (dict "Icon" "at-sign" "Title" "aliases.addTitle" "Desc" "aliases.addDesc")}}
 <form class="form-grid" data-reset hx-post="/admin/ui/aliases" hx-target="#aliases-panel" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Alias address <input type="email" name="alias" placeholder="alias@example.com" required></label>
-<label>Delivers to <input type="email" name="main" placeholder="user@example.com" required></label>
-<button type="submit"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "plus"}}"/></svg>Add alias</button>
+<label>{{t "aliases.aliasAddress"}} <input type="email" name="alias" placeholder="alias@example.com" required></label>
+<label>{{t "aliases.deliversTo"}} <input type="email" name="main" placeholder="user@example.com" required></label>
+<button type="submit"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "plus"}}"/></svg>{{t "aliases.add"}}</button>
 </form>
 </section>
 {{template "aliases-panel" .}}
@@ -20,12 +20,12 @@
 {{template "foot" .}}{{end}}
 
 {{define "aliases-panel"}}<div id="aliases-panel">
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
 <table class="grid">
-<thead><tr><th>Alias</th><th>Forwards to</th></tr></thead>
+<thead><tr><th>{{t "aliases.colAlias"}}</th><th>{{t "aliases.colForwardsTo"}}</th></tr></thead>
 <tbody>
 {{range .Aliases}}<tr><td>{{.Alias}}</td><td><a href="/admin/ui/users/{{.Main}}">{{.Main}}</a></td></tr>
-{{else}}<tr><td colspan="2" class="empty{{if .AliasesError}} failed{{end}}">{{or .AliasesError "No aliases yet."}}</td></tr>
+{{else}}<tr><td colspan="2" class="empty{{if .AliasesError}} failed{{end}}">{{t (or .AliasesError "aliases.none")}}</td></tr>
 {{end}}
 </tbody>
 </table>

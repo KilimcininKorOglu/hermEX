@@ -4,9 +4,10 @@
 <main>
 <header class="page-head">
 <div>
-<nav class="crumbs" aria-label="Breadcrumb"><a href="/admin/ui/domains">Domains</a><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "chevron-right"}}"/></svg><span>{{.Domain.Name}}</span></nav>
+<nav class="crumbs" aria-label="{{t "userDetail.breadcrumb"}}"><a href="/admin/ui/domains">{{t "nav.domains"}}</a><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "chevron-right"}}"/></svg><span>{{.Domain.Name}}</span></nav>
 <h1>{{.Domain.Name}}</h1>
-<p class="page-desc">{{if eq .Domain.Status 0}}Active{{else}}Suspended{{end}}, {{.Domain.ActiveUsers}} active {{if eq .Domain.ActiveUsers 1}}user{{else}}users{{end}}.</p>
+{{$state := "domains.suspended"}}{{if eq .Domain.Status 0}}{{$state = "domains.active"}}{{end}}
+<p class="page-desc">{{if eq .Domain.ActiveUsers 1}}{{t "domainDetail.summaryOne" (t $state) .Domain.ActiveUsers}}{{else}}{{t "domainDetail.summaryMany" (t $state) .Domain.ActiveUsers}}{{end}}</p>
 </div>
 </header>
 {{template "user-status" .}}
@@ -19,84 +20,84 @@
 <input type="radio" name="domaintab" id="domaintab-policy">
 <input type="radio" name="domaintab" id="domaintab-danger">
 <div class="tabbar">
-<label for="domaintab-general">General</label>
-<label for="domaintab-members">Members</label>
-<label for="domaintab-mail">Mail handling</label>
-<label for="domaintab-dns">DNS and DKIM</label>
-<label for="domaintab-policy">Policies</label>
-<label for="domaintab-danger">Danger zone</label>
+<label for="domaintab-general">{{t "domainDetail.tabGeneral"}}</label>
+<label for="domaintab-members">{{t "domainDetail.tabMembers"}}</label>
+<label for="domaintab-mail">{{t "domainDetail.tabMail"}}</label>
+<label for="domaintab-dns">{{t "domainDetail.tabDNS"}}</label>
+<label for="domaintab-policy">{{t "domainDetail.tabPolicy"}}</label>
+<label for="domaintab-danger">{{t "domainDetail.tabDanger"}}</label>
 </div>
 
 <section class="tabpanel">
 <div class="stats">
-<div class="stat"><div class="stat-head">Active users<svg class="icon" aria-hidden="true"><use href="{{icon "users"}}"/></svg></div><div class="stat-value">{{.Domain.ActiveUsers}}</div></div>
-<div class="stat"><div class="stat-head">Inactive users<svg class="icon" aria-hidden="true"><use href="{{icon "user"}}"/></svg></div><div class="stat-value">{{.Domain.InactiveUsers}}</div></div>
-<div class="stat"><div class="stat-head">Virtual users<svg class="icon" aria-hidden="true"><use href="{{icon "contact"}}"/></svg></div><div class="stat-value">{{.Domain.VirtualUsers}}</div></div>
+<div class="stat"><div class="stat-head">{{t "domainDetail.activeUsers"}}<svg class="icon" aria-hidden="true"><use href="{{icon "users"}}"/></svg></div><div class="stat-value">{{.Domain.ActiveUsers}}</div></div>
+<div class="stat"><div class="stat-head">{{t "domainDetail.inactiveUsers"}}<svg class="icon" aria-hidden="true"><use href="{{icon "user"}}"/></svg></div><div class="stat-value">{{.Domain.InactiveUsers}}</div></div>
+<div class="stat"><div class="stat-head">{{t "domainDetail.virtualUsers"}}<svg class="icon" aria-hidden="true"><use href="{{icon "contact"}}"/></svg></div><div class="stat-value">{{.Domain.VirtualUsers}}</div></div>
 </div>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "globe" "Title" "Details" "Desc" "Status, organization, mailbox limit and the contact details of this domain.")}}
-{{with index .ReadFailed "details"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "globe" "Title" "domainDetail.detailsTitle" "Desc" "domainDetail.detailsDesc")}}
+{{with index .ReadFailed "details"}}<p class="error">{{t .}}</p>{{else}}
 <form class="form-grid" hx-put="/admin/ui/domains/{{.Domain.ID}}" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Domain <input type="text" value="{{.Domain.Name}}" disabled></label>
-<label>Status
+<label>{{t "domainDetail.domain"}} <input type="text" value="{{.Domain.Name}}" disabled></label>
+<label>{{t "domainDetail.status"}}
 <select name="status">
-<option value="0"{{if eq .Domain.Status 0}} selected{{end}}>Active</option>
-<option value="1"{{if eq .Domain.Status 1}} selected{{end}}>Suspended</option>
+<option value="0"{{if eq .Domain.Status 0}} selected{{end}}>{{t "domains.active"}}</option>
+<option value="1"{{if eq .Domain.Status 1}} selected{{end}}>{{t "domains.suspended"}}</option>
 </select></label>
-<label>Organization
+<label>{{t "domainDetail.organization"}}
 <select name="org">
-<option value="0"{{if eq .Domain.OrgID 0}} selected{{end}}>None</option>
+<option value="0"{{if eq .Domain.OrgID 0}} selected{{end}}>{{t "domains.noneOrg"}}</option>
 {{range .Orgs}}<option value="{{.ID}}"{{if eq .ID $.Domain.OrgID}} selected{{end}}>{{.Name}}</option>
 {{end}}
 </select></label>
-<label>Maximum users <input type="number" name="maxUser" value="{{.Domain.MaxUser}}" min="0"><small>0 means unlimited.</small></label>
-<label>Title <input type="text" name="title" value="{{.Domain.Title}}" maxlength="128"></label>
-<label>Address <input type="text" name="address" value="{{.Domain.Address}}" maxlength="128"></label>
-<label>Administrator <input type="text" name="adminName" value="{{.Domain.AdminName}}" maxlength="32"></label>
-<label>Telephone <input type="text" name="tel" value="{{.Domain.Tel}}" maxlength="64"></label>
-<button type="submit">Save</button>
+<label>{{t "domains.maxUsers"}} <input type="number" name="maxUser" value="{{.Domain.MaxUser}}" min="0"><small>{{t "domains.unlimitedHint"}}</small></label>
+<label>{{t "domainDetail.title"}} <input type="text" name="title" value="{{.Domain.Title}}" maxlength="128"></label>
+<label>{{t "domainDetail.address"}} <input type="text" name="address" value="{{.Domain.Address}}" maxlength="128"></label>
+<label>{{t "domainDetail.administrator"}} <input type="text" name="adminName" value="{{.Domain.AdminName}}" maxlength="32"></label>
+<label>{{t "domainDetail.telephone"}} <input type="text" name="tel" value="{{.Domain.Tel}}" maxlength="64"></label>
+<button type="submit">{{t "domainDetail.save"}}</button>
 </form>
 {{end}}
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "folder-open" "Title" "Public folders" "Desc" "Folders every user of this domain shares.")}}
-<div><a class="btn" href="/admin/ui/public-folders?domain={{.Domain.Name}}">Manage public folders<svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "chevron-right"}}"/></svg></a></div>
+{{template "card-head" (dict "Icon" "folder-open" "Title" "domainDetail.publicFoldersTitle" "Desc" "domainDetail.publicFoldersDesc")}}
+<div><a class="btn" href="/admin/ui/public-folders?domain={{.Domain.Name}}">{{t "domainDetail.managePublicFolders"}}<svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "chevron-right"}}"/></svg></a></div>
 </section>
 </section>
 
 <section class="tabpanel">
 <section class="card">
-{{template "card-head" (dict "Icon" "users" "Title" "Users" "Desc" "Mailboxes in this domain.")}}
+{{template "card-head" (dict "Icon" "users" "Title" "domainDetail.usersTitle" "Desc" "domainDetail.usersDesc")}}
 <table class="grid">
-<thead><tr><th>Username</th></tr></thead>
+<thead><tr><th>{{t "domainDetail.username"}}</th></tr></thead>
 <tbody>
 {{range .DomainUsers}}<tr><td><a href="/admin/ui/users/{{.Username}}">{{.Username}}</a></td></tr>
-{{else}}<tr><td class="empty{{if .DomainUsersError}} failed{{end}}">{{if .DomainUsersError}}{{.DomainUsersError}}{{else}}No users.{{end}}</td></tr>{{end}}
+{{else}}<tr><td class="empty{{if .DomainUsersError}} failed{{end}}">{{if .DomainUsersError}}{{t .DomainUsersError}}{{else}}{{t "domainDetail.noUsers"}}{{end}}</td></tr>{{end}}
 </tbody>
 </table>
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "contact" "Title" "Contacts" "Desc" "External addresses listed in this domain's address book.")}}
+{{template "card-head" (dict "Icon" "contact" "Title" "domainDetail.contactsTitle" "Desc" "domainDetail.contactsDesc")}}
 <table class="grid">
-<thead><tr><th>Address</th><th>Display name</th><th>LDAP ID</th></tr></thead>
+<thead><tr><th>{{t "domainDetail.address"}}</th><th>{{t "domainDetail.displayName"}}</th><th>LDAP ID</th></tr></thead>
 <tbody>
 {{range .DomainContacts}}<tr><td>{{.Address}}</td><td>{{.DisplayName}}</td><td>{{if .LDAPID}}<code>{{.LDAPID}}</code>{{end}}</td></tr>
-{{else}}<tr><td colspan="3" class="empty{{if .DomainContactsError}} failed{{end}}">{{if .DomainContactsError}}{{.DomainContactsError}}{{else}}No contacts.{{end}}</td></tr>{{end}}
+{{else}}<tr><td colspan="3" class="empty{{if .DomainContactsError}} failed{{end}}">{{if .DomainContactsError}}{{t .DomainContactsError}}{{else}}{{t "domainDetail.noContacts"}}{{end}}</td></tr>{{end}}
 </tbody>
 </table>
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "mail-plus" "Title" "Groups" "Desc" "Mailing lists and groups in this domain.")}}
+{{template "card-head" (dict "Icon" "mail-plus" "Title" "domainDetail.groupsTitle" "Desc" "domainDetail.groupsDesc")}}
 <table class="grid">
-<thead><tr><th>Address</th></tr></thead>
+<thead><tr><th>{{t "domainDetail.address"}}</th></tr></thead>
 <tbody>
 {{range .DomainGroups}}<tr><td>{{.Listname}}</td></tr>
-{{else}}<tr><td class="empty{{if .DomainGroupsError}} failed{{end}}">{{if .DomainGroupsError}}{{.DomainGroupsError}}{{else}}No groups.{{end}}</td></tr>{{end}}
+{{else}}<tr><td class="empty{{if .DomainGroupsError}} failed{{end}}">{{if .DomainGroupsError}}{{t .DomainGroupsError}}{{else}}{{t "domainDetail.noGroups"}}{{end}}</td></tr>{{end}}
 </tbody>
 </table>
 </section>
@@ -105,72 +106,72 @@
 <section class="tabpanel">
 <div class="card-grid">
 <section class="card">
-{{template "card-head" (dict "Icon" "shield-alert" "Title" "Spam threshold" "Desc" "Inbound mail at or above this score goes to Junk for this domain's mailboxes, unless a user sets their own. Empty inherits the global threshold; an operator block or allow rule still wins.")}}
-{{with index .ReadFailed "spam"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "shield-alert" "Title" "userDetail.spamTitle" "Desc" "domainDetail.spamDesc")}}
+{{with index .ReadFailed "spam"}}<p class="error">{{t .}}</p>{{else}}
 <form hx-put="/admin/ui/domains/{{.Domain.ID}}/spam-threshold" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Threshold <input type="number" name="spam_threshold" value="{{if .SpamThreshold}}{{.SpamThreshold}}{{end}}" min="1" placeholder="inherit"></label>
-<button type="submit">Save threshold</button>
+<label>{{t "userDetail.threshold"}} <input type="number" name="spam_threshold" value="{{if .SpamThreshold}}{{.SpamThreshold}}{{end}}" min="1" placeholder="{{t "userDetail.inherit"}}"></label>
+<button type="submit">{{t "userDetail.saveThreshold"}}</button>
 </form>
 {{end}}
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "shield-check" "Title" "Antivirus" "Desc" "Scan this domain's mail through ClamAV. A match is quarantined, not delivered, and the recipient plus the domain and organization administrators are notified.")}}
-{{with index .ReadFailed "avscan"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "shield-check" "Title" "domainDetail.avTitle" "Desc" "domainDetail.avDesc")}}
+{{with index .ReadFailed "avscan"}}<p class="error">{{t .}}</p>{{else}}
 <form hx-put="/admin/ui/domains/{{.Domain.ID}}/avscan" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label class="check"><input type="checkbox" name="av_scan_inbound" {{if .AVScanInbound}}checked{{end}}> Scan inbound mail</label>
-<label class="check"><input type="checkbox" name="av_scan_outbound" {{if .AVScanOutbound}}checked{{end}}> Scan outbound mail</label>
-<p class="hint">Inbound covers messages arriving for this domain's mailboxes; outbound covers messages its users send. Scanning also requires a clamd service configured on the server.</p>
-<button type="submit">Save antivirus</button>
+<label class="check"><input type="checkbox" name="av_scan_inbound" {{if .AVScanInbound}}checked{{end}}> {{t "domainDetail.avInbound"}}</label>
+<label class="check"><input type="checkbox" name="av_scan_outbound" {{if .AVScanOutbound}}checked{{end}}> {{t "domainDetail.avOutbound"}}</label>
+<p class="hint">{{t "domainDetail.avHint"}}</p>
+<button type="submit">{{t "domainDetail.saveAV"}}</button>
 </form>
 {{end}}
 </section>
 </div>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "inbox" "Title" "Catch-all mailbox" "Desc" "Mail addressed to a local part this domain does not have is delivered to this mailbox instead of being refused.")}}
-{{with index .ReadFailed "catchall"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "inbox" "Title" "domainDetail.catchAllTitle" "Desc" "domainDetail.catchAllDesc")}}
+{{with index .ReadFailed "catchall"}}<p class="error">{{t .}}</p>{{else}}
 <form hx-put="/admin/ui/domains/{{.Domain.ID}}/catchall" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Mailbox
+<label>{{t "domainDetail.mailbox"}}
 <select name="catchall">
-<option value="">(none, refuse unknown recipients)</option>
+<option value="">{{t "domainDetail.catchAllNone"}}</option>
 {{range .DomainUsers}}<option value="{{.Username}}"{{if eq .Username $.CatchAll}} selected{{end}}>{{.Username}}</option>{{end}}
 </select></label>
-<p class="hint">It applies to delivery only: an unknown address still cannot sign in, and it appears in no address book. The delivered message carries a Delivered-To header naming the address it was sent to.</p>
-<button type="submit">Save catch-all</button>
+<p class="hint">{{t "domainDetail.catchAllHint"}}</p>
+<button type="submit">{{t "domainDetail.saveCatchAll"}}</button>
 </form>
 {{end}}
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "server" "Title" "Split domain" "Desc" "Share this domain with another mail system. Leave the host empty when every address of the domain lives here.")}}
-{{with index .ReadFailed "split"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "server" "Title" "domainDetail.splitTitle" "Desc" "domainDetail.splitDesc")}}
+{{with index .ReadFailed "split"}}<p class="error">{{t .}}</p>{{else}}
 <form hx-put="/admin/ui/domains/{{.Domain.ID}}/split" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Host <input type="text" name="split_relay_host" value="{{.SplitRelayHost}}" placeholder="legacy-mail.example.com"></label>
-<p class="hint">Mail that local users send, and mail this server generates, to an address of this domain with no mailbox here is delivered to this host instead of being refused. Mail arriving from outside for such an address is still refused, and postmaster stays local.</p>
-<button type="submit">Save split domain</button>
+<label>{{t "domainDetail.host"}} <input type="text" name="split_relay_host" value="{{.SplitRelayHost}}" placeholder="legacy-mail.example.com"></label>
+<p class="hint">{{t "domainDetail.splitHint"}}</p>
+<button type="submit">{{t "domainDetail.saveSplit"}}</button>
 </form>
 {{end}}
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "send" "Title" "Outbound gateway" "Desc" "Mail whose sender is in this domain is handed to this server instead of the global gateway. Leave it unset to follow the global setting.")}}
+{{template "card-head" (dict "Icon" "send" "Title" "domainDetail.gatewayTitle" "Desc" "domainDetail.gatewayDesc")}}
 {{template "domain-gateway-panel" .}}
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "user-cog" "Title" "Outgoing display name" "Desc" "Rebuild the From display name on outgoing mail from the sender's profile.")}}
-{{with index .ReadFailed "sendername"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "user-cog" "Title" "domainDetail.senderNameTitle" "Desc" "domainDetail.senderNameDesc")}}
+{{with index .ReadFailed "sendername"}}<p class="error">{{t .}}</p>{{else}}
 <form class="form-grid" hx-put="/admin/ui/domains/{{.Domain.ID}}/sendername" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Internal recipients <input type="text" name="sender_name_internal" value="{{.SenderNameInternal}}" placeholder="{name} ({title})"></label>
-<label>External recipients <input type="text" name="sender_name_external" value="{{.SenderNameExternal}}" placeholder="{name} ({company} - {title})"></label>
-<p class="hint">Placeholders: <code>{name}</code> <code>{company}</code> <code>{title}</code> <code>{department}</code> <code>{office}</code>. Leave a template blank to keep the sender's own From name for that direction.</p>
-<button type="submit">Save outgoing name</button>
+<label>{{t "domainDetail.internalRecipients"}} <input type="text" name="sender_name_internal" value="{{.SenderNameInternal}}" placeholder="{name} ({title})"></label>
+<label>{{t "domainDetail.externalRecipients"}} <input type="text" name="sender_name_external" value="{{.SenderNameExternal}}" placeholder="{name} ({company} - {title})"></label>
+<p class="hint">{{t "domainDetail.placeholders"}} <code>{name}</code> <code>{company}</code> <code>{title}</code> <code>{department}</code> <code>{office}</code>. {{t "domainDetail.senderNameHint"}}</p>
+<button type="submit">{{t "domainDetail.saveSenderName"}}</button>
 </form>
 {{end}}
 </section>
@@ -178,83 +179,83 @@
 
 <section class="tabpanel">
 <section class="card">
-{{template "card-head" (dict "Icon" "key" "Title" "DKIM signing" "Desc" "Signs outbound mail from this domain so it passes DKIM and DMARC at receivers.")}}
-<p class="hint">Generate a key, publish the DNS record it shows, allow a few minutes for it to propagate, then enable signing. Enabling before the record is published and visible makes your mail fail DKIM.</p>
+{{template "card-head" (dict "Icon" "key" "Title" "domainDetail.dkimTitle" "Desc" "domainDetail.dkimDesc")}}
+<p class="hint">{{t "domainDetail.dkimHint"}}</p>
 {{template "dkim-panel" .}}
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "list" "Title" "Required DNS records" "Desc" "Publish these records at the domain owner's DNS provider so mail routes to this server and passes SPF, DKIM and DMARC.")}}
+{{template "card-head" (dict "Icon" "list" "Title" "domainDetail.dnsTitle" "Desc" "domainDetail.dnsDesc")}}
 <table class="grid">
-<thead><tr><th>Record</th><th>Type</th><th>Name</th><th>Value</th></tr></thead>
+<thead><tr><th>{{t "domainDetail.record"}}</th><th>{{t "domainDetail.type"}}</th><th>{{t "domainDetail.name"}}</th><th>{{t "domainDetail.value"}}</th></tr></thead>
 <tbody>
 {{range .DNSRecords}}<tr><td class="dns-label">{{.Label}}<small>{{.Note}}</small></td><td><span class="badge">{{.Type}}</span></td><td><code>{{.Name}}</code></td><td><code class="dns-record">{{.Value}}</code></td></tr>
-{{else}}{{with .DNSRecordsError}}<tr><td colspan="4" class="empty failed">{{.}}</td></tr>{{end}}
+{{else}}{{with .DNSRecordsError}}<tr><td colspan="4" class="empty failed">{{t .}}</td></tr>{{end}}
 {{end}}
 </tbody>
 </table>
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "activity" "Title" "DNS health" "Desc" "Resolves this domain's live mail-related DNS records (read-only). Run it after publishing the records above.")}}
-<div><button type="button" class="primary" hx-get="/admin/ui/domains/{{.Domain.ID}}/dnscheck" hx-target="#dns-report" hx-swap="innerHTML"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "refresh-cw"}}"/></svg>Check DNS</button></div>
+{{template "card-head" (dict "Icon" "activity" "Title" "domainDetail.healthTitle" "Desc" "domainDetail.healthDesc")}}
+<div><button type="button" class="primary" hx-get="/admin/ui/domains/{{.Domain.ID}}/dnscheck" hx-target="#dns-report" hx-swap="innerHTML"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "refresh-cw"}}"/></svg>{{t "domainDetail.checkDNS"}}</button></div>
 <div id="dns-report"></div>
 </section>
 </section>
 
 <section class="tabpanel">
 <section class="card">
-{{template "card-head" (dict "Icon" "shield" "Title" "Device policy" "Desc" "Overrides the server default for this domain's devices; a per-user override is merged on top. Leave a field unset to inherit. Password rules apply only when DevicePasswordEnabled is Yes.")}}
-{{with index .ReadFailed "policy"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "shield" "Title" "domainDetail.policyTitle" "Desc" "domainDetail.policyDesc")}}
+{{with index .ReadFailed "policy"}}<p class="error">{{t .}}</p>{{else}}
 <form hx-put="/admin/ui/domains/{{.Domain.ID}}/syncpolicy" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <div class="policy-grid">
 {{range .PolicyFields}}
 <label class="policy-field">{{.Name}}
-{{if .Bool}}<select name="{{.Name}}"><option value="">(unset)</option><option value="1"{{if eq .Value "1"}} selected{{end}}>Yes</option><option value="0"{{if eq .Value "0"}} selected{{end}}>No</option></select>
-{{else}}<input type="number" min="0" name="{{.Name}}" value="{{.Value}}" placeholder="(unset)">{{end}}
+{{if .Bool}}<select name="{{.Name}}"><option value="">{{t "domainDetail.unset"}}</option><option value="1"{{if eq .Value "1"}} selected{{end}}>{{t "userDetail.yes"}}</option><option value="0"{{if eq .Value "0"}} selected{{end}}>{{t "userDetail.no"}}</option></select>
+{{else}}<input type="number" min="0" name="{{.Name}}" value="{{.Value}}" placeholder="{{t "domainDetail.unset"}}">{{end}}
 </label>
 {{end}}
 </div>
-<button type="submit">Save device policy</button>
+<button type="submit">{{t "userDetail.savePolicy"}}</button>
 </form>
 {{end}}
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "sliders-horizontal" "Title" "User create defaults (override)" "Desc" "Overrides the system create-defaults for new users in this domain. Leave a field on Inherit to use the system value.")}}
-{{with index .ReadFailed "override"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "sliders-horizontal" "Title" "domainDetail.overrideTitle" "Desc" "domainDetail.overrideDesc")}}
+{{with index .ReadFailed "override"}}<p class="error">{{t .}}</p>{{else}}
 <form hx-put="/admin/ui/domains/{{.Domain.ID}}/createdefaults" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <div class="field-grid">
-<label>Language <input type="text" name="lang" value="{{.Override.Lang}}" placeholder="(inherit)"></label>
+<label>{{t "users.language"}} <input type="text" name="lang" value="{{.Override.Lang}}" placeholder="{{t "domainDetail.inheritParen"}}"></label>
 {{with .Override}}
-<label>POP3/IMAP <select name="pop3_imap"><option value="">Inherit</option><option value="1"{{if eq .POP3IMAP "1"}} selected{{end}}>Yes</option><option value="0"{{if eq .POP3IMAP "0"}} selected{{end}}>No</option></select></label>
-<label>SMTP <select name="smtp"><option value="">Inherit</option><option value="1"{{if eq .SMTP "1"}} selected{{end}}>Yes</option><option value="0"{{if eq .SMTP "0"}} selected{{end}}>No</option></select></label>
-<label>Change password <select name="chgpasswd"><option value="">Inherit</option><option value="1"{{if eq .ChgPasswd "1"}} selected{{end}}>Yes</option><option value="0"{{if eq .ChgPasswd "0"}} selected{{end}}>No</option></select></label>
-<label>Web <select name="web"><option value="">Inherit</option><option value="1"{{if eq .Web "1"}} selected{{end}}>Yes</option><option value="0"{{if eq .Web "0"}} selected{{end}}>No</option></select></label>
-<label>EAS <select name="eas"><option value="">Inherit</option><option value="1"{{if eq .EAS "1"}} selected{{end}}>Yes</option><option value="0"{{if eq .EAS "0"}} selected{{end}}>No</option></select></label>
-<label>DAV <select name="dav"><option value="">Inherit</option><option value="1"{{if eq .DAV "1"}} selected{{end}}>Yes</option><option value="0"{{if eq .DAV "0"}} selected{{end}}>No</option></select></label>
+<label>POP3/IMAP <select name="pop3_imap"><option value="">{{t "domainDetail.inherit"}}</option><option value="1"{{if eq .POP3IMAP "1"}} selected{{end}}>{{t "userDetail.yes"}}</option><option value="0"{{if eq .POP3IMAP "0"}} selected{{end}}>{{t "userDetail.no"}}</option></select></label>
+<label>SMTP <select name="smtp"><option value="">{{t "domainDetail.inherit"}}</option><option value="1"{{if eq .SMTP "1"}} selected{{end}}>{{t "userDetail.yes"}}</option><option value="0"{{if eq .SMTP "0"}} selected{{end}}>{{t "userDetail.no"}}</option></select></label>
+<label>{{t "users.changePassword"}} <select name="chgpasswd"><option value="">{{t "domainDetail.inherit"}}</option><option value="1"{{if eq .ChgPasswd "1"}} selected{{end}}>{{t "userDetail.yes"}}</option><option value="0"{{if eq .ChgPasswd "0"}} selected{{end}}>{{t "userDetail.no"}}</option></select></label>
+<label>{{t "users.web"}} <select name="web"><option value="">{{t "domainDetail.inherit"}}</option><option value="1"{{if eq .Web "1"}} selected{{end}}>{{t "userDetail.yes"}}</option><option value="0"{{if eq .Web "0"}} selected{{end}}>{{t "userDetail.no"}}</option></select></label>
+<label>EAS <select name="eas"><option value="">{{t "domainDetail.inherit"}}</option><option value="1"{{if eq .EAS "1"}} selected{{end}}>{{t "userDetail.yes"}}</option><option value="0"{{if eq .EAS "0"}} selected{{end}}>{{t "userDetail.no"}}</option></select></label>
+<label>DAV <select name="dav"><option value="">{{t "domainDetail.inherit"}}</option><option value="1"{{if eq .DAV "1"}} selected{{end}}>{{t "userDetail.yes"}}</option><option value="0"{{if eq .DAV "0"}} selected{{end}}>{{t "userDetail.no"}}</option></select></label>
 {{end}}
-<label>Storage quota (MiB) <input type="number" name="storagemb" min="0" value="{{.Override.StorageMB}}" placeholder="(inherit)"></label>
-<label>Receive quota (MiB) <input type="number" name="receivemb" min="0" value="{{.Override.ReceiveMB}}" placeholder="(inherit)"></label>
-<label>Send quota (MiB) <input type="number" name="sendmb" min="0" value="{{.Override.SendMB}}" placeholder="(inherit)"></label>
+<label>{{t "users.storageQuota"}} <input type="number" name="storagemb" min="0" value="{{.Override.StorageMB}}" placeholder="{{t "domainDetail.inheritParen"}}"></label>
+<label>{{t "users.receiveQuota"}} <input type="number" name="receivemb" min="0" value="{{.Override.ReceiveMB}}" placeholder="{{t "domainDetail.inheritParen"}}"></label>
+<label>{{t "users.sendQuota"}} <input type="number" name="sendmb" min="0" value="{{.Override.SendMB}}" placeholder="{{t "domainDetail.inheritParen"}}"></label>
 </div>
-<button type="submit">Save override</button>
+<button type="submit">{{t "domainDetail.saveOverride"}}</button>
 </form>
 {{end}}
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "layout-dashboard" "Title" "Login branding" "Desc" "What the login screen shows for users signing in under this domain. Leave all fields blank to inherit the global default.")}}
-{{with index .ReadFailed "branding"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "layout-dashboard" "Title" "domainDetail.brandingTitle" "Desc" "domainDetail.brandingDesc")}}
+{{with index .ReadFailed "branding"}}<p class="error">{{t .}}</p>{{else}}
 <form class="form-grid" hx-put="/admin/ui/domains/{{.Domain.ID}}/branding" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>App name <input type="text" name="app_name" value="{{.Branding.AppName}}" placeholder="hermEX"></label>
-<label>Logo URL <input type="url" name="logo_url" value="{{.Branding.LogoURL}}" placeholder="https://example.com/logo.png"></label>
-<label>Primary color <input type="text" name="primary_color" value="{{.Branding.PrimaryColor}}" placeholder="#4f46e5"></label>
-<label>Footer text <input type="text" name="footer_text" value="{{.Branding.FooterText}}"></label>
-<button type="submit">Save branding</button>
+<label>{{t "domainDetail.appName"}} <input type="text" name="app_name" value="{{.Branding.AppName}}" placeholder="hermEX"></label>
+<label>{{t "domainDetail.logoURL"}} <input type="url" name="logo_url" value="{{.Branding.LogoURL}}" placeholder="https://example.com/logo.png"></label>
+<label>{{t "domainDetail.primaryColor"}} <input type="text" name="primary_color" value="{{.Branding.PrimaryColor}}" placeholder="#4f46e5"></label>
+<label>{{t "domainDetail.footerText"}} <input type="text" name="footer_text" value="{{.Branding.FooterText}}"></label>
+<button type="submit">{{t "domainDetail.saveBranding"}}</button>
 </form>
 {{end}}
 </section>
@@ -262,13 +263,13 @@
 
 <section class="tabpanel">
 <section class="card danger-zone">
-{{template "card-head" (dict "Icon" "trash-2" "Title" "Purge this domain" "Desc" "Permanently removes the domain and every user, alias and list in it. This cannot be undone.")}}
+{{template "card-head" (dict "Icon" "trash-2" "Title" "domainDetail.purgeTitle" "Desc" "domainDetail.purgeDesc")}}
 <form class="delete-form" hx-post="/admin/ui/domains/{{.Domain.ID}}/purge"
-      hx-confirm="Purge {{.Domain.Name}}? This permanently removes the domain and every user, alias, and list in it."
+      hx-confirm="{{t "domains.confirmPurge" .Domain.Name}}"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <input type="hidden" name="from" value="detail">
-<label class="check"><input type="checkbox" name="deleteFiles" value="true"> Also delete the mailbox files from disk</label>
-<button type="submit" class="danger">Purge domain</button>
+<label class="check"><input type="checkbox" name="deleteFiles" value="true"> {{t "userDetail.deleteFiles"}}</label>
+<button type="submit" class="danger">{{t "domainDetail.purge"}}</button>
 </form>
 </section>
 </section>
@@ -279,70 +280,70 @@
 
 {{define "domain-gateway-panel"}}<div id="domain-gateway-panel">
 {{template "notice" .GatewayNotice}}
-{{with index .ReadFailed "gateway"}}<p class="error">{{.}}</p>{{else}}
-<p>This domain {{if .GatewayOverride}}has its own gateway{{else}}follows the global gateway{{end}}.</p>
+{{with index .ReadFailed "gateway"}}<p class="error">{{t .}}</p>{{else}}
+<p>{{if .GatewayOverride}}{{t "domainDetail.gatewayOwn"}}{{else}}{{t "domainDetail.gatewayGlobal"}}{{end}}</p>
 <form hx-post="/admin/ui/domains/{{.Domain.ID}}/gateway" hx-target="#domain-gateway-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 {{template "gateway-fields" .Gateway}}
 <div class="form-actions">
-<button type="submit">Save gateway</button>
-{{if .GatewayOverride}}<button type="submit" form="domain-gateway-delete" class="danger">Remove override</button>{{end}}
+<button type="submit">{{t "domainDetail.saveGateway"}}</button>
+{{if .GatewayOverride}}<button type="submit" form="domain-gateway-delete" class="danger">{{t "domainDetail.removeOverride"}}</button>{{end}}
 </div>
 </form>
 {{if .GatewayOverride}}
 {{/* The remove button sits beside the save button but submits this form. */}}
 <form id="domain-gateway-delete" hidden hx-post="/admin/ui/domains/{{.Domain.ID}}/gateway/delete" hx-target="#domain-gateway-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'
-      hx-confirm="Remove this domain's gateway? It follows the global gateway again."></form>
+      hx-confirm="{{t "domainDetail.confirmRemoveOverride"}}"></form>
 {{end}}
 {{end}}
 </div>{{end}}
 
 {{define "dkim-panel"}}<div id="dkim-panel">
 {{template "notice" .DKIMNotice}}
-{{if .DKIMError}}<p class="error">{{.DKIMError}}</p>
+{{if .DKIMError}}<p class="error">{{t .DKIMError}}</p>
 {{else if .DKIMHasKey}}
-<p>Status: {{if .DKIMEnabled}}<span class="status status-ok"><strong>enabled, outbound mail from this domain is signed</strong></span>{{else}}<span class="status status-warn"><strong>not signing, key generated, publish the record then enable</strong></span>{{end}} (selector <code>{{.DKIMSelector}}</code>).</p>
+<p>{{t "dkim.status"}} {{if .DKIMEnabled}}<span class="status status-ok"><strong>{{t "dkim.enabled"}}</strong></span>{{else}}<span class="status status-warn"><strong>{{t "dkim.notSigning"}}</strong></span>{{end}} ({{t "dkim.selector"}} <code>{{.DKIMSelector}}</code>).</p>
 <form>
-<label>Publish this TXT record as
+<label>{{t "dkim.publishAs"}}
 <select name="mode" hx-get="/admin/ui/domains/{{.Domain.ID}}/dkim/output" hx-target="#dkim-output" hx-swap="outerHTML">
-<option value="record">DNS record line</option>
-<option value="txt">TXT value</option>
-<option value="key">Public key only</option>
+<option value="record">{{t "dkim.modeRecord"}}</option>
+<option value="txt">{{t "dkim.modeTXT"}}</option>
+<option value="key">{{t "dkim.modeKey"}}</option>
 </select></label>
 </form>
 {{template "dkim-output" .}}
 <form hx-put="/admin/ui/domains/{{.Domain.ID}}/dkim/enable" hx-target="#dkim-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <input type="hidden" name="enabled" value="{{if .DKIMEnabled}}0{{else}}1{{end}}">
-<button type="submit">{{if .DKIMEnabled}}Disable signing{{else}}Enable signing{{end}}</button>
+<button type="submit">{{if .DKIMEnabled}}{{t "dkim.disable"}}{{else}}{{t "dkim.enable"}}{{end}}</button>
 </form>
 <form class="create-form" hx-post="/admin/ui/domains/{{.Domain.ID}}/dkim/generate" hx-target="#dkim-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Key type <select name="keytype"><option value="rsa">rsa</option><option value="ed25519">ed25519</option></select></label>
-<label>Selector <input type="text" name="selector" value="{{.DKIMSelector}}" placeholder="hermex"></label>
-<button type="submit" class="secondary" hx-confirm="Regenerate this domain's DKIM key? Signing stops until you publish the new record and enable it again.">Regenerate key</button>
+<label>{{t "dkim.keyType"}} <select name="keytype"><option value="rsa">rsa</option><option value="ed25519">ed25519</option></select></label>
+<label>{{t "dkim.selectorLabel"}} <input type="text" name="selector" value="{{.DKIMSelector}}" placeholder="hermex"></label>
+<button type="submit" class="secondary" hx-confirm="{{t "dkim.confirmRegenerate"}}">{{t "dkim.regenerate"}}</button>
 </form>
 <form hx-post="/admin/ui/domains/{{.Domain.ID}}/dkim/delete" hx-target="#dkim-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<button type="submit" class="danger" hx-confirm="Delete this domain's DKIM key? Outbound mail stops being signed.">Delete key</button>
+<button type="submit" class="danger" hx-confirm="{{t "dkim.confirmDelete"}}">{{t "dkim.delete"}}</button>
 </form>
 {{else}}
-<p>No DKIM key for this domain.</p>
+<p>{{t "dkim.noKey"}}</p>
 <form class="create-form" hx-post="/admin/ui/domains/{{.Domain.ID}}/dkim/generate" hx-target="#dkim-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Key type <select name="keytype"><option value="rsa">rsa</option><option value="ed25519">ed25519</option></select></label>
-<label>Selector <input type="text" name="selector" placeholder="hermex"></label>
-<button type="submit">Generate key</button>
+<label>{{t "dkim.keyType"}} <select name="keytype"><option value="rsa">rsa</option><option value="ed25519">ed25519</option></select></label>
+<label>{{t "dkim.selectorLabel"}} <input type="text" name="selector" placeholder="hermex"></label>
+<button type="submit">{{t "dkim.generate"}}</button>
 </form>
 {{end}}
 </div>{{end}}
 
 {{define "dkim-output"}}<div id="dkim-output">
-{{if .DKIMError}}<p class="error">{{.DKIMError}}</p>{{else}}
-<p class="hint">Name: <code>{{.DKIMRecordName}}</code></p>
+{{if .DKIMError}}<p class="error">{{t .DKIMError}}</p>{{else}}
+<p class="hint">{{t "dkim.name"}} <code>{{.DKIMRecordName}}</code></p>
 <pre class="dns-record">{{.DKIMOutput}}</pre>
 {{end}}
 </div>{{end}}
 
 {{define "dns-report"}}<table class="grid">
-<thead><tr><th>Record</th><th>Status</th><th>Detail</th></tr></thead>
+<thead><tr><th>{{t "dnsReport.record"}}</th><th>{{t "dnsReport.status"}}</th><th>{{t "dnsReport.detail"}}</th></tr></thead>
 <tbody>
-{{range .Items}}<tr><td>{{.Label}}</td><td>{{if .OK}}<span class="ok">OK</span>{{else if .Failed}}<span class="warn">not checked</span>{{else}}<span class="error">missing</span>{{end}}</td><td>{{.Detail}}</td></tr>
+{{range .Items}}<tr><td>{{.Label}}</td><td>{{if .OK}}<span class="ok">{{t "dnsReport.ok"}}</span>{{else if .Failed}}<span class="warn">{{t "dnsReport.notChecked"}}</span>{{else}}<span class="error">{{t "dnsReport.missing"}}</span>{{end}}</td><td>{{.Detail}}</td></tr>
 {{end}}
 </tbody>
 </table>{{end}}

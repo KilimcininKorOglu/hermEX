@@ -2,20 +2,20 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<header class="page-head"><div><h1>Contacts</h1><p class="page-desc">External addresses listed in a domain's address book.</p></div></header>
+<header class="page-head"><div><h1>{{t "contacts.title"}}</h1><p class="page-desc">{{t "contacts.desc"}}</p></div></header>
 <div class="stack">
 <section class="card">
-{{template "card-head" (dict "Icon" "contact" "Title" "Add a contact" "Desc" "The contact appears in the address book of the domain it is filed under.")}}
-{{with .DomainsError}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "contact" "Title" "contacts.addTitle" "Desc" "contacts.addDesc")}}
+{{with .DomainsError}}<p class="error">{{t .}}</p>{{else}}
 <form class="form-grid cols-3" data-reset hx-post="/admin/ui/contacts" hx-target="#contacts-panel" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Address <input type="email" name="email" placeholder="contact@partner.example" required></label>
-<label>Display name <input type="text" name="displayname" placeholder="Jane Partner"></label>
-<label>Filing domain
+<label>{{t "contacts.address"}} <input type="email" name="email" placeholder="contact@partner.example" required></label>
+<label>{{t "contacts.displayName"}} <input type="text" name="displayname" placeholder="Jane Partner"></label>
+<label>{{t "contacts.filingDomain"}}
 <select name="domain">
 {{range .Domains}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
 </select></label>
-<button type="submit"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "plus"}}"/></svg>Add contact</button>
+<button type="submit"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "plus"}}"/></svg>{{t "contacts.add"}}</button>
 </form>
 {{end}}
 </section>
@@ -26,12 +26,12 @@
 {{template "foot" .}}{{end}}
 
 {{define "contacts-panel"}}<div id="contacts-panel">
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
 <table class="grid">
-<thead><tr><th>Name</th><th>Address</th><th>Domain</th><th>LDAP ID</th><th></th></tr></thead>
+<thead><tr><th>{{t "contacts.colName"}}</th><th>{{t "contacts.address"}}</th><th>{{t "contacts.colDomain"}}</th><th>LDAP ID</th><th></th></tr></thead>
 <tbody>
-{{range .Contacts}}<tr><td><form class="inline-edit" hx-put="/admin/ui/contacts/{{.Address}}" hx-target="#contacts-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'><input type="text" name="displayname" value="{{.DisplayName}}" aria-label="Display name of {{.Address}}"><button type="submit" class="secondary">Save</button></form></td><td>{{.Address}}</td><td>{{.Domain}}</td><td>{{if .LDAPID}}<code>{{.LDAPID}}</code>{{end}}</td><td class="actions"><form hx-post="/admin/ui/contacts/{{.Address}}/delete" hx-target="#contacts-panel" hx-swap="outerHTML" hx-confirm="Delete {{.Address}}? This cannot be undone." hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'><button type="submit" class="danger">Delete</button></form></td></tr>
-{{else}}<tr><td colspan="5" class="empty{{if .ContactsError}} failed{{end}}">{{or .ContactsError "No contacts yet."}}</td></tr>
+{{range .Contacts}}<tr><td><form class="inline-edit" hx-put="/admin/ui/contacts/{{.Address}}" hx-target="#contacts-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'><input type="text" name="displayname" value="{{.DisplayName}}" aria-label="{{t "contacts.displayNameOf" .Address}}"><button type="submit" class="secondary">{{t "contacts.save"}}</button></form></td><td>{{.Address}}</td><td>{{.Domain}}</td><td>{{if .LDAPID}}<code>{{.LDAPID}}</code>{{end}}</td><td class="actions"><form hx-post="/admin/ui/contacts/{{.Address}}/delete" hx-target="#contacts-panel" hx-swap="outerHTML" hx-confirm="{{t "contacts.confirmDelete" .Address}}" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'><button type="submit" class="danger">{{t "contacts.delete"}}</button></form></td></tr>
+{{else}}<tr><td colspan="5" class="empty{{if .ContactsError}} failed{{end}}">{{t (or .ContactsError "contacts.none")}}</td></tr>
 {{end}}
 </tbody>
 </table>

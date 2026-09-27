@@ -89,7 +89,7 @@ func (s *Server) handleUISaveDomainAVScan(w http.ResponseWriter, r *http.Request
 	data := map[string]any{}
 	id, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64)
 	if err != nil {
-		data["Error"] = "Invalid domain id."
+		data["Error"] = "domains.invalidID"
 		s.render(w, r, "user-status", data)
 		return
 	}
@@ -98,13 +98,13 @@ func (s *Server) handleUISaveDomainAVScan(w http.ResponseWriter, r *http.Request
 	case err != nil:
 		data["Error"] = s.notice(domainUnread, err)
 	case !found:
-		data["Error"] = "No such domain."
+		data["Error"] = "domains.noSuchDomain"
 	default:
 		oldIn, oldOut, oldErr := s.dir.GetDomainAVScan(dd.Name)
 		inbound := r.PostFormValue("av_scan_inbound") == "on"
 		outbound := r.PostFormValue("av_scan_outbound") == "on"
 		if err := s.dir.SetDomainAVScan(dd.Name, inbound, outbound); err != nil {
-			data["Error"] = s.notice("Could not save the antivirus toggles.", err)
+			data["Error"] = s.notice("domainDetail.avFailed", err)
 		} else {
 			data["Saved"] = true
 			s.auditSettingChange(cl.Login, "av_scan", logging.Fields{

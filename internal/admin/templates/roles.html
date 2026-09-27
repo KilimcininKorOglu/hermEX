@@ -2,15 +2,15 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<header class="page-head"><div><h1>Roles</h1><p class="page-desc">A role bundles administrative permissions and is assigned to users.</p></div></header>
+<header class="page-head"><div><h1>{{t "roles.title"}}</h1><p class="page-desc">{{t "roles.desc"}}</p></div></header>
 <div class="stack">
 <section class="card">
-{{template "card-head" (dict "Icon" "shield-check" "Title" "Add a role" "Desc" "Open the role once it exists to choose its permissions and the users who hold it.")}}
+{{template "card-head" (dict "Icon" "shield-check" "Title" "roles.addTitle" "Desc" "roles.addDesc")}}
 <form class="form-grid" data-reset hx-post="/admin/ui/roles" hx-target="#roles-panel" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Name <input type="text" name="name" placeholder="Helpdesk" maxlength="64" required></label>
-<label>Description <input type="text" name="description" placeholder="Optional"></label>
-<button type="submit"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "plus"}}"/></svg>Add role</button>
+<label>{{t "roles.name"}} <input type="text" name="name" placeholder="Helpdesk" maxlength="64" required></label>
+<label>{{t "roles.description"}} <input type="text" name="description" placeholder="{{t "roles.optional"}}"></label>
+<button type="submit"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "plus"}}"/></svg>{{t "roles.add"}}</button>
 </form>
 </section>
 {{template "roles-panel" .}}
@@ -20,12 +20,12 @@
 {{template "foot" .}}{{end}}
 
 {{define "roles-panel"}}<div id="roles-panel">
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
 <table class="grid">
-<thead><tr><th>Name</th><th>Description</th><th>Permissions</th><th>Users</th></tr></thead>
+<thead><tr><th>{{t "roles.name"}}</th><th>{{t "roles.description"}}</th><th>{{t "roles.colPermissions"}}</th><th>{{t "roles.colUsers"}}</th></tr></thead>
 <tbody>
 {{range .Roles}}<tr><td><a href="/admin/ui/roles/{{.ID}}">{{.Name}}</a></td><td>{{.Description}}</td><td>{{.PermCount}}</td><td>{{.UserCount}}</td></tr>
-{{else}}<tr><td colspan="4" class="empty{{if .RolesError}} failed{{end}}">{{or .RolesError "No roles yet."}}</td></tr>
+{{else}}<tr><td colspan="4" class="empty{{if .RolesError}} failed{{end}}">{{t (or .RolesError "roles.none")}}</td></tr>
 {{end}}
 </tbody>
 </table>

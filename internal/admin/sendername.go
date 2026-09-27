@@ -16,7 +16,7 @@ func (s *Server) handleUISaveDomainSenderName(w http.ResponseWriter, r *http.Req
 	data := map[string]any{}
 	id, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64)
 	if err != nil {
-		data["Error"] = "Invalid domain id."
+		data["Error"] = "domains.invalidID"
 		s.render(w, r, "user-status", data)
 		return
 	}
@@ -25,11 +25,11 @@ func (s *Server) handleUISaveDomainSenderName(w http.ResponseWriter, r *http.Req
 	case err != nil:
 		data["Error"] = s.notice(domainUnread, err)
 	case !found:
-		data["Error"] = "No such domain."
+		data["Error"] = "domains.noSuchDomain"
 	default:
 		if err := s.dir.SetDomainNameTemplates(dd.Name,
 			r.PostFormValue("sender_name_internal"), r.PostFormValue("sender_name_external")); err != nil {
-			data["Error"] = s.notice("Could not save the templates.", err)
+			data["Error"] = s.notice("domainDetail.senderNameFailed", err)
 		} else {
 			data["Saved"] = true
 		}

@@ -2,8 +2,8 @@ package admin
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"hermex/internal/directory"
@@ -82,7 +82,7 @@ func (s *Server) handleUISaveLDAP(w http.ResponseWriter, r *http.Request) {
 	// save: it would store the empty password in its place.
 	existing, _, err := s.dir.GetLDAPConfig(defaultOrgID)
 	if err != nil {
-		s.render(w, r, "ldap-panel", s.ldapPanelData(r, false, "", s.notice("Could not read the stored configuration; nothing was saved.", err)))
+		s.render(w, r, "ldap-panel", s.ldapPanelData(r, false, "", s.notice("ldap.configUnread", err)))
 		return
 	}
 	cfg := directory.LDAPConfig{
@@ -114,11 +114,11 @@ func (s *Server) handleUISaveLDAP(w http.ResponseWriter, r *http.Request) {
 	cfg.ContactFilter = r.PostFormValue("contact_filter")
 	cfg.ContactDomain = r.PostFormValue("contact_domain")
 	if err := s.dir.SetLDAPConfig(defaultOrgID, cfg); err != nil {
-		msg := "Could not save the configuration."
+		failMsg := "ldap.saveFailed"
 		if errors.Is(err, directory.ErrInsecureLDAP) {
-			msg = "Use an ldaps:// URI or enable StartTLS: a plain bind sends every user's password in the clear."
+			failMsg = "ldap.insecure"
 		}
-		s.render(w, r, "ldap-panel", s.ldapPanelData(r, false, "", s.notice(msg, err)))
+		s.render(w, r, "ldap-panel", s.ldapPanelData(r, false, "", s.notice(failMsg, err)))
 		return
 	}
 	s.render(w, r, "ldap-panel", s.ldapPanelData(r, true, "", ""))
@@ -134,15 +134,15 @@ func (s *Server) handleUISyncLDAP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.syncer == nil {
-		s.render(w, r, "ldap-panel", s.ldapPanelData(r, false, "", "Directory sync is not available."))
+		s.render(w, r, "ldap-panel", s.ldapPanelData(r, false, "", "ldap.unavailable"))
 		return
 	}
 	id, err := s.dir.CreateTask("ldapsync", "", cl.Login)
 	if err != nil {
-		s.render(w, r, "ldap-panel", s.ldapPanelData(r, false, "", s.notice("Could not queue the sync.", err)))
+		s.render(w, r, "ldap-panel", s.ldapPanelData(r, false, "", s.notice("ldap.queueFailed", err)))
 		return
 	}
 	s.render(w, r, "ldap-panel", s.ldapPanelData(r, false,
-		fmt.Sprintf("Directory sync queued as task #%d, watch the Task queue for its result.", id), ""))
+		msg("ldap.queued", strconv.FormatInt(id, 10)), ""))
 
 }

@@ -314,7 +314,7 @@ func (s *Server) handleUIDomainDNS(w http.ResponseWriter, r *http.Request) {
 	}
 	selector, err := s.dkimSelectorOf(name)
 	if err != nil {
-		s.render(w, r, "notice", s.failNotice("Could not read the DKIM key, so the check cannot name its record.", err))
+		s.render(w, r, "notice", s.failNotice("dnsReport.dkimUnread", err))
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)

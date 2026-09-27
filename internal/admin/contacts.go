@@ -36,10 +36,10 @@ func (s *Server) handleUICreateContact(w http.ResponseWriter, r *http.Request) {
 	var errMsg string
 	switch {
 	case email == "" || r.PostFormValue("domain") == "":
-		errMsg = "A contact address and a filing domain are required."
+		errMsg = "contacts.required"
 	default:
 		if _, err := s.dir.CreateContact(email, r.PostFormValue("displayname"), r.PostFormValue("domain")); err != nil {
-			errMsg = s.notice("Could not create contact.", err)
+			errMsg = s.notice("contacts.createFailed", err)
 		}
 	}
 	s.renderContactsPanel(w, r, errMsg)
@@ -57,16 +57,16 @@ func (s *Server) handleUIUpdateContact(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, directory.ErrLDAPMasteredContact):
 		errMsg = masteredContactNotice
 	case err != nil:
-		errMsg = s.notice("Could not update contact.", err)
+		errMsg = s.notice("contacts.updateFailed", err)
 	case !found:
-		errMsg = "No such contact."
+		errMsg = "contacts.noSuchContact"
 	}
 	s.renderContactsPanel(w, r, errMsg)
 }
 
 // masteredContactNotice explains why an edit of an LDAP-synced contact is refused. The
 // directory owns the record, so a local change would last only until the next sync.
-const masteredContactNotice = "This contact is synced from the LDAP directory. Change it there, or turn contact sync off first."
+const masteredContactNotice = "contacts.mastered"
 
 // handleUIDeleteContact deletes an org mail contact named in the path and returns
 // the refreshed panel for htmx to swap in.
@@ -79,7 +79,7 @@ func (s *Server) handleUIDeleteContact(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, directory.ErrLDAPMasteredContact):
 		errMsg = masteredContactNotice
 	case err != nil:
-		errMsg = s.notice("Could not delete contact.", err)
+		errMsg = s.notice("contacts.deleteFailed", err)
 	}
 	s.renderContactsPanel(w, r, errMsg)
 }

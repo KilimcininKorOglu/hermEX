@@ -19,7 +19,7 @@ func (s *Server) handleUISaveDomainSplit(w http.ResponseWriter, r *http.Request)
 	data := map[string]any{}
 	id, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64)
 	if err != nil {
-		data["Error"] = "Invalid domain id."
+		data["Error"] = "domains.invalidID"
 		s.render(w, r, "user-status", data)
 		return
 	}
@@ -29,15 +29,15 @@ func (s *Server) handleUISaveDomainSplit(w http.ResponseWriter, r *http.Request)
 	case err != nil:
 		data["Error"] = s.notice(domainUnread, err)
 	case !found:
-		data["Error"] = "No such domain."
+		data["Error"] = "domains.noSuchDomain"
 	case host != "" && !validHostname(host):
-		data["Error"] = "Enter a host name such as mail.example.com."
+		data["Error"] = "domainDetail.splitHostInvalid"
 	case s.paths != nil && strings.EqualFold(host, s.paths.ServerHostname()):
-		data["Error"] = "The split host cannot be this server."
+		data["Error"] = "domainDetail.splitHostSelf"
 	default:
 		old, oldErr := s.dir.SplitRelayHost(dd.Name)
 		if err := s.dir.SetSplitRelayHost(dd.Name, host); err != nil {
-			data["Error"] = s.notice("Could not save the split domain.", err)
+			data["Error"] = s.notice("domainDetail.splitFailed", err)
 		} else {
 			data["Saved"] = true
 			s.auditSettingChange(cl.Login, "split_domain", logging.Fields{

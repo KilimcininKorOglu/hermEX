@@ -126,14 +126,14 @@ func (s *Server) handleUISaveDomainGateway(w http.ResponseWriter, r *http.Reques
 	// As for the global gateway: a failed read would store an empty password.
 	stored, _, err := s.dir.GetSMTPGateway(dd.Name)
 	if err != nil {
-		s.domainGatewayPanel(w, r, dd, s.failNotice("Could not read the stored gateway; nothing was saved.", err))
+		s.domainGatewayPanel(w, r, dd, s.failNotice("domainDetail.gatewayUnread", err))
 		return
 	}
 	if err := s.dir.SetSMTPGateway(dd.Name, gatewayFromForm(r, stored.Password)); err != nil {
-		s.domainGatewayPanel(w, r, dd, s.failNotice("Could not save the gateway.", err))
+		s.domainGatewayPanel(w, r, dd, s.failNotice("domainDetail.gatewayFailed", err))
 		return
 	}
-	s.domainGatewayPanel(w, r, dd, okNotice("Gateway saved for this domain, the MTA applies it within a minute."))
+	s.domainGatewayPanel(w, r, dd, okNotice("domainDetail.gatewaySaved"))
 }
 
 // handleUIDeleteDomainGateway removes one domain's override so it follows the global
@@ -147,8 +147,8 @@ func (s *Server) handleUIDeleteDomainGateway(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if _, err := s.dir.DeleteSMTPGateway(dd.Name); err != nil {
-		s.domainGatewayPanel(w, r, dd, s.failNotice("Could not remove the override.", err))
+		s.domainGatewayPanel(w, r, dd, s.failNotice("domainDetail.removeOverrideFailed", err))
 		return
 	}
-	s.domainGatewayPanel(w, r, dd, okNotice("Override removed, this domain follows the global gateway again."))
+	s.domainGatewayPanel(w, r, dd, okNotice("domainDetail.overrideRemoved"))
 }

@@ -21,24 +21,24 @@ type mlistView struct {
 // mlistTypeLabel names a list_type for display.
 func mlistTypeLabel(t int) string {
 	if t == 2 {
-		return "Domain (all users)"
+		return "mlists.typeDomain"
 	}
-	return "Normal (explicit members)"
+	return "mlists.typeNormal"
 }
 
 // mlistPrivLabel names a list_privilege for display.
 func mlistPrivLabel(p int) string {
 	switch p {
 	case 1:
-		return "Members only"
+		return "mlists.privMembers"
 	case 2:
-		return "Same domain"
+		return "mlists.privDomain"
 	case 3:
-		return "Specified senders"
+		return "mlists.privSpecified"
 	case 4:
-		return "Anyone (announce)"
+		return "mlists.privAnnounce"
 	default:
-		return "Anyone"
+		return "mlists.privAnyoneShort"
 	}
 }
 
@@ -84,12 +84,12 @@ func (s *Server) handleUICreateMList(w http.ResponseWriter, r *http.Request) {
 	var errMsg string
 	switch name {
 	case "":
-		errMsg = "A list address is required."
+		errMsg = "mlists.addressRequired"
 	default:
 		listType, _ := strconv.Atoi(r.PostFormValue("type"))
 		listPriv, _ := strconv.Atoi(r.PostFormValue("privilege"))
 		if _, err := s.dir.CreateMList(name, listType, listPriv); err != nil {
-			errMsg = s.notice("Could not create list.", err)
+			errMsg = s.notice("mlists.createFailed", err)
 		}
 	}
 	lists, err := s.dir.ListMLists()
@@ -149,7 +149,7 @@ func (s *Server) handleUIMListMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	found, err := s.dir.SetMembers(r.PathValue("addr"), strings.Fields(r.PostFormValue("members")))
-	s.render(w, r, "user-status", s.mlistStatus(found, err, "members"))
+	s.render(w, r, "user-status", s.mlistStatus(found, err, "mlistDetail.whatMembers"))
 }
 
 // handleUIMListSpecifieds saves a list's permitted senders from the form and
@@ -159,7 +159,7 @@ func (s *Server) handleUIMListSpecifieds(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	found, err := s.dir.SetSpecifieds(r.PathValue("addr"), strings.Fields(r.PostFormValue("specifieds")))
-	s.render(w, r, "user-status", s.mlistStatus(found, err, "permitted senders"))
+	s.render(w, r, "user-status", s.mlistStatus(found, err, "mlistDetail.whatSenders"))
 }
 
 // handleUIMListOwner sets or clears a list's owner (the Exchange managedBy
@@ -169,7 +169,7 @@ func (s *Server) handleUIMListOwner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	found, err := s.dir.SetMListOwner(r.PathValue("addr"), r.PostFormValue("owner"))
-	s.render(w, r, "user-status", s.mlistStatus(found, err, "owner"))
+	s.render(w, r, "user-status", s.mlistStatus(found, err, "mlistDetail.whatOwner"))
 }
 
 // handleUIDeleteMList deletes a distribution list and redirects htmx back to the
@@ -191,9 +191,9 @@ func (s *Server) mlistStatus(found bool, err error, what string) map[string]any 
 	data := map[string]any{}
 	switch {
 	case err != nil:
-		data["Error"] = s.notice("Could not save "+what+".", err)
+		data["Error"] = s.notice(msg("mlistDetail.saveFailed", what), err)
 	case !found:
-		data["Error"] = "No such list."
+		data["Error"] = "mlistDetail.noSuchList"
 	default:
 		data["Saved"] = true
 	}

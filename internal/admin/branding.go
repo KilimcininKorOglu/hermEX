@@ -18,7 +18,7 @@ func (s *Server) handleUISaveDomainBranding(w http.ResponseWriter, r *http.Reque
 	data := map[string]any{}
 	id, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64)
 	if err != nil {
-		data["Error"] = "Invalid domain id."
+		data["Error"] = "domains.invalidID"
 		s.render(w, r, "user-status", data)
 		return
 	}
@@ -27,7 +27,7 @@ func (s *Server) handleUISaveDomainBranding(w http.ResponseWriter, r *http.Reque
 	case err != nil:
 		data["Error"] = s.notice(domainUnread, err)
 	case !found:
-		data["Error"] = "No such domain."
+		data["Error"] = "domains.noSuchDomain"
 	default:
 		b := directory.DomainBranding{
 			AppName:      strings.TrimSpace(r.PostFormValue("app_name")),
@@ -36,7 +36,7 @@ func (s *Server) handleUISaveDomainBranding(w http.ResponseWriter, r *http.Reque
 			FooterText:   strings.TrimSpace(r.PostFormValue("footer_text")),
 		}
 		if err := s.dir.SetDomainBranding(dd.Name, b); err != nil {
-			data["Error"] = s.notice("Could not save branding.", err)
+			data["Error"] = s.notice("domainDetail.brandingFailed", err)
 		} else {
 			data["Saved"] = true
 		}

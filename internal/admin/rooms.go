@@ -40,9 +40,9 @@ func (s *Server) handleUICreateRoom(w http.ResponseWriter, r *http.Request) {
 	equipment := r.PostFormValue("kind") == "equipment"
 	var errMsg string
 	if email == "" {
-		errMsg = "A resource address is required."
+		errMsg = "rooms.addressRequired"
 	} else if _, err := s.dir.CreateRoom(email, r.PostFormValue("displayname"), s.paths.MaildirFor(email), capacity, equipment); err != nil {
-		errMsg = s.notice("Could not create resource.", err)
+		errMsg = s.notice("rooms.createFailed", err)
 	}
 	s.renderRoomsPanel(w, r, errMsg)
 }
@@ -59,12 +59,12 @@ func (s *Server) handleUIDeleteRoom(w http.ResponseWriter, r *http.Request) {
 	u, found, err := s.dir.GetUser(email)
 	switch {
 	case err != nil:
-		errMsg = s.notice("Could not delete resource.", err)
+		errMsg = s.notice("rooms.deleteFailed", err)
 	case !found || (u.DisplayType != displayTypeRoom && u.DisplayType != displayTypeEquipment):
-		errMsg = "No such room."
+		errMsg = "rooms.noSuchRoom"
 	default:
 		if _, err := s.dir.DeleteUser(email, true); err != nil {
-			errMsg = s.notice("Could not delete resource.", err)
+			errMsg = s.notice("rooms.deleteFailed", err)
 		}
 	}
 	s.renderRoomsPanel(w, r, errMsg)

@@ -277,9 +277,9 @@ func (s *Server) handleUICreateOrg(w http.ResponseWriter, r *http.Request) {
 	}
 	var errMsg string
 	if name := strings.TrimSpace(r.PostFormValue("name")); name == "" {
-		errMsg = "An organization name is required."
+		errMsg = "orgs.nameRequired"
 	} else if _, err := s.dir.CreateOrg(name, r.PostFormValue("description")); err != nil {
-		errMsg = s.notice("Could not create organization.", err)
+		errMsg = s.notice("orgs.createFailed", err)
 	}
 	orgs, err := s.dir.ListOrgs()
 	s.render(w, r, "orgs-panel", map[string]any{
@@ -309,7 +309,7 @@ func (s *Server) orgDomainsData(orgID int64, csrf, errMsg string) map[string]any
 		"Attached": attached, "Available": available, "Error": errMsg,
 	}
 	if err != nil {
-		data["DomainsError"] = s.notice("Could not read the domains.", err)
+		data["DomainsError"] = s.notice("orgDetail.domainsUnread", err)
 	}
 	return data
 }
@@ -353,9 +353,9 @@ func (s *Server) handleUIUpdateOrg(w http.ResponseWriter, r *http.Request) {
 	found, err := s.dir.UpdateOrg(id, r.PostFormValue("name"), r.PostFormValue("description"))
 	switch {
 	case err != nil:
-		data["Error"] = s.notice("Could not save.", err)
+		data["Error"] = s.notice("userDetail.saveFailed", err)
 	case !found:
-		data["Error"] = "No such organization."
+		data["Error"] = "orgDetail.noSuchOrg"
 	default:
 		data["Saved"] = true
 	}
@@ -392,9 +392,9 @@ func (s *Server) handleUIOrgAttachDomain(w http.ResponseWriter, r *http.Request)
 	}
 	var errMsg string
 	if domID, err := strconv.ParseInt(r.PostFormValue("domainID"), 10, 64); err != nil {
-		errMsg = "Select a domain to add."
+		errMsg = "orgDetail.selectDomain"
 	} else if _, err := s.dir.AssignDomainToOrg(domID, id); err != nil {
-		errMsg = s.notice("Could not attach domain.", err)
+		errMsg = s.notice("orgDetail.attachFailed", err)
 	}
 	s.render(w, r, "org-domains-panel", s.orgDomainsData(id, csrfCookieValue(r), errMsg))
 }
@@ -411,9 +411,9 @@ func (s *Server) handleUIOrgDetachDomain(w http.ResponseWriter, r *http.Request)
 	}
 	var errMsg string
 	if domID, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64); err != nil {
-		errMsg = "Invalid domain."
+		errMsg = "orgDetail.invalidDomain"
 	} else if _, err := s.dir.AssignDomainToOrg(domID, 0); err != nil {
-		errMsg = s.notice("Could not detach domain.", err)
+		errMsg = s.notice("orgDetail.detachFailed", err)
 	}
 	s.render(w, r, "org-domains-panel", s.orgDomainsData(id, csrfCookieValue(r), errMsg))
 }

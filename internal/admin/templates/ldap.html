@@ -2,79 +2,79 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<header class="page-head"><div><h1>Directory Sync</h1><p class="page-desc">Import accounts, groups and contacts from an LDAP or Active Directory server.</p></div></header>
+<header class="page-head"><div><h1>{{t "ldap.title"}}</h1><p class="page-desc">{{t "ldap.desc"}}</p></div></header>
 {{template "ldap-panel" .}}
 </main>
 </div>
 {{template "foot" .}}{{end}}
 
 {{define "ldap-panel"}}<div id="ldap-panel" class="stack">
-{{if .Saved}}<p class="ok">Configuration saved.</p>{{end}}
-{{if .SyncResult}}<p class="ok">{{.SyncResult}}</p>{{end}}
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
-{{with index .ReadFailed "config"}}<p class="error">{{.}}</p>{{else}}
+{{if .Saved}}<p class="ok">{{t "ldap.saved"}}</p>{{end}}
+{{if .SyncResult}}<p class="ok">{{t .SyncResult}}</p>{{end}}
+{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
+{{with index .ReadFailed "config"}}<p class="error">{{t .}}</p>{{else}}
 <form class="stack" hx-post="/admin/ui/ldap" hx-target="#ldap-panel" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <section class="card">
-{{template "card-head" (dict "Icon" "server" "Title" "Connection" "Desc" "Where the directory is and the account this server reads it with.")}}
+{{template "card-head" (dict "Icon" "server" "Title" "ldap.connectionTitle" "Desc" "ldap.connectionDesc")}}
 <div class="form-grid">
-<label class="full">Directory URI <input type="text" name="uri" value="{{.Config.URI}}" placeholder="ldaps://dc.example.com:636"></label>
-<label class="check"><input type="checkbox" name="starttls" {{if .Config.StartTLS}}checked{{end}}> Upgrade with StartTLS</label>
-<label>Bind DN <input type="text" name="bind_dn" value="{{.Config.BindDN}}" placeholder="cn=svc,dc=example,dc=com" autocomplete="off"></label>
-<label>Bind password <input type="password" name="bind_password" placeholder="{{if .BindPasswordSet}}(unchanged){{else}}(unset){{end}}" autocomplete="new-password"></label>
-<label>Search base <input type="text" name="base_dn" value="{{.Config.BaseDN}}" placeholder="ou=people,dc=example,dc=com"></label>
-<label>Username attribute <input type="text" name="username_attr" value="{{.Config.UsernameAttr}}" placeholder="mail"></label>
+<label class="full">{{t "ldap.uri"}} <input type="text" name="uri" value="{{.Config.URI}}" placeholder="ldaps://dc.example.com:636"></label>
+<label class="check"><input type="checkbox" name="starttls" {{if .Config.StartTLS}}checked{{end}}> {{t "ldap.startTLS"}}</label>
+<label>{{t "ldap.bindDN"}} <input type="text" name="bind_dn" value="{{.Config.BindDN}}" placeholder="cn=svc,dc=example,dc=com" autocomplete="off"></label>
+<label>{{t "ldap.bindPassword"}} <input type="password" name="bind_password" placeholder="{{if .BindPasswordSet}}{{t "ldap.unchanged"}}{{else}}{{t "ldap.unsetParen"}}{{end}}" autocomplete="new-password"></label>
+<label>{{t "ldap.searchBase"}} <input type="text" name="base_dn" value="{{.Config.BaseDN}}" placeholder="ou=people,dc=example,dc=com"></label>
+<label>{{t "ldap.usernameAttr"}} <input type="text" name="username_attr" value="{{.Config.UsernameAttr}}" placeholder="mail"></label>
 </div>
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "contact" "Title" "Profile fields to sync" "Desc" "Enable a field and optionally override the LDAP attribute it reads from.")}}
+{{template "card-head" (dict "Icon" "contact" "Title" "ldap.fieldsTitle" "Desc" "ldap.fieldsDesc")}}
 <div class="check-grid">
 {{range .Fields}}
 <div class="field-pair">
 <label class="check"><input type="checkbox" name="field_{{.Key}}_enabled" {{if .Enabled}}checked{{end}}> {{.Key}}</label>
-<input type="text" name="field_{{.Key}}_attr" value="{{.Attr}}" placeholder="{{.DefaultAttr}}" aria-label="LDAP attribute for {{.Key}}">
+<input type="text" name="field_{{.Key}}_attr" value="{{.Attr}}" placeholder="{{.DefaultAttr}}" aria-label="{{t "ldap.attrFor" .Key}}">
 </div>
 {{end}}
 </div>
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "at-sign" "Title" "Alias sync" "Desc" "Read each account's additional addresses from the directory.")}}
-<label>Alias attribute (optional) <input type="text" name="alias_attr" value="{{.Config.AliasAttr}}" placeholder="proxyAddresses"></label>
-<p class="hint">An <code>smtp:</code> prefix is stripped and other schemes are ignored. While the attribute is set the directory OWNS each account's alias set: every sync replaces it, so an alias added here by hand is removed. An address outside your domains, or already in use, is skipped and reported in the sync result.</p>
+{{template "card-head" (dict "Icon" "at-sign" "Title" "ldap.aliasTitle" "Desc" "ldap.aliasDesc")}}
+<label>{{t "ldap.aliasAttr"}} <input type="text" name="alias_attr" value="{{.Config.AliasAttr}}" placeholder="proxyAddresses"></label>
+<p class="hint">{{t "ldap.aliasHintBefore"}} <code>smtp:</code> {{t "ldap.aliasHintAfter"}}</p>
 </section>
 
 <div class="card-grid two">
 <section class="card">
-{{template "card-head" (dict "Icon" "users" "Title" "Group sync" "Desc" "Turn directory groups into distribution lists.")}}
-<label class="check"><input type="checkbox" name="syncgroups" {{if .Config.SyncGroups}}checked{{end}}> Sync groups into distribution lists</label>
-<label>Group search base (optional) <input type="text" name="group_base_dn" value="{{.Config.GroupBaseDN}}" placeholder="ou=groups,dc=example,dc=com"></label>
-<label>Group filter (optional) <input type="text" name="group_filter" value="{{.Config.GroupFilter}}" placeholder="(&amp;(objectClass=group)(mail=*))"></label>
+{{template "card-head" (dict "Icon" "users" "Title" "ldap.groupTitle" "Desc" "ldap.groupDesc")}}
+<label class="check"><input type="checkbox" name="syncgroups" {{if .Config.SyncGroups}}checked{{end}}> {{t "ldap.syncGroups"}}</label>
+<label>{{t "ldap.groupBase"}} <input type="text" name="group_base_dn" value="{{.Config.GroupBaseDN}}" placeholder="ou=groups,dc=example,dc=com"></label>
+<label>{{t "ldap.groupFilter"}} <input type="text" name="group_filter" value="{{.Config.GroupFilter}}" placeholder="(&amp;(objectClass=group)(mail=*))"></label>
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "contact" "Title" "Contact sync" "Desc" "Copy the directory's mail contacts into the address book.")}}
-<label class="check"><input type="checkbox" name="synccontacts" {{if .Config.SyncContacts}}checked{{end}}> Sync mail contacts into the address book</label>
-<label>Filing domain
+{{template "card-head" (dict "Icon" "contact" "Title" "ldap.contactTitle" "Desc" "ldap.contactDesc")}}
+<label class="check"><input type="checkbox" name="synccontacts" {{if .Config.SyncContacts}}checked{{end}}> {{t "ldap.syncContacts"}}</label>
+<label>{{t "ldap.filingDomain"}}
 <select name="contact_domain">
-<option value="">(choose a domain)</option>
+<option value="">{{t "ldap.chooseDomain"}}</option>
 {{range .Domains}}<option value="{{.Name}}" {{if eq .Name $.Config.ContactDomain}}selected{{end}}>{{.Name}}</option>{{end}}
-</select><small>A synced contact's own address is external, so it is filed under one of your domains. Contact sync does not run without this.</small></label>
-<label>Contact search base (optional) <input type="text" name="contact_base_dn" value="{{.Config.ContactBaseDN}}" placeholder="ou=contacts,dc=example,dc=com"></label>
-<label>Contact filter (optional) <input type="text" name="contact_filter" value="{{.Config.ContactFilter}}" placeholder="(&amp;(objectClass=contact)(mail=*))"></label>
+</select><small>{{t "ldap.filingHint"}}</small></label>
+<label>{{t "ldap.contactBase"}} <input type="text" name="contact_base_dn" value="{{.Config.ContactBaseDN}}" placeholder="ou=contacts,dc=example,dc=com"></label>
+<label>{{t "ldap.contactFilter"}} <input type="text" name="contact_filter" value="{{.Config.ContactFilter}}" placeholder="(&amp;(objectClass=contact)(mail=*))"></label>
 </section>
 </div>
 
-<div><button type="submit">Save configuration</button></div>
+<div><button type="submit">{{t "ldap.save"}}</button></div>
 </form>
 {{end}}
 
 <section class="card">
-{{template "card-head" (dict "Icon" "refresh-cw" "Title" "Synchronize" "Desc" "Run one sync now with the saved configuration. Save a change first; the sync does not read this form.")}}
+{{template "card-head" (dict "Icon" "refresh-cw" "Title" "ldap.syncTitle" "Desc" "ldap.syncDesc")}}
 <form hx-post="/admin/ui/ldap/sync" hx-target="#ldap-panel" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<button type="submit" class="secondary"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "refresh-cw"}}"/></svg>Sync now</button>
+<button type="submit" class="secondary"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "refresh-cw"}}"/></svg>{{t "ldap.syncNow"}}</button>
 </form>
 </section>
 </div>{{end}}

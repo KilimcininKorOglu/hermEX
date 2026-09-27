@@ -248,7 +248,7 @@ func (s *Server) handleUISaveDomainSyncPolicy(w http.ResponseWriter, r *http.Req
 	data := map[string]any{}
 	id, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64)
 	if err != nil {
-		data["Error"] = "Invalid domain id."
+		data["Error"] = "domains.invalidID"
 		s.render(w, r, "user-status", data)
 		return
 	}
@@ -257,7 +257,7 @@ func (s *Server) handleUISaveDomainSyncPolicy(w http.ResponseWriter, r *http.Req
 	case err != nil:
 		data["Error"] = s.notice(domainUnread, err)
 	case !found:
-		data["Error"] = "No such domain."
+		data["Error"] = "domains.noSuchDomain"
 	default:
 		p, perr := policyFromForm(r)
 		switch {
@@ -265,7 +265,7 @@ func (s *Server) handleUISaveDomainSyncPolicy(w http.ResponseWriter, r *http.Req
 			data["Error"] = invalidPolicy(perr)
 		default:
 			if _, err := s.dir.SetDomainSyncPolicy(dd.Name, p); err != nil {
-				data["Error"] = s.notice("Could not save sync policy.", err)
+				data["Error"] = s.notice("userDetail.saveSyncPolicyFailed", err)
 			} else {
 				data["Saved"] = true
 			}

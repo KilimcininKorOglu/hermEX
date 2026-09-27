@@ -63,12 +63,12 @@ func (s *Server) handleUIDomainSpamThreshold(w http.ResponseWriter, r *http.Requ
 	case derr != nil:
 		data["Error"] = s.notice(domainUnread, derr)
 	case !found:
-		data["Error"] = "No such domain."
+		data["Error"] = "domains.noSuchDomain"
 	case !valid:
-		data["Error"] = "Threshold must be at least 1, or empty to inherit."
+		data["Error"] = "userDetail.thresholdInvalid"
 	default:
 		if err := s.dir.SetDomainSpamThreshold(dd.Name, th); err != nil {
-			data["Error"] = s.notice("Could not save threshold.", err)
+			data["Error"] = s.notice("userDetail.saveThresholdFailed", err)
 		} else {
 			data["Saved"] = true
 		}

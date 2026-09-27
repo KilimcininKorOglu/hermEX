@@ -21,7 +21,7 @@ func (s *Server) handleUIDomains(w http.ResponseWriter, r *http.Request) {
 	data["Nav"] = "domains"
 	data["DefaultMaxUser"] = def.Domain.MaxUser
 	if err != nil {
-		data["DefaultsError"] = s.notice("Could not read the create defaults. The form is hidden so a new domain does not skip them.", err)
+		data["DefaultsError"] = s.notice("domains.defaultsUnread", err)
 	}
 	s.render(w, r, "domains.html", data)
 }
@@ -56,12 +56,12 @@ func (s *Server) handleUICreateDomain(w http.ResponseWriter, r *http.Request) {
 	maxUser, _ := strconv.ParseInt(r.PostFormValue("maxUser"), 10, 64)
 	var errMsg string
 	if name == "" {
-		errMsg = "A domain name is required."
+		errMsg = "domains.nameRequired"
 	} else if id, err := s.dir.CreateDomain(name, s.paths.HomedirFor(name)); err != nil {
-		errMsg = s.notice("Could not create domain.", err)
+		errMsg = s.notice("domains.createFailed", err)
 	} else if maxUser > 0 {
 		if _, err := s.dir.UpdateDomain(id, directory.DomainUpdate{MaxUser: maxUser}); err != nil {
-			errMsg = s.notice("Created the domain, but could not set the user limit.", err)
+			errMsg = s.notice("domains.limitFailed", err)
 		}
 	}
 	s.render(w, r, "domains-panel", s.domainsPanelData(r, errMsg))
@@ -77,9 +77,9 @@ func (s *Server) handleUIPurgeDomain(w http.ResponseWriter, r *http.Request) {
 	var errMsg string
 	id, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64)
 	if err != nil {
-		errMsg = "Invalid domain id."
+		errMsg = "domains.invalidID"
 	} else if _, err := s.dir.PurgeDomain(id, r.PostFormValue("deleteFiles") == "true"); err != nil {
-		errMsg = s.notice("Could not purge domain.", err)
+		errMsg = s.notice("domains.purgeFailed", err)
 	}
 	// From the domain detail page the domain is gone, so navigate back to the
 	// list; from the list page swap the refreshed panel in place.
@@ -135,17 +135,17 @@ func (s *Server) addDomainMembers(data map[string]any, failed readFailures, id i
 	users, usersErr := s.dir.ListUsersInDomain(id)
 	data["DomainUsers"] = users
 	if usersErr != nil {
-		data["DomainUsersError"] = s.notice("Could not read the users of this domain.", usersErr)
+		data["DomainUsersError"] = s.notice("domainDetail.usersUnread", usersErr)
 	}
 	contacts, err := s.dir.ListContactsInDomain(id)
 	data["DomainContacts"] = contacts
 	if err != nil {
-		data["DomainContactsError"] = s.notice("Could not read the contacts of this domain.", err)
+		data["DomainContactsError"] = s.notice("domainDetail.contactsUnread", err)
 	}
 	groups, err := s.dir.ListMListsInDomain(id)
 	data["DomainGroups"] = groups
 	if err != nil {
-		data["DomainGroupsError"] = s.notice("Could not read the groups of this domain.", err)
+		data["DomainGroupsError"] = s.notice("domainDetail.groupsUnread", err)
 	}
 	catchAll, _, err := s.dir.GetDomainCatchAll(domain)
 	if s.noteRead(failed, "catchall", "the users of this domain", usersErr) &&
@@ -201,9 +201,9 @@ func (s *Server) addDomainDNSRecords(data map[string]any, domain string) {
 	sts, _, err := s.dir.GetMTASTSSettings()
 	switch {
 	case err != nil:
-		data["DNSRecordsError"] = s.notice("Could not read the MTA-STS settings, so the required records cannot be listed.", err)
+		data["DNSRecordsError"] = s.notice("domainDetail.mtastsUnread", err)
 	case data["DKIMError"] != nil:
-		data["DNSRecordsError"] = "Could not read the DKIM key, so the required records cannot be listed."
+		data["DNSRecordsError"] = "domainDetail.dkimUnreadRecords"
 	default:
 		dkimName, _ := data["DKIMRecordName"].(string)
 		dkimValue, _ := data["DKIMPublicTXT"].(string)
@@ -236,12 +236,12 @@ func (s *Server) handleUISaveDomain(w http.ResponseWriter, r *http.Request) {
 	})
 	switch {
 	case err != nil:
-		data["Error"] = s.notice("Could not save.", err)
+		data["Error"] = s.notice("userDetail.saveFailed", err)
 	case !found:
-		data["Error"] = "No such domain."
+		data["Error"] = "domains.noSuchDomain"
 	default:
 		if _, err := s.dir.AssignDomainToOrg(id, atoi(r.PostFormValue("org"))); err != nil {
-			data["Error"] = s.notice("Saved the fields, but the organization change failed.", err)
+			data["Error"] = s.notice("domainDetail.orgFailed", err)
 		} else {
 			data["Saved"] = true
 		}
@@ -272,10 +272,10 @@ func (s *Server) handleUICreateAlias(w http.ResponseWriter, r *http.Request) {
 	var errMsg string
 	switch {
 	case alias == "" || main == "":
-		errMsg = "Both the alias and the target address are required."
+		errMsg = "aliases.required"
 	default:
 		if err := s.dir.CreateAlias(alias, main); err != nil {
-			errMsg = s.notice("Could not create alias.", err)
+			errMsg = s.notice("aliases.createFailed", err)
 		}
 	}
 	aliases, err := s.dir.ListAliases()

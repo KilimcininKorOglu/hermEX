@@ -4,7 +4,7 @@
 <main>
 <header class="page-head">
 <div>
-<nav class="crumbs" aria-label="Breadcrumb"><a href="/admin/ui/roles">Roles</a><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "chevron-right"}}"/></svg><span>{{.Role.Name}}</span></nav>
+<nav class="crumbs" aria-label="{{t "userDetail.breadcrumb"}}"><a href="/admin/ui/roles">{{t "nav.roles"}}</a><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "chevron-right"}}"/></svg><span>{{.Role.Name}}</span></nav>
 <h1>{{.Role.Name}}</h1>
 {{if .Role.Description}}<p class="page-desc">{{.Role.Description}}</p>{{end}}
 </div>
@@ -13,10 +13,10 @@
 {{template "role-editor" .}}
 
 <section class="card danger-zone">
-{{template "card-head" (dict "Icon" "trash-2" "Title" "Delete this role" "Desc" "Users who hold it lose the permissions it grants.")}}
-<form class="delete-form" hx-post="/admin/ui/roles/{{.Role.ID}}/delete" hx-confirm="Delete role {{.Role.Name}}? Users lose the permissions it grants."
+{{template "card-head" (dict "Icon" "trash-2" "Title" "roleDetail.deleteTitle" "Desc" "roleDetail.deleteDesc")}}
+<form class="delete-form" hx-post="/admin/ui/roles/{{.Role.ID}}/delete" hx-confirm="{{t "roleDetail.confirmDelete" .Role.Name}}"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<button type="submit" class="danger">Delete role</button>
+<button type="submit" class="danger">{{t "roleDetail.delete"}}</button>
 </form>
 </section>
 </div>
@@ -25,63 +25,63 @@
 {{template "foot" .}}{{end}}
 
 {{define "role-editor"}}<div id="role-editor" class="flow">
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
-{{if .Saved}}<p class="ok">Saved.</p>{{end}}
-{{with index .ReadFailed "editor"}}<p class="error">{{.}}</p>{{else}}
+{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
+{{if .Saved}}<p class="ok">{{t "roleDetail.saved"}}</p>{{end}}
+{{with index .ReadFailed "editor"}}<p class="error">{{t .}}</p>{{else}}
 <form class="stack" hx-put="/admin/ui/roles/{{.Role.ID}}" hx-target="#role-editor" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <section class="card">
-{{template "card-head" (dict "Icon" "shield-check" "Title" "Details" "Desc" "The name administrators see when they assign the role.")}}
+{{template "card-head" (dict "Icon" "shield-check" "Title" "roleDetail.detailsTitle" "Desc" "roleDetail.detailsDesc")}}
 <div class="form-grid">
-<label>Name <input type="text" name="name" value="{{.Role.Name}}" maxlength="64" required></label>
-<label>Description <input type="text" name="description" value="{{.Role.Description}}"></label>
+<label>{{t "roles.name"}} <input type="text" name="name" value="{{.Role.Name}}" maxlength="64" required></label>
+<label>{{t "roles.description"}} <input type="text" name="description" value="{{.Role.Description}}"></label>
 </div>
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "key-round" "Title" "Capabilities" "Desc" "Panel-wide permissions this role grants.")}}
+{{template "card-head" (dict "Icon" "key-round" "Title" "roleDetail.capsTitle" "Desc" "roleDetail.capsDesc")}}
 <div class="check-grid">
-{{range .Caps}}<label class="check"><input type="checkbox" name="cap" value="{{.Name}}"{{if .Checked}} checked{{end}}> {{.Label}}</label>
+{{range .Caps}}<label class="check"><input type="checkbox" name="cap" value="{{.Name}}"{{if .Checked}} checked{{end}}> {{t .Label}}</label>
 {{end}}
 </div>
 </section>
 
 <div class="card-grid two">
 <section class="card">
-{{template "card-head" (dict "Icon" "building-2" "Title" "Organization administrator" "Desc" "Organizations whose domains a holder manages.")}}
+{{template "card-head" (dict "Icon" "building-2" "Title" "roleDetail.orgAdminTitle" "Desc" "roleDetail.orgAdminDesc")}}
 <div class="check-grid">
-{{range .OrgAdmin}}<label class="check"><input type="checkbox" name="orgadmin" value="{{.ID}}"{{if .Checked}} checked{{end}}> {{.Label}}</label>
+{{range .OrgAdmin}}<label class="check"><input type="checkbox" name="orgadmin" value="{{.ID}}"{{if .Checked}} checked{{end}}> {{t .Label}}</label>
 {{end}}
 </div>
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "globe" "Title" "Domain administrator" "Desc" "Domains a holder manages.")}}
+{{template "card-head" (dict "Icon" "globe" "Title" "roleDetail.domainAdminTitle" "Desc" "roleDetail.domainAdminDesc")}}
 <div class="check-grid">
-{{range .DomainAdmin}}<label class="check"><input type="checkbox" name="domainadmin" value="{{.ID}}"{{if .Checked}} checked{{end}}> {{.Label}}</label>
+{{range .DomainAdmin}}<label class="check"><input type="checkbox" name="domainadmin" value="{{.ID}}"{{if .Checked}} checked{{end}}> {{t .Label}}</label>
 {{end}}
 </div>
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "eye-off" "Title" "Domain administrator (read-only)" "Desc" "Domains a holder may see but not change.")}}
+{{template "card-head" (dict "Icon" "eye-off" "Title" "roleDetail.domainROTitle" "Desc" "roleDetail.domainRODesc")}}
 <div class="check-grid">
-{{range .DomainRO}}<label class="check"><input type="checkbox" name="domainadminro" value="{{.ID}}"{{if .Checked}} checked{{end}}> {{.Label}}</label>
+{{range .DomainRO}}<label class="check"><input type="checkbox" name="domainadminro" value="{{.ID}}"{{if .Checked}} checked{{end}}> {{t .Label}}</label>
 {{end}}
 </div>
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "users" "Title" "Assigned users" "Desc" "The users who hold this role.")}}
+{{template "card-head" (dict "Icon" "users" "Title" "roleDetail.usersTitle" "Desc" "roleDetail.usersDesc")}}
 <div class="check-list">
 {{range .Users}}<label class="check"><input type="checkbox" name="user" value="{{.ID}}"{{if .Assigned}} checked{{end}}> {{.Label}}</label>
-{{else}}<p class="empty-note">No users yet.</p>
+{{else}}<p class="empty-note">{{t "roleDetail.noUsers"}}</p>
 {{end}}
 </div>
 </section>
 </div>
 
-<div><button type="submit">Save role</button></div>
+<div><button type="submit">{{t "roleDetail.save"}}</button></div>
 </form>
 {{end}}
 </div>{{end}}

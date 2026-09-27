@@ -58,7 +58,7 @@ func (s *Server) handleUICreateRole(w http.ResponseWriter, r *http.Request) {
 	}
 	var errMsg string
 	if _, err := s.dir.CreateRole(r.PostFormValue("name"), r.PostFormValue("description"), nil, nil); err != nil {
-		errMsg = s.notice("Could not create role.", err)
+		errMsg = s.notice("roles.createFailed", err)
 	}
 	s.render(w, r, "roles-panel", s.rolesPanelData(r, errMsg))
 }
@@ -120,18 +120,18 @@ func addRoleChecks(data map[string]any, role directory.RoleDetail, orgs []direct
 		return false
 	}
 	caps := []capCheck{
-		{directory.PermSystemAdmin, "System administrator (full)", has(directory.PermSystemAdmin, "")},
-		{directory.PermSystemAdminRO, "System administrator (read-only)", has(directory.PermSystemAdminRO, "")},
-		{directory.PermDomainPurge, "Purge domains", has(directory.PermDomainPurge, "")},
-		{directory.PermResetPasswd, "Reset user passwords", has(directory.PermResetPasswd, "")},
+		{directory.PermSystemAdmin, "roleDetail.capSystemAdmin", has(directory.PermSystemAdmin, "")},
+		{directory.PermSystemAdminRO, "roleDetail.capSystemAdminRO", has(directory.PermSystemAdminRO, "")},
+		{directory.PermDomainPurge, "roleDetail.capPurge", has(directory.PermDomainPurge, "")},
+		{directory.PermResetPasswd, "roleDetail.capResetPasswd", has(directory.PermResetPasswd, "")},
 	}
-	orgScopes := []scopeItem{{ID: "*", Label: "All organizations", Checked: has(directory.PermOrgAdmin, "*")}}
+	orgScopes := []scopeItem{{ID: "*", Label: "roleDetail.allOrgs", Checked: has(directory.PermOrgAdmin, "*")}}
 	for _, o := range orgs {
 		id := strconv.FormatInt(o.ID, 10)
 		orgScopes = append(orgScopes, scopeItem{ID: id, Label: o.Name, Checked: has(directory.PermOrgAdmin, id)})
 	}
 	domScopes := func(perm string) []scopeItem {
-		out := []scopeItem{{ID: "*", Label: "All domains", Checked: has(perm, "*")}}
+		out := []scopeItem{{ID: "*", Label: "roleDetail.allDomains", Checked: has(perm, "*")}}
 		for _, d := range domains {
 			id := strconv.FormatInt(d.ID, 10)
 			out = append(out, scopeItem{ID: id, Label: d.Name, Checked: has(perm, id)})
@@ -175,7 +175,7 @@ func (s *Server) handleUIUpdateRole(w http.ResponseWriter, r *http.Request) {
 	found, err := s.dir.UpdateRole(id, r.PostFormValue("name"), r.PostFormValue("description"), rolePermsFromForm(r), userIDs)
 	if err != nil {
 		role, _, roleErr := s.dir.GetRole(id)
-		s.render(w, r, "role-editor", s.roleDetailData(r, role, roleErr, s.notice("Could not save role.", err), false))
+		s.render(w, r, "role-editor", s.roleDetailData(r, role, roleErr, s.notice("roleDetail.saveFailed", err), false))
 		return
 	}
 	if !found {
