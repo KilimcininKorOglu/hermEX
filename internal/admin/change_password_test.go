@@ -53,6 +53,11 @@ func TestUIChangePasswordSubmit(t *testing.T) {
 	if !strings.Contains(string(body), "changed") {
 		t.Errorf("success result missing: %s", body)
 	}
+	// The page styles and announces an acknowledgement by its "ok" class; any
+	// other class renders as plain text and raises no toast.
+	if !strings.Contains(string(body), `class="ok"`) {
+		t.Errorf("success result is not marked as an acknowledgement: %s", body)
+	}
 }
 
 // TestUIChangePasswordRecordsAFailedWrite proves a password the directory could not
