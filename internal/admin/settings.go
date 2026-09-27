@@ -20,11 +20,8 @@ func (s *Server) handleUISettings(w http.ResponseWriter, r *http.Request) {
 func (s *Server) settingsPageData(r *http.Request, notice panelNotice) map[string]any {
 	data := s.antispamPageData(r, notice)
 	data["Nav"] = "settings"
-	s.fillSizeLimits(data)
-	s.fillHTTPRateLimit(data)
-	s.fillConnLimit(data)
-	s.fillLoginLockout(data)
-	s.fillFetchPolicy(data)
+	// antispamPageData always sets ReadFailed; the Limits cards record into it too.
+	s.addLimitSettings(data, data["ReadFailed"].(readFailures))
 	s.fillLogRetention(data)
 	s.fillRecoverableRetention(data)
 

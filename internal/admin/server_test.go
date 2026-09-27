@@ -395,7 +395,7 @@ func (f *fakeDir) ListAliases() ([]directory.AliasInfo, error) {
 }
 
 func (f *fakeDir) GetFetchSettings() (directory.FetchSettings, bool, error) {
-	return f.fetchSettings, f.fetchSettingsFound, nil
+	return f.fetchSettings, f.fetchSettingsFound, f.readErrs["GetFetchSettings"]
 }
 
 func (f *fakeDir) SetFetchSettings(s directory.FetchSettings) error {
@@ -577,21 +577,21 @@ func (f *fakeDir) SetRateLimitSettings(s directory.RateLimitSettings) error {
 	return nil
 }
 func (f *fakeDir) GetHTTPRateLimitSettings() (directory.HTTPRateLimitSettings, bool, error) {
-	return f.httpRateLimit, f.httpRateLimitFound, nil
+	return f.httpRateLimit, f.httpRateLimitFound, f.readErrs["GetHTTPRateLimitSettings"]
 }
 func (f *fakeDir) SetHTTPRateLimitSettings(s directory.HTTPRateLimitSettings) error {
 	f.httpRateLimit, f.httpRateLimitFound = s, true
 	return nil
 }
 func (f *fakeDir) GetConnLimitSettings() (directory.ConnLimitSettings, bool, error) {
-	return f.connLimit, f.connLimitFound, nil
+	return f.connLimit, f.connLimitFound, f.readErrs["GetConnLimitSettings"]
 }
 func (f *fakeDir) SetConnLimitSettings(s directory.ConnLimitSettings) error {
 	f.connLimit, f.connLimitFound = s, true
 	return nil
 }
 func (f *fakeDir) GetLoginLockoutSettings() (directory.LoginLockoutSettings, bool, error) {
-	return f.loginLockout, f.loginLockoutFound, nil
+	return f.loginLockout, f.loginLockoutFound, f.readErrs["GetLoginLockoutSettings"]
 }
 func (f *fakeDir) SetLoginLockoutSettings(s directory.LoginLockoutSettings) error {
 	f.loginLockout, f.loginLockoutFound = s, true
@@ -722,7 +722,7 @@ func (f *fakeDir) SetDMARCReportSettings(s directory.DMARCReportSettings) error 
 	return nil
 }
 func (f *fakeDir) GetSizeLimits() (directory.SizeLimits, bool, error) {
-	return f.sizeLimits, f.sizeLimitsFound, nil
+	return f.sizeLimits, f.sizeLimitsFound, f.readErrs["GetSizeLimits"]
 }
 func (f *fakeDir) SetSizeLimits(s directory.SizeLimits) error {
 	f.sizeLimits, f.sizeLimitsFound = s, true

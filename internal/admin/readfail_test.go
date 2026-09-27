@@ -60,6 +60,16 @@ func TestAFailedReadHidesTheFormItFeeds(t *testing.T) {
 		{"GetDigestSettings", "/admin/ui/antispam", "The quarantine digest is", "the digest settings"},
 		{"GetAutoReplySettings", "/admin/ui/settings", `/antispam/autoreply"`, "the auto-reply settings"},
 		{"GetOutboundSettings", "/admin/ui/settings", `/antispam/outbound"`, "the outbound settings"},
+		{"GetSizeLimits", "/admin/ui/limits", `hx-post="/admin/ui/limits"`, "the size limits"},
+		{"GetHTTPRateLimitSettings", "/admin/ui/limits", `/limits/requestrate"`, "the request-rate settings"},
+		{"GetHTTPRateLimitSettings", "/admin/ui/limits", "Request rate limiting is", "the request-rate settings"},
+		{"GetConnLimitSettings", "/admin/ui/limits", `/limits/connections"`, "the connection caps"},
+		{"GetConnLimitSettings", "/admin/ui/limits", "The connection cap is", "the connection caps"},
+		{"GetLoginLockoutSettings", "/admin/ui/limits", `/limits/loginlockout"`, "the login-lockout settings"},
+		{"GetLoginLockoutSettings", "/admin/ui/limits", "A login that fails", "the login-lockout settings"},
+		{"GetFetchSettings", "/admin/ui/limits", `/limits/fetchpolicy"`, "the fetch policy"},
+		{"GetSizeLimits", "/admin/ui/settings", `hx-post="/admin/ui/limits"`, "the size limits"},
+		{"GetLoginLockoutSettings", "/admin/ui/settings", `/limits/loginlockout"`, "the login-lockout settings"},
 	} {
 		d := &fakeDir{
 			authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},

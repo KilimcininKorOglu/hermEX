@@ -44,6 +44,7 @@
 
 {{define "limits-panel"}}<div id="limits-panel">
 {{template "notice" .Notice}}
+{{with index .ReadFailed "limits"}}<p class="error">{{.}}</p>{{else}}
 <form class="form-grid" hx-post="/admin/ui/limits" hx-target="#limits-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>IMAP maximum literal (MB) <input type="number" name="imap_literal_mb" value="{{.IMAPLiteralMB}}" min="1"></label>
 <label>EWS maximum SOAP request (MB) <input type="number" name="ews_request_mb" value="{{.EWSRequestMB}}" min="1"></label>
@@ -67,49 +68,64 @@
 <label>EWS subscription timeout (minutes) <input type="number" name="ews_subscription_timeout_min" value="{{.EWSSubscriptionTimeoutMin}}" min="1" max="1440"></label>
 <button type="submit">Save limits</button>
 </form>
+{{end}}
 </div>{{end}}
 
 {{define "http-ratelimit-panel"}}<div id="http-ratelimit-panel">
 {{template "notice" .Notice}}
+{{with index .ReadFailed "http-ratelimit"}}<p class="error">{{.}}</p>{{else}}
 <p>Request rate limiting is <strong>{{if .HTTPRateEnabled}}on{{else}}off{{end}}</strong>.</p>
+{{end}}
 <p class="hint">When on, a client address that sends more than the burst within the window is answered with 429 and a Retry-After header, so one client cannot exhaust a daemon for everyone else. It covers every HTTP surface (webmail, EWS, ActiveSync, MAPI/HTTP, DAV, this panel and the gateway) and each daemon counts on its own. Keep the burst generous: Outlook and ActiveSync clients issue large legitimate bursts during an initial sync.</p>
+{{if not (index .ReadFailed "http-ratelimit")}}
 <form class="form-grid" hx-post="/admin/ui/limits/requestrate" hx-target="#http-ratelimit-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label class="check"><input type="checkbox" name="enabled" value="1"{{if .HTTPRateEnabled}} checked{{end}}> Enable request rate limiting</label>
 <label>Burst (requests per window) <input type="number" name="http_burst" value="{{.HTTPRateBurst}}" min="1"></label>
 <label>Window (seconds) <input type="number" name="http_window" value="{{.HTTPRateWindow}}" min="1"></label>
 <button type="submit">Save settings</button>
 </form>
+{{end}}
 </div>{{end}}
 
 {{define "conn-limit-panel"}}<div id="conn-limit-panel">
 {{template "notice" .Notice}}
+{{with index .ReadFailed "conn-limit"}}<p class="error">{{.}}</p>{{else}}
 <p>The connection cap is <strong>{{if .ConnLimitEnabled}}on{{else}}off{{end}}</strong>.</p>
+{{end}}
 <p class="hint">When on, a daemon serves at most the total number of connections at once, and one client address holds at most its own share. A refused connection is told why in the protocol's own greeting (IMAP <code>* BYE</code>, POP3 <code>-ERR</code>, SMTP <code>421</code>, which makes a sending server retry later rather than bounce the mail) and then closed. It covers IMAP, POP3 and SMTP; each daemon counts on its own. Keep the per-client figure generous: a desktop mail client holds several connections at once, and one address is often a whole office behind a NAT.</p>
+{{if not (index .ReadFailed "conn-limit")}}
 <form class="form-grid" hx-post="/admin/ui/limits/connections" hx-target="#conn-limit-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label class="check"><input type="checkbox" name="enabled" value="1"{{if .ConnLimitEnabled}} checked{{end}}> Enable the connection cap</label>
 <label>Connections per daemon <input type="number" name="conn_max_total" value="{{.ConnMaxTotal}}" min="1"></label>
 <label>Connections per client address <input type="number" name="conn_max_per_client" value="{{.ConnMaxPerClient}}" min="1"></label>
 <button type="submit">Save settings</button>
 </form>
+{{end}}
 </div>{{end}}
 
 {{define "loginlockout-panel"}}<div id="loginlockout-panel">
 {{template "notice" .Notice}}
+{{with index .ReadFailed "loginlockout"}}<p class="error">{{.}}</p>{{else}}
 <p>A login that fails <strong>{{.LoginMaxFails}}</strong> times within <strong>{{.LoginWindow}}</strong> seconds is locked out for <strong>{{.LoginLockout}}</strong> seconds.</p>
+{{end}}
 <p class="hint">This is what makes online password guessing hopeless. It covers webmail, IMAP, POP3 and this panel; each daemon counts on its own, and every attempt counts twice: once against the account and once against the client address. The address is locked out at four times this threshold, since one address is often a whole office behind a NAT. Tighten it during a credential-stuffing wave, loosen it if legitimate users are being locked out. There is no off switch: raise the threshold instead.</p>
+{{if not (index .ReadFailed "loginlockout")}}
 <form class="form-grid cols-3" hx-post="/admin/ui/limits/loginlockout" hx-target="#loginlockout-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Failures before lockout <input type="number" name="login_max_fails" value="{{.LoginMaxFails}}" min="1"></label>
 <label>Window (seconds) <input type="number" name="login_window" value="{{.LoginWindow}}" min="1"></label>
 <label>Lockout (seconds) <input type="number" name="login_lockout" value="{{.LoginLockout}}" min="1"></label>
 <button type="submit">Save settings</button>
 </form>
+{{end}}
 </div>{{end}}
 
 {{define "fetchpolicy-panel"}}<div id="fetchpolicy-panel">
 {{template "notice" .Notice}}
 <p class="hint">A fetchmail source is dialled by this server on a schedule, so a source pointed at an internal address reaches services that are not exposed to the network at all. Internal, loopback and link-local source addresses are therefore refused unless you allow them here. Turn this on only if you fetch from a server on your own private network. Domain administrators can create fetchmail entries; only a full system administrator can change this.</p>
+{{with index .ReadFailed "fetchpolicy"}}<p class="error">{{.}}</p>{{else}}
 <form hx-post="/admin/ui/limits/fetchpolicy" hx-target="#fetchpolicy-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label class="check"><input type="checkbox" name="fetch_allow_internal" value="1"{{if .FetchAllowInternal}} checked{{end}}> Allow fetchmail sources on internal addresses</label>
 <button type="submit">Save policy</button>
 </form>
+{{end}}
 </div>{{end}}

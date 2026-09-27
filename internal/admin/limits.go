@@ -51,13 +51,22 @@ func (s *Server) handleUILimits(w http.ResponseWriter, r *http.Request) {
 // limitsPageData builds the size-limits page model: each protocol cap shown in whole
 // MB (the stored value, or the built-in default when none has been saved).
 func (s *Server) limitsPageData(r *http.Request, notice panelNotice) map[string]any {
-	data := map[string]any{"Nav": "limits", "Notice": notice, "CSRF": csrfCookieValue(r)}
-	s.fillSizeLimits(data)
-	s.fillHTTPRateLimit(data)
-	s.fillConnLimit(data)
-	s.fillLoginLockout(data)
-	s.fillFetchPolicy(data)
+	failed := readFailures{}
+	data := map[string]any{"Nav": "limits", "Notice": notice, "CSRF": csrfCookieValue(r), "ReadFailed": failed}
+	s.addLimitSettings(data, failed)
 	return data
+}
+
+// addLimitSettings merges the Limits cards' settings into a page's data. A setting
+// that could not be read is recorded in failed, and its card shows that in place of
+// its form, which would otherwise offer the defaults for a save to store. The Limits
+// and Settings pages share it.
+func (s *Server) addLimitSettings(data map[string]any, failed readFailures) {
+	s.fillSizeLimits(data, failed)
+	s.fillHTTPRateLimit(data, failed)
+	s.fillConnLimit(data, failed)
+	s.fillLoginLockout(data, failed)
+	s.fillFetchPolicy(data, failed)
 }
 
 // defaultLoginMaxFails, defaultLoginWindow and defaultLoginLockout mirror the login
@@ -71,14 +80,17 @@ const (
 
 // fillLoginLockout sets the failed-login limiter's tunables on a page-data map,
 // using the stored values or the limiter's built-in defaults.
-func (s *Server) fillLoginLockout(data map[string]any) {
-	data["LoginMaxFails"] = defaultLoginMaxFails
-	data["LoginWindow"], data["LoginLockout"] = defaultLoginWindow, defaultLoginLockout
-	if st, found, err := s.dir.GetLoginLockoutSettings(); err == nil && found {
-		data["LoginMaxFails"] = st.MaxFails
-		data["LoginWindow"] = st.WindowSeconds
-		data["LoginLockout"] = st.LockoutSeconds
+func (s *Server) fillLoginLockout(data map[string]any, failed readFailures) {
+	st, found, err := s.dir.GetLoginLockoutSettings()
+	if !s.noteRead(failed, "loginlockout", "the login-lockout settings", err) {
+		return
 	}
+	if !found {
+		st = directory.LoginLockoutSettings{MaxFails: defaultLoginMaxFails, WindowSeconds: defaultLoginWindow, LockoutSeconds: defaultLoginLockout}
+	}
+	data["LoginMaxFails"] = st.MaxFails
+	data["LoginWindow"] = st.WindowSeconds
+	data["LoginLockout"] = st.LockoutSeconds
 }
 
 // handleUISaveLoginLockout persists the failed-login limiter's tuning. Every daemon
@@ -113,14 +125,17 @@ const (
 // fillHTTPRateLimit sets the per-client HTTP request limiter's toggle and tunables on
 // a page-data map, using the stored values or the limiter's built-in defaults
 // (disabled). Shared by the Limits page and the unified Settings page.
-func (s *Server) fillHTTPRateLimit(data map[string]any) {
-	data["HTTPRateEnabled"] = false
-	data["HTTPRateBurst"], data["HTTPRateWindow"] = defaultHTTPRateBurst, defaultHTTPRateWindow
-	if st, found, err := s.dir.GetHTTPRateLimitSettings(); err == nil && found {
-		data["HTTPRateEnabled"] = st.Enabled
-		data["HTTPRateBurst"] = st.Burst
-		data["HTTPRateWindow"] = st.WindowSeconds
+func (s *Server) fillHTTPRateLimit(data map[string]any, failed readFailures) {
+	st, found, err := s.dir.GetHTTPRateLimitSettings()
+	if !s.noteRead(failed, "http-ratelimit", "the request-rate settings", err) {
+		return
 	}
+	if !found {
+		st = directory.HTTPRateLimitSettings{Burst: defaultHTTPRateBurst, WindowSeconds: defaultHTTPRateWindow}
+	}
+	data["HTTPRateEnabled"] = st.Enabled
+	data["HTTPRateBurst"] = st.Burst
+	data["HTTPRateWindow"] = st.WindowSeconds
 }
 
 // handleUISaveHTTPRateLimit persists the per-client HTTP request limiter's settings.
@@ -159,14 +174,17 @@ const (
 // fillConnLimit sets the concurrent-connection cap's toggle and tunables on a
 // page-data map, using the stored values or the limiter's built-in defaults
 // (disabled). Shared by the Limits page and the unified Settings page.
-func (s *Server) fillConnLimit(data map[string]any) {
-	data["ConnLimitEnabled"] = false
-	data["ConnMaxTotal"], data["ConnMaxPerClient"] = defaultConnMaxTotal, defaultConnMaxPerClient
-	if st, found, err := s.dir.GetConnLimitSettings(); err == nil && found {
-		data["ConnLimitEnabled"] = st.Enabled
-		data["ConnMaxTotal"] = st.MaxTotal
-		data["ConnMaxPerClient"] = st.MaxPerClient
+func (s *Server) fillConnLimit(data map[string]any, failed readFailures) {
+	st, found, err := s.dir.GetConnLimitSettings()
+	if !s.noteRead(failed, "conn-limit", "the connection caps", err) {
+		return
 	}
+	if !found {
+		st = directory.ConnLimitSettings{MaxTotal: defaultConnMaxTotal, MaxPerClient: defaultConnMaxPerClient}
+	}
+	data["ConnLimitEnabled"] = st.Enabled
+	data["ConnMaxTotal"] = st.MaxTotal
+	data["ConnMaxPerClient"] = st.MaxPerClient
 }
 
 // handleUISaveConnLimit persists the concurrent-connection cap. Every IMAP, POP3
@@ -195,14 +213,19 @@ func (s *Server) handleUISaveConnLimit(w http.ResponseWriter, r *http.Request) {
 
 // fillSizeLimits sets each protocol's cap (in whole MB) on a page-data map, using the
 // stored values or the built-in defaults. Shared by the Limits page and the unified
-// Settings page so both render the same limits-panel.
-func (s *Server) fillSizeLimits(data map[string]any) {
+// Settings page so both render the same limits-panel. The one stored row feeds every
+// field of the form, so a failed read of it is recorded in failed and fills none.
+func (s *Server) fillSizeLimits(data map[string]any, failed readFailures) {
+	sl, found, err := s.dir.GetSizeLimits()
+	if !s.noteRead(failed, "limits", "the size limits", err) {
+		return
+	}
 	imapMB, ewsMB, easMB := int64(defaultIMAPLiteralMB), int64(defaultEWSRequestMB), int64(defaultActiveSyncRequestMB)
 	icalMB, vcardMB := int64(defaultDAVICalMB), int64(defaultDAVVCardMB)
 	webMB, mapiMB := int64(defaultWebmailRequestMB), int64(defaultMapiRequestMB)
 	fbTargets, previewMB := int64(defaultFreeBusyTargets), int64(defaultWebmailPreviewMB)
 	tlsReportMB := int64(defaultTLSReportMB)
-	if sl, found, err := s.dir.GetSizeLimits(); err == nil && found {
+	if found {
 		tlsReportMB = sl.TLSReportBytes / (1024 * 1024)
 		imapMB = sl.IMAPLiteralBytes / (1024 * 1024)
 		ewsMB = sl.EWSRequestBytes / (1024 * 1024)
@@ -214,7 +237,7 @@ func (s *Server) fillSizeLimits(data map[string]any) {
 		fbTargets = sl.FreeBusyMaxTargets
 		previewMB = sl.WebmailPreviewMaxBytes / (1024 * 1024)
 	}
-	s.fillCommandLineLimits(data)
+	fillCommandLineLimits(data, sl, found)
 	data["IMAPLiteralMB"] = imapMB
 	data["EWSRequestMB"] = ewsMB
 	data["ActiveSyncRequestMB"] = easMB
@@ -225,15 +248,15 @@ func (s *Server) fillSizeLimits(data map[string]any) {
 	data["FreeBusyMaxTargets"] = fbTargets
 	data["WebmailPreviewMB"] = previewMB
 	data["TLSReportMB"] = tlsReportMB
-	s.fillSubscriptionTimeout(data)
+	fillSubscriptionTimeout(data, sl, found)
 }
 
 // fillSubscriptionTimeout sets the EWS notification-subscription idle timeout on a
 // page-data map. It is a duration in minutes, so it is filled on its own rather
 // than through the megabyte fields above.
-func (s *Server) fillSubscriptionTimeout(data map[string]any) {
+func fillSubscriptionTimeout(data map[string]any, sl directory.SizeLimits, found bool) {
 	mins := int64(defaultEWSSubscriptionTimeoutMin)
-	if sl, found, err := s.dir.GetSizeLimits(); err == nil && found && sl.EWSSubscriptionTimeoutMinutes > 0 {
+	if found && sl.EWSSubscriptionTimeoutMinutes > 0 {
 		mins = sl.EWSSubscriptionTimeoutMinutes
 	}
 	data["EWSSubscriptionTimeoutMin"] = mins
@@ -251,9 +274,9 @@ const (
 // fillCommandLineLimits sets the per-protocol command-line caps on a page-data map.
 // They are shown in BYTES, not megabytes: one line of a mail protocol is small, and
 // the SMTP figure is the 512 octets its RFC gives a command line.
-func (s *Server) fillCommandLineLimits(data map[string]any) {
+func fillCommandLineLimits(data map[string]any, sl directory.SizeLimits, found bool) {
 	imap, pop3, smtp := int64(defaultIMAPCommandLineBytes), int64(defaultPOP3CommandLineBytes), int64(defaultSMTPCommandLineBytes)
-	if sl, found, err := s.dir.GetSizeLimits(); err == nil && found {
+	if found {
 		imap, pop3, smtp = sl.IMAPCommandLineBytes, sl.POP3CommandLineBytes, sl.SMTPCommandLineBytes
 	}
 	data["IMAPCommandLineBytes"] = imap
@@ -349,10 +372,10 @@ func megabytes(mb int) int64 { return int64(mb) * 1024 * 1024 }
 
 // fillFetchPolicy sets the fetch worker's source policy on a page-data map. The
 // default is the worker's own: internal source addresses refused.
-func (s *Server) fillFetchPolicy(data map[string]any) {
-	data["FetchAllowInternal"] = false
-	if st, found, err := s.dir.GetFetchSettings(); err == nil && found {
-		data["FetchAllowInternal"] = st.AllowInternalSources
+func (s *Server) fillFetchPolicy(data map[string]any, failed readFailures) {
+	st, found, err := s.dir.GetFetchSettings()
+	if s.noteRead(failed, "fetchpolicy", "the fetch policy", err) {
+		data["FetchAllowInternal"] = found && st.AllowInternalSources
 	}
 }
 
