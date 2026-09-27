@@ -81,7 +81,7 @@
 <form class="form-grid" hx-post="/admin/ui/limits/requestrate" hx-target="#http-ratelimit-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label class="check"><input type="checkbox" name="enabled" value="1"{{if .HTTPRateEnabled}} checked{{end}}> {{t "limits.enableRate"}}</label>
 <label>{{t "limits.burstRequests"}} <input type="number" name="http_burst" value="{{.HTTPRateBurst}}" min="1"></label>
-<label>{{t "antispam.windowSeconds"}} <input type="number" name="http_window" value="{{.HTTPRateWindow}}" min="1"></label>
+<label>{{t "antispam.windowSeconds"}} <input type="number" name="http_window" value="{{.HTTPRateWindow}}" min="1" data-duration></label>
 <button type="submit">{{t "antispam.saveSettings"}}</button>
 </form>
 {{end}}
@@ -112,8 +112,8 @@
 {{if not (index .ReadFailed "loginlockout")}}
 <form class="form-grid cols-3" hx-post="/admin/ui/limits/loginlockout" hx-target="#loginlockout-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>{{t "limits.failures"}} <input type="number" name="login_max_fails" value="{{.LoginMaxFails}}" min="1"></label>
-<label>{{t "antispam.windowSeconds"}} <input type="number" name="login_window" value="{{.LoginWindow}}" min="1"></label>
-<label>{{t "limits.lockoutSeconds"}} <input type="number" name="login_lockout" value="{{.LoginLockout}}" min="1"></label>
+<label>{{t "antispam.windowSeconds"}} <input type="number" name="login_window" value="{{.LoginWindow}}" min="1" data-duration></label>
+<label>{{t "limits.lockoutSeconds"}} <input type="number" name="login_lockout" value="{{.LoginLockout}}" min="1" data-duration></label>
 <button type="submit">{{t "antispam.saveSettings"}}</button>
 </form>
 {{end}}

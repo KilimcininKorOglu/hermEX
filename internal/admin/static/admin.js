@@ -231,6 +231,60 @@
     }
   });
 
+  // DURATION_UNITS are the steps a second count is spelled out in, largest first.
+  const DURATION_UNITS = [
+    ["unit-days", 86400],
+    ["unit-hours", 3600],
+    ["unit-minutes", 60],
+    ["unit-seconds", 1],
+  ];
+
+  // spellDuration writes a second count in every unit it holds: 90061 reads as
+  // "1 day 1 h 1 min 1 s". It returns "" for a value that is not a whole count.
+  function spellDuration(value) {
+    let left = Number(value);
+    if (!Number.isInteger(left) || left <= 0) {
+      return "";
+    }
+    const parts = [];
+    for (const [name, size] of DURATION_UNITS) {
+      const n = Math.floor(left / size);
+      left -= n * size;
+      if (n > 0) {
+        parts.push(pageText(name, n));
+      }
+    }
+    return "= " + parts.join(" ");
+  }
+
+  // A field entered in seconds shows its value spelled out beside it, so 2592000
+  // reads as 30 days while it is typed.
+  function showDuration(input) {
+    let hint = input.nextElementSibling;
+    if (!hint || !hint.classList.contains("duration-hint")) {
+      hint = document.createElement("small");
+      hint.className = "duration-hint";
+      input.after(hint);
+    }
+    hint.textContent = spellDuration(input.value);
+  }
+  function showDurations(root) {
+    for (const input of root.querySelectorAll("input[data-duration]")) {
+      showDuration(input);
+    }
+  }
+  showDurations(document);
+  document.addEventListener("htmx:load", (evt) => {
+    if (evt.detail.elt instanceof Element) {
+      showDurations(evt.detail.elt);
+    }
+  });
+  document.addEventListener("input", (evt) => {
+    if (evt.target instanceof HTMLInputElement && evt.target.hasAttribute("data-duration")) {
+      showDuration(evt.target);
+    }
+  });
+
   // The account page's time zone field suggests every zone the browser knows,
   // and its button fills in the browser's own zone. The server checks the name.
   const zoneList = document.getElementById("tz-names");

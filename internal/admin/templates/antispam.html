@@ -101,9 +101,9 @@
 <h3>{{t "antispam.timings"}}</h3>
 {{with index .ReadFailed "greylist-timings"}}<p class="error">{{t .}}</p>{{else}}
 <form class="form-grid cols-3" hx-post="/admin/ui/antispam/greylist-timings" hx-target="#greylist-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>{{t "antispam.minDelay"}} <input type="number" name="min_delay" value="{{.GreylistMinDelay}}" min="1"><small>{{t "antispam.minDelayHint"}}</small></label>
-<label>{{t "antispam.unconfirmedTTL"}}{{template "help" "help.antispam.unconfirmedTTL"}} <input type="number" name="unconfirmed_ttl" value="{{.GreylistUnconfirmedTTL}}" min="1"></label>
-<label>{{t "antispam.confirmedTTL"}}{{template "help" "help.antispam.confirmedTTL"}} <input type="number" name="confirmed_ttl" value="{{.GreylistConfirmedTTL}}" min="1"></label>
+<label>{{t "antispam.minDelay"}} <input type="number" name="min_delay" value="{{.GreylistMinDelay}}" min="1" data-duration><small>{{t "antispam.minDelayHint"}}</small></label>
+<label>{{t "antispam.unconfirmedTTL"}}{{template "help" "help.antispam.unconfirmedTTL"}} <input type="number" name="unconfirmed_ttl" value="{{.GreylistUnconfirmedTTL}}" min="1" data-duration></label>
+<label>{{t "antispam.confirmedTTL"}}{{template "help" "help.antispam.confirmedTTL"}} <input type="number" name="confirmed_ttl" value="{{.GreylistConfirmedTTL}}" min="1" data-duration></label>
 <button type="submit">{{t "antispam.saveTimings"}}</button>
 </form>
 {{end}}
@@ -142,7 +142,7 @@
 <p class="hint">{{t "antispam.relayHint"}}</p>
 {{with index .ReadFailed "relay"}}<p class="error">{{t .}}</p>{{else}}
 <form class="form-grid" hx-post="/admin/ui/antispam/relay" hx-target="#relay-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>{{t "antispam.backoff"}} <input type="number" name="backoff" value="{{.RelayBackoff}}" min="1"></label>
+<label>{{t "antispam.backoff"}} <input type="number" name="backoff" value="{{.RelayBackoff}}" min="1" data-duration></label>
 <label>{{t "antispam.attempts"}} <input type="number" name="attempts" value="{{.RelayMaxAttempts}}" min="1"></label>
 <button type="submit">{{t "antispam.saveSettings"}}</button>
 </form>
@@ -192,7 +192,7 @@
 <form class="form-grid" hx-post="/admin/ui/antispam/outbound" hx-target="#outbound-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label class="check"><input type="checkbox" name="enabled" value="1"{{if .OutboundEnabled}} checked{{end}}> {{t "antispam.enableOutbound"}}</label>
 <label>{{t "antispam.outboundCap"}} <input type="number" name="cap" value="{{.OutboundCap}}" min="1"></label>
-<label>{{t "antispam.windowSeconds"}} <input type="number" name="window" value="{{.OutboundWindow}}" min="1"></label>
+<label>{{t "antispam.windowSeconds"}} <input type="number" name="window" value="{{.OutboundWindow}}" min="1" data-duration></label>
 <button type="submit">{{t "antispam.saveSettings"}}</button>
 </form>
 {{end}}
@@ -219,7 +219,7 @@
 <form class="form-grid" hx-post="/admin/ui/antispam/ratelimit" hx-target="#ratelimit-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label class="check"><input type="checkbox" name="enabled" value="1"{{if .RateLimitEnabled}} checked{{end}}> {{t "antispam.enableRatelimit"}}</label>
 <label>{{t "antispam.burstMessages"}} <input type="number" name="burst" value="{{.RateLimitBurst}}" min="1"></label>
-<label>{{t "antispam.windowSeconds"}} <input type="number" name="window" value="{{.RateLimitWindow}}" min="1"></label>
+<label>{{t "antispam.windowSeconds"}} <input type="number" name="window" value="{{.RateLimitWindow}}" min="1" data-duration></label>
 <button type="submit">{{t "antispam.saveSettings"}}</button>
 </form>
 {{end}}

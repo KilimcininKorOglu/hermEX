@@ -68,7 +68,7 @@
 <option value="testing" {{if ne .MTASTSMode "enforce"}}selected{{end}}>{{t "tls.mtastsTesting"}}</option>
 <option value="enforce" {{if eq .MTASTSMode "enforce"}}selected{{end}}>{{t "tls.mtastsEnforce"}}</option>
 </select></label>
-<label>{{t "tls.maxAge"}} <input type="number" name="mtasts_max_age" value="{{.MTASTSMaxAge}}" min="1"><small>{{t "tls.maxAgeHint"}}</small></label>
+<label>{{t "tls.maxAge"}} <input type="number" name="mtasts_max_age" value="{{.MTASTSMaxAge}}" min="1" data-duration><small>{{t "tls.maxAgeHint"}}</small></label>
 <label class="check"><input type="checkbox" name="mtasts_enforce_confirm"> {{t "tls.enforceConfirm"}}</label>
 <button type="submit">{{t "tls.saveMTASTS"}}</button>
 </form>

@@ -167,5 +167,11 @@
     "mb": "{0} MB",
     "gb": "{0} GB",
     "tb": "{0} TB"
+  },
+  "durUnit": {
+    "days": "{0} d",
+    "hours": "{0} h",
+    "minutes": "{0} min",
+    "seconds": "{0} s"
   }
 }
