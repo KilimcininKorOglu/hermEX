@@ -8,7 +8,6 @@ import (
 
 	"hermex/internal/mapi"
 	"hermex/internal/oxcmail"
-	"hermex/internal/recurrence"
 )
 
 var errNoEvent = errors.New("oxcical: no VEVENT in calendar")
@@ -37,6 +36,11 @@ func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 	if vev == nil {
 		return nil, errNoEvent
 	}
+	// A series is described by its master, whichever order the components come in;
+	// an object holding only overrides is described by the first.
+	if master, _ := splitSeries(cal); master != nil {
+		vev = master
+	}
 	applyDefaultZone(cal, opt.DefaultZone)
 	reportZones(cal, opt)
 
@@ -63,7 +67,7 @@ func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 
 	// Recurring events round-trip verbatim; store only what listing needs.
 	if vev.prop("RRULE") != nil || vev.prop("RECURRENCE-ID") != nil {
-		importRecurring(p, named, vev, raw)
+		importRecurring(p, named, cal, vev, raw)
 		return msg, nil
 	}
 
@@ -105,9 +109,10 @@ func importedUID(vev *icomp) string {
 // importRecurring preserves a recurring event's body verbatim and stores what
 // listing needs. A series master (carrying RRULE) is also marked PidLidRecurring
 // and gets the MS-OXOCAL AppointmentRecurrencePattern blob Outlook reads in
-// PidLidAppointmentRecur; an override (RECURRENCE-ID only) is an exception
+// PidLidAppointmentRecur, with the occurrences EXDATE removes and the ones its
+// RECURRENCE-ID overrides move; an override (RECURRENCE-ID only) is an exception
 // instance and carries neither.
-func importRecurring(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag, vev *icomp, raw []byte) {
+func importRecurring(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag, cal, vev *icomp, raw []byte) {
 	p.Set(mapi.PrIcalOriginal, append([]byte(nil), raw...))
 	var start time.Time
 	if l := vev.prop("DTSTART"); l != nil {
@@ -137,7 +142,7 @@ func importRecurring(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.Pr
 		start = start.In(loc)
 		writeSeriesZone(p, named, loc, start)
 	}
-	blob, err := recurrence.FromRRule(rrule.value, start)
+	blob, err := appointmentBlob(cal, vev, rrule.value, start)
 	if err != nil {
 		return
 	}

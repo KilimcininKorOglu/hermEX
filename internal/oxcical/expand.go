@@ -67,15 +67,24 @@ func splitSeries(cal *icomp) (master *icomp, overrides map[string]*icomp) {
 // excludedInstants collects the occurrences the master's EXDATE lines remove.
 func excludedInstants(master *icomp) map[string]bool {
 	skip := map[string]bool{}
+	for _, t := range exdates(master) {
+		skip[instantKey(t)] = true
+	}
+	return skip
+}
+
+// exdates returns every instant the master's EXDATE lines name.
+func exdates(master *icomp) []time.Time {
+	var out []time.Time
 	for _, l := range master.propLines("EXDATE") {
 		for v := range strings.SplitSeq(l.value, ",") {
 			ex := iline{name: "EXDATE", params: l.params, value: strings.TrimSpace(v), loc: l.loc}
 			if t, _, ok := parseICalTime(&ex); ok {
-				skip[instantKey(t)] = true
+				out = append(out, t)
 			}
 		}
 	}
-	return skip
+	return out
 }
 
 // instantKey normalizes an instant to a UTC comparison key, so an EXDATE or a

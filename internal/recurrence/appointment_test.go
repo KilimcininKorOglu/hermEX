@@ -3,6 +3,7 @@ package recurrence
 import (
 	"encoding/hex"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -127,5 +128,35 @@ func TestRRuleUntilEndsAtTheLastStart(t *testing.T) {
 	}
 	if plain, _ := p.RRuleUntil(time.Time{}); plain != "FREQ=DAILY;INTERVAL=1;UNTIL=20260610T000000Z" {
 		t.Errorf("zero until changed the rule: %q", plain)
+	}
+}
+
+// TestEncodeAppointmentWritesTheSpecExample re-encodes the decoded [MS-OXOCAL]
+// example and requires the published bytes back, which pins every field, its order
+// and each exception's optional parts.
+func TestEncodeAppointmentWritesTheSpecExample(t *testing.T) {
+	p, err := DecodeAppointment(specBlob(t))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got := hex.EncodeToString(EncodeAppointment(p)); !strings.EqualFold(got, nMonthlyWithExceptions) {
+		t.Errorf("encoded\n%s\nwant\n%s", got, strings.ToLower(nMonthlyWithExceptions))
+	}
+}
+
+// TestAppointmentFromRRuleRecordsTheTimeOfDay anchors the pattern at the first
+// day's midnight and carries the time of day in the offsets, in the series zone.
+func TestAppointmentFromRRuleRecordsTheTimeOfDay(t *testing.T) {
+	loc := time.FixedZone("", 3*3600)
+	p, err := AppointmentFromRRule("FREQ=DAILY;COUNT=3", time.Date(2026, 6, 1, 9, 30, 0, 0, loc), 45*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := DecodeAppointment(EncodeAppointment(p))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if wall(back.StartDate) != "2026-06-01 00:00" || back.StartTimeOffset != 570 || back.EndTimeOffset != 615 || back.FirstDateTime != 0 {
+		t.Errorf("pattern = start %s offsets %d-%d first %d", wall(back.StartDate), back.StartTimeOffset, back.EndTimeOffset, back.FirstDateTime)
 	}
 }

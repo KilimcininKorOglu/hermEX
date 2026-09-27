@@ -159,7 +159,7 @@ func (c *cancellation) apply(st *objectstore.Store, appt int64, props mapi.Prope
 			if revised, ok := oxcical.SetSequence(cancelled, c.seq, &c.at); ok {
 				cancelled = revised
 			}
-			return st.ModifyMessageProperties(appt, mapi.PropertyValues{{Tag: mapi.PrIcalOriginal, Value: cancelled}})
+			return st.ModifyMessageProperties(appt, withRecurrence(st, mapi.PropertyValues{{Tag: mapi.PrIcalOriginal, Value: cancelled}}, cancelled))
 		}
 		if _, series := oxcical.CancelOccurrence(stored, c.at); series {
 			return nil

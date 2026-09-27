@@ -3,11 +3,13 @@ package meeting
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
+	"hermex/internal/recurrence"
 )
 
 const cancelUID = "cancel-1@hermex.test"
@@ -190,5 +192,38 @@ func TestCancelledInstanceIsNotRecreated(t *testing.T) {
 	v, _ := theMeeting(t, st).Get(mapi.PrIcalOriginal)
 	if ical, _ := v.([]byte); strings.Contains(string(ical), "RECURRENCE-ID") {
 		t.Errorf("an excluded instance came back as an override:\n%s", ical)
+	}
+}
+
+// TestInstanceCancellationReachesTheRecurrenceBlob proves the pattern a MAPI
+// client reads loses the cancelled instance too. Only the iCalendar used to change,
+// so Outlook kept showing the occurrence the organizer cancelled.
+func TestInstanceCancellationReachesTheRecurrenceBlob(t *testing.T) {
+	st, accounts := cancelHarness(t, objectstore.MeetingConfig{})
+	deliverScheduling(t, accounts, "organizer@hermex.test", "REQUEST", dailySeries(false))
+	deliverScheduling(t, accounts, "organizer@hermex.test", "CANCEL",
+		"RECURRENCE-ID:20260621T100000Z\r\nDTSTART:20260621T100000Z\r\nDTEND:20260621T110000Z\r\nSEQUENCE:1\r\nSTATUS:CANCELLED\r\n")
+
+	ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{mapi.NameAppointmentRecur})
+	if err != nil || ids[0] == 0 {
+		t.Fatalf("recurrence tag: %v", err)
+	}
+	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
+	if err != nil || len(objs) != 1 {
+		t.Fatalf("calendar holds %d items (err %v), want the one meeting", len(objs), err)
+	}
+	tag := mapi.MakeTag(ids[0], mapi.PtBinary)
+	pv, err := st.GetMessageProperties(objs[0].ID, tag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, _ := pv.Get(tag)
+	blob, _ := v.([]byte)
+	p, err := recurrence.DecodeAppointment(blob)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(p.DeletedDates) != 1 || recurrence.WallClock(p.DeletedDates[0], time.UTC).Format("2006-01-02") != "2026-06-21" {
+		t.Errorf("deleted dates = %v, want 2026-06-21", p.DeletedDates)
 	}
 }

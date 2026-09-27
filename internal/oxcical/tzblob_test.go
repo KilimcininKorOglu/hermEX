@@ -85,10 +85,13 @@ func TestImportWritesOutlookZones(t *testing.T) {
 		t.Errorf("TimeZoneStruct = %v, want a 48-byte TZREG", v)
 	}
 	blob, _ := msg.Props.Get(r.tag(mapi.NameAppointmentRecur, mapi.PtBinary))
-	pattern, err := recurrence.UnmarshalBinary(blob.([]byte))
+	// [MS-OXOCAL] 2.2.1.44.5: StartDate is the first day's midnight and the time of
+	// day every occurrence starts at is StartTimeOffset.
+	pattern, err := recurrence.DecodeAppointment(blob.([]byte))
 	mustNoErr(t, err, "decode pattern")
-	if got := pattern.StartDate % (24 * 60); got != 9*60 {
-		t.Errorf("pattern start is %d minutes past midnight, want 540 (09:00 Berlin)", got)
+	if pattern.StartDate%(24*60) != 0 || pattern.StartTimeOffset != 9*60 || pattern.EndTimeOffset != 9*60+30 {
+		t.Errorf("pattern = start %d offsets %d-%d, want midnight and 540-570 (09:00 Berlin)",
+			pattern.StartDate, pattern.StartTimeOffset, pattern.EndTimeOffset)
 	}
 }
 

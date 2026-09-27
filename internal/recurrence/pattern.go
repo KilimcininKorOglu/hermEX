@@ -599,6 +599,12 @@ func setEndRange(p *Pattern, r rrule) {
 // MarshalBinary encodes the Pattern as the MS-OXOCAL RecurrencePattern bytes
 // (the leading fixed fields; no TimeZone block, no exceptions for v1).
 func (p Pattern) MarshalBinary() []byte {
+	return p.marshal(nil, nil)
+}
+
+// marshal encodes the RecurrencePattern with the given deleted and modified
+// instance dates.
+func (p Pattern) marshal(deleted, modified []uint32) []byte {
 	var b []byte
 	put16 := func(v uint16) { b = binary.LittleEndian.AppendUint16(b, v) }
 	put32 := func(v uint32) { b = binary.LittleEndian.AppendUint32(b, v) }
@@ -626,8 +632,16 @@ func (p Pattern) MarshalBinary() []byte {
 	put32(p.EndType)
 	put32(p.OccurrenceCount)
 	put32(p.FirstDOW)
-	put32(0) // DeletedInstanceCount
-	put32(0) // ModifiedInstanceCount
+	// #nosec G115 -- the instance lists come from one series, far below the 32-bit range
+	put32(uint32(len(deleted))) // DeletedInstanceCount
+	for _, d := range deleted {
+		put32(d)
+	}
+	// #nosec G115 -- the instance lists come from one series, far below the 32-bit range
+	put32(uint32(len(modified))) // ModifiedInstanceCount
+	for _, d := range modified {
+		put32(d)
+	}
 	put32(p.StartDate)
 	put32(p.EndDate)
 	return b

@@ -289,9 +289,9 @@ func foldOccurrence(st *objectstore.Store, existing int64, req *oxcmail.Message)
 		st.LogSwallowedError("meeting.fold-occurrence", errFoldRefused)
 		return true, nil // the stored series stays as it is
 	}
-	return true, st.ModifyMessageProperties(existing, mapi.PropertyValues{
+	return true, st.ModifyMessageProperties(existing, withRecurrence(st, mapi.PropertyValues{
 		{Tag: mapi.PrIcalOriginal, Value: merged},
-	})
+	}, merged))
 }
 
 // errFoldRefused reports an occurrence update that could not be folded into the
@@ -355,9 +355,28 @@ func cancelOccurrence(st *objectstore.Store, existing int64, req *oxcmail.Messag
 	if !ok {
 		return false, nil // not a series: the stored item IS that occurrence
 	}
-	return true, st.ModifyMessageProperties(existing, mapi.PropertyValues{
+	return true, st.ModifyMessageProperties(existing, withRecurrence(st, mapi.PropertyValues{
 		{Tag: mapi.PrIcalOriginal, Value: trimmed},
-	})
+	}, trimmed))
+}
+
+// withRecurrence adds to update the PidLidAppointmentRecur blob of a series body
+// changed in place, so a MAPI client reads the same occurrences the iCalendar now
+// holds. A body that is not a series, or a tag that cannot be resolved, leaves the
+// update as it is; the failure to resolve is recorded, because the iCalendar is
+// still written.
+func withRecurrence(st *objectstore.Store, update mapi.PropertyValues, ical []byte) mapi.PropertyValues {
+	blob, ok := oxcical.RecurrenceBlob(ical)
+	if !ok {
+		return update
+	}
+	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameAppointmentRecur})
+	if err != nil {
+		st.LogSwallowedError("meeting.recurrence-tag", err)
+		return update
+	}
+	update.Set(mapi.MakeTag(ids[0], mapi.PtBinary), blob)
+	return update
 }
 
 // uidOf reads the iCalendar UID a scheduling message carries, or "".
