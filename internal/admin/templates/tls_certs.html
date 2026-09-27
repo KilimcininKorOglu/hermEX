@@ -35,7 +35,7 @@
 <tbody>
 {{range .Certs}}<tr>
 <td>{{if .Name}}<code>{{.Name}}</code>{{else}}<span class="badge">{{t "tls.default"}}</span>{{end}}</td>
-<td class="nowrap">{{.Expires}}</td>
+<td class="nowrap"><time datetime="{{.Expires.ISO}}" title="{{.Expires.Full}}">{{.Expires.Short}}</time><small class="{{if .Soon}}status status-warn{{end}}">{{t .Left}}</small></td>
 <td class="actions"><form hx-post="/admin/ui/tls/delete" hx-target="#tls-certs-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}' hx-confirm="{{t "tls.confirmDelete"}}">
 <input type="hidden" name="name" value="{{.Name}}">
 <button type="submit" class="danger">{{t "tls.delete"}}</button>

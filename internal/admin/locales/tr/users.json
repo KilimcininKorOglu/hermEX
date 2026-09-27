@@ -271,7 +271,7 @@
     "asVersion": "AS sürümü",
     "folders": "Klasörler",
     "status": "Durum",
-    "firstSync": "İlk eşitleme {0}",
+    "firstSync": "İlk eşitleme",
     "resync": "Yeniden eşitle",
     "confirmWipe": "{0} uzaktan silinsin mi? Bu işlem cihazı siler.",
     "wipe": "Uzaktan sil",

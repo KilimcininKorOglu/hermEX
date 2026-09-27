@@ -44,6 +44,10 @@
      and keyboard focus. It takes the catalogue key of the explanation. */}}
 {{define "help"}}<span class="help" tabindex="0" role="note" aria-label="{{t .}}"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "circle-help"}}"/></svg><span class="help-tip" role="tooltip">{{t .}}</span></span>{{end}}
 
+{{/* when renders a stamp: the distance from now ("12 min ago") or, for a time
+     too far off, the date, with the full time and zone in the tooltip. */}}
+{{define "when"}}{{with .}}{{if .ISO}}<time datetime="{{.ISO}}" title="{{.Full}}">{{if .Rel}}{{t .Rel}}{{else}}{{.Short}}{{end}}</time>{{end}}{{end}}{{end}}
+
 {{define "brand"}}<img class="brand-mark" src="{{asset "favicon.svg"}}" alt="" width="36" height="36">{{end}}
 
 {{/* nav-link is one sidebar entry. It takes dict "Nav" (the current page)

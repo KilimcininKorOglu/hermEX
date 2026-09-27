@@ -25,21 +25,9 @@ type healthResult struct {
 	Err       string
 }
 
-// UptimeText renders Uptime in its two largest units (days and hours, hours and
-// minutes, minutes and seconds), because a raw second count stops being readable
-// after the first few minutes.
+// UptimeText renders Uptime in its two largest units.
 func (h healthResult) UptimeText() string {
-	s := h.Uptime
-	d, hr, m := s/86400, s%86400/3600, s%3600/60
-	switch {
-	case d > 0:
-		return msg("status.uptimeDays", strconv.FormatInt(d, 10), strconv.FormatInt(hr, 10))
-	case hr > 0:
-		return msg("status.uptimeHours", strconv.FormatInt(hr, 10), strconv.FormatInt(m, 10))
-	case m > 0:
-		return msg("status.uptimeMinutes", strconv.FormatInt(m, 10), strconv.FormatInt(s%60, 10))
-	}
-	return msg("status.uptimeSeconds", strconv.FormatInt(s, 10))
+	return durationMsg(h.Uptime)
 }
 
 // probeHealth reads the stored targets and probes each concurrently with a short

@@ -298,7 +298,9 @@
     "storedNames": "Stored the {0} certificate (covers {1}). Listeners apply it within a minute, no restart.",
     "storedNoNames": "Stored the {0} certificate (no SAN host names). Listeners apply it within a minute, no restart.",
     "deleteFailed": "Could not delete the certificate.",
-    "deleted": "Certificate deleted. Listeners fall back to the config-file certificate within a minute."
+    "deleted": "Certificate deleted. Listeners fall back to the config-file certificate within a minute.",
+    "daysLeft": "{0} days left",
+    "expired": "Expired"
   },
   "logs": {
     "title": "Logs",
@@ -345,10 +347,6 @@
     "degraded": "Degraded",
     "down": "Down",
     "latency": "{0} ms",
-    "uptimeDays": "{0}d {1}h",
-    "uptimeHours": "{0}h {1}m",
-    "uptimeMinutes": "{0}m {1}s",
-    "uptimeSeconds": "{0}s",
     "na": "n/a",
     "noTargets": "No health targets configured. Add one below.",
     "targetsTitle": "Monitored daemons",

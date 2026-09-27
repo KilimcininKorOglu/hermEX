@@ -142,5 +142,30 @@
     "storeOwners": "the store owners",
     "sendAs": "the send-as grants",
     "sendOnBehalf": "the send-on-behalf grants"
+  },
+  "time": {
+    "justNow": "just now",
+    "secondsAgo": "{0} s ago",
+    "minutesAgo": "{0} min ago",
+    "hoursAgo": "{0} h ago",
+    "daysAgo": "{0} days ago",
+    "shortly": "shortly",
+    "inSeconds": "in {0} s",
+    "inMinutes": "in {0} min",
+    "inHours": "in {0} h",
+    "inDays": "in {0} days"
+  },
+  "dur": {
+    "daysHours": "{0}d {1}h",
+    "hoursMinutes": "{0}h {1}m",
+    "minutesSeconds": "{0}m {1}s",
+    "seconds": "{0}s"
+  },
+  "size": {
+    "bytes": "{0} B",
+    "kb": "{0} KB",
+    "mb": "{0} MB",
+    "gb": "{0} GB",
+    "tb": "{0} TB"
   }
 }

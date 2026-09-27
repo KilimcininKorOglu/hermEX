@@ -398,7 +398,7 @@
 <thead><tr><th>{{t "userQuarantine.date"}}</th><th>{{t "userQuarantine.from"}}</th><th>{{t "userQuarantine.subject"}}</th><th>{{t "userQuarantine.size"}}</th><th></th></tr></thead>
 <tbody>
 {{range .Messages}}<tr>
-<td>{{.Date}}</td><td>{{.Sender}}</td><td>{{.Subject}}</td><td>{{.Size}}</td>
+<td class="nowrap">{{template "when" .Date}}</td><td>{{.Sender}}</td><td>{{.Subject}}</td><td>{{.Size}}</td>
 <td class="actions">
 <form class="inline" hx-post="/admin/ui/users/{{$.Email}}/quarantine/release" hx-target="#quarantine" hx-swap="innerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
 <input type="hidden" name="uid" value="{{.UID}}"><button type="submit" class="secondary">{{t "userQuarantine.release"}}</button></form>
@@ -418,7 +418,7 @@
 {{range .Devices}}<tr>
 <td>{{.DeviceID}}<small>{{.DeviceType}}{{if .UserAgent}} / {{.UserAgent}}{{end}}</small></td>
 <td>{{.DeviceUser}}</td>
-<td class="nowrap">{{.LastSync}}<small>{{t "userDevices.firstSync" .FirstSync}}</small></td>
+<td class="nowrap">{{template "when" .LastSync}}{{if .FirstSync.ISO}}<small>{{t "userDevices.firstSync"}} {{template "when" .FirstSync}}</small>{{end}}</td>
 <td>{{.ASVersion}}</td>
 <td>{{.FoldersSynced}}</td>
 <td>{{t .Status}}</td>

@@ -60,8 +60,8 @@ type mailqView struct {
 	From        string
 	Recipient   string
 	Attempts    int
-	Enqueued    string
-	NextAttempt string
+	Enqueued    stamp
+	NextAttempt stamp
 	Status      string
 	LastError   string
 	SizeKB      int
@@ -70,7 +70,7 @@ type mailqView struct {
 // mailqViews reads the queue and projects each entry for display. An entry that
 // has been attempted (has a recorded error) is "Deferred" and shows its next
 // retry time; one awaiting its first attempt is "Pending".
-func (s *Server) mailqViews() ([]mailqView, error) {
+func (s *Server) mailqViews(c clock) ([]mailqView, error) {
 	entries, err := s.mailq.List()
 	if err != nil {
 		return nil, err
@@ -78,10 +78,10 @@ func (s *Server) mailqViews() ([]mailqView, error) {
 	out := make([]mailqView, 0, len(entries))
 	for _, e := range entries {
 		status := "Pending"
-		next := ""
+		var next stamp
 		if e.Attempts > 0 || e.LastError != "" {
 			status = "Deferred"
-			next = e.NextAttempt.Format("2006-01-02 15:04:05")
+			next = c.at(e.NextAttempt)
 		}
 		// An interrupted row is never handed back to delivery (it may already have
 		// been accepted by the recipient's server), so it would otherwise sit here
@@ -91,7 +91,7 @@ func (s *Server) mailqViews() ([]mailqView, error) {
 		}
 		out = append(out, mailqView{
 			ID: e.RecipientID, From: e.From, Recipient: e.Recipient, Attempts: e.Attempts,
-			Enqueued: e.EnqueuedAt.Format("2006-01-02 15:04:05"), NextAttempt: next,
+			Enqueued: c.at(e.EnqueuedAt), NextAttempt: next,
 			Status: status, LastError: e.LastError, SizeKB: (e.Size + 1023) / 1024,
 		})
 	}
@@ -104,7 +104,7 @@ func (s *Server) handleUIMailq(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	views, err := s.mailqViews()
+	views, err := s.mailqViews(requestClock(r))
 	errMsg := ""
 	if err != nil {
 		errMsg = s.notice("mailq.unread", err)
@@ -153,7 +153,7 @@ func (s *Server) handleUIMailqDelete(w http.ResponseWriter, r *http.Request) {
 // renderMailqPanel renders the queue table partial with the current entries and an
 // optional error banner.
 func (s *Server) renderMailqPanel(w http.ResponseWriter, r *http.Request, errMsg string) {
-	views, err := s.mailqViews()
+	views, err := s.mailqViews(requestClock(r))
 	if err != nil && errMsg == "" {
 		errMsg = s.notice("mailq.unread", err)
 	}

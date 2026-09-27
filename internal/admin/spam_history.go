@@ -2,7 +2,6 @@ package admin
 
 import (
 	"net/http"
-	"time"
 
 	"hermex/internal/directory"
 )
@@ -14,7 +13,7 @@ const defaultSpamHistoryRetainDisplay = 10000
 
 // spamVerdictView is one recorded spam verdict rendered for the Spam History page.
 type spamVerdictView struct {
-	Time       string
+	Time       stamp
 	MailFrom   string
 	RemoteAddr string
 	Score      int
@@ -38,10 +37,11 @@ func (s *Server) handleUISpamHistory(w http.ResponseWriter, r *http.Request) {
 // save; CSRF is included so that panel's htmx form can post.
 func (s *Server) spamHistoryPageData(r *http.Request, notice panelNotice) map[string]any {
 	verdicts, err := s.dir.RecentSpamVerdicts(200)
+	c := requestClock(r)
 	views := make([]spamVerdictView, 0, len(verdicts))
 	for _, v := range verdicts {
 		views = append(views, spamVerdictView{
-			Time: time.Unix(v.Time, 0).Format("2006-01-02 15:04:05"), MailFrom: v.MailFrom,
+			Time: c.unix(v.Time), MailFrom: v.MailFrom,
 			RemoteAddr: v.RemoteAddr, Score: v.Score, Spam: v.Spam, Reasons: v.Reasons,
 		})
 	}

@@ -21,7 +21,7 @@
 <td>{{.DeviceType}} <small>{{.DeviceID}}</small></td>
 <td>{{.Command}}{{if .Push}} <span class="badge">push</span>{{end}}</td>
 <td>{{.ASVersion}}</td>
-<td class="nowrap">{{t "mobileDevices.agoSeconds" .AgeSec}}</td>
+<td class="nowrap">{{template "when" .LastActive}}</td>
 <td><span class="status{{if eq .Status "Active"}} status-ok{{end}}">{{if eq .Status "Active"}}{{t "mobileDevices.active"}}{{else if eq .Status "Ended"}}{{t "mobileDevices.ended"}}{{else}}{{.Status}}{{end}}</span></td>
 </tr>
 {{else}}<tr><td colspan="7" class="empty{{if .Error}} failed{{end}}">{{if .Error}}{{t .Error}}{{else}}{{t "mobileDevices.none"}}{{end}}</td></tr>

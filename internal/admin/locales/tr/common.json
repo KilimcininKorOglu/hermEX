@@ -142,5 +142,30 @@
     "storeOwners": "Depo sahipleri",
     "sendAs": "Olarak gönder izinleri",
     "sendOnBehalf": "Adına gönder izinleri"
+  },
+  "time": {
+    "justNow": "az önce",
+    "secondsAgo": "{0} sn önce",
+    "minutesAgo": "{0} dk önce",
+    "hoursAgo": "{0} sa önce",
+    "daysAgo": "{0} gün önce",
+    "shortly": "birazdan",
+    "inSeconds": "{0} sn sonra",
+    "inMinutes": "{0} dk sonra",
+    "inHours": "{0} sa sonra",
+    "inDays": "{0} gün sonra"
+  },
+  "dur": {
+    "daysHours": "{0} gün {1} sa",
+    "hoursMinutes": "{0} sa {1} dk",
+    "minutesSeconds": "{0} dk {1} sn",
+    "seconds": "{0} sn"
+  },
+  "size": {
+    "bytes": "{0} bayt",
+    "kb": "{0} KB",
+    "mb": "{0} MB",
+    "gb": "{0} GB",
+    "tb": "{0} TB"
   }
 }

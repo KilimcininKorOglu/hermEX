@@ -298,7 +298,9 @@
     "storedNames": "{0} sertifikası saklandı (kapsadığı adlar: {1}). Dinleyiciler bunu yeniden başlatma olmadan bir dakika içinde uygular.",
     "storedNoNames": "{0} sertifikası saklandı (SAN sunucu adı yok). Dinleyiciler bunu yeniden başlatma olmadan bir dakika içinde uygular.",
     "deleteFailed": "Sertifika silinemedi.",
-    "deleted": "Sertifika silindi. Dinleyiciler bir dakika içinde yapılandırma dosyasındaki sertifikaya döner."
+    "deleted": "Sertifika silindi. Dinleyiciler bir dakika içinde yapılandırma dosyasındaki sertifikaya döner.",
+    "daysLeft": "{0} gün kaldı",
+    "expired": "Süresi doldu"
   },
   "logs": {
     "title": "Günlükler",
@@ -345,10 +347,6 @@
     "degraded": "Sorunlu",
     "down": "Kapalı",
     "latency": "{0} ms",
-    "uptimeDays": "{0} gün {1} sa",
-    "uptimeHours": "{0} sa {1} dk",
-    "uptimeMinutes": "{0} dk {1} sn",
-    "uptimeSeconds": "{0} sn",
     "na": "yok",
     "noTargets": "İzlenen hizmet yok. Aşağıdan ekleyin.",
     "targetsTitle": "İzlenen hizmetler",

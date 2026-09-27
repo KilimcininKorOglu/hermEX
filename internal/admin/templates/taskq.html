@@ -17,8 +17,8 @@
 <td><span class="badge">{{.Type}}</span></td>
 <td><span class="status{{if eq .Status "done"}} status-ok{{else if eq .Status "failed"}} status-off{{else if eq .Status "running"}} status-warn{{end}}">{{if eq .Status "done"}}{{t "taskq.done"}}{{else if eq .Status "failed"}}{{t "taskq.failed"}}{{else if eq .Status "running"}}{{t "taskq.running"}}{{else if eq .Status "pending"}}{{t "taskq.pending"}}{{else}}{{.Status}}{{end}}</span></td>
 <td>{{.CreatedBy}}</td>
-<td class="nowrap">{{.Created}}</td>
-<td class="nowrap">{{.Updated}}</td>
+<td class="nowrap">{{template "when" .Created}}</td>
+<td class="nowrap">{{template "when" .Updated}}</td>
 <td><small>{{t .Message}}</small></td>
 </tr>
 {{else}}<tr><td colspan="7" class="empty{{if .TasksError}} failed{{end}}">{{t (or .TasksError "taskq.none")}}</td></tr>{{end}}

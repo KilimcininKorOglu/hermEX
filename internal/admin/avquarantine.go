@@ -4,14 +4,13 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"hermex/internal/logging"
 )
 
 // avQuarantineView is one quarantine record formatted for the panel.
 type avQuarantineView struct {
-	When       string
+	When       stamp
 	Direction  string
 	From       string
 	Recipients string
@@ -51,10 +50,11 @@ func (s *Server) handleUIAVQuarantine(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		errMsg = s.notice("avQuarantine.unread", err)
 	}
+	c := requestClock(r)
 	views := make([]avQuarantineView, 0, len(recs))
 	for _, rec := range recs {
 		views = append(views, avQuarantineView{
-			When:       time.Unix(rec.CreatedAt, 0).UTC().Format("2006-01-02 15:04 UTC"),
+			When:       c.unix(rec.CreatedAt),
 			Direction:  rec.Direction,
 			From:       rec.MailFrom,
 			Recipients: strings.Join(rec.Recipients, ", "),

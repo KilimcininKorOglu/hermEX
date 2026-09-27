@@ -33,7 +33,7 @@
 <thead><tr><th>{{t "reports.colReceived"}}</th><th>{{t "reports.domain"}}</th><th>{{t "reports.colSourceIP"}}</th><th>{{t "reports.colFailure"}}</th><th>{{t "reports.colOriginalSender"}}</th><th>{{t "reports.colDKIMDomain"}}</th></tr></thead>
 <tbody>
 {{range .Failures}}<tr>
-<td class="nowrap"><a href="/admin/ui/reports/failure/{{.ID}}">{{.Received}}</a></td>
+<td class="nowrap"><a href="/admin/ui/reports/failure/{{.ID}}">{{template "when" .Received}}</a></td>
 <td>{{.Domain}}</td>
 <td>{{.SourceIP}}</td>
 <td>{{.AuthFailure}}</td>
@@ -96,7 +96,7 @@
 <td>{{.Domain}}</td>
 <td>{{.OrgName}}</td>
 <td><code>{{.ReportID}}</code></td>
-<td class="nowrap">{{.Received}}</td>
+<td class="nowrap">{{template "when" .Received}}</td>
 <td>{{.Total}}</td>
 <td>{{.Failed}}</td>
 </tr>

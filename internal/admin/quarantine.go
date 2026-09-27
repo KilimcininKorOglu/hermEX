@@ -13,7 +13,7 @@ import (
 // reviewing a user's quarantine for false positives does not read their mail.
 type quarantineMsg struct {
 	UID     uint32
-	Date    string
+	Date    stamp
 	Sender  string
 	Subject string
 	Size    int64
@@ -110,11 +110,12 @@ func (s *Server) renderQuarantine(w http.ResponseWriter, r *http.Request, email,
 		s.render(w, r, "quarantine", data)
 		return
 	}
+	c := requestClock(r)
 	views := make([]quarantineMsg, 0, len(msgs))
 	for _, m := range msgs {
 		views = append(views, quarantineMsg{
 			UID:     m.UID,
-			Date:    m.InternalDate.Format("2006-01-02 15:04"),
+			Date:    c.at(m.InternalDate),
 			Sender:  m.Sender,
 			Subject: m.Subject,
 			Size:    m.Size,

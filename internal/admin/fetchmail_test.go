@@ -4,7 +4,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -184,5 +183,3 @@ func TestUIUserDetailShowsFetchmail(t *testing.T) {
 		}
 	}
 }
-
-func itoa(n int64) string { return strconv.FormatInt(n, 10) }

@@ -36,7 +36,28 @@ func validateTLSCert(certPEM, keyPEM string) (notAfter int64, dnsNames []string,
 // the default) and a human expiry date.
 type tlsCertView struct {
 	Name    string
-	Expires string
+	Expires stamp
+	// Left is how long the certificate stays valid: "tls.daysLeft" with the
+	// count, or "tls.expired".
+	Left string
+	// Soon marks a certificate that expires within certWarnDays or has expired.
+	Soon bool
+}
+
+// certWarnDays is how close to its expiry a certificate is flagged. An ACME
+// certificate renews 30 days ahead, so one inside this window has missed a
+// renewal.
+const certWarnDays = 21
+
+// certView renders one stored certificate's expiry.
+func certView(c clock, name string, notAfterMs int64) tlsCertView {
+	exp := time.UnixMilli(notAfterMs)
+	days := int64(exp.Sub(c.now) / (24 * time.Hour))
+	left := msg("tls.daysLeft", itoa(days))
+	if !exp.After(c.now) {
+		left = "tls.expired"
+	}
+	return tlsCertView{Name: name, Expires: c.at(exp), Left: left, Soon: days < certWarnDays}
 }
 
 // tlsCertsPageData builds the TLS-certificates page model: the certificate mode and
@@ -44,7 +65,7 @@ type tlsCertView struct {
 func (s *Server) tlsCertsPageData(r *http.Request, notice panelNotice) map[string]any {
 	failed := readFailures{}
 	data := map[string]any{"Nav": "tls", "CSRF": csrfCookieValue(r), "Notice": notice, "ReadFailed": failed}
-	s.addTLSCertViews(data)
+	s.addTLSCertViews(data, requestClock(r))
 	settings, _, err := s.dir.GetTLSSettings()
 	if s.noteRead(failed, "mode", "what.certMode", err) {
 		data["Mode"], data["ACMEEmail"] = settings.Mode, settings.ACMEEmail
@@ -59,7 +80,7 @@ func (s *Server) tlsCertsPageData(r *http.Request, notice panelNotice) map[strin
 
 // addTLSCertViews lists the stored certificates on a page-data map, or reports
 // that they could not be read, which the table must not show as none stored.
-func (s *Server) addTLSCertViews(data map[string]any) {
+func (s *Server) addTLSCertViews(data map[string]any, c clock) {
 	infos, err := s.dir.ListTLSCerts()
 	if err != nil {
 		data["CertsError"] = s.notice("tls.certsUnread", err)
@@ -67,7 +88,7 @@ func (s *Server) addTLSCertViews(data map[string]any) {
 	}
 	views := make([]tlsCertView, len(infos))
 	for i, info := range infos {
-		views[i] = tlsCertView{Name: info.Name, Expires: time.UnixMilli(info.NotAfter).UTC().Format("2006-01-02")}
+		views[i] = certView(c, info.Name, info.NotAfter)
 	}
 	data["Certs"] = views
 }

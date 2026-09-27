@@ -8,7 +8,7 @@
 <thead><tr><th>{{t "avQuarantine.colHeld"}}</th><th>{{t "avQuarantine.colDirection"}}</th><th>{{t "avQuarantine.colFrom"}}</th><th>{{t "avQuarantine.colRecipients"}}</th><th>{{t "avQuarantine.colSubject"}}</th><th>{{t "avQuarantine.colSignature"}}</th><th>{{t "avQuarantine.colStatus"}}</th></tr></thead>
 <tbody>
 {{range .Items}}<tr>
-<td class="nowrap">{{.When}}</td>
+<td class="nowrap">{{template "when" .When}}</td>
 <td><span class="badge">{{if eq .Direction "inbound"}}{{t "avQuarantine.inbound"}}{{else if eq .Direction "outbound"}}{{t "avQuarantine.outbound"}}{{else}}{{.Direction}}{{end}}</span></td>
 <td>{{.From}}</td>
 <td>{{.Recipients}}</td>

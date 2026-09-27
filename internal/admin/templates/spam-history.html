@@ -8,7 +8,7 @@
 <thead><tr><th>{{t "spamHistory.colTime"}}</th><th>{{t "spamHistory.colFrom"}}</th><th>{{t "spamHistory.colClientIP"}}</th><th>{{t "spamHistory.colScore"}}</th><th>{{t "spamHistory.colSpam"}}</th><th>{{t "spamHistory.colReasons"}}</th></tr></thead>
 <tbody>
 {{range .Verdicts}}<tr>
-<td class="nowrap">{{.Time}}</td>
+<td class="nowrap">{{template "when" .Time}}</td>
 <td>{{.MailFrom}}</td>
 <td>{{.RemoteAddr}}</td>
 <td>{{.Score}}</td>

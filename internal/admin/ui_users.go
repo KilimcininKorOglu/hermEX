@@ -271,7 +271,7 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 	s.addUserAddressing(data, failed, u.Username)
 	s.addUserMailboxSettings(data, failed, u.Maildir)
 	s.addUserGrants(data, failed, u.Maildir)
-	s.addUserLists(data, u)
+	s.addUserLists(data, u, requestClock(r))
 	s.render(w, r, "user_detail.html", data)
 }
 
@@ -351,9 +351,9 @@ func (s *Server) addUserGrants(data map[string]any, failed readFailures, maildir
 // addUserLists fills the user detail lists: the mobile devices, the remote accounts,
 // the folders and the admin roles. A list that could not be read is reported, not
 // shown as empty.
-func (s *Server) addUserLists(data map[string]any, u directory.UserDetail) {
+func (s *Server) addUserLists(data map[string]any, u directory.UserDetail, c clock) {
 	devs, err := s.store.ListDevices(u.Maildir)
-	data["Devices"] = deviceViewsOf(devs)
+	data["Devices"] = deviceViewsOf(devs, c)
 	if err != nil {
 		data["DevicesError"] = s.notice("userDetail.devicesUnread", err)
 	}

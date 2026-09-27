@@ -15,7 +15,7 @@
 <table class="grid">
 <thead><tr><th>{{t "logs.colTime"}}</th><th>{{t "logs.colLevel"}}</th><th>{{t "logs.subsystem"}}</th><th>{{t "logs.colEvent"}}</th><th>{{t "logs.colUser"}}</th><th>{{t "logs.colAddress"}}</th></tr></thead>
 <tbody>
-{{range .Entries}}<tr><td class="nowrap">{{.Time.Format "2006-01-02 15:04:05"}}</td><td><span class="status{{if eq .Level "error"}} status-off{{else if eq .Level "warn"}} status-warn{{end}}">{{.Level}}</span></td><td>{{.Subsystem}}</td><td>{{.Name}}{{if .Err}}<small>{{.Err}}</small>{{end}}</td><td>{{.User}}</td><td>{{.RemoteAddr}}</td></tr>
+{{range .Entries}}<tr><td class="nowrap">{{template "when" ($.Clock.At .Time)}}</td><td><span class="status{{if eq .Level "error"}} status-off{{else if eq .Level "warn"}} status-warn{{end}}">{{.Level}}</span></td><td>{{.Subsystem}}</td><td>{{.Name}}{{if .Err}}<small>{{.Err}}</small>{{end}}</td><td>{{.User}}</td><td>{{.RemoteAddr}}</td></tr>
 {{else}}<tr><td colspan="6" class="empty">{{t "logs.none"}}</td></tr>
 {{end}}
 </tbody>

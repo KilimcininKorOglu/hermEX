@@ -15,7 +15,7 @@
 <table class="grid">
 <thead><tr><th>{{t "mailboxFailures.colTime"}}</th><th>{{t "mailboxFailures.colMailbox"}}</th><th>{{t "mailboxFailures.colClient"}}</th><th>{{t "mailboxFailures.colError"}}</th></tr></thead>
 <tbody>
-{{range .Entries}}<tr><td class="nowrap">{{.Time.Format "2006-01-02 15:04:05"}}</td><td>{{.User}}</td><td>{{.RemoteAddr}}</td><td><small>{{.Err}}</small></td></tr>
+{{range .Entries}}<tr><td class="nowrap">{{template "when" ($.Clock.At .Time)}}</td><td>{{.User}}</td><td>{{.RemoteAddr}}</td><td><small>{{.Err}}</small></td></tr>
 {{else}}<tr><td colspan="4" class="empty">{{t "mailboxFailures.none"}}</td></tr>
 {{end}}
 </tbody>

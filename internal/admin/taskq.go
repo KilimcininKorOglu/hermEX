@@ -2,7 +2,6 @@ package admin
 
 import (
 	"net/http"
-	"time"
 
 	"hermex/internal/directory"
 )
@@ -14,20 +13,12 @@ type taskView struct {
 	Status    string
 	CreatedBy string
 	Message   string
-	Created   string
-	Updated   string
-}
-
-// taskTime formats a Unix timestamp for display, or "" when zero.
-func taskTime(s int64) string {
-	if s == 0 {
-		return ""
-	}
-	return time.Unix(s, 0).Format("2006-01-02 15:04:05")
+	Created   stamp
+	Updated   stamp
 }
 
 // taskViews reads the most recent tasks and projects them for display.
-func (s *Server) taskViews() ([]taskView, error) {
+func (s *Server) taskViews(c clock) ([]taskView, error) {
 	tasks, err := s.dir.ListTasks(100)
 	if err != nil {
 		return nil, err
@@ -36,7 +27,7 @@ func (s *Server) taskViews() ([]taskView, error) {
 	for _, t := range tasks {
 		out = append(out, taskView{
 			ID: t.ID, Type: t.Type, Status: t.Status, CreatedBy: t.CreatedBy, Message: t.Message,
-			Created: taskTime(t.CreatedAt), Updated: taskTime(t.UpdatedAt),
+			Created: c.unix(t.CreatedAt), Updated: c.unix(t.UpdatedAt),
 		})
 	}
 	return out, nil
@@ -48,7 +39,7 @@ func (s *Server) handleUITaskq(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	data := s.taskqPanelData()
+	data := s.taskqPanelData(r)
 	data["Nav"] = "taskq"
 	s.render(w, r, "taskq.html", data)
 }
@@ -58,13 +49,13 @@ func (s *Server) handleUITaskqPanel(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	s.render(w, r, "taskq-panel", s.taskqPanelData())
+	s.render(w, r, "taskq-panel", s.taskqPanelData(r))
 }
 
 // taskqPanelData returns what the task table renders. A failed read is reported in
 // the table on every poll, so it never reads as an empty queue.
-func (s *Server) taskqPanelData() map[string]any {
-	views, err := s.taskViews()
+func (s *Server) taskqPanelData(r *http.Request) map[string]any {
+	views, err := s.taskViews(requestClock(r))
 	return map[string]any{"Tasks": views, "TasksError": s.listFailure("what.taskQueue", err)}
 }
 

@@ -12,7 +12,7 @@ func (s *Server) handleUILogs(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	data := map[string]any{"Nav": "logs", "CSRF": csrfCookieValue(r)}
+	data := map[string]any{"Nav": "logs", "CSRF": csrfCookieValue(r), "Clock": requestClock(r)}
 	if s.logs == nil {
 		data["Disabled"] = true
 		s.render(w, r, "logs.html", data)

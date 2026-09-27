@@ -271,7 +271,7 @@
     "asVersion": "AS version",
     "folders": "Folders",
     "status": "Status",
-    "firstSync": "First sync {0}",
+    "firstSync": "First sync",
     "resync": "Resync",
     "confirmWipe": "Remote wipe {0}? This erases the device.",
     "wipe": "Wipe",

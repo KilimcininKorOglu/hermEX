@@ -17,7 +17,6 @@ var reportKinds = []string{"dmarc", "tlsrpt", "failure"}
 
 const (
 	reportDateLayout = "2006-01-02"
-	reportTimeLayout = "2006-01-02 15:04 UTC"
 	reportListLimit  = 200
 )
 
@@ -28,7 +27,7 @@ type reportListView struct {
 	OrgName  string
 	ReportID string
 	Period   string
-	Received string
+	Received stamp
 	Total    int64
 	Failed   int64
 }
@@ -37,24 +36,16 @@ type reportListView struct {
 type failureListView struct {
 	ID               int64
 	Domain           string
-	Received         string
+	Received         stamp
 	SourceIP         string
 	AuthFailure      string
 	OriginalMailFrom string
 	DKIMDomain       string
 }
 
-// unixUTC formats a unix time for the report pages; zero reads as unknown.
-func unixUTC(sec int64) string {
-	if sec == 0 {
-		return ""
-	}
-	return time.Unix(sec, 0).UTC().Format(reportTimeLayout)
-}
-
-// reportPeriod formats a report's period.
-func reportPeriod(begin, end int64) string {
-	return msg("reports.period", unixUTC(begin), unixUTC(end))
+// reportPeriod formats a report's period in the operator's zone.
+func reportPeriod(c clock, begin, end int64) string {
+	return msg("reports.period", c.unix(begin).Short, c.unix(end).Short)
 }
 
 // handleUIReports renders the report page: one tab per report kind, filtered by
@@ -70,7 +61,8 @@ func (s *Server) handleUIReports(w http.ResponseWriter, r *http.Request) {
 	if !slices.Contains(reportKinds, kind) {
 		kind = reportKinds[0]
 	}
-	filter, problems := reportFilterFrom(q, all, ids)
+	c := requestClock(r)
+	filter, problems := reportFilterFrom(q, all, ids, c.loc)
 	data := map[string]any{
 		"Nav": "reports", "Kind": kind, "CSRF": csrfCookieValue(r),
 		"DomainID": q.Get("domain"), "From": q.Get("from"), "To": q.Get("to"),
@@ -87,7 +79,7 @@ func (s *Server) handleUIReports(w http.ResponseWriter, r *http.Request) {
 		}
 		data["PostmasterWarnings"] = warnings
 	}
-	if err := s.fillReports(data, kind, filter); err != nil {
+	if err := s.fillReports(data, kind, filter, c); err != nil {
 		problems = append(problems, s.notice("reports.unread", err))
 	}
 	if cl, ok := s.uiClaims(r); ok && s.isSystemAdmin(cl.UserID) {
@@ -99,9 +91,10 @@ func (s *Server) handleUIReports(w http.ResponseWriter, r *http.Request) {
 
 // reportFilterFrom builds the directory filter from the page's query: the
 // caller's scope, narrowed to one domain when the domain filter names one inside
-// it, and the period. The "to" date is inclusive. A domain outside the scope
-// selects nothing. It returns a notice for each value it could not read.
-func reportFilterFrom(q url.Values, all bool, ids map[int64]bool) (directory.ReportFilter, []string) {
+// it, and the period, whose dates are days in the operator's zone. The "to" date
+// is inclusive. A domain outside the scope selects nothing. It returns a notice
+// for each value it could not read.
+func reportFilterFrom(q url.Values, all bool, ids map[int64]bool, loc *time.Location) (directory.ReportFilter, []string) {
 	f := directory.ReportFilter{All: all, DomainIDs: domainIDList(ids), Limit: reportListLimit}
 	var problems []string
 	if v := q.Get("domain"); v != "" {
@@ -115,32 +108,31 @@ func reportFilterFrom(q url.Values, all bool, ids map[int64]bool) (directory.Rep
 			f.All, f.DomainIDs = false, nil
 		}
 	}
-	from, ok := parseReportDate(q.Get("from"))
+	from, ok := parseReportDate(q.Get("from"), loc, 0)
 	if !ok {
 		problems = append(problems, "reports.badStart")
 	}
-	to, ok := parseReportDate(q.Get("to"))
+	to, ok := parseReportDate(q.Get("to"), loc, 1)
 	if !ok {
 		problems = append(problems, "reports.badEnd")
-	}
-	if to > 0 {
-		to += int64((24 * time.Hour).Seconds())
 	}
 	f.From, f.To = from, to
 	return f, problems
 }
 
-// parseReportDate reads a YYYY-MM-DD date as the unix time of its start in UTC.
-// An empty value is no bound (0); ok is false for a value that is not a date.
-func parseReportDate(v string) (int64, bool) {
+// parseReportDate reads a YYYY-MM-DD date as the unix time of the start of that
+// day in loc, moved on by days whole days (1 gives the end of an inclusive
+// bound). An empty value is no bound (0); ok is false for a value that is not a
+// date.
+func parseReportDate(v string, loc *time.Location, days int) (int64, bool) {
 	if v == "" {
 		return 0, true
 	}
-	t, err := time.Parse(reportDateLayout, v)
+	t, err := time.ParseInLocation(reportDateLayout, v, loc)
 	if err != nil {
 		return 0, false
 	}
-	return t.Unix(), true
+	return t.AddDate(0, 0, days).Unix(), true
 }
 
 // reportDomains lists the domains the caller may filter by.
@@ -198,7 +190,7 @@ func (s *Server) postmasterWarnings(domains []directory.DomainInfo) ([]postmaste
 }
 
 // fillReports reads one tab's summary and list into the page data.
-func (s *Server) fillReports(data map[string]any, kind string, f directory.ReportFilter) error {
+func (s *Server) fillReports(data map[string]any, kind string, f directory.ReportFilter, c clock) error {
 	switch kind {
 	case "tlsrpt":
 		summary, err := s.dir.TLSSummary(f)
@@ -206,11 +198,11 @@ func (s *Server) fillReports(data map[string]any, kind string, f directory.Repor
 			return err
 		}
 		list, err := s.dir.ListTLSReports(f)
-		data["TLSSummary"], data["Reports"] = summary, reportListViews(list)
+		data["TLSSummary"], data["Reports"] = summary, reportListViews(list, c)
 		return err
 	case "failure":
 		list, err := s.dir.ListDMARCFailures(f)
-		data["Failures"] = failureListViews(list)
+		data["Failures"] = failureListViews(list, c)
 		return err
 	default:
 		summary, err := s.dir.DMARCSummary(f)
@@ -218,28 +210,28 @@ func (s *Server) fillReports(data map[string]any, kind string, f directory.Repor
 			return err
 		}
 		list, err := s.dir.ListDMARCReports(f)
-		data["DMARCSummary"], data["Reports"] = summary, reportListViews(list)
+		data["DMARCSummary"], data["Reports"] = summary, reportListViews(list, c)
 		return err
 	}
 }
 
-func reportListViews(list []directory.ReportListing) []reportListView {
+func reportListViews(list []directory.ReportListing, c clock) []reportListView {
 	out := make([]reportListView, 0, len(list))
 	for _, l := range list {
 		out = append(out, reportListView{
 			ID: l.ID, Domain: l.Domain, OrgName: l.OrgName, ReportID: l.ReportID,
-			Period: reportPeriod(l.Begin, l.End), Received: unixUTC(l.ReceivedAt),
+			Period: reportPeriod(c, l.Begin, l.End), Received: c.unix(l.ReceivedAt),
 			Total: l.Total, Failed: l.Failed,
 		})
 	}
 	return out
 }
 
-func failureListViews(list []directory.DMARCFailure) []failureListView {
+func failureListViews(list []directory.DMARCFailure, c clock) []failureListView {
 	out := make([]failureListView, 0, len(list))
 	for _, f := range list {
 		out = append(out, failureListView{
-			ID: f.ID, Domain: f.Domain, Received: unixUTC(f.ReceivedAt), SourceIP: f.SourceIP,
+			ID: f.ID, Domain: f.Domain, Received: c.unix(f.ReceivedAt), SourceIP: f.SourceIP,
 			AuthFailure: f.AuthFailure, OriginalMailFrom: f.OriginalMailFrom, DKIMDomain: f.DKIMDomain,
 		})
 	}
@@ -287,9 +279,10 @@ func (s *Server) handleUIDMARCReport(w http.ResponseWriter, r *http.Request) {
 	if !s.reportVisible(w, found, err, all || ids[rep.DomainID]) {
 		return
 	}
+	c := requestClock(r)
 	s.render(w, r, "report-dmarc.html", map[string]any{
 		"Nav": "reports", "CSRF": csrfCookieValue(r), "R": rep,
-		"Period": reportPeriod(rep.Begin, rep.End), "Received": unixUTC(rep.ReceivedAt),
+		"Period": reportPeriod(c, rep.Begin, rep.End), "Received": c.unix(rep.ReceivedAt).Full,
 	})
 
 }
@@ -304,9 +297,10 @@ func (s *Server) handleUITLSReport(w http.ResponseWriter, r *http.Request) {
 	if !s.reportVisible(w, found, err, all || ids[rep.DomainID]) {
 		return
 	}
+	c := requestClock(r)
 	s.render(w, r, "report-tlsrpt.html", map[string]any{
 		"Nav": "reports", "CSRF": csrfCookieValue(r), "R": rep,
-		"Period": reportPeriod(rep.Begin, rep.End), "Received": unixUTC(rep.ReceivedAt),
+		"Period": reportPeriod(c, rep.Begin, rep.End), "Received": c.unix(rep.ReceivedAt).Full,
 	})
 
 }
@@ -321,9 +315,10 @@ func (s *Server) handleUIDMARCFailure(w http.ResponseWriter, r *http.Request) {
 	if !s.reportVisible(w, found, err, all || ids[rep.DomainID]) {
 		return
 	}
+	c := requestClock(r)
 	s.render(w, r, "report-failure.html", map[string]any{
 		"Nav": "reports", "CSRF": csrfCookieValue(r), "R": rep,
-		"Arrival": unixUTC(rep.ArrivalDate), "Received": unixUTC(rep.ReceivedAt),
+		"Arrival": c.unix(rep.ArrivalDate).Full, "Received": c.unix(rep.ReceivedAt).Full,
 	})
 
 }

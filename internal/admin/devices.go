@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"time"
 
 	"hermex/internal/activesync"
 )
@@ -84,23 +83,12 @@ type deviceView struct {
 	DeviceType    string
 	UserAgent     string
 	ASVersion     string
-	FirstSync     string
-	LastSync      string
+	FirstSync     stamp
+	LastSync      stamp
 	FoldersSynced int
 	Status        string
 	CanWipe       bool // no wipe outstanding -> a wipe can be queued
 	CanCancel     bool // a wipe is queued but not yet acknowledged -> it can be cancelled
-}
-
-// deviceTimeLayout is the read-only display form for device timestamps (local
-// wall-clock); the open-ended value (0) renders empty.
-const deviceTimeLayout = "2006-01-02 15:04"
-
-func formatDeviceTime(sec int64) string {
-	if sec == 0 {
-		return ""
-	}
-	return time.Unix(sec, 0).Local().Format(deviceTimeLayout)
 }
 
 // wipeStatusLabel renders a device's remote-wipe status for display.
@@ -126,7 +114,7 @@ func wipeStatusLabel(status int) string {
 }
 
 // deviceViewsOf builds the table model from the merged device list.
-func deviceViewsOf(devs []activesync.DeviceInfo) []deviceView {
+func deviceViewsOf(devs []activesync.DeviceInfo, c clock) []deviceView {
 	out := make([]deviceView, 0, len(devs))
 	for _, d := range devs {
 		wiped := d.WipeStatus == activesync.WipeStatusWiped || d.WipeStatus == activesync.WipeStatusAccountWiped
@@ -136,8 +124,8 @@ func deviceViewsOf(devs []activesync.DeviceInfo) []deviceView {
 			DeviceType:    d.DeviceType,
 			UserAgent:     d.UserAgent,
 			ASVersion:     d.ASVersion,
-			FirstSync:     formatDeviceTime(d.FirstSync),
-			LastSync:      formatDeviceTime(d.LastSync),
+			FirstSync:     c.unix(d.FirstSync),
+			LastSync:      c.unix(d.LastSync),
 			FoldersSynced: d.FoldersSynced,
 			Status:        wipeStatusLabel(d.WipeStatus),
 			CanWipe:       d.WipeStatus < activesync.WipeStatusPending,
@@ -186,7 +174,7 @@ func (s *Server) renderUserDevices(w http.ResponseWriter, r *http.Request, email
 	s.render(w, r, "user-devices", map[string]any{
 		"Email":        email,
 		"CSRF":         csrf,
-		"Devices":      deviceViewsOf(devs),
+		"Devices":      deviceViewsOf(devs, requestClock(r)),
 		"Error":        errMsg,
 		"DevicesError": listErr,
 	})

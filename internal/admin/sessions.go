@@ -6,7 +6,7 @@ import (
 )
 
 // sessionView is one live ActiveSync session's row in the mobile-devices monitor:
-// the stored telemetry plus a derived status and a relative age.
+// the stored telemetry plus a derived status and the last activity.
 type sessionView struct {
 	User       string
 	IP         string
@@ -15,15 +15,14 @@ type sessionView struct {
 	Command    string
 	ASVersion  string
 	Push       bool
-	AgeSec     int64
+	LastActive stamp
 	Status     string
 }
 
 // sessionViews reads the non-stale live sessions and projects them for display,
-// deriving "Active"/"Ended" and the seconds since the last activity.
-func (s *Server) sessionViews() ([]sessionView, error) {
-	now := time.Now().Unix()
-	recs, err := s.dir.ListActiveSessions(now)
+// deriving "Active"/"Ended" and when the session was last active.
+func (s *Server) sessionViews(c clock) ([]sessionView, error) {
+	recs, err := s.dir.ListActiveSessions(c.now.Unix())
 	if err != nil {
 		return nil, err
 	}
@@ -33,10 +32,11 @@ func (s *Server) sessionViews() ([]sessionView, error) {
 		if rec.EndedAt > 0 {
 			status = "Ended"
 		}
-		age := max(now-rec.LastUpdate, 0)
+		// A clock step between daemons must not show an activity in the future.
+		last := c.unix(min(rec.LastUpdate, c.now.Unix()))
 		out = append(out, sessionView{
 			User: rec.Username, IP: rec.IP, DeviceType: rec.DeviceType, DeviceID: rec.DeviceID,
-			Command: rec.Command, ASVersion: rec.ASVersion, Push: rec.Push, AgeSec: age, Status: status,
+			Command: rec.Command, ASVersion: rec.ASVersion, Push: rec.Push, LastActive: last, Status: status,
 		})
 	}
 	return out, nil
@@ -44,8 +44,8 @@ func (s *Server) sessionViews() ([]sessionView, error) {
 
 // sessionsPanelData is the session table's model. A failed read is reported
 // rather than rendered as an empty table, which reads as no device connected.
-func (s *Server) sessionsPanelData() map[string]any {
-	views, err := s.sessionViews()
+func (s *Server) sessionsPanelData(r *http.Request) map[string]any {
+	views, err := s.sessionViews(requestClock(r))
 	if err != nil {
 		return map[string]any{"Error": s.notice("mobileDevices.unread", err)}
 	}
@@ -57,7 +57,7 @@ func (s *Server) handleUIMobileDevices(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	data := s.sessionsPanelData()
+	data := s.sessionsPanelData(r)
 	data["Nav"], data["CSRF"] = "mobiledevices", csrfCookieValue(r)
 	s.render(w, r, "mobile_devices.html", data)
 }
@@ -67,7 +67,7 @@ func (s *Server) handleUIMobileDevicesPanel(w http.ResponseWriter, r *http.Reque
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	s.render(w, r, "sessions-panel", s.sessionsPanelData())
+	s.render(w, r, "sessions-panel", s.sessionsPanelData(r))
 }
 
 // handleGetMobileDevices returns the live sessions as JSON (system admins).
