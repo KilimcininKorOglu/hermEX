@@ -190,6 +190,26 @@ func TestUISaveLDAPPreservesPassword(t *testing.T) {
 	}
 }
 
+// TestUISaveLDAPRefusesWhenTheStoredOneCannotBeRead proves a save stops when the
+// stored configuration cannot be read. An empty bind password keeps the stored one,
+// so the save stored an empty password in its place.
+func TestUISaveLDAPRefusesWhenTheStoredOneCannotBeRead(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		ldap:     map[int64]directory.LDAPConfig{0: {URI: "old", BindPassword: "kept-secret"}},
+		readErrs: map[string]error{"GetLDAPConfig": errReadFailed},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/ldap", session, csrf,
+		url.Values{"uri": {"new"}, "starttls": {"on"}, "bind_password": {""}}), http.StatusOK, "save")
+	wantContains(t, body, "nothing was saved", "the refused save is reported")
+	if got := d.ldap[0]; got.BindPassword != "kept-secret" || got.URI != "old" {
+		t.Errorf("a save after a failed read replaced the stored configuration: %+v", got)
+	}
+}
+
 // TestUISyncLDAP proves the sync trigger enqueues an async task rather than
 // syncing inline: the response acknowledges the queued task and nothing is
 // upserted until the worker runs it.

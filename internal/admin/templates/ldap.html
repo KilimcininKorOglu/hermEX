@@ -12,6 +12,7 @@
 {{if .Saved}}<p class="ok">Configuration saved.</p>{{end}}
 {{if .SyncResult}}<p class="ok">{{.SyncResult}}</p>{{end}}
 {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{with index .ReadFailed "config"}}<p class="error">{{.}}</p>{{else}}
 <form class="stack" hx-post="/admin/ui/ldap" hx-target="#ldap-panel" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <section class="card">
@@ -67,6 +68,7 @@
 
 <div><button type="submit">Save configuration</button></div>
 </form>
+{{end}}
 
 <section class="card">
 {{template "card-head" (dict "Icon" "refresh-cw" "Title" "Synchronize" "Desc" "Run one sync now with the saved configuration. Save a change first; the sync does not read this form.")}}

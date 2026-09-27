@@ -37,6 +37,8 @@ func TestAFailedReadHidesTheFormItFeeds(t *testing.T) {
 		{"GetDomainSyncPolicy", "/admin/ui/domains/1", `/admin/ui/domains/1/syncpolicy"`, "the device policy of this domain"},
 		{"GetCreateDefaults", "/admin/ui/domains/1", `/admin/ui/domains/1/createdefaults"`, "the create defaults override"},
 		{"GetDomainBranding", "/admin/ui/domains/1", `/admin/ui/domains/1/branding"`, "the login branding"},
+		{"GetLDAPConfig", "/admin/ui/ldap", `hx-post="/admin/ui/ldap"`, "the directory configuration"},
+		{"ListDomains", "/admin/ui/ldap", `hx-post="/admin/ui/ldap"`, "the domains"},
 	} {
 		d := &fakeDir{
 			authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},

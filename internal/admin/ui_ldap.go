@@ -23,32 +23,19 @@ type ldapFieldView struct {
 	Enabled                bool
 }
 
-// ldapPanelData builds the Directory Sync panel data: the stored config with its
-// bind password stripped (never sent to the browser) plus a flag noting whether
-// one is set, and an optional saved/sync/error message.
+// ldapPanelData builds the Directory Sync panel data: the stored config and the
+// domains its contact sync can file under, and an optional saved/sync/error message.
+// The form is hidden when either could not be read: it would show a blank
+// configuration and no filing domain, and a save would store both.
 func (s *Server) ldapPanelData(r *http.Request, saved bool, syncResult, errMsg string) map[string]any {
-	cfg, ok, _ := s.dir.GetLDAPConfig(defaultOrgID)
-	if !ok {
-		// A fresh form starts with StartTLS on: an unchecked box next to an ldap://
-		// URI is a plaintext bind, and that must not be the path of least resistance.
-		cfg.StartTLS = true
-	}
-	bindSet := ok && cfg.BindPassword != ""
-	cfg.BindPassword = "" // never echo the secret back to the browser
-	fields := make([]ldapFieldView, 0)
-	for _, f := range directory.LDAPProfileFields() {
-		s := cfg.SyncFields[f.Key]
-		fields = append(fields, ldapFieldView{Key: f.Key, DefaultAttr: f.DefaultAttr, Attr: s.Attr, Enabled: s.Enabled})
-	}
-	domains, _ := s.dir.ListDomains()
-	data := map[string]any{
-		"Nav":             "ldap",
-		"CSRF":            csrfCookieValue(r),
-		"Config":          cfg,
-		"BindPasswordSet": bindSet,
-		"Saved":           saved,
-		"Fields":          fields,
-		"Domains":         domains,
+	failed := readFailures{}
+	data := map[string]any{"Nav": "ldap", "CSRF": csrfCookieValue(r), "Saved": saved, "ReadFailed": failed}
+	cfg, found, cfgErr := s.dir.GetLDAPConfig(defaultOrgID)
+	domains, domErr := s.dir.ListDomains()
+	if s.noteRead(failed, "config", "the directory configuration", cfgErr) &&
+		s.noteRead(failed, "config", "the domains", domErr) {
+		addLDAPConfig(data, cfg, found)
+		data["Domains"] = domains
 	}
 	if syncResult != "" {
 		data["SyncResult"] = syncResult
@@ -57,6 +44,24 @@ func (s *Server) ldapPanelData(r *http.Request, saved bool, syncResult, errMsg s
 		data["Error"] = errMsg
 	}
 	return data
+}
+
+// addLDAPConfig merges the stored configuration into the panel data with its bind
+// password stripped (never sent to the browser) plus a flag noting whether one is set.
+func addLDAPConfig(data map[string]any, cfg directory.LDAPConfig, found bool) {
+	if !found {
+		// A fresh form starts with StartTLS on: an unchecked box next to an ldap://
+		// URI is a plaintext bind, and that must not be the path of least resistance.
+		cfg.StartTLS = true
+	}
+	data["BindPasswordSet"] = found && cfg.BindPassword != ""
+	cfg.BindPassword = "" // never echo the secret back to the browser
+	fields := make([]ldapFieldView, 0)
+	for _, f := range directory.LDAPProfileFields() {
+		sf := cfg.SyncFields[f.Key]
+		fields = append(fields, ldapFieldView{Key: f.Key, DefaultAttr: f.DefaultAttr, Attr: sf.Attr, Enabled: sf.Enabled})
+	}
+	data["Config"], data["Fields"] = cfg, fields
 }
 
 // handleUILDAP renders the Directory Sync page (system administrators only).
@@ -73,7 +78,13 @@ func (s *Server) handleUISaveLDAP(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.uiAuthorized(w, r); !ok {
 		return
 	}
-	existing, _, _ := s.dir.GetLDAPConfig(defaultOrgID)
+	// An empty bind password keeps the stored one, so a failed read must stop the
+	// save: it would store the empty password in its place.
+	existing, _, err := s.dir.GetLDAPConfig(defaultOrgID)
+	if err != nil {
+		s.render(w, "ldap-panel", s.ldapPanelData(r, false, "", s.notice("Could not read the stored configuration; nothing was saved.", err)))
+		return
+	}
 	cfg := directory.LDAPConfig{
 		URI:          r.PostFormValue("uri"),
 		StartTLS:     r.PostFormValue("starttls") != "",

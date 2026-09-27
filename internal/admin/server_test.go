@@ -327,8 +327,13 @@ func (f *fakeDir) RevokeAdminRole(_ int64, role string, scopeID int64) error {
 	f.revokedRole, f.revokedScope = role, scopeID
 	return nil
 }
-func (f *fakeDir) ListDomains() ([]directory.DomainInfo, error) { return f.domains, nil }
-func (f *fakeDir) ListUsers() ([]directory.UserInfo, error)     { return f.users, f.listUsersErr }
+func (f *fakeDir) ListDomains() ([]directory.DomainInfo, error) {
+	if err := f.readErrs["ListDomains"]; err != nil {
+		return nil, err
+	}
+	return f.domains, nil
+}
+func (f *fakeDir) ListUsers() ([]directory.UserInfo, error) { return f.users, f.listUsersErr }
 func (f *fakeDir) CreateDomain(name, homedir string) (int64, error) {
 	if f.createErr != nil {
 		return 0, f.createErr
@@ -434,6 +439,9 @@ func (f *fakeDir) AssignDomainToOrg(domainID, orgID int64) (bool, error) {
 	return !f.assignDomainMissing, nil
 }
 func (f *fakeDir) GetLDAPConfig(orgID int64) (directory.LDAPConfig, bool, error) {
+	if err := f.readErrs["GetLDAPConfig"]; err != nil {
+		return directory.LDAPConfig{}, false, err
+	}
 	c, ok := f.ldap[orgID]
 	return c, ok, nil
 }
