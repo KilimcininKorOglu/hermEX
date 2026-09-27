@@ -2,19 +2,24 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<h1>Create defaults</h1>
-<p class="hint">Default values pre-filled into the new-domain and new-user forms. They seed each form; an administrator can still change any field before creating.</p>
-{{with index .ReadFailed "defaults"}}<p class="error">{{.}}</p>{{else}}
-<form class="defaults-form" hx-put="/admin/ui/defaults" hx-target="#user-status" hx-swap="outerHTML"
+<header class="page-head"><div><h1>Create defaults</h1><p class="page-desc">Values pre-filled into the new-domain and new-user forms. An administrator can still change any field before creating.</p></div></header>
+{{template "user-status" .}}
+{{with index .ReadFailed "defaults"}}<section class="card"><p class="error">{{.}}</p></section>{{else}}
+<form class="stack" hx-put="/admin/ui/defaults" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<h2>Domain create parameters</h2>
-<label>Max users <input type="number" name="maxUser" min="0" value="{{.MaxUser}}"> <small>(0 = unlimited)</small></label>
-<h2>User create parameters</h2>
+<section class="card">
+{{template "card-head" (dict "Icon" "globe" "Title" "New domains" "Desc" "Seeds the form that creates a domain.")}}
+<div class="field-grid">
+<label>Max users <input type="number" name="maxUser" min="0" value="{{.MaxUser}}"><small>0 = unlimited</small></label>
+</div>
+</section>
+<section class="card">
+{{template "card-head" (dict "Icon" "user" "Title" "New users" "Desc" "Seeds the form that creates a user. A domain's own override takes precedence.")}}
 {{template "user-create-fields" .Fields}}
+</section>
 <button type="submit">Save defaults</button>
 </form>
 {{end}}
-<div id="user-status"></div>
 </main>
 </div>
 {{template "foot" .}}{{end}}

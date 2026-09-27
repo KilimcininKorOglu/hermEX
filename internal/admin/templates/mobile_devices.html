@@ -2,9 +2,11 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<h1>Mobile devices</h1>
-<p class="hint">Live ActiveSync sessions across all users (refreshes every 2 seconds).</p>
+<header class="page-head"><div><h1>Mobile devices</h1><p class="page-desc">Live ActiveSync sessions across all users. The list refreshes every 2 seconds.</p></div></header>
+<section class="card">
+{{template "card-head" (dict "Icon" "smartphone" "Title" "Live sessions" "Desc" "Each device's latest ActiveSync command and when it last reached the server.")}}
 {{template "sessions-panel" .}}
+</section>
 </main>
 </div>
 {{template "foot" .}}{{end}}
@@ -19,8 +21,8 @@
 <td>{{.DeviceType}} <small>{{.DeviceID}}</small></td>
 <td>{{.Command}}{{if .Push}} <span class="badge">push</span>{{end}}</td>
 <td>{{.ASVersion}}</td>
-<td>{{.AgeSec}}s ago</td>
-<td>{{.Status}}</td>
+<td class="nowrap">{{.AgeSec}}s ago</td>
+<td><span class="status{{if eq .Status "Active"}} status-ok{{end}}">{{.Status}}</span></td>
 </tr>
 {{else}}<tr><td colspan="7" class="empty{{if .Error}} failed{{end}}">{{if .Error}}{{.Error}}{{else}}No active sessions.{{end}}</td></tr>
 {{end}}

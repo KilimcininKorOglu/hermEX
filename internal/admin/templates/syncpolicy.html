@@ -2,11 +2,12 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<h1>ActiveSync device policy (server default)</h1>
-<p class="hint">The baseline policy served to every device before a per-user override is merged on top. Leave a field unset to leave it unenforced.</p>
-<p class="hint">Password rules (length, complex characters, expiration, history, failed-attempt limit) apply only when DevicePasswordEnabled is Yes.</p>
+<header class="page-head"><div><h1>Sync policy</h1><p class="page-desc">The baseline ActiveSync policy every device receives before a domain or per-user override is merged on top.</p></div></header>
+{{template "user-status" .}}
+<section class="card">
+{{template "card-head" (dict "Icon" "shield" "Title" "ActiveSync device policy (server default)" "Desc" "Leave a field unset to leave it unenforced. Password rules (length, complex characters, expiration, history, failed-attempt limit) apply only when DevicePasswordEnabled is Yes.")}}
 {{with index .ReadFailed "policy"}}<p class="error">{{.}}</p>{{else}}
-<form class="syncpolicy-form" hx-put="/admin/ui/syncpolicy" hx-target="#user-status" hx-swap="outerHTML"
+<form hx-put="/admin/ui/syncpolicy" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <div class="policy-grid">
 {{range .Fields}}
@@ -19,7 +20,7 @@
 <button type="submit">Save default policy</button>
 </form>
 {{end}}
-<div id="user-status"></div>
+</section>
 </main>
 </div>
 {{template "foot" .}}{{end}}
