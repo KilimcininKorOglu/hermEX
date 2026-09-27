@@ -343,7 +343,7 @@
 {{define "dns-report"}}<table class="grid">
 <thead><tr><th>Record</th><th>Status</th><th>Detail</th></tr></thead>
 <tbody>
-{{range .Items}}<tr><td>{{.Label}}</td><td>{{if .OK}}<span class="ok">OK</span>{{else}}<span class="error">missing</span>{{end}}</td><td>{{.Detail}}</td></tr>
+{{range .Items}}<tr><td>{{.Label}}</td><td>{{if .OK}}<span class="ok">OK</span>{{else if .Failed}}<span class="warn">not checked</span>{{else}}<span class="error">missing</span>{{end}}</td><td>{{.Detail}}</td></tr>
 {{end}}
 </tbody>
 </table>{{end}}

@@ -12,39 +12,55 @@ import (
 )
 
 // fakeResolver is a scripted dnsResolver: a lookup with no scripted record returns
-// a not-found error, exactly as a missing record would.
+// a not-found error, exactly as a missing record would. A name in servfail (an SRV
+// name as "_service._proto.domain") answers a server failure instead, and failAll
+// fails every lookup that way.
 type fakeResolver struct {
-	mx   map[string][]*net.MX
-	txt  map[string][]string
-	host map[string][]string
-	srv  map[string][]*net.SRV
+	mx       map[string][]*net.MX
+	txt      map[string][]string
+	host     map[string][]string
+	srv      map[string][]*net.SRV
+	servfail map[string]bool
+	failAll  bool
 }
 
 func notFound() error { return &net.DNSError{Err: "no such host", IsNotFound: true} }
+
+// serverFailure is the error a resolver returns when it cannot answer.
+func serverFailure() error { return &net.DNSError{Err: "server misbehaving", IsTemporary: true} }
+
+// miss returns the error a lookup of an unscripted name answers.
+func (f fakeResolver) miss(name string) error {
+	if f.failAll || f.servfail[name] {
+		return serverFailure()
+	}
+	return notFound()
+}
 
 func (f fakeResolver) LookupMX(_ context.Context, name string) ([]*net.MX, error) {
 	if v, ok := f.mx[name]; ok {
 		return v, nil
 	}
-	return nil, notFound()
+	return nil, f.miss(name)
 }
 func (f fakeResolver) LookupTXT(_ context.Context, name string) ([]string, error) {
 	if v, ok := f.txt[name]; ok {
 		return v, nil
 	}
-	return nil, notFound()
+	return nil, f.miss(name)
 }
 func (f fakeResolver) LookupHost(_ context.Context, host string) ([]string, error) {
 	if v, ok := f.host[host]; ok {
 		return v, nil
 	}
-	return nil, notFound()
+	return nil, f.miss(host)
 }
 func (f fakeResolver) LookupSRV(_ context.Context, service, proto, name string) (string, []*net.SRV, error) {
-	if v, ok := f.srv["_"+service+"._"+proto+"."+name]; ok {
+	key := "_" + service + "._" + proto + "." + name
+	if v, ok := f.srv[key]; ok {
 		return "", v, nil
 	}
-	return "", nil, notFound()
+	return "", nil, f.miss(key)
 }
 
 // acmeResolver scripts every record for acme.test except autoconfig, so a report
@@ -147,6 +163,66 @@ func TestCheckDomainDNSAllMissing(t *testing.T) {
 		if it.OK {
 			t.Errorf("%s reported OK for a domain with no records", it.Label)
 		}
+	}
+}
+
+// TestCheckDomainDNSDoesNotReportAFailedLookupAsMissing proves a lookup the resolver
+// could not answer is reported as not checked. It was reported as a missing record,
+// so a resolver outage told the operator to publish records that already exist.
+func TestCheckDomainDNSDoesNotReportAFailedLookupAsMissing(t *testing.T) {
+	rep := checkDomainDNS(context.Background(), fakeResolver{failAll: true}, "acme.test", "mail.acme.test", dkimSelector)
+	if len(rep.Items) == 0 {
+		t.Fatal("empty report")
+	}
+	for _, it := range rep.Items {
+		if it.OK || !it.Failed {
+			t.Errorf("%s: OK=%v Failed=%v (%q), want a failed lookup", it.Label, it.OK, it.Failed, it.Detail)
+		}
+		if !strings.Contains(it.Detail, "could not look up") || !strings.Contains(it.Detail, "server misbehaving") {
+			t.Errorf("%s detail = %q, want the failed lookup named", it.Label, it.Detail)
+		}
+	}
+}
+
+// TestCheckDomainDNSPairsAFoundRecordWithAFailedLookup proves a check over two names
+// reports a record it found even when the other lookup failed, and reports the
+// failure only when nothing was found.
+func TestCheckDomainDNSPairsAFoundRecordWithAFailedLookup(t *testing.T) {
+	r := acmeResolver()
+	r.servfail = map[string]bool{
+		"_imap._tcp.acme.test": true, "_carddav._tcp.acme.test": true, "_carddavs._tcp.acme.test": true,
+	}
+	rep := checkDomainDNS(context.Background(), r, "acme.test", "mail.acme.test", dkimSelector)
+	for label, want := range map[string]struct{ ok, failed bool }{
+		"IMAP SRV":    {true, false},
+		"CardDAV SRV": {false, true},
+		"DAV TXT":     {true, false},
+		"POP3 SRV":    {false, false},
+	} {
+		it, ok := reportItem(rep, label)
+		if !ok {
+			t.Errorf("report missing item %q", label)
+			continue
+		}
+		if it.OK != want.ok || it.Failed != want.failed {
+			t.Errorf("%s: OK=%v Failed=%v (%q), want OK=%v Failed=%v", label, it.OK, it.Failed, it.Detail, want.ok, want.failed)
+		}
+	}
+}
+
+// TestUIDomainDNSCheckShowsAFailedLookup proves the report partial labels a failed
+// lookup as not checked rather than missing.
+func TestUIDomainDNSCheckShowsAFailedLookup(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		domainDetail: directory.DomainDetail{ID: 1, Name: "acme.test"},
+	}
+	ts := adminServerDNS(t, d, fakeResolver{failAll: true})
+	session, _ := loginCookies(t, ts)
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/domains/1/dnscheck", session), http.StatusOK, "ui dns check")
+	wantContains(t, page, `<span class="warn">not checked</span>`, "the failed lookup is labelled")
+	if strings.Contains(page, ">missing<") {
+		t.Errorf("a failed lookup is shown as missing:\n%s", page)
 	}
 }
 

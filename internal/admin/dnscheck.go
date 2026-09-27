@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"strconv"
@@ -20,10 +21,13 @@ type dnsResolver interface {
 }
 
 // dnsCheckItem is one resolved record class: whether it was found and a short
-// human detail (the resolved value, or why it is missing).
+// human detail (the resolved value, or why it is missing). Failed marks a lookup
+// the resolver could not answer (a timeout or a server failure), which says
+// nothing about whether the record exists and so is never reported as missing.
 type dnsCheckItem struct {
 	Label  string `json:"label"`
 	OK     bool   `json:"ok"`
+	Failed bool   `json:"failed,omitempty"`
 	Detail string `json:"detail"`
 }
 
@@ -62,10 +66,34 @@ func (c *dnsChecker) add(label string, ok bool, detail string) {
 	c.rep.Items = append(c.rep.Items, dnsCheckItem{Label: label, OK: ok, Detail: detail})
 }
 
+// failed records a lookup of name the resolver could not answer.
+func (c *dnsChecker) failed(label, name string, err error) {
+	detail := "could not look up " + name
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) && dnsErr.Err != "" {
+		detail += ": " + dnsErr.Err
+	}
+	c.rep.Items = append(c.rep.Items, dnsCheckItem{Label: label, Failed: true, Detail: detail})
+}
+
+// lookupFailed reports whether err is a failure to answer rather than an answer
+// that the name or record does not exist. Only the latter proves a record missing.
+func lookupFailed(err error) bool {
+	if err == nil {
+		return false
+	}
+	var dnsErr *net.DNSError
+	return !errors.As(err, &dnsErr) || !dnsErr.IsNotFound
+}
+
 // host reports the addresses a name resolves to, or that it does not resolve.
 func (c *dnsChecker) host(label, name string) {
 	hosts, err := c.r.LookupHost(c.ctx, name)
-	if err != nil || len(hosts) == 0 {
+	if lookupFailed(err) {
+		c.failed(label, name, err)
+		return
+	}
+	if len(hosts) == 0 {
 		c.add(label, false, name+" does not resolve")
 		return
 	}
@@ -74,9 +102,13 @@ func (c *dnsChecker) host(label, name string) {
 
 // txt reports the first TXT record at name carrying the given prefix.
 func (c *dnsChecker) txt(label, name, prefix, missing string) {
-	recs, _ := c.r.LookupTXT(c.ctx, name)
+	recs, err := c.r.LookupTXT(c.ctx, name)
 	if v := findTXT(recs, prefix); v != "" {
 		c.add(label, true, v)
+		return
+	}
+	if lookupFailed(err) {
+		c.failed(label, name, err)
 		return
 	}
 	c.add(label, false, missing)
@@ -85,7 +117,11 @@ func (c *dnsChecker) txt(label, name, prefix, missing string) {
 // srv reports the first SRV target for a service under the domain.
 func (c *dnsChecker) srv(label, service, detailPrefix, missing string) {
 	_, srv, err := c.r.LookupSRV(c.ctx, service, "tcp", c.domain)
-	if err != nil || len(srv) == 0 {
+	if lookupFailed(err) {
+		c.failed(label, "_"+service+"._tcp."+c.domain, err)
+		return
+	}
+	if len(srv) == 0 {
 		c.add(label, false, missing)
 		return
 	}
@@ -105,7 +141,11 @@ func (c *dnsChecker) checkReachability(hostname string) {
 // checkMX reports the domain's mail exchangers.
 func (c *dnsChecker) checkMX() {
 	mx, err := c.r.LookupMX(c.ctx, c.domain)
-	if err != nil || len(mx) == 0 {
+	if lookupFailed(err) {
+		c.failed("MX", c.domain, err)
+		return
+	}
+	if len(mx) == 0 {
 		c.add("MX", false, "no MX record")
 		return
 	}
@@ -153,34 +193,60 @@ func (c *dnsChecker) checkServices() {
 }
 
 // srvPair reports a protocol's implicit-TLS and plaintext SRV records together.
+// A found record answers the check even when the other lookup failed; with none
+// found, a failed lookup leaves the check unanswered rather than missing.
 func (c *dnsChecker) srvPair(label, secure, plain string) {
 	var found []string
+	var lost lostLookup
 	for _, service := range [...]string{secure, plain} {
-		if _, srv, err := c.r.LookupSRV(c.ctx, service, "tcp", c.domain); err == nil && len(srv) > 0 {
+		_, srv, err := c.r.LookupSRV(c.ctx, service, "tcp", c.domain)
+		if len(srv) > 0 && err == nil {
 			found = append(found, "_"+service+"._tcp → "+srvTarget(srv[0]))
 		}
+		lost.note("_"+service+"._tcp."+c.domain, err)
 	}
-	if len(found) == 0 {
-		c.add(label, false, "no _"+secure+"/_"+plain+"._tcp SRV record")
-		return
-	}
-	c.add(label, true, strings.Join(found, ", "))
+	c.addFound(label, found, lost, "no _"+secure+"/_"+plain+"._tcp SRV record")
 }
 
 // checkDAVText reports the TXT records advertising the DAV well-known path.
 func (c *dnsChecker) checkDAVText() {
 	var found []string
+	var lost lostLookup
 	for _, host := range []string{"_caldavs._tcp." + c.domain, "_carddavs._tcp." + c.domain} {
-		recs, _ := c.r.LookupTXT(c.ctx, host)
+		recs, err := c.r.LookupTXT(c.ctx, host)
 		if p := findTXT(recs, "path="); p != "" {
 			found = append(found, host+" → "+p)
 		}
+		lost.note(host, err)
 	}
-	if len(found) == 0 {
-		c.add("DAV TXT", false, `no _caldavs/_carddavs._tcp TXT "path=/dav" record`)
-		return
+	c.addFound("DAV TXT", found, lost, `no _caldavs/_carddavs._tcp TXT "path=/dav" record`)
+}
+
+// lostLookup keeps the first lookup of a multi-name check the resolver could not
+// answer.
+type lostLookup struct {
+	name string
+	err  error
+}
+
+// note keeps name and err when err is the first failure to answer.
+func (l *lostLookup) note(name string, err error) {
+	if l.err == nil && lookupFailed(err) {
+		l.name, l.err = name, err
 	}
-	c.add("DAV TXT", true, strings.Join(found, ", "))
+}
+
+// addFound records a multi-name check: the records found, else the failed lookup,
+// else missing.
+func (c *dnsChecker) addFound(label string, found []string, lost lostLookup, missing string) {
+	switch {
+	case len(found) > 0:
+		c.add(label, true, strings.Join(found, ", "))
+	case lost.err != nil:
+		c.failed(label, lost.name, lost.err)
+	default:
+		c.add(label, false, missing)
+	}
 }
 
 // srvTarget renders an SRV record as "host:port".
