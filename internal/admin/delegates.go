@@ -20,10 +20,10 @@ func (s *Server) handleUIUserDelegates(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		data["Error"] = s.notice(userUnread, err)
 	case !ok:
-		data["Error"] = "No such user."
+		data["Error"] = "userDetail.noSuchUser"
 	default:
 		if err := s.store.SetDelegates(u.Maildir, strings.Fields(r.PostFormValue("delegates"))); err != nil {
-			data["Error"] = s.notice("Could not save delegates.", err)
+			data["Error"] = s.notice("userDetail.saveDelegatesFailed", err)
 		} else {
 			data["Saved"] = true
 		}

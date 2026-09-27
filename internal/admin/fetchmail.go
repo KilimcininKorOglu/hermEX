@@ -132,7 +132,7 @@ func (s *Server) renderFetchmailPanel(w http.ResponseWriter, r *http.Request, em
 	entries, err := s.dir.ListFetchmail(email)
 	data := map[string]any{"Email": email, "CSRF": csrf, "Fetchmail": fetchmailViews(entries), "Error": errMsg}
 	if err != nil {
-		data["FetchmailError"] = s.notice("Could not read the remote accounts.", err)
+		data["FetchmailError"] = s.notice("userDetail.fetchmailUnread", err)
 	}
 	s.render(w, r, "fetchmail-panel", data)
 }
@@ -160,7 +160,7 @@ func (s *Server) handleUIUserAddFetchmail(w http.ResponseWriter, r *http.Request
 	}
 	errMsg := ""
 	if _, err := s.dir.CreateFetchmail(in.entry(email)); err != nil {
-		errMsg = s.notice("Could not add.", err)
+		errMsg = s.notice("fetchmail.addFailed", err)
 	}
 	s.renderFetchmailPanel(w, r, email, csrfCookieValue(r), errMsg)
 }
@@ -176,10 +176,10 @@ func (s *Server) handleUIUserDeleteFetchmail(w http.ResponseWriter, r *http.Requ
 	errMsg := ""
 	if s.ownsFetchmail(email, id) {
 		if _, err := s.dir.DeleteFetchmail(id); err != nil {
-			errMsg = s.notice("Could not delete.", err)
+			errMsg = s.notice("fetchmail.deleteFailed", err)
 		}
 	} else {
-		errMsg = "No such entry."
+		errMsg = "fetchmail.noEntry"
 	}
 	s.renderFetchmailPanel(w, r, email, csrfCookieValue(r), errMsg)
 }

@@ -33,10 +33,10 @@ func (s *Server) handleUIUserSpamThreshold(w http.ResponseWriter, r *http.Reques
 	th, valid := spamThresholdFromForm(r)
 	switch {
 	case !valid:
-		data["Error"] = "Threshold must be at least 1, or empty to inherit."
+		data["Error"] = "userDetail.thresholdInvalid"
 	default:
 		if err := s.dir.SetUserSpamThreshold(r.PathValue("email"), th); err != nil {
-			data["Error"] = s.notice("Could not save threshold.", err)
+			data["Error"] = s.notice("userDetail.saveThresholdFailed", err)
 		} else {
 			data["Saved"] = true
 		}

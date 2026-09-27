@@ -2,12 +2,12 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<header class="page-head"><div><h1>Dashboard</h1><p class="page-desc">Signed in as {{.Login}}.</p></div></header>
-{{if .Error}}<p class="error">{{.Error}}</p>{{else}}
+<header class="page-head"><div><h1>{{t "dashboard.title"}}</h1><p class="page-desc">{{t "dashboard.signedInAs" .Login}}</p></div></header>
+{{if .Error}}<p class="error">{{t .Error}}</p>{{else}}
 <section class="stats">
-<a class="stat" href="/admin/ui/users"><svg class="icon" aria-hidden="true"><use href="{{icon "users"}}"/></svg><span class="num">{{.UserCount}}</span><span class="label">Users</span></a>
-<a class="stat" href="/admin/ui/domains"><svg class="icon" aria-hidden="true"><use href="{{icon "globe"}}"/></svg><span class="num">{{.DomainCount}}</span><span class="label">Domains</span></a>
-<a class="stat" href="/admin/ui/aliases"><svg class="icon" aria-hidden="true"><use href="{{icon "at-sign"}}"/></svg><span class="num">{{.AliasCount}}</span><span class="label">Aliases</span></a>
+<a class="stat" href="/admin/ui/users"><svg class="icon" aria-hidden="true"><use href="{{icon "users"}}"/></svg><span class="num">{{.UserCount}}</span><span class="label">{{t "dashboard.users"}}</span></a>
+<a class="stat" href="/admin/ui/domains"><svg class="icon" aria-hidden="true"><use href="{{icon "globe"}}"/></svg><span class="num">{{.DomainCount}}</span><span class="label">{{t "dashboard.domains"}}</span></a>
+<a class="stat" href="/admin/ui/aliases"><svg class="icon" aria-hidden="true"><use href="{{icon "at-sign"}}"/></svg><span class="num">{{.AliasCount}}</span><span class="label">{{t "dashboard.aliases"}}</span></a>
 </section>
 {{end}}
 </main>

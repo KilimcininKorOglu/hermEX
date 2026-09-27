@@ -47,12 +47,12 @@ func (s *Server) handleUIQuarantineRelease(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	uid := quarantineUID(r)
-	notice := okNotice("Released to the inbox.")
+	notice := okNotice("userQuarantine.released")
 	if err := s.quarantineMutate(maildir, func(st *objectstore.Store) error {
 		_, err := st.MoveMessage(int64(mapi.PrivateFIDJunk), uid, int64(mapi.PrivateFIDInbox))
 		return err
 	}); err != nil {
-		notice = warnNotice("Could not release the message, it may already have been moved.")
+		notice = warnNotice("userQuarantine.releaseFailed")
 	}
 	s.renderQuarantine(w, r, r.PathValue("email"), maildir, csrfCookieValue(r), notice)
 }
@@ -68,11 +68,11 @@ func (s *Server) handleUIQuarantineDelete(w http.ResponseWriter, r *http.Request
 		return
 	}
 	uid := quarantineUID(r)
-	notice := okNotice("Deleted.")
+	notice := okNotice("userQuarantine.deleted")
 	if err := s.quarantineMutate(maildir, func(st *objectstore.Store) error {
 		return st.DeleteMessage(int64(mapi.PrivateFIDJunk), uid)
 	}); err != nil {
-		notice = warnNotice("Could not delete the message, it may already be gone.")
+		notice = warnNotice("userQuarantine.deleteFailed")
 	}
 	s.renderQuarantine(w, r, r.PathValue("email"), maildir, csrfCookieValue(r), notice)
 }
@@ -106,7 +106,7 @@ func (s *Server) renderQuarantine(w http.ResponseWriter, r *http.Request, email,
 	defer st.Close()
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDJunk))
 	if err != nil {
-		data["Error"] = s.notice("Could not read the Junk folder.", err)
+		data["Error"] = s.notice("userQuarantine.junkUnread", err)
 		s.render(w, r, "quarantine", data)
 		return
 	}

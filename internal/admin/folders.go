@@ -207,7 +207,7 @@ func (s *Server) renderFolderPerms(w http.ResponseWriter, r *http.Request, email
 	}
 	perms, err := s.store.ListFolderPermissions(maildir, fid)
 	if err != nil && errMsg == "" {
-		errMsg = s.notice("Could not read permissions.", err)
+		errMsg = s.notice("folderPerms.permsUnread", err)
 	}
 	members := make([]folderMemberJSON, 0, len(perms))
 	for _, p := range perms {
@@ -226,10 +226,10 @@ func (s *Server) uiFolderUser(w http.ResponseWriter, r *http.Request) (directory
 	u, ok, err := s.dir.GetUser(r.PathValue("email"))
 	switch {
 	case err != nil:
-		s.render(w, r, "folder-perms", map[string]any{"Error": s.notice("Could not read the user.", err)})
+		s.render(w, r, "folder-perms", map[string]any{"Error": s.notice("userDetail.userUnread", err)})
 		return directory.UserDetail{}, false
 	case !ok:
-		s.render(w, r, "folder-perms", map[string]any{"Error": "No such user."})
+		s.render(w, r, "folder-perms", map[string]any{"Error": "userDetail.noSuchUser"})
 		return directory.UserDetail{}, false
 	}
 	return u, true
@@ -270,12 +270,12 @@ func (s *Server) handleUISetFolderPerm(w http.ResponseWriter, r *http.Request) {
 	case !inScope:
 		errMsg = scopeRefusal("folder permission member", outOfScope)
 	case mErr != nil:
-		errMsg = s.notice("Could not look up user.", mErr)
+		errMsg = s.notice("folderPerms.lookupFailed", mErr)
 	case !memberOK:
-		errMsg = "No such user. Grant to the recipient's primary address."
+		errMsg = "folderPerms.noSuchMember"
 	default:
 		if err := s.store.SetFolderPermission(u.Maildir, fid, member, uint32(rights)); err != nil {
-			errMsg = s.notice("Could not grant.", err)
+			errMsg = s.notice("folderPerms.grantFailed", err)
 		}
 	}
 	s.renderFolderPerms(w, r, u.Username, u.Maildir, fid, csrfCookieValue(r), errMsg)
@@ -295,7 +295,7 @@ func (s *Server) handleUIRemoveFolderPerm(w http.ResponseWriter, r *http.Request
 	memberID, _ := strconv.ParseInt(r.PostFormValue("memberID"), 10, 64)
 	errMsg := ""
 	if err := s.store.RemoveFolderPermission(u.Maildir, fid, memberID); err != nil {
-		errMsg = s.notice("Could not remove.", err)
+		errMsg = s.notice("folderPerms.removeFailed", err)
 	}
 	s.renderFolderPerms(w, r, u.Username, u.Maildir, fid, csrfCookieValue(r), errMsg)
 }

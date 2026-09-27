@@ -73,7 +73,7 @@ func (s *Server) handleUIUserStoreOwners(w http.ResponseWriter, r *http.Request)
 	case err != nil:
 		data["Error"] = s.notice(userUnread, err)
 	case !ok:
-		data["Error"] = "No such user."
+		data["Error"] = "userDetail.noSuchUser"
 	default:
 		grantees := strings.Fields(r.PostFormValue("storeowners"))
 		list, bad, gErr := s.canonicalGrantees(grantees)
@@ -84,10 +84,10 @@ func (s *Server) handleUIUserStoreOwners(w http.ResponseWriter, r *http.Request)
 		case gErr != nil:
 			data["Error"] = s.notice(granteesUnread, gErr)
 		case bad != "":
-			data["Error"] = "No such user: " + bad + "."
+			data["Error"] = msg("userDetail.noSuchUserNamed", bad)
 		default:
 			if err := s.store.SetStoreOwners(u.Maildir, list); err != nil {
-				data["Error"] = s.notice("Could not save store owners.", err)
+				data["Error"] = s.notice("userDetail.saveStoreOwnersFailed", err)
 			} else {
 				data["Saved"] = true
 			}

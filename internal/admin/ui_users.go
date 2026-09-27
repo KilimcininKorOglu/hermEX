@@ -101,7 +101,7 @@ func (s *Server) handleUIUsers(w http.ResponseWriter, r *http.Request) {
 // createDefaultsUnread is the message that replaces the new-user fields when the
 // effective create defaults could not be read. Those fields would carry no service
 // and no quota, and a user created from them would skip the defaults.
-const createDefaultsUnread = "Could not read the create defaults. The form is hidden so a new user does not skip them."
+const createDefaultsUnread = "users.createDefaultsUnread"
 
 // addUserCreateForm adds what the create form offers: the domains, and the per-user
 // defaults of the first one, which the domain selector re-fetches when the admin
@@ -109,7 +109,7 @@ const createDefaultsUnread = "Could not read the create defaults. The form is hi
 func (s *Server) addUserCreateForm(data map[string]any) {
 	domains, err := s.dir.ListDomains()
 	if err != nil {
-		data["CreateError"] = s.notice("Could not read the domains.", err)
+		data["CreateError"] = s.notice("users.domainsUnread", err)
 		return
 	}
 	var initDomain int64
@@ -185,16 +185,16 @@ func (s *Server) handleUICreateUser(w http.ResponseWriter, r *http.Request) {
 	var errMsg string
 	switch {
 	case local == "" || r.PostFormValue("password") == "":
-		errMsg = "A username and password are required."
+		errMsg = "users.credentialsRequired"
 	case r.PostFormValue("defaults_unread") != "":
-		errMsg = "The create defaults of the domain could not be read, so no user was created. Select the domain again."
+		errMsg = "users.defaultsUnreadRetry"
 	default:
 		dd, found, derr := s.dir.GetDomain(domainID)
 		switch {
 		case derr != nil:
 			errMsg = s.notice(domainUnread, derr)
 		case !found:
-			errMsg = "Select a valid domain."
+			errMsg = "users.selectDomain"
 		default:
 			errMsg = s.createUserWithDefaults(r, local+"@"+dd.Name)
 		}
@@ -215,7 +215,7 @@ func (s *Server) handleUICreateUser(w http.ResponseWriter, r *http.Request) {
 func (s *Server) createUserWithDefaults(r *http.Request, email string) string {
 	maildir := s.paths.MaildirFor(email)
 	if _, err := s.dir.CreateUser(email, r.PostFormValue("password"), maildir); err != nil {
-		return s.notice("Could not create user.", err)
+		return s.notice("users.createFailed", err)
 	}
 	cb := func(name string) bool { return r.PostFormValue(name) != "" }
 	if _, err := s.dir.UpdateUser(email, directory.UserUpdate{
@@ -223,12 +223,12 @@ func (s *Server) createUserWithDefaults(r *http.Request, email string) string {
 		POP3IMAP: cb("pop3_imap"), SMTP: cb("smtp"), ChgPasswd: cb("chgpasswd"),
 		Web: cb("web"), EAS: cb("eas"), DAV: cb("dav"),
 	}); err != nil {
-		return s.notice("Created the user, but could not apply its settings.", err)
+		return s.notice("users.settingsFailed", err)
 	}
 	q := quotaFromForm(r)
 	if q.SendKB > 0 || q.ReceiveKB > 0 || q.StorageKB > 0 {
 		if err := s.store.SetQuota(maildir, q); err != nil {
-			return s.notice("Created the user, but could not set its quota.", err)
+			return s.notice("users.quotaFailed", err)
 		}
 	}
 	return ""
@@ -340,22 +340,22 @@ func (s *Server) addUserLists(data map[string]any, u directory.UserDetail) {
 	devs, err := s.store.ListDevices(u.Maildir)
 	data["Devices"] = deviceViewsOf(devs)
 	if err != nil {
-		data["DevicesError"] = s.notice("Could not read the mobile devices.", err)
+		data["DevicesError"] = s.notice("userDetail.devicesUnread", err)
 	}
 	entries, err := s.dir.ListFetchmail(u.Username)
 	data["Fetchmail"] = fetchmailViews(entries)
 	if err != nil {
-		data["FetchmailError"] = s.notice("Could not read the remote accounts.", err)
+		data["FetchmailError"] = s.notice("userDetail.fetchmailUnread", err)
 	}
 	folders, err := s.store.ListFolders(u.Maildir)
 	data["Folders"] = folders
 	if err != nil {
-		data["FoldersError"] = s.notice("Could not read the folders.", err)
+		data["FoldersError"] = s.notice("userDetail.foldersUnread", err)
 	}
 	roles, err := s.dir.AdminRoles(u.ID)
 	data["Roles"] = roles
 	if err != nil {
-		data["RolesError"] = s.notice("Could not read the admin roles.", err)
+		data["RolesError"] = s.notice("userRoles.rolesUnread", err)
 	}
 }
 
@@ -373,9 +373,9 @@ func (s *Server) handleUIUserContact(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{}
 	switch {
 	case err != nil:
-		data["Error"] = s.notice("Could not save contact.", err)
+		data["Error"] = s.notice("userDetail.saveContactFailed", err)
 	case !found:
-		data["Error"] = "No such user."
+		data["Error"] = "userDetail.noSuchUser"
 	default:
 		data["Saved"] = true
 	}
@@ -389,7 +389,7 @@ func (s *Server) renderUserRoles(w http.ResponseWriter, r *http.Request, email, 
 	roles, err := s.dir.AdminRoles(uid)
 	data := map[string]any{"Email": email, "CSRF": csrf, "Roles": roles, "Error": errMsg}
 	if err != nil {
-		data["RolesError"] = s.notice("Could not read the admin roles.", err)
+		data["RolesError"] = s.notice("userRoles.rolesUnread", err)
 	}
 	s.render(w, r, "user-roles", data)
 }
@@ -407,7 +407,7 @@ func (s *Server) handleUIUserGrantRole(w http.ResponseWriter, r *http.Request) {
 	scopeID, _ := strconv.ParseInt(r.PostFormValue("scopeID"), 10, 64)
 	errMsg := ""
 	if err := s.dir.GrantAdminRole(uid, r.PostFormValue("role"), scopeID); err != nil {
-		errMsg = s.notice("Could not grant role.", err)
+		errMsg = s.notice("userRoles.grantFailed", err)
 	}
 	s.renderUserRoles(w, r, r.PathValue("email"), csrfCookieValue(r), uid, errMsg)
 }
@@ -425,7 +425,7 @@ func (s *Server) handleUIUserRevokeRole(w http.ResponseWriter, r *http.Request) 
 	scopeID, _ := strconv.ParseInt(r.PostFormValue("scopeID"), 10, 64)
 	errMsg := ""
 	if err := s.dir.RevokeAdminRole(uid, r.PostFormValue("role"), scopeID); err != nil {
-		errMsg = s.notice("Could not revoke role.", err)
+		errMsg = s.notice("userRoles.revokeFailed", err)
 	}
 	s.renderUserRoles(w, r, r.PathValue("email"), csrfCookieValue(r), uid, errMsg)
 }
@@ -441,9 +441,9 @@ func (s *Server) handleUIUserAliases(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{}
 	switch {
 	case err != nil:
-		data["Error"] = s.notice("Could not save aliases.", err)
+		data["Error"] = s.notice("userDetail.saveAliasesFailed", err)
 	case !found:
-		data["Error"] = "No such user."
+		data["Error"] = "userDetail.noSuchUser"
 	default:
 		data["Saved"] = true
 	}
@@ -461,9 +461,9 @@ func (s *Server) handleUIUserAltnames(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{}
 	switch {
 	case err != nil:
-		data["Error"] = s.notice("Could not save alternative names.", err)
+		data["Error"] = s.notice("userDetail.saveAltnamesFailed", err)
 	case !found:
-		data["Error"] = "No such user."
+		data["Error"] = "userDetail.noSuchUser"
 	default:
 		data["Saved"] = true
 	}
@@ -494,9 +494,9 @@ func (s *Server) handleUIUserEdit(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{}
 	switch {
 	case err != nil:
-		data["Error"] = s.notice("Could not save.", err)
+		data["Error"] = s.notice("userDetail.saveFailed", err)
 	case !found:
-		data["Error"] = "No such user."
+		data["Error"] = "userDetail.noSuchUser"
 	default:
 		data["Saved"] = true
 	}

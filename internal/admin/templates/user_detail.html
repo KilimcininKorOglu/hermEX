@@ -4,9 +4,9 @@
 <main>
 <header class="page-head">
 <div>
-<nav class="crumbs" aria-label="Breadcrumb"><a href="/admin/ui/users">Users</a><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "chevron-right"}}"/></svg><span>{{.User.Username}}</span></nav>
+<nav class="crumbs" aria-label="{{t "userDetail.breadcrumb"}}"><a href="/admin/ui/users">{{t "nav.users"}}</a><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "chevron-right"}}"/></svg><span>{{.User.Username}}</span></nav>
 <h1>{{.User.Username}}</h1>
-<p class="page-desc">{{if .User.LDAP}}Synchronized from LDAP{{else}}Local account{{end}}, {{if eq .User.Status 1}}suspended{{else if eq .User.Status 4}}shared mailbox{{else}}active{{end}}.</p>
+<p class="page-desc">{{if .User.LDAP}}{{t "userDetail.fromLDAP"}}{{else}}{{t "userDetail.localAccount"}}{{end}}, {{if eq .User.Status 1}}{{t "userDetail.stateSuspended"}}{{else if eq .User.Status 4}}{{t "userDetail.stateShared"}}{{else}}{{t "userDetail.stateActive"}}{{end}}.</p>
 </div>
 </header>
 {{template "user-status" .}}
@@ -18,115 +18,115 @@
 <input type="radio" name="usertab" id="usertab-devices">
 <input type="radio" name="usertab" id="usertab-danger">
 <div class="tabbar">
-<label for="usertab-general">General</label>
-<label for="usertab-mail">Mail handling</label>
-<label for="usertab-access">Permissions</label>
-<label for="usertab-devices">Devices</label>
-<label for="usertab-danger">Danger zone</label>
+<label for="usertab-general">{{t "userDetail.tabGeneral"}}</label>
+<label for="usertab-mail">{{t "userDetail.tabMail"}}</label>
+<label for="usertab-access">{{t "userDetail.tabAccess"}}</label>
+<label for="usertab-devices">{{t "userDetail.tabDevices"}}</label>
+<label for="usertab-danger">{{t "userDetail.tabDanger"}}</label>
 </div>
 
 <section class="tabpanel">
 <section class="card">
-{{template "card-head" (dict "Icon" "user-cog" "Title" "Account" "Desc" "Status, mailbox type and the protocols this user may sign in with.")}}
+{{template "card-head" (dict "Icon" "user-cog" "Title" "userDetail.accountTitle" "Desc" "userDetail.accountDesc")}}
 <form class="form-grid" hx-put="/admin/ui/users/{{.User.Username}}" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Username <input type="text" value="{{.User.Username}}" disabled></label>
-<label>Authentication <input type="text" value="{{if .User.LDAP}}LDAP{{else}}local{{end}}" disabled></label>
-<label>Status
+<label>{{t "userDetail.username"}} <input type="text" value="{{.User.Username}}" disabled></label>
+<label>{{t "userDetail.authentication"}} <input type="text" value="{{if .User.LDAP}}LDAP{{else}}{{t "users.local"}}{{end}}" disabled></label>
+<label>{{t "userDetail.status"}}
 <select name="status">
-<option value="0"{{if eq .User.Status 0}} selected{{end}}>Normal</option>
-<option value="1"{{if eq .User.Status 1}} selected{{end}}>Suspended</option>
-<option value="4"{{if eq .User.Status 4}} selected{{end}}>Shared mailbox</option>
+<option value="0"{{if eq .User.Status 0}} selected{{end}}>{{t "userDetail.statusNormal"}}</option>
+<option value="1"{{if eq .User.Status 1}} selected{{end}}>{{t "userDetail.statusSuspended"}}</option>
+<option value="4"{{if eq .User.Status 4}} selected{{end}}>{{t "userDetail.statusShared"}}</option>
 </select></label>
-<label>Type
+<label>{{t "userDetail.type"}}
 <select name="displayType">
-<option value="0"{{if eq .User.DisplayType 0}} selected{{end}}>User</option>
-<option value="7"{{if eq .User.DisplayType 7}} selected{{end}}>Room</option>
-<option value="8"{{if eq .User.DisplayType 8}} selected{{end}}>Equipment</option>
+<option value="0"{{if eq .User.DisplayType 0}} selected{{end}}>{{t "userDetail.typeUser"}}</option>
+<option value="7"{{if eq .User.DisplayType 7}} selected{{end}}>{{t "userDetail.typeRoom"}}</option>
+<option value="8"{{if eq .User.DisplayType 8}} selected{{end}}>{{t "userDetail.typeEquipment"}}</option>
 </select></label>
-<label>Language <input type="text" name="lang" value="{{.User.Lang}}" placeholder="en_US"></label>
-<label>Timezone <input type="text" name="timezone" value="{{.User.Timezone}}" placeholder="Europe/Istanbul"></label>
-<label>Homeserver <input type="number" name="homeserver" value="{{.User.Homeserver}}" min="0" max="255"></label>
+<label>{{t "userDetail.language"}} <input type="text" name="lang" value="{{.User.Lang}}" placeholder="en_US"></label>
+<label>{{t "userDetail.timezone"}} <input type="text" name="timezone" value="{{.User.Timezone}}" placeholder="Europe/Istanbul"></label>
+<label>{{t "userDetail.homeserver"}} <input type="number" name="homeserver" value="{{.User.Homeserver}}" min="0" max="255"></label>
 <div>
-<p class="field-label">Allowed protocols</p>
+<p class="field-label">{{t "users.allowedProtocols"}}</p>
 <div class="checks">
-<label class="check"><input type="checkbox" name="pop3_imap"{{if .User.POP3IMAP}} checked{{end}}> Allow POP3/IMAP logins</label>
-<label class="check"><input type="checkbox" name="smtp"{{if .User.SMTP}} checked{{end}}> Allow SMTP sending</label>
-<label class="check"><input type="checkbox" name="web"{{if .User.Web}} checked{{end}}> Allow webmail logins</label>
-<label class="check"><input type="checkbox" name="eas"{{if .User.EAS}} checked{{end}}> Allow ActiveSync (mobile)</label>
-<label class="check"><input type="checkbox" name="dav"{{if .User.DAV}} checked{{end}}> Allow CalDAV/CardDAV</label>
-<label class="check"><input type="checkbox" name="chgpasswd"{{if .User.ChgPasswd}} checked{{end}}> Allow password changes</label>
+<label class="check"><input type="checkbox" name="pop3_imap"{{if .User.POP3IMAP}} checked{{end}}> {{t "userDetail.allowPOP3IMAP"}}</label>
+<label class="check"><input type="checkbox" name="smtp"{{if .User.SMTP}} checked{{end}}> {{t "userDetail.allowSMTP"}}</label>
+<label class="check"><input type="checkbox" name="web"{{if .User.Web}} checked{{end}}> {{t "userDetail.allowWeb"}}</label>
+<label class="check"><input type="checkbox" name="eas"{{if .User.EAS}} checked{{end}}> {{t "userDetail.allowEAS"}}</label>
+<label class="check"><input type="checkbox" name="dav"{{if .User.DAV}} checked{{end}}> {{t "userDetail.allowDAV"}}</label>
+<label class="check"><input type="checkbox" name="chgpasswd"{{if .User.ChgPasswd}} checked{{end}}> {{t "userDetail.allowChgPasswd"}}</label>
 </div>
 </div>
-<button type="submit">Save account</button>
+<button type="submit">{{t "userDetail.saveAccount"}}</button>
 </form>
 </section>
 
 <div class="card-grid">
 <section class="card">
 {{with index .ReadFailed "quota"}}
-{{template "card-head" (dict "Icon" "hard-drive" "Title" "Storage quota" "Desc" "A limit of 0 means unlimited.")}}
-<p class="error">{{.}}</p>
+{{template "card-head" (dict "Icon" "hard-drive" "Title" "userDetail.quotaTitle" "Desc" "userDetail.quotaDesc")}}
+<p class="error">{{t .}}</p>
 {{else}}
-{{template "card-head" (dict "Icon" "hard-drive" "Title" "Storage quota" "Desc" (printf "Used space: %v MiB. A limit of 0 means unlimited." .Quota.UsedMB))}}
+{{template "card-head" (dict "Icon" "hard-drive" "Title" "userDetail.quotaTitle" "Desc" (t "userDetail.quotaUsedDesc" .Quota.UsedMB))}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/quota" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Send quota limit (MiB) <input type="number" name="sendmb" value="{{.Quota.SendMB}}" min="0"></label>
-<label>Receive quota limit (MiB) <input type="number" name="receivemb" value="{{.Quota.ReceiveMB}}" min="0"></label>
-<label>Storage quota and warning (MiB) <input type="number" name="storagemb" value="{{.Quota.StorageMB}}" min="0"></label>
-<button type="submit">Save quota</button>
+<label>{{t "userDetail.sendQuota"}} <input type="number" name="sendmb" value="{{.Quota.SendMB}}" min="0"></label>
+<label>{{t "userDetail.receiveQuota"}} <input type="number" name="receivemb" value="{{.Quota.ReceiveMB}}" min="0"></label>
+<label>{{t "userDetail.storageQuota"}} <input type="number" name="storagemb" value="{{.Quota.StorageMB}}" min="0"></label>
+<button type="submit">{{t "userDetail.saveQuota"}}</button>
 </form>
 {{end}}
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "shield-alert" "Title" "Spam threshold" "Desc" "Inbound mail at or above this score goes to Junk. Empty inherits the domain or global threshold; an operator block or allow rule still wins.")}}
-{{with index .ReadFailed "spam"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "shield-alert" "Title" "userDetail.spamTitle" "Desc" "userDetail.spamDesc")}}
+{{with index .ReadFailed "spam"}}<p class="error">{{t .}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/spam-threshold" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Threshold <input type="number" name="spam_threshold" value="{{if .SpamThreshold}}{{.SpamThreshold}}{{end}}" min="1" placeholder="inherit"></label>
-<button type="submit">Save threshold</button>
+<label>{{t "userDetail.threshold"}} <input type="number" name="spam_threshold" value="{{if .SpamThreshold}}{{.SpamThreshold}}{{end}}" min="1" placeholder="{{t "userDetail.inherit"}}"></label>
+<button type="submit">{{t "userDetail.saveThreshold"}}</button>
 </form>
 {{end}}
 </section>
 </div>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "eye-off" "Title" "Address-book visibility" "Desc" "Hide this user from the lists below.")}}
-{{with index .ReadFailed "properties"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "eye-off" "Title" "userDetail.hideTitle" "Desc" "userDetail.hideDesc")}}
+{{with index .ReadFailed "properties"}}<p class="error">{{t .}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/hide" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <div class="checks">
-<label class="check"><input type="checkbox" name="hide_gal"{{if .Hide.GAL}} checked{{end}}> Global Address List</label>
-<label class="check"><input type="checkbox" name="hide_al"{{if .Hide.AL}} checked{{end}}> Address/Member lists</label>
-<label class="check"><input type="checkbox" name="hide_delegate"{{if .Hide.Delegate}} checked{{end}}> Delegate lists</label>
-<label class="check"><input type="checkbox" name="hide_anr"{{if .Hide.ANR}} checked{{end}}> Name resolution (Check Names)</label>
+<label class="check"><input type="checkbox" name="hide_gal"{{if .Hide.GAL}} checked{{end}}> {{t "userDetail.hideGAL"}}</label>
+<label class="check"><input type="checkbox" name="hide_al"{{if .Hide.AL}} checked{{end}}> {{t "userDetail.hideAL"}}</label>
+<label class="check"><input type="checkbox" name="hide_delegate"{{if .Hide.Delegate}} checked{{end}}> {{t "userDetail.hideDelegate"}}</label>
+<label class="check"><input type="checkbox" name="hide_anr"{{if .Hide.ANR}} checked{{end}}> {{t "userDetail.hideANR"}}</label>
 </div>
-<button type="submit">Save visibility</button>
+<button type="submit">{{t "userDetail.saveVisibility"}}</button>
 </form>
 {{end}}
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "contact" "Title" "Contact details" "Desc" "How this user appears in the address book and to Outlook.")}}
-{{with index .ReadFailed "properties"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "contact" "Title" "userDetail.contactTitle" "Desc" "userDetail.contactDesc")}}
+{{with index .ReadFailed "properties"}}<p class="error">{{t .}}</p>{{else}}
 <form class="form-grid" hx-put="/admin/ui/users/{{.User.Username}}/contact" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Display name <input type="text" name="displayname" value="{{index .Contact "displayname"}}"></label>
-<label>Nickname <input type="text" name="nickname" value="{{index .Contact "nickname"}}"></label>
-<label>Name prefix <input type="text" name="nameprefix" value="{{index .Contact "nameprefix"}}"></label>
-<label>First name <input type="text" name="givenname" value="{{index .Contact "givenname"}}"></label>
-<label>Surname <input type="text" name="surname" value="{{index .Contact "surname"}}"></label>
-<label>Job title <input type="text" name="title" value="{{index .Contact "title"}}"></label>
-<label>Company <input type="text" name="company" value="{{index .Contact "company"}}"></label>
-<label>Department <input type="text" name="department" value="{{index .Contact "department"}}"></label>
-<label>Office phone <input type="text" name="office_phone" value="{{index .Contact "office_phone"}}"></label>
-<label>Mobile phone <input type="text" name="mobile_phone" value="{{index .Contact "mobile_phone"}}"></label>
-<label>Home phone <input type="text" name="home_phone" value="{{index .Contact "home_phone"}}"></label>
-<label>Fax <input type="text" name="fax" value="{{index .Contact "fax"}}"></label>
-<label>Pager <input type="text" name="pager" value="{{index .Contact "pager"}}"></label>
-<label>Comment <input type="text" name="comment" value="{{index .Contact "comment"}}"></label>
-<button type="submit">Save contact</button>
+<label>{{t "userDetail.displayName"}} <input type="text" name="displayname" value="{{index .Contact "displayname"}}"></label>
+<label>{{t "userDetail.nickname"}} <input type="text" name="nickname" value="{{index .Contact "nickname"}}"></label>
+<label>{{t "userDetail.namePrefix"}} <input type="text" name="nameprefix" value="{{index .Contact "nameprefix"}}"></label>
+<label>{{t "userDetail.firstName"}} <input type="text" name="givenname" value="{{index .Contact "givenname"}}"></label>
+<label>{{t "userDetail.surname"}} <input type="text" name="surname" value="{{index .Contact "surname"}}"></label>
+<label>{{t "userDetail.jobTitle"}} <input type="text" name="title" value="{{index .Contact "title"}}"></label>
+<label>{{t "userDetail.company"}} <input type="text" name="company" value="{{index .Contact "company"}}"></label>
+<label>{{t "userDetail.department"}} <input type="text" name="department" value="{{index .Contact "department"}}"></label>
+<label>{{t "userDetail.officePhone"}} <input type="text" name="office_phone" value="{{index .Contact "office_phone"}}"></label>
+<label>{{t "userDetail.mobilePhone"}} <input type="text" name="mobile_phone" value="{{index .Contact "mobile_phone"}}"></label>
+<label>{{t "userDetail.homePhone"}} <input type="text" name="home_phone" value="{{index .Contact "home_phone"}}"></label>
+<label>{{t "userDetail.fax"}} <input type="text" name="fax" value="{{index .Contact "fax"}}"></label>
+<label>{{t "userDetail.pager"}} <input type="text" name="pager" value="{{index .Contact "pager"}}"></label>
+<label>{{t "userDetail.comment"}} <input type="text" name="comment" value="{{index .Contact "comment"}}"></label>
+<button type="submit">{{t "userDetail.saveContact"}}</button>
 </form>
 {{end}}
 </section>
@@ -134,183 +134,183 @@
 
 <section class="tabpanel">
 <section class="card">
-{{template "card-head" (dict "Icon" "clock" "Title" "Out of office" "Desc" "Automatic replies while the user is away.")}}
-{{with index .ReadFailed "oof"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "clock" "Title" "userDetail.oofTitle" "Desc" "userDetail.oofDesc")}}
+{{with index .ReadFailed "oof"}}<p class="error">{{t .}}</p>{{else}}
 <form class="form-grid" hx-put="/admin/ui/users/{{.User.Username}}/oof" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label class="check"><input type="checkbox" name="enabled"{{if .OOF.Enabled}} checked{{end}}> Send automatic replies</label>
-<label>Start <input type="datetime-local" name="start" value="{{.OOF.Start}}"></label>
-<label>End <input type="datetime-local" name="end" value="{{.OOF.End}}"></label>
-<label class="full">Internal subject <input type="text" name="internalsubject" value="{{.OOF.InternalSubject}}" placeholder="Automatic reply"></label>
-<label class="full">Reply to people inside the organization
+<label class="check"><input type="checkbox" name="enabled"{{if .OOF.Enabled}} checked{{end}}> {{t "userDetail.oofEnabled"}}</label>
+<label>{{t "userDetail.start"}} <input type="datetime-local" name="start" value="{{.OOF.Start}}"></label>
+<label>{{t "userDetail.end"}} <input type="datetime-local" name="end" value="{{.OOF.End}}"></label>
+<label class="full">{{t "userDetail.internalSubject"}} <input type="text" name="internalsubject" value="{{.OOF.InternalSubject}}" placeholder="{{t "userDetail.automaticReply"}}"></label>
+<label class="full">{{t "userDetail.internalReply"}}
 <textarea name="internalreply" rows="4">{{.OOF.InternalReply}}</textarea></label>
-<label class="check"><input type="checkbox" name="externalenabled"{{if .OOF.ExternalEnabled}} checked{{end}}> Also reply to senders outside the organization</label>
-<label class="full">External subject <input type="text" name="externalsubject" value="{{.OOF.ExternalSubject}}" placeholder="Automatic reply"></label>
-<label class="full">Reply to senders outside the organization
+<label class="check"><input type="checkbox" name="externalenabled"{{if .OOF.ExternalEnabled}} checked{{end}}> {{t "userDetail.externalEnabled"}}</label>
+<label class="full">{{t "userDetail.externalSubject"}} <input type="text" name="externalsubject" value="{{.OOF.ExternalSubject}}" placeholder="{{t "userDetail.automaticReply"}}"></label>
+<label class="full">{{t "userDetail.externalReply"}}
 <textarea name="externalreply" rows="4">{{.OOF.ExternalReply}}</textarea></label>
-<label class="check"><input type="checkbox" name="externalknownonly"{{if .OOF.KnownOnly}} checked{{end}}> Only reply to senders already in the user's contacts</label>
-<button type="submit">Save out-of-office</button>
+<label class="check"><input type="checkbox" name="externalknownonly"{{if .OOF.KnownOnly}} checked{{end}}> {{t "userDetail.knownOnly"}}</label>
+<button type="submit">{{t "userDetail.saveOOF"}}</button>
 </form>
 {{end}}
 </section>
 
 <div class="card-grid">
 <section class="card">
-{{template "card-head" (dict "Icon" "forward" "Title" "Forward" "Desc" "Send this user's mail on to another address.")}}
-{{with index .ReadFailed "forward"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "forward" "Title" "userDetail.forwardTitle" "Desc" "userDetail.forwardDesc")}}
+{{with index .ReadFailed "forward"}}<p class="error">{{t .}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/forward" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Type
+<label>{{t "userDetail.type"}}
 <select name="forwardtype">
-<option value=""{{if eq .Forward.Type ""}} selected{{end}}>No forwarding</option>
-<option value="cc"{{if eq .Forward.Type "cc"}} selected{{end}}>Keep a copy and forward (CC)</option>
-<option value="redirect"{{if eq .Forward.Type "redirect"}} selected{{end}}>Forward only (Redirect)</option>
+<option value=""{{if eq .Forward.Type ""}} selected{{end}}>{{t "userDetail.forwardNone"}}</option>
+<option value="cc"{{if eq .Forward.Type "cc"}} selected{{end}}>{{t "userDetail.forwardCC"}}</option>
+<option value="redirect"{{if eq .Forward.Type "redirect"}} selected{{end}}>{{t "userDetail.forwardRedirect"}}</option>
 </select></label>
-<label>Destination <input type="email" name="destination" value="{{.Forward.Destination}}" placeholder="boss@example.com"></label>
-<button type="submit">Save forward</button>
+<label>{{t "userDetail.destination"}} <input type="email" name="destination" value="{{.Forward.Destination}}" placeholder="boss@example.com"></label>
+<button type="submit">{{t "userDetail.saveForward"}}</button>
 </form>
 {{end}}
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "at-sign" "Title" "E-mail aliases" "Desc" "Other addresses that deliver to this mailbox, one per line.")}}
-{{with index .ReadFailed "aliases"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "at-sign" "Title" "userDetail.aliasesTitle" "Desc" "userDetail.aliasesDesc")}}
+{{with index .ReadFailed "aliases"}}<p class="error">{{t .}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/aliases" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Aliases <textarea name="aliases" rows="4" placeholder="sales@example.com">{{.Aliases}}</textarea></label>
-<button type="submit">Save aliases</button>
+<label>{{t "userDetail.aliases"}} <textarea name="aliases" rows="4" placeholder="sales@example.com">{{.Aliases}}</textarea></label>
+<button type="submit">{{t "userDetail.saveAliases"}}</button>
 </form>
 {{end}}
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "key" "Title" "Alternative login names" "Desc" "Other names this user may sign in with, one per line.")}}
-{{with index .ReadFailed "altnames"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "key" "Title" "userDetail.altnamesTitle" "Desc" "userDetail.altnamesDesc")}}
+{{with index .ReadFailed "altnames"}}<p class="error">{{t .}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/altnames" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Login names <textarea name="altnames" rows="4" placeholder="alias-login">{{.Altnames}}</textarea></label>
-<button type="submit">Save names</button>
+<label>{{t "userDetail.loginNames"}} <textarea name="altnames" rows="4" placeholder="alias-login">{{.Altnames}}</textarea></label>
+<button type="submit">{{t "userDetail.saveNames"}}</button>
 </form>
 {{end}}
 </section>
 </div>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "calendar" "Title" "Meeting requests" "Desc" "How this mailbox answers the meeting requests it receives.")}}
-{{with index .ReadFailed "meeting"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "calendar" "Title" "userDetail.meetingTitle" "Desc" "userDetail.meetingDesc")}}
+{{with index .ReadFailed "meeting"}}<p class="error">{{t .}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/meeting" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label class="check"><input type="checkbox" name="autoaccept"{{if .Meeting.AutoAccept}} checked{{end}}> Accept conflict-free meeting requests (otherwise added to the calendar as tentative only, with no response to the organizer)</label>
-<label class="check"><input type="checkbox" name="declinerecurring"{{if .Meeting.DeclineRecurring}} checked{{end}}> Decline all recurring meeting requests</label>
-<label class="check"><input type="checkbox" name="declineconflict"{{if .Meeting.DeclineConflict}} checked{{end}}> Decline all meeting requests with scheduling conflicts</label>
-<p class="hint">Automatic processing requires "Accept conflict-free meeting requests". With it unchecked the mailbox does no automatic processing, so the two decline options have no effect on their own.</p>
-<label class="check"><input type="checkbox" name="removerequest"{{if .Meeting.RemoveRequestOnResponse}} checked{{end}}> Move the request mail to Deleted Items once it has been answered</label>
-<p class="hint">This applies to every response, whether a person made it or automatic processing did. It is independent of the three options above.</p>
-<label class="check"><input type="checkbox" name="processcancellations"{{if not .Meeting.LeaveCancellationsUnprocessed}} checked{{end}}> Mark a meeting cancelled in the calendar when its cancellation arrives</label>
-<p class="hint">The meeting stays in the calendar, marked cancelled and shown as free, until the user removes it. Only a cancellation from the meeting's organizer that is not older than the calendar's copy is applied.</p>
-<button type="submit">Save meeting settings</button>
+<label class="check"><input type="checkbox" name="autoaccept"{{if .Meeting.AutoAccept}} checked{{end}}> {{t "userDetail.autoAccept"}}</label>
+<label class="check"><input type="checkbox" name="declinerecurring"{{if .Meeting.DeclineRecurring}} checked{{end}}> {{t "userDetail.declineRecurring"}}</label>
+<label class="check"><input type="checkbox" name="declineconflict"{{if .Meeting.DeclineConflict}} checked{{end}}> {{t "userDetail.declineConflict"}}</label>
+<p class="hint">{{t "userDetail.autoAcceptHint"}}</p>
+<label class="check"><input type="checkbox" name="removerequest"{{if .Meeting.RemoveRequestOnResponse}} checked{{end}}> {{t "userDetail.removeRequest"}}</label>
+<p class="hint">{{t "userDetail.removeRequestHint"}}</p>
+<label class="check"><input type="checkbox" name="processcancellations"{{if not .Meeting.LeaveCancellationsUnprocessed}} checked{{end}}> {{t "userDetail.processCancellations"}}</label>
+<p class="hint">{{t "userDetail.processCancellationsHint"}}</p>
+<button type="submit">{{t "userDetail.saveMeeting"}}</button>
 </form>
 {{end}}
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "download" "Title" "Fetchmail (remote accounts)" "Desc" "Remote POP3/IMAP accounts polled into this mailbox. Keep on server leaves the originals on the source; otherwise they are deleted after fetching.")}}
+{{template "card-head" (dict "Icon" "download" "Title" "userDetail.fetchmailTitle" "Desc" "userDetail.fetchmailDesc")}}
 {{template "fetchmail-panel" .}}
-<h3>Add a remote account</h3>
+<h3>{{t "userDetail.addRemote"}}</h3>
 <form class="form-grid" data-reset hx-post="/admin/ui/users/{{.User.Username}}/fetchmail" hx-target="#fetchmail-panel" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Server <input type="text" name="srcServer" placeholder="mail.example.com" required></label>
-<label>Port <input type="number" name="srcPort" placeholder="0 = default" min="0"></label>
-<label>Remote user <input type="text" name="srcUser" placeholder="remote user" autocomplete="off" required></label>
-<label>Remote password <input type="password" name="srcPassword" placeholder="remote password" autocomplete="new-password"></label>
-<label>Protocol <select name="protocol"><option value="POP3">POP3</option><option value="IMAP">IMAP</option></select></label>
-<label>IMAP folder <input type="text" name="srcFolder" placeholder="INBOX"></label>
+<label>{{t "userDetail.server"}} <input type="text" name="srcServer" placeholder="mail.example.com" required></label>
+<label>{{t "userDetail.port"}} <input type="number" name="srcPort" placeholder="{{t "userDetail.portPlaceholder"}}" min="0"></label>
+<label>{{t "userDetail.remoteUser"}} <input type="text" name="srcUser" placeholder="{{t "userDetail.remoteUserPlaceholder"}}" autocomplete="off" required></label>
+<label>{{t "userDetail.remotePassword"}} <input type="password" name="srcPassword" placeholder="{{t "userDetail.remotePasswordPlaceholder"}}" autocomplete="new-password"></label>
+<label>{{t "userDetail.protocol"}} <select name="protocol"><option value="POP3">POP3</option><option value="IMAP">IMAP</option></select></label>
+<label>{{t "userDetail.imapFolder"}} <input type="text" name="srcFolder" placeholder="INBOX"></label>
 <div class="checks">
-<label class="check"><input type="checkbox" name="fetchall"> Fetch all</label>
-<label class="check"><input type="checkbox" name="keep"> Keep on server</label>
+<label class="check"><input type="checkbox" name="fetchall"> {{t "userDetail.fetchAll"}}</label>
+<label class="check"><input type="checkbox" name="keep"> {{t "userDetail.keepOnServer"}}</label>
 <label class="check"><input type="checkbox" name="useSSL" checked> SSL</label>
-<label class="check"><input type="checkbox" name="sslVerify" checked> Verify certificate</label>
-<label class="check"><input type="checkbox" name="active" checked> Active</label>
+<label class="check"><input type="checkbox" name="sslVerify" checked> {{t "userDetail.verifyCert"}}</label>
+<label class="check"><input type="checkbox" name="active" checked> {{t "userDetail.active"}}</label>
 </div>
-<button type="submit"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "plus"}}"/></svg>Add account</button>
+<button type="submit"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "plus"}}"/></svg>{{t "userDetail.addAccount"}}</button>
 </form>
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "shield-alert" "Title" "Quarantine (Junk)" "Desc" "Review this user's Junk folder for false positives and release or delete a message. Message bodies are not shown.")}}
-<div id="quarantine"><button type="button" class="secondary" hx-get="/admin/ui/users/{{.User.Username}}/quarantine" hx-target="#quarantine" hx-swap="innerHTML">Review quarantine</button></div>
+{{template "card-head" (dict "Icon" "shield-alert" "Title" "userDetail.quarantineTitle" "Desc" "userDetail.quarantineDesc")}}
+<div id="quarantine"><button type="button" class="secondary" hx-get="/admin/ui/users/{{.User.Username}}/quarantine" hx-target="#quarantine" hx-swap="innerHTML">{{t "userDetail.reviewQuarantine"}}</button></div>
 </section>
 </section>
 
 <section class="tabpanel">
 <div class="card-grid two">
 <section class="card">
-{{template "card-head" (dict "Icon" "users-round" "Title" "Delegates" "Desc" "People who may open this mailbox, one address per line. A delegate may not send.")}}
-{{with index .ReadFailed "delegates"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "users-round" "Title" "userDetail.delegatesTitle" "Desc" "userDetail.delegatesDesc")}}
+{{with index .ReadFailed "delegates"}}<p class="error">{{t .}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/delegates" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Delegates <textarea name="delegates" rows="4" placeholder="assistant@example.com">{{.Delegates}}</textarea></label>
-<button type="submit">Save delegates</button>
+<label>{{t "userDetail.delegates"}} <textarea name="delegates" rows="4" placeholder="assistant@example.com">{{.Delegates}}</textarea></label>
+<button type="submit">{{t "userDetail.saveDelegates"}}</button>
 </form>
 {{end}}
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "user-cog" "Title" "Additional store owners" "Desc" "People who get read-write access to every object in this mailbox, one address per line.")}}
-{{with index .ReadFailed "storeowners"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "user-cog" "Title" "userDetail.storeOwnersTitle" "Desc" "userDetail.storeOwnersDesc")}}
+{{with index .ReadFailed "storeowners"}}<p class="error">{{t .}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/storeowners" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Store owners <textarea name="storeowners" rows="4" placeholder="assistant@example.com">{{.StoreOwners}}</textarea></label>
-<button type="submit">Save store owners</button>
+<label>{{t "userDetail.storeOwners"}} <textarea name="storeowners" rows="4" placeholder="assistant@example.com">{{.StoreOwners}}</textarea></label>
+<button type="submit">{{t "userDetail.saveStoreOwners"}}</button>
 </form>
 {{end}}
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "send" "Title" "Send as" "Desc" "The message names this user in From and nobody else, so the recipient cannot tell who sent it.")}}
-{{with index .ReadFailed "sendas"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "send" "Title" "userDetail.sendAsTitle" "Desc" "userDetail.sendAsDesc")}}
+{{with index .ReadFailed "sendas"}}<p class="error">{{t .}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/sendas" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Users who may send as this user <textarea name="sendas" rows="4" placeholder="assistant@example.com">{{.SendAs}}</textarea></label>
-<button type="submit">Save send-as</button>
+<label>{{t "userDetail.sendAsLabel"}} <textarea name="sendas" rows="4" placeholder="assistant@example.com">{{.SendAs}}</textarea></label>
+<button type="submit">{{t "userDetail.saveSendAs"}}</button>
 </form>
 {{end}}
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "mail" "Title" "Send on behalf" "Desc" "The message names this user in From and the sender in Sender, so the recipient sees both.")}}
-{{with index .ReadFailed "sendonbehalf"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "mail" "Title" "userDetail.sendOnBehalfTitle" "Desc" "userDetail.sendOnBehalfDesc")}}
+{{with index .ReadFailed "sendonbehalf"}}<p class="error">{{t .}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/sendonbehalf" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Users who may send on this user's behalf <textarea name="sendonbehalf" rows="4" placeholder="assistant@example.com">{{.SendOnBehalf}}</textarea></label>
-<button type="submit">Save send-on-behalf</button>
+<label>{{t "userDetail.sendOnBehalfLabel"}} <textarea name="sendonbehalf" rows="4" placeholder="assistant@example.com">{{.SendOnBehalf}}</textarea></label>
+<button type="submit">{{t "userDetail.saveSendOnBehalf"}}</button>
 </form>
 {{end}}
 </section>
 </div>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "copy" "Title" "Copy of mail sent in this user's name" "Desc" "Without a copy here, a shared mailbox holds no record of what went out in its name.")}}
-{{with index .ReadFailed "sentcopy"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "copy" "Title" "userDetail.sentCopyTitle" "Desc" "userDetail.sentCopyDesc")}}
+{{with index .ReadFailed "sentcopy"}}<p class="error">{{t .}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/sentcopy" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label class="check"><input type="checkbox" name="copysendas"{{if .SentCopy.ForSendAs}} checked{{end}}> Keep a copy of mail sent as this user in its Sent Items</label>
-<label class="check"><input type="checkbox" name="copysendonbehalf"{{if .SentCopy.ForSendOnBehalf}} checked{{end}}> Keep a copy of mail sent on this user's behalf in its Sent Items</label>
-<label class="check"><input type="checkbox" name="copyexclusive"{{if .SentCopy.Exclusive}} checked{{end}}> Make this copy the only one (the sender keeps none)</label>
-<p class="hint">The sender keeps their own copy unless the last option is on. The last option has no effect unless one of the first two filed a copy, and a sender's mail client that saves its own copy (IMAP) still does.</p>
-<button type="submit">Save sent-copy settings</button>
+<label class="check"><input type="checkbox" name="copysendas"{{if .SentCopy.ForSendAs}} checked{{end}}> {{t "userDetail.copySendAs"}}</label>
+<label class="check"><input type="checkbox" name="copysendonbehalf"{{if .SentCopy.ForSendOnBehalf}} checked{{end}}> {{t "userDetail.copySendOnBehalf"}}</label>
+<label class="check"><input type="checkbox" name="copyexclusive"{{if .SentCopy.Exclusive}} checked{{end}}> {{t "userDetail.copyExclusive"}}</label>
+<p class="hint">{{t "userDetail.sentCopyHint"}}</p>
+<button type="submit">{{t "userDetail.saveSentCopy"}}</button>
 </form>
 {{end}}
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "folder-open" "Title" "Folders" "Desc" "Choose a folder to see and change who may open it.")}}
-{{with .FoldersError}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "folder-open" "Title" "userDetail.foldersTitle" "Desc" "userDetail.foldersDesc")}}
+{{with .FoldersError}}<p class="error">{{t .}}</p>{{else}}
 <form>
-<label>Folder
+<label>{{t "userDetail.folder"}}
 <select name="fid" hx-get="/admin/ui/users/{{.User.Username}}/folder-perms" hx-target="#folder-perms" hx-swap="innerHTML" hx-trigger="change"
         hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<option value="">Select a folder</option>
+<option value="">{{t "userDetail.selectFolder"}}</option>
 {{range .Folders}}<option value="{{.ID}}">{{.DisplayName}}</option>{{end}}
 </select></label>
 </form>
@@ -319,31 +319,31 @@
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "shield-check" "Title" "Admin roles" "Desc" "Panel roles this user holds. An organization or domain role is limited to that scope.")}}
+{{template "card-head" (dict "Icon" "shield-check" "Title" "userDetail.rolesTitle" "Desc" "userDetail.rolesDesc")}}
 {{template "user-roles" .}}
 </section>
 </section>
 
 <section class="tabpanel">
 <section class="card">
-{{template "card-head" (dict "Icon" "smartphone" "Title" "Mobile devices" "Desc" "ActiveSync devices that have synchronized with this mailbox.")}}
+{{template "card-head" (dict "Icon" "smartphone" "Title" "userDetail.devicesTitle" "Desc" "userDetail.devicesDesc")}}
 {{template "user-devices" .}}
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "shield" "Title" "ActiveSync device policy" "Desc" "A per-user override. Each field overrides the server default; leave it on inherit to take the default. Password rules apply only when DevicePasswordEnabled is Yes.")}}
-{{with index .ReadFailed "policy"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "shield" "Title" "userDetail.policyTitle" "Desc" "userDetail.policyDesc")}}
+{{with index .ReadFailed "policy"}}<p class="error">{{t .}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/syncpolicy" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <div class="policy-grid">
 {{range .SyncPolicy}}
 <label class="policy-field">{{.Name}}
-{{if .Bool}}<select name="{{.Name}}"><option value="">(inherit)</option><option value="1"{{if eq .Value "1"}} selected{{end}}>Yes</option><option value="0"{{if eq .Value "0"}} selected{{end}}>No</option></select>
-{{else}}<input type="number" min="0" name="{{.Name}}" value="{{.Value}}" placeholder="(inherit)">{{end}}
+{{if .Bool}}<select name="{{.Name}}"><option value="">{{t "userDetail.inheritParen"}}</option><option value="1"{{if eq .Value "1"}} selected{{end}}>{{t "userDetail.yes"}}</option><option value="0"{{if eq .Value "0"}} selected{{end}}>{{t "userDetail.no"}}</option></select>
+{{else}}<input type="number" min="0" name="{{.Name}}" value="{{.Value}}" placeholder="{{t "userDetail.inheritParen"}}">{{end}}
 </label>
 {{end}}
 </div>
-<button type="submit">Save device policy</button>
+<button type="submit">{{t "userDetail.savePolicy"}}</button>
 </form>
 {{end}}
 </section>
@@ -351,11 +351,11 @@
 
 <section class="tabpanel">
 <section class="card danger-zone">
-{{template "card-head" (dict "Icon" "trash-2" "Title" "Delete this user" "Desc" "The account is removed from the directory. This cannot be undone.")}}
-<form class="delete-form" hx-post="/admin/ui/users/{{.User.Username}}/delete" hx-confirm="Delete {{.User.Username}}? This cannot be undone."
+{{template "card-head" (dict "Icon" "trash-2" "Title" "userDetail.deleteTitle" "Desc" "userDetail.deleteDesc")}}
+<form class="delete-form" hx-post="/admin/ui/users/{{.User.Username}}/delete" hx-confirm="{{t "userDetail.confirmDelete" .User.Username}}"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label class="check"><input type="checkbox" name="deleteFiles"> Also delete the mailbox files from disk</label>
-<button type="submit" class="danger">Delete user</button>
+<label class="check"><input type="checkbox" name="deleteFiles"> {{t "userDetail.deleteFiles"}}</label>
+<button type="submit" class="danger">{{t "userDetail.deleteUser"}}</button>
 </form>
 </section>
 </section>
@@ -365,121 +365,121 @@
 {{template "foot" .}}{{end}}
 
 {{define "user-status"}}<div id="user-status">
-{{if .Error}}<p class="error">{{.Error}}</p>{{else if .Saved}}<p class="ok">Saved.</p>{{end}}
+{{if .Error}}<p class="error">{{t .Error}}</p>{{else if .Saved}}<p class="ok">{{t "userDetail.saved"}}</p>{{end}}
 </div>{{end}}
 
 {{define "folder-perms"}}
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
 {{if .FID}}
 <table class="grid">
-<thead><tr><th>Member</th><th>Level</th><th></th></tr></thead>
+<thead><tr><th>{{t "folderPerms.member"}}</th><th>{{t "folderPerms.level"}}</th><th></th></tr></thead>
 <tbody>
 {{range .Members}}<tr>
 <td>{{.Name}}</td><td>{{.Level}}</td>
 <td class="actions"><form hx-post="/admin/ui/users/{{$.Email}}/folder-perms/remove" hx-target="#folder-perms" hx-swap="innerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
 <input type="hidden" name="fid" value="{{$.FID}}"><input type="hidden" name="memberID" value="{{.MemberID}}">
-<button type="submit" class="secondary">Remove</button></form></td></tr>
-{{else}}<tr><td colspan="3" class="empty">No permissions are set on this folder.</td></tr>{{end}}
+<button type="submit" class="secondary">{{t "folderPerms.remove"}}</button></form></td></tr>
+{{else}}<tr><td colspan="3" class="empty">{{t "folderPerms.none"}}</td></tr>{{end}}
 </tbody>
 </table>
 <form class="create-form" hx-post="/admin/ui/users/{{.Email}}/folder-perms/set" hx-target="#folder-perms" hx-swap="innerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <input type="hidden" name="fid" value="{{.FID}}">
-<label>User <input type="email" name="username" placeholder="bob@example.com" required></label>
-<label>Level <select name="rights">{{range .Levels}}<option value="{{.Rights}}">{{.Name}}</option>{{end}}</select></label>
-<button type="submit">Grant</button>
+<label>{{t "folderPerms.user"}} <input type="email" name="username" placeholder="bob@example.com" required></label>
+<label>{{t "folderPerms.level"}} <select name="rights">{{range .Levels}}<option value="{{.Rights}}">{{.Name}}</option>{{end}}</select></label>
+<button type="submit">{{t "folderPerms.grant"}}</button>
 </form>
 {{end}}{{end}}
 
 {{define "quarantine"}}
 {{template "notice" .Notice}}
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
 <table class="grid">
-<thead><tr><th>Date</th><th>From</th><th>Subject</th><th>Size</th><th></th></tr></thead>
+<thead><tr><th>{{t "userQuarantine.date"}}</th><th>{{t "userQuarantine.from"}}</th><th>{{t "userQuarantine.subject"}}</th><th>{{t "userQuarantine.size"}}</th><th></th></tr></thead>
 <tbody>
 {{range .Messages}}<tr>
 <td>{{.Date}}</td><td>{{.Sender}}</td><td>{{.Subject}}</td><td>{{.Size}}</td>
 <td class="actions">
 <form class="inline" hx-post="/admin/ui/users/{{$.Email}}/quarantine/release" hx-target="#quarantine" hx-swap="innerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
-<input type="hidden" name="uid" value="{{.UID}}"><button type="submit" class="secondary">Release</button></form>
-<form class="inline" hx-post="/admin/ui/users/{{$.Email}}/quarantine/delete" hx-target="#quarantine" hx-swap="innerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}' hx-confirm="Delete this message?">
-<input type="hidden" name="uid" value="{{.UID}}"><button type="submit" class="danger">Delete</button></form>
+<input type="hidden" name="uid" value="{{.UID}}"><button type="submit" class="secondary">{{t "userQuarantine.release"}}</button></form>
+<form class="inline" hx-post="/admin/ui/users/{{$.Email}}/quarantine/delete" hx-target="#quarantine" hx-swap="innerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}' hx-confirm="{{t "userQuarantine.confirmDelete"}}">
+<input type="hidden" name="uid" value="{{.UID}}"><button type="submit" class="danger">{{t "userQuarantine.delete"}}</button></form>
 </td></tr>
-{{else}}<tr><td colspan="5" class="empty">No quarantined messages.</td></tr>{{end}}
+{{else}}<tr><td colspan="5" class="empty">{{t "userQuarantine.none"}}</td></tr>{{end}}
 </tbody>
 </table>
 {{end}}
 
 {{define "user-devices"}}<div id="user-devices">
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
 <table class="grid">
-<thead><tr><th>Device</th><th>User</th><th>Last connection</th><th>AS version</th><th>Folders</th><th>Status</th><th></th></tr></thead>
+<thead><tr><th>{{t "userDevices.device"}}</th><th>{{t "userDevices.user"}}</th><th>{{t "userDevices.lastConnection"}}</th><th>{{t "userDevices.asVersion"}}</th><th>{{t "userDevices.folders"}}</th><th>{{t "userDevices.status"}}</th><th></th></tr></thead>
 <tbody>
 {{range .Devices}}<tr>
 <td>{{.DeviceID}}<small>{{.DeviceType}}{{if .UserAgent}} / {{.UserAgent}}{{end}}</small></td>
 <td>{{.DeviceUser}}</td>
-<td class="nowrap">{{.LastSync}}<small>First sync {{.FirstSync}}</small></td>
+<td class="nowrap">{{.LastSync}}<small>{{t "userDevices.firstSync" .FirstSync}}</small></td>
 <td>{{.ASVersion}}</td>
 <td>{{.FoldersSynced}}</td>
-<td>{{.Status}}</td>
+<td>{{t .Status}}</td>
 <td class="actions device-actions">
 <form hx-post="/admin/ui/users/{{$.Email}}/devices/action" hx-target="#user-devices" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
 <input type="hidden" name="deviceID" value="{{.DeviceID}}"><input type="hidden" name="action" value="resync">
-<button type="submit" class="secondary">Resync</button></form>
+<button type="submit" class="secondary">{{t "userDevices.resync"}}</button></form>
 {{if .CanWipe}}
-<form hx-post="/admin/ui/users/{{$.Email}}/devices/action" hx-target="#user-devices" hx-swap="outerHTML" hx-confirm="Remote wipe {{.DeviceID}}? This erases the device." hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
+<form hx-post="/admin/ui/users/{{$.Email}}/devices/action" hx-target="#user-devices" hx-swap="outerHTML" hx-confirm="{{t "userDevices.confirmWipe" .DeviceID}}" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
 <input type="hidden" name="deviceID" value="{{.DeviceID}}"><input type="hidden" name="action" value="wipe">
-<button type="submit" class="danger">Wipe</button></form>
-<form hx-post="/admin/ui/users/{{$.Email}}/devices/action" hx-target="#user-devices" hx-swap="outerHTML" hx-confirm="Account-only wipe {{.DeviceID}}? This removes the account from the device." hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
+<button type="submit" class="danger">{{t "userDevices.wipe"}}</button></form>
+<form hx-post="/admin/ui/users/{{$.Email}}/devices/action" hx-target="#user-devices" hx-swap="outerHTML" hx-confirm="{{t "userDevices.confirmAccountWipe" .DeviceID}}" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
 <input type="hidden" name="deviceID" value="{{.DeviceID}}"><input type="hidden" name="action" value="wipe-account">
-<button type="submit" class="danger">Account wipe</button></form>
+<button type="submit" class="danger">{{t "userDevices.accountWipe"}}</button></form>
 {{end}}
 {{if .CanCancel}}
 <form hx-post="/admin/ui/users/{{$.Email}}/devices/action" hx-target="#user-devices" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
 <input type="hidden" name="deviceID" value="{{.DeviceID}}"><input type="hidden" name="action" value="cancel">
-<button type="submit" class="secondary">Cancel wipe</button></form>
+<button type="submit" class="secondary">{{t "userDevices.cancelWipe"}}</button></form>
 {{end}}
-<form hx-post="/admin/ui/users/{{$.Email}}/devices/action" hx-target="#user-devices" hx-swap="outerHTML" hx-confirm="Delete {{.DeviceID}}?" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
+<form hx-post="/admin/ui/users/{{$.Email}}/devices/action" hx-target="#user-devices" hx-swap="outerHTML" hx-confirm="{{t "userDevices.confirmDelete" .DeviceID}}" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
 <input type="hidden" name="deviceID" value="{{.DeviceID}}"><input type="hidden" name="action" value="delete">
-<button type="submit" class="danger">Delete</button></form>
+<button type="submit" class="danger">{{t "userDevices.delete"}}</button></form>
 </td>
 </tr>
-{{else}}<tr><td colspan="7" class="empty{{if .DevicesError}} failed{{end}}">{{if .DevicesError}}{{.DevicesError}}{{else}}No mobile devices.{{end}}</td></tr>
+{{else}}<tr><td colspan="7" class="empty{{if .DevicesError}} failed{{end}}">{{if .DevicesError}}{{t .DevicesError}}{{else}}{{t "userDevices.none"}}{{end}}</td></tr>
 {{end}}
 </tbody>
 </table>
 </div>{{end}}
 
 {{define "user-roles"}}<div id="user-roles">
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
 <table class="grid">
-<thead><tr><th>Role</th><th>Scope</th><th></th></tr></thead>
+<thead><tr><th>{{t "userRoles.role"}}</th><th>{{t "userRoles.scope"}}</th><th></th></tr></thead>
 <tbody>
-{{range .Roles}}<tr><td><span class="badge">{{.Role}}</span></td><td>{{if .ScopeID}}{{.ScopeID}}{{else}}All{{end}}</td>
+{{range .Roles}}<tr><td><span class="badge">{{.Role}}</span></td><td>{{if .ScopeID}}{{.ScopeID}}{{else}}{{t "userRoles.all"}}{{end}}</td>
 <td class="actions"><form hx-post="/admin/ui/users/{{$.Email}}/roles/revoke" hx-target="#user-roles" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
 <input type="hidden" name="role" value="{{.Role}}"><input type="hidden" name="scopeID" value="{{.ScopeID}}">
-<button type="submit" class="danger">Revoke</button></form></td></tr>
-{{else}}<tr><td colspan="3" class="empty{{if .RolesError}} failed{{end}}">{{if .RolesError}}{{.RolesError}}{{else}}No admin roles.{{end}}</td></tr>
+<button type="submit" class="danger">{{t "userRoles.revoke"}}</button></form></td></tr>
+{{else}}<tr><td colspan="3" class="empty{{if .RolesError}} failed{{end}}">{{if .RolesError}}{{t .RolesError}}{{else}}{{t "userRoles.none"}}{{end}}</td></tr>
 {{end}}
 </tbody>
 </table>
 <form class="create-form" hx-post="/admin/ui/users/{{.Email}}/roles/grant" hx-target="#user-roles" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Role <select name="role"><option value="system">System</option><option value="org">Organization</option><option value="domain">Domain</option></select></label>
-<label>Scope id <input type="number" name="scopeID" value="0" min="0" title="Org or domain id; 0 for a system role"></label>
-<button type="submit">Grant role</button>
+<label>{{t "userRoles.role"}} <select name="role"><option value="system">{{t "userRoles.roleSystem"}}</option><option value="org">{{t "userRoles.roleOrg"}}</option><option value="domain">{{t "userRoles.roleDomain"}}</option></select></label>
+<label>{{t "userRoles.scopeID"}} <input type="number" name="scopeID" value="0" min="0" title="{{t "userRoles.scopeIDTitle"}}"></label>
+<button type="submit">{{t "userRoles.grantRole"}}</button>
 </form>
 </div>{{end}}
 
 {{define "fetchmail-panel"}}<div id="fetchmail-panel">
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
 <table class="grid">
-<thead><tr><th>Server</th><th>User</th><th>Protocol</th><th>Folder</th><th>Keep</th><th>SSL</th><th>Active</th><th></th></tr></thead>
+<thead><tr><th>{{t "fetchmail.server"}}</th><th>{{t "fetchmail.user"}}</th><th>{{t "fetchmail.protocol"}}</th><th>{{t "fetchmail.folder"}}</th><th>{{t "fetchmail.keep"}}</th><th>SSL</th><th>{{t "fetchmail.active"}}</th><th></th></tr></thead>
 <tbody>
-{{range .Fetchmail}}<tr><td>{{.SrcServer}}{{if .SrcPort}}:{{.SrcPort}}{{end}}</td><td>{{.SrcUser}}</td><td>{{.Protocol}}</td><td>{{.SrcFolder}}</td><td>{{if .Keep}}yes{{else}}no{{end}}</td><td>{{if .UseSSL}}yes{{else}}no{{end}}</td><td>{{if .Active}}yes{{else}}no{{end}}</td>
+{{range .Fetchmail}}<tr><td>{{.SrcServer}}{{if .SrcPort}}:{{.SrcPort}}{{end}}</td><td>{{.SrcUser}}</td><td>{{.Protocol}}</td><td>{{.SrcFolder}}</td><td>{{if .Keep}}{{t "fetchmail.yes"}}{{else}}{{t "fetchmail.no"}}{{end}}</td><td>{{if .UseSSL}}{{t "fetchmail.yes"}}{{else}}{{t "fetchmail.no"}}{{end}}</td><td>{{if .Active}}{{t "fetchmail.yes"}}{{else}}{{t "fetchmail.no"}}{{end}}</td>
 <td class="actions"><form hx-post="/admin/ui/users/{{$.Email}}/fetchmail/{{.ID}}/delete" hx-target="#fetchmail-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
-<button type="submit" class="danger">Delete</button></form></td></tr>
-{{else}}<tr><td colspan="8" class="empty{{if .FetchmailError}} failed{{end}}">{{if .FetchmailError}}{{.FetchmailError}}{{else}}No remote accounts.{{end}}</td></tr>
+<button type="submit" class="danger">{{t "fetchmail.delete"}}</button></form></td></tr>
+{{else}}<tr><td colspan="8" class="empty{{if .FetchmailError}} failed{{end}}">{{if .FetchmailError}}{{t .FetchmailError}}{{else}}{{t "fetchmail.none"}}{{end}}</td></tr>
 {{end}}
 </tbody>
 </table>

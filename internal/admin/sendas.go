@@ -135,7 +135,7 @@ func (s *Server) saveGrantListForm(w http.ResponseWriter, r *http.Request, kind,
 	case err != nil:
 		data["Error"] = s.notice(userUnread, err)
 	case !ok:
-		data["Error"] = "No such user."
+		data["Error"] = "userDetail.noSuchUser"
 	default:
 		grantees := strings.Fields(r.PostFormValue(field))
 		if msg := s.storeGrantList(cl.UserID, u.Maildir, kind, grantees, set); msg != "" {
@@ -159,10 +159,10 @@ func (s *Server) storeGrantList(adminID int64, maildir, kind string, grantees []
 	case gErr != nil:
 		return s.notice(granteesUnread, gErr)
 	case bad != "":
-		return "No such user: " + bad + "."
+		return msg("userDetail.noSuchUserNamed", bad)
 	}
 	if err := set(maildir, list); err != nil {
-		return s.notice("Could not save "+kind+".", err)
+		return s.notice(msg("userDetail.saveGrantFailed", kind), err)
 	}
 	return ""
 }

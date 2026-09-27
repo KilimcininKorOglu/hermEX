@@ -121,7 +121,7 @@ func (s *Server) handleUIUserSyncPolicy(w http.ResponseWriter, r *http.Request) 
 	case err != nil:
 		data["Error"] = s.notice(userUnread, err)
 	case !ok:
-		data["Error"] = "No such user."
+		data["Error"] = "userDetail.noSuchUser"
 	default:
 		p, perr := policyFromForm(r)
 		switch {
@@ -129,7 +129,7 @@ func (s *Server) handleUIUserSyncPolicy(w http.ResponseWriter, r *http.Request) 
 			data["Error"] = invalidPolicy(perr)
 		default:
 			if err := s.store.SetSyncPolicy(u.Maildir, p); err != nil {
-				data["Error"] = s.notice("Could not save sync policy.", err)
+				data["Error"] = s.notice("userDetail.saveSyncPolicyFailed", err)
 			} else {
 				data["Saved"] = true
 			}

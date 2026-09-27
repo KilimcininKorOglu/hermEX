@@ -146,10 +146,10 @@ func (s *Server) handleUIUserOOF(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		data["Error"] = s.notice(userUnread, err)
 	case !ok:
-		data["Error"] = "No such user."
+		data["Error"] = "userDetail.noSuchUser"
 	default:
 		if err := s.store.SetOOFSettings(u.Maildir, oofFromForm(r)); err != nil {
-			data["Error"] = s.notice("Could not save out-of-office settings.", err)
+			data["Error"] = s.notice("userDetail.saveOOFFailed", err)
 		} else {
 			data["Saved"] = true
 		}

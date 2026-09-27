@@ -107,21 +107,21 @@ func formatDeviceTime(sec int64) string {
 func wipeStatusLabel(status int) string {
 	switch status {
 	case activesync.WipeStatusOK:
-		return "OK"
+		return "userDevices.statusOK"
 	case activesync.WipeStatusPending:
-		return "Wipe pending"
+		return "userDevices.statusWipePending"
 	case activesync.WipeStatusRequested:
-		return "Wipe requested"
+		return "userDevices.statusWipeRequested"
 	case activesync.WipeStatusWiped:
-		return "Wiped"
+		return "userDevices.statusWiped"
 	case activesync.WipeStatusAccountPending:
-		return "Account wipe pending"
+		return "userDevices.statusAccountPending"
 	case activesync.WipeStatusAccountRequested:
-		return "Account wipe requested"
+		return "userDevices.statusAccountRequested"
 	case activesync.WipeStatusAccountWiped:
-		return "Account wiped"
+		return "userDevices.statusAccountWiped"
 	default:
-		return "Unknown"
+		return "userDevices.statusUnknown"
 	}
 }
 
@@ -158,23 +158,23 @@ func (s *Server) handleUIUserDevices(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case err != nil:
 		s.renderUserDevices(w, r, r.PathValue("email"), csrfCookieValue(r), nil,
-			s.notice("Could not read the user.", err), "Could not read the mobile devices.")
+			s.notice("userDetail.userUnread", err), "userDetail.devicesUnread")
 
 		return
 	case !ok:
-		s.renderUserDevices(w, r, r.PathValue("email"), csrfCookieValue(r), nil, "No such user.", "")
+		s.renderUserDevices(w, r, r.PathValue("email"), csrfCookieValue(r), nil, "userDetail.noSuchUser", "")
 		return
 	}
 	errMsg := ""
 	if deviceID := r.PostFormValue("deviceID"); deviceID == "" {
-		errMsg = "No device specified."
+		errMsg = "userDevices.noDevice"
 	} else if err := s.applyDeviceAction(u.Maildir, deviceID, r.PostFormValue("action")); err != nil {
-		errMsg = s.notice("Could not apply device action.", err)
+		errMsg = s.notice("userDevices.actionFailed", err)
 	}
 	listErr := ""
 	devs, err := s.store.ListDevices(u.Maildir)
 	if err != nil {
-		listErr = s.notice("Could not read the mobile devices.", err)
+		listErr = s.notice("userDetail.devicesUnread", err)
 	}
 	s.renderUserDevices(w, r, u.Username, csrfCookieValue(r), devs, errMsg, listErr)
 }

@@ -63,7 +63,7 @@ func (s *Server) handleUIUserSentCopy(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		data["Error"] = s.notice(userUnread, err)
 	case !ok:
-		data["Error"] = "No such user."
+		data["Error"] = "userDetail.noSuchUser"
 	default:
 		cfg := objectstore.SentCopyConfig{
 			ForSendAs:       r.PostFormValue("copysendas") != "",
@@ -71,7 +71,7 @@ func (s *Server) handleUIUserSentCopy(w http.ResponseWriter, r *http.Request) {
 			Exclusive:       r.PostFormValue("copyexclusive") != "",
 		}
 		if err := s.store.SetSentCopyConfig(u.Maildir, cfg); err != nil {
-			data["Error"] = s.notice("Could not save sent-copy settings.", err)
+			data["Error"] = s.notice("userDetail.saveSentCopyFailed", err)
 		} else {
 			data["Saved"] = true
 		}

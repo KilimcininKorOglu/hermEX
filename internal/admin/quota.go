@@ -106,10 +106,10 @@ func (s *Server) handleUIUserQuota(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		data["Error"] = s.notice(userUnread, err)
 	case !ok:
-		data["Error"] = "No such user."
+		data["Error"] = "userDetail.noSuchUser"
 	default:
 		if err := s.store.SetQuota(u.Maildir, quotaFromForm(r)); err != nil {
-			data["Error"] = s.notice("Could not save quota.", err)
+			data["Error"] = s.notice("userDetail.saveQuotaFailed", err)
 		} else {
 			data["Saved"] = true
 		}

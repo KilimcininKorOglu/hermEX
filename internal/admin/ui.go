@@ -239,7 +239,7 @@ func (s *Server) handleUIDashboard(w http.ResponseWriter, r *http.Request) {
 		// than rendering three confident zeroes.
 		s.render(w, r, "dashboard.html", map[string]any{
 			"Nav": "dashboard", "Login": cl.Login, "CSRF": csrfCookieValue(r),
-			"Error": s.notice("Could not read the directory.", err),
+			"Error": s.notice("dashboard.readFailed", err),
 		})
 
 		return

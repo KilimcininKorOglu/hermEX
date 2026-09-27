@@ -66,7 +66,7 @@ func (s *Server) handleUIUserMeeting(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		data["Error"] = s.notice(userUnread, err)
 	case !ok:
-		data["Error"] = "No such user."
+		data["Error"] = "userDetail.noSuchUser"
 	default:
 		cfg := objectstore.MeetingConfig{
 			AutoAccept:              r.PostFormValue("autoaccept") != "",
@@ -77,7 +77,7 @@ func (s *Server) handleUIUserMeeting(w http.ResponseWriter, r *http.Request) {
 			LeaveCancellationsUnprocessed: r.PostFormValue("processcancellations") == "",
 		}
 		if err := s.store.SetMeetingConfig(u.Maildir, cfg); err != nil {
-			data["Error"] = s.notice("Could not save meeting settings.", err)
+			data["Error"] = s.notice("userDetail.saveMeetingFailed", err)
 		} else {
 			data["Saved"] = true
 		}
