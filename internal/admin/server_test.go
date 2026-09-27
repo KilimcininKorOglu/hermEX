@@ -218,8 +218,13 @@ func (f *fakeDir) Authenticate(_, password string) (string, bool) {
 	}
 	return "", false
 }
-func (f *fakeDir) UserID(_ string) (int64, bool, error)            { return f.uid, f.uid != 0, nil }
-func (f *fakeDir) AdminRoles(int64) ([]directory.AdminRole, error) { return f.roles, nil }
+func (f *fakeDir) UserID(_ string) (int64, bool, error) { return f.uid, f.uid != 0, nil }
+func (f *fakeDir) AdminRoles(int64) ([]directory.AdminRole, error) {
+	if err := f.readErrs["AdminRoles"]; err != nil {
+		return nil, err
+	}
+	return f.roles, nil
+}
 
 // EffectivePermissions mirrors the real resolver's union bridge: any explicitly
 // scripted named-role permissions in f.perms, plus the equivalents of the tier
@@ -817,7 +822,9 @@ func (f *fakeDir) SetMTASTSSettings(s directory.MTASTSSettings) error {
 	f.mtastsSettings = &s
 	return nil
 }
-func (f *fakeDir) GetUserSpamThreshold(string) (*int, error) { return f.userSpamThreshold, nil }
+func (f *fakeDir) GetUserSpamThreshold(string) (*int, error) {
+	return f.userSpamThreshold, f.readErrs["GetUserSpamThreshold"]
+}
 func (f *fakeDir) GetDomainSpamThreshold(string) (*int, error) {
 	return f.domainSpamThreshold, f.readErrs["GetDomainSpamThreshold"]
 }
@@ -882,7 +889,7 @@ func (f *fakeDir) SetDomainSyncPolicy(domain string, p easpolicy.Policy) (bool, 
 	return !f.domainSyncPolicyMissing, nil
 }
 func (f *fakeDir) ListFetchmail(mailbox string) ([]directory.FetchmailEntry, error) {
-	return f.fetchmail[mailbox], nil
+	return f.fetchmail[mailbox], f.readErrs["ListFetchmail"]
 }
 func (f *fakeDir) CreateFetchmail(e directory.FetchmailEntry) (int64, error) {
 	if err := e.Validate(); err != nil {
@@ -932,7 +939,9 @@ func (f *fakeDir) DeleteUser(username string, deleteFiles bool) (bool, error) {
 	f.deletedUser, f.deleteFiles = username, deleteFiles
 	return !f.deleteMissing, nil
 }
-func (f *fakeDir) ListAltnames(string) ([]string, error) { return f.altnames, nil }
+func (f *fakeDir) ListAltnames(string) ([]string, error) {
+	return f.altnames, f.readErrs["ListAltnames"]
+}
 func (f *fakeDir) SetAltnames(username string, altnames []string) (bool, error) {
 	if f.createErr != nil {
 		return false, f.createErr
@@ -940,7 +949,9 @@ func (f *fakeDir) SetAltnames(username string, altnames []string) (bool, error) 
 	f.setAltnamesUser, f.setAltnames = username, altnames
 	return !f.altnamesMissing, nil
 }
-func (f *fakeDir) ListAliasesFor(string) ([]string, error) { return f.userAliases, nil }
+func (f *fakeDir) ListAliasesFor(string) ([]string, error) {
+	return f.userAliases, f.readErrs["ListAliasesFor"]
+}
 func (f *fakeDir) SetAliasesFor(username string, aliases []string) (bool, error) {
 	if f.createErr != nil {
 		return false, f.createErr
@@ -974,7 +985,7 @@ func (f *fakeDir) SyncAliasesFor(username string, aliases []string) ([]string, b
 	return nil, !f.aliasesMissing, nil
 }
 func (f *fakeDir) GetForward(string) (directory.ForwardInfo, bool, error) {
-	return f.forward, f.forwardSet, nil
+	return f.forward, f.forwardSet, f.readErrs["GetForward"]
 }
 func (f *fakeDir) SetForward(username string, forwardType int, destination string) (bool, error) {
 	if f.createErr != nil {
@@ -1057,7 +1068,9 @@ func (f *fakeDir) CreateRoom(email, displayName, maildir string, capacity int, e
 	f.createdRoom, f.createdRoomName, f.createdRoomCap, f.createdRoomEquip = email, displayName, capacity, equipment
 	return 1, nil
 }
-func (f *fakeDir) GetUserProperties(string) (map[uint32]string, error) { return f.userProps, nil }
+func (f *fakeDir) GetUserProperties(string) (map[uint32]string, error) {
+	return f.userProps, f.readErrs["GetUserProperties"]
+}
 func (f *fakeDir) SetUserProperties(username string, props map[uint32]string) (bool, error) {
 	if f.createErr != nil {
 		return false, f.createErr
@@ -1079,13 +1092,13 @@ func (p fakePaths) ServerHostname() string           { return "mail.hermex.test"
 
 // fakeStore is a scripted MailboxStore for the admin store-backed tabs: it holds
 // the out-of-office settings and the device list keyed by maildir, and captures
-// the last write or device action.
+// the last write or device action. readErrs fails a read method, keyed by its name.
 type fakeStore struct {
-	oof    map[string]objectstore.OOFSettings
-	setDir string
-	setOOF objectstore.OOFSettings
-	getErr error
-	setErr error
+	oof      map[string]objectstore.OOFSettings
+	setDir   string
+	setOOF   objectstore.OOFSettings
+	readErrs map[string]error
+	setErr   error
 
 	devices         map[string][]activesync.DeviceInfo
 	deviceAction    string // "resync"/"delete"/"wipe"/"wipe-account"/"cancel"
@@ -1138,8 +1151,8 @@ type fakeStore struct {
 }
 
 func (f *fakeStore) GetOOFSettings(maildir string) (objectstore.OOFSettings, error) {
-	if f.getErr != nil {
-		return objectstore.OOFSettings{}, f.getErr
+	if err := f.readErrs["GetOOFSettings"]; err != nil {
+		return objectstore.OOFSettings{}, err
 	}
 	return f.oof[maildir], nil
 }
@@ -1157,8 +1170,8 @@ func (f *fakeStore) SetOOFSettings(maildir string, cfg objectstore.OOFSettings) 
 }
 
 func (f *fakeStore) ListDevices(maildir string) ([]activesync.DeviceInfo, error) {
-	if f.getErr != nil {
-		return nil, f.getErr
+	if err := f.readErrs["ListDevices"]; err != nil {
+		return nil, err
 	}
 	return f.devices[maildir], nil
 }
@@ -1193,8 +1206,8 @@ func (f *fakeStore) recordDeviceAction(action, maildir, deviceID string) error {
 }
 
 func (f *fakeStore) GetQuota(maildir string) (objectstore.QuotaLimits, int64, error) {
-	if f.getErr != nil {
-		return objectstore.QuotaLimits{}, 0, f.getErr
+	if err := f.readErrs["GetQuota"]; err != nil {
+		return objectstore.QuotaLimits{}, 0, err
 	}
 	return f.quota[maildir], f.used[maildir], nil
 }
@@ -1208,8 +1221,8 @@ func (f *fakeStore) SetQuota(maildir string, q objectstore.QuotaLimits) error {
 }
 
 func (f *fakeStore) GetDelegates(maildir string) ([]string, error) {
-	if f.getErr != nil {
-		return nil, f.getErr
+	if err := f.readErrs["GetDelegates"]; err != nil {
+		return nil, err
 	}
 	return f.delegates[maildir], nil
 }
@@ -1227,22 +1240,22 @@ func (f *fakeStore) SetDelegates(maildir string, list []string) error {
 }
 
 func (f *fakeStore) GetSendAs(maildir string) ([]string, error) {
-	if f.getErr != nil {
-		return nil, f.getErr
+	if err := f.readErrs["GetSendAs"]; err != nil {
+		return nil, err
 	}
 	return f.sendAs[maildir], nil
 }
 
 func (f *fakeStore) GetStoreOwners(maildir string) ([]string, error) {
-	if f.getErr != nil {
-		return nil, f.getErr
+	if err := f.readErrs["GetStoreOwners"]; err != nil {
+		return nil, err
 	}
 	return f.storeOwners[maildir], nil
 }
 
 func (f *fakeStore) GetSyncPolicy(maildir string) (easpolicy.Policy, error) {
-	if f.getErr != nil {
-		return nil, f.getErr
+	if err := f.readErrs["GetSyncPolicy"]; err != nil {
+		return nil, err
 	}
 	return f.syncPolicy[maildir], nil
 }
@@ -1272,8 +1285,8 @@ func (f *fakeStore) SetStoreOwners(maildir string, list []string) error {
 }
 
 func (f *fakeStore) GetMeetingConfig(maildir string) (objectstore.MeetingConfig, error) {
-	if f.getErr != nil {
-		return objectstore.MeetingConfig{}, f.getErr
+	if err := f.readErrs["GetMeetingConfig"]; err != nil {
+		return objectstore.MeetingConfig{}, err
 	}
 	return f.meetingConfig[maildir], nil
 }
@@ -1303,8 +1316,8 @@ func (f *fakeStore) SetSendAs(maildir string, list []string) error {
 }
 
 func (f *fakeStore) GetSendOnBehalf(maildir string) ([]string, error) {
-	if f.getErr != nil {
-		return nil, f.getErr
+	if err := f.readErrs["GetSendOnBehalf"]; err != nil {
+		return nil, err
 	}
 	return f.sendOnBehalf[maildir], nil
 }
@@ -1322,8 +1335,8 @@ func (f *fakeStore) SetSendOnBehalf(maildir string, list []string) error {
 }
 
 func (f *fakeStore) GetSentCopyConfig(maildir string) (objectstore.SentCopyConfig, error) {
-	if f.getErr != nil {
-		return objectstore.SentCopyConfig{}, f.getErr
+	if err := f.readErrs["GetSentCopyConfig"]; err != nil {
+		return objectstore.SentCopyConfig{}, err
 	}
 	return f.sentCopy[maildir], nil
 }
@@ -1341,15 +1354,15 @@ func (f *fakeStore) SetSentCopyConfig(maildir string, cfg objectstore.SentCopyCo
 }
 
 func (f *fakeStore) ListFolders(maildir string) ([]objectstore.FolderInfo, error) {
-	if f.getErr != nil {
-		return nil, f.getErr
+	if err := f.readErrs["ListFolders"]; err != nil {
+		return nil, err
 	}
 	return f.folders[maildir], nil
 }
 
 func (f *fakeStore) ListFolderPermissions(maildir string, folderID int64) ([]objectstore.PermissionEntry, error) {
-	if f.getErr != nil {
-		return nil, f.getErr
+	if err := f.readErrs["ListFolderPermissions"]; err != nil {
+		return nil, err
 	}
 	return f.folderPerms[maildir], nil
 }

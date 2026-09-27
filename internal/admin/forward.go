@@ -58,17 +58,18 @@ type forwardView struct {
 	Destination string
 }
 
-// forwardViewOf builds the forward section model from a directory lookup; an unset or
-// unreadable forward renders as none.
-func (s *Server) forwardViewOf(username string) forwardView {
+// forwardViewOf builds the forward section model from a directory lookup; an unset
+// forward renders as none. A failed lookup is returned rather than rendered as none,
+// because a save of that form would clear the stored forward.
+func (s *Server) forwardViewOf(username string) (forwardView, error) {
 	fi, ok, err := s.dir.GetForward(username)
 	if err != nil || !ok {
-		return forwardView{}
+		return forwardView{}, err
 	}
 	if fi.Type == directory.ForwardRedirect {
-		return forwardView{Type: "redirect", Destination: fi.Destination}
+		return forwardView{Type: "redirect", Destination: fi.Destination}, nil
 	}
-	return forwardView{Type: "cc", Destination: fi.Destination}
+	return forwardView{Type: "cc", Destination: fi.Destination}, nil
 }
 
 // handleUIUserForward saves the user's forward directive from the detail form and

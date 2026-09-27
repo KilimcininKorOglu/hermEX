@@ -217,48 +217,114 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no such user", http.StatusNotFound)
 		return
 	}
-	altnames, _ := s.dir.ListAltnames(u.Username)
-	aliases, _ := s.dir.ListAliasesFor(u.Username)
-	roles, _ := s.dir.AdminRoles(u.ID)
-	props, _ := s.dir.GetUserProperties(u.Username)
-	oof, _ := s.store.GetOOFSettings(u.Maildir)
-	devs, _ := s.store.ListDevices(u.Maildir)
-	qlimits, qused, _ := s.store.GetQuota(u.Maildir)
-	delegates, _ := s.store.GetDelegates(u.Maildir)
-	sendAs, _ := s.store.GetSendAs(u.Maildir)
-	sendOnBehalf, _ := s.store.GetSendOnBehalf(u.Maildir)
-	sentCopy, _ := s.store.GetSentCopyConfig(u.Maildir)
-	storeOwners, _ := s.store.GetStoreOwners(u.Maildir)
-	meetingCfg, _ := s.store.GetMeetingConfig(u.Maildir)
-	syncPol, _ := s.store.GetSyncPolicy(u.Maildir)
-	fmEntries, _ := s.dir.ListFetchmail(u.Username)
-	folders, _ := s.store.ListFolders(u.Maildir)
-	spamThreshold, _ := s.dir.GetUserSpamThreshold(u.Username)
-	s.render(w, "user_detail.html", map[string]any{
-		"Nav":           "users",
-		"CSRF":          csrfCookieValue(r),
-		"User":          u,
-		"Email":         u.Username,
-		"Altnames":      strings.Join(altnames, "\n"),
-		"Aliases":       strings.Join(aliases, "\n"),
-		"Forward":       s.forwardViewOf(u.Username),
-		"Roles":         roles,
-		"Contact":       contactValues(props),
-		"OOF":           oofViewOf(oof),
-		"Devices":       deviceViewsOf(devs),
-		"Quota":         quotaViewOf(qlimits, qused),
-		"Hide":          hideViewOf(props),
-		"Delegates":     strings.Join(delegates, "\n"),
-		"SendAs":        strings.Join(sendAs, "\n"),
-		"SendOnBehalf":  strings.Join(sendOnBehalf, "\n"),
-		"SentCopy":      sentCopy,
-		"StoreOwners":   strings.Join(storeOwners, "\n"),
-		"Meeting":       meetingCfg,
-		"SyncPolicy":    policyView(syncPol),
-		"Fetchmail":     fetchmailViews(fmEntries),
-		"Folders":       folders,
-		"SpamThreshold": spamThreshold,
-	})
+	failed := readFailures{}
+	data := map[string]any{
+		"Nav": "users", "CSRF": csrfCookieValue(r), "User": u, "Email": u.Username, "ReadFailed": failed,
+	}
+	s.addUserAddressing(data, failed, u.Username)
+	s.addUserMailboxSettings(data, failed, u.Maildir)
+	s.addUserGrants(data, failed, u.Maildir)
+	s.addUserLists(data, u)
+	s.render(w, "user_detail.html", data)
+}
+
+// addUserAddressing fills the user detail forms kept in the directory: the
+// alternative login names, the aliases, the forward, the contact details and the
+// address-book visibility, and the spam threshold. A form whose value could not be
+// read is hidden, because saving it would replace the stored value with an empty one.
+func (s *Server) addUserAddressing(data map[string]any, failed readFailures, username string) {
+	altnames, err := s.dir.ListAltnames(username)
+	if s.noteRead(failed, "altnames", "the alternative login names", err) {
+		data["Altnames"] = strings.Join(altnames, "\n")
+	}
+	aliases, err := s.dir.ListAliasesFor(username)
+	if s.noteRead(failed, "aliases", "the aliases", err) {
+		data["Aliases"] = strings.Join(aliases, "\n")
+	}
+	forward, err := s.forwardViewOf(username)
+	if s.noteRead(failed, "forward", "the forward", err) {
+		data["Forward"] = forward
+	}
+	props, err := s.dir.GetUserProperties(username)
+	if s.noteRead(failed, "properties", "the user properties", err) {
+		data["Contact"], data["Hide"] = contactValues(props), hideViewOf(props)
+	}
+	threshold, err := s.dir.GetUserSpamThreshold(username)
+	if s.noteRead(failed, "spam", "the spam threshold", err) {
+		data["SpamThreshold"] = threshold
+	}
+}
+
+// addUserMailboxSettings fills the user detail forms kept in the mailbox store: the
+// out-of-office reply, the quota, the meeting handling, the sent-copy rule and the
+// device policy. A form whose value could not be read is hidden.
+func (s *Server) addUserMailboxSettings(data map[string]any, failed readFailures, maildir string) {
+	oof, err := s.store.GetOOFSettings(maildir)
+	if s.noteRead(failed, "oof", "the out-of-office settings", err) {
+		data["OOF"] = oofViewOf(oof)
+	}
+	limits, used, err := s.store.GetQuota(maildir)
+	if s.noteRead(failed, "quota", "the quota", err) {
+		data["Quota"] = quotaViewOf(limits, used)
+	}
+	meeting, err := s.store.GetMeetingConfig(maildir)
+	if s.noteRead(failed, "meeting", "the meeting settings", err) {
+		data["Meeting"] = meeting
+	}
+	sentCopy, err := s.store.GetSentCopyConfig(maildir)
+	if s.noteRead(failed, "sentcopy", "the sent-copy settings", err) {
+		data["SentCopy"] = sentCopy
+	}
+	policy, err := s.store.GetSyncPolicy(maildir)
+	if s.noteRead(failed, "policy", "the device policy of this user", err) {
+		data["SyncPolicy"] = policyView(policy)
+	}
+}
+
+// addUserGrants fills the user detail forms that give other people access to the
+// mailbox. A form whose list could not be read is hidden, because saving it would
+// revoke every grant it did not show.
+func (s *Server) addUserGrants(data map[string]any, failed readFailures, maildir string) {
+	for _, g := range []struct {
+		key, section, what string
+		read               func(string) ([]string, error)
+	}{
+		{"Delegates", "delegates", "the delegates", s.store.GetDelegates},
+		{"StoreOwners", "storeowners", "the store owners", s.store.GetStoreOwners},
+		{"SendAs", "sendas", "the send-as grants", s.store.GetSendAs},
+		{"SendOnBehalf", "sendonbehalf", "the send-on-behalf grants", s.store.GetSendOnBehalf},
+	} {
+		list, err := g.read(maildir)
+		if s.noteRead(failed, g.section, g.what, err) {
+			data[g.key] = strings.Join(list, "\n")
+		}
+	}
+}
+
+// addUserLists fills the user detail lists: the mobile devices, the remote accounts,
+// the folders and the admin roles. A list that could not be read is reported, not
+// shown as empty.
+func (s *Server) addUserLists(data map[string]any, u directory.UserDetail) {
+	devs, err := s.store.ListDevices(u.Maildir)
+	data["Devices"] = deviceViewsOf(devs)
+	if err != nil {
+		data["DevicesError"] = s.notice("Could not read the mobile devices.", err)
+	}
+	entries, err := s.dir.ListFetchmail(u.Username)
+	data["Fetchmail"] = fetchmailViews(entries)
+	if err != nil {
+		data["FetchmailError"] = s.notice("Could not read the remote accounts.", err)
+	}
+	folders, err := s.store.ListFolders(u.Maildir)
+	data["Folders"] = folders
+	if err != nil {
+		data["FoldersError"] = s.notice("Could not read the folders.", err)
+	}
+	roles, err := s.dir.AdminRoles(u.ID)
+	data["Roles"] = roles
+	if err != nil {
+		data["RolesError"] = s.notice("Could not read the admin roles.", err)
+	}
 }
 
 // handleUIUserContact saves the user's contact/detail fields from the form and
@@ -285,18 +351,15 @@ func (s *Server) handleUIUserContact(w http.ResponseWriter, r *http.Request) {
 }
 
 // renderUserRoles re-renders the admin-roles panel for htmx after a grant or
-// revoke, carrying an optional error message.
+// revoke, carrying an optional error message. A failed read of the roles is shown in
+// the table, which must not read as a user holding none.
 func (s *Server) renderUserRoles(w http.ResponseWriter, email, csrf string, uid int64, errMsg string) {
 	roles, err := s.dir.AdminRoles(uid)
-	if err != nil && errMsg == "" {
-		errMsg = s.notice("Could not load roles.", err)
+	data := map[string]any{"Email": email, "CSRF": csrf, "Roles": roles, "Error": errMsg}
+	if err != nil {
+		data["RolesError"] = s.notice("Could not read the admin roles.", err)
 	}
-	s.render(w, "user-roles", map[string]any{
-		"Email": email,
-		"CSRF":  csrf,
-		"Roles": roles,
-		"Error": errMsg,
-	})
+	s.render(w, "user-roles", data)
 }
 
 // handleUIUserGrantRole grants the user an admin role from the detail form and

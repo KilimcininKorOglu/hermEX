@@ -126,17 +126,15 @@ func (s *Server) handleDeleteUserFetchmail(w http.ResponseWriter, r *http.Reques
 }
 
 // renderFetchmailPanel re-renders the user's fetchmail list for htmx after a change.
+// A failed read of the list is shown in the table, which must not read as no remote
+// accounts.
 func (s *Server) renderFetchmailPanel(w http.ResponseWriter, email, csrf, errMsg string) {
 	entries, err := s.dir.ListFetchmail(email)
-	if err != nil && errMsg == "" {
-		errMsg = s.notice("Could not load fetchmail.", err)
+	data := map[string]any{"Email": email, "CSRF": csrf, "Fetchmail": fetchmailViews(entries), "Error": errMsg}
+	if err != nil {
+		data["FetchmailError"] = s.notice("Could not read the remote accounts.", err)
 	}
-	s.render(w, "fetchmail-panel", map[string]any{
-		"Email":     email,
-		"CSRF":      csrf,
-		"Fetchmail": fetchmailViews(entries),
-		"Error":     errMsg,
-	})
+	s.render(w, "fetchmail-panel", data)
 }
 
 // handleUIUserAddFetchmail adds a configuration from the detail form and returns the

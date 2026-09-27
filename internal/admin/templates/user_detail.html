@@ -64,6 +64,10 @@
 
 <div class="card-grid">
 <section class="card">
+{{with index .ReadFailed "quota"}}
+{{template "card-head" (dict "Icon" "hard-drive" "Title" "Storage quota" "Desc" "A limit of 0 means unlimited.")}}
+<p class="error">{{.}}</p>
+{{else}}
 {{template "card-head" (dict "Icon" "hard-drive" "Title" "Storage quota" "Desc" (printf "Used space: %v MiB. A limit of 0 means unlimited." .Quota.UsedMB))}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/quota" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
@@ -72,20 +76,24 @@
 <label>Storage quota and warning (MiB) <input type="number" name="storagemb" value="{{.Quota.StorageMB}}" min="0"></label>
 <button type="submit">Save quota</button>
 </form>
+{{end}}
 </section>
 
 <section class="card">
 {{template "card-head" (dict "Icon" "shield-alert" "Title" "Spam threshold" "Desc" "Inbound mail at or above this score goes to Junk. Empty inherits the domain or global threshold; an operator block or allow rule still wins.")}}
+{{with index .ReadFailed "spam"}}<p class="error">{{.}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/spam-threshold" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Threshold <input type="number" name="spam_threshold" value="{{if .SpamThreshold}}{{.SpamThreshold}}{{end}}" min="1" placeholder="inherit"></label>
 <button type="submit">Save threshold</button>
 </form>
+{{end}}
 </section>
 </div>
 
 <section class="card">
 {{template "card-head" (dict "Icon" "eye-off" "Title" "Address-book visibility" "Desc" "Hide this user from the lists below.")}}
+{{with index .ReadFailed "properties"}}<p class="error">{{.}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/hide" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <div class="checks">
@@ -96,10 +104,12 @@
 </div>
 <button type="submit">Save visibility</button>
 </form>
+{{end}}
 </section>
 
 <section class="card">
 {{template "card-head" (dict "Icon" "contact" "Title" "Contact details" "Desc" "How this user appears in the address book and to Outlook.")}}
+{{with index .ReadFailed "properties"}}<p class="error">{{.}}</p>{{else}}
 <form class="form-grid" hx-put="/admin/ui/users/{{.User.Username}}/contact" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Display name <input type="text" name="displayname" value="{{index .Contact "displayname"}}"></label>
@@ -118,12 +128,14 @@
 <label>Comment <input type="text" name="comment" value="{{index .Contact "comment"}}"></label>
 <button type="submit">Save contact</button>
 </form>
+{{end}}
 </section>
 </section>
 
 <section class="tabpanel">
 <section class="card">
 {{template "card-head" (dict "Icon" "clock" "Title" "Out of office" "Desc" "Automatic replies while the user is away.")}}
+{{with index .ReadFailed "oof"}}<p class="error">{{.}}</p>{{else}}
 <form class="form-grid" hx-put="/admin/ui/users/{{.User.Username}}/oof" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label class="check"><input type="checkbox" name="enabled"{{if .OOF.Enabled}} checked{{end}}> Send automatic replies</label>
@@ -139,11 +151,13 @@
 <label class="check"><input type="checkbox" name="externalknownonly"{{if .OOF.KnownOnly}} checked{{end}}> Only reply to senders already in the user's contacts</label>
 <button type="submit">Save out-of-office</button>
 </form>
+{{end}}
 </section>
 
 <div class="card-grid">
 <section class="card">
 {{template "card-head" (dict "Icon" "forward" "Title" "Forward" "Desc" "Send this user's mail on to another address.")}}
+{{with index .ReadFailed "forward"}}<p class="error">{{.}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/forward" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Type
@@ -155,29 +169,35 @@
 <label>Destination <input type="email" name="destination" value="{{.Forward.Destination}}" placeholder="boss@example.com"></label>
 <button type="submit">Save forward</button>
 </form>
+{{end}}
 </section>
 
 <section class="card">
 {{template "card-head" (dict "Icon" "at-sign" "Title" "E-mail aliases" "Desc" "Other addresses that deliver to this mailbox, one per line.")}}
+{{with index .ReadFailed "aliases"}}<p class="error">{{.}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/aliases" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Aliases <textarea name="aliases" rows="4" placeholder="sales@example.com">{{.Aliases}}</textarea></label>
 <button type="submit">Save aliases</button>
 </form>
+{{end}}
 </section>
 
 <section class="card">
 {{template "card-head" (dict "Icon" "key" "Title" "Alternative login names" "Desc" "Other names this user may sign in with, one per line.")}}
+{{with index .ReadFailed "altnames"}}<p class="error">{{.}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/altnames" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Login names <textarea name="altnames" rows="4" placeholder="alias-login">{{.Altnames}}</textarea></label>
 <button type="submit">Save names</button>
 </form>
+{{end}}
 </section>
 </div>
 
 <section class="card">
 {{template "card-head" (dict "Icon" "calendar" "Title" "Meeting requests" "Desc" "How this mailbox answers the meeting requests it receives.")}}
+{{with index .ReadFailed "meeting"}}<p class="error">{{.}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/meeting" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label class="check"><input type="checkbox" name="autoaccept"{{if .Meeting.AutoAccept}} checked{{end}}> Accept conflict-free meeting requests (otherwise added to the calendar as tentative only, with no response to the organizer)</label>
@@ -190,6 +210,7 @@
 <p class="hint">The meeting stays in the calendar, marked cancelled and shown as free, until the user removes it. Only a cancellation from the meeting's organizer that is not older than the calendar's copy is applied.</p>
 <button type="submit">Save meeting settings</button>
 </form>
+{{end}}
 </section>
 
 <section class="card">
@@ -225,43 +246,52 @@
 <div class="card-grid two">
 <section class="card">
 {{template "card-head" (dict "Icon" "users-round" "Title" "Delegates" "Desc" "People who may open this mailbox, one address per line. A delegate may not send.")}}
+{{with index .ReadFailed "delegates"}}<p class="error">{{.}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/delegates" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Delegates <textarea name="delegates" rows="4" placeholder="assistant@example.com">{{.Delegates}}</textarea></label>
 <button type="submit">Save delegates</button>
 </form>
+{{end}}
 </section>
 
 <section class="card">
 {{template "card-head" (dict "Icon" "user-cog" "Title" "Additional store owners" "Desc" "People who get read-write access to every object in this mailbox, one address per line.")}}
+{{with index .ReadFailed "storeowners"}}<p class="error">{{.}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/storeowners" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Store owners <textarea name="storeowners" rows="4" placeholder="assistant@example.com">{{.StoreOwners}}</textarea></label>
 <button type="submit">Save store owners</button>
 </form>
+{{end}}
 </section>
 
 <section class="card">
 {{template "card-head" (dict "Icon" "send" "Title" "Send as" "Desc" "The message names this user in From and nobody else, so the recipient cannot tell who sent it.")}}
+{{with index .ReadFailed "sendas"}}<p class="error">{{.}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/sendas" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Users who may send as this user <textarea name="sendas" rows="4" placeholder="assistant@example.com">{{.SendAs}}</textarea></label>
 <button type="submit">Save send-as</button>
 </form>
+{{end}}
 </section>
 
 <section class="card">
 {{template "card-head" (dict "Icon" "mail" "Title" "Send on behalf" "Desc" "The message names this user in From and the sender in Sender, so the recipient sees both.")}}
+{{with index .ReadFailed "sendonbehalf"}}<p class="error">{{.}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/sendonbehalf" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Users who may send on this user's behalf <textarea name="sendonbehalf" rows="4" placeholder="assistant@example.com">{{.SendOnBehalf}}</textarea></label>
 <button type="submit">Save send-on-behalf</button>
 </form>
+{{end}}
 </section>
 </div>
 
 <section class="card">
 {{template "card-head" (dict "Icon" "copy" "Title" "Copy of mail sent in this user's name" "Desc" "Without a copy here, a shared mailbox holds no record of what went out in its name.")}}
+{{with index .ReadFailed "sentcopy"}}<p class="error">{{.}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/sentcopy" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label class="check"><input type="checkbox" name="copysendas"{{if .SentCopy.ForSendAs}} checked{{end}}> Keep a copy of mail sent as this user in its Sent Items</label>
@@ -270,10 +300,12 @@
 <p class="hint">The sender keeps their own copy unless the last option is on. The last option has no effect unless one of the first two filed a copy, and a sender's mail client that saves its own copy (IMAP) still does.</p>
 <button type="submit">Save sent-copy settings</button>
 </form>
+{{end}}
 </section>
 
 <section class="card">
 {{template "card-head" (dict "Icon" "folder-open" "Title" "Folders" "Desc" "Choose a folder to see and change who may open it.")}}
+{{with .FoldersError}}<p class="error">{{.}}</p>{{else}}
 <form>
 <label>Folder
 <select name="fid" hx-get="/admin/ui/users/{{.User.Username}}/folder-perms" hx-target="#folder-perms" hx-swap="innerHTML" hx-trigger="change"
@@ -283,6 +315,7 @@
 </select></label>
 </form>
 <div id="folder-perms"></div>
+{{end}}
 </section>
 
 <section class="card">
@@ -299,6 +332,7 @@
 
 <section class="card">
 {{template "card-head" (dict "Icon" "shield" "Title" "ActiveSync device policy" "Desc" "A per-user override. Each field overrides the server default; leave it on inherit to take the default. Password rules apply only when DevicePasswordEnabled is Yes.")}}
+{{with index .ReadFailed "policy"}}<p class="error">{{.}}</p>{{else}}
 <form hx-put="/admin/ui/users/{{.User.Username}}/syncpolicy" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <div class="policy-grid">
@@ -311,6 +345,7 @@
 </div>
 <button type="submit">Save device policy</button>
 </form>
+{{end}}
 </section>
 </section>
 
@@ -409,7 +444,7 @@
 <button type="submit" class="danger">Delete</button></form>
 </td>
 </tr>
-{{else}}<tr><td colspan="7" class="empty">No mobile devices.</td></tr>
+{{else}}<tr><td colspan="7" class="empty{{if .DevicesError}} failed{{end}}">{{if .DevicesError}}{{.DevicesError}}{{else}}No mobile devices.{{end}}</td></tr>
 {{end}}
 </tbody>
 </table>
@@ -424,7 +459,7 @@
 <td class="actions"><form hx-post="/admin/ui/users/{{$.Email}}/roles/revoke" hx-target="#user-roles" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
 <input type="hidden" name="role" value="{{.Role}}"><input type="hidden" name="scopeID" value="{{.ScopeID}}">
 <button type="submit" class="danger">Revoke</button></form></td></tr>
-{{else}}<tr><td colspan="3" class="empty">No admin roles.</td></tr>
+{{else}}<tr><td colspan="3" class="empty{{if .RolesError}} failed{{end}}">{{if .RolesError}}{{.RolesError}}{{else}}No admin roles.{{end}}</td></tr>
 {{end}}
 </tbody>
 </table>
@@ -444,7 +479,7 @@
 {{range .Fetchmail}}<tr><td>{{.SrcServer}}{{if .SrcPort}}:{{.SrcPort}}{{end}}</td><td>{{.SrcUser}}</td><td>{{.Protocol}}</td><td>{{.SrcFolder}}</td><td>{{if .Keep}}yes{{else}}no{{end}}</td><td>{{if .UseSSL}}yes{{else}}no{{end}}</td><td>{{if .Active}}yes{{else}}no{{end}}</td>
 <td class="actions"><form hx-post="/admin/ui/users/{{$.Email}}/fetchmail/{{.ID}}/delete" hx-target="#fetchmail-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
 <button type="submit" class="danger">Delete</button></form></td></tr>
-{{else}}<tr><td colspan="8" class="empty">No remote accounts.</td></tr>
+{{else}}<tr><td colspan="8" class="empty{{if .FetchmailError}} failed{{end}}">{{if .FetchmailError}}{{.FetchmailError}}{{else}}No remote accounts.{{end}}</td></tr>
 {{end}}
 </tbody>
 </table>
