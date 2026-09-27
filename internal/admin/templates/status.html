@@ -31,7 +31,7 @@
 <td>{{.Name}}</td>
 <td>{{if eq .Status "Up"}}<span class="status status-ok">{{t "status.up"}}</span>{{else if eq .Status "Degraded"}}<span class="status status-warn">{{t "status.degraded"}}</span>{{else if eq .Status "Down"}}<span class="status status-off">{{t "status.down"}}</span>{{else}}<span class="status status-off">{{.Status}}</span>{{end}}</td>
 <td class="nowrap">{{t "status.latency" .LatencyMS}}</td>
-<td class="nowrap">{{if eq .Status "Down"}}<span class="muted">{{t "status.na"}}</span>{{else}}{{t "status.uptime" .Uptime}}{{end}}</td>
+<td class="nowrap">{{if eq .Status "Down"}}<span class="muted">{{t "status.na"}}</span>{{else}}<span title="{{.Uptime}} s">{{t .UptimeText}}</span>{{end}}</td>
 <td>{{.Version}}</td>
 <td><small>{{.Err}}</small></td>
 </tr>

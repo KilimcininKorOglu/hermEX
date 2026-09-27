@@ -191,3 +191,23 @@ func TestLiveStatusRequiresSystem(t *testing.T) {
 		t.Errorf("org-admin add = %d, stored %d; want 403 and nothing stored", add.StatusCode, len(d.healthTargets))
 	}
 }
+
+// TestUptimeText proves the uptime reads in its two largest units in both
+// languages rather than as a raw second count.
+func TestUptimeText(t *testing.T) {
+	cases := []struct {
+		secs   int64
+		en, tr string
+	}{
+		{42, "42s", "42 sn"},
+		{125, "2m 5s", "2 dk 5 sn"},
+		{7260, "2h 1m", "2 sa 1 dk"},
+		{71481, "19h 51m", "19 sa 51 dk"},
+		{190000, "2d 4h", "2 gün 4 sa"},
+	}
+	for _, c := range cases {
+		m := healthResult{Uptime: c.secs}.UptimeText()
+		wantEq(t, translate("en", m), c.en, "English uptime")
+		wantEq(t, translate("tr", m), c.tr, "Turkish uptime")
+	}
+}
