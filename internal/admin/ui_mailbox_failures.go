@@ -28,7 +28,7 @@ func (s *Server) handleUIMailboxFailures(w http.ResponseWriter, r *http.Request)
 	defer cancel()
 	entries, err := s.logs.RecentByEvent(ctx, mailboxUnusableEvent, 200)
 	if err != nil {
-		data["Error"] = "logs.queryFailed"
+		data["Error"] = s.notice("logs.queryFailed", err)
 	} else {
 		data["Entries"] = entries
 	}

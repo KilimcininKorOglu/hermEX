@@ -81,6 +81,26 @@ func TestUILogsDisabled(t *testing.T) {
 	}
 }
 
+// TestUILogsRecordAFailedQuery proves a failed log query is reported on both log
+// pages and recorded. Only the page said so before, and the page is gone once the
+// operator leaves it.
+func TestUILogsRecordAFailedQuery(t *testing.T) {
+	for _, path := range []string{"/admin/ui/logs", "/admin/ui/mailbox-failures"} {
+		d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+		sink := &failCaptureSink{}
+		srv := NewServer(d, fakePaths{root: t.TempDir()}, []byte("test-secret"))
+		srv.SetLogger(logging.New(sink))
+		srv.SetLogReader(&fakeLogReader{err: errReadFailed})
+		ts := httptest.NewServer(srv.Handler())
+		session, _ := loginCookies(t, ts)
+		wantBody(t, authedGET(t, ts, path, session), http.StatusOK, path)
+		if e, ok := sink.find("panel.fail"); !ok || e.Err != errReadFailed.Error() {
+			t.Errorf("%s: the failed query was not recorded (event %+v)", path, e)
+		}
+		ts.Close()
+	}
+}
+
 // TestUILogsRequiresSystem proves the log viewer is system-admin only.
 func TestUILogsRequiresSystem(t *testing.T) {
 	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminOrg, ScopeID: 1}}}
