@@ -565,6 +565,9 @@ table.grid tbody tr { transition: background-color 0.15s; }
 table.grid tbody tr:hover { background: hsl(from var(--muted) h s l / 0.5); }
 table.grid tbody tr:last-child > * { border-bottom: none; }
 table.grid td.empty { height: 6rem; color: var(--muted-foreground); text-align: center; white-space: normal; }
+/* A table that could not be read says so in its own body: a polled table would
+   raise a toast on every refresh from a message paragraph. */
+table.grid td.empty.failed { color: var(--destructive-text); }
 table.grid td a { font-weight: 500; text-decoration: none; }
 table.grid td a:hover { text-decoration: underline; }
 .card table.grid { box-shadow: none; }

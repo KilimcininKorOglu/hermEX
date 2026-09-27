@@ -21,9 +21,12 @@ type sessionView struct {
 
 // sessionViews reads the non-stale live sessions and projects them for display,
 // deriving "Active"/"Ended" and the seconds since the last activity.
-func (s *Server) sessionViews() []sessionView {
+func (s *Server) sessionViews() ([]sessionView, error) {
 	now := time.Now().Unix()
-	recs, _ := s.dir.ListActiveSessions(now)
+	recs, err := s.dir.ListActiveSessions(now)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]sessionView, 0, len(recs))
 	for _, rec := range recs {
 		status := "Active"
@@ -36,7 +39,17 @@ func (s *Server) sessionViews() []sessionView {
 			Command: rec.Command, ASVersion: rec.ASVersion, Push: rec.Push, AgeSec: age, Status: status,
 		})
 	}
-	return out
+	return out, nil
+}
+
+// sessionsPanelData is the session table's model. A failed read is reported
+// rather than rendered as an empty table, which reads as no device connected.
+func (s *Server) sessionsPanelData() map[string]any {
+	views, err := s.sessionViews()
+	if err != nil {
+		return map[string]any{"Error": s.notice("Could not read the sessions.", err)}
+	}
+	return map[string]any{"Sessions": views}
 }
 
 // handleUIMobileDevices renders the live ActiveSync session monitor (system admins).
@@ -44,9 +57,9 @@ func (s *Server) handleUIMobileDevices(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	s.render(w, "mobile_devices.html", map[string]any{
-		"Nav": "mobiledevices", "CSRF": csrfCookieValue(r), "Sessions": s.sessionViews(),
-	})
+	data := s.sessionsPanelData()
+	data["Nav"], data["CSRF"] = "mobiledevices", csrfCookieValue(r)
+	s.render(w, "mobile_devices.html", data)
 }
 
 // handleUIMobileDevicesPanel renders just the session table for the auto-refresh poll.
@@ -54,7 +67,7 @@ func (s *Server) handleUIMobileDevicesPanel(w http.ResponseWriter, r *http.Reque
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	s.render(w, "sessions-panel", map[string]any{"Sessions": s.sessionViews()})
+	s.render(w, "sessions-panel", s.sessionsPanelData())
 }
 
 // handleGetMobileDevices returns the live sessions as JSON (system admins).

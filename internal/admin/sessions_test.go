@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -57,6 +58,25 @@ func TestUIMobileDevicesPanel(t *testing.T) {
 	s := string(body)
 	if !strings.Contains(s, "alice@hermex.test") || !strings.Contains(s, `hx-trigger="every 2s"`) {
 		t.Errorf("panel missing the session or the refresh trigger:\n%s", s)
+	}
+}
+
+// TestUIMobileDevicesReportsAReadFailure proves a failed session read says so on
+// the page and on the poll. It used to render as "No active sessions", which reads
+// as no device being connected.
+func TestUIMobileDevicesReportsAReadFailure(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		activeSessionsErr: errors.New("directory unreachable"),
+	}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+	for _, path := range []string{"/admin/ui/mobile-devices", "/admin/ui/mobile-devices/panel"} {
+		page := wantBody(t, authedGET(t, ts, path, session), http.StatusOK, path)
+		wantContains(t, page, "Could not read the sessions", path+" reports the failed read")
+		if strings.Contains(page, "No active sessions") {
+			t.Errorf("%s: a failed read rendered as no active sessions:\n%s", path, page)
+		}
 	}
 }
 

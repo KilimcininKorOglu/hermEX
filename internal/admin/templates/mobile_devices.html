@@ -22,7 +22,7 @@
 <td>{{.AgeSec}}s ago</td>
 <td>{{.Status}}</td>
 </tr>
-{{else}}<tr><td colspan="7" class="empty">No active sessions.</td></tr>
+{{else}}<tr><td colspan="7" class="empty{{if .Error}} failed{{end}}">{{if .Error}}{{.Error}}{{else}}No active sessions.{{end}}</td></tr>
 {{end}}
 </tbody>
 </table>
