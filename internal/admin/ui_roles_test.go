@@ -74,7 +74,7 @@ func TestUIRoleDetailEditor(t *testing.T) {
 	if !strings.Contains(s, `name="orgadmin" value="*" checked`) {
 		t.Errorf("OrgAdmin(all) not pre-checked: %s", s)
 	}
-	if !strings.Contains(s, `value="5" selected`) {
+	if !strings.Contains(s, `name="user" value="5" checked`) {
 		t.Errorf("assigned user not pre-selected: %s", s)
 	}
 }

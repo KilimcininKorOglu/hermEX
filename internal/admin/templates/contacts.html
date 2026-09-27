@@ -2,17 +2,23 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<h1>Contacts</h1>
-<form class="create-form" hx-post="/admin/ui/contacts" hx-target="#contacts-panel" hx-swap="outerHTML"
+<header class="page-head"><div><h1>Contacts</h1><p class="page-desc">External addresses listed in a domain's address book.</p></div></header>
+<div class="stack">
+<section class="card">
+{{template "card-head" (dict "Icon" "contact" "Title" "Add a contact" "Desc" "The contact appears in the address book of the domain it is filed under.")}}
+<form class="form-grid cols-3" data-reset hx-post="/admin/ui/contacts" hx-target="#contacts-panel" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<input type="email" name="email" placeholder="contact@partner.example" required>
-<input type="text" name="displayname" placeholder="Display name">
+<label>Address <input type="email" name="email" placeholder="contact@partner.example" required></label>
+<label>Display name <input type="text" name="displayname" placeholder="Jane Partner"></label>
+<label>Filing domain
 <select name="domain">
 {{range .Domains}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
-</select>
-<button type="submit">Add contact</button>
+</select></label>
+<button type="submit"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "plus"}}"/></svg>Add contact</button>
 </form>
+</section>
 {{template "contacts-panel" .}}
+</div>
 </main>
 </div>
 {{template "foot" .}}{{end}}
@@ -22,7 +28,7 @@
 <table class="grid">
 <thead><tr><th>Name</th><th>Address</th><th>Domain</th><th>LDAP ID</th><th></th></tr></thead>
 <tbody>
-{{range .Contacts}}<tr><td><form class="inline-edit" hx-put="/admin/ui/contacts/{{.Address}}" hx-target="#contacts-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'><input type="text" name="displayname" value="{{.DisplayName}}"><button type="submit">Save</button></form></td><td>{{.Address}}</td><td>{{.Domain}}</td><td><code>{{.LDAPID}}</code></td><td><form class="delete-form" hx-post="/admin/ui/contacts/{{.Address}}/delete" hx-target="#contacts-panel" hx-swap="outerHTML" hx-confirm="Delete {{.Address}}? This cannot be undone." hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'><button type="submit" class="danger">Delete</button></form></td></tr>
+{{range .Contacts}}<tr><td><form class="inline-edit" hx-put="/admin/ui/contacts/{{.Address}}" hx-target="#contacts-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'><input type="text" name="displayname" value="{{.DisplayName}}" aria-label="Display name of {{.Address}}"><button type="submit" class="secondary">Save</button></form></td><td>{{.Address}}</td><td>{{.Domain}}</td><td>{{if .LDAPID}}<code>{{.LDAPID}}</code>{{end}}</td><td class="actions"><form hx-post="/admin/ui/contacts/{{.Address}}/delete" hx-target="#contacts-panel" hx-swap="outerHTML" hx-confirm="Delete {{.Address}}? This cannot be undone." hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'><button type="submit" class="danger">Delete</button></form></td></tr>
 {{else}}<tr><td colspan="5" class="empty">No contacts yet.</td></tr>
 {{end}}
 </tbody>

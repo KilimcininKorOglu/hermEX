@@ -2,50 +2,84 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<h1>Role: {{.Role.Name}}</h1>
-<p><a href="/admin/ui/roles">&larr; Back to roles</a></p>
+<header class="page-head">
+<div>
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/admin/ui/roles">Roles</a><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "chevron-right"}}"/></svg><span>{{.Role.Name}}</span></nav>
+<h1>{{.Role.Name}}</h1>
+{{if .Role.Description}}<p class="page-desc">{{.Role.Description}}</p>{{end}}
+</div>
+</header>
+<div class="stack">
 {{template "role-editor" .}}
 
-<h2>Delete</h2>
+<section class="card danger-zone">
+{{template "card-head" (dict "Icon" "trash-2" "Title" "Delete this role" "Desc" "Users who hold it lose the permissions it grants.")}}
 <form class="delete-form" hx-post="/admin/ui/roles/{{.Role.ID}}/delete" hx-confirm="Delete role {{.Role.Name}}? Users lose the permissions it grants."
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <button type="submit" class="danger">Delete role</button>
 </form>
+</section>
+</div>
 </main>
 </div>
 {{template "foot" .}}{{end}}
 
-{{define "role-editor"}}<div id="role-editor">
+{{define "role-editor"}}<div id="role-editor" class="flow">
 {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
 {{if .Saved}}<p class="ok">Saved.</p>{{end}}
-<form hx-put="/admin/ui/roles/{{.Role.ID}}" hx-target="#role-editor" hx-swap="outerHTML"
+<form class="stack" hx-put="/admin/ui/roles/{{.Role.ID}}" hx-target="#role-editor" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<section class="card">
+{{template "card-head" (dict "Icon" "shield-check" "Title" "Details" "Desc" "The name administrators see when they assign the role.")}}
+<div class="form-grid">
 <label>Name <input type="text" name="name" value="{{.Role.Name}}" maxlength="64" required></label>
 <label>Description <input type="text" name="description" value="{{.Role.Description}}"></label>
+</div>
+</section>
 
-<h3>Capabilities</h3>
+<section class="card">
+{{template "card-head" (dict "Icon" "key-round" "Title" "Capabilities" "Desc" "Panel-wide permissions this role grants.")}}
+<div class="check-grid">
 {{range .Caps}}<label class="check"><input type="checkbox" name="cap" value="{{.Name}}"{{if .Checked}} checked{{end}}> {{.Label}}</label>
 {{end}}
+</div>
+</section>
 
-<h3>Organization administrator</h3>
+<div class="card-grid two">
+<section class="card">
+{{template "card-head" (dict "Icon" "building-2" "Title" "Organization administrator" "Desc" "Organizations whose domains a holder manages.")}}
+<div class="check-grid">
 {{range .OrgAdmin}}<label class="check"><input type="checkbox" name="orgadmin" value="{{.ID}}"{{if .Checked}} checked{{end}}> {{.Label}}</label>
 {{end}}
+</div>
+</section>
 
-<h3>Domain administrator</h3>
+<section class="card">
+{{template "card-head" (dict "Icon" "globe" "Title" "Domain administrator" "Desc" "Domains a holder manages.")}}
+<div class="check-grid">
 {{range .DomainAdmin}}<label class="check"><input type="checkbox" name="domainadmin" value="{{.ID}}"{{if .Checked}} checked{{end}}> {{.Label}}</label>
 {{end}}
+</div>
+</section>
 
-<h3>Domain administrator (read-only)</h3>
+<section class="card">
+{{template "card-head" (dict "Icon" "eye-off" "Title" "Domain administrator (read-only)" "Desc" "Domains a holder may see but not change.")}}
+<div class="check-grid">
 {{range .DomainRO}}<label class="check"><input type="checkbox" name="domainadminro" value="{{.ID}}"{{if .Checked}} checked{{end}}> {{.Label}}</label>
 {{end}}
+</div>
+</section>
 
-<h3>Assigned users</h3>
-<select name="user" multiple size="6">
-{{range .Users}}<option value="{{.ID}}"{{if .Assigned}} selected{{end}}>{{.Label}}</option>
-{{else}}<option disabled>No users yet</option>
+<section class="card">
+{{template "card-head" (dict "Icon" "users" "Title" "Assigned users" "Desc" "The users who hold this role.")}}
+<div class="check-list">
+{{range .Users}}<label class="check"><input type="checkbox" name="user" value="{{.ID}}"{{if .Assigned}} checked{{end}}> {{.Label}}</label>
+{{else}}<p class="empty-note">No users yet.</p>
 {{end}}
-</select>
+</div>
+</section>
+</div>
 
-<button type="submit">Save role</button>
+<div><button type="submit">Save role</button></div>
 </form>
 </div>{{end}}

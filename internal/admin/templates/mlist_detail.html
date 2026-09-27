@@ -2,40 +2,52 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
+<header class="page-head">
+<div>
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/admin/ui/mlists">Mailing lists</a><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "chevron-right"}}"/></svg><span>{{.List.Listname}}</span></nav>
 <h1>{{.List.Listname}}</h1>
-<p><a href="/admin/ui/mlists">&larr; Back to mailing lists</a></p>
-<p>Type: {{.List.TypeLabel}} &middot; Who may post: {{.List.PrivLabel}}</p>
-
-<h2>Owner</h2>
-<form class="owner-form" hx-put="/admin/ui/mlists/{{.List.Listname}}/owner" hx-target="#user-status" hx-swap="outerHTML"
+<p class="page-desc">Type: {{.List.TypeLabel}} &middot; Who may post: {{.List.PrivLabel}}</p>
+</div>
+</header>
+{{template "user-status" .}}
+<div class="stack">
+<section class="card">
+{{template "card-head" (dict "Icon" "users" "Title" "Members" "Desc" "One address per line. Applies to normal-type lists; a member may itself be a list.")}}
+<form hx-put="/admin/ui/mlists/{{.List.Listname}}/members" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<p>The list owner (managedBy). Leave empty for none; Outlook shows this as the group owner.</p>
-<input type="email" name="owner" value="{{.Owner}}" placeholder="owner@example.com">
-<button type="submit">Save owner</button>
-</form>
-
-<h2>Members</h2>
-<form class="members-form" hx-put="/admin/ui/mlists/{{.List.Listname}}/members" hx-target="#user-status" hx-swap="outerHTML"
-      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<p>One address per line. Applies to normal-type lists; a member may itself be a list.</p>
-<textarea name="members" rows="6">{{.Members}}</textarea>
+<label>Members <textarea name="members" rows="6" placeholder="alice@example.com">{{.Members}}</textarea></label>
 <button type="submit">Save members</button>
 </form>
-{{template "user-status" .}}
+</section>
 
-<h2>Permitted senders</h2>
-<form class="specifieds-form" hx-put="/admin/ui/mlists/{{.List.Listname}}/specifieds" hx-target="#user-status" hx-swap="outerHTML"
+<div class="card-grid two">
+<section class="card">
+{{template "card-head" (dict "Icon" "user-cog" "Title" "Owner" "Desc" "The list owner (managedBy); Outlook shows it as the group owner. Leave it empty for none.")}}
+<form hx-put="/admin/ui/mlists/{{.List.Listname}}/owner" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<p>One address or bare domain per line. Used when "Who may post" is "Specified senders".</p>
-<textarea name="specifieds" rows="4">{{.Specifieds}}</textarea>
+<label>Owner <input type="email" name="owner" value="{{.Owner}}" placeholder="owner@example.com"></label>
+<button type="submit">Save owner</button>
+</form>
+</section>
+
+<section class="card">
+{{template "card-head" (dict "Icon" "shield-check" "Title" "Permitted senders" "Desc" "Used when Who may post is Specified senders. One address or bare domain per line.")}}
+<form hx-put="/admin/ui/mlists/{{.List.Listname}}/specifieds" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>Senders <textarea name="specifieds" rows="4" placeholder="example.com">{{.Specifieds}}</textarea></label>
 <button type="submit">Save permitted senders</button>
 </form>
+</section>
+</div>
 
-<h2>Delete</h2>
+<section class="card danger-zone">
+{{template "card-head" (dict "Icon" "trash-2" "Title" "Delete this list" "Desc" "The list and its members are removed. This cannot be undone.")}}
 <form class="delete-form" hx-post="/admin/ui/mlists/{{.List.Listname}}/delete" hx-confirm="Delete {{.List.Listname}}? This cannot be undone."
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <button type="submit" class="danger">Delete list</button>
 </form>
+</section>
+</div>
 </main>
 </div>
 {{template "foot" .}}{{end}}
