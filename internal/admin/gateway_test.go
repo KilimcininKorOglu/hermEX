@@ -1,7 +1,9 @@
 package admin
 
 import (
+	"errors"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -94,6 +96,43 @@ func TestSaveDomainGatewayStoresTheOverride(t *testing.T) {
 
 	if _, ok := d.gateways["tenant.test"]; !ok {
 		t.Errorf("no override stored for the domain, gateways = %+v", d.gateways)
+	}
+}
+
+// TestSaveGatewayRefusesWhenTheStoredOneCannotBeRead proves a save stops when the
+// stored gateway cannot be read. An empty password field keeps the stored password,
+// so a save on a failed read stored an empty password in its place.
+func TestSaveGatewayRefusesWhenTheStoredOneCannotBeRead(t *testing.T) {
+	for path, key := range map[string]string{
+		"/admin/ui/antispam/gateway":  directory.GlobalGateway,
+		"/admin/ui/domains/1/gateway": "tenant.test",
+	} {
+		d, ts, session, csrf := gatewayAdmin(t)
+		d.gateways = map[string]directory.SMTPGateway{key: {Host: "smtp.provider.example", Password: "s3cret"}}
+		d.gatewayErr = errors.New("directory unreachable")
+		form := gatewayForm()
+		form.Set("password", "")
+
+		body := wantBody(t, htmxPOST(t, ts, path, session, csrf, form), http.StatusOK, path)
+		wantContains(t, body, "nothing was saved", path+": the refusal is reported")
+		if got := d.gateways[key].Password; got != "s3cret" {
+			t.Errorf("%s: stored password = %q, want the stored one untouched", path, got)
+		}
+	}
+}
+
+// TestGatewayFormIsHiddenWhenItCannotBeRead proves a page does not offer the
+// gateway form built from a failed read. It showed the defaults, and saving them
+// replaced the configured gateway.
+func TestGatewayFormIsHiddenWhenItCannotBeRead(t *testing.T) {
+	d, ts, session, _ := gatewayAdmin(t)
+	d.gatewayErr = errors.New("directory unreachable")
+	for _, path := range []string{"/admin/ui/settings", "/admin/ui/domains/1"} {
+		page := wantBody(t, authedGET(t, ts, path, session), http.StatusOK, path)
+		wantContains(t, page, "gateway. The form is hidden", path+": the failed read is reported")
+		if strings.Contains(page, `name="host"`) {
+			t.Errorf("%s: the gateway form is offered after a failed read", path)
+		}
 	}
 }
 

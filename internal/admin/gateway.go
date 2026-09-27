@@ -30,10 +30,13 @@ func gatewayViewOf(g directory.SMTPGateway, found bool) gatewayView {
 	}
 }
 
-// addGatewaySettings merges the global gateway's form state into a page's data.
-func (s *Server) addGatewaySettings(data map[string]any) {
+// addGatewaySettings merges the global gateway's form state into a page's data,
+// or records under "gateway" that it could not be read.
+func (s *Server) addGatewaySettings(data map[string]any, failed readFailures) {
 	g, found, err := s.dir.GetSMTPGateway(directory.GlobalGateway)
-	data["Gateway"] = gatewayViewOf(g, found && err == nil)
+	if s.noteRead(failed, "gateway", "the outbound gateway", err) {
+		data["Gateway"] = gatewayViewOf(g, found)
+	}
 }
 
 // gatewayFromForm reads a gateway out of a submitted form. An empty password field keeps
@@ -61,7 +64,13 @@ func (s *Server) handleUISaveGateway(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.uiAuthorized(w, r); !ok {
 		return
 	}
-	stored, _, _ := s.dir.GetSMTPGateway(directory.GlobalGateway)
+	// An empty password field keeps the stored one, so a failed read must stop the
+	// save: it would store the empty password in its place.
+	stored, _, err := s.dir.GetSMTPGateway(directory.GlobalGateway)
+	if err != nil {
+		s.render(w, "gateway-panel", s.antispamPageData(r, s.failNotice("Could not read the stored gateway; nothing was saved.", err)))
+		return
+	}
 	if err := s.dir.SetSMTPGateway(directory.GlobalGateway, gatewayFromForm(r, stored.Password)); err != nil {
 		s.render(w, "gateway-panel", s.antispamPageData(r, s.failNotice("Could not save the gateway.", err)))
 		return
@@ -86,11 +95,20 @@ func (s *Server) handleUIDeleteGateway(w http.ResponseWriter, r *http.Request) {
 
 // domainGatewayPanel re-renders one domain's gateway fragment with a notice.
 func (s *Server) domainGatewayPanel(w http.ResponseWriter, r *http.Request, dd directory.DomainDetail, notice panelNotice) {
-	g, found, err := s.dir.GetSMTPGateway(dd.Name)
-	s.render(w, "domain-gateway-panel", map[string]any{
-		"Domain": dd, "CSRF": csrfCookieValue(r), "GatewayNotice": notice,
-		"Gateway": gatewayViewOf(g, found && err == nil), "GatewayOverride": found && err == nil,
-	})
+	data := map[string]any{"Domain": dd, "CSRF": csrfCookieValue(r), "GatewayNotice": notice}
+	failed := readFailures{}
+	s.addDomainGateway(data, failed, dd.Name)
+	data["ReadFailed"] = failed
+	s.render(w, "domain-gateway-panel", data)
+}
+
+// addDomainGateway merges one domain's gateway override into a page's data, or
+// records under "gateway" that it could not be read.
+func (s *Server) addDomainGateway(data map[string]any, failed readFailures, domain string) {
+	g, found, err := s.dir.GetSMTPGateway(domain)
+	if s.noteRead(failed, "gateway", "this domain's gateway", err) {
+		data["Gateway"], data["GatewayOverride"] = gatewayViewOf(g, found), found
+	}
 }
 
 // handleUISaveDomainGateway persists one domain's gateway override, used for mail whose
@@ -103,7 +121,12 @@ func (s *Server) handleUISaveDomainGateway(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	stored, _, _ := s.dir.GetSMTPGateway(dd.Name)
+	// As for the global gateway: a failed read would store an empty password.
+	stored, _, err := s.dir.GetSMTPGateway(dd.Name)
+	if err != nil {
+		s.domainGatewayPanel(w, r, dd, s.failNotice("Could not read the stored gateway; nothing was saved.", err))
+		return
+	}
 	if err := s.dir.SetSMTPGateway(dd.Name, gatewayFromForm(r, stored.Password)); err != nil {
 		s.domainGatewayPanel(w, r, dd, s.failNotice("Could not save the gateway.", err))
 		return

@@ -136,6 +136,7 @@
 {{define "gateway-panel"}}<div id="gateway-panel">
 {{template "notice" .Notice}}
 <p class="hint">Outgoing mail is normally delivered straight to each recipient domain's mail exchangers. With a gateway configured, every message is handed to that one server instead, which is what a network that blocks outbound port 25 requires. A domain can override this on its own page. MTA-STS, DANE and TLS reporting describe a recipient domain's own mail exchangers, so they do not apply to a gateway connection; the transport below is what protects it.</p>
+{{with index .ReadFailed "gateway"}}<p class="error">{{.}}</p>{{else}}
 <form hx-post="/admin/ui/antispam/gateway" hx-target="#gateway-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 {{template "gateway-fields" .Gateway}}
 <div class="form-actions">
@@ -146,6 +147,7 @@
 {{/* The remove button sits beside the save button but submits this form. */}}
 <form id="gateway-delete" hidden hx-post="/admin/ui/antispam/gateway/delete" hx-target="#gateway-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'
       hx-confirm="Remove the outbound gateway? Mail is delivered directly to each recipient's mail exchangers again."></form>
+{{end}}
 </div>{{end}}
 
 {{define "gateway-fields"}}

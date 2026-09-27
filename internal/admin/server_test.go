@@ -72,6 +72,7 @@ type fakeDir struct {
 	relay              directory.RelaySettings
 	relayFound         bool
 	gateways           map[string]directory.SMTPGateway
+	gatewayErr         error
 	catchAll           map[string]string
 	resolvable         map[string]bool
 	digest             directory.DigestSettings
@@ -705,6 +706,9 @@ func (f *fakeDir) GetRelaySettings() (directory.RelaySettings, bool, error) {
 	return f.relay, f.relayFound, nil
 }
 func (f *fakeDir) GetSMTPGateway(domain string) (directory.SMTPGateway, bool, error) {
+	if f.gatewayErr != nil {
+		return directory.SMTPGateway{}, false, f.gatewayErr
+	}
 	g, ok := f.gateways[domain]
 	return g, ok, nil
 }

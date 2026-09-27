@@ -129,9 +129,9 @@ func (s *Server) handleUIDomainDetail(w http.ResponseWriter, r *http.Request) {
 	catchAll, _, _ := s.dir.GetDomainCatchAll(dd.Name)
 	data["CatchAll"] = catchAll
 	data["SplitRelayHost"], _ = s.dir.SplitRelayHost(dd.Name)
-	gw, gwFound, gwErr := s.dir.GetSMTPGateway(dd.Name)
-	data["Gateway"] = gatewayViewOf(gw, gwFound && gwErr == nil)
-	data["GatewayOverride"] = gwFound && gwErr == nil
+	failed := readFailures{}
+	s.addDomainGateway(data, failed, dd.Name)
+	data["ReadFailed"] = failed
 	// Prescribe the DNS records the domain owner must publish, reusing the DKIM
 	// record already merged above (empty when no key exists yet) and adding the
 	// MTA-STS/TLSRPT records when publishing is enabled.

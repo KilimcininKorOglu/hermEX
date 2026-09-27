@@ -76,10 +76,12 @@ func (s *Server) performBayesRetrain() (string, error) {
 // (the stored row, or the built-in defaults when none has been saved), and the
 // status of the Bayesian model and the SpamAssassin ruleset.
 func (s *Server) antispamPageData(r *http.Request, notice panelNotice) map[string]any {
+	failed := readFailures{}
 	data := map[string]any{
-		"Nav":    "antispam",
-		"CSRF":   csrfCookieValue(r),
-		"Notice": notice,
+		"Nav":        "antispam",
+		"CSRF":       csrfCookieValue(r),
+		"Notice":     notice,
+		"ReadFailed": failed,
 	}
 	sc := s.scoringSettings()
 	data["Weights"] = sc.weights
@@ -94,7 +96,7 @@ func (s *Server) antispamPageData(r *http.Request, notice panelNotice) map[strin
 	s.addOutboundSettings(data)
 	data["AutoReplyPrefix"] = s.autoReplyPrefix()
 	s.addRelaySettings(data)
-	s.addGatewaySettings(data)
+	s.addGatewaySettings(data, failed)
 	s.addDigestSettings(data)
 	return data
 }

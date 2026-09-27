@@ -75,3 +75,21 @@ func errorNotice(text string) panelNotice { return panelNotice{Text: text, Kind:
 func (s *Server) failNotice(msg string, err error) panelNotice {
 	return errorNotice(s.notice(msg, err))
 }
+
+// readFailures maps a section of a page to the message that replaces its form
+// when the section's stored values could not be read. That form would show empty
+// or default values, and saving it would overwrite what is stored, so the section
+// shows the failure instead. A template reads it as
+// {{with index .ReadFailed "section"}}.
+type readFailures map[string]string
+
+// noteRead records a failed read of what under section and reports whether the
+// read succeeded. The message is built from what alone; err is recorded
+// server-side, as notice does.
+func (s *Server) noteRead(failed readFailures, section, what string, err error) bool {
+	if err == nil {
+		return true
+	}
+	failed[section] = s.notice("Could not read "+what+". The form is hidden so a save cannot overwrite it.", err)
+	return false
+}
