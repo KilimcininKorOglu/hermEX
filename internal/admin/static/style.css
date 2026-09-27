@@ -202,14 +202,17 @@ main {
 
 /* ---------- Page and sections ---------- */
 
+/* The title block takes the width and the page's own buttons keep to the top
+   right, however long the description runs. */
 .page-head {
 	display: flex;
-	flex-wrap: wrap;
-	align-items: flex-end;
+	align-items: flex-start;
 	justify-content: space-between;
 	gap: 1rem;
 	margin-bottom: 1.5rem;
 }
+.page-head > div:first-child { flex: 1; min-width: 0; }
+.page-head > .page-actions { flex-shrink: 0; }
 .crumbs { display: flex; align-items: center; gap: 0.35rem; margin-bottom: 0.35rem; color: var(--muted-foreground); font-size: 0.875rem; }
 .crumbs a { color: inherit; font-weight: 400; text-decoration: none; }
 .crumbs a:hover { color: var(--foreground); }
