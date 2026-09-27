@@ -547,6 +547,7 @@
       "spellCheckDescription": "Yazarken yazımı denetleyin"
     },
     "autoReply": {
+      "loadFailed": "Otomatik yanıt ayarlarınız yüklenemedi. Kaydetme onları ezmesin diye form gizlendi.",
       "title": "Otomatik Yanıt (Ofis Dışı)",
       "description": "Uzaktayken gelen postalara otomatik olarak yanıt verin",
       "enable": "Otomatik yanıtı etkinleştir",

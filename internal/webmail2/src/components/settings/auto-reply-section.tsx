@@ -25,14 +25,18 @@ function useVacation() {
   const { t } = useI18n()
   const [vacation, setVacation] = useState<VacationAutoReply>(emptyVacation)
   const [loading, setLoading] = useState(true)
+  const [loadFailed, setLoadFailed] = useState(false)
   const [saving, setSaving] = useState(false)
 
+  // A failed load hides the form rather than showing empty settings, because
+  // saving an empty form would overwrite the reply that is stored.
   const load = useCallback(async () => {
     setLoading(true)
     try {
       setVacation({ ...emptyVacation, ...(await api.getVacation()) })
+      setLoadFailed(false)
     } catch {
-      setVacation(emptyVacation)
+      setLoadFailed(true)
     } finally {
       setLoading(false)
     }
@@ -66,7 +70,7 @@ function useVacation() {
 
   const disable = () => run(() => api.deleteVacation(), "settings.autoReply.disabled", "settings.autoReply.disableFailed")
 
-  return { vacation, setVacation, loading, saving, save, disable }
+  return { vacation, setVacation, loading, loadFailed, reload: load, saving, save, disable }
 }
 
 type VacationEdit = { vacation: VacationAutoReply; onChange: (v: VacationAutoReply) => void }
@@ -177,6 +181,11 @@ export function AutoReplySection() {
     <SettingSection icon={Plane} title={t("settings.autoReply.title")} description={t("settings.autoReply.description")}>
       {v.loading ? (
         <p className="text-sm text-muted-foreground py-3">{t("common.loading")}</p>
+      ) : v.loadFailed ? (
+        <div className="flex items-center gap-3 py-3">
+          <p role="alert" className="text-sm text-destructive">{t("settings.autoReply.loadFailed")}</p>
+          <Button variant="outline" size="sm" onClick={() => void v.reload()}>{t("common.retry")}</Button>
+        </div>
       ) : (
         <div className="space-y-4">
           <SettingRow

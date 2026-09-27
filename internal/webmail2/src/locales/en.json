@@ -547,6 +547,7 @@
       "spellCheckDescription": "Check spelling while typing"
     },
     "autoReply": {
+      "loadFailed": "Your auto-reply settings could not be loaded, so the form is hidden to keep a save from overwriting them.",
       "title": "Auto-Reply (Out of Office)",
       "description": "Automatically reply to incoming mail while you are away",
       "enable": "Enable auto-reply",

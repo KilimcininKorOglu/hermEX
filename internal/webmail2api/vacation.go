@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/objectstore"
 )
 
@@ -79,19 +80,21 @@ func vacationToOOF(v vacationJSON) objectstore.OOFSettings {
 	return o
 }
 
+// handleGetVacation serves the stored auto-reply. A failed read is an error, never
+// the empty settings: the form would show a blank reply, and saving it would
+// overwrite the one that is stored.
 func (s *Server) handleGetVacation(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.session(r)
+	st, c, ok := s.openStore(w, r)
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-		return
-	}
-	st, err := objectstore.Open(c.Mailbox)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return
 	}
 	defer st.Close()
-	o, _ := st.GetOOFSettings()
+	o, err := st.GetOOFSettings()
+	if err != nil {
+		logError("vacation-read", err, logging.Fields{"user": c.Email})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read"})
+		return
+	}
 	v := oofToVacation(o)
 	v.SubjectPrefix = s.autoReplyPrefix()
 	writeJSON(w, http.StatusOK, v)
@@ -121,18 +124,13 @@ func (s *Server) handlePutVacation(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	c, ok := s.session(r)
+	st, c, ok := s.openStore(w, r)
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-		return
-	}
-	st, err := objectstore.Open(c.Mailbox)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return
 	}
 	defer st.Close()
 	if err := st.SetOOFSettings(vacationToOOF(v)); err != nil {
+		logError("vacation-save", err, logging.Fields{"user": c.Email})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save"})
 		return
 	}
@@ -142,18 +140,18 @@ func (s *Server) handlePutVacation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, v)
 }
 
+// handleDeleteVacation turns the auto-reply off. It answers ok only when the
+// cleared settings were stored, so a failure never reads as replies stopped.
 func (s *Server) handleDeleteVacation(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.session(r)
+	st, c, ok := s.openStore(w, r)
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-		return
-	}
-	st, err := objectstore.Open(c.Mailbox)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return
 	}
 	defer st.Close()
-	_ = st.SetOOFSettings(objectstore.OOFSettings{})
+	if err := st.SetOOFSettings(objectstore.OOFSettings{}); err != nil {
+		logError("vacation-delete", err, logging.Fields{"user": c.Email})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save"})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

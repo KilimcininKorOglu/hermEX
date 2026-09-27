@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"hermex/internal/directory"
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
 
@@ -30,6 +31,14 @@ func (a *prefixAuth) GetAutoReplySettings() (directory.AutoReplySettings, bool, 
 // prefixHarness seeds a mailbox and returns the directory plus a signed-in
 // browser.
 func prefixHarness(t *testing.T) (*prefixAuth, requestFunc) {
+	t.Helper()
+	auth, do, _ := vacationHarness(t)
+	return auth, do
+}
+
+// vacationHarness is prefixHarness that also returns the mailbox directory, for a
+// test that tampers with the stored settings.
+func vacationHarness(t *testing.T) (*prefixAuth, requestFunc, string) {
 	t.Helper()
 	dir := t.TempDir()
 	st, err := objectstore.Open(dir)
@@ -64,7 +73,30 @@ func prefixHarness(t *testing.T) (*prefixAuth, requestFunc) {
 		`{"email":"alice@hermex.test","password":"pw"}`); rec.Code != http.StatusOK {
 		t.Fatalf("login = %d", rec.Code)
 	}
-	return auth, do
+	return auth, do, dir
+}
+
+// TestAnUnreadableAutoReplyIsNotServedAsEmpty pins the read failure: stored
+// settings that cannot be decoded must answer an error, because an empty answer
+// shows a blank form whose save would overwrite what is stored.
+func TestAnUnreadableAutoReplyIsNotServedAsEmpty(t *testing.T) {
+	_, do, dir := vacationHarness(t)
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetStoreProperties(mapi.PropertyValues{{Tag: mapi.PrOOFSettings, Value: "{not json"}}); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	rec := do(http.MethodGet, "/api/v1/vacation", "")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 for unreadable settings: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), `"enabled"`) {
+		t.Errorf("the failure still carries settings: %s", rec.Body.String())
+	}
 }
 
 // readVacation decodes the vacation endpoint's answer.
