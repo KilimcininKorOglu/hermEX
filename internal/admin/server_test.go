@@ -532,7 +532,7 @@ func (f *fakeDir) SetSpamHistorySettings(s directory.SpamHistorySettings) error 
 	return nil
 }
 func (f *fakeDir) GetAntispamSettings() (directory.AntispamSettings, bool, error) {
-	return f.settings, f.settingsFound, nil
+	return f.settings, f.settingsFound, f.readErrs["GetAntispamSettings"]
 }
 func (f *fakeDir) SetAntispamSettings(s directory.AntispamSettings) error {
 	f.settings, f.settingsFound = s, true
@@ -558,17 +558,19 @@ func (f *fakeDir) DeleteSenderRule(pattern string) (bool, error) {
 	}
 	return false, nil
 }
-func (f *fakeDir) GetGreylistEnabled() (bool, error) { return f.greylistOn, nil }
-func (f *fakeDir) SetGreylistEnabled(on bool) error  { f.greylistOn = on; return nil }
+func (f *fakeDir) GetGreylistEnabled() (bool, error) {
+	return f.greylistOn, f.readErrs["GetGreylistEnabled"]
+}
+func (f *fakeDir) SetGreylistEnabled(on bool) error { f.greylistOn = on; return nil }
 func (f *fakeDir) GetGreylistTimings() (directory.GreylistTimings, bool, error) {
-	return f.greylistTimings, f.greylistTimingsSet, nil
+	return f.greylistTimings, f.greylistTimingsSet, f.readErrs["GetGreylistTimings"]
 }
 func (f *fakeDir) SetGreylistTimings(t directory.GreylistTimings) error {
 	f.greylistTimings, f.greylistTimingsSet = t, true
 	return nil
 }
 func (f *fakeDir) GetRateLimitSettings() (directory.RateLimitSettings, bool, error) {
-	return f.rateLimit, f.rateLimitFound, nil
+	return f.rateLimit, f.rateLimitFound, f.readErrs["GetRateLimitSettings"]
 }
 func (f *fakeDir) SetRateLimitSettings(s directory.RateLimitSettings) error {
 	f.rateLimit, f.rateLimitFound = s, true
@@ -596,7 +598,7 @@ func (f *fakeDir) SetLoginLockoutSettings(s directory.LoginLockoutSettings) erro
 	return nil
 }
 func (f *fakeDir) GetMessageSizeSettings() (directory.MessageSizeSettings, bool, error) {
-	return f.messageSize, f.messageSizeFound, nil
+	return f.messageSize, f.messageSizeFound, f.readErrs["GetMessageSizeSettings"]
 }
 func (f *fakeDir) SetMessageSizeSettings(s directory.MessageSizeSettings) error {
 	f.messageSize, f.messageSizeFound = s, true
@@ -741,10 +743,10 @@ func (f *fakeDir) SetRecoverableSettings(s directory.RecoverableSettings) error 
 	return nil
 }
 func (f *fakeDir) GetOutboundSettings() (directory.OutboundSettings, bool, error) {
-	return f.outbound, f.outboundFound, nil
+	return f.outbound, f.outboundFound, f.readErrs["GetOutboundSettings"]
 }
 func (f *fakeDir) GetRelaySettings() (directory.RelaySettings, bool, error) {
-	return f.relay, f.relayFound, nil
+	return f.relay, f.relayFound, f.readErrs["GetRelaySettings"]
 }
 func (f *fakeDir) GetSMTPGateway(domain string) (directory.SMTPGateway, bool, error) {
 	if f.gatewayErr != nil {
@@ -774,14 +776,14 @@ func (f *fakeDir) SetOutboundSettings(s directory.OutboundSettings) error {
 	return nil
 }
 func (f *fakeDir) GetAutoReplySettings() (directory.AutoReplySettings, bool, error) {
-	return f.autoReply, f.autoReplyFound, nil
+	return f.autoReply, f.autoReplyFound, f.readErrs["GetAutoReplySettings"]
 }
 func (f *fakeDir) SetAutoReplySettings(s directory.AutoReplySettings) error {
 	f.autoReply, f.autoReplyFound = s, true
 	return nil
 }
 func (f *fakeDir) GetDigestSettings() (directory.DigestSettings, bool, error) {
-	return f.digest, f.digestFound, nil
+	return f.digest, f.digestFound, f.readErrs["GetDigestSettings"]
 }
 func (f *fakeDir) SetDigestSettings(s directory.DigestSettings) error {
 	f.digest, f.digestFound = s, true

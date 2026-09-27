@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 
@@ -44,6 +45,21 @@ func TestAFailedReadHidesTheFormItFeeds(t *testing.T) {
 		{"ListUsers", "/admin/ui/roles/1", `hx-put="/admin/ui/roles/1"`, "the users"},
 		{"ListMembers", "/admin/ui/mlists/team@acme.test", `/members"`, "the members"},
 		{"ListSpecifieds", "/admin/ui/mlists/team@acme.test", `/specifieds"`, "the permitted senders"},
+		{"GetAntispamSettings", "/admin/ui/antispam", `hx-post="/admin/ui/antispam/settings"`, "the scoring settings"},
+		{"GetAntispamSettings", "/admin/ui/antispam", "the verdict gains", "the scoring settings"},
+		{"GetGreylistEnabled", "/admin/ui/antispam", `hx-post="/admin/ui/antispam/greylist"`, "the greylisting switch"},
+		{"GetGreylistEnabled", "/admin/ui/antispam", "Greylisting is", "the greylisting switch"},
+		{"GetGreylistTimings", "/admin/ui/antispam", `/antispam/greylist-timings"`, "the greylist timings"},
+		{"GetRateLimitSettings", "/admin/ui/antispam", `/antispam/ratelimit"`, "the rate-limit settings"},
+		{"GetRateLimitSettings", "/admin/ui/antispam", "Rate limiting is", "the rate-limit settings"},
+		{"GetMessageSizeSettings", "/admin/ui/antispam", `/antispam/message-size"`, "the message size limit"},
+		{"GetOutboundSettings", "/admin/ui/antispam", `/antispam/outbound"`, "the outbound settings"},
+		{"GetOutboundSettings", "/admin/ui/antispam", "Outbound abuse limiting is", "the outbound settings"},
+		{"GetRelaySettings", "/admin/ui/antispam", `/antispam/relay"`, "the retry settings"},
+		{"GetDigestSettings", "/admin/ui/antispam", `/antispam/digest"`, "the digest settings"},
+		{"GetDigestSettings", "/admin/ui/antispam", "The quarantine digest is", "the digest settings"},
+		{"GetAutoReplySettings", "/admin/ui/settings", `/antispam/autoreply"`, "the auto-reply settings"},
+		{"GetOutboundSettings", "/admin/ui/settings", `/antispam/outbound"`, "the outbound settings"},
 	} {
 		d := &fakeDir{
 			authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
@@ -59,6 +75,34 @@ func TestAFailedReadHidesTheFormItFeeds(t *testing.T) {
 		wantContains(t, page, "Could not read "+tc.what, tc.read+": the failed read is reported")
 		if strings.Contains(page, tc.form) {
 			t.Errorf("%s: %s offers the form after the read failed", tc.read, tc.path)
+		}
+	}
+}
+
+// TestAnUnreadableModelOrRulesetIsReported proves the anti-spam page reports a
+// model or ruleset file it could not read. The page showed an unreadable model as
+// the cold-start model and an unreadable ruleset as the embedded baseline, which
+// only a missing file means.
+func TestAnUnreadableModelOrRulesetIsReported(t *testing.T) {
+	paths := fakePaths{root: t.TempDir()}
+	for _, p := range []string{paths.AntispamModelPath(), paths.AntispamRulesPath()} {
+		if err := os.Mkdir(p, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	srv := NewServer(d, paths, []byte("test-secret"))
+	srv.store = &fakeStore{}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	session, _ := loginCookies(t, ts)
+
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/antispam", session), http.StatusOK, "antispam page")
+	wantContains(t, page, "Could not read the trained model.", "the unreadable model is reported")
+	wantContains(t, page, "Could not read the ruleset in data_dir.", "the unreadable ruleset is reported")
+	for _, absent := range []string{"cold-start model", "embedded baseline"} {
+		if strings.Contains(page, absent) {
+			t.Errorf("an unreadable file still reads as %q", absent)
 		}
 	}
 }

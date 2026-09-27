@@ -29,6 +29,7 @@
 
 {{define "ruleset-card"}}<section class="card">
 {{template "card-head" (dict "Icon" "file-text" "Title" "SpamAssassin ruleset" "Desc" "The rules contribute one combined signal to the spam score.")}}
+{{with .RulesError}}<p class="error">{{.}}</p>{{else}}
 <table class="grid kv">
 <tbody>
 <tr><th>Source</th><td>{{.SASource}}</td></tr>
@@ -36,7 +37,8 @@
 <tr><th>Dropped</th><td>{{.SASkipped}} rules and {{.SADropped}} meta rules</td></tr>
 </tbody>
 </table>
-<p class="hint">Network-, plugin- and Bayes-backed rules, and patterns the engine cannot compile, are dropped; those checks are done natively. When the summed score of the rules reaches {{.SAThreshold}}, the verdict gains {{.SAWeight}} points. The ruleset is seeded into data_dir on first run; refresh it with the antispam-rules tool, changes are applied automatically within about a minute, no restart.</p>
+{{end}}
+<p class="hint">Network-, plugin- and Bayes-backed rules, and patterns the engine cannot compile, are dropped; those checks are done natively.{{if not (index .ReadFailed "scoring")}} When the summed score of the rules reaches {{.SAThreshold}}, the verdict gains {{.SAWeight}} points.{{end}} The ruleset is seeded into data_dir on first run; refresh it with the antispam-rules tool, changes are applied automatically within about a minute, no restart.</p>
 </section>{{end}}
 
 {{define "bayes-card"}}<section class="card">
@@ -86,51 +88,65 @@
 
 {{define "greylist-panel"}}<div id="greylist-panel">
 {{template "notice" .Notice}}
+{{with index .ReadFailed "greylist"}}<p class="error">{{.}}</p>{{else}}
 <p>Greylisting is <strong>{{if .GreylistEnabled}}on{{else}}off{{end}}</strong>.</p>
+{{end}}
 <p class="hint">When on, the first message from an unknown sender (keyed by network, sender, and recipient) is deferred with a temporary failure so a legitimate server retries after a short delay; a spammer that does not retry never gets through. This delays first mail from new senders by a few minutes. Authenticated submission and allowlisted senders are never greylisted.</p>
+{{if not (index .ReadFailed "greylist")}}
 <form hx-post="/admin/ui/antispam/greylist" hx-target="#greylist-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <input type="hidden" name="enabled" value="{{if .GreylistEnabled}}0{{else}}1{{end}}">
 <button type="submit"{{if .GreylistEnabled}} class="secondary"{{end}}>{{if .GreylistEnabled}}Disable{{else}}Enable{{end}} greylisting</button>
 </form>
+{{end}}
 <h3>Timings</h3>
+{{with index .ReadFailed "greylist-timings"}}<p class="error">{{.}}</p>{{else}}
 <form class="form-grid cols-3" hx-post="/admin/ui/antispam/greylist-timings" hx-target="#greylist-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Minimum delay (seconds) <input type="number" name="min_delay" value="{{.GreylistMinDelay}}" min="1"><small>Before a first-seen sender is accepted.</small></label>
 <label>Unconfirmed sender memory (seconds) <input type="number" name="unconfirmed_ttl" value="{{.GreylistUnconfirmedTTL}}" min="1"></label>
 <label>Confirmed sender memory (seconds) <input type="number" name="confirmed_ttl" value="{{.GreylistConfirmedTTL}}" min="1"></label>
 <button type="submit">Save timings</button>
 </form>
+{{end}}
 </div>{{end}}
 
 {{define "digest-panel"}}<div id="digest-panel">
 {{template "notice" .Notice}}
+{{with index .ReadFailed "digest"}}<p class="error">{{.}}</p>{{else}}
 <p>The quarantine digest is <strong>{{if and .DigestEnabled .DigestSigningConfigured}}on{{else if .DigestEnabled}}on, but not sending{{else}}off{{end}}</strong>.</p>
+{{end}}
 {{if not .DigestSigningConfigured}}<p class="warn">No <code>digest_secret</code> is set in the server configuration, so <strong>no summary is sent at all</strong>, whatever this toggle says. Every entry carries a signed release link, so the digest cannot be built without the key. Set <code>digest_secret</code> to the same value in the MTA and webmail configuration and restart the MTA.</p>{{end}}
 <p class="hint">When on, each user is emailed a periodic plain-text summary of newly quarantined (Junk) mail, every entry carrying a signed one-click link that releases that one message back to the inbox after a confirmation page. A per-mailbox watermark means only mail new since the last summary is included, and a mailbox with nothing new is skipped. The <code>digest_secret</code> is shared by the MTA, which signs the release links, and webmail, which verifies them.</p>
+{{if not (index .ReadFailed "digest")}}
 <form class="form-grid" hx-post="/admin/ui/antispam/digest" hx-target="#digest-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label class="check"><input type="checkbox" name="enabled" value="1"{{if .DigestEnabled}} checked{{end}}> Enable the quarantine digest</label>
 <label>Interval (hours) <input type="number" name="interval" value="{{.DigestInterval}}" min="1"></label>
 <label>Release link base URL <input type="url" name="base_url" value="{{.DigestBaseURL}}" placeholder="https://mail.example.com"></label>
 <button type="submit">Save settings</button>
 </form>
+{{end}}
 </div>{{end}}
 
 {{define "autoreply-panel"}}<div id="autoreply-panel">
 {{template "notice" .Notice}}
 <p class="hint">An out-of-office reply is sent under the subject the user configured. EWS and ActiveSync carry no subject field, so a mailbox turned out of office from Outlook or a phone has none, and the reply uses this prefix followed by the subject of the message it answers. A mailbox that stores its own subject keeps it; this is only the fallback. Leave the field empty to restore the built-in wording.</p>
+{{with index .ReadFailed "autoreply"}}<p class="error">{{.}}</p>{{else}}
 <form class="narrow" hx-post="/admin/ui/antispam/autoreply" hx-target="#autoreply-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Subject prefix <input type="text" name="subject_prefix" value="{{.AutoReplyPrefix}}" maxlength="128"></label>
 <button type="submit">Save settings</button>
 </form>
+{{end}}
 </div>{{end}}
 
 {{define "relay-panel"}}<div id="relay-panel">
 {{template "notice" .Notice}}
 <p class="hint">When delivery to a remote server fails transiently, the message is retried with an exponential backoff (the base delay below, doubling each attempt) until it succeeds or the attempt limit is reached, after which a non-delivery report is returned to the sender.</p>
+{{with index .ReadFailed "relay"}}<p class="error">{{.}}</p>{{else}}
 <form class="form-grid" hx-post="/admin/ui/antispam/relay" hx-target="#relay-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Base retry backoff (seconds) <input type="number" name="backoff" value="{{.RelayBackoff}}" min="1"></label>
 <label>Attempts before giving up <input type="number" name="attempts" value="{{.RelayMaxAttempts}}" min="1"></label>
 <button type="submit">Save settings</button>
 </form>
+{{end}}
 </div>{{end}}
 
 {{define "gateway-panel"}}<div id="gateway-panel">
@@ -168,40 +184,52 @@
 
 {{define "outbound-panel"}}<div id="outbound-panel">
 {{template "notice" .Notice}}
+{{with index .ReadFailed "outbound"}}<p class="error">{{.}}</p>{{else}}
 <p>Outbound abuse limiting is <strong>{{if .OutboundEnabled}}on{{else}}off{{end}}</strong>.</p>
+{{end}}
 <p class="hint">When on, a local account that sends to more than the cap of external recipients within the window has the excess deferred with a temporary failure, a compromised account cannot blast spam unchecked, and an <code>outbound.abuse</code> event is logged once per window so you can disable the account. Authenticated submission only; inbound mail is never affected.</p>
+{{if not (index .ReadFailed "outbound")}}
 <form class="form-grid" hx-post="/admin/ui/antispam/outbound" hx-target="#outbound-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label class="check"><input type="checkbox" name="enabled" value="1"{{if .OutboundEnabled}} checked{{end}}> Enable outbound limiting</label>
 <label>External recipients per window <input type="number" name="cap" value="{{.OutboundCap}}" min="1"></label>
 <label>Window (seconds) <input type="number" name="window" value="{{.OutboundWindow}}" min="1"></label>
 <button type="submit">Save settings</button>
 </form>
+{{end}}
 </div>{{end}}
 
 {{define "message-size-panel"}}<div id="message-size-panel">
 {{template "notice" .Notice}}
 <p class="hint">The limit is advertised to senders as the SMTP SIZE extension. 0 means no limit; a larger message is rejected before it is queued.</p>
+{{with index .ReadFailed "message-size"}}<p class="error">{{.}}</p>{{else}}
 <form class="narrow" hx-post="/admin/ui/antispam/message-size" hx-target="#message-size-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Maximum message size (MB, 0 = no limit) <input type="number" name="max_mb" value="{{.MessageSizeMB}}" min="0"></label>
 <button type="submit">Save limit</button>
 </form>
+{{end}}
 </div>{{end}}
 
 {{define "ratelimit-panel"}}<div id="ratelimit-panel">
 {{template "notice" .Notice}}
+{{with index .ReadFailed "ratelimit"}}<p class="error">{{.}}</p>{{else}}
 <p>Rate limiting is <strong>{{if .RateLimitEnabled}}on{{else}}off{{end}}</strong>.</p>
+{{end}}
 <p class="hint">When on, an unauthenticated client network (keyed by /24 or /64) that sends more than the burst within the window is deferred with a temporary failure, so a flood is slowed while a legitimate server simply retries. Authenticated submission is never rate limited.</p>
+{{if not (index .ReadFailed "ratelimit")}}
 <form class="form-grid" hx-post="/admin/ui/antispam/ratelimit" hx-target="#ratelimit-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label class="check"><input type="checkbox" name="enabled" value="1"{{if .RateLimitEnabled}} checked{{end}}> Enable rate limiting</label>
 <label>Burst (messages per window) <input type="number" name="burst" value="{{.RateLimitBurst}}" min="1"></label>
 <label>Window (seconds) <input type="number" name="window" value="{{.RateLimitWindow}}" min="1"></label>
 <button type="submit">Save settings</button>
 </form>
+{{end}}
 </div>{{end}}
 
 {{define "antispam-panel"}}<div id="antispam-panel">
 {{template "notice" .Notice}}
-{{if .ModelTrained}}
+{{if .ModelError}}
+<p class="error">{{.ModelError}}</p>
+{{else if .ModelTrained}}
 <p>Trained model in use: {{.SpamMsgs}} spam and {{.HamMsgs}} ham messages.</p>
 {{else}}
 <p>Using the built-in cold-start model. Retrain from your users' mail to improve it.</p>
@@ -215,6 +243,7 @@
 
 {{define "scoring-panel"}}<div id="scoring-panel">
 {{template "notice" .Notice}}
+{{with index .ReadFailed "scoring"}}<p class="error">{{.}}</p>{{else}}
 <form class="form-grid" hx-post="/admin/ui/antispam/settings" hx-target="#scoring-panel" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <div>
@@ -238,4 +267,5 @@
 <p class="hint">Edited settings apply to inbound scoring within about a minute, no restart.</p>
 <button type="submit">Save settings</button>
 </form>
+{{end}}
 </div>{{end}}

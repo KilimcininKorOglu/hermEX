@@ -74,7 +74,9 @@ func (s *Server) performBayesRetrain() (string, error) {
 
 // antispamPageData builds the anti-spam page model: the editable scoring settings
 // (the stored row, or the built-in defaults when none has been saved), and the
-// status of the Bayesian model and the SpamAssassin ruleset.
+// status of the Bayesian model and the SpamAssassin ruleset. A setting that could
+// not be read is recorded in ReadFailed, and its card shows that in place of its
+// form, which would otherwise offer the defaults for a save to store.
 func (s *Server) antispamPageData(r *http.Request, notice panelNotice) map[string]any {
 	failed := readFailures{}
 	data := map[string]any{
@@ -83,21 +85,23 @@ func (s *Server) antispamPageData(r *http.Request, notice panelNotice) map[strin
 		"Notice":     notice,
 		"ReadFailed": failed,
 	}
-	sc := s.scoringSettings()
-	data["Weights"] = sc.weights
-	data["Threshold"] = sc.threshold
-	data["Zones"] = sc.zones
-	data["BayesProb"] = sc.bayesProb
+	sc, err := s.scoringSettings()
+	if s.noteRead(failed, "scoring", "the scoring settings", err) {
+		data["Weights"] = sc.weights
+		data["Threshold"] = sc.threshold
+		data["Zones"] = sc.zones
+		data["BayesProb"] = sc.bayesProb
+	}
 
 	s.addModelStatus(data)
 	s.addRulesStatus(data, sc)
-	s.addGreylistSettings(data)
-	s.addInboundLimits(data)
-	s.addOutboundSettings(data)
-	data["AutoReplyPrefix"] = s.autoReplyPrefix()
-	s.addRelaySettings(data)
+	s.addGreylistSettings(data, failed)
+	s.addInboundLimits(data, failed)
+	s.addOutboundSettings(data, failed)
+	s.addAutoReplySettings(data, failed)
+	s.addRelaySettings(data, failed)
 	s.addGatewaySettings(data, failed)
-	s.addDigestSettings(data)
+	s.addDigestSettings(data, failed)
 	return data
 }
 
@@ -111,8 +115,9 @@ type antispamScoring struct {
 	saThreshold float64
 }
 
-// scoringSettings reads the stored scoring settings, falling back to the defaults.
-func (s *Server) scoringSettings() antispamScoring {
+// scoringSettings reads the stored scoring settings, falling back to the defaults
+// when none has been saved. A failed read returns the defaults with the error.
+func (s *Server) scoringSettings() (antispamScoring, error) {
 	sc := antispamScoring{
 		weights:     antispam.DefaultWeights,
 		threshold:   antispam.DefaultThreshold,
@@ -121,7 +126,7 @@ func (s *Server) scoringSettings() antispamScoring {
 	}
 	st, found, err := s.dir.GetAntispamSettings()
 	if err != nil || !found {
-		return sc
+		return sc, err
 	}
 	sc.weights = weightsFromSettings(st)
 	sc.threshold, sc.zones = st.Threshold, st.Zones
@@ -131,26 +136,38 @@ func (s *Server) scoringSettings() antispamScoring {
 	if st.SAThreshold > 0 {
 		sc.saThreshold = st.SAThreshold
 	}
-	return sc
+	return sc, nil
 }
 
-// addModelStatus reports how much the Bayesian model has been trained on.
+// addModelStatus reports how much the Bayesian model has been trained on. A model
+// file that exists but cannot be read is reported, not shown as the cold-start
+// model, which only a missing file means.
 func (s *Server) addModelStatus(data map[string]any) {
 	m, err := antispam.LoadModelFile(s.paths.AntispamModelPath())
-	if err != nil || m == nil {
-		return
+	switch {
+	case err != nil:
+		data["ModelError"] = s.notice("Could not read the trained model.", err)
+	case m != nil:
+		data["ModelTrained"] = true
+		data["SpamMsgs"] = m.SpamMsgs
+		data["HamMsgs"] = m.HamMsgs
 	}
-	data["ModelTrained"] = true
-	data["SpamMsgs"] = m.SpamMsgs
-	data["HamMsgs"] = m.HamMsgs
 }
 
 // addRulesStatus reports the live data_dir SpamAssassin ruleset if present,
-// otherwise the embedded baseline that the MTA seeds on first run.
+// otherwise the embedded baseline that the MTA seeds on first run. A ruleset file
+// that exists but cannot be read is reported, not shown as the baseline.
 func (s *Server) addRulesStatus(data map[string]any, sc antispamScoring) {
+	data["SAWeight"] = sc.weights.SARulesHit
+	data["SAThreshold"] = sc.saThreshold
 	rs := antispam.EmbeddedRules()
 	saSource := "embedded baseline (seeded on first run)"
-	if live, err := antispam.LoadRulesFile(s.paths.AntispamRulesPath()); err == nil && live != nil {
+	live, err := antispam.LoadRulesFile(s.paths.AntispamRulesPath())
+	switch {
+	case err != nil:
+		data["RulesError"] = s.notice("Could not read the ruleset in data_dir.", err)
+		return
+	case live != nil:
 		rs, saSource = live, "data_dir/"+antispam.RulesFileName
 	}
 	rules, metas := rs.RuleCount()
@@ -159,21 +176,22 @@ func (s *Server) addRulesStatus(data map[string]any, sc antispamScoring) {
 	data["SAMetas"] = metas
 	data["SASkipped"] = rs.SkippedRules
 	data["SADropped"] = rs.DroppedMetas
-	data["SAWeight"] = sc.weights.SARulesHit
-	data["SAThreshold"] = sc.saThreshold
 }
 
 // addGreylistSettings reports the greylist toggle and its timings: the stored
 // values, or the greylister's built-in defaults (300 s delay, 24 h and 36 d TTLs)
-// when none has been saved.
-func (s *Server) addGreylistSettings(data map[string]any) {
-	if on, err := s.dir.GetGreylistEnabled(); err == nil {
+// when none has been saved. Each is recorded in failed when it could not be read.
+func (s *Server) addGreylistSettings(data map[string]any, failed readFailures) {
+	on, err := s.dir.GetGreylistEnabled()
+	if s.noteRead(failed, "greylist", "the greylisting switch", err) {
 		data["GreylistEnabled"] = on
 	}
-	data["GreylistMinDelay"], data["GreylistUnconfirmedTTL"], data["GreylistConfirmedTTL"] = int64(300), int64(86400), int64(3110400)
 	t, found, err := s.dir.GetGreylistTimings()
-	if err != nil || !found {
+	if !s.noteRead(failed, "greylist-timings", "the greylist timings", err) {
 		return
+	}
+	if !found {
+		t = directory.GreylistTimings{MinDelay: 300, UnconfirmedTTL: 86400, ConfirmedTTL: 3110400}
 	}
 	data["GreylistMinDelay"] = t.MinDelay
 	data["GreylistUnconfirmedTTL"] = t.UnconfirmedTTL
@@ -184,27 +202,35 @@ func (s *Server) addGreylistSettings(data map[string]any) {
 // messages per 60 s) and the message size ceiling. The size is shown in whole MB
 // (0 = no limit) and stored as bytes; with nothing saved the server enforces its
 // built-in ceiling, so show that rather than 0, which would claim a limit the
-// server does not actually apply.
-func (s *Server) addInboundLimits(data map[string]any) {
-	data["RateLimitEnabled"], data["RateLimitBurst"], data["RateLimitWindow"] = false, 60, 60
-	if rl, found, err := s.dir.GetRateLimitSettings(); err == nil && found {
-		data["RateLimitEnabled"] = rl.Enabled
-		data["RateLimitBurst"] = rl.Burst
-		data["RateLimitWindow"] = rl.WindowSeconds
+// server does not actually apply. Each is recorded in failed when it could not be
+// read.
+func (s *Server) addInboundLimits(data map[string]any, failed readFailures) {
+	rl, rlFound, err := s.dir.GetRateLimitSettings()
+	if s.noteRead(failed, "ratelimit", "the rate-limit settings", err) {
+		if !rlFound {
+			rl = directory.RateLimitSettings{Burst: 60, WindowSeconds: 60}
+		}
+		data["RateLimitEnabled"], data["RateLimitBurst"], data["RateLimitWindow"] = rl.Enabled, rl.Burst, rl.WindowSeconds
 	}
-	data["MessageSizeMB"] = int64(directory.DefaultMaxInboundBytes / (1024 * 1024))
-	if ms, found, err := s.dir.GetMessageSizeSettings(); err == nil && found {
+	ms, msFound, err := s.dir.GetMessageSizeSettings()
+	if s.noteRead(failed, "message-size", "the message size limit", err) {
+		if !msFound {
+			ms.MaxInboundBytes = directory.DefaultMaxInboundBytes
+		}
 		data["MessageSizeMB"] = ms.MaxInboundBytes / (1024 * 1024)
 	}
 }
 
 // addOutboundSettings reports the outbound abuse limit: the stored settings, or the
-// limiter's built-in defaults (disabled, 500 external recipients per 3600 s).
-func (s *Server) addOutboundSettings(data map[string]any) {
-	data["OutboundEnabled"], data["OutboundCap"], data["OutboundWindow"] = false, 500, 3600
+// limiter's built-in defaults (disabled, 500 external recipients per 3600 s). It is
+// recorded in failed when it could not be read.
+func (s *Server) addOutboundSettings(data map[string]any, failed readFailures) {
 	ob, found, err := s.dir.GetOutboundSettings()
-	if err != nil || !found {
+	if !s.noteRead(failed, "outbound", "the outbound settings", err) {
 		return
+	}
+	if !found {
+		ob = directory.OutboundSettings{RecipientCap: 500, WindowSeconds: 3600}
 	}
 	data["OutboundEnabled"] = ob.Enabled
 	data["OutboundCap"] = ob.RecipientCap
@@ -212,12 +238,15 @@ func (s *Server) addOutboundSettings(data map[string]any) {
 }
 
 // addRelaySettings reports the outbound delivery retry policy: the stored values,
-// or the relay worker's built-in defaults (300 s base backoff, 10 attempts).
-func (s *Server) addRelaySettings(data map[string]any) {
-	data["RelayBackoff"], data["RelayMaxAttempts"] = 300, 10
+// or the relay worker's built-in defaults (300 s base backoff, 10 attempts). It is
+// recorded in failed when it could not be read.
+func (s *Server) addRelaySettings(data map[string]any, failed readFailures) {
 	rs, found, err := s.dir.GetRelaySettings()
-	if err != nil || !found {
+	if !s.noteRead(failed, "relay", "the retry settings", err) {
 		return
+	}
+	if !found {
+		rs = directory.RelaySettings{BackoffSeconds: 300, MaxAttempts: 10}
 	}
 	data["RelayBackoff"] = rs.BackoffSeconds
 	data["RelayMaxAttempts"] = rs.MaxAttempts
@@ -227,15 +256,20 @@ func (s *Server) addRelaySettings(data map[string]any) {
 // worker's built-in defaults (disabled, every 24 h, no base URL). It also reports
 // whether the digest can actually send, because the toggle alone says nothing:
 // without a signing secret the worker skips every run, so a panel showing only the
-// toggle would report summaries going out that never do.
-func (s *Server) addDigestSettings(data map[string]any) {
-	data["DigestEnabled"], data["DigestInterval"], data["DigestBaseURL"] = false, 24, ""
-	if dg, found, err := s.dir.GetDigestSettings(); err == nil && found {
-		data["DigestEnabled"] = dg.Enabled
-		data["DigestInterval"] = dg.IntervalHours
-		data["DigestBaseURL"] = dg.BaseURL
-	}
+// toggle would report summaries going out that never do. The settings are recorded
+// in failed when they could not be read.
+func (s *Server) addDigestSettings(data map[string]any, failed readFailures) {
 	data["DigestSigningConfigured"] = s.digestSigning
+	dg, found, err := s.dir.GetDigestSettings()
+	if !s.noteRead(failed, "digest", "the digest settings", err) {
+		return
+	}
+	if !found {
+		dg = directory.DigestSettings{IntervalHours: 24}
+	}
+	data["DigestEnabled"] = dg.Enabled
+	data["DigestInterval"] = dg.IntervalHours
+	data["DigestBaseURL"] = dg.BaseURL
 }
 
 // handleUIToggleGreylist turns greylisting on or off. The MTA applies the change
@@ -341,16 +375,20 @@ func (s *Server) handleUISaveOutbound(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "outbound-panel", s.antispamPageData(r, okNotice("Outbound settings saved, the MTA applies them within a minute, no restart.")))
 }
 
-// autoReplyPrefix returns the stored out-of-office subject prefix, or the MTA's
-// built-in default when none has been saved or the read fails. The form shows
-// what the MTA would actually use, so an unreadable row must not render as an
-// empty field the operator then saves.
-func (s *Server) autoReplyPrefix() string {
+// addAutoReplySettings reports the stored out-of-office subject prefix, or the
+// MTA's built-in default when none has been saved. The form shows what the MTA
+// would actually use, so it is recorded in failed rather than offered when the
+// row could not be read.
+func (s *Server) addAutoReplySettings(data map[string]any, failed readFailures) {
 	ar, found, err := s.dir.GetAutoReplySettings()
-	if err != nil || !found || ar.SubjectPrefix == "" {
-		return directory.DefaultAutoReplySubjectPrefix
+	if !s.noteRead(failed, "autoreply", "the auto-reply settings", err) {
+		return
 	}
-	return ar.SubjectPrefix
+	prefix := ar.SubjectPrefix
+	if !found || prefix == "" {
+		prefix = directory.DefaultAutoReplySubjectPrefix
+	}
+	data["AutoReplyPrefix"] = prefix
 }
 
 // handleUISaveAutoReply persists the out-of-office subject prefix. It is used
