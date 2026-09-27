@@ -62,7 +62,7 @@ export function Header({ onMenuToggle, sidebarCollapsed }: HeaderProps) {
     navigate("/login")
   }
 
-  const handleSearch = (e: React.FormEvent) => {
+  const handleSearch = (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (searchQuery.trim()) {
       navigate(`/search?q=${encodeURIComponent(searchQuery.trim())}`)
