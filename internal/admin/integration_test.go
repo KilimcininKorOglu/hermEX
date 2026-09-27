@@ -2,9 +2,11 @@ package admin
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -92,7 +94,7 @@ func TestAdminServerIntegration(t *testing.T) {
 	wantStatus(t, postBossLogin(t, ts, "wrong"), http.StatusUnauthorized, "wrong-password login")
 
 	checkAPICreateUser(t, ts, dir, session, csrf)
-	checkLDAPConfigRoundTrip(t, ts, session, csrf)
+	checkLDAPConnectionRoundTrip(t, ts, session, csrf)
 	checkPasswordReset(t, ts, dir, session, csrf)
 	checkRoleGrantRevoke(t, ts, dir, session, csrf)
 }
@@ -104,7 +106,7 @@ func seedIntegrationDirectory(t *testing.T) *directory.SQLDirectory {
 	db := openTestDB(t)
 	dir := directory.NewSQL(db)
 	mustNoErr(t, dir.EnsureSchema(), "ensure schema")
-	for _, tbl := range []string{"altnames", "aliases", "admin_roles", "users", "domains"} {
+	for _, tbl := range []string{"altnames", "aliases", "admin_roles", "users", "domains", "ldap_connections"} {
 		_, err := db.Exec("DELETE FROM " + tbl)
 		mustNoErr(t, err, "clean "+tbl)
 	}
@@ -160,15 +162,19 @@ func checkAPICreateUser(t *testing.T, ts *httptest.Server, dir *directory.SQLDir
 	wantTrue(t, ok, "the API-created user lands in the directory")
 }
 
-// checkLDAPConfigRoundTrip sets then reads an org's LDAP config through the API
-// (real ldap_config table); the read must not echo the bind password.
-func checkLDAPConfigRoundTrip(t *testing.T, ts *httptest.Server, session, csrf string) {
+// checkLDAPConnectionRoundTrip creates then reads an LDAP connection through the API
+// (real ldap_connections table); the read must not echo the bind password.
+func checkLDAPConnectionRoundTrip(t *testing.T, ts *httptest.Server, session, csrf string) {
 	t.Helper()
-	put := authedPUT(t, ts, "/admin/orgs/5/ldap", session, csrf,
-		`{"URI":"ldaps://dc.hermex.test","BindDN":"cn=svc","BindPassword":"topsecret","BaseDN":"dc=hermex,dc=test"}`)
-	wantStatus(t, put, http.StatusNoContent, "put ldap")
-	body := wantBody(t, authedGET(t, ts, "/admin/orgs/5/ldap", session), http.StatusOK, "get ldap")
+	post := authedPOST(t, ts, "/admin/ldap/connections", session, csrf,
+		`{"Name":"hq","URI":"ldaps://dc.hermex.test","BindDN":"cn=svc","BindPassword":"topsecret","BaseDN":"dc=hermex,dc=test"}`)
+	created := wantBody(t, post, http.StatusCreated, "create ldap connection")
+	var out struct{ ID int64 }
+	mustNoErr(t, json.Unmarshal([]byte(created), &out), "decode the created id")
+	path := "/admin/ldap/connections/" + strconv.FormatInt(out.ID, 10)
+	body := wantBody(t, authedGET(t, ts, path, session), http.StatusOK, "get ldap connection")
 	wantContains(t, body, "ldaps://dc.hermex.test", "the read carries the stored URI")
+	wantContains(t, body, `"BindPasswordSet":true`, "the read reports a stored password")
 	wantNotContains(t, body, "topsecret", "the bind password stays out of the read")
 }
 

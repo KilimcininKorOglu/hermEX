@@ -41,7 +41,8 @@ func TestAFailedReadIsRecordedByTheJSONAPI(t *testing.T) {
 		{"/admin/mobile-devices", "ListActiveSessions"},
 		{"/admin/aliases", "ListAliases"},
 		{"/admin/orgs", "ListOrgs"},
-		{"/admin/orgs/0/ldap", "GetLDAPConfig"},
+		{"/admin/ldap/connections", "ListLDAPConnections"},
+		{"/admin/ldap/bindings", "ListLDAPBindings"},
 		{"/admin/roles", "ListRoles"},
 		{"/admin/roles/1", "GetRole"},
 	} {

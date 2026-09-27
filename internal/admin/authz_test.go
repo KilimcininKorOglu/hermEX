@@ -221,11 +221,13 @@ func TestDomainPurgeCapability(t *testing.T) {
 // endpoint).
 func TestReadOnlyAdminReadWriteSplit(t *testing.T) {
 	d := &fakeDir{
-		authOK: true,
-		uid:    1,
-		perms:  []directory.Permission{{Name: directory.PermSystemAdminRO}},
-		orgs:   map[int64]directory.OrgInfo{1: {ID: 1, Name: "Acme"}},
-		ldap:   map[int64]directory.LDAPConfig{1: {URI: "ldap://x"}},
+		authOK:    true,
+		uid:       1,
+		perms:     []directory.Permission{{Name: directory.PermSystemAdminRO}},
+		orgs:      map[int64]directory.OrgInfo{1: {ID: 1, Name: "Acme"}},
+		ldapConns: map[int64]directory.LDAPConnection{1: {ID: 1, Name: "hq", URI: "ldaps://x"}},
+		ldapBindings: map[int64]directory.LDAPBinding{
+			1: {ID: 1, ConnectionID: 1, DomainID: 1, Domain: "hermex.test"}},
 	}
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
@@ -245,7 +247,9 @@ func TestReadOnlyAdminReadWriteSplit(t *testing.T) {
 		"/admin/orgs/1",
 		"/admin/syncpolicy",
 		"/admin/users/u@hermex.test/roles",
-		"/admin/orgs/1/ldap",
+		"/admin/ldap/connections",
+		"/admin/ldap/bindings",
+		"/admin/ldap/bindings/1",
 	}
 	for _, path := range reads {
 		resp := authedGET(t, ts, path, session)
@@ -275,7 +279,10 @@ func TestReadOnlyAdminReadWriteSplit(t *testing.T) {
 		{"DELETE", "/admin/orgs/1", ``},
 		{"PUT", "/admin/orgs/1/domains/2", ``},
 		{"PUT", "/admin/syncpolicy", `{}`},
-		{"PUT", "/admin/orgs/1/ldap", `{"uri":"ldap://y"}`},
+		{"POST", "/admin/ldap/connections", `{"Name":"x","URI":"ldaps://y"}`},
+		{"PUT", "/admin/ldap/connections/1", `{"Name":"x","URI":"ldaps://y"}`},
+		{"PUT", "/admin/ldap/bindings/1", `{}`},
+		{"POST", "/admin/ldap/bindings/1/sync", ``},
 		{"POST", "/admin/users/u@hermex.test/roles", `{"role":"system"}`},
 		{"DELETE", "/admin/users/u@hermex.test/roles", `{"role":"system"}`},
 		{"POST", "/admin/users/u@hermex.test/password", `{"password":"newpw"}`},

@@ -2,7 +2,6 @@ package admin
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -20,24 +19,6 @@ func (s *Server) hasOrgScope(userID, orgID int64) bool {
 	return hasPerm(perms, directory.PermSystemAdmin, "") ||
 		hasPerm(perms, directory.PermOrgAdmin, "*") ||
 		hasPerm(perms, directory.PermOrgAdmin, strconv.FormatInt(orgID, 10))
-}
-
-// orgScope parses the {orgID} path value and authorizes the caller for it,
-// method-aware: a read (GET/HEAD) additionally admits a read-only system admin,
-// so RO can read an org's configuration; a write requires org write scope. When
-// ok is false a response has already been written.
-func (s *Server) orgScope(w http.ResponseWriter, r *http.Request) (orgID int64, ok bool) {
-	orgID, err := strconv.ParseInt(r.PathValue("orgID"), 10, 64)
-	if err != nil {
-		http.Error(w, "invalid organization id", http.StatusBadRequest)
-		return 0, false
-	}
-	uid := claimsOf(r).UserID
-	if s.hasOrgScope(uid, orgID) || (isReadMethod(r.Method) && s.isSystemReadAdmin(uid)) {
-		return orgID, true
-	}
-	http.Error(w, "forbidden: requires an administrator of this organization", http.StatusForbidden)
-	return 0, false
 }
 
 // orgIDParam parses the {orgID} path value, writing a 400 when it is not a
@@ -186,68 +167,6 @@ func (s *Server) handleUnassignOrgDomain(w http.ResponseWriter, r *http.Request)
 	}
 	if !found {
 		http.Error(w, "no such domain", http.StatusNotFound)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// handleGetLDAP returns an organization's LDAP configuration. The bind password
-// is never disclosed, only whether one is stored.
-func (s *Server) handleGetLDAP(w http.ResponseWriter, r *http.Request) {
-	orgID, ok := s.orgScope(w, r)
-	if !ok {
-		return
-	}
-	cfg, found, err := s.dir.GetLDAPConfig(orgID)
-	if err != nil {
-		s.fail(w, "server error", err, http.StatusInternalServerError)
-		return
-	}
-	if !found {
-		http.Error(w, "no LDAP configuration for this organization", http.StatusNotFound)
-		return
-	}
-	writeJSON(w, struct {
-		URI             string
-		StartTLS        bool
-		BindDN          string
-		BaseDN          string
-		UsernameAttr    string
-		BindPasswordSet bool
-	}{cfg.URI, cfg.StartTLS, cfg.BindDN, cfg.BaseDN, cfg.UsernameAttr, cfg.BindPassword != ""})
-}
-
-// handlePutLDAP sets an organization's LDAP configuration. A request that omits
-// the bind password keeps the stored one, so the secret need not round-trip
-// through the client.
-func (s *Server) handlePutLDAP(w http.ResponseWriter, r *http.Request) {
-	orgID, ok := s.orgScope(w, r)
-	if !ok {
-		return
-	}
-	var cfg directory.LDAPConfig
-	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
-		http.Error(w, "malformed request", http.StatusBadRequest)
-		return
-	}
-	if cfg.BindPassword == "" {
-		// A failed read must stop the write: it would store the empty password in
-		// place of the stored one.
-		existing, found, err := s.dir.GetLDAPConfig(orgID)
-		if err != nil {
-			s.fail(w, "server error", err, http.StatusInternalServerError)
-			return
-		}
-		if found {
-			cfg.BindPassword = existing.BindPassword
-		}
-	}
-	if err := s.dir.SetLDAPConfig(orgID, cfg); err != nil {
-		if errors.Is(err, directory.ErrInsecureLDAP) {
-			http.Error(w, "the directory URI must be ldaps:// or StartTLS must be enabled", http.StatusBadRequest)
-			return
-		}
-		s.fail(w, "could not save LDAP configuration", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
