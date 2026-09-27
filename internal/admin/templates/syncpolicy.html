@@ -2,22 +2,22 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<header class="page-head"><div><h1>Sync policy</h1><p class="page-desc">The baseline ActiveSync policy every device receives before a domain or per-user override is merged on top.</p></div></header>
+<header class="page-head"><div><h1>{{t "syncPolicy.title"}}</h1><p class="page-desc">{{t "syncPolicy.desc"}}</p></div></header>
 {{template "user-status" .}}
 <section class="card">
-{{template "card-head" (dict "Icon" "shield" "Title" "ActiveSync device policy (server default)" "Desc" "Leave a field unset to leave it unenforced. Password rules (length, complex characters, expiration, history, failed-attempt limit) apply only when DevicePasswordEnabled is Yes.")}}
-{{with index .ReadFailed "policy"}}<p class="error">{{.}}</p>{{else}}
+{{template "card-head" (dict "Icon" "shield" "Title" "syncPolicy.cardTitle" "Desc" "syncPolicy.cardDesc")}}
+{{with index .ReadFailed "policy"}}<p class="error">{{t .}}</p>{{else}}
 <form hx-put="/admin/ui/syncpolicy" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <div class="policy-grid">
 {{range .Fields}}
 <label class="policy-field">{{.Name}}
-{{if .Bool}}<select name="{{.Name}}"><option value="">(unset)</option><option value="1"{{if eq .Value "1"}} selected{{end}}>Yes</option><option value="0"{{if eq .Value "0"}} selected{{end}}>No</option></select>
-{{else}}<input type="number" min="0" name="{{.Name}}" value="{{.Value}}" placeholder="(unset)">{{end}}
+{{if .Bool}}<select name="{{.Name}}"><option value="">{{t "domainDetail.unset"}}</option><option value="1"{{if eq .Value "1"}} selected{{end}}>{{t "userDetail.yes"}}</option><option value="0"{{if eq .Value "0"}} selected{{end}}>{{t "userDetail.no"}}</option></select>
+{{else}}<input type="number" min="0" name="{{.Name}}" value="{{.Value}}" placeholder="{{t "domainDetail.unset"}}">{{end}}
 </label>
 {{end}}
 </div>
-<button type="submit">Save default policy</button>
+<button type="submit">{{t "syncPolicy.save"}}</button>
 </form>
 {{end}}
 </section>

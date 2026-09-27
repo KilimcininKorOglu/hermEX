@@ -16,7 +16,7 @@ func (s *Server) senderAccessData(r *http.Request, notice panelNotice) map[strin
 	data := map[string]any{"Nav": "senderaccess", "CSRF": csrfCookieValue(r), "Notice": notice}
 	rules, err := s.dir.ListSenderRules()
 	if err != nil {
-		data["Error"] = s.notice("Could not read the rules.", err)
+		data["Error"] = s.notice("senderAccess.unread", err)
 	}
 	views := make([]senderRuleView, 0, len(rules))
 	for _, rule := range rules {
@@ -42,14 +42,14 @@ func (s *Server) handleUISaveSenderRule(w http.ResponseWriter, r *http.Request) 
 	}
 	pattern := strings.TrimSpace(r.FormValue("pattern"))
 	if pattern == "" {
-		s.render(w, r, "sender-access-panel", s.senderAccessData(r, errorNotice("A pattern (email address or domain) is required.")))
+		s.render(w, r, "sender-access-panel", s.senderAccessData(r, errorNotice("senderAccess.patternRequired")))
 		return
 	}
 	if err := s.dir.SetSenderRule(pattern, r.FormValue("action")); err != nil {
-		s.render(w, r, "sender-access-panel", s.senderAccessData(r, s.failNotice("Could not save the rule.", err)))
+		s.render(w, r, "sender-access-panel", s.senderAccessData(r, s.failNotice("senderAccess.saveFailed", err)))
 		return
 	}
-	s.render(w, r, "sender-access-panel", s.senderAccessData(r, okNotice("Rule saved.")))
+	s.render(w, r, "sender-access-panel", s.senderAccessData(r, okNotice("senderAccess.saved")))
 }
 
 // handleUIDeleteSenderRule removes an allow/block rule.
@@ -58,8 +58,8 @@ func (s *Server) handleUIDeleteSenderRule(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if _, err := s.dir.DeleteSenderRule(strings.TrimSpace(r.FormValue("pattern"))); err != nil {
-		s.render(w, r, "sender-access-panel", s.senderAccessData(r, s.failNotice("Could not delete the rule.", err)))
+		s.render(w, r, "sender-access-panel", s.senderAccessData(r, s.failNotice("senderAccess.deleteFailed", err)))
 		return
 	}
-	s.render(w, r, "sender-access-panel", s.senderAccessData(r, okNotice("Rule removed.")))
+	s.render(w, r, "sender-access-panel", s.senderAccessData(r, okNotice("senderAccess.removed")))
 }

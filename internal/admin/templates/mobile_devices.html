@@ -2,9 +2,9 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<header class="page-head"><div><h1>Mobile devices</h1><p class="page-desc">Live ActiveSync sessions across all users. The list refreshes every 2 seconds.</p></div></header>
+<header class="page-head"><div><h1>{{t "mobileDevices.title"}}</h1><p class="page-desc">{{t "mobileDevices.desc"}}</p></div></header>
 <section class="card">
-{{template "card-head" (dict "Icon" "smartphone" "Title" "Live sessions" "Desc" "Each device's latest ActiveSync command and when it last reached the server.")}}
+{{template "card-head" (dict "Icon" "smartphone" "Title" "mobileDevices.liveTitle" "Desc" "mobileDevices.liveDesc")}}
 {{template "sessions-panel" .}}
 </section>
 </main>
@@ -13,7 +13,7 @@
 
 {{define "sessions-panel"}}<div id="sessions-panel" hx-get="/admin/ui/mobile-devices/panel" hx-trigger="every 2s" hx-swap="outerHTML">
 <table class="grid">
-<thead><tr><th>User</th><th>IP</th><th>Device</th><th>Command</th><th>EAS</th><th>Last activity</th><th>Status</th></tr></thead>
+<thead><tr><th>{{t "mobileDevices.colUser"}}</th><th>IP</th><th>{{t "mobileDevices.colDevice"}}</th><th>{{t "mobileDevices.colCommand"}}</th><th>EAS</th><th>{{t "mobileDevices.colLastActivity"}}</th><th>{{t "mobileDevices.colStatus"}}</th></tr></thead>
 <tbody>
 {{range .Sessions}}<tr>
 <td>{{.User}}</td>
@@ -21,10 +21,10 @@
 <td>{{.DeviceType}} <small>{{.DeviceID}}</small></td>
 <td>{{.Command}}{{if .Push}} <span class="badge">push</span>{{end}}</td>
 <td>{{.ASVersion}}</td>
-<td class="nowrap">{{.AgeSec}}s ago</td>
-<td><span class="status{{if eq .Status "Active"}} status-ok{{end}}">{{.Status}}</span></td>
+<td class="nowrap">{{t "mobileDevices.agoSeconds" .AgeSec}}</td>
+<td><span class="status{{if eq .Status "Active"}} status-ok{{end}}">{{if eq .Status "Active"}}{{t "mobileDevices.active"}}{{else if eq .Status "Ended"}}{{t "mobileDevices.ended"}}{{else}}{{.Status}}{{end}}</span></td>
 </tr>
-{{else}}<tr><td colspan="7" class="empty{{if .Error}} failed{{end}}">{{if .Error}}{{.Error}}{{else}}No active sessions.{{end}}</td></tr>
+{{else}}<tr><td colspan="7" class="empty{{if .Error}} failed{{end}}">{{if .Error}}{{t .Error}}{{else}}{{t "mobileDevices.none"}}{{end}}</td></tr>
 {{end}}
 </tbody>
 </table>

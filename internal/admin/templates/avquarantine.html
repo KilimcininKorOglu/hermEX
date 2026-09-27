@@ -2,21 +2,21 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<header class="page-head"><div><h1>Quarantine</h1><p class="page-desc">Messages held because antivirus matched a signature. They were not delivered; the recipient and the domain and organization administrators were notified. A system administrator sees every held message, a domain administrator only their domains'.</p></div></header>
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<header class="page-head"><div><h1>{{t "avQuarantine.title"}}</h1><p class="page-desc">{{t "avQuarantine.desc"}}</p></div></header>
+{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
 <table class="grid">
-<thead><tr><th>Held</th><th>Direction</th><th>From</th><th>Recipients</th><th>Subject</th><th>Signature</th><th>Status</th></tr></thead>
+<thead><tr><th>{{t "avQuarantine.colHeld"}}</th><th>{{t "avQuarantine.colDirection"}}</th><th>{{t "avQuarantine.colFrom"}}</th><th>{{t "avQuarantine.colRecipients"}}</th><th>{{t "avQuarantine.colSubject"}}</th><th>{{t "avQuarantine.colSignature"}}</th><th>{{t "avQuarantine.colStatus"}}</th></tr></thead>
 <tbody>
 {{range .Items}}<tr>
 <td class="nowrap">{{.When}}</td>
-<td><span class="badge">{{.Direction}}</span></td>
+<td><span class="badge">{{if eq .Direction "inbound"}}{{t "avQuarantine.inbound"}}{{else if eq .Direction "outbound"}}{{t "avQuarantine.outbound"}}{{else}}{{.Direction}}{{end}}</span></td>
 <td>{{.From}}</td>
 <td>{{.Recipients}}</td>
 <td>{{.Subject}}</td>
 <td><code>{{.Virus}}</code></td>
-<td>{{.Status}}</td>
+<td>{{if eq .Status "held"}}{{t "avQuarantine.held"}}{{else}}{{.Status}}{{end}}</td>
 </tr>
-{{else}}<tr><td colspan="7" class="empty">No messages are held in quarantine.</td></tr>
+{{else}}<tr><td colspan="7" class="empty">{{t "avQuarantine.none"}}</td></tr>
 {{end}}
 </tbody>
 </table>

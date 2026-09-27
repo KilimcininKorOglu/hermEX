@@ -3,8 +3,8 @@
 {{template "sidebar" .}}
 <main>
 <header class="page-head">
-<div><h1>Mail queue</h1><p class="page-desc">Outbound deliveries awaiting relay. A pending entry has not been attempted yet; a deferred one failed transiently and retries at the shown time. Flush a deferred entry to retry it now, or delete one to drop it (no bounce is sent).</p></div>
-<div class="page-actions"><button type="button" class="secondary" hx-get="/admin/ui/mailq/panel" hx-target="#mailq-panel" hx-swap="innerHTML"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "refresh-cw"}}"/></svg>Refresh</button></div>
+<div><h1>{{t "mailq.title"}}</h1><p class="page-desc">{{t "mailq.desc"}}</p></div>
+<div class="page-actions"><button type="button" class="secondary" hx-get="/admin/ui/mailq/panel" hx-target="#mailq-panel" hx-swap="innerHTML"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "refresh-cw"}}"/></svg>{{t "mailq.refresh"}}</button></div>
 </header>
 <div id="mailq-panel">{{template "mailq-panel" .}}</div>
 </main>
@@ -12,24 +12,24 @@
 {{template "foot" .}}{{end}}
 
 {{define "mailq-panel"}}
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
 <table class="grid">
-<thead><tr><th>Message</th><th>Status</th><th>Enqueued</th><th>Last error</th><th></th></tr></thead>
+<thead><tr><th>{{t "mailq.colMessage"}}</th><th>{{t "mailq.colStatus"}}</th><th>{{t "mailq.colEnqueued"}}</th><th>{{t "mailq.colLastError"}}</th><th></th></tr></thead>
 <tbody>
 {{range .Queue}}<tr>
-<td>{{.Recipient}}<small>from {{.From}}, {{.SizeKB}} KB</small></td>
-<td><span class="status{{if eq .Status "Deferred"}} status-warn{{else if eq .Status "Interrupted"}} status-off{{end}}">{{.Status}}</span><small>{{.Attempts}} {{if eq .Attempts 1}}try{{else}}tries{{end}}</small></td>
-<td class="nowrap">{{.Enqueued}}{{if .NextAttempt}}<small>Next retry {{.NextAttempt}}</small>{{end}}</td>
+<td>{{.Recipient}}<small>{{t "mailq.fromSize" .From .SizeKB}}</small></td>
+<td><span class="status{{if eq .Status "Deferred"}} status-warn{{else if eq .Status "Interrupted"}} status-off{{end}}">{{if eq .Status "Deferred"}}{{t "mailq.statusDeferred"}}{{else if eq .Status "Interrupted"}}{{t "mailq.statusInterrupted"}}{{else if eq .Status "Pending"}}{{t "mailq.statusPending"}}{{else}}{{.Status}}{{end}}</span><small>{{if eq .Attempts 1}}{{t "mailq.tryOne" .Attempts}}{{else}}{{t "mailq.tryMany" .Attempts}}{{end}}</small></td>
+<td class="nowrap">{{.Enqueued}}{{if .NextAttempt}}<small>{{t "mailq.nextRetry" .NextAttempt}}</small>{{end}}</td>
 <td><small>{{.LastError}}</small></td>
 <td class="actions">
 <form hx-post="/admin/ui/mailq/retry" hx-target="#mailq-panel" hx-swap="innerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
-<input type="hidden" name="id" value="{{.ID}}"><button type="submit" class="secondary">Flush</button></form>
+<input type="hidden" name="id" value="{{.ID}}"><button type="submit" class="secondary">{{t "mailq.flush"}}</button></form>
 <form hx-post="/admin/ui/mailq/delete" hx-target="#mailq-panel" hx-swap="innerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'
-      hx-confirm="Delete this queued delivery to {{.Recipient}}? No bounce is sent.">
-<input type="hidden" name="id" value="{{.ID}}"><button type="submit" class="danger">Delete</button></form>
+      hx-confirm="{{t "mailq.confirmDelete" .Recipient}}">
+<input type="hidden" name="id" value="{{.ID}}"><button type="submit" class="danger">{{t "mailq.delete"}}</button></form>
 </td>
 </tr>
-{{else}}<tr><td colspan="5" class="empty">The outbound queue is empty.</td></tr>
+{{else}}<tr><td colspan="5" class="empty">{{t "mailq.empty"}}</td></tr>
 {{end}}
 </tbody>
 </table>

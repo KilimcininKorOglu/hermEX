@@ -49,7 +49,7 @@ func (s *Server) handleUIAVQuarantine(w http.ResponseWriter, r *http.Request) {
 	recs, err := s.dir.ListQuarantine(domainIDList(ids), all, 200)
 	errMsg := ""
 	if err != nil {
-		errMsg = s.notice("Could not read the quarantine.", err)
+		errMsg = s.notice("avQuarantine.unread", err)
 	}
 	views := make([]avQuarantineView, 0, len(recs))
 	for _, rec := range recs {

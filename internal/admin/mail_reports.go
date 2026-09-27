@@ -54,7 +54,7 @@ func unixUTC(sec int64) string {
 
 // reportPeriod formats a report's period.
 func reportPeriod(begin, end int64) string {
-	return unixUTC(begin) + " to " + unixUTC(end)
+	return msg("reports.period", unixUTC(begin), unixUTC(end))
 }
 
 // handleUIReports renders the report page: one tab per report kind, filtered by
@@ -77,23 +77,23 @@ func (s *Server) handleUIReports(w http.ResponseWriter, r *http.Request) {
 	}
 	domains, err := s.reportDomains(all, ids)
 	if err != nil {
-		problems = append(problems, s.notice("Could not read the domains.", err))
+		problems = append(problems, s.notice("reports.domainsUnread", err))
 	}
 	data["Domains"] = domains
 	if err == nil {
 		warnings, werr := s.postmasterWarnings(domains)
 		if werr != nil {
-			problems = append(problems, s.notice("Could not check the postmaster addresses.", werr))
+			problems = append(problems, s.notice("reports.postmasterUnread", werr))
 		}
 		data["PostmasterWarnings"] = warnings
 	}
 	if err := s.fillReports(data, kind, filter); err != nil {
-		problems = append(problems, s.notice("Could not read the reports.", err))
+		problems = append(problems, s.notice("reports.unread", err))
 	}
 	if cl, ok := s.uiClaims(r); ok && s.isSystemAdmin(cl.UserID) {
 		s.addReportSettings(data)
 	}
-	data["Error"] = strings.Join(problems, " ")
+	data["Errors"] = problems
 	s.render(w, r, "reports.html", data)
 }
 
@@ -108,7 +108,7 @@ func reportFilterFrom(q url.Values, all bool, ids map[int64]bool) (directory.Rep
 		id, err := strconv.ParseInt(v, 10, 64)
 		switch {
 		case err != nil:
-			problems = append(problems, "The domain filter is not valid.")
+			problems = append(problems, "reports.badDomain")
 		case all || ids[id]:
 			f.All, f.DomainIDs = false, []int64{id}
 		default:
@@ -117,11 +117,11 @@ func reportFilterFrom(q url.Values, all bool, ids map[int64]bool) (directory.Rep
 	}
 	from, ok := parseReportDate(q.Get("from"))
 	if !ok {
-		problems = append(problems, "The start date is not valid.")
+		problems = append(problems, "reports.badStart")
 	}
 	to, ok := parseReportDate(q.Get("to"))
 	if !ok {
-		problems = append(problems, "The end date is not valid.")
+		problems = append(problems, "reports.badEnd")
 	}
 	if to > 0 {
 		to += int64((24 * time.Hour).Seconds())
@@ -372,12 +372,12 @@ func (s *Server) handleUISaveMailReportRetention(w http.ResponseWriter, r *http.
 	data := map[string]any{"CSRF": csrfCookieValue(r), "ReadFailed": failed}
 	if err := s.dir.SetMailReportSettings(rs); err != nil {
 		s.fillMailReportRetention(data, failed)
-		data["Notice"] = s.failNotice("Could not save the retention setting.", err)
+		data["Notice"] = s.failNotice("reports.retentionFailed", err)
 		s.render(w, r, "report-retention-panel", data)
 		return
 	}
 	s.fillMailReportRetention(data, failed)
-	data["Notice"] = okNotice("Report retention saved; the sweep deletes expired reports within a minute, no restart.")
+	data["Notice"] = okNotice("reports.retentionSaved")
 	s.render(w, r, "report-retention-panel", data)
 }
 
@@ -403,11 +403,11 @@ func (s *Server) handleUISaveDMARCSending(w http.ResponseWriter, r *http.Request
 	data := map[string]any{"CSRF": csrfCookieValue(r), "ReadFailed": failed}
 	if err := s.dir.SetDMARCReportSettings(directory.DMARCReportSettings{Enabled: on}); err != nil {
 		s.fillDMARCSending(data, failed)
-		data["DMARCNotice"] = s.failNotice("Could not save the DMARC sending setting.", err)
+		data["DMARCNotice"] = s.failNotice("reports.sendingFailed", err)
 		s.render(w, r, "dmarc-sending-panel", data)
 		return
 	}
 	s.fillDMARCSending(data, failed)
-	data["DMARCNotice"] = okNotice("DMARC report sending saved; the mail server applies it within a minute, no restart.")
+	data["DMARCNotice"] = okNotice("reports.sendingSaved")
 	s.render(w, r, "dmarc-sending-panel", data)
 }

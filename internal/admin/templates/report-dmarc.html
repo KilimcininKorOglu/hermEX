@@ -4,30 +4,30 @@
 <main>
 <header class="page-head">
 <div>
-<nav class="crumbs" aria-label="Breadcrumb"><a href="/admin/ui/reports?kind=dmarc">Reports</a><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "chevron-right"}}"/></svg><span>{{.R.ReportID}}</span></nav>
-<h1>DMARC aggregate report</h1>
-<p class="page-desc">{{.R.OrgName}} about {{.R.Domain}}, {{.Period}}.</p>
+<nav class="crumbs" aria-label="{{t "userDetail.breadcrumb"}}"><a href="/admin/ui/reports?kind=dmarc">{{t "reports.title"}}</a><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "chevron-right"}}"/></svg><span>{{.R.ReportID}}</span></nav>
+<h1>{{t "reportDetail.dmarcTitle"}}</h1>
+<p class="page-desc">{{t "reportDetail.about" .R.OrgName .R.Domain (t .Period)}}</p>
 </div>
 </header>
 <div class="stack">
 <section class="card">
-{{template "card-head" (dict "Icon" "file-text" "Title" "Report" "Desc" "The report is the reporter's claim. How it arrived and the DKIM result below are what this server saw. A valid signature proves which domain sent the report, not that its numbers are true.")}}
+{{template "card-head" (dict "Icon" "file-text" "Title" "reportDetail.reportTitle" "Desc" "reportDetail.reportDesc")}}
 <table class="grid kv">
 <tbody>
-<tr><th>Domain</th><td>{{.R.Domain}}</td></tr>
-<tr><th>Reporter</th><td>{{.R.OrgName}} &lt;{{.R.ReporterEmail}}&gt;</td></tr>
-<tr><th>Report ID</th><td><code>{{.R.ReportID}}</code></td></tr>
-<tr><th>Period</th><td>{{.Period}}</td></tr>
-<tr><th>Published policy</th><td><code>p={{.R.PolicyP}} sp={{.R.PolicySP}} pct={{.R.PolicyPct}} adkim={{.R.ADKIM}} aspf={{.R.ASPF}}</code></td></tr>
-<tr><th>Messages</th><td>{{.R.Total}} ({{.R.Failed}} failed DKIM and SPF)</td></tr>
+<tr><th>{{t "reportDetail.domain"}}</th><td>{{.R.Domain}}</td></tr>
+<tr><th>{{t "reportDetail.reporter"}}</th><td>{{.R.OrgName}} &lt;{{.R.ReporterEmail}}&gt;</td></tr>
+<tr><th>{{t "reportDetail.reportID"}}</th><td><code>{{.R.ReportID}}</code></td></tr>
+<tr><th>{{t "reportDetail.period"}}</th><td>{{t .Period}}</td></tr>
+<tr><th>{{t "reportDetail.publishedPolicy"}}</th><td><code>p={{.R.PolicyP}} sp={{.R.PolicySP}} pct={{.R.PolicyPct}} adkim={{.R.ADKIM}} aspf={{.R.ASPF}}</code></td></tr>
+<tr><th>{{t "reportDetail.messages"}}</th><td>{{t "reportDetail.messagesFailed" .R.Total .R.Failed}}</td></tr>
 {{template "report-sender" .}}</tbody>
 </table>
 </section>
 
 <section class="card">
-{{template "card-head" (dict "Icon" "list" "Title" "Records" "Desc" "One row per source address and result the reporter saw.")}}
+{{template "card-head" (dict "Icon" "list" "Title" "reportDetail.recordsTitle" "Desc" "reportDetail.recordsDesc")}}
 <table class="grid">
-<thead><tr><th>Source IP</th><th>Messages</th><th>Disposition</th><th>DKIM</th><th>SPF</th><th>From domain</th><th>Envelope from</th><th>DKIM results</th><th>SPF results</th></tr></thead>
+<thead><tr><th>{{t "reportDetail.colSourceIP"}}</th><th>{{t "reportDetail.messages"}}</th><th>{{t "reportDetail.colDisposition"}}</th><th>DKIM</th><th>SPF</th><th>{{t "reportDetail.colFromDomain"}}</th><th>{{t "reportDetail.colEnvelopeFrom"}}</th><th>{{t "reportDetail.colDKIMResults"}}</th><th>{{t "reportDetail.colSPFResults"}}</th></tr></thead>
 <tbody>
 {{range .R.Records}}<tr>
 <td>{{.SourceIP}}</td>
@@ -40,7 +40,7 @@
 <td><small>{{.DKIMResults}}</small></td>
 <td><small>{{.SPFResults}}</small></td>
 </tr>
-{{else}}<tr><td colspan="9" class="empty">The report has no records.</td></tr>
+{{else}}<tr><td colspan="9" class="empty">{{t "reportDetail.noRecords"}}</td></tr>
 {{end}}
 </tbody>
 </table>

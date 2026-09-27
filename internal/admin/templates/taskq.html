@@ -2,7 +2,7 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<header class="page-head"><div><h1>Task queue</h1><p class="page-desc">Long-running admin operations, such as a directory sync, run here in the background. The table refreshes every five seconds.</p></div></header>
+<header class="page-head"><div><h1>{{t "taskq.title"}}</h1><p class="page-desc">{{t "taskq.desc"}}</p></div></header>
 <div id="taskq-panel" hx-get="/admin/ui/taskq/panel" hx-trigger="every 5s" hx-swap="innerHTML">{{template "taskq-panel" .}}</div>
 </main>
 </div>
@@ -10,18 +10,18 @@
 
 {{define "taskq-panel"}}
 <table class="grid">
-<thead><tr><th>ID</th><th>Type</th><th>Status</th><th>By</th><th>Queued</th><th>Updated</th><th>Result</th></tr></thead>
+<thead><tr><th>ID</th><th>{{t "taskq.colType"}}</th><th>{{t "taskq.colStatus"}}</th><th>{{t "taskq.colBy"}}</th><th>{{t "taskq.colQueued"}}</th><th>{{t "taskq.colUpdated"}}</th><th>{{t "taskq.colResult"}}</th></tr></thead>
 <tbody>
 {{range .Tasks}}<tr>
 <td>{{.ID}}</td>
 <td><span class="badge">{{.Type}}</span></td>
-<td><span class="status{{if eq .Status "done"}} status-ok{{else if eq .Status "failed"}} status-off{{else if eq .Status "running"}} status-warn{{end}}">{{.Status}}</span></td>
+<td><span class="status{{if eq .Status "done"}} status-ok{{else if eq .Status "failed"}} status-off{{else if eq .Status "running"}} status-warn{{end}}">{{if eq .Status "done"}}{{t "taskq.done"}}{{else if eq .Status "failed"}}{{t "taskq.failed"}}{{else if eq .Status "running"}}{{t "taskq.running"}}{{else if eq .Status "pending"}}{{t "taskq.pending"}}{{else}}{{.Status}}{{end}}</span></td>
 <td>{{.CreatedBy}}</td>
 <td class="nowrap">{{.Created}}</td>
 <td class="nowrap">{{.Updated}}</td>
-<td><small>{{.Message}}</small></td>
+<td><small>{{t .Message}}</small></td>
 </tr>
-{{else}}<tr><td colspan="7" class="empty{{if .TasksError}} failed{{end}}">{{or .TasksError "No tasks."}}</td></tr>{{end}}
+{{else}}<tr><td colspan="7" class="empty{{if .TasksError}} failed{{end}}">{{t (or .TasksError "taskq.none")}}</td></tr>{{end}}
 </tbody>
 </table>
 {{end}}

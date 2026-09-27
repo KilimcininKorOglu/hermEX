@@ -47,7 +47,7 @@ func (s *Server) sessionViews() ([]sessionView, error) {
 func (s *Server) sessionsPanelData() map[string]any {
 	views, err := s.sessionViews()
 	if err != nil {
-		return map[string]any{"Error": s.notice("Could not read the sessions.", err)}
+		return map[string]any{"Error": s.notice("mobileDevices.unread", err)}
 	}
 	return map[string]any{"Sessions": views}
 }

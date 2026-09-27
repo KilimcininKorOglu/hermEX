@@ -4,21 +4,21 @@
 <main>
 <header class="page-head">
 <div>
-<nav class="crumbs" aria-label="Breadcrumb"><a href="/admin/ui/reports?kind=tlsrpt">Reports</a><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "chevron-right"}}"/></svg><span>{{.R.ReportID}}</span></nav>
-<h1>TLS report</h1>
-<p class="page-desc">{{.R.OrgName}} about {{.R.Domain}}, {{.Period}}.</p>
+<nav class="crumbs" aria-label="{{t "userDetail.breadcrumb"}}"><a href="/admin/ui/reports?kind=tlsrpt">{{t "reports.title"}}</a><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "chevron-right"}}"/></svg><span>{{.R.ReportID}}</span></nav>
+<h1>{{t "reportDetail.tlsTitle"}}</h1>
+<p class="page-desc">{{t "reportDetail.about" .R.OrgName .R.Domain (t .Period)}}</p>
 </div>
 </header>
 <div class="stack">
 <section class="card">
-{{template "card-head" (dict "Icon" "file-text" "Title" "Report" "Desc" "The report is the reporter's claim. How it arrived and the DKIM result below are what this server saw. A valid signature proves which domain sent the report, not that its numbers are true.")}}
+{{template "card-head" (dict "Icon" "file-text" "Title" "reportDetail.reportTitle" "Desc" "reportDetail.reportDesc")}}
 <table class="grid kv">
 <tbody>
-<tr><th>Domain</th><td>{{.R.Domain}}</td></tr>
-<tr><th>Reporter</th><td>{{.R.OrgName}} ({{.R.Contact}})</td></tr>
-<tr><th>Report ID</th><td><code>{{.R.ReportID}}</code></td></tr>
-<tr><th>Period</th><td>{{.Period}}</td></tr>
-<tr><th>Sessions</th><td>{{.R.Total}} ({{.R.Failed}} failed)</td></tr>
+<tr><th>{{t "reportDetail.domain"}}</th><td>{{.R.Domain}}</td></tr>
+<tr><th>{{t "reportDetail.reporter"}}</th><td>{{.R.OrgName}} ({{.R.Contact}})</td></tr>
+<tr><th>{{t "reportDetail.reportID"}}</th><td><code>{{.R.ReportID}}</code></td></tr>
+<tr><th>{{t "reportDetail.period"}}</th><td>{{t .Period}}</td></tr>
+<tr><th>{{t "reportDetail.sessions"}}</th><td>{{t "reportDetail.sessionsFailed" .R.Total .R.Failed}}</td></tr>
 {{template "report-sender" .}}</tbody>
 </table>
 </section>
@@ -27,10 +27,10 @@
 <section class="card">
 <div class="card-head">
 <span class="card-icon"><svg class="icon" aria-hidden="true"><use href="{{icon "lock"}}"/></svg></span>
-<div class="card-title"><h2>Policy {{.PolicyType}} for {{.PolicyDomain}}{{if .MXHost}} ({{.MXHost}}){{end}}</h2><p class="card-desc">{{.Success}} successful sessions, {{.Failure}} failed sessions.</p></div>
+<div class="card-title"><h2>{{t "reportDetail.policyHeading" .PolicyType .PolicyDomain}}{{if .MXHost}} ({{.MXHost}}){{end}}</h2><p class="card-desc">{{t "reportDetail.policySessions" .Success .Failure}}</p></div>
 </div>
 <table class="grid">
-<thead><tr><th>Result</th><th>Sessions</th><th>Sending MTA</th><th>Receiving MX</th><th>Receiving IP</th><th>Reason</th></tr></thead>
+<thead><tr><th>{{t "reportDetail.colResult"}}</th><th>{{t "reportDetail.sessions"}}</th><th>{{t "reportDetail.colSendingMTA"}}</th><th>{{t "reportDetail.colReceivingMX"}}</th><th>{{t "reportDetail.colReceivingIP"}}</th><th>{{t "reportDetail.colReason"}}</th></tr></thead>
 <tbody>
 {{range .FailureDetails}}<tr>
 <td>{{.ResultType}}</td>
@@ -40,12 +40,12 @@
 <td>{{.ReceivingIP}}</td>
 <td>{{.FailureReasonCode}}</td>
 </tr>
-{{else}}<tr><td colspan="6" class="empty">No failure details.</td></tr>
+{{else}}<tr><td colspan="6" class="empty">{{t "reportDetail.noFailureDetails"}}</td></tr>
 {{end}}
 </tbody>
 </table>
 </section>
-{{else}}<section class="card"><p class="empty-note">The report has no policies.</p></section>
+{{else}}<section class="card"><p class="empty-note">{{t "reportDetail.noPolicies"}}</p></section>
 {{end}}
 </div>
 </main>

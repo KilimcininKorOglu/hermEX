@@ -301,7 +301,7 @@ func (s *Server) handleUISaveSyncPolicy(w http.ResponseWriter, r *http.Request) 
 		data["Error"] = invalidPolicy(err)
 	default:
 		if err := s.dir.SetDefaultSyncPolicy(p); err != nil {
-			data["Error"] = s.notice("Could not save.", err)
+			data["Error"] = s.notice("userDetail.saveFailed", err)
 		} else {
 			data["Saved"] = true
 		}

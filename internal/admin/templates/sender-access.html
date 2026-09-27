@@ -2,10 +2,10 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<header class="page-head"><div><h1>Sender allow/block</h1><p class="page-desc">Rules that override spam scoring at delivery. Changes apply within about a minute, no restart.</p></div></header>
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<header class="page-head"><div><h1>{{t "senderAccess.title"}}</h1><p class="page-desc">{{t "senderAccess.desc"}}</p></div></header>
+{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
 <section class="card">
-{{template "card-head" (dict "Icon" "ban" "Title" "Rules" "Desc" "An allowlisted sender skips score-based junking (a forged sender that hard-fails DMARC under an enforcing policy is still junked); a blocklisted sender is always filed to Junk. A pattern is an address or a bare domain, and an exact address beats a domain.")}}
+{{template "card-head" (dict "Icon" "ban" "Title" "senderAccess.rulesTitle" "Desc" "senderAccess.rulesDesc")}}
 {{template "sender-access-panel" .}}
 </section>
 </main>
@@ -15,25 +15,25 @@
 {{define "sender-access-panel"}}<div id="sender-access-panel">
 {{template "notice" .Notice}}
 <table class="grid">
-<thead><tr><th>Pattern</th><th>Action</th><th></th></tr></thead>
+<thead><tr><th>{{t "senderAccess.colPattern"}}</th><th>{{t "senderAccess.colAction"}}</th><th></th></tr></thead>
 <tbody>
 {{range .Rules}}<tr>
 <td>{{.Pattern}}</td>
-<td>{{if eq .Action "block"}}<span class="status status-off">block</span>{{else}}<span class="status status-ok">{{.Action}}</span>{{end}}</td>
+<td>{{if eq .Action "block"}}<span class="status status-off">{{t "senderAccess.block"}}</span>{{else if eq .Action "allow"}}<span class="status status-ok">{{t "senderAccess.allow"}}</span>{{else}}<span class="status status-ok">{{.Action}}</span>{{end}}</td>
 <td class="actions"><form hx-post="/admin/ui/sender-access/delete" hx-target="#sender-access-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
 <input type="hidden" name="pattern" value="{{.Pattern}}">
-<button type="submit" class="secondary">Remove</button></form></td>
+<button type="submit" class="secondary">{{t "senderAccess.remove"}}</button></form></td>
 </tr>
-{{else}}<tr><td colspan="3" class="empty">No rules.</td></tr>{{end}}
+{{else}}<tr><td colspan="3" class="empty">{{t "senderAccess.none"}}</td></tr>{{end}}
 </tbody>
 </table>
 <form class="create-form" hx-post="/admin/ui/sender-access" hx-target="#sender-access-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<label>Pattern <input type="text" name="pattern" placeholder="user@example.com or example.com" required></label>
-<label>Action
+<label>{{t "senderAccess.colPattern"}} <input type="text" name="pattern" placeholder="{{t "senderAccess.patternPlaceholder"}}" required></label>
+<label>{{t "senderAccess.colAction"}}
 <select name="action">
-<option value="allow">allow</option>
-<option value="block">block</option>
+<option value="allow">{{t "senderAccess.allow"}}</option>
+<option value="block">{{t "senderAccess.block"}}</option>
 </select></label>
-<button type="submit">Add rule</button>
+<button type="submit">{{t "senderAccess.addRule"}}</button>
 </form>
 </div>{{end}}

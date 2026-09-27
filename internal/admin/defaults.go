@@ -252,7 +252,7 @@ func (s *Server) handleUISaveDefaults(w http.ResponseWriter, r *http.Request) {
 	}
 	data := map[string]any{}
 	if err := s.dir.SetCreateDefaults(0, createDefaultsFromForm(r)); err != nil {
-		data["Error"] = s.notice("Could not save.", err)
+		data["Error"] = s.notice("userDetail.saveFailed", err)
 	} else {
 		data["Saved"] = true
 	}
