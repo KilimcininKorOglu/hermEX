@@ -231,7 +231,14 @@ func (s *Server) handlePutLDAP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cfg.BindPassword == "" {
-		if existing, found, _ := s.dir.GetLDAPConfig(orgID); found {
+		// A failed read must stop the write: it would store the empty password in
+		// place of the stored one.
+		existing, found, err := s.dir.GetLDAPConfig(orgID)
+		if err != nil {
+			s.fail(w, "server error", err, http.StatusInternalServerError)
+			return
+		}
+		if found {
 			cfg.BindPassword = existing.BindPassword
 		}
 	}

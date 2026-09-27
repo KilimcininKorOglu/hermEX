@@ -286,3 +286,25 @@ func TestAdminPutLDAP(t *testing.T) {
 		t.Errorf("after a password-less put, config = %+v; want URI updated but password preserved", got)
 	}
 }
+
+// TestAdminPutLDAPRefusesWhenTheStoredOneCannotBeRead proves a password-less write
+// stops when the stored configuration cannot be read. It stored the empty password
+// in place of the stored one.
+func TestAdminPutLDAPRefusesWhenTheStoredOneCannotBeRead(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		ldap:     map[int64]directory.LDAPConfig{5: {URI: "ldap://dc", BindPassword: "s3cret"}},
+		readErrs: map[string]error{"GetLDAPConfig": errReadFailed},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedPUT(t, ts, "/admin/orgs/5/ldap", session, csrf, `{"URI":"ldap://dc2","StartTLS":true}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("put status %d after a failed read, want 500", resp.StatusCode)
+	}
+	if got := d.ldap[5]; got.URI != "ldap://dc" || got.BindPassword != "s3cret" {
+		t.Errorf("a write after a failed read replaced the stored configuration: %+v", got)
+	}
+}
