@@ -261,9 +261,10 @@ func (s *Server) handleUIOrgs(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	orgs, _ := s.dir.ListOrgs()
+	orgs, err := s.dir.ListOrgs()
 	s.render(w, "orgs.html", map[string]any{
-		"Nav": "orgs", "CSRF": csrfCookieValue(r), "Orgs": orgs,
+		"Nav": "orgs", "CSRF": csrfCookieValue(r),
+		"Orgs": orgs, "OrgsError": s.listFailure("the organizations", err),
 	})
 }
 
@@ -279,8 +280,11 @@ func (s *Server) handleUICreateOrg(w http.ResponseWriter, r *http.Request) {
 	} else if _, err := s.dir.CreateOrg(name, r.PostFormValue("description")); err != nil {
 		errMsg = s.notice("Could not create organization.", err)
 	}
-	orgs, _ := s.dir.ListOrgs()
-	s.render(w, "orgs-panel", map[string]any{"Orgs": orgs, "Error": errMsg})
+	orgs, err := s.dir.ListOrgs()
+	s.render(w, "orgs-panel", map[string]any{
+		"Orgs": orgs, "OrgsError": s.listFailure("the organizations", err),
+		"Error": errMsg,
+	})
 }
 
 // orgDomainsData gathers an org's attached domains and the unassigned domains

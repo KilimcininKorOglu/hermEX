@@ -25,7 +25,7 @@
 <thead><tr><th>Name</th><th>Description</th><th>Domains</th></tr></thead>
 <tbody>
 {{range .Orgs}}<tr><td><a href="/admin/ui/orgs/{{.ID}}">{{.Name}}</a></td><td>{{.Description}}</td><td>{{.DomainCount}}</td></tr>
-{{else}}<tr><td colspan="3" class="empty">No organizations yet.</td></tr>
+{{else}}<tr><td colspan="3" class="empty{{if .OrgsError}} failed{{end}}">{{or .OrgsError "No organizations yet."}}</td></tr>
 {{end}}
 </tbody>
 </table>
