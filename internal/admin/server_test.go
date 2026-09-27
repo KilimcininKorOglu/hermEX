@@ -384,7 +384,12 @@ func (f *fakeDir) SetPassword(username, password string) (bool, error) {
 func (f *fakeDir) RequirePasswordChange(_ string, _ bool) (bool, error) {
 	return true, nil
 }
-func (f *fakeDir) ListAliases() ([]directory.AliasInfo, error) { return f.aliases, nil }
+func (f *fakeDir) ListAliases() ([]directory.AliasInfo, error) {
+	if err := f.readErrs["ListAliases"]; err != nil {
+		return nil, err
+	}
+	return f.aliases, nil
+}
 
 func (f *fakeDir) GetFetchSettings() (directory.FetchSettings, bool, error) {
 	return f.fetchSettings, f.fetchSettingsFound, nil

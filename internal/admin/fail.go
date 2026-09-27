@@ -93,3 +93,13 @@ func (s *Server) noteRead(failed readFailures, section, what string, err error) 
 	failed[section] = s.notice("Could not read "+what+". The form is hidden so a save cannot overwrite it.", err)
 	return false
 }
+
+// listFailure returns the message a table shows in place of its rows when the list
+// could not be read, or "" when the read succeeded. The table must not show a failed
+// read as an empty list; err is recorded server-side, as notice does.
+func (s *Server) listFailure(what string, err error) string {
+	if err == nil {
+		return ""
+	}
+	return s.notice("Could not read "+what+".", err)
+}

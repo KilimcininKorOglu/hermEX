@@ -81,6 +81,35 @@ func TestAFailedListReadIsNotAMissingMailingList(t *testing.T) {
 	}
 }
 
+// TestAFailedListReadIsNotShownAsEmpty proves a list page reports a list it could
+// not read, on the page and on the panel its create form re-renders. The table
+// read as empty, which says the directory holds none.
+func TestAFailedListReadIsNotShownAsEmpty(t *testing.T) {
+	for _, tc := range []struct {
+		read, path, reported, absent string
+	}{
+		{"ListAliases", "/admin/ui/aliases", "Could not read the aliases.", "No aliases yet."},
+	} {
+		d := &fakeDir{
+			authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+			readErrs: map[string]error{tc.read: errReadFailed},
+		}
+		ts := adminServer(t, d)
+		session, csrf := loginCookies(t, ts)
+
+		bodies := map[string]string{
+			"page":  wantBody(t, authedGET(t, ts, tc.path, session), http.StatusOK, tc.path),
+			"panel": wantBody(t, htmxPOST(t, ts, tc.path, session, csrf, url.Values{}), http.StatusOK, tc.path),
+		}
+		for name, body := range bodies {
+			wantContains(t, body, tc.reported, tc.read+" "+name+": the failed read is reported")
+			if strings.Contains(body, tc.absent) {
+				t.Errorf("%s %s: still renders %q after the read failed", tc.read, name, tc.absent)
+			}
+		}
+	}
+}
+
 // TestAnOrganizationDomainReadIsNotShownAsNone proves the organization page reports
 // a failed read of the domains, on the page and on the panel a change re-renders.
 // The table read "No domains in this organization." and the add form offered no

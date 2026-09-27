@@ -243,8 +243,11 @@ func (s *Server) handleUIAliases(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	aliases, _ := s.dir.ListAliases()
-	s.render(w, "aliases.html", map[string]any{"Nav": "aliases", "CSRF": csrfCookieValue(r), "Aliases": aliases})
+	aliases, err := s.dir.ListAliases()
+	s.render(w, "aliases.html", map[string]any{
+		"Nav": "aliases", "CSRF": csrfCookieValue(r),
+		"Aliases": aliases, "AliasesError": s.listFailure("the aliases", err),
+	})
 }
 
 // handleUICreateAlias creates an alias from the management form and returns the
@@ -263,6 +266,8 @@ func (s *Server) handleUICreateAlias(w http.ResponseWriter, r *http.Request) {
 			errMsg = s.notice("Could not create alias.", err)
 		}
 	}
-	aliases, _ := s.dir.ListAliases()
-	s.render(w, "aliases-panel", map[string]any{"Aliases": aliases, "Error": errMsg})
+	aliases, err := s.dir.ListAliases()
+	s.render(w, "aliases-panel", map[string]any{
+		"Aliases": aliases, "AliasesError": s.listFailure("the aliases", err), "Error": errMsg,
+	})
 }
