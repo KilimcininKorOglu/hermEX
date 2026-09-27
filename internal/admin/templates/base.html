@@ -4,15 +4,24 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>hermEX Admin</title>
+<link rel="icon" type="image/svg+xml" href="{{asset "favicon.svg"}}">
+<script src="{{asset "theme.js"}}"></script>
 <link rel="stylesheet" href="{{asset "style.css"}}">
 <script src="{{asset "htmx.min.js"}}"></script>
 <script src="{{asset "admin.js"}}" defer></script>
 </head>
 <body>{{end}}
 
-{{define "foot"}}<dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-dialog-title">
+{{define "foot"}}<div id="toasts" class="toasts" aria-live="polite"></div>
+<template id="toast-icons">
+<svg class="icon" data-kind="ok" aria-hidden="true"><use href="{{icon "circle-check"}}"/></svg>
+<svg class="icon" data-kind="warn" aria-hidden="true"><use href="{{icon "triangle-alert"}}"/></svg>
+<svg class="icon" data-kind="error" aria-hidden="true"><use href="{{icon "circle-x"}}"/></svg>
+<svg class="icon icon-sm" data-kind="close" aria-hidden="true"><use href="{{icon "x"}}"/></svg>
+</template>
+<dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-dialog-title">
 <form method="dialog">
-<h2 id="confirm-dialog-title">Please confirm</h2>
+<h2 id="confirm-dialog-title">Are you sure?</h2>
 <p class="confirm-message"></p>
 <div class="dialog-actions">
 <button type="submit" value="cancel" class="secondary" autofocus>Cancel</button>
@@ -23,39 +32,73 @@
 </body>
 </html>{{end}}
 
-{{define "sidebar"}}<aside class="sidebar">
-<div class="brand">hermEX Admin</div>
-<nav>
-<a href="/admin/ui/" class="{{if eq .Nav "dashboard"}}active{{end}}">Dashboard</a>
-<a href="/admin/ui/users" class="{{if eq .Nav "users"}}active{{end}}">Users</a>
-<a href="/admin/ui/orgs" class="{{if eq .Nav "orgs"}}active{{end}}">Organizations</a>
-<a href="/admin/ui/roles" class="{{if eq .Nav "roles"}}active{{end}}">Roles</a>
-<a href="/admin/ui/domains" class="{{if eq .Nav "domains"}}active{{end}}">Domains</a>
-<a href="/admin/ui/aliases" class="{{if eq .Nav "aliases"}}active{{end}}">Aliases</a>
-<a href="/admin/ui/mlists" class="{{if eq .Nav "mlists"}}active{{end}}">Mailing lists</a>
-<a href="/admin/ui/contacts" class="{{if eq .Nav "contacts"}}active{{end}}">Contacts</a>
-<a href="/admin/ui/rooms" class="{{if eq .Nav "rooms"}}active{{end}}">Rooms</a>
-<a href="/admin/ui/logs" class="{{if eq .Nav "logs"}}active{{end}}">Logs</a>
-<a href="/admin/ui/mailbox-failures" class="{{if eq .Nav "mailboxfailures"}}active{{end}}">Mailbox failures</a>
-<a href="/admin/ui/ldap" class="{{if eq .Nav "ldap"}}active{{end}}">Directory Sync</a>
-<a href="/admin/ui/syncpolicy" class="{{if eq .Nav "syncpolicy"}}active{{end}}">Sync policy</a>
-<a href="/admin/ui/defaults" class="{{if eq .Nav "defaults"}}active{{end}}">Defaults</a>
-<a href="/admin/ui/mobile-devices" class="{{if eq .Nav "mobiledevices"}}active{{end}}">Mobile devices</a>
-<a href="/admin/ui/public-folders" class="{{if eq .Nav "publicfolders"}}active{{end}}">Public folders</a>
-<a href="/admin/ui/mailq" class="{{if eq .Nav "mailq"}}active{{end}}">Mail queue</a>
-<a href="/admin/ui/avquarantine" class="{{if eq .Nav "avquarantine"}}active{{end}}">Quarantine</a>
-<a href="/admin/ui/reports" class="{{if eq .Nav "reports"}}active{{end}}">Reports</a>
-<a href="/admin/ui/status" class="{{if eq .Nav "status"}}active{{end}}">Live status</a>
-<a href="/admin/ui/taskq" class="{{if eq .Nav "taskq"}}active{{end}}">Task queue</a>
-<a href="/admin/ui/settings" class="{{if eq .Nav "settings"}}active{{end}}">Settings</a>
-<a href="/admin/ui/tls" class="{{if eq .Nav "tls"}}active{{end}}">TLS certificates</a>
-<a href="/admin/ui/spam-history" class="{{if eq .Nav "spamhistory"}}active{{end}}">Spam History</a>
-<a href="/admin/ui/sender-access" class="{{if eq .Nav "senderaccess"}}active{{end}}">Sender allow/block</a>
-<a href="/admin/ui/change-password" class="{{if eq .Nav "changepassword"}}active{{end}}">Change password</a>
+{{/* card-head is the header of a section card: an icon in a circle, the title
+     and a one-line description. It takes dict "Icon" "Title" "Desc". */}}
+{{define "card-head"}}<div class="card-head"><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="{{icon .Icon}}"/></svg></span><div class="card-title"><h2>{{.Title}}</h2>{{if .Desc}}<p class="card-desc">{{.Desc}}</p>{{end}}</div></div>{{end}}
+
+{{define "brand"}}<img class="brand-mark" src="{{asset "favicon.svg"}}" alt="" width="36" height="36">{{end}}
+
+{{define "sidebar"}}<aside class="sidebar" id="sidebar">
+<div class="brand">{{template "brand"}}<span class="brand-name">hermEX<small>Admin</small></span></div>
+<nav aria-label="Main">
+<div class="nav-group">
+<p class="nav-label">Overview</p>
+<a href="/admin/ui/" class="{{if eq .Nav "dashboard"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "layout-dashboard"}}"/></svg>Dashboard</a>
+<a href="/admin/ui/status" class="{{if eq .Nav "status"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "activity"}}"/></svg>Live status</a>
+</div>
+<div class="nav-group">
+<p class="nav-label">Directory</p>
+<a href="/admin/ui/users" class="{{if eq .Nav "users"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "users"}}"/></svg>Users</a>
+<a href="/admin/ui/orgs" class="{{if eq .Nav "orgs"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "building-2"}}"/></svg>Organizations</a>
+<a href="/admin/ui/domains" class="{{if eq .Nav "domains"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "globe"}}"/></svg>Domains</a>
+<a href="/admin/ui/aliases" class="{{if eq .Nav "aliases"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "at-sign"}}"/></svg>Aliases</a>
+<a href="/admin/ui/mlists" class="{{if eq .Nav "mlists"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "mail-plus"}}"/></svg>Mailing lists</a>
+<a href="/admin/ui/contacts" class="{{if eq .Nav "contacts"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "contact"}}"/></svg>Contacts</a>
+<a href="/admin/ui/rooms" class="{{if eq .Nav "rooms"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "door-open"}}"/></svg>Rooms</a>
+<a href="/admin/ui/public-folders" class="{{if eq .Nav "publicfolders"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "folder-open"}}"/></svg>Public folders</a>
+<a href="/admin/ui/roles" class="{{if eq .Nav "roles"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "shield-check"}}"/></svg>Roles</a>
+<a href="/admin/ui/ldap" class="{{if eq .Nav "ldap"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "folder-sync"}}"/></svg>Directory Sync</a>
+</div>
+<div class="nav-group">
+<p class="nav-label">Mail flow</p>
+<a href="/admin/ui/mailq" class="{{if eq .Nav "mailq"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "send"}}"/></svg>Mail queue</a>
+<a href="/admin/ui/taskq" class="{{if eq .Nav "taskq"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "list-checks"}}"/></svg>Task queue</a>
+<a href="/admin/ui/avquarantine" class="{{if eq .Nav "avquarantine"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "shield-alert"}}"/></svg>Quarantine</a>
+<a href="/admin/ui/spam-history" class="{{if eq .Nav "spamhistory"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "history"}}"/></svg>Spam History</a>
+<a href="/admin/ui/sender-access" class="{{if eq .Nav "senderaccess"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "ban"}}"/></svg>Sender allow/block</a>
+<a href="/admin/ui/reports" class="{{if eq .Nav "reports"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "chart-column"}}"/></svg>Reports</a>
+</div>
+<div class="nav-group">
+<p class="nav-label">Devices and policy</p>
+<a href="/admin/ui/mobile-devices" class="{{if eq .Nav "mobiledevices"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "smartphone"}}"/></svg>Mobile devices</a>
+<a href="/admin/ui/syncpolicy" class="{{if eq .Nav "syncpolicy"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "shield"}}"/></svg>Sync policy</a>
+<a href="/admin/ui/defaults" class="{{if eq .Nav "defaults"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "sliders-horizontal"}}"/></svg>Defaults</a>
+</div>
+<div class="nav-group">
+<p class="nav-label">System</p>
+<a href="/admin/ui/settings" class="{{if eq .Nav "settings"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "settings"}}"/></svg>Settings</a>
+<a href="/admin/ui/tls" class="{{if eq .Nav "tls"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "lock"}}"/></svg>TLS certificates</a>
+<a href="/admin/ui/logs" class="{{if eq .Nav "logs"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "scroll-text"}}"/></svg>Logs</a>
+<a href="/admin/ui/mailbox-failures" class="{{if eq .Nav "mailboxfailures"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "triangle-alert"}}"/></svg>Mailbox failures</a>
+</div>
 </nav>
-<form class="logout" method="post" action="/admin/ui/logout">
-<input type="hidden" name="_csrf" value="{{.CSRF}}">
-<button type="submit">Sign out</button>
-</form>
+<div class="sidebar-foot">
+<a href="/admin/ui/change-password" class="{{if eq .Nav "changepassword"}}active{{end}}"><svg class="icon" aria-hidden="true"><use href="{{icon "key-round"}}"/></svg>Change password</a>
 <div class="version">hermEX {{version}}</div>
-</aside>{{end}}
+</div>
+</aside>
+<div class="backdrop" data-nav-close></div>
+<header class="topbar">
+<button type="button" class="ghost icon-button nav-toggle" aria-controls="sidebar" aria-expanded="false" aria-label="Open the menu"><svg class="icon" aria-hidden="true"><use href="{{icon "menu"}}"/></svg></button>
+<span class="topbar-title">hermEX Admin</span>
+<div class="topbar-actions">
+<button type="button" class="ghost icon-button theme-toggle" aria-label="Switch between light and dark theme" title="Switch theme">
+<svg class="icon icon-moon" aria-hidden="true"><use href="{{icon "moon"}}"/></svg>
+<svg class="icon icon-sun" aria-hidden="true"><use href="{{icon "sun"}}"/></svg>
+</button>
+<form method="post" action="/admin/ui/logout">
+<input type="hidden" name="_csrf" value="{{.CSRF}}">
+<button type="submit" class="secondary"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "log-out"}}"/></svg>Sign out</button>
+</form>
+</div>
+</header>{{end}}

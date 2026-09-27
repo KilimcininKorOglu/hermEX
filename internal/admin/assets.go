@@ -2,6 +2,7 @@ package admin
 
 import (
 	"embed"
+	"errors"
 	"html/template"
 
 	"hermex/internal/buildinfo"
@@ -27,8 +28,36 @@ var staticAssets = buildStaticAssets()
 // under the sidebar so an operator can tell which build the panel runs.
 var tmpl = template.Must(template.New("").Funcs(template.FuncMap{
 	"asset":   assetURL,
+	"icon":    iconURL,
+	"dict":    dict,
 	"version": buildinfo.Display,
 }).ParseFS(templateFS, "templates/*.html"))
+
+// errDictArgs reports a dict call whose arguments are not key and value pairs.
+var errDictArgs = errors.New("dict wants string keys each followed by a value")
+
+// dict builds the map a shared sub-template takes, from alternating keys and
+// values, so a page can hand a card header its icon, title and description.
+func dict(pairs ...any) (map[string]any, error) {
+	if len(pairs)%2 != 0 {
+		return nil, errDictArgs
+	}
+	m := make(map[string]any, len(pairs)/2)
+	for i := 0; i < len(pairs); i += 2 {
+		key, ok := pairs[i].(string)
+		if !ok {
+			return nil, errDictArgs
+		}
+		m[key] = pairs[i+1]
+	}
+	return m, nil
+}
+
+// iconURL returns the reference an <svg><use> takes for one symbol of the icon
+// sprite, versioned like every other static file.
+func iconURL(name string) string {
+	return assetURL("icons.svg") + "#" + name
+}
 
 // assetVersionLen is how many hex digits of the content hash an asset URL
 // carries: enough that two builds of one file never share a version.
