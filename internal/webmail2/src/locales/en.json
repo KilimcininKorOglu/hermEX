@@ -557,7 +557,7 @@
       "audience": "Send replies to",
       "audienceAll": "Everyone",
       "audienceInternal": "People inside my organization only",
-      "audienceExternal": "People inside and outside my organization",
+      "audienceExternal": "People inside my organization and my contacts",
       "internalMessage": "Reply to people inside my organization",
       "externalMessage": "Reply to people outside my organization",
       "externalMessagePlaceholder": "I am currently out of office.",
@@ -1599,7 +1599,7 @@
   },
   "help": {
     "label": "More information",
-    "autoReplyAudience": "Everyone: every sender gets a reply. Inside my organization only: senders outside it get none. Inside and outside: senders outside your organization get a reply only when they are in your contacts.",
+    "autoReplyAudience": "Everyone: every sender gets a reply. Inside my organization only: senders outside it get none. Inside my organization and my contacts: a sender outside it gets a reply only when they are in your contacts.",
     "autoReplyStart": "Replies start when this day begins in your time zone. Leave it empty to start at once.",
     "autoReplyEnd": "Replies continue through the end of this day. Leave it empty to keep replying until you turn replies off.",
     "appPasswordName": "A name that tells this app password apart in the list, such as the device or program that uses it.",

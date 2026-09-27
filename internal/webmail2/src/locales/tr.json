@@ -557,7 +557,7 @@
       "audience": "Yanıt gönderilecek kişiler",
       "audienceAll": "Herkes",
       "audienceInternal": "Yalnızca kuruluşumdaki kişiler",
-      "audienceExternal": "Kuruluş içindeki ve dışındaki kişiler",
+      "audienceExternal": "Kuruluşumdaki kişiler ve kişilerim",
       "internalMessage": "Kuruluşumdaki kişilere yanıt",
       "externalMessage": "Kuruluşum dışındaki kişilere yanıt",
       "externalMessagePlaceholder": "Şu anda ofis dışındayım.",
@@ -1599,7 +1599,7 @@
   },
   "help": {
     "label": "Daha fazla bilgi",
-    "autoReplyAudience": "Herkes: her gönderen yanıt alır. Yalnızca kuruluşumdaki kişiler: kuruluş dışındaki gönderenler yanıt almaz. Kuruluş içindeki ve dışındaki kişiler: kuruluş dışındaki gönderenler yalnızca kişilerinizdeyse yanıt alır.",
+    "autoReplyAudience": "Herkes: her gönderen yanıt alır. Yalnızca kuruluşumdaki kişiler: kuruluş dışındaki gönderenler yanıt almaz. Kuruluşumdaki kişiler ve kişilerim: kuruluş dışındaki bir gönderen yalnızca kişilerinizdeyse yanıt alır.",
     "autoReplyStart": "Yanıtlar bu gün, saat diliminizde başladığında başlar. Hemen başlaması için boş bırakın.",
     "autoReplyEnd": "Yanıtlar bu günün sonuna kadar sürer. Siz kapatana kadar yanıt verilmesi için boş bırakın.",
     "appPasswordName": "Bu uygulama parolasını listede ayırt eden bir ad, örneğin onu kullanan cihaz ya da program.",
