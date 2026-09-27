@@ -1095,7 +1095,12 @@ func (f *fakeDir) DeleteContact(email string) (bool, error) {
 	f.deletedContact = email
 	return !f.deleteContactMissing, nil
 }
-func (f *fakeDir) ListAllRooms() ([]directory.GALEntry, error) { return f.rooms, nil }
+func (f *fakeDir) ListAllRooms() ([]directory.GALEntry, error) {
+	if err := f.readErrs["ListAllRooms"]; err != nil {
+		return nil, err
+	}
+	return f.rooms, nil
+}
 func (f *fakeDir) CreateRoom(email, displayName, maildir string, capacity int, equipment bool) (int64, error) {
 	if f.createErr != nil {
 		return 0, f.createErr

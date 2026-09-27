@@ -31,7 +31,7 @@
 <thead><tr><th>Name</th><th>Address</th><th>Type</th><th>Capacity</th><th></th></tr></thead>
 <tbody>
 {{range .Rooms}}<tr><td>{{.DisplayName}}</td><td>{{.Address}}</td><td><span class="badge">{{if eq .DisplayType 8}}Equipment{{else}}Room{{end}}</span></td><td>{{if .Capacity}}{{.Capacity}}{{end}}</td><td class="actions"><form hx-post="/admin/ui/rooms/{{.Address}}/delete" hx-target="#rooms-panel" hx-swap="outerHTML" hx-confirm="Delete {{.Address}}? This cannot be undone." hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'><button type="submit" class="danger">Delete</button></form></td></tr>
-{{else}}<tr><td colspan="5" class="empty">No rooms yet.</td></tr>
+{{else}}<tr><td colspan="5" class="empty{{if .RoomsError}} failed{{end}}">{{or .RoomsError "No rooms yet."}}</td></tr>
 {{end}}
 </tbody>
 </table>
