@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { FileText, Mail, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { HelpTip } from "@/components/ui/help-tip"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { RichTextEditor } from "@/components/RichTextEditor"
@@ -160,6 +161,7 @@ function SnippetForm({ form, keys, withSubject, onSave }: {
         <label className="flex items-center gap-1.5 text-sm cursor-pointer">
           <input type="checkbox" checked={draft.isHtml} onChange={(e) => form.patch({ isHtml: e.target.checked })} />
           {t("settings.signature.isHtml")}
+          <HelpTip text={t("help.snippetHtml")} />
         </label>
       </div>
       {form.error && <p className="text-xs text-destructive">{form.error}</p>}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { Plane } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { HelpTip } from "@/components/ui/help-tip"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
@@ -89,7 +90,10 @@ function SubjectAndAudience({ vacation, onChange }: VacationEdit) {
         <p className="text-xs text-muted-foreground">{t("settings.autoReply.subjectOptional")}</p>
       </div>
       <div className="space-y-2">
-        <Label htmlFor="vacation-audience">{t("settings.autoReply.audience")}</Label>
+        <Label htmlFor="vacation-audience" className="flex items-center gap-1.5">
+          {t("settings.autoReply.audience")}
+          <HelpTip text={t("help.autoReplyAudience")} />
+        </Label>
         <select
           id="vacation-audience"
           value={vacation.audience || "all"}
@@ -141,15 +145,18 @@ function Messages({ vacation, onChange }: VacationEdit) {
 
 function DateRange({ vacation, onChange }: VacationEdit) {
   const { t } = useI18n()
-  const fields: { id: string; key: "start_date" | "end_date"; label: string }[] = [
-    { id: "vacation-start", key: "start_date", label: "settings.autoReply.startDate" },
-    { id: "vacation-end", key: "end_date", label: "settings.autoReply.endDate" },
+  const fields: { id: string; key: "start_date" | "end_date"; label: string; help: string }[] = [
+    { id: "vacation-start", key: "start_date", label: "settings.autoReply.startDate", help: t("help.autoReplyStart") },
+    { id: "vacation-end", key: "end_date", label: "settings.autoReply.endDate", help: t("help.autoReplyEnd") },
   ]
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
       {fields.map((f) => (
         <div key={f.id} className="space-y-2">
-          <Label htmlFor={f.id}>{t(f.label)}</Label>
+          <Label htmlFor={f.id} className="flex items-center gap-1.5">
+            {t(f.label)}
+            <HelpTip text={f.help} />
+          </Label>
           <Input
             id={f.id}
             type="date"

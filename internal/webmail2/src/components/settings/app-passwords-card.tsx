@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { KeyRound, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { HelpTip } from "@/components/ui/help-tip"
 import {
   Dialog,
   DialogContent,
@@ -139,8 +140,9 @@ export function AppPasswordsCard() {
           ) : (
             <div className="space-y-3">
               <div className="space-y-2">
-                <label className="text-sm font-medium" htmlFor="ap-name">
+                <label className="flex items-center gap-1.5 text-sm font-medium" htmlFor="ap-name">
                   {t("settings.appPasswords.nameLabel")}
+                  <HelpTip text={t("help.appPasswordName")} />
                 </label>
                 <input
                   id="ap-name"
