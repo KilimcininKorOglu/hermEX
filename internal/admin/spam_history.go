@@ -38,10 +38,6 @@ func (s *Server) handleUISpamHistory(w http.ResponseWriter, r *http.Request) {
 // save; CSRF is included so that panel's htmx form can post.
 func (s *Server) spamHistoryPageData(r *http.Request, notice panelNotice) map[string]any {
 	verdicts, err := s.dir.RecentSpamVerdicts(200)
-	errMsg := ""
-	if err != nil {
-		errMsg = s.notice("Could not read the spam history.", err)
-	}
 	views := make([]spamVerdictView, 0, len(verdicts))
 	for _, v := range verdicts {
 		views = append(views, spamVerdictView{
@@ -51,7 +47,7 @@ func (s *Server) spamHistoryPageData(r *http.Request, notice panelNotice) map[st
 	}
 	failed := readFailures{}
 	data := map[string]any{
-		"Nav": "spamhistory", "Verdicts": views, "Error": errMsg,
+		"Nav": "spamhistory", "Verdicts": views, "VerdictsError": s.listFailure("the spam history", err),
 		"Notice": notice, "CSRF": csrfCookieValue(r), "ReadFailed": failed,
 	}
 	s.fillSpamRetention(data, failed)

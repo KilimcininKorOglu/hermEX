@@ -523,7 +523,12 @@ func (f *fakeDir) FinishTask(id int64, status, message string) error {
 	}
 	return nil
 }
-func (f *fakeDir) RecentSpamVerdicts(int) ([]directory.SpamVerdict, error) { return f.verdicts, nil }
+func (f *fakeDir) RecentSpamVerdicts(int) ([]directory.SpamVerdict, error) {
+	if err := f.readErrs["RecentSpamVerdicts"]; err != nil {
+		return nil, err
+	}
+	return f.verdicts, nil
+}
 func (f *fakeDir) GetSpamHistorySettings() (directory.SpamHistorySettings, bool, error) {
 	return f.spamHistory, f.spamHistoryFound, f.readErrs["GetSpamHistorySettings"]
 }

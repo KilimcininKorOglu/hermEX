@@ -10,6 +10,24 @@ import (
 	"hermex/internal/directory"
 )
 
+// TestSpamHistoryReadIsNotShownAsEmpty proves the Spam History table reports a
+// failed read of the verdicts. The page showed the failure above a table that
+// read "No scored messages yet.", which says nothing was scored.
+func TestSpamHistoryReadIsNotShownAsEmpty(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		readErrs: map[string]error{"RecentSpamVerdicts": errReadFailed},
+	}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/spam-history", session), http.StatusOK, "spam history")
+	wantContains(t, page, "Could not read the spam history.", "the failed read is reported")
+	if strings.Contains(page, "No scored messages yet.") {
+		t.Error("the table still reads as no scored messages after the read failed")
+	}
+}
+
 // TestSpamHistoryPageRenders proves the Spam History page renders the recorded
 // verdicts for a system admin, showing the sender and the reasons each scored.
 func TestSpamHistoryPageRenders(t *testing.T) {
