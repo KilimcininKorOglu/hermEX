@@ -144,7 +144,7 @@
 
 /* Prose styles for email content */
 .prose {
-  color: hsl(var(--color-foreground));
+  color: var(--color-foreground);
 }
 
 .prose p {
@@ -162,7 +162,7 @@
 }
 
 .prose a {
-  color: hsl(var(--color-primary));
+  color: var(--color-primary);
   text-decoration: underline;
 }
 
