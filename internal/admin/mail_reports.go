@@ -91,9 +91,7 @@ func (s *Server) handleUIReports(w http.ResponseWriter, r *http.Request) {
 		problems = append(problems, s.notice("Could not read the reports.", err))
 	}
 	if cl, ok := s.uiClaims(r); ok && s.isSystemAdmin(cl.UserID) {
-		data["CanEdit"] = true
-		s.fillMailReportRetention(data)
-		s.fillDMARCSending(data)
+		s.addReportSettings(data)
 	}
 	data["Error"] = strings.Join(problems, " ")
 	s.render(w, "reports.html", data)
@@ -327,19 +325,30 @@ func (s *Server) handleUIDMARCFailure(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// addReportSettings adds the report settings a system administrator may edit to the
+// Reports page. A setting that could not be read is recorded in ReadFailed, and its
+// card shows that in place of its form, which would otherwise offer the default for
+// a save to store.
+func (s *Server) addReportSettings(data map[string]any) {
+	failed := readFailures{}
+	data["CanEdit"], data["ReadFailed"] = true, failed
+	s.fillMailReportRetention(data, failed)
+	s.fillDMARCSending(data, failed)
+}
+
 // fillMailReportRetention sets the stored retention windows, or the defaults
-// when none has been saved, on a page-data map.
-func (s *Server) fillMailReportRetention(data map[string]any) {
-	rs := directory.MailReportSettings{
-		AggregateDays: directory.DefaultMailReportAggregateDays,
-		FailureDays:   directory.DefaultMailReportFailureDays,
+// when none has been saved, on a page-data map. A failed read is recorded in
+// failed.
+func (s *Server) fillMailReportRetention(data map[string]any, failed readFailures) {
+	rs, found, err := s.dir.GetMailReportSettings()
+	if !s.noteRead(failed, "report-retention", "the report retention", err) {
+		return
 	}
-	stored, found, err := s.dir.GetMailReportSettings()
-	switch {
-	case err != nil:
-		data["Notice"] = s.failNotice("Could not read the retention setting; the defaults are shown.", err)
-	case found:
-		rs = stored
+	if !found {
+		rs = directory.MailReportSettings{
+			AggregateDays: directory.DefaultMailReportAggregateDays,
+			FailureDays:   directory.DefaultMailReportFailureDays,
+		}
 	}
 	data["AggregateDays"], data["FailureDays"] = rs.AggregateDays, rs.FailureDays
 }
@@ -356,26 +365,27 @@ func (s *Server) handleUISaveMailReportRetention(w http.ResponseWriter, r *http.
 		AggregateDays: formInt(r, "aggregate_days"),
 		FailureDays:   formInt(r, "failure_days"),
 	}
-	data := map[string]any{"CSRF": csrfCookieValue(r)}
+	failed := readFailures{}
+	data := map[string]any{"CSRF": csrfCookieValue(r), "ReadFailed": failed}
 	if err := s.dir.SetMailReportSettings(rs); err != nil {
-		s.fillMailReportRetention(data)
+		s.fillMailReportRetention(data, failed)
 		data["Notice"] = s.failNotice("Could not save the retention setting.", err)
 		s.render(w, "report-retention-panel", data)
 		return
 	}
-	s.fillMailReportRetention(data)
+	s.fillMailReportRetention(data, failed)
 	data["Notice"] = okNotice("Report retention saved; the sweep deletes expired reports within a minute, no restart.")
 	s.render(w, "report-retention-panel", data)
 }
 
 // fillDMARCSending sets the DMARC aggregate report sending switch on a page-data
-// map. A missing row reads as off, the setting's default.
-func (s *Server) fillDMARCSending(data map[string]any) {
-	stored, _, err := s.dir.GetDMARCReportSettings()
-	if err != nil {
-		data["DMARCNotice"] = s.failNotice("Could not read the DMARC sending setting; it is shown as off.", err)
+// map. A missing row reads as off, the setting's default. A failed read is
+// recorded in failed.
+func (s *Server) fillDMARCSending(data map[string]any, failed readFailures) {
+	stored, found, err := s.dir.GetDMARCReportSettings()
+	if s.noteRead(failed, "dmarc-sending", "the DMARC sending setting", err) {
+		data["DMARCSending"] = found && stored.Enabled
 	}
-	data["DMARCSending"] = err == nil && stored.Enabled
 }
 
 // handleUISaveDMARCSending switches the DMARC aggregate report sending on or off.
@@ -386,14 +396,15 @@ func (s *Server) handleUISaveDMARCSending(w http.ResponseWriter, r *http.Request
 		return
 	}
 	on := r.FormValue("enabled") != ""
-	data := map[string]any{"CSRF": csrfCookieValue(r)}
+	failed := readFailures{}
+	data := map[string]any{"CSRF": csrfCookieValue(r), "ReadFailed": failed}
 	if err := s.dir.SetDMARCReportSettings(directory.DMARCReportSettings{Enabled: on}); err != nil {
-		s.fillDMARCSending(data)
+		s.fillDMARCSending(data, failed)
 		data["DMARCNotice"] = s.failNotice("Could not save the DMARC sending setting.", err)
 		s.render(w, "dmarc-sending-panel", data)
 		return
 	}
-	s.fillDMARCSending(data)
+	s.fillDMARCSending(data, failed)
 	data["DMARCNotice"] = okNotice("DMARC report sending saved; the mail server applies it within a minute, no restart.")
 	s.render(w, "dmarc-sending-panel", data)
 }

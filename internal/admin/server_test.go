@@ -713,14 +713,14 @@ func (f *fakeDir) TLSSummary(fl directory.ReportFilter) ([]directory.TLSPolicySu
 	return f.reports.tlsSummary, nil
 }
 func (f *fakeDir) GetMailReportSettings() (directory.MailReportSettings, bool, error) {
-	return f.reports.settings, f.reports.settingsFound, nil
+	return f.reports.settings, f.reports.settingsFound, f.readErrs["GetMailReportSettings"]
 }
 func (f *fakeDir) SetMailReportSettings(s directory.MailReportSettings) error {
 	f.reports.settings, f.reports.settingsFound = s, true
 	return nil
 }
 func (f *fakeDir) GetDMARCReportSettings() (directory.DMARCReportSettings, bool, error) {
-	return f.reports.dmarcSending, true, nil
+	return f.reports.dmarcSending, true, f.readErrs["GetDMARCReportSettings"]
 }
 func (f *fakeDir) SetDMARCReportSettings(s directory.DMARCReportSettings) error {
 	f.reports.dmarcSending = s

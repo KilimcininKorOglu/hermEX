@@ -75,6 +75,8 @@ func TestAFailedReadHidesTheFormItFeeds(t *testing.T) {
 		{"GetSpamHistorySettings", "/admin/ui/settings", `/spam-history/retention"`, "the spam history retention"},
 		{"GetSpamHistorySettings", "/admin/ui/spam-history", `/spam-history/retention"`, "the spam history retention"},
 		{"GetSpamHistorySettings", "/admin/ui/spam-history", "scored verdicts are kept", "the spam history retention"},
+		{"GetMailReportSettings", "/admin/ui/reports", `/reports/retention"`, "the report retention"},
+		{"GetDMARCReportSettings", "/admin/ui/reports", `/reports/dmarc-sending"`, "the DMARC sending setting"},
 	} {
 		d := &fakeDir{
 			authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
