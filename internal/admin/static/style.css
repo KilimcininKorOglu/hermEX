@@ -249,8 +249,8 @@ table.grid + *, * + table.grid { margin-top: 1rem; }
 /* A stack spaces its children with its gap alone, even when it is a panel. */
 .stack > * + * { margin-top: 0; }
 .card > .card-head + * { margin-top: 1.25rem; }
-.card > h3 { margin: 1.5rem 0 0; }
-.card > h3 + * { margin-top: 0.75rem; }
+.card > h3, [id$="-panel"] > h3 { margin: 1.5rem 0 0; }
+.card > h3 + *, [id$="-panel"] > h3 + * { margin-top: 0.75rem; }
 .card-icon {
 	display: grid;
 	place-items: center;
@@ -438,12 +438,17 @@ main label.check {
 main form p { margin: 0; }
 main form p input { display: inline-block; width: 8rem; margin-left: 0.5rem; }
 main form > button { align-self: flex-start; }
+/* A form's buttons side by side: save beside remove. */
+.form-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 
 /* Two columns of fields, the submit button and full-width rows below them. */
 .form-grid { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
 .form-grid > button, .form-grid > .full, .form-grid > label.check, .form-grid > p, .form-grid > div { grid-column: 1 / -1; }
 .form-grid > button { justify-self: start; }
 .form-grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+/* A heading inside a grid form opens a group of fields; the grid gap already
+   separates it from its hint. */
+.form-grid > h3 { margin: 0.5rem 0 -0.5rem; }
 .checks { display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; }
 /* A long list of options, one column per 16rem. */
 .check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: 0.75rem 1.5rem; }
@@ -565,6 +570,10 @@ table.grid td a:hover { text-decoration: underline; }
 table.grid.kv th, table.grid.kv td { height: auto; padding: 0.75rem 1rem; vertical-align: top; }
 table.grid.kv th { width: 14rem; white-space: normal; }
 table.grid.kv td { overflow-wrap: anywhere; }
+/* The scoring weights: a short number beside each signal, narrow enough that
+   the table fits a phone without scrolling. */
+table.grid.weights td { white-space: normal; }
+table.grid.weights td input { width: 5rem; min-width: 0; }
 /* Tabs on the left and a filter on the right of one row. */
 .toolbar-row { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 1rem; }
 .toolbar-row .tabbar { margin: 0; }

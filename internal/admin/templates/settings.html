@@ -2,8 +2,7 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<h1>Settings</h1>
-<p class="hint">Every operator-tunable setting in one place. Changes apply automatically within about a minute, no restart.</p>
+<header class="page-head"><div><h1>Settings</h1><p class="page-desc">Every operator-tunable setting in one place. Changes apply automatically within about a minute, no restart.</p></div></header>
 
 <div class="tabs">
 <input type="radio" name="settab" id="settab-antispam" checked>
@@ -18,55 +17,43 @@
 </div>
 
 <div class="tabpanel antispam">
-<h2>Scoring</h2>
-{{template "scoring-panel" .}}
-<h2>SpamAssassin ruleset</h2>
-<p>Source: {{.SASource}}</p>
-<p>{{.SARules}} rules and {{.SAMetas}} meta rules in use; {{.SASkipped}} rules and {{.SADropped}} metas are dropped (network-, plugin-, and Bayes-backed rules and patterns the engine cannot compile, those checks are done natively).</p>
-<p class="hint">The rules contribute one combined signal: when their summed score reaches {{.SAThreshold}}, the verdict gains {{.SAWeight}} points. The ruleset is seeded into data_dir on first run; refresh it with the antispam-rules tool, changes are applied automatically within about a minute, no restart.</p>
-{{template "antispam-panel" .}}
-<h2>Greylisting</h2>
-{{template "greylist-panel" .}}
+{{template "scoring-card" .}}
+{{template "ruleset-card" .}}
+{{template "bayes-card" .}}
+{{template "greylist-card" .}}
 </div>
 
 <div class="tabpanel delivery">
-<h2>Inbound rate limiting</h2>
-{{template "ratelimit-panel" .}}
-<h2>Inbound message size</h2>
-{{template "message-size-panel" .}}
-<h2>Outbound abuse</h2>
-{{template "outbound-panel" .}}
-<h2>Outbound delivery retry</h2>
-{{template "relay-panel" .}}
-<h2>Outbound gateway</h2>
-{{template "gateway-panel" .}}
-<h2>Quarantine digest</h2>
-{{template "digest-panel" .}}
-<h2>Out-of-office reply</h2>
-{{template "autoreply-panel" .}}
+{{template "ratelimit-card" .}}
+{{template "message-size-card" .}}
+{{template "outbound-card" .}}
+{{template "relay-card" .}}
+{{template "gateway-card" .}}
+{{template "digest-card" .}}
+{{template "autoreply-card" .}}
 </div>
 
 <div class="tabpanel limits">
-<h2>Protocol size limits</h2>
-<p class="hint">The maximum request/body size each protocol accepts; a larger request is rejected. More protocol limits (EWS, ActiveSync, DAV) are added here as they are wired.</p>
-{{template "limits-panel" .}}
-<h2>Request rate</h2>
-{{template "http-ratelimit-panel" .}}
-<h2>Concurrent connections</h2>
-{{template "conn-limit-panel" .}}
-<h2>Login lockout</h2>
-{{template "loginlockout-panel" .}}
-<h2>Mail fetching</h2>
-{{template "fetchpolicy-panel" .}}
+{{template "limits-card" .}}
+{{template "http-ratelimit-card" .}}
+{{template "conn-limit-card" .}}
+{{template "loginlockout-card" .}}
+{{template "fetchpolicy-card" .}}
 </div>
 
 <div class="tabpanel retention">
-<h2>Spam history retention</h2>
+<section class="card">
+{{template "card-head" (dict "Icon" "history" "Title" "Spam history retention" "Desc" "How many scored verdicts the Spam History page keeps.")}}
 {{template "retention-panel" .}}
-<h2>Central log retention</h2>
+</section>
+<section class="card">
+{{template "card-head" (dict "Icon" "scroll-text" "Title" "Central log retention" "Desc" "How long the central log store keeps its events.")}}
 {{template "log-retention-panel" .}}
-<h2>Recoverable Items retention</h2>
+</section>
+<section class="card">
+{{template "card-head" (dict "Icon" "archive" "Title" "Recoverable Items retention" "Desc" "How long deleted mail stays recoverable.")}}
 {{template "recoverable-retention-panel" .}}
+</section>
 </div>
 </div>
 </main>
@@ -75,18 +62,18 @@
 
 {{define "log-retention-panel"}}<div id="log-retention-panel">
 {{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
-<p>Central log events older than this many days are pruned by the admin daemon, so the log store never grows unbounded. Use <strong>0</strong> to keep logs forever (pruning disabled).</p>
-<form hx-post="/admin/ui/log-retention" hx-target="#log-retention-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<p>Days to keep (0 = forever): <input type="number" name="log_retention_days" value="{{.LogRetentionDays}}" min="0"></p>
+<p class="hint">Central log events older than this many days are pruned by the admin daemon, so the log store never grows unbounded. Use <strong>0</strong> to keep logs forever (pruning disabled).</p>
+<form class="narrow" hx-post="/admin/ui/log-retention" hx-target="#log-retention-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>Days to keep (0 = forever) <input type="number" name="log_retention_days" value="{{.LogRetentionDays}}" min="0"></label>
 <button type="submit">Save log retention</button>
 </form>
 </div>{{end}}
 
 {{define "recoverable-retention-panel"}}<div id="recoverable-retention-panel">
 {{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
-<p>Soft-deleted mail (the Recoverable Items dumpster) older than this many days is permanently purged by the admin sweep, so deleted items stay recoverable for a bounded window. Use <strong>0</strong> to keep recoverable items forever (auto-purge disabled).</p>
-<form hx-post="/admin/ui/recoverable-retention" hx-target="#recoverable-retention-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<p>Days to keep (0 = forever): <input type="number" name="recoverable_retention_days" value="{{.RecoverableRetentionDays}}" min="0"></p>
+<p class="hint">Soft-deleted mail (the Recoverable Items dumpster) older than this many days is permanently purged by the admin sweep, so deleted items stay recoverable for a bounded window. Use <strong>0</strong> to keep recoverable items forever (auto-purge disabled).</p>
+<form class="narrow" hx-post="/admin/ui/recoverable-retention" hx-target="#recoverable-retention-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>Days to keep (0 = forever) <input type="number" name="recoverable_retention_days" value="{{.RecoverableRetentionDays}}" min="0"></label>
 <button type="submit">Save recoverable retention</button>
 </form>
 </div>{{end}}
