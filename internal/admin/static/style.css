@@ -706,7 +706,10 @@ body:has(> .login) {
 	padding: 1rem;
 	background: var(--muted);
 }
+/* The sign-in card has no sidebar beside it, so it leaves the shell's second
+   column and sits in the middle of the page. */
 main.login {
+	grid-column: auto;
 	width: 100%;
 	max-width: 24rem;
 	padding: 2rem;
