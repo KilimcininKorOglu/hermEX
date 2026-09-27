@@ -2,35 +2,48 @@
 <div class="layout">
 {{template "sidebar" .}}
 <main>
-<h1>Users</h1>
-<form class="create-form" hx-post="/admin/ui/users" hx-target="#users-panel" hx-swap="outerHTML"
+<header class="page-head"><div><h1>Users</h1><p class="page-desc">Mailboxes, the protocols they may sign in with, and their quotas.</p></div></header>
+<div class="stack">
+<section class="card">
+{{template "card-head" (dict "Icon" "user" "Title" "Add a user" "Desc" "Create a mailbox in one of your domains.")}}
+<form class="form-grid" data-reset hx-post="/admin/ui/users" hx-target="#users-panel" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<input type="text" name="local" placeholder="username" required> @
+<label>Address
+<span class="input-group"><input type="text" name="local" placeholder="username" required><span class="input-addon">@</span>
 <select name="domain" hx-get="/admin/ui/user-create-fields" hx-target="#user-create-fields" hx-swap="outerHTML" hx-trigger="change">
 {{range .Domains}}<option value="{{.ID}}">{{.Name}}</option>
 {{else}}<option value="">No domains yet</option>
 {{end}}
-</select>
-<input type="password" name="password" placeholder="Password" required>
+</select></span></label>
+<label>Password <input type="password" name="password" placeholder="Password" autocomplete="new-password" required></label>
 {{template "user-create-fields" .Fields}}
-<button type="submit">Add user</button>
+<button type="submit"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "plus"}}"/></svg>Add user</button>
 </form>
+</section>
 {{template "users-panel" .}}
+</div>
 </main>
 </div>
 {{template "foot" .}}{{end}}
 
 {{define "user-create-fields"}}<div id="user-create-fields" class="create-fields">
+<div class="field-grid">
 <label>Language <input type="text" name="lang" value="{{.Lang}}" placeholder="(default)"></label>
+<label>Storage quota (MiB) <input type="number" name="storagemb" min="0" value="{{.StorageMB}}"></label>
+<label>Receive quota (MiB) <input type="number" name="receivemb" min="0" value="{{.ReceiveMB}}"></label>
+<label>Send quota (MiB) <input type="number" name="sendmb" min="0" value="{{.SendMB}}"></label>
+</div>
+<div>
+<p class="field-label">Allowed protocols</p>
+<div class="checks">
 <label class="check"><input type="checkbox" name="pop3_imap"{{if .POP3IMAP}} checked{{end}}> POP3/IMAP</label>
 <label class="check"><input type="checkbox" name="smtp"{{if .SMTP}} checked{{end}}> SMTP</label>
 <label class="check"><input type="checkbox" name="chgpasswd"{{if .ChgPasswd}} checked{{end}}> Change password</label>
 <label class="check"><input type="checkbox" name="web"{{if .Web}} checked{{end}}> Web</label>
 <label class="check"><input type="checkbox" name="eas"{{if .EAS}} checked{{end}}> EAS</label>
 <label class="check"><input type="checkbox" name="dav"{{if .DAV}} checked{{end}}> DAV</label>
-<label>Storage quota (MiB) <input type="number" name="storagemb" min="0" value="{{.StorageMB}}"></label>
-<label>Receive quota (MiB) <input type="number" name="receivemb" min="0" value="{{.ReceiveMB}}"></label>
-<label>Send quota (MiB) <input type="number" name="sendmb" min="0" value="{{.SendMB}}"></label>
+</div>
+</div>
 </div>{{end}}
 
 {{define "users-panel"}}<div id="users-panel">
@@ -38,7 +51,7 @@
 <table class="grid">
 <thead><tr><th>Email</th><th>Auth</th><th>Status</th></tr></thead>
 <tbody>
-{{range .Users}}<tr><td><a href="/admin/ui/users/{{.Username}}">{{.Username}}</a></td><td>{{if .LDAP}}LDAP{{else}}local{{end}}</td><td>{{if eq .Status 0}}Active{{else}}Suspended{{end}}</td></tr>
+{{range .Users}}<tr><td><a href="/admin/ui/users/{{.Username}}">{{.Username}}</a></td><td><span class="badge">{{if .LDAP}}LDAP{{else}}local{{end}}</span></td><td>{{if eq .Status 0}}<span class="status status-ok">Active</span>{{else}}<span class="status status-off">Suspended</span>{{end}}</td></tr>
 {{else}}<tr><td colspan="3" class="empty">No users yet.</td></tr>
 {{end}}
 </tbody>

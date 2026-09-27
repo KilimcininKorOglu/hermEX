@@ -136,7 +136,7 @@ func TestUIDomainDetailPage(t *testing.T) {
 		t.Fatalf("domain detail status %d, want 200", resp.StatusCode)
 	}
 	s := string(body)
-	for _, want := range []string{"acme.test", "Suspended", "Maximum users", `value="25"`, "Usage", ">5<", "Org2"} {
+	for _, want := range []string{"acme.test", "Suspended", "Maximum users", `value="25"`, "Active users", ">5<", "Org2"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("domain detail page missing %q:\n%s", want, s)
 		}

@@ -102,17 +102,18 @@
 
 {{define "gateway-fields"}}
 <label class="check"><input type="checkbox" name="enabled" value="1"{{if .Enabled}} checked{{end}}> Send outgoing mail through this gateway</label>
-<p>Host: <input type="text" name="host" value="{{.Host}}" size="30" placeholder="smtp.provider.example"></p>
-<p>Port: <input type="number" name="port" value="{{.Port}}" min="1" max="65535"></p>
-<p>Transport:
+<div class="field-grid">
+<label>Host <input type="text" name="host" value="{{.Host}}" placeholder="smtp.provider.example"></label>
+<label>Port <input type="number" name="port" value="{{.Port}}" min="1" max="65535"></label>
+<label>Transport
 <select name="encryption">
 <option value="starttls"{{if eq .Encryption "starttls"}} selected{{end}}>STARTTLS (required)</option>
 <option value="tls"{{if eq .Encryption "tls"}} selected{{end}}>Implicit TLS</option>
 <option value="none"{{if eq .Encryption "none"}} selected{{end}}>None (cleartext)</option>
-</select>
-</p>
-<p>Username: <input type="text" name="username" value="{{.Username}}" size="30"></p>
-<p>Password: <input type="password" name="password" value="" size="30" autocomplete="new-password"> <span class="hint">{{if .HasPassword}}A password is stored; leave empty to keep it.{{else}}No password stored.{{end}}</span></p>
+</select></label>
+<label>Username <input type="text" name="username" value="{{.Username}}" autocomplete="off"></label>
+<label>Password <input type="password" name="password" value="" autocomplete="new-password"><small>{{if .HasPassword}}A password is stored; leave empty to keep it.{{else}}No password stored.{{end}}</small></label>
+</div>
 {{end}}
 
 {{define "outbound-panel"}}<div id="outbound-panel">
