@@ -95,8 +95,16 @@
     for (const el of found) {
       const kind = kindOf(el);
       toast(kind, el.textContent.trim());
-      if (kind === "ok") {
+      if (kind !== "ok") {
+        continue;
+      }
+      // A hidden element still counts as the sibling the spacing rules measure
+      // from, so the acknowledgement is removed. The swapped root itself only
+      // hides, because a later swap may still target it.
+      if (el === root) {
         el.classList.add("toasted");
+      } else {
+        el.remove();
       }
     }
   });
