@@ -50,6 +50,7 @@ export const shortcuts = [
   ]},
   { category: "shortcuts.cat.actions", items: [
     { keys: ["⌘", "N"], description: "shortcuts.desc.composeNew", level: "basic" },
+    { keys: ["C"], description: "shortcuts.desc.composeNew", level: "basic" },
     { keys: ["⌘", "Shift", "I"], description: "shortcuts.desc.goToInbox", level: "basic" },
     { keys: ["R"], description: "shortcuts.desc.replyEmail", level: "basic" },
     { keys: ["A"], description: "shortcuts.desc.replyAll", level: "basic" },

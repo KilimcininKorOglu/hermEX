@@ -26,6 +26,7 @@ const ctrlKey = (key: string) => (k: ShortcutKey) => k.ctrl && k.key === key
 // wins. Ctrl stands for Ctrl or Cmd. Keys are lower-cased before matching.
 const RULES: Rule[] = [
   { level: "basic", matches: ctrlKey("n"), action: go("/compose") },
+  { level: "basic", matches: (k) => !k.ctrl && !k.shift && k.key === "c", action: go("/compose") },
   { level: "basic", matches: (k) => k.ctrl && k.shift && k.key === "i", action: go("/inbox") },
   { level: "basic", matches: (k) => !k.ctrl && k.key === "/", action: go("/search") },
   { level: "extended", matches: ctrlKey("1"), action: go("/inbox") },

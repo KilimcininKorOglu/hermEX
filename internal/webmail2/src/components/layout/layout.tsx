@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react"
-import { Outlet, useNavigate } from "react-router-dom"
+import { Outlet } from "react-router-dom"
 import { Sidebar } from "./sidebar"
 import { Header } from "./header"
 import { ReminderOverlay } from "@/components/reminder-overlay"
@@ -15,7 +15,6 @@ export function Layout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [showUnreadCounter, setShowUnreadCounter] = useState(false)
-  const navigate = useNavigate()
   const { inboxUnread } = useMailbox()
 
   // The unread-counter-in-title preference lives in the DB-backed appearance
@@ -58,27 +57,6 @@ export function Layout() {
     prevUnread.current = inboxUnread
   }, [inboxUnread])
 
-  // Global keyboard shortcuts (ignored while typing in an input/textarea/contenteditable
-  // so they never swallow ordinary typing):
-  //   c → compose, / → focus the header search, g t → Today, g i → Inbox, g c → Calendar.
-  useEffect(() => {
-    const actions = new Map<string, () => void>(Object.entries({
-      c: () => navigate("/compose"),
-      "/": () => document.querySelector<HTMLInputElement>('[aria-label="search"]')?.focus(),
-      "?": () =>
-        alert("Keyboard shortcuts\n\nc - Compose\n/ - Focus search\nj / ↓ - Next message\nk / ↑ - Previous message\nEnter - Open message"),
-    }))
-    const onKey = (e: KeyboardEvent) => {
-      if (isTypingTarget(e.target) || e.metaKey || e.ctrlKey || e.altKey) return
-      const action = actions.get(e.key)
-      if (!action) return
-      e.preventDefault()
-      action()
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [navigate])
-
   return (
     <div className="min-h-screen bg-background">
       <Sidebar
@@ -117,11 +95,4 @@ export function Layout() {
       <ReminderOverlay />
     </div>
   )
-}
-
-// isTypingTarget reports whether a key event lands in a text field or an
-// editable region, where a single-letter shortcut must not fire.
-function isTypingTarget(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null
-  return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)
 }

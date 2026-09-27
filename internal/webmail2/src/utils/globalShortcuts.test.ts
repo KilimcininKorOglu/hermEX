@@ -26,7 +26,16 @@ describe("shortcutAction", () => {
     expect(shortcutAction("basic", press(key, true))).toBeNull()
   })
 
+  it("binds a bare C to compose in basic mode, but not with Ctrl or Shift", () => {
+    expect(shortcutAction("basic", press("c"))).toEqual({ navigate: "/compose", preventDefault: true })
+    expect(shortcutAction("basic", press("C", false, true))).toBeNull()
+    expect(shortcutAction("basic", press("c", true))).toBeNull()
+  })
+
   it("binds nothing when shortcuts are off", () => {
+    expect(shortcutAction("off", press("c"))).toBeNull()
+    expect(shortcutAction("off", press("/"))).toBeNull()
+    expect(shortcutAction("off", press("?", false, true))).toBeNull()
     expect(shortcutAction("off", press("n", true))).toBeNull()
     expect(shortcutAction("off", press("Escape"))).toBeNull()
   })
