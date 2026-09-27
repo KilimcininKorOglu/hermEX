@@ -388,7 +388,7 @@ func (f *fakeDir) ListOrgs() ([]directory.OrgInfo, error) {
 	for _, o := range f.orgs {
 		out = append(out, o)
 	}
-	return out, nil
+	return out, f.readErrs["ListOrgs"]
 }
 func (f *fakeDir) GetOrg(id int64) (directory.OrgInfo, bool, error) {
 	o, ok := f.orgs[id]
@@ -568,12 +568,16 @@ func (f *fakeDir) SetMessageSizeSettings(s directory.MessageSizeSettings) error 
 	f.messageSize, f.messageSizeFound = s, true
 	return nil
 }
-func (f *fakeDir) GetDomainAVScan(string) (bool, bool, error) { return f.avInbound, f.avOutbound, nil }
+func (f *fakeDir) GetDomainAVScan(string) (bool, bool, error) {
+	return f.avInbound, f.avOutbound, f.readErrs["GetDomainAVScan"]
+}
 func (f *fakeDir) SetDomainAVScan(_ string, inbound, outbound bool) error {
 	f.avInbound, f.avOutbound = inbound, outbound
 	return nil
 }
-func (f *fakeDir) SplitRelayHost(string) (string, error) { return f.splitHost, nil }
+func (f *fakeDir) SplitRelayHost(string) (string, error) {
+	return f.splitHost, f.readErrs["SplitRelayHost"]
+}
 func (f *fakeDir) SetSplitRelayHost(_ string, host string) error {
 	f.splitHost = host
 	return nil
@@ -813,8 +817,10 @@ func (f *fakeDir) SetMTASTSSettings(s directory.MTASTSSettings) error {
 	f.mtastsSettings = &s
 	return nil
 }
-func (f *fakeDir) GetUserSpamThreshold(string) (*int, error)   { return f.userSpamThreshold, nil }
-func (f *fakeDir) GetDomainSpamThreshold(string) (*int, error) { return f.domainSpamThreshold, nil }
+func (f *fakeDir) GetUserSpamThreshold(string) (*int, error) { return f.userSpamThreshold, nil }
+func (f *fakeDir) GetDomainSpamThreshold(string) (*int, error) {
+	return f.domainSpamThreshold, f.readErrs["GetDomainSpamThreshold"]
+}
 func (f *fakeDir) SetUserSpamThreshold(_ string, th *int) error {
 	f.userSpamThreshold, f.userSpamThresholdSet = th, true
 	return nil
@@ -824,14 +830,14 @@ func (f *fakeDir) SetDomainSpamThreshold(_ string, th *int) error {
 	return nil
 }
 func (f *fakeDir) GetDomainBranding(string) (directory.DomainBranding, bool, error) {
-	return f.branding, !f.branding.Empty(), nil
+	return f.branding, !f.branding.Empty(), f.readErrs["GetDomainBranding"]
 }
 func (f *fakeDir) SetDomainBranding(_ string, b directory.DomainBranding) error {
 	f.branding, f.brandingSet = b, true
 	return nil
 }
 func (f *fakeDir) GetDomainNameTemplates(string) (string, string, error) {
-	return f.senderInt, f.senderExt, nil
+	return f.senderInt, f.senderExt, f.readErrs["GetDomainNameTemplates"]
 }
 func (f *fakeDir) SetDomainNameTemplates(_, internal, external string) error {
 	f.senderInt, f.senderExt = internal, external
@@ -845,7 +851,7 @@ func (f *fakeDir) SetDefaultSyncPolicy(p easpolicy.Policy) error {
 	return nil
 }
 func (f *fakeDir) GetDomainSyncPolicy(string) (easpolicy.Policy, error) {
-	return f.domainSyncPolicy, nil
+	return f.domainSyncPolicy, f.readErrs["GetDomainSyncPolicy"]
 }
 func (f *fakeDir) GetCreateDefaults(scopeID int64) (directory.CreateDefaults, bool, error) {
 	cd, ok := f.createDefaults[scopeID]
@@ -944,7 +950,7 @@ func (f *fakeDir) SetAliasesFor(username string, aliases []string) (bool, error)
 }
 func (f *fakeDir) GetDomainCatchAll(domain string) (string, bool, error) {
 	addr, ok := f.catchAll[domain]
-	return addr, ok, nil
+	return addr, ok, f.readErrs["GetDomainCatchAll"]
 }
 func (f *fakeDir) Resolve(address string) (string, bool) {
 	if f.resolvable[address] {
@@ -1020,12 +1026,14 @@ func (f *fakeDir) ListUsersInDomain(domainID int64) ([]directory.UserInfo, error
 			out = append(out, u)
 		}
 	}
-	return out, nil
+	return out, f.readErrs["ListUsersInDomain"]
 }
 func (f *fakeDir) ListContactsInDomain(int64) ([]directory.ContactInfo, error) {
-	return f.contacts, nil
+	return f.contacts, f.readErrs["ListContactsInDomain"]
 }
-func (f *fakeDir) ListMListsInDomain(int64) ([]directory.MListInfo, error) { return f.mlists, nil }
+func (f *fakeDir) ListMListsInDomain(int64) ([]directory.MListInfo, error) {
+	return f.mlists, f.readErrs["ListMListsInDomain"]
+}
 func (f *fakeDir) CreateContact(email, displayName, domain string) (int64, error) {
 	if f.createErr != nil {
 		return 0, f.createErr

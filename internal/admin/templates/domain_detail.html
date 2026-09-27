@@ -36,6 +36,7 @@
 
 <section class="card">
 {{template "card-head" (dict "Icon" "globe" "Title" "Details" "Desc" "Status, organization, mailbox limit and the contact details of this domain.")}}
+{{with index .ReadFailed "details"}}<p class="error">{{.}}</p>{{else}}
 <form class="form-grid" hx-put="/admin/ui/domains/{{.Domain.ID}}" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Domain <input type="text" value="{{.Domain.Name}}" disabled></label>
@@ -57,6 +58,7 @@
 <label>Telephone <input type="text" name="tel" value="{{.Domain.Tel}}" maxlength="64"></label>
 <button type="submit">Save</button>
 </form>
+{{end}}
 </section>
 
 <section class="card">
@@ -72,7 +74,7 @@
 <thead><tr><th>Username</th></tr></thead>
 <tbody>
 {{range .DomainUsers}}<tr><td><a href="/admin/ui/users/{{.Username}}">{{.Username}}</a></td></tr>
-{{else}}<tr><td class="empty">No users.</td></tr>{{end}}
+{{else}}<tr><td class="empty{{if .DomainUsersError}} failed{{end}}">{{if .DomainUsersError}}{{.DomainUsersError}}{{else}}No users.{{end}}</td></tr>{{end}}
 </tbody>
 </table>
 </section>
@@ -83,7 +85,7 @@
 <thead><tr><th>Address</th><th>Display name</th><th>LDAP ID</th></tr></thead>
 <tbody>
 {{range .DomainContacts}}<tr><td>{{.Address}}</td><td>{{.DisplayName}}</td><td>{{if .LDAPID}}<code>{{.LDAPID}}</code>{{end}}</td></tr>
-{{else}}<tr><td colspan="3" class="empty">No contacts.</td></tr>{{end}}
+{{else}}<tr><td colspan="3" class="empty{{if .DomainContactsError}} failed{{end}}">{{if .DomainContactsError}}{{.DomainContactsError}}{{else}}No contacts.{{end}}</td></tr>{{end}}
 </tbody>
 </table>
 </section>
@@ -94,7 +96,7 @@
 <thead><tr><th>Address</th></tr></thead>
 <tbody>
 {{range .DomainGroups}}<tr><td>{{.Listname}}</td></tr>
-{{else}}<tr><td class="empty">No groups.</td></tr>{{end}}
+{{else}}<tr><td class="empty{{if .DomainGroupsError}} failed{{end}}">{{if .DomainGroupsError}}{{.DomainGroupsError}}{{else}}No groups.{{end}}</td></tr>{{end}}
 </tbody>
 </table>
 </section>
@@ -104,15 +106,18 @@
 <div class="card-grid">
 <section class="card">
 {{template "card-head" (dict "Icon" "shield-alert" "Title" "Spam threshold" "Desc" "Inbound mail at or above this score goes to Junk for this domain's mailboxes, unless a user sets their own. Empty inherits the global threshold; an operator block or allow rule still wins.")}}
+{{with index .ReadFailed "spam"}}<p class="error">{{.}}</p>{{else}}
 <form hx-put="/admin/ui/domains/{{.Domain.ID}}/spam-threshold" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Threshold <input type="number" name="spam_threshold" value="{{if .SpamThreshold}}{{.SpamThreshold}}{{end}}" min="1" placeholder="inherit"></label>
 <button type="submit">Save threshold</button>
 </form>
+{{end}}
 </section>
 
 <section class="card">
 {{template "card-head" (dict "Icon" "shield-check" "Title" "Antivirus" "Desc" "Scan this domain's mail through ClamAV. A match is quarantined, not delivered, and the recipient plus the domain and organization administrators are notified.")}}
+{{with index .ReadFailed "avscan"}}<p class="error">{{.}}</p>{{else}}
 <form hx-put="/admin/ui/domains/{{.Domain.ID}}/avscan" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label class="check"><input type="checkbox" name="av_scan_inbound" {{if .AVScanInbound}}checked{{end}}> Scan inbound mail</label>
@@ -120,11 +125,13 @@
 <p class="hint">Inbound covers messages arriving for this domain's mailboxes; outbound covers messages its users send. Scanning also requires a clamd service configured on the server.</p>
 <button type="submit">Save antivirus</button>
 </form>
+{{end}}
 </section>
 </div>
 
 <section class="card">
 {{template "card-head" (dict "Icon" "inbox" "Title" "Catch-all mailbox" "Desc" "Mail addressed to a local part this domain does not have is delivered to this mailbox instead of being refused.")}}
+{{with index .ReadFailed "catchall"}}<p class="error">{{.}}</p>{{else}}
 <form hx-put="/admin/ui/domains/{{.Domain.ID}}/catchall" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Mailbox
@@ -135,16 +142,19 @@
 <p class="hint">It applies to delivery only: an unknown address still cannot sign in, and it appears in no address book. The delivered message carries a Delivered-To header naming the address it was sent to.</p>
 <button type="submit">Save catch-all</button>
 </form>
+{{end}}
 </section>
 
 <section class="card">
 {{template "card-head" (dict "Icon" "server" "Title" "Split domain" "Desc" "Share this domain with another mail system. Leave the host empty when every address of the domain lives here.")}}
+{{with index .ReadFailed "split"}}<p class="error">{{.}}</p>{{else}}
 <form hx-put="/admin/ui/domains/{{.Domain.ID}}/split" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Host <input type="text" name="split_relay_host" value="{{.SplitRelayHost}}" placeholder="legacy-mail.example.com"></label>
 <p class="hint">Mail that local users send, and mail this server generates, to an address of this domain with no mailbox here is delivered to this host instead of being refused. Mail arriving from outside for such an address is still refused, and postmaster stays local.</p>
 <button type="submit">Save split domain</button>
 </form>
+{{end}}
 </section>
 
 <section class="card">
@@ -154,6 +164,7 @@
 
 <section class="card">
 {{template "card-head" (dict "Icon" "user-cog" "Title" "Outgoing display name" "Desc" "Rebuild the From display name on outgoing mail from the sender's profile.")}}
+{{with index .ReadFailed "sendername"}}<p class="error">{{.}}</p>{{else}}
 <form class="form-grid" hx-put="/admin/ui/domains/{{.Domain.ID}}/sendername" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Internal recipients <input type="text" name="sender_name_internal" value="{{.SenderNameInternal}}" placeholder="{name} ({title})"></label>
@@ -161,6 +172,7 @@
 <p class="hint">Placeholders: <code>{name}</code> <code>{company}</code> <code>{title}</code> <code>{department}</code> <code>{office}</code>. Leave a template blank to keep the sender's own From name for that direction.</p>
 <button type="submit">Save outgoing name</button>
 </form>
+{{end}}
 </section>
 </section>
 
@@ -177,6 +189,7 @@
 <thead><tr><th>Record</th><th>Type</th><th>Name</th><th>Value</th></tr></thead>
 <tbody>
 {{range .DNSRecords}}<tr><td class="dns-label">{{.Label}}<small>{{.Note}}</small></td><td><span class="badge">{{.Type}}</span></td><td><code>{{.Name}}</code></td><td><code class="dns-record">{{.Value}}</code></td></tr>
+{{else}}{{with .DNSRecordsError}}<tr><td colspan="4" class="empty failed">{{.}}</td></tr>{{end}}
 {{end}}
 </tbody>
 </table>
@@ -192,6 +205,7 @@
 <section class="tabpanel">
 <section class="card">
 {{template "card-head" (dict "Icon" "shield" "Title" "Device policy" "Desc" "Overrides the server default for this domain's devices; a per-user override is merged on top. Leave a field unset to inherit. Password rules apply only when DevicePasswordEnabled is Yes.")}}
+{{with index .ReadFailed "policy"}}<p class="error">{{.}}</p>{{else}}
 <form hx-put="/admin/ui/domains/{{.Domain.ID}}/syncpolicy" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <div class="policy-grid">
@@ -204,10 +218,12 @@
 </div>
 <button type="submit">Save device policy</button>
 </form>
+{{end}}
 </section>
 
 <section class="card">
 {{template "card-head" (dict "Icon" "sliders-horizontal" "Title" "User create defaults (override)" "Desc" "Overrides the system create-defaults for new users in this domain. Leave a field on Inherit to use the system value.")}}
+{{with index .ReadFailed "override"}}<p class="error">{{.}}</p>{{else}}
 <form hx-put="/admin/ui/domains/{{.Domain.ID}}/createdefaults" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <div class="field-grid">
@@ -226,10 +242,12 @@
 </div>
 <button type="submit">Save override</button>
 </form>
+{{end}}
 </section>
 
 <section class="card">
 {{template "card-head" (dict "Icon" "layout-dashboard" "Title" "Login branding" "Desc" "What the login screen shows for users signing in under this domain. Leave all fields blank to inherit the global default.")}}
+{{with index .ReadFailed "branding"}}<p class="error">{{.}}</p>{{else}}
 <form class="form-grid" hx-put="/admin/ui/domains/{{.Domain.ID}}/branding" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>App name <input type="text" name="app_name" value="{{.Branding.AppName}}" placeholder="hermEX"></label>
@@ -239,6 +257,7 @@
 <label class="full">Footer text <input type="text" name="footer_text" value="{{.Branding.FooterText}}"></label>
 <button type="submit">Save branding</button>
 </form>
+{{end}}
 </section>
 </section>
 

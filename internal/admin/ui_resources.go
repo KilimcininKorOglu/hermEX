@@ -101,45 +101,103 @@ func (s *Server) handleUIDomainDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no such domain", http.StatusNotFound)
 		return
 	}
-	orgs, _ := s.dir.ListOrgs()
-	policy, _ := s.dir.GetDomainSyncPolicy(dd.Name)
-	override, _, _ := s.dir.GetCreateDefaults(dd.ID)
-	users, _ := s.dir.ListUsersInDomain(id)
-	contacts, _ := s.dir.ListContactsInDomain(id)
-	groups, _ := s.dir.ListMListsInDomain(id)
-	spamThreshold, _ := s.dir.GetDomainSpamThreshold(dd.Name)
-	branding, _, _ := s.dir.GetDomainBranding(dd.Name)
-	senderInt, senderExt, _ := s.dir.GetDomainNameTemplates(dd.Name)
-	avIn, avOut, _ := s.dir.GetDomainAVScan(dd.Name)
-	data := map[string]any{
-		"Nav": "domains", "CSRF": csrfCookieValue(r), "Domain": dd, "Orgs": orgs,
-		"PolicyFields":       policyView(policy),
-		"Override":           userOverrideViewOf(override.User),
-		"DomainUsers":        users,
-		"DomainContacts":     contacts,
-		"DomainGroups":       groups,
-		"SpamThreshold":      spamThreshold,
-		"Branding":           branding,
-		"SenderNameInternal": senderInt,
-		"SenderNameExternal": senderExt,
-		"AVScanInbound":      avIn,
-		"AVScanOutbound":     avOut,
-	}
-	maps.Copy(data, s.dkimData(dd.Name))
-	catchAll, _, _ := s.dir.GetDomainCatchAll(dd.Name)
-	data["CatchAll"] = catchAll
-	data["SplitRelayHost"], _ = s.dir.SplitRelayHost(dd.Name)
 	failed := readFailures{}
+	data := map[string]any{"Nav": "domains", "CSRF": csrfCookieValue(r), "Domain": dd, "ReadFailed": failed}
+	orgs, err := s.dir.ListOrgs()
+	if s.noteRead(failed, "details", "the organizations", err) {
+		data["Orgs"] = orgs
+	}
+	s.addDomainMembers(data, failed, id, dd.Name)
+	s.addDomainMailHandling(data, failed, dd.Name)
+	s.addDomainPolicies(data, failed, dd)
+	maps.Copy(data, s.dkimData(dd.Name))
 	s.addDomainGateway(data, failed, dd.Name)
-	data["ReadFailed"] = failed
-	// Prescribe the DNS records the domain owner must publish, reusing the DKIM
-	// record already merged above (empty when no key exists yet) and adding the
-	// MTA-STS/TLSRPT records when publishing is enabled.
-	dkimName, _ := data["DKIMRecordName"].(string)
-	dkimValue, _ := data["DKIMPublicTXT"].(string)
-	sts, _, _ := s.dir.GetMTASTSSettings()
-	data["DNSRecords"] = prescribeDomainDNS(dd.Name, s.paths.ServerHostname(), dkimName, dkimValue, sts)
+	s.addDomainDNSRecords(data, dd.Name)
 	s.render(w, "domain_detail.html", data)
+}
+
+// addDomainMembers lists a domain's users, contacts and groups on its detail page,
+// or reports a list that could not be read, which the page must not show as empty.
+// The catch-all form chooses among the users, so it is hidden when either they or
+// the stored catch-all cannot be read.
+func (s *Server) addDomainMembers(data map[string]any, failed readFailures, id int64, domain string) {
+	users, usersErr := s.dir.ListUsersInDomain(id)
+	data["DomainUsers"] = users
+	if usersErr != nil {
+		data["DomainUsersError"] = s.notice("Could not read the users of this domain.", usersErr)
+	}
+	contacts, err := s.dir.ListContactsInDomain(id)
+	data["DomainContacts"] = contacts
+	if err != nil {
+		data["DomainContactsError"] = s.notice("Could not read the contacts of this domain.", err)
+	}
+	groups, err := s.dir.ListMListsInDomain(id)
+	data["DomainGroups"] = groups
+	if err != nil {
+		data["DomainGroupsError"] = s.notice("Could not read the groups of this domain.", err)
+	}
+	catchAll, _, err := s.dir.GetDomainCatchAll(domain)
+	if s.noteRead(failed, "catchall", "the users of this domain", usersErr) &&
+		s.noteRead(failed, "catchall", "the catch-all mailbox", err) {
+		data["CatchAll"] = catchAll
+	}
+}
+
+// addDomainMailHandling fills the detail page's mail handling forms, hiding each one
+// whose stored value could not be read.
+func (s *Server) addDomainMailHandling(data map[string]any, failed readFailures, domain string) {
+	threshold, err := s.dir.GetDomainSpamThreshold(domain)
+	if s.noteRead(failed, "spam", "the spam threshold", err) {
+		data["SpamThreshold"] = threshold
+	}
+	avIn, avOut, err := s.dir.GetDomainAVScan(domain)
+	if s.noteRead(failed, "avscan", "the antivirus settings", err) {
+		data["AVScanInbound"], data["AVScanOutbound"] = avIn, avOut
+	}
+	host, err := s.dir.SplitRelayHost(domain)
+	if s.noteRead(failed, "split", "the split domain host", err) {
+		data["SplitRelayHost"] = host
+	}
+	internal, external, err := s.dir.GetDomainNameTemplates(domain)
+	if s.noteRead(failed, "sendername", "the outgoing display name templates", err) {
+		data["SenderNameInternal"], data["SenderNameExternal"] = internal, external
+	}
+}
+
+// addDomainPolicies fills the detail page's policy forms, hiding each one whose
+// stored value could not be read.
+func (s *Server) addDomainPolicies(data map[string]any, failed readFailures, dd directory.DomainDetail) {
+	policy, err := s.dir.GetDomainSyncPolicy(dd.Name)
+	if s.noteRead(failed, "policy", "the device policy of this domain", err) {
+		data["PolicyFields"] = policyView(policy)
+	}
+	override, _, err := s.dir.GetCreateDefaults(dd.ID)
+	if s.noteRead(failed, "override", "the create defaults override", err) {
+		data["Override"] = userOverrideViewOf(override.User)
+	}
+	branding, _, err := s.dir.GetDomainBranding(dd.Name)
+	if s.noteRead(failed, "branding", "the login branding", err) {
+		data["Branding"] = branding
+	}
+}
+
+// addDomainDNSRecords prescribes the DNS records the domain owner must publish,
+// reusing the DKIM record dkimData merged (empty when no key exists yet) and adding
+// the MTA-STS/TLSRPT records when publishing is enabled. When either input could not
+// be read no list is built, because it would tell the owner to generate a key that
+// may exist, or leave out the MTA-STS records the domain needs.
+func (s *Server) addDomainDNSRecords(data map[string]any, domain string) {
+	sts, _, err := s.dir.GetMTASTSSettings()
+	switch {
+	case err != nil:
+		data["DNSRecordsError"] = s.notice("Could not read the MTA-STS settings, so the required records cannot be listed.", err)
+	case data["DKIMError"] != nil:
+		data["DNSRecordsError"] = "Could not read the DKIM key, so the required records cannot be listed."
+	default:
+		dkimName, _ := data["DKIMRecordName"].(string)
+		dkimValue, _ := data["DKIMPublicTXT"].(string)
+		data["DNSRecords"] = prescribeDomainDNS(domain, s.paths.ServerHostname(), dkimName, dkimValue, sts)
+	}
 }
 
 // handleUISaveDomain saves a domain's edited fields from the detail form and
