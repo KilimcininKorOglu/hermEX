@@ -269,6 +269,8 @@ table.grid + *, * + table.grid { margin-top: 1rem; }
 .card-desc { margin: 0.125rem 0 0; color: var(--muted-foreground); font-size: 0.875rem; }
 .card-head .page-actions { margin-left: auto; }
 .card > :last-child { margin-bottom: 0; }
+/* A result slot that holds nothing yet takes no room at the foot of its card. */
+.card > :empty { margin-top: 0; }
 .card.danger-zone { border-color: var(--error-border); }
 .card.danger-zone .card-icon { background: var(--error-bg); color: var(--destructive-text); }
 

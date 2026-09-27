@@ -1,8 +1,7 @@
 {{define "second_factor.html"}}{{template "head" .}}
 <main class="login">
-<h1>hermEX Admin</h1>
+<div class="login-brand">{{template "brand"}}<div><h1>Two-step verification</h1><p class="page-desc">Enter the code from your authenticator app, or one of your recovery codes.</p></div></div>
 {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
-<p>Enter the code from your authenticator app, or one of your recovery codes.</p>
 <form method="post" action="/admin/ui/second-factor">
 <input type="hidden" name="_csrf" value="{{.CSRF}}">
 <label>Verification code
