@@ -31,7 +31,7 @@ func (s *Server) handleUIQuarantine(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.renderQuarantine(w, r.PathValue("email"), maildir, csrfCookieValue(r), "")
+	s.renderQuarantine(w, r.PathValue("email"), maildir, csrfCookieValue(r), panelNotice{})
 }
 
 // handleUIQuarantineRelease moves a quarantined message from Junk back to the inbox,
@@ -47,12 +47,12 @@ func (s *Server) handleUIQuarantineRelease(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	uid := quarantineUID(r)
-	notice := "Released to the inbox."
+	notice := okNotice("Released to the inbox.")
 	if err := s.quarantineMutate(maildir, func(st *objectstore.Store) error {
 		_, err := st.MoveMessage(int64(mapi.PrivateFIDJunk), uid, int64(mapi.PrivateFIDInbox))
 		return err
 	}); err != nil {
-		notice = "Could not release the message, it may already have been moved."
+		notice = warnNotice("Could not release the message, it may already have been moved.")
 	}
 	s.renderQuarantine(w, r.PathValue("email"), maildir, csrfCookieValue(r), notice)
 }
@@ -68,11 +68,11 @@ func (s *Server) handleUIQuarantineDelete(w http.ResponseWriter, r *http.Request
 		return
 	}
 	uid := quarantineUID(r)
-	notice := "Deleted."
+	notice := okNotice("Deleted.")
 	if err := s.quarantineMutate(maildir, func(st *objectstore.Store) error {
 		return st.DeleteMessage(int64(mapi.PrivateFIDJunk), uid)
 	}); err != nil {
-		notice = "Could not delete the message, it may already be gone."
+		notice = warnNotice("Could not delete the message, it may already be gone.")
 	}
 	s.renderQuarantine(w, r.PathValue("email"), maildir, csrfCookieValue(r), notice)
 }
@@ -96,7 +96,7 @@ func (s *Server) quarantineMutate(maildir string, fn func(*objectstore.Store) er
 // renderQuarantine reads the user's Junk folder and renders the quarantine panel. A
 // mailbox that cannot be opened (e.g. one that was never provisioned) shows an empty
 // quarantine rather than a failure, a clean mailbox is not an error.
-func (s *Server) renderQuarantine(w http.ResponseWriter, email, maildir, csrf, notice string) {
+func (s *Server) renderQuarantine(w http.ResponseWriter, email, maildir, csrf string, notice panelNotice) {
 	data := map[string]any{"Email": email, "CSRF": csrf, "Notice": notice}
 	st, err := objectstore.Open(maildir)
 	if err != nil {

@@ -13,7 +13,7 @@
 {{template "foot" .}}{{end}}
 
 {{define "sender-access-panel"}}<div id="sender-access-panel">
-{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+{{template "notice" .Notice}}
 <table class="grid">
 <thead><tr><th>Pattern</th><th>Action</th><th></th></tr></thead>
 <tbody>

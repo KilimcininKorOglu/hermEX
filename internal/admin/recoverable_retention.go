@@ -19,7 +19,7 @@ func (s *Server) fillRecoverableRetention(data map[string]any) {
 
 // recoverableRetentionPanelData builds the model the panel renders: the stored window
 // (or the default) plus the notice and CSRF token its htmx form needs.
-func (s *Server) recoverableRetentionPanelData(r *http.Request, notice string) map[string]any {
+func (s *Server) recoverableRetentionPanelData(r *http.Request, notice panelNotice) map[string]any {
 	data := map[string]any{"Notice": notice, "CSRF": csrfCookieValue(r)}
 	s.fillRecoverableRetention(data)
 	return data
@@ -35,12 +35,12 @@ func (s *Server) handleUISaveRecoverableRetention(w http.ResponseWriter, r *http
 	}
 	days := formInt(r, "recoverable_retention_days")
 	if err := s.dir.SetRecoverableSettings(directory.RecoverableSettings{RetentionDays: days}); err != nil {
-		s.render(w, "recoverable-retention-panel", s.recoverableRetentionPanelData(r, s.notice("Could not save the retention setting.", err)))
+		s.render(w, "recoverable-retention-panel", s.recoverableRetentionPanelData(r, s.failNotice("Could not save the retention setting.", err)))
 		return
 	}
 	msg := "Recoverable Items retention saved; the sweep purges expired items within a minute, no restart."
 	if days <= 0 {
 		msg = "Recoverable Items retention set to keep forever; auto-purge is disabled."
 	}
-	s.render(w, "recoverable-retention-panel", s.recoverableRetentionPanelData(r, msg))
+	s.render(w, "recoverable-retention-panel", s.recoverableRetentionPanelData(r, okNotice(msg)))
 }

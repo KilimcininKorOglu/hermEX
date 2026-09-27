@@ -63,11 +63,11 @@ func (s *Server) handleUISaveGateway(w http.ResponseWriter, r *http.Request) {
 	}
 	stored, _, _ := s.dir.GetSMTPGateway(directory.GlobalGateway)
 	if err := s.dir.SetSMTPGateway(directory.GlobalGateway, gatewayFromForm(r, stored.Password)); err != nil {
-		s.render(w, "gateway-panel", s.antispamPageData(r, s.notice("Could not save the gateway.", err)))
+		s.render(w, "gateway-panel", s.antispamPageData(r, s.failNotice("Could not save the gateway.", err)))
 		return
 	}
 	s.render(w, "gateway-panel", s.antispamPageData(r,
-		"Outbound gateway saved, the MTA applies it within a minute, no restart."))
+		okNotice("Outbound gateway saved, the MTA applies it within a minute, no restart.")))
 }
 
 // handleUIDeleteGateway removes the global gateway, returning every domain that has no
@@ -77,15 +77,15 @@ func (s *Server) handleUIDeleteGateway(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := s.dir.DeleteSMTPGateway(directory.GlobalGateway); err != nil {
-		s.render(w, "gateway-panel", s.antispamPageData(r, s.notice("Could not remove the gateway.", err)))
+		s.render(w, "gateway-panel", s.antispamPageData(r, s.failNotice("Could not remove the gateway.", err)))
 		return
 	}
 	s.render(w, "gateway-panel", s.antispamPageData(r,
-		"Outbound gateway removed, mail is delivered directly to each recipient's mail exchangers again."))
+		okNotice("Outbound gateway removed, mail is delivered directly to each recipient's mail exchangers again.")))
 }
 
 // domainGatewayPanel re-renders one domain's gateway fragment with a notice.
-func (s *Server) domainGatewayPanel(w http.ResponseWriter, r *http.Request, dd directory.DomainDetail, notice string) {
+func (s *Server) domainGatewayPanel(w http.ResponseWriter, r *http.Request, dd directory.DomainDetail, notice panelNotice) {
 	g, found, err := s.dir.GetSMTPGateway(dd.Name)
 	s.render(w, "domain-gateway-panel", map[string]any{
 		"Domain": dd, "CSRF": csrfCookieValue(r), "GatewayNotice": notice,
@@ -105,10 +105,10 @@ func (s *Server) handleUISaveDomainGateway(w http.ResponseWriter, r *http.Reques
 	}
 	stored, _, _ := s.dir.GetSMTPGateway(dd.Name)
 	if err := s.dir.SetSMTPGateway(dd.Name, gatewayFromForm(r, stored.Password)); err != nil {
-		s.domainGatewayPanel(w, r, dd, s.notice("Could not save the gateway.", err))
+		s.domainGatewayPanel(w, r, dd, s.failNotice("Could not save the gateway.", err))
 		return
 	}
-	s.domainGatewayPanel(w, r, dd, "Gateway saved for this domain, the MTA applies it within a minute.")
+	s.domainGatewayPanel(w, r, dd, okNotice("Gateway saved for this domain, the MTA applies it within a minute."))
 }
 
 // handleUIDeleteDomainGateway removes one domain's override so it follows the global
@@ -122,8 +122,8 @@ func (s *Server) handleUIDeleteDomainGateway(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if _, err := s.dir.DeleteSMTPGateway(dd.Name); err != nil {
-		s.domainGatewayPanel(w, r, dd, s.notice("Could not remove the override.", err))
+		s.domainGatewayPanel(w, r, dd, s.failNotice("Could not remove the override.", err))
 		return
 	}
-	s.domainGatewayPanel(w, r, dd, "Override removed, this domain follows the global gateway again.")
+	s.domainGatewayPanel(w, r, dd, okNotice("Override removed, this domain follows the global gateway again."))
 }

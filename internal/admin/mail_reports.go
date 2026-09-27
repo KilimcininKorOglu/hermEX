@@ -337,7 +337,7 @@ func (s *Server) fillMailReportRetention(data map[string]any) {
 	stored, found, err := s.dir.GetMailReportSettings()
 	switch {
 	case err != nil:
-		data["Notice"] = s.notice("Could not read the retention setting; the defaults are shown.", err)
+		data["Notice"] = s.failNotice("Could not read the retention setting; the defaults are shown.", err)
 	case found:
 		rs = stored
 	}
@@ -359,12 +359,12 @@ func (s *Server) handleUISaveMailReportRetention(w http.ResponseWriter, r *http.
 	data := map[string]any{"CSRF": csrfCookieValue(r)}
 	if err := s.dir.SetMailReportSettings(rs); err != nil {
 		s.fillMailReportRetention(data)
-		data["Notice"] = s.notice("Could not save the retention setting.", err)
+		data["Notice"] = s.failNotice("Could not save the retention setting.", err)
 		s.render(w, "report-retention-panel", data)
 		return
 	}
 	s.fillMailReportRetention(data)
-	data["Notice"] = "Report retention saved; the sweep deletes expired reports within a minute, no restart."
+	data["Notice"] = okNotice("Report retention saved; the sweep deletes expired reports within a minute, no restart.")
 	s.render(w, "report-retention-panel", data)
 }
 
@@ -373,7 +373,7 @@ func (s *Server) handleUISaveMailReportRetention(w http.ResponseWriter, r *http.
 func (s *Server) fillDMARCSending(data map[string]any) {
 	stored, _, err := s.dir.GetDMARCReportSettings()
 	if err != nil {
-		data["DMARCNotice"] = s.notice("Could not read the DMARC sending setting; it is shown as off.", err)
+		data["DMARCNotice"] = s.failNotice("Could not read the DMARC sending setting; it is shown as off.", err)
 	}
 	data["DMARCSending"] = err == nil && stored.Enabled
 }
@@ -389,11 +389,11 @@ func (s *Server) handleUISaveDMARCSending(w http.ResponseWriter, r *http.Request
 	data := map[string]any{"CSRF": csrfCookieValue(r)}
 	if err := s.dir.SetDMARCReportSettings(directory.DMARCReportSettings{Enabled: on}); err != nil {
 		s.fillDMARCSending(data)
-		data["DMARCNotice"] = s.notice("Could not save the DMARC sending setting.", err)
+		data["DMARCNotice"] = s.failNotice("Could not save the DMARC sending setting.", err)
 		s.render(w, "dmarc-sending-panel", data)
 		return
 	}
 	s.fillDMARCSending(data)
-	data["DMARCNotice"] = "DMARC report sending saved; the mail server applies it within a minute, no restart."
+	data["DMARCNotice"] = okNotice("DMARC report sending saved; the mail server applies it within a minute, no restart.")
 	s.render(w, "dmarc-sending-panel", data)
 }

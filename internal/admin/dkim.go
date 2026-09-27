@@ -111,7 +111,7 @@ func dkimKeyTypeFrom(r *http.Request) (string, bool) {
 }
 
 // dkimPanel re-renders the DKIM panel fragment for a domain with a notice.
-func (s *Server) dkimPanel(w http.ResponseWriter, r *http.Request, dd directory.DomainDetail, notice string) {
+func (s *Server) dkimPanel(w http.ResponseWriter, r *http.Request, dd directory.DomainDetail, notice panelNotice) {
 	data := map[string]any{"Domain": dd, "CSRF": csrfCookieValue(r), "DKIMNotice": notice}
 	maps.Copy(data, s.dkimData(dd.Name))
 	s.render(w, "dkim-panel", data)
@@ -146,24 +146,24 @@ func (s *Server) handleUIDKIMGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 	selector, ok := dkimSelectorFrom(r)
 	if !ok {
-		s.dkimPanel(w, r, dd, "Not a valid selector. Use letters, digits and hyphens, optionally separated by dots.")
+		s.dkimPanel(w, r, dd, errorNotice("Not a valid selector. Use letters, digits and hyphens, optionally separated by dots."))
 		return
 	}
 	keyType, ok := dkimKeyTypeFrom(r)
 	if !ok {
-		s.dkimPanel(w, r, dd, "Not a supported key type. Choose rsa or ed25519.")
+		s.dkimPanel(w, r, dd, errorNotice("Not a supported key type. Choose rsa or ed25519."))
 		return
 	}
 	privPEM, dnsTXT, err := dkimsign.GenerateKey(keyType)
 	if err != nil {
-		s.dkimPanel(w, r, dd, s.notice("Could not generate a key.", err))
+		s.dkimPanel(w, r, dd, s.failNotice("Could not generate a key.", err))
 		return
 	}
 	if err := s.dir.SetDKIMKey(dd.Name, selector, privPEM, dnsTXT); err != nil {
-		s.dkimPanel(w, r, dd, s.notice("Could not save the key.", err))
+		s.dkimPanel(w, r, dd, s.failNotice("Could not save the key.", err))
 		return
 	}
-	s.dkimPanel(w, r, dd, "Key generated. Publish the DNS record below, then enable signing.")
+	s.dkimPanel(w, r, dd, okNotice("Key generated. Publish the DNS record below, then enable signing."))
 }
 
 // handleUIDKIMOutput re-renders the published record in the operator's chosen output mode.
@@ -199,14 +199,14 @@ func (s *Server) handleUIDKIMEnable(w http.ResponseWriter, r *http.Request) {
 	}
 	enabled := r.FormValue("enabled") == "1"
 	if err := s.dir.SetDKIMEnabled(dd.Name, enabled); err != nil {
-		s.dkimPanel(w, r, dd, s.notice("Could not change signing.", err))
+		s.dkimPanel(w, r, dd, s.failNotice("Could not change signing.", err))
 		return
 	}
 	verb := "disabled"
 	if enabled {
 		verb = "enabled"
 	}
-	s.dkimPanel(w, r, dd, "Signing "+verb+".")
+	s.dkimPanel(w, r, dd, okNotice("Signing "+verb+"."))
 }
 
 // handleUIDKIMDelete removes the domain's signing key, stopping signing.
@@ -219,8 +219,8 @@ func (s *Server) handleUIDKIMDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.dir.DeleteDKIMKey(dd.Name); err != nil {
-		s.dkimPanel(w, r, dd, s.notice("Could not delete the key.", err))
+		s.dkimPanel(w, r, dd, s.failNotice("Could not delete the key.", err))
 		return
 	}
-	s.dkimPanel(w, r, dd, "Key deleted.")
+	s.dkimPanel(w, r, dd, okNotice("Key deleted."))
 }

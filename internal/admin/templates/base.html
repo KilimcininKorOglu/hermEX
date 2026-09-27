@@ -36,6 +36,10 @@
      and a one-line description. It takes dict "Icon" "Title" "Desc". */}}
 {{define "card-head"}}<div class="card-head"><span class="card-icon"><svg class="icon" aria-hidden="true"><use href="{{icon .Icon}}"/></svg></span><div class="card-title"><h2>{{.Title}}</h2>{{if .Desc}}<p class="card-desc">{{.Desc}}</p>{{end}}</div></div>{{end}}
 
+{{/* notice renders a settings panel's panelNotice with its status class: an
+     acknowledgement, a caveat or a refusal. It renders nothing for an empty one. */}}
+{{define "notice"}}{{with .}}{{if .Text}}<p class="{{.Kind}}">{{.Text}}</p>{{end}}{{end}}{{end}}
+
 {{define "brand"}}<img class="brand-mark" src="{{asset "favicon.svg"}}" alt="" width="36" height="36">{{end}}
 
 {{define "sidebar"}}<aside class="sidebar" id="sidebar">

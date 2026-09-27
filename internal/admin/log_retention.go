@@ -20,7 +20,7 @@ func (s *Server) fillLogRetention(data map[string]any) {
 
 // logRetentionPanelData builds the model the log-retention panel renders: the stored
 // window (or the keep-forever default) plus the notice and CSRF token its htmx form needs.
-func (s *Server) logRetentionPanelData(r *http.Request, notice string) map[string]any {
+func (s *Server) logRetentionPanelData(r *http.Request, notice panelNotice) map[string]any {
 	data := map[string]any{"Notice": notice, "CSRF": csrfCookieValue(r)}
 	s.fillLogRetention(data)
 	return data
@@ -36,12 +36,12 @@ func (s *Server) handleUISaveLogRetention(w http.ResponseWriter, r *http.Request
 	}
 	days := formInt(r, "log_retention_days")
 	if err := s.dir.SetLogRetentionDays(days); err != nil {
-		s.render(w, "log-retention-panel", s.logRetentionPanelData(r, s.notice("Could not save the retention setting.", err)))
+		s.render(w, "log-retention-panel", s.logRetentionPanelData(r, s.failNotice("Could not save the retention setting.", err)))
 		return
 	}
 	msg := "Log retention saved, the admin prunes the log store to match within a minute, no restart."
 	if days == 0 {
 		msg = "Log retention set to keep forever, pruning is disabled."
 	}
-	s.render(w, "log-retention-panel", s.logRetentionPanelData(r, msg))
+	s.render(w, "log-retention-panel", s.logRetentionPanelData(r, okNotice(msg)))
 }

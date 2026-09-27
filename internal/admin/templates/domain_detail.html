@@ -260,7 +260,7 @@
 {{template "foot" .}}{{end}}
 
 {{define "domain-gateway-panel"}}<div id="domain-gateway-panel">
-{{if .GatewayNotice}}<p class="ok">{{.GatewayNotice}}</p>{{end}}
+{{template "notice" .GatewayNotice}}
 <p>This domain {{if .GatewayOverride}}has its own gateway{{else}}follows the global gateway{{end}}.</p>
 <form hx-post="/admin/ui/domains/{{.Domain.ID}}/gateway" hx-target="#domain-gateway-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 {{template "gateway-fields" .Gateway}}
@@ -277,7 +277,7 @@
 </div>{{end}}
 
 {{define "dkim-panel"}}<div id="dkim-panel">
-{{if .DKIMNotice}}<p class="ok">{{.DKIMNotice}}</p>{{end}}
+{{template "notice" .DKIMNotice}}
 {{if .DKIMHasKey}}
 <p>Status: {{if .DKIMEnabled}}<span class="status status-ok"><strong>enabled, outbound mail from this domain is signed</strong></span>{{else}}<span class="status status-warn"><strong>not signing, key generated, publish the record then enable</strong></span>{{end}} (selector <code>{{.DKIMSelector}}</code>).</p>
 <form>

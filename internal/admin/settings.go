@@ -9,7 +9,7 @@ func (s *Server) handleUISettings(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	s.render(w, "settings.html", s.settingsPageData(r, ""))
+	s.render(w, "settings.html", s.settingsPageData(r, panelNotice{}))
 }
 
 // settingsPageData merges every settings panel's data into one model. It reuses
@@ -17,7 +17,7 @@ func (s *Server) handleUISettings(w http.ResponseWriter, r *http.Request) {
 // message size, model/ruleset status) and adds the protocol limits, the login
 // lockout, the fetch policy and the retention windows so all panels render on the
 // single page.
-func (s *Server) settingsPageData(r *http.Request, notice string) map[string]any {
+func (s *Server) settingsPageData(r *http.Request, notice panelNotice) map[string]any {
 	data := s.antispamPageData(r, notice)
 	data["Nav"] = "settings"
 	s.fillSizeLimits(data)

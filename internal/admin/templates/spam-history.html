@@ -30,7 +30,7 @@
 {{template "foot" .}}{{end}}
 
 {{define "retention-panel"}}<div id="retention-panel">
-{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+{{template "notice" .Notice}}
 <p class="hint">The newest <strong>{{.Retain}}</strong> scored verdicts are kept; older rows are pruned automatically as new mail is scored, so the history never grows unbounded.</p>
 <form class="narrow" hx-post="/admin/ui/spam-history/retention" hx-target="#retention-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Verdicts to keep <input type="number" name="retain" value="{{.Retain}}" min="1"></label>

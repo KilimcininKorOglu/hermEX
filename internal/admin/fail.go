@@ -49,3 +49,29 @@ func (s *Server) notice(msg string, err error) string {
 	})
 	return msg
 }
+
+// panelNotice is the message a re-rendered settings panel shows above its form:
+// what was saved, or why nothing was. Kind is the status class it renders with
+// (the "notice" template). The page announces an "ok" notice as a toast and then
+// removes it, while a "warn" or "error" notice also stays beside the form, so a
+// refused or failed save never reads as a saved one.
+type panelNotice struct {
+	Text string
+	Kind string
+}
+
+// okNotice acknowledges a change that took effect.
+func okNotice(text string) panelNotice { return panelNotice{Text: text, Kind: "ok"} }
+
+// warnNotice reports a change that took effect with a caveat, or a requested
+// action that found nothing to act on.
+func warnNotice(text string) panelNotice { return panelNotice{Text: text, Kind: "warn"} }
+
+// errorNotice reports a change that was refused, and why.
+func errorNotice(text string) panelNotice { return panelNotice{Text: text, Kind: "error"} }
+
+// failNotice is notice for a panel: it records err server-side and reports msg
+// as a failed change.
+func (s *Server) failNotice(msg string, err error) panelNotice {
+	return errorNotice(s.notice(msg, err))
+}

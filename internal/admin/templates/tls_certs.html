@@ -10,7 +10,7 @@
 {{template "foot" .}}{{end}}
 
 {{define "tls-certs-panel"}}<div id="tls-certs-panel">
-{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+{{template "notice" .Notice}}
 <h2>Certificate mode</h2>
 <p class="hint">Manual serves the operator-uploaded certificates below. ACME has the gateway obtain and renew Let's Encrypt certificates automatically for every active domain's mail/autodiscover/autoconfig hosts (and the mta-sts host when publishing is on) over the TLS-ALPN-01 challenge, so each name must resolve to the gateway on :443. The apex is excluded, it is the domain owner's own website. A mode change takes effect when the gateway restarts; certificate contents still hot-reload without one.</p>
 <form hx-post="/admin/ui/tls/mode" hx-target="#tls-certs-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>

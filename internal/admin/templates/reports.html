@@ -125,7 +125,7 @@
 {{template "foot" .}}{{end}}
 
 {{define "report-retention-panel"}}<div id="report-retention-panel">
-{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+{{template "notice" .Notice}}
 <p class="hint">Reports are deleted once they are older than their retention window, counted from the time they arrived. 0 keeps them forever. A failure report carries the failed message's headers, which are personal data, so keep it for a shorter time.</p>
 <form hx-post="/admin/ui/reports/retention" hx-target="#report-retention-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>DMARC aggregate and TLS reports, days <input type="number" name="aggregate_days" value="{{.AggregateDays}}" min="0"></label>
@@ -135,7 +135,7 @@
 </div>{{end}}
 
 {{define "dmarc-sending-panel"}}<div id="dmarc-sending-panel">
-{{if .DMARCNotice}}<p class="ok">{{.DMARCNotice}}</p>{{end}}
+{{template "notice" .DMARCNotice}}
 <p class="hint">When this is on, the server counts the mail it receives from each domain that asks for DMARC aggregate reports, and once a day sends that domain a report to the mailto: addresses its DMARC record names. A report lists the addresses that sent mail claiming the domain, and how each one authenticated. It is sent from noreply at the server's hostname, and it is DKIM-signed only when that hostname has a DKIM key.</p>
 <form hx-post="/admin/ui/reports/dmarc-sending" hx-target="#dmarc-sending-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label class="check"><input type="checkbox" name="enabled" value="1"{{if .DMARCSending}} checked{{end}}> Send DMARC aggregate reports</label>

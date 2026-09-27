@@ -105,6 +105,34 @@ func TestRenderedPanelNoticeDoesNotLeakDriverText(t *testing.T) {
 	}
 }
 
+// TestPanelNoticeClassMatchesTheOutcome proves a settings panel renders its notice
+// with the class of what happened. The page announces an "ok" notice as a toast and
+// then removes it, so a refusal rendered as "ok" read as a saved setting and was
+// gone from the page a few seconds later.
+func TestPanelNoticeClassMatchesTheOutcome(t *testing.T) {
+	ts, _ := loggingAdminServer(t, systemAdminDir())
+	session, csrf := loginCookies(t, ts)
+
+	for _, tc := range []struct {
+		name, path string
+		form       url.Values
+		want       string
+	}{
+		{"refused", "/admin/ui/limits/requestrate", url.Values{"http_burst": {"0"}, "http_window": {"60"}},
+			`<p class="error">Burst and window must each be at least 1`},
+		{"rejected upload", "/admin/ui/tls/upload", url.Values{"cert": {"not a certificate"}, "key": {"not a key"}},
+			`<p class="error">Upload rejected`},
+		{"saved with a caveat", "/admin/ui/antispam/digest",
+			url.Values{"enabled": {"1"}, "interval": {"24"}, "base_url": {"https://mail.example.com"}},
+			`<p class="warn">Digest settings saved, but`},
+		{"saved", "/admin/ui/limits/requestrate", url.Values{"http_burst": {"900"}, "http_window": {"30"}},
+			`<p class="ok">Request-rate settings saved`},
+	} {
+		body := wantBody(t, htmxPOST(t, ts, tc.path, session, csrf, tc.form), http.StatusOK, tc.name)
+		wantContains(t, body, tc.want, tc.name+": the notice carries the outcome's class")
+	}
+}
+
 // TestCertificateUploadKeepsItsValidationMessage proves the sanitization spared the
 // panel's own validation. validateTLSCert describes the file the operator just
 // uploaded, not server internals, and its message is the only thing telling them what

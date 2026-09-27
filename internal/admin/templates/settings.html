@@ -61,7 +61,7 @@
 {{template "foot" .}}{{end}}
 
 {{define "log-retention-panel"}}<div id="log-retention-panel">
-{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+{{template "notice" .Notice}}
 <p class="hint">Central log events older than this many days are pruned by the admin daemon, so the log store never grows unbounded. Use <strong>0</strong> to keep logs forever (pruning disabled).</p>
 <form class="narrow" hx-post="/admin/ui/log-retention" hx-target="#log-retention-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Days to keep (0 = forever) <input type="number" name="log_retention_days" value="{{.LogRetentionDays}}" min="0"></label>
@@ -70,7 +70,7 @@
 </div>{{end}}
 
 {{define "recoverable-retention-panel"}}<div id="recoverable-retention-panel">
-{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+{{template "notice" .Notice}}
 <p class="hint">Soft-deleted mail (the Recoverable Items dumpster) older than this many days is permanently purged by the admin sweep, so deleted items stay recoverable for a bounded window. Use <strong>0</strong> to keep recoverable items forever (auto-purge disabled).</p>
 <form class="narrow" hx-post="/admin/ui/recoverable-retention" hx-target="#recoverable-retention-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Days to keep (0 = forever) <input type="number" name="recoverable_retention_days" value="{{.RecoverableRetentionDays}}" min="0"></label>

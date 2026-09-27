@@ -357,7 +357,7 @@
 {{end}}{{end}}
 
 {{define "quarantine"}}
-{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+{{template "notice" .Notice}}
 {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
 <table class="grid">
 <thead><tr><th>Date</th><th>From</th><th>Subject</th><th>Size</th><th></th></tr></thead>
