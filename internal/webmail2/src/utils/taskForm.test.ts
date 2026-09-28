@@ -14,6 +14,11 @@ describe("quickDueDays", () => {
     setDisplayTimeZone("")
     expect(quickDueDays(new Date("2026-11-26T22:30:00Z")).today).toBe("2026-11-26")
   })
+
+  it("sets next week on a Monday to the Monday after, not to Tuesday", () => {
+    expect(quickDueDays(new Date("2026-11-30T09:00:00Z")).nextWeek).toBe("2026-12-07")
+    expect(quickDueDays(new Date("2026-11-29T09:00:00Z")).nextWeek).toBe("2026-11-30")
+  })
 })
 
 describe("taskFormOf", () => {

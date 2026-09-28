@@ -64,12 +64,11 @@ export interface QuickDue {
 export function quickDueDays(now: Date = new Date()): QuickDue {
   const today = zonedDayKey(now)
   const weekday = weekdayOfKey(today)
-  const toMonday = weekday === 1 ? 1 : (8 - weekday) % 7
   return {
     today,
     tomorrow: addDaysToKey(today, 1),
     thisWeek: addDaysToKey(today, (5 - weekday + 7) % 7),
-    nextWeek: addDaysToKey(today, toMonday === 0 ? 7 : toMonday),
+    nextWeek: addDaysToKey(today, (8 - weekday) % 7 || 7),
   }
 }
 
