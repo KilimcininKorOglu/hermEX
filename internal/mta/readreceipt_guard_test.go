@@ -104,6 +104,28 @@ func TestReceiptTheReaderChoseIsNotGuarded(t *testing.T) {
 	wantEq(t, "receipts the client asked for", len(listInbox(t, p.senderDir)), 1)
 }
 
+// TestNoReceiptAnswersAReceipt proves a message that is itself a disposition
+// notification is never answered with another, even when it asks for one and the
+// reader agrees (RFC 8098 section 2.1).
+func TestNoReceiptAnswersAReceipt(t *testing.T) {
+	p := newReceiptParties(t)
+	raw := "From: sender@hermex.test\r\nTo: reader@hermex.test\r\nSubject: read\r\n" +
+		"Disposition-Notification-To: sender@hermex.test\r\nMIME-Version: 1.0\r\n" +
+		"Content-Type: multipart/report; report-type=disposition-notification; boundary=b\r\n\r\n" +
+		"--b\r\nContent-Type: text/plain\r\n\r\nread\r\n--b--\r\n"
+	_, err := Deliver(p.accounts, "sender@hermex.test", []string{"reader@hermex.test"}, []byte(raw), time.Now())
+	mustNoErr(t, "deliver the notification", err)
+	st, err := objectstore.Open(p.readerDir)
+	mustNoErr(t, "open the reader's mailbox", err)
+	defer st.Close()
+	id := listInbox(t, p.readerDir)[0].ID
+	pending, err := ReceiptPending(st, id)
+	mustNoErr(t, "read the request", err)
+	wantEq(t, "a receipt pending for a notification", pending, false)
+	p.send(t, st, id, ReceiptManual)
+	wantEq(t, "receipts answering a notification", len(listInbox(t, p.senderDir)), 0)
+}
+
 // TestReceiptDestinationOrder proves the receipt goes to the address the request
 // names, else to the sender, else to the represented sender.
 func TestReceiptDestinationOrder(t *testing.T) {

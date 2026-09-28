@@ -97,14 +97,13 @@ var receiptAddressTags = []mapi.PropTag{
 
 // receiptDestinationTags are the properties that say whether a message asks for a
 // read receipt and where it goes.
-var receiptDestinationTags = append([]mapi.PropTag{mapi.PrReadReceiptRequested}, receiptAddressTags...)
+var receiptDestinationTags = append([]mapi.PropTag{mapi.PrReadReceiptRequested, mapi.PrTransportMessageHeaders}, receiptAddressTags...)
 
 // receiptRequestTags are the properties a read-receipt request is read from.
 var receiptRequestTags = append([]mapi.PropTag{
 	mapi.PrSubject,
 	mapi.PrInternetMessageID,
 	mapi.PrClientSubmitTime,
-	mapi.PrTransportMessageHeaders,
 }, receiptDestinationTags...)
 
 // SendRequestedReceipt sends the read receipt a stored message asks for
@@ -171,7 +170,7 @@ func ReceiptPending(st *objectstore.Store, messageID int64) (bool, error) {
 // with a Disposition-Notification-To goes there, not to the From address. The
 // represented sender is the last resort for a message that names no sender.
 func receiptDestination(props mapi.PropertyValues) string {
-	if req, _ := props.Get(mapi.PrReadReceiptRequested); req != true {
+	if req, _ := props.Get(mapi.PrReadReceiptRequested); req != true || isMDN(props) {
 		return ""
 	}
 	for _, tag := range receiptAddressTags {
@@ -180,6 +179,18 @@ func receiptDestination(props mapi.PropertyValues) string {
 		}
 	}
 	return ""
+}
+
+// isMDN reports whether the message is itself a disposition notification, which
+// RFC 8098 section 2.1 forbids answering with another, whatever it asks for.
+func isMDN(props mapi.PropertyValues) bool {
+	hdr, err := mail.ReadMessage(strings.NewReader(stringValue(props, mapi.PrTransportMessageHeaders) + "\r\n"))
+	if err != nil {
+		return false
+	}
+	mediaType, params, err := mime.ParseMediaType(hdr.Header.Get("Content-Type"))
+	return err == nil && mediaType == "multipart/report" &&
+		strings.EqualFold(params["report-type"], "disposition-notification")
 }
 
 // automaticReceiptAllowed applies RFC 8098 section 2.1 to a receipt sent without
