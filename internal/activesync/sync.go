@@ -106,7 +106,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, sess *sessio
 		return
 	}
 
-	out, err := syncCollections(st, dev, collections, sess.protocol)
+	out, becameRead, err := syncCollections(st, dev, collections, sess.protocol)
 	if err != nil {
 		s.failRequest(w, r, "sync.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
@@ -115,6 +115,9 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, sess *sessio
 		s.failRequest(w, r, "sync.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
+	// The receipts go out after the device state is saved, so a failed save never
+	// leaves a receipt sent for a change the device will send again.
+	s.sendReadReceipts(sess, st, becameRead)
 	writeWBXML(w, wbxml.Elem(wbxml.ASSync, wbxml.Elem(wbxml.ASCollections, out...)))
 }
 
@@ -141,20 +144,20 @@ func (s *Server) waitForSyncChanges(w http.ResponseWriter, r *http.Request, sess
 
 // syncCollections runs every collection in the request through syncCollection and
 // collects their responses in request order. protocol is the negotiated version,
-// carried down because a mail item's rendering depends on it.
-func syncCollections(st *objectstore.Store, dev *deviceState, collections *wbxml.Node, protocol string) ([]*wbxml.Node, error) {
-	var out []*wbxml.Node
+// carried down because a mail item's rendering depends on it. becameRead lists the
+// messages the device's changes took from unread to read.
+func syncCollections(st *objectstore.Store, dev *deviceState, collections *wbxml.Node, protocol string) (out []*wbxml.Node, becameRead []int64, err error) {
 	for _, c := range collections.Children {
 		if c.Tag != wbxml.ASCollection {
 			continue
 		}
-		resp, err := syncCollection(st, dev, c, protocol)
+		resp, err := syncCollection(st, dev, c, protocol, &becameRead)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		out = append(out, resp)
 	}
-	return out, nil
+	return out, becameRead, nil
 }
 
 // syncWaitLimit builds the Status-14 reply for an out-of-range HeartbeatInterval,
@@ -324,7 +327,7 @@ const (
 // syncCollection processes one <Collection>: it primes on sync key 0, rejects a
 // stale key with Status 3, otherwise applies the client's commands and streams
 // the snapshot-diff changes (capped at the window).
-func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node, protocol string) (*wbxml.Node, error) {
+func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node, protocol string, becameRead *[]int64) (*wbxml.Node, error) {
 	collID := c.ChildText(wbxml.ASCollectionID)
 	clientKey := c.ChildText(wbxml.ASSyncKey)
 	window := parseWindow(c.ChildText(wbxml.ASWindowSize))
@@ -355,7 +358,7 @@ func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node, prot
 
 	// Apply the client's commands first, folding each into the snapshot so the
 	// diff below does not echo the client's own change back to it.
-	applyClientCommands(st, folderID, cstate, c)
+	*becameRead = append(*becameRead, applyClientCommands(st, folderID, cstate, c)...)
 
 	live, err := st.ListMessages(folderID)
 	if err != nil {
@@ -458,10 +461,12 @@ func diffSnapshot(snapshot map[string]int64, live []objectstore.MessageInfo) []p
 
 // applyClientCommands applies the device's Change (read flag) and Delete
 // commands to the store, updating the snapshot so the server does not echo them.
-func applyClientCommands(st *objectstore.Store, folderID int64, cstate *collectionState, c *wbxml.Node) {
+// It returns the messages a Change took from unread to read, which owe the read
+// receipt they ask for.
+func applyClientCommands(st *objectstore.Store, folderID int64, cstate *collectionState, c *wbxml.Node) (becameRead []int64) {
 	cmds := c.Child(wbxml.ASCommands)
 	if cmds == nil {
-		return
+		return nil
 	}
 	for _, cmd := range cmds.Children {
 		sid := cmd.ChildText(wbxml.ASServerID)
@@ -472,36 +477,43 @@ func applyClientCommands(st *objectstore.Store, folderID int64, cstate *collecti
 		uid := uint32(uid64)
 		switch cmd.Tag {
 		case wbxml.ASChange:
-			applyReadFlag(st, folderID, uid, sid, cstate, cmd)
+			if id, ok := applyReadFlag(st, folderID, uid, sid, cstate, cmd); ok {
+				becameRead = append(becameRead, id)
+			}
 		case wbxml.ASDelete:
 			if st.SoftDeleteMessage(folderID, uid) == nil {
 				delete(cstate.Items, sid)
 			}
 		}
 	}
+	return becameRead
 }
 
 // applyReadFlag applies one device Change command, which for a mail item carries
-// only the read flag, and records the resulting flags in the snapshot.
+// only the read flag, and records the resulting flags in the snapshot. It returns
+// the message's id and true when the change took it from unread to read.
 func applyReadFlag(st *objectstore.Store, folderID int64, uid uint32, sid string,
-	cstate *collectionState, cmd *wbxml.Node) {
+	cstate *collectionState, cmd *wbxml.Node) (int64, bool) {
 	data := cmd.Child(wbxml.ASData)
 	if data == nil {
-		return
+		return 0, false
 	}
-	cur, err := st.MessageFlags(folderID, uid)
+	m, err := st.MessageByUID(folderID, uid)
 	if err != nil {
-		return
+		return 0, false
 	}
+	cur := m.Flags
 	switch data.ChildText(wbxml.EMRead) {
 	case "1":
 		cur |= objectstore.FlagSeen
 	case "0":
 		cur &^= objectstore.FlagSeen
 	}
-	if st.SetMessageFlags(folderID, uid, cur) == nil {
-		cstate.Items[sid] = cur
+	if st.SetMessageFlags(folderID, uid, cur) != nil {
+		return 0, false
 	}
+	cstate.Items[sid] = cur
+	return m.ID, m.Flags&objectstore.FlagSeen == 0 && cur&objectstore.FlagSeen != 0
 }
 
 // bodyPref is the body representation a Sync request asked for: the chosen
