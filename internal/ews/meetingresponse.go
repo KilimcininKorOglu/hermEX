@@ -11,24 +11,49 @@ import (
 
 // meetingResponse is an AcceptItem/TentativelyAcceptItem/DeclineItem response
 // object ([MS-OXWSMTGS]): it references the meeting request it answers and may
-// carry the note the attendee wrote for the organizer.
+// carry the note the attendee wrote for the organizer and a new time the attendee
+// proposes (MeetingRegistrationResponseObjectType, [MS-OXWSMTGS] 2.2.4.16).
 type meetingResponse struct {
 	ReferenceItemID refID `xml:"ReferenceItemId"`
 	Body            struct {
 		Type    string `xml:"BodyType,attr"`
 		Content string `xml:",chardata"`
 	} `xml:"Body"`
+	ProposedStart string `xml:"ProposedStart"`
+	ProposedEnd   string `xml:"ProposedEnd"`
 }
 
 // reply is what the organizer receives with the response: the attendee's note, in
-// the body type the client wrote it in. send, a SendOnly/SendAndSaveCopy
-// disposition, asks for the organizer to be notified at all.
-func (mr meetingResponse) reply(send bool) meeting.Reply {
+// the body type the client wrote it in, and the proposed time. send, a
+// SendOnly/SendAndSaveCopy disposition, asks for the organizer to be notified at
+// all. code is the EWS error for a proposed span that cannot be sent.
+func (mr meetingResponse) reply(send bool) (meeting.Reply, string) {
+	p, code := mr.proposal()
 	return meeting.Reply{
-		Send: send,
-		Body: mr.Body.Content,
-		HTML: strings.EqualFold(mr.Body.Type, "HTML"),
+		Send:     send,
+		Body:     mr.Body.Content,
+		HTML:     strings.EqualFold(mr.Body.Type, "HTML"),
+		Proposal: p,
+	}, code
+}
+
+// proposal reads the new time the attendee proposes, nil when it proposes none. A
+// counter proposal is a span, so a response naming only one end of it, or a time
+// that does not parse, is an invalid request, and one that ends before it starts
+// is refused with the code Exchange gives such a span.
+func (mr meetingResponse) proposal() (*meeting.Proposal, string) {
+	if mr.ProposedStart == "" && mr.ProposedEnd == "" {
+		return nil, ""
 	}
+	start, okStart := parseAvailabilityTime(mr.ProposedStart)
+	end, okEnd := parseAvailabilityTime(mr.ProposedEnd)
+	if !okStart || !okEnd {
+		return nil, "ErrorInvalidRequest"
+	}
+	if end.Before(start) {
+		return nil, "ErrorCalendarEndDateIsEarlierThanStartDate"
+	}
+	return &meeting.Proposal{Start: mapi.UnixToNTTime(start), End: mapi.UnixToNTTime(end)}, ""
 }
 
 // meetingRespond records an attendee's response to the referenced meeting request
@@ -38,6 +63,10 @@ func (s *Server) meetingRespond(sess *session, mr meetingResponse, response int3
 	id, err := oxews.DecodeItemID(mr.ReferenceItemID.ID)
 	if err != nil {
 		return itemError("ErrorInvalidRequest")
+	}
+	reply, code := mr.reply(send)
+	if code != "" {
+		return itemError(code)
 	}
 	// The request id self-encodes its mailbox; responding to a delegated meeting is
 	// gated on edit access to its folder. The responder is the mailbox owner
@@ -53,7 +82,7 @@ func (s *Server) meetingRespond(sess *session, mr meetingResponse, response int3
 	if code != "" {
 		return itemError(code)
 	}
-	if _, err := meeting.RespondOnBehalfWith(st, s.accounts, s.Spool, responder, actor, id.MessageID, response, mr.reply(send)); err != nil {
+	if _, err := meeting.RespondOnBehalfWith(st, s.accounts, s.Spool, responder, actor, id.MessageID, response, reply); err != nil {
 		if errors.Is(err, meeting.ErrRequestNotFound) {
 			return itemError("ErrorItemNotFound")
 		}

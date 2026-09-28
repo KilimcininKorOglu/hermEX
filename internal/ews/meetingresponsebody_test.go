@@ -48,6 +48,39 @@ func respondAndClaim(t *testing.T, verb, extra string) []byte {
 	return due[0].Body
 }
 
+// TestMeetingResponseProposesANewTime proves a response object's ProposedStart and
+// ProposedEnd ([MS-OXWSMTGS] 2.2.4.16) reach the organizer as a counter proposal
+// for that span ([MS-OXCICAL] METHOD: COUNTER).
+func TestMeetingResponseProposesANewTime(t *testing.T) {
+	raw := respondAndClaim(t, "TentativelyAcceptItem",
+		`<t:ProposedStart>2026-07-01T16:00:00Z</t:ProposedStart><t:ProposedEnd>2026-07-01T17:00:00Z</t:ProposedEnd>`)
+	for _, want := range []string{"METHOD:COUNTER", "DTSTART:20260701T160000Z", "DTEND:20260701T170000Z", "PARTSTAT=TENTATIVE"} {
+		if !bytes.Contains(raw, []byte(want)) {
+			t.Errorf("the proposal lacks %q:\n%s", want, raw)
+		}
+	}
+}
+
+// TestMeetingResponseRefusesABadProposal proves a proposed span the organizer
+// cannot be offered is refused, and nothing is sent: one end alone is an invalid
+// request, and a span that ends before it starts gets Exchange's code for it.
+func TestMeetingResponseRefusesABadProposal(t *testing.T) {
+	for _, tc := range []struct{ name, extra, want string }{
+		{"one end", `<t:ProposedStart>2026-07-01T16:00:00Z</t:ProposedStart>`, "ErrorInvalidRequest"},
+		{"ends first", `<t:ProposedStart>2026-07-01T17:00:00Z</t:ProposedStart><t:ProposedEnd>2026-07-01T16:00:00Z</t:ProposedEnd>`,
+			"ErrorCalendarEndDateIsEarlierThanStartDate"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			reqID := seedExternalMeetingRequest(t, dir)
+			ts := meetingServer(t, dir)
+			itemID := oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDInbox), MessageID: reqID})
+			_, out := soapPost(t, ts, meetingResponseReqWith("TentativelyAcceptItem", itemID, "SendAndSaveCopy", tc.extra), true)
+			wantContains(t, "the refusal", out, "<ResponseCode>"+tc.want+"</ResponseCode>")
+		})
+	}
+}
+
 // TestMeetingResponseCarriesTheAttendeesNote proves the note an attendee writes in
 // an AcceptItem's Body reaches the organizer with the response ([MS-OXWSMTGS]
 // AcceptItem: Body), in the body type the client wrote it in, and that the
