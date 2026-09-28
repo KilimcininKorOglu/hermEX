@@ -1,4 +1,5 @@
 import type { Task, TaskInput } from "@/utils/api"
+import { addDaysToKey, weekdayOfKey, zonedDayKey } from "@/utils/date"
 
 // TaskForm is the task edit dialog's state: every optional field is filled so
 // the controlled inputs never switch between controlled and uncontrolled.
@@ -46,6 +47,29 @@ export function taskInputOf(form: TaskForm, completed: boolean): TaskInput {
     description: form.description || undefined,
     owner: form.owner || undefined,
     completed,
+  }
+}
+
+// QuickDue is the day each quick flag of the task list sets, as YYYY-MM-DD.
+export interface QuickDue {
+  today: string
+  tomorrow: string
+  thisWeek: string
+  nextWeek: string
+}
+
+// quickDueDays finds the quick-flag days from the day it is now in the display
+// zone, the zone the page shows every time in: this week is the coming Friday
+// (today on a Friday), next week the following Monday.
+export function quickDueDays(now: Date = new Date()): QuickDue {
+  const today = zonedDayKey(now)
+  const weekday = weekdayOfKey(today)
+  const toMonday = weekday === 1 ? 1 : (8 - weekday) % 7
+  return {
+    today,
+    tomorrow: addDaysToKey(today, 1),
+    thisWeek: addDaysToKey(today, (5 - weekday + 7) % 7),
+    nextWeek: addDaysToKey(today, toMonday === 0 ? 7 : toMonday),
   }
 }
 

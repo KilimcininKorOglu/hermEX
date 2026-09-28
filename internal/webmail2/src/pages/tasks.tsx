@@ -25,7 +25,7 @@ import api, { type Task, type TaskInput } from "@/utils/api"
 import { useI18n } from "@/hooks/useI18n"
 import { useBusyGate } from "@/hooks/useBusyGate"
 import { CategoryChips, toggledCategories, type CategoryOption } from "@/components/category-chips"
-import { dateInputValue, emptyTaskForm, taskFormOf, taskInputOf, type TaskForm } from "@/utils/taskForm"
+import { dateInputValue, emptyTaskForm, quickDueDays, taskFormOf, taskInputOf, type TaskForm } from "@/utils/taskForm"
 
 function dueLabel(due?: string): string {
   return due ? formatDay(due) : ""
@@ -44,10 +44,10 @@ function TaskFlagMenu({ task, onFlag }: { task: Task; onFlag: (task: Task, when:
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => onFlag(task, ymd(new Date()))}>{t("tasks.flagToday")}</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onFlag(task, ymd(addDays(new Date(), 1)))}>{t("tasks.flagTomorrow")}</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onFlag(task, ymd(thisFriday()))}>{t("tasks.flagThisWeek")}</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onFlag(task, ymd(nextMonday()))}>{t("tasks.flagNextWeek")}</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onFlag(task, quickDueDays().today)}>{t("tasks.flagToday")}</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onFlag(task, quickDueDays().tomorrow)}>{t("tasks.flagTomorrow")}</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onFlag(task, quickDueDays().thisWeek)}>{t("tasks.flagThisWeek")}</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onFlag(task, quickDueDays().nextWeek)}>{t("tasks.flagNextWeek")}</DropdownMenuItem>
         {task.due && (
           <DropdownMenuItem className="text-destructive" onClick={() => onFlag(task, "")}>{t("tasks.flagNoDate")}</DropdownMenuItem>
         )}
@@ -545,33 +545,4 @@ export function TasksPage() {
       </Dialog>
     </div>
   )
-}
-
-// ymd renders a Date as YYYY-MM-DD (the task due shape the backend parses).
-function ymd(d: Date): string {
-  const m = String(d.getMonth() + 1).padStart(2, "0")
-  const day = String(d.getDate()).padStart(2, "0")
-  return `${d.getFullYear()}-${m}-${day}`
-}
-
-// addDays returns a Date n days after d.
-function addDays(d: Date, n: number): Date {
-  return new Date(d.getTime() + n * 86400000)
-}
-
-// thisFriday returns the Friday of the current week (today if it is Friday, the
-// coming Friday otherwise).
-function thisFriday(): Date {
-  const d = new Date()
-  const day = d.getDay() // 0 Sun .. 6 Sat
-  const delta = (5 - day + 7) % 7
-  return addDays(d, delta)
-}
-
-// nextMonday returns the next Monday strictly after today.
-function nextMonday(): Date {
-  const d = new Date()
-  const day = d.getDay()
-  const delta = day === 1 ? 1 : (8 - day) % 7
-  return addDays(d, delta === 0 ? 7 : delta)
 }

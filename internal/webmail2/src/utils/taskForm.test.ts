@@ -1,5 +1,20 @@
-import { describe, expect, it } from "vitest"
-import { dateInputValue, emptyTaskForm, taskFormOf, taskInputOf } from "./taskForm"
+import { afterEach, describe, expect, it } from "vitest"
+import { setDisplayTimeZone } from "@/utils/date"
+import { dateInputValue, emptyTaskForm, quickDueDays, taskFormOf, taskInputOf } from "./taskForm"
+
+describe("quickDueDays", () => {
+  afterEach(() => setDisplayTimeZone(""))
+
+  it("counts from the day it is in the display zone, not in the browser", () => {
+    // Thursday 22:30 UTC is already Friday in Istanbul.
+    setDisplayTimeZone("Europe/Istanbul")
+    expect(quickDueDays(new Date("2026-11-26T22:30:00Z"))).toEqual({
+      today: "2026-11-27", tomorrow: "2026-11-28", thisWeek: "2026-11-27", nextWeek: "2026-11-30",
+    })
+    setDisplayTimeZone("")
+    expect(quickDueDays(new Date("2026-11-26T22:30:00Z")).today).toBe("2026-11-26")
+  })
+})
 
 describe("taskFormOf", () => {
   it("fills absent fields with the form defaults", () => {
