@@ -106,11 +106,15 @@ func (s *Server) handleMeetingResponse(w http.ResponseWriter, r *http.Request, s
 }
 
 // requestedItem finds the item a Request answers: RequestId in the folder its
-// CollectionId names.
+// CollectionId names. That is a meeting request in a mail folder or, from 14.1, the
+// meeting's item in the Calendar ([MS-ASCMD] MeetingResponse).
 func requestedItem(st *objectstore.Store, req *wbxml.Node) (int64, bool) {
 	folderID, err := strconv.ParseInt(req.ChildText(wbxml.MRFolderID), 10, 64)
 	if err != nil {
 		return 0, false
+	}
+	if folderID == int64(mapi.PrivateFIDCalendar) {
+		return calendarItem(st, req.ChildText(wbxml.MRRequestID))
 	}
 	uid, err := strconv.ParseUint(req.ChildText(wbxml.MRRequestID), 10, 32)
 	if err != nil {
@@ -122,6 +126,34 @@ func requestedItem(st *objectstore.Store, req *wbxml.Node) (int64, bool) {
 	}
 	return info.ID, true
 }
+
+// calendarItem resolves a Calendar ServerId, the object's message id (objectclass.go),
+// to a meeting the user was invited to. An item in another folder, or a meeting the
+// user organized, cannot be answered ([MS-ASCMD] MeetingResponse Status 2).
+func calendarItem(st *objectstore.Store, serverID string) (int64, bool) {
+	id, err := strconv.ParseInt(serverID, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	if fid, err := st.MessageFolder(id); err != nil || fid != int64(mapi.PrivateFIDCalendar) {
+		return 0, false
+	}
+	tags, err := meeting.ResolveTags(st)
+	if err != nil {
+		return 0, false
+	}
+	props, err := st.GetMessageProperties(id, tags.State)
+	if err != nil {
+		return 0, false
+	}
+	state, _ := props.Get(tags.State)
+	flags, _ := state.(int32)
+	return id, flags&appointmentReceived != 0
+}
+
+// appointmentReceived is the PidLidAppointmentStateFlags bit of a meeting received
+// as an invitation rather than organized here ([MS-OXOCAL] 2.2.1.10).
+const appointmentReceived int32 = 0x2
 
 // respondMeeting processes one MeetingResponse Request and builds its Result.
 func (s *Server) respondMeeting(st *objectstore.Store, sess *session, req *wbxml.Node) *wbxml.Node {
