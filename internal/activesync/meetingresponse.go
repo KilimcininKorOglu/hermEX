@@ -42,6 +42,24 @@ func serverSends(protocol string, req *wbxml.Node) bool {
 	return req.Child(wbxml.MRSendResponse) != nil
 }
 
+// airSyncBodyHTML is the airsyncbase:Type of an HTML body ([MS-ASAIRS] Type).
+const airSyncBodyHTML = "2"
+
+// replyOf reads what the server sends the organizer. An empty SendResponse sends
+// a response with no body; an airsyncbase:Body in it becomes the body ([MS-ASCMD]
+// SendResponse).
+func replyOf(protocol string, req *wbxml.Node) meeting.Reply {
+	if !serverSends(protocol, req) {
+		return meeting.Reply{}
+	}
+	sr := req.Child(wbxml.MRSendResponse)
+	reply := meeting.Reply{Send: true, Body: airSyncBody(sr)}
+	if b := sr.Child(wbxml.ABBody); b != nil {
+		reply.HTML = b.ChildText(wbxml.ABType) == airSyncBodyHTML
+	}
+	return reply
+}
+
 // handleMeetingResponse answers the MeetingResponse command (MS-ASCMD): the device
 // accepts, tentatively accepts, or declines meeting requests it received. Each
 // Request is recorded through the shared meeting workflow, filing the appointment
@@ -99,7 +117,7 @@ func (s *Server) respondMeeting(st *objectstore.Store, sess *session, req *wbxml
 		return result(mrStatusInvalid, "")
 	}
 
-	calendarID, err := meeting.Respond(st, s.accounts, s.Spool, sess.user, info.ID, response, serverSends(sess.protocol, req))
+	calendarID, err := meeting.RespondWith(st, s.accounts, s.Spool, sess.user, info.ID, response, replyOf(sess.protocol, req))
 	if err != nil {
 		return result(mrStatusError, "")
 	}

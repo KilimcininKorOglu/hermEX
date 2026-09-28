@@ -65,6 +65,27 @@ const planningICS = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\n" +
 	"ORGANIZER:mailto:" + localOrganizer + "\r\nATTENDEE;RSVP=TRUE:mailto:" + testUser + "\r\n" +
 	"END:VEVENT\r\nEND:VCALENDAR\r\n"
 
+// seedRequestWithText delivers a request whose mail carries the organizer's own
+// text beside the calendar part, and returns its IMAP UID.
+func seedRequestWithText(t *testing.T, dir string) uint32 {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	raw := "From: " + localOrganizer + "\r\nTo: " + testUser + "\r\nSubject: Planning\r\n" +
+		"MIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=b\r\n\r\n" +
+		"--b\r\nContent-Type: text/plain\r\n\r\nOrganizer agenda text.\r\n" +
+		"--b\r\nContent-Type: text/calendar; method=REQUEST; charset=UTF-8\r\n\r\n" + planningICS +
+		"--b--\r\n"
+	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), time.Now(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info.UID
+}
+
 // postVersioned POSTs a command under the given MS-ASProtocolVersion.
 func postVersioned(t *testing.T, ts *httptest.Server, version, cmd string, root *wbxml.Node) *wbxml.Node {
 	t.Helper()
@@ -156,6 +177,37 @@ func TestMeetingResponseSendRule(t *testing.T) {
 			acceptRequest(t, ts, tc.version, uid, extra...)
 			if got := len(organizerInbox(t, organizer)); got != tc.want {
 				t.Errorf("organizer received %d responses, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestMeetingResponseBody proves the response carries the text the attendee wrote
+// in SendResponse, and never the invitation's own text ([MS-ASCMD] SendResponse:
+// an empty node sends a response with no body).
+func TestMeetingResponseBody(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body *wbxml.Node
+		want string
+	}{
+		{"empty", wbxml.Elem(wbxml.MRSendResponse), ""},
+		{"with body", wbxml.Elem(wbxml.MRSendResponse, wbxml.Elem(wbxml.ABBody,
+			wbxml.Str(wbxml.ABType, "1"), wbxml.Str(wbxml.ABData, "See you there."))), "See you there."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ts, attendee, organizer := organizerServer(t)
+			uid := seedRequestWithText(t, attendee)
+			acceptRequest(t, ts, "16.1", uid, tc.body)
+			got := organizerInbox(t, organizer)
+			if len(got) != 1 {
+				t.Fatalf("organizer received %d responses, want 1", len(got))
+			}
+			if bytes.Contains(got[0], []byte("Organizer agenda text.")) {
+				t.Errorf("the response repeats the invitation's text:\n%s", got[0])
+			}
+			if tc.want != "" && !bytes.Contains(got[0], []byte(tc.want)) {
+				t.Errorf("the response lacks the attendee's text %q:\n%s", tc.want, got[0])
 			}
 		})
 	}
