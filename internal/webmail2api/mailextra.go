@@ -899,23 +899,34 @@ func (s *Server) handleMarkAllRead(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot read folder"})
 		return
 	}
-	marked, failed := 0, 0
-	for _, m := range msgs {
-		if m.Flags&objectstore.FlagSeen == 0 {
-			if err := mb.st.SetMessageFlags(fid, m.UID, m.Flags|objectstore.FlagSeen); err != nil {
-				// A discarded error made a partial pass indistinguishable from a
-				// folder that simply had less unread mail in it.
-				failed++
-				logError("mark-all-read", err, logging.Fields{"user": mb.user, "folder": req.Folder, "uid": m.UID})
-				continue
-			}
-			marked++
-		}
+	read, failed := markAllSeen(mb, fid, req.Folder, msgs)
+	for _, id := range read {
+		s.receiptOnRead(nil, mb, id, true)
 	}
+	marked := len(read)
 	if failed > 0 {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"error": "some messages could not be marked", "marked": marked, "failed": failed})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"marked": marked})
+}
+
+// markAllSeen marks every unread message of msgs \Seen and returns the ids it
+// marked and how many it could not.
+func markAllSeen(mb *mailboxCtx, fid int64, folder string, msgs []objectstore.MessageInfo) (read []int64, failed int) {
+	for _, m := range msgs {
+		if m.Flags&objectstore.FlagSeen != 0 {
+			continue
+		}
+		if err := mb.st.SetMessageFlags(fid, m.UID, m.Flags|objectstore.FlagSeen); err != nil {
+			// A discarded error made a partial pass indistinguishable from a
+			// folder that simply had less unread mail in it.
+			failed++
+			logError("mark-all-read", err, logging.Fields{"user": mb.user, "folder": folder, "uid": m.UID})
+			continue
+		}
+		read = append(read, m.ID)
+	}
+	return read, failed
 }

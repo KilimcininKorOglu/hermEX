@@ -226,6 +226,9 @@ type mailDetailJSON struct {
 	FollowupDue    string           `json:"followupDue,omitempty"`    // RFC3339, empty when unset
 	Labels         []string         `json:"labels,omitempty"`         // category labels (PidNameKeywords)
 	Annotatable    bool             `json:"annotatable"`              // the mail has a Message-ID a note can link to
+	// ReceiptRequested asks the reader whether to send the read receipt the message
+	// is still waiting for; it is set only when the reader chose to be asked.
+	ReceiptRequested bool `json:"receiptRequested,omitempty"`
 }
 
 // handleMailMessage returns a single message's full detail and marks it read.
@@ -258,7 +261,9 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 
 	d := buildMailDetail(raw, folder, uid)
 	s.applySmimeStatus(&d, st, raw)
-	markReadOnOpen(&d, mb, fid, uid)
+	if m, becameRead := markReadOnOpen(&d, mb, fid, uid); m != nil {
+		s.receiptOnRead(&d, mb, m.ID, becameRead)
+	}
 	// A safe-listed sender's remote images load automatically in the reader. The
 	// match is computed server-side (against the shared allowlist) so the
 	// security-relevant decision stays in tested Go, not client code.
@@ -299,18 +304,26 @@ func (s *Server) applySmimeStatus(d *mailDetailJSON, st *objectstore.Store, raw 
 
 // markReadOnOpen reports the message's flags and marks it \Seen, preserving its
 // other flags. A shared mailbox is read without marking, so a delegate's read
-// does not change what the owner sees as unread.
-func markReadOnOpen(d *mailDetailJSON, mb *mailboxCtx, fid int64, uid uint32) {
-	flags, err := mb.st.MessageFlags(fid, uid)
+// does not change what the owner sees as unread. It returns the message's index
+// row (nil when it cannot be read) and whether this open took it from unread to
+// read. A failed mark is logged and the message is reported as still unread.
+func markReadOnOpen(d *mailDetailJSON, mb *mailboxCtx, fid int64, uid uint32) (*objectstore.MessageInfo, bool) {
+	m, err := mb.st.MessageByUID(fid, uid)
 	if err != nil {
-		return
+		return nil, false
 	}
+	flags := m.Flags
 	d.Read = flags&objectstore.FlagSeen != 0
 	d.Starred = flags&objectstore.FlagFlagged != 0
-	if flags&objectstore.FlagSeen == 0 && !mb.shared {
-		_ = mb.st.SetMessageFlags(fid, uid, flags|objectstore.FlagSeen)
-		d.Read = true
+	if d.Read || mb.shared {
+		return &m, false
 	}
+	if err := mb.st.SetMessageFlags(fid, uid, flags|objectstore.FlagSeen); err != nil {
+		logError("mark-read-on-open", err, logging.Fields{"user": mb.user, "uid": uid})
+		return &m, false
+	}
+	d.Read = true
+	return &m, true
 }
 
 // addStoredProps surfaces what the stored message carries beyond its wire
@@ -461,26 +474,33 @@ func (s *Server) handleMailFlag(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown flag"})
 		return
 	}
-	st, fid, uid, ok := s.locate(w, r, req.ID, accessWrite)
+	mb, fid, uid, ok := s.locateMailbox(w, r, req.ID, accessWrite)
 	if !ok {
 		return
 	}
-	defer st.Close()
-	cur, err := st.MessageFlags(fid, uid)
+	defer mb.st.Close()
+	m, err := mb.st.MessageByUID(fid, uid)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
+	cur := m.Flags
 	if req.Value {
 		cur |= bit
 	} else {
 		cur &^= bit
 	}
-	if err := st.SetMessageFlags(fid, uid, cur); err != nil {
+	if err := mb.st.SetMessageFlags(fid, uid, cur); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "flag failed"})
 		return
 	}
+	s.receiptOnRead(nil, mb, m.ID, becameRead(m.Flags, cur))
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// becameRead reports whether a flag change took a message from unread to read.
+func becameRead(before, after int64) bool {
+	return before&objectstore.FlagSeen == 0 && after&objectstore.FlagSeen != 0
 }
 
 // handleMailFollowup sets a message's follow-up flag: a coloured flag with an
