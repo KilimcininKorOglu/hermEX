@@ -703,6 +703,9 @@ func ApplyReply(st *objectstore.Store, tags Tags, uid, attendeeEmail string, res
 	}
 	var props mapi.PropertyValues
 	props.Set(tags.Resp, response)
+	// Outlook's tracking view reads the response from PidTagRecipientTrackStatus,
+	// whose values are the response codes ([MS-OXOCAL] 2.2.4.10.2, 3.1.4.8.5.2).
+	props.Set(mapi.PrRecipientTrackStatus, response)
 	if sent != 0 {
 		props.Set(mapi.PrRecipientTrackStatusTime, sent)
 	}

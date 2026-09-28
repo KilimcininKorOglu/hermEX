@@ -376,8 +376,9 @@ const (
 	PrRecipientProposedStartTime = PropTag(0x5FE30040) // PtSysTime
 	PrRecipientProposedEndTime   = PropTag(0x5FE40040) // PtSysTime
 
-	// When the attendee sent the response the organizer's meeting records for it
-	// ([MS-OXOCAL] 2.2.4.10.3).
+	// The response the organizer's meeting records for an attendee, and when the
+	// attendee sent it ([MS-OXOCAL] 2.2.4.10.2 and 2.2.4.10.3).
+	PrRecipientTrackStatus     = PropTag(0x5FFF0003) // PtLong
 	PrRecipientTrackStatusTime = PropTag(0x5FFB0040) // PtSysTime
 )
 

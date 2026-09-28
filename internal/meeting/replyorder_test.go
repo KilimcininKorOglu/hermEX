@@ -54,6 +54,15 @@ func TestOlderReplyDoesNotOverwriteANewerOne(t *testing.T) {
 		t.Errorf("track status time = %v, want the decline's DTSTAMP %v", got, want)
 	}
 
+	// Outlook reads the same response from PidTagRecipientTrackStatus.
+	row, err = st.GetRecipientProperties(recipID, mapi.PrRecipientTrackStatus)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := row.Get(mapi.PrRecipientTrackStatus); got != ResponseDeclined {
+		t.Errorf("PidTagRecipientTrackStatus = %v, want %d", got, ResponseDeclined)
+	}
+
 	// A later answer still replaces it.
 	latest := deliverStampedReply(t, st, "order-1", attendee, "TENTATIVE", "20260611T080000Z")
 	if _, err := ProcessReply(st, nil, attendee, latest); err != nil {
