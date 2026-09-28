@@ -110,14 +110,36 @@ func (t *tableState) rowProps(store *objectstore.Store, idx int) (mapi.PropertyV
 // folderRow projects one hierarchy row, synthesizing the folder's EID when the
 // column set asks for it.
 func (t *tableState) folderRow(store *objectstore.Store, base int) (mapi.PropertyValues, error) {
-	fid := t.folders[base].ID
-	props, err := store.GetFolderProperties(fid, t.columns...)
+	return folderProps(store, t.folders[base].ID, t.columns)
+}
+
+// computedFolderTags are the folder properties the store computes; a read that
+// asks for none of them skips the computation.
+var computedFolderTags = []mapi.PropTag{
+	mapi.PrContentCount, mapi.PrContentUnreadCount, mapi.PrMessageSizeExtended,
+	mapi.PrMessageSize, mapi.PrSubfolders, mapi.PrFolderType, mapi.PrFolderFlags, mapi.PrFolderID,
+}
+
+// folderProps returns a folder's stored properties overlaid with the ones the
+// store computes ([MS-OXCFOLD] 2.2.2.2.1), narrowed to tags, or all of them when
+// tags is empty. A computed value replaces a stored one: a counter seeded at
+// creation says nothing about the folder now.
+func folderProps(store *objectstore.Store, fid int64, tags []mapi.PropTag) (mapi.PropertyValues, error) {
+	props, err := store.GetFolderProperties(fid, tags...)
 	if err != nil {
 		return nil, err
 	}
-	if slices.Contains(t.columns, mapi.PrFolderID) {
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		props.Set(mapi.PrFolderID, int64(mapi.MakeEIDEx(1, uint64(fid))))
+	if len(tags) > 0 && !slices.ContainsFunc(computedFolderTags, func(t mapi.PropTag) bool { return slices.Contains(tags, t) }) {
+		return props, nil
+	}
+	computed, err := store.FolderComputedProps(fid)
+	if err != nil {
+		return nil, err
+	}
+	for _, tv := range computed {
+		if len(tags) == 0 || slices.Contains(tags, tv.Tag) {
+			props.Set(tv.Tag, tv.Value)
+		}
 	}
 	return props, nil
 }

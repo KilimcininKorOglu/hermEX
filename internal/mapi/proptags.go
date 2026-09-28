@@ -186,6 +186,16 @@ const (
 	PrEmbeddedContact = PropTag(0x67800102) // PtBinary
 )
 
+// Folder properties the store computes rather than stores ([MS-OXCFOLD]
+// 2.2.2.2.1).
+const (
+	PrContentCount       = PropTag(0x36020003) // PtLong, non-FAI messages (a store's: in the mailbox)
+	PrContentUnreadCount = PropTag(0x36030003) // PtLong
+	PrSubfolders         = PropTag(0x360A000B) // PtBoolean
+	PrFolderType         = PropTag(0x36010003) // PtLong: 0 root, 1 generic, 2 search
+	PrFolderFlags        = PropTag(0x66A80003) // PtLong: 1 IPM, 2 search, 4 normal, 8 rules
+)
+
 // PrAddressBookDisplayNamePrintable is PidTagAddressBookDisplayNamePrintable
 // ([MS-OXOABK] 2.2.3.7), the form of an address book object's display name the
 // client renders in its own code page; Outlook copies it onto a recipient row.

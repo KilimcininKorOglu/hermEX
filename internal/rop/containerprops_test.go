@@ -23,10 +23,14 @@ func TestGetPropertiesOnTheStoreAndAFolder(t *testing.T) {
 	ropOK(t, out, ropGetPropertiesSpecific, "GetPropertiesSpecific(store)")
 
 	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
-	cols = []mapi.PropTag{mapi.PrDisplayName}
+	cols = []mapi.PropTag{mapi.PrDisplayName, mapi.PrContentCount, mapi.PrContentUnreadCount}
 	out, _ = sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{h[1]})
 	p := ropOK(t, out, ropGetPropertiesSpecific, "GetPropertiesSpecific(folder)")
-	if name, _ := decodeRow(t, p, cols).Get(mapi.PrDisplayName); name != "Inbox" {
+	row := decodeRow(t, p, cols)
+	if name, _ := row.Get(mapi.PrDisplayName); name != "Inbox" {
 		t.Errorf("folder display name = %v, want Inbox", name)
 	}
+	// [MS-OXCFOLD] 2.2.2.2.1: the counts the store computes for what the folder holds.
+	wantProp(t, row, mapi.PrContentCount, int32(1), "content count")
+	wantProp(t, row, mapi.PrContentUnreadCount, int32(1), "unread count")
 }
