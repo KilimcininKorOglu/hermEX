@@ -33,17 +33,39 @@ func (s *Server) meetingRespond(sess *session, ref refID, response int32, send b
 	if code != "" {
 		return itemError(code)
 	}
-	responder := sess.user
-	if id.Mailbox != "" {
-		responder = id.Mailbox
+	responder, actor, code := s.meetingResponder(sess, id, send)
+	if code != "" {
+		return itemError(code)
 	}
-	if _, err := meeting.Respond(st, s.accounts, s.Spool, responder, id.MessageID, response, send); err != nil {
+	if _, err := meeting.RespondOnBehalf(st, s.accounts, s.Spool, responder, actor, id.MessageID, response, send); err != nil {
 		if errors.Is(err, meeting.ErrRequestNotFound) {
 			return itemError("ErrorItemNotFound")
 		}
 		return itemError("ErrorInternalServerError")
 	}
 	return meetingResponseOK()
+}
+
+// meetingResponder names who a meeting response is from and who submits it. The
+// attendee is the mailbox the request is in: the caller's own, or the delegated one
+// the item id names. A response that notifies the organizer goes out from that
+// mailbox, so in a delegated one the caller answers only under a send-as or
+// send-on-behalf grant, the decision every send path shares, and an on-behalf
+// answer names the caller as its sender. A response that only records the answer
+// sends nothing and needs no grant.
+func (s *Server) meetingResponder(sess *session, id oxews.ItemID, send bool) (attendee, actor, code string) {
+	attendee = sess.user
+	if id.Mailbox != "" {
+		attendee = id.Mailbox
+	}
+	if !send {
+		return attendee, attendee, ""
+	}
+	attendee, actor, ok := s.resolveSender(sess.user, attendee)
+	if !ok {
+		return "", "", "ErrorSendAsDenied"
+	}
+	return attendee, actor, ""
 }
 
 // meetingResponseOK is a success response message for one meeting response. The

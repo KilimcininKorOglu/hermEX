@@ -194,6 +194,15 @@ func (s *Server) handleRSVP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer mb.st.Close()
+	// In a shared mailbox the attendee is the mailbox, not the delegate answering for
+	// it, and the answer goes to the organizer from that mailbox, so the delegate
+	// answers only under a send-as or send-on-behalf grant, the decision every send
+	// path shares. An on-behalf answer names the delegate as its Sender.
+	attendee, actor, allowed := s.resolveSender(mb.user, mb.identity())
+	if !allowed {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
 	st := mb.st
 	info, err := st.MessageByUID(fid, uid)
 	if err != nil {
@@ -201,9 +210,8 @@ func (s *Server) handleRSVP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// This is the reader's own answer, so it also clears the request mail when the
-	// mailbox asked for that. In a shared mailbox the attendee is the mailbox, not
-	// the delegate answering for it, the same responder EWS names.
-	if _, err := meeting.Respond(st, s.accounts, s.spool, mb.identity(), info.ID, response, true); err != nil {
+	// mailbox asked for that.
+	if _, err := meeting.RespondOnBehalf(st, s.accounts, s.spool, attendee, actor, info.ID, response, true); err != nil {
 		if errors.Is(err, meeting.ErrRequestNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return

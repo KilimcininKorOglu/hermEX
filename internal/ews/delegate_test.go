@@ -2,6 +2,7 @@ package ews
 
 import (
 	"net/http/httptest"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcical"
 	"hermex/internal/oxews"
+	"hermex/internal/relay"
 )
 
 // delegateServer builds an EWS server over alice (the soapPost requester) and bob,
@@ -1003,6 +1005,73 @@ func TestMeetingResponseCrossMailboxDenied(t *testing.T) {
 	if !strings.Contains(out, "ErrorAccessDenied") {
 		t.Errorf("responding without edit access must be denied:\n%s", out)
 	}
+}
+
+// delegateSendServer is delegateServer with a relay spool, so an answer to an
+// external organizer is queued where a test can read it, and bob's Inbox holds a
+// request that organizer sent, on which alice holds edit rights. onBehalf is bob's
+// send-on-behalf list.
+func delegateSendServer(t *testing.T, onBehalf []string) (*httptest.Server, *relay.Spool, string, string) {
+	t.Helper()
+	bob := t.TempDir()
+	accs := directory.StaticAccounts{
+		testUser:          {Password: testPass, MailboxPath: t.TempDir()},
+		"bob@hermex.test": {Password: testPass, MailboxPath: bob},
+	}
+	srv := NewServer(accs, accs, "mail.hermex.test")
+	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
+	mustNoErr(t, "open the relay spool", err)
+	t.Cleanup(func() { mustNoErr(t, "close the relay spool", sp.Close()) })
+	srv.Spool = sp
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	grantFolder(t, bob, int64(mapi.PrivateFIDInbox), testUser, mapi.RightsEditor)
+	st, err := objectstore.Open(bob)
+	mustNoErr(t, "open bob's mailbox", err)
+	mustNoErr(t, "grant send-on-behalf", st.SetSendOnBehalf(onBehalf))
+	st.Close()
+	reqID := seedExternalMeetingRequest(t, bob)
+	return ts, sp, bob, oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDInbox), MessageID: reqID, Mailbox: "bob@hermex.test"})
+}
+
+// TestMeetingResponseCrossMailboxSendNeedsAGrant proves an answer that notifies the
+// organizer from another mailbox needs that mailbox's send-as or send-on-behalf
+// grant, as every send does. Edit rights on the Inbox used to be enough to mail the
+// organizer under bob's name. A refused answer records nothing.
+func TestMeetingResponseCrossMailboxSendNeedsAGrant(t *testing.T) {
+	ts, sp, bob, refID := delegateSendServer(t, nil)
+
+	_, out := soapPost(t, ts, meetingResponseReqDisp("AcceptItem", refID, "SendAndSaveCopy"), true)
+	wantContains(t, "the AcceptItem response", out, "ErrorSendAsDenied")
+	due, err := sp.Claim(time.Now(), 10)
+	mustNoErr(t, "claim the spool", err)
+	wantEq(t, "queued answers", len(due), 0)
+	st, err := objectstore.Open(bob)
+	mustNoErr(t, "open bob's mailbox", err)
+	defer st.Close()
+	cal, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
+	mustNoErr(t, "list bob's calendar", err)
+	wantEq(t, "appointments after a refused answer", len(cal), 0)
+}
+
+// TestMeetingResponseCrossMailboxSendsOnBehalf follows a granted delegate's answer to
+// the organizer: it is from bob, names the delegate as its Sender, and leaves with
+// the delegate as its envelope sender.
+func TestMeetingResponseCrossMailboxSendsOnBehalf(t *testing.T) {
+	ts, sp, _, refID := delegateSendServer(t, []string{testUser})
+
+	_, out := soapPost(t, ts, meetingResponseReqDisp("AcceptItem", refID, "SendAndSaveCopy"), true)
+	wantContains(t, "the AcceptItem response class", out, `ResponseClass="Success"`)
+	due, err := sp.Claim(time.Now(), 10)
+	mustNoErr(t, "claim the spooled answer", err)
+	if len(due) != 1 {
+		t.Fatalf("relay spool = %v, want one queued answer", due)
+	}
+	wantEq(t, "the answer's envelope From", due[0].From, testUser)
+	head := headersOf(due[0].Body)
+	wantContains(t, "the answer's headers", head, "From: <bob@hermex.test>")
+	wantContains(t, "the answer's headers", head, "Sender: <"+testUser+">")
 }
 
 // firstSyncState extracts the SyncState token from a SyncFolderItems response.

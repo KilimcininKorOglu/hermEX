@@ -86,7 +86,21 @@ func ResolveTags(st *objectstore.Store) (Tags, error) {
 // the mailbox asked for that. A response the SERVER decided goes through
 // respondAutomatically instead.
 func Respond(st *objectstore.Store, accounts directory.Accounts, spool *relay.Spool, sender string, messageID int64, response int32, send bool) (int64, error) {
-	return respond(st, accounts, spool, sender, messageID, response, send, true)
+	return respond(st, accounts, spool, identity{attendee: sender, actor: sender}, messageID, response, send, true)
+}
+
+// RespondOnBehalf is Respond for a delegate answering in the attendee's mailbox:
+// the response is from the attendee and names the delegate as its sender, the way
+// mail sent on behalf of someone does. The caller has authorized the delegate to
+// send for the attendee; a send-as grant passes the attendee as both.
+func RespondOnBehalf(st *objectstore.Store, accounts directory.Accounts, spool *relay.Spool, attendee, delegate string, messageID int64, response int32, send bool) (int64, error) {
+	return respond(st, accounts, spool, identity{attendee: attendee, actor: delegate}, messageID, response, send, true)
+}
+
+// identity is who a response is from: the attendee the invitation reached, and
+// the actor who submitted the answer, a delegate or the attendee itself.
+type identity struct {
+	attendee, actor string
 }
 
 // respondAutomatically records a response the server decided on the mailbox's
@@ -94,10 +108,10 @@ func Respond(st *objectstore.Store, accounts directory.Accounts, spool *relay.Sp
 // yet, and a message that disappears without anyone acting on it is one they can
 // no longer find.
 func respondAutomatically(st *objectstore.Store, accounts directory.Accounts, spool *relay.Spool, sender string, messageID int64, response int32, send bool) (int64, error) {
-	return respond(st, accounts, spool, sender, messageID, response, send, false)
+	return respond(st, accounts, spool, identity{attendee: sender, actor: sender}, messageID, response, send, false)
 }
 
-func respond(st *objectstore.Store, accounts directory.Accounts, spool *relay.Spool, sender string, messageID int64, response int32, send bool, userAction bool) (int64, error) {
+func respond(st *objectstore.Store, accounts directory.Accounts, spool *relay.Spool, who identity, messageID int64, response int32, send bool, userAction bool) (int64, error) {
 	req, err := st.OpenMessage(messageID)
 	if err != nil {
 		return 0, ErrRequestNotFound
@@ -129,7 +143,7 @@ func respond(st *objectstore.Store, accounts directory.Accounts, spool *relay.Sp
 		return 0, err
 	}
 	if send {
-		if err := notifyOrganizer(st, accounts, spool, sender, req, response); err != nil {
+		if err := notifyOrganizer(st, accounts, spool, who, req, response); err != nil {
 			return 0, err
 		}
 	}
@@ -413,14 +427,15 @@ func stripInboundCruft(props mapi.PropertyValues) mapi.PropertyValues {
 }
 
 // notifyOrganizer sends the organizer an iTIP REPLY for the response: the request is
-// reshaped into a response message (re-classed, with the responder as both the sender
-// and the representing identity, so the From header and the REPLY's ATTENDEE name the
-// responder and the one recipient, the organizer, becomes the ORGANIZER), rendered to
-// an iCalendar REPLY carried as a text/calendar part, and routed like any submission.
-// sender is the mailbox that answers, the address the request reached it at when the
-// server answers automatically. An organizer that did not request a response is not
-// told.
-func notifyOrganizer(st *objectstore.Store, accounts directory.Accounts, spool *relay.Spool, sender string, req *oxcmail.Message, response int32) error {
+// reshaped into a response message (re-classed, with the attendee as the
+// representing identity and the actor as the sender, so the From header and the
+// REPLY's ATTENDEE name the attendee, a delegate's answer names the delegate in
+// Sender, and the one recipient, the organizer, becomes the ORGANIZER), rendered to
+// an iCalendar REPLY carried as a text/calendar part, and routed like any
+// submission from the actor. The attendee is the mailbox the request reached, the
+// address it reached it at when the server answers automatically. An organizer
+// that did not request a response is not told.
+func notifyOrganizer(st *objectstore.Store, accounts directory.Accounts, spool *relay.Spool, who identity, req *oxcmail.Message, response int32) error {
 	organizer := propStr(req.Props, mapi.PrSentRepresentingSmtpAddress)
 	if organizer == "" {
 		organizer = propStr(req.Props, mapi.PrSenderSmtpAddress)
@@ -433,20 +448,24 @@ func notifyOrganizer(st *objectstore.Store, accounts directory.Accounts, spool *
 
 	resp := stripInboundCruft(req.Props)
 	resp.Set(mapi.PrMessageClass, responseClass(response))
-	resp.Set(mapi.PrSenderSmtpAddress, sender)
-	resp.Set(mapi.PrSenderEmailAddress, sender)
+	// The actor submitted the answer: the attendee itself, or a delegate answering
+	// in its mailbox, whom the Sender header names.
+	resp.Set(mapi.PrSenderSmtpAddress, who.actor)
+	resp.Set(mapi.PrSenderEmailAddress, who.actor)
 	resp.Set(mapi.PrSenderAddrType, "SMTP")
-	// The response is FROM the responder, so the responder is also the representing
+	// The response is FROM the attendee, so the attendee is the representing
 	// identity. Leaving the request's organizer there made the reply's From header
 	// name the organizer: the organizer received a reply apparently from themselves,
 	// it failed DMARC alignment for their domain, and any sender could have hermEX
 	// emit mail from an address of their choosing by putting it on a request.
-	resp.Set(mapi.PrSentRepresentingSmtpAddress, sender)
-	resp.Set(mapi.PrSentRepresentingEmailAddress, sender)
+	resp.Set(mapi.PrSentRepresentingSmtpAddress, who.attendee)
+	resp.Set(mapi.PrSentRepresentingEmailAddress, who.attendee)
 	resp.Set(mapi.PrSentRepresentingAddrType, "SMTP")
-	// Cleared rather than left: the request's value is the organizer's display name,
-	// and carrying it over would label the responder's own address with it.
+	// Cleared rather than left: the request's values are the organizer's display
+	// name, and carrying them over would label the attendee's or the delegate's own
+	// address with it.
 	resp.Set(mapi.PrSentRepresentingName, "")
+	resp.Set(mapi.PrSenderName, "")
 	resp.Set(mapi.PrSubject, responsePrefix(response)+propStr(req.Props, mapi.PrSubject))
 	resp.Set(mapi.PrClientSubmitTime, mapi.UnixToNTTime(time.Now()))
 
@@ -468,7 +487,7 @@ func notifyOrganizer(st *objectstore.Store, accounts directory.Accounts, spool *
 	if err != nil {
 		return err
 	}
-	_, err = mta.DeliverAndRelay(accounts, spool, sender, []string{organizer}, raw, time.Now())
+	_, err = mta.DeliverAndRelay(accounts, spool, who.actor, []string{organizer}, raw, time.Now())
 	return err
 }
 

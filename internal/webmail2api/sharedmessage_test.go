@@ -10,7 +10,9 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
+	"hermex/internal/mime"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcical"
 )
 
 // sharedMessageFixture is a caller with a mailbox of their own and a shared
@@ -261,5 +263,82 @@ func TestSharedProposalNeedsASendGrant(t *testing.T) {
 	rec := f.do(http.MethodPost, "/api/v1/mail/propose-time?owner=team@hermex.test", body)
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// fileInvite files in the shared Inbox an invitation bob organizes and returns its
+// id.
+func (f *sharedMessageFixture) fileInvite(t *testing.T) string {
+	t.Helper()
+	st, err := objectstore.Open(f.shared)
+	mustNoErr(t, "open", err)
+	defer st.Close()
+	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), inviteMail("shared-invite@hermex.test"), time.Now(), 0)
+	mustNoErr(t, "file the invite", err)
+	return "inbox:" + strconv.FormatUint(uint64(info.UID), 10)
+}
+
+// TestSharedRSVPNeedsASendGrant proves a delegate answers an invitation in the
+// shared mailbox only under a send-as or send-on-behalf grant, because the answer
+// goes to the organizer from that mailbox. It used to go out under the mailbox's
+// name for anyone who could change its Inbox. A refused answer records nothing.
+func TestSharedRSVPNeedsASendGrant(t *testing.T) {
+	f := newSharedMessageFixture(t, mapi.RightsEditor, false)
+	id := f.fileInvite(t)
+	rec := f.do(http.MethodPost, "/api/v1/mail/rsvp?owner=team@hermex.test", `{"id":"`+id+`","response":"accept"}`)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+	wantEq(t, "appointments after a refused answer", calendarCount(t, f.shared), 0)
+}
+
+// TestSharedRSVPNamesTheDelegate follows a delegate's answer to the organizer. It is
+// the shared mailbox's answer, so it is from that mailbox and answers for it; under
+// a send-on-behalf grant it names the delegate as its Sender, and under a send-as
+// grant it names the mailbox alone.
+func TestSharedRSVPNamesTheDelegate(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		grant    func(*objectstore.Store, []string) error
+		sender   string
+		attendee string
+	}{
+		{"on behalf", (*objectstore.Store).SetSendOnBehalf, "Sender: <alice@hermex.test>",
+			"ATTENDEE;PARTSTAT=ACCEPTED:mailto:team@hermex.test"},
+		{"send as", (*objectstore.Store).SetSendAs, "",
+			"ATTENDEE;PARTSTAT=ACCEPTED:mailto:team@hermex.test"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newSharedMessageFixture(t, mapi.RightsEditor, false)
+			bob := t.TempDir()
+			accounts := directory.StaticAccounts{
+				"alice@hermex.test": {Password: "pw", MailboxPath: f.own},
+				"team@hermex.test":  {Shared: true, MailboxPath: f.shared},
+				"bob@hermex.test":   {Password: "pw", MailboxPath: bob},
+			}
+			f.srv = NewServer(accounts, accounts, nil, "mail.hermex.test", []byte("shared-message-test-secret"), "", false)
+			st, err := objectstore.Open(f.shared)
+			mustNoErr(t, "open", err)
+			mustNoErr(t, "grant", c.grant(st, []string{"alice@hermex.test"}))
+			st.Close()
+			id := f.fileInvite(t)
+
+			rec := f.do(http.MethodPost, "/api/v1/mail/rsvp?owner=team@hermex.test", `{"id":"`+id+`","response":"accept"}`)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+			}
+			answer := lastOf(t, folderMail(t, bob, int64(mapi.PrivateFIDInbox)), 1)
+			head, _, _ := strings.Cut(answer, "\r\n\r\n")
+			wantContains(t, "answer header", head, "From: <team@hermex.test>")
+			if c.sender == "" {
+				if strings.Contains(head, "Sender:") {
+					t.Errorf("a send-as answer names a Sender:\n%s", head)
+				}
+			} else {
+				wantContains(t, "answer header", head, c.sender)
+			}
+			ics := findCalendarPart(mime.ParseStructure([]byte(answer)))
+			wantContains(t, "answer calendar", strings.Join(oxcical.ContentLines(ics), "\n"), c.attendee)
+		})
 	}
 }
