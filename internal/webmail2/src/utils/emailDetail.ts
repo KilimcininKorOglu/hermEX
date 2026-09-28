@@ -1,4 +1,5 @@
 import type { AttachmentInfo, Mail, MeetingInvite, MeetingResponse, RsvpOptions } from "@/utils/api"
+import { zonedInputFromISO, zonedInputToISO } from "@/utils/date"
 
 // EmailDetail is the reading view's model of one message.
 export interface EmailDetail {
@@ -144,13 +145,16 @@ export function readerShortcut(
 }
 
 // toDatetimeLocal converts an RFC3339 instant to the "YYYY-MM-DDTHH:mm" value a
-// native datetime-local input expects, in the browser's local zone.
+// native datetime-local input expects, in the display zone the page shows times
+// in, so the input and the page never disagree.
 export function toDatetimeLocal(iso?: string): string {
-  if (!iso) return ""
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return ""
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  return zonedInputFromISO(iso)
+}
+
+// fromDatetimeLocal is toDatetimeLocal the other way round: the instant a
+// datetime-local value means in the display zone.
+export function fromDatetimeLocal(value: string): string {
+  return zonedInputToISO(value)
 }
 
 const HOUR_MS = 60 * 60 * 1000
@@ -166,8 +170,8 @@ export function proposeWindow(invite: Pick<MeetingInvite, "start" | "end">): { s
 // proposalRange turns the propose-new-time inputs into the instants sent to
 // the organizer; an empty end means an hour after the start.
 export function proposalRange(start: string, end: string): { start: string; end: string } {
-  const s = new Date(start)
-  const e = end ? new Date(end) : new Date(s.getTime() + HOUR_MS)
+  const s = new Date(fromDatetimeLocal(start))
+  const e = end ? new Date(fromDatetimeLocal(end)) : new Date(s.getTime() + HOUR_MS)
   return { start: s.toISOString(), end: e.toISOString() }
 }
 

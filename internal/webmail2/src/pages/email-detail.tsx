@@ -78,6 +78,7 @@ import {
   replySubject,
   senderInitials,
   toDatetimeLocal,
+  fromDatetimeLocal,
   type BodyView,
   type EmailDetail,
   type FollowupAction,
@@ -1004,7 +1005,7 @@ function FollowupMenu({ email, onFollowup }: {
             defaultValue={toDatetimeLocal(email.followupDue)}
             onChange={(e) =>
               e.target.value &&
-              onFollowup("flag", email.followupColor || 6, new Date(e.target.value).toISOString())
+              onFollowup("flag", email.followupColor || 6, fromDatetimeLocal(e.target.value))
             }
           />
         </div>

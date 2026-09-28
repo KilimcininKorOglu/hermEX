@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { setDisplayTimeZone } from "@/utils/date"
 import type { Mail } from "@/utils/api"
 import {
   answerNoteKey,
@@ -95,16 +96,19 @@ describe("readerShortcut", () => {
 })
 
 describe("propose-new-time", () => {
-  const local = (h: number, m: number) => new Date(2026, 8, 25, h, m)
+  // The inputs show the display zone's wall clock, whatever zone the browser is
+  // in: New York is UTC-4 on this day.
+  beforeEach(() => setDisplayTimeZone("America/New_York"))
+  afterEach(() => setDisplayTimeZone(""))
 
-  it("prefills the invite's window and defaults the end to an hour later", () => {
-    expect(proposeWindow({ start: local(10, 0).toISOString(), end: local(10, 30).toISOString() })).toEqual({ start: "2026-09-25T10:00", end: "2026-09-25T10:30" })
-    expect(proposeWindow({ start: local(10, 0).toISOString() })).toEqual({ start: "2026-09-25T10:00", end: "2026-09-25T11:00" })
+  it("prefills the invite's window in the display zone and defaults the end to an hour later", () => {
+    expect(proposeWindow({ start: "2026-09-25T14:00:00Z", end: "2026-09-25T14:30:00Z" })).toEqual({ start: "2026-09-25T10:00", end: "2026-09-25T10:30" })
+    expect(proposeWindow({ start: "2026-09-25T14:00:00Z" })).toEqual({ start: "2026-09-25T10:00", end: "2026-09-25T11:00" })
   })
 
-  it("sends instants and defaults an empty end to an hour after the start", () => {
-    expect(proposalRange("2026-09-25T10:00", "")).toEqual({ start: local(10, 0).toISOString(), end: local(11, 0).toISOString() })
-    expect(proposalRange("2026-09-25T10:00", "2026-09-25T12:00")).toEqual({ start: local(10, 0).toISOString(), end: local(12, 0).toISOString() })
+  it("sends the instants the display-zone inputs mean", () => {
+    expect(proposalRange("2026-09-25T10:00", "")).toEqual({ start: "2026-09-25T14:00:00.000Z", end: "2026-09-25T15:00:00.000Z" })
+    expect(proposalRange("2026-09-25T10:00", "2026-09-25T12:00")).toEqual({ start: "2026-09-25T14:00:00.000Z", end: "2026-09-25T16:00:00.000Z" })
   })
 })
 
@@ -124,11 +128,10 @@ describe("meeting answers", () => {
   it("sends the note only when there is one, and the span only for a proposal", () => {
     expect(draftOptions("  ", false, "", "")).toEqual({ send: true })
     expect(draftOptions(" See you. ", false, "2026-09-25T10:00", "")).toEqual({ send: true, comment: "See you." })
-    const local = (h: number) => new Date(2026, 8, 25, h, 0).toISOString()
     expect(draftOptions("", true, "2026-09-25T10:00", "2026-09-25T11:30")).toEqual({
-      send: true, proposeStart: local(10), proposeEnd: new Date(2026, 8, 25, 11, 30).toISOString(),
+      send: true, proposeStart: "2026-09-25T10:00:00.000Z", proposeEnd: "2026-09-25T11:30:00.000Z",
     })
-    expect(draftOptions("", true, "2026-09-25T10:00", "").proposeEnd).toBe(local(11))
+    expect(draftOptions("", true, "2026-09-25T10:00", "").proposeEnd).toBe("2026-09-25T11:00:00.000Z")
   })
 })
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { formatAbsolute, formatDate, formatDay, formatFullDate, formatWhen, setDisplayTimeZone, withTz, zonedInputToISO } from './date'
+import { formatAbsolute, formatDate, formatDay, formatFullDate, formatWhen, setDisplayTimeZone, withTz, zonedInputToISO, zonedInputFromISO, zonedDayKey, zonedDayStartISO, addDaysToKey, weekdayOfKey } from './date'
 
 describe('without a chosen time zone', () => {
   afterEach(() => setDisplayTimeZone(''))
@@ -62,6 +62,29 @@ describe('formatFullDate', () => {
     // Should contain year and day
     expect(result).toContain('2024')
     expect(result).toContain('1')
+  })
+})
+
+describe('display-zone inputs', () => {
+  afterEach(() => setDisplayTimeZone(''))
+
+  it('reads an instant back as the wall clock the page shows, both ways', () => {
+    setDisplayTimeZone('America/New_York')
+    expect(zonedInputFromISO('2026-11-26T09:00:00Z')).toBe('2026-11-26T04:00')
+    expect(zonedInputToISO('2026-11-26T04:00')).toBe('2026-11-26T09:00:00.000Z')
+    // Across the DST switch the offset follows the day.
+    expect(zonedInputFromISO('2026-07-01T09:00:00Z')).toBe('2026-07-01T05:00')
+    setDisplayTimeZone('')
+    expect(zonedInputFromISO('2026-11-26T09:00:00Z')).toBe('2026-11-26T09:00')
+  })
+
+  it('finds the day an instant falls on, and the day boundaries, in the zone', () => {
+    setDisplayTimeZone('Europe/Istanbul')
+    expect(zonedDayKey('2026-11-26T22:30:00Z')).toBe('2026-11-27')
+    expect(zonedDayStartISO('2026-11-27')).toBe('2026-11-26T21:00:00.000Z')
+    expect(addDaysToKey('2026-12-31', 1)).toBe('2027-01-01')
+    expect(weekdayOfKey('2026-11-27')).toBe(5)
+    expect(zonedInputFromISO('nope')).toBe('')
   })
 })
 

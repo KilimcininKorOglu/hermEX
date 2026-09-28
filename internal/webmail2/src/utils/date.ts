@@ -75,6 +75,40 @@ export function zonedInputToISO(localValue: string): string {
   return new Date(utcMs).toISOString()
 }
 
+// zonedInputFromISO is zonedInputToISO the other way round: the "YYYY-MM-DDTHH:mm"
+// wall clock an instant shows in the display zone, for a datetime-local input,
+// so the input reads the same time the page shows. An unreadable value is "".
+export function zonedInputFromISO(value?: string | Date): string {
+  if (!value) return ''
+  const date = value instanceof Date ? value : new Date(value)
+  if (isNaN(date.getTime())) return ''
+  const p = zonedParts(date)
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`
+}
+
+// zonedDayKey is the "YYYY-MM-DD" day an instant falls on in the display zone.
+export function zonedDayKey(value: string | Date): string {
+  return zonedInputFromISO(value).slice(0, 10)
+}
+
+// zonedDayStartISO is the instant a "YYYY-MM-DD" day starts in the display zone.
+export function zonedDayStartISO(day: string): string {
+  return zonedInputToISO(`${day}T00:00`)
+}
+
+// addDaysToKey moves a "YYYY-MM-DD" day by n calendar days. A day is a date, not
+// an instant, so no zone takes part.
+export function addDaysToKey(day: string, n: number): string {
+  const [y, m, d] = day.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10)
+}
+
+// weekdayOfKey is a "YYYY-MM-DD" day's weekday, 0 for Sunday.
+export function weekdayOfKey(day: string): number {
+  const [y, m, d] = day.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay()
+}
+
 type Translate = (key: string, params?: Record<string, string>) => string
 
 // uiLang is the interface language the page renders in, which useI18n mirrors
