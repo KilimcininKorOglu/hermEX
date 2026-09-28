@@ -69,8 +69,11 @@ func classMethod(class string) string {
 }
 
 // eventUID returns the stored iCalendar UID, else the one the MAPI global object id
-// exports as, else a constant fallback so the VEVENT always carries the property
-// RFC 5545 §3.8.4.7 requires.
+// exports as ([MS-OXCICAL] UID). The store gives every appointment a global object
+// id when it is created, so only an object that was never stored lacks both; it
+// gets a freshly minted one, unique like any other, because RFC 5545 §3.8.4.7
+// requires the property and a shared constant would make a CalDAV client merge
+// every such event into one.
 func eventUID(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag, uidTag mapi.PropTag) string {
 	if uidTag != 0 {
 		if uid := getStr(p, uidTag); uid != "" {
@@ -80,7 +83,7 @@ func eventUID(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag, 
 	if uid := globalObjectUID(namedBytes(p, named, mapi.NameGlobalObjectId)); uid != "" {
 		return uid
 	}
-	return "hermex-event"
+	return globalObjectUID(NewGlobalObjectID(time.Now()))
 }
 
 // exportClassification emits how the event is filed: whether it takes time, how

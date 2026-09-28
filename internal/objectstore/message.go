@@ -18,6 +18,9 @@ import (
 // offloaded to content files by the property layer. It returns the new message
 // EID.
 func (s *Store) CreateMessage(folderID int64, msg *oxcmail.Message) (int64, error) {
+	if err := s.stampGlobalObjectID(msg); err != nil {
+		return 0, err
+	}
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		return 0, err

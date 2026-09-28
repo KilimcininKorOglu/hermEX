@@ -2,6 +2,7 @@ package oxcical
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
 	"slices"
@@ -82,6 +83,23 @@ func GlobalObjectID(uid string) []byte {
 	copy(goid, goidClassID)
 	binary.LittleEndian.PutUint32(goid[goidSizeOffset:], uint32(len(data))) // #nosec G115 -- a UID is a line of text
 	return append(goid, data...)
+}
+
+// goidDataSize is how many random bytes a freshly minted global object id carries
+// as its Data.
+const goidDataSize = 16
+
+// NewGlobalObjectID mints the global object id of a new calendar object
+// ([MS-OXOCAL] 2.2.1.27): the class id, a zero instance date, the time it was
+// generated, the reserved zeros, and random data that makes it unique across
+// mailboxes.
+func NewGlobalObjectID(created time.Time) []byte {
+	goid := make([]byte, goidDataOffset+goidDataSize)
+	copy(goid, goidClassID)
+	binary.LittleEndian.PutUint64(goid[goidDateOffset+4:], mapi.UnixToNTTime(created))
+	binary.LittleEndian.PutUint32(goid[goidSizeOffset:], goidDataSize)
+	_, _ = rand.Read(goid[goidDataOffset:]) // crypto/rand.Read never returns an error; it aborts the program instead
+	return goid
 }
 
 // GlobalObjectIDForms returns every form a stored meeting named by uid can carry
