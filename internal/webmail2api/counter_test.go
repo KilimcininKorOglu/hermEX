@@ -3,13 +3,10 @@ package webmail2api
 import (
 	"net/http"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
 	"hermex/internal/mapi"
-	"hermex/internal/mime"
-	"hermex/internal/oxcical"
 )
 
 // counterInvite files in alice's inbox a request bob organizes.
@@ -27,16 +24,19 @@ func counterInvite(t *testing.T, alice string) string {
 	return "inbox:" + strconv.FormatUint(uint64(info.UID), 10)
 }
 
-// TestCounterProposalReachesTheOrganizer proposes a new time for bob's meeting:
-// exactly one proposal reaches bob, filed as the counter-proposal response his
-// client reads the proposed time from. It used to be filed as a plain message
-// with the calendar as an attachment.
-func TestCounterProposalReachesTheOrganizer(t *testing.T) {
+// TestProposalReachesTheOrganizer answers tentatively with a new time: exactly one
+// answer reaches bob, filed as the counter proposal his client reads the proposed
+// time from ([MS-OXOCAL] 3.1.4.8.4.1), and it carries the note alice wrote.
+func TestProposalReachesTheOrganizer(t *testing.T) {
 	do, alice, bob := meetingHarness(t)
 	id := counterInvite(t, alice)
-	wantStatus(t, "propose", do(http.MethodPost, "/api/v1/mail/propose-time",
-		`{"id":"`+id+`","start":"2026-09-08T11:00:00Z","end":"2026-09-08T12:00:00Z"}`), http.StatusOK)
-	lastOf(t, folderMail(t, bob, int64(mapi.PrivateFIDInbox)), 1)
+	wantStatus(t, "propose", do(http.MethodPost, "/api/v1/mail/rsvp", `{"id":"`+id+`","response":"tentative",`+
+		`"proposeStart":"2026-09-08T11:00:00Z","proposeEnd":"2026-09-08T12:00:00Z","comment":"Mornings are full."}`), http.StatusOK)
+	wire := lastOf(t, folderMail(t, bob, int64(mapi.PrivateFIDInbox)), 1)
+	for _, want := range []string{"METHOD:COUNTER", "DTSTART:20260908T110000Z", "DTEND:20260908T120000Z",
+		"Subject: New Time Proposed: Sync", "Mornings are full.", "Message-ID:"} {
+		wantContains(t, "the proposal", wire, want)
+	}
 
 	st := openMailbox(t, bob)
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
@@ -50,42 +50,56 @@ func TestCounterProposalReachesTheOrganizer(t *testing.T) {
 	wantEq(t, "proposed start", start, any(mapi.UnixToNTTime(time.Date(2026, 9, 8, 11, 0, 0, 0, time.UTC))))
 }
 
-// TestCounterProposalWireForm is the message the proposal sends: built through the
-// shared mail export, so it carries a Message-ID and the calendar part as the
-// COUNTER alternative, and a summary holding a line break reaches neither a header
-// line nor a new iCalendar line.
-func TestCounterProposalWireForm(t *testing.T) {
-	raw, err := buildCounterRequest("alice@hermex.test", "alice@hermex.test", "Bob <bob@hermex.test>", eventJSON{UID: "counter-1@test",
-		Summary: "Sync\r\nBcc: attacker@evil.example", Start: "2026-09-08T11:00:00Z", End: "2026-09-08T12:00:00Z"})
-	mustNoErr(t, "build", err)
-	msg := string(raw)
-	for _, want := range []string{"method=COUNTER", "METHOD:COUNTER", "UID:counter-1@test", "DTSTART:20260908T110000Z",
-		"DTEND:20260908T120000Z", "ORGANIZER:mailto:bob@hermex.test", "DTSTAMP:", "Message-ID:"} {
-		wantContains(t, "counter-proposal", msg, want)
-	}
-	wantNoInjectedLines(t, msg)
-	wantContains(t, "escaped summary", msg, `SUMMARY:Sync\nBcc: attacker@evil.example`)
-}
-
-// TestDelegateCounterProposalNamesTheDelegate proposes a new time for a shared
-// mailbox under a send-on-behalf grant: the COUNTER is the mailbox's own and names
-// the delegate in its SENT-BY, as the delegate's answer to the invitation does.
-func TestDelegateCounterProposalNamesTheDelegate(t *testing.T) {
-	raw, err := buildCounterRequest("team@hermex.test", "alice@hermex.test", "bob@hermex.test", eventJSON{UID: "counter-2@test",
-		Summary: "Sync", Start: "2026-09-08T11:00:00Z", End: "2026-09-08T12:00:00Z"})
-	mustNoErr(t, "build", err)
-	ics := findCalendarPart(mime.ParseStructure(raw))
-	wantContains(t, "counter-proposal", strings.Join(oxcical.ContentLines(ics), "\n"),
-		`ATTENDEE;SENT-BY="mailto:alice@hermex.test";ROLE=REQ-PARTICIPANT;PARTSTAT=TENTATIVE:mailto:team@hermex.test`)
-}
-
-// TestCounterProposalRefusesAnUnreadableTime proposes a start that is not a time.
-// The value used to be written onto the DTSTART line verbatim, so a line break in
-// it added iCalendar properties of the client's choosing.
-func TestCounterProposalRefusesAnUnreadableTime(t *testing.T) {
+// TestDeclineWithAProposalTakesTheMeetingOff declines with a new time, Outlook's
+// "Decline and propose new time": the organizer is offered the time, and the
+// meeting leaves alice's calendar as any decline takes it off.
+func TestDeclineWithAProposalTakesTheMeetingOff(t *testing.T) {
 	do, alice, bob := meetingHarness(t)
 	id := counterInvite(t, alice)
-	wantStatus(t, "propose", do(http.MethodPost, "/api/v1/mail/propose-time",
-		`{"id":"`+id+`","start":"2026-09-08T11:00:00Z\r\nATTENDEE:mailto:carol@hermex.test"}`), http.StatusBadRequest)
+	wantStatus(t, "accept", do(http.MethodPost, "/api/v1/mail/rsvp", `{"id":"`+id+`","response":"accept","send":false}`), http.StatusOK)
+	wantStatus(t, "decline and propose", do(http.MethodPost, "/api/v1/mail/rsvp", `{"id":"`+id+`","response":"decline",`+
+		`"proposeStart":"2026-09-09T09:00:00Z","proposeEnd":"2026-09-09T10:00:00Z"}`), http.StatusOK)
+	wantContains(t, "the proposal", lastOf(t, folderMail(t, bob, int64(mapi.PrivateFIDInbox)), 1), "METHOD:COUNTER")
+	wantEq(t, "alice's calendar", calendarCount(t, alice), 0)
+}
+
+// TestProposalRefusesAnUnreadableTime proposes a time that is not one. The value
+// used to be written onto the DTSTART line verbatim, so a line break in it added
+// iCalendar properties of the client's choosing. A half span and a span that ends
+// before it starts are refused too, and nothing reaches bob.
+func TestProposalRefusesAnUnreadableTime(t *testing.T) {
+	for _, span := range []string{
+		`"proposeStart":"2026-09-08T11:00:00Z\r\nATTENDEE:mailto:carol@hermex.test","proposeEnd":"2026-09-08T12:00:00Z"`,
+		`"proposeStart":"2026-09-08T11:00:00Z"`,
+		`"proposeStart":"2026-09-08T12:00:00Z","proposeEnd":"2026-09-08T11:00:00Z"`,
+	} {
+		do, alice, bob := meetingHarness(t)
+		id := counterInvite(t, alice)
+		wantStatus(t, span, do(http.MethodPost, "/api/v1/mail/rsvp", `{"id":"`+id+`","response":"tentative",`+span+`}`), http.StatusBadRequest)
+		wantEq(t, "bob's inbox", len(folderMail(t, bob, int64(mapi.PrivateFIDInbox))), 0)
+		wantEq(t, "alice's calendar", calendarCount(t, alice), 0)
+	}
+}
+
+// TestProposalMustBeSent refuses a proposal the reader chose not to send: a time
+// nobody receives proposes nothing.
+func TestProposalMustBeSent(t *testing.T) {
+	do, alice, _ := meetingHarness(t)
+	id := counterInvite(t, alice)
+	wantStatus(t, "unsent proposal", do(http.MethodPost, "/api/v1/mail/rsvp", `{"id":"`+id+`","response":"tentative","send":false,`+
+		`"proposeStart":"2026-09-08T11:00:00Z","proposeEnd":"2026-09-08T12:00:00Z"}`), http.StatusBadRequest)
+	wantEq(t, "alice's calendar", calendarCount(t, alice), 0)
+}
+
+// TestAnswerWithoutSendingTellsNobody answers with Outlook's "Don't send a
+// response": the answer is recorded on alice's calendar, and bob receives nothing
+// and alice keeps nothing in Sent Items.
+func TestAnswerWithoutSendingTellsNobody(t *testing.T) {
+	do, alice, bob := meetingHarness(t)
+	id := counterInvite(t, alice)
+	wantStatus(t, "accept silently", do(http.MethodPost, "/api/v1/mail/rsvp", `{"id":"`+id+`","response":"accept","send":false}`), http.StatusOK)
+	wantEq(t, "alice's calendar", calendarCount(t, alice), 1)
 	wantEq(t, "bob's inbox", len(folderMail(t, bob, int64(mapi.PrivateFIDInbox))), 0)
+	wantEq(t, "alice's Sent Items", sentItems(t, alice), 0)
+	wantEq(t, "the answer shown", inviteView(t, do, id).Response, "accept")
 }

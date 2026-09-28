@@ -200,7 +200,8 @@ func TestRSVPClearsTheRequestWhenConfigured(t *testing.T) {
 	}
 }
 
-// TestRSVPReportsTheStatus keeps the response body the SPA reads.
+// TestRSVPReportsTheStatus reports the answer recorded. The status used to be the
+// request word with "ed" glued on, so a tentative answer reported "tentativeed".
 func TestRSVPReportsTheStatus(t *testing.T) {
 	do, _, id := rsvpHarness(t)
 	rec := do(`{"id":"` + id + `","response":"tentative"}`)
@@ -210,7 +211,19 @@ func TestRSVPReportsTheStatus(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if out.Status != "tentativeed" {
-		t.Errorf("status = %q", out.Status)
+	if out.Status != "tentative" {
+		t.Errorf("status = %q, want tentative", out.Status)
 	}
+}
+
+// TestRSVPCarriesTheNote proves the note the reader writes reaches the organizer
+// with the answer, and the invitation's own text does not.
+func TestRSVPCarriesTheNote(t *testing.T) {
+	do, alice, bob := meetingHarness(t)
+	id := counterInvite(t, alice)
+	wantStatus(t, "accept", do(http.MethodPost, "/api/v1/mail/rsvp",
+		`{"id":"`+id+`","response":"accept","comment":"I will dial in from Ankara."}`), http.StatusOK)
+	answer := lastOf(t, folderMail(t, bob, int64(mapi.PrivateFIDInbox)), 1)
+	wantContains(t, "the answer", answer, "I will dial in from Ankara.")
+	wantContains(t, "the answer", answer, "METHOD:REPLY")
 }

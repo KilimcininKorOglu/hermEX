@@ -493,14 +493,43 @@ export interface RecipientRule {
   action: 'allow' | 'block'
 }
 
+/** MeetingResponse is an attendee's answer to a meeting request. */
+export type MeetingResponse = 'accept' | 'tentative' | 'decline'
+
+/**
+ * MeetingInvite is what the reader shows about a message carrying a calendar
+ * part. kind is absent for a calendar part that is not a meeting message, such
+ * as an event shared as an attachment.
+ */
 export interface MeetingInvite {
   isInvite: boolean
+  kind?: 'request' | 'response' | 'counter' | 'cancellation'
   uid?: string
   summary?: string
   start?: string
   end?: string
   location?: string
   organizer?: string
+  /** The answer the mailbox gave to a request, or the answer a response carries. */
+  response?: MeetingResponse
+  responseRequested?: boolean
+  /** The mailbox organizes the meeting a request is for: nothing to answer. */
+  isOrganizer?: boolean
+  proposedStart?: string
+  proposedEnd?: string
+  /** A cancellation whose meeting is still on the calendar, marked canceled. */
+  removable?: boolean
+}
+
+/**
+ * RsvpOptions are the choices that go with an answer: whether the organizer is
+ * sent it, the note that goes with it, and a new time it proposes.
+ */
+export interface RsvpOptions {
+  send: boolean
+  comment?: string
+  proposeStart?: string
+  proposeEnd?: string
 }
 
 interface AuthLoginRequest {
@@ -1105,15 +1134,16 @@ class API {
     return this.get<MeetingInvite>(this.withOwner(`/mail/invite?id=${encodeURIComponent(id)}`))
   }
 
-  // rsvp responds to a meeting invite; accept/tentative add it to the calendar.
-  async rsvp(id: string, response: 'accept' | 'tentative' | 'decline'): Promise<{ status: string }> {
-    return this.post<{ status: string }>(this.withOwner('/mail/rsvp'), { id, response })
+  // rsvp answers a meeting invite; accept/tentative put it on the calendar and
+  // decline takes it off. The options say whether the organizer is sent the
+  // answer, with a note and a new time it proposes.
+  async rsvp(id: string, response: MeetingResponse, opts: RsvpOptions): Promise<{ status: string }> {
+    return this.post<{ status: string }>(this.withOwner('/mail/rsvp'), { id, response, ...opts })
   }
 
-  // proposeTime emails a METHOD:COUNTER iTIP to the organizer proposing a new
-  // start/end for the meeting the invite message carries.
-  async proposeTime(id: string, start: string, end: string): Promise<{ status: string }> {
-    return this.post<{ status: string }>(this.withOwner('/mail/propose-time'), { id, start, end })
+  // removeFromCalendar takes off the calendar the meeting a cancellation calls off.
+  async removeFromCalendar(id: string): Promise<{ status: string }> {
+    return this.post<{ status: string }>(this.withOwner('/mail/remove-from-calendar'), { id })
   }
 
   // getCategories returns the user's master category list (name + color).

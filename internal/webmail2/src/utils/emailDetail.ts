@@ -1,4 +1,4 @@
-import type { AttachmentInfo, Mail, MeetingInvite } from "@/utils/api"
+import type { AttachmentInfo, Mail, MeetingInvite, MeetingResponse, RsvpOptions } from "@/utils/api"
 
 // EmailDetail is the reading view's model of one message.
 export interface EmailDetail {
@@ -169,6 +169,44 @@ export function proposalRange(start: string, end: string): { start: string; end:
   const s = new Date(start)
   const e = end ? new Date(end) : new Date(s.getTime() + HOUR_MS)
   return { start: s.toISOString(), end: e.toISOString() }
+}
+
+// RESPONSE_TOAST_KEYS is the i18n key each answer to a meeting request confirms
+// with: accept and tentative put the meeting on the calendar, decline takes it off.
+export const RESPONSE_TOAST_KEYS: Record<MeetingResponse, string> = {
+  accept: "emailDetail.addedToCalendar",
+  tentative: "emailDetail.markedTentative",
+  decline: "emailDetail.removedFromCalendar",
+}
+
+// ANSWER_WORDS names each answer in the keys of the lines that state it.
+const ANSWER_WORDS: Record<MeetingResponse, string> = { accept: "Accepted", tentative: "Tentative", decline: "Declined" }
+
+// answerNoteKey is the i18n key of the line that states an answer: the reader's
+// own answer to a request, or the answer an attendee sent.
+export function answerNoteKey(response: MeetingResponse, own: boolean): string {
+  return `emailDetail.${own ? "you" : "they"}${ANSWER_WORDS[response]}`
+}
+
+// draftTitleKey is the i18n key of the answer dialog's title: the answer, or the
+// answer with the new time it proposes.
+export function draftTitleKey(response: MeetingResponse, propose: boolean): string {
+  if (!propose) return `emailDetail.${response}`
+  return response === "decline" ? "emailDetail.declineProposeNewTime" : "emailDetail.tentativeProposeNewTime"
+}
+
+// draftOptions turns the answer dialog into what the answer sends: it is sent,
+// with the note when there is one and the proposed span when it proposes one.
+export function draftOptions(comment: string, propose: boolean, start: string, end: string): RsvpOptions {
+  const opts: RsvpOptions = { send: true }
+  const note = comment.trim()
+  if (note) opts.comment = note
+  if (propose) {
+    const range = proposalRange(start, end)
+    opts.proposeStart = range.start
+    opts.proposeEnd = range.end
+  }
+  return opts
 }
 
 // replySubject prefixes "Re: " once.

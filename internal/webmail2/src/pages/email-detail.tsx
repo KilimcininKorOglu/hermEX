@@ -28,6 +28,10 @@ import {
   Copy,
   Braces,
   StickyNote,
+  CalendarClock,
+  CalendarX,
+  ChevronDown,
+  type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -61,9 +65,12 @@ import { MAX_DRAG_BYTES, blobToBase64, setAttachmentDrag } from "@/utils/attachm
 import { dragSet, emptySelection, selectOnClick } from "@/utils/attachmentSelection"
 import {
   FOLLOWUP_TOAST_KEYS,
+  RESPONSE_TOAST_KEYS,
+  answerNoteKey,
+  draftOptions,
+  draftTitleKey,
   emailDetailOf,
   followupPatch,
-  proposalRange,
   proposeWindow,
   readerShortcut,
   recallable,
@@ -78,7 +85,7 @@ import {
 } from "@/utils/emailDetail"
 import { cn } from "@/lib/utils"
 import api from "@/utils/api"
-import type { MeetingInvite, AttachmentInfo, Mail as MailMessage, Note } from "@/utils/api"
+import type { MeetingInvite, MeetingResponse, RsvpOptions, AttachmentInfo, Mail as MailMessage, Note } from "@/utils/api"
 import * as smimeStore from "@/utils/smime"
 import { hasIdentity as hasBrowserSmime } from "@/utils/smimeIdentity"
 import { formatAbsolute, withTz, formatWhen } from "@/utils/date"
@@ -487,67 +494,84 @@ function useNotes(email: EmailDetail | null, setNotes: (notes: Note[]) => void) 
 
 type NotesEditor = ReturnType<typeof useNotes>
 
-// useInviteActions answers a meeting invite: accept, tentative or decline, or
-// propose a new time to the organizer.
-function useInviteActions(email: EmailDetail | null, invite: MeetingInvite | null) {
+// AnswerDraft is an answer the reader writes before it is sent: the answer, and
+// whether it proposes a new time.
+interface AnswerDraft {
+  response: MeetingResponse
+  propose: boolean
+}
+
+// useInviteActions answers a meeting request with the choices Outlook offers
+// beside each answer: send it now, write a note first, or send nothing. A new
+// time is proposed with a tentative answer or a decline. It also removes from
+// the calendar the meeting a cancellation calls off.
+function useInviteActions(email: EmailDetail | null, invite: MeetingInvite | null, onRemoved: () => void) {
   const { t } = useI18n()
-  const [rsvpStatus, setRsvpStatus] = useState<string | null>(null)
-  // One gate for every answer: an RSVP and a counter-proposal both answer the
-  // same invite, so neither may start while the other is in flight.
+  // The answer given here; the panel shows it until the next message opens.
+  const [answered, setAnswered] = useState<MeetingResponse | null>(null)
+  // One gate for every answer: they all answer the same request, so none may
+  // start while another is in flight.
   const { busy, begin, end } = useBusyGate()
-  // Propose-new-time: a dialog where the invitee picks a proposed start/end and
-  // emails a METHOD:COUNTER iTIP to the organizer.
-  const [proposeOpen, setProposeOpen] = useState(false)
+  const [draft, setDraft] = useState<AnswerDraft | null>(null)
+  const [comment, setComment] = useState("")
   const [proposeStart, setProposeStart] = useState("")
   const [proposeEnd, setProposeEnd] = useState("")
 
-  // handleRsvp responds to a meeting invite. Accept/tentative add the event to
-  // the user's calendar; decline removes it.
-  const handleRsvp = async (response: "accept" | "tentative" | "decline") => {
+  const emailId = email?.id
+  useEffect(() => {
+    setAnswered(null)
+    setDraft(null)
+  }, [emailId])
+
+  // respond records the answer and, when opts says so, sends it to the organizer.
+  const respond = async (response: MeetingResponse, opts: RsvpOptions) => {
     if (!email || !begin()) return
+    const proposing = opts.proposeStart !== undefined
     try {
-      await api.rsvp(email.id, response)
-      setRsvpStatus(response)
-      const messages: Record<string, string> = {
-        accept: t("emailDetail.addedToCalendar"),
-        tentative: t("emailDetail.markedTentative"),
-        decline: t("emailDetail.removedFromCalendar"),
-      }
-      toast.success(messages[response])
+      await api.rsvp(email.id, response, opts)
+      setAnswered(response)
+      setDraft(null)
+      toast.success(t(proposing ? "emailDetail.proposedTime" : RESPONSE_TOAST_KEYS[response]))
     } catch {
-      toast.error(t("emailDetail.failedToRsvp"))
+      toast.error(t(proposing ? "emailDetail.failedToPropose" : "emailDetail.failedToRsvp"))
     } finally {
       end()
     }
   }
 
-  // openPropose prefills the propose-new-time dialog with the invite's window.
-  const openPropose = () => {
+  // openDraft opens the dialog for an answer written before it is sent. A
+  // proposal starts from the meeting's own time.
+  const openDraft = (response: MeetingResponse, propose: boolean) => {
     if (!invite) return
     const range = proposeWindow(invite)
     setProposeStart(range.start)
     setProposeEnd(range.end)
-    setProposeOpen(true)
+    setComment("")
+    setDraft({ response, propose })
   }
 
-  // handleProposeTime emails the counter-proposal to the organizer.
-  const handleProposeTime = async () => {
-    if (!email || !proposeStart || !begin()) return
+  const sendDraft = () => {
+    if (draft) void respond(draft.response, draftOptions(comment, draft.propose, proposeStart, proposeEnd))
+  }
+
+  // removeFromCalendar takes the canceled meeting off the calendar, then files
+  // the cancellation away, as Outlook's "Remove from Calendar" does.
+  const removeFromCalendar = async () => {
+    if (!email || !begin()) return
     try {
-      const range = proposalRange(proposeStart, proposeEnd)
-      await api.proposeTime(email.id, range.start, range.end)
-      toast.success(t("emailDetail.proposedTime"))
-      setProposeOpen(false)
+      await api.removeFromCalendar(email.id)
+      toast.success(t("emailDetail.removedFromCalendar"))
+      onRemoved()
     } catch {
-      toast.error(t("emailDetail.failedToPropose"))
+      toast.error(t("emailDetail.failedToRemoveFromCalendar"))
     } finally {
       end()
     }
   }
 
   return {
-    rsvpStatus, rsvpBusy: busy, handleRsvp, openPropose, handleProposeTime,
-    proposeOpen, setProposeOpen, proposeStart, setProposeStart, proposeEnd, setProposeEnd, proposeBusy: busy,
+    answered, busy, respond, openDraft, sendDraft, removeFromCalendar,
+    draft, setDraft, comment, setComment, proposeStart, setProposeStart, proposeEnd, setProposeEnd,
   }
 }
 
@@ -762,7 +786,7 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
   const actions = useMessageActions(email, setEmail, invite, prefs.omitOriginal)
   const attachments = useAttachments(email)
   const notes = useNotes(email, message.setNotes)
-  const inviteActions = useInviteActions(email, invite)
+  const inviteActions = useInviteActions(email, invite, () => void actions.handleDelete())
   const reply = useInlineReply(email)
   const [itemDataOpen, setItemDataOpen] = useState(false)
   useReaderShortcuts(actions)
@@ -786,8 +810,8 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
         {/* A note links to its mail by the Message-ID; a mail without one
             cannot carry a note, so the panel is not offered. */}
         {email.annotatable && <NotesPanel notes={message.notes} editor={notes} />}
-        {invite && <InvitePanel invite={invite} actions={inviteActions} />}
-        <ProposeDialog actions={inviteActions} />
+        {invite && <InvitePanel email={email} invite={invite} actions={inviteActions} />}
+        <AnswerDialog actions={inviteActions} />
         <Separator className="my-6" />
         <div className="px-6 pb-6">
           <ReceiptPrompt email={email} onAnswered={() => setEmail((e) => e && { ...e, receiptRequested: false })} />
@@ -1245,75 +1269,262 @@ function inviteTime(start: string): string {
   return isNaN(d.getTime()) ? start : d.toLocaleString([], withTz())
 }
 
-// InvitePanel shows a meeting invitation with its RSVP actions.
-function InvitePanel({ invite, actions }: { invite: MeetingInvite; actions: InviteActions }) {
+// inviteWindow renders a meeting's span: its start, then the time it ends on the
+// same day, or the whole end when it ends on another.
+function inviteWindow(start: string, end?: string): string {
+  const s = new Date(start)
+  const e = new Date(end ?? "")
+  if (isNaN(s.getTime()) || isNaN(e.getTime())) return inviteTime(start)
+  const sameDay = s.toLocaleDateString([], withTz()) === e.toLocaleDateString([], withTz())
+  const endText = sameDay ? e.toLocaleTimeString([], withTz({ hour: "2-digit", minute: "2-digit" })) : inviteTime(e.toISOString())
+  return `${inviteTime(start)} - ${endText}`
+}
+
+// ANSWERS are the three answers to a meeting request.
+const ANSWERS: { response: MeetingResponse; icon: LucideIcon; key: string }[] = [
+  { response: "accept", icon: Check, key: "emailDetail.accept" },
+  { response: "tentative", icon: HelpCircle, key: "emailDetail.tentative" },
+  { response: "decline", icon: X, key: "emailDetail.decline" },
+]
+
+// InvitePanel shows what a message carrying a meeting is: a request to answer, an
+// answer or a new time an attendee sent, a cancellation, or an event shared as a
+// calendar file.
+function InvitePanel({ email, invite, actions }: { email: EmailDetail; invite: MeetingInvite; actions: InviteActions }) {
   const { t } = useI18n()
-  const rsvp = (response: "accept" | "tentative" | "decline", icon: ReactNode, label: string) => (
-    <Button
-      size="sm"
-      variant={actions.rsvpStatus === response ? "default" : "outline"}
-      onClick={() => actions.handleRsvp(response)}
-      disabled={actions.rsvpBusy}
-    >
-      {icon}
-      {label}
-    </Button>
-  )
+  const icon = <CalendarCheck className="h-4 w-4 text-primary" />
+  switch (invite.kind) {
+    case "request":
+      if (!invite.isOrganizer) return <RequestCard invite={invite} actions={actions} />
+      return <MeetingCard icon={icon} title={t("emailDetail.meetingInvitation")} invite={invite} note={t("emailDetail.youOrganize")} />
+    case "response": {
+      const note = invite.response ? t(answerNoteKey(invite.response, false), { name: email.from }) : undefined
+      return <MeetingCard icon={icon} title={t("emailDetail.meetingResponse")} invite={invite} note={note} />
+    }
+    case "counter":
+      return <CounterCard email={email} invite={invite} />
+    case "cancellation":
+      return <CancellationCard invite={invite} actions={actions} />
+  }
+  return <MeetingCard icon={icon} title={t("emailDetail.calendarEvent")} invite={invite} />
+}
+
+// MeetingCard is the frame every meeting panel shares: its title, the meeting's
+// details, a line stating where the meeting stands, and what the reader can do.
+function MeetingCard({ icon, title, invite, note, children }: {
+  icon: ReactNode
+  title: string
+  invite: MeetingInvite
+  note?: string
+  children?: ReactNode
+}) {
+  const { t } = useI18n()
   return (
     <div className="mx-6 mt-4 rounded-lg border border-primary/30 bg-primary/5 p-4">
       <div className="flex items-center gap-2 text-sm font-medium">
-        <CalendarCheck className="h-4 w-4 text-primary" />
-        {t("emailDetail.meetingInvitation")}
+        {icon}
+        {title}
       </div>
       <div className="mt-2 space-y-1 text-sm">
         {invite.summary && <div className="font-medium">{invite.summary}</div>}
-        {invite.start && <div className="text-muted-foreground">{inviteTime(invite.start)}</div>}
+        {invite.start && <div className="text-muted-foreground">{inviteWindow(invite.start, invite.end)}</div>}
         {invite.location && <div className="text-muted-foreground">{invite.location}</div>}
         {invite.organizer && (
           <div className="text-muted-foreground">{t("emailDetail.organizer", { name: invite.organizer })}</div>
         )}
       </div>
-      <div className="mt-3 flex items-center gap-2">
-        {rsvp("accept", <Check className="mr-1 h-4 w-4" />, t("emailDetail.accept"))}
-        {rsvp("tentative", <HelpCircle className="mr-1 h-4 w-4" />, t("emailDetail.tentative"))}
-        {rsvp("decline", <X className="mr-1 h-4 w-4" />, t("emailDetail.decline"))}
-        <Button size="sm" variant="outline" onClick={actions.openPropose} disabled={actions.rsvpBusy}>
-          {t("emailDetail.proposeNewTime")}
-        </Button>
-      </div>
+      {note && <p className="mt-2 text-sm font-medium">{note}</p>}
+      {children}
     </div>
   )
 }
 
-function ProposeDialog({ actions }: { actions: InviteActions }) {
+// RequestCard offers the answers to a request and states the one already given.
+// An organizer who asked for no answer is sent none, so the answers only record
+// it, and no new time is offered.
+function RequestCard({ invite, actions }: { invite: MeetingInvite; actions: InviteActions }) {
+  const { t } = useI18n()
+  const given = actions.answered ?? invite.response
+  return (
+    <MeetingCard
+      icon={<CalendarCheck className="h-4 w-4 text-primary" />}
+      title={t("emailDetail.meetingInvitation")}
+      invite={invite}
+      note={given ? t(answerNoteKey(given, true)) : undefined}
+    >
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {ANSWERS.map((answer) => (
+          <AnswerButton key={answer.response} answer={answer} given={given} sends={!!invite.responseRequested} actions={actions} />
+        ))}
+        {invite.responseRequested && <ProposeMenu actions={actions} />}
+      </div>
+    </MeetingCard>
+  )
+}
+
+// AnswerButton is one answer. When the organizer asked for answers, it opens the
+// choice of how to send it; otherwise it records the answer alone.
+function AnswerButton({ answer, given, sends, actions }: {
+  answer: (typeof ANSWERS)[number]
+  given: MeetingResponse | undefined
+  sends: boolean
+  actions: InviteActions
+}) {
+  const { t } = useI18n()
+  const Icon = answer.icon
+  const variant = given === answer.response ? "default" : "outline"
+  if (!sends) {
+    return (
+      <Button size="sm" variant={variant} disabled={actions.busy} onClick={() => void actions.respond(answer.response, { send: false })}>
+        <Icon className="mr-1 h-4 w-4" />
+        {t(answer.key)}
+      </Button>
+    )
+  }
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="sm" variant={variant} disabled={actions.busy}>
+          <Icon className="mr-1 h-4 w-4" />
+          {t(answer.key)}
+          <ChevronDown className="ml-1 h-3.5 w-3.5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        <DropdownMenuItem onClick={() => void actions.respond(answer.response, { send: true })}>
+          {t("emailDetail.sendResponseNow")}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => actions.openDraft(answer.response, false)}>
+          {t("emailDetail.editResponse")}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => void actions.respond(answer.response, { send: false })}>
+          {t("emailDetail.noResponse")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+// ProposeMenu proposes a new time with the two answers a proposal travels with:
+// tentative and decline.
+function ProposeMenu({ actions }: { actions: InviteActions }) {
   const { t } = useI18n()
   return (
-    <Dialog open={actions.proposeOpen} onOpenChange={actions.setProposeOpen}>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="sm" variant="outline" disabled={actions.busy}>
+          <CalendarClock className="mr-1 h-4 w-4" />
+          {t("emailDetail.proposeNewTime")}
+          <ChevronDown className="ml-1 h-3.5 w-3.5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        <DropdownMenuItem onClick={() => actions.openDraft("tentative", true)}>
+          {t("emailDetail.tentativeProposeNewTime")}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => actions.openDraft("decline", true)}>
+          {t("emailDetail.declineProposeNewTime")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+// CounterCard shows the new time an attendee proposed. The calendar part of a
+// proposal carries the proposed time, not the meeting's, so it is shown as the
+// proposal only.
+function CounterCard({ email, invite }: { email: EmailDetail; invite: MeetingInvite }) {
+  const { t } = useI18n()
+  return (
+    <MeetingCard
+      icon={<CalendarClock className="h-4 w-4 text-primary" />}
+      title={t("emailDetail.newTimeProposed")}
+      invite={{ ...invite, start: undefined }}
+      note={t("emailDetail.theyProposed", { name: email.from })}
+    >
+      {invite.proposedStart && (
+        <p className="mt-1 text-sm">{t("emailDetail.proposedWindow", { time: inviteWindow(invite.proposedStart, invite.proposedEnd) })}</p>
+      )}
+    </MeetingCard>
+  )
+}
+
+// CancellationCard shows a canceled meeting and, while it is still on the
+// calendar, offers to remove it.
+function CancellationCard({ invite, actions }: { invite: MeetingInvite; actions: InviteActions }) {
+  const { t } = useI18n()
+  return (
+    <MeetingCard
+      icon={<CalendarX className="h-4 w-4 text-destructive" />}
+      title={t("emailDetail.meetingCanceled")}
+      invite={invite}
+      note={t("emailDetail.meetingCanceledNote")}
+    >
+      {invite.removable && (
+        <div className="mt-3">
+          <Button size="sm" variant="outline" onClick={() => void actions.removeFromCalendar()} disabled={actions.busy}>
+            <Trash2 className="mr-1 h-4 w-4" />
+            {t("emailDetail.removeFromCalendar")}
+          </Button>
+        </div>
+      )}
+    </MeetingCard>
+  )
+}
+
+// AnswerDialog writes an answer before it is sent: the note for the organizer,
+// and the new time when the answer proposes one.
+function AnswerDialog({ actions }: { actions: InviteActions }) {
+  const { t } = useI18n()
+  const draft = actions.draft
+  const propose = draft?.propose === true
+  return (
+    <Dialog open={draft !== null} onOpenChange={(open) => { if (!open) actions.setDraft(null) }}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t("emailDetail.proposeNewTime")}</DialogTitle>
-          <DialogDescription>{t("emailDetail.proposeNewTimeHint")}</DialogDescription>
+          <DialogTitle>{draft ? t(draftTitleKey(draft.response, draft.propose)) : ""}</DialogTitle>
+          <DialogDescription>{t(propose ? "emailDetail.proposeNewTimeHint" : "emailDetail.responseNoteHint")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3 py-2">
+          {propose && <ProposalFields actions={actions} />}
           <div className="space-y-1">
-            <Label htmlFor="pt-start">{t("calendar.start")}</Label>
-            <Input id="pt-start" type="datetime-local" value={actions.proposeStart} onChange={(e) => actions.setProposeStart(e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="pt-end">{t("calendar.end")}</Label>
-            <Input id="pt-end" type="datetime-local" value={actions.proposeEnd} onChange={(e) => actions.setProposeEnd(e.target.value)} />
+            <Label htmlFor="answer-note">{t("emailDetail.responseNote")}</Label>
+            <Textarea
+              id="answer-note"
+              rows={4}
+              value={actions.comment}
+              onChange={(e) => actions.setComment(e.target.value)}
+              placeholder={t("emailDetail.responseNotePlaceholder")}
+            />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => actions.setProposeOpen(false)} disabled={actions.proposeBusy}>
+          <Button variant="outline" onClick={() => actions.setDraft(null)} disabled={actions.busy}>
             {t("common.cancel")}
           </Button>
-          <Button onClick={actions.handleProposeTime} disabled={actions.proposeBusy || !actions.proposeStart}>
-            {t("emailDetail.sendProposal")}
+          <Button onClick={actions.sendDraft} disabled={actions.busy || (propose && !actions.proposeStart)}>
+            {t(propose ? "emailDetail.sendProposal" : "emailDetail.sendResponse")}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// ProposalFields picks the new time an answer proposes.
+function ProposalFields({ actions }: { actions: InviteActions }) {
+  const { t } = useI18n()
+  return (
+    <>
+      <div className="space-y-1">
+        <Label htmlFor="pt-start">{t("calendar.start")}</Label>
+        <Input id="pt-start" type="datetime-local" value={actions.proposeStart} onChange={(e) => actions.setProposeStart(e.target.value)} />
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor="pt-end">{t("calendar.end")}</Label>
+        <Input id="pt-end" type="datetime-local" value={actions.proposeEnd} onChange={(e) => actions.setProposeEnd(e.target.value)} />
+      </div>
+    </>
   )
 }
 

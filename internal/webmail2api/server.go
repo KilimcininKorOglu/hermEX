@@ -134,7 +134,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/mail/export-ics", s.handleExportICS)
 	mux.HandleFunc("POST /api/v1/mail/rsvp", s.handleRSVP)
 	mux.HandleFunc("POST /api/v1/mail/remove-from-calendar", s.handleRemoveFromCalendar)
-	mux.HandleFunc("POST /api/v1/mail/propose-time", s.handleProposeTime)
 	mux.HandleFunc("GET /api/v1/mail/{folder}", s.handleMailFolder)
 
 	// Search & threads.

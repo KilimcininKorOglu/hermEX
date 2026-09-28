@@ -2,17 +2,14 @@ package webmail2api
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
-	"hermex/internal/itip"
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/meeting"
 	"hermex/internal/mime"
-	"hermex/internal/mta"
 	"hermex/internal/objectstore"
 )
 
@@ -288,8 +285,47 @@ func cancellationOf(st *objectstore.Store, fid int64, uid uint32) (int64, []byte
 	return info.ID, ics, ics != nil
 }
 
+// rsvpRequest is an answer to a meeting request, with the choices Outlook offers
+// beside it: whether the organizer is sent the answer at all, the note that goes
+// with it, and a new time it proposes ([MS-OXOCAL] 3.1.4.8.4.1). An absent send
+// sends, the way every answer did before the choice existed.
+type rsvpRequest struct {
+	ID           string `json:"id"`
+	Response     string `json:"response"`
+	Send         *bool  `json:"send"`
+	Comment      string `json:"comment"`
+	ProposeStart string `json:"proposeStart"`
+	ProposeEnd   string `json:"proposeEnd"`
+}
+
+// reply reads what the organizer receives. ok is false for a proposed time that is
+// not a span, ends before it starts, or would not be sent: a proposal nobody
+// receives proposes nothing.
+func (req rsvpRequest) reply() (meeting.Reply, bool) {
+	reply := meeting.Reply{Send: req.Send == nil || *req.Send, Body: req.Comment}
+	if req.ProposeStart == "" && req.ProposeEnd == "" {
+		return reply, true
+	}
+	start, err1 := time.Parse(time.RFC3339, req.ProposeStart)
+	end, err2 := time.Parse(time.RFC3339, req.ProposeEnd)
+	if errors.Join(err1, err2) != nil || end.Before(start) || !reply.Send {
+		return reply, false
+	}
+	reply.Proposal = &meeting.Proposal{Start: mapi.UnixToNTTime(start), End: mapi.UnixToNTTime(end)}
+	return reply, true
+}
+
+// rsvpStatus is the status an answer reports, by response.
+var rsvpStatus = map[int32]string{
+	meeting.ResponseAccepted:  "accepted",
+	meeting.ResponseTentative: "tentative",
+	meeting.ResponseDeclined:  "declined",
+}
+
 // handleRSVP responds to a meeting invite through the SAME model every other
-// protocol answers with.
+// protocol answers with: the answer is recorded and the calendar updated, and,
+// unless the reader chose not to send it, the organizer is sent the answer with the
+// reader's note and any new time proposed, and the reader keeps it in Sent Items.
 //
 // It used to answer on its own: declining recorded nothing at all, the response
 // properties the organizer's tracking reads were never written, and accepting
@@ -297,10 +333,7 @@ func cancellationOf(st *objectstore.Store, fid int64, uid uint32) (int64, []byte
 // twice, or answering after the server had auto-processed the invitation, left
 // two appointments for one meeting.
 func (s *Server) handleRSVP(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ID       string `json:"id"`
-		Response string `json:"response"`
-	}
+	var req rsvpRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
@@ -310,22 +343,22 @@ func (s *Server) handleRSVP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "response must be accept, tentative or decline"})
 		return
 	}
+	reply, ok := req.reply()
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a proposed time is a start and an end, and it is sent"})
+		return
+	}
 	mb, fid, uid, ok := s.locateMailbox(w, r, req.ID, accessWrite)
 	if !ok {
 		return
 	}
 	defer mb.st.Close()
-	// In a shared mailbox the attendee is the mailbox, not the delegate answering for
-	// it, and the answer goes to the organizer from that mailbox, so the delegate
-	// answers only under a send-as or send-on-behalf grant, the decision every send
-	// path shares. An on-behalf answer names the delegate as its Sender.
-	attendee, actor, allowed := s.resolveSender(mb.user, mb.identity())
+	attendee, actor, allowed := s.rsvpIdentity(mb, reply.Send)
 	if !allowed {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
-	st := mb.st
-	info, err := st.MessageByUID(fid, uid)
+	info, err := mb.st.MessageByUID(fid, uid)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
@@ -334,12 +367,25 @@ func (s *Server) handleRSVP(w http.ResponseWriter, r *http.Request) {
 	// mailbox asked for that. The response sent to the organizer is kept in the
 	// caller's own Sent Items, like everything else sent from here.
 	c, _ := s.session(r)
-	reply := meeting.Reply{Send: true, SentCopy: func(raw []byte) { s.fileCallerSentCopy(mb, c, raw, "meeting-response") }}
-	if _, err := meeting.RespondOnBehalfWith(st, s.accounts, s.spool, attendee, actor, info.ID, response, reply); err != nil {
+	reply.SentCopy = func(raw []byte) { s.fileCallerSentCopy(mb, c, raw, "meeting-response") }
+	if _, err := meeting.RespondOnBehalfWith(mb.st, s.accounts, s.spool, attendee, actor, info.ID, response, reply); err != nil {
 		rsvpFailure(w, err, mb.user)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": req.Response + "ed"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": rsvpStatus[response]})
+}
+
+// rsvpIdentity names who an answer is from and who submits it. In a shared mailbox
+// the attendee is the mailbox, not the delegate answering for it. An answer the
+// organizer is sent goes out from that mailbox, so the delegate sends it only under
+// a send-as or send-on-behalf grant, the decision every send path shares, and an
+// on-behalf answer names the delegate as its Sender. An answer that is only
+// recorded sends nothing and needs no grant.
+func (s *Server) rsvpIdentity(mb *mailboxCtx, send bool) (attendee, actor string, ok bool) {
+	if !send {
+		return mb.identity(), mb.identity(), true
+	}
+	return s.resolveSender(mb.user, mb.identity())
 }
 
 // rsvpFailure answers a response the meeting workflow refused: a message that is
@@ -360,149 +406,4 @@ func rsvpFailure(w http.ResponseWriter, err error, user string) {
 		logError("rsvp", err, logging.Fields{"user": user})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not record the response"})
 	}
-}
-
-// errBadCounter reports a counter-proposal that cannot be written: no organizer
-// address, a time that does not parse, or a meeting UID that would break its line.
-var errBadCounter = errors.New("webmail2api: the counter-proposal cannot be built")
-
-// buildCounterRequest renders the METHOD:COUNTER iTIP message (RFC 5546 3.2.7) in
-// which proposer asks organizer to move the meeting e names to e's start and end.
-// Every value that reaches a content line is checked or escaped first: the
-// organizer, UID and summary come from a mail anyone can send, and the times from
-// the client.
-func buildCounterRequest(proposer, sender, organizer string, e eventJSON) ([]byte, error) {
-	to := cleanAddresses([]string{organizer})
-	start, err1 := counterTime(e.Start, e.AllDay)
-	end, err2 := counterTime(e.End, e.AllDay)
-	if len(to) == 0 || errors.Join(err1, err2) != nil || strings.ContainsAny(e.UID, "\r\n") {
-		return nil, errBadCounter
-	}
-	var cal strings.Builder
-	cal.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//webmail2//EN\r\nMETHOD:COUNTER\r\nBEGIN:VEVENT\r\n")
-	fmt.Fprintf(&cal, "UID:%s\r\n", uidOrGenerated(e.UID))
-	fmt.Fprintf(&cal, "DTSTAMP:%s\r\n", time.Now().UTC().Format("20060102T150405Z"))
-	fmt.Fprintf(&cal, "SUMMARY:%s\r\n", icalText(e.Summary))
-	fmt.Fprintf(&cal, "DTSTART%s\r\n", start)
-	if end != "" {
-		fmt.Fprintf(&cal, "DTEND%s\r\n", end)
-	}
-	fmt.Fprintf(&cal, "ORGANIZER:mailto:%s\r\n", to[0])
-	// A COUNTER names its one attendee with the tentative response it carries
-	// ([MS-OXCICAL] METHOD), and a delegate proposing for the attendee in the
-	// attendee's SENT-BY (RFC 5545 section 3.2.18).
-	fmt.Fprintf(&cal, "ATTENDEE%s;ROLE=REQ-PARTICIPANT;PARTSTAT=TENTATIVE:mailto:%s\r\n", sentBy(proposer, sender), proposer)
-	cal.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
-	return itip.Message(itip.Mail{
-		From: proposer, Sender: sender, To: to, Subject: headerSafe("Proposed new time: " + e.Summary),
-		Text:     fmt.Sprintf("%s proposed a new time for: %s\r\nProposed: %s", proposer, e.Summary, e.Start),
-		Calendar: []byte(cal.String()), Method: "COUNTER",
-	})
-}
-
-// counterTime renders a proposed time as the tail of a DTSTART or DTEND line. A
-// value that does not parse is refused rather than written through, because it
-// comes from the client and would otherwise land on the line verbatim. An empty
-// value is no time.
-func counterTime(v string, allDay bool) (string, error) {
-	if v == "" {
-		return "", nil
-	}
-	layout := time.RFC3339
-	if allDay {
-		layout = "2006-01-02"
-	}
-	if _, err := time.Parse(layout, v); err != nil {
-		return "", err
-	}
-	return toICalTime(v, allDay), nil
-}
-
-// sentBy renders the SENT-BY parameter that names a delegate answering for the
-// attendee (RFC 5545 section 3.2.18), or "" when the attendee answers itself.
-func sentBy(attendee, sender string) string {
-	if sender == "" || strings.EqualFold(sender, attendee) {
-		return ""
-	}
-	return `;SENT-BY="mailto:` + quotedParamSafe.Replace(sender) + `"`
-}
-
-// quotedParamSafe strips what would end a quoted parameter value or its line.
-var quotedParamSafe = strings.NewReplacer("\r", "", "\n", "", `"`, "")
-
-// handleProposeTime lets an invitee propose a new time for a meeting: it reads
-// the invite message for the original meeting identity + organizer, then emails a
-// METHOD:COUNTER iTIP to the organizer with the proposed start/end. The proposal
-// does not mutate the invitee's calendar (the organizer must accept the counter).
-func (s *Server) handleProposeTime(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.session(r)
-	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-		return
-	}
-	var req struct {
-		ID    string `json:"id"`
-		Start string `json:"start"`
-		End   string `json:"end"`
-	}
-	if err := decodeJSON(r, &req); err != nil || req.ID == "" || req.Start == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
-		return
-	}
-	mb, fid, uid, ok := s.locateMailbox(w, r, req.ID, accessRead)
-	if !ok {
-		return
-	}
-	defer mb.st.Close()
-	// In a shared mailbox the attendee is the mailbox, and the delegate proposes
-	// only under a send-as or send-on-behalf grant, the decision every send path
-	// shares.
-	proposer, sender, allowed := s.resolveSender(c.Email, mb.identity())
-	if !allowed {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
-		return
-	}
-	msg, org, status, reason := counterFor(mb.st, fid, uid, proposer, sender, req.Start, req.End)
-	if status != 0 {
-		writeJSON(w, status, map[string]string{"error": reason})
-		return
-	}
-	_, keepOwnCopy, err := mta.SendAndRelay(s.accounts, s.spool, c.Email, []string{org}, msg, time.Now())
-	if err != nil {
-		logError("send-counter-proposal", err, logging.Fields{"user": c.Email, "organizer": org})
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delivery failed"})
-		return
-	}
-	// File a Sent copy so the invitee sees the outgoing counter-proposal. It goes
-	// to the caller's own mailbox, like every other send; a represented mailbox
-	// files its own copy when its settings ask for one.
-	if keepOwnCopy {
-		s.fileCallerSentCopy(mb, c, msg, "counter-proposal")
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "proposed"})
-}
-
-// counterFor builds the counter-proposal answering the invitation at (fid, uid)
-// and names the organizer it goes to. A non-zero status is the failure to report,
-// with the reason to send back.
-func counterFor(st *objectstore.Store, fid int64, uid uint32, proposer, sender, start, end string) (msg []byte, org string, status int, reason string) {
-	raw, err := st.GetMessageRaw(fid, uid)
-	if err != nil {
-		return nil, "", http.StatusNotFound, "not found"
-	}
-	ics := findCalendarPart(mime.ParseStructure(raw))
-	if ics == nil {
-		return nil, "", http.StatusBadRequest, "not a meeting invite"
-	}
-	e := icalToEvent(ics, 0)
-	e.Start = start
-	e.End = end
-	organizer, _ := icalProp(ics, "ORGANIZER")
-	org = organizerAddress(organizer)
-	msg, err = buildCounterRequest(proposer, sender, org, e)
-	if err != nil {
-		logError("build-counter-proposal", err, logging.Fields{"user": sender, "organizer": org})
-		return nil, "", http.StatusBadRequest, "could not build the counter-proposal"
-	}
-	return msg, org, 0, ""
 }

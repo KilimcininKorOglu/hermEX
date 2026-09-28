@@ -259,11 +259,26 @@ func TestSharedRecallIsAuthoredByTheSharedMailbox(t *testing.T) {
 // decision every send path takes.
 func TestSharedProposalNeedsASendGrant(t *testing.T) {
 	f := newSharedMessageFixture(t, mapi.RightsEditor, false)
-	body := `{"id":"inbox:1","start":"2026-09-08T11:00:00Z","end":"2026-09-08T12:00:00Z"}`
-	rec := f.do(http.MethodPost, "/api/v1/mail/propose-time?owner=team@hermex.test", body)
+	id := f.fileInvite(t)
+	body := `{"id":"` + id + `","response":"tentative","proposeStart":"2026-09-08T11:00:00Z","proposeEnd":"2026-09-08T12:00:00Z"}`
+	rec := f.do(http.MethodPost, "/api/v1/mail/rsvp?owner=team@hermex.test", body)
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
 	}
+	wantEq(t, "appointments after a refused proposal", calendarCount(t, f.shared), 0)
+}
+
+// TestSharedAnswerWithoutSendingNeedsNoGrant proves a delegate who may change the
+// shared Inbox records an answer the organizer is not sent without a send grant:
+// nothing goes out in the mailbox's name.
+func TestSharedAnswerWithoutSendingNeedsNoGrant(t *testing.T) {
+	f := newSharedMessageFixture(t, mapi.RightsEditor, false)
+	id := f.fileInvite(t)
+	rec := f.do(http.MethodPost, "/api/v1/mail/rsvp?owner=team@hermex.test", `{"id":"`+id+`","response":"accept","send":false}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	wantEq(t, "appointments after the answer", calendarCount(t, f.shared), 1)
 }
 
 // fileInvite files in the shared Inbox an invitation bob organizes and returns its
@@ -295,18 +310,23 @@ func TestSharedRSVPNeedsASendGrant(t *testing.T) {
 // TestSharedRSVPNamesTheDelegate follows a delegate's answer to the organizer. It is
 // the shared mailbox's answer, so it is from that mailbox; under a send-on-behalf
 // grant it names the delegate as its Sender and in the attendee's SENT-BY, and under
-// a send-as grant it names the mailbox alone.
+// a send-as grant it names the mailbox alone. A proposal of a new time is such an
+// answer too.
 func TestSharedRSVPNamesTheDelegate(t *testing.T) {
 	for _, c := range []struct {
 		name     string
 		grant    func(*objectstore.Store, []string) error
 		sender   string
 		attendee string
+		proposal string
 	}{
 		{"on behalf", (*objectstore.Store).SetSendOnBehalf, "Sender: <alice@hermex.test>",
-			`ATTENDEE;SENT-BY="mailto:alice@hermex.test";PARTSTAT=ACCEPTED:mailto:team@hermex.test`},
+			`ATTENDEE;SENT-BY="mailto:alice@hermex.test";PARTSTAT=ACCEPTED:mailto:team@hermex.test`, ""},
 		{"send as", (*objectstore.Store).SetSendAs, "",
-			"ATTENDEE;PARTSTAT=ACCEPTED:mailto:team@hermex.test"},
+			"ATTENDEE;PARTSTAT=ACCEPTED:mailto:team@hermex.test", ""},
+		{"on behalf, proposing", (*objectstore.Store).SetSendOnBehalf, "Sender: <alice@hermex.test>",
+			`ATTENDEE;SENT-BY="mailto:alice@hermex.test";PARTSTAT=TENTATIVE:mailto:team@hermex.test`,
+			`,"proposeStart":"2026-09-08T11:00:00Z","proposeEnd":"2026-09-08T12:00:00Z"`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			f := newSharedMessageFixture(t, mapi.RightsEditor, false)
@@ -323,7 +343,7 @@ func TestSharedRSVPNamesTheDelegate(t *testing.T) {
 			st.Close()
 			id := f.fileInvite(t)
 
-			rec := f.do(http.MethodPost, "/api/v1/mail/rsvp?owner=team@hermex.test", `{"id":"`+id+`","response":"accept"}`)
+			rec := f.do(http.MethodPost, "/api/v1/mail/rsvp?owner=team@hermex.test", `{"id":"`+id+`","response":"accept"`+c.proposal+`}`)
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
 			}

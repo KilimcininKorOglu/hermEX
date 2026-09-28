@@ -519,6 +519,24 @@ describe('getMail query', () => {
   })
 })
 
+describe('meeting answers', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  // An answer carries the reader's choices, or the server records a different
+  // one: an absent send sends, and a dropped proposal sends a plain answer.
+  it('sends the choices that go with an answer', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 'tentative' }), { headers: { 'Content-Type': 'application/json' } }))
+    globalThis.fetch = fetchMock
+    await API.rsvp('inbox:7', 'tentative', { send: false, comment: 'Later?', proposeStart: 's', proposeEnd: 'e' })
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    expect(JSON.parse(String(init.body))).toEqual({
+      id: 'inbox:7', response: 'tentative', send: false, comment: 'Later?', proposeStart: 's', proposeEnd: 'e',
+    })
+  })
+})
+
 describe('shared mailbox per-message calls', () => {
   afterEach(() => {
     API.setMailboxOwner(undefined)
@@ -535,8 +553,8 @@ describe('shared mailbox per-message calls', () => {
     API.setMailboxOwner('team@hermex.test')
     await API.setMailLabels('inbox:1', [])
     await API.getInvite('inbox:1')
-    await API.rsvp('inbox:1', 'accept')
-    await API.proposeTime('inbox:1', 'a', 'b')
+    await API.rsvp('inbox:1', 'accept', { send: true })
+    await API.removeFromCalendar('inbox:1')
     await API.recallMail('sent:1')
     await API.getMailNotes('inbox:1')
     await API.addMailNote('inbox:1', { body: 'x' })
