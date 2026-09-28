@@ -32,6 +32,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { useConfirm } from "@/components/confirm-dialog"
 import { RawTextDialog, type RawTextKind } from "@/components/raw-text-dialog"
+import { ReadReceiptBanner } from "@/components/read-receipt-banner"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -792,6 +793,7 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
         <ProposeDialog actions={inviteActions} />
         <Separator className="my-6" />
         <div className="px-6 pb-6">
+          <ReceiptPrompt email={email} onAnswered={() => setEmail((e) => e && { ...e, receiptRequested: false })} />
           <SmimeBanner email={email} />
           <MessageBody content={email.content} showImages={message.showImages} onShowImages={() => message.setShowImages(true)} />
         </div>
@@ -1327,6 +1329,13 @@ function smimeText(t: TFunc, email: EmailDetail): string {
     parts.push(t(key, { signer: email.smimeSignedBy || "" }))
   }
   return parts.join(" · ")
+}
+
+// ReceiptPrompt asks about the read receipt the message is waiting for, when the
+// reader chose to be asked.
+function ReceiptPrompt({ email, onAnswered }: { email: EmailDetail; onAnswered: () => void }) {
+  if (!email.receiptRequested) return null
+  return <ReadReceiptBanner id={email.id} onAnswered={onAnswered} />
 }
 
 function SmimeBanner({ email }: { email: EmailDetail }) {

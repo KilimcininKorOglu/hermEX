@@ -25,6 +25,8 @@ export interface EmailDetail {
   smimeSignedBy?: string
   // annotatable reports whether the mail has a Message-ID a note can link to.
   annotatable: boolean
+  // receiptRequested asks the reader whether to send the pending read receipt.
+  receiptRequested: boolean
 }
 
 // BodyView is the body the reader renders plus the S/MIME signature state,
@@ -64,6 +66,7 @@ export function emailDetailOf(result: Mail, view: BodyView): EmailDetail {
     smimeVerified: view.smimeVerified,
     smimeSignedBy: view.smimeSignedBy,
     annotatable: !!result.annotatable,
+    receiptRequested: !!result.receiptRequested,
   }
 }
 

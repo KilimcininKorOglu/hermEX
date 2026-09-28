@@ -17,7 +17,6 @@ const DEFAULT_PREFERENCES = {
   deliveryReceipts: true,
   // Privacy
   showOnlineStatus: false,
-  allowReadReceipts: true,
   // Composition
   richTextMode: true,
   autoCorrect: true,

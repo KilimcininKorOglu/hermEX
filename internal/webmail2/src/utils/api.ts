@@ -101,6 +101,7 @@ export interface Mail {
   followupColor?: number // follow-up flag colour: 1..6 (purple..red)
   followupDue?: string // follow-up due date (RFC3339), empty when unset
   annotatable?: boolean // the mail has a Message-ID a note can link to (detail read only)
+  receiptRequested?: boolean // the reader is asked whether to send the pending read receipt (detail read only)
 }
 
 /** RecoverableItem is one message in a folder's Recoverable Items dumpster. */
@@ -604,6 +605,15 @@ interface RwzImportResult {
 export interface MeetingSettings {
   removeRequestOnResponse: boolean
   processCancellations: boolean
+}
+
+// ReadReceiptSettings mirrors /api/v1/settings/read-receipts: how webmail answers a
+// message that asks for a read receipt, and whether a read on an ActiveSync device
+// sends none.
+export type ReadReceiptResponse = 'ask' | 'always' | 'never'
+export interface ReadReceiptSettings {
+  response: ReadReceiptResponse
+  suppressActiveSync: boolean
 }
 
 // VacationAutoReply mirrors the backend /api/v1/vacation contract
@@ -1471,6 +1481,21 @@ class API {
 
   async setMeetingSettings(settings: MeetingSettings): Promise<MeetingSettings> {
     return this.put<MeetingSettings>('/settings/meeting', settings)
+  }
+
+  // Read-receipt settings; a PUT carries the whole object.
+  async getReadReceiptSettings(): Promise<ReadReceiptSettings> {
+    return this.get<ReadReceiptSettings>('/settings/read-receipts')
+  }
+
+  async setReadReceiptSettings(settings: ReadReceiptSettings): Promise<ReadReceiptSettings> {
+    return this.put<ReadReceiptSettings>('/settings/read-receipts', settings)
+  }
+
+  // answerReadReceipt sends the read receipt an opened message asks for, or
+  // declines it so no later read sends it.
+  async answerReadReceipt(id: string, send: boolean): Promise<void> {
+    await this.post('/mail/read-receipt', { id, send })
   }
 
   // Search

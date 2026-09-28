@@ -3,6 +3,7 @@ import { Fragment } from "react"
 import { Separator } from "@/components/ui/separator"
 import { useI18n } from "@/hooks/useI18n"
 import type { PreferenceKey, Preferences } from "@/hooks/usePreferences"
+import { ReadReceiptControls } from "./read-receipt-controls"
 import { SettingRow, SettingSection } from "./setting-layout"
 import { SmimeControls } from "./smime-controls"
 
@@ -46,7 +47,6 @@ const PRIVACY_ROWS: [PreferenceKey, string][] = [
   ["readReceipts", "readReceipts"],
   ["deliveryReceipts", "deliveryReceipts"],
   ["showOnlineStatus", "showOnlineStatus"],
-  ["allowReadReceipts", "allowReadReceipts"],
 ]
 
 export function NotificationsSection({ prefs }: { prefs: Preferences }) {
@@ -77,6 +77,8 @@ export function PrivacySection({ prefs }: { prefs: Preferences }) {
     <SettingSection icon={Shield} title={t("settings.privacy.title")} description={t("settings.privacy.description")}>
       <div className="space-y-1">
         <PreferenceRows prefs={prefs} rows={PRIVACY_ROWS} prefix="settings.privacy" />
+        <Separator />
+        <ReadReceiptControls />
         <Separator />
         <SmimeControls />
       </div>
