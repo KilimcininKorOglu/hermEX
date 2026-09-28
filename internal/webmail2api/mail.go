@@ -261,7 +261,8 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 
 	d := buildMailDetail(raw, folder, uid)
 	s.applySmimeStatus(&d, st, raw)
-	if m, becameRead := markReadOnOpen(&d, mb, fid, uid); m != nil {
+	// A read-only delegate neither marks the message nor answers for its receipt.
+	if m, becameRead := markReadOnOpen(&d, mb, fid, uid); m != nil && mb.writeAllowed(fid) {
 		s.receiptOnRead(&d, mb, m.ID, becameRead)
 	}
 	// A safe-listed sender's remote images load automatically in the reader. The

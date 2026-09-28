@@ -3,6 +3,7 @@ package webmail2api
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -175,6 +176,50 @@ func TestSharedMessageOpenMarksReadWithWriteRights(t *testing.T) {
 		st.Close()
 		mustNoErr(t, "list", err)
 		wantEq(t, c.name+" stored read state", msgs[0].Flags&objectstore.FlagSeen != 0, c.read)
+	}
+}
+
+// TestSharedMessageOpenFollowsTheOwnersReceiptSetting proves a delegate who may
+// change the folder sends the receipt the owner's "always" setting asks for, in
+// the owner's name, and that a read-only delegate sends none and is not asked.
+func TestSharedMessageOpenFollowsTheOwnersReceiptSetting(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		rights uint32
+		sent   int
+	}{
+		{"editor", mapi.RightsEditor, 1},
+		{"reviewer", mapi.RightsReviewer, 0},
+	} {
+		f := newSharedMessageFixture(t, c.rights, false)
+		bob := t.TempDir()
+		accounts := directory.StaticAccounts{
+			"alice@hermex.test": {Password: "pw", MailboxPath: f.own},
+			"team@hermex.test":  {Shared: true, MailboxPath: f.shared},
+			"bob@hermex.test":   {Password: "pw", MailboxPath: bob},
+		}
+		f.srv = NewServer(accounts, accounts, nil, "mail.hermex.test", []byte("shared-message-test-secret"), "", false)
+		st, err := objectstore.Open(f.shared)
+		mustNoErr(t, "open", err)
+		mustNoErr(t, "setting", st.SetReadReceiptConfig(objectstore.ReadReceiptConfig{Response: objectstore.ReadReceiptAlways}))
+		raw := "Return-Path: <bob@hermex.test>\r\nFrom: bob@hermex.test\r\nTo: team@hermex.test\r\nSubject: rr\r\n" +
+			"Disposition-Notification-To: bob@hermex.test\r\n\r\nbody\r\n"
+		info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), time.Now(), 0)
+		st.Close()
+		mustNoErr(t, "append", err)
+		id := "inbox:" + strconv.FormatUint(uint64(info.UID), 10)
+		rec := f.do(http.MethodGet, "/api/v1/mail/message?id="+id+"&owner=team@hermex.test", "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d; body=%s", c.name, rec.Code, rec.Body.String())
+		}
+		if strings.Contains(rec.Body.String(), `"receiptRequested":true`) {
+			t.Errorf("%s: the delegate is asked about the owner's receipt", c.name)
+		}
+		got := folderMail(t, bob, int64(mapi.PrivateFIDInbox))
+		wantEq(t, c.name+" receipts", len(got), c.sent)
+		if c.sent == 1 {
+			wantContains(t, "the receipt", got[0], "Final-Recipient: rfc822;team@hermex.test")
+		}
 	}
 }
 

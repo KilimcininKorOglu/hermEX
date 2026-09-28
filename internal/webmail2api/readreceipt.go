@@ -13,8 +13,9 @@ import (
 // stored per mailbox (objectstore.ReadReceiptConfig): "always" sends the receipt
 // when a message goes from unread to read, "never" sends nothing, and "ask" shows
 // the reader a prompt when they open a message whose receipt is still pending.
-// Only the caller's own mailbox sends receipts: a delegate reading a shared
-// mailbox does not answer for its owner.
+// A delegate reading a shared mailbox follows the owner's setting and the receipt
+// names the owner as the reader, as a read through EWS does. Answering a prompt
+// needs the right to change the message, the same right that marks it read.
 
 // readReceiptResponses maps the stored response to its wire name.
 var readReceiptResponses = map[objectstore.ReadReceiptResponse]string{
@@ -87,7 +88,7 @@ func (s *Server) handlePutReadReceiptSettings(w http.ResponseWriter, r *http.Req
 // Return-Path. d is nil when there is no detail to fill (a flag change from the
 // list).
 func (s *Server) receiptOnRead(d *mailDetailJSON, mb *mailboxCtx, messageID int64, becameRead bool) {
-	if mb.shared || (d == nil && !becameRead) {
+	if d == nil && !becameRead {
 		return
 	}
 	cfg, err := mb.st.GetReadReceiptConfig()
@@ -112,7 +113,7 @@ func (s *Server) receiptOnRead(d *mailDetailJSON, mb *mailboxCtx, messageID int6
 // reporting false when it failed; a failure is logged. An automatic receipt RFC
 // 8098 does not allow is not a failure, and leaves the request pending.
 func (s *Server) sendReceipt(mb *mailboxCtx, messageID int64, mode mta.ReceiptMode) bool {
-	err := mta.SendRequestedReceipt(s.accounts, s.spool, mb.st, messageID, mb.user, mode, time.Now())
+	err := mta.SendRequestedReceipt(s.accounts, s.spool, mb.st, messageID, mb.identity(), mode, time.Now())
 	if err != nil {
 		logError("read-receipt", err, logging.Fields{"user": mb.user, "message": messageID})
 		return false
@@ -137,10 +138,6 @@ func (s *Server) handleMailReadReceipt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer mb.st.Close()
-	if mb.shared {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
-		return
-	}
 	m, err := mb.st.MessageByUID(fid, uid)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
