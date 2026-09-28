@@ -72,34 +72,35 @@ type oofView struct {
 }
 
 // oofTimeLayout is the wire form of an HTML datetime-local field: wall-clock with
-// no timezone, read in the server's local zone (matching the webmail OOF form).
+// no timezone, read in the operator's zone, the zone the panel shows times in.
 const oofTimeLayout = "2006-01-02T15:04"
 
-// formatOOFTime renders a stored unix time as a datetime-local value; the
+// formatOOFTime renders a stored unix time as a datetime-local value in loc; the
 // open-ended bound (0) renders empty.
-func formatOOFTime(sec int64) string {
+func formatOOFTime(sec int64, loc *time.Location) string {
 	if sec == 0 {
 		return ""
 	}
-	return time.Unix(sec, 0).Local().Format(oofTimeLayout)
+	return time.Unix(sec, 0).In(loc).Format(oofTimeLayout)
 }
 
-// parseOOFTime parses a datetime-local field value to unix seconds; an empty or
-// unparseable value is the open-ended bound (0).
-func parseOOFTime(v string) int64 {
+// parseOOFTime parses a datetime-local field value, a wall clock in loc, to unix
+// seconds; an empty or unparseable value is the open-ended bound (0).
+func parseOOFTime(v string, loc *time.Location) int64 {
 	v = strings.TrimSpace(v)
 	if v == "" {
 		return 0
 	}
-	t, err := time.ParseInLocation(oofTimeLayout, v, time.Local)
+	t, err := time.ParseInLocation(oofTimeLayout, v, loc)
 	if err != nil {
 		return 0
 	}
 	return t.Unix()
 }
 
-// oofViewOf builds the template model from stored settings.
-func oofViewOf(cfg objectstore.OOFSettings) oofView {
+// oofViewOf builds the template model from stored settings, with the bounds as
+// wall clocks in loc.
+func oofViewOf(cfg objectstore.OOFSettings, loc *time.Location) oofView {
 	return oofView{
 		Enabled:         cfg.Enabled,
 		InternalSubject: cfg.InternalSubject,
@@ -108,14 +109,15 @@ func oofViewOf(cfg objectstore.OOFSettings) oofView {
 		ExternalReply:   cfg.ExternalReply,
 		ExternalEnabled: cfg.ExternalEnabled,
 		KnownOnly:       cfg.ExternalAudience == objectstore.OOFExternalKnown,
-		Start:           formatOOFTime(cfg.Start),
-		End:             formatOOFTime(cfg.End),
+		Start:           formatOOFTime(cfg.Start, loc),
+		End:             formatOOFTime(cfg.End, loc),
 	}
 }
 
 // oofFromForm reads the out-of-office form into the canonical settings, mapping
 // the known-only checkbox onto the external audience.
 func oofFromForm(r *http.Request) objectstore.OOFSettings {
+	loc := requestZone(r)
 	audience := objectstore.OOFExternalAll
 	if r.PostFormValue("externalknownonly") != "" {
 		audience = objectstore.OOFExternalKnown
@@ -128,8 +130,8 @@ func oofFromForm(r *http.Request) objectstore.OOFSettings {
 		ExternalReply:    r.PostFormValue("externalreply"),
 		ExternalEnabled:  r.PostFormValue("externalenabled") != "",
 		ExternalAudience: audience,
-		Start:            parseOOFTime(r.PostFormValue("start")),
-		End:              parseOOFTime(r.PostFormValue("end")),
+		Start:            parseOOFTime(r.PostFormValue("start"), loc),
+		End:              parseOOFTime(r.PostFormValue("end"), loc),
 	}
 }
 

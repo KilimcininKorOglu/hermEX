@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"hermex/internal/directory"
 	"hermex/internal/objectstore"
@@ -17,6 +18,29 @@ func oofUserDir() *fakeDir {
 	return &fakeDir{
 		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
 		userDetail: directory.UserDetail{Username: "alice@hermex.test", Maildir: "/mb/alice"},
+	}
+}
+
+// TestOOFTimesAreTheOperatorsWallClock proves the out-of-office bounds are read
+// and shown as wall clocks in the operator's zone, not the server's: 09:00 in
+// New York is 13:00 UTC in June, and it reads back as 09:00.
+func TestOOFTimesAreTheOperatorsWallClock(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sec := parseOOFTime("2026-06-01T09:00", ny)
+	if want := time.Date(2026, 6, 1, 13, 0, 0, 0, time.UTC).Unix(); sec != want {
+		t.Fatalf("parseOOFTime = %d, want %d", sec, want)
+	}
+	if got := formatOOFTime(sec, ny); got != "2026-06-01T09:00" {
+		t.Errorf("formatOOFTime = %q, want 2026-06-01T09:00", got)
+	}
+	if got := formatOOFTime(sec, time.UTC); got != "2026-06-01T13:00" {
+		t.Errorf("formatOOFTime in UTC = %q, want 2026-06-01T13:00", got)
+	}
+	if parseOOFTime("", ny) != 0 || formatOOFTime(0, ny) != "" {
+		t.Error("the open-ended bound must stay 0 and empty")
 	}
 }
 
