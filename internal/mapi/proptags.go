@@ -10,6 +10,7 @@ const (
 	PrCreationTime          = PropTag(0x30070040) // PtSysTime
 	PrLastModificationTime  = PropTag(0x30080040) // PtSysTime
 	PrHierRev               = PropTag(0x40820040) // PtSysTime
+	PrLocalCommitTime       = PropTag(0x67090040) // PtSysTime
 	PrLocalCommitTimeMax    = PropTag(0x670A0040) // PtSysTime
 	PrChangeKey             = PropTag(0x65E20102) // PtBinary (XID)
 	PrPredecessorChangeList = PropTag(0x65E30102) // PtBinary (PCL)

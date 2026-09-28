@@ -54,7 +54,52 @@ func (s *Store) FolderComputedProps(fid int64) (mapi.PropertyValues, error) {
 	if parent.Valid {
 		props = append(props, mapi.TaggedPropVal{Tag: mapi.PrParentFolderID, Value: folderEID(parent.Int64)})
 	}
+	times, err := s.folderTimes(fid)
+	if err != nil {
+		return nil, err
+	}
+	return append(props, times...), nil
+}
+
+// folderTimes returns when the folder and its contents last changed, read from
+// the PidTagLastModificationTime every write stamps ([MS-OXCFOLD] 2.2.2.2.1.9,
+// .13 and .14): PidTagLocalCommitTimeMax is the newest change to a message or
+// subfolder directly in the folder, PidTagLocalCommitTime the newest change to
+// the folder or those objects, and PidTagHierRev the newest change to the folder
+// or its subfolders, the hierarchy a cached client resynchronizes. A time nothing
+// records is left out. A soft-deleted message counts, because deleting it changed
+// the folder.
+func (s *Store) folderTimes(fid int64) (mapi.PropertyValues, error) {
+	tag := int64(uint32(mapi.PrLastModificationTime))
+	var own, messages, subfolders sql.NullInt64
+	if err := s.objdb.QueryRow(
+		`SELECT
+		   (SELECT propval FROM folder_properties WHERE folder_id=? AND proptag=?),
+		   (SELECT MAX(p.propval) FROM message_properties p JOIN messages m ON m.message_id=p.message_id WHERE m.parent_fid=? AND p.proptag=?),
+		   (SELECT MAX(p.propval) FROM folder_properties p JOIN folders f ON f.folder_id=p.folder_id WHERE f.parent_id=? AND p.proptag=?)`,
+		fid, tag, fid, tag, fid, tag).Scan(&own, &messages, &subfolders); err != nil {
+		return nil, err
+	}
+	var props mapi.PropertyValues
+	setLatest(&props, mapi.PrLocalCommitTimeMax, messages, subfolders)
+	setLatest(&props, mapi.PrLocalCommitTime, own, messages, subfolders)
+	setLatest(&props, mapi.PrHierRev, own, subfolders)
 	return props, nil
+}
+
+// setLatest sets tag to the latest of the recorded times, and leaves it out when
+// none is recorded.
+func setLatest(props *mapi.PropertyValues, tag mapi.PropTag, times ...sql.NullInt64) {
+	var latest int64
+	found := false
+	for _, t := range times {
+		if t.Valid && (!found || t.Int64 > latest) {
+			latest, found = t.Int64, true
+		}
+	}
+	if found {
+		props.Set(tag, uint64(latest)) // #nosec G115 -- an NT time is stored as the same 64 bits
+	}
 }
 
 // storeStateSearchFolders is the PidTagStoreState value of a mailbox with an

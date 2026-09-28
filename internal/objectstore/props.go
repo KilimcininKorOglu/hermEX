@@ -4,7 +4,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
+	"time"
 
 	"hermex/internal/mapi"
 )
@@ -52,8 +54,16 @@ func (s *Store) GetStoreProperties(tags ...mapi.PropTag) (mapi.PropertyValues, e
 	return s.scanProps(query, args)
 }
 
-// SetFolderProperties upserts properties on a folder.
+// SetFolderProperties upserts properties on a folder and stamps the write as the
+// folder's PidTagLastModificationTime, unless the write carries that time itself.
+// A rename and a move both go through here, and the folder's commit and hierarchy
+// times are read from the stamp.
 func (s *Store) SetFolderProperties(folderID int64, props mapi.PropertyValues) error {
+	if !props.Has(mapi.PrLastModificationTime) {
+		props = append(slices.Clone(props), mapi.TaggedPropVal{
+			Tag: mapi.PrLastModificationTime, Value: mapi.UnixToNTTime(time.Now()),
+		})
+	}
 	return s.setObjectProps("folder_properties", "folder_id", folderID, props)
 }
 
@@ -116,6 +126,9 @@ func (s *Store) ModifyMessageProperties(messageID int64, props mapi.PropertyValu
 	if _, err := tx.Exec(`UPDATE messages SET change_number=? WHERE message_id=?`, int64(cn), messageID); err != nil {
 		return err
 	}
+	if err := s.stampModified(tx, messageID, props); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
@@ -151,6 +164,9 @@ func (s *Store) SetRecipientProperties(recipientID int64, props mapi.PropertyVal
 	}
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	if _, err := tx.Exec(`UPDATE messages SET change_number=? WHERE message_id=?`, int64(cn), messageID); err != nil {
+		return err
+	}
+	if err := s.stampModified(tx, messageID, nil); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {

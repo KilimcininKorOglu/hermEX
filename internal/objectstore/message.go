@@ -71,9 +71,13 @@ func (s *Store) CreateMessage(folderID int64, msg *oxcmail.Message) (int64, erro
 // insertMessageProps writes the message's property bag, seeding
 // PidTagMessageStatus when the caller supplied none. Every message carries that
 // property so the status ROPs can read and modify it; it is otherwise managed
-// through RopSetMessageStatus.
+// through RopSetMessageStatus. The creation is also stamped as the message's last
+// modification unless the caller carried one.
 func (s *Store) insertMessageProps(tx *sql.Tx, id int64, props mapi.PropertyValues) error {
 	if err := s.insertProps(tx, "message_properties", "message_id", id, props); err != nil {
+		return err
+	}
+	if err := s.stampModified(tx, id, props); err != nil {
 		return err
 	}
 	if _, ok := props.Get(mapi.PrMsgStatus); ok {
@@ -81,6 +85,19 @@ func (s *Store) insertMessageProps(tx *sql.Tx, id int64, props mapi.PropertyValu
 	}
 	return s.insertProps(tx, "message_properties", "message_id", id,
 		mapi.PropertyValues{{Tag: mapi.PrMsgStatus, Value: int32(0)}})
+}
+
+// stampModified records that a write in tx changed the message now: the server
+// sets PidTagLastModificationTime when a message is created and on every save
+// ([MS-OXCMSG] 3.2.5.2 and 3.2.5.8), and the folder times of [MS-OXCFOLD]
+// 2.2.2.2.1 are read from it. A write that carries the property itself, such as
+// an ICS upload replaying the source's time, keeps that value.
+func (s *Store) stampModified(tx *sql.Tx, messageID int64, written mapi.PropertyValues) error {
+	if written.Has(mapi.PrLastModificationTime) {
+		return nil
+	}
+	return s.insertProps(tx, "message_properties", "message_id", messageID,
+		mapi.PropertyValues{{Tag: mapi.PrLastModificationTime, Value: mapi.UnixToNTTime(time.Now())}})
 }
 
 // insertMessageChildren writes the message's recipients and attachments.

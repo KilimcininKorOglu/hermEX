@@ -36,6 +36,9 @@ func (s *Store) ReplaceRecipients(messageID int64, recips []mapi.PropertyValues)
 	if _, err := tx.Exec(`UPDATE messages SET change_number=? WHERE message_id=?`, int64(cn), messageID); err != nil {
 		return err
 	}
+	if err := s.stampModified(tx, messageID, nil); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}

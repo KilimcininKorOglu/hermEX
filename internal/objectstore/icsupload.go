@@ -367,7 +367,10 @@ func (um *UploadMessage) insertRow(tx *sql.Tx, id int64, cn uint64) error {
 		id, um.folderID, assoc, int64(cn), readState(um.msg.Props), messageSize(um.msg), midString(um.mid)); err != nil {
 		return err
 	}
-	return um.store.insertProps(tx, "message_properties", "message_id", id, um.msg.Props)
+	if err := um.store.insertProps(tx, "message_properties", "message_id", id, um.msg.Props); err != nil {
+		return err
+	}
+	return um.store.stampModified(tx, id, um.msg.Props)
 }
 
 // insertSubObjects writes the message's recipients and attachments, each as its

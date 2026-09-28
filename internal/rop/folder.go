@@ -125,6 +125,7 @@ func requestsAny(tags, of []mapi.PropTag) bool {
 var computedFolderTags = []mapi.PropTag{
 	mapi.PrContentCount, mapi.PrContentUnreadCount, mapi.PrMessageSizeExtended,
 	mapi.PrMessageSize, mapi.PrSubfolders, mapi.PrFolderType, mapi.PrFolderFlags, mapi.PrFolderID,
+	mapi.PrLocalCommitTime, mapi.PrLocalCommitTimeMax, mapi.PrHierRev,
 }
 
 // folderProps returns a folder's stored properties overlaid with the ones the
