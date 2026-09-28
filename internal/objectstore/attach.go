@@ -65,7 +65,7 @@ func (s *Store) CreateAttachment(messageID int64, initialProps mapi.PropertyValu
 	}
 	// Rebuild the served wire form: the message now carries an attachment the cached
 	// bytes do not.
-	s.refreshEML(messageID)
+	s.messageEdited(messageID)
 	// #nosec G115 -- the attachment number is a 32-bit MAPI long counted within one message
 	return aid, uint32(next), nil
 }
@@ -127,6 +127,6 @@ func (s *Store) DeleteAttachment(messageID int64, attachNum uint32) error {
 	}
 	// Rebuild the served wire form, so the removed attachment stops appearing to
 	// readers served from the cache.
-	s.refreshEML(messageID)
+	s.messageEdited(messageID)
 	return nil
 }

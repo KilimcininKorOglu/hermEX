@@ -42,7 +42,7 @@ func (s *Store) ReplaceRecipients(messageID int64, recips []mapi.PropertyValues)
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	s.refreshEML(messageID)
+	s.messageEdited(messageID)
 	s.publishChange("modify", cn, "")
 	return nil
 }

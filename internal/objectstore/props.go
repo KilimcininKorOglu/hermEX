@@ -102,8 +102,8 @@ func (s *Store) GetMessageProperties(messageID int64, tags ...mapi.PropTag) (map
 // as changed. The load-bearing write is the
 // messages-row change_number bump: ICS content-sync reports the message as
 // updated only when that column advances, so this is what drives the "updated"
-// branch of GetContentSync. The message_size column is left stale (v1 does not
-// recompute it on edit).
+// branch of GetContentSync. The message_size column is recomputed once the edit
+// has committed.
 func (s *Store) ModifyMessageProperties(messageID int64, props mapi.PropertyValues, deletes ...mapi.PropTag) error {
 	tx, err := s.objdb.Begin()
 	if err != nil {
@@ -134,7 +134,7 @@ func (s *Store) ModifyMessageProperties(messageID int64, props mapi.PropertyValu
 	}
 	// The edit is persisted; rebuild the served wire form so a reader gets the edited
 	// message rather than the cached pre-edit bytes.
-	s.refreshEML(messageID)
+	s.messageEdited(messageID)
 	s.publishChange("modify", cn, "")
 	return nil
 }
@@ -172,7 +172,7 @@ func (s *Store) SetRecipientProperties(recipientID int64, props mapi.PropertyVal
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	s.refreshEML(messageID)
+	s.messageEdited(messageID)
 	s.publishChange("modify", cn, "")
 	return nil
 }
@@ -246,7 +246,7 @@ func (s *Store) SetAttachmentProperties(attachmentID int64, props mapi.PropertyV
 		return err
 	}
 	if messageID, ok := s.parentMessage("attachments", "attachment_id", attachmentID); ok {
-		s.refreshEML(messageID)
+		s.messageEdited(messageID)
 	}
 	return nil
 }

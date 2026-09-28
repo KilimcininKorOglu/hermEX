@@ -224,6 +224,29 @@ func (s *Store) refreshEML(messageID int64) {
 	}
 }
 
+// messageEdited brings what the store derives from a message's content up to date
+// after a committed edit: the size its folder and quota count, and the served wire
+// form.
+func (s *Store) messageEdited(messageID int64) {
+	s.refreshMessageSize(messageID)
+	s.refreshEML(messageID)
+}
+
+// refreshMessageSize recomputes the message_size column from the message as it now
+// stands, the value folder and mailbox sizes and the quota sum. It runs after the
+// edit has committed, so a failure is recorded rather than returned: the edit
+// itself stands, and only the size stays behind until the next write.
+func (s *Store) refreshMessageSize(messageID int64) {
+	msg, err := s.OpenMessage(messageID)
+	if err != nil {
+		s.logStoreError("refresh-size", err)
+		return
+	}
+	if _, err := s.objdb.Exec(`UPDATE messages SET message_size=? WHERE message_id=?`, messageSize(msg), messageID); err != nil {
+		s.logStoreError("refresh-size", err)
+	}
+}
+
 // indexedMessage reports whether the message has an IMAP index row, i.e. it is a
 // mail message (contacts, calendar items and other object-store-only items are not
 // indexed). It distinguishes a pruned mail cache, which must be regenerated to keep
