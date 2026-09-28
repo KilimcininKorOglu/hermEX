@@ -451,6 +451,9 @@ func galUserProps(u galUser) mapi.PropertyValues {
 		{Tag: mapi.PrEntryID, Value: permanentEntryID(u.dt, userDN(u.smtp))},
 		{Tag: mapi.PrDisplayName, Value: u.display},
 		{Tag: mapi.PrAddressBookDisplayNamePrintable, Value: printableName(u.display, u.smtp)},
+		// [MS-OXOABK] 2.2.3.8: present on every object but the organization, equal to
+		// the display name.
+		{Tag: mapi.PrTransmitableDisplayName, Value: u.display},
 		{Tag: mapi.PrAddrType, Value: "SMTP"},
 		{Tag: mapi.PrEmailAddress, Value: u.smtp},
 		{Tag: mapi.PrSmtpAddress, Value: u.smtp},

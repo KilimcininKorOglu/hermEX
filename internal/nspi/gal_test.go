@@ -93,12 +93,14 @@ func TestGalUserProps(t *testing.T) {
 	u := galUser{mid: midBase, display: "Alice", smtp: "alice@hermex.test"}
 	bag := galUserProps(u)
 	checks := map[mapi.PropTag]any{
-		mapi.PrDisplayName:  "Alice",
-		mapi.PrAddrType:     "SMTP",
-		mapi.PrEmailAddress: "alice@hermex.test",
-		mapi.PrSmtpAddress:  "alice@hermex.test",
-		mapi.PrObjectType:   int32(mapi.ObjectTypeMailUser),
-		mapi.PrDisplayType:  int32(mapi.DisplayTypeMailUser),
+		mapi.PrDisplayName: "Alice",
+		// [MS-OXOABK] 2.2.3.8 requires it on every object and equal to the display name.
+		mapi.PrTransmitableDisplayName: "Alice",
+		mapi.PrAddrType:                "SMTP",
+		mapi.PrEmailAddress:            "alice@hermex.test",
+		mapi.PrSmtpAddress:             "alice@hermex.test",
+		mapi.PrObjectType:              int32(mapi.ObjectTypeMailUser),
+		mapi.PrDisplayType:             int32(mapi.DisplayTypeMailUser),
 	}
 	for tag, want := range checks {
 		got, ok := bag.Get(tag)
