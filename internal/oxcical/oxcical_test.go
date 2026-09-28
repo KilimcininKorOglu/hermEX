@@ -307,8 +307,10 @@ func TestExportCounterProposal(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(out)
+	// A COUNTER names the organizer it proposes to, as a REPLY does (RFC 5546
+	// section 3.2.7).
 	for _, want := range []string{"METHOD:COUNTER", "DTSTART:20260701T160000Z", "DTEND:20260701T170000Z",
-		"ATTENDEE;PARTSTAT=TENTATIVE:mailto:alice@hermex.test"} {
+		"ORGANIZER:mailto:organizer@hermex.test", "ATTENDEE;PARTSTAT=TENTATIVE:mailto:alice@hermex.test"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("counter export missing %q\n%s", want, s)
 		}
