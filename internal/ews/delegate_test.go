@@ -924,12 +924,49 @@ func sendDelegateItemReq(itemID string) string {
 		`</SendItem>`)
 }
 
+// grantSendOnBehalf records a send-on-behalf-of grant from a mailbox to the test user.
+func grantSendOnBehalf(t *testing.T, path string) {
+	t.Helper()
+	st, err := objectstore.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.SetSendOnBehalf([]string{testUser}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestSendItemCrossMailboxNeedsASendGrant is the forgery case: read access to another
+// mailbox's drafts is not a right to send as that mailbox, so a draft carrying its
+// owner's From is refused with ErrorSendAsDenied and stays where it was.
+func TestSendItemCrossMailboxNeedsASendGrant(t *testing.T) {
+	ts, paths := delegateServer(t)
+	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDDraft), testUser, mapi.RightsReviewer)
+	seedDraftMessage(t, paths["bob@hermex.test"], testUser, "No grant")
+	itemID := firstItemID(must(soapPost(t, ts, crossMailboxFindItem("drafts", "bob@hermex.test"), true)))
+
+	_, out := soapPost(t, ts, sendDelegateItemReq(itemID), true)
+	if !strings.Contains(out, "ErrorSendAsDenied") {
+		t.Fatalf("a draft sent without a send grant must be refused:\n%s", out)
+	}
+	st, err := objectstore.Open(paths["bob@hermex.test"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if drafts, _ := st.ListMessages(int64(mapi.PrivateFIDDraft)); len(drafts) != 1 {
+		t.Errorf("a refused draft must stay in place, got %d drafts", len(drafts))
+	}
+}
+
 // TestSendItemCrossMailboxWithGrant confirms a delegate with read access to another
-// mailbox's drafts can send one on its behalf (the draft already carries the
+// mailbox's drafts and a send-on-behalf grant can send one (the draft carries the
 // principal's From), and the draft is consumed in that mailbox.
 func TestSendItemCrossMailboxWithGrant(t *testing.T) {
 	ts, paths := delegateServer(t)
 	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDDraft), testUser, mapi.RightsReviewer)
+	grantSendOnBehalf(t, paths["bob@hermex.test"])
 	seedDraftMessage(t, paths["bob@hermex.test"], testUser, "On behalf")
 	itemID := firstItemID(must(soapPost(t, ts, crossMailboxFindItem("drafts", "bob@hermex.test"), true)))
 

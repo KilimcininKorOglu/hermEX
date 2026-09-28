@@ -104,20 +104,9 @@ func (s *Server) sendOne(cache *storeCache, sess *session, itemID string, save b
 	if code := checkSendAccess(st, sess, id, isOwn, save, saveFID); code != "" {
 		return itemError(code)
 	}
-	msg, err := st.OpenMessage(id.MessageID)
-	if err != nil {
-		return itemError("ErrorItemNotFound")
-	}
-
-	recips, wire := splitRecipients(msg.Recipients)
-	if len(recips) == 0 {
-		return itemError("ErrorInvalidRecipients")
-	}
-	msg.Recipients = wire
-	oxcmail.EnsureMessageID(&msg.Props)
-	raw, err := oxcmail.Export(msg, oxcmail.Options{Resolver: st.GetNamedPropIDs})
-	if err != nil {
-		return itemError("ErrorInternalServerError")
+	recips, raw, code := s.renderDraft(st, sess, id)
+	if code != "" {
+		return itemError(code)
 	}
 	_, keepOwnCopy, err := mta.SendAndRelay(s.accounts, s.Spool, sess.user, recips, raw, time.Now())
 	if err != nil {
@@ -129,6 +118,32 @@ func (s *Server) sendOne(cache *storeCache, sess *session, itemID string, save b
 		return itemError("ErrorInternalServerError")
 	}
 	return itemResponseMessage{ResponseClass: "Success", ResponseCode: "NoError"}
+}
+
+// renderDraft opens a saved draft, authorizes its From and renders the wire copy,
+// returning the delivery addresses and the bytes to send. A non-empty code refuses
+// the send.
+func (s *Server) renderDraft(st *objectstore.Store, sess *session, id oxews.ItemID) ([]string, []byte, string) {
+	msg, err := st.OpenMessage(id.MessageID)
+	if err != nil {
+		return nil, nil, "ErrorItemNotFound"
+	}
+	// The draft's From was written by whoever saved it, possibly another delegate or a
+	// client that never passed CreateItem, so it is authorized here as it is sent.
+	if !s.stampDraftSender(&msg.Props, sess.user) {
+		return nil, nil, "ErrorSendAsDenied"
+	}
+	recips, wire := splitRecipients(msg.Recipients)
+	if len(recips) == 0 {
+		return nil, nil, "ErrorInvalidRecipients"
+	}
+	msg.Recipients = wire
+	oxcmail.EnsureMessageID(&msg.Props)
+	raw, err := oxcmail.Export(msg, oxcmail.Options{Resolver: st.GetNamedPropIDs})
+	if err != nil {
+		return nil, nil, "ErrorInternalServerError"
+	}
+	return recips, raw, ""
 }
 
 // consumeDraft files the sent copy and drops the original draft. The copy is
