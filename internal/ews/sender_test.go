@@ -85,14 +85,16 @@ func TestCreateItemKeepsTheClientsAliasFrom(t *testing.T) {
 }
 
 // TestCreateItemRefusesAnUnownedFrom is the security case: a client must not write mail as
-// an address it does not hold, so the request is refused and nothing is stored.
+// an address it does not hold, so the request is refused and nothing is stored. The
+// refusal is ErrorSendAsDenied, the code Exchange answers a From the caller may not
+// send as with, not the ErrorAccessDenied of a folder the caller may not reach.
 func TestCreateItemRefusesAnUnownedFrom(t *testing.T) {
 	ts, dir := senderServer(t, "sales@hermex.test")
 
 	_, out := soapPost(t, ts, draftFromRequest("ceo@hermex.test"), true)
 
-	if !strings.Contains(out, "ErrorAccessDenied") {
-		t.Errorf("an unowned From was not refused:\n%s", out)
+	if !strings.Contains(out, "ErrorSendAsDenied") {
+		t.Errorf("an unowned From was not refused with ErrorSendAsDenied:\n%s", out)
 	}
 	st, err := objectstore.Open(dir)
 	if err != nil {

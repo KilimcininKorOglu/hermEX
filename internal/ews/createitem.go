@@ -176,9 +176,12 @@ func (s *Server) createMeetingResponses(sess *session, req createItemRequest, se
 // and files the copy the disposition asks for.
 func (s *Server) createOneItem(st *objectstore.Store, sess *session, m createMessage,
 	disp string, send, save bool) itemResponseMessage {
+	// A From the caller holds no send-as or send-on-behalf right to is refused with
+	// the code Exchange gives it, which tells the client the sending account is the
+	// problem rather than access to the folder.
 	representing, sender, ok := s.resolveSender(sess.user, m.From.Mailbox.EmailAddress)
 	if !ok {
-		return itemError("ErrorAccessDenied")
+		return itemError("ErrorSendAsDenied")
 	}
 	out := oxews.BuildOutgoing(oxews.OutgoingInput{
 		From:      representing,
