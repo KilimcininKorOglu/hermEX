@@ -9,10 +9,9 @@ import (
 
 // Bulk read-flagging (MS-OXWSCORE MarkAllItemsAsRead) sets or clears the read flag
 // on every item in one or more folders. ReadFlag true marks them read, false marks
-// them unread. SuppressReadReceipts is accepted but always effectively honored:
-// hermEX never emits a read receipt on a bulk flag change, so no receipt is sent
-// regardless. v1 marks only the caller's own mailbox; a delegated or public-store
-// target is refused.
+// them unread. Each message it takes from unread to read sends the read receipt it
+// asks for, unless SuppressReadReceipts is true, as Exchange does. v1 marks only
+// the caller's own mailbox; a delegated or public-store target is refused.
 
 type markAllReadRequest struct {
 	ReadFlag             bool       `xml:"ReadFlag"`
@@ -42,26 +41,35 @@ func (s *Server) handleMarkAllItemsAsRead(w http.ResponseWriter, inner []byte, s
 
 	var msgs []folderResponseMessage
 	for _, tgt := range resolveTargets(req.FolderIDs) {
-		msgs = append(msgs, markFolderRead(st, tgt, req.ReadFlag))
+		rm, becameRead := markFolderRead(st, tgt, req.ReadFlag)
+		msgs = append(msgs, rm)
+		if req.SuppressReadReceipts {
+			continue
+		}
+		for _, id := range becameRead {
+			s.sendReadReceipt(st, sess, "", id)
+		}
 	}
 	writeResponse(w, markAllReadResponse{Messages: msgs})
 }
 
-// markFolderRead sets the read flag on every item in one resolved folder.
-func markFolderRead(st *objectstore.Store, tgt folderTarget, read bool) folderResponseMessage {
+// markFolderRead sets the read flag on every item in one resolved folder. becameRead
+// lists the messages it took from unread to read, which are the ones that owe a
+// read receipt.
+func markFolderRead(st *objectstore.Store, tgt folderTarget, read bool) (rm folderResponseMessage, becameRead []int64) {
 	if !tgt.ok {
 		code := tgt.code
 		if code == "" {
 			code = "ErrorFolderNotFound"
 		}
-		return folderError(code)
+		return folderError(code), nil
 	}
 	if tgt.mailbox != "" {
-		return folderError("ErrorAccessDenied")
+		return folderError("ErrorAccessDenied"), nil
 	}
 	items, err := st.ListMessages(tgt.fid)
 	if err != nil {
-		return folderError("ErrorItemNotFound")
+		return folderError("ErrorItemNotFound"), nil
 	}
 	for _, m := range items {
 		next := m.Flags
@@ -74,8 +82,11 @@ func markFolderRead(st *objectstore.Store, tgt folderTarget, read bool) folderRe
 			continue
 		}
 		if err := st.SetMessageFlags(tgt.fid, m.UID, next); err != nil {
-			return folderError("ErrorItemNotFound")
+			return folderError("ErrorItemNotFound"), becameRead
+		}
+		if read {
+			becameRead = append(becameRead, m.ID)
 		}
 	}
-	return folderResponseMessage{ResponseClass: "Success", ResponseCode: "NoError"}
+	return folderResponseMessage{ResponseClass: "Success", ResponseCode: "NoError"}, becameRead
 }

@@ -31,6 +31,10 @@ type createItemRequest struct {
 		ReplyToItem    []smartResponse `xml:"ReplyToItem"`
 		ReplyAllToItem []smartResponse `xml:"ReplyAllToItem"`
 		ForwardItem    []smartResponse `xml:"ForwardItem"`
+		// SuppressReadReceipt declines the read receipt a received message asks for.
+		SuppressReadReceipt []struct {
+			ReferenceItemID refID `xml:"ReferenceItemId"`
+		} `xml:"SuppressReadReceipt"`
 	} `xml:"Items"`
 }
 
@@ -112,7 +116,23 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *ses
 
 	msgs := s.createMessages(st, sess, req, disp, send, save)
 	msgs = append(msgs, s.createMeetingResponses(sess, req, send)...)
+	msgs = append(msgs, s.createReceiptSuppressions(sess, req)...)
 	writeResponse(w, createItemResponse{Messages: msgs})
+}
+
+// createReceiptSuppressions answers the SuppressReadReceipt response objects in the
+// request, each of which declines one message's read receipt.
+func (s *Server) createReceiptSuppressions(sess *session, req createItemRequest) []itemResponseMessage {
+	if len(req.Items.SuppressReadReceipt) == 0 {
+		return nil
+	}
+	cache := s.newStoreCache()
+	defer cache.closeAll()
+	msgs := make([]itemResponseMessage, 0, len(req.Items.SuppressReadReceipt))
+	for _, sr := range req.Items.SuppressReadReceipt {
+		msgs = append(msgs, s.suppressReadReceipt(cache, sess, sr.ReferenceItemID))
+	}
+	return msgs
 }
 
 // createMessages stores every message-shaped item in the request: a plain Message and the

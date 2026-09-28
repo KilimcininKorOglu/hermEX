@@ -23,7 +23,10 @@ type updateItemRequest struct {
 	// transmit it. A client that composes by creating a draft and then updating
 	// it sends through this attribute and never calls SendItem at all.
 	MessageDisposition string `xml:"MessageDisposition,attr"`
-	ItemChanges        struct {
+	// SuppressReadReceipts stops the read receipt that marking a message read
+	// otherwise sends ([MS-OXWSCORE] 3.1.4.9.3.1).
+	SuppressReadReceipts bool `xml:"SuppressReadReceipts,attr"`
+	ItemChanges          struct {
 		Changes []itemChangeReq `xml:"ItemChange"`
 	} `xml:"ItemChanges"`
 }
@@ -107,15 +110,15 @@ func (s *Server) handleUpdateItem(w http.ResponseWriter, inner []byte, sess *ses
 
 	var msgs []itemResponseMessage
 	for _, ch := range req.ItemChanges.Changes {
-		msgs = append(msgs, s.updateOne(cache, sess, ch, disp))
+		msgs = append(msgs, s.updateOne(cache, sess, ch, disp, req.SuppressReadReceipts))
 	}
 	writeResponse(w, updateItemResponse{Messages: msgs})
 }
 
 // updateOne applies one ItemChange and returns its response message. disp is the
 // request's MessageDisposition, which decides whether the updated message is
-// also transmitted.
-func (s *Server) updateOne(cache *storeCache, sess *session, ch itemChangeReq, disp string) itemResponseMessage {
+// also transmitted; suppress stops the read receipt marking it read would send.
+func (s *Server) updateOne(cache *storeCache, sess *session, ch itemChangeReq, disp string, suppress bool) itemResponseMessage {
 	id, err := oxews.DecodeItemID(ch.ItemID.ID)
 	if err != nil {
 		return itemError("ErrorInvalidRequest")
@@ -139,7 +142,7 @@ func (s *Server) updateOne(cache *storeCache, sess *session, ch itemChangeReq, d
 		id.MessageID, id.UID = info.ID, info.UID
 		newID = oxews.EncodeItemID(id)
 	}
-	if err := applyReadFlag(st, id, ch.Updates.SetFields); err != nil {
+	if err := s.updateReadFlag(st, sess, id, ch.Updates.SetFields, suppress); err != nil {
 		return itemError("ErrorItemNotFound")
 	}
 	// The send runs on the updated message, so the recipients and body the same
@@ -184,26 +187,44 @@ func hasContentUpdate(fields []setItemField) bool {
 	return false
 }
 
-// applyReadFlag writes the read flag when the request names it.
-func applyReadFlag(st *objectstore.Store, id oxews.ItemID, fields []setItemField) error {
+// updateReadFlag writes the read flag when the request names it and sends the read
+// receipt a message taken from unread to read asks for, unless suppress is set.
+func (s *Server) updateReadFlag(st *objectstore.Store, sess *session, id oxews.ItemID, fields []setItemField, suppress bool) error {
+	becameRead, err := applyReadFlag(st, id, fields)
+	if err != nil {
+		return err
+	}
+	if becameRead && !suppress {
+		s.sendReadReceipt(st, sess, id.Mailbox, id.MessageID)
+	}
+	return nil
+}
+
+// applyReadFlag writes the read flag when the request names it. becameRead reports
+// whether the message went from unread to read, which is the only change that owes
+// a read receipt.
+func applyReadFlag(st *objectstore.Store, id oxews.ItemID, fields []setItemField) (becameRead bool, err error) {
 	for _, sf := range fields {
 		if sf.FieldURI.URI != fieldIsRead {
 			continue
 		}
 		flags, err := st.MessageFlags(id.FolderID, id.UID)
 		if err != nil {
-			return err
+			return false, err
 		}
-		if strings.EqualFold(strings.TrimSpace(sf.Message.IsRead), "true") {
+		wasRead := flags&objectstore.FlagSeen != 0
+		read := strings.EqualFold(strings.TrimSpace(sf.Message.IsRead), "true")
+		if read {
 			flags |= objectstore.FlagSeen
 		} else {
 			flags &^= objectstore.FlagSeen
 		}
 		if err := st.SetMessageFlags(id.FolderID, id.UID, flags); err != nil {
-			return err
+			return false, err
 		}
+		becameRead = read && !wasRead
 	}
-	return nil
+	return becameRead, nil
 }
 
 // rewriteItem applies the content updates to the stored message in place and

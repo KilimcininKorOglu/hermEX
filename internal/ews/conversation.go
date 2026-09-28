@@ -332,6 +332,9 @@ type conversationAction struct {
 	ConversationID      convIDElem `xml:"ConversationId"`
 	DestinationFolderID folderRefs `xml:"DestinationFolderId"`
 	IsRead              *bool      `xml:"IsRead"`
+	// SuppressReadReceipts stops the read receipts a SetReadState that marks the
+	// conversation read would otherwise send.
+	SuppressReadReceipts bool `xml:"SuppressReadReceipts"`
 }
 
 type applyConversationActionRequest struct {
@@ -364,32 +367,40 @@ func (s *Server) handleApplyConversationAction(w http.ResponseWriter, inner []by
 	groups := conversationGroups(st, allFolderIDs(st))
 	msgs := make([]folderResponseMessage, 0, len(req.Actions))
 	for _, a := range req.Actions {
-		msgs = append(msgs, applyOneConversationAction(st, a, groups[a.ConversationID.ID]))
+		rm, becameRead := applyOneConversationAction(st, a, groups[a.ConversationID.ID])
+		msgs = append(msgs, rm)
+		if a.SuppressReadReceipts {
+			continue
+		}
+		for _, id := range becameRead {
+			s.sendReadReceipt(st, sess, "", id)
+		}
 	}
 	writeResponse(w, applyConversationActionResponse{Messages: msgs})
 }
 
 // applyOneConversationAction applies a single action to a conversation's members.
-func applyOneConversationAction(st *objectstore.Store, a conversationAction, members []convMember) folderResponseMessage {
+// becameRead lists the messages a SetReadState took from unread to read.
+func applyOneConversationAction(st *objectstore.Store, a conversationAction, members []convMember) (rm folderResponseMessage, becameRead []int64) {
 	switch a.Action {
 	case "Move", "AlwaysMove":
 		if !relocateConversation(st, a.DestinationFolderID, members, moveMessage) {
-			return folderError("ErrorInvalidRequest")
+			return folderError("ErrorInvalidRequest"), nil
 		}
 	case "Copy":
 		if !relocateConversation(st, a.DestinationFolderID, members, copyMessage) {
-			return folderError("ErrorInvalidRequest")
+			return folderError("ErrorInvalidRequest"), nil
 		}
 	case "Delete", "AlwaysDelete":
 		for _, m := range members {
 			_ = st.SoftDeleteMessage(m.folderID, m.info.UID)
 		}
 	case "SetReadState":
-		setConversationRead(st, members, a.IsRead != nil && *a.IsRead)
+		becameRead = setConversationRead(st, members, a.IsRead != nil && *a.IsRead)
 	default:
-		return folderError("ErrorInvalidRequest")
+		return folderError("ErrorInvalidRequest"), nil
 	}
-	return folderResponseMessage{ResponseClass: "Success", ResponseCode: "NoError"}
+	return folderResponseMessage{ResponseClass: "Success", ResponseCode: "NoError"}, becameRead
 }
 
 // relocateConversation moves or copies every member of a conversation into the
@@ -407,8 +418,9 @@ func relocateConversation(st *objectstore.Store, refs folderRefs, members []conv
 }
 
 // setConversationRead marks every member of a conversation read or unread,
-// touching only the ones whose flag actually changes.
-func setConversationRead(st *objectstore.Store, members []convMember, read bool) {
+// touching only the ones whose flag actually changes, and returns the members it
+// took from unread to read.
+func setConversationRead(st *objectstore.Store, members []convMember, read bool) (becameRead []int64) {
 	for _, m := range members {
 		next := m.info.Flags
 		if read {
@@ -416,10 +428,14 @@ func setConversationRead(st *objectstore.Store, members []convMember, read bool)
 		} else {
 			next &^= objectstore.FlagSeen
 		}
-		if next != m.info.Flags {
-			_ = st.SetMessageFlags(m.folderID, m.info.UID, next)
+		if next == m.info.Flags {
+			continue
+		}
+		if st.SetMessageFlags(m.folderID, m.info.UID, next) == nil && read {
+			becameRead = append(becameRead, m.info.ID)
 		}
 	}
+	return becameRead
 }
 
 // singleFolderTarget resolves a destination folder reference to one folder id in
