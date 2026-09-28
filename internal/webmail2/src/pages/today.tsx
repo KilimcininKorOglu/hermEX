@@ -7,21 +7,7 @@ import { Label } from "@/components/ui/label"
 import api, { type CalendarEvent, type Task, type Contact } from "@/utils/api"
 import { useMailbox } from "@/contexts/MailboxContext"
 import { useI18n } from "@/hooks/useI18n"
-import { withTz, formatDay } from "@/utils/date"
-
-// dateKey returns a local YYYY-MM-DD key for a Date.
-function dateKey(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-}
-
-// eventDayKey returns the local day key an event belongs to (all-day uses the
-// date-only start; timed uses the RFC3339 instant).
-function eventDayKey(ev: CalendarEvent): string {
-  const raw = ev.allDay && ev.start.length === 10 ? `${ev.start}T00:00:00` : ev.start
-  const d = new Date(raw)
-  return isNaN(d.getTime()) ? "" : dateKey(d)
-}
+import { withTz, formatDay, eventDayKey, zonedDayKey, zonedInputToISO } from "@/utils/date"
 
 // TodayPage is the dashboard: a configurable set of widgets summarizing the
 // user's day - today's appointments (and a quick-add), the inbox unread count,
@@ -54,7 +40,7 @@ export function TodayPage() {
     api.getAppearanceSettings().then((s) => setHideWidgets(s.hideWidgetPanel)).catch(() => undefined)
   }, [])
 
-  const todayKey = dateKey(new Date())
+  const todayKey = zonedDayKey(new Date())
   const todayEvents = events.filter((ev) => eventDayKey(ev) === todayKey).sort((a, b) => a.start.localeCompare(b.start))
   const openTasks = tasks.filter((tk) => !tk.completed).slice(0, 8)
 
@@ -62,7 +48,7 @@ export function TodayPage() {
     if (!quickSummary.trim()) return
     setQuickBusy(true)
     try {
-      const d = new Date(`${todayKey}T${quickTime}:00`)
+      const d = new Date(zonedInputToISO(`${todayKey}T${quickTime}`))
       const end = new Date(d.getTime() + 60 * 60 * 1000)
       await api.createCalendarEvent({
         summary: quickSummary.trim(),

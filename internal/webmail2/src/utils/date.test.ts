@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { formatAbsolute, formatDate, formatDay, formatFullDate, formatWhen, setDisplayTimeZone, withTz, zonedInputToISO, zonedInputFromISO, zonedDayKey, zonedDayStartISO, addDaysToKey, weekdayOfKey } from './date'
+import { formatAbsolute, formatDate, formatDay, formatFullDate, formatWhen, setDisplayTimeZone, withTz, zonedInputToISO, zonedInputFromISO, zonedDayKey, zonedDayStartISO, addDaysToKey, weekdayOfKey, eventDayKey } from './date'
 
 describe('without a chosen time zone', () => {
   afterEach(() => setDisplayTimeZone(''))
@@ -85,6 +85,14 @@ describe('display-zone inputs', () => {
     expect(addDaysToKey('2026-12-31', 1)).toBe('2027-01-01')
     expect(weekdayOfKey('2026-11-27')).toBe(5)
     expect(zonedInputFromISO('nope')).toBe('')
+  })
+
+  it('puts a timed event on its display-zone day and an all-day event on its own day', () => {
+    setDisplayTimeZone('America/New_York')
+    expect(eventDayKey({ start: '2026-11-27T02:00:00Z' })).toBe('2026-11-26')
+    expect(eventDayKey({ start: '2026-11-27', allDay: true })).toBe('2026-11-27')
+    setDisplayTimeZone('Europe/Istanbul')
+    expect(eventDayKey({ start: '2026-11-26T22:30:00Z' })).toBe('2026-11-27')
   })
 })
 

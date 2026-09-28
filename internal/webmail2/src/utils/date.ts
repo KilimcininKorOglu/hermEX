@@ -109,7 +109,14 @@ export function weekdayOfKey(day: string): number {
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay()
 }
 
-type Translate = (key: string, params?: Record<string, string>) => string
+// eventDayKey is the "YYYY-MM-DD" day an event falls on in the display zone. An
+// all-day event's date-only start names a day, not an instant, so it is kept.
+export function eventDayKey(ev: { start: string; allDay?: boolean }): string {
+  if (ev.allDay && ev.start.length === 10) return ev.start
+  return zonedDayKey(ev.start)
+}
+
+type Translate =(key: string, params?: Record<string, string>) => string
 
 // uiLang is the interface language the page renders in, which useI18n mirrors
 // onto <html lang>.
