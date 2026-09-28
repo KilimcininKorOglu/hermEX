@@ -16,8 +16,8 @@ import (
 // header-derived envelope properties, the recipient table, and the body. It
 // implements the MS-OXCMAIL internet-to-MAPI import path for the core property
 // set, an S/MIME message in the shape [MS-OXOSMIME] gives it, and a calendar
-// part through opt.CalendarImporter; the long tail (TNEF, report/DSN/MDN) is not
-// yet handled.
+// part through opt.CalendarImporter, and a delivery or disposition report; TNEF
+// is not yet handled.
 //
 // opt.Resolver allocates the named property an opaque S/MIME message keeps its
 // Content-Type in, and the PS_INTERNET_HEADERS properties unmapped header fields
@@ -61,6 +61,7 @@ func Import(raw []byte, opt Options) (*Message, error) {
 		return nil, err
 	}
 	parseContent(root, msg, stamp, opt.CalendarImporter)
+	importReport(root, msg, stamp)
 	if err := importSMIME(root, msg, stamp, opt); err != nil {
 		return nil, err
 	}

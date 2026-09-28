@@ -43,6 +43,12 @@ func Export(msg *Message, opt Options) ([]byte, error) {
 		writeSMIMEBody(&b, msg, opt, clearSigned)
 		return b.Bytes(), nil
 	}
+	if kind := reportKind(msg); kind != "" {
+		if err := writeReportBody(&b, msg, opt, kind); err != nil {
+			return nil, err
+		}
+		return b.Bytes(), nil
+	}
 
 	inline, regular := splitAttachments(msg.Attachments)
 
@@ -533,7 +539,7 @@ func identityAddress(props mapi.PropertyValues, t addrTags) string {
 func recipientList(msg *Message, rcptType int32) string {
 	var addrs []string
 	for _, r := range msg.Recipients {
-		if v, ok := propInt32(r, mapi.PrRecipientType); !ok || v != rcptType {
+		if v, ok := propInt32(r, mapi.PrRecipientType); !ok || v != rcptType || isReportedRecipient(r) {
 			continue
 		}
 		addr := propString(r, mapi.PrSmtpAddress)

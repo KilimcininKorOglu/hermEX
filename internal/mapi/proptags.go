@@ -180,6 +180,26 @@ const (
 	PrScheduleOriginal = PropTag(0x67760102) // PtBinary
 )
 
+// Report property tags ([MS-OXOMSG] 2.2.2): what a delivery status notification
+// or a message disposition notification records on the report message and on
+// each recipient it reports on.
+const (
+	PrReportingMessageTransferAgent = PropTag(0x6820001F) // PtUnicode, the DSN Reporting-MTA
+	PrRemoteMessageTransferAgent    = PropTag(0x0C21001F) // PtUnicode (recipient), the DSN Remote-MTA
+	PrSupplementaryInfo             = PropTag(0x0C1B001F) // PtUnicode (recipient)
+	PrReportTime                    = PropTag(0x00320040) // PtSysTime
+	PrDeliverTime                   = PropTag(0x00100040) // PtSysTime (recipient)
+	PrNonDeliveryReportStatusCode   = PropTag(0x0C200003) // PtLong (recipient), status as kind*100+subject*10+detail
+	PrNonDeliveryReportDiagCode     = PropTag(0x0C050003) // PtLong (recipient)
+	PrNonDeliveryReportReasonCode   = PropTag(0x0C040003) // PtLong (recipient)
+	PrOriginalDisplayTo             = PropTag(0x0074001F) // PtUnicode
+	PrOriginalDeliveryTime          = PropTag(0x00550040) // PtSysTime
+	PrReceiptTime                   = PropTag(0x002A0040) // PtSysTime
+	PrReportText                    = PropTag(0x1001001F) // PtUnicode, the MDN Disposition
+	PrParentKey                     = PropTag(0x00250102) // PtBinary
+	PrOriginalMessageID             = PropTag(0x1046001F) // PtUnicode
+)
+
 // Message envelope property tags (MS-OXCMAIL / MS-OXOMSG): the standard
 // header-derived properties an imported message carries.
 const (
