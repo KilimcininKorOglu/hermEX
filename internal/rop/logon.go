@@ -77,7 +77,7 @@ func (s *Session) ropLogon(p *ext.Pull, out *ext.Push, handles []uint32, hindex 
 		s.delegateCallers[st] = s.owner
 		s.delegateOwners[st] = ownerSMTP
 	}
-	h := s.alloc(&object{kind: kindLogon, store: st})
+	h := s.alloc(&object{kind: kindLogon, store: st, logon: s.logonIdentityFor(ownerSMTP)})
 	setHandle(handles, hindex, h)
 
 	// Response header: RopId, OutputHandleIndex (echoed), ReturnValue.

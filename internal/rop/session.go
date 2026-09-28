@@ -109,6 +109,7 @@ type object struct {
 	store          *objectstore.Store            // kindLogon, and inherited by every child object
 	folderID       int64                         // kindFolder
 	rights         rightsResolver                // kindFolder: the caller's rights, for PidTagRights and PidTagAccess
+	logon          *logonIdentity                // kindLogon: who the store was opened as
 	table          *tableState                   // kindTable
 	messageID      int64                         // kindMessage
 	pendingProps   mapi.PropertyValues           // kindMessage: in-place edits buffered until SaveChangesMessage

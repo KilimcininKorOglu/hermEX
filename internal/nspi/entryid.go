@@ -25,6 +25,14 @@ const (
 // reversible DN, the GAL container carries "/". DNToMId reverses the mailuser
 // DN, so the round-trip a client performs (QueryRows row -> OpenEntry by its
 // PR_ENTRYID) closes.
+// MailUserEntryID is the address-book entry id of a mailbox user: the same
+// PermanentEntryID the GAL hands out for that user, so another surface naming the
+// user (a store's owner, the logged-on user) points at the entry the address book
+// serves.
+func MailUserEntryID(smtp string) []byte {
+	return permanentEntryID(dtMailuser, userDN(smtp))
+}
+
 func permanentEntryID(displayType uint32, x500dn string) []byte {
 	p := ext.NewPush(0)
 	p.Uint32(0) // flags: ENTRYID_TYPE_PERMANENT

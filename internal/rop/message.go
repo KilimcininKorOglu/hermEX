@@ -159,7 +159,7 @@ func (o *object) readContainerProps(tags []mapi.PropTag) (mapi.PropertyValues, b
 		props, err := folderProps(o.store, o.folderID, tags, o.rights)
 		return props, true, err
 	case kindLogon:
-		props, err := o.store.GetStoreProperties(tags...)
+		props, err := storeProps(o.store, tags, o.logon)
 		return props, true, err
 	}
 	return nil, false, nil

@@ -57,6 +57,38 @@ func (s *Store) FolderComputedProps(fid int64) (mapi.PropertyValues, error) {
 	return props, nil
 }
 
+// storeStateSearchFolders is the PidTagStoreState value of a mailbox with an
+// active search folder ([MS-OXCSTOR] 2.2.2.1.1.5).
+const storeStateSearchFolders int32 = 0x01000000
+
+// StoreComputedProps returns the store properties the store computes rather than
+// stores ([MS-OXCSTOR] 2.2.2.1.1): the count and total size of the mailbox's live
+// non-FAI messages, and whether it has an active search folder.
+func (s *Store) StoreComputedProps() (mapi.PropertyValues, error) {
+	var count int64
+	if err := s.objdb.QueryRow(`SELECT COUNT(*) FROM messages WHERE is_deleted=0 AND COALESCE(is_associated, 0)=0`).Scan(&count); err != nil {
+		return nil, err
+	}
+	size, err := s.MailboxSize()
+	if err != nil {
+		return nil, err
+	}
+	var searches int64
+	if err := s.objdb.QueryRow(`SELECT COUNT(*) FROM folders WHERE is_search=1 AND is_deleted=0 AND search_criteria IS NOT NULL`).Scan(&searches); err != nil {
+		return nil, err
+	}
+	state := int32(0)
+	if searches > 0 {
+		state = storeStateSearchFolders
+	}
+	return mapi.PropertyValues{
+		{Tag: mapi.PrContentCount, Value: clampLong(count)},
+		{Tag: mapi.PrMessageSizeExtended, Value: size},
+		{Tag: mapi.PrMessageSize, Value: clampLong(size)},
+		{Tag: mapi.PrStoreState, Value: state},
+	}, nil
+}
+
 // folderEID is a folder's short-term id as a PtI8 value.
 func folderEID(fid int64) int64 {
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly

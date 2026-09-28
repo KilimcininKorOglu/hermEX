@@ -199,6 +199,14 @@ const (
 	PrAccess             = PropTag(0x0FF40003) // PtLong, the operations open to the caller ([MS-OXCPRPT] 2.2.1.1)
 )
 
+// Logon (store) properties the server computes ([MS-OXCSTOR] 2.2.2.1.1).
+const (
+	PrStoreState          = PropTag(0x340E0003) // PtLong: 0x01000000 with an active search folder
+	PrMailboxOwnerEntryID = PropTag(0x661B0102) // PtBinary, the owner's address-book entry id
+	PrMailboxOwnerName    = PropTag(0x661C001F) // PtUnicode
+	PrUserEntryID         = PropTag(0x66190102) // PtBinary, the logged-on user's address-book entry id
+)
+
 // PrAddressBookDisplayNamePrintable is PidTagAddressBookDisplayNamePrintable
 // ([MS-OXOABK] 2.2.3.7), the form of an address book object's display name the
 // client renders in its own code page; Outlook copies it onto a recipient row.
