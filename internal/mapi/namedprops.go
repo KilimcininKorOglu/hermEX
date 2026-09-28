@@ -19,6 +19,12 @@ var (
 	// NameInternetContentType is the "Content-Type" header field under
 	// PsInternetHeaders.
 	NameInternetContentType = PropertyName{Kind: MnidString, GUID: PsInternetHeaders, Name: "Content-Type"}
+	// PsGpgOL {31805AB8-3E92-11DC-879C-00061B031004} is the namespace the GpgOL
+	// Outlook add-in keeps its OpenPGP properties in.
+	PsGpgOL = GUID{Data1: 0x31805AB8, Data2: 0x3E92, Data3: 0x11DC, Data4: [8]byte{0x87, 0x9C, 0x00, 0x06, 0x1B, 0x03, 0x10, 0x04}}
+	// NameGpgOLMsgClass is GpgOL's message class override, which names an OpenPGP
+	// message in a contents table without reading its MIME body.
+	NameGpgOLMsgClass = PropertyName{Kind: MnidString, GUID: PsGpgOL, Name: "GpgOL Msg Class"}
 	// PsetidAddress {00062004-0000-0000-C000-000000000046} holds the contact
 	// (person) named properties: the three email slots, the work address,
 	// file-as, instant-messaging address, and the has-picture flag.

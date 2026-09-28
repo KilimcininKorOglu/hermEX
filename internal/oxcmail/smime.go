@@ -27,11 +27,14 @@ func CheckSMIME(msg *Message) error {
 // smimeShape reports whether the message class names an S/MIME message object
 // and, if so, whether it is clear-signed ([MS-OXOSMIME] 3.1.4.1 and 3.1.4.2): a
 // class ending in ".SMIME.MultipartSigned" is clear-signed, one ending in ".SMIME"
-// is opaque-signed or encrypted.
+// is opaque-signed or encrypted. A GpgOL OpenPGP class holds its whole entity the
+// way a clear-signed one does.
 func smimeShape(props mapi.PropertyValues) (isSMIME, clearSigned bool) {
 	class := strings.ToLower(propString(props, mapi.PrMessageClass))
 	switch {
-	case strings.HasSuffix(class, ".smime.multipartsigned"):
+	case strings.HasSuffix(class, ".smime.multipartsigned"),
+		// An OpenPGP entity is kept whole, like a clear-signed one.
+		class == strings.ToLower(classGpgOLEncrypted), class == strings.ToLower(classGpgOLSigned):
 		return true, true
 	case strings.HasSuffix(class, ".smime"):
 		return true, false

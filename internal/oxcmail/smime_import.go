@@ -1,6 +1,7 @@
 package oxcmail
 
 import (
+	stdmime "mime"
 	"strings"
 
 	"hermex/internal/mapi"
@@ -12,6 +13,12 @@ const (
 	classSMIME             = "IPM.Note.SMIME"
 	classSMIMEMultipartSig = "IPM.Note.SMIME.MultipartSigned"
 	smimeAttachmentName    = "smime.p7m"
+	// The GpgOL classes of an OpenPGP/MIME message (RFC 3156). A signed one is
+	// stored under the S/MIME clear-signed class and names this one in the GpgOL
+	// override; an encrypted one takes its class directly.
+	classGpgOLSigned    = "IPM.Note.GpgOL.MultipartSigned"
+	classGpgOLEncrypted = "IPM.Note.GpgOL.MultipartEncrypted"
+	gpgolAttachmentName = "GpgOL_MIME_structure.mime"
 )
 
 // importSMIME reshapes a message whose top-level entity is S/MIME into the message
@@ -28,15 +35,75 @@ const (
 func importSMIME(root *mime.Part, msg *Message, stamp uint64, opt Options) error {
 	switch {
 	case root.Type == "multipart" && root.Subtype == "signed":
-		msg.Props.Set(mapi.PrMessageClass, classSMIMEMultipartSig)
-		msg.Attachments = []Attachment{signedEntityAttachment(root, stamp)}
+		return importClearSigned(root, msg, stamp, opt)
+	case root.Type == "multipart" && root.Subtype == "encrypted" && openPGPProtocol(root):
+		return importOpenPGPEncrypted(root, msg, stamp, opt)
 	case root.Type == "application" && (root.Subtype == "pkcs7-mime" || root.Subtype == "x-pkcs7-mime"):
-		msg.Props.Set(mapi.PrMessageClass, classSMIME)
-		if root.Filename() == "" && len(msg.Attachments) == 1 {
-			msg.Attachments[0].Props.Set(mapi.PrAttachLongFilename, smimeAttachmentName)
-			msg.Attachments[0].Props.Set(mapi.PrAttachExtension, ".p7m")
-		}
-		return keepContentType(msg, root, opt)
+		return importOpaque(root, msg, opt)
+	}
+	return nil
+}
+
+// importOpaque stores an opaque S/MIME message: it is already its one attachment,
+// and gains the class and its kept Content-Type.
+func importOpaque(root *mime.Part, msg *Message, opt Options) error {
+	msg.Props.Set(mapi.PrMessageClass, classSMIME)
+	if root.Filename() == "" && len(msg.Attachments) == 1 {
+		msg.Attachments[0].Props.Set(mapi.PrAttachLongFilename, smimeAttachmentName)
+		msg.Attachments[0].Props.Set(mapi.PrAttachExtension, ".p7m")
+	}
+	return keepContentType(msg, root, opt)
+}
+
+// importClearSigned stores a clear-signed message, S/MIME or OpenPGP, as the
+// signed class with one attachment holding its entity. An OpenPGP one also names
+// GpgOL's class in its override.
+func importClearSigned(root *mime.Part, msg *Message, stamp uint64, opt Options) error {
+	msg.Props.Set(mapi.PrMessageClass, classSMIMEMultipartSig)
+	msg.Attachments = []Attachment{signedEntityAttachment(root, stamp)}
+	if openPGPProtocol(root) {
+		return setGpgOLClass(msg, classGpgOLSigned, opt)
+	}
+	return nil
+}
+
+// importOpenPGPEncrypted stores an OpenPGP encrypted message. Its ciphertext is
+// not CMS data, so it keeps GpgOL's class rather than an S/MIME one, and its
+// entity is kept whole like a clear-signed one.
+func importOpenPGPEncrypted(root *mime.Part, msg *Message, stamp uint64, opt Options) error {
+	msg.Props.Set(mapi.PrMessageClass, classGpgOLEncrypted)
+	a := signedEntityAttachment(root, stamp)
+	a.Props.Set(mapi.PrAttachMimeTag, "multipart/encrypted")
+	a.Props.Set(mapi.PrAttachLongFilename, gpgolAttachmentName)
+	a.Props.Set(mapi.PrAttachExtension, ".mime")
+	msg.Attachments = []Attachment{a}
+	return setGpgOLClass(msg, classGpgOLEncrypted, opt)
+}
+
+// openPGPProtocol reports whether a multipart/signed or multipart/encrypted entity
+// is OpenPGP/MIME (RFC 3156), by its protocol parameter.
+func openPGPProtocol(root *mime.Part) bool {
+	_, params, err := stdmime.ParseMediaType(root.Header().Get("Content-Type"))
+	if err != nil {
+		return false
+	}
+	p := strings.ToLower(params["protocol"])
+	return (root.Subtype == "signed" && p == "application/pgp-signature") ||
+		(root.Subtype == "encrypted" && p == "application/pgp-encrypted")
+}
+
+// setGpgOLClass stores GpgOL's message class override, which names an OpenPGP
+// message in a contents table without reading its body.
+func setGpgOLClass(msg *Message, class string, opt Options) error {
+	if opt.Resolver == nil {
+		return nil
+	}
+	ids, err := opt.Resolver(true, []mapi.PropertyName{mapi.NameGpgOLMsgClass})
+	if err != nil {
+		return err
+	}
+	if len(ids) == 1 && ids[0] != 0 {
+		msg.Props.Set(mapi.MakeTag(ids[0], mapi.PtString8), class)
 	}
 	return nil
 }
