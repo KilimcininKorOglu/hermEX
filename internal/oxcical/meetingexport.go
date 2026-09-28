@@ -51,6 +51,9 @@ func globalObjectUID(goid []byte) string {
 		data = data[:size]
 	}
 	if rest, ok := bytes.CutPrefix(data, vcalUIDMarker); ok {
+		// The size counts the NUL that ends the UID ([MS-OXOCAL] 2.2.1.27), and a
+		// UID line holding it is refused when it is read back.
+		rest, _, _ = bytes.Cut(rest, []byte{0})
 		return string(rest)
 	}
 	clean := bytes.Clone(goid[:goidDataOffset+len(data)])

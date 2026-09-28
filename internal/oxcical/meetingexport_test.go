@@ -170,6 +170,13 @@ func TestExportForeignUIDRoundTrips(t *testing.T) {
 	if got := GlobalObjectID(uid); !bytes.Equal(got, goid[:len(got)]) || len(got) != len(goid) {
 		t.Errorf("GlobalObjectID(%q) = %X, want %X", uid, got, goid)
 	}
+	// Outlook and ActiveSync end the wrapped UID with a NUL the size counts
+	// ([MS-OXOCAL] 2.2.1.27); the UID line must not carry it.
+	terminated := append(bytes.Clone(goid), 0)
+	binary.LittleEndian.PutUint32(terminated[goidSizeOffset:], uint32(len(vcalUIDMarker)+len(uid)+1))
+	if got := globalObjectUID(terminated); got != uid {
+		t.Errorf("UID of a terminated id = %q, want %q", got, uid)
+	}
 }
 
 // TestGlobalObjectIDInvertsTheUID maps an exported UID back to the id of the whole
