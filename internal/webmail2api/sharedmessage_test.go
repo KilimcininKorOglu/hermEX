@@ -151,6 +151,33 @@ func TestSharedMessageRefusesADelegateWithoutAGrant(t *testing.T) {
 	}
 }
 
+// TestSharedMessageOpenMarksReadWithWriteRights proves opening a shared message
+// marks it read for a grantee who may change the folder, and leaves it unread,
+// and reported unread, for a read-only grantee.
+func TestSharedMessageOpenMarksReadWithWriteRights(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		rights uint32
+		read   bool
+	}{
+		{"editor", mapi.RightsEditor, true},
+		{"reviewer", mapi.RightsReviewer, false},
+	} {
+		f := newSharedMessageFixture(t, c.rights, false)
+		rec := f.do(http.MethodGet, "/api/v1/mail/message?id=inbox:1&owner=team@hermex.test", "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d; body=%s", c.name, rec.Code, rec.Body.String())
+		}
+		wantContains(t, c.name+" detail", rec.Body.String(), `"read":`+map[bool]string{true: "true", false: "false"}[c.read])
+		st, err := objectstore.Open(f.shared)
+		mustNoErr(t, "open", err)
+		msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
+		st.Close()
+		mustNoErr(t, "list", err)
+		wantEq(t, c.name+" stored read state", msgs[0].Flags&objectstore.FlagSeen != 0, c.read)
+	}
+}
+
 // grantFolder gives alice rights on one folder of the shared mailbox.
 func (f *sharedMessageFixture) grantFolder(t *testing.T, fid int64, rights uint32) {
 	t.Helper()

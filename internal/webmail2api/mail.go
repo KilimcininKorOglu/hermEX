@@ -303,8 +303,9 @@ func (s *Server) applySmimeStatus(d *mailDetailJSON, st *objectstore.Store, raw 
 }
 
 // markReadOnOpen reports the message's flags and marks it \Seen, preserving its
-// other flags. A shared mailbox is read without marking, so a delegate's read
-// does not change what the owner sees as unread. It returns the message's index
+// other flags. In a shared mailbox it is marked only when the caller may change
+// the folder's items, the right the flag endpoint asks for, as Exchange marks a
+// delegate's read; a read-only grantee leaves it unread. It returns the message's index
 // row (nil when it cannot be read) and whether this open took it from unread to
 // read. A failed mark is logged and the message is reported as still unread.
 func markReadOnOpen(d *mailDetailJSON, mb *mailboxCtx, fid int64, uid uint32) (*objectstore.MessageInfo, bool) {
@@ -315,7 +316,7 @@ func markReadOnOpen(d *mailDetailJSON, mb *mailboxCtx, fid int64, uid uint32) (*
 	flags := m.Flags
 	d.Read = flags&objectstore.FlagSeen != 0
 	d.Starred = flags&objectstore.FlagFlagged != 0
-	if d.Read || mb.shared {
+	if d.Read || !mb.writeAllowed(fid) {
 		return &m, false
 	}
 	if err := mb.st.SetMessageFlags(fid, uid, flags|objectstore.FlagSeen); err != nil {

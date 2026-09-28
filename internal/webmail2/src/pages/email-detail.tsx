@@ -301,13 +301,10 @@ function useMessage(id: string | undefined) {
       // the one-time prompt (the server computed the allowlist match).
       if (result.senderTrusted) setShowImages(true)
       setEmail(emailDetailOf(result, await bodyView(result, t)))
-      // Mark the message read on open (server-side) if it was unread, so the
-      // unread count reflects reading, standard mail-client behavior.
-      // Fire-and-forget: a failure must not block reading the message.
-      if (!result.read) {
-        api.setFlag(result.id, "\\Seen", true).catch(() => undefined)
-        patchInbox([result.id], { read: true })
-      }
+      // The server marks the message read on open when the reader may change it
+      // (a read-only delegate leaves it unread) and reports the state it left, so
+      // the list follows that state rather than assuming the mark.
+      patchInbox([result.id], { read: result.read })
       setInvite(await inviteOf(result.id))
       setNotes(await notesOf(result.id))
     }
