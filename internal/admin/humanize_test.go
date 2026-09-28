@@ -6,17 +6,19 @@ import (
 )
 
 // TestClockStamp proves a time renders in the operator's zone, reads as a
-// distance from now in both directions, and falls back to the date beyond the
-// relative limit.
+// distance from now in both directions under a day, and from a day on reads as
+// its date and time in the operator's language.
 func TestClockStamp(t *testing.T) {
 	ist, err := time.LoadLocation("Europe/Istanbul")
 	mustNoErr(t, err, "load a zone")
 	now := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
-	c := clock{loc: ist, now: now}
+	c := clock{loc: ist, now: now, lang: "tr"}
 
 	s := c.at(now.Add(-90 * time.Minute))
-	wantEq(t, s.Short, "2026-09-28 13:30", "the wall clock in the operator's zone")
-	wantEq(t, s.Full, "2026-09-28 13:30 Europe/Istanbul", "the tooltip names the zone")
+	wantEq(t, s.Short, "28.09.2026 13:30", "the Turkish date and time in the operator's zone")
+	wantEq(t, s.Full, "28.09.2026 13:30 Europe/Istanbul", "the tooltip names the zone")
+	en := clock{loc: ist, now: now, lang: "en"}.at(now.Add(-90 * time.Minute))
+	wantEq(t, en.Short, "09/28/2026 1:30 PM", "the English date and time")
 	wantEq(t, s.ISO, "2026-09-28T10:30:00Z", "the machine-readable instant")
 
 	cases := []struct {
@@ -28,21 +30,22 @@ func TestClockStamp(t *testing.T) {
 		{45 * time.Second, "in 45 s", "45 sn sonra"},
 		{-5 * time.Minute, "5 min ago", "5 dk önce"},
 		{-90 * time.Minute, "1 h ago", "1 sa önce"},
-		{-3 * 24 * time.Hour, "3 days ago", "3 gün önce"},
+		{-23 * time.Hour, "23 h ago", "23 sa önce"},
 		{500 * time.Millisecond, "shortly", "birazdan"},
 		{4 * time.Minute, "in 4 min", "4 dk sonra"},
-		{50 * time.Hour, "in 2 days", "2 gün sonra"},
+		{23*time.Hour + 59*time.Minute, "in 23 h", "23 sa sonra"},
 	}
 	for _, tc := range cases {
 		rel := c.at(now.Add(tc.d)).Rel
 		wantEq(t, translate("en", rel), tc.en, "English distance")
 		wantEq(t, translate("tr", rel), tc.tr, "Turkish distance")
 	}
-	wantEq(t, c.at(now.Add(-40*24*time.Hour)).Rel, "", "a distant time reads as its date")
+	wantEq(t, c.at(now.Add(-24*time.Hour)).Rel, "", "a day ago reads as its date")
+	wantEq(t, c.at(now.Add(3*24*time.Hour)).Rel, "", "three days ahead reads as its date")
 	wantEq(t, c.unix(0), stamp{}, "an unset time renders nothing")
 
-	utc := clock{loc: time.UTC, now: now}.at(now)
-	wantEq(t, utc.Full, "2026-09-28 12:00 UTC", "an operator without a zone sees UTC, labelled")
+	utc := clock{loc: time.UTC, now: now, lang: "tr"}.at(now)
+	wantEq(t, utc.Full, "28.09.2026 12:00 UTC", "an operator without a zone sees UTC, labelled")
 }
 
 // TestDurationMsg proves a length of time reads in its two largest units in

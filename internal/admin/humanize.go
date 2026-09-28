@@ -8,8 +8,8 @@ import (
 )
 
 // stamp is one point in time as a page shows it: Rel is a catalogue message such
-// as "12 minutes ago" (empty when the time is too far off for one), Short is the
-// wall-clock time in the operator's zone, Full adds the zone name for the tooltip,
+// as "12 minutes ago" (empty a day or more from now), Short is the date and time
+// in the operator's zone and language, Full adds the zone name for the tooltip,
 // and ISO is the machine-readable instant. The zero stamp renders nothing.
 type stamp struct {
 	ISO, Short, Full, Rel string
@@ -18,29 +18,37 @@ type stamp struct {
 // clock formats times for one response: in the operator's zone, relative to one
 // moment, so every row on a page is measured from the same now.
 type clock struct {
-	loc *time.Location
-	now time.Time
+	loc  *time.Location
+	now  time.Time
+	lang string
 }
 
 // requestClock is the clock a response renders times with.
 func requestClock(r *http.Request) clock {
-	return clock{loc: requestZone(r), now: time.Now()}
+	return clock{loc: requestZone(r), now: time.Now(), lang: requestLang(r)}
 }
 
-// stampLayout is the wall-clock form a stamp shows and its tooltip extends.
-const stampLayout = "2006-01-02 15:04"
+// stampLayouts are the date and time forms each language writes; a language
+// without one uses the English form.
+var stampLayouts = map[string]string{
+	"en": "01/02/2006 3:04 PM",
+	"tr": "02.01.2006 15:04",
+}
 
-// relativeLimit is how far from now a time still reads better as a distance than
-// as a date.
-const relativeLimit = 30 * 24 * time.Hour
+// relativeLimit is how far from now a time still reads as a distance ("10 h
+// ago"); from a day on the date and time say more.
+const relativeLimit = 24 * time.Hour
 
 // at renders t; the zero time renders as the zero stamp.
 func (c clock) at(t time.Time) stamp {
 	if t.IsZero() {
 		return stamp{}
 	}
-	local := t.In(c.loc)
-	short := local.Format(stampLayout)
+	layout, ok := stampLayouts[c.lang]
+	if !ok {
+		layout = stampLayouts["en"]
+	}
+	short := t.In(c.loc).Format(layout)
 	return stamp{
 		ISO:   t.UTC().Format(time.RFC3339),
 		Short: short,
@@ -72,14 +80,14 @@ func zoneLabel(loc *time.Location) string {
 }
 
 // relativeMsg renders the distance d from now as a catalogue message: "3 hours
-// ago" for a past time and "in 3 hours" for a future one. It returns "" beyond
-// relativeLimit, where the date says more than the distance.
+// ago" for a past time and "in 3 hours" for a future one. It returns "" from
+// relativeLimit on, where the date says more than the distance.
 func relativeMsg(d time.Duration) string {
 	past := d <= 0
 	if past {
 		d = -d
 	}
-	if d > relativeLimit {
+	if d >= relativeLimit {
 		return ""
 	}
 	u, n := relativeUnit(d)
@@ -97,7 +105,6 @@ type relUnit struct {
 }
 
 var relUnits = []relUnit{
-	{24 * time.Hour, "time.daysAgo", "time.inDays"},
 	{time.Hour, "time.hoursAgo", "time.inHours"},
 	{time.Minute, "time.minutesAgo", "time.inMinutes"},
 	{time.Second, "time.secondsAgo", "time.inSeconds"},

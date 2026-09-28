@@ -148,12 +148,10 @@
     "secondsAgo": "{0} sn önce",
     "minutesAgo": "{0} dk önce",
     "hoursAgo": "{0} sa önce",
-    "daysAgo": "{0} gün önce",
     "shortly": "birazdan",
     "inSeconds": "{0} sn sonra",
     "inMinutes": "{0} dk sonra",
-    "inHours": "{0} sa sonra",
-    "inDays": "{0} gün sonra"
+    "inHours": "{0} sa sonra"
   },
   "dur": {
     "daysHours": "{0} gün {1} sa",

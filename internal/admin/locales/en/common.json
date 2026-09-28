@@ -148,12 +148,10 @@
     "secondsAgo": "{0} s ago",
     "minutesAgo": "{0} min ago",
     "hoursAgo": "{0} h ago",
-    "daysAgo": "{0} days ago",
     "shortly": "shortly",
     "inSeconds": "in {0} s",
     "inMinutes": "in {0} min",
-    "inHours": "in {0} h",
-    "inDays": "in {0} days"
+    "inHours": "in {0} h"
   },
   "dur": {
     "daysHours": "{0}d {1}h",
