@@ -45,6 +45,23 @@ func seedAppointment(t *testing.T, st *objectstore.Store, tags apptTags, uid str
 	}
 }
 
+// markReceived marks the calendar item carrying uid as a meeting received as an
+// invitation, as the appointment an accept files is.
+func markReceived(t *testing.T, st *objectstore.Store, uid string) {
+	t.Helper()
+	tags, err := ResolveTags(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, ok := findCalendarByUID(st, tags.UID, uid)
+	if !ok {
+		t.Fatalf("no calendar item carries %q", uid)
+	}
+	if err := st.ModifyMessageProperties(id, mapi.PropertyValues{{Tag: tags.State, Value: asfMeeting | asfReceived}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // apSetup opens the room mailbox with the given config and a directory that resolves
 // both the room (the responder) and the organizer (so an accept/decline can route the
 // organizer notification locally).
@@ -191,6 +208,7 @@ func TestAutoProcessDeclinesConflict(t *testing.T) {
 func TestAutoProcessUpdateNotSelfConflict(t *testing.T) {
 	st, tags, accounts := apSetup(t, objectstore.MeetingConfig{AutoAccept: true, DeclineConflict: true})
 	seedAppointment(t, st, tags, "meeting-x", apBase, apBase.Add(time.Hour), busyBusy) // already accepted
+	markReceived(t, st, "meeting-x")
 	id := seedRequest(t, st, tags, "meeting-x", apBase.Add(30*time.Minute), apBase.Add(90*time.Minute), false)
 
 	handled, err := AutoProcess(st, accounts, nil, "room@hermex.test", id)

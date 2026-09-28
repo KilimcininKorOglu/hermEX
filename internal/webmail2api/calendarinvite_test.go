@@ -134,6 +134,27 @@ func TestInvitationDropsInjectedLines(t *testing.T) {
 	lastOf(t, folderMail(t, bob, int64(mapi.PrivateFIDInbox)), 1)
 }
 
+// TestOrganizerCannotAnswerTheOwnInvitation answers the copy of the invitation
+// alice keeps in Sent Items. It is a meeting request like the one bob received, and
+// accepting it used to file alice's own meeting as one received from someone else
+// and mail her an acceptance from herself.
+func TestOrganizerCannotAnswerTheOwnInvitation(t *testing.T) {
+	do, alice, _ := meetingHarness(t)
+	createEvent(t, do, `{"summary":"Review","start":"2026-09-08T09:00:00Z","end":"2026-09-08T10:00:00Z",`+
+		`"attendees":["bob@hermex.test"],"sendInvite":true}`)
+	st := openMailbox(t, alice)
+	sent, err := st.ListMessages(int64(mapi.PrivateFIDSentItems))
+	mustNoErr(t, "list alice's Sent Items", err)
+	if len(sent) != 1 {
+		t.Fatalf("alice's Sent Items holds %d messages, want her invitation", len(sent))
+	}
+
+	id := "sent:" + strconv.FormatUint(uint64(sent[0].UID), 10)
+	wantStatus(t, "accepting the own invitation", do(http.MethodPost, "/api/v1/mail/rsvp",
+		`{"id":"`+id+`","response":"accept"}`), http.StatusBadRequest)
+	wantEq(t, "alice's inbox", len(folderMail(t, alice, int64(mapi.PrivateFIDInbox))), 0)
+}
+
 // injectedSummary is an event summary that tries to add header lines.
 const injectedSummary = `Sync\r\nReply-To: attacker@evil.example`
 

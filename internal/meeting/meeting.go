@@ -60,8 +60,8 @@ var (
 )
 
 // openAnswerable opens the message a response answers and checks that an attendee
-// can answer it: a meeting request, or the calendar item of a meeting the mailbox
-// was invited to that is still on.
+// can answer it: a meeting request the mailbox received, or the calendar item of a
+// meeting the mailbox was invited to that is still on.
 func openAnswerable(st *objectstore.Store, messageID int64, tags Tags) (*oxcmail.Message, error) {
 	req, err := st.OpenMessage(messageID)
 	if err != nil {
@@ -70,11 +70,31 @@ func openAnswerable(st *objectstore.Store, messageID int64, tags Tags) (*oxcmail
 	class := strings.ToLower(propStr(req.Props, mapi.PrMessageClass))
 	switch {
 	case class == strings.ToLower(requestClass) || strings.HasPrefix(class, strings.ToLower(requestClass)+"."):
-		return req, nil
+		return req, requestAnswerable(st, req, tags)
 	case class == "ipm.appointment" || strings.HasPrefix(class, "ipm.appointment."):
 		return req, appointmentAnswerable(longVal(req.Props, tags.State))
 	}
 	return nil, ErrNotARequest
+}
+
+// requestAnswerable checks that a meeting request is one the mailbox received. The
+// organizer keeps a copy of the invitation it sent, and that copy is a request like
+// the one each attendee got; answering it would file the organizer's own meeting as
+// one received from someone else. A meeting the calendar holds without the received
+// flag is the mailbox's own ([MS-OXOCAL] 2.2.1.10).
+func requestAnswerable(st *objectstore.Store, req *oxcmail.Message, tags Tags) error {
+	appt, ok := findCalendarByUID(st, tags.UID, uidOf(req.Props, tags))
+	if !ok {
+		return nil
+	}
+	props, err := st.GetMessageProperties(appt, tags.State)
+	if err != nil {
+		return err
+	}
+	if longVal(props, tags.State)&asfReceived == 0 {
+		return ErrOrganizer
+	}
+	return nil
 }
 
 // appointmentAnswerable checks a calendar item's PidLidAppointmentStateFlags

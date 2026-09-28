@@ -34,6 +34,38 @@ func TestAnsweringAReplyLeavesTheMeetingAlone(t *testing.T) {
 	}
 }
 
+// TestAnsweringTheOwnInvitationIsRefused proves the organizer cannot answer the
+// invitation it sent. The copy kept in Sent Items is a meeting request like the one
+// each attendee received, and accepting it used to overwrite the organizer's
+// meeting with the request's properties, mark it received from someone else, and
+// send the organizer a response from themselves.
+func TestAnsweringTheOwnInvitationIsRefused(t *testing.T) {
+	st, tags, _ := organizerWithEvent(t, "own-1", "bob@hermex.test")
+	cal, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
+	if err != nil || len(cal) != 1 {
+		t.Fatalf("calendar = %v (%v), want the organizer's meeting", cal, err)
+	}
+	sentID, err := st.CreateMessage(int64(mapi.PrivateFIDSentItems), &oxcmail.Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: requestClass},
+		{Tag: tags.UID, Value: "own-1"},
+		{Tag: mapi.PrSentRepresentingSmtpAddress, Value: "organizer@hermex.test"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Respond(st, nil, nil, "organizer@hermex.test", sentID, ResponseAccepted, false); !errors.Is(err, ErrOrganizer) {
+		t.Fatalf("answering the own invitation: err = %v, want ErrOrganizer", err)
+	}
+	props, err := st.GetMessageProperties(cal[0].ID, tags.State, tags.Resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(props) != 0 {
+		t.Errorf("the organizer's meeting gained %v, want it untouched", props)
+	}
+}
+
 // TestAnsweringACalendarItemNeedsAnInvitation proves a calendar item is answered
 // only when it is a meeting the mailbox was invited to and is still on
 // ([MS-OXOCAL] 2.2.1.10): the organizer's own meeting and a canceled one are
