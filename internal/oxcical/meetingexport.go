@@ -84,6 +84,25 @@ func GlobalObjectID(uid string) []byte {
 	return append(goid, data...)
 }
 
+// GlobalObjectIDForms returns every form a stored meeting named by uid can carry
+// in PidLidGlobalObjectId, so a lookup finds it whichever writer stored it. A UID
+// that is the hex of an id has one form. A foreign UID has two: [MS-OXCICAL]
+// imports it bare, as GlobalObjectID does, while [MS-ASEMAIL] 2.2.2.37 ends it
+// with a NUL the size counts, the form ActiveSync and Outlook write. The UID
+// export drops that NUL, so the bare UID is all a response names.
+func GlobalObjectIDForms(uid string) [][]byte {
+	goid := GlobalObjectID(uid)
+	if goid == nil {
+		return nil
+	}
+	if !bytes.HasPrefix(goid[goidDataOffset:], vcalUIDMarker) {
+		return [][]byte{goid}
+	}
+	terminated := append(bytes.Clone(goid), 0)
+	binary.LittleEndian.PutUint32(terminated[goidSizeOffset:], uint32(len(terminated)-goidDataOffset)) // #nosec G115 -- a UID is a line of text
+	return [][]byte{goid, terminated}
+}
+
 // goidInstanceDate reads the instance date a global object id carries for a
 // message about one occurrence. ok is false for the id of a whole meeting, whose
 // date bytes are zero.

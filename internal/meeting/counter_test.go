@@ -136,6 +136,32 @@ func TestResponseFindsAMeetingByItsGlobalObjectID(t *testing.T) {
 	}
 }
 
+// TestResponseFindsAMeetingByATerminatedForeignID covers a meeting whose global
+// object id wraps a foreign UID in the form ActiveSync and Outlook write, ended by a
+// NUL ([MS-ASEMAIL] 2.2.2.37). The response names the UID without the NUL, so the
+// lookup must still find the meeting.
+func TestResponseFindsAMeetingByATerminatedForeignID(t *testing.T) {
+	const uid = "event-7@calendar.example"
+	st, tags, recipID := organizerWithEvent(t, "", "bob@hermex.test")
+	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameGlobalObjectId})
+	if err != nil {
+		t.Fatal(err)
+	}
+	forms := oxcical.GlobalObjectIDForms(uid)
+	if len(forms) != 2 {
+		t.Fatalf("a foreign UID has %d stored forms, want 2", len(forms))
+	}
+	goid := mapi.PropertyValues{{Tag: mapi.MakeTag(ids[0], mapi.PtBinary), Value: forms[1]}}
+	if err := st.SetMessageProperties(eventOf(t, st), goid); err != nil {
+		t.Fatal(err)
+	}
+
+	mustProcess(t, st, deliverReply(t, st, uid, "bob@hermex.test", "ACCEPTED"))
+	if got := responseOf(t, st, tags, recipID); got != ResponseAccepted {
+		t.Errorf("tracking status = %d, want accepted", got)
+	}
+}
+
 // TestCounterWithoutPartstatIsTentative reads a COUNTER that names no PARTSTAT as
 // the tentative response it is.
 func TestCounterWithoutPartstatIsTentative(t *testing.T) {

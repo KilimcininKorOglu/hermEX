@@ -545,7 +545,7 @@ func findCalendarByUID(st *objectstore.Store, uidTag mapi.PropTag, uid string) (
 // findCalendarByGlobalObjectID matches a meeting a MAPI client (Outlook) organized.
 // Such a meeting carries no iCalendar UID property, only its global object id, and
 // the UID every response names is exported from that id, so the id is derived back
-// from the UID and looked up instead.
+// from the UID and looked up instead, in every form a writer may have stored it.
 func findCalendarByGlobalObjectID(st *objectstore.Store, uid string) (int64, bool) {
 	ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{mapi.NameGlobalObjectId})
 	if err != nil {
@@ -555,12 +555,18 @@ func findCalendarByGlobalObjectID(st *objectstore.Store, uid string) (int64, boo
 	if ids[0] == 0 {
 		return 0, false
 	}
-	id, found, err := st.FindObjectByProperty(int64(mapi.PrivateFIDCalendar), mapi.MakeTag(ids[0], mapi.PtBinary), oxcical.GlobalObjectID(uid))
-	if err != nil {
-		st.LogSwallowedError("meeting.find-by-goid", err)
-		return 0, false
+	tag := mapi.MakeTag(ids[0], mapi.PtBinary)
+	for _, goid := range oxcical.GlobalObjectIDForms(uid) {
+		id, found, err := st.FindObjectByProperty(int64(mapi.PrivateFIDCalendar), tag, goid)
+		if err != nil {
+			st.LogSwallowedError("meeting.find-by-goid", err)
+			return 0, false
+		}
+		if found {
+			return id, true
+		}
 	}
-	return id, found
+	return 0, false
 }
 
 // ApplyReply processes an incoming iTIP REPLY on the organizer's side: it locates
