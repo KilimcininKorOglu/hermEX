@@ -39,7 +39,7 @@ export function withTz(opts: Intl.DateTimeFormatOptions = {}): Intl.DateTimeForm
 
 // zoneLabel is appended to a full date: " UTC" when no zone was chosen, so a UTC
 // time is never read as local time, and nothing once the user picked a zone.
-export function zoneLabel(): string {
+function zoneLabel(): string {
   return displayTimeZone ? '' : ' UTC'
 }
 
