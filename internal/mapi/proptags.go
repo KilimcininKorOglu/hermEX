@@ -180,6 +180,11 @@ const (
 	PrScheduleOriginal = PropTag(0x67760102) // PtBinary
 )
 
+// PrAddressBookDisplayNamePrintable is PidTagAddressBookDisplayNamePrintable
+// ([MS-OXOABK] 2.2.3.7), the form of an address book object's display name the
+// client renders in its own code page; Outlook copies it onto a recipient row.
+const PrAddressBookDisplayNamePrintable = PropTag(0x39FF001F) // PtUnicode
+
 // TNEF-related property tags ([MS-OXTNEF], [MS-OXCMSG]): the ones a decoded TNEF
 // stream sets that no other code path names.
 const (

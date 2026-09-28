@@ -418,6 +418,27 @@ func (g gal) resolveEntry(curRec uint32) (galUser, bool) {
 	return g.users[i], true
 }
 
+// printableName is the display name a client can render in any code page
+// ([MS-OXOABK] 2.2.3.7): the display name when it is printable 7-bit text, the
+// local part of the address otherwise, which is 7-bit by construction.
+func printableName(display, smtp string) string {
+	if display != "" && isPrintableASCII(display) {
+		return display
+	}
+	local, _, _ := strings.Cut(smtp, "@")
+	return local
+}
+
+// isPrintableASCII reports whether s holds only printable 7-bit characters.
+func isPrintableASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] > 0x7E {
+			return false
+		}
+	}
+	return true
+}
+
 // galUserProps projects a GAL user into the address-book property bag a row
 // carries: the permanent EntryID (with the reversible DN), the display name, the
 // SMTP address under the standard address tags, and the object/display types.
@@ -429,6 +450,7 @@ func galUserProps(u galUser) mapi.PropertyValues {
 	props := mapi.PropertyValues{
 		{Tag: mapi.PrEntryID, Value: permanentEntryID(u.dt, userDN(u.smtp))},
 		{Tag: mapi.PrDisplayName, Value: u.display},
+		{Tag: mapi.PrAddressBookDisplayNamePrintable, Value: printableName(u.display, u.smtp)},
 		{Tag: mapi.PrAddrType, Value: "SMTP"},
 		{Tag: mapi.PrEmailAddress, Value: u.smtp},
 		{Tag: mapi.PrSmtpAddress, Value: u.smtp},

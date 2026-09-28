@@ -115,3 +115,20 @@ func TestGalUserProps(t *testing.T) {
 		t.Error("PR_ENTRYID is not the mailuser PermanentEntryID")
 	}
 }
+
+// TestGalUserPropsCarryAPrintableName proves every entry carries
+// PidTagAddressBookDisplayNamePrintable, which Outlook copies onto the recipient
+// row it builds from the entry: the display name when it is 7-bit text, and the
+// address's local part when the name would not render in the client's code page.
+func TestGalUserPropsCarryAPrintableName(t *testing.T) {
+	for display, want := range map[string]string{
+		"Alice Smith":  "Alice Smith",
+		"Çağla Öztürk": "cagla",
+		"":             "cagla",
+	} {
+		bag := galUserProps(galUser{mid: midBase, display: display, smtp: "cagla@hermex.test"})
+		if got, _ := bag.Get(mapi.PrAddressBookDisplayNamePrintable); got != want {
+			t.Errorf("display %q: printable name = %v, want %q", display, got, want)
+		}
+	}
+}
