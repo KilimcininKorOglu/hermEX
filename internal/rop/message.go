@@ -118,7 +118,8 @@ func (s *Session) ropOpenMessage(p *ext.Pull, out *ext.Push, handles []uint32, h
 	return true
 }
 
-// readMessageProps returns the requested properties of a message-kind object. An
+// readMessageProps returns the requested properties of an object: a message, an
+// embedded message, a folder or the logon's store. An
 // opened store message reads from the store and then overlays its buffered edits
 // so a read reflects the open working copy (MAPI's read-your-writes contract: a
 // SetProperties/DeleteProperties before SaveChangesMessage is visible to a
@@ -142,6 +143,24 @@ func (o *object) readMessageProps(tags ...mapi.PropTag) (mapi.PropertyValues, bo
 			return nil, false, nil
 		}
 		return selectProps(o.embedded.msg.Props, tags), true, nil
+	}
+	return o.readContainerProps(tags)
+}
+
+// readContainerProps returns the requested properties of a folder or of the store
+// a logon opened ([MS-OXCFOLD] 2.2.2, [MS-OXCSTOR] 2.2.2). The bool is false for
+// any other object kind.
+func (o *object) readContainerProps(tags []mapi.PropTag) (mapi.PropertyValues, bool, error) {
+	if o.store == nil {
+		return nil, false, nil
+	}
+	switch o.kind {
+	case kindFolder:
+		props, err := o.store.GetFolderProperties(o.folderID, tags...)
+		return props, true, err
+	case kindLogon:
+		props, err := o.store.GetStoreProperties(tags...)
+		return props, true, err
 	}
 	return nil, false, nil
 }
