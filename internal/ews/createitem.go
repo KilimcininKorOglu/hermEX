@@ -208,8 +208,17 @@ func (s *Server) createOneItem(st *objectstore.Store, sess *session, m createMes
 	// and holds the stored item's id (with a ChangeKey, as every other returned
 	// ItemId does) for SaveOnly and SendAndSaveCopy.
 	rm := itemResponseMessage{ResponseClass: "Success", ResponseCode: "NoError", Items: &itemsWrap{}}
-	if save {
-		fileCreatedItem(st, raw, disp, rm.Items)
+	if !save {
+		return rm
+	}
+	if err := fileCreatedItem(st, raw, disp, rm.Items); err != nil {
+		// A draft that was not stored is the whole outcome of SaveOnly, so it fails.
+		// The Sent copy of SendAndSaveCopy is filed after the message went out, and a
+		// failure there must not tell the client to send it again; it is recorded.
+		if !send {
+			return itemError("ErrorItemSave")
+		}
+		st.LogSwallowedError("ews.file_sent_copy", err)
 	}
 	return rm
 }
@@ -231,7 +240,7 @@ func (s *Server) sendCreatedItem(sess *session, m createMessage, raw []byte) (co
 
 // fileCreatedItem stores the copy the disposition asks for: a draft for SaveOnly,
 // a sent copy otherwise, and records its id in the response.
-func fileCreatedItem(st *objectstore.Store, raw []byte, disp string, items *itemsWrap) {
+func fileCreatedItem(st *objectstore.Store, raw []byte, disp string, items *itemsWrap) error {
 	folder := int64(mapi.PrivateFIDSentItems)
 	flags := int64(objectstore.FlagSeen)
 	if disp == "SaveOnly" {
@@ -240,10 +249,11 @@ func fileCreatedItem(st *objectstore.Store, raw []byte, disp string, items *item
 	}
 	info, err := st.AppendMessage(folder, raw, time.Now(), flags)
 	if err != nil {
-		return
+		return err
 	}
 	id := oxews.EncodeItemID(oxews.ItemID{FolderID: folder, MessageID: info.ID, UID: info.UID})
 	items.Messages = []oxews.Message{{ItemID: oxews.ItemIDElem{ID: id, ChangeKey: changeKey(st, info.ID)}}}
+	return nil
 }
 
 // itemError builds an error response message with the given EWS response code.

@@ -19,6 +19,26 @@ func createItemReq(disposition, to, subject, body string) string {
 		`</t:Message></Items></CreateItem>`)
 }
 
+// TestCreateItemSaveOnlyReportsAFailedSave proves a draft the store could not keep
+// is reported as a failure, not as a success carrying no item.
+func TestCreateItemSaveOnlyReportsAFailedSave(t *testing.T) {
+	dir := t.TempDir()
+	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
+	srv := NewServer(accs, accs, "mail.hermex.test")
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A closed store refuses the append, standing in for a disk or database fault.
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	m := createMessage{Subject: "draft"}
+	m.ToRecipients.Mailbox = []mailboxEntry{{EmailAddress: "bob@hermex.test"}}
+	rm := srv.createOneItem(st, &session{user: testUser, mailbox: dir}, m, "SaveOnly", false, true)
+	wantEq(t, "the response code", rm.ResponseCode, "ErrorItemSave")
+}
+
 // TestCreateItemSendAndSave confirms SendAndSaveCopy delivers (loopback to the
 // sender) and files a Sent copy.
 func TestCreateItemSendAndSave(t *testing.T) {
