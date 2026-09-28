@@ -2,8 +2,12 @@ package oxvcard
 
 import (
 	"bytes"
+	"io"
+	"mime/quotedprintable"
 	"slices"
 	"strings"
+
+	"hermex/internal/mime"
 )
 
 // vline is one parsed content line: a property name, its parameters (each a
@@ -38,7 +42,7 @@ func parseVCard(raw []byte) (*vcard, error) {
 				return c, nil
 			}
 		case in:
-			c.lines = append(c.lines, vline{name: upper, params: params, value: value})
+			c.lines = append(c.lines, vline{name: upper, params: params, value: decodeValue(params, value)})
 		}
 	}
 	if !in || len(c.lines) == 0 {
@@ -53,19 +57,50 @@ func isCardBoundary(name, boundary, value string) bool {
 }
 
 // unfold splits raw into logical lines, joining RFC 6350 continuation lines (a
-// physical line beginning with a space or tab continues the previous one). It
-// tolerates both CRLF and LF.
+// physical line beginning with a space or tab continues the previous one). A
+// vCard 2.1 quoted-printable value that ends in a soft line break ("=") continues
+// on the next physical line whatever it starts with. It tolerates both CRLF and LF.
 func unfold(raw []byte) []string {
 	physical := strings.Split(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n")
 	var out []string
 	for _, p := range physical {
-		if (strings.HasPrefix(p, " ") || strings.HasPrefix(p, "\t")) && len(out) > 0 {
-			out[len(out)-1] += p[1:]
-			continue
+		n := len(out)
+		switch {
+		case n > 0 && softBreak(out[n-1]):
+			out[n-1] = strings.TrimSuffix(out[n-1], "=") + p
+		case n > 0 && (strings.HasPrefix(p, " ") || strings.HasPrefix(p, "\t")):
+			out[n-1] += p[1:]
+		default:
+			out = append(out, p)
 		}
-		out = append(out, p)
 	}
 	return out
+}
+
+// softBreak reports whether a logical line is a quoted-printable value cut by a
+// soft line break.
+func softBreak(line string) bool {
+	return strings.HasSuffix(line, "=") && strings.Contains(strings.ToUpper(line), "QUOTED-PRINTABLE")
+}
+
+// decodeValue undoes a vCard 2.1 transfer encoding and charset: a
+// quoted-printable value is decoded, and its bytes, or those of an 8-bit value,
+// are read in the CHARSET the line names ([MS-OXCMAIL] 2.2.3.4.4.2). A base64
+// value (a PHOTO) is left for its reader.
+func decodeValue(params map[string][]string, value string) string {
+	enc := strings.ToUpper(strings.Join(params["ENCODING"], ""))
+	charset := strings.Join(params["CHARSET"], "")
+	switch {
+	case enc == "QUOTED-PRINTABLE":
+		b, err := io.ReadAll(quotedprintable.NewReader(strings.NewReader(value)))
+		if err != nil {
+			return value
+		}
+		return mime.DecodeCharset(b, charset)
+	case charset != "" && enc == "":
+		return mime.DecodeCharset([]byte(value), charset)
+	}
+	return value
 }
 
 // splitLine splits a logical content line into its property name, parameters,

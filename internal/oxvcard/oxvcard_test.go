@@ -155,13 +155,37 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
-// TestRejectVersion21 confirms a vCard 2.1 card is rejected, as the converter
-// only supports 3.0 and 4.0.
-func TestRejectVersion21(t *testing.T) {
+// TestImportVersion21 proves a vCard 2.1 card, what a text/x-vCard mail part
+// carries ([MS-OXCMAIL] 2.2.3.4.4.1), is read: types given without "TYPE=", a
+// quoted-printable value cut by a soft line break, and a CHARSET other than UTF-8
+// ([MS-OXCMAIL] 2.2.3.4.4.2).
+func TestImportVersion21(t *testing.T) {
 	r := newResolver()
-	card := "BEGIN:VCARD\r\nVERSION:2.1\r\nFN:Old Style\r\nEND:VCARD\r\n"
-	if _, err := Import([]byte(card), Options{Resolver: r.resolve}); err != errVersion {
-		t.Errorf("err %v, want errVersion", err)
+	card := "BEGIN:VCARD\r\nVERSION:2.1\r\n" +
+		"N;CHARSET=ISO-8859-9;ENCODING=QUOTED-PRINTABLE:G=FCl;Ay=\r\n" +
+		"=FEe\r\n" +
+		"FN;CHARSET=ISO-8859-9;ENCODING=QUOTED-PRINTABLE:Ay=FEe G=FCl\r\n" +
+		"TEL;WORK;VOICE:+90 212 555 0101\r\n" +
+		"TEL;CELL:+90 532 555 0102\r\n" +
+		"EMAIL;PREF;INTERNET:ayse@example.test\r\n" +
+		"END:VCARD\r\n"
+	m, err := Import([]byte(card), Options{Resolver: r.resolve})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for tag, want := range map[mapi.PropTag]string{
+		mapi.PrDisplayName:             "Ayşe Gül",
+		mapi.PrSurname:                 "Gül",
+		mapi.PrGivenName:               "Ayşe",
+		mapi.PrBusinessTelephoneNumber: "+90 212 555 0101",
+		mapi.PrMobileTelephoneNumber:   "+90 532 555 0102",
+	} {
+		if got, _ := m.Props.Get(tag); got != want {
+			t.Errorf("%#x = %q, want %q", uint32(tag), got, want)
+		}
+	}
+	if got := namedVal(t, r, m, mapi.NameEmail1Address); got != "ayse@example.test" {
+		t.Errorf("email = %q", got)
 	}
 }
 

@@ -3,8 +3,8 @@
 //
 // Import parses a vCard into an oxcmail.Message, a property bag plus, for a
 // contact photo, one attachment, and Export renders such a message back into a
-// vCard. Import accepts vCard 3.0 and 4.0 and rejects 2.1; Export always emits
-// 4.0. It is the contact analogue of package oxcmail: the same Message type and
+// vCard. Import accepts vCard 2.1, 3.0 and 4.0; Export emits 4.0, or 3.0 when
+// asked. It is the contact analogue of package oxcmail: the same Message type and
 // the same store seam (CreateMessage / OpenMessage) carry a contact unchanged.
 //
 // The package never touches storage. The contact email slots, work address,

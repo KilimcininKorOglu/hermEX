@@ -13,7 +13,7 @@ import (
 
 var (
 	errNoCard  = errors.New("oxvcard: no BEGIN:VCARD block")
-	errVersion = errors.New("oxvcard: unsupported vCard version (need 3.0 or 4.0)")
+	errVersion = errors.New("oxvcard: unsupported vCard version (need 2.1, 3.0 or 4.0)")
 )
 
 // nameVCardUID preserves the vCard UID as a contact named property (a neutral
@@ -21,15 +21,16 @@ var (
 // round-trip a card's stable identity.
 var nameVCardUID = mapi.PropertyName{Kind: mapi.MnidString, GUID: mapi.PsPublicStrings, Name: "VCardUID"}
 
-// Import parses a vCard into an IPM.Contact message. It accepts vCard 3.0 and
-// 4.0 and rejects 2.1. Named properties (email slots, work address, file-as, IM
-// address, has-picture, the preserved UID) are resolved through opt.Resolver.
+// Import parses a vCard into an IPM.Contact message. It accepts vCard 2.1, which
+// a text/x-vCard mail part carries ([MS-OXCMAIL] 2.2.3.4.4.1), 3.0 and 4.0. Named
+// properties (email slots, work address, file-as, IM address, has-picture, the
+// preserved UID) are resolved through opt.Resolver.
 func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 	card, err := parseVCard(raw)
 	if err != nil {
 		return nil, err
 	}
-	if v := card.version(); v != "3.0" && v != "4.0" {
+	if v := card.version(); v != "2.1" && v != "3.0" && v != "4.0" {
 		return nil, errVersion
 	}
 	named, err := namedTags(opt, true)
