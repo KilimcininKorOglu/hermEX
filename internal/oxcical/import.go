@@ -64,6 +64,7 @@ func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 	}
 	setIf(p, mapi.PrSubject, vev.propText("SUMMARY"))
 	importCounterProposal(p, named, cal, vev)
+	importStamp(p, named, cal, vev)
 
 	// Recurring events round-trip verbatim; store only what listing needs.
 	if vev.prop("RRULE") != nil || vev.prop("RECURRENCE-ID") != nil {
@@ -95,6 +96,30 @@ func importIdentity(msg *oxcmail.Message, vev *icomp, class string) {
 	if !strings.HasPrefix(class, "IPM.Schedule.Meeting.Resp") {
 		importAttendees(msg, atts)
 	}
+}
+
+// importStamp stores DTSTAMP, when the object was sent ([MS-OXCICAL] DTSTAMP):
+// as PidLidAttendeeCriticalChange for a REPLY or COUNTER, which an attendee sent,
+// and as PidLidOwnerCriticalChange for anything the organizer sent.
+func importStamp(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag, cal, vev *icomp) {
+	l := vev.prop("DTSTAMP")
+	if l == nil {
+		return
+	}
+	t, _, ok := parseICalTime(l)
+	if !ok {
+		return
+	}
+	setNamedTime(p, named, stampName(cal.propText("METHOD")), t)
+}
+
+// stampName is the property DTSTAMP maps to under an iTIP METHOD.
+func stampName(method string) mapi.PropertyName {
+	switch strings.ToUpper(strings.TrimSpace(method)) {
+	case "REPLY", "COUNTER":
+		return mapi.NameAttendeeCriticalChange
+	}
+	return mapi.NameOwnerCriticalChange
 }
 
 // importedUID returns the event's stored UID, deriving a stable one when the body

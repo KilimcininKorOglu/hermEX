@@ -198,6 +198,12 @@ var (
 	// NameMeetingType (PidLidMeetingType, MS-OXOCAL 2.2.6.5) says what a meeting
 	// message is to its meeting; mtgOutOfDate marks one a newer message superseded.
 	NameMeetingType = PropertyName{Kind: MnidID, GUID: PsetidMeeting, LID: 0x0026} // PtLong
+	// NameOwnerCriticalChange (PidLidOwnerCriticalChange) is when the organizer sent
+	// a meeting request, and NameAttendeeCriticalChange (PidLidAttendeeCriticalChange)
+	// when a meeting-related object was sent: the DTSTAMP of a request and of a
+	// response respectively ([MS-OXCICAL] DTSTAMP).
+	NameOwnerCriticalChange    = PropertyName{Kind: MnidID, GUID: PsetidMeeting, LID: 0x001A} // PtSysTime
+	NameAttendeeCriticalChange = PropertyName{Kind: MnidID, GUID: PsetidMeeting, LID: 0x0001} // PtSysTime
 
 	// NameICalUID preserves the iCalendar UID as a named string (PS_PUBLIC_STRINGS),
 	// the v1 stand-in for the binary global object id, the stable identity that

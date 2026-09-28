@@ -11,7 +11,7 @@ import (
 // meeting request with every synthesized field, an all-day event, a zoned series
 // master, and a counter proposal.
 var managedFixtures = []string{
-	"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:m-1\r\nSUMMARY:Review\r\n" +
+	"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:m-1\r\nDTSTAMP:20260601T080000Z\r\nSUMMARY:Review\r\n" +
 		"DESCRIPTION:Agenda\r\nLOCATION:Room 1\r\nCLASS:PRIVATE\r\nPRIORITY:1\r\nSEQUENCE:2\r\n" +
 		"DTSTART;TZID=Europe/Berlin:20260612T090000\r\nDTEND;TZID=Europe/Berlin:20260612T100000\r\n" +
 		"ORGANIZER;CN=Alice:mailto:alice@example.test\r\nATTENDEE;CN=Bob:mailto:bob@example.test\r\n" +
@@ -21,7 +21,7 @@ var managedFixtures = []string{
 	"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:m-3\r\nSUMMARY:Standup\r\n" +
 		"DTSTART;TZID=Europe/Berlin:20260612T090000\r\nDTEND;TZID=Europe/Berlin:20260612T093000\r\n" +
 		"RRULE:FREQ=DAILY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
-	"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:COUNTER\r\nBEGIN:VEVENT\r\nUID:m-4\r\nSUMMARY:Review\r\n" +
+	"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:COUNTER\r\nBEGIN:VEVENT\r\nUID:m-4\r\nDTSTAMP:20260602T080000Z\r\nSUMMARY:Review\r\n" +
 		"DTSTART:20260612T110000Z\r\nDTEND:20260612T113000Z\r\nORGANIZER:mailto:alice@example.test\r\n" +
 		"ATTENDEE;PARTSTAT=TENTATIVE:mailto:bob@example.test\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
 }

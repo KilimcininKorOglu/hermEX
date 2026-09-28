@@ -468,7 +468,13 @@ func notifyOrganizer(st *objectstore.Store, accounts directory.Accounts, spool *
 	resp.Set(mapi.PrSentRepresentingName, "")
 	resp.Set(mapi.PrSenderName, "")
 	setResponseSubject(&resp, req.Props, response)
-	resp.Set(mapi.PrClientSubmitTime, mapi.UnixToNTTime(time.Now()))
+	now := mapi.UnixToNTTime(time.Now())
+	resp.Set(mapi.PrClientSubmitTime, now)
+	// The REPLY's DTSTAMP is when the attendee sent it ([MS-OXCICAL] DTSTAMP), which
+	// is what lets the organizer keep the newest of several answers (RFC 5546 2.1.5).
+	if err := setAttendeeCriticalChange(st, &resp, now); err != nil {
+		return err
+	}
 
 	respMsg := &oxcmail.Message{
 		Props: resp,
@@ -490,6 +496,18 @@ func notifyOrganizer(st *objectstore.Store, accounts directory.Accounts, spool *
 	}
 	_, err = mta.DeliverAndRelay(accounts, spool, who.actor, []string{organizer}, raw, time.Now())
 	return err
+}
+
+// setAttendeeCriticalChange records when an attendee sent a response.
+func setAttendeeCriticalChange(st *objectstore.Store, props *mapi.PropertyValues, at uint64) error {
+	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameAttendeeCriticalChange})
+	if err != nil {
+		return err
+	}
+	if ids[0] != 0 {
+		props.Set(mapi.MakeTag(ids[0], mapi.PtSysTime), at)
+	}
+	return nil
 }
 
 // meetingBusy maps a response to the free/busy the resulting appointment shows.

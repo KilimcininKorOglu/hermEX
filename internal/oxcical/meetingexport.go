@@ -154,7 +154,8 @@ type eventExport struct {
 	instance time.Time      // the RECURRENCE-ID of a message about one occurrence
 	series   *recurrence.AppointmentPattern
 	rrule    string
-	zoned    bool // times are written as wall clocks with a TZID and a VTIMEZONE
+	zoned    bool      // times are written as wall clocks with a TZID and a VTIMEZONE
+	dtstamp  time.Time // the DTSTAMP every VEVENT of the object carries
 	// exceptionBodies holds the body of each exception attachment of a series,
 	// keyed by the UTC start (Unix seconds) of the occurrence it replaces.
 	exceptionBodies map[int64]string
@@ -365,10 +366,25 @@ func (e *eventExport) render() []byte {
 			b.add(l)
 		}
 	}
+	e.dtstamp = e.stamp()
 	e.writeEvent(b)
 	e.writeOverrides(b)
 	b.add("END:VCALENDAR")
 	return b.buf.Bytes()
+}
+
+// stamp is the event's DTSTAMP ([MS-OXCICAL] DTSTAMP): when an attendee sent a
+// REPLY or COUNTER, PidLidAttendeeCriticalChange; otherwise when the organizer sent
+// it, PidLidOwnerCriticalChange, or the current time when that is not recorded.
+func (e *eventExport) stamp() time.Time {
+	method := e.method
+	if e.counter {
+		method = "COUNTER"
+	}
+	if t, ok := namedTime(e.p, e.named, stampName(method)); ok {
+		return t
+	}
+	return time.Now().UTC()
 }
 
 // writeEvent emits the object's own VEVENT.
@@ -387,8 +403,7 @@ func (e *eventExport) writeEvent(b *builder) {
 }
 
 // writeSchedule emits the event's stamp, text and time span. DTSTAMP is required
-// (RFC 5545 §3.8.7.2); the start is a stable, deterministic stamp for a synthesized
-// event. A counter proposal's span is the one it proposes.
+// (RFC 5545 §3.8.7.2). A counter proposal's span is the one it proposes.
 func (e *eventExport) writeSchedule(b *builder) {
 	startName, endName := mapi.NameAppointmentStartWhole, mapi.NameAppointmentEndWhole
 	if e.counter {
@@ -397,9 +412,7 @@ func (e *eventExport) writeSchedule(b *builder) {
 	start, hasStart := namedTime(e.p, e.named, startName)
 	end, hasEnd := namedTime(e.p, e.named, endName)
 
-	if hasStart {
-		b.add("DTSTAMP:" + formatICalUTC(start))
-	}
+	b.add("DTSTAMP:" + formatICalUTC(e.dtstamp))
 	addLine(b, "SUMMARY", getStr(e.p, mapi.PrSubject))
 	addLine(b, "DESCRIPTION", getStr(e.p, mapi.PrBody))
 	addLine(b, "LOCATION", namedStr(e.p, e.named, mapi.NameAppointmentLocation))
@@ -466,7 +479,7 @@ func (e *eventExport) writeOverride(b *builder, ex *recurrence.Exception) {
 	original := recurrence.WallClock(ex.OriginalStart, loc)
 	b.add("BEGIN:VEVENT")
 	b.line("UID", e.uid)
-	b.add("DTSTAMP:" + formatICalUTC(e.start))
+	b.add("DTSTAMP:" + formatICalUTC(e.dtstamp))
 	b.add(e.timeLine("RECURRENCE-ID", original))
 	addLine(b, "SUMMARY", overridden(ex, recurrence.OverrideSubject, ex.Subject, getStr(e.p, mapi.PrSubject)))
 	addLine(b, "DESCRIPTION", e.exceptionBodies[original.Unix()])
