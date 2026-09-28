@@ -67,28 +67,29 @@ func (s *Session) ropIdFromLongTermId(p *ext.Pull, out *ext.Push, handles []uint
 	return true
 }
 
-// replidToGUID maps a short-term replica id to its database GUID. hermEX is a
-// single-replica store: every object id is built with the object replid (1), and the
-// logon advertises its own replica id; both resolve to the mailbox's replica GUID,
-// the same GUID that stamps the store's source keys.
+// replidToGUID maps a short-term replica id to its database GUID. A mailbox knows
+// two: the object replid (1), which every object id is built with and which maps
+// to the store GUID that stamps its source keys, and the replid the logon reports
+// (privateReplID), which maps to the mapping signature the logon pairs it with in
+// LOGON_PMB_RESPONSE ([MS-OXCSTOR] 2.2.1.1.3).
 func replidToGUID(st *objectstore.Store, replid uint16) (mapi.GUID, error) {
 	switch replid {
-	case 1, privateReplID:
+	case 1:
 		return st.StoreGUID()
+	case privateReplID:
+		return st.MappingSignature()
 	default:
 		return mapi.GUID{}, fmt.Errorf("rop: unknown replica id %d", replid)
 	}
 }
 
-// guidToReplid maps a database GUID back to its short-term replica id, recognizing
-// only the mailbox's own replica, resolved to the object replid (1).
+// guidToReplid maps a database GUID back to its short-term replica id, the
+// inverse of replidToGUID.
 func guidToReplid(st *objectstore.Store, guid mapi.GUID) (uint16, bool) {
-	own, err := st.StoreGUID()
-	if err != nil {
-		return 0, false
-	}
-	if guid == own {
-		return 1, true
+	for _, replid := range []uint16{1, privateReplID} {
+		if g, err := replidToGUID(st, replid); err == nil && g == guid {
+			return replid, true
+		}
 	}
 	return 0, false
 }

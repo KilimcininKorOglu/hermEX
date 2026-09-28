@@ -81,3 +81,44 @@ func TestLongTermIdRoundTrip(t *testing.T) {
 		t.Errorf("round-trip id = %#x, want %#x", got, objEID)
 	}
 }
+
+// TestLogonReplicaGUIDResolves proves the replica GUID the logon pairs with its
+// ReplId in LOGON_PMB_RESPONSE ([MS-OXCSTOR] 2.2.1.1.3), the mapping signature,
+// resolves both ways: a long-term id carrying it maps to that ReplId, and an id
+// carrying that ReplId maps back to it.
+func TestLogonReplicaGUIDResolves(t *testing.T) {
+	dir := t.TempDir()
+	seedInboxMessage(t, dir, "LTID")
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	sig, err := sess.get(h[0]).store.MappingSignature()
+	if err != nil {
+		t.Fatal(err)
+	}
+	gc := mapi.ValueToGC(0x1234)
+
+	idResp, _ := sess.Dispatch(buildIdFromLongTermId(sig, gc), []uint32{h[0]})
+	p := ext.NewPull(idResp, ext.FlagUTF16)
+	mustU8(t, p, "RopId")
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("IdFromLongTermId(mapping signature) ec = %#x, want success", ec)
+	}
+	id, err := p.Uint64()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replid := mapi.EID(id).ReplID(); replid != privateReplID {
+		t.Errorf("replid = %d, want %d, the one the logon pairs with the signature", replid, privateReplID)
+	}
+
+	lt, _ := sess.Dispatch(buildLongTermIdFromId(id), []uint32{h[0]})
+	p = ext.NewPull(lt, ext.FlagUTF16)
+	mustU8(t, p, "RopId")
+	mustU8(t, p, "hindex")
+	mustU32(t, p, "ec")
+	if guid, _ := p.GUID(); guid != sig {
+		t.Errorf("LongTermIdFromId GUID = %v, want the mapping signature %v", guid, sig)
+	}
+}
