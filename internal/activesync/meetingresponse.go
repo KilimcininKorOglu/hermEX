@@ -179,6 +179,9 @@ func (s *Server) respondMeeting(st *objectstore.Store, sess *session, req *wbxml
 	if status != mrStatusOK {
 		return result(status, "")
 	}
+	if reply.Send {
+		reply.SentCopy = sentItemsCopy(st)
+	}
 	calendarID, err := meeting.RespondWith(st, s.accounts, s.Spool, sess.user, messageID, response, reply)
 	if err != nil {
 		return result(respondStatus(err), "")
@@ -188,6 +191,19 @@ func (s *Server) respondMeeting(st *objectstore.Store, sess *session, req *wbxml
 		cid = strconv.FormatInt(calendarID, 10)
 	}
 	return result(mrStatusOK, cid)
+}
+
+// sentItemsCopy files the response the server sent for the device in the user's
+// Sent Items. Through 14.1 the device sends the response itself with SendMail and
+// SaveInSentItems, which leaves the copy there; a response the server sends from
+// 16.0 is kept in the same place. It has already gone out, so a copy that cannot be
+// filed is recorded, not reported.
+func sentItemsCopy(st *objectstore.Store) func([]byte) {
+	return func(raw []byte) {
+		if _, err := st.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, time.Now(), objectstore.FlagSeen); err != nil {
+			st.LogSwallowedError("activesync.sent-copy", err)
+		}
+	}
 }
 
 // parseMeetingRequest reads one Request: the item it answers, the answer, and what

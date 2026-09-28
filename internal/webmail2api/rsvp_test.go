@@ -144,6 +144,18 @@ func TestRSVPRefusesAnUnknownResponse(t *testing.T) {
 	}
 }
 
+// TestRSVPKeepsTheSentResponse proves the response sent to the organizer is kept in
+// the caller's Sent Items, like everything else webmail sends.
+func TestRSVPKeepsTheSentResponse(t *testing.T) {
+	do, mbox, id := rsvpHarness(t)
+	if rec := do(`{"id":"` + id + `","response":"accept"}`); rec.Code != http.StatusOK {
+		t.Fatalf("accept = %d: %s", rec.Code, rec.Body.String())
+	}
+	if n := sentItems(t, mbox); n != 1 {
+		t.Errorf("the caller's Sent Items holds %d responses, want 1", n)
+	}
+}
+
 // TestRSVPRefusesAMeetingResponse proves a meeting response is not answered as an
 // invitation. It carries a calendar part like one, and answering it used to file
 // the response on the calendar as a meeting received from its sender.

@@ -210,8 +210,11 @@ func (s *Server) handleRSVP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// This is the reader's own answer, so it also clears the request mail when the
-	// mailbox asked for that.
-	if _, err := meeting.RespondOnBehalf(st, s.accounts, s.spool, attendee, actor, info.ID, response, true); err != nil {
+	// mailbox asked for that. The response sent to the organizer is kept in the
+	// caller's own Sent Items, like everything else sent from here.
+	c, _ := s.session(r)
+	reply := meeting.Reply{Send: true, SentCopy: func(raw []byte) { s.fileCallerSentCopy(mb, c, raw, "meeting-response") }}
+	if _, err := meeting.RespondOnBehalfWith(st, s.accounts, s.spool, attendee, actor, info.ID, response, reply); err != nil {
 		rsvpFailure(w, err, mb.user)
 		return
 	}

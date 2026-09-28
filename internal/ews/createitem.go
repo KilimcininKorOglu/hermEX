@@ -115,7 +115,7 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *ses
 	save := disp == "SaveOnly" || disp == "SendAndSaveCopy"
 
 	msgs := s.createMessages(st, sess, req, disp, send, save)
-	msgs = append(msgs, s.createMeetingResponses(sess, req, send)...)
+	msgs = append(msgs, s.createMeetingResponses(st, sess, req, send, save)...)
 	msgs = append(msgs, s.createReceiptSuppressions(sess, req)...)
 	writeResponse(w, createItemResponse{Messages: msgs})
 }
@@ -154,8 +154,14 @@ func (s *Server) createMessages(st *objectstore.Store, sess *session, req create
 
 // createMeetingResponses answers the meeting responses in the request ([MS-OXWSMTGS]): an
 // Accept/Tentative/Decline updates the attendee's calendar and the referenced request, and
-// (when the disposition sends) notifies the organizer with an iTIP REPLY.
-func (s *Server) createMeetingResponses(sess *session, req createItemRequest, send bool) []itemResponseMessage {
+// (when the disposition sends) notifies the organizer with an iTIP REPLY. A
+// SendAndSaveCopy response is kept in the caller's own Sent Items, st, as any
+// other message sent with that disposition is ([MS-OXWSCDATA] MessageDispositionType).
+func (s *Server) createMeetingResponses(st *objectstore.Store, sess *session, req createItemRequest, send, save bool) []itemResponseMessage {
+	var sentCopy func([]byte)
+	if send && save {
+		sentCopy = sentItemsCopy(st)
+	}
 	var msgs []itemResponseMessage
 	for _, r := range []struct {
 		items    []meetingResponse
@@ -166,7 +172,7 @@ func (s *Server) createMeetingResponses(sess *session, req createItemRequest, se
 		{req.Items.Decline, meeting.ResponseDeclined},
 	} {
 		for _, mr := range r.items {
-			msgs = append(msgs, s.meetingRespond(sess, mr, r.response, send))
+			msgs = append(msgs, s.meetingRespond(sess, mr, r.response, send, sentCopy))
 		}
 	}
 	return msgs

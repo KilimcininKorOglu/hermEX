@@ -144,6 +144,11 @@ type Reply struct {
 	// Instance is the original start of the one occurrence of a series the
 	// response is for. The zero time answers the whole meeting.
 	Instance time.Time
+	// SentCopy receives the response as it went out, for the caller to file in
+	// its own Sent Items the way every send path keeps what it sent. It is not
+	// called when nothing was sent, nor when the mailbox the response went out in
+	// the name of filed the only copy. Nil keeps no copy.
+	SentCopy func(raw []byte)
 }
 
 // RespondWith is Respond with the message the attendee sends the organizer.
@@ -567,8 +572,21 @@ func notifyOrganizer(st *objectstore.Store, accounts directory.Accounts, spool *
 	if err != nil {
 		return err
 	}
-	_, err = mta.DeliverAndRelay(accounts, spool, who.actor, []string{organizer}, raw, time.Now())
-	return err
+	return sendResponse(accounts, spool, who.actor, organizer, raw, reply.SentCopy)
+}
+
+// sendResponse routes a response to the organizer from the actor and hands the
+// caller the copy it keeps, unless the mailbox the response was sent in the name of
+// filed the only one.
+func sendResponse(accounts directory.Accounts, spool *relay.Spool, actor, organizer string, raw []byte, sentCopy func([]byte)) error {
+	_, keepOwnCopy, err := mta.SendAndRelay(accounts, spool, actor, []string{organizer}, raw, time.Now())
+	if err != nil {
+		return err
+	}
+	if keepOwnCopy && sentCopy != nil {
+		sentCopy(raw)
+	}
+	return nil
 }
 
 // bodyTags are every representation of a message body.

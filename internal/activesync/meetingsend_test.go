@@ -133,18 +133,24 @@ func acceptRequest(t *testing.T, ts *httptest.Server, version string, uid uint32
 // organizerInbox returns the raw messages in the organizer's Inbox.
 func organizerInbox(t *testing.T, dir string) [][]byte {
 	t.Helper()
+	return folderMessages(t, dir, int64(mapi.PrivateFIDInbox))
+}
+
+// folderMessages returns the raw messages in one folder of a mailbox.
+func folderMessages(t *testing.T, dir string, fid int64) [][]byte {
+	t.Helper()
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
+	msgs, err := st.ListMessages(fid)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var out [][]byte
 	for _, m := range msgs {
-		raw, err := st.GetMessageRaw(int64(mapi.PrivateFIDInbox), m.UID)
+		raw, err := st.GetMessageRaw(fid, m.UID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -155,7 +161,9 @@ func organizerInbox(t *testing.T, dir string) [][]byte {
 
 // TestMeetingResponseSendRule proves who sends the organizer the answer ([MS-ASCMD]
 // MeetingResponse): through 14.1 the client does it with SendMail, so the server
-// sends nothing; from 16.0 the server sends it only when SendResponse is present.
+// sends nothing; from 16.0 the server sends it only when SendResponse is present,
+// and keeps the copy in the user's Sent Items that the device's SendMail with
+// SaveInSentItems would have left there.
 func TestMeetingResponseSendRule(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -177,6 +185,9 @@ func TestMeetingResponseSendRule(t *testing.T) {
 			acceptRequest(t, ts, tc.version, uid, extra...)
 			if got := len(organizerInbox(t, organizer)); got != tc.want {
 				t.Errorf("organizer received %d responses, want %d", got, tc.want)
+			}
+			if got := len(folderMessages(t, attendee, int64(mapi.PrivateFIDSentItems))); got != tc.want {
+				t.Errorf("the attendee's Sent Items holds %d responses, want %d", got, tc.want)
 			}
 		})
 	}

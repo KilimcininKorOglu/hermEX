@@ -3,9 +3,11 @@ package ews
 import (
 	"errors"
 	"strings"
+	"time"
 
 	"hermex/internal/mapi"
 	"hermex/internal/meeting"
+	"hermex/internal/objectstore"
 	"hermex/internal/oxews"
 )
 
@@ -58,8 +60,9 @@ func (mr meetingResponse) proposal() (*meeting.Proposal, string) {
 
 // meetingRespond records an attendee's response to the referenced meeting request
 // through the shared meeting workflow (stamp, file the appointment, notify the
-// organizer) and reports success.
-func (s *Server) meetingRespond(sess *session, mr meetingResponse, response int32, send bool) itemResponseMessage {
+// organizer) and reports success. sentCopy keeps the response that went out, nil
+// when the disposition keeps none.
+func (s *Server) meetingRespond(sess *session, mr meetingResponse, response int32, send bool, sentCopy func([]byte)) itemResponseMessage {
 	id, err := oxews.DecodeItemID(mr.ReferenceItemID.ID)
 	if err != nil {
 		return itemError("ErrorInvalidRequest")
@@ -68,6 +71,7 @@ func (s *Server) meetingRespond(sess *session, mr meetingResponse, response int3
 	if code != "" {
 		return itemError(code)
 	}
+	reply.SentCopy = sentCopy
 	// The request id self-encodes its mailbox; responding to a delegated meeting is
 	// gated on edit access to its folder. The responder is the mailbox owner
 	// (respond-on-behalf, the organizer is notified as the principal), so for the
@@ -86,6 +90,16 @@ func (s *Server) meetingRespond(sess *session, mr meetingResponse, response int3
 		return itemError(meetingErrorCode(err, response))
 	}
 	return meetingResponseOK()
+}
+
+// sentItemsCopy files a sent meeting response in st's Sent Items. The response has
+// already gone out, so a copy that cannot be filed is recorded, not reported.
+func sentItemsCopy(st *objectstore.Store) func([]byte) {
+	return func(raw []byte) {
+		if _, err := st.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, time.Now(), objectstore.FlagSeen); err != nil {
+			st.LogSwallowedError("ews.file_sent_copy", err)
+		}
+	}
 }
 
 // meetingErrorCode is the EWS response code for a response the meeting workflow

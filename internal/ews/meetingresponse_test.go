@@ -255,6 +255,44 @@ func seedExternalMeetingRequest(t *testing.T, dir string) int64 {
 	return reqID
 }
 
+// TestMeetingResponseKeepsTheSentCopy proves a response sent with SendAndSaveCopy
+// is kept in the caller's Sent Items and one sent with SendOnly is not, as for any
+// other item sent with those dispositions ([MS-OXWSCDATA] MessageDispositionType).
+func TestMeetingResponseKeepsTheSentCopy(t *testing.T) {
+	for _, tc := range []struct {
+		disp string
+		want int
+	}{{"SendAndSaveCopy", 1}, {"SendOnly", 0}} {
+		t.Run(tc.disp, func(t *testing.T) {
+			dir, itemID := seedMeetingRequest(t)
+			organizer := t.TempDir()
+			org, err := objectstore.Open(organizer)
+			mustNoErr(t, "open the organizer's store", err)
+			org.Close()
+			accs := directory.StaticAccounts{
+				testUser:                {Password: testPass, MailboxPath: dir},
+				"organizer@hermex.test": {MailboxPath: organizer},
+			}
+			ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
+			t.Cleanup(ts.Close)
+
+			_, out := soapPost(t, ts, meetingResponseReqDisp("AcceptItem", itemID, tc.disp), true)
+			wantContains(t, "the AcceptItem response class", out, `ResponseClass="Success"`)
+			st, err := objectstore.Open(dir)
+			mustNoErr(t, "open the store", err)
+			defer st.Close()
+			sent, err := st.ListMessages(int64(mapi.PrivateFIDSentItems))
+			mustNoErr(t, "list Sent Items", err)
+			wantEq(t, "the responses kept in Sent Items", len(sent), tc.want)
+			for _, m := range sent {
+				raw, err := st.GetMessageRaw(int64(mapi.PrivateFIDSentItems), m.UID)
+				mustNoErr(t, "read the kept response", err)
+				wantContains(t, "the kept response", string(raw), "Subject: Accepted: Quarterly Review")
+			}
+		})
+	}
+}
+
 // TestMeetingResponseRefusesWhatIsNotAnInvitation proves only a meeting request, or
 // a meeting the mailbox was invited to, is answered, and each refusal carries the
 // code Exchange gives it ([MS-OXWSCDATA] ResponseCodeType). A meeting response
