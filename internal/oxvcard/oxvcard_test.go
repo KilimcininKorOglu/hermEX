@@ -189,6 +189,23 @@ func TestImportVersion21(t *testing.T) {
 	}
 }
 
+// TestIMAddressRoundTripsVersion3 proves the instant-messaging address a vCard 3.0
+// carries in X-MS-IMADDRESS ([MS-OXVCARD] 2.1.3.9.4), which Export writes, is read
+// back.
+func TestIMAddressRoundTripsVersion3(t *testing.T) {
+	r := newResolver()
+	opt := Options{Resolver: r.resolve, Version3: true}
+	card := "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Chat;Carol;;;\r\nFN:Carol Chat\r\n" +
+		"X-MS-IMADDRESS:carol@im.example.test\r\nEND:VCARD\r\n"
+	m, err := Import([]byte(card), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := namedVal(t, r, m, mapi.NameInstantMessagingAddress); got != "carol@im.example.test" {
+		t.Errorf("IM address = %q, want carol@im.example.test", got)
+	}
+}
+
 // TestExportShape checks the emitted vCard opens and closes correctly and is
 // version 4.0.
 func TestExportShape(t *testing.T) {

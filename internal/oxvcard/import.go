@@ -51,9 +51,7 @@ func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 	importContactPoints(p, card)
 	importAddresses(p, card, named)
 	importEmails(p, card, named)
-	if l := card.get("IMPP"); l != nil {
-		setNamed(p, named, mapi.NameInstantMessagingAddress, l.text())
-	}
+	importIMAddress(p, card, named)
 	importKeywords(p, card, opt)
 	if uidTag != 0 {
 		p.Set(uidTag, importedUID(card))
@@ -115,6 +113,17 @@ func importContactPoints(p *mapi.PropertyValues, card *vcard) {
 	for _, l := range card.all("TEL") {
 		if tag := telTag(l.types()); tag != 0 {
 			setIf(p, tag, l.text())
+		}
+	}
+}
+
+// importIMAddress stores the instant-messaging address: IMPP in 4.0, and in 3.0,
+// which has no IM property, X-MS-IMADDRESS ([MS-OXVCARD] 2.1.3.9.4).
+func importIMAddress(p *mapi.PropertyValues, card *vcard, named map[mapi.PropertyName]mapi.PropTag) {
+	for _, name := range []string{"IMPP", "X-MS-IMADDRESS"} {
+		if l := card.get(name); l != nil {
+			setNamed(p, named, mapi.NameInstantMessagingAddress, l.text())
+			return
 		}
 	}
 }
