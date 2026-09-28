@@ -155,11 +155,22 @@ func exportIdentity(b *builder, msg *oxcmail.Message, partstat string) {
 	}
 	addParams(b, "ORGANIZER", mailtoParams(p, mapi.PrSentRepresentingSmtpAddress, mapi.PrSentRepresentingName, ""))
 	for i := range msg.Recipients {
-		if params := mailtoParams(&msg.Recipients[i], mapi.PrSmtpAddress, mapi.PrDisplayName, ""); params != "" {
-			b.add("ATTENDEE" + attendeeRole(&msg.Recipients[i]) + params)
+		r := &msg.Recipients[i]
+		track, _ := propInt32(r, mapi.PrRecipientTrackStatus)
+		if params := mailtoParams(r, mapi.PrSmtpAddress, mapi.PrDisplayName, trackStatusPartStat[track]); params != "" {
+			b.add("ATTENDEE" + attendeeRole(r) + params)
 		}
 	}
 }
+
+// trackStatusPartStat maps the response recorded for an attendee
+// (PidTagRecipientTrackStatus) to the PARTSTAT the attendee is exported with; a
+// status with no entry exports none ([MS-OXCICAL] 2.1.3.1.1.20.2.3).
+var trackStatusPartStat = map[int32]string{2: "TENTATIVE", 3: "ACCEPTED", 4: "DECLINED"}
+
+// partStatTrackStatus is the inverse of trackStatusPartStat, the import direction
+// ([MS-OXCICAL] 2.1.3.1.1.20.2): any other PARTSTAT imports as 0.
+var partStatTrackStatus = map[string]int32{"TENTATIVE": 2, "ACCEPTED": 3, "DECLINED": 4}
 
 // attendeeRole renders the ROLE parameter of an exported attendee from its
 // recipient type ([MS-OXCICAL] 2.1.3.1.1.20.2.4): OPT-PARTICIPANT for Cc,

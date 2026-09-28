@@ -371,7 +371,8 @@ func mailtoAddr(v string) string {
 }
 
 // importAttendees appends each ATTENDEE line as a primary (To) recipient bag (its
-// SMTP address, address type, and optional CN as the display name), so a meeting's
+// SMTP address, address type, optional CN as the display name, and the response
+// its PARTSTAT records as PidTagRecipientTrackStatus), so a meeting's
 // invitee set persists as MAPI recipients (MS-OXOCAL §2.2.4.10), visible to every
 // protocol and to implicit scheduling. The organizer is recorded separately as the
 // representing identity.
@@ -389,6 +390,9 @@ func importAttendees(msg *oxcmail.Message, atts []iline) {
 		}
 		if cn := l.param("CN"); cn != "" {
 			rcpt = append(rcpt, mapi.TaggedPropVal{Tag: mapi.PrDisplayName, Value: cn})
+		}
+		if ps := l.param("PARTSTAT"); ps != "" {
+			rcpt = append(rcpt, mapi.TaggedPropVal{Tag: mapi.PrRecipientTrackStatus, Value: partStatTrackStatus[strings.ToUpper(ps)]})
 		}
 		msg.Recipients = append(msg.Recipients, rcpt)
 	}
