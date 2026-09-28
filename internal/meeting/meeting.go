@@ -99,6 +99,9 @@ type Reply struct {
 	HTML bool
 	// Proposal is a new time the attendee asks for, or nil.
 	Proposal *Proposal
+	// Instance is the original start of the one occurrence of a series the
+	// response is for. The zero time answers the whole meeting.
+	Instance time.Time
 }
 
 // RespondWith is Respond with the message the attendee sends the organizer.
@@ -133,6 +136,9 @@ func respond(st *objectstore.Store, accounts directory.Accounts, spool *relay.Sp
 	req, err := st.OpenMessage(messageID)
 	if err != nil {
 		return 0, ErrRequestNotFound
+	}
+	if !reply.Instance.IsZero() {
+		return respondToInstance(st, accounts, spool, who, req, response, reply)
 	}
 	tags, err := ResolveTags(st)
 	if err != nil {

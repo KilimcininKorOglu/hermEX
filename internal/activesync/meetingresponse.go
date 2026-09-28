@@ -1,9 +1,11 @@
 package activesync
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"hermex/internal/mapi"
 	"hermex/internal/meeting"
@@ -11,11 +13,14 @@ import (
 	"hermex/internal/wbxml"
 )
 
-// MeetingResponse Status codes (MS-ASCMD 2.2.3.144.4).
+// MeetingResponse Status codes ([MS-ASCMD] Status (MeetingResponse), and the
+// common codes of Status for InstanceId).
 const (
-	mrStatusOK      = 1 // the response was processed
-	mrStatusInvalid = 2 // an invalid meeting request
-	mrStatusError   = 3 // the server failed to process the response
+	mrStatusOK              = 1   // the response was processed
+	mrStatusInvalid         = 2   // an invalid meeting request
+	mrStatusError           = 3   // the server failed to process the response
+	mrStatusInvalidInstance = 104 // an InstanceId that is not a date-time
+	mrStatusNotRecurring    = 146 // an InstanceId on a meeting that is not recurring
 )
 
 // userResponse maps an EAS UserResponse (1 accept, 2 tentative, 3 decline) to the
@@ -157,38 +162,81 @@ const appointmentReceived int32 = 0x2
 
 // respondMeeting processes one MeetingResponse Request and builds its Result.
 func (s *Server) respondMeeting(st *objectstore.Store, sess *session, req *wbxml.Node) *wbxml.Node {
-	requestID := req.ChildText(wbxml.MRRequestID)
 	result := func(status int, calendarID string) *wbxml.Node {
 		n := wbxml.Elem(wbxml.MRResult,
-			wbxml.Str(wbxml.MRRequestID, requestID),
+			wbxml.Str(wbxml.MRRequestID, req.ChildText(wbxml.MRRequestID)),
 			wbxml.Str(wbxml.MRStatus, strconv.Itoa(status)))
 		if calendarID != "" {
 			n.Children = append(n.Children, wbxml.Str(wbxml.MRCalendarID, calendarID))
 		}
+		if id := req.ChildText(wbxml.MRInstanceID); id != "" {
+			n.Children = append(n.Children, wbxml.Str(wbxml.MRInstanceID, id))
+		}
 		return n
 	}
 
-	ur, _ := strconv.Atoi(req.ChildText(wbxml.MRUserResponse))
-	response, ok := userResponse(ur)
-	if !ok {
-		return result(mrStatusInvalid, "")
+	messageID, response, reply, status := parseMeetingRequest(st, sess.protocol, req)
+	if status != mrStatusOK {
+		return result(status, "")
 	}
-	messageID, ok := requestedItem(st, req)
-	if !ok {
-		return result(mrStatusInvalid, "")
-	}
-	reply, ok := replyOf(sess.protocol, req)
-	if !ok {
-		return result(mrStatusInvalid, "")
-	}
-
 	calendarID, err := meeting.RespondWith(st, s.accounts, s.Spool, sess.user, messageID, response, reply)
 	if err != nil {
-		return result(mrStatusError, "")
+		return result(respondStatus(err), "")
 	}
 	cid := ""
 	if calendarID != 0 {
 		cid = strconv.FormatInt(calendarID, 10)
 	}
 	return result(mrStatusOK, cid)
+}
+
+// parseMeetingRequest reads one Request: the item it answers, the answer, and what
+// the organizer receives. status is mrStatusOK when the Request is usable.
+func parseMeetingRequest(st *objectstore.Store, protocol string, req *wbxml.Node) (messageID int64, response int32, reply meeting.Reply, status int) {
+	ur, _ := strconv.Atoi(req.ChildText(wbxml.MRUserResponse))
+	response, ok := userResponse(ur)
+	if !ok {
+		return 0, 0, reply, mrStatusInvalid
+	}
+	messageID, ok = requestedItem(st, req)
+	if !ok {
+		return 0, 0, reply, mrStatusInvalid
+	}
+	reply, ok = replyOf(protocol, req)
+	if !ok {
+		return 0, 0, reply, mrStatusInvalid
+	}
+	reply.Instance, status = instanceOf(protocol, req)
+	return messageID, response, reply, status
+}
+
+// instanceOf reads the InstanceId naming the one occurrence of a recurring meeting
+// a Request answers, the zero time when it answers the whole meeting ([MS-ASCMD]
+// InstanceId). It is a 14.1 element that names an occurrence of a Calendar item: on
+// 14.0, or beside a meeting request mail, the Request is invalid, and a value that
+// is not a date-time is Status 104.
+func instanceOf(protocol string, req *wbxml.Node) (time.Time, int) {
+	text := req.ChildText(wbxml.MRInstanceID)
+	if text == "" {
+		return time.Time{}, mrStatusOK
+	}
+	if protocol == "14.0" || req.ChildText(wbxml.MRFolderID) != strconv.FormatInt(int64(mapi.PrivateFIDCalendar), 10) {
+		return time.Time{}, mrStatusInvalid
+	}
+	at, err := time.Parse(time.RFC3339, text)
+	if err != nil {
+		return time.Time{}, mrStatusInvalidInstance
+	}
+	return at.UTC(), mrStatusOK
+}
+
+// respondStatus maps a failed response to its MeetingResponse Status.
+func respondStatus(err error) int {
+	switch {
+	case errors.Is(err, meeting.ErrNotRecurring):
+		return mrStatusNotRecurring
+	case errors.Is(err, meeting.ErrNoInstance), errors.Is(err, meeting.ErrRequestNotFound):
+		return mrStatusInvalid
+	}
+	return mrStatusError
 }
