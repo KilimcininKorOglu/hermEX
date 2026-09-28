@@ -810,7 +810,7 @@ func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from strin
 // it is true on every other send, and on every failure, so a failure cannot leave the
 // message filed nowhere.
 func SendAndRelay(accounts directory.Accounts, spool *relay.Spool, from string, recipients []string, raw []byte, received time.Time) (unresolved []string, keepOwnCopy bool, err error) {
-	unresolved, localRaw, err := deliverAndRelay(accounts, spool, from, recipients, raw, received)
+	unresolved, localRaw, err := deliverAndRelay(accounts, spool, from, from, recipients, raw, received)
 	if err != nil {
 		return unresolved, true, err
 	}
@@ -822,10 +822,20 @@ func SendAndRelay(accounts directory.Accounts, spool *relay.Spool, from string, 
 	return unresolved, !only, nil
 }
 
+// SendReport is DeliverAndRelay for a report an account sends, such as a read
+// receipt: every check and limit applies to account, while the message travels
+// with the null reverse-path its kind requires (RFC 8098 section 3), so a failed
+// delivery is never reported back.
+func SendReport(accounts directory.Accounts, spool *relay.Spool, account string, recipients []string, raw []byte, received time.Time) (unresolved []string, err error) {
+	unresolved, _, err = deliverAndRelay(accounts, spool, account, "", recipients, raw, received)
+	return unresolved, err
+}
+
 // deliverAndRelay is the body of DeliverAndRelay up to the represented mailbox's
-// copy. localRaw is the copy local recipients received, which is what that copy
-// files.
-func deliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from string, recipients []string, raw []byte, received time.Time) (unresolved []string, localRaw []byte, err error) {
+// copy. from is the account the checks and limits apply to and envelope the
+// reverse-path the message travels with. localRaw is the copy local recipients
+// received, which is what that copy files.
+func deliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from, envelope string, recipients []string, raw []byte, received time.Time) (unresolved []string, localRaw []byte, err error) {
 	// Antivirus on the authenticated submission path (webmail, EWS, ROP, ActiveSync,
 	// SMTP MSA via the send-later worker, and the local->local leg). A hit is
 	// quarantined and the sender plus admins notified, and the send is blocked so no
@@ -863,12 +873,12 @@ func deliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from strin
 	leaves, dests := applyForwards(accounts, leaves)
 	leaves = append(leaves, dests...)
 	localRaw, relayRaw := outgoingCopies(accounts, from, raw)
-	unresolved, err = Deliver(accounts, from, leaves, localRaw, received)
+	unresolved, err = Deliver(accounts, envelope, leaves, localRaw, received)
 	if err != nil {
 		return append(unresolved, refused...), nil, err
 	}
 	if spool != nil && len(unresolved) > 0 {
-		stuck, e := relayUnresolved(accounts, spool, from, unresolved, relayRaw, received)
+		stuck, e := relayUnresolved(accounts, spool, envelope, unresolved, relayRaw, received)
 		if e != nil {
 			return append(stuck, refused...), nil, e
 		}

@@ -54,7 +54,7 @@ func SendReadReceipt(accounts directory.Accounts, spool *relay.Spool, info ReadR
 	if err != nil {
 		return err
 	}
-	if _, err := DeliverAndRelay(accounts, spool, info.Reader, []string{info.To}, raw, when); err != nil {
+	if _, err := SendReport(accounts, spool, info.Reader, []string{info.To}, raw, when); err != nil {
 		return err
 	}
 	return nil

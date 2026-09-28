@@ -540,7 +540,9 @@ func (d *mtaDaemon) relayLoop() lifecycle.Component {
 			// requesting FAILURE) means the sender wants no failure notice, so
 			// suppress the bounce rather than emit backscatter. Reported as success:
 			// nothing was lost, the sender asked not to be told.
-			if !mta.NotifyFailureWanted(it.Notify) {
+			// A null reverse-path (a read receipt, a bounce) has nobody to tell, and a
+			// notice about it must never be sent (RFC 5321 section 4.5.5).
+			if !mta.NotifyFailureWanted(it.Notify) || it.From == "" {
 				return nil
 			}
 			report, err := mta.Bounce(cfg.Hostname, it.From, it.Recipient, cause.Error(), time.Now())

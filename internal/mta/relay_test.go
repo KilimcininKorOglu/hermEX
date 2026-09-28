@@ -3,6 +3,7 @@ package mta
 import (
 	"bytes"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -104,6 +105,29 @@ func TestDeliverAndRelayRoutesExternal(t *testing.T) {
 	un2, err := DeliverAndRelay(accounts, nil, "alice@local", []string{"bob@remote"}, raw, time.Now())
 	mustNoErr(t, "deliver with no spool", err)
 	wantOnly(t, "the unresolved recipients with no spool", un2, "bob@remote")
+}
+
+// TestReadReceiptTravelsWithTheNullSender proves a read receipt leaves with the
+// null reverse-path RFC 8098 section 3 requires, relayed and filed locally alike.
+func TestReadReceiptTravelsWithTheNullSender(t *testing.T) {
+	mbox := filepath.Join(t.TempDir(), "alice")
+	accounts := directory.StaticAccounts{"alice@local": {MailboxPath: mbox}, "reader@local": {MailboxPath: t.TempDir()}}
+	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
+	mustNoErr(t, "open the relay spool", err)
+	defer sp.Close()
+
+	mustNoErr(t, "send the receipt", SendReadReceipt(accounts, sp, ReadReceiptInfo{Reader: "reader@local", To: "bob@remote"}, time.Now()))
+	due, err := sp.Claim(time.Now(), 10)
+	mustNoErr(t, "claim the spool", err)
+	if len(due) != 1 {
+		t.Fatalf("spool = %v, want the relayed receipt", due)
+	}
+	wantEq(t, "the relayed reverse-path", due[0].From, "")
+
+	got := filedReturnPaths(t, func(a directory.Accounts) ([]string, error) {
+		return nil, SendReadReceipt(a, nil, ReadReceiptInfo{Reader: "reader@local", To: "alice@local"}, time.Now())
+	})
+	wantEq(t, "the filed Return-Path", strings.Join(got, ","), "<>")
 }
 
 // wantOnly checks a recipient list holds exactly the one address wanted.

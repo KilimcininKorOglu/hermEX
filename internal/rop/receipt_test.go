@@ -126,8 +126,8 @@ func TestReadReceiptGeneratedOnFirstRead(t *testing.T) {
 }
 
 // TestReadReceiptRelaysToExternalSender proves a read receipt for a message from a
-// sender in a foreign domain is queued for relay from the reader's address, not
-// dropped because the sender has no mailbox here.
+// sender in a foreign domain is queued for relay with the null reverse-path RFC
+// 8098 requires, not dropped because the sender has no mailbox here.
 func TestReadReceiptRelaysToExternalSender(t *testing.T) {
 	readerDir := t.TempDir()
 	accounts := directory.StaticAccounts{"reader@hermex.test": {MailboxPath: readerDir}}
@@ -151,8 +151,8 @@ func TestReadReceiptRelaysToExternalSender(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(due) != 1 || due[0].Recipient != "carol@external.test" || due[0].From != "reader@hermex.test" {
-		t.Fatalf("relay spool = %v, want one receipt from reader@hermex.test to carol@external.test", due)
+	if len(due) != 1 || due[0].Recipient != "carol@external.test" || due[0].From != "" {
+		t.Fatalf("relay spool = %v, want one receipt with a null reverse-path to carol@external.test", due)
 	}
 	if receiptRequested(t, readerDir, msgID) {
 		t.Errorf("PR_READ_RECEIPT_REQUESTED still set after the relayed receipt; it would re-fire")
