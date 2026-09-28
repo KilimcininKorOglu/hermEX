@@ -83,12 +83,32 @@ func (s *Server) meetingRespond(sess *session, mr meetingResponse, response int3
 		return itemError(code)
 	}
 	if _, err := meeting.RespondOnBehalfWith(st, s.accounts, s.Spool, responder, actor, id.MessageID, response, reply); err != nil {
-		if errors.Is(err, meeting.ErrRequestNotFound) {
-			return itemError("ErrorItemNotFound")
-		}
-		return itemError("ErrorInternalServerError")
+		return itemError(meetingErrorCode(err, response))
 	}
 	return meetingResponseOK()
+}
+
+// meetingErrorCode is the EWS response code for a response the meeting workflow
+// refused: the item is gone, it is not a meeting request, or it is a calendar item
+// its owner organizes or its organizer canceled, each of which Exchange reports
+// under a code naming the response ([MS-OXWSCDATA] ResponseCodeType).
+func meetingErrorCode(err error, response int32) string {
+	verb := map[int32]string{
+		meeting.ResponseAccepted:  "Accept",
+		meeting.ResponseTentative: "Tentative",
+		meeting.ResponseDeclined:  "Decline",
+	}[response]
+	switch {
+	case errors.Is(err, meeting.ErrRequestNotFound):
+		return "ErrorItemNotFound"
+	case errors.Is(err, meeting.ErrNotARequest):
+		return "ErrorInvalidReferenceItem"
+	case errors.Is(err, meeting.ErrOrganizer):
+		return "ErrorCalendarIsOrganizerFor" + verb
+	case errors.Is(err, meeting.ErrCanceled):
+		return "ErrorCalendarIsCancelledFor" + verb
+	}
+	return "ErrorInternalServerError"
 }
 
 // meetingResponder names who a meeting response is from and who submits it. The

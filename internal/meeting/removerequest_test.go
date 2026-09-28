@@ -196,7 +196,9 @@ func TestRespondSurvivesAFailedCleanup(t *testing.T) {
 }
 
 // seedAppointmentFor stores a Calendar appointment carrying the meeting's UID, the
-// object a calendar-view response answers.
+// object a calendar-view response answers. It is marked a meeting received as an
+// invitation, as the copy filing a request leaves is, because only that is a
+// meeting an attendee answers.
 func seedAppointmentFor(t *testing.T, st *objectstore.Store, tags Tags, uid string) int64 {
 	t.Helper()
 	raw := []byte("From: bob@hermex.test\r\nTo: alice@hermex.test\r\nSubject: Sync\r\n" +
@@ -208,6 +210,7 @@ func seedAppointmentFor(t *testing.T, st *objectstore.Store, tags Tags, uid stri
 	if err := st.ModifyMessageProperties(info.ID, mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: "IPM.Appointment"},
 		{Tag: tags.UID, Value: uid},
+		{Tag: tags.State, Value: asfMeeting | asfReceived},
 	}); err != nil {
 		t.Fatal(err)
 	}

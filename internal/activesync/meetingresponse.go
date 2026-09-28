@@ -230,12 +230,16 @@ func instanceOf(protocol string, req *wbxml.Node) (time.Time, int) {
 	return at.UTC(), mrStatusOK
 }
 
-// respondStatus maps a failed response to its MeetingResponse Status.
+// respondStatus maps a failed response to its MeetingResponse Status. An item that
+// is not a meeting request, and an appointment the user organizes, are Status 2
+// ([MS-ASCMD] Status (MeetingResponse)), and so is a canceled meeting, which has no
+// request left to answer.
 func respondStatus(err error) int {
 	switch {
 	case errors.Is(err, meeting.ErrNotRecurring):
 		return mrStatusNotRecurring
-	case errors.Is(err, meeting.ErrNoInstance), errors.Is(err, meeting.ErrRequestNotFound):
+	case errors.Is(err, meeting.ErrNoInstance), errors.Is(err, meeting.ErrRequestNotFound),
+		errors.Is(err, meeting.ErrNotARequest), errors.Is(err, meeting.ErrOrganizer), errors.Is(err, meeting.ErrCanceled):
 		return mrStatusInvalid
 	}
 	return mrStatusError

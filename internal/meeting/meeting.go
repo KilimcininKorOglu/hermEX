@@ -48,6 +48,48 @@ const (
 // opened, so a protocol handler can map it to its own not-found status.
 var ErrRequestNotFound = errors.New("meeting: request not found")
 
+// Errors for a message an attendee cannot answer. A meeting response, a counter
+// proposal and a cancellation carry a calendar part like a request does, and
+// answering one would overwrite the meeting it names with the message's own
+// properties; a meeting the mailbox organizes or one its organizer canceled has no
+// invitation left to answer.
+var (
+	ErrNotARequest = errors.New("meeting: not a meeting request")
+	ErrOrganizer   = errors.New("meeting: the mailbox organizes this meeting")
+	ErrCanceled    = errors.New("meeting: the meeting was canceled")
+)
+
+// openAnswerable opens the message a response answers and checks that an attendee
+// can answer it: a meeting request, or the calendar item of a meeting the mailbox
+// was invited to that is still on.
+func openAnswerable(st *objectstore.Store, messageID int64, tags Tags) (*oxcmail.Message, error) {
+	req, err := st.OpenMessage(messageID)
+	if err != nil {
+		return nil, ErrRequestNotFound
+	}
+	class := strings.ToLower(propStr(req.Props, mapi.PrMessageClass))
+	switch {
+	case class == strings.ToLower(requestClass) || strings.HasPrefix(class, strings.ToLower(requestClass)+"."):
+		return req, nil
+	case class == "ipm.appointment" || strings.HasPrefix(class, "ipm.appointment."):
+		return req, appointmentAnswerable(longVal(req.Props, tags.State))
+	}
+	return nil, ErrNotARequest
+}
+
+// appointmentAnswerable checks a calendar item's PidLidAppointmentStateFlags
+// ([MS-OXOCAL] 2.2.1.10): only a meeting received as an invitation has an
+// organizer to answer, and a canceled one has nothing left to answer.
+func appointmentAnswerable(state int32) error {
+	switch {
+	case state&asfCanceled != 0:
+		return ErrCanceled
+	case state&asfReceived == 0:
+		return ErrOrganizer
+	}
+	return nil
+}
+
 // Tags are the meeting-workflow named-property tags resolved against a mailbox once
 // per response.
 type Tags struct {
@@ -138,16 +180,16 @@ func respondAutomatically(st *objectstore.Store, accounts directory.Accounts, sp
 }
 
 func respond(st *objectstore.Store, accounts directory.Accounts, spool *relay.Spool, who identity, messageID int64, response int32, reply Reply, userAction bool) (int64, error) {
-	req, err := st.OpenMessage(messageID)
-	if err != nil {
-		return 0, ErrRequestNotFound
-	}
-	if !reply.Instance.IsZero() {
-		return respondToInstance(st, accounts, spool, who, req, response, reply)
-	}
 	tags, err := ResolveTags(st)
 	if err != nil {
 		return 0, err
+	}
+	req, err := openAnswerable(st, messageID, tags)
+	if err != nil {
+		return 0, err
+	}
+	if !reply.Instance.IsZero() {
+		return respondToInstance(st, accounts, spool, who, req, response, reply)
 	}
 	now := mapi.UnixToNTTime(time.Now())
 

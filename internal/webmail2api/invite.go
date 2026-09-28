@@ -212,15 +212,30 @@ func (s *Server) handleRSVP(w http.ResponseWriter, r *http.Request) {
 	// This is the reader's own answer, so it also clears the request mail when the
 	// mailbox asked for that.
 	if _, err := meeting.RespondOnBehalf(st, s.accounts, s.spool, attendee, actor, info.ID, response, true); err != nil {
-		if errors.Is(err, meeting.ErrRequestNotFound) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-			return
-		}
-		logError("rsvp", err, logging.Fields{"user": mb.user})
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not record the response"})
+		rsvpFailure(w, err, mb.user)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": req.Response + "ed"})
+}
+
+// rsvpFailure answers a response the meeting workflow refused: a message that is
+// gone, one that is not an invitation (a meeting response, a counter proposal or a
+// cancellation carries a calendar part too), or a meeting the mailbox organizes or
+// its organizer canceled. Anything else is a failure to record, logged here.
+func rsvpFailure(w http.ResponseWriter, err error, user string) {
+	switch {
+	case errors.Is(err, meeting.ErrRequestNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+	case errors.Is(err, meeting.ErrNotARequest):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a meeting request"})
+	case errors.Is(err, meeting.ErrOrganizer):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "you organize this meeting"})
+	case errors.Is(err, meeting.ErrCanceled):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the meeting was canceled"})
+	default:
+		logError("rsvp", err, logging.Fields{"user": user})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not record the response"})
+	}
 }
 
 // errBadCounter reports a counter-proposal that cannot be written: no organizer

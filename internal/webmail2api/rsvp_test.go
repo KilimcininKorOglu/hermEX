@@ -26,16 +26,34 @@ func inviteMail(uid string) []byte {
 		"ATTENDEE;RSVP=TRUE:mailto:alice@hermex.test\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
 }
 
+// replyMail is a delivered meeting response: an iTIP REPLY, which carries a
+// calendar part just as an invitation does.
+func replyMail(uid string) []byte {
+	return []byte("From: bob@hermex.test\r\nTo: alice@hermex.test\r\nSubject: Accepted: Quarterly review\r\n" +
+		"Date: Mon, 01 Jun 2026 10:00:00 +0000\r\n" +
+		"Content-Type: text/calendar; method=REPLY; charset=utf-8\r\n\r\n" +
+		"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REPLY\r\nBEGIN:VEVENT\r\n" +
+		"UID:" + uid + "\r\nDTSTART:20260615T090000Z\r\nDTEND:20260615T100000Z\r\n" +
+		"ORGANIZER:mailto:alice@hermex.test\r\n" +
+		"ATTENDEE;PARTSTAT=ACCEPTED:mailto:bob@hermex.test\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+}
+
 // rsvpHarness seeds one delivered invitation and returns a request helper plus the
 // mailbox path and the SPA's opaque id for that mail.
 func rsvpHarness(t *testing.T) (func(body string) *httptest.ResponseRecorder, string, string) {
+	t.Helper()
+	return rsvpHarnessWith(t, inviteMail("review-1@hermex.test"))
+}
+
+// rsvpHarnessWith is rsvpHarness for any delivered mail.
+func rsvpHarnessWith(t *testing.T, mail []byte) (func(body string) *httptest.ResponseRecorder, string, string) {
 	t.Helper()
 	dir := t.TempDir()
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), inviteMail("review-1@hermex.test"), time.Now(), 0)
+	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), mail, time.Now(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,6 +141,20 @@ func TestRSVPRefusesAnUnknownResponse(t *testing.T) {
 	rec := do(`{"id":"` + id + `","response":"maybe"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("an unknown response = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestRSVPRefusesAMeetingResponse proves a meeting response is not answered as an
+// invitation. It carries a calendar part like one, and answering it used to file
+// the response on the calendar as a meeting received from its sender.
+func TestRSVPRefusesAMeetingResponse(t *testing.T) {
+	do, mbox, id := rsvpHarnessWith(t, replyMail("review-1@hermex.test"))
+	rec := do(`{"id":"` + id + `","response":"accept"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("answering a meeting response = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if n := calendarCount(t, mbox); n != 0 {
+		t.Errorf("the calendar holds %d appointments after answering a response, want 0", n)
 	}
 }
 

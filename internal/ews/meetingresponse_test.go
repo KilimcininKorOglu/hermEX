@@ -13,6 +13,7 @@ import (
 	"hermex/internal/meeting"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcical"
+	"hermex/internal/oxcmail"
 	"hermex/internal/oxews"
 	"hermex/internal/relay"
 )
@@ -252,6 +253,62 @@ func seedExternalMeetingRequest(t *testing.T, dir string) int64 {
 	reqID, err := st.CreateMessage(int64(mapi.PrivateFIDInbox), req)
 	mustNoErr(t, "store the meeting request", err)
 	return reqID
+}
+
+// TestMeetingResponseRefusesWhatIsNotAnInvitation proves only a meeting request, or
+// a meeting the mailbox was invited to, is answered, and each refusal carries the
+// code Exchange gives it ([MS-OXWSCDATA] ResponseCodeType). A meeting response
+// carries a calendar part like a request, and accepting one used to file it as a
+// meeting received from its sender.
+func TestMeetingResponseRefusesWhatIsNotAnInvitation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		seed func(t *testing.T, st *objectstore.Store) oxews.ItemID
+		want string
+	}{
+		{"a meeting response", seedMeetingReply, "ErrorInvalidReferenceItem"},
+		{"the organizer's meeting", seedOrganizedMeeting, "ErrorCalendarIsOrganizerForAccept"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			st, err := objectstore.Open(dir)
+			mustNoErr(t, "open the store", err)
+			id := tc.seed(t, st)
+			st.Close()
+			ts := meetingServer(t, dir)
+			_, out := soapPost(t, ts, meetingResponseReq("AcceptItem", oxews.EncodeItemID(id)), true)
+			wantContains(t, "the refusal", out, "<ResponseCode>"+tc.want+"</ResponseCode>")
+		})
+	}
+}
+
+// seedMeetingReply files an attendee's response to the mailbox's meeting in its Inbox.
+func seedMeetingReply(t *testing.T, st *objectstore.Store) oxews.ItemID {
+	t.Helper()
+	const ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REPLY\r\n" +
+		"BEGIN:VEVENT\r\nUID:meeting-7\r\nDTSTART:20260701T140000Z\r\nDTEND:20260701T150000Z\r\n" +
+		"ORGANIZER:mailto:alice@hermex.test\r\nATTENDEE;PARTSTAT=ACCEPTED:mailto:bob@hermex.test\r\n" +
+		"END:VEVENT\r\nEND:VCALENDAR\r\n"
+	msg, err := oxcical.Import([]byte(ics), oxcical.Options{Resolver: st.GetNamedPropIDs})
+	mustNoErr(t, "import the meeting response", err)
+	id, err := st.CreateMessage(int64(mapi.PrivateFIDInbox), msg)
+	mustNoErr(t, "store the meeting response", err)
+	return oxews.ItemID{FolderID: int64(mapi.PrivateFIDInbox), MessageID: id}
+}
+
+// seedOrganizedMeeting files a meeting the mailbox organizes in its Calendar: a
+// meeting with no received flag ([MS-OXOCAL] 2.2.1.10).
+func seedOrganizedMeeting(t *testing.T, st *objectstore.Store) oxews.ItemID {
+	t.Helper()
+	tags, err := meeting.ResolveTags(st)
+	mustNoErr(t, "resolve the meeting properties", err)
+	id, err := st.CreateMessage(int64(mapi.PrivateFIDCalendar), &oxcmail.Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: "IPM.Appointment"},
+		{Tag: tags.UID, Value: "meeting-8"},
+		{Tag: tags.State, Value: int32(1)},
+	}})
+	mustNoErr(t, "store the meeting", err)
+	return oxews.ItemID{FolderID: int64(mapi.PrivateFIDCalendar), MessageID: id}
 }
 
 // decodeMID extracts the message id encoded in an EWS ItemId.
