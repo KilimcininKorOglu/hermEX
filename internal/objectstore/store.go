@@ -327,6 +327,7 @@ func openKind(dir string, seedBuiltins bool, kind storeKind) (*Store, error) {
 	if seedBuiltins && kind == storePrivate {
 		s.upgradeLegacyTasks()
 		s.upgradeSMIMEMessages()
+		s.repairDatelessMessages()
 	}
 	return s, nil
 }
