@@ -68,6 +68,11 @@ func TestDeliverForwardsViaRuleWithGuards(t *testing.T) {
 	if !bytes.Contains(got[0].raw, []byte(forwardMarkerHeader)) {
 		t.Errorf("forwarded copy missing the loop-break marker header")
 	}
+	// The Return-Path is written for the filed copy only; a message sent on must not
+	// carry one (RFC 5321 §4.4).
+	if bytes.Contains(got[0].raw, []byte("Return-Path:")) {
+		t.Errorf("forwarded copy carries the Return-Path written for the filed copy")
+	}
 
 	// 2-4. Each guarded message must NOT forward.
 	for _, c := range []struct {

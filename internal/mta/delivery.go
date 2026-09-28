@@ -754,6 +754,23 @@ func fromHeaderDomain(raw []byte) string {
 // reply) hands its unresolved recipients to relayAutomated. User-composed send
 // paths that should relay external recipients use DeliverAndRelay.
 func Deliver(accounts directory.Accounts, from string, recipients []string, raw []byte, received time.Time) (unresolved []string, err error) {
+	return deliverEach(accounts, from, recipients, raw, withReturnPath(raw, from), received)
+}
+
+// DeliverRetrieved files a message retrieved from a remote mailbox into the local
+// mailbox of recipient. The message had its final delivery at the source, which
+// wrote its Return-Path, so the header is kept as retrieved. The envelope sender is
+// null, so a retrieved message never triggers a local out-of-office reply: the
+// source already handled the original arrival, and a bulk pull must not flood the
+// original senders.
+func DeliverRetrieved(accounts directory.Accounts, recipient string, raw []byte, received time.Time) (unresolved []string, err error) {
+	return deliverEach(accounts, "", []string{recipient}, raw, raw, received)
+}
+
+// deliverEach files stored into the INBOX of every recipient that resolves to a
+// local mailbox, and returns the ones that do not. raw is the message as it
+// arrived, which the passes that answer or forward it read.
+func deliverEach(accounts directory.Accounts, from string, recipients []string, raw, stored []byte, received time.Time) (unresolved []string, err error) {
 	if accounts == nil {
 		// A caller with no directory (a daemon that stores mail but never
 		// delivers it, and its tests) can reach this through a notification path.
@@ -767,7 +784,7 @@ func Deliver(accounts directory.Accounts, from string, recipients []string, raw 
 			unresolved = append(unresolved, rcpt)
 			continue
 		}
-		if err := deliver(accounts, from, rcpt, path, raw, received, int64(mapi.PrivateFIDInbox)); err != nil {
+		if err := fileDelivery(accounts, from, rcpt, path, raw, stored, received, int64(mapi.PrivateFIDInbox)); err != nil {
 			return unresolved, err
 		}
 	}
@@ -939,8 +956,16 @@ func applyForwards(accounts directory.Accounts, recipients []string) (locals, de
 // deliver appends a raw message to the inbox of the mailbox at path. The inbox
 // is a built-in folder provisioned when the mailbox is created, so it is
 // addressed directly by its fixed id. from is the envelope sender and rcptAddr
-// the address this mailbox was reached at; both feed the out-of-office pass.
+// the address this mailbox was reached at; both feed the out-of-office pass. The
+// filed copy carries from as its Return-Path.
 func deliver(accounts directory.Accounts, from, rcptAddr, path string, raw []byte, received time.Time, folder int64) error {
+	return fileDelivery(accounts, from, rcptAddr, path, raw, withReturnPath(raw, from), received, folder)
+}
+
+// fileDelivery is deliver with the filed bytes given apart from the delivered ones:
+// the store keeps stored, while the rule and auto-reply passes read raw, so a
+// forward never carries a header this server wrote for its own copy.
+func fileDelivery(accounts directory.Accounts, from, rcptAddr, path string, raw, stored []byte, received time.Time, folder int64) error {
 	st, err := objectstore.Open(path)
 	if err != nil {
 		return err
@@ -951,7 +976,7 @@ func deliver(accounts directory.Accounts, from, rcptAddr, path string, raw []byt
 	// the wrong hour for anyone not at UTC.
 	st.SetDefaultZone(directory.UserZone(accounts, rcptAddr))
 
-	info, err := st.AppendMessage(folder, raw, received, 0)
+	info, err := st.AppendMessage(folder, stored, received, 0)
 	if err != nil {
 		return err
 	}
