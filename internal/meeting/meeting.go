@@ -684,7 +684,12 @@ func findCalendarByGlobalObjectID(st *objectstore.Store, uid string) (int64, boo
 // recorded on the attendee and the meeting, and a plain response withdraws an
 // earlier one (trackProposal). It is a no-op (returns nil) when the event or the
 // attendee is not found, so a stray REPLY never fails delivery.
-func ApplyReply(st *objectstore.Store, tags Tags, uid, attendeeEmail string, response int32, p *Proposal) error {
+//
+// sent is when the attendee sent the response (its PidLidAttendeeCriticalChange),
+// 0 when the response does not say. A response older than the one already
+// recorded for the attendee is not recorded: replies can arrive out of order, and
+// the organizer keeps the newest ([MS-OXOCAL] 3.1.4.8.5.2; RFC 5546 2.1.5).
+func ApplyReply(st *objectstore.Store, tags Tags, uid, attendeeEmail string, response int32, p *Proposal, sent uint64) error {
 	eventID, ok := findCalendarByUID(st, tags.UID, uid)
 	if !ok {
 		return nil
@@ -693,12 +698,33 @@ func ApplyReply(st *objectstore.Store, tags Tags, uid, attendeeEmail string, res
 	if err != nil || !ok {
 		return err
 	}
+	if stale, err := olderThanRecorded(st, recipID, sent); err != nil || stale {
+		return err
+	}
 	var props mapi.PropertyValues
 	props.Set(tags.Resp, response)
+	if sent != 0 {
+		props.Set(mapi.PrRecipientTrackStatusTime, sent)
+	}
 	if err := st.SetRecipientProperties(recipID, props); err != nil {
 		return err
 	}
 	return trackProposal(st, eventID, recipID, p)
+}
+
+// olderThanRecorded reports whether a response sent at sent predates the one
+// already recorded on the attendee's row. A response that does not say when it
+// was sent is never older.
+func olderThanRecorded(st *objectstore.Store, recipID int64, sent uint64) (bool, error) {
+	if sent == 0 {
+		return false, nil
+	}
+	row, err := st.GetRecipientProperties(recipID, mapi.PrRecipientTrackStatusTime)
+	if err != nil {
+		return false, err
+	}
+	recorded, ok := sysTime(row, mapi.PrRecipientTrackStatusTime)
+	return ok && recorded > sent, nil
 }
 
 // attendeeRecipient finds the recipient row of the meeting whose SMTP address is

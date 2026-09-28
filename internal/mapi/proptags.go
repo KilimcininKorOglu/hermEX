@@ -375,6 +375,10 @@ const (
 	PrRecipientProposed          = PropTag(0x5FE1000B) // PtBoolean
 	PrRecipientProposedStartTime = PropTag(0x5FE30040) // PtSysTime
 	PrRecipientProposedEndTime   = PropTag(0x5FE40040) // PtSysTime
+
+	// When the attendee sent the response the organizer's meeting records for it
+	// ([MS-OXOCAL] 2.2.4.10.3).
+	PrRecipientTrackStatusTime = PropTag(0x5FFB0040) // PtSysTime
 )
 
 // Address-book container proptags (NSPI GetSpecialTable, [MS-OXNSPI] / [MS-OXOABK]).

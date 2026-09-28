@@ -58,7 +58,28 @@ func ProcessReply(st *objectstore.Store, accounts directory.Accounts, sender str
 	if err != nil {
 		return true, err
 	}
-	return true, ApplyReply(st, tags, uid, attendee, resp, proposal)
+	sent, err := responseSent(st, messageID)
+	if err != nil {
+		return true, err
+	}
+	return true, ApplyReply(st, tags, uid, attendee, resp, proposal, sent)
+}
+
+// responseSent reads when the attendee sent a delivered response: the
+// PidLidAttendeeCriticalChange its DTSTAMP was imported as ([MS-OXCICAL]
+// DTSTAMP), or 0 when it carries none.
+func responseSent(st *objectstore.Store, messageID int64) (uint64, error) {
+	ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{mapi.NameAttendeeCriticalChange})
+	if err != nil || ids[0] == 0 {
+		return 0, err
+	}
+	tag := mapi.MakeTag(ids[0], mapi.PtSysTime)
+	props, err := st.GetMessageProperties(messageID, tag)
+	if err != nil {
+		return 0, err
+	}
+	t, _ := sysTime(props, tag)
+	return t, nil
 }
 
 // responseMethods are the iTIP methods an attendee answers with, each with the
