@@ -186,6 +186,12 @@ func createGenericFolder(tx *sql.Tx, replica mapi.GUID, ntNow uint64, f builtinF
 		int64(f.fid), parent, int64(cn), int64(begin), int64(end)); err != nil {
 		return err
 	}
+	if f.parent != 0 {
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		if err := countSubfolderChange(tx, int64(f.parent)); err != nil {
+			return err
+		}
+	}
 	props, err := folderPropertyBag(tx, replica, ntNow, cn, f.dispName, f.contClass, true, f.hidden)
 	if err != nil {
 		return err
@@ -205,6 +211,10 @@ func createSearchFolder(tx *sql.Tx, replica mapi.GUID, ntNow uint64, fid, parent
 		`INSERT INTO folders (folder_id, parent_id, change_number, is_search, cur_eid, max_eid) VALUES (?, ?, ?, 1, 0, 0)`,
 		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		int64(fid), int64(parent), int64(cn)); err != nil {
+		return err
+	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	if err := countSubfolderChange(tx, int64(parent)); err != nil {
 		return err
 	}
 	props, err := folderPropertyBag(tx, replica, ntNow, cn, dispName, mapi.ContainerClassNote, false, false)

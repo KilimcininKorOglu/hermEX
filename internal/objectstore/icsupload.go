@@ -781,10 +781,7 @@ func (s *Store) writeImportedFolder(tx *sql.Tx, imp hierarchyImport, home mapi.G
 // with it.
 func (s *Store) upsertFolderRow(tx *sql.Tx, imp hierarchyImport, home mapi.GUID, cn, ntNow uint64, propvals mapi.PropertyValues, exists bool) (mapi.PropertyValues, error) {
 	if exists {
-		if _, err := tx.Exec(
-			`UPDATE folders SET parent_id=?, change_number=? WHERE folder_id=?`,
-			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-			int64(imp.parent), int64(cn), int64(imp.fid)); err != nil {
+		if err := updateImportedFolderRow(tx, imp, cn); err != nil {
 			return nil, err
 		}
 		return updatedFolderBag(home, cn, ntNow, imp.dispName, imp.hasName, propvals)
@@ -802,7 +799,29 @@ func (s *Store) upsertFolderRow(tx *sql.Tx, imp hierarchyImport, home mapi.GUID,
 	if err := advanceStoreEID(tx, imp.fid); err != nil {
 		return nil, err
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	if err := countSubfolderChange(tx, int64(imp.parent)); err != nil {
+		return nil, err
+	}
 	return newFolderBag(tx, home, cn, ntNow, imp.dispName, propvals)
+}
+
+// updateImportedFolderRow re-parents and re-stamps an existing folder an ICS
+// upload changed, counting a move in both parents' hierarchy counters.
+func updateImportedFolderRow(tx *sql.Tx, imp hierarchyImport, cn uint64) error {
+	var oldParent sql.NullInt64
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	if err := tx.QueryRow(`SELECT parent_id FROM folders WHERE folder_id=?`, int64(imp.fid)).Scan(&oldParent); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		`UPDATE folders SET parent_id=?, change_number=? WHERE folder_id=?`,
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		int64(imp.parent), int64(cn), int64(imp.fid)); err != nil {
+		return err
+	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	return countReparent(tx, oldParent, int64(imp.parent))
 }
 
 // newFolderBag builds the property bag for a freshly imported folder: the standard

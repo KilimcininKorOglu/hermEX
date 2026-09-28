@@ -27,7 +27,7 @@ func (s *Store) DeleteMessage(folderID int64, uid uint32) error {
 	// Remove the object first (its cascade drops everything it owns), then the
 	// index rows; an interruption between leaves an index row pointing at a
 	// gone object, which a folder reindex prunes.
-	if _, err := s.objdb.Exec(`DELETE FROM messages WHERE message_id=?`, messageID); err != nil {
+	if err := s.deleteMessageRow(messageID); err != nil {
 		return err
 	}
 	if _, err := s.idxdb.Exec(`DELETE FROM messages WHERE message_id=?`, messageID); err != nil {
@@ -61,7 +61,7 @@ func (s *Store) DeleteObject(messageID int64) error {
 	if err != nil {
 		return err
 	}
-	if _, err := s.objdb.Exec(`DELETE FROM messages WHERE message_id=?`, messageID); err != nil {
+	if err := s.deleteMessageRow(messageID); err != nil {
 		return err
 	}
 	if _, err := s.idxdb.Exec(`DELETE FROM messages WHERE message_id=?`, messageID); err != nil {
@@ -73,4 +73,21 @@ func (s *Store) DeleteObject(messageID int64) error {
 	s.removeEML(mid)
 	s.publishChange("delete", 0, mid)
 	return nil
+}
+
+// deleteMessageRow removes a message's object row, counting the deletion in its
+// folder in the same transaction.
+func (s *Store) deleteMessageRow(messageID int64) error {
+	tx, err := s.objdb.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := countMessageDeletion(tx, messageID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM messages WHERE message_id=?`, messageID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

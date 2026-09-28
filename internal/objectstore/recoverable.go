@@ -80,6 +80,9 @@ func (s *Store) softDeleteRow(messageID int64) error {
 	if err != nil {
 		return err
 	}
+	if err := countMessageDeletion(tx, messageID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(
 		`UPDATE messages SET is_deleted=1, change_number=? WHERE message_id=?`,
 		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly

@@ -90,7 +90,7 @@ func insertFolderRow(tx *sql.Tx, parentFID int64) (fid, cn uint64, err error) {
 		int64(fid), parentFID, int64(cn), int64(begin), int64(end)); err != nil {
 		return 0, 0, err
 	}
-	return fid, cn, nil
+	return fid, cn, countSubfolderChange(tx, parentFID)
 }
 
 // FolderByName looks up a folder by parent and display name, reporting
@@ -229,25 +229,56 @@ func (s *Store) RenameFolder(folderID int64, newParent *int64, newName string) e
 			return ErrFolderCycle
 		}
 	}
-	res, err := s.objdb.Exec(
-		`UPDATE folders SET parent_id=? WHERE folder_id=? AND is_deleted=0`, parentFID, folderID)
-	if err != nil {
+	if err := s.reparentFolder(folderID, parentFID); err != nil {
 		return err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return ErrNotFound
 	}
 	if err := s.SetFolderProperties(folderID,
 		mapi.PropertyValues{{Tag: mapi.PrDisplayName, Value: newName}}); err != nil {
 		return err
 	}
 	// Keep the index projection's name in step where a row exists.
-	_, err = s.idxdb.Exec(`UPDATE folders SET name=? WHERE folder_id=?`, newName, folderID)
+	_, err := s.idxdb.Exec(`UPDATE folders SET name=? WHERE folder_id=?`, newName, folderID)
 	return err
+}
+
+// reparentFolder moves a live folder under parentFID and, when that changes its
+// parent, counts the move in both parents' hierarchy counters. It reports
+// ErrNotFound when the folder is missing.
+func (s *Store) reparentFolder(folderID, parentFID int64) error {
+	tx, err := s.objdb.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var oldParent sql.NullInt64
+	err = tx.QueryRow(`SELECT parent_id FROM folders WHERE folder_id=? AND is_deleted=0`, folderID).Scan(&oldParent)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE folders SET parent_id=? WHERE folder_id=?`, parentFID, folderID); err != nil {
+		return err
+	}
+	if err := countReparent(tx, oldParent, parentFID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// countReparent counts a folder leaving oldParent for newParent in both
+// hierarchy counters; a folder that stays where it was changes neither.
+func countReparent(tx *sql.Tx, oldParent sql.NullInt64, newParent int64) error {
+	if oldParent.Valid && oldParent.Int64 == newParent {
+		return nil
+	}
+	if oldParent.Valid {
+		if err := countSubfolderChange(tx, oldParent.Int64); err != nil {
+			return err
+		}
+	}
+	return countSubfolderChange(tx, newParent)
 }
 
 // SetFolderName renames a folder in place: it updates the display name and the
@@ -308,16 +339,8 @@ func (s *Store) DeleteFolder(folderID int64) error {
 	if err := s.dumpsterSubtree(subtree); err != nil {
 		return err
 	}
-	res, err := s.objdb.Exec(`DELETE FROM folders WHERE folder_id=?`, folderID)
-	if err != nil {
+	if err := s.deleteFolderRow(folderID); err != nil {
 		return err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return ErrNotFound
 	}
 	for _, fid := range subtree {
 		if err := s.dropIndexFolder(fid); err != nil {
@@ -326,6 +349,34 @@ func (s *Store) DeleteFolder(folderID int64) error {
 	}
 	s.publishChange("folder", 0, "")
 	return nil
+}
+
+// deleteFolderRow removes a folder's row, and with it its subtree, and counts the
+// removal in its parent's hierarchy counter. It reports ErrNotFound when the
+// folder is missing.
+func (s *Store) deleteFolderRow(folderID int64) error {
+	tx, err := s.objdb.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var parent sql.NullInt64
+	err = tx.QueryRow(`SELECT parent_id FROM folders WHERE folder_id=?`, folderID).Scan(&parent)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM folders WHERE folder_id=?`, folderID); err != nil {
+		return err
+	}
+	if parent.Valid {
+		if err := countSubfolderChange(tx, parent.Int64); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // CopyFolder copies the folder srcFolderID under newParent with the display name
