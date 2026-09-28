@@ -59,6 +59,86 @@ func seedAttachmentMessage(t *testing.T, dir string) int64 {
 	return info.ID
 }
 
+// seedTwoAttachmentMessage delivers a message with two attachments into folder
+// and returns the stored message.
+func seedTwoAttachmentMessage(t *testing.T, st *objectstore.Store, folder int64) objectstore.MessageInfo {
+	t.Helper()
+	part := func(name string) string {
+		return "--B\r\nContent-Type: application/octet-stream\r\n" +
+			"Content-Disposition: attachment; filename=\"" + name + "\"\r\n\r\n" + name + "\r\n"
+	}
+	raw := "From: sender@hermex.test\r\nTo: alice@hermex.test\r\nSubject: TWOATTACH\r\n" +
+		"MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"B\"\r\n\r\n" +
+		"--B\r\nContent-Type: text/plain\r\n\r\nbody\r\n" + part("a.bin") + part("b.bin") + "--B--\r\n"
+	info, err := st.AppendMessage(folder, []byte(raw), time.Now(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info
+}
+
+// attachmentKeyRows opens a message's attachment table and reads its PidTagMid
+// and PidTagRecordKey columns, PidTagMid first as a MAPI client asks for it.
+func attachmentKeyRows(t *testing.T, sess *Session, folderFID, msgID int64) []mapi.PropertyValues {
+	t.Helper()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	folderEID := uint64(mapi.MakeEIDEx(1, uint64(folderFID)))
+	msgEID := uint64(mapi.MakeEIDEx(1, uint64(msgID)))
+	_, h = sess.Dispatch(buildOpenMessage(0, 1, folderEID, msgEID), []uint32{h[0], 0xFFFFFFFF})
+	_, h = sess.Dispatch(buildGetAttachmentTable(0, 1), []uint32{h[1], 0xFFFFFFFF})
+	cols := []mapi.PropTag{mapi.PrMid, mapi.PrRecordKey}
+	sess.Dispatch(buildSetColumns(0, cols), []uint32{h[1]})
+	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{h[1]})
+	_, rows := queryRowsResponse(t, qr, cols)
+	return rows
+}
+
+// TestAttachmentTableRowKeys proves each attachment row carries its own
+// PidTagMid, so a client building PidTagInstanceKey from the first column gets a
+// distinct key per row, and a PidTagRecordKey of the lead byte and the
+// attachment's position that stays the same when the message moves.
+func TestAttachmentTableRowKeys(t *testing.T) {
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inbox := int64(mapi.PrivateFIDInbox)
+	stored := seedTwoAttachmentMessage(t, st, inbox)
+	wantKeys := [][]byte{
+		{0xA2, 0, 0, 0, 0, 0, 0, 0, 0},
+		{0xA2, 0, 0, 0, 0, 0, 0, 0, 1},
+	}
+	check := func(label string, folder, id int64) {
+		sess := NewSession(dir, nil, "")
+		defer sess.Close()
+		rows := attachmentKeyRows(t, sess, folder, id)
+		if len(rows) != 2 {
+			t.Fatalf("%s: attachment rows = %d, want 2", label, len(rows))
+		}
+		for i, row := range rows {
+			if got, _ := row.Get(mapi.PrRecordKey); !bytes.Equal(asBytes(got), wantKeys[i]) {
+				t.Errorf("%s: row %d PidTagRecordKey = %x, want %x", label, i, got, wantKeys[i])
+			}
+		}
+		mid0, _ := rows[0].Get(mapi.PrMid)
+		mid1, _ := rows[1].Get(mapi.PrMid)
+		if mid0 == nil || mid0 == mid1 {
+			t.Errorf("%s: PidTagMid per row = %v, %v, want two distinct values", label, mid0, mid1)
+		}
+	}
+	check("before the move", inbox, stored.ID)
+
+	moved, err := st.MoveMessage(inbox, stored.UID, int64(mapi.PrivateFIDDeletedItems))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	check("after the move", int64(mapi.PrivateFIDDeletedItems), moved.ID)
+}
+
 // TestAttachmentReadChain walks the full attachment read path: open the message,
 // open its attachment table, QueryRows the attachment (PR_ATTACH_NUM +
 // filename), OpenAttachment by that number, then OpenStream + ReadStream its

@@ -1,6 +1,7 @@
 package rop
 
 import (
+	"encoding/binary"
 	"slices"
 
 	"hermex/internal/ext"
@@ -122,19 +123,50 @@ func (t *tableState) folderRow(store *objectstore.Store, base int) (mapi.Propert
 }
 
 // attachmentRow projects one attachment row. The bags are already in memory, so
-// it copies before synthesizing PR_ATTACH_NUM and the stored snapshot is not
-// mutated. A stored attach number is authoritative; only when one is absent
+// it copies before synthesizing the computed columns and the stored snapshot is
+// not mutated. A stored attach number is authoritative; only when one is absent
 // (legacy data predating stored numbers) is the base row index used instead.
 func (t *tableState) attachmentRow(base int) mapi.PropertyValues {
 	row := append(mapi.PropertyValues(nil), t.attachments[base]...)
-	if !slices.Contains(t.columns, mapi.PrAttachNum) {
-		return row
+	if slices.Contains(t.columns, mapi.PrAttachNum) {
+		if _, ok := row.Get(mapi.PrAttachNum); !ok {
+			// #nosec G115 -- an index into the message's in-memory attachment list
+			row.Set(mapi.PrAttachNum, int32(base))
+		}
 	}
-	if _, ok := row.Get(mapi.PrAttachNum); !ok {
-		// #nosec G115 -- an index into the message's in-memory attachment list
-		row.Set(mapi.PrAttachNum, int32(base))
+	if slices.Contains(t.columns, mapi.PrRecordKey) {
+		row.Set(mapi.PrRecordKey, attachmentRecordKey(base))
+	}
+	if slices.Contains(t.columns, mapi.PrMid) {
+		row.Set(mapi.PrMid, attachmentRowMid(base))
 	}
 	return row
+}
+
+// attachmentKeyLead marks a key derived from an attachment's position in its
+// message.
+const attachmentKeyLead = 0xA2
+
+// attachmentRecordKey computes an attachment's PidTagRecordKey: the lead byte
+// then the attachment's position among its message's attachments as a big-endian
+// 64-bit value. The key is scoped to the message and does not encode the message
+// id, so it stays the same when the message moves, which re-files it under a new
+// id. The position is the attachment's rank in storage order, which a move keeps.
+func attachmentRecordKey(pos int) []byte {
+	key := make([]byte, 9)
+	key[0] = attachmentKeyLead
+	// #nosec G115 -- an index into the message's attachment list, never negative
+	binary.BigEndian.PutUint64(key[1:], uint64(pos))
+	return key
+}
+
+// attachmentRowMid computes the PidTagMid column of an attachment table row. A
+// MAPI client builds each row's PidTagInstanceKey from the table's first column,
+// and it puts PidTagMid first, so the parent message's id would give every row
+// the same instance key. The value is therefore distinct per row instead.
+func attachmentRowMid(pos int) int64 {
+	// #nosec G115 -- the lead byte and a non-negative list index fill the 64 bits; the signed view holds the same bits
+	return int64(uint64(attachmentKeyLead)<<56 | uint64(pos))
 }
 
 // messageRow projects one contents row, synthesizing the message's EID when the
