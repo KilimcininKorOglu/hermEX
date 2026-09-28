@@ -69,9 +69,9 @@ func openAnswerable(st *objectstore.Store, messageID int64, tags Tags) (*oxcmail
 	}
 	class := strings.ToLower(propStr(req.Props, mapi.PrMessageClass))
 	switch {
-	case class == strings.ToLower(requestClass) || strings.HasPrefix(class, strings.ToLower(requestClass)+"."):
+	case isClass(class, requestClass):
 		return req, requestAnswerable(st, req, tags)
-	case class == "ipm.appointment" || strings.HasPrefix(class, "ipm.appointment."):
+	case isClass(class, "IPM.Appointment"):
 		return req, appointmentAnswerable(longVal(req.Props, tags.State))
 	}
 	return nil, ErrNotARequest

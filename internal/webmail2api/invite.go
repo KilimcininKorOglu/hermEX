@@ -9,6 +9,7 @@ import (
 
 	"hermex/internal/itip"
 	"hermex/internal/logging"
+	"hermex/internal/mapi"
 	"hermex/internal/meeting"
 	"hermex/internal/mime"
 	"hermex/internal/mta"
@@ -50,8 +51,34 @@ func organizerAddress(v string) string {
 	return v
 }
 
-// handleInvite reports whether a message is a meeting invite and, when it is,
-// the details parsed from its embedded iCalendar.
+// inviteJSON is what the reader shows about a message carrying a calendar part:
+// the meeting it describes, and, for a meeting message, its kind and the state that
+// goes with it. Kind is empty for a calendar part that is not a meeting message,
+// such as an event shared as an attachment. Response is the answer the mailbox
+// gave to a request, or the answer a response carries, in the words /mail/rsvp
+// takes.
+type inviteJSON struct {
+	IsInvite          bool   `json:"isInvite"`
+	Kind              string `json:"kind,omitempty"`
+	UID               string `json:"uid,omitempty"`
+	Summary           string `json:"summary,omitempty"`
+	Start             string `json:"start,omitempty"`
+	End               string `json:"end,omitempty"`
+	Location          string `json:"location,omitempty"`
+	Organizer         string `json:"organizer,omitempty"`
+	Response          string `json:"response,omitempty"`
+	ResponseRequested bool   `json:"responseRequested,omitempty"`
+	IsOrganizer       bool   `json:"isOrganizer,omitempty"`
+	ProposedStart     string `json:"proposedStart,omitempty"`
+	ProposedEnd       string `json:"proposedEnd,omitempty"`
+	Removable         bool   `json:"removable,omitempty"`
+}
+
+// handleInvite reports whether a message carries a meeting and, when it does, the
+// details parsed from its embedded iCalendar and what the meeting workflow knows
+// about it: a request the reader can answer, the answer already given, an
+// attendee's answer or proposed time, or a cancellation whose meeting is still on
+// the calendar.
 func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
 	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"), accessRead)
 	if !ok {
@@ -60,25 +87,52 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
 	defer st.Close()
 	raw, err := st.GetMessageRaw(fid, uid)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"isInvite": false})
+		writeJSON(w, http.StatusOK, inviteJSON{})
 		return
 	}
 	ics := findCalendarPart(mime.ParseStructure(raw))
 	if ics == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"isInvite": false})
+		writeJSON(w, http.StatusOK, inviteJSON{})
 		return
 	}
+	out := inviteDetails(ics)
+	if err := describeMeeting(st, fid, uid, ics, &out); err != nil {
+		logError("invite", err, logging.Fields{})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read the meeting"})
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// inviteDetails reads the meeting a calendar part describes.
+func inviteDetails(ics []byte) inviteJSON {
 	e := icalToEvent(ics, 0)
 	organizer, _ := icalProp(ics, "ORGANIZER")
-	writeJSON(w, http.StatusOK, map[string]any{
-		"isInvite":  true,
-		"uid":       e.UID,
-		"summary":   e.Summary,
-		"start":     e.Start,
-		"end":       e.End,
-		"location":  e.Location,
-		"organizer": organizerAddress(organizer),
-	})
+	return inviteJSON{IsInvite: true, UID: e.UID, Summary: e.Summary, Start: e.Start, End: e.End,
+		Location: e.Location, Organizer: organizerAddress(organizer)}
+}
+
+// describeMeeting adds to out what the meeting workflow knows about the meeting
+// message at (fid, uid). A message that is not a meeting message adds nothing.
+func describeMeeting(st *objectstore.Store, fid int64, uid uint32, ics []byte, out *inviteJSON) error {
+	info, err := st.MessageByUID(fid, uid)
+	if err != nil {
+		return err
+	}
+	v, ok, err := meeting.Describe(st, info.ID, ics)
+	if err != nil || !ok {
+		return err
+	}
+	out.Kind = string(v.Kind)
+	out.Response = meetingResponseWord(v.Response)
+	out.ResponseRequested = v.ResponseRequested
+	out.IsOrganizer = v.Organizer
+	out.Removable = v.Removable
+	if v.Proposal != nil {
+		out.ProposedStart = mapi.NTTimeToUnix(v.Proposal.Start).UTC().Format(time.RFC3339)
+		out.ProposedEnd = mapi.NTTimeToUnix(v.Proposal.End).UTC().Format(time.RFC3339)
+	}
+	return nil
 }
 
 // handleExportICS streams a message's embedded meeting invite as an .ics file.
@@ -165,6 +219,73 @@ func meetingResponseCode(response string) int32 {
 		return meeting.ResponseDeclined
 	}
 	return 0
+}
+
+// meetingResponseWord is meetingResponseCode the other way round: the SPA's word
+// for a stored response, "" for none.
+func meetingResponseWord(response int32) string {
+	switch response {
+	case meeting.ResponseAccepted:
+		return "accept"
+	case meeting.ResponseTentative:
+		return "tentative"
+	case meeting.ResponseDeclined:
+		return "decline"
+	}
+	return ""
+}
+
+// handleRemoveFromCalendar takes off the calendar the meeting, or the one instance
+// of a series, the cancellation the reader opened calls off: the attendee removing
+// a meeting its organizer canceled ([MS-OXOCAL] 3.1.4.9.2). Only what the calendar
+// holds as canceled is removed, so the cancellation of a meeting that has since
+// been renewed, or one its organizer did not send, removes nothing.
+func (s *Server) handleRemoveFromCalendar(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	mb, fid, uid, ok := s.locateMailbox(w, r, req.ID, accessRead)
+	if !ok {
+		return
+	}
+	defer mb.st.Close()
+	if !mb.writeAllowed(int64(mapi.PrivateFIDCalendar)) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+	id, ics, ok := cancellationOf(mb.st, fid, uid)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	err := meeting.RemoveCanceled(mb.st, id, ics)
+	switch {
+	case errors.Is(err, meeting.ErrNotCanceled):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "nothing canceled is on the calendar"})
+	case err != nil:
+		logError("remove-canceled", err, logging.Fields{"user": mb.user})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not remove the meeting"})
+	default:
+		writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+	}
+}
+
+// cancellationOf reads the message at (fid, uid) and the calendar part it carries.
+func cancellationOf(st *objectstore.Store, fid int64, uid uint32) (int64, []byte, bool) {
+	info, err := st.MessageByUID(fid, uid)
+	if err != nil {
+		return 0, nil, false
+	}
+	raw, err := st.GetMessageRaw(fid, uid)
+	if err != nil {
+		return 0, nil, false
+	}
+	ics := findCalendarPart(mime.ParseStructure(raw))
+	return info.ID, ics, ics != nil
 }
 
 // handleRSVP responds to a meeting invite through the SAME model every other

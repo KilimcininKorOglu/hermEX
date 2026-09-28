@@ -126,6 +126,27 @@ func CancelInstance(stored []byte, at time.Time) ([]byte, bool) {
 	return replaceOverride(cal, at, ev), true
 }
 
+// InstanceCancelled reports whether a stored series keeps the instance it generates
+// at at as called off, the state CancelInstance leaves: its override carries
+// STATUS:CANCELLED and no EXDATE has removed it since. series is false when the
+// object is not a recurring series, so a caller reads a standalone occurrence as
+// the object itself.
+func InstanceCancelled(stored []byte, at time.Time) (cancelled, series bool) {
+	cal, err := parseICal(stored)
+	if err != nil {
+		return false, false
+	}
+	master, overrides := splitSeries(cal)
+	if _, ok := seriesShape(master); !ok {
+		return false, false
+	}
+	if excludedInstants(master)[instantKey(at)] {
+		return false, true
+	}
+	ov := overrides[instantKey(at)]
+	return ov != nil && isCancelledComp(ov), true
+}
+
 // Sequence returns the SEQUENCE of the object's primary VEVENT, or of the override
 // for *at when at is set and the object has one. A missing or unreadable value is 0,
 // the RFC 5545 default.

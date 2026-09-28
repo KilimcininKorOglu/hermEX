@@ -59,6 +59,31 @@ func TestInstanceCancelDropsOnlyThatInstance(t *testing.T) {
 	}
 }
 
+// TestInstanceCancelledReadsTheAttendeeCopy reads back the state CancelInstance
+// leaves: the called-off instance, and no other, reads as cancelled until it is
+// removed, and an object that is not a series says so.
+func TestInstanceCancelledReadsTheAttendeeCopy(t *testing.T) {
+	marked, ok := CancelInstance([]byte(seriesICal), march9)
+	if !ok {
+		t.Fatal("CancelInstance refused a live instance")
+	}
+	if cancelled, series := InstanceCancelled(marked, march9); !cancelled || !series {
+		t.Errorf("the cancelled instance reads cancelled=%v series=%v, want both", cancelled, series)
+	}
+	if cancelled, _ := InstanceCancelled(marked, march9.Add(7*24*time.Hour)); cancelled {
+		t.Error("an instance that is still on reads as cancelled")
+	}
+	removed, _ := CancelOccurrence(marked, march9)
+	if cancelled, series := InstanceCancelled(removed, march9); cancelled || !series {
+		t.Errorf("a removed instance reads cancelled=%v series=%v, want a series without it", cancelled, series)
+	}
+	single := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:one\r\n" +
+		"DTSTART:20260309T170000Z\r\nDTEND:20260309T180000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	if _, series := InstanceCancelled([]byte(single), march9); series {
+		t.Error("a single event reads as a series")
+	}
+}
+
 // TestInstanceRequestMovesTheAttendeeInstance sends a moved instance as a
 // single-instance REQUEST and folds it into the attendee's copy.
 func TestInstanceRequestMovesTheAttendeeInstance(t *testing.T) {
