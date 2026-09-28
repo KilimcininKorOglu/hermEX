@@ -35,7 +35,7 @@ const dateLayout = "Mon, 02 Jan 2006 15:04:05 -0700"
 func Export(msg *Message, opt Options) ([]byte, error) {
 	var b bytes.Buffer
 	writeMailHead(&b, msg)
-	if isSMIME, clearSigned := smimeShape(msg.Props); isSMIME {
+	if isSMIME, clearSigned := smimeShape(msg); isSMIME {
 		writeSMIMEBody(&b, msg, opt, clearSigned)
 		return b.Bytes(), nil
 	}

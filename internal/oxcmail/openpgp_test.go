@@ -82,6 +82,31 @@ func TestEncryptedOfAnotherProtocolIsNotOpenPGP(t *testing.T) {
 	}
 }
 
+// TestGpgOLClassWithoutTheEntityIsRegularMail proves a message GpgOL gave its
+// class to but that holds a body and loose signature or ciphertext attachments is
+// exported as the mail it is, not as the invalid-message notice, and may be sent.
+func TestGpgOLClassWithoutTheEntityIsRegularMail(t *testing.T) {
+	for _, class := range []string{classGpgOLSigned, classGpgOLEncrypted} {
+		msg := &Message{}
+		msg.Props.Set(mapi.PrMessageClass, class)
+		msg.Props.Set(mapi.PrBody, "the readable body")
+		for _, name := range []string{"signature.asc", "msg.asc"} {
+			var a Attachment
+			a.Props.Set(mapi.PrAttachLongFilename, name)
+			a.Props.Set(mapi.PrAttachDataBin, []byte("-----BEGIN PGP-----"))
+			msg.Attachments = append(msg.Attachments, a)
+		}
+		if err := CheckSMIME(msg); err != nil {
+			t.Errorf("%s: CheckSMIME = %v, want nil", class, err)
+		}
+		raw, err := Export(msg, Options{})
+		mustImport(t, err)
+		if !bytes.Contains(raw, []byte("the readable body")) || bytes.Contains(raw, []byte("not a valid S/MIME")) {
+			t.Errorf("%s: exported as the notice:\n%s", class, raw)
+		}
+	}
+}
+
 func mustImport(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {

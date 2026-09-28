@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"hermex/internal/mapi"
+	"hermex/internal/mime"
 )
 
 // ErrInvalidSMIME reports an S/MIME message object that does not carry the one
@@ -18,7 +19,7 @@ var ErrInvalidSMIME = errors.New("oxcmail: an S/MIME message must carry exactly 
 // such an object as a short notice so a stored copy stays readable, and that
 // notice must not go out in place of the message.
 func CheckSMIME(msg *Message) error {
-	if isSMIME, _ := smimeShape(msg.Props); isSMIME && len(msg.Attachments) != 1 {
+	if isSMIME, _ := smimeShape(msg); isSMIME && len(msg.Attachments) != 1 {
 		return fmt.Errorf("%w: found %d", ErrInvalidSMIME, len(msg.Attachments))
 	}
 	return nil
@@ -28,18 +29,32 @@ func CheckSMIME(msg *Message) error {
 // and, if so, whether it is clear-signed ([MS-OXOSMIME] 3.1.4.1 and 3.1.4.2): a
 // class ending in ".SMIME.MultipartSigned" is clear-signed, one ending in ".SMIME"
 // is opaque-signed or encrypted. A GpgOL OpenPGP class holds its whole entity the
-// way a clear-signed one does.
-func smimeShape(props mapi.PropertyValues) (isSMIME, clearSigned bool) {
-	class := strings.ToLower(propString(props, mapi.PrMessageClass))
+// way a clear-signed one does, but only when its one attachment is that entity:
+// GpgOL gives the class to any message it recognizes as OpenPGP, however it was
+// stored, and a message kept as a body with signature or ciphertext attachments
+// is ordinary mail.
+func smimeShape(msg *Message) (isSMIME, clearSigned bool) {
+	class := strings.ToLower(propString(msg.Props, mapi.PrMessageClass))
 	switch {
-	case strings.HasSuffix(class, ".smime.multipartsigned"),
-		// An OpenPGP entity is kept whole, like a clear-signed one.
-		class == strings.ToLower(classGpgOLEncrypted), class == strings.ToLower(classGpgOLSigned):
+	case strings.HasSuffix(class, ".smime.multipartsigned"):
 		return true, true
+	case class == strings.ToLower(classGpgOLEncrypted), class == strings.ToLower(classGpgOLSigned):
+		return openPGPEntity(msg), true
 	case strings.HasSuffix(class, ".smime"):
 		return true, false
 	}
 	return false, false
+}
+
+// openPGPEntity reports whether the message's one attachment holds a whole
+// OpenPGP/MIME entity: a multipart/signed or an OpenPGP multipart/encrypted.
+func openPGPEntity(msg *Message) bool {
+	if len(msg.Attachments) != 1 {
+		return false
+	}
+	data, _ := bytesProp(msg.Attachments[0].Props, mapi.PrAttachDataBin)
+	root := mime.ParseStructure(data)
+	return root.Type == "multipart" && (root.Subtype == "signed" || (root.Subtype == "encrypted" && openPGPProtocol(root)))
 }
 
 // writeSMIMEBody writes the content header fields and body of an S/MIME message
