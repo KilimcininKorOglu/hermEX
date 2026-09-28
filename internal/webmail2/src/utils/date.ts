@@ -7,8 +7,9 @@ import { getCookie, setCookie, deleteCookie } from "./cookies"
 // chosen IANA zone is kept in a module singleton so the pure formatter functions
 // (used across many pages) can read it without threading React context through
 // every call site. AuthContext sets it from /auth/me on load and onboarding /
-// settings update it on change. An empty value means "follow the device",
-// formatters then omit the timeZone option and fall back to the browser zone.
+// settings update it on change. An empty value means no zone was chosen: times
+// then render in UTC, and a full date carries a "UTC" label so it cannot be
+// read as local time.
 
 const TZ_COOKIE_KEY = 'hermex-timezone'
 
@@ -29,12 +30,17 @@ export function getDisplayTimeZone(): string {
   return displayTimeZone
 }
 
-// withTz merges the chosen timezone into Intl options. Callers pass their format
-// options and get them back with { timeZone } added when a zone is set, so
-// inline toLocale* calls (calendar, tasks, compose, email-detail) localize to
-// the user's zone with a one-line change.
+// withTz merges the chosen timezone, or UTC when none was chosen, into Intl
+// options, so inline toLocale* calls (calendar, tasks, compose, email-detail)
+// render in the user's zone with a one-line change.
 export function withTz(opts: Intl.DateTimeFormatOptions = {}): Intl.DateTimeFormatOptions {
-  return displayTimeZone ? { ...opts, timeZone: displayTimeZone } : opts
+  return { ...opts, timeZone: displayTimeZone || 'UTC' }
+}
+
+// zoneLabel is appended to a full date: " UTC" when no zone was chosen, so a UTC
+// time is never read as local time, and nothing once the user picked a zone.
+export function zoneLabel(): string {
+  return displayTimeZone ? '' : ' UTC'
 }
 
 // zoneOffsetMs returns timeZone's UTC offset in milliseconds at instant `at`,
@@ -55,18 +61,15 @@ function zoneOffsetMs(timeZone: string, at: Date): number {
 
 // zonedInputToISO converts a <input type="datetime-local"> value (a zoneless
 // wall clock "YYYY-MM-DDTHH:mm") into an absolute RFC3339/ISO instant,
-// interpreting the wall clock in the user's chosen display timezone (falling
-// back to the browser zone when none is set). The compose scheduler uses it so
-// "14:30" means 14:30 in the zone the user actually sees times in. Two passes
-// resolve the zone offset across DST boundaries.
+// interpreting the wall clock in the user's chosen display timezone, or UTC when
+// none is set. The compose scheduler uses it so "14:30" means 14:30 in the zone
+// the user actually sees times in. Two passes resolve the zone offset across DST
+// boundaries.
 export function zonedInputToISO(localValue: string): string {
   if (!localValue) return ''
-  if (!displayTimeZone) {
-    const d = new Date(localValue)
-    return isNaN(d.getTime()) ? '' : d.toISOString()
-  }
   const target = new Date(localValue + ':00Z') // wall clock treated as UTC
   if (isNaN(target.getTime())) return ''
+  if (!displayTimeZone) return target.toISOString()
   let utcMs = target.getTime() - zoneOffsetMs(displayTimeZone, target)
   utcMs = target.getTime() - zoneOffsetMs(displayTimeZone, new Date(utcMs))
   return new Date(utcMs).toISOString()
@@ -99,7 +102,7 @@ export function formatFullDate(dateString: string): string {
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit'
-  }))
+  })) + zoneLabel()
 }
 
 // formatAbsolute renders a full, unambiguous localized date+time for the message
@@ -115,5 +118,5 @@ export function formatAbsolute(dateString: string): string {
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit'
-  }))
+  })) + zoneLabel()
 }

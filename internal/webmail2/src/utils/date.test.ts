@@ -1,5 +1,26 @@
-import { describe, it, expect } from 'vitest'
-import { formatDate, formatFullDate } from './date'
+import { describe, it, expect, afterEach } from 'vitest'
+import { formatAbsolute, formatDate, formatFullDate, setDisplayTimeZone, withTz, zonedInputToISO } from './date'
+
+describe('without a chosen time zone', () => {
+  afterEach(() => setDisplayTimeZone(''))
+
+  it('renders in UTC and labels a full date as UTC', () => {
+    setDisplayTimeZone('')
+    expect(withTz().timeZone).toBe('UTC')
+    const at = '2026-03-28T12:33:00Z'
+    expect(formatFullDate(at).endsWith(' UTC')).toBe(true)
+    expect(formatAbsolute(at)).toContain('12:33')
+    expect(zonedInputToISO('2026-03-28T15:33')).toBe('2026-03-28T15:33:00.000Z')
+  })
+
+  it('renders in the chosen zone without a label once one is set', () => {
+    setDisplayTimeZone('Europe/Istanbul')
+    const at = '2026-03-28T12:33:00Z'
+    expect(formatAbsolute(at)).toMatch(/0?3:33|15:33/)
+    expect(formatAbsolute(at).endsWith('UTC')).toBe(false)
+    expect(zonedInputToISO('2026-03-28T15:33')).toBe('2026-03-28T12:33:00.000Z')
+  })
+})
 
 describe('formatDate', () => {
   it('returns time for dates less than 24 hours old', () => {
@@ -29,14 +50,14 @@ describe('formatDate', () => {
 
 describe('formatFullDate', () => {
   it('returns full date and time string', () => {
-    const dateStr = new Date(2024, 3, 15, 14, 30).toISOString()
+    const dateStr = '2024-04-15T14:30:00Z'
     const result = formatFullDate(dateStr)
     // Should contain the year
     expect(result).toContain('2024')
   })
 
   it('handles dates correctly', () => {
-    const date = new Date(2024, 0, 1, 0, 0).toISOString() // Jan 1, 2024
+    const date = '2024-01-01T12:00:00Z' // Jan 1, 2024 in UTC, the zone shown when none is chosen
     const result = formatFullDate(date)
     // Should contain year and day
     expect(result).toContain('2024')

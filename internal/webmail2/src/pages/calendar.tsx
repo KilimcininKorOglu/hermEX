@@ -31,7 +31,6 @@ import { AttendeePicker } from "@/components/attendee-picker"
 import { CategoryChips, toggledCategories, type CategoryOption } from "@/components/category-chips"
 import { EventTitle, eventTitleText } from "@/components/event-title"
 import { withTz, getDisplayTimeZone } from "@/utils/date"
-import { detectTimeZone } from "@/utils/timezone"
 import api, { type Calendar, type CalendarEvent, type UserFreeBusy, type Room, type CalendarSettings } from "@/utils/api"
 import {
   emptyEventForm,
@@ -468,7 +467,8 @@ function useEventEditor(load: () => Promise<void>) {
       toast.error(t(problem))
       return
     }
-    const payload = eventPayload(form, getDisplayTimeZone() || detectTimeZone())
+    // The form shows wall clocks in the display zone, which is UTC until one is chosen.
+    const payload = eventPayload(form, getDisplayTimeZone() || "UTC")
     if (!beginMutation()) return
     try {
       await save(payload)
