@@ -1,4 +1,5 @@
 import type { CalendarEvent, Room } from "@/utils/api"
+import { zonedInputFromISO, zonedInputToISO } from "@/utils/date"
 
 // EventForm is the calendar event editor's state. Every field is the text an
 // input holds, so an absent value is "" rather than undefined.
@@ -37,18 +38,16 @@ export function parseAttendees(s: string): string[] {
 }
 
 // rfc3339ToLocalInput converts an RFC3339 instant to the value a
-// datetime-local input expects ("YYYY-MM-DDTHH:mm" in local time).
-export function rfc3339ToLocalInput(value: string): string {
-  const d = new Date(value)
-  if (isNaN(d.getTime())) return ""
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+// datetime-local input expects: "YYYY-MM-DDTHH:mm" in the display zone, the
+// zone the calendar shows times in.
+function rfc3339ToLocalInput(value: string): string {
+  return zonedInputFromISO(value)
 }
 
-// localInputToRFC3339 converts a datetime-local value to an RFC3339 instant.
+// localInputToRFC3339 converts a datetime-local value, a wall clock in the
+// display zone, to an RFC3339 instant.
 function localInputToRFC3339(value: string): string {
-  const d = new Date(value)
-  return isNaN(d.getTime()) ? "" : d.toISOString()
+  return zonedInputToISO(value)
 }
 
 // recurrenceToForm maps a stored RRULE value to the form's frequency selector.
@@ -143,8 +142,9 @@ export function withoutRoom(form: EventForm, room: Room): EventForm {
 // or unstarted event has none.
 export function pickerWindow(form: EventForm): { start: string; end: string } | undefined {
   if (!form.start || form.allDay) return undefined
-  const end = form.end ? localInputToRFC3339(form.end) : new Date(new Date(form.start).getTime() + 60 * 60 * 1000).toISOString()
-  return { start: localInputToRFC3339(form.start), end }
+  const start = localInputToRFC3339(form.start)
+  const end = form.end ? localInputToRFC3339(form.end) : new Date(Date.parse(start) + 60 * 60 * 1000).toISOString()
+  return { start, end }
 }
 
 function instant(allDay: boolean, value: string): string {

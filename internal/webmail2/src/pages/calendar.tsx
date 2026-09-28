@@ -30,7 +30,21 @@ import { toast } from "sonner"
 import { AttendeePicker } from "@/components/attendee-picker"
 import { CategoryChips, toggledCategories, type CategoryOption } from "@/components/category-chips"
 import { EventTitle, eventTitleText } from "@/components/event-title"
-import { withTz, getDisplayTimeZone } from "@/utils/date"
+import { withTz, getDisplayTimeZone, addDaysToKey, eventDayKey, zonedDayKey, zonedDayStartISO } from "@/utils/date"
+import {
+  dayKeyOf,
+  dayLabel,
+  eventHeightMinutes,
+  eventsOnDay,
+  eventTopMinutes,
+  gridDay,
+  monthMatrix,
+  moveCursor,
+  todayGridDay,
+  wallInput,
+  wallTime,
+  weekDays,
+} from "@/utils/calendarGrid"
 import api, { type Calendar, type CalendarEvent, type UserFreeBusy, type Room, type CalendarSettings } from "@/utils/api"
 import {
   emptyEventForm,
@@ -42,7 +56,6 @@ import {
   parseAttendees,
   pickerWindow,
   recurrenceToForm,
-  rfc3339ToLocalInput,
   splitRooms,
   withoutRoom,
   withRoom,
@@ -89,9 +102,11 @@ function recurrenceLabel(t: TFunc, freq: string): string {
   }
 }
 
+// dayKey is the agenda's heading for the day an event starts on in the display
+// zone. An all-day event's date-only start already names that day.
 function dayKey(value: string): string {
-  const d = new Date(value)
-  return isNaN(d.getTime()) ? value : d.toLocaleDateString(undefined, withTz({ weekday: "long", year: "numeric", month: "long", day: "numeric" }))
+  const key = value.length === 10 ? value : zonedDayKey(value)
+  return key ? dayLabel(gridDay(key), { weekday: "long", year: "numeric", month: "long", day: "numeric" }) : value
 }
 
 function timeLabel(t: TFunc, ev: CalendarEvent): string {
@@ -109,51 +124,6 @@ function clockTime(value: string): string {
   return new Date(value).toLocaleTimeString(undefined, withTz({ hour: "2-digit", minute: "2-digit" }))
 }
 
-// dateKey returns a local YYYY-MM-DD key for a Date, used to bucket events
-// into the calendar grid's day cells.
-function dateKey(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-}
-
-// eventDayKey returns the local day key an event belongs to. All-day events
-// carry a date-only start ("YYYY-MM-DD"); timed events carry an RFC3339 instant.
-function eventDayKey(ev: CalendarEvent): string {
-  const raw = ev.allDay && ev.start.length === 10 ? `${ev.start}T00:00:00` : ev.start
-  const d = new Date(raw)
-  return isNaN(d.getTime()) ? "" : dateKey(d)
-}
-
-// monthMatrix returns the 42 days (6 weeks) that fill the grid for the month
-// containing cursor, including trailing days from adjacent months. The week
-// starts on firstDayOfWeek (0=Sun..6=Sat), matching the user's locale setting.
-function monthMatrix(cursor: Date, firstDayOfWeek: number): Date[] {
-  const year = cursor.getFullYear()
-  const month = cursor.getMonth()
-  const first = new Date(year, month, 1)
-  const offset = (first.getDay() - firstDayOfWeek + 7) % 7
-  const days: Date[] = []
-  for (let i = 0; i < 42; i++) {
-    days.push(new Date(year, month, 1 - offset + i))
-  }
-  return days
-}
-
-// weekDays returns the consecutive days that fill a time-grid view anchored to
-// the firstDayOfWeek of the week containing cursor. count is the number of day
-// columns (1 for day, 5 for work week, 7 for full week), the standard
-// "days in columns" calendar layout with time on the vertical axis.
-function weekDays(cursor: Date, count: number, firstDayOfWeek: number): Date[] {
-  const d = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate())
-  const offset = (d.getDay() - firstDayOfWeek + 7) % 7
-  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() - offset)
-  const days: Date[] = []
-  for (let i = 0; i < count; i++) {
-    days.push(new Date(start.getFullYear(), start.getMonth(), start.getDate() + i))
-  }
-  return days
-}
-
 // PX_PER_MINUTE positions timed events in the time grid (60 px per hour). The
 // grid renders one row per hour over 24 hours, so an event's vertical offset is
 // its minutes-since-local-midnight times this factor.
@@ -165,35 +135,12 @@ const PX_PER_MINUTE = 1
 // of the event with the day, never negative. All-day events are excluded; they
 // render in the all-day header row.
 function timedEventsForDay(events: CalendarEvent[], day: Date): CalendarEvent[] {
-  const key = dateKey(day)
-  return events.filter((ev) => !ev.allDay && eventDayKey(ev) === key)
+  return eventsOnDay(events, day, false)
 }
 
-// allDayEventsForDay returns the all-day events that fall on the given local day.
+// allDayEventsForDay returns the all-day events that fall on the given day.
 function allDayEventsForDay(events: CalendarEvent[], day: Date): CalendarEvent[] {
-  const key = dateKey(day)
-  return events.filter((ev) => ev.allDay && eventDayKey(ev) === key)
-}
-
-// eventTopMinutes returns the minutes offset from the day's local midnight at
-// which the event's box should start, clamped to >= 0 (a past-midnight start
-// renders at the top of the column).
-function eventTopMinutes(ev: CalendarEvent, day: Date): number {
-  const start = new Date(ev.start)
-  const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, 0)
-  return Math.max(0, Math.round((start.getTime() - dayStart.getTime()) / 60000))
-}
-
-// eventHeightMinutes returns the event's height in minutes, clamped so the box
-// never overflows the day and is never shorter than 15 minutes (a readable sliver
-// for short meetings). The end defaults to one hour after start when absent.
-function eventHeightMinutes(ev: CalendarEvent, day: Date): number {
-  const start = new Date(ev.start)
-  const end = ev.end ? new Date(ev.end) : new Date(start.getTime() + 60 * 60 * 1000)
-  const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 23, 59, 59, 999)
-  const s = Math.max(start.getTime(), new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime())
-  const e = Math.min(end.getTime(), dayEnd.getTime())
-  return Math.max(15, Math.round((e - s) / 60000))
+  return eventsOnDay(events, day, true)
 }
 
 // rangeLabel renders the human label for a day/week/work-week range so the
@@ -202,22 +149,13 @@ function rangeLabel(days: Date[]): string {
   const first = days[0]
   const last = days[days.length - 1]
   if (days.length === 1) {
-    return first.toLocaleDateString(undefined, withTz({ weekday: "long", year: "numeric", month: "long", day: "numeric" }))
+    return dayLabel(first, { weekday: "long", year: "numeric", month: "long", day: "numeric" })
   }
-  const sameMonth = first.getMonth() === last.getMonth() && first.getFullYear() === last.getFullYear()
-  const dayNum = (d: Date) => d.getDate()
+  const sameMonth = first.getUTCMonth() === last.getUTCMonth() && first.getUTCFullYear() === last.getUTCFullYear()
   if (sameMonth) {
-    return `${first.toLocaleDateString(undefined, withTz({ month: "long" }))} ${dayNum(first)} – ${dayNum(last)}, ${first.getFullYear()}`
+    return `${dayLabel(first, { month: "long" })} ${first.getUTCDate()} – ${last.getUTCDate()}, ${first.getUTCFullYear()}`
   }
-  return `${first.toLocaleDateString(undefined, withTz({ month: "short", day: "numeric" }))} – ${last.toLocaleDateString(undefined, withTz({ month: "short", day: "numeric" }))}, ${last.getFullYear()}`
-}
-
-// moveCursor advances the cursor by one step for the active view: a day for the
-// day view, a week for the work-week/week views, a month for the month view.
-function moveCursor(cursor: Date, view: CalendarView, sign: number): Date {
-  if (view === "month") return new Date(cursor.getFullYear(), cursor.getMonth() + sign, 1)
-  const days = view === "day" ? 1 : 7
-  return new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + sign * days)
+  return `${dayLabel(first, { month: "short", day: "numeric" })} – ${dayLabel(last, { month: "short", day: "numeric" })}, ${last.getUTCFullYear()}`
 }
 
 // weekdayNames returns the localized short weekday names, Sunday first.
@@ -363,14 +301,14 @@ function useCalendarData(cursor: Date) {
   // with the visible range, not the age of the account. The window is keyed on
   // year/month, so day/week navigation within a month reuses the same fetch and
   // only a month change triggers a reload.
-  const cursorYear = cursor.getFullYear()
-  const cursorMonth = cursor.getMonth()
+  const cursorYear = cursor.getUTCFullYear()
+  const cursorMonth = cursor.getUTCMonth()
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const start = new Date(cursorYear, cursorMonth - 1, 1)
-      const end = new Date(cursorYear, cursorMonth + 2, 1)
-      const res = await api.getCalendarEvents({ start: start.toISOString(), end: end.toISOString() })
+      const start = zonedDayStartISO(dayKeyOf(new Date(Date.UTC(cursorYear, cursorMonth - 1, 1))))
+      const end = zonedDayStartISO(dayKeyOf(new Date(Date.UTC(cursorYear, cursorMonth + 2, 1))))
+      const res = await api.getCalendarEvents({ start, end })
       const list = (res.events ?? []).slice().sort((a, b) => a.start.localeCompare(b.start))
       setEvents(list)
     } catch {
@@ -442,12 +380,11 @@ function useEventEditor(load: () => Promise<void>) {
   const openCreate = () => openWith(null, null, emptyEventForm())
 
   // openCreateOn opens the new-event dialog prefilled for the clicked grid day.
-  // When start/end are supplied (a drag-select time range), the dialog opens with
-  // that exact window; otherwise it defaults to 09:00 for an hour.
-  const openCreateOn = (day: Date, start?: Date, end?: Date) => {
-    const s = start ?? new Date(day.getFullYear(), day.getMonth(), day.getDate(), 9, 0)
-    const e = end ?? new Date(s.getFullYear(), s.getMonth(), s.getDate(), s.getHours() + 1, s.getMinutes())
-    openWith(null, null, { ...emptyEventForm(), start: rfc3339ToLocalInput(s.toISOString()), end: rfc3339ToLocalInput(e.toISOString()) })
+  // When startMin/endMin are supplied (a drag-select range, in minutes after the
+  // day starts), the dialog opens with that exact window; otherwise it defaults
+  // to 09:00 for an hour. Both are wall clocks in the display zone.
+  const openCreateOn = (day: Date, startMin = 9 * 60, endMin = startMin + 60) => {
+    openWith(null, null, { ...emptyEventForm(), start: wallInput(day, startMin), end: wallInput(day, endMin) })
   }
 
   const openEdit = (ev: CalendarEvent) => openWith(ev.uid, ev.tracking ?? null, eventFormOf(ev))
@@ -538,7 +475,7 @@ function useFreeBusy() {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const [emails, setEmails] = useState("")
-  const [date, setDate] = useState(() => dateKey(new Date()))
+  const [date, setDate] = useState(() => zonedDayKey(new Date()))
   const [loading, setLoading] = useState(false)
   const [results, setResults] = useState<UserFreeBusy[] | null>(null)
 
@@ -554,13 +491,13 @@ function useFreeBusy() {
       toast.error(t(problem))
       return
     }
-    // Query the whole local day.
-    const dayStart = new Date(`${date}T00:00:00`)
-    const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000)
+    // Query the whole day in the display zone.
+    const dayStart = zonedDayStartISO(date)
+    const dayEnd = zonedDayStartISO(addDaysToKey(date, 1))
     setLoading(true)
     setResults(null)
     try {
-      const res = await api.getFreeBusy(list, dayStart.toISOString(), dayEnd.toISOString())
+      const res = await api.getFreeBusy(list, dayStart, dayEnd)
       setResults(res.freeBusy ?? [])
     } catch (err) {
       toast.error(errorText(err, t("calendar.availabilityFailed")))
@@ -665,7 +602,7 @@ export function CalendarPage() {
   // View toggle: agenda list, day/week/work-week time grid, or month grid. cursor
   // is the displayed month (month view) or the anchor day (day/week/work-week).
   const [view, setView] = useState<CalendarView>("list")
-  const [cursor, setCursor] = useState(() => new Date())
+  const [cursor, setCursor] = useState(() => todayGridDay())
   // sideBySide renders each visible calendar in its own day/week grid (columns)
   // instead of overlaying them in one shared grid; only meaningful with 2+ visible
   // calendars, so the toggle is hidden otherwise.
@@ -826,10 +763,9 @@ function CalendarToolbar(props: {
           type="date"
           aria-label={t("calendar.jumpToDate")}
           title={t("calendar.jumpToDate")}
-          value={dateKey(props.cursor)}
+          value={dayKeyOf(props.cursor)}
           onChange={(e) => {
-            const d = new Date(e.target.value)
-            if (!isNaN(d.getTime())) props.onCursor(d)
+            if (/^\d{4}-\d{2}-\d{2}$/.test(e.target.value)) props.onCursor(gridDay(e.target.value))
           }}
           className="rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/20"
         />
@@ -992,16 +928,16 @@ function PeriodNav({ label, prevLabel, nextLabel, onPrev, onNext, onToday }: {
 function MonthView({ cursor, setCursor, grid, weekdayLabels, events, eventColor, editor }: ViewProps) {
   const { t } = useI18n()
   const eventsByDay = bucketByDay(events)
-  const todayKey = dateKey(new Date())
+  const todayKey = zonedDayKey(new Date())
   return (
     <div className="space-y-3">
       <PeriodNav
-        label={cursor.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
+        label={dayLabel(cursor, { month: "long", year: "numeric" })}
         prevLabel={t("calendar.previousMonth")}
         nextLabel={t("calendar.nextMonth")}
-        onPrev={() => setCursor((c) => new Date(c.getFullYear(), c.getMonth() - 1, 1))}
-        onNext={() => setCursor((c) => new Date(c.getFullYear(), c.getMonth() + 1, 1))}
-        onToday={() => setCursor(new Date())}
+        onPrev={() => setCursor((c) => moveCursor(c, "month", -1))}
+        onNext={() => setCursor((c) => moveCursor(c, "month", +1))}
+        onToday={() => setCursor(todayGridDay())}
       />
       <div className="overflow-hidden rounded-lg border bg-card">
         <div className="grid grid-cols-7 border-b bg-muted/30 text-center text-xs font-medium text-muted-foreground">
@@ -1011,12 +947,12 @@ function MonthView({ cursor, setCursor, grid, weekdayLabels, events, eventColor,
         </div>
         <div className="grid grid-cols-7">
           {monthMatrix(cursor, grid.firstDayOfWeek).map((day) => {
-            const key = dateKey(day)
+            const key = dayKeyOf(day)
             return (
               <MonthDayCell
                 key={key}
                 day={day}
-                inMonth={day.getMonth() === cursor.getMonth()}
+                inMonth={day.getUTCMonth() === cursor.getUTCMonth()}
                 isToday={key === todayKey}
                 events={eventsByDay.get(key) ?? []}
                 eventColor={eventColor}
@@ -1053,7 +989,7 @@ function MonthDayCell({ day, inMonth, isToday, events, eventColor, editor }: {
     >
       <div className="flex justify-end">
         <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs ${dayNumberClass(isToday, events.length > 0)}`}>
-          {day.getDate()}
+          {day.getUTCDate()}
         </span>
       </div>
       <div className="mt-0.5 space-y-0.5">
@@ -1088,7 +1024,7 @@ function TimeGridBody({ view, cursor, setCursor, grid, weekdayLabels, events, ev
 }) {
   const { t } = useI18n()
   const days = weekDays(cursor, GRID_DAYS[view], grid.firstDayOfWeek)
-  const todayKey = dateKey(new Date())
+  const todayKey = zonedDayKey(new Date())
   const renderGrid = (evs: CalendarEvent[], label: string) => (
     <DayTimeGrid
       days={days}
@@ -1098,7 +1034,7 @@ function TimeGridBody({ view, cursor, setCursor, grid, weekdayLabels, events, ev
       todayLabel={t("common.today")}
       onPrev={() => setCursor((c) => moveCursor(c, view, -1))}
       onNext={() => setCursor((c) => moveCursor(c, view, +1))}
-      onToday={() => setCursor(new Date())}
+      onToday={() => setCursor(todayGridDay())}
       weekdayLabels={weekdayLabels}
       firstDayOfWeek={grid.firstDayOfWeek}
       resolution={grid.resolution}
@@ -1753,7 +1689,7 @@ function DayTimeGrid(props: {
   eventColor: (ev: CalendarEvent) => string | undefined
   todayKey: string
   onOpenEvent: (ev: CalendarEvent) => void
-  onCreateOn: (day: Date, start?: Date, end?: Date) => void
+  onCreateOn: (day: Date, startMin?: number, endMin?: number) => void
   onMoveEvent: (ev: CalendarEvent, start: Date, end: Date) => void
 }) {
   const { t } = useI18n()
@@ -1796,12 +1732,10 @@ function DayTimeGrid(props: {
           const lo = Math.min(d.startMin, d.endMin)
           const hi = Math.max(d.startMin, d.endMin)
           const day = props.days[d.dayIdx]
-          const start = new Date(day.getFullYear(), day.getMonth(), day.getDate(), Math.floor(lo / 60), lo % 60)
-          const end = new Date(day.getFullYear(), day.getMonth(), day.getDate(), Math.floor(hi / 60), hi % 60)
           // A click (lo == hi) opens the default 09:00 dialog; a drag opens the
           // selected window, but only when it spans at least one slot.
           if (hi - lo >= props.resolution) {
-            props.onCreateOn(day, start, end)
+            props.onCreateOn(day, lo, hi)
           } else {
             props.onCreateOn(day)
           }
@@ -1834,9 +1768,7 @@ function DayTimeGrid(props: {
       setEventDrag((d) => {
         if (d) {
           const day = props.days[d.dayIdx]
-          const start = new Date(day.getFullYear(), day.getMonth(), day.getDate(), Math.floor(d.startMin / 60), d.startMin % 60)
-          const end = new Date(day.getFullYear(), day.getMonth(), day.getDate(), Math.floor(d.endMin / 60), d.endMin % 60)
-          props.onMoveEvent(d.ev, start, end)
+          props.onMoveEvent(d.ev, wallTime(day, d.startMin), wallTime(day, d.endMin))
         }
         return null
       })
@@ -1890,12 +1822,12 @@ function DayTimeGrid(props: {
         <div className="grid border-b bg-muted/30" style={{ gridTemplateColumns: colTemplate }}>
           <div className="py-2" />
           {props.days.map((day) => {
-            const key = dateKey(day)
+            const key = dayKeyOf(day)
             const isToday = key === props.todayKey
             return (
               <div key={key} className={`border-l py-2 text-center ${isToday ? "text-primary font-semibold" : ""}`}>
-                <div className="text-xs text-muted-foreground">{props.weekdayLabels[(day.getDay() - props.firstDayOfWeek + 7) % 7]}</div>
-                <div className="text-sm">{day.getDate()}</div>
+                <div className="text-xs text-muted-foreground">{props.weekdayLabels[(day.getUTCDay() - props.firstDayOfWeek + 7) % 7]}</div>
+                <div className="text-sm">{day.getUTCDate()}</div>
               </div>
             )
           })}
@@ -1904,7 +1836,7 @@ function DayTimeGrid(props: {
         <div className="grid border-b" style={{ gridTemplateColumns: colTemplate }}>
           <div className="py-1 text-center text-[10px] text-muted-foreground">{t("calendar.allDay")}</div>
           {props.days.map((day) => {
-            const key = dateKey(day)
+            const key = dayKeyOf(day)
             const allDay = allDayEventsForDay(props.events, day)
             return (
               <div key={key} className="min-h-7 border-l px-1 py-0.5">
@@ -1936,7 +1868,7 @@ function DayTimeGrid(props: {
               ))}
             </div>
             {props.days.map((day, dayIdx) => {
-              const key = dateKey(day)
+              const key = dayKeyOf(day)
               const isToday = key === props.todayKey
               const timed = timedEventsForDay(props.events, day)
               return (

@@ -1,7 +1,14 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { setDisplayTimeZone } from "@/utils/date"
 import { emptyEventForm, eventFormError, eventFormOf, eventKey, eventPayload, movedEventPayload, parseAttendees, pickerWindow, recurrenceToForm, splitRooms, withoutRoom, withRoom } from "./eventForm"
 
-const localISO = (h: number, m: number) => new Date(2026, 8, 25, h, m).toISOString()
+// The form's inputs are wall clocks in the display zone, whatever zone the
+// browser is in. New York is UTC-4 on 25 September 2026.
+beforeEach(() => setDisplayTimeZone("America/New_York"))
+afterEach(() => setDisplayTimeZone(""))
+
+// localISO is the instant of h:m on 25 September 2026 in New York.
+const localISO = (h: number, m: number) => new Date(Date.UTC(2026, 8, 25, h + 4, m)).toISOString()
 
 describe("movedEventPayload", () => {
   it("moves the event to the new window and keeps its zone and other fields", () => {
@@ -22,7 +29,7 @@ describe("movedEventPayload", () => {
 })
 
 describe("eventFormOf", () => {
-  it("fills a timed event's inputs in local time and keeps every field", () => {
+  it("fills a timed event's inputs in the display zone and keeps every field", () => {
     const form = eventFormOf({
       uid: "1", summary: "Review", start: localISO(10, 30), end: localISO(11, 0), location: "Room 1", description: "Notes",
       attendees: ["a@hermex.test", "b@hermex.test"], optionalAttendees: ["c@hermex.test"], recurrence: "FREQ=WEEKLY;BYDAY=MO",
