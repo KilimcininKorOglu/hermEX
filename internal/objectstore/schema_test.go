@@ -24,6 +24,9 @@ func tableNames(t *testing.T, db *sql.DB) []string {
 		}
 		names = append(names, n)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	return names
 }
 
@@ -51,7 +54,7 @@ func TestOpenCreatesSchema(t *testing.T) {
 
 	wantObjects := []string{
 		"allocated_eids", "attachment_properties", "attachments", "autoreply_ts",
-		"configurations", "dav_dead_props", "folder_properties", "folders",
+		"configurations", "dav_dead_props", "folder_properties", "folders", "foreign_named_props",
 		"message_changes", "message_properties", "messages", "msgtime_index",
 		"named_properties", "permissions", "public_read_state", "receive_table",
 		"recipients", "recipients_properties", "replguidmap", "rules",
@@ -138,7 +141,7 @@ func TestReopenIsIdempotent(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer s2.Close()
-	if got := tableNames(t, s2.objdb); len(got) != 23 {
-		t.Errorf("object store has %d tables after reopen, want 23", len(got))
+	if got := tableNames(t, s2.objdb); len(got) != 24 {
+		t.Errorf("object store has %d tables after reopen, want 24", len(got))
 	}
 }

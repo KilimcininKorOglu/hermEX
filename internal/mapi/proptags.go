@@ -180,6 +180,16 @@ const (
 	PrScheduleOriginal = PropTag(0x67760102) // PtBinary
 )
 
+// TNEF-related property tags ([MS-OXTNEF], [MS-OXCMSG]): the ones a decoded TNEF
+// stream sets that no other code path names.
+const (
+	PrOriginalMessageClass = PropTag(0x004B001F) // PtUnicode
+	PrTnefCorrelationKey   = PropTag(0x007F0102) // PtBinary, pairs a TNEF part with its message
+	PrAttachTransportName  = PropTag(0x370C001F) // PtUnicode
+	PrAttachTag            = PropTag(0x370A0102) // PtBinary
+	PrAttachEncoding       = PropTag(0x37020102) // PtBinary
+)
+
 // Report property tags ([MS-OXOMSG] 2.2.2): what a delivery status notification
 // or a message disposition notification records on the report message and on
 // each recipient it reports on.

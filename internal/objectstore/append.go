@@ -66,6 +66,8 @@ func (s *Store) AppendMessage(folderID int64, raw []byte, internalDate time.Time
 		Resolver: s.GetNamedPropIDs,
 		// The served form carries the promoted header fields back out.
 		PropName: s.NamedPropName,
+		// A TNEF part carries named properties its sender chose.
+		ForeignResolver: s.GetForeignNamedPropIDs,
 		// A message without a Date header is dated when it arrived, which for an
 		// IMAP APPEND is the internal date the client named, not the append time.
 		ArrivalTime: internalDate,

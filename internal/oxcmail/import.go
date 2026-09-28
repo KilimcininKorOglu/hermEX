@@ -36,13 +36,6 @@ func Import(raw []byte, opt Options) (*Message, error) {
 	// only one identity.
 	fillSenderRepresenting(msg)
 
-	if !msg.Props.Has(mapi.PrImportance) {
-		msg.Props.Set(mapi.PrImportance, int32(mapi.ImportanceNormal))
-	}
-	if !msg.Props.Has(mapi.PrSensitivity) {
-		msg.Props.Set(mapi.PrSensitivity, int32(mapi.SensitivityNone))
-	}
-
 	// The original header block, captured verbatim.
 	msg.Props.Set(mapi.PrTransportMessageHeaders, string(root.RawHeader()))
 
@@ -60,7 +53,17 @@ func Import(raw []byte, opt Options) (*Message, error) {
 	if err := promoteInternetHeaders(hdr, msg, opt); err != nil {
 		return nil, err
 	}
-	parseContent(root, msg, stamp, opt.CalendarImporter)
+	if err := parseContent(root, msg, stamp, opt); err != nil {
+		return nil, err
+	}
+	// Importance and sensitivity default only after a TNEF part had its say, since a
+	// header-less value is one it may carry.
+	if !msg.Props.Has(mapi.PrImportance) {
+		msg.Props.Set(mapi.PrImportance, int32(mapi.ImportanceNormal))
+	}
+	if !msg.Props.Has(mapi.PrSensitivity) {
+		msg.Props.Set(mapi.PrSensitivity, int32(mapi.SensitivityNone))
+	}
 	importReport(root, msg, stamp)
 	if err := importSMIME(root, msg, stamp, opt); err != nil {
 		return nil, err
@@ -430,7 +433,8 @@ type bodyParts struct {
 // PR_HTML + PR_INTERNET_CPID from a single HTML part (raw bytes in its original
 // charset), then turns every non-body leaf part into an attachment.
 // Multiple-HTML joining, enriched, and calendar bodies are deferred.
-func parseContent(root *mime.Part, msg *Message, stamp uint64, calImport CalendarImporter) {
+func parseContent(root *mime.Part, msg *Message, stamp uint64, opt Options) error {
+	calImport := opt.CalendarImporter
 	var bp bodyParts
 	selectParts(root, &bp, 0)
 	if bp.plain != nil {
@@ -448,17 +452,24 @@ func parseContent(root *mime.Part, msg *Message, stamp uint64, calImport Calenda
 		mergeCalendar(msg, bp.calendar, calImport)
 	}
 
-	bodySet := map[*mime.Part]bool{}
-	if bp.plain != nil {
-		bodySet[bp.plain] = true
-	}
-	for _, h := range bp.htmls {
-		bodySet[h] = true
-	}
-	if bp.enriched != nil {
-		bodySet[bp.enriched] = true
-	}
+	bodySet := bp.consumed()
+	decoded := claimTNEF(root, bodySet)
 	walkAttachments(root, bodySet, msg, stamp)
+	if decoded == nil {
+		return nil
+	}
+	return applyTNEF(msg, decoded, opt, stamp)
+}
+
+// consumed returns the parts the body took, which are no attachments.
+func (bp bodyParts) consumed() map[*mime.Part]bool {
+	set := map[*mime.Part]bool{}
+	for _, p := range append([]*mime.Part{bp.plain, bp.enriched}, bp.htmls...) {
+		if p != nil {
+			set[p] = true
+		}
+	}
+	return set
 }
 
 // mergeCalendar parses a text/calendar part through the injected importer and, when
@@ -520,6 +531,11 @@ func walkAttachments(part *mime.Part, bodySet map[*mime.Part]bool, msg *Message,
 func buildAttachment(part *mime.Part, stamp uint64) Attachment {
 	var a Attachment
 	cttype := strings.ToLower(part.Type + "/" + part.Subtype)
+	// A TNEF part reaches here only when it did not decode, and is then kept as
+	// opaque data ([MS-OXCMAIL] 2.2.3.8).
+	if isTNEFPart(part) {
+		cttype = "application/octet-stream"
+	}
 	a.Props.Set(mapi.PrAttachMimeTag, cttype)
 
 	filename := part.Filename()
