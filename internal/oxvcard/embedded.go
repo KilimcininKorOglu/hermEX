@@ -2,6 +2,7 @@ package oxvcard
 
 import (
 	"errors"
+	"slices"
 	"strings"
 
 	"hermex/internal/ext"
@@ -108,6 +109,42 @@ func RestoreEmbedded(blob []byte, resolve PropIDResolver) (mapi.PropertyValues, 
 		out = append(out, mapi.TaggedPropVal{Tag: mapi.MakeTag(id, pv.Tag.Type()), Value: pv.Value})
 	}
 	return out, nil
+}
+
+// CardContact converts a received vCard into the encoded contact an attachment
+// keeps in PrEmbeddedContact ([MS-OXCMAIL] 2.2.3.4.4), with the contact's display
+// name. The card's named properties are recorded by name, so no store is needed.
+// A contact photo is not kept: the encoding holds properties, not attachments.
+func CardContact(card []byte) (blob []byte, name string, err error) {
+	var names []mapi.PropertyName
+	resolve := func(_ bool, want []mapi.PropertyName) ([]uint16, error) {
+		out := make([]uint16, len(want))
+		for i, w := range want {
+			j := slices.Index(names, w)
+			if j < 0 {
+				j = len(names)
+				names = append(names, w)
+			}
+			out[i] = 0x8000 + uint16(j) // #nosec G115 -- a contact uses a few dozen named properties
+		}
+		return out, nil
+	}
+	msg, err := Import(card, Options{Resolver: resolve})
+	if err != nil {
+		return nil, "", err
+	}
+	nameOf := func(id uint16) (mapi.PropertyName, bool, error) {
+		i := int(id) - 0x8000
+		if i < 0 || i >= len(names) {
+			return mapi.PropertyName{}, false, nil
+		}
+		return names[i], true, nil
+	}
+	blob, err = EncodeEmbedded(msg.Props, nameOf)
+	if err != nil {
+		return nil, "", err
+	}
+	return blob, displayName(&msg.Props), nil
 }
 
 // EmbeddedCard renders an encoded contact as the vCard 3.0 an internet message

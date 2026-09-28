@@ -454,7 +454,7 @@ func parseContent(root *mime.Part, msg *Message, stamp uint64, opt Options) erro
 
 	bodySet := bp.consumed()
 	decoded := claimTNEF(root, bodySet)
-	walkAttachments(root, bodySet, msg, stamp)
+	walkAttachments(root, bodySet, msg, stamp, opt.ContactFromCard)
 	if decoded == nil {
 		return nil
 	}
@@ -511,17 +511,21 @@ func calendarPropCarried(tag mapi.PropTag) bool {
 // walkAttachments turns every non-body leaf part into an attachment, mirroring
 // the MS-OXCMAIL attachment enumeration: multipart containers are descended into
 // (not themselves attachments), and the parts chosen for the body are skipped.
-func walkAttachments(part *mime.Part, bodySet map[*mime.Part]bool, msg *Message, stamp uint64) {
+func walkAttachments(part *mime.Part, bodySet map[*mime.Part]bool, msg *Message, stamp uint64, fromCard ContactFromCard) {
 	if len(part.Children) > 0 {
 		for _, child := range part.Children {
-			walkAttachments(child, bodySet, msg, stamp)
+			walkAttachments(child, bodySet, msg, stamp, fromCard)
 		}
 		return
 	}
 	if bodySet[part] {
 		return
 	}
-	msg.Attachments = append(msg.Attachments, buildAttachment(part, stamp))
+	att := buildAttachment(part, stamp)
+	if isVCardPart(part) {
+		promoteContact(&att, part, fromCard)
+	}
+	msg.Attachments = append(msg.Attachments, att)
 }
 
 // buildAttachment constructs one attachment property bag from a leaf MIME part,

@@ -32,6 +32,11 @@ type PropIDResolver func(create bool, names []mapi.PropertyName) ([]uint16, erro
 // name. It is satisfied by oxvcard.EmbeddedCard, which oxcmail cannot import.
 type ContactCard func(blob []byte) (card []byte, name string, err error)
 
+// ContactFromCard is the import-side counterpart of ContactCard: it converts a
+// received vCard into the encoded contact PrEmbeddedContact keeps, with the
+// contact's display name. It is satisfied by oxvcard.CardContact.
+type ContactFromCard func(card []byte) (blob []byte, name string, err error)
+
 // ForeignResolver resolves named properties a message's sender chose, allocating
 // a new name only within the store's quota; the result is parallel to names, 0
 // for a name left unresolved. It is satisfied by the store's
@@ -63,6 +68,8 @@ type PropNameResolver func(propid uint16) (name mapi.PropertyName, ok bool, err 
 //
 // ContactCard lets Export send an attached contact as the vCard [MS-OXCMAIL]
 // 2.1.3.4.6 calls for; without it the contact goes as the message it is stored as.
+// ContactFromCard lets Import store a received vCard as an attached contact
+// ([MS-OXCMAIL] 2.2.3.4.4); without it the card stays a file attachment.
 //
 // ForeignResolver maps the named properties a sender chose, the ones a TNEF part
 // carries, under the store's quota for such names; without it those properties
@@ -80,6 +87,7 @@ type Options struct {
 	PropName         PropNameResolver
 	ForeignResolver  ForeignResolver
 	ContactCard      ContactCard
+	ContactFromCard  ContactFromCard
 	CalendarBody     []byte
 	CalendarMethod   string
 	CalendarImporter CalendarImporter

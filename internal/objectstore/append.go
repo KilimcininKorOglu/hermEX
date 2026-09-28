@@ -12,6 +12,7 @@ import (
 	"hermex/internal/mapi"
 	"hermex/internal/oxcical"
 	"hermex/internal/oxcmail"
+	"hermex/internal/oxvcard"
 	"hermex/internal/smime"
 )
 
@@ -68,6 +69,10 @@ func (s *Store) AppendMessage(folderID int64, raw []byte, internalDate time.Time
 		PropName: s.NamedPropName,
 		// A TNEF part carries named properties its sender chose.
 		ForeignResolver: s.GetForeignNamedPropIDs,
+		// A received vCard is stored as an attached contact, and the served form
+		// sends that contact back out as a vCard.
+		ContactFromCard: oxvcard.CardContact,
+		ContactCard:     oxvcard.EmbeddedCard,
 		// A message without a Date header is dated when it arrived, which for an
 		// IMAP APPEND is the internal date the client named, not the append time.
 		ArrivalTime: internalDate,
