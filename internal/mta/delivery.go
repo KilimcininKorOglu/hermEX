@@ -750,9 +750,9 @@ func fromHeaderDomain(raw []byte) string {
 // return-path), used as the destination of any out-of-office auto-reply.
 // Addresses with no local mailbox are returned as unresolved, so callers can
 // report partial delivery rather than silently dropping them. Deliver never
-// relays: automated notifications (auto-reply, read receipt, bounce) use it so a
-// message can never be sent off-server. User-composed send paths that should
-// relay external recipients use DeliverAndRelay.
+// relays; an automated notification that may leave the server (the out-of-office
+// reply) hands its unresolved recipients to relayAutomated. User-composed send
+// paths that should relay external recipients use DeliverAndRelay.
 func Deliver(accounts directory.Accounts, from string, recipients []string, raw []byte, received time.Time) (unresolved []string, err error) {
 	if accounts == nil {
 		// A caller with no directory (a daemon that stores mail but never

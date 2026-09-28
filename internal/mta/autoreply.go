@@ -96,13 +96,38 @@ func sendAutoReply(accounts directory.Accounts, st *objectstore.Store, selfAddr,
 		return err
 	}
 
-	// Deliver the reply through the normal path. A local recipient receives it
-	// in their inbox; its Auto-Submitted header makes their own out-of-office
-	// suppress, so the exchange ends after one message. An external recipient
-	// has no local mailbox and no relay exists yet, so the reply is reported
-	// unresolved and dropped, consistent with the rest of the server.
-	if _, err := Deliver(accounts, selfAddr, []string{to}, reply, received); err != nil {
+	// A local recipient receives the reply in their inbox; its Auto-Submitted
+	// header makes their own out-of-office suppress, so the exchange ends after one
+	// message. A recipient without a mailbox here leaves through the relay when its
+	// domain is foreign or split with another mail system.
+	unresolved, err := Deliver(accounts, selfAddr, []string{to}, reply, received)
+	if err != nil {
 		return err
+	}
+	return relayAutomated(accounts, selfAddr, unresolved, reply)
+}
+
+// relayAutomated hands a server-generated message to the relay for each recipient
+// without a mailbox here that may leave this server: a foreign domain, or an
+// address of a split domain that another mail system serves. It goes through
+// OnRuleSend, which enqueues from the owning mailbox under the outbound abuse cap.
+// A recipient that may not leave is dropped, as a local user-unknown always was.
+func relayAutomated(accounts directory.Accounts, owner string, unresolved []string, raw []byte) error {
+	if OnRuleSend == nil {
+		return nil
+	}
+	var out []string
+	for _, rcpt := range unresolved {
+		ok, err := isRelayable(accounts, rcpt)
+		if err != nil {
+			return err
+		}
+		if ok {
+			out = append(out, rcpt)
+		}
+	}
+	if len(out) > 0 {
+		OnRuleSend(owner, out, raw)
 	}
 	return nil
 }
