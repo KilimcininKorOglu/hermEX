@@ -27,6 +27,11 @@ type Attachment struct {
 // store's named-property allocator.
 type PropIDResolver func(create bool, names []mapi.PropertyName) ([]uint16, error)
 
+// ContactCard renders the contact properties an attachment keeps in
+// PrEmbeddedContact as a vCard 3.0, returning the card and the contact's display
+// name. It is satisfied by oxvcard.EmbeddedCard, which oxcmail cannot import.
+type ContactCard func(blob []byte) (card []byte, name string, err error)
+
 // ForeignResolver resolves named properties a message's sender chose, allocating
 // a new name only within the store's quota; the result is parallel to names, 0
 // for a name left unresolved. It is satisfied by the store's
@@ -56,6 +61,9 @@ type PropNameResolver func(propid uint16) (name mapi.PropertyName, ok bool, err 
 // the caller's iCalendar converter understands, letting Import overlay a scheduling
 // message's class and appointment properties (see CalendarImporter).
 //
+// ContactCard lets Export send an attached contact as the vCard [MS-OXCMAIL]
+// 2.1.3.4.6 calls for; without it the contact goes as the message it is stored as.
+//
 // ForeignResolver maps the named properties a sender chose, the ones a TNEF part
 // carries, under the store's quota for such names; without it those properties
 // are dropped.
@@ -71,6 +79,7 @@ type Options struct {
 	Resolver         PropIDResolver
 	PropName         PropNameResolver
 	ForeignResolver  ForeignResolver
+	ContactCard      ContactCard
 	CalendarBody     []byte
 	CalendarMethod   string
 	CalendarImporter CalendarImporter

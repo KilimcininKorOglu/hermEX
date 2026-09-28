@@ -43,37 +43,47 @@ func Export(msg *Message, opt Options) ([]byte, error) {
 		writeSMIMEBody(&b, msg, opt, clearSigned)
 		return b.Bytes(), nil
 	}
+	if msg, err = withContactCards(msg, opt); err != nil {
+		return nil, err
+	}
 	if kind := reportKind(msg); kind != "" {
 		if err := writeReportBody(&b, msg, opt, kind); err != nil {
 			return nil, err
 		}
 		return b.Bytes(), nil
 	}
+	if err := writeContentBody(&b, msg, opt); err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
+}
 
+// writeContentBody writes the body of an ordinary message: the body itself,
+// wrapped in multipart/related when it has inline images and then in
+// multipart/mixed when regular attachments follow.
+func writeContentBody(b *bytes.Buffer, msg *Message, opt Options) error {
 	inline, regular := splitAttachments(msg.Attachments)
 
-	// The innermost unit is the body, wrapped in multipart/related when it has
-	// inline images and then in multipart/mixed when regular attachments follow.
 	innerHdr, innerBytes, err := renderBody(msg, opt)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if len(inline) > 0 {
 		innerHdr, innerBytes, err = wrapMultipart("related", innerHdr, innerBytes, inline)
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
 	if len(regular) > 0 {
 		innerHdr, innerBytes, err = wrapMultipart("mixed", innerHdr, innerBytes, regular)
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
-	writeHeaderFields(&b, innerHdr)
+	writeHeaderFields(b, innerHdr)
 	b.WriteString("\r\n")
 	b.Write(innerBytes)
-	return b.Bytes(), nil
+	return nil
 }
 
 // splitAttachments separates inline (HTML-referenced) attachments from regular
@@ -254,7 +264,11 @@ func renderAttachment(att Attachment) (textproto.MIMEHeader, []byte) {
 	// 8bit, or binary transfer encoding, never base64 or quoted-printable, so
 	// its bytes are emitted verbatim. Every other attachment is base64-encoded.
 	cte, body := "base64", encodeBase64(data)
-	if strings.HasPrefix(mimeType, "message/") {
+	switch {
+	case strings.HasPrefix(mimeType, "text/directory"):
+		// [MS-OXCMAIL] 2.1.3.4.6: a vCard attachment is quoted-printable.
+		cte, body = "quoted-printable", quotedPrintable(data)
+	case strings.HasPrefix(mimeType, "message/"):
 		if is7bitClean(data) {
 			cte = "7bit"
 		} else {

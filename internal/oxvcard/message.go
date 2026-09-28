@@ -11,8 +11,13 @@ type PropIDResolver func(create bool, names []mapi.PropertyName) ([]uint16, erro
 // Options configures a conversion. Resolver supplies named-property ids and is
 // required: a contact's email slots, work address, file-as, IM address, and
 // has-picture flag are all named properties.
+//
+// Version3 makes Export write vCard 3.0 (RFC 2426), the version [MS-OXVCARD] and
+// the vCard attachment of an internet message ([MS-OXCMAIL] 2.1.3.4.6) use;
+// otherwise Export writes 4.0.
 type Options struct {
 	Resolver PropIDResolver
+	Version3 bool
 }
 
 // namedField is one contact named property and the type its value takes.

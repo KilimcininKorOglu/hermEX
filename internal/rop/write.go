@@ -12,6 +12,7 @@ import (
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcical"
 	"hermex/internal/oxcmail"
+	"hermex/internal/oxvcard"
 	"hermex/internal/sendas"
 )
 
@@ -357,17 +358,40 @@ func (s *Session) saveEmbeddedMessage(out *ext.Push, obj *object, hindex, ihinde
 		writeErr(out, ropSaveChangesMessage, hindex, ecNotSupported)
 		return
 	}
-	raw, err := oxcmail.Export(emb.msg, oxcmail.Options{})
+	payload, err := embeddedPayloadProps(obj.store, emb.msg)
 	if err != nil {
 		writeErr(out, ropSaveChangesMessage, hindex, ecError)
 		return
 	}
 	if emb.parent != nil {
-		s.saveStoredEmbedded(out, emb.parent, hindex, ihindex, raw)
+		s.saveStoredEmbedded(out, emb.parent, hindex, ihindex, payload)
 		return
 	}
-	setEmbeddedPayload(&emb.writeback.pending, raw)
+	for _, tv := range payload {
+		emb.writeback.pending.Set(tv.Tag, tv.Value)
+	}
 	writeSaveChangesOK(out, hindex, ihindex, uint64(handle))
+}
+
+// embeddedPayloadProps renders an embedded message into the attachment properties
+// that carry it: the RFC 5322 bytes and, for a contact, its properties, which the
+// bytes cannot hold and a vCard is built from when the parent is sent.
+func embeddedPayloadProps(st *objectstore.Store, msg *oxcmail.Message) (mapi.PropertyValues, error) {
+	raw, err := oxcmail.Export(msg, oxcmail.Options{})
+	if err != nil {
+		return nil, err
+	}
+	var props mapi.PropertyValues
+	setEmbeddedPayload(&props, raw)
+	if !oxvcard.IsContactClass(stringProp(msg.Props, mapi.PrMessageClass)) {
+		return props, nil
+	}
+	blob, err := oxvcard.EncodeEmbedded(msg.Props, st.NamedPropName)
+	if err != nil {
+		return nil, err
+	}
+	props.Set(mapi.PrEmbeddedContact, blob)
+	return props, nil
 }
 
 // saveStoredEmbedded writes an edited embedded message back into the stored
@@ -376,13 +400,11 @@ func (s *Session) saveEmbeddedMessage(out *ext.Push, obj *object, hindex, ihinde
 // marked touched so its own save advances the change number: without that the edit
 // is in the store but no already-synced client downloads it, because ICS reports a
 // message as updated only when its change number advances.
-func (s *Session) saveStoredEmbedded(out *ext.Push, att *object, hindex, ihindex uint8, raw []byte) {
+func (s *Session) saveStoredEmbedded(out *ext.Push, att *object, hindex, ihindex uint8, props mapi.PropertyValues) {
 	parent := att.attachParent
 	if s.denyWrite(out, ropSaveChangesMessage, hindex, att.store, parent.folderID, mapi.FrightsEditAny) {
 		return
 	}
-	var props mapi.PropertyValues
-	setEmbeddedPayload(&props, raw)
 	if err := att.store.SetAttachmentProperties(att.attachID, props); err != nil {
 		writeErr(out, ropSaveChangesMessage, hindex, ecError)
 		return
@@ -905,6 +927,8 @@ func exportSubmitted(st *objectstore.Store, msg *oxcmail.Message) ([]byte, error
 		opt.Resolver = st.GetNamedPropIDs
 	}
 	opt.PropName = st.NamedPropName
+	// An attached contact is sent as the vCard [MS-OXCMAIL] 2.1.3.4.6 calls for.
+	opt.ContactCard = oxvcard.EmbeddedCard
 	return oxcmail.Export(msg, opt)
 }
 

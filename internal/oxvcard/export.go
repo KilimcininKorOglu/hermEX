@@ -8,10 +8,10 @@ import (
 	"hermex/internal/oxcmail"
 )
 
-// Export renders an IPM.Contact message as a vCard 4.0. Named properties (email
-// slots, work address, IM, has-picture, the preserved UID) are resolved through
-// opt.Resolver with create=false: a property never stored simply does not
-// appear.
+// Export renders an IPM.Contact message as a vCard 4.0, or 3.0 with
+// opt.Version3. Named properties (email slots, work address, IM, has-picture, the
+// preserved UID) are resolved through opt.Resolver with create=false: a property
+// never stored simply does not appear.
 func Export(msg *oxcmail.Message, opt Options) ([]byte, error) {
 	named, err := namedTags(opt, false)
 	if err != nil {
@@ -26,17 +26,17 @@ func Export(msg *oxcmail.Message, opt Options) ([]byte, error) {
 		return nil, err
 	}
 	p := &msg.Props
-	b := &builder{}
+	b := &builder{v3: opt.Version3}
 
 	b.add("BEGIN:VCARD")
-	b.add("VERSION:4.0")
+	b.add("VERSION:" + b.version())
 
 	exportIdentity(b, p)
 	exportPhones(b, p)
 	exportAddresses(b, p, named)
 	exportEmails(b, p, named)
 	if tag, ok := named[mapi.NameInstantMessagingAddress]; ok {
-		addLine(b, "IMPP", getStr(p, tag))
+		addLine(b, b.imType(), getStr(p, tag))
 	}
 	exportURLs(b, p)
 	exportCategories(b, p, catTag)
@@ -53,10 +53,15 @@ func Export(msg *oxcmail.Message, opt Options) ([]byte, error) {
 // name, the organization, and the notes and birthday.
 func exportIdentity(b *builder, p *mapi.PropertyValues) {
 	b.line("FN", displayName(p))
-	if n := structured(
+	n := structured(
 		getStr(p, mapi.PrSurname), getStr(p, mapi.PrGivenName), getStr(p, mapi.PrMiddleName),
 		getStr(p, mapi.PrDisplayNamePrefix), getStr(p, mapi.PrGeneration),
-	); n != "" {
+	)
+	// vCard 3.0 requires N on every card (RFC 2426 section 5); 4.0 does not.
+	if n == "" && b.v3 {
+		n = ";;;;"
+	}
+	if n != "" {
 		b.add("N:" + n)
 	}
 	addLine(b, "NICKNAME", getStr(p, mapi.PrNickname))
@@ -186,7 +191,13 @@ func exportPhoto(b *builder, msg *oxcmail.Message) {
 	if !ok || len(data) == 0 {
 		return
 	}
-	b.add("PHOTO:data:" + sniffImage(data) + ";base64," + base64.StdEncoding.EncodeToString(data))
+	enc := base64.StdEncoding.EncodeToString(data)
+	if b.v3 {
+		// RFC 2426 section 3.1.4: inline binary with ENCODING=b and the image TYPE.
+		b.add("PHOTO;ENCODING=b;TYPE=" + strings.ToUpper(strings.TrimPrefix(sniffImage(data), "image/")) + ":" + enc)
+		return
+	}
+	b.add("PHOTO:data:" + sniffImage(data) + ";base64," + enc)
 }
 
 // getStr returns a string-valued property, or "".

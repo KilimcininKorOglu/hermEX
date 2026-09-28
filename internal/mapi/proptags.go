@@ -178,6 +178,12 @@ const (
 	// alternative to an attachment. Offloaded to a content file like other large
 	// content. (Same strategy as PrSmimeOriginal.)
 	PrScheduleOriginal = PropTag(0x67760102) // PtBinary
+	// PrEmbeddedContact is the provider-defined attachment property (0x6780) holding
+	// the properties of an attached contact (an embedded IPM.Contact), encoded by
+	// oxvcard.EncodeEmbedded. The embedded message itself is stored as RFC 5322
+	// bytes, which carry neither its class nor its contact fields; this keeps them,
+	// so the attachment reopens as the contact it was and is sent as a vCard.
+	PrEmbeddedContact = PropTag(0x67800102) // PtBinary
 )
 
 // PrAddressBookDisplayNamePrintable is PidTagAddressBookDisplayNamePrintable

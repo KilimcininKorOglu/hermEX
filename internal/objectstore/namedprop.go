@@ -9,6 +9,7 @@ import (
 
 	"hermex/internal/mapi"
 	"hermex/internal/oxcmail"
+	"hermex/internal/oxvcard"
 )
 
 // Named-property id range (MS-OXCDATA §2.6.1): named properties are numbered
@@ -84,9 +85,10 @@ func (s *Store) recordDeclinedHeaderNames(names []mapi.PropertyName, ids []uint1
 
 // ExportOptions are the oxcmail options that render a message of this store: its
 // named properties resolve both ways, so an opaque S/MIME message finds its stored
-// Content-Type and every PS_INTERNET_HEADERS property becomes a header field.
+// Content-Type and every PS_INTERNET_HEADERS property becomes a header field, and
+// an attached contact goes out as a vCard.
 func (s *Store) ExportOptions() oxcmail.Options {
-	return oxcmail.Options{Resolver: s.GetNamedPropIDs, PropName: s.NamedPropName}
+	return oxcmail.Options{Resolver: s.GetNamedPropIDs, PropName: s.NamedPropName, ContactCard: oxvcard.EmbeddedCard}
 }
 
 // NamedPropName resolves a store property id back to its PropertyName, the

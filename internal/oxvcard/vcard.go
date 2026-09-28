@@ -249,9 +249,29 @@ func escapeValue(s string) string {
 	return b.String()
 }
 
-// builder accumulates content lines for serialization.
+// builder accumulates content lines for serialization, in vCard 3.0 when v3 is
+// set and 4.0 otherwise.
 type builder struct {
 	buf bytes.Buffer
+	v3  bool
+}
+
+// version is the VERSION value the builder writes.
+func (b *builder) version() string {
+	if b.v3 {
+		return "3.0"
+	}
+	return "4.0"
+}
+
+// imType is the property an instant-messaging address is written under: IMPP in
+// 4.0, and in 3.0, which has no IM property, the X-MS-IMADDRESS extension
+// [MS-OXVCARD] 2.1.3.9.4 names.
+func (b *builder) imType() string {
+	if b.v3 {
+		return "X-MS-IMADDRESS"
+	}
+	return "IMPP"
 }
 
 // add writes one content line "NAME[;params]:value", value already escaped, then

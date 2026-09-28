@@ -5,6 +5,7 @@ import (
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcmail"
+	"hermex/internal/oxvcard"
 )
 
 // OpenEmbeddedMessage open-mode flags ([MS-OXCMSG] 2.2.3.22.1, mapidefs MAPI_*):
@@ -89,6 +90,14 @@ func (s *Session) openStoredEmbedded(out *ext.Push, handles []uint32, ohindex ui
 		writeErr(out, ropOpenEmbeddedMessage, ohindex, ecError)
 		return
 	}
+	// An attached contact reopens as the contact it was: its class and fields are
+	// kept beside the bytes, which cannot hold them.
+	if blob, ok := att.attachProps.Get(mapi.PrEmbeddedContact); ok {
+		if err := restoreContact(emb, blob, att.store); err != nil {
+			writeErr(out, ropOpenEmbeddedMessage, ohindex, ecError)
+			return
+		}
+	}
 	// MAPI_MODIFY opens the message for editing: SaveChangesMessage then re-exports
 	// it into the attachment row it came from. Without the flag, or over an
 	// attachment with no store row, the message stays read-only.
@@ -97,6 +106,23 @@ func (s *Session) openStoredEmbedded(out *ext.Push, handles []uint32, ohindex ui
 		parent = att
 	}
 	s.openEmbeddedResponse(out, handles, ohindex, att.store, &embeddedMessage{msg: emb, parent: parent})
+}
+
+// restoreContact overlays the contact properties an attachment keeps onto the
+// message imported from its bytes, under the store's named-property ids.
+func restoreContact(emb *oxcmail.Message, blob any, st *objectstore.Store) error {
+	raw, _ := blob.([]byte)
+	if len(raw) == 0 {
+		return nil
+	}
+	props, err := oxvcard.RestoreEmbedded(raw, st.GetNamedPropIDs)
+	if err != nil {
+		return err
+	}
+	for _, tv := range props {
+		emb.Props.Set(tv.Tag, tv.Value)
+	}
+	return nil
 }
 
 // embeddedPayload reads the attachment's encapsulated bytes and its method, the
