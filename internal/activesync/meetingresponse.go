@@ -3,6 +3,7 @@ package activesync
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"hermex/internal/meeting"
 	"hermex/internal/objectstore"
@@ -28,6 +29,17 @@ func userResponse(u int) (int32, bool) {
 		return meeting.ResponseDeclined, true
 	}
 	return 0, false
+}
+
+// serverSends reports whether the server itself sends the response to the
+// organizer ([MS-ASCMD] MeetingResponse). Through protocol 14.1 the client sends it
+// with SendMail, so a server copy would give the organizer two answers; from 16.0 the
+// server sends it only when the request carries a SendResponse element.
+func serverSends(protocol string, req *wbxml.Node) bool {
+	if !strings.HasPrefix(protocol, "16.") {
+		return false
+	}
+	return req.Child(wbxml.MRSendResponse) != nil
 }
 
 // handleMeetingResponse answers the MeetingResponse command (MS-ASCMD): the device
@@ -87,8 +99,7 @@ func (s *Server) respondMeeting(st *objectstore.Store, sess *session, req *wbxml
 		return result(mrStatusInvalid, "")
 	}
 
-	// AS 14.0+ has the server send the response to the organizer.
-	calendarID, err := meeting.Respond(st, s.accounts, s.Spool, sess.user, info.ID, response, true)
+	calendarID, err := meeting.Respond(st, s.accounts, s.Spool, sess.user, info.ID, response, serverSends(sess.protocol, req))
 	if err != nil {
 		return result(mrStatusError, "")
 	}
