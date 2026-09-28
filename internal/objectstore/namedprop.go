@@ -2,11 +2,13 @@ package objectstore
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"hermex/internal/mapi"
+	"hermex/internal/oxcmail"
 )
 
 // Named-property id range (MS-OXCDATA §2.6.1): named properties are numbered
@@ -61,7 +63,30 @@ func (s *Store) GetNamedPropIDs(create bool, names []mapi.PropertyName) ([]uint1
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
+	s.recordDeclinedHeaderNames(names, ids)
 	return ids, nil
+}
+
+// recordDeclinedHeaderNames logs, once per allocation, how many PS_INTERNET_HEADERS
+// names were left unresolved, so a store that reached its quota shows why received
+// fields stopped reaching clients.
+func (s *Store) recordDeclinedHeaderNames(names []mapi.PropertyName, ids []uint16) {
+	declined := 0
+	for i, n := range names {
+		if ids[i] == 0 && n.GUID == mapi.PsInternetHeaders {
+			declined++
+		}
+	}
+	if declined > 0 {
+		s.LogSwallowedError("objectstore.internet_header_name", fmt.Errorf("%w: %d declined", errInternetHeaderQuota, declined))
+	}
+}
+
+// ExportOptions are the oxcmail options that render a message of this store: its
+// named properties resolve both ways, so an opaque S/MIME message finds its stored
+// Content-Type and every PS_INTERNET_HEADERS property becomes a header field.
+func (s *Store) ExportOptions() oxcmail.Options {
+	return oxcmail.Options{Resolver: s.GetNamedPropIDs, PropName: s.NamedPropName}
 }
 
 // NamedPropName resolves a store property id back to its PropertyName, the
@@ -134,20 +159,50 @@ func getNamedPropIDs(q sqlExec, create bool, names []mapi.PropertyName) ([]uint1
 			ids[i] = 0
 			continue
 		}
-		// Allocate the next id, computing it explicitly so the floor is
-		// namedPropBase even on an empty table (no pre-seed needed).
-		var maxID uint64
-		if err := q.QueryRow(`SELECT COALESCE(MAX(propid), ?) FROM named_properties`, int64(namedPropBase-1)).Scan(&maxID); err != nil {
+		id, err := allocateNamedProp(q, n, key)
+		if err != nil {
 			return nil, err
 		}
-		next := maxID + 1
-		if next > namedPropMax {
-			return nil, fmt.Errorf("objectstore: named-property id space exhausted")
-		}
-		if _, err := q.Exec(`INSERT INTO named_properties (propid, name_string) VALUES (?, ?)`, int64(next), key); err != nil {
-			return nil, err
-		}
-		ids[i] = uint16(next)
+		ids[i] = id
 	}
 	return ids, nil
+}
+
+// internetHeaderNameQuota bounds how many PS_INTERNET_HEADERS names a store holds.
+// Every received header field no other property maps becomes one of these names,
+// and a sender chooses the field names, so without a bound a stream of mail with
+// invented X- fields would spend the whole named-property id space and every
+// later allocation, including the ones delivery needs, would fail.
+const internetHeaderNameQuota = 4000
+
+// errInternetHeaderQuota names why a PS_INTERNET_HEADERS name was left unresolved:
+// its quota is spent, or the name is too long to store.
+var errInternetHeaderQuota = errors.New("objectstore: PS_INTERNET_HEADERS name quota reached")
+
+// allocateNamedProp assigns the next id to a name not seen before, computing it
+// explicitly so the floor is namedPropBase even on an empty table (no pre-seed
+// needed). A PS_INTERNET_HEADERS name past its quota is declined with id 0.
+func allocateNamedProp(q sqlExec, n mapi.PropertyName, key string) (uint16, error) {
+	if n.GUID == mapi.PsInternetHeaders {
+		var held int
+		prefix := "GUID=" + mapi.PsInternetHeaders.String() + ",%"
+		if err := q.QueryRow(`SELECT COUNT(*) FROM named_properties WHERE name_string LIKE ?`, prefix).Scan(&held); err != nil {
+			return 0, err
+		}
+		if held >= internetHeaderNameQuota {
+			return 0, nil
+		}
+	}
+	var maxID uint64
+	if err := q.QueryRow(`SELECT COALESCE(MAX(propid), ?) FROM named_properties`, int64(namedPropBase-1)).Scan(&maxID); err != nil {
+		return 0, err
+	}
+	next := maxID + 1
+	if next > namedPropMax {
+		return 0, fmt.Errorf("objectstore: named-property id space exhausted")
+	}
+	if _, err := q.Exec(`INSERT INTO named_properties (propid, name_string) VALUES (?, ?)`, int64(next), key); err != nil {
+		return 0, err
+	}
+	return uint16(next), nil
 }

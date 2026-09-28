@@ -110,7 +110,7 @@ func (s *Store) indexExistingMessage(folderID, id int64, read bool) error {
 	}
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	mid := midString(uint64(id))
-	eml, err := oxcmail.Export(msg, oxcmail.Options{Resolver: s.GetNamedPropIDs})
+	eml, err := oxcmail.Export(msg, s.ExportOptions())
 	if err != nil {
 		return fmt.Errorf("objectstore: export: %w", err)
 	}

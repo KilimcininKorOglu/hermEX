@@ -898,11 +898,13 @@ func exportSubmitted(st *objectstore.Store, msg *oxcmail.Message) ([]byte, error
 	if err := oxcmail.CheckSMIME(msg); err != nil {
 		return nil, err
 	}
-	// An opaque S/MIME message reads its stored Content-Type through the store's
-	// named properties.
+	// An opaque S/MIME message reads its stored Content-Type, and every
+	// PS_INTERNET_HEADERS property its header field, through the store's named
+	// properties.
 	if opt.Resolver == nil {
 		opt.Resolver = st.GetNamedPropIDs
 	}
+	opt.PropName = st.NamedPropName
 	return oxcmail.Export(msg, opt)
 }
 

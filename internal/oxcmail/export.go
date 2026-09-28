@@ -33,8 +33,12 @@ const dateLayout = "Mon, 02 Jan 2006 15:04:05 -0700"
 // that holds its signed or encrypted content ([MS-OXOSMIME]). opt.Resolver is read
 // for the named properties that shape carries.
 func Export(msg *Message, opt Options) ([]byte, error) {
+	extra, err := internetHeaderFields(msg.Props, opt)
+	if err != nil {
+		return nil, err
+	}
 	var b bytes.Buffer
-	writeMailHead(&b, msg)
+	writeMailHead(&b, msg, extra)
 	if isSMIME, clearSigned := smimeShape(msg); isSMIME {
 		writeSMIMEBody(&b, msg, opt, clearSigned)
 		return b.Bytes(), nil
@@ -292,7 +296,7 @@ func encodeBase64(data []byte) []byte {
 // writeMailHead synthesizes the message header block (no trailing blank line;
 // the body writer appends the content headers and the separator), following the
 // header order of the MS-OXCMAIL export path.
-func writeMailHead(b *bytes.Buffer, msg *Message) {
+func writeMailHead(b *bytes.Buffer, msg *Message, extra []headerField) {
 	writeField(b, "MIME-Version", "1.0")
 	writeOriginatorFields(b, msg)
 	writeRecipientFields(b, msg)
@@ -303,6 +307,9 @@ func writeMailHead(b *bytes.Buffer, msg *Message) {
 	writeField(b, "Subject", encodeText(subjectText(msg.Props)))
 	writeThreadFields(b, msg)
 	writePreservedHeaders(b, msg)
+	for _, f := range extra {
+		writeField(b, f.name, encodeText(f.value))
+	}
 }
 
 // writeOriginatorFields emits From, which carries the sent-representing identity,

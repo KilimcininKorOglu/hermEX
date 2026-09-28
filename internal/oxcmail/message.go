@@ -27,6 +27,11 @@ type Attachment struct {
 // store's named-property allocator.
 type PropIDResolver func(create bool, names []mapi.PropertyName) ([]uint16, error)
 
+// PropNameResolver resolves a store property id back to its named property, the
+// reverse of PropIDResolver; ok is false for an id with no name. It is satisfied
+// by the store's NamedPropName.
+type PropNameResolver func(propid uint16) (name mapi.PropertyName, ok bool, err error)
+
 // Options configures a conversion. Resolver supplies named-property ids and is
 // required whenever the message carries named properties.
 //
@@ -45,12 +50,16 @@ type PropIDResolver func(create bool, names []mapi.PropertyName) ([]uint16, erro
 // the caller's iCalendar converter understands, letting Import overlay a scheduling
 // message's class and appointment properties (see CalendarImporter).
 //
+// PropName lets Export read the header fields a message stores as
+// PS_INTERNET_HEADERS named properties; without it none are written.
+//
 // ArrivalTime is when the message reached the store. Import uses it as the submit
 // time of a message without a Date header, as the receiving MTA adds one from the
 // time it received the message (RFC 5321 section 6.4); a zero value falls back to
 // the current time.
 type Options struct {
 	Resolver         PropIDResolver
+	PropName         PropNameResolver
 	CalendarBody     []byte
 	CalendarMethod   string
 	CalendarImporter CalendarImporter

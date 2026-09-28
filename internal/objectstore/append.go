@@ -64,6 +64,8 @@ func (s *Store) AppendMessage(folderID int64, raw []byte, internalDate time.Time
 	}()
 	resolver := oxcmail.Options{
 		Resolver: s.GetNamedPropIDs,
+		// The served form carries the promoted header fields back out.
+		PropName: s.NamedPropName,
 		// A message without a Date header is dated when it arrived, which for an
 		// IMAP APPEND is the internal date the client named, not the append time.
 		ArrivalTime: internalDate,

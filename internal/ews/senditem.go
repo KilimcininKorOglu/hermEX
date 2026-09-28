@@ -139,7 +139,7 @@ func (s *Server) renderDraft(st *objectstore.Store, sess *session, id oxews.Item
 	}
 	msg.Recipients = wire
 	oxcmail.EnsureMessageID(&msg.Props)
-	raw, err := oxcmail.Export(msg, oxcmail.Options{Resolver: st.GetNamedPropIDs})
+	raw, err := oxcmail.Export(msg, st.ExportOptions())
 	if err != nil {
 		return nil, nil, "ErrorInternalServerError"
 	}

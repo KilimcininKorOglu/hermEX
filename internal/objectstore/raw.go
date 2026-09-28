@@ -121,7 +121,7 @@ func (s *Store) regenerateEML(messageID int64, mid string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	eml, err := oxcmail.Export(msg, oxcmail.Options{Resolver: s.GetNamedPropIDs})
+	eml, err := oxcmail.Export(msg, s.ExportOptions())
 	if err != nil {
 		return nil, fmt.Errorf("objectstore: export: %w", err)
 	}
