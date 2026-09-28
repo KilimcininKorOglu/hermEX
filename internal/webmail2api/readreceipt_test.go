@@ -11,11 +11,17 @@ import (
 )
 
 // seedReceiptMail files a message from bob in alice's Inbox that asks for a read
-// receipt and returns its webmail id.
+// receipt and returns its webmail id. It is filed as delivered, with bob as its
+// Return-Path, so an automatic receipt may answer it.
 func seedReceiptMail(t *testing.T, alice string) string {
+	return seedReceiptMailFrom(t, alice, "bob@hermex.test")
+}
+
+// seedReceiptMailFrom is seedReceiptMail with the given Return-Path.
+func seedReceiptMailFrom(t *testing.T, alice, returnPath string) string {
 	t.Helper()
 	st := openMailbox(t, alice)
-	raw := "From: Bob <bob@hermex.test>\r\nTo: alice@hermex.test\r\nSubject: Did you read this\r\n" +
+	raw := "Return-Path: <" + returnPath + ">\r\nFrom: Bob <bob@hermex.test>\r\nTo: alice@hermex.test\r\nSubject: Did you read this\r\n" +
 		"Message-ID: <rr-1@hermex.test>\r\nDisposition-Notification-To: bob@hermex.test\r\n\r\nplease confirm\r\n"
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), time.Now(), 0)
 	mustNoErr(t, "seed the message", err)
@@ -95,6 +101,21 @@ func TestReadReceiptAlwaysAndNever(t *testing.T) {
 	d = okBody[mailDetailJSON](t, "open", do(http.MethodGet, "/api/v1/mail/message?id="+seedReceiptMail(t, alice), ""))
 	wantEq(t, "the prompt under never", d.ReceiptRequested, false)
 	wantEq(t, "receipts under never", receiptsTo(t, bob), 0)
+}
+
+// TestReadReceiptAlwaysAsksForAnotherAddress proves "always" sends nothing on its
+// own when the request names an address other than the Return-Path, and prompts
+// the reader instead, whose agreement sends it.
+func TestReadReceiptAlwaysAsksForAnotherAddress(t *testing.T) {
+	do, alice, bob := meetingHarness(t)
+	setReceiptResponse(t, alice, objectstore.ReadReceiptAlways)
+	id := seedReceiptMailFrom(t, alice, "bounces@lists.example")
+	d := okBody[mailDetailJSON](t, "open", do(http.MethodGet, "/api/v1/mail/message?id="+id, ""))
+	wantEq(t, "receipts sent on their own", receiptsTo(t, bob), 0)
+	wantEq(t, "the prompt", d.ReceiptRequested, true)
+
+	wantStatus(t, "send", do(http.MethodPost, "/api/v1/mail/read-receipt", `{"id":"`+id+`","send":true}`), http.StatusOK)
+	wantEq(t, "receipts after agreeing", receiptsTo(t, bob), 1)
 }
 
 // TestReadReceiptAlwaysOnMarkRead proves "always" also sends when the message is

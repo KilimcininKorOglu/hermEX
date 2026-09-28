@@ -82,7 +82,10 @@ func (s *Server) handlePutReadReceiptSettings(w http.ResponseWriter, r *http.Req
 // receiptOnRead applies the reader's setting to a message they just read. For
 // "always" a message taken from unread to read sends its receipt; for "ask" the
 // detail reports whether a receipt is still pending, so the reader is prompted.
-// d is nil when there is no detail to fill (a flag change from the list).
+// Under "always" the reader is prompted too when the receipt could not go out on
+// its own, which RFC 8098 asks for a request naming an address other than the
+// Return-Path. d is nil when there is no detail to fill (a flag change from the
+// list).
 func (s *Server) receiptOnRead(d *mailDetailJSON, mb *mailboxCtx, messageID int64, becameRead bool) {
 	if mb.shared || (d == nil && !becameRead) {
 		return
@@ -92,22 +95,24 @@ func (s *Server) receiptOnRead(d *mailDetailJSON, mb *mailboxCtx, messageID int6
 		logError("read-receipt-settings", err, logging.Fields{"user": mb.user})
 		return
 	}
-	switch {
-	case cfg.Response == objectstore.ReadReceiptAlways && becameRead:
-		s.sendReceipt(mb, messageID, false)
-	case cfg.Response == objectstore.ReadReceiptAsk && d != nil:
-		pending, err := mta.ReceiptPending(mb.st, messageID)
-		if err != nil {
-			logError("read-receipt", err, logging.Fields{"user": mb.user})
-		}
-		d.ReceiptRequested = pending
+	if cfg.Response == objectstore.ReadReceiptAlways && becameRead {
+		s.sendReceipt(mb, messageID, mta.ReceiptAutomatic)
 	}
+	if cfg.Response == objectstore.ReadReceiptNever || d == nil {
+		return
+	}
+	pending, err := mta.ReceiptPending(mb.st, messageID)
+	if err != nil {
+		logError("read-receipt", err, logging.Fields{"user": mb.user})
+	}
+	d.ReceiptRequested = pending
 }
 
 // sendReceipt sends a message's pending read receipt from the caller's mailbox,
-// reporting whether it went out; a failure is logged.
-func (s *Server) sendReceipt(mb *mailboxCtx, messageID int64, manual bool) bool {
-	err := mta.SendRequestedReceipt(s.accounts, s.spool, mb.st, messageID, mb.user, manual, time.Now())
+// reporting false when it failed; a failure is logged. An automatic receipt RFC
+// 8098 does not allow is not a failure, and leaves the request pending.
+func (s *Server) sendReceipt(mb *mailboxCtx, messageID int64, mode mta.ReceiptMode) bool {
+	err := mta.SendRequestedReceipt(s.accounts, s.spool, mb.st, messageID, mb.user, mode, time.Now())
 	if err != nil {
 		logError("read-receipt", err, logging.Fields{"user": mb.user, "message": messageID})
 		return false
@@ -142,7 +147,7 @@ func (s *Server) handleMailReadReceipt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Send {
-		if !s.sendReceipt(mb, m.ID, true) {
+		if !s.sendReceipt(mb, m.ID, mta.ReceiptManual) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "receipt failed"})
 			return
 		}

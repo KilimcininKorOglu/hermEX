@@ -23,7 +23,8 @@ func receiptServer(t *testing.T) (ts *httptest.Server, dir, bobDir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := "From: Bob <bob@hermex.test>\r\nTo: " + testUser + "\r\nSubject: Did you read this\r\n" +
+	// As delivered: the Return-Path is bob, so an automatic receipt may answer it.
+	raw := "Return-Path: <bob@hermex.test>\r\nFrom: Bob <bob@hermex.test>\r\nTo: " + testUser + "\r\nSubject: Did you read this\r\n" +
 		"Message-ID: <r1@hermex.test>\r\nDisposition-Notification-To: bob@hermex.test\r\n\r\nplease confirm\r\n"
 	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), time.Now(), 0); err != nil {
 		t.Fatal(err)

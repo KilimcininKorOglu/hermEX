@@ -19,7 +19,8 @@ import (
 // sendReadReceipt sends the read receipt a message just marked read asks for,
 // through the receipt path every surface shares. mailbox is the address of the
 // mailbox the message lives in, empty for the caller's own, and is the reader the
-// receipt names. A failure is logged and never fails the read that triggered it.
+// receipt names. The receipt is automatic, since nothing asked the reader. A
+// failure is logged and never fails the read that triggered it.
 func (s *Server) sendReadReceipt(st *objectstore.Store, sess *session, mailbox string, messageID int64) {
 	if s.accounts == nil {
 		return
@@ -28,7 +29,7 @@ func (s *Server) sendReadReceipt(st *objectstore.Store, sess *session, mailbox s
 	if reader == "" {
 		reader = sess.user
 	}
-	err := mta.SendRequestedReceipt(s.accounts, s.Spool, st, messageID, reader, false, time.Now())
+	err := mta.SendRequestedReceipt(s.accounts, s.Spool, st, messageID, reader, mta.ReceiptAutomatic, time.Now())
 	if err != nil {
 		s.logReceiptFailure(sess, messageID, err)
 	}

@@ -126,7 +126,7 @@ func TestSendRequestedReceiptSendsOnce(t *testing.T) {
 	mustNoErr(t, "read the request", err)
 	wantEq(t, "pending before the read", pending, true)
 	for range 2 {
-		mustNoErr(t, "send the receipt", SendRequestedReceipt(accounts, nil, st, id, "reader@hermex.test", false, time.Now()))
+		mustNoErr(t, "send the receipt", SendRequestedReceipt(accounts, nil, st, id, "reader@hermex.test", ReceiptClient, time.Now()))
 	}
 	wantEq(t, "receipts in the sender's inbox", len(listInbox(t, senderDir)), 1)
 	pending, err = ReceiptPending(st, id)
@@ -139,7 +139,7 @@ func TestSendRequestedReceiptSendsOnce(t *testing.T) {
 	}})
 	mustNoErr(t, "store a second message", err)
 	mustNoErr(t, "decline", ConsumeReceiptRequest(st, declined))
-	mustNoErr(t, "read after declining", SendRequestedReceipt(accounts, nil, st, declined, "reader@hermex.test", false, time.Now()))
+	mustNoErr(t, "read after declining", SendRequestedReceipt(accounts, nil, st, declined, "reader@hermex.test", ReceiptClient, time.Now()))
 	wantEq(t, "receipts after a decline", len(listInbox(t, senderDir)), 1)
 }
 

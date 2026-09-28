@@ -29,7 +29,7 @@ func (s *Server) sendReadReceipts(sess *session, st *objectstore.Store, becameRe
 		return
 	}
 	for _, id := range becameRead {
-		err := mta.SendRequestedReceipt(s.accounts, s.Spool, st, id, sess.user, false, time.Now())
+		err := mta.SendRequestedReceipt(s.accounts, s.Spool, st, id, sess.user, mta.ReceiptAutomatic, time.Now())
 		if err == nil {
 			continue
 		}

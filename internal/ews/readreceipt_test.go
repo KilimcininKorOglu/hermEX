@@ -12,9 +12,10 @@ import (
 	"hermex/internal/objectstore"
 )
 
-// receiptRequest is a message from bob that asks for a read receipt.
+// receiptRequest is a message from bob that asks for a read receipt, as delivered:
+// its Return-Path is bob, so an automatic receipt may answer it.
 func receiptRequest(msgID string) string {
-	return "From: Bob <bob@hermex.test>\r\nTo: Alice <alice@hermex.test>\r\n" +
+	return "Return-Path: <bob@hermex.test>\r\nFrom: Bob <bob@hermex.test>\r\nTo: Alice <alice@hermex.test>\r\n" +
 		"Message-Id: <" + msgID + "@hermex.test>\r\nSubject: Did you read this\r\n" +
 		"Disposition-Notification-To: bob@hermex.test\r\n\r\nplease confirm\r\n"
 }
@@ -145,7 +146,7 @@ func TestMarkAllItemsAsReadReceipts(t *testing.T) {
 func TestConversationSetReadStateSendsReceipts(t *testing.T) {
 	ts, _, bobDir := receiptServer(t,
 		receiptRequest("root"),
-		"From: Bob <bob@hermex.test>\r\nMessage-Id: <reply@hermex.test>\r\nReferences: <root@hermex.test>\r\n"+
+		"Return-Path: <bob@hermex.test>\r\nFrom: Bob <bob@hermex.test>\r\nMessage-Id: <reply@hermex.test>\r\nReferences: <root@hermex.test>\r\n"+
 			"Subject: Re: Did you read this\r\nDisposition-Notification-To: bob@hermex.test\r\n\r\nand this\r\n")
 	id := threadConversationID(t, ts)
 	body := strings.Replace(applyConversationActionBody("SetReadState", id, ""),
