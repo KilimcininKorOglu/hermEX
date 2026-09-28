@@ -109,9 +109,9 @@ func onlyInboxMessage(t *testing.T, st *objectstore.Store) ([]byte, int64) {
 
 // TestDelegateAnswerIsFromTheAttendee has an assistant accept an invitation in the
 // boss's mailbox under a send-on-behalf grant. The answer is the boss's: it is from
-// the boss, names the assistant as its Sender, and the organizer's tracking records
-// the boss as accepted. Before, the answer named the mailbox alone, as if the boss
-// had sent it, whatever right the assistant held.
+// the boss, names the assistant as its Sender and in the boss's SENT-BY, and the
+// organizer's tracking records the boss as accepted. Before, the answer named the
+// mailbox alone, as if the boss had sent it, whatever right the assistant held.
 func TestDelegateAnswerIsFromTheAttendee(t *testing.T) {
 	const uid = "delegate-1"
 	organizer, tags, recipID := organizerWithEvent(t, uid, bossAddr)
@@ -131,7 +131,7 @@ func TestDelegateAnswerIsFromTheAttendee(t *testing.T) {
 		t.Errorf("Sender = %q, want the assistant", got)
 	}
 	ics, _ := inboxCalendarPart(organizer, answerID)
-	want := replyAttendee{addr: bossAddr, partstat: "ACCEPTED"}
+	want := replyAttendee{addr: bossAddr, partstat: "ACCEPTED", sentBy: assistantAddr}
 	if got := parseAttendee(ics); got != want {
 		t.Errorf("answer's attendee = %+v, want %+v\n%s", got, want, ics)
 	}

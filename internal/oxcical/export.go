@@ -174,17 +174,31 @@ func attendeeRole(p *mapi.PropertyValues) string {
 
 // exportReplyIdentity emits an iTIP REPLY's ORGANIZER and ATTENDEE. The responder is
 // the representing identity, falling back to the sender for a message that stores
-// only one. The organizer is the first recipient.
+// only one. The organizer is the first recipient. A reply someone other than the
+// attendee submitted, a delegate answering in the attendee's mailbox, names that
+// sender in the attendee's SENT-BY (RFC 5545 section 3.2.18).
 func exportReplyIdentity(b *builder, msg *oxcmail.Message, partstat string) {
 	p := &msg.Props
 	attendee := mailtoParams(p, mapi.PrSentRepresentingSmtpAddress, mapi.PrSentRepresentingName, partstat)
-	if attendee == "" {
+	if attendee != "" {
+		attendee = sentByParam(p) + attendee
+	} else {
 		attendee = mailtoParams(p, mapi.PrSenderSmtpAddress, mapi.PrSenderName, partstat)
 	}
 	if len(msg.Recipients) > 0 {
 		addParams(b, "ORGANIZER", mailtoParams(&msg.Recipients[0], mapi.PrSmtpAddress, mapi.PrDisplayName, ""))
 	}
 	addParams(b, "ATTENDEE", attendee)
+}
+
+// sentByParam renders the SENT-BY parameter of a reply's attendee: the sender, when
+// it is not the attendee the reply is from. It is "" for a reply the attendee sent.
+func sentByParam(p *mapi.PropertyValues) string {
+	sender := getStr(p, mapi.PrSenderSmtpAddress)
+	if sender == "" || strings.EqualFold(sender, getStr(p, mapi.PrSentRepresentingSmtpAddress)) {
+		return ""
+	}
+	return `;SENT-BY="mailto:` + icalParamSafe.Replace(sender) + `"`
 }
 
 // addParams emits a property line only when the identity rendered to something.

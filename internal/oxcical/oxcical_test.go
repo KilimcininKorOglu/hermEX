@@ -263,6 +263,28 @@ func TestExportReplyIdentity(t *testing.T) {
 	}
 }
 
+// TestExportReplyNamesTheDelegate proves a reply a delegate submitted for the
+// attendee names the delegate in the attendee's SENT-BY (RFC 5545 section 3.2.18),
+// while the attendee stays the one answering.
+func TestExportReplyNamesTheDelegate(t *testing.T) {
+	r := newResolver()
+	_, _ = r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole, nameICalUID})
+	msg := &oxcmail.Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: "IPM.Schedule.Meeting.Resp.Pos"},
+		{Tag: r.tag(nameICalUID, mapi.PtUnicode), Value: "meeting-43"},
+		{Tag: mapi.PrSentRepresentingSmtpAddress, Value: "boss@hermex.test"},
+		{Tag: mapi.PrSenderSmtpAddress, Value: "assistant@hermex.test"},
+	}, Recipients: []mapi.PropertyValues{{{Tag: mapi.PrSmtpAddress, Value: "organizer@hermex.test"}}}}
+	out, err := Export(msg, r.opt())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `ATTENDEE;SENT-BY="mailto:assistant@hermex.test";PARTSTAT=ACCEPTED:mailto:boss@hermex.test`
+	if !strings.Contains(strings.Join(ContentLines(out), "\n"), want) {
+		t.Errorf("reply export missing %q\n%s", want, out)
+	}
+}
+
 // TestExportCounterProposal renders a counter proposal as Outlook stores it: a
 // tentative response flagged as a proposal. It used to go out as a tentative REPLY
 // with the meeting's own time, so the organizer never saw the time proposed.

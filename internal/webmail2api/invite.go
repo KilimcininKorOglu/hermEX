@@ -250,8 +250,9 @@ func buildCounterRequest(proposer, sender, organizer string, e eventJSON) ([]byt
 	}
 	fmt.Fprintf(&cal, "ORGANIZER:mailto:%s\r\n", to[0])
 	// A COUNTER names its one attendee with the tentative response it carries
-	// ([MS-OXCICAL] METHOD).
-	fmt.Fprintf(&cal, "ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=TENTATIVE:mailto:%s\r\n", proposer)
+	// ([MS-OXCICAL] METHOD), and a delegate proposing for the attendee in the
+	// attendee's SENT-BY (RFC 5545 section 3.2.18).
+	fmt.Fprintf(&cal, "ATTENDEE%s;ROLE=REQ-PARTICIPANT;PARTSTAT=TENTATIVE:mailto:%s\r\n", sentBy(proposer, sender), proposer)
 	cal.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
 	return itip.Message(itip.Mail{
 		From: proposer, Sender: sender, To: to, Subject: headerSafe("Proposed new time: " + e.Summary),
@@ -277,6 +278,18 @@ func counterTime(v string, allDay bool) (string, error) {
 	}
 	return toICalTime(v, allDay), nil
 }
+
+// sentBy renders the SENT-BY parameter that names a delegate answering for the
+// attendee (RFC 5545 section 3.2.18), or "" when the attendee answers itself.
+func sentBy(attendee, sender string) string {
+	if sender == "" || strings.EqualFold(sender, attendee) {
+		return ""
+	}
+	return `;SENT-BY="mailto:` + quotedParamSafe.Replace(sender) + `"`
+}
+
+// quotedParamSafe strips what would end a quoted parameter value or its line.
+var quotedParamSafe = strings.NewReplacer("\r", "", "\n", "", `"`, "")
 
 // handleProposeTime lets an invitee propose a new time for a meeting: it reads
 // the invite message for the original meeting identity + organizer, then emails a

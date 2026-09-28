@@ -293,9 +293,9 @@ func TestSharedRSVPNeedsASendGrant(t *testing.T) {
 }
 
 // TestSharedRSVPNamesTheDelegate follows a delegate's answer to the organizer. It is
-// the shared mailbox's answer, so it is from that mailbox and answers for it; under
-// a send-on-behalf grant it names the delegate as its Sender, and under a send-as
-// grant it names the mailbox alone.
+// the shared mailbox's answer, so it is from that mailbox; under a send-on-behalf
+// grant it names the delegate as its Sender and in the attendee's SENT-BY, and under
+// a send-as grant it names the mailbox alone.
 func TestSharedRSVPNamesTheDelegate(t *testing.T) {
 	for _, c := range []struct {
 		name     string
@@ -304,7 +304,7 @@ func TestSharedRSVPNamesTheDelegate(t *testing.T) {
 		attendee string
 	}{
 		{"on behalf", (*objectstore.Store).SetSendOnBehalf, "Sender: <alice@hermex.test>",
-			"ATTENDEE;PARTSTAT=ACCEPTED:mailto:team@hermex.test"},
+			`ATTENDEE;SENT-BY="mailto:alice@hermex.test";PARTSTAT=ACCEPTED:mailto:team@hermex.test`},
 		{"send as", (*objectstore.Store).SetSendAs, "",
 			"ATTENDEE;PARTSTAT=ACCEPTED:mailto:team@hermex.test"},
 	} {

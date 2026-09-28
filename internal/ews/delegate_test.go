@@ -1056,8 +1056,8 @@ func TestMeetingResponseCrossMailboxSendNeedsAGrant(t *testing.T) {
 }
 
 // TestMeetingResponseCrossMailboxSendsOnBehalf follows a granted delegate's answer to
-// the organizer: it is from bob, names the delegate as its Sender, and leaves with
-// the delegate as its envelope sender.
+// the organizer: it is from bob, names the delegate as its Sender and in bob's
+// SENT-BY, and leaves with the delegate as its envelope sender.
 func TestMeetingResponseCrossMailboxSendsOnBehalf(t *testing.T) {
 	ts, sp, _, refID := delegateSendServer(t, []string{testUser})
 
@@ -1072,6 +1072,9 @@ func TestMeetingResponseCrossMailboxSendsOnBehalf(t *testing.T) {
 	head := headersOf(due[0].Body)
 	wantContains(t, "the answer's headers", head, "From: <bob@hermex.test>")
 	wantContains(t, "the answer's headers", head, "Sender: <"+testUser+">")
+	unfolded := strings.ReplaceAll(string(due[0].Body), "\r\n ", "")
+	wantContains(t, "the answer's calendar", unfolded,
+		`ATTENDEE;SENT-BY="mailto:`+testUser+`";PARTSTAT=ACCEPTED:mailto:bob@hermex.test`)
 }
 
 // firstSyncState extracts the SyncState token from a SyncFolderItems response.

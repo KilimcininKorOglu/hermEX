@@ -78,6 +78,44 @@ func TestSubmitCounterProposalCarriesITIP(t *testing.T) {
 	}
 }
 
+// TestDelegateMeetingResponseNamesTheDelegate submits, as a delegate in the boss's
+// mailbox, the meeting response Outlook composes there. The iTIP REPLY is the boss's
+// answer and names the delegate in the boss's SENT-BY, as the Sender header does, so
+// an organizer on another server sees who answered for the boss.
+func TestDelegateMeetingResponseNamesTheDelegate(t *testing.T) {
+	bossDir, delegateDir, aliceDir := t.TempDir(), t.TempDir(), t.TempDir()
+	const delegate = "delegate@hermex.test"
+	const boss = "boss@hermex.test"
+	setDelegateList(t, bossDir, []string{delegate})
+	grantFolderPermission(t, bossDir, int64(mapi.PrivateFIDDraft), delegate, mapi.RightsOwner)
+	accounts := directory.StaticAccounts{
+		boss:                {MailboxPath: bossDir},
+		delegate:            {MailboxPath: delegateDir},
+		"alice@hermex.test": {MailboxPath: aliceDir},
+	}
+	sess := NewSession(delegateDir, accounts, delegate)
+	defer sess.Close()
+	_, h := sess.Dispatch(delegateLogonRequest(0, 0x01, userDNFor(boss)), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	_, h = sess.Dispatch(buildCreateMessage(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))), []uint32{logonH, 0xFFFFFFFF})
+	msgH := h[1]
+	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: "IPM.Schedule.Meeting.Resp.Pos"},
+		{Tag: mapi.PrSubject, Value: "Accepted: Review"},
+	}), []uint32{msgH})
+	toRow := buildSMTPRecipientRow(0, mapi.RecipTo, "alice@hermex.test", "Alice")
+	sess.Dispatch(buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), []uint32{msgH})
+	sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
+	sub, _ := sess.Dispatch(buildSubmitMessage(0), []uint32{msgH})
+	ropOK(t, sub, ropSubmitMessage, "SubmitMessage")
+
+	raw := bytes.ReplaceAll(firstInboxRaw(t, aliceDir), []byte("\r\n "), nil)
+	want := `ATTENDEE;SENT-BY="mailto:` + delegate + `";PARTSTAT=ACCEPTED:mailto:` + boss
+	if !bytes.Contains(raw, []byte(want)) {
+		t.Errorf("delivered response missing %q:\n%s", want, raw)
+	}
+}
+
 // TestMeetingCalendarLeavesPlainMailAlone attaches nothing to a message that is not
 // a meeting, so an ordinary submit is unchanged.
 func TestMeetingCalendarLeavesPlainMailAlone(t *testing.T) {

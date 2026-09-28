@@ -3,10 +3,13 @@ package webmail2api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"hermex/internal/mapi"
+	"hermex/internal/mime"
+	"hermex/internal/oxcical"
 )
 
 // counterInvite files in alice's inbox a request bob organizes.
@@ -62,6 +65,18 @@ func TestCounterProposalWireForm(t *testing.T) {
 	}
 	wantNoInjectedLines(t, msg)
 	wantContains(t, "escaped summary", msg, `SUMMARY:Sync\nBcc: attacker@evil.example`)
+}
+
+// TestDelegateCounterProposalNamesTheDelegate proposes a new time for a shared
+// mailbox under a send-on-behalf grant: the COUNTER is the mailbox's own and names
+// the delegate in its SENT-BY, as the delegate's answer to the invitation does.
+func TestDelegateCounterProposalNamesTheDelegate(t *testing.T) {
+	raw, err := buildCounterRequest("team@hermex.test", "alice@hermex.test", "bob@hermex.test", eventJSON{UID: "counter-2@test",
+		Summary: "Sync", Start: "2026-09-08T11:00:00Z", End: "2026-09-08T12:00:00Z"})
+	mustNoErr(t, "build", err)
+	ics := findCalendarPart(mime.ParseStructure(raw))
+	wantContains(t, "counter-proposal", strings.Join(oxcical.ContentLines(ics), "\n"),
+		`ATTENDEE;SENT-BY="mailto:alice@hermex.test";ROLE=REQ-PARTICIPANT;PARTSTAT=TENTATIVE:mailto:team@hermex.test`)
 }
 
 // TestCounterProposalRefusesAnUnreadableTime proposes a start that is not a time.

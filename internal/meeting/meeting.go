@@ -91,8 +91,9 @@ func Respond(st *objectstore.Store, accounts directory.Accounts, spool *relay.Sp
 
 // RespondOnBehalf is Respond for a delegate answering in the attendee's mailbox:
 // the response is from the attendee and names the delegate as its sender, the way
-// mail sent on behalf of someone does. The caller has authorized the delegate to
-// send for the attendee; a send-as grant passes the attendee as both.
+// mail sent on behalf of someone does, and the iTIP REPLY names the delegate in the
+// attendee's SENT-BY. The caller has authorized the delegate to send for the
+// attendee; a send-as grant passes the attendee as both.
 func RespondOnBehalf(st *objectstore.Store, accounts directory.Accounts, spool *relay.Spool, attendee, delegate string, messageID int64, response int32, send bool) (int64, error) {
 	return respond(st, accounts, spool, identity{attendee: attendee, actor: delegate}, messageID, response, send, true)
 }
@@ -430,11 +431,11 @@ func stripInboundCruft(props mapi.PropertyValues) mapi.PropertyValues {
 // reshaped into a response message (re-classed, with the attendee as the
 // representing identity and the actor as the sender, so the From header and the
 // REPLY's ATTENDEE name the attendee, a delegate's answer names the delegate in
-// Sender, and the one recipient, the organizer, becomes the ORGANIZER), rendered to
-// an iCalendar REPLY carried as a text/calendar part, and routed like any
-// submission from the actor. The attendee is the mailbox the request reached, the
-// address it reached it at when the server answers automatically. An organizer
-// that did not request a response is not told.
+// Sender and in SENT-BY, and the one recipient, the organizer, becomes the
+// ORGANIZER), rendered to an iCalendar REPLY carried as a text/calendar part, and
+// routed like any submission from the actor. The attendee is the mailbox the
+// request reached, the address it reached it at when the server answers
+// automatically. An organizer that did not request a response is not told.
 func notifyOrganizer(st *objectstore.Store, accounts directory.Accounts, spool *relay.Spool, who identity, req *oxcmail.Message, response int32) error {
 	organizer := propStr(req.Props, mapi.PrSentRepresentingSmtpAddress)
 	if organizer == "" {
@@ -449,7 +450,7 @@ func notifyOrganizer(st *objectstore.Store, accounts directory.Accounts, spool *
 	resp := stripInboundCruft(req.Props)
 	resp.Set(mapi.PrMessageClass, responseClass(response))
 	// The actor submitted the answer: the attendee itself, or a delegate answering
-	// in its mailbox, whom the Sender header names.
+	// in its mailbox, whom the Sender header and the attendee's SENT-BY name.
 	resp.Set(mapi.PrSenderSmtpAddress, who.actor)
 	resp.Set(mapi.PrSenderEmailAddress, who.actor)
 	resp.Set(mapi.PrSenderAddrType, "SMTP")
