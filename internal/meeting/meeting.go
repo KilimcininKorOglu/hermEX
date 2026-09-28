@@ -467,7 +467,7 @@ func notifyOrganizer(st *objectstore.Store, accounts directory.Accounts, spool *
 	// address with it.
 	resp.Set(mapi.PrSentRepresentingName, "")
 	resp.Set(mapi.PrSenderName, "")
-	resp.Set(mapi.PrSubject, responsePrefix(response)+propStr(req.Props, mapi.PrSubject))
+	setResponseSubject(&resp, req.Props, response)
 	resp.Set(mapi.PrClientSubmitTime, mapi.UnixToNTTime(time.Now()))
 
 	respMsg := &oxcmail.Message{
@@ -515,6 +515,30 @@ func responseClass(response int32) string {
 	default:
 		return "IPM.Schedule.Meeting.Resp.Neg"
 	}
+}
+
+// setResponseSubject gives a response the meeting's subject under the prefix that
+// names the answer: a Meeting Response object carries PidTagSubjectPrefix
+// "Accepted: " and the meeting's PidTagNormalizedSubject ([MS-OXOCAL] Accepting the
+// Meeting Request). All three subject properties are written because a response
+// copies the request's prefix and normalized subject, and the outgoing Subject
+// header is built from those two whenever a message has both, so setting the full
+// subject alone sent the response under the request's own subject.
+func setResponseSubject(resp *mapi.PropertyValues, req mapi.PropertyValues, response int32) {
+	prefix, topic := responsePrefix(response), normalizedSubject(req)
+	resp.Set(mapi.PrSubjectPrefix, prefix)
+	resp.Set(mapi.PrNormalizedSubject, topic)
+	resp.Set(mapi.PrSubject, prefix+topic)
+}
+
+// normalizedSubject is a message's subject without its prefix, so a forwarded
+// request is answered under the meeting's subject. A message that stores no
+// normalized subject gives its whole subject.
+func normalizedSubject(props mapi.PropertyValues) string {
+	if s := propStr(props, mapi.PrNormalizedSubject); s != "" {
+		return s
+	}
+	return propStr(props, mapi.PrSubject)
 }
 
 // responsePrefix is the human-readable subject prefix Exchange clients show for a
