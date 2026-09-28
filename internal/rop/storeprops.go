@@ -15,6 +15,7 @@ import (
 type logonIdentity struct {
 	owner, user string
 	ownerName   func() string
+	locale      Locale
 }
 
 // computedStoreTags are the store properties the store computes; a read that asks
@@ -54,7 +55,31 @@ func storeProps(store *objectstore.Store, tags []mapi.PropTag, id *logonIdentity
 		}
 	}
 	addLogonIdentity(&props, tags, id)
+	addLocale(&props, tags, id)
 	return props, nil
+}
+
+// addLocale sets the logon's locale properties from the locale the client
+// connected with ([MS-OXCSTOR] 2.2.2.1.1.12, .14 and .15). A value the client did
+// not give is left unset, which a read answers with NotFound ([MS-OXCSTOR]
+// 3.2.5.1.1).
+func addLocale(props *mapi.PropertyValues, tags []mapi.PropTag, id *logonIdentity) {
+	if id == nil {
+		return
+	}
+	l := id.locale
+	for _, p := range []struct {
+		tag mapi.PropTag
+		v   uint32
+	}{
+		{mapi.PrLocaleID, l.LCIDString},
+		{mapi.PrSortLocaleID, l.LCIDSort},
+		{mapi.PrCodePageID, l.CodePage},
+	} {
+		if p.v != 0 && (len(tags) == 0 || slices.Contains(tags, p.tag)) {
+			props.Set(p.tag, int32(p.v)) // #nosec G115 -- an LCID and a code page are 32-bit values carried as PtLong
+		}
+	}
 }
 
 // addLogonIdentity sets the owner's and the logged-on user's address-book entry
@@ -83,7 +108,7 @@ func (s *Session) logonIdentityFor(owner string) *logonIdentity {
 	if owner == "" {
 		owner = s.owner
 	}
-	return &logonIdentity{owner: owner, user: s.owner, ownerName: func() string { return s.displayName(owner) }}
+	return &logonIdentity{owner: owner, user: s.owner, ownerName: func() string { return s.displayName(owner) }, locale: s.locale}
 }
 
 // displayName looks an address up in the directory's address book, as seen by

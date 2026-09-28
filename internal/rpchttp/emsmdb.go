@@ -183,10 +183,11 @@ func (e *EMSMDB) connectEx(sess *Session, stub []byte) ([]byte, uint32) {
 	cxh := e.mintHandle()
 	e.mu.Lock()
 	e.sessions[cxh.GUID] = &emsmdbSession{
-		user:     sess.User,
-		mailbox:  sess.Mailbox,
-		cpid:     in.cpid,
-		rop:      rop.NewSession(sess.Mailbox, e.accounts, sess.User, rop.WithSpool(e.Spool), rop.WithLogger(e.Logger)),
+		user:    sess.User,
+		mailbox: sess.Mailbox,
+		cpid:    in.cpid,
+		rop: rop.NewSession(sess.Mailbox, e.accounts, sess.User, rop.WithSpool(e.Spool), rop.WithLogger(e.Logger),
+			rop.WithLocale(rop.Locale{CodePage: in.cpid, LCIDString: in.lcidString, LCIDSort: in.lcidSort})),
 		lastSeen: time.Now(),
 	}
 	e.mu.Unlock()
@@ -270,6 +271,8 @@ type connectExIn struct {
 	userDN     string
 	flags      uint32
 	cpid       uint32
+	lcidString uint32
+	lcidSort   uint32
 	clientVers [3]uint16
 	timestamp  uint32
 }
@@ -330,7 +333,13 @@ func pullConnectExScalars(p *ndr.Pull, r *connectExIn) error {
 	if r.cpid, err = p.Uint32(); err != nil {
 		return err
 	}
-	if err = skipUint32(p, 3); err != nil { // lcid_string, lcid_sort, cxr_link
+	if r.lcidString, err = p.Uint32(); err != nil {
+		return err
+	}
+	if r.lcidSort, err = p.Uint32(); err != nil {
+		return err
+	}
+	if err = skipUint32(p, 1); err != nil { // cxr_link
 		return err
 	}
 	if _, err = p.Uint16(); err != nil { // cnvt_cps

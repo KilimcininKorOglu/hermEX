@@ -194,10 +194,28 @@ type Session struct {
 	// nothing about which folder was re-permissioned or which caller was refused.
 	// Nil is a no-op (Logger.Emit is nil-safe).
 	logger *logging.Logger
+
+	// locale is the language and code page the client connected with.
+	locale Locale
+}
+
+// Locale is the code page and the two language ids a client connects with: the
+// DefaultCodePage, LcidString and LcidSort of a MAPI/HTTP Connect request
+// ([MS-OXCMAPIHTTP] 2.2.4.1.1) and the cpid, lcid_string and lcid_sort of
+// EcDoConnectEx ([MS-OXCRPC] 3.1.4.1). A zero field is one the client did not
+// give.
+type Locale struct {
+	CodePage, LCIDString, LCIDSort uint32
 }
 
 // SessionOption configures an optional Session dependency at construction.
 type SessionOption func(*Session)
+
+// WithLocale supplies the locale the client connected with, which a logon reports
+// as its locale properties. Without it those properties are not served.
+func WithLocale(l Locale) SessionOption {
+	return func(s *Session) { s.locale = l }
+}
 
 // WithSpool supplies the outbound relay spool a submitted message's external
 // recipients are queued into. Without it, external recipients are not relayed.

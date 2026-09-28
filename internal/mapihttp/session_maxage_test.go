@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/rop"
 )
 
 // backdateSession moves a session's Connect time into the past, standing in for
@@ -29,7 +30,7 @@ func backdateSession(t *testing.T, store *sessionStore, sid string, age time.Dur
 // mailbox store for as long as the process lived, and the table only ever grew.
 func TestBusySessionIsRefusedAtItsAbsoluteLifetime(t *testing.T) {
 	store, accs := testStore(t)
-	sid, seq := store.create(testUser, accs[testUser].MailboxPath, accs, nil, nil)
+	sid, seq := store.create(testUser, accs[testUser].MailboxPath, accs, nil, nil, rop.Locale{})
 	backdateSession(t, store, sid, sessionMaxAge+time.Minute)
 
 	// The client is not idle: it executed a moment ago and executes again now.
@@ -46,7 +47,7 @@ func TestBusySessionIsRefusedAtItsAbsoluteLifetime(t *testing.T) {
 // and the open store would leave the leak the cap exists to bound.
 func TestBusySessionIsSweptAtItsAbsoluteLifetime(t *testing.T) {
 	store, accs := testStore(t)
-	sid, _ := store.create(testUser, accs[testUser].MailboxPath, accs, nil, nil)
+	sid, _ := store.create(testUser, accs[testUser].MailboxPath, accs, nil, nil, rop.Locale{})
 	backdateSession(t, store, sid, sessionMaxAge+time.Minute)
 
 	// now is the session's lastSeen, so the idle rule alone would keep it.
@@ -66,7 +67,7 @@ func TestBusySessionIsSweptAtItsAbsoluteLifetime(t *testing.T) {
 // to re-Connect on every request.
 func TestSessionBelowTheCapIsUnaffected(t *testing.T) {
 	store, accs := testStore(t)
-	sid, seq := store.create(testUser, accs[testUser].MailboxPath, accs, nil, nil)
+	sid, seq := store.create(testUser, accs[testUser].MailboxPath, accs, nil, nil, rop.Locale{})
 	backdateSession(t, store, sid, sessionMaxAge-time.Hour)
 
 	if _, _, code := store.execute(sid, seq, testUser); code != rcSuccess {
@@ -79,7 +80,7 @@ func TestSessionBelowTheCapIsUnaffected(t *testing.T) {
 func TestZeroMaxAgeDisablesTheCap(t *testing.T) {
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: t.TempDir()}}
 	store := newSessionStore(0)
-	sid, seq := store.create(testUser, accs[testUser].MailboxPath, accs, nil, nil)
+	sid, seq := store.create(testUser, accs[testUser].MailboxPath, accs, nil, nil, rop.Locale{})
 	backdateSession(t, store, sid, 10*365*24*time.Hour)
 
 	if _, _, code := store.execute(sid, seq, testUser); code != rcSuccess {

@@ -21,22 +21,35 @@ func buildConnectExStub(userDN string) []byte {
 	p.Uint32(0)               // offset
 	p.Uint32(uint32(len(dn))) // actual_count
 	p.Raw(dn)
-	p.Uint32(0)    // flags
-	p.Uint32(0)    // conmod
-	p.Uint32(0)    // limit
-	p.Uint32(1252) // cpid
-	p.Uint32(0)    // lcid_string
-	p.Uint32(0)    // lcid_sort
-	p.Uint32(0)    // cxr_link
-	p.Uint16(0)    // cnvt_cps
-	p.Uint16(0)    // client_vers[0]
-	p.Uint16(0)    // client_vers[1]
-	p.Uint16(0)    // client_vers[2]
-	p.Uint32(0)    // timestamp
-	p.Uint32(0)    // AUX-in max_count
-	p.Uint32(0)    // cb_auxin
-	p.Uint32(0)    // cb_auxout
+	p.Uint32(0)      // flags
+	p.Uint32(0)      // conmod
+	p.Uint32(0)      // limit
+	p.Uint32(1252)   // cpid
+	p.Uint32(0x041F) // lcid_string
+	p.Uint32(0x0409) // lcid_sort
+	p.Uint32(0)      // cxr_link
+	p.Uint16(0)      // cnvt_cps
+	p.Uint16(0)      // client_vers[0]
+	p.Uint16(0)      // client_vers[1]
+	p.Uint16(0)      // client_vers[2]
+	p.Uint32(0)      // timestamp
+	p.Uint32(0)      // AUX-in max_count
+	p.Uint32(0)      // cb_auxin
+	p.Uint32(0)      // cb_auxout
 	return p.Bytes()
+}
+
+// TestConnectExReadsTheLocale proves EcDoConnectEx keeps the code page and the two
+// language ids the client sent ([MS-OXCRPC] 3.1.4.1), which the logon reports as
+// its locale properties.
+func TestConnectExReadsTheLocale(t *testing.T) {
+	in, err := pullConnectEx(buildConnectExStub("/o=hermex/cn=alice"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.cpid != 1252 || in.lcidString != 0x041F || in.lcidSort != 0x0409 {
+		t.Errorf("cpid, lcid_string, lcid_sort = %d, %#x, %#x; want 1252, 0x41f, 0x409", in.cpid, in.lcidString, in.lcidSort)
+	}
 }
 
 // pullConfString reads a unique-pointer conformant-varying string.

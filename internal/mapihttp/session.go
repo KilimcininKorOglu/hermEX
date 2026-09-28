@@ -57,8 +57,9 @@ func (s *sessionStore) tooOld(c *sessionContext, now time.Time) bool {
 // create mints a session for the user and returns its sid and initial sequence.
 // accounts is the recipient directory the session's ROP layer resolves against
 // when submitting mail; the authenticated user doubles as the session owner's
-// SMTP address (the From of a submitted message).
-func (s *sessionStore) create(user, mailbox string, accounts directory.Accounts, spool *relay.Spool, logger *logging.Logger) (sid, sequence string) {
+// SMTP address (the From of a submitted message). locale is what the Connect
+// request carried.
+func (s *sessionStore) create(user, mailbox string, accounts directory.Accounts, spool *relay.Spool, logger *logging.Logger, locale rop.Locale) (sid, sequence string) {
 	sid, sequence = newSessionToken(), newSessionToken()
 	now := time.Now()
 	s.mu.Lock()
@@ -66,7 +67,7 @@ func (s *sessionStore) create(user, mailbox string, accounts directory.Accounts,
 		user:     user,
 		mailbox:  mailbox,
 		sequence: sequence,
-		ropSess:  rop.NewSession(mailbox, accounts, user, rop.WithSpool(spool), rop.WithLogger(logger)),
+		ropSess:  rop.NewSession(mailbox, accounts, user, rop.WithSpool(spool), rop.WithLogger(logger), rop.WithLocale(locale)),
 		lastSeen: now,
 		created:  now,
 	}

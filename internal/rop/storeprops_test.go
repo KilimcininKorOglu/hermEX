@@ -11,10 +11,10 @@ import (
 )
 
 // storeRow logs on as owner and reads the given store columns.
-func storeRow(t *testing.T, dir, owner string, cols []mapi.PropTag) (mapi.PropertyValues, *objectstore.Store) {
+func storeRow(t *testing.T, dir, owner string, cols []mapi.PropTag, opts ...SessionOption) (mapi.PropertyValues, *objectstore.Store) {
 	t.Helper()
 	accs := directory.StaticAccounts{owner: {Password: "x", MailboxPath: dir}}
-	sess := NewSession(dir, accs, owner)
+	sess := NewSession(dir, accs, owner, opts...)
 	t.Cleanup(sess.Close)
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
 	out, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{h[0]})
@@ -49,6 +49,26 @@ func TestStoreReportsWhatItHolds(t *testing.T) {
 		}
 	}
 	wantProp(t, row, mapi.PrMailboxOwnerName, owner, "owner name")
+}
+
+// TestStoreReportsTheConnectLocale proves the logon reports the locale the client
+// connected with ([MS-OXCSTOR] 2.2.2.1.1.12, .14 and .15), and leaves a locale it
+// was not given unset, which a read answers with NotFound ([MS-OXCSTOR] 3.2.5.1.1).
+func TestStoreReportsTheConnectLocale(t *testing.T) {
+	const owner = "owner@hermex.test"
+	cols := []mapi.PropTag{mapi.PrLocaleID, mapi.PrSortLocaleID, mapi.PrCodePageID}
+	row, _ := storeRow(t, t.TempDir(), owner, cols,
+		WithLocale(Locale{CodePage: 1254, LCIDString: 0x041F, LCIDSort: 0x0409}))
+	wantProp(t, row, mapi.PrLocaleID, int32(0x041F), "locale")
+	wantProp(t, row, mapi.PrSortLocaleID, int32(0x0409), "sort locale")
+	wantProp(t, row, mapi.PrCodePageID, int32(1254), "code page")
+
+	row, _ = storeRow(t, t.TempDir(), owner, cols)
+	for _, tag := range cols {
+		if v, ok := row.Get(tag); ok {
+			t.Errorf("%#x = %v without a connect locale, want it unset", uint32(tag), v)
+		}
+	}
 }
 
 // TestStoreHidesAnUnlimitedQuota proves a quota stored as 0 (unlimited) is not

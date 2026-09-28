@@ -91,14 +91,15 @@ func (s *Server) emsConnect(w http.ResponseWriter, r *http.Request, sess *sessio
 	rd := &reader{b: body}
 	rd.cstr() // UserDn
 	rd.u32()  // Flags
-	rd.u32()  // DefaultCodePage
-	rd.u32()  // LcidString
-	rd.u32()  // LcidSort
+	var locale rop.Locale
+	locale.CodePage = rd.u32()
+	locale.LCIDString = rd.u32()
+	locale.LCIDSort = rd.u32()
 	if rd.err {
 		writeRespError(w, r, "Connect", rcInvalidReqBody)
 		return
 	}
-	sid, sequence := s.sessions.create(sess.user, sess.mailbox, s.accounts, s.spool, s.logger)
+	sid, sequence := s.sessions.create(sess.user, sess.mailbox, s.accounts, s.spool, s.logger, locale)
 	setCookie(w, "sid", sid)
 	setCookie(w, "sequence", sequence)
 

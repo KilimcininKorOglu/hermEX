@@ -206,6 +206,9 @@ const (
 	PrMailboxOwnerEntryID = PropTag(0x661B0102) // PtBinary, the owner's address-book entry id
 	PrMailboxOwnerName    = PropTag(0x661C001F) // PtUnicode
 	PrUserEntryID         = PropTag(0x66190102) // PtBinary, the logged-on user's address-book entry id
+	PrLocaleID            = PropTag(0x66A10003) // PtLong, the LCID for system-generated messages
+	PrSortLocaleID        = PropTag(0x67050003) // PtLong, the LCID tables sort by
+	PrCodePageID          = PropTag(0x66C30003) // PtLong, the client code page
 )
 
 // PrAddressBookDisplayNamePrintable is PidTagAddressBookDisplayNamePrintable
