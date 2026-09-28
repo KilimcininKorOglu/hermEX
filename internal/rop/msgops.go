@@ -184,12 +184,16 @@ func (s *Session) applyReadFlag(folder *object, mid int64, action readFlagAction
 		return true
 	}
 	// A read receipt is owed only on the unread-to-read transition, so read the
-	// prior state before writing.
+	// prior state before writing. A state that cannot be read fails the message, as
+	// the single-message ROP does, rather than reading as unread and sending a
+	// receipt for a message the reader had already read.
 	var wasRead bool
 	if action.receipt {
-		if w, err := folder.store.GetMessageReadState(mid); err == nil {
-			wasRead = w
+		w, err := folder.store.GetMessageReadState(mid)
+		if err != nil {
+			return false
 		}
+		wasRead = w
 	}
 	if err := folder.store.SetMessageReadState(mid, action.read); err != nil {
 		return false
