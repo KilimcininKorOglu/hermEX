@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
+import { formatWhen } from "@/utils/date"
 import { KeyRound, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -103,7 +104,7 @@ export function AppPasswordsCard() {
                 <p className="text-xs text-muted-foreground">
                   {p.lastUsedAt > 0
                     ? t("settings.appPasswords.lastUsed", {
-                        when: new Date(p.lastUsedAt * 1000).toLocaleDateString(),
+                        when: formatWhen(p.lastUsedAt * 1000, t),
                       })
                     : t("settings.appPasswords.neverUsed")}
                 </p>

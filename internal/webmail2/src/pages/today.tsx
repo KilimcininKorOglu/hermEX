@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label"
 import api, { type CalendarEvent, type Task, type Contact } from "@/utils/api"
 import { useMailbox } from "@/contexts/MailboxContext"
 import { useI18n } from "@/hooks/useI18n"
-import { withTz } from "@/utils/date"
+import { withTz, formatDay } from "@/utils/date"
 
 // dateKey returns a local YYYY-MM-DD key for a Date.
 function dateKey(d: Date): string {
@@ -214,7 +214,7 @@ export function TodayPage() {
                   <span className="truncate">{tk.summary}</span>
                   {tk.due && (
                     <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                      {new Date(tk.due).toLocaleDateString()}
+                      {formatDay(tk.due)}
                     </span>
                   )}
                 </li>

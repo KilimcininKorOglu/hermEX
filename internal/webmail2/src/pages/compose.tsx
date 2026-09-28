@@ -88,7 +88,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext"
 import { useMailbox } from "@/contexts/MailboxContext"
 import { useI18n } from "@/hooks/useI18n"
-import { withTz, zonedInputToISO } from "@/utils/date"
+import { zonedInputToISO, formatDay, formatWhen } from "@/utils/date"
 import { RichTextEditor } from "@/components/RichTextEditor"
 
 type TFunc = ReturnType<typeof useI18n>["t"]
@@ -1080,13 +1080,6 @@ export function ComposePage() {
   )
 }
 
-// formatLastSaved renders when the draft was last stored.
-function formatLastSaved(t: TFunc, lastSaved: Date): string {
-  const diff = Math.floor((Date.now() - lastSaved.getTime()) / 1000)
-  if (diff < 60) return t("compose.justNow")
-  if (diff < 3600) return t("compose.minutesAgo", { minutes: String(Math.floor(diff / 60)) })
-  return lastSaved.toLocaleTimeString([], withTz({ hour: "2-digit", minute: "2-digit" }))
-}
 
 function SaveStatus({ drafts }: { drafts: DraftSaving }) {
   const { t } = useI18n()
@@ -1101,7 +1094,7 @@ function SaveStatus({ drafts }: { drafts: DraftSaving }) {
       ) : (
         <>
           <Check className="h-3 w-3" />
-          {t("compose.saved", { time: formatLastSaved(t, drafts.lastSaved) })}
+          {t("compose.saved", { time: formatWhen(drafts.lastSaved, t) })}
         </>
       )}
     </span>
@@ -1479,7 +1472,7 @@ function DiagnosticItem({ entry }: { entry: DiagnosticEntry }) {
               <span className="font-medium">{entry.nextStep}</span>
             </div>
           )}
-          <div className="text-muted-foreground mt-1">{new Date(entry.timestamp).toLocaleString([], withTz())}</div>
+          <div className="text-muted-foreground mt-1">{formatWhen(entry.timestamp, t)}</div>
         </div>
       </div>
     </div>
@@ -1750,7 +1743,7 @@ function ItemPickerList({ picker }: { picker: Pickers["item"] }) {
         loading={picker.loading}
         items={picker.events}
         render={(ev) => (
-          <PickerRow key={ev.uid} title={ev.summary || noSubject} detail={ev.start ? new Date(ev.start).toLocaleString() : ""} onClick={() => void picker.attachEvent(ev)} />
+          <PickerRow key={ev.uid} title={ev.summary || noSubject} detail={ev.start ? formatWhen(ev.start, t) : ""} onClick={() => void picker.attachEvent(ev)} />
         )}
       />
     )
@@ -1761,7 +1754,7 @@ function ItemPickerList({ picker }: { picker: Pickers["item"] }) {
         loading={picker.loading}
         items={picker.tasks}
         render={(tk) => (
-          <PickerRow key={tk.uid} title={tk.summary || noSubject} detail={tk.due ? new Date(tk.due).toLocaleDateString() : undefined} onClick={() => void picker.attachTask(tk)} />
+          <PickerRow key={tk.uid} title={tk.summary || noSubject} detail={tk.due ? formatDay(tk.due) : undefined} onClick={() => void picker.attachTask(tk)} />
         )}
       />
     )

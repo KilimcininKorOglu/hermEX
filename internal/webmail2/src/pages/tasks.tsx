@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
+import { formatDay } from "@/utils/date"
 import { ListTodo, Plus, Trash2, Edit, CalendarClock, Flag } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -27,10 +28,7 @@ import { CategoryChips, toggledCategories, type CategoryOption } from "@/compone
 import { dateInputValue, emptyTaskForm, taskFormOf, taskInputOf, type TaskForm } from "@/utils/taskForm"
 
 function dueLabel(due?: string): string {
-  if (!due) return ""
-  const d = new Date(due.length === 10 ? `${due}T00:00:00` : due)
-  if (isNaN(d.getTime())) return due
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+  return due ? formatDay(due) : ""
 }
 
 type Category = CategoryOption

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { formatAbsolute, formatDate, formatFullDate, setDisplayTimeZone, withTz, zonedInputToISO } from './date'
+import { formatAbsolute, formatDate, formatDay, formatFullDate, formatWhen, setDisplayTimeZone, withTz, zonedInputToISO } from './date'
 
 describe('without a chosen time zone', () => {
   afterEach(() => setDisplayTimeZone(''))
@@ -62,5 +62,39 @@ describe('formatFullDate', () => {
     // Should contain year and day
     expect(result).toContain('2024')
     expect(result).toContain('1')
+  })
+})
+
+describe('formatWhen and formatDay', () => {
+  const t = (key: string, params?: Record<string, string>) => `${key}:${params?.n ?? ''}`
+  const now = Date.parse('2026-03-28T12:00:00Z')
+  afterEach(() => {
+    setDisplayTimeZone('')
+    document.documentElement.lang = 'en'
+  })
+
+  it('writes a time under a day away as a distance', () => {
+    expect(formatWhen(now - 300, t, now)).toBe('time.justNow:')
+    expect(formatWhen(now - 20000, t, now)).toBe('time.secondsAgo:20')
+    expect(formatWhen(now - 5 * 60000, t, now)).toBe('time.minutesAgo:5')
+    expect(formatWhen(now - 23 * 3600000, t, now)).toBe('time.hoursAgo:23')
+    expect(formatWhen(now + 4 * 60000, t, now)).toBe('time.inMinutes:4')
+  })
+
+  it('writes a time a day or more away as its date in the zone and language', () => {
+    setDisplayTimeZone('Europe/Istanbul')
+    document.documentElement.lang = 'tr'
+    expect(formatWhen('2026-03-26T12:33:00Z', t, now)).toBe('26.03.2026 15:33')
+    document.documentElement.lang = 'en'
+    expect(formatWhen('2026-03-26T12:33:00Z', t, now)).toBe('03/26/2026 3:33 PM')
+    setDisplayTimeZone('')
+    expect(formatWhen('2026-03-20T00:05:00Z', t, now)).toBe('03/20/2026 12:05 AM UTC')
+  })
+
+  it('writes a date-only value as that day in every zone', () => {
+    setDisplayTimeZone('America/New_York')
+    document.documentElement.lang = 'tr'
+    expect(formatDay('2026-03-28')).toBe('28.03.2026')
+    expect(formatWhen('garbage', t, now)).toBe('garbage')
   })
 })

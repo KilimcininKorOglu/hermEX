@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
+import { formatWhen } from "@/utils/date"
 import { useNavigate } from "react-router-dom"
 import { Bell, Clock } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -92,7 +93,7 @@ export function ReminderOverlay() {
                 {rem.start && (
                   <p className="flex items-center gap-1 text-sm text-muted-foreground">
                     <Clock className="h-3.5 w-3.5" />
-                    {new Date(rem.start).toLocaleString()}
+                    {formatWhen(rem.start, t)}
                   </p>
                 )}
               </div>

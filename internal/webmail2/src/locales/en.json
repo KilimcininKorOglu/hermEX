@@ -302,8 +302,6 @@
     "draftSaved": "Draft saved",
     "draftSaveFailed": "Failed to save draft",
     "discardConfirm": "Discard this email? Your draft will be saved.",
-    "justNow": "Just now",
-    "minutesAgo": "{{minutes}}m ago",
     "newMessage": "New Message",
     "saved": "Saved {{time}}",
     "exitFullscreen": "Exit fullscreen",
@@ -1605,5 +1603,15 @@
     "autoReplyEnd": "Replies continue through the end of this day. Leave it empty to keep replying until you turn replies off.",
     "appPasswordName": "A name that tells this app password apart in the list, such as the device or program that uses it.",
     "snippetHtml": "On: the body is edited as formatted text (HTML). Off: it is plain text."
+  },
+  "time": {
+    "justNow": "just now",
+    "secondsAgo": "{{n}} s ago",
+    "minutesAgo": "{{n}} min ago",
+    "hoursAgo": "{{n}} h ago",
+    "shortly": "shortly",
+    "inSeconds": "in {{n}} s",
+    "inMinutes": "in {{n}} min",
+    "inHours": "in {{n}} h"
   }
 }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
+import { formatDay } from "@/utils/date"
 import { FileKey } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -176,7 +177,7 @@ function SmimeStatus({ smime }: { smime: Smime }) {
 
 function CertDetails({ cert }: { cert: CertInfo }) {
   const { t } = useI18n()
-  const date = (v?: string) => (v ? new Date(v).toLocaleDateString() : "-")
+  const date = (v?: string) => (v ? formatDay(v) : "-")
   return (
     <div className="rounded-lg border bg-muted/50 p-4 space-y-2">
       <div className="grid grid-cols-[120px_1fr] gap-1 text-sm">

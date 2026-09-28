@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import { formatDate, formatWhen } from "@/utils/date"
 import { FolderOpen, ChevronRight, ChevronLeft, Mail as MailIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -72,7 +73,7 @@ function PublicMessageView({ message, onBack }: { message: Mail; onBack: () => v
         <div className="text-sm text-muted-foreground mb-4">
           <span className="font-medium text-foreground">{message.fromName || message.from}</span>
           {message.fromName && <span> &lt;{message.from}&gt;</span>}
-          {message.date && <span> - {new Date(message.date).toLocaleString()}</span>}
+          {message.date && <span> - {formatWhen(message.date, t)}</span>}
         </div>
         <div className="prose prose-sm max-w-none dark:prose-invert" dangerouslySetInnerHTML={{ __html: html }} />
       </div>
@@ -93,7 +94,7 @@ function MessageRow({ m, onOpen }: { m: Mail; onOpen: (m: Mail) => void }) {
         <p className="font-medium truncate">{m.subject || t("common.noSubject")}</p>
         <p className="text-xs text-muted-foreground truncate">
           {m.fromName || m.from}
-          {m.date ? " - " + new Date(m.date).toLocaleDateString() : ""}
+          {m.date ? " - " + formatDate(m.date) : ""}
         </p>
       </div>
       <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />

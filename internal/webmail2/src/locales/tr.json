@@ -302,8 +302,6 @@
     "draftSaved": "Taslak kaydedildi",
     "draftSaveFailed": "Taslak kaydedilemedi",
     "discardConfirm": "Bu e-posta atılsın mı? Taslağınız kaydedilecek.",
-    "justNow": "Az önce",
-    "minutesAgo": "{{minutes}} dk önce",
     "newMessage": "Yeni İleti",
     "saved": "{{time}} kaydedildi",
     "exitFullscreen": "Tam ekrandan çık",
@@ -1605,5 +1603,15 @@
     "autoReplyEnd": "Yanıtlar bu günün sonuna kadar sürer. Siz kapatana kadar yanıt verilmesi için boş bırakın.",
     "appPasswordName": "Bu uygulama parolasını listede ayırt eden bir ad, örneğin onu kullanan cihaz ya da program.",
     "snippetHtml": "Açık: gövde biçimli metin (HTML) olarak düzenlenir. Kapalı: düz metindir."
+  },
+  "time": {
+    "justNow": "az önce",
+    "secondsAgo": "{{n}} sn önce",
+    "minutesAgo": "{{n}} dk önce",
+    "hoursAgo": "{{n}} sa önce",
+    "shortly": "birazdan",
+    "inSeconds": "{{n}} sn sonra",
+    "inMinutes": "{{n}} dk sonra",
+    "inHours": "{{n}} sa sonra"
   }
 }

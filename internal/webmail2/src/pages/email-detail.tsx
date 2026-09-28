@@ -80,7 +80,7 @@ import api from "@/utils/api"
 import type { MeetingInvite, AttachmentInfo, Mail as MailMessage, Note } from "@/utils/api"
 import * as smimeStore from "@/utils/smime"
 import { hasIdentity as hasBrowserSmime } from "@/utils/smimeIdentity"
-import { formatAbsolute, withTz } from "@/utils/date"
+import { formatAbsolute, withTz, formatWhen } from "@/utils/date"
 import { getShortcutMode } from "@/utils/shortcutMode"
 import { useAuth } from "@/contexts/AuthContext"
 import { useMailbox } from "@/contexts/MailboxContext"
@@ -1066,7 +1066,7 @@ function MessageHeader({ email, categoryColors, actions }: {
           {rows.map((row) => (
             <RecipientRow key={row.label} label={row.label} addrs={row.addrs} names={row.names} actions={actions} />
           ))}
-          <div className="mt-1 text-sm text-muted-foreground">{formatAbsolute(email.date)}</div>
+          <div className="mt-1 text-sm text-muted-foreground" title={formatAbsolute(email.date)}>{formatWhen(email.date, t)}</div>
           <LabelBar labels={email.labels} categoryColors={categoryColors} actions={actions} />
         </div>
       </div>
