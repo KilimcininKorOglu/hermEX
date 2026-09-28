@@ -35,6 +35,20 @@ const (
 // a FLAGGED row (flag 0x01, then a FLAGGED_PROPVAL per column, available with
 // its value, or unavailable). The column proptag types how each value encodes.
 func buildPropertyRow(out *ext.Push, columns []mapi.PropTag, props mapi.PropertyValues) error {
+	return buildRow(out, columns, props, mapi.FlaggedPropVal{Flag: mapi.FlaggedUnavailable})
+}
+
+// buildGetPropsRow serializes the PROPERTY_ROW of RopGetPropertiesSpecific, where
+// a property the object lacks is answered with the NotFound error in place of a
+// value ([MS-OXCPRPT] 3.2.5.5 and the example in section 4.3), not the table's
+// "unavailable" flag.
+func buildGetPropsRow(out *ext.Push, columns []mapi.PropTag, props mapi.PropertyValues) error {
+	return buildRow(out, columns, props, mapi.FlaggedPropVal{Flag: mapi.FlaggedError, Type: mapi.PtError, Value: uint32(ecNotFound)})
+}
+
+// buildRow serializes one PROPERTY_ROW, writing missing for a column the bag
+// lacks.
+func buildRow(out *ext.Push, columns []mapi.PropTag, props mapi.PropertyValues, missing mapi.FlaggedPropVal) error {
 	allPresent := true
 	for _, col := range columns {
 		if _, ok := props.Get(col); !ok {
@@ -58,7 +72,7 @@ func buildPropertyRow(out *ext.Push, columns []mapi.PropTag, props mapi.Property
 			if err := out.FlaggedPropVal(col, mapi.FlaggedPropVal{Flag: mapi.FlaggedAvailable, Value: v}); err != nil {
 				return err
 			}
-		} else if err := out.FlaggedPropVal(col, mapi.FlaggedPropVal{Flag: mapi.FlaggedUnavailable}); err != nil {
+		} else if err := out.FlaggedPropVal(col, missing); err != nil {
 			return err
 		}
 	}

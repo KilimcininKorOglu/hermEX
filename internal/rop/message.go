@@ -208,7 +208,7 @@ func (s *Session) ropGetPropertiesSpecific(p *ext.Pull, out *ext.Push, handles [
 	// Build the row first so a serialization failure does not leave a partial
 	// response after the header.
 	row := ext.NewPush(ext.FlagUTF16)
-	if err := buildPropertyRow(row, cols, props); err != nil {
+	if err := buildGetPropsRow(row, cols, props); err != nil {
 		writeErr(out, ropGetPropertiesSpecific, hindex, ecError)
 		return true
 	}
