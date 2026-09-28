@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/relay"
 )
 
 // readReceiptSubject is the fixed subject of a read-receipt MDN, matching the
@@ -37,12 +38,15 @@ type ReadReceiptInfo struct {
 // reason buildAutoReply is: Export emits a fixed single-part header set and
 // cannot produce the multipart/report; report-type=disposition-notification
 // structure by which a receiving client recognizes a message as a read receipt.
-func SendReadReceipt(accounts directory.Accounts, info ReadReceiptInfo, when time.Time) error {
+//
+// A sender without a mailbox here is reached through spool, like any mail the
+// reader sends; with a nil spool the receipt is delivered locally only.
+func SendReadReceipt(accounts directory.Accounts, spool *relay.Spool, info ReadReceiptInfo, when time.Time) error {
 	raw, err := buildReadReceipt(info, when)
 	if err != nil {
 		return err
 	}
-	if _, err := Deliver(accounts, info.Reader, []string{info.To}, raw, when); err != nil {
+	if _, err := DeliverAndRelay(accounts, spool, info.Reader, []string{info.To}, raw, when); err != nil {
 		return err
 	}
 	return nil

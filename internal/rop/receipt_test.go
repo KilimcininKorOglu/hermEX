@@ -1,13 +1,16 @@
 package rop
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcmail"
+	"hermex/internal/relay"
 )
 
 // seedReceiptRequest writes an unread Inbox message that requested a read receipt,
@@ -119,6 +122,40 @@ func TestReadReceiptGeneratedOnFirstRead(t *testing.T) {
 	}
 	if receiptRequested(t, readerDir, msgID) {
 		t.Errorf("PR_READ_RECEIPT_REQUESTED still set after sending; the receipt would re-fire")
+	}
+}
+
+// TestReadReceiptRelaysToExternalSender proves a read receipt for a message from a
+// sender in a foreign domain is queued for relay from the reader's address, not
+// dropped because the sender has no mailbox here.
+func TestReadReceiptRelaysToExternalSender(t *testing.T) {
+	readerDir := t.TempDir()
+	accounts := directory.StaticAccounts{"reader@hermex.test": {MailboxPath: readerDir}}
+	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sp.Close()
+	msgID := seedReceiptRequest(t, readerDir, "carol@external.test", "PingMe")
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	msgEID := uint64(mapi.MakeEIDEx(1, uint64(msgID)))
+
+	sess := NewSession(readerDir, accounts, "reader@hermex.test", WithSpool(sp))
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, msgEID), []uint32{logonH, 0xFFFFFFFF})
+	sess.Dispatch(buildSetMessageReadFlag(0, 1, rfDefault), []uint32{logonH, h[1]})
+
+	due, err := sp.Claim(time.Now(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(due) != 1 || due[0].Recipient != "carol@external.test" || due[0].From != "reader@hermex.test" {
+		t.Fatalf("relay spool = %v, want one receipt from reader@hermex.test to carol@external.test", due)
+	}
+	if receiptRequested(t, readerDir, msgID) {
+		t.Errorf("PR_READ_RECEIPT_REQUESTED still set after the relayed receipt; it would re-fire")
 	}
 }
 

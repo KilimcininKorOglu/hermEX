@@ -56,7 +56,7 @@ func (s *Session) maybeReadReceipt(store *objectstore.Store, messageID int64) {
 		}
 	}
 
-	if err := mta.SendReadReceipt(s.accounts, info, time.Now()); err != nil {
+	if err := mta.SendReadReceipt(s.accounts, s.spool, info, time.Now()); err != nil {
 		s.logReceiptFailure(store, messageID, "send", err)
 		return
 	}
