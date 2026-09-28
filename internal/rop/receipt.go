@@ -1,84 +1,38 @@
 package rop
 
 import (
+	"errors"
 	"time"
 
 	"hermex/internal/logging"
-	"hermex/internal/mapi"
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
 )
 
-// maybeReadReceipt generates and sends a read-receipt MDN for a message the
-// client just marked read, when that message carried a read-receipt request
-// ([MS-OXOMSG] 3.3.4.3). It is best-effort: any storage or send failure is
-// logged and swallowed so it can never fail the SetMessageReadFlag that
-// triggered it. After a successful send it clears both request flags so the
-// receipt fires exactly once, a later read finds no pending request. A
-// read-only session (no MTA bridge) sends nothing.
-//
-// The destination is the original message's PR_SENT_REPRESENTING_SMTP_ADDRESS,
-// matching the reference; an absent value means there is no represented sender to
-// notify, and the receipt is skipped.
+// maybeReadReceipt sends the read receipt a message the client just marked read
+// asks for, through the one receipt path every surface shares
+// (mta.SendRequestedReceipt). It is best-effort: a failure is logged and swallowed
+// so it can never fail the SetMessageReadFlag that triggered it. A read-only
+// session (no MTA bridge) sends nothing.
 func (s *Session) maybeReadReceipt(store *objectstore.Store, messageID int64) {
 	if s.accounts == nil {
 		return
 	}
-	props, err := store.GetMessageProperties(messageID,
-		mapi.PrReadReceiptRequested,
-		mapi.PrSentRepresentingSmtpAddress,
-		mapi.PrSubject,
-		mapi.PrInternetMessageID,
-		mapi.PrClientSubmitTime,
-	)
-	if err != nil {
-		s.logReceiptFailure(store, messageID, "read", err)
-		return
-	}
-	if req, _ := props.Get(mapi.PrReadReceiptRequested); req != true {
-		return // no receipt requested, or a prior read already consumed it
-	}
-	dest := stringProp(props, mapi.PrSentRepresentingSmtpAddress)
-	if dest == "" {
-		return // no represented sender to notify (matches the reference's early return)
-	}
-
-	info := mta.ReadReceiptInfo{
-		Reader:      s.owner,
-		To:          dest,
-		OrigFrom:    dest,
-		OrigSubject: stringProp(props, mapi.PrSubject),
-		OrigMsgID:   stringProp(props, mapi.PrInternetMessageID),
-	}
-	if v, ok := props.Get(mapi.PrClientSubmitTime); ok {
-		if nt, ok := v.(uint64); ok {
-			info.SubmitTime = mapi.NTTimeToUnix(nt)
-		}
-	}
-
-	if err := mta.SendReadReceipt(s.accounts, s.spool, info, time.Now()); err != nil {
-		s.logReceiptFailure(store, messageID, "send", err)
-		return
-	}
-	// Fire-once: clear both request flags after sending, exactly as the reference
-	// does, so a subsequent read of the same message cannot re-send the receipt.
-	if err := store.SetMessageProperties(messageID, mapi.PropertyValues{
-		{Tag: mapi.PrReadReceiptRequested, Value: false},
-		{Tag: mapi.PrNonReceiptNotificationRequested, Value: false},
-	}); err != nil {
-		s.logReceiptFailure(store, messageID, "clear", err)
+	if err := mta.SendRequestedReceipt(s.accounts, s.spool, store, messageID, s.owner, false, time.Now()); err != nil {
+		s.logReceiptFailure(store, messageID, err)
 	}
 }
 
-// logReceiptFailure records a read receipt that could not be produced. Each branch
+// logReceiptFailure records a read receipt that could not be produced. The failure
 // is swallowed so it can never fail the read that triggered it, which is right and
-// is also what makes the failure invisible: the sender is simply never told their
-// message was read. stage names which of the three steps failed, so a systematically
-// broken send is distinguishable from a one-off store error.
-//
-// A failed clear is the one that repeats: the request flags still stand, so the next
-// read tries again and the recipient can send the same receipt more than once.
-func (s *Session) logReceiptFailure(store *objectstore.Store, messageID int64, stage string, err error) {
+// is also what makes it invisible: the sender is simply never told their message
+// was read. The stage names which step failed, so a systematically broken send is
+// distinguishable from a one-off store error.
+func (s *Session) logReceiptFailure(store *objectstore.Store, messageID int64, err error) {
+	stage := "unknown"
+	if re, ok := errors.AsType[*mta.ReceiptError](err); ok {
+		stage = re.Stage
+	}
 	s.logger.Emit(logging.Event{
 		Level: logging.LevelError, Subsystem: logging.MAPI, Name: "readreceipt.fail",
 		User: s.effectiveCaller(store),

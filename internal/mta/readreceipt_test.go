@@ -8,6 +8,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"hermex/internal/directory"
+	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
+	"hermex/internal/oxcmail"
 )
 
 // TestBuildReadReceiptMDN parses a generated read receipt back and asserts the
@@ -78,6 +83,64 @@ func nextPart(t *testing.T, mr *multipart.Reader, what, mediaType string) string
 	body, err := io.ReadAll(p)
 	mustNoErr(t, "read the body of "+what, err)
 	return string(body)
+}
+
+// TestBuildReadReceiptManualDisposition proves a receipt the reader chose to send
+// reports a manual action, as RFC 8098 section 3.2.6 asks.
+func TestBuildReadReceiptManualDisposition(t *testing.T) {
+	raw, err := buildReadReceipt(ReadReceiptInfo{Reader: "reader@hermex.test", To: "sender@hermex.test", Manual: true}, time.Now())
+	mustNoErr(t, "build the receipt", err)
+	wantContains(t, "the manual receipt", string(raw), "Disposition: manual-action/MDN-sent-manually; displayed")
+}
+
+// seedRequestedReceipt stores a message in dir that asks for a read receipt from
+// sender and returns the open store and the message id.
+func seedRequestedReceipt(t *testing.T, dir, sender string) (*objectstore.Store, int64) {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open the reader's mailbox", err)
+	id, err := st.CreateMessage(int64(mapi.PrivateFIDInbox), &oxcmail.Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: "IPM.Note"},
+		{Tag: mapi.PrSubject, Value: "PingMe"},
+		{Tag: mapi.PrReadReceiptRequested, Value: true},
+		{Tag: mapi.PrNonReceiptNotificationRequested, Value: true},
+		{Tag: mapi.PrSentRepresentingSmtpAddress, Value: sender},
+	}})
+	mustNoErr(t, "store the message", err)
+	return st, id
+}
+
+// TestSendRequestedReceiptSendsOnce proves the shared receipt path delivers one
+// receipt and consumes the request, so a second call, from any surface, sends
+// nothing, and that a declined request is consumed without a receipt.
+func TestSendRequestedReceiptSendsOnce(t *testing.T) {
+	readerDir, senderDir := t.TempDir(), t.TempDir()
+	accounts := directory.StaticAccounts{
+		"reader@hermex.test": {MailboxPath: readerDir},
+		"sender@hermex.test": {MailboxPath: senderDir},
+	}
+	st, id := seedRequestedReceipt(t, readerDir, "sender@hermex.test")
+	defer st.Close()
+
+	pending, err := ReceiptPending(st, id)
+	mustNoErr(t, "read the request", err)
+	wantEq(t, "pending before the read", pending, true)
+	for range 2 {
+		mustNoErr(t, "send the receipt", SendRequestedReceipt(accounts, nil, st, id, "reader@hermex.test", false, time.Now()))
+	}
+	wantEq(t, "receipts in the sender's inbox", len(listInbox(t, senderDir)), 1)
+	pending, err = ReceiptPending(st, id)
+	mustNoErr(t, "read the request", err)
+	wantEq(t, "pending after the send", pending, false)
+
+	declined, err := st.CreateMessage(int64(mapi.PrivateFIDInbox), &oxcmail.Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrReadReceiptRequested, Value: true},
+		{Tag: mapi.PrSentRepresentingSmtpAddress, Value: "sender@hermex.test"},
+	}})
+	mustNoErr(t, "store a second message", err)
+	mustNoErr(t, "decline", ConsumeReceiptRequest(st, declined))
+	mustNoErr(t, "read after declining", SendRequestedReceipt(accounts, nil, st, declined, "reader@hermex.test", false, time.Now()))
+	wantEq(t, "receipts after a decline", len(listInbox(t, senderDir)), 1)
 }
 
 // TestBuildReadReceiptOmitsAbsentFields confirms the optional decorations are
