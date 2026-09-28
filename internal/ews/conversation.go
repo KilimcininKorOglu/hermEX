@@ -381,46 +381,65 @@ func (s *Server) handleApplyConversationAction(w http.ResponseWriter, inner []by
 
 // applyOneConversationAction applies a single action to a conversation's members.
 // becameRead lists the messages a SetReadState took from unread to read.
+//
+// Every member is attempted, and a member that fails makes the whole action
+// report an error, so a client is never told a conversation moved, was deleted or
+// was marked read while part of it was not.
 func applyOneConversationAction(st *objectstore.Store, a conversationAction, members []convMember) (rm folderResponseMessage, becameRead []int64) {
+	var code string
 	switch a.Action {
 	case "Move", "AlwaysMove":
-		if !relocateConversation(st, a.DestinationFolderID, members, moveMessage) {
-			return folderError("ErrorInvalidRequest"), nil
-		}
+		code = relocateConversation(st, a.DestinationFolderID, members, moveMessage)
 	case "Copy":
-		if !relocateConversation(st, a.DestinationFolderID, members, copyMessage) {
-			return folderError("ErrorInvalidRequest"), nil
-		}
+		code = relocateConversation(st, a.DestinationFolderID, members, copyMessage)
 	case "Delete", "AlwaysDelete":
-		for _, m := range members {
-			_ = st.SoftDeleteMessage(m.folderID, m.info.UID)
-		}
+		code = deleteConversation(st, members)
 	case "SetReadState":
-		becameRead = setConversationRead(st, members, a.IsRead != nil && *a.IsRead)
+		becameRead, code = setConversationRead(st, members, a.IsRead != nil && *a.IsRead)
 	default:
-		return folderError("ErrorInvalidRequest"), nil
+		code = "ErrorInvalidRequest"
+	}
+	if code != "" {
+		return folderError(code), becameRead
 	}
 	return folderResponseMessage{ResponseClass: "Success", ResponseCode: "NoError"}, becameRead
 }
 
 // relocateConversation moves or copies every member of a conversation into the
-// named destination folder, reporting false when the destination does not resolve.
+// named destination folder. It returns ErrorInvalidRequest when the destination
+// does not resolve, ErrorMoveCopyFailed when a member could not be relocated, and
+// "" when all were.
 func relocateConversation(st *objectstore.Store, refs folderRefs, members []convMember,
-	relocate func(*objectstore.Store, int64, uint32, int64) (objectstore.MessageInfo, error)) bool {
+	relocate func(*objectstore.Store, int64, uint32, int64) (objectstore.MessageInfo, error)) string {
 	target, ok := singleFolderTarget(refs)
 	if !ok {
-		return false
+		return "ErrorInvalidRequest"
 	}
+	code := ""
 	for _, m := range members {
-		_, _ = relocate(st, m.folderID, m.info.UID, target)
+		if _, err := relocate(st, m.folderID, m.info.UID, target); err != nil {
+			code = "ErrorMoveCopyFailed"
+		}
 	}
-	return true
+	return code
+}
+
+// deleteConversation moves every member of a conversation to Recoverable Items,
+// returning ErrorDeleteItemsFailed when a member could not be deleted.
+func deleteConversation(st *objectstore.Store, members []convMember) string {
+	code := ""
+	for _, m := range members {
+		if err := st.SoftDeleteMessage(m.folderID, m.info.UID); err != nil {
+			code = "ErrorDeleteItemsFailed"
+		}
+	}
+	return code
 }
 
 // setConversationRead marks every member of a conversation read or unread,
-// touching only the ones whose flag actually changes, and returns the members it
-// took from unread to read.
-func setConversationRead(st *objectstore.Store, members []convMember, read bool) (becameRead []int64) {
+// touching only the ones whose flag actually changes. It returns the members it
+// took from unread to read, and ErrorItemSave when a member could not be marked.
+func setConversationRead(st *objectstore.Store, members []convMember, read bool) (becameRead []int64, code string) {
 	for _, m := range members {
 		next := m.info.Flags
 		if read {
@@ -431,11 +450,15 @@ func setConversationRead(st *objectstore.Store, members []convMember, read bool)
 		if next == m.info.Flags {
 			continue
 		}
-		if st.SetMessageFlags(m.folderID, m.info.UID, next) == nil && read {
+		if err := st.SetMessageFlags(m.folderID, m.info.UID, next); err != nil {
+			code = "ErrorItemSave"
+			continue
+		}
+		if read {
 			becameRead = append(becameRead, m.info.ID)
 		}
 	}
-	return becameRead
+	return becameRead, code
 }
 
 // singleFolderTarget resolves a destination folder reference to one folder id in

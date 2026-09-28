@@ -181,6 +181,45 @@ func TestApplyConversationActionMove(t *testing.T) {
 	}
 }
 
+// TestApplyConversationActionReportsFailedMembers proves an action that could not
+// reach every member reports an error for it rather than success, while the
+// members it could reach are still acted on.
+func TestApplyConversationActionReportsFailedMembers(t *testing.T) {
+	_, dir := seededEWS(t)
+	seedThread(t, dir)
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	inbox := int64(mapi.PrivateFIDInbox)
+	live, err := st.ListMessages(inbox)
+	if err != nil || len(live) == 0 {
+		t.Fatalf("list the inbox: %v", err)
+	}
+	members := []convMember{
+		{folderID: inbox, info: live[0]},
+		{folderID: inbox, info: objectstore.MessageInfo{ID: 999999, UID: 999999}},
+	}
+	dest := folderRefs{}
+	if err := xml.Unmarshal([]byte(`<DestinationFolderId><DistinguishedFolderId Id="junkemail"/></DestinationFolderId>`), &dest); err != nil {
+		t.Fatal(err)
+	}
+	// Delete runs last, because it takes the reachable member away from the others.
+	for _, c := range []struct{ action, want string }{
+		{"Copy", "ErrorMoveCopyFailed"},
+		{"SetReadState", "ErrorItemSave"},
+		{"Delete", "ErrorDeleteItemsFailed"},
+	} {
+		read := true
+		rm, _ := applyOneConversationAction(st, conversationAction{Action: c.action, DestinationFolderID: dest, IsRead: &read}, members)
+		wantEq(t, c.action+" response code", rm.ResponseCode, c.want)
+	}
+	if n := folderCount(t, dir, int64(mapi.PrivateFIDJunk)); n != 1 {
+		t.Errorf("Junk has %d messages, want the 1 member the copy could reach", n)
+	}
+}
+
 // TestApplyConversationActionSetReadState proves SetReadState marks every message
 // of a conversation read.
 func TestApplyConversationActionSetReadState(t *testing.T) {
