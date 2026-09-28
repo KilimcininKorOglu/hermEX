@@ -45,13 +45,13 @@ func Import(raw []byte, opt Options) (*Message, error) {
 	// The original header block, captured verbatim.
 	msg.Props.Set(mapi.PrTransportMessageHeaders, string(root.RawHeader()))
 
-	// Submit time: the parsed Date, else the current time. Creation time mirrors
-	// it, exactly as the import driver does.
+	// Submit time: the parsed Date, else the time the message arrived, else the
+	// current time. Creation time mirrors it.
 	var stamp uint64
 	if v, ok := msg.Props.Get(mapi.PrClientSubmitTime); ok {
 		stamp = v.(uint64)
 	} else {
-		stamp = mapi.UnixToNTTime(time.Now())
+		stamp = mapi.UnixToNTTime(arrivalOrNow(opt.ArrivalTime))
 		msg.Props.Set(mapi.PrClientSubmitTime, stamp)
 	}
 	msg.Props.Set(mapi.PrCreationTime, stamp)
@@ -61,6 +61,14 @@ func Import(raw []byte, opt Options) (*Message, error) {
 		return nil, err
 	}
 	return msg, nil
+}
+
+// arrivalOrNow is the arrival time a caller named, or the current time.
+func arrivalOrNow(arrival time.Time) time.Time {
+	if arrival.IsZero() {
+		return time.Now()
+	}
+	return arrival
 }
 
 // senderTags and representingTags name the two parallel identity property sets

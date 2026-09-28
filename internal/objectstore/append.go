@@ -64,6 +64,9 @@ func (s *Store) AppendMessage(folderID int64, raw []byte, internalDate time.Time
 	}()
 	resolver := oxcmail.Options{
 		Resolver: s.GetNamedPropIDs,
+		// A message without a Date header is dated when it arrived, which for an
+		// IMAP APPEND is the internal date the client named, not the append time.
+		ArrivalTime: internalDate,
 		// A delivered meeting request/response carries its appointment as a
 		// text/calendar part; bridge to the iCalendar converter (oxcmail cannot
 		// import it directly without a cycle) so Import overlays the scheduling

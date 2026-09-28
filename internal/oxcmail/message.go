@@ -1,6 +1,10 @@
 package oxcmail
 
-import "hermex/internal/mapi"
+import (
+	"time"
+
+	"hermex/internal/mapi"
+)
 
 // Message is a MAPI message object: the top-level property bag, the recipient
 // table (one property bag per recipient), and the attachment table. Import
@@ -40,11 +44,17 @@ type PropIDResolver func(create bool, names []mapi.PropertyName) ([]uint16, erro
 // CalendarImporter is the import-side counterpart: it parses a text/calendar part
 // the caller's iCalendar converter understands, letting Import overlay a scheduling
 // message's class and appointment properties (see CalendarImporter).
+//
+// ArrivalTime is when the message reached the store. Import uses it as the submit
+// time of a message without a Date header, as the receiving MTA adds one from the
+// time it received the message (RFC 5321 section 6.4); a zero value falls back to
+// the current time.
 type Options struct {
 	Resolver         PropIDResolver
 	CalendarBody     []byte
 	CalendarMethod   string
 	CalendarImporter CalendarImporter
+	ArrivalTime      time.Time
 }
 
 // CalendarImporter parses a text/calendar body (a UTF-8 iCalendar object) into the
