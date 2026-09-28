@@ -38,10 +38,13 @@ func storeProps(store *objectstore.Store, tags []mapi.PropTag, id *logonIdentity
 	if err != nil {
 		return nil, err
 	}
-	for _, t := range quotaTags {
-		if v, ok := props.Get(t); ok && v == int32(0) {
-			props = removeTag(props, t)
+	props = hideUnlimitedQuotas(props)
+	if requestsAny(tags, []mapi.PropTag{mapi.PrSerializedReplidGuidMap}) {
+		m, err := serializedReplidGUIDMap(store)
+		if err != nil {
+			return nil, err
 		}
+		props.Set(mapi.PrSerializedReplidGuidMap, m)
 	}
 	if requestsAny(tags, computedStoreTags) {
 		computed, err := store.StoreComputedProps()
@@ -57,6 +60,17 @@ func storeProps(store *objectstore.Store, tags []mapi.PropTag, id *logonIdentity
 	addLogonIdentity(&props, tags, id)
 	addLocale(&props, tags, id)
 	return props, nil
+}
+
+// hideUnlimitedQuotas drops each quota stored as 0, the value that means no
+// limit (see quotaTags).
+func hideUnlimitedQuotas(props mapi.PropertyValues) mapi.PropertyValues {
+	for _, t := range quotaTags {
+		if v, ok := props.Get(t); ok && v == int32(0) {
+			props = removeTag(props, t)
+		}
+	}
+	return props
 }
 
 // addLocale sets the logon's locale properties from the locale the client

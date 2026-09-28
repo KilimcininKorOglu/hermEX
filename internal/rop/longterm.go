@@ -83,10 +83,29 @@ func replidToGUID(st *objectstore.Store, replid uint16) (mapi.GUID, error) {
 	}
 }
 
+// knownReplids are the replica ids replidToGUID resolves.
+var knownReplids = []uint16{1, privateReplID}
+
+// serializedReplidGUIDMap renders the logon's whole REPLID/REPLGUID mapping as
+// PidTagSerializedReplidGuidMap carries it: one 18-byte pair per replica, a
+// 2-byte REPLID then a 16-byte REPLGUID ([MS-OXCSTOR] 2.2.2.1.1.13).
+func serializedReplidGUIDMap(st *objectstore.Store) ([]byte, error) {
+	p := ext.NewPush(0)
+	for _, replid := range knownReplids {
+		guid, err := replidToGUID(st, replid)
+		if err != nil {
+			return nil, err
+		}
+		p.Uint16(replid)
+		p.GUID(guid)
+	}
+	return p.Bytes(), nil
+}
+
 // guidToReplid maps a database GUID back to its short-term replica id, the
 // inverse of replidToGUID.
 func guidToReplid(st *objectstore.Store, guid mapi.GUID) (uint16, bool) {
-	for _, replid := range []uint16{1, privateReplID} {
+	for _, replid := range knownReplids {
 		if g, err := replidToGUID(st, replid); err == nil && g == guid {
 			return replid, true
 		}

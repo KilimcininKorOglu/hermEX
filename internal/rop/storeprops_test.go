@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"hermex/internal/directory"
+	"hermex/internal/ext"
 	"hermex/internal/mapi"
 	"hermex/internal/nspi"
 	"hermex/internal/objectstore"
@@ -68,6 +69,31 @@ func TestStoreReportsTheConnectLocale(t *testing.T) {
 		if v, ok := row.Get(tag); ok {
 			t.Errorf("%#x = %v without a connect locale, want it unset", uint32(tag), v)
 		}
+	}
+}
+
+// TestStoreReportsItsReplidMap proves the logon serves its whole REPLID/REPLGUID
+// mapping in PidTagSerializedReplidGuidMap ([MS-OXCSTOR] 2.2.2.1.1.13): the object
+// replid with the store GUID, and the replid the logon reports with the mapping
+// signature it pairs that replid with.
+func TestStoreReportsItsReplidMap(t *testing.T) {
+	row, store := storeRow(t, t.TempDir(), "owner@hermex.test", []mapi.PropTag{mapi.PrSerializedReplidGuidMap})
+	storeGUID, err := store.StoreGUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sig, err := store.MappingSignature()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := ext.NewPush(0)
+	want.Uint16(1)
+	want.GUID(storeGUID)
+	want.Uint16(privateReplID)
+	want.GUID(sig)
+	v, _ := row.Get(mapi.PrSerializedReplidGuidMap)
+	if got, _ := v.([]byte); !bytes.Equal(got, want.Bytes()) {
+		t.Errorf("replid map = % x, want % x", got, want.Bytes())
 	}
 }
 

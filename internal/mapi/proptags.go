@@ -209,6 +209,8 @@ const (
 	PrLocaleID            = PropTag(0x66A10003) // PtLong, the LCID for system-generated messages
 	PrSortLocaleID        = PropTag(0x67050003) // PtLong, the LCID tables sort by
 	PrCodePageID          = PropTag(0x66C30003) // PtLong, the client code page
+	// PrSerializedReplidGuidMap is the logon's REPLID/REPLGUID pairs, 18 bytes each.
+	PrSerializedReplidGuidMap = PropTag(0x66380102) // PtBinary
 )
 
 // PrAddressBookDisplayNamePrintable is PidTagAddressBookDisplayNamePrintable
