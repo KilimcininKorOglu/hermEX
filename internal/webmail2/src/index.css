@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* The theme provider sets .dark on <html> from the chosen theme, so the dark:
+   variant follows that class. Tailwind's default follows the operating system's
+   preference instead, which paints light banners on a dark page, and the reverse. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-background: hsl(0 0% 100%);
   --color-foreground: hsl(222.2 84% 4.9%);
