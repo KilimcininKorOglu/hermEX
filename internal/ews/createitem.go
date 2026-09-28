@@ -166,7 +166,7 @@ func (s *Server) createMeetingResponses(sess *session, req createItemRequest, se
 		{req.Items.Decline, meeting.ResponseDeclined},
 	} {
 		for _, mr := range r.items {
-			msgs = append(msgs, s.meetingRespond(sess, mr.ReferenceItemID, r.response, send))
+			msgs = append(msgs, s.meetingRespond(sess, mr, r.response, send))
 		}
 	}
 	return msgs

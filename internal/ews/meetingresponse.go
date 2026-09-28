@@ -2,6 +2,7 @@ package ews
 
 import (
 	"errors"
+	"strings"
 
 	"hermex/internal/mapi"
 	"hermex/internal/meeting"
@@ -9,17 +10,32 @@ import (
 )
 
 // meetingResponse is an AcceptItem/TentativelyAcceptItem/DeclineItem response
-// object ([MS-OXWSMTGS]): it references the meeting request it answers.
+// object ([MS-OXWSMTGS]): it references the meeting request it answers and may
+// carry the note the attendee wrote for the organizer.
 type meetingResponse struct {
 	ReferenceItemID refID `xml:"ReferenceItemId"`
+	Body            struct {
+		Type    string `xml:"BodyType,attr"`
+		Content string `xml:",chardata"`
+	} `xml:"Body"`
+}
+
+// reply is what the organizer receives with the response: the attendee's note, in
+// the body type the client wrote it in. send, a SendOnly/SendAndSaveCopy
+// disposition, asks for the organizer to be notified at all.
+func (mr meetingResponse) reply(send bool) meeting.Reply {
+	return meeting.Reply{
+		Send: send,
+		Body: mr.Body.Content,
+		HTML: strings.EqualFold(mr.Body.Type, "HTML"),
+	}
 }
 
 // meetingRespond records an attendee's response to the referenced meeting request
 // through the shared meeting workflow (stamp, file the appointment, notify the
-// organizer) and reports success. send, a SendOnly/SendAndSaveCopy disposition,
-// asks for the organizer to be notified.
-func (s *Server) meetingRespond(sess *session, ref refID, response int32, send bool) itemResponseMessage {
-	id, err := oxews.DecodeItemID(ref.ID)
+// organizer) and reports success.
+func (s *Server) meetingRespond(sess *session, mr meetingResponse, response int32, send bool) itemResponseMessage {
+	id, err := oxews.DecodeItemID(mr.ReferenceItemID.ID)
 	if err != nil {
 		return itemError("ErrorInvalidRequest")
 	}
@@ -37,7 +53,7 @@ func (s *Server) meetingRespond(sess *session, ref refID, response int32, send b
 	if code != "" {
 		return itemError(code)
 	}
-	if _, err := meeting.RespondOnBehalf(st, s.accounts, s.Spool, responder, actor, id.MessageID, response, send); err != nil {
+	if _, err := meeting.RespondOnBehalfWith(st, s.accounts, s.Spool, responder, actor, id.MessageID, response, mr.reply(send)); err != nil {
 		if errors.Is(err, meeting.ErrRequestNotFound) {
 			return itemError("ErrorItemNotFound")
 		}

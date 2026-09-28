@@ -115,7 +115,12 @@ func RespondWith(st *objectstore.Store, accounts directory.Accounts, spool *rela
 // attendee's SENT-BY. The caller has authorized the delegate to send for the
 // attendee; a send-as grant passes the attendee as both.
 func RespondOnBehalf(st *objectstore.Store, accounts directory.Accounts, spool *relay.Spool, attendee, delegate string, messageID int64, response int32, send bool) (int64, error) {
-	return respond(st, accounts, spool, identity{attendee: attendee, actor: delegate}, messageID, response, Reply{Send: send}, true)
+	return RespondOnBehalfWith(st, accounts, spool, attendee, delegate, messageID, response, Reply{Send: send})
+}
+
+// RespondOnBehalfWith is RespondOnBehalf with the message the organizer receives.
+func RespondOnBehalfWith(st *objectstore.Store, accounts directory.Accounts, spool *relay.Spool, attendee, delegate string, messageID int64, response int32, reply Reply) (int64, error) {
+	return respond(st, accounts, spool, identity{attendee: attendee, actor: delegate}, messageID, response, reply, true)
 }
 
 // identity is who a response is from: the attendee the invitation reached, and
