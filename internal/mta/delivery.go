@@ -1009,7 +1009,7 @@ func fileDelivery(accounts directory.Accounts, from, rcptAddr, path string, raw,
 	// An inbound iTIP REPLY (an attendee's response) updates the organizer's
 	// calendar event so the TrackingTab reflects it; best-effort, never fails
 	// delivery, and runs after the OOF pass so a REPLY never triggers an auto-reply.
-	autoProcessReply(st, from, info)
+	autoProcessReply(accounts, st, from, info)
 	// A cancellation from a meeting's organizer marks the meeting cancelled in the
 	// attendee's calendar; best-effort like the REPLY pass.
 	autoProcessCancel(st, from, info)
@@ -1028,8 +1028,9 @@ var OnMeetingRequest func(st *objectstore.Store, accounts directory.Accounts, re
 // calendar event so the TrackingTab reflects responses. Wired by cmd/mta to the
 // meeting package; the indirection breaks the meeting→mta import cycle.
 // sender is the delivered message's envelope sender, so the processor can refuse
-// a REPLY that claims to speak for an attendee who did not send it.
-var OnMeetingReply func(st *objectstore.Store, sender string, messageID int64) (bool, error)
+// a REPLY that claims to speak for an attendee who did not send it; accounts lets
+// it read a delegate's grant to answer for one.
+var OnMeetingReply func(st *objectstore.Store, accounts directory.Accounts, sender string, messageID int64) (bool, error)
 
 // OnMeetingCancel, when set, applies an inbound iTIP CANCEL on the attendee's side:
 // it marks the cancelled meeting, or the one instance the cancellation names, as
@@ -1062,8 +1063,14 @@ func autoProcessMeeting(accounts directory.Accounts, st *objectstore.Store, reci
 // here is the tracking write on the organizer's event, and that failure is
 // invisible to everyone (the organizer just sees an attendee who never answered)
 // unless it is logged.
-func autoProcessReply(st *objectstore.Store, sender string, m objectstore.MessageInfo) {
-	runSenderPass("meeting-reply", OnMeetingReply, st, sender, m)
+func autoProcessReply(accounts directory.Accounts, st *objectstore.Store, sender string, m objectstore.MessageInfo) {
+	var pass func(*objectstore.Store, string, int64) (bool, error)
+	if OnMeetingReply != nil {
+		pass = func(st *objectstore.Store, sender string, id int64) (bool, error) {
+			return OnMeetingReply(st, accounts, sender, id)
+		}
+	}
+	runSenderPass("meeting-reply", pass, st, sender, m)
 }
 
 // autoProcessCancel runs the registered inbound-CANCEL processor (if any) on a

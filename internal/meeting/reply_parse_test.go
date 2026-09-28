@@ -29,12 +29,12 @@ func TestParseAttendeeReadsPartStat(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			addr, stat := parseAttendee([]byte("BEGIN:VEVENT\r\n" + c.line + "\r\nEND:VEVENT\r\n"))
-			if addr != c.wantAddr {
-				t.Errorf("address = %q, want %q", addr, c.wantAddr)
+			a := parseAttendee([]byte("BEGIN:VEVENT\r\n" + c.line + "\r\nEND:VEVENT\r\n"))
+			if a.addr != c.wantAddr {
+				t.Errorf("address = %q, want %q", a.addr, c.wantAddr)
 			}
-			if stat != c.wantStat {
-				t.Errorf("partstat = %q, want %q", stat, c.wantStat)
+			if a.partstat != c.wantStat {
+				t.Errorf("partstat = %q, want %q", a.partstat, c.wantStat)
 			}
 		})
 	}
@@ -45,12 +45,26 @@ func TestParseAttendeeReadsPartStat(t *testing.T) {
 // index of -1, so a perfectly valid reply crashed the delivery pass; the recover
 // upstream kept mail flowing but abandoned the rest of that pass.
 func TestParseAttendeeHandlesNoParameters(t *testing.T) {
-	addr, stat := parseAttendee([]byte("BEGIN:VEVENT\r\nATTENDEE:mailto:bob@hermex.test\r\nEND:VEVENT\r\n"))
-	if addr != "bob@hermex.test" {
-		t.Errorf("address = %q, want bob@hermex.test", addr)
+	a := parseAttendee([]byte("BEGIN:VEVENT\r\nATTENDEE:mailto:bob@hermex.test\r\nEND:VEVENT\r\n"))
+	if a.addr != "bob@hermex.test" {
+		t.Errorf("address = %q, want bob@hermex.test", a.addr)
 	}
-	if stat != "" {
-		t.Errorf("partstat = %q, want empty (the line carries none)", stat)
+	if a.partstat != "" || a.sentBy != "" {
+		t.Errorf("partstat = %q, sent-by = %q, want both empty (the line carries none)", a.partstat, a.sentBy)
+	}
+}
+
+// TestParseAttendeeReadsAQuotedSentBy reads the delegate a REPLY names. SENT-BY is a
+// quoted cal-address (RFC 5545 section 3.2.18), so its value holds a colon before
+// the one that starts the property value; splitting the line at its first colon
+// read "mailto" as the parameters' end and lost both the delegate and the attendee.
+func TestParseAttendeeReadsAQuotedSentBy(t *testing.T) {
+	a := parseAttendee([]byte("BEGIN:VEVENT\r\n" +
+		"ATTENDEE;SENT-BY=\"mailto:assistant@hermex.test\";PARTSTAT=ACCEPTED:mailto:boss@hermex.test\r\n" +
+		"END:VEVENT\r\n"))
+	want := replyAttendee{addr: "boss@hermex.test", partstat: "ACCEPTED", sentBy: "assistant@hermex.test"}
+	if a != want {
+		t.Errorf("attendee = %+v, want %+v", a, want)
 	}
 }
 
@@ -58,8 +72,8 @@ func TestParseAttendeeHandlesNoParameters(t *testing.T) {
 // it is read for: an accepted reply must map to a response status the organizer's
 // tracking can store, and an empty one must map to no update.
 func TestParseAttendeePartStatDrivesTheResponse(t *testing.T) {
-	_, stat := parseAttendee([]byte("ATTENDEE;PARTSTAT=ACCEPTED:mailto:b@hermex.test\r\n"))
-	if got := partstatResponse(stat); got == 0 {
+	a := parseAttendee([]byte("ATTENDEE;PARTSTAT=ACCEPTED:mailto:b@hermex.test\r\n"))
+	if got := partstatResponse(a.partstat); got == 0 {
 		t.Error("an accepted reply mapped to no response status; tracking would never update")
 	}
 	if got := partstatResponse(""); got != 0 {

@@ -5,6 +5,7 @@ import (
 	"sync"
 	"testing"
 
+	"hermex/internal/directory"
 	"hermex/internal/logging"
 	"hermex/internal/objectstore"
 )
@@ -114,12 +115,12 @@ func TestMeetingReplyTrackingFailureIsRecorded(t *testing.T) {
 	sink := withPassLogger(t)
 
 	prev := OnMeetingReply
-	OnMeetingReply = func(*objectstore.Store, string, int64) (bool, error) {
+	OnMeetingReply = func(*objectstore.Store, directory.Accounts, string, int64) (bool, error) {
 		return true, errors.New("store write failed")
 	}
 	t.Cleanup(func() { OnMeetingReply = prev })
 
-	autoProcessReply(nil, "bob@hermex.test", objectstore.MessageInfo{UID: 7})
+	autoProcessReply(nil, nil, "bob@hermex.test", objectstore.MessageInfo{UID: 7})
 
 	e, ok := sink.find("delivery.pass.fail")
 	if !ok {
@@ -142,10 +143,10 @@ func TestMeetingReplySuccessIsSilent(t *testing.T) {
 	sink := withPassLogger(t)
 
 	prev := OnMeetingReply
-	OnMeetingReply = func(*objectstore.Store, string, int64) (bool, error) { return true, nil }
+	OnMeetingReply = func(*objectstore.Store, directory.Accounts, string, int64) (bool, error) { return true, nil }
 	t.Cleanup(func() { OnMeetingReply = prev })
 
-	autoProcessReply(nil, "bob@hermex.test", objectstore.MessageInfo{UID: 7})
+	autoProcessReply(nil, nil, "bob@hermex.test", objectstore.MessageInfo{UID: 7})
 
 	if _, ok := sink.find("delivery.pass.fail"); ok {
 		t.Error("a successful tracking update emitted a failure event")

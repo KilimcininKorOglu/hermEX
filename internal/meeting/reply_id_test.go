@@ -27,7 +27,7 @@ func TestProcessReplyResolvesTheMessageID(t *testing.T) {
 		t.Fatalf("the seeding did not separate id %d from UID %d, so the case is not covered", info.ID, info.UID)
 	}
 
-	handled, _ := ProcessReply(st, "bob@hermex.test", info.ID)
+	handled, _ := ProcessReply(st, nil, "bob@hermex.test", info.ID)
 	wantTrue(t, handled, "the REPLY was processed")
 	wantEq(t, trackedResponse(t, st, tags, eventID), int32(ResponseAccepted), "the attendee's tracking status")
 }

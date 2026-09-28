@@ -3,9 +3,12 @@ package meeting
 import (
 	"strings"
 
+	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/mime"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcical"
+	"hermex/internal/sendas"
 )
 
 // ProcessReply processes an inbound iTIP REPLY or COUNTER on the organizer's side:
@@ -17,10 +20,10 @@ import (
 // sender is the delivered message's envelope sender. The ATTENDEE line is body
 // content, so it says only who the message CLAIMS to answer for: without this
 // check any invitee who knows the meeting UID could set a co-invitee's tracking
-// status by mailing the organizer. A REPLY is therefore honoured only for the
-// attendee who actually sent it. That is deliberately strict: a reply relayed by
-// anyone else (a delegate answering for an attendee) updates nothing, because
-// nothing in the message proves the attendee authorized it.
+// status by mailing the organizer. A REPLY is therefore honoured for the attendee
+// who sent it, and for a delegate whose right to send for the attendee accounts
+// records. A reply relayed by anyone else updates nothing, because nothing in the
+// message proves the attendee authorized it.
 //
 // It reports whether a REPLY was handled, plus the error from the one step that
 // actually changes state (writing the attendee's response status). Both matter:
@@ -31,7 +34,7 @@ import (
 // It is best-effort and never errors a delivery: a malformed, unmatched or
 // unauthorized REPLY is left as an ordinary email the organizer can read, not a
 // delivery failure.
-func ProcessReply(st *objectstore.Store, sender string, messageID int64) (bool, error) {
+func ProcessReply(st *objectstore.Store, accounts directory.Accounts, sender string, messageID int64) (bool, error) {
 	ics, ok := inboxCalendarPart(st, messageID)
 	if !ok {
 		return false, nil
@@ -40,7 +43,7 @@ func ProcessReply(st *objectstore.Store, sender string, messageID int64) (bool, 
 	if !ok {
 		return false, nil
 	}
-	uid, attendee, resp, ok := authorizedReply(ics, sender, fallback)
+	uid, attendee, resp, ok := authorizedReply(ics, accounts, sender, fallback)
 	if !ok {
 		return false, nil
 	}
@@ -86,29 +89,46 @@ func inboxCalendarPart(st *objectstore.Store, messageID int64) ([]byte, bool) {
 }
 
 // authorizedReply reads the REPLY's UID, attendee and response status. It reports ok
-// only when the envelope sender is the attendee the body answers for, because the
-// ATTENDEE line alone says who the message claims to answer for. fallback is the
-// response that stands when the ATTENDEE names no PARTSTAT (0: none).
-func authorizedReply(ics []byte, sender string, fallback int32) (uid, attendee string, resp int32, ok bool) {
+// only when the envelope sender may answer for the attendee the body names, because
+// the ATTENDEE line alone says who the message claims to answer for. fallback is
+// the response that stands when the ATTENDEE names no PARTSTAT (0: none).
+func authorizedReply(ics []byte, accounts directory.Accounts, sender string, fallback int32) (uid, attendee string, resp int32, ok bool) {
 	uid = strings.TrimSpace(icalLine(ics, "UID"))
-	attendee, partstat := parseAttendee(ics)
-	if uid == "" || attendee == "" {
+	a := parseAttendee(ics)
+	if uid == "" || a.addr == "" || !mayAnswerFor(accounts, sender, a) {
 		return "", "", 0, false
 	}
-	// An empty envelope sender (a bounce, or a locally injected message that
-	// carries none) proves nothing either, so it updates no tracking.
-	from := strings.ToLower(strings.TrimSpace(sender))
-	if from == "" || from != strings.ToLower(strings.TrimSpace(attendee)) {
-		return "", "", 0, false
-	}
-	resp = partstatResponse(partstat)
+	resp = partstatResponse(a.partstat)
 	if resp == 0 {
 		resp = fallback
 	}
 	if resp == 0 {
 		return "", "", 0, false
 	}
-	return uid, attendee, resp, true
+	return uid, a.addr, resp, true
+}
+
+// mayAnswerFor reports whether the envelope sender may answer for the attendee: it
+// is the attendee, or this directory records its right to send for the attendee (an
+// alias of its own, or a send-as or on-behalf grant), the right a delegate answering
+// in the attendee's mailbox holds. A delegate shows itself in one of two ways: in
+// the attendee's SENT-BY (RFC 5546 section 3.2.3), or in the message's Sender only,
+// which is how Exchange sends one, as it writes no SENT-BY ([MS-STANXICAL]). A
+// SENT-BY that names someone other than the envelope sender contradicts it, so such
+// a reply is refused. An empty envelope sender (a bounce, or a locally injected
+// message that carries none) proves nothing, and neither does a delegate of an
+// attendee this server does not hold, whose grants it cannot read.
+func mayAnswerFor(accounts directory.Accounts, sender string, a replyAttendee) bool {
+	from := strings.TrimSpace(sender)
+	switch {
+	case from == "":
+		return false
+	case strings.EqualFold(from, a.addr):
+		return true
+	case a.sentBy != "" && !strings.EqualFold(from, a.sentBy), accounts == nil:
+		return false
+	}
+	return sendas.Allows(accounts, from, a.addr)
 }
 
 // findCalendarPart returns the decoded text/calendar (or .ics) body, or nil.
@@ -133,19 +153,13 @@ func findCalendarPart(root *mime.Part) []byte {
 	return found
 }
 
-// icalLine returns the value of the first top-level property named name in the
-// iCalendar stream (ignoring parameters and folding), or "". It is a minimal
-// scanner sufficient for REPLY's METHOD/UID, not a general parser.
+// icalLine returns the value of the first property named name in the iCalendar
+// stream, or "". It is a scanner sufficient for REPLY's METHOD/UID, not a general
+// parser, but it reads content lines the way RFC 5545 section 3.1 defines them:
+// unfolded, and split at the first colon outside a quoted parameter.
 func icalLine(ics []byte, name string) string {
-	for line := range strings.SplitSeq(string(ics), "\n") {
-		line = strings.TrimRight(line, "\r")
-		key, val, found := strings.Cut(line, ":")
-		if !found {
-			continue
-		}
-		if semi := strings.IndexByte(key, ';'); semi >= 0 {
-			key = key[:semi]
-		}
+	for _, line := range oxcical.ContentLines(ics) {
+		key, _, val := oxcical.SplitContentLine(line)
 		if strings.EqualFold(key, name) {
 			return val
 		}
@@ -153,40 +167,44 @@ func icalLine(ics []byte, name string) string {
 	return ""
 }
 
-// parseAttendee reads the ATTENDEE line's CN (the responder's address, falling
-// back to the mailto: value) and PARTSTAT. The REPLY carries a single attendee.
-func parseAttendee(ics []byte) (addr, partstat string) {
-	for line := range strings.SplitSeq(string(ics), "\n") {
-		line = strings.TrimRight(line, "\r")
-		key, val, found := strings.Cut(line, ":")
-		if !found {
-			continue
-		}
-		// Everything before the colon is the property name and, after the first
-		// semicolon, its parameters. Splitting here rather than re-scanning the whole
-		// line matters twice: the first semicolon of the line marks where parameters
-		// BEGIN, not where they end, and a parameterless ATTENDEE has no semicolon at
-		// all, so an offset computed from one is negative.
-		name, params, _ := strings.Cut(key, ";")
+// replyAttendee is the one attendee an iTIP response answers for.
+type replyAttendee struct {
+	// addr is the attendee's address, partstat its participation status.
+	addr, partstat string
+	// sentBy is the address that submitted the answer for the attendee, a delegate,
+	// from the SENT-BY parameter (RFC 5545 section 3.2.18); "" when the attendee
+	// answered itself.
+	sentBy string
+}
+
+// parseAttendee reads the ATTENDEE line: the responder's address (the mailto:
+// value), its PARTSTAT and its SENT-BY. The REPLY carries a single attendee.
+func parseAttendee(ics []byte) replyAttendee {
+	for _, line := range oxcical.ContentLines(ics) {
+		name, params, val := oxcical.SplitContentLine(line)
 		if !strings.EqualFold(name, "ATTENDEE") {
 			continue
 		}
-		if i := strings.LastIndex(strings.ToLower(params), "partstat="); i >= 0 {
-			rest := params[i+len("partstat="):]
-			if semi := strings.IndexByte(rest, ';'); semi >= 0 {
-				rest = rest[:semi]
-			}
-			partstat = strings.TrimSpace(rest)
+		a := replyAttendee{addr: calAddress(val)}
+		if v := params["PARTSTAT"]; len(v) > 0 {
+			a.partstat = strings.TrimSpace(v[0])
 		}
-		// The address is the mailto: value, or the CN parameter's value.
-		if i := strings.LastIndex(strings.ToLower(val), "mailto:"); i >= 0 {
-			addr = strings.TrimSpace(val[i+len("mailto:"):])
-		} else if val != "" {
-			addr = strings.TrimSpace(val)
+		if v := params["SENT-BY"]; len(v) > 0 {
+			a.sentBy = calAddress(v[0])
 		}
-		return addr, partstat
+		return a
 	}
-	return "", ""
+	return replyAttendee{}
+}
+
+// calAddress reads the address out of a cal-address, the mailto: URI an ATTENDEE
+// value or a SENT-BY parameter carries; a value without the scheme is taken whole.
+func calAddress(v string) string {
+	v = strings.TrimSpace(v)
+	if i := strings.LastIndex(strings.ToLower(v), "mailto:"); i >= 0 {
+		v = v[i+len("mailto:"):]
+	}
+	return strings.TrimSpace(v)
 }
 
 // partstatResponse maps an iCalendar PARTSTAT to PidLidResponseStatus; an unknown

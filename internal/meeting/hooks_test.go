@@ -2,7 +2,6 @@ package meeting
 
 import (
 	"errors"
-	"strings"
 	"sync"
 	"testing"
 
@@ -130,9 +129,8 @@ func TestAutomaticResponseNamesTheResponder(t *testing.T) {
 		}
 	}
 	ics, _ := inboxCalendarPart(organizer, msgs[0].ID)
-	unfolded := []byte(strings.ReplaceAll(string(ics), "\r\n ", ""))
-	if addr, partstat := parseAttendee(unfolded); icalLine(unfolded, "METHOD") != "REPLY" || addr != "room@hermex.test" || partstat != "ACCEPTED" {
-		t.Errorf("response calendar answers for %q with %q, want a REPLY from room@hermex.test with ACCEPTED:\n%s", addr, partstat, ics)
+	if a := parseAttendee(ics); icalLine(ics, "METHOD") != "REPLY" || a.addr != "room@hermex.test" || a.partstat != "ACCEPTED" {
+		t.Errorf("response calendar answers for %q with %q, want a REPLY from room@hermex.test with ACCEPTED:\n%s", a.addr, a.partstat, ics)
 	}
 	if got := responseOf(t, organizer, tags, recipID); got != ResponseAccepted {
 		t.Errorf("organizer's tracking status for the room = %d, want accepted", got)
