@@ -182,6 +182,47 @@ func TestMeetingResponseSendRule(t *testing.T) {
 	}
 }
 
+// TestMeetingResponseProposesATime proves a SendResponse with ProposedStartTime and
+// ProposedEndTime reaches the organizer as a COUNTER for that span ([MS-ASCMD]
+// ProposedStartTime; [MS-OXCICAL] METHOD: a counter proposal is the tentative
+// response), even when the attendee accepted.
+func TestMeetingResponseProposesATime(t *testing.T) {
+	ts, attendee, organizer := organizerServer(t)
+	uid := seedLocalRequest(t, attendee, planningICS)
+	acceptRequest(t, ts, "16.1", uid, wbxml.Elem(wbxml.MRSendResponse,
+		wbxml.Str(wbxml.MRProposedStartTime, "20260702T160000Z"),
+		wbxml.Str(wbxml.MRProposedEndTime, "20260702T170000Z")))
+	got := organizerInbox(t, organizer)
+	if len(got) != 1 {
+		t.Fatalf("organizer received %d responses, want 1", len(got))
+	}
+	for _, want := range []string{"METHOD:COUNTER", "DTSTART:20260702T160000Z", "DTEND:20260702T170000Z",
+		"PARTSTAT=TENTATIVE", "Subject: New Time Proposed: Planning"} {
+		if !bytes.Contains(got[0], []byte(want)) {
+			t.Errorf("the proposal lacks %q:\n%s", want, got[0])
+		}
+	}
+}
+
+// TestMeetingResponseRefusesAHalfProposal proves a proposal missing one end is an
+// invalid request ([MS-ASCMD] ProposedStartTime: each requires the other).
+func TestMeetingResponseRefusesAHalfProposal(t *testing.T) {
+	ts, attendee, organizer := organizerServer(t)
+	uid := seedLocalRequest(t, attendee, planningICS)
+	root := postVersioned(t, ts, "16.1", "MeetingResponse", wbxml.Elem(wbxml.MRMeetingResponse,
+		wbxml.Elem(wbxml.MRRequest,
+			wbxml.Str(wbxml.MRUserResponse, "2"),
+			wbxml.Str(wbxml.MRFolderID, strconv.FormatInt(int64(mapi.PrivateFIDInbox), 10)),
+			wbxml.Str(wbxml.MRRequestID, strconv.FormatUint(uint64(uid), 10)),
+			wbxml.Elem(wbxml.MRSendResponse, wbxml.Str(wbxml.MRProposedStartTime, "20260702T160000Z")))))
+	if got := root.Child(wbxml.MRResult).ChildText(wbxml.MRStatus); got != "2" {
+		t.Errorf("Status = %q, want 2 (invalid request)", got)
+	}
+	if n := len(organizerInbox(t, organizer)); n != 0 {
+		t.Errorf("organizer received %d responses to a refused request", n)
+	}
+}
+
 // TestMeetingResponseBody proves the response carries the text the attendee wrote
 // in SendResponse, and never the invitation's own text ([MS-ASCMD] SendResponse:
 // an empty node sends a response with no body).

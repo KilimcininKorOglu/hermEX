@@ -36,6 +36,40 @@ func resolveCounterTags(st *objectstore.Store) (counterTags, error) {
 	}, nil
 }
 
+// proposePrefix is the subject prefix of a response that proposes a new time.
+const proposePrefix = "New Time Proposed: "
+
+// proposeTime turns a response into a counter proposal for p ([MS-OXOCAL] 3.1.4.8.4.1
+// Proposing a New Time): the flag, the proposed span and its duration, and the
+// subject prefix. iCalendar carries a proposal only as a COUNTER, whose one class is
+// the tentative response ([MS-OXCICAL] METHOD), so an accept or a decline that
+// proposes a time is sent as that class. A nil p leaves the response as it is.
+func proposeTime(st *objectstore.Store, resp *mapi.PropertyValues, p *Proposal) error {
+	if p == nil {
+		return nil
+	}
+	ct, err := resolveCounterTags(st)
+	if err != nil {
+		return err
+	}
+	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameAppointmentProposedDuration})
+	if err != nil {
+		return err
+	}
+	resp.Set(mapi.PrMessageClass, responseClass(ResponseTentative))
+	resp.Set(ct.flag, true)
+	resp.Set(ct.start, p.Start)
+	resp.Set(ct.end, p.End)
+	resp.Set(mapi.MakeTag(ids[0], mapi.PtLong), int32((p.End-p.Start)/filetimePerMinute))
+	topic := propStr(*resp, mapi.PrNormalizedSubject)
+	resp.Set(mapi.PrSubjectPrefix, proposePrefix)
+	resp.Set(mapi.PrSubject, proposePrefix+topic)
+	return nil
+}
+
+// filetimePerMinute is one minute in FILETIME units of 100 ns.
+const filetimePerMinute = 600_000_000
+
 // readProposal reads the proposal a delivered response carries: the counter flag
 // and the proposed span its iCalendar import stored ([MS-OXCICAL] METHOD, DTSTART,
 // DTEND). It returns nil for a response that proposes nothing.

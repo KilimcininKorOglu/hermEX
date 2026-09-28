@@ -97,6 +97,8 @@ type Reply struct {
 	// sends the response with no body: the invitation's own text is not repeated.
 	Body string
 	HTML bool
+	// Proposal is a new time the attendee asks for, or nil.
+	Proposal *Proposal
 }
 
 // RespondWith is Respond with the message the attendee sends the organizer.
@@ -483,6 +485,9 @@ func notifyOrganizer(st *objectstore.Store, accounts directory.Accounts, spool *
 	resp.Set(mapi.PrSentRepresentingName, "")
 	resp.Set(mapi.PrSenderName, "")
 	setResponseSubject(&resp, req.Props, response)
+	if err := proposeTime(st, &resp, reply.Proposal); err != nil {
+		return err
+	}
 	now := mapi.UnixToNTTime(time.Now())
 	resp.Set(mapi.PrClientSubmitTime, now)
 	// The REPLY's DTSTAMP is when the attendee sent it ([MS-OXCICAL] DTSTAMP), which

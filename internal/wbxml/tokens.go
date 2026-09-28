@@ -257,19 +257,21 @@ const (
 	CalResponseType         Tag = 0x0436
 )
 
-// MeetingResponse (code page 0x08, MS-ASCMD). The 16.x ProposedStart/EndTime and
-// the deprecated 2.0 Version tokens are omitted.
+// MeetingResponse (code page 0x08, MS-ASCMD). The deprecated 2.0 Version token is
+// omitted.
 const (
-	MRCalendarID      Tag = 0x0805
-	MRFolderID        Tag = 0x0806
-	MRMeetingResponse Tag = 0x0807
-	MRRequestID       Tag = 0x0808
-	MRRequest         Tag = 0x0809
-	MRResult          Tag = 0x080A
-	MRStatus          Tag = 0x080B
-	MRUserResponse    Tag = 0x080C
-	MRInstanceID      Tag = 0x080E
-	MRSendResponse    Tag = 0x0812
+	MRCalendarID        Tag = 0x0805
+	MRFolderID          Tag = 0x0806
+	MRMeetingResponse   Tag = 0x0807
+	MRRequestID         Tag = 0x0808
+	MRRequest           Tag = 0x0809
+	MRResult            Tag = 0x080A
+	MRStatus            Tag = 0x080B
+	MRUserResponse      Tag = 0x080C
+	MRInstanceID        Tag = 0x080E
+	MRProposedStartTime Tag = 0x0810
+	MRProposedEndTime   Tag = 0x0811
+	MRSendResponse      Tag = 0x0812
 )
 
 // GetItemEstimate (code page 0x06).

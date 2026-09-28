@@ -144,6 +144,7 @@ var (
 	NameAppointmentCounterProposal    = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8257} // PtBoolean
 	NameAppointmentProposedStartWhole = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8250} // PtSysTime
 	NameAppointmentProposedEndWhole   = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8251} // PtSysTime
+	NameAppointmentProposedDuration   = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8256} // PtLong, minutes (MS-OXOCAL 2.2.7.5)
 	// NameAppointmentProposalNumber (PidLidAppointmentProposalNumber, MS-OXOCAL
 	// 2.2.4.6) counts the attendees whose counter proposals the organizer has not
 	// answered yet.
