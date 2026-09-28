@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"hermex/internal/directory"
 	"hermex/internal/logging"
@@ -761,6 +762,20 @@ func (s *Server) userLocale(email string) (timezone, locale string) {
 		}
 	}
 	return "", ""
+}
+
+// callerZone is the zone the caller chose to see times in, the zone its date
+// inputs mean. With no session or no chosen zone it is UTC, the zone the SPA
+// shows times in then.
+func (s *Server) callerZone(r *http.Request) *time.Location {
+	c, ok := s.session(r)
+	if !ok {
+		return time.UTC
+	}
+	if loc := directory.UserZone(s.auth, c.Email); loc != nil {
+		return loc
+	}
+	return time.UTC
 }
 
 // onboardedFlag reports whether the caller has completed first-run onboarding.

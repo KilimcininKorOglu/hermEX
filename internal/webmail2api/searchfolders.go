@@ -98,6 +98,7 @@ func (s *Server) handleDeleteSearchFolder(w http.ResponseWriter, r *http.Request
 // handleSearchFolderResults runs a saved search and returns the matching mail.
 func (s *Server) handleSearchFolderResults(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	loc := s.callerZone(r)
 	s.withSettings(w, r, func(st *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
 		var sf *searchFolderJSON
 		for _, f := range readSearchFolders(m) {
@@ -109,14 +110,14 @@ func (s *Server) handleSearchFolderResults(w http.ResponseWriter, r *http.Reques
 		if sf == nil {
 			return map[string]any{"emails": []mailJSON{}, "total": 0}, false
 		}
-		results := runSearchFolder(st, *sf)
+		results := runSearchFolder(st, *sf, loc)
 		return map[string]any{"emails": results, "total": len(results)}, false
 	})
 }
 
 // runSearchFolder scans the saved search's folders and returns the messages
-// matching all its set criteria.
-func runSearchFolder(st *objectstore.Store, sf searchFolderJSON) []mailJSON {
+// matching all its set criteria. Its day bounds are days in loc.
+func runSearchFolder(st *objectstore.Store, sf searchFolderJSON, loc *time.Location) []mailJSON {
 	results := []mailJSON{}
 scan:
 	for _, f := range searchFolders() {
@@ -134,7 +135,7 @@ scan:
 			if len(results) >= maxSearchResults {
 				break scan
 			}
-			if !matchSearchFolder(st, fid, sf, msg) {
+			if !matchSearchFolder(st, fid, sf, msg, loc) {
 				continue
 			}
 			results = append(results, mailJSON{
@@ -150,8 +151,8 @@ scan:
 
 // matchSearchFolder reports whether a message satisfies every set criterion. The
 // raw message is fetched only when a body or attachment criterion needs it.
-func matchSearchFolder(st *objectstore.Store, fid int64, sf searchFolderJSON, m objectstore.MessageInfo) bool {
-	if !matchesIndexCriteria(sf, m) {
+func matchSearchFolder(st *objectstore.Store, fid int64, sf searchFolderJSON, m objectstore.MessageInfo, loc *time.Location) bool {
+	if !matchesIndexCriteria(sf, m, loc) {
 		return false
 	}
 	if sf.Body == "" && !sf.HasAttachment {
@@ -166,17 +167,24 @@ func matchSearchFolder(st *objectstore.Store, fid int64, sf searchFolderJSON, m 
 
 // matchesIndexCriteria applies the criteria the index row answers, so a message
 // they reject never costs a body read.
-func matchesIndexCriteria(sf searchFolderJSON, m objectstore.MessageInfo) bool {
+func matchesIndexCriteria(sf searchFolderJSON, m objectstore.MessageInfo, loc *time.Location) bool {
 	if sf.From != "" && !containsFolded(m.Sender, sf.From) {
 		return false
 	}
 	if sf.Subject != "" && !containsFolded(m.Subject, sf.Subject) {
 		return false
 	}
-	if d := parseSearchDate(sf.DateFrom); !d.IsZero() && m.InternalDate.Before(d) {
+	return inSearchDates(sf, m.InternalDate, loc)
+}
+
+// inSearchDates reports whether at falls inside the saved search's day range.
+// Both bounds are whole days in loc, the caller's zone: the range starts when
+// the from day starts and ends when the day after the to day starts.
+func inSearchDates(sf searchFolderJSON, at time.Time, loc *time.Location) bool {
+	if d := parseSearchDate(sf.DateFrom, loc); !d.IsZero() && at.Before(d) {
 		return false
 	}
-	if d := parseSearchDate(sf.DateTo); !d.IsZero() && m.InternalDate.After(d.Add(24*time.Hour)) {
+	if d := parseSearchDate(sf.DateTo, loc); !d.IsZero() && !at.Before(d.AddDate(0, 0, 1)) {
 		return false
 	}
 	return true
@@ -198,14 +206,14 @@ func containsFolded(haystack, needle string) bool {
 	return strings.Contains(strings.ToLower(haystack), strings.ToLower(needle))
 }
 
-// parseSearchDate parses a YYYY-MM-DD or RFC3339 date, returning the zero time
-// when empty or unparseable.
-func parseSearchDate(s string) time.Time {
+// parseSearchDate parses a YYYY-MM-DD day as its start in loc, or an RFC3339
+// date, returning the zero time when empty or unparseable.
+func parseSearchDate(s string, loc *time.Location) time.Time {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return time.Time{}
 	}
-	if t, err := time.Parse("2006-01-02", s); err == nil {
+	if t, err := time.ParseInLocation("2006-01-02", s, loc); err == nil {
 		return t
 	}
 	if t, err := time.Parse(time.RFC3339, s); err == nil {
