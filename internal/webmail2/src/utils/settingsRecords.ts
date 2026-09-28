@@ -1,6 +1,7 @@
 import type { AppearanceSettings, CalendarSettings } from "@/utils/api"
 import { defaultMailColumns } from "@/utils/mailListColumns"
 import { DEFAULT_PAGE_SIZE } from "@/utils/inboxNavigation"
+import { addDaysToKey, zonedDayKey, zonedDayStartISO } from "@/utils/date"
 
 // AppearanceRecord is the whole appearance record the settings page edits and
 // saves. The server's read-only preview cap is not part of it.
@@ -85,29 +86,22 @@ export function detectBrowser(ua: string): string {
   return ver ? `${hit.name} ${ver}` : hit.name
 }
 
-// localDate renders an instant as the YYYY-MM-DD day it falls on in the browser's zone.
-function localDate(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-}
-
-// rfc3339ToDate renders an RFC3339 instant as the local day for <input type="date">.
-// For an end bound, which marks the first instant after the range, it renders
-// the last day the range covers.
+// rfc3339ToDate renders an RFC3339 instant as the day it falls on in the display
+// zone, for <input type="date">. For an end bound, which marks the first instant
+// after the range, it renders the last day the range covers.
 export function rfc3339ToDate(value?: string, endBound = false): string {
   if (!value) return ""
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return ""
-  return localDate(new Date(d.getTime() - (endBound ? 1 : 0)))
+  return zonedDayKey(new Date(d.getTime() - (endBound ? 1 : 0)))
 }
 
 // dateToRFC3339 turns a YYYY-MM-DD day into the RFC3339 instant the day starts
-// in the browser's zone, or undefined when empty. For an end bound it returns
-// the start of the next day, so the chosen day is part of the range.
+// in the display zone, or undefined when empty. For an end bound it returns the
+// start of the next day, so the chosen day is part of the range.
 export function dateToRFC3339(value: string, endBound = false): string | undefined {
   if (!value) return undefined
-  const [y, m, d] = value.split("-").map(Number)
-  return new Date(y, m - 1, d + (endBound ? 1 : 0)).toISOString()
+  return zonedDayStartISO(endBound ? addDaysToKey(value, 1) : value)
 }
 
 // formatStorageBytes renders a byte count with a binary-prefix unit for the

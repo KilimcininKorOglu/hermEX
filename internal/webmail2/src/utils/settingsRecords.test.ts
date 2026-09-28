@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { setDisplayTimeZone } from "@/utils/date"
 import {
   appearanceFromServer,
   calendarFromServer,
@@ -48,19 +49,21 @@ describe("detectBrowser", () => {
 })
 
 describe("format helpers", () => {
+  // The day bounds are midnights in the display zone, whatever zone the browser
+  // is in: New York is UTC-4 in September.
+  beforeEach(() => setDisplayTimeZone("America/New_York"))
+  afterEach(() => setDisplayTimeZone(""))
+
   it("converts between a date input and RFC 3339", () => {
     expect(rfc3339ToDate(dateToRFC3339("2026-09-25"))).toBe("2026-09-25")
     expect(rfc3339ToDate(undefined)).toBe("")
     expect(dateToRFC3339("")).toBeUndefined()
-    // A start bound is the local midnight the day begins.
-    expect(new Date(dateToRFC3339("2026-09-25") ?? "").getHours()).toBe(0)
+    expect(dateToRFC3339("2026-09-25")).toBe("2026-09-25T04:00:00.000Z")
   })
 
   it("keeps the chosen end day inside the range", () => {
     const end = dateToRFC3339("2026-09-25", true) ?? ""
-    const last = new Date(new Date(end).getTime() - 1)
-    expect(last.getDate()).toBe(25)
-    expect(new Date(end).getDate()).toBe(26)
+    expect(end).toBe("2026-09-26T04:00:00.000Z")
     expect(rfc3339ToDate(end, true)).toBe("2026-09-25")
     // A month end rolls over into the next month.
     expect(rfc3339ToDate(dateToRFC3339("2026-09-30", true), true)).toBe("2026-09-30")
