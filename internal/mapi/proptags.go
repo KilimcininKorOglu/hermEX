@@ -194,6 +194,9 @@ const (
 	PrSubfolders         = PropTag(0x360A000B) // PtBoolean
 	PrFolderType         = PropTag(0x36010003) // PtLong: 0 root, 1 generic, 2 search
 	PrFolderFlags        = PropTag(0x66A80003) // PtLong: 1 IPM, 2 search, 4 normal, 8 rules
+	PrParentEntryID      = PropTag(0x0E090102) // PtBinary, the containing folder's entry id
+	PrRights             = PropTag(0x66390003) // PtLong, the caller's folder rights
+	PrAccess             = PropTag(0x0FF40003) // PtLong, the operations open to the caller ([MS-OXCPRPT] 2.2.1.1)
 )
 
 // PrAddressBookDisplayNamePrintable is PidTagAddressBookDisplayNamePrintable

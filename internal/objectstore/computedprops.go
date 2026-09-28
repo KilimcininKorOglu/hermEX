@@ -37,13 +37,11 @@ func (s *Store) FolderComputedProps(fid int64) (mapi.PropertyValues, error) {
 	if err := s.objdb.QueryRow(`SELECT COUNT(*) FROM folders WHERE parent_id=? AND is_deleted=0`, fid).Scan(&subfolders); err != nil {
 		return nil, err
 	}
-	folderType, flags, err := s.folderKind(fid)
+	folderType, flags, parent, err := s.folderKind(fid)
 	if err != nil {
 		return nil, err
 	}
-	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-	eid := int64(mapi.MakeEIDEx(1, uint64(fid)))
-	return mapi.PropertyValues{
+	props := mapi.PropertyValues{
 		{Tag: mapi.PrContentCount, Value: clampLong(count)},
 		{Tag: mapi.PrContentUnreadCount, Value: clampLong(unread)},
 		{Tag: mapi.PrMessageSizeExtended, Value: size},
@@ -51,8 +49,18 @@ func (s *Store) FolderComputedProps(fid int64) (mapi.PropertyValues, error) {
 		{Tag: mapi.PrSubfolders, Value: subfolders > 0},
 		{Tag: mapi.PrFolderType, Value: folderType},
 		{Tag: mapi.PrFolderFlags, Value: flags},
-		{Tag: mapi.PrFolderID, Value: eid},
-	}, nil
+		{Tag: mapi.PrFolderID, Value: folderEID(fid)},
+	}
+	if parent.Valid {
+		props = append(props, mapi.TaggedPropVal{Tag: mapi.PrParentFolderID, Value: folderEID(parent.Int64)})
+	}
+	return props, nil
+}
+
+// folderEID is a folder's short-term id as a PtI8 value.
+func folderEID(fid int64) int64 {
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	return int64(mapi.MakeEIDEx(1, uint64(fid)))
 }
 
 // folderContentStats counts a folder's live non-FAI messages, the unread ones
@@ -65,12 +73,11 @@ func (s *Store) folderContentStats(fid int64) (count, unread, size int64, err er
 }
 
 // folderKind derives a folder's type and flags from its row, its ancestry and
-// its rules.
-func (s *Store) folderKind(fid int64) (folderType, flags int32, err error) {
-	var parent sql.NullInt64
+// its rules, and returns its parent.
+func (s *Store) folderKind(fid int64) (folderType, flags int32, parent sql.NullInt64, err error) {
 	var isSearch int64
 	if err := s.objdb.QueryRow(`SELECT parent_id, COALESCE(is_search, 0) FROM folders WHERE folder_id=?`, fid).Scan(&parent, &isSearch); err != nil {
-		return 0, 0, err
+		return 0, 0, parent, err
 	}
 	switch {
 	case !parent.Valid:
@@ -82,19 +89,19 @@ func (s *Store) folderKind(fid int64) (folderType, flags int32, err error) {
 	}
 	ipm, err := s.underIPMSubtree(fid)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, parent, err
 	}
 	if ipm {
 		flags |= folderFlagIPM
 	}
 	var rules int64
 	if err := s.objdb.QueryRow(`SELECT COUNT(*) FROM rules WHERE folder_id=?`, fid).Scan(&rules); err != nil {
-		return 0, 0, err
+		return 0, 0, parent, err
 	}
 	if rules > 0 {
 		flags |= folderFlagRules
 	}
-	return folderType, flags, nil
+	return folderType, flags, parent, nil
 }
 
 // underIPMSubtree reports whether a folder is the IPM subtree or lies below it.

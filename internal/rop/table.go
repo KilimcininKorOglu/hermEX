@@ -245,6 +245,7 @@ func (s *Session) ropGetHierarchyTable(p *ext.Pull, out *ext.Push, handles []uin
 			folderID: folder.folderID,
 			notify:   tableFlags&tableFlagNoNotifications == 0,
 			folders:  children,
+			rights:   s.rightsFor(folder.store),
 		},
 	})
 	setHandle(handles, ohindex, h)

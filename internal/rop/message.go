@@ -156,7 +156,7 @@ func (o *object) readContainerProps(tags []mapi.PropTag) (mapi.PropertyValues, b
 	}
 	switch o.kind {
 	case kindFolder:
-		props, err := folderProps(o.store, o.folderID, tags)
+		props, err := folderProps(o.store, o.folderID, tags, o.rights)
 		return props, true, err
 	case kindLogon:
 		props, err := o.store.GetStoreProperties(tags...)

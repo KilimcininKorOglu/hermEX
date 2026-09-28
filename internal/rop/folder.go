@@ -49,6 +49,7 @@ type tableState struct {
 	cursor       int
 	bookmarks    map[uint16]int // named cursor positions keyed by bookmark index
 	nextBookmark uint16
+	rights       rightsResolver // tableHierarchy: the caller's rights, for PidTagRights and PidTagAccess
 }
 
 // baseCount reports the immutable base row count for the table kind.
@@ -110,7 +111,13 @@ func (t *tableState) rowProps(store *objectstore.Store, idx int) (mapi.PropertyV
 // folderRow projects one hierarchy row, synthesizing the folder's EID when the
 // column set asks for it.
 func (t *tableState) folderRow(store *objectstore.Store, base int) (mapi.PropertyValues, error) {
-	return folderProps(store, t.folders[base].ID, t.columns)
+	return folderProps(store, t.folders[base].ID, t.columns, t.rights)
+}
+
+// requestsAny reports whether a read asks for any of the given tags; an empty
+// request asks for everything.
+func requestsAny(tags, of []mapi.PropTag) bool {
+	return len(tags) == 0 || slices.ContainsFunc(of, func(t mapi.PropTag) bool { return slices.Contains(tags, t) })
 }
 
 // computedFolderTags are the folder properties the store computes; a read that
@@ -124,12 +131,17 @@ var computedFolderTags = []mapi.PropTag{
 // store computes ([MS-OXCFOLD] 2.2.2.2.1), narrowed to tags, or all of them when
 // tags is empty. A computed value replaces a stored one: a counter seeded at
 // creation says nothing about the folder now.
-func folderProps(store *objectstore.Store, fid int64, tags []mapi.PropTag) (mapi.PropertyValues, error) {
+func folderProps(store *objectstore.Store, fid int64, tags []mapi.PropTag, rights rightsResolver) (mapi.PropertyValues, error) {
 	props, err := store.GetFolderProperties(fid, tags...)
 	if err != nil {
 		return nil, err
 	}
-	if len(tags) > 0 && !slices.ContainsFunc(computedFolderTags, func(t mapi.PropTag) bool { return slices.Contains(tags, t) }) {
+	if requestsAny(tags, folderIdentityTags) {
+		if err := addFolderIdentity(&props, store, fid, tags, rights); err != nil {
+			return nil, err
+		}
+	}
+	if !requestsAny(tags, computedFolderTags) {
 		return props, nil
 	}
 	computed, err := store.FolderComputedProps(fid)
@@ -242,7 +254,7 @@ func (s *Session) ropOpenFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 		writeErr(out, ropOpenFolder, ohindex, ecAccessDenied)
 		return true
 	}
-	h := s.alloc(&object{kind: kindFolder, store: parent.store, folderID: fid})
+	h := s.alloc(&object{kind: kindFolder, store: parent.store, folderID: fid, rights: s.rightsFor(parent.store)})
 	setHandle(handles, ohindex, h)
 
 	out.Uint8(ropOpenFolder)
