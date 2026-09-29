@@ -145,6 +145,42 @@ func TestEvalContentFuzzyKinds(t *testing.T) {
 	}
 }
 
+// TestEvalPropertyComparesEveryScalarKind checks a property restriction on a
+// boolean, a floating and a binary value: a search for unread mail compares the
+// read flag, and a task search compares the percent complete.
+func TestEvalPropertyComparesEveryScalarKind(t *testing.T) {
+	pct := mapi.MakeTag(0x8102, mapi.PtDouble)
+	key := mapi.MakeTag(0x0FF9, mapi.PtBinary)
+	bag := mapi.PropertyValues{
+		{Tag: mapi.PrRead, Value: false},
+		{Tag: pct, Value: 0.5},
+		{Tag: key, Value: []byte{1, 2}},
+	}
+	prop := func(tag mapi.PropTag, relop mapi.Relop, v any) mapi.Restriction {
+		return mapi.Restriction{Type: mapi.ResProperty, Value: mapi.PropertyRestriction{
+			Relop: relop, PropTag: tag, PropVal: mapi.TaggedPropVal{Tag: tag, Value: v}}}
+	}
+	cases := []struct {
+		name string
+		r    mapi.Restriction
+		want bool
+	}{
+		{"unread equals false", prop(mapi.PrRead, mapi.RelopEQ, false), true},
+		{"unread is not true", prop(mapi.PrRead, mapi.RelopEQ, true), false},
+		{"unread differs from true", prop(mapi.PrRead, mapi.RelopNE, true), true},
+		{"half is above a quarter", prop(pct, mapi.RelopGT, 0.25), true},
+		{"half is not below a quarter", prop(pct, mapi.RelopLT, 0.25), false},
+		{"binary equal", prop(key, mapi.RelopEQ, []byte{1, 2}), true},
+		{"binary greater", prop(key, mapi.RelopGT, []byte{1, 1}), true},
+		{"boolean against a number", prop(mapi.PrRead, mapi.RelopEQ, int32(0)), false},
+	}
+	for _, c := range cases {
+		if got := evalRestriction(c.r, bag); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 // TestEvalContentWordsAndDiacritics checks the match kinds a search client asks
 // for beyond the rule editor's: a prefix of any word, a phrase, and a match that
 // ignores diacritics, alone or as part of a loose match.

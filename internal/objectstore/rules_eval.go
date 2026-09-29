@@ -1,6 +1,8 @@
 package objectstore
 
 import (
+	"bytes"
+	"cmp"
 	"reflect"
 	"slices"
 	"strings"
@@ -232,21 +234,47 @@ func evalMultivalueProperty(pr mapi.PropertyRestriction, have any) bool {
 	return found == (pr.Relop == mapi.RelopEQ)
 }
 
-// compareProperty applies the relational operator to one value. Integer values
-// compare numerically and string values lexically; a type mismatch fails.
+// compareProperty applies the relational operator to one value. Integer and
+// floating values compare numerically, strings and binaries by their bytes, and a
+// boolean orders false before true; a type mismatch fails.
 func compareProperty(have any, pr mapi.PropertyRestriction) bool {
-	if hn, hok := toInt64(have); hok {
-		if wn, wok := toInt64(pr.PropVal.Value); wok {
-			return applyRelop(cmpInt64(hn, wn), pr.Relop)
-		}
-		return false
+	sign, ok := compareValues(have, pr.PropVal.Value)
+	return ok && applyRelop(sign, pr.Relop)
+}
+
+// compareValues returns the sign of have compared with want, and false when the
+// two are not values of one comparable kind.
+func compareValues(have, want any) (int, bool) {
+	if hn, ok := toInt64(have); ok {
+		wn, ok := toInt64(want)
+		return cmpInt64(hn, wn), ok
 	}
-	if hs, hok := have.(string); hok {
-		if ws, wok := pr.PropVal.Value.(string); wok {
-			return applyRelop(strings.Compare(hs, ws), pr.Relop)
-		}
+	switch h := have.(type) {
+	case string:
+		w, ok := want.(string)
+		return strings.Compare(h, w), ok
+	case []byte:
+		w, ok := want.([]byte)
+		return bytes.Compare(h, w), ok
+	case bool:
+		w, ok := want.(bool)
+		return cmpInt64(boolInt(h), boolInt(w)), ok
+	case float64:
+		w, ok := want.(float64)
+		return cmp.Compare(h, w), ok
+	case float32:
+		w, ok := want.(float32)
+		return cmp.Compare(h, w), ok
 	}
-	return false
+	return 0, false
+}
+
+// boolInt is 1 for true and 0 for false.
+func boolInt(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // evalBitmask tests masked bits of an integer property.
