@@ -15,10 +15,24 @@ import (
 type createFolderRequest struct {
 	ParentFolderID folderRefs `xml:"ParentFolderId"`
 	Folders        struct {
-		Folders []struct {
-			DisplayName string `xml:"DisplayName"`
-		} `xml:"Folder"`
+		Folders []newFolderXML `xml:",any"`
 	} `xml:"Folders"`
+}
+
+// newFolderXML is one folder a CreateFolder names. Its element name is its kind:
+// a t:SearchFolder is created as a search folder over its SearchParameters.
+type newFolderXML struct {
+	XMLName          xml.Name
+	DisplayName      string               `xml:"DisplayName"`
+	SearchParameters *searchParametersXML `xml:"SearchParameters"`
+}
+
+// searchParametersXML is a search folder's t:SearchParameters: what it searches
+// for, the folders it looks in, and whether it looks in their subfolders too.
+type searchParametersXML struct {
+	Traversal     string          `xml:"Traversal,attr"`
+	Restriction   *restrictionXML `xml:"Restriction"`
+	BaseFolderIDs *folderRefs     `xml:"BaseFolderIds"`
 }
 
 type createFolderResponse struct {
@@ -59,22 +73,118 @@ func (s *Server) handleCreateFolder(w http.ResponseWriter, inner []byte, sess *s
 
 	var msgs []folderResponseMessage
 	for _, f := range req.Folders.Folders {
-		if f.DisplayName == "" {
-			msgs = append(msgs, folderError("ErrorInvalidRequest"))
-			continue
-		}
-		fid, err := st.CreateFolder(parent, f.DisplayName)
-		if err != nil {
-			msgs = append(msgs, folderError("ErrorInternalServerError"))
-			continue
-		}
-		elem := oxews.BuildFolder(oxews.FolderInput{FolderID: fid, DisplayName: f.DisplayName})
-		msgs = append(msgs, folderResponseMessage{
-			ResponseClass: "Success", ResponseCode: "NoError",
-			Folders: &foldersWrap{Folders: []oxews.Folder{elem}},
-		})
+		msgs = append(msgs, createOneFolder(st, parentFID, parent, f))
 	}
 	writeResponse(w, createFolderResponse{Messages: msgs})
+}
+
+// createOneFolder creates one requested folder under the parent. parent is nil
+// for a top-level folder.
+func createOneFolder(st *objectstore.Store, parentFID int64, parent *int64, f newFolderXML) folderResponseMessage {
+	if f.DisplayName == "" {
+		return folderError("ErrorInvalidRequest")
+	}
+	if f.XMLName.Local == "SearchFolder" {
+		return createSearchFolder(st, parentFID, f)
+	}
+	fid, err := st.CreateFolder(parent, f.DisplayName)
+	if err != nil {
+		return folderError("ErrorInternalServerError")
+	}
+	return createdFolder(fid, f.DisplayName, false)
+}
+
+// createSearchFolder creates a search folder and gives it the criteria its
+// SearchParameters name. A folder whose criteria are refused is removed, so a
+// failed request leaves no empty search folder behind.
+func createSearchFolder(st *objectstore.Store, parentFID int64, f newFolderXML) folderResponseMessage {
+	var criteria *objectstore.SearchCriteria
+	if f.SearchParameters != nil {
+		c, code := searchCriteria(st, *f.SearchParameters)
+		if code != "" {
+			return folderError(code)
+		}
+		criteria = &c
+	}
+	fid, err := st.CreateSearchFolder(parentFID, f.DisplayName)
+	if err != nil {
+		return folderError("ErrorInternalServerError")
+	}
+	if criteria != nil {
+		if err := st.SetSearchCriteria(fid, *criteria); err != nil {
+			if derr := st.DeleteFolder(fid); derr != nil {
+				return folderError("ErrorInternalServerError")
+			}
+			return folderError(searchCriteriaCode(err))
+		}
+	}
+	return createdFolder(fid, f.DisplayName, true)
+}
+
+// searchCriteria reads SearchParameters into store search criteria: a running
+// search over the base folders, recursive for a Deep traversal.
+func searchCriteria(st *objectstore.Store, p searchParametersXML) (objectstore.SearchCriteria, string) {
+	if p.Restriction == nil {
+		return objectstore.SearchCriteria{}, codeInvalidRestriction
+	}
+	r, code := restrictionReader{st: st}.read(p.Restriction)
+	if code != "" {
+		return objectstore.SearchCriteria{}, code
+	}
+	scope, code := searchScope(p.BaseFolderIDs)
+	if code != "" {
+		return objectstore.SearchCriteria{}, code
+	}
+	flags := uint32(mapi.SearchRestart | mapi.SearchShallow)
+	switch p.Traversal {
+	case "", "Shallow":
+	case "Deep":
+		flags = mapi.SearchRestart | mapi.SearchRecursive
+	default:
+		return objectstore.SearchCriteria{}, "ErrorInvalidRequest"
+	}
+	return objectstore.SearchCriteria{Restriction: r, Scope: scope, Flags: flags}, ""
+}
+
+// searchScope resolves the base folders a search looks in. They must be folders
+// of the caller's own mailbox, since a search folder evaluates in the mailbox
+// that holds it.
+func searchScope(refs *folderRefs) ([]int64, string) {
+	if refs == nil {
+		return nil, "ErrorInvalidRequest"
+	}
+	targets := resolveTargets(*refs)
+	if len(targets) == 0 {
+		return nil, "ErrorInvalidRequest"
+	}
+	scope := make([]int64, 0, len(targets))
+	for _, t := range targets {
+		if !t.ok {
+			return nil, t.code
+		}
+		if t.mailbox != "" || t.public {
+			return nil, "ErrorInvalidOperation"
+		}
+		scope = append(scope, t.fid)
+	}
+	return scope, ""
+}
+
+// createdFolder is the response to a folder created as asked.
+func createdFolder(fid int64, name string, search bool) folderResponseMessage {
+	elem := oxews.BuildFolder(oxews.FolderInput{FolderID: fid, DisplayName: name, Search: search})
+	return folderResponseMessage{
+		ResponseClass: "Success", ResponseCode: "NoError",
+		Folders: &foldersWrap{Folders: []oxews.Folder{elem}},
+	}
+}
+
+// searchCriteriaCode is the response code a refused set of criteria answers.
+func searchCriteriaCode(err error) string {
+	if errors.Is(err, objectstore.ErrSearchScope) {
+		return "ErrorInvalidOperation"
+	}
+	return "ErrorInternalServerError"
 }
 
 // --- DeleteFolder ---
