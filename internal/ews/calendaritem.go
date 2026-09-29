@@ -114,6 +114,13 @@ func (r *calendarReader) meta(msg *oxcmail.Message) oxews.CalendarMeta {
 		MyResponse:  responseTypeName(longProp(p, r.resp)),
 		Zone:        meetingZone(r.st, &p),
 	}
+	if c.Body == "" {
+		if html, ok := p.Get(mapi.PrHTML); ok {
+			if b, ok := html.([]byte); ok {
+				c.Body, c.BodyHTML = string(b), true
+			}
+		}
+	}
 	c.Importance = optionalLong(p, mapi.PrImportance)
 	c.Sensitivity = optionalLong(p, mapi.PrSensitivity)
 	if c.ReminderSet {

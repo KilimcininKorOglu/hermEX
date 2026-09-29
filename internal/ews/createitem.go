@@ -19,11 +19,17 @@ import (
 
 type createItemRequest struct {
 	MessageDisposition string `xml:"MessageDisposition,attr"`
-	Items              struct {
-		Messages          []createMessage   `xml:"Message"`
-		Accept            []meetingResponse `xml:"AcceptItem"`
-		TentativelyAccept []meetingResponse `xml:"TentativelyAcceptItem"`
-		Decline           []meetingResponse `xml:"DeclineItem"`
+	// SendMeetingInvitations says whether a created meeting's request goes to its
+	// attendees: SendToNone, SendOnlyToAll or SendToAllAndSaveCopy.
+	SendMeetingInvitations string `xml:"SendMeetingInvitations,attr"`
+	// SavedItemFolderID names the folder a created calendar item is stored in.
+	SavedItemFolderID folderRefs `xml:"SavedItemFolderId"`
+	Items             struct {
+		Messages          []createMessage      `xml:"Message"`
+		CalendarItems     []createCalendarItem `xml:"CalendarItem"`
+		Accept            []meetingResponse    `xml:"AcceptItem"`
+		TentativelyAccept []meetingResponse    `xml:"TentativelyAcceptItem"`
+		Decline           []meetingResponse    `xml:"DeclineItem"`
 		// The smart-response types ([MS-OXWSMSG] ReplyToItemType and its siblings).
 		// A client sends one of these instead of a plain Message when the user
 		// replies to or forwards a message; saving such a draft is the common case,
@@ -118,6 +124,7 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *ses
 	save := disp == "SaveOnly" || disp == "SendAndSaveCopy"
 
 	msgs := s.createMessages(st, sess, req, disp, send, save)
+	msgs = append(msgs, s.createCalendarItems(st, sess, req)...)
 	msgs = append(msgs, s.createMeetingResponses(st, sess, req, send, save)...)
 	msgs = append(msgs, s.createReceiptSuppressions(sess, req)...)
 	writeResponse(w, createItemResponse{Messages: msgs})

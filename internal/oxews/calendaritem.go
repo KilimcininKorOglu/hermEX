@@ -70,6 +70,7 @@ type Attendee struct {
 type CalendarMeta struct {
 	Subject         string
 	Body            string
+	BodyHTML        bool // Body is HTML rather than plain text
 	Categories      []string
 	Importance      *int32 // PidTagImportance, nil when unset
 	Sensitivity     *int32 // PidTagSensitivity, nil when unset
@@ -128,6 +129,9 @@ func BuildCalendarItem(meta ItemMeta, c CalendarMeta) CalendarItem {
 	}
 	if c.Body != "" {
 		out.Body = &Body{BodyType: "Text", Content: c.Body}
+		if c.BodyHTML {
+			out.Body.BodyType = "HTML"
+		}
 	}
 	if len(c.Categories) > 0 {
 		out.Categories = &Categories{String: c.Categories}
