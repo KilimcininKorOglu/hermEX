@@ -4,7 +4,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"hermex/internal/crypt"
 )
@@ -192,33 +191,21 @@ func TestUpgradeIsOncePerAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	start := time.Now()
+	// upgradeHash generates a hash only after needsRehash reports the stored one
+	// stale, so a current hash is what keeps the repeat login from paying for it.
+	if needsRehash(first) {
+		t.Fatal("the hash stored by the first login still reads as needing a re-hash")
+	}
+
 	if _, ok := d.Authenticate(user, pass); !ok {
 		t.Fatal("second login failed")
 	}
-	elapsed := time.Since(start)
-
 	var second string
 	if err := db.QueryRow(`SELECT password FROM users WHERE username = ?`, user).Scan(&second); err != nil {
 		t.Fatal(err)
 	}
+	// Every re-hash carries a fresh salt, so an unchanged hash proves none ran.
 	if second != first {
 		t.Error("an already-current hash was rewritten, so every login pays for a re-hash")
 	}
-	// One verify, not a verify plus a generate. The margin is generous so the
-	// assertion is about the missing second hash, not about absolute speed.
-	if budget := 3 * hashCost(t); elapsed > budget {
-		t.Errorf("a repeat login took %s against a single hash's %s, which is the re-hash running again", elapsed, budget)
-	}
-}
-
-// hashCost measures one hash generation on this machine, so the assertion above
-// scales with the host rather than with a number picked on one.
-func hashCost(t *testing.T) time.Duration {
-	t.Helper()
-	start := time.Now()
-	if _, err := sqlCryptNewHash("timing sample"); err != nil {
-		t.Fatal(err)
-	}
-	return time.Since(start)
 }
