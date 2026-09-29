@@ -9,13 +9,16 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
 
-// delegationJSON is what webmail keeps about a grant beyond the store lists: the
-// id it hands the SPA, the access the user picked and when. The grant itself, who
-// is a delegate and who may send, is the store's delegate, send-as and
-// send-on-behalf lists, the lists Outlook, EWS and the admin panel write too.
+// delegationJSON is what webmail keeps about a grant beyond the store: the id it
+// hands the SPA and when the grant was made. The grant itself is the store's: who
+// is a delegate and who may send are its delegate, send-as and send-on-behalf
+// lists, and the access is the permission each delegate folder holds, the same
+// lists and permissions Outlook, EWS and the admin panel write. Rights is always
+// read back from those permissions.
 type delegationJSON struct {
 	ID              string   `json:"id"`
 	Grantee         string   `json:"grantee"`
@@ -154,6 +157,53 @@ func delegationRows(g storeGrants, saved []delegationJSON) []delegationJSON {
 	return rows
 }
 
+// folderRights is the rights mask the SPA's access choice sets on each delegate
+// folder: "write" makes the delegate an Editor, "read" a Reviewer, and no choice
+// removes the folder grant.
+func folderRights(rights []string) uint32 {
+	var mask uint32
+	switch {
+	case slices.Contains(rights, "write"):
+		mask = mapi.RightsEditor
+	case slices.Contains(rights, "read"):
+		mask = mapi.RightsReviewer
+	default:
+		return 0
+	}
+	return mapi.NormalizeRights(mask, true)
+}
+
+// accessNames reads the access a grantee holds back from the delegate folders,
+// whichever surface granted it: "read" when any folder lets them read every item,
+// "write" when any lets them delete every item, the right the shared-mailbox write
+// gate checks.
+func accessNames(byFolder map[int64]uint32) []string {
+	var union uint32
+	for _, r := range byFolder {
+		union |= r
+	}
+	var out []string
+	if union&mapi.FrightsReadAny != 0 {
+		out = append(out, "read")
+	}
+	if union&mapi.FrightsDeleteAny != 0 {
+		out = append(out, "write")
+	}
+	return out
+}
+
+// withFolderAccess sets each row's access to what the delegate folders grant.
+func withFolderAccess(st *objectstore.Store, rows []delegationJSON) error {
+	for i := range rows {
+		byFolder, err := st.DelegateFolderRights(rows[i].Grantee)
+		if err != nil {
+			return err
+		}
+		rows[i].Rights = accessNames(byFolder)
+	}
+	return nil
+}
+
 func grantsUnavailable(err error) settingsFailure {
 	return settingsFailure{status: http.StatusInternalServerError, msg: "delegates unavailable", event: "delegates.read", err: err}
 }
@@ -174,6 +224,9 @@ func (s *Server) handleGetDelegations(w http.ResponseWriter, r *http.Request) {
 			return grantsUnavailable(err), false
 		}
 		rows := delegationRows(g, readDelegations(m))
+		if err := withFolderAccess(st, rows); err != nil {
+			return grantsUnavailable(err), false
+		}
 		out := make([]map[string]any, 0, len(rows))
 		for _, d := range rows {
 			out = append(out, delegationOut(c.Email, d))
@@ -220,6 +273,9 @@ func (s *Server) handlePostDelegation(w http.ResponseWriter, r *http.Request) {
 		if err := g.save(st); err != nil {
 			return grantsUnsaved(err), false
 		}
+		if err := st.SetDelegateFolderRights(grantee, folderRights(d.Rights)); err != nil {
+			return grantsUnsaved(err), false
+		}
 		saved := slices.DeleteFunc(readDelegations(m), func(o delegationJSON) bool { return strings.EqualFold(o.Grantee, grantee) })
 		writeDelegations(m, append(saved, d))
 		return delegationOut(c.Email, d), true
@@ -242,6 +298,9 @@ func (s *Server) handleDeleteDelegation(w http.ResponseWriter, r *http.Request) 
 		grantee := rows[i].Grantee
 		g.remove(grantee)
 		if err := g.save(st); err != nil {
+			return grantsUnsaved(err), false
+		}
+		if err := st.SetDelegateFolderRights(grantee, 0); err != nil {
 			return grantsUnsaved(err), false
 		}
 		writeDelegations(m, slices.DeleteFunc(saved, func(d delegationJSON) bool { return strings.EqualFold(d.Grantee, grantee) }))
