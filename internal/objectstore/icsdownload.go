@@ -2,11 +2,13 @@ package objectstore
 
 import (
 	"database/sql"
+	"encoding/binary"
 	"fmt"
 	"time"
 
 	"hermex/internal/ics"
 	"hermex/internal/mapi"
+	"hermex/internal/oxcmail"
 )
 
 // SynchronizationFlags ([MS-OXCFXICS] 2.2.3.2.1.1.1). A download context passes
@@ -88,7 +90,8 @@ func sourceKey(replica mapi.GUID, value uint64) []byte {
 type flowKind uint8
 
 const (
-	flowMessage   flowKind = iota // one changed message (INCRSYNCCHG …)
+	flowProgress  flowKind = iota // INCRSYNCPROGRESSMODE + the totals of the changed set
+	flowMessage                   // one changed message (INCRSYNCCHG …)
 	flowDeletions                 // INCRSYNCDEL + deleted/no-longer idsets
 	flowReadState                 // INCRSYNCREAD + read/unread idsets
 	flowState                     // INCRSYNCSTATEBEGIN + new high-water state + END
@@ -108,8 +111,7 @@ type flowNode struct {
 // by the ROP FastTransferSourceGetBuffer handler; it can also be driven directly
 // and verified by parsing the stream back.
 //
-// v1 scope (documented deferrals, matching the slice plan): SYNC_PROGRESS_MODE,
-// restriction filtering, and delivery-time ordering are not honored; the changed
+// v1 scope (documented deferrals, matching the slice plan): restriction filtering, and delivery-time ordering are not honored; the changed
 // set is emitted in MID order. The read-state and modification ("updated")
 // branches are live: the store bumps change_number (ModifyMessageProperties) and
 // records read_cn (read.go, ImportReadStateChanges), so an in-place edit or a
@@ -134,6 +136,7 @@ type DownloadContext struct {
 	unreadMIDs   []uint64
 	lastCN       uint64
 	lastReadCN   uint64
+	progress     ContentSyncResult // the FAI/normal totals a progress-mode download announces
 }
 
 // NewContentDownload computes the contents delta for a folder against the
@@ -167,6 +170,7 @@ func (s *Store) NewContentDownload(folderID int64, state *ics.State, syncFlags u
 		unreadMIDs:   res.UnreadMIDs,
 		lastCN:       res.LastCN,
 		lastReadCN:   res.LastReadCN,
+		progress:     ContentSyncResult{FAICount: res.FAICount, FAISize: res.FAISize, NormalCount: res.NormalCount, NormalSize: res.NormalSize},
 	}
 	for _, t := range proptags {
 		dc.proptags[t] = struct{}{}
@@ -193,15 +197,18 @@ func contentSyncRequestFor(folderID int64, state *ics.State, syncFlags uint16) C
 	return req
 }
 
-// contentFlow plans what the download emits and in what order: the changed
-// messages, then the optional deletion and read-state blocks, then the state and
-// the end marker.
+// contentFlow plans what the download emits and in what order: the progress
+// totals when asked for, the changed messages, then the optional deletion and
+// read-state blocks, then the state and the end marker.
 func contentFlow(res ContentSyncResult, syncFlags uint16) []flowNode {
 	updated := make(map[uint64]struct{}, len(res.UpdatedMIDs))
 	for _, m := range res.UpdatedMIDs {
 		updated[m] = struct{}{}
 	}
 	var flow []flowNode
+	if syncFlags&SyncProgressMode != 0 {
+		flow = append(flow, flowNode{kind: flowProgress})
+	}
 	if syncFlags&(SyncAssociated|SyncNormal) != 0 {
 		for _, mid := range res.ChangedMIDs {
 			_, upd := updated[mid]
@@ -338,6 +345,8 @@ func (dc *DownloadContext) GetBuffer(maxLen int) (chunk []byte, last bool, err e
 
 func (dc *DownloadContext) emitNode(n flowNode) error {
 	switch n.kind {
+	case flowProgress:
+		return dc.writeProgressTotal()
 	case flowMessage:
 		return dc.writeMessageChange(n.mid)
 	case flowDeletions:
@@ -387,10 +396,19 @@ func (dc *DownloadContext) writeMessageChange(mid uint64) error {
 		return err
 	}
 
+	if err := dc.writeProgressPerMessage(size, assoc.Valid && assoc.Int64 != 0); err != nil {
+		return err
+	}
 	dc.producer.WriteMarker(ics.MarkerIncrSyncChg)
 	if err := dc.writeProps(header); err != nil {
 		return err
 	}
+	return dc.writeMessageBody(msg)
+}
+
+// writeMessageBody emits INCRSYNCMESSAGE and the message's filtered properties,
+// recipients and attachments.
+func (dc *DownloadContext) writeMessageBody(msg *oxcmail.Message) error {
 	dc.producer.WriteMarker(ics.MarkerIncrSyncMessage)
 	if err := dc.writeProps(dc.filter(msg.Props)); err != nil {
 		return err
@@ -455,6 +473,40 @@ func (dc *DownloadContext) writeCollection(tag mapi.PropTag, openMarker, closeMa
 		dc.producer.WriteMarker(closeMarker)
 	}
 	return nil
+}
+
+// writeProgressTotal emits the progressTotal element ([MS-OXCFXICS] 2.2.4.3.19):
+// INCRSYNCPROGRESSMODE and a 32-byte ProgressInformation (version, padding, the
+// FAI count and size, the normal count, padding, the normal size) under an
+// untagged binary propdef.
+func (dc *DownloadContext) writeProgressTotal() error {
+	p := dc.progress
+	info := make([]byte, 0, 32)
+	info = binary.LittleEndian.AppendUint16(info, 0) // Version
+	info = binary.LittleEndian.AppendUint16(info, 0) // Padding1
+	info = binary.LittleEndian.AppendUint32(info, p.FAICount)
+	info = binary.LittleEndian.AppendUint64(info, p.FAISize)
+	info = binary.LittleEndian.AppendUint32(info, p.NormalCount)
+	info = binary.LittleEndian.AppendUint32(info, 0) // Padding2
+	info = binary.LittleEndian.AppendUint64(info, p.NormalSize)
+	dc.producer.WriteMarker(ics.MarkerIncrSyncProgressMode)
+	return dc.writeProp(ics.StreamProp{Tag: mapi.PropTag(mapi.PtBinary), Value: info})
+}
+
+// writeProgressPerMessage emits the progressPerMessage element that precedes a
+// message change in a progress-mode download ([MS-OXCFXICS] 2.2.4.3.20):
+// INCRSYNCPROGRESSPERMSG, the message size as an untagged long, and whether the
+// message is associated as an untagged boolean.
+func (dc *DownloadContext) writeProgressPerMessage(size int64, isFAI bool) error {
+	if dc.syncFlags&SyncProgressMode == 0 {
+		return nil
+	}
+	dc.producer.WriteMarker(ics.MarkerIncrSyncProgressPerMsg)
+	// #nosec G115 -- the per-message size is a PtLong on the wire, the same ceiling PR_MESSAGE_SIZE has
+	if err := dc.writeProp(ics.StreamProp{Tag: mapi.PropTag(mapi.PtLong), Value: int32(size)}); err != nil {
+		return err
+	}
+	return dc.writeProp(ics.StreamProp{Tag: mapi.PropTag(mapi.PtBoolean), Value: isFAI})
 }
 
 // writeDeletions emits INCRSYNCDEL with the deleted and (unless soft deletions

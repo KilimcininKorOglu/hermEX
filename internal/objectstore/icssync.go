@@ -50,6 +50,13 @@ type ContentSyncResult struct {
 	UnreadMIDs   []uint64 // body-up-to-date MIDs whose read state changed to unread
 	LastCN       uint64   // the highest change number scanned (the client's new Seen high-water mark)
 	LastReadCN   uint64   // the highest read change number scanned (the client's new Read high-water mark)
+
+	// The count and total size of the associated and normal messages in
+	// ChangedMIDs, the totals a progress-mode download announces.
+	FAICount    uint32
+	FAISize     uint64
+	NormalCount uint32
+	NormalSize  uint64
 }
 
 // GetContentSync computes the message delta for one folder against the client's
@@ -69,7 +76,7 @@ type ContentSyncResult struct {
 func (s *Store) GetContentSync(req ContentSyncRequest) (ContentSyncResult, error) {
 	var res ContentSyncResult
 	rows, err := s.objdb.Query(
-		`SELECT message_id, change_number, is_associated, read_state, read_cn
+		`SELECT message_id, change_number, is_associated, read_state, read_cn, message_size
 		   FROM messages WHERE parent_fid=? AND is_deleted=0`, req.FolderID)
 	if err != nil {
 		return res, err
@@ -119,6 +126,7 @@ type contentRow struct {
 	isFAI     bool
 	readState bool
 	readCN    uint64 // 0 when the message never had its read state flipped
+	size      uint64
 }
 
 func scanContentRow(rows *sql.Rows) (contentRow, error) {
@@ -127,8 +135,9 @@ func scanContentRow(rows *sql.Rows) (contentRow, error) {
 		assoc     sql.NullInt64
 		readState int
 		readCN    sql.NullInt64
+		size      sql.NullInt64
 	)
-	if err := rows.Scan(&mid, &cn, &assoc, &readState, &readCN); err != nil {
+	if err := rows.Scan(&mid, &cn, &assoc, &readState, &readCN, &size); err != nil {
 		return contentRow{}, err
 	}
 	row := contentRow{
@@ -138,6 +147,8 @@ func scanContentRow(rows *sql.Rows) (contentRow, error) {
 		cn:        uint64(cn),
 		isFAI:     assoc.Valid && assoc.Int64 != 0,
 		readState: readState != 0,
+		// #nosec G115 -- a size crosses SQLite's signed 64-bit column and is never negative
+		size: uint64(max(size.Int64, 0)),
 	}
 	if readCN.Valid {
 		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
@@ -191,6 +202,18 @@ func (sc *contentScan) classify(row contentRow, req ContentSyncRequest, res *Con
 	if inGiven {
 		res.UpdatedMIDs = append(res.UpdatedMIDs, row.mid)
 	}
+	res.countChange(row)
+}
+
+// countChange adds one changed message to the progress totals of its class.
+func (res *ContentSyncResult) countChange(row contentRow) {
+	if row.isFAI {
+		res.FAICount++
+		res.FAISize += row.size
+		return
+	}
+	res.NormalCount++
+	res.NormalSize += row.size
 }
 
 // readStateChanged reports whether a body-current message carries a read_cn the

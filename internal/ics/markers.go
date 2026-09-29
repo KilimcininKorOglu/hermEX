@@ -83,18 +83,21 @@ const (
 	MarkerIncrSyncStateBegin = markerIncrSyncStateBegin
 	MarkerIncrSyncStateEnd   = markerIncrSyncStateEnd
 	MarkerIncrSyncEnd        = markerIncrSyncEnd
-	MarkerStartRecip         = markerStartRecip
-	MarkerEndToRecip         = markerEndToRecip
-	MarkerNewAttach          = markerNewAttach
-	MarkerEndAttach          = markerEndAttach
-	MarkerStartTopFld        = markerStartTopFld
-	MarkerStartSubFld        = markerStartSubFld
-	MarkerEndFolder          = markerEndFolder
-	MarkerStartMessage       = markerStartMessage
-	MarkerStartFAIMsg        = markerStartFAIMsg
-	MarkerEndMessage         = markerEndMessage
-	MarkerStartEmbed         = markerStartEmbed
-	MarkerEndEmbed           = markerEndEmbed
+
+	MarkerIncrSyncProgressMode   = markerIncrSyncProgressMode
+	MarkerIncrSyncProgressPerMsg = markerIncrSyncProgressPerMsg
+	MarkerStartRecip             = markerStartRecip
+	MarkerEndToRecip             = markerEndToRecip
+	MarkerNewAttach              = markerNewAttach
+	MarkerEndAttach              = markerEndAttach
+	MarkerStartTopFld            = markerStartTopFld
+	MarkerStartSubFld            = markerStartSubFld
+	MarkerEndFolder              = markerEndFolder
+	MarkerStartMessage           = markerStartMessage
+	MarkerStartFAIMsg            = markerStartFAIMsg
+	MarkerEndMessage             = markerEndMessage
+	MarkerStartEmbed             = markerStartEmbed
+	MarkerEndEmbed               = markerEndEmbed
 )
 
 // IsStateMetaTag reports whether a property tag is one of the ICS state idset
