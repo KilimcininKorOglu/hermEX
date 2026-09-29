@@ -1494,6 +1494,7 @@
     "savedSearchDateTo": "To date",
     "savedSearchFoldersPlaceholder": "Folders (comma-separated, empty = all)",
     "savedSearchHasAttachment": "Only messages with attachments",
+    "savedSearchCustom": "Another client defined the criteria of this search. Only its name can be changed here.",
     "savedSearchActions": "Saved search actions for {{name}}",
     "savedSearchNameRequired": "Search folder name is required",
     "savedSearchCreated": "Saved search created",

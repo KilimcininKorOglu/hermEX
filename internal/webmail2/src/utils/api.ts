@@ -716,6 +716,11 @@ export interface SearchFolder {
   date_to?: string
   has_attachment?: boolean
   base_folders?: string[]
+  /**
+   * Set when another client defined the search's criteria in a shape these
+   * fields cannot express; an update then only renames it.
+   */
+  custom?: boolean
 }
 
 /** SearchFolderInput is the create/update payload (no server-assigned id). */

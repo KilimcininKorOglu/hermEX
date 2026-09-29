@@ -1494,6 +1494,7 @@
     "savedSearchDateTo": "Bitiş tarihi",
     "savedSearchFoldersPlaceholder": "Klasörler (virgülle ayrılmış, boş = tümü)",
     "savedSearchHasAttachment": "Yalnızca ekli iletiler",
+    "savedSearchCustom": "Bu aramanın ölçütlerini başka bir istemci tanımladı. Buradan yalnızca adı değiştirilebilir.",
     "savedSearchActions": "{{name}} için kayıtlı arama işlemleri",
     "savedSearchNameRequired": "Arama klasörü adı gerekli",
     "savedSearchCreated": "Kayıtlı arama oluşturuldu",

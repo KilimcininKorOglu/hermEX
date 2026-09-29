@@ -112,6 +112,7 @@ const EMPTY_SF_FORM = {
   dateTo: "",
   hasAttachment: false,
   baseFolders: "",
+  custom: false,
 }
 
 const folderItems: NavItem[] = [
@@ -284,6 +285,7 @@ const savedSearchFormOf = (sf: SearchFolder): SavedSearchForm => ({
   dateTo: sf.date_to ?? "",
   hasAttachment: sf.has_attachment === true,
   baseFolders: (sf.base_folders ?? []).join(", "),
+  custom: sf.custom === true,
 })
 
 // savedSearchInput builds the API payload from the criteria form; empty
@@ -763,6 +765,64 @@ const ConfirmDeleteDialog = ({
   )
 }
 
+// SavedSearchCriteria is the criteria half of the saved search form.
+const SavedSearchCriteria = ({
+  form,
+  setForm,
+}: {
+  form: SavedSearchForm
+  setForm: (form: SavedSearchForm) => void
+}) => {
+  const { t } = useI18n()
+  const field = (key: keyof SavedSearchForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm({ ...form, [key]: e.target.value })
+  return (
+    <>
+      <Input
+        value={form.from}
+        onChange={field("from")}
+        placeholder={t("sidebar.savedSearchFromPlaceholder")}
+      />
+      <Input
+        value={form.subject}
+        onChange={field("subject")}
+        placeholder={t("sidebar.savedSearchSubjectPlaceholder")}
+      />
+      <Input
+        value={form.body}
+        onChange={field("body")}
+        placeholder={t("sidebar.savedSearchBodyPlaceholder")}
+      />
+      <div className="flex gap-2">
+        <Input
+          type="date"
+          value={form.dateFrom}
+          onChange={field("dateFrom")}
+          aria-label={t("sidebar.savedSearchDateFrom")}
+        />
+        <Input
+          type="date"
+          value={form.dateTo}
+          onChange={field("dateTo")}
+          aria-label={t("sidebar.savedSearchDateTo")}
+        />
+      </div>
+      <Input
+        value={form.baseFolders}
+        onChange={field("baseFolders")}
+        placeholder={t("sidebar.savedSearchFoldersPlaceholder")}
+      />
+      <label className="flex items-center gap-2 text-sm">
+        <Checkbox
+          checked={form.hasAttachment}
+          onCheckedChange={(v) => setForm({ ...form, hasAttachment: v === true })}
+        />
+        {t("sidebar.savedSearchHasAttachment")}
+      </label>
+    </>
+  )
+}
+
 // SavedSearchDialog edits the structured criteria of a saved search.
 const SavedSearchDialog = ({
   open,
@@ -801,47 +861,11 @@ const SavedSearchDialog = ({
             onChange={field("name")}
             placeholder={t("sidebar.savedSearchNamePlaceholder")}
           />
-          <Input
-            value={form.from}
-            onChange={field("from")}
-            placeholder={t("sidebar.savedSearchFromPlaceholder")}
-          />
-          <Input
-            value={form.subject}
-            onChange={field("subject")}
-            placeholder={t("sidebar.savedSearchSubjectPlaceholder")}
-          />
-          <Input
-            value={form.body}
-            onChange={field("body")}
-            placeholder={t("sidebar.savedSearchBodyPlaceholder")}
-          />
-          <div className="flex gap-2">
-            <Input
-              type="date"
-              value={form.dateFrom}
-              onChange={field("dateFrom")}
-              aria-label={t("sidebar.savedSearchDateFrom")}
-            />
-            <Input
-              type="date"
-              value={form.dateTo}
-              onChange={field("dateTo")}
-              aria-label={t("sidebar.savedSearchDateTo")}
-            />
-          </div>
-          <Input
-            value={form.baseFolders}
-            onChange={field("baseFolders")}
-            placeholder={t("sidebar.savedSearchFoldersPlaceholder")}
-          />
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox
-              checked={form.hasAttachment}
-              onCheckedChange={(v) => setForm({ ...form, hasAttachment: v === true })}
-            />
-            {t("sidebar.savedSearchHasAttachment")}
-          </label>
+          {form.custom ? (
+            <p className="text-sm text-muted-foreground">{t("sidebar.savedSearchCustom")}</p>
+          ) : (
+            <SavedSearchCriteria form={form} setForm={setForm} />
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
