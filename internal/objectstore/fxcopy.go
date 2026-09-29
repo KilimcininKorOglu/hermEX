@@ -113,7 +113,7 @@ func (c *CopyContext) GetBuffer(maxLen int) (chunk []byte, last bool, err error)
 // and attachment lists. exclude lists the property tags to omit (CopyTo's exclusion
 // set); an empty set copies every property.
 func (s *Store) NewCopyToMessageSource(messageID int64, exclude []mapi.PropTag) (*CopyContext, error) {
-	msg, err := s.OpenMessage(messageID)
+	msg, err := s.openTransferMessage(messageID)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +128,7 @@ func (s *Store) NewCopyToMessageSource(messageID int64, exclude []mapi.PropTag) 
 // the CopyProperties body, with no recipients or attachments ([MS-OXCFXICS]
 // 2.2.4.1.1). include is the inclusive tag set; an empty set copies nothing.
 func (s *Store) NewCopyPropertiesMessageSource(messageID int64, include []mapi.PropTag) (*CopyContext, error) {
-	msg, err := s.OpenMessage(messageID)
+	msg, err := s.openTransferMessage(messageID)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +158,7 @@ func (s *Store) NewCopyMessagesSource(folderID int64, messageIDs []int64, exclud
 		if err != nil {
 			return nil, err
 		}
-		msg, err := s.OpenMessage(mid)
+		msg, err := s.openTransferMessage(mid)
 		if err != nil {
 			return nil, err
 		}
@@ -261,7 +261,7 @@ func (s *Store) writeFolderMessageList(pr *ics.Producer, folderID int64, associa
 		marker = ics.MarkerStartFAIMsg
 	}
 	for _, mid := range mids {
-		msg, err := s.OpenMessage(mid)
+		msg, err := s.openTransferMessage(mid)
 		if err != nil {
 			return err
 		}

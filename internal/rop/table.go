@@ -395,7 +395,7 @@ func (t *tableState) rowKeyProps(store *objectstore.Store, baseIdx int, tags []m
 	case tableAttachment:
 		return t.attachments[baseIdx], nil
 	default:
-		return store.GetMessageProperties(t.messageIDs[baseIdx], tags...)
+		return messageProps(store, t.messageIDs[baseIdx], tags)
 	}
 }
 
@@ -461,9 +461,17 @@ func (t *tableState) contentsKeyProps(store *objectstore.Store, n int, tags []ma
 	if err != nil {
 		return nil, err
 	}
+	computed, err := store.MessageComputedPropsBatch(t.messageIDs[:n], tags)
+	if err != nil {
+		return nil, err
+	}
 	bags := make([]mapi.PropertyValues, n)
 	for i := range n {
-		bags[i] = byID[t.messageIDs[i]]
+		bag := byID[t.messageIDs[i]]
+		for _, tv := range computed[t.messageIDs[i]] {
+			bag.Set(tv.Tag, tv.Value)
+		}
+		bags[i] = bag
 	}
 	return bags, nil
 }

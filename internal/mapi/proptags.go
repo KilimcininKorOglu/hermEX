@@ -265,6 +265,8 @@ const (
 	PrStartDate           = PropTag(0x00600040) // PtSysTime (PidTagStartDate), appointment start, mirrors PidLidAppointmentStartWhole
 	PrEndDate             = PropTag(0x00610040) // PtSysTime (PidTagEndDate), appointment end, mirrors PidLidAppointmentEndWhole
 	PrMessageFlags        = PropTag(0x0E070003) // PtLong
+	PrHasAttachments      = PropTag(0x0E1B000B) // PtBoolean (PidTagHasAttachments), computed from the attachment rows
+	PrRead                = PropTag(0x0E69000B) // PtBoolean (PidTagRead), computed from the read state
 	PrMessageSize         = PropTag(0x0E080003) // PtLong (PidTagMessageSize), total message size in bytes
 	PrFlagStatus          = PropTag(0x10900003) // PtLong (PidTagFlagStatus, MS-OXOFLAG), 0 none / 1 complete / 2 flagged
 	PrFollowupIcon        = PropTag(0x10950003) // PtLong (PidTagFollowupIcon), flag color: 0 clear / 1 purple / 2 orange / 3 green / 4 yellow / 5 blue / 6 red
@@ -304,8 +306,12 @@ const (
 	SensitivityPrivate      = 2
 	SensitivityConfidential = 3
 
-	MsgFlagRead   = 0x00000001 // mfRead
-	MsgFlagUnsent = 0x00000008 // mfUnsent
+	MsgFlagRead       = 0x00000001 // mfRead
+	MsgFlagUnsent     = 0x00000008 // mfUnsent
+	MsgFlagHasAttach  = 0x00000010 // mfHasAttach
+	MsgFlagAssociated = 0x00000040 // mfFAI
+	MsgFlagRNPending  = 0x00000100 // mfNotifyRead
+	MsgFlagNRNPending = 0x00000200 // mfNotifyUnread
 )
 
 // Sender and sent-representing identity property tags. Import fills both sets,

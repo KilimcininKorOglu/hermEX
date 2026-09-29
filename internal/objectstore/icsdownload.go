@@ -377,7 +377,7 @@ func (dc *DownloadContext) writeMessageChange(mid uint64) error {
 		return err
 	}
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-	msg, err := dc.store.OpenMessage(int64(mid))
+	msg, err := dc.store.openTransferMessage(int64(mid))
 	if err != nil {
 		return err
 	}

@@ -158,6 +158,25 @@ func folderProps(store *objectstore.Store, fid int64, tags []mapi.PropTag, right
 	return props, nil
 }
 
+// messageProps returns a stored message's properties overlaid with the ones the
+// store computes ([MS-OXCMSG] 2.2.1.6, 2.2.1.9, 2.2.1.10), narrowed to tags, or all
+// of them when tags is empty. A computed value replaces a stored one: the read
+// state and the paperclip change without a property write.
+func messageProps(store *objectstore.Store, mid int64, tags []mapi.PropTag) (mapi.PropertyValues, error) {
+	props, err := store.GetMessageProperties(mid, tags...)
+	if err != nil {
+		return nil, err
+	}
+	computed, err := store.MessageComputedProps(mid, tags...)
+	if err != nil {
+		return nil, err
+	}
+	for _, tv := range computed {
+		props.Set(tv.Tag, tv.Value)
+	}
+	return props, nil
+}
+
 // attachmentRow projects one attachment row. The bags are already in memory, so
 // it copies before synthesizing the computed columns and the stored snapshot is
 // not mutated. A stored attach number is authoritative; only when one is absent
@@ -209,7 +228,7 @@ func attachmentRowMid(pos int) int64 {
 // column set asks for it.
 func (t *tableState) messageRow(store *objectstore.Store, base int) (mapi.PropertyValues, error) {
 	mid := t.messageIDs[base]
-	props, err := store.GetMessageProperties(mid, t.columns...)
+	props, err := messageProps(store, mid, t.columns)
 	if err != nil {
 		return nil, err
 	}

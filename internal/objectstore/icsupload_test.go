@@ -323,7 +323,7 @@ func TestImportMessageFullLoop(t *testing.T) {
 
 	orig := map[uint64]*oxcmail.Message{}
 	for _, mid := range []int64{m1, m2} {
-		orig[uint64(mid)] = mustOpenMessage(t, s, mid)
+		orig[uint64(mid)] = mustOpenTransferMessage(t, s, mid)
 	}
 
 	dc, err := s.NewContentDownload(fld, downloadState(t, s), SyncNormal, 0, nil)
@@ -357,7 +357,7 @@ func TestImportMessageAssociatedRoundTrip(t *testing.T) {
 	mid := mustCreateMessage(t, s, fld, richMsg("fai"))
 	_, err := s.objdb.Exec(`UPDATE messages SET is_associated=1 WHERE message_id=?`, mid)
 	mustNoErr(t, "mark the message associated", err)
-	orig := mustOpenMessage(t, s, mid)
+	orig := mustOpenTransferMessage(t, s, mid)
 
 	dc, err := s.NewContentDownload(fld, downloadState(t, s), SyncAssociated, 0, nil)
 	mustNoErr(t, "new content download", err)

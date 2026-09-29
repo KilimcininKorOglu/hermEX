@@ -79,7 +79,7 @@ func TestCopyToMessageRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := s.OpenMessage(mid)
+	want, err := s.openTransferMessage(mid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestCopyMessagesSingleRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := s.OpenMessage(mid)
+	want, err := s.openTransferMessage(mid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +326,7 @@ func TestCopyFolderTopFolder(t *testing.T) {
 	wantEq(t, "StartMessage count (one per folder)", countMarkers(items, ics.MarkerStartMessage), 2)
 	wantEq(t, "EndMessage count", countMarkers(items, ics.MarkerEndMessage), 2)
 
-	want := mustOpenMessage(t, s, pmid)
+	want := mustOpenTransferMessage(t, s, pmid)
 	content := reserializeMessageContent(t, firstMessageBody(t, items))
 	dst := openSeededStore(t)
 	id := reconstructMessage(t, dst, int64(mapi.PrivateFIDInbox), content)

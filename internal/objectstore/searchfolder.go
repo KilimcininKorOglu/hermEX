@@ -416,27 +416,43 @@ func searchFolders(q sqlQuery, c SearchCriteria) ([]int64, error) {
 	return out, nil
 }
 
-// matchFolder returns the live, non-FAI messages of one folder that match r.
-// The message size is set on the property bag, as a rule condition sees it,
-// because the store keeps it on the message row.
-func (s *Store) matchFolder(q sqlQuery, fid int64, r mapi.Restriction) ([]int64, error) {
+// searchCandidate is a message a search tests, with the size its row keeps.
+type searchCandidate struct{ id, size int64 }
+
+// searchCandidates lists the live, non-FAI messages of one folder in id order.
+func searchCandidates(q sqlQuery, fid int64) ([]searchCandidate, error) {
 	rows, err := q.Query(
 		`SELECT message_id, message_size FROM messages WHERE parent_fid=? AND is_deleted=0 AND COALESCE(is_associated, 0)=0 ORDER BY message_id`, fid)
 	if err != nil {
 		return nil, err
 	}
-	type candidate struct{ id, size int64 }
-	var cands []candidate
+	defer rows.Close()
+	var cands []searchCandidate
 	for rows.Next() {
-		var c candidate
+		var c searchCandidate
 		if err := rows.Scan(&c.id, &c.size); err != nil {
-			rows.Close()
 			return nil, err
 		}
 		cands = append(cands, c)
 	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
+	return cands, rows.Err()
+}
+
+// matchFolder returns the live, non-FAI messages of one folder that match r.
+// The message size and the computed message properties are set on the property
+// bag, as a client reading the message sees them, because the store keeps them on
+// the message row rather than as properties.
+func (s *Store) matchFolder(q sqlQuery, fid int64, r mapi.Restriction) ([]int64, error) {
+	cands, err := searchCandidates(q, fid)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]int64, len(cands))
+	for i, c := range cands {
+		ids[i] = c.id
+	}
+	computed, err := s.MessageComputedPropsBatch(ids, nil)
+	if err != nil {
 		return nil, err
 	}
 	var out []int64
@@ -446,6 +462,9 @@ func (s *Store) matchFolder(q sqlQuery, fid int64, r mapi.Restriction) ([]int64,
 			return nil, err
 		}
 		props.Set(mapi.PrMessageSize, clampLong(c.size))
+		for _, tv := range computed[c.id] {
+			props.Set(tv.Tag, tv.Value)
+		}
 		if evalRestriction(r, props) {
 			out = append(out, c.id)
 		}

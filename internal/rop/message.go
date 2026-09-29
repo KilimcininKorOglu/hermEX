@@ -134,7 +134,7 @@ func (o *object) readMessageProps(tags ...mapi.PropTag) (mapi.PropertyValues, bo
 		if o.store == nil {
 			return nil, false, nil
 		}
-		props, err := o.store.GetMessageProperties(o.messageID, tags...)
+		props, err := messageProps(o.store, o.messageID, tags)
 		if err != nil {
 			return nil, true, err
 		}

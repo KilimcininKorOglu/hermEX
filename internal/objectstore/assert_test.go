@@ -144,6 +144,17 @@ func mustOpenMessage(t *testing.T, s *Store, messageID int64) *oxcmail.Message {
 	return msg
 }
 
+// mustOpenTransferMessage reads a stored object back as a FastTransfer stream
+// carries it, with its computed message flags.
+func mustOpenTransferMessage(t *testing.T, s *Store, messageID int64) *oxcmail.Message {
+	t.Helper()
+	msg, err := s.openTransferMessage(messageID)
+	if err != nil {
+		t.Fatalf("open message for transfer: %v", err)
+	}
+	return msg
+}
+
 // mustGetMessageRaw returns the wire form served for one index row.
 func mustGetMessageRaw(t *testing.T, s *Store, folderID int64, uid uint32) []byte {
 	t.Helper()
