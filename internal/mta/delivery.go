@@ -822,6 +822,14 @@ func SendAndRelay(accounts directory.Accounts, spool *relay.Spool, from string, 
 	return unresolved, !only, nil
 }
 
+// SendCopy delivers a second rendering of a message SendAndRelay sent, to
+// recipients that message did not reach: every check and limit applies, and no
+// represented mailbox files a copy, because SendAndRelay filed the one record.
+func SendCopy(accounts directory.Accounts, spool *relay.Spool, from string, recipients []string, raw []byte, received time.Time) (unresolved []string, err error) {
+	unresolved, _, err = deliverAndRelay(accounts, spool, from, from, recipients, raw, received)
+	return unresolved, err
+}
+
 // SendReport is DeliverAndRelay for a report an account sends, such as a read
 // receipt: every check and limit applies to account, while the message travels
 // with the null reverse-path its kind requires (RFC 8098 section 3), so a failed

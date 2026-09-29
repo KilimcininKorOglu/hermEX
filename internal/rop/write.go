@@ -865,18 +865,13 @@ var errNoRecipient = errors.New("rop: no routable recipient")
 // text/calendar alternative ([MS-OXCICAL]), because a recipient outside this server
 // reads a request, a response, a counter proposal or a cancellation from that part
 // alone. Without it the message arrives as a plain mail.
+//
+// A recipient whose PidTagSendRichInfo is true is sent the TNEF form, which
+// carries the properties MIME cannot; every other recipient is sent plain MIME.
+// The plain form is the one returned for the Sent copy.
 func (s *Session) deliverComposed(st *objectstore.Store, nm *newMessageState, representing, sender string) (raw []byte, keepOwnCopy bool, err error) {
-	var recipients []string
-	wire := make([]mapi.PropertyValues, 0, len(nm.recipients))
-	for _, bag := range nm.recipients {
-		if addr := recipientSMTP(bag); addr != "" {
-			recipients = append(recipients, addr)
-		}
-		if rt, _ := bag.Get(mapi.PrRecipientType); rt != int32(mapi.RecipBcc) {
-			wire = append(wire, bag)
-		}
-	}
-	if len(recipients) == 0 {
+	plainTo, richTo, wire := splitRecipients(nm.recipients)
+	if len(plainTo)+len(richTo) == 0 {
 		return nil, false, errNoRecipient
 	}
 	// Stamp the representing/sender identities + submit time: Export derives From from
@@ -896,26 +891,75 @@ func (s *Session) deliverComposed(st *objectstore.Store, nm *newMessageState, re
 		return nil, false, err
 	}
 	msg := &oxcmail.Message{Props: props, Recipients: wire, Attachments: saved.Attachments}
-	raw, err = exportSubmitted(st, msg)
+	raw, err = exportSubmitted(st, msg, false)
 	if err != nil {
 		return nil, false, err
 	}
-	_, keepOwnCopy, err = mta.SendAndRelay(s.accounts, s.spool, s.owner, recipients, raw, time.Now())
+	rich := raw
+	if len(richTo) > 0 {
+		if rich, err = exportSubmitted(st, msg, true); err != nil {
+			return nil, false, err
+		}
+	}
+	keepOwnCopy, err = s.sendRenderings(plainTo, raw, richTo, rich)
 	if err != nil {
 		return nil, false, err
 	}
 	return raw, keepOwnCopy, nil
 }
 
+// splitRecipients returns the routable addresses of the recipients sent plain MIME
+// and of those sent the TNEF form, and the recipients the headers name (every one
+// but Bcc).
+func splitRecipients(bags []mapi.PropertyValues) (plainTo, richTo []string, wire []mapi.PropertyValues) {
+	wire = make([]mapi.PropertyValues, 0, len(bags))
+	for _, bag := range bags {
+		if addr := recipientSMTP(bag); addr != "" {
+			if v, _ := bag.Get(mapi.PrSendRichInfo); v == true {
+				richTo = append(richTo, addr)
+			} else {
+				plainTo = append(plainTo, addr)
+			}
+		}
+		if rt, _ := bag.Get(mapi.PrRecipientType); rt != int32(mapi.RecipBcc) {
+			wire = append(wire, bag)
+		}
+	}
+	return plainTo, richTo, wire
+}
+
+// sendRenderings sends each rendering to its recipients. The first group sent
+// through SendAndRelay files the represented mailbox's record; the other goes as a
+// copy, so the record is filed once.
+func (s *Session) sendRenderings(plainTo []string, plain []byte, richTo []string, rich []byte) (keepOwnCopy bool, err error) {
+	now := time.Now()
+	if len(plainTo) == 0 {
+		_, keepOwnCopy, err = mta.SendAndRelay(s.accounts, s.spool, s.owner, richTo, rich, now)
+		return keepOwnCopy, err
+	}
+	if _, keepOwnCopy, err = mta.SendAndRelay(s.accounts, s.spool, s.owner, plainTo, plain, now); err != nil {
+		return keepOwnCopy, err
+	}
+	if len(richTo) > 0 {
+		if _, err = mta.SendCopy(s.accounts, s.spool, s.owner, richTo, rich, now); err != nil {
+			return keepOwnCopy, err
+		}
+	}
+	return keepOwnCopy, nil
+}
+
 // exportSubmitted renders a submitted message as the mail that goes out: a
 // meeting message with its iCalendar, the attachments without a meeting's
 // exceptions, and an S/MIME message only when it is well formed, because Export
-// renders a malformed one as a notice for its stored copy.
-func exportSubmitted(st *objectstore.Store, msg *oxcmail.Message) ([]byte, error) {
+// renders a malformed one as a notice for its stored copy. richInfo asks for the
+// TNEF form; a meeting message keeps its iCalendar form for every recipient,
+// because that is the part a scheduling client acts on.
+func exportSubmitted(st *objectstore.Store, msg *oxcmail.Message, richInfo bool) ([]byte, error) {
 	opt, err := meetingCalendar(st, msg)
 	if err != nil {
 		return nil, err
 	}
+	opt.TNEF = richInfo && len(opt.CalendarBody) == 0
 	msg.Attachments = mailAttachments(msg.Attachments)
 	if err := oxcmail.CheckSMIME(msg); err != nil {
 		return nil, err

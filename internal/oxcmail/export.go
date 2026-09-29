@@ -52,6 +52,12 @@ func Export(msg *Message, opt Options) ([]byte, error) {
 		}
 		return b.Bytes(), nil
 	}
+	if opt.TNEF {
+		if err := writeTNEFBody(&b, msg, opt); err != nil {
+			return nil, err
+		}
+		return b.Bytes(), nil
+	}
 	if err := writeContentBody(&b, msg, opt); err != nil {
 		return nil, err
 	}

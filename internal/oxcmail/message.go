@@ -82,6 +82,10 @@ type PropNameResolver func(propid uint16) (name mapi.PropertyName, ok bool, err 
 // time of a message without a Date header, as the receiving MTA adds one from the
 // time it received the message (RFC 5321 section 6.4); a zero value falls back to
 // the current time.
+//
+// TNEF makes Export write the form a recipient that accepts rich information reads:
+// the plain text body and a winmail.dat that carries the properties and the
+// attachments. PropName names the named properties the stream carries.
 type Options struct {
 	Resolver         PropIDResolver
 	PropName         PropNameResolver
@@ -92,6 +96,7 @@ type Options struct {
 	CalendarMethod   string
 	CalendarImporter CalendarImporter
 	ArrivalTime      time.Time
+	TNEF             bool
 }
 
 // CalendarImporter parses a text/calendar body (a UTF-8 iCalendar object) into the
