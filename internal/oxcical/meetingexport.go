@@ -180,6 +180,19 @@ func newEventExport(msg *oxcmail.Message, named map[mapi.PropertyName]mapi.PropT
 	return e
 }
 
+// StoredZoneNames are the named properties StoredZone reads, for a caller that
+// resolves them against its own store.
+var StoredZoneNames = []mapi.PropertyName{
+	mapi.NameAppointmentTimeZoneDefRecur, mapi.NameAppointmentTimeZoneDefStartDisplay, mapi.NameTimeZoneDescription,
+}
+
+// StoredZone is the named zone an appointment's wall clocks belong to, read the way
+// its iCalendar export reads it, so every protocol names the same zone. An empty
+// or unknown time zone description is no zone, and StoredZone returns nil.
+func StoredZone(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag) *time.Location {
+	return storedZone(p, named)
+}
+
 // storedZone is the named zone an object's wall clocks belong to: the zone its
 // series definition names, else the zone its start is shown in, else its time zone
 // description when that is a zone id. It is nil when none resolves.

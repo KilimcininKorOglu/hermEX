@@ -55,7 +55,11 @@ type MeetingRequest struct {
 	Location               string     `xml:"Location,omitempty"`
 	IsMeeting              bool       `xml:"IsMeeting"`
 	Organizer              *Recipient `xml:"Organizer,omitempty"`
-	UID                    string     `xml:"UID,omitempty"`
+	// StartTimeZone and EndTimeZone follow Organizer in the sequence. They are left
+	// out when the invitation names no zone, since an empty Id tells a client nothing.
+	StartTimeZone *TimeZoneDef `xml:"StartTimeZone,omitempty"`
+	EndTimeZone   *TimeZoneDef `xml:"EndTimeZone,omitempty"`
+	UID           string       `xml:"UID,omitempty"`
 }
 
 // MeetingMeta carries the appointment facts a meeting request is rendered from.
@@ -71,6 +75,12 @@ type MeetingMeta struct {
 	ResponseRequested bool
 	RequestType       string // a MeetingType* value
 	Organizer         *Mailbox
+	Zone              string // the Windows time-zone id of Start and End, "" when none
+}
+
+// TimeZoneDef is a <t:StartTimeZone> or <t:EndTimeZone> naming a zone by its id.
+type TimeZoneDef struct {
+	ID string `xml:"Id,attr"`
 }
 
 // BuildMeetingRequest renders a delivered invitation as <t:MeetingRequest>. The mail
@@ -114,6 +124,10 @@ func BuildMeetingRequest(msg *oxcmail.Message, meta ItemMeta, mr MeetingMeta) Me
 	}
 	if mr.Organizer != nil {
 		out.Organizer = &Recipient{Mailbox: *mr.Organizer}
+	}
+	if mr.Zone != "" {
+		out.StartTimeZone = &TimeZoneDef{ID: mr.Zone}
+		out.EndTimeZone = &TimeZoneDef{ID: mr.Zone}
 	}
 	return out
 }

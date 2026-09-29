@@ -3,6 +3,7 @@ package ews
 import (
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcical"
 	"hermex/internal/oxcmail"
 	"hermex/internal/oxews"
 )
@@ -68,7 +69,35 @@ func meetingMeta(st *objectstore.Store, msg *oxcmail.Message) oxews.MeetingMeta 
 		ResponseRequested: responseRequested(props),
 		RequestType:       meetingRequestType(longProp(props, tags.sequence)),
 		Organizer:         organizerMailbox(props),
+		Zone:              meetingZone(st, &props),
 	}
+}
+
+// meetingZone names the zone an invitation's times belong to by its Windows id,
+// the Id a TimeZoneDefinition carries, or "" when the invitation names none. The
+// zone is read the way the iCalendar export reads it, so EWS and CalDAV agree, and
+// an empty time zone description is no zone.
+func meetingZone(st *objectstore.Store, props *mapi.PropertyValues) string {
+	ids, err := st.GetNamedPropIDs(false, oxcical.StoredZoneNames)
+	if err != nil {
+		st.LogSwallowedError("ews.meeting-zone", err)
+		return ""
+	}
+	types := []mapi.PropType{mapi.PtBinary, mapi.PtBinary, mapi.PtUnicode}
+	named := make(map[mapi.PropertyName]mapi.PropTag, len(ids))
+	for i, id := range ids {
+		if id != 0 {
+			named[oxcical.StoredZoneNames[i]] = mapi.MakeTag(id, types[i])
+		}
+	}
+	loc := oxcical.StoredZone(props, named)
+	if loc == nil {
+		return ""
+	}
+	if win, ok := oxcical.WindowsZoneFor(loc.String()); ok {
+		return win
+	}
+	return loc.String()
 }
 
 // meetingRequestType names an invitation by its iCalendar SEQUENCE: 0 is the first
