@@ -134,6 +134,48 @@ func TestCreateFolderRefusesOtherTypes(t *testing.T) {
 	}
 }
 
+// TestDelegateOwnsTheFolderTheyCreate proves a delegate who may only create
+// subfolders under the Inbox holds owner rights on the folder they create, so they
+// can read its contents, which the Inbox grant alone would not allow.
+func TestDelegateOwnsTheFolderTheyCreate(t *testing.T) {
+	dir := t.TempDir()
+	const delegate = "delegate@hermex.test"
+	grantFolderPermission(t, dir, int64(mapi.PrivateFIDInbox), delegate, mapi.FrightsVisible|mapi.FrightsCreateSubfolder)
+	sess, logonH := delegateLogon(t, dir, delegate)
+	defer sess.Close()
+	_, h := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
+	resp, h := sess.Dispatch(toROPRequest(ropCreateFolder, 0, createFolderBody(1, "Mine", false)), []uint32{h[1], 0xFFFFFFFF})
+	p := ropOK(t, resp, ropCreateFolder, "delegate CreateFolder")
+	fid := int64(mapi.EID(mustU64(t, p, "FolderId")).GCValue())
+
+	if ec := ropResultEC(t, mustDispatch(sess, buildGetContentsTable(0, 1), h[1], 0xFFFFFFFF)); ec != ecSuccess {
+		t.Errorf("GetContentsTable on the new folder ec = %#x, want success", ec)
+	}
+	rights, err := sess.get(logonH).store.ResolvePermission(fid, delegate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rights != creatorRights {
+		t.Errorf("delegate rights on the new folder = %#x, want %#x", rights, creatorRights)
+	}
+}
+
+// TestOwnerCreatedFolderGrantsNobody proves an owner's new folder carries no
+// member row: the owner needs none, and no one else is granted anything.
+func TestOwnerCreatedFolderGrantsNobody(t *testing.T) {
+	sess, inboxH := openInboxForCreate(t)
+	resp, h := sess.Dispatch(toROPRequest(ropCreateFolder, 0, createFolderBody(1, "Plain", false)), []uint32{inboxH, 0xFFFFFFFF})
+	p := ropOK(t, resp, ropCreateFolder, "CreateFolder")
+	fid := int64(mapi.EID(mustU64(t, p, "FolderId")).GCValue())
+	perms, err := sess.get(h[1]).store.ListPermissions(fid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(perms) != 0 {
+		t.Errorf("owner-created folder has permission rows %+v, want none", perms)
+	}
+}
+
 // TestHardDeleteMessagesAndSubfolders clears a folder's messages AND removes its
 // subfolders in one ROP: the inbox holds a message and a subfolder, and after the
 // ROP both are gone (the message recoverable in the dumpster, the subfolder dropped

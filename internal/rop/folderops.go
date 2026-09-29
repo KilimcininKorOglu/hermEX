@@ -70,7 +70,11 @@ func (s *Session) ropCreateFolder(p *ext.Pull, out *ext.Push, handles []uint32, 
 	if s.denyWrite(out, ropCreateFolder, req.ohindex, folder.store, folder.folderID, mapi.FrightsCreateSubfolder) {
 		return true
 	}
-	folderID, ec := createOrOpenFolder(folder, req)
+	caller, delegate := s.delegateCallers[folder.store]
+	if !delegate {
+		caller = ""
+	}
+	folderID, ec := createOrOpenFolder(folder, req, caller)
 	if ec != ecSuccess {
 		writeErr(out, ropCreateFolder, req.ohindex, ec)
 		return true
@@ -97,8 +101,10 @@ func createFolderTypeError(folderType uint8) uint32 {
 }
 
 // createOrOpenFolder creates the requested subfolder of parent, or returns the
-// existing one of that name when the request allows it.
-func createOrOpenFolder(parent *object, req createFolderRequest) (int64, uint32) {
+// existing one of that name when the request allows it and the existing folder is
+// of the requested type. delegate names the creator when a delegate logon creates
+// the folder, and is empty for the owner.
+func createOrOpenFolder(parent *object, req createFolderRequest, delegate string) (int64, uint32) {
 	existing, found, err := parent.store.FolderByName(&parent.folderID, req.name)
 	if err != nil {
 		return 0, ecError
@@ -113,7 +119,26 @@ func createOrOpenFolder(parent *object, req createFolderRequest) (int64, uint32)
 	if err != nil {
 		return 0, ecError
 	}
+	if err := initNewFolder(parent.store, folderID, delegate); err != nil {
+		return 0, ecError
+	}
 	return folderID, ecSuccess
+}
+
+// creatorRights is what a delegate holds on a folder they created: owner rights,
+// so the folder they made stays theirs to use, share and delete.
+var creatorRights = mapi.NormalizeRights(mapi.RightsAll, false)
+
+// initNewFolder grants a delegate who created a folder owner rights on it.
+// Without the grant a delegate whose rights came from the parent could not open
+// the folder they had just made.
+func initNewFolder(store *objectstore.Store, fid int64, delegate string) error {
+	if delegate == "" {
+		return nil
+	}
+	return store.ModifyPermissions(fid, false, []objectstore.PermissionChange{
+		{Op: objectstore.PermAdd, Username: delegate, Rights: creatorRights},
+	})
 }
 
 // ropDeleteFolder handles RopDeleteFolder ([MS-OXCFOLD] 2.2.1.2): it deletes the
