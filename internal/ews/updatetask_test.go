@@ -69,6 +69,7 @@ func TestUpdateItemEditsATaskInPlace(t *testing.T) {
 	wantEq(t, "the subject", tk.Subject, "Ship the plan")
 	wantEq(t, "the complete flag", tk.Complete, true)
 	wantEq(t, "the status", tk.Status, 2)
+	wantEq(t, "the percent complete", tk.PercentComplete, 1.0)
 	wantEq(t, "the completion date", tk.DateCompleted, time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC))
 	wantEq(t, "the cleared due date", tk.Due.IsZero(), true)
 	wantEq(t, "the untouched sensitivity", tk.Sensitivity, 2)

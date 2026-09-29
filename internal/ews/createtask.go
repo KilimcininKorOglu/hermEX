@@ -211,6 +211,11 @@ func (item createTask) progress(tk *oxtask.Task) error {
 		}
 		tk.Status = v
 		tk.Complete = v == taskStatusValues["Completed"]
+		if tk.Complete {
+			// A completed task is done in full; a PercentComplete the same request
+			// carries is read after this and wins.
+			tk.PercentComplete = 1
+		}
 	}
 	if p := item.PercentComplete; p != nil {
 		if *p < 0 || *p > 100 {
