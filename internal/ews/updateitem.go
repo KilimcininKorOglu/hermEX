@@ -426,9 +426,7 @@ func deleteMessage(st *objectstore.Store, id oxews.ItemID, deleteType string) er
 
 type moveCopyItemRequest struct {
 	ToFolderID folderRefs `xml:"ToFolderId"`
-	ItemIDs    struct {
-		Items []refID `xml:"ItemId"`
-	} `xml:"ItemIds"`
+	ItemIDs    itemRefs   `xml:"ItemIds"`
 }
 
 type moveItemResponse struct {
@@ -469,7 +467,12 @@ func (s *Server) moveOrCopy(w http.ResponseWriter, inner []byte, sess *session, 
 
 	var msgs []itemResponseMessage
 	for _, ref := range req.ItemIDs.Items {
-		msgs = append(msgs, moveCopyOne(cache, sess, dest, ref.ID, remove))
+		token, code := resolveItemRef(cache, sess, ref)
+		if code != "" {
+			msgs = append(msgs, itemError(code))
+			continue
+		}
+		msgs = append(msgs, moveCopyOne(cache, sess, dest, token, remove))
 	}
 	writeMoveCopy(w, remove, msgs)
 }
@@ -518,12 +521,18 @@ func folderCreateAccess(st *objectstore.Store, fid int64, user string) string {
 
 // moveCopyOne moves or copies one item into the gated destination.
 func moveCopyOne(cache *storeCache, sess *session, dest moveCopyDest, itemID string, remove bool) itemResponseMessage {
-	id, err := oxews.DecodeItemID(itemID)
+	id, err := oxews.DecodeAnyItemID(itemID)
 	if err != nil {
 		return itemError("ErrorInvalidRequest")
 	}
+	if id.Instance != 0 {
+		return itemError("ErrorCalendarCannotMoveOrCopyOccurrence")
+	}
 	if code := checkMoveCopySource(cache, sess, dest, id, remove); code != "" {
 		return itemError(code)
+	}
+	if id.UID == 0 {
+		return moveCopyObject(dest, id, remove)
 	}
 	info, err := applyMoveCopy(dest, id, remove)
 	if err != nil {
