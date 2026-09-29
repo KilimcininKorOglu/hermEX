@@ -822,12 +822,25 @@ func SendAndRelay(accounts directory.Accounts, spool *relay.Spool, from string, 
 	return unresolved, !only, nil
 }
 
-// SendCopy delivers a second rendering of a message SendAndRelay sent, to
-// recipients that message did not reach: every check and limit applies, and no
-// represented mailbox files a copy, because SendAndRelay filed the one record.
-func SendCopy(accounts directory.Accounts, spool *relay.Spool, from string, recipients []string, raw []byte, received time.Time) (unresolved []string, err error) {
-	unresolved, _, err = deliverAndRelay(accounts, spool, from, from, recipients, raw, received)
-	return unresolved, err
+// SendRenderings is SendAndRelay for a message sent in two renderings: plain MIME
+// to plainTo and the TNEF form to richTo, the recipients whose PidTagSendRichInfo
+// is true. The first group sent files the represented mailbox's record; the other
+// group goes as a copy that files none, so the record is filed once. Every check
+// and limit applies to both.
+func SendRenderings(accounts directory.Accounts, spool *relay.Spool, from string, plainTo []string, plain []byte, richTo []string, rich []byte, received time.Time) (keepOwnCopy bool, err error) {
+	if len(plainTo) == 0 {
+		_, keepOwnCopy, err = SendAndRelay(accounts, spool, from, richTo, rich, received)
+		return keepOwnCopy, err
+	}
+	if _, keepOwnCopy, err = SendAndRelay(accounts, spool, from, plainTo, plain, received); err != nil {
+		return keepOwnCopy, err
+	}
+	if len(richTo) > 0 {
+		if _, _, err = deliverAndRelay(accounts, spool, from, from, richTo, rich, received); err != nil {
+			return keepOwnCopy, err
+		}
+	}
+	return keepOwnCopy, nil
 }
 
 // SendReport is DeliverAndRelay for a report an account sends, such as a read

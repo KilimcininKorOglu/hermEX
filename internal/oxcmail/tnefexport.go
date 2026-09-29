@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"mime/multipart"
 	"net/textproto"
+	"strings"
 
 	"hermex/internal/mapi"
 	"hermex/internal/tnef"
@@ -14,6 +15,21 @@ import (
 // text body and an application/ms-tnef winmail.dat that carries every property and
 // attachment. X-MS-TNEF-Correlator names the stream's PidTagTnefCorrelationKey, the
 // Message-ID, so a reader can tell the stream belongs to this message.
+
+// SendsRichInfo reports whether a recipient's PidTagSendRichInfo asks for the TNEF
+// form.
+func SendsRichInfo(bag mapi.PropertyValues) bool {
+	v, _ := bag.Get(mapi.PrSendRichInfo)
+	b, _ := v.(bool)
+	return b
+}
+
+// sendsTNEF reports whether Export writes the TNEF form. A meeting message keeps
+// its iCalendar form, because that is the part a scheduling client acts on.
+func sendsTNEF(msg *Message, opt Options) bool {
+	return opt.TNEF && len(opt.CalendarBody) == 0 &&
+		!strings.HasPrefix(propString(msg.Props, mapi.PrMessageClass), "IPM.Schedule.Meeting.")
+}
 
 // writeTNEFBody writes the TNEF form of a message after its header block.
 func writeTNEFBody(b *bytes.Buffer, msg *Message, opt Options) error {

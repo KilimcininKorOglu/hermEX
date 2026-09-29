@@ -62,6 +62,20 @@ func TestTNEFExportCorrelatesWithTheMessageID(t *testing.T) {
 	t.Error("the stream carries no correlation key")
 }
 
+// TestTNEFExportKeepsAMeetingPlain proves a meeting message is not wrapped in TNEF
+// even when asked, because a scheduling client acts on its iCalendar form.
+func TestTNEFExportKeepsAMeetingPlain(t *testing.T) {
+	msg := tnefMessage()
+	msg.Props.Set(mapi.PrMessageClass, "IPM.Schedule.Meeting.Request")
+	raw, err := Export(msg, Options{TNEF: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "application/ms-tnef") {
+		t.Errorf("a meeting message was sent as TNEF:\n%s", raw)
+	}
+}
+
 // TestTNEFExportRoundTrip proves a message sent in the TNEF form is read back with
 // the class and the attachment the stream carries.
 func TestTNEFExportRoundTrip(t *testing.T) {

@@ -901,7 +901,7 @@ func (s *Session) deliverComposed(st *objectstore.Store, nm *newMessageState, re
 			return nil, false, err
 		}
 	}
-	keepOwnCopy, err = s.sendRenderings(plainTo, raw, richTo, rich)
+	keepOwnCopy, err = mta.SendRenderings(s.accounts, s.spool, s.owner, plainTo, raw, richTo, rich, time.Now())
 	if err != nil {
 		return nil, false, err
 	}
@@ -915,7 +915,7 @@ func splitRecipients(bags []mapi.PropertyValues) (plainTo, richTo []string, wire
 	wire = make([]mapi.PropertyValues, 0, len(bags))
 	for _, bag := range bags {
 		if addr := recipientSMTP(bag); addr != "" {
-			if v, _ := bag.Get(mapi.PrSendRichInfo); v == true {
+			if oxcmail.SendsRichInfo(bag) {
 				richTo = append(richTo, addr)
 			} else {
 				plainTo = append(plainTo, addr)
@@ -928,38 +928,17 @@ func splitRecipients(bags []mapi.PropertyValues) (plainTo, richTo []string, wire
 	return plainTo, richTo, wire
 }
 
-// sendRenderings sends each rendering to its recipients. The first group sent
-// through SendAndRelay files the represented mailbox's record; the other goes as a
-// copy, so the record is filed once.
-func (s *Session) sendRenderings(plainTo []string, plain []byte, richTo []string, rich []byte) (keepOwnCopy bool, err error) {
-	now := time.Now()
-	if len(plainTo) == 0 {
-		_, keepOwnCopy, err = mta.SendAndRelay(s.accounts, s.spool, s.owner, richTo, rich, now)
-		return keepOwnCopy, err
-	}
-	if _, keepOwnCopy, err = mta.SendAndRelay(s.accounts, s.spool, s.owner, plainTo, plain, now); err != nil {
-		return keepOwnCopy, err
-	}
-	if len(richTo) > 0 {
-		if _, err = mta.SendCopy(s.accounts, s.spool, s.owner, richTo, rich, now); err != nil {
-			return keepOwnCopy, err
-		}
-	}
-	return keepOwnCopy, nil
-}
-
 // exportSubmitted renders a submitted message as the mail that goes out: a
 // meeting message with its iCalendar, the attachments without a meeting's
 // exceptions, and an S/MIME message only when it is well formed, because Export
 // renders a malformed one as a notice for its stored copy. richInfo asks for the
-// TNEF form; a meeting message keeps its iCalendar form for every recipient,
-// because that is the part a scheduling client acts on.
+// TNEF form, which Export does not write for a meeting message.
 func exportSubmitted(st *objectstore.Store, msg *oxcmail.Message, richInfo bool) ([]byte, error) {
 	opt, err := meetingCalendar(st, msg)
 	if err != nil {
 		return nil, err
 	}
-	opt.TNEF = richInfo && len(opt.CalendarBody) == 0
+	opt.TNEF = richInfo
 	msg.Attachments = mailAttachments(msg.Attachments)
 	if err := oxcmail.CheckSMIME(msg); err != nil {
 		return nil, err

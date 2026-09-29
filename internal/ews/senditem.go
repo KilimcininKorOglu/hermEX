@@ -104,11 +104,12 @@ func (s *Server) sendOne(cache *storeCache, sess *session, itemID string, save b
 	if code := checkSendAccess(st, sess, id, isOwn, save, saveFID); code != "" {
 		return itemError(code)
 	}
-	recips, raw, code := s.renderDraft(st, sess, id)
+	d, code := s.renderDraft(st, sess, id)
 	if code != "" {
 		return itemError(code)
 	}
-	_, keepOwnCopy, err := mta.SendAndRelay(s.accounts, s.Spool, sess.user, recips, raw, time.Now())
+	raw := d.plain
+	keepOwnCopy, err := mta.SendRenderings(s.accounts, s.Spool, sess.user, d.plainTo, d.plain, d.richTo, d.rich, time.Now())
 	if err != nil {
 		return itemError("ErrorInternalServerError")
 	}
@@ -120,30 +121,46 @@ func (s *Server) sendOne(cache *storeCache, sess *session, itemID string, save b
 	return itemResponseMessage{ResponseClass: "Success", ResponseCode: "NoError"}
 }
 
-// renderDraft opens a saved draft, authorizes its From and renders the wire copy,
-// returning the delivery addresses and the bytes to send. A non-empty code refuses
-// the send.
-func (s *Server) renderDraft(st *objectstore.Store, sess *session, id oxews.ItemID) ([]string, []byte, string) {
+// renderedDraft is a draft rendered for sending: plain MIME for plainTo and, for
+// richTo, the recipients a MAPI client saved with PidTagSendRichInfo true, the
+// TNEF form.
+type renderedDraft struct {
+	plainTo, richTo []string
+	plain, rich     []byte
+}
+
+// renderDraft opens a saved draft, authorizes its From and renders the wire
+// copies. A non-empty code refuses the send.
+func (s *Server) renderDraft(st *objectstore.Store, sess *session, id oxews.ItemID) (renderedDraft, string) {
+	var d renderedDraft
 	msg, err := st.OpenMessage(id.MessageID)
 	if err != nil {
-		return nil, nil, "ErrorItemNotFound"
+		return d, "ErrorItemNotFound"
 	}
 	// The draft's From was written by whoever saved it, possibly another delegate or a
 	// client that never passed CreateItem, so it is authorized here as it is sent.
 	if !s.stampDraftSender(&msg.Props, sess.user) {
-		return nil, nil, "ErrorSendAsDenied"
+		return d, "ErrorSendAsDenied"
 	}
-	recips, wire := splitRecipients(msg.Recipients)
-	if len(recips) == 0 {
-		return nil, nil, "ErrorInvalidRecipients"
+	var wire []mapi.PropertyValues
+	d.plainTo, d.richTo, wire = splitRecipients(msg.Recipients)
+	if len(d.plainTo)+len(d.richTo) == 0 {
+		return d, "ErrorInvalidRecipients"
 	}
 	msg.Recipients = wire
 	oxcmail.EnsureMessageID(&msg.Props)
-	raw, err := oxcmail.Export(msg, st.ExportOptions())
-	if err != nil {
-		return nil, nil, "ErrorInternalServerError"
+	opt := st.ExportOptions()
+	if d.plain, err = oxcmail.Export(msg, opt); err != nil {
+		return d, "ErrorInternalServerError"
 	}
-	return recips, raw, ""
+	d.rich = d.plain
+	if len(d.richTo) > 0 {
+		opt.TNEF = true
+		if d.rich, err = oxcmail.Export(msg, opt); err != nil {
+			return d, "ErrorInternalServerError"
+		}
+	}
+	return d, ""
 }
 
 // consumeDraft files the sent copy and drops the original draft. The copy is
@@ -174,20 +191,24 @@ func checkSendAccess(st *objectstore.Store, sess *session, id oxews.ItemID, isOw
 	return folderCreateAccess(st, saveFID, sess.user)
 }
 
-// splitRecipients returns the routable addresses the message is delivered to and
-// the recipient bags that ride on the wire, which exclude Bcc so recipients never
-// see the blind list.
-func splitRecipients(bags []mapi.PropertyValues) (recips []string, wire []mapi.PropertyValues) {
+// splitRecipients returns the routable addresses sent plain MIME and those sent
+// the TNEF form, and the recipient bags that ride on the wire, which exclude Bcc so
+// recipients never see the blind list.
+func splitRecipients(bags []mapi.PropertyValues) (plainTo, richTo []string, wire []mapi.PropertyValues) {
 	wire = make([]mapi.PropertyValues, 0, len(bags))
 	for _, bag := range bags {
 		if addr := recipientSMTP(bag); addr != "" {
-			recips = append(recips, addr)
+			if oxcmail.SendsRichInfo(bag) {
+				richTo = append(richTo, addr)
+			} else {
+				plainTo = append(plainTo, addr)
+			}
 		}
 		if rt, _ := bag.Get(mapi.PrRecipientType); rt != int32(mapi.RecipBcc) {
 			wire = append(wire, bag)
 		}
 	}
-	return recips, wire
+	return plainTo, richTo, wire
 }
 
 // recipientSMTP extracts a routable SMTP address from a recipient bag: the

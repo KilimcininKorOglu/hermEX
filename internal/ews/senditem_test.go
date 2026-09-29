@@ -10,6 +10,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxews"
 	"hermex/internal/relay"
 )
 
@@ -119,6 +120,65 @@ func TestSendItemInvalidSaveSettings(t *testing.T) {
 	defer st.Close()
 	if drafts, _ := st.ListMessages(int64(mapi.PrivateFIDDraft)); len(drafts) != 1 {
 		t.Errorf("drafts = %d, want 1 (rejected send must not consume the draft)", len(drafts))
+	}
+}
+
+// TestSendItemSendsTNEFToARichInfoRecipient sends a draft whose recipient a MAPI
+// client saved with PidTagSendRichInfo true, and reads what the relay queued. The
+// recipient must get the TNEF form: SendItem rendered every draft as plain MIME,
+// so a draft Outlook saved and another client sent lost what MIME cannot carry.
+func TestSendItemSendsTNEFToARichInfoRecipient(t *testing.T) {
+	dir := t.TempDir()
+	if st, err := objectstore.Open(dir); err != nil {
+		t.Fatal(err)
+	} else {
+		st.Close()
+	}
+	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
+	srv := NewServer(accs, accs, "mail.hermex.test")
+	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sp.Close()
+	srv.Spool = sp
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	itemID := createDraft(t, ts, "carol@external.test")
+	markRichInfo(t, dir, itemID)
+
+	if _, out := soapPost(t, ts, sendItemReq("false", itemID), true); !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Fatalf("SendItem not success: %s", out)
+	}
+	due, err := sp.Claim(time.Now(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(due) != 1 || !strings.Contains(string(due[0].Body), "application/ms-tnef") {
+		t.Fatalf("relay spool = %+v, want the TNEF form for carol", due)
+	}
+}
+
+// markRichInfo sets PidTagSendRichInfo on a draft's one recipient, as a MAPI
+// client saves it.
+func markRichInfo(t *testing.T, dir, itemID string) {
+	t.Helper()
+	id, err := oxews.DecodeItemID(itemID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	recips, err := st.ListRecipients(id.MessageID)
+	if err != nil || len(recips) != 1 {
+		t.Fatalf("recipients = %v, %v", recips, err)
+	}
+	if err := st.SetRecipientProperties(recips[0].ID, mapi.PropertyValues{{Tag: mapi.PrSendRichInfo, Value: true}}); err != nil {
+		t.Fatal(err)
 	}
 }
 
