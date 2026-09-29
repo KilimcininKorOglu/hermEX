@@ -58,8 +58,20 @@ func storeProps(store *objectstore.Store, tags []mapi.PropTag, id *logonIdentity
 		}
 	}
 	addLogonIdentity(&props, tags, id)
+	addPrintableName(&props, tags, id)
 	addLocale(&props, tags, id)
 	return props, nil
+}
+
+// addPrintableName sets PidTagAddressBookDisplayNamePrintable on the store: the
+// local part of the mailbox owner's address, which is ASCII where the display name
+// need not be.
+func addPrintableName(props *mapi.PropertyValues, tags []mapi.PropTag, id *logonIdentity) {
+	if id == nil || id.owner == "" || (len(tags) > 0 && !slices.Contains(tags, mapi.PrAddressBookDisplayNamePrintable)) {
+		return
+	}
+	local, _, _ := strings.Cut(id.owner, "@")
+	props.Set(mapi.PrAddressBookDisplayNamePrintable, local)
 }
 
 // hideUnlimitedQuotas drops each quota stored as 0, the value that means no

@@ -52,6 +52,15 @@ func TestStoreReportsWhatItHolds(t *testing.T) {
 	wantProp(t, row, mapi.PrMailboxOwnerName, owner, "owner name")
 }
 
+// TestStoreReportsAPrintableOwnerName proves the logon's store serves
+// PidTagAddressBookDisplayNamePrintable as the local part of the owner's address,
+// the printable name a client shows where the display name may not render.
+func TestStoreReportsAPrintableOwnerName(t *testing.T) {
+	cols := []mapi.PropTag{mapi.PrAddressBookDisplayNamePrintable}
+	row, _ := storeRow(t, t.TempDir(), "owner@hermex.test", cols)
+	wantProp(t, row, mapi.PrAddressBookDisplayNamePrintable, "owner", "printable name")
+}
+
 // TestStoreReportsTheConnectLocale proves the logon reports the locale the client
 // connected with ([MS-OXCSTOR] 2.2.2.1.1.12, .14 and .15), and leaves a locale it
 // was not given unset, which a read answers with NotFound ([MS-OXCSTOR] 3.2.5.1.1).
