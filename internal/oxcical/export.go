@@ -199,10 +199,26 @@ func exportReplyIdentity(b *builder, msg *oxcmail.Message, partstat string) {
 	} else {
 		attendee = mailtoParams(p, mapi.PrSenderSmtpAddress, mapi.PrSenderName, partstat)
 	}
-	if len(msg.Recipients) > 0 {
-		addParams(b, "ORGANIZER", mailtoParams(&msg.Recipients[0], mapi.PrSmtpAddress, mapi.PrDisplayName, ""))
+	if org := replyOrganizer(msg); org != nil {
+		addParams(b, "ORGANIZER", mailtoParams(org, mapi.PrSmtpAddress, mapi.PrDisplayName, ""))
 	}
 	addParams(b, "ATTENDEE", attendee)
+}
+
+// replyOrganizer is the recipient a reply is addressed to: the first To recipient
+// with an address, a recipient with no type counting as To. A copy recipient is
+// never the organizer. It is nil when no recipient qualifies.
+func replyOrganizer(msg *oxcmail.Message) *mapi.PropertyValues {
+	for i := range msg.Recipients {
+		r := &msg.Recipients[i]
+		if t, ok := propInt32(r, mapi.PrRecipientType); ok && t != mapi.RecipTo {
+			continue
+		}
+		if getStr(r, mapi.PrSmtpAddress) != "" {
+			return r
+		}
+	}
+	return nil
 }
 
 // sentByParam renders the SENT-BY parameter of a reply's attendee: the sender, when

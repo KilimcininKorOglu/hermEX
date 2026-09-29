@@ -285,6 +285,29 @@ func TestExportReplyNamesTheDelegate(t *testing.T) {
 	}
 }
 
+// TestExportReplyOrganizerIsTheToRecipient proves a reply names as ORGANIZER the
+// recipient it is addressed to, not a copy recipient listed before it.
+func TestExportReplyOrganizerIsTheToRecipient(t *testing.T) {
+	r := newResolver()
+	_, _ = r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole, nameICalUID})
+	msg := &oxcmail.Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: "IPM.Schedule.Meeting.Resp.Pos"},
+		{Tag: r.tag(nameICalUID, mapi.PtUnicode), Value: "meeting-44"},
+		{Tag: mapi.PrSentRepresentingSmtpAddress, Value: "attendee@hermex.test"},
+	}, Recipients: []mapi.PropertyValues{
+		{{Tag: mapi.PrRecipientType, Value: int32(mapi.RecipCc)}, {Tag: mapi.PrSmtpAddress, Value: "copy@hermex.test"}},
+		{{Tag: mapi.PrRecipientType, Value: int32(mapi.RecipTo)}, {Tag: mapi.PrSmtpAddress, Value: "organizer@hermex.test"}},
+	}}
+	out, err := Export(msg, r.opt())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Join(ContentLines(out), "\n")
+	if !strings.Contains(lines, "ORGANIZER:mailto:organizer@hermex.test") || strings.Contains(lines, "ORGANIZER:mailto:copy@") {
+		t.Errorf("reply ORGANIZER is not the To recipient\n%s", out)
+	}
+}
+
 // TestExportCounterProposal renders a counter proposal as Outlook stores it: a
 // tentative response flagged as a proposal. It used to go out as a tentative REPLY
 // with the meeting's own time, so the organizer never saw the time proposed.
