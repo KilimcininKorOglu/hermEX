@@ -107,7 +107,11 @@ func (s *Server) handleFindPeople(w http.ResponseWriter, inner []byte, sess *ses
 		s.soapFault(w, "ErrorInvalidRequest", "FindPeople: invalid request", err)
 		return
 	}
-	personas := s.searchPeople(sess, req.QueryString)
+	personas, err := s.searchPeople(sess, req.QueryString)
+	if err != nil {
+		s.soapFault(w, "ErrorInternalServerError", "FindPeople: the address book could not be read", err)
+		return
+	}
 	// The counters are always emitted, including the zero case: a client reads
 	// them to decide whether to ask for another page, and an absent count is not
 	// the same answer as none.
@@ -131,7 +135,11 @@ func (s *Server) handleFindPeople(w http.ResponseWriter, inner []byte, sess *ses
 //
 // The GAL comes first, because a colleague is the likelier match, and an address
 // found in both is emitted once.
-func (s *Server) searchPeople(sess *session, query string) []personaOut {
+func (s *Server) searchPeople(sess *session, query string) ([]personaOut, error) {
+	entries, err := s.searchGAL(sess, query, personaSearchLimit)
+	if err != nil {
+		return nil, err
+	}
 	var personas []personaOut
 	seen := map[string]bool{}
 	add := func(displayName, address string) {
@@ -142,19 +150,14 @@ func (s *Server) searchPeople(sess *session, query string) []personaOut {
 		seen[key] = true
 		personas = append(personas, newPersona(displayName, address))
 	}
-	if gal, ok := s.accounts.(directory.GAL); ok {
-		entries, err := gal.SearchGAL(sess.user, query, personaSearchLimit)
-		// Withhold the addresses the operator hid from the address book.
-		if err == nil {
-			for _, e := range directory.VisibleGAL(entries) {
-				add(e.DisplayName, e.Address)
-			}
-		}
+	// Withhold the addresses the operator hid from the address book.
+	for _, e := range directory.VisibleGAL(entries) {
+		add(e.DisplayName, e.Address)
 	}
 	for _, c := range s.searchOwnContacts(sess, query, personaSearchLimit-len(personas)) {
 		add(c.DisplayName, c.Address)
 	}
-	return personas
+	return personas, nil
 }
 
 // searchOwnContacts matches the query against the caller's own Contacts folder.
@@ -203,22 +206,18 @@ func newPersona(displayName, address string) personaOut {
 // galPersona builds the persona of an address-book entry at an exact address, or
 // nil. A hidden address has no persona to report, the same as an address absent
 // from the directory.
-func (s *Server) galPersona(sess *session, target string) *personaOut {
-	gal, ok := s.accounts.(directory.GAL)
-	if !ok {
-		return nil
-	}
-	entries, err := gal.SearchGAL(sess.user, target, personaSearchLimit)
+func (s *Server) galPersona(sess *session, target string) (*personaOut, error) {
+	entries, err := s.searchGAL(sess, target, personaSearchLimit)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	for _, e := range directory.VisibleGAL(entries) {
 		if strings.EqualFold(e.Address, target) {
 			p := newPersona(e.DisplayName, e.Address)
-			return &p
+			return &p, nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // contactPersona builds the persona of the caller's own contact at an address, or
@@ -267,7 +266,11 @@ func (s *Server) handleGetPersona(w http.ResponseWriter, inner []byte, sess *ses
 		writeResponse(w, getPersonaResponse{ResponseClass: "Error", ResponseCode: "ErrorInvalidArgument", MessageText: "EmailAddress is required"})
 		return
 	}
-	found := s.galPersona(sess, target)
+	found, err := s.galPersona(sess, target)
+	if err != nil {
+		s.soapFault(w, "ErrorInternalServerError", "GetPersona: the address book could not be read", err)
+		return
+	}
 	if found == nil {
 		// FindPeople offers the caller's own contacts as personas, so GetPersona
 		// answers for them too; a client asks for the persona it was just given.

@@ -36,7 +36,11 @@ func (s *Server) handleGetUserPhoto(w http.ResponseWriter, inner []byte, sess *s
 		s.soapFault(w, "ErrorInvalidRequest", "GetUserPhoto: invalid request", err)
 		return
 	}
-	photo := s.userPhoto(req.Email, sess)
+	photo, err := s.userPhoto(req.Email, sess)
+	if err != nil {
+		s.soapFault(w, "ErrorInternalServerError", "GetUserPhoto: the address book could not be read", err)
+		return
+	}
 	if photo == nil {
 		writeResponse(w, getUserPhotoResponse{ResponseClass: "Error", ResponseCode: "ErrorItemNotFound"})
 		return
@@ -54,32 +58,31 @@ func (s *Server) handleGetUserPhoto(w http.ResponseWriter, inner []byte, sess *s
 // through the GAL (which carries the store path); an address the GAL does not
 // answer for falls back to the caller's own Contacts folder, which is where the
 // picture of an external correspondent lives.
-func (s *Server) userPhoto(email string, sess *session) []byte {
+func (s *Server) userPhoto(email string, sess *session) ([]byte, error) {
 	if email == "" || strings.EqualFold(email, sess.user) {
-		return storePhoto(sess.mailbox)
+		return storePhoto(sess.mailbox), nil
 	}
-	if photo := s.galPhoto(email, sess); photo != nil {
-		return photo
+	photo, err := s.galPhoto(email, sess)
+	if err != nil || photo != nil {
+		return photo, err
 	}
-	return contactPhoto(sess.mailbox, email)
+	return contactPhoto(sess.mailbox, email), nil
 }
 
 // galPhoto returns the portrait of the address-book user at an address, or nil.
-func (s *Server) galPhoto(email string, sess *session) []byte {
-	gal, ok := s.accounts.(directory.GAL)
-	if !ok {
-		return nil
+func (s *Server) galPhoto(email string, sess *session) ([]byte, error) {
+	entries, err := s.searchGAL(sess, email, 5)
+	if err != nil {
+		return nil, err
 	}
-	entries, _ := gal.SearchGAL(sess.user, email, 5)
 	// A portrait for an address the operator hid from the address book would
 	// confirm the mailbox exists; the caller's own mailbox is handled above.
-	entries = directory.VisibleGAL(entries)
-	for _, e := range entries {
+	for _, e := range directory.VisibleGAL(entries) {
 		if strings.EqualFold(e.Address, email) && e.StorePath != "" {
-			return storePhoto(e.StorePath)
+			return storePhoto(e.StorePath), nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // contactPhoto returns the picture the caller saved on their own contact card for

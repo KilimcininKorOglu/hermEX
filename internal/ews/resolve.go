@@ -39,6 +39,17 @@ type resolution struct {
 	Mailbox oxews.Mailbox `xml:"http://schemas.microsoft.com/exchange/services/2006/types Mailbox"`
 }
 
+// searchGAL queries the directory's address book for the caller. A directory
+// without one has no entries. An error is a directory failure, which the caller
+// must surface rather than answer as an unknown name.
+func (s *Server) searchGAL(sess *session, query string, limit int) ([]directory.GALEntry, error) {
+	gal, ok := s.accounts.(directory.GAL)
+	if !ok {
+		return nil, nil
+	}
+	return gal.SearchGAL(sess.user, query, limit)
+}
+
 // handleResolveNames answers ResolveNames against the directory GAL: one match is
 // a Success, several a Warning (the client picks), none a Warning with no
 // results, the same three-way outcome as the webmail "check names".
@@ -48,15 +59,14 @@ func (s *Server) handleResolveNames(w http.ResponseWriter, inner []byte, sess *s
 		s.soapFault(w, "ErrorInvalidRequest", "ResolveNames: invalid request", err)
 		return
 	}
-	gal, ok := s.accounts.(directory.GAL)
-	if !ok {
-		writeResolveWarning(w, "ErrorNameResolutionNoResults")
+	entries, err := s.searchGAL(sess, req.UnresolvedEntry, resolveLimit)
+	if err != nil {
+		s.soapFault(w, "ErrorInternalServerError", "ResolveNames: the address book could not be read", err)
 		return
 	}
-	entries, err := gal.SearchGAL(sess.user, req.UnresolvedEntry, resolveLimit)
 	// Withhold the addresses the operator hid from name resolution.
 	entries = directory.ResolvableGAL(entries)
-	if err != nil || len(entries) == 0 {
+	if len(entries) == 0 {
 		writeResolveWarning(w, "ErrorNameResolutionNoResults")
 		return
 	}
