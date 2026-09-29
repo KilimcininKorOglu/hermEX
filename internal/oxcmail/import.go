@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"hermex/internal/conversation"
 	"hermex/internal/mapi"
 	"hermex/internal/mime"
 )
@@ -124,6 +125,22 @@ func enumMailHead(hdr textproto.MIMEHeader, msg *Message) {
 	if v := hdr.Get("Subject"); v != "" {
 		parseSubject(v, &msg.Props)
 	}
+	importConversation(hdr, msg)
+}
+
+// importConversation fills the conversation a message belongs to. Without a
+// Thread-Topic header the topic is the normalized subject, as Exchange derives it,
+// so a client grouping by topic puts a reply beside its original. The id is the
+// one every protocol's conversation view derives, so a reply and a second delivery
+// of the same message join one conversation rather than each starting a new one.
+func importConversation(hdr textproto.MIMEHeader, msg *Message) {
+	if !msg.Props.Has(mapi.PrConversationTopic) {
+		if n, ok := msg.Props.Get(mapi.PrNormalizedSubject); ok && n != "" {
+			msg.Props.Set(mapi.PrConversationTopic, n)
+		}
+	}
+	msg.Props.Set(mapi.PrConversationId, conversation.IDFromParts(
+		hdr.Get("References"), hdr.Get("In-Reply-To"), hdr.Get("Message-Id"), hdr.Get("Subject")))
 }
 
 // importOriginators fills the two originator identities.

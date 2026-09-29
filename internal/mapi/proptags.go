@@ -280,6 +280,7 @@ const (
 	PrInternetReferences    = PropTag(0x1039001F) // PtUnicode
 	PrConversationTopic     = PropTag(0x0070001F) // PtUnicode
 	PrConversationIndex     = PropTag(0x00710102) // PtBinary
+	PrConversationId        = PropTag(0x30130102) // PtBinary (PidTagConversationId)
 	PrInternetCodepage      = PropTag(0x3FDE0003) // PtLong (PidTagInternetCodepage)
 	PrPriority              = PropTag(0x00260003) // PtLong
 )
