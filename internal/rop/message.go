@@ -119,7 +119,8 @@ func (s *Session) ropOpenMessage(p *ext.Pull, out *ext.Push, handles []uint32, h
 }
 
 // readMessageProps returns the requested properties of an object: a message, an
-// embedded message, a folder or the logon's store. An
+// embedded message, a message being composed, an attachment, a folder or the
+// logon's store. An
 // opened store message reads from the store and then overlays its buffered edits
 // so a read reflects the open working copy (MAPI's read-your-writes contract: a
 // SetProperties/DeleteProperties before SaveChangesMessage is visible to a
@@ -138,13 +139,67 @@ func (o *object) readMessageProps(tags ...mapi.PropTag) (mapi.PropertyValues, bo
 			return nil, true, err
 		}
 		return o.applyPending(props, tags), true, nil
-	case kindEmbedded:
-		if o.embedded == nil || o.embedded.msg == nil {
+	case kindEmbedded, kindNewMessage, kindAttachment:
+		bag, ok := o.memoryProps()
+		if !ok {
 			return nil, false, nil
 		}
-		return selectProps(o.embedded.msg.Props, tags), true, nil
+		return selectProps(bag, tags), true, nil
+	case kindAttachWrite:
+		return o.readAttachWriteProps(tags)
 	}
 	return o.readContainerProps(tags)
+}
+
+// memoryProps returns the property bag of an object held in memory: an embedded
+// message, a message being composed, or an opened attachment. The bool is false
+// when the object carries no bag.
+func (o *object) memoryProps() (mapi.PropertyValues, bool) {
+	switch o.kind {
+	case kindEmbedded:
+		if o.embedded == nil || o.embedded.msg == nil {
+			return nil, false
+		}
+		return o.embedded.msg.Props, true
+	case kindNewMessage:
+		if o.newMsg == nil {
+			return nil, false
+		}
+		return o.newMsg.props, true
+	}
+	return o.attachProps, true
+}
+
+// readAttachWriteProps returns the requested properties of a created attachment
+// being filled: its saved properties (the staged compose attachment, or its store
+// row) with the buffered edits laid over them, so a read reflects the working
+// copy before SaveChangesAttachment, as it does for an opened message.
+func (o *object) readAttachWriteProps(tags []mapi.PropTag) (mapi.PropertyValues, bool, error) {
+	aw := o.attachW
+	if aw == nil {
+		return nil, false, nil
+	}
+	var base mapi.PropertyValues
+	if aw.inMem != nil {
+		base = aw.inMem.props
+	} else {
+		if o.store == nil {
+			return nil, false, nil
+		}
+		stored, err := o.store.GetAttachmentProperties(aw.attachmentID)
+		if err != nil {
+			return nil, true, err
+		}
+		base = stored
+	}
+	props := slices.Clone(base)
+	for _, t := range aw.pendingDeletes {
+		props = removeTag(props, t)
+	}
+	for _, pv := range aw.pending {
+		props.Set(pv.Tag, pv.Value)
+	}
+	return selectProps(props, tags), true, nil
 }
 
 // readContainerProps returns the requested properties of a folder or of the store
