@@ -259,6 +259,11 @@ func renderAttachment(att Attachment) (textproto.MIMEHeader, []byte) {
 
 	h := textproto.MIMEHeader{}
 	h.Set("Content-Type", mimeType+nameParam(filename))
+	// [MS-OXCMAIL] 2.1.3.4.1: the display name travels as the Content-Description,
+	// RFC 2047 encoded when it is not ASCII.
+	if desc := headerLineBreaks.Replace(propString(att.Props, mapi.PrDisplayName)); desc != "" {
+		h.Set("Content-Description", encodeText(desc))
+	}
 
 	// RFC 2046 §5.2.1: an encapsulated message (message/*) must use a 7bit,
 	// 8bit, or binary transfer encoding, never base64 or quoted-printable, so
@@ -292,7 +297,7 @@ func renderAttachment(att Attachment) (textproto.MIMEHeader, []byte) {
 // writeHeaderFields writes a part's header fields in a fixed order; used for the
 // top-level body when the message has no attachments.
 func writeHeaderFields(b *bytes.Buffer, h textproto.MIMEHeader) {
-	for _, k := range []string{"Content-Type", "Content-Transfer-Encoding", "Content-Disposition", "Content-ID"} {
+	for _, k := range []string{"Content-Type", "Content-Description", "Content-Transfer-Encoding", "Content-Disposition", "Content-ID"} {
 		if v := h.Get(k); v != "" {
 			writeField(b, k, v)
 		}
