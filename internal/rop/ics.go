@@ -251,15 +251,40 @@ func (s *Session) ropFastTransferSourceGetBuffer(p *ext.Pull, out *ext.Push, han
 	case last:
 		status = transferStatusDone
 	}
+	done, total := stepCounts(o.fastSrc, last)
 	out.Uint8(ropFastTransferSourceGetBuffer)
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
 	out.Uint16(status)
-	out.Uint16(0)           // InProgressCount
-	out.Uint16(0)           // TotalStepCount
+	out.Uint16(done)        // InProgressCount
+	out.Uint16(total)       // TotalStepCount
 	out.Uint8(0)            // Reserved
 	_ = out.BinShort(chunk) // chunk <= fastChunkCap < 0xFFFF, so this never errors
 	return true
+}
+
+// transferProgress is a FastTransfer source that can say how far it got.
+type transferProgress interface {
+	Progress() (done, total uint64)
+}
+
+// stepCounts scales a source's progress to the 16-bit InProgressCount and
+// TotalStepCount a GetBuffer response carries ([MS-OXCFXICS] 2.2.3.1.1.5.2): both
+// are divided by one factor so the total fits, the total is never zero, and a
+// finished transfer reports every step done. A source that cannot report
+// progress answers zero steps.
+func stepCounts(src fastTransferSource, last bool) (done, total uint16) {
+	p, ok := src.(transferProgress)
+	if !ok {
+		return 0, 0
+	}
+	d, t := p.Progress()
+	divisor := max((t+0xFFFE)/0xFFFF, 1) // rounded up, so t/divisor never exceeds 0xFFFF
+	total = uint16(max(t/divisor, 1))    // #nosec G115 -- t/divisor is at most 0xFFFF
+	if last {
+		return total, total
+	}
+	return uint16(min(d/divisor, uint64(total))), total // #nosec G115 -- capped at total
 }
 
 // ropSyncOpenCollector handles RopSynchronizationOpenCollector ([MS-OXCFXICS]

@@ -134,3 +134,12 @@ func (c *DownloadCollector) GetBuffer(maxLen int) (chunk []byte, last bool, err 
 	}
 	return c.dc.GetBuffer(maxLen)
 }
+
+// Progress reports the download's progress, zero before the first GetBuffer
+// builds it.
+func (c *DownloadCollector) Progress() (done, total uint64) {
+	if c.dc == nil {
+		return 0, 0
+	}
+	return c.dc.Progress()
+}

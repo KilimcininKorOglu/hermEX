@@ -62,6 +62,26 @@ func wantProgressBefore(t *testing.T, items []ics.Item, i int, sizes map[bool]in
 	wantEq(t, "per-message size", int64(size), sizes[isFAI])
 }
 
+// TestContentDownloadProgressAdvances proves a download's progress starts at
+// zero, totals the size of every change, and reaches the total once every change
+// was written.
+func TestContentDownloadProgressAdvances(t *testing.T) {
+	s := openSeededStore(t)
+	fld := int64(mapi.PrivateFIDContacts)
+	a := mustCreateMessage(t, s, fld, contactMsg("Ada Lovelace"))
+	b := mustCreateMessage(t, s, fld, contactMsg("Grace Hopper"))
+	want := uint64(storedSize(t, s, a) + storedSize(t, s, b))
+	dc, err := s.NewContentDownload(fld, downloadState(t, s), SyncNormal, 0, nil)
+	mustNoErr(t, "new content download", err)
+	if done, total := dc.Progress(); done != 0 || total != want {
+		t.Fatalf("progress before the first chunk = %d/%d, want 0/%d", done, total, want)
+	}
+	drainDownload(t, dc, 48)
+	if done, total := dc.Progress(); done != want || total != want {
+		t.Errorf("progress after the download = %d/%d, want %d/%d", done, total, want, want)
+	}
+}
+
 // TestContentDownloadWithoutProgressMode proves the progress elements stay out of
 // a download that did not ask for them.
 func TestContentDownloadWithoutProgressMode(t *testing.T) {

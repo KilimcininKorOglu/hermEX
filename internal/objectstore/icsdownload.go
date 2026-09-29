@@ -137,6 +137,13 @@ type DownloadContext struct {
 	lastCN       uint64
 	lastReadCN   uint64
 	progress     ContentSyncResult // the FAI/normal totals a progress-mode download announces
+	doneSteps    uint64            // the size of the message changes already written
+}
+
+// Progress reports how far the download got, in bytes of message content: the
+// size of the changes written so far and of all the changes it will write.
+func (dc *DownloadContext) Progress() (done, total uint64) {
+	return dc.doneSteps, dc.progress.FAISize + dc.progress.NormalSize
 }
 
 // NewContentDownload computes the contents delta for a folder against the
@@ -403,7 +410,12 @@ func (dc *DownloadContext) writeMessageChange(mid uint64) error {
 	if err := dc.writeProps(header); err != nil {
 		return err
 	}
-	return dc.writeMessageBody(msg)
+	if err := dc.writeMessageBody(msg); err != nil {
+		return err
+	}
+	// #nosec G115 -- a stored message size is never negative
+	dc.doneSteps += uint64(size)
+	return nil
 }
 
 // writeMessageBody emits INCRSYNCMESSAGE and the message's filtered properties,
