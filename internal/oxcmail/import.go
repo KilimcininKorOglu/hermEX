@@ -71,6 +71,7 @@ func Import(raw []byte, opt Options) (*Message, error) {
 	if err := importSMIME(root, msg, stamp, opt); err != nil {
 		return nil, err
 	}
+	fillPlainBody(msg)
 	return msg, nil
 }
 

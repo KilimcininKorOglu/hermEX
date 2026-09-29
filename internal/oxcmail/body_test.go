@@ -286,27 +286,35 @@ func TestHTMLNonUTF8Charset(t *testing.T) {
 	}
 }
 
-// TestExportHTMLOnly checks a message with only an HTML body: import records
-// PR_HTML, export emits a single text/html body, and the HTML survives.
-func TestExportHTMLOnly(t *testing.T) {
+// TestImportHTMLOnlyFillsThePlainBody proves a message whose only body is HTML
+// gets the text of that HTML as PR_BODY, which a plain-text reader, an inbox rule
+// and a search folder read, and keeps the HTML itself.
+func TestImportHTMLOnlyFillsThePlainBody(t *testing.T) {
 	raw := []byte("From: a@b.com\r\n" +
 		"Subject: HTMLonly\r\n" +
-		"Content-Type: text/html; charset=utf-8\r\n" +
+		"Content-Type: text/html; charset=iso-8859-9\r\n" +
 		"\r\n" +
-		"<h1>only html</h1>\r\n")
+		"<html><head><title>t</title><style>p{}</style></head>" +
+		"<body><h1>Fatura</h1><p>Tutar: 5 \xFEubat</p></body></html>\r\n")
+	msg, err := Import(raw, Options{})
+	mustNoErr(t, err, "import")
+	if got, want := propString(msg.Props, mapi.PrBody), "Fatura\n\nTutar: 5 şubat"; got != want {
+		t.Errorf("PR_BODY = %q, want %q", got, want)
+	}
+	if html, _ := bytesProp(msg.Props, mapi.PrHTML); !bytes.Contains(html, []byte("<h1>Fatura</h1>")) {
+		t.Errorf("PR_HTML = %q, want the markup kept", html)
+	}
+}
 
-	msg1, err := Import(raw, Options{})
-	if err != nil {
-		t.Fatalf("Import 1: %v", err)
-	}
-	if msg1.Props.Has(mapi.PrBody) {
-		t.Error("PR_BODY should be absent for an HTML-only message")
-	}
-	if _, ok := bytesProp(msg1.Props, mapi.PrHTML); !ok {
-		t.Fatal("PR_HTML missing")
-	}
+// TestExportHTMLOnly checks a message with only an HTML body, as a MAPI client
+// may save one: export emits a single text/html body, and the HTML survives.
+func TestExportHTMLOnly(t *testing.T) {
+	var msg1 Message
+	msg1.Props.Set(mapi.PrMessageClass, "IPM.Note")
+	msg1.Props.Set(mapi.PrInternetCodepage, int32(cpUTF8))
+	msg1.Props.Set(mapi.PrHTML, []byte("<h1>only html</h1>"))
 
-	wire, err := Export(msg1, Options{})
+	wire, err := Export(&msg1, Options{})
 	if err != nil {
 		t.Fatalf("Export: %v", err)
 	}
