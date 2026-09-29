@@ -30,7 +30,7 @@ type findItemRequest struct {
 	Shape           itemShape  `xml:"ItemShape"`
 	ParentFolderIDs folderRefs `xml:"ParentFolderIds"`
 	// Restriction filters the items listed; an item it does not match is left out.
-	Restriction *restrictionXML `xml:"Restriction"`
+	Restriction *oxews.Restriction `xml:"Restriction"`
 }
 
 type getAttachmentRequest struct {
@@ -125,7 +125,7 @@ func (s *Server) handleFindItem(w http.ResponseWriter, inner []byte, sess *sessi
 }
 
 // findItemForTarget lists one requested folder, keeping the items restr matches.
-func findItemForTarget(cache *storeCache, sess *session, tgt folderTarget, fields []extField, restr *restrictionXML) findItemResponseMessage {
+func findItemForTarget(cache *storeCache, sess *session, tgt folderTarget, fields []extField, restr *oxews.Restriction) findItemResponseMessage {
 	// A recoverable (Recoverable Items dumpster) target is intentionally ok=false so
 	// every other handler still reports ErrorFolderNotFound; FindItem serves it.
 	if !tgt.ok && !tgt.recoverable {
@@ -165,7 +165,7 @@ func findItemForTarget(cache *storeCache, sess *session, tgt folderTarget, field
 // soft-deleted items mailbox-wide. It is served only for the caller's own mailbox
 // (no per-folder ACL applies to an aggregate), and each item keeps its original
 // parent folder in its id.
-func recoverableItemsFor(cache *storeCache, sess *session, tgt folderTarget, fields []extField, restr *restrictionXML) findItemResponseMessage {
+func recoverableItemsFor(cache *storeCache, sess *session, tgt folderTarget, fields []extField, restr *oxews.Restriction) findItemResponseMessage {
 	st, _, isOwn, code := cache.open(sess, tgt.mailbox)
 	if code != "" {
 		return findItemError(code)

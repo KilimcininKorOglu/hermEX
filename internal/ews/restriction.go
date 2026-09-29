@@ -1,7 +1,6 @@
 package ews
 
 import (
-	"encoding/xml"
 	"strconv"
 
 	"hermex/internal/mapi"
@@ -30,41 +29,6 @@ const (
 	fuzzyIgnoreNonSp   = 0x00020000
 	fuzzyLoose         = 0x00040000
 )
-
-// restrictionXML is the <m:Restriction> element: one search expression.
-type restrictionXML struct {
-	Expr []searchExprXML `xml:",any"`
-}
-
-// searchExprXML is one search expression element. And, Or and Not carry further
-// expressions; every other expression names a property by one path element and
-// may carry a constant, a second path or a bitmask.
-type searchExprXML struct {
-	XMLName               xml.Name
-	ContainmentMode       string                  `xml:"ContainmentMode,attr"`
-	ContainmentComparison string                  `xml:"ContainmentComparison,attr"`
-	FieldURI              *fieldURIXML            `xml:"FieldURI"`
-	IndexedFieldURI       *fieldURIXML            `xml:"IndexedFieldURI"`
-	ExtendedFieldURI      *oxews.ExtendedFieldURI `xml:"ExtendedFieldURI"`
-	Constant              *valueAttrXML           `xml:"Constant"`
-	Bitmask               *valueAttrXML           `xml:"Bitmask"`
-	FieldURIOrConstant    *fieldOrConstantXML     `xml:"FieldURIOrConstant"`
-	Children              []searchExprXML         `xml:",any"`
-}
-
-type fieldURIXML struct {
-	URI string `xml:"FieldURI,attr"`
-}
-
-type valueAttrXML struct {
-	Value *string `xml:"Value,attr"`
-}
-
-type fieldOrConstantXML struct {
-	FieldURI         *fieldURIXML            `xml:"FieldURI"`
-	ExtendedFieldURI *oxews.ExtendedFieldURI `xml:"ExtendedFieldURI"`
-	Constant         *valueAttrXML           `xml:"Constant"`
-}
 
 // comparisons are the comparison elements and the operators they stand for.
 var comparisons = map[string]mapi.Relop{
@@ -108,7 +72,7 @@ type restrictionReader struct {
 
 // read reads a <m:Restriction> into a MAPI restriction. A nil element reads as
 // no restriction. The code names why a restriction is refused.
-func (rr restrictionReader) read(r *restrictionXML) (*mapi.Restriction, string) {
+func (rr restrictionReader) read(r *oxews.Restriction) (*mapi.Restriction, string) {
 	if r == nil {
 		return nil, ""
 	}
@@ -123,7 +87,7 @@ func (rr restrictionReader) read(r *restrictionXML) (*mapi.Restriction, string) 
 }
 
 // expr reads one search expression.
-func (rr restrictionReader) expr(e searchExprXML) (mapi.Restriction, string) {
+func (rr restrictionReader) expr(e oxews.SearchExpression) (mapi.Restriction, string) {
 	switch e.XMLName.Local {
 	case "And", "Or":
 		return rr.logical(e)
@@ -143,7 +107,7 @@ func (rr restrictionReader) expr(e searchExprXML) (mapi.Restriction, string) {
 }
 
 // logical reads an And or an Or over its child expressions.
-func (rr restrictionReader) logical(e searchExprXML) (mapi.Restriction, string) {
+func (rr restrictionReader) logical(e oxews.SearchExpression) (mapi.Restriction, string) {
 	if len(e.Children) == 0 {
 		return mapi.Restriction{}, codeInvalidRestriction
 	}
@@ -163,7 +127,7 @@ func (rr restrictionReader) logical(e searchExprXML) (mapi.Restriction, string) 
 }
 
 // not reads a Not over its one child expression.
-func (rr restrictionReader) not(e searchExprXML) (mapi.Restriction, string) {
+func (rr restrictionReader) not(e oxews.SearchExpression) (mapi.Restriction, string) {
 	if len(e.Children) != 1 {
 		return mapi.Restriction{}, codeInvalidRestriction
 	}
@@ -175,7 +139,7 @@ func (rr restrictionReader) not(e searchExprXML) (mapi.Restriction, string) {
 }
 
 // contains reads a Contains: a string test of each property the path names.
-func (rr restrictionReader) contains(e searchExprXML) (mapi.Restriction, string) {
+func (rr restrictionReader) contains(e oxews.SearchExpression) (mapi.Restriction, string) {
 	mode, ok := containmentModes[e.ContainmentMode]
 	flags, ok2 := containmentComparisons[e.ContainmentComparison]
 	if !ok || !ok2 || e.Constant == nil || e.Constant.Value == nil {
@@ -201,7 +165,7 @@ func (rr restrictionReader) contains(e searchExprXML) (mapi.Restriction, string)
 
 // excludes reads an Excludes: the bits of the mask are all clear in the one
 // integer property the path names.
-func (rr restrictionReader) excludes(e searchExprXML) (mapi.Restriction, string) {
+func (rr restrictionReader) excludes(e oxews.SearchExpression) (mapi.Restriction, string) {
 	if e.Bitmask == nil || e.Bitmask.Value == nil {
 		return mapi.Restriction{}, codeInvalidRestriction
 	}
@@ -222,7 +186,7 @@ func (rr restrictionReader) excludes(e searchExprXML) (mapi.Restriction, string)
 }
 
 // exists reads an Exists: the item carries a property the path names.
-func (rr restrictionReader) exists(e searchExprXML) (mapi.Restriction, string) {
+func (rr restrictionReader) exists(e oxews.SearchExpression) (mapi.Restriction, string) {
 	tags, code := rr.path(e.FieldURI, e.IndexedFieldURI, e.ExtendedFieldURI)
 	if code != "" {
 		return mapi.Restriction{}, code
@@ -237,7 +201,7 @@ func (rr restrictionReader) exists(e searchExprXML) (mapi.Restriction, string) {
 // compare reads a comparison of the path's properties against a constant. A
 // field of several properties matches when one of them compares true, and for
 // IsNotEqualTo when none of them equals the constant.
-func (rr restrictionReader) compare(e searchExprXML, op mapi.Relop) (mapi.Restriction, string) {
+func (rr restrictionReader) compare(e oxews.SearchExpression, op mapi.Relop) (mapi.Restriction, string) {
 	other := e.FieldURIOrConstant
 	if other == nil || other.Constant == nil || other.Constant.Value == nil {
 		// A comparison of two properties is not one a search folder or a
@@ -266,7 +230,7 @@ func (rr restrictionReader) compare(e searchExprXML, op mapi.Relop) (mapi.Restri
 
 // constantValue reads a comparison's constant as a value of type typ. A field
 // whose EWS value is a name (the importance, the sensitivity) takes the name.
-func constantValue(field *fieldURIXML, typ mapi.PropType, text string) (any, bool) {
+func constantValue(field *oxews.PathToField, typ mapi.PropType, text string) (any, bool) {
 	if field != nil {
 		if names, ok := enumFields[field.URI]; ok {
 			v, ok := names[text]
@@ -279,7 +243,7 @@ func constantValue(field *fieldURIXML, typ mapi.PropType, text string) (any, boo
 
 // path resolves the one path element an expression carries to the tags it
 // names in this mailbox.
-func (rr restrictionReader) path(field, indexed *fieldURIXML, ext *oxews.ExtendedFieldURI) ([]mapi.PropTag, string) {
+func (rr restrictionReader) path(field, indexed *oxews.PathToField, ext *oxews.ExtendedFieldURI) ([]mapi.PropTag, string) {
 	switch {
 	case field != nil && indexed == nil && ext == nil:
 		return rr.fieldTags(field.URI)

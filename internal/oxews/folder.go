@@ -21,6 +21,9 @@ type Folder struct {
 	// emitted only when GetFolder requested folder:PermissionSet (otherwise nil).
 	PermissionSet *PermissionSet `xml:"PermissionSet,omitempty"`
 	UnreadCount   int            `xml:"UnreadCount"`
+	// SearchParameters closes a SearchFolderType; it is emitted only when GetFolder
+	// asked for it and the folder is a search folder (otherwise nil).
+	SearchParameters *SearchParameters `xml:"SearchParameters,omitempty"`
 }
 
 // FolderID is the EWS <t:FolderId> element: an opaque id plus a change key, both

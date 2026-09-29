@@ -7,6 +7,7 @@ import (
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxews"
 )
 
 var searchFolderIDRE = regexp.MustCompile(`<SearchFolder xmlns="[^"]+"><FolderId Id="([^"]+)"`)
@@ -108,6 +109,87 @@ func TestCreateFolderRefusesASearchFolderItCannotRun(t *testing.T) {
 	finder, err := st.SearchFolderChildren(int64(mapi.PrivateFIDFinder))
 	if err != nil || len(finder) != 1 {
 		t.Errorf("Finder holds %+v (%v), want only the seeded search folder", finder, err)
+	}
+}
+
+// getSearchFolderReq is a GetFolder of one folder id in the given base shape.
+func getSearchFolderReq(id, shape string) string {
+	return wrapRequest(`<GetFolder xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
+		`<FolderShape><t:BaseShape>` + shape + `</t:BaseShape></FolderShape>` +
+		`<FolderIds><t:FolderId Id="` + id + `"/></FolderIds></GetFolder>`)
+}
+
+var searchParamsRE = regexp.MustCompile(`<SearchParameters Traversal="[^"]+">.*</SearchParameters>`)
+
+// TestGetFolderReturnsSearchParameters proves GetFolder in the AllProperties
+// shape returns what a search folder searches for and where, and that the
+// parameters it returns create a folder that finds the same mail.
+func TestGetFolderReturnsSearchParameters(t *testing.T) {
+	_, post := searchFolderMailbox(t)
+	params := `<t:SearchParameters Traversal="Deep"><t:Restriction><t:And>` +
+		`<t:Contains ContainmentMode="Prefixed" ContainmentComparison="IgnoreCase"><t:FieldURI FieldURI="item:Subject"/><t:Constant Value="unrel"/></t:Contains>` +
+		`<t:IsEqualTo><t:FieldURI FieldURI="message:IsRead"/><t:FieldURIOrConstant><t:Constant Value="false"/></t:FieldURIOrConstant></t:IsEqualTo>` +
+		`<t:Not><t:Exists><t:ExtendedFieldURI DistinguishedPropertySetId="PublicStrings" PropertyName="x-tag" PropertyType="String"/></t:Exists></t:Not>` +
+		`<t:Excludes><t:FieldURI FieldURI="item:Sensitivity"/><t:Bitmask Value="2"/></t:Excludes>` +
+		`</t:And></t:Restriction><t:BaseFolderIds><t:DistinguishedFolderId Id="inbox"/></t:BaseFolderIds></t:SearchParameters>`
+	id := searchFolderIDRE.FindStringSubmatch(post(createSearchFolderReq(params)))
+	if len(id) != 2 {
+		t.Fatal("CreateFolder did not create the search folder")
+	}
+	if out := post(getSearchFolderReq(id[1], "Default")); strings.Contains(out, "SearchParameters") {
+		t.Errorf("the Default shape returned the search parameters: %s", out)
+	}
+	out := post(getSearchFolderReq(id[1], "AllProperties"))
+	got := searchParamsRE.FindString(out)
+	for _, want := range []string{
+		`Traversal="Deep"`,
+		`<Contains ContainmentMode="Prefixed" ContainmentComparison="IgnoreCase"><FieldURI FieldURI="item:Subject"></FieldURI><Constant Value="unrel"></Constant></Contains>`,
+		`<IsEqualTo><FieldURI FieldURI="message:IsRead"></FieldURI><FieldURIOrConstant><Constant Value="false"></Constant></FieldURIOrConstant></IsEqualTo>`,
+		`<Not><Exists><ExtendedFieldURI DistinguishedPropertySetId="PublicStrings" PropertyName="x-tag" PropertyType="String"></ExtendedFieldURI></Exists></Not>`,
+		`<Excludes><ExtendedFieldURI PropertyTag="0x36" PropertyType="Integer"></ExtendedFieldURI><Bitmask Value="2"></Bitmask></Excludes>`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("SearchParameters lack %s: %s", want, out)
+		}
+	}
+	// The parameters a client reads back make a folder that finds the same mail.
+	again := strings.NewReplacer("</", "</t:", "<", "<t:").Replace(got)
+	copyID := searchFolderIDRE.FindStringSubmatch(post(createSearchFolderReq(again)))
+	if len(copyID) != 2 {
+		t.Fatalf("the returned SearchParameters do not create a folder: %s", again)
+	}
+	items := post(wrapRequest(`<FindItem Traversal="Shallow" xmlns="` + nsMessages + `">` +
+		`<ItemShape><BaseShape>Default</BaseShape></ItemShape>` +
+		`<ParentFolderIds><t:FolderId Id="` + copyID[1] + `" xmlns:t="` + nsTypes + `"/></ParentFolderIds>` +
+		`</FindItem>`))
+	if !strings.Contains(items, "Unrelated") || strings.Contains(items, "Hello EWS") {
+		t.Errorf("the copied search folder lists %s, want the Unrelated message only", items)
+	}
+}
+
+// TestGetFolderLeavesOutCriteriaEWSCannotState proves a search folder whose
+// criteria have no EWS form (a size test) is still served, without the
+// SearchParameters that would state a different search.
+func TestGetFolderLeavesOutCriteriaEWSCannotState(t *testing.T) {
+	dir, post := searchFolderMailbox(t)
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fid, err := st.CreateSearchFolder(int64(mapi.PrivateFIDFinder), "Large")
+	if err == nil {
+		large := mapi.Restriction{Type: mapi.ResSize, Value: mapi.SizeRestriction{Relop: mapi.RelopGT, PropTag: mapi.PrBody, Size: 1}}
+		err = st.SetSearchCriteria(fid, objectstore.SearchCriteria{
+			Restriction: &large, Scope: []int64{int64(mapi.PrivateFIDInbox)}, Flags: mapi.SearchRestart,
+		})
+	}
+	st.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := post(getSearchFolderReq(oxews.EncodeFolderIDFor(fid, ""), "AllProperties"))
+	if !strings.Contains(out, "<DisplayName>Large</DisplayName>") || strings.Contains(out, "SearchParameters") {
+		t.Errorf("GetFolder = %s, want the folder without SearchParameters", out)
 	}
 }
 

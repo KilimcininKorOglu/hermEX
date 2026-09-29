@@ -30,9 +30,9 @@ type newFolderXML struct {
 // searchParametersXML is a search folder's t:SearchParameters: what it searches
 // for, the folders it looks in, and whether it looks in their subfolders too.
 type searchParametersXML struct {
-	Traversal     string          `xml:"Traversal,attr"`
-	Restriction   *restrictionXML `xml:"Restriction"`
-	BaseFolderIDs *folderRefs     `xml:"BaseFolderIds"`
+	Traversal     string             `xml:"Traversal,attr"`
+	Restriction   *oxews.Restriction `xml:"Restriction"`
+	BaseFolderIDs *folderRefs        `xml:"BaseFolderIds"`
 }
 
 type createFolderResponse struct {

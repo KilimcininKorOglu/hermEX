@@ -158,6 +158,50 @@ func (u ExtendedFieldURI) Echo() ExtendedFieldURI {
 	return out
 }
 
+// FieldURIFor is the URI that addresses t, the inverse of Target: a tagged
+// property by its tag, a named one by its property set, under its distinguished
+// name when it has one, and its long id or name. ok is false for a type the URI
+// has no name for.
+func FieldURIFor(t FieldTarget) (ExtendedFieldURI, bool) {
+	typ, ok := propertyTypeName(t.Type)
+	if !ok {
+		return ExtendedFieldURI{}, false
+	}
+	u := ExtendedFieldURI{PropertyType: typ}
+	if !t.Named {
+		u.PropertyTag = fmt.Sprintf("0x%x", t.ID)
+		return u, true
+	}
+	u.DistinguishedPropertySetID, u.PropertySetID = propertySetName(t.Name.GUID)
+	if t.Name.Kind == mapi.MnidString {
+		u.PropertyName = t.Name.Name
+	} else {
+		u.PropertyID = strconv.FormatUint(uint64(t.Name.LID), 10)
+	}
+	return u, true
+}
+
+// propertyTypeName is the MapiPropertyTypeType name of t.
+func propertyTypeName(t mapi.PropType) (string, bool) {
+	for name, pt := range propertyTypes {
+		if pt == t {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+// propertySetName names a property set: by its distinguished name when it has
+// one, else by its GUID.
+func propertySetName(g mapi.GUID) (distinguished, id string) {
+	for name, set := range distinguishedSets {
+		if set == g {
+			return name, ""
+		}
+	}
+	return "", g.String()
+}
+
 // Key is a string that equals another URI's key exactly when both address the
 // same property, whichever of the equivalent spellings each used.
 func (t FieldTarget) Key() string {

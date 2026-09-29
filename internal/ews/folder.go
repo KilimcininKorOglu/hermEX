@@ -55,6 +55,20 @@ func (sh folderShape) wantsPermissionSet() bool {
 	return false
 }
 
+// wantsSearchParameters reports whether the shape asked for a search folder's
+// SearchParameters: by the AllProperties base shape, or by name.
+func (sh folderShape) wantsSearchParameters() bool {
+	if sh.BaseShape == "AllProperties" {
+		return true
+	}
+	for _, fu := range sh.AdditionalProperties.FieldURIs {
+		if fu.URI == "folder:SearchParameters" {
+			return true
+		}
+	}
+	return false
+}
+
 type findFolderRequest struct {
 	Traversal       string     `xml:"Traversal,attr"`
 	ParentFolderIDs folderRefs `xml:"ParentFolderIds"`
@@ -144,17 +158,15 @@ func (s *Server) handleGetFolder(w http.ResponseWriter, inner []byte, sess *sess
 	}
 	cache := s.newStoreCache()
 	defer cache.closeAll()
-	wantPerms := req.FolderShape.wantsPermissionSet()
-
 	var msgs []folderResponseMessage
 	for _, tgt := range resolveTargets(req.FolderIDs) {
-		msgs = append(msgs, s.getOneFolder(cache, sess, tgt, wantPerms))
+		msgs = append(msgs, s.getOneFolder(cache, sess, tgt, req.FolderShape))
 	}
 	writeResponse(w, getFolderResponse{Messages: msgs})
 }
 
 // getOneFolder renders one requested folder.
-func (s *Server) getOneFolder(cache *storeCache, sess *session, tgt folderTarget, wantPerms bool) folderResponseMessage {
+func (s *Server) getOneFolder(cache *storeCache, sess *session, tgt folderTarget, shape folderShape) folderResponseMessage {
 	if !tgt.ok {
 		return folderErr(tgt.code)
 	}
@@ -178,13 +190,13 @@ func (s *Server) getOneFolder(cache *storeCache, sess *session, tgt folderTarget
 			return folderErr(code)
 		}
 	}
-	return renderFolderElement(st, tgt.fid, all, delegatedMailbox(tgt, isOwn), wantPerms)
+	return renderFolderElement(st, tgt.fid, all, delegatedMailbox(tgt, isOwn), shape)
 }
 
-// renderFolderElement builds one folder's response element, with its permission
-// set when the request's shape asked for one.
+// renderFolderElement builds one folder's response element, with the optional
+// parts the request's shape asked for.
 func renderFolderElement(st *objectstore.Store, fid int64, all []objectstore.FolderInfo,
-	idMailbox string, wantPerms bool) folderResponseMessage {
+	idMailbox string, shape folderShape) folderResponseMessage {
 	f, code, err := folderElement(st, fid, folderIndex(all), all, idMailbox)
 	switch {
 	case err != nil:
@@ -192,17 +204,62 @@ func renderFolderElement(st *objectstore.Store, fid int64, all []objectstore.Fol
 	case code != "":
 		return folderErr(code)
 	}
-	if wantPerms {
-		ps, err := folderPermissionSet(st, fid)
-		if err != nil {
-			return folderErr("ErrorInternalServerError")
-		}
-		f.PermissionSet = ps
+	if err := addShapedParts(st, fid, &f, idMailbox, shape); err != nil {
+		return folderErr("ErrorInternalServerError")
 	}
 	return folderResponseMessage{
 		ResponseClass: "Success", ResponseCode: "NoError",
 		Folders: &foldersWrap{Folders: []oxews.Folder{f}},
 	}
+}
+
+// addShapedParts adds the parts of a folder element a shape returns only when
+// asked: the permission set, and a search folder's search parameters.
+func addShapedParts(st *objectstore.Store, fid int64, f *oxews.Folder, idMailbox string, shape folderShape) error {
+	if shape.wantsPermissionSet() {
+		ps, err := folderPermissionSet(st, fid)
+		if err != nil {
+			return err
+		}
+		f.PermissionSet = ps
+	}
+	if !shape.wantsSearchParameters() || f.XMLName.Local != "SearchFolder" {
+		return nil
+	}
+	sp, err := searchParameters(st, fid, idMailbox)
+	if errors.Is(err, errInexpressible) {
+		// Criteria EWS cannot state (Outlook builds such) are left out rather
+		// than written as a different search.
+		return nil
+	}
+	f.SearchParameters = sp
+	return err
+}
+
+// searchParameters reads a search folder's criteria as its SearchParameters,
+// nil for a search folder whose criteria were never set.
+func searchParameters(st *objectstore.Store, fid int64, idMailbox string) (*oxews.SearchParameters, error) {
+	c, _, err := st.GetSearchCriteria(fid)
+	if err != nil || c.Restriction == nil {
+		return nil, err
+	}
+	expr, err := restrictionWriter{st}.write(*c.Restriction)
+	if err != nil {
+		return nil, err
+	}
+	traversal := "Shallow"
+	if c.Flags&mapi.SearchRecursive != 0 {
+		traversal = "Deep"
+	}
+	bases := make([]oxews.FolderID, 0, len(c.Scope))
+	for _, base := range c.Scope {
+		bases = append(bases, oxews.FolderID{ID: oxews.EncodeFolderIDFor(base, idMailbox)})
+	}
+	return &oxews.SearchParameters{
+		Traversal:     traversal,
+		Restriction:   oxews.Restriction{Expr: []oxews.SearchExpression{expr}},
+		BaseFolderIDs: bases,
+	}, nil
 }
 
 // folderPermissionSet reads a folder's access-control list as a wire PermissionSet.
