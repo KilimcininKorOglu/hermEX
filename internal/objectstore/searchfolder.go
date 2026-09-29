@@ -477,6 +477,30 @@ func (s *Store) MatchMessages(ids []int64, r mapi.Restriction) (map[int64]bool, 
 	return out, nil
 }
 
+// MatchFolders reports which of the given folders match r, evaluated on the
+// properties a client reading each folder sees: the stored ones and the ones
+// the store computes, such as the message counts.
+func (s *Store) MatchFolders(ids []int64, r mapi.Restriction) (map[int64]bool, error) {
+	out := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		props, err := s.GetFolderProperties(id)
+		if err != nil {
+			return nil, err
+		}
+		computed, err := s.FolderComputedProps(id)
+		if err != nil {
+			return nil, err
+		}
+		for _, tv := range computed {
+			props.Set(tv.Tag, tv.Value)
+		}
+		if evalRestriction(r, props) {
+			out[id] = true
+		}
+	}
+	return out, nil
+}
+
 // matchCandidates returns the candidates that match r, in their order.
 func (s *Store) matchCandidates(cands []searchCandidate, r mapi.Restriction) ([]int64, error) {
 	ids := make([]int64, len(cands))

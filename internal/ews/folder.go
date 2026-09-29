@@ -70,8 +70,9 @@ func (sh folderShape) wantsSearchParameters() bool {
 }
 
 type findFolderRequest struct {
-	Traversal       string     `xml:"Traversal,attr"`
-	ParentFolderIDs folderRefs `xml:"ParentFolderIds"`
+	Traversal       string             `xml:"Traversal,attr"`
+	Restriction     *oxews.Restriction `xml:"Restriction"`
+	ParentFolderIDs folderRefs         `xml:"ParentFolderIds"`
 }
 
 type syncFolderHierarchyRequest struct {
@@ -352,13 +353,15 @@ func (s *Server) handleFindFolder(w http.ResponseWriter, inner []byte, sess *ses
 
 	var msgs []findFolderResponseMessage
 	for _, tgt := range resolveTargets(req.ParentFolderIDs) {
-		msgs = append(msgs, findFolderForTarget(cache, sess, tgt, deep))
+		msgs = append(msgs, findFolderForTarget(cache, sess, tgt, deep, req.Restriction))
 	}
 	writeResponse(w, findFolderResponse{Messages: msgs})
 }
 
-// findFolderForTarget enumerates one requested parent folder's children.
-func findFolderForTarget(cache *storeCache, sess *session, tgt folderTarget, deep bool) findFolderResponseMessage {
+// findFolderForTarget enumerates one requested parent folder's children, those
+// the request's restriction matches when it carries one.
+func findFolderForTarget(cache *storeCache, sess *session, tgt folderTarget, deep bool,
+	restriction *oxews.Restriction) findFolderResponseMessage {
 	if !tgt.ok {
 		return findFolderError(tgt.code)
 	}
@@ -376,6 +379,9 @@ func findFolderForTarget(cache *storeCache, sess *session, tgt folderTarget, dee
 		return findFolderError(code)
 	}
 	children, code := findFolderChildren(st, sess, tgt, all, isOwn, deep)
+	if code == "" {
+		children, code = restrictFolders(st, children, restriction)
+	}
 	if code != "" {
 		return findFolderError(code)
 	}
@@ -423,6 +429,31 @@ func findFolderChildren(st *objectstore.Store, sess *session, tgt folderTarget,
 		return finderChildren(st)
 	}
 	return collectChildren(all, tgt.fid, deep), ""
+}
+
+// restrictFolders keeps the folders a FindFolder restriction matches, evaluated
+// on the properties the store serves for each folder. No restriction keeps them
+// all.
+func restrictFolders(st *objectstore.Store, folders []objectstore.FolderInfo, r *oxews.Restriction) ([]objectstore.FolderInfo, string) {
+	res, code := restrictionReader{st}.read(r)
+	if code != "" || res == nil {
+		return folders, code
+	}
+	ids := make([]int64, len(folders))
+	for i, f := range folders {
+		ids[i] = f.ID
+	}
+	matched, err := st.MatchFolders(ids, *res)
+	if err != nil {
+		return nil, "ErrorInternalServerError"
+	}
+	kept := folders[:0:0]
+	for _, f := range folders {
+		if matched[f.ID] {
+			kept = append(kept, f)
+		}
+	}
+	return kept, ""
 }
 
 // finderChildren lists the search folders under Finder. The folder listing
