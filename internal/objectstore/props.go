@@ -70,7 +70,24 @@ func (s *Store) SetFolderProperties(folderID int64, props mapi.PropertyValues) e
 // GetFolderProperties returns the requested folder properties; with no tags it
 // returns all of them.
 func (s *Store) GetFolderProperties(folderID int64, tags ...mapi.PropTag) (mapi.PropertyValues, error) {
-	return s.getObjectProps("folder_properties", "folder_id", folderID, tags)
+	props, err := s.getObjectProps("folder_properties", "folder_id", folderID, tags)
+	if err != nil || len(props) > 0 {
+		return props, err
+	}
+	return props, s.requireRow(`SELECT 1 FROM folders WHERE folder_id = ?`, folderID)
+}
+
+// requireRow reports ErrNotFound when query, a SELECT of one object row by id,
+// finds nothing. A property read that found nothing calls it, so a read of a
+// removed object fails rather than answering with an empty bag that reads as an
+// object without properties.
+func (s *Store) requireRow(query string, id int64) error {
+	var one int
+	err := s.objdb.QueryRow(query, id).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
 }
 
 // SetMessageProperties upserts properties on a message, allocating a fresh change
@@ -91,7 +108,11 @@ func (s *Store) SetMessageProperties(messageID int64, props mapi.PropertyValues)
 // GetMessageProperties returns the requested message properties; with no tags
 // it returns all of them.
 func (s *Store) GetMessageProperties(messageID int64, tags ...mapi.PropTag) (mapi.PropertyValues, error) {
-	return s.getObjectProps("message_properties", "message_id", messageID, tags)
+	props, err := s.getObjectProps("message_properties", "message_id", messageID, tags)
+	if err != nil || len(props) > 0 {
+		return props, err
+	}
+	return props, s.requireRow(`SELECT 1 FROM messages WHERE message_id = ?`, messageID)
 }
 
 // ModifyMessageProperties upserts properties on an existing message and, in the

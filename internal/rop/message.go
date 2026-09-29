@@ -289,7 +289,7 @@ func (s *Session) ropGetPropertiesSpecific(p *ext.Pull, out *ext.Push, handles [
 	}
 	props, ok, err := msg.readMessageProps(cols...)
 	if !ok || err != nil {
-		writeErr(out, ropGetPropertiesSpecific, hindex, ecError)
+		writeErr(out, ropGetPropertiesSpecific, hindex, notFoundOrError(err))
 		return true
 	}
 	// Build the row first so a serialization failure does not leave a partial
@@ -322,7 +322,7 @@ func (s *Session) ropGetPropertiesAll(p *ext.Pull, out *ext.Push, handles []uint
 	}
 	props, ok, err := msg.readMessageProps()
 	if !ok || err != nil {
-		writeErr(out, ropGetPropertiesAll, hindex, ecError)
+		writeErr(out, ropGetPropertiesAll, hindex, notFoundOrError(err))
 		return true
 	}
 	body := ext.NewPush(ext.FlagUTF16)
@@ -348,7 +348,7 @@ func (s *Session) ropGetPropertiesList(_ *ext.Pull, out *ext.Push, handles []uin
 	}
 	props, ok, err := obj.readMessageProps()
 	if !ok || err != nil {
-		writeErr(out, ropGetPropertiesList, hindex, ecError)
+		writeErr(out, ropGetPropertiesList, hindex, notFoundOrError(err))
 		return true
 	}
 	tags := make([]mapi.PropTag, 0, len(props))

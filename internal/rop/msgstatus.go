@@ -28,7 +28,7 @@ func (s *Session) ropReloadCachedInformation(p *ext.Pull, out *ext.Push, handles
 	// so RopReloadCachedInformation refreshes the header of either.
 	props, ok, err := msg.readMessageProps(mapi.PrSubjectPrefix, mapi.PrNormalizedSubject)
 	if !ok || err != nil {
-		writeErr(out, ropReloadCachedInfo, hindex, ecError)
+		writeErr(out, ropReloadCachedInfo, hindex, notFoundOrError(err))
 		return true
 	}
 	recipients, err := messageRecipientBags(msg)
@@ -69,7 +69,7 @@ func (s *Session) ropGetMessageStatus(p *ext.Pull, out *ext.Push, handles []uint
 	mid := int64(mapi.EID(msgEID).GCValue())
 	props, err := folder.store.GetMessageProperties(mid, mapi.PrMsgStatus)
 	if err != nil {
-		writeErr(out, ropGetMessageStatus, hindex, ecError)
+		writeErr(out, ropGetMessageStatus, hindex, notFoundOrError(err))
 		return true
 	}
 	status, ok := messageStatus(props)
@@ -101,7 +101,7 @@ func (s *Session) ropGetMessageStatus(p *ext.Pull, out *ext.Push, handles []uint
 func mergeMessageStatus(folder *object, mid int64, newStatus, mask uint32) (merged, ec uint32, ok bool) {
 	props, err := folder.store.GetMessageProperties(mid, mapi.PrMsgStatus)
 	if err != nil {
-		return 0, ecError, false
+		return 0, notFoundOrError(err), false
 	}
 	original, found := messageStatus(props)
 	if !found {

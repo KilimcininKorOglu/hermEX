@@ -1,6 +1,7 @@
 package objectstore
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -28,7 +29,9 @@ func TestOpenPublicStoreSeedsHierarchy(t *testing.T) {
 
 	// It is NOT a private mailbox: the private Inbox id holds no folder here.
 	props, err := s.GetFolderProperties(int64(mapi.PrivateFIDInbox), mapi.PrDisplayName)
-	mustNoErr(t, "probe private inbox", err)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("probe private inbox: err = %v, want ErrNotFound", err)
+	}
 	if got, ok := stringProp(props, mapi.PrDisplayName); ok {
 		t.Errorf("public store has a private Inbox folder named %q; seed used the wrong hierarchy", got)
 	}
