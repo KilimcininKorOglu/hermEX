@@ -37,6 +37,7 @@ import (
 	"hermex/internal/notify"
 	"hermex/internal/objectstore"
 	"hermex/internal/relay"
+	"hermex/internal/sendas"
 	"hermex/internal/serve"
 	"hermex/internal/smtp"
 	"hermex/internal/spooler"
@@ -457,6 +458,9 @@ type releaseFor func(owner string) (spooler.DeliverFunc, spooler.GiveUpFunc)
 func sendAsOwner(dir directory.Accounts, spool *relay.Spool, hostname string, logger *logging.Logger) releaseFor {
 	return func(owner string) (spooler.DeliverFunc, spooler.GiveUpFunc) {
 		deliver := func(recipients []string, raw []byte, when time.Time) ([]string, bool, error) {
+			if err := authorizeScheduledFrom(dir, owner, raw); err != nil {
+				return nil, false, err
+			}
 			return mta.SendAndRelay(dir, spool, owner, recipients, raw, when)
 		}
 		onGiveUp := func(raw []byte, recipients []string, cause error) {
@@ -464,6 +468,28 @@ func sendAsOwner(dir directory.Accounts, spool *relay.Spool, hostname string, lo
 		}
 		return deliver, onGiveUp
 	}
+}
+
+// errScheduledFrom refuses a scheduled message whose From the scheduling account
+// may not use.
+var errScheduledFrom = errors.New("scheduled message names a From its owner may not send as")
+
+// authorizeScheduledFrom checks the From header of a message released from owner's
+// Outbox against the same send-as gate every live send clears. The Outbox is not
+// written by webmail alone: a MAPI client can store a message there and set its
+// deferred-send time itself, with any identity in it, so the release is the one
+// point every scheduled message passes. The grant is also read at release rather
+// than trusted from scheduling, so a grant revoked in between stops the send.
+func authorizeScheduledFrom(dir directory.Accounts, owner string, raw []byte) error {
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		return fmt.Errorf("%w: %v", errScheduledFrom, err)
+	}
+	list, err := mail.ParseAddressList(msg.Header.Get("From"))
+	if err != nil || len(list) != 1 || !sendas.Allows(dir, owner, list[0].Address) {
+		return errScheduledFrom
+	}
+	return nil
 }
 
 // reportSendLaterGiveUp tells the account that scheduled a send why the spooler

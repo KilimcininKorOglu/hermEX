@@ -556,6 +556,32 @@ func TestScheduledSendInASharedNameIsSentByTheScheduler(t *testing.T) {
 	}
 }
 
+// TestScheduledSendInAnUngrantedNameIsRefused releases a message in alice's Outbox
+// whose From names a mailbox that grants her nothing, as a MAPI client can store by
+// setting the deferred-send time itself. It must not go out under that name, nor
+// be filed in that mailbox's Sent Items.
+func TestScheduledSendInAnUngrantedNameIsRefused(t *testing.T) {
+	accounts, aliceDir, sharedDir := sharedScheduleWorld(t, objectstore.SentCopyConfig{ForSendAs: true, ForSendOnBehalf: true})
+	shared, err := objectstore.Open(sharedDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := shared.SetSendAs(nil); err != nil {
+		t.Fatal(err)
+	}
+	shared.Close()
+	sweepOutboxes(context.Background(), accounts, sendAsOwner(accounts, nil, "mail.hermex.test", logging.New(&sweepSink{})), logging.New(&sweepSink{}))
+	if n := folderCount(t, sharedDir, int64(mapi.PrivateFIDInbox)); n != 0 {
+		t.Errorf("the message was delivered under an ungranted From (%d in the recipient's Inbox)", n)
+	}
+	if n := folderCount(t, sharedDir, int64(mapi.PrivateFIDSentItems)); n != 0 {
+		t.Errorf("the ungranted mailbox's Sent Items has %d copies, want none", n)
+	}
+	if n := folderCount(t, aliceDir, int64(mapi.PrivateFIDSentItems)); n != 0 {
+		t.Errorf("alice Sent has %d, want the message unsent", n)
+	}
+}
+
 // TestSendLaterGiveUpReachesTheScheduler abandons a message scheduled in a shared
 // mailbox's name. The report goes to the account that scheduled it, not to the
 // shared mailbox its From header names, where nobody may be watching.
