@@ -2,7 +2,13 @@ package objectstore
 
 import (
 	"reflect"
+	"slices"
 	"strings"
+	"unicode"
+
+	"golang.org/x/text/runes"
+	"golang.org/x/text/transform"
+	"golang.org/x/text/unicode/norm"
 
 	"hermex/internal/mapi"
 )
@@ -10,10 +16,14 @@ import (
 // Fuzzy-level bits for a ContentRestriction (MS-OXCDATA §2.12.3.1). The low word
 // selects the match kind; the high word carries case/diacritic flags.
 const (
-	flFullString = 0x0000 // match the whole value
-	flSubstring  = 0x0001 // match a substring
-	flPrefix     = 0x0002 // match a leading prefix
-	flIgnoreCase = 0x00010000
+	flFullString      = 0x0000 // match the whole value
+	flSubstring       = 0x0001 // match a substring
+	flPrefix          = 0x0002 // match a leading prefix
+	flPrefixOnAnyWord = 0x0010 // match the prefix of any word
+	flPhraseMatch     = 0x0020 // match a phrase within the value
+	flIgnoreCase      = 0x00010000
+	flIgnoreNonSpace  = 0x00020000 // ignore diacritics
+	flLoose           = 0x00040000
 )
 
 // ruleFuzzyContains is the fuzzy level the curated "contains" conditions use:
@@ -145,20 +155,44 @@ func evalContent(c mapi.ContentRestriction, props mapi.PropertyValues) bool {
 	return false
 }
 
-// contentMatches applies one fuzzy level to one string value.
+// contentMatches applies one fuzzy level to one string value. A loose match
+// ignores case and diacritics.
 func contentMatches(hay, needle string, fuzzyLevel uint32) bool {
-	if fuzzyLevel&flIgnoreCase != 0 {
+	if fuzzyLevel&(flIgnoreCase|flLoose) != 0 {
 		hay = strings.ToLower(hay)
 		needle = strings.ToLower(needle)
+	}
+	if fuzzyLevel&(flIgnoreNonSpace|flLoose) != 0 {
+		hay = withoutMarks(hay)
+		needle = withoutMarks(needle)
 	}
 	switch fuzzyLevel & 0x0000FFFF {
 	case flFullString:
 		return hay == needle
 	case flPrefix:
 		return strings.HasPrefix(hay, needle)
-	default: // flSubstring and any unrecognized low word
+	case flPrefixOnAnyWord:
+		return slices.ContainsFunc(strings.FieldsFunc(hay, notWordRune), func(w string) bool {
+			return strings.HasPrefix(w, needle)
+		})
+	case flSubstring, flPhraseMatch:
+		return strings.Contains(hay, needle)
+	default: // an unrecognized low word reads as a substring match
 		return strings.Contains(hay, needle)
 	}
+}
+
+// notWordRune reports whether r separates words.
+func notWordRune(r rune) bool {
+	return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+}
+
+// withoutMarks removes the non-spacing marks from s, so "é" reads as "e". The
+// chain replaces invalid UTF-8 rather than failing, so it returns no error on a
+// string.
+func withoutMarks(s string) string {
+	out, _, _ := transform.String(transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC), s)
+	return out
 }
 
 // evalProperty compares a property against a value with a relational operator.

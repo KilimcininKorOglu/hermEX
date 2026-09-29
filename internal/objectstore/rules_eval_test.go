@@ -145,6 +145,40 @@ func TestEvalContentFuzzyKinds(t *testing.T) {
 	}
 }
 
+// TestEvalContentWordsAndDiacritics checks the match kinds a search client asks
+// for beyond the rule editor's: a prefix of any word, a phrase, and a match that
+// ignores diacritics, alone or as part of a loose match.
+func TestEvalContentWordsAndDiacritics(t *testing.T) {
+	bag := mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "Rapor: Şubat döküm-listesi"}}
+	content := func(fuzzy uint32, needle string) mapi.Restriction {
+		return mapi.Restriction{Type: mapi.ResContent, Value: mapi.ContentRestriction{
+			FuzzyLevel: fuzzy, PropTag: mapi.PrSubject,
+			PropVal: mapi.TaggedPropVal{Tag: mapi.PrSubject, Value: needle}}}
+	}
+	cases := []struct {
+		name  string
+		fuzzy uint32
+		ndl   string
+		want  bool
+	}{
+		{"prefix of a later word", flPrefixOnAnyWord, "döküm", true},
+		{"prefix of a word after a hyphen", flPrefixOnAnyWord, "list", true},
+		{"inside a word is not a word prefix", flPrefixOnAnyWord, "üm", false},
+		{"phrase", flPhraseMatch, "Şubat döküm", true},
+		{"diacritics kept by default", flSubstring, "dokum", false},
+		{"diacritics ignored", flSubstring | flIgnoreNonSpace, "dokum", true},
+		{"loose ignores case and diacritics", flSubstring | flLoose, "SUBAT DOKUM", true},
+	}
+	for _, c := range cases {
+		if got := evalRestriction(content(c.fuzzy, c.ndl), bag); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+	if got := withoutMarks("a\xffé"); got != "a�e" && got != "a\xffe" {
+		t.Errorf("withoutMarks on invalid UTF-8 = %q", got)
+	}
+}
+
 // TestEvalContentMultivalued checks a content condition on a multivalued string
 // property, the shape of a category condition on the Keywords property: it
 // matches when any one value matches, and fails when none does.
