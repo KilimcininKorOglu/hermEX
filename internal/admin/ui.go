@@ -195,6 +195,7 @@ func (s *Server) handleUILoginSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.limiter.Succeed(addr, login)
+	s.adoptSignInPrefs(r, login)
 	required, err := s.secondFactorRequired(login)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)

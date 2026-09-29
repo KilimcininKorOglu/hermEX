@@ -1,4 +1,8 @@
 {{define "login.html"}}{{template "head" .}}
+<div class="login-prefs" data-prefs-local>
+{{template "lang-select"}}
+{{template "theme-toggle"}}
+</div>
 <main class="login">
 <div class="login-brand">{{template "brand"}}<div><h1>{{t "common.appTitle"}}</h1><p class="page-desc">{{t "login.desc"}}</p></div></div>
 {{if .Error}}<p class="error">{{t .Error}}</p>{{end}}

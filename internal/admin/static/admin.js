@@ -163,11 +163,28 @@
     }
   }
 
+  // cachePref keeps a preference in the cookie the server reads it from, for the
+  // sign-in page, where no session can store it yet. Signing in adopts it into
+  // the users record when the record holds no choice.
+  function cachePref(name, value) {
+    document.cookie = "admin_" + name + "=" + encodeURIComponent(value) +
+      "; Path=/admin; Max-Age=31536000; SameSite=Lax; Secure";
+  }
+
+  // localPrefs reports whether a control sits where preferences are cached only.
+  function localPrefs(el) {
+    return el.closest("[data-prefs-local]") !== null;
+  }
+
   // setTheme shows the operator's theme at once and stores it. A failed save puts
   // the previous theme back and says so.
-  function setTheme(theme) {
+  function setTheme(theme, local) {
     const previous = document.documentElement.dataset.theme;
     document.documentElement.dataset.theme = theme;
+    if (local) {
+      cachePref("theme", theme);
+      return;
+    }
     savePref("theme", theme).catch(() => {
       document.documentElement.dataset.theme = previous;
       toast("error", pageText("theme-failed"));
@@ -179,6 +196,11 @@
   document.addEventListener("change", (evt) => {
     const select = evt.target instanceof HTMLSelectElement && evt.target.matches(".lang-select") ? evt.target : null;
     if (!select) {
+      return;
+    }
+    if (localPrefs(select)) {
+      cachePref("lang", select.value);
+      window.location.reload();
       return;
     }
     savePref("lang", select.value).then(() => window.location.reload()).catch(() => {
@@ -202,7 +224,7 @@
       return;
     }
     if (target.closest(".theme-toggle")) {
-      setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+      setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark", localPrefs(target));
     } else if (target.closest(".nav-toggle")) {
       setNav(!document.body.classList.contains("nav-open"));
     } else if (target.closest("[data-nav-close], .sidebar nav a")) {

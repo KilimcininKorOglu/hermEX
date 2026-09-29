@@ -99,6 +99,43 @@ func (s *Server) storedPrefs(r *http.Request) (directory.UserPrefs, bool) {
 	return p, found
 }
 
+// adoptSignInPrefs stores the theme and language the sign-in page cached in its
+// cookies, before any session could store them, where the users record holds no
+// choice yet. A choice the record holds wins. A failure is recorded and does not
+// stop the sign-in.
+func (s *Server) adoptSignInPrefs(r *http.Request, login string) {
+	store, ok := s.prefsStore()
+	if !ok {
+		return
+	}
+	p, found, err := store.GetUserPrefs(login)
+	if err == nil && found {
+		u := signInAdoptions(r, p)
+		if u.Theme == nil && u.Lang == nil {
+			return
+		}
+		_, err = store.SetUserPrefs(login, u)
+	}
+	if err != nil {
+		s.logger.Emit(logging.Event{
+			Level: logging.LevelError, Subsystem: logging.Admin, Name: "prefs.adopt_fail", Err: err.Error(),
+		})
+	}
+}
+
+// signInAdoptions lists the cookie choices the users record p does not hold yet;
+// a cookie value that is no valid choice is left out.
+func signInAdoptions(r *http.Request, p directory.UserPrefs) directory.UserPrefsUpdate {
+	var u directory.UserPrefsUpdate
+	if theme := requestCookie(r, themeCookie); p.Theme == "" && theme != "" && directory.ValidPrefs(directory.UserPrefsUpdate{Theme: &theme}) {
+		u.Theme = &theme
+	}
+	if lang := requestCookie(r, langCookie); p.Lang == "" && supportedLang(lang) {
+		u.Lang = &lang
+	}
+	return u
+}
+
 // requestCookie returns the named cookie's value, or "" when the request has none.
 func requestCookie(r *http.Request, name string) string {
 	if c, err := r.Cookie(name); err == nil {

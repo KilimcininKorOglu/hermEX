@@ -109,16 +109,19 @@
 <span class="topbar-title">{{t "common.appTitle"}}</span>
 <div class="topbar-actions">
 {{template "lang-select"}}
-<button type="button" class="ghost icon-button theme-toggle" aria-label="{{t "common.toggleTheme"}}" title="{{t "common.switchTheme"}}">
-<svg class="icon icon-moon" aria-hidden="true"><use href="{{icon "moon"}}"/></svg>
-<svg class="icon icon-sun" aria-hidden="true"><use href="{{icon "sun"}}"/></svg>
-</button>
+{{template "theme-toggle"}}
 <form method="post" action="/admin/ui/logout">
 <input type="hidden" name="_csrf" value="{{.CSRF}}">
 <button type="submit" class="secondary"><svg class="icon icon-sm" aria-hidden="true"><use href="{{icon "log-out"}}"/></svg>{{t "common.signOut"}}</button>
 </form>
 </div>
 </header>{{end}}
+
+{{/* theme-toggle switches between the light and the dark theme. */}}
+{{define "theme-toggle"}}<button type="button" class="ghost icon-button theme-toggle" aria-label="{{t "common.toggleTheme"}}" title="{{t "common.switchTheme"}}">
+<svg class="icon icon-moon" aria-hidden="true"><use href="{{icon "moon"}}"/></svg>
+<svg class="icon icon-sun" aria-hidden="true"><use href="{{icon "sun"}}"/></svg>
+</button>{{end}}
 
 {{/* lang-select switches the interface language. Each language is named in
      itself, so an operator who cannot read the current one still finds theirs. */}}
