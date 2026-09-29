@@ -64,11 +64,34 @@ func TestOpenPGPRoundTrip(t *testing.T) {
 		}
 		wantProp(t, c.mediaType+" attachment type", propString(msg.Attachments[0].Props, mapi.PrAttachMimeTag), c.mimeTag)
 
-		raw, err := Export(msg, Options{Resolver: resolver})
-		mustImport(t, err)
-		if !bytes.HasSuffix(raw, []byte(c.payload)) || !bytes.Contains(raw, []byte("Content-Type: "+c.mediaType+"; protocol=\""+c.protocol+"\"")) {
-			t.Errorf("%s: re-export changed the entity:\n%s", c.mediaType, raw)
+		// The class Outlook stores after GpgOL handles the message is an InfoPath
+		// variant of the clear-signed one; it must export the entity the same way.
+		for _, class := range []string{c.class, "IPM.Note.InfoPathForm.GpgOL.SMIME.MultipartSigned", "IPM.Note.InfoPathForm.GpgOLS.SMIME.MultipartSigned"} {
+			msg.Props.Set(mapi.PrMessageClass, class)
+			raw, err := Export(msg, Options{Resolver: resolver})
+			mustImport(t, err)
+			if !bytes.HasSuffix(raw, []byte(c.payload)) || !bytes.Contains(raw, []byte("Content-Type: "+c.mediaType+"; protocol=\""+c.protocol+"\"")) {
+				t.Errorf("%s as %s: re-export changed the entity:\n%s", c.mediaType, class, raw)
+			}
 		}
+	}
+}
+
+// TestOpenPGPKeepsTheBlindRecipient proves an OpenPGP message keeps its Bcc
+// recipient in the recipient table, where the sender's Sent Items copy reads it.
+func TestOpenPGPKeepsTheBlindRecipient(t *testing.T) {
+	mail := strings.Replace(pgpMail("multipart/signed", "application/pgp-signature", pgpSignedPayload),
+		"To: recipient@example.org\r\n", "To: recipient@example.org\r\nBcc: hidden@example.org\r\n", 1)
+	msg, err := Import([]byte(mail), Options{})
+	mustImport(t, err)
+	found := false
+	for _, r := range msg.Recipients {
+		if rt, _ := r.Get(mapi.PrRecipientType); rt == int32(mapi.RecipBcc) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("recipients %v lack the Bcc recipient", msg.Recipients)
 	}
 }
 
