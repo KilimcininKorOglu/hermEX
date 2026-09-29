@@ -15,6 +15,10 @@ type ThreadHeaders struct {
 	MessageID  string // PR_INTERNET_MESSAGE_ID, e.g. "<abc@host>"
 	References string // PR_INTERNET_REFERENCES, the space-separated chain
 	InReplyTo  string // PR_IN_REPLY_TO_ID
+	// ConversationID is the stored PidTagConversationId, the one id every protocol
+	// names the message's conversation by. A message stored before import set it
+	// has none.
+	ConversationID []byte
 }
 
 // threadChunk bounds the message-id IN clause well under SQLite's host-parameter
@@ -26,14 +30,15 @@ const threadChunk = 900
 // message ids, a folder's messages, whose ids come from ListMessages, so a
 // threaded list view does one query per chunk instead of a property read per
 // message. The headers live in the message property bag (the IMAP index mirrors
-// the reference schema and carries no message-id/references columns). Messages
-// with none of the three headers are simply absent from the result map.
+// the reference schema and carries no message-id/references columns). A message
+// carrying none of the headers and no conversation id is absent from the map.
 func (s *Store) ConversationThreading(messageIDs []int64) (map[int64]ThreadHeaders, error) {
 	out := make(map[int64]ThreadHeaders, len(messageIDs))
 	tags := []any{
 		int64(uint32(mapi.PrInternetMessageID)),
 		int64(uint32(mapi.PrInternetReferences)),
 		int64(uint32(mapi.PrInReplyToID)),
+		int64(uint32(mapi.PrConversationId)),
 	}
 	for start := 0; start < len(messageIDs); start += threadChunk {
 		end := min(start+threadChunk, len(messageIDs))
@@ -80,17 +85,24 @@ func (s *Store) threadingChunk(ids []int64, tags []any, out map[int64]ThreadHead
 		if err != nil {
 			return fmt.Errorf("objectstore: decode %s: %w", tag, err)
 		}
-		sval, _ := val.(string)
 		th := out[mid]
-		switch tag {
-		case mapi.PrInternetMessageID:
-			th.MessageID = sval
-		case mapi.PrInternetReferences:
-			th.References = sval
-		case mapi.PrInReplyToID:
-			th.InReplyTo = sval
-		}
+		th.set(tag, val)
 		out[mid] = th
 	}
 	return rows.Err()
+}
+
+// set stores one read property in its field.
+func (th *ThreadHeaders) set(tag mapi.PropTag, val any) {
+	sval, _ := val.(string)
+	switch tag {
+	case mapi.PrConversationId:
+		th.ConversationID, _ = val.([]byte)
+	case mapi.PrInternetMessageID:
+		th.MessageID = sval
+	case mapi.PrInternetReferences:
+		th.References = sval
+	case mapi.PrInReplyToID:
+		th.InReplyTo = sval
+	}
 }

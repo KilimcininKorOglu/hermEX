@@ -2,9 +2,11 @@ package activesync
 
 import (
 	"bytes"
+	"encoding/base64"
 	"testing"
 	"time"
 
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/wbxml"
 )
@@ -81,5 +83,31 @@ func TestEmailAppDataCarriesConversation(t *testing.T) {
 	}
 	if !bytes.Equal(cidx.Opaque[6:], cid.Opaque) {
 		t.Error("the rendered index GUID must equal the rendered ConversationId")
+	}
+}
+
+// TestEmailAppDataCarriesTheStoredConversation proves a device receives the
+// conversation id and index the store holds, the ones import took from the
+// message's Thread-Index and MAPI serves, not ones derived again from the headers.
+func TestEmailAppDataCarriesTheStoredConversation(t *testing.T) {
+	st, err := objectstore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	guid := bytes.Repeat([]byte{0xcd}, 16)
+	idx := append([]byte{0x01, 0xd0, 0x11, 0x22, 0x33, 0x44}, guid...)
+	raw := []byte("Message-ID: <ti@hermex.test>\r\nSubject: Plan\r\nThread-Index: " +
+		base64.StdEncoding.EncodeToString(idx) + "\r\n\r\nbody\r\n")
+	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), raw, time.Unix(1718200000, 0), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := emailAppData(mailRender{st: st}, raw, info, "1", "1")
+	if cid := data.Child(wbxml.EM2ConversationId); cid == nil || !bytes.Equal(cid.Opaque, guid) {
+		t.Errorf("ConversationId = %#v, want the stored %x", cid, guid)
+	}
+	if cidx := data.Child(wbxml.EM2ConversationIndex); cidx == nil || !bytes.Equal(cidx.Opaque, idx) {
+		t.Errorf("ConversationIndex = %#v, want the stored %x", cidx, idx)
 	}
 }

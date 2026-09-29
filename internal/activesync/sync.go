@@ -601,13 +601,12 @@ func emailAppData(rc mailRender, raw []byte, m objectstore.MessageInfo, collID, 
 		wbxml.Str(wbxml.EMRead, readFlag(m.Flags)),
 		emailBody(raw, pref, forceMIME),
 	)
-	// ConversationId/ConversationIndex (MS-ASEMAIL, Since 14.0) group the thread; the
-	// id hashes the thread root so every reply shares it, the index carries it with the
-	// delivery time for ordering.
-	convID := conversationID(raw)
+	// ConversationId/ConversationIndex (MS-ASEMAIL, Since 14.0) group the thread by
+	// the same stored id MAPI and EWS name it by.
+	convID, convIdx := messageConversation(rc.st, m.ID, raw, m.InternalDate)
 	data.Children = append(data.Children,
 		wbxml.Opaque(wbxml.EM2ConversationId, convID),
-		wbxml.Opaque(wbxml.EM2ConversationIndex, conversationIndex(convID, m.InternalDate)))
+		wbxml.Opaque(wbxml.EM2ConversationIndex, convIdx))
 	// A forced full-MIME body already carries every part; the device parses them
 	// from the MIME itself. Listing them again would surface the S/MIME signature
 	// part as a bogus attachment, so the Attachments listing is omitted for it.

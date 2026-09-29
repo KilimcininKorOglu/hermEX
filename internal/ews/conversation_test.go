@@ -1,6 +1,8 @@
 package ews
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/xml"
 	"net/http/httptest"
 	"strings"
@@ -243,5 +245,27 @@ func TestApplyConversationActionSetReadState(t *testing.T) {
 	}
 	if read != 2 {
 		t.Errorf("%d of %d inbox messages read, want the 2 thread messages read", read, len(seen))
+	}
+}
+
+// TestFindConversationUsesTheStoredID proves EWS names a conversation by the id
+// the store holds, the GUID of the message's Thread-Index, which is the id MAPI
+// and ActiveSync serve, rather than an id of its own derived from the headers.
+func TestFindConversationUsesTheStoredID(t *testing.T) {
+	ts, dir := seededEWS(t)
+	guid := bytes.Repeat([]byte{0xcd}, 16)
+	idx := append([]byte{0x01, 0xd0, 0x11, 0x22, 0x33, 0x44}, guid...)
+	seedRaw(t, dir, int64(mapi.PrivateFIDInbox),
+		"From: Alice <alice@x.test>\r\nMessage-Id: <ti@x>\r\nSubject: Plan\r\nThread-Index: "+
+			base64.StdEncoding.EncodeToString(idx)+"\r\n\r\nbody\r\n", time.Unix(1718200000, 0))
+
+	_, body := soapPost(t, ts, wrapRequest(findConversationBody("inbox")), true)
+	var p parsedFindConversation
+	if err := xml.Unmarshal([]byte(body), &p); err != nil {
+		t.Fatalf("parse FindConversation: %v\n%s", err, body)
+	}
+	want := base64.StdEncoding.EncodeToString(guid)
+	if len(p.Conversations) != 1 || p.Conversations[0].ConversationID.ID != want {
+		t.Errorf("conversations %+v, want one named %s", p.Conversations, want)
 	}
 }

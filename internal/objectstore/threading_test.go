@@ -9,7 +9,7 @@ import (
 
 // TestConversationThreading checks the batch read returns each message's stored
 // RFC 5322 threading headers verbatim (the full References chain, not a
-// truncation), and omits a message that carries none of them.
+// truncation) and its stored conversation id.
 func TestConversationThreading(t *testing.T) {
 	s := openSeededStore(t)
 	inbox := int64(mapi.PrivateFIDInbox)
@@ -24,7 +24,6 @@ func TestConversationThreading(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A message with no threading headers must be absent from the map.
 	plain, err := s.AppendMessage(inbox, []byte("From: d@b.test\r\nSubject: standalone\r\n\r\nbody\r\n"), when, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -43,8 +42,18 @@ func TestConversationThreading(t *testing.T) {
 	if got := th[reply.ID].InReplyTo; got != "<b@x>" {
 		t.Errorf("reply In-Reply-To = %q, want <b@x>", got)
 	}
-	if _, ok := th[plain.ID]; ok {
-		t.Errorf("a message with no threading headers should be absent from the map")
+	checkConversationIDs(t, th[root.ID], th[plain.ID])
+}
+
+// checkConversationIDs asserts both messages carry the conversation id import
+// derived, and the one without threading headers carries no header.
+func checkConversationIDs(t *testing.T, root, plain ThreadHeaders) {
+	t.Helper()
+	if plain.MessageID != "" || plain.References != "" || plain.InReplyTo != "" || len(plain.ConversationID) != 16 {
+		t.Errorf("standalone message = %+v, want only its conversation id", plain)
+	}
+	if len(root.ConversationID) != 16 {
+		t.Errorf("root carries no conversation id: %+v", root)
 	}
 }
 

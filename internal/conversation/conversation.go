@@ -36,6 +36,18 @@ func IDFromParts(references, inReplyTo, messageID, subject string) []byte {
 	return sum[:]
 }
 
+// Resolve returns a message's conversation id: the stored PidTagConversationId
+// when the message carries one, which import took from its Thread-Index header
+// when it had one, else the id derived from its threading fields. Every protocol
+// resolves the id here, so MAPI, ActiveSync and EWS name a message's conversation
+// by the same id.
+func Resolve(stored []byte, references, inReplyTo, messageID, subject string) []byte {
+	if len(stored) == 16 {
+		return stored
+	}
+	return IDFromParts(references, inReplyTo, messageID, subject)
+}
+
 // Index builds the 22-byte PidTagConversationIndex header (MS-OXOMSG 2.2.1.3): a
 // reserved 0x01 byte, the delivery time as the high 40 bits of a FILETIME written
 // big-endian, and the 16-byte conversation GUID. Reply-chain child blocks are not

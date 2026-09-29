@@ -15,11 +15,10 @@ import (
 )
 
 // Conversation operations (MS-OXWSCONV) expose the thread-grouped view of a
-// mailbox. The grouping reuses internal/conversation (the same id ActiveSync's
-// conversation view emits), so a thread has one identity across protocols. The
-// conversation id is not stored as a property; it is derived from the threading
-// properties the store already holds for every message, so grouping reads indexed
-// rows rather than each message's wire form.
+// mailbox. The id comes from conversation.Resolve, the stored PidTagConversationId
+// or, for a message stored without one, the id derived from its threading
+// properties, so a thread has one identity across MAPI, ActiveSync and EWS. Both are
+// read from indexed rows rather than each message's wire form.
 
 // convMember is one message belonging to a conversation, with the sender display
 // name and internet message id the store holds for it.
@@ -57,7 +56,7 @@ func conversationGroups(st *objectstore.Store, folderIDs []int64) map[string][]c
 		for _, info := range infos {
 			th := headers[info.ID]
 			id := base64.StdEncoding.EncodeToString(
-				conversation.IDFromParts(th.References, th.InReplyTo, th.MessageID, info.Subject))
+				conversation.Resolve(th.ConversationID, th.References, th.InReplyTo, th.MessageID, info.Subject))
 			groups[id] = append(groups[id], convMember{
 				folderID:          fid,
 				info:              info,
