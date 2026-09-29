@@ -8,9 +8,6 @@ import (
 	"hermex/internal/objectstore"
 )
 
-// ropCreateFolder handles RopCreateFolder ([MS-OXCFOLD] 2.2.1.1): it creates a new
-// subfolder under the folder identified by the input handle. openExisting and folder
-// comment are parsed but not yet acted on (v1 always creates, never reopens).
 // pullFolderString reads one string in the encoding the request's UseUnicode
 // byte selects. The folder ROPs carry that byte once and every string after it
 // follows the same encoding.
@@ -21,51 +18,102 @@ func pullFolderString(p *ext.Pull, useUnicode uint8) (string, error) {
 	return p.String8()
 }
 
-// pullCreateFolderRequest reads a RopCreateFolder request and returns the new
-// folder's name. The output handle index, folder type, OpenExisting flag and
-// reserved field are read to keep the stream framed and then dropped: v1 always
-// creates a generic folder and allocates no handle for it. The comment is read
-// for the same reason, since the store does not model folder comments yet.
-func pullCreateFolderRequest(p *ext.Pull) (name string, ok bool) {
-	_ /* ohindex */, eh := p.Uint8() // output handle index (v1 does not allocate)
-	_ /* ft */, e0 := p.Uint8()      // FolderType
-	uv, e1 := p.Uint8()              // UseUnicode
-	_ /* oe */, e2 := p.Uint8()      // OpenExisting
-	_ /* rs */, e3 := p.Uint32()     // Reserved
-	if eh != nil || e0 != nil || e1 != nil || e2 != nil || e3 != nil {
-		return "", false
-	}
-	name, e5 := pullFolderString(p, uv)
-	_ /* comment */, e6 := pullFolderString(p, uv)
-	return name, e5 == nil && e6 == nil
+// createFolderRequest is a parsed RopCreateFolder request ([MS-OXCFOLD] 2.2.1.2).
+type createFolderRequest struct {
+	ohindex      uint8
+	folderType   uint8
+	openExisting bool
+	name         string
 }
 
+// The RopCreateFolder FolderType values ([MS-OXCFOLD] 2.2.1.2.1).
+const (
+	folderTypeGeneric uint8 = 1
+	folderTypeSearch  uint8 = 2
+)
+
+// pullCreateFolderRequest reads a RopCreateFolder request. Every field before the
+// strings is one byte, the Reserved byte included. The comment is read to keep
+// the stream framed, since the store does not model folder comments.
+func pullCreateFolderRequest(p *ext.Pull) (createFolderRequest, bool) {
+	var r createFolderRequest
+	head, err := p.Raw(5) // OutputHandleIndex, FolderType, UseUnicode, OpenExisting, Reserved
+	if err != nil {
+		return r, false
+	}
+	r.ohindex, r.folderType, r.openExisting = head[0], head[1], head[3] != 0
+	name, e1 := pullFolderString(p, head[2])
+	_ /* comment */, e2 := pullFolderString(p, head[2])
+	r.name = name
+	return r, e1 == nil && e2 == nil
+}
+
+// ropCreateFolder handles RopCreateFolder ([MS-OXCFOLD] 2.2.1.2): it creates a
+// subfolder under the folder at the input handle and opens it at the output
+// handle. A name already taken is refused with ecDuplicateName unless the request
+// asks to open an existing folder, which then opens that one. As Exchange 2010
+// and later do, the response always reports IsExistingFolder as 0, so it ends
+// after that byte.
 func (s *Session) ropCreateFolder(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	name, framed := pullCreateFolderRequest(p)
+	req, framed := pullCreateFolderRequest(p)
 	if !framed {
 		return false
 	}
-	folder, ok := s.openFolder(out, ropCreateFolder, handles, hindex, hindex)
+	folder, ok := s.openFolder(out, ropCreateFolder, handles, hindex, req.ohindex)
 	if !ok {
 		return true
 	}
-	if s.denyWrite(out, ropCreateFolder, hindex, folder.store, folder.folderID, mapi.FrightsCreateSubfolder) {
+	if req.folderType != folderTypeGeneric {
+		writeErr(out, ropCreateFolder, req.ohindex, createFolderTypeError(req.folderType))
 		return true
 	}
-	folderID, err := folder.store.CreateFolder(&folder.folderID, name)
-	if err != nil {
-		writeErr(out, ropCreateFolder, hindex, ecError)
+	if s.denyWrite(out, ropCreateFolder, req.ohindex, folder.store, folder.folderID, mapi.FrightsCreateSubfolder) {
 		return true
 	}
+	folderID, ec := createOrOpenFolder(folder, req)
+	if ec != ecSuccess {
+		writeErr(out, ropCreateFolder, req.ohindex, ec)
+		return true
+	}
+	h := s.alloc(&object{kind: kindFolder, store: folder.store, folderID: folderID, rights: s.rightsFor(folder.store)})
+	setHandle(handles, req.ohindex, h)
 	out.Uint8(ropCreateFolder)
-	out.Uint8(hindex)
+	out.Uint8(req.ohindex)
 	out.Uint32(ecSuccess)
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	out.Uint64(uint64(mapi.MakeEIDEx(1, uint64(folderID)))) // FolderId (EID, matching RopLogon's encoding)
-	out.Uint8(0)                                            // IsExisting
-	out.Uint8(0)                                            // HasRules
-	out.Uint64(0)                                           // Ghost (unused)
+	out.Uint8(0)                                            // IsExistingFolder
 	return true
+}
+
+// createFolderTypeError is the return code for a FolderType the ROP does not
+// create: a search folder is a valid type this path does not build, any other
+// value is invalid.
+func createFolderTypeError(folderType uint8) uint32 {
+	if folderType == folderTypeSearch {
+		return ecNotSupported
+	}
+	return ecInvalidParam
+}
+
+// createOrOpenFolder creates the requested subfolder of parent, or returns the
+// existing one of that name when the request allows it.
+func createOrOpenFolder(parent *object, req createFolderRequest) (int64, uint32) {
+	existing, found, err := parent.store.FolderByName(&parent.folderID, req.name)
+	if err != nil {
+		return 0, ecError
+	}
+	if found {
+		if !req.openExisting {
+			return 0, ecDuplicateName
+		}
+		return existing, ecSuccess
+	}
+	folderID, err := parent.store.CreateFolder(&parent.folderID, req.name)
+	if err != nil {
+		return 0, ecError
+	}
+	return folderID, ecSuccess
 }
 
 // ropDeleteFolder handles RopDeleteFolder ([MS-OXCFOLD] 2.2.1.2): it deletes the

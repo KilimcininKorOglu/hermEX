@@ -37,19 +37,100 @@ func TestCreateFolderSuccess(t *testing.T) {
 	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDIPMSubtree))), []uint32{logonH, 0xFFFFFFFF})
 	storeH := h[1]
 
-	// RopCreateFolder body: ohindex, FolderType, UseUnicode, OpenExisting, Reserved, name, comment
-	body := ext.NewPush(ext.FlagUTF16)
-	body.Uint8(0)  // ohindex
-	body.Uint8(0)  // FolderType
-	body.Uint8(1)  // UseUnicode
-	body.Uint8(0)  // OpenExisting
-	body.Uint32(0) // Reserved
-	body.Unicode("TestSub")
-	body.Unicode("")
-
-	resp, _ := sess.Dispatch(toROPRequest(ropCreateFolder, 0, body.Bytes()), []uint32{storeH})
+	resp, _ := sess.Dispatch(toROPRequest(ropCreateFolder, 0, createFolderBody(1, "TestSub", false)), []uint32{storeH, 0xFFFFFFFF})
 	if ec := readEC(t, resp, ropCreateFolder); ec != ecSuccess {
 		t.Fatalf("CreateFolder ec = %#x", ec)
+	}
+}
+
+// createFolderBody is a RopCreateFolder request body opening the new folder at
+// output index 1: OutputHandleIndex, FolderType, UseUnicode, OpenExisting,
+// Reserved (each one byte), then the name and an empty comment.
+func createFolderBody(folderType uint8, name string, openExisting bool) []byte {
+	body := ext.NewPush(ext.FlagUTF16)
+	body.Uint8(1)
+	body.Uint8(folderType)
+	body.Uint8(1)
+	if openExisting {
+		body.Uint8(1)
+	} else {
+		body.Uint8(0)
+	}
+	body.Uint8(0)
+	body.Unicode(name)
+	body.Unicode("")
+	return body.Bytes()
+}
+
+// openInboxForCreate logs on and opens the Inbox, returning the session and
+// the Inbox handle.
+func openInboxForCreate(t *testing.T) (*Session, uint32) {
+	t.Helper()
+	sess := NewSession(t.TempDir(), nil, "")
+	t.Cleanup(sess.Close)
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{h[0], 0xFFFFFFFF})
+	return sess, h[1]
+}
+
+// TestCreateFolderOpensTheNewFolder proves RopCreateFolder is framed as a client
+// sends it (a one-byte Reserved field), answers with FolderId and a zero
+// IsExistingFolder and nothing after it, and opens the new folder at the output
+// handle, so a property read on that handle names the folder.
+func TestCreateFolderOpensTheNewFolder(t *testing.T) {
+	sess, inboxH := openInboxForCreate(t)
+	resp, h := sess.Dispatch(toROPRequest(ropCreateFolder, 0, createFolderBody(1, "Projects", false)), []uint32{inboxH, 0xFFFFFFFF})
+	if len(resp) != 6+8+1 {
+		t.Fatalf("CreateFolder response is %d bytes (%x), want 15", len(resp), resp)
+	}
+	p := ropOK(t, resp, ropCreateFolder, "CreateFolder")
+	fid := int64(mapi.EID(mustU64(t, p, "FolderId")).GCValue())
+	wantU8(t, p, "IsExistingFolder", 0)
+	if h[1] == 0xFFFFFFFF {
+		t.Fatal("CreateFolder left the output handle unset")
+	}
+	if got := sess.get(h[1]); got == nil || got.kind != kindFolder || got.folderID != fid {
+		t.Fatalf("output handle holds %+v, want folder %d", got, fid)
+	}
+	got, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, []mapi.PropTag{mapi.PrDisplayName}), []uint32{h[1]})
+	gp := ropOK(t, got, ropGetPropertiesSpecific, "GetPropertiesSpecific on the new folder")
+	wantU8(t, gp, "row flag", 0)
+	if name, err := gp.Unicode(); err != nil || name != "Projects" {
+		t.Fatalf("display name = %q, %v", name, err)
+	}
+}
+
+// TestCreateFolderNameCollision proves a name already taken under the parent is
+// refused with ecDuplicateName, and that OpenExisting opens that folder instead.
+func TestCreateFolderNameCollision(t *testing.T) {
+	sess, inboxH := openInboxForCreate(t)
+	first, _ := sess.Dispatch(toROPRequest(ropCreateFolder, 0, createFolderBody(1, "Twice", false)), []uint32{inboxH, 0xFFFFFFFF})
+	p := ropOK(t, first, ropCreateFolder, "first CreateFolder")
+	fid := mustU64(t, p, "FolderId")
+
+	dup, _ := sess.Dispatch(toROPRequest(ropCreateFolder, 0, createFolderBody(1, "Twice", false)), []uint32{inboxH, 0xFFFFFFFF})
+	if ec := readEC(t, dup, ropCreateFolder); ec != ecDuplicateName {
+		t.Fatalf("duplicate CreateFolder ec = %#x, want ecDuplicateName", ec)
+	}
+	again, h := sess.Dispatch(toROPRequest(ropCreateFolder, 0, createFolderBody(1, "Twice", true)), []uint32{inboxH, 0xFFFFFFFF})
+	p = ropOK(t, again, ropCreateFolder, "CreateFolder with OpenExisting")
+	if got := mustU64(t, p, "FolderId"); got != fid {
+		t.Fatalf("OpenExisting returned folder %#x, want %#x", got, fid)
+	}
+	if o := sess.get(h[1]); o == nil || o.kind != kindFolder {
+		t.Fatal("OpenExisting did not open the folder at the output handle")
+	}
+}
+
+// TestCreateFolderRefusesOtherTypes proves a search folder type is not supported
+// here and an unknown type is an invalid parameter.
+func TestCreateFolderRefusesOtherTypes(t *testing.T) {
+	sess, inboxH := openInboxForCreate(t)
+	for ft, want := range map[uint8]uint32{2: ecNotSupported, 0: ecInvalidParam, 7: ecInvalidParam} {
+		resp, _ := sess.Dispatch(toROPRequest(ropCreateFolder, 0, createFolderBody(ft, "Typed", false)), []uint32{inboxH, 0xFFFFFFFF})
+		if ec := readEC(t, resp, ropCreateFolder); ec != want {
+			t.Errorf("FolderType %d: ec = %#x, want %#x", ft, ec, want)
+		}
 	}
 }
 

@@ -101,6 +101,7 @@ const (
 	ecDstNullObject   uint32 = 0x00000503 // a copy's destination handle resolves to no object
 	ecDeclineCopy     uint32 = 0x80040306 // MAPI_E_DECLINE_COPY (copy between mismatched object types)
 	ecFolderCycle     uint32 = 0x8004060B // MAPI_E_FOLDER_CYCLE (folder copied into its own subtree)
+	ecDuplicateName   uint32 = 0x80040604 // MAPI_E_COLLISION (a sibling folder already has the name)
 	ecNotImplemented  uint32 = 0x80040FFF // ecNotImplemented (RopGetStoreState, as Exchange 2010+)
 	ecUnableToAbort   uint32 = 0x80040114 // MAPI_E_UNABLE_TO_ABORT (RopAbort: nothing async to abort)
 	ecInvalidBookmark uint32 = 0x80040405 // MAPI_E_INVALID_BOOKMARK (RopSeekRowFractional: zero denominator)

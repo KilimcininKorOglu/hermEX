@@ -369,7 +369,7 @@ func buildCreateFolder(inIdx uint8, name string) []byte {
 	b.Uint8(1) // FolderType
 	b.Uint8(1) // UseUnicode
 	b.Uint8(0) // OpenExisting
-	b.Uint32(0)
+	b.Uint8(0) // Reserved
 	b.Unicode(name)
 	b.Unicode("")
 	return b.Bytes()
