@@ -134,12 +134,7 @@ func assertOpenMessageBody(t *testing.T, p *ext.Pull, subject string) {
 	}
 	wantU8(t, p, "recipient RowCount", 1)
 	wantU8(t, p, "RecipientType (To)", uint8(mapi.RecipTo))
-	mustU16(t, p, "codePageId")
-	mustU16(t, p, "reserved")
-	rbag, ok := pullRecipientRow(p, rcols)
-	if !ok {
-		t.Fatal("recipient row decode failed")
-	}
+	rbag := pullOpenRecipientRest(t, p, rcols, "recipient")
 	if got := stringProp(rbag, mapi.PrEmailAddress); got != "alice@hermex.test" {
 		t.Errorf("recipient email = %q, want alice@hermex.test", got)
 	}

@@ -112,12 +112,7 @@ func TestReloadCachedInformation(t *testing.T) {
 		t.Errorf("RowCount = %d, want 1", rows)
 	}
 	mustU8(t, p, "recipientType")
-	mustU16(t, p, "codePageId")
-	mustU16(t, p, "reserved")
-	rbag, ok := pullRecipientRow(p, cols)
-	if !ok {
-		t.Fatal("recipient row decode failed")
-	}
+	rbag := pullOpenRecipientRest(t, p, cols, "recipient")
 	if got := stringProp(rbag, mapi.PrEmailAddress); got != "alice@hermex.test" {
 		t.Errorf("recipient email = %q, want alice@hermex.test", got)
 	}

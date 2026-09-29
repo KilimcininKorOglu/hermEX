@@ -45,13 +45,31 @@ func TestRecipientTableRoundTrip(t *testing.T) {
 	} {
 		label := fmt.Sprintf("row %d", i)
 		wantU8(t, p, label+" type", w.typ)
-		mustU16(t, p, label+" CodePageId")
-		mustU16(t, p, label+" Reserved")
-		bag, ok := pullRecipientRow(p, cols)
-		if !ok {
-			t.Fatalf("%s: RecipientRow decode failed", label)
-		}
+		bag := pullOpenRecipientRest(t, p, cols, label)
 		wantProp(t, bag, mapi.PrDisplayName, w.name, label+" name")
 		wantProp(t, bag, mapi.PrEmailAddress, w.email, label+" email")
 	}
+}
+
+// pullOpenRecipientRest decodes an OpenRecipientRow after its RecipientType: the
+// code page id, the reserved field, and the RECIPIENT_ROW its RecipientRowSize
+// bounds, which must decode to exactly that many bytes.
+func pullOpenRecipientRest(t *testing.T, p *ext.Pull, cols []mapi.PropTag, label string) mapi.PropertyValues {
+	t.Helper()
+	mustU16(t, p, label+" CodePageId")
+	mustU16(t, p, label+" Reserved")
+	size := mustU16(t, p, label+" RecipientRowSize")
+	body, err := p.Raw(int(size))
+	if err != nil {
+		t.Fatalf("%s: RecipientRow of %d bytes: %v", label, size, err)
+	}
+	sub := ext.NewPull(body, ext.FlagUTF16)
+	bag, ok := pullRecipientRow(sub, cols)
+	if !ok {
+		t.Fatalf("%s: RecipientRow decode failed", label)
+	}
+	if sub.Remaining() != 0 {
+		t.Errorf("%s: RecipientRowSize %d leaves %d bytes unread", label, size, sub.Remaining())
+	}
+	return bag
 }

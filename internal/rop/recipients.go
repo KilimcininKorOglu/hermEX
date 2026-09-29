@@ -28,8 +28,9 @@ func writeRecipientTable(out *ext.Push, recipients []mapi.PropertyValues) {
 	}
 }
 
-// writeOpenRecipientRow emits one OPENRECIPIENT_ROW: the recipient type, a code page
-// id and reserved field, then the RECIPIENT_ROW body.
+// writeOpenRecipientRow emits one OpenRecipientRow ([MS-OXCMSG] 2.2.3.1.2): the
+// recipient type, a code page id and reserved field, then the RECIPIENT_ROW
+// prefixed by its size.
 func writeOpenRecipientRow(out *ext.Push, r mapi.PropertyValues) {
 	rcptType := mapi.RecipTo
 	if v, ok := r.Get(mapi.PrRecipientType); ok {
@@ -40,7 +41,10 @@ func writeOpenRecipientRow(out *ext.Push, r mapi.PropertyValues) {
 	out.Uint8(uint8(rcptType)) // RecipientType (1 To, 2 Cc, 3 Bcc)
 	out.Uint16(0)              // CodePageId (Unicode rows carry their own encoding)
 	out.Uint16(0)              // Reserved
-	pushRecipientRow(out, r)
+	row := ext.NewPush(ext.FlagUTF16)
+	pushRecipientRow(row, r)
+	out.Uint16(uint16(row.Len())) // RecipientRowSize
+	out.Raw(row.Bytes())
 }
 
 // pushRecipientRow encodes a RECIPIENT_ROW ([MS-OXCDATA] 2.8.3.2) for a stored
