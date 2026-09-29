@@ -28,8 +28,11 @@ type Message struct {
 	DateTimeReceived string          `xml:"DateTimeReceived,omitempty"`
 	Size             int             `xml:"Size,omitempty"`
 	Importance       string          `xml:"Importance,omitempty"`
-	DateTimeSent     string          `xml:"DateTimeSent,omitempty"`
-	HasAttachments   bool            `xml:"HasAttachments"`
+	// InternetMessageHeaders is served only when the shape asks for it; ItemType
+	// places it after Importance and before DateTimeSent.
+	InternetMessageHeaders *HeaderList `xml:"InternetMessageHeaders,omitempty"`
+	DateTimeSent           string      `xml:"DateTimeSent,omitempty"`
+	HasAttachments         bool        `xml:"HasAttachments"`
 	// ExtendedProperties are the MAPI properties the request's shape asked for by
 	// field URI. ItemType places them after HasAttachments and before the
 	// MessageType fields.

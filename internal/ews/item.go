@@ -280,13 +280,13 @@ func (s *Server) handleGetItem(w http.ResponseWriter, inner []byte, sess *sessio
 
 	var msgs []itemResponseMessage
 	for _, ref := range req.ItemIDs.Items {
-		msgs = append(msgs, getOneItem(cache, sess, ref.ID, fields))
+		msgs = append(msgs, getOneItem(cache, sess, ref.ID, fields, req.Shape.wantsHeaders()))
 	}
 	writeResponse(w, getItemResponse{Messages: msgs})
 }
 
 // getOneItem renders one requested item in the shape its class calls for.
-func getOneItem(cache *storeCache, sess *session, itemID string, fields []extField) itemResponseMessage {
+func getOneItem(cache *storeCache, sess *session, itemID string, fields []extField, headers bool) itemResponseMessage {
 	id, err := oxews.DecodeItemID(itemID)
 	if err != nil {
 		return itemError("ErrorInvalidRequest")
@@ -326,14 +326,25 @@ func getOneItem(cache *storeCache, sess *session, itemID string, fields []extFie
 		elem.ExtendedProperties = readExtended(st, id.MessageID, fields)
 		return itemFound(&itemsWrap{BaseItems: []oxews.Item{elem}})
 	}
-	return mailItem(st, id, itemID, key, msg, hasAttach, readExtended(st, id.MessageID, fields))
+	var hdrs *oxews.HeaderList
+	if headers {
+		hdrs = oxews.MessageHeaders(msg.Props)
+	}
+	return mailItem(st, id, itemID, key, msg, hasAttach, mailExtras{ext: readExtended(st, id.MessageID, fields), headers: hdrs})
+}
+
+// mailExtras are the shape-requested parts of a mail item: its extended
+// properties and, when asked for, its internet message headers.
+type mailExtras struct {
+	ext     []oxews.ExtendedProperty
+	headers *oxews.HeaderList
 }
 
 // mailItem renders a stored mail item: an ordinary message as <t:Message>, and a
 // delivered invitation as <t:MeetingRequest>, so a client can tell the invitation
 // from ordinary mail and offer Accept / Tentative / Decline.
 func mailItem(st *objectstore.Store, id oxews.ItemID, itemID, changeKey string,
-	msg *oxcmail.Message, hasAttach bool, ext []oxews.ExtendedProperty) itemResponseMessage {
+	msg *oxcmail.Message, hasAttach bool, extra mailExtras) itemResponseMessage {
 	info, _ := st.MessageByUID(id.FolderID, id.UID)
 	body, bodyType := "", "Text"
 	if raw, err := st.GetMessageRaw(id.FolderID, id.UID); err == nil {
@@ -355,11 +366,13 @@ func mailItem(st *objectstore.Store, id oxews.ItemID, itemID, changeKey string,
 	}
 	if meta.ItemClass == oxews.MeetingRequestClass {
 		mr := oxews.BuildMeetingRequest(msg, meta, meetingMeta(st, msg))
-		mr.ExtendedProperties = ext
+		mr.ExtendedProperties = extra.ext
+		mr.InternetMessageHeaders = extra.headers
 		return itemFound(&itemsWrap{MeetingRequests: []oxews.MeetingRequest{mr}})
 	}
 	m := oxews.BuildItem(msg, meta)
-	m.ExtendedProperties = ext
+	m.ExtendedProperties = extra.ext
+	m.InternetMessageHeaders = extra.headers
 	return itemFound(&itemsWrap{Messages: []oxews.Message{m}})
 }
 

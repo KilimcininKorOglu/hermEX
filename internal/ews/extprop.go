@@ -6,10 +6,28 @@ import (
 	"hermex/internal/oxews"
 )
 
-// itemShape is the part of an <m:ItemShape> this server reads beyond the base
-// shape: the extended properties a client asks for by field URI.
+// itemShape is the part of an <m:ItemShape> this server reads: the base shape, the
+// properties a client adds by field URI, and the extended properties it asks for.
 type itemShape struct {
+	BaseShape string `xml:"BaseShape"`
+	Fields    []struct {
+		URI string `xml:"FieldURI,attr"`
+	} `xml:"AdditionalProperties>FieldURI"`
 	Extended []oxews.ExtendedFieldURI `xml:"AdditionalProperties>ExtendedFieldURI"`
+}
+
+// wantsHeaders reports whether a shape asks for InternetMessageHeaders: by name, or
+// through AllProperties, which includes them for GetItem.
+func (s itemShape) wantsHeaders() bool {
+	if s.BaseShape == "AllProperties" {
+		return true
+	}
+	for _, f := range s.Fields {
+		if f.URI == "item:InternetMessageHeaders" {
+			return true
+		}
+	}
+	return false
 }
 
 // extField is one requested extended property: the URI to echo and the property

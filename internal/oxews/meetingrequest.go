@@ -24,25 +24,26 @@ const MeetingRequestClass = "IPM.Schedule.Meeting.Request"
 // the response rejects a reordered element. The order below follows the documented
 // sequence, mail fields first and the meeting fields after ReplyTo.
 type MeetingRequest struct {
-	XMLName             xml.Name           `xml:"http://schemas.microsoft.com/exchange/services/2006/types MeetingRequest"`
-	ItemID              ItemIDElem         `xml:"ItemId"`
-	ItemClass           string             `xml:"ItemClass,omitempty"`
-	Subject             string             `xml:"Subject,omitempty"`
-	Sensitivity         string             `xml:"Sensitivity,omitempty"`
-	Body                *Body              `xml:"Body,omitempty"`
-	Attachments         *AttachmentList    `xml:"Attachments,omitempty"`
-	DateTimeReceived    string             `xml:"DateTimeReceived,omitempty"`
-	Size                int                `xml:"Size,omitempty"`
-	Importance          string             `xml:"Importance,omitempty"`
-	DateTimeSent        string             `xml:"DateTimeSent,omitempty"`
-	HasAttachments      bool               `xml:"HasAttachments"`
-	ExtendedProperties  []ExtendedProperty `xml:"ExtendedProperty"`
-	Sender              *Recipient         `xml:"Sender,omitempty"`
-	ToRecipients        *RecipientList     `xml:"ToRecipients,omitempty"`
-	CcRecipients        *RecipientList     `xml:"CcRecipients,omitempty"`
-	From                *Recipient         `xml:"From,omitempty"`
-	IsRead              bool               `xml:"IsRead"`
-	IsResponseRequested bool               `xml:"IsResponseRequested"`
+	XMLName                xml.Name           `xml:"http://schemas.microsoft.com/exchange/services/2006/types MeetingRequest"`
+	ItemID                 ItemIDElem         `xml:"ItemId"`
+	ItemClass              string             `xml:"ItemClass,omitempty"`
+	Subject                string             `xml:"Subject,omitempty"`
+	Sensitivity            string             `xml:"Sensitivity,omitempty"`
+	Body                   *Body              `xml:"Body,omitempty"`
+	Attachments            *AttachmentList    `xml:"Attachments,omitempty"`
+	DateTimeReceived       string             `xml:"DateTimeReceived,omitempty"`
+	Size                   int                `xml:"Size,omitempty"`
+	Importance             string             `xml:"Importance,omitempty"`
+	InternetMessageHeaders *HeaderList        `xml:"InternetMessageHeaders,omitempty"`
+	DateTimeSent           string             `xml:"DateTimeSent,omitempty"`
+	HasAttachments         bool               `xml:"HasAttachments"`
+	ExtendedProperties     []ExtendedProperty `xml:"ExtendedProperty"`
+	Sender                 *Recipient         `xml:"Sender,omitempty"`
+	ToRecipients           *RecipientList     `xml:"ToRecipients,omitempty"`
+	CcRecipients           *RecipientList     `xml:"CcRecipients,omitempty"`
+	From                   *Recipient         `xml:"From,omitempty"`
+	IsRead                 bool               `xml:"IsRead"`
+	IsResponseRequested    bool               `xml:"IsResponseRequested"`
 	// The meeting fields. MeetingRequestType is the one a client keys on to decide
 	// whether to offer Accept / Tentative / Decline.
 	MeetingRequestType     string     `xml:"MeetingRequestType,omitempty"`
