@@ -2,6 +2,7 @@ package rop
 
 import (
 	"errors"
+	"slices"
 	"time"
 
 	"hermex/internal/ext"
@@ -49,22 +50,23 @@ func messageAttachmentBags(o *object) ([]mapi.PropertyValues, error) {
 // deletes; the match is therefore by that property, not by row position. When no
 // bag carries a stored number (legacy data predating stored attach numbers),
 // AttachmentId is treated as the row ordinal, the same fallback the attachment
-// table's column synthesis uses, so the two read paths agree.
-func resolveAttachment(bags []mapi.PropertyValues, attachID uint32) (mapi.PropertyValues, bool) {
+// table's column synthesis uses, so the two read paths agree. It also reports the
+// bag's position among the message's attachments.
+func resolveAttachment(bags []mapi.PropertyValues, attachID uint32) (mapi.PropertyValues, int, bool) {
 	anyNumbered := false
-	for _, b := range bags {
+	for i, b := range bags {
 		if v, ok := b.Get(mapi.PrAttachNum); ok {
 			anyNumbered = true
 			// #nosec G115 -- the signed and unsigned views of the same 32 bits
 			if n, ok := v.(int32); ok && uint32(n) == attachID {
-				return b, true
+				return b, i, true
 			}
 		}
 	}
 	if !anyNumbered && int(attachID) < len(bags) {
-		return bags[attachID], true
+		return bags[attachID], int(attachID), true
 	}
-	return nil, false
+	return nil, 0, false
 }
 
 // ropGetAttachmentTable handles RopGetAttachmentTable ([MS-OXCMSG] 2.2.3.18): it
@@ -122,11 +124,15 @@ func (s *Session) ropOpenAttachment(p *ext.Pull, out *ext.Push, handles []uint32
 		writeErr(out, ropOpenAttachment, ohindex, ecNotFound)
 		return true
 	}
-	bag, ok := resolveAttachment(bags, attachID)
+	bag, pos, ok := resolveAttachment(bags, attachID)
 	if !ok {
 		writeErr(out, ropOpenAttachment, ohindex, ecNotFound)
 		return true
 	}
+	// The record key is computed, not stored; an opened attachment reports the
+	// same key its attachment table row does.
+	bag = slices.Clone(bag)
+	bag.Set(mapi.PrRecordKey, attachmentRecordKey(pos))
 	att := &object{kind: kindAttachment, store: msg.store, attachProps: bag}
 	bindStoredAttachment(att, msg, attachID)
 	h := s.alloc(att)

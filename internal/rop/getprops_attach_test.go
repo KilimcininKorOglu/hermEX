@@ -34,6 +34,16 @@ func TestGetPropertiesOnAnOpenAttachment(t *testing.T) {
 		t.Fatalf("decode TPROPVAL_ARRAY: %v", err)
 	}
 	wantProp(t, all, mapi.PrAttachLongFilename, "a.bin", "GetPropertiesAll filename")
+
+	// The record key is computed; the opened attachment reports the key its
+	// attachment table row carries.
+	keyCols := []mapi.PropTag{mapi.PrRecordKey}
+	gk, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, keyCols), []uint32{attachH})
+	p = ropOK(t, gk, ropGetPropertiesSpecific, "GetPropertiesSpecific(record key)")
+	v, _ := decodeRow(t, p, keyCols).Get(mapi.PrRecordKey)
+	if key, _ := v.([]byte); !slices.Equal(key, attachmentRecordKey(0)) {
+		t.Errorf("attachment record key = %x, want %x", v, attachmentRecordKey(0))
+	}
 }
 
 // TestGetPropertiesListNamesEveryTag proves RopGetPropertiesList answers the
