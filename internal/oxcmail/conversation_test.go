@@ -41,6 +41,12 @@ func TestImportDerivesTheConversation(t *testing.T) {
 	if topic, _ := importConv(t, "Subject: RE: Budget\r\nThread-Topic: Plan\r\n"); topic != "Plan" {
 		t.Errorf("topic %q, want the Thread-Topic header kept", topic)
 	}
+	// A Thread-Topic that decodes to nothing names no topic, so the subject does.
+	for _, h := range []string{"Thread-Topic: =?utf-8?Q??=\r\n", "Thread-Topic:  \r\n"} {
+		if topic, _ := importConv(t, "Subject: RE: Budget\r\n"+h); topic != "Budget" {
+			t.Errorf("%q: topic %q, want the normalized subject", h, topic)
+		}
+	}
 }
 
 // TestImportReadsTheThreadIndex proves a Thread-Index header is kept as the

@@ -110,7 +110,7 @@ func (s *Store) ModifyMessageProperties(messageID int64, props mapi.PropertyValu
 		return err
 	}
 	defer tx.Rollback()
-	if err := s.insertProps(tx, "message_properties", "message_id", messageID, props); err != nil {
+	if err := s.insertProps(tx, "message_properties", "message_id", messageID, rectifyTopic(props, false)); err != nil {
 		return err
 	}
 	if len(deletes) > 0 {

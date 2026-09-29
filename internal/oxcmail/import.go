@@ -225,8 +225,10 @@ func importThreadFields(hdr textproto.MIMEHeader, msg *Message) {
 			msg.Props.Set(mapi.PrClientSubmitTime, mapi.UnixToNTTime(t))
 		}
 	}
-	if v := hdr.Get("Thread-Topic"); v != "" {
-		msg.Props.Set(mapi.PrConversationTopic, decodeHeaderWord(v))
+	// A topic that decodes to nothing is no topic: importConversation then takes
+	// the subject, so the message does not land in an unnamed conversation.
+	if v := strings.TrimSpace(decodeHeaderWord(hdr.Get("Thread-Topic"))); v != "" {
+		msg.Props.Set(mapi.PrConversationTopic, v)
 	}
 }
 

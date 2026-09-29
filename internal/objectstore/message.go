@@ -74,6 +74,7 @@ func (s *Store) CreateMessage(folderID int64, msg *oxcmail.Message) (int64, erro
 // through RopSetMessageStatus. The creation is also stamped as the message's last
 // modification unless the caller carried one.
 func (s *Store) insertMessageProps(tx *sql.Tx, id int64, props mapi.PropertyValues) error {
+	props = rectifyTopic(props, true)
 	if err := s.insertProps(tx, "message_properties", "message_id", id, props); err != nil {
 		return err
 	}
