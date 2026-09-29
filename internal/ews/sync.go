@@ -50,7 +50,8 @@ type itemChanges struct {
 }
 
 type itemChange struct {
-	Message oxews.Message
+	Message      *oxews.Message
+	CalendarItem *oxews.CalendarItem
 }
 
 type deleteItemChange struct {
@@ -99,19 +100,18 @@ func (s *Server) handleSyncFolderItems(w http.ResponseWriter, inner []byte, sess
 		return
 	}
 
-	live, err := ctx.st.ListMessages(ctx.fid)
+	all, err := ctx.pending(snap)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
-	all := pendingItemChanges(live, snap, ctx)
-	includesLast := true
-	if max := syncBatchLimit(req.MaxChangesReturned); len(all) > max {
-		all = all[:max]
-		includesLast = false
-	}
+	all, includesLast := syncBatch(all, req.MaxChangesReturned)
 	ctx.fields = fields
-	changes, newSnap := renderItemChanges(all, snap, ctx)
+	changes, newSnap, err := renderItemChanges(all, snap, ctx)
+	if err != nil {
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
+		return
+	}
 
 	newToken := nextSyncState(fstate.SyncState)
 	fstate.SyncState = newToken
@@ -139,6 +139,93 @@ type itemSyncContext struct {
 	stateStore *objectstore.Store // holds the sync cursor
 	stateKey   string
 	fields     []extField // the extended properties each change row carries
+	// calendar is the reader of a calendar folder, whose items live in the object
+	// store only and are versioned by change number; nil for a mail folder.
+	calendar *calendarReader
+}
+
+// pending lists the changes the folder holds against the snapshot. A mail folder
+// is diffed on its IMAP flags; a calendar folder, whose items are not in the IMAP
+// index, on each object's change number, which every write advances.
+func (ctx *itemSyncContext) pending(snap map[string]int64) ([]pendingItem, error) {
+	calendar, err := isCalendarFolder(ctx.st, ctx.fid)
+	if err != nil {
+		return nil, err
+	}
+	if !calendar {
+		live, err := ctx.st.ListMessages(ctx.fid)
+		if err != nil {
+			return nil, err
+		}
+		return pendingItemChanges(live, snap, *ctx), nil
+	}
+	if ctx.calendar, err = newCalendarReader(ctx.st); err != nil {
+		return nil, err
+	}
+	objs, err := ctx.st.ListFolderObjects(ctx.fid)
+	if err != nil {
+		return nil, err
+	}
+	return pendingObjectChanges(objs, snap, *ctx), nil
+}
+
+// pendingObjectChanges diffs a folder's stored objects against the snapshot: an
+// object the snapshot does not hold is a create, one whose change number moved an
+// update, and a snapshot entry no longer stored a delete.
+func pendingObjectChanges(objs []objectstore.FolderObject, snap map[string]int64, ctx itemSyncContext) []pendingItem {
+	liveSet := make(map[string]bool, len(objs))
+	var all []pendingItem
+	for _, o := range objs {
+		id := oxews.EncodeItemID(oxews.ItemID{FolderID: ctx.fid, MessageID: o.ID, Mailbox: ctx.idMailbox})
+		liveSet[id] = true
+		// #nosec G115 -- a change number is read from SQLite's signed 64-bit column
+		cn := int64(o.ChangeNumber)
+		if prev, ok := snap[id]; !ok {
+			all = append(all, pendingItem{kind: "create", id: id, flag: cn, objID: o.ID})
+		} else if prev != cn {
+			all = append(all, pendingItem{kind: "update", id: id, flag: cn, objID: o.ID})
+		}
+	}
+	return appendDeletes(all, snap, liveSet)
+}
+
+// appendDeletes adds a delete for every snapshot entry no longer live, sorted so
+// the batch boundary is deterministic.
+func appendDeletes(all []pendingItem, snap map[string]int64, liveSet map[string]bool) []pendingItem {
+	var delIDs []string
+	for id := range snap {
+		if !liveSet[id] {
+			delIDs = append(delIDs, id)
+		}
+	}
+	slices.Sort(delIDs)
+	for _, id := range delIDs {
+		all = append(all, pendingItem{kind: "delete", id: id})
+	}
+	return all
+}
+
+// syncBatch cuts the changes to the batch the request allows, reporting whether
+// the batch holds the last of them.
+func syncBatch(all []pendingItem, requested int) ([]pendingItem, bool) {
+	if max := syncBatchLimit(requested); len(all) > max {
+		return all[:max], false
+	}
+	return all, true
+}
+
+// changeItem renders the item a create or update change carries.
+func (ctx itemSyncContext) changeItem(p pendingItem) (itemChange, error) {
+	if ctx.calendar == nil {
+		m := summaryWith(ctx.st, ctx.fid, p.info, ctx.idMailbox, ctx.fields)
+		return itemChange{Message: &m}, nil
+	}
+	item, err := ctx.calendar.item(oxews.ItemID{FolderID: ctx.fid, MessageID: p.objID, Mailbox: ctx.idMailbox}, p.id)
+	if err != nil {
+		return itemChange{}, err
+	}
+	item.ExtendedProperties = readExtended(ctx.st, p.objID, ctx.fields)
+	return itemChange{CalendarItem: &item}, nil
 }
 
 // prepareItemSync resolves the requested folder, opens the store that holds its
@@ -218,8 +305,10 @@ func syncBatchLimit(requested int) int {
 type pendingItem struct {
 	kind string
 	id   string
-	flag int64
+	flag int64 // the IMAP flags of a mail item, the change number of a stored object
 	info objectstore.MessageInfo
+	// objID is the message id of a stored object, which has no IMAP index row.
+	objID int64
 }
 
 // pendingItemChanges diffs the live folder against the snapshot: a live item the
@@ -238,40 +327,34 @@ func pendingItemChanges(live []objectstore.MessageInfo, snap map[string]int64, c
 			all = append(all, pendingItem{kind: "update", id: id, flag: info.Flags, info: info})
 		}
 	}
-	var delIDs []string
-	for id := range snap {
-		if !liveSet[id] {
-			delIDs = append(delIDs, id)
-		}
-	}
-	slices.Sort(delIDs)
-	for _, id := range delIDs {
-		all = append(all, pendingItem{kind: "delete", id: id})
-	}
-	return all
+	return appendDeletes(all, snap, liveSet)
 }
 
 // renderItemChanges builds the response changes and advances a fresh copy of the
 // snapshot for the sent changes only, so unsent changes stay in the old snapshot
 // and the next sync reports them again.
-func renderItemChanges(all []pendingItem, snap map[string]int64, ctx itemSyncContext) (*itemChanges, map[string]int64) {
+func renderItemChanges(all []pendingItem, snap map[string]int64, ctx itemSyncContext) (*itemChanges, map[string]int64, error) {
 	newSnap := make(map[string]int64, len(snap))
 	maps.Copy(newSnap, snap)
 	changes := &itemChanges{}
 	for _, p := range all {
-		switch p.kind {
-		case "create":
-			changes.Create = append(changes.Create, itemChange{Message: summaryWith(ctx.st, ctx.fid, p.info, ctx.idMailbox, ctx.fields)})
-			newSnap[p.id] = p.flag
-		case "update":
-			changes.Update = append(changes.Update, itemChange{Message: summaryWith(ctx.st, ctx.fid, p.info, ctx.idMailbox, ctx.fields)})
-			newSnap[p.id] = p.flag
-		case "delete":
+		if p.kind == "delete" {
 			changes.Delete = append(changes.Delete, deleteItemChange{ItemID: oxews.ItemIDElem{ID: p.id}})
 			delete(newSnap, p.id)
+			continue
 		}
+		c, err := ctx.changeItem(p)
+		if err != nil {
+			return nil, nil, err
+		}
+		if p.kind == "create" {
+			changes.Create = append(changes.Create, c)
+		} else {
+			changes.Update = append(changes.Update, c)
+		}
+		newSnap[p.id] = p.flag
 	}
-	return changes, newSnap
+	return changes, newSnap, nil
 }
 
 // writeSyncItemsError writes a SyncFolderItems error response message.
