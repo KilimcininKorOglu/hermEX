@@ -557,8 +557,9 @@ func TestScheduledSendInASharedNameIsSentByTheScheduler(t *testing.T) {
 }
 
 // TestScheduledSendInAnUngrantedNameIsRefused releases a message in alice's Outbox
-// whose From names a mailbox that grants her nothing, as a MAPI client can store by
-// setting the deferred-send time itself. It must not go out under that name, nor
+// whose From names a mailbox that grants her nothing, as IMAP APPEND followed by a
+// MAPI SetProperties of the deferred-send time stores. It must not go out under
+// that name, nor
 // be filed in that mailbox's Sent Items.
 func TestScheduledSendInAnUngrantedNameIsRefused(t *testing.T) {
 	accounts, aliceDir, sharedDir := sharedScheduleWorld(t, objectstore.SentCopyConfig{ForSendAs: true, ForSendOnBehalf: true})

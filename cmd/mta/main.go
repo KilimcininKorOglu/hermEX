@@ -476,9 +476,9 @@ var errScheduledFrom = errors.New("scheduled message names a From its owner may 
 
 // authorizeScheduledFrom checks the From header of a message released from owner's
 // Outbox against the same send-as gate every live send clears. The Outbox is not
-// written by webmail alone: a MAPI client can store a message there and set its
-// deferred-send time itself, with any identity in it, so the release is the one
-// point every scheduled message passes. The grant is also read at release rather
+// written by webmail alone: IMAP APPEND files a message with any From header there,
+// and a MAPI SetProperties then gives it a deferred-send time, so the release is the
+// one point every scheduled message passes. The grant is also read at release rather
 // than trusted from scheduling, so a grant revoked in between stops the send.
 func authorizeScheduledFrom(dir directory.Accounts, owner string, raw []byte) error {
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
