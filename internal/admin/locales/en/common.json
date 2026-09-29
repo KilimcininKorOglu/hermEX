@@ -16,7 +16,6 @@
     "langSaveFailed": "The language could not be saved."
   },
   "login": {
-    "desc": "Sign in with an administrator account.",
     "email": "Email",
     "password": "Password",
     "submit": "Sign in",

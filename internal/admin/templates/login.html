@@ -4,7 +4,7 @@
 {{template "theme-toggle"}}
 </div>
 <main class="login">
-<div class="login-brand">{{template "brand"}}<div><h1>{{t "common.appTitle"}}</h1><p class="page-desc">{{t "login.desc"}}</p></div></div>
+<div class="login-brand">{{template "brand"}}<div><h1>{{t "common.appTitle"}}</h1></div></div>
 {{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
 <form method="post" action="/admin/ui/login">
 <label>{{t "login.email"}}

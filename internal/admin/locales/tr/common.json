@@ -16,7 +16,6 @@
     "langSaveFailed": "Dil kaydedilemedi."
   },
   "login": {
-    "desc": "Bir yönetici hesabıyla giriş yapın.",
     "email": "E-posta",
     "password": "Parola",
     "submit": "Giriş yap",
