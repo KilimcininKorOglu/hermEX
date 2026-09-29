@@ -126,7 +126,6 @@ func (s *Server) serveAutodiscoverSOAP(w http.ResponseWriter, r *http.Request) {
 // requested settings hermEX can answer, omitting any it has no value for (an
 // unavailable setting is simply absent, which the client tolerates).
 func (s *Server) writeUserSettings(w http.ResponseWriter, host, user string, req *adUserSettingsRequest) {
-	ewsURL := "https://" + host + "/EWS/Exchange.asmx"
 	n := len(req.Request.Users.User)
 	if n == 0 {
 		n = 1
@@ -142,7 +141,7 @@ func (s *Server) writeUserSettings(w http.ResponseWriter, host, user string, req
 			"<UserSettingErrors/>"+
 			"<UserSettings>")
 		for _, name := range req.Request.RequestedSettings.Setting {
-			if v, ok := userSettingValue(name, ewsURL, user); ok {
+			if v, ok := userSettingValue(name, host, user); ok {
 				writeADSetting(w, "UserSetting", "StringSetting", name, v)
 			}
 		}
@@ -184,12 +183,15 @@ func (s *Server) writeDomainSettings(w http.ResponseWriter, host string, req *ad
 
 // userSettingValue maps a requested setting name to the value hermEX serves for it,
 // or ok=false when hermEX has no value (the setting is then omitted from the
-// response). The EWS URLs are host-global; the identity settings echo the
+// response). The EWS and web frontend URLs are host-global; the identity settings echo the
 // authenticated caller, never the request body's mailbox.
-func userSettingValue(name, ewsURL, user string) (string, bool) {
+func userSettingValue(name, host, user string) (string, bool) {
 	switch name {
 	case "ExternalEwsUrl", "InternalEwsUrl":
-		return ewsURL, true
+		return "https://" + host + "/EWS/Exchange.asmx", true
+	case "ExternalEcpUrl", "InternalEcpUrl":
+		// The web frontend, the same EcpUrl the POX response carries.
+		return "https://" + host + "/", true
 	case "AutoDiscoverSMTPAddress", "UserDisplayName":
 		return user, true
 	case "EwsSupportedSchemas":

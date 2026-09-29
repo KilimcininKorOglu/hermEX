@@ -184,4 +184,11 @@ func TestAutodiscover(t *testing.T) {
 			t.Errorf("autodiscover missing RPC/HTTP marker %q, got: %s", want, body)
 		}
 	}
+	// The profile picture link: EcpUrl is the web frontend and EcpUrl-photo the
+	// settings page, relative to it, where the photo is changed.
+	for _, want := range []string{"<EcpUrl>https://mail.hermex.test/</EcpUrl>", "<EcpUrl-photo>settings</EcpUrl-photo>"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("autodiscover missing %q, got: %s", want, body)
+		}
+	}
 }

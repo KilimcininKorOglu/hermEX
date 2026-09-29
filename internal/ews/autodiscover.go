@@ -46,7 +46,15 @@ type adProtocol struct {
 	SSL                    string `xml:"SSL,omitempty"`
 	AuthPackage            string `xml:"AuthPackage,omitempty"`
 	ServerExclusiveConnect string `xml:"ServerExclusiveConnect,omitempty"`
+	// Outlook opens EcpUrl joined with EcpUrl-photo when the user asks to change
+	// the profile picture, so the pair names the webmail settings page.
+	EcpURL      string `xml:"EcpUrl,omitempty"`
+	EcpURLPhoto string `xml:"EcpUrl-photo,omitempty"`
 }
+
+// ecpPhotoPath is the webmail page, relative to the web frontend root, where
+// the user changes the profile picture.
+const ecpPhotoPath = "settings"
 
 // serveAutodiscover answers the Outlook Autodiscover request (MS-OXDSCLI): it
 // authenticates, then returns the EWS endpoint URL the client should bind to.
@@ -89,6 +97,8 @@ func (s *Server) serveAutodiscover(w http.ResponseWriter, r *http.Request) {
 					SSL:                    "On",
 					AuthPackage:            "Basic",
 					ServerExclusiveConnect: "On",
+					EcpURL:                 "https://" + host + "/",
+					EcpURLPhoto:            ecpPhotoPath,
 				},
 			},
 		},

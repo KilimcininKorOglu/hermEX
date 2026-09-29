@@ -136,6 +136,26 @@ func TestAutodiscoverSOAPGetUserSettings(t *testing.T) {
 	}
 }
 
+// TestAutodiscoverSOAPEcpUrl proves the SOAP endpoint names the same web
+// frontend the POX response's EcpUrl does, so a client reaches the profile
+// picture page by either discovery path.
+func TestAutodiscoverSOAPEcpUrl(t *testing.T) {
+	ts := newTestServer(t)
+	resp, out := adSoapPost(t, ts, userSettingsEnvelope(testUser, "ExternalEcpUrl", "InternalEcpUrl"), true)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, out)
+	}
+	var env adReplyEnvelope
+	if err := xml.Unmarshal([]byte(out), &env); err != nil {
+		t.Fatalf("parse response: %v\n%s", err, out)
+	}
+	for _, name := range []string{"ExternalEcpUrl", "InternalEcpUrl"} {
+		if got := env.Body.Reply.settingValue(name); got != "https://mail.hermex.test/" {
+			t.Errorf("%s = %q, want https://mail.hermex.test/", name, got)
+		}
+	}
+}
+
 // TestAutodiscoverSOAPOmitsUnknownSetting proves a requested setting hermEX has no
 // value for is omitted from the response rather than answered with an empty or
 // fabricated value.
