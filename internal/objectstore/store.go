@@ -328,6 +328,7 @@ func openKind(dir string, seedBuiltins bool, kind storeKind) (*Store, error) {
 		s.upgradeLegacyTasks()
 		s.upgradeSMIMEMessages()
 		s.repairDatelessMessages()
+		s.repairAppendedReadState()
 	}
 	return s, nil
 }

@@ -62,5 +62,6 @@ const (
 	cfgAnonymousPerm     = 9
 	cfgSchemaVersion     = 10
 	cfgMappingSignature  = 11
-	// cfgDatelessRepaired (12) is declared beside its repair in datelessrepair.go.
+	// cfgDatelessRepaired (12) is declared beside its repair in datelessrepair.go,
+	// cfgReadStateRepaired (13) beside its own in readstaterepair.go.
 )
