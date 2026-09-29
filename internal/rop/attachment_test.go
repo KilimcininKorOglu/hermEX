@@ -187,3 +187,20 @@ func TestAttachmentReadChain(t *testing.T) {
 		t.Errorf("attachment data = %q, want \"ATTACHDATA\"", got)
 	}
 }
+
+// TestAttachmentTableColumnsAll proves RopQueryColumnsAll on an attachment table
+// lists the attachments' stored tags and the synthesized row keys, not only the
+// chosen columns.
+func TestAttachmentTableColumnsAll(t *testing.T) {
+	dir := t.TempDir()
+	msgID := seedAttachmentMessage(t, dir)
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	folderEID := uint64(mapi.MakeEIDEx(1, uint64(mapi.PrivateFIDInbox)))
+	msgEID := uint64(mapi.MakeEIDEx(1, uint64(msgID)))
+	_, h = sess.Dispatch(buildOpenMessage(0, 1, folderEID, msgEID), []uint32{h[0], 0xFFFFFFFF})
+	_, h = sess.Dispatch(buildGetAttachmentTable(0, 1), []uint32{h[1], 0xFFFFFFFF})
+	sess.Dispatch(buildSetColumns(0, []mapi.PropTag{mapi.PrAttachNum}), []uint32{h[1]})
+	assertColumnsAll(t, sess, h[1], mapi.PrAttachNum, mapi.PrAttachLongFilename, mapi.PrRecordKey, mapi.PrMid)
+}

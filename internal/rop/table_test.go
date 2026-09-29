@@ -2,6 +2,7 @@ package rop
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -237,6 +238,27 @@ func TestQueryRowsHierarchy(t *testing.T) {
 	if !found {
 		t.Errorf("hierarchy rows did not include Inbox (%d rows)", len(rows))
 	}
+	assertColumnsAll(t, sess, tableH, mapi.PrDisplayName, mapi.PrContainerClass, mapi.PrContentCount, mapi.PrFolderID, mapi.PrEntryID)
+}
+
+// assertColumnsAll checks that RopQueryColumnsAll lists every wanted tag, whatever
+// the column set, and lists each tag once in ascending order.
+func assertColumnsAll(t *testing.T, sess *Session, tableH uint32, want ...mapi.PropTag) {
+	t.Helper()
+	qc, _ := sess.Dispatch(toROPRequest(ropQueryColumnsAll, 0, nil), []uint32{tableH})
+	p := ropOK(t, qc, ropQueryColumnsAll, "QueryColumnsAll")
+	got, err := p.PropTags()
+	if err != nil {
+		t.Fatalf("QueryColumnsAll PropTags: %v", err)
+	}
+	for _, tag := range want {
+		if !slices.Contains(got, tag) {
+			t.Errorf("QueryColumnsAll lacks %v: %v", tag, got)
+		}
+	}
+	if !slices.IsSorted(got) || len(slices.Compact(slices.Clone(got))) != len(got) {
+		t.Errorf("QueryColumnsAll = %v, want each tag once in ascending order", got)
+	}
 }
 
 // sortOrderEntry is one SortOrder for buildSortTable.
@@ -287,16 +309,8 @@ func TestTableStatusOps(t *testing.T) {
 	p := ropOK(t, gs, ropGetStatus, "GetStatus")
 	wantU8(t, p, "GetStatus status", tableStatusComplete)
 
-	// QueryColumnsAll: the display column set (PR_SUBJECT).
-	qc, _ := sess.Dispatch(toROPRequest(ropQueryColumnsAll, 0, nil), []uint32{tableH})
-	p = ropOK(t, qc, ropQueryColumnsAll, "QueryColumnsAll")
-	gotCols, err := p.PropTags()
-	if err != nil {
-		t.Fatalf("QueryColumnsAll PropTags: %v", err)
-	}
-	if len(gotCols) != 1 || gotCols[0] != mapi.PrSubject {
-		t.Errorf("QueryColumnsAll columns = %v, want [PrSubject]", gotCols)
-	}
+	// QueryColumnsAll: every column the rows can produce, not just the chosen one.
+	assertColumnsAll(t, sess, tableH, mapi.PrSubject, mapi.PrMessageClass, mapi.PrMid, mapi.PrMessageFlags, mapi.PrRead)
 
 	// QueryPosition: cursor at the start, denominator = row count.
 	assertTablePosition(t, sess, tableH, "initial", 0, 3)

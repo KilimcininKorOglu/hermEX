@@ -3,6 +3,7 @@ package rop
 import (
 	"bytes"
 	"cmp"
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -1201,19 +1202,78 @@ func (s *Session) ropSeekRowFractional(p *ext.Pull, out *ext.Push, handles []uin
 }
 
 // ropQueryColumnsAll handles RopQueryColumnsAll ([MS-OXCTABL] 2.2.2.3): it returns
-// the property tags the table can produce. hermEX projects columns on demand with no
-// fixed schema, so the answer is the currently configured display column set (empty
-// before the first RopSetColumns).
+// every property tag the table's rows can produce, whatever the current column
+// set: the tags stored on the rows plus the ones the table computes, once each
+// and in ascending order.
 func (s *Session) ropQueryColumnsAll(_ *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	table, ok := s.openTable(out, ropQueryColumnsAll, handles, hindex, ecNotSupported)
 	if !ok {
 		return true
 	}
+	tags, err := table.table.allColumns(table.store)
+	if err != nil {
+		writeErr(out, ropQueryColumnsAll, hindex, ecError)
+		return true
+	}
 	out.Uint8(ropQueryColumnsAll)
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
-	_ = out.PropTags(table.table.columns) // PropertyTags (PROPTAG_ARRAY); nil => count 0
+	_ = out.PropTags(tags) // PropertyTags (PROPTAG_ARRAY)
 	return true
+}
+
+// allColumns lists every tag the table's rows can produce: the stored tags of its
+// base rows and the tags rowProps synthesizes for its kind.
+func (t *tableState) allColumns(store *objectstore.Store) ([]mapi.PropTag, error) {
+	var tags []mapi.PropTag
+	switch t.kind {
+	case tableContents, tableHierarchy:
+		var err error
+		if tags, err = t.storedColumns(store); err != nil {
+			return nil, err
+		}
+	case tableAttachment:
+		tags = append(bagTags(t.attachments), mapi.PrAttachNum, mapi.PrRecordKey, mapi.PrMid)
+	case tablePermission:
+		tags = bagTags(t.permissions)
+	case tableRules:
+		tags = bagTags(t.rules)
+	}
+	slices.Sort(tags)
+	return slices.Compact(tags), nil
+}
+
+// storedColumns lists the columns of a table whose rows live in the store: the
+// tags stored on its messages or folders plus the ones the store and rowProps
+// compute for them.
+func (t *tableState) storedColumns(store *objectstore.Store) ([]mapi.PropTag, error) {
+	if store == nil {
+		return nil, errNoStore
+	}
+	if t.kind == tableContents {
+		tags, err := store.MessagePropTags(t.messageIDs)
+		return append(append(tags, objectstore.ComputedMessageTags...), mapi.PrMid), err
+	}
+	ids := make([]int64, len(t.folders))
+	for i, f := range t.folders {
+		ids[i] = f.ID
+	}
+	tags, err := store.FolderPropTags(ids)
+	return append(append(tags, computedFolderTags...), folderIdentityTags...), err
+}
+
+// errNoStore reports a store-backed table that is bound to no store.
+var errNoStore = errors.New("rop: table has no store")
+
+// bagTags lists the tags of in-memory row bags.
+func bagTags(rows []mapi.PropertyValues) []mapi.PropTag {
+	var tags []mapi.PropTag
+	for _, row := range rows {
+		for _, tv := range row {
+			tags = append(tags, tv.Tag)
+		}
+	}
+	return tags
 }
 
 // ropAbort handles RopAbort ([MS-OXCTABL] 2.2.2.8): it would stop an in-progress
