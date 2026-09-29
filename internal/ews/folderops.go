@@ -20,11 +20,33 @@ type createFolderRequest struct {
 }
 
 // newFolderXML is one folder a CreateFolder names. Its element name is its kind:
-// a t:SearchFolder is created as a search folder over its SearchParameters.
+// a t:SearchFolder is created as a search folder over its SearchParameters, and
+// a calendar, contacts or tasks folder holds that kind of item.
 type newFolderXML struct {
 	XMLName          xml.Name
+	FolderClass      string               `xml:"FolderClass"`
 	DisplayName      string               `xml:"DisplayName"`
 	SearchParameters *searchParametersXML `xml:"SearchParameters"`
+}
+
+// elementClasses are the container classes the typed folder elements create a
+// folder with when the request names none.
+var elementClasses = map[string]string{
+	"Folder":         mapi.ContainerClassNote,
+	"CalendarFolder": mapi.ContainerClassAppointment,
+	"ContactsFolder": mapi.ContainerClassContact,
+	"TasksFolder":    mapi.ContainerClassTask,
+}
+
+// class is the container class the folder is created with: the one the request
+// names, else the one its element stands for. ok is false for an element that
+// is no folder kind.
+func (f newFolderXML) class() (string, bool) {
+	class, ok := elementClasses[f.XMLName.Local]
+	if f.FolderClass != "" {
+		class = f.FolderClass
+	}
+	return class, ok
 }
 
 // searchParametersXML is a search folder's t:SearchParameters: what it searches
@@ -87,11 +109,22 @@ func createOneFolder(st *objectstore.Store, parentFID int64, parent *int64, f ne
 	if f.XMLName.Local == "SearchFolder" {
 		return createSearchFolder(st, parentFID, f)
 	}
+	class, ok := f.class()
+	if !ok {
+		return folderError("ErrorInvalidRequest")
+	}
 	fid, err := st.CreateFolder(parent, f.DisplayName)
 	if err != nil {
 		return folderError("ErrorInternalServerError")
 	}
-	return createdFolder(fid, f.DisplayName, false)
+	// CreateFolder makes a mail folder; give any other kind its class.
+	if class != mapi.ContainerClassNote {
+		err = st.SetFolderProperties(fid, mapi.PropertyValues{{Tag: mapi.PrContainerClass, Value: class}})
+	}
+	if err != nil {
+		return folderError("ErrorInternalServerError")
+	}
+	return createdFolder(oxews.FolderInput{FolderID: fid, DisplayName: f.DisplayName, Class: class})
 }
 
 // createSearchFolder creates a search folder and gives it the criteria its
@@ -118,7 +151,7 @@ func createSearchFolder(st *objectstore.Store, parentFID int64, f newFolderXML) 
 			return folderError(searchCriteriaCode(err))
 		}
 	}
-	return createdFolder(fid, f.DisplayName, true)
+	return createdFolder(oxews.FolderInput{FolderID: fid, DisplayName: f.DisplayName, Search: true})
 }
 
 // searchCriteria reads SearchParameters into store search criteria: a running
@@ -171,8 +204,8 @@ func searchScope(refs *folderRefs) ([]int64, string) {
 }
 
 // createdFolder is the response to a folder created as asked.
-func createdFolder(fid int64, name string, search bool) folderResponseMessage {
-	elem := oxews.BuildFolder(oxews.FolderInput{FolderID: fid, DisplayName: name, Search: search})
+func createdFolder(in oxews.FolderInput) folderResponseMessage {
+	elem := oxews.BuildFolder(in)
 	return folderResponseMessage{
 		ResponseClass: "Success", ResponseCode: "NoError",
 		Folders: &foldersWrap{Folders: []oxews.Folder{elem}},

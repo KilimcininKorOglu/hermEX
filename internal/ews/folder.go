@@ -906,6 +906,12 @@ func buildFolderElem(st *objectstore.Store, info objectstore.FolderInfo, childre
 	if err != nil {
 		return oxews.Folder{}, err
 	}
+	props, err := st.GetFolderProperties(info.ID, mapi.PrContainerClass)
+	if err != nil {
+		return oxews.Folder{}, err
+	}
+	v, _ := props.Get(mapi.PrContainerClass)
+	class, _ := v.(string)
 	// A top-level folder (nil store parent) hangs off the IPM subtree root, so
 	// clients can place it under the mailbox root when building the tree. A public
 	// store's top-level folders hang off the public IPM subtree (publicfoldersroot),
@@ -928,6 +934,7 @@ func buildFolderElem(st *objectstore.Store, info objectstore.FolderInfo, childre
 		Children:     children,
 		Mailbox:      mailbox,
 		Search:       search,
+		Class:        class,
 	}), nil
 }
 
