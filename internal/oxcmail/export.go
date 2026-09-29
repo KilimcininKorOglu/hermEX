@@ -410,6 +410,11 @@ func writeThreadFields(b *bytes.Buffer, msg *Message) {
 	if topic := propString(msg.Props, mapi.PrConversationTopic); topic != "" {
 		writeField(b, "Thread-Topic", encodeText(topic))
 	}
+	if idx, ok := msg.Props.Get(mapi.PrConversationIndex); ok {
+		if raw, ok := idx.([]byte); ok && len(raw) >= 22 {
+			writeField(b, "Thread-Index", base64.StdEncoding.EncodeToString(raw))
+		}
+	}
 	for _, f := range []struct {
 		field string
 		tag   mapi.PropTag

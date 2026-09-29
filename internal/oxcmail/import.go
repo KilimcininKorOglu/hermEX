@@ -1,9 +1,11 @@
 package oxcmail
 
 import (
+	"encoding/base64"
 	stdmime "mime"
 	"net/mail"
 	"net/textproto"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -139,8 +141,37 @@ func importConversation(hdr textproto.MIMEHeader, msg *Message) {
 			msg.Props.Set(mapi.PrConversationTopic, n)
 		}
 	}
-	msg.Props.Set(mapi.PrConversationId, conversation.IDFromParts(
-		hdr.Get("References"), hdr.Get("In-Reply-To"), hdr.Get("Message-Id"), hdr.Get("Subject")))
+	idx := threadIndex(hdr.Get("Thread-Index"))
+	if idx == nil {
+		id := conversation.IDFromParts(hdr.Get("References"), hdr.Get("In-Reply-To"), hdr.Get("Message-Id"), hdr.Get("Subject"))
+		idx = conversation.Index(id, conversationTime(msg.Props))
+	}
+	msg.Props.Set(mapi.PrConversationIndex, idx)
+	// [MS-OXOMSG] 2.2.1.2: the conversation id is the GUID the index header carries,
+	// so a reply whose sender continued the original's index joins its conversation.
+	msg.Props.Set(mapi.PrConversationId, slices.Clone(idx[6:22]))
+}
+
+// threadIndex decodes a Thread-Index header into a conversation index: a 22-byte
+// header and any number of 5-byte child blocks. A value of any other shape is not
+// an index and is ignored.
+func threadIndex(v string) []byte {
+	b, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(v), ""))
+	if err != nil || len(b) < 22 || (len(b)-22)%5 != 0 {
+		return nil
+	}
+	return b
+}
+
+// conversationTime is the time a new conversation index is stamped with: the
+// message's submit time, or now for a message without a Date.
+func conversationTime(props mapi.PropertyValues) time.Time {
+	if v, ok := props.Get(mapi.PrClientSubmitTime); ok {
+		if nt, ok := v.(uint64); ok {
+			return mapi.NTTimeToUnix(nt)
+		}
+	}
+	return time.Now()
 }
 
 // importOriginators fills the two originator identities.
