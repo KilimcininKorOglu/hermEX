@@ -26,13 +26,22 @@ type updateItemRequest struct {
 	// SuppressReadReceipts stops the read receipt that marking a message read
 	// otherwise sends ([MS-OXWSCORE] 3.1.4.9.3.1).
 	SuppressReadReceipts bool `xml:"SuppressReadReceipts,attr"`
-	ItemChanges          struct {
+	// SendMeetingInvitationsOrCancellations decides whether an edit of a meeting
+	// is sent to its attendees; a request changing a calendar item must carry it.
+	SendMeetingInvitationsOrCancellations string `xml:"SendMeetingInvitationsOrCancellations,attr"`
+	ItemChanges                           struct {
 		Changes []itemChangeReq `xml:"ItemChange"`
 	} `xml:"ItemChanges"`
 }
 
 type itemChangeReq struct {
-	ItemID  refID `xml:"ItemId"`
+	ItemID refID `xml:"ItemId"`
+	// Occurrence names the item as one occurrence of a series by its master and
+	// index, in place of an ItemId.
+	Occurrence *struct {
+		MasterID string `xml:"RecurringMasterId,attr"`
+		Index    int    `xml:"InstanceIndex,attr"`
+	} `xml:"OccurrenceItemId"`
 	Updates struct {
 		SetFields    []setItemField    `xml:"SetItemField"`
 		DeleteFields []deleteItemField `xml:"DeleteItemField"`
@@ -47,7 +56,9 @@ type setItemField struct {
 	// is the matching <t:ExtendedProperty> of the item element.
 	Extended *oxews.ExtendedFieldURI `xml:"ExtendedFieldURI"`
 	Message  updateMessageFields     `xml:"Message"`
-	Item     struct {
+	// CalendarItem carries the value of a field set on a calendar item.
+	CalendarItem createCalendarItem `xml:"CalendarItem"`
+	Item         struct {
 		Extended []oxews.ExtendedProperty `xml:"ExtendedProperty"`
 	} `xml:"Item"`
 }
@@ -125,16 +136,33 @@ func (s *Server) handleUpdateItem(w http.ResponseWriter, inner []byte, sess *ses
 
 	var msgs []itemResponseMessage
 	for _, ch := range req.ItemChanges.Changes {
-		msgs = append(msgs, s.updateOne(cache, sess, ch, disp, req.SuppressReadReceipts))
+		if ch.Occurrence != nil {
+			token, code := occurrenceToken(cache, sess, itemRef{MasterID: ch.Occurrence.MasterID, Index: ch.Occurrence.Index})
+			if code != "" {
+				msgs = append(msgs, itemError(code))
+				continue
+			}
+			ch.ItemID.ID = token
+		}
+		msgs = append(msgs, s.updateOne(cache, sess, ch, updateOptions{disp: disp, suppress: req.SuppressReadReceipts, send: req.SendMeetingInvitationsOrCancellations}))
 	}
 	writeResponse(w, updateItemResponse{Messages: msgs})
 }
 
-// updateOne applies one ItemChange and returns its response message. disp is the
-// request's MessageDisposition, which decides whether the updated message is
-// also transmitted; suppress stops the read receipt marking it read would send.
-func (s *Server) updateOne(cache *storeCache, sess *session, ch itemChangeReq, disp string, suppress bool) itemResponseMessage {
-	id, err := oxews.DecodeItemID(ch.ItemID.ID)
+// updateOptions are the request attributes an ItemChange is applied under: disp is
+// the MessageDisposition, which decides whether the updated message is also
+// transmitted; suppress stops the read receipt marking it read would send; send
+// decides whether an edited meeting goes to its attendees.
+type updateOptions struct {
+	disp, send string
+	suppress   bool
+}
+
+// updateOne applies one ItemChange and returns its response message. An item of
+// the object store alone (a calendar item or occurrence) has no IMAP uid and is
+// edited by its object id.
+func (s *Server) updateOne(cache *storeCache, sess *session, ch itemChangeReq, o updateOptions) itemResponseMessage {
+	id, err := oxews.DecodeAnyItemID(ch.ItemID.ID)
 	if err != nil {
 		return itemError("ErrorInvalidRequest")
 	}
@@ -143,6 +171,15 @@ func (s *Server) updateOne(cache *storeCache, sess *session, ch itemChangeReq, d
 	if code != "" {
 		return itemError(code)
 	}
+	if id.UID == 0 {
+		return s.updateCalendarItem(st, id, ch, o.send, sess.user)
+	}
+	return s.updateMessage(cache, sess, st, id, ch, o)
+}
+
+// updateMessage applies one ItemChange to an indexed message.
+func (s *Server) updateMessage(cache *storeCache, sess *session, st *objectstore.Store, id oxews.ItemID, ch itemChangeReq, o updateOptions) itemResponseMessage {
+	disp, suppress := o.disp, o.suppress
 	ext, code := checkedChange(st, ch)
 	if code != "" {
 		return itemError(code)
