@@ -12,6 +12,7 @@ const (
 	ropCreateMessage               uint8 = 0x06
 	ropGetPropertiesSpecific       uint8 = 0x07
 	ropGetPropertiesAll            uint8 = 0x08
+	ropGetPropertiesList           uint8 = 0x09
 	ropSetProperties               uint8 = 0x0A
 	ropSaveChangesMessage          uint8 = 0x0C
 	ropModifyRecipients            uint8 = 0x0E
@@ -122,6 +123,7 @@ var ropTable = map[uint8]ropHandler{
 	ropOpenMessage:                      (*Session).ropOpenMessage,
 	ropGetPropertiesSpecific:            (*Session).ropGetPropertiesSpecific,
 	ropGetPropertiesAll:                 (*Session).ropGetPropertiesAll,
+	ropGetPropertiesList:                (*Session).ropGetPropertiesList,
 	ropCreateMessage:                    (*Session).ropCreateMessage,
 	ropSetProperties:                    (*Session).ropSetProperties,
 	ropDeleteProperties:                 (*Session).ropDeleteProperties,

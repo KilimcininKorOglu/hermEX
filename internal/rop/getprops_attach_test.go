@@ -1,6 +1,7 @@
 package rop
 
 import (
+	"slices"
 	"testing"
 
 	"hermex/internal/mapi"
@@ -33,6 +34,46 @@ func TestGetPropertiesOnAnOpenAttachment(t *testing.T) {
 		t.Fatalf("decode TPROPVAL_ARRAY: %v", err)
 	}
 	wantProp(t, all, mapi.PrAttachLongFilename, "a.bin", "GetPropertiesAll filename")
+}
+
+// TestGetPropertiesListNamesEveryTag proves RopGetPropertiesList answers the
+// tags an object holds ([MS-OXCPRPT] 2.2.2.12) on a message, an attachment and
+// a folder.
+func TestGetPropertiesListNamesEveryTag(t *testing.T) {
+	dir := t.TempDir()
+	msgID := seedAttachmentMessage(t, dir)
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(msgID)))), []uint32{logonH, 0xFFFFFFFF})
+	msgH := h[1]
+	_, h = sess.Dispatch(buildOpenAttachment(0, 1, 0), []uint32{msgH, 0xFFFFFFFF})
+	attachH := h[1]
+	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	folderH := h[1]
+
+	for _, c := range []struct {
+		name   string
+		handle uint32
+		want   mapi.PropTag
+	}{
+		{"message", msgH, mapi.PrSubject},
+		{"attachment", attachH, mapi.PrAttachLongFilename},
+		{"folder", folderH, mapi.PrDisplayName},
+	} {
+		out, _ := sess.Dispatch([]byte{ropGetPropertiesList, 0, 0}, []uint32{c.handle})
+		p := ropOK(t, out, ropGetPropertiesList, c.name+" GetPropertiesList")
+		tags, err := p.PropTags()
+		if err != nil {
+			t.Fatalf("%s: decode tags: %v", c.name, err)
+		}
+		if !slices.Contains(tags, c.want) {
+			t.Errorf("%s tags %v lack %v", c.name, tags, c.want)
+		}
+		wantDrained(t, p, c.name+" GetPropertiesList")
+	}
 }
 
 // TestGetPropertiesOnACreatedAttachment proves a created attachment reads back

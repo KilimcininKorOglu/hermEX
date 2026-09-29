@@ -323,3 +323,33 @@ func (s *Session) ropGetPropertiesAll(p *ext.Pull, out *ext.Push, handles []uint
 	out.Raw(body.Bytes())
 	return true
 }
+
+// ropGetPropertiesList handles RopGetPropertiesList ([MS-OXCPRPT] 2.2.2.12): it
+// returns the tags of every property the object holds, as a count followed by
+// the tags. The request carries no body after the handle index.
+func (s *Session) ropGetPropertiesList(_ *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	obj := s.get(handleAt(handles, hindex))
+	if obj == nil {
+		writeErr(out, ropGetPropertiesList, hindex, ecError)
+		return true
+	}
+	props, ok, err := obj.readMessageProps()
+	if !ok || err != nil {
+		writeErr(out, ropGetPropertiesList, hindex, ecError)
+		return true
+	}
+	tags := make([]mapi.PropTag, 0, len(props))
+	for _, pv := range props {
+		tags = append(tags, pv.Tag)
+	}
+	body := ext.NewPush(ext.FlagUTF16)
+	if err := body.PropTags(tags); err != nil {
+		writeErr(out, ropGetPropertiesList, hindex, ecError)
+		return true
+	}
+	out.Uint8(ropGetPropertiesList)
+	out.Uint8(hindex)
+	out.Uint32(ecSuccess)
+	out.Raw(body.Bytes())
+	return true
+}

@@ -18,10 +18,10 @@ import (
 // wiredROPs is every opcode Dispatch answers itself rather than falling through
 // to the generic error, probed with a bare header and no request body.
 //
-// Eleven wired opcodes are absent, because their handler answers a bodiless
+// Twelve wired opcodes are absent, because their handler answers a bodiless
 // request with the same generic error an unknown opcode gets and the two are
-// indistinguishable from outside: 0x1B, 0x47, 0x59, 0x5A, 0x5D, 0x5E, 0x68,
-// 0x6C, 0x6D, 0x77 and 0x81. Those are covered by the dispatch table's own
+// indistinguishable from outside: 0x09, 0x1B, 0x47, 0x59, 0x5A, 0x5D, 0x5E,
+// 0x68, 0x6C, 0x6D, 0x77 and 0x81. Those are covered by the dispatch table's own
 // completeness test rather than from the wire.
 var wiredROPs = []uint8{
 	0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
@@ -80,11 +80,11 @@ var tableOnlyROPs = []uint8{
 	ropCreateBookmark, ropSetSpooler, ropExpandRow, ropCollapseRow,
 	ropCommitStream, ropGetStreamSize, ropGetReceiveFolderTable,
 	ropSetCollapseState, ropGetTransportFolder, ropSyncUploadStateStreamEnd,
-	ropResetTable,
+	ropResetTable, ropGetPropertiesList,
 }
 
 // TestDispatchTableCoversEveryWiredOpcode is the companion to the wire probe: it
-// asserts the table holds exactly the opcodes the probe found plus the eleven it
+// asserts the table holds exactly the opcodes the probe found plus the twelve it
 // cannot distinguish. Together the two cover every wiring.
 func TestDispatchTableCoversEveryWiredOpcode(t *testing.T) {
 	want := make(map[uint8]bool, len(wiredROPs)+len(tableOnlyROPs))
