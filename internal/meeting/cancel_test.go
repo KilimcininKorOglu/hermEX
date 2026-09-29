@@ -195,6 +195,32 @@ func TestCancelledInstanceIsNotRecreated(t *testing.T) {
 	}
 }
 
+// TestInstanceCancellationLeavesAMAPISeriesStanding delivers a cancellation for
+// one instance to a series held without an iCalendar, the form a MAPI client
+// writes. The rest of the series must stay booked: the cancellation used to mark
+// the whole meeting cancelled.
+func TestInstanceCancellationLeavesAMAPISeriesStanding(t *testing.T) {
+	st, accounts := cancelHarness(t, objectstore.MeetingConfig{})
+	deliverScheduling(t, accounts, "organizer@hermex.test", "REQUEST", dailySeries(false))
+	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
+	if err != nil || len(objs) != 1 {
+		t.Fatalf("calendar holds %d items (err %v), want the one meeting", len(objs), err)
+	}
+	if err := st.ModifyMessageProperties(objs[0].ID, nil, mapi.PrIcalOriginal); err != nil {
+		t.Fatal(err)
+	}
+	deliverScheduling(t, accounts, "organizer@hermex.test", "CANCEL",
+		"RECURRENCE-ID:20260621T100000Z\r\nDTSTART:20260621T100000Z\r\nDTEND:20260621T110000Z\r\nSEQUENCE:1\r\nSTATUS:CANCELLED\r\n")
+
+	tags, err := ResolveTags(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if longVal(theMeeting(t, st), tags.State)&asfCanceled != 0 {
+		t.Error("one cancelled instance marked the whole series cancelled")
+	}
+}
+
 // TestInstanceCancellationReachesTheRecurrenceBlob proves the pattern a MAPI
 // client reads loses the cancelled instance too. Only the iCalendar used to change,
 // so Outlook kept showing the occurrence the organizer cancelled.

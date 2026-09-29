@@ -154,15 +154,9 @@ func (c *cancellation) storedSequence(props mapi.PropertyValues) int {
 // stays gone.
 func (c *cancellation) apply(st *objectstore.Store, appt int64, props mapi.PropertyValues) error {
 	stored, isICal := icalOf(props)
-	if c.instance && isICal {
-		if cancelled, ok := oxcical.CancelInstance(stored, c.at); ok {
-			if revised, ok := oxcical.SetSequence(cancelled, c.seq, &c.at); ok {
-				cancelled = revised
-			}
-			return st.ModifyMessageProperties(appt, withRecurrence(st, mapi.PropertyValues{{Tag: mapi.PrIcalOriginal, Value: cancelled}}, cancelled))
-		}
-		if _, series := oxcical.CancelOccurrence(stored, c.at); series {
-			return nil
+	if c.instance {
+		if done, err := c.applyInstance(st, appt, stored, isICal); done {
+			return err
 		}
 	}
 	update := mapi.PropertyValues{
@@ -180,6 +174,29 @@ func (c *cancellation) apply(st *objectstore.Store, appt int64, props mapi.Prope
 		}
 	}
 	return st.ModifyMessageProperties(appt, update)
+}
+
+// applyInstance cancels the one instance a cancellation names inside the stored
+// series. done is false when the stored item is not a series, so the caller
+// cancels it whole.
+func (c *cancellation) applyInstance(st *objectstore.Store, appt int64, stored []byte, isICal bool) (done bool, err error) {
+	if !isICal {
+		// A series a MAPI client wrote has no iCalendar to cancel the one instance
+		// in; marking the whole meeting cancelled would cancel every other instance.
+		if isSeries(st, appt) {
+			st.LogSwallowedError("meeting.cancel-instance", errFoldRefused)
+			return true, nil
+		}
+		return false, nil
+	}
+	if cancelled, ok := oxcical.CancelInstance(stored, c.at); ok {
+		if revised, ok := oxcical.SetSequence(cancelled, c.seq, &c.at); ok {
+			cancelled = revised
+		}
+		return true, st.ModifyMessageProperties(appt, withRecurrence(st, mapi.PropertyValues{{Tag: mapi.PrIcalOriginal, Value: cancelled}}, cancelled))
+	}
+	_, series := oxcical.CancelOccurrence(stored, c.at)
+	return series, nil
 }
 
 // finish marks the cancellation processed, and out of date when meetingType
