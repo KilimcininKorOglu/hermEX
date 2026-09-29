@@ -68,6 +68,17 @@ func TestFreeBusyExpandsARecurringSeries(t *testing.T) {
 	}
 	wantOccurrence(t, got, "2026-03-16T09:00:00Z", "Busy", "Weekly sync")
 	wantOccurrence(t, got, "2026-03-23T14:00:00Z", "Tentative", "Moved sync")
+	wantFlags(t, got["2026-03-16T09:00:00Z"], false)
+	wantFlags(t, got["2026-03-23T14:00:00Z"], true)
+}
+
+// wantFlags checks an occurrence is marked recurring, and an exception only when
+// an exception changed it.
+func wantFlags(t *testing.T, ev CalendarEvent, exception bool) {
+	t.Helper()
+	if ev.Details == nil || !ev.Details.IsRecurring || ev.Details.IsException != exception {
+		t.Errorf("occurrence %s details = %+v, want IsRecurring and IsException=%v", ev.StartTime, ev.Details, exception)
+	}
 }
 
 // wantOccurrence checks the event reported at start carries the busy type and

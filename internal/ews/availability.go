@@ -347,7 +347,13 @@ func occurrenceEvent(o oxcical.Occurrence, detailed bool) CalendarEvent {
 		Status:    o.BusyStatus,
 	}
 	if detailed {
-		ev.Details = &calendarEventDetails{Subject: o.Subject, Location: o.Location, IsReminderSet: o.ReminderSet}
+		ev.Details = &calendarEventDetails{
+			Subject:       o.Subject,
+			Location:      o.Location,
+			IsRecurring:   true,
+			IsException:   o.Exception,
+			IsReminderSet: o.ReminderSet,
+		}
 	}
 	return ev
 }

@@ -16,6 +16,8 @@ type Occurrence struct {
 	Location    string
 	BusyStatus  int32
 	ReminderSet bool
+	// Exception reports that an exception of the series changed the occurrence.
+	Exception bool
 }
 
 // SeriesOccurrences expands a stored recurring appointment into the occurrences
@@ -82,6 +84,7 @@ func (e *eventExport) exceptionsByOriginal() map[int64]*recurrence.Exception {
 
 // applyException replaces each detail the exception's flags say it changes.
 func applyException(o *Occurrence, ex *recurrence.Exception) {
+	o.Exception = true
 	o.Subject = overridden(ex, recurrence.OverrideSubject, ex.Subject, o.Subject)
 	o.Location = overridden(ex, recurrence.OverrideLocation, ex.Location, o.Location)
 	if ex.Flags&recurrence.OverrideBusyStatus != 0 {
