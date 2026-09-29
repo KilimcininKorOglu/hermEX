@@ -103,10 +103,10 @@ func (s *Store) AppendMessage(folderID int64, raw []byte, internalDate time.Time
 	if !msg.Props.Has(mapi.PrMessageDeliveryTime) {
 		msg.Props.Set(mapi.PrMessageDeliveryTime, mapi.UnixToNTTime(internalDate))
 	}
-	// An append marked \Seen stores a read message, so the object store's read
-	// state, which every non-IMAP protocol reads, agrees with the index row.
-	if flags&FlagSeen != 0 {
-		markReadProp(&msg.Props)
+	// An append marked \Seen stores a read message and one marked \Draft an unsent
+	// one, so what every non-IMAP protocol reads agrees with the index row.
+	if bits := appendMsgFlags(flags); bits != 0 {
+		addMessageFlags(&msg.Props, bits)
 	}
 
 	eid, err := s.CreateMessage(folderID, msg)

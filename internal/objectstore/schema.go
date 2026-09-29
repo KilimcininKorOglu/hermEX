@@ -63,5 +63,6 @@ const (
 	cfgSchemaVersion     = 10
 	cfgMappingSignature  = 11
 	// cfgDatelessRepaired (12) is declared beside its repair in datelessrepair.go,
-	// cfgReadStateRepaired (13) beside its own in readstaterepair.go.
+	// cfgReadStateRepaired (13) and cfgDraftRepaired (14) beside their own in
+	// appendflags.go.
 )

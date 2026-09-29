@@ -329,6 +329,7 @@ func openKind(dir string, seedBuiltins bool, kind storeKind) (*Store, error) {
 		s.upgradeSMIMEMessages()
 		s.repairDatelessMessages()
 		s.repairAppendedReadState()
+		s.repairAppendedDrafts()
 	}
 	return s, nil
 }

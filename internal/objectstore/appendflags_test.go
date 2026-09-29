@@ -30,6 +30,58 @@ func TestAppendSeenIsReadEverywhere(t *testing.T) {
 	}
 }
 
+// storedFlags reads a message's stored PidTagMessageFlags.
+func storedFlags(t *testing.T, st *Store, id int64) int32 {
+	t.Helper()
+	props, err := st.GetMessageProperties(id, mapi.PrMessageFlags)
+	mustNoErr(t, "read flags", err)
+	v, _ := props.Get(mapi.PrMessageFlags)
+	f, _ := v.(int32)
+	return f
+}
+
+// TestAppendDraftIsUnsent proves a message appended with \Draft is unsent to a
+// MAPI client, which then treats it as a draft it may edit and send.
+func TestAppendDraftIsUnsent(t *testing.T) {
+	st := openSeededStore(t)
+	draft := mustAppendMessage(t, st, int64(mapi.PrivateFIDDraft), []byte("From: a@hermex.test\r\nSubject: draft\r\n\r\nx\r\n"), time.Now(), FlagDraft)
+	sent := mustAppendMessage(t, st, int64(mapi.PrivateFIDSentItems), []byte("From: a@hermex.test\r\nSubject: sent\r\n\r\nx\r\n"), time.Now(), FlagSeen)
+	if f := storedFlags(t, st, draft.ID); f&mapi.MsgFlagUnsent == 0 {
+		t.Errorf("appended \\Draft flags = %#x, want the unsent bit", f)
+	}
+	if f := storedFlags(t, st, sent.ID); f&mapi.MsgFlagUnsent != 0 {
+		t.Errorf("appended sent copy flags = %#x, want no unsent bit", f)
+	}
+}
+
+// TestRepairAppendedDrafts proves the next open marks unsent a draft an earlier
+// append stored as sent, advancing its change number.
+func TestRepairAppendedDrafts(t *testing.T) {
+	dir := t.TempDir()
+	st, err := Open(dir)
+	mustNoErr(t, "open", err)
+	draft := mustAppendMessage(t, st, int64(mapi.PrivateFIDDraft), []byte("From: a@hermex.test\r\nSubject: draft\r\n\r\nx\r\n"), time.Now(), FlagDraft)
+	_, err = st.objdb.Exec(`DELETE FROM message_properties WHERE message_id=? AND proptag=?`, draft.ID, int64(uint32(mapi.PrMessageFlags)))
+	mustNoErr(t, "drop the flags", err)
+	var before int64
+	mustScan(t, st.objdb.QueryRow(`SELECT change_number FROM messages WHERE message_id=?`, draft.ID), &before)
+	_, err = st.objdb.Exec(`DELETE FROM configurations WHERE config_id=?`, cfgDraftRepaired)
+	mustNoErr(t, "clear the marker", err)
+	mustNoErr(t, "close", st.Close())
+
+	st, err = Open(dir)
+	mustNoErr(t, "reopen", err)
+	defer st.Close()
+	if f := storedFlags(t, st, draft.ID); f&mapi.MsgFlagUnsent == 0 {
+		t.Errorf("repaired draft flags = %#x, want the unsent bit", f)
+	}
+	var after int64
+	mustScan(t, st.objdb.QueryRow(`SELECT change_number FROM messages WHERE message_id=?`, draft.ID), &after)
+	if after <= before {
+		t.Errorf("change number %d did not advance past %d", after, before)
+	}
+}
+
 // TestRepairAppendedReadState proves the next open marks read a message an
 // earlier append left seen in the index and unread in the object store, with a
 // read change number a synchronized client downloads, and leaves alone a message
