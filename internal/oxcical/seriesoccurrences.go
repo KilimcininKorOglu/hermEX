@@ -12,6 +12,9 @@ import (
 // answer reports for it: those its exception changes, else the series' own.
 type Occurrence struct {
 	Span
+	// At is the instant the series generates for the occurrence, its RECURRENCE-ID;
+	// an exception may have moved Span away from it.
+	At          time.Time
 	Subject     string
 	Location    string
 	BusyStatus  int32
@@ -48,6 +51,7 @@ func SeriesOccurrences(msg *oxcmail.Message, opt Options, rangeStart, rangeEnd t
 	for _, inst := range insts {
 		o := base
 		o.Span = inst.Span
+		o.At = inst.At
 		if ex, found := exceptions[inst.At.Unix()]; found {
 			applyException(&o, ex)
 		}

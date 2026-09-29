@@ -20,9 +20,7 @@ import (
 
 type getItemRequest struct {
 	Shape   itemShape `xml:"ItemShape"`
-	ItemIDs struct {
-		Items []refID `xml:"ItemId"`
-	} `xml:"ItemIds"`
+	ItemIDs itemRefs  `xml:"ItemIds"`
 }
 
 type findItemRequest struct {
@@ -31,6 +29,9 @@ type findItemRequest struct {
 	ParentFolderIDs folderRefs `xml:"ParentFolderIds"`
 	// Restriction filters the items listed; an item it does not match is left out.
 	Restriction *oxews.Restriction `xml:"Restriction"`
+	// CalendarView asks for a calendar's items as they appear in a window, each
+	// series expanded into its occurrences.
+	CalendarView *calendarView `xml:"CalendarView"`
 }
 
 type getAttachmentRequest struct {
@@ -120,13 +121,15 @@ func (s *Server) handleFindItem(w http.ResponseWriter, inner []byte, sess *sessi
 
 	var msgs []findItemResponseMessage
 	for _, tgt := range resolveTargets(req.ParentFolderIDs) {
-		msgs = append(msgs, findItemForTarget(cache, sess, tgt, fields, req.Restriction))
+		msgs = append(msgs, findItemForTarget(cache, sess, tgt, fields, req))
 	}
 	writeResponse(w, findItemResponse{Messages: msgs})
 }
 
-// findItemForTarget lists one requested folder, keeping the items restr matches.
-func findItemForTarget(cache *storeCache, sess *session, tgt folderTarget, fields []extField, restr *oxews.Restriction) findItemResponseMessage {
+// findItemForTarget lists one requested folder, keeping the items the request's
+// restriction matches.
+func findItemForTarget(cache *storeCache, sess *session, tgt folderTarget, fields []extField, req findItemRequest) findItemResponseMessage {
+	restr := req.Restriction
 	// A recoverable (Recoverable Items dumpster) target is intentionally ok=false so
 	// every other handler still reports ErrorFolderNotFound; FindItem serves it.
 	if !tgt.ok && !tgt.recoverable {
@@ -159,7 +162,7 @@ func findItemForTarget(cache *storeCache, sess *session, tgt folderTarget, field
 	if code != "" {
 		return findItemError(code)
 	}
-	return itemListing{st: st, idMailbox: delegatedMailbox(tgt, isOwn), fields: fields, filter: filter}.folder(tgt.fid)
+	return itemListing{st: st, idMailbox: delegatedMailbox(tgt, isOwn), fields: fields, filter: filter, view: req.CalendarView}.folder(tgt.fid)
 }
 
 // recoverableItemsFor lists the Recoverable Items dumpster, which aggregates
@@ -193,15 +196,18 @@ func recoverableItemsFor(cache *storeCache, sess *session, tgt folderTarget, fie
 // notes live in the object store (versioned by change number), not the IMAP
 // index, so they are listed as folder objects rather than messages.
 func (l itemListing) folder(fid int64) findItemResponseMessage {
+	calendar, err := isCalendarFolder(l.st, fid)
+	if err != nil {
+		return findItemError("ErrorInternalServerError")
+	}
+	if l.view != nil && !calendar {
+		return findItemError("ErrorCalendarFolderIsInvalidForCalendarView")
+	}
 	switch fid {
 	case int64(mapi.PrivateFIDTasks):
 		return l.tasks(fid)
 	case int64(mapi.PrivateFIDNotes):
 		return l.notes(fid)
-	}
-	calendar, err := isCalendarFolder(l.st, fid)
-	if err != nil {
-		return findItemError("ErrorInternalServerError")
 	}
 	if calendar {
 		return l.calendar(fid)
@@ -220,6 +226,9 @@ type itemListing struct {
 	idMailbox string
 	fields    []extField
 	filter    *mapi.Restriction
+	// view is the request's CalendarView: a calendar is then listed as the single
+	// items and series occurrences in its window rather than as stored objects.
+	view *calendarView
 }
 
 // matching returns the ids of the given items the filter keeps, or nil when the
@@ -426,14 +435,19 @@ func (s *Server) handleGetItem(w http.ResponseWriter, inner []byte, sess *sessio
 
 	var msgs []itemResponseMessage
 	for _, ref := range req.ItemIDs.Items {
-		msgs = append(msgs, getOneItem(cache, sess, ref.ID, fields, req.Shape.wantsHeaders()))
+		token, code := resolveItemRef(cache, sess, ref)
+		if code != "" {
+			msgs = append(msgs, itemError(code))
+			continue
+		}
+		msgs = append(msgs, getOneItem(cache, sess, token, fields, req.Shape.wantsHeaders()))
 	}
 	writeResponse(w, getItemResponse{Messages: msgs})
 }
 
 // getOneItem renders one requested item in the shape its class calls for.
 func getOneItem(cache *storeCache, sess *session, itemID string, fields []extField, headers bool) itemResponseMessage {
-	id, err := oxews.DecodeItemID(itemID)
+	id, err := oxews.DecodeAnyItemID(itemID)
 	if err != nil {
 		return itemError("ErrorInvalidRequest")
 	}

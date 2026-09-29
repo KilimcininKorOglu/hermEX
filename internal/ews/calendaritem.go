@@ -70,6 +70,11 @@ func (r *calendarReader) item(id oxews.ItemID, itemID string) (oxews.CalendarIte
 	if err != nil {
 		return oxews.CalendarItem{}, err
 	}
+	return r.render(id, itemID, msg, r.meta(msg))
+}
+
+// render builds the <t:CalendarItem> of one stored appointment from its facts.
+func (r *calendarReader) render(id oxews.ItemID, itemID string, msg *oxcmail.Message, c oxews.CalendarMeta) (oxews.CalendarItem, error) {
 	hasAttach, err := r.st.HasAttachments(id.MessageID)
 	if err != nil {
 		return oxews.CalendarItem{}, err
@@ -84,7 +89,6 @@ func (r *calendarReader) item(id oxews.ItemID, itemID string) (oxews.CalendarIte
 		ItemClass:      itemClass(msg.Props),
 		HasAttachments: hasAttach,
 	}
-	c := r.meta(msg)
 	c.Categories = cats
 	return oxews.BuildCalendarItem(meta, c), nil
 }
@@ -240,6 +244,9 @@ func isCalendarFolder(st *objectstore.Store, fid int64) (bool, error) {
 
 // calendar lists a calendar folder as calendar items.
 func (l itemListing) calendar(fid int64) findItemResponseMessage {
+	if l.view != nil {
+		return l.calendarView(fid)
+	}
 	objs, matched, code := l.objects(fid)
 	if code != "" {
 		return findItemError(code)
@@ -274,7 +281,11 @@ func calendarItemResponse(st *objectstore.Store, id oxews.ItemID, itemID string,
 	if err != nil {
 		return itemError("ErrorInternalServerError")
 	}
-	item, err := reader.item(id, itemID)
+	read := reader.item
+	if id.Instance != 0 {
+		read = reader.occurrence
+	}
+	item, err := read(id, itemID)
 	if err != nil {
 		return itemError("ErrorItemNotFound")
 	}

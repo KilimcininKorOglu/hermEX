@@ -2,6 +2,7 @@ package oxews
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"testing"
 )
@@ -80,6 +81,22 @@ func TestAttachmentIDRoundTrip(t *testing.T) {
 	}
 	if fid != 13 || mid != 0x20001 || idx != 3 || mb != "boss@hermex.test" {
 		t.Errorf("round trip = (%d, %d, %d, %q), want (13, 131073, 3, boss@hermex.test)", fid, mid, idx, mb)
+	}
+}
+
+// TestOccurrenceIDIsNotAnItemID proves an occurrence id round-trips through
+// DecodeAnyItemID and is refused by DecodeItemID, so an operation that has not
+// been taught occurrences (DeleteItem, UpdateItem, MoveItem) never applies itself
+// to the whole series the id's message id names.
+func TestOccurrenceIDIsNotAnItemID(t *testing.T) {
+	want := ItemID{FolderID: 10, MessageID: 42, Instance: 1791190800, Mailbox: "boss@hermex.test"}
+	tok := EncodeItemID(want)
+	got, err := DecodeAnyItemID(tok)
+	if err != nil || got != want {
+		t.Fatalf("DecodeAnyItemID = %+v, %v, want %+v", got, err, want)
+	}
+	if _, err := DecodeItemID(tok); !errors.Is(err, ErrOccurrenceID) {
+		t.Errorf("DecodeItemID(occurrence id) error = %v, want ErrOccurrenceID", err)
 	}
 }
 

@@ -26,22 +26,48 @@ type ItemID struct {
 	// mailbox the item was found in. An "|" separates it from the dotted coordinates
 	// because an SMTP address itself contains dots.
 	Mailbox string
+	// Instance names one occurrence of a recurring series: the Unix time of the
+	// instant the series generates for it (its RECURRENCE-ID). Zero names the item
+	// itself, the series master for a series.
+	Instance int64
 }
 
 // EncodeItemID encodes an item id as an opaque base64 token. A token from another
 // mailbox carries its SMTP after a "|"; an own-mailbox token keeps the original
-// three-field form, so ids minted before this field decode unchanged.
+// three-field form, so ids minted before this field decode unchanged. An
+// occurrence id carries its instance as a fourth dotted field.
 func EncodeItemID(id ItemID) string {
 	s := fmt.Sprintf("%d.%d.%d", id.FolderID, id.MessageID, id.UID)
+	if id.Instance != 0 {
+		s += "." + strconv.FormatInt(id.Instance, 10)
+	}
 	if id.Mailbox != "" {
 		s += "|" + id.Mailbox
 	}
 	return base64.RawURLEncoding.EncodeToString([]byte(s))
 }
 
-// DecodeItemID reverses EncodeItemID. A token with no "|" segment decodes to an
-// own-mailbox id (empty Mailbox), preserving compatibility with older tokens.
+// ErrOccurrenceID reports an occurrence id where only an item id is accepted.
+var ErrOccurrenceID = errors.New("oxews: an occurrence id names no stored item")
+
+// DecodeItemID reverses EncodeItemID for an id that names a stored item. An
+// occurrence id is refused with ErrOccurrenceID, so an operation that has not been
+// taught occurrences never applies itself to the whole series instead.
 func DecodeItemID(s string) (ItemID, error) {
+	id, err := DecodeAnyItemID(s)
+	if err != nil {
+		return ItemID{}, err
+	}
+	if id.Instance != 0 {
+		return ItemID{}, ErrOccurrenceID
+	}
+	return id, nil
+}
+
+// DecodeAnyItemID reverses EncodeItemID, occurrence ids included. A token with no
+// "|" segment decodes to an own-mailbox id (empty Mailbox), preserving
+// compatibility with older tokens.
+func DecodeAnyItemID(s string) (ItemID, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(s)
 	if err != nil {
 		return ItemID{}, errBadID
@@ -52,8 +78,18 @@ func DecodeItemID(s string) (ItemID, error) {
 		mailbox = str[i+1:]
 		str = str[:i]
 	}
-	parts := strings.Split(str, ".")
-	if len(parts) != 3 {
+	id, err := parseItemCoords(strings.Split(str, "."))
+	if err != nil {
+		return ItemID{}, err
+	}
+	id.Mailbox = mailbox
+	return id, nil
+}
+
+// parseItemCoords reads the dotted fields of an item id: folder, message and uid,
+// then the instance of an occurrence id.
+func parseItemCoords(parts []string) (ItemID, error) {
+	if len(parts) != 3 && len(parts) != 4 {
 		return ItemID{}, errBadID
 	}
 	fid, err1 := strconv.ParseInt(parts[0], 10, 64)
@@ -62,7 +98,15 @@ func DecodeItemID(s string) (ItemID, error) {
 	if err1 != nil || err2 != nil || err3 != nil {
 		return ItemID{}, errBadID
 	}
-	return ItemID{FolderID: fid, MessageID: mid, UID: uint32(uid), Mailbox: mailbox}, nil
+	id := ItemID{FolderID: fid, MessageID: mid, UID: uint32(uid)}
+	if len(parts) == 4 {
+		inst, err := strconv.ParseInt(parts[3], 10, 64)
+		if err != nil || inst == 0 {
+			return ItemID{}, errBadID
+		}
+		id.Instance = inst
+	}
+	return id, nil
 }
 
 // EncodeFolderID encodes an own-mailbox folder id as an opaque token.

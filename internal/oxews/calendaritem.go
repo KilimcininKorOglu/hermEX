@@ -12,6 +12,8 @@ const AppointmentClass = "IPM.Appointment"
 const (
 	CalendarItemSingle          = "Single"
 	CalendarItemRecurringMaster = "RecurringMaster"
+	CalendarItemOccurrence      = "Occurrence"
+	CalendarItemException       = "Exception"
 )
 
 // CalendarItem is the EWS <t:CalendarItem> element ([MS-OXWSCAL] CalendarItemType),
@@ -81,11 +83,16 @@ type CalendarMeta struct {
 	Meeting         bool
 	Cancelled       bool
 	Recurring       bool
-	MyResponse      string // ResponseTypeType name, "" when none
-	Organizer       *Mailbox
-	Required        []Attendee
-	Optional        []Attendee
-	Zone            string // the Windows time-zone id of Start and End, "" when none
+	// OriginalStart is the instant an occurrence of a series was generated for,
+	// zero for an item that is not an occurrence.
+	OriginalStart time.Time
+	// Exception marks an occurrence an exception of its series changed.
+	Exception  bool
+	MyResponse string // ResponseTypeType name, "" when none
+	Organizer  *Mailbox
+	Required   []Attendee
+	Optional   []Attendee
+	Zone       string // the Windows time-zone id of Start and End, "" when none
 }
 
 // BuildCalendarItem renders a stored appointment as <t:CalendarItem>.
@@ -111,9 +118,8 @@ func BuildCalendarItem(meta ItemMeta, c CalendarMeta) CalendarItem {
 		RequiredAttendees:          attendeeList(c.Required),
 		OptionalAttendees:          attendeeList(c.Optional),
 	}
-	if c.Recurring {
-		out.CalendarItemType = CalendarItemRecurringMaster
-	}
+	out.CalendarItemType = calendarItemType(c)
+	out.OriginalStart = calendarTime(c.OriginalStart)
 	if c.Importance != nil {
 		out.Importance = importanceName(*c.Importance)
 	}
@@ -134,6 +140,19 @@ func BuildCalendarItem(meta ItemMeta, c CalendarMeta) CalendarItem {
 		out.EndTimeZone = &TimeZoneDef{ID: c.Zone}
 	}
 	return out
+}
+
+// calendarItemType names what the item is within its series, if any.
+func calendarItemType(c CalendarMeta) string {
+	switch {
+	case c.Exception:
+		return CalendarItemException
+	case !c.OriginalStart.IsZero():
+		return CalendarItemOccurrence
+	case c.Recurring:
+		return CalendarItemRecurringMaster
+	}
+	return CalendarItemSingle
 }
 
 // calendarTime renders an instant as xs:dateTime, "" for the zero time.
