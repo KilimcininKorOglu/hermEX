@@ -52,6 +52,9 @@ type createMessage struct {
 	From struct {
 		Mailbox mailboxEntry `xml:"Mailbox"`
 	} `xml:"From"`
+	// Extended are the MAPI properties the client sets by field URI. They are kept
+	// on the stored copy; the MIME form sent to the recipients has no room for them.
+	Extended []oxews.ExtendedProperty `xml:"ExtendedProperty"`
 }
 
 // smartResponse is one reply or forward item. Outlook for Mac nests a full Message
@@ -189,6 +192,10 @@ func (s *Server) createOneItem(st *objectstore.Store, sess *session, m createMes
 	if !ok {
 		return itemError("ErrorSendAsDenied")
 	}
+	ext, code := extendedValues(st, m.Extended)
+	if code != "" {
+		return itemError(code)
+	}
 	out := oxews.BuildOutgoing(oxews.OutgoingInput{
 		From:      representing,
 		Sender:    sender,
@@ -220,7 +227,7 @@ func (s *Server) createOneItem(st *objectstore.Store, sess *session, m createMes
 	if !save {
 		return rm
 	}
-	if err := fileCreatedItem(st, raw, disp, rm.Items); err != nil {
+	if err := fileCreatedItem(st, raw, disp, ext, rm.Items); err != nil {
 		// A draft that was not stored is the whole outcome of SaveOnly, so it fails.
 		// The Sent copy of SendAndSaveCopy is filed after the message went out, and a
 		// failure there must not tell the client to send it again; it is recorded.
@@ -249,7 +256,7 @@ func (s *Server) sendCreatedItem(sess *session, m createMessage, raw []byte) (co
 
 // fileCreatedItem stores the copy the disposition asks for: a draft for SaveOnly,
 // a sent copy otherwise, and records its id in the response.
-func fileCreatedItem(st *objectstore.Store, raw []byte, disp string, items *itemsWrap) error {
+func fileCreatedItem(st *objectstore.Store, raw []byte, disp string, ext mapi.PropertyValues, items *itemsWrap) error {
 	folder := int64(mapi.PrivateFIDSentItems)
 	flags := int64(objectstore.FlagSeen)
 	if disp == "SaveOnly" {
@@ -260,9 +267,24 @@ func fileCreatedItem(st *objectstore.Store, raw []byte, disp string, items *item
 	if err != nil {
 		return err
 	}
+	if info, err = storeExtended(st, info, ext); err != nil {
+		return err
+	}
 	id := oxews.EncodeItemID(oxews.ItemID{FolderID: folder, MessageID: info.ID, UID: info.UID})
 	items.Messages = []oxews.Message{{ItemID: oxews.ItemIDElem{ID: id, ChangeKey: changeKey(st, info.ID)}}}
 	return nil
+}
+
+// storeExtended writes the client's extended properties onto a filed message and
+// indexes it again, so its IMAP form is read from the properties it now holds.
+func storeExtended(st *objectstore.Store, info objectstore.MessageInfo, ext mapi.PropertyValues) (objectstore.MessageInfo, error) {
+	if len(ext) == 0 {
+		return info, nil
+	}
+	if err := st.SetMessageProperties(info.ID, ext); err != nil {
+		return info, err
+	}
+	return st.ReindexMessage(info.ID)
 }
 
 // itemError builds an error response message with the given EWS response code.

@@ -34,7 +34,8 @@ type updateItemRequest struct {
 type itemChangeReq struct {
 	ItemID  refID `xml:"ItemId"`
 	Updates struct {
-		SetFields []setItemField `xml:"SetItemField"`
+		SetFields    []setItemField    `xml:"SetItemField"`
+		DeleteFields []deleteItemField `xml:"DeleteItemField"`
 	} `xml:"Updates"`
 }
 
@@ -42,7 +43,20 @@ type setItemField struct {
 	FieldURI struct {
 		URI string `xml:"FieldURI,attr"`
 	} `xml:"FieldURI"`
-	Message updateMessageFields `xml:"Message"`
+	// Extended names an extended property to set instead of a FieldURI; its value
+	// is the matching <t:ExtendedProperty> of the item element.
+	Extended *oxews.ExtendedFieldURI `xml:"ExtendedFieldURI"`
+	Message  updateMessageFields     `xml:"Message"`
+	Item     struct {
+		Extended []oxews.ExtendedProperty `xml:"ExtendedProperty"`
+	} `xml:"Item"`
+}
+
+// deleteItemField is a <t:DeleteItemField>. Only an extended property is removed
+// this way; the fields named by FieldURI are required ones this server refuses to
+// delete.
+type deleteItemField struct {
+	Extended *oxews.ExtendedFieldURI `xml:"ExtendedFieldURI"`
 }
 
 // updateMessageFields is the <t:Message> a SetItemField carries. Every update
@@ -53,10 +67,11 @@ type updateMessageFields struct {
 		Type    string `xml:"BodyType,attr"`
 		Content string `xml:",chardata"`
 	} `xml:"Body"`
-	ToRecipients  mailboxList `xml:"ToRecipients"`
-	CcRecipients  mailboxList `xml:"CcRecipients"`
-	BccRecipients mailboxList `xml:"BccRecipients"`
-	IsRead        string      `xml:"IsRead"`
+	ToRecipients  mailboxList              `xml:"ToRecipients"`
+	CcRecipients  mailboxList              `xml:"CcRecipients"`
+	BccRecipients mailboxList              `xml:"BccRecipients"`
+	IsRead        string                   `xml:"IsRead"`
+	Extended      []oxews.ExtendedProperty `xml:"ExtendedProperty"`
 }
 
 // The item fields UpdateItem writes. A field outside this set is refused rather
@@ -128,14 +143,15 @@ func (s *Server) updateOne(cache *storeCache, sess *session, ch itemChangeReq, d
 	if code != "" {
 		return itemError(code)
 	}
-	if !everyFieldIsWritten(ch.Updates.SetFields) {
-		return itemError("ErrorInvalidPropertySet")
+	ext, code := checkedChange(st, ch)
+	if code != "" {
+		return itemError(code)
 	}
 	// The content rewrite runs first and yields a new uid, so the read flag is
 	// then set on the message that survives.
 	newID := ch.ItemID.ID
-	if hasContentUpdate(ch.Updates.SetFields) {
-		info, err := rewriteItem(st, id, ch.Updates.SetFields)
+	if hasContentUpdate(ch.Updates.SetFields) || !ext.empty() {
+		info, err := rewriteItem(st, id, ch.Updates.SetFields, ext)
 		if err != nil {
 			return itemError("ErrorItemNotFound")
 		}
@@ -162,10 +178,19 @@ func (s *Server) updateOne(cache *storeCache, sess *session, ch itemChangeReq, d
 	}
 }
 
+// checkedChange refuses an ItemChange naming a field the handler does not write
+// and reads its extended-property updates.
+func checkedChange(st *objectstore.Store, ch itemChangeReq) (extUpdate, string) {
+	if !everyFieldIsWritten(ch.Updates.SetFields) {
+		return extUpdate{}, "ErrorInvalidPropertySet"
+	}
+	return extendedUpdate(st, ch)
+}
+
 // everyFieldIsWritten reports whether the handler writes every field named.
 func everyFieldIsWritten(fields []setItemField) bool {
 	for _, sf := range fields {
-		if !rewritesContent(sf.FieldURI.URI) && sf.FieldURI.URI != fieldIsRead {
+		if sf.Extended == nil && !rewritesContent(sf.FieldURI.URI) && sf.FieldURI.URI != fieldIsRead {
 			return false
 		}
 	}
@@ -234,7 +259,7 @@ func applyReadFlag(st *objectstore.Store, id oxews.ItemID, fields []setItemField
 // class. The message is then indexed again under a new uid, because an IMAP
 // client treats a uid's content as immutable and would otherwise keep serving
 // the old subject and body; the new uid reaches the client in the response.
-func rewriteItem(st *objectstore.Store, id oxews.ItemID, fields []setItemField) (objectstore.MessageInfo, error) {
+func rewriteItem(st *objectstore.Store, id oxews.ItemID, fields []setItemField, ext extUpdate) (objectstore.MessageInfo, error) {
 	msg, err := st.OpenMessage(id.MessageID)
 	if err != nil {
 		return objectstore.MessageInfo{}, err
@@ -243,6 +268,7 @@ func rewriteItem(st *objectstore.Store, id oxews.ItemID, fields []setItemField) 
 	for _, sf := range fields {
 		applyField(msg, sf)
 	}
+	ext.apply(&msg.Props)
 	oxcmail.EnsureMessageID(&msg.Props)
 	set, removed := changedProps(stored, msg.Props)
 	if err := st.ModifyMessageProperties(id.MessageID, set, removed...); err != nil {

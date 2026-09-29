@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -96,5 +97,59 @@ func TestItemShapeRefusesAnInvalidExtendedField(t *testing.T) {
 		`<ParentFolderIds><t:DistinguishedFolderId Id="inbox" xmlns:t="`+nsTypes+`"/></ParentFolderIds></FindItem>`), true)
 	if !strings.Contains(out, "ErrorInvalidExtendedProperty") {
 		t.Errorf("an invalid field URI is not refused: %s", out)
+	}
+}
+
+// getExtended reads one item with extShape.
+func getExtended(t *testing.T, ts *httptest.Server, itemID string) string {
+	t.Helper()
+	_, out := soapPost(t, ts, wrapRequest(`<GetItem xmlns="`+nsMessages+`">`+extShape+
+		`<ItemIds><t:ItemId Id="`+itemID+`" xmlns:t="`+nsTypes+`"/></ItemIds></GetItem>`), true)
+	return out
+}
+
+// updateExtended sends one UpdateItem ItemChange with the given updates and
+// returns the response.
+func updateExtended(t *testing.T, ts *httptest.Server, itemID, updates string) string {
+	t.Helper()
+	_, out := soapPost(t, ts, wrapRequest(`<UpdateItem xmlns="`+nsMessages+`" xmlns:t="`+nsTypes+`"><ItemChanges><t:ItemChange>`+
+		`<t:ItemId Id="`+itemID+`"/><t:Updates>`+updates+`</t:Updates></t:ItemChange></ItemChanges></UpdateItem>`), true)
+	return out
+}
+
+// TestExtendedPropertiesAreWritten proves CreateItem stores the extended
+// properties a message carries, UpdateItem sets one with SetItemField and removes
+// one with DeleteItemField, and a value that does not fit its type is refused.
+func TestExtendedPropertiesAreWritten(t *testing.T) {
+	ts, _ := seededWithMessage(t)
+	named := `<t:ExtendedFieldURI DistinguishedPropertySetId="PublicStrings" PropertyName="hx-mark" PropertyType="String"/>`
+	tagged := `<t:ExtendedFieldURI PropertyTag="0x6801" PropertyType="Integer"/>`
+	_, created := soapPost(t, ts, wrapRequest(`<CreateItem MessageDisposition="SaveOnly" xmlns="`+nsMessages+`" xmlns:t="`+nsTypes+`"><Items><t:Message>`+
+		`<t:Subject>draft</t:Subject>`+
+		`<t:ExtendedProperty>`+named+`<t:Value>marked</t:Value></t:ExtendedProperty>`+
+		`<t:ExtendedProperty>`+tagged+`<t:Value>42</t:Value></t:ExtendedProperty>`+
+		`</t:Message></Items></CreateItem>`), true)
+	id := itemIDRE.FindStringSubmatch(created)
+	if len(id) != 2 {
+		t.Fatalf("CreateItem returned no ItemId: %s", created)
+	}
+	checkExtended(t, "GetItem after CreateItem", getExtended(t, ts, id[1]))
+
+	updated := updateExtended(t, ts, id[1],
+		`<t:SetItemField>`+named+`<t:Message><t:ExtendedProperty>`+named+`<t:Value>changed</t:Value></t:ExtendedProperty></t:Message></t:SetItemField>`+
+			`<t:DeleteItemField>`+tagged+`</t:DeleteItemField>`)
+	newID := itemIDRE.FindStringSubmatch(updated)
+	if len(newID) != 2 {
+		t.Fatalf("UpdateItem returned no ItemId: %s", updated)
+	}
+	got := getExtended(t, ts, newID[1])
+	if !strings.Contains(got, "<Value>changed</Value>") || strings.Contains(got, "0x6801") {
+		t.Errorf("after the update the item holds: %s", got)
+	}
+
+	bad := updateExtended(t, ts, newID[1],
+		`<t:SetItemField>`+tagged+`<t:Message><t:ExtendedProperty>`+tagged+`<t:Value>many</t:Value></t:ExtendedProperty></t:Message></t:SetItemField>`)
+	if !strings.Contains(bad, "ErrorInvalidExtendedPropertyValue") {
+		t.Errorf("a value that is no integer is not refused: %s", bad)
 	}
 }
