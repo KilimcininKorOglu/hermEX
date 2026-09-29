@@ -60,9 +60,9 @@ type setItemField struct {
 	CalendarItem createCalendarItem `xml:"CalendarItem"`
 	// Task carries the value of a field set on a task.
 	Task createTask `xml:"Task"`
-	Item struct {
-		Extended []oxews.ExtendedProperty `xml:"ExtendedProperty"`
-	} `xml:"Item"`
+	// Item carries the value of a field set on a base item: a sticky note, or an
+	// extended property on any item.
+	Item noteItem `xml:"Item"`
 }
 
 // deleteItemField is a <t:DeleteItemField>. An extended property is removed this
@@ -178,6 +178,9 @@ func (s *Server) updateOne(cache *storeCache, sess *session, ch itemChangeReq, o
 	}
 	if id.UID == 0 && isTaskItem(st, id.MessageID) {
 		return updateTask(st, id, ch)
+	}
+	if id.UID == 0 && isNoteItem(st, id.MessageID) {
+		return updateNote(st, id, ch)
 	}
 	if id.UID == 0 {
 		return s.updateCalendarItem(st, id, ch, o.send, sess.user)

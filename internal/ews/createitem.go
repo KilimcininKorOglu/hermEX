@@ -25,12 +25,14 @@ type createItemRequest struct {
 	// SavedItemFolderID names the folder a created calendar item is stored in.
 	SavedItemFolderID folderRefs `xml:"SavedItemFolderId"`
 	Items             struct {
-		Messages          []createMessage      `xml:"Message"`
-		CalendarItems     []createCalendarItem `xml:"CalendarItem"`
-		Tasks             []createTask         `xml:"Task"`
-		Accept            []meetingResponse    `xml:"AcceptItem"`
-		TentativelyAccept []meetingResponse    `xml:"TentativelyAcceptItem"`
-		Decline           []meetingResponse    `xml:"DeclineItem"`
+		Messages      []createMessage      `xml:"Message"`
+		CalendarItems []createCalendarItem `xml:"CalendarItem"`
+		Tasks         []createTask         `xml:"Task"`
+		// Items are base items, which a client sends for a sticky note.
+		Items             []noteItem        `xml:"Item"`
+		Accept            []meetingResponse `xml:"AcceptItem"`
+		TentativelyAccept []meetingResponse `xml:"TentativelyAcceptItem"`
+		Decline           []meetingResponse `xml:"DeclineItem"`
 		// The smart-response types ([MS-OXWSMSG] ReplyToItemType and its siblings).
 		// A client sends one of these instead of a plain Message when the user
 		// replies to or forwards a message; saving such a draft is the common case,
@@ -127,6 +129,7 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *ses
 	msgs := s.createMessages(st, sess, req, disp, send, save)
 	msgs = append(msgs, s.createCalendarItems(st, sess, req)...)
 	msgs = append(msgs, s.createTasks(st, req)...)
+	msgs = append(msgs, s.createNotes(st, req)...)
 	msgs = append(msgs, s.createMeetingResponses(st, sess, req, send, save)...)
 	msgs = append(msgs, s.createReceiptSuppressions(sess, req)...)
 	writeResponse(w, createItemResponse{Messages: msgs})

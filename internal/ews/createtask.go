@@ -59,7 +59,7 @@ func (s *Server) createTasks(st *objectstore.Store, req createItemRequest) []ite
 	if len(req.Items.Tasks) == 0 {
 		return nil
 	}
-	fid, code := taskSaveFolder(st, req.SavedItemFolderID)
+	fid, code := classSaveFolder(st, req.SavedItemFolderID, int64(mapi.PrivateFIDTasks), mapi.ContainerClassTask)
 	msgs := make([]itemResponseMessage, 0, len(req.Items.Tasks))
 	for _, item := range req.Items.Tasks {
 		if code != "" {
@@ -69,34 +69,6 @@ func (s *Server) createTasks(st *objectstore.Store, req createItemRequest) []ite
 		msgs = append(msgs, createOneTask(st, fid, item))
 	}
 	return msgs
-}
-
-// taskSaveFolder is the folder a created task is stored in: the one the request
-// names, which must be a task folder of the caller's own mailbox, else Tasks.
-func taskSaveFolder(st *objectstore.Store, refs folderRefs) (int64, string) {
-	targets := resolveTargets(refs)
-	if len(targets) == 0 {
-		return int64(mapi.PrivateFIDTasks), ""
-	}
-	t := targets[0]
-	if !t.ok || t.mailbox != "" {
-		return 0, "ErrorFolderNotFound"
-	}
-	if t.fid == int64(mapi.PrivateFIDTasks) {
-		return t.fid, ""
-	}
-	props, err := st.GetFolderProperties(t.fid, mapi.PrContainerClass)
-	if errors.Is(err, objectstore.ErrNotFound) {
-		return 0, "ErrorFolderNotFound"
-	}
-	if err != nil {
-		return 0, "ErrorInternalServerError"
-	}
-	class := strProp(props, mapi.PrContainerClass)
-	if class != mapi.ContainerClassTask && !strings.HasPrefix(class, mapi.ContainerClassTask+".") {
-		return 0, "ErrorInvalidRequest"
-	}
-	return t.fid, ""
 }
 
 // createOneTask stores one task through the shared task model every protocol
