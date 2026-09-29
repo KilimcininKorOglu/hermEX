@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"hermex/internal/mapi"
-	"hermex/internal/meeting"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcical"
 	"hermex/internal/oxcmail"
@@ -120,8 +119,8 @@ func (s *Server) editOccurrence(e calendarEdit) string {
 			return "ErrorInvalidPropertySet"
 		}
 	}
-	before, ok := verbatimICal(e.msg.Props)
-	if !ok {
+	before, verbatim, err := seriesICal(e.st, e.msg)
+	if err != nil {
 		return "ErrorItemSave"
 	}
 	at := time.Unix(e.id.Instance, 0).UTC()
@@ -138,7 +137,7 @@ func (s *Server) editOccurrence(e calendarEdit) string {
 		return "ErrorItemNotFound"
 	}
 	edited, notice := occurrenceUpdate(e, before, edited, at)
-	if err := meeting.ReplaceSeries(e.st, e.id.MessageID, edited); err != nil {
+	if err := storeSeries(e.st, e.id.MessageID, e.msg, verbatim, edited, at, &oxcical.Span{Start: start, End: end}); err != nil {
 		return "ErrorItemSave"
 	}
 	s.sendScheduling(e.st, notice, e.send)

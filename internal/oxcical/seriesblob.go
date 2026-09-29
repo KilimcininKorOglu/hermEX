@@ -1,10 +1,13 @@
 package oxcical
 
 import (
+	"cmp"
 	"slices"
 	"strings"
 	"time"
 
+	"hermex/internal/mapi"
+	"hermex/internal/oxcmail"
 	"hermex/internal/recurrence"
 )
 
@@ -89,6 +92,56 @@ func sortedKeys(m map[string]*icomp) []string {
 	}
 	slices.Sort(keys)
 	return keys
+}
+
+// EditRecurrenceBlob edits the PidLidAppointmentRecur blob of a stored series that
+// keeps no iCalendar, the form a MAPI client writes: it removes the occurrence the
+// series generates at at, or, when to is set, moves it to that span. The instance
+// becomes a deleted day, and a moved one a modified instance too, so an earlier
+// change to the same occurrence is replaced ([MS-OXOCAL] 2.2.1.44.5). ok is false
+// when the object carries no pattern this package decodes.
+func EditRecurrenceBlob(msg *oxcmail.Message, opt Options, at time.Time, to *Span) ([]byte, bool, error) {
+	named, err := resolveFields(opt, exportFields, false)
+	if err != nil {
+		return nil, false, err
+	}
+	uidTag, err := resolveOne(opt, nameICalUID, mapi.PtUnicode, false)
+	if err != nil {
+		return nil, false, err
+	}
+	e := newEventExport(msg, named, uidTag, getStr(&msg.Props, mapi.PrMessageClass))
+	if e.series == nil {
+		return nil, false, nil
+	}
+	loc := e.wallZone()
+	p := *e.series
+	original := recurrence.Minutes(at.In(loc))
+	dropException(&p, original)
+	if day := recurrence.Day(original); !slices.Contains(p.DeletedDates, day) {
+		p.DeletedDates = append(p.DeletedDates, day)
+		slices.Sort(p.DeletedDates)
+	}
+	if to != nil {
+		ex := recurrence.Exception{Start: recurrence.Minutes(to.Start.In(loc)), End: recurrence.Minutes(to.End.In(loc)), OriginalStart: original}
+		p.Exceptions = append(p.Exceptions, ex)
+		slices.SortFunc(p.Exceptions, func(a, b recurrence.Exception) int { return cmp.Compare(a.Start, b.Start) })
+		p.ModifiedDates = append(p.ModifiedDates, recurrence.Day(ex.Start))
+		slices.Sort(p.ModifiedDates)
+	}
+	return recurrence.EncodeAppointment(p), true, nil
+}
+
+// dropException removes the modified instance that replaces the occurrence
+// generated at original, with its modified day.
+func dropException(p *recurrence.AppointmentPattern, original uint32) {
+	i := slices.IndexFunc(p.Exceptions, func(ex recurrence.Exception) bool { return ex.OriginalStart == original })
+	if i < 0 {
+		return
+	}
+	if j := slices.Index(p.ModifiedDates, recurrence.Day(p.Exceptions[i].Start)); j >= 0 {
+		p.ModifiedDates = slices.Delete(p.ModifiedDates, j, j+1)
+	}
+	p.Exceptions = slices.Delete(p.Exceptions, i, i+1)
 }
 
 // RecurrenceBlob renders the PidLidAppointmentRecur blob of a stored series from

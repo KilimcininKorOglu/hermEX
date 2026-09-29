@@ -110,12 +110,10 @@ func removeObject(st *objectstore.Store, id int64, deleteType string) error {
 }
 
 // deleteOccurrence removes one occurrence from its series, leaving the others,
-// and tells the attendees when the caller organizes the meeting. A series a MAPI
-// client wrote keeps no iCalendar to remove the one instance from, and is refused
-// rather than deleted whole.
+// and tells the attendees when the caller organizes the meeting.
 func (s *Server) deleteOccurrence(d objectDelete, msg *oxcmail.Message) string {
-	before, ok := verbatimICal(msg.Props)
-	if !ok {
+	before, verbatim, err := seriesICal(d.st, msg)
+	if err != nil {
 		return "ErrorItemSave"
 	}
 	at := time.Unix(d.id.Instance, 0).UTC()
@@ -127,7 +125,7 @@ func (s *Server) deleteOccurrence(d objectDelete, msg *oxcmail.Message) string {
 		return "ErrorItemNotFound"
 	}
 	edited, notice := occurrenceCancellation(d.st, msg, d.caller, before, edited, at)
-	if err := meeting.ReplaceSeries(d.st, d.id.MessageID, edited); err != nil {
+	if err := storeSeries(d.st, d.id.MessageID, msg, verbatim, edited, at, nil); err != nil {
 		return "ErrorItemSave"
 	}
 	s.sendScheduling(d.st, notice, d.cancellations)
@@ -227,6 +225,39 @@ func neverInvited(st *objectstore.Store, props mapi.PropertyValues) bool {
 	v, ok := props.Get(mapi.MakeTag(ids[0], mapi.PtBoolean))
 	sent, isBool := v.(bool)
 	return ok && isBool && !sent
+}
+
+// seriesICal is the iCalendar an occurrence edit reads a stored series from: the
+// one it keeps verbatim, else, for a series a MAPI client wrote, the export of its
+// recurrence blob. verbatim reports which.
+func seriesICal(st *objectstore.Store, msg *oxcmail.Message) (ical []byte, verbatim bool, err error) {
+	if raw, ok := verbatimICal(msg.Props); ok {
+		return raw, true, nil
+	}
+	ical, err = oxcical.Export(msg, oxcical.Options{Resolver: st.GetNamedPropIDs})
+	return ical, false, err
+}
+
+// storeSeries writes an occurrence edit onto the stored series: the edited
+// iCalendar of a series that keeps one, else its recurrence blob edited in place,
+// so a series a MAPI client wrote keeps the form that client reads. to is the new
+// span of a moved occurrence, nil for a removed one.
+func storeSeries(st *objectstore.Store, id int64, msg *oxcmail.Message, verbatim bool, edited []byte, at time.Time, to *oxcical.Span) error {
+	if verbatim {
+		return meeting.ReplaceSeries(st, id, edited)
+	}
+	blob, ok, err := oxcical.EditRecurrenceBlob(msg, oxcical.Options{Resolver: st.GetNamedPropIDs}, at, to)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("ews: the series recurrence cannot be edited")
+	}
+	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameAppointmentRecur})
+	if err != nil {
+		return err
+	}
+	return st.ModifyMessageProperties(id, mapi.PropertyValues{{Tag: mapi.MakeTag(ids[0], mapi.PtBinary), Value: blob}})
 }
 
 // verbatimICal reads the iCalendar a stored calendar item keeps verbatim.
