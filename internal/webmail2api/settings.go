@@ -79,6 +79,16 @@ func (s *Server) lockSettings(mailbox string) func() {
 	return m.Unlock
 }
 
+// settingsFailure is what a withSettings callback returns to answer with an error
+// status instead of its result; nothing is saved. err, when set, is logged under
+// event, and only the generic msg reaches the client.
+type settingsFailure struct {
+	status int
+	msg    string
+	event  string
+	err    error
+}
+
 // withSettings opens the caller's store and runs fn against its shared settings
 // map, persisting it when fn returns true.
 func (s *Server) withSettings(w http.ResponseWriter, r *http.Request, fn func(st *objectstore.Store, m map[string]json.RawMessage) (any, bool)) {
@@ -106,6 +116,13 @@ func (s *Server) withSettings(w http.ResponseWriter, r *http.Request, fn func(st
 		return
 	}
 	resp, save := fn(st, m)
+	if f, failed := resp.(settingsFailure); failed {
+		if f.err != nil {
+			st.LogSwallowedError(f.event, f.err)
+		}
+		writeJSON(w, f.status, map[string]string{"error": f.msg})
+		return
+	}
 	if save {
 		if err := saveSharedSettings(st, m); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save settings"})

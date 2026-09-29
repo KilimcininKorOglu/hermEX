@@ -1,17 +1,21 @@
 package webmail2api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
 	"hermex/internal/objectstore"
 )
 
-// delegationJSON is the stored form of a delegate grant. The grantee list is
-// mirrored to the store's delegate list (the real access gate); the rights and
-// send flags live here so the SPA round-trips them.
+// delegationJSON is what webmail keeps about a grant beyond the store lists: the
+// id it hands the SPA, the access the user picked and when. The grant itself, who
+// is a delegate and who may send, is the store's delegate, send-as and
+// send-on-behalf lists, the lists Outlook, EWS and the admin panel write too.
 type delegationJSON struct {
 	ID              string   `json:"id"`
 	Grantee         string   `json:"grantee"`
@@ -49,32 +53,113 @@ func delegationOut(owner string, d delegationJSON) map[string]any {
 	}
 }
 
-// mirrorDelegates writes the three store lists a delegation implies, because each
-// grants a different thing and only the store lists are consulted at send time. The
-// delegate list is the shared-mailbox open gate (callerMayOpenShared) and grants no
-// send of its own; the send-as list puts only this mailbox on the message; the
-// send-on-behalf list puts this mailbox in From and the delegate in Sender. A
-// delegation whose two flags are both off therefore grants access and no send.
-func mirrorDelegates(st *objectstore.Store, dels []delegationJSON) {
-	grantees := make([]string, 0, len(dels))
-	sendAs := make([]string, 0, len(dels))
-	onBehalf := make([]string, 0, len(dels))
-	for _, d := range dels {
-		g := strings.TrimSpace(d.Grantee)
-		if g == "" {
-			continue
-		}
-		grantees = append(grantees, g)
-		if d.CanSendAs {
-			sendAs = append(sendAs, g)
-		}
-		if d.CanSendOnBehalf {
-			onBehalf = append(onBehalf, g)
+// storeGrants are the three store lists a delegation is made of. The delegate
+// list is the shared-mailbox open gate (callerMayOpenShared) and grants no send of
+// its own; the send-as list puts only this mailbox on the message; the
+// send-on-behalf list puts this mailbox in From and the delegate in Sender.
+type storeGrants struct {
+	delegates, sendAs, onBehalf []string
+}
+
+func loadGrants(st *objectstore.Store) (storeGrants, error) {
+	var g storeGrants
+	var err error
+	if g.delegates, err = st.GetDelegates(); err != nil {
+		return g, err
+	}
+	if g.sendAs, err = st.GetSendAs(); err != nil {
+		return g, err
+	}
+	g.onBehalf, err = st.GetSendOnBehalf()
+	return g, err
+}
+
+func (g storeGrants) save(st *objectstore.Store) error {
+	if err := st.SetDelegates(g.delegates); err != nil {
+		return err
+	}
+	if err := st.SetSendAs(g.sendAs); err != nil {
+		return err
+	}
+	return st.SetSendOnBehalf(g.onBehalf)
+}
+
+// grantees lists everyone the store lists name, once each, in list order.
+func (g storeGrants) grantees() []string {
+	var out []string
+	for _, list := range [][]string{g.delegates, g.onBehalf, g.sendAs} {
+		for _, a := range list {
+			if indexFold(out, a) < 0 {
+				out = append(out, a)
+			}
 		}
 	}
-	_ = st.SetDelegates(grantees)
-	_ = st.SetSendAs(sendAs)
-	_ = st.SetSendOnBehalf(onBehalf)
+	return out
+}
+
+// set puts grantee on the delegate list and on each send list its flags ask for,
+// and takes it off a send list whose flag is off.
+func (g *storeGrants) set(grantee string, sendAs, onBehalf bool) {
+	g.delegates = withMember(g.delegates, grantee, true)
+	g.sendAs = withMember(g.sendAs, grantee, sendAs)
+	g.onBehalf = withMember(g.onBehalf, grantee, onBehalf)
+}
+
+// remove takes grantee off every list.
+func (g *storeGrants) remove(grantee string) {
+	g.set(grantee, false, false)
+	g.delegates = withMember(g.delegates, grantee, false)
+}
+
+// withMember returns list with addr present or absent, matched without regard to
+// case, keeping every other entry and its order.
+func withMember(list []string, addr string, present bool) []string {
+	i := indexFold(list, addr)
+	switch {
+	case present && i < 0:
+		return append(list, addr)
+	case !present && i >= 0:
+		return slices.Delete(slices.Clone(list), i, i+1)
+	}
+	return list
+}
+
+func indexFold(list []string, addr string) int {
+	return slices.IndexFunc(list, func(a string) bool { return strings.EqualFold(a, addr) })
+}
+
+// grantID is the id of a grant webmail has no record of: stable across reads, so
+// the SPA can delete it by the id it listed.
+func grantID(grantee string) string {
+	sum := sha256.Sum256([]byte(strings.ToLower(grantee)))
+	return "g" + hex.EncodeToString(sum[:4])
+}
+
+// delegationRows joins the store lists with webmail's own records: every grantee
+// the lists name is a row, its send flags read from the lists, and its id, access
+// and date taken from webmail's record when there is one.
+func delegationRows(g storeGrants, saved []delegationJSON) []delegationJSON {
+	grantees := g.grantees()
+	rows := make([]delegationJSON, 0, len(grantees))
+	for _, a := range grantees {
+		row := delegationJSON{ID: grantID(a)}
+		if i := slices.IndexFunc(saved, func(d delegationJSON) bool { return strings.EqualFold(d.Grantee, a) }); i >= 0 {
+			row = saved[i]
+		}
+		row.Grantee = a
+		row.CanSendAs = indexFold(g.sendAs, a) >= 0
+		row.CanSendOnBehalf = indexFold(g.onBehalf, a) >= 0
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func grantsUnavailable(err error) settingsFailure {
+	return settingsFailure{status: http.StatusInternalServerError, msg: "delegates unavailable", event: "delegates.read", err: err}
+}
+
+func grantsUnsaved(err error) settingsFailure {
+	return settingsFailure{status: http.StatusInternalServerError, msg: "could not save delegates", event: "delegates.write", err: err}
 }
 
 func (s *Server) handleGetDelegations(w http.ResponseWriter, r *http.Request) {
@@ -83,10 +168,14 @@ func (s *Server) handleGetDelegations(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		dels := readDelegations(m)
-		out := make([]map[string]any, 0, len(dels))
-		for _, d := range dels {
+	s.withSettings(w, r, func(st *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
+		g, err := loadGrants(st)
+		if err != nil {
+			return grantsUnavailable(err), false
+		}
+		rows := delegationRows(g, readDelegations(m))
+		out := make([]map[string]any, 0, len(rows))
+		for _, d := range rows {
 			out = append(out, delegationOut(c.Email, d))
 		}
 		return map[string]any{"delegations": out}, false
@@ -109,24 +198,30 @@ func (s *Server) handlePostDelegation(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	if strings.TrimSpace(in.Grantee) == "" {
+	grantee := strings.TrimSpace(in.Grantee)
+	if grantee == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a grantee address is required"})
 		return
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
+	d := delegationJSON{
+		ID:              randomHex()[:8],
+		Grantee:         grantee,
+		Rights:          in.Rights,
+		CanSendAs:       in.CanSendAs,
+		CanSendOnBehalf: in.CanSendOnBehalf,
+		CreatedAt:       time.Now().UTC().Format(time.RFC3339),
+	}
 	s.withSettings(w, r, func(st *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		dels := readDelegations(m)
-		d := delegationJSON{
-			ID:              randomHex()[:8],
-			Grantee:         in.Grantee,
-			Rights:          in.Rights,
-			CanSendAs:       in.CanSendAs,
-			CanSendOnBehalf: in.CanSendOnBehalf,
-			CreatedAt:       now,
+		g, err := loadGrants(st)
+		if err != nil {
+			return grantsUnavailable(err), false
 		}
-		dels = append(dels, d)
-		writeDelegations(m, dels)
-		mirrorDelegates(st, dels)
+		g.set(grantee, d.CanSendAs, d.CanSendOnBehalf)
+		if err := g.save(st); err != nil {
+			return grantsUnsaved(err), false
+		}
+		saved := slices.DeleteFunc(readDelegations(m), func(o delegationJSON) bool { return strings.EqualFold(o.Grantee, grantee) })
+		writeDelegations(m, append(saved, d))
 		return delegationOut(c.Email, d), true
 	})
 }
@@ -134,15 +229,22 @@ func (s *Server) handlePostDelegation(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteDelegation(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	s.withSettings(w, r, func(st *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		dels := readDelegations(m)
-		kept := dels[:0]
-		for _, d := range dels {
-			if d.ID != id {
-				kept = append(kept, d)
-			}
+		g, err := loadGrants(st)
+		if err != nil {
+			return grantsUnavailable(err), false
 		}
-		writeDelegations(m, kept)
-		mirrorDelegates(st, kept)
+		saved := readDelegations(m)
+		rows := delegationRows(g, saved)
+		i := slices.IndexFunc(rows, func(d delegationJSON) bool { return d.ID == id })
+		if i < 0 {
+			return settingsFailure{status: http.StatusNotFound, msg: "no such delegation"}, false
+		}
+		grantee := rows[i].Grantee
+		g.remove(grantee)
+		if err := g.save(st); err != nil {
+			return grantsUnsaved(err), false
+		}
+		writeDelegations(m, slices.DeleteFunc(saved, func(d delegationJSON) bool { return strings.EqualFold(d.Grantee, grantee) }))
 		return map[string]bool{"ok": true}, true
 	})
 }

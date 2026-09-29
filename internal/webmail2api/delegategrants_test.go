@@ -21,12 +21,14 @@ func TestADelegationMirrorsItsSendGrants(t *testing.T) {
 	}
 	defer st.Close()
 
-	mirrorDelegates(st, []delegationJSON{
-		{Grantee: "asonly@hermex.test", CanSendAs: true},
-		{Grantee: "behalf@hermex.test", CanSendOnBehalf: true},
-		{Grantee: "both@hermex.test", CanSendAs: true, CanSendOnBehalf: true},
-		{Grantee: "readonly@hermex.test"},
-	})
+	var g storeGrants
+	g.set("asonly@hermex.test", true, false)
+	g.set("behalf@hermex.test", false, true)
+	g.set("both@hermex.test", true, true)
+	g.set("readonly@hermex.test", false, false)
+	if err := g.save(st); err != nil {
+		t.Fatal(err)
+	}
 
 	dels, err := st.GetDelegates()
 	if err != nil {
@@ -57,8 +59,8 @@ func TestADelegationMirrorsItsSendGrants(t *testing.T) {
 	}
 }
 
-// TestRemovingADelegationClearsItsGrants proves the mirror is a replacement, not an
-// append: a revoked delegation must take its send grants with it.
+// TestRemovingADelegationClearsItsGrants proves a revoked delegation takes its
+// send grants with it.
 func TestRemovingADelegationClearsItsGrants(t *testing.T) {
 	dir := t.TempDir()
 	st, err := objectstore.Open(dir)
@@ -67,8 +69,15 @@ func TestRemovingADelegationClearsItsGrants(t *testing.T) {
 	}
 	defer st.Close()
 
-	mirrorDelegates(st, []delegationJSON{{Grantee: "gone@hermex.test", CanSendAs: true, CanSendOnBehalf: true}})
-	mirrorDelegates(st, nil)
+	var g storeGrants
+	g.set("gone@hermex.test", true, true)
+	if err := g.save(st); err != nil {
+		t.Fatal(err)
+	}
+	g.remove("GONE@hermex.test")
+	if err := g.save(st); err != nil {
+		t.Fatal(err)
+	}
 
 	for _, c := range []struct {
 		name string
