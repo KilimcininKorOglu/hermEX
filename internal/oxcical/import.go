@@ -149,17 +149,14 @@ func importedUID(vev *icomp) string {
 // instance and carries neither.
 func importRecurring(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag, cal, vev *icomp, raw []byte) {
 	p.Set(mapi.PrIcalOriginal, append([]byte(nil), raw...))
+	// The span stored is the first instance's, as for a single event: a MAPI
+	// reader takes the series' start, end and all-day flag from the master.
+	importTimes(p, named, vev)
 	var start time.Time
 	if l := vev.prop("DTSTART"); l != nil {
-		if t, _, ok := parseICalTime(l); ok {
-			start = t
-			setNamedTime(p, named, mapi.NameAppointmentStartWhole, t)
-		}
+		start, _, _ = parseICalTime(l)
 	}
 	loc := eventZone(vev)
-	if loc != nil && !start.IsZero() {
-		writeDisplayZones(p, named, loc, start)
-	}
 	rrule := vev.prop("RRULE")
 	if rrule == nil {
 		return
