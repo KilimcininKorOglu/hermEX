@@ -2,12 +2,14 @@ package ews
 
 import (
 	"encoding/xml"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcical"
 
 	"hermex/internal/logging"
 )
@@ -228,9 +230,9 @@ func (s *Server) freeBusyForTarget(sess *session, email string, windowStart, win
 }
 
 // CalendarFreeBusy enumerates the target's calendar for appointments overlapping
-// the window. A recurring series master is skipped: its stored start/end describe
-// only the first instance, so emitting it would place a misleading single block at
-// the series origin, recurrence expansion is a documented v1 gap. Detail fields
+// the window. A recurring series is reported as the occurrences it places in the
+// window, not as its master, whose stored start/end describe only the first
+// instance. Detail fields
 // are attached only when the caller is entitled to the detailed view.
 func CalendarFreeBusy(st *objectstore.Store, windowStart, windowEnd time.Time, detailed bool) ([]CalendarEvent, error) {
 	ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{
@@ -296,12 +298,63 @@ func CalendarFreeBusy(st *objectstore.Store, windowStart, windowEnd time.Time, d
 		}
 		events = append(events, ev)
 	}
+	series, err := seriesFreeBusy(st, recurTag, windowStart, windowEnd, detailed)
+	if err != nil {
+		return nil, err
+	}
+	return append(events, series...), nil
+}
+
+// seriesFreeBusy reports every occurrence of the calendar's recurring series that
+// overlaps the window. A series master carries its first instance's span, so it is
+// found by its recurring flag rather than by the window, and expanded with each
+// exception's own busy status, subject, location and reminder.
+func seriesFreeBusy(st *objectstore.Store, recurTag mapi.PropTag, windowStart, windowEnd time.Time, detailed bool) ([]CalendarEvent, error) {
+	if recurTag == 0 {
+		return nil, nil
+	}
+	masters, err := st.ListFolderObjectsWithFlag(int64(mapi.PrivateFIDCalendar), recurTag)
+	if err != nil {
+		return nil, err
+	}
+	var events []CalendarEvent
+	for _, obj := range masters {
+		msg, err := st.OpenMessage(obj.ID)
+		if err != nil {
+			return nil, err
+		}
+		occ, ok, err := oxcical.SeriesOccurrences(msg, oxcical.Options{Resolver: st.GetNamedPropIDs}, windowStart, windowEnd)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			st.LogSwallowedError("ews.freebusy-series", fmt.Errorf("recurring object %d does not expand as a series", obj.ID))
+			continue
+		}
+		for _, o := range occ {
+			events = append(events, occurrenceEvent(o, detailed))
+		}
+	}
 	return events, nil
 }
 
+// occurrenceEvent renders one series occurrence as a free/busy event.
+func occurrenceEvent(o oxcical.Occurrence, detailed bool) CalendarEvent {
+	ev := CalendarEvent{
+		StartTime: o.Start.UTC().Format(time.RFC3339),
+		EndTime:   o.End.UTC().Format(time.RFC3339),
+		BusyType:  busyTypeName(o.BusyStatus),
+		Status:    o.BusyStatus,
+	}
+	if detailed {
+		ev.Details = &calendarEventDetails{Subject: o.Subject, Location: o.Location, IsReminderSet: o.ReminderSet}
+	}
+	return ev
+}
+
 // appointmentWindow reports whether one appointment belongs in the free/busy
-// answer, and its span. A recurring master is skipped (v1 gap: no instance
-// expansion). The test is overlap, not containment: an appointment that starts
+// answer, and its span. A recurring master is left to seriesFreeBusy, which
+// expands it. The test is overlap, not containment: an appointment that starts
 // before the window and ends after it still occupies the whole window and must
 // appear.
 func appointmentWindow(pv mapi.PropertyValues, startTag, endTag, recurTag mapi.PropTag,
