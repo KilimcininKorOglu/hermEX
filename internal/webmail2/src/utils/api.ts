@@ -1,4 +1,5 @@
 import type { VaultEnvelope } from './smimeVault'
+import { sharedSenderIdentity } from './senderIdentity'
 
 const API_URL = window.location.origin + '/api/v1'
 
@@ -739,6 +740,8 @@ export interface SharedMailbox {
   mailbox: string
   displayName?: string
   rights?: string
+  // The From grant the caller holds on the mailbox, as the send gate decides it.
+  sendGrant?: "send-as" | "on-behalf" | "none"
 }
 
 export interface SenderIdentity {
@@ -1625,18 +1628,10 @@ class API {
     // Add identities from shared mailboxes
     if (sharedResult.shared_mailboxes) {
       for (const mb of sharedResult.shared_mailboxes) {
-        // User has access to this shared mailbox
-        // They can send on behalf of the owner if they have write rights
         const key = mb.owner.toLowerCase()
         if (seen.has(key)) continue
         seen.add(key)
-        identities.push({
-          email: mb.owner,
-          displayName: `${mb.mailbox} (${mb.owner})`,
-          type: 'send-on-behalf',
-          mailboxOwner: mb.owner,
-          canSend: true // Permission will be validated server-side on send
-        })
+        identities.push(sharedSenderIdentity(mb))
       }
     }
 

@@ -13,6 +13,7 @@ import (
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/sendas"
 )
 
 // sharedSettings reads the shared webmail settings blob (PrWebmailSettings) as a
@@ -965,6 +966,7 @@ func (s *Server) handleGetSharedMailboxes(w http.ResponseWriter, r *http.Request
 						"mailbox":     b.Address,
 						"displayName": b.Address,
 						"rights":      "read",
+						"sendGrant":   s.sendGrant(c.Email, b.Address),
 					})
 				}
 				_ = st.Close()
@@ -972,6 +974,14 @@ func (s *Server) handleGetSharedMailboxes(w http.ResponseWriter, r *http.Request
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"shared_mailboxes": boxes})
+}
+
+// sendGrant names the From grant the caller holds on a shared mailbox (send-as,
+// on-behalf or none), the same decision the send gate applies, so the compose
+// picker offers only identities a send will accept.
+func (s *Server) sendGrant(caller, mailbox string) string {
+	_, _, g := sendas.Resolve(s.accounts, caller, mailbox)
+	return g.String()
 }
 
 // handleGetSharedAsOwner lists the shared mailboxes the caller OWNS (is a store
