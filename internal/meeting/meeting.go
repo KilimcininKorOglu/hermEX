@@ -383,15 +383,19 @@ func file(st *objectstore.Store, req *oxcmail.Message, tags Tags, response int32
 // cannot be folded into is left untouched and the failure is recorded, because
 // destroying the series is the thing this avoids.
 func foldOccurrence(st *objectstore.Store, existing int64, req *oxcmail.Message) (done bool, err error) {
-	update, ok := icalOf(req.Props)
-	if !ok {
-		return false, nil
-	}
-	if _, isOccurrence := oxcical.OccurrenceInstant(update); !isOccurrence {
+	update, hasICal := icalOf(req.Props)
+	if !isOccurrenceRequest(st, req, update, hasICal) {
 		return false, nil
 	}
 	stored, ok := storedICal(st, existing)
-	if !ok {
+	if !ok || !hasICal {
+		// A series a MAPI client wrote keeps its exceptions in the recurrence blob,
+		// which only that client edits; writing the occurrence over it would replace
+		// the series with one instance.
+		if isSeries(st, existing) {
+			st.LogSwallowedError("meeting.fold-occurrence", errFoldRefused)
+			return true, nil
+		}
 		return false, nil
 	}
 	merged, ok := oxcical.MergeOverride(stored, update)
@@ -402,6 +406,39 @@ func foldOccurrence(st *objectstore.Store, existing int64, req *oxcmail.Message)
 	return true, st.ModifyMessageProperties(existing, withRecurrence(st, mapi.PropertyValues{
 		{Tag: mapi.PrIcalOriginal, Value: merged},
 	}, merged))
+}
+
+// isOccurrenceRequest reports whether a request names one instance of a series:
+// its iCalendar carries a RECURRENCE-ID, or, without an iCalendar, its
+// PidLidGlobalObjectId carries the instance date, which is zero on a series
+// ([MS-OXOCAL] 2.2.1.27).
+func isOccurrenceRequest(st *objectstore.Store, req *oxcmail.Message, update []byte, hasICal bool) bool {
+	if hasICal {
+		_, ok := oxcical.OccurrenceInstant(update)
+		return ok
+	}
+	ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{mapi.NameGlobalObjectId})
+	if err != nil || ids[0] == 0 {
+		return false
+	}
+	v, _ := req.Props.Get(mapi.MakeTag(ids[0], mapi.PtBinary))
+	goid, _ := v.([]byte)
+	return len(goid) >= 20 && (goid[16] != 0 || goid[17] != 0 || goid[18] != 0 || goid[19] != 0)
+}
+
+// isSeries reports whether a stored calendar item carries a recurrence pattern.
+func isSeries(st *objectstore.Store, id int64) bool {
+	ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{mapi.NameAppointmentRecur})
+	if err != nil || ids[0] == 0 {
+		return false
+	}
+	tag := mapi.MakeTag(ids[0], mapi.PtBinary)
+	pv, err := st.GetMessageProperties(id, tag)
+	if err != nil {
+		st.LogSwallowedError("meeting.read-recurrence", err)
+		return false
+	}
+	return pv.Has(tag)
 }
 
 // errFoldRefused reports an occurrence update that could not be folded into the
@@ -449,18 +486,21 @@ func removeAppointment(st *objectstore.Store, req *oxcmail.Message, tags Tags) e
 // done is false when the cancellation is not for one occurrence, or the stored item
 // is not a series, so the caller deletes the appointment as before.
 func cancelOccurrence(st *objectstore.Store, existing int64, req *oxcmail.Message) (done bool, err error) {
-	cancel, ok := icalOf(req.Props)
-	if !ok {
-		return false, nil
-	}
-	at, isOccurrence := oxcical.OccurrenceInstant(cancel)
-	if !isOccurrence {
+	cancel, hasICal := icalOf(req.Props)
+	if !isOccurrenceRequest(st, req, cancel, hasICal) {
 		return false, nil
 	}
 	stored, ok := storedICal(st, existing)
-	if !ok {
+	if !ok || !hasICal {
+		// A MAPI client's series: deleting it would take every other instance with
+		// the one this names, so it is left for that client to edit.
+		if isSeries(st, existing) {
+			st.LogSwallowedError("meeting.cancel-occurrence", errFoldRefused)
+			return true, nil
+		}
 		return false, nil
 	}
+	at, _ := oxcical.OccurrenceInstant(cancel)
 	trimmed, ok := oxcical.CancelOccurrence(stored, at)
 	if !ok {
 		return false, nil // not a series: the stored item IS that occurrence

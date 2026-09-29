@@ -7,6 +7,7 @@ import (
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcical"
 )
 
 const occurrenceUID = "series-42@hermex.test"
@@ -130,6 +131,115 @@ func TestOccurrenceUpdateKeepsTheSeriesStart(t *testing.T) {
 	}
 	if v, _ := pv.Get(startProp); v != start {
 		t.Errorf("series start = %v, want it unchanged at %v", v, start)
+	}
+}
+
+// TestOccurrenceUpdateLeavesAMAPISeriesAlone accepts an update for one instance
+// of a series a MAPI client wrote: the stored series has its recurrence blob but
+// no iCalendar to fold the update into. The series must stay as it is. Before,
+// the occurrence's properties were written over it, which moved the series start
+// to the one instance.
+func TestOccurrenceUpdateLeavesAMAPISeriesAlone(t *testing.T) {
+	st, tags := occurrenceStore(t)
+	apptID := seedAppointmentFor(t, st, tags, occurrenceUID)
+	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole, mapi.NameAppointmentRecur})
+	if err != nil {
+		t.Fatal(err)
+	}
+	startProp := mapi.MakeTag(ids[0], mapi.PtSysTime)
+	seriesStart := mapi.UnixToNTTime(time.Date(2026, 3, 2, 17, 0, 0, 0, time.UTC))
+	if err := st.ModifyMessageProperties(apptID, mapi.PropertyValues{
+		{Tag: startProp, Value: seriesStart},
+		{Tag: mapi.MakeTag(ids[1], mapi.PtBinary), Value: []byte{0x04, 0x30, 0x04, 0x30}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reqID := appendScheduling(t, st, tags, occurrenceBody)
+	if err := st.ModifyMessageProperties(reqID, mapi.PropertyValues{
+		{Tag: startProp, Value: mapi.UnixToNTTime(time.Date(2026, 3, 9, 18, 0, 0, 0, time.UTC))},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Respond(st, nil, nil, "alice@hermex.test", reqID, ResponseAccepted, false); err != nil {
+		t.Fatal(err)
+	}
+
+	pv, err := st.GetMessageProperties(apptID, startProp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := pv.Get(startProp); v != seriesStart {
+		t.Errorf("series start = %v, want it unchanged at %v", v, seriesStart)
+	}
+	if n := folderCount(t, st, int64(mapi.PrivateFIDCalendar)); n != 1 {
+		t.Errorf("Calendar holds %d items, want the one series object", n)
+	}
+}
+
+// TestInstanceGOIDRequestLeavesTheSeriesAlone accepts a request that carries no
+// iCalendar and names its instance only through the date in its
+// PidLidGlobalObjectId, the form a MAPI client writes. The series must stay as it
+// is.
+func TestInstanceGOIDRequestLeavesTheSeriesAlone(t *testing.T) {
+	st, tags := occurrenceStore(t)
+	apptID := seedAppointmentFor(t, st, tags, occurrenceUID)
+	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole, mapi.NameAppointmentRecur, mapi.NameGlobalObjectId})
+	if err != nil {
+		t.Fatal(err)
+	}
+	startProp := mapi.MakeTag(ids[0], mapi.PtSysTime)
+	seriesStart := mapi.UnixToNTTime(time.Date(2026, 3, 2, 17, 0, 0, 0, time.UTC))
+	if err := st.ModifyMessageProperties(apptID, mapi.PropertyValues{
+		{Tag: startProp, Value: seriesStart},
+		{Tag: mapi.MakeTag(ids[1], mapi.PtBinary), Value: []byte{0x04, 0x30, 0x04, 0x30}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	goid := oxcical.GlobalObjectID(occurrenceUID)
+	goid[16], goid[17], goid[18], goid[19] = 0x07, 0xEA, 3, 9 // 2026-03-09
+	reqID := appendRequestWithUID(t, st, tags, occurrenceUID)
+	if err := st.ModifyMessageProperties(reqID, mapi.PropertyValues{
+		{Tag: startProp, Value: mapi.UnixToNTTime(time.Date(2026, 3, 9, 18, 0, 0, 0, time.UTC))},
+		{Tag: mapi.MakeTag(ids[2], mapi.PtBinary), Value: goid},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Respond(st, nil, nil, "alice@hermex.test", reqID, ResponseAccepted, false); err != nil {
+		t.Fatal(err)
+	}
+	pv, err := st.GetMessageProperties(apptID, startProp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := pv.Get(startProp); v != seriesStart {
+		t.Errorf("series start = %v, want it unchanged at %v", v, seriesStart)
+	}
+}
+
+// TestDeclinedOccurrenceKeepsAMAPISeries declines one instance of a series a MAPI
+// client wrote, which has no iCalendar to exclude the day from. The series must
+// survive: the decline used to delete it with every other instance.
+func TestDeclinedOccurrenceKeepsAMAPISeries(t *testing.T) {
+	st, tags := occurrenceStore(t)
+	apptID := seedAppointmentFor(t, st, tags, occurrenceUID)
+	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameAppointmentRecur})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ModifyMessageProperties(apptID, mapi.PropertyValues{
+		{Tag: mapi.MakeTag(ids[0], mapi.PtBinary), Value: []byte{0x04, 0x30, 0x04, 0x30}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reqID := appendScheduling(t, st, tags, occurrenceBody)
+
+	if _, err := Respond(st, nil, nil, "alice@hermex.test", reqID, ResponseDeclined, false); err != nil {
+		t.Fatal(err)
+	}
+	if n := folderCount(t, st, int64(mapi.PrivateFIDCalendar)); n != 1 {
+		t.Errorf("Calendar holds %d items, want the series to have survived the decline", n)
 	}
 }
 
