@@ -2,6 +2,7 @@ package ews
 
 import (
 	"encoding/xml"
+	"errors"
 	"net/http"
 	"net/mail"
 	"strings"
@@ -213,6 +214,9 @@ func folderItemsFound(st *objectstore.Store, fid int64, idMailbox string, fields
 			Items:                   itemsWrap{BaseItems: notes},
 		})
 	}
+	if resp, ok := searchItemsFound(st, fid, idMailbox, fields); ok {
+		return resp
+	}
 	items, err := st.ListMessages(fid)
 	if err != nil {
 		return findItemError("ErrorItemNotFound")
@@ -226,6 +230,32 @@ func folderItemsFound(st *objectstore.Store, fid int64, idMailbox string, fields
 		IncludesLastItemInRange: true,
 		Items:                   itemsWrap{Messages: elems},
 	})
+}
+
+// searchItemsFound lists the mail a search folder finds, and reports false for
+// any other folder. Each item keeps the id of the folder it lives in, so a
+// GetItem, an update or a move on a result reaches the message itself.
+func searchItemsFound(st *objectstore.Store, fid int64, idMailbox string, fields []extField) (findItemResponseMessage, bool) {
+	search, err := st.IsSearchFolder(fid)
+	if errors.Is(err, objectstore.ErrNotFound) || (err == nil && !search) {
+		return findItemResponseMessage{}, false
+	}
+	if err != nil {
+		return findItemError("ErrorInternalServerError"), true
+	}
+	found, err := st.SearchFolderMessages(fid)
+	if err != nil {
+		return findItemError("ErrorInternalServerError"), true
+	}
+	elems := make([]oxews.Message, 0, len(found))
+	for _, m := range found {
+		elems = append(elems, summaryWith(st, m.Folder, m.MessageInfo, idMailbox, fields))
+	}
+	return findItemFound(&findItemRoot{
+		TotalItemsInView:        len(elems),
+		IncludesLastItemInRange: true,
+		Items:                   itemsWrap{Messages: elems},
+	}), true
 }
 
 // folderVisibleAccess reports the response code refusing a caller who cannot see

@@ -293,36 +293,19 @@ func folderSlug(st *objectstore.Store, fid int64) string {
 // savedSearchMail returns the mail a search folder holds, newest first and
 // bounded as a search is.
 func savedSearchMail(st *objectstore.Store, fid int64) ([]mailJSON, error) {
-	ids, err := st.SearchFolderMessageIDs(fid)
+	found, err := st.SearchFolderMessages(fid)
 	if err != nil {
 		return nil, err
 	}
-	byFolder := map[int64]map[int64]bool{}
-	for _, id := range ids {
-		folder, _, ok, err := st.MessageIndexLocation(id)
-		if err != nil {
-			return nil, err
-		}
+	slugs := map[int64]string{}
+	rows := make([]foundMail, 0, len(found))
+	for _, m := range found {
+		slug, ok := slugs[m.Folder]
 		if !ok {
-			continue
+			slug = folderSlug(st, m.Folder)
+			slugs[m.Folder] = slug
 		}
-		if byFolder[folder] == nil {
-			byFolder[folder] = map[int64]bool{}
-		}
-		byFolder[folder][id] = true
-	}
-	var rows []foundMail
-	for folder, want := range byFolder {
-		msgs, err := st.ListMessages(folder)
-		if err != nil {
-			return nil, err
-		}
-		slug := folderSlug(st, folder)
-		for _, m := range msgs {
-			if want[m.ID] {
-				rows = append(rows, foundMail{MessageInfo: m, slug: slug})
-			}
-		}
+		rows = append(rows, foundMail{MessageInfo: m.MessageInfo, slug: slug})
 	}
 	return newestMail(rows), nil
 }

@@ -2,11 +2,16 @@ package oxews
 
 import "encoding/xml"
 
-// Folder is the EWS <t:Folder> element (the BaseFolderType subset v1 emits). The
-// element declares the types namespace once on itself; the child elements inherit
-// it as the default namespace, so they need no per-field namespace boilerplate.
+// typesNS is the EWS types namespace every folder element is in.
+const typesNS = "http://schemas.microsoft.com/exchange/services/2006/types"
+
+// Folder is the EWS <t:Folder> element (the BaseFolderType subset v1 emits), or
+// <t:SearchFolder> for a search folder: the element name is how a client tells
+// the two apart. The element declares the types namespace once on itself; the
+// child elements inherit it as the default namespace, so they need no per-field
+// namespace boilerplate. BuildFolder sets the name.
 type Folder struct {
-	XMLName          xml.Name  `xml:"http://schemas.microsoft.com/exchange/services/2006/types Folder"`
+	XMLName          xml.Name
 	FolderID         FolderID  `xml:"FolderId"`
 	ParentFolderID   *FolderID `xml:"ParentFolderId,omitempty"`
 	DisplayName      string    `xml:"DisplayName"`
@@ -41,11 +46,18 @@ type FolderInput struct {
 	// caller was granted access to; empty for the caller's own. It is encoded into the
 	// folder and parent ids so a later request reopens the same mailbox.
 	Mailbox string
+	// Search marks a search folder, rendered as <t:SearchFolder>.
+	Search bool
 }
 
-// BuildFolder renders a <t:Folder> element from store folder data.
+// BuildFolder renders a folder element from store folder data.
 func BuildFolder(in FolderInput) Folder {
+	name := "Folder"
+	if in.Search {
+		name = "SearchFolder"
+	}
 	f := Folder{
+		XMLName:          xml.Name{Space: typesNS, Local: name},
 		FolderID:         FolderID{ID: EncodeFolderIDFor(in.FolderID, in.Mailbox), ChangeKey: ChangeKey(in.ChangeNumber)},
 		DisplayName:      in.DisplayName,
 		TotalCount:       in.Total,

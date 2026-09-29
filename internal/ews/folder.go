@@ -362,7 +362,22 @@ func findFolderChildren(st *objectstore.Store, sess *session, tgt folderTarget,
 			return nil, code
 		}
 	}
+	if tgt.fid == int64(mapi.PrivateFIDFinder) {
+		return finderChildren(st)
+	}
 	return collectChildren(all, tgt.fid, deep), ""
+}
+
+// finderChildren lists the search folders under Finder. The folder listing
+// holds only the IPM subtree, and Finder hangs off the mailbox root, so its
+// search folders are read from the store. A search folder has no subfolders, so
+// a deep and a shallow traversal find the same folders.
+func finderChildren(st *objectstore.Store) ([]objectstore.FolderInfo, string) {
+	found, err := st.SearchFolderChildren(int64(mapi.PrivateFIDFinder))
+	if err != nil {
+		return nil, "ErrorInternalServerError"
+	}
+	return found, ""
 }
 
 // findFolderError builds a FindFolder error response message.
@@ -791,7 +806,11 @@ func folderElements(st *objectstore.Store, infos, all []objectstore.FolderInfo, 
 // buildFolderElem renders a folder element with its live item counts and child
 // count. mailbox tags the minted folder ids with the target mailbox (empty for own).
 func buildFolderElem(st *objectstore.Store, info objectstore.FolderInfo, children int, mailbox string) (oxews.Folder, error) {
-	total, unread, err := st.CountMessages(info.ID)
+	search, err := st.IsSearchFolder(info.ID)
+	if err != nil {
+		return oxews.Folder{}, err
+	}
+	total, unread, err := folderCounts(st, info.ID, search)
 	if err != nil {
 		return oxews.Folder{}, err
 	}
@@ -820,7 +839,17 @@ func buildFolderElem(st *objectstore.Store, info objectstore.FolderInfo, childre
 		Unread:       unread,
 		Children:     children,
 		Mailbox:      mailbox,
+		Search:       search,
 	}), nil
+}
+
+// folderCounts returns a folder's item and unread counts: a search folder holds
+// no messages of its own, so its counts are those of the messages it finds.
+func folderCounts(st *objectstore.Store, fid int64, search bool) (total, unread int, err error) {
+	if search {
+		return st.SearchFolderCounts(fid)
+	}
+	return st.CountMessages(fid)
 }
 
 // syntheticRoot renders the IPM subtree root, which is not itself enumerated by
