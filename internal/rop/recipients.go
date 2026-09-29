@@ -12,9 +12,9 @@ import (
 // and RopReloadCachedInformation responses ([MS-OXCMSG] 2.2.3.1.2 / 2.2.3.6):
 // RecipientCount, an (empty) RecipientColumns array, RowCount, then one
 // OPENRECIPIENT_ROW per recipient. The essential recipient fields travel in each
-// row's flag-driven section, so no extra columns are projected. RowCount is a single
-// byte; any recipients beyond 255 are not inlined (a client reads them with
-// RopReadRecipients, which is out of scope here).
+// row's flag-driven section; the other stored recipient properties travel as the
+// RecipientColumns. RowCount is a single byte; any recipients beyond 255 are not
+// inlined, and a client reads them with RopReadRecipients.
 func writeRecipientTable(out *ext.Push, recipients []mapi.PropertyValues) {
 	// RecipientCount is a 16-bit field, so it saturates the way RowCount below
 	// saturates its byte: a stored message can hold more recipients than the field

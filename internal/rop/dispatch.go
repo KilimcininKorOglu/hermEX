@@ -146,6 +146,7 @@ var ropTable = map[uint8]ropHandler{
 	ropRegisterNotification:             (*Session).ropRegisterNotification,
 	ropModifyRecipients:                 (*Session).ropModifyRecipients,
 	ropReloadCachedInfo:                 (*Session).ropReloadCachedInformation,
+	ropReadRecipients:                   (*Session).ropReadRecipients,
 	ropGetMessageStatus:                 (*Session).ropGetMessageStatus,
 	ropSetMessageStatus:                 (*Session).ropSetMessageStatus,
 	ropSubmitMessage:                    (*Session).ropSubmitMessage,
