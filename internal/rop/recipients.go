@@ -1,6 +1,7 @@
 package rop
 
 import (
+	"slices"
 	"strings"
 
 	"hermex/internal/ext"
@@ -20,18 +21,41 @@ func writeRecipientTable(out *ext.Push, recipients []mapi.PropertyValues) {
 	// can name (an ICS import or a list expansion is not bound by the 16-bit count
 	// RopModifyRecipients uses), and wrapping would misstate the table's size.
 	out.Uint16(uint16(min(len(recipients), 0xFFFF))) // RecipientCount (total, not just inlined)
-	_ = out.PropTags(nil)                            // RecipientColumns (empty)
+	cols := recipientColumns(recipients)
+	_ = out.PropTags(cols) // RecipientColumns
 	n := min(len(recipients), 0xFF)
 	out.Uint8(uint8(n)) // RowCount
 	for _, r := range recipients[:n] {
-		writeOpenRecipientRow(out, r)
+		writeOpenRecipientRow(out, cols, r)
 	}
+}
+
+// recipientRowFields are the recipient properties a RECIPIENT_ROW carries in its
+// flag-driven section, so they never travel as recipient columns.
+var recipientRowFields = []mapi.PropTag{
+	mapi.PrResponsibility, mapi.PrAddrType, mapi.PrDisplayName, mapi.PrEmailAddress,
+	mapi.PrEntryID, mapi.PrInstanceKey, mapi.PrRecipientType, mapi.PrRowid,
+	mapi.PrSearchKey, mapi.PrSendRichInfo, mapi.PrTransmitableDisplayName,
+}
+
+// recipientColumns lists the columns every recipient row carries after its
+// flag-driven section: each tag some recipient stores that the section does not
+// already carry, once each and in ascending order.
+func recipientColumns(recipients []mapi.PropertyValues) []mapi.PropTag {
+	cols := []mapi.PropTag{}
+	for _, tag := range bagTags(recipients) {
+		if !slices.Contains(recipientRowFields, tag) {
+			cols = append(cols, tag)
+		}
+	}
+	slices.Sort(cols)
+	return slices.Compact(cols)
 }
 
 // writeOpenRecipientRow emits one OpenRecipientRow ([MS-OXCMSG] 2.2.3.1.2): the
 // recipient type, a code page id and reserved field, then the RECIPIENT_ROW
 // prefixed by its size.
-func writeOpenRecipientRow(out *ext.Push, r mapi.PropertyValues) {
+func writeOpenRecipientRow(out *ext.Push, cols []mapi.PropTag, r mapi.PropertyValues) {
 	rcptType := mapi.RecipTo
 	if v, ok := r.Get(mapi.PrRecipientType); ok {
 		if n, ok := v.(int32); ok {
@@ -42,16 +66,16 @@ func writeOpenRecipientRow(out *ext.Push, r mapi.PropertyValues) {
 	out.Uint16(0)              // CodePageId (Unicode rows carry their own encoding)
 	out.Uint16(0)              // Reserved
 	row := ext.NewPush(ext.FlagUTF16)
-	pushRecipientRow(row, r)
+	pushRecipientRow(row, cols, r)
 	out.Uint16(uint16(row.Len())) // RecipientRowSize
 	out.Raw(row.Bytes())
 }
 
 // pushRecipientRow encodes a RECIPIENT_ROW ([MS-OXCDATA] 2.8.3.2) for a stored
 // recipient. It is the inverse of pullRecipientRow: Unicode display and email,
-// the SMTP/EX/other address kind derived from PR_ADDRTYPE, and an empty trailing
-// PROPERTY_ROW.
-func pushRecipientRow(out *ext.Push, r mapi.PropertyValues) {
+// the SMTP/EX/other address kind derived from PR_ADDRTYPE, and a trailing
+// PROPERTY_ROW over the recipient columns.
+func pushRecipientRow(out *ext.Push, cols []mapi.PropTag, r mapi.PropertyValues) {
 	display, addrType, email := recipientAddress(r)
 	flags := recipientRowFlags(r, display, addrType, email)
 	out.Uint16(flags)
@@ -72,8 +96,8 @@ func pushRecipientRow(out *ext.Push, r mapi.PropertyValues) {
 	if flags&recipientRowDisplay != 0 {
 		out.Unicode(display)
 	}
-	out.Uint16(0)                     // RecipientColumnCount (no extra columns)
-	_ = buildPropertyRow(out, nil, r) // empty PROPERTY_ROW (single NONE flag byte)
+	out.Uint16(uint16(len(cols)))      // RecipientColumnCount
+	_ = buildPropertyRow(out, cols, r) // PROPERTY_ROW; a column this recipient lacks is flagged unavailable
 }
 
 // recipientAddress picks the address this row goes out with. A stored SMTP

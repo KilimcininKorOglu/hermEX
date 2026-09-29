@@ -370,6 +370,7 @@ const (
 	PrEntryID                 = PropTag(0x0FFF0102) // PtBinary
 	PrRecipientEntryID        = PropTag(0x5FF70102) // PtBinary
 	PrRecordKey               = PropTag(0x0FF90102) // PtBinary
+	PrInstanceKey             = PropTag(0x0FF60102) // PtBinary (PidTagInstanceKey)
 	PrObjectType              = PropTag(0x0FFE0003) // PtLong
 	PrDisplayType             = PropTag(0x39000003) // PtLong
 	PrResponsibility          = PropTag(0x0E0F000B) // PtBoolean

@@ -1,6 +1,7 @@
 package rop
 
 import (
+	"slices"
 	"testing"
 
 	"hermex/internal/ext"
@@ -105,8 +106,8 @@ func TestReloadCachedInformation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RecipientColumns: %v", err)
 	}
-	if len(cols) != 0 {
-		t.Errorf("RecipientColumns = %d tags, want 0", len(cols))
+	if slices.ContainsFunc(cols, func(c mapi.PropTag) bool { return slices.Contains(recipientRowFields, c) }) {
+		t.Errorf("RecipientColumns %v repeat a flag-driven field", cols)
 	}
 	if rows := mustU8(t, p, "RowCount"); rows != 1 {
 		t.Errorf("RowCount = %d, want 1", rows)
