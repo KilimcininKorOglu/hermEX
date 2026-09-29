@@ -176,6 +176,24 @@ func TestOwnerCreatedFolderGrantsNobody(t *testing.T) {
 	}
 }
 
+// TestCreateFolderKeepsTheComment proves the request's comment is stored on the
+// new folder as PidTagComment.
+func TestCreateFolderKeepsTheComment(t *testing.T) {
+	sess, inboxH := openInboxForCreate(t)
+	body := ext.NewPush(ext.FlagUTF16)
+	body.Raw([]byte{1, 1, 1, 0, 0})
+	body.Unicode("Noted")
+	body.Unicode("folder for notes")
+	resp, h := sess.Dispatch(toROPRequest(ropCreateFolder, 0, body.Bytes()), []uint32{inboxH, 0xFFFFFFFF})
+	ropOK(t, resp, ropCreateFolder, "CreateFolder with a comment")
+	got, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, []mapi.PropTag{mapi.PrComment}), []uint32{h[1]})
+	gp := ropOK(t, got, ropGetPropertiesSpecific, "GetPropertiesSpecific(PrComment)")
+	wantU8(t, gp, "row flag", 0)
+	if c, err := gp.Unicode(); err != nil || c != "folder for notes" {
+		t.Fatalf("comment = %q, %v", c, err)
+	}
+}
+
 // TestHardDeleteMessagesAndSubfolders clears a folder's messages AND removes its
 // subfolders in one ROP: the inbox holds a message and a subfolder, and after the
 // ROP both are gone (the message recoverable in the dumpster, the subfolder dropped

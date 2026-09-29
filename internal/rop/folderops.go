@@ -24,6 +24,7 @@ type createFolderRequest struct {
 	folderType   uint8
 	openExisting bool
 	name         string
+	comment      string
 }
 
 // The RopCreateFolder FolderType values ([MS-OXCFOLD] 2.2.1.2.1).
@@ -33,8 +34,7 @@ const (
 )
 
 // pullCreateFolderRequest reads a RopCreateFolder request. Every field before the
-// strings is one byte, the Reserved byte included. The comment is read to keep
-// the stream framed, since the store does not model folder comments.
+// strings is one byte, the Reserved byte included.
 func pullCreateFolderRequest(p *ext.Pull) (createFolderRequest, bool) {
 	var r createFolderRequest
 	head, err := p.Raw(5) // OutputHandleIndex, FolderType, UseUnicode, OpenExisting, Reserved
@@ -43,8 +43,8 @@ func pullCreateFolderRequest(p *ext.Pull) (createFolderRequest, bool) {
 	}
 	r.ohindex, r.folderType, r.openExisting = head[0], head[1], head[3] != 0
 	name, e1 := pullFolderString(p, head[2])
-	_ /* comment */, e2 := pullFolderString(p, head[2])
-	r.name = name
+	comment, e2 := pullFolderString(p, head[2])
+	r.name, r.comment = name, comment
 	return r, e1 == nil && e2 == nil
 }
 
@@ -101,9 +101,8 @@ func createFolderTypeError(folderType uint8) uint32 {
 }
 
 // createOrOpenFolder creates the requested subfolder of parent, or returns the
-// existing one of that name when the request allows it and the existing folder is
-// of the requested type. delegate names the creator when a delegate logon creates
-// the folder, and is empty for the owner.
+// existing one of that name when the request allows it. delegate names the
+// creator when a delegate logon creates the folder, and is empty for the owner.
 func createOrOpenFolder(parent *object, req createFolderRequest, delegate string) (int64, uint32) {
 	existing, found, err := parent.store.FolderByName(&parent.folderID, req.name)
 	if err != nil {
@@ -119,7 +118,7 @@ func createOrOpenFolder(parent *object, req createFolderRequest, delegate string
 	if err != nil {
 		return 0, ecError
 	}
-	if err := initNewFolder(parent.store, folderID, delegate); err != nil {
+	if err := initNewFolder(parent.store, folderID, req, delegate); err != nil {
 		return 0, ecError
 	}
 	return folderID, ecSuccess
@@ -129,10 +128,16 @@ func createOrOpenFolder(parent *object, req createFolderRequest, delegate string
 // so the folder they made stays theirs to use, share and delete.
 var creatorRights = mapi.NormalizeRights(mapi.RightsAll, false)
 
-// initNewFolder grants a delegate who created a folder owner rights on it.
-// Without the grant a delegate whose rights came from the parent could not open
-// the folder they had just made.
-func initNewFolder(store *objectstore.Store, fid int64, delegate string) error {
+// initNewFolder stores the request's comment on a new folder and, when a delegate
+// created it, grants that delegate owner rights on it. Without the grant a
+// delegate whose rights came from the parent could not open the folder they had
+// just made.
+func initNewFolder(store *objectstore.Store, fid int64, req createFolderRequest, delegate string) error {
+	if req.comment != "" {
+		if err := store.SetFolderProperties(fid, mapi.PropertyValues{{Tag: mapi.PrComment, Value: req.comment}}); err != nil {
+			return err
+		}
+	}
 	if delegate == "" {
 		return nil
 	}
