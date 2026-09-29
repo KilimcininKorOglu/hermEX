@@ -528,6 +528,27 @@ func walkAttachments(part *mime.Part, bodySet map[*mime.Part]bool, msg *Message,
 	msg.Attachments = append(msg.Attachments, att)
 }
 
+// setAttachmentNames sets an attachment's file name, extension and display name.
+// [MS-OXCMAIL] 2.2.3.4.1: a part that names no file is named by its
+// Content-Description, and the description is always the display name.
+func setAttachmentNames(props *mapi.PropertyValues, part *mime.Part, cttype string) {
+	desc := decodeHeaderWord(part.Description)
+	filename := part.Filename()
+	if filename == "" {
+		filename = desc
+	}
+	if filename == "" {
+		filename = "attachment" + attachmentExtension(cttype)
+	}
+	props.Set(mapi.PrAttachLongFilename, filename)
+	if ext := filenameExtension(filename); ext != "" {
+		props.Set(mapi.PrAttachExtension, ext)
+	}
+	if desc != "" {
+		props.Set(mapi.PrDisplayName, desc)
+	}
+}
+
 // buildAttachment constructs one attachment property bag from a leaf MIME part,
 // mirroring the MS-OXCMAIL attachment property set for a by-value attachment:
 // MIME type, filename, optional display name / content id, timestamps, the
@@ -542,24 +563,7 @@ func buildAttachment(part *mime.Part, stamp uint64) Attachment {
 	}
 	a.Props.Set(mapi.PrAttachMimeTag, cttype)
 
-	// [MS-OXCMAIL] 2.2.3.4.1: a part that names no file is named by its
-	// Content-Description, and the description is always the display name.
-	desc := decodeHeaderWord(part.Description)
-	filename := part.Filename()
-	if filename == "" {
-		filename = desc
-	}
-	if filename == "" {
-		filename = "attachment" + attachmentExtension(cttype)
-	}
-	a.Props.Set(mapi.PrAttachLongFilename, filename)
-	if ext := filenameExtension(filename); ext != "" {
-		a.Props.Set(mapi.PrAttachExtension, ext)
-	}
-
-	if desc != "" {
-		a.Props.Set(mapi.PrDisplayName, desc)
-	}
+	setAttachmentNames(&a.Props, part, cttype)
 
 	inline := part.Disposition == "inline"
 	if cid := strings.Trim(part.ID, "<>"); cid != "" {
