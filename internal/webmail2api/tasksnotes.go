@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"hermex/internal/logging"
@@ -399,11 +400,14 @@ func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
-	if old, err := strconv.ParseInt(r.PathValue("id"), 10, 64); err == nil {
-		_ = st.DeleteObject(old)
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || !isNote(st, id) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "note not found"})
+		return
 	}
+	// The note is edited in place, so it keeps the id every other protocol holds
+	// it by and every property the editor does not surface.
 	var props mapi.PropertyValues
-	props.Set(mapi.PrMessageClass, "IPM.StickyNote")
 	props.Set(mapi.PrSubject, in.Title)
 	props.Set(mapi.PrBody, in.Body)
 	if in.Color != 0 && fitsMAPILong(in.Color) {
@@ -413,13 +417,20 @@ func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	setNoteLink(st, &props, in.LinkedMessageID)
-	id, err := st.CreateMessage(mapi.PrivateFIDNotes, &oxcmail.Message{Props: props})
-	if err != nil {
+	// The plain-text body replaces an HTML one another client wrote, or that stale
+	// half would be what an HTML reader shows.
+	if err := st.ModifyMessageProperties(id, props, mapi.PrHTML); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save note"})
 		return
 	}
 	in.ID = strconv.FormatInt(id, 10)
 	writeJSON(w, http.StatusOK, in)
+}
+
+// isNote reports whether a stored object is a sticky note.
+func isNote(st *objectstore.Store, id int64) bool {
+	props, err := st.GetMessageProperties(id, mapi.PrMessageClass)
+	return err == nil && strings.HasPrefix(strings.ToUpper(propStr(props, mapi.PrMessageClass)), "IPM.STICKYNOTE")
 }
 
 func (s *Server) handleDeleteNote(w http.ResponseWriter, r *http.Request) {
