@@ -66,19 +66,29 @@ func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 	importCounterProposal(p, named, cal, vev)
 	importStamp(p, named, cal, vev)
 
-	// Recurring events round-trip verbatim; store only what listing needs.
+	// Recurring events round-trip verbatim; store what listing and the series'
+	// details need.
 	if vev.prop("RRULE") != nil || vev.prop("RECURRENCE-ID") != nil {
 		importRecurring(p, named, cal, vev, raw)
+		importDetails(p, named, vev)
 		return msg, nil
 	}
 
 	// Non-recurring: full property synthesis.
 	setIf(p, mapi.PrBody, vev.propText("DESCRIPTION"))
-	setNamedStr(p, named, mapi.NameAppointmentLocation, vev.propText("LOCATION"))
 	importTimes(p, named, vev)
+	importDetails(p, named, vev)
+	return msg, nil
+}
+
+// importDetails stores where the event is, whether it takes time, how it is
+// filed and its reminder. A series stores them too: they are the details every
+// occurrence without an exception shares, which a MAPI reader takes from the
+// master rather than from the verbatim body.
+func importDetails(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag, vev *icomp) {
+	setNamedStr(p, named, mapi.NameAppointmentLocation, vev.propText("LOCATION"))
 	importClassification(p, named, vev)
 	importAlarm(p, named, vev)
-	return msg, nil
 }
 
 // importIdentity stores the meeting's participants. A meeting's ORGANIZER becomes
