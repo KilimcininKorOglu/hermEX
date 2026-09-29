@@ -354,9 +354,10 @@ func setRecipients(msg *oxcmail.Message, rcptType int32, list mailboxList) {
 
 type deleteItemRequest struct {
 	DeleteType string `xml:"DeleteType,attr"`
-	ItemIDs    struct {
-		Items []refID `xml:"ItemId"`
-	} `xml:"ItemIds"`
+	// SendMeetingCancellations decides whether deleting a meeting tells its
+	// attendees; a request deleting a calendar item must carry it.
+	SendMeetingCancellations string   `xml:"SendMeetingCancellations,attr"`
+	ItemIDs                  itemRefs `xml:"ItemIds"`
 }
 
 type deleteItemResponse struct {
@@ -378,31 +379,47 @@ func (s *Server) handleDeleteItem(w http.ResponseWriter, inner []byte, sess *ses
 
 	var msgs []itemResponseMessage
 	for _, ref := range req.ItemIDs.Items {
-		id, err := oxews.DecodeItemID(ref.ID)
-		if err != nil {
-			msgs = append(msgs, itemError("ErrorInvalidRequest"))
-			continue
-		}
-		// The id self-encodes its mailbox; a delegated item is gated on delete access.
-		st, code := cache.openForItem(sess, id, mapi.FrightsDeleteAny)
-		if code != "" {
-			msgs = append(msgs, itemError(code))
-			continue
-		}
-		var derr error
-		switch req.DeleteType {
-		case "HardDelete", "SoftDelete":
-			derr = st.SoftDeleteMessage(id.FolderID, id.UID)
-		default: // MoveToDeletedItems
-			_, derr = moveMessage(st, id.FolderID, id.UID, int64(mapi.PrivateFIDDeletedItems))
-		}
-		if derr != nil {
-			msgs = append(msgs, itemError("ErrorItemNotFound"))
-			continue
-		}
-		msgs = append(msgs, itemResponseMessage{ResponseClass: "Success", ResponseCode: "NoError"})
+		msgs = append(msgs, s.deleteOne(cache, sess, ref, req))
 	}
 	writeResponse(w, deleteItemResponse{Messages: msgs})
+}
+
+// deleteOne deletes one item of a DeleteItem. An item of the object store alone (a
+// calendar item or occurrence, a task, a note) has no IMAP uid and is deleted by
+// its object id.
+func (s *Server) deleteOne(cache *storeCache, sess *session, ref itemRef, req deleteItemRequest) itemResponseMessage {
+	token, code := resolveItemRef(cache, sess, ref)
+	if code != "" {
+		return itemError(code)
+	}
+	id, err := oxews.DecodeAnyItemID(token)
+	if err != nil {
+		return itemError("ErrorInvalidRequest")
+	}
+	// The id self-encodes its mailbox; a delegated item is gated on delete access.
+	st, code := cache.openForItem(sess, id, mapi.FrightsDeleteAny)
+	if code != "" {
+		return itemError(code)
+	}
+	if id.UID == 0 {
+		code = s.deleteObjectItem(objectDelete{st: st, id: id, deleteType: req.DeleteType, cancellations: req.SendMeetingCancellations, caller: sess.user})
+	} else if err := deleteMessage(st, id, req.DeleteType); err != nil {
+		code = "ErrorItemNotFound"
+	}
+	if code != "" {
+		return itemError(code)
+	}
+	return itemResponseMessage{ResponseClass: "Success", ResponseCode: "NoError"}
+}
+
+// deleteMessage deletes one indexed message: HardDelete and SoftDelete into the
+// Recoverable Items dumpster, anything else into Deleted Items.
+func deleteMessage(st *objectstore.Store, id oxews.ItemID, deleteType string) error {
+	if deleteType == "HardDelete" || deleteType == "SoftDelete" {
+		return st.SoftDeleteMessage(id.FolderID, id.UID)
+	}
+	_, err := moveMessage(st, id.FolderID, id.UID, int64(mapi.PrivateFIDDeletedItems))
+	return err
 }
 
 // --- MoveItem / CopyItem ---

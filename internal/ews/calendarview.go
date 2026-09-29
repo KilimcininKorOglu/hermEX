@@ -207,35 +207,30 @@ func (r *calendarReader) renderOccurrence(id oxews.ItemID, msg *oxcmail.Message,
 	return r.render(id, oxews.EncodeItemID(id), msg, c)
 }
 
-// nthOccurrence returns the instant of a series' index-th occurrence, counted from
-// one ([MS-OXWSCORE] OccurrenceItemId InstanceIndex). The series is expanded a
-// year of generated instants at a time from its first start; each pass reaches
-// wider so an occurrence an exception moved out of its year is still counted in
-// the year it was generated for, and only there.
+// nthOccurrence returns the instant a series generates for its index-th
+// occurrence, counted from one ([MS-OXWSCORE] OccurrenceItemId InstanceIndex). An
+// occurrence deleted from the series keeps its place in the count, as Exchange
+// numbers them, so the index of every later one does not shift. The series is
+// expanded a year of generated instants at a time from its first start.
 func (r *calendarReader) nthOccurrence(msg *oxcmail.Message, index int) (time.Time, error) {
 	if index < 1 {
 		return time.Time{}, errNoOccurrence
 	}
+	ical, err := oxcical.Export(msg, oxcical.Options{Resolver: r.st.GetNamedPropIDs})
+	if err != nil {
+		return time.Time{}, err
+	}
 	from, _ := r.span(msg.Props)
-	opt := oxcical.Options{Resolver: r.st.GetNamedPropIDs}
 	for range 100 {
 		to := from.AddDate(1, 0, 0)
-		occ, ok, err := oxcical.SeriesOccurrences(msg, opt, from.Add(-occurrenceReach), to.Add(occurrenceReach))
-		if err != nil {
-			return time.Time{}, err
-		}
+		insts, ok := oxcical.GeneratedInstants(ical, from, to)
 		if !ok {
 			return time.Time{}, errNoOccurrence
 		}
-		slices.SortFunc(occ, func(a, b oxcical.Occurrence) int { return a.At.Compare(b.At) })
-		for _, o := range occ {
-			if o.At.Before(from) || !o.At.Before(to) {
-				continue
-			}
-			if index--; index == 0 {
-				return o.At, nil
-			}
+		if index <= len(insts) {
+			return insts[index-1], nil
 		}
+		index -= len(insts)
 		from = to
 	}
 	return time.Time{}, errNoOccurrence

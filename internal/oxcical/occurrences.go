@@ -65,6 +65,24 @@ func InstancesIn(ical []byte, rangeStart, rangeEnd time.Time) ([]Instance, bool)
 	return out, true
 }
 
+// GeneratedInstants returns the instants a stored series' rule and added dates
+// generate within [rangeStart, rangeEnd), in order, those an EXDATE or a
+// cancellation has since removed included: the numbering an occurrence index
+// counts in ([MS-OXWSCORE] OccurrenceItemId). ok is false when the object is not a
+// series.
+func GeneratedInstants(ical []byte, rangeStart, rangeEnd time.Time) ([]time.Time, bool) {
+	cal, err := parseICal(ical)
+	if err != nil {
+		return nil, false
+	}
+	master, _ := splitSeries(cal)
+	s, ok := seriesShape(master)
+	if !ok {
+		return nil, false
+	}
+	return seriesInstants(master, s, nil, rangeStart, rangeEnd), true
+}
+
 // series is what an expansion needs from the master: its first start, whether
 // that start is a date without a time, one instance's duration, and the parsed
 // rule. hasRule is false for a series defined by RDATE alone, which carries no

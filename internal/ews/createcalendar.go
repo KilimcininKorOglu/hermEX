@@ -8,11 +8,8 @@ import (
 	"fmt"
 	"net/mail"
 	"strings"
-	"time"
 
-	"hermex/internal/itip"
 	"hermex/internal/mapi"
-	"hermex/internal/mta"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcical"
 	"hermex/internal/oxews"
@@ -253,27 +250,22 @@ func (s *Server) inviteAttendees(c calendarCreate, id int64) {
 	if len(to) == 0 || c.invitations == "SendToNone" {
 		return
 	}
-	raw, err := invitation(c.st, id, c.organizer, to)
-	if err == nil {
-		_, err = mta.DeliverAndRelay(s.accounts, s.Spool, c.organizer, to, raw, time.Now())
-	}
+	m, err := invitation(c.st, id, c.organizer, to)
 	if err != nil {
 		c.st.LogSwallowedError("ews.meeting_invitation", err)
+		return
+	}
+	if !s.sendScheduling(c.st, m, c.invitations) {
 		return
 	}
 	if err := markSent(c.st, id); err != nil {
 		c.st.LogSwallowedError("ews.meeting_invited", err)
 	}
-	if c.invitations == "SendToAllAndSaveCopy" {
-		if _, err := c.st.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, time.Now(), int64(objectstore.FlagSeen)); err != nil {
-			c.st.LogSwallowedError("ews.meeting_sent_copy", err)
-		}
-	}
 }
 
 // invitation renders the stored meeting as the METHOD:REQUEST its attendees
 // receive: the whole object, series rule and time zones included.
-func invitation(st *objectstore.Store, id int64, organizer string, to []string) ([]byte, error) {
+func invitation(st *objectstore.Store, id int64, organizer string, to []string) (*schedulingMail, error) {
 	msg, err := st.OpenMessage(id)
 	if err != nil {
 		return nil, err
@@ -286,8 +278,7 @@ func invitation(st *objectstore.Store, id int64, organizer string, to []string) 
 	if !ok {
 		return nil, errors.New("ews: the meeting does not render as a request")
 	}
-	subject := strings.NewReplacer("\r", " ", "\n", " ").Replace(strProp(msg.Props, mapi.PrSubject))
-	return itip.Message(itip.Mail{From: organizer, To: to, Subject: subject, Text: subject, Calendar: req, Method: "REQUEST"})
+	return &schedulingMail{organizer: organizer, to: to, subject: strProp(msg.Props, mapi.PrSubject), method: "REQUEST", calendar: req}, nil
 }
 
 // markSent records on the stored meeting that its request went out

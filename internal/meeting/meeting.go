@@ -529,6 +529,12 @@ func withRecurrence(st *objectstore.Store, update mapi.PropertyValues, ical []by
 	return update
 }
 
+// ReplaceSeries writes an edited series body over a stored calendar item in place,
+// with the recurrence blob a MAPI client reads the same occurrences from.
+func ReplaceSeries(st *objectstore.Store, id int64, ical []byte) error {
+	return st.ModifyMessageProperties(id, withRecurrence(st, mapi.PropertyValues{{Tag: mapi.PrIcalOriginal, Value: ical}}, ical))
+}
+
 // uidOf reads the iCalendar UID a scheduling message carries, or "".
 func uidOf(props mapi.PropertyValues, tags Tags) string {
 	if v, ok := props.Get(tags.UID); ok {
