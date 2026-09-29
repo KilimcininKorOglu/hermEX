@@ -137,13 +137,16 @@ type DownloadContext struct {
 	lastCN       uint64
 	lastReadCN   uint64
 	progress     ContentSyncResult // the FAI/normal totals a progress-mode download announces
-	doneSteps    uint64            // the size of the message changes already written
+	doneSteps    uint64            // contents: the size of the message changes written; hierarchy: the bytes served
+	totalSteps   uint64            // contents: the size of every message change; hierarchy: the stream size
 }
 
-// Progress reports how far the download got, in bytes of message content: the
-// size of the changes written so far and of all the changes it will write.
+// Progress reports how far the download got. A contents download counts the
+// size of the message changes written against the size of all of them; a
+// hierarchy download, built whole up front, counts the bytes served against the
+// size of its stream.
 func (dc *DownloadContext) Progress() (done, total uint64) {
-	return dc.doneSteps, dc.progress.FAISize + dc.progress.NormalSize
+	return dc.doneSteps, dc.totalSteps
 }
 
 // NewContentDownload computes the contents delta for a folder against the
@@ -178,6 +181,7 @@ func (s *Store) NewContentDownload(folderID int64, state *ics.State, syncFlags u
 		lastCN:       res.LastCN,
 		lastReadCN:   res.LastReadCN,
 		progress:     ContentSyncResult{FAICount: res.FAICount, FAISize: res.FAISize, NormalCount: res.NormalCount, NormalSize: res.NormalSize},
+		totalSteps:   res.FAISize + res.NormalSize,
 	}
 	for _, t := range proptags {
 		dc.proptags[t] = struct{}{}
@@ -292,6 +296,7 @@ func (s *Store) NewHierarchyDownload(folderID int64, state *ics.State, syncFlags
 		return nil, err
 	}
 	dc.producer.WriteMarker(ics.MarkerIncrSyncEnd)
+	dc.totalSteps = uint64(dc.producer.PendingLen())
 	return dc, nil
 }
 
@@ -347,6 +352,9 @@ func (dc *DownloadContext) GetBuffer(maxLen int) (chunk []byte, last bool, err e
 		dc.flowPos++
 	}
 	chunk, drained := dc.producer.ReadBuffer(maxLen)
+	if dc.syncType == SyncTypeHierarchy {
+		dc.doneSteps += uint64(len(chunk))
+	}
 	return chunk, drained && dc.flowPos >= len(dc.flow), nil
 }
 

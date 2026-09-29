@@ -98,6 +98,14 @@ func fxWritePropsBuilt(producer *ics.Producer, props []ics.StreamProp) error {
 // depth) are later slices.
 type CopyContext struct {
 	producer *ics.Producer
+	total    uint64 // the size of the rendered stream
+	served   uint64 // the bytes GetBuffer handed out so far
+}
+
+// newCopyContext wraps a fully rendered stream, recording its size as the
+// transfer's total.
+func newCopyContext(pr *ics.Producer) *CopyContext {
+	return &CopyContext{producer: pr, total: uint64(pr.PendingLen())}
 }
 
 // GetBuffer serves up to maxLen bytes of the rendered copy stream; last reports the
@@ -105,7 +113,13 @@ type CopyContext struct {
 // satisfy the dispatch layer's FastTransfer source.
 func (c *CopyContext) GetBuffer(maxLen int) (chunk []byte, last bool, err error) {
 	chunk, drained := c.producer.ReadBuffer(maxLen)
+	c.served += uint64(len(chunk))
 	return chunk, drained, nil
+}
+
+// Progress reports the bytes served against the size of the rendered stream.
+func (c *CopyContext) Progress() (done, total uint64) {
+	return c.served, c.total
 }
 
 // NewCopyToMessageSource renders a stored message as a generic-copy messageContent
@@ -121,7 +135,7 @@ func (s *Store) NewCopyToMessageSource(messageID int64, exclude []mapi.PropTag) 
 	if err := writeCopyMessageContent(pr, s, msg, propTagSet(exclude), false); err != nil {
 		return nil, err
 	}
-	return &CopyContext{producer: pr}, nil
+	return newCopyContext(pr), nil
 }
 
 // NewCopyPropertiesMessageSource renders a stored message's property list only,
@@ -141,7 +155,7 @@ func (s *Store) NewCopyPropertiesMessageSource(messageID int64, include []mapi.P
 			return nil, err
 		}
 	}
-	return &CopyContext{producer: pr}, nil
+	return newCopyContext(pr), nil
 }
 
 // NewCopyMessagesSource renders the listed messages of a folder as a generic-copy
@@ -172,7 +186,7 @@ func (s *Store) NewCopyMessagesSource(folderID int64, messageIDs []int64, exclud
 		}
 		pr.WriteMarker(ics.MarkerEndMessage)
 	}
-	return &CopyContext{producer: pr}, nil
+	return newCopyContext(pr), nil
 }
 
 // messageIsAssociated reports whether a live message of folderID is an associated
@@ -210,7 +224,7 @@ func (s *Store) NewCopyFolderSource(folderID int64, subfolders bool) (*CopyConte
 		return nil, err
 	}
 	pr.WriteMarker(ics.MarkerEndFolder)
-	return &CopyContext{producer: pr}, nil
+	return newCopyContext(pr), nil
 }
 
 // writeFolderContentNoDelProps emits a no-del-props folderContent: the folder's

@@ -55,6 +55,9 @@ const fastChunkCap = 0xF000
 // transfer-state buffer in a later one.
 type fastTransferSource interface {
 	GetBuffer(maxLen int) (chunk []byte, last bool, err error)
+	// Progress reports the steps done and the steps in the whole transfer, in
+	// the source's own unit, for the GetBuffer step counts.
+	Progress() (done, total uint64)
 }
 
 // stateStreamSink receives the client's prior synchronization state, replayed as a
@@ -263,22 +266,12 @@ func (s *Session) ropFastTransferSourceGetBuffer(p *ext.Pull, out *ext.Push, han
 	return true
 }
 
-// transferProgress is a FastTransfer source that can say how far it got.
-type transferProgress interface {
-	Progress() (done, total uint64)
-}
-
 // stepCounts scales a source's progress to the 16-bit InProgressCount and
 // TotalStepCount a GetBuffer response carries ([MS-OXCFXICS] 2.2.3.1.1.5.2): both
 // are divided by one factor so the total fits, the total is never zero, and a
-// finished transfer reports every step done. A source that cannot report
-// progress answers zero steps.
+// finished transfer reports every step done.
 func stepCounts(src fastTransferSource, last bool) (done, total uint16) {
-	p, ok := src.(transferProgress)
-	if !ok {
-		return 0, 0
-	}
-	d, t := p.Progress()
+	d, t := src.Progress()
 	divisor := max((t+0xFFFE)/0xFFFF, 1) // rounded up, so t/divisor never exceeds 0xFFFF
 	total = uint16(max(t/divisor, 1))    // #nosec G115 -- t/divisor is at most 0xFFFF
 	if last {
@@ -614,6 +607,11 @@ func (b *transferStateSource) GetBuffer(maxLen int) (chunk []byte, last bool, er
 	chunk = b.data[b.off:end]
 	b.off = end
 	return chunk, b.off >= len(b.data), nil
+}
+
+// Progress reports the bytes served against the size of the state.
+func (b *transferStateSource) Progress() (done, total uint64) {
+	return uint64(b.off), uint64(len(b.data))
 }
 
 // stateSink resolves a sync-context handle to its state-stream sink, or nil.
