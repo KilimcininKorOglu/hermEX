@@ -1,25 +1,26 @@
 package oxews
 
 import (
-	"encoding/xml"
-	"strings"
 	"testing"
 
 	"hermex/internal/mapi"
 )
 
-// TestEmptyHeaderNameIsWritten proves a header field with no name keeps its
-// HeaderName attribute, empty, since the schema requires it and a client reads it
-// without testing for absence.
-func TestEmptyHeaderNameIsWritten(t *testing.T) {
+// TestMessageHeadersFields proves a nameless ": value" line is skipped, since
+// HeaderName has nothing to carry for it, and an encoded-word value reaches the
+// client as the text it encodes.
+func TestMessageHeadersFields(t *testing.T) {
 	var props mapi.PropertyValues
-	props.Set(mapi.PrTransportMessageHeaders, "Subject: x\r\n: orphan\r\n\r\n")
-	out, err := xml.Marshal(MessageHeaders(props))
-	if err != nil {
-		t.Fatal(err)
+	props.Set(mapi.PrTransportMessageHeaders, "Subject: =?utf-8?Q?G=C3=BCnayd=C4=B1n?=\r\n: orphan\r\nX-Plain: a\r\n\r\n")
+	got := MessageHeaders(props)
+	want := []InternetHeader{{Name: "Subject", Value: "Günaydın"}, {Name: "X-Plain", Value: "a"}}
+	if got == nil || len(got.Headers) != len(want) {
+		t.Fatalf("headers %+v, want %+v", got, want)
 	}
-	if !strings.Contains(string(out), `<InternetMessageHeader HeaderName="">orphan</InternetMessageHeader>`) {
-		t.Errorf("the nameless field lost its HeaderName: %s", out)
+	for i, h := range want {
+		if got.Headers[i] != h {
+			t.Errorf("header %d = %+v, want %+v", i, got.Headers[i], h)
+		}
 	}
 	if MessageHeaders(nil) != nil {
 		t.Error("an item without a header block got an empty InternetMessageHeaders")
