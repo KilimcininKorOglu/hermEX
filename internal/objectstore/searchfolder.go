@@ -447,6 +447,38 @@ func (s *Store) matchFolder(q sqlQuery, fid int64, r mapi.Restriction) ([]int64,
 	if err != nil {
 		return nil, err
 	}
+	return s.matchCandidates(cands, r)
+}
+
+// MatchMessages reports which of the given messages match r, evaluated on the
+// properties a client reading each message sees. A message that does not exist
+// matches nothing.
+func (s *Store) MatchMessages(ids []int64, r mapi.Restriction) (map[int64]bool, error) {
+	cands := make([]searchCandidate, 0, len(ids))
+	for _, id := range ids {
+		var size int64
+		err := s.objdb.QueryRow(`SELECT message_size FROM messages WHERE message_id=?`, id).Scan(&size)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		cands = append(cands, searchCandidate{id: id, size: size})
+	}
+	matched, err := s.matchCandidates(cands, r)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]bool, len(matched))
+	for _, id := range matched {
+		out[id] = true
+	}
+	return out, nil
+}
+
+// matchCandidates returns the candidates that match r, in their order.
+func (s *Store) matchCandidates(cands []searchCandidate, r mapi.Restriction) ([]int64, error) {
 	ids := make([]int64, len(cands))
 	for i, c := range cands {
 		ids[i] = c.id

@@ -29,6 +29,8 @@ type findItemRequest struct {
 	Traversal       string     `xml:"Traversal,attr"`
 	Shape           itemShape  `xml:"ItemShape"`
 	ParentFolderIDs folderRefs `xml:"ParentFolderIds"`
+	// Restriction filters the items listed; an item it does not match is left out.
+	Restriction *restrictionXML `xml:"Restriction"`
 }
 
 type getAttachmentRequest struct {
@@ -117,13 +119,13 @@ func (s *Server) handleFindItem(w http.ResponseWriter, inner []byte, sess *sessi
 
 	var msgs []findItemResponseMessage
 	for _, tgt := range resolveTargets(req.ParentFolderIDs) {
-		msgs = append(msgs, findItemForTarget(cache, sess, tgt, fields))
+		msgs = append(msgs, findItemForTarget(cache, sess, tgt, fields, req.Restriction))
 	}
 	writeResponse(w, findItemResponse{Messages: msgs})
 }
 
-// findItemForTarget lists one requested folder.
-func findItemForTarget(cache *storeCache, sess *session, tgt folderTarget, fields []extField) findItemResponseMessage {
+// findItemForTarget lists one requested folder, keeping the items restr matches.
+func findItemForTarget(cache *storeCache, sess *session, tgt folderTarget, fields []extField, restr *restrictionXML) findItemResponseMessage {
 	// A recoverable (Recoverable Items dumpster) target is intentionally ok=false so
 	// every other handler still reports ErrorFolderNotFound; FindItem serves it.
 	if !tgt.ok && !tgt.recoverable {
@@ -135,7 +137,7 @@ func findItemForTarget(cache *storeCache, sess *session, tgt folderTarget, field
 		return findItemFound(&findItemRoot{IncludesLastItemInRange: true})
 	}
 	if tgt.recoverable {
-		return recoverableItemsFor(cache, sess, tgt, fields)
+		return recoverableItemsFor(cache, sess, tgt, fields, restr)
 	}
 	st, _, isOwn, code := cache.open(sess, tgt.mailbox)
 	if code == codePublicAbsent {
@@ -152,14 +154,18 @@ func findItemForTarget(cache *storeCache, sess *session, tgt folderTarget, field
 			return findItemError(code)
 		}
 	}
-	return folderItemsFound(st, tgt.fid, delegatedMailbox(tgt, isOwn), fields)
+	filter, code := restrictionReader{st: st}.read(restr)
+	if code != "" {
+		return findItemError(code)
+	}
+	return itemListing{st: st, idMailbox: delegatedMailbox(tgt, isOwn), fields: fields, filter: filter}.folder(tgt.fid)
 }
 
 // recoverableItemsFor lists the Recoverable Items dumpster, which aggregates
 // soft-deleted items mailbox-wide. It is served only for the caller's own mailbox
 // (no per-folder ACL applies to an aggregate), and each item keeps its original
 // parent folder in its id.
-func recoverableItemsFor(cache *storeCache, sess *session, tgt folderTarget, fields []extField) findItemResponseMessage {
+func recoverableItemsFor(cache *storeCache, sess *session, tgt folderTarget, fields []extField, restr *restrictionXML) findItemResponseMessage {
 	st, _, isOwn, code := cache.open(sess, tgt.mailbox)
 	if code != "" {
 		return findItemError(code)
@@ -167,63 +173,139 @@ func recoverableItemsFor(cache *storeCache, sess *session, tgt folderTarget, fie
 	if !isOwn {
 		return findItemError("ErrorAccessDenied")
 	}
+	filter, code := restrictionReader{st: st}.read(restr)
+	if code != "" {
+		return findItemError(code)
+	}
 	items, err := st.ListAllSoftDeleted()
 	if err != nil {
 		return findItemError("ErrorInternalServerError")
 	}
-	elems := make([]oxews.Message, 0, len(items))
-	for _, it := range items {
-		elems = append(elems, summaryWith(st, it.FolderID, it.Info, "", fields))
+	found := make([]foundInfo, len(items))
+	for i, it := range items {
+		found[i] = foundInfo{folder: it.FolderID, info: it.Info}
+	}
+	return itemListing{st: st, fields: fields, filter: filter}.foundMail(found)
+}
+
+// folder lists one folder's items in the shape its class calls for. Tasks and
+// notes live in the object store (versioned by change number), not the IMAP
+// index, so they are listed as folder objects rather than messages.
+func (l itemListing) folder(fid int64) findItemResponseMessage {
+	switch fid {
+	case int64(mapi.PrivateFIDTasks):
+		return l.tasks(fid)
+	case int64(mapi.PrivateFIDNotes):
+		return l.notes(fid)
+	}
+	if resp, ok := l.search(fid); ok {
+		return resp
+	}
+	return l.mail(fid)
+}
+
+// itemListing is what FindItem lists a folder with: the mailbox, the mailbox to
+// stamp into the item ids, the extended properties asked for and the filter the
+// request's restriction names.
+type itemListing struct {
+	st        *objectstore.Store
+	idMailbox string
+	fields    []extField
+	filter    *mapi.Restriction
+}
+
+// matching returns the ids of the given items the filter keeps, or nil when the
+// request names no filter.
+func (l itemListing) matching(ids []int64) (map[int64]bool, error) {
+	if l.filter == nil {
+		return nil, nil
+	}
+	return l.st.MatchMessages(ids, *l.filter)
+}
+
+// kept reports whether a matching set keeps id; a nil set keeps every item.
+func kept(matched map[int64]bool, id int64) bool {
+	return matched == nil || matched[id]
+}
+
+// tasks lists a task folder, whose items live in the object store only.
+func (l itemListing) tasks(fid int64) findItemResponseMessage {
+	objs, matched, code := l.objects(fid)
+	if code != "" {
+		return findItemError(code)
+	}
+	tasks := make([]oxews.Task, 0, len(objs))
+	for _, o := range objs {
+		if kept(matched, o.ID) {
+			tk := taskSummary(l.st, fid, o.ID, l.idMailbox)
+			tk.ExtendedProperties = readExtended(l.st, o.ID, l.fields)
+			tasks = append(tasks, tk)
+		}
 	}
 	return findItemFound(&findItemRoot{
-		TotalItemsInView:        len(elems),
+		TotalItemsInView:        len(tasks),
 		IncludesLastItemInRange: true,
-		Items:                   itemsWrap{Messages: elems},
+		Items:                   itemsWrap{Tasks: tasks},
 	})
 }
 
-// folderItemsFound lists one folder's items in the shape its class calls for.
-// Tasks and notes live in the object store (versioned by change number), not the
-// IMAP index, so they are listed as folder objects rather than messages.
-func folderItemsFound(st *objectstore.Store, fid int64, idMailbox string, fields []extField) findItemResponseMessage {
-	switch fid {
-	case int64(mapi.PrivateFIDTasks):
-		objs, _ := st.ListFolderObjects(fid)
-		tasks := make([]oxews.Task, 0, len(objs))
-		for _, o := range objs {
-			tk := taskSummary(st, fid, o.ID, idMailbox)
-			tk.ExtendedProperties = readExtended(st, o.ID, fields)
-			tasks = append(tasks, tk)
-		}
-		return findItemFound(&findItemRoot{
-			TotalItemsInView:        len(tasks),
-			IncludesLastItemInRange: true,
-			Items:                   itemsWrap{Tasks: tasks},
-		})
-	case int64(mapi.PrivateFIDNotes):
-		objs, _ := st.ListFolderObjects(fid)
-		notes := make([]oxews.Item, 0, len(objs))
-		for _, o := range objs {
-			note := noteSummary(st, fid, o.ID, idMailbox)
-			note.ExtendedProperties = readExtended(st, o.ID, fields)
+// notes lists a notes folder, whose items live in the object store only.
+func (l itemListing) notes(fid int64) findItemResponseMessage {
+	objs, matched, code := l.objects(fid)
+	if code != "" {
+		return findItemError(code)
+	}
+	notes := make([]oxews.Item, 0, len(objs))
+	for _, o := range objs {
+		if kept(matched, o.ID) {
+			note := noteSummary(l.st, fid, o.ID, l.idMailbox)
+			note.ExtendedProperties = readExtended(l.st, o.ID, l.fields)
 			notes = append(notes, note)
 		}
-		return findItemFound(&findItemRoot{
-			TotalItemsInView:        len(notes),
-			IncludesLastItemInRange: true,
-			Items:                   itemsWrap{BaseItems: notes},
-		})
 	}
-	if resp, ok := searchItemsFound(st, fid, idMailbox, fields); ok {
-		return resp
+	return findItemFound(&findItemRoot{
+		TotalItemsInView:        len(notes),
+		IncludesLastItemInRange: true,
+		Items:                   itemsWrap{BaseItems: notes},
+	})
+}
+
+// objects reads a folder's object-store items and the ones the filter keeps.
+func (l itemListing) objects(fid int64) ([]objectstore.FolderObject, map[int64]bool, string) {
+	objs, err := l.st.ListFolderObjects(fid)
+	if err != nil {
+		return nil, nil, "ErrorInternalServerError"
 	}
-	items, err := st.ListMessages(fid)
+	ids := make([]int64, len(objs))
+	for i, o := range objs {
+		ids[i] = o.ID
+	}
+	matched, err := l.matching(ids)
+	if err != nil {
+		return nil, nil, "ErrorInternalServerError"
+	}
+	return objs, matched, ""
+}
+
+// mail lists a mail folder from the IMAP index.
+func (l itemListing) mail(fid int64) findItemResponseMessage {
+	items, err := l.st.ListMessages(fid)
 	if err != nil {
 		return findItemError("ErrorItemNotFound")
 	}
+	ids := make([]int64, len(items))
+	for i, info := range items {
+		ids[i] = info.ID
+	}
+	matched, err := l.matching(ids)
+	if err != nil {
+		return findItemError("ErrorInternalServerError")
+	}
 	elems := make([]oxews.Message, 0, len(items))
 	for _, info := range items {
-		elems = append(elems, summaryWith(st, fid, info, idMailbox, fields))
+		if kept(matched, info.ID) {
+			elems = append(elems, summaryWith(l.st, fid, info, l.idMailbox, l.fields))
+		}
 	}
 	return findItemFound(&findItemRoot{
 		TotalItemsInView:        len(elems),
@@ -232,30 +314,56 @@ func folderItemsFound(st *objectstore.Store, fid int64, idMailbox string, fields
 	})
 }
 
-// searchItemsFound lists the mail a search folder finds, and reports false for
-// any other folder. Each item keeps the id of the folder it lives in, so a
-// GetItem, an update or a move on a result reaches the message itself.
-func searchItemsFound(st *objectstore.Store, fid int64, idMailbox string, fields []extField) (findItemResponseMessage, bool) {
-	search, err := st.IsSearchFolder(fid)
+// search lists the mail a search folder finds, and reports false for any other
+// folder. Each item keeps the id of the folder it lives in, so a GetItem, an
+// update or a move on a result reaches the message itself.
+func (l itemListing) search(fid int64) (findItemResponseMessage, bool) {
+	search, err := l.st.IsSearchFolder(fid)
 	if errors.Is(err, objectstore.ErrNotFound) || (err == nil && !search) {
 		return findItemResponseMessage{}, false
 	}
 	if err != nil {
 		return findItemError("ErrorInternalServerError"), true
 	}
-	found, err := st.SearchFolderMessages(fid)
+	found, err := l.st.SearchFolderMessages(fid)
 	if err != nil {
 		return findItemError("ErrorInternalServerError"), true
 	}
+	infos := make([]foundInfo, len(found))
+	for i, m := range found {
+		infos[i] = foundInfo{folder: m.Folder, info: m.MessageInfo}
+	}
+	return l.foundMail(infos), true
+}
+
+// foundInfo is a listed message with the folder it lives in.
+type foundInfo struct {
+	folder int64
+	info   objectstore.MessageInfo
+}
+
+// foundMail renders messages that live in several folders, as a search folder
+// and the Recoverable Items dumpster hold.
+func (l itemListing) foundMail(found []foundInfo) findItemResponseMessage {
+	ids := make([]int64, len(found))
+	for i, m := range found {
+		ids[i] = m.info.ID
+	}
+	matched, err := l.matching(ids)
+	if err != nil {
+		return findItemError("ErrorInternalServerError")
+	}
 	elems := make([]oxews.Message, 0, len(found))
 	for _, m := range found {
-		elems = append(elems, summaryWith(st, m.Folder, m.MessageInfo, idMailbox, fields))
+		if kept(matched, m.info.ID) {
+			elems = append(elems, summaryWith(l.st, m.folder, m.info, l.idMailbox, l.fields))
+		}
 	}
 	return findItemFound(&findItemRoot{
 		TotalItemsInView:        len(elems),
 		IncludesLastItemInRange: true,
 		Items:                   itemsWrap{Messages: elems},
-	}), true
+	})
 }
 
 // folderVisibleAccess reports the response code refusing a caller who cannot see
