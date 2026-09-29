@@ -32,18 +32,39 @@ func CheckSMIME(msg *Message) error {
 // way a clear-signed one does, but only when its one attachment is that entity:
 // GpgOL gives the class to any message it recognizes as OpenPGP, however it was
 // stored, and a message kept as a body with signature or ciphertext attachments
-// is ordinary mail.
+// is ordinary mail. The InfoPath variants GpgOL writes end in the clear-signed
+// suffix, so the GpgOL test runs first.
 func smimeShape(msg *Message) (isSMIME, clearSigned bool) {
 	class := strings.ToLower(propString(msg.Props, mapi.PrMessageClass))
 	switch {
+	case gpgolClass(class):
+		return openPGPEntity(msg), true
 	case strings.HasSuffix(class, ".smime.multipartsigned"):
 		return true, true
-	case class == strings.ToLower(classGpgOLEncrypted), class == strings.ToLower(classGpgOLSigned):
-		return openPGPEntity(msg), true
 	case strings.HasSuffix(class, ".smime"):
 		return true, false
 	}
 	return false, false
+}
+
+// gpgolPrefixes are the lower-cased message classes GpgOL gives a message it
+// recognizes as OpenPGP, and the InfoPath form classes Outlook stores for them.
+var gpgolPrefixes = []string{
+	strings.ToLower(classGpgOLEncrypted),
+	strings.ToLower(classGpgOLSigned),
+	"ipm.note.infopathform.gpgol",
+	"ipm.note.infopathform.gpgols",
+}
+
+// gpgolClass reports whether a lower-cased message class is one of GpgOL's, or
+// a subclass of one.
+func gpgolClass(class string) bool {
+	for _, p := range gpgolPrefixes {
+		if class == p || strings.HasPrefix(class, p+".") {
+			return true
+		}
+	}
+	return false
 }
 
 // openPGPEntity reports whether the message's one attachment holds a whole

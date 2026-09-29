@@ -109,7 +109,8 @@ func TestEncryptedOfAnotherProtocolIsNotOpenPGP(t *testing.T) {
 // class to but that holds a body and loose signature or ciphertext attachments is
 // exported as the mail it is, not as the invalid-message notice, and may be sent.
 func TestGpgOLClassWithoutTheEntityIsRegularMail(t *testing.T) {
-	for _, class := range []string{classGpgOLSigned, classGpgOLEncrypted} {
+	for _, class := range []string{classGpgOLSigned, classGpgOLEncrypted,
+		"IPM.Note.InfoPathForm.GpgOL.SMIME.MultipartSigned", "IPM.Note.InfoPathForm.GpgOLS.SMIME.MultipartSigned"} {
 		msg := &Message{}
 		msg.Props.Set(mapi.PrMessageClass, class)
 		msg.Props.Set(mapi.PrBody, "the readable body")
