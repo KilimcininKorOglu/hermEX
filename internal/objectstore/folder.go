@@ -99,7 +99,7 @@ func (s *Store) seedMailbox(replica mapi.GUID) error {
 			return fmt.Errorf("objectstore: seed folder %#x: %w", f.fid, err)
 		}
 	}
-	if err := createSearchFolder(tx, replica, ntNow,
+	if _, err := createSearchFolder(tx, replica, ntNow,
 		mapi.PrivateFIDSpoolerQueue, mapi.PrivateFIDRoot, "Spooler Queue"); err != nil {
 		return fmt.Errorf("objectstore: seed spooler queue: %w", err)
 	}
@@ -202,27 +202,28 @@ func createGenericFolder(tx *sql.Tx, replica mapi.GUID, ntNow uint64, f builtinF
 
 // createSearchFolder inserts a search folder, which owns no message-id range
 // (its contents are computed) but still takes a change number and property bag.
-func createSearchFolder(tx *sql.Tx, replica mapi.GUID, ntNow uint64, fid, parent uint64, dispName string) error {
+// It returns the change number.
+func createSearchFolder(tx *sql.Tx, replica mapi.GUID, ntNow uint64, fid, parent uint64, dispName string) (uint64, error) {
 	cn, err := allocateCN(tx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if _, err := tx.Exec(
 		`INSERT INTO folders (folder_id, parent_id, change_number, is_search, cur_eid, max_eid) VALUES (?, ?, ?, 1, 0, 0)`,
 		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		int64(fid), int64(parent), int64(cn)); err != nil {
-		return err
+		return 0, err
 	}
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	if err := countSubfolderChange(tx, int64(parent)); err != nil {
-		return err
+		return 0, err
 	}
 	props, err := folderPropertyBag(tx, replica, ntNow, cn, dispName, mapi.ContainerClassNote, false, false)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-	return insertProps(tx, "folder_properties", "folder_id", int64(fid), props)
+	return cn, insertProps(tx, "folder_properties", "folder_id", int64(fid), props)
 }
 
 // folderPropertyBag builds the property set written for a newly created folder:

@@ -141,12 +141,41 @@ func folderEID(fid int64) int64 {
 }
 
 // folderContentStats counts a folder's live non-FAI messages, the unread ones
-// among them, and their total size.
+// among them, and their total size. A search folder counts the messages it
+// finds.
 func (s *Store) folderContentStats(fid int64) (count, unread, size int64, err error) {
+	isSearch, err := s.IsSearchFolder(fid)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return 0, 0, 0, err
+	}
+	if isSearch {
+		return s.searchContentStats(fid)
+	}
 	err = s.objdb.QueryRow(
 		`SELECT COUNT(*), COALESCE(SUM(CASE WHEN read_state=0 THEN 1 ELSE 0 END), 0), COALESCE(SUM(message_size), 0)
 		 FROM messages WHERE parent_fid=? AND is_deleted=0 AND COALESCE(is_associated, 0)=0`, fid).Scan(&count, &unread, &size)
 	return count, unread, size, err
+}
+
+// searchContentStats counts the messages a search folder finds, the unread ones
+// among them, and their total size.
+func (s *Store) searchContentStats(fid int64) (count, unread, size int64, err error) {
+	ids, err := s.SearchFolderMessageIDs(fid)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	for _, id := range ids {
+		var read, sz int64
+		if err := s.objdb.QueryRow(`SELECT read_state, message_size FROM messages WHERE message_id=?`, id).Scan(&read, &sz); err != nil {
+			return 0, 0, 0, err
+		}
+		count++
+		size += sz
+		if read == 0 {
+			unread++
+		}
+	}
+	return count, unread, size, nil
 }
 
 // folderKind derives a folder's type and flags from its row, its ancestry and
