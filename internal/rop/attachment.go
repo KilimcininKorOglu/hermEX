@@ -2,7 +2,6 @@ package rop
 
 import (
 	"errors"
-	"slices"
 	"time"
 
 	"hermex/internal/ext"
@@ -129,11 +128,7 @@ func (s *Session) ropOpenAttachment(p *ext.Pull, out *ext.Push, handles []uint32
 		writeErr(out, ropOpenAttachment, ohindex, ecNotFound)
 		return true
 	}
-	// The record key is computed, not stored; an opened attachment reports the
-	// same key its attachment table row does.
-	bag = slices.Clone(bag)
-	bag.Set(mapi.PrRecordKey, attachmentRecordKey(pos))
-	att := &object{kind: kindAttachment, store: msg.store, attachProps: bag}
+	att := &object{kind: kindAttachment, store: msg.store, attachProps: bag, attachPos: pos}
 	bindStoredAttachment(att, msg, attachID)
 	h := s.alloc(att)
 	setHandle(handles, ohindex, h)

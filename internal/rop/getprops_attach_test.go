@@ -46,6 +46,38 @@ func TestGetPropertiesOnAnOpenAttachment(t *testing.T) {
 	}
 }
 
+// TestCopiedAttachmentStoresNoRecordKey proves CopyTo from an opened attachment
+// does not carry its computed record key into the destination, where it would be
+// saved and name the source's position instead of the destination's.
+func TestCopiedAttachmentStoresNoRecordKey(t *testing.T) {
+	dir := t.TempDir()
+	msgID := seedAttachmentMessage(t, dir)
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	store := sess.get(h[0]).store
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(msgID)))), []uint32{h[0], 0xFFFFFFFF})
+	msgH := h[1]
+	_, h = sess.Dispatch(buildOpenAttachment(0, 1, 0), []uint32{msgH, 0xFFFFFFFF})
+	srcH := h[1]
+	_, dstH := createAttachmentNum(t, sess, msgH)
+
+	ct, _ := sess.Dispatch(buildCopyTo(0, 1, 0, nil), []uint32{srcH, dstH})
+	ropOK(t, ct, ropCopyTo, "CopyTo(attachment)")
+	sc, _ := sess.Dispatch(buildSaveChangesAttachment(0, 1), []uint32{msgH, dstH})
+	ropOK(t, sc, ropSaveChangesAttachment, "SaveChangesAttachment")
+
+	stored, err := store.GetAttachmentProperties(sess.get(dstH).attachW.attachmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantProp(t, stored, mapi.PrAttachLongFilename, "a.bin", "copied filename")
+	if v, ok := stored.Get(mapi.PrRecordKey); ok {
+		t.Errorf("copied attachment stored record key %x", v)
+	}
+}
+
 // TestGetPropertiesListNamesEveryTag proves RopGetPropertiesList answers the
 // tags an object holds ([MS-OXCPRPT] 2.2.2.12) on a message, an attachment and
 // a folder.

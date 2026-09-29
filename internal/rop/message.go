@@ -144,6 +144,9 @@ func (o *object) readMessageProps(tags ...mapi.PropTag) (mapi.PropertyValues, bo
 		if !ok {
 			return nil, false, nil
 		}
+		if o.kind == kindAttachment {
+			bag = withRecordKey(bag, o.attachPos)
+		}
 		return selectProps(bag, tags), true, nil
 	case kindAttachWrite:
 		return o.readAttachWriteProps(tags)
@@ -168,6 +171,16 @@ func (o *object) memoryProps() (mapi.PropertyValues, bool) {
 		return o.newMsg.props, true
 	}
 	return o.attachProps, true
+}
+
+// withRecordKey returns a copy of an opened attachment's bag carrying the record
+// key its attachment table row reports. The key is computed on every read and
+// never enters the bag itself, which a copy would otherwise carry into another
+// attachment and save there under the wrong position.
+func withRecordKey(bag mapi.PropertyValues, pos int) mapi.PropertyValues {
+	out := slices.Clone(bag)
+	out.Set(mapi.PrRecordKey, attachmentRecordKey(pos))
+	return out
 }
 
 // readAttachWriteProps returns the requested properties of a created attachment

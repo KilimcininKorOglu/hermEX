@@ -120,6 +120,7 @@ type object struct {
 	stream         *streamState                  // kindStream
 	attachProps    mapi.PropertyValues           // kindAttachment
 	attachID       int64                         // kindAttachment: the stored attachment row, 0 when the parent is not a stored message
+	attachPos      int                           // kindAttachment: the position among the message's attachments, which the record key is computed from
 	attachParent   *object                       // kindAttachment: the opened parent message, for the write gate and the change-number bump
 	newMsg         *newMessageState              // kindNewMessage
 	fastSrc        fastTransferSource            // kindSync: what GetBuffer drains
