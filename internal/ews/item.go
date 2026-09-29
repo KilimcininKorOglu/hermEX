@@ -18,6 +18,7 @@ import (
 // --- request types ---
 
 type getItemRequest struct {
+	Shape   itemShape `xml:"ItemShape"`
 	ItemIDs struct {
 		Items []refID `xml:"ItemId"`
 	} `xml:"ItemIds"`
@@ -25,6 +26,7 @@ type getItemRequest struct {
 
 type findItemRequest struct {
 	Traversal       string     `xml:"Traversal,attr"`
+	Shape           itemShape  `xml:"ItemShape"`
 	ParentFolderIDs folderRefs `xml:"ParentFolderIds"`
 }
 
@@ -104,18 +106,23 @@ func (s *Server) handleFindItem(w http.ResponseWriter, inner []byte, sess *sessi
 		s.soapFault(w, "ErrorInvalidRequest", "FindItem: invalid request", err)
 		return
 	}
+	fields, err := extendedFields(req.Shape)
+	if err != nil {
+		s.soapFault(w, "ErrorInvalidExtendedProperty", "FindItem: invalid extended property", err)
+		return
+	}
 	cache := s.newStoreCache()
 	defer cache.closeAll()
 
 	var msgs []findItemResponseMessage
 	for _, tgt := range resolveTargets(req.ParentFolderIDs) {
-		msgs = append(msgs, findItemForTarget(cache, sess, tgt))
+		msgs = append(msgs, findItemForTarget(cache, sess, tgt, fields))
 	}
 	writeResponse(w, findItemResponse{Messages: msgs})
 }
 
 // findItemForTarget lists one requested folder.
-func findItemForTarget(cache *storeCache, sess *session, tgt folderTarget) findItemResponseMessage {
+func findItemForTarget(cache *storeCache, sess *session, tgt folderTarget, fields []extField) findItemResponseMessage {
 	// A recoverable (Recoverable Items dumpster) target is intentionally ok=false so
 	// every other handler still reports ErrorFolderNotFound; FindItem serves it.
 	if !tgt.ok && !tgt.recoverable {
@@ -127,7 +134,7 @@ func findItemForTarget(cache *storeCache, sess *session, tgt folderTarget) findI
 		return findItemFound(&findItemRoot{IncludesLastItemInRange: true})
 	}
 	if tgt.recoverable {
-		return recoverableItemsFor(cache, sess, tgt)
+		return recoverableItemsFor(cache, sess, tgt, fields)
 	}
 	st, _, isOwn, code := cache.open(sess, tgt.mailbox)
 	if code == codePublicAbsent {
@@ -144,14 +151,14 @@ func findItemForTarget(cache *storeCache, sess *session, tgt folderTarget) findI
 			return findItemError(code)
 		}
 	}
-	return folderItemsFound(st, tgt.fid, delegatedMailbox(tgt, isOwn))
+	return folderItemsFound(st, tgt.fid, delegatedMailbox(tgt, isOwn), fields)
 }
 
 // recoverableItemsFor lists the Recoverable Items dumpster, which aggregates
 // soft-deleted items mailbox-wide. It is served only for the caller's own mailbox
 // (no per-folder ACL applies to an aggregate), and each item keeps its original
 // parent folder in its id.
-func recoverableItemsFor(cache *storeCache, sess *session, tgt folderTarget) findItemResponseMessage {
+func recoverableItemsFor(cache *storeCache, sess *session, tgt folderTarget, fields []extField) findItemResponseMessage {
 	st, _, isOwn, code := cache.open(sess, tgt.mailbox)
 	if code != "" {
 		return findItemError(code)
@@ -165,7 +172,7 @@ func recoverableItemsFor(cache *storeCache, sess *session, tgt folderTarget) fin
 	}
 	elems := make([]oxews.Message, 0, len(items))
 	for _, it := range items {
-		elems = append(elems, itemSummary(st, it.FolderID, it.Info, ""))
+		elems = append(elems, summaryWith(st, it.FolderID, it.Info, "", fields))
 	}
 	return findItemFound(&findItemRoot{
 		TotalItemsInView:        len(elems),
@@ -177,13 +184,15 @@ func recoverableItemsFor(cache *storeCache, sess *session, tgt folderTarget) fin
 // folderItemsFound lists one folder's items in the shape its class calls for.
 // Tasks and notes live in the object store (versioned by change number), not the
 // IMAP index, so they are listed as folder objects rather than messages.
-func folderItemsFound(st *objectstore.Store, fid int64, idMailbox string) findItemResponseMessage {
+func folderItemsFound(st *objectstore.Store, fid int64, idMailbox string, fields []extField) findItemResponseMessage {
 	switch fid {
 	case int64(mapi.PrivateFIDTasks):
 		objs, _ := st.ListFolderObjects(fid)
 		tasks := make([]oxews.Task, 0, len(objs))
 		for _, o := range objs {
-			tasks = append(tasks, taskSummary(st, fid, o.ID, idMailbox))
+			tk := taskSummary(st, fid, o.ID, idMailbox)
+			tk.ExtendedProperties = readExtended(st, o.ID, fields)
+			tasks = append(tasks, tk)
 		}
 		return findItemFound(&findItemRoot{
 			TotalItemsInView:        len(tasks),
@@ -194,7 +203,9 @@ func folderItemsFound(st *objectstore.Store, fid int64, idMailbox string) findIt
 		objs, _ := st.ListFolderObjects(fid)
 		notes := make([]oxews.Item, 0, len(objs))
 		for _, o := range objs {
-			notes = append(notes, noteSummary(st, fid, o.ID, idMailbox))
+			note := noteSummary(st, fid, o.ID, idMailbox)
+			note.ExtendedProperties = readExtended(st, o.ID, fields)
+			notes = append(notes, note)
 		}
 		return findItemFound(&findItemRoot{
 			TotalItemsInView:        len(notes),
@@ -208,7 +219,7 @@ func folderItemsFound(st *objectstore.Store, fid int64, idMailbox string) findIt
 	}
 	elems := make([]oxews.Message, 0, len(items))
 	for _, info := range items {
-		elems = append(elems, itemSummary(st, fid, info, idMailbox))
+		elems = append(elems, summaryWith(st, fid, info, idMailbox, fields))
 	}
 	return findItemFound(&findItemRoot{
 		TotalItemsInView:        len(elems),
@@ -259,18 +270,23 @@ func (s *Server) handleGetItem(w http.ResponseWriter, inner []byte, sess *sessio
 		s.soapFault(w, "ErrorInvalidRequest", "GetItem: invalid request", err)
 		return
 	}
+	fields, err := extendedFields(req.Shape)
+	if err != nil {
+		s.soapFault(w, "ErrorInvalidExtendedProperty", "GetItem: invalid extended property", err)
+		return
+	}
 	cache := s.newStoreCache()
 	defer cache.closeAll()
 
 	var msgs []itemResponseMessage
 	for _, ref := range req.ItemIDs.Items {
-		msgs = append(msgs, getOneItem(cache, sess, ref.ID))
+		msgs = append(msgs, getOneItem(cache, sess, ref.ID, fields))
 	}
 	writeResponse(w, getItemResponse{Messages: msgs})
 }
 
 // getOneItem renders one requested item in the shape its class calls for.
-func getOneItem(cache *storeCache, sess *session, itemID string) itemResponseMessage {
+func getOneItem(cache *storeCache, sess *session, itemID string, fields []extField) itemResponseMessage {
 	id, err := oxews.DecodeItemID(itemID)
 	if err != nil {
 		return itemError("ErrorInvalidRequest")
@@ -301,21 +317,23 @@ func getOneItem(cache *storeCache, sess *session, itemID string) itemResponseMes
 		// MIME path (a task has no RFC822 form).
 		tk, _ := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
 		elem := oxews.BuildTask(tk, oxews.ItemMeta{ItemID: itemID, ChangeKey: key, HasAttachments: hasAttach})
+		elem.ExtendedProperties = readExtended(st, id.MessageID, fields)
 		return itemFound(&itemsWrap{Tasks: []oxews.Task{elem}})
 	case oxews.NoteClass:
 		// A sticky note is rendered as a base <t:Item> (EWS has no Note type) from
 		// its shared properties.
 		elem := buildNoteItem(st, msg.Props, itemID, key)
+		elem.ExtendedProperties = readExtended(st, id.MessageID, fields)
 		return itemFound(&itemsWrap{BaseItems: []oxews.Item{elem}})
 	}
-	return mailItem(st, id, itemID, key, msg, hasAttach)
+	return mailItem(st, id, itemID, key, msg, hasAttach, readExtended(st, id.MessageID, fields))
 }
 
 // mailItem renders a stored mail item: an ordinary message as <t:Message>, and a
 // delivered invitation as <t:MeetingRequest>, so a client can tell the invitation
 // from ordinary mail and offer Accept / Tentative / Decline.
 func mailItem(st *objectstore.Store, id oxews.ItemID, itemID, changeKey string,
-	msg *oxcmail.Message, hasAttach bool) itemResponseMessage {
+	msg *oxcmail.Message, hasAttach bool, ext []oxews.ExtendedProperty) itemResponseMessage {
 	info, _ := st.MessageByUID(id.FolderID, id.UID)
 	body, bodyType := "", "Text"
 	if raw, err := st.GetMessageRaw(id.FolderID, id.UID); err == nil {
@@ -337,9 +355,12 @@ func mailItem(st *objectstore.Store, id oxews.ItemID, itemID, changeKey string,
 	}
 	if meta.ItemClass == oxews.MeetingRequestClass {
 		mr := oxews.BuildMeetingRequest(msg, meta, meetingMeta(st, msg))
+		mr.ExtendedProperties = ext
 		return itemFound(&itemsWrap{MeetingRequests: []oxews.MeetingRequest{mr}})
 	}
-	return itemFound(&itemsWrap{Messages: []oxews.Message{oxews.BuildItem(msg, meta)}})
+	m := oxews.BuildItem(msg, meta)
+	m.ExtendedProperties = ext
+	return itemFound(&itemsWrap{Messages: []oxews.Message{m}})
 }
 
 // itemFound builds a GetItem success response message over one rendered item.
@@ -471,6 +492,14 @@ func itemSummary(st *objectstore.Store, folderID int64, info objectstore.Message
 		IsRead:         info.Flags&objectstore.FlagSeen != 0,
 		HasAttachments: info.HasAttachments,
 	})
+}
+
+// summaryWith builds a listing row with the extended properties the request's
+// shape asked for.
+func summaryWith(st *objectstore.Store, folderID int64, info objectstore.MessageInfo, mailbox string, fields []extField) oxews.Message {
+	m := itemSummary(st, folderID, info, mailbox)
+	m.ExtendedProperties = readExtended(st, info.ID, fields)
+	return m
 }
 
 // storedClass reads one message's class for a listing row. A summary row carries it

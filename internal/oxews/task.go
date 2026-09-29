@@ -9,22 +9,23 @@ import (
 // Task is the EWS <t:Task> element (MS-OXWSTASK), the subset v1 emits, with its
 // children in the Types.xsd sequence order.
 type Task struct {
-	XMLName         xml.Name    `xml:"http://schemas.microsoft.com/exchange/services/2006/types Task"`
-	ItemID          ItemIDElem  `xml:"ItemId"`
-	Subject         string      `xml:"Subject,omitempty"`
-	Sensitivity     string      `xml:"Sensitivity,omitempty"`
-	Body            *Body       `xml:"Body,omitempty"`
-	Categories      *Categories `xml:"Categories,omitempty"`
-	Importance      string      `xml:"Importance,omitempty"`
-	ReminderDueBy   string      `xml:"ReminderDueBy,omitempty"`
-	ReminderIsSet   bool        `xml:"ReminderIsSet"`
-	HasAttachments  bool        `xml:"HasAttachments"`
-	CompleteDate    string      `xml:"CompleteDate,omitempty"`
-	DueDate         string      `xml:"DueDate,omitempty"`
-	IsComplete      bool        `xml:"IsComplete"`
-	PercentComplete float64     `xml:"PercentComplete"`
-	StartDate       string      `xml:"StartDate,omitempty"`
-	Status          string      `xml:"Status,omitempty"`
+	XMLName            xml.Name           `xml:"http://schemas.microsoft.com/exchange/services/2006/types Task"`
+	ItemID             ItemIDElem         `xml:"ItemId"`
+	Subject            string             `xml:"Subject,omitempty"`
+	Sensitivity        string             `xml:"Sensitivity,omitempty"`
+	Body               *Body              `xml:"Body,omitempty"`
+	Categories         *Categories        `xml:"Categories,omitempty"`
+	Importance         string             `xml:"Importance,omitempty"`
+	ReminderDueBy      string             `xml:"ReminderDueBy,omitempty"`
+	ReminderIsSet      bool               `xml:"ReminderIsSet"`
+	HasAttachments     bool               `xml:"HasAttachments"`
+	ExtendedProperties []ExtendedProperty `xml:"ExtendedProperty"`
+	CompleteDate       string             `xml:"CompleteDate,omitempty"`
+	DueDate            string             `xml:"DueDate,omitempty"`
+	IsComplete         bool               `xml:"IsComplete"`
+	PercentComplete    float64            `xml:"PercentComplete"`
+	StartDate          string             `xml:"StartDate,omitempty"`
+	Status             string             `xml:"Status,omitempty"`
 }
 
 // Categories is the EWS <t:Categories> element: a list of <t:String> values.

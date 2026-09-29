@@ -12,13 +12,14 @@ const NoteClass = "IPM.StickyNote"
 // a note is returned as a base Item carrying ItemClass="IPM.StickyNote", with its
 // children in the Types.xsd sequence order.
 type Item struct {
-	XMLName          xml.Name    `xml:"http://schemas.microsoft.com/exchange/services/2006/types Item"`
-	ItemID           ItemIDElem  `xml:"ItemId"`
-	ItemClass        string      `xml:"ItemClass,omitempty"`
-	Subject          string      `xml:"Subject,omitempty"`
-	Body             *Body       `xml:"Body,omitempty"`
-	Categories       *Categories `xml:"Categories,omitempty"`
-	LastModifiedTime string      `xml:"LastModifiedTime,omitempty"`
+	XMLName            xml.Name           `xml:"http://schemas.microsoft.com/exchange/services/2006/types Item"`
+	ItemID             ItemIDElem         `xml:"ItemId"`
+	ItemClass          string             `xml:"ItemClass,omitempty"`
+	Subject            string             `xml:"Subject,omitempty"`
+	Body               *Body              `xml:"Body,omitempty"`
+	Categories         *Categories        `xml:"Categories,omitempty"`
+	ExtendedProperties []ExtendedProperty `xml:"ExtendedProperty"`
+	LastModifiedTime   string             `xml:"LastModifiedTime,omitempty"`
 }
 
 // BuildNote renders a sticky note as a base <t:Item> from its extracted fields plus

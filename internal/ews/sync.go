@@ -19,6 +19,7 @@ const maxSyncBatch = 512
 // --- request ---
 
 type syncFolderItemsRequest struct {
+	Shape              itemShape  `xml:"ItemShape"`
 	SyncFolderID       folderRefs `xml:"SyncFolderId"`
 	SyncState          string     `xml:"SyncState"`
 	MaxChangesReturned int        `xml:"MaxChangesReturned"`
@@ -69,6 +70,11 @@ func (s *Server) handleSyncFolderItems(w http.ResponseWriter, inner []byte, sess
 		s.soapFault(w, "ErrorInvalidRequest", "SyncFolderItems: invalid request", err)
 		return
 	}
+	fields, err := extendedFields(req.Shape)
+	if err != nil {
+		s.soapFault(w, "ErrorInvalidExtendedProperty", "SyncFolderItems: invalid extended property", err)
+		return
+	}
 	cache := s.newStoreCache()
 	defer cache.closeAll()
 	ctx, code, err := s.prepareItemSync(cache, sess, req.SyncFolderID)
@@ -104,6 +110,7 @@ func (s *Server) handleSyncFolderItems(w http.ResponseWriter, inner []byte, sess
 		all = all[:max]
 		includesLast = false
 	}
+	ctx.fields = fields
 	changes, newSnap := renderItemChanges(all, snap, ctx)
 
 	newToken := nextSyncState(fstate.SyncState)
@@ -131,6 +138,7 @@ type itemSyncContext struct {
 	idMailbox  string             // stamped into item ids, empty for the caller's own mailbox
 	stateStore *objectstore.Store // holds the sync cursor
 	stateKey   string
+	fields     []extField // the extended properties each change row carries
 }
 
 // prepareItemSync resolves the requested folder, opens the store that holds its
@@ -253,10 +261,10 @@ func renderItemChanges(all []pendingItem, snap map[string]int64, ctx itemSyncCon
 	for _, p := range all {
 		switch p.kind {
 		case "create":
-			changes.Create = append(changes.Create, itemChange{Message: itemSummary(ctx.st, ctx.fid, p.info, ctx.idMailbox)})
+			changes.Create = append(changes.Create, itemChange{Message: summaryWith(ctx.st, ctx.fid, p.info, ctx.idMailbox, ctx.fields)})
 			newSnap[p.id] = p.flag
 		case "update":
-			changes.Update = append(changes.Update, itemChange{Message: itemSummary(ctx.st, ctx.fid, p.info, ctx.idMailbox)})
+			changes.Update = append(changes.Update, itemChange{Message: summaryWith(ctx.st, ctx.fid, p.info, ctx.idMailbox, ctx.fields)})
 			newSnap[p.id] = p.flag
 		case "delete":
 			changes.Delete = append(changes.Delete, deleteItemChange{ItemID: oxews.ItemIDElem{ID: p.id}})

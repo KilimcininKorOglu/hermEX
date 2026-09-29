@@ -30,11 +30,15 @@ type Message struct {
 	Importance       string          `xml:"Importance,omitempty"`
 	DateTimeSent     string          `xml:"DateTimeSent,omitempty"`
 	HasAttachments   bool            `xml:"HasAttachments"`
-	Sender           *Recipient      `xml:"Sender,omitempty"`
-	From             *Recipient      `xml:"From,omitempty"`
-	ToRecipients     *RecipientList  `xml:"ToRecipients,omitempty"`
-	CcRecipients     *RecipientList  `xml:"CcRecipients,omitempty"`
-	IsRead           bool            `xml:"IsRead"`
+	// ExtendedProperties are the MAPI properties the request's shape asked for by
+	// field URI. ItemType places them after HasAttachments and before the
+	// MessageType fields.
+	ExtendedProperties []ExtendedProperty `xml:"ExtendedProperty"`
+	Sender             *Recipient         `xml:"Sender,omitempty"`
+	From               *Recipient         `xml:"From,omitempty"`
+	ToRecipients       *RecipientList     `xml:"ToRecipients,omitempty"`
+	CcRecipients       *RecipientList     `xml:"CcRecipients,omitempty"`
+	IsRead             bool               `xml:"IsRead"`
 }
 
 // ItemIDElem is the EWS <t:ItemId> element.
