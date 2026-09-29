@@ -319,19 +319,11 @@ func TestHardDeleteMessagesToDumpster(t *testing.T) {
 	inboxH := h[1]
 
 	store := sess.get(inboxH).store
-	blob := make([]byte, 16)
-	put64 := func(b []byte, v int64) {
-		b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7] =
-			byte(v), byte(v>>8), byte(v>>16), byte(v>>24),
-			byte(v>>32), byte(v>>40), byte(v>>48), byte(v>>56)
-	}
-	put64(blob[0:8], int64(mapi.MakeEIDEx(1, uint64(midA)))) // message ids on the wire are EIDs
-	put64(blob[8:16], int64(mapi.MakeEIDEx(1, uint64(msgB))))
-
+	// MessageIds is a 16-bit count of 8-byte EIDs, as RopDeleteMessages carries it.
 	body := ext.NewPush(ext.FlagUTF16)
 	body.Uint8(0)
 	body.Uint8(0)
-	_ = body.BinShort(blob)
+	_ = body.Uint64ArrayShort([]uint64{uint64(mapi.MakeEIDEx(1, uint64(midA))), uint64(mapi.MakeEIDEx(1, uint64(msgB)))})
 
 	resp, _ := sess.Dispatch(toROPRequest(ropHardDeleteMessages, 0, body.Bytes()), []uint32{inboxH})
 	if ec := readEC(t, resp, ropHardDeleteMessages); ec != ecSuccess {

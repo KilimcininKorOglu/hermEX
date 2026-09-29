@@ -423,7 +423,7 @@ func (s *Session) ropEmptyFolder(p *ext.Pull, out *ext.Push, handles []uint32, h
 func (s *Session) ropHardDeleteMessages(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	_ /* wantAsync */, e1 := p.Uint8()
 	_ /* notifyNonRead */, e2 := p.Uint8()
-	mids, e3 := p.BinShort() // MessageIds (binary blob)
+	mids, e3 := p.Uint64ArrayShort() // MessageIds (EID_ARRAY, a 16-bit count of 8-byte ids)
 	if e1 != nil || e2 != nil || e3 != nil {
 		return false
 	}
@@ -435,14 +435,9 @@ func (s *Session) ropHardDeleteMessages(p *ext.Pull, out *ext.Push, handles []ui
 	if s.denyWrite(out, ropHardDeleteMessages, hindex, folder.store, folder.folderID, mapi.FrightsDeleteAny) {
 		return true
 	}
-	// MessageIds is a flat sequence of 8-byte little-endian message EIDs; the store
-	// row is the EID's global-counter value (the same extraction RopMoveCopyMessages
-	// uses), not the raw EID.
-	for i := 0; i+8 <= len(mids); i += 8 {
-		eid := uint64(mids[i]) | uint64(mids[i+1])<<8 |
-			uint64(mids[i+2])<<16 | uint64(mids[i+3])<<24 |
-			uint64(mids[i+4])<<32 | uint64(mids[i+5])<<40 |
-			uint64(mids[i+6])<<48 | uint64(mids[i+7])<<56
+	// The store row is the EID's global-counter value (the same extraction
+	// RopMoveCopyMessages uses), not the raw EID.
+	for _, eid := range mids {
 		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		mid := int64(mapi.EID(eid).GCValue())
 		if err := folder.store.SoftDeleteObject(mid); err != nil {
