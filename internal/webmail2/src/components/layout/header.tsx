@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils"
 import { useAuth } from "@/contexts/AuthContext"
 import { useMailbox } from "@/contexts/MailboxContext"
 import api from "@/utils/api"
+import { LOCALE_NAMES } from "@/utils/locale"
 
 interface Notification {
   id: string
@@ -30,12 +31,6 @@ interface Notification {
 interface HeaderProps {
   onMenuToggle: () => void
   sidebarCollapsed: boolean
-}
-
-// Human-readable names for the supported locales (shown in the language menu).
-const localeNames: Record<string, string> = {
-  en: "English",
-  tr: "Türkçe",
 }
 
 export function Header({ onMenuToggle, sidebarCollapsed }: HeaderProps) {
@@ -122,7 +117,7 @@ export function Header({ onMenuToggle, sidebarCollapsed }: HeaderProps) {
                   onClick={() => changeLocale(code)}
                   className="flex items-center justify-between cursor-pointer"
                 >
-                  <span>{localeNames[code] ?? code.toUpperCase()}</span>
+                  <span>{LOCALE_NAMES[code] ?? code.toUpperCase()}</span>
                   {locale === code && <Check className="h-4 w-4" />}
                 </DropdownMenuItem>
               ))}
