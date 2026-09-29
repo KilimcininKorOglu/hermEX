@@ -39,6 +39,13 @@ const (
 // calendar system chose ([MS-OXCICAL] UID).
 var vcalUIDMarker = []byte("vCal-Uid\x01\x00\x00\x00")
 
+// GlobalObjectUID renders a stored PidLidGlobalObjectId as the iCalendar UID the
+// object exports with, so every protocol names a meeting by the same UID. It
+// returns "" for a value too short to be an id.
+func GlobalObjectUID(goid []byte) string {
+	return globalObjectUID(goid)
+}
+
 // globalObjectUID renders a global object id as the iCalendar UID [MS-OXCICAL]
 // exports for it: a wrapped foreign UID as itself, anything else as the upper-case
 // hex of the id with its instance date cleared, so every instance of a meeting

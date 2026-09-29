@@ -81,6 +81,7 @@ type itemsWrap struct {
 	Messages        []oxews.Message
 	MeetingRequests []oxews.MeetingRequest
 	Tasks           []oxews.Task
+	CalendarItems   []oxews.CalendarItem
 	BaseItems       []oxews.Item
 }
 
@@ -197,6 +198,13 @@ func (l itemListing) folder(fid int64) findItemResponseMessage {
 		return l.tasks(fid)
 	case int64(mapi.PrivateFIDNotes):
 		return l.notes(fid)
+	}
+	calendar, err := isCalendarFolder(l.st, fid)
+	if err != nil {
+		return findItemError("ErrorInternalServerError")
+	}
+	if calendar {
+		return l.calendar(fid)
 	}
 	if resp, ok := l.search(fid); ok {
 		return resp
@@ -449,26 +457,40 @@ func getOneItem(cache *storeCache, sess *session, itemID string, fields []extFie
 	}
 	hasAttach, _ := st.HasAttachments(id.MessageID)
 	key := changeKey(st, id.MessageID)
-	switch itemClass(msg.Props) {
-	case oxtask.MessageClass:
-		// A task is rendered as <t:Task> from its shared properties, not the mail
-		// MIME path (a task has no RFC822 form).
-		tk, _ := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
-		elem := oxews.BuildTask(tk, oxews.ItemMeta{ItemID: itemID, ChangeKey: key, HasAttachments: hasAttach})
-		elem.ExtendedProperties = readExtended(st, id.MessageID, fields)
-		return itemFound(&itemsWrap{Tasks: []oxews.Task{elem}})
-	case oxews.NoteClass:
-		// A sticky note is rendered as a base <t:Item> (EWS has no Note type) from
-		// its shared properties.
-		elem := buildNoteItem(st, msg.Props, itemID, key)
-		elem.ExtendedProperties = readExtended(st, id.MessageID, fields)
-		return itemFound(&itemsWrap{BaseItems: []oxews.Item{elem}})
+	if resp, ok := objectItem(st, id, itemID, key, msg, hasAttach, fields); ok {
+		return resp
 	}
 	var hdrs *oxews.HeaderList
 	if headers {
 		hdrs = oxews.MessageHeaders(msg.Props)
 	}
 	return mailItem(st, id, itemID, key, msg, hasAttach, mailExtras{ext: readExtended(st, id.MessageID, fields), headers: hdrs})
+}
+
+// objectItem renders an item that lives in the object store only, in the shape
+// its class calls for: a task, a sticky note or a calendar item. ok is false for
+// any other class, which is rendered from its mail form.
+func objectItem(st *objectstore.Store, id oxews.ItemID, itemID, key string,
+	msg *oxcmail.Message, hasAttach bool, fields []extField) (itemResponseMessage, bool) {
+	class := itemClass(msg.Props)
+	switch {
+	case class == oxtask.MessageClass:
+		// A task is rendered as <t:Task> from its shared properties, not the mail
+		// MIME path (a task has no RFC822 form).
+		tk, _ := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
+		elem := oxews.BuildTask(tk, oxews.ItemMeta{ItemID: itemID, ChangeKey: key, HasAttachments: hasAttach})
+		elem.ExtendedProperties = readExtended(st, id.MessageID, fields)
+		return itemFound(&itemsWrap{Tasks: []oxews.Task{elem}}), true
+	case class == oxews.NoteClass:
+		// A sticky note is rendered as a base <t:Item> (EWS has no Note type) from
+		// its shared properties.
+		elem := buildNoteItem(st, msg.Props, itemID, key)
+		elem.ExtendedProperties = readExtended(st, id.MessageID, fields)
+		return itemFound(&itemsWrap{BaseItems: []oxews.Item{elem}}), true
+	case isAppointment(class):
+		return calendarItemResponse(st, id, itemID, fields), true
+	}
+	return itemResponseMessage{}, false
 }
 
 // mailExtras are the shape-requested parts of a mail item: its extended
