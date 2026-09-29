@@ -218,7 +218,7 @@ func renderFolderElement(st *objectstore.Store, fid int64, all []objectstore.Fol
 // asked: the permission set, and a search folder's search parameters.
 func addShapedParts(st *objectstore.Store, fid int64, f *oxews.Folder, idMailbox string, shape folderShape) error {
 	if shape.wantsPermissionSet() {
-		ps, err := folderPermissionSet(st, fid)
+		ps, err := folderPermissionSet(st, fid, f.XMLName.Local == "CalendarFolder")
 		if err != nil {
 			return err
 		}
@@ -266,8 +266,9 @@ func searchParameters(st *objectstore.Store, fid int64, idMailbox string) (*oxew
 // folderPermissionSet reads a folder's access-control list as a wire PermissionSet.
 // The always-present Default and Anonymous members are synthesized at no rights when
 // the folder stores no row for them, so a reader always sees them (mirroring the
-// permission table the store presents elsewhere).
-func folderPermissionSet(st *objectstore.Store, fid int64) (*oxews.PermissionSet, error) {
+// permission table the store presents elsewhere). A calendar folder's set is
+// the CalendarPermissionSet variant.
+func folderPermissionSet(st *objectstore.Store, fid int64, calendar bool) (*oxews.PermissionSet, error) {
 	entries, err := st.ListPermissions(fid)
 	if err != nil {
 		return nil, err
@@ -287,9 +288,16 @@ func folderPermissionSet(st *objectstore.Store, fid int64) (*oxews.PermissionSet
 	if !haveAnon {
 		entries = append(entries, objectstore.PermissionEntry{MemberID: mapi.MemberIDAnonymous, Name: "anonymous", Rights: mapi.RightsNone})
 	}
+	render := oxews.PermissionFromRights
+	if calendar {
+		render = oxews.CalendarPermissionFromRights
+	}
 	perms := make([]oxews.Permission, 0, len(entries))
 	for _, e := range entries {
-		perms = append(perms, oxews.PermissionFromRights(e.MemberID, e.Name, e.Rights))
+		perms = append(perms, render(e.MemberID, e.Name, e.Rights))
+	}
+	if calendar {
+		return &oxews.PermissionSet{CalendarPermissions: perms}, nil
 	}
 	return &oxews.PermissionSet{Permissions: perms}, nil
 }

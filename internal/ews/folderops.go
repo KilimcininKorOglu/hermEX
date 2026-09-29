@@ -295,10 +295,12 @@ type setFolderField struct {
 	FieldURI struct {
 		URI string `xml:"FieldURI,attr"`
 	} `xml:"FieldURI"`
+	// Folder is the folder element carrying the new value, whichever kind it is
+	// (a calendar's permissions arrive in a t:CalendarFolder).
 	Folder struct {
 		DisplayName   *string              `xml:"DisplayName"`
 		PermissionSet *oxews.PermissionSet `xml:"PermissionSet"`
-	} `xml:"Folder"`
+	} `xml:",any"`
 }
 
 type updateFolderResponse struct {
@@ -402,14 +404,22 @@ func applyFolderRename(st *objectstore.Store, fid int64, newName string) (folder
 // contract requires. A real member whose address does not resolve in the directory
 // is skipped (matching the ROP permission path); because this is a full replace,
 // skipping silently drops that member from the new ACL.
+//
+// A CalendarPermissionSet states each member's free/busy access, so its rights
+// are stored as stated; a PermissionSet does not, so the free/busy access the
+// member's read rights imply is filled in.
 func (s *Server) applyPermissionSet(st *objectstore.Store, fid int64, set *oxews.PermissionSet) (folderResponseMessage, bool) {
-	changes := make([]objectstore.PermissionChange, 0, len(set.Permissions))
-	for _, p := range set.Permissions {
+	members, statesFreeBusy := set.Permissions, false
+	if len(set.CalendarPermissions) > 0 {
+		members, statesFreeBusy = set.CalendarPermissions, true
+	}
+	changes := make([]objectstore.PermissionChange, 0, len(members))
+	for _, p := range members {
 		memberID, username, ok := s.resolvePermissionUser(p.UserID)
 		if !ok {
 			continue
 		}
-		rights := mapi.NormalizeRights(oxews.PermissionRights(p)&mapi.RightsMaxROP, true)
+		rights := mapi.NormalizeRights(oxews.PermissionRights(p)&mapi.RightsMaxROP, !statesFreeBusy)
 		changes = append(changes, objectstore.PermissionChange{
 			Op: objectstore.PermAdd, MemberID: memberID, Username: username, Rights: rights,
 		})
