@@ -84,9 +84,9 @@ func (s *Session) openCopySource(out *ext.Push, ropID uint8, handles []uint32, h
 // variant (the stream is always UTF-16).
 func (s *Session) ropFastTransferSourceCopyMessages(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8()
-	eids, e2 := p.EIDs()
-	_, e3 := p.Uint8() // CopyFlags, Move/SendEntryId not honored (plain content copy)
-	_, e4 := p.Uint8() // SendOptions, the stream codec is always UTF-16
+	eids, e2 := p.Uint64ArrayShort() // MessageIds (EID_ARRAY, a 16-bit count of 8-byte ids)
+	_, e3 := p.Uint8()               // CopyFlags, Move/SendEntryId not honored (plain content copy)
+	_, e4 := p.Uint8()               // SendOptions, the stream codec is always UTF-16
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil {
 		return false
 	}
@@ -104,7 +104,7 @@ func (s *Session) ropFastTransferSourceCopyMessages(p *ext.Pull, out *ext.Push, 
 	mids := make([]int64, len(eids))
 	for i, eid := range eids {
 		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		mids[i] = int64(eid.GCValue())
+		mids[i] = int64(mapi.EID(eid).GCValue())
 	}
 	col, err := src.store.NewCopyMessagesSource(src.folderID, mids, nil)
 	if err != nil {

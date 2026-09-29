@@ -128,11 +128,12 @@ func buildFastCopyMessages(inIdx, outIdx uint8, mids []int64) []byte {
 	b.Uint8(0) // LogonId
 	b.Uint8(inIdx)
 	b.Uint8(outIdx)
-	eids := make([]mapi.EID, len(mids))
+	// MessageIds is a 16-bit count of 8-byte EIDs.
+	eids := make([]uint64, len(mids))
 	for i, mid := range mids {
-		eids[i] = mapi.MakeEIDEx(1, uint64(mid))
+		eids[i] = uint64(mapi.MakeEIDEx(1, uint64(mid)))
 	}
-	_ = b.EIDs(eids)
+	_ = b.Uint64ArrayShort(eids)
 	b.Uint8(0) // CopyFlags
 	b.Uint8(0) // SendOptions
 	return b.Bytes()
