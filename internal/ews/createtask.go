@@ -138,9 +138,7 @@ func createOneTask(st *objectstore.Store, fid int64, item createTask) itemRespon
 func (item createTask) model() (oxtask.Task, error) {
 	tk := oxtask.New()
 	tk.Subject = item.Subject
-	if !strings.EqualFold(item.Body.Type, "HTML") {
-		tk.Body = item.Body.Content
-	}
+	tk.Body = item.textBody()
 	tk.Categories = item.Categories.String
 	tk.ReminderSet = item.ReminderIsSet
 	if err := item.handling(&tk); err != nil {
@@ -150,6 +148,15 @@ func (item createTask) model() (oxtask.Task, error) {
 		return tk, err
 	}
 	return tk, item.progress(&tk)
+}
+
+// textBody is the plain-text body the task model stores, empty for an HTML body,
+// which is kept as PR_HTML beside it.
+func (item createTask) textBody() string {
+	if strings.EqualFold(item.Body.Type, "HTML") {
+		return ""
+	}
+	return item.Body.Content
 }
 
 // handling reads the importance and sensitivity names.

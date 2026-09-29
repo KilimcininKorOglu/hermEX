@@ -58,15 +58,20 @@ type setItemField struct {
 	Message  updateMessageFields     `xml:"Message"`
 	// CalendarItem carries the value of a field set on a calendar item.
 	CalendarItem createCalendarItem `xml:"CalendarItem"`
-	Item         struct {
+	// Task carries the value of a field set on a task.
+	Task createTask `xml:"Task"`
+	Item struct {
 		Extended []oxews.ExtendedProperty `xml:"ExtendedProperty"`
 	} `xml:"Item"`
 }
 
-// deleteItemField is a <t:DeleteItemField>. Only an extended property is removed
-// this way; the fields named by FieldURI are required ones this server refuses to
-// delete.
+// deleteItemField is a <t:DeleteItemField>. An extended property is removed this
+// way on any item; a field named by FieldURI only on a task, whose optional fields
+// a client clears so.
 type deleteItemField struct {
+	FieldURI struct {
+		URI string `xml:"FieldURI,attr"`
+	} `xml:"FieldURI"`
 	Extended *oxews.ExtendedFieldURI `xml:"ExtendedFieldURI"`
 }
 
@@ -170,6 +175,9 @@ func (s *Server) updateOne(cache *storeCache, sess *session, ch itemChangeReq, o
 	st, code := cache.openForItem(sess, id, mapi.FrightsEditAny)
 	if code != "" {
 		return itemError(code)
+	}
+	if id.UID == 0 && isTaskItem(st, id.MessageID) {
+		return updateTask(st, id, ch)
 	}
 	if id.UID == 0 {
 		return s.updateCalendarItem(st, id, ch, o.send, sess.user)

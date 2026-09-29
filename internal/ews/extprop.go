@@ -1,6 +1,8 @@
 package ews
 
 import (
+	"slices"
+
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxews"
@@ -179,7 +181,7 @@ func extendedUpdate(st *objectstore.Store, ch itemChangeReq) (extUpdate, string)
 		if sf.Extended == nil {
 			continue
 		}
-		ep, ok := matchingValue(*sf.Extended, append(sf.Message.Extended, sf.Item.Extended...))
+		ep, ok := matchingValue(*sf.Extended, slices.Concat(sf.Message.Extended, sf.Item.Extended, sf.Task.Extended))
 		if !ok {
 			return extUpdate{}, "ErrorInvalidExtendedProperty"
 		}
