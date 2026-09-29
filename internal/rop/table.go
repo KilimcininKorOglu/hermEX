@@ -391,7 +391,7 @@ func withCharsetSiblings(tags []mapi.PropTag) []mapi.PropTag {
 func (t *tableState) rowKeyProps(store *objectstore.Store, baseIdx int, tags []mapi.PropTag) (mapi.PropertyValues, error) {
 	switch t.kind {
 	case tableHierarchy:
-		return store.GetFolderProperties(t.folders[baseIdx].ID, tags...)
+		return folderProps(store, t.folders[baseIdx].ID, tags, t.rights)
 	case tableAttachment:
 		return t.attachments[baseIdx], nil
 	default:
