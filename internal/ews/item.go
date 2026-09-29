@@ -196,20 +196,19 @@ func recoverableItemsFor(cache *storeCache, sess *session, tgt folderTarget, fie
 // notes live in the object store (versioned by change number), not the IMAP
 // index, so they are listed as folder objects rather than messages.
 func (l itemListing) folder(fid int64) findItemResponseMessage {
-	calendar, err := isCalendarFolder(l.st, fid)
+	kind, err := folderKind(l.st, fid)
 	if err != nil {
 		return findItemError("ErrorInternalServerError")
 	}
-	if l.view != nil && !calendar {
+	if l.view != nil && kind != kindCalendar {
 		return findItemError("ErrorCalendarFolderIsInvalidForCalendarView")
 	}
-	switch fid {
-	case int64(mapi.PrivateFIDTasks):
+	switch kind {
+	case kindTask:
 		return l.tasks(fid)
-	case int64(mapi.PrivateFIDNotes):
+	case kindNote:
 		return l.notes(fid)
-	}
-	if calendar {
+	case kindCalendar:
 		return l.calendar(fid)
 	}
 	if resp, ok := l.search(fid); ok {

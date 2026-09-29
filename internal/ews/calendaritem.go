@@ -235,18 +235,51 @@ func optionalLong(p mapi.PropertyValues, tag mapi.PropTag) *int32 {
 // folder itself, or any folder whose container class is IPF.Appointment. Its items
 // live in the object store only, never in the IMAP index.
 func isCalendarFolder(st *objectstore.Store, fid int64) (bool, error) {
-	if fid == int64(mapi.PrivateFIDCalendar) {
-		return true, nil
+	kind, err := folderKind(st, fid)
+	return kind == kindCalendar, err
+}
+
+// objectKind is the class of items a folder holds, which decides where they are
+// stored and how EWS renders them.
+type objectKind int
+
+const (
+	kindMail     objectKind = iota // indexed mail
+	kindCalendar                   // calendar items, in the object store only
+	kindTask                       // tasks, in the object store only
+	kindNote                       // sticky notes, in the object store only
+)
+
+// folderKind reads the class of items a folder holds from its well-known id or
+// its container class, so a task or notes folder a user created is read like the
+// built-in one.
+func folderKind(st *objectstore.Store, fid int64) (objectKind, error) {
+	switch fid {
+	case int64(mapi.PrivateFIDCalendar):
+		return kindCalendar, nil
+	case int64(mapi.PrivateFIDTasks):
+		return kindTask, nil
+	case int64(mapi.PrivateFIDNotes):
+		return kindNote, nil
 	}
 	props, err := st.GetFolderProperties(fid, mapi.PrContainerClass)
 	if errors.Is(err, objectstore.ErrNotFound) {
-		return false, nil // the folder listing reports the missing folder
+		return kindMail, nil // the folder listing reports the missing folder
 	}
 	if err != nil {
-		return false, err
+		return kindMail, err
 	}
 	class := strProp(props, mapi.PrContainerClass)
-	return class == mapi.ContainerClassAppointment || strings.HasPrefix(class, mapi.ContainerClassAppointment+"."), nil
+	for container, kind := range map[string]objectKind{
+		mapi.ContainerClassAppointment: kindCalendar,
+		mapi.ContainerClassTask:        kindTask,
+		mapi.ContainerClassStickyNote:  kindNote,
+	} {
+		if class == container || strings.HasPrefix(class, container+".") {
+			return kind, nil
+		}
+	}
+	return kindMail, nil
 }
 
 // calendar lists a calendar folder as calendar items.

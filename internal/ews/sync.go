@@ -52,6 +52,8 @@ type itemChanges struct {
 type itemChange struct {
 	Message      *oxews.Message
 	CalendarItem *oxews.CalendarItem
+	Task         *oxews.Task
+	Item         *oxews.Item // a sticky note
 }
 
 type deleteItemChange struct {
@@ -142,25 +144,32 @@ type itemSyncContext struct {
 	// calendar is the reader of a calendar folder, whose items live in the object
 	// store only and are versioned by change number; nil for a mail folder.
 	calendar *calendarReader
+	// kind is the class of object-store folder the items come from, kindMail for
+	// a folder of indexed mail.
+	kind objectKind
 }
 
 // pending lists the changes the folder holds against the snapshot. A mail folder
-// is diffed on its IMAP flags; a calendar folder, whose items are not in the IMAP
-// index, on each object's change number, which every write advances.
+// is diffed on its IMAP flags; a calendar, task or notes folder, whose items are
+// not in the IMAP index, on each object's change number, which every write
+// advances.
 func (ctx *itemSyncContext) pending(snap map[string]int64) ([]pendingItem, error) {
-	calendar, err := isCalendarFolder(ctx.st, ctx.fid)
+	kind, err := folderKind(ctx.st, ctx.fid)
 	if err != nil {
 		return nil, err
 	}
-	if !calendar {
+	ctx.kind = kind
+	if kind == kindMail {
 		live, err := ctx.st.ListMessages(ctx.fid)
 		if err != nil {
 			return nil, err
 		}
 		return pendingItemChanges(live, snap, *ctx), nil
 	}
-	if ctx.calendar, err = newCalendarReader(ctx.st); err != nil {
-		return nil, err
+	if kind == kindCalendar {
+		if ctx.calendar, err = newCalendarReader(ctx.st); err != nil {
+			return nil, err
+		}
 	}
 	objs, err := ctx.st.ListFolderObjects(ctx.fid)
 	if err != nil {
@@ -216,9 +225,18 @@ func syncBatch(all []pendingItem, requested int) ([]pendingItem, bool) {
 
 // changeItem renders the item a create or update change carries.
 func (ctx itemSyncContext) changeItem(p pendingItem) (itemChange, error) {
-	if ctx.calendar == nil {
+	switch ctx.kind {
+	case kindMail:
 		m := summaryWith(ctx.st, ctx.fid, p.info, ctx.idMailbox, ctx.fields)
 		return itemChange{Message: &m}, nil
+	case kindTask:
+		tk := taskSummary(ctx.st, ctx.fid, p.objID, ctx.idMailbox)
+		tk.ExtendedProperties = readExtended(ctx.st, p.objID, ctx.fields)
+		return itemChange{Task: &tk}, nil
+	case kindNote:
+		note := noteSummary(ctx.st, ctx.fid, p.objID, ctx.idMailbox)
+		note.ExtendedProperties = readExtended(ctx.st, p.objID, ctx.fields)
+		return itemChange{Item: &note}, nil
 	}
 	item, err := ctx.calendar.item(oxews.ItemID{FolderID: ctx.fid, MessageID: p.objID, Mailbox: ctx.idMailbox}, p.id)
 	if err != nil {
