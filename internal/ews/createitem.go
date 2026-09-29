@@ -27,6 +27,7 @@ type createItemRequest struct {
 	Items             struct {
 		Messages          []createMessage      `xml:"Message"`
 		CalendarItems     []createCalendarItem `xml:"CalendarItem"`
+		Tasks             []createTask         `xml:"Task"`
 		Accept            []meetingResponse    `xml:"AcceptItem"`
 		TentativelyAccept []meetingResponse    `xml:"TentativelyAcceptItem"`
 		Decline           []meetingResponse    `xml:"DeclineItem"`
@@ -125,6 +126,7 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *ses
 
 	msgs := s.createMessages(st, sess, req, disp, send, save)
 	msgs = append(msgs, s.createCalendarItems(st, sess, req)...)
+	msgs = append(msgs, s.createTasks(st, req)...)
 	msgs = append(msgs, s.createMeetingResponses(st, sess, req, send, save)...)
 	msgs = append(msgs, s.createReceiptSuppressions(sess, req)...)
 	writeResponse(w, createItemResponse{Messages: msgs})
