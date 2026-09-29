@@ -122,11 +122,11 @@ func TestCreateFolderNameCollision(t *testing.T) {
 	}
 }
 
-// TestCreateFolderRefusesOtherTypes proves a search folder type is not supported
-// here and an unknown type is an invalid parameter.
+// TestCreateFolderRefusesOtherTypes proves a type other than generic or search is
+// an invalid parameter.
 func TestCreateFolderRefusesOtherTypes(t *testing.T) {
 	sess, inboxH := openInboxForCreate(t)
-	for ft, want := range map[uint8]uint32{2: ecNotSupported, 0: ecInvalidParam, 7: ecInvalidParam} {
+	for ft, want := range map[uint8]uint32{0: ecInvalidParam, 7: ecInvalidParam} {
 		resp, _ := sess.Dispatch(toROPRequest(ropCreateFolder, 0, createFolderBody(ft, "Typed", false)), []uint32{inboxH, 0xFFFFFFFF})
 		if ec := readEC(t, resp, ropCreateFolder); ec != want {
 			t.Errorf("FolderType %d: ec = %#x, want %#x", ft, ec, want)
@@ -490,93 +490,4 @@ func folderNamedUnder(t *testing.T, store *objectstore.Store, parentID int64, na
 		}
 	}
 	return false
-}
-
-func TestSetSearchCriteriaReturnsNotSupported(t *testing.T) {
-	dir := t.TempDir()
-	sess := NewSession(dir, nil, "")
-	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
-	inboxH := h[1]
-
-	// SetSearchCriteria body: RestrictionDataSize (u16) + RestrictionData + FolderIds (EID_ARRAY) + SearchFlags (u32)
-	body := ext.NewPush(ext.FlagUTF16)
-	body.Uint16(0)     // RestrictionDataSize (no restriction)
-	_ = body.EIDs(nil) // FolderIds (empty EID_ARRAY)
-	body.Uint32(1)     // SearchFlags (RESTART_SEARCH)
-
-	resp, _ := sess.Dispatch(toROPRequest(ropSetSearchCriteria, 0, body.Bytes()), []uint32{inboxH})
-	if ec := readEC(t, resp, ropSetSearchCriteria); ec != ecNotSupported {
-		t.Errorf("SetSearchCriteria ec = %#x, want ecNotSupported", ec)
-	}
-}
-
-func TestGetSearchCriteriaReturnsNotSupported(t *testing.T) {
-	dir := t.TempDir()
-	sess := NewSession(dir, nil, "")
-	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
-	inboxH := h[1]
-
-	// GetSearchCriteria body: useUnicode, includeRestriction, includeFolders (three u8)
-	body := ext.NewPush(ext.FlagUTF16)
-	body.Uint8(1)
-	body.Uint8(1)
-	body.Uint8(1)
-
-	resp, _ := sess.Dispatch(toROPRequest(ropGetSearchCriteria, 0, body.Bytes()), []uint32{inboxH})
-	if ec := readEC(t, resp, ropGetSearchCriteria); ec != ecNotSupported {
-		t.Errorf("GetSearchCriteria ec = %#x, want ecNotSupported", ec)
-	}
-}
-
-// TestSearchCriteriaBatchAlignment verifies the request body is fully consumed so a
-// following ROP in the same batch parses from the correct offset.
-func TestSearchCriteriaBatchAlignment(t *testing.T) {
-	dir := t.TempDir()
-	sess := NewSession(dir, nil, "")
-	defer sess.Close()
-	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	logonH := h[0]
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
-	inboxH := h[1]
-
-	// Build a batch: SetSearchCriteria followed by GetSearchCriteria.
-	b := ext.NewPush(ext.FlagUTF16)
-	b.Uint8(ropSetSearchCriteria)
-	b.Uint8(0)
-	b.Uint8(0)
-	b.Uint16(0)     // RestrictionDataSize
-	_ = b.EIDs(nil) // FolderIds
-	b.Uint32(1)     // SearchFlags
-	b.Uint8(ropGetSearchCriteria)
-	b.Uint8(0)
-	b.Uint8(0)
-	b.Uint8(1) // useUnicode
-	b.Uint8(1) // includeRestriction
-	b.Uint8(1) // includeFolders
-
-	resp, _ := sess.Dispatch(b.Bytes(), []uint32{inboxH})
-	p := ext.NewPull(resp, ext.FlagUTF16)
-
-	// First response: SetSearchCriteria.
-	if id := mustU8(t, p, "RopId"); id != ropSetSearchCriteria {
-		t.Fatalf("first RopId = %#x, want SetSearchCriteria", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecNotSupported {
-		t.Errorf("SetSearchCriteria ec = %#x, want ecNotSupported", ec)
-	}
-	// Second response: GetSearchCriteria, proves the parser stayed aligned.
-	if id := mustU8(t, p, "RopId"); id != ropGetSearchCriteria {
-		t.Fatalf("second RopId = %#x, want GetSearchCriteria (parser misaligned)", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecNotSupported {
-		t.Errorf("GetSearchCriteria ec = %#x, want ecNotSupported", ec)
-	}
 }

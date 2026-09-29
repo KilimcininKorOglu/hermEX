@@ -1428,5 +1428,10 @@ func childFolders(store *objectstore.Store, parentID int64) ([]objectstore.Folde
 			out = append(out, f)
 		}
 	}
-	return out, nil
+	// The user folder tree leaves search folders out; they are children too.
+	searches, err := store.SearchFolderChildren(parentID)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, searches...), nil
 }

@@ -59,12 +59,16 @@ func (s *Session) ropCreateFolder(p *ext.Pull, out *ext.Push, handles []uint32, 
 	if !framed {
 		return false
 	}
+	if req.folderType != folderTypeGeneric && req.folderType != folderTypeSearch {
+		writeErr(out, ropCreateFolder, req.ohindex, ecInvalidParam)
+		return true
+	}
 	folder, ok := s.openFolder(out, ropCreateFolder, handles, hindex, req.ohindex)
 	if !ok {
 		return true
 	}
-	if req.folderType != folderTypeGeneric {
-		writeErr(out, ropCreateFolder, req.ohindex, createFolderTypeError(req.folderType))
+	if ec := createFolderParentError(folder); ec != ecSuccess {
+		writeErr(out, ropCreateFolder, req.ohindex, ec)
 		return true
 	}
 	if s.denyWrite(out, ropCreateFolder, req.ohindex, folder.store, folder.folderID, mapi.FrightsCreateSubfolder) {
@@ -90,31 +94,39 @@ func (s *Session) ropCreateFolder(p *ext.Pull, out *ext.Push, handles []uint32, 
 	return true
 }
 
-// createFolderTypeError is the return code for a FolderType the ROP does not
-// create: a search folder is a valid type this path does not build, any other
-// value is invalid.
-func createFolderTypeError(folderType uint8) uint32 {
-	if folderType == folderTypeSearch {
+// createFolderParentError refuses a parent that cannot hold a new folder: a
+// search folder holds only the results of its search.
+func createFolderParentError(parent *object) uint32 {
+	isSearch, err := parent.store.IsSearchFolder(parent.folderID)
+	switch {
+	case errors.Is(err, objectstore.ErrNotFound):
+		return ecNotFound
+	case err != nil:
+		return ecError
+	case isSearch:
 		return ecNotSupported
 	}
-	return ecInvalidParam
+	return ecSuccess
 }
 
 // createOrOpenFolder creates the requested subfolder of parent, or returns the
-// existing one of that name when the request allows it. delegate names the
-// creator when a delegate logon creates the folder, and is empty for the owner.
+// existing one of that name when the request allows it and the existing folder is
+// of the requested type. delegate names the creator when a delegate logon creates
+// the folder, and is empty for the owner.
 func createOrOpenFolder(parent *object, req createFolderRequest, delegate string) (int64, uint32) {
 	existing, found, err := parent.store.FolderByName(&parent.folderID, req.name)
 	if err != nil {
 		return 0, ecError
 	}
 	if found {
-		if !req.openExisting {
-			return 0, ecDuplicateName
-		}
-		return existing, ecSuccess
+		return openExistingFolder(parent.store, existing, req)
 	}
-	folderID, err := parent.store.CreateFolder(&parent.folderID, req.name)
+	var folderID int64
+	if req.folderType == folderTypeSearch {
+		folderID, err = parent.store.CreateSearchFolder(parent.folderID, req.name)
+	} else {
+		folderID, err = parent.store.CreateFolder(&parent.folderID, req.name)
+	}
 	if err != nil {
 		return 0, ecError
 	}
@@ -122,6 +134,24 @@ func createOrOpenFolder(parent *object, req createFolderRequest, delegate string
 		return 0, ecError
 	}
 	return folderID, ecSuccess
+}
+
+// openExistingFolder answers a create whose name is taken: the existing folder is
+// opened only when the request asks for it and the folder is of the requested
+// type, else the name is a duplicate.
+func openExistingFolder(store *objectstore.Store, fid int64, req createFolderRequest) (int64, uint32) {
+	if !req.openExisting {
+		return 0, ecDuplicateName
+	}
+	props, err := store.FolderComputedProps(fid)
+	if err != nil {
+		return 0, ecError
+	}
+	v, _ := props.Get(mapi.PrFolderType)
+	if t, _ := v.(int32); t != int32(req.folderType) {
+		return 0, ecDuplicateName
+	}
+	return fid, ecSuccess
 }
 
 // creatorRights is what a delegate holds on a folder they created: owner rights,
@@ -449,44 +479,6 @@ func (s *Session) ropHardDeleteMessages(p *ext.Pull, out *ext.Push, handles []ui
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
 	out.Uint8(0) // PartialCompletion
-	return true
-}
-
-// ropSetSearchCriteria handles RopSetSearchCriteria ([MS-OXCFOLD] 2.2.1.4): it sets
-// the restriction, scope folders, and search flags on a search folder. v1 has no
-// search-folder backend, so the request body is fully consumed (to keep the parser
-// aligned in a multi-ROP batch) and ecNotSupported is returned. The body is
-// RestrictionDataSize (u16) + RestrictionData + FolderIds (EID_ARRAY) + SearchFlags (u32).
-func (s *Session) ropSetSearchCriteria(p *ext.Pull, out *ext.Push, _ []uint32, hindex uint8) bool {
-	resSize, e1 := p.Uint16() // RestrictionDataSize
-	if e1 != nil {
-		return false
-	}
-	if _, err := p.Raw(int(resSize)); err != nil { // RestrictionData
-		return false
-	}
-	if _, err := p.EIDs(); err != nil { // FolderIds (EID_ARRAY, wide-count)
-		return false
-	}
-	if _, err := p.Uint32(); err != nil { // SearchFlags
-		return false
-	}
-	writeErr(out, ropSetSearchCriteria, hindex, ecNotSupported)
-	return true
-}
-
-// ropGetSearchCriteria handles RopGetSearchCriteria ([MS-OXCFOLD] 2.2.1.5): it
-// returns the restriction, scope folders, and search status of a search folder.
-// v1 has no search-folder backend, so the request body (three u8 flags) is
-// consumed and ecNotSupported is returned.
-func (s *Session) ropGetSearchCriteria(p *ext.Pull, out *ext.Push, _ []uint32, hindex uint8) bool {
-	_ /* useUnicode */, e1 := p.Uint8()
-	_ /* includeRestriction */, e2 := p.Uint8()
-	_ /* includeFolders */, e3 := p.Uint8()
-	if e1 != nil || e2 != nil || e3 != nil {
-		return false
-	}
-	writeErr(out, ropGetSearchCriteria, hindex, ecNotSupported)
 	return true
 }
 

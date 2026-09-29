@@ -106,6 +106,10 @@ const (
 	ecUnableToAbort   uint32 = 0x80040114 // MAPI_E_UNABLE_TO_ABORT (RopAbort: nothing async to abort)
 	ecInvalidBookmark uint32 = 0x80040405 // MAPI_E_INVALID_BOOKMARK (RopSeekRowFractional: zero denominator)
 	ecSyncObjectDel   uint32 = 0x80040800 // SYNC_E_OBJECT_DELETED (ICS move source no longer exists)
+
+	ecNotSearchFolder            uint32 = 0x00000461 // search criteria on a folder that is not a search folder
+	ecSearchFolderScopeViolation uint32 = 0x00000490 // a search scope outside the store, or holding the search folder
+	ecNotInitialized             uint32 = 0x80040605 // MAPI_E_NOT_INITIALIZED (a search folder without criteria)
 )
 
 // ropHandler processes one ROP: it reads the request body from p, appends the
@@ -251,10 +255,11 @@ func (s *Session) Dispatch(ropList []byte, reqHandles []uint32) (respRops []byte
 	p := ext.NewPull(ropList, ext.FlagUTF16)
 	out := ext.NewPush(ext.FlagUTF16)
 	for p.Remaining() > 0 {
-		ropID, hindex, ok := pullRopHeader(p)
+		ropID, logonID, hindex, ok := pullRopHeader(p)
 		if !ok {
 			break
 		}
+		s.logonID = logonID
 		run, known := ropTable[ropID]
 		if !known {
 			writeErr(out, ropID, hindex, ecError)
@@ -272,14 +277,14 @@ func (s *Session) Dispatch(ropList []byte, reqHandles []uint32) (respRops []byte
 	return out.Bytes(), handles
 }
 
-// pullRopHeader reads the three-byte ROP header: RopId, LogonId (a single logon
-// in v1, so it is discarded) and the handle index. ok is false when the list
-// ends mid-header, which ends the batch with no response.
-func pullRopHeader(p *ext.Pull) (ropID, hindex uint8, ok bool) {
+// pullRopHeader reads the three-byte ROP header: RopId, LogonId and the handle
+// index. ok is false when the list ends mid-header, which ends the batch with no
+// response.
+func pullRopHeader(p *ext.Pull) (ropID, logonID, hindex uint8, ok bool) {
 	ropID, e1 := p.Uint8()
-	_, e2 := p.Uint8() // LogonId (a single logon in v1)
+	logonID, e2 := p.Uint8()
 	hindex, e3 := p.Uint8()
-	return ropID, hindex, e1 == nil && e2 == nil && e3 == nil
+	return ropID, logonID, hindex, e1 == nil && e2 == nil && e3 == nil
 }
 
 // writeErr appends the 6-byte generic ROP error response: RopId, HandleIndex, ec.

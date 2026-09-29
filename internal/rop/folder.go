@@ -2,6 +2,7 @@ package rop
 
 import (
 	"encoding/binary"
+	"errors"
 	"slices"
 
 	"hermex/internal/ext"
@@ -277,6 +278,23 @@ const tableFlagSoftDeletes uint8 = 0x20
 // constant serves both.
 const tableFlagNoNotifications uint8 = 0x10
 
+// contentsTableIDs lists the messages a contents table of folder shows: the
+// soft-deleted ones when asked for, the messages a search folder finds, and the
+// folder's own messages otherwise.
+func contentsTableIDs(folder *object, softDeleted bool) ([]int64, error) {
+	if softDeleted {
+		return folder.store.ListSoftDeletedIDs(folder.folderID)
+	}
+	isSearch, err := folder.store.IsSearchFolder(folder.folderID)
+	if err != nil && !errors.Is(err, objectstore.ErrNotFound) {
+		return nil, err
+	}
+	if isSearch {
+		return folder.store.SearchFolderMessageIDs(folder.folderID)
+	}
+	return folder.store.ListMessageIDs(folder.folderID)
+}
+
 // ropGetContentsTable handles RopGetContentsTable ([MS-OXCFOLD] 2.2.1.14): it
 // snapshots the folder's messages into a new table object and returns the row
 // count. With the SHOW_SOFT_DELETES TableFlags bit set it snapshots the folder's
@@ -304,16 +322,8 @@ func (s *Session) ropGetContentsTable(p *ext.Pull, out *ext.Push, handles []uint
 	// Only the ids are snapshotted: a row's values are read from the store when
 	// RopQueryRows serves it, so the index row's subject, sender and preview would
 	// be built for every message in the folder and never read.
-	var (
-		ids []int64
-		err error
-	)
 	softDeleted := tableFlags&tableFlagSoftDeletes != 0
-	if softDeleted {
-		ids, err = folder.store.ListSoftDeletedIDs(folder.folderID)
-	} else {
-		ids, err = folder.store.ListMessageIDs(folder.folderID)
-	}
+	ids, err := contentsTableIDs(folder, softDeleted)
 	if err != nil {
 		writeErr(out, ropGetContentsTable, ohindex, ecError)
 		return true

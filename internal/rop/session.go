@@ -198,6 +198,10 @@ type Session struct {
 
 	// locale is the language and code page the client connected with.
 	locale Locale
+
+	// logonID is the LogonId of the ROP being dispatched, which a response that
+	// carries one echoes.
+	logonID uint8
 }
 
 // Locale is the code page and the two language ids a client connects with: the
