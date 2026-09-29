@@ -219,6 +219,36 @@ func TestInstanceCancellationLeavesAMAPISeriesStanding(t *testing.T) {
 	if longVal(theMeeting(t, st), tags.State)&asfCanceled != 0 {
 		t.Error("one cancelled instance marked the whole series cancelled")
 	}
+	// The cancelled instance must leave the recurrence blob, the only form the
+	// series has, or Outlook keeps showing it.
+	if got := deletedDays(t, st, objs[0].ID); len(got) != 1 || got[0] != "2026-06-21" {
+		t.Errorf("deleted dates = %v, want [2026-06-21]", got)
+	}
+}
+
+// deletedDays reads the days the stored series' recurrence blob deletes.
+func deletedDays(t *testing.T, st *objectstore.Store, id int64) []string {
+	t.Helper()
+	ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{mapi.NameAppointmentRecur})
+	if err != nil || ids[0] == 0 {
+		t.Fatalf("recurrence tag: %v", err)
+	}
+	tag := mapi.MakeTag(ids[0], mapi.PtBinary)
+	pv, err := st.GetMessageProperties(id, tag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, _ := pv.Get(tag)
+	blob, _ := v.([]byte)
+	p, err := recurrence.DecodeAppointment(blob)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var days []string
+	for _, d := range p.DeletedDates {
+		days = append(days, recurrence.WallClock(d, time.UTC).Format("2006-01-02"))
+	}
+	return days
 }
 
 // TestInstanceCancellationReachesTheRecurrenceBlob proves the pattern a MAPI

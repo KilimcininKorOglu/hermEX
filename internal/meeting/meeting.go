@@ -490,17 +490,21 @@ func cancelOccurrence(st *objectstore.Store, existing int64, req *oxcmail.Messag
 	if !isOccurrenceRequest(st, req, cancel, hasICal) {
 		return false, nil
 	}
+	at, _ := oxcical.OccurrenceInstant(cancel)
 	stored, ok := storedICal(st, existing)
 	if !ok || !hasICal {
 		// A MAPI client's series: deleting it would take every other instance with
-		// the one this names, so it is left for that client to edit.
-		if isSeries(st, existing) {
+		// the one this names. With the instant known, the instance leaves the
+		// recurrence blob; without one it is left for that client to edit.
+		if !isSeries(st, existing) {
+			return false, nil
+		}
+		if !hasICal {
 			st.LogSwallowedError("meeting.cancel-occurrence", errFoldRefused)
 			return true, nil
 		}
-		return false, nil
+		return true, removeBlobInstance(st, existing, at)
 	}
-	at, _ := oxcical.OccurrenceInstant(cancel)
 	trimmed, ok := oxcical.CancelOccurrence(stored, at)
 	if !ok {
 		return false, nil // not a series: the stored item IS that occurrence
@@ -527,6 +531,30 @@ func withRecurrence(st *objectstore.Store, update mapi.PropertyValues, ical []by
 	}
 	update.Set(mapi.MakeTag(ids[0], mapi.PtBinary), blob)
 	return update
+}
+
+// removeBlobInstance removes the occurrence generated at at from a series whose
+// recurrence lives in its PidLidAppointmentRecur blob alone, the form a MAPI client
+// writes, so the series keeps that form.
+func removeBlobInstance(st *objectstore.Store, id int64, at time.Time) error {
+	msg, err := st.OpenMessage(id)
+	if err != nil {
+		return err
+	}
+	blob, ok, err := oxcical.EditRecurrenceBlob(msg, oxcical.Options{Resolver: st.GetNamedPropIDs}, at, nil)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		// A pattern this package cannot decode is left as the client wrote it.
+		st.LogSwallowedError("meeting.remove-instance", errFoldRefused)
+		return nil
+	}
+	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameAppointmentRecur})
+	if err != nil {
+		return err
+	}
+	return st.ModifyMessageProperties(id, mapi.PropertyValues{{Tag: mapi.MakeTag(ids[0], mapi.PtBinary), Value: blob}})
 }
 
 // ReplaceSeries writes an edited series body over a stored calendar item in place,

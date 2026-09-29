@@ -182,10 +182,10 @@ func (c *cancellation) apply(st *objectstore.Store, appt int64, props mapi.Prope
 func (c *cancellation) applyInstance(st *objectstore.Store, appt int64, stored []byte, isICal bool) (done bool, err error) {
 	if !isICal {
 		// A series a MAPI client wrote has no iCalendar to cancel the one instance
-		// in; marking the whole meeting cancelled would cancel every other instance.
+		// in, so the instance leaves its recurrence blob; marking the whole meeting
+		// cancelled would cancel every other instance.
 		if isSeries(st, appt) {
-			st.LogSwallowedError("meeting.cancel-instance", errFoldRefused)
-			return true, nil
+			return true, removeBlobInstance(st, appt, c.at)
 		}
 		return false, nil
 	}
