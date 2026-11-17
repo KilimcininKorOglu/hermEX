@@ -61,6 +61,13 @@ func TestConversationIndexFormat(t *testing.T) {
 	if idx[0] != 0x01 {
 		t.Errorf("reserved byte = %#x, want 0x01", idx[0])
 	}
+	// MS-OXOMSG 2.2.1.3: the time field is the high 40 bits of the FILETIME
+	// (100ns ticks since 1601-01-01 UTC), most significant byte first.
+	ft := uint64(when.Unix()+11644473600) * 10_000_000
+	wantTime := []byte{byte(ft >> 56), byte(ft >> 48), byte(ft >> 40), byte(ft >> 32), byte(ft >> 24)}
+	if !bytes.Equal(idx[1:6], wantTime) {
+		t.Errorf("time bytes = %x, want the high 40 bits of the FILETIME %x", idx[1:6], wantTime)
+	}
 	if !bytes.Equal(idx[6:], convID) {
 		t.Errorf("trailing GUID %x != ConversationId %x", idx[6:], convID)
 	}
