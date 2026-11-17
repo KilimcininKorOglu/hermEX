@@ -33,6 +33,7 @@ type Server struct {
 	roots    *x509.CertPool     // S/MIME trust anchors for ValidateCert; nil = system roots
 	Sessions SessionRecorder    // live-session telemetry sink; nil disables it
 	waker    notify.Registrar   // push wake source; nil keeps Ping on its poll cadence only
+	pingHold time.Duration      // unit tests only: how long a Ping is held instead of its heartbeat; zero holds the heartbeat
 }
 
 // SetNotify wires the push wake source so a held Ping wakes the instant the

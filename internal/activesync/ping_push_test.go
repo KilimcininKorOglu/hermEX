@@ -49,7 +49,7 @@ func TestPingWakesViaPush(t *testing.T) {
 
 	status := make(chan string, 1)
 	go func() {
-		_, root := postCommand(t, ts, "Ping", pingReq("30"))
+		_, root := postCommand(t, ts, "Ping", pingReq("60"))
 		status <- root.ChildText(wbxml.PGStatus)
 	}()
 	time.Sleep(200 * time.Millisecond) // let Ping begin and register its wake

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"hermex/internal/directory"
 	"hermex/internal/objectstore"
@@ -24,7 +25,10 @@ func seededServer(t *testing.T) (*httptest.Server, string) {
 	}
 	st.Close()
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
-	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
+	srv := NewServer(accs, accs, "mail.hermex.test")
+	// A Ping heartbeat is at least 60 seconds; tests hold it one second.
+	srv.pingHold = time.Second
+	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, dir
 }

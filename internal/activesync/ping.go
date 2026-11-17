@@ -15,7 +15,10 @@ import (
 
 // Ping heartbeat bounds and the poll cadence within a heartbeat.
 const (
-	minHeartbeat = 1 * time.Second
+	// minHeartbeat matches the Sync Wait/HeartbeatInterval floor (MS-ASCMD, 60
+	// to 3540 seconds); Ping leaves its range to the server, and the operator
+	// chose the same floor so a device cannot poll every second.
+	minHeartbeat = 60 * time.Second
 	maxHeartbeat = 3540 * time.Second
 	pingPoll     = 5 * time.Second
 )
@@ -145,6 +148,9 @@ func (d *deviceState) cachePing(p pingParams) bool {
 // heartbeat expires (Status 1), or the device disconnects.
 func (s *Server) holdPing(w http.ResponseWriter, r *http.Request, sess *session,
 	dev *deviceState, folderIDs []string, heartbeat time.Duration) {
+	if s.pingHold > 0 {
+		heartbeat = s.pingHold
+	}
 	deadline := time.Now().Add(heartbeat)
 	// Register the mailbox for a push wake before the first poll, so a change landing
 	// during the heartbeat wakes Ping at once. A nil waker (push disabled) leaves wake

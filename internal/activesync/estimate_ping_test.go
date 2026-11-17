@@ -87,6 +87,13 @@ func TestPingRefusesAMalformedHeartbeat(t *testing.T) {
 	}
 	s, shortest := status("0")
 	wantEq(t, "the status for a zero heartbeat", s, "5")
+	// The operator's floor: 60 seconds, the Sync heartbeat minimum.
+	wantEq(t, "the shortest heartbeat", shortest, "60")
+	for _, hb := range []string{"1", "59"} {
+		s, got := status(hb)
+		wantEq(t, "the status for heartbeat "+hb, s, "5")
+		wantEq(t, "the bound for heartbeat "+hb, got, "60")
+	}
 	for _, hb := range []string{"-5", "-99999999999999999999"} {
 		s, got := status(hb)
 		wantEq(t, "the status for heartbeat "+hb, s, "5")
@@ -152,11 +159,11 @@ func TestPingUsesTheCachedParameters(t *testing.T) {
 
 	postCommand(t, ts, "Sync", syncReq("0", ""))
 	postCommand(t, ts, "Sync", syncReq("1", ""))
-	_, root = postCommand(t, ts, "Ping", pingReq("1"))
+	_, root = postCommand(t, ts, "Ping", pingReq("60"))
 	wantEq(t, "the full Ping", root.ChildText(wbxml.PGStatus), "1")
 
 	// Heartbeat only: the cached Inbox is watched, so the expiry is Status 1.
-	_, root = postCommand(t, ts, "Ping", wbxml.Elem(wbxml.PGPing, wbxml.Str(wbxml.PGHeartbeatInt, "1")))
+	_, root = postCommand(t, ts, "Ping", wbxml.Elem(wbxml.PGPing, wbxml.Str(wbxml.PGHeartbeatInt, "60")))
 	wantEq(t, "a Ping with only a heartbeat", root.ChildText(wbxml.PGStatus), "1")
 
 	// Empty: the cached Inbox and heartbeat are used, and new mail is reported.
@@ -172,7 +179,7 @@ func TestPingUsesTheCachedParameters(t *testing.T) {
 func TestPingNoFolders(t *testing.T) {
 	ts, _ := seededServer(t)
 
-	_, root := postCommand(t, ts, "Ping", wbxml.Elem(wbxml.PGPing, wbxml.Str(wbxml.PGHeartbeatInt, "30")))
+	_, root := postCommand(t, ts, "Ping", wbxml.Elem(wbxml.PGPing, wbxml.Str(wbxml.PGHeartbeatInt, "60")))
 	if s := root.ChildText(wbxml.PGStatus); s != "3" {
 		t.Errorf("status = %q, want 3 (no pingable folders)", s)
 	}
@@ -185,7 +192,7 @@ func TestPingFolderNotSynced(t *testing.T) {
 	ts, dir := seededServer(t)
 	seedInbox(t, dir, 1)
 
-	_, root := postCommand(t, ts, "Ping", pingReq("30"))
+	_, root := postCommand(t, ts, "Ping", pingReq("60"))
 	if s := root.ChildText(wbxml.PGStatus); s != "7" {
 		t.Errorf("status = %q, want 7 (folder needs sync)", s)
 	}
@@ -199,7 +206,7 @@ func TestPingNoChange(t *testing.T) {
 	postCommand(t, ts, "Sync", syncReq("0", ""))
 	postCommand(t, ts, "Sync", syncReq("1", "")) // snapshot synced
 
-	_, root := postCommand(t, ts, "Ping", pingReq("1"))
+	_, root := postCommand(t, ts, "Ping", pingReq("60"))
 	if root.ChildText(wbxml.PGStatus) != "1" {
 		t.Errorf("status = %q, want 1 (heartbeat expired)", root.ChildText(wbxml.PGStatus))
 	}
@@ -214,7 +221,7 @@ func TestPingDetectsChange(t *testing.T) {
 	postCommand(t, ts, "Sync", syncReq("1", ""))
 	seedInbox(t, dir, 1) // a new message arrives after the sync
 
-	_, root := postCommand(t, ts, "Ping", pingReq("30"))
+	_, root := postCommand(t, ts, "Ping", pingReq("60"))
 	if root.ChildText(wbxml.PGStatus) != "2" {
 		t.Fatalf("status = %q, want 2 (changes)", root.ChildText(wbxml.PGStatus))
 	}
