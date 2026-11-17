@@ -1,6 +1,7 @@
 package activesync
 
 import (
+	"errors"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -96,6 +97,32 @@ func TestHiddenUserStaysHiddenByExactAddress(t *testing.T) {
 			}
 		}
 	}
+}
+
+// failingGAL is a directory whose address book cannot be read.
+type failingGAL struct{ directory.StaticAccounts }
+
+func (failingGAL) SearchGAL(string, string, int) ([]directory.GALEntry, error) {
+	return nil, errors.New("directory unreachable")
+}
+
+// TestSearchGALReportsADirectoryFailure proves a GAL Search the directory cannot
+// answer reports Store Status 3, a server error ([MS-ASCMD] 2.2.3.177.15), and
+// never a successful empty result the device would show as "no such person".
+func TestSearchGALReportsADirectoryFailure(t *testing.T) {
+	accs := failingGAL{directory.StaticAccounts{
+		testUser: {Password: testPass, MailboxPath: filepath.Join(t.TempDir(), "alice")},
+	}}
+	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
+	t.Cleanup(ts.Close)
+	_, root := postCommand(t, ts, "Search", searchReq("GAL", "al"))
+	wantEq(t, "Store Status", searchStore(t, root).ChildText(wbxml.SRStatus), "3")
+
+	// ResolveRecipients: Status 6, a server error ([MS-ASCMD] 2.2.3.177.14), not
+	// an unresolved recipient the device would offer to send to anyway.
+	_, root = postCommand(t, ts, "ResolveRecipients",
+		wbxml.Elem(wbxml.RRResolveRecipients, wbxml.Str(wbxml.RRTo, "al")))
+	wantEq(t, "ResolveRecipients Status", root.ChildText(wbxml.RRStatus), "6")
 }
 
 // TestSearchGALKeepsResolutionHiddenUser proves the browse surface follows the

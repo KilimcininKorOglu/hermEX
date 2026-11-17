@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/mime"
 	"hermex/internal/objectstore"
@@ -20,7 +21,30 @@ const (
 	srStatusServerError = 3 // the request carried no store to search
 	srStoreOK           = 1 // the store search succeeded
 	srStoreReqInvalid   = 2 // the store/query is not supported here
+	srStoreServerError  = 3 // the store could not be searched
 )
+
+// logSearchFail records a store search the server could not run.
+func (s *Server) logSearchFail(sess *session, err error) {
+	s.logDirectoryFail("search.gal.fail", sess, err)
+}
+
+// logResolveFail records a recipient resolution the server could not run.
+func (s *Server) logResolveFail(sess *session, err error) {
+	s.logDirectoryFail("resolve.gal.fail", sess, err)
+}
+
+// logDirectoryFail records an address-book read that failed.
+func (s *Server) logDirectoryFail(name string, sess *session, err error) {
+	s.Logger.Emit(logging.Event{
+		Level:      logging.LevelError,
+		Subsystem:  logging.ActiveSync,
+		Name:       name,
+		User:       sess.user,
+		RemoteAddr: sess.tel.IP,
+		Fields:     logging.Fields{"error": err.Error()},
+	})
+}
 
 // handleSearch answers Search ([MS-ASCMD] 2.2.2.16). The GAL store resolves the
 // Query against the directory address book; the Mailbox store scans the caller's
@@ -279,7 +303,13 @@ func (s *Server) handleGALSearch(w http.ResponseWriter, store *wbxml.Node, sess 
 	query := store.ChildText(wbxml.SRQuery)
 	var entries []directory.GALEntry
 	if gal, ok := s.accounts.(directory.GAL); ok && query != "" {
-		entries, _ = gal.SearchGAL(sess.user, query, hi+1)
+		var err error
+		if entries, err = gal.SearchGAL(sess.user, query, hi+1); err != nil {
+			// A directory failure is a server error, never an empty address book.
+			s.logSearchFail(sess, err)
+			writeWBXML(w, searchGALReply(srStoreServerError, nil, 0, 0))
+			return
+		}
 		// Withhold the addresses the operator hid from the address book.
 		entries = directory.VisibleGAL(entries)
 	}

@@ -20,6 +20,7 @@ const resolveRecipientLimit = 100
 const (
 	rrStatusOK            = 1 // the command succeeded
 	rrStatusProtocolError = 5 // an invalid parameter, or a range over its limit
+	rrStatusServerError   = 6 // the server could not resolve the recipients
 	rrResolved            = 1 // one or more recipients matched the query
 	rrUnresolved          = 4 // no recipient matched the query
 
@@ -75,7 +76,15 @@ func (s *Server) handleResolveRecipients(w http.ResponseWriter, r *http.Request,
 	}
 	pictures := 0
 	for _, to := range tos {
-		children = append(children, resolveOneRecipient(gal, to, opt, win, sess, &pictures))
+		node, err := resolveOneRecipient(gal, to, opt, win, sess, &pictures)
+		if err != nil {
+			// A directory failure is a server error, never an unknown recipient.
+			s.logResolveFail(sess, err)
+			writeWBXML(w, wbxml.Elem(wbxml.RRResolveRecipients,
+				wbxml.Str(wbxml.RRStatus, strconv.Itoa(rrStatusServerError))))
+			return
+		}
+		children = append(children, node)
 	}
 	writeWBXML(w, wbxml.Elem(wbxml.RRResolveRecipients, children...))
 }
@@ -113,14 +122,17 @@ type resolvedRecipient struct {
 // status, the match count, and a Recipient for each match (with its free/busy and
 // portrait when requested). A query that matches nothing is an unresolved Response
 // with a zero count, not an error.
-func resolveOneRecipient(gal directory.GAL, to string, opt pictureOpts, win availabilityWindow, sess *session, pictures *int) *wbxml.Node {
+func resolveOneRecipient(gal directory.GAL, to string, opt pictureOpts, win availabilityWindow, sess *session, pictures *int) (*wbxml.Node, error) {
 	resp := []*wbxml.Node{wbxml.Str(wbxml.RRTo, to)}
 
-	matches := resolveEntries(gal, to, sess)
+	matches, err := resolveEntries(gal, to, sess)
+	if err != nil {
+		return nil, err
+	}
 	if len(matches) == 0 {
 		return wbxml.Elem(wbxml.RRResponse, append(resp,
 			wbxml.Str(wbxml.RRStatus, strconv.Itoa(rrUnresolved)),
-			wbxml.Str(wbxml.RRRecipientCount, "0"))...)
+			wbxml.Str(wbxml.RRRecipientCount, "0"))...), nil
 	}
 
 	resp = append(resp,
@@ -129,16 +141,16 @@ func resolveOneRecipient(gal directory.GAL, to string, opt pictureOpts, win avai
 	for _, m := range matches {
 		resp = append(resp, recipientNode(m, opt, win, sess, pictures))
 	}
-	return wbxml.Elem(wbxml.RRResponse, resp...)
+	return wbxml.Elem(wbxml.RRResponse, resp...), nil
 }
 
 // resolveEntries matches a query against the two address sources a client
 // expects: the organization's address book, then the caller's own contacts. The
 // address book comes first, because a colleague is the likelier match, and an
 // address in both is reported once.
-func resolveEntries(gal directory.GAL, to string, sess *session) []resolvedRecipient {
+func resolveEntries(gal directory.GAL, to string, sess *session) ([]resolvedRecipient, error) {
 	if to == "" {
-		return nil
+		return nil, nil
 	}
 	var matches []resolvedRecipient
 	seen := map[string]bool{}
@@ -151,7 +163,10 @@ func resolveEntries(gal directory.GAL, to string, sess *session) []resolvedRecip
 		matches = append(matches, resolvedRecipient{entry: e, contact: contact})
 	}
 	if gal != nil {
-		entries, _ := gal.SearchGAL(sess.user, to, resolveRecipientLimit)
+		entries, err := gal.SearchGAL(sess.user, to, resolveRecipientLimit)
+		if err != nil {
+			return nil, err
+		}
 		// Withhold the addresses the operator hid from name resolution.
 		for _, e := range directory.ResolvableGAL(entries) {
 			add(e, false)
@@ -160,7 +175,7 @@ func resolveEntries(gal directory.GAL, to string, sess *session) []resolvedRecip
 	for _, c := range ownContacts(sess.mailbox, to, resolveRecipientLimit-len(matches)) {
 		add(directory.GALEntry{DisplayName: c.DisplayName, Address: c.Address}, true)
 	}
-	return matches
+	return matches, nil
 }
 
 // ownContacts matches a query against the caller's own Contacts folder. A mailbox
