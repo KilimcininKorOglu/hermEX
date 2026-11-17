@@ -15,11 +15,14 @@ type asState struct {
 	Devices map[string]*deviceState `json:"devices,omitempty"`
 }
 
-// deviceState is one device's sync state: the folder-hierarchy sync key and the
-// per-collection content sync state.
+// deviceState is one device's sync state: the folder-hierarchy sync key, the
+// per-collection content sync state, and the Ping heartbeat (seconds) and folder
+// list the server caches for a later Ping that omits them.
 type deviceState struct {
-	HierarchyKey string                      `json:"hierarchyKey,omitempty"`
-	Collections  map[string]*collectionState `json:"collections,omitempty"`
+	HierarchyKey  string                      `json:"hierarchyKey,omitempty"`
+	Collections   map[string]*collectionState `json:"collections,omitempty"`
+	PingHeartbeat int64                       `json:"pingHeartbeat,omitempty"`
+	PingFolders   []string                    `json:"pingFolders,omitempty"`
 }
 
 // collectionState is one collection's content sync state for a device: the

@@ -2,7 +2,9 @@ package activesync
 
 import (
 	"errors"
+	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -37,12 +39,11 @@ const (
 // returns as soon as a folder changes (Status 2) or when the heartbeat expires
 // (Status 1). The change detection reuses the same snapshot diff as Sync.
 func (s *Server) handlePing(w http.ResponseWriter, r *http.Request, sess *session) {
-	root, err := readWBXML(r)
+	root, err := readPingBody(r)
 	if err != nil {
 		s.failRequest(w, r, "wbxml.parse.fail", err, http.StatusBadRequest, "invalid WBXML")
 		return
 	}
-	folderIDs := pingFolders(root)
 	heartbeat, refused := parseHeartbeat(root.Child(wbxml.PGHeartbeatInt))
 	switch refused {
 	case pingStatusBadHeartbeat:
@@ -54,43 +55,92 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request, sess *sessio
 		writeWBXML(w, pingResponse(pingStatusSyntax, nil))
 		return
 	}
-	if len(folderIDs) == 0 {
-		// Nothing to watch: the device must name at least one folder.
-		writeWBXML(w, pingResponse(pingStatusNoFolders, nil))
-		return
-	}
-
-	dev, err := s.pingDevice(sess)
+	dev, p, status, err := s.pingDevice(sess, pingParams{heartbeat: heartbeat, folders: pingFolders(root)})
 	if err != nil {
 		s.failRequest(w, r, "ping.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
-
-	// Ping can only watch a folder the device has already synced (its snapshot is
-	// the change baseline). A watched folder with no snapshot means the device
-	// must sync first, report Status 7 rather than silently ignoring it.
-	for _, id := range folderIDs {
-		if dev.Collections[id] == nil {
-			writeWBXML(w, pingResponse(pingStatusFolderSync, nil))
-			return
-		}
+	if status != 0 {
+		writeWBXML(w, pingResponse(status, nil))
+		return
 	}
-	s.holdPing(w, r, sess, dev, folderIDs, heartbeat)
+	s.holdPing(w, r, sess, dev, p.folders, p.heartbeat)
 }
 
-// pingDevice reads the calling device's sync state, closing the store again so a
-// held Ping does not keep the mailbox open for its whole heartbeat.
-func (s *Server) pingDevice(sess *session) (*deviceState, error) {
+// readPingBody reads a Ping request. An empty body is a legal Ping that reuses
+// the cached parameters (MS-ASCMD 3.1.5.8), so it reads as a Ping with no
+// children.
+func readPingBody(r *http.Request) (*wbxml.Node, error) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyLimit()))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) == 0 {
+		return wbxml.Elem(wbxml.PGPing), nil
+	}
+	return wbxml.Unmarshal(body)
+}
+
+// pingParams is what a Ping watches: the heartbeat and the folder ids. A zero
+// heartbeat or an empty folder list means the request did not send it.
+type pingParams struct {
+	heartbeat time.Duration
+	folders   []string
+}
+
+// pingDevice reads the calling device's sync state and resolves the parameters
+// the Ping runs with. MS-ASCMD 3.1.5.8: the server MUST cache the heartbeat and
+// the folders, and use them when a later Ping omits either. A parameter neither
+// sent nor cached is Status 3; a folder the device has not synced is Status 7,
+// because its snapshot is the change baseline. Only parameters that pass both
+// checks are cached, so the stored list holds synced collections only. The store
+// is closed again so a held Ping does not keep the mailbox open.
+func (s *Server) pingDevice(sess *session, sent pingParams) (*deviceState, pingParams, int, error) {
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		return nil, err
+		return nil, pingParams{}, 0, err
 	}
+	defer st.Close()
 	state, err := loadState(st)
-	_ = st.Close()
 	if err != nil {
-		return nil, err
+		return nil, pingParams{}, 0, err
 	}
-	return state.device(sess.req.deviceID), nil
+	dev := state.device(sess.req.deviceID)
+	p := dev.pingParams(sent)
+	if p.heartbeat == 0 || len(p.folders) == 0 {
+		return nil, p, pingStatusNoFolders, nil
+	}
+	for _, id := range p.folders {
+		if dev.Collections[id] == nil {
+			return nil, p, pingStatusFolderSync, nil
+		}
+	}
+	if dev.cachePing(p) {
+		err = saveState(st, state)
+	}
+	return dev, p, 0, err
+}
+
+// pingParams fills what a Ping did not send from the device's cache.
+func (d *deviceState) pingParams(sent pingParams) pingParams {
+	if sent.heartbeat == 0 {
+		sent.heartbeat = time.Duration(d.PingHeartbeat) * time.Second
+	}
+	if len(sent.folders) == 0 {
+		sent.folders = d.PingFolders
+	}
+	return sent
+}
+
+// cachePing records the parameters a Ping runs with, reporting whether they
+// changed and the state needs saving.
+func (d *deviceState) cachePing(p pingParams) bool {
+	secs := int64(p.heartbeat / time.Second)
+	if d.PingHeartbeat == secs && slices.Equal(d.PingFolders, p.folders) {
+		return false
+	}
+	d.PingHeartbeat, d.PingFolders = secs, p.folders
+	return true
 }
 
 // holdPing holds the request open until a watched folder changes (Status 2), the
@@ -183,10 +233,10 @@ func pingFolders(root *wbxml.Node) []string {
 // outside minHeartbeat..maxHeartbeat is Status 5 with the nearest bound
 // (MS-ASCMD 2.2.3.177.11). The range is compared in whole seconds before any
 // Duration is built, so a huge value cannot wrap into the range. An absent
-// element holds for the maximum.
+// element answers 0 and 0: the cached heartbeat applies.
 func parseHeartbeat(el *wbxml.Node) (time.Duration, int) {
 	if el == nil {
-		return maxHeartbeat, 0
+		return 0, 0
 	}
 	n, err := strconv.ParseInt(el.Text, 10, 64)
 	switch {

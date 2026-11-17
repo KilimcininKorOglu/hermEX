@@ -1,6 +1,9 @@
 package activesync
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"testing"
 
@@ -109,6 +112,59 @@ func TestPingRefusesAMalformedHeartbeat(t *testing.T) {
 	for _, hb := range []string{"abc", "1.5", " 30"} {
 		s, _ := status(hb)
 		wantEq(t, "the status for heartbeat "+strconv.Quote(hb), s, "4")
+	}
+}
+
+// postEmptyPing sends a Ping with no body, which MS-ASCMD 3.1.5.8 allows once
+// the device has sent its heartbeat and folder list.
+func postEmptyPing(t *testing.T, ts *httptest.Server) *wbxml.Node {
+	t.Helper()
+	url := ts.URL + "/Microsoft-Server-ActiveSync?Cmd=Ping&User=" + testUser + "&DeviceId=dev1&DeviceType=iPhone"
+	req, err := http.NewRequest("POST", url, nil)
+	mustNoErr(t, "build the request", err)
+	req.SetBasicAuth(testUser, testPass)
+	req.Header.Set("Content-Type", "application/vnd.ms-sync.wbxml")
+	resp, err := http.DefaultClient.Do(req)
+	mustNoErr(t, "send the empty Ping", err)
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("empty Ping status %d: %s", resp.StatusCode, out)
+	}
+	root, err := wbxml.Unmarshal(out)
+	mustNoErr(t, "decode the empty Ping reply", err)
+	return root
+}
+
+// TestPingUsesTheCachedParameters proves MS-ASCMD 3.1.5.8: the server MUST cache
+// the HeartbeatInterval and the Folders of a Ping and use them when a later Ping
+// omits either, and an empty Ping reuses both. A device that never sent them is
+// answered Status 3, "the Ping command request omitted required parameters".
+func TestPingUsesTheCachedParameters(t *testing.T) {
+	ts, dir := seededServer(t)
+	seedInbox(t, dir, 1)
+
+	wantEq(t, "an empty Ping from a new device", postEmptyPing(t, ts).ChildText(wbxml.PGStatus), "3")
+	foldersOnly := wbxml.Elem(wbxml.PGPing, wbxml.Elem(wbxml.PGFolders,
+		wbxml.Elem(wbxml.PGFolder, wbxml.Str(wbxml.PGID, inboxID()), wbxml.Str(wbxml.PGClass, "Email"))))
+	_, root := postCommand(t, ts, "Ping", foldersOnly)
+	wantEq(t, "a Ping with no heartbeat ever sent", root.ChildText(wbxml.PGStatus), "3")
+
+	postCommand(t, ts, "Sync", syncReq("0", ""))
+	postCommand(t, ts, "Sync", syncReq("1", ""))
+	_, root = postCommand(t, ts, "Ping", pingReq("1"))
+	wantEq(t, "the full Ping", root.ChildText(wbxml.PGStatus), "1")
+
+	// Heartbeat only: the cached Inbox is watched, so the expiry is Status 1.
+	_, root = postCommand(t, ts, "Ping", wbxml.Elem(wbxml.PGPing, wbxml.Str(wbxml.PGHeartbeatInt, "1")))
+	wantEq(t, "a Ping with only a heartbeat", root.ChildText(wbxml.PGStatus), "1")
+
+	// Empty: the cached Inbox and heartbeat are used, and new mail is reported.
+	seedInbox(t, dir, 1)
+	root = postEmptyPing(t, ts)
+	wantEq(t, "an empty Ping after new mail", root.ChildText(wbxml.PGStatus), "2")
+	if f := root.Child(wbxml.PGFolders); f == nil || f.ChildText(wbxml.PGFolder) != inboxID() {
+		t.Error("the empty Ping did not report the cached Inbox")
 	}
 }
 
