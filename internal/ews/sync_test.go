@@ -1,8 +1,11 @@
 package ews
 
 import (
+	"io"
+	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -45,6 +48,56 @@ func inboxUIDs(t *testing.T, dir string) (*objectstore.Store, []objectstore.Mess
 		t.Fatalf("list: %v", err)
 	}
 	return st, msgs
+}
+
+// TestConcurrentFolderSyncsKeepTheirState proves SyncFolderItems requests for
+// different folders that run at once each keep their folder's sync state. The
+// mailbox stores every folder's state in one value, so a request that writes
+// back the whole copy it read erases a folder another request saved meanwhile,
+// and that client's next sync is refused as an unknown sync state.
+func TestConcurrentFolderSyncsKeepTheirState(t *testing.T) {
+	ts, dir := seededWithMessage(t, plainMessage)
+	folders := []string{"inbox", "drafts", "sentitems", "deleteditems", "junkemail", "outbox"}
+	var wg sync.WaitGroup
+	errs := make(chan error, len(folders))
+	for _, f := range folders {
+		wg.Add(1)
+		go func(body string) {
+			defer wg.Done()
+			req, err := http.NewRequest(http.MethodPost, ts.URL+"/EWS/Exchange.asmx", strings.NewReader(body))
+			if err != nil {
+				errs <- err
+				return
+			}
+			req.Header.Set("Content-Type", "text/xml; charset=utf-8")
+			req.SetBasicAuth(testUser, testPass)
+			resp, err := http.DefaultClient.Do(req)
+			if err == nil {
+				_, err = io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+			}
+			errs <- err
+		}(syncItemsReq(f, "", 0))
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	state, err := loadState(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Folders) != len(folders) {
+		t.Errorf("stored folder states = %d, want one per synced folder (%d)", len(state.Folders), len(folders))
+	}
 }
 
 // TestSyncFolderItemsPrime confirms an empty SyncState reports every item as a

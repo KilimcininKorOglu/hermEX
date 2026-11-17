@@ -20,6 +20,13 @@ func (s *Store) GetEwsState() (string, error) {
 	return "", nil
 }
 
+// UpdateEwsState applies update to the stored EWS sync-state JSON inside one
+// write transaction, so two clients syncing at once cannot erase each other's
+// state. See updateStoreString.
+func (s *Store) UpdateEwsState(update func(stateJSON string) (string, bool, error)) error {
+	return s.updateStoreString(mapi.PrEwsSyncState, update)
+}
+
 // SetEwsState saves the EWS sync-state JSON as the store-root property,
 // replacing any previous value.
 func (s *Store) SetEwsState(stateJSON string) error {

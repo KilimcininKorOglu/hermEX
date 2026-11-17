@@ -116,9 +116,9 @@ func (s *Server) handleSyncFolderItems(w http.ResponseWriter, inner []byte, sess
 	}
 
 	newToken := nextSyncState(fstate.SyncState)
-	fstate.SyncState = newToken
-	fstate.Items = newSnap
-	if err := saveState(ctx.stateStore, state); err != nil {
+	if err := updateState(ctx.stateStore, func(s *ewsState) {
+		*s.folder(ctx.stateKey) = folderItemState{SyncState: newToken, Items: newSnap}
+	}); err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}

@@ -516,9 +516,9 @@ func (s *Server) handleSyncFolderHierarchy(w http.ResponseWriter, inner []byte, 
 	}
 
 	newToken := nextSyncState(state.HierarchyState)
-	state.HierarchyState = newToken
-	state.HierarchyFolders = cur
-	if err := saveState(st, state); err != nil {
+	if err := updateState(st, func(s *ewsState) {
+		s.HierarchyState, s.HierarchyFolders = newToken, cur
+	}); err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}

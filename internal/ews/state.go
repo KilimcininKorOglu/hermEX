@@ -56,13 +56,23 @@ func loadState(st *objectstore.Store) (*ewsState, error) {
 	return s, nil
 }
 
-// saveState persists the mailbox's EWS state.
-func saveState(st *objectstore.Store, s *ewsState) error {
-	b, err := json.Marshal(s)
-	if err != nil {
-		return err
-	}
-	return st.SetEwsState(string(b))
+// updateState applies change to the mailbox's EWS state as stored at the moment
+// of the write, inside one store transaction. Every client of the mailbox shares
+// the one stored value, so a request must not write back a copy it read earlier:
+// that would erase another request's folder state committed in between. change
+// edits only the fields its request owns and must not use the store.
+func updateState(st *objectstore.Store, change func(*ewsState)) error {
+	return st.UpdateEwsState(func(raw string) (string, bool, error) {
+		s := &ewsState{}
+		if raw != "" {
+			if err := json.Unmarshal([]byte(raw), s); err != nil {
+				return "", false, err
+			}
+		}
+		change(s)
+		b, err := json.Marshal(s)
+		return string(b), err == nil, err
+	})
 }
 
 // nextSyncState returns the successor of an opaque integer sync-state token; an
