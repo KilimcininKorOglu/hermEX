@@ -115,6 +115,36 @@ func TestFolderNamesStayUniqueAmongSiblings(t *testing.T) {
 	}
 }
 
+// TestDeleteFolderTwiceOfOneName proves a folder can still be deleted when
+// Deleted Items already holds a folder of its name: the user deletes "Project X",
+// makes a new "Project X" and deletes that too. Both reach Deleted Items, the
+// second under a name of its own, because sibling folders cannot share a name
+// ([MS-OXCFOLD] 3.2.5.2).
+func TestDeleteFolderTwiceOfOneName(t *testing.T) {
+	do, dir := folderHarness(t)
+	for round := range 2 {
+		if rec := do(http.MethodPost, "/api/v1/folders", `{"name":"Project X"}`); rec.Code != http.StatusOK {
+			t.Fatalf("round %d create = %d: %s", round, rec.Code, rec.Body.String())
+		}
+		if rec := do(http.MethodDelete, "/api/v1/folders/Project%20X", ""); rec.Code != http.StatusOK {
+			t.Fatalf("round %d delete = %d: %s", round, rec.Code, rec.Body.String())
+		}
+	}
+	trash := int64(mapi.PrivateFIDDeletedItems)
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	n, err := st.CountChildFolders(trash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("folders in Deleted Items = %d, want both deleted folders", n)
+	}
+}
+
 // TestDeleteFolderMovesItToTrashFirst pins the two-stage delete: the first
 // delete moves the folder under Deleted Items, so the user can still get it back.
 func TestDeleteFolderMovesItToTrashFirst(t *testing.T) {

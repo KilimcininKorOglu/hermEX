@@ -2,6 +2,7 @@ package webmail2api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -129,7 +130,7 @@ func (s *Server) handleDeleteFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !inTrash {
-		if err := st.RenameFolder(id, &trash, name); err != nil {
+		if err := moveToTrash(st, id, name); err != nil {
 			logError("delete-folder.move", err, logging.Fields{"folder": name})
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not delete folder"})
 			return
@@ -200,12 +201,55 @@ func folderByName(st *objectstore.Store, name string) (int64, bool) {
 	if err != nil {
 		return 0, false
 	}
+	parent := make(map[int64]int64, len(folders))
 	for _, f := range folders {
-		if f.DisplayName == name {
-			return f.ID, true
+		if f.ParentID != nil {
+			parent[f.ID] = *f.ParentID
 		}
 	}
-	return 0, false
+	// A name is not unique across the tree: a deleted folder keeps its name
+	// under Deleted Items while a new one of that name lives elsewhere. The live
+	// folder is the one the user means, so it wins over a deleted one.
+	var deleted int64
+	for _, f := range folders {
+		if f.DisplayName != name {
+			continue
+		}
+		if !underTrash(parent, f.ID) {
+			return f.ID, true
+		}
+		if deleted == 0 {
+			deleted = f.ID
+		}
+	}
+	return deleted, deleted != 0
+}
+
+// moveToTrash moves a folder under Deleted Items. Deleted Items may already hold
+// a folder of its name, and siblings cannot share one ([MS-OXCFOLD] 3.2.5.2), so
+// the folder then takes the first free "name (n)".
+func moveToTrash(st *objectstore.Store, id int64, name string) error {
+	trash := int64(mapi.PrivateFIDDeletedItems)
+	err := st.RenameFolder(id, &trash, name)
+	for n := 2; errors.Is(err, objectstore.ErrFolderExists) && n <= maxTrashNameTries; n++ {
+		err = st.RenameFolder(id, &trash, fmt.Sprintf("%s (%d)", name, n))
+	}
+	return err
+}
+
+// maxTrashNameTries bounds the "name (n)" search of moveToTrash.
+const maxTrashNameTries = 1000
+
+// underTrash reports whether a folder sits below Deleted Items in the parent map
+// built from a folder listing.
+func underTrash(parent map[int64]int64, fid int64) bool {
+	trash := int64(mapi.PrivateFIDDeletedItems)
+	for p, ok := parent[fid]; ok; p, ok = parent[p] {
+		if p == trash {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveFolder maps a folder identifier from the SPA to a private folder id:
