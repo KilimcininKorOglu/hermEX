@@ -6,10 +6,14 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
+	"hermex/internal/directory"
 	"hermex/internal/health"
+	"hermex/internal/tlscert"
+	"hermex/internal/tlstest"
 )
 
 // stubPinger stands in for the directory connection.
@@ -78,5 +82,44 @@ func TestAdminReportsHealthyWhenTheDirectoryAnswers(t *testing.T) {
 func TestAdminHealthOmitsTheCertificateWithoutTLS(t *testing.T) {
 	if checks := adminHealthChecks(stubPinger{}, nil); len(checks) != 1 {
 		t.Errorf("checks without TLS = %d, want only the directory probe", len(checks))
+	}
+}
+
+// certStore serves one stored certificate to a tlscert.Provider.
+type certStore struct{ cert directory.TLSCertData }
+
+func (s certStore) LoadTLSCerts() ([]directory.TLSCertData, error) {
+	return []directory.TLSCertData{s.cert}, nil
+}
+func (s certStore) TLSCertVersion() (int64, int64, error) { return 1, 1, nil }
+
+// TestAdminHealthReportsTheCertificateWithTLS is the other half of the TLS
+// contract every daemon's /healthz shares: once the panel serves a certificate,
+// its remaining validity is a reported check beside the directory probe, so an
+// expiring certificate shows on the Live monitor before clients start failing.
+func TestAdminHealthReportsTheCertificateWithTLS(t *testing.T) {
+	certPath, keyPath, err := tlstest.SelfSigned(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	certPEM, err := os.ReadFile(certPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPEM, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := tlscert.New(nil, certStore{directory.TLSCertData{CertPEM: string(certPEM), KeyPEM: string(keyPEM)}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !provider.TLSEnabled() {
+		t.Fatal("the provider holds a certificate but reports TLS off")
+	}
+
+	checks := adminHealthChecks(stubPinger{}, provider)
+	if len(checks) != 2 || checks[0].Name != "directory" || checks[1].Name != tlscert.ExpiryCheck(provider).Name {
+		t.Errorf("checks with TLS = %+v, want the directory probe and the certificate check", checks)
 	}
 }
