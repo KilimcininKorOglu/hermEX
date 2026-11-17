@@ -73,7 +73,7 @@ func (s *Server) handleFolderCreate(w http.ResponseWriter, r *http.Request, sess
 // for, returning the new folder's id and the EAS status to report.
 func createFolder(st *objectstore.Store, dev *deviceState, root *wbxml.Node) (int64, int) {
 	name := root.ChildText(wbxml.FHDisplayName)
-	if name == "" {
+	if name == "" || !userFolderType(root.Child(wbxml.FHType)) {
 		return 0, fhStatusBadRequest
 	}
 	if syncKey := root.ChildText(wbxml.FHSyncKey); syncKey == "" || syncKey != dev.HierarchyKey {
@@ -95,6 +95,19 @@ func createFolder(st *objectstore.Store, dev *deviceState, root *wbxml.Node) (in
 		return 0, fhStatusServerError
 	}
 	return fid, fhStatusOK
+}
+
+// userFolderType reports whether a FolderCreate Type names a folder a client may
+// create: 1 (generic) or 12-17 (user-created mail, calendar, contacts, tasks,
+// journal, notes), per MS-ASCMD Type (FolderCreate). Type is required, 2-11 and
+// 19 are reserved for default folders, and anything else is outside the table;
+// all of those are a malformed request (Status 10).
+func userFolderType(el *wbxml.Node) bool {
+	if el == nil {
+		return false
+	}
+	n, err := strconv.Atoi(el.Text)
+	return err == nil && (n == 1 || (n >= 12 && n <= 17))
 }
 
 // resolveFolderParent maps an EAS ParentId to a store parent: "0" (or empty) is

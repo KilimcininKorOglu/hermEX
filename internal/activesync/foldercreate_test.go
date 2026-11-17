@@ -125,6 +125,62 @@ func TestFolderCreateDuplicate(t *testing.T) {
 	}
 }
 
+// TestFolderCreateRefusesAMalformedRequest proves the MS-ASCMD FolderCreate
+// rules for the device's values: Status 10 ("malformed request ... or the client
+// attempted to create a default folder") for a missing or empty DisplayName, a
+// missing Type, a Type reserved for default folders (2-11 and 19, Type
+// (FolderCreate)) and a Type outside the table; Status 5 for a ParentId that
+// names no folder. Nothing is created in any of these cases.
+func TestFolderCreateRefusesAMalformedRequest(t *testing.T) {
+	ts, dir := seededServer(t)
+	key := primeHierarchy(t, ts)
+	req := func(parent, name, typ string, withName, withType bool) *wbxml.Node {
+		kids := []*wbxml.Node{wbxml.Str(wbxml.FHSyncKey, key), wbxml.Str(wbxml.FHParentID, parent)}
+		if withName {
+			kids = append(kids, wbxml.Str(wbxml.FHDisplayName, name))
+		}
+		if withType {
+			kids = append(kids, wbxml.Str(wbxml.FHType, typ))
+		}
+		return wbxml.Elem(wbxml.FHFolderCreate, kids...)
+	}
+	cases := []struct {
+		name string
+		body *wbxml.Node
+		want string
+	}{
+		{"no DisplayName", req("0", "", "12", false, true), "10"},
+		{"an empty DisplayName", req("0", "", "12", true, true), "10"},
+		{"no Type", req("0", "Bad1", "", true, false), "10"},
+		{"Type 2 (Inbox)", req("0", "Bad2", "2", true, true), "10"},
+		{"Type 11", req("0", "Bad3", "11", true, true), "10"},
+		{"Type 19", req("0", "Bad4", "19", true, true), "10"},
+		{"Type 0", req("0", "Bad5", "0", true, true), "10"},
+		{"Type 18", req("0", "Bad6", "18", true, true), "10"},
+		{"Type not a number", req("0", "Bad7", "mail", true, true), "10"},
+		{"a ParentId that is not a number", req("abc", "Bad8", "12", true, true), "5"},
+	}
+	for _, c := range cases {
+		key = primeHierarchy(t, ts)
+		c.body.Children[0].Text = key
+		_, root := postCommand(t, ts, "FolderCreate", c.body)
+		wantEq(t, "the Status for "+c.name, root.ChildText(wbxml.FHStatus), c.want)
+	}
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open the store", err)
+	defer st.Close()
+	for i := 1; i <= 8; i++ {
+		if _, exists, _ := st.FolderByName(nil, "Bad"+strconv.Itoa(i)); exists {
+			t.Errorf("refused folder Bad%d was created", i)
+		}
+	}
+	for _, typ := range []string{"1", "12"} {
+		key = primeHierarchy(t, ts)
+		_, root := postCommand(t, ts, "FolderCreate", req("0", "Good"+typ, typ, true, true))
+		wantEq(t, "the Status for Type "+typ, root.ChildText(wbxml.FHStatus), "1")
+	}
+}
+
 // TestFolderCreateBadParent proves a FolderCreate under a non-existent parent
 // reports Status 5.
 func TestFolderCreateBadParent(t *testing.T) {
