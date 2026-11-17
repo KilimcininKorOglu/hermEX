@@ -375,6 +375,30 @@ func TestCalFreeBusy(t *testing.T) {
 	}
 }
 
+// TestCalFreeBusyRequiresATimeRange proves RFC 4791 7.10 and 9.9: the request
+// "MUST contain exactly one CALDAV:time-range", which carries at least one of
+// start and end, with end after start when both are set. Anything else is a
+// bad request, not a free/busy answer for all time.
+func TestCalFreeBusyRequiresATimeRange(t *testing.T) {
+	ts := davServerCal(t)
+	for _, tr := range []string{
+		``,
+		`<c:time-range/>`,
+		`<c:time-range start="20260701T000000Z" end="20260601T000000Z"/>`,
+		`<c:time-range start="not-a-time"/>`,
+	} {
+		body := `<c:free-busy-query xmlns:c="urn:ietf:params:xml:ns:caldav">` + tr + `</c:free-busy-query>`
+		resp, out := doFull(t, ts, "REPORT", calURL(""), body, map[string]string{"Depth": "1"})
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("time-range %q: status %d, want 400\n%s", tr, resp.StatusCode, out)
+		}
+	}
+	body := `<c:free-busy-query xmlns:c="urn:ietf:params:xml:ns:caldav"><c:time-range start="20260601T000000Z"/></c:free-busy-query>`
+	if resp, out := doFull(t, ts, "REPORT", calURL(""), body, map[string]string{"Depth": "1"}); resp.StatusCode != http.StatusOK {
+		t.Errorf("open-ended time-range: status %d, want 200\n%s", resp.StatusCode, out)
+	}
+}
+
 // TestMkCalendarCollection confirms MKCALENDAR creates a usable second calendar,
 // rejects re-creation, isolates its objects from the default calendar, and that the
 // home set then lists both (RFC 4791 §5.3.1).

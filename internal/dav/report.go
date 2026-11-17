@@ -361,11 +361,10 @@ func appendSyncTail(ms *multistatus, st *objectstore.Store, fid int64, sinceToke
 // the busy (non-transparent) VEVENTs overlapping the requested range into a
 // VFREEBUSY component, returned as text/calendar.
 func (s *Server) handleFreeBusy(w http.ResponseWriter, st *objectstore.Store, fid int64, tr *timeRange) {
-	var rangeStart, rangeEnd time.Time
-	var okS, okE bool
-	if tr != nil {
-		rangeStart, okS = parseFilterTime(tr.Start)
-		rangeEnd, okE = parseFilterTime(tr.End)
+	rangeStart, rangeEnd, okS, okE, valid := freeBusyRange(tr)
+	if !valid {
+		http.Error(w, "free-busy-query needs a valid time-range", http.StatusBadRequest)
+		return
 	}
 	periods, err := busyPeriods(st, fid, rangeStart, rangeEnd, okS, okE)
 	if err != nil {
@@ -389,6 +388,26 @@ func (s *Server) handleFreeBusy(w http.ResponseWriter, st *objectstore.Store, fi
 	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(b.String()))
+}
+
+// freeBusyRange reads a free-busy-query's time-range. RFC 4791 7.10 requires
+// exactly one time-range, and 9.9 requires at least one of start and end, each a
+// UTC date-time, with end after start when both are set; valid is false for any
+// request that breaks those rules. An absent bound leaves that side open.
+func freeBusyRange(tr *timeRange) (start, end time.Time, okS, okE, valid bool) {
+	if tr == nil {
+		return start, end, false, false, false
+	}
+	start, okS = parseFilterTime(tr.Start)
+	end, okE = parseFilterTime(tr.End)
+	parsed := (tr.Start == "" || okS) && (tr.End == "" || okE)
+	return start, end, okS, okE, parsed && (okS || okE) && rangeOrdered(start, end, okS, okE)
+}
+
+// rangeOrdered reports whether a time-range's end is after its start, which RFC
+// 4791 9.9 requires only when both are set.
+func rangeOrdered(start, end time.Time, okS, okE bool) bool {
+	return !okS || !okE || end.After(start)
 }
 
 // addressData exports a stored contact to its vCard text.
