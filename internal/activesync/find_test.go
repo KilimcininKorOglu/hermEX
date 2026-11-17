@@ -96,6 +96,25 @@ func TestFindPaging(t *testing.T) {
 	}
 }
 
+// TestFindRefusesAnInvalidRange proves the MS-ASCMD Range (Find) grammar: m-n
+// with 0 <= m <= n <= 999. A Range outside it fails validation, Status 2, rather
+// than being served: 0-1000 would otherwise render every match in the mailbox
+// in one reply, and a malformed one was silently replaced by the default.
+func TestFindRefusesAnInvalidRange(t *testing.T) {
+	ts, dir := seededServer(t)
+	seedSearchMessage(t, dir, "Quarterly revenue report", "the body text")
+	for _, rng := range []string{"0-1000", "0-99999999999999999999", "5-2", "-1-3", "abc", "0-", "0-x"} {
+		_, root := postCommand(t, ts, "Find", findReq("quarterly", rng))
+		if s := root.ChildText(wbxml.FNDStatus); s != "2" {
+			t.Errorf("Range %q: Status = %q, want 2", rng, s)
+		}
+	}
+	_, root := postCommand(t, ts, "Find", findReq("quarterly", "0-999"))
+	if s := root.ChildText(wbxml.FNDStatus); s != "1" {
+		t.Errorf("Range 0-999: Status = %q, want 1", s)
+	}
+}
+
 // TestFindGalRejected proves a GalSearchCriterion is reported invalid-request: Find
 // over the GAL is not implemented (matching the reference), so the device falls back
 // to the Search command for address-book lookups.

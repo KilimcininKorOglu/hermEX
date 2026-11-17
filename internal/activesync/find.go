@@ -48,9 +48,10 @@ func (s *Server) handleFind(w http.ResponseWriter, r *http.Request, sess *sessio
 	freetext := strings.ToLower(strings.TrimSpace(descendantText(query, wbxml.FNDFreeText)))
 	folderFilter := descendantText(query, wbxml.ASCollectionID)
 
-	lo, hi := 0, mailboxSearchHiDefault
-	if opts := mbx.Child(wbxml.FNDOptions); opts != nil {
-		lo, hi = parseSearchRange(opts.ChildText(wbxml.FNDRange), lo, hi)
+	lo, hi, ok := findRange(mbx.Child(wbxml.FNDOptions))
+	if !ok {
+		writeWBXML(w, findStatus(findStatusInvalidRequest))
+		return
 	}
 
 	if freetext == "" {
@@ -89,6 +90,26 @@ func (s *Server) handleFind(w http.ResponseWriter, r *http.Request, sess *sessio
 		rangeHi = lo + len(page) - 1
 	}
 	writeWBXML(w, findReply(results, lo, rangeHi, total))
+}
+
+// findRangeMax is the highest index a Find Range may name (MS-ASCMD Range (Find):
+// 0 <= m <= n <= 999).
+const findRangeMax = 999
+
+// findRange reads the Options>Range of a mailbox Find. No Range is the default
+// 0-99 page. A Range must be m-n with 0 <= m <= n <= findRangeMax; ok is false
+// for any other value, which the command answers as an invalid request.
+func findRange(opts *wbxml.Node) (lo, hi int, ok bool) {
+	if opts == nil || opts.Child(wbxml.FNDRange) == nil {
+		return 0, mailboxSearchHiDefault, true
+	}
+	m, n, found := strings.Cut(opts.ChildText(wbxml.FNDRange), "-")
+	lo, errLo := strconv.Atoi(m)
+	hi, errHi := strconv.Atoi(n)
+	if !found || errLo != nil || errHi != nil || lo < 0 || hi < lo || hi > findRangeMax {
+		return 0, 0, false
+	}
+	return lo, hi, true
 }
 
 // findStatus builds a bare Find reply carrying only the overall status, for a
