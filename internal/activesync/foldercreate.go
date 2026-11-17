@@ -57,12 +57,16 @@ func (s *Server) handleFolderCreate(w http.ResponseWriter, r *http.Request, sess
 		return
 	}
 
-	dev.HierarchyKey = nextSyncKey(dev.HierarchyKey)
-	if err := saveState(st, state); err != nil {
+	key, ok, err := advanceHierarchy(st, sess.req.deviceID, dev.HierarchyKey)
+	if err != nil {
 		s.failRequest(w, r, "folder.create.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
-	writeWBXML(w, folderCreateResponse(dev.HierarchyKey, strconv.FormatInt(fid, 10)))
+	if !ok {
+		writeWBXML(w, folderCreateStatus(fhStatusBadSyncKey))
+		return
+	}
+	writeWBXML(w, folderCreateResponse(key, strconv.FormatInt(fid, 10)))
 }
 
 // createFolder validates a FolderCreate request and creates the folder it asks

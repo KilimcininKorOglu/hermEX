@@ -184,29 +184,25 @@ func advanceProvisionWipe(st *objectstore.Store, deviceID string, acked bool) (i
 // and collections on the next sync, while leaving the device recorded (it stays
 // in the device list with its metadata).
 func ResyncDevice(st *objectstore.Store, deviceID string) error {
-	state, err := loadState(st)
-	if err != nil {
-		return err
-	}
-	if _, ok := state.Devices[deviceID]; !ok {
-		return nil
-	}
-	delete(state.Devices, deviceID)
-	return saveState(st, state)
+	return dropDeviceState(st, deviceID)
+}
+
+// dropDeviceState removes one device's sync state, leaving the other devices'.
+func dropDeviceState(st *objectstore.Store, deviceID string) error {
+	return updateState(st, func(s *asState) bool {
+		if _, ok := s.Devices[deviceID]; !ok {
+			return false
+		}
+		delete(s.Devices, deviceID)
+		return true
+	})
 }
 
 // DeleteDevice removes a device entirely, both its sync state and its recorded
 // metadata, so it disappears from the device list until it next connects.
 func DeleteDevice(st *objectstore.Store, deviceID string) error {
-	state, err := loadState(st)
-	if err != nil {
+	if err := dropDeviceState(st, deviceID); err != nil {
 		return err
-	}
-	if _, ok := state.Devices[deviceID]; ok {
-		delete(state.Devices, deviceID)
-		if err := saveState(st, state); err != nil {
-			return err
-		}
 	}
 	meta, err := loadDevices(st)
 	if err != nil {

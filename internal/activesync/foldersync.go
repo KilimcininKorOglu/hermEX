@@ -68,12 +68,15 @@ func (s *Server) handleFolderSync(w http.ResponseWriter, r *http.Request, sess *
 			s.failRequest(w, r, "foldersync.fail", err, http.StatusInternalServerError, "an internal error occurred")
 			return
 		}
-		dev.HierarchyKey = nextSyncKey(syncKey)
-		if err := saveState(st, state); err != nil {
+		key := nextSyncKey(syncKey)
+		if err := updateState(st, func(s *asState) bool {
+			s.device(sess.req.deviceID).HierarchyKey = key
+			return true
+		}); err != nil {
 			s.failRequest(w, r, "foldersync.fail", err, http.StatusInternalServerError, "an internal error occurred")
 			return
 		}
-		writeWBXML(w, folderSyncResponse(dev.HierarchyKey, folders))
+		writeWBXML(w, folderSyncResponse(key, folders))
 	case syncKey == dev.HierarchyKey && syncKey != "":
 		writeWBXML(w, folderSyncResponse(dev.HierarchyKey, nil))
 	default:

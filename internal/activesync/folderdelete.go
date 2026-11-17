@@ -41,12 +41,16 @@ func (s *Server) handleFolderDelete(w http.ResponseWriter, r *http.Request, sess
 		return
 	}
 
-	dev.HierarchyKey = nextSyncKey(dev.HierarchyKey)
-	if err := saveState(st, state); err != nil {
+	key, ok, err := advanceHierarchy(st, sess.req.deviceID, dev.HierarchyKey)
+	if err != nil {
 		s.failRequest(w, r, "folder.delete.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
-	writeWBXML(w, folderDeleteResponse(dev.HierarchyKey))
+	if !ok {
+		writeWBXML(w, folderDeleteStatus(fhStatusBadSyncKey))
+		return
+	}
+	writeWBXML(w, folderDeleteResponse(key))
 }
 
 // deleteFolder validates a FolderDelete request and removes the folder it names,

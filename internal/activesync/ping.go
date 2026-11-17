@@ -115,9 +115,7 @@ func (s *Server) pingDevice(sess *session, sent pingParams) (*deviceState, pingP
 			return nil, p, pingStatusFolderSync, nil
 		}
 	}
-	if dev.cachePing(p) {
-		err = saveState(st, state)
-	}
+	err = updateState(st, func(s *asState) bool { return s.device(sess.req.deviceID).cachePing(p) })
 	return dev, p, 0, err
 }
 

@@ -104,6 +104,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, sess *sessio
 		return
 	}
 	dev := state.device(sess.req.deviceID)
+	before := collectionKeys(dev, collections)
 
 	if !s.waitForSyncChanges(w, r, sess, st, dev, collections, heartbeat) {
 		return
@@ -114,7 +115,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, sess *sessio
 		s.failRequest(w, r, "sync.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
-	if err := saveState(st, state); err != nil {
+	if err := commitCollections(st, sess.req.deviceID, dev, before); err != nil {
 		s.failRequest(w, r, "sync.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}

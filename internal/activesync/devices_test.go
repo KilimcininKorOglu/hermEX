@@ -161,12 +161,12 @@ func TestDeviceMutations(t *testing.T) {
 // seedSyncedCollections gives a device a sync state over the named collections.
 func seedSyncedCollections(t *testing.T, st *objectstore.Store, deviceID string, collIDs ...string) {
 	t.Helper()
-	state, err := loadState(st)
-	mustNoErr(t, "load the sync state", err)
-	for _, id := range collIDs {
-		state.device(deviceID).collection(id).SyncKey = "1"
-	}
-	mustNoErr(t, "save the sync state", saveState(st, state))
+	mustNoErr(t, "save the sync state", updateState(st, func(s *asState) bool {
+		for _, id := range collIDs {
+			s.device(deviceID).collection(id).SyncKey = "1"
+		}
+		return true
+	}))
 }
 
 // TestRecordDeviceContactBlank proves a request with no device id records nothing.

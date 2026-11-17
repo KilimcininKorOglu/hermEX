@@ -42,12 +42,16 @@ func (s *Server) handleFolderUpdate(w http.ResponseWriter, r *http.Request, sess
 		return
 	}
 
-	dev.HierarchyKey = nextSyncKey(dev.HierarchyKey)
-	if err := saveState(st, state); err != nil {
+	key, ok, err := advanceHierarchy(st, sess.req.deviceID, dev.HierarchyKey)
+	if err != nil {
 		s.failRequest(w, r, "folderupdate.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
-	writeWBXML(w, folderUpdateResponse(dev.HierarchyKey))
+	if !ok {
+		writeWBXML(w, folderUpdateStatus(fhStatusBadSyncKey))
+		return
+	}
+	writeWBXML(w, folderUpdateResponse(key))
 }
 
 // updateFolder validates a FolderUpdate request and performs the rename or
