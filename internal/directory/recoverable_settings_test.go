@@ -1,6 +1,7 @@
 package directory
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -68,6 +69,33 @@ func TestSweepRecoverableItemsHonorsRetention(t *testing.T) {
 	n, err = d.SweepRecoverableItems(time.Now())
 	mustNoErr(t, "sweep", err)
 	wantEq(t, "items swept with a 10-year window", n, 0)
+}
+
+// TestMaintenanceReadsNeverCreateAMailbox proves the retention sweep and the
+// public-delegate read leave a missing mailbox missing. A mailbox is made when
+// its account is created; one that is gone (a deleted directory, an unmounted
+// volume) must not be replaced by an empty mailbox at that path.
+func TestMaintenanceReadsNeverCreateAMailbox(t *testing.T) {
+	d := setupRecoverableSettings(t)
+	root := t.TempDir()
+	_, err := d.CreateDomain("hermex.test", filepath.Join(root, "domains", "hermex.test"))
+	mustNoErr(t, "create domain", err)
+	maildir := filepath.Join(root, "alice")
+	_, err = d.CreateUser("alice@hermex.test", "pw", maildir)
+	mustNoErr(t, "create user", err)
+	mustNoErr(t, "remove the mailbox", os.RemoveAll(maildir))
+	mustNoErr(t, "set a window", d.SetRecoverableSettings(RecoverableSettings{RetentionDays: 14}))
+
+	_, err = d.SweepRecoverableItems(time.Now())
+	mustNoErr(t, "sweep", err)
+	list, err := d.Delegates("alice@hermex.test")
+	mustNoErr(t, "delegates", err)
+	if len(list) != 0 {
+		t.Errorf("delegates of a missing mailbox = %v, want none", list)
+	}
+	if _, err := os.Stat(maildir); !os.IsNotExist(err) {
+		t.Errorf("a maintenance read created the missing mailbox: %v", err)
+	}
 }
 
 // seedAgedDumpster soft-deletes two messages and backdates one of them by 40

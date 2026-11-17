@@ -1,6 +1,10 @@
 package directory
 
-import "hermex/internal/objectstore"
+import (
+	"errors"
+
+	"hermex/internal/objectstore"
+)
 
 // Delegates returns the public-delegate list stored in the mailbox of userAddr,
 // the addresses permitted to act for it, for the address book's public-delegates
@@ -12,7 +16,11 @@ func (d *SQLDirectory) Delegates(userAddr string) ([]string, error) {
 	if !ok {
 		return nil, nil
 	}
-	st, err := objectstore.Open(maildir)
+	// A missing mailbox has no delegates, and this read never creates one.
+	st, err := objectstore.OpenExisting(maildir)
+	if errors.Is(err, objectstore.ErrNotProvisioned) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}

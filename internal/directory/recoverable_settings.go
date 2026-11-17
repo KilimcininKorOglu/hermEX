@@ -161,17 +161,35 @@ func (d *SQLDirectory) SweepRecoverableItems(now time.Time) (int, error) {
 		return 0, err
 	}
 	purged := 0
+	var errs []error
 	for _, md := range maildirs {
-		st, err := objectstore.Open(md)
+		n, err := purgeMailbox(md, cutoff)
 		if err != nil {
-			continue
-		}
-		n, err := st.PurgeSoftDeletedOlderThan(cutoff)
-		_ = st.Close()
-		if err != nil {
-			continue
+			errs = append(errs, err)
 		}
 		purged += n
 	}
-	return purged, nil
+	return purged, errors.Join(errs...)
+}
+
+// purgeMailbox purges one mailbox's soft-deleted items older than cutoff. A
+// mailbox that does not exist has nothing to purge and is never created here;
+// any other failure is returned so one bad mailbox does not stop the sweep but is
+// still reported.
+func purgeMailbox(md string, cutoff time.Time) (int, error) {
+	st, err := objectstore.OpenExisting(md)
+	if errors.Is(err, objectstore.ErrNotProvisioned) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("directory: open %s: %w", md, err)
+	}
+	n, err := st.PurgeSoftDeletedOlderThan(cutoff)
+	if cerr := st.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return n, fmt.Errorf("directory: purge %s: %w", md, err)
+	}
+	return n, nil
 }
