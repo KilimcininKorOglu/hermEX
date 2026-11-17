@@ -140,7 +140,7 @@ func (s *Server) handleMailSend(w http.ResponseWriter, r *http.Request) {
 // is already delivered, so neither step fails the request; a failure is recorded
 // instead, because a retry would send it twice.
 func afterSend(c sessionClaims, raw []byte, draftID, kind string, keepOwnCopy bool) {
-	st, err := objectstore.Open(c.Mailbox)
+	st, err := objectstore.OpenExisting(c.Mailbox)
 	if err != nil {
 		logError("file-sent-copy", err, logging.Fields{"user": c.Email, "kind": kind})
 		return
@@ -203,7 +203,7 @@ func (s *Server) signOutgoing(w http.ResponseWriter, c sessionClaims, raw []byte
 // scheduleSend files a built message in the Outbox with a deferred send time;
 // the release worker delivers it when due. It answers the client itself.
 func (s *Server) scheduleSend(w http.ResponseWriter, c sessionClaims, raw []byte, sendAt, draftID string) {
-	st, err := objectstore.Open(c.Mailbox)
+	st, err := objectstore.OpenExisting(c.Mailbox)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return
@@ -372,7 +372,7 @@ func (s *Server) handleMailDraft(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not build the draft"})
 		return
 	}
-	st, err := objectstore.Open(c.Mailbox)
+	st, err := objectstore.OpenExisting(c.Mailbox)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return

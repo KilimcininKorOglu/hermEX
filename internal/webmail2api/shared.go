@@ -33,7 +33,7 @@ func (s *Server) openMailbox(w http.ResponseWriter, r *http.Request) (*mailboxCt
 	}
 	want := strings.TrimSpace(r.URL.Query().Get("owner"))
 	if want == "" || strings.EqualFold(want, c.Email) {
-		st, err := objectstore.Open(c.Mailbox)
+		st, err := objectstore.OpenExisting(c.Mailbox)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 			return nil, false

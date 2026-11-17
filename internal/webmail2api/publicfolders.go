@@ -204,7 +204,7 @@ func (s *Server) publicTarget(email string, fid int64) (*objectstore.Store, stri
 // unread), never an error to the client, so public-folder browsing degrades
 // gracefully when per-user read state is unavailable.
 func (s *Server) publicReadSet(mailbox, owner string) map[int64]bool {
-	own, err := objectstore.Open(mailbox)
+	own, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
 		return map[int64]bool{}
 	}
@@ -220,7 +220,7 @@ func (s *Server) publicReadSet(mailbox, owner string) map[int64]bool {
 // read a public message. Best-effort by design: public-folder reading must
 // succeed even when the per-user read state cannot be written.
 func (s *Server) markPublicRead(mailbox, owner string, messageID int64) {
-	own, err := objectstore.Open(mailbox)
+	own, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
 		return
 	}

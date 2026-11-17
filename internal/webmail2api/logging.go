@@ -61,7 +61,7 @@ func (s *Server) fileCallerSentCopy(mb *mailboxCtx, c sessionClaims, raw []byte,
 		fileSentCopy(mb.st, raw, c.Email, kind)
 		return
 	}
-	own, err := objectstore.Open(c.Mailbox)
+	own, err := objectstore.OpenExisting(c.Mailbox)
 	if err != nil {
 		logError("file-sent-copy", err, logging.Fields{"user": c.Email, "kind": kind})
 		return

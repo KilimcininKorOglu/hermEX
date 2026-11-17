@@ -49,7 +49,7 @@ func (s *Server) aclStore(w http.ResponseWriter, r *http.Request, c sessionClaim
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return nil, false
 	}
-	st, err := objectstore.Open(c.Mailbox)
+	st, err := objectstore.OpenExisting(c.Mailbox)
 	if err != nil {
 		logError("acl-open-store", err, logging.Fields{"user": c.Email})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})

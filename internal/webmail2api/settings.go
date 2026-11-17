@@ -97,7 +97,7 @@ func (s *Server) withSettings(w http.ResponseWriter, r *http.Request, fn func(st
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	st, err := objectstore.Open(c.Mailbox)
+	st, err := objectstore.OpenExisting(c.Mailbox)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return
@@ -325,7 +325,7 @@ func (s *Server) handlePutAppearanceSettings(w http.ResponseWriter, r *http.Requ
 // leaves the blob alone when it could not be read, because writing back what was
 // assembled from an unreadable one replaces the user's settings.
 func setOnboardedFlag(mailbox string, done bool) {
-	st, err := objectstore.Open(mailbox)
+	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
 		return
 	}
@@ -833,7 +833,7 @@ func (s *Server) handleGetProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	// Storage usage + onboarding flag from the store; quota limits are best-effort
 	// (0 = unlimited), and onboarded defaults false for a fresh account.
-	if st, err := objectstore.Open(c.Mailbox); err == nil {
+	if st, err := objectstore.OpenExisting(c.Mailbox); err == nil {
 		if used, err := st.MailboxSize(); err == nil {
 			prof["quota_used"] = used
 		}
@@ -973,7 +973,7 @@ func (s *Server) handleGetSharedMailboxes(w http.ResponseWriter, r *http.Request
 	if lister, ok := s.auth.(directory.SharedMailboxLister); ok {
 		if list, err := lister.SharedMailboxes(c.Email); err == nil {
 			for _, b := range list {
-				st, err := objectstore.Open(b.StorePath)
+				st, err := objectstore.OpenExisting(b.StorePath)
 				if err != nil {
 					continue
 				}
@@ -1018,7 +1018,7 @@ func (s *Server) handleGetSharedAsOwner(w http.ResponseWriter, r *http.Request) 
 	if lister, ok := s.auth.(directory.SharedMailboxLister); ok {
 		if list, err := lister.SharedMailboxes(c.Email); err == nil {
 			for _, b := range list {
-				st, err := objectstore.Open(b.StorePath)
+				st, err := objectstore.OpenExisting(b.StorePath)
 				if err != nil {
 					continue
 				}

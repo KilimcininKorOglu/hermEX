@@ -410,7 +410,7 @@ func (s *Server) openStore(w http.ResponseWriter, r *http.Request) (*objectstore
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return nil, sessionClaims{}, false
 	}
-	st, err := objectstore.Open(c.Mailbox)
+	st, err := objectstore.OpenExisting(c.Mailbox)
 	if err != nil {
 		logError("open-store", err, logging.Fields{"user": c.Email})
 		// The client is told only that the mailbox is unavailable, so this line is
@@ -594,7 +594,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hasAvatar, onboarded := false, false
-	if st, err := objectstore.Open(c.Mailbox); err == nil {
+	if st, err := objectstore.OpenExisting(c.Mailbox); err == nil {
 		if photo, _ := st.UserPhoto(); photo != nil {
 			hasAvatar = true
 		}

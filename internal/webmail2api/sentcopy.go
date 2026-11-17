@@ -23,7 +23,7 @@ func (s *Server) handleGetSentCopy(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	st, err := objectstore.Open(c.Mailbox)
+	st, err := objectstore.OpenExisting(c.Mailbox)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return
@@ -50,7 +50,7 @@ func (s *Server) handlePutSentCopy(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	st, err := objectstore.Open(c.Mailbox)
+	st, err := objectstore.OpenExisting(c.Mailbox)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return

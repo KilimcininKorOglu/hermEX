@@ -21,7 +21,7 @@ func (s *Server) handleGetAvatar(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no avatar", http.StatusNotFound)
 		return
 	}
-	st, err := objectstore.Open(c.Mailbox)
+	st, err := objectstore.OpenExisting(c.Mailbox)
 	if err != nil {
 		http.Error(w, "no avatar", http.StatusNotFound)
 		return
@@ -67,7 +67,7 @@ func (s *Server) handlePutAvatar(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "image too large (max 1 MB)"})
 		return
 	}
-	st, err := objectstore.Open(c.Mailbox)
+	st, err := objectstore.OpenExisting(c.Mailbox)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return
@@ -87,7 +87,7 @@ func (s *Server) handleDeleteAvatar(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	st, err := objectstore.Open(c.Mailbox)
+	st, err := objectstore.OpenExisting(c.Mailbox)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return

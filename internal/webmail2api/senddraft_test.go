@@ -18,7 +18,7 @@ import (
 // message stayed in Drafts as if it were still unsent, and sending it again from
 // there delivered it twice.
 func TestSendingADraftRemovesIt(t *testing.T) {
-	alice, bob := t.TempDir(), t.TempDir()
+	alice, bob := provisionedDir(t), provisionedDir(t)
 	accounts := directory.StaticAccounts{
 		"alice@hermex.test": {Password: "pw", MailboxPath: alice},
 		"bob@hermex.test":   {Password: "pw", MailboxPath: bob},

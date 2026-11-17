@@ -20,7 +20,7 @@ import (
 func TestScheduleFailureDoesNotEchoInternals(t *testing.T) {
 	sink := withSink(t)
 	secret := []byte("send-error-test-secret")
-	mbox := t.TempDir()
+	mbox := provisionedDir(t)
 	accounts := directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: mbox}}
 	srv := NewServer(accounts, accounts, nil, "mail.hermex.test", secret, "", false)
 	token, err := mintToken(secret, sessionClaims{

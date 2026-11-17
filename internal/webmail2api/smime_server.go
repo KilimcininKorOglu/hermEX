@@ -121,7 +121,7 @@ func (s *Server) recipientCert(addr string) (*x509.Certificate, bool) {
 // applySmime signs and/or encrypts a built message for a server-mode sender. The
 // identity headers are split off and re-attached around the S/MIME entity.
 func (s *Server) applySmime(mailbox string, raw []byte, recipients []string, sign, encrypt bool) ([]byte, error) {
-	st, err := objectstore.Open(mailbox)
+	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
 		return nil, errors.New("mailbox unavailable")
 	}

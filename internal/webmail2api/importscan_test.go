@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -51,10 +53,52 @@ func importEML(t *testing.T, srv *Server, token, raw string) (int, string) {
 	return rec.Code, rec.Body.String()
 }
 
+// provisionedDir returns a fresh directory holding a created mailbox, the state
+// account creation leaves.
+func provisionedDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// TestRequestsNeverCreateAMissingMailbox proves a webmail request for an account
+// whose mailbox is missing fails and leaves it missing. A mailbox is made when
+// its account is created; a lost one (a deleted directory, an unmounted volume)
+// must not come back as an empty inbox the user then reads as "all mail gone".
+func TestRequestsNeverCreateAMissingMailbox(t *testing.T) {
+	gone := filepath.Join(t.TempDir(), "gone")
+	secret := []byte("missing-mailbox-secret")
+	accounts := directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: gone}}
+	srv := NewServer(accounts, accounts, nil, "mail.hermex.test", secret, "", false)
+	token, err := mintToken(secret, sessionClaims{
+		Email: "alice@hermex.test", Mailbox: gone, Exp: time.Now().Add(time.Hour).Unix(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/contacts", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("contact list on a missing mailbox = %d, want 500 mailbox unavailable", rec.Code)
+	}
+	if _, err := os.Stat(gone); !os.IsNotExist(err) {
+		t.Errorf("a webmail request created the missing mailbox: %v", err)
+	}
+}
+
 // importHarness builds a server with one account and a session for it.
 func importHarness(t *testing.T) (*Server, string, string) {
 	t.Helper()
-	mbox := t.TempDir()
+	mbox := provisionedDir(t)
 	secret := []byte("import-scan-secret")
 	accounts := directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: mbox}}
 	srv := NewServer(accounts, accounts, nil, "mail.hermex.test", secret, "", false)

@@ -16,7 +16,7 @@ import (
 // purpose, so a Bcc recipient was gone the moment the draft was saved and the
 // reopened draft had no way to show or send to it.
 func TestDraftKeepsItsBcc(t *testing.T) {
-	mbox := t.TempDir()
+	mbox := provisionedDir(t)
 	secret := []byte("draft-bcc-test-secret")
 	accounts := directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: mbox}}
 	srv := NewServer(accounts, accounts, nil, "mail.hermex.test", secret, "", false)

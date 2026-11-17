@@ -87,7 +87,7 @@ func sampleInbox(mailbox string, lastTotal, lastUnread *int) string {
 	if mailbox == "" {
 		return ""
 	}
-	st, err := objectstore.Open(mailbox)
+	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
 		return ""
 	}
