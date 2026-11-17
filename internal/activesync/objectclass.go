@@ -66,6 +66,10 @@ func applyObjectClientCommands(st *objectstore.Store, folderID int64, cstate *co
 	var responses []*wbxml.Node
 	written := map[string]bool{}
 	for _, cmd := range cmds.Children {
+		if refusal := refuseOutsideCollection(st, folderID, cmd); refusal != nil {
+			responses = append(responses, refusal)
+			continue
+		}
 		switch cmd.Tag {
 		case wbxml.ASAdd:
 			if resp, sid := cls.addObject(st, cmd); resp != nil {
@@ -82,6 +86,27 @@ func applyObjectClientCommands(st *objectstore.Store, folderID int64, cstate *co
 	}
 	foldClientWritesIntoSnapshot(st, cls.folderID, cstate, written)
 	return responses
+}
+
+// refuseOutsideCollection answers a Change or Delete whose ServerId names no item
+// of the collection with Sync Status 8, MS-ASCMD's "Object not found", and returns
+// nil for every command it lets through. The ServerId comes from the device, so a
+// store-wide message id is checked against the folder the collection names before
+// anything is written: without it a Delete sent for the Calendar could remove a
+// task or a mail message.
+func refuseOutsideCollection(st *objectstore.Store, folderID int64, cmd *wbxml.Node) *wbxml.Node {
+	if cmd.Tag != wbxml.ASChange && cmd.Tag != wbxml.ASDelete {
+		return nil
+	}
+	sid := cmd.ChildText(wbxml.ASServerID)
+	if id, err := strconv.ParseInt(sid, 10, 64); err == nil {
+		if fid, err := st.MessageFolder(id); err == nil && fid == folderID {
+			return nil
+		}
+	}
+	return wbxml.Elem(cmd.Tag,
+		wbxml.Str(wbxml.ASServerID, sid),
+		wbxml.Str(wbxml.ASStatus, strconv.Itoa(syncStatusObjectNotFound)))
 }
 
 // addObject creates one item from a device's Add command and builds the response

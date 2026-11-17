@@ -157,6 +157,52 @@ func TestSyncCalendarClientEdits(t *testing.T) {
 	}
 }
 
+// TestSyncCalendarRefusesAnItemOfAnotherFolder proves a Change or Delete sent for
+// the Calendar collection only reaches items in that collection. The ServerId
+// comes from the device, so one naming an item in another folder (here a task)
+// leaves that item untouched, and each refused command is answered with Sync
+// Status 8, MS-ASCMD's "Object not found".
+func TestSyncCalendarRefusesAnItemOfAnotherFolder(t *testing.T) {
+	ts, dir := seededServer(t)
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open the store", err)
+	taskID, err := st.CreateMessage(int64(mapi.PrivateFIDTasks), &oxcmail.Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: "IPM.Task"}, {Tag: mapi.PrSubject, Value: "Keep me"},
+	}})
+	mustNoErr(t, "store a task", err)
+	st.Close()
+	taskSID := strconv.FormatInt(taskID, 10)
+
+	calID := strconv.FormatInt(int64(mapi.PrivateFIDCalendar), 10)
+	calReq := func(key string, cmds ...*wbxml.Node) *wbxml.Node {
+		return wbxml.Elem(wbxml.ASSync, wbxml.Elem(wbxml.ASCollections, wbxml.Elem(wbxml.ASCollection,
+			wbxml.Str(wbxml.ASSyncKey, key), wbxml.Str(wbxml.ASCollectionID, calID),
+			wbxml.Elem(wbxml.ASCommands, cmds...))))
+	}
+	postCommand(t, ts, "Sync", wbxml.Elem(wbxml.ASSync, wbxml.Elem(wbxml.ASCollections, wbxml.Elem(wbxml.ASCollection,
+		wbxml.Str(wbxml.ASSyncKey, "0"), wbxml.Str(wbxml.ASCollectionID, calID)))))
+
+	change := wbxml.Elem(wbxml.ASChange, wbxml.Str(wbxml.ASServerID, taskSID),
+		wbxml.Elem(wbxml.ASData, wbxml.Str(wbxml.CalSubject, "Overwritten")))
+	del := wbxml.Elem(wbxml.ASDelete, wbxml.Str(wbxml.ASServerID, taskSID))
+	_, root := postCommand(t, ts, "Sync", calReq("1", change, del))
+
+	wantEq(t, "the task's subject", storedSubject(t, dir, taskID), "Keep me")
+	resp := respColl(t, root).Child(wbxml.ASResponses)
+	if resp == nil {
+		t.Fatal("the refused commands got no Responses")
+	}
+	for _, tag := range []wbxml.Tag{wbxml.ASChange, wbxml.ASDelete} {
+		r := resp.Child(tag)
+		if r == nil {
+			t.Errorf("no response for the refused %#06x", uint16(tag))
+			continue
+		}
+		wantEq(t, "the refused command's ServerId", r.ChildText(wbxml.ASServerID), taskSID)
+		wantEq(t, "the refused command's Status", r.ChildText(wbxml.ASStatus), "8")
+	}
+}
+
 // TestSyncCalendarClientAdd proves a device-created appointment is stored and
 // answered with a client-id -> server-id mapping in the Responses section, and is
 // not echoed back to the device that created it.

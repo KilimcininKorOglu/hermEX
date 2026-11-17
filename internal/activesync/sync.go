@@ -23,10 +23,13 @@ const (
 // Sync collection status codes (MS-ASCMD): 1 success, 3 invalid sync key
 // (forces a re-prime), 4 malformed request, 14 invalid wait/heartbeat value.
 const (
-	syncStatusOK           = 1
-	syncStatusInvalidKey   = 3
-	syncStatusBadRequest   = 4
-	syncStatusWaitInterval = 14
+	syncStatusOK         = 1
+	syncStatusInvalidKey = 3
+	syncStatusBadRequest = 4
+	// syncStatusObjectNotFound answers a Change or Delete naming no item of the
+	// collection (MS-ASCMD Status (Sync) 8, "Object not found").
+	syncStatusObjectNotFound = 8
+	syncStatusWaitInterval   = 14
 )
 
 // syncHoldCadence is the fallback poll interval during a hanging Sync when the push
