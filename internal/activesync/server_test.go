@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -145,6 +146,45 @@ func TestParseBase64Query(t *testing.T) {
 	}
 	if req.deviceType != "iPhone" {
 		t.Errorf("deviceType = %q, want iPhone", req.deviceType)
+	}
+}
+
+// TestQueryRefusesAMalformedDeviceID proves the device id follows MS-ASHTTP. In
+// the plain query the device-id ABNF rule is 1*32(ALPHA / DIGIT); in the
+// base64-packed form the Device ID length byte MUST be greater than 0, and the
+// field may be a binary GUID, so only its length is checked. A request breaking
+// either rule is answered 400 Bad Request ("could not be understood by the
+// server due to malformed syntax") before any device state is written.
+func TestQueryRefusesAMalformedDeviceID(t *testing.T) {
+	ts := testServer(t)
+	plain := func(id string) string {
+		return "/Microsoft-Server-ActiveSync?Cmd=GetAttachment&User=" + testUser +
+			"&DeviceId=" + url.QueryEscape(id) + "&DeviceType=iPhone"
+	}
+	for name, id := range map[string]string{
+		"missing":        "",
+		"33 characters":  strings.Repeat("a", 33),
+		"a slash":        "dev/1",
+		"a comma":        "dev,1",
+		"a control byte": "dev\x001",
+		"a space":        "dev 1",
+	} {
+		if resp, _ := do(t, ts, "POST", plain(id), "", true); resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("plain DeviceId with %s: status %d, want 400", name, resp.StatusCode)
+		}
+	}
+	if resp, _ := do(t, ts, "POST", plain(strings.Repeat("A9", 16)), "", true); resp.StatusCode != http.StatusNotImplemented {
+		t.Errorf("a 32-character alphanumeric DeviceId: status %d, want 501 (dispatch reached)", resp.StatusCode)
+	}
+
+	empty := []byte{0x0E, 0x04, 0x09, 0x04, 0x00, 0x00, 0x03, 'A', 'n', 'd'}
+	if resp, _ := do(t, ts, "POST", "/Microsoft-Server-ActiveSync?"+base64.StdEncoding.EncodeToString(empty), "", true); resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("base64 Device ID of length 0: status %d, want 400", resp.StatusCode)
+	}
+	guid := append([]byte{0x0E, 0x04, 0x09, 0x04, 0x10}, 0xff, 0xfe, 0x00, 0x01, 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8b)
+	guid = append(guid, 0x00, 0x03, 'A', 'n', 'd')
+	if resp, _ := do(t, ts, "POST", "/Microsoft-Server-ActiveSync?"+base64.StdEncoding.EncodeToString(guid), "", true); resp.StatusCode != http.StatusNotImplemented {
+		t.Errorf("base64 Device ID that is a binary GUID: status %d, want 501 (dispatch reached)", resp.StatusCode)
 	}
 }
 

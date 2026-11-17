@@ -121,6 +121,9 @@ func protocolVersion(r *http.Request) string {
 func parseQuery(r *http.Request) (asRequest, error) {
 	if cmd := r.URL.Query().Get("Cmd"); cmd != "" {
 		q := r.URL.Query()
+		if !validPlainDeviceID(q.Get("DeviceId")) {
+			return asRequest{}, errBadDeviceID
+		}
 		return asRequest{
 			cmd:        cmd,
 			user:       q.Get("User"),
@@ -152,8 +155,10 @@ func parseBase64Query(raw string) (asRequest, error) {
 		return asRequest{}, errBadPacked
 	}
 	p.skip(2) // locale
+	// The Device ID length MUST be greater than 0 (MS-ASHTTP 2.2.1.1.1.1). The
+	// field may be a binary GUID, so its bytes are not checked.
 	devID, ok := p.lenPrefixed()
-	if !ok {
+	if !ok || len(devID) == 0 {
 		return asRequest{}, errBadPacked
 	}
 	policy, ok := p.lenPrefixed()
@@ -174,6 +179,33 @@ func parseBase64Query(raw string) (asRequest, error) {
 		req.policyKey = strconv.FormatUint(uint64(key), 10)
 	}
 	return req, nil
+}
+
+// errBadDeviceID reports a plain-query DeviceId outside the MS-ASHTTP grammar.
+var errBadDeviceID = errors.New("malformed DeviceId")
+
+// validPlainDeviceID reports whether a plain-query DeviceId matches the MS-ASHTTP
+// device-id ABNF rule, 1*32(ALPHA / DIGIT). The value comes from the client and
+// keys the device's stored state, so anything else is refused.
+func validPlainDeviceID(id string) bool {
+	if id == "" || len(id) > 32 {
+		return false
+	}
+	for _, c := range []byte(id) {
+		if !isASCIIAlnum(c) {
+			return false
+		}
+	}
+	return true
+}
+
+// isASCIIAlnum reports whether c is an ABNF ALPHA or DIGIT.
+func isASCIIAlnum(c byte) bool {
+	switch {
+	case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9':
+		return true
+	}
+	return false
 }
 
 // errBadPacked reports a malformed base64-packed command string.
