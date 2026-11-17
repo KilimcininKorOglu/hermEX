@@ -384,7 +384,9 @@ type mailbox struct {
 }
 
 func openMailbox(path string) (*mailbox, error) {
-	st, err := objectstore.Open(path)
+	// The mailbox is made when the account is created; a missing one is an error,
+	// never one to replace with an empty maildrop.
+	st, err := objectstore.OpenExisting(path)
 	if err != nil {
 		return nil, err
 	}

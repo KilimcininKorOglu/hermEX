@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/textproto"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -14,6 +15,35 @@ import (
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
+
+// TestLoginRefusesAnUnprovisionedMailbox proves a read path never creates a
+// mailbox: an account's mailbox is made when the account is created, so a
+// missing one is refused at PASS and stays missing, rather than being replaced
+// by an empty maildrop that hides the loss.
+func TestLoginRefusesAnUnprovisionedMailbox(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gone")
+	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test"}).Serve(ln) }()
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	r := textproto.NewReader(bufio.NewReader(conn))
+	wantReply(t, r, "+OK")
+	_, _ = fmt.Fprintf(conn, "USER alice\r\n")
+	wantReply(t, r, "+OK")
+	_, _ = fmt.Fprintf(conn, "PASS secret\r\n")
+	wantReply(t, r, "-ERR")
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("PASS created the missing mailbox: %v", err)
+	}
+}
 
 func TestPOP3RetrieveAndDelete(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "alice")
