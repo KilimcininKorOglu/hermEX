@@ -76,10 +76,26 @@ func emptyFolderContents(st *objectstore.Store, op *wbxml.Node) *wbxml.Node {
 		wbxml.Str(wbxml.ASCollectionID, collID))
 }
 
-// emptyFolder deletes every message in a folder; when deleteSubs is set it also
-// deletes each child folder (and its subtree) through the same primitive FolderDelete
-// uses, leaving the target folder itself in place but empty.
-func emptyFolder(st *objectstore.Store, folderID int64, deleteSubs bool) error {
+// deleteFolderItems deletes every item of a folder: the objects of an object
+// folder (calendar, contacts, tasks, notes), which the mail index never holds, and
+// the indexed messages of a mail folder.
+func deleteFolderItems(st *objectstore.Store, folderID int64) error {
+	_, isObject, err := objectClassFor(st, folderID)
+	if err != nil {
+		return err
+	}
+	if isObject {
+		objs, err := st.ListFolderObjects(folderID)
+		if err != nil {
+			return err
+		}
+		for _, o := range objs {
+			if err := st.DeleteObject(o.ID); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	msgs, err := st.ListMessages(folderID)
 	if err != nil {
 		return err
@@ -88,6 +104,16 @@ func emptyFolder(st *objectstore.Store, folderID int64, deleteSubs bool) error {
 		if err := st.SoftDeleteMessage(folderID, m.UID); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// emptyFolder deletes every message in a folder; when deleteSubs is set it also
+// deletes each child folder (and its subtree) through the same primitive FolderDelete
+// uses, leaving the target folder itself in place but empty.
+func emptyFolder(st *objectstore.Store, folderID int64, deleteSubs bool) error {
+	if err := deleteFolderItems(st, folderID); err != nil {
+		return err
 	}
 	if !deleteSubs {
 		return nil

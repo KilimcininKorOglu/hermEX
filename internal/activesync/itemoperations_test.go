@@ -2,8 +2,10 @@ package activesync
 
 import (
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
@@ -127,6 +129,30 @@ func TestItemOperationsEmptyFolder(t *testing.T) {
 	if msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox)); err != nil || len(msgs) != 0 {
 		t.Errorf("inbox has %d messages after EmptyFolderContents (err %v), want 0", len(msgs), err)
 	}
+}
+
+// TestItemOperationsEmptyFolderOfObjects proves EmptyFolderContents empties an
+// object folder too ([MS-ASCMD] 2.2.3.56: the folder's items are deleted). An
+// appointment is not in the mail index, so emptying the folder as mail reported
+// success and left every appointment in place.
+func TestItemOperationsEmptyFolderOfObjects(t *testing.T) {
+	ts, dir := seededServer(t)
+	start := time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC)
+	seedAppointment(t, dir, "Standup", start, start.Add(30*time.Minute))
+	cal := strconv.Itoa(int(mapi.PrivateFIDCalendar))
+
+	req := wbxml.Elem(wbxml.IOItemOperations,
+		wbxml.Elem(wbxml.IOEmptyFolderContents, wbxml.Str(wbxml.ASCollectionID, cal)))
+	_, root := postCommand(t, ts, "ItemOperations", req)
+	wantEq(t, "EmptyFolderContents Status",
+		root.Child(wbxml.IOResponse).Child(wbxml.IOEmptyFolderContents).ChildText(wbxml.IOStatus), "1")
+
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open the store", err)
+	defer st.Close()
+	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
+	mustNoErr(t, "list the calendar", err)
+	wantEq(t, "appointments left in the emptied calendar", len(objs), 0)
 }
 
 // TestItemOperationsEmptyFolderDeleteSubs confirms the DeleteSubFolders option also
