@@ -75,6 +75,29 @@ func TestSearchGALOmitsHiddenUser(t *testing.T) {
 	}
 }
 
+// TestHiddenUserStaysHiddenByExactAddress proves a caller who already knows a
+// hidden user's full address cannot read the entry back by asking for it: the
+// hide switch withholds the user from the surface, not only from a prefix list.
+func TestHiddenUserStaysHiddenByExactAddress(t *testing.T) {
+	const hidden = "albert@hermex.test"
+	ts := hidingServer(t, directory.HideFromGAL)
+	_, root := postCommand(t, ts, "Search", searchReq("GAL", hidden))
+	if got := galAddresses(searchStore(t, root)); len(got) != 0 {
+		t.Errorf("a GAL Search for the hidden address returned %v", got)
+	}
+
+	ts = hidingServer(t, directory.HideFromResolve)
+	_, root = postCommand(t, ts, "ResolveRecipients",
+		wbxml.Elem(wbxml.RRResolveRecipients, wbxml.Str(wbxml.RRTo, hidden)))
+	if resp := root.Child(wbxml.RRResponse); resp != nil {
+		for _, rec := range resp.Children {
+			if rec.Tag == wbxml.RRRecipient && rec.ChildText(wbxml.RREmailAddress) == hidden {
+				t.Error("ResolveRecipients returned the hidden user asked for by address")
+			}
+		}
+	}
+}
+
 // TestSearchGALKeepsResolutionHiddenUser proves the browse surface follows the
 // address book: a user withheld only from name resolution still appears in a GAL
 // search, so the two switches stay distinct.
