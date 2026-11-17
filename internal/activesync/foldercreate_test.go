@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"testing"
 
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/wbxml"
 )
@@ -83,6 +84,85 @@ func TestFolderCreate(t *testing.T) {
 	if !folderSyncHasAdd(t, ts, newID) {
 		t.Error("created folder is not advertised by a re-primed FolderSync")
 	}
+}
+
+// folderSyncType returns the Type a re-primed FolderSync advertises for a server
+// id, "" when the folder is not advertised.
+func folderSyncType(t *testing.T, ts *httptest.Server, serverID string) string {
+	t.Helper()
+	_, root := postCommand(t, ts, "FolderSync", wbxml.Elem(wbxml.FHFolderSync, wbxml.Str(wbxml.FHSyncKey, "0")))
+	for _, c := range root.Child(wbxml.FHChanges).Children {
+		if c.Tag == wbxml.FHAdd && c.ChildText(wbxml.FHServerID) == serverID {
+			return c.ChildText(wbxml.FHType)
+		}
+	}
+	return ""
+}
+
+// TestFolderCreateMakesTheKindAsked proves the MS-ASCMD 2.2.3.186.2 Type
+// (FolderCreate) of a user folder sets what the folder is: types 13-17 become a
+// calendar, contacts, tasks, journal and notes folder (the container class every
+// other protocol reads), and FolderSync reports each back with the type the
+// device asked for (MS-ASCMD 2.2.3.186.3), so the device keeps the folder it made.
+func TestFolderCreateMakesTheKindAsked(t *testing.T) {
+	ts, dir := seededServer(t)
+	cases := []struct{ typ, name, class string }{
+		{"13", "Team", mapi.ContainerClassAppointment},
+		{"14", "Clients", mapi.ContainerClassContact},
+		{"15", "Chores", mapi.ContainerClassTask},
+		{"16", "Log", mapi.ContainerClassJournal},
+		{"17", "Jottings", mapi.ContainerClassStickyNote},
+	}
+	for _, c := range cases {
+		req := folderCreateReq(primeHierarchy(t, ts), "0", c.name)
+		req.Children[3].Text = c.typ
+		_, root := postCommand(t, ts, "FolderCreate", req)
+		if s := root.ChildText(wbxml.FHStatus); s != "1" {
+			t.Fatalf("Type %s: Status = %q, want 1", c.typ, s)
+		}
+		id := root.ChildText(wbxml.FHServerID)
+		fid, _ := strconv.ParseInt(id, 10, 64)
+		st, err := objectstore.Open(dir)
+		mustNoErr(t, "open the store", err)
+		cls, err := folderClass(st, fid)
+		st.Close()
+		mustNoErr(t, "read the class", err)
+		wantEq(t, "the class of Type "+c.typ, cls, c.class)
+		wantEq(t, "the FolderSync Type of "+c.name, folderSyncType(t, ts, id), c.typ)
+	}
+}
+
+// TestSyncServesAUserTaskFolder proves a task folder the device created is synced
+// as a task collection: a task the device adds there is stored in that folder,
+// not in the built-in Tasks folder, and is not refused as a mail folder would be.
+func TestSyncServesAUserTaskFolder(t *testing.T) {
+	ts, dir := seededServer(t)
+	req := folderCreateReq(primeHierarchy(t, ts), "0", "Chores")
+	req.Children[3].Text = "15"
+	_, root := postCommand(t, ts, "FolderCreate", req)
+	id := root.ChildText(wbxml.FHServerID)
+	sync := func(key string, cmds ...*wbxml.Node) *wbxml.Node {
+		coll := []*wbxml.Node{wbxml.Str(wbxml.ASSyncKey, key), wbxml.Str(wbxml.ASCollectionID, id)}
+		if len(cmds) > 0 {
+			coll = append(coll, wbxml.Elem(wbxml.ASCommands, cmds...))
+		}
+		return wbxml.Elem(wbxml.ASSync, wbxml.Elem(wbxml.ASCollections, wbxml.Elem(wbxml.ASCollection, coll...)))
+	}
+	postCommand(t, ts, "Sync", sync("0"))
+	add := wbxml.Elem(wbxml.ASAdd, wbxml.Str(wbxml.ASClientID, "cli-1"),
+		wbxml.Elem(wbxml.ASData, wbxml.Str(wbxml.TKSubject, "Water plants")))
+	_, root = postCommand(t, ts, "Sync", sync("1", add))
+	addResp := respColl(t, root).Child(wbxml.ASResponses).Child(wbxml.ASAdd)
+	if addResp == nil || addResp.ChildText(wbxml.ASStatus) != "1" {
+		t.Fatalf("no successful Add response for the task: %+v", addResp)
+	}
+	mid, _ := strconv.ParseInt(addResp.ChildText(wbxml.ASServerID), 10, 64)
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open the store", err)
+	defer st.Close()
+	parent, err := st.MessageFolder(mid)
+	mustNoErr(t, "find the task's folder", err)
+	wantEq(t, "the folder the task was stored in", strconv.FormatInt(parent, 10), id)
 }
 
 // TestFolderCreateBadSyncKey proves a FolderCreate whose sync key does not match

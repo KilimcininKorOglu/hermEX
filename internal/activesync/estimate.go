@@ -77,7 +77,11 @@ func estimateCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node) 
 	// Object collections (calendar, contacts) are versioned by object change
 	// number, not the IMAP index, so their estimate must read the same object list
 	// Sync does.
-	if isObjectFolder(folderID) {
+	_, isObject, err := objectClassFor(st, folderID)
+	if err != nil {
+		return nil, "objects.list.fail", err
+	}
+	if isObject {
 		objs, err := st.ListFolderObjects(folderID)
 		if err != nil {
 			return nil, "objects.list.fail", err

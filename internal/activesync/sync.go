@@ -215,7 +215,11 @@ func collectionHasChanges(st *objectstore.Store, dev *deviceState, c *wbxml.Node
 	if clientKey != cstate.SyncKey {
 		return false // stale key: let the normal path return Status 3
 	}
-	if isObjectFolder(folderID) {
+	_, isObject, err := objectClassFor(st, folderID)
+	if err != nil {
+		return false
+	}
+	if isObject {
 		objs, err := st.ListFolderObjects(folderID)
 		if err != nil {
 			return false
@@ -350,9 +354,13 @@ func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node, prot
 	// number, not IMAP flags. The device's Add/Change/Delete edits are applied first
 	// (folded into the snapshot so they are not echoed back), then server-side changes
 	// are streamed through the folder's data-class renderer.
-	if isObjectFolder(folderID) {
-		responses := applyObjectClientCommands(st, folderID, cstate, c)
-		cmds, more, err := objectChanges(st, folderID, cstate, window, objectAppData(folderID))
+	cls, isObject, err := objectClassFor(st, folderID)
+	if err != nil {
+		return nil, err
+	}
+	if isObject {
+		responses := applyObjectClientCommands(st, cls, cstate, c)
+		cmds, more, err := objectChanges(st, folderID, cstate, window, cls.appData)
 		if err != nil {
 			return nil, err
 		}

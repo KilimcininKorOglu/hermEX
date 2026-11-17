@@ -18,20 +18,68 @@ type easFolder struct {
 	typ  int
 }
 
-// EAS folder types (MS-ASCMD FolderSync Type): the mail set v1 exposes.
+// EAS folder types (MS-ASCMD 2.2.3.186.3 Type (FolderSync)).
 const (
-	folderTypeInbox      = 2
-	folderTypeDrafts     = 3
-	folderTypeDeleted    = 4
-	folderTypeSent       = 5
-	folderTypeOutbox     = 6
-	folderTypeTask       = 7
-	folderTypeCalendar   = 8
-	folderTypeContact    = 9
-	folderTypeNote       = 10
-	folderTypeUserMail   = 12
-	folderSyncInvalidKey = 9
+	folderTypeInbox        = 2
+	folderTypeDrafts       = 3
+	folderTypeDeleted      = 4
+	folderTypeSent         = 5
+	folderTypeOutbox       = 6
+	folderTypeTask         = 7
+	folderTypeCalendar     = 8
+	folderTypeContact      = 9
+	folderTypeNote         = 10
+	folderTypeUserMail     = 12
+	folderTypeUserCalendar = 13
+	folderTypeUserContact  = 14
+	folderTypeUserTask     = 15
+	folderTypeUserJournal  = 16
+	folderTypeUserNote     = 17
+	folderSyncInvalidKey   = 9
 )
+
+// userFolderClasses pairs each user-created folder type (MS-ASCMD 12-17) with the
+// container class the store keeps for it, so a folder made over EAS is the same
+// kind of folder every other protocol reads, and a folder another protocol made
+// reaches the device with its kind.
+var userFolderClasses = []struct {
+	typ   int
+	class string
+}{
+	{folderTypeUserMail, mapi.ContainerClassNote},
+	{folderTypeUserCalendar, mapi.ContainerClassAppointment},
+	{folderTypeUserContact, mapi.ContainerClassContact},
+	{folderTypeUserTask, mapi.ContainerClassTask},
+	{folderTypeUserJournal, mapi.ContainerClassJournal},
+	{folderTypeUserNote, mapi.ContainerClassStickyNote},
+}
+
+// userFolderTypeOf returns the EAS type of a user folder of the given class.
+func userFolderTypeOf(class string) (int, bool) {
+	if class == "" {
+		return folderTypeUserMail, true
+	}
+	for _, u := range userFolderClasses {
+		if u.class == class {
+			return u.typ, true
+		}
+	}
+	return 0, false
+}
+
+// userFolderClassOf returns the container class for a FolderCreate Type; the
+// generic type 1 is a mail folder.
+func userFolderClassOf(typ int) (string, bool) {
+	if typ == 1 {
+		return mapi.ContainerClassNote, true
+	}
+	for _, u := range userFolderClasses {
+		if u.typ == typ {
+			return u.class, true
+		}
+	}
+	return "", false
+}
 
 // handleFolderSync answers FolderSync. SyncKey 0 primes the hierarchy and
 // returns the mail folders with a fresh key; a matching key returns the same key
@@ -123,21 +171,29 @@ var wellKnownFolderTypes = map[int64]int{
 // easFolderType maps a store folder to its EAS type, reporting ok=false for a
 // folder Sync cannot serve. The standard mail folders and the well-known Calendar,
 // Contacts, Tasks, and Notes collections are mapped by their fixed ids; any other
-// folder is included as a generic mail folder only when its container class is a note
-// (mail) folder.
+// folder is a user-created folder typed by its container class (mail, calendar,
+// contacts, tasks or notes), and a folder of any other class is left out.
 func easFolderType(st *objectstore.Store, fid int64) (int, bool, error) {
 	if typ, ok := wellKnownFolderTypes[fid]; ok {
 		return typ, true, nil
 	}
-	props, err := st.GetFolderProperties(fid, mapi.PrContainerClass)
+	class, err := folderClass(st, fid)
 	if err != nil {
 		return 0, false, err
 	}
-	class, _ := props.Get(mapi.PrContainerClass)
-	if cs, _ := class.(string); cs == "" || cs == mapi.ContainerClassNote {
-		return folderTypeUserMail, true, nil
+	typ, ok := userFolderTypeOf(class)
+	return typ, ok, nil
+}
+
+// folderClass reads a folder's container class, "" when it has none.
+func folderClass(st *objectstore.Store, fid int64) (string, error) {
+	props, err := st.GetFolderProperties(fid, mapi.PrContainerClass)
+	if err != nil {
+		return "", err
 	}
-	return 0, false, nil
+	class, _ := props.Get(mapi.PrContainerClass)
+	cs, _ := class.(string)
+	return cs, nil
 }
 
 // folderSyncResponse builds a Status-1 FolderSync reply carrying the new sync

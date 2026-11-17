@@ -33,32 +33,43 @@ var objectClasses = map[int64]objectClass{
 	int64(mapi.PrivateFIDNotes):    {int64(mapi.PrivateFIDNotes), noteAppData, parseNoteItem},
 }
 
-// isObjectFolder reports whether a folder's items live in the object store and are
-// versioned by change number (calendar, contacts, tasks, notes) rather than the
-// IMAP index.
-func isObjectFolder(folderID int64) bool {
-	_, ok := objectClasses[folderID]
-	return ok
+// classByContainer gives a user-created object folder the data class of the
+// built-in folder of its container class.
+var classByContainer = map[string]int64{
+	mapi.ContainerClassAppointment: int64(mapi.PrivateFIDCalendar),
+	mapi.ContainerClassContact:     int64(mapi.PrivateFIDContacts),
+	mapi.ContainerClassTask:        int64(mapi.PrivateFIDTasks),
+	mapi.ContainerClassStickyNote:  int64(mapi.PrivateFIDNotes),
 }
 
-// classOf returns a folder's data class, falling back to the calendar for a
-// folder the callers only reach after isObjectFolder said yes.
-func classOf(folderID int64) objectClass {
+// objectClassFor reports whether a folder's items live in the object store and
+// are versioned by change number (calendar, contacts, tasks, notes) rather than
+// the IMAP index, and returns its data class bound to that folder. A built-in
+// folder is known by its id, a user-created one by its container class.
+func objectClassFor(st *objectstore.Store, folderID int64) (objectClass, bool, error) {
 	if cls, ok := objectClasses[folderID]; ok {
-		return cls
+		return cls, true, nil
 	}
-	return objectClasses[int64(mapi.PrivateFIDCalendar)]
-}
-
-// objectAppData returns the data-class renderer for an object folder's items.
-func objectAppData(folderID int64) func(*objectstore.Store, int64) (*wbxml.Node, error) {
-	return classOf(folderID).appData
+	if _, builtin := wellKnownFolderTypes[folderID]; builtin {
+		return objectClass{}, false, nil
+	}
+	class, err := folderClass(st, folderID)
+	if err != nil {
+		return objectClass{}, false, err
+	}
+	base, ok := classByContainer[class]
+	if !ok {
+		return objectClass{}, false, nil
+	}
+	cls := objectClasses[base]
+	cls.folderID = folderID
+	return cls, true, nil
 }
 
 // applyObjectClientCommands applies a device's Add/Change/Delete commands to an
 // object folder and returns the Add responses carrying the assigned server ids.
-func applyObjectClientCommands(st *objectstore.Store, folderID int64, cstate *collectionState, c *wbxml.Node) []*wbxml.Node {
-	cls := classOf(folderID)
+func applyObjectClientCommands(st *objectstore.Store, cls objectClass, cstate *collectionState, c *wbxml.Node) []*wbxml.Node {
+	folderID := cls.folderID
 	cmds := c.Child(wbxml.ASCommands)
 	if cmds == nil {
 		return nil

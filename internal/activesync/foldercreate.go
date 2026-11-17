@@ -1,9 +1,11 @@
 package activesync
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/wbxml"
 )
@@ -28,9 +30,8 @@ const (
 // Status 9 so the device re-primes from key 0. "0" names the mailbox root (a
 // top-level folder); any other ParentId names an existing folder.
 //
-// The request's folder Type is not honored: every folder is created as a mail
-// (note) folder, the only collection class v1 synchronizes, a calendar or
-// contact folder type would not sync anyway.
+// The request's folder Type sets the folder's container class (mail, calendar,
+// contacts, tasks or notes), which FolderSync reports back and Sync serves.
 func (s *Server) handleFolderCreate(w http.ResponseWriter, r *http.Request, sess *session) {
 	root, err := readWBXML(r)
 	if err != nil {
@@ -73,7 +74,8 @@ func (s *Server) handleFolderCreate(w http.ResponseWriter, r *http.Request, sess
 // for, returning the new folder's id and the EAS status to report.
 func createFolder(st *objectstore.Store, dev *deviceState, root *wbxml.Node) (int64, int) {
 	name := root.ChildText(wbxml.FHDisplayName)
-	if name == "" || !userFolderType(root.Child(wbxml.FHType)) {
+	class, ok := userFolderType(root.Child(wbxml.FHType))
+	if name == "" || !ok {
 		return 0, fhStatusBadRequest
 	}
 	if syncKey := root.ChildText(wbxml.FHSyncKey); syncKey == "" || syncKey != dev.HierarchyKey {
@@ -83,31 +85,42 @@ func createFolder(st *objectstore.Store, dev *deviceState, root *wbxml.Node) (in
 	if code != 0 {
 		return 0, code
 	}
-	_, exists, err := st.FolderByName(parent, name)
-	if err != nil {
-		return 0, fhStatusServerError
-	}
-	if exists {
+	// The store refuses a sibling's name inside the create's own transaction.
+	fid, err := createOfClass(st, parent, name, class)
+	switch {
+	case errors.Is(err, objectstore.ErrFolderExists):
 		return 0, fhStatusExists
-	}
-	fid, err := st.CreateFolder(parent, name)
-	if err != nil {
+	case err != nil:
 		return 0, fhStatusServerError
 	}
 	return fid, fhStatusOK
 }
 
-// userFolderType reports whether a FolderCreate Type names a folder a client may
+// createOfClass creates a folder and gives it class. CreateFolder makes a mail
+// folder, so any other kind gets its class written, and the folder a device made
+// as a calendar is a calendar to every protocol.
+func createOfClass(st *objectstore.Store, parent *int64, name, class string) (int64, error) {
+	fid, err := st.CreateFolder(parent, name)
+	if err != nil || class == mapi.ContainerClassNote {
+		return fid, err
+	}
+	return fid, st.SetFolderProperties(fid, mapi.PropertyValues{{Tag: mapi.PrContainerClass, Value: class}})
+}
+
+// userFolderType returns the container class for a FolderCreate Type a client may
 // create: 1 (generic) or 12-17 (user-created mail, calendar, contacts, tasks,
-// journal, notes), per MS-ASCMD Type (FolderCreate). Type is required, 2-11 and
-// 19 are reserved for default folders, and anything else is outside the table;
-// all of those are a malformed request (Status 10).
-func userFolderType(el *wbxml.Node) bool {
+// journal, notes), per MS-ASCMD 2.2.3.186.2 Type (FolderCreate). Type is
+// required, 2-11 and 19 are reserved for default folders, and anything else is
+// outside the table; all of those are a malformed request (Status 10).
+func userFolderType(el *wbxml.Node) (string, bool) {
 	if el == nil {
-		return false
+		return "", false
 	}
 	n, err := strconv.Atoi(el.Text)
-	return err == nil && (n == 1 || (n >= 12 && n <= 17))
+	if err != nil {
+		return "", false
+	}
+	return userFolderClassOf(n)
 }
 
 // resolveFolderParent maps an EAS ParentId to a store parent: "0" (or empty) is
