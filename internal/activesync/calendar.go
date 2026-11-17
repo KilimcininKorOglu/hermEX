@@ -184,6 +184,18 @@ func parseEASCalTime(s string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
+// parseBusyStatus reads a device's BusyStatus. The value comes off the wire, and
+// MS-ASCAL allows only 0 (Free) through 4 (Working elsewhere): anything else is
+// rejected rather than stored as a status no reader can name, or wrapped into a
+// valid one.
+func parseBusyStatus(s string) (int32, bool) {
+	n, err := strconv.ParseInt(s, 10, 32)
+	if err != nil || n < 0 || n > 4 {
+		return 0, false
+	}
+	return int32(n), true
+}
+
 // parseCalendarItem builds the appointment named properties from a device's
 // MS-ASCAL ApplicationData (start/end/subject/location/busy-status/all-day).
 // Recurrence is not reversed in this increment, so a client edit to a recurring
@@ -206,12 +218,8 @@ func parseCalendarItem(st *objectstore.Store, data *wbxml.Node) (mapi.PropertyVa
 	if t, ok := parseEASCalTime(data.ChildText(wbxml.CalEndTime)); ok {
 		props = append(props, mapi.TaggedPropVal{Tag: mapi.MakeTag(ids[1], mapi.PtSysTime), Value: mapi.UnixToNTTime(t)})
 	}
-	if b := data.ChildText(wbxml.CalBusyStatus); b != "" {
-		// PtLong is 32-bit, and the value comes off the wire: parse at that width so
-		// an out-of-range status is rejected rather than wrapped into a valid one.
-		if n, err := strconv.ParseInt(b, 10, 32); err == nil {
-			props = append(props, mapi.TaggedPropVal{Tag: mapi.MakeTag(ids[2], mapi.PtLong), Value: int32(n)})
-		}
+	if n, ok := parseBusyStatus(data.ChildText(wbxml.CalBusyStatus)); ok {
+		props = append(props, mapi.TaggedPropVal{Tag: mapi.MakeTag(ids[2], mapi.PtLong), Value: n})
 	}
 	if loc := data.ChildText(wbxml.CalLocation); loc != "" {
 		props = append(props, mapi.TaggedPropVal{Tag: mapi.MakeTag(ids[3], mapi.PtUnicode), Value: loc})

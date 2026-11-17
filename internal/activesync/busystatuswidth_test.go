@@ -8,11 +8,12 @@ import (
 	"hermex/internal/wbxml"
 )
 
-// TestBusyStatusRejectsWiderThanPtLong pins the parse width of the MS-ASCAL
-// BusyStatus element. The value arrives from the device and lands in a PtLong,
-// which is 32-bit, so a wider integer parsed at the platform width wrapped into a
-// different, valid-looking status: 4294967298 became 2 (tentative) rather than
-// being refused.
+// TestBusyStatusRejectsWiderThanPtLong pins the values the MS-ASCAL BusyStatus
+// element may carry: an unsignedByte from 0 (Free) through 4 (Working
+// elsewhere). The value arrives from the device, so anything else is refused
+// rather than stored: a wider integer once wrapped into a valid-looking status
+// (4294967298 became 2), and a number inside int32 but outside the enumeration
+// (9, -1) would be stored as a status no reader can name.
 func TestBusyStatusRejectsWiderThanPtLong(t *testing.T) {
 	st, err := objectstore.Open(t.TempDir())
 	if err != nil {
@@ -31,7 +32,12 @@ func TestBusyStatusRejectsWiderThanPtLong(t *testing.T) {
 		in   string
 		want any // nil means the property must not be set at all
 	}{
-		{"in range", "2", int32(2)},
+		{"free", "0", int32(0)},
+		{"busy", "2", int32(2)},
+		{"working elsewhere", "4", int32(4)},
+		{"past the enumeration", "5", nil},
+		{"far past the enumeration", "9", nil},
+		{"negative", "-1", nil},
 		{"wraps to a valid status", "4294967298", nil},
 		{"above int32", "2147483648", nil},
 		{"below int32", "-2147483649", nil},
