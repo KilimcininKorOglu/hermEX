@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"testing"
 
+	"hermex/internal/objectstore"
 	"hermex/internal/wbxml"
 )
 
@@ -173,6 +174,34 @@ func TestPingUsesTheCachedParameters(t *testing.T) {
 	if f := root.Child(wbxml.PGFolders); f == nil || f.ChildText(wbxml.PGFolder) != inboxID() {
 		t.Error("the empty Ping did not report the cached Inbox")
 	}
+}
+
+// TestPingRaisesACachedHeartbeatBelowTheFloor proves the 60-second heartbeat
+// floor also holds for a heartbeat cached before it existed: an empty Ping
+// reuses the device's cached interval (MS-ASCMD 3.1.5.8), and a cached 30
+// seconds is held to 60 rather than letting the device keep polling faster
+// than the floor allows.
+func TestPingRaisesACachedHeartbeatBelowTheFloor(t *testing.T) {
+	ts, dir := seededServer(t)
+	seedInbox(t, dir, 1)
+	postCommand(t, ts, "Sync", syncReq("0", ""))
+	postCommand(t, ts, "Sync", syncReq("1", ""))
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open the store", err)
+	mustNoErr(t, "cache an old heartbeat", updateState(st, func(s *asState) bool {
+		d := s.device("dev1")
+		d.PingHeartbeat, d.PingFolders = 30, []string{inboxID()}
+		return true
+	}))
+	st.Close()
+
+	wantEq(t, "the empty Ping", postEmptyPing(t, ts).ChildText(wbxml.PGStatus), "1")
+	st, err = objectstore.Open(dir)
+	mustNoErr(t, "reopen the store", err)
+	defer st.Close()
+	state, err := loadState(st)
+	mustNoErr(t, "load the state", err)
+	wantEq(t, "the cached heartbeat after the Ping", state.device("dev1").PingHeartbeat, int64(60))
 }
 
 // TestPingNoFolders confirms a Ping naming no folder to watch reports Status 3.

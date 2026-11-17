@@ -122,10 +122,11 @@ func (s *Server) pingDevice(sess *session, sent pingParams) (*deviceState, pingP
 	return dev, p, 0, err
 }
 
-// pingParams fills what a Ping did not send from the device's cache.
+// pingParams fills what a Ping did not send from the device's cache. A cached
+// heartbeat is held to the current bounds, since it may predate them.
 func (d *deviceState) pingParams(sent pingParams) pingParams {
-	if sent.heartbeat == 0 {
-		sent.heartbeat = time.Duration(d.PingHeartbeat) * time.Second
+	if sent.heartbeat == 0 && d.PingHeartbeat > 0 {
+		sent.heartbeat = min(max(time.Duration(d.PingHeartbeat)*time.Second, minHeartbeat), maxHeartbeat)
 	}
 	if len(sent.folders) == 0 {
 		sent.folders = d.PingFolders
