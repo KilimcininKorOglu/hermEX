@@ -87,9 +87,10 @@ func TestFolderDeleteNotFound(t *testing.T) {
 }
 
 // TestFolderDeleteBadSyncKey proves a FolderDelete whose sync key does not match
-// reports Status 9.
+// reports Status 9 ([MS-ASCMD] 2.2.3.177.4: the device must re-prime) and deletes
+// nothing, since a stale device may name a folder from an outdated hierarchy.
 func TestFolderDeleteBadSyncKey(t *testing.T) {
-	ts, _ := seededServer(t)
+	ts, dir := seededServer(t)
 	key := primeHierarchy(t, ts)
 	_, created := postCommand(t, ts, "FolderCreate", folderCreateReq(key, "0", "Keep"))
 	newID := created.ChildText(wbxml.FHServerID)
@@ -97,5 +98,42 @@ func TestFolderDeleteBadSyncKey(t *testing.T) {
 	_, root := postCommand(t, ts, "FolderDelete", folderDeleteReq("999", newID))
 	if s := root.ChildText(wbxml.FHStatus); s != "9" {
 		t.Errorf("bad-sync-key Status = %q, want 9", s)
+	}
+	wantFolderPresent(t, dir, newID)
+}
+
+// TestFolderDeleteRefusesAMalformedServerID proves a ServerId the server never
+// issued is refused without deleting anything: an empty one is a malformed
+// request (Status 10) and one that is not a folder id names no folder (Status 4),
+// per [MS-ASCMD] 2.2.3.177.4.
+func TestFolderDeleteRefusesAMalformedServerID(t *testing.T) {
+	ts, dir := seededServer(t)
+	key := primeHierarchy(t, ts)
+	_, created := postCommand(t, ts, "FolderCreate", folderCreateReq(key, "0", "Keep"))
+	keep := created.ChildText(wbxml.FHServerID)
+	key = created.ChildText(wbxml.FHSyncKey)
+	for id, want := range map[string]string{"": "10", "abc": "4", "../" + keep: "4", keep + " ": "4"} {
+		_, root := postCommand(t, ts, "FolderDelete", folderDeleteReq(key, id))
+		if s := root.ChildText(wbxml.FHStatus); s != want {
+			t.Errorf("ServerId %q Status = %q, want %s", id, s, want)
+		}
+	}
+	wantFolderPresent(t, dir, keep)
+}
+
+// wantFolderPresent fails when the folder with the given server id is gone.
+func wantFolderPresent(t *testing.T, dir, serverID string) {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	fid, err := strconv.ParseInt(serverID, 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := st.FolderExists(fid); !ok {
+		t.Errorf("folder %s was deleted by a refused FolderDelete", serverID)
 	}
 }
