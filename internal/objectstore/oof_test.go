@@ -1,10 +1,73 @@
 package objectstore
 
 import (
+	"strings"
+	"sync"
 	"testing"
 
 	"hermex/internal/mapi"
 )
+
+// TestUpdateOOFSettingsLosesNoEdit proves concurrent merges through
+// UpdateOOFSettings, from two handles as two daemons (EWS and ActiveSync) would,
+// each land: every writer appends one mark to the reply, so a merge applied to a
+// copy read before another's commit would drop marks. It also proves
+// PR_OOF_STATE follows the merged Enabled.
+func TestUpdateOOFSettingsLosesNoEdit(t *testing.T) {
+	dir := t.TempDir()
+	const writers, rounds = 2, 20
+	mergeConcurrently(t, dir, writers, rounds)
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	cfg, err := st.GetOOFSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := strings.Repeat("x", writers*rounds); cfg.InternalReply != want {
+		t.Errorf("reply has %d marks after %d merges", len(cfg.InternalReply), writers*rounds)
+	}
+	props, err := st.GetStoreProperties(mapi.PrOOFState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := props.Get(mapi.PrOOFState); v != true {
+		t.Errorf("PR_OOF_STATE = %v after enabling, want true", v)
+	}
+}
+
+// mergeConcurrently runs rounds OOF merges from each of writers handles on dir at
+// once; each merge appends one mark to the internal reply and enables the reply.
+func mergeConcurrently(t *testing.T, dir string, writers, rounds int) {
+	t.Helper()
+	var wg sync.WaitGroup
+	errs := make(chan error, writers*rounds)
+	for range writers {
+		st, err := Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer st.Close()
+		wg.Go(func() {
+			for range rounds {
+				errs <- st.UpdateOOFSettings(func(c *OOFSettings) error {
+					c.InternalReply += "x"
+					c.Enabled = true
+					return nil
+				})
+			}
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
 
 // TestOOFSettingsRoundTrip stores out-of-office settings and reads them back,
 // and checks the standard PR_OOF_STATE boolean is kept in sync with Enabled so

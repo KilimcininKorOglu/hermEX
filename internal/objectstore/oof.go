@@ -85,6 +85,52 @@ func (s *Store) GetOOFSettings() (OOFSettings, error) {
 	return cfg, nil
 }
 
+// UpdateOOFSettings applies update to the stored out-of-office settings inside
+// one write transaction, and keeps PR_OOF_STATE in step like SetOOFSettings. A
+// protocol that sets only the fields its wire carries (EWS, ActiveSync) merges
+// onto the stored value, so a write made elsewhere between the read and the
+// write would otherwise be erased. update must not touch the store.
+func (s *Store) UpdateOOFSettings(update func(*OOFSettings) error) error {
+	tx, err := s.objdb.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	raw, err := s.txStoreString(tx, mapi.PrOOFSettings)
+	if err != nil {
+		return err
+	}
+	var cfg OOFSettings
+	if raw != "" {
+		if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+			return err
+		}
+	}
+	if err := update(&cfg); err != nil {
+		return err
+	}
+	b, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	for _, p := range []mapi.TaggedPropVal{
+		{Tag: mapi.PrOOFSettings, Value: string(b)},
+		{Tag: mapi.PrOOFState, Value: cfg.Enabled},
+	} {
+		enc, err := s.storedPropval(p.Tag, p.Value)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO store_properties (proptag, propval) VALUES (?, ?)
+			 ON CONFLICT(proptag) DO UPDATE SET propval = excluded.propval`,
+			int64(uint32(p.Tag)), enc); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // SetOOFSettings stores the mailbox's out-of-office settings and keeps the
 // standard PR_OOF_STATE boolean in sync with Enabled, so a MAPI client and the
 // delivery path can read the on/off state directly.

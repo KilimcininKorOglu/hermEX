@@ -157,14 +157,12 @@ func oofMessage(appliesTo wbxml.Tag, enabled bool, reply string) *wbxml.Node {
 // neither enabled turns external replies off. The reply text comes from the
 // ExternalKnown bucket a client always sends, falling back to ExternalUnknown.
 func applyOofSet(st *objectstore.Store, set *wbxml.Node) error {
-	cfg, err := st.GetOOFSettings()
-	if err != nil {
-		return err
-	}
-	applyOofState(&cfg, set)
-	known, unknown := readOofBuckets(&cfg, set)
-	applyOofExternal(&cfg, known, unknown)
-	return st.SetOOFSettings(cfg)
+	return st.UpdateOOFSettings(func(cfg *objectstore.OOFSettings) error {
+		applyOofState(cfg, set)
+		known, unknown := readOofBuckets(cfg, set)
+		applyOofExternal(cfg, known, unknown)
+		return nil
+	})
 }
 
 // applyOofState applies the Set's OofState: off, on globally, or on for a window.

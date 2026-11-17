@@ -161,13 +161,11 @@ func (s *Server) handleSetUserOofSettings(w http.ResponseWriter, inner []byte, s
 	}
 	defer st.Close()
 
-	cfg, err := st.GetOOFSettings()
+	err = st.UpdateOOFSettings(func(cfg *objectstore.OOFSettings) error {
+		applyWireOof(cfg, req.Settings)
+		return nil
+	})
 	if err != nil {
-		writeResponse(w, setOofError("ErrorInternalServerError"))
-		return
-	}
-	applyWireOof(&cfg, req.Settings)
-	if err := st.SetOOFSettings(cfg); err != nil {
 		writeResponse(w, setOofError("ErrorInternalServerError"))
 		return
 	}
