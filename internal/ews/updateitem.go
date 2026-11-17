@@ -606,7 +606,7 @@ func checkMoveCopySource(cache *storeCache, sess *session, dest moveCopyDest, id
 		return "ErrorAccessDenied"
 	}
 	if srcOwn {
-		return ""
+		return checkItemFolder(srcSt, id)
 	}
 	// A non-own source is gated on delete (move) or read (copy) of the source folder.
 	need := mapi.FrightsReadAny

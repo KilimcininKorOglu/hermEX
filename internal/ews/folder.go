@@ -798,12 +798,37 @@ func (c *storeCache) openForItem(sess *session, id oxews.ItemID, need uint32) (*
 	if code != "" {
 		return nil, code
 	}
-	if !isOwn {
-		if code := checkItemAccess(st, id, sess.user, need); code != "" {
-			return nil, code
-		}
+	if isOwn {
+		code = checkItemFolder(st, id)
+	} else {
+		code = checkItemAccess(st, id, sess.user, need)
+	}
+	if code != "" {
+		return nil, code
 	}
 	return st, ""
+}
+
+// checkItemFolder proves the folder an item id names is the message's real parent
+// and returns ErrorItemNotFound when it is not. The id's fields are client-supplied
+// and independent, so without it an id naming one folder reaches a message of
+// another: a calendar delete could remove a task. An id with no message id names
+// a folder-level target and needs no check.
+func checkItemFolder(st *objectstore.Store, id oxews.ItemID) string {
+	if id.MessageID == 0 {
+		return ""
+	}
+	parent, err := st.MessageFolder(id.MessageID)
+	if errors.Is(err, objectstore.ErrNotFound) {
+		return "ErrorItemNotFound"
+	}
+	if err != nil {
+		return "ErrorInternalServerError"
+	}
+	if parent != id.FolderID {
+		return "ErrorItemNotFound"
+	}
+	return ""
 }
 
 // checkItemAccess resolves the caller's rights for one item id, returning a
@@ -826,20 +851,7 @@ func checkItemAccess(st *objectstore.Store, id oxews.ItemID, user string, need u
 	if rights&need == 0 {
 		return "ErrorAccessDenied"
 	}
-	if id.MessageID == 0 {
-		return ""
-	}
-	parent, err := st.MessageFolder(id.MessageID)
-	if errors.Is(err, objectstore.ErrNotFound) {
-		return "ErrorItemNotFound"
-	}
-	if err != nil {
-		return "ErrorInternalServerError"
-	}
-	if parent != id.FolderID {
-		return "ErrorItemNotFound"
-	}
-	return ""
+	return checkItemFolder(st, id)
 }
 
 // folderErr builds a per-folder error response message.

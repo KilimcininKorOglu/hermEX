@@ -7,6 +7,8 @@ import (
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcmail"
+	"hermex/internal/oxews"
 )
 
 // deleteCalendarReq is a DeleteItem of one entry of an ItemIds list with the given
@@ -41,6 +43,39 @@ func octoberBusy(t *testing.T, path string) int {
 	events, err := CalendarFreeBusy(st, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC), false)
 	mustNoErr(t, "read free/busy", err)
 	return len(events)
+}
+
+// TestDeleteItemRefusesAnIdWhoseFolderIsNotTheItems proves an item id whose folder
+// is not the item's real folder reaches nothing, in the caller's own mailbox too.
+// The id's fields are client-supplied and independent, so one naming the Calendar
+// with a task's message id must not delete the task: it is answered with
+// ErrorItemNotFound and the task stays.
+func TestDeleteItemRefusesAnIdWhoseFolderIsNotTheItems(t *testing.T) {
+	ts, paths := availabilityServer(t)
+	st, err := objectstore.Open(paths["alice@hermex.test"])
+	mustNoErr(t, "open alice", err)
+	taskID, err := st.CreateMessage(int64(mapi.PrivateFIDTasks), &oxcmail.Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: "IPM.Task"}, {Tag: mapi.PrSubject, Value: "Keep me"},
+	}})
+	mustNoErr(t, "store a task", err)
+	mustNoErr(t, "close alice", st.Close())
+
+	forged := oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDCalendar), MessageID: taskID})
+	for name, req := range map[string]string{
+		"DeleteItem": deleteCalendarReq("SendToNone", `<t:ItemId Id="`+forged+`"/>`),
+		"MoveItem":   moveItemReq(forged, "deleteditems", ""),
+		"SendItem":   sendDelegateItemReq(forged),
+	} {
+		_, out := soapPost(t, ts, req, true)
+		wantContains(t, name+" of a forged id", out, "ErrorItemNotFound")
+	}
+
+	st, err = objectstore.Open(paths["alice@hermex.test"])
+	mustNoErr(t, "reopen alice", err)
+	defer st.Close()
+	fid, err := st.MessageFolder(taskID)
+	mustNoErr(t, "find the task", err)
+	wantEq(t, "the task's folder", fid, int64(mapi.PrivateFIDTasks))
 }
 
 // TestDeleteItemDeletesACalendarItem proves DeleteItem removes a meeting the

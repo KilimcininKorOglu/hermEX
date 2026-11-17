@@ -180,7 +180,7 @@ func consumeDraft(st *objectstore.Store, id oxews.ItemID, raw []byte, save bool,
 // the send may proceed.
 func checkSendAccess(st *objectstore.Store, sess *session, id oxews.ItemID, isOwn, save bool, saveFID int64) string {
 	if isOwn {
-		return ""
+		return checkItemFolder(st, id)
 	}
 	if code := checkItemAccess(st, id, sess.user, mapi.FrightsReadAny); code != "" {
 		return code
