@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -204,19 +203,22 @@ func (d *SQLDirectory) UpsertLDAPUser(username string, externid []byte, maildir 
 	case err != nil:
 		return false, err
 	}
-	if _, err = d.db.Exec(
+	tx, err := d.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec(
 		`INSERT INTO users
 		   (username, password, domain_id, homeserver, maildir, lang, timezone, privilege_bits, address_status, display_type, externid)
 		 VALUES (?, '', ?, 0, ?, '', '', ?, 0, 0, ?)`,
 		username, domainID, maildir, privIMAPPOP3|privSMTP, externid); err != nil {
 		return false, err
 	}
-	if maildir != "" {
-		if err = os.MkdirAll(maildir, 0o700); err != nil {
-			return false, err
-		}
+	if err = provisionMailbox(maildir); err != nil {
+		return false, err
 	}
-	return true, nil
+	return true, tx.Commit()
 }
 
 // ErrInsecureLDAP rejects a configuration that would bind in the clear. The

@@ -116,6 +116,9 @@ func (d *SQLDirectory) CreateRoom(email, displayName, maildir string, capacity i
 	if err := insertRoomProperties(tx, id, displayName, capacity); err != nil {
 		return 0, err
 	}
+	if err := provisionMailbox(maildir); err != nil {
+		return 0, err
+	}
 	return id, tx.Commit()
 }
 

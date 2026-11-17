@@ -10,6 +10,7 @@ import (
 
 	mysqldriver "github.com/go-sql-driver/mysql"
 
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
 
@@ -235,6 +236,57 @@ func TestResolveOpensStoreAcrossPartitions(t *testing.T) {
 		wantEq(t, "Resolve found "+tc.addr, ok, true)
 		wantEq(t, "the path "+tc.addr+" resolves to", path, tc.want)
 		wantSeededStore(t, path)
+	}
+}
+
+// TestCreatingAnAccountProvisionsItsMailbox proves the operator's rule: an
+// account is usable the moment it is created, so its mailbox exists with the
+// standard folders before any mail arrives or anyone signs in. That holds for a
+// user (panel and CLI), an LDAP-synced user and a room. A mailbox that cannot be
+// created fails the create and leaves no account behind, so a retry can succeed.
+func TestCreatingAnAccountProvisionsItsMailbox(t *testing.T) {
+	d, _ := freshDirectory(t)
+	mustCreateDomain(t, d, t.TempDir(), "hermex.test")
+	root := t.TempDir()
+
+	_, err := d.CreateUser("alice@hermex.test", "pw", filepath.Join(root, "alice"))
+	mustNoErr(t, "create alice", err)
+	_, err = d.UpsertLDAPUser("bob@hermex.test", []byte{0x01}, filepath.Join(root, "bob"))
+	mustNoErr(t, "sync bob from LDAP", err)
+	_, err = d.CreateRoom("room1@hermex.test", "Room 1", filepath.Join(root, "room1"), 4, false)
+	mustNoErr(t, "create the room", err)
+	for _, name := range []string{"alice", "bob", "room1"} {
+		wantProvisioned(t, filepath.Join(root, name))
+	}
+
+	// A path under a regular file cannot become a directory.
+	blocker := filepath.Join(root, "blocker")
+	mustNoErr(t, "write the blocker file", os.WriteFile(blocker, nil, 0o600))
+	_, err = d.CreateUser("carol@hermex.test", "pw", filepath.Join(blocker, "carol"))
+	if err == nil {
+		t.Fatal("creating an account whose mailbox cannot be made succeeded")
+	}
+	if _, ok := d.Resolve("carol@hermex.test"); ok {
+		t.Error("a failed create left the account behind")
+	}
+	_, err = d.CreateUser("carol@hermex.test", "pw", filepath.Join(root, "carol"))
+	mustNoErr(t, "retry the create", err)
+	wantProvisioned(t, filepath.Join(root, "carol"))
+}
+
+// wantProvisioned proves a mailbox exists without creating it: OpenExisting
+// refuses a path no one provisioned, and the standard folders are present.
+func wantProvisioned(t *testing.T, path string) {
+	t.Helper()
+	st, err := objectstore.OpenExisting(path)
+	mustNoErr(t, "open the provisioned mailbox at "+path, err)
+	defer st.Close()
+	for _, fid := range []uint64{mapi.PrivateFIDInbox, mapi.PrivateFIDSentItems, mapi.PrivateFIDDeletedItems, mapi.PrivateFIDCalendar, mapi.PrivateFIDContacts} {
+		ok, err := st.FolderExists(int64(fid))
+		mustNoErr(t, "look up a standard folder", err)
+		if !ok {
+			t.Errorf("mailbox %s lacks the standard folder %d", path, fid)
+		}
 	}
 }
 

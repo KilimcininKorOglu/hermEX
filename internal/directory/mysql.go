@@ -13,6 +13,7 @@ import (
 
 	"hermex/internal/crypt"
 	"hermex/internal/migrate"
+	"hermex/internal/objectstore"
 )
 
 // privilege_bits: the service privileges a user holds. The bit positions match
@@ -737,7 +738,12 @@ func (d *SQLDirectory) CreateUser(username, password, maildir string) (int64, er
 	if err != nil {
 		return 0, err
 	}
-	res, err := d.db.Exec(
+	tx, err := d.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(
 		`INSERT INTO users
 		   (username, password, domain_id, homeserver, maildir, lang, timezone, privilege_bits, address_status, display_type)
 		 VALUES (?, ?, ?, 0, ?, '', '', ?, 0, 0)`,
@@ -745,12 +751,30 @@ func (d *SQLDirectory) CreateUser(username, password, maildir string) (int64, er
 	if err != nil {
 		return 0, err
 	}
-	if maildir != "" {
-		if err := os.MkdirAll(maildir, 0o700); err != nil {
-			return 0, err
-		}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
 	}
-	return res.LastInsertId()
+	if err := provisionMailbox(maildir); err != nil {
+		return 0, err
+	}
+	return id, tx.Commit()
+}
+
+// provisionMailbox creates an account's mailbox with its standard folders, so the
+// account is usable the moment it exists rather than after its first delivery or
+// sign-in. Account creation calls it inside the transaction that inserts the
+// account, so a mailbox that cannot be made leaves no account behind. An empty
+// maildir (an account with no mailbox) creates nothing.
+func provisionMailbox(maildir string) error {
+	if maildir == "" {
+		return nil
+	}
+	st, err := objectstore.Open(maildir)
+	if err != nil {
+		return fmt.Errorf("directory: create the mailbox: %w", err)
+	}
+	return st.Close()
 }
 
 // domainWithRoom validates an address and resolves the domain it belongs to,
