@@ -81,3 +81,32 @@ func TestMeetingResponseRefusesTheOrganizersOwnMeeting(t *testing.T) {
 		t.Errorf("a refused response still sent %d messages", n)
 	}
 }
+
+// TestMeetingResponseRefusesWhatIsNoMeeting proves a RequestId that names no
+// meeting is refused with Status 2 ([MS-ASCMD] MeetingResponse: the meeting
+// request is invalid) and sends nothing: a plain appointment with no attendees,
+// and ids the server never issued.
+func TestMeetingResponseRefusesWhatIsNoMeeting(t *testing.T) {
+	ts, attendee, organizer := organizerServer(t)
+	st, err := objectstore.Open(attendee)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.CreateMessage(int64(mapi.PrivateFIDCalendar), &oxcmail.Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: "IPM.Appointment"},
+		{Tag: mapi.PrSubject, Value: "Dentist"},
+	}})
+	st.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	post := func(n *wbxml.Node) *wbxml.Node { return postVersioned(t, ts, "16.1", "MeetingResponse", n) }
+	for _, rid := range []string{strconv.FormatInt(id, 10), "abc", "-1", "999999999"} {
+		if got := respondInCalendar(t, post, rid, "1"); got != "2" {
+			t.Errorf("RequestId %q Status = %q, want 2", rid, got)
+		}
+	}
+	if n := len(organizerInbox(t, organizer)); n != 0 {
+		t.Errorf("a refused response still sent %d messages", n)
+	}
+}
