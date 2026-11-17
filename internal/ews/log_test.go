@@ -1,11 +1,13 @@
 package ews
 
 import (
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 
+	"hermex/internal/directory"
 	"hermex/internal/logging"
 )
 
@@ -30,6 +32,36 @@ func (c *captureSink) find(name string) (logging.Event, bool) {
 		}
 	}
 	return logging.Event{}, false
+}
+
+// TestFailedLoginIsRecordedWithoutThePassword proves a rejected login records
+// auth.fail with the user it tried, as IMAP and POP3 do, and that no event
+// carries the password the client sent.
+func TestFailedLoginIsRecordedWithoutThePassword(t *testing.T) {
+	const tried = "Wrong-Secret-Value-42"
+	sink := &captureSink{}
+	accs := directory.StaticAccounts{"alice@test": {Password: "right", MailboxPath: t.TempDir()}}
+	srv := NewServer(accs, accs, "mail.hermex.test")
+	srv.Logger = logging.New(sink)
+	r := httptest.NewRequest("POST", "/EWS/Exchange.asmx", nil)
+	r.SetBasicAuth("alice@test", tried)
+	if _, _, ok := srv.basicAuth(httptest.NewRecorder(), r); ok {
+		t.Fatal("a wrong password was accepted")
+	}
+	e, ok := sink.find("auth.fail")
+	if !ok {
+		t.Fatal("the failed login recorded no auth.fail event")
+	}
+	if e.User != "alice@test" {
+		t.Errorf("auth.fail user = %q, want alice@test", e.User)
+	}
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	for _, e := range sink.events {
+		if strings.Contains(fmt.Sprintf("%+v", e), tried) {
+			t.Errorf("event %q carries the password the client sent", e.Name)
+		}
+	}
 }
 
 // TestEWSLogsOperation proves dispatch logs an EWS operation event with the SOAP
