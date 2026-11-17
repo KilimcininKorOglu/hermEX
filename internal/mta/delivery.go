@@ -125,6 +125,8 @@ func (s *session) Auth(username, password string) bool {
 		if s.limiter != nil {
 			s.limiter.Fail(s.remoteAddr, username)
 		}
+		// Record the attempt with the user it tried, never the password.
+		s.logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.MTA, Name: "auth.fail", User: username, RemoteAddr: s.remoteAddr})
 		return false
 	}
 	if s.limiter != nil {

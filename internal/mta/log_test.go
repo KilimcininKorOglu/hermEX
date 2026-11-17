@@ -1,7 +1,9 @@
 package mta
 
 import (
+	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -20,6 +22,40 @@ func (c *captureSink) Write(e logging.Event) {
 	c.mu.Lock()
 	c.events = append(c.events, e)
 	c.mu.Unlock()
+}
+
+// TestFailedSubmissionLoginIsRecordedWithoutThePassword proves a rejected SMTP
+// AUTH records auth.fail with the user it tried and the client address, as IMAP
+// and POP3 do, and that no event carries the password the client sent.
+func TestFailedSubmissionLoginIsRecordedWithoutThePassword(t *testing.T) {
+	const tried = "Wrong-Secret-Value-42"
+	sink := &captureSink{}
+	accounts := directory.StaticAccounts{"alice@test": {Password: "right", MailboxPath: t.TempDir()}}
+	b := &Backend{Accounts: accounts, Logger: logging.New(sink)}
+	sess, err := b.NewSession("203.0.113.5:1234")
+	mustNoErr(t, "open the session", err)
+	authn, ok := sess.(interface{ Auth(user, pass string) bool })
+	if !ok {
+		t.Fatal("the session offers no AUTH")
+	}
+	if authn.Auth("alice@test", tried) {
+		t.Fatal("a wrong password was accepted")
+	}
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	found := false
+	for _, e := range sink.events {
+		if e.Name == "auth.fail" && e.User == "alice@test" && e.RemoteAddr == "203.0.113.5:1234" {
+			found = true
+		}
+		if strings.Contains(fmt.Sprintf("%+v", e), tried) {
+			t.Errorf("event %q carries the password the client sent", e.Name)
+		}
+	}
+	if !found {
+		t.Error("the failed login recorded no auth.fail event for the user and address")
+	}
 }
 
 // TestDeliveryLogsRecipient proves the MTA logs a delivery.ok event tagged with
