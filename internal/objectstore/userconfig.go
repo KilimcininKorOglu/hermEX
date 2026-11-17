@@ -59,6 +59,30 @@ func (s *Store) GetUserConfigs() ([]UserConfig, error) {
 	return data.Records, nil
 }
 
+// UpdateUserConfigs applies update to the stored user-configuration objects
+// inside one write transaction, so a configuration another request wrote between
+// the read and the write is kept. update returns the new set and whether to
+// write it; an error from update is returned unchanged and nothing is written.
+func (s *Store) UpdateUserConfigs(update func([]UserConfig) ([]UserConfig, bool, error)) error {
+	return s.updateStoreString(mapi.PrUserConfigurations, func(raw string) (string, bool, error) {
+		var data userConfigStore
+		if raw != "" {
+			if err := json.Unmarshal([]byte(raw), &data); err != nil {
+				return "", false, err
+			}
+		}
+		next, write, err := update(data.Records)
+		if err != nil || !write {
+			return "", false, err
+		}
+		b, err := json.Marshal(userConfigStore{Records: next})
+		if err != nil {
+			return "", false, err
+		}
+		return string(b), true, nil
+	})
+}
+
 // SetUserConfigs replaces the mailbox's stored user-configuration objects.
 func (s *Store) SetUserConfigs(records []UserConfig) error {
 	b, err := json.Marshal(userConfigStore{Records: records})

@@ -5,12 +5,17 @@ import (
 	"crypto/md5"
 	"encoding/binary"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"net/http"
 
 	"hermex/internal/objectstore"
 	"hermex/internal/oxews"
 )
+
+// errUserConfigMissing leaves a config update with no stored config to change,
+// answered as ErrorItemNotFound.
+var errUserConfigMissing = errors.New("ews: user configuration not found")
 
 // User-configuration objects (MS-OXWSUSRCFG) are named blobs a client attaches to
 // a folder to roam its own settings (OWA options, the Calendar working hours, a
@@ -189,18 +194,16 @@ func (s *Server) handleCreateUserConfiguration(w http.ResponseWriter, inner []by
 		return
 	}
 	defer st.Close()
-	recs, err := st.GetUserConfigs()
-	if err != nil {
-		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
-		return
-	}
 	rec := configFromRequest(fid, req.Config)
-	if idx := indexUserConfig(recs, fid, rec.Name); idx >= 0 {
-		recs[idx] = rec
-	} else {
-		recs = append(recs, rec)
-	}
-	if err := st.SetUserConfigs(recs); err != nil {
+	err = st.UpdateUserConfigs(func(recs []objectstore.UserConfig) ([]objectstore.UserConfig, bool, error) {
+		if idx := indexUserConfig(recs, fid, rec.Name); idx >= 0 {
+			recs[idx] = rec
+		} else {
+			recs = append(recs, rec)
+		}
+		return recs, true, nil
+	})
+	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
@@ -228,18 +231,19 @@ func (s *Server) handleUpdateUserConfiguration(w http.ResponseWriter, inner []by
 		return
 	}
 	defer st.Close()
-	recs, err := st.GetUserConfigs()
-	if err != nil {
-		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
-		return
-	}
-	idx := indexUserConfig(recs, fid, req.Config.Name.Name)
-	if idx < 0 {
+	err = st.UpdateUserConfigs(func(recs []objectstore.UserConfig) ([]objectstore.UserConfig, bool, error) {
+		idx := indexUserConfig(recs, fid, req.Config.Name.Name)
+		if idx < 0 {
+			return nil, false, errUserConfigMissing
+		}
+		recs[idx] = configFromRequest(fid, req.Config)
+		return recs, true, nil
+	})
+	if errors.Is(err, errUserConfigMissing) {
 		writeResponse(w, updateUserConfigResponse{Messages: []ucActionMessage{{ResponseClass: "Error", ResponseCode: "ErrorItemNotFound"}}})
 		return
 	}
-	recs[idx] = configFromRequest(fid, req.Config)
-	if err := st.SetUserConfigs(recs); err != nil {
+	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
@@ -265,18 +269,18 @@ func (s *Server) handleDeleteUserConfiguration(w http.ResponseWriter, inner []by
 		return
 	}
 	defer st.Close()
-	recs, err := st.GetUserConfigs()
-	if err != nil {
-		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
-		return
-	}
-	idx := indexUserConfig(recs, fid, req.Name.Name)
-	if idx < 0 {
+	err = st.UpdateUserConfigs(func(recs []objectstore.UserConfig) ([]objectstore.UserConfig, bool, error) {
+		idx := indexUserConfig(recs, fid, req.Name.Name)
+		if idx < 0 {
+			return nil, false, errUserConfigMissing
+		}
+		return append(recs[:idx], recs[idx+1:]...), true, nil
+	})
+	if errors.Is(err, errUserConfigMissing) {
 		writeResponse(w, deleteUserConfigResponse{Messages: []ucActionMessage{{ResponseClass: "Error", ResponseCode: "ErrorItemNotFound"}}})
 		return
 	}
-	recs = append(recs[:idx], recs[idx+1:]...)
-	if err := st.SetUserConfigs(recs); err != nil {
+	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
