@@ -250,6 +250,7 @@ func (s *Server) basicAuth(w http.ResponseWriter, r *http.Request) (user, mailbo
 		if s.limiter != nil {
 			s.limiter.Fail(addr, u)
 		}
+		s.mapiEvent(r, logging.LevelWarn, logging.MAPI, "auth.fail", u, nil)
 	}
 	w.Header().Set("WWW-Authenticate", `Basic realm="hermEX"`)
 	http.Error(w, "unauthorized", http.StatusUnauthorized)
