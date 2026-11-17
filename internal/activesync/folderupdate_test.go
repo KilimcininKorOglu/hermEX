@@ -114,9 +114,10 @@ func TestFolderUpdateDuplicate(t *testing.T) {
 	}
 }
 
-// TestFolderUpdateBadSyncKey proves a mismatched sync key reports Status 9.
+// TestFolderUpdateBadSyncKey proves a mismatched sync key reports Status 9
+// ([MS-ASCMD] 2.2.3.177.6) and renames nothing.
 func TestFolderUpdateBadSyncKey(t *testing.T) {
-	ts, _ := seededServer(t)
+	ts, dir := seededServer(t)
 	key := primeHierarchy(t, ts)
 	_, created := postCommand(t, ts, "FolderCreate", folderCreateReq(key, "0", "X"))
 	id := created.ChildText(wbxml.FHServerID)
@@ -124,5 +125,50 @@ func TestFolderUpdateBadSyncKey(t *testing.T) {
 	_, root := postCommand(t, ts, "FolderUpdate", folderUpdateReq("999", id, "0", "Y"))
 	if s := root.ChildText(wbxml.FHStatus); s != "9" {
 		t.Errorf("bad-sync-key Status = %q, want 9", s)
+	}
+	wantRootFolder(t, dir, "X", true)
+	wantRootFolder(t, dir, "Y", false)
+}
+
+// TestFolderUpdateRefusesHostileTargets proves a FolderUpdate naming a target
+// the hierarchy cannot take changes nothing ([MS-ASCMD] 2.2.3.177.6): a parent
+// that does not exist is Status 5, a folder moved under its own subfolder would
+// detach the subtree from the mailbox and is refused, and a ServerId the server
+// never issued names no folder (Status 4).
+func TestFolderUpdateRefusesHostileTargets(t *testing.T) {
+	ts, dir := seededServer(t)
+	key := primeHierarchy(t, ts)
+	_, p := postCommand(t, ts, "FolderCreate", folderCreateReq(key, "0", "Outer"))
+	outer := p.ChildText(wbxml.FHServerID)
+	_, c := postCommand(t, ts, "FolderCreate", folderCreateReq(p.ChildText(wbxml.FHSyncKey), outer, "Inner"))
+	inner := c.ChildText(wbxml.FHServerID)
+	key = c.ChildText(wbxml.FHSyncKey)
+
+	for _, tc := range []struct{ id, parent, want string }{
+		{outer, "999999", "5"},
+		{"abc", "0", "4"},
+	} {
+		_, root := postCommand(t, ts, "FolderUpdate", folderUpdateReq(key, tc.id, tc.parent, "Moved"))
+		wantEq(t, "Status for "+tc.id+" under "+tc.parent, root.ChildText(wbxml.FHStatus), tc.want)
+	}
+	_, root := postCommand(t, ts, "FolderUpdate", folderUpdateReq(key, outer, inner, "Outer"))
+	if s := root.ChildText(wbxml.FHStatus); s == "1" {
+		t.Error("a folder moved under its own subfolder was accepted")
+	}
+	wantRootFolder(t, dir, "Outer", true)
+	wantRootFolder(t, dir, "Moved", false)
+}
+
+// wantRootFolder fails unless a top-level folder of the name exists exactly when
+// present is true.
+func wantRootFolder(t *testing.T, dir, name string, present bool) {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, exists, _ := st.FolderByName(nil, name); exists != present {
+		t.Errorf("top-level folder %q present = %v, want %v", name, exists, present)
 	}
 }
