@@ -3,6 +3,7 @@ package activesync
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"hermex/internal/authlimit"
@@ -75,6 +76,24 @@ func TestBasicAuthThrottlesGuessing(t *testing.T) {
 	// Even the right password waits out the lockout: the account is the key.
 	if code := attempt(t, ts, testUser, testPass); code != http.StatusTooManyRequests {
 		t.Errorf("status for the correct password while locked out = %d, want 429", code)
+	}
+}
+
+// TestBasicAuthThrottleIgnoresAddressCase proves the lockout follows the account,
+// not the spelling of its address. An address compares case-insensitively, so a
+// guesser who rewrites the case after the lockout must still be refused rather
+// than handed a fresh budget of attempts.
+func TestBasicAuthThrottleIgnoresAddressCase(t *testing.T) {
+	ts, calls := throttledServer(t)
+	for range authlimit.DefaultMaxFails {
+		attempt(t, ts, testUser, "wrong")
+	}
+	before := *calls
+	if code := attempt(t, ts, strings.ToUpper(testUser), "wrong"); code != http.StatusTooManyRequests {
+		t.Errorf("status for the upper-case address after the lockout = %d, want 429", code)
+	}
+	if *calls != before {
+		t.Error("the upper-case address had its password checked while the account was locked out")
 	}
 }
 
