@@ -14,7 +14,7 @@ import (
 // folder tree is created by objectstore.Open).
 func seededEWS(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatalf("open store: %v", err)

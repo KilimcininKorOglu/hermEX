@@ -22,8 +22,8 @@ import (
 func delegateServer(t *testing.T) (*httptest.Server, map[string]string) {
 	t.Helper()
 	paths := map[string]string{
-		testUser:          t.TempDir(),
-		"bob@hermex.test": t.TempDir(),
+		testUser:          provisionedDir(t),
+		"bob@hermex.test": provisionedDir(t),
 	}
 	accs := directory.StaticAccounts{
 		testUser:          {Password: testPass, MailboxPath: paths[testUser]},
@@ -1050,13 +1050,13 @@ func TestMeetingResponseCrossMailboxDenied(t *testing.T) {
 // send-on-behalf list.
 func delegateSendServer(t *testing.T, onBehalf []string) (*httptest.Server, *relay.Spool, string, string) {
 	t.Helper()
-	bob := t.TempDir()
+	bob := provisionedDir(t)
 	accs := directory.StaticAccounts{
-		testUser:          {Password: testPass, MailboxPath: t.TempDir()},
+		testUser:          {Password: testPass, MailboxPath: provisionedDir(t)},
 		"bob@hermex.test": {Password: testPass, MailboxPath: bob},
 	}
 	srv := NewServer(accs, accs, "mail.hermex.test")
-	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
+	sp, err := relay.Open(filepath.Join(provisionedDir(t), "relay.sqlite3"))
 	mustNoErr(t, "open the relay spool", err)
 	t.Cleanup(func() { mustNoErr(t, "close the relay spool", sp.Close()) })
 	srv.Spool = sp

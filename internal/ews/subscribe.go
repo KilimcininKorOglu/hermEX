@@ -216,7 +216,7 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, inner []byte, sess *sess
 	}
 	allFolders := sub.SubscribeToAllFolders || len(folderIDs) == 0
 
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
@@ -388,7 +388,7 @@ func (s *Server) getEvents(id, user string) (getEventsResponseMessage, error) {
 	sub.mu.Lock()
 	defer sub.mu.Unlock()
 
-	st, err := objectstore.Open(sub.mailbox)
+	st, err := objectstore.OpenExisting(sub.mailbox)
 	if err != nil {
 		return getEventsResponseMessage{}, err
 	}

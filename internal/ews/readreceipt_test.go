@@ -25,7 +25,7 @@ func receiptRequest(msgID string) string {
 // the server, alice's mailbox dir and bob's.
 func receiptServer(t *testing.T, raws ...string) (ts *httptest.Server, aliceDir, bobDir string) {
 	t.Helper()
-	aliceDir, bobDir = t.TempDir(), filepath.Join(t.TempDir(), "bob")
+	aliceDir, bobDir = provisionedDir(t), filepath.Join(provisionedDir(t), "bob")
 	for _, raw := range raws {
 		seedRaw(t, aliceDir, int64(mapi.PrivateFIDInbox), raw, time.Unix(1718200000, 0))
 	}

@@ -15,8 +15,8 @@ import (
 func seededRoomsEWS(t *testing.T) *httptest.Server {
 	t.Helper()
 	accs := directory.StaticAccounts{
-		testUser:                {Password: testPass, MailboxPath: t.TempDir()},
-		"boardroom@hermex.test": {Room: true, MailboxPath: t.TempDir()},
+		testUser:                {Password: testPass, MailboxPath: provisionedDir(t)},
+		"boardroom@hermex.test": {Room: true, MailboxPath: provisionedDir(t)},
 	}
 	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
 	t.Cleanup(ts.Close)

@@ -86,7 +86,7 @@ func (s *Server) handleCreateFolder(w http.ResponseWriter, inner []byte, sess *s
 		parent = &p
 	}
 
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
@@ -243,7 +243,7 @@ func (s *Server) handleDeleteFolder(w http.ResponseWriter, inner []byte, sess *s
 		s.soapFault(w, "ErrorInvalidRequest", "DeleteFolder: invalid request", err)
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
@@ -322,7 +322,7 @@ func (s *Server) handleUpdateFolder(w http.ResponseWriter, inner []byte, sess *s
 		s.soapFault(w, "ErrorInvalidRequest", "UpdateFolder: invalid request", err)
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
@@ -503,7 +503,7 @@ func (s *Server) moveCopyFolders(w http.ResponseWriter, inner []byte, sess *sess
 		return
 	}
 
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return

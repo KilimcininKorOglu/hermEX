@@ -26,7 +26,7 @@ func (f fakeDLDir) ExpandMList(listAddr, _ string) ([]string, directory.MListRes
 func dlServer(t *testing.T, lists map[string][]string) *httptest.Server {
 	t.Helper()
 	d := fakeDLDir{
-		StaticAccounts: directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: t.TempDir()}},
+		StaticAccounts: directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: provisionedDir(t)}},
 		lists:          lists,
 	}
 	ts := httptest.NewServer(NewServer(d, d, "mail.hermex.test").Handler())

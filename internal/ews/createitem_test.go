@@ -22,7 +22,7 @@ func createItemReq(disposition, to, subject, body string) string {
 // TestCreateItemSaveOnlyReportsAFailedSave proves a draft the store could not keep
 // is reported as a failure, not as a success carrying no item.
 func TestCreateItemSaveOnlyReportsAFailedSave(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
 	srv := NewServer(accs, accs, "mail.hermex.test")
 	st, err := objectstore.Open(dir)
@@ -120,9 +120,9 @@ func TestCreateItemSendOnly(t *testing.T) {
 func multiAccountServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	accs := directory.StaticAccounts{
-		"alice@hermex.test": {Password: testPass, MailboxPath: t.TempDir()},
-		"alex@hermex.test":  {Password: testPass, MailboxPath: t.TempDir()},
-		"bob@hermex.test":   {Password: testPass, MailboxPath: t.TempDir()},
+		"alice@hermex.test": {Password: testPass, MailboxPath: provisionedDir(t)},
+		"alex@hermex.test":  {Password: testPass, MailboxPath: provisionedDir(t)},
+		"bob@hermex.test":   {Password: testPass, MailboxPath: provisionedDir(t)},
 	}
 	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
 	t.Cleanup(ts.Close)
@@ -157,7 +157,7 @@ func TestResolveNames(t *testing.T) {
 // its own copy and asks for it to be the only one: the caller's Sent Items stays
 // empty on SendAndSaveCopy, and the represented mailbox holds the copy.
 func TestCreateItemLeavesTheOnlyCopyToAnExclusiveMailbox(t *testing.T) {
-	dir, sharedDir := t.TempDir(), t.TempDir()
+	dir, sharedDir := provisionedDir(t), provisionedDir(t)
 	shared, err := objectstore.Open(sharedDir)
 	if err != nil {
 		t.Fatal(err)

@@ -133,7 +133,7 @@ func (s *Server) recipientActiveOOF(caller, address string, now int64) string {
 	if !ok {
 		return ""
 	}
-	st, err := objectstore.Open(path)
+	st, err := objectstore.OpenExisting(path)
 	if err != nil {
 		return ""
 	}

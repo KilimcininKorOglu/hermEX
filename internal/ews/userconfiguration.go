@@ -149,7 +149,7 @@ func (s *Server) handleGetUserConfiguration(w http.ResponseWriter, inner []byte,
 		writeResponse(w, getUserConfigResponse{Messages: []getUserConfigMessage{{ResponseClass: "Error", ResponseCode: code}}})
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
@@ -183,7 +183,7 @@ func (s *Server) handleCreateUserConfiguration(w http.ResponseWriter, inner []by
 		writeResponse(w, createUserConfigResponse{Messages: []ucActionMessage{{ResponseClass: "Error", ResponseCode: code}}})
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
@@ -222,7 +222,7 @@ func (s *Server) handleUpdateUserConfiguration(w http.ResponseWriter, inner []by
 		writeResponse(w, updateUserConfigResponse{Messages: []ucActionMessage{{ResponseClass: "Error", ResponseCode: code}}})
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
@@ -259,7 +259,7 @@ func (s *Server) handleDeleteUserConfiguration(w http.ResponseWriter, inner []by
 		writeResponse(w, deleteUserConfigResponse{Messages: []ucActionMessage{{ResponseClass: "Error", ResponseCode: code}}})
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return

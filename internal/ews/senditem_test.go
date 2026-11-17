@@ -128,7 +128,7 @@ func TestSendItemInvalidSaveSettings(t *testing.T) {
 // recipient must get the TNEF form: SendItem rendered every draft as plain MIME,
 // so a draft Outlook saved and another client sent lost what MIME cannot carry.
 func TestSendItemSendsTNEFToARichInfoRecipient(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	if st, err := objectstore.Open(dir); err != nil {
 		t.Fatal(err)
 	} else {
@@ -186,7 +186,7 @@ func markRichInfo(t *testing.T, dir, itemID string) {
 // queued for outbound relay (carrying the sender's address as the envelope From)
 // and the source draft is consumed.
 func TestSendItemRelaysExternal(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	if st, err := objectstore.Open(dir); err != nil {
 		t.Fatal(err)
 	} else {

@@ -15,7 +15,7 @@ import (
 // lifetime so a streaming test drives the loop to completion in milliseconds.
 func streamServer(t *testing.T) (*Server, *httptest.Server, string) {
 	t.Helper()
-	path := t.TempDir()
+	path := provisionedDir(t)
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: path}}
 	srv := NewServer(accs, accs, "mail.hermex.test")
 	srv.streamInterval = 20 * time.Millisecond

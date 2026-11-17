@@ -29,7 +29,7 @@ const meetingRequestICS = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\n"
 // and returns the mailbox dir and the request's EWS ItemId.
 func seedMeetingRequest(t *testing.T) (string, string) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -191,7 +191,7 @@ func TestMeetingResponseTentativeDedup(t *testing.T) {
 // organizer, so it queues for relay) as the responder, carrying METHOD:REPLY with
 // the attendee's ACCEPTED participation status.
 func TestMeetingResponseNotifiesOrganizer(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	reqID := seedExternalMeetingRequest(t, dir)
 
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
@@ -265,7 +265,7 @@ func TestMeetingResponseKeepsTheSentCopy(t *testing.T) {
 	}{{"SendAndSaveCopy", 1}, {"SendOnly", 0}} {
 		t.Run(tc.disp, func(t *testing.T) {
 			dir, itemID := seedMeetingRequest(t)
-			organizer := t.TempDir()
+			organizer := provisionedDir(t)
 			org, err := objectstore.Open(organizer)
 			mustNoErr(t, "open the organizer's store", err)
 			org.Close()
@@ -308,7 +308,7 @@ func TestMeetingResponseRefusesWhatIsNotAnInvitation(t *testing.T) {
 		{"the organizer's meeting", seedOrganizedMeeting, "ErrorCalendarIsOrganizerForAccept"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
+			dir := provisionedDir(t)
 			st, err := objectstore.Open(dir)
 			mustNoErr(t, "open the store", err)
 			id := tc.seed(t, st)

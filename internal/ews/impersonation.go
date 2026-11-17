@@ -53,7 +53,7 @@ func (s *Server) applyImpersonation(w http.ResponseWriter, sess *session, imp *i
 		writeSOAPFault(w, "ErrorImpersonateUserDenied", "ExchangeImpersonation: not permitted")
 		return false
 	}
-	st, err := objectstore.Open(targetPath)
+	st, err := objectstore.OpenExisting(targetPath)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return false

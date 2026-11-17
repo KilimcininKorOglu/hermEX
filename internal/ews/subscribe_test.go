@@ -15,7 +15,7 @@ import (
 // session for that user and the mailbox path (so a test can seed the store).
 func subServer(t *testing.T) (*Server, *session, string) {
 	t.Helper()
-	path := t.TempDir()
+	path := provisionedDir(t)
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: path}}
 	srv := NewServer(accs, accs, "mail.hermex.test")
 	// Touch the store so the folder tree exists before the first subscribe.
@@ -253,7 +253,7 @@ func TestGetEventsCrossUserDenied(t *testing.T) {
 	srv, sess, _ := subServer(t)
 	id := subscribe(t, srv, sess, subscribeInner(true, "", "CreatedEvent"))
 
-	other := &session{user: "mallory@hermex.test", mailbox: t.TempDir()}
+	other := &session{user: "mallory@hermex.test", mailbox: provisionedDir(t)}
 	if out := getEvents(t, srv, other, id); !strings.Contains(out, "ErrorAccessDenied") {
 		t.Errorf("a cross-user poll must be ErrorAccessDenied: %s", out)
 	}

@@ -17,7 +17,7 @@ import (
 // (so a test can mutate the store directly).
 func seededWithMessage(t *testing.T, raws ...string) (*httptest.Server, string) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatalf("open store: %v", err)

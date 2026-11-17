@@ -11,7 +11,7 @@ import (
 // domains, which is what an out-of-scope pair looks like to a static directory.
 func mailTipsForeignServer(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
-	callerDir, foreignDir := t.TempDir(), t.TempDir()
+	callerDir, foreignDir := provisionedDir(t), provisionedDir(t)
 	accs := directory.StaticAccounts{
 		testUser:         {Password: testPass, MailboxPath: callerDir},
 		"ceo@other.test": {Password: "ceosecret", MailboxPath: foreignDir},
@@ -59,7 +59,7 @@ func TestMailTipsKeepsInScopeOOF(t *testing.T) {
 // directory that cannot answer the scope question yields no tip rather than the
 // whole deployment's out-of-office text.
 func TestMailTipsFailsClosedWithoutScopeModel(t *testing.T) {
-	callerDir, bobDir := t.TempDir(), t.TempDir()
+	callerDir, bobDir := provisionedDir(t), provisionedDir(t)
 	static := directory.StaticAccounts{
 		testUser:          {Password: testPass, MailboxPath: callerDir},
 		"bob@hermex.test": {Password: "bobsecret", MailboxPath: bobDir},

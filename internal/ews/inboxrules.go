@@ -97,7 +97,7 @@ func (s *Server) handleGetInboxRules(w http.ResponseWriter, inner []byte, sess *
 	var req getInboxRulesRequest
 	_ = xml.Unmarshal(inner, &req) // MailboxSmtpAddress is advisory; v1 serves the requester's own inbox
 
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
@@ -441,7 +441,7 @@ func (s *Server) handleUpdateInboxRules(w http.ResponseWriter, inner []byte, ses
 		s.soapFault(w, "ErrorInvalidRequest", "UpdateInboxRules: invalid request", err)
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return

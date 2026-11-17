@@ -93,7 +93,7 @@ func contactPhoto(mailbox, email string) []byte {
 	if mailbox == "" {
 		return nil
 	}
-	st, err := objectstore.Open(mailbox)
+	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
 		return nil
 	}
@@ -107,7 +107,7 @@ func storePhoto(path string) []byte {
 	if path == "" {
 		return nil
 	}
-	st, err := objectstore.Open(path)
+	st, err := objectstore.OpenExisting(path)
 	if err != nil {
 		return nil
 	}

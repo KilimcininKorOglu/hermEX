@@ -32,7 +32,7 @@ func (f *fakeJunkDir) DeleteRecipientRule(_, pattern string) (bool, error) {
 // junkServer builds a server backed by a block-list-capable directory.
 func junkServer(t *testing.T) (*httptest.Server, string, *fakeJunkDir) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	d := &fakeJunkDir{
 		StaticAccounts: directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}},
 		blocked:        map[string]bool{},

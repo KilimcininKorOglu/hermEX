@@ -304,7 +304,7 @@ func (s *Server) streamChunk(ids []string) (getStreamingEventsResponseMessage, [
 func pollOneForStream(id string, sub *ewsSubscription) notification {
 	sub.mu.Lock()
 	defer sub.mu.Unlock()
-	st, err := objectstore.Open(sub.mailbox)
+	st, err := objectstore.OpenExisting(sub.mailbox)
 	if err != nil {
 		return notification{SubscriptionID: id, Events: []notifEvent{statusEvent()}}
 	}

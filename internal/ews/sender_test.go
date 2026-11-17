@@ -28,7 +28,7 @@ func (a aliasAccounts) Identities(user string) ([]string, error) {
 // server plus the mailbox directory.
 func senderServer(t *testing.T, alias string) (*httptest.Server, string) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	accs := aliasAccounts{
 		StaticAccounts: directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}},
 		alias:          alias,
@@ -133,7 +133,7 @@ func onBehalfServer(t *testing.T, other string) (*httptest.Server, string) {
 // of the two send grants.
 func grantingServer(t *testing.T, other string, onBehalf bool) (*httptest.Server, string) {
 	t.Helper()
-	dir, otherDir := t.TempDir(), t.TempDir()
+	dir, otherDir := provisionedDir(t), provisionedDir(t)
 	st, err := objectstore.Open(otherDir)
 	if err != nil {
 		t.Fatal(err)

@@ -116,7 +116,7 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *ses
 	if disp == "" {
 		disp = "SaveOnly"
 	}
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return

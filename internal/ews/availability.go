@@ -181,7 +181,7 @@ func (s *Server) freeBusyForTarget(sess *session, email string, windowStart, win
 	if !ok {
 		return errorFreeBusy("ErrorMailRecipientNotFound")
 	}
-	st, err := objectstore.Open(targetPath)
+	st, err := objectstore.OpenExisting(targetPath)
 	if err != nil {
 		return errorFreeBusy("ErrorFreeBusyGenerationFailed")
 	}

@@ -17,7 +17,7 @@ import (
 // the test can read back.
 func spooledServer(t *testing.T) (*httptest.Server, string, *relay.Spool) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)

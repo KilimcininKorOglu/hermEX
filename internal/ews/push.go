@@ -82,7 +82,7 @@ func (s *Server) handlePushSubscribe(w http.ResponseWriter, req *pushSubscriptio
 	}
 	allFolders := all || len(folderIDs) == 0
 
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
@@ -185,7 +185,7 @@ func (s *Server) pushWorker(id string, sub *ewsSubscription) {
 // wake with nothing new sends nothing.
 func (s *Server) pushPollAndSend(id string, sub *ewsSubscription, heartbeat bool, failures *int) bool {
 	sub.mu.Lock()
-	st, err := objectstore.Open(sub.mailbox)
+	st, err := objectstore.OpenExisting(sub.mailbox)
 	if err != nil {
 		sub.mu.Unlock()
 		return true // transient store error; keep the subscription

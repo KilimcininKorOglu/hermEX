@@ -114,7 +114,7 @@ func (s *Server) handleGetUserOofSettings(w http.ResponseWriter, inner []byte, s
 		return
 	}
 
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		writeResponse(w, getUserOofSettingsResponse{
 			ResponseMessage: oofResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"},
@@ -154,7 +154,7 @@ func (s *Server) handleSetUserOofSettings(w http.ResponseWriter, inner []byte, s
 		return
 	}
 
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		writeResponse(w, setOofError("ErrorInternalServerError"))
 		return

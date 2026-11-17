@@ -4,10 +4,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"hermex/internal/directory"
+	"hermex/internal/objectstore"
 )
 
 const (
@@ -15,13 +18,61 @@ const (
 	testPass = "secret"
 )
 
+// provisionedDir returns a fresh directory holding a created mailbox, the state
+// account creation leaves.
+func provisionedDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 // newTestServer builds an EWS server backed by a single static test account.
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: t.TempDir()}}
+	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: provisionedDir(t)}}
 	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
 	t.Cleanup(ts.Close)
 	return ts
+}
+
+// TestRequestsNeverCreateAMissingMailbox proves an EWS request for an account
+// whose mailbox is missing fails and leaves it missing. A mailbox is made when
+// its account is created; a lost one (a deleted directory, an unmounted volume)
+// must not come back as an empty mailbox the client then syncs against.
+func TestRequestsNeverCreateAMissingMailbox(t *testing.T) {
+	gone := filepath.Join(t.TempDir(), "gone")
+	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: gone}}
+	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
+	t.Cleanup(ts.Close)
+
+	body := wrapRequest(`<GetUserOofSettingsRequest xmlns="` + nsMessages + `">` +
+		`<Mailbox xmlns="` + nsTypes + `"><Address>` + testUser + `</Address></Mailbox>` +
+		`</GetUserOofSettingsRequest>`)
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/EWS/Exchange.asmx", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.SetBasicAuth(testUser, testPass)
+	req.Header.Set("Content-Type", "text/xml; charset=utf-8")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if strings.Contains(string(out), "NoError") {
+		t.Errorf("GetUserOofSettings on a missing mailbox succeeded:\n%s", out)
+	}
+	if _, err := os.Stat(gone); !os.IsNotExist(err) {
+		t.Errorf("an EWS request created the missing mailbox: %v", err)
+	}
 }
 
 // wrapRequest wraps an operation element in a minimal SOAP request envelope.

@@ -19,14 +19,14 @@ const impersonationTargetAddr = "boss@hermex.test"
 // impersonation; otherwise the caller holds no grant.
 func seededImpersonationEWS(t *testing.T, marker string, delegated bool) *httptest.Server {
 	t.Helper()
-	callerDir := t.TempDir()
+	callerDir := provisionedDir(t)
 	cst, err := objectstore.Open(callerDir)
 	if err != nil {
 		t.Fatalf("open caller store: %v", err)
 	}
 	cst.Close()
 
-	targetDir := t.TempDir()
+	targetDir := provisionedDir(t)
 	tst, err := objectstore.Open(targetDir)
 	if err != nil {
 		t.Fatalf("open target store: %v", err)

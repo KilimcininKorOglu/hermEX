@@ -201,7 +201,7 @@ func (s *Server) handleGetDelegate(w http.ResponseWriter, inner []byte, sess *se
 		return
 	}
 
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
@@ -449,7 +449,7 @@ func (s *Server) handleAddDelegate(w http.ResponseWriter, inner []byte, sess *se
 		writeSOAPFault(w, "ErrorAccessDenied", "AddDelegate: managing another mailbox's delegates is not supported")
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
@@ -503,7 +503,7 @@ func (s *Server) handleRemoveDelegate(w http.ResponseWriter, inner []byte, sess 
 		writeSOAPFault(w, "ErrorAccessDenied", "RemoveDelegate: managing another mailbox's delegates is not supported")
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
@@ -551,7 +551,7 @@ func (s *Server) handleUpdateDelegate(w http.ResponseWriter, inner []byte, sess 
 		writeSOAPFault(w, "ErrorAccessDenied", "UpdateDelegate: managing another mailbox's delegates is not supported")
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return

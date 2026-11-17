@@ -32,7 +32,7 @@ func (s *Server) handleMarkAllItemsAsRead(w http.ResponseWriter, inner []byte, s
 		s.soapFault(w, "ErrorInvalidRequest", "MarkAllItemsAsRead: invalid request", err)
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return

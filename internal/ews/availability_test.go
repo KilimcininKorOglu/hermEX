@@ -17,8 +17,8 @@ import (
 func availabilityServer(t *testing.T) (*httptest.Server, map[string]string) {
 	t.Helper()
 	paths := map[string]string{
-		"alice@hermex.test": t.TempDir(),
-		"bob@hermex.test":   t.TempDir(),
+		"alice@hermex.test": provisionedDir(t),
+		"bob@hermex.test":   provisionedDir(t),
 	}
 	accs := directory.StaticAccounts{
 		"alice@hermex.test": {Password: testPass, MailboxPath: paths["alice@hermex.test"]},

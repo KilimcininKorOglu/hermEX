@@ -14,7 +14,7 @@ import (
 // mailbox path, so a test can inspect the store directly.
 func oofServer(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
 	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
 	t.Cleanup(ts.Close)
@@ -25,7 +25,7 @@ func oofServer(t *testing.T) (*httptest.Server, string) {
 // account, returning the second account's mailbox path for the denial test.
 func oofTwoAccountServer(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
-	aliceDir, bobDir := t.TempDir(), t.TempDir()
+	aliceDir, bobDir := provisionedDir(t), provisionedDir(t)
 	accs := directory.StaticAccounts{
 		testUser:          {Password: testPass, MailboxPath: aliceDir},
 		"bob@hermex.test": {Password: "bobsecret", MailboxPath: bobDir},

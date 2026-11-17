@@ -24,7 +24,7 @@ func (failingGAL) SearchGAL(string, string, int) ([]directory.GALEntry, error) {
 // so a directory outage looked like an empty directory and was recorded nowhere.
 func TestAddressBookFailureIsReported(t *testing.T) {
 	accs := failingGAL{directory.StaticAccounts{
-		"alice@hermex.test": {Password: testPass, MailboxPath: t.TempDir()},
+		"alice@hermex.test": {Password: testPass, MailboxPath: provisionedDir(t)},
 	}}
 	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
 	t.Cleanup(ts.Close)

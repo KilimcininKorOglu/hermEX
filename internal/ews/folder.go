@@ -581,7 +581,7 @@ func hierarchyDiff(st *objectstore.Store, all []objectstore.FolderInfo, prev []i
 // openFolders opens the session's store and lists its folders, writing a Fault
 // and returning ok=false on error.
 func (s *Server) openFolders(w http.ResponseWriter, sess *session) (*objectstore.Store, []objectstore.FolderInfo, bool) {
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return nil, nil, false
@@ -735,7 +735,7 @@ func (c *storeCache) open(sess *session, mailbox string) (*objectstore.Store, []
 	if st, ok := c.stores[dir]; ok {
 		return st, c.folders[dir], isOwn, ""
 	}
-	st, err := objectstore.Open(dir)
+	st, err := objectstore.OpenExisting(dir)
 	if err != nil {
 		return nil, nil, false, "ErrorInternalServerError"
 	}

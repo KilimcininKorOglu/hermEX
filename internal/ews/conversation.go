@@ -146,7 +146,7 @@ func (s *Server) handleFindConversation(w http.ResponseWriter, inner []byte, ses
 		writeResponse(w, findConversationResponse{ResponseClass: "Error", ResponseCode: "ErrorFolderNotFound"})
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		writeResponse(w, findConversationResponse{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"})
 		return
@@ -261,7 +261,7 @@ func (s *Server) handleGetConversationItems(w http.ResponseWriter, inner []byte,
 		s.soapFault(w, "ErrorInvalidRequest", "GetConversationItems: invalid request", err)
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
@@ -356,7 +356,7 @@ func (s *Server) handleApplyConversationAction(w http.ResponseWriter, inner []by
 		s.soapFault(w, "ErrorInvalidRequest", "ApplyConversationAction: invalid request", err)
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return

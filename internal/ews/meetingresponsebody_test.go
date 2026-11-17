@@ -26,7 +26,7 @@ func meetingResponseReqWith(verb, refItemID, disp, extra string) string {
 // response object and returns the one reply the relay spool queued for them.
 func respondAndClaim(t *testing.T, verb, extra string) []byte {
 	t.Helper()
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	reqID := seedExternalMeetingRequest(t, dir)
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
 	srv := NewServer(accs, accs, "mail.hermex.test")
@@ -71,7 +71,7 @@ func TestMeetingResponseRefusesABadProposal(t *testing.T) {
 			"ErrorCalendarEndDateIsEarlierThanStartDate"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
+			dir := provisionedDir(t)
 			reqID := seedExternalMeetingRequest(t, dir)
 			ts := meetingServer(t, dir)
 			itemID := oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDInbox), MessageID: reqID})

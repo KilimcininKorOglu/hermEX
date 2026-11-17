@@ -29,8 +29,8 @@ func hidingServer(t *testing.T, mask uint32) *httptest.Server {
 	t.Helper()
 	accs := hidingAccounts{
 		StaticAccounts: directory.StaticAccounts{
-			"alice@hermex.test": {Password: testPass, MailboxPath: t.TempDir()},
-			"alex@hermex.test":  {Password: testPass, MailboxPath: t.TempDir()},
+			"alice@hermex.test": {Password: testPass, MailboxPath: provisionedDir(t)},
+			"alex@hermex.test":  {Password: testPass, MailboxPath: provisionedDir(t)},
 		},
 		hidden: map[string]uint32{"alex@hermex.test": mask},
 	}

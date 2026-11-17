@@ -168,7 +168,7 @@ func (s *Server) searchOwnContacts(sess *session, query string, limit int) []obj
 	if limit <= 0 {
 		return nil
 	}
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		return nil
 	}
@@ -226,7 +226,7 @@ func contactPersona(mailbox, target string) *personaOut {
 	if mailbox == "" {
 		return nil
 	}
-	st, err := objectstore.Open(mailbox)
+	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
 		return nil
 	}
