@@ -58,7 +58,7 @@ RUNFLAG := $(if $(RUN),-run '$(RUN)',)
 # benchmark in PKG.
 BENCH ?= .
 
-.PHONY: all build test test-host test-race bench vet fmt fmt-check gate gate-host lint lint-modernize require-golangci-lint audit-deps audit-go audit-npm require-govulncheck tidy up down images rebuild clean help compose-check dump-db dump-mail restore-db version release
+.PHONY: all build test test-host test-race bench vet fmt fmt-check gate gate-host lint lint-modernize require-golangci-lint audit-deps audit-go audit-npm require-govulncheck tidy up down images rebuild clean help compose-check dump-db dump-mail provision-mailboxes restore-db version release
 
 all: build
 
@@ -249,6 +249,15 @@ dump-mail:
 	@mkdir -p docker-data/backup
 	@out=docker-data/backup/mail-$$(date +%Y%m%d-%H%M%S); \
 	$(COMPOSE) exec -T dev go run ./cmd/admin -config docker-data/config.json backup-mail all $$out
+
+## provision-mailboxes: create the mailbox of every account that has none on disk
+# An account created before account creation built its mailbox has a directory
+# row and no mailbox until its first delivery or sign-in. This creates those
+# mailboxes once; an existing mailbox is not touched, so it is safe to re-run.
+# It runs in the admin service, which mounts the mailbox volume the daemons read;
+# a path whose data root is not mounted there is skipped and listed.
+provision-mailboxes:
+	$(COMPOSE) exec -T admin /usr/local/bin/hermex-admin -config /config/config.json provision-mailboxes
 
 ## restore-db: load a dump back, e.g. make restore-db DUMP=docker-data/backup/hermex-....sql.gz
 # This REPLACES the current directory: every account, key and policy in the dump

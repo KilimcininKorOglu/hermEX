@@ -204,6 +204,12 @@ func (c *Config) MaildirFor(address string) string {
 	return filepath.Join(c.maildirRoot(address), "user", domain, local)
 }
 
+// MailboxRoots lists every root a mailbox may be placed under: DataDir and the
+// placement pool.
+func (c *Config) MailboxRoots() []string {
+	return append([]string{c.DataDir}, c.DataPartitions...)
+}
+
 // maildirRoot picks a new mailbox's storage root from the placement pool. An
 // empty pool falls back to DataDir, making MaildirFor byte-identical to the
 // single-root behaviour.

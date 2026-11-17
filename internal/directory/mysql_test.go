@@ -274,6 +274,70 @@ func TestCreatingAnAccountProvisionsItsMailbox(t *testing.T) {
 	wantProvisioned(t, filepath.Join(root, "carol"))
 }
 
+// TestProvisionMissingMailboxesRepairsOlderAccounts proves the one-off repair the
+// operator asked for: an account created before mailboxes were made at account
+// creation has a row but no mailbox, and the repair creates exactly those,
+// reporting each, while an existing mailbox and its mail are left untouched. A
+// second run finds nothing to do.
+func TestProvisionMissingMailboxesRepairsOlderAccounts(t *testing.T) {
+	d, _ := freshDirectory(t)
+	mustCreateDomain(t, d, t.TempDir(), "hermex.test")
+	root := t.TempDir()
+	alice := filepath.Join(root, "alice")
+	_, err := d.CreateUser("alice@hermex.test", "pw", alice)
+	mustNoErr(t, "create alice", err)
+	st, err := objectstore.OpenExisting(alice)
+	mustNoErr(t, "open alice", err)
+	_, err = st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("Subject: kept\r\n\r\nbody\r\n"), time.Now(), 0)
+	mustNoErr(t, "deliver to alice", err)
+	mustNoErr(t, "close alice", st.Close())
+
+	// An account from before the change: a row and nothing on disk.
+	old := filepath.Join(root, "old")
+	_, err = d.db.Exec(`INSERT INTO users (username, password, domain_id, homeserver, maildir, lang, timezone, privilege_bits, address_status, display_type)
+		SELECT 'old@hermex.test', '', id, 0, ?, '', '', 0, 0, 0 FROM domains WHERE domainname = 'hermex.test'`, old)
+	mustNoErr(t, "insert the older account", err)
+
+	// Two accounts the repair must not write for: one outside every data root,
+	// and one under a root that is not present (an unmounted data volume).
+	outside := filepath.Join(t.TempDir(), "elsewhere")
+	unmounted := filepath.Join(root, "absent-volume", "user", "ghost")
+	for _, p := range []struct{ user, dir string }{{"stray@hermex.test", outside}, {"ghost@hermex.test", unmounted}} {
+		_, err = d.db.Exec(`INSERT INTO users (username, password, domain_id, homeserver, maildir, lang, timezone, privilege_bits, address_status, display_type)
+			SELECT ?, '', id, 0, ?, '', '', 0, 0, 0 FROM domains WHERE domainname = 'hermex.test'`, p.user, p.dir)
+		mustNoErr(t, "insert "+p.user, err)
+	}
+
+	roots := []string{root, filepath.Join(root, "absent-volume")}
+	created, skipped, err := d.ProvisionMissingMailboxes(roots)
+	mustNoErr(t, "repair", err)
+	if !slices.Equal(created, []string{old}) {
+		t.Errorf("repaired %v, want only %v", created, []string{old})
+	}
+	want := []string{outside, unmounted}
+	slices.Sort(skipped)
+	slices.Sort(want)
+	if !slices.Equal(skipped, want) {
+		t.Errorf("skipped %v, want %v", skipped, want)
+	}
+	for _, p := range []string{outside, unmounted} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("the repair wrote at %s: %v", p, err)
+		}
+	}
+	wantProvisioned(t, old)
+	st, err = objectstore.OpenExisting(alice)
+	mustNoErr(t, "reopen alice", err)
+	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
+	st.Close()
+	mustNoErr(t, "list alice's inbox", err)
+	wantEq(t, "alice's messages after the repair", len(msgs), 1)
+
+	created, _, err = d.ProvisionMissingMailboxes(roots)
+	mustNoErr(t, "repair again", err)
+	wantEq(t, "mailboxes created by a second run", len(created), 0)
+}
+
 // wantProvisioned proves a mailbox exists without creating it: OpenExisting
 // refuses a path no one provisioned, and the standard folders are present.
 func wantProvisioned(t *testing.T, path string) {

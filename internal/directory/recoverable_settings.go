@@ -3,6 +3,10 @@ package directory
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"hermex/internal/objectstore"
@@ -62,6 +66,76 @@ func (d *SQLDirectory) AllMaildirs() ([]string, error) {
 		out = append(out, md)
 	}
 	return out, rows.Err()
+}
+
+// ProvisionMissingMailboxes creates the mailbox of every account that has a
+// mailbox path but no mailbox on disk, the state an account created before
+// account creation built its mailbox is left in. It returns the paths it
+// created; an existing mailbox is not touched.
+//
+// It creates a mailbox only under one of roots that exists: a path outside them,
+// or under a root that is not present (a data volume this process does not
+// have mounted), is returned in skipped instead, so the repair never writes a
+// mailbox somewhere no daemon reads.
+func (d *SQLDirectory) ProvisionMissingMailboxes(roots []string) (created, skipped []string, err error) {
+	dirs, err := d.AllMaildirs()
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, md := range dirs {
+		if !underPresentRoot(md, roots) {
+			skipped = append(skipped, md)
+			continue
+		}
+		made, err := provisionIfMissing(md)
+		if err != nil {
+			return created, skipped, err
+		}
+		if made {
+			created = append(created, md)
+		}
+	}
+	return created, skipped, nil
+}
+
+// underPresentRoot reports whether the root path belongs to exists on disk. A
+// path belongs to the most specific root that contains it, so a partition
+// mounted inside DataDir is not stood in for by DataDir when it is absent.
+func underPresentRoot(path string, roots []string) bool {
+	owner := ""
+	for _, root := range roots {
+		if insideRoot(path, root) && len(root) > len(owner) {
+			owner = root
+		}
+	}
+	if owner == "" {
+		return false
+	}
+	info, err := os.Stat(owner)
+	return err == nil && info.IsDir()
+}
+
+// insideRoot reports whether path lies strictly below root.
+func insideRoot(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	return root != "" && err == nil && rel != "." && !strings.HasPrefix(rel, "..")
+}
+
+// provisionIfMissing creates the mailbox at md when none exists there, reporting
+// whether it did.
+func provisionIfMissing(md string) (bool, error) {
+	st, err := objectstore.OpenExisting(md)
+	switch {
+	case err == nil:
+		return false, st.Close()
+	case errors.Is(err, objectstore.ErrNotProvisioned):
+		if err := provisionMailbox(md); err != nil {
+			return false, fmt.Errorf("directory: provision %s: %w", md, err)
+		}
+		return true, nil
+	default:
+		return false, fmt.Errorf("directory: open %s: %w", md, err)
+	}
 }
 
 // SweepRecoverableItems is the retention sweep: it reads the operator-tunable

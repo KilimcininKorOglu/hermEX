@@ -71,6 +71,8 @@ var commands = []command{
 	{name: "create-domain", args: "<domainname>", minArgs: 2, maxArgs: 2, run: runCreateDomain},
 	{name: "create-user", args: "<email> <password>", minArgs: 3, maxArgs: 3, run: runCreateUser},
 	{name: "create-alias", args: "<alias-address> <user-email>", minArgs: 3, maxArgs: 3, run: runCreateAlias},
+	{name: "provision-mailboxes", note: "create the mailbox of every account that has none on disk; existing mailboxes are not touched",
+		run: runProvisionMailboxes},
 	{name: "set-password", args: "<email> <password> [--no-force-change] [--keep-sessions]",
 		note:    "reset a password; by default the account must change it at the next login and every live session ends",
 		minArgs: 3, maxArgs: 5, run: runSetPassword},
@@ -207,6 +209,20 @@ func runCreateUser(c *cmdContext) {
 		log.Fatalf("hermex-admin: %v", err)
 	}
 	fmt.Printf("user %s created\n", c.args[1])
+}
+
+func runProvisionMailboxes(c *cmdContext) {
+	created, skipped, err := c.dir.ProvisionMissingMailboxes(c.cfg.MailboxRoots())
+	for _, md := range created {
+		fmt.Printf("mailbox created: %s\n", md)
+	}
+	for _, md := range skipped {
+		fmt.Printf("skipped, not under a mounted data root: %s\n", md)
+	}
+	if err != nil {
+		log.Fatalf("hermex-admin: %v", err)
+	}
+	fmt.Printf("%d mailbox(es) created, %d skipped\n", len(created), len(skipped))
 }
 
 func runCreateAlias(c *cmdContext) {
