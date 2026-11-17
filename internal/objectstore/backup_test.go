@@ -2,12 +2,14 @@ package objectstore
 
 import (
 	"bytes"
+	"database/sql"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"hermex/internal/atomicfile"
 	"hermex/internal/mapi"
 )
 
@@ -29,6 +31,55 @@ func countFiles(t *testing.T, root string) int {
 		t.Fatal(err)
 	}
 	return n
+}
+
+// TestFailedSnapshotKeepsThePreviousCopy proves an interrupted snapshot never
+// costs the last good backup: the previous copy stays whole under its name and
+// nothing is left beside it, because the snapshot is written to a temporary name
+// and only moved over the copy once complete.
+func TestFailedSnapshotKeepsThePreviousCopy(t *testing.T) {
+	s := openSeededStore(t)
+	dest := t.TempDir()
+	if err := s.Backup(dest); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dest, "objects.sqlite3")
+	before, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "x.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := closed.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := vacuumInto(closed, out); err == nil {
+		t.Fatal("a snapshot from a closed database succeeded")
+	}
+	after, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("the previous copy is gone: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("the previous copy changed under a failed snapshot")
+	}
+	wantNoTempFiles(t, dest)
+}
+
+// wantNoTempFiles fails when dir holds an atomic-write temporary.
+func wantNoTempFiles(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if atomicfile.IsTemp(e.Name()) {
+			t.Errorf("temporary file left: %s", e.Name())
+		}
+	}
 }
 
 // TestBackupProducesAnOpenableMailbox is the property that matters: the copy is a

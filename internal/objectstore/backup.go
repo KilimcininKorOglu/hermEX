@@ -2,6 +2,7 @@ package objectstore
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -50,13 +51,7 @@ func (s *Store) Backup(dest string) error {
 		{s.idxdb, "imapindex.sqlite3"},
 		{s.objdb, "objects.sqlite3"},
 	} {
-		out := filepath.Join(dest, db.name)
-		// VACUUM INTO refuses to overwrite, so a re-run into the same directory
-		// replaces rather than fails: the previous copy is superseded, not merged.
-		if err := os.Remove(out); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-		if _, err := db.handle.Exec(`VACUUM INTO ?`, out); err != nil {
+		if err := vacuumInto(db.handle, filepath.Join(dest, db.name)); err != nil {
 			return fmt.Errorf("objectstore: snapshot %s: %w", db.name, err)
 		}
 		// Test-only seam: fire a concurrent write into the between-snapshots window
@@ -66,6 +61,29 @@ func (s *Store) Backup(dest string) error {
 		}
 	}
 	return copyTree(filepath.Join(s.dir, "cid"), filepath.Join(dest, "cid"))
+}
+
+// vacuumInto snapshots a database to out. VACUUM INTO writes its target in
+// place and refuses an existing one, so the snapshot goes to a fresh name beside
+// out and is moved over it durably: an interrupted run leaves the previous copy,
+// never a torn one under the real name.
+func vacuumInto(db *sql.DB, out string) error {
+	tmp := filepath.Join(filepath.Dir(out), "."+filepath.Base(out)+atomicfile.TempMarker+"vacuum")
+	if err := os.Remove(tmp); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if _, err := db.Exec(`VACUUM INTO ?`, tmp); err != nil {
+		return errors.Join(err, removeIfPresent(tmp))
+	}
+	return atomicfile.SyncRename(tmp, out)
+}
+
+// removeIfPresent deletes path, treating an absent file as done.
+func removeIfPresent(path string) error {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // copyTree copies a directory recursively. A missing source is not an error: a
