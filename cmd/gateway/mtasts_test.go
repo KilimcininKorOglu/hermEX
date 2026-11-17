@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 
 	"hermex/internal/config"
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 )
 
 // fakeMTASTSDir is a directory double for the MTA-STS policy handler.
@@ -52,7 +54,7 @@ func TestMTASTSServesPolicyForActiveDomain(t *testing.T) {
 		settings: directory.MTASTSSettings{Enabled: true, Mode: "testing", MaxAge: 86400}, found: true,
 		domains: []directory.DomainInfo{{Name: "tenant.com", Status: 0}},
 	}
-	h := withMTASTS(&config.Config{Hostname: "mail.hermex.test"}, dir, http.HandlerFunc(proxied))
+	h := withMTASTS(&config.Config{Hostname: "mail.hermex.test"}, dir, nil, http.HandlerFunc(proxied))
 	rec := doRequest(h, "mta-sts.tenant.com", mtastsPolicyPath)
 
 	if rec.Code != http.StatusOK {
@@ -82,7 +84,7 @@ func TestMTASTSDisabledIs404(t *testing.T) {
 		settings: directory.MTASTSSettings{Enabled: false, Mode: "testing", MaxAge: 86400}, found: true,
 		domains: []directory.DomainInfo{{Name: "tenant.com", Status: 0}},
 	}
-	h := withMTASTS(&config.Config{Hostname: "mail.hermex.test"}, dir, http.HandlerFunc(proxied))
+	h := withMTASTS(&config.Config{Hostname: "mail.hermex.test"}, dir, nil, http.HandlerFunc(proxied))
 	rec := doRequest(h, "mta-sts.tenant.com", mtastsPolicyPath)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("disabled status = %d, want 404", rec.Code)
@@ -97,7 +99,7 @@ func TestMTASTSUnknownDomainIs404(t *testing.T) {
 		settings: directory.MTASTSSettings{Enabled: true, Mode: "testing", MaxAge: 86400}, found: true,
 		domains: []directory.DomainInfo{{Name: "tenant.com", Status: 1}}, // suspended
 	}
-	h := withMTASTS(&config.Config{Hostname: "mail.hermex.test"}, dir, http.HandlerFunc(proxied))
+	h := withMTASTS(&config.Config{Hostname: "mail.hermex.test"}, dir, nil, http.HandlerFunc(proxied))
 	if rec := doRequest(h, "mta-sts.other.org", mtastsPolicyPath); rec.Code != http.StatusNotFound {
 		t.Errorf("unknown domain status = %d, want 404", rec.Code)
 	}
@@ -106,14 +108,44 @@ func TestMTASTSUnknownDomainIs404(t *testing.T) {
 	}
 }
 
-// TestMTASTSDirectoryErrorIs500 proves a directory failure is a per-request 5xx, not a
-// panic that takes the front door down, the same resilience the cert store holds.
+// TestMTASTSDirectoryErrorIs500 proves a failure of either directory read is a
+// per-request 5xx, not a panic that takes the front door down, that the body
+// carries none of the error's text, and that the failure is recorded: the
+// operator's log is the only place a sender's missing policy can be traced.
 func TestMTASTSDirectoryErrorIs500(t *testing.T) {
-	dir := &fakeMTASTSDir{settingsErr: errors.New("db down")}
-	h := withMTASTS(&config.Config{Hostname: "mail.hermex.test"}, dir, http.HandlerFunc(proxied))
-	rec := doRequest(h, "mta-sts.tenant.com", mtastsPolicyPath)
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("db-error status = %d, want 500", rec.Code)
+	for name, dir := range map[string]*fakeMTASTSDir{
+		"settings": {settingsErr: errors.New("db down: settings")},
+		"domains": {settings: directory.MTASTSSettings{Enabled: true, Mode: "testing", MaxAge: 86400},
+			found: true, domainsErr: errors.New("db down: domains")},
+	} {
+		var logs bytes.Buffer
+		logger := logging.New(logging.NewStderrSink(&logs))
+		h := withMTASTS(&config.Config{Hostname: "mail.hermex.test"}, dir, logger, http.HandlerFunc(proxied))
+		rec := doRequest(h, "mta-sts.tenant.com", mtastsPolicyPath)
+		if rec.Code != http.StatusInternalServerError {
+			t.Errorf("%s: status = %d, want 500", name, rec.Code)
+		}
+		if strings.Contains(rec.Body.String(), "db down") {
+			t.Errorf("%s: the response leaks the error: %q", name, rec.Body.String())
+		}
+		if !strings.Contains(logs.String(), "db down: "+name) {
+			t.Errorf("%s: the failure was not recorded; log = %q", name, logs.String())
+		}
+	}
+}
+
+// TestMTASTSPolicyHostIgnoresCaseAndPort proves the policy host is matched as the
+// DNS name it is (case-insensitive, RFC 4343) and that a port in the Host header
+// does not hide it.
+func TestMTASTSPolicyHostIgnoresCaseAndPort(t *testing.T) {
+	dir := &fakeMTASTSDir{
+		settings: directory.MTASTSSettings{Enabled: true, Mode: "enforce", MaxAge: 604800}, found: true,
+		domains: []directory.DomainInfo{{Name: "tenant.com", Status: 0}},
+	}
+	h := withMTASTS(&config.Config{Hostname: "mail.hermex.test"}, dir, nil, http.HandlerFunc(proxied))
+	rec := doRequest(h, "MTA-STS.Tenant.COM:443", mtastsPolicyPath)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "mode: enforce\r\n") {
+		t.Errorf("status = %d body = %q, want the enforce policy", rec.Code, rec.Body.String())
 	}
 }
 
@@ -125,7 +157,7 @@ func TestMTASTSPassesThroughNonPolicyRequests(t *testing.T) {
 		settings: directory.MTASTSSettings{Enabled: true, Mode: "testing", MaxAge: 86400}, found: true,
 		domains: []directory.DomainInfo{{Name: "tenant.com", Status: 0}},
 	}
-	h := withMTASTS(&config.Config{Hostname: "mail.hermex.test"}, dir, http.HandlerFunc(proxied))
+	h := withMTASTS(&config.Config{Hostname: "mail.hermex.test"}, dir, nil, http.HandlerFunc(proxied))
 	for _, tc := range []struct{ host, path string }{
 		{"mail.hermex.test", mtastsPolicyPath}, // normal host, policy path → proxy
 		{"mta-sts.tenant.com", "/ews/"},        // policy host, other path → proxy

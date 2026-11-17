@@ -7,6 +7,7 @@ import (
 
 	"hermex/internal/config"
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/mtasts"
 )
 
@@ -27,8 +28,9 @@ const mtastsPolicyPath = "/.well-known/mta-sts.txt"
 // policy, while every other request is proxied to a backend. Publishing MTA-STS means
 // serving this file over HTTPS, and the gateway is the TLS front door, so it is where
 // the policy is served. A per-request directory failure answers 5xx rather than
-// panicking, consistent with the front door's resilience model.
-func withMTASTS(cfg *config.Config, dir mtastsDirectory, next http.Handler) http.Handler {
+// panicking, consistent with the front door's resilience model, and the failure is
+// recorded so the operator sees why senders are getting no policy.
+func withMTASTS(cfg *config.Config, dir mtastsDirectory, logger *logging.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host := r.Host
 		if i := strings.IndexByte(host, ':'); i >= 0 {
@@ -39,18 +41,24 @@ func withMTASTS(cfg *config.Config, dir mtastsDirectory, next http.Handler) http
 			next.ServeHTTP(w, r)
 			return
 		}
-		serveMTASTSPolicy(w, cfg, dir, domain)
+		serveMTASTSPolicy(w, cfg, dir, logger, domain)
 	})
+}
+
+// mtastsUnavailable records a directory failure and answers 500 without its detail.
+func mtastsUnavailable(w http.ResponseWriter, logger *logging.Logger, domain string, err error) {
+	logger.Error(logging.Gateway, "mtasts.policy_failed", logging.Fields{"domain": domain, "error": err.Error()})
+	http.Error(w, "mta-sts unavailable", http.StatusInternalServerError)
 }
 
 // serveMTASTSPolicy writes the published MTA-STS policy for domain, or 404 when
 // publishing is disabled or domain is not an active local domain. The policy's single
 // mx is this server's hostname, the MX target every domain's mail routes to, and the
 // mode and max_age come from the operator's settings.
-func serveMTASTSPolicy(w http.ResponseWriter, cfg *config.Config, dir mtastsDirectory, domain string) {
+func serveMTASTSPolicy(w http.ResponseWriter, cfg *config.Config, dir mtastsDirectory, logger *logging.Logger, domain string) {
 	settings, _, err := dir.GetMTASTSSettings()
 	if err != nil {
-		http.Error(w, "mta-sts unavailable", http.StatusInternalServerError)
+		mtastsUnavailable(w, logger, domain, err)
 		return
 	}
 	if !settings.Enabled {
@@ -59,7 +67,7 @@ func serveMTASTSPolicy(w http.ResponseWriter, cfg *config.Config, dir mtastsDire
 	}
 	domains, err := dir.ListDomains()
 	if err != nil {
-		http.Error(w, "mta-sts unavailable", http.StatusInternalServerError)
+		mtastsUnavailable(w, logger, domain, err)
 		return
 	}
 	active := false
