@@ -54,7 +54,10 @@ func (s *Server) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
-	if _, err := st.CreateFolder(nil, body.Name); err != nil {
+	if _, err := st.CreateFolder(nil, body.Name); errors.Is(err, objectstore.ErrFolderExists) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "a folder with that name already exists"})
+		return
+	} else if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not create folder"})
 		return
 	}
@@ -84,6 +87,10 @@ func (s *Server) handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 	if err := st.RenameFolder(id, nil, body.Name); err != nil {
 		if errors.Is(err, objectstore.ErrBuiltinFolder) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "this folder cannot be renamed"})
+			return
+		}
+		if errors.Is(err, objectstore.ErrFolderExists) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "a folder with that name already exists"})
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not rename folder"})

@@ -30,8 +30,11 @@ type folderNode struct {
 // clients create their own folders. The folder is provisioned like a built-in
 // one: a freshly allocated id, a message-id range, a change number, and the
 // standard property bag (display name, note container class, timestamps,
-// change key). Callers guard against duplicate names via FolderByName;
-// built-in folders are addressed by their fixed ids and never created here.
+// change key). A live sibling already holding displayName refuses the create
+// with ErrFolderExists ([MS-OXCFOLD] 3.2.5.2: sibling folders cannot have the
+// same name); the check runs inside the insert's transaction, so two concurrent
+// creates cannot both pass it. Built-in folders are addressed by their fixed ids
+// and never created here.
 func (s *Store) CreateFolder(parent *int64, displayName string) (int64, error) {
 	replica, err := s.replicaGUID()
 	if err != nil {
@@ -47,6 +50,9 @@ func (s *Store) CreateFolder(parent *int64, displayName string) (int64, error) {
 	}
 	defer tx.Rollback()
 
+	if err := siblingNameFree(tx, parentFID, 0, displayName); err != nil {
+		return 0, err
+	}
 	fid, cn, err := insertFolderRow(tx, parentFID)
 	if err != nil {
 		return 0, err
@@ -91,6 +97,28 @@ func insertFolderRow(tx *sql.Tx, parentFID int64) (fid, cn uint64, err error) {
 		return 0, 0, err
 	}
 	return fid, cn, countSubfolderChange(tx, parentFID)
+}
+
+// siblingNameFree reports ErrFolderExists when a live child of parentFID other
+// than self already has name as its display name, read inside tx. self is 0 for
+// a folder not created yet.
+func siblingNameFree(tx *sql.Tx, parentFID, self int64, name string) error {
+	enc, err := encodeValue(mapi.PrDisplayName.Type(), name)
+	if err != nil {
+		return err
+	}
+	var one int
+	err = tx.QueryRow(
+		`SELECT 1 FROM folders f JOIN folder_properties p ON p.folder_id = f.folder_id
+		 WHERE f.parent_id=? AND f.folder_id<>? AND f.is_deleted=0 AND p.proptag=? AND p.propval=? LIMIT 1`,
+		parentFID, self, int64(uint32(mapi.PrDisplayName)), enc).Scan(&one)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil
+	case err != nil:
+		return err
+	}
+	return ErrFolderExists
 }
 
 // FolderByName looks up a folder by parent and display name, reporting
@@ -229,7 +257,7 @@ func (s *Store) RenameFolder(folderID int64, newParent *int64, newName string) e
 			return ErrFolderCycle
 		}
 	}
-	if err := s.reparentFolder(folderID, parentFID); err != nil {
+	if err := s.reparentFolder(folderID, parentFID, newName); err != nil {
 		return err
 	}
 	if err := s.SetFolderProperties(folderID,
@@ -243,8 +271,10 @@ func (s *Store) RenameFolder(folderID int64, newParent *int64, newName string) e
 
 // reparentFolder moves a live folder under parentFID and, when that changes its
 // parent, counts the move in both parents' hierarchy counters. It reports
-// ErrNotFound when the folder is missing.
-func (s *Store) reparentFolder(folderID, parentFID int64) error {
+// ErrNotFound when the folder is missing, and ErrFolderExists when another live
+// child of parentFID already carries newName ([MS-OXCFOLD] 3.2.5.2), checked in
+// the same transaction as the move.
+func (s *Store) reparentFolder(folderID, parentFID int64, newName string) error {
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		return err
@@ -256,6 +286,9 @@ func (s *Store) reparentFolder(folderID, parentFID int64) error {
 		return ErrNotFound
 	}
 	if err != nil {
+		return err
+	}
+	if err := siblingNameFree(tx, parentFID, folderID, newName); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`UPDATE folders SET parent_id=? WHERE folder_id=?`, parentFID, folderID); err != nil {

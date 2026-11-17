@@ -12,7 +12,7 @@ import (
 func TestRunRulesInSweepsAnotherFolder(t *testing.T) {
 	s := openSeededStore(t)
 	inbox := int64(mapi.PrivateFIDInbox)
-	archive := mustCreateFolder(t, s, nil, "Archive")
+	archive := mustCreateFolder(t, s, nil, "Old Mail")
 	filed := mustCreateFolder(t, s, nil, "Filed")
 	deliverTo(t, s, archive, ruleMsg("Project update", "lead@acme.com", ""))
 

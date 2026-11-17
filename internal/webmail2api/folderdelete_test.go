@@ -88,6 +88,33 @@ func TestDeleteBuiltinFolderIsRefused(t *testing.T) {
 	}
 }
 
+// TestFolderNamesStayUniqueAmongSiblings proves the webmail folder and calendar
+// endpoints keep [MS-OXCFOLD] 3.2.5.2 (sibling folders cannot have the same
+// name): a second create of a top-level name, a calendar of that name and a
+// rename onto it all answer 409 Conflict, and the folders keep their names.
+func TestFolderNamesStayUniqueAmongSiblings(t *testing.T) {
+	do, dir := folderHarness(t)
+	for _, name := range []string{"Project X", "Project Y"} {
+		if rec := do(http.MethodPost, "/api/v1/folders", `{"name":"`+name+`"}`); rec.Code != http.StatusOK {
+			t.Fatalf("create %s = %d: %s", name, rec.Code, rec.Body.String())
+		}
+	}
+	for _, c := range []struct{ method, path, body string }{
+		{http.MethodPost, "/api/v1/folders", `{"name":"Project X"}`},
+		{http.MethodPost, "/api/v1/calendar/calendars", `{"name":"Project X"}`},
+		{http.MethodPut, "/api/v1/folders/Project%20Y", `{"name":"Project X"}`},
+	} {
+		if rec := do(c.method, c.path, c.body); rec.Code != http.StatusConflict {
+			t.Errorf("%s %s %s = %d, want 409: %s", c.method, c.path, c.body, rec.Code, rec.Body.String())
+		}
+	}
+	for _, name := range []string{"Project X", "Project Y"} {
+		if parentOf(t, dir, name) == 0 {
+			t.Errorf("folder %s is gone", name)
+		}
+	}
+}
+
 // TestDeleteFolderMovesItToTrashFirst pins the two-stage delete: the first
 // delete moves the folder under Deleted Items, so the user can still get it back.
 func TestDeleteFolderMovesItToTrashFirst(t *testing.T) {

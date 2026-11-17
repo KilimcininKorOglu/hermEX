@@ -869,6 +869,10 @@ func (s *Server) handleCreateCalendar(w http.ResponseWriter, r *http.Request) {
 	}
 	defer st.Close()
 	fid, err := st.CreateFolder(nil, in.Name)
+	if errors.Is(err, objectstore.ErrFolderExists) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "a folder with that name already exists"})
+		return
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not create calendar"})
 		return

@@ -9,6 +9,42 @@ import (
 	"hermex/internal/mapi"
 )
 
+// TestCreateFolderRefusesASiblingName proves [MS-OXCFOLD] 3.2.5.2 ("sibling
+// folders cannot have the same name") holds at the store, for every protocol:
+// a second top-level "Projects" and a second "Inner" under it are refused with
+// ErrFolderExists, while the same name under another parent is allowed.
+func TestCreateFolderRefusesASiblingName(t *testing.T) {
+	s := openSeededStore(t)
+	top, err := s.CreateFolder(nil, "Projects")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateFolder(nil, "Projects"); !errors.Is(err, ErrFolderExists) {
+		t.Errorf("second top-level Projects: err = %v, want ErrFolderExists", err)
+	}
+	if _, err := s.CreateFolder(&top, "Inner"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateFolder(&top, "Inner"); !errors.Is(err, ErrFolderExists) {
+		t.Errorf("second Inner under Projects: err = %v, want ErrFolderExists", err)
+	}
+	other, err := s.CreateFolder(nil, "Inner")
+	if err != nil {
+		t.Fatalf("Inner at the top level beside Projects/Inner: %v", err)
+	}
+	// A rename or a move onto a sibling's name is refused the same way, and
+	// renaming a folder to its own name is not a collision.
+	if err := s.RenameFolder(other, nil, "Projects"); !errors.Is(err, ErrFolderExists) {
+		t.Errorf("rename onto Projects: err = %v, want ErrFolderExists", err)
+	}
+	if err := s.RenameFolder(other, &top, "Inner"); !errors.Is(err, ErrFolderExists) {
+		t.Errorf("move into Projects beside its Inner: err = %v, want ErrFolderExists", err)
+	}
+	if err := s.RenameFolder(other, nil, "Inner"); err != nil {
+		t.Errorf("rename to its own name: %v", err)
+	}
+}
+
 // folderByName indexes a ListFolders result by display name.
 func folderByName(t *testing.T, s *Store) map[string]FolderInfo {
 	t.Helper()

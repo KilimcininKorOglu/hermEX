@@ -71,6 +71,45 @@ func TestCreateFolderMakesTheFolderKindAsked(t *testing.T) {
 	}
 }
 
+// TestCreateFolderRefusesASiblingName proves a second folder of one name under
+// one parent is refused with ErrorFolderExists ([MS-OXWSFOLD] CreateFolder,
+// [MS-OXCFOLD] 3.2.5.2: sibling folders cannot have the same name), whatever
+// its kind, and that only one folder of the name exists afterwards.
+func TestCreateFolderRefusesASiblingName(t *testing.T) {
+	ts, dir := seededEWS(t)
+	create := func(folder string) string {
+		_, out := soapPost(t, ts, wrapRequest(`<CreateFolder xmlns="`+nsMessages+`" xmlns:t="`+nsTypes+`">`+
+			`<ParentFolderId><t:DistinguishedFolderId Id="msgfolderroot"/></ParentFolderId>`+
+			`<Folders>`+folder+`</Folders></CreateFolder>`), true)
+		return out
+	}
+	if out := create(`<t:Folder><t:DisplayName>Archive 2026</t:DisplayName></t:Folder>`); !strings.Contains(out, "NoError") {
+		t.Fatalf("first create = %s", out)
+	}
+	out := create(`<t:CalendarFolder><t:DisplayName>Archive 2026</t:DisplayName></t:CalendarFolder>`)
+	if !strings.Contains(out, "<ResponseCode>ErrorFolderExists</ResponseCode>") {
+		t.Errorf("second create of the name = %s, want ErrorFolderExists", out)
+	}
+	st, err := objectstore.OpenExisting(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	folders, err := st.ListFolders()
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, f := range folders {
+		if f.DisplayName == "Archive 2026" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("folders named Archive 2026 = %d, want 1", n)
+	}
+}
+
 // storedFolderClass reads the container class the store holds for an EWS folder id.
 func storedFolderClass(t *testing.T, dir, id string) string {
 	t.Helper()

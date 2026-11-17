@@ -1,6 +1,7 @@
 package dav
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -54,7 +55,12 @@ func (s *Server) makeCollection(w http.ResponseWriter, r *http.Request, mailbox 
 		return
 	}
 
-	if err := createTypedCollection(st, isCal, coll); err != nil {
+	if err := createTypedCollection(st, isCal, coll); errors.Is(err, objectstore.ErrFolderExists) {
+		// Another client created the name after the check above.
+		w.Header().Set("Allow", allowMethods)
+		http.Error(w, "collection already exists", http.StatusMethodNotAllowed)
+		return
+	} else if err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}

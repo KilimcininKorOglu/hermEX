@@ -114,6 +114,9 @@ func createOneFolder(st *objectstore.Store, parentFID int64, parent *int64, f ne
 		return folderError("ErrorInvalidRequest")
 	}
 	fid, err := st.CreateFolder(parent, f.DisplayName)
+	if errors.Is(err, objectstore.ErrFolderExists) {
+		return folderError("ErrorFolderExists")
+	}
 	if err != nil {
 		return folderError("ErrorInternalServerError")
 	}
