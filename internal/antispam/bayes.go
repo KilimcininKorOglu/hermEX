@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+
+	"hermex/internal/atomicfile"
 )
 
 // BayesModel is a naive Bayes spam model: per-token occurrence counts in each
@@ -118,19 +120,7 @@ func TrainFromDir(m *BayesModel, dir string, spam bool) (int, error) {
 // same directory and renames it into place, so the MTA loading the model at
 // startup never reads a half-written file.
 func (m *BayesModel) SaveFile(path string) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".antispam-model-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer func() { _ = os.Remove(tmpName) }() // a no-op once the rename succeeds
-	if err := m.Save(tmp); err != nil {
-		return errors.Join(err, tmp.Close())
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, path)
+	return atomicfile.WriteFunc(path, 0o600, m.Save)
 }
 
 // LoadModelFile reads a Bayes model from path. A missing file returns (nil, nil)

@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+
+	"hermex/internal/atomicfile"
 )
 
 // sarules_embed.go vendors a baseline SpamAssassin ruleset into the binary and,
@@ -126,15 +128,11 @@ func LoadRulesFile(path string) (*SARuleSet, error) {
 }
 
 // seedRulesFile writes the embedded baseline (with a provenance header) to path
-// atomically: a temp file in the same directory, then rename.
+// atomically and durably, so a reader never loads a partial rule set.
 func seedRulesFile(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	data := append([]byte(seededHeader), embeddedRulesText()...)
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return atomicfile.WriteFile(path, data, 0o600)
 }
