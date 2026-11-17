@@ -292,6 +292,34 @@ func TestAvailabilityNoTimeZone(t *testing.T) {
 	}
 }
 
+// TestAvailabilityRefusesAnOutOfRangeWindow confirms the TimeWindow limits of
+// the EWS ResponseCode reference: a window larger than the 42-day default limit
+// reports ErrorTimeIntervalTooBig, and an end before the start reports
+// ErrorInvalidTimeInterval. Either is reported per mailbox, like ErrorTimeZone,
+// and no free/busy is computed, so an oversized window cannot make the server
+// scan a calendar across centuries.
+func TestAvailabilityRefusesAnOutOfRangeWindow(t *testing.T) {
+	ts, _ := availabilityServer(t)
+	for _, c := range []struct{ name, start, end, code string }{
+		{"43 days", "2026-06-01T00:00:00Z", "2026-07-14T00:00:00Z", "ErrorTimeIntervalTooBig"},
+		{"centuries", "1970-01-01T00:00:00Z", "9999-12-31T00:00:00Z", "ErrorTimeIntervalTooBig"},
+		{"inverted", winEnd, winStart, "ErrorInvalidTimeInterval"},
+	} {
+		_, out := soapPost(t, ts, availabilityReq("alice@hermex.test", c.start, c.end, true), true)
+		if !strings.Contains(out, `ResponseClass="Error"`) || !strings.Contains(out, c.code) {
+			t.Errorf("%s: want a per-mailbox %s, got: %s", c.name, c.code, out)
+		}
+		if strings.Contains(out, "FreeBusyView") {
+			t.Errorf("%s: a refused window still carries a FreeBusyView: %s", c.name, out)
+		}
+	}
+	// The limit itself is allowed.
+	_, out := soapPost(t, ts, availabilityReq("alice@hermex.test", "2026-06-01T00:00:00Z", "2026-07-13T00:00:00Z", true), true)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Errorf("a 42-day window was refused: %s", out)
+	}
+}
+
 // TestAvailabilityUnknownUser confirms an unresolvable target reports
 // ErrorMailRecipientNotFound for that mailbox.
 func TestAvailabilityUnknownUser(t *testing.T) {

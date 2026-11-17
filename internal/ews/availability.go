@@ -149,11 +149,7 @@ func (s *Server) handleGetUserAvailability(w http.ResponseWriter, inner []byte, 
 	// A missing time zone is not fatal: every mailbox reports ErrorTimeZone,
 	// matching the reference (which fills the whole array with the error).
 	if req.TimeZone == nil {
-		resp := getUserAvailabilityResponse{}
-		for range items {
-			resp.Responses = append(resp.Responses, errorFreeBusy("ErrorTimeZone"))
-		}
-		writeResponse(w, resp)
+		writeResponse(w, errorEveryMailbox(len(items), "ErrorTimeZone"))
 		return
 	}
 
@@ -161,6 +157,10 @@ func (s *Server) handleGetUserAvailability(w http.ResponseWriter, inner []byte, 
 	windowEnd, okE := parseAvailabilityTime(req.FreeBusyViewOptions.TimeWindow.EndTime)
 	if !okS || !okE {
 		writeSOAPFault(w, "ErrorInvalidRequest", "GetUserAvailability: malformed TimeWindow")
+		return
+	}
+	if code := timeWindowError(windowStart, windowEnd); code != "" {
+		writeResponse(w, errorEveryMailbox(len(items), code))
 		return
 	}
 
@@ -385,6 +385,35 @@ func appointmentWindow(pv mapi.PropertyValues, startTag, endTag, recurTag mapi.P
 // message (no free/busy view), as the reference does on a per-mailbox failure.
 func errorFreeBusy(code string) freeBusyResponse {
 	return freeBusyResponse{ResponseMessage: availResponseMessage{ResponseClass: "Error", ResponseCode: code}}
+}
+
+// errorEveryMailbox answers every requested mailbox with the same error, keeping
+// the response array paired with the request.
+func errorEveryMailbox(n int, code string) getUserAvailabilityResponse {
+	resp := getUserAvailabilityResponse{}
+	for range n {
+		resp.Responses = append(resp.Responses, errorFreeBusy(code))
+	}
+	return resp
+}
+
+// maxAvailabilityWindow is the largest TimeWindow GetUserAvailability serves,
+// the 42-day default limit the EWS ResponseCode reference gives for
+// ErrorTimeIntervalTooBig.
+const maxAvailabilityWindow = 42 * 24 * time.Hour
+
+// timeWindowError reports the response code for a TimeWindow the request may not
+// ask for, or "" when the window is served: an end before the start is
+// ErrorInvalidTimeInterval, a span over maxAvailabilityWindow is
+// ErrorTimeIntervalTooBig.
+func timeWindowError(start, end time.Time) string {
+	switch {
+	case end.Before(start):
+		return "ErrorInvalidTimeInterval"
+	case end.Sub(start) > maxAvailabilityWindow:
+		return "ErrorTimeIntervalTooBig"
+	}
+	return ""
 }
 
 // busyTypeName maps a PidLidBusyStatus value to its LegacyFreeBusyType string. The
