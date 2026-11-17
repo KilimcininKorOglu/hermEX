@@ -8,12 +8,12 @@ import (
 	"hermex/internal/wbxml"
 )
 
-// ItemOperations status codes (MS-ASCMD): success, a conversion/retrieval failure,
-// and a malformed-request error.
+// ItemOperations status codes (MS-ASCMD, Status element of ItemOperations).
 const (
 	ioStatusSuccess  = "1"
-	ioStatusConvFail = "14"  // CONVERSIONFAILED, the item could not be retrieved
-	ioStatusProtocol = "155" // PROTOCOLERROR, the request was malformed
+	ioStatusProtocol = "2"  // protocol violation / XML validation error
+	ioStatusConvFail = "14" // mailbox fetch provider: the item failed conversion
+	ioStatusBadAttID = "15" // attachment fetch provider: attachment or attachment ID is invalid
 )
 
 // handleItemOperations answers the MS-ASCMD ItemOperations command: a batch of
@@ -146,15 +146,15 @@ func fetchAttachment(st *objectstore.Store, ref string) *wbxml.Node {
 	folderID, ferr := strconv.ParseInt(collID, 10, 64)
 	uid64, uerr := strconv.ParseUint(serverID, 10, 32)
 	if !ok || ferr != nil || uerr != nil {
-		return attachmentError(ref, ioStatusProtocol)
+		return attachmentError(ref, ioStatusBadAttID)
 	}
 	raw, err := st.GetMessageRaw(folderID, uint32(uid64))
 	if err != nil {
-		return attachmentError(ref, ioStatusConvFail)
+		return attachmentError(ref, ioStatusBadAttID)
 	}
 	data, contentType, ok := attachmentContent(raw, index)
 	if !ok {
-		return attachmentError(ref, ioStatusConvFail)
+		return attachmentError(ref, ioStatusBadAttID)
 	}
 	return wbxml.Elem(wbxml.IOFetch,
 		wbxml.Str(wbxml.IOStatus, ioStatusSuccess),

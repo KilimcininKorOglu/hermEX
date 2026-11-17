@@ -143,20 +143,50 @@ func TestItemOperationsFetchAttachment(t *testing.T) {
 	}
 }
 
-// TestItemOperationsFetchBadReference proves a malformed FileReference reports a
-// per-Fetch error status and still echoes the reference.
+// TestItemOperationsFetchBadReference proves a FileReference that names no
+// attachment the caller holds is refused with status 15, MS-ASCMD's "Attachment
+// fetch provider - Attachment or attachment ID is invalid", carries no data, and
+// still echoes the reference. The reference arrives from the client, so each
+// case is a forged or broken one: no separators, a non-numeric collection or
+// message id, a message id past uint32, an empty segment, extra colons, a
+// negative index, an index past the last attachment, and a message that does
+// not exist.
 func TestItemOperationsFetchBadReference(t *testing.T) {
-	ts, _ := seededServer(t)
-
-	req := wbxml.Elem(wbxml.IOItemOperations,
-		wbxml.Elem(wbxml.IOFetch, wbxml.Str(wbxml.ABFileReference, "not-a-valid-ref")))
-	_, root := postCommand(t, ts, "ItemOperations", req)
-
-	fetch := root.Child(wbxml.IOResponse).Child(wbxml.IOFetch)
-	if s := fetch.ChildText(wbxml.IOStatus); s == "1" {
-		t.Errorf("Fetch of a malformed reference reported success")
+	ts, dir := seededServer(t)
+	seedInboxAttachment(t, dir)
+	postCommand(t, ts, "Sync", syncReq("0", ""))
+	_, sync := postCommand(t, ts, "Sync", syncReq("1", ""))
+	valid := respColl(t, sync).Child(wbxml.ASCommands).Child(wbxml.ASAdd).
+		Child(wbxml.ASData).Child(wbxml.ABAttachments).Child(wbxml.ABAttachment).ChildText(wbxml.ABFileReference)
+	coll, uid, _, ok := parseFileRef(valid)
+	if !ok {
+		t.Fatalf("Sync exposed an unreadable FileReference %q", valid)
 	}
-	if fetch.ChildText(wbxml.ABFileReference) != "not-a-valid-ref" {
-		t.Error("error Fetch did not echo the FileReference")
+
+	for _, ref := range []string{
+		"not-a-valid-ref",
+		"inbox:" + uid + ":0",
+		coll + ":x:0",
+		coll + ":4294967296:0",
+		":" + uid + ":0",
+		coll + "::0",
+		coll + ":" + uid + ":0:9",
+		coll + ":" + uid + ":-1",
+		coll + ":" + uid + ":1",
+		coll + ":999999:0",
+	} {
+		req := wbxml.Elem(wbxml.IOItemOperations,
+			wbxml.Elem(wbxml.IOFetch, wbxml.Str(wbxml.ABFileReference, ref)))
+		_, root := postCommand(t, ts, "ItemOperations", req)
+		fetch := root.Child(wbxml.IOResponse).Child(wbxml.IOFetch)
+		if s := fetch.ChildText(wbxml.IOStatus); s != "15" {
+			t.Errorf("Fetch(%q) Status = %q, want 15", ref, s)
+		}
+		if fetch.Child(wbxml.IOProperties) != nil {
+			t.Errorf("Fetch(%q) returned data for an invalid reference", ref)
+		}
+		if fetch.ChildText(wbxml.ABFileReference) != ref {
+			t.Errorf("Fetch(%q) did not echo the FileReference", ref)
+		}
 	}
 }

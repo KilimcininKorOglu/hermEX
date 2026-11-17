@@ -72,8 +72,10 @@ func TestItemOperationsFetchNotFound(t *testing.T) {
 	}
 }
 
-// TestItemOperationsFetchMalformed confirms an unparseable id reports a protocol
-// error.
+// TestItemOperationsFetchMalformed confirms an unparseable id reports status 2,
+// MS-ASCMD's "Protocol error - protocol violation/XML validation error" (scope
+// Item or Global). 155 is a Global code reserved for a move request missing its
+// Options and MoveAlways elements, so it does not describe a malformed Fetch.
 func TestItemOperationsFetchMalformed(t *testing.T) {
 	ts, _ := seededServer(t)
 	req := wbxml.Elem(wbxml.IOItemOperations,
@@ -82,8 +84,20 @@ func TestItemOperationsFetchMalformed(t *testing.T) {
 			wbxml.Str(wbxml.ASServerID, "x")))
 	_, root := postCommand(t, ts, "ItemOperations", req)
 	f := root.Child(wbxml.IOResponse).Child(wbxml.IOFetch)
-	if f.ChildText(wbxml.IOStatus) != "155" {
-		t.Errorf("malformed Fetch Status = %q, want 155", f.ChildText(wbxml.IOStatus))
+	if f.ChildText(wbxml.IOStatus) != "2" {
+		t.Errorf("malformed Fetch Status = %q, want 2", f.ChildText(wbxml.IOStatus))
+	}
+}
+
+// TestItemOperationsEmptyFolderMalformed confirms an EmptyFolderContents with no
+// usable collection id also reports status 2.
+func TestItemOperationsEmptyFolderMalformed(t *testing.T) {
+	ts, _ := seededServer(t)
+	req := wbxml.Elem(wbxml.IOItemOperations,
+		wbxml.Elem(wbxml.IOEmptyFolderContents, wbxml.Str(wbxml.ASCollectionID, "inbox")))
+	_, root := postCommand(t, ts, "ItemOperations", req)
+	if s := root.Child(wbxml.IOResponse).Child(wbxml.IOEmptyFolderContents).ChildText(wbxml.IOStatus); s != "2" {
+		t.Errorf("malformed EmptyFolderContents Status = %q, want 2", s)
 	}
 }
 
