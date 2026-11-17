@@ -107,6 +107,17 @@ func TestCreateItemCalendarItemRefusals(t *testing.T) {
 	_, out = soapPost(t, ts, createCalendarReq("SendToNone",
 		`<t:Subject>Backwards</t:Subject><t:Start>2026-10-05T09:00:00Z</t:Start><t:End>2026-10-05T08:00:00Z</t:End>`), true)
 	wantContains(t, "an end before the start", out, "ErrorCalendarEndDateIsEarlierThanStartDate")
+	// LegacyFreeBusyType ([MS-OXWSCDATA] 2.2.5.19) names Free, Tentative, Busy,
+	// OOF, WorkingElsewhere and NoData; only the first five are a stored
+	// PidLidBusyStatus, so any other value is refused, not stored.
+	for _, bad := range []string{"Away", "busy", "5", "NoData"} {
+		_, out = soapPost(t, ts, createCalendarReq("SendToNone",
+			`<t:Subject>Odd</t:Subject><t:Start>2026-10-05T08:00:00Z</t:Start><t:End>2026-10-05T09:00:00Z</t:End>`+
+				`<t:LegacyFreeBusyStatus>`+bad+`</t:LegacyFreeBusyStatus>`), true)
+		if strings.Contains(out, `ResponseClass="Success"`) {
+			t.Errorf("LegacyFreeBusyStatus %q was stored: %s", bad, out)
+		}
+	}
 
 	_, out = soapPost(t, ts, createCalendarReq("SendToNone", weeklyMeeting), true)
 	wantContains(t, "SendToNone", out, `ResponseClass="Success"`)
