@@ -7,37 +7,42 @@ import (
 	"hermex/internal/directory"
 )
 
-// TestApplyDAVSizeLimits proves both PUT body caps are applied only on a clean read;
-// a read error or a missing row leaves both untouched. Without the guard a transient
-// directory failure would zero the iCal and vCard caps on a running server.
+// davLimits captures what applyDAVSizeLimits hands to its three setters.
+type davLimits struct {
+	ical, vcard, freeBusyTargets int64
+}
+
+// applyWith runs applyDAVSizeLimits over one read result and returns what each
+// setter received; a setter that was not called keeps -1.
+func applyWith(read func() (directory.SizeLimits, bool, error)) davLimits {
+	got := davLimits{ical: -1, vcard: -1, freeBusyTargets: -1}
+	applyDAVSizeLimits(nil, read,
+		func(n int64) { got.ical = n },
+		func(n int64) { got.vcard = n },
+		func(n int64) { got.freeBusyTargets = n })
+	return got
+}
+
+// TestApplyDAVSizeLimits proves the three operator-set limits the size-limits row
+// carries for DAV (the iCal and vCard PUT body caps and the free/busy target cap)
+// all reach the running daemon on a clean read, and that a read error or a missing
+// row leaves every one untouched. Without the guard a transient directory failure
+// would zero the caps on a running server.
 func TestApplyDAVSizeLimits(t *testing.T) {
-	const sentinel int64 = -1
-
-	ical, vcard := sentinel, sentinel
-	applyDAVSizeLimits(nil,
-		func() (directory.SizeLimits, bool, error) {
-			return directory.SizeLimits{DAVICalBytes: 1000, DAVVCardBytes: 2000}, true, nil
-		},
-		func(n int64) { ical = n }, func(n int64) { vcard = n }, func(int64) {})
-	if ical != 1000 || vcard != 2000 {
-		t.Errorf("applied caps = ical %d, vcard %d; want 1000, 2000", ical, vcard)
+	stored := directory.SizeLimits{DAVICalBytes: 1000, DAVVCardBytes: 2000, FreeBusyMaxTargets: 7}
+	got := applyWith(func() (directory.SizeLimits, bool, error) { return stored, true, nil })
+	if got != (davLimits{ical: 1000, vcard: 2000, freeBusyTargets: 7}) {
+		t.Errorf("applied = %+v, want the stored ical 1000, vcard 2000 and free/busy 7", got)
 	}
 
-	ical, vcard = sentinel, sentinel
-	applyDAVSizeLimits(nil,
-		func() (directory.SizeLimits, bool, error) {
-			return directory.SizeLimits{}, false, errors.New("db down")
-		},
-		func(n int64) { ical = n }, func(n int64) { vcard = n }, func(int64) {})
-	if ical != sentinel || vcard != sentinel {
-		t.Errorf("setters called on read error (ical %d, vcard %d); the caps must be left unchanged", ical, vcard)
+	untouched := davLimits{ical: -1, vcard: -1, freeBusyTargets: -1}
+	got = applyWith(func() (directory.SizeLimits, bool, error) { return stored, false, errors.New("db down") })
+	if got != untouched {
+		t.Errorf("a read error applied %+v; every cap must be left unchanged", got)
 	}
 
-	ical, vcard = sentinel, sentinel
-	applyDAVSizeLimits(nil,
-		func() (directory.SizeLimits, bool, error) { return directory.SizeLimits{}, false, nil },
-		func(n int64) { ical = n }, func(n int64) { vcard = n }, func(int64) {})
-	if ical != sentinel || vcard != sentinel {
-		t.Errorf("setters called with no stored row (ical %d, vcard %d); the defaults must stand", ical, vcard)
+	got = applyWith(func() (directory.SizeLimits, bool, error) { return directory.SizeLimits{}, false, nil })
+	if got != untouched {
+		t.Errorf("a missing row applied %+v; the defaults must stand", got)
 	}
 }
