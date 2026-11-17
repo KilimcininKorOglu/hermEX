@@ -61,6 +61,43 @@ func wantUntouched(t *testing.T, mbox, route string, seed foreignSeed) {
 	wantEq(t, route+": the subject", propStr(props, mapi.PrSubject), seed.subject)
 }
 
+// TestCalendarIdsNameOnlyCalendars proves a calendar id from the client reaches
+// only a calendar folder. The Inbox has a number too, so an event created or
+// moved into it, or a calendar PATCH or DELETE naming it, must answer 404: the
+// Inbox keeps its name and its mail, and no event lands in it.
+func TestCalendarIdsNameOnlyCalendars(t *testing.T) {
+	do, mbox := apiHarness(t)
+	_, _, mail := seedForeignObjects(t, mbox)
+	inbox := strconv.FormatInt(int64(mapi.PrivateFIDInbox), 10)
+	wantStatus(t, "create in the default calendar", do(http.MethodPost, "/api/v1/calendar/events",
+		`{"summary":"Standup","start":"2026-08-02T09:00:00Z"}`), http.StatusOK)
+	event := listOneEvent(t, do, "list the event")
+
+	cases := []struct{ name, method, target, body string }{
+		{"create into the Inbox", http.MethodPost, "/api/v1/calendar/events",
+			`{"summary":"Forged","start":"2026-08-03T09:00:00Z","calendarId":"` + inbox + `"}`},
+		{"move into the Inbox", http.MethodPut, "/api/v1/calendar/events/" + event.UID,
+			`{"summary":"Standup","start":"2026-08-02T09:00:00Z","calendarId":"` + inbox + `"}`},
+		{"rename the Inbox", http.MethodPatch, "/api/v1/calendar/calendars/" + inbox, `{"name":"Renamed"}`},
+		{"delete the Inbox", http.MethodDelete, "/api/v1/calendar/calendars/" + inbox, ""},
+	}
+	for _, c := range cases {
+		wantEq(t, c.name+": the status", do(c.method, c.target, c.body).Code, http.StatusNotFound)
+	}
+
+	wantUntouched(t, mbox, "calendar ids", mail)
+	st, err := objectstore.Open(mbox)
+	mustNoErr(t, "reopen the mailbox", err)
+	defer st.Close()
+	props, err := st.GetFolderProperties(int64(mapi.PrivateFIDInbox), mapi.PrDisplayName)
+	mustNoErr(t, "read the Inbox name", err)
+	wantEq(t, "the Inbox name", propStr(props, mapi.PrDisplayName), "Inbox")
+	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDInbox))
+	mustNoErr(t, "list the Inbox objects", err)
+	wantEq(t, "objects in the Inbox", len(objs), 1)
+	wantEq(t, "events in the calendar", len(listEvents(t, do, "list after")), 1)
+}
+
 // TestWritesRefuseAnObjectOfAnotherFolder proves every webmail endpoint that
 // writes an object by the id in its path reaches only objects of its own kind.
 // The id comes from the client and the store addresses every object by it, so
@@ -94,6 +131,8 @@ func TestWritesRefuseAnObjectOfAnotherFolder(t *testing.T) {
 		{http.MethodPut, "/api/v1/contacts/", "", `{"name":"Forged"}`, task},
 		{http.MethodDelete, "/api/v1/contacts/", "", "", task},
 		{http.MethodDelete, "/api/v1/contacts/", "/photo", "", task},
+		{http.MethodPost, "/api/v1/reminders/", "/dismiss", "", note},
+		{http.MethodPost, "/api/v1/reminders/", "/snooze", `{"minutes":5}`, note},
 	}
 	for _, r := range routes {
 		for _, seed := range []foreignSeed{r.other, mail} {

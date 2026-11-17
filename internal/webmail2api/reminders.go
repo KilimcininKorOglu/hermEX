@@ -220,6 +220,9 @@ func (s *Server) mutateReminder(w http.ResponseWriter, r *http.Request, build fu
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
+	if !objectInKind(w, st, id, inReminderFolder) {
+		return
+	}
 	msg, err := st.OpenMessage(id)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "reminder not found"})

@@ -692,7 +692,11 @@ func (s *Server) handleCreateEvent(w http.ResponseWriter, r *http.Request) {
 	if c, ok := s.session(r); ok && hasAttendees(in) {
 		organizer = c.Email
 	}
-	id, err := storeEvent(st, in, calendarFolderID(in.CalendarID), organizer)
+	fid, ok := calendarOr404(w, st, in.CalendarID)
+	if !ok {
+		return
+	}
+	id, err := storeEvent(st, in, fid, organizer)
 	if err != nil {
 		logError("calendar-save", err, logging.Fields{"calendar": in.CalendarID})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save event"})
@@ -726,7 +730,7 @@ func (s *Server) handleUpdateEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
-	if !objectInKind(w, st, id, inCalendar) {
+	if !eventEditTarget(w, st, id, in.CalendarID) {
 		return
 	}
 	caller := ""
@@ -907,7 +911,10 @@ func (s *Server) handleUpdateCalendar(w http.ResponseWriter, r *http.Request) {
 	}
 	defer st.Close()
 	id := r.PathValue("id")
-	fid := calendarFolderID(id)
+	fid, ok := calendarOr404(w, st, id)
+	if !ok {
+		return
+	}
 	if strings.TrimSpace(in.Name) != "" {
 		if err := st.SetFolderName(fid, in.Name); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not rename calendar"})
@@ -932,7 +939,10 @@ func (s *Server) handleDeleteCalendar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
-	fid := calendarFolderID(id)
+	fid, ok := calendarOr404(w, st, id)
+	if !ok {
+		return
+	}
 	if fid == mapi.PrivateFIDCalendar {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot delete the default calendar"})
 		return
