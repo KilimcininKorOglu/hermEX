@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"io"
 	"mime/quotedprintable"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -207,6 +208,25 @@ func TestDigestDisabledWithoutSecret(t *testing.T) {
 		t.Errorf("run without a secret sent %d digests, want 0", sent)
 	}
 	inboxRaw(t, maildir, 0)
+}
+
+// TestDigestSkipsAMissingMailboxWithoutCreatingIt proves the digest run never
+// creates a mailbox. A mailbox is made when its account is created; a missing
+// one (a deleted directory, an unmounted volume) has no quarantine to report, and
+// writing a digest into a fresh empty mailbox there would hide the loss.
+func TestDigestSkipsAMissingMailboxWithoutCreatingIt(t *testing.T) {
+	maildir := filepath.Join(t.TempDir(), "gone")
+	r := newDigestRunner(&fakeDigestDir{
+		users:     []directory.UserInfo{{Username: "dave@hermex.test"}},
+		maildirs:  map[string]string{"dave@hermex.test": maildir},
+		watermark: map[string]uint32{},
+	})
+	if sent := r.Run(); sent != 0 {
+		t.Errorf("run over a missing mailbox sent %d digests, want 0", sent)
+	}
+	if _, err := os.Stat(maildir); !os.IsNotExist(err) {
+		t.Errorf("the digest run created the missing mailbox: %v", err)
+	}
 }
 
 // TestDigestLogsJunkListReadFailure proves a Junk read fault on an opened mailbox

@@ -80,9 +80,12 @@ func (r *DigestRunner) digestMailbox(email, maildir string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	st, err := objectstore.Open(maildir)
+	// A missing or unopenable mailbox is skipped so one fault never fails the run,
+	// but recorded; it is never created here, since account creation makes it.
+	st, err := objectstore.OpenExisting(maildir)
 	if err != nil {
-		return false, nil // unprovisioned/unopenable mailbox → skip, never fail the run
+		r.logErr(email, "digest.open", err)
+		return false, nil
 	}
 	defer st.Close()
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDJunk))
