@@ -19,7 +19,7 @@ const resolveRecipientLimit = 100
 // status, the per-query resolution status, and the per-picture status.
 const (
 	rrStatusOK            = 1 // the command succeeded
-	rrStatusProtocolError = 5 // the request named no recipient to resolve
+	rrStatusProtocolError = 5 // an invalid parameter, or a range over its limit
 	rrResolved            = 1 // one or more recipients matched the query
 	rrUnresolved          = 4 // no recipient matched the query
 
@@ -60,7 +60,7 @@ func (s *Server) handleResolveRecipients(w http.ResponseWriter, r *http.Request,
 			win = parseAvailability(c)
 		}
 	}
-	if len(tos) == 0 {
+	if len(tos) == 0 || win.invalid {
 		writeWBXML(w, wbxml.Elem(wbxml.RRResolveRecipients,
 			wbxml.Str(wbxml.RRStatus, strconv.Itoa(rrStatusProtocolError))))
 		return

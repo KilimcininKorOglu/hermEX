@@ -28,32 +28,50 @@ const (
 	availStatusNoData  = 163 // could not be retrieved (no readable mailbox or no permission)
 )
 
+// Availability window bounds (MS-ASCMD EndTime (ResolveRecipients) and its
+// Appendix A note): an absent EndTime means seven days after StartTime, and a
+// window shorter than 30 minutes or longer than 42 days is refused.
+const (
+	availDefaultSpan = 7 * 24 * time.Hour
+	availMinSpan     = 30 * time.Minute
+	availMaxSpan     = 42 * 24 * time.Hour
+)
+
 // availabilityWindow is the free/busy span an Availability request asks for. ok
-// is false when Availability was not requested or the window is malformed.
+// is false when Availability was not requested or the window is refused; invalid
+// is set when it was requested but refused, which fails the whole command.
 type availabilityWindow struct {
 	start, end time.Time
 	ok         bool
+	invalid    bool
 }
 
 // parseAvailability reads an Options>Availability request: the StartTime and
-// EndTime bounding the free/busy window. A missing Availability element, an
-// unparseable time (parseEASTime yields 0), or an end at or before the start
-// yields a not-ok window, in which case the response simply omits Availability.
+// EndTime bounding the free/busy window. No Availability element is no request.
+// A StartTime that is missing or unreadable (parseEASTime yields 0), an EndTime
+// sent but unreadable, or a span outside availMinSpan..availMaxSpan is invalid.
 func parseAvailability(options *wbxml.Node) availabilityWindow {
 	avail := options.Child(wbxml.RRAvailability)
 	if avail == nil {
 		return availabilityWindow{}
 	}
 	startSec := parseEASTime(avail.ChildText(wbxml.RRStartTime))
-	endSec := parseEASTime(avail.ChildText(wbxml.RREndTime))
-	if startSec == 0 || endSec == 0 || endSec <= startSec {
-		return availabilityWindow{}
+	if startSec == 0 {
+		return availabilityWindow{invalid: true}
 	}
-	return availabilityWindow{
-		start: time.Unix(startSec, 0).UTC(),
-		end:   time.Unix(endSec, 0).UTC(),
-		ok:    true,
+	start := time.Unix(startSec, 0).UTC()
+	end := start.Add(availDefaultSpan)
+	if raw := avail.ChildText(wbxml.RREndTime); raw != "" {
+		endSec := parseEASTime(raw)
+		if endSec == 0 {
+			return availabilityWindow{invalid: true}
+		}
+		end = time.Unix(endSec, 0).UTC()
 	}
+	if span := end.Sub(start); span < availMinSpan || span > availMaxSpan {
+		return availabilityWindow{invalid: true}
+	}
+	return availabilityWindow{start: start, end: end, ok: true}
 }
 
 // availabilityNode builds a recipient's Availability response: a Status and, on

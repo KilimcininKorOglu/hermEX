@@ -92,26 +92,81 @@ func TestQuantizeFreeBusy(t *testing.T) {
 	}
 }
 
-// TestParseAvailability proves the Options>Availability window parses, and that a
-// missing element or a malformed/inverted window yields a not-ok window (so the
-// response omits Availability).
-func TestParseAvailability(t *testing.T) {
-	start := time.Date(2026, 6, 27, 9, 0, 0, 0, time.UTC)
-	end := start.Add(time.Hour)
-	avail := func(s, e string) *wbxml.Node {
-		return wbxml.Elem(wbxml.RROptions, wbxml.Elem(wbxml.RRAvailability,
-			wbxml.Str(wbxml.RRStartTime, s), wbxml.Str(wbxml.RREndTime, e)))
-	}
+// availWindowStart is the StartTime the window-parsing tests send.
+var availWindowStart = time.Date(2026, 6, 27, 9, 0, 0, 0, time.UTC)
 
-	win := parseAvailability(avail(start.Format(easDateDashes), end.Format(easDateDashes)))
-	if !win.ok || !win.start.Equal(start) || !win.end.Equal(end) {
-		t.Errorf("parsed window = %+v, want start %v end %v ok", win, start, end)
+// availOpts wraps Availability children in an Options element.
+func availOpts(children ...*wbxml.Node) *wbxml.Node {
+	return wbxml.Elem(wbxml.RROptions, wbxml.Elem(wbxml.RRAvailability, children...))
+}
+
+// availTime is an EAS time element d after availWindowStart.
+func availTime(tag wbxml.Tag, d time.Duration) *wbxml.Node {
+	return wbxml.Str(tag, availWindowStart.Add(d).Format(easDateDashes))
+}
+
+// TestParseAvailability proves the Options>Availability windows MS-ASCMD EndTime
+// (ResolveRecipients) accepts: a window parses as sent, with no EndTime the end
+// defaults to seven days after StartTime, a 42-day span is still allowed, and no
+// Availability element is no request at all.
+func TestParseAvailability(t *testing.T) {
+	start := availWindowStart
+	startEl := availTime(wbxml.RRStartTime, 0)
+	avail, endAt := availOpts, func(d time.Duration) *wbxml.Node { return availTime(wbxml.RREndTime, d) }
+
+	win := parseAvailability(avail(startEl, endAt(time.Hour)))
+	if !win.ok || win.invalid || !win.start.Equal(start) || !win.end.Equal(start.Add(time.Hour)) {
+		t.Errorf("parsed window = %+v, want start %v end %v ok", win, start, start.Add(time.Hour))
 	}
-	if parseAvailability(wbxml.Elem(wbxml.RROptions)).ok {
-		t.Error("no Availability element must yield a not-ok window")
+	win = parseAvailability(avail(startEl))
+	if !win.ok || !win.end.Equal(start.Add(7*24*time.Hour)) {
+		t.Errorf("window with no EndTime = %+v, want the end seven days after the start", win)
 	}
-	if parseAvailability(avail(end.Format(easDateDashes), start.Format(easDateDashes))).ok {
-		t.Error("an end before the start must yield a not-ok window")
+	if win := parseAvailability(avail(startEl, endAt(42*24*time.Hour))); !win.ok {
+		t.Errorf("a 42-day window = %+v, want accepted", win)
+	}
+	if win := parseAvailability(wbxml.Elem(wbxml.RROptions)); win.ok || win.invalid {
+		t.Errorf("no Availability element = %+v, want neither requested nor invalid", win)
+	}
+}
+
+// TestParseAvailabilityRefusesAnOutOfRangeWindow proves the windows the client
+// may not ask for are invalid, which the command answers with Status 5: a
+// missing or unreadable StartTime, an unreadable EndTime, an EndTime earlier
+// than StartTime plus 30 minutes, or a span over 42 days (Exchange 2010 to 2019,
+// MS-ASCMD Appendix A).
+func TestParseAvailabilityRefusesAnOutOfRangeWindow(t *testing.T) {
+	startEl := availTime(wbxml.RRStartTime, 0)
+	avail, endAt := availOpts, func(d time.Duration) *wbxml.Node { return availTime(wbxml.RREndTime, d) }
+	for name, opts := range map[string]*wbxml.Node{
+		"no StartTime":            avail(endAt(time.Hour)),
+		"unreadable StartTime":    avail(wbxml.Str(wbxml.RRStartTime, "tomorrow"), endAt(time.Hour)),
+		"unreadable EndTime":      avail(startEl, wbxml.Str(wbxml.RREndTime, "later")),
+		"end before the start":    avail(startEl, endAt(-time.Hour)),
+		"end under 30 minutes":    avail(startEl, endAt(29*time.Minute)),
+		"span over 42 days":       avail(startEl, endAt(42*24*time.Hour+time.Minute)),
+		"span of eight millennia": avail(wbxml.Str(wbxml.RRStartTime, "1970-01-01T00:00:01.000Z"), wbxml.Str(wbxml.RREndTime, "9999-12-31T23:59:59.000Z")),
+	} {
+		if win := parseAvailability(opts); win.ok || !win.invalid {
+			t.Errorf("%s: window = %+v, want invalid", name, win)
+		}
+	}
+}
+
+// TestResolveRecipientsRefusesAnInvalidWindow proves an Availability window the
+// client may not ask for fails the command with ResolveRecipients Status 5
+// ("Protocol error. Either an invalid parameter was specified or the range
+// exceeded limits") and computes no free/busy at all, so an oversized window
+// cannot make the server build a MergedFreeBusy string of millions of digits.
+func TestResolveRecipientsRefusesAnInvalidWindow(t *testing.T) {
+	ts, _ := seededServer(t)
+	start := time.Date(2026, 6, 27, 9, 0, 0, 0, time.UTC)
+	_, root := postCommand(t, ts, "ResolveRecipients", availReq(testUser, start, start.Add(43*24*time.Hour)))
+	if s := root.ChildText(wbxml.RRStatus); s != "5" {
+		t.Errorf("ResolveRecipients Status = %q, want 5", s)
+	}
+	if responseFor(root, testUser) != nil {
+		t.Error("a refused request still resolved the recipient")
 	}
 }
 
