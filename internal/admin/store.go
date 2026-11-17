@@ -247,14 +247,9 @@ func withExistingStore(maildir string, fn func(*objectstore.Store) error) error 
 	return fn(st)
 }
 
-// withStore opens the object store at maildir, creating it when the mailbox was
-// never provisioned, runs fn, and closes it. Only a settings write uses it: an
-// operator may configure a new mailbox before its first delivery.
+// withStore runs a settings write against the existing store at maildir. A
+// mailbox is made when its account is created, so a missing one answers
+// objectstore.ErrNotProvisioned instead of being replaced by an empty mailbox.
 func withStore(maildir string, fn func(*objectstore.Store) error) error {
-	st, err := objectstore.Open(maildir)
-	if err != nil {
-		return err
-	}
-	defer st.Close()
-	return fn(st)
+	return withExistingStore(maildir, fn)
 }

@@ -41,8 +41,14 @@ func TestMailboxReadsDoNotProvision(t *testing.T) {
 	}
 	notCreated(t, dir, "a device action")
 
-	mustNoErr(t, ms.SetQuota(dir, objectstore.QuotaLimits{StorageKB: 1024}), "preset the quota")
-	q, _, err = ms.GetQuota(dir)
-	mustNoErr(t, err, "read the preset quota")
-	wantEq(t, q.StorageKB, uint32(1024), "an operator may configure a mailbox before its first delivery")
+	// A mailbox is made when its account is created, so a settings write to one
+	// that is missing is an error; writing it would replace a lost mailbox with an
+	// empty one.
+	if err := ms.SetQuota(dir, objectstore.QuotaLimits{StorageKB: 1024}); !errors.Is(err, objectstore.ErrNotProvisioned) {
+		t.Errorf("a settings write to an unprovisioned mailbox = %v, want ErrNotProvisioned", err)
+	}
+	if err := ms.SetOOFSettings(dir, objectstore.OOFSettings{}); !errors.Is(err, objectstore.ErrNotProvisioned) {
+		t.Errorf("an OOF write to an unprovisioned mailbox = %v, want ErrNotProvisioned", err)
+	}
+	notCreated(t, dir, "a settings write")
 }
