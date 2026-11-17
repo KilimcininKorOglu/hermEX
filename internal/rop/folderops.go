@@ -467,9 +467,14 @@ func (s *Session) ropHardDeleteMessages(p *ext.Pull, out *ext.Push, handles []ui
 	}
 	// The store row is the EID's global-counter value (the same extraction
 	// RopMoveCopyMessages uses), not the raw EID.
+	var partial uint8
 	for _, eid := range mids {
 		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		mid := int64(mapi.EID(eid).GCValue())
+		if !inHandleFolder(folder, mid) {
+			partial = 1 // a message of another folder is left alone
+			continue
+		}
 		if err := folder.store.SoftDeleteObject(mid); err != nil {
 			writeErr(out, ropHardDeleteMessages, hindex, ecError)
 			return true
@@ -478,7 +483,7 @@ func (s *Session) ropHardDeleteMessages(p *ext.Pull, out *ext.Push, handles []ui
 	out.Uint8(ropHardDeleteMessages)
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
-	out.Uint8(0) // PartialCompletion
+	out.Uint8(partial) // PartialCompletion
 	return true
 }
 

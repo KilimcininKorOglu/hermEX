@@ -180,6 +180,59 @@ func TestDeleteMessages(t *testing.T) {
 	}
 }
 
+// TestFolderRopsLeaveAMessageOfAnotherFolder proves DeleteMessages,
+// HardDeleteMessages and SetReadFlags act only on messages of the folder the
+// handle opened. The rights check runs on that folder while the message ids come
+// from the client, so an Inbox message named over a Sent Items handle must stay
+// as it is, and the response reports PartialCompletion as [MS-OXCFOLD] 2.2.1.11,
+// 2.2.1.12 and 2.2.1.2 require for a message the server did not process.
+func TestFolderRopsLeaveAMessageOfAnotherFolder(t *testing.T) {
+	dir := provisionedDir(t)
+	mid := seedInboxMessage(t, dir, "Inbox mail")
+	eid := uint64(mapi.MakeEIDEx(1, uint64(mid)))
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDSentItems))), []uint32{h[0], 0xFFFFFFFF})
+	sentH := h[1]
+
+	hard := ext.NewPush(ext.FlagUTF16)
+	hard.Uint8(0) // WantAsynchronous
+	hard.Uint8(0) // NotifyNonRead
+	_ = hard.Uint64ArrayShort([]uint64{eid})
+	cases := []struct {
+		name  string
+		ropID uint8
+		req   []byte
+	}{
+		{"DeleteMessages", ropDeleteMessages, buildDeleteMessages(0, eid)},
+		{"HardDeleteMessages", ropHardDeleteMessages, toROPRequest(ropHardDeleteMessages, 0, hard.Bytes())},
+		{"SetReadFlags", ropSetReadFlags, buildSetReadFlags(0, rfDefault, eid)},
+	}
+	for _, c := range cases {
+		resp, _ := sess.Dispatch(c.req, []uint32{sentH})
+		p := ext.NewPull(resp, ext.FlagUTF16)
+		if id := mustU8(t, p, "RopId"); id != c.ropID {
+			t.Fatalf("%s RopId = %#x", c.name, id)
+		}
+		mustU8(t, p, "hindex")
+		if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+			t.Errorf("%s ReturnValue = %#x, want success with partial completion", c.name, ec)
+			continue
+		}
+		if pc := mustU8(t, p, "partialCompletion"); pc != 1 {
+			t.Errorf("%s PartialCompletion = %d, want 1", c.name, pc)
+		}
+	}
+	f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), mid)
+	if f == -1 {
+		t.Fatal("the Inbox message was deleted through a Sent Items handle")
+	}
+	if f&objectstore.FlagSeen != 0 {
+		t.Errorf("the Inbox message was marked read through a Sent Items handle (flags=%#x)", f)
+	}
+}
+
 // TestSetReadFlags marks messages read in bulk over a folder handle: an explicit
 // two-id list flips both to read, then an empty list (meaning every message in the
 // folder) with rfClearReadFlag flips them back to unread. This proves both the

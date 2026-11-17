@@ -115,7 +115,7 @@ func (s *Session) ropSetReadFlags(p *ext.Pull, out *ext.Push, handles []uint32, 
 	}
 	var partial uint8
 	for _, mid := range targets {
-		if !s.applyReadFlag(folder, mid, action) {
+		if !inHandleFolder(folder, mid) || !s.applyReadFlag(folder, mid, action) {
 			partial = 1
 		}
 	}
@@ -173,6 +173,17 @@ func readFlagTargets(folder *object, ids []uint64) ([]int64, error) {
 	return targets, nil
 }
 
+// inHandleFolder reports whether a message lives in the folder the handle opened.
+// A message id on the wire is client-supplied and the store addresses messages by
+// it alone, while the rights check ran on the handle's folder; without this a
+// delegate holding a right on one folder could change a message of another. A
+// message outside the folder is not processed, which the response reports as
+// PartialCompletion ([MS-OXCFOLD] 2.2.1.11 and 2.2.1.12).
+func inHandleFolder(folder *object, mid int64) bool {
+	fid, err := folder.store.MessageFolder(mid)
+	return err == nil && fid == folder.folderID
+}
+
 // applyReadFlag applies one message's read-state change and any receipt it owes.
 // It reports false when the write failed, which makes the whole ROP report
 // partial completion.
@@ -222,7 +233,8 @@ func (s *Session) ropDeleteMessages(p *ext.Pull, out *ext.Push, handles []uint32
 	var partial uint8
 	for _, eid := range ids {
 		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		if err := folder.store.SoftDeleteObject(int64(mapi.EID(eid).GCValue())); err != nil {
+		mid := int64(mapi.EID(eid).GCValue())
+		if !inHandleFolder(folder, mid) || folder.store.SoftDeleteObject(mid) != nil {
 			partial = 1
 		}
 	}
