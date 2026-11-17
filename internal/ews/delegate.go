@@ -461,31 +461,49 @@ func (s *Server) handleAddDelegate(w http.ResponseWriter, inner []byte, sess *se
 		return
 	}
 
-	msgs := make([]delegateWriteMessage, 0, len(req.DelegateUsers))
-	for _, du := range req.DelegateUsers {
+	msgs, added := s.grantNewDelegates(st, list, req.DelegateUsers)
+	// The list is rewritten from the stored value inside one transaction, so a
+	// delegate another client added since the read above is kept.
+	err = st.UpdateDelegates(func(cur []string) []string {
+		for _, addr := range added {
+			if !containsFold(cur, addr) {
+				cur = append(cur, addr)
+			}
+		}
+		return cur
+	})
+	if err != nil {
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
+		return
+	}
+	writeDelegateMutationResponse(w, "AddDelegateResponse", msgs)
+}
+
+// grantNewDelegates writes the folder grants of each requested delegate not yet on
+// list and returns the per-user response messages and the addresses to add. The
+// grants are written before the list entry, so a grant failure leaves no
+// half-configured delegate on the list.
+func (s *Server) grantNewDelegates(st *objectstore.Store, list []string, users []reqDelegateUser) ([]delegateWriteMessage, []string) {
+	msgs := make([]delegateWriteMessage, 0, len(users))
+	var added []string
+	for _, du := range users {
 		addr := du.UserId.PrimarySmtpAddress
 		switch {
 		case addr == "":
 			msgs = append(msgs, delegateErr("ErrorDelegateNoUser", "No user specified", ""))
 			continue
-		case containsFold(list, addr):
+		case containsFold(list, addr) || containsFold(added, addr):
 			msgs = append(msgs, delegateErr("ErrorDelegateAlreadyExists", "Delegate already exists", addr))
 			continue
 		}
-		// Write the grants before recording the list entry so a grant failure leaves no
-		// half-configured delegate on the list.
 		if err := writeDelegateGrants(st, addr, du.DelegatePermissions); err != nil {
 			msgs = append(msgs, s.delegateWriteFailed(addr, err))
 			continue
 		}
-		list = append(list, addr)
+		added = append(added, addr)
 		msgs = append(msgs, delegateOK(addr))
 	}
-	if err := st.SetDelegates(list); err != nil {
-		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
-		return
-	}
-	writeDelegateMutationResponse(w, "AddDelegateResponse", msgs)
+	return msgs, added
 }
 
 // handleRemoveDelegate removes delegates from the mailbox's delegate list. A delegate
@@ -509,14 +527,25 @@ func (s *Server) handleRemoveDelegate(w http.ResponseWriter, inner []byte, sess 
 		return
 	}
 	defer st.Close()
-	list, err := st.GetDelegates()
+	// The removal is decided against the stored list inside one transaction, so a
+	// delegate another client added meanwhile is not dropped with it.
+	var msgs []delegateWriteMessage
+	err = st.UpdateDelegates(func(list []string) []string {
+		msgs, list = removeDelegates(list, req.UserIds)
+		return list
+	})
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
+	writeDelegateMutationResponse(w, "RemoveDelegateResponse", msgs)
+}
 
-	msgs := make([]delegateWriteMessage, 0, len(req.UserIds))
-	for _, uid := range req.UserIds {
+// removeDelegates drops each named user from list and returns the per-user
+// response messages and the remaining list.
+func removeDelegates(list []string, users []delegateReqUserId) ([]delegateWriteMessage, []string) {
+	msgs := make([]delegateWriteMessage, 0, len(users))
+	for _, uid := range users {
 		addr := uid.PrimarySmtpAddress
 		if addr == "" {
 			msgs = append(msgs, delegateErr("ErrorDelegateNoUser", "No user specified", ""))
@@ -530,11 +559,7 @@ func (s *Server) handleRemoveDelegate(w http.ResponseWriter, inner []byte, sess 
 		list = append(list[:idx], list[idx+1:]...)
 		msgs = append(msgs, delegateOK(addr))
 	}
-	if err := st.SetDelegates(list); err != nil {
-		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
-		return
-	}
-	writeDelegateMutationResponse(w, "RemoveDelegateResponse", msgs)
+	return msgs, list
 }
 
 // handleUpdateDelegate rewrites the per-folder grants of delegates already on the

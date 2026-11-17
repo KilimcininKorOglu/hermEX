@@ -107,12 +107,12 @@ func (s *Server) modLinkAttCore(req modLinkAttRequest, user string) uint32 {
 	if !strings.EqualFold(strings.TrimSpace(user), target.smtp) {
 		return ecAccessDenied
 	}
-	list, err := writer.Delegates(target.smtp)
+	// The edit applies to the stored list inside one transaction, so a delegate
+	// another client added meanwhile is kept.
+	err := writer.UpdateDelegates(target.smtp, func(list []string) []string {
+		return g.applyDelegateEdits(list, req.entryIDs, req.flags&modFlagDelete != 0)
+	})
 	if err != nil {
-		return ecError
-	}
-	list = g.applyDelegateEdits(list, req.entryIDs, req.flags&modFlagDelete != 0)
-	if err := writer.SetDelegates(target.smtp, list); err != nil {
 		return ecError
 	}
 	return ecSuccess

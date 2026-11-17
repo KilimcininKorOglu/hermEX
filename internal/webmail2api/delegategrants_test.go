@@ -21,12 +21,13 @@ func TestADelegationMirrorsItsSendGrants(t *testing.T) {
 	}
 	defer st.Close()
 
-	var g storeGrants
-	g.set("asonly@hermex.test", true, false)
-	g.set("behalf@hermex.test", false, true)
-	g.set("both@hermex.test", true, true)
-	g.set("readonly@hermex.test", false, false)
-	if err := g.save(st); err != nil {
+	err = applyGrants(st, func(g *storeGrants) {
+		g.set("asonly@hermex.test", true, false)
+		g.set("behalf@hermex.test", false, true)
+		g.set("both@hermex.test", true, true)
+		g.set("readonly@hermex.test", false, false)
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -69,13 +70,10 @@ func TestRemovingADelegationClearsItsGrants(t *testing.T) {
 	}
 	defer st.Close()
 
-	var g storeGrants
-	g.set("gone@hermex.test", true, true)
-	if err := g.save(st); err != nil {
+	if err := applyGrants(st, func(g *storeGrants) { g.set("gone@hermex.test", true, true) }); err != nil {
 		t.Fatal(err)
 	}
-	g.remove("GONE@hermex.test")
-	if err := g.save(st); err != nil {
+	if err := applyGrants(st, func(g *storeGrants) { g.remove("GONE@hermex.test") }); err != nil {
 		t.Fatal(err)
 	}
 

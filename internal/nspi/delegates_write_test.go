@@ -9,10 +9,11 @@ import (
 	"hermex/internal/mapi"
 )
 
-// SetDelegates lets delegatingGAL satisfy delegateWriter for the ModLinkAtt tests;
-// it mutates the shared map so a test can read back the persisted list.
-func (d delegatingGAL) SetDelegates(userAddr string, list []string) error {
-	d.delegates[strings.ToLower(userAddr)] = list
+// UpdateDelegates lets delegatingGAL satisfy delegateWriter for the ModLinkAtt
+// tests; it mutates the shared map so a test can read back the persisted list.
+func (d delegatingGAL) UpdateDelegates(userAddr string, update func([]string) []string) error {
+	key := strings.ToLower(userAddr)
+	d.delegates[key] = update(d.delegates[key])
 	return nil
 }
 

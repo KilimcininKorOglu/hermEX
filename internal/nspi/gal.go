@@ -85,13 +85,14 @@ type delegateReader interface {
 // build error rather than delegate lists silently reading as empty at runtime.
 var _ delegateReader = (*directory.SQLDirectory)(nil)
 
-// delegateWriter is delegateReader plus the capability to replace a mailbox's
-// public-delegate list, used by ModLinkAtt to edit the caller's own list.
-// *directory.SQLDirectory satisfies it by opening the mailbox store; a directory
-// without it cannot edit delegates, so ModLinkAtt reports the op unsupported.
+// delegateWriter is delegateReader plus the capability to edit a mailbox's
+// public-delegate list in one store transaction, used by ModLinkAtt to edit the
+// caller's own list. *directory.SQLDirectory satisfies it by opening the mailbox
+// store; a directory without it cannot edit delegates, so ModLinkAtt reports the
+// op unsupported.
 type delegateWriter interface {
 	delegateReader
-	SetDelegates(userAddr string, list []string) error
+	UpdateDelegates(userAddr string, update func([]string) []string) error
 }
 
 var _ delegateWriter = (*directory.SQLDirectory)(nil)

@@ -28,11 +28,12 @@ func (d *SQLDirectory) Delegates(userAddr string) ([]string, error) {
 	return st.GetDelegates()
 }
 
-// SetDelegates replaces the public-delegate list of the mailbox at userAddr. An
-// address with no local mailbox is a no-op (there is no store to write). An
-// account whose mailbox is missing answers objectstore.ErrNotProvisioned; the
-// write never creates it.
-func (d *SQLDirectory) SetDelegates(userAddr string, list []string) error {
+// UpdateDelegates applies update to the public-delegate list of the mailbox at
+// userAddr inside one store transaction, so an edit another client made between
+// the read and the write is kept. An address with no local mailbox is a no-op
+// (there is no store to write). An account whose mailbox is missing answers
+// objectstore.ErrNotProvisioned; the write never creates it.
+func (d *SQLDirectory) UpdateDelegates(userAddr string, update func([]string) []string) error {
 	maildir, ok := d.Resolve(userAddr)
 	if !ok {
 		return nil
@@ -42,5 +43,5 @@ func (d *SQLDirectory) SetDelegates(userAddr string, list []string) error {
 		return err
 	}
 	defer st.Close()
-	return st.SetDelegates(list)
+	return st.UpdateDelegates(update)
 }

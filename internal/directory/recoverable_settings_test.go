@@ -94,7 +94,8 @@ func TestMaintenanceReadsNeverCreateAMailbox(t *testing.T) {
 	if len(list) != 0 {
 		t.Errorf("delegates of a missing mailbox = %v, want none", list)
 	}
-	if err := d.SetDelegates("alice@hermex.test", []string{"bob@hermex.test"}); !errors.Is(err, objectstore.ErrNotProvisioned) {
+	add := func(list []string) []string { return append(list, "bob@hermex.test") }
+	if err := d.UpdateDelegates("alice@hermex.test", add); !errors.Is(err, objectstore.ErrNotProvisioned) {
 		t.Errorf("a delegate write to a missing mailbox = %v, want ErrNotProvisioned", err)
 	}
 	if _, err := os.Stat(maildir); !os.IsNotExist(err) {

@@ -24,8 +24,9 @@ func (d delegatingAccounts) Delegates(userAddr string) ([]string, error) {
 	return d.delegates[strings.ToLower(userAddr)], nil
 }
 
-func (d delegatingAccounts) SetDelegates(userAddr string, list []string) error {
-	d.delegates[strings.ToLower(userAddr)] = list
+func (d delegatingAccounts) UpdateDelegates(userAddr string, update func([]string) []string) error {
+	key := strings.ToLower(userAddr)
+	d.delegates[key] = update(d.delegates[key])
 	return nil
 }
 

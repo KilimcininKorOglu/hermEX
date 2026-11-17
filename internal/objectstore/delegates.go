@@ -31,6 +31,44 @@ func (s *Store) GetDelegates() ([]string, error) {
 	return list, nil
 }
 
+// UpdateDelegates applies update to the public-delegate list inside one write
+// transaction, so an edit made through another protocol (EWS AddDelegate, the
+// Outlook address book, webmail) between this read and this write is not erased.
+// update must not touch the store; see updateStoreString.
+func (s *Store) UpdateDelegates(update func(list []string) []string) error {
+	return s.updateJSONList(mapi.PrAbDelegates, update)
+}
+
+// UpdateSendAs applies update to the send-as list inside one write transaction,
+// like UpdateDelegates.
+func (s *Store) UpdateSendAs(update func(list []string) []string) error {
+	return s.updateJSONList(mapi.PrAbSendAs, update)
+}
+
+// UpdateSendOnBehalf applies update to the send-on-behalf list inside one write
+// transaction, like UpdateDelegates.
+func (s *Store) UpdateSendOnBehalf(update func(list []string) []string) error {
+	return s.updateJSONList(mapi.PrAbSendOnBehalf, update)
+}
+
+// updateJSONList applies update to a store-root address list held as a JSON
+// array string, reading and writing it in one transaction.
+func (s *Store) updateJSONList(tag mapi.PropTag, update func(list []string) []string) error {
+	return s.updateStoreString(tag, func(raw string) (string, bool, error) {
+		var list []string
+		if raw != "" {
+			if err := json.Unmarshal([]byte(raw), &list); err != nil {
+				return "", false, err
+			}
+		}
+		next, err := json.Marshal(update(list))
+		if err != nil {
+			return "", false, err
+		}
+		return string(next), true, nil
+	})
+}
+
 // SetDelegates replaces the mailbox's public-delegate list with the given SMTP
 // addresses. An empty list clears it (a later read returns no delegates).
 func (s *Store) SetDelegates(list []string) error {

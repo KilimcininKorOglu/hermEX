@@ -77,14 +77,27 @@ func loadGrants(st *objectstore.Store) (storeGrants, error) {
 	return g, err
 }
 
-func (g storeGrants) save(st *objectstore.Store) error {
-	if err := st.SetDelegates(g.delegates); err != nil {
+// applyGrants applies edit to each of the three store lists, each read and
+// written inside its own store transaction. EWS, the Outlook address book and
+// the admin panel write these lists from other processes, so an edit applied to
+// a copy read earlier would erase theirs. edit must change one grantee only,
+// which keeps it correct when it sees one list at a time.
+func applyGrants(st *objectstore.Store, edit func(*storeGrants)) error {
+	on := func(pick func(*storeGrants) *[]string) func([]string) []string {
+		return func(cur []string) []string {
+			var g storeGrants
+			*pick(&g) = cur
+			edit(&g)
+			return *pick(&g)
+		}
+	}
+	if err := st.UpdateDelegates(on(func(g *storeGrants) *[]string { return &g.delegates })); err != nil {
 		return err
 	}
-	if err := st.SetSendAs(g.sendAs); err != nil {
+	if err := st.UpdateSendAs(on(func(g *storeGrants) *[]string { return &g.sendAs })); err != nil {
 		return err
 	}
-	return st.SetSendOnBehalf(g.onBehalf)
+	return st.UpdateSendOnBehalf(on(func(g *storeGrants) *[]string { return &g.onBehalf }))
 }
 
 // grantees lists everyone the store lists name, once each, in list order.
@@ -265,12 +278,8 @@ func (s *Server) handlePostDelegation(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:       time.Now().UTC().Format(time.RFC3339),
 	}
 	s.withSettings(w, r, func(st *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		g, err := loadGrants(st)
-		if err != nil {
-			return grantsUnavailable(err), false
-		}
-		g.set(grantee, d.CanSendAs, d.CanSendOnBehalf)
-		if err := g.save(st); err != nil {
+		edit := func(g *storeGrants) { g.set(grantee, d.CanSendAs, d.CanSendOnBehalf) }
+		if err := applyGrants(st, edit); err != nil {
 			return grantsUnsaved(err), false
 		}
 		if err := st.SetDelegateFolderRights(grantee, folderRights(d.Rights)); err != nil {
@@ -296,8 +305,7 @@ func (s *Server) handleDeleteDelegation(w http.ResponseWriter, r *http.Request) 
 			return settingsFailure{status: http.StatusNotFound, msg: "no such delegation"}, false
 		}
 		grantee := rows[i].Grantee
-		g.remove(grantee)
-		if err := g.save(st); err != nil {
+		if err := applyGrants(st, func(g *storeGrants) { g.remove(grantee) }); err != nil {
 			return grantsUnsaved(err), false
 		}
 		if err := st.SetDelegateFolderRights(grantee, 0); err != nil {
