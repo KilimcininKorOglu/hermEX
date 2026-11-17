@@ -1,10 +1,14 @@
 package activesync
 
 import (
+	"fmt"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
+	"hermex/internal/directory"
 	"hermex/internal/logging"
 )
 
@@ -29,6 +33,49 @@ func (c *captureSink) find(name string) (logging.Event, bool) {
 		}
 	}
 	return logging.Event{}, false
+}
+
+// TestFailedLoginNeverLogsThePassword proves a rejected login records no event
+// carrying the password the client sent: credentials are never logged, a failed
+// attempt included, since the log store is readable by operators who must not
+// learn a user's password (or a near miss of it).
+func TestFailedLoginNeverLogsThePassword(t *testing.T) {
+	const tried = "Wrong-Secret-Value-42"
+	sink := &captureSink{}
+	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: t.TempDir()}}
+	srv := NewServer(accs, accs, "mail.hermex.test")
+	srv.Logger = logging.New(sink)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	req, err := http.NewRequest("POST", ts.URL+"/Microsoft-Server-ActiveSync?Cmd=FolderSync&User="+testUser+"&DeviceId=dev1&DeviceType=iPhone", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.SetBasicAuth(testUser, tried)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("wrong password status = %d, want 401", resp.StatusCode)
+	}
+
+	// The attempt is recorded, as IMAP and POP3 record theirs, with the user it
+	// tried and never the password.
+	e, ok := sink.find("auth.fail")
+	if !ok {
+		t.Fatal("the failed login recorded no auth.fail event")
+	}
+	wantEq(t, "auth.fail user", e.User, testUser)
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	for _, e := range sink.events {
+		if strings.Contains(fmt.Sprintf("%+v", e), tried) {
+			t.Errorf("event %q carries the password the client sent", e.Name)
+		}
+	}
 }
 
 // TestActiveSyncLogsCommand proves dispatch logs an activesync command event with
