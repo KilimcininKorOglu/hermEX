@@ -142,6 +142,35 @@ func TestCalendarEventBusyStatusRoundTrip(t *testing.T) {
 	}
 }
 
+// TestCalendarEventRefusesAnUnknownBusyStatus proves the event API takes only
+// the busy statuses PidLidBusyStatus defines, 0 (free) through 4 (working
+// elsewhere), the same values MS-ASCAL BusyStatus and the EWS
+// LegacyFreeBusyType carry. Any other number is refused with 400 on create and
+// on update and stores nothing, rather than saving a status no reader can name.
+func TestCalendarEventRefusesAnUnknownBusyStatus(t *testing.T) {
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	st.Close()
+	do := apiHarnessFor(t, dir)
+
+	for _, bad := range []string{"5", "9", "-1", "2147483647"} {
+		wantStatus(t, "create busyStatus "+bad, do(http.MethodPost, "/api/v1/calendar/events",
+			`{"summary":"Meeting","start":"2026-08-02T09:00:00Z","busyStatus":`+bad+`}`), http.StatusBadRequest)
+	}
+	wantStatus(t, "create busyStatus 4", do(http.MethodPost, "/api/v1/calendar/events",
+		`{"summary":"Meeting","start":"2026-08-02T09:00:00Z","busyStatus":4}`), http.StatusOK)
+	listed := listOneEvent(t, do, "list")
+	wantStatus(t, "update busyStatus 9", do(http.MethodPut, "/api/v1/calendar/events/"+listed.UID,
+		`{"summary":"Meeting","start":"2026-08-02T09:00:00Z","busyStatus":9}`), http.StatusBadRequest)
+	listed = listOneEvent(t, do, "list after the refused update")
+	if listed.BusyStatus == nil || *listed.BusyStatus != 4 {
+		t.Errorf("busyStatus after a refused update = %v, want 4 kept", listed.BusyStatus)
+	}
+}
+
 // deleteEvent removes one event by the uid the listing reported.
 func deleteEvent(t *testing.T, do requestFunc, uid string) {
 	t.Helper()

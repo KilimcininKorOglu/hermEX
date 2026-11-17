@@ -14,11 +14,19 @@ import (
 // false when it does not decode or carries a recurrence rule that is not one.
 func decodeEvent(w http.ResponseWriter, r *http.Request) (eventJSON, bool) {
 	var in eventJSON
-	if err := decodeJSON(r, &in); err != nil || (in.Recurrence != "" && !validRRule(in.Recurrence)) {
+	if err := decodeJSON(r, &in); err != nil || (in.Recurrence != "" && !validRRule(in.Recurrence)) || !validBusyStatus(in.BusyStatus) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return eventJSON{}, false
 	}
 	return in, true
+}
+
+// validBusyStatus reports whether an event's busy status is one PidLidBusyStatus
+// defines: absent, or 0 (free) through 4 (working elsewhere), the values MS-ASCAL
+// BusyStatus and the EWS LegacyFreeBusyType carry too. Any other number is a
+// status no reader can name.
+func validBusyStatus(v *int) bool {
+	return v == nil || (*v >= 0 && *v <= 4)
 }
 
 // validRRule reports whether s is an RRULE value that can be written on its own
