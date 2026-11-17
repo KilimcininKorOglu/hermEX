@@ -80,6 +80,9 @@ func (s *Server) editOccurrence(w http.ResponseWriter, r *http.Request, ch occur
 		return
 	}
 	defer st.Close()
+	if !objectInKind(w, st, id, inCalendar) {
+		return
+	}
 	notice, err := editSeries(st, id, c.Email, ch)
 	if errors.Is(err, errNoSuchEvent) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such occurrence"})

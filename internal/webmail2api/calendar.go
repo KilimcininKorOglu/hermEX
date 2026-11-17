@@ -726,6 +726,9 @@ func (s *Server) handleUpdateEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
+	if !objectInKind(w, st, id, inCalendar) {
+		return
+	}
 	caller := ""
 	if c, ok := s.session(r); ok {
 		caller = c.Email
@@ -807,6 +810,9 @@ func (s *Server) handleDeleteEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
+	if !objectInKind(w, st, id, inCalendar) {
+		return
+	}
 	// The organizer's deletion cancels the meeting for its attendees; an
 	// attendee's deletion of their own copy tells nobody.
 	var cancel *pendingMail

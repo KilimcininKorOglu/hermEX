@@ -413,6 +413,13 @@ func (s *Server) handleUpdateContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
+	// A numeric id that names an object outside Contacts is refused before the
+	// edit can replace it; an id that names nothing still stores a new contact.
+	if old, err := strconv.ParseInt(r.PathValue("id"), 10, 64); err == nil {
+		if _, err := st.MessageFolder(old); err == nil && !objectInKind(w, st, old, inFolder(mapi.PrivateFIDContacts)) {
+			return
+		}
+	}
 	id, err := saveContactEdit(st, r.PathValue("id"), in)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save contact"})
@@ -452,6 +459,9 @@ func (s *Server) handleDeleteContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
+	if !objectInKind(w, st, id, inFolder(mapi.PrivateFIDContacts)) {
+		return
+	}
 	if err := st.DeleteObject(id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not delete contact"})
 		return
@@ -814,6 +824,9 @@ func (s *Server) handleSetContactPhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
+	if !objectInKind(w, st, id, inFolder(mapi.PrivateFIDContacts)) {
+		return
+	}
 	// Drop an existing photo first so the contact has at most one photo.
 	if msg, err := st.OpenMessage(id); err == nil {
 		if num, _, has := objectstore.ContactPhotoAttachment(msg); has {
@@ -889,6 +902,9 @@ func (s *Server) handleDeleteContactPhoto(w http.ResponseWriter, r *http.Request
 		return
 	}
 	defer st.Close()
+	if !objectInKind(w, st, id, inFolder(mapi.PrivateFIDContacts)) {
+		return
+	}
 	msg, err := st.OpenMessage(id)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such contact"})

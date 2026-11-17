@@ -308,6 +308,9 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
+	if !objectInKind(w, st, id, inFolder(mapi.PrivateFIDTasks)) {
+		return
+	}
 	merged, err := updateTaskInPlace(st, id, jsonToTask(in))
 	if errors.Is(err, errNoSuchTask) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
@@ -324,7 +327,7 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
-	s.deleteObjectByPath(w, r, "uid")
+	s.deleteObjectByPath(w, r, "uid", mapi.PrivateFIDTasks)
 }
 
 // ---- Notes ----
@@ -405,17 +408,15 @@ func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "note not found"})
 		return
 	}
+	if !objectInKind(w, st, id, inFolder(mapi.PrivateFIDNotes)) {
+		return
+	}
 	// The note is edited in place, so it keeps the id every other protocol holds
 	// it by and every property the editor does not surface.
 	var props mapi.PropertyValues
 	props.Set(mapi.PrSubject, in.Title)
 	props.Set(mapi.PrBody, in.Body)
-	if in.Color != 0 && fitsMAPILong(in.Color) {
-		if tag, err := noteColorTag(st, true); err == nil && tag != 0 {
-			// #nosec G115 -- the fitsMAPILong guard on the same line refuses a value the property cannot carry
-			props.Set(tag, int32(in.Color))
-		}
-	}
+	setNoteColor(st, &props, in.Color)
 	setNoteLink(st, &props, in.LinkedMessageID)
 	// The plain-text body replaces an HTML one another client wrote, or that stale
 	// half would be what an HTML reader shows.
@@ -427,6 +428,18 @@ func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, in)
 }
 
+// setNoteColor adds the note color to props when the editor sent one the
+// property can carry; zero leaves the stored color as it is.
+func setNoteColor(st *objectstore.Store, props *mapi.PropertyValues, color int) {
+	if color == 0 || !fitsMAPILong(color) {
+		return
+	}
+	if tag, err := noteColorTag(st, true); err == nil && tag != 0 {
+		// #nosec G115 -- the fitsMAPILong guard above refuses a value the property cannot carry
+		props.Set(tag, int32(color))
+	}
+}
+
 // isNote reports whether a stored object is a sticky note.
 func isNote(st *objectstore.Store, id int64) bool {
 	props, err := st.GetMessageProperties(id, mapi.PrMessageClass)
@@ -434,12 +447,12 @@ func isNote(st *objectstore.Store, id int64) bool {
 }
 
 func (s *Server) handleDeleteNote(w http.ResponseWriter, r *http.Request) {
-	s.deleteObjectByPath(w, r, "id")
+	s.deleteObjectByPath(w, r, "id", mapi.PrivateFIDNotes)
 }
 
 // deleteObjectByPath deletes an object-store item whose id is in the named path
-// segment.
-func (s *Server) deleteObjectByPath(w http.ResponseWriter, r *http.Request, seg string) {
+// segment and which lives in folder fid.
+func (s *Server) deleteObjectByPath(w http.ResponseWriter, r *http.Request, seg string, fid int64) {
 	id, err := strconv.ParseInt(r.PathValue(seg), 10, 64)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
@@ -450,6 +463,9 @@ func (s *Server) deleteObjectByPath(w http.ResponseWriter, r *http.Request, seg 
 		return
 	}
 	defer st.Close()
+	if !objectInKind(w, st, id, inFolder(fid)) {
+		return
+	}
 	if err := st.DeleteObject(id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not delete"})
 		return
