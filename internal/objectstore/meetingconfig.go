@@ -104,6 +104,33 @@ func (s *Store) GetMeetingConfig() (MeetingConfig, error) {
 	}, nil
 }
 
+// SetMeetingResponseFlags writes only the user's two meeting-handling flags, each
+// left unchanged when nil. Each setting is its own store property, so writing
+// only these keeps a concurrent operator change to automatic acceptance, which a
+// whole-config write from a stale read would erase.
+func (s *Store) SetMeetingResponseFlags(removeRequest, leaveCancellations *bool) error {
+	var props mapi.PropertyValues
+	for name, value := range map[mapi.PropertyName]*bool{
+		nameRemoveRequestOnResponse:       removeRequest,
+		nameLeaveCancellationsUnprocessed: leaveCancellations,
+	} {
+		if value == nil {
+			continue
+		}
+		tag, err := s.namedFlagTag(name, true)
+		if err != nil {
+			return err
+		}
+		if tag != 0 {
+			props = append(props, mapi.TaggedPropVal{Tag: tag, Value: *value})
+		}
+	}
+	if len(props) == 0 {
+		return nil
+	}
+	return s.SetStoreProperties(props)
+}
+
 // SetMeetingConfig replaces the mailbox's meeting-request handling settings.
 func (s *Store) SetMeetingConfig(cfg MeetingConfig) error {
 	props := mapi.PropertyValues{
