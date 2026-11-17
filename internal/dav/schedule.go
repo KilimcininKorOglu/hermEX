@@ -13,6 +13,7 @@ import (
 	"hermex/internal/mapi"
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcical"
 )
 
 // CalDAV scheduling (RFC 6638). The scheduling Outbox accepts a POST carrying an
@@ -322,6 +323,9 @@ func objectBusyPeriods(data string, win freeBusyWindow) []string {
 	if root == nil {
 		return nil
 	}
+	if periods, ok := seriesBusyPeriods(root, data, win); ok {
+		return periods
+	}
 	var periods []string
 	for _, ev := range root.kids {
 		if !strings.EqualFold(ev.name, "VEVENT") {
@@ -332,6 +336,64 @@ func objectBusyPeriods(data string, win freeBusyWindow) []string {
 		}
 	}
 	return periods
+}
+
+// openRangeEnd stands in for an absent time-range end ("+infinity", RFC 4791
+// 9.9) when a series is expanded; the expansion's own period limit bounds the
+// work an open-ended rule can cost.
+var openRangeEnd = time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC)
+
+// seriesBusyPeriods renders every instance of a recurring object inside the
+// window, because RFC 4791 9.9 says a time-range test "MUST consider every
+// recurrence instance". ok is false for an object that is not a series, which
+// the caller renders as single events.
+func seriesBusyPeriods(root *icalNode, data string, win freeBusyWindow) ([]string, bool) {
+	master := seriesMaster(root)
+	if master == nil {
+		return nil, false
+	}
+	if isTransparent(master) {
+		return nil, true
+	}
+	lo, hi := win.expansionBounds()
+	insts, ok := oxcical.InstancesIn([]byte(data), lo, hi)
+	if !ok {
+		return nil, false
+	}
+	periods := make([]string, 0, len(insts))
+	for _, in := range insts {
+		cs, ce := win.clamp(in.Start, in.End)
+		periods = append(periods, formatICalUTCZ(cs)+"/"+formatICalUTCZ(ce))
+	}
+	return periods, true
+}
+
+// seriesMaster returns the VEVENT that defines a series (the one without a
+// RECURRENCE-ID, carrying an RRULE or RDATE), or nil when the object is not one.
+func seriesMaster(root *icalNode) *icalNode {
+	for _, ev := range root.kids {
+		if !strings.EqualFold(ev.name, "VEVENT") || len(ev.propsByName("RECURRENCE-ID")) > 0 {
+			continue
+		}
+		if len(ev.propsByName("RRULE"))+len(ev.propsByName("RDATE")) > 0 {
+			return ev
+		}
+		return nil
+	}
+	return nil
+}
+
+// expansionBounds is the window a series is expanded over, an absent bound read
+// as -infinity or +infinity (RFC 4791 9.9).
+func (w freeBusyWindow) expansionBounds() (time.Time, time.Time) {
+	lo, hi := time.Time{}, openRangeEnd
+	if w.okS {
+		lo = w.start
+	}
+	if w.okE {
+		hi = w.end
+	}
+	return lo, hi
 }
 
 // eventBusyPeriod renders one VEVENT as the PERIOD it blocks, clamped to the
@@ -459,5 +521,34 @@ func folderObjectsForRange(st *objectstore.Store, fid int64, rangeStart, rangeEn
 	if !ok {
 		return st.ListFolderObjects(fid)
 	}
-	return st.ListFolderObjectsInWindow(fid, startTag, endTag, rangeStart, rangeEnd)
+	objs, err := st.ListFolderObjectsInWindow(fid, startTag, endTag, rangeStart, rangeEnd)
+	if err != nil {
+		return nil, err
+	}
+	// A series master carries only its first instance's times, so a series that
+	// began before the window is added whole and expanded by the caller.
+	ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{mapi.NameRecurring})
+	if err != nil || len(ids) != 1 || ids[0] == 0 {
+		return objs, err
+	}
+	series, err := st.ListFolderObjectsWithFlag(fid, mapi.MakeTag(ids[0], mapi.PtBoolean))
+	if err != nil {
+		return nil, err
+	}
+	return mergeObjects(objs, series), nil
+}
+
+// mergeObjects appends the objects of b that a does not already hold.
+func mergeObjects(a, b []objectstore.FolderObject) []objectstore.FolderObject {
+	seen := make(map[int64]bool, len(a))
+	for _, o := range a {
+		seen[o.ID] = true
+	}
+	for _, o := range b {
+		if !seen[o.ID] {
+			seen[o.ID] = true
+			a = append(a, o)
+		}
+	}
+	return a
 }

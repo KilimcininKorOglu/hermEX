@@ -375,6 +375,27 @@ func TestCalFreeBusy(t *testing.T) {
 	}
 }
 
+// TestCalFreeBusyCountsEveryInstance proves RFC 4791 9.9: "Time range tests
+// MUST consider every recurrence instance". A weekly series that started weeks
+// before the window still blocks each Monday inside it, so free/busy reports
+// those instances, not nothing because the first instance is out of range.
+func TestCalFreeBusyCountsEveryInstance(t *testing.T) {
+	ts := davServerCal(t)
+	weekly := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\nBEGIN:VEVENT\r\n" +
+		"UID:rec-fb\r\nSUMMARY:Weekly\r\nDTSTART:20260601T090000Z\r\nDTEND:20260601T100000Z\r\n" +
+		"RRULE:FREQ=WEEKLY;BYDAY=MO\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	doFull(t, ts, "PUT", calURL("weekly.ics"), weekly, nil)
+	body := `<c:free-busy-query xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <c:time-range start="20260706T000000Z" end="20260720T000000Z"/>
+</c:free-busy-query>`
+	_, out := doFull(t, ts, "REPORT", calURL(""), body, map[string]string{"Depth": "1"})
+	for _, want := range []string{"20260706T090000Z/20260706T100000Z", "20260713T090000Z/20260713T100000Z"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("free-busy missing the instance %s\n%s", want, out)
+		}
+	}
+}
+
 // TestCalFreeBusyRequiresATimeRange proves RFC 4791 7.10 and 9.9: the request
 // "MUST contain exactly one CALDAV:time-range", which carries at least one of
 // start and end, with end after start when both are set. Anything else is a
