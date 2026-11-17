@@ -351,7 +351,7 @@ func (s *Server) resolveTarget(authUser, authMailbox, pathUser string) (mailbox 
 	if !found {
 		return "", false
 	}
-	st, err := objectstore.Open(ownerMaildir)
+	st, err := objectstore.OpenExisting(ownerMaildir)
 	if err != nil {
 		return "", false
 	}

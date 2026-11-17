@@ -87,7 +87,7 @@ func findInboxItem(items []inboxItem, name string) (inboxItem, bool) {
 // class implies (a COUNTER for a counter proposal, not a plain REPLY).
 func (s *Server) handleScheduleInboxGet(w http.ResponseWriter, r *http.Request, mailbox string) {
 	_, _, _, name := classify(r.URL.Path)
-	st, err := objectstore.Open(mailbox)
+	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
 		return
@@ -130,7 +130,7 @@ func (s *Server) handleScheduleInboxGet(w http.ResponseWriter, r *http.Request, 
 // backing meeting message (the dumpster path) so the change number tombstones it.
 func (s *Server) handleScheduleInboxDelete(w http.ResponseWriter, r *http.Request, mailbox string) {
 	_, _, _, name := classify(r.URL.Path)
-	st, err := objectstore.Open(mailbox)
+	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
 		return

@@ -3,6 +3,7 @@ package dav
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -647,19 +648,48 @@ func TestOutboxRemoteRecipient(t *testing.T) {
 // so delivery is local-only.
 func davServerWithPeer(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
-	bobDir := filepath.Join(t.TempDir(), "bob")
-	st, err := objectstore.Open(bobDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	st.Close()
+	bobDir := provisionedMailbox(t, "bob")
 	accs := directory.StaticAccounts{
-		testUser:          {Password: testPass, MailboxPath: filepath.Join(t.TempDir(), "alice")},
+		testUser:          {Password: testPass, MailboxPath: provisionedMailbox(t, "alice")},
 		"bob@hermex.test": {Password: testPass, MailboxPath: bobDir},
 	}
 	ts := httptest.NewServer(NewServer(accs, accs, "hermex.test").Handler())
 	t.Cleanup(ts.Close)
 	return ts, bobDir
+}
+
+// provisionedMailbox creates a mailbox the way account creation does and returns
+// its directory.
+func provisionedMailbox(t *testing.T, name string) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), name)
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// TestRequestsNeverCreateAMissingMailbox proves a DAV request for an account
+// whose mailbox is missing fails and leaves it missing. A mailbox is made when
+// its account is created; a lost one (a deleted directory, an unmounted volume)
+// must not come back as an empty calendar the client then syncs against.
+func TestRequestsNeverCreateAMissingMailbox(t *testing.T) {
+	gone := filepath.Join(t.TempDir(), "gone")
+	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: gone}}
+	ts := httptest.NewServer(NewServer(accs, accs, "hermex.test").Handler())
+	t.Cleanup(ts.Close)
+
+	resp, _ := do(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/", "", true)
+	if resp.StatusCode < 400 {
+		t.Errorf("PROPFIND on a missing mailbox = %d, want a failure", resp.StatusCode)
+	}
+	if _, err := os.Stat(gone); !os.IsNotExist(err) {
+		t.Errorf("a DAV request created the missing mailbox: %v", err)
+	}
 }
 
 // inboxMessage reports the count, message class, and subject of the first message in

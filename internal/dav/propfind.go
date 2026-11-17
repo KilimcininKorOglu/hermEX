@@ -186,7 +186,7 @@ func cardCollectionResponse(st *objectstore.Store, user, coll, displayName strin
 // collection (the reserved "contacts" or a user-created one); a nil slice means no
 // such collection exists.
 func (s *Server) addressbookResponses(mailbox, user, coll, depth string) ([]msResponse, error) {
-	st, err := objectstore.Open(mailbox)
+	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +234,7 @@ func (s *Server) addressbookResponses(mailbox, user, coll, depth string) ([]msRe
 // allAddressbookCollections lists every address book in the home set: the
 // well-known Contacts plus each user-created child collection.
 func (s *Server) allAddressbookCollections(mailbox, user string) ([]msResponse, error) {
-	st, err := objectstore.Open(mailbox)
+	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +329,7 @@ func calCollectionResponse(st *objectstore.Store, user, coll, displayName string
 // collection (the reserved "calendar" or a user-created one); a nil slice means no
 // such collection exists.
 func (s *Server) calendarResponses(mailbox, user, coll, depth string) ([]msResponse, error) {
-	st, err := objectstore.Open(mailbox)
+	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
 		return nil, err
 	}
@@ -377,7 +377,7 @@ func (s *Server) calendarResponses(mailbox, user, coll, depth string) ([]msRespo
 // allCalendarCollections lists every calendar in the home set: the well-known
 // Calendar plus each user-created child collection.
 func (s *Server) allCalendarCollections(mailbox, user string) ([]msResponse, error) {
-	st, err := objectstore.Open(mailbox)
+	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
 		return nil, err
 	}
@@ -466,7 +466,7 @@ func scheduleInboxCollectionResponse(st *objectstore.Store, user string) (msResp
 // scheduleInboxResponses returns the scheduling Inbox collection response, followed
 // (when depth != "0") by one response per delivered scheduling message.
 func (s *Server) scheduleInboxResponses(mailbox, user, depth string) ([]msResponse, error) {
-	st, err := objectstore.Open(mailbox)
+	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
 		return nil, err
 	}

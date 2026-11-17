@@ -23,7 +23,7 @@ func (s *Server) handleCopyMove(w http.ResponseWriter, r *http.Request, mailbox 
 		return
 	}
 
-	st, err := objectstore.Open(mailbox)
+	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
 		return
@@ -235,7 +235,7 @@ func (s *Server) openObjectCollection(w http.ResponseWriter, r *http.Request, ma
 		http.Error(w, "invalid resource name", http.StatusBadRequest)
 		return nil, 0, "", false
 	}
-	st, err := objectstore.Open(mailbox)
+	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
 		return nil, 0, "", false

@@ -245,7 +245,7 @@ func invalidRecipient(recipient string) scheduleRespItem {
 // attendeeFreeBusy computes one local attendee's busy periods over the requested
 // window and renders them as an iTIP free-busy reply (RFC 5546 §3.3.2).
 func attendeeFreeBusy(mailboxPath, organizer, recipient string, rangeStart, rangeEnd time.Time, okS, okE bool) (string, error) {
-	st, err := objectstore.Open(mailboxPath)
+	st, err := objectstore.OpenExisting(mailboxPath)
 	if err != nil {
 		return "", err
 	}

@@ -26,7 +26,7 @@ func (s *Server) delegatedMailboxes(user string) ([]directory.SharedMailbox, err
 		if strings.EqualFold(m.Address, user) {
 			continue
 		}
-		ost, err := objectstore.Open(m.StorePath)
+		ost, err := objectstore.OpenExisting(m.StorePath)
 		if err != nil {
 			continue
 		}
@@ -55,7 +55,7 @@ func (s *Server) sharedCalendars(user string) ([]msResponse, error) {
 	}
 	var out []msResponse
 	for _, m := range owners {
-		ost, err := objectstore.Open(m.StorePath)
+		ost, err := objectstore.OpenExisting(m.StorePath)
 		if err != nil {
 			continue
 		}
@@ -78,7 +78,7 @@ func (s *Server) sharedAddressBooks(user string) ([]msResponse, error) {
 	}
 	var out []msResponse
 	for _, m := range owners {
-		ost, err := objectstore.Open(m.StorePath)
+		ost, err := objectstore.OpenExisting(m.StorePath)
 		if err != nil {
 			continue
 		}

@@ -36,7 +36,7 @@ func (s *Server) makeCollection(w http.ResponseWriter, r *http.Request, mailbox 
 		return
 	}
 
-	st, err := objectstore.Open(mailbox)
+	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
 		return
