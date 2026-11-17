@@ -227,7 +227,9 @@ func applyProfile(u ldapauth.SyncedUser, maildir string, store Store, logf func(
 	if len(u.Photo) == 0 || maildir == "" {
 		return
 	}
-	st, err := objectstore.Open(maildir)
+	// The upsert made the mailbox of a new account, so a missing one was lost;
+	// writing the photo must not replace it with an empty mailbox.
+	st, err := objectstore.OpenExisting(maildir)
 	if err != nil {
 		logf("%s photo: %v", u.Username, err)
 		return

@@ -2,6 +2,9 @@ package ldapsync
 
 import (
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -9,6 +12,23 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/ldapauth"
 )
+
+// TestPhotoSyncNeverCreatesAMailbox proves the LDAP photo write leaves a missing
+// mailbox missing and logs the failure. The upsert makes the mailbox of a new
+// account, so one that is gone afterwards was lost, and writing a photo into a
+// fresh empty mailbox there would hide that.
+func TestPhotoSyncNeverCreatesAMailbox(t *testing.T) {
+	maildir := filepath.Join(t.TempDir(), "gone")
+	var logged []string
+	logf := func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) }
+	applyProfile(ldapauth.SyncedUser{Username: "alice@hermex.test", Photo: []byte("jpeg")}, maildir, nil, logf)
+	if _, err := os.Stat(maildir); !os.IsNotExist(err) {
+		t.Errorf("the photo sync created the missing mailbox: %v", err)
+	}
+	if len(logged) != 1 || !strings.Contains(logged[0], "alice@hermex.test photo") {
+		t.Errorf("logged %q, want one photo failure for alice", logged)
+	}
+}
 
 type fakeSyncer struct {
 	users    []ldapauth.SyncedUser
