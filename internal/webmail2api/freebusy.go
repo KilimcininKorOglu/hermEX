@@ -81,7 +81,7 @@ func (s *Server) handleFreeBusy(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	start, err1 := time.Parse(time.RFC3339, q.Get("start"))
 	end, err2 := time.Parse(time.RFC3339, q.Get("end"))
-	if err1 != nil || err2 != nil || !end.After(start) {
+	if err1 != nil || err2 != nil || !end.After(start) || end.Sub(start) > ews.MaxAvailabilityWindow {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad window"})
 		return
 	}

@@ -397,20 +397,21 @@ func errorEveryMailbox(n int, code string) getUserAvailabilityResponse {
 	return resp
 }
 
-// maxAvailabilityWindow is the largest TimeWindow GetUserAvailability serves,
-// the 42-day default limit the EWS ResponseCode reference gives for
-// ErrorTimeIntervalTooBig.
-const maxAvailabilityWindow = 42 * 24 * time.Hour
+// MaxAvailabilityWindow is the largest free/busy window served, the 42-day
+// default limit the EWS ResponseCode reference gives for
+// ErrorTimeIntervalTooBig. GetUserAvailability and the webmail free/busy
+// endpoint both scan calendars over it, so both apply this one limit.
+const MaxAvailabilityWindow = 42 * 24 * time.Hour
 
 // timeWindowError reports the response code for a TimeWindow the request may not
 // ask for, or "" when the window is served: an end before the start is
-// ErrorInvalidTimeInterval, a span over maxAvailabilityWindow is
+// ErrorInvalidTimeInterval, a span over MaxAvailabilityWindow is
 // ErrorTimeIntervalTooBig.
 func timeWindowError(start, end time.Time) string {
 	switch {
 	case end.Before(start):
 		return "ErrorInvalidTimeInterval"
-	case end.Sub(start) > maxAvailabilityWindow:
+	case end.Sub(start) > MaxAvailabilityWindow:
 		return "ErrorTimeIntervalTooBig"
 	}
 	return ""

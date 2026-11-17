@@ -93,6 +93,45 @@ func busyBlocks(t *testing.T, status int32) int {
 	return len(out.FreeBusy[0].Busy)
 }
 
+// TestFreeBusyRefusesAWindowOverTheLimit proves the free/busy endpoint serves
+// at most the 42-day window the EWS ErrorTimeIntervalTooBig reference names,
+// the limit EWS GetUserAvailability and the EAS ResolveRecipients free/busy
+// apply to the same calendar scan. A wider window, such as one spanning
+// centuries, is refused with 400 rather than scanning every calendar.
+func TestFreeBusyRefusesAWindowOverTheLimit(t *testing.T) {
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	secret := []byte("freebusy-test-secret")
+	accs := directory.StaticAccounts{"alice@hermex.test": {MailboxPath: dir}}
+	srv := NewServer(accs, accs, nil, "mail.hermex.test", secret, "", false)
+	token, err := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		end  time.Time
+		want int
+	}{
+		{start.Add(42 * 24 * time.Hour), http.StatusOK},
+		{start.Add(42*24*time.Hour + time.Second), http.StatusBadRequest},
+		{time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC), http.StatusBadRequest},
+	} {
+		q := url.Values{"users": {"alice@hermex.test"}, "start": {start.Format(time.RFC3339)}, "end": {c.end.Format(time.RFC3339)}}
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/calendar/freebusy?"+q.Encode(), nil)
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != c.want {
+			t.Errorf("window to %s: status %d, want %d", c.end.Format(time.RFC3339), rec.Code, c.want)
+		}
+	}
+}
+
 // TestFreeBusyReportsOnlyOccupiedTime is what the grid means. An appointment
 // marked free, and one marking a home office day, say where the attendee is
 // rather than that they are unavailable, so reporting them as busy would empty
