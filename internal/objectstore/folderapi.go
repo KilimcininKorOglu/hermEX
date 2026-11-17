@@ -260,20 +260,17 @@ func (s *Store) RenameFolder(folderID int64, newParent *int64, newName string) e
 	if err := s.reparentFolder(folderID, parentFID, newName); err != nil {
 		return err
 	}
-	if err := s.SetFolderProperties(folderID,
-		mapi.PropertyValues{{Tag: mapi.PrDisplayName, Value: newName}}); err != nil {
-		return err
-	}
 	// Keep the index projection's name in step where a row exists.
 	_, err := s.idxdb.Exec(`UPDATE folders SET name=? WHERE folder_id=?`, newName, folderID)
 	return err
 }
 
-// reparentFolder moves a live folder under parentFID and, when that changes its
-// parent, counts the move in both parents' hierarchy counters. It reports
-// ErrNotFound when the folder is missing, and ErrFolderExists when another live
-// child of parentFID already carries newName ([MS-OXCFOLD] 3.2.5.2), checked in
-// the same transaction as the move.
+// reparentFolder moves a live folder under parentFID with the display name
+// newName and, when that changes its parent, counts the move in both parents'
+// hierarchy counters. It reports ErrNotFound when the folder is missing, and
+// ErrFolderExists when another live child of parentFID already carries newName
+// ([MS-OXCFOLD] 3.2.5.2). The name is checked and written in one transaction, so
+// a second writer cannot take it between the check and the write.
 func (s *Store) reparentFolder(folderID, parentFID int64, newName string) error {
 	tx, err := s.objdb.Begin()
 	if err != nil {
@@ -295,6 +292,12 @@ func (s *Store) reparentFolder(folderID, parentFID int64, newName string) error 
 		return err
 	}
 	if err := countReparent(tx, oldParent, parentFID); err != nil {
+		return err
+	}
+	if err := s.insertProps(tx, "folder_properties", "folder_id", folderID, mapi.PropertyValues{
+		{Tag: mapi.PrDisplayName, Value: newName},
+		{Tag: mapi.PrLastModificationTime, Value: mapi.UnixToNTTime(time.Now())},
+	}); err != nil {
 		return err
 	}
 	return tx.Commit()

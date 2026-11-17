@@ -45,6 +45,39 @@ func TestCreateFolderRefusesASiblingName(t *testing.T) {
 	}
 }
 
+// TestRenameClaimsItsNameInTheCheckingTransaction proves a rename's new name is
+// written by the transaction that checked it was free. Were the name written in a
+// later transaction, a second writer (another daemon on the mailbox) running
+// between the two would find the name still free and take it too. The test stops
+// the first rename right after that transaction and runs the second writer there.
+func TestRenameClaimsItsNameInTheCheckingTransaction(t *testing.T) {
+	dir := t.TempDir()
+	a, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	b, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	x, err := a.CreateFolder(nil, "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	y, err := a.CreateFolder(nil, "y")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.reparentFolder(x, a.ipmSubtree(), "Shared Name"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.RenameFolder(y, nil, "Shared Name"); !errors.Is(err, ErrFolderExists) {
+		t.Errorf("second rename onto the claimed name: err = %v, want ErrFolderExists", err)
+	}
+}
+
 // folderByName indexes a ListFolders result by display name.
 func folderByName(t *testing.T, s *Store) map[string]FolderInfo {
 	t.Helper()
