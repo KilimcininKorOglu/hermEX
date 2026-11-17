@@ -65,6 +65,18 @@ func TestExpandACMENamesDedupesHostname(t *testing.T) {
 	}
 }
 
+// TestExpandACMENamesIgnoresCase proves names that differ only in case are one
+// name: DNS names compare case-insensitively (RFC 4343), so an operator who types
+// the hostname as Mail.Tenant.com in config.json must not get two certificate
+// orders for the same host.
+func TestExpandACMENamesIgnoresCase(t *testing.T) {
+	got := expandACMENames([]string{"Tenant.COM"}, "Mail.Tenant.com", false)
+	want := []string{"autoconfig.tenant.com", "autodiscover.tenant.com", "mail.tenant.com"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("expandACMENames = %v, want %v", got, want)
+	}
+}
+
 // TestExpandACMENamesEmpty proves no domains and no hostname yield an empty list
 // rather than a slice with empty strings, CertMagic must not be asked to manage "".
 func TestExpandACMENamesEmpty(t *testing.T) {

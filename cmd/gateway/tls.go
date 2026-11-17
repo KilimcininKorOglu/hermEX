@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"hermex/internal/config"
@@ -168,13 +169,15 @@ func acmeNames(dir *directory.SQLDirectory, hostname string) ([]string, error) {
 // The apex is deliberately excluded, it is the tenant's own website, not the mail
 // front door, so it would not resolve here and TLS-ALPN-01 would fail for it. Each
 // included name must resolve to the gateway on :443. The result is deduplicated and
-// sorted so the obtain order is stable.
+// sorted so the obtain order is stable, and lowercased first, since names that
+// differ only in case are one DNS name (RFC 4343).
 func expandACMENames(domains []string, hostname string, mtastsEnabled bool) []string {
 	set := map[string]bool{}
 	if hostname != "" {
-		set[hostname] = true
+		set[strings.ToLower(hostname)] = true
 	}
 	for _, d := range domains {
+		d = strings.ToLower(d)
 		if d == "" {
 			continue
 		}
