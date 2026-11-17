@@ -50,6 +50,25 @@ func TestApplyEWSSizeLimit(t *testing.T) {
 	}
 }
 
+// TestApplyEWSFreeBusyTargets proves the free/busy target cap, the bound on how
+// many mailboxes one GetUserAvailability may ask about, reaches the daemon from the
+// same row, and that a failed read leaves the running value alone.
+func TestApplyEWSFreeBusyTargets(t *testing.T) {
+	got := runApply(func() (directory.SizeLimits, bool, error) {
+		return directory.SizeLimits{FreeBusyMaxTargets: 7}, true, nil
+	})
+	if got.targets != 7 {
+		t.Errorf("applied free/busy target cap = %d, want 7", got.targets)
+	}
+
+	got = runApply(func() (directory.SizeLimits, bool, error) {
+		return directory.SizeLimits{FreeBusyMaxTargets: 7}, false, errors.New("db down")
+	})
+	if got.targets != sentinel {
+		t.Errorf("free/busy setter called on read error (got %d); it must be left unchanged", got.targets)
+	}
+}
+
 // TestApplyEWSSubscriptionTimeout proves the subscription idle timeout travels the
 // same path as the byte caps. It is the setting that decides how long a streaming
 // client may be away before the server drops its subscription, so an operator's
