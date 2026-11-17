@@ -21,6 +21,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 
 	"hermex/internal/admin"
+	"hermex/internal/atomicfile"
 	"hermex/internal/authlimit"
 	"hermex/internal/config"
 	"hermex/internal/directory"
@@ -872,8 +873,8 @@ func backupQuarantine(cfg *config.Config, dest string) error {
 		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 			return err
 		}
-		// #nosec G703 -- target is dest joined with a path relative to src, so a copied file never leaves the backup root
-		return os.WriteFile(target, data, 0o600)
+		// target is dest joined with a path relative to src, so a copied file never leaves the backup root
+		return atomicfile.WriteFile(target, data, 0o600)
 	})
 }
 

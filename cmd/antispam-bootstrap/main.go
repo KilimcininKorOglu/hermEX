@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"hermex/internal/antispam"
+	"hermex/internal/atomicfile"
 )
 
 func main() {
@@ -32,16 +33,13 @@ func main() {
 		log.Fatalf("antispam-bootstrap: ham corpus: %v", err)
 	}
 
-	w := os.Stdout
+	// The model file keeps the mode os.Create gave it before (0644 under the usual
+	// umask), because another process loads it.
+	save := func() error { return model.Save(os.Stdout) }
 	if *out != "" {
-		f, err := os.Create(*out)
-		if err != nil {
-			log.Fatalf("antispam-bootstrap: create %s: %v", *out, err)
-		}
-		defer f.Close()
-		w = f
+		save = func() error { return atomicfile.WriteFunc(*out, 0o644, model.Save) }
 	}
-	if err := model.Save(w); err != nil {
+	if err := save(); err != nil {
 		log.Fatalf("antispam-bootstrap: write model: %v", err)
 	}
 	log.Printf("antispam-bootstrap: trained on %d spam + %d ham messages", ns, nh)

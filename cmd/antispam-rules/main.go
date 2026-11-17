@@ -15,6 +15,7 @@ import (
 	"os"
 
 	"hermex/internal/antispam"
+	"hermex/internal/atomicfile"
 )
 
 func main() {
@@ -58,12 +59,8 @@ func main() {
 	log.Printf("antispam-rules: wrote %s, the MTA picks it up automatically within a minute (no restart)", *out)
 }
 
-// writeAtomic writes data to path via a temp file in the same directory, then
-// renames it into place so a reader never sees a partial ruleset.
+// writeAtomic replaces path with data atomically and durably, so the MTA never
+// loads a partial rule set.
 func writeAtomic(path string, data []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return atomicfile.WriteFile(path, data, 0o600)
 }
