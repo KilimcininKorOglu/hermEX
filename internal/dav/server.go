@@ -318,6 +318,7 @@ func (s *Server) basicAuth(w http.ResponseWriter, r *http.Request) (user, mailbo
 		if s.Limiter != nil {
 			s.Limiter.Fail(addr, u)
 		}
+		s.logAuth(r, u, "auth.fail")
 	}
 	w.Header().Set("WWW-Authenticate", `Basic realm="hermEX"`)
 	http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -327,11 +328,17 @@ func (s *Server) basicAuth(w http.ResponseWriter, r *http.Request) (user, mailbo
 // logThrottled records a refused-before-checked login so the operator sees a
 // guessing wave rather than silence.
 func (s *Server) logThrottled(r *http.Request, user string) {
+	s.logAuth(r, user, "auth.throttled")
+}
+
+// logAuth records a refused login under name with the user it tried, never the
+// password.
+func (s *Server) logAuth(r *http.Request, user, name string) {
 	if s.Logger == nil {
 		return
 	}
 	s.Logger.Emit(logging.Event{
-		Level: logging.LevelWarn, Subsystem: logging.DAV, Name: "auth.throttled",
+		Level: logging.LevelWarn, Subsystem: logging.DAV, Name: name,
 		User: user, RemoteAddr: serve.ClientAddr(r),
 	})
 }
