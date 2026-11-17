@@ -1,8 +1,10 @@
 package activesync
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"hermex/internal/objectstore"
@@ -16,14 +18,16 @@ const (
 	pingPoll     = 5 * time.Second
 )
 
-// Ping status codes (MS-ASCMD 2.2.3.166): 1 the heartbeat expired with no
+// Ping status codes (MS-ASCMD 2.2.3.177.11): 1 the heartbeat expired with no
 // change, 2 one or more watched folders changed, 3 the request named no folder
-// to watch, 5 the requested heartbeat is out of range, 7 a watched folder has
-// not been synced (the device must sync it before Ping can watch it).
+// to watch, 4 a syntax error in the request, 5 the requested heartbeat is out of
+// range, 7 a watched folder has not been synced (the device must sync it before
+// Ping can watch it).
 const (
 	pingStatusExpired      = 1
 	pingStatusChanges      = 2
 	pingStatusNoFolders    = 3
+	pingStatusSyntax       = 4
 	pingStatusBadHeartbeat = 5
 	pingStatusFolderSync   = 7
 )
@@ -39,12 +43,15 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request, sess *sessio
 		return
 	}
 	folderIDs := pingFolders(root)
-	heartbeat, ok := parseHeartbeat(root.ChildText(wbxml.PGHeartbeatInt))
-	if !ok {
-		// The requested interval is out of range: tell the device the nearest
-		// acceptable value (Status 5) so it retries, rather than silently holding
-		// for a different interval than it asked for.
+	heartbeat, refused := parseHeartbeat(root.Child(wbxml.PGHeartbeatInt))
+	switch refused {
+	case pingStatusBadHeartbeat:
+		// Tell the device the nearest acceptable value so it retries, rather than
+		// silently holding for a different interval than it asked for.
 		writeWBXML(w, pingOutOfRange(heartbeat))
+		return
+	case pingStatusSyntax:
+		writeWBXML(w, pingResponse(pingStatusSyntax, nil))
 		return
 	}
 	if len(folderIDs) == 0 {
@@ -170,23 +177,38 @@ func pingFolders(root *wbxml.Node) []string {
 	return out
 }
 
-// parseHeartbeat parses the requested heartbeat seconds. ok is false when the
-// value was present but out of the supported range, the caller replies Status 5
-// with the returned nearest bound so the device retries with an acceptable
-// interval. A missing or unparseable value defaults to the maximum with ok true.
-func parseHeartbeat(s string) (d time.Duration, ok bool) {
-	n, err := strconv.Atoi(s)
-	if err != nil || n <= 0 {
-		return maxHeartbeat, true
+// parseHeartbeat reads the requested heartbeat. It answers the interval to hold
+// and 0, or the interval to report and the Ping status refusing the request: a
+// value that is not a decimal integer is a syntax error (Status 4), and one
+// outside minHeartbeat..maxHeartbeat is Status 5 with the nearest bound
+// (MS-ASCMD 2.2.3.177.11). The range is compared in whole seconds before any
+// Duration is built, so a huge value cannot wrap into the range. An absent
+// element holds for the maximum.
+func parseHeartbeat(el *wbxml.Node) (time.Duration, int) {
+	if el == nil {
+		return maxHeartbeat, 0
 	}
-	d = time.Duration(n) * time.Second
-	if d < minHeartbeat {
-		return minHeartbeat, false
+	n, err := strconv.ParseInt(el.Text, 10, 64)
+	switch {
+	case errors.Is(err, strconv.ErrRange):
+		return heartbeatBound(strings.HasPrefix(el.Text, "-")), pingStatusBadHeartbeat
+	case err != nil:
+		return 0, pingStatusSyntax
+	case n < int64(minHeartbeat/time.Second):
+		return minHeartbeat, pingStatusBadHeartbeat
+	case n > int64(maxHeartbeat/time.Second):
+		return maxHeartbeat, pingStatusBadHeartbeat
 	}
-	if d > maxHeartbeat {
-		return maxHeartbeat, false
+	return time.Duration(n) * time.Second, 0
+}
+
+// heartbeatBound is the bound a heartbeat too large to parse is held to: the
+// shortest interval for a negative one, the longest otherwise.
+func heartbeatBound(negative bool) time.Duration {
+	if negative {
+		return minHeartbeat
 	}
-	return d, true
+	return maxHeartbeat
 }
 
 // pingOutOfRange builds a Status-5 reply naming the nearest acceptable heartbeat

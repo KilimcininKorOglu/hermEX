@@ -1,6 +1,7 @@
 package activesync
 
 import (
+	"strconv"
 	"testing"
 
 	"hermex/internal/wbxml"
@@ -67,6 +68,47 @@ func TestPingHeartbeatOutOfRange(t *testing.T) {
 	}
 	if hb := root.ChildText(wbxml.PGHeartbeatInt); hb != "3540" {
 		t.Errorf("HeartbeatInterval = %q, want 3540 (the upper bound)", hb)
+	}
+}
+
+// TestPingRefusesAMalformedHeartbeat proves the MS-ASCMD Status (Ping) table: a
+// heartbeat that is too short or too long is answered Status 5 with the shortest
+// or longest allowed interval, and one that is not a number is a syntax error,
+// Status 4. The watched folder is unsynced, so an accepted heartbeat answers
+// Status 7 at once instead of holding the request.
+func TestPingRefusesAMalformedHeartbeat(t *testing.T) {
+	ts, _ := seededServer(t)
+	status := func(hb string) (string, string) {
+		_, root := postCommand(t, ts, "Ping", pingReq(hb))
+		return root.ChildText(wbxml.PGStatus), root.ChildText(wbxml.PGHeartbeatInt)
+	}
+	s, shortest := status("0")
+	wantEq(t, "the status for a zero heartbeat", s, "5")
+	for _, hb := range []string{"-5", "-99999999999999999999"} {
+		s, got := status(hb)
+		wantEq(t, "the status for heartbeat "+hb, s, "5")
+		wantEq(t, "the bound for heartbeat "+hb, got, shortest)
+	}
+	s, longest := status("99999")
+	wantEq(t, "the status for a long heartbeat", s, "5")
+	// 18446744075 seconds wraps a nanosecond Duration to about 1.3s.
+	for _, hb := range []string{"18446744075", "99999999999999999999"} {
+		s, got := status(hb)
+		wantEq(t, "the status for heartbeat "+hb, s, "5")
+		wantEq(t, "the bound for heartbeat "+hb, got, longest)
+	}
+	lo, _ := strconv.Atoi(shortest)
+	hi, _ := strconv.Atoi(longest)
+	if lo <= 0 || lo >= hi {
+		t.Errorf("shortest %q and longest %q are not an allowed range", shortest, longest)
+	}
+	for _, hb := range []string{shortest, longest} {
+		s, _ := status(hb)
+		wantEq(t, "the status for the returned bound "+hb, s, "7")
+	}
+	for _, hb := range []string{"abc", "1.5", " 30"} {
+		s, _ := status(hb)
+		wantEq(t, "the status for heartbeat "+strconv.Quote(hb), s, "4")
 	}
 }
 
