@@ -3,6 +3,7 @@ package rop
 import (
 	"testing"
 
+	"hermex/internal/directory"
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
@@ -91,6 +92,48 @@ func TestSyncImportMessageMove(t *testing.T) {
 	}
 	if _, err := st.OpenMessage(int64(dstMID)); err != nil {
 		t.Fatalf("destination message %#x not found after move: %v", dstMID, err)
+	}
+}
+
+// TestSyncImportMessageMoveNeedsDeleteOnTheSource proves a delegate's move is gated
+// on the source folder as well as the destination. The source folder comes from
+// the client's request, so a delegate with Editor rights on Sent Items only must
+// not pull a message out of the boss's Inbox: the move answers ecAccessDenied
+// (MAPI_E_NO_ACCESS) and the message stays where it was.
+func TestSyncImportMessageMoveNeedsDeleteOnTheSource(t *testing.T) {
+	callerDir := provisionedDir(t)
+	bossDir := provisionedDir(t)
+	msgID := seedInboxMessage(t, bossDir, "PRIVATE")
+	grantFolderPermission(t, bossDir, int64(mapi.PrivateFIDSentItems), "delegate@hermex.test", mapi.RightsEditor)
+	accounts := directory.StaticAccounts{
+		"boss@hermex.test":     {MailboxPath: bossDir},
+		"delegate@hermex.test": {MailboxPath: callerDir},
+	}
+	sess := NewSession(callerDir, accounts, "delegate@hermex.test")
+	defer sess.Close()
+	resp, h := sess.Dispatch(delegateLogonRequest(0, 0x01, userDNFor("boss@hermex.test")), []uint32{0xFFFFFFFF})
+	if ec, _ := readLogonResponseFlags(t, resp); ec != ecSuccess {
+		t.Fatalf("delegate logon ec = %#x", ec)
+	}
+	logonH := h[0]
+	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDSentItems))), []uint32{logonH, 0xFFFFFFFF})
+	handles := []uint32{logonH, h[1], 0xFFFFFFFF}
+	h, _ = mustDispatchOK(t, sess, buildOpenCollector(1, 2, 1), handles, ropSyncOpenCollector)
+	handles = []uint32{logonH, h[1], h[2]}
+
+	dstMID := uint64(msgID) + 0x100000
+	move := buildSyncImportMessageMove(2,
+		homeSourceKey(t, bossDir, uint64(mapi.PrivateFIDInbox)), homeSourceKey(t, bossDir, uint64(msgID)),
+		homeSourceKey(t, bossDir, uint64(msgID)), homeSourceKey(t, bossDir, dstMID), homeSourceKey(t, bossDir, dstMID)[16:])
+	sr, _ := sess.Dispatch(move, handles)
+	p := ext.NewPull(sr, ext.FlagUTF16)
+	mustU8(t, p, "RopId")
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecAccessDenied {
+		t.Errorf("move out of an ungranted folder ec = %#x, want ecAccessDenied", ec)
+	}
+	if f := messageFlags(t, bossDir, int64(mapi.PrivateFIDInbox), msgID); f == -1 {
+		t.Error("the boss's Inbox message left the Inbox")
 	}
 }
 

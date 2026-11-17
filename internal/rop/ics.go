@@ -304,6 +304,14 @@ func (s *Session) ropSyncOpenCollector(p *ext.Pull, out *ext.Push, handles []uin
 	var err error
 	if isContent != 0 {
 		col, err = folder.store.NewContentUpload(folder.folderID)
+		if col != nil {
+			// A move takes its message out of a folder the request names, so it
+			// needs DeleteAny there too, as RopMoveCopyMessages requires.
+			col.SetSourceGate(func(fid int64) bool {
+				ok, err := s.authorize(folder.store, fid, mapi.FrightsDeleteAny)
+				return err == nil && ok
+			})
+		}
 	} else {
 		col, err = folder.store.NewHierarchyUpload(folder.folderID)
 	}
@@ -436,11 +444,7 @@ func (s *Session) ropSyncImportMessageMove(p *ext.Pull, out *ext.Push, handles [
 		return true
 	}
 	if err := o.upload.ImportMessageMove(srcFolderKey, srcMsgKey, dstMsgKey); err != nil {
-		if errors.Is(err, objectstore.ErrObjectDeleted) {
-			writeErr(out, ropSynchronizationImportMessageMove, hindex, ecSyncObjectDel)
-			return true
-		}
-		writeErr(out, ropSynchronizationImportMessageMove, hindex, ecError)
+		writeErr(out, ropSynchronizationImportMessageMove, hindex, moveErrorCode(err))
 		return true
 	}
 	out.Uint8(ropSynchronizationImportMessageMove)
@@ -448,6 +452,20 @@ func (s *Session) ropSyncImportMessageMove(p *ext.Pull, out *ext.Push, handles [
 	out.Uint32(ecSuccess)
 	out.Uint64(0) // MessageId; the client's destination id is authoritative
 	return true
+}
+
+// moveErrorCode maps a failed import move to its ROP error: a source the store no
+// longer holds is SYNC_E_OBJECT_DELETED, a source folder the caller holds no right
+// on is MAPI_E_NO_ACCESS, anything else a generic failure.
+func moveErrorCode(err error) uint32 {
+	switch {
+	case errors.Is(err, objectstore.ErrObjectDeleted):
+		return ecSyncObjectDel
+	case errors.Is(err, objectstore.ErrAccessDenied):
+		return ecAccessDenied
+	default:
+		return ecError
+	}
 }
 
 // ropSyncGetTransferState handles RopSynchronizationGetTransferState ([MS-OXCFXICS]

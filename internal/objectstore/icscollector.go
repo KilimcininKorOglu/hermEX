@@ -1,6 +1,7 @@
 package objectstore
 
 import (
+	"errors"
 	"fmt"
 
 	"hermex/internal/ics"
@@ -29,6 +30,20 @@ type UploadCollector struct {
 	streamTag uint32
 	streamBuf []byte
 	started   bool
+	// sourceAllowed, when set, decides whether a message move may take a message
+	// out of the named source folder; see SetSourceGate.
+	sourceAllowed func(folderID int64) bool
+}
+
+// ErrAccessDenied reports an import the caller holds no right for.
+var ErrAccessDenied = errors.New("objectstore: access denied")
+
+// SetSourceGate installs the check a message move runs on its source folder. The
+// collector's own folder was authorized when it was opened, but a move names its
+// source folder in the request, so without this a caller with rights on the
+// destination alone could take a message out of any folder.
+func (c *UploadCollector) SetSourceGate(allowed func(folderID int64) bool) {
+	c.sourceAllowed = allowed
 }
 
 // NewContentUpload opens a contents-side upload collector for folderID, seeded
@@ -202,30 +217,37 @@ func (c *UploadCollector) ImportMessageMove(srcFolderKey, srcMsgKey, dstMsgKey [
 	if err != nil {
 		return err
 	}
-	srcFID, foreign, err := parseSourceKeyMID(srcFolderKey, home)
+	srcFID, err := homeKeyID(srcFolderKey, home, "source folder")
 	if err != nil {
 		return err
 	}
-	if foreign {
-		return fmt.Errorf("objectstore: cross-store move source folder unsupported")
+	if c.sourceAllowed != nil && !c.sourceAllowed(srcFID) {
+		return ErrAccessDenied
 	}
-	srcMID, foreign, err := parseSourceKeyMID(srcMsgKey, home)
+	srcMID, err := homeKeyID(srcMsgKey, home, "source message")
 	if err != nil {
 		return err
 	}
-	if foreign {
-		return fmt.Errorf("objectstore: cross-store move source message unsupported")
-	}
-	dstMID, foreign, err := parseSourceKeyMID(dstMsgKey, home)
+	dstMID, err := homeKeyID(dstMsgKey, home, "destination message")
 	if err != nil {
 		return err
 	}
+	_, err = c.store.MoveMessageImport(srcFID, srcMID, c.folderID, dstMID)
+	return err
+}
+
+// homeKeyID reads the store id a move XID names, refusing one of another replica
+// (a cross-store move is unsupported). what names the XID in the error.
+func homeKeyID(key []byte, home mapi.GUID, what string) (int64, error) {
+	id, foreign, err := parseSourceKeyMID(key, home)
+	if err != nil {
+		return 0, err
+	}
 	if foreign {
-		return fmt.Errorf("objectstore: cross-store move destination message unsupported")
+		return 0, fmt.Errorf("objectstore: cross-store move %s unsupported", what)
 	}
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-	_, err = c.store.MoveMessageImport(int64(srcFID), int64(srcMID), c.folderID, int64(dstMID))
-	return err
+	return int64(id), nil
 }
 
 // GetTransferState renders the collected synchronization state as a FastTransfer
