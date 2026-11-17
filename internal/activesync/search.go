@@ -13,15 +13,6 @@ import (
 	"hermex/internal/wbxml"
 )
 
-// galSearchLimit caps the GAL matches a single Search returns.
-const galSearchLimit = 100
-
-// mailboxSearchHiDefault is the upper Range index a Store=Mailbox search returns
-// when the client requests no Range (0-99 = 100 results, the MS-ASCMD default). It
-// also bounds the per-request scan: matches beyond it are counted in Total but not
-// rendered.
-const mailboxSearchHiDefault = 99
-
 // Search Status values (MS-ASCMD 2.2.3.166.3): the overall command status and the
 // per-store status carried in the response.
 const (
@@ -51,19 +42,11 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, sess *sess
 
 	switch {
 	case strings.EqualFold(name, "GAL"):
-		// The GAL query is the text content of the Query element.
-		query := store.ChildText(wbxml.SRQuery)
-		var entries []directory.GALEntry
-		if gal, ok := s.accounts.(directory.GAL); ok && query != "" {
-			entries, _ = gal.SearchGAL(sess.user, query, galSearchLimit)
-			// Withhold the addresses the operator hid from the address book.
-			entries = directory.VisibleGAL(entries)
-		}
-		writeWBXML(w, searchGALReply(srStoreOK, entries))
+		s.handleGALSearch(w, store, sess)
 	case strings.EqualFold(name, "Mailbox"):
 		s.handleMailboxSearch(w, store, sess)
 	default:
-		writeWBXML(w, searchGALReply(srStoreReqInvalid, nil))
+		writeWBXML(w, searchGALReply(srStoreReqInvalid, nil, 0, 0))
 	}
 }
 
@@ -79,10 +62,13 @@ func (s *Server) handleMailboxSearch(w http.ResponseWriter, store *wbxml.Node, s
 	folderFilter := descendantText(store.Child(wbxml.SRQuery), wbxml.ASCollectionID)
 
 	pref := bodyPref{}
-	lo, hi := 0, mailboxSearchHiDefault
 	if opts := store.Child(wbxml.SROptions); opts != nil {
 		pref = parseBodyPref(opts)
-		lo, hi = parseSearchRange(opts.ChildText(wbxml.SRRange), lo, hi)
+	}
+	lo, hi, status := searchRange(store)
+	if status != srStoreOK {
+		writeWBXML(w, mailboxSearchReply(status, nil, 0, 0, 0))
+		return
 	}
 
 	if freetext == "" {
@@ -224,20 +210,38 @@ func collectBodyPart(p *mime.Part, plain, html *string) {
 	}
 }
 
-// parseSearchRange reads an Options>Range "lo-hi" (e.g. "0-49"). A missing or
-// malformed value leaves the defaults so a client that sends no Range still gets a
-// bounded page.
-func parseSearchRange(s string, defLo, defHi int) (int, int) {
-	lo, hi, ok := strings.Cut(s, "-")
+// searchRangeMax is the most rows one Mailbox or GAL Search may ask for
+// ([MS-ASCMD] 2.2.3.143.3 Range (Search): default 0-99, maximum 100).
+const searchRangeMax = 100
+
+// srStoreRangeExceeded is the Store Status for a Range asking for more rows than
+// the store's maximum ([MS-ASCMD] 2.2.3.143.3, Status 12).
+const srStoreRangeExceeded = 12
+
+// searchRange reads a store's Options>Range, "m-n" with zero-based indexes
+// ([MS-ASCMD] 2.2.3.143.3). No Range is the default 0-99. A value that is not two
+// numbers with m <= n is an invalid search parameter (Store Status 2), and one
+// asking for more than searchRangeMax rows exceeds the maximum range (Status 12).
+// A range that starts past 0 is a later page and is allowed. It returns the
+// bounds and srStoreOK, or the Store Status to answer.
+func searchRange(store *wbxml.Node) (int, int, int) {
+	opts := store.Child(wbxml.SROptions)
+	if opts == nil || opts.Child(wbxml.SRRange) == nil {
+		return 0, searchRangeMax - 1, srStoreOK
+	}
+	lo, hi, ok := strings.Cut(opts.ChildText(wbxml.SRRange), "-")
 	if !ok {
-		return defLo, defHi
+		return 0, 0, srStoreReqInvalid
 	}
 	l, errl := strconv.Atoi(strings.TrimSpace(lo))
 	h, errh := strconv.Atoi(strings.TrimSpace(hi))
 	if errl != nil || errh != nil || l < 0 || h < l {
-		return defLo, defHi
+		return 0, 0, srStoreReqInvalid
 	}
-	return l, h
+	if h-l >= searchRangeMax {
+		return 0, 0, srStoreRangeExceeded
+	}
+	return l, h, srStoreOK
 }
 
 // descendantText returns the text of the first descendant carrying tag, searching
@@ -259,10 +263,30 @@ func descendantText(n *wbxml.Node, tag wbxml.Tag) string {
 	return ""
 }
 
+// handleGALSearch resolves a GAL Query (the text content of the Query element)
+// against the directory address book and returns the rows its Range names.
+func (s *Server) handleGALSearch(w http.ResponseWriter, store *wbxml.Node, sess *session) {
+	lo, hi, status := searchRange(store)
+	if status != srStoreOK {
+		writeWBXML(w, searchGALReply(status, nil, 0, 0))
+		return
+	}
+	query := store.ChildText(wbxml.SRQuery)
+	var entries []directory.GALEntry
+	if gal, ok := s.accounts.(directory.GAL); ok && query != "" {
+		entries, _ = gal.SearchGAL(sess.user, query, hi+1)
+		// Withhold the addresses the operator hid from the address book.
+		entries = directory.VisibleGAL(entries)
+	}
+	total := len(entries)
+	lo = min(lo, total)
+	writeWBXML(w, searchGALReply(srStoreOK, entries[lo:min(hi+1, total)], lo, total))
+}
+
 // searchGALReply builds a Search reply for the GAL store: the overall success, then
-// a Store carrying its status, a Result per GAL match, and (when non-empty) the
-// returned Range and Total.
-func searchGALReply(storeStatus int, entries []directory.GALEntry) *wbxml.Node {
+// a Store carrying its status, a Result per GAL match in the page starting at
+// index lo, and (when non-empty) the returned Range and Total.
+func searchGALReply(storeStatus int, entries []directory.GALEntry, lo, total int) *wbxml.Node {
 	store := []*wbxml.Node{wbxml.Str(wbxml.SRStatus, strconv.Itoa(storeStatus))}
 	for _, e := range entries {
 		// FirstName/LastName are emitted (empty) because some clients will not
@@ -276,8 +300,8 @@ func searchGALReply(storeStatus int, entries []directory.GALEntry) *wbxml.Node {
 	}
 	if len(entries) > 0 {
 		store = append(store,
-			wbxml.Str(wbxml.SRRange, "0-"+strconv.Itoa(len(entries)-1)),
-			wbxml.Str(wbxml.SRTotal, strconv.Itoa(len(entries))))
+			wbxml.Str(wbxml.SRRange, strconv.Itoa(lo)+"-"+strconv.Itoa(lo+len(entries)-1)),
+			wbxml.Str(wbxml.SRTotal, strconv.Itoa(total)))
 	}
 	return wbxml.Elem(wbxml.SRSearch,
 		wbxml.Str(wbxml.SRStatus, strconv.Itoa(srStatusOK)),

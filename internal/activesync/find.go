@@ -101,7 +101,7 @@ const findRangeMax = 999
 // for any other value, which the command answers as an invalid request.
 func findRange(opts *wbxml.Node) (lo, hi int, ok bool) {
 	if opts == nil || opts.Child(wbxml.FNDRange) == nil {
-		return 0, mailboxSearchHiDefault, true
+		return 0, searchRangeMax - 1, true
 	}
 	m, n, found := strings.Cut(opts.ChildText(wbxml.FNDRange), "-")
 	lo, errLo := strconv.Atoi(m)

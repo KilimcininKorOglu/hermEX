@@ -88,6 +88,57 @@ func TestSearchGALMultiple(t *testing.T) {
 	}
 }
 
+// withRange adds an Options>Range to a Search request's Store.
+func withRange(req *wbxml.Node, rng string) *wbxml.Node {
+	store := req.Child(wbxml.SRStore)
+	store.Children = append(store.Children, wbxml.Elem(wbxml.SROptions, wbxml.Str(wbxml.SRRange, rng)))
+	return req
+}
+
+// TestSearchRangeFollowsTheGrammar proves the [MS-ASCMD] 2.2.3.143.3 Range
+// (Search) rules for the device's value, on both stores: "m-n" with zero-based
+// indexes, at most 100 rows (more is Store Status 12, maximum range exceeded),
+// and a value that is not m-n with m <= n is an invalid parameter (Status 2,
+// [MS-ASCMD] 2.2.3.177.13), never silently read as the default page.
+func TestSearchRangeFollowsTheGrammar(t *testing.T) {
+	ts, _ := seededServer(t)
+	cases := []struct{ rng, want string }{
+		{"0-99", "1"},
+		{"100-199", "1"},
+		{"0-100", "12"},
+		{"0-99999999", "12"},
+		{"5-2", "2"},
+		{"abc", "2"},
+		{"-1-5", "2"},
+		{"0-x", "2"},
+	}
+	for _, c := range cases {
+		for _, req := range []*wbxml.Node{mailboxSearchReq("anything"), searchReq("GAL", "alice")} {
+			name := req.Child(wbxml.SRStore).ChildText(wbxml.SRName)
+			_, root := postCommand(t, ts, "Search", withRange(req, c.rng))
+			wantEq(t, name+" store Status for Range "+c.rng, searchStore(t, root).ChildText(wbxml.SRStatus), c.want)
+		}
+	}
+}
+
+// TestSearchGALReturnsTheRangeAsked proves a GAL Range names the rows returned:
+// "1-1" over two matches returns only the second, reported as Range 1-1 with the
+// Total of both.
+func TestSearchGALReturnsTheRangeAsked(t *testing.T) {
+	ts := galServer(t)
+	_, root := postCommand(t, ts, "Search", withRange(searchReq("GAL", "al"), "1-1"))
+	store := searchStore(t, root)
+	wantEq(t, "the Range", store.ChildText(wbxml.SRRange), "1-1")
+	wantEq(t, "the Total", store.ChildText(wbxml.SRTotal), "2")
+	n := 0
+	for _, c := range store.Children {
+		if c.Tag == wbxml.SRResult {
+			n++
+		}
+	}
+	wantEq(t, "the Results returned", n, 1)
+}
+
 // TestSearchGALNoMatch proves a GAL Search that matches nothing reports a
 // successful store with no Result and no Total.
 func TestSearchGALNoMatch(t *testing.T) {
