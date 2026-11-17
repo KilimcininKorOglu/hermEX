@@ -2,18 +2,24 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
-	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"hermex/internal/directory"
 	"hermex/internal/health"
 	"hermex/internal/tlscert"
-	"hermex/internal/tlstest"
 )
 
 // stubPinger stands in for the directory connection.
@@ -93,33 +99,63 @@ func (s certStore) LoadTLSCerts() ([]directory.TLSCertData, error) {
 }
 func (s certStore) TLSCertVersion() (int64, int64, error) { return 1, 1, nil }
 
+// certExpiringIn returns a self-signed certificate and key that stop being valid
+// after d.
+func certExpiringIn(t *testing.T, d time.Duration) directory.TLSCertData {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "admin.hermex.test"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(d),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return directory.TLSCertData{
+		CertPEM: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
+		KeyPEM:  string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})),
+	}
+}
+
 // TestAdminHealthReportsTheCertificateWithTLS is the other half of the TLS
 // contract every daemon's /healthz shares: once the panel serves a certificate,
-// its remaining validity is a reported check beside the directory probe, so an
-// expiring certificate shows on the Live monitor before clients start failing.
+// its remaining validity is reported beside the directory probe, so a
+// certificate three days from expiry turns the panel's /healthz unhealthy and
+// shows on the Live monitor before clients start failing.
 func TestAdminHealthReportsTheCertificateWithTLS(t *testing.T) {
-	certPath, keyPath, err := tlstest.SelfSigned(t.TempDir())
+	provider, err := tlscert.New(nil, certStore{certExpiringIn(t, 72*time.Hour)}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	certPEM, err := os.ReadFile(certPath)
+	ts := httptest.NewServer(health.Handler("admin", "", time.Now(), adminHealthChecks(stubPinger{}, provider)...))
+	defer ts.Close()
+	resp, err := http.Get(ts.URL + "/healthz")
 	if err != nil {
 		t.Fatal(err)
 	}
-	keyPEM, err := os.ReadFile(keyPath)
-	if err != nil {
+	defer resp.Body.Close()
+	var st health.Status
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
 		t.Fatal(err)
 	}
-	provider, err := tlscert.New(nil, certStore{directory.TLSCertData{CertPEM: string(certPEM), KeyPEM: string(keyPEM)}}, nil)
-	if err != nil {
-		t.Fatal(err)
+	if st.OK || st.Checks["directory"] != "ok" {
+		t.Errorf("ok = %v checks = %v, want unhealthy on the certificate alone", st.OK, st.Checks)
 	}
-	if !provider.TLSEnabled() {
-		t.Fatal("the provider holds a certificate but reports TLS off")
+	reported := false
+	for name, msg := range st.Checks {
+		reported = reported || (name != "directory" && strings.Contains(msg, "expires"))
 	}
-
-	checks := adminHealthChecks(stubPinger{}, provider)
-	if len(checks) != 2 || checks[0].Name != "directory" || checks[1].Name != tlscert.ExpiryCheck(provider).Name {
-		t.Errorf("checks with TLS = %+v, want the directory probe and the certificate check", checks)
+	if !reported {
+		t.Errorf("checks = %v, want a check reporting the coming expiry", st.Checks)
 	}
 }
