@@ -99,7 +99,7 @@ type pingParams struct {
 // checks are cached, so the stored list holds synced collections only. The store
 // is closed again so a held Ping does not keep the mailbox open.
 func (s *Server) pingDevice(sess *session, sent pingParams) (*deviceState, pingParams, int, error) {
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		return nil, pingParams{}, 0, err
 	}
@@ -189,7 +189,7 @@ func (s *Server) holdPing(w http.ResponseWriter, r *http.Request, sess *session,
 // folder with no snapshot (never synced) is skipped, the client must Sync it
 // before Ping can watch it.
 func (s *Server) pingCheck(mailbox string, dev *deviceState, folderIDs []string) []string {
-	st, err := objectstore.Open(mailbox)
+	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
 		return nil
 	}

@@ -22,7 +22,7 @@ func (s *Server) handleFolderDelete(w http.ResponseWriter, r *http.Request, sess
 		s.failRequest(w, r, "wbxml.parse.fail", err, http.StatusBadRequest, "invalid WBXML")
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.failRequest(w, r, "folder.delete.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return

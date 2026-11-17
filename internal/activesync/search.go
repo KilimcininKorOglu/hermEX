@@ -90,7 +90,7 @@ func (s *Server) handleMailboxSearch(w http.ResponseWriter, store *wbxml.Node, s
 		return
 	}
 
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		writeWBXML(w, mailboxSearchReply(srStatusServerError, nil, 0, 0, 0))
 		return

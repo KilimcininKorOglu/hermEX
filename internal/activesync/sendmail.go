@@ -80,7 +80,7 @@ func (s *Server) fileSentCopy(sess *session, r *http.Request, cm composeMail) {
 	if !cm.saveToSent && !needMark {
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		return
 	}

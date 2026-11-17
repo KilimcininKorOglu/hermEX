@@ -172,7 +172,7 @@ func ownContacts(mailbox, query string, limit int) []objectstore.ContactMatch {
 	if mailbox == "" || limit <= 0 {
 		return nil
 	}
-	st, err := objectstore.Open(mailbox)
+	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
 		return nil
 	}
@@ -236,7 +236,7 @@ func recipientPhoto(storePath string) []byte {
 	if storePath == "" {
 		return nil
 	}
-	st, err := objectstore.Open(storePath)
+	st, err := objectstore.OpenExisting(storePath)
 	if err != nil {
 		return nil
 	}
@@ -251,7 +251,7 @@ func contactPhoto(mailbox, address string) []byte {
 	if mailbox == "" {
 		return nil
 	}
-	st, err := objectstore.Open(mailbox)
+	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
 		return nil
 	}

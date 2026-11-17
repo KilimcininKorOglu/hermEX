@@ -30,7 +30,7 @@ func (s *Server) handleGetItemEstimate(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.failRequest(w, r, "store.open.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return

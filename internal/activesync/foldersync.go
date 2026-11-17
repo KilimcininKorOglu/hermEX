@@ -47,7 +47,7 @@ func (s *Server) handleFolderSync(w http.ResponseWriter, r *http.Request, sess *
 	}
 	syncKey := root.ChildText(wbxml.FHSyncKey)
 
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.failRequest(w, r, "foldersync.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return

@@ -59,7 +59,7 @@ func (s *Server) handleFind(w http.ResponseWriter, r *http.Request, sess *sessio
 		return
 	}
 
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		writeWBXML(w, findStatus(findStatusInvalidRequest))
 		return

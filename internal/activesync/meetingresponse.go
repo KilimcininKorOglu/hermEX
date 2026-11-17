@@ -94,7 +94,7 @@ func (s *Server) handleMeetingResponse(w http.ResponseWriter, r *http.Request, s
 		http.Error(w, "malformed WBXML", http.StatusBadRequest)
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
 		return

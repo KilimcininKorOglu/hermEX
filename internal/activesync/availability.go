@@ -96,7 +96,7 @@ func mergedFreeBusy(e directory.GALEntry, win availabilityWindow, sess *session)
 	if e.StorePath == "" {
 		return "", false // an external contact has no local calendar to read
 	}
-	st, err := objectstore.Open(e.StorePath)
+	st, err := objectstore.OpenExisting(e.StorePath)
 	if err != nil {
 		return "", false
 	}

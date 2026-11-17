@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -27,6 +29,26 @@ func testServer(t *testing.T) *httptest.Server {
 	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
 	t.Cleanup(ts.Close)
 	return ts
+}
+
+// TestRequestsNeverCreateAMissingMailbox proves an ActiveSync command for an
+// account whose mailbox is missing fails and leaves it missing. A mailbox is made
+// when its account is created; a lost one (a deleted directory, an unmounted
+// volume) must not come back as an empty mailbox a device then syncs, wiping the
+// device's own copy of the mail.
+func TestRequestsNeverCreateAMissingMailbox(t *testing.T) {
+	gone := filepath.Join(t.TempDir(), "gone")
+	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: gone}}
+	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
+	t.Cleanup(ts.Close)
+
+	code := rawCommandStatus(t, ts, "FolderSync", wbxml.Elem(wbxml.FHFolderSync, wbxml.Str(wbxml.FHSyncKey, "0")))
+	if code == http.StatusOK {
+		t.Errorf("FolderSync on a missing mailbox = %d, want a failure", code)
+	}
+	if _, err := os.Stat(gone); !os.IsNotExist(err) {
+		t.Errorf("an ActiveSync command created the missing mailbox: %v", err)
+	}
 }
 
 // do issues a request to the test server, optionally with Basic auth.

@@ -291,7 +291,7 @@ func (s *Server) logThrottled(r *http.Request, user string) {
 // affects the command response. Skipped by the caller when the request carries
 // no device id.
 func (s *Server) recordDevice(r *http.Request, sess *session) int {
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		return WipeStatusUnknown
 	}

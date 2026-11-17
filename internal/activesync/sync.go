@@ -91,7 +91,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, sess *sessio
 		return
 	}
 
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		s.failRequest(w, r, "sync.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
@@ -307,7 +307,7 @@ func (s *Server) holdForSync(ctx context.Context, mailbox string, dev *deviceSta
 
 // syncCheck opens a fresh store and reports whether any watched collection changed.
 func (s *Server) syncCheck(mailbox string, dev *deviceState, collections *wbxml.Node) bool {
-	st, err := objectstore.Open(mailbox)
+	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
 		return false
 	}

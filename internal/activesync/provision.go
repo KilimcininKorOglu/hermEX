@@ -100,7 +100,7 @@ func (s *Server) devicePolicy(sess *session) easpolicy.Policy {
 	}
 	var override easpolicy.Policy
 	if sess.mailbox != "" {
-		st, err := objectstore.Open(sess.mailbox)
+		st, err := objectstore.OpenExisting(sess.mailbox)
 		if err != nil {
 			s.logPolicyReadFail("mailbox", sess, err)
 		} else {
@@ -159,7 +159,7 @@ func (s *Server) provisionWipe(sess *session, acked bool) int {
 	if sess.req.deviceID == "" {
 		return wipeEmitNone
 	}
-	st, err := objectstore.Open(sess.mailbox)
+	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		return wipeEmitNone
 	}
