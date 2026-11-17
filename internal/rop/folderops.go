@@ -237,7 +237,7 @@ func (s *Session) ropMoveFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 		return true
 	}
 	if err := folder.store.RenameFolder(movedFID, newParent, newName); err != nil {
-		writeErr(out, ropMoveFolder, hindex, ecError)
+		writeErr(out, ropMoveFolder, hindex, folderMoveErrorCode(err))
 		return true
 	}
 	out.Uint8(ropMoveFolder)
@@ -245,6 +245,16 @@ func (s *Session) ropMoveFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 	out.Uint32(ecSuccess)
 	out.Uint8(0) // PartialCompletion
 	return true
+}
+
+// folderMoveErrorCode maps a failed folder move to its ROP error: a sibling
+// already holding the name is ecDuplicateName ([MS-OXCFOLD] 3.2.5.2), anything
+// else a generic failure.
+func folderMoveErrorCode(err error) uint32 {
+	if errors.Is(err, objectstore.ErrFolderExists) {
+		return ecDuplicateName
+	}
+	return ecError
 }
 
 // emptyFolderContents soft-deletes every message in the folder and removes every

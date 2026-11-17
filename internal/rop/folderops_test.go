@@ -411,6 +411,24 @@ func TestMoveFolder(t *testing.T) {
 	if v, ok := props.Get(mapi.PrDisplayName); !ok || v.(string) != "RenamedSub" {
 		t.Errorf("display name = %v, want RenamedSub", v)
 	}
+
+	// A move onto a sibling's name is refused with ecDuplicateName ([MS-OXCFOLD]
+	// 3.2.5.2: sibling folders cannot have the same name), and the folder keeps
+	// its name.
+	body = ext.NewPush(ext.FlagUTF16)
+	body.Uint8(0)
+	body.Uint8(0)
+	body.Uint8(1)
+	body.Uint64(uint64(mapi.MakeEIDEx(1, uint64(subFID))))
+	body.Unicode("Destination")
+	resp, _ = sess.Dispatch(toROPRequest(ropMoveFolder, 0, body.Bytes()), []uint32{storeH})
+	if ec := readEC(t, resp, ropMoveFolder); ec != ecDuplicateName {
+		t.Errorf("MoveFolder onto a sibling's name ec = %#x, want ecDuplicateName", ec)
+	}
+	props, _ = store.GetFolderProperties(subFID, mapi.PrDisplayName)
+	if v, _ := props.Get(mapi.PrDisplayName); v != "RenamedSub" {
+		t.Errorf("display name after the refused move = %v, want RenamedSub", v)
+	}
 }
 
 // TestCopyFolderRecursiveAndCycle drives RopCopyFolder over the wire: a folder
