@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"hermex/internal/ews"
 	"hermex/internal/itip"
 	"hermex/internal/mapi"
 	"hermex/internal/mta"
@@ -61,10 +62,11 @@ func (s *Server) outboxFreeBusy(w http.ResponseWriter, user string, vfb *icalNod
 	}
 
 	// The query window is the request VFREEBUSY's DTSTART/DTEND, both required
-	// (RFC 5546 3.3.2), with the end after the start.
+	// (RFC 5546 3.3.2), with the end after the start and no wider than the
+	// free/busy window every other surface serves (ews.MaxAvailabilityWindow).
 	rangeStart, okS := propTimeValue(vfb, "DTSTART")
 	rangeEnd, okE := propTimeValue(vfb, "DTEND")
-	if !okS || !okE || !rangeEnd.After(rangeStart) {
+	if !okS || !okE || !rangeEnd.After(rangeStart) || rangeEnd.Sub(rangeStart) > ews.MaxAvailabilityWindow {
 		schedulePreconditionFail(w, "valid-scheduling-message", http.StatusBadRequest)
 		return
 	}

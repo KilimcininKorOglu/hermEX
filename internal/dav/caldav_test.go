@@ -599,11 +599,19 @@ func TestOutboxFreeBusyNeedsItsWindow(t *testing.T) {
 		"no window":        strings.Replace(strings.Replace(full, "DTSTART:20260601T000000Z\r\n", "", 1), "DTEND:20260701T000000Z\r\n", "", 1),
 		"end before start": strings.Replace(full, "DTEND:20260701T000000Z", "DTEND:20260501T000000Z", 1),
 		"garbled DTSTART":  strings.Replace(full, "DTSTART:20260601T000000Z", "DTSTART:soon", 1),
+		// The 42-day limit every other free/busy surface applies (EWS
+		// ErrorTimeIntervalTooBig), chosen for the Outbox by the operator.
+		"over 42 days": strings.Replace(full, "DTEND:20260701T000000Z", "DTEND:20260713T000001Z", 1),
+		"to year 9999": strings.Replace(full, "DTEND:20260701T000000Z", "DTEND:99991231T000000Z", 1),
 	} {
 		resp, out := doFull(t, ts, "POST", "/dav/calendars/"+testUser+"/outbox/", body, nil)
 		if resp.StatusCode != http.StatusBadRequest || !strings.Contains(out, "valid-scheduling-message") {
 			t.Errorf("%s: status %d, want 400 valid-scheduling-message\n%s", name, resp.StatusCode, out)
 		}
+	}
+	exact := strings.Replace(full, "DTEND:20260701T000000Z", "DTEND:20260713T000000Z", 1)
+	if resp, out := doFull(t, ts, "POST", "/dav/calendars/"+testUser+"/outbox/", exact, nil); resp.StatusCode != http.StatusOK {
+		t.Errorf("a 42-day window: status %d, want 200\n%s", resp.StatusCode, out)
 	}
 }
 
