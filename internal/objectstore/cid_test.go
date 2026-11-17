@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 
+	"hermex/internal/atomicfile"
 	"hermex/internal/mapi"
 	"hermex/internal/oxcmail"
 )
@@ -94,6 +96,38 @@ func roundTripContent(t *testing.T, s *Store, i int, v []byte) string {
 // files: a stray content file no property points to is removed, while a content
 // file two messages share (dedup) survives and both messages still read it. This
 // is the safety property the inline-delete alternative would violate.
+// TestSweepRemovesCrashLeftovers proves the sweep deletes a temporary file a
+// crash left between its creation and its rename, and keeps referenced content:
+// with the mailbox held exclusively no write is in flight, so such a file can
+// only be a leftover, and nothing else would ever delete it.
+func TestSweepRemovesCrashLeftovers(t *testing.T) {
+	s := openSeededStore(t)
+	cid, err := s.putContent([]byte("referenced content"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateMessage(int64(mapi.PrivateFIDInbox), &oxcmail.Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: "IPM.Note"},
+		{Tag: mapi.PrBody, Value: "referenced content"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	path := s.cidPath(cid)
+	leftover := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+atomicfile.TempMarker+"123")
+	if err := os.WriteFile(leftover, []byte("torn"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SweepOrphanContent(); err != nil {
+		t.Fatalf("SweepOrphanContent: %v", err)
+	}
+	if _, err := os.Stat(leftover); !os.IsNotExist(err) {
+		t.Errorf("crash leftover survived the sweep: %v", err)
+	}
+	if _, err := s.getContent(cid); err != nil {
+		t.Errorf("referenced content lost: %v", err)
+	}
+}
+
 func TestSweepOrphanContent(t *testing.T) {
 	s := openSeededStore(t)
 

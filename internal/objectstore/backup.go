@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"hermex/internal/atomicfile"
 )
 
 // Backup writes a self-contained copy of this mailbox into dest, which is created
@@ -102,14 +104,8 @@ func copyFile(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 		return err
 	}
-	// #nosec G304 -- both paths are inside the operator's data directory and the backup root
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
+	return atomicfile.WriteFunc(dst, 0o600, func(out io.Writer) error {
+		_, err := io.Copy(out, in)
 		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close()
-		return err
-	}
-	return out.Close()
+	})
 }

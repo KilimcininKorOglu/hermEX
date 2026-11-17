@@ -11,6 +11,7 @@ import (
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
 
+	"hermex/internal/atomicfile"
 	"hermex/internal/logging"
 	"hermex/internal/migrate"
 )
@@ -216,7 +217,7 @@ func (s *Store) mailMessageCount(folders []int64) (int, error) {
 // behind, and the next open runs the fill again instead of reading a structurally
 // valid index as complete and serving the mailbox short for good.
 func (s *Store) reindexMailFolders() error {
-	if err := os.WriteFile(s.indexMarkerPath(), nil, 0o600); err != nil {
+	if err := atomicfile.WriteFile(s.indexMarkerPath(), nil, 0o600); err != nil {
 		return err
 	}
 	folders, err := s.mailFolderIDs()

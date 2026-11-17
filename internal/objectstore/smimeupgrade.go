@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"hermex/internal/atomicfile"
 	"hermex/internal/mapi"
 	"hermex/internal/oxcmail"
 )
@@ -53,7 +54,7 @@ func (s *Store) upgradeSMIMEMessages() {
 	if failed {
 		return
 	}
-	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+	if err := atomicfile.WriteFile(marker, nil, 0o600); err != nil {
 		s.logStoreError("upgrade_smime_marker", err)
 	}
 }

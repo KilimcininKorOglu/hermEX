@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"hermex/internal/atomicfile"
 )
 
 // TableRecovery is what RecoverDatabase salvaged from one table.
@@ -294,7 +296,7 @@ func swapInRebuilt(path, rebuilt string) (string, error) {
 			return backup, err
 		}
 	}
-	return backup, os.Rename(rebuilt, path)
+	return backup, atomicfile.SyncRename(rebuilt, path)
 }
 
 // removeDatabaseFiles deletes a database and its journal sidecars, used to clear

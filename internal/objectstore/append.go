@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/atomicfile"
 	"hermex/internal/mapi"
 	"hermex/internal/oxcical"
 	"hermex/internal/oxcmail"
@@ -262,19 +263,8 @@ func (s *Store) indexedMessage(messageID int64) bool {
 }
 
 // writeEML writes the re-synthesized wire form to the message's eml cache,
-// atomically (temp file + rename) so a reader never sees a partial file.
+// atomically and durably, so neither a reader nor a restart after a power loss
+// finds a partial file.
 func (s *Store) writeEML(mid string, data []byte) error {
-	path := s.emlPath(mid)
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".eml-*")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }() // a no-op once the rename succeeds
-	if _, err := tmp.Write(data); err != nil {
-		return errors.Join(err, tmp.Close())
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return atomicfile.WriteFile(s.emlPath(mid), data, 0o600)
 }

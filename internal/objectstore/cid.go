@@ -13,6 +13,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
+	"hermex/internal/atomicfile"
 	"hermex/internal/mapi"
 )
 
@@ -76,6 +77,11 @@ func (s *Store) sweepOrphanContent() (int, error) {
 	if _, err := os.Stat(root); errors.Is(err, fs.ErrNotExist) {
 		return 0, nil
 	}
+	// The mailbox is held exclusively, so no write is in flight: a temporary file
+	// here is what a crash between its creation and its rename left behind.
+	if err := removeTempFiles(root); err != nil {
+		return 0, err
+	}
 	files, err := contentFiles(root)
 	if err != nil {
 		return 0, err
@@ -99,6 +105,19 @@ func (s *Store) sweepOrphanContent() (int, error) {
 		removed++
 	}
 	return removed, nil
+}
+
+// removeTempFiles deletes the atomic-write temporaries under root.
+func removeTempFiles(root string) error {
+	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !atomicfile.IsTemp(d.Name()) {
+			return nil
+		}
+		return os.Remove(path)
+	})
 }
 
 // contentFiles lists every offloaded content blob under the cid directory.
@@ -207,18 +226,7 @@ func (s *Store) putContent(data []byte) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
-	tmp, err := os.CreateTemp(dir, ".cid-*")
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }() // a no-op once the rename succeeds
-	if _, err := tmp.Write(cidEncoder.EncodeAll(data, nil)); err != nil {
-		return "", errors.Join(err, tmp.Close())
-	}
-	if err := tmp.Close(); err != nil {
-		return "", err
-	}
-	return cid, os.Rename(tmp.Name(), path)
+	return cid, atomicfile.WriteFile(path, cidEncoder.EncodeAll(data, nil), 0o600)
 }
 
 // getContent reads and decompresses the content file for cid.
