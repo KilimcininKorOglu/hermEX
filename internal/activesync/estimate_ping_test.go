@@ -6,7 +6,9 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
 
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/wbxml"
 )
@@ -239,6 +241,33 @@ func TestPingNoChange(t *testing.T) {
 	if root.ChildText(wbxml.PGStatus) != "1" {
 		t.Errorf("status = %q, want 1 (heartbeat expired)", root.ChildText(wbxml.PGStatus))
 	}
+}
+
+// TestPingWatchesTheCalendar proves Ping reads a calendar folder as the object
+// folder Sync serves ([MS-ASCMD] 2.2.1.13: Status 1 when nothing changed since the
+// last Sync, Status 2 naming the folder when it did). An appointment is not in the
+// mail index, so reading the folder as mail sees the synced appointment as gone.
+func TestPingWatchesTheCalendar(t *testing.T) {
+	ts, dir := seededServer(t)
+	cal := strconv.Itoa(int(mapi.PrivateFIDCalendar))
+	start := time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC)
+	seedAppointment(t, dir, "Standup", start, start.Add(30*time.Minute))
+	syncCal := func(key string) {
+		postCommand(t, ts, "Sync", wbxml.Elem(wbxml.ASSync, wbxml.Elem(wbxml.ASCollections,
+			wbxml.Elem(wbxml.ASCollection, wbxml.Str(wbxml.ASSyncKey, key), wbxml.Str(wbxml.ASCollectionID, cal)))))
+	}
+	syncCal("0")
+	syncCal("1")
+	ping := wbxml.Elem(wbxml.PGPing, wbxml.Str(wbxml.PGHeartbeatInt, "60"),
+		wbxml.Elem(wbxml.PGFolders, wbxml.Elem(wbxml.PGFolder,
+			wbxml.Str(wbxml.PGID, cal), wbxml.Str(wbxml.PGClass, "Calendar"))))
+
+	_, root := postCommand(t, ts, "Ping", ping)
+	wantEq(t, "Ping status with nothing changed", root.ChildText(wbxml.PGStatus), "1")
+
+	seedAppointment(t, dir, "Review", start.Add(time.Hour), start.Add(2*time.Hour))
+	_, root = postCommand(t, ts, "Ping", ping)
+	wantEq(t, "Ping status after a new appointment", root.ChildText(wbxml.PGStatus), "2")
 }
 
 // TestPingDetectsChange confirms a new message makes Ping return Status 2 with

@@ -215,6 +215,14 @@ func collectionHasChanges(st *objectstore.Store, dev *deviceState, c *wbxml.Node
 	if clientKey != cstate.SyncKey {
 		return false // stale key: let the normal path return Status 3
 	}
+	return folderDiffers(st, folderID, cstate)
+}
+
+// folderDiffers reports whether a folder's live items differ from the device's
+// snapshot of it, reading an object folder (calendar, contacts, tasks, notes) by
+// its objects and a mail folder by its index, the way Sync serves each. A folder
+// that cannot be read reports no change.
+func folderDiffers(st *objectstore.Store, folderID int64, cstate *collectionState) bool {
 	_, isObject, err := objectClassFor(st, folderID)
 	if err != nil {
 		return false

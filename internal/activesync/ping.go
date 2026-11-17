@@ -204,11 +204,7 @@ func (s *Server) pingCheck(mailbox string, dev *deviceState, folderIDs []string)
 		if err != nil {
 			continue
 		}
-		live, err := st.ListMessages(folderID)
-		if err != nil {
-			continue
-		}
-		if len(diffSnapshot(cstate.Items, live)) > 0 {
+		if folderDiffers(st, folderID, cstate) {
 			changed = append(changed, collID)
 		}
 	}
