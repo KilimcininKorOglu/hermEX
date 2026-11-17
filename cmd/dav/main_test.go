@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 )
 
 // davLimits captures what applyDAVSizeLimits hands to its three setters.
@@ -44,5 +45,25 @@ func TestApplyDAVSizeLimits(t *testing.T) {
 	got = applyWith(func() (directory.SizeLimits, bool, error) { return directory.SizeLimits{}, false, nil })
 	if got != untouched {
 		t.Errorf("a missing row applied %+v; the defaults must stand", got)
+	}
+}
+
+// captureSink collects the events an applier emits.
+type captureSink struct{ events []logging.Event }
+
+func (s *captureSink) Write(e logging.Event) { s.events = append(s.events, e) }
+
+// TestApplyDAVSizeLimitsRecordsAReadFailure proves the read failure the applier
+// swallows to keep the running caps is still recorded in the central log, the
+// operator's only view of a settings row that stopped being read.
+func TestApplyDAVSizeLimitsRecordsAReadFailure(t *testing.T) {
+	sink := &captureSink{}
+	applyDAVSizeLimits(logging.New(sink),
+		func() (directory.SizeLimits, bool, error) {
+			return directory.SizeLimits{}, false, errors.New("db down")
+		},
+		func(int64) {}, func(int64) {}, func(int64) {})
+	if len(sink.events) != 1 || sink.events[0].Name != "settings.read.fail" || sink.events[0].Fields["settings"] != "size-limits" {
+		t.Errorf("events = %+v, want one settings.read.fail for size-limits", sink.events)
 	}
 }
