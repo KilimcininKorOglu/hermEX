@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 )
 
 // applied records what one applyEWSSizeLimit pass set, so a test can state which
@@ -47,6 +48,26 @@ func TestApplyEWSSizeLimit(t *testing.T) {
 	got = runApply(func() (directory.SizeLimits, bool, error) { return directory.SizeLimits{}, false, nil })
 	if got.body != sentinel {
 		t.Errorf("setter called with no stored row (got %d); the default must stand", got.body)
+	}
+}
+
+// captureSink collects the events an applier emits.
+type captureSink struct{ events []logging.Event }
+
+func (s *captureSink) Write(e logging.Event) { s.events = append(s.events, e) }
+
+// TestApplyEWSSizeLimitRecordsAReadFailure proves the read failure the applier
+// swallows to keep the running values is still recorded in the central log, the
+// operator's only view of a settings row that stopped being read.
+func TestApplyEWSSizeLimitRecordsAReadFailure(t *testing.T) {
+	sink := &captureSink{}
+	applyEWSSizeLimit(logging.New(sink),
+		func() (directory.SizeLimits, bool, error) {
+			return directory.SizeLimits{}, false, errors.New("db down")
+		},
+		func(int64) {}, func(int64) {}, func(int64) {})
+	if len(sink.events) != 1 || sink.events[0].Name != "settings.read.fail" || sink.events[0].Fields["settings"] != "size-limits" {
+		t.Errorf("events = %+v, want one settings.read.fail for size-limits", sink.events)
 	}
 }
 
