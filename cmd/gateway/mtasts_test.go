@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -108,6 +107,11 @@ func TestMTASTSUnknownDomainIs404(t *testing.T) {
 	}
 }
 
+// eventSink collects the events the handler emits.
+type eventSink struct{ events []logging.Event }
+
+func (s *eventSink) Write(e logging.Event) { s.events = append(s.events, e) }
+
 // TestMTASTSDirectoryErrorIs500 proves a failure of either directory read is a
 // per-request 5xx, not a panic that takes the front door down, that the body
 // carries none of the error's text, and that the failure is recorded: the
@@ -118,18 +122,20 @@ func TestMTASTSDirectoryErrorIs500(t *testing.T) {
 		"domains": {settings: directory.MTASTSSettings{Enabled: true, Mode: "testing", MaxAge: 86400},
 			found: true, domainsErr: errors.New("db down: domains")},
 	} {
-		var logs bytes.Buffer
-		logger := logging.New(logging.NewStderrSink(&logs))
-		h := withMTASTS(&config.Config{Hostname: "mail.hermex.test"}, dir, logger, http.HandlerFunc(proxied))
-		rec := doRequest(h, "mta-sts.tenant.com", mtastsPolicyPath)
+		sink := &eventSink{}
+		h := withMTASTS(&config.Config{Hostname: "mail.hermex.test"}, dir, logging.New(sink), http.HandlerFunc(proxied))
+		req := httptest.NewRequest(http.MethodGet, "http://mta-sts.tenant.com"+mtastsPolicyPath, nil)
+		req.RemoteAddr = "192.0.2.7:4711"
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
 		if rec.Code != http.StatusInternalServerError {
 			t.Errorf("%s: status = %d, want 500", name, rec.Code)
 		}
 		if strings.Contains(rec.Body.String(), "db down") {
 			t.Errorf("%s: the response leaks the error: %q", name, rec.Body.String())
 		}
-		if !strings.Contains(logs.String(), "db down: "+name) {
-			t.Errorf("%s: the failure was not recorded; log = %q", name, logs.String())
+		if len(sink.events) != 1 || sink.events[0].Err != "db down: "+name || sink.events[0].RemoteAddr != "192.0.2.7:4711" {
+			t.Errorf("%s: events = %+v, want one carrying the error and the client address", name, sink.events)
 		}
 	}
 }
