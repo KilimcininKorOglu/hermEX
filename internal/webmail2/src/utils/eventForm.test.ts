@@ -101,6 +101,19 @@ describe("eventPayload", () => {
     const { uid: _uid, ...stored } = ev
     expect(eventPayload(eventFormOf(ev), "UTC")).toEqual({ ...stored, allDay: undefined, location: undefined, description: undefined, sendInvite: undefined, timezone: "UTC" })
   })
+
+  // The server takes only the PidLidBusyStatus values 0-4. Another client (a
+  // MAPI write) can store a value outside them; editing such an event must not
+  // send that value back, or the save is refused, so the form leaves the busy
+  // status unset and the server keeps the stored value.
+  it("does not send back a busy status outside 0-4", () => {
+    for (const busyStatus of [5, -1, 9]) {
+      const ev = { uid: "4", summary: "Old", start: localISO(9, 0), end: localISO(9, 30), busyStatus }
+      expect(eventPayload(eventFormOf(ev), "UTC").busyStatus).toBeUndefined()
+    }
+    const ev = { uid: "5", summary: "Home", start: localISO(9, 0), end: localISO(9, 30), busyStatus: 4 }
+    expect(eventPayload(eventFormOf(ev), "UTC").busyStatus).toBe(4)
+  })
 })
 
 describe("rooms", () => {

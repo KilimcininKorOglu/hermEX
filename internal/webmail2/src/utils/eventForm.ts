@@ -97,7 +97,9 @@ export function eventFormOf(ev: CalendarEvent): EventForm {
     recurrence: recurrenceToForm(ev.recurrence),
     calendarId: ev.calendarId ?? "calendar",
     reminder: numberText(ev.reminderMinutes, (n) => n !== 0),
-    busyStatus: numberText(ev.busyStatus, () => true),
+    // Only the PidLidBusyStatus values the server accepts; a value another client
+    // stored outside them is left unset so the server keeps it.
+    busyStatus: numberText(ev.busyStatus, (n) => n >= 0 && n <= 4),
     sensitivity: numberText(ev.sensitivity, (n) => n > 0),
     categories: ev.categories ?? [],
     sendInvite: false,
