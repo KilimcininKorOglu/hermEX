@@ -3,6 +3,7 @@ package relay
 import (
 	"bytes"
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -314,5 +315,33 @@ func TestSpoolBackupSnapshotsQueuedMail(t *testing.T) {
 	}
 	if len(queued) != 1 || queued[0].Recipient != "bob@remote" {
 		t.Fatalf("backup holds %+v, want the one queued recipient bob@remote", queued)
+	}
+}
+
+// TestFailedSpoolBackupKeepsThePreviousCopy proves an interrupted backup never
+// costs the last good one: a snapshot that fails leaves the earlier backup whole
+// under its name, because the new one is only moved over it once complete.
+func TestFailedSpoolBackupKeepsThePreviousCopy(t *testing.T) {
+	sp := openSpool(t)
+	dest := filepath.Join(t.TempDir(), "relay-copy.sqlite3")
+	if err := sp.Backup(dest); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sp.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := sp.Backup(dest); err == nil {
+		t.Fatal("a backup from a closed spool succeeded")
+	}
+	after, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("the previous backup is gone: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("the previous backup changed under a failed one")
 	}
 }

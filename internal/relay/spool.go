@@ -20,8 +20,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
+	"hermex/internal/atomicfile"
 	"hermex/internal/logging"
 	"hermex/internal/migrate"
 
@@ -144,14 +146,21 @@ func (s *Spool) Close() error { return s.db.Close() }
 
 // Backup writes a consistent snapshot of the spool to dest via VACUUM INTO, so a
 // live spool holding accepted-but-undelivered outbound mail is captured without a
-// torn copy. VACUUM INTO refuses to overwrite, so an existing dest is removed first,
-// making a re-run into the same path replace rather than fail.
+// torn copy. VACUUM INTO writes its target in place and refuses an existing one,
+// so the snapshot goes to a fresh name beside dest and is moved over it durably:
+// an interrupted run leaves the previous backup, never a torn one under dest.
 func (s *Spool) Backup(dest string) error {
-	if err := os.Remove(dest); err != nil && !os.IsNotExist(err) {
+	tmp := filepath.Join(filepath.Dir(dest), "."+filepath.Base(dest)+atomicfile.TempMarker+"vacuum")
+	if err := os.Remove(tmp); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	_, err := s.db.Exec(`VACUUM INTO ?`, dest)
-	return err
+	if _, err := s.db.Exec(`VACUUM INTO ?`, tmp); err != nil {
+		if rmErr := os.Remove(tmp); rmErr != nil && !os.IsNotExist(rmErr) {
+			return errors.Join(err, rmErr)
+		}
+		return err
+	}
+	return atomicfile.SyncRename(tmp, dest)
 }
 
 func (s *Spool) ensureSchema() error {
