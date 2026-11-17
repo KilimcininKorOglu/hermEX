@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"hermex/internal/antivirus"
+	"hermex/internal/atomicfile"
 	"hermex/internal/directory"
 	"hermex/internal/logging"
 )
@@ -319,17 +320,13 @@ func subjectOf(raw []byte) string {
 	return subj
 }
 
-// writeQuarantineEml writes raw to path atomically (temp file then rename) so a
-// reader never sees a partial quarantine message.
+// writeQuarantineEml writes raw to path atomically and durably, so neither a
+// reader nor a restart after a power loss finds a partial quarantine message.
 func writeQuarantineEml(path string, raw []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return atomicfile.WriteFile(path, raw, 0o600)
 }
 
 // avRecipients flattens a session's local and relay recipients into one list for
