@@ -95,13 +95,25 @@ func loadDevices(st *objectstore.Store) (*devicesMeta, error) {
 	return m, nil
 }
 
-// saveDevices persists the mailbox's ActiveSync device metadata.
-func saveDevices(st *objectstore.Store, m *devicesMeta) error {
-	b, err := json.Marshal(m)
-	if err != nil {
-		return err
-	}
-	return st.SetActiveSyncDevices(string(b))
+// updateDevices applies change to the mailbox's device metadata as stored at the
+// moment of the write, inside one store transaction, like updateState: the
+// daemon records every device's contact while the admin panel queues wipes from
+// another process, so a writer must never put back a copy it read earlier.
+// change reports whether it changed anything and must not use the store.
+func updateDevices(st *objectstore.Store, change func(*devicesMeta) bool) error {
+	return st.UpdateActiveSyncDevices(func(raw string) (string, bool, error) {
+		m := &devicesMeta{}
+		if raw != "" {
+			if err := json.Unmarshal([]byte(raw), m); err != nil {
+				return "", false, err
+			}
+		}
+		if !change(m) {
+			return "", false, nil
+		}
+		b, err := json.Marshal(m)
+		return string(b), err == nil, err
+	})
 }
 
 // recordDeviceContact stamps a device's metadata on the store and returns the
@@ -113,11 +125,22 @@ func recordDeviceContact(st *objectstore.Store, deviceID, user, deviceType, user
 	if deviceID == "" {
 		return WipeStatusUnknown, nil
 	}
-	m, err := loadDevices(st)
+	status := WipeStatusUnknown
+	err := updateDevices(st, func(m *devicesMeta) bool {
+		d := m.device(deviceID)
+		d.stampContact(user, deviceType, userAgent, asVersion, now)
+		status = d.WipeStatus
+		return true
+	})
 	if err != nil {
 		return WipeStatusUnknown, err
 	}
-	d := m.device(deviceID)
+	return status, nil
+}
+
+// stampContact records one contact on a device's metadata: firstSync and the OK
+// status once, lastSync and the live attributes every time.
+func (d *deviceMeta) stampContact(user, deviceType, userAgent, asVersion string, now int64) {
 	if d.FirstSync == 0 {
 		d.FirstSync = now
 	}
@@ -137,10 +160,6 @@ func recordDeviceContact(st *objectstore.Store, deviceID, user, deviceType, user
 	if asVersion != "" {
 		d.ASVersion = asVersion
 	}
-	if err := saveDevices(st, m); err != nil {
-		return WipeStatusUnknown, err
-	}
-	return d.WipeStatus, nil
 }
 
 // advanceProvisionWipe reads a device's outstanding remote-wipe state, advances
@@ -150,34 +169,36 @@ func recordDeviceContact(st *objectstore.Store, deviceID, user, deviceType, user
 // and is re-sent until the device acknowledges. A device with no outstanding wipe
 // yields wipeEmitNone and is left untouched.
 func advanceProvisionWipe(st *objectstore.Store, deviceID string, acked bool) (int, error) {
-	m, err := loadDevices(st)
+	emit := wipeEmitNone
+	err := updateDevices(st, func(m *devicesMeta) bool {
+		d := m.Devices[deviceID]
+		if d == nil || !wipeOutstanding(d.WipeStatus) {
+			return false
+		}
+		emit = d.advanceWipe(acked)
+		return true
+	})
 	if err != nil {
 		return wipeEmitNone, err
 	}
-	d := m.Devices[deviceID]
-	if d == nil || !wipeOutstanding(d.WipeStatus) {
-		return wipeEmitNone, nil
-	}
-	var emit int
+	return emit, nil
+}
+
+// advanceWipe moves an outstanding wipe one Provision exchange forward and
+// reports which wipe element the response carries.
+func (d *deviceMeta) advanceWipe(acked bool) int {
 	if d.WipeStatus <= WipeStatusWiped {
-		emit = wipeEmitFull
+		d.WipeStatus = WipeStatusRequested
 		if acked {
 			d.WipeStatus = WipeStatusWiped
-		} else {
-			d.WipeStatus = WipeStatusRequested
 		}
-	} else {
-		emit = wipeEmitAccount
-		if acked {
-			d.WipeStatus = WipeStatusAccountWiped
-		} else {
-			d.WipeStatus = WipeStatusAccountRequested
-		}
+		return wipeEmitFull
 	}
-	if err := saveDevices(st, m); err != nil {
-		return wipeEmitNone, err
+	d.WipeStatus = WipeStatusAccountRequested
+	if acked {
+		d.WipeStatus = WipeStatusAccountWiped
 	}
-	return emit, nil
+	return wipeEmitAccount
 }
 
 // ResyncDevice clears a device's sync state so it re-primes its folder hierarchy
@@ -204,15 +225,13 @@ func DeleteDevice(st *objectstore.Store, deviceID string) error {
 	if err := dropDeviceState(st, deviceID); err != nil {
 		return err
 	}
-	meta, err := loadDevices(st)
-	if err != nil {
-		return err
-	}
-	if _, ok := meta.Devices[deviceID]; ok {
-		delete(meta.Devices, deviceID)
-		return saveDevices(st, meta)
-	}
-	return nil
+	return updateDevices(st, func(m *devicesMeta) bool {
+		if _, ok := m.Devices[deviceID]; !ok {
+			return false
+		}
+		delete(m.Devices, deviceID)
+		return true
+	})
 }
 
 // RequestWipe queues a remote wipe for a device: a full device reset, or an
@@ -235,12 +254,10 @@ func CancelWipe(st *objectstore.Store, deviceID string) error {
 // setDeviceWipeStatus sets a recorded device's wipe status, creating the metadata
 // record if the administrator acts before the device's first contact lands.
 func setDeviceWipeStatus(st *objectstore.Store, deviceID string, status int) error {
-	meta, err := loadDevices(st)
-	if err != nil {
-		return err
-	}
-	meta.device(deviceID).WipeStatus = status
-	return saveDevices(st, meta)
+	return updateDevices(st, func(m *devicesMeta) bool {
+		m.device(deviceID).WipeStatus = status
+		return true
+	})
 }
 
 // DeviceInfo is the read-only view of one ActiveSync device for the management

@@ -67,6 +67,40 @@ func TestConcurrentDevicesKeepTheirState(t *testing.T) {
 			t.Errorf("device %s lost its hierarchy key", id)
 		}
 	}
+	meta, err := loadDevices(st)
+	mustNoErr(t, "load the device records", err)
+	wantEq(t, "recorded devices", len(meta.Devices), devices)
+}
+
+// TestQueuedWipeSurvivesOtherDevicesContacts proves an administrator's remote
+// wipe, written from the admin panel while other devices of the mailbox keep
+// syncing, is not erased by one of those devices recording its contact. A lost
+// write here would silently cancel the wipe.
+func TestQueuedWipeSurvivesOtherDevicesContacts(t *testing.T) {
+	dir := t.TempDir()
+	open := func() *objectstore.Store {
+		st, err := objectstore.Open(dir)
+		mustNoErr(t, "open the store", err)
+		t.Cleanup(func() { st.Close() })
+		return st
+	}
+	daemon, panel := open(), open()
+	mustRecordContact(t, daemon, "lost", "ua", 1)
+	var wg sync.WaitGroup
+	for i := range 4 {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			for n := range 20 {
+				if _, err := recordDeviceContact(daemon, id, testUser, "iPhone", "ua", "16.1", int64(n)); err != nil {
+					t.Error(err)
+				}
+			}
+		}("busy" + strconv.Itoa(i))
+	}
+	mustNoErr(t, "queue the wipe", RequestWipe(panel, "lost", false))
+	wg.Wait()
+	wantDeviceWipe(t, daemon, "after the other devices' contacts", "lost", WipeStatusPending)
 }
 
 // inboxSync is a Sync request body naming the Inbox at key.

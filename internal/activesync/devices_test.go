@@ -80,10 +80,10 @@ func TestRecordDeviceContact(t *testing.T) {
 // setDeviceWipe forces a device's stored remote-wipe status.
 func setDeviceWipe(t *testing.T, st *objectstore.Store, id string, status int) {
 	t.Helper()
-	m, err := loadDevices(st)
-	mustNoErr(t, "load the devices", err)
-	m.device(id).WipeStatus = status
-	mustNoErr(t, "save the devices", saveDevices(st, m))
+	mustNoErr(t, "save the devices", updateDevices(st, func(m *devicesMeta) bool {
+		m.device(id).WipeStatus = status
+		return true
+	}))
 }
 
 // wantDeviceWipe checks a device's stored remote-wipe status.
