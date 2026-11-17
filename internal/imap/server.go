@@ -564,7 +564,9 @@ func (c *conn) finishAuth(tag, user, pass string) {
 		c.no(tag, "[AUTHORIZATIONFAILED] IMAP access is disabled for this account")
 		return
 	}
-	st, err := objectstore.Open(path)
+	// The account's mailbox is made when the account is created; a missing one is
+	// an error to report, never one to replace with an empty mailbox.
+	st, err := objectstore.OpenExisting(path)
 	if err != nil {
 		c.srv.Logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.IMAP, Name: "auth.fail", User: user, RemoteAddr: remoteHost(c.nc), Err: err.Error()})
 		c.no(tag, "mailbox unavailable")

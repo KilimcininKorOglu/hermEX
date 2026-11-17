@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -58,6 +59,36 @@ func startServer(t *testing.T) (*testClient, string) {
 	c := &testClient{t: t, conn: conn, br: bufio.NewReader(conn)}
 	c.expectUntagged("OK", "greeting")
 	return c, path
+}
+
+// TestLoginRefusesAnUnprovisionedMailbox proves a read path never creates a
+// mailbox: an account's mailbox is made when the account is created, so a
+// missing one (a deleted directory, an unmounted volume) is refused at LOGIN and
+// stays missing, rather than being replaced by an empty mailbox that hides the
+// loss from the user and the operator.
+func TestLoginRefusesAnUnprovisionedMailbox(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gone")
+	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test"}).Serve(ln) }()
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	c := &testClient{t: t, conn: conn, br: bufio.NewReader(conn)}
+	c.expectUntagged("OK", "greeting")
+
+	if _, status := c.do("a1", "LOGIN alice secret"); status != "NO" {
+		t.Errorf("LOGIN to a missing mailbox = %q, want NO", status)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("LOGIN created the missing mailbox: %v", err)
+	}
 }
 
 // line reads one logical response line, inlining any IMAP literals ({n}CRLF +

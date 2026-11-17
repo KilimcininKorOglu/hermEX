@@ -10,7 +10,21 @@ import (
 
 	"hermex/internal/authlimit"
 	"hermex/internal/directory"
+	"hermex/internal/objectstore"
 )
+
+// provisionedMailbox creates a mailbox the way account creation does, for a test
+// whose account must be able to log in.
+func provisionedMailbox(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	return dir
+}
 
 // TestIMAPLoginThrottle proves repeated failed LOGINs from one client IP are
 // locked out once the failure threshold is crossed, so online password guessing
@@ -66,7 +80,7 @@ func TestIMAPLoginThrottle(t *testing.T) {
 func TestIMAPThrottleCountsTheAccountToo(t *testing.T) {
 	auth := directory.StaticAccounts{
 		"alice": {Password: "secret", MailboxPath: t.TempDir()},
-		"bob":   {Password: "secret", MailboxPath: t.TempDir()},
+		"bob":   {Password: "secret", MailboxPath: provisionedMailbox(t)},
 	}
 	srv := &Server{Auth: auth, Hostname: "mail.test", Limiter: authlimit.New(2, time.Minute, time.Minute)}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
