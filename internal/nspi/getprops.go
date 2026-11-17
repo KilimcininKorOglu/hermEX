@@ -191,9 +191,10 @@ func errorTag(tag mapi.PropTag) mapi.PropTag {
 }
 
 // userPhoto reads a mailbox's portrait bytes from its object store, or nil when
-// none is set or the store cannot be opened.
+// none is set or the store cannot be opened. A missing mailbox has no photo and
+// is never created by this read.
 func userPhoto(storePath string) []byte {
-	st, err := objectstore.Open(storePath)
+	st, err := objectstore.OpenExisting(storePath)
 	if err != nil {
 		return nil
 	}
@@ -203,9 +204,10 @@ func userPhoto(storePath string) []byte {
 }
 
 // userX509Cert returns the mailbox's published S/MIME public certificate (raw
-// DER), or nil when none is published.
+// DER), or nil when none is published. A missing mailbox has no certificate and
+// is never created by this read.
 func userX509Cert(storePath string) []byte {
-	st, err := objectstore.Open(storePath)
+	st, err := objectstore.OpenExisting(storePath)
 	if err != nil {
 		return nil
 	}

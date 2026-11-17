@@ -1,12 +1,31 @@
 package nspi
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"hermex/internal/directory"
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
 )
+
+// TestAddressBookReadsNeverCreateAMailbox proves reading another user's photo
+// and certificate for an address-book row leaves a missing mailbox missing. A
+// mailbox is made when its account is created; a lookup into someone else's
+// mailbox must answer "no value", not create an empty one on their behalf.
+func TestAddressBookReadsNeverCreateAMailbox(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gone")
+	if photo := userPhoto(path); photo != nil {
+		t.Errorf("photo of a missing mailbox = %d bytes, want none", len(photo))
+	}
+	if cert := userX509Cert(path); cert != nil {
+		t.Errorf("certificate of a missing mailbox = %d bytes, want none", len(cert))
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("an address-book read created the missing mailbox: %v", err)
+	}
+}
 
 // profileGAL is a GAL source that also serves user properties, exercising the lazy
 // profile-field path in GetProps (StaticAccounts alone has no GetUserProperties).
