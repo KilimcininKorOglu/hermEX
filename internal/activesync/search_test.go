@@ -111,6 +111,10 @@ func TestSearchRangeFollowsTheGrammar(t *testing.T) {
 		{"abc", "2"},
 		{"-1-5", "2"},
 		{"0-x", "2"},
+		// Indexes a device could not mean: an int overflow on hi+1, and an index
+		// past any address book, are invalid, never a panic or a million-row scan.
+		{"9223372036854775800-9223372036854775807", "2"},
+		{"1000000-1000099", "2"},
 	}
 	for _, c := range cases {
 		for _, req := range []*wbxml.Node{mailboxSearchReq("anything"), searchReq("GAL", "alice")} {

@@ -222,7 +222,10 @@ const srStoreRangeExceeded = 12
 // ([MS-ASCMD] 2.2.3.143.3). No Range is the default 0-99. A value that is not two
 // numbers with m <= n is an invalid search parameter (Store Status 2), and one
 // asking for more than searchRangeMax rows exceeds the maximum range (Status 12).
-// A range that starts past 0 is a later page and is allowed. It returns the
+// A range that starts past 0 is a later page and is allowed, up to the index
+// bound the same specification sets for Find (findRangeMax); Range (Search)
+// names none, and an unbounded index would overflow hi+1 and ask the address
+// book for any number of rows. It returns the
 // bounds and srStoreOK, or the Store Status to answer.
 func searchRange(store *wbxml.Node) (int, int, int) {
 	opts := store.Child(wbxml.SROptions)
@@ -235,11 +238,13 @@ func searchRange(store *wbxml.Node) (int, int, int) {
 	}
 	l, errl := strconv.Atoi(strings.TrimSpace(lo))
 	h, errh := strconv.Atoi(strings.TrimSpace(hi))
-	if errl != nil || errh != nil || l < 0 || h < l {
+	switch {
+	case errl != nil || errh != nil || l < 0 || h < l:
 		return 0, 0, srStoreReqInvalid
-	}
-	if h-l >= searchRangeMax {
+	case h-l >= searchRangeMax:
 		return 0, 0, srStoreRangeExceeded
+	case h > findRangeMax:
+		return 0, 0, srStoreReqInvalid
 	}
 	return l, h, srStoreOK
 }
