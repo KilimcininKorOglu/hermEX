@@ -48,7 +48,7 @@ func unknownReply(op uint8) string {
 // returns the response as hex.
 func dispatchProbe(t *testing.T, op uint8) string {
 	t.Helper()
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 	resp, _ := sess.Dispatch([]byte{op, 0, 0}, []uint32{0xFFFFFFFF})
 	return hex.EncodeToString(resp)
@@ -115,7 +115,7 @@ func TestDispatchTableCoversEveryWiredOpcode(t *testing.T) {
 // refactor that answered the error and kept reading would emit responses parsed
 // out of another ROP's body.
 func TestDispatchStopsAtAnUnknownOpcode(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
 	// An unknown opcode followed by a well-formed RopLogon.
@@ -134,7 +134,7 @@ func TestDispatchStopsAtAnUnknownOpcode(t *testing.T) {
 // header is three bytes and a short one cannot name an opcode, so the batch ends
 // with no error response at all.
 func TestDispatchStopsAtATruncatedHeader(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
 	resp, _ := sess.Dispatch([]byte{ropRelease, 0}, []uint32{0xFFFFFFFF})

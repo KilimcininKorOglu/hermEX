@@ -31,7 +31,7 @@ func buildFastCopyTo(inIdx, outIdx uint8, level uint8, copyFlags uint32, exclude
 // and returns a session with that message opened at handle slot 1.
 func copyToSession(t *testing.T) (sess *Session, logonH, msgH uint32) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	accounts := directory.StaticAccounts{"user@hermex.test": {MailboxPath: dir}}
 	st, err := objectstore.Open(dir)
 	if err != nil {
@@ -143,7 +143,7 @@ func buildFastCopyMessages(inIdx, outIdx uint8, mids []int64) []byte {
 // returns their ids and a session with the inbox folder opened at handle slot 1.
 func copyMessagesSession(t *testing.T) (sess *Session, logonH, folderH uint32, mids []int64) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	accounts := directory.StaticAccounts{"user@hermex.test": {MailboxPath: dir}}
 	st, err := objectstore.Open(dir)
 	if err != nil {

@@ -68,7 +68,7 @@ func logonExecuteBuffer() []byte {
 func TestRpcExt2Logon(t *testing.T) {
 	ems := NewEMSMDB(nil)
 	// Connect against a fresh on-disk mailbox; the ROP store opens at RopLogon.
-	out, _ := ems.Handle(&Session{User: "alice@hermex.test", Mailbox: t.TempDir()}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
+	out, _ := ems.Handle(&Session{User: "alice@hermex.test", Mailbox: provisionedDir(t)}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
 	cxh, _ := parseConnectExOut(t, out)
 
 	resp, fault := ems.Handle(&Session{}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, logonExecuteBuffer()))
@@ -120,7 +120,7 @@ func openFolderExecuteBuffer(logonH uint32) []byte {
 // fail to resolve the logon handle and return ecError.
 func TestRpcExt2CrossExecuteHandle(t *testing.T) {
 	ems := NewEMSMDB(nil)
-	out, _ := ems.Handle(&Session{User: "alice@hermex.test", Mailbox: t.TempDir()}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
+	out, _ := ems.Handle(&Session{User: "alice@hermex.test", Mailbox: provisionedDir(t)}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
 	cxh, _ := parseConnectExOut(t, out)
 
 	// Execute #1: RopLogon -> the logon handle lands in the response handle table.

@@ -74,7 +74,7 @@ func readTypedString(t *testing.T, p *ext.Pull) string {
 // header, confirming the normalized subject round-trips and the response carries
 // the same empty recipient table shape RopOpenMessage emits.
 func TestReloadCachedInformation(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	mid := uint64(seedInboxMessage(t, dir, "RELOADME"))
 
@@ -125,7 +125,7 @@ func TestReloadCachedInformation(t *testing.T) {
 // unmasked bits, the in-conflict rejection, the not-found cases, and that a
 // non-folder handle is refused.
 func TestMessageStatusViaFolder(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	mid := uint64(seedInboxMessage(t, dir, "STATUS"))
 	msgEID := uint64(mapi.MakeEIDEx(1, mid))
@@ -181,7 +181,7 @@ func TestMessageStatusViaFolder(t *testing.T) {
 // and proves the message is stored as folder-associated: it appears in an
 // associated (FAI) content sync but not in a normal one.
 func TestCreateAssociatedMessage(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	inboxFID := int64(mapi.PrivateFIDInbox)
 

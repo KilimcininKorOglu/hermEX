@@ -31,7 +31,7 @@ func buildIdFromLongTermId(guid mapi.GUID, gc mapi.GlobCnt) []byte {
 // and back to the identical id, so a client can persist a stable cross-session
 // reference to a folder or message.
 func TestLongTermIdRoundTrip(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "LTID") // seeds the mailbox (store GUID) and a message
 
 	sess := NewSession(dir, nil, "")
@@ -87,7 +87,7 @@ func TestLongTermIdRoundTrip(t *testing.T) {
 // resolves both ways: a long-term id carrying it maps to that ReplId, and an id
 // carrying that ReplId maps back to it.
 func TestLogonReplicaGUIDResolves(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "LTID")
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()

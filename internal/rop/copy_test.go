@@ -44,7 +44,7 @@ func buildCopyTo(srcIdx, dstIdx, copyFlags uint8, excluded []mapi.PropTag) []byt
 // tag; CopyTo copies everything except the excluded tag. Both are verified by saving
 // the destination and reading the stored result.
 func TestCopyPropertiesAndCopyTo(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	mid := uint64(seedInboxMessage(t, dir, "COPYSRC"))
 
@@ -108,7 +108,7 @@ func TestCopyPropertiesAndCopyTo(t *testing.T) {
 // mismatched object categories (message to attachment) is declined, and MAPI_MOVE is
 // unsupported.
 func TestCopyPropertiesErrors(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	mid := uint64(seedInboxMessage(t, dir, "COPYERR"))
 
@@ -158,7 +158,7 @@ func TestCopyPropertiesErrors(t *testing.T) {
 // copy: a property set on the source but not yet saved is carried into the
 // destination. Reading the source from the store alone would copy the stale value.
 func TestCopyReflectsBufferedEdits(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	mid := uint64(seedInboxMessage(t, dir, "COPYBUF"))
 
@@ -243,7 +243,7 @@ func seedMessageWithSubObjects(t *testing.T, dir string) int64 {
 // sub-object is copied (only scalar properties). This is the gap the earlier code
 // left when it copied scalar properties only.
 func TestCopyToSubObjects(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	srcID := uint64(seedMessageWithSubObjects(t, dir))
 

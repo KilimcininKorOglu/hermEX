@@ -68,7 +68,7 @@ func executeRaw(t *testing.T, ts *httptest.Server, sid string, seq *string, ropB
 // size the fields could not carry once it passed 0xFFFF. The RPC/HTTP transport
 // already refused anything over 32 KiB with ecResponseTooBig; this one framed it.
 func TestExecuteRefusesUnframeableRopResponse(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedLargeMessage(t, dir)
 
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}

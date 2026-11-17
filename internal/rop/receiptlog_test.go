@@ -16,7 +16,7 @@ import (
 // receipt is silently dropped.
 func brokenSenderSession(t *testing.T, sink logging.Sink) (sess *Session, logonH, msgH uint32, readerDir string) {
 	t.Helper()
-	readerDir = t.TempDir()
+	readerDir = provisionedDir(t)
 	// A regular file where a mailbox directory belongs.
 	blocked := filepath.Join(t.TempDir(), "not-a-mailbox")
 	if err := os.WriteFile(blocked, []byte("this is a file"), 0o600); err != nil {
@@ -98,7 +98,7 @@ func TestReadReceiptFailureDoesNotFailTheRead(t *testing.T) {
 // works must stay quiet, or the event becomes noise an operator learns to skip.
 func TestSuccessfulReadReceiptRecordsNoFailure(t *testing.T) {
 	sink := &ropSink{}
-	readerDir, senderDir := t.TempDir(), t.TempDir()
+	readerDir, senderDir := provisionedDir(t), provisionedDir(t)
 	accounts := directory.StaticAccounts{
 		"reader@hermex.test": {MailboxPath: readerDir},
 		"sender@hermex.test": {MailboxPath: senderDir},

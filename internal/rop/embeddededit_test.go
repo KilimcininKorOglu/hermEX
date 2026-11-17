@@ -64,7 +64,7 @@ func messageChangeNumber(t *testing.T, store *objectstore.Store, mid int64) uint
 // a recurring appointment lives as an encapsulated message, so without this the
 // only way to correct one field of one occurrence is to rewrite the whole series.
 func TestEditStoredEmbeddedMessagePersists(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
 	logonH := h[0]
@@ -91,7 +91,7 @@ func TestEditStoredEmbeddedMessagePersists(t *testing.T) {
 // client, Outlook, ActiveSync or EWS, ever downloads it. The carrier's save is
 // what advances it, the same rule an attachment add or delete follows.
 func TestEditStoredEmbeddedMessageAdvancesTheChangeNumber(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
 	logonH := h[0]
@@ -118,7 +118,7 @@ func TestEditStoredEmbeddedMessageAdvancesTheChangeNumber(t *testing.T) {
 // refused where it is made. Reporting success and dropping the value at the save
 // leaves the client believing the edit was stored.
 func TestReadOnlyEmbeddedMessageRefusesAWrite(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
 	logonH := h[0]

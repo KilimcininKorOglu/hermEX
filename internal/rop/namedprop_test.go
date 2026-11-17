@@ -36,7 +36,7 @@ func buildGetNamesFromPropertyIds(inIdx uint8, ids []uint16) []byte {
 // unknown name to 0, recovering the name from the id, getting the "none" kind for an
 // unmapped (static) id, and rejecting an invalid flag.
 func TestNamedPropertyRoundTrip(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	name := mapi.PropertyName{Kind: mapi.MnidString, GUID: mapi.PsPublicStrings, Name: "hermexTestKeyword"}
 	unknown := mapi.PropertyName{Kind: mapi.MnidString, GUID: mapi.PsPublicStrings, Name: "neverSeenName"}
 

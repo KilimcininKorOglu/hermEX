@@ -21,7 +21,7 @@ func ropReturn(t *testing.T, resp []byte) uint32 {
 // message was removed underneath it answers ecNotFound, the code the store
 // failure carries, rather than a generic ecError or an empty success.
 func TestPropertyReadOfARemovedObject(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	msgID := seedInboxMessage(t, dir, "GONE")
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
@@ -46,7 +46,7 @@ func TestPropertyReadOfARemovedObject(t *testing.T) {
 // TestPropertyReadOfARemovedFolder proves the same for a folder handle whose
 // folder was deleted underneath it.
 func TestPropertyReadOfARemovedFolder(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "SEED")
 	st, err := objectstore.Open(dir)
 	if err != nil {

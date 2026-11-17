@@ -73,7 +73,7 @@ func wantTableChanged(t *testing.T, resp []byte, tableH uint32) {
 // table's own handle. The client holds no subscription, which is the point, a
 // table is its own notification target.
 func TestContentsTableNotifiesOnNewMessage(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
 	st, tableH := openInboxTable(t, sess, ropGetContentsTable, 0)
@@ -96,7 +96,7 @@ func TestContentsTableNotifiesOnNewMessage(t *testing.T) {
 // the row count cannot carry: marking a message read leaves the folder's message
 // count untouched and moves only its modification counter.
 func TestContentsTableNotifiesOnReadStateChange(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
 	st, tableH := openInboxTable(t, sess, ropGetContentsTable, 0)
@@ -121,7 +121,7 @@ func TestContentsTableNotifiesOnReadStateChange(t *testing.T) {
 // folder created under the table's folder moves the table's rows, so the table
 // handle receives a TABLE_CHANGED.
 func TestHierarchyTableNotifiesOnNewChildFolder(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
 	st, tableH := openInboxTable(t, sess, ropGetHierarchyTable, 0)
@@ -139,7 +139,7 @@ func TestHierarchyTableNotifiesOnNewChildFolder(t *testing.T) {
 // bit is read: a client that asked to be left out gets no event for a change that
 // would otherwise raise one.
 func TestTableNotificationsHonorNoNotifications(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
 	st, _ := openInboxTable(t, sess, ropGetContentsTable, tableFlagNoNotifications)
@@ -161,7 +161,7 @@ func TestTableNotificationsHonorNoNotifications(t *testing.T) {
 // that has not moved since must likewise report nothing. Without both, a client
 // would be told to re-read rows it is holding for the first time.
 func TestTableNotificationIsNotSentForAnUnchangedFolder(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})

@@ -14,7 +14,7 @@ import (
 // from its properties and recipients alone, so every attachment a MAPI client
 // added was dropped from the mail that went out.
 func TestSubmitCarriesTheAttachments(t *testing.T) {
-	ownerDir, aliceDir := t.TempDir(), t.TempDir()
+	ownerDir, aliceDir := provisionedDir(t), provisionedDir(t)
 	accounts := directory.StaticAccounts{
 		"owner@hermex.test": {MailboxPath: ownerDir},
 		"alice@hermex.test": {MailboxPath: aliceDir},
@@ -72,7 +72,7 @@ func TestSubmitSendsAClearSignedMessage(t *testing.T) {
 	const entity = "Content-Type: multipart/signed; protocol=\"application/pkcs7-signature\"; micalg=sha-256; boundary=\"b1\"\r\n" +
 		"\r\n--b1\r\nContent-Type: text/plain\r\n\r\nsigned text\r\n--b1\r\nContent-Type: application/pkcs7-signature\r\n" +
 		"Content-Transfer-Encoding: base64\r\n\r\nMIIB\r\n--b1--\r\n"
-	ownerDir, aliceDir := t.TempDir(), t.TempDir()
+	ownerDir, aliceDir := provisionedDir(t), provisionedDir(t)
 	accounts := directory.StaticAccounts{
 		"owner@hermex.test": {MailboxPath: ownerDir},
 		"alice@hermex.test": {MailboxPath: aliceDir},

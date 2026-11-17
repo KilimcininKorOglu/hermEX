@@ -28,7 +28,7 @@ func buildDeletePropsOp(ropID, inIdx uint8, tags []mapi.PropTag) []byte {
 // NoReplicate variant behaves identically, and that the delete advances the change
 // number so ICS observes the edit.
 func TestDeleteMessageProperties(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	inboxFID := int64(mapi.PrivateFIDInbox)
 	mid := uint64(seedInboxMessage(t, dir, "DELME"))
@@ -87,7 +87,7 @@ func TestDeleteMessageProperties(t *testing.T) {
 // SaveChangesMessage would insert the row and then delete it in the same
 // transaction, losing the client's write.
 func TestSetAfterDeleteWins(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	mid := uint64(seedInboxMessage(t, dir, "SETWINS"))
 
@@ -144,7 +144,7 @@ func storeAttachment(t *testing.T, store *objectstore.Store, mid int64) mapi.Pro
 // set-after-delete order on an attachment: a property deleted then set again in one
 // edit survives.
 func TestDeleteAttachmentPropertyReachesStore(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	mid := seedInboxMessage(t, dir, "ATTDELHOST")
 

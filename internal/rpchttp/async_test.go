@@ -72,7 +72,7 @@ func registerNotifyExecuteBuffer(logonH uint32) []byte {
 func TestAsyncConnectEx(t *testing.T) {
 	ems := NewEMSMDB(nil)
 	const user = "alice@hermex.test"
-	out, _ := ems.Handle(&Session{User: user, Mailbox: t.TempDir()}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
+	out, _ := ems.Handle(&Session{User: user, Mailbox: provisionedDir(t)}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
 	cxh, _ := parseConnectExOut(t, out)
 
 	aout, fault := ems.Handle(&Session{User: user}, opEcDoAsyncConnectEx, buildAsyncConnectExStub(cxh))
@@ -103,7 +103,7 @@ func TestAsyncWaitExRejectsForeignHandles(t *testing.T) {
 	ems := NewEMSMDB(nil)
 	async := NewAsyncEMSMDB(ems)
 	const user = "alice@hermex.test"
-	out, _ := ems.Handle(&Session{User: user, Mailbox: t.TempDir()}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
+	out, _ := ems.Handle(&Session{User: user, Mailbox: provisionedDir(t)}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
 	cxh, _ := parseConnectExOut(t, out)
 	aout, _ := ems.Handle(&Session{User: user}, opEcDoAsyncConnectEx, buildAsyncConnectExStub(cxh))
 	acxh, _ := parseAsyncConnectExOut(t, aout)
@@ -132,7 +132,7 @@ func TestAsyncWaitExNoNotification(t *testing.T) {
 	ems := NewEMSMDB(nil)
 	async := NewAsyncEMSMDB(ems)
 	const user = "alice@hermex.test"
-	out, _ := ems.Handle(&Session{User: user, Mailbox: t.TempDir()}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
+	out, _ := ems.Handle(&Session{User: user, Mailbox: provisionedDir(t)}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
 	cxh, _ := parseConnectExOut(t, out)
 	aout, _ := ems.Handle(&Session{User: user}, opEcDoAsyncConnectEx, buildAsyncConnectExStub(cxh))
 	acxh, _ := parseAsyncConnectExOut(t, aout)
@@ -155,7 +155,7 @@ func TestAsyncWaitExNotificationPending(t *testing.T) {
 	ems := NewEMSMDB(nil)
 	async := NewAsyncEMSMDB(ems)
 	const user = "alice@hermex.test"
-	mailbox := t.TempDir()
+	mailbox := provisionedDir(t)
 	cxh, _ := connectLogonRegister(t, ems, user, mailbox)
 
 	aout, _ := ems.Handle(&Session{User: user}, opEcDoAsyncConnectEx, buildAsyncConnectExStub(cxh))
@@ -257,7 +257,7 @@ func TestAsyncWaitExParksThenWakesOnDelivery(t *testing.T) {
 	async.cadence = 10 * time.Millisecond
 	async.waitInterval = 2 * time.Second
 	const user = "alice@hermex.test"
-	mailbox := t.TempDir()
+	mailbox := provisionedDir(t)
 	cxh, _ := connectLogonRegister(t, ems, user, mailbox)
 	acxh := asyncConnect(t, ems, user, cxh)
 
@@ -297,7 +297,7 @@ func TestAsyncWaitExParkTimesOut(t *testing.T) {
 	async.cadence = 10 * time.Millisecond
 	async.waitInterval = 60 * time.Millisecond
 	const user = "alice@hermex.test"
-	cxh, _ := connectLogonRegister(t, ems, user, t.TempDir())
+	cxh, _ := connectLogonRegister(t, ems, user, provisionedDir(t))
 	acxh := asyncConnect(t, ems, user, cxh)
 
 	vc := testVconn()
@@ -318,7 +318,7 @@ func TestAsyncWaitExParkAbortsOnTeardown(t *testing.T) {
 	async.cadence = 10 * time.Millisecond
 	async.waitInterval = 10 * time.Second // long, so only teardown ends the wait
 	const user = "alice@hermex.test"
-	cxh, _ := connectLogonRegister(t, ems, user, t.TempDir())
+	cxh, _ := connectLogonRegister(t, ems, user, provisionedDir(t))
 	acxh := asyncConnect(t, ems, user, cxh)
 	s, _ := ems.lookup(cxh.GUID)
 
@@ -352,7 +352,7 @@ func TestAsyncWaitExConcurrentParkAndExecute(t *testing.T) {
 	async.cadence = 2 * time.Millisecond
 	async.waitInterval = 500 * time.Millisecond
 	const user = "alice@hermex.test"
-	mailbox := t.TempDir()
+	mailbox := provisionedDir(t)
 	cxh, logonH := connectLogonRegister(t, ems, user, mailbox)
 	acxh := asyncConnect(t, ems, user, cxh)
 

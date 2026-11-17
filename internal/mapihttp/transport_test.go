@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"hermex/internal/directory"
+	"hermex/internal/objectstore"
 	"hermex/internal/oxmapihttp"
 )
 
@@ -18,10 +19,25 @@ const (
 	testPass = "test1234"
 )
 
+// provisionedDir returns a fresh directory holding a created mailbox, the state
+// account creation leaves, so a test account can log on to it.
+func provisionedDir(t testing.TB) string {
+	t.Helper()
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 // newTestServer builds a MAPI/HTTP server over a single static account.
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: t.TempDir()}}
+	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: provisionedDir(t)}}
 	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test", nil).Handler())
 	t.Cleanup(ts.Close)
 	return ts

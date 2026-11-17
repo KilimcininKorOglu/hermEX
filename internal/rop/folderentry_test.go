@@ -19,7 +19,7 @@ func folderRowProps(t *testing.T, sess *Session, logonH uint32, fid uint64, cols
 // ([MS-OXCDATA] 2.2.4.1, [MS-OXCFOLD] 2.2.2.2.1.7): a private folder id under the
 // MailboxGuid the logon reports, whose global counter is the folder's.
 func TestFolderEntryIDs(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
@@ -53,7 +53,7 @@ func TestFolderEntryIDs(t *testing.T) {
 // the free/busy bits ([MS-OXCFOLD] 2.2.2.2.2.8) and PidTagAccess what it allows
 // ([MS-OXCPRPT] 2.2.1.1): the owner may do everything, a reviewer only read.
 func TestFolderRightsAndAccess(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	const delegate = "delegate@hermex.test"
 	grantFolderPermission(t, dir, int64(mapi.PrivateFIDInbox), delegate, mapi.RightsReviewer|mapi.FrightsFreeBusySimple)
 	cols := []mapi.PropTag{mapi.PrRights, mapi.PrAccess}

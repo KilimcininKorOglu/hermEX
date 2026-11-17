@@ -99,6 +99,7 @@ const (
 	ecAccessDenied    uint32 = 0x80070005 // MAPI_E_NO_ACCESS (e.g. setting the in-conflict status bit)
 	ecInvalidParam    uint32 = 0x80070057 // MAPI_E_INVALID_PARAMETER (e.g. a bad stream-seek origin)
 	ecDstNullObject   uint32 = 0x00000503 // a copy's destination handle resolves to no object
+	ecUnknownUser     uint32 = 0x000003EB // RopLogon: the user has no mailbox ([MS-OXCSTOR] 3.2.5.1.3)
 	ecDeclineCopy     uint32 = 0x80040306 // MAPI_E_DECLINE_COPY (copy between mismatched object types)
 	ecFolderCycle     uint32 = 0x8004060B // MAPI_E_FOLDER_CYCLE (folder copied into its own subtree)
 	ecDuplicateName   uint32 = 0x80040604 // MAPI_E_COLLISION (a sibling folder already has the name)

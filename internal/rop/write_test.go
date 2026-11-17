@@ -137,7 +137,7 @@ func TestModifyRecipientRowRemoval(t *testing.T) {
 // message both through the ROP layer (by the EID the save returned) and directly
 // from the store, proving the message and its recipient actually persisted.
 func TestCreateFillSaveRoundTrip(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 
 	sess := NewSession(dir, nil, "")
@@ -236,7 +236,7 @@ func buildSubmitMessage(inIdx uint8) []byte {
 // the session owner but never discloses the Bcc recipient, that a Sent Items copy
 // was filed, and that the source draft was consumed.
 func TestCreateFillSaveSubmitDelivers(t *testing.T) {
-	ownerDir, aliceDir, carolDir := t.TempDir(), t.TempDir(), t.TempDir()
+	ownerDir, aliceDir, carolDir := provisionedDir(t), provisionedDir(t), provisionedDir(t)
 	accounts := directory.StaticAccounts{
 		"owner@hermex.test": {MailboxPath: ownerDir},
 		"alice@hermex.test": {MailboxPath: aliceDir},
@@ -324,7 +324,7 @@ func wantFolderCount(t *testing.T, st *objectstore.Store, fid uint64, want int, 
 // gate the spoofed representing address would flow straight into the From header and
 // get DKIM-signed as an internal impersonation.
 func TestSubmitOverwritesForgedRepresenting(t *testing.T) {
-	ownerDir, aliceDir, victimDir := t.TempDir(), t.TempDir(), t.TempDir()
+	ownerDir, aliceDir, victimDir := provisionedDir(t), provisionedDir(t), provisionedDir(t)
 	accounts := directory.StaticAccounts{
 		"owner@hermex.test":  {MailboxPath: ownerDir},
 		"alice@hermex.test":  {MailboxPath: aliceDir},
@@ -418,8 +418,8 @@ func inboxCount(t *testing.T, dir string) int {
 // returns the copy delivered to alice with the owner's and shared@'s mailboxes.
 func submitFromShared(t *testing.T, grant func(*objectstore.Store) error) (raw []byte, ownerDir, sharedDir string) {
 	t.Helper()
-	ownerDir, sharedDir = t.TempDir(), t.TempDir()
-	aliceDir := t.TempDir()
+	ownerDir, sharedDir = provisionedDir(t), provisionedDir(t)
+	aliceDir := provisionedDir(t)
 	accounts := directory.StaticAccounts{
 		"owner@hermex.test":  {MailboxPath: ownerDir},
 		"alice@hermex.test":  {MailboxPath: aliceDir},

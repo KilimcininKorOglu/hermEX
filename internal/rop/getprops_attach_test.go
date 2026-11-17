@@ -12,7 +12,7 @@ import (
 // 2.2.2.10 apply to attachment objects), since a client reads an attachment's
 // name and size off its handle after RopOpenAttachment.
 func TestGetPropertiesOnAnOpenAttachment(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	msgID := seedAttachmentMessage(t, dir)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
@@ -50,7 +50,7 @@ func TestGetPropertiesOnAnOpenAttachment(t *testing.T) {
 // does not carry its computed record key into the destination, where it would be
 // saved and name the source's position instead of the destination's.
 func TestCopiedAttachmentStoresNoRecordKey(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	msgID := seedAttachmentMessage(t, dir)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
@@ -82,7 +82,7 @@ func TestCopiedAttachmentStoresNoRecordKey(t *testing.T) {
 // tags an object holds ([MS-OXCPRPT] 2.2.2.12) on a message, an attachment and
 // a folder.
 func TestGetPropertiesListNamesEveryTag(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	msgID := seedAttachmentMessage(t, dir)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
@@ -122,7 +122,7 @@ func TestGetPropertiesListNamesEveryTag(t *testing.T) {
 // its buffered edits before RopSaveChangesAttachment, on a stored parent and on
 // a message still being composed.
 func TestGetPropertiesOnACreatedAttachment(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	msgID := seedInboxMessage(t, dir, "parent")
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
@@ -152,7 +152,7 @@ func TestGetPropertiesOnACreatedAttachment(t *testing.T) {
 // TestGetPropertiesOnAComposedMessage proves a message being composed reads back
 // what SetProperties gave it before its first save.
 func TestGetPropertiesOnAComposedMessage(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})

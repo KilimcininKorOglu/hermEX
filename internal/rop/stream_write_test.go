@@ -78,7 +78,7 @@ func writeStreamWritten(t *testing.T, sess *Session, streamH uint32, data []byte
 // committed and saved. It proves the written bytes reach the stored attachment,
 // the path SetProperties was too small for and CreateAttachment deferred to streams.
 func TestStreamWriteAttachmentData(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	mid := uint64(seedInboxMessage(t, dir, "STREAMHOST"))
 
@@ -144,7 +144,7 @@ func TestStreamWriteAttachmentData(t *testing.T) {
 // read-only stream refuses a write, SetStreamSize grows with zero-fill and shrinks
 // with truncation, and SeekStream(END) positions at the end for an append.
 func TestStreamWriteMechanics(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	mid := uint64(seedInboxMessage(t, dir, "MECHHOST"))
 
@@ -210,7 +210,7 @@ func TestStreamWriteMechanics(t *testing.T) {
 // of the message read overlay. Previously a read-mode stream over a kindAttachWrite
 // had no backing and reported not-found.
 func TestStreamReadComposeAttachment(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 
 	sess := NewSession(dir, nil, "")
@@ -236,7 +236,7 @@ func TestStreamReadComposeAttachment(t *testing.T) {
 // pending buffer is empty by then, so the read must fall back to the stored row
 // rather than report not-found.
 func TestStreamReadPersistedAttachmentAfterSave(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	mid := seedInboxMessage(t, dir, "PERSATT")
 
@@ -263,7 +263,7 @@ func TestStreamReadPersistedAttachmentAfterSave(t *testing.T) {
 // position past the memory-safety cap rather than reserving gigabytes or wrapping
 // int() negative and panicking make().
 func TestStreamSizeCapped(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	mid := uint64(seedInboxMessage(t, dir, "CAPHOST"))
 

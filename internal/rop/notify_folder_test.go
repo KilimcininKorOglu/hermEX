@@ -16,7 +16,7 @@ import (
 // with every existing folder as a create, the same bug class the message baseline
 // guards against.
 func TestWholeStoreFolderBaselineSuppressesPreExisting(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
@@ -35,7 +35,7 @@ func TestWholeStoreFolderBaselineSuppressesPreExisting(t *testing.T) {
 // the new folder id and its parent (the IPM subtree, since the folder is top-level),
 // with nfByMessage clear so no message id rides and an empty changed-property set.
 func TestWholeStoreFolderCreated(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
@@ -81,7 +81,7 @@ func TestWholeStoreFolderCreated(t *testing.T) {
 // subscriber to deleted events gets a folder-level RopNotify naming the gone folder
 // and the parent it was removed from. A delete carries no changed-property set.
 func TestWholeStoreFolderDeleted(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
@@ -130,7 +130,7 @@ func TestWholeStoreFolderDeleted(t *testing.T) {
 // the created bit), so the single drained RopNotify is the Inbox's count update, the
 // event a client uses to refresh the folder tree's unread badge.
 func TestWholeStoreFolderModifiedCounts(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
@@ -184,7 +184,7 @@ func TestWholeStoreFolderModifiedCounts(t *testing.T) {
 // table, delivered in one drain. The hierarchy pass runs before the message sweep, so
 // the folder-modified comes first; this guards against a future reorder.
 func TestWholeStoreMessageEmitsFolderModifiedAndMessageCreated(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})

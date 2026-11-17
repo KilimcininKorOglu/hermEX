@@ -83,8 +83,8 @@ func readLogonResponseFlags(t *testing.T, resp []byte) (ec uint32, flags uint8) 
 // the send-as bit, list membership confers send-on-behalf, but not the owner right)
 // and is registered for per-folder authorization.
 func TestDelegateLogonViaDelegateList(t *testing.T) {
-	callerDir := t.TempDir()
-	targetDir := t.TempDir()
+	callerDir := provisionedDir(t)
+	targetDir := provisionedDir(t)
 	setDelegateList(t, targetDir, []string{"delegate@hermex.test"})
 	accounts := directory.StaticAccounts{
 		"boss@hermex.test":     {MailboxPath: targetDir},
@@ -113,8 +113,8 @@ func TestDelegateLogonViaDelegateList(t *testing.T) {
 // TestDelegateLogonViaFolderGrant proves the other open path: a caller with a folder
 // permission on the target (but not on its delegate list) may also open it.
 func TestDelegateLogonViaFolderGrant(t *testing.T) {
-	callerDir := t.TempDir()
-	targetDir := t.TempDir()
+	callerDir := provisionedDir(t)
+	targetDir := provisionedDir(t)
 	grantFolderPermission(t, targetDir, int64(mapi.PrivateFIDInbox), "delegate@hermex.test", mapi.RightsReviewer)
 	accounts := directory.StaticAccounts{
 		"boss@hermex.test":     {MailboxPath: targetDir},
@@ -135,8 +135,8 @@ func TestDelegateLogonViaFolderGrant(t *testing.T) {
 // TestDelegateLogonDeniedWithoutAccess proves the gate: a caller with neither a
 // delegate designation nor any folder grant on the target is refused at logon.
 func TestDelegateLogonDeniedWithoutAccess(t *testing.T) {
-	callerDir := t.TempDir()
-	targetDir := t.TempDir()
+	callerDir := provisionedDir(t)
+	targetDir := provisionedDir(t)
 	accounts := directory.StaticAccounts{
 		"boss@hermex.test":     {MailboxPath: targetDir},
 		"stranger@hermex.test": {MailboxPath: callerDir},
@@ -158,8 +158,8 @@ func TestDelegateLogonDeniedWithoutAccess(t *testing.T) {
 // may open the target store. Ownership confers access, not send-on-behalf, so the
 // response carries no send-as right.
 func TestDelegateLogonViaStoreOwner(t *testing.T) {
-	callerDir := t.TempDir()
-	targetDir := t.TempDir()
+	callerDir := provisionedDir(t)
+	targetDir := provisionedDir(t)
 	setStoreOwners(t, targetDir, []string{"owner@hermex.test"})
 	accounts := directory.StaticAccounts{
 		"boss@hermex.test":  {MailboxPath: targetDir},
@@ -186,7 +186,7 @@ func TestDelegateLogonViaStoreOwner(t *testing.T) {
 // Essdn stays an owner logon (full response flags, no delegate registration), the
 // path an alias login must not misroute.
 func TestOwnerLogonWithSelfEssdn(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	accounts := directory.StaticAccounts{"owner@hermex.test": {MailboxPath: dir}}
 	sess := NewSession(dir, accounts, "owner@hermex.test")
 	defer sess.Close()
@@ -274,7 +274,7 @@ func delegateLogon(t *testing.T, dir, caller string) (*Session, uint32) {
 // messages; Visible-only opens the folder but denies its contents (reading items
 // needs ReadAny, which opening did not require); no grant denies the open outright.
 func TestDelegateReadGatesByFolderRights(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	const delegate = "delegate@hermex.test"
 
 	inboxMsg := seedFolderMessage(t, dir, int64(mapi.PrivateFIDInbox), "READABLE")
@@ -324,7 +324,7 @@ func TestDelegateReadGatesByFolderRights(t *testing.T) {
 // message really lives in one they cannot. The gate resolves the message's true
 // parent folder from the store and ignores the (informational) wire FolderId.
 func TestDelegateMessageGateUsesRealParent(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	const delegate = "delegate@hermex.test"
 
 	// The message lives in SentItems (Visible only, no ReadAny); the delegate has
@@ -417,7 +417,7 @@ func buildCopyFolder(inIdx, destIdx uint8, folderEID uint64, name string) []byte
 // EVERY mutating ROP it can reach with its read handles. A handler that forgot its
 // write gate returns ecSuccess here and fails the test.
 func TestDelegateWritesDeniedForReviewer(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	const delegate = "delegate@hermex.test"
 	msgID := seedFolderMessage(t, dir, int64(mapi.PrivateFIDInbox), "X")
 	grantFolderPermission(t, dir, int64(mapi.PrivateFIDInbox), delegate, mapi.RightsReviewer)
@@ -481,7 +481,7 @@ func TestDelegateWritesDeniedForReviewer(t *testing.T) {
 // the two-sided rights (ReadAny on the source, Create on the destination), yet
 // send-on-behalf (Submit/TransportSend) stays refused regardless of folder rights.
 func TestDelegateEditorWritesAndSendBoundary(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	const delegate = "delegate@hermex.test"
 	msgID := seedFolderMessage(t, dir, int64(mapi.PrivateFIDInbox), "X")
 	grantFolderPermission(t, dir, int64(mapi.PrivateFIDInbox), delegate, mapi.RightsOwner)
@@ -537,8 +537,8 @@ func TestDelegateEditorWritesAndSendBoundary(t *testing.T) {
 // copy runs single-store and the well-known folder ids collide across mailboxes, so a
 // cross-mailbox move/copy would file into the wrong store; it is refused NotSupported.
 func TestDelegateMoveCopyCrossMailboxUnsupported(t *testing.T) {
-	ownDir := t.TempDir()
-	bossDir := t.TempDir()
+	ownDir := provisionedDir(t)
+	bossDir := provisionedDir(t)
 	const delegate = "delegate@hermex.test"
 	grantFolderPermission(t, bossDir, int64(mapi.PrivateFIDInbox), delegate, mapi.RightsOwner)
 	msgID := seedFolderMessage(t, ownDir, int64(mapi.PrivateFIDInbox), "MINE")
@@ -585,7 +585,7 @@ func mustDispatchN(sess *Session, req []byte, handles []uint32) []byte {
 // row at all (DeletedItems) and reads its messages, the owner short-circuit grants
 // full access without consulting the permission table.
 func TestOwnerBypassUnaffectedByGates(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	delMsg := seedFolderMessage(t, dir, int64(mapi.PrivateFIDDeletedItems), "OWNED")
 
 	sess := NewSession(dir, nil, "")
@@ -616,7 +616,7 @@ func TestOwnerBypassUnaffectedByGates(t *testing.T) {
 // Sent Items copy must land in the boss's mailbox (not the delegate's), and the logon
 // must have advertised the send-as right.
 func TestDelegateSendsOnBehalf(t *testing.T) {
-	bossDir, delegateDir, aliceDir := t.TempDir(), t.TempDir(), t.TempDir()
+	bossDir, delegateDir, aliceDir := provisionedDir(t), provisionedDir(t), provisionedDir(t)
 	const delegate = "delegate@hermex.test"
 	const boss = "boss@hermex.test"
 	// On the delegate list (the send-on-behalf grant) and holding Create on the boss's
@@ -680,7 +680,7 @@ func TestDelegateSendsOnBehalf(t *testing.T) {
 // Drafts, but not on the delegate list) may compose, but its submit is refused, and
 // its logon never advertised the send-as right.
 func TestDelegateFolderGrantCannotSend(t *testing.T) {
-	bossDir, delegateDir, aliceDir := t.TempDir(), t.TempDir(), t.TempDir()
+	bossDir, delegateDir, aliceDir := provisionedDir(t), provisionedDir(t), provisionedDir(t)
 	const delegate = "delegate@hermex.test"
 	const boss = "boss@hermex.test"
 	grantFolderPermission(t, bossDir, int64(mapi.PrivateFIDDraft), delegate, mapi.RightsOwner)

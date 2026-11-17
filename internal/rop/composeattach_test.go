@@ -39,7 +39,7 @@ func fillAndSaveAttachment(t *testing.T, sess *Session, msgH, attH uint32, name 
 // surviving attachment keeps its original (non-renumbered) attach number, the
 // guarantee that makes a client's AttachmentId stable across a sibling delete.
 func TestComposeMessageWithAttachment(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 
 	sess := NewSession(dir, nil, "")

@@ -91,7 +91,7 @@ func permRows(t *testing.T, dir string, folderFID uint64, includeFreeBusy bool) 
 // 0 with its name and rights, and the always-present anonymous member is synthesized.
 // The response head is the bare 6-byte form (verified by permissionsTableHandle).
 func TestGetPermissionsTableSeededDefault(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -119,7 +119,7 @@ func TestGetPermissionsTableSeededDefault(t *testing.T) {
 // it, the free/busy bits are stripped from PR_MEMBER_RIGHTS before the row goes out,
 // so the seeded 0xC00 Calendar default reads back as 0x400 (Visible only).
 func TestGetPermissionsTableFreeBusyMasking(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -140,7 +140,7 @@ func TestGetPermissionsTableFreeBusyMasking(t *testing.T) {
 // permissions still serves the two always-present special members, Default (id 0)
 // and Anonymous (id -1), at rightsNone, so an Outlook dialog can edit them.
 func TestGetPermissionsTableSynthesizesSpecials(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -238,7 +238,7 @@ func testAccounts(addr string) directory.Accounts {
 // member must land in the table at a positive id with the granted rights, proving
 // the EntryID parse and the directory existence check close end to end.
 func TestModifyAddMemberViaEntryID(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -277,7 +277,7 @@ func TestModifyAddMemberViaEntryID(t *testing.T) {
 // TestModifyAddMemberViaSmtpAddress drives the fallback AddRow path: a member with no
 // PR_ENTRYID, identified by a literal PR_SMTP_ADDRESS.
 func TestModifyAddMemberViaSmtpAddress(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -307,7 +307,7 @@ func TestModifyAddMemberViaSmtpAddress(t *testing.T) {
 // TestModifyUnknownMemberSkipped proves an AddRow for an address the directory does
 // not know is skipped silently (no fault, no row), matching the reference.
 func TestModifyUnknownMemberSkipped(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -334,7 +334,7 @@ func TestModifyUnknownMemberSkipped(t *testing.T) {
 // implied rights are filled (ReadAny implies Visible), so what lands is the
 // normalized, masked value, not the raw client bits.
 func TestModifyIngestMasksAndNormalizesRights(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -370,7 +370,7 @@ func TestModifyIngestMasksAndNormalizesRights(t *testing.T) {
 // folder with no stored default row and confirms the grant persists, the
 // create-on-modify path, exercised end to end through the ROP layer.
 func TestModifyDefaultThroughRop(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -396,7 +396,7 @@ func TestModifyDefaultThroughRop(t *testing.T) {
 // client does NOT set IncludeFreeBusy, the server fills the implied free/busy bits, so
 // a bare ReadAny grant gains Visible plus both free/busy levels.
 func TestModifyFillsFreeBusyWhenNotIncluded(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -428,7 +428,7 @@ func TestModifyFillsFreeBusyWhenNotIncluded(t *testing.T) {
 // TestModifyRemoveMember adds a member then removes it by its wire member id, and
 // confirms it is gone from the table.
 func TestModifyRemoveMember(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -470,7 +470,7 @@ func TestModifyRemoveMember(t *testing.T) {
 // right offset. A short or long read would surface as the second RopId coming back
 // wrong. The single-ROP tests pin the response framing; this pins the request side.
 func TestModifyPermissionsBatchAlignment(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -513,7 +513,7 @@ func TestModifyPermissionsBatchAlignment(t *testing.T) {
 // permissions before applying the batch: the seeded Calendar default is cleared, and
 // only the new member (plus the always-synthesized specials) remains.
 func TestModifyReplaceRows(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)

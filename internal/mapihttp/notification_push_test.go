@@ -24,7 +24,7 @@ const pushTestSecret = "mapi-push-test-secret"
 // store's Dir() and the wait registers sess.MailboxDir(), which must be byte-
 // identical for the wake to route.
 func TestNotificationWaitWakesViaPush(t *testing.T) {
-	mailbox := t.TempDir()
+	mailbox := provisionedDir(t)
 	ts, srv := notifyTestServer(t, mailbox)
 	srv.notifyWait = 30 * time.Second
 	srv.notifyCadence = 10 * time.Second // long: only a push wake can return the wait quickly

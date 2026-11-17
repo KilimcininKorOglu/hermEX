@@ -14,7 +14,7 @@ import (
 // next Execute, here a bare wake-up with no ROPs, drains the change as a byte-exact
 // RopNotify. A second wake-up yields nothing, proving the event is delivered once.
 func TestNotifyDrainDeliversCreate(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
@@ -77,7 +77,7 @@ func TestNotifyDrainDeliversCreate(t *testing.T) {
 // next Execute delivers them. It populates the queue directly to exercise the drain at
 // its byte boundary without seeding tens of thousands of store rows.
 func TestNotifyDrainOverflowEmitsPendingAndRequeues(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
 	// A subscription handle the drain can resolve (a released handle would be dropped).
@@ -128,7 +128,7 @@ func TestNotifyDrainOverflowEmitsPendingAndRequeues(t *testing.T) {
 // content folder, not just one. A message is delivered into Sent Items and the next
 // Execute drains a RopNotify for it.
 func TestWholeStoreDeliversCreateInAnyFolder(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})

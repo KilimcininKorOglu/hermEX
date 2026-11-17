@@ -82,7 +82,7 @@ func seedInboxMessage(t *testing.T, dir, subject string) int64 {
 // it back two ways: the OpenMessage subject, GetPropertiesSpecific (a single
 // PROPERTY_ROW), and GetPropertiesAll (the full TPROPVAL_ARRAY).
 func TestOpenMessageAndGetProps(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	msgID := seedInboxMessage(t, dir, "READMSG")
 	msgEID := uint64(mapi.MakeEIDEx(1, uint64(msgID)))
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
@@ -146,7 +146,7 @@ func assertOpenMessageBody(t *testing.T, p *ext.Pull, subject string) {
 // store stays untouched until the save. Without the overlay a read would return
 // the stale persisted values.
 func TestReadReflectsBufferedEdits(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	mid := uint64(seedInboxMessage(t, dir, "RYW"))
 
@@ -196,7 +196,7 @@ func TestReadReflectsBufferedEdits(t *testing.T) {
 // TestOpenMessageNotFound confirms opening a non-existent message id yields
 // ecNotFound.
 func TestOpenMessageNotFound(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
@@ -218,7 +218,7 @@ func TestOpenMessageNotFound(t *testing.T) {
 // OpenMessage it. PrMid is synthesized in the row projection, so this is the
 // integration check that the browse->open chain actually closes.
 func TestBrowseOpenChain(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "CHAINMSG")
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 

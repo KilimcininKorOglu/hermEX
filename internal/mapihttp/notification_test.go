@@ -93,7 +93,7 @@ func subscribeInbox(t *testing.T, sess *rop.Session) {
 // TestNotificationWaitTimeout: a quiet mailbox holds the wait for its interval and
 // returns EventPending=0.
 func TestNotificationWaitTimeout(t *testing.T) {
-	ts, _ := notifyTestServer(t, t.TempDir())
+	ts, _ := notifyTestServer(t, provisionedDir(t))
 	sid := notifyConnect(t, ts)
 	if flags := notificationWaitFlags(t, ts, sid); flags != 0 {
 		t.Errorf("EventPending flags = %d, want 0 (no subscription, no change)", flags)
@@ -104,7 +104,7 @@ func TestNotificationWaitTimeout(t *testing.T) {
 // returns EventPending=1, the wake signal that tells the client to Execute and drain
 // the RopNotify.
 func TestNotificationWaitPending(t *testing.T) {
-	mailbox := t.TempDir()
+	mailbox := provisionedDir(t)
 	ts, srv := notifyTestServer(t, mailbox)
 	sid := notifyConnect(t, ts)
 
@@ -138,7 +138,7 @@ func TestNotificationWaitPending(t *testing.T) {
 // poll detected the delivery rather than the wait expiring. The delivery comes from a
 // separate store handle, as a separate daemon's MTA would.
 func TestNotificationWaitWakesMidWait(t *testing.T) {
-	mailbox := t.TempDir()
+	mailbox := provisionedDir(t)
 	ts, srv := notifyTestServer(t, mailbox)
 	sid := notifyConnect(t, ts)
 	sc := srv.sessions.lookup(sid, testUser)
@@ -176,12 +176,12 @@ func TestNotificationWaitWakesMidWait(t *testing.T) {
 // TestWaitForNotificationContextCancel proves the loop bails as soon as the client
 // drops the connection, rather than holding the full interval.
 func TestWaitForNotificationContextCancel(t *testing.T) {
-	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: t.TempDir()}}
+	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: provisionedDir(t)}}
 	srv := NewServer(accs, accs, "mail.hermex.test", nil)
 	srv.notifyWait = 30 * time.Second // long, so only ctx cancellation can end the wait quickly
 	srv.notifyCadence = 10 * time.Millisecond
 
-	sess := rop.NewSession(t.TempDir(), nil, "")
+	sess := rop.NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

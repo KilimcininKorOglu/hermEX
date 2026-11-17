@@ -24,7 +24,7 @@ func buildReadRecipients(inIdx uint8, rowID uint32) []byte {
 // answers row 256 onward with each row's own id and address, a row id past the
 // last recipient is not found, and a folder handle is refused.
 func TestReadRecipientsPastInlineTable(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()

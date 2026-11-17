@@ -24,7 +24,7 @@ func buildTransportHeaderOnly(ropID, inIdx uint8) []byte {
 // transport ROPs resolve.
 func transportSession(t *testing.T) (*Session, uint32) {
 	t.Helper()
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
 	return sess, h[0]
 }
@@ -96,7 +96,7 @@ func folderMsgCount(t *testing.T, dir string, folderID int64) int {
 // behaviour that distinguishes it from RopSubmitMessage, that it files NO Sent
 // Items copy (the reference does not file one here, leaving disposition to the client).
 func TestTransportSendDelivers(t *testing.T) {
-	ownerDir, aliceDir := t.TempDir(), t.TempDir()
+	ownerDir, aliceDir := provisionedDir(t), provisionedDir(t)
 	accounts := directory.StaticAccounts{
 		"owner@hermex.test": {MailboxPath: ownerDir},
 		"alice@hermex.test": {MailboxPath: aliceDir},

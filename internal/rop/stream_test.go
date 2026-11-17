@@ -77,7 +77,7 @@ func decodeUTF16LE(b []byte) string {
 // the size, that the chunks reassemble to the UTF-16LE body, and that a read at
 // end-of-stream returns zero bytes.
 func TestOpenReadStream(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	msgID := seedInboxMessage(t, dir, "STREAMMSG") // body = "hello body"
 	msgEID := uint64(mapi.MakeEIDEx(1, uint64(msgID)))
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))

@@ -154,7 +154,7 @@ func queryRowsResponse(t *testing.T, resp []byte, cols []mapi.PropTag) (seekPos 
 // GetContentsTable -> SetColumns -> QueryRows, asserting the row carries the
 // seeded subject and the cursor reports end-of-table.
 func TestQueryRowsContents(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -209,7 +209,7 @@ func contentsRowCount(t *testing.T, resp []byte) uint32 {
 // GetHierarchyTable -> SetColumns -> QueryRows and confirms the child folder
 // rows include the Inbox by display name.
 func TestQueryRowsHierarchy(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
 
@@ -293,7 +293,7 @@ func buildSortTable(inIdx uint8, catCount, expanded uint16, keys []sortOrderEntr
 // unsupported on a flat table, and FreeBookmark genuinely drops the bookmark (a
 // later SeekRowBookmark on the freed blob reports ecNotFound).
 func TestTableStatusOps(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "One")
 	seedInboxMessage(t, dir, "Two")
 	seedInboxMessage(t, dir, "Three")
@@ -420,7 +420,7 @@ func assertSubjects(t *testing.T, rows []mapi.PropertyValues, want ...string) {
 // so store order differs from sorted order, and a descending re-sort must replace
 // the ascending one and re-page from the top.
 func TestSortTableOrdersContents(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "Charlie")
 	seedInboxMessage(t, dir, "Alpha")
 	seedInboxMessage(t, dir, "Bravo")
@@ -446,7 +446,7 @@ func TestSortTableOrdersContents(t *testing.T) {
 // not be a displayed column: the table sorts by PR_SUBJECT while projecting only
 // PR_MID, so the returned ids must come back in subject order.
 func TestSortTableSortsOnNonDisplayedProperty(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	cID := seedInboxMessage(t, dir, "Charlie")
 	aID := seedInboxMessage(t, dir, "Alpha")
 	bID := seedInboxMessage(t, dir, "Bravo")
@@ -480,7 +480,7 @@ func TestSortTableSortsOnNonDisplayedProperty(t *testing.T) {
 // than silently returning a flattened table, the same silent-error class the
 // non-categorized fix closes.
 func TestSortTableRejectsCategorized(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "x")
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
@@ -528,7 +528,7 @@ func propEq(tag mapi.PropTag, val any) *mapi.Restriction {
 // every row). A second restriction must widen back to the full base before
 // re-filtering, and an empty restriction must restore every row.
 func TestRestrictFiltersByProperty(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "Apple")
 	seedInboxMessage(t, dir, "Banana")
 	seedInboxMessage(t, dir, "Cherry")
@@ -556,7 +556,7 @@ func TestRestrictFiltersByProperty(t *testing.T) {
 
 // TestRestrictContentSubstring covers a case-insensitive substring content match.
 func TestRestrictContentSubstring(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "Weekly Report A")
 	seedInboxMessage(t, dir, "Summary")
 	seedInboxMessage(t, dir, "report B") // lowercase, matched via IGNORECASE
@@ -646,7 +646,7 @@ func TestRestrictPropertyMultivalued(t *testing.T) {
 
 // TestRestrictNot covers the boolean tree: NOT(subject == Banana) keeps the rest.
 func TestRestrictNot(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "Apple")
 	seedInboxMessage(t, dir, "Banana")
 	seedInboxMessage(t, dir, "Cherry")
@@ -666,7 +666,7 @@ func TestRestrictNot(t *testing.T) {
 // TestRestrictRejectsUnsupported confirms a restriction outside the v1 subset (here
 // a regular-expression relop) fails loud rather than returning an unfiltered table.
 func TestRestrictRejectsUnsupported(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "x")
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
@@ -690,7 +690,7 @@ func TestRestrictRejectsUnsupported(t *testing.T) {
 // TestRestrictThenSort confirms rebuildView filters before sorting: the surviving
 // rows come back in sorted order, the filtered-out row absent.
 func TestRestrictThenSort(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "box")
 	seedInboxMessage(t, dir, "apple") // no 'x' -> filtered out
 	seedInboxMessage(t, dir, "fox")
@@ -752,7 +752,7 @@ func seekRowResponse(t *testing.T, resp []byte) (hasSoughtLess uint8, sought int
 // TestSeekRow moves the cursor forward from the beginning and confirms the next
 // QueryRows pages from the sought position.
 func TestSeekRow(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	for _, s := range []string{"m0", "m1", "m2", "m3", "m4"} {
 		seedInboxMessage(t, dir, s)
 	}
@@ -774,7 +774,7 @@ func TestSeekRow(t *testing.T) {
 // TestSeekRowClampsAtEnd confirms a seek past the end stops at the last row and
 // reports HasSoughtLess.
 func TestSeekRowClampsAtEnd(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	for _, s := range []string{"a", "b", "c"} {
 		seedInboxMessage(t, dir, s)
 	}
@@ -793,7 +793,7 @@ func TestSeekRowClampsAtEnd(t *testing.T) {
 // restriction: after a filtered + sorted view, a reset and a fresh SetColumns
 // return every row in store order.
 func TestResetTable(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "Charlie")
 	seedInboxMessage(t, dir, "Alpha")
 	seedInboxMessage(t, dir, "Bravo")
@@ -860,7 +860,7 @@ func findRowResponse(t *testing.T, resp []byte, cols []mapi.PropTag) (found bool
 // TestFindRow finds the first row matching a restriction from the beginning and
 // confirms it lands the cursor on that row.
 func TestFindRow(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "Apple")
 	seedInboxMessage(t, dir, "Banana")
 	seedInboxMessage(t, dir, "Cherry")
@@ -887,7 +887,7 @@ func TestFindRow(t *testing.T) {
 // TestFindRowNoMatch confirms a search that matches nothing reports HasRowData=0
 // rather than erroring.
 func TestFindRowNoMatch(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "Apple")
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
@@ -959,7 +959,7 @@ func seekRowBookmarkResponse(t *testing.T, resp []byte) (invisible uint8, hasSou
 
 // TestCreateBookmark creates a bookmark, seeks away, then seeks back via the bookmark.
 func TestCreateBookmark(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	for _, s := range []string{"m0", "m1", "m2", "m3", "m4"} {
 		seedInboxMessage(t, dir, s)
 	}
@@ -993,7 +993,7 @@ func TestCreateBookmark(t *testing.T) {
 
 // TestSeekRowBookmarkNotFound returns ecNotFound for a non-existent bookmark.
 func TestSeekRowBookmarkNotFound(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "m0")
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
@@ -1021,7 +1021,7 @@ func buildSingleROP(ropID uint8, inIdx uint8) []byte {
 // TestExpandCollapseUnsupported verifies expand/collapse ROPs return ecNotSupported
 // since uncategorized (flat) tables have no category state.
 func TestExpandCollapseUnsupported(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "m0")
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()

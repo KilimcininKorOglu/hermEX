@@ -250,7 +250,7 @@ func mustDispatchOK(t *testing.T, sess *Session, req []byte, handles []uint32, w
 // range must survive the round trip, proving OpenCollector, the state-stream sink,
 // GetTransferState, and its buffer source are wired end to end.
 func TestSyncCollectorTransferStateRoundTrip(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
@@ -307,7 +307,7 @@ func TestSyncCollectorTransferStateRoundTrip(t *testing.T) {
 // message read by its source key through RopSyncImportReadStateChanges, asserting
 // the stored read flag flipped.
 func TestSyncCollectorImportReadState(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	msgID := seedInboxMessage(t, dir, "Unread")
 
 	sess := NewSession(dir, nil, "")
@@ -338,7 +338,7 @@ func TestSyncCollectorImportReadState(t *testing.T) {
 // is gone and the other remains, exercising the multivalue-binary source-key
 // extraction.
 func TestSyncCollectorImportDeletes(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	id1 := seedInboxMessage(t, dir, "DELME")
 	id2 := seedInboxMessage(t, dir, "KEEPME")
 
@@ -419,7 +419,7 @@ func messageContentBody(class, subject string) []byte {
 // message must carry the uploaded subject, proving ImportMessageChange,
 // DestinationConfigure, PutBuffer, and the SaveChangesMessage commit branch link up.
 func TestSyncImportMessageBody(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "anchor")
 
 	sess := NewSession(dir, nil, "")
@@ -482,7 +482,7 @@ func TestSyncImportMessageBody(t *testing.T) {
 // wrong offset and its RopId comes back wrong. A real client batches ROPs, so this
 // is the only shape that catches a byte-misaligned request parser.
 func TestSyncDownloadBatchAlignment(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "batch")
 
 	sess := NewSession(dir, nil, "")
@@ -521,7 +521,7 @@ func TestSyncDownloadBatchAlignment(t *testing.T) {
 // TPROPVAL_ARRAY parse), then GetTransferState. Each parser's byte alignment is
 // proven by the next ROP's RopId reading correctly.
 func TestSyncUploadBatchAlignment(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	readID := seedInboxMessage(t, dir, "read-me")
 	delID := seedInboxMessage(t, dir, "delete-me")
 
@@ -584,7 +584,7 @@ func homeGUID(t *testing.T, dir string) mapi.GUID {
 // counter, and that the second block does not overlap the first, proving the
 // store allocator advances across reservations.
 func TestGetLocalReplicaIds(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "anchor")
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
@@ -631,7 +631,7 @@ func TestGetLocalReplicaIds(t *testing.T) {
 // block, and the terminating INCRSYNCEND, proving SyncConfigure + GetBuffer wire
 // the existing download context end to end.
 func TestSyncDownloadContents(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "Ada Lovelace")
 	seedInboxMessage(t, dir, "Grace Hopper")
 
@@ -659,7 +659,7 @@ func TestSyncDownloadContents(t *testing.T) {
 // then drains. It proves the three state-stream opcodes are accepted on a sync
 // handle and the subsequent download still completes.
 func TestSyncUploadStateStreamThenDownload(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "Katherine Johnson")
 
 	sess := NewSession(dir, nil, "")

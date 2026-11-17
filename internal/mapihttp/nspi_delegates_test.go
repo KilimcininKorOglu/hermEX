@@ -67,8 +67,8 @@ func TestNspiModLinkAttWritesOwnDelegateList(t *testing.T) {
 	// they appear in the GAL in address order: alice = midBase (0x10), bob = 0x11.
 	accs := delegatingAccounts{
 		StaticAccounts: directory.StaticAccounts{
-			testUser:          {Password: testPass, MailboxPath: t.TempDir()},
-			"bob@hermex.test": {Password: testPass, MailboxPath: t.TempDir()},
+			testUser:          {Password: testPass, MailboxPath: provisionedDir(t)},
+			"bob@hermex.test": {Password: testPass, MailboxPath: provisionedDir(t)},
 		},
 		delegates: map[string][]string{},
 	}

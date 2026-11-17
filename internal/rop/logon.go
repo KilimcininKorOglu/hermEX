@@ -1,10 +1,12 @@
 package rop
 
 import (
+	"errors"
 	"strings"
 	"time"
 
 	"hermex/internal/ext"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -38,6 +40,24 @@ const (
 // (OOF state is not folded in here; v1 keeps it in the webmail settings.)
 const ownerResponseFlags = responseFlagReserved | responseFlagOwnerRight | responseFlagSendAsRight
 
+// openLogonStore opens the mailbox a logon targets and returns the RopLogon
+// return value for a failure. A mailbox is made when its account is created. One
+// that is missing is a user with no mailbox database, which [MS-OXCSTOR] 3.2.5.1
+// answers with ecUnknownUser, never with an empty mailbox made on the spot.
+func (s *Session) openLogonStore(maildir string) (*objectstore.Store, uint32) {
+	st, err := objectstore.OpenExisting(maildir)
+	switch {
+	case err == nil:
+		return st, ecSuccess
+	case errors.Is(err, objectstore.ErrNotProvisioned):
+		s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MAPI, Name: "logon.unprovisioned",
+			User: s.owner, Fields: logging.Fields{"mailbox": maildir}})
+		return nil, ecUnknownUser
+	default:
+		return nil, ecError
+	}
+}
+
 // ropLogon handles RopLogon ([MS-OXCSTOR] 2.2.1.1): it opens the mailbox store,
 // registers the logon object at the output handle slot, and writes the private
 // LOGON_PMB_RESPONSE. It returns false only when the request body is malformed
@@ -49,9 +69,9 @@ func (s *Session) ropLogon(p *ext.Pull, out *ext.Push, handles []uint32, hindex 
 		return false
 	}
 	maildir, delegate, ownerSMTP := s.logonTarget(essdn)
-	st, err := objectstore.Open(maildir)
-	if err != nil {
-		writeErr(out, ropLogon, hindex, ecError)
+	st, ec := s.openLogonStore(maildir)
+	if ec != ecSuccess {
+		writeErr(out, ropLogon, hindex, ec)
 		return true
 	}
 	sendsOnBehalf, ok := s.authorizeLogon(out, st, hindex, delegate)

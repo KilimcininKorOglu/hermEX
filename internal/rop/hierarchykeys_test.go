@@ -10,7 +10,7 @@ import (
 // folder property the store computes: a view of the folders holding unread mail
 // finds the Inbox with one unread message and not the empty folders beside it.
 func TestHierarchyRestrictOnComputedCount(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "unread")
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()

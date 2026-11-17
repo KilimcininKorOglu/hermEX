@@ -26,7 +26,7 @@ func markRead(t *testing.T, dir string, id int64) {
 // computes them ([MS-OXCMSG] 2.2.1.6), so a message read on another protocol
 // shows read in Outlook, and an unread-only view filters on the read bit.
 func TestMessageFlagsReachAMAPIClient(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	readID := seedInboxMessage(t, dir, "Seen")
 	seedInboxMessage(t, dir, "Unseen")
 	markRead(t, dir, readID)

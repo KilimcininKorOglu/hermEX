@@ -14,7 +14,7 @@ import (
 // change_number), and a delete when an id vanishes. It drives a real objectstore so
 // the change-number/read_cn behaviour is exercised end to end, not mocked.
 func TestDetectContentChanges(t *testing.T) {
-	st, err := objectstore.Open(t.TempDir())
+	st, err := objectstore.Open(provisionedDir(t))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

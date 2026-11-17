@@ -36,7 +36,7 @@ func namedTagsIn(t *testing.T, dir string, names []mapi.PropertyName, types []ma
 // proposed time. It used to leave as a plain mail with no calendar part, so a
 // recipient outside the server saw neither the response nor the time proposed.
 func TestSubmitCounterProposalCarriesITIP(t *testing.T) {
-	ownerDir, aliceDir := t.TempDir(), t.TempDir()
+	ownerDir, aliceDir := provisionedDir(t), provisionedDir(t)
 	accounts := directory.StaticAccounts{
 		"owner@hermex.test": {MailboxPath: ownerDir},
 		"alice@hermex.test": {MailboxPath: aliceDir},
@@ -83,7 +83,7 @@ func TestSubmitCounterProposalCarriesITIP(t *testing.T) {
 // answer and names the delegate in the boss's SENT-BY, as the Sender header does, so
 // an organizer on another server sees who answered for the boss.
 func TestDelegateMeetingResponseNamesTheDelegate(t *testing.T) {
-	bossDir, delegateDir, aliceDir := t.TempDir(), t.TempDir(), t.TempDir()
+	bossDir, delegateDir, aliceDir := provisionedDir(t), provisionedDir(t), provisionedDir(t)
 	const delegate = "delegate@hermex.test"
 	const boss = "boss@hermex.test"
 	setDelegateList(t, bossDir, []string{delegate})
@@ -119,7 +119,7 @@ func TestDelegateMeetingResponseNamesTheDelegate(t *testing.T) {
 // TestMeetingCalendarLeavesPlainMailAlone attaches nothing to a message that is not
 // a meeting, so an ordinary submit is unchanged.
 func TestMeetingCalendarLeavesPlainMailAlone(t *testing.T) {
-	st, err := objectstore.Open(t.TempDir())
+	st, err := objectstore.Open(provisionedDir(t))
 	if err != nil {
 		t.Fatal(err)
 	}

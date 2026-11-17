@@ -54,7 +54,7 @@ func containsMID(mids []uint64, mid uint64) bool {
 // held before the edit, now lists the message in both ChangedMIDs and
 // UpdatedMIDs with an advanced high-water change number.
 func TestInPlaceModifyBumpsChangeNumber(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	inboxFID := int64(mapi.PrivateFIDInbox)
 
@@ -129,7 +129,7 @@ func contentSync(t *testing.T, store *objectstore.Store, folderID int64, mid uin
 // untouched (the reference's untouched-message early-out). A bump here would make every
 // read-only open-then-save re-sync the message to every client.
 func TestOpenSaveNoEditKeepsChangeNumber(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	inboxFID := int64(mapi.PrivateFIDInbox)
 

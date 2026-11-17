@@ -10,7 +10,23 @@ import (
 
 	"hermex/internal/mapi"
 	"hermex/internal/ndr"
+	"hermex/internal/objectstore"
 )
+
+// provisionedDir returns a fresh directory holding a created mailbox, the state
+// account creation leaves, so a test session can log on to it.
+func provisionedDir(t testing.TB) string {
+	t.Helper()
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
 
 // buildConnectExStub assembles an EcDoConnectEx request stub: the conformant-
 // varying szUserDN string, the scalar parameters, and an empty AUX-in buffer.
@@ -227,7 +243,7 @@ func wantPDUType(t *testing.T, pdu []byte, typ uint8, what string) {
 // process's life and every reconnect added another.
 func TestIdleSessionIsReclaimed(t *testing.T) {
 	ems := NewEMSMDB(nil)
-	sess := &Session{User: "alice@hermex.test", Mailbox: t.TempDir()}
+	sess := &Session{User: "alice@hermex.test", Mailbox: provisionedDir(t)}
 
 	out, fault := ems.Handle(sess, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
 	if fault != 0 {
@@ -256,7 +272,7 @@ func TestIdleSessionIsReclaimed(t *testing.T) {
 // keeps issuing calls must not have its session pulled out from under it.
 func TestSessionTouchDefersReclaim(t *testing.T) {
 	ems := NewEMSMDB(nil)
-	sess := &Session{User: "alice@hermex.test", Mailbox: t.TempDir()}
+	sess := &Session{User: "alice@hermex.test", Mailbox: provisionedDir(t)}
 	out, _ := ems.Handle(sess, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
 	cxh, _ := parseConnectExOut(t, out)
 

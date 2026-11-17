@@ -128,7 +128,7 @@ func ruleAddRow(name, needle string, state uint32, sequence int32) permDataRow {
 // inboxRulesSession seeds a store and opens a session + Inbox handle to drive rule ROPs.
 func inboxRulesSession(t *testing.T) (*Session, uint32) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -229,7 +229,7 @@ func TestModifyRulesBatchAlignment(t *testing.T) {
 // carry forward-to addresses, block patterns and vacation text: mailbox
 // configuration a merely visible folder must not expose.
 func TestDelegateRulesTableRequiresReadAny(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	const delegate = "delegate@hermex.test"
 
 	grantFolderPermission(t, dir, int64(mapi.PrivateFIDInbox), delegate, mapi.RightsReviewer)     // ReadAny|Visible

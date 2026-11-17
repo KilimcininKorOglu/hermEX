@@ -13,7 +13,7 @@ import (
 // 4.3 shows flag 0x0A with 0x8004010F), not with the table row's "unavailable"
 // flag, which carries no error for the client to act on.
 func TestGetPropertiesSpecificAnswersAMissingPropertyWithNotFound(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	mid := uint64(seedInboxMessage(t, dir, "present"))
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()

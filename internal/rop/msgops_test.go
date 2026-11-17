@@ -88,7 +88,7 @@ func messageFlags(t *testing.T, dir string, folder, id int64) int64 {
 // message is seated at a handle slot distinct from the echoed ResponseHandleIndex
 // so resolving it at the wrong handle would fail.
 func TestSetMessageReadFlag(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	msgID := seedInboxMessage(t, dir, "READFLAG")
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	msgEID := uint64(mapi.MakeEIDEx(1, uint64(msgID)))
@@ -144,7 +144,7 @@ func TestSetMessageReadFlag(t *testing.T) {
 // and confirms the targeted message is gone, the other remains, and the response
 // reports no partial completion.
 func TestDeleteMessages(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	id1 := seedInboxMessage(t, dir, "DELME")
 	id2 := seedInboxMessage(t, dir, "KEEPME")
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
@@ -185,7 +185,7 @@ func TestDeleteMessages(t *testing.T) {
 // folder) with rfClearReadFlag flips them back to unread. This proves both the
 // explicit-list and the empty-means-all paths and both flag directions.
 func TestSetReadFlags(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	id1 := seedInboxMessage(t, dir, "BULK1")
 	id2 := seedInboxMessage(t, dir, "BULK2")
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
@@ -234,7 +234,7 @@ func TestSetReadFlags(t *testing.T) {
 // received date), then copies one Inbox->Junk (leaving the source), and confirms
 // a message id absent from the source folder reports partial completion.
 func TestMoveCopyMessages(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	date := time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC)
 
 	// Seed two messages directly so the move case carries a known read flag+date.

@@ -38,7 +38,7 @@ func (c *captureSink) find(name string) (logging.Event, bool) {
 // hand-built NSPI body.
 func TestMAPILogsNspiBind(t *testing.T) {
 	sink := &captureSink{}
-	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: t.TempDir()}}
+	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: provisionedDir(t)}}
 	srv := NewServer(accs, accs, "mail.hermex.test", nil)
 	srv.SetLogger(logging.New(sink))
 	ts := httptest.NewServer(srv.Handler())

@@ -27,7 +27,7 @@ func buildGetContentsTableFlags(inIdx, outIdx, flags uint8) []byte {
 // dumpster. It also proves the soft-deleted row's properties still materialize (the
 // QueryRows path reads them from the object store by message id).
 func TestContentsTableShowSoftDeletes(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)

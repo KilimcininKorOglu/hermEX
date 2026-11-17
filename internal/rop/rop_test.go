@@ -2,12 +2,29 @@ package rop
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
+
+// provisionedDir returns a fresh mailbox directory holding a created mailbox,
+// the state account creation leaves, so a test session can log on to it.
+func provisionedDir(t testing.TB) string {
+	t.Helper()
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
 
 // logonRequest builds a well-formed RopLogon request ROP (header + private
 // LOGON_REQUEST body) targeting the given output handle slot.
@@ -28,7 +45,7 @@ func logonRequest(hindex uint8, logonFlags uint8) []byte {
 // (replica id 1), ResponseFlags, MailboxGuid, ReplId=5, ReplGuid, an 8-byte
 // LogonTime, GwartTime, StoreState, and registers a logon object at the slot.
 func TestRopLogonResponse(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
 
@@ -58,6 +75,28 @@ func TestRopLogonResponse(t *testing.T) {
 	wantU64(t, p, "GwartTime", 0)
 	wantU32(t, p, "StoreState", 0)
 	wantDrained(t, p, "LOGON_PMB_RESPONSE")
+}
+
+// TestRopLogonRefusesAnUnprovisionedMailbox proves a logon never creates a
+// mailbox. A mailbox is made when its account is created, so a missing one is a
+// user with no mailbox database, which [MS-OXCSTOR] 3.2.5.1 answers with
+// ecUnknownUser. The directory must stay absent and no logon handle is bound.
+func TestRopLogonRefusesAnUnprovisionedMailbox(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "gone")
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+
+	resp, handles := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	p := ext.NewPull(resp, ext.FlagUTF16)
+	wantU8(t, p, "RopId", ropLogon)
+	wantU8(t, p, "OutputHandleIndex", 0)
+	wantU32(t, p, "ReturnValue", ecUnknownUser)
+	if handles[0] != 0xFFFFFFFF && sess.handles[handles[0]] != nil {
+		t.Errorf("a logon object was bound to a missing mailbox")
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("the logon created the missing mailbox: %v", err)
+	}
 }
 
 // assertLogonIdentity checks the two GUIDs and the replica id the response
@@ -96,7 +135,7 @@ func assertLogonTime(t *testing.T, p *ext.Pull) {
 
 // TestRopRelease confirms Release frees the handle and emits no response bytes.
 func TestRopRelease(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
 	_, handles := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})

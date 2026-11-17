@@ -14,7 +14,7 @@ import (
 // quiet mailbox and true once a subscribed folder gains a message, the boolean a
 // NotificationWait long-poll turns into FLAG_NOTIFICATION_PENDING.
 func TestPollForChangeDetectsCreate(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
@@ -43,7 +43,7 @@ func TestPollForChangeDetectsCreate(t *testing.T) {
 // halves would stay green while the live flow silently dropped every notification (the
 // Execute's own poll finds nothing, since the snapshot already moved).
 func TestPollForChangeThenExecuteDrains(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
@@ -93,7 +93,7 @@ func TestPollForChangeThenExecuteDrains(t *testing.T) {
 // NotificationWait connection. It asserts only the absence of a race or panic; the
 // wake signal's correctness is pinned by TestPollForChangeDetectsCreate.
 func TestSessionConcurrentDispatchPollClose(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
 	logonH := h[0]

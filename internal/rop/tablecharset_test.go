@@ -44,7 +44,7 @@ func assertMIDs(t *testing.T, rows []mapi.PropertyValues, want ...int64) {
 // it prefers, and a filter that insists on the exact type drops a row whose
 // property is present under the sibling tag.
 func TestRestrictMatchesAcrossStringTypes(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "Apple")
 	bID := seedInboxMessage(t, dir, "Banana")
 	seedInboxMessage(t, dir, "Cherry")
@@ -66,7 +66,7 @@ func TestRestrictMatchesAcrossStringTypes(t *testing.T) {
 // whose subject is stored under the sibling string type must sort by its value,
 // not fall to the end as a row with no key at all.
 func TestSortOrdersAcrossStringTypes(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	cID := seedInboxMessage(t, dir, "Charlie")
 	aID := seedInboxMessage(t, dir, "Alpha")
 	bID := seedInboxMessage(t, dir, "Bravo")

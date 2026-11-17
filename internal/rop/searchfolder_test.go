@@ -124,7 +124,7 @@ func rowCount(t *testing.T, sess *Session, request []byte, folderH uint32, what 
 // Finder, give it criteria, read them back, and see the matching messages in its
 // contents table, and that Finder's hierarchy table lists the search folder.
 func TestSearchFolderThroughROP(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "Invoice 12")
 	seedInboxMessage(t, dir, "Lunch")
 	seedInboxMessage(t, dir, "invoice reminder")
@@ -160,7 +160,7 @@ func TestSearchFolderThroughROP(t *testing.T) {
 // name taken by a folder of the other type is a duplicate even with OpenExisting,
 // while the same type opens the existing folder.
 func TestCreateSearchFolderRefusals(t *testing.T) {
-	sess, finderH := ownerFinder(t, t.TempDir())
+	sess, finderH := ownerFinder(t, provisionedDir(t))
 	fid, searchH := createSearchFolderROP(t, sess, finderH, "Saved")
 	if ok, err := sess.get(searchH).store.IsSearchFolder(fid); err != nil || !ok {
 		t.Fatalf("the created folder is a search folder: %v, %v", ok, err)
@@ -185,7 +185,7 @@ func TestCreateSearchFolderRefusals(t *testing.T) {
 // a scope in another store, and a scope that holds the search folder. It also
 // proves a request that names nothing and does not restart changes nothing.
 func TestSetSearchCriteriaRefusals(t *testing.T) {
-	sess, finderH := ownerFinder(t, t.TempDir())
+	sess, finderH := ownerFinder(t, provisionedDir(t))
 	_, searchH := createSearchFolderROP(t, sess, finderH, "S")
 	res := objectstore.RuleSubjectContains("x")
 	inbox := folderEIDs(int64(mapi.PrivateFIDInbox))
@@ -218,7 +218,7 @@ func TestSetSearchCriteriaRefusals(t *testing.T) {
 // TestGetSearchCriteriaIn8BitStrings proves a client that does not use Unicode
 // gets the restriction's string property as an 8-bit string.
 func TestGetSearchCriteriaIn8BitStrings(t *testing.T) {
-	sess, finderH := ownerFinder(t, t.TempDir())
+	sess, finderH := ownerFinder(t, provisionedDir(t))
 	_, searchH := createSearchFolderROP(t, sess, finderH, "S")
 	res := objectstore.RuleSubjectContains("x")
 	ropOK(t, mustDispatch(sess, toROPRequest(ropSetSearchCriteria, 0, setCriteriaBody(t, &res, folderEIDs(int64(mapi.PrivateFIDInbox)), mapi.SearchRestart)), searchH, 0xFFFFFFFF), ropSetSearchCriteria, "SetSearchCriteria")
@@ -235,7 +235,7 @@ func TestGetSearchCriteriaIn8BitStrings(t *testing.T) {
 // TestDelegateSearchCriteriaRights proves a delegate needs owner rights on the
 // search folder and read rights on every folder it searches.
 func TestDelegateSearchCriteriaRights(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	const delegate = "delegate@hermex.test"
 	owner, finderH := ownerFinder(t, dir)
 	fid, _ := createSearchFolderROP(t, owner, finderH, "Shared")

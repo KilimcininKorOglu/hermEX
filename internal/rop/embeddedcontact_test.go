@@ -13,7 +13,7 @@ import (
 // bytes would lose: the parent is sent with a vCard 3.0 part ([MS-OXCMAIL]
 // 2.1.3.4.6), and the attachment reopens with its contact class and fields.
 func TestAttachedContactIsSentAsAVCard(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	mid := uint64(seedInboxMessage(t, dir, "CARRIER"))
 	sess := NewSession(dir, nil, "")

@@ -76,7 +76,7 @@ func receiptRequested(t *testing.T, dir string, msgID int64) bool {
 // Both reader and sender are local so a generated receipt lands in the sender's inbox.
 func readReceiptSession(t *testing.T) (sess *Session, logonH, msgH uint32, msgID int64, readerDir, senderDir string) {
 	t.Helper()
-	readerDir, senderDir = t.TempDir(), t.TempDir()
+	readerDir, senderDir = provisionedDir(t), provisionedDir(t)
 	accounts := directory.StaticAccounts{
 		"reader@hermex.test": {MailboxPath: readerDir},
 		"sender@hermex.test": {MailboxPath: senderDir},
@@ -129,7 +129,7 @@ func TestReadReceiptGeneratedOnFirstRead(t *testing.T) {
 // sender in a foreign domain is queued for relay with the null reverse-path RFC
 // 8098 requires, not dropped because the sender has no mailbox here.
 func TestReadReceiptRelaysToExternalSender(t *testing.T) {
-	readerDir := t.TempDir()
+	readerDir := provisionedDir(t)
 	accounts := directory.StaticAccounts{"reader@hermex.test": {MailboxPath: readerDir}}
 	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
 	if err != nil {
@@ -185,7 +185,7 @@ func TestReadReceiptFiresOnceViaFlagClear(t *testing.T) {
 // rfDefault, there is no unread→read transition. A flag-only guard would fire a
 // spurious receipt here.
 func TestReadReceiptTransitionGate(t *testing.T) {
-	readerDir, senderDir := t.TempDir(), t.TempDir()
+	readerDir, senderDir := provisionedDir(t), provisionedDir(t)
 	accounts := directory.StaticAccounts{
 		"reader@hermex.test": {MailboxPath: readerDir},
 		"sender@hermex.test": {MailboxPath: senderDir},

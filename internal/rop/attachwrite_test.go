@@ -75,7 +75,7 @@ func openAttachmentEC(t *testing.T, sess *Session, msgH uint32, num uint32) uint
 // number, and the message, changed only by attachment edits, with no top-level
 // property set, must still surface as updated in the ICS content-sync diff.
 func TestAttachmentWriteChain(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	inboxFID := int64(mapi.PrivateFIDInbox)
 
@@ -191,7 +191,7 @@ func assertAttachmentEditsBumpedCN(t *testing.T, store *objectstore.Store, folde
 // common-header handle. Inverting them (message at ihindex2, attachment at the
 // header) must fail rather than silently save against the wrong object.
 func TestSaveChangesAttachmentHandleWiring(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	mid := uint64(seedInboxMessage(t, dir, "HOST"))
 

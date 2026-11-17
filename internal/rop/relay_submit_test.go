@@ -16,7 +16,7 @@ import (
 // session, the external recipient leaves through the relay carrying the owner's
 // address as the envelope From.
 func TestTransportSendRelaysExternal(t *testing.T) {
-	ownerDir := t.TempDir()
+	ownerDir := provisionedDir(t)
 	accounts := directory.StaticAccounts{"owner@hermex.test": {MailboxPath: ownerDir}}
 	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
 	if err != nil {

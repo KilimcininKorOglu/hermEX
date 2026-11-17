@@ -56,8 +56,8 @@ func wireName(s string) []byte {
 func TestNSPIQueryRowsIsScopedToTheAuthenticatedUser(t *testing.T) {
 	const neighbour = "eve@other.test"
 	accs := tenantAccounts{directory.StaticAccounts{
-		testUser:  {Password: testPass, MailboxPath: t.TempDir()},
-		neighbour: {Password: testPass, MailboxPath: t.TempDir()},
+		testUser:  {Password: testPass, MailboxPath: provisionedDir(t)},
+		neighbour: {Password: testPass, MailboxPath: provisionedDir(t)},
 	}}
 	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test", nil).Handler())
 	t.Cleanup(ts.Close)

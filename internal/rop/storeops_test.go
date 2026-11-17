@@ -28,7 +28,7 @@ func buildSetReceiveFolder(hindex uint8, folderEID uint64, class string) []byte 
 // rejects the un-settable IPM class and the zero-folder default removal;
 // GetReceiveFolderTable returns the mappings; GetStoreState is not implemented.
 func TestReceiveFolderROPs(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})

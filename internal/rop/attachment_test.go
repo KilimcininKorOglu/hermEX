@@ -98,7 +98,7 @@ func attachmentKeyRows(t *testing.T, sess *Session, folderFID, msgID int64) []ma
 // distinct key per row, and a PidTagRecordKey of the lead byte and the
 // attachment's position that stays the same when the message moves.
 func TestAttachmentTableRowKeys(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -144,7 +144,7 @@ func TestAttachmentTableRowKeys(t *testing.T) {
 // filename), OpenAttachment by that number, then OpenStream + ReadStream its
 // data.
 func TestAttachmentReadChain(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	msgID := seedAttachmentMessage(t, dir)
 	msgEID := uint64(mapi.MakeEIDEx(1, uint64(msgID)))
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
@@ -192,7 +192,7 @@ func TestAttachmentReadChain(t *testing.T) {
 // lists the attachments' stored tags and the synthesized row keys, not only the
 // chosen columns.
 func TestAttachmentTableColumnsAll(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	msgID := seedAttachmentMessage(t, dir)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()

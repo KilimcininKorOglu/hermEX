@@ -78,7 +78,7 @@ func TestSessionBelowTheCapIsUnaffected(t *testing.T) {
 // TestZeroMaxAgeDisablesTheCap pins the documented meaning of a zero lifetime,
 // so a store built without one keeps every session until it goes idle.
 func TestZeroMaxAgeDisablesTheCap(t *testing.T) {
-	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: t.TempDir()}}
+	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: provisionedDir(t)}}
 	store := newSessionStore(0)
 	sid, seq := store.create(testUser, accs[testUser].MailboxPath, accs, nil, nil, rop.Locale{})
 	backdateSession(t, store, sid, 10*365*24*time.Hour)
@@ -95,8 +95,8 @@ func TestZeroMaxAgeDisablesTheCap(t *testing.T) {
 func TestNotificationWaitRefusesAnotherUsersSession(t *testing.T) {
 	const otherUser = "mallory@hermex.test"
 	accs := directory.StaticAccounts{
-		testUser:  {Password: testPass, MailboxPath: t.TempDir()},
-		otherUser: {Password: testPass, MailboxPath: t.TempDir()},
+		testUser:  {Password: testPass, MailboxPath: provisionedDir(t)},
+		otherUser: {Password: testPass, MailboxPath: provisionedDir(t)},
 	}
 	srv := NewServer(accs, accs, "mail.hermex.test", nil)
 	// The owner's wait below has nothing to report and would otherwise hold for

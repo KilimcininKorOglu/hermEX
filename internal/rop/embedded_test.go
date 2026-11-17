@@ -74,7 +74,7 @@ func seedCarrier(t *testing.T, store *objectstore.Store, eml string) (*oxcmail.M
 // subject, and that GetProperties on the embedded handle reads the embedded body
 // from the in-memory imported message.
 func TestOpenEmbeddedMessageRead(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 
 	sess := NewSession(dir, nil, "")
@@ -142,7 +142,7 @@ func TestOpenEmbeddedMessageRead(t *testing.T) {
 // reported unsupported (the create path is deferred) rather than silently opening
 // an empty message that could never be written back.
 func TestOpenEmbeddedMessageErrors(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 
 	sess := NewSession(dir, nil, "")
@@ -189,7 +189,7 @@ func TestOpenEmbeddedMessageErrors(t *testing.T) {
 // and its subject and body are read back, proving the compose → export → store →
 // import round-trip, and that the parent attachment ends up tagged method-5.
 func TestComposeEmbeddedMessage(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	mid := uint64(seedInboxMessage(t, dir, "CARRIER"))
 
@@ -306,7 +306,7 @@ func openReadStreamAll(t *testing.T, sess *Session, parentH uint32, tag uint32) 
 // nested attachment, and OpenAttachment + OpenStream read that nested attachment's
 // data. Each of these previously rejected a kindEmbedded handle.
 func TestEmbeddedMessageReadSurface(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 
 	sess := NewSession(dir, nil, "")

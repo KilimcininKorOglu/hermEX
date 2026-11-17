@@ -152,7 +152,7 @@ func utf16le(s string) []byte {
 // this is a self-driven smoke (dispatch + framing), NOT an independent wire oracle;
 // the real-client cached-mode close stays Outlook-pending.
 func TestExecuteRopSyncDownload(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedSyncMessage(t, dir, "SYNCME")
 
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}

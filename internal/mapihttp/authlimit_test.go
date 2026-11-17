@@ -27,8 +27,8 @@ func throttledServer(t *testing.T) (*httptest.Server, *int) {
 	calls := 0
 	accs := countingAuth{
 		StaticAccounts: directory.StaticAccounts{
-			testUser:          {Password: testPass, MailboxPath: t.TempDir()},
-			"bob@hermex.test": {Password: testPass, MailboxPath: t.TempDir()},
+			testUser:          {Password: testPass, MailboxPath: provisionedDir(t)},
+			"bob@hermex.test": {Password: testPass, MailboxPath: provisionedDir(t)},
 		},
 		calls: &calls,
 	}

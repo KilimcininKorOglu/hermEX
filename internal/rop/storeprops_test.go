@@ -27,7 +27,7 @@ func storeRow(t *testing.T, dir, owner string, cols []mapi.PropTag, opts ...Sess
 // written when the mailbox was created, and names its owner and the logged-on user
 // with the entry ids the address book serves.
 func TestStoreReportsWhatItHolds(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	const owner = "owner@hermex.test"
 	seedInboxMessage(t, dir, "one")
 	seedInboxMessage(t, dir, "two")
@@ -57,7 +57,7 @@ func TestStoreReportsWhatItHolds(t *testing.T) {
 // the printable name a client shows where the display name may not render.
 func TestStoreReportsAPrintableOwnerName(t *testing.T) {
 	cols := []mapi.PropTag{mapi.PrAddressBookDisplayNamePrintable}
-	row, _ := storeRow(t, t.TempDir(), "owner@hermex.test", cols)
+	row, _ := storeRow(t, provisionedDir(t), "owner@hermex.test", cols)
 	wantProp(t, row, mapi.PrAddressBookDisplayNamePrintable, "owner", "printable name")
 }
 
@@ -67,13 +67,13 @@ func TestStoreReportsAPrintableOwnerName(t *testing.T) {
 func TestStoreReportsTheConnectLocale(t *testing.T) {
 	const owner = "owner@hermex.test"
 	cols := []mapi.PropTag{mapi.PrLocaleID, mapi.PrSortLocaleID, mapi.PrCodePageID}
-	row, _ := storeRow(t, t.TempDir(), owner, cols,
+	row, _ := storeRow(t, provisionedDir(t), owner, cols,
 		WithLocale(Locale{CodePage: 1254, LCIDString: 0x041F, LCIDSort: 0x0409}))
 	wantProp(t, row, mapi.PrLocaleID, int32(0x041F), "locale")
 	wantProp(t, row, mapi.PrSortLocaleID, int32(0x0409), "sort locale")
 	wantProp(t, row, mapi.PrCodePageID, int32(1254), "code page")
 
-	row, _ = storeRow(t, t.TempDir(), owner, cols)
+	row, _ = storeRow(t, provisionedDir(t), owner, cols)
 	for _, tag := range cols {
 		if v, ok := row.Get(tag); ok {
 			t.Errorf("%#x = %v without a connect locale, want it unset", uint32(tag), v)
@@ -86,7 +86,7 @@ func TestStoreReportsTheConnectLocale(t *testing.T) {
 // replid with the store GUID, and the replid the logon reports with the mapping
 // signature it pairs that replid with.
 func TestStoreReportsItsReplidMap(t *testing.T) {
-	row, store := storeRow(t, t.TempDir(), "owner@hermex.test", []mapi.PropTag{mapi.PrSerializedReplidGuidMap})
+	row, store := storeRow(t, provisionedDir(t), "owner@hermex.test", []mapi.PropTag{mapi.PrSerializedReplidGuidMap})
 	storeGUID, err := store.StoreGUID()
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +110,7 @@ func TestStoreReportsItsReplidMap(t *testing.T) {
 // served: [MS-OXCSTOR] 2.2.2.1.1.3 expresses no limit as an unset property, and a
 // client reading 0 would call the mailbox full. A set quota is served in KB.
 func TestStoreHidesAnUnlimitedQuota(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	const owner = "owner@hermex.test"
 	st, err := objectstore.Open(dir)
 	if err != nil {

@@ -21,7 +21,7 @@ import (
 // TestContentsTableRowReadsTheStore proves a row is projected from the store when
 // QueryRows asks for it. An edit made after the table was built shows through.
 func TestContentsTableRowReadsTheStore(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	mid := seedInboxMessage(t, dir, "Before")
 
 	sess := NewSession(dir, nil, "")
@@ -59,7 +59,7 @@ func TestContentsTableRowReadsTheStore(t *testing.T) {
 // built. A message delivered afterwards is neither counted nor returned, so the
 // row indices a client already holds keep naming the same rows.
 func TestContentsTableSnapshotIsFrozen(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "One")
 
 	sess := NewSession(dir, nil, "")

@@ -41,7 +41,7 @@ func TestStepCounts(t *testing.T) {
 // a CopyTo of a stored message reports the bytes served against the size of
 // the rendered stream, and every step done once drained.
 func TestCopySourceStepCounts(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	mid := seedInboxMessage(t, dir, "COPYME")
 	st, err := objectstore.Open(dir)
 	if err != nil {

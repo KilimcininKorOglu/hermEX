@@ -34,7 +34,7 @@ func buildRegisterNotification(inIdx, outIdx, ntypes, wantWhole uint8, folderEID
 // baseline snapshot taken at registration so the first poll suppresses a message that
 // already existed when the client subscribed.
 func TestRegisterNotificationFolderScope(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
@@ -103,7 +103,7 @@ func subscriptionAt(t *testing.T, sess *Session, subH uint32) *object {
 // the client, but is left without a folder baseline, since the all-folders poll it
 // needs is deferred (the internal spec §9).
 func TestRegisterNotificationWholeStore(t *testing.T) {
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	defer sess.Close()
 
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})

@@ -29,7 +29,7 @@ func readEC(t *testing.T, resp []byte, wantID uint8) uint32 {
 }
 
 func TestCreateFolderSuccess(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
@@ -66,7 +66,7 @@ func createFolderBody(folderType uint8, name string, openExisting bool) []byte {
 // the Inbox handle.
 func openInboxForCreate(t *testing.T) (*Session, uint32) {
 	t.Helper()
-	sess := NewSession(t.TempDir(), nil, "")
+	sess := NewSession(provisionedDir(t), nil, "")
 	t.Cleanup(sess.Close)
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
 	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{h[0], 0xFFFFFFFF})
@@ -138,7 +138,7 @@ func TestCreateFolderRefusesOtherTypes(t *testing.T) {
 // subfolders under the Inbox holds owner rights on the folder they create, so they
 // can read its contents, which the Inbox grant alone would not allow.
 func TestDelegateOwnsTheFolderTheyCreate(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	const delegate = "delegate@hermex.test"
 	grantFolderPermission(t, dir, int64(mapi.PrivateFIDInbox), delegate, mapi.FrightsVisible|mapi.FrightsCreateSubfolder)
 	sess, logonH := delegateLogon(t, dir, delegate)
@@ -199,7 +199,7 @@ func TestCreateFolderKeepsTheComment(t *testing.T) {
 // ROP both are gone (the message recoverable in the dumpster, the subfolder dropped
 // with its subtree), with PartialCompletion=0.
 func TestHardDeleteMessagesAndSubfolders(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "TOPMSG")
 	inboxFID := int64(mapi.PrivateFIDInbox)
 	store, err := objectstore.Open(dir)
@@ -273,7 +273,7 @@ func assertFolderCleared(t *testing.T, st *objectstore.Store, inboxFID, subID in
 }
 
 func TestEmptyFolderDeletesMessages(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "M1")
 	seedInboxMessage(t, dir, "M2")
 	inboxFID := int64(mapi.PrivateFIDInbox)
@@ -307,7 +307,7 @@ func TestEmptyFolderDeletesMessages(t *testing.T) {
 }
 
 func TestHardDeleteMessagesToDumpster(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	midA := seedInboxMessage(t, dir, "A")
 	msgB := seedInboxMessage(t, dir, "B")
 	midC := seedInboxMessage(t, dir, "C")
@@ -343,7 +343,7 @@ func TestHardDeleteMessagesToDumpster(t *testing.T) {
 }
 
 func TestDeleteFolder(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
@@ -378,7 +378,7 @@ func TestDeleteFolder(t *testing.T) {
 }
 
 func TestMoveFolder(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
@@ -417,7 +417,7 @@ func TestMoveFolder(t *testing.T) {
 // with a message is copied under a destination folder (the copy appears there),
 // and copying a folder into its own subtree is refused with MAPI_E_FOLDER_CYCLE.
 func TestCopyFolderRecursiveAndCycle(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})

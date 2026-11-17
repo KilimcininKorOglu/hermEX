@@ -14,7 +14,7 @@ import (
 // testStore builds an EMSMDB session store over a throwaway mailbox.
 func testStore(t *testing.T) (*sessionStore, directory.StaticAccounts) {
 	t.Helper()
-	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: t.TempDir()}}
+	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: provisionedDir(t)}}
 	return newSessionStore(sessionMaxAge), accs
 }
 
@@ -46,7 +46,7 @@ func TestSweepReclaimsIdleSession(t *testing.T) {
 // invalid-context-cookie code, the same answer it gets after a Disconnect, so it
 // reconnects instead of hanging on a session the server no longer has.
 func TestReclaimedSessionIsRejectedEndToEnd(t *testing.T) {
-	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: t.TempDir()}}
+	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: provisionedDir(t)}}
 	srv := NewServer(accs, accs, "mail.hermex.test", nil)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)

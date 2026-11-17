@@ -11,7 +11,7 @@ import (
 // 2.2.2), not only on messages: Outlook reads the folder's name and counts, and
 // the store's size, through these handles.
 func TestGetPropertiesOnTheStoreAndAFolder(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "x")
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()

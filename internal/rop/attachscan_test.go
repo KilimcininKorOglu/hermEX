@@ -51,7 +51,7 @@ func saveAttachmentWith(t *testing.T, sess *Session, msgH, attH uint32, props ma
 // never pass through delivery, so this is the only point they can be checked.
 func TestSaveChangesAttachmentRefusesInfectedContent(t *testing.T) {
 	withScanner(t, avtest.Infected)
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	mid := uint64(seedInboxMessage(t, dir, "HOST"))
 
@@ -76,7 +76,7 @@ func TestSaveChangesAttachmentRefusesInfectedContent(t *testing.T) {
 // working with the scanner enabled.
 func TestSaveChangesAttachmentAcceptsCleanContent(t *testing.T) {
 	withScanner(t, avtest.Clean)
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	mid := uint64(seedInboxMessage(t, dir, "HOST"))
 

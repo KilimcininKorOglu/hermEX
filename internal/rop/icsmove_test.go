@@ -48,7 +48,7 @@ func openMoveCollector(t *testing.T, dir string, destFID uint64) (*Session, []ui
 // (the client's id is authoritative), and a no-op ROP chained behind the move only
 // frames if the five length-prefixed binaries were consumed exactly.
 func TestSyncImportMessageMove(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	msgID := seedInboxMessage(t, dir, "MOVEME")
 	destFID := uint64(mapi.PrivateFIDSentItems)
 	dstMID := uint64(msgID) + 0x100000
@@ -97,7 +97,7 @@ func TestSyncImportMessageMove(t *testing.T) {
 // TestSyncImportMessageMoveObjectDeleted asserts the handler maps a source the store
 // no longer holds to SYNC_E_OBJECT_DELETED rather than a generic failure.
 func TestSyncImportMessageMoveObjectDeleted(t *testing.T) {
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "anchor") // materializes the store; not the move target
 	destFID := uint64(mapi.PrivateFIDSentItems)
 

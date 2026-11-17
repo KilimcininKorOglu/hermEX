@@ -53,7 +53,7 @@ func (c *ropSink) count(name string) int {
 // without this event nothing says who granted access to which folder.
 func TestPermissionChangeIsLogged(t *testing.T) {
 	sink := &ropSink{}
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	sess := NewSession(dir, nil, "owner@hermex.test", WithLogger(logging.New(sink)))
 	t.Cleanup(sess.Close)
 
@@ -97,8 +97,8 @@ func TestPermissionChangeIsLogged(t *testing.T) {
 // mailbox in the only situation that matters.
 func TestDelegateDenialIsLogged(t *testing.T) {
 	sink := &ropSink{}
-	callerDir := t.TempDir()
-	targetDir := t.TempDir()
+	callerDir := provisionedDir(t)
+	targetDir := provisionedDir(t)
 	// A grant on the Inbox alone: it opens the store, and leaves Sent Items with no
 	// rights at all, so opening Sent Items is refused. (The Calendar would not do:
 	// it is seeded with a default free/busy grant that already confers Visible.)
@@ -143,7 +143,7 @@ func TestDelegateDenialIsLogged(t *testing.T) {
 // while the log said nothing useful.
 func TestOwnerAccessIsNotLoggedAsDenial(t *testing.T) {
 	sink := &ropSink{}
-	dir := t.TempDir()
+	dir := provisionedDir(t)
 	sess := NewSession(dir, nil, "owner@hermex.test", WithLogger(logging.New(sink)))
 	t.Cleanup(sess.Close)
 

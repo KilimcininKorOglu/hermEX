@@ -17,7 +17,7 @@ import (
 // form, the second plain MIME: without the split every recipient got plain MIME,
 // and a rich-info recipient lost what MIME cannot carry.
 func TestSubmitSendsTNEFToARichInfoRecipient(t *testing.T) {
-	ownerDir := t.TempDir()
+	ownerDir := provisionedDir(t)
 	accounts := directory.StaticAccounts{"owner@hermex.test": {MailboxPath: ownerDir}}
 	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
 	if err != nil {
