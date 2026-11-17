@@ -585,6 +585,28 @@ func TestOutboxFreeBusy(t *testing.T) {
 	}
 }
 
+// TestOutboxFreeBusyNeedsItsWindow proves RFC 5546 3.3.2: a VFREEBUSY REQUEST
+// carries exactly one DTSTART and one DTEND, both UTC. A request without them,
+// or with an end that is not after the start, is not a valid scheduling message
+// (RFC 6638 CALDAV:valid-scheduling-message), so it is refused with 400 rather
+// than answered with another user's busy time for all time.
+func TestOutboxFreeBusyNeedsItsWindow(t *testing.T) {
+	ts := davServerCal(t)
+	full := freeBusyRequest(testUser, testUser)
+	for name, body := range map[string]string{
+		"no DTSTART":       strings.Replace(full, "DTSTART:20260601T000000Z\r\n", "", 1),
+		"no DTEND":         strings.Replace(full, "DTEND:20260701T000000Z\r\n", "", 1),
+		"no window":        strings.Replace(strings.Replace(full, "DTSTART:20260601T000000Z\r\n", "", 1), "DTEND:20260701T000000Z\r\n", "", 1),
+		"end before start": strings.Replace(full, "DTEND:20260701T000000Z", "DTEND:20260501T000000Z", 1),
+		"garbled DTSTART":  strings.Replace(full, "DTSTART:20260601T000000Z", "DTSTART:soon", 1),
+	} {
+		resp, out := doFull(t, ts, "POST", "/dav/calendars/"+testUser+"/outbox/", body, nil)
+		if resp.StatusCode != http.StatusBadRequest || !strings.Contains(out, "valid-scheduling-message") {
+			t.Errorf("%s: status %d, want 400 valid-scheduling-message\n%s", name, resp.StatusCode, out)
+		}
+	}
+}
+
 // TestOutboxValidOrganizer confirms the Outbox rejects a POST whose ORGANIZER is
 // not a calendar address of the Outbox owner (RFC 6638 §5.2.6, valid-organizer).
 func TestOutboxValidOrganizer(t *testing.T) {

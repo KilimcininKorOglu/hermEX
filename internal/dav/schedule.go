@@ -60,10 +60,14 @@ func (s *Server) outboxFreeBusy(w http.ResponseWriter, user string, vfb *icalNod
 		return
 	}
 
-	// The query window is the request VFREEBUSY's DTSTART/DTEND; an absent bound
-	// leaves that side open.
+	// The query window is the request VFREEBUSY's DTSTART/DTEND, both required
+	// (RFC 5546 3.3.2), with the end after the start.
 	rangeStart, okS := propTimeValue(vfb, "DTSTART")
 	rangeEnd, okE := propTimeValue(vfb, "DTEND")
+	if !okS || !okE || !rangeEnd.After(rangeStart) {
+		schedulePreconditionFail(w, "valid-scheduling-message", http.StatusBadRequest)
+		return
+	}
 
 	// Each attendee opens a store and scans a whole calendar, so bound how many one
 	// scheduling request may ask for.
