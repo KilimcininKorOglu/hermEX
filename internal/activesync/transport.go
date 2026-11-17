@@ -2,6 +2,7 @@ package activesync
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"io"
 	"net/http"
@@ -171,7 +172,7 @@ func parseBase64Query(raw string) (asRequest, error) {
 	}
 	req := asRequest{
 		cmd:        commandNames[code],
-		deviceID:   string(devID),
+		deviceID:   packedDeviceID(devID),
 		deviceType: string(devType),
 	}
 	if len(policy) == 4 {
@@ -206,6 +207,18 @@ func isASCIIAlnum(c byte) bool {
 		return true
 	}
 	return false
+}
+
+// packedDeviceID turns a packed Device ID into the string that keys the device's
+// state. An ID that is already 1 to 32 alphanumerics is used as sent, so it
+// matches the same device's plain-query requests; any other ID, such as a binary
+// GUID, is written as uppercase hex, because the state is stored as JSON and
+// cannot carry arbitrary bytes unchanged.
+func packedDeviceID(raw []byte) string {
+	if s := string(raw); validPlainDeviceID(s) {
+		return s
+	}
+	return strings.ToUpper(hex.EncodeToString(raw))
 }
 
 // errBadPacked reports a malformed base64-packed command string.

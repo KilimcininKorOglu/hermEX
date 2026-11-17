@@ -1,6 +1,7 @@
 package activesync
 
 import (
+	"bytes"
 	"encoding/base64"
 	"io"
 	"net/http"
@@ -10,6 +11,8 @@ import (
 	"testing"
 
 	"hermex/internal/directory"
+	"hermex/internal/objectstore"
+	"hermex/internal/wbxml"
 )
 
 const (
@@ -186,6 +189,44 @@ func TestQueryRefusesAMalformedDeviceID(t *testing.T) {
 	if resp, _ := do(t, ts, "POST", "/Microsoft-Server-ActiveSync?"+base64.StdEncoding.EncodeToString(guid), "", true); resp.StatusCode != http.StatusNotImplemented {
 		t.Errorf("base64 Device ID that is a binary GUID: status %d, want 501 (dispatch reached)", resp.StatusCode)
 	}
+}
+
+// TestBase64GUIDDeviceIDsKeepTheirOwnState proves two devices whose packed
+// Device ID is a binary GUID (MS-ASHTTP 2.2.1.1.1.1 allows one) each keep their
+// own sync state across requests. The state is stored as JSON, which cannot hold
+// arbitrary bytes, so a raw GUID used as the key would change on the round trip
+// and two GUIDs differing only in non-UTF-8 bytes would share one device.
+func TestBase64GUIDDeviceIDsKeepTheirOwnState(t *testing.T) {
+	ts, dir := seededServer(t)
+	folderSync := func(guid []byte, key string) string {
+		packed := append([]byte{0x0E, 0x09, 0x09, 0x04, byte(len(guid))}, guid...)
+		packed = append(packed, 0x00, 0x03, 'A', 'n', 'd')
+		body := wbxml.Marshal(wbxml.Elem(wbxml.FHFolderSync, wbxml.Str(wbxml.FHSyncKey, key)))
+		req, err := http.NewRequest("POST", ts.URL+"/Microsoft-Server-ActiveSync?"+base64.StdEncoding.EncodeToString(packed), bytes.NewReader(body))
+		mustNoErr(t, "build the request", err)
+		req.SetBasicAuth(testUser, testPass)
+		req.Header.Set("Content-Type", "application/vnd.ms-sync.wbxml")
+		resp, err := http.DefaultClient.Do(req)
+		mustNoErr(t, "send the request", err)
+		defer resp.Body.Close()
+		out, _ := io.ReadAll(resp.Body)
+		root, err := wbxml.Unmarshal(out)
+		mustNoErr(t, "decode the reply", err)
+		return root.ChildText(wbxml.FHStatus)
+	}
+	a := []byte{0xff, 0xfe, 0x01, 0x02, 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8b}
+	b := []byte{0xfe, 0xff, 0x01, 0x02, 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8b}
+	wantEq(t, "device a's prime", folderSync(a, "0"), "1")
+	// A device that never synced holds no key 1, so it must be told to re-prime.
+	wantEq(t, "device b's FolderSync before its own prime", folderSync(b, "1"), "9")
+	wantEq(t, "device a's FolderSync with its key", folderSync(a, "1"), "1")
+
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open the store", err)
+	defer st.Close()
+	m, err := loadDevices(st)
+	mustNoErr(t, "load the devices", err)
+	wantEq(t, "recorded devices", len(m.Devices), 2)
 }
 
 // TestBase64QueryDispatch confirms a base64-packed command also routes through
