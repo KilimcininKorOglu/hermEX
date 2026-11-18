@@ -2,6 +2,7 @@ package activesync
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -52,7 +53,7 @@ func galServer(t *testing.T) *httptest.Server {
 // postCommand POSTs a WBXML command to the live endpoint and decodes the reply.
 func postCommand(t *testing.T, ts *httptest.Server, cmd string, root *wbxml.Node) (*http.Response, *wbxml.Node) {
 	t.Helper()
-	resp, node, err := postCommandErr(ts, cmd, root)
+	resp, node, err := postCommandErr(context.Background(), ts, cmd, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,9 +62,11 @@ func postCommand(t *testing.T, ts *httptest.Server, cmd string, root *wbxml.Node
 
 // postCommandErr is postCommand for a goroutine other than the test's own, where
 // t.Fatal must not be called (testing.T.FailNow): it returns the failure instead.
-func postCommandErr(ts *httptest.Server, cmd string, root *wbxml.Node) (*http.Response, *wbxml.Node, error) {
+// Cancelling ctx abandons a request the server is holding, which lets the test
+// server close.
+func postCommandErr(ctx context.Context, ts *httptest.Server, cmd string, root *wbxml.Node) (*http.Response, *wbxml.Node, error) {
 	url := ts.URL + "/Microsoft-Server-ActiveSync?Cmd=" + cmd + "&User=" + testUser + "&DeviceId=dev1&DeviceType=iPhone"
-	req, err := http.NewRequest("POST", url, bytes.NewReader(wbxml.Marshal(root)))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(wbxml.Marshal(root)))
 	if err != nil {
 		return nil, nil, err
 	}

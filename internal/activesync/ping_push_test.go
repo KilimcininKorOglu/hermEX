@@ -1,6 +1,7 @@
 package activesync
 
 import (
+	"context"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -51,9 +52,13 @@ func heldPing(t *testing.T) (string, *fakePingWaker, <-chan pingOutcome) {
 	postCommand(t, ts, "Sync", syncReq("0", ""))
 	postCommand(t, ts, "Sync", syncReq("1", ""))
 
+	// Cleanups run last-in first-out, so this cancel ends a still-held Ping before
+	// ts.Close, which waits for every active request, runs.
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	out := make(chan pingOutcome, 1)
 	go func() {
-		_, root, err := postCommandErr(ts, "Ping", pingReq("60"))
+		_, root, err := postCommandErr(ctx, ts, "Ping", pingReq("60"))
 		if err != nil {
 			out <- pingOutcome{err: err}
 			return

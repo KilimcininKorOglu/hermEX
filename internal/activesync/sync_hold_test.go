@@ -62,10 +62,15 @@ func TestSyncHoldWakesViaPush(t *testing.T) {
 	postCommand(t, ts, "Sync", syncReq("0", ""))
 	postCommand(t, ts, "Sync", syncReq("1", ""))
 
-	done := make(chan *wbxml.Node, 1)
+	type outcome struct {
+		root *wbxml.Node
+		err  error
+	}
+	done := make(chan outcome, 1)
 	go func() {
-		_, root := postCommand(t, ts, "Sync", hangingSyncReq("2", "60"))
-		done <- root
+		// postCommandErr, not postCommand: t.Fatal must not run off the test goroutine.
+		_, root, err := postCommandErr(context.Background(), ts, "Sync", hangingSyncReq("2", "60"))
+		done <- outcome{root, err}
 	}()
 	time.Sleep(200 * time.Millisecond) // let the hold begin and register
 
@@ -73,8 +78,11 @@ func TestSyncHoldWakesViaPush(t *testing.T) {
 	waker.fire()         // the push wake
 
 	select {
-	case root := <-done:
-		if !syncRespHasAdd(root) {
+	case o := <-done:
+		if o.err != nil {
+			t.Fatal(o.err)
+		}
+		if !syncRespHasAdd(o.root) {
 			t.Errorf("hanging Sync did not return the new message as an Add")
 		}
 	case <-time.After(2 * time.Second):
@@ -118,14 +126,41 @@ func TestHoldForSyncTimesOut(t *testing.T) {
 }
 
 // TestSyncHoldOutOfRange proves an out-of-range HeartbeatInterval yields Status 14
-// with the nearest acceptable bound in a Limit element.
+// with the nearest acceptable bound in a Limit element. [MS-ASCMD] Sync
+// HeartbeatInterval: the valid range is 60 through 3540 seconds.
 func TestSyncHoldOutOfRange(t *testing.T) {
-	ts, _ := seededServer(t)
-	_, root := postCommand(t, ts, "Sync", hangingSyncReq("1", "10")) // 10s < 60s minimum
-	if s := root.ChildText(wbxml.ASStatus); s != strconv.Itoa(syncStatusWaitInterval) {
-		t.Errorf("Status = %q, want %d (invalid wait/heartbeat)", s, syncStatusWaitInterval)
-	}
-	if lim := root.ChildText(wbxml.ASLimit); lim != "60" {
-		t.Errorf("Limit = %q, want 60 (the minimum heartbeat)", lim)
+	for _, tc := range []struct{ heartbeat, limit string }{
+		{"10", "60"},
+		{"3541", "3540"},
+	} {
+		ts, _ := seededServer(t)
+		// A server that accepts the value holds the request for its heartbeat, so the
+		// reply is awaited with a bound rather than for up to an hour.
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel) // runs before the server's Close, which waits for the held request
+		reply := make(chan *wbxml.Node, 1)
+		errs := make(chan error, 1)
+		go func() {
+			_, root, err := postCommandErr(ctx, ts, "Sync", hangingSyncReq("1", tc.heartbeat))
+			if err != nil {
+				errs <- err
+				return
+			}
+			reply <- root
+		}()
+		var root *wbxml.Node
+		select {
+		case root = <-reply:
+		case err := <-errs:
+			t.Fatal(err)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("heartbeat %s was held instead of refused", tc.heartbeat)
+		}
+		if s := root.ChildText(wbxml.ASStatus); s != strconv.Itoa(syncStatusWaitInterval) {
+			t.Errorf("heartbeat %s: Status = %q, want %d (invalid wait/heartbeat)", tc.heartbeat, s, syncStatusWaitInterval)
+		}
+		if lim := root.ChildText(wbxml.ASLimit); lim != tc.limit {
+			t.Errorf("heartbeat %s: Limit = %q, want %s", tc.heartbeat, lim, tc.limit)
+		}
 	}
 }
