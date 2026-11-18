@@ -481,12 +481,10 @@ var errScheduledFrom = errors.New("scheduled message names a From its owner may 
 // one point every scheduled message passes. The grant is also read at release rather
 // than trusted from scheduling, so a grant revoked in between stops the send.
 func authorizeScheduledFrom(dir directory.Accounts, owner string, raw []byte) error {
-	msg, err := mail.ReadMessage(bytes.NewReader(raw))
-	if err != nil {
-		return fmt.Errorf("%w: %v", errScheduledFrom, err)
-	}
-	list, err := mail.ParseAddressList(msg.Header.Get("From"))
-	if err != nil || len(list) != 1 || !sendas.Allows(dir, owner, list[0].Address) {
+	// Every From field counts: a second one would name an address beside the one
+	// authorized, and a message with no From is not one this path schedules.
+	from, claim := sendas.HeaderFrom(raw)
+	if claim != sendas.FromOne || !sendas.Allows(dir, owner, from) {
 		return errScheduledFrom
 	}
 	return nil
