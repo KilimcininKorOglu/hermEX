@@ -378,7 +378,8 @@ func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node, prot
 
 	// Apply the client's commands first, folding each into the snapshot so the
 	// diff below does not echo the client's own change back to it.
-	*becameRead = append(*becameRead, applyClientCommands(st, folderID, cstate, c)...)
+	read, responses := applyClientCommands(st, folderID, cstate, c)
+	*becameRead = append(*becameRead, read...)
 
 	live, err := st.ListMessages(folderID)
 	if err != nil {
@@ -398,7 +399,7 @@ func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node, prot
 		return nil, err
 	}
 	cstate.SyncKey = nextSyncKey(clientKey)
-	return syncResponse(collID, cstate.SyncKey, cmds, nil, more), nil
+	return syncResponse(collID, cstate.SyncKey, cmds, responses, more), nil
 }
 
 // mailChangeCommands renders a mail folder's pending changes as Sync commands and
@@ -483,30 +484,58 @@ func diffSnapshot(snapshot map[string]int64, live []objectstore.MessageInfo) []p
 // commands to the store, updating the snapshot so the server does not echo them.
 // It returns the messages a Change took from unread to read, which owe the read
 // receipt they ask for.
-func applyClientCommands(st *objectstore.Store, folderID int64, cstate *collectionState, c *wbxml.Node) (becameRead []int64) {
+//
+// A Change or Delete naming no message of the folder is answered in responses with
+// Status 8, "Object not found": MS-ASCMD 2.2.3.154 has the server report failed
+// changes and deletions, and a device given no response counts the edit as done.
+func applyClientCommands(st *objectstore.Store, folderID int64, cstate *collectionState,
+	c *wbxml.Node) (becameRead []int64, responses []*wbxml.Node) {
 	cmds := c.Child(wbxml.ASCommands)
 	if cmds == nil {
-		return nil
+		return nil, nil
 	}
 	for _, cmd := range cmds.Children {
-		sid := cmd.ChildText(wbxml.ASServerID)
-		uid64, err := strconv.ParseUint(sid, 10, 32)
-		if err != nil {
+		if cmd.Tag != wbxml.ASChange && cmd.Tag != wbxml.ASDelete {
 			continue
 		}
-		uid := uint32(uid64)
-		switch cmd.Tag {
-		case wbxml.ASChange:
-			if id, ok := applyReadFlag(st, folderID, uid, sid, cstate, cmd); ok {
-				becameRead = append(becameRead, id)
-			}
-		case wbxml.ASDelete:
-			if st.SoftDeleteMessage(folderID, uid) == nil {
-				delete(cstate.Items, sid)
-			}
+		sid := cmd.ChildText(wbxml.ASServerID)
+		id, ok := applyMailCommand(st, folderID, sid, cstate, cmd)
+		if !ok {
+			responses = append(responses, wbxml.Elem(cmd.Tag,
+				wbxml.Str(wbxml.ASServerID, sid),
+				wbxml.Str(wbxml.ASStatus, strconv.Itoa(syncStatusObjectNotFound))))
+		} else if id != 0 {
+			becameRead = append(becameRead, id)
 		}
 	}
-	return becameRead
+	return becameRead, responses
+}
+
+// applyMailCommand applies one Change or Delete to the message the ServerId (its
+// uid) names. ok is false when no such message exists; id is the message a Change
+// took from unread to read, else 0.
+func applyMailCommand(st *objectstore.Store, folderID int64, sid string, cstate *collectionState,
+	cmd *wbxml.Node) (id int64, ok bool) {
+	uid64, err := strconv.ParseUint(sid, 10, 32)
+	if err != nil {
+		return 0, false
+	}
+	uid := uint32(uid64)
+	if cmd.Tag == wbxml.ASDelete {
+		if st.SoftDeleteMessage(folderID, uid) != nil {
+			return 0, false
+		}
+		delete(cstate.Items, sid)
+		return 0, true
+	}
+	if _, err := st.MessageByUID(folderID, uid); err != nil {
+		return 0, false
+	}
+	id, read := applyReadFlag(st, folderID, uid, sid, cstate, cmd)
+	if !read {
+		id = 0
+	}
+	return id, true
 }
 
 // applyReadFlag applies one device Change command, which for a mail item carries

@@ -224,6 +224,47 @@ func TestSyncClientChange(t *testing.T) {
 	}
 }
 
+// TestSyncUnknownServerIDIsObjectNotFound sends a Change and a Delete for ServerIds
+// no message of the Inbox has (a missing uid and one that is not a number): MS-ASCMD
+// 2.2.3.154 has the server answer failed changes and deletions, and 2.2.3.177.17
+// names Status 8, Object not found, so each must come back under Responses with 8.
+// The real message must stay unread and in place.
+func TestSyncUnknownServerIDIsObjectNotFound(t *testing.T) {
+	ts, dir := seededServer(t)
+	seedInbox(t, dir, 1)
+	postCommand(t, ts, "Sync", syncReq("0", ""))
+	postCommand(t, ts, "Sync", syncReq("1", ""))
+
+	change := wbxml.Elem(wbxml.ASChange, wbxml.Str(wbxml.ASServerID, "4000000"),
+		wbxml.Elem(wbxml.ASData, wbxml.Str(wbxml.EMRead, "1")))
+	del := wbxml.Elem(wbxml.ASDelete, wbxml.Str(wbxml.ASServerID, "../13"))
+	_, root := postCommand(t, ts, "Sync", syncReq("2", "", change, del))
+
+	resp := respColl(t, root).Child(wbxml.ASResponses)
+	if resp == nil {
+		t.Fatal("no Responses for a failed Change and Delete")
+	}
+	want := map[wbxml.Tag]string{wbxml.ASChange: "4000000", wbxml.ASDelete: "../13"}
+	for _, r := range resp.Children {
+		if want[r.Tag] == r.ChildText(wbxml.ASServerID) && r.ChildText(wbxml.ASStatus) == "8" {
+			delete(want, r.Tag)
+		}
+	}
+	if len(want) != 0 {
+		t.Errorf("commands without a Status 8 response: %v", want)
+	}
+
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	flags, err := st.MessageFlags(int64(mapi.PrivateFIDInbox), firstUID(t, dir))
+	if err != nil || flags&objectstore.FlagSeen != 0 {
+		t.Errorf("the real message changed: flags %d, err %v", flags, err)
+	}
+}
+
 // TestSyncWindow confirms WindowSize caps a batch and MoreAvailable drives the
 // client to fetch the remainder, with the snapshot advancing only for sent items.
 func TestSyncWindow(t *testing.T) {
