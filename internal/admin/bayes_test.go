@@ -276,6 +276,25 @@ func TestSaveMessageSizeZeroDisables(t *testing.T) {
 	}
 }
 
+// TestSaveMessageSizeRefusesAnOverflow enters a megabyte count whose byte value
+// does not fit in 64 bits (2^44 MB is 2^64 bytes, which wraps to exactly 0, the
+// "no limit" value): the save is refused and nothing is persisted.
+func TestSaveMessageSizeRefusesAnOverflow(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/antispam/message-size", session, csrf, url.Values{"max_mb": {"17592186044416"}})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if d.messageSizeFound {
+		t.Errorf("an overflowing limit was persisted as %d bytes", d.messageSize.MaxInboundBytes)
+	}
+	if !strings.Contains(string(body), "too large") {
+		t.Errorf("the panel does not name the refusal: %s", body)
+	}
+}
+
 // TestSaveRelaySettings proves the relay form persists the backoff and attempt limit
 // and acknowledges the save, the values the MTA then polls to apply without a restart.
 func TestSaveRelaySettings(t *testing.T) {

@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"math"
 	"net/http"
 
 	"hermex/internal/directory"
@@ -357,12 +358,18 @@ func readSizeLimitMB(r *http.Request) (map[string]int, bool) {
 	mb := make(map[string]int, len(sizeLimitFields))
 	for _, name := range sizeLimitFields {
 		v := formInt(r, name)
-		if v < 1 {
+		if v < 1 || !fitsInBytes(int64(v), 20) {
 			return nil, false
 		}
 		mb[name] = v
 	}
 	return mb, true
+}
+
+// fitsInBytes reports whether n units of 2^shift bytes fit in an int64. A size
+// entered past that wraps when scaled, to zero or a negative byte count.
+func fitsInBytes(n int64, shift uint) bool {
+	return n <= math.MaxInt64>>shift
 }
 
 // megabytes converts a limit entered in whole MB to the bytes it is stored as.

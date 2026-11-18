@@ -351,6 +351,12 @@ func (s *Server) handleUISaveMessageSize(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	mb := formInt(r, "max_mb") // megabytes; 0 disables the limit, negatives clamp to 0
+	// A count whose byte value overflows int64 would wrap, 2^44 to exactly 0, and
+	// silently turn the limit off.
+	if !fitsInBytes(int64(mb), 20) {
+		s.render(w, r, "message-size-panel", s.antispamPageData(r, errorNotice("antispam.sizeInvalid")))
+		return
+	}
 	if err := s.dir.SetMessageSizeSettings(directory.MessageSizeSettings{MaxInboundBytes: int64(mb) * 1024 * 1024}); err != nil {
 		s.render(w, r, "message-size-panel", s.antispamPageData(r, s.failNotice("antispam.sizeFailed", err)))
 		return

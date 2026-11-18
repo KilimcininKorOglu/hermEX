@@ -146,6 +146,7 @@
     "ratelimitFailed": "Hız sınırı ayarları kaydedilemedi.",
     "ratelimitSaved": "Hız sınırı ayarları kaydedildi. MTA bunları yeniden başlatma olmadan bir dakika içinde uygular.",
     "sizeFailed": "İleti boyutu sınırı kaydedilemedi.",
+    "sizeInvalid": "İleti boyutu sınırı çok büyük. Ayarlar kaydedilmedi.",
     "sizeSaved": "İleti boyutu sınırı kaydedildi. MTA bunu yeniden başlatma olmadan bir dakika içinde uygular.",
     "outboundInvalid": "Alıcı sınırı ve süre penceresi en az 1 olmalı. Ayarlar kaydedilmedi.",
     "outboundFailed": "Giden posta ayarları kaydedilemedi.",

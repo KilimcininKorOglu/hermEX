@@ -67,6 +67,25 @@ func TestSaveLimits(t *testing.T) {
 	wantEq(t, d.sizeLimits.EWSSubscriptionTimeoutMinutes, int64(720), "EWS subscription timeout minutes")
 }
 
+// TestSaveLimitsRejectsAnOverflowingSize enters a request cap of 2^44 MB, whose byte
+// value (2^64) does not fit in 64 bits and would wrap to 0: the save is refused
+// and nothing persists, where the wrapped cap would refuse every request body.
+func TestSaveLimitsRejectsAnOverflowingSize(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/limits", session, csrf, url.Values{
+		"imap_literal_mb": {"10"}, "ews_request_mb": {"17592186044416"}, "activesync_request_mb": {"2"},
+		"dav_ical_mb": {"3"}, "dav_vcard_mb": {"5"}, "webmail_request_mb": {"20"},
+		"mapi_request_mb": {"16"}, "freebusy_max_targets": {"25"}, "webmail_preview_mb": {"6"}, "tlsrpt_mb": {"7"},
+		"imap_line_bytes": {"32768"}, "pop3_line_bytes": {"4096"}, "smtp_line_bytes": {"1024"},
+		"ews_subscription_timeout_min": {"720"},
+	})
+	wantBody(t, resp, http.StatusOK, "save limits with an overflowing size")
+	wantFalse(t, d.sizeLimitsFound, "nothing is persisted")
+}
+
 // TestSaveLimitsRejectsATinyCommandLine proves a cap no command fits in is rejected
 // and nothing persists, because such a daemon would refuse every client.
 func TestSaveLimitsRejectsATinyCommandLine(t *testing.T) {
