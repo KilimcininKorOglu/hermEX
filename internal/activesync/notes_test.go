@@ -115,6 +115,51 @@ func TestSyncNotesClientAdd(t *testing.T) {
 	}
 }
 
+// TestSyncNotesRefusesAnObjectOfAnotherFolder proves a Change or Delete in the
+// Notes collection whose ServerId names an object of another folder (here a
+// Calendar item) is refused with Status 8, [MS-ASCMD] Sync "object not found in
+// the collection", and leaves that object as it was: a ServerId is scoped to the
+// collection it is sent in.
+func TestSyncNotesRefusesAnObjectOfAnotherFolder(t *testing.T) {
+	ts, dir := seededServer(t)
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := st.CreateMessage(int64(mapi.PrivateFIDCalendar), &oxcmail.Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: "IPM.Appointment"},
+		{Tag: mapi.PrSubject, Value: "Dentist"},
+	}})
+	st.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid := strconv.FormatInt(foreign, 10)
+	postCommand(t, ts, "Sync", ntReq("0"))
+	change := wbxml.Elem(wbxml.ASChange, wbxml.Str(wbxml.ASServerID, sid),
+		wbxml.Elem(wbxml.ASData, wbxml.Str(wbxml.NTSubject, "Overwritten")))
+	_, root := postCommand(t, ts, "Sync", ntReq("1", change))
+	if got := respColl(t, root).Child(wbxml.ASResponses).Child(wbxml.ASChange).ChildText(wbxml.ASStatus); got != "8" {
+		t.Errorf("Change Status = %q, want 8", got)
+	}
+	key := respColl(t, root).ChildText(wbxml.ASSyncKey)
+	del := wbxml.Elem(wbxml.ASDelete, wbxml.Str(wbxml.ASServerID, sid))
+	postCommand(t, ts, "Sync", ntReq(key, del))
+
+	st, err = objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	msg, err := st.OpenMessage(foreign)
+	if err != nil {
+		t.Fatalf("the Calendar item is gone after a Notes Delete: %v", err)
+	}
+	if got := contactStr(msg.Props, mapi.PrSubject); got != "Dentist" {
+		t.Errorf("Calendar item Subject = %q, want Dentist", got)
+	}
+}
+
 // TestFolderSyncAdvertisesNotes confirms FolderSync exposes the Notes collection with
 // EAS folder type 10.
 func TestFolderSyncAdvertisesNotes(t *testing.T) {
