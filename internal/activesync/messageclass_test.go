@@ -3,6 +3,7 @@ package activesync
 import (
 	"bytes"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,6 +57,13 @@ func TestMessageClassFor(t *testing.T) {
 		{"pkcs7-mime is SMIME", "", encryptedFixture, messageClassSMIME},
 		{"a plain note keeps IPM.Note", "", convMsgRoot, messageClassNote},
 		{"a stored IPM.Note is still refined", messageClassNote, signedFixture, messageClassSMIMEMultipart},
+		// RFC 2045 5.1: type and subtype names are case-insensitive, so a sender's
+		// spelling cannot hide the class.
+		{"media type in upper case", "", strings.Replace(signedFixture, "multipart/signed", "Multipart/SIGNED", 1), messageClassSMIMEMultipart},
+		// RFC 8551 3.2.1: receiving agents must accept the legacy x-pkcs7-mime name.
+		{"legacy x-pkcs7-mime", "", strings.Replace(encryptedFixture, "application/pkcs7-mime", "application/x-pkcs7-mime", 1), messageClassSMIME},
+		// A body that merely mentions the media type is not S/MIME.
+		{"media type only in the body", "", convMsgRoot + "Content-Type: multipart/signed\r\n", messageClassNote},
 		// The load-bearing case: a delivered invitation must reach the device as the
 		// scheduling class, or the device shows it as ordinary mail and never offers
 		// Accept / Tentative / Decline.
