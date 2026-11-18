@@ -14,6 +14,9 @@ const (
 	moveStatusInvalidDest   = "2"
 	moveStatusSuccess       = "3"
 	moveStatusSameSrcDest   = "4"
+	// moveStatusFailed is MS-ASCMD's "the source or destination item was locked",
+	// the status for a move the server could not carry out.
+	moveStatusFailed = "5"
 )
 
 // handleMoveItems answers the MS-ASCMD MoveItems command, moving each message from
@@ -66,6 +69,14 @@ func moveOne(st *objectstore.Store, mv *wbxml.Node) *wbxml.Node {
 	}
 	if srcFolderID == dstFolderID {
 		return response(moveStatusSameSrcDest, srcMsg)
+	}
+	exists, err := st.FolderExists(dstFolderID)
+	if err != nil {
+		st.LogSwallowedError("activesync.move-destination", err)
+		return response(moveStatusFailed, srcMsg)
+	}
+	if !exists {
+		return response(moveStatusInvalidDest, srcMsg)
 	}
 	info, err := st.MoveMessage(srcFolderID, uint32(uid64), dstFolderID)
 	if err != nil {

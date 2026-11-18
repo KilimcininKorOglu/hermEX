@@ -63,6 +63,34 @@ func TestMoveItemsSameFolder(t *testing.T) {
 	}
 }
 
+// TestMoveItemsRefusesABadTarget proves the refusals [MS-ASCMD] MoveItems names
+// leave the message where it was: a destination that does not exist or is not a
+// folder id is Status 2, and a source folder id that is not a number is Status 1.
+func TestMoveItemsRefusesABadTarget(t *testing.T) {
+	ts, dir := seededServer(t)
+	seedInbox(t, dir, 1)
+	sid := firstInboxServerID(t, ts)
+	for _, tc := range []struct{ name, src, dst, want string }{
+		{"no such destination", inboxID(), "9999999", "2"},
+		{"destination not a number", inboxID(), "../13", "2"},
+		{"source folder not a number", "inbox", deletedID(), "1"},
+	} {
+		_, root := postCommand(t, ts, "MoveItems", moveReq(sid, tc.src, tc.dst))
+		if s := root.Child(wbxml.MOResponse).ChildText(wbxml.MOStatus); s != tc.want {
+			t.Errorf("%s: Status = %q, want %s", tc.name, s, tc.want)
+		}
+	}
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	uid, _ := strconv.ParseUint(sid, 10, 32)
+	if _, err := st.MessageByUID(int64(mapi.PrivateFIDInbox), uint32(uid)); err != nil {
+		t.Errorf("a refused move took the message out of the Inbox: %v", err)
+	}
+}
+
 // TestMoveItemsInvalidSource confirms a move of an unknown message reports an
 // invalid-source status.
 func TestMoveItemsInvalidSource(t *testing.T) {
