@@ -70,6 +70,7 @@ func (d *SQLDirectory) EnsureSchema() error {
 		return fmt.Errorf("directory: apply schema: %w", err)
 	}
 	d.wrapLDAPBindPasswords()
+	d.syncHideMasks()
 	return nil
 }
 
@@ -1367,13 +1368,36 @@ func (d *SQLDirectory) SetUserProperties(username string, props map[uint32]strin
 		return false, err
 	}
 	defer tx.Rollback()
+	hide := touchesHideMask(props)
+	if hide {
+		// Lock the user row before the property rows, the order syncHideMasks
+		// takes too, so the two cannot deadlock or interleave.
+		if _, err := tx.Exec(`SELECT id FROM users WHERE id = ? FOR UPDATE`, id); err != nil {
+			return false, err
+		}
+	}
+	if err := writeUserProperties(tx, id, props); err != nil {
+		return false, err
+	}
+	// The hide mask's numeric copy changes in the same transaction as the
+	// property, so a GAL query never sees one without the other.
+	if hide {
+		if err := syncHideMask(tx, id); err != nil {
+			return false, err
+		}
+	}
+	return true, tx.Commit()
+}
+
+// writeUserProperties upserts each non-empty property and deletes each empty one.
+func writeUserProperties(tx *sql.Tx, id int64, props map[uint32]string) error {
 	for tag, val := range props {
 		val = strings.TrimSpace(val)
 		if val == "" {
 			if _, err := tx.Exec(
 				`DELETE FROM user_properties WHERE user_id = ? AND proptag = ? AND order_id = 1`,
 				id, tag); err != nil {
-				return false, err
+				return err
 			}
 			continue
 		}
@@ -1381,10 +1405,10 @@ func (d *SQLDirectory) SetUserProperties(username string, props map[uint32]strin
 			`INSERT INTO user_properties (user_id, proptag, order_id, propval_str, propval_bin) VALUES (?, ?, 1, ?, NULL)
 			 ON DUPLICATE KEY UPDATE propval_str = VALUES(propval_str), propval_bin = NULL`,
 			id, tag, val); err != nil {
-			return false, err
+			return err
 		}
 	}
-	return true, tx.Commit()
+	return nil
 }
 
 // CreateAlias maps an alternate address (aliasname) to a canonical user
