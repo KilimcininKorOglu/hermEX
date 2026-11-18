@@ -100,38 +100,25 @@ func (s *Server) fileSentCopy(sess *session, r *http.Request, cm composeMail) {
 var errUnauthorizedFrom = errors.New("message From not authorized for caller")
 
 // authorizedFrom reports whether the authenticated caller may put the message's
-// From header on the wire. An absent or unparseable From is allowed: there is no
-// identity to forge and delivery keeps the caller as sender. Any address is decided
-// by internal/sendas, shared with the other three surfaces that accept a
+// From header on the wire. A message with no From field is allowed: it claims no
+// identity and delivery keeps the caller as sender. A From that does not resolve
+// to exactly one address is refused, because a list, a second field or text the
+// parser cannot read can name an address this gate never checks. The one address
+// is decided by internal/sendas, shared with the other surfaces that accept a
 // client-chosen From, because a gate that drifts between them is a forgery waiting
 // on whichever one drifted.
 //
 // The device composed the MIME itself, so the Sender header is already whatever it
 // wrote: this decides the permission, not the headers.
 func (s *Server) authorizedFrom(caller string, mime []byte) bool {
-	from, ok := parseFromAddress(mime)
-	if !ok {
+	from, claim := sendas.HeaderFrom(mime)
+	switch claim {
+	case sendas.FromAbsent:
 		return true
+	case sendas.FromOne:
+		return sendas.Allows(s.accounts, caller, from)
 	}
-	return sendas.Allows(s.accounts, caller, from)
-}
-
-// parseFromAddress extracts the bare address from a message's From header, or
-// reports ok=false when there is no parseable From.
-func parseFromAddress(mime []byte) (addr string, ok bool) {
-	msg, err := mail.ReadMessage(bytes.NewReader(mime))
-	if err != nil {
-		return "", false
-	}
-	h := msg.Header.Get("From")
-	if h == "" {
-		return "", false
-	}
-	a, err := mail.ParseAddress(h)
-	if err != nil {
-		return "", false
-	}
-	return a.Address, true
+	return false
 }
 
 // composeMail is a decoded ComposeMail request: the message MIME, whether to save
