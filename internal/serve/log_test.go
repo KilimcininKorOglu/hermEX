@@ -3,6 +3,7 @@ package serve
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -116,6 +117,35 @@ func TestRequestIDIsReturnedToTheClient(t *testing.T) {
 	// log line carries, or quoting it finds nothing.
 	if e.RequestID != got {
 		t.Errorf("logged id %q does not match the returned id %q", e.RequestID, got)
+	}
+}
+
+// TestHostileRequestIDAndUserAreBounded sends values a client controls: an
+// X-Request-Id that is oversized or carries a line break is replaced by a minted
+// id in both the response and the log, and a Basic user of megabyte size with
+// control characters is logged cut to an address's 320 octets (RFC 5321
+// 4.5.3.1) with the control characters removed.
+func TestHostileRequestIDAndUserAreBounded(t *testing.T) {
+	for _, id := range []string{strings.Repeat("a", 100000), "ok\r\nX-Injected: 1", "id with spaces"} {
+		sink := &recordSink{}
+		req := httptest.NewRequest(http.MethodGet, "/ews/Exchange.asmx", nil)
+		req.Header["X-Request-Id"] = []string{id}
+		req.SetBasicAuth(strings.Repeat("u", 1<<20)+"\r\nforged", "x")
+		rec := httptest.NewRecorder()
+		logMiddleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
+			logging.New(sink), logging.EWS).ServeHTTP(rec, req)
+
+		got := rec.Header().Get("X-Request-Id")
+		if got == id || len(got) > 64 || got == "" {
+			t.Errorf("returned id %.40q for a hostile one, want a minted id", got)
+		}
+		e, _ := sink.last()
+		if e.RequestID != got {
+			t.Errorf("logged id %.40q differs from the returned %q", e.RequestID, got)
+		}
+		if len(e.User) > 320 || strings.ContainsAny(e.User, "\r\n") {
+			t.Errorf("logged user is %d bytes or carries a line break", len(e.User))
+		}
 	}
 }
 

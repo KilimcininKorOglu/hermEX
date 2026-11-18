@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"hermex/internal/logging"
 )
@@ -68,7 +69,7 @@ func logMiddleware(h http.Handler, logger *logging.Logger, subsystem logging.Sub
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		rid := r.Header.Get("X-Request-Id")
-		if rid == "" {
+		if !validRequestID(rid) {
 			rid = newRequestID()
 		}
 		// Return the id to the client. It is what a user quoting an error gives
@@ -91,7 +92,7 @@ func logMiddleware(h http.Handler, logger *logging.Logger, subsystem logging.Sub
 			Level:      levelForStatus(rec.status),
 			Subsystem:  subsystem,
 			Name:       "http.request",
-			User:       user,
+			User:       logUser(user),
 			RemoteAddr: ClientAddr(r),
 			RequestID:  rid,
 			DurationMs: time.Since(start).Milliseconds(),
@@ -159,6 +160,42 @@ func ClientAddr(r *http.Request) string {
 // newRequestID mints a short random hex id for correlating an access-log line with
 // the rest of a request's events. Identifiers are best effort: a (vanishingly
 // unlikely) RNG failure yields an empty id rather than failing the request.
+// maxRequestIDLen bounds an inbound X-Request-Id, and maxLogUserLen the logged
+// account (an address is at most 320 octets, RFC 5321 4.5.3.1).
+const (
+	maxRequestIDLen = 64
+	maxLogUserLen   = 320
+)
+
+// validRequestID reports whether a client's X-Request-Id may be kept: 1 to 64
+// letters, digits, '-', '_' or '.'. The header is echoed in the response and
+// stored in every log line, so anything else is replaced by a minted id.
+func validRequestID(id string) bool {
+	if id == "" || len(id) > maxRequestIDLen {
+		return false
+	}
+	return strings.Trim(id, requestIDChars) == ""
+}
+
+// requestIDChars is the alphabet an inbound X-Request-Id may use.
+const requestIDChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."
+
+// logUser bounds the account name a log line carries. A Basic user or a failed
+// login is the client's claim, so it is cut to an address's length and stripped
+// of control characters before it is stored.
+func logUser(u string) string {
+	u = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, u)
+	if len(u) > maxLogUserLen {
+		u = strings.ToValidUTF8(u[:maxLogUserLen], "")
+	}
+	return u
+}
+
 func newRequestID() string {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
