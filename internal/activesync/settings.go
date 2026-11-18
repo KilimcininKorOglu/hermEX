@@ -94,10 +94,41 @@ func oofSubRequest(st *objectstore.Store, sub *wbxml.Node) (get, set *wbxml.Node
 	if node == nil {
 		return nil, nil, nil
 	}
+	if status := oofSetStatus(node); status != "1" {
+		return nil, wbxml.Elem(wbxml.STOof, wbxml.Str(wbxml.STStatus, status)), nil
+	}
 	if err := applyOofSet(st, node); err != nil {
 		return nil, nil, err
 	}
 	return nil, wbxml.Elem(wbxml.STOof, wbxml.Str(wbxml.STStatus, "1")), nil
+}
+
+// oofSetStatus checks an Oof Set before anything is stored, answering its Status
+// ([MS-ASCMD] 2.2.3.177.15): 2 when only one of StartTime and EndTime is sent
+// (2.2.3.176.2, 2.2.3.61.2), 5 for an OofState outside 0-2 (2.2.3.124), a time
+// that does not parse or a time-based state without its window, and 6 for a
+// window that ends before it starts.
+func oofSetStatus(set *wbxml.Node) string {
+	startText, endText := set.ChildText(wbxml.STStartTime), set.ChildText(wbxml.STEndTime)
+	if (startText == "") != (endText == "") {
+		return "2"
+	}
+	state := set.ChildText(wbxml.STOofState)
+	switch state {
+	case "", oofDisabled, oofGlobal:
+		return "1"
+	case oofTimeBased:
+	default:
+		return "5"
+	}
+	start, end := parseEASTime(startText), parseEASTime(endText)
+	if start == 0 || end == 0 {
+		return "5"
+	}
+	if end <= start {
+		return "6"
+	}
+	return "1"
 }
 
 // oofGetResponse reads the mailbox OOF settings and renders the Oof Get response.

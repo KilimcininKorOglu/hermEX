@@ -103,6 +103,39 @@ func TestSettingsOofTimeBased(t *testing.T) {
 	}
 }
 
+// TestSettingsOofRefusesABrokenWindow sends Oof Sets the [MS-ASCMD] rules refuse:
+// one of StartTime/EndTime alone is Status 2 (2.2.3.176.2), an OofState outside 0-2
+// (2.2.3.124), an unparseable time or a time-based state with no window is 5, and
+// a window ending before it starts is 6. None may change the stored OOF, which is
+// left off: a refused time-based Set must not leave a reply on with no end.
+func TestSettingsOofRefusesABrokenWindow(t *testing.T) {
+	ts, dir := seededServer(t)
+	start, end := "2026-06-19T00:00:00.000Z", "2026-06-26T00:00:00.000Z"
+	cases := []struct {
+		name, status string
+		fields       []*wbxml.Node
+	}{
+		{"start only", "2", []*wbxml.Node{wbxml.Str(wbxml.STOofState, "2"), wbxml.Str(wbxml.STStartTime, start)}},
+		{"end only", "2", []*wbxml.Node{wbxml.Str(wbxml.STOofState, "2"), wbxml.Str(wbxml.STEndTime, end)}},
+		{"unknown state", "5", []*wbxml.Node{wbxml.Str(wbxml.STOofState, "7")}},
+		{"time-based without a window", "5", []*wbxml.Node{wbxml.Str(wbxml.STOofState, "2")}},
+		{"unparseable time", "5", []*wbxml.Node{wbxml.Str(wbxml.STOofState, "2"),
+			wbxml.Str(wbxml.STStartTime, "tomorrow"), wbxml.Str(wbxml.STEndTime, end)}},
+		{"ends before it starts", "6", []*wbxml.Node{wbxml.Str(wbxml.STOofState, "2"),
+			wbxml.Str(wbxml.STStartTime, end), wbxml.Str(wbxml.STEndTime, start)}},
+	}
+	for _, c := range cases {
+		fields := append(c.fields, oofMessageNode(wbxml.STAppliesToInternal, "1", "away"))
+		_, root := postCommand(t, ts, "Settings", settingsReq(wbxml.Elem(wbxml.STOof, wbxml.Elem(wbxml.STSet, fields...))))
+		if got := root.Child(wbxml.STOof).ChildText(wbxml.STStatus); got != c.status {
+			t.Errorf("%s: Oof Status = %q, want %s", c.name, got, c.status)
+		}
+	}
+	if cfg := storedOOF(t, dir); cfg.Enabled || cfg.InternalReply != "" {
+		t.Errorf("a refused Set changed the stored OOF: %+v", cfg)
+	}
+}
+
 // TestSettingsOofExternalAudience confirms the external audience round-trips
 // through EAS's two external buckets: a Known-only Set (only ExternalKnown
 // enabled) enables just the ExternalKnown bucket on Get, while an All Set
