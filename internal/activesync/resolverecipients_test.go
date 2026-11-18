@@ -95,8 +95,9 @@ func TestResolveRecipientsMultipleQueries(t *testing.T) {
 }
 
 // TestResolveRecipientsAmbiguous proves a single query matching two GAL users
-// returns both recipients with RecipientCount 2, the multi-recipient path a
-// single match would not exercise.
+// returns both recipients with RecipientCount 2 and Status 2, which MS-ASCMD
+// 2.2.3.177.12 defines as an ambiguous recipient whose list is suggestions for
+// the user to pick from.
 func TestResolveRecipientsAmbiguous(t *testing.T) {
 	ts := galServer(t)
 
@@ -104,6 +105,9 @@ func TestResolveRecipientsAmbiguous(t *testing.T) {
 	resp := responseFor(root, "al")
 	if resp == nil {
 		t.Fatal("no Response for the ambiguous query")
+	}
+	if s := resp.ChildText(wbxml.RRStatus); s != "2" {
+		t.Errorf("response Status = %q, want 2 (ambiguous)", s)
 	}
 	if c := resp.ChildText(wbxml.RRRecipientCount); c != "2" {
 		t.Errorf("RecipientCount = %q, want 2", c)

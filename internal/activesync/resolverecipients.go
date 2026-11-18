@@ -22,7 +22,8 @@ const (
 	rrStatusOK            = 1 // the command succeeded
 	rrStatusProtocolError = 5 // an invalid parameter, or a range over its limit
 	rrStatusServerError   = 6 // the server could not resolve the recipients
-	rrResolved            = 1 // one or more recipients matched the query
+	rrResolved            = 1 // exactly one recipient matched the query
+	rrAmbiguous           = 2 // several matched; the list is every suggestion
 	rrUnresolved          = 4 // no recipient matched the query
 
 	rrPictureOK       = 1   // a portrait is returned
@@ -159,8 +160,12 @@ func resolveOneRecipient(gal directory.GAL, to string, opt pictureOpts, win avai
 			wbxml.Str(wbxml.RRRecipientCount, "0"))...), nil
 	}
 
+	status := rrResolved
+	if len(matches) > 1 {
+		status = rrAmbiguous
+	}
 	resp = append(resp,
-		wbxml.Str(wbxml.RRStatus, strconv.Itoa(rrResolved)),
+		wbxml.Str(wbxml.RRStatus, strconv.Itoa(status)),
 		wbxml.Str(wbxml.RRRecipientCount, strconv.Itoa(len(matches))))
 	for _, m := range matches {
 		resp = append(resp, recipientNode(m, opt, win, sess, pictures, fail))
