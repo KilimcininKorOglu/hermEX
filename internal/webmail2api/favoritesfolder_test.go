@@ -129,12 +129,19 @@ func TestLegacyFavoritesBecomeIDs(t *testing.T) {
 }
 
 // TestRenamingABuiltinFolderIsRefused closes the same hole the delete path had:
-// the rename resolved by display name too, and the store's own guard is the
-// backstop rather than the answer the caller should see.
+// the rename resolved by display name too. The display name, the slug and the
+// Inbox's id slug must all be refused, and the Inbox keeps its name.
 func TestRenamingABuiltinFolderIsRefused(t *testing.T) {
-	do, _ := folderHarness(t)
-	rec := do(http.MethodPut, "/api/v1/folders/Inbox", `{"name":"Posteingang"}`)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("rename Inbox = %d, want 403: %s", rec.Code, rec.Body.String())
+	do, dir := folderHarness(t)
+	for _, ref := range []string{"Inbox", "inbox", "f13"} {
+		if rec := do(http.MethodPut, "/api/v1/folders/"+ref, `{"name":"Posteingang"}`); rec.Code == http.StatusOK {
+			t.Errorf("rename %s = 200, want a refusal", ref)
+		}
 	}
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open the store", err)
+	defer st.Close()
+	props, err := st.GetFolderProperties(int64(mapi.PrivateFIDInbox), mapi.PrDisplayName)
+	mustNoErr(t, "read the Inbox name", err)
+	wantEq(t, "the Inbox name", propStr(props, mapi.PrDisplayName), "Inbox")
 }

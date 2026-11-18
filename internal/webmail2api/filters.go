@@ -553,11 +553,16 @@ func rejectReason(a filterActionJSON) string {
 	return "Message refused by a recipient rule"
 }
 
-// resolveFilterFolder resolves a filter target (a folder slug or display name) to
-// a folder id.
+// resolveFilterFolder resolves a filter target to a folder id: its slug, else,
+// for a target stored by display name before folders had ids and not yet
+// converted (slugFilterTargets runs when the filters are next read), the folder
+// that name reached then.
 func resolveFilterFolder(st *objectstore.Store, target string) (int64, bool) {
 	if fid, ok := folderFID(strings.ToLower(target)); ok {
 		return fid, true
 	}
-	return userFolderByRef(st, target)
+	if fid, ok := userFolderByRef(st, target); ok {
+		return fid, true
+	}
+	return legacyFolder(st, target)
 }

@@ -68,15 +68,33 @@ func parentOf(t *testing.T, mbox, name string) int64 {
 	return 0
 }
 
-// TestDeleteBuiltinFolderIsRefused is the data-loss guard. Every built-in folder
-// is listed by display name, so "Inbox" resolved like any other folder and the
-// delete took the folder AND every message in it.
+// makeFolder creates a top-level folder and returns the slug the create answered.
+func makeFolder(t *testing.T, do func(string, string, string) *httptest.ResponseRecorder, name string) string {
+	t.Helper()
+	rec := do(http.MethodPost, "/api/v1/folders", `{"name":"`+name+`"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create %s = %d: %s", name, rec.Code, rec.Body.String())
+	}
+	var out struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	return out.ID
+}
+
+// TestDeleteBuiltinFolderIsRefused is the data-loss guard: "Inbox" once resolved
+// by display name like any other folder and the delete took the folder AND every
+// message in it. The display name, the slug and the Inbox's id slug must all be
+// refused.
 func TestDeleteBuiltinFolderIsRefused(t *testing.T) {
 	do, dir := folderHarness(t)
 
-	rec := do(http.MethodDelete, "/api/v1/folders/Inbox", "")
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("delete Inbox = %d, want 403: %s", rec.Code, rec.Body.String())
+	for _, ref := range []string{"Inbox", "inbox", "f13"} {
+		if rec := do(http.MethodDelete, "/api/v1/folders/"+ref, ""); rec.Code == http.StatusOK {
+			t.Errorf("delete %s = 200, want a refusal", ref)
+		}
 	}
 	st, err := objectstore.Open(dir)
 	if err != nil {
@@ -94,15 +112,12 @@ func TestDeleteBuiltinFolderIsRefused(t *testing.T) {
 // rename onto it all answer 409 Conflict, and the folders keep their names.
 func TestFolderNamesStayUniqueAmongSiblings(t *testing.T) {
 	do, dir := folderHarness(t)
-	for _, name := range []string{"Project X", "Project Y"} {
-		if rec := do(http.MethodPost, "/api/v1/folders", `{"name":"`+name+`"}`); rec.Code != http.StatusOK {
-			t.Fatalf("create %s = %d: %s", name, rec.Code, rec.Body.String())
-		}
-	}
+	makeFolder(t, do, "Project X")
+	y := makeFolder(t, do, "Project Y")
 	for _, c := range []struct{ method, path, body string }{
 		{http.MethodPost, "/api/v1/folders", `{"name":"Project X"}`},
 		{http.MethodPost, "/api/v1/calendar/calendars", `{"name":"Project X"}`},
-		{http.MethodPut, "/api/v1/folders/Project%20Y", `{"name":"Project X"}`},
+		{http.MethodPut, "/api/v1/folders/" + y, `{"name":"Project X"}`},
 	} {
 		if rec := do(c.method, c.path, c.body); rec.Code != http.StatusConflict {
 			t.Errorf("%s %s %s = %d, want 409: %s", c.method, c.path, c.body, rec.Code, rec.Body.String())
@@ -123,10 +138,8 @@ func TestFolderNamesStayUniqueAmongSiblings(t *testing.T) {
 func TestDeleteFolderTwiceOfOneName(t *testing.T) {
 	do, dir := folderHarness(t)
 	for round := range 2 {
-		if rec := do(http.MethodPost, "/api/v1/folders", `{"name":"Project X"}`); rec.Code != http.StatusOK {
-			t.Fatalf("round %d create = %d: %s", round, rec.Code, rec.Body.String())
-		}
-		if rec := do(http.MethodDelete, "/api/v1/folders/Project%20X", ""); rec.Code != http.StatusOK {
+		x := makeFolder(t, do, "Project X")
+		if rec := do(http.MethodDelete, "/api/v1/folders/"+x, ""); rec.Code != http.StatusOK {
 			t.Fatalf("round %d delete = %d: %s", round, rec.Code, rec.Body.String())
 		}
 	}
@@ -149,11 +162,9 @@ func TestDeleteFolderTwiceOfOneName(t *testing.T) {
 // delete moves the folder under Deleted Items, so the user can still get it back.
 func TestDeleteFolderMovesItToTrashFirst(t *testing.T) {
 	do, dir := folderHarness(t)
-	if rec := do(http.MethodPost, "/api/v1/folders", `{"name":"Project X"}`); rec.Code != http.StatusOK {
-		t.Fatalf("create = %d: %s", rec.Code, rec.Body.String())
-	}
+	x := makeFolder(t, do, "Project X")
 
-	rec := do(http.MethodDelete, "/api/v1/folders/Project%20X", "")
+	rec := do(http.MethodDelete, "/api/v1/folders/"+x, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("first delete = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -175,14 +186,12 @@ func TestDeleteFolderMovesItToTrashFirst(t *testing.T) {
 // could not reach: a folder already in Deleted Items must go, not move again.
 func TestDeleteFolderFromTrashRemovesIt(t *testing.T) {
 	do, dir := folderHarness(t)
-	if rec := do(http.MethodPost, "/api/v1/folders", `{"name":"Project X"}`); rec.Code != http.StatusOK {
-		t.Fatalf("create = %d", rec.Code)
-	}
-	if rec := do(http.MethodDelete, "/api/v1/folders/Project%20X", ""); rec.Code != http.StatusOK {
+	x := makeFolder(t, do, "Project X")
+	if rec := do(http.MethodDelete, "/api/v1/folders/"+x, ""); rec.Code != http.StatusOK {
 		t.Fatalf("first delete = %d", rec.Code)
 	}
 
-	rec := do(http.MethodDelete, "/api/v1/folders/Project%20X", "")
+	rec := do(http.MethodDelete, "/api/v1/folders/"+x, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("second delete = %d: %s", rec.Code, rec.Body.String())
 	}

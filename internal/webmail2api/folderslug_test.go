@@ -148,9 +148,9 @@ func TestASlugNamesOnlyAUserFolder(t *testing.T) {
 	}
 }
 
-// TestAListingAnswersWithTheSlug proves a folder listed by its legacy display
-// name answers with the folder's slug in every message id and folder field, so
-// the client holds one address per folder whatever it sent.
+// TestAListingAnswersWithTheSlug proves a user folder's display name is no
+// longer an address (two folders may share it), and a folder listed by its slug
+// answers with that slug in every message id and folder field.
 func TestAListingAnswersWithTheSlug(t *testing.T) {
 	tf := newTwinFolders(t)
 	st, err := objectstore.Open(tf.dir)
@@ -160,7 +160,8 @@ func TestAListingAnswersWithTheSlug(t *testing.T) {
 	mustNoErr(t, "append to Projects", err)
 	st.Close()
 
-	rec := tf.call(http.MethodGet, "/api/v1/mail/Projects", "")
+	wantEq(t, "messages listed by the display name", len(tf.subjects(t, "Projects")), 0)
+	rec := tf.call(http.MethodGet, "/api/v1/mail/"+customSlug(tf.projects), "")
 	var out struct {
 		Emails []struct {
 			ID     string `json:"id"`

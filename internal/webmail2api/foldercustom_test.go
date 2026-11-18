@@ -15,7 +15,7 @@ import (
 // folder is visible in that folder's list view AND can be opened by its id.
 // Both paths used to resolve the folder via the well-known-slug table only, so a
 // custom folder like "Projects" listed empty and its messages returned 404 on
-// open. resolveFolder now falls back to the folder's display name, closing that
+// open. resolveFolder now resolves a user folder by its id slug, closing that
 // gap for the list/open/action handlers alike.
 func TestCustomFolderRoundTrip(t *testing.T) {
 	dir := t.TempDir()
@@ -23,12 +23,9 @@ func TestCustomFolderRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if _, err := st.CreateFolder(nil, "Projects"); err != nil {
+	cfid, err := st.CreateFolder(nil, "Projects")
+	if err != nil {
 		t.Fatalf("create folder: %v", err)
-	}
-	cfid, ok := folderByName(st, "Projects")
-	if !ok {
-		t.Fatalf("custom folder not found after create")
 	}
 	raw := []byte("From: a@b.test\r\nSubject: filed away\r\n\r\nhi\r\n")
 	if _, err := st.AppendMessage(cfid, raw, time.Now(), 0); err != nil {
@@ -48,7 +45,7 @@ func TestCustomFolderRoundTrip(t *testing.T) {
 	}
 
 	// The list view must show the filed message (it used to return empty).
-	listRec := get("/api/v1/mail/Projects")
+	listRec := get("/api/v1/mail/" + customSlug(cfid))
 	if listRec.Code != http.StatusOK {
 		t.Fatalf("list: %d %s", listRec.Code, listRec.Body.String())
 	}

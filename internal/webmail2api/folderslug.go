@@ -82,13 +82,11 @@ func isUserFolderID(fid int64) bool {
 	return fid >= int64(mapi.PrivateFIDUnassignedStart)
 }
 
-// userFolderByRef resolves a user folder from the SPA: its slug, or, while the
-// SPA still addresses folders by name, a display name.
+// userFolderByRef resolves a user folder from the SPA by its slug only. A
+// display name is not an address: two folders under different parents may share
+// one.
 func userFolderByRef(st *objectstore.Store, ref string) (int64, bool) {
-	if fid, ok := userFolderBySlug(st, ref); ok {
-		return fid, true
-	}
-	return folderByName(st, ref)
+	return userFolderBySlug(st, ref)
 }
 
 // userFolderBySlug resolves a user-folder slug to its folder id. It resolves

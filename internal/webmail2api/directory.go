@@ -103,7 +103,7 @@ func (s *Server) handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"name": body.Name, "id": slugOf(id)})
 }
 
-// handleDeleteFolder removes a user folder by display name.
+// handleDeleteFolder removes a user folder by its slug.
 func (s *Server) handleDeleteFolder(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	st, c, ok := s.openStore(w, r)
@@ -165,7 +165,7 @@ func (s *Server) handleDeleteFolder(w http.ResponseWriter, r *http.Request) {
 // handleEmptyFolder removes every message from a folder: permanently from Deleted
 // Items and Junk (where "empty" means discard), otherwise the messages move to
 // Deleted Items. This is the old webmail's empty-folder behaviour. It resolves a
-// slug (trash/spam/...) or a custom folder by display name.
+// slug (trash/spam/...) or a user folder by its id slug.
 func (s *Server) handleEmptyFolder(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	st, _, ok := s.openStore(w, r)
@@ -280,9 +280,9 @@ func underTrash(parent map[int64]int64, fid int64) bool {
 }
 
 // resolveFolder maps a folder identifier from the SPA to a private folder id:
-// first the well-known slugs (inbox/sent/drafts/trash/spam), then a custom folder
-// by its display name. This lets custom folders round-trip through the
-// list/open/action paths the same way built-in folders do.
+// first the well-known slugs (inbox/sent/drafts/trash/spam), then a user folder
+// by its id slug. This lets user folders round-trip through the list/open/action
+// paths the same way built-in folders do.
 func resolveFolder(st *objectstore.Store, folder string) (int64, bool) {
 	if fid, ok := folderFID(folder); ok {
 		return fid, true

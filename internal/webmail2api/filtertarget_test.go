@@ -8,6 +8,27 @@ import (
 	"hermex/internal/objectstore"
 )
 
+// TestAnUnconvertedFilterTargetStillDelivers proves a filter target stored by
+// display name, which no read of the filters has converted yet, still files a
+// delivery into the folder that name reached, while a slug resolves to its own
+// folder and a name reaching nothing resolves nowhere.
+func TestAnUnconvertedFilterTargetStillDelivers(t *testing.T) {
+	st, err := objectstore.Open(t.TempDir())
+	mustNoErr(t, "open the store", err)
+	defer st.Close()
+	fid, err := st.CreateFolder(nil, "Project X")
+	mustNoErr(t, "create Project X", err)
+	for _, ref := range []string{"Project X", customSlug(fid)} {
+		got, ok := resolveFilterFolder(st, ref)
+		if !ok || got != fid {
+			t.Errorf("target %q resolved to %d, %v; want %d", ref, got, ok, fid)
+		}
+	}
+	if got, ok := resolveFilterFolder(st, "Gone"); ok {
+		t.Errorf("target Gone resolved to %d", got)
+	}
+}
+
 // TestLegacyFilterTargetsBecomeIDs proves a move or copy target stored by
 // display name, from before folders were addressed by id, is read as the slug of
 // the folder it reached; a target of another action type, a slug, and a name

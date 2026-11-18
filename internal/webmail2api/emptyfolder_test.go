@@ -17,12 +17,8 @@ func TestEmptyFolderMovesToTrashAndDumpstersJunk(t *testing.T) {
 	dir := t.TempDir()
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open mailbox", err)
-	_, err = st.CreateFolder(nil, "Project")
+	cfid, err := st.CreateFolder(nil, "Project")
 	mustNoErr(t, "create folder", err)
-	cfid, ok := folderByName(st, "Project")
-	if !ok {
-		t.Fatalf("custom folder not found after create")
-	}
 	raw := []byte("From: a@b.test\r\nSubject: x\r\n\r\nhi\r\n")
 	for _, fid := range []int64{cfid, cfid, int64(mapi.PrivateFIDJunk)} {
 		_, err = st.AppendMessage(fid, raw, time.Now(), 0)
@@ -31,7 +27,7 @@ func TestEmptyFolderMovesToTrashAndDumpstersJunk(t *testing.T) {
 	st.Close()
 
 	do := apiHarnessFor(t, dir)
-	wantStatus(t, "empty custom", do(http.MethodPost, "/api/v1/folders/Project/empty", ""), http.StatusOK)
+	wantStatus(t, "empty custom", do(http.MethodPost, "/api/v1/folders/"+customSlug(cfid)+"/empty", ""), http.StatusOK)
 	wantStatus(t, "empty spam", do(http.MethodPost, "/api/v1/folders/spam/empty", ""), http.StatusOK)
 
 	st2, err := objectstore.Open(dir)

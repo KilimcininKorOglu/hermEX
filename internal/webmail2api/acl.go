@@ -58,8 +58,8 @@ func (s *Server) aclStore(w http.ResponseWriter, r *http.Request, c sessionClaim
 	return st, true
 }
 
-// aclFolderID resolves the {mailbox} path segment (a folder slug, a calendar id
-// or a display name) to a folder id.
+// aclFolderID resolves the {mailbox} path segment (a built-in slug, a calendar
+// id or a user folder's id slug) to a folder id.
 func aclFolderID(st *objectstore.Store, name string) (int64, bool) {
 	if fid, ok := folderFID(strings.ToLower(name)); ok {
 		return fid, true
