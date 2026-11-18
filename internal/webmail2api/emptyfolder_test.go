@@ -24,9 +24,10 @@ func TestEmptyFolderMovesToTrashAndDumpstersJunk(t *testing.T) {
 		t.Fatalf("custom folder not found after create")
 	}
 	raw := []byte("From: a@b.test\r\nSubject: x\r\n\r\nhi\r\n")
-	_, _ = st.AppendMessage(cfid, raw, time.Now(), 0)
-	_, _ = st.AppendMessage(cfid, raw, time.Now(), 0)
-	_, _ = st.AppendMessage(int64(mapi.PrivateFIDJunk), raw, time.Now(), 0)
+	for _, fid := range []int64{cfid, cfid, int64(mapi.PrivateFIDJunk)} {
+		_, err = st.AppendMessage(fid, raw, time.Now(), 0)
+		mustNoErr(t, "seed a message", err)
+	}
 	st.Close()
 
 	do := apiHarnessFor(t, dir)
@@ -42,6 +43,28 @@ func TestEmptyFolderMovesToTrashAndDumpstersJunk(t *testing.T) {
 	// The emptied Junk message is in the dumpster, not purged: recoverable.
 	wantEq(t, "junk dumpster items (soft-deleted, recoverable)",
 		len(mustListDumpster(t, st2, int64(mapi.PrivateFIDJunk))), 1)
+}
+
+// TestEmptyMessagesReportsAFailure proves a store write that fails is returned,
+// not swallowed, and that the count covers only what was removed: a folder
+// reported as emptied must not still hold the messages. A closed store fails
+// every write, for the move to Deleted Items and the dumpster alike.
+func TestEmptyMessagesReportsAFailure(t *testing.T) {
+	st, err := objectstore.Open(t.TempDir())
+	mustNoErr(t, "open mailbox", err)
+	raw := []byte("From: a@b.test\r\nSubject: x\r\n\r\nhi\r\n")
+	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), raw, time.Now(), 0)
+	mustNoErr(t, "seed a message", err)
+	msgs := []objectstore.MessageInfo{info}
+	st.Close()
+
+	for _, toDumpster := range []bool{false, true} {
+		n, err := emptyMessages(st, int64(mapi.PrivateFIDInbox), msgs, toDumpster)
+		if err == nil {
+			t.Errorf("dumpster=%v: a failed write reported no error", toDumpster)
+		}
+		wantEq(t, "messages reported removed", n, 0)
+	}
 }
 
 // mustList enumerates a folder's live messages.

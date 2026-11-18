@@ -185,14 +185,33 @@ func (s *Server) handleEmptyFolder(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot read messages"})
 		return
 	}
-	for _, m := range msgs {
+	emptied, err := emptyMessages(st, fid, msgs, toDumpster)
+	if err != nil {
+		logError("empty-folder", err, logging.Fields{"folder": fid, "emptied": emptied})
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "the folder could not be emptied", "emptied": emptied})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"emptied": emptied})
+}
+
+// emptyMessages removes msgs from folder fid, into the dumpster when toDumpster is
+// set and into Deleted Items otherwise. It stops at the first failure and reports
+// how many messages it removed before it, so the caller never reports a message
+// as gone that is still in the folder.
+func emptyMessages(st *objectstore.Store, fid int64, msgs []objectstore.MessageInfo, toDumpster bool) (int, error) {
+	trash := int64(mapi.PrivateFIDDeletedItems)
+	for i, m := range msgs {
+		var err error
 		if toDumpster {
-			_ = st.SoftDeleteMessage(fid, m.UID)
+			err = st.SoftDeleteMessage(fid, m.UID)
 		} else {
-			_, _ = st.MoveMessage(fid, m.UID, trash)
+			_, err = st.MoveMessage(fid, m.UID, trash)
+		}
+		if err != nil {
+			return i, fmt.Errorf("remove uid %d: %w", m.UID, err)
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]int{"emptied": len(msgs)})
+	return len(msgs), nil
 }
 
 // folderByName resolves a user folder by its display name (case-sensitive).
