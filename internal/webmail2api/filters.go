@@ -524,5 +524,5 @@ func resolveFilterFolder(st *objectstore.Store, target string) (int64, bool) {
 	if fid, ok := folderFID(strings.ToLower(target)); ok {
 		return fid, true
 	}
-	return folderByName(st, target)
+	return userFolderByRef(st, target)
 }

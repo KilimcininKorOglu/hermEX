@@ -67,7 +67,7 @@ func aclFolderID(st *objectstore.Store, name string) (int64, bool) {
 	if fid, ok := calendarACLFolder(st, name); ok {
 		return fid, true
 	}
-	return folderByName(st, name)
+	return userFolderByRef(st, name)
 }
 
 // calendarACLFolder resolves a calendar the way the calendar page names it:

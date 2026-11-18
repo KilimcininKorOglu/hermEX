@@ -951,14 +951,51 @@ func (s *Server) handleGetMailboxes(w http.ResponseWriter, r *http.Request) {
 	// only user-created folders (id at/above the unassigned start); the built-in
 	// folders are rendered from the SPA's own fixed navigation.
 	names := []string{}
-	if folders, err := st.ListFolders(); err == nil {
+	listed := []userFolderJSON{}
+	if folders, err := userFolders(st); err == nil {
 		for _, f := range folders {
-			if f.ID >= int64(mapi.PrivateFIDUnassignedStart) {
-				names = append(names, f.DisplayName)
-			}
+			names = append(names, f.DisplayName)
+			listed = append(listed, userFolderEntry(f))
+		}
+	} else {
+		logError("list-folders", err, nil)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"mailboxes": names, "folders": listed})
+}
+
+// userFolderJSON is one user folder as the SPA addresses it: its slug, its
+// display name, and the slug of its parent when that is another user folder ("" at
+// the top), so two folders of one name can be told apart by where they sit.
+type userFolderJSON struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Parent string `json:"parent"`
+}
+
+// userFolderEntry renders one user folder for the listing.
+func userFolderEntry(f objectstore.FolderInfo) userFolderJSON {
+	out := userFolderJSON{ID: customSlug(f.ID), Name: f.DisplayName}
+	if f.ParentID != nil {
+		if fid, ok := folderSlugFor(*f.ParentID); ok {
+			out.Parent = fid
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"mailboxes": names})
+	return out
+}
+
+// folderSlugFor is the slug of a folder a listing names as a parent: a
+// built-in folder's fixed slug, a user folder's id slug, and nothing for the
+// folder-tree root.
+func folderSlugFor(fid int64) (string, bool) {
+	if isUserFolderID(fid) {
+		return customSlug(fid), true
+	}
+	for _, sf := range searchFolders() {
+		if sf.fid == fid {
+			return sf.slug, true
+		}
+	}
+	return "", false
 }
 
 func (s *Server) handleGetSharedMailboxes(w http.ResponseWriter, r *http.Request) {

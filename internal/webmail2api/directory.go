@@ -81,7 +81,7 @@ func (s *Server) handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
-	id, found := folderByName(st, current)
+	id, found := userFolderByRef(st, current)
 	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "folder not found"})
 		return
@@ -110,7 +110,7 @@ func (s *Server) handleDeleteFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
-	id, found := folderByName(st, name)
+	id, found := userFolderByRef(st, name)
 	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "folder not found"})
 		return
@@ -168,7 +168,7 @@ func (s *Server) handleEmptyFolder(w http.ResponseWriter, r *http.Request) {
 	defer st.Close()
 	fid, ok := folderFID(name)
 	if !ok {
-		id, found := folderByName(st, name)
+		id, found := userFolderByRef(st, name)
 		if !found {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "folder not found"})
 			return
@@ -280,5 +280,5 @@ func resolveFolder(st *objectstore.Store, folder string) (int64, bool) {
 	if fid, ok := folderFID(folder); ok {
 		return fid, true
 	}
-	return folderByName(st, folder)
+	return userFolderByRef(st, folder)
 }
