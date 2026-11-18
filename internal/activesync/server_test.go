@@ -301,6 +301,46 @@ func TestAutodiscover(t *testing.T) {
 	}
 }
 
+// TestParseBase64QueryRefusesATruncatedPacket cuts a valid MS-ASHTTP 2.2.1.1.1.1
+// packed query short at every field and lies about a length: each must be refused,
+// never read past its end, and the live endpoint answers 400.
+func TestParseBase64QueryRefusesATruncatedPacket(t *testing.T) {
+	ts := testServer(t)
+	full := []byte{0x0E, 0x09, 0x09, 0x04, 0x04, 'd', 'e', 'v', '1', 0x00, 0x03, 'A', 'n', 'd'}
+	cases := map[string][]byte{
+		"empty":                   {},
+		"version only":            full[:1],
+		"no device id length":     full[:4],
+		"device id cut":           full[:7],
+		"no policy key length":    full[:9],
+		"no device type length":   full[:10],
+		"device type cut":         full[:12],
+		"device id length lies":   {0x0E, 0x09, 0x09, 0x04, 0xff, 'd', 'e', 'v'},
+		"device type length lies": {0x0E, 0x09, 0x09, 0x04, 0x01, 'd', 0x00, 0xff, 'A'},
+	}
+	for name, b := range cases {
+		enc := base64.StdEncoding.EncodeToString(b)
+		if _, err := parseBase64Query(enc); err == nil {
+			t.Errorf("%s: parsed, want a refusal", name)
+		}
+		if resp, _ := do(t, ts, "POST", "/Microsoft-Server-ActiveSync?"+enc, "", true); resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s: status %d, want 400", name, resp.StatusCode)
+		}
+	}
+}
+
+// TestAutodiscoverAnswersOnlyForTheCaller asks Autodiscover about another account:
+// the answer names the authenticated user, never the address in the request, so a
+// caller cannot learn settings or a display name for someone else.
+func TestAutodiscoverAnswersOnlyForTheCaller(t *testing.T) {
+	ts := testServer(t)
+	body := `<Autodiscover xmlns="http://schemas.microsoft.com/exchange/autodiscover/mobilesync/requestschema/2006"><Request><EMailAddress>ceo@hermex.test</EMailAddress></Request></Autodiscover>`
+	resp, out := do(t, ts, "POST", "/autodiscover/autodiscover.xml", body, true)
+	if resp.StatusCode == http.StatusOK && strings.Contains(out, "ceo@hermex.test") {
+		t.Errorf("autodiscover answered for another account:\n%s", out)
+	}
+}
+
 // TestAutodiscoverUnauthenticated confirms Autodiscover requires credentials.
 func TestAutodiscoverUnauthenticated(t *testing.T) {
 	ts := testServer(t)
