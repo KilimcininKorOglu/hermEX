@@ -216,6 +216,30 @@ func (s *session) authorizedSender(from string) bool {
 	return sendas.Allows(s.accounts, s.authUser, from)
 }
 
+// authorizeHeaderFrom applies the send-as gate to the From header of an
+// authenticated submission, before anything is filed or queued. MAIL FROM is
+// checked in Mail, but the relay signer picks the DKIM domain from the header, so
+// an own envelope under another user's From would leave signed as that user. A
+// message with no From claims no identity and passes; a From list, a second From
+// field or one that does not parse is refused, because it can name an address the
+// gate never checks. Unauthenticated intake keeps whatever From its sender wrote.
+func (s *session) authorizeHeaderFrom(raw []byte) error {
+	if s.authUser == "" {
+		return nil
+	}
+	from, claim := sendas.HeaderFrom(raw)
+	switch claim {
+	case sendas.FromAbsent:
+		return nil
+	case sendas.FromOne:
+		if s.authorizedSender(from) {
+			return nil
+		}
+		return &smtp.PermError{Message: fmt.Sprintf("5.7.1 <%s> is not an address you may send as", from)}
+	}
+	return &smtp.PermError{Message: "5.7.1 the From header must name exactly one address you may send as"}
+}
+
 // Rcpt routes one recipient. A recipient that resolves to a local mailbox is
 // filed there. A recipient that does not resolve is refused unless this is an
 // authenticated submission relaying to an external domain: only an authenticated
@@ -448,6 +472,9 @@ func (s *session) Data(r io.Reader) error {
 			RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from}, Err: err.Error(),
 		})
 		return &smtp.TempError{Message: "4.3.0 could not read the message, please retry later"}
+	}
+	if err := s.authorizeHeaderFrom(raw); err != nil {
+		return err
 	}
 	received := time.Now()
 	switch s.avVerdict(raw, received) {
