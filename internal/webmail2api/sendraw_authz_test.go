@@ -100,6 +100,10 @@ func TestSendRawRefusesUnusableFrom(t *testing.T) {
 	}{
 		{"no From header", ""},
 		{"From list", "alice@hermex.test, ceo@hermex.test"},
+		// RFC 5322 3.6 allows one From field; a second one, in either order, names
+		// an address beside the one the gate reads.
+		{"second From field after own", "alice@hermex.test\r\nFrom: ceo@hermex.test"},
+		{"second From field before own", "ceo@hermex.test\r\nFrom: alice@hermex.test"},
 	}
 	for _, tc := range cases {
 		rec := postSendRaw(t, srv, token, rawMessage(tc.from))

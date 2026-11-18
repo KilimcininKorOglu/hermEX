@@ -1,7 +1,6 @@
 package webmail2api
 
 import (
-	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -391,19 +390,14 @@ func (s *Server) handleMailDraft(w http.ResponseWriter, r *http.Request) {
 }
 
 // rawFromAddress reads the single From identity a client-built raw message
-// asserts. RFC 5322 permits a From list, but a compose never emits one and a
-// second address is a way to hide the address that will actually be authorized,
-// so exactly one is required; anything else is refused as malformed.
+// asserts, through the reader every send surface shares. A From list or a second
+// From field is a way to hide an address beside the one that will actually be
+// authorized, so exactly one field with one address is required. A message with
+// no From is refused too: this route always posts a message the browser signed
+// as the caller, so a missing From is malformed here.
 func rawFromAddress(raw []byte) (string, bool) {
-	msg, err := mail.ReadMessage(bytes.NewReader(raw))
-	if err != nil {
-		return "", false
-	}
-	list, err := mail.ParseAddressList(msg.Header.Get("From"))
-	if err != nil || len(list) != 1 {
-		return "", false
-	}
-	return list[0].Address, true
+	from, claim := sendas.HeaderFrom(raw)
+	return from, claim == sendas.FromOne
 }
 
 // resolveSender authorizes the caller's chosen From identity and returns the
