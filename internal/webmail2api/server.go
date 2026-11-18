@@ -657,6 +657,8 @@ func folderFID(slug string) (int64, bool) {
 		return mapi.PrivateFIDDeletedItems, true
 	case "spam", "junk":
 		return mapi.PrivateFIDJunk, true
+	case "archive":
+		return mapi.PrivateFIDArchive, true
 	default:
 		return 0, false
 	}
