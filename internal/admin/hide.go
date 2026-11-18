@@ -3,8 +3,8 @@ package admin
 import (
 	"net/http"
 	"strconv"
-	"strings"
 
+	"hermex/internal/directory"
 	"hermex/internal/mapi"
 )
 
@@ -26,26 +26,10 @@ type hideView struct {
 	ANR      bool
 }
 
-// effectiveHideMask reads a user's hide mask from its stored properties: the
-// PtLong mask form wins (parsed base-0), else the legacy boolean expands to
-// "hidden from GAL and address lists" (0x03). Anything unparsable reads visible.
-func effectiveHideMask(props map[uint32]string) uint32 {
-	if s, ok := props[uint32(mapi.PrAttrHiddenMask)]; ok {
-		if v, err := strconv.ParseUint(strings.TrimSpace(s), 0, 32); err == nil {
-			return uint32(v)
-		}
-	}
-	if s, ok := props[uint32(mapi.PrAttrHidden)]; ok {
-		if v, err := strconv.ParseUint(strings.TrimSpace(s), 0, 32); err == nil && v != 0 {
-			return 0x03
-		}
-	}
-	return 0
-}
-
-// hideViewOf projects the stored hide mask into the four checkbox states.
+// hideViewOf projects the stored hide mask into the four checkbox states, decoded
+// the way every address-book reader decodes it (directory.HideMask).
 func hideViewOf(props map[uint32]string) hideView {
-	m := effectiveHideMask(props)
+	m := directory.HideMask(props)
 	return hideView{
 		GAL:      m&hideGAL != 0,
 		AL:       m&hideAL != 0,

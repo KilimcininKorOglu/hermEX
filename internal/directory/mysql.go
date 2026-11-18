@@ -463,9 +463,7 @@ func (d *SQLDirectory) SearchGAL(caller, query string, limit int) ([]GALEntry, e
 	// is a bound parameter, so only the ESCAPE clause sits in the SQL text (where
 	// '\\' is how MySQL spells a single backslash escape character).
 	esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(strings.ToLower(strings.TrimSpace(query)))
-	const prDisplayName = 0x3001001F    // PR_DISPLAY_NAME (PtUnicode)
-	const prAttrHiddenMask = 0x10F40003 // PR_ATTR_HIDDEN, PtLong mask form
-	const prAttrHiddenBool = 0x10F4000B // PR_ATTR_HIDDEN, PtBoolean legacy form
+	const prDisplayName = 0x3001001F // PR_DISPLAY_NAME (PtUnicode)
 	// The hide mask is loaded but NOT filtered here: SearchGAL feeds both GAL
 	// enumeration and name resolution, which hide on different bits, so the
 	// per-surface filtering lives in the NSPI layer. The SQL only loads the raw
@@ -486,7 +484,7 @@ SELECT u.username, u.display_type, u.maildir, dn.propval_str, hg.propval_str, hb
    AND u.username LIKE ? ESCAPE '\\'` + galScopePredicate + `
  ORDER BY u.username
  LIMIT ?`
-	args := []any{prDisplayName, prAttrHiddenMask, prAttrHiddenBool, prRoomCapacity,
+	args := []any{prDisplayName, PropAttrHiddenMask, PropAttrHidden, prRoomCapacity,
 		dtMailuser, dtDistlist, dtContact, dtRoom, dtEquipment, // display_type IN
 		dtDistlist, dtContact, // maildir-exempt types (no mailbox)
 		afUserMask, afUserNormal, afDomainMask, "%" + esc + "%"}
@@ -522,19 +520,38 @@ SELECT u.username, u.display_type, u.maildir, dn.propval_str, hg.propval_str, hb
 	return out, rows.Err()
 }
 
-// hideMaskFromProps decodes a user's address-book hide mask from its two source
-// properties. The PtLong mask form of PR_ATTR_HIDDEN is parsed base-0 (so "0x03"
-// and "3" both work) and wins when present; absent that, the legacy boolean form,
-// when truthy, means hidden from the GAL and address lists (mask 0x03). An
-// unparsable value reads as visible.
+// hideMaskFromProps decodes a user's address-book hide mask from the two property
+// columns a query loaded; see HideMask.
 func hideMaskFromProps(mask, boolean sql.NullString) uint32 {
-	if mask.Valid && mask.String != "" {
-		if v, err := strconv.ParseUint(strings.TrimSpace(mask.String), 0, 32); err == nil {
+	props := map[uint32]string{}
+	if mask.Valid {
+		props[PropAttrHiddenMask] = mask.String
+	}
+	if boolean.Valid {
+		props[PropAttrHidden] = boolean.String
+	}
+	return HideMask(props)
+}
+
+// The two stored forms of PR_ATTR_HIDDEN, the address-book hide mask.
+const (
+	PropAttrHiddenMask uint32 = 0x10F40003 // PtLong mask form
+	PropAttrHidden     uint32 = 0x10F4000B // PtBoolean legacy form
+)
+
+// HideMask decodes a user's address-book hide mask from its stored properties,
+// the one decoding every reader uses. The PtLong mask form is parsed base-0 (so
+// "0x03" and "3" both work) and wins when present; absent that, the legacy
+// boolean form, when truthy, means hidden from the GAL and address lists (mask
+// 0x03). An unparsable value reads as visible.
+func HideMask(props map[uint32]string) uint32 {
+	if s := strings.TrimSpace(props[PropAttrHiddenMask]); s != "" {
+		if v, err := strconv.ParseUint(s, 0, 32); err == nil {
 			return uint32(v)
 		}
 	}
-	if boolean.Valid {
-		if v, err := strconv.ParseUint(strings.TrimSpace(boolean.String), 0, 32); err == nil && v != 0 {
+	if s, ok := props[PropAttrHidden]; ok {
+		if v, err := strconv.ParseUint(strings.TrimSpace(s), 0, 32); err == nil && v != 0 {
 			return 0x03
 		}
 	}
