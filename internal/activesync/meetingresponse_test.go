@@ -61,6 +61,51 @@ func TestMeetingResponseAccept(t *testing.T) {
 	}
 }
 
+// TestMeetingResponseRefusesInvalidRequests proves the Requests [MS-ASCMD]
+// MeetingResponse refuses with Status 2 ("the meeting request is invalid") file
+// nothing: a UserResponse outside 1 (Accept), 2 (Tentative) and 3 (Decline), a
+// RequestId naming an ordinary mail, a RequestId the folder does not hold, and a
+// FolderId that is not a number.
+func TestMeetingResponseRefusesInvalidRequests(t *testing.T) {
+	ts, dir := seededServer(t)
+	invite := strconv.FormatUint(uint64(seedMeetingRequest(t, dir)), 10)
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(convMsgRoot), time.Now(), 0)
+	st.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	inbox := strconv.FormatInt(int64(mapi.PrivateFIDInbox), 10)
+	for _, tc := range []struct{ name, response, folder, request string }{
+		{"response 0", "0", inbox, invite},
+		{"response 4", "4", inbox, invite},
+		{"response not a number", "yes", inbox, invite},
+		{"ordinary mail", "1", inbox, strconv.FormatUint(uint64(plain.UID), 10)},
+		{"no such message", "1", inbox, "4000000"},
+		{"folder not a number", "1", "inbox", invite},
+	} {
+		req := wbxml.Elem(wbxml.MRMeetingResponse, wbxml.Elem(wbxml.MRRequest,
+			wbxml.Str(wbxml.MRUserResponse, tc.response),
+			wbxml.Str(wbxml.MRFolderID, tc.folder),
+			wbxml.Str(wbxml.MRRequestID, tc.request)))
+		_, root := postCommand(t, ts, "MeetingResponse", req)
+		if got := root.Child(wbxml.MRResult).ChildText(wbxml.MRStatus); got != "2" {
+			t.Errorf("%s: Status = %q, want 2", tc.name, got)
+		}
+	}
+	st, err = objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if cal, _ := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar)); len(cal) != 0 {
+		t.Errorf("refused responses filed %d calendar items, want 0", len(cal))
+	}
+}
+
 // seedMeetingRequest delivers a meeting-request email (a text/calendar METHOD:REQUEST
 // part beside a plain body) into the Inbox through the normal append path, so its
 // appointment is parsed on import exactly as a real inbound request, and returns its
