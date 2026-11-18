@@ -73,7 +73,12 @@ type createMessage struct {
 type smartResponse struct {
 	ReferenceItemID refID          `xml:"ReferenceItemId"`
 	Message         *createMessage `xml:"Message"`
-	createMessage                  // the flat shape: the message fields on the element itself
+	// NewBodyContent is the new text only; the server adds the original below it.
+	NewBodyContent *struct {
+		Type    string `xml:"BodyType,attr"`
+		Content string `xml:",chardata"`
+	} `xml:"NewBodyContent"`
+	createMessage // the flat shape: the message fields on the element itself
 }
 
 // message returns the message body a smart response carries, preferring the nested
@@ -159,12 +164,7 @@ func (s *Server) createMessages(st *objectstore.Store, sess *session, req create
 	for _, m := range req.Items.Messages {
 		msgs = append(msgs, s.createOneItem(st, sess, m, disp, send, save))
 	}
-	for _, list := range [][]smartResponse{req.Items.ReplyToItem, req.Items.ReplyAllToItem, req.Items.ForwardItem} {
-		for _, sr := range list {
-			msgs = append(msgs, s.createOneItem(st, sess, sr.message(), disp, send, save))
-		}
-	}
-	return msgs
+	return append(msgs, s.createSmartResponses(st, sess, req, disp, send, save)...)
 }
 
 // createMeetingResponses answers the meeting responses in the request ([MS-OXWSMTGS]): an
@@ -197,17 +197,13 @@ func (s *Server) createMeetingResponses(st *objectstore.Store, sess *session, re
 // and files the copy the disposition asks for.
 func (s *Server) createOneItem(st *objectstore.Store, sess *session, m createMessage,
 	disp string, send, save bool) itemResponseMessage {
-	// A From the caller holds no send-as or send-on-behalf right to is refused with
-	// the code Exchange gives it, which tells the client the sending account is the
-	// problem rather than access to the folder.
-	representing, sender, ok := s.resolveSender(sess.user, m.From.Mailbox.EmailAddress)
-	if !ok {
-		return itemError("ErrorSendAsDenied")
-	}
-	ext, code := extendedValues(st, m.Extended)
-	if code != "" {
-		return itemError(code)
-	}
+	return s.createItemWith(st, sess, m, disp, send, save, nil)
+}
+
+// renderCreated builds the IPM.Note a created message stands for, lets complete
+// finish it when given, and renders it with oxcmail.Export.
+func (s *Server) renderCreated(m createMessage, representing, sender string,
+	complete func(*oxcmail.Message)) ([]byte, error) {
 	out := oxews.BuildOutgoing(oxews.OutgoingInput{
 		From:      representing,
 		Sender:    sender,
@@ -219,7 +215,28 @@ func (s *Server) createOneItem(st *objectstore.Store, sess *session, m createMes
 		MessageID: newMessageID(s.hostname),
 		Sent:      time.Now(),
 	})
-	raw, err := oxcmail.Export(out, oxcmail.Options{})
+	if complete != nil {
+		complete(out)
+	}
+	return oxcmail.Export(out, oxcmail.Options{})
+}
+
+// createItemWith is createOneItem with a step that completes the built message
+// before it is rendered (a smart response adds the original there); nil adds none.
+func (s *Server) createItemWith(st *objectstore.Store, sess *session, m createMessage,
+	disp string, send, save bool, complete func(*oxcmail.Message)) itemResponseMessage {
+	// A From the caller holds no send-as or send-on-behalf right to is refused with
+	// the code Exchange gives it, which tells the client the sending account is the
+	// problem rather than access to the folder.
+	representing, sender, ok := s.resolveSender(sess.user, m.From.Mailbox.EmailAddress)
+	if !ok {
+		return itemError("ErrorSendAsDenied")
+	}
+	ext, code := extendedValues(st, m.Extended)
+	if code != "" {
+		return itemError(code)
+	}
+	raw, err := s.renderCreated(m, representing, sender, complete)
 	if err != nil {
 		return itemError("ErrorInternalServerError")
 	}
