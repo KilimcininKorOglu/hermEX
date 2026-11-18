@@ -100,3 +100,15 @@ func TestMoveItemsInvalidSource(t *testing.T) {
 		t.Errorf("invalid-source move Status = %q, want 1", s)
 	}
 }
+
+// TestMoveItemsReportsAStoreFailureAsRetryable proves a move the store cannot
+// carry out answers Status 7, "source or destination item was locked", the
+// transient condition [MS-ASCMD] 2.2.3.177.10 tells the client to retry. Status 5
+// means the request named more than one DstFldId, which a store failure is not.
+func TestMoveItemsReportsAStoreFailureAsRetryable(t *testing.T) {
+	st, err := objectstore.Open(t.TempDir())
+	mustNoErr(t, "open the store", err)
+	st.Close()
+	resp := moveOne(st, moveReq("1", inboxID(), deletedID()).Child(wbxml.MOMove))
+	wantEq(t, "Status", resp.ChildText(wbxml.MOStatus), "7")
+}

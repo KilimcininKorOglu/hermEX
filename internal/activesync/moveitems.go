@@ -8,15 +8,16 @@ import (
 	"hermex/internal/wbxml"
 )
 
-// MoveItems status codes (MS-ASCMD). Note success is 3, not 1.
+// MoveItems status codes ([MS-ASCMD] 2.2.3.177.10). Note success is 3, not 1.
 const (
 	moveStatusInvalidSource = "1"
 	moveStatusInvalidDest   = "2"
 	moveStatusSuccess       = "3"
 	moveStatusSameSrcDest   = "4"
-	// moveStatusFailed is MS-ASCMD's "the source or destination item was locked",
-	// the status for a move the server could not carry out.
-	moveStatusFailed = "5"
+	// moveStatusFailed is "source or destination item was locked", a transient
+	// server condition the client retries: the status for a move the store
+	// could not carry out. (Status 5 means more than one DstFldId.)
+	moveStatusFailed = "7"
 )
 
 // handleMoveItems answers the MS-ASCMD MoveItems command, moving each message from
