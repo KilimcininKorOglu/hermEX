@@ -1,6 +1,7 @@
 package objectstore
 
 import (
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -169,6 +170,41 @@ func TestOOFActive(t *testing.T) {
 	for _, c := range cases {
 		if got := c.cfg.OOFActive(c.now); got != c.want {
 			t.Errorf("%s: OOFActive(%d) = %v, want %v", c.name, c.now, got, c.want)
+		}
+	}
+}
+
+// TestOOFWindowIsChecked writes schedules through both store writers: a window
+// that ends before it starts, or a bound that is not a time (-1, what a surface
+// reads from an unparseable date), is refused and the stored settings stay; a
+// single unset bound is the open-ended schedule OOFActive defines and is kept.
+func TestOOFWindowIsChecked(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	bad := []OOFSettings{
+		{Enabled: true, Start: 2000, End: 1000},
+		{Enabled: true, Start: 1000, End: 1000},
+		{Enabled: true, Start: -1, End: 2000},
+		{Enabled: true, Start: 1000, End: -1},
+	}
+	for _, cfg := range bad {
+		if err := st.SetOOFSettings(cfg); !errors.Is(err, ErrInvalidOOFWindow) {
+			t.Errorf("SetOOFSettings(%d..%d) = %v, want ErrInvalidOOFWindow", cfg.Start, cfg.End, err)
+		}
+		err := st.UpdateOOFSettings(func(c *OOFSettings) error { *c = cfg; return nil })
+		if !errors.Is(err, ErrInvalidOOFWindow) {
+			t.Errorf("UpdateOOFSettings(%d..%d) = %v, want ErrInvalidOOFWindow", cfg.Start, cfg.End, err)
+		}
+	}
+	if got, _ := st.GetOOFSettings(); got.Enabled {
+		t.Errorf("a refused window was stored: %+v", got)
+	}
+	for _, cfg := range []OOFSettings{{Enabled: true, Start: 1000}, {Enabled: true, End: 2000}, {Enabled: true, Start: 1000, End: 2000}} {
+		if err := st.SetOOFSettings(cfg); err != nil {
+			t.Errorf("SetOOFSettings(%d..%d) = %v, want stored", cfg.Start, cfg.End, err)
 		}
 	}
 }

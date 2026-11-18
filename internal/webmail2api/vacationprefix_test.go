@@ -99,6 +99,30 @@ func TestAnUnreadableAutoReplyIsNotServedAsEmpty(t *testing.T) {
 	}
 }
 
+// TestVacationRefusesABrokenSchedule saves vacations whose end precedes the start
+// or whose date is not RFC 3339: each is a 400 and nothing is stored, where the
+// unparseable date used to be dropped and the reply saved with no end.
+func TestVacationRefusesABrokenSchedule(t *testing.T) {
+	_, do, dir := vacationHarness(t)
+	for name, dates := range map[string]string{
+		"ends before it starts": `"start_date":"2026-07-10T00:00:00Z","end_date":"2026-07-01T00:00:00Z"`,
+		"unparseable end":       `"start_date":"2026-07-01T00:00:00Z","end_date":"next week"`,
+	} {
+		rec := do(http.MethodPut, "/api/v1/vacation", `{"enabled":true,"message":"away",`+dates+`}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: status %d, want 400: %s", name, rec.Code, rec.Body.String())
+		}
+	}
+	st, err := objectstore.OpenExisting(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if cfg, _ := st.GetOOFSettings(); cfg.Enabled {
+		t.Errorf("a refused schedule was stored: %+v", cfg)
+	}
+}
+
 // readVacation decodes the vacation endpoint's answer.
 func readVacation(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 	t.Helper()

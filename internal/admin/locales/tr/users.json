@@ -222,6 +222,7 @@
     "saveAltnamesFailed": "Alternatif adlar kaydedilemedi.",
     "saveQuotaFailed": "Kota kaydedilemedi.",
     "saveOOFFailed": "Ofis dışı ayarları kaydedilemedi.",
+    "oofWindowInvalid": "Bitiş zamanı başlangıçtan sonra olmalıdır.",
     "saveForwardFailed": "Yönlendirme kaydedilemedi.",
     "saveMeetingFailed": "Toplantı ayarları kaydedilemedi.",
     "saveSentCopyFailed": "Kopya ayarları kaydedilemedi.",

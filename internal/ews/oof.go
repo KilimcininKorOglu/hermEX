@@ -2,6 +2,7 @@ package ews
 
 import (
 	"encoding/xml"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -165,6 +166,10 @@ func (s *Server) handleSetUserOofSettings(w http.ResponseWriter, inner []byte, s
 		applyWireOof(cfg, req.Settings)
 		return nil
 	})
+	if errors.Is(err, objectstore.ErrInvalidOOFWindow) {
+		writeResponse(w, setOofError("ErrorInvalidScheduledOofDuration"))
+		return
+	}
 	if err != nil {
 		writeResponse(w, setOofError("ErrorInternalServerError"))
 		return
@@ -292,5 +297,7 @@ func oofParseTime(v string) int64 {
 			return t.UTC().Unix()
 		}
 	}
-	return 0
+	// Not a time: -1 makes the store refuse the window rather than read the
+	// bound as unset, which would leave a dated reply running with no end.
+	return -1
 }

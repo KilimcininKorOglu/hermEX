@@ -91,6 +91,28 @@ func TestAdminSetUserOOF(t *testing.T) {
 	}
 }
 
+// TestAdminOOFRefusesABrokenWindow has the store refuse the schedule, as it does a
+// window ending before its start: the API answers 400 and the form names the
+// cause, instead of the generic save failure.
+func TestAdminOOFRefusesABrokenWindow(t *testing.T) {
+	ts := adminServerStore(t, oofUserDir(), &fakeStore{setErr: objectstore.ErrInvalidOOFWindow})
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedPUT(t, ts, "/admin/users/alice@hermex.test/oof", session, csrf, `{"enabled":true,"start":1700600000,"end":1700000000}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("api status %d, want 400", resp.StatusCode)
+	}
+	resp = htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/oof", session, csrf, url.Values{
+		"enabled": {"on"}, "start": {"2026-06-10T09:00"}, "end": {"2026-06-01T09:00"},
+	})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(body), "The end must be after the start") {
+		t.Errorf("form does not name the window error:\n%s", body)
+	}
+}
+
 // TestAdminUserOOFNotFound proves reading or writing an unknown user's OOF is a 404
 // and the store is never touched for a user that does not exist.
 func TestAdminUserOOFNotFound(t *testing.T) {

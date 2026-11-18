@@ -127,6 +127,31 @@ func TestOofScheduledRoundTrip(t *testing.T) {
 	}
 }
 
+// TestOofRefusesABrokenDuration sends Scheduled Sets whose Duration ends before it
+// starts or carries a time that does not parse: each is refused with
+// ErrorInvalidScheduledOofDuration and the stored OOF stays off, so a typo cannot
+// leave an auto-reply running with no end.
+func TestOofRefusesABrokenDuration(t *testing.T) {
+	ts, dir := oofServer(t)
+	for name, d := range map[string][2]string{
+		"ends before it starts": {"2026-07-10T17:00:00", "2026-07-01T09:00:00"},
+		"unparseable end":       {"2026-07-01T09:00:00", "next week"},
+	} {
+		_, body := soapPost(t, ts, wrapRequest(setOofBody(testUser, "Scheduled", "All", "i", "e", d[0], d[1])), true)
+		if !strings.Contains(body, "ErrorInvalidScheduledOofDuration") {
+			t.Errorf("%s: response lacks ErrorInvalidScheduledOofDuration:\n%s", name, body)
+		}
+	}
+	st, err := objectstore.OpenExisting(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if cfg, _ := st.GetOOFSettings(); cfg.Enabled {
+		t.Errorf("a refused Duration was stored: %+v", cfg)
+	}
+}
+
 // TestOofDisabled proves Set Disabled turns OOF off.
 func TestOofDisabled(t *testing.T) {
 	ts, _ := oofServer(t)

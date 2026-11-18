@@ -1,7 +1,9 @@
 package objectstore
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 
 	"hermex/internal/mapi"
 )
@@ -85,6 +87,23 @@ func (s *Store) GetOOFSettings() (OOFSettings, error) {
 	return cfg, nil
 }
 
+// ErrInvalidOOFWindow refuses a schedule bound that is not a time, or a window
+// that ends before it starts. A single unset bound (0) stays valid: OOFActive
+// reads it as open-ended.
+var ErrInvalidOOFWindow = errors.New("out-of-office window needs a start before its end")
+
+// checkWindow reports whether each bound is unset or a time, and a window with
+// both bounds ends after it starts.
+func (c OOFSettings) checkWindow() error {
+	if c.Start < 0 || c.End < 0 {
+		return ErrInvalidOOFWindow
+	}
+	if c.Start != 0 && c.End != 0 && c.End <= c.Start {
+		return ErrInvalidOOFWindow
+	}
+	return nil
+}
+
 // UpdateOOFSettings applies update to the stored out-of-office settings inside
 // one write transaction, and keeps PR_OOF_STATE in step like SetOOFSettings. A
 // protocol that sets only the fields its wire carries (EWS, ActiveSync) merges
@@ -109,6 +128,17 @@ func (s *Store) UpdateOOFSettings(update func(*OOFSettings) error) error {
 	if err := update(&cfg); err != nil {
 		return err
 	}
+	if err := cfg.checkWindow(); err != nil {
+		return err
+	}
+	if err := s.txWriteOOF(tx, cfg); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// txWriteOOF stores cfg and its PR_OOF_STATE inside tx.
+func (s *Store) txWriteOOF(tx *sql.Tx, cfg OOFSettings) error {
 	b, err := json.Marshal(cfg)
 	if err != nil {
 		return err
@@ -128,13 +158,16 @@ func (s *Store) UpdateOOFSettings(update func(*OOFSettings) error) error {
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 // SetOOFSettings stores the mailbox's out-of-office settings and keeps the
 // standard PR_OOF_STATE boolean in sync with Enabled, so a MAPI client and the
 // delivery path can read the on/off state directly.
 func (s *Store) SetOOFSettings(cfg OOFSettings) error {
+	if err := cfg.checkWindow(); err != nil {
+		return err
+	}
 	b, err := json.Marshal(cfg)
 	if err != nil {
 		return err

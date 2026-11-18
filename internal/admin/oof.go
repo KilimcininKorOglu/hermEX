@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -49,7 +50,10 @@ func (s *Server) handleSetUserOOF(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	if err := s.store.SetOOFSettings(u.Maildir, cfg); err != nil {
+	if err := s.store.SetOOFSettings(u.Maildir, cfg); errors.Is(err, objectstore.ErrInvalidOOFWindow) {
+		http.Error(w, "the end must follow the start", http.StatusBadRequest)
+		return
+	} else if err != nil {
 		s.fail(w, "could not save out-of-office settings", err, http.StatusInternalServerError)
 		return
 	}
@@ -150,7 +154,9 @@ func (s *Server) handleUIUserOOF(w http.ResponseWriter, r *http.Request) {
 	case !ok:
 		data["Error"] = "userDetail.noSuchUser"
 	default:
-		if err := s.store.SetOOFSettings(u.Maildir, oofFromForm(r)); err != nil {
+		if err := s.store.SetOOFSettings(u.Maildir, oofFromForm(r)); errors.Is(err, objectstore.ErrInvalidOOFWindow) {
+			data["Error"] = "userDetail.oofWindowInvalid"
+		} else if err != nil {
 			data["Error"] = s.notice("userDetail.saveOOFFailed", err)
 		} else {
 			data["Saved"] = true

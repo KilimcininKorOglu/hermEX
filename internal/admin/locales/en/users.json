@@ -222,6 +222,7 @@
     "saveAltnamesFailed": "Could not save alternative names.",
     "saveQuotaFailed": "Could not save quota.",
     "saveOOFFailed": "Could not save out-of-office settings.",
+    "oofWindowInvalid": "The end must be after the start.",
     "saveForwardFailed": "Could not save forward.",
     "saveMeetingFailed": "Could not save meeting settings.",
     "saveSentCopyFailed": "Could not save sent-copy settings.",

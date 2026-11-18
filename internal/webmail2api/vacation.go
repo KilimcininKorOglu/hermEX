@@ -2,6 +2,7 @@ package webmail2api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -48,6 +49,20 @@ func oofToVacation(o objectstore.OOFSettings) vacationJSON {
 	return v
 }
 
+// vacationTime reads one schedule bound. An empty value is no bound; a value that
+// is not RFC 3339 reads as -1, which the store's window check refuses, so a typo
+// can never silently turn a dated reply into one with no end.
+func vacationTime(s string) int64 {
+	if s == "" {
+		return 0
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return -1
+	}
+	return t.Unix()
+}
+
 func vacationToOOF(v vacationJSON) objectstore.OOFSettings {
 	o := objectstore.OOFSettings{
 		Enabled:         v.Enabled,
@@ -67,16 +82,7 @@ func vacationToOOF(v vacationJSON) objectstore.OOFSettings {
 	default:
 		o.ExternalEnabled, o.ExternalAudience = true, objectstore.OOFExternalAll
 	}
-	if v.StartDate != "" {
-		if t, err := time.Parse(time.RFC3339, v.StartDate); err == nil {
-			o.Start = t.Unix()
-		}
-	}
-	if v.EndDate != "" {
-		if t, err := time.Parse(time.RFC3339, v.EndDate); err == nil {
-			o.End = t.Unix()
-		}
-	}
+	o.Start, o.End = vacationTime(v.StartDate), vacationTime(v.EndDate)
 	return o
 }
 
@@ -129,7 +135,10 @@ func (s *Server) handlePutVacation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
-	if err := st.SetOOFSettings(vacationToOOF(v)); err != nil {
+	if err := st.SetOOFSettings(vacationToOOF(v)); errors.Is(err, objectstore.ErrInvalidOOFWindow) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the end date must follow the start date"})
+		return
+	} else if err != nil {
 		logError("vacation-save", err, logging.Fields{"user": c.Email})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save"})
 		return
