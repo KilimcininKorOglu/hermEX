@@ -210,14 +210,30 @@ func (s *Server) provisionWipe(sess *session, acked bool) int {
 	}
 	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
+		s.logWipeReadFail(sess, err)
 		return wipeEmitNone
 	}
 	defer st.Close()
 	emit, err := advanceProvisionWipe(st, sess.req.deviceID, acked)
 	if err != nil {
+		s.logWipeReadFail(sess, err)
 		return wipeEmitNone
 	}
 	return emit
+}
+
+// logWipeReadFail records a remote-wipe state that could not be read or advanced.
+// The device is then served no wipe directive, so without this event a wipe the
+// operator ordered would silently never reach it.
+func (s *Server) logWipeReadFail(sess *session, err error) {
+	s.Logger.Emit(logging.Event{
+		Level:      logging.LevelError,
+		Subsystem:  logging.ActiveSync,
+		Name:       "wipe.read.fail",
+		User:       sess.user,
+		RemoteAddr: sess.tel.IP,
+		Fields:     logging.Fields{"device": sess.req.deviceID, "error": err.Error()},
+	})
 }
 
 // requestWipeAck reports whether the Provision request carries the device's

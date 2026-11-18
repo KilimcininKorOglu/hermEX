@@ -80,6 +80,35 @@ func TestPolicyReadFailureIsLogged(t *testing.T) {
 	}
 }
 
+// TestWipeReadFailureIsLogged proves a remote-wipe state that cannot be read is
+// recorded: the device is then served no wipe directive, so without the event a
+// wipe the operator ordered would never reach it and nothing would say so. A
+// mailbox that does not exist makes the read fail.
+func TestWipeReadFailureIsLogged(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "never-provisioned")
+	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: missing}}
+	srv := NewServer(accs, accs, "mail.hermex.test")
+	sink := &policySink{}
+	srv.Logger = logging.New(sink)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	phase1 := wbxml.Elem(wbxml.PVProvision,
+		wbxml.Elem(wbxml.PVPolicies, wbxml.Elem(wbxml.PVPolicy,
+			wbxml.Str(wbxml.PVPolicyType, "MS-EAS-Provisioning-WBXML"))))
+	postCommand(t, ts, "Provision", phase1)
+
+	for _, e := range sink.events {
+		if e.Name == "wipe.read.fail" {
+			if e.User != testUser || e.Fields["device"] != "dev1" {
+				t.Errorf("wipe.read.fail user %q device %v, want %s/dev1", e.User, e.Fields["device"], testUser)
+			}
+			return
+		}
+	}
+	t.Error("an unreadable wipe state recorded no wipe.read.fail event")
+}
+
 // TestACleanPolicyReadLogsNothing is the negative control: provisioning runs on
 // every device sync, so a pass that logs when nothing is wrong would bury the log
 // store and make the real failure unfindable.
