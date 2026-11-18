@@ -1,7 +1,9 @@
 package admin
 
 import (
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"hermex/internal/directory"
@@ -59,7 +61,12 @@ func TestAFailedReadIsRecordedByTheJSONAPI(t *testing.T) {
 
 		name := tc.path + " " + tc.read
 		resp := authedGET(t, ts, tc.path, session)
+		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		// The error stays server-side: the client gets a generic message.
+		if strings.Contains(string(body), errReadFailed.Error()) {
+			t.Errorf("%s: the response carries the internal error: %s", name, body)
+		}
 		if resp.StatusCode != http.StatusInternalServerError {
 			t.Errorf("%s: status %d, want 500", name, resp.StatusCode)
 			continue
