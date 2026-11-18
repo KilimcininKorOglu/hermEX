@@ -313,9 +313,27 @@ func (s *Server) handleGALSearch(w http.ResponseWriter, store *wbxml.Node, sess 
 		// Withhold the addresses the operator hid from the address book.
 		entries = directory.VisibleGAL(entries)
 	}
-	total := len(entries)
-	lo = min(lo, total)
-	writeWBXML(w, searchGALReply(srStoreOK, entries[lo:min(hi+1, total)], lo, total))
+	total, err := galSearchTotal(s.accounts, sess.user, query, entries, hi)
+	if err != nil {
+		s.logSearchFail(sess, err)
+		writeWBXML(w, searchGALReply(srStoreServerError, nil, 0, 0))
+		return
+	}
+	n := len(entries)
+	lo = min(lo, n)
+	writeWBXML(w, searchGALReply(srStoreOK, entries[lo:min(hi+1, n)], lo, total))
+}
+
+// galSearchTotal is the Total a GAL Search reports: every visible match, not the
+// rows read for the page. A page read in full (hi+1 rows) may stop short of the
+// matches, so the directory counts them; a directory that cannot count leaves
+// the Total at the rows read.
+func galSearchTotal(accounts any, caller, query string, entries []directory.GALEntry, hi int) (int, error) {
+	counter, ok := accounts.(directory.GALCounter)
+	if len(entries) <= hi || !ok {
+		return len(entries), nil
+	}
+	return counter.CountGAL(caller, query, directory.HideFromGAL)
 }
 
 // searchGALReply builds a Search reply for the GAL store: the overall success, then

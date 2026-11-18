@@ -143,6 +143,17 @@ func TestSearchGALReturnsTheRangeAsked(t *testing.T) {
 	wantEq(t, "the Results returned", n, 1)
 }
 
+// TestSearchGALTotalCountsPastTheRange proves Total is every match, not the rows
+// read for the page: a Range of 0-0 over two matches returns one Result with a
+// Total of 2, so the device knows to ask for more ([MS-ASCMD] 2.2.3.181 Total).
+func TestSearchGALTotalCountsPastTheRange(t *testing.T) {
+	ts := galServer(t)
+	_, root := postCommand(t, ts, "Search", withRange(searchReq("GAL", "al"), "0-0"))
+	store := searchStore(t, root)
+	wantEq(t, "the Range", store.ChildText(wbxml.SRRange), "0-0")
+	wantEq(t, "the Total", store.ChildText(wbxml.SRTotal), "2")
+}
+
 // TestSearchGALNoMatch proves a GAL Search that matches nothing reports a
 // successful store with no Result and no Total.
 func TestSearchGALNoMatch(t *testing.T) {
