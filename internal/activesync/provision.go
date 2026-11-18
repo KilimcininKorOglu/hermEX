@@ -148,7 +148,12 @@ func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request, sess *s
 		return
 	}
 	merged := s.devicePolicy(sess)
-	key, status, err := s.provisionKey(sess, root, easpolicy.Key(merged))
+	final := easpolicy.Key(merged)
+	if code := complianceRefusal(root, final); code != 0 {
+		writeWBXML(w, appendWipe(wbxml.Elem(wbxml.PVProvision, wbxml.Str(wbxml.PVStatus, strconv.Itoa(code))), wipe))
+		return
+	}
+	key, status, err := s.provisionKey(sess, root, final)
 	if err != nil {
 		s.failRequest(w, r, "provision.key.fail", err, http.StatusServiceUnavailable, "device state unavailable")
 		return
@@ -162,6 +167,34 @@ func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request, sess *s
 		policy = merged // the document rides only on phase one
 	}
 	writeWBXML(w, provisionResponse(key, phaseOne(root), wipe, policy))
+}
+
+// The Provision Status values a device that cannot comply with the policy is
+// refused with ([MS-ASPROV] Provision command errors): 139 when it applied the
+// policy only in part, 145 when it is externally managed.
+const (
+	provisionStatusNotCompliant      = 139
+	provisionStatusExternallyManaged = 145
+)
+
+// complianceRefusal returns the Provision Status an acknowledgement is refused
+// with when the device did not report the policy applied in full, or 0. Only a
+// device that applied it (Status 1) earns the final key: one that applied part or
+// none of it, or reports nothing, is 139, and an externally managed one is 145.
+// A mailbox with no policy, phase one and a request with no Policies element have
+// nothing to comply with.
+func complianceRefusal(root *wbxml.Node, final string) int {
+	policies := root.Child(wbxml.PVPolicies)
+	if final == "1" || policies == nil || policies.Child(wbxml.PVPolicy) == nil || phaseOne(root) {
+		return 0
+	}
+	switch policies.Child(wbxml.PVPolicy).ChildText(wbxml.PVStatus) {
+	case "1":
+		return 0
+	case "4":
+		return provisionStatusExternallyManaged
+	}
+	return provisionStatusNotCompliant
 }
 
 // phaseOne reports whether a Provision request asks for the policy (no policy

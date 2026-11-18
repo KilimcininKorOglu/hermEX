@@ -84,13 +84,31 @@ const easProvisioningType = "MS-EAS-Provisioning-WBXML"
 // phase one) and returns the reply's Policy element.
 func provisionPolicy(t *testing.T, ts *httptest.Server, policyType, key string) *wbxml.Node {
 	t.Helper()
+	// An acknowledgement reports the policy applied in full, as a compliant device
+	// does.
+	applied := ""
+	if key != "" {
+		applied = "1"
+	}
+	root := provisionAck(t, ts, policyType, key, applied)
+	return root.Child(wbxml.PVPolicies).Child(wbxml.PVPolicy)
+}
+
+// provisionAck posts a Provision request with the given PolicyType, PolicyKey and
+// the Status the device reports for applying the policy (each omitted when empty),
+// and returns the whole reply.
+func provisionAck(t *testing.T, ts *httptest.Server, policyType, key, applied string) *wbxml.Node {
+	t.Helper()
 	policy := []*wbxml.Node{wbxml.Str(wbxml.PVPolicyType, policyType)}
 	if key != "" {
 		policy = append(policy, wbxml.Str(wbxml.PVPolicyKey, key))
 	}
+	if applied != "" {
+		policy = append(policy, wbxml.Str(wbxml.PVStatus, applied))
+	}
 	_, root := postCommand(t, ts, "Provision", wbxml.Elem(wbxml.PVProvision,
 		wbxml.Elem(wbxml.PVPolicies, wbxml.Elem(wbxml.PVPolicy, policy...))))
-	return root.Child(wbxml.PVPolicies).Child(wbxml.PVPolicy)
+	return root
 }
 
 // wantPolicyStatus checks a Policy reply's Status and, for a refusal, that it hands
