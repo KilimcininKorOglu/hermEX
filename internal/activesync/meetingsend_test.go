@@ -215,22 +215,39 @@ func TestMeetingResponseProposesATime(t *testing.T) {
 	}
 }
 
-// TestMeetingResponseRefusesAHalfProposal proves a proposal missing one end is an
-// invalid request ([MS-ASCMD] ProposedStartTime: each requires the other).
-func TestMeetingResponseRefusesAHalfProposal(t *testing.T) {
-	ts, attendee, organizer := organizerServer(t)
-	uid := seedLocalRequest(t, attendee, planningICS)
-	root := postVersioned(t, ts, "16.1", "MeetingResponse", wbxml.Elem(wbxml.MRMeetingResponse,
-		wbxml.Elem(wbxml.MRRequest,
-			wbxml.Str(wbxml.MRUserResponse, "2"),
-			wbxml.Str(wbxml.MRFolderID, strconv.FormatInt(int64(mapi.PrivateFIDInbox), 10)),
-			wbxml.Str(wbxml.MRRequestID, strconv.FormatUint(uint64(uid), 10)),
-			wbxml.Elem(wbxml.MRSendResponse, wbxml.Str(wbxml.MRProposedStartTime, "20260702T160000Z")))))
-	if got := root.Child(wbxml.MRResult).ChildText(wbxml.MRStatus); got != "2" {
-		t.Errorf("Status = %q, want 2 (invalid request)", got)
-	}
-	if n := len(organizerInbox(t, organizer)); n != 0 {
-		t.Errorf("organizer received %d responses to a refused request", n)
+// TestMeetingResponseRefusesABadProposal proves a proposal the client cannot have
+// meant is an invalid request (Status 2) and sends nothing: one end missing
+// ([MS-ASCMD] ProposedStartTime: each requires the other), a value that is not a
+// compact date-time, and a span that ends before it starts.
+func TestMeetingResponseRefusesABadProposal(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		times []*wbxml.Node
+	}{
+		{"half", []*wbxml.Node{wbxml.Str(wbxml.MRProposedStartTime, "20260702T160000Z")}},
+		{"not a date-time", []*wbxml.Node{
+			wbxml.Str(wbxml.MRProposedStartTime, "tomorrow"),
+			wbxml.Str(wbxml.MRProposedEndTime, "20260702T170000Z")}},
+		{"ends before it starts", []*wbxml.Node{
+			wbxml.Str(wbxml.MRProposedStartTime, "20260702T170000Z"),
+			wbxml.Str(wbxml.MRProposedEndTime, "20260702T160000Z")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ts, attendee, organizer := organizerServer(t)
+			uid := seedLocalRequest(t, attendee, planningICS)
+			root := postVersioned(t, ts, "16.1", "MeetingResponse", wbxml.Elem(wbxml.MRMeetingResponse,
+				wbxml.Elem(wbxml.MRRequest,
+					wbxml.Str(wbxml.MRUserResponse, "2"),
+					wbxml.Str(wbxml.MRFolderID, strconv.FormatInt(int64(mapi.PrivateFIDInbox), 10)),
+					wbxml.Str(wbxml.MRRequestID, strconv.FormatUint(uint64(uid), 10)),
+					wbxml.Elem(wbxml.MRSendResponse, tc.times...))))
+			if got := root.Child(wbxml.MRResult).ChildText(wbxml.MRStatus); got != "2" {
+				t.Errorf("Status = %q, want 2 (invalid request)", got)
+			}
+			if n := len(organizerInbox(t, organizer)); n != 0 {
+				t.Errorf("organizer received %d responses to a refused request", n)
+			}
+		})
 	}
 }
 
