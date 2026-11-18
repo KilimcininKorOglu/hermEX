@@ -37,6 +37,7 @@ type pictureOpts struct {
 	want        bool
 	maxSize     int
 	maxPictures int
+	invalid     bool // a cap that is not an unsigned integer
 }
 
 // handleResolveRecipients answers ResolveRecipients ([MS-ASCMD] 2.2.2.14): each
@@ -50,19 +51,8 @@ func (s *Server) handleResolveRecipients(w http.ResponseWriter, r *http.Request,
 		s.failRequest(w, r, "wbxml.parse.fail", err, http.StatusBadRequest, "invalid WBXML")
 		return
 	}
-	var tos []string
-	var opt pictureOpts
-	var win availabilityWindow
-	for _, c := range root.Children {
-		switch c.Tag {
-		case wbxml.RRTo:
-			tos = append(tos, c.Text)
-		case wbxml.RROptions:
-			opt = parsePictureOpts(c)
-			win = parseAvailability(c)
-		}
-	}
-	if len(tos) == 0 || win.invalid {
+	tos, opt, win := parseResolveRequest(root)
+	if len(tos) == 0 || win.invalid || opt.invalid {
 		writeWBXML(w, wbxml.Elem(wbxml.RRResolveRecipients,
 			wbxml.Str(wbxml.RRStatus, strconv.Itoa(rrStatusProtocolError))))
 		return
@@ -91,8 +81,25 @@ func (s *Server) handleResolveRecipients(w http.ResponseWriter, r *http.Request,
 	writeWBXML(w, wbxml.Elem(wbxml.RRResolveRecipients, children...))
 }
 
+// parseResolveRequest reads a ResolveRecipients request: its To queries and the
+// picture and availability options.
+func parseResolveRequest(root *wbxml.Node) (tos []string, opt pictureOpts, win availabilityWindow) {
+	for _, c := range root.Children {
+		switch c.Tag {
+		case wbxml.RRTo:
+			tos = append(tos, c.Text)
+		case wbxml.RROptions:
+			opt = parsePictureOpts(c)
+			win = parseAvailability(c)
+		}
+	}
+	return tos, opt, win
+}
+
 // parsePictureOpts reads the Options>Picture request: its presence means
-// portraits are wanted, with optional MaxSize/MaxPictures caps.
+// portraits are wanted, with optional MaxSize/MaxPictures caps. Both caps are
+// unsigned integers in [MS-ASCMD]; one that is not marks the options invalid,
+// because reading it as zero would lift the cap the client meant to set.
 func parsePictureOpts(options *wbxml.Node) pictureOpts {
 	var o pictureOpts
 	for _, c := range options.Children {
@@ -103,13 +110,24 @@ func parsePictureOpts(options *wbxml.Node) pictureOpts {
 		for _, p := range c.Children {
 			switch p.Tag {
 			case wbxml.RRMaxSize:
-				o.maxSize, _ = strconv.Atoi(p.Text)
+				o.maxSize = o.pictureCap(p.Text)
 			case wbxml.RRMaxPictures:
-				o.maxPictures, _ = strconv.Atoi(p.Text)
+				o.maxPictures = o.pictureCap(p.Text)
 			}
 		}
 	}
 	return o
+}
+
+// pictureCap parses one cap as an unsigned 31-bit integer, the range an int holds
+// on every platform, and marks the options invalid when it is not one.
+func (o *pictureOpts) pictureCap(text string) int {
+	n, err := strconv.ParseUint(text, 10, 31)
+	if err != nil {
+		o.invalid = true
+		return 0
+	}
+	return int(n)
 }
 
 // resolvedRecipient is one match for a query, and where it came from. A contact
