@@ -2,14 +2,15 @@ package activesync
 
 import (
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"hermex/internal/directory"
 	"hermex/internal/objectstore"
 	"hermex/internal/wbxml"
-	"sync/atomic"
 )
 
 // resolveRecipientLimit caps the GAL matches returned for one recipient query.
@@ -75,8 +76,9 @@ func (s *Server) handleResolveRecipients(w http.ResponseWriter, r *http.Request,
 		tos = tos[:max]
 	}
 	pictures := 0
+	fail := func(stage string, err error) { s.logDirectoryFail("resolve."+stage+".fail", sess, err) }
 	for _, to := range tos {
-		node, err := resolveOneRecipient(gal, to, opt, win, sess, &pictures)
+		node, err := resolveOneRecipient(gal, to, opt, win, sess, &pictures, fail)
 		if err != nil {
 			// A directory failure is a server error, never an unknown recipient.
 			s.logResolveFail(sess, err)
@@ -122,10 +124,14 @@ type resolvedRecipient struct {
 // status, the match count, and a Recipient for each match (with its free/busy and
 // portrait when requested). A query that matches nothing is an unresolved Response
 // with a zero count, not an error.
-func resolveOneRecipient(gal directory.GAL, to string, opt pictureOpts, win availabilityWindow, sess *session, pictures *int) (*wbxml.Node, error) {
+//
+// The mailbox reads behind a contact match and a picture fail open, because the
+// address-book half has already answered; fail records each such failure, so a
+// store that cannot be read does not look like an empty one.
+func resolveOneRecipient(gal directory.GAL, to string, opt pictureOpts, win availabilityWindow, sess *session, pictures *int, fail storeFail) (*wbxml.Node, error) {
 	resp := []*wbxml.Node{wbxml.Str(wbxml.RRTo, to)}
 
-	matches, err := resolveEntries(gal, to, sess)
+	matches, err := resolveEntries(gal, to, sess, fail)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +145,7 @@ func resolveOneRecipient(gal directory.GAL, to string, opt pictureOpts, win avai
 		wbxml.Str(wbxml.RRStatus, strconv.Itoa(rrResolved)),
 		wbxml.Str(wbxml.RRRecipientCount, strconv.Itoa(len(matches))))
 	for _, m := range matches {
-		resp = append(resp, recipientNode(m, opt, win, sess, pictures))
+		resp = append(resp, recipientNode(m, opt, win, sess, pictures, fail))
 	}
 	return wbxml.Elem(wbxml.RRResponse, resp...), nil
 }
@@ -148,7 +154,7 @@ func resolveOneRecipient(gal directory.GAL, to string, opt pictureOpts, win avai
 // expects: the organization's address book, then the caller's own contacts. The
 // address book comes first, because a colleague is the likelier match, and an
 // address in both is reported once.
-func resolveEntries(gal directory.GAL, to string, sess *session) ([]resolvedRecipient, error) {
+func resolveEntries(gal directory.GAL, to string, sess *session, fail storeFail) ([]resolvedRecipient, error) {
 	if to == "" {
 		return nil, nil
 	}
@@ -172,28 +178,33 @@ func resolveEntries(gal directory.GAL, to string, sess *session) ([]resolvedReci
 			add(e, false)
 		}
 	}
-	for _, c := range ownContacts(sess.mailbox, to, resolveRecipientLimit-len(matches)) {
+	for _, c := range ownContacts(sess.mailbox, to, resolveRecipientLimit-len(matches), fail) {
 		add(directory.GALEntry{DisplayName: c.DisplayName, Address: c.Address}, true)
 	}
 	return matches, nil
 }
 
+// storeFail records a mailbox read that failed under the named stage.
+type storeFail func(stage string, err error)
+
 // ownContacts matches a query against the caller's own Contacts folder. A mailbox
 // that will not open yields nothing rather than failing the query, because the
-// address-book half has already answered. A query shorter than three characters
-// matches nothing (SearchContacts holds the address book back while the user is
-// still typing).
-func ownContacts(mailbox, query string, limit int) []objectstore.ContactMatch {
+// address-book half has already answered; the failure is recorded. A query
+// shorter than three characters matches nothing (SearchContacts holds the address
+// book back while the user is still typing).
+func ownContacts(mailbox, query string, limit int, fail storeFail) []objectstore.ContactMatch {
 	if mailbox == "" || limit <= 0 {
 		return nil
 	}
 	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
+		fail("contacts", err)
 		return nil
 	}
 	defer st.Close()
 	matches, err := st.SearchContacts(query, limit)
 	if err != nil {
+		fail("contacts", err)
 		return nil
 	}
 	return matches
@@ -201,7 +212,7 @@ func ownContacts(mailbox, query string, limit int) []objectstore.ContactMatch {
 
 // recipientNode builds one Recipient: its type, name and address, plus the
 // free/busy and picture the client asked for.
-func recipientNode(m resolvedRecipient, opt pictureOpts, win availabilityWindow, sess *session, pictures *int) *wbxml.Node {
+func recipientNode(m resolvedRecipient, opt pictureOpts, win availabilityWindow, sess *session, pictures *int, fail storeFail) *wbxml.Node {
 	// [MS-ASCMD] 2.2.3.186.5: Type is 1 for a GAL entry and 2 for a contact entry.
 	kind := "1"
 	if m.contact {
@@ -218,7 +229,7 @@ func recipientNode(m resolvedRecipient, opt pictureOpts, win availabilityWindow,
 		rc = append(rc, availabilityNode(m.entry, win, sess))
 	}
 	if opt.want {
-		rc = append(rc, pictureNode(m, opt, sess, pictures))
+		rc = append(rc, pictureNode(m, opt, sess, pictures, fail))
 	}
 	return wbxml.Elem(wbxml.RRRecipient, rc...)
 }
@@ -226,13 +237,15 @@ func recipientNode(m resolvedRecipient, opt pictureOpts, win availabilityWindow,
 // pictureNode builds a recipient's Picture element, serving the portrait from the
 // cross-protocol photo property (or, for one of the caller's own contacts, from
 // that contact's card) and honoring the MaxSize/MaxPictures caps.
-func pictureNode(m resolvedRecipient, opt pictureOpts, sess *session, pictures *int) *wbxml.Node {
+func pictureNode(m resolvedRecipient, opt pictureOpts, sess *session, pictures *int, fail storeFail) *wbxml.Node {
 	if opt.maxPictures > 0 && *pictures >= opt.maxPictures {
 		return wbxml.Elem(wbxml.RRPicture, wbxml.Str(wbxml.RRStatus, strconv.Itoa(rrPictureLimit)))
 	}
-	photo := recipientPhoto(m.entry.StorePath)
+	var photo []byte
 	if m.contact {
-		photo = contactPhoto(sess.mailbox, m.entry.Address)
+		photo = contactPhoto(sess.mailbox, m.entry.Address, fail)
+	} else {
+		photo = recipientPhoto(m.entry.StorePath, fail)
 	}
 	if photo == nil {
 		return wbxml.Elem(wbxml.RRPicture, wbxml.Str(wbxml.RRStatus, strconv.Itoa(rrPictureNone)))
@@ -246,32 +259,46 @@ func pictureNode(m resolvedRecipient, opt pictureOpts, sess *session, pictures *
 		wbxml.Str(wbxml.RRData, base64.StdEncoding.EncodeToString(photo)))
 }
 
-// recipientPhoto opens a mailbox and returns its portrait bytes, or nil.
-func recipientPhoto(storePath string) []byte {
+// recipientPhoto opens a mailbox and returns its portrait bytes, or nil. A
+// directory entry whose mailbox was never provisioned has no portrait, which is
+// not a failure; every other read error is recorded.
+func recipientPhoto(storePath string, fail storeFail) []byte {
 	if storePath == "" {
 		return nil
 	}
 	st, err := objectstore.OpenExisting(storePath)
+	if errors.Is(err, objectstore.ErrNotProvisioned) {
+		return nil
+	}
 	if err != nil {
+		fail("photo", err)
 		return nil
 	}
 	defer st.Close()
-	p, _ := st.UserPhoto()
+	p, err := st.UserPhoto()
+	if err != nil {
+		fail("photo", err)
+	}
 	return p
 }
 
 // contactPhoto returns the picture the caller saved on their own contact card for
-// an address, or nil. The store read is the caller's own mailbox.
-func contactPhoto(mailbox, address string) []byte {
+// an address, or nil. The store read is the caller's own mailbox, and a read that
+// fails is recorded.
+func contactPhoto(mailbox, address string, fail storeFail) []byte {
 	if mailbox == "" {
 		return nil
 	}
 	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
+		fail("contact-photo", err)
 		return nil
 	}
 	defer st.Close()
-	p, _ := st.ContactPhotoFor(address)
+	p, err := st.ContactPhotoFor(address)
+	if err != nil {
+		fail("contact-photo", err)
+	}
 	return p
 }
 
