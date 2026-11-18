@@ -135,10 +135,14 @@ func TestUIDomainsPageRequiresSystem(t *testing.T) {
 	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}}}
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
-	resp := authedGET(t, ts, "/admin/ui/domains", session)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("domain-admin domains page = %d, want 403", resp.StatusCode)
+	// The detail of a domain, its own included, carries system-wide settings (DKIM
+	// keys, quotas, the organization), so a domain admin is refused it too.
+	for _, path := range []string{"/admin/ui/domains", "/admin/ui/domains/1", "/admin/ui/domains/2"} {
+		resp := authedGET(t, ts, path, session)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("domain-admin %s = %d, want 403", path, resp.StatusCode)
+		}
 	}
 }
 
