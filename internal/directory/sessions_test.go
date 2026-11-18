@@ -1,6 +1,9 @@
 package directory
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestSessionUpsertRefresh proves a second upsert with the same id refreshes the
 // mutable fields (command, last_update, addinfo, push) while preserving the
@@ -33,6 +36,35 @@ func TestSessionUpsertRefresh(t *testing.T) {
 	wantEq(t, "preserved device type", s.DeviceType, "iPhone")
 	wantEq(t, "preserved ip", s.IP, "10.0.0.1")
 	wantEq(t, "preserved start time", s.StartAt, now)
+}
+
+// TestSessionsKeepAnOverlongClientValue gives both session stores device and agent
+// strings longer than their columns, in multi-byte characters as a hostile client
+// may: each session must still be written (an EAS one shows in the monitor, a
+// webmail one stays signed in) with the value cut to the column width.
+func TestSessionsKeepAnOverlongClientValue(t *testing.T) {
+	d, _ := freshDirectory(t)
+	long := strings.Repeat("ş", 1000)
+	const now = int64(1_000_000)
+	mustNoErr(t, "write the EAS session", d.UpsertSession(SessionRecord{
+		ID: "s1", Username: "a@x.test", DeviceID: long, DeviceType: long, UserAgent: long,
+		Command: long, ASVersion: long, AddInfo: long, StartAt: now, LastUpdate: now,
+	}))
+	list, err := d.ListActiveSessions(now + 1)
+	mustNoErr(t, "list active sessions", err)
+	if len(list) != 1 {
+		t.Fatalf("got %d sessions, want the one written", len(list))
+	}
+	wantEq(t, "stored user agent", list[0].UserAgent, strings.Repeat("ş", 255))
+	wantEq(t, "stored device type", list[0].DeviceType, strings.Repeat("ş", 64))
+
+	mustNoErr(t, "write the webmail session", d.CreateWebmailSession(WebmailSession{
+		Jti: "j1", Email: "a@x.test", DeviceType: long, UserAgent: long, ClientIP: long,
+		CreatedAt: now, LastActive: now, ExpiresAt: now + 3600,
+	}))
+	active, err := d.WebmailSessionActive("j1", now+1)
+	mustNoErr(t, "check the webmail session", err)
+	wantEq(t, "webmail session active", active, true)
 }
 
 // TestSessionStalenessAndPurge proves the age filter hides stale rows and that

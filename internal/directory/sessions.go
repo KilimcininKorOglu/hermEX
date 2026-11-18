@@ -1,5 +1,7 @@
 package directory
 
+import "unicode/utf8"
+
 // Staleness windows for live ActiveSync sessions, in seconds, mirroring the
 // reference monitor: a running session is considered gone once it has not been
 // updated for sessionRunningTTL; an ended session lingers briefly so it is still
@@ -32,7 +34,15 @@ type SessionRecord struct {
 // (refreshing last_update and addinfo), and once more with EndedAt set when the
 // request finishes. The immutable fields (user/device/ip/start) are kept from the
 // initial insert.
+//
+// The device and agent fields come from the client, so each is cut to its column
+// width: in strict mode an over-long value fails the whole insert, and a session
+// that cannot be written is one the operator's monitor never shows.
 func (d *SQLDirectory) UpsertSession(s SessionRecord) error {
+	s.DeviceID, s.DeviceType = clipText(s.DeviceID, 64), clipText(s.DeviceType, 64)
+	s.UserAgent, s.IP = clipText(s.UserAgent, 255), clipText(s.IP, 64)
+	s.Command, s.ASVersion = clipText(s.Command, 32), clipText(s.ASVersion, 16)
+	s.AddInfo = clipText(s.AddInfo, 128)
 	_, err := d.db.Exec(`
 		INSERT INTO active_sessions
 		  (session_id, username, device_id, device_type, user_agent, ip, command, as_version, start_at, last_update, ended_at, push, addinfo)
@@ -43,6 +53,15 @@ func (d *SQLDirectory) UpsertSession(s SessionRecord) error {
 		s.ID, s.Username, s.DeviceID, s.DeviceType, s.UserAgent, s.IP, s.Command, s.ASVersion,
 		s.StartAt, s.LastUpdate, s.EndedAt, boolToTiny(s.Push), s.AddInfo)
 	return err
+}
+
+// clipText cuts s to at most n characters, the unit a utf8mb4 VARCHAR(n) counts,
+// never splitting a character.
+func clipText(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	return string([]rune(s)[:n])
 }
 
 // ListActiveSessions returns the non-stale live sessions as of now (unix seconds):

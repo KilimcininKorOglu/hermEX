@@ -31,7 +31,10 @@ func (d *SQLDirectory) CreateWebmailSession(s WebmailSession) error {
 		`INSERT INTO webmail_sessions
 		   (jti, email, device_type, user_agent, client_ip, created_at, last_active, expires_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.Jti, strings.ToLower(s.Email), s.DeviceType, s.UserAgent, s.ClientIP,
+		// The agent fields come from the browser: an over-long one would fail the
+		// insert, and a login without its row is refused on every request.
+		s.Jti, strings.ToLower(s.Email), clipText(s.DeviceType, 255), clipText(s.UserAgent, 512),
+		clipText(s.ClientIP, 64),
 		s.CreatedAt, s.LastActive, s.ExpiresAt)
 	return err
 }
