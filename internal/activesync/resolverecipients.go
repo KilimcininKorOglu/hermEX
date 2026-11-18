@@ -24,6 +24,7 @@ const (
 	rrStatusServerError   = 6 // the server could not resolve the recipients
 	rrResolved            = 1 // exactly one recipient matched the query
 	rrAmbiguous           = 2 // several matched; the list is every suggestion
+	rrAmbiguousPartial    = 3 // several matched; the list is cut, RecipientCount is the total
 	rrUnresolved          = 4 // no recipient matched the query
 
 	rrPictureOK       = 1   // a portrait is returned
@@ -39,6 +40,10 @@ type pictureOpts struct {
 	maxSize     int
 	maxPictures int
 	invalid     bool // a cap that is not an unsigned integer
+	// maxAmbiguous is the suggestions returned per query: Options>
+	// MaxAmbiguousRecipients when the client sent it, else resolveRecipientLimit,
+	// never above it; -1 marks a value outside 0-9999 ([MS-ASCMD] 2.2.3.100).
+	maxAmbiguous int
 }
 
 // handleResolveRecipients answers ResolveRecipients ([MS-ASCMD] 2.2.2.14): each
@@ -53,7 +58,7 @@ func (s *Server) handleResolveRecipients(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	tos, opt, win := parseResolveRequest(root)
-	if len(tos) == 0 || win.invalid || opt.invalid {
+	if len(tos) == 0 || win.invalid || opt.invalid || opt.maxAmbiguous < 0 {
 		writeWBXML(w, wbxml.Elem(wbxml.RRResolveRecipients,
 			wbxml.Str(wbxml.RRStatus, strconv.Itoa(rrStatusProtocolError))))
 		return
@@ -94,7 +99,23 @@ func parseResolveRequest(root *wbxml.Node) (tos []string, opt pictureOpts, win a
 			win = parseAvailability(c)
 		}
 	}
+	opt.maxAmbiguous = parseMaxAmbiguous(root.Child(wbxml.RROptions))
 	return tos, opt, win
+}
+
+// parseMaxAmbiguous reads Options>MaxAmbiguousRecipients, an integer in 0-9999
+// ([MS-ASCMD] 2.2.3.100), as the suggestions to return per query, capped at
+// resolveRecipientLimit. Absent, it is the server cap; outside the range or not
+// a number, it is -1, which the command answers as a protocol error.
+func parseMaxAmbiguous(options *wbxml.Node) int {
+	if options == nil || options.Child(wbxml.RRMaxAmbiguous) == nil {
+		return resolveRecipientLimit
+	}
+	n, err := strconv.ParseUint(options.ChildText(wbxml.RRMaxAmbiguous), 10, 16)
+	if err != nil || n > 9999 {
+		return -1
+	}
+	return min(int(n), resolveRecipientLimit)
 }
 
 // parsePictureOpts reads the Options>Picture request: its presence means
@@ -150,61 +171,100 @@ type resolvedRecipient struct {
 func resolveOneRecipient(gal directory.GAL, to string, opt pictureOpts, win availabilityWindow, sess *session, pictures *int, fail storeFail) (*wbxml.Node, error) {
 	resp := []*wbxml.Node{wbxml.Str(wbxml.RRTo, to)}
 
-	matches, err := resolveEntries(gal, to, sess, fail)
+	matches, total, err := resolveEntries(gal, to, sess, fail, opt.maxAmbiguous)
 	if err != nil {
 		return nil, err
 	}
-	if len(matches) == 0 {
-		return wbxml.Elem(wbxml.RRResponse, append(resp,
-			wbxml.Str(wbxml.RRStatus, strconv.Itoa(rrUnresolved)),
-			wbxml.Str(wbxml.RRRecipientCount, "0"))...), nil
-	}
-
-	status := rrResolved
-	if len(matches) > 1 {
-		status = rrAmbiguous
-	}
 	resp = append(resp,
-		wbxml.Str(wbxml.RRStatus, strconv.Itoa(status)),
-		wbxml.Str(wbxml.RRRecipientCount, strconv.Itoa(len(matches))))
+		wbxml.Str(wbxml.RRStatus, strconv.Itoa(resolutionStatus(len(matches), total))),
+		wbxml.Str(wbxml.RRRecipientCount, strconv.Itoa(total)))
 	for _, m := range matches {
 		resp = append(resp, recipientNode(m, opt, win, sess, pictures, fail))
 	}
 	return wbxml.Elem(wbxml.RRResponse, resp...), nil
 }
 
+// resolutionStatus is a query's Response Status ([MS-ASCMD] 2.2.3.177.12) from
+// the recipients returned and the recipients that matched: none matched, one
+// resolved, several returned in full, or several returned in part.
+func resolutionStatus(returned, total int) int {
+	switch {
+	case total == 0:
+		return rrUnresolved
+	case total == 1:
+		return rrResolved
+	case returned < total:
+		return rrAmbiguousPartial
+	default:
+		return rrAmbiguous
+	}
+}
+
+// galResolveHide is the hide bits name resolution honors.
+const galResolveHide = directory.HideFromGAL | directory.HideFromResolve
+
 // resolveEntries matches a query against the two address sources a client
 // expects: the organization's address book, then the caller's own contacts. The
 // address book comes first, because a colleague is the likelier match, and an
-// address in both is reported once.
-func resolveEntries(gal directory.GAL, to string, sess *session, fail storeFail) ([]resolvedRecipient, error) {
+// address in both is reported once. It returns at most limit matches (always
+// the one match a query with a single match has) and how many matched in all.
+func resolveEntries(gal directory.GAL, to string, sess *session, fail storeFail, limit int) ([]resolvedRecipient, int, error) {
 	if to == "" {
-		return nil, nil
+		return nil, 0, nil
 	}
-	var matches []resolvedRecipient
-	seen := map[string]bool{}
-	add := func(e directory.GALEntry, contact bool) {
-		key := strings.ToLower(strings.TrimSpace(e.Address))
-		if key == "" || seen[key] || len(matches) >= resolveRecipientLimit {
-			return
-		}
-		seen[key] = true
-		matches = append(matches, resolvedRecipient{entry: e, contact: contact})
-	}
+	set := recipientSet{seen: map[string]bool{}}
+	galFull := false
 	if gal != nil {
-		entries, err := gal.SearchGAL(sess.user, to, resolveRecipientLimit, directory.HideFromGAL|directory.HideFromResolve)
+		entries, err := gal.SearchGAL(sess.user, to, limit+1, galResolveHide)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
+		galFull = len(entries) > limit
 		// Withhold the addresses the operator hid from name resolution.
 		for _, e := range directory.ResolvableGAL(entries) {
-			add(e, false)
+			set.add(e, false)
 		}
 	}
-	for _, c := range ownContacts(sess.mailbox, to, resolveRecipientLimit-len(matches), fail) {
-		add(directory.GALEntry{DisplayName: c.DisplayName, Address: c.Address}, true)
+	fromGAL := len(set.list)
+	for _, c := range ownContacts(sess.mailbox, to, limit+1, fail) {
+		set.add(directory.GALEntry{DisplayName: c.DisplayName, Address: c.Address}, true)
 	}
-	return matches, nil
+	total, err := matchTotal(gal, sess.user, to, len(set.list), fromGAL, galFull)
+	if err != nil {
+		return nil, 0, err
+	}
+	return set.list[:min(len(set.list), max(limit, 1))], total, nil
+}
+
+// recipientSet collects matches once per address.
+type recipientSet struct {
+	list []resolvedRecipient
+	seen map[string]bool
+}
+
+func (s *recipientSet) add(e directory.GALEntry, contact bool) {
+	key := strings.ToLower(strings.TrimSpace(e.Address))
+	if key == "" || s.seen[key] {
+		return
+	}
+	s.seen[key] = true
+	s.list = append(s.list, resolvedRecipient{entry: e, contact: contact})
+}
+
+// matchTotal is how many recipients matched in all: the matches collected, plus,
+// when the address-book page was cut, the address-book entries past it, counted
+// by the directory. A directory that cannot count leaves the total at what was
+// collected.
+func matchTotal(gal directory.GAL, caller, to string, collected, fromGAL int, galFull bool) (int, error) {
+	counter, ok := gal.(directory.GALCounter)
+	if !galFull || !ok {
+		return collected, nil
+	}
+	n, err := counter.CountGAL(caller, to, galResolveHide)
+	if err != nil {
+		return 0, err
+	}
+	return collected + max(n-fromGAL, 0), nil
 }
 
 // storeFail records a mailbox read that failed under the named stage.

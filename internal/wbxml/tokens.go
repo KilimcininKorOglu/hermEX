@@ -319,6 +319,7 @@ const (
 	RROptions           Tag = 0x0A0F
 	RRTo                Tag = 0x0A10
 	RRRecipientCount    Tag = 0x0A12
+	RRMaxAmbiguous      Tag = 0x0A14 // request: MaxAmbiguousRecipients, suggestions per query
 	RRAvailability      Tag = 0x0A16 // since 14.0: free/busy request and response
 	RRStartTime         Tag = 0x0A17 // request: free/busy window start
 	RREndTime           Tag = 0x0A18 // request: free/busy window end

@@ -77,6 +77,39 @@ func TestSearchGALHidesBeforeTheLimit(t *testing.T) {
 	wantEq(t, "entries when the caller hides only name resolution", len(got), 3)
 }
 
+// TestCountGALCountsWhatTheSearchFinds proves CountGAL counts the rows SearchGAL
+// pages through, for the same caller, query and hide bits: every match with no
+// limit, hidden entries left out, and nothing for a caller outside the scope.
+func TestCountGALCountsWhatTheSearchFinds(t *testing.T) {
+	d, _ := freshDirectory(t)
+	root := t.TempDir()
+	mustCreateDomain(t, d, root, "hermex.test")
+	mustCreateUser(t, d, root, "caller@hermex.test", "pw")
+	for _, a := range []string{"aa-x@hermex.test", "ab-x@hermex.test", "ac-x@hermex.test"} {
+		_, err := d.CreateContact(a, a, "hermex.test")
+		mustNoErr(t, "create contact "+a, err)
+	}
+	_, err := d.SetUserProperties("aa-x@hermex.test", map[uint32]string{PropAttrHiddenMask: strconv.Itoa(int(HideFromResolve))})
+	mustNoErr(t, "hide aa-x", err)
+
+	for _, c := range []struct {
+		caller string
+		hide   uint32
+		want   int
+	}{
+		{"caller@hermex.test", 0, 3},
+		{"caller@hermex.test", HideFromResolve, 2},
+		{"", 0, 0},
+	} {
+		n, err := d.CountGAL(c.caller, "-x", c.hide)
+		mustNoErr(t, "count", err)
+		wantEq(t, "count for "+c.caller, n, c.want)
+		got, err := d.SearchGAL(c.caller, "-x", 100, c.hide)
+		mustNoErr(t, "search", err)
+		wantEq(t, "search length for "+c.caller, len(got), n)
+	}
+}
+
 // TestEnsureSchemaHealsAStaleHideMask proves a start-up recomputes the column for
 // a property written behind SetUserProperties (a restored dump, or an older
 // binary that knew nothing of the column), in both directions.

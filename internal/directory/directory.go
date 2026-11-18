@@ -241,6 +241,15 @@ type GAL interface {
 	SearchGAL(caller, query string, limit int, hide uint32) ([]GALEntry, error)
 }
 
+// GALCounter optionally counts the entries SearchGAL matches for the same caller,
+// query and hide bits, with no limit. A surface that returns a capped list uses
+// it to report how many suggestions exist in all (EAS ResolveRecipients
+// RecipientCount). A directory without it leaves that surface reporting only the
+// entries it returned.
+type GALCounter interface {
+	CountGAL(caller, query string, hide uint32) (int, error)
+}
+
 // DisplayTypeRoom is the PR_DISPLAY_TYPE_EX value (DT_ROOM) that marks a bookable
 // room resource mailbox, the GALEntry.DisplayType a RoomLister surfaces for a
 // room. It mirrors the internal dtRoom schema constant for callers outside this
@@ -412,6 +421,13 @@ func (a StaticAccounts) SearchGAL(_, query string, limit int, _ uint32) ([]GALEn
 		}
 	}
 	return out, nil
+}
+
+// CountGAL implements GALCounter: the number of entries SearchGAL returns for
+// the query with no limit.
+func (a StaticAccounts) CountGAL(caller, query string, hide uint32) (int, error) {
+	out, err := a.SearchGAL(caller, query, 0, hide)
+	return len(out), err
 }
 
 // Authenticate implements Authenticator using a constant-time password compare.

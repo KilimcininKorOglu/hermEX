@@ -460,10 +460,6 @@ func (d *SQLDirectory) SearchGAL(caller, query string, limit int, hide uint32) (
 	if !ok {
 		return nil, nil
 	}
-	// Escape LIKE metacharacters so a typed % or _ matches literally; the pattern
-	// is a bound parameter, so only the ESCAPE clause sits in the SQL text (where
-	// '\\' is how MySQL spells a single backslash escape character).
-	esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(strings.ToLower(strings.TrimSpace(query)))
 	const prDisplayName = 0x3001001F // PR_DISPLAY_NAME (PtUnicode)
 	// The caller's hide bits are applied on users.hide_mask before the LIMIT, so
 	// hidden entries never use up the answer; the raw mask properties are still
@@ -477,21 +473,11 @@ SELECT u.username, u.display_type, u.maildir, dn.propval_str, hg.propval_str, hb
   LEFT JOIN user_properties hg ON hg.user_id = u.id AND hg.proptag = ? AND hg.order_id = 1
   LEFT JOIN user_properties hb ON hb.user_id = u.id AND hb.proptag = ? AND hb.order_id = 1
   LEFT JOIN user_properties cap ON cap.user_id = u.id AND cap.proptag = ? AND cap.order_id = 1
-  LEFT JOIN mlists ml ON ml.listname = u.username
- WHERE u.display_type IN (?, ?, ?, ?, ?)
-   AND (u.maildir <> '' OR u.display_type IN (?, ?))
-   AND (u.address_status & ?) = ?
-   AND (u.address_status & ?) = 0
-   AND d.domain_status = 0
-   AND (u.hide_mask & ?) = 0
-   AND u.username LIKE ? ESCAPE '\\'` + galScopePredicate + `
+  LEFT JOIN mlists ml ON ml.listname = u.username` + galMatchWhere + `
  ORDER BY u.username
  LIMIT ?`
-	args := []any{prDisplayName, PropAttrHiddenMask, PropAttrHidden, prRoomCapacity,
-		dtMailuser, dtDistlist, dtContact, dtRoom, dtEquipment, // display_type IN
-		dtDistlist, dtContact, // maildir-exempt types (no mailbox)
-		afUserMask, afUserNormal, afDomainMask, hide, "%" + esc + "%"}
-	args = append(args, scope...)
+	args := []any{prDisplayName, PropAttrHiddenMask, PropAttrHidden, prRoomCapacity}
+	args = append(args, galMatchArgs(query, hide, scope)...)
 	args = append(args, limit)
 	rows, err := d.db.Query(q, args...)
 	if err != nil {
@@ -521,6 +507,45 @@ SELECT u.username, u.display_type, u.maildir, dn.propval_str, hg.propval_str, hb
 		out = append(out, GALEntry{DisplayName: display, Address: addr, DisplayType: displayType, HiddenFrom: hideMaskFromProps(hideMask, hideBool), StorePath: storePath, Capacity: capacity, Owner: ownerStr.String})
 	}
 	return out, rows.Err()
+}
+
+// galMatchWhere selects the address-book objects a GAL query matches: the object
+// classes the address book holds, live accounts in live domains, none carrying a
+// hide bit the caller honors, whose address contains the query, in the caller's
+// scope. SearchGAL and CountGAL share it, so the count is of the same rows the
+// search pages through. Its arguments are galMatchArgs.
+const galMatchWhere = `
+ WHERE u.display_type IN (?, ?, ?, ?, ?)
+   AND (u.maildir <> '' OR u.display_type IN (?, ?))
+   AND (u.address_status & ?) = ?
+   AND (u.address_status & ?) = 0
+   AND d.domain_status = 0
+   AND (u.hide_mask & ?) = 0
+   AND u.username LIKE ? ESCAPE '\\'` + galScopePredicate
+
+// galMatchArgs binds galMatchWhere. LIKE metacharacters in the query are escaped
+// so a typed % or _ matches literally; the pattern is a bound parameter, so only
+// the ESCAPE clause sits in the SQL text (where '\\' is how MySQL spells a single
+// backslash escape character).
+func galMatchArgs(query string, hide uint32, scope []any) []any {
+	esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(strings.ToLower(strings.TrimSpace(query)))
+	args := []any{dtMailuser, dtDistlist, dtContact, dtRoom, dtEquipment, // display_type IN
+		dtDistlist, dtContact, // maildir-exempt types (no mailbox)
+		afUserMask, afUserNormal, afDomainMask, hide, "%" + esc + "%"}
+	return append(args, scope...)
+}
+
+// CountGAL implements GALCounter: how many address-book objects SearchGAL would
+// return for the same caller, query and hide bits with no limit.
+func (d *SQLDirectory) CountGAL(caller, query string, hide uint32) (int, error) {
+	scope, ok := d.galScope(caller)
+	if !ok {
+		return 0, nil
+	}
+	const q = `SELECT COUNT(*) FROM users u JOIN domains d ON u.domain_id = d.id` + galMatchWhere
+	var n int
+	err := d.db.QueryRow(q, galMatchArgs(query, hide, scope)...).Scan(&n)
+	return n, err
 }
 
 // hideMaskFromProps decodes a user's address-book hide mask from the two property
