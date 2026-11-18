@@ -1,6 +1,7 @@
 package activesync
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -14,15 +15,15 @@ const (
 	moveStatusInvalidDest   = "2"
 	moveStatusSuccess       = "3"
 	moveStatusSameSrcDest   = "4"
-	// moveStatusFailed is "source or destination item was locked", a transient
+	// moveStatusLocked is "source or destination item was locked", a transient
 	// server condition the client retries: the status for a move the store
 	// could not carry out. (Status 5 means more than one DstFldId.)
-	moveStatusFailed = "7"
+	moveStatusLocked = "7"
 )
 
-// handleMoveItems answers the MS-ASCMD MoveItems command, moving each message from
-// its source folder to a destination folder. The destination server id (the
-// message's new per-folder UID) is returned so the client can re-key the item.
+// handleMoveItems answers the MS-ASCMD MoveItems command, moving each item from
+// its source folder to a destination folder. The destination server id is
+// returned so the client can re-key the item.
 func (s *Server) handleMoveItems(w http.ResponseWriter, r *http.Request, sess *session) {
 	root, err := readWBXML(r)
 	if err != nil {
@@ -45,44 +46,120 @@ func (s *Server) handleMoveItems(w http.ResponseWriter, r *http.Request, sess *s
 	writeWBXML(w, wbxml.Elem(wbxml.MOMoves, responses...))
 }
 
-// moveOne performs a single move and renders its Response. The destination id
-// echoes the source on any failure so the client keeps a valid id to retry.
+// moveRequest is one Move element of a MoveItems request.
+type moveRequest struct {
+	srcMsg, srcFld, dstFld string
+	srcFolderID            int64
+	dstFolderID            int64
+}
+
+// response renders the request's Response. The destination id echoes the
+// source on any failure so the client keeps a valid id to retry.
+func (m moveRequest) response(status, dstMsg string) *wbxml.Node {
+	return wbxml.Elem(wbxml.MOResponse,
+		wbxml.Str(wbxml.MOSrcMsgId, m.srcMsg),
+		wbxml.Str(wbxml.MOStatus, status),
+		wbxml.Str(wbxml.MODstMsgId, dstMsg))
+}
+
+// moveOne performs a single move and renders its Response. An item moves only
+// between folders that hold its kind: mail between mail folders, and a calendar
+// item, contact, task or note between folders of that class. A destination of
+// another kind is refused with Status 2 and nothing moves, because no surface of
+// that folder could read the item.
 func moveOne(st *objectstore.Store, mv *wbxml.Node) *wbxml.Node {
-	srcMsg := mv.ChildText(wbxml.MOSrcMsgId)
-	srcFld := mv.ChildText(wbxml.MOSrcFldId)
-	dstFld := mv.ChildText(wbxml.MODstFldId)
-
-	response := func(status, dstMsg string) *wbxml.Node {
-		return wbxml.Elem(wbxml.MOResponse,
-			wbxml.Str(wbxml.MOSrcMsgId, srcMsg),
-			wbxml.Str(wbxml.MOStatus, status),
-			wbxml.Str(wbxml.MODstMsgId, dstMsg))
+	m := moveRequest{
+		srcMsg: mv.ChildText(wbxml.MOSrcMsgId),
+		srcFld: mv.ChildText(wbxml.MOSrcFldId),
+		dstFld: mv.ChildText(wbxml.MODstFldId),
 	}
-
-	srcFolderID, srcFldErr := strconv.ParseInt(srcFld, 10, 64)
-	dstFolderID, dstFldErr := strconv.ParseInt(dstFld, 10, 64)
-	uid64, uidErr := strconv.ParseUint(srcMsg, 10, 32)
-	if srcFldErr != nil || uidErr != nil {
-		return response(moveStatusInvalidSource, srcMsg)
+	if status := m.resolveFolders(st); status != "" {
+		return m.response(status, m.srcMsg)
 	}
-	if dstFldErr != nil {
-		return response(moveStatusInvalidDest, srcMsg)
-	}
-	if srcFolderID == dstFolderID {
-		return response(moveStatusSameSrcDest, srcMsg)
-	}
-	exists, err := st.FolderExists(dstFolderID)
+	srcCls, srcObj, err := objectClassFor(st, m.srcFolderID)
 	if err != nil {
-		st.LogSwallowedError("activesync.move-destination", err)
-		return response(moveStatusFailed, srcMsg)
+		st.LogSwallowedError("activesync.move-source-class", err)
+		return m.response(moveStatusLocked, m.srcMsg)
+	}
+	dstCls, dstObj, err := objectClassFor(st, m.dstFolderID)
+	if err != nil {
+		st.LogSwallowedError("activesync.move-destination-class", err)
+		return m.response(moveStatusLocked, m.srcMsg)
+	}
+	if srcObj != dstObj || srcCls.base != dstCls.base {
+		return m.response(moveStatusInvalidDest, m.srcMsg)
+	}
+	if srcObj {
+		return m.moveObject(st)
+	}
+	return m.moveMail(st)
+}
+
+// resolveFolders parses and checks both folder ids, answering the failure status
+// or "" when both folders exist and differ.
+func (m *moveRequest) resolveFolders(st *objectstore.Store) string {
+	var err error
+	if m.srcFolderID, err = strconv.ParseInt(m.srcFld, 10, 64); err != nil {
+		return moveStatusInvalidSource
+	}
+	if m.dstFolderID, err = strconv.ParseInt(m.dstFld, 10, 64); err != nil {
+		return moveStatusInvalidDest
+	}
+	if m.srcFolderID == m.dstFolderID {
+		return moveStatusSameSrcDest
+	}
+	if status := folderStatus(st, m.srcFolderID, moveStatusInvalidSource, "activesync.move-source"); status != "" {
+		return status
+	}
+	return folderStatus(st, m.dstFolderID, moveStatusInvalidDest, "activesync.move-destination")
+}
+
+// folderStatus answers missing when the folder does not exist, Status 7 when the
+// store cannot say, and "" when it exists.
+func folderStatus(st *objectstore.Store, fid int64, missing, stage string) string {
+	exists, err := st.FolderExists(fid)
+	if err != nil {
+		st.LogSwallowedError(stage, err)
+		return moveStatusLocked
 	}
 	if !exists {
-		return response(moveStatusInvalidDest, srcMsg)
+		return missing
 	}
-	info, err := st.MoveMessage(srcFolderID, uint32(uid64), dstFolderID)
+	return ""
+}
+
+// moveMail moves an IMAP-indexed message, addressed by its per-folder UID; the
+// destination id is the message's new UID there.
+func (m moveRequest) moveMail(st *objectstore.Store) *wbxml.Node {
+	uid, err := strconv.ParseUint(m.srcMsg, 10, 32)
+	if err != nil {
+		return m.response(moveStatusInvalidSource, m.srcMsg)
+	}
+	info, err := st.MoveMessage(m.srcFolderID, uint32(uid), m.dstFolderID)
 	if err != nil {
 		// The source no longer resolves (a stale client id) or the move failed.
-		return response(moveStatusInvalidSource, srcMsg)
+		return m.response(moveStatusInvalidSource, m.srcMsg)
 	}
-	return response(moveStatusSuccess, strconv.FormatUint(uint64(info.UID), 10))
+	return m.response(moveStatusSuccess, strconv.FormatUint(uint64(info.UID), 10))
+}
+
+// moveObject moves an item the object store alone holds, addressed by its
+// message id, which the move keeps, so every other protocol still names it the
+// same. An id the source folder does not hold live (another folder's item, a
+// soft-deleted one, a stale id) is Status 1 and nothing moves: a deleted item
+// stays in the dumpster rather than being pulled out of it.
+func (m moveRequest) moveObject(st *objectstore.Store) *wbxml.Node {
+	id, err := strconv.ParseInt(m.srcMsg, 10, 64)
+	if err != nil || id <= 0 {
+		return m.response(moveStatusInvalidSource, m.srcMsg)
+	}
+	_, err = st.MoveMessageImport(m.srcFolderID, id, m.dstFolderID, id)
+	if errors.Is(err, objectstore.ErrObjectDeleted) {
+		return m.response(moveStatusInvalidSource, m.srcMsg)
+	}
+	if err != nil {
+		st.LogSwallowedError("activesync.move-object", err)
+		return m.response(moveStatusLocked, m.srcMsg)
+	}
+	return m.response(moveStatusSuccess, m.srcMsg)
 }

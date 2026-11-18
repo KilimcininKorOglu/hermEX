@@ -23,14 +23,17 @@ type objectClass struct {
 	folderID int64
 	appData  func(*objectstore.Store, int64) (*wbxml.Node, error)
 	parse    func(*objectstore.Store, *wbxml.Node) (mapi.PropertyValues, error)
+	// base is the built-in folder of the class, which names the class itself:
+	// two folders hold the same kind of item exactly when their bases match.
+	base int64
 }
 
 // objectClasses is the single dispatch source for the object folders.
 var objectClasses = map[int64]objectClass{
-	int64(mapi.PrivateFIDCalendar): {int64(mapi.PrivateFIDCalendar), calendarAppData, parseCalendarProps},
-	int64(mapi.PrivateFIDContacts): {int64(mapi.PrivateFIDContacts), contactAppData, parseContactProps},
-	int64(mapi.PrivateFIDTasks):    {int64(mapi.PrivateFIDTasks), taskAppData, parseTaskProps},
-	int64(mapi.PrivateFIDNotes):    {int64(mapi.PrivateFIDNotes), noteAppData, parseNoteItem},
+	int64(mapi.PrivateFIDCalendar): {int64(mapi.PrivateFIDCalendar), calendarAppData, parseCalendarProps, int64(mapi.PrivateFIDCalendar)},
+	int64(mapi.PrivateFIDContacts): {int64(mapi.PrivateFIDContacts), contactAppData, parseContactProps, int64(mapi.PrivateFIDContacts)},
+	int64(mapi.PrivateFIDTasks):    {int64(mapi.PrivateFIDTasks), taskAppData, parseTaskProps, int64(mapi.PrivateFIDTasks)},
+	int64(mapi.PrivateFIDNotes):    {int64(mapi.PrivateFIDNotes), noteAppData, parseNoteItem, int64(mapi.PrivateFIDNotes)},
 }
 
 // classByContainer gives a user-created object folder the data class of the
