@@ -154,14 +154,14 @@ func TestSearchGALIncludesDistlist(t *testing.T) {
 	d := mlistTestDir(t)
 	mkList(t, d, "team@hermex.test", mlistTypeNormal, mlistPrivAll)
 
-	lists, err := d.SearchGAL("alice@hermex.test", "team", 50)
+	lists, err := d.SearchGAL("alice@hermex.test", "team", 50, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(lists) != 1 || lists[0].Address != "team@hermex.test" || lists[0].DisplayType != dtDistlist {
 		t.Errorf("SearchGAL(team) = %+v, want one team@hermex.test with DisplayType DT_DISTLIST", lists)
 	}
-	users, err := d.SearchGAL("alice@hermex.test", "alice", 50)
+	users, err := d.SearchGAL("alice@hermex.test", "alice", 50, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestMListOwner(t *testing.T) {
 	wantEq(t, "stored owner", mustOneMList(t, d, "after setting the owner").Owner, "alice@hermex.test")
 
 	// The GAL search that feeds the NSPI address book carries the owner too.
-	gal, err := d.SearchGAL("alice@hermex.test", "crew", 20)
+	gal, err := d.SearchGAL("alice@hermex.test", "crew", 20, 0)
 	mustNoErr(t, "search GAL", err)
 	if len(gal) != 1 {
 		t.Fatalf("SearchGAL = %+v, want the crew list", gal)

@@ -30,11 +30,12 @@ func (s *Server) handleDirectory(w http.ResponseWriter, r *http.Request) {
 	// address), so the contacts page can show the GAL, not only a live search.
 	if gal, ok := s.auth.(directory.GAL); ok {
 		// Withhold the addresses the operator hid from the address book.
-		if res, err := gal.SearchGAL(c.Email, q, limit); err == nil {
-			res = directory.VisibleGAL(res)
-			for _, e := range res {
-				entries = append(entries, map[string]any{"name": e.DisplayName, "email": e.Address, "display_name": e.DisplayName})
-			}
+		res, err := gal.SearchGAL(c.Email, q, limit, directory.HideFromGAL)
+		if err != nil {
+			logError("gal-search", err, logging.Fields{"user": c.Email})
+		}
+		for _, e := range directory.VisibleGAL(res) {
+			entries = append(entries, map[string]any{"name": e.DisplayName, "email": e.Address, "display_name": e.DisplayName})
 		}
 	}
 	// Return under several keys so the SPA's expected field matches regardless.

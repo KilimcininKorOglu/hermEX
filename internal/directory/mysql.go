@@ -452,7 +452,7 @@ SELECT u.username, u.maildir
 // PR_DISPLAY_NAME from user_properties, falling back to the address when none is
 // set; DisplayType carries the object class (the users.display_type column, not
 // joined from user_properties).
-func (d *SQLDirectory) SearchGAL(caller, query string, limit int) ([]GALEntry, error) {
+func (d *SQLDirectory) SearchGAL(caller, query string, limit int, hide uint32) ([]GALEntry, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -465,10 +465,11 @@ func (d *SQLDirectory) SearchGAL(caller, query string, limit int) ([]GALEntry, e
 	// '\\' is how MySQL spells a single backslash escape character).
 	esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(strings.ToLower(strings.TrimSpace(query)))
 	const prDisplayName = 0x3001001F // PR_DISPLAY_NAME (PtUnicode)
-	// The hide mask is loaded but NOT filtered here: SearchGAL feeds both GAL
-	// enumeration and name resolution, which hide on different bits, so the
-	// per-surface filtering lives in the NSPI layer. The SQL only loads the raw
-	// mask; the address-book code applies the bit appropriate to each query.
+	// The caller's hide bits are applied on users.hide_mask before the LIMIT, so
+	// hidden entries never use up the answer; the raw mask properties are still
+	// loaded into HiddenFrom, which the surfaces apply again and the NSPI layer
+	// (which passes 0) applies per query. A column that lags its property can
+	// therefore only withhold an entry, never show a hidden one.
 	const q = `
 SELECT u.username, u.display_type, u.maildir, dn.propval_str, hg.propval_str, hb.propval_str, cap.propval_str, ml.owner
   FROM users u JOIN domains d ON u.domain_id = d.id
@@ -482,13 +483,14 @@ SELECT u.username, u.display_type, u.maildir, dn.propval_str, hg.propval_str, hb
    AND (u.address_status & ?) = ?
    AND (u.address_status & ?) = 0
    AND d.domain_status = 0
+   AND (u.hide_mask & ?) = 0
    AND u.username LIKE ? ESCAPE '\\'` + galScopePredicate + `
  ORDER BY u.username
  LIMIT ?`
 	args := []any{prDisplayName, PropAttrHiddenMask, PropAttrHidden, prRoomCapacity,
 		dtMailuser, dtDistlist, dtContact, dtRoom, dtEquipment, // display_type IN
 		dtDistlist, dtContact, // maildir-exempt types (no mailbox)
-		afUserMask, afUserNormal, afDomainMask, "%" + esc + "%"}
+		afUserMask, afUserNormal, afDomainMask, hide, "%" + esc + "%"}
 	args = append(args, scope...)
 	args = append(args, limit)
 	rows, err := d.db.Query(q, args...)

@@ -13,7 +13,7 @@ import (
 // carries the caller through rather than reproving the SQL.
 type tenantGAL []string
 
-func (g tenantGAL) SearchGAL(caller, _ string, _ int) ([]directory.GALEntry, error) {
+func (g tenantGAL) SearchGAL(caller, _ string, _ int, _ uint32) ([]directory.GALEntry, error) {
 	dom := domainOf(caller)
 	if dom == "" {
 		return nil, nil

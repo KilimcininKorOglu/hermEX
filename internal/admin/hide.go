@@ -9,8 +9,9 @@ import (
 )
 
 // Address-book hide bits (the PR_ATTR_HIDDEN mask): which surfaces a user is
-// hidden from. GAL and ANR are enforced by the NSPI layer today; AL and Delegate
-// are stored faithfully and take effect when those address-book surfaces exist.
+// hidden from. GAL and ANR are enforced by every address-book surface; AL by the
+// NSPI address lists; Delegate is stored faithfully and takes effect when a
+// delegate picker exists.
 const (
 	hideGAL      = 0x01
 	hideAL       = 0x02

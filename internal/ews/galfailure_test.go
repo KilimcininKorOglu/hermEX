@@ -14,7 +14,7 @@ type failingGAL struct {
 	directory.StaticAccounts
 }
 
-func (failingGAL) SearchGAL(string, string, int) ([]directory.GALEntry, error) {
+func (failingGAL) SearchGAL(string, string, int, uint32) ([]directory.GALEntry, error) {
 	return nil, errors.New("directory unavailable")
 }
 

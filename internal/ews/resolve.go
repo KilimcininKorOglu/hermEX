@@ -42,12 +42,12 @@ type resolution struct {
 // searchGAL queries the directory's address book for the caller. A directory
 // without one has no entries. An error is a directory failure, which the caller
 // must surface rather than answer as an unknown name.
-func (s *Server) searchGAL(sess *session, query string, limit int) ([]directory.GALEntry, error) {
+func (s *Server) searchGAL(sess *session, query string, limit int, hide uint32) ([]directory.GALEntry, error) {
 	gal, ok := s.accounts.(directory.GAL)
 	if !ok {
 		return nil, nil
 	}
-	return gal.SearchGAL(sess.user, query, limit)
+	return gal.SearchGAL(sess.user, query, limit, hide)
 }
 
 // handleResolveNames answers ResolveNames against the directory GAL: one match is
@@ -59,7 +59,7 @@ func (s *Server) handleResolveNames(w http.ResponseWriter, inner []byte, sess *s
 		s.soapFault(w, "ErrorInvalidRequest", "ResolveNames: invalid request", err)
 		return
 	}
-	entries, err := s.searchGAL(sess, req.UnresolvedEntry, resolveLimit)
+	entries, err := s.searchGAL(sess, req.UnresolvedEntry, resolveLimit, directory.HideFromGAL|directory.HideFromResolve)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "ResolveNames: the address book could not be read", err)
 		return

@@ -51,7 +51,7 @@ func seedScopedPrincipals(t *testing.T, d *SQLDirectory, db *sql.DB, root, dom s
 // galAddresses runs an unfiltered GAL search as caller and returns the addresses.
 func galAddresses(t *testing.T, d *SQLDirectory, caller string) []string {
 	t.Helper()
-	entries, err := d.SearchGAL(caller, "", 0)
+	entries, err := d.SearchGAL(caller, "", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

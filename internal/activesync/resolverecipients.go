@@ -187,7 +187,7 @@ func resolveEntries(gal directory.GAL, to string, sess *session, fail storeFail)
 		matches = append(matches, resolvedRecipient{entry: e, contact: contact})
 	}
 	if gal != nil {
-		entries, err := gal.SearchGAL(sess.user, to, resolveRecipientLimit)
+		entries, err := gal.SearchGAL(sess.user, to, resolveRecipientLimit, directory.HideFromGAL|directory.HideFromResolve)
 		if err != nil {
 			return nil, err
 		}

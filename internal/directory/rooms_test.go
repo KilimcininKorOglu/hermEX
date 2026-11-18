@@ -109,7 +109,7 @@ func TestSearchGALRoomCapacity(t *testing.T) {
 	if _, err := d.CreateRoom("conf-a@hermex.test", "Conference A", filepath.Join(root, "conf"), 8, false); err != nil {
 		t.Fatal(err)
 	}
-	entries, err := d.SearchGAL("alice@hermex.test", "conf-a", 20)
+	entries, err := d.SearchGAL("alice@hermex.test", "conf-a", 20, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

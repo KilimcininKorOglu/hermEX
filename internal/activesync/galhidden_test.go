@@ -2,6 +2,7 @@ package activesync
 
 import (
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
@@ -11,34 +12,62 @@ import (
 )
 
 // hidingAccounts is a directory whose GAL carries the operator's hide mask, which
-// the static directory never sets.
+// the static directory never sets. Like the SQL directory it leaves out an entry
+// carrying any bit the caller asked to hide, and it records the bits each search
+// asked for.
 type hidingAccounts struct {
 	directory.StaticAccounts
 	hidden map[string]uint32
+	asked  *[]uint32
 }
 
-func (h hidingAccounts) SearchGAL(caller, q string, limit int) ([]directory.GALEntry, error) {
-	entries, err := h.StaticAccounts.SearchGAL(caller, q, limit)
-	for i := range entries {
-		entries[i].HiddenFrom = h.hidden[entries[i].Address]
+func (h hidingAccounts) SearchGAL(caller, q string, limit int, hide uint32) ([]directory.GALEntry, error) {
+	*h.asked = append(*h.asked, hide)
+	entries, err := h.StaticAccounts.SearchGAL(caller, q, 0, 0)
+	var out []directory.GALEntry
+	for _, e := range entries {
+		e.HiddenFrom = h.hidden[e.Address]
+		if e.HiddenFrom&hide == 0 && (limit <= 0 || len(out) < limit) {
+			out = append(out, e)
+		}
 	}
-	return entries, err
+	return out, err
 }
 
 // hidingServer starts a server whose GAL holds one visible and one hidden user,
-// both matching the query prefix "al".
-func hidingServer(t *testing.T, mask uint32) *httptest.Server {
+// both matching the query prefix "al". The returned slice collects the hide bits
+// every GAL search asked for.
+func hidingServer(t *testing.T, mask uint32) (*httptest.Server, *[]uint32) {
 	t.Helper()
+	asked := &[]uint32{}
 	accs := hidingAccounts{
 		StaticAccounts: directory.StaticAccounts{
 			testUser:             {Password: testPass, MailboxPath: filepath.Join(t.TempDir(), "alice")},
 			"albert@hermex.test": {Password: testPass, MailboxPath: filepath.Join(t.TempDir(), "albert")},
 		},
 		hidden: map[string]uint32{"albert@hermex.test": mask},
+		asked:  asked,
 	}
 	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
 	t.Cleanup(ts.Close)
-	return ts
+	return ts, asked
+}
+
+// TestGALSearchesAskTheDirectoryToHide proves each surface hands the directory
+// the hide bits it honors, so hidden entries are dropped before the directory's
+// row limit: a GAL Search the GAL bit, ResolveRecipients the GAL and name
+// resolution bits. A surface that asked for nothing would let hidden entries use
+// up the limit and push visible ones out of the answer.
+func TestGALSearchesAskTheDirectoryToHide(t *testing.T) {
+	ts, asked := hidingServer(t, 0)
+	postCommand(t, ts, "Search", searchReq("GAL", "al"))
+	wantEq(t, "hide bits of a GAL Search", fmt.Sprint(*asked), fmt.Sprint([]uint32{directory.HideFromGAL}))
+
+	*asked = nil
+	postCommand(t, ts, "ResolveRecipients",
+		wbxml.Elem(wbxml.RRResolveRecipients, wbxml.Str(wbxml.RRTo, "al")))
+	wantEq(t, "hide bits of ResolveRecipients", fmt.Sprint(*asked),
+		fmt.Sprint([]uint32{directory.HideFromGAL | directory.HideFromResolve}))
 }
 
 // galAddresses collects every address a Search reply carried.
@@ -58,7 +87,7 @@ func galAddresses(store *wbxml.Node) []string {
 // TestSearchGALOmitsHiddenUser proves a GAL Search does not return a user the
 // operator hid from the address book, and still returns the one it did not.
 func TestSearchGALOmitsHiddenUser(t *testing.T) {
-	ts := hidingServer(t, directory.HideFromGAL)
+	ts, _ := hidingServer(t, directory.HideFromGAL)
 
 	_, root := postCommand(t, ts, "Search", searchReq("GAL", "al"))
 	store := searchStore(t, root)
@@ -81,13 +110,13 @@ func TestSearchGALOmitsHiddenUser(t *testing.T) {
 // hide switch withholds the user from the surface, not only from a prefix list.
 func TestHiddenUserStaysHiddenByExactAddress(t *testing.T) {
 	const hidden = "albert@hermex.test"
-	ts := hidingServer(t, directory.HideFromGAL)
+	ts, _ := hidingServer(t, directory.HideFromGAL)
 	_, root := postCommand(t, ts, "Search", searchReq("GAL", hidden))
 	if got := galAddresses(searchStore(t, root)); len(got) != 0 {
 		t.Errorf("a GAL Search for the hidden address returned %v", got)
 	}
 
-	ts = hidingServer(t, directory.HideFromResolve)
+	ts, _ = hidingServer(t, directory.HideFromResolve)
 	_, root = postCommand(t, ts, "ResolveRecipients",
 		wbxml.Elem(wbxml.RRResolveRecipients, wbxml.Str(wbxml.RRTo, hidden)))
 	if resp := root.Child(wbxml.RRResponse); resp != nil {
@@ -102,7 +131,7 @@ func TestHiddenUserStaysHiddenByExactAddress(t *testing.T) {
 // failingGAL is a directory whose address book cannot be read.
 type failingGAL struct{ directory.StaticAccounts }
 
-func (failingGAL) SearchGAL(string, string, int) ([]directory.GALEntry, error) {
+func (failingGAL) SearchGAL(string, string, int, uint32) ([]directory.GALEntry, error) {
 	return nil, errors.New("directory unreachable")
 }
 
@@ -129,7 +158,7 @@ func TestSearchGALReportsADirectoryFailure(t *testing.T) {
 // address book: a user withheld only from name resolution still appears in a GAL
 // search, so the two switches stay distinct.
 func TestSearchGALKeepsResolutionHiddenUser(t *testing.T) {
-	ts := hidingServer(t, directory.HideFromResolve)
+	ts, _ := hidingServer(t, directory.HideFromResolve)
 
 	_, root := postCommand(t, ts, "Search", searchReq("GAL", "al"))
 	if got := galAddresses(searchStore(t, root)); len(got) != 2 {
@@ -141,7 +170,7 @@ func TestSearchGALKeepsResolutionHiddenUser(t *testing.T) {
 // hidden from resolution, the switch that exists to keep an address out of
 // auto-completion.
 func TestResolveRecipientsOmitsHiddenUser(t *testing.T) {
-	ts := hidingServer(t, directory.HideFromResolve)
+	ts, _ := hidingServer(t, directory.HideFromResolve)
 
 	_, root := postCommand(t, ts, "ResolveRecipients",
 		wbxml.Elem(wbxml.RRResolveRecipients, wbxml.Str(wbxml.RRTo, "al")))

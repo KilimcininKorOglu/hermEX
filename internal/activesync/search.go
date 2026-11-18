@@ -304,7 +304,7 @@ func (s *Server) handleGALSearch(w http.ResponseWriter, store *wbxml.Node, sess 
 	var entries []directory.GALEntry
 	if gal, ok := s.accounts.(directory.GAL); ok && query != "" {
 		var err error
-		if entries, err = gal.SearchGAL(sess.user, query, hi+1); err != nil {
+		if entries, err = gal.SearchGAL(sess.user, query, hi+1, directory.HideFromGAL); err != nil {
 			// A directory failure is a server error, never an empty address book.
 			s.logSearchFail(sess, err)
 			writeWBXML(w, searchGALReply(srStoreServerError, nil, 0, 0))

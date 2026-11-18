@@ -145,7 +145,7 @@ func (s *Session) displayName(addr string) string {
 	if !ok || addr == "" {
 		return ""
 	}
-	entries, err := gal.SearchGAL(s.owner, addr, 10)
+	entries, err := gal.SearchGAL(s.owner, addr, 10, 0)
 	if err != nil {
 		return ""
 	}

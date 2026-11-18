@@ -9,14 +9,17 @@ import (
 )
 
 // hidingAccounts is a directory whose GAL carries the operator's hide mask, which
-// the static directory never sets.
+// the static directory never sets. It records the hide bits each search asked the
+// directory for.
 type hidingAccounts struct {
 	directory.StaticAccounts
 	hidden map[string]uint32
+	asked  *[]uint32
 }
 
-func (h hidingAccounts) SearchGAL(caller, q string, limit int) ([]directory.GALEntry, error) {
-	entries, err := h.StaticAccounts.SearchGAL(caller, q, limit)
+func (h hidingAccounts) SearchGAL(caller, q string, limit int, hide uint32) ([]directory.GALEntry, error) {
+	*h.asked = append(*h.asked, hide)
+	entries, err := h.StaticAccounts.SearchGAL(caller, q, limit, hide)
 	for i := range entries {
 		entries[i].HiddenFrom = h.hidden[entries[i].Address]
 	}
@@ -26,17 +29,51 @@ func (h hidingAccounts) SearchGAL(caller, q string, limit int) ([]directory.GALE
 // hidingServer starts an EWS server whose GAL holds one visible and one hidden
 // user, both matching the query prefix "al".
 func hidingServer(t *testing.T, mask uint32) *httptest.Server {
+	ts, _ := hidingServerAsked(t, mask)
+	return ts
+}
+
+// hidingServerAsked is hidingServer that also returns the hide bits every GAL
+// search asked the directory for.
+func hidingServerAsked(t *testing.T, mask uint32) (*httptest.Server, *[]uint32) {
 	t.Helper()
+	asked := &[]uint32{}
 	accs := hidingAccounts{
 		StaticAccounts: directory.StaticAccounts{
 			"alice@hermex.test": {Password: testPass, MailboxPath: provisionedDir(t)},
 			"alex@hermex.test":  {Password: testPass, MailboxPath: provisionedDir(t)},
 		},
 		hidden: map[string]uint32{"alex@hermex.test": mask},
+		asked:  asked,
 	}
 	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
 	t.Cleanup(ts.Close)
-	return ts
+	return ts, asked
+}
+
+// TestGALSearchesAskTheDirectoryToHide proves each EWS surface hands the
+// directory the hide bits it honors, so hidden entries are dropped before the
+// directory's row limit instead of using it up: ResolveNames the GAL and name
+// resolution bits, FindPeople and GetPersona the GAL bit.
+func TestGALSearchesAskTheDirectoryToHide(t *testing.T) {
+	persona := `<GetPersona xmlns="` + nsMessages + `"><EmailAddress xmlns="` + nsTypes +
+		`"><EmailAddress>alice@hermex.test</EmailAddress></EmailAddress></GetPersona>`
+	for _, tc := range []struct {
+		name string
+		req  string
+		want uint32
+	}{
+		{"ResolveNames", resolveReq("al"), directory.HideFromGAL | directory.HideFromResolve},
+		{"FindPeople", wrapRequest(`<FindPeople xmlns="` + nsMessages + `"><QueryString>al</QueryString></FindPeople>`), directory.HideFromGAL},
+		{"GetPersona", wrapRequest(persona), directory.HideFromGAL},
+		{"GetUserPhoto", getUserPhotoBody("alex@hermex.test"), directory.HideFromGAL},
+	} {
+		ts, asked := hidingServerAsked(t, 0)
+		soapPost(t, ts, tc.req, true)
+		if got := *asked; len(got) == 0 || got[0] != tc.want {
+			t.Errorf("%s: hide bits asked of the directory = %v, want %d first", tc.name, got, tc.want)
+		}
+	}
 }
 
 // TestResolveNamesOmitsHiddenUser proves ResolveNames withholds a user the

@@ -12,14 +12,17 @@ import (
 )
 
 // hidingAccounts is a directory whose GAL carries the operator's hide mask, which
-// the static directory never sets.
+// the static directory never sets. It records the hide bits each search asked the
+// directory for.
 type hidingAccounts struct {
 	directory.StaticAccounts
 	hidden map[string]uint32
+	asked  *[]uint32
 }
 
-func (h hidingAccounts) SearchGAL(caller, q string, limit int) ([]directory.GALEntry, error) {
-	entries, err := h.StaticAccounts.SearchGAL(caller, q, limit)
+func (h hidingAccounts) SearchGAL(caller, q string, limit int, hide uint32) ([]directory.GALEntry, error) {
+	*h.asked = append(*h.asked, hide)
+	entries, err := h.StaticAccounts.SearchGAL(caller, q, limit, hide)
 	for i := range entries {
 		entries[i].HiddenFrom = h.hidden[entries[i].Address]
 	}
@@ -43,6 +46,7 @@ func TestDirectoryOmitsHiddenUser(t *testing.T) {
 			"alex@hermex.test":  {MailboxPath: t.TempDir()},
 		},
 		hidden: map[string]uint32{"alex@hermex.test": directory.HideFromGAL},
+		asked:  &[]uint32{},
 	}
 	secret := []byte("directory-hide-test-secret")
 	srv := NewServer(accs, accs, nil, "mail.hermex.test", secret, "", false)
@@ -62,5 +66,10 @@ func TestDirectoryOmitsHiddenUser(t *testing.T) {
 	}
 	if !strings.Contains(body, "alice@hermex.test") {
 		t.Errorf("the directory dropped the visible user: %s", body)
+	}
+	// The directory must drop hidden entries before its row limit, or they use
+	// up the answer and push visible users out of it.
+	if got := *accs.asked; len(got) != 1 || got[0] != directory.HideFromGAL {
+		t.Errorf("hide bits asked of the directory = %v, want [%d]", got, directory.HideFromGAL)
 	}
 }

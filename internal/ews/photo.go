@@ -71,7 +71,7 @@ func (s *Server) userPhoto(email string, sess *session) ([]byte, error) {
 
 // galPhoto returns the portrait of the address-book user at an address, or nil.
 func (s *Server) galPhoto(email string, sess *session) ([]byte, error) {
-	entries, err := s.searchGAL(sess, email, 5)
+	entries, err := s.searchGAL(sess, email, 5, directory.HideFromGAL)
 	if err != nil {
 		return nil, err
 	}

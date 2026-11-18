@@ -231,8 +231,14 @@ type GALEntry struct {
 // account enumerate every mailbox in the deployment; making the compiler ask for
 // it is what keeps a new surface from reintroducing that. An empty caller
 // resolves to nothing rather than everything.
+//
+// hide is the address-book hide bits the surface honors (HideFromGAL for a
+// browse, HideFromGAL|HideFromResolve for name resolution, 0 for a layer that
+// applies the bits itself): an entry carrying any of them is left out before the
+// limit applies, so hidden entries never use up the answer. It is required for
+// the same reason caller is, so every surface names the bits it honors.
 type GAL interface {
-	SearchGAL(caller, query string, limit int) ([]GALEntry, error)
+	SearchGAL(caller, query string, limit int, hide uint32) ([]GALEntry, error)
 }
 
 // DisplayTypeRoom is the PR_DISPLAY_TYPE_EX value (DT_ROOM) that marks a bookable
@@ -381,8 +387,9 @@ func (a StaticAccounts) SharedMailboxes(string) ([]SharedMailbox, error) {
 // capped at limit (limit <= 0 means no cap). DisplayName mirrors the address.
 //
 // caller is ignored: a static directory is one flat map with no domains, so
-// every account is in the same scope by construction.
-func (a StaticAccounts) SearchGAL(_, query string, limit int) ([]GALEntry, error) {
+// every account is in the same scope by construction. hide is ignored too: a
+// static directory records no hide mask, so no entry carries a bit.
+func (a StaticAccounts) SearchGAL(_, query string, limit int, _ uint32) ([]GALEntry, error) {
 	q := strings.ToLower(strings.TrimSpace(query))
 	addrs := make([]string, 0, len(a))
 	for addr := range a {

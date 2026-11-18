@@ -136,7 +136,7 @@ func (s *Server) handleFindPeople(w http.ResponseWriter, inner []byte, sess *ses
 // The GAL comes first, because a colleague is the likelier match, and an address
 // found in both is emitted once.
 func (s *Server) searchPeople(sess *session, query string) ([]personaOut, error) {
-	entries, err := s.searchGAL(sess, query, personaSearchLimit)
+	entries, err := s.searchGAL(sess, query, personaSearchLimit, directory.HideFromGAL)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +207,7 @@ func newPersona(displayName, address string) personaOut {
 // nil. A hidden address has no persona to report, the same as an address absent
 // from the directory.
 func (s *Server) galPersona(sess *session, target string) (*personaOut, error) {
-	entries, err := s.searchGAL(sess, target, personaSearchLimit)
+	entries, err := s.searchGAL(sess, target, personaSearchLimit, directory.HideFromGAL)
 	if err != nil {
 		return nil, err
 	}

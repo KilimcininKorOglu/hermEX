@@ -18,7 +18,7 @@ type memberGAL struct {
 	members map[string][]string
 }
 
-func (m memberGAL) SearchGAL(string, string, int) ([]directory.GALEntry, error) {
+func (m memberGAL) SearchGAL(string, string, int, uint32) ([]directory.GALEntry, error) {
 	return m.entries, nil
 }
 

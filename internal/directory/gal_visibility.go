@@ -1,9 +1,10 @@
 package directory
 
 // Address-book hide bits, the PR_ATTR_HIDDEN mask an operator sets per user with
-// the panel's "Hide user from..." switches. SearchGAL loads the mask into
-// GALEntry.HiddenFrom but deliberately does not apply it, because each surface
-// applies a different combination; the filters below are how a surface applies it.
+// the panel's "Hide user from..." switches. Each surface passes the bits it honors
+// to SearchGAL, which drops those entries before its row limit, and applies the
+// filters below to the mask SearchGAL loads into GALEntry.HiddenFrom, so a
+// directory whose numeric copy lags the property can only withhold an entry.
 const (
 	HideFromGAL      uint32 = 0x01 // absent from the Global Address List
 	HideFromAL       uint32 = 0x02 // absent from the typed address lists

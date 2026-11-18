@@ -157,7 +157,7 @@ func (s *Server) snapshot(caller string) gal {
 	if s.gal == nil {
 		return gal{}
 	}
-	entries, err := s.gal.SearchGAL(caller, "", galEnumLimit)
+	entries, err := s.gal.SearchGAL(caller, "", galEnumLimit, 0)
 	if err != nil {
 		return gal{}
 	}

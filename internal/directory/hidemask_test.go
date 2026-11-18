@@ -45,6 +45,36 @@ func TestHideMaskColumnFollowsTheProperty(t *testing.T) {
 	}
 }
 
+// TestSearchGALHidesBeforeTheLimit proves the hide bits a surface asks for drop
+// hidden entries before the row limit. The two hidden contacts sort ahead of the
+// visible one under ORDER BY username and fill the limit of 2 on their own, so a
+// filter applied after the limit would answer with nothing visible. An entry
+// carrying only a bit the caller did not ask for stays.
+func TestSearchGALHidesBeforeTheLimit(t *testing.T) {
+	d, _ := freshDirectory(t)
+	root := t.TempDir()
+	mustCreateDomain(t, d, root, "hermex.test")
+	mustCreateUser(t, d, root, "caller@hermex.test", "pw")
+	for _, a := range []string{"aa-hidden@hermex.test", "ab-hidden@hermex.test", "zz-visible@hermex.test"} {
+		_, err := d.CreateContact(a, a, "hermex.test")
+		mustNoErr(t, "create contact "+a, err)
+	}
+	for _, a := range []string{"aa-hidden@hermex.test", "ab-hidden@hermex.test"} {
+		_, err := d.SetUserProperties(a, map[uint32]string{PropAttrHiddenMask: strconv.Itoa(int(HideFromGAL))})
+		mustNoErr(t, "hide "+a, err)
+	}
+
+	got, err := d.SearchGAL("caller@hermex.test", "-", 2, HideFromGAL)
+	mustNoErr(t, "search hiding GAL entries", err)
+	if len(got) != 1 || got[0].Address != "zz-visible@hermex.test" {
+		t.Errorf("SearchGAL(limit 2, hide GAL) = %+v, want only zz-visible@hermex.test", got)
+	}
+
+	got, err = d.SearchGAL("caller@hermex.test", "-", 5, HideFromResolve)
+	mustNoErr(t, "search hiding resolution entries", err)
+	wantEq(t, "entries when the caller hides only name resolution", len(got), 3)
+}
+
 // TestEnsureSchemaHealsAStaleHideMask proves a start-up recomputes the column for
 // a property written behind SetUserProperties (a restored dump, or an older
 // binary that knew nothing of the column), in both directions.

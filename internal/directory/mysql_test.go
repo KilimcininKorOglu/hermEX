@@ -531,7 +531,7 @@ func TestSQLDirectorySearchGAL(t *testing.T) {
 // mustSearchGAL runs a GAL search as alice.
 func mustSearchGAL(t *testing.T, d *SQLDirectory, query string, limit int) []GALEntry {
 	t.Helper()
-	got, err := d.SearchGAL("alice@hermex.test", query, limit)
+	got, err := d.SearchGAL("alice@hermex.test", query, limit, 0)
 	mustNoErr(t, "search GAL", err)
 	return got
 }

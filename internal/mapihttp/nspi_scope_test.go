@@ -17,7 +17,7 @@ type tenantAccounts struct {
 	directory.StaticAccounts
 }
 
-func (a tenantAccounts) SearchGAL(caller, _ string, _ int) ([]directory.GALEntry, error) {
+func (a tenantAccounts) SearchGAL(caller, _ string, _ int, _ uint32) ([]directory.GALEntry, error) {
 	dom := afterAt(caller)
 	if dom == "" {
 		return nil, nil

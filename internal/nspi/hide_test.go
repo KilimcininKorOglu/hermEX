@@ -1,6 +1,7 @@
 package nspi
 
 import (
+	"fmt"
 	"testing"
 
 	"hermex/internal/directory"
@@ -10,9 +11,15 @@ import (
 // maskedGAL is a directory.GAL whose entries carry an address-book hide mask.
 // snapshot() always queries with an empty string, so the query is ignored and
 // every entry is returned; the NSPI layer does the per-surface hide filtering.
+// The NSPI snapshot serves browse, resolution and address-list views that hide on
+// different bits, so it must ask the directory to hide nothing: a search with any
+// hide bit fails, which empties the snapshot and fails the visibility tests.
 type maskedGAL []directory.GALEntry
 
-func (m maskedGAL) SearchGAL(caller, query string, limit int) ([]directory.GALEntry, error) {
+func (m maskedGAL) SearchGAL(caller, query string, limit int, hide uint32) ([]directory.GALEntry, error) {
+	if hide != 0 {
+		return nil, fmt.Errorf("the NSPI snapshot asked the directory to hide %#x", hide)
+	}
 	return []directory.GALEntry(m), nil
 }
 
