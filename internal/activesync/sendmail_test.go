@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -283,6 +284,13 @@ func TestSmartForwardOfAnAppointment(t *testing.T) {
 	}
 	if v, ok := sourceVerb(t, aliceDir, id); !ok || v != mapi.NoteVerbForward {
 		t.Errorf("appointment PidTagLastVerbExecuted = %d (present=%v), want %d", v, ok, mapi.NoteVerbForward)
+	}
+	// 2.2.1.19: a forwarded appointment rides as the original message attached.
+	got := firstRaw(t, bobDir, int64(mapi.PrivateFIDInbox))
+	for _, want := range []string{"message/rfc822", "Planning.eml", "Subject: Planning"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("forward of an appointment lacks %q:\n%s", want, got)
+		}
 	}
 }
 

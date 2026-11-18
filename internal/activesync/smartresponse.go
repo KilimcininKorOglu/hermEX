@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcmail"
 )
@@ -60,6 +62,14 @@ func withOriginal(mailbox string, device []byte, src *replySource) ([]byte, erro
 	if err != nil {
 		return nil, fmt.Errorf("read the device message: %w", err)
 	}
-	oxcmail.AppendOriginal(reply, orig, src.forward)
+	class, _ := orig.Props.Get(mapi.PrMessageClass)
+	if s, _ := class.(string); src.forward && strings.HasPrefix(strings.ToLower(s), "ipm.appointment") {
+		// An appointment is forwarded as an attachment ([MS-ASCMD] 2.2.1.19).
+		if err := oxcmail.AttachOriginal(reply, orig); err != nil {
+			return nil, fmt.Errorf("attach the source: %w", err)
+		}
+	} else {
+		oxcmail.AppendOriginal(reply, orig, src.forward)
+	}
 	return oxcmail.Export(reply, oxcmail.Options{})
 }

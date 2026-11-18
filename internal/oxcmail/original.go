@@ -28,6 +28,27 @@ func AppendOriginal(reply, orig *Message, forward bool) {
 	}
 }
 
+// AttachOriginal adds the original as an embedded message attachment (method 5,
+// its RFC 5322 bytes in PR_ATTACH_DATA_BIN), the form a forward of an
+// appointment takes ([MS-ASCMD] 2.2.1.19).
+func AttachOriginal(fwd, orig *Message) error {
+	raw, err := Export(orig, Options{})
+	if err != nil {
+		return err
+	}
+	name := propString(orig.Props, mapi.PrSubject)
+	if name == "" {
+		name = "original"
+	}
+	var a mapi.PropertyValues
+	a.Set(mapi.PrAttachMethod, int32(mapi.AttachEmbeddedMsg))
+	a.Set(mapi.PrAttachMimeTag, "message/rfc822")
+	a.Set(mapi.PrAttachLongFilename, name+".eml")
+	a.Set(mapi.PrAttachDataBin, raw)
+	fwd.Attachments = append(fwd.Attachments, Attachment{Props: a})
+	return nil
+}
+
 // originalHeader lists the header lines of the quoted original, skipping the ones
 // the original does not carry.
 func originalHeader(p mapi.PropertyValues) []string {
