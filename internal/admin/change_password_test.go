@@ -77,6 +77,26 @@ func TestUIChangePasswordRecordsAFailedWrite(t *testing.T) {
 	}
 }
 
+// TestUIChangePasswordRefusesAForgedRequest sends what an attacker controls: a
+// form naming another account changes only the session's own, a request without
+// the CSRF token is refused (403) and changes nothing, and an empty new password
+// is refused before the directory is asked.
+func TestUIChangePasswordRefusesAForgedRequest(t *testing.T) {
+	d := cpFakeDir()
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	htmxPUT(t, ts, "/admin/ui/change-password", session, csrf,
+		url.Values{"old": {"pw"}, "new": {"x1"}, "login": {"victim@hermex.test"}, "user": {"victim@hermex.test"}}).Body.Close()
+	wantEq(t, d.setPwUser, "admin@hermex.test", "the account changed")
+
+	d.setPwUser, d.setPwValue = "", ""
+	resp := htmxPUT(t, ts, "/admin/ui/change-password", session, "", url.Values{"old": {"pw"}, "new": {"x2"}})
+	wantStatus(t, resp, http.StatusForbidden, "a request without the CSRF token")
+	htmxPUT(t, ts, "/admin/ui/change-password", session, csrf, url.Values{"old": {"pw"}, "new": {""}}).Body.Close()
+	wantEq(t, d.setPwValue, "", "the password after a CSRF-less or empty-password request")
+}
+
 // TestUIChangePasswordWrongCurrent proves a wrong current password reports an
 // error and never touches the stored password.
 func TestUIChangePasswordWrongCurrent(t *testing.T) {
