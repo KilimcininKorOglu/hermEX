@@ -1,8 +1,11 @@
 package activesync
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"slices"
+	"strconv"
 	"strings"
 
 	"hermex/internal/objectstore"
@@ -58,6 +61,14 @@ type deviceMeta struct {
 	FirstSync  int64  `json:"firstSync,omitempty"`
 	LastSync   int64  `json:"lastSync,omitempty"`
 	WipeStatus int    `json:"wipeStatus,omitempty"`
+	// PendingKey is the temporary policy key phase one of Provision handed the
+	// device and PendingFor the policy key it was issued under; AckedKey is the
+	// final key the device earned by acknowledging that policy. [MS-ASPROV] lets
+	// only the acknowledgement earn the final key, so the command gate reads
+	// AckedKey and never trusts the key a request merely carries.
+	PendingKey string `json:"pendingKey,omitempty"`
+	PendingFor string `json:"pendingFor,omitempty"`
+	AckedKey   string `json:"ackedKey,omitempty"`
 }
 
 // devicesMeta is the whole mailbox's ActiveSync device metadata, persisted as
@@ -116,26 +127,80 @@ func updateDevices(st *objectstore.Store, change func(*devicesMeta) bool) error 
 	})
 }
 
-// recordDeviceContact stamps a device's metadata on the store and returns the
-// device's current wipe status. The caller treats the write as best-effort, it
-// is a pure side effect that must never alter or fail a command response.
-// firstSync and the OK status are set once; lastSync and the live attributes
-// refresh every call. A blank device id is a no-op.
-func recordDeviceContact(st *objectstore.Store, deviceID, user, deviceType, userAgent, asVersion string, now int64) (int, error) {
+// recordDeviceContact stamps a device's metadata on the store and returns a copy
+// of the device's record as written, which carries its wipe status and the policy
+// key it acknowledged. firstSync and the OK status are set once; lastSync and the
+// live attributes refresh every call. A blank device id is a no-op.
+func recordDeviceContact(st *objectstore.Store, deviceID, user, deviceType, userAgent, asVersion string, now int64) (deviceMeta, error) {
 	if deviceID == "" {
-		return WipeStatusUnknown, nil
+		return deviceMeta{}, nil
 	}
-	status := WipeStatusUnknown
+	var snap deviceMeta
 	err := updateDevices(st, func(m *devicesMeta) bool {
 		d := m.device(deviceID)
 		d.stampContact(user, deviceType, userAgent, asVersion, now)
-		status = d.WipeStatus
+		snap = *d
 		return true
 	})
 	if err != nil {
-		return WipeStatusUnknown, err
+		return deviceMeta{}, err
 	}
-	return status, nil
+	return snap, nil
+}
+
+// issuePendingKey stores a fresh temporary policy key for a device's Provision
+// phase one, under the policy key final, and returns it.
+func issuePendingKey(st *objectstore.Store, deviceID, final string) (string, error) {
+	temp, err := tempPolicyKey(final)
+	if err != nil {
+		return "", err
+	}
+	err = updateDevices(st, func(m *devicesMeta) bool {
+		d := m.device(deviceID)
+		d.PendingKey, d.PendingFor = temp, final
+		return true
+	})
+	if err != nil {
+		return "", err
+	}
+	return temp, nil
+}
+
+// tempPolicyKey draws a random 32-bit policy key, the width the packed command
+// line carries. It is never 0 (the not-provisioned key), 1 (the key of a mailbox
+// with no policy) or final, so it cannot be taken for any of them.
+func tempPolicyKey(final string) (string, error) {
+	var b [4]byte
+	for {
+		if _, err := rand.Read(b[:]); err != nil {
+			return "", err
+		}
+		k := strconv.FormatUint(uint64(binary.LittleEndian.Uint32(b[:])), 10)
+		if k != "0" && k != "1" && k != final {
+			return k, nil
+		}
+	}
+}
+
+// acknowledgePendingKey consumes a device's temporary policy key. When key is the
+// one phase one issued, under the policy that is still current (final), the device
+// earns final and the temporary key is cleared, so it cannot be acknowledged a
+// second time. It reports whether the acknowledgement matched.
+func acknowledgePendingKey(st *objectstore.Store, deviceID, key, final string) (bool, error) {
+	matched := false
+	err := updateDevices(st, func(m *devicesMeta) bool {
+		d := m.Devices[deviceID]
+		if d == nil || d.PendingKey == "" || d.PendingKey != key || d.PendingFor != final {
+			return false
+		}
+		d.PendingKey, d.PendingFor, d.AckedKey = "", "", final
+		matched = true
+		return true
+	})
+	if err != nil {
+		return false, err
+	}
+	return matched, nil
 }
 
 // stampContact records one contact on a device's metadata: firstSync and the OK

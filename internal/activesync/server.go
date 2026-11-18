@@ -8,6 +8,8 @@ package activesync
 
 import (
 	"crypto/x509"
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -186,9 +188,10 @@ var easCommands = map[string]func(*Server, http.ResponseWriter, *http.Request, *
 // must not run until the device provisions again. It reports whether the response
 // is already written.
 func (s *Server) forceProvision(w http.ResponseWriter, r *http.Request, sess *session) bool {
-	var wipeStatus int
+	var dev deviceMeta
+	var devErr error
 	if sess.req.deviceID != "" {
-		wipeStatus = s.recordDevice(r, sess)
+		dev, devErr = s.recordDevice(r, sess)
 	}
 	if sess.req.cmd == "Provision" {
 		return false
@@ -196,21 +199,38 @@ func (s *Server) forceProvision(w http.ResponseWriter, r *http.Request, sess *se
 	// A pending remote wipe is delivered only through a Provision exchange, so any
 	// other command from a device awaiting a wipe is answered with HTTP 449, which
 	// forces the device to re-provision and pick the wipe up immediately.
-	if wipeOutstanding(wipeStatus) {
+	if wipeOutstanding(dev.WipeStatus) {
 		s.refuseUnprovisioned(w, r, sess, "")
 		return true
 	}
-	// A configured device policy must be acknowledged: a command carrying a stale or
-	// missing policy key is answered with 449, forcing the device to re-provision and
-	// apply the current policy, this is how a policy change reaches an already-enrolled
-	// device. A mailbox with no policy resolves to the baseline key "1" and requires no
-	// provisioning, so unconfigured deployments never churn. (This resolves the policy per
-	// command; a generation cache is a future optimization if it ever matters.)
-	if sess.req.deviceID == "" {
+	return s.policyGate(w, r, sess, dev, devErr)
+}
+
+// errDeviceUnreadable is the failure behind a command refused because the device
+// record that says which policy it acknowledged could not be read.
+var errDeviceUnreadable = errors.New("device record unreadable under a configured policy")
+
+// policyGate refuses a command from a device that has not acknowledged the
+// configured policy, and reports whether the response is already written. The
+// device must send the current key and must be the device that earned it by
+// acknowledging ([MS-ASPROV]: only the acknowledgement of the temporary key
+// returns the final key); the key a request carries proves nothing on its own,
+// since it is the same for every device under one policy. A stale or missing
+// acknowledgement is answered with 449, which is how a policy change reaches an
+// enrolled device. A mailbox with no policy resolves to the baseline key "1" and
+// is never gated. A device record that cannot be read is a server error, not a
+// 449, because a Provision that cannot write would answer the 449 in a loop.
+func (s *Server) policyGate(w http.ResponseWriter, r *http.Request, sess *session, dev deviceMeta, devErr error) bool {
+	want := easpolicy.Key(s.devicePolicy(sess))
+	if want == "1" {
 		return false
 	}
-	want := easpolicy.Key(s.devicePolicy(sess))
-	if want == "1" || sess.req.policyKey == want {
+	if devErr != nil {
+		s.failRequest(w, r, "provision.gate.fail", fmt.Errorf("%w: %v", errDeviceUnreadable, devErr),
+			http.StatusServiceUnavailable, "device state unavailable")
+		return true
+	}
+	if sess.req.deviceID != "" && sess.req.policyKey == want && dev.AckedKey == want {
 		return false
 	}
 	s.refuseUnprovisioned(w, r, sess, "stale-policy-key")
@@ -297,24 +317,24 @@ func (s *Server) logAuth(r *http.Request, user, name string) {
 // property apart from the sync-state blob, so a failure here is logged and never
 // affects the command response. Skipped by the caller when the request carries
 // no device id.
-func (s *Server) recordDevice(r *http.Request, sess *session) int {
+func (s *Server) recordDevice(r *http.Request, sess *session) (deviceMeta, error) {
 	st, err := objectstore.OpenExisting(sess.mailbox)
-	if err != nil {
-		return WipeStatusUnknown
+	if err == nil {
+		defer st.Close()
+		var dev deviceMeta
+		dev, err = recordDeviceContact(st, sess.req.deviceID, sess.user, sess.req.deviceType,
+			r.Header.Get("User-Agent"), sess.protocol, time.Now().Unix())
+		if err == nil {
+			return dev, nil
+		}
 	}
-	defer st.Close()
-	status, err := recordDeviceContact(st, sess.req.deviceID, sess.user, sess.req.deviceType,
-		r.Header.Get("User-Agent"), sess.protocol, time.Now().Unix())
-	if err != nil {
-		s.Logger.Emit(logging.Event{
-			Level:      logging.LevelDebug,
-			Subsystem:  logging.ActiveSync,
-			Name:       "device.record.fail",
-			User:       sess.user,
-			RemoteAddr: serve.ClientAddr(r),
-			Fields:     logging.Fields{"device": sess.req.deviceID, "error": err.Error()},
-		})
-		return WipeStatusUnknown
-	}
-	return status
+	s.Logger.Emit(logging.Event{
+		Level:      logging.LevelError,
+		Subsystem:  logging.ActiveSync,
+		Name:       "device.record.fail",
+		User:       sess.user,
+		RemoteAddr: serve.ClientAddr(r),
+		Fields:     logging.Fields{"device": sess.req.deviceID, "error": err.Error()},
+	})
+	return deviceMeta{}, err
 }

@@ -127,33 +127,85 @@ func (s *Server) logPolicyReadFail(layer string, sess *session, err error) {
 	})
 }
 
-// handleProvision answers the two-phase EAS provisioning handshake. Phase one
-// (the request carries no policy key, or key 0) returns the policy key plus the
-// policy document; phase two (the device echoes the key) returns the key alone.
-// Both responses report Status 1. The key is the policy's generation token
-// (easpolicy.Key), it changes when the resolved policy changes, which is how a
-// later command carrying a stale key is detected and forced to re-provision. When
-// a remote wipe is outstanding the response also carries the wipe directive, and
-// the device's acknowledgement in the request advances the wipe to completed.
+// handleProvision answers the two-phase EAS provisioning handshake ([MS-ASPROV]).
+// Phase one (the request carries no policy key, or key 0) returns a temporary
+// policy key plus the policy document; phase two (the device acknowledges with
+// that temporary key) returns the final key, the policy's generation token
+// (easpolicy.Key). The final key changes when the resolved policy changes, which
+// is how a later command carrying a stale key is detected and forced to
+// re-provision. When a remote wipe is outstanding the response also carries the
+// wipe directive, and the device's acknowledgement in the request advances the
+// wipe to completed.
 func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request, sess *session) {
 	root, err := readWBXML(r)
 	if err != nil {
 		s.failRequest(w, r, "wbxml.parse.fail", err, http.StatusBadRequest, "invalid WBXML")
 		return
 	}
-	phaseOne := requestPolicyKey(root) == "" || requestPolicyKey(root) == "0"
 	wipe := s.provisionWipe(sess, requestWipeAck(root))
+	if t := requestPolicyType(root); t != "" && t != provisionPolicyType {
+		writeWBXML(w, provisionRefused(policyStatusUnknownType, wipe))
+		return
+	}
 	merged := s.devicePolicy(sess)
-	key := easpolicy.Key(merged)
-	if status := provisionRefusal(root, key, phaseOne); status != 0 {
+	key, status, err := s.provisionKey(sess, root, easpolicy.Key(merged))
+	if err != nil {
+		s.failRequest(w, r, "provision.key.fail", err, http.StatusServiceUnavailable, "device state unavailable")
+		return
+	}
+	if status != 0 {
 		writeWBXML(w, provisionRefused(status, wipe))
 		return
 	}
 	var policy easpolicy.Policy
-	if phaseOne {
+	if phaseOne(root) {
 		policy = merged // the document rides only on phase one
 	}
-	writeWBXML(w, provisionResponse(key, phaseOne, wipe, policy))
+	writeWBXML(w, provisionResponse(key, phaseOne(root), wipe, policy))
+}
+
+// phaseOne reports whether a Provision request asks for the policy (no policy
+// key, or the not-provisioned key 0) rather than acknowledging one.
+func phaseOne(root *wbxml.Node) bool {
+	k := requestPolicyKey(root)
+	return k == "" || k == "0"
+}
+
+// provisionKey returns the policy key a Provision reply hands out, or the Policy
+// Status the request is refused with. final is the current policy's key.
+//
+// With no policy configured final is the baseline 1 and nothing is stored, since
+// no command is gated. A request with no Policies element (a bare wipe
+// acknowledgement) touches no key state either: the key it is answered with earns
+// nothing, because the command gate reads what the device acknowledged.
+// Otherwise phase one stores and returns a fresh temporary key, and phase two
+// earns final only by acknowledging that temporary key while its policy is still
+// current; anything else is Status 5, so the device starts over. The key is never
+// handed out unless the state behind it was written.
+func (s *Server) provisionKey(sess *session, root *wbxml.Node, final string) (string, int, error) {
+	if final == "1" || root.Child(wbxml.PVPolicies) == nil {
+		if !phaseOne(root) && requestPolicyKey(root) != final {
+			return "", policyStatusKeyMismatch, nil
+		}
+		return final, 0, nil
+	}
+	st, err := objectstore.OpenExisting(sess.mailbox)
+	if err != nil {
+		return "", 0, err
+	}
+	defer st.Close()
+	if phaseOne(root) {
+		temp, err := issuePendingKey(st, sess.req.deviceID, final)
+		return temp, 0, err
+	}
+	ok, err := acknowledgePendingKey(st, sess.req.deviceID, requestPolicyKey(root), final)
+	if err != nil {
+		return "", 0, err
+	}
+	if !ok {
+		return "", policyStatusKeyMismatch, nil
+	}
+	return final, 0, nil
 }
 
 // The one PolicyType this server serves, and the Policy Status values a request is
@@ -164,21 +216,6 @@ const (
 	policyStatusUnknownType = 3
 	policyStatusKeyMismatch = 5
 )
-
-// provisionRefusal returns the Policy Status a Provision request is refused with,
-// or 0 when it is not refused. A PolicyType other than the one served is unknown;
-// an acknowledgement (phase two) of a key other than the current one acknowledges
-// the wrong policy, so the device must start over and is given no key. A request
-// with no PolicyType (a bare wipe acknowledgement) is not refused for it.
-func provisionRefusal(root *wbxml.Node, currentKey string, phaseOne bool) int {
-	if t := requestPolicyType(root); t != "" && t != provisionPolicyType {
-		return policyStatusUnknownType
-	}
-	if !phaseOne && requestPolicyKey(root) != currentKey {
-		return policyStatusKeyMismatch
-	}
-	return 0
-}
 
 // provisionRefused builds the reply to a refused Provision: the Policy carries the
 // status alone, with no key and no document, and an outstanding remote wipe still

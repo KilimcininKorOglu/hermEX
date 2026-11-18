@@ -15,7 +15,13 @@ import (
 // status, for asserting the stale-policy-key 449.
 func commandStatusWithKey(t *testing.T, ts *httptest.Server, cmd string, root *wbxml.Node, key string) int {
 	t.Helper()
-	url := ts.URL + "/Microsoft-Server-ActiveSync?Cmd=" + cmd + "&User=" + testUser + "&DeviceId=dev1&DeviceType=iPhone&PolicyKey=" + key
+	return commandStatusOnDevice(t, ts, "dev1", cmd, root, key)
+}
+
+// commandStatusOnDevice is commandStatusWithKey from the named device.
+func commandStatusOnDevice(t *testing.T, ts *httptest.Server, device, cmd string, root *wbxml.Node, key string) int {
+	t.Helper()
+	url := ts.URL + "/Microsoft-Server-ActiveSync?Cmd=" + cmd + "&User=" + testUser + "&DeviceId=" + device + "&DeviceType=iPhone&PolicyKey=" + key
 	req, err := http.NewRequest("POST", url, bytes.NewReader(wbxml.Marshal(root)))
 	if err != nil {
 		t.Fatal(err)
@@ -46,29 +52,36 @@ func folderSync() *wbxml.Node {
 	return wbxml.Elem(wbxml.FHFolderSync, wbxml.Str(wbxml.FHSyncKey, "0"))
 }
 
-// TestProvisionKeyReflectsPolicy proves the issued policy key is the policy's generation
-// token: a configured mailbox gets the content-derived key (not the baseline), and an
-// unconfigured one keeps the baseline "1".
+// provisionDevice runs both Provision phases for dev1 and returns the final key the
+// acknowledgement earned.
+func provisionDevice(t *testing.T, ts *httptest.Server) string {
+	t.Helper()
+	temp := provisionPolicy(t, ts, easProvisioningType, "").ChildText(wbxml.PVPolicyKey)
+	final := provisionPolicy(t, ts, easProvisioningType, temp)
+	wantPolicyStatus(t, "acknowledgement", final, "1")
+	return final.ChildText(wbxml.PVPolicyKey)
+}
+
+// TestProvisionKeyReflectsPolicy proves the final policy key is the policy's
+// generation token: a configured mailbox earns the content-derived key (not the
+// baseline) by acknowledging, phase one hands out a temporary key that is none of
+// 0, 1 or the final key, and an unconfigured mailbox keeps the baseline "1".
 func TestProvisionKeyReflectsPolicy(t *testing.T) {
 	ts, dir := seededServer(t)
 	override := easpolicy.Policy{"DevicePasswordEnabled": 1, "MinDevicePasswordLength": 8}
 	setOverride(t, dir, override)
+	want := easpolicy.Key(override)
 
-	phase1 := wbxml.Elem(wbxml.PVProvision,
-		wbxml.Elem(wbxml.PVPolicies, wbxml.Elem(wbxml.PVPolicy,
-			wbxml.Str(wbxml.PVPolicyType, "MS-EAS-Provisioning-WBXML"))))
-	_, root := postCommand(t, ts, "Provision", phase1)
-	key := root.Child(wbxml.PVPolicies).Child(wbxml.PVPolicy).ChildText(wbxml.PVPolicyKey)
-	if want := easpolicy.Key(override); key != want {
-		t.Errorf("issued key = %q, want the policy generation %q", key, want)
+	temp := provisionPolicy(t, ts, easProvisioningType, "").ChildText(wbxml.PVPolicyKey)
+	if temp == "0" || temp == "1" || temp == want || temp == "" {
+		t.Errorf("phase-one key = %q, want a temporary key other than 0, 1 and the final key", temp)
 	}
-	if key == "1" {
-		t.Error("a configured policy issued the baseline key 1; changes could not be detected")
+	if final := provisionPolicy(t, ts, easProvisioningType, temp).ChildText(wbxml.PVPolicyKey); final != want {
+		t.Errorf("final key = %q, want the policy generation %q", final, want)
 	}
 
 	tsEmpty, _ := seededServer(t)
-	_, rootE := postCommand(t, tsEmpty, "Provision", phase1)
-	if k := rootE.Child(wbxml.PVPolicies).Child(wbxml.PVPolicy).ChildText(wbxml.PVPolicyKey); k != "1" {
+	if k := provisionPolicy(t, tsEmpty, easProvisioningType, "").ChildText(wbxml.PVPolicyKey); k != "1" {
 		t.Errorf("unconfigured key = %q, want the baseline 1", k)
 	}
 }
@@ -95,20 +108,65 @@ func TestStalePolicyKeyForcesReprovision(t *testing.T) {
 			t.Errorf("forged key %q: FolderSync status %d, want 449", forged, code)
 		}
 	}
-	// The current key passes.
+	// The current key passes once the device acknowledged it.
+	if got := provisionDevice(t, ts); got != k1 {
+		t.Fatalf("acknowledgement earned %q, want %q", got, k1)
+	}
 	if code := commandStatusWithKey(t, ts, "FolderSync", folderSync(), k1); code == 449 {
 		t.Error("current-key FolderSync was refused with 449")
 	}
 
-	// The policy changes; the key the device still holds is now stale.
+	// The policy changes; the key the device still holds is now stale until it
+	// acknowledges the new policy.
 	p2 := easpolicy.Policy{"DevicePasswordEnabled": 1, "MinDevicePasswordLength": 8}
 	setOverride(t, dir, p2)
 	if code := commandStatusWithKey(t, ts, "FolderSync", folderSync(), k1); code != 449 {
 		t.Errorf("stale-key FolderSync status %d, want 449 (the policy change must propagate)", code)
 	}
-	if code := commandStatusWithKey(t, ts, "FolderSync", folderSync(), easpolicy.Key(p2)); code == 449 {
-		t.Error("the new policy key was refused with 449")
+	if code := commandStatusWithKey(t, ts, "FolderSync", folderSync(), easpolicy.Key(p2)); code != 449 {
+		t.Errorf("new key before acknowledging the new policy: status %d, want 449", code)
 	}
+	provisionDevice(t, ts)
+	if code := commandStatusWithKey(t, ts, "FolderSync", folderSync(), easpolicy.Key(p2)); code == 449 {
+		t.Error("the new policy key was refused with 449 after acknowledgement")
+	}
+}
+
+// TestAPhaseOneKeyIsNotAcknowledgement proves a device cannot skip acknowledging
+// the policy. [MS-ASPROV] ("Acknowledging Security Policy Settings", "Responding
+// to a Security Policy Settings Acknowledgment"): phase one hands out a temporary
+// key, the acknowledgement MUST carry it, and only the reply to that
+// acknowledgement carries the final key the device then sends on every command.
+//
+// The final key is the same for every device under one policy, so carrying it
+// proves nothing: a device that never provisioned, or another device of the same
+// user, is refused with 449 even when it sends it. A temporary key is consumed by
+// its acknowledgement, so acknowledging it a second time is Status 5.
+func TestAPhaseOneKeyIsNotAcknowledgement(t *testing.T) {
+	ts, dir := seededServer(t)
+	policy := easpolicy.Policy{"DevicePasswordEnabled": 1, "MinDevicePasswordLength": 4}
+	setOverride(t, dir, policy)
+
+	if code := commandStatusOnDevice(t, ts, "dev9", "FolderSync", folderSync(), easpolicy.Key(policy)); code != 449 {
+		t.Errorf("never-provisioned device sending the final key: FolderSync status %d, want 449", code)
+	}
+
+	temp := provisionPolicy(t, ts, easProvisioningType, "").ChildText(wbxml.PVPolicyKey)
+	if code := commandStatusWithKey(t, ts, "FolderSync", folderSync(), temp); code != 449 {
+		t.Errorf("phase-one key without acknowledgement: FolderSync status %d, want 449", code)
+	}
+
+	final := provisionPolicy(t, ts, easProvisioningType, temp)
+	wantPolicyStatus(t, "acknowledgement of the phase-one key", final, "1")
+	key := final.ChildText(wbxml.PVPolicyKey)
+	if code := commandStatusWithKey(t, ts, "FolderSync", folderSync(), key); code == 449 {
+		t.Error("the key the acknowledgement returned was refused with 449")
+	}
+	if code := commandStatusOnDevice(t, ts, "dev2", "FolderSync", folderSync(), key); code != 449 {
+		t.Errorf("another device sending the key dev1 earned: FolderSync status %d, want 449", code)
+	}
+	wantPolicyStatus(t, "second acknowledgement of a consumed temporary key",
+		provisionPolicy(t, ts, easProvisioningType, temp), "5")
 }
 
 // TestNoPolicyNoProvisioningRequired proves an unconfigured mailbox never forces
