@@ -61,6 +61,25 @@ func TestAdminUserDeviceWipe(t *testing.T) {
 	}
 }
 
+// TestAdminUserDeviceUnknownAction sends an action outside the documented set
+// (resync, delete, wipe, wipe-account, cancel): it is a 400 and the store is never
+// asked to act on the device.
+func TestAdminUserDeviceUnknownAction(t *testing.T) {
+	store := &fakeStore{}
+	ts := adminServerStore(t, deviceUserDir(), store)
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedPOST(t, ts, "/admin/users/alice@hermex.test/devices/action", session, csrf,
+		`{"deviceId":"dev1","action":"format-disk"}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("unknown action status %d, want 400", resp.StatusCode)
+	}
+	if store.deviceAction != "" {
+		t.Errorf("the store was asked to %q the device", store.deviceAction)
+	}
+}
+
 // TestAdminUserDevicesNotFound proves device read/action on an unknown user is a
 // 404 and the store is never touched.
 func TestAdminUserDevicesNotFound(t *testing.T) {
