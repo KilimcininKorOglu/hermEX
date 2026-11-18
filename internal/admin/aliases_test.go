@@ -48,3 +48,23 @@ func TestAdminCreateAlias(t *testing.T) {
 		t.Errorf("created alias %q -> %q, want sales -> boss", d.createdAlias, d.createdAliasTo)
 	}
 }
+
+// TestAdminCreateAliasNeedsBothAddresses sends alias requests missing a side or
+// not JSON at all: each is a 400 and the directory is never asked to create an
+// alias that points nowhere or has no name.
+func TestAdminCreateAliasNeedsBothAddresses(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	for _, body := range []string{`{"alias":"sales@hermex.test"}`, `{"main":"boss@hermex.test"}`, `{"alias":"","main":""}`, `not json`} {
+		resp := authedPOST(t, ts, "/admin/aliases", session, csrf, body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s: status %d, want 400", body, resp.StatusCode)
+		}
+	}
+	if d.createdAlias != "" || d.createdAliasTo != "" {
+		t.Errorf("an incomplete request created alias %q -> %q", d.createdAlias, d.createdAliasTo)
+	}
+}
