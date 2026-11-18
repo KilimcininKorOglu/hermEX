@@ -702,6 +702,32 @@ interface SearchResponse {
 }
 
 /**
+ * UserFolder is one of the user's own folders. id is the slug every folder call
+ * and route addresses it by; name is only for display, since two folders under
+ * different parents may share one. parent is the slug of the folder it sits in,
+ * or "" at the top.
+ */
+export interface UserFolder {
+  id: string
+  name: string
+  parent: string
+}
+
+/**
+ * folderLabel names a folder for a list where two folders may share a name: the
+ * name alone when it is unique, else the name after its parent's label, so each
+ * entry reads differently.
+ */
+export function folderLabel(folder: UserFolder, all: UserFolder[]): string {
+  const twins = all.filter((f) => f.name === folder.name).length
+  if (twins < 2) return folder.name
+  const parent = all.find((f) => f.id === folder.parent)
+  if (parent) return `${folderLabel(parent, all)} / ${folder.name}`
+  // A built-in parent (inbox, archive, ...) is named by its slug.
+  return folder.parent ? `${folder.parent} / ${folder.name}` : folder.name
+}
+
+/**
  * A persistent saved search (MAPI-style search folder). The criteria fields are
  * optional; an empty field imposes no constraint. base_folders names the
  * mailboxes to search, or all mailboxes when omitted.
@@ -1191,9 +1217,10 @@ class API {
     await this.delete('/recipient-rules?pattern=' + encodeURIComponent(pattern))
   }
 
-  // getMailboxes returns the user's mailbox names.
-  async getMailboxes(): Promise<{ mailboxes?: string[] }> {
-    return this.get<{ mailboxes?: string[] }>('/mailboxes')
+  // getMailboxes returns the user's own folders, each with the id slug every
+  // other folder call addresses it by.
+  async getMailboxes(): Promise<{ folders?: UserFolder[] }> {
+    return this.get<{ folders?: UserFolder[] }>('/mailboxes')
   }
 
   // getGroups lists the distribution lists the caller owns (the managedBy owner).
@@ -1247,32 +1274,34 @@ class API {
   }
 
   // Custom folder management (built-in folders cannot be renamed/deleted).
-  async createFolder(name: string): Promise<{ name: string }> {
-    return this.post<{ name: string }>('/folders', { name })
+  async createFolder(name: string): Promise<{ name: string; id: string }> {
+    return this.post<{ name: string; id: string }>('/folders', { name })
   }
 
-  async renameFolder(current: string, name: string): Promise<{ name: string }> {
-    return this.put<{ name: string }>(`/folders/${encodeURIComponent(current)}`, { name })
+  // renameFolder renames the folder whose slug is id.
+  async renameFolder(id: string, name: string): Promise<{ name: string; id: string }> {
+    return this.put<{ name: string; id: string }>(`/folders/${encodeURIComponent(id)}`, { name })
   }
 
-  async deleteFolder(name: string): Promise<void> {
-    await this.delete(`/folders/${encodeURIComponent(name)}`)
+  // deleteFolder deletes the folder whose slug is id.
+  async deleteFolder(id: string): Promise<void> {
+    await this.delete(`/folders/${encodeURIComponent(id)}`)
   }
 
   // emptyFolder removes every message from a folder: permanently from Trash/Spam,
-  // otherwise the messages move to Trash. name is a built-in slug (trash/spam) or
-  // a custom folder's display name.
-  async emptyFolder(name: string): Promise<{ emptied?: number }> {
-    return this.post<{ emptied?: number }>(`/folders/${encodeURIComponent(name)}/empty`, {})
+  // otherwise the messages move to Trash. id is a built-in slug (trash/spam) or a
+  // user folder's id slug.
+  async emptyFolder(id: string): Promise<{ emptied?: number }> {
+    return this.post<{ emptied?: number }>(`/folders/${encodeURIComponent(id)}/empty`, {})
   }
 
-  // Favourite (pinned) folders, persisted in webmail settings.
+  // Favourite (pinned) folders by slug, persisted in webmail settings.
   async getFavorites(): Promise<{ favorites?: string[] }> {
     return this.get<{ favorites?: string[] }>('/favorites')
   }
 
-  async toggleFavorite(name: string): Promise<{ favorites?: string[] }> {
-    return this.post<{ favorites?: string[] }>('/favorites/toggle', { name })
+  async toggleFavorite(id: string): Promise<{ favorites?: string[] }> {
+    return this.post<{ favorites?: string[] }>('/favorites/toggle', { id })
   }
 
   // Saved searches (persistent MAPI-style search folders).

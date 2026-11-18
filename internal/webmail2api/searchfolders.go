@@ -273,21 +273,9 @@ func readSearchFolder(st *objectstore.Store, fid int64, name string, loc *time.L
 	return sf, nil
 }
 
-// folderSlug is the name the SPA addresses a folder by: a well-known slug, or a
-// custom folder's display name.
-func folderSlug(st *objectstore.Store, fid int64) string {
-	for _, f := range searchFolders() {
-		if f.fid == fid {
-			return f.slug
-		}
-	}
-	props, err := st.GetFolderProperties(fid, mapi.PrDisplayName)
-	if err != nil {
-		return ""
-	}
-	name, _ := props.Get(mapi.PrDisplayName)
-	s, _ := name.(string)
-	return s
+// folderSlug is the slug the SPA addresses a folder by (slugOf).
+func folderSlug(_ *objectstore.Store, fid int64) string {
+	return slugOf(fid)
 }
 
 // savedSearchMail returns the mail a search folder holds, newest first and

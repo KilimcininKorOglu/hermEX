@@ -23,8 +23,8 @@ import {
 } from "@/components/ui/select"
 import { toast } from "sonner"
 import { useI18n } from "@/hooks/useI18n"
-import api from "@/utils/api"
-import type { Filter, FilterCondition, FilterAction, FilterInput } from "@/utils/api"
+import api, { folderLabel } from "@/utils/api"
+import type { Filter, FilterCondition, FilterAction, FilterInput, UserFolder } from "@/utils/api"
 import { useBusyGate } from "@/hooks/useBusyGate"
 import { LEVEL_FIELDS, VALUELESS_FIELDS, draftOf, emptyAction, emptyCondition, emptyDraft, toggledInput, validateDraft } from "@/utils/filterDraft"
 
@@ -33,6 +33,59 @@ import { LEVEL_FIELDS, VALUELESS_FIELDS, draftOf, emptyAction, emptyCondition, e
 const RUN_FOLDERS = ["inbox", "spam", "trash", "sent", "drafts"] as const
 
 type TFunc = (key: string, params?: Record<string, string>) => string
+
+// FolderChoice is one folder a move or copy action may target: its slug and the
+// label the picker shows.
+interface FolderChoice {
+  id: string
+  label: string
+}
+
+// BUILTIN_TARGETS are the built-in folders a move or copy action may target, by
+// slug and the i18n key of their label.
+const BUILTIN_TARGETS = [
+  { id: "inbox", key: "nav.inbox" },
+  { id: "archive", key: "common.archive" },
+  { id: "sent", key: "nav.sent" },
+  { id: "drafts", key: "nav.drafts" },
+  { id: "spam", key: "nav.spam" },
+  { id: "trash", key: "nav.trash" },
+] as const
+
+// folderChoices lists the move and copy targets: the built-in folders, then the
+// user's own, each labelled so two folders of one name read differently.
+function folderChoices(user: UserFolder[], t: TFunc): FolderChoice[] {
+  return [
+    ...BUILTIN_TARGETS.map((b) => ({ id: b.id, label: t(b.key) })),
+    ...user.map((f) => ({ id: f.id, label: folderLabel(f, user) })),
+  ]
+}
+
+// FolderSelect picks a move or copy target by slug. A stored target the list
+// does not hold (a folder since deleted) stays shown as itself, so opening the
+// filter does not silently change it.
+function FolderSelect({ value, folders, onChange, t }: {
+  value: string
+  folders: FolderChoice[]
+  onChange: (id: string) => void
+  t: TFunc
+}) {
+  const choices = value && !folders.some((f) => f.id === value) ? [...folders, { id: value, label: value }] : folders
+  return (
+    <Select value={value || undefined} onValueChange={onChange}>
+      <SelectTrigger className="min-w-[140px] flex-1">
+        <SelectValue placeholder={t("filters.targetFolderPlaceholder")} />
+      </SelectTrigger>
+      <SelectContent>
+        {choices.map((f) => (
+          <SelectItem key={f.id} value={f.id}>
+            {f.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
 
 const conditionFields = (t: TFunc): { value: FilterCondition["field"]; label: string }[] => [
   { value: "from", label: t("common.from") },
@@ -201,8 +254,6 @@ const NARROW = "w-[150px]"
 
 // ACTION_INPUTS lists, per action type, the text inputs its row shows, in order.
 const ACTION_INPUTS: Partial<Record<FilterAction["type"], ActionTextInput[]>> = {
-  moveToFolder: [{ key: "target", placeholder: "filters.targetFolderPlaceholder", className: WIDE }],
-  copyToFolder: [{ key: "target", placeholder: "filters.targetFolderPlaceholder", className: WIDE }],
   forward: [{ key: "forwardTo", placeholder: "filters.destinationPlaceholder", className: WIDE }],
   forwardAsAttachment: [{ key: "forwardTo", placeholder: "filters.destinationPlaceholder", className: WIDE }],
   redirect: [{ key: "forwardTo", placeholder: "filters.destinationPlaceholder", className: WIDE }],
@@ -217,16 +268,21 @@ const ACTION_INPUTS: Partial<Record<FilterAction["type"], ActionTextInput[]>> = 
   flag: [{ key: "flagName", placeholder: "filters.flagNamePlaceholder", className: NARROW }],
 }
 
+// FOLDER_ACTIONS are the action types whose target is a folder, picked by slug.
+const FOLDER_ACTIONS: ReadonlySet<FilterAction["type"]> = new Set(["moveToFolder", "copyToFolder"])
+
 // ActionRow edits one action: its type and the fields that type takes.
 function ActionRow({
   action,
   removable,
+  folders,
   onUpdate,
   onRemove,
   t,
 }: {
   action: FilterAction
   removable: boolean
+  folders: FolderChoice[]
   onUpdate: (patch: Partial<FilterAction>) => void
   onRemove: () => void
   t: TFunc
@@ -250,6 +306,9 @@ function ActionRow({
           ))}
         </SelectContent>
       </Select>
+      {FOLDER_ACTIONS.has(action.type) && (
+        <FolderSelect value={action.target ?? ""} folders={folders} onChange={(id) => onUpdate({ target: id })} t={t} />
+      )}
       {(ACTION_INPUTS[action.type] ?? []).map((input) => (
         <Input
           key={input.key}
@@ -473,10 +532,12 @@ function FilterList({
 function FilterEditor({
   draft,
   setDraft,
+  folders,
   t,
 }: {
   draft: FilterInput
   setDraft: React.Dispatch<React.SetStateAction<FilterInput>>
+  folders: FolderChoice[]
   t: TFunc
 }) {
   const exceptions = draft.exceptions ?? []
@@ -556,6 +617,7 @@ function FilterEditor({
             key={i}
             action={action}
             removable={draft.actions.length > 1}
+            folders={folders}
             onUpdate={(patch) => setDraft((d) => ({ ...d, actions: patchRow(d.actions, i, patch) }))}
             onRemove={() => setDraft({ ...draft, actions: dropRow(draft.actions, i) })}
             t={t}
@@ -600,6 +662,16 @@ export function FiltersPage() {
   useEffect(() => {
     loadFilters()
   }, [loadFilters])
+
+  // The user's own folders, offered as move and copy targets.
+  const [userFolders, setUserFolders] = useState<UserFolder[]>([])
+  useEffect(() => {
+    let cancelled = false
+    api.getMailboxes()
+      .then((res) => { if (!cancelled) setUserFolders(res.folders ?? []) })
+      .catch(() => { if (!cancelled) setUserFolders([]) })
+    return () => { cancelled = true }
+  }, [])
 
   const handleExport = useCallback(async () => {
     setTransferring(true)
@@ -828,7 +900,7 @@ export function FiltersPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <FilterEditor draft={draft} setDraft={setDraft} t={t} />
+          <FilterEditor draft={draft} setDraft={setDraft} folders={folderChoices(userFolders, t)} t={t} />
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>

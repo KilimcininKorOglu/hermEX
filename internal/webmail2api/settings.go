@@ -985,15 +985,10 @@ func userFolderEntry(f objectstore.FolderInfo) userFolderJSON {
 
 // folderSlugFor is the slug of a folder a listing names as a parent: a
 // built-in folder's fixed slug, a user folder's id slug, and nothing for the
-// folder-tree root.
+// folder-tree root or another system folder.
 func folderSlugFor(fid int64) (string, bool) {
-	if isUserFolderID(fid) {
-		return customSlug(fid), true
-	}
-	for _, sf := range searchFolders() {
-		if sf.fid == fid {
-			return sf.slug, true
-		}
+	if _, builtin := builtinSlugs[fid]; builtin || isUserFolderID(fid) {
+		return slugOf(fid), true
 	}
 	return "", false
 }

@@ -248,6 +248,7 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown folder"})
 		return
 	}
+	folder = slugOf(fid)
 	if !mb.readAllowed(fid) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return

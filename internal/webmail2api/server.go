@@ -670,12 +670,12 @@ func (s *Server) handleMailFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer mb.st.Close()
-	folder := r.PathValue("folder")
-	fid, ok := resolveFolder(mb.st, folder)
+	fid, ok := resolveFolder(mb.st, r.PathValue("folder"))
 	if !ok {
 		writeJSON(w, http.StatusOK, map[string]any{"emails": []mailJSON{}})
 		return
 	}
+	folder := slugOf(fid)
 	if !mb.readAllowed(fid) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return

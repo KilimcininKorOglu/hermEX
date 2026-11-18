@@ -1492,7 +1492,7 @@
     "savedSearchBodyPlaceholder": "Gövde şunu içerir",
     "savedSearchDateFrom": "Başlangıç tarihi",
     "savedSearchDateTo": "Bitiş tarihi",
-    "savedSearchFoldersPlaceholder": "Klasörler (virgülle ayrılmış, boş = tümü)",
+    "savedSearchFoldersPlaceholder": "Klasörler (seçim yoksa tüm posta klasörleri)",
     "savedSearchHasAttachment": "Yalnızca ekli iletiler",
     "savedSearchCustom": "Bu aramanın ölçütlerini başka bir istemci tanımladı. Buradan yalnızca adı değiştirilebilir.",
     "savedSearchActions": "{{name}} için kayıtlı arama işlemleri",

@@ -57,7 +57,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext"
 import { useMailbox } from "@/contexts/MailboxContext"
 import { useI18n } from "@/hooks/useI18n"
-import api, { type SearchFolder } from "@/utils/api"
+import api, { folderLabel, type SearchFolder } from "@/utils/api"
 import { ShareFolderDialog } from "@/components/share-folder-dialog"
 
 interface SidebarProps {
@@ -98,9 +98,6 @@ const mainNavItems: NavItem[] = [
   { icon: Users, label: "nav.groups", path: "/groups" },
 ]
 
-// Standard mailboxes already shown in the main nav (or as Spam below); excluded
-// from the dynamic custom-folder list.
-const standardMailboxes = new Set(["inbox", "sent", "drafts", "trash", "junk", "scheduled"])
 
 // EMPTY_SF_FORM is the blank saved-search criteria form (reset on open/create).
 const EMPTY_SF_FORM = {
@@ -111,9 +108,22 @@ const EMPTY_SF_FORM = {
   dateFrom: "",
   dateTo: "",
   hasAttachment: false,
-  baseFolders: "",
+  // baseFolders are the slugs of the folders the search looks in; none means
+  // the default mail folders.
+  baseFolders: [] as string[],
   custom: false,
 }
+
+// SEARCH_BUILTINS are the built-in folders a saved search may be scoped to, by
+// slug and the i18n key of their label.
+const SEARCH_BUILTINS = [
+  { id: "inbox", key: "nav.inbox" },
+  { id: "archive", key: "common.archive" },
+  { id: "sent", key: "nav.sent" },
+  { id: "drafts", key: "nav.drafts" },
+  { id: "spam", key: "nav.spam" },
+  { id: "trash", key: "nav.trash" },
+] as const
 
 const folderItems: NavItem[] = [
   { icon: AlertCircle, label: "nav.spam", path: "/spam", color: "text-red-500" },
@@ -284,7 +294,7 @@ const savedSearchFormOf = (sf: SearchFolder): SavedSearchForm => ({
   dateFrom: sf.date_from ?? "",
   dateTo: sf.date_to ?? "",
   hasAttachment: sf.has_attachment === true,
-  baseFolders: (sf.base_folders ?? []).join(", "),
+  baseFolders: sf.base_folders ?? [],
   custom: sf.custom === true,
 })
 
@@ -298,10 +308,7 @@ const savedSearchInput = (form: SavedSearchForm, name: string) => ({
   date_from: form.dateFrom || undefined,
   date_to: form.dateTo || undefined,
   has_attachment: form.hasAttachment ? true : undefined,
-  base_folders: form.baseFolders
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean),
+  base_folders: form.baseFolders,
 })
 
 // SidebarLogo renders the brand mark and, when expanded, the collapse button.
@@ -454,8 +461,9 @@ const SharedMailboxesSection = ({ isExpanded }: { isExpanded: boolean }) => {
   )
 }
 
-// FavoritesSection lists the pinned favourite folders.
-const FavoritesSection = ({ favorites }: { favorites: string[] }) => {
+// FavoritesSection lists the pinned favourite folders, each pinned by its slug
+// and shown by its label (labels holds the label of every listed user folder).
+const FavoritesSection = ({ favorites, labels }: { favorites: string[]; labels: Map<string, string> }) => {
   const { t } = useI18n()
   if (favorites.length === 0) return null
   return (
@@ -463,8 +471,9 @@ const FavoritesSection = ({ favorites }: { favorites: string[] }) => {
       <p className="px-3 pb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         {t("nav.favorites")}
       </p>
-      {favorites.map((name) => {
-        const path = `/folder/${encodeURIComponent(name)}`
+      {favorites.map((id) => {
+        const name = labels.get(id) ?? id
+        const path = `/folder/${encodeURIComponent(id)}`
         return (
           <NavLink
             key={"fav-" + path}
@@ -577,58 +586,66 @@ const ActionRow = ({ isActive, children }: { isActive: boolean; children: React.
   </div>
 )
 
+// SidebarFolder is a user folder as the sidebar shows it: its slug, its display
+// name, and the label that tells it apart from a folder of the same name.
+interface SidebarFolder {
+  id: string
+  name: string
+  label: string
+}
+
 interface CustomFolderActions {
-  onToggleFavorite: (name: string) => void
-  onRename: (name: string) => void
-  onShare: (name: string) => void
-  onEmpty: (name: string) => void
-  onDelete: (name: string) => void
+  onToggleFavorite: (folder: SidebarFolder) => void
+  onRename: (folder: SidebarFolder) => void
+  onShare: (folder: SidebarFolder) => void
+  onEmpty: (folder: SidebarFolder) => void
+  onDelete: (folder: SidebarFolder) => void
 }
 
 // CustomFolderItem renders one user folder with its favourite, rename, share,
-// empty and delete actions.
+// empty and delete actions. Every action names the folder by its slug.
 const CustomFolderItem = ({
-  name,
+  folder,
   isExpanded,
   isFavorite,
   actions,
 }: {
-  name: string
+  folder: SidebarFolder
   isExpanded: boolean
   isFavorite: boolean
   actions: CustomFolderActions
 }) => {
   const location = useLocation()
   const { t } = useI18n()
-  const path = `/folder/${encodeURIComponent(name)}`
+  const path = `/folder/${encodeURIComponent(folder.id)}`
   if (!isExpanded) {
-    return <NavItemComponent item={{ icon: FolderOpen, label: name, path }} isExpanded={isExpanded} />
+    return <NavItemComponent item={{ icon: FolderOpen, label: folder.label, path }} isExpanded={isExpanded} />
   }
   const isActive = location.pathname === path
   const FavoriteIcon = isFavorite ? StarOff : Star
   return (
     <ActionRow isActive={isActive}>
-      <RowLink to={path} isActive={isActive} icon={FolderOpen} label={name} />
-      <RowActions label={t("sidebar.folderActions", { name })}>
-        <DropdownMenuItem onClick={() => actions.onToggleFavorite(name)}>
+      <RowLink to={path} isActive={isActive} icon={FolderOpen} label={folder.label} />
+      <RowActions label={t("sidebar.folderActions", { name: folder.label })}>
+        <DropdownMenuItem onClick={() => actions.onToggleFavorite(folder)}>
           <FavoriteIcon className="mr-2 h-4 w-4" />
           {t(isFavorite ? "sidebar.removeFavorite" : "sidebar.addFavorite")}
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => actions.onRename(name)}>
+        <DropdownMenuItem onClick={() => actions.onRename(folder)}>
           <Pencil className="mr-2 h-4 w-4" />
           {t("sidebar.rename")}
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => actions.onShare(name)}>
+        <DropdownMenuItem onClick={() => actions.onShare(folder)}>
           <Share2 className="mr-2 h-4 w-4" />
           {t("share.dialogTitle")}
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => actions.onEmpty(name)}>
+        <DropdownMenuItem onClick={() => actions.onEmpty(folder)}>
           <Eraser className="mr-2 h-4 w-4" />
           {t("sidebar.empty")}
         </DropdownMenuItem>
         <DropdownMenuItem
           className="text-destructive"
-          onClick={() => actions.onDelete(name)}
+          onClick={() => actions.onDelete(folder)}
         >
           <Trash2 className="mr-2 h-4 w-4" />
           {t("common.delete")}
@@ -765,13 +782,46 @@ const ConfirmDeleteDialog = ({
   )
 }
 
+// SearchScopePicker picks the folders a saved search looks in, by slug. A stored
+// slug the list does not hold (a folder since deleted) stays listed as itself,
+// so saving the search does not silently drop it.
+const SearchScopePicker = ({
+  selected,
+  folders,
+  onChange,
+}: {
+  selected: string[]
+  folders: { id: string; label: string }[]
+  onChange: (selected: string[]) => void
+}) => {
+  const { t } = useI18n()
+  const extra = selected.filter((id) => !folders.some((f) => f.id === id)).map((id) => ({ id, label: id }))
+  const toggle = (id: string, on: boolean) =>
+    onChange(on ? [...selected, id] : selected.filter((s) => s !== id))
+  return (
+    <fieldset className="space-y-1">
+      <legend className="text-sm text-muted-foreground">{t("sidebar.savedSearchFoldersPlaceholder")}</legend>
+      <div className="max-h-40 overflow-y-auto space-y-1">
+        {[...folders, ...extra].map((f) => (
+          <label key={f.id} className="flex items-center gap-2 text-sm">
+            <Checkbox checked={selected.includes(f.id)} onCheckedChange={(v) => toggle(f.id, v === true)} />
+            {f.label}
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  )
+}
+
 // SavedSearchCriteria is the criteria half of the saved search form.
 const SavedSearchCriteria = ({
   form,
   setForm,
+  folders,
 }: {
   form: SavedSearchForm
   setForm: (form: SavedSearchForm) => void
+  folders: { id: string; label: string }[]
 }) => {
   const { t } = useI18n()
   const field = (key: keyof SavedSearchForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -807,10 +857,10 @@ const SavedSearchCriteria = ({
           aria-label={t("sidebar.savedSearchDateTo")}
         />
       </div>
-      <Input
-        value={form.baseFolders}
-        onChange={field("baseFolders")}
-        placeholder={t("sidebar.savedSearchFoldersPlaceholder")}
+      <SearchScopePicker
+        selected={form.baseFolders}
+        folders={folders}
+        onChange={(baseFolders) => setForm({ ...form, baseFolders })}
       />
       <label className="flex items-center gap-2 text-sm">
         <Checkbox
@@ -830,6 +880,7 @@ const SavedSearchDialog = ({
   mode,
   form,
   setForm,
+  folders,
   busy,
   onSubmit,
 }: {
@@ -838,6 +889,7 @@ const SavedSearchDialog = ({
   mode: "create" | "edit"
   form: SavedSearchForm
   setForm: (form: SavedSearchForm) => void
+  folders: { id: string; label: string }[]
   busy: boolean
   onSubmit: () => void
 }) => {
@@ -864,7 +916,7 @@ const SavedSearchDialog = ({
           {form.custom ? (
             <p className="text-sm text-muted-foreground">{t("sidebar.savedSearchCustom")}</p>
           ) : (
-            <SavedSearchCriteria form={form} setForm={setForm} />
+            <SavedSearchCriteria form={form} setForm={setForm} folders={folders} />
           )}
         </div>
         <DialogFooter>
@@ -916,17 +968,19 @@ const asideClass = (isExpanded: boolean, mobileOpen: boolean): string =>
 const FoldersHeader = ({
   isExpanded,
   favorites,
+  labels,
   onCreate,
 }: {
   isExpanded: boolean
   favorites: string[]
+  labels: Map<string, string>
   onCreate: () => void
 }) => {
   const { t } = useI18n()
   if (!isExpanded) return null
   return (
     <>
-      <FavoritesSection favorites={favorites} />
+      <FavoritesSection favorites={favorites} labels={labels} />
       <SectionHeader
         label={t("nav.folders")}
         actionLabel={t("nav.newFolder")}
@@ -1017,8 +1071,8 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
 
   // Spam total (inbox unread comes from the shared MailboxContext).
   const [spamCount, setSpamCount] = useState(0)
-  // Real custom mailboxes (beyond the standard ones shown in the main nav).
-  const [customFolders, setCustomFolders] = useState<string[]>([])
+  // The user's own folders, each labelled so two of one name read differently.
+  const [customFolders, setCustomFolders] = useState<SidebarFolder[]>([])
   // Pinned favourite folders, shown in a section at the top of the folder list.
   const [favorites, setFavorites] = useState<string[]>([])
 
@@ -1030,10 +1084,10 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
   // Folder management dialog state.
   const [folderDialogOpen, setFolderDialogOpen] = useState(false)
   const [folderDialogMode, setFolderDialogMode] = useState<"create" | "rename">("create")
-  const [folderDialogCurrent, setFolderDialogCurrent] = useState("")
+  const [folderDialogCurrent, setFolderDialogCurrent] = useState<SidebarFolder | null>(null)
   const [folderDialogValue, setFolderDialogValue] = useState("")
   const [folderBusy, setFolderBusy] = useState(false)
-  const [folderDeleteTarget, setFolderDeleteTarget] = useState<string | null>(null)
+  const [folderDeleteTarget, setFolderDeleteTarget] = useState<SidebarFolder | null>(null)
 
   // Folder sharing dialog
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
@@ -1052,11 +1106,8 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
   // create/rename/delete so the sidebar reflects the change immediately).
   const loadCustomFolders = useCallback(async () => {
     try {
-      const result = await api.getMailboxes()
-      const extra = (result.mailboxes ?? []).filter(
-        (m) => !standardMailboxes.has(m.toLowerCase())
-      )
-      setCustomFolders(extra)
+      const all = (await api.getMailboxes()).folders ?? []
+      setCustomFolders(all.map((f) => ({ id: f.id, name: f.name, label: folderLabel(f, all) })))
     } catch {
       setCustomFolders([])
     }
@@ -1106,15 +1157,15 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
 
   const openCreateFolder = () => {
     setFolderDialogMode("create")
-    setFolderDialogCurrent("")
+    setFolderDialogCurrent(null)
     setFolderDialogValue("")
     setFolderDialogOpen(true)
   }
 
-  const openRenameFolder = (name: string) => {
+  const openRenameFolder = (folder: SidebarFolder) => {
     setFolderDialogMode("rename")
-    setFolderDialogCurrent(name)
-    setFolderDialogValue(name)
+    setFolderDialogCurrent(folder)
+    setFolderDialogValue(folder.name)
     setFolderDialogOpen(true)
   }
 
@@ -1129,8 +1180,8 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
       if (folderDialogMode === "create") {
         await api.createFolder(value)
         toast.success(t("sidebar.folderCreated"))
-      } else {
-        await api.renameFolder(folderDialogCurrent, value)
+      } else if (folderDialogCurrent) {
+        await api.renameFolder(folderDialogCurrent.id, value)
         toast.success(t("sidebar.folderRenamed"))
       }
       setFolderDialogOpen(false)
@@ -1146,9 +1197,9 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
     if (!folderDeleteTarget || folderBusy) return
     setFolderBusy(true)
     try {
-      await api.deleteFolder(folderDeleteTarget)
+      await api.deleteFolder(folderDeleteTarget.id)
       toast.success(t("sidebar.folderDeleted"))
-      if (location.pathname === `/folder/${encodeURIComponent(folderDeleteTarget)}`) {
+      if (location.pathname === `/folder/${encodeURIComponent(folderDeleteTarget.id)}`) {
         navigate("/inbox")
       }
       setFolderDeleteTarget(null)
@@ -1162,11 +1213,11 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
 
   // handleEmptyFolder discards a custom folder's contents to Trash (server-side, in
   // one call), then refreshes the folder list so its unread badge updates.
-  const handleEmptyFolder = async (name: string) => {
+  const handleEmptyFolder = async (folder: SidebarFolder) => {
     if (folderBusy) return
     setFolderBusy(true)
     try {
-      await api.emptyFolder(name)
+      await api.emptyFolder(folder.id)
       toast.success(t("sidebar.folderEmptied"))
       await loadCustomFolders()
     } catch (err) {
@@ -1177,9 +1228,9 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
   }
 
   // handleToggleFavorite pins or unpins a folder; the server returns the new list.
-  const handleToggleFavorite = async (name: string) => {
+  const handleToggleFavorite = async (folder: SidebarFolder) => {
     try {
-      const res = await api.toggleFavorite(name)
+      const res = await api.toggleFavorite(folder.id)
       setFavorites(res.favorites ?? [])
     } catch (err) {
       toast.error(errorText(err, t("sidebar.favoriteFailed")))
@@ -1244,15 +1295,16 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
   }
 
   const folderActions: CustomFolderActions = {
-    onToggleFavorite: (name) => void handleToggleFavorite(name),
+    onToggleFavorite: (folder) => void handleToggleFavorite(folder),
     onRename: openRenameFolder,
-    onShare: (name) => {
-      setShareDialogFolder({ name, label: name })
+    onShare: (folder) => {
+      setShareDialogFolder({ name: folder.id, label: folder.label })
       setShareDialogOpen(true)
     },
-    onEmpty: (name) => void handleEmptyFolder(name),
+    onEmpty: (folder) => void handleEmptyFolder(folder),
     onDelete: setFolderDeleteTarget,
   }
+  const folderLabels = new Map(customFolders.map((f) => [f.id, f.label]))
 
   // Inject real counts into the nav items (badges only render when > 0).
   const mainNav = mainNavItems.map((item) =>
@@ -1285,18 +1337,18 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
 
         <Separator className="my-3" />
 
-        <FoldersHeader isExpanded={isExpanded} favorites={favorites} onCreate={openCreateFolder} />
+        <FoldersHeader isExpanded={isExpanded} favorites={favorites} labels={folderLabels} onCreate={openCreateFolder} />
 
         {folders.map((item) => (
           <FolderDropTarget key={item.path} item={item} isExpanded={isExpanded} />
         ))}
 
-        {customFolders.map((name) => (
+        {customFolders.map((folder) => (
           <CustomFolderItem
-            key={name}
-            name={name}
+            key={folder.id}
+            folder={folder}
             isExpanded={isExpanded}
-            isFavorite={favorites.includes(name)}
+            isFavorite={favorites.includes(folder.id)}
             actions={folderActions}
           />
         ))}
@@ -1314,7 +1366,7 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
         open={folderDialogOpen}
         onOpenChange={setFolderDialogOpen}
         mode={folderDialogMode}
-        current={folderDialogCurrent}
+        current={folderDialogCurrent?.label ?? ""}
         value={folderDialogValue}
         onValueChange={setFolderDialogValue}
         busy={folderBusy}
@@ -1324,7 +1376,7 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
       <ConfirmDeleteDialog
         open={folderDeleteTarget !== null}
         title={t("sidebar.deleteFolderTitle")}
-        description={t("sidebar.deleteFolderConfirm", { name: folderDeleteTarget ?? "" })}
+        description={t("sidebar.deleteFolderConfirm", { name: folderDeleteTarget?.label ?? "" })}
         busy={folderBusy}
         onCancel={() => setFolderDeleteTarget(null)}
         onConfirm={() => void confirmDeleteFolder()}
@@ -1346,6 +1398,10 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
         mode={sfDialogMode}
         form={sfForm}
         setForm={setSfForm}
+        folders={[
+          ...SEARCH_BUILTINS.map((b) => ({ id: b.id, label: t(b.key) })),
+          ...customFolders.map((f) => ({ id: f.id, label: f.label })),
+        ]}
         busy={sfBusy}
         onSubmit={() => void submitSavedSearch()}
       />

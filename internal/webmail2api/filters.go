@@ -52,9 +52,44 @@ func writeFilters(m map[string]json.RawMessage, f []filterJSON) {
 }
 
 func (s *Server) handleGetFilters(w http.ResponseWriter, r *http.Request) {
-	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		return map[string]any{"filters": readFilters(m)}, false
+	s.withSettings(w, r, func(st *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
+		f := readFilters(m)
+		migrated := slugFilterTargets(st, f)
+		if migrated {
+			writeFilters(m, f)
+		}
+		return map[string]any{"filters": f}, migrated
 	})
+}
+
+// slugFilterTargets rewrites each move or copy target stored by display name,
+// from before folders were addressed by id, into the slug of the folder it
+// reached, reporting whether any changed. A target that is already a slug, or a
+// name that reaches no folder, is left as it is.
+func slugFilterTargets(st *objectstore.Store, f []filterJSON) bool {
+	changed := false
+	for i := range f {
+		for j := range f[i].Actions {
+			a := &f[i].Actions[j]
+			if a.Type != "moveToFolder" && a.Type != "copyToFolder" || isSlug(a.Target) {
+				continue
+			}
+			if fid, ok := legacyFolder(st, a.Target); ok {
+				a.Target = slugOf(fid)
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
+// isSlug reports whether ref is already a folder slug the server emits.
+func isSlug(ref string) bool {
+	if _, ok := folderFID(ref); ok {
+		return true
+	}
+	_, ok := parseCustomSlug(ref)
+	return ok
 }
 
 func (s *Server) handlePostFilter(w http.ResponseWriter, r *http.Request) {

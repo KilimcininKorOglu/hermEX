@@ -148,6 +148,36 @@ func TestASlugNamesOnlyAUserFolder(t *testing.T) {
 	}
 }
 
+// TestAListingAnswersWithTheSlug proves a folder listed by its legacy display
+// name answers with the folder's slug in every message id and folder field, so
+// the client holds one address per folder whatever it sent.
+func TestAListingAnswersWithTheSlug(t *testing.T) {
+	tf := newTwinFolders(t)
+	st, err := objectstore.Open(tf.dir)
+	mustNoErr(t, "open the store", err)
+	raw := []byte("From: bob@hermex.test\r\nSubject: top\r\nDate: Mon, 01 Jun 2026 10:00:00 +0000\r\n\r\nbody\r\n")
+	_, err = st.AppendMessage(tf.projects, raw, time.Now(), 0)
+	mustNoErr(t, "append to Projects", err)
+	st.Close()
+
+	rec := tf.call(http.MethodGet, "/api/v1/mail/Projects", "")
+	var out struct {
+		Emails []struct {
+			ID     string `json:"id"`
+			Folder string `json:"folder"`
+		} `json:"emails"`
+	}
+	mustNoErr(t, "decode the listing", json.Unmarshal(rec.Body.Bytes(), &out))
+	if len(out.Emails) != 1 {
+		t.Fatalf("listing holds %d messages, want 1", len(out.Emails))
+	}
+	slug := customSlug(tf.projects)
+	wantEq(t, "folder field", out.Emails[0].Folder, slug)
+	if !strings.HasPrefix(out.Emails[0].ID, slug+":") {
+		t.Errorf("message id %q does not start with %q", out.Emails[0].ID, slug+":")
+	}
+}
+
 // TestAFolderNamedLikeASlugCannotTakeIt proves a folder whose display name is
 // another folder's slug does not capture that slug: the slug names the folder of
 // that id.

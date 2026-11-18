@@ -13,15 +13,18 @@ import (
 )
 
 // TestFavoritesTogglePersists proves the favourite-folder toggle pins and unpins a
-// folder in the user's webmail settings and survives a re-read, matching the old
-// favourites, persisted in the settings blob.
+// folder, by its slug, in the user's webmail settings and survives a re-read, and
+// that a slug naming no folder is refused rather than pinned.
 func TestFavoritesTogglePersists(t *testing.T) {
 	dir := t.TempDir()
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
+	fid, err := st.CreateFolder(nil, "Project")
+	mustNoErr(t, "create Project", err)
 	st.Close()
+	slug := customSlug(fid)
 
 	secret := []byte("favorites-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
@@ -49,14 +52,29 @@ func TestFavoritesTogglePersists(t *testing.T) {
 	if got := favs(do(http.MethodGet, "/api/v1/favorites", "")); len(got) != 0 {
 		t.Fatalf("initial favorites = %v, want empty", got)
 	}
-	if rec := do(http.MethodPost, "/api/v1/favorites/toggle", `{"name":"Project"}`); rec.Code != 200 {
+	if rec := do(http.MethodPost, "/api/v1/favorites/toggle", `{"id":"`+slug+`"}`); rec.Code != 200 {
 		t.Fatalf("toggle on: %d %s", rec.Code, rec.Body.String())
 	}
-	if got := favs(do(http.MethodGet, "/api/v1/favorites", "")); len(got) != 1 || got[0] != "Project" {
-		t.Errorf("after pin, favorites = %v, want [Project]", got)
+	if got := favs(do(http.MethodGet, "/api/v1/favorites", "")); len(got) != 1 || got[0] != slug {
+		t.Errorf("after pin, favorites = %v, want [%s]", got, slug)
 	}
-	do(http.MethodPost, "/api/v1/favorites/toggle", `{"name":"Project"}`)
+	do(http.MethodPost, "/api/v1/favorites/toggle", `{"id":"`+slug+`"}`)
 	if got := favs(do(http.MethodGet, "/api/v1/favorites", "")); len(got) != 0 {
 		t.Errorf("after unpin, favorites = %v, want empty", got)
+	}
+}
+
+// TestFavoritesToggleRefusesAnUnknownFolder proves a toggle naming no folder (a
+// missing id, a malformed slug, no id at all) is refused and pins nothing, so a
+// pin always names a real folder.
+func TestFavoritesToggleRefusesAnUnknownFolder(t *testing.T) {
+	do, _ := folderHarness(t)
+	for _, body := range []string{`{"id":"f999999"}`, `{"id":"f13x"}`, `{}`} {
+		if rec := do(http.MethodPost, "/api/v1/favorites/toggle", body); rec.Code == http.StatusOK {
+			t.Errorf("toggle %s = 200, want a refusal", body)
+		}
+	}
+	if got := favorites(t, do); len(got) != 0 {
+		t.Errorf("after refused toggles, favorites = %v, want empty", got)
 	}
 }

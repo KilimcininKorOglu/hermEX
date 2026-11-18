@@ -22,6 +22,28 @@ func customSlug(fid int64) string {
 	return customSlugPrefix + strconv.FormatInt(fid, 10)
 }
 
+// builtinSlugs are the fixed slugs of the built-in folders, the names folderFID
+// resolves; the first slug of a folder is the one the server emits.
+var builtinSlugs = map[int64]string{
+	mapi.PrivateFIDInbox:        "inbox",
+	mapi.PrivateFIDSentItems:    "sent",
+	mapi.PrivateFIDDraft:        "drafts",
+	mapi.PrivateFIDDeletedItems: "trash",
+	mapi.PrivateFIDJunk:         "spam",
+	mapi.PrivateFIDArchive:      "archive",
+}
+
+// slugOf is the one slug the server emits for a folder it resolved: the fixed
+// slug of a built-in folder, else the id slug. Every id and folder field a
+// response carries is built from the resolved folder through this, never echoed
+// from the request, so a folder has one address whatever the client sent.
+func slugOf(fid int64) string {
+	if s, ok := builtinSlugs[fid]; ok {
+		return s
+	}
+	return customSlug(fid)
+}
+
 // parseCustomSlug reads the folder id out of a user-folder slug: "f" followed by
 // a positive decimal id with no sign and no leading zero, so each folder has
 // exactly one spelling.

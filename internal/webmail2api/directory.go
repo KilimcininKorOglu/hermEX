@@ -56,17 +56,19 @@ func (s *Server) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
-	if _, err := st.CreateFolder(nil, body.Name); errors.Is(err, objectstore.ErrFolderExists) {
+	fid, err := st.CreateFolder(nil, body.Name)
+	if errors.Is(err, objectstore.ErrFolderExists) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "a folder with that name already exists"})
 		return
 	} else if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not create folder"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"name": body.Name})
+	writeJSON(w, http.StatusOK, map[string]string{"name": body.Name, "id": slugOf(fid)})
 }
 
-// handleRenameFolder renames a user folder identified by its current display name.
+// handleRenameFolder renames a user folder identified by its slug. The folder
+// keeps its id, so its pins and references survive the rename.
 func (s *Server) handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 	current := r.PathValue("current")
 	var body struct {
@@ -76,7 +78,7 @@ func (s *Server) handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
 		return
 	}
-	st, c, ok := s.openStore(w, r)
+	st, _, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
@@ -98,8 +100,7 @@ func (s *Server) handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not rename folder"})
 		return
 	}
-	s.retitleFavorite(st, c.Mailbox, current, body.Name)
-	writeJSON(w, http.StatusOK, map[string]string{"name": body.Name})
+	writeJSON(w, http.StatusOK, map[string]string{"name": body.Name, "id": slugOf(id)})
 }
 
 // handleDeleteFolder removes a user folder by display name.
@@ -131,12 +132,18 @@ func (s *Server) handleDeleteFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !inTrash {
-		if err := moveToTrash(st, id, name); err != nil {
+		// The request names the folder by its slug; under Deleted Items it keeps
+		// its own display name.
+		props, err := st.GetFolderProperties(id, mapi.PrDisplayName)
+		if err == nil {
+			err = moveToTrash(st, id, propStr(props, mapi.PrDisplayName))
+		}
+		if err != nil {
 			logError("delete-folder.move", err, logging.Fields{"folder": name})
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not delete folder"})
 			return
 		}
-		s.retitleFavorite(st, c.Mailbox, name, "")
+		s.unpinFolder(st, c.Mailbox, id)
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "movedToTrash": true})
 		return
 	}
@@ -151,7 +158,7 @@ func (s *Server) handleDeleteFolder(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not delete folder"})
 		return
 	}
-	s.retitleFavorite(st, c.Mailbox, name, "")
+	s.unpinFolder(st, c.Mailbox, id)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "movedToTrash": false})
 }
 

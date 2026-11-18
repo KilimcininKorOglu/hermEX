@@ -85,7 +85,7 @@ import {
   type ReaderAction,
 } from "@/utils/emailDetail"
 import { cn } from "@/lib/utils"
-import api from "@/utils/api"
+import api, { folderLabel } from "@/utils/api"
 import type { MeetingInvite, MeetingResponse, RsvpOptions, AttachmentInfo, Mail as MailMessage, Note } from "@/utils/api"
 import * as smimeStore from "@/utils/smime"
 import { hasIdentity as hasBrowserSmime } from "@/utils/smimeIdentity"
@@ -126,11 +126,6 @@ const FOLLOWUP_COLORS = [
   { value: 5, key: "followUpColorBlue", fill: "fill-blue-500 text-blue-500" },
   { value: 6, key: "followUpColorRed", fill: "fill-red-500 text-red-500" },
 ] as const
-
-// STANDARD_FOLDERS are the built-in mailbox names already offered as fixed copy
-// targets below, so getMailboxes() entries matching these are dropped from the
-// custom-folder list.
-const STANDARD_FOLDERS = new Set(["inbox", "sent", "drafts", "trash", "junk", "scheduled"])
 
 // FOLDER_TARGETS are the fixed move and copy targets: the folder slug and the
 // i18n key of its label.
@@ -235,7 +230,7 @@ function useReaderPrefs() {
   // Category name → color, so labels render with their configured color.
   const [categoryColors, setCategoryColors] = useState<Record<string, string>>({})
   // Custom folders offered as copy-to targets, alongside the fixed built-ins.
-  const [copyFolders, setCopyFolders] = useState<string[]>([])
+  const [copyFolders, setCopyFolders] = useState<{ id: string; label: string }[]>([])
   // When set (a saved preference), a reply does not quote the original message.
   const [omitOriginal, setOmitOriginal] = useState(false)
   // Item data: a dev-only raw property dump (the JSON the API returned). The
@@ -263,7 +258,8 @@ function useReaderPrefs() {
     api.getMailboxes()
       .then((res) => {
         if (cancelled) return
-        setCopyFolders((res.mailboxes ?? []).filter((m) => !STANDARD_FOLDERS.has(m.toLowerCase())))
+        const all = res.folders ?? []
+        setCopyFolders(all.map((f) => ({ id: f.id, label: folderLabel(f, all) })))
       })
       .catch(() => {})
     api.getPreferences()
@@ -1027,7 +1023,7 @@ function FollowupMenu({ email, onFollowup }: {
 function FolderMenu({ title, icon, custom, onPick }: {
   title: string
   icon: ReactNode
-  custom: string[]
+  custom: { id: string; label: string }[]
   onPick: (folder: string, label: string) => void
 }) {
   const { t } = useI18n()
@@ -1044,7 +1040,7 @@ function FolderMenu({ title, icon, custom, onPick }: {
         ))}
         {custom.length > 0 && <DropdownMenuSeparator />}
         {custom.map((f) => (
-          <DropdownMenuItem key={f} onClick={() => onPick(f, f)}>{f}</DropdownMenuItem>
+          <DropdownMenuItem key={f.id} onClick={() => onPick(f.id, f.label)}>{f.label}</DropdownMenuItem>
         ))}
       </DropdownMenuContent>
     </DropdownMenu>

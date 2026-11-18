@@ -3,23 +3,57 @@ package webmail2api
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
+	"strings"
 
 	"hermex/internal/objectstore"
 )
 
 // favoritesKey is the PrWebmailSettings blob key holding the user's pinned
-// favourite folders (a list of custom-folder display names).
-const favoritesKey = "webmail2Favorites"
+// favourite folders, each by its folder slug (slugOf), so a rename keeps the pin
+// and two folders of one name are two different pins.
+const favoritesKey = "webmail2FavoriteFolders"
 
-func readFavorites(m map[string]json.RawMessage) []string {
+// legacyFavoritesKey held the pins by display name before folders were addressed
+// by id. It is read once, converted into favoritesKey and removed.
+const legacyFavoritesKey = "webmail2Favorites"
+
+// loadFavorites returns the pinned folder slugs, converting a legacy list of
+// display names into slugs (and reporting that m changed) the first time it is
+// read. A name converts to the folder it reached before, the folder the user
+// pinned; a name that no longer reaches a folder is dropped.
+func loadFavorites(st *objectstore.Store, m map[string]json.RawMessage) ([]string, bool) {
 	fav := []string{}
 	if raw, ok := m[favoritesKey]; ok {
 		_ = json.Unmarshal(raw, &fav)
+		if fav == nil {
+			fav = []string{}
+		}
+		return fav, false
 	}
-	if fav == nil {
-		fav = []string{}
+	raw, ok := m[legacyFavoritesKey]
+	if !ok {
+		return fav, false
 	}
-	return fav
+	var names []string
+	_ = json.Unmarshal(raw, &names)
+	for _, name := range names {
+		if fid, found := legacyFolder(st, name); found && !slices.Contains(fav, slugOf(fid)) {
+			fav = append(fav, slugOf(fid))
+		}
+	}
+	writeFavorites(m, fav)
+	delete(m, legacyFavoritesKey)
+	return fav, true
+}
+
+// legacyFolder resolves a folder reference stored before folders were addressed
+// by id: a built-in slug, else the display name as it resolved then.
+func legacyFolder(st *objectstore.Store, name string) (int64, bool) {
+	if fid, ok := folderFID(strings.ToLower(name)); ok {
+		return fid, true
+	}
+	return folderByName(st, name)
 }
 
 func writeFavorites(m map[string]json.RawMessage, fav []string) {
@@ -27,52 +61,50 @@ func writeFavorites(m map[string]json.RawMessage, fav []string) {
 	m[favoritesKey] = raw
 }
 
-// handleGetFavorites returns the user's pinned favourite folders, the names the
-// sidebar shows in a "Favorites" section above the regular folder list.
+// handleGetFavorites returns the user's pinned favourite folders, the slugs of
+// the folders the sidebar shows in a "Favorites" section above the folder list.
 func (s *Server) handleGetFavorites(w http.ResponseWriter, r *http.Request) {
-	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		return map[string]any{"favorites": readFavorites(m)}, false
+	s.withSettings(w, r, func(st *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
+		fav, migrated := loadFavorites(st, m)
+		return map[string]any{"favorites": fav}, migrated
 	})
 }
 
 // handleToggleFavorite pins or unpins a folder in the user's sidebar favourites,
-// the old webmail's favorite toggle, persisted in the webmail settings blob.
+// persisted in the webmail settings blob. The folder is named by its slug and
+// must exist, so a pin always names a real folder.
 func (s *Server) handleToggleFavorite(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Name string `json:"name"`
+		ID string `json:"id"`
 	}
-	if err := decodeJSON(r, &in); err != nil || in.Name == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+	if err := decodeJSON(r, &in); err != nil || in.ID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
 		return
 	}
-	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		fav := readFavorites(m)
-		idx := -1
-		for i, f := range fav {
-			if f == in.Name {
-				idx = i
-				break
-			}
+	s.withSettings(w, r, func(st *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
+		fid, ok := resolveFolder(st, in.ID)
+		if !ok {
+			return settingsFailure{status: http.StatusNotFound, msg: "folder not found"}, false
 		}
-		if idx >= 0 {
-			fav = append(fav[:idx], fav[idx+1:]...)
+		fav, _ := loadFavorites(st, m)
+		slug := slugOf(fid)
+		if i := slices.Index(fav, slug); i >= 0 {
+			fav = slices.Delete(fav, i, i+1)
 		} else {
-			fav = append(fav, in.Name)
+			fav = append(fav, slug)
 		}
 		writeFavorites(m, fav)
 		return map[string]any{"favorites": fav}, true
 	})
 }
 
-// retitleFavorite keeps the sidebar pins in step with a folder operation. A
-// favourite is stored by DISPLAY NAME, so a rename that does not carry the pin
-// drops it, and a delete that does not clear it leaves the sidebar pointing at a
-// folder that is no longer there. An empty newName removes the pin.
+// unpinFolder removes a deleted folder's pin, so the sidebar does not point at a
+// folder that is no longer there. A rename needs no upkeep: the pin is the id.
 //
 // It reports its own failure rather than the caller's: the folder operation has
 // already succeeded by the time this runs, and a pin left behind must not be
-// answered as a failed rename.
-func (s *Server) retitleFavorite(st *objectstore.Store, mailbox, oldName, newName string) {
+// answered as a failed delete.
+func (s *Server) unpinFolder(st *objectstore.Store, mailbox string, fid int64) {
 	unlock := s.lockSettings(mailbox)
 	defer unlock()
 	m, loaded := settingsForWrite(st)
@@ -82,25 +114,16 @@ func (s *Server) retitleFavorite(st *objectstore.Store, mailbox, oldName, newNam
 		// pin.
 		return
 	}
-	fav := readFavorites(m)
-	out := make([]string, 0, len(fav))
-	changed := false
-	for _, f := range fav {
-		switch {
-		case f != oldName:
-			out = append(out, f)
-		case newName != "":
-			out = append(out, newName)
-			changed = true
-		default:
-			changed = true
-		}
-	}
-	if !changed {
+	fav, migrated := loadFavorites(st, m)
+	i := slices.Index(fav, slugOf(fid))
+	if i < 0 && !migrated {
 		return
 	}
-	writeFavorites(m, out)
+	if i >= 0 {
+		fav = slices.Delete(fav, i, i+1)
+	}
+	writeFavorites(m, fav)
 	if err := saveSharedSettings(st, m); err != nil {
-		st.LogSwallowedError("favorites.retitle", err)
+		st.LogSwallowedError("favorites.unpin", err)
 	}
 }
