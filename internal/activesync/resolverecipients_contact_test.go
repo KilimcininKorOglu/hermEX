@@ -2,8 +2,11 @@ package activesync
 
 import (
 	"encoding/base64"
+	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
+	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcmail"
@@ -109,6 +112,55 @@ func TestResolveRecipientsServesAContactPicture(t *testing.T) {
 	}
 	if want := base64.StdEncoding.EncodeToString(photo); pic.ChildText(wbxml.RRData) != want {
 		t.Errorf("Picture Data is not the contact photo")
+	}
+}
+
+// TestResolveRecipientsKeepsContactsPrivate proves an address book answers only
+// its owner. Another user's saved contact, a contact the owner deleted (soft-deleted
+// into Recoverable Items, so its row is still in Contacts) and a query of LIKE wildcards, which would
+// otherwise match every contact, all resolve to nothing: in [MS-ASCMD] a
+// ResolveRecipients Response Status of 4 is "the recipient was not found" (2 and 3
+// are ambiguous matches).
+func TestResolveRecipientsKeepsContactsPrivate(t *testing.T) {
+	root := t.TempDir()
+	aliceDir, bobDir := filepath.Join(root, "alice"), filepath.Join(root, "bob")
+	for _, d := range []string{aliceDir, bobDir} {
+		st, err := objectstore.Open(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.Close()
+	}
+	seedAddressedContact(t, bobDir, "Ada Lovelace", "ada@partner.example")
+	deleted := seedAddressedContact(t, aliceDir, "Grace Hopper", "grace@partner.example")
+	st, err := objectstore.Open(aliceDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SoftDeleteObject(deleted); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	seedAddressedContact(t, aliceDir, "Kept Contact", "kept@partner.example")
+	accs := directory.StaticAccounts{
+		testUser:          {Password: testPass, MailboxPath: aliceDir},
+		"bob@hermex.test": {Password: "x", MailboxPath: bobDir},
+	}
+	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
+	t.Cleanup(ts.Close)
+
+	for _, q := range []string{"Lovelace", "Hopper", "%%%", "___"} {
+		_, resp := postCommand(t, ts, "ResolveRecipients", resolveReq(q))
+		r := responseFor(resp, q)
+		if r == nil {
+			t.Fatalf("%q: no Response echoed", q)
+		}
+		if s := r.ChildText(wbxml.RRStatus); s != "4" {
+			t.Errorf("%q: Status = %q, want 4 (not found)", q, s)
+		}
+		if rec := r.Child(wbxml.RRRecipient); rec != nil {
+			t.Errorf("%q: resolved to %q, want no Recipient", q, rec.ChildText(wbxml.RREmailAddress))
+		}
 	}
 }
 
