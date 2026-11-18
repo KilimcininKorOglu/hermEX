@@ -154,6 +154,36 @@ func TestSharedMessageRefusesADelegateWithoutAGrant(t *testing.T) {
 	}
 }
 
+// TestSharedUserFolderBySlugNeedsAGrant proves a user folder of a shared mailbox,
+// addressed by its slug, is gated on its own folder rights: a delegate with no
+// grant on it can neither list it nor read its message, and a grant on it lets
+// the same slug through.
+func TestSharedUserFolderBySlugNeedsAGrant(t *testing.T) {
+	f := newSharedMessageFixture(t, 0, true)
+	st, err := objectstore.Open(f.shared)
+	mustNoErr(t, "open shared", err)
+	fid, err := st.CreateFolder(nil, "Board")
+	mustNoErr(t, "create Board", err)
+	_, err = st.AppendMessage(fid, []byte("From: s@hermex.test\r\nSubject: board minutes\r\n\r\nbody"), time.Now(), 0)
+	mustNoErr(t, "append", err)
+	st.Close()
+	slug := customSlug(fid)
+	list := "/api/v1/mail/" + slug + "?owner=team@hermex.test"
+	read := "/api/v1/mail/source?id=" + slug + ":1&owner=team@hermex.test"
+
+	for _, target := range []string{list, read} {
+		rec := f.do(http.MethodGet, target, "")
+		if rec.Code != http.StatusForbidden || strings.Contains(rec.Body.String(), "board minutes") {
+			t.Errorf("GET %s without a grant = %d: %s", target, rec.Code, rec.Body.String())
+		}
+	}
+
+	f.grantFolder(t, fid, mapi.RightsReviewer)
+	if rec := f.do(http.MethodGet, read, ""); !strings.Contains(rec.Body.String(), "board minutes") {
+		t.Errorf("GET %s with a grant = %d: %s", read, rec.Code, rec.Body.String())
+	}
+}
+
 // TestSharedMessageOpenMarksReadWithWriteRights proves opening a shared message
 // marks it read for a grantee who may change the folder, and leaves it unread,
 // and reported unread, for a read-only grantee.

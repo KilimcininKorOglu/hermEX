@@ -179,6 +179,33 @@ func TestAListingAnswersWithTheSlug(t *testing.T) {
 	}
 }
 
+// TestAFolderNameWithAColonRoundTrips proves a folder whose name holds the ":"
+// that separates a message id's folder from its uid still lists and opens: the
+// id carries the folder's slug, which never holds one.
+func TestAFolderNameWithAColonRoundTrips(t *testing.T) {
+	tf := newTwinFolders(t)
+	st, err := objectstore.Open(tf.dir)
+	mustNoErr(t, "open the store", err)
+	fid, err := st.CreateFolder(nil, "Q3: plans")
+	mustNoErr(t, "create Q3: plans", err)
+	_, err = st.AppendMessage(fid, []byte("From: b@hermex.test\r\nSubject: colon\r\n\r\nbody\r\n"), time.Now(), 0)
+	mustNoErr(t, "append", err)
+	st.Close()
+
+	rec := tf.call(http.MethodGet, "/api/v1/mail/"+customSlug(fid), "")
+	var out struct {
+		Emails []struct {
+			ID string `json:"id"`
+		} `json:"emails"`
+	}
+	mustNoErr(t, "decode the listing", json.Unmarshal(rec.Body.Bytes(), &out))
+	if len(out.Emails) != 1 {
+		t.Fatalf("listing holds %d messages, want 1", len(out.Emails))
+	}
+	open := tf.call(http.MethodGet, "/api/v1/mail/message?id="+out.Emails[0].ID, "")
+	wantEq(t, "open status", open.Code, http.StatusOK)
+}
+
 // TestAFolderNamedLikeASlugCannotTakeIt proves a folder whose display name is
 // another folder's slug does not capture that slug: the slug names the folder of
 // that id.
