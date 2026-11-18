@@ -155,13 +155,15 @@ func parseTaskRecurrence(data *wbxml.Node, t *oxtask.Task) bool {
 	r := oxcical.Recurrence{Freq: freq, Interval: 1}
 	setPositive(rec, wbxml.TKRecurInterval, &r.Interval)
 	setPositive(rec, wbxml.TKRecurOccurrences, &r.Count)
-	setTaskInt(rec, wbxml.TKRecurDayOfMonth, &r.MonthDay)
-	setTaskInt(rec, wbxml.TKRecurMonthOfYear, &r.Month)
+	// MS-ASTASK bounds: DayOfMonth 1-31, MonthOfYear 1-12, DayOfWeek a 7-bit mask.
+	// A value outside them is dropped, never written into the stored RRULE.
+	setInRange(rec, wbxml.TKRecurDayOfMonth, 1, 31, &r.MonthDay)
+	setInRange(rec, wbxml.TKRecurMonthOfYear, 1, 12, &r.Month)
 	if until, ok := parseEASCalTime(rec.ChildText(wbxml.TKRecurUntil)); ok {
 		r.Until = until
 	}
 	var mask int
-	if setPositive(rec, wbxml.TKRecurDayOfWeek, &mask); mask > 0 {
+	if setInRange(rec, wbxml.TKRecurDayOfWeek, 1, 127, &mask); mask > 0 {
 		r.Weekdays = bitmaskWeekdays(mask)
 	}
 	// The nth-weekday ordinal stays implicit in the EAS WeekOfMonth field: BYDAY
@@ -175,6 +177,14 @@ func parseTaskRecurrence(data *wbxml.Node, t *oxtask.Task) bool {
 // the device sent nothing, a non-number, or a value below one.
 func setPositive(rec *wbxml.Node, tag wbxml.Tag, dst *int) {
 	if n, err := strconv.Atoi(rec.ChildText(tag)); err == nil && n > 0 {
+		*dst = n
+	}
+}
+
+// setInRange reads one recurrence field, keeping the current value when the device
+// sent nothing, a non-number, or a value outside lo..hi.
+func setInRange(rec *wbxml.Node, tag wbxml.Tag, lo, hi int, dst *int) {
+	if n, err := strconv.Atoi(rec.ChildText(tag)); err == nil && n >= lo && n <= hi {
 		*dst = n
 	}
 }
@@ -254,8 +264,9 @@ func parseTaskItem(data *wbxml.Node) oxtask.Task {
 	t := oxtask.New()
 	t.Subject = data.ChildText(wbxml.TKSubject)
 	t.Body = airSyncBody(data)
-	setTaskInt(data, wbxml.TKImportance, &t.Importance)
-	setTaskInt(data, wbxml.TKSensitivity, &t.Sensitivity)
+	// MS-ASTASK: Importance 0-2, Sensitivity 0-3.
+	setInRange(data, wbxml.TKImportance, 0, 2, &t.Importance)
+	setInRange(data, wbxml.TKSensitivity, 0, 3, &t.Sensitivity)
 	t.Start = taskDate(data, wbxml.TKUtcStartDate, wbxml.TKStartDate)
 	t.Due = taskDate(data, wbxml.TKUtcDueDate, wbxml.TKDueDate)
 	t.Complete = data.ChildText(wbxml.TKComplete) == "1"
@@ -265,14 +276,6 @@ func parseTaskItem(data *wbxml.Node) oxtask.Task {
 	t.Categories = listChildText(data, wbxml.TKCategories, wbxml.TKCategory)
 	parseTaskRecurrence(data, &t)
 	return t
-}
-
-// setTaskInt reads one numeric task field, leaving the model's own default when
-// the device sent nothing or sent a value that is not a number.
-func setTaskInt(data *wbxml.Node, tag wbxml.Tag, dst *int) {
-	if n, err := strconv.Atoi(data.ChildText(tag)); err == nil {
-		*dst = n
-	}
 }
 
 // setTaskTime reads one task date in the MS-ASTASK format, leaving the field

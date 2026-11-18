@@ -107,6 +107,40 @@ func TestSyncTasksClientAdd(t *testing.T) {
 	wantEq(t, "the stored due date", task.Due.Format("2006-01-02"), "2026-07-05")
 }
 
+// TestSyncTasksClientRecurrenceOutOfRange adds a device task whose Recurrence fields
+// break the MS-ASTASK bounds (DayOfMonth 1-31, MonthOfYear 1-12, DayOfWeek a 7-bit
+// mask): the task is stored, but no out-of-range value reaches the shared RRULE that
+// webmail, EWS and MAPI read.
+func TestSyncTasksClientRecurrenceOutOfRange(t *testing.T) {
+	ts, dir := seededServer(t)
+	postCommand(t, ts, "Sync", tkReq("0"))
+	add := wbxml.Elem(wbxml.ASAdd, wbxml.Str(wbxml.ASClientID, "cli-bad"),
+		wbxml.Elem(wbxml.ASData,
+			wbxml.Str(wbxml.TKSubject, "Odd rule"),
+			wbxml.Str(wbxml.TKImportance, "9"),
+			wbxml.Str(wbxml.TKSensitivity, "77"),
+			wbxml.Elem(wbxml.TKRecurrence,
+				wbxml.Str(wbxml.TKRecurType, "3"),
+				wbxml.Str(wbxml.TKRecurDayOfMonth, "99"),
+				wbxml.Str(wbxml.TKRecurMonthOfYear, "-4"),
+				wbxml.Str(wbxml.TKRecurDayOfWeek, "4096"))))
+	_, root := postCommand(t, ts, "Sync", tkReq("1", add))
+	addResp := respColl(t, root).Child(wbxml.ASResponses).Child(wbxml.ASAdd)
+	if addResp == nil {
+		t.Fatal("no Add response for the task")
+	}
+	task, cleanup := storedTask(t, dir, addResp.ChildText(wbxml.ASServerID))
+	defer cleanup()
+	for _, bad := range []string{"BYMONTHDAY=99", "BYMONTH=-4", "BYMONTH=", "BYDAY="} {
+		if strings.Contains(task.RecurrenceRule, bad) {
+			t.Errorf("stored RRULE %q carries %s", task.RecurrenceRule, bad)
+		}
+	}
+	if task.Importance > 2 || task.Sensitivity > 3 {
+		t.Errorf("stored Importance %d / Sensitivity %d outside MS-ASTASK bounds", task.Importance, task.Sensitivity)
+	}
+}
+
 // storedTask reads back the task one server id names, through the shared task
 // model every protocol reads it with. The returned cleanup closes the store.
 func storedTask(t *testing.T, dir, serverID string) (oxtask.Task, func()) {
