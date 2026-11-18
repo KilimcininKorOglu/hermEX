@@ -1,6 +1,7 @@
 package dav
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"slices"
@@ -10,6 +11,7 @@ import (
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcmail"
 	"hermex/internal/oxvcard"
+	"hermex/internal/serve"
 )
 
 // defaultMaxVCard caps a PUT body; a vCard, even with an embedded photo, is far
@@ -136,7 +138,12 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request, mailbox strin
 		return
 	}
 
-	msg, status, err := importVCardBody(st, io.LimitReader(r.Body, s.vcardLimit()), name)
+	body, err := serve.ReadBody(r.Body, s.vcardLimit())
+	if err != nil {
+		s.davError(w, err, http.StatusBadRequest)
+		return
+	}
+	msg, status, err := importVCardBody(st, bytes.NewReader(body), name)
 	if err != nil {
 		s.davError(w, err, status)
 		return

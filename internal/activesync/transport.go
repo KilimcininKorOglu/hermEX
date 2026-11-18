@@ -4,13 +4,13 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"io"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
 
+	"hermex/internal/serve"
 	"hermex/internal/wbxml"
 )
 
@@ -45,7 +45,7 @@ func maxBodyLimit() int64 {
 
 // readWBXML reads and decodes the WBXML request body.
 func readWBXML(r *http.Request) (*wbxml.Node, error) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyLimit()))
+	body, err := serve.ReadBody(r.Body, maxBodyLimit())
 	if err != nil {
 		return nil, err
 	}

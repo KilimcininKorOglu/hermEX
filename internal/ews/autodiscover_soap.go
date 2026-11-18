@@ -80,7 +80,7 @@ func (s *Server) serveAutodiscoverSOAP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxAutodiscoverBody))
+	body, err := serve.ReadBody(r.Body, maxAutodiscoverBody)
 	if err != nil {
 		s.Logger.Emit(logging.Event{
 			Level:      logging.LevelWarn,

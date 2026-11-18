@@ -3,7 +3,6 @@ package dav
 import (
 	"encoding/xml"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -15,6 +14,7 @@ import (
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcical"
+	"hermex/internal/serve"
 )
 
 // CalDAV scheduling (RFC 6638). The scheduling Outbox accepts a POST carrying an
@@ -28,7 +28,7 @@ import (
 // VFREEBUSY request is answered with each attendee's busy periods, while an event
 // component (VEVENT) carrying an iTIP METHOD is delivered to its recipients.
 func (s *Server) handleOutboxPost(w http.ResponseWriter, r *http.Request, user string) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, s.icalLimit()))
+	body, err := serve.ReadBody(r.Body, s.icalLimit())
 	if err != nil {
 		s.davError(w, err, http.StatusBadRequest)
 		return

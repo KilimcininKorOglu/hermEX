@@ -3,7 +3,6 @@ package dav
 import (
 	"encoding/xml"
 	"fmt"
-	"io"
 	"net/http"
 	"path"
 	"strconv"
@@ -15,6 +14,7 @@ import (
 	"hermex/internal/oxcical"
 	"hermex/internal/oxtask"
 	"hermex/internal/oxvcard"
+	"hermex/internal/serve"
 )
 
 // reportReq captures the fields of the CardDAV REPORTs we support. The root
@@ -179,7 +179,7 @@ type reportTarget struct {
 // for the reports that re-parse them into their own request type.
 func (s *Server) parseReport(w http.ResponseWriter, r *http.Request) (reportReq, []byte, bool) {
 	var req reportReq
-	body, err := io.ReadAll(io.LimitReader(r.Body, s.vcardLimit()))
+	body, err := serve.ReadBody(r.Body, s.vcardLimit())
 	if err != nil {
 		s.davError(w, err, http.StatusBadRequest)
 		return req, nil, false

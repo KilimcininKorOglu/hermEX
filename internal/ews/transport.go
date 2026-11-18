@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"hermex/internal/logging"
+	"hermex/internal/serve"
 )
 
 // defaultMaxRequestBody caps a SOAP request body; it is the fallback when no operator
@@ -177,7 +178,7 @@ func readEnvelope(r *http.Request) (op string, inner []byte, imp *impersonationT
 	if v := reqBodyLimit.Load(); v > 0 {
 		limit = v
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, limit))
+	body, err := serve.ReadBody(r.Body, limit)
 	if err != nil {
 		return "", nil, nil, err
 	}

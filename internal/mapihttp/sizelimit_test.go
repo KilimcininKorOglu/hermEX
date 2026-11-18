@@ -19,8 +19,10 @@ func TestReadBodyRespectsTheOperatorLimit(t *testing.T) {
 
 	SetMaxRequestBody(16)
 	defer SetMaxRequestBody(0)
-	if got := read(); len(got) != 16 {
-		t.Errorf("body under a 16-byte cap read %d bytes, want 16", len(got))
+	// A body over the cap is refused whole (read as empty), never cut to a prefix a
+	// handler would parse as the request.
+	if got := read(); len(got) != 0 {
+		t.Errorf("body over a 16-byte cap read %d bytes, want 0", len(got))
 	}
 
 	// Restoring the default (0) admits the whole body again.

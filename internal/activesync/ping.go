@@ -2,7 +2,6 @@ package activesync
 
 import (
 	"errors"
-	"io"
 	"net/http"
 	"slices"
 	"strconv"
@@ -10,6 +9,7 @@ import (
 	"time"
 
 	"hermex/internal/objectstore"
+	"hermex/internal/serve"
 	"hermex/internal/wbxml"
 )
 
@@ -74,7 +74,7 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request, sess *sessio
 // the cached parameters (MS-ASCMD 3.1.5.8), so it reads as a Ping with no
 // children.
 func readPingBody(r *http.Request) (*wbxml.Node, error) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyLimit()))
+	body, err := serve.ReadBody(r.Body, maxBodyLimit())
 	if err != nil {
 		return nil, err
 	}

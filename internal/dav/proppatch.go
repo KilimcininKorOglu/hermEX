@@ -2,11 +2,11 @@ package dav
 
 import (
 	"encoding/xml"
-	"io"
 	"net/http"
 	"strings"
 
 	"hermex/internal/objectstore"
+	"hermex/internal/serve"
 )
 
 // propUpdate is a PROPPATCH request body (RFC 4918 §14.19): an ordered list of set
@@ -132,7 +132,7 @@ func proppatchableCollection(kind resourceKind, isCal, isCard bool) bool {
 // is already written.
 func (s *Server) parsePropUpdate(w http.ResponseWriter, r *http.Request) (propUpdate, bool) {
 	var pu propUpdate
-	body, err := io.ReadAll(io.LimitReader(r.Body, s.vcardLimit()))
+	body, err := serve.ReadBody(r.Body, s.vcardLimit())
 	if err != nil {
 		s.davError(w, err, http.StatusBadRequest)
 		return pu, false

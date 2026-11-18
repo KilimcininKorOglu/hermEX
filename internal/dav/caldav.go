@@ -2,7 +2,6 @@ package dav
 
 import (
 	"errors"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"hermex/internal/oxcical"
 	"hermex/internal/oxcmail"
 	"hermex/internal/oxtask"
+	"hermex/internal/serve"
 )
 
 // defaultMaxICal caps a calendar PUT body; an event, even a recurring one preserved
@@ -107,7 +107,7 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, s.icalLimit()))
+	body, err := serve.ReadBody(r.Body, s.icalLimit())
 	if err != nil {
 		s.davError(w, err, http.StatusBadRequest)
 		return

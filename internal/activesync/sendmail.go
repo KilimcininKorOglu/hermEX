@@ -26,7 +26,7 @@ import (
 // with no body (MS-ASCMD). For a reply or forward, the source message is then
 // marked replied/forwarded so the icon survives across devices.
 func (s *Server) handleSendMail(w http.ResponseWriter, r *http.Request, sess *session) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyLimit()))
+	body, err := serve.ReadBody(r.Body, maxBodyLimit())
 	if err != nil {
 		s.composeFail(w, r, sess, "sendmail.read.fail", err, statusInvalidContent)
 		return

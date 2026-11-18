@@ -40,6 +40,20 @@ func TestReadWBXMLRespectsBodyLimit(t *testing.T) {
 		t.Error("WBXML over the 4-byte cap decoded, want a truncation error")
 	}
 
+	// A valid document followed by more bytes, with the cap at the document's own
+	// length: cut at the cap the prefix decodes, so only refusing the oversized body
+	// whole keeps the server from running a request it never fully read.
+	extra := append(append([]byte{}, body...), make([]byte, 64)...)
+	SetMaxRequestBody(int64(len(body)))
+	r3 := httptest.NewRequest("POST", "/Microsoft-Server-ActiveSync", bytes.NewReader(extra))
+	if _, err := readWBXML(r3); err == nil {
+		t.Error("a body over the cap decoded from its prefix, want a refusal")
+	}
+	r4 := httptest.NewRequest("POST", "/Microsoft-Server-ActiveSync", bytes.NewReader(body))
+	if _, err := readWBXML(r4); err != nil {
+		t.Errorf("a body exactly at the cap = %v, want success", err)
+	}
+
 	SetMaxRequestBody(0)
 	r2 := httptest.NewRequest("POST", "/Microsoft-Server-ActiveSync", bytes.NewReader(body))
 	if _, err := readWBXML(r2); err != nil {

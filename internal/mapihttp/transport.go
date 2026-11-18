@@ -2,6 +2,7 @@ package mapihttp
 
 import (
 	"encoding/binary"
+	"hermex/internal/serve"
 	"io"
 	"net/http"
 	"strconv"
@@ -42,7 +43,9 @@ func readBody(r *http.Request) []byte {
 	if limit <= 0 {
 		limit = defaultMaxRequestBody
 	}
-	body, _ := io.ReadAll(io.LimitReader(r.Body, limit))
+	// An oversized body reads as empty, which every handler refuses as an invalid
+	// request body, rather than as a prefix cut at the cap.
+	body, _ := serve.ReadBody(r.Body, limit)
 	return body
 }
 
