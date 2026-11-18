@@ -54,6 +54,16 @@ func TestAdminSetDomainSyncPolicy(t *testing.T) {
 	if s := statusOf(authedReq(t, ts, "PUT", "/admin/domains/1/syncpolicy", session, csrf, `{"BogusField":1}`)); s != http.StatusBadRequest {
 		t.Errorf("unknown policy field = %d, want 400", s)
 	}
+	// A count cannot be negative and a toggle is 0 or 1 ([MS-ASPROV] 2.2.2); the
+	// stored override must stay the accepted one above.
+	for _, bad := range []string{`{"MinDevicePasswordLength":-1}`, `{"DevicePasswordEnabled":2}`} {
+		if s := statusOf(authedReq(t, ts, "PUT", "/admin/domains/1/syncpolicy", session, csrf, bad)); s != http.StatusBadRequest {
+			t.Errorf("%s = %d, want 400", bad, s)
+		}
+	}
+	if d.domainSyncPolicy["MinDevicePasswordLength"] != 8 {
+		t.Errorf("a refused policy replaced the stored one: %v", d.domainSyncPolicy)
+	}
 }
 
 // TestUIDomainSyncPolicySave proves the device-policy section on the domain detail
