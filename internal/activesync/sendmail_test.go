@@ -13,6 +13,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcmail"
 	"hermex/internal/wbxml"
 )
 
@@ -240,6 +241,48 @@ func TestSmartResponseToAMissingSourceSendsNothing(t *testing.T) {
 	}
 	if n := folderCount(t, bobDir, int64(mapi.PrivateFIDInbox)); n != 0 {
 		t.Errorf("bob's Inbox has %d messages; a reply to a missing source was sent", n)
+	}
+}
+
+// TestSmartForwardOfAnAppointment forwards a calendar item by the ServerId a
+// calendar Sync hands the device (its object id, not an IMAP uid): the SmartForward
+// page names an appointment as a forward source, so it is sent and marked. The
+// same id named under another folder is not that folder's item and answers 150.
+func TestSmartForwardOfAnAppointment(t *testing.T) {
+	ts, aliceDir, bobDir := sendServer(t)
+	st, err := objectstore.Open(aliceDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var props mapi.PropertyValues
+	props.Set(mapi.PrMessageClass, "IPM.Appointment")
+	props.Set(mapi.PrSubject, "Planning")
+	id, err := st.CreateMessage(int64(mapi.PrivateFIDCalendar), &oxcmail.Message{Props: props})
+	st.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid := strconv.FormatInt(id, 10)
+	forward := func(folder int64) (*http.Response, []byte) {
+		return postRaw(t, ts, "SmartForward", wbxml.Marshal(wbxml.Elem(wbxml.CMSmartForward,
+			wbxml.Elem(wbxml.CMSource,
+				wbxml.Str(wbxml.CMFolderID, strconv.FormatInt(folder, 10)),
+				wbxml.Str(wbxml.CMItemID, sid)),
+			wbxml.Opaque(wbxml.CMMIME, []byte(sampleMIME)))))
+	}
+
+	resp, out := forward(mapi.PrivateFIDContacts)
+	wantComposeStatus(t, resp, out, wbxml.CMSmartForward, "150")
+
+	resp, out = forward(mapi.PrivateFIDCalendar)
+	if resp.StatusCode != http.StatusOK || len(out) != 0 {
+		t.Fatalf("forward of an appointment: HTTP %d, body %q; want an empty 200", resp.StatusCode, out)
+	}
+	if n := folderCount(t, bobDir, int64(mapi.PrivateFIDInbox)); n != 1 {
+		t.Errorf("bob's Inbox has %d messages, want the one forward", n)
+	}
+	if v, ok := sourceVerb(t, aliceDir, id); !ok || v != mapi.NoteVerbForward {
+		t.Errorf("appointment PidTagLastVerbExecuted = %d (present=%v), want %d", v, ok, mapi.NoteVerbForward)
 	}
 }
 

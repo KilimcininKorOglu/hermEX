@@ -81,7 +81,8 @@ func (s *Server) handleSendMail(w http.ResponseWriter, r *http.Request, sess *se
 // replySource is the resolved source message of a SmartReply or SmartForward.
 type replySource struct {
 	fid     int64
-	uid     uint32
+	uid     uint32 // a mail item's IMAP uid
+	objID   int64  // an object-store item's id (calendar, contact, task, note)
 	forward bool
 }
 
@@ -103,19 +104,45 @@ func findSource(sess *session, cm composeMail, r *http.Request) (*replySource, e
 	if err != nil {
 		return nil, errSourceNotFound
 	}
-	uid, err := strconv.ParseUint(itemID, 10, 32)
-	if err != nil {
-		return nil, errSourceNotFound
-	}
 	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = st.Close() }()
+	src, err := locateSource(st, fid, itemID)
+	if err != nil {
+		return nil, err
+	}
+	src.forward = forward
+	return src, nil
+}
+
+// locateSource finds the item a Sync handed the device under (folder, ServerId).
+// A mail folder's ServerId is the item's IMAP uid; a calendar, contact, task or
+// note folder's is the object id, which must lie in that folder.
+func locateSource(st *objectstore.Store, fid int64, itemID string) (*replySource, error) {
+	_, isObject, err := objectClassFor(st, fid)
+	if err != nil {
+		return nil, errSourceNotFound
+	}
+	if isObject {
+		id, perr := strconv.ParseInt(itemID, 10, 64)
+		if perr != nil {
+			return nil, errSourceNotFound
+		}
+		if parent, ferr := st.MessageFolder(id); ferr != nil || parent != fid {
+			return nil, errSourceNotFound
+		}
+		return &replySource{fid: fid, objID: id}, nil
+	}
+	uid, err := strconv.ParseUint(itemID, 10, 32)
+	if err != nil {
+		return nil, errSourceNotFound
+	}
 	if _, err := st.MessageByUID(fid, uint32(uid)); err != nil {
 		return nil, errSourceNotFound
 	}
-	return &replySource{fid: fid, uid: uint32(uid), forward: forward}, nil
+	return &replySource{fid: fid, uid: uint32(uid)}, nil
 }
 
 // fileSentCopy saves the sent copy the device asked for and marks the source of a
@@ -298,21 +325,25 @@ func resolveSource(cm composeMail, r *http.Request) (folderID, itemID string) {
 // rewrites the whole mask). Best-effort: a source removed since findSource is
 // skipped, never failing a send whose mail already left.
 func markReplyForwardSource(st *objectstore.Store, src replySource) {
-	fid, uid, forward := src.fid, src.uid, src.forward
-	info, err := st.MessageByUID(fid, uid)
-	if err != nil {
-		return
-	}
 	verb := mapi.NoteVerbReplyToSender
-	if forward {
+	if src.forward {
 		verb = mapi.NoteVerbForward
 	}
 	var props mapi.PropertyValues
 	props.Set(mapi.PrLastVerbExecuted, verb)
 	props.Set(mapi.PrLastVerbExecutionTime, mapi.UnixToNTTime(time.Now()))
+	if src.objID != 0 {
+		// An object-store item has no IMAP flags; the verb is its whole mark.
+		_ = st.ModifyMessageProperties(src.objID, props)
+		return
+	}
+	info, err := st.MessageByUID(src.fid, src.uid)
+	if err != nil {
+		return
+	}
 	_ = st.ModifyMessageProperties(info.ID, props)
-	if !forward {
-		_ = st.SetMessageFlags(fid, uid, info.Flags|objectstore.FlagAnswered)
+	if !src.forward {
+		_ = st.SetMessageFlags(src.fid, src.uid, info.Flags|objectstore.FlagAnswered)
 	}
 }
 
