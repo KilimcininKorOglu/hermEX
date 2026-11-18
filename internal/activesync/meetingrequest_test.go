@@ -2,6 +2,7 @@ package activesync
 
 import (
 	"encoding/base64"
+	"encoding/binary"
 	"strings"
 	"testing"
 	"time"
@@ -100,6 +101,41 @@ func TestOrdinaryMailCarriesNoMeetingRequest(t *testing.T) {
 	}
 }
 
+// TestInvitationWithoutTimesCarriesNoMeetingRequest proves a sender-written
+// calendar part that names no start or end gives no MeetingRequest block: the block
+// exists to deliver DtStamp and the span (MS-ASEMAIL MeetingRequest), so a block
+// without them would offer the device a meeting it cannot place. The message must
+// still reach the device as mail.
+func TestInvitationWithoutTimesCarriesNoMeetingRequest(t *testing.T) {
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	const ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\n" +
+		"BEGIN:VEVENT\r\nUID:eas-no-times\r\nSUMMARY:No time\r\n" +
+		"ORGANIZER:mailto:organizer@external.test\r\nATTENDEE:mailto:alice@hermex.test\r\n" +
+		"END:VEVENT\r\nEND:VCALENDAR\r\n"
+	raw := "From: organizer@external.test\r\nTo: alice@hermex.test\r\nSubject: No time\r\n" +
+		"MIME-Version: 1.0\r\nContent-Type: text/calendar; method=REQUEST; charset=UTF-8\r\n\r\n" + ics
+	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), time.Now(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	served, err := st.GetMessageRaw(int64(mapi.PrivateFIDInbox), info.UID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := emailAppData(mailRender{st: st, protocol: "14.1"}, served, info, "1", "5")
+	if data == nil {
+		t.Fatal("the message did not reach the device at all")
+	}
+	if data.Child(wbxml.EMMeetingRequest) != nil {
+		t.Error("an invitation without start and end carries a MeetingRequest block")
+	}
+}
+
 // TestMeetingIdentifierFollowsTheProtocol proves the version split: 14.x carries
 // email:GlobalObjId and 16.x carries calendar:UID, the element that replaced it.
 func TestMeetingIdentifierFollowsTheProtocol(t *testing.T) {
@@ -142,6 +178,13 @@ func TestGlobalObjIDCarriesTheUID(t *testing.T) {
 	uid := strings.TrimSuffix(data[len("vCal-Uid")+4:], "\x00")
 	if uid != "eas-meeting-1" {
 		t.Errorf("decoded UID = %q, want eas-meeting-1", uid)
+	}
+	// [MS-OXOCAL] 2.2.1.27: Size (bytes 36-39, little-endian) is the byte count of
+	// the Data field that follows it; a device reading Data by Size must land exactly
+	// on the end of the blob.
+	size := int(binary.LittleEndian.Uint32(raw[36:40]))
+	if size != len(raw)-40 {
+		t.Errorf("Size = %d, want the Data length %d", size, len(raw)-40)
 	}
 	if globalObjID("") != "" {
 		t.Error("an absent UID must yield no identifier")
