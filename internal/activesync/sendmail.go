@@ -10,10 +10,12 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
 	"hermex/internal/sendas"
+	"hermex/internal/serve"
 	"hermex/internal/wbxml"
 )
 
@@ -26,26 +28,27 @@ import (
 func (s *Server) handleSendMail(w http.ResponseWriter, r *http.Request, sess *session) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyLimit()))
 	if err != nil {
-		s.failRequest(w, r, "sendmail.read.fail", err, http.StatusBadRequest, "cannot read request body")
+		s.composeFail(w, r, sess, "sendmail.read.fail", err, statusInvalidContent)
 		return
 	}
 	cm, err := extractComposeMail(body)
 	if err != nil {
-		s.failRequest(w, r, "sendmail.parse.fail", err, http.StatusBadRequest, "invalid SendMail")
+		s.composeFail(w, r, sess, "sendmail.parse.fail", err, parseStatus(err))
 		return
 	}
 	recipients := recipientsOf(cm.mime)
 	if len(recipients) == 0 {
-		http.Error(w, "SendMail has no recipients", http.StatusBadRequest)
+		s.composeFail(w, r, sess, "sendmail.no-recipient", errNoRecipient, statusMessageHasNoRecipient)
 		return
 	}
 
 	// The device composes the whole MIME, so the From header is client-controlled
 	// and the DKIM signer keys on its domain. Authorize it against the caller the
 	// same way every other send path does, and fail closed rather than relay a
-	// DKIM-aligned message the caller may not send as.
+	// DKIM-aligned message the caller may not send as. The status table has no
+	// sender row; AccessDenied is its answer for a request the user may not make.
 	if !s.authorizedFrom(sess.user, cm.mime) {
-		s.failRequest(w, r, "sendmail.sender.denied", errUnauthorizedFrom, http.StatusForbidden, "sender not authorized")
+		s.composeFail(w, r, sess, "sendmail.sender.denied", errUnauthorizedFrom, statusAccessDenied)
 		return
 	}
 
@@ -53,7 +56,7 @@ func (s *Server) handleSendMail(w http.ResponseWriter, r *http.Request, sess *se
 	// saved copy keeps the full headers for the sender's record.
 	_, keepOwnCopy, err := mta.SendAndRelay(s.accounts, s.Spool, sess.user, recipients, stripBcc(cm.mime), time.Now())
 	if err != nil {
-		s.failRequest(w, r, "sendmail.delivery.fail", err, http.StatusInternalServerError, "delivery failed")
+		s.composeFail(w, r, sess, "sendmail.delivery.fail", err, statusMailSubmissionFailed)
 		return
 	}
 
@@ -93,6 +96,66 @@ func (s *Server) fileSentCopy(sess *session, r *http.Request, cm composeMail) {
 	if needMark {
 		markReplyForwardSource(st, srcFolder, srcItem, forward)
 	}
+}
+
+// ComposeMail failure statuses ([MS-ASCMD] 2.2.2 Common Status Codes). Every
+// served protocol version is 14.0 or later, where a failure is an HTTP 200 whose
+// body is the command element carrying this Status (2.2.3.177.14, .16).
+const (
+	statusInvalidContent        = 101
+	statusInvalidWBXML          = 102
+	statusInvalidXML            = 103
+	statusMessageHasNoRecipient = 119
+	statusMailSubmissionFailed  = 120
+	statusAccessDenied          = 130
+	statusItemNotFound          = 150
+)
+
+var (
+	errNoRecipient = errors.New("message has no recipient")
+	errNoMIME      = errors.New("ComposeMail request carries no MIME element")
+)
+
+// parseStatus maps an extractComposeMail failure to its status: an empty body is
+// invalid content, a request without the MIME element breaks the schema, and
+// anything else is WBXML that did not decode.
+func parseStatus(err error) int {
+	switch {
+	case errors.Is(err, io.ErrUnexpectedEOF):
+		return statusInvalidContent
+	case errors.Is(err, errNoMIME):
+		return statusInvalidXML
+	}
+	return statusInvalidWBXML
+}
+
+// composeRoot names the response element of the command being answered.
+func composeRoot(cmd string) wbxml.Tag {
+	switch cmd {
+	case "SmartForward":
+		return wbxml.CMSmartForward
+	case "SmartReply":
+		return wbxml.CMSmartReply
+	}
+	return wbxml.CMSendMail
+}
+
+// composeFail logs the full error and answers the device with the command element
+// and a Status, never the error text.
+func (s *Server) composeFail(w http.ResponseWriter, r *http.Request, sess *session, op string, err error, status int) {
+	level := logging.LevelWarn
+	if status == statusMailSubmissionFailed {
+		level = logging.LevelError
+	}
+	s.Logger.Emit(logging.Event{
+		Level:      level,
+		Subsystem:  logging.ActiveSync,
+		Name:       op,
+		User:       sess.user,
+		RemoteAddr: serve.ClientAddr(r),
+		Err:        err.Error(),
+	})
+	writeWBXML(w, wbxml.Elem(composeRoot(sess.req.cmd), wbxml.Str(wbxml.CMStatus, strconv.Itoa(status))))
 }
 
 // errUnauthorizedFrom is returned when a SendMail message carries a From header
@@ -148,7 +211,7 @@ func extractComposeMail(body []byte) (composeMail, error) {
 	}
 	m := root.Child(wbxml.CMMIME)
 	if m == nil {
-		return composeMail{}, io.ErrUnexpectedEOF
+		return composeMail{}, errNoMIME
 	}
 	mimeData := m.Opaque
 	if mimeData == nil {

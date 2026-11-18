@@ -130,16 +130,79 @@ func TestSendMailRejectsForgedFrom(t *testing.T) {
 		wbxml.Empty(wbxml.CMSaveInSentItems),
 		wbxml.Opaque(wbxml.CMMIME, []byte(forged)))
 
-	resp, _ := postRaw(t, ts, "SendMail", wbxml.Marshal(sm))
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("status %d, want 403 for a forged From", resp.StatusCode)
-	}
+	resp, out := postRaw(t, ts, "SendMail", wbxml.Marshal(sm))
+	wantComposeStatus(t, resp, out, wbxml.CMSendMail, "130")
 	if n := folderCount(t, bobDir, int64(mapi.PrivateFIDInbox)); n != 0 {
 		t.Errorf("bob's Inbox has %d messages, want 0 (delivery must be refused)", n)
 	}
 	if n := folderCount(t, aliceDir, int64(mapi.PrivateFIDSentItems)); n != 0 {
 		t.Errorf("alice's Sent has %d messages, want 0", n)
 	}
+}
+
+// wantComposeStatus asserts a ComposeMail failure as [MS-ASCMD] 2.2.3.177.14 and
+// .16 shape it: HTTP 200, the command's own element as root, and the Status.
+func wantComposeStatus(t *testing.T, resp *http.Response, out []byte, root wbxml.Tag, status string) {
+	t.Helper()
+	node := composeReply(t, resp, out)
+	if node.Tag != root {
+		t.Errorf("response root = %#x, want %#x", node.Tag, root)
+	}
+	if got := node.ChildText(wbxml.CMStatus); got != status {
+		t.Errorf("Status = %q, want %q", got, status)
+	}
+}
+
+// composeReply decodes a ComposeMail failure reply, which is HTTP 200 with a body.
+func composeReply(t *testing.T, resp *http.Response, out []byte) *wbxml.Node {
+	t.Helper()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("HTTP status %d, want 200 with a Status body: %s", resp.StatusCode, out)
+	}
+	node, err := wbxml.Unmarshal(out)
+	if err != nil {
+		t.Fatalf("response is not WBXML: %v (%q)", err, out)
+	}
+	return node
+}
+
+// composeStatusOf returns the Status of a ComposeMail failure reply.
+func composeStatusOf(t *testing.T, resp *http.Response, out []byte) string {
+	t.Helper()
+	return composeReply(t, resp, out).ChildText(wbxml.CMStatus)
+}
+
+// TestComposeMailRefusalsCarryTheirStatus sends requests the [MS-ASCMD] 2.2.2
+// table names a status for, and checks each is refused with that status and
+// delivers nothing: no recipient (119), no MIME element (103), bytes that are
+// not WBXML past the version byte (102).
+func TestComposeMailRefusalsCarryTheirStatus(t *testing.T) {
+	ts, _, bobDir := sendServer(t)
+	noRcpt := "From: alice@hermex.test\r\nSubject: nobody\r\n\r\nbody\r\n"
+	cases := []struct {
+		name, status string
+		body         []byte
+	}{
+		{"no recipient", "119", wbxml.Marshal(wbxml.Elem(wbxml.CMSendMail, wbxml.Opaque(wbxml.CMMIME, []byte(noRcpt))))},
+		{"no MIME", "103", wbxml.Marshal(wbxml.Elem(wbxml.CMSendMail, wbxml.Empty(wbxml.CMSaveInSentItems)))},
+		{"broken WBXML", "102", []byte{0x03, 0x01, 0x6a, 0x00, 0xff, 0xff, 0xff}},
+	}
+	for _, c := range cases {
+		resp, out := postRaw(t, ts, "SendMail", c.body)
+		t.Run(c.name, func(t *testing.T) { wantComposeStatus(t, resp, out, wbxml.CMSendMail, c.status) })
+	}
+	if n := folderCount(t, bobDir, int64(mapi.PrivateFIDInbox)); n != 0 {
+		t.Errorf("bob's Inbox has %d messages after refused requests", n)
+	}
+}
+
+// TestSmartReplyRefusalNamesSmartReply checks a refused SmartReply answers with a
+// SmartReply element, not a SendMail one (6.44 SmartReply Response Schema).
+func TestSmartReplyRefusalNamesSmartReply(t *testing.T) {
+	ts, _, _ := sendServer(t)
+	forged := "From: bob@hermex.test\r\nTo: bob@hermex.test\r\nSubject: spoof\r\n\r\nx\r\n"
+	resp, out := postRaw(t, ts, "SmartReply", wbxml.Marshal(wbxml.Elem(wbxml.CMSmartReply, wbxml.Opaque(wbxml.CMMIME, []byte(forged)))))
+	wantComposeStatus(t, resp, out, wbxml.CMSmartReply, "130")
 }
 
 // TestSendMailLegacyRawMIME confirms the pre-14 path (a raw-MIME body, no WBXML

@@ -46,7 +46,7 @@ func relayServer(t *testing.T) (*httptest.Server, *relay.Spool) {
 // TestSendMailRelaysNothingUnderAForgedFrom proves a From the caller may not use
 // never reaches the relay spool: the relay worker DKIM-signs what it sends for the
 // From domain, so a forged From that got queued would leave signed as another
-// user. The refusal is 403, as for local delivery.
+// user. The refusal is a ComposeMail Status, as for local delivery.
 func TestSendMailRelaysNothingUnderAForgedFrom(t *testing.T) {
 	for _, tc := range []struct{ name, from string }{
 		{"another user", "From: " + bobUser + "\r\n"},
@@ -64,10 +64,12 @@ func TestSendMailRelaysNothingUnderAForgedFrom(t *testing.T) {
 		sm := wbxml.Elem(wbxml.CMSendMail,
 			wbxml.Str(wbxml.CMClientID, "c1"),
 			wbxml.Opaque(wbxml.CMMIME, []byte(forged)))
-		// Refused either way: 403 at the From gate, or 400 earlier when a header
-		// block that does not parse yields no recipients at all.
-		if resp, _ := postRaw(t, ts, "SendMail", wbxml.Marshal(sm)); resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusBadRequest {
-			t.Errorf("%s: status %d, want a refusal (403 or 400)", tc.name, resp.StatusCode)
+		// Refused either way: AccessDenied (130) at the From gate, or
+		// MessageHasNoRecipient (119) earlier when a header block that does not
+		// parse yields no recipients at all.
+		resp, out := postRaw(t, ts, "SendMail", wbxml.Marshal(sm))
+		if st := composeStatusOf(t, resp, out); st != "130" && st != "119" {
+			t.Errorf("%s: Status %q, want a refusal (130 or 119)", tc.name, st)
 		}
 		due, err := sp.Claim(time.Now(), 10)
 		if err != nil {
