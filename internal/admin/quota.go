@@ -5,6 +5,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"hermex/internal/objectstore"
 )
@@ -80,18 +81,29 @@ func quotaViewOf(limits objectstore.QuotaLimits, usedBytes int64, lang string) q
 }
 
 // quotaFromForm reads the quota form (values in MiB) into the canonical KiB
-// limits. The MiB→KiB conversion is done in 64-bit and clamped to the uint32 KiB
-// ceiling (~4 TiB), so a large entry cannot overflow.
-func quotaFromForm(r *http.Request) objectstore.QuotaLimits {
+// limits. The MiB count is clamped to the uint32 KiB ceiling (~4 TiB) before it is
+// scaled, so a large entry cannot wrap. An empty field is 0 (unlimited); anything
+// else that is not a whole number is refused (ok false), never read as unlimited.
+func quotaFromForm(r *http.Request) (objectstore.QuotaLimits, bool) {
+	ok := true
 	mbToKB := func(field string) uint32 {
-		n, _ := strconv.ParseUint(r.PostFormValue(field), 10, 64)
-		return uint32(min(n*1024, math.MaxUint32))
+		v := strings.TrimSpace(r.PostFormValue(field))
+		if v == "" {
+			return 0
+		}
+		n, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			ok = false
+			return 0
+		}
+		return uint32(min(n, math.MaxUint32/1024) * 1024)
 	}
-	return objectstore.QuotaLimits{
+	q := objectstore.QuotaLimits{
 		SendKB:    mbToKB("sendmb"),
 		ReceiveKB: mbToKB("receivemb"),
 		StorageKB: mbToKB("storagemb"),
 	}
+	return q, ok
 }
 
 // handleUIUserQuota saves the user's quota limits from the detail form and returns
@@ -109,7 +121,10 @@ func (s *Server) handleUIUserQuota(w http.ResponseWriter, r *http.Request) {
 	case !ok:
 		data["Error"] = "userDetail.noSuchUser"
 	default:
-		if err := s.store.SetQuota(u.Maildir, quotaFromForm(r)); err != nil {
+		q, valid := quotaFromForm(r)
+		if !valid {
+			data["Error"] = "userDetail.quotaInvalid"
+		} else if err := s.store.SetQuota(u.Maildir, q); err != nil {
 			data["Error"] = s.notice("userDetail.saveQuotaFailed", err)
 		} else {
 			data["Saved"] = true

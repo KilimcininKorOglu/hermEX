@@ -229,6 +229,12 @@ func (s *Server) handleUICreateUser(w http.ResponseWriter, r *http.Request) {
 // applied only when a limit is set, so an unlimited account does not need its
 // store opened at creation.
 func (s *Server) createUserWithDefaults(r *http.Request, email string) string {
+	// The quota is checked before the account exists, so a bad entry never leaves
+	// an account created without the limit the operator meant to give it.
+	q, valid := quotaFromForm(r)
+	if !valid {
+		return "userDetail.quotaInvalid"
+	}
 	maildir := s.paths.MaildirFor(email)
 	if _, err := s.dir.CreateUser(email, r.PostFormValue("password"), maildir); err != nil {
 		return s.notice("users.createFailed", err)
@@ -241,7 +247,6 @@ func (s *Server) createUserWithDefaults(r *http.Request, email string) string {
 	}); err != nil {
 		return s.notice("users.settingsFailed", err)
 	}
-	q := quotaFromForm(r)
 	if q.SendKB > 0 || q.ReceiveKB > 0 || q.StorageKB > 0 {
 		if err := s.store.SetQuota(maildir, q); err != nil {
 			return s.notice("users.quotaFailed", err)

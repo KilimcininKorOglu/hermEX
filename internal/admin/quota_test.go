@@ -2,6 +2,7 @@ package admin
 
 import (
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -133,5 +134,33 @@ func TestUIUserQuota(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "Saved") {
 		t.Errorf("ui quota save did not report success:\n%s", body)
+	}
+}
+
+// TestUIUserQuotaRefusesWhatIsNotASize sends quota entries a typo or a hostile form
+// produces: not a number and negative were stored as 0, the unlimited quota, and
+// must now be refused with nothing stored. A count past the KiB ceiling is clamped
+// to it (~4 TiB), never wrapped: 2^54 MiB times 1024 overflows 64 bits.
+func TestUIUserQuotaRefusesWhatIsNotASize(t *testing.T) {
+	for _, bad := range []string{"12x", "-5"} {
+		store := &fakeStore{}
+		ts := adminServerStore(t, oofUserDir(), store)
+		session, csrf := loginCookies(t, ts)
+		resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/quota", session, csrf, url.Values{"storagemb": {bad}})
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if store.setQuotaDir != "" {
+			t.Errorf("%s: a quota was stored: %+v", bad, store.setQuotaVal)
+		}
+		if !strings.Contains(string(body), "whole number of MB") {
+			t.Errorf("%s: the panel does not name the refusal:\n%s", bad, body)
+		}
+	}
+	store := &fakeStore{}
+	ts := adminServerStore(t, oofUserDir(), store)
+	session, csrf := loginCookies(t, ts)
+	htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/quota", session, csrf, url.Values{"storagemb": {"18014398509481984"}}).Body.Close()
+	if store.setQuotaVal.StorageKB != math.MaxUint32/1024*1024 {
+		t.Errorf("a huge quota stored %d KiB, want the ceiling %d", store.setQuotaVal.StorageKB, math.MaxUint32/1024*1024)
 	}
 }
