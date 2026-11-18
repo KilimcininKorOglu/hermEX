@@ -52,15 +52,12 @@ func (s *Server) handleSendMail(w http.ResponseWriter, r *http.Request, sess *se
 		return
 	}
 
-	// A reply or forward whose source is not in the mailbox is refused before
-	// anything leaves ([MS-ASCMD] 2.2.2: 150 ItemNotFound).
-	src, err := findSource(sess, cm, r)
-	if errors.Is(err, errSourceNotFound) {
-		s.composeFail(w, r, sess, "sendmail.source.missing", err, statusItemNotFound)
-		return
-	}
-	if err != nil {
-		s.composeFail(w, r, sess, "sendmail.source.fail", err, statusMailSubmissionFailed)
+	// A reply or forward whose source is not in the mailbox, or whose original
+	// cannot be added, is refused before anything leaves ([MS-ASCMD] 2.2.2: 150
+	// ItemNotFound, 121 MessageReplyFailed).
+	src, status, err := prepareSmartResponse(sess, &cm, r)
+	if status != 0 {
+		s.composeFail(w, r, sess, "sendmail.source.fail", err, status)
 		return
 	}
 
@@ -177,6 +174,7 @@ const (
 	statusInvalidXML            = 103
 	statusMessageHasNoRecipient = 119
 	statusMailSubmissionFailed  = 120
+	statusMessageReplyFailed    = 121
 	statusAccessDenied          = 130
 	statusItemNotFound          = 150
 )
@@ -258,11 +256,12 @@ func (s *Server) authorizedFrom(caller string, mime []byte) bool {
 // a Sent copy, and the source-message identity a reply/forward references (all
 // source fields empty for a plain SendMail).
 type composeMail struct {
-	mime       []byte
-	saveToSent bool
-	srcFolder  string
-	srcItem    string
-	srcLongID  string
+	mime        []byte
+	saveToSent  bool
+	replaceMime bool // the device sent the whole message; add no original
+	srcFolder   string
+	srcItem     string
+	srcLongID   string
 }
 
 // extractComposeMail decodes a ComposeMail request. EAS 14.x wraps the MIME in a
@@ -287,7 +286,11 @@ func extractComposeMail(body []byte) (composeMail, error) {
 	if mimeData == nil {
 		mimeData = []byte(m.Text)
 	}
-	cm := composeMail{mime: mimeData, saveToSent: root.Child(wbxml.CMSaveInSentItems) != nil}
+	cm := composeMail{
+		mime:        mimeData,
+		saveToSent:  root.Child(wbxml.CMSaveInSentItems) != nil,
+		replaceMime: root.Child(wbxml.CMReplaceMime) != nil,
+	}
 	if src := root.Child(wbxml.CMSource); src != nil {
 		cm.srcFolder = src.ChildText(wbxml.CMFolderID)
 		cm.srcItem = src.ChildText(wbxml.CMItemID)
