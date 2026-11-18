@@ -52,6 +52,18 @@ func (s *Server) handleSendMail(w http.ResponseWriter, r *http.Request, sess *se
 		return
 	}
 
+	// A reply or forward whose source is not in the mailbox is refused before
+	// anything leaves ([MS-ASCMD] 2.2.2: 150 ItemNotFound).
+	src, err := findSource(sess, cm, r)
+	if errors.Is(err, errSourceNotFound) {
+		s.composeFail(w, r, sess, "sendmail.source.missing", err, statusItemNotFound)
+		return
+	}
+	if err != nil {
+		s.composeFail(w, r, sess, "sendmail.source.fail", err, statusMailSubmissionFailed)
+		return
+	}
+
 	// Deliver with Bcc stripped so recipients never see the blind list; the
 	// saved copy keeps the full headers for the sender's record.
 	_, keepOwnCopy, err := mta.SendAndRelay(s.accounts, s.Spool, sess.user, recipients, stripBcc(cm.mime), time.Now())
@@ -62,25 +74,56 @@ func (s *Server) handleSendMail(w http.ResponseWriter, r *http.Request, sess *se
 
 	// The mailbox the message was sent in the name of may have filed the only copy.
 	cm.saveToSent = cm.saveToSent && keepOwnCopy
-	s.fileSentCopy(sess, r, cm)
+	s.fileSentCopy(sess, cm, src)
 	w.WriteHeader(http.StatusOK)
+}
+
+// replySource is the resolved source message of a SmartReply or SmartForward.
+type replySource struct {
+	fid     int64
+	uid     uint32
+	forward bool
+}
+
+// errSourceNotFound is returned when a reply or forward names no message of the
+// caller's own mailbox.
+var errSourceNotFound = errors.New("reply/forward source not found")
+
+// findSource resolves the message a SmartReply or SmartForward references, in
+// the WBXML Source or the URL query, and confirms it exists in the caller's own
+// mailbox. Resolving only against sess.mailbox keeps the reference scoped to the
+// authenticated identity (OWASP A01). A plain SendMail has no source (nil).
+func findSource(sess *session, cm composeMail, r *http.Request) (*replySource, error) {
+	forward := sess.req.cmd == "SmartForward"
+	if !forward && sess.req.cmd != "SmartReply" {
+		return nil, nil
+	}
+	folderID, itemID := resolveSource(cm, r)
+	fid, err := strconv.ParseInt(folderID, 10, 64)
+	if err != nil {
+		return nil, errSourceNotFound
+	}
+	uid, err := strconv.ParseUint(itemID, 10, 32)
+	if err != nil {
+		return nil, errSourceNotFound
+	}
+	st, err := objectstore.OpenExisting(sess.mailbox)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = st.Close() }()
+	if _, err := st.MessageByUID(fid, uint32(uid)); err != nil {
+		return nil, errSourceNotFound
+	}
+	return &replySource{fid: fid, uid: uint32(uid), forward: forward}, nil
 }
 
 // fileSentCopy saves the sent copy the device asked for and marks the source of a
 // reply or forward, so the icon survives across devices. Both are best-effort: the
 // message is already delivered, so a store that will not open is not a send
 // failure.
-func (s *Server) fileSentCopy(sess *session, r *http.Request, cm composeMail) {
-	// A reply or forward references a source message in the sender's own mailbox,
-	// in the WBXML Source or the URL query. Resolving it only against sess.mailbox
-	// keeps the mark scoped to the authenticated identity (OWASP A01).
-	forward := sess.req.cmd == "SmartForward"
-	var srcFolder, srcItem string
-	if forward || sess.req.cmd == "SmartReply" {
-		srcFolder, srcItem = resolveSource(cm, r)
-	}
-	needMark := srcFolder != "" && srcItem != ""
-	if !cm.saveToSent && !needMark {
+func (s *Server) fileSentCopy(sess *session, cm composeMail, src *replySource) {
+	if !cm.saveToSent && src == nil {
 		return
 	}
 	st, err := objectstore.OpenExisting(sess.mailbox)
@@ -93,8 +136,8 @@ func (s *Server) fileSentCopy(sess *session, r *http.Request, cm composeMail) {
 			st.LogSwallowedError("activesync.sent-copy", err)
 		}
 	}
-	if needMark {
-		markReplyForwardSource(st, srcFolder, srcItem, forward)
+	if src != nil {
+		markReplyForwardSource(st, *src)
 	}
 }
 
@@ -252,18 +295,10 @@ func resolveSource(cm composeMail, r *http.Request) (folderID, itemID string) {
 // client renders the replied/forwarded icon (PidTagLastVerbExecuted, MS-OXOMSG). A
 // reply also sets the \Answered IMAP flag, the marker IMAP and webmail surface,
 // merged into the current flags so the read state survives (SetMessageFlags
-// rewrites the whole mask). Best-effort: a missing or unparseable source is
-// silently skipped, never failing a send whose mail already left.
-func markReplyForwardSource(st *objectstore.Store, folderID, itemID string, forward bool) {
-	fid, err := strconv.ParseInt(folderID, 10, 64)
-	if err != nil {
-		return
-	}
-	uid64, err := strconv.ParseUint(itemID, 10, 32)
-	if err != nil {
-		return
-	}
-	uid := uint32(uid64)
+// rewrites the whole mask). Best-effort: a source removed since findSource is
+// skipped, never failing a send whose mail already left.
+func markReplyForwardSource(st *objectstore.Store, src replySource) {
+	fid, uid, forward := src.fid, src.uid, src.forward
 	info, err := st.MessageByUID(fid, uid)
 	if err != nil {
 		return

@@ -205,6 +205,44 @@ func TestSmartReplyRefusalNamesSmartReply(t *testing.T) {
 	wantComposeStatus(t, resp, out, wbxml.CMSmartReply, "130")
 }
 
+// TestSmartResponseToAMissingSourceSendsNothing names reply and forward sources
+// that are not a message of the caller's mailbox: [MS-ASCMD] 2.2.2 answers 150
+// ItemNotFound, and nothing may be delivered for a reply to nothing.
+func TestSmartResponseToAMissingSourceSendsNothing(t *testing.T) {
+	ts, aliceDir, bobDir := sendServer(t)
+	uid, _ := seedSource(t, aliceDir, 0)
+	inbox := strconv.FormatInt(int64(mapi.PrivateFIDInbox), 10)
+	sent := strconv.FormatInt(int64(mapi.PrivateFIDSentItems), 10)
+	item := strconv.FormatUint(uint64(uid), 10)
+	src := func(folder, it string) *wbxml.Node {
+		return wbxml.Elem(wbxml.CMSource, wbxml.Str(wbxml.CMFolderID, folder), wbxml.Str(wbxml.CMItemID, it))
+	}
+	cases := map[string]*wbxml.Node{
+		"no source":              nil,
+		"unknown item":           src(inbox, "9999"),
+		"item of another folder": src(sent, item),
+		"non-numeric item":       src(inbox, "1;DROP"),
+		"negative folder":        src("-1", item),
+		"LongId without colon":   wbxml.Elem(wbxml.CMSource, wbxml.Str(wbxml.CMLongId, "nonsense")),
+	}
+	for name, source := range cases {
+		for _, cmd := range []struct {
+			name string
+			tag  wbxml.Tag
+		}{{"SmartReply", wbxml.CMSmartReply}, {"SmartForward", wbxml.CMSmartForward}} {
+			kids := []*wbxml.Node{wbxml.Opaque(wbxml.CMMIME, []byte(sampleMIME))}
+			if source != nil {
+				kids = append(kids, source)
+			}
+			resp, out := postRaw(t, ts, cmd.name, wbxml.Marshal(wbxml.Elem(cmd.tag, kids...)))
+			t.Run(name+"/"+cmd.name, func(t *testing.T) { wantComposeStatus(t, resp, out, cmd.tag, "150") })
+		}
+	}
+	if n := folderCount(t, bobDir, int64(mapi.PrivateFIDInbox)); n != 0 {
+		t.Errorf("bob's Inbox has %d messages; a reply to a missing source was sent", n)
+	}
+}
+
 // TestSendMailLegacyRawMIME confirms the pre-14 path (a raw-MIME body, no WBXML
 // envelope) also delivers.
 func TestSendMailLegacyRawMIME(t *testing.T) {
