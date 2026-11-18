@@ -20,7 +20,7 @@ const (
 	vcStatusCantValidate  = 3 // the certificate could not be parsed/validated
 	vcStatusUntrusted     = 4 // the certificate does not chain to a trusted root
 	vcStatusNotForSign    = 6 // the certificate is not valid for S/MIME signing
-	vcStatusBadTime       = 8 // a certificate in the chain is expired or not yet valid
+	vcStatusBadTime       = 7 // the certificate has expired or is not yet valid
 )
 
 // handleValidateCert answers ValidateCert ([MS-ASCMD] 2.2.2.21): each certificate

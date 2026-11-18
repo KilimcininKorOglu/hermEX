@@ -120,19 +120,49 @@ func TestValidateCertUntrusted(t *testing.T) {
 	}
 }
 
-// TestValidateCertExpired proves an expired certificate (even from a trusted CA)
-// reports the bad-time Status 8.
+// TestValidateCertExpired proves a certificate from a trusted CA that has expired,
+// or is not yet valid, reports Status 7: MS-ASCMD 2.2.3.177.18 gives 7 to "expired
+// or is not yet valid", and 8 only to a chain whose validity periods do not nest.
 func TestValidateCertExpired(t *testing.T) {
 	now := time.Now()
-	ca, caKey, _ := genCert(t, "Test CA", now.Add(-48*time.Hour), now.Add(24*time.Hour), true, nil, nil)
-	_, _, leafDER := genCert(t, "old", now.Add(-48*time.Hour), now.Add(-24*time.Hour), false, ca, caKey)
+	ca, caKey, _ := genCert(t, "Test CA", now.Add(-48*time.Hour), now.Add(96*time.Hour), true, nil, nil)
+	_, _, oldDER := genCert(t, "old", now.Add(-48*time.Hour), now.Add(-24*time.Hour), false, ca, caKey)
+	_, _, futureDER := genCert(t, "future", now.Add(24*time.Hour), now.Add(48*time.Hour), false, ca, caKey)
 	pool := x509.NewCertPool()
 	pool.AddCert(ca)
 	ts := certServer(t, pool)
 
-	_, root := postCommand(t, ts, "ValidateCert", validateCertReq(b64DER(leafDER)))
-	if s := firstCertStatus(root); s != "8" {
-		t.Errorf("certificate Status = %q, want 8 (expired)", s)
+	for name, der := range map[string][]byte{"expired": oldDER, "not yet valid": futureDER} {
+		_, root := postCommand(t, ts, "ValidateCert", validateCertReq(b64DER(der)))
+		if s := firstCertStatus(root); s != "7" {
+			t.Errorf("%s certificate Status = %q, want 7", name, s)
+		}
+	}
+}
+
+// TestValidateCertNotForSigning proves a trusted certificate without the S/MIME
+// (email-protection) usage reports Status 6, "not valid for signing email messages".
+func TestValidateCertNotForSigning(t *testing.T) {
+	now := time.Now()
+	ca, caKey, _ := genCert(t, "Test CA", now.Add(-time.Hour), now.Add(48*time.Hour), true, nil, nil)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(7), Subject: pkix.Name{CommonName: "web"},
+		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(24 * time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca, &key.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(ca)
+	_, root := postCommand(t, certServer(t, pool), "ValidateCert", validateCertReq(b64DER(der)))
+	if s := firstCertStatus(root); s != "6" {
+		t.Errorf("certificate Status = %q, want 6", s)
 	}
 }
 
