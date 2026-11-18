@@ -87,6 +87,14 @@ func TestStalePolicyKeyForcesReprovision(t *testing.T) {
 	if code := commandStatusWithKey(t, ts, "FolderSync", folderSync(), ""); code != 449 {
 		t.Errorf("missing-key FolderSync status %d, want 449", code)
 	}
+	// A key the device makes up does not pass: the baseline "1" claims a mailbox with
+	// no policy, "0" is the not-yet-provisioned key ([MS-ASPROV]), and any other
+	// value was never issued.
+	for _, forged := range []string{"1", "0", "4294967295", "x"} {
+		if code := commandStatusWithKey(t, ts, "FolderSync", folderSync(), forged); code != 449 {
+			t.Errorf("forged key %q: FolderSync status %d, want 449", forged, code)
+		}
+	}
 	// The current key passes.
 	if code := commandStatusWithKey(t, ts, "FolderSync", folderSync(), k1); code == 449 {
 		t.Error("current-key FolderSync was refused with 449")
