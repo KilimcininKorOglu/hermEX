@@ -84,13 +84,18 @@ func onlyCalendarICal(t *testing.T, dir string) []byte {
 
 // TestMeetingResponseInstanceStatuses proves the InstanceId failures ([MS-ASCMD]
 // InstanceId): a value that is not a date-time is 104, an instance the series does
-// not have is 2, and an instance of a meeting that does not recur is 146.
+// not have is 2, and an instance of a meeting that does not recur is 146. A refused
+// instance leaves the attendee's series as it was. The daily series has five
+// occurrences from 2026-07-06 (RRULE COUNT=5), so the day before the first and the
+// day after the last are instances it does not have.
 func TestMeetingResponseInstanceStatuses(t *testing.T) {
 	for _, tc := range []struct {
 		name, ics, instance, want string
 	}{
 		{"bad format", dailyICS, "8 July", "104"},
 		{"no such instance", dailyICS, "2026-07-08T10:00:00.000Z", "2"},
+		{"before the series", dailyICS, "2026-07-05T09:00:00.000Z", "2"},
+		{"after the last occurrence", dailyICS, "2026-07-11T09:00:00.000Z", "2"},
 		{"not recurring", planningICS, "2026-07-02T14:00:00.000Z", "146"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -103,6 +108,9 @@ func TestMeetingResponseInstanceStatuses(t *testing.T) {
 			}
 			if n := len(organizerInbox(t, organizer)); n != 0 {
 				t.Errorf("a refused response still sent %d messages", n)
+			}
+			if body := onlyCalendarICal(t, attendee); bytes.Contains(body, []byte("EXDATE")) {
+				t.Errorf("a refused response changed the series:\n%s", body)
 			}
 		})
 	}
