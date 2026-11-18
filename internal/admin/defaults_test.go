@@ -164,6 +164,36 @@ func TestUISaveDefaults(t *testing.T) {
 	wantEq(t, deref(cd.User.StorageKB), int64(100*1024), "stored storage quota in KiB")
 }
 
+// TestDefaultsRefuseABadQuota sends quotas a typo or a hostile value produces: not
+// a number, negative, or a MiB count whose KiB value overflows 64 bits. Each was
+// stored as 0 (the unlimited quota), a negative size or a wrapped one; now the
+// system form, the domain form and both JSON endpoints refuse it and store nothing.
+func TestDefaultsRefuseABadQuota(t *testing.T) {
+	for _, bad := range []string{"12x", "-5", "9223372036854775807"} {
+		d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+			domainDetail: directory.DomainDetail{ID: 1, Name: "acme.test"}}
+		ts := adminServer(t, d)
+		session, csrf := loginCookies(t, ts)
+
+		body := wantBody(t, htmxPUT(t, ts, "/admin/ui/defaults", session, csrf, url.Values{"storagemb": {bad}}), http.StatusOK, "system form "+bad)
+		wantContains(t, body, "whole number of MB", "the system form names the refusal for "+bad)
+		body = wantBody(t, htmxPUT(t, ts, "/admin/ui/domains/1/createdefaults", session, csrf, url.Values{"sendmb": {bad}}), http.StatusOK, "domain form "+bad)
+		wantContains(t, body, "whole number of MB", "the domain form names the refusal for "+bad)
+		if len(d.createDefaults) != 0 {
+			t.Errorf("%s: a bad quota was stored: %+v", bad, d.createDefaults)
+		}
+	}
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		domainDetail: directory.DomainDetail{ID: 1, Name: "acme.test"}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	wantStatus(t, authedPUT(t, ts, "/admin/defaults", session, csrf, `{"user":{"storageQuota":-1}}`), http.StatusBadRequest, "system JSON")
+	wantStatus(t, authedPUT(t, ts, "/admin/domains/1/createdefaults", session, csrf, `{"sendQuota":-1}`), http.StatusBadRequest, "domain JSON")
+	if len(d.createDefaults) != 0 {
+		t.Errorf("a negative JSON quota was stored: %+v", d.createDefaults)
+	}
+}
+
 // deref reads an optional stored field, reporting the zero value when unset so an
 // assertion names the value that differs rather than a nil check.
 func deref[T any](p *T) T {

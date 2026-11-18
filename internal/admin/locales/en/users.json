@@ -217,6 +217,7 @@
     "noSuchUserNamed": "No such user: {0}.",
     "userUnread": "Could not read the user.",
     "saveFailed": "Could not save.",
+    "quotaInvalid": "Each quota must be a whole number of MB, 0 or more.",
     "saveContactFailed": "Could not save contact.",
     "saveAliasesFailed": "Could not save aliases.",
     "saveAltnamesFailed": "Could not save alternative names.",

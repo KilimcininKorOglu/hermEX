@@ -16,8 +16,10 @@ import (
 func userDefaultsFromForm(r *http.Request) directory.UserCreateDefaults {
 	b := func(name string) *bool { v := r.PostFormValue(name) != ""; return &v }
 	mb := func(name string) *int64 {
-		n, _ := strconv.ParseInt(r.PostFormValue(name), 10, 64)
-		v := n * 1024
+		v := int64(0)
+		if s := strings.TrimSpace(r.PostFormValue(name)); s != "" {
+			v = quotaKB(s)
+		}
 		return &v
 	}
 	lang := r.PostFormValue("lang")
@@ -26,6 +28,28 @@ func userDefaultsFromForm(r *http.Request) directory.UserCreateDefaults {
 		Web: b("web"), EAS: b("eas"), DAV: b("dav"),
 		StorageKB: mb("storagemb"), ReceiveKB: mb("receivemb"), SendKB: mb("sendmb"),
 	}
+}
+
+// quotaKB reads a quota entered in MiB as KiB. A value that is not a number, is
+// negative, or overflows when scaled reads as -1, which quotasValid refuses: before,
+// a typo was stored as 0, the unlimited quota, and a large count wrapped.
+func quotaKB(s string) int64 {
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n < 0 || !fitsInBytes(n, 10) {
+		return -1
+	}
+	return n * 1024
+}
+
+// quotasValid reports whether every quota a defaults set carries is unset or a
+// non-negative size. It guards the form and the JSON API alike.
+func quotasValid(u directory.UserCreateDefaults) bool {
+	for _, q := range []*int64{u.StorageKB, u.ReceiveKB, u.SendKB} {
+		if q != nil && *q < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // createDefaultsFromForm builds the full system create-defaults from the editor.
@@ -102,8 +126,7 @@ func userOverrideFromForm(r *http.Request) directory.UserCreateDefaults {
 		if v == "" {
 			return nil
 		}
-		n, _ := strconv.ParseInt(v, 10, 64)
-		kb := n * 1024
+		kb := quotaKB(v)
 		return &kb
 	}
 	var langP *string
@@ -164,7 +187,7 @@ func (s *Server) handleSetDomainDefaults(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var u directory.UserCreateDefaults
-	if err := json.NewDecoder(r.Body).Decode(&u); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&u); err != nil || !quotasValid(u) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
@@ -183,9 +206,12 @@ func (s *Server) handleUISaveDomainDefaults(w http.ResponseWriter, r *http.Reque
 	}
 	id, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64)
 	data := map[string]any{}
+	u := userOverrideFromForm(r)
 	if err != nil {
 		data["Error"] = "domains.invalidID"
-	} else if err := s.storeDomainOverride(id, userOverrideFromForm(r)); err != nil {
+	} else if !quotasValid(u) {
+		data["Error"] = "userDetail.quotaInvalid"
+	} else if err := s.storeDomainOverride(id, u); err != nil {
 		data["Error"] = s.notice("userDetail.saveFailed", err)
 	} else {
 		data["Saved"] = true
@@ -216,7 +242,7 @@ func (s *Server) handleGetDefaults(w http.ResponseWriter, r *http.Request) {
 // handleSetDefaults replaces the system-wide create-defaults (system administrators).
 func (s *Server) handleSetDefaults(w http.ResponseWriter, r *http.Request) {
 	var cd directory.CreateDefaults
-	if err := json.NewDecoder(r.Body).Decode(&cd); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&cd); err != nil || !quotasValid(cd.User) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
@@ -251,7 +277,10 @@ func (s *Server) handleUISaveDefaults(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := map[string]any{}
-	if err := s.dir.SetCreateDefaults(0, createDefaultsFromForm(r)); err != nil {
+	cd := createDefaultsFromForm(r)
+	if !quotasValid(cd.User) {
+		data["Error"] = "userDetail.quotaInvalid"
+	} else if err := s.dir.SetCreateDefaults(0, cd); err != nil {
 		data["Error"] = s.notice("userDetail.saveFailed", err)
 	} else {
 		data["Saved"] = true
