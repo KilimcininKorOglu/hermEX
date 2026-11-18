@@ -2,6 +2,7 @@ package activesync
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -51,27 +52,40 @@ func galServer(t *testing.T) *httptest.Server {
 // postCommand POSTs a WBXML command to the live endpoint and decodes the reply.
 func postCommand(t *testing.T, ts *httptest.Server, cmd string, root *wbxml.Node) (*http.Response, *wbxml.Node) {
 	t.Helper()
+	resp, node, err := postCommandErr(ts, cmd, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp, node
+}
+
+// postCommandErr is postCommand for a goroutine other than the test's own, where
+// t.Fatal must not be called (testing.T.FailNow): it returns the failure instead.
+func postCommandErr(ts *httptest.Server, cmd string, root *wbxml.Node) (*http.Response, *wbxml.Node, error) {
 	url := ts.URL + "/Microsoft-Server-ActiveSync?Cmd=" + cmd + "&User=" + testUser + "&DeviceId=dev1&DeviceType=iPhone"
 	req, err := http.NewRequest("POST", url, bytes.NewReader(wbxml.Marshal(root)))
 	if err != nil {
-		t.Fatal(err)
+		return nil, nil, err
 	}
 	req.SetBasicAuth(testUser, testPass)
 	req.Header.Set("Content-Type", "application/vnd.ms-sync.wbxml")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatal(err)
+		return nil, nil, err
 	}
 	defer resp.Body.Close()
-	out, _ := io.ReadAll(resp.Body)
+	out, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read %s reply: %w", cmd, err)
+	}
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("%s status %d: %s", cmd, resp.StatusCode, out)
+		return nil, nil, fmt.Errorf("%s status %d: %s", cmd, resp.StatusCode, out)
 	}
 	node, err := wbxml.Unmarshal(out)
 	if err != nil {
-		t.Fatalf("decode %s reply: %v\n% x", cmd, err, out)
+		return nil, nil, fmt.Errorf("decode %s reply: %w\n% x", cmd, err, out)
 	}
-	return resp, node
+	return resp, node, nil
 }
 
 // TestProvisionTwoPhase confirms the two-phase handshake: phase one returns a
