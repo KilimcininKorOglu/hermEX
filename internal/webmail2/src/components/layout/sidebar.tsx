@@ -118,7 +118,7 @@ const EMPTY_SF_FORM = {
 // slug and the i18n key of their label.
 const SEARCH_BUILTINS = [
   { id: "inbox", key: "nav.inbox" },
-  { id: "archive", key: "common.archive" },
+  { id: "archive", key: "nav.archive" },
   { id: "sent", key: "nav.sent" },
   { id: "drafts", key: "nav.drafts" },
   { id: "spam", key: "nav.spam" },

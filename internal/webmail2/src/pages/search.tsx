@@ -9,6 +9,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/hooks/useI18n"
+import { slugLabel, useUserFolders } from "@/hooks/useFolderLabels"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -131,7 +132,7 @@ function NoResults({ query, onClear }: { query: string; onClear: () => void }) {
 }
 
 // ResultRow is one matching message; a click opens it.
-function ResultRow({ email }: { email: SearchEmail }) {
+function ResultRow({ email, folderName }: { email: SearchEmail; folderName: string }) {
   const navigate = useNavigate()
   return (
     <div
@@ -149,7 +150,7 @@ function ResultRow({ email }: { email: SearchEmail }) {
           )}
           <span className="font-medium">{email.from}</span>
           <Badge variant="outline" className="text-[10px]">
-            {email.folder}
+            {folderName}
           </Badge>
         </div>
         <div className="text-sm">
@@ -177,6 +178,7 @@ function ResultList({
   truncated: boolean
 }) {
   const { t } = useI18n()
+  const userFolders = useUserFolders()
   const countKey = totalResults === 1 ? "search.resultCount" : "search.resultCountPlural"
   return (
     <div className="space-y-2">
@@ -188,7 +190,7 @@ function ResultList({
       </div>
       <div className="rounded-lg border bg-card divide-y">
         {results.map((email) => (
-          <ResultRow key={email.id} email={email} />
+          <ResultRow key={email.id} email={email} folderName={slugLabel(email.folder, userFolders, t)} />
         ))}
       </div>
     </div>

@@ -8,6 +8,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/hooks/useI18n"
+import { slugLabel, useUserFolders } from "@/hooks/useFolderLabels"
 import { formatAbsolute } from "@/utils/date"
 import { useMailEvents } from "@/utils/mailEvents"
 import { Button } from "@/components/ui/button"
@@ -47,8 +48,9 @@ export function FolderPage() {
   const [emails, setEmails] = useState<FolderEmail[]>([])
   const sel = useBulkSelection()
 
-  // The folder name comes straight from the route; it maps to a real mailbox.
-  const pageTitle = type ? type.charAt(0).toUpperCase() + type.slice(1) : t("folder.title")
+  // The route carries the folder's slug; the title is the folder's label.
+  const userFolders = useUserFolders()
+  const pageTitle = type ? slugLabel(type, userFolders, t) : t("folder.title")
   const pageColor = "text-muted-foreground"
 
   const loadFolder = useCallback(async (silent = false) => {

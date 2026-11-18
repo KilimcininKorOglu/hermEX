@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom"
 import { Search } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/hooks/useI18n"
+import { slugLabel, useUserFolders } from "@/hooks/useFolderLabels"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -25,6 +26,7 @@ interface SavedSearchRow {
  */
 export function SavedSearchPage() {
   const { t } = useI18n()
+  const userFolders = useUserFolders()
   const { id } = useParams()
   const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
@@ -102,7 +104,7 @@ export function SavedSearchPage() {
                     {!email.read && <span className="h-2 w-2 rounded-full bg-primary shrink-0" />}
                     <span className="font-medium">{email.from}</span>
                     <Badge variant="outline" className="text-[10px]">
-                      {email.folder}
+                      {slugLabel(email.folder, userFolders, t)}
                     </Badge>
                   </div>
                   <div className="text-sm">

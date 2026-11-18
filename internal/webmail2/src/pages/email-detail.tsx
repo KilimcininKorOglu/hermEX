@@ -131,7 +131,7 @@ const FOLLOWUP_COLORS = [
 // i18n key of its label.
 const FOLDER_TARGETS = [
   { folder: "inbox", key: "nav.inbox" },
-  { folder: "archive", key: "common.archive" },
+  { folder: "archive", key: "nav.archive" },
   { folder: "spam", key: "nav.spam" },
   { folder: "trash", key: "nav.trash" },
 ]
