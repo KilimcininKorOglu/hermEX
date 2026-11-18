@@ -144,11 +144,60 @@ func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request, sess *s
 	phaseOne := requestPolicyKey(root) == "" || requestPolicyKey(root) == "0"
 	wipe := s.provisionWipe(sess, requestWipeAck(root))
 	merged := s.devicePolicy(sess)
+	key := easpolicy.Key(merged)
+	if status := provisionRefusal(root, key, phaseOne); status != 0 {
+		writeWBXML(w, provisionRefused(status, wipe))
+		return
+	}
 	var policy easpolicy.Policy
 	if phaseOne {
 		policy = merged // the document rides only on phase one
 	}
-	writeWBXML(w, provisionResponse(easpolicy.Key(merged), phaseOne, wipe, policy))
+	writeWBXML(w, provisionResponse(key, phaseOne, wipe, policy))
+}
+
+// The one PolicyType this server serves, and the Policy Status values a request is
+// refused with ([MS-ASPROV] 2.2.2.54.1 Status (Policy)). MS-WAP-Provisioning-XML
+// belongs to protocol 2.5, which this server does not offer.
+const (
+	provisionPolicyType     = "MS-EAS-Provisioning-WBXML"
+	policyStatusUnknownType = 3
+	policyStatusKeyMismatch = 5
+)
+
+// provisionRefusal returns the Policy Status a Provision request is refused with,
+// or 0 when it is not refused. A PolicyType other than the one served is unknown;
+// an acknowledgement (phase two) of a key other than the current one acknowledges
+// the wrong policy, so the device must start over and is given no key. A request
+// with no PolicyType (a bare wipe acknowledgement) is not refused for it.
+func provisionRefusal(root *wbxml.Node, currentKey string, phaseOne bool) int {
+	if t := requestPolicyType(root); t != "" && t != provisionPolicyType {
+		return policyStatusUnknownType
+	}
+	if !phaseOne && requestPolicyKey(root) != currentKey {
+		return policyStatusKeyMismatch
+	}
+	return 0
+}
+
+// provisionRefused builds the reply to a refused Provision: the Policy carries the
+// status alone, with no key and no document, and an outstanding remote wipe still
+// rides along.
+func provisionRefused(status, wipe int) *wbxml.Node {
+	reply := wbxml.Elem(wbxml.PVProvision,
+		wbxml.Str(wbxml.PVStatus, "1"),
+		wbxml.Elem(wbxml.PVPolicies, wbxml.Elem(wbxml.PVPolicy,
+			wbxml.Str(wbxml.PVPolicyType, provisionPolicyType),
+			wbxml.Str(wbxml.PVStatus, strconv.Itoa(status)))))
+	return appendWipe(reply, wipe)
+}
+
+// requestPolicyType extracts Provision > Policies > Policy > PolicyType, or "".
+func requestPolicyType(root *wbxml.Node) string {
+	if root == nil || root.Child(wbxml.PVPolicies) == nil || root.Child(wbxml.PVPolicies).Child(wbxml.PVPolicy) == nil {
+		return ""
+	}
+	return root.Child(wbxml.PVPolicies).Child(wbxml.PVPolicy).ChildText(wbxml.PVPolicyType)
 }
 
 // provisionWipe advances and reports the device's outstanding remote wipe for
@@ -205,7 +254,7 @@ func requestPolicyKey(root *wbxml.Node) string {
 // policies.
 func provisionResponse(key string, withDoc bool, wipe int, pol easpolicy.Policy) *wbxml.Node {
 	policy := []*wbxml.Node{
-		wbxml.Str(wbxml.PVPolicyType, "MS-EAS-Provisioning-WBXML"),
+		wbxml.Str(wbxml.PVPolicyType, provisionPolicyType),
 		wbxml.Str(wbxml.PVStatus, "1"),
 		wbxml.Str(wbxml.PVPolicyKey, key),
 	}
@@ -222,15 +271,19 @@ func provisionResponse(key string, withDoc bool, wipe int, pol easpolicy.Policy)
 		policy = append(policy, wbxml.Elem(wbxml.PVData,
 			wbxml.Elem(wbxml.PVEASProvisionDoc, doc...)))
 	}
-	children := []*wbxml.Node{
+	return appendWipe(wbxml.Elem(wbxml.PVProvision,
 		wbxml.Str(wbxml.PVStatus, "1"),
-		wbxml.Elem(wbxml.PVPolicies, wbxml.Elem(wbxml.PVPolicy, policy...)),
-	}
+		wbxml.Elem(wbxml.PVPolicies, wbxml.Elem(wbxml.PVPolicy, policy...))), wipe)
+}
+
+// appendWipe adds the empty remote-wipe element wipe names after the policies, or
+// nothing for wipeEmitNone.
+func appendWipe(reply *wbxml.Node, wipe int) *wbxml.Node {
 	switch wipe {
 	case wipeEmitFull:
-		children = append(children, wbxml.Elem(wbxml.PVRemoteWipe))
+		reply.Children = append(reply.Children, wbxml.Elem(wbxml.PVRemoteWipe))
 	case wipeEmitAccount:
-		children = append(children, wbxml.Elem(wbxml.PVAccountOnlyRemoteWipe))
+		reply.Children = append(reply.Children, wbxml.Elem(wbxml.PVAccountOnlyRemoteWipe))
 	}
-	return wbxml.Elem(wbxml.PVProvision, children...)
+	return reply
 }

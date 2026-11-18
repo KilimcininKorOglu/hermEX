@@ -76,6 +76,60 @@ func TestProvisionServesMergedPolicy(t *testing.T) {
 	}
 }
 
+// easProvisioningType is the PolicyType [MS-ASPROV] defines for protocol 12.0 and
+// later.
+const easProvisioningType = "MS-EAS-Provisioning-WBXML"
+
+// provisionPolicy sends one Provision with the given PolicyType and PolicyKey ("" for
+// phase one) and returns the reply's Policy element.
+func provisionPolicy(t *testing.T, ts *httptest.Server, policyType, key string) *wbxml.Node {
+	t.Helper()
+	policy := []*wbxml.Node{wbxml.Str(wbxml.PVPolicyType, policyType)}
+	if key != "" {
+		policy = append(policy, wbxml.Str(wbxml.PVPolicyKey, key))
+	}
+	_, root := postCommand(t, ts, "Provision", wbxml.Elem(wbxml.PVProvision,
+		wbxml.Elem(wbxml.PVPolicies, wbxml.Elem(wbxml.PVPolicy, policy...))))
+	return root.Child(wbxml.PVPolicies).Child(wbxml.PVPolicy)
+}
+
+// wantPolicyStatus checks a Policy reply's Status and, for a refusal, that it hands
+// the device no key and no document.
+func wantPolicyStatus(t *testing.T, name string, p *wbxml.Node, want string) {
+	t.Helper()
+	if got := p.ChildText(wbxml.PVStatus); got != want {
+		t.Errorf("%s: Policy Status = %q, want %s", name, got, want)
+	}
+	if want != "1" && (p.ChildText(wbxml.PVPolicyKey) != "" || p.Child(wbxml.PVData) != nil) {
+		t.Errorf("%s: a refused Policy carries a key or a document", name)
+	}
+}
+
+// TestProvisionRefusesWhatItCannotServe proves the refusals [MS-ASPROV] 2.2.2.54.1
+// Status (Policy) defines: a PolicyType this server does not serve is 3 (only
+// MS-EAS-Provisioning-WBXML; MS-WAP-Provisioning-XML belongs to protocol 2.5, which
+// is not offered), and an acknowledgement of a key that is not the current one is
+// 5. Neither hands the device a key. The current key is acknowledged, an
+// unconfigured mailbox's baseline key is too, and a policy that changed between the
+// phases refuses the old key until a fresh phase one.
+func TestProvisionRefusesWhatItCannotServe(t *testing.T) {
+	ts, dir := seededServer(t)
+	wantPolicyStatus(t, "unconfigured ack of 1", provisionPolicy(t, ts, easProvisioningType, "1"), "1")
+
+	setOverride(t, dir, easpolicy.Policy{"DevicePasswordEnabled": 1})
+	wantPolicyStatus(t, "WAP type", provisionPolicy(t, ts, "MS-WAP-Provisioning-XML", ""), "3")
+	wantPolicyStatus(t, "made-up type", provisionPolicy(t, ts, "x", ""), "3")
+
+	key := provisionPolicy(t, ts, easProvisioningType, "").ChildText(wbxml.PVPolicyKey)
+	wantPolicyStatus(t, "ack of a made-up key", provisionPolicy(t, ts, easProvisioningType, "12345"), "5")
+	wantPolicyStatus(t, "ack of the current key", provisionPolicy(t, ts, easProvisioningType, key), "1")
+
+	setOverride(t, dir, easpolicy.Policy{"DevicePasswordEnabled": 1, "MinDevicePasswordLength": 6})
+	wantPolicyStatus(t, "ack of the key the policy replaced", provisionPolicy(t, ts, easProvisioningType, key), "5")
+	fresh := provisionPolicy(t, ts, easProvisioningType, "").ChildText(wbxml.PVPolicyKey)
+	wantPolicyStatus(t, "ack after a fresh phase one", provisionPolicy(t, ts, easProvisioningType, fresh), "1")
+}
+
 // TestProvisionServesDomainLayer proves the domain override is the middle layer:
 // it overrides the server default but is itself overridden by the per-user policy.
 // Distinct fields pin each precedence relationship.
