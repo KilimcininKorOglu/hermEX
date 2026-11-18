@@ -10,7 +10,9 @@ import (
 func storedHideMask(t *testing.T, db *sql.DB, addr string) uint32 {
 	t.Helper()
 	var m uint32
-	mustNoErr(t, "read hide_mask of "+addr, db.QueryRow(`SELECT hide_mask FROM users WHERE username = ?`, addr).Scan(&m))
+	err := db.QueryRow(`SELECT hide_mask FROM users WHERE username = ?`, addr).Scan(&m)
+	label := "read hide_mask of " + addr
+	mustNoErr(t, label, err)
 	return m
 }
 
