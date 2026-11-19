@@ -1599,10 +1599,13 @@ func TestAdminLoginAndWhoami(t *testing.T) {
 // TestAdminLoginBadCreds proves wrong credentials are refused.
 func TestAdminLoginBadCreds(t *testing.T) {
 	ts := adminServer(t, &fakeDir{authOK: false})
-	resp, _ := login(t, ts)
+	resp, setCookie := login(t, ts)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("bad-credentials status %d, want 401", resp.StatusCode)
+	}
+	if strings.Contains(setCookie, sessionCookie+"=") {
+		t.Errorf("a refused login set a session cookie: %q", setCookie)
 	}
 }
 
@@ -1611,10 +1614,13 @@ func TestAdminLoginBadCreds(t *testing.T) {
 // non-admin login is not an oracle confirming the password was correct.
 func TestAdminLoginNonAdmin(t *testing.T) {
 	ts := adminServer(t, &fakeDir{authOK: true, uid: 7, roles: nil})
-	resp, _ := login(t, ts)
+	resp, setCookie := login(t, ts)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("non-admin status %d, want 401", resp.StatusCode)
+	}
+	if strings.Contains(setCookie, sessionCookie+"=") {
+		t.Errorf("a non-admin login set a session cookie: %q", setCookie)
 	}
 }
 
@@ -1629,12 +1635,12 @@ func TestAdminCSRF(t *testing.T) {
 		t.Fatalf("login set session=%q csrf=%q, want both", session, csrf)
 	}
 
-	withCookies := func(setHeader bool) int {
+	withCookies := func(header string) int {
 		req, _ := http.NewRequest("POST", ts.URL+"/admin/logout", nil)
 		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 		req.AddCookie(&http.Cookie{Name: csrfCookie, Value: csrf})
-		if setHeader {
-			req.Header.Set(csrfHeader, csrf)
+		if header != "" {
+			req.Header.Set(csrfHeader, header)
 		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -1644,10 +1650,14 @@ func TestAdminCSRF(t *testing.T) {
 		return resp.StatusCode
 	}
 
-	if code := withCookies(false); code != http.StatusForbidden {
+	if code := withCookies(""); code != http.StatusForbidden {
 		t.Errorf("logout without CSRF header = %d, want 403", code)
 	}
-	if code := withCookies(true); code != http.StatusNoContent {
+	// A header that does not match the cookie is what a cross-site page can send.
+	if code := withCookies(csrf + "x"); code != http.StatusForbidden {
+		t.Errorf("logout with a forged CSRF header = %d, want 403", code)
+	}
+	if code := withCookies(csrf); code != http.StatusNoContent {
 		t.Errorf("logout with CSRF header = %d, want 204", code)
 	}
 }
