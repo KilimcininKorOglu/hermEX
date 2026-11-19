@@ -48,6 +48,30 @@ func TestIndexFormat(t *testing.T) {
 	if !bytes.Equal(idx[6:], convID) {
 		t.Error("index tail must be the 16-byte conversation id")
 	}
+	// Bytes 1-5 are the high 40 bits of the FILETIME, big-endian. A FILETIME
+	// counts 100 ns ticks since 1601-01-01, 11644473600 s before the Unix epoch.
+	ft := uint64(1718200000+11644473600) * 10_000_000
+	want := []byte{byte(ft >> 56), byte(ft >> 48), byte(ft >> 40), byte(ft >> 32), byte(ft >> 24)}
+	if !bytes.Equal(idx[1:6], want) {
+		t.Errorf("index time bytes = %x, want %x", idx[1:6], want)
+	}
+}
+
+// TestResolvePrefersAWellFormedStoredID proves a stored PidTagConversationId is
+// used only when it has the GUID's 16 bytes. Any other length is a damaged or
+// foreign value, and the message falls back to the id its threading headers
+// derive rather than grouping by bytes that are not a conversation id.
+func TestResolvePrefersAWellFormedStoredID(t *testing.T) {
+	stored := bytes.Repeat([]byte{0xAB}, 16)
+	derived := IDFromParts("", "", "<root@x>", "Weekly sync")
+	if got := Resolve(stored, "", "", "<root@x>", "Weekly sync"); !bytes.Equal(got, stored) {
+		t.Errorf("Resolve with a 16-byte stored id = %x, want the stored id", got)
+	}
+	for _, bad := range [][]byte{nil, {}, stored[:15], append(bytes.Clone(stored), 0)} {
+		if got := Resolve(bad, "", "", "<root@x>", "Weekly sync"); !bytes.Equal(got, derived) {
+			t.Errorf("Resolve with a %d-byte stored id = %x, want the derived id %x", len(bad), got, derived)
+		}
+	}
 }
 
 // TestIDFromPartsMatchesID proves the two entry points agree for every branch of
