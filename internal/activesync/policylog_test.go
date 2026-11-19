@@ -133,8 +133,18 @@ func TestACleanPolicyReadLogsNothing(t *testing.T) {
 	phase1 := wbxml.Elem(wbxml.PVProvision,
 		wbxml.Elem(wbxml.PVPolicies, wbxml.Elem(wbxml.PVPolicy,
 			wbxml.Str(wbxml.PVPolicyType, "MS-EAS-Provisioning-WBXML"))))
-	postCommand(t, ts, "Provision", phase1)
+	_, root := postCommand(t, ts, "Provision", phase1)
 
+	// The pass must have read the policy, or the silence below proves nothing.
+	doc := root
+	for _, tag := range []wbxml.Tag{wbxml.PVPolicies, wbxml.PVPolicy, wbxml.PVData, wbxml.PVEASProvisionDoc} {
+		if doc = doc.Child(tag); doc == nil {
+			t.Fatalf("Provision answered no policy document (missing tag %v)", tag)
+		}
+	}
+	if got := doc.ChildText(wbxml.PVDevicePasswordEnabled); got != "1" {
+		t.Fatalf("DevicePasswordEnabled = %q, want the configured 1", got)
+	}
 	for _, e := range sink.events {
 		if e.Name == "policy.read.fail" {
 			t.Errorf("a clean policy read logged a failure: %+v", e.Fields)
