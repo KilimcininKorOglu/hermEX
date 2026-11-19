@@ -176,7 +176,11 @@ func listRelaySigns(t *testing.T, authUser string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { sp.Close() })
+	t.Cleanup(func() {
+		if err := sp.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	cs := &countingSigner{}
 	sp.Signer = cs
 	accounts := mlistDir{
