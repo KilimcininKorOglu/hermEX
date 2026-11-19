@@ -37,8 +37,24 @@ func TestParseSeqSetStar(t *testing.T) {
 	}
 }
 
+// TestParseSeqSetLargestNumberIsNotStar parses 4294967295, the largest nz-number
+// RFC 3501 section 9 allows. It names that one value, not '*': in a mailbox whose
+// largest UID is 8 it matches nothing, where '*' would match message 8.
+func TestParseSeqSetLargestNumberIsNotStar(t *testing.T) {
+	ss, err := parseSeqSet("4294967295")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if ss.contains(8, 8) {
+		t.Error("4294967295 matched the largest UID 8, as if it were '*'")
+	}
+	if !ss.contains(4294967295, 4294967295) {
+		t.Error("4294967295 does not match the UID 4294967295")
+	}
+}
+
 func TestParseSeqSetRejects(t *testing.T) {
-	for _, bad := range []string{"", "0", "1,0", "a", "1:b", "1,,2"} {
+	for _, bad := range []string{"", "0", "1,0", "a", "1:b", "1,,2", "4294967296", "-1", "1:", ":1", "**"} {
 		if _, err := parseSeqSet(bad); err == nil {
 			t.Errorf("parseSeqSet(%q) = nil error, want rejection", bad)
 		}

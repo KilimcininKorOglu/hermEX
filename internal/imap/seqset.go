@@ -8,13 +8,15 @@ import (
 
 // seqStar is the wire token '*', meaning the largest value in use (the highest
 // message sequence number, or the highest UID for a UID command). It is
-// resolved against the mailbox at evaluation time.
-const seqStar = ^uint32(0)
+// resolved against the mailbox at evaluation time. It lies outside the 32-bit
+// range, because 4294967295 is itself a valid nz-number (RFC 3501 section 9)
+// and must not read as '*'.
+const seqStar = uint64(1) << 32
 
 // seqRange is one inclusive range of a sequence set. lo and hi are stored as
 // written (either bound may be seqStar); contains normalizes them.
 type seqRange struct {
-	lo, hi uint32
+	lo, hi uint64
 }
 
 // seqSet is an IMAP sequence set: a comma-separated union of numbers and
@@ -48,7 +50,7 @@ func parseSeqSet(s string) (seqSet, error) {
 }
 
 // parseSeqNum parses one bound of a sequence set: a positive integer or '*'.
-func parseSeqNum(s string) (uint32, error) {
+func parseSeqNum(s string) (uint64, error) {
 	if s == "*" {
 		return seqStar, nil
 	}
@@ -56,7 +58,7 @@ func parseSeqNum(s string) (uint32, error) {
 	if err != nil || n == 0 {
 		return 0, fmt.Errorf("%w: bad sequence number %q", errProtocol, s)
 	}
-	return uint32(n), nil
+	return n, nil
 }
 
 // contains reports whether n falls in the set, resolving '*' to max (the
@@ -64,11 +66,11 @@ func parseSeqNum(s string) (uint32, error) {
 // so a:b and b:a denote the same range.
 func (ss seqSet) contains(n, max uint32) bool {
 	for _, r := range ss {
-		lo, hi := r.resolve(max)
+		lo, hi := r.resolve(uint64(max))
 		if lo > hi {
 			lo, hi = hi, lo
 		}
-		if n >= lo && n <= hi {
+		if uint64(n) >= lo && uint64(n) <= hi {
 			return true
 		}
 	}
@@ -76,7 +78,7 @@ func (ss seqSet) contains(n, max uint32) bool {
 }
 
 // resolve substitutes max for any '*' bound.
-func (r seqRange) resolve(max uint32) (uint32, uint32) {
+func (r seqRange) resolve(max uint64) (uint64, uint64) {
 	lo, hi := r.lo, r.hi
 	if lo == seqStar {
 		lo = max
