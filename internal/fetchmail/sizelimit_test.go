@@ -131,7 +131,11 @@ func TestAnEndlessServerLineIsRefused(t *testing.T) {
 	allowLoopback(t)
 	SetMaxMessage(1024)
 	defer SetMaxMessage(0)
-	limit := int64(1024 + responseSlack + 1<<20) // the budget plus socket buffering
+	// The server counts bytes the kernel accepted, not bytes the client read: the
+	// loopback socket buffers hold several MiB on Linux (2.5 MiB measured in the dev
+	// container). 16 MiB covers that and stays far below the 256 MiB an unbounded
+	// reader takes.
+	limit := int64(1024 + responseSlack + 16<<20)
 
 	addr, sent := endlessLineServer(t, "")
 	host, port := splitAddr(t, addr)
