@@ -119,16 +119,29 @@ func TestRemoveFolderPermission(t *testing.T) {
 // TestFolderPermissionsRequireSystem proves a domain admin cannot read or write a
 // user's folder permissions through the system-scoped endpoints.
 func TestFolderPermissionsRequireSystem(t *testing.T) {
-	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}}}
-	ts := adminServer(t, d)
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		userDetail: directory.UserDetail{Username: "alice@hermex.test", Maildir: "/mb/alice"}}
+	store := &fakeStore{}
+	ts := adminServerStore(t, d, store)
 	session, csrf := loginCookies(t, ts)
 
 	get := authedGET(t, ts, "/admin/users/alice@hermex.test/folders", session)
 	get.Body.Close()
 	put := authedPUT(t, ts, "/admin/users/alice@hermex.test/folders/12/permissions", session, csrf, `{"username":"x@y.test","rights":1}`)
 	put.Body.Close()
-	if get.StatusCode != http.StatusForbidden || put.StatusCode != http.StatusForbidden {
-		t.Errorf("domain-admin folders = GET %d / PUT %d, want both 403", get.StatusCode, put.StatusCode)
+	del := authedDELETE(t, ts, "/admin/users/alice@hermex.test/folders/12/permissions?memberID=5", session, csrf, "")
+	del.Body.Close()
+	if get.StatusCode != http.StatusForbidden || put.StatusCode != http.StatusForbidden || del.StatusCode != http.StatusForbidden {
+		t.Errorf("domain-admin folders = GET %d / PUT %d / DELETE %d, want all 403", get.StatusCode, put.StatusCode, del.StatusCode)
+	}
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/users/alice@hermex.test/folder-perms/set", session, csrf, url.Values{
+		"fid": {"12"}, "username": {"x@y.test"}, "rights": {fmt.Sprintf("%d", mapi.RightsOwner)},
+	}), http.StatusForbidden, "domain-admin UI grant")
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/users/alice@hermex.test/folder-perms/remove", session, csrf, url.Values{
+		"fid": {"12"}, "memberID": {"5"},
+	}), http.StatusForbidden, "domain-admin UI remove")
+	if store.setPermDir != "" || store.rmPermDir != "" {
+		t.Errorf("a domain admin changed folder rights: set %q/%q, removed on %q", store.setPermDir, store.setPermUser, store.rmPermDir)
 	}
 }
 
