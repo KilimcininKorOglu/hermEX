@@ -131,6 +131,30 @@ func TestASuspendedAccountsCredentialStopsWorking(t *testing.T) {
 	}
 }
 
+// TestAForcedPasswordChangeClosesAppPasswords flags an account that holds an app
+// password for a forced change. An admin reset closes every client protocol
+// until the owner sets a new password, so the credential must stop signing in
+// too, and work again once the flag is cleared.
+func TestAForcedPasswordChangeClosesAppPasswords(t *testing.T) {
+	d := twoAccounts(t)
+	secret, err := d.CreateAppPassword("u@acme.test", "Phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.RequirePasswordChange("u@acme.test", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := d.AuthenticateProtocol("u@acme.test", secret); ok {
+		t.Error("an app password signed in while a password change is forced")
+	}
+	if _, err := d.RequirePasswordChange("u@acme.test", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := d.AuthenticateProtocol("u@acme.test", secret); !ok {
+		t.Error("the app password stayed closed after the flag was cleared")
+	}
+}
+
 // twoCredentials mints a phone and a laptop credential and returns them with the
 // phone's row id.
 func twoCredentials(t *testing.T, d *SQLDirectory) (phone, laptop string, phoneID int64) {

@@ -162,9 +162,11 @@ func (d *SQLDirectory) AuthenticateAppPassword(user, password string) (string, b
 	// The same resolution and eligibility rules the account password goes
 	// through: exactly one of username, altname or alias, an active mail user in
 	// an active domain, with a mailbox. A credential must not outlive the account
-	// being disabled.
+	// being disabled. A forced password change closes every client protocol, the
+	// same as Authenticate, so a credential minted before an admin reset does not
+	// keep the account open while its owner has not chosen a new password.
 	row, found, err := d.resolve(strings.ToLower(strings.TrimSpace(user)))
-	if err != nil || !found || !row.eligible() || strings.TrimSpace(password) == "" {
+	if err != nil || !found || !row.eligible() || row.mustChange || strings.TrimSpace(password) == "" {
 		return "", false
 	}
 	matched, err := d.matchAppPassword(row.id, password)
