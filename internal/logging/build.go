@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"hermex/internal/atomicfile"
 	"hermex/internal/buildinfo"
 )
 
@@ -47,14 +48,19 @@ const legacySpillName = "logspill.jsonl"
 // the file, inserts it and removes it, taking with it whatever another daemon
 // appended in between. A legacy file is from a deployment that gave each daemon
 // its own directory, so it belongs to this daemon and is moved to the new name,
-// unless that name already holds data, which is never overwritten.
-func spillFile(spillDir, daemon string) string {
+// unless that name already holds data, which is never overwritten. The path is
+// returned even with an error, which only means the legacy file stayed where it
+// was.
+func spillFile(spillDir, daemon string) (string, error) {
 	path := filepath.Join(spillDir, daemon+".spill.jsonl")
-	legacy := filepath.Join(spillDir, legacySpillName)
-	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
-		_ = os.Rename(legacy, path) // absent legacy file: nothing to move
+	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+		return path, err
 	}
-	return path
+	err := atomicfile.SyncRename(filepath.Join(spillDir, legacySpillName), path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return path, nil
+	}
+	return path, err
 }
 
 // Build assembles the process logger from configuration. It always writes to
@@ -93,8 +99,8 @@ func Build(daemon, mongoURI, database, spillDir string) (*Logger, func() error) 
 		// it cannot be created, leave spill disabled rather than failing the daemon.
 		if err := os.MkdirAll(spillDir, 0o700); err != nil {
 			stderr.Write(Event{Level: LevelWarn, Subsystem: System, Name: "logging.spill.unavailable", Err: err.Error()})
-		} else {
-			spillPath = spillFile(spillDir, daemon)
+		} else if spillPath, err = spillFile(spillDir, daemon); err != nil {
+			stderr.Write(Event{Level: LevelWarn, Subsystem: System, Name: "logging.spill.legacy", Err: err.Error()})
 		}
 	}
 	ms, err := NewMongoSink(mongoURI, database, spillPath)

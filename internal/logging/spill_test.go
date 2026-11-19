@@ -50,6 +50,15 @@ func TestSpillReplayAcrossRestart(t *testing.T) {
 	}
 }
 
+func mustSpillFile(t *testing.T, dir, daemon string) string {
+	t.Helper()
+	path, err := spillFile(dir, daemon)
+	if err != nil {
+		t.Fatalf("spillFile(%q): %v", daemon, err)
+	}
+	return path
+}
+
 // TestDaemonsSharingASpillDirectoryKeepEachOthersEvents runs two daemons on one
 // host with one log_spill_dir while the store is down. When the store returns and
 // one daemon replays, the other daemon's spilled events must still be on disk:
@@ -66,19 +75,19 @@ func TestDaemonsSharingASpillDirectoryKeepEachOthersEvents(t *testing.T) {
 		}
 	}
 
-	imap := newAsyncSink(readyConn(down), spillFile(dir, "hermex-imap"))
+	imap := newAsyncSink(readyConn(down), mustSpillFile(t, dir, "hermex-imap"))
 	imap.Write(Event{Subsystem: IMAP, Name: "imap.event"})
 	closeSink(imap)
-	pop3 := newAsyncSink(readyConn(down), spillFile(dir, "hermex-pop3"))
+	pop3 := newAsyncSink(readyConn(down), mustSpillFile(t, dir, "hermex-pop3"))
 	pop3.Write(Event{Subsystem: POP3, Name: "pop3.event"})
 	closeSink(pop3)
 
 	var got fakeInserter
-	closeSink(newAsyncSink(readyConn(&got), spillFile(dir, "hermex-pop3")))
+	closeSink(newAsyncSink(readyConn(&got), mustSpillFile(t, dir, "hermex-pop3")))
 	if _, total := got.totals(); total != 1 {
 		t.Errorf("the pop3 replay inserted %d events, want only its own 1", total)
 	}
-	if docs, err := readSpill(spillFile(dir, "hermex-imap")); err != nil || len(docs) != 1 {
+	if docs, err := readSpill(mustSpillFile(t, dir, "hermex-imap")); err != nil || len(docs) != 1 {
 		t.Errorf("imap's spill holds %d events (err %v) after pop3 replayed, want its 1 kept", len(docs), err)
 	}
 }
@@ -102,7 +111,7 @@ func TestALegacySpillFileIsReplayedUnderTheNewName(t *testing.T) {
 		}
 	}
 	spillTo(legacy, "before.upgrade")
-	path := spillFile(dir, "hermex-imap")
+	path := mustSpillFile(t, dir, "hermex-imap")
 	if docs, err := readSpill(path); err != nil || len(docs) != 1 {
 		t.Fatalf("the daemon's spill holds %d events (err %v), want the legacy event", len(docs), err)
 	}
@@ -111,7 +120,7 @@ func TestALegacySpillFileIsReplayedUnderTheNewName(t *testing.T) {
 	}
 
 	spillTo(legacy, "stray")
-	spillFile(dir, "hermex-imap")
+	mustSpillFile(t, dir, "hermex-imap")
 	docs, err := readSpill(path)
 	if err != nil || len(docs) != 1 || docs[0].(mongoDoc).Name != "before.upgrade" {
 		t.Errorf("the daemon's spill holds %v (err %v), want its own before.upgrade event kept, not replaced", docs, err)
