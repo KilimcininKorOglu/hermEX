@@ -13,6 +13,20 @@ import (
 	"hermex/internal/objectstore"
 )
 
+// TestEventFilenameCannotBreakTheHeader feeds an event subject an invitation
+// sender chose, carrying a quote, CR, LF and a forged header. The name is placed
+// inside a quoted Content-Disposition parameter (RFC 6266 4.1), where a quote
+// ends the value and CR LF ends the field, so neither may survive.
+func TestEventFilenameCannotBreakTheHeader(t *testing.T) {
+	got := filenameFrom("Sync\"; x=\"\r\nSet-Cookie: a=b")
+	if strings.ContainsAny(got, "\"\r\n;=: ") {
+		t.Errorf("filenameFrom kept a header metacharacter: %q", got)
+	}
+	if got != "SyncxSet-Cookieab" {
+		t.Errorf("filenameFrom = %q, want the safe characters in order", got)
+	}
+}
+
 // TestCalendarEventUIDIsMessageID proves a listed event is identified by its store
 // message id, not its iCalendar UID. The delete and update handlers parse the uid
 // back to a store id, so a created-then-reloaded event must carry the numeric id;
