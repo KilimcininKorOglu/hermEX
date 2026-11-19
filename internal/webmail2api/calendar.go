@@ -823,7 +823,7 @@ func (s *Server) handleDeleteEvent(w http.ResponseWriter, r *http.Request) {
 	if c, ok := s.session(r); ok {
 		cancel = prepareCancellation(st, id, c.Email)
 	}
-	if err := st.DeleteObject(id); err != nil {
+	if err := st.SoftDeleteObject(id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not delete event"})
 		return
 	}
@@ -951,12 +951,7 @@ func (s *Server) handleDeleteCalendar(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot delete the default calendar"})
 		return
 	}
-	// Delete the calendar's events first so DeleteFolder leaves no orphaned messages.
-	if objs, err := st.ListFolderObjects(fid); err == nil {
-		for _, o := range objs {
-			_ = st.DeleteObject(o.ID)
-		}
-	}
+	// DeleteFolder moves the calendar's events to Recoverable Items itself.
 	if err := st.DeleteFolder(fid); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not delete calendar"})
 		return

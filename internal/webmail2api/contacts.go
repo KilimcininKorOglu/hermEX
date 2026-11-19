@@ -465,7 +465,7 @@ func (s *Server) handleDeleteContact(w http.ResponseWriter, r *http.Request) {
 	if !objectInKind(w, st, id, inFolder(mapi.PrivateFIDContacts)) {
 		return
 	}
-	if err := st.DeleteObject(id); err != nil {
+	if err := st.SoftDeleteObject(id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not delete contact"})
 		return
 	}
