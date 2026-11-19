@@ -53,6 +53,22 @@ func TestAdminSetUserQuota(t *testing.T) {
 	}
 }
 
+// TestAdminSetUserQuotaRefusesWhatIsNotAKilobyteCount sends a negative limit, one
+// past 32 bits and a string. Each is a 400 that writes nothing: a limit wrapped or
+// read as 0 would make the mailbox unlimited.
+func TestAdminSetUserQuotaRefusesWhatIsNotAKilobyteCount(t *testing.T) {
+	for _, body := range []string{`{"storageKB":-1}`, `{"receiveKB":4294967296}`, `{"sendKB":"1024"}`} {
+		store := &fakeStore{}
+		ts := adminServerStore(t, oofUserDir(), store)
+		session, csrf := loginCookies(t, ts)
+		wantStatus(t, authedPUT(t, ts, "/admin/users/alice@hermex.test/quota", session, csrf, body),
+			http.StatusBadRequest, body)
+		if store.setQuotaDir != "" {
+			t.Errorf("%s was stored as %+v", body, store.setQuotaVal)
+		}
+	}
+}
+
 // TestAdminUserQuotaNotFound proves quota read/write on an unknown user is a 404
 // and the store is never written.
 func TestAdminUserQuotaNotFound(t *testing.T) {
