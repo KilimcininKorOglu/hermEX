@@ -3,6 +3,7 @@ package activesync
 import (
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"hermex/internal/objectstore"
 	"hermex/internal/wbxml"
@@ -86,11 +87,11 @@ func TestSettingsOofTimeBased(t *testing.T) {
 		oofMessageNode(wbxml.STAppliesToInternal, "1", "scheduled")))
 	postCommand(t, ts, "Settings", settingsReq(set))
 
-	st, _ := objectstore.Open(dir)
-	cfg, _ := st.GetOOFSettings()
-	st.Close()
-	if cfg.Start == 0 || cfg.End == 0 || cfg.End <= cfg.Start {
-		t.Fatalf("schedule not stored: start=%d end=%d", cfg.Start, cfg.End)
+	cfg := storedOOF(t, dir)
+	wantStart := time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC).Unix()
+	wantEnd := time.Date(2026, 6, 26, 0, 0, 0, 0, time.UTC).Unix()
+	if cfg.Start != wantStart || cfg.End != wantEnd {
+		t.Fatalf("stored window %d-%d, want %d-%d", cfg.Start, cfg.End, wantStart, wantEnd)
 	}
 
 	_, root := postCommand(t, ts, "Settings", settingsReq(wbxml.Elem(wbxml.STOof, wbxml.Empty(wbxml.STGet))))
@@ -100,6 +101,9 @@ func TestSettingsOofTimeBased(t *testing.T) {
 	}
 	if get.ChildText(wbxml.STStartTime) != "2026-06-19T00:00:00.000Z" {
 		t.Errorf("StartTime = %q, want round-tripped", get.ChildText(wbxml.STStartTime))
+	}
+	if get.ChildText(wbxml.STEndTime) != "2026-06-26T00:00:00.000Z" {
+		t.Errorf("EndTime = %q, want round-tripped", get.ChildText(wbxml.STEndTime))
 	}
 }
 
@@ -221,9 +225,7 @@ func TestSettingsOofPreservesSubject(t *testing.T) {
 		oofMessageNode(wbxml.STAppliesToInternal, "1", "away")))
 	postCommand(t, ts, "Settings", settingsReq(set))
 
-	st, _ = objectstore.Open(dir)
-	cfg, _ := st.GetOOFSettings()
-	st.Close()
+	cfg := storedOOF(t, dir)
 	if cfg.InternalSubject != "On vacation" || cfg.ExternalSubject != "Out of office" {
 		t.Errorf("subjects not preserved: internal=%q external=%q", cfg.InternalSubject, cfg.ExternalSubject)
 	}
