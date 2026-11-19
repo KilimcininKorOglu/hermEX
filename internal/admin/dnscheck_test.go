@@ -270,6 +270,25 @@ func TestDomainDNSCheckReportsAFailedKeyRead(t *testing.T) {
 	}
 }
 
+// TestUIDomainDNSCheckEscapesTheRecords proves a TXT record renders as text. A
+// hosted domain's zone belongs to its tenant, and the report is read in a
+// system administrator's session.
+func TestUIDomainDNSCheckEscapesTheRecords(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		domainDetail: directory.DomainDetail{ID: 1, Name: "acme.test"},
+	}
+	r := acmeResolver()
+	r.txt["_dmarc.acme.test"] = []string{`v=DMARC1; p=none<script>alert(1)</script>`}
+	ts := adminServerDNS(t, d, r)
+	session, _ := loginCookies(t, ts)
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/domains/1/dnscheck", session), http.StatusOK, "ui dns check")
+	if strings.Contains(page, "<script>alert(1)") {
+		t.Errorf("a TXT record renders as markup:\n%s", page)
+	}
+	wantContains(t, page, "&lt;script&gt;alert(1)", "the record is shown, escaped")
+}
+
 // TestUIDomainDNSCheck proves the UI endpoint renders the report partial.
 func TestUIDomainDNSCheck(t *testing.T) {
 	d := &fakeDir{
