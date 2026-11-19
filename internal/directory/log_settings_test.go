@@ -37,6 +37,40 @@ func TestLogRetentionRoundTrip(t *testing.T) {
 	}
 }
 
+// TestLogSpillLimitIsItsOwnSetting proves the spill cap reads its default before
+// any save, reads back what was saved, refuses a negative cap, and that saving
+// the retention window and the cap never overwrite each other in the shared row.
+func TestLogSpillLimitIsItsOwnSetting(t *testing.T) {
+	d := setupLogSettings(t)
+	if mb, err := d.GetLogSpillLimitMB(); err != nil || mb != DefaultLogSpillLimitMB {
+		t.Fatalf("Get on empty = %d (err %v), want the default %d", mb, err, DefaultLogSpillLimitMB)
+	}
+	if err := d.SetLogRetentionDays(30); err != nil {
+		t.Fatal(err)
+	}
+	if mb, err := d.GetLogSpillLimitMB(); err != nil || mb != DefaultLogSpillLimitMB {
+		t.Errorf("after saving retention the cap = %d (err %v), want the default %d", mb, err, DefaultLogSpillLimitMB)
+	}
+	if err := d.SetLogSpillLimitMB(200); err != nil {
+		t.Fatal(err)
+	}
+	if mb, err := d.GetLogSpillLimitMB(); err != nil || mb != 200 {
+		t.Errorf("cap = %d (err %v), want 200", mb, err)
+	}
+	if days, _, err := d.GetLogRetentionDays(); err != nil || days != 30 {
+		t.Errorf("saving the cap changed retention to %d (err %v), want 30", days, err)
+	}
+	if err := d.SetLogSpillLimitMB(-1); err == nil {
+		t.Error("a negative cap was accepted")
+	}
+	if err := d.SetLogSpillLimitMB(0); err != nil {
+		t.Fatal(err)
+	}
+	if mb, _ := d.GetLogSpillLimitMB(); mb != 0 {
+		t.Errorf("cap = %d after saving 0, want 0 (no cap)", mb)
+	}
+}
+
 // TestLogRetentionUpsert proves a second save replaces the single row, including the
 // keep-forever value (0) an operator may set to disable pruning.
 func TestLogRetentionUpsert(t *testing.T) {
