@@ -57,10 +57,10 @@ func liveFolderOf(t *testing.T, dir string, id int64) int64 {
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
 	defer st.Close()
+	// A soft-deleted item keeps its folder, so a lookup error is a failure, not
+	// an item that is not live.
 	fid, err := st.MessageFolder(id)
-	if err != nil {
-		return 0
-	}
+	mustNoErr(t, "find the item's folder", err)
 	objs, err := st.ListFolderObjects(fid)
 	mustNoErr(t, "list the folder", err)
 	for _, o := range objs {
