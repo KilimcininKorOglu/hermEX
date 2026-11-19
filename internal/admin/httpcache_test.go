@@ -22,6 +22,24 @@ func TestAdminHTMLIsNoStore(t *testing.T) {
 	}
 }
 
+// TestAdminDataIsNoStore proves the responses that carry operator data, a signed-in
+// page and a JSON API answer, are no-store as well: the login page carries none,
+// so it alone proves little.
+func TestAdminDataIsNoStore(t *testing.T) {
+	ts := adminServer(t, systemAdmin())
+	session, _ := loginCookies(t, ts)
+	for _, path := range []string{"/admin/ui/settings", "/admin/users"} {
+		resp := authedGET(t, ts, path, session)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: status %d, want 200", path, resp.StatusCode)
+		}
+		if got := resp.Header.Get("Cache-Control"); got != "no-store" {
+			t.Errorf("%s: Cache-Control = %q, want no-store", path, got)
+		}
+	}
+}
+
 // TestAdminStaticIsCacheable is the negative control: the blanket no-store must
 // not reach /admin/static/, whose embedded assets carry no operator data and get
 // a short cacheable policy plus a strong ETag.
