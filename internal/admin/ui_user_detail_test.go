@@ -244,6 +244,14 @@ func TestUIUserRoles(t *testing.T) {
 	if d.revokedRole != "domain" || d.revokedScope != 3 {
 		t.Errorf("revoked (%q, %d), want (domain, 3)", d.revokedRole, d.revokedScope)
 	}
+
+	// A scope that is not a number must reach the directory as the refused -1, not as
+	// 0, which stored a domain role that grants nothing yet showed as granted.
+	htmxPOST(t, ts, "/admin/ui/users/alice@hermex.test/roles/grant", session, csrf,
+		url.Values{"role": {"domain"}, "scopeID": {"acme"}}).Body.Close()
+	if d.grantedScope != -1 {
+		t.Errorf("a forged scope reached the directory as %d, want -1", d.grantedScope)
+	}
 }
 
 // TestUIUserContact proves the detail page seeds the contact form with stored

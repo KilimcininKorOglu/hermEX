@@ -31,6 +31,11 @@ func TestAdminRoles(t *testing.T) {
 	wantEq(t, "org:5 grant present", hasRole(roles, AdminOrg, 5), true)
 
 	wantErr(t, "GrantAdminRole accepted an unknown role tier", d.GrantAdminRole(uid, "wizard", 0))
+	// A scope that does not fit the role grants nothing, so it is refused: an org or
+	// domain role with no scope (0 or negative), and a system role with one.
+	wantErr(t, "GrantAdminRole accepted an org role with scope 0", d.GrantAdminRole(uid, AdminOrg, 0))
+	wantErr(t, "GrantAdminRole accepted a domain role with scope -1", d.GrantAdminRole(uid, AdminDomain, -1))
+	wantErr(t, "GrantAdminRole accepted a system role with a scope", d.GrantAdminRole(uid, AdminSystem, 3))
 }
 
 // mustAdminRoles reads a user's direct admin grants.

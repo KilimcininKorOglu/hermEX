@@ -42,10 +42,16 @@ func (d *SQLDirectory) UserID(login string) (id int64, ok bool, err error) {
 // org id for an org admin, a domain id for a domain admin, 0 for a system
 // admin). Granting a role the user already holds is a no-op.
 func (d *SQLDirectory) GrantAdminRole(userID int64, role string, scopeID int64) error {
-	switch role {
-	case AdminSystem, AdminOrg, AdminDomain:
-	default:
+	// A system role has no scope, and an org or domain role needs one: id 0 names
+	// no organization or domain, so such a row would grant nothing while the panel
+	// listed it as granted.
+	switch {
+	case role == AdminSystem && scopeID == 0:
+	case (role == AdminOrg || role == AdminDomain) && scopeID > 0:
+	case role != AdminSystem && role != AdminOrg && role != AdminDomain:
 		return fmt.Errorf("directory: unknown admin role %q", role)
+	default:
+		return fmt.Errorf("directory: scope %d does not fit the %s role", scopeID, role)
 	}
 	_, err := d.db.Exec(
 		`INSERT IGNORE INTO admin_roles (user_id, role, scope_id) VALUES (?, ?, ?)`,

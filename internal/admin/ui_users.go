@@ -425,7 +425,7 @@ func (s *Server) handleUIUserGrantRole(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	scopeID, _ := strconv.ParseInt(r.PostFormValue("scopeID"), 10, 64)
+	scopeID := int64(formInt(r, "scopeID"))
 	errMsg := ""
 	if err := s.dir.GrantAdminRole(uid, r.PostFormValue("role"), scopeID); err != nil {
 		errMsg = s.notice("userRoles.grantFailed", err)
@@ -443,7 +443,7 @@ func (s *Server) handleUIUserRevokeRole(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	scopeID, _ := strconv.ParseInt(r.PostFormValue("scopeID"), 10, 64)
+	scopeID := int64(formInt(r, "scopeID"))
 	errMsg := ""
 	if err := s.dir.RevokeAdminRole(uid, r.PostFormValue("role"), scopeID); err != nil {
 		errMsg = s.notice("userRoles.revokeFailed", err)
