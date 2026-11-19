@@ -71,6 +71,8 @@ func TestLDAPConnectionsAreSystemOnly(t *testing.T) {
 		http.StatusForbidden, "connection create")
 	wantStatus(t, authedPOST(t, ts, "/admin/ldap/bindings", session, csrf, `{"ConnectionID":1,"DomainID":1}`),
 		http.StatusForbidden, "binding create")
+	wantEq(t, len(d.ldapConns), 2, "connections after the refused create")
+	wantEq(t, len(d.ldapBindings), 2, "bindings after the refused create")
 }
 
 // TestLDAPReadOnlySystemAdminReadsOnly proves a read-only system admin reads
@@ -87,6 +89,9 @@ func TestLDAPReadOnlySystemAdminReadsOnly(t *testing.T) {
 	wantStatus(t, authedPOST(t, ts, "/admin/ldap/bindings/2/reset", session, csrf, ``), http.StatusForbidden, "reset")
 	wantStatus(t, authedReq(t, ts, "DELETE", "/admin/ldap/connections/1", session, csrf, ``),
 		http.StatusForbidden, "connection delete")
+	if _, ok := d.ldapConns[1]; !ok {
+		t.Error("a read-only admin deleted connection 1")
+	}
 }
 
 // TestLDAPNonSystemEditKeepsSystemFields proves a domain admin's edit cannot change
