@@ -217,18 +217,27 @@ func (s *Server) writeCopy(st *objectstore.Store, ends copyMoveEnds, msg *oxcmai
 			return err
 		}
 	}
+	// The copy is written before the object it replaces is removed, so a failed
+	// write leaves the destination as it was; the replaced object goes to
+	// Recoverable Items like any other delete.
+	if _, err := createCopy(st, ends.dstFID, msg); err != nil {
+		return err
+	}
 	if ends.dstExists {
-		if err := st.DeleteObject(ends.dst.ID); err != nil {
+		if err := st.SoftDeleteObject(ends.dst.ID); err != nil {
 			return err
 		}
-	}
-	if _, err := st.CreateMessage(ends.dstFID, msg); err != nil {
-		return err
 	}
 	if move {
 		return st.SoftDeleteObject(ends.src.ID)
 	}
 	return nil
+}
+
+// createCopy files the copied object; a variable only so a test can make the
+// write fail.
+var createCopy = func(st *objectstore.Store, fid int64, msg *oxcmail.Message) (int64, error) {
+	return st.CreateMessage(fid, msg)
 }
 
 // objectTarget describes the collection an object request must name, and the
