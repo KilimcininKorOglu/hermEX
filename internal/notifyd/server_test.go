@@ -169,6 +169,32 @@ func TestBearerRequired(t *testing.T) {
 	}
 }
 
+// TestForgedBearerIsRefused sends bearers that are not the configured secret: a
+// wrong one, a prefix of it, the secret with a byte added, and an empty token.
+// Each must be refused on both endpoints, or anyone could publish wakes or watch
+// which mailboxes receive mail.
+func TestForgedBearerIsRefused(t *testing.T) {
+	ts := httptest.NewServer(New("s3cret", nil).Handler())
+	defer ts.Close()
+	for _, forged := range []string{"wrong", "s3cre", "s3cretX", " s3cret", ""} {
+		pub := publish(t, ts, forged, Event{Mailbox: "x"})
+		pub.Body.Close()
+		if pub.StatusCode != http.StatusUnauthorized {
+			t.Errorf("publish with bearer %q = %d, want 401", forged, pub.StatusCode)
+		}
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/events", nil)
+		req.Header.Set("Authorization", "Bearer "+forged)
+		ev, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatalf("events request: %v", err)
+		}
+		ev.Body.Close()
+		if ev.StatusCode != http.StatusUnauthorized {
+			t.Errorf("events with bearer %q = %d, want 401", forged, ev.StatusCode)
+		}
+	}
+}
+
 // TestPublishBadBody rejects a malformed event without disturbing the relay.
 func TestPublishBadBody(t *testing.T) {
 	ts := httptest.NewServer(New(testSecret, nil).Handler())
