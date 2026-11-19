@@ -2,6 +2,7 @@
 # hermEX bare-metal installer and updater.
 #
 #   install.sh install --hostname mail.example.com [--version X.Y.Z | --from FILE]
+#              [--domain example.com] [--acme-email you@example.com --agree-tos]
 #   install.sh update  [--version X.Y.Z | --from FILE]
 #   install.sh rollback
 #   install.sh status
@@ -9,7 +10,10 @@
 # install  sets up MariaDB, MongoDB and ClamAV from their packages, creates the
 #          hermex system user, the directory database, /etc/hermex/config.json
 #          (only when absent), the systemd units and the firewall rules, then
-#          installs and starts the release.
+#          installs and starts the release. It then asks for the first mail
+#          domain (or takes --domain), creates its postmaster administrator,
+#          DKIM key and antivirus setting, writes the DNS records to publish to
+#          /root/hermex-dns-<domain>.txt, and offers Let's Encrypt certificates.
 # update   backs up the directory database, stops every daemon, switches to the
 #          new release, applies its schema migrations and starts it again.
 # rollback switches back to the release before the last update and restores the
@@ -60,7 +64,7 @@ readonly DAEMONS=(
 )
 
 OS_FAMILY="" OS_ID="" OS_CODENAME="" ARCH="" WORK=""
-ARG_HOSTNAME="" ARG_VERSION="" ARG_FROM=""
+ARG_HOSTNAME="" ARG_VERSION="" ARG_FROM="" ARG_DOMAIN="" ARG_ACME_EMAIL="" ARG_AGREE_TOS=""
 
 log() { printf '==> %s\n' "$*"; }
 die() {
@@ -115,6 +119,9 @@ parse_args() {
 		--hostname) ARG_HOSTNAME="${2:?--hostname needs a value}" && shift ;;
 		--version) ARG_VERSION="${2:?--version needs a value}" && shift ;;
 		--from) ARG_FROM="${2:?--from needs a value}" && shift ;;
+		--domain) ARG_DOMAIN="${2:?--domain needs a value}" && shift ;;
+		--acme-email) ARG_ACME_EMAIL="${2:?--acme-email needs a value}" && shift ;;
+		--agree-tos) ARG_AGREE_TOS="yes" ;;
 		*) die "unknown option: $1" ;;
 		esac
 		shift
@@ -589,21 +596,79 @@ cmd_install() {
 	register_health_targets
 	open_firewall
 	log "hermEX $version is running"
+	setup_mail "$host"
 	print_next_steps
+}
+
+# ask PROMPT DEFAULT: prints the answer read from the terminal, or DEFAULT when
+# there is no terminal, so an unattended install takes the flags and defaults.
+ask() {
+	local answer=""
+	if [[ -r /dev/tty ]] && { : </dev/tty; } 2>/dev/null; then
+		read -r -p "$1${2:+ [$2]}: " answer </dev/tty || true
+	fi
+	echo "${answer:-$2}"
+}
+
+# setup_mail HOST: creates the first domain with its postmaster account (a
+# system administrator), turns its antivirus scanning on, gives it a DKIM key
+# and writes the DNS records it needs to /root, then offers ACME certificates.
+setup_mail() {
+	local host="$1" domain admin password records
+	domain="${ARG_DOMAIN:-$(ask "First mail domain (empty to skip)" "${host#*.}")}"
+	[[ -n "$domain" ]] || return 0
+	admin="postmaster@${domain}"
+	password="$(openssl rand -base64 18)"
+	admin_cli create-domain "$domain" >/dev/null
+	admin_cli create-user "$admin" "$password" >/dev/null
+	admin_cli grant-admin "$admin" system >/dev/null
+	admin_cli set-av-scan "$domain" on >/dev/null
+	admin_cli generate-dkim "$domain" >/dev/null
+	records="/root/hermex-dns-${domain}.txt"
+	{
+		echo "# DNS records for ${domain}: type, name, value (tab separated)."
+		echo "# After the DKIM record is published, start signing with:"
+		echo "#   $0 admin enable-dkim ${domain}"
+		admin_cli dns-records "$domain"
+	} | write_file "$records" 0600 root:root
+	log "created ${domain} and ${admin} (system administrator)"
+	printf '\n%s password (shown once, stored nowhere): %s\n\n' "$admin" "$password"
+	log "DNS records to publish, also saved to ${records}:"
+	column -t -s $'\t' "$records" 2>/dev/null || cat "$records"
+	setup_acme "$host" "$admin"
+}
+
+# setup_acme HOST CONTACT: switches the front door to Let's Encrypt when the
+# operator accepts the CA's terms and HOST already resolves to this server, since
+# the CA validates by connecting to it.
+setup_acme() {
+	local host="$1" email agree resolved
+	email="${ARG_ACME_EMAIL:-$(ask "Let's Encrypt contact email (empty to keep the self-signed certificate)" "$2")}"
+	[[ -n "$email" ]] || return 0
+	agree="${ARG_AGREE_TOS:-$(ask "Accept the Let's Encrypt terms (https://letsencrypt.org/repository/)? yes/no" "no")}"
+	if [[ "$agree" != "yes" ]]; then
+		log "ACME not enabled; the self-signed certificate stays"
+		return 0
+	fi
+	resolved="$(getent ahostsv4 "$host" | awk 'NR==1{print $1}')"
+	if [[ -z "$resolved" ]] || ! ip -4 -o addr show | grep -qF " ${resolved}/"; then
+		log "ACME not enabled: ${host} resolves to '${resolved:-nothing}', not to this server; publish its A record, then run: $0 admin set-tls-acme ${email} --agree-tos && systemctl restart hermex-gateway"
+		return 0
+	fi
+	admin_cli set-tls-acme "$email" --agree-tos >/dev/null
+	systemctl restart hermex-gateway.service
+	log "ACME enabled; the gateway obtains the certificate for ${host} now"
 }
 
 print_next_steps() {
 	cat <<EOF
 
 Next steps:
-  1. Create the first domain, mailbox and administrator:
-       $0 admin create-domain example.com
-       $0 admin create-user postmaster@example.com '<password>'
-       $0 admin grant-admin postmaster@example.com system
-  2. Open the admin panel through an SSH tunnel (ssh -L 8608:127.0.0.1:8608
+  1. Publish the DNS records listed above (saved under /root/hermex-dns-*.txt),
+     then enable DKIM signing: $0 admin enable-dkim <domain>
+  2. The admin panel is reached through an SSH tunnel (ssh -L 8608:127.0.0.1:8608
      root@<server>, then https://127.0.0.1:8608/admin/ui/ in a browser; the
-     certificate is the self-signed internal one), set the DNS records it
-     prescribes, and switch TLS to ACME there.
+     certificate is the self-signed internal one).
   3. Back up $CONFIG off this server: without it the stored keys are lost.
 EOF
 }
