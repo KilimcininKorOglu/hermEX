@@ -19,6 +19,62 @@ func TestTag(t *testing.T) {
 	}
 }
 
+// TestTagReplacesSenderSpamHeaders proves the verdict headers are the only X-Spam
+// headers on the tagged message. A sender can write its own "X-Spam-Flag: NO";
+// left in place beside the verdict, a client that reads the last occurrence filed
+// the spam as clean. Folded continuation lines go with their field, any case of the
+// name counts, and the other headers and the body are untouched.
+func TestTagReplacesSenderSpamHeaders(t *testing.T) {
+	orig := "x-spam-flag: NO\r\n" +
+		"Subject: hi\r\n" +
+		"X-Spam-Status: No,\r\n score=-50\r\n" +
+		"X-Spammy-Other: kept\r\n" +
+		"\r\n" +
+		"X-Spam-Flag: NO in the body stays\r\n"
+	out := string(Tag([]byte(orig), Verdict{Score: 9, Spam: true}))
+
+	head, body, _ := strings.Cut(out, "\r\n\r\n")
+	if body != "X-Spam-Flag: NO in the body stays\r\n" {
+		t.Errorf("body = %q, want it unchanged", body)
+	}
+	low := strings.ToLower(head)
+	if n := strings.Count(low, "x-spam-flag:"); n != 1 || !strings.Contains(head, "X-Spam-Flag: YES") {
+		t.Errorf("header block carries %d X-Spam-Flag fields, want only the verdict:\n%s", n, head)
+	}
+	if strings.Contains(head, "score=-50") || strings.Count(low, "x-spam-status:") != 1 {
+		t.Errorf("the sender's X-Spam-Status survived:\n%s", head)
+	}
+	for _, kept := range []string{"Subject: hi\r\n", "X-Spammy-Other: kept"} {
+		if !strings.Contains(head, kept) {
+			t.Errorf("header %q was removed:\n%s", kept, head)
+		}
+	}
+}
+
+// TestTagStripsForgedSpamHeadersInEveryShape sends the forms a sender can use to
+// slip a forged field past a line scanner. Each tagged message must carry exactly
+// the verdict's X-Spam fields and keep the rest of the message byte for byte.
+func TestTagStripsForgedSpamHeadersInEveryShape(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, rest string
+		spam            bool
+	}{
+		{"bare LF", "X-Spam-Flag: NO\nSubject: s\n\nbody\n", "Subject: s\n\nbody\n", true},
+		{"space before colon", "X-Spam-Flag : NO\r\nSubject: s\r\n\r\nbody", "Subject: s\r\n\r\nbody", true},
+		{"tab fold", "X-Spam-Status: No,\r\n\tscore=-9\r\nSubject: s\r\n\r\nbody", "Subject: s\r\n\r\nbody", true},
+		{"last before the blank line", "Subject: s\r\nX-Spam-Flag: NO\r\n\r\nbody", "Subject: s\r\n\r\nbody", true},
+		{"no blank line", "Subject: s\r\nX-Spam-Flag: NO\r\n", "Subject: s\r\n", true},
+		{"empty", "", "", true},
+		{"reverse forgery", "X-Spam-Flag: YES\r\nSubject: s\r\n\r\nbody", "Subject: s\r\n\r\nbody", false},
+	} {
+		v := Verdict{Score: 1, Spam: tc.spam}
+		want := string(Tag(nil, v)) + tc.rest
+		if got := string(Tag([]byte(tc.raw), v)); got != want {
+			t.Errorf("%s: Tag = %q, want %q", tc.name, got, want)
+		}
+	}
+}
+
 // newTestScorer builds a Scorer with injected deterministic checks so the scoring
 // logic is exercised without live DNS.
 func newTestScorer(spfResult AuthResult, dkimValid bool) *Scorer {

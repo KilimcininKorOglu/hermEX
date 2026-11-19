@@ -8,6 +8,7 @@
 package antispam
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"strings"
@@ -434,8 +435,56 @@ func Tag(raw []byte, v Verdict) []byte {
 		flag, v.Score, status, v.Score)
 	out := make([]byte, 0, len(hdr)+len(raw))
 	out = append(out, hdr...)
-	out = append(out, raw...)
+	return appendWithoutSpamFields(out, raw)
+}
+
+// appendWithoutSpamFields appends raw to out without the X-Spam-* fields of its
+// header block. A sender can write its own "X-Spam-Flag: NO", and left beside the
+// verdict a client reading the last occurrence would trust it. Every other line,
+// and the body after the first empty line, is copied byte for byte, whatever its
+// line ending.
+func appendWithoutSpamFields(out, raw []byte) []byte {
+	dropping := false
+	for i := 0; i < len(raw); {
+		line, next := lineAt(raw, i)
+		if isEmptyLine(line) {
+			return append(append(out, line...), raw[next:]...)
+		}
+		if line[0] != ' ' && line[0] != '\t' {
+			dropping = isSpamField(line) // a continuation line follows its field
+		}
+		if !dropping {
+			out = append(out, line...)
+		}
+		i = next
+	}
 	return out
+}
+
+// lineAt returns the line starting at i, its terminator included, and the offset
+// of the next line.
+func lineAt(raw []byte, i int) ([]byte, int) {
+	if j := bytes.IndexByte(raw[i:], '\n'); j >= 0 {
+		return raw[i : i+j+1], i + j + 1
+	}
+	return raw[i:], len(raw)
+}
+
+// isEmptyLine reports whether line is the empty line ending a header block.
+func isEmptyLine(line []byte) bool {
+	return string(line) == "\n" || string(line) == "\r\n"
+}
+
+// isSpamField reports whether a header line starts an X-Spam-* field, in any case
+// and with any whitespace before the colon.
+func isSpamField(line []byte) bool {
+	name, _, ok := bytes.Cut(line, []byte(":"))
+	if !ok {
+		return false
+	}
+	name = bytes.TrimRight(name, " \t")
+	const prefix = "x-spam-"
+	return len(name) >= len(prefix) && strings.EqualFold(string(name[:len(prefix)]), prefix)
 }
 
 // domainOf extracts the lowercased domain from an address, or "" when it has none.

@@ -2,6 +2,7 @@ package mta
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -216,4 +217,33 @@ func TestSpamFiledToJunk(t *testing.T) {
 	mustNoErr(t, "read the filed spam", err)
 	wantContains(t, "the filed spam (its X-Spam tag must survive the store round-trip)",
 		string(raw), "X-Spam-Flag: YES")
+}
+
+// TestFiledSpamCarriesOnlyTheVerdictFlag proves a sender's forged "X-Spam-Flag: NO"
+// does not reach the reader beside the verdict, both from the cached copy and from
+// the copy the store regenerates through the export. A client that reads the last
+// occurrence of the field would otherwise trust the sender's own answer.
+func TestFiledSpamCarriesOnlyTheVerdictFlag(t *testing.T) {
+	mbox := filepath.Join(t.TempDir(), "alice")
+	accounts := directory.StaticAccounts{"alice@test": {MailboxPath: mbox}}
+	b := &Backend{Accounts: accounts, Scorer: &recordingScorer{verdict: antispam.Verdict{Score: 99, Spam: true}}}
+	deliverBody(t, b, "203.0.113.9:1234", "bob@external.example", "alice@test",
+		"From: bob@external.example\r\nX-Spam-Flag: NO\r\nSubject: spam\r\n\r\nbuy now")
+
+	junk := folderMessages(t, mbox, int64(mapi.PrivateFIDJunk))
+	wantEq(t, "messages in Junk", len(junk), 1)
+	for _, how := range []string{"cached", "regenerated"} {
+		if how == "regenerated" {
+			mustNoErr(t, "drop the cached copy", os.RemoveAll(filepath.Join(mbox, "eml")))
+		}
+		st, err := objectstore.Open(mbox)
+		mustNoErr(t, "open the mailbox", err)
+		raw, err := st.GetMessageRaw(int64(mapi.PrivateFIDJunk), junk[0].UID)
+		st.Close()
+		mustNoErr(t, "read the filed spam", err)
+		head, _, _ := strings.Cut(string(raw), "\r\n\r\n")
+		if n := strings.Count(strings.ToLower(head), "x-spam-flag:"); n != 1 || !strings.Contains(head, "X-Spam-Flag: YES") {
+			t.Errorf("%s copy carries %d X-Spam-Flag fields, want only the verdict:\n%s", how, n, head)
+		}
+	}
 }
