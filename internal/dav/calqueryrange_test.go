@@ -68,6 +68,63 @@ func TestCalQueryObjectsAppliesTheRange(t *testing.T) {
 	}
 }
 
+// TestCalQueryObjectsKeepsEventsThatCrossTheBounds stores events that overlap the
+// range only partly: one starting before it and ending inside, one starting
+// inside and ending after, one spanning it whole. RFC 4791 section 9.9 matches an
+// event that overlaps the range at all (start < DTEND and end > DTSTART). The
+// store narrowing may over-include, since the full filter runs on each member
+// afterwards, but it must not drop an overlapping event; the full filter must
+// then exclude the event that ends exactly where the range starts.
+func TestCalQueryObjectsKeepsEventsThatCrossTheBounds(t *testing.T) {
+	st, err := objectstore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	fid := int64(mapi.PrivateFIDCalendar)
+	from := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	overlapping := []int64{
+		seedRangeEvent(t, st, from.Add(-2*time.Hour), from.Add(time.Hour)),
+		seedRangeEvent(t, st, to.Add(-time.Hour), to.Add(2*time.Hour)),
+		seedRangeEvent(t, st, from.AddDate(0, -1, 0), to.AddDate(0, 1, 0)),
+	}
+	touching := seedRangeEvent(t, st, from.Add(-time.Hour), from)
+
+	filt := eventRangeFilter("20260601T000000Z", "20260701T000000Z")
+	got, err := calQueryObjects(st, fid, false, filt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := map[int64]bool{}
+	for _, o := range got {
+		listed[o.ID] = true
+	}
+	for _, id := range overlapping {
+		if !listed[id] {
+			t.Errorf("overlapping object %d was dropped by the store narrowing", id)
+			continue
+		}
+		if !matchesFilter(t, st, fid, id, filt) {
+			t.Errorf("overlapping object %d does not match the filter", id)
+		}
+	}
+	if listed[touching] && matchesFilter(t, st, fid, touching, filt) {
+		t.Error("an event ending exactly at the range start matched the filter")
+	}
+}
+
+// matchesFilter renders one stored object and runs the full calendar-query filter
+// on it, the step the report applies to every listed member.
+func matchesFilter(t *testing.T, st *objectstore.Store, fid, id int64, filt *filter) bool {
+	t.Helper()
+	data, err := calendarObjectData(st, fid, id, objectName(st, id, ".ics"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return calendarMatches(filt, data)
+}
+
 // TestCalQueryObjectsFallsBackOnOtherShapes keeps every filter the pre-filter
 // cannot reason about on the full listing. Narrowing one of these in the store
 // would drop members the filter would have matched.
