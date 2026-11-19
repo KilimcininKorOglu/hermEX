@@ -39,3 +39,18 @@ func TestApplyFlagNames(t *testing.T) {
 		t.Errorf("replace = %d, want %d", got, objectstore.FlagDraft)
 	}
 }
+
+// TestClientCannotStoreRecent sends \Recent in every STORE mode. RFC 3501 2.3.2:
+// the server sets \Recent and a client cannot alter it, so the stored bits must
+// come out exactly as they went in.
+func TestClientCannotStoreRecent(t *testing.T) {
+	base := objectstore.FlagSeen
+	for _, mode := range []byte{'+', '-'} {
+		if got := applyFlagNames(base, mode, []string{`\Recent`, `\RECENT`}); got != base {
+			t.Errorf("STORE %cFLAGS (\\Recent) changed the stored bits to %d, want %d", mode, got, base)
+		}
+	}
+	if got := applyFlagNames(base, ' ', []string{`\Recent`}); got != 0 {
+		t.Errorf("STORE FLAGS (\\Recent) stored %d, want no bit", got)
+	}
+}
