@@ -186,6 +186,46 @@ func servfailResolver(t *testing.T) *Resolver {
 	return &Resolver{Addr: pc.LocalAddr().String()}
 }
 
+// tlsaResolver starts a UDP DNS stub that answers every query with one usable
+// DANE-EE TLSA record, setting the AD bit only when secure, and returns a Resolver
+// pointed at it.
+func tlsaResolver(t *testing.T, secure bool) *Resolver {
+	t.Helper()
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &dns.Server{PacketConn: pc, Handler: dns.HandlerFunc(func(w dns.ResponseWriter, r *dns.Msg) {
+		m := new(dns.Msg)
+		m.SetReply(r)
+		m.AuthenticatedData = secure
+		m.Answer = []dns.RR{&dns.TLSA{
+			Hdr:   dns.RR_Header{Name: r.Question[0].Name, Rrtype: dns.TypeTLSA, Class: dns.ClassINET, Ttl: 300},
+			Usage: 3, Selector: 1, MatchingType: 1,
+			Certificate: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		}}
+		_ = w.WriteMsg(m)
+	})}
+	go func() { _ = srv.ActivateAndServe() }()
+	t.Cleanup(func() { _ = srv.Shutdown() })
+	return &Resolver{Addr: pc.LocalAddr().String()}
+}
+
+// TestLookupTLSATrustsOnlyAValidatedAnswer is the downgrade-and-forgery boundary
+// of RFC 7672 section 2.2: a TLSA RRset that is not DNSSEC-validated (no AD bit)
+// may be forged by anyone on the path, so it must not make DANE apply, while the
+// same record validated must.
+func TestLookupTLSATrustsOnlyAValidatedAnswer(t *testing.T) {
+	recs, applies, err := tlsaResolver(t, false).LookupTLSA("mx.example", 25)
+	if err != nil || applies || len(recs) != 0 {
+		t.Errorf("insecure answer = %d records, applies %v, err %v; want none, false, nil", len(recs), applies, err)
+	}
+	recs, applies, err = tlsaResolver(t, true).LookupTLSA("mx.example", 25)
+	if err != nil || !applies || len(recs) != 1 {
+		t.Errorf("validated answer = %d records, applies %v, err %v; want 1, true, nil", len(recs), applies, err)
+	}
+}
+
 // TestLookupTLSABogus proves a SERVFAIL answer surfaces as ErrBogus, the typed
 // signal a caller relies on to defer delivery and report a TLS-RPT
 // dnssec-invalid result rather than silently downgrade to cleartext.
