@@ -2,6 +2,25 @@ package mta
 
 import "testing"
 
+// TestIsRoleMailbox proves the auto-reply pass recognizes the unattended role
+// mailboxes it must never answer (RFC 3834 section 2), in any case, and reads the
+// local part up to the last '@': a quoted local part that merely starts with a role
+// name is an ordinary sender.
+func TestIsRoleMailbox(t *testing.T) {
+	for _, addr := range []string{"postmaster@example.com", "MAILER-DAEMON@example.com", "noreply@example.com", "do-not-reply@example.com"} {
+		if !isRoleMailbox(addr) {
+			t.Errorf("isRoleMailbox(%q) = false, want true", addr)
+		}
+	}
+	// net/mail unquotes a local part, so "postmaster@x"@example.com reaches the check
+	// as postmaster@x@example.com.
+	for _, addr := range []string{"alice@example.com", `"postmaster@x"@example.com`, "postmaster@x@example.com"} {
+		if isRoleMailbox(addr) {
+			t.Errorf("isRoleMailbox(%q) = true, want false", addr)
+		}
+	}
+}
+
 // TestSameDomain pins the cross-tenant guard used by the out-of-office decision:
 // only two addresses in the same domain count as internal, and a missing domain
 // on either side is never a match.

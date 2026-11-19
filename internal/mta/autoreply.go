@@ -249,8 +249,8 @@ func sameDomain(a, b string) bool {
 // and replying to them risks a loop with another automaton.
 func isRoleMailbox(addr string) bool {
 	local := addr
-	if i := strings.IndexByte(local, '@'); i >= 0 {
-		local = local[:i]
+	if i := strings.LastIndexByte(local, '@'); i >= 0 {
+		local = local[:i] // the domain follows the last '@'
 	}
 	switch strings.ToLower(local) {
 	case "postmaster", "mailer-daemon", "no-reply", "noreply", "do-not-reply", "donotreply":
