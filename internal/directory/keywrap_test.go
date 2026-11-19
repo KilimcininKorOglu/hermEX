@@ -68,6 +68,47 @@ func TestWrapWrongSecretFails(t *testing.T) {
 	}
 }
 
+// TestWrapRefusesATamperedValue changes one character of a stored value. Whoever
+// can write the database must not be able to alter a key undetected, so the
+// authenticated encryption has to refuse it and return nothing.
+func TestWrapRefusesATamperedValue(t *testing.T) {
+	d := &SQLDirectory{}
+	d.SetKeySecret([]byte("a-long-operator-secret"))
+	sealed, err := d.wrapKey(wrapDKIM, wrapTestPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(sealed)
+	i := len(wrapPrefix) + (len(body)-len(wrapPrefix))/2
+	if body[i] == 'A' {
+		body[i] = 'B'
+	} else {
+		body[i] = 'A'
+	}
+	if got, _, err := d.unwrapKey(wrapDKIM, string(body)); err == nil || got != "" {
+		t.Errorf("a tampered value unwrapped to %q (err %v), want a refusal", got, err)
+	}
+}
+
+// TestWrapUsesAFreshNonce wraps one key twice. AES-GCM loses both secrecy and
+// integrity when a nonce repeats under one key, so the two stored forms must
+// differ.
+func TestWrapUsesAFreshNonce(t *testing.T) {
+	d := &SQLDirectory{}
+	d.SetKeySecret([]byte("a-long-operator-secret"))
+	a, err := d.wrapKey(wrapDKIM, wrapTestPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := d.wrapKey(wrapDKIM, wrapTestPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a == b {
+		t.Error("two wraps of one key are identical, so the nonce repeats")
+	}
+}
+
 // TestPlaintextRowIsReadable proves adopting encryption needs no migration: a row
 // written before a secret existed still opens, and is reported as unwrapped so
 // the caller rewrites it.
