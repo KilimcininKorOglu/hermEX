@@ -201,6 +201,16 @@ func TestUIUserOOF(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("ui oof save status %d, want 200", resp.StatusCode)
 	}
+	wantStoredOOF(t, store)
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "Saved") {
+		t.Errorf("ui oof save did not report success:\n%s", body)
+	}
+}
+
+// wantStoredOOF checks the settings TestUIUserOOF submitted reached alice's store.
+func wantStoredOOF(t *testing.T, store *fakeStore) {
+	t.Helper()
 	if store.setDir != "/mb/alice" {
 		t.Errorf("SetOOFSettings maildir = %q, want /mb/alice", store.setDir)
 	}
@@ -212,9 +222,5 @@ func TestUIUserOOF(t *testing.T) {
 	// The operator has no stored zone, so the wall clock entered is UTC.
 	if want := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC).Unix(); got.Start != want || got.End != 0 {
 		t.Errorf("stored window = [%d, %d], want [%d, 0]", got.Start, got.End, want)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "Saved") {
-		t.Errorf("ui oof save did not report success:\n%s", body)
 	}
 }
