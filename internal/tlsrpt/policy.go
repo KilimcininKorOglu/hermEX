@@ -11,10 +11,12 @@
 package tlsrpt
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
 	"strings"
+	"time"
 )
 
 // version is the required first field of a TLS-RPT TXT record (RFC 8460 §3).
@@ -85,9 +87,25 @@ func validURI(uri string) bool {
 }
 
 // Resolver discovers a domain's TLS-RPT policy from DNS. LookupTXT is injectable
-// so tests can supply records without a network; nil uses net.LookupTXT.
+// so tests can supply records without a network; nil uses lookupTXTWithDeadline.
 type Resolver struct {
 	LookupTXT func(name string) ([]string, error)
+}
+
+// txtResolver and lookupTimeout make the default lookup; variables so a test can
+// substitute a nameserver that never answers and a short deadline.
+var (
+	txtResolver   = net.DefaultResolver
+	lookupTimeout = 10 * time.Second
+)
+
+// lookupTXTWithDeadline resolves name under lookupTimeout. net.LookupTXT has no
+// deadline, and the relay looks policies up on its drain tick, so a report
+// domain's nameserver that never answers would stop every outbound delivery.
+func lookupTXTWithDeadline(name string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), lookupTimeout)
+	defer cancel()
+	return txtResolver.LookupTXT(ctx, name)
 }
 
 // Lookup fetches and parses the TLS-RPT policy published at _smtp._tls.<domain>
@@ -97,7 +115,7 @@ type Resolver struct {
 func (r *Resolver) Lookup(domain string) (*Policy, error) {
 	lookup := r.LookupTXT
 	if lookup == nil {
-		lookup = net.LookupTXT
+		lookup = lookupTXTWithDeadline
 	}
 	records, err := lookup("_smtp._tls." + domain)
 	if err != nil {
