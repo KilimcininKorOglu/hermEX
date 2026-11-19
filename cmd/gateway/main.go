@@ -73,6 +73,7 @@ func main() {
 	httpLimiter := httplimit.NewLimiter()
 	httplimit.Apply("hermex-gateway", logger, httpLimiter, dir.GetHTTPRateLimitSettings)
 	go httplimit.RunMaintenance("hermex-gateway", logger, httpLimiter, dir.GetHTTPRateLimitSettings)
+	go logging.RunSpillLimit(context.Background(), "hermex-gateway", logger, dir.GetLogSpillLimitMB)
 	hs, err := serve.New(addr, h, tlsSrc, logger, logging.Gateway, httpLimiter, serve.FrontDoor())
 	if err != nil {
 		log.Fatalf("hermex-gateway: %v", err)

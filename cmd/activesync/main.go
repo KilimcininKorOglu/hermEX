@@ -133,6 +133,7 @@ func openDirectory(cfgPath string) (*config.Config, *sql.DB, *directory.SQLDirec
 	}
 	dir.SetLDAPVerifier(ldapauth.New())
 	logger, logClose := logging.Build("hermex-activesync", cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
+	go logging.RunSpillLimit(context.Background(), "hermex-activesync", logger, dir.GetLogSpillLimitMB)
 	return cfg, db, dir, logger, logClose
 }
 

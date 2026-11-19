@@ -430,6 +430,7 @@ func runServe(c *cmdContext) {
 	ldapVerifier := ldapauth.New()
 	dir.SetLDAPVerifier(ldapVerifier) // an administrator may be LDAP-mastered
 	logger, logClose := logging.Build("hermex-admin", cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
+	go logging.RunSpillLimit(context.Background(), "hermex-admin", logger, dir.GetLogSpillLimitMB)
 	srv := admin.NewServer(dir, cfg, []byte(cfg.AdminSecret))
 	// Failed-login lockout: read the stored tuning at startup and re-read it every
 	// minute, so an operator can tighten it during a credential-stuffing wave, or

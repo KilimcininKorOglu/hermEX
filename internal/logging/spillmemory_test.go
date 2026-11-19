@@ -3,6 +3,8 @@ package logging
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -88,6 +90,28 @@ func TestSpillStopsAtTheLimit(t *testing.T) {
 	s.spill(events[:1])
 	if after, _ := readSpill(path); len(after) != len(kept)+1 {
 		t.Errorf("with no limit the spill holds %d events, want %d", len(after), len(kept)+1)
+	}
+}
+
+// TestApplySpillLimitReachesTheSpillingSink applies the operator's cap through
+// the logger a daemon holds, the way RunSpillLimit does each minute. The cap
+// must land on the spilling sink behind the stderr fan-out, in bytes, and a
+// failed read must leave the cap already applied in place.
+func TestApplySpillLimitReachesTheSpillingSink(t *testing.T) {
+	ms := &MongoSink{}
+	l := New(NewMultiSink(NewStderrSink(io.Discard), ms))
+
+	ApplySpillLimit("test", l, func() (int, error) { return 3, nil })
+	if got := ms.spillLimit.Load(); got != 3<<20 {
+		t.Fatalf("cap = %d bytes, want %d (3 MiB)", got, 3<<20)
+	}
+	ApplySpillLimit("test", l, func() (int, error) { return 0, errors.New("directory down") })
+	if got := ms.spillLimit.Load(); got != 3<<20 {
+		t.Errorf("a failed read changed the cap to %d, want it kept at %d", got, 3<<20)
+	}
+	ApplySpillLimit("test", l, func() (int, error) { return 0, nil })
+	if got := ms.spillLimit.Load(); got != 0 {
+		t.Errorf("cap = %d after the setting went to 0, want 0 (no cap)", got)
 	}
 }
 

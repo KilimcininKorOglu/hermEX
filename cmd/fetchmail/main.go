@@ -54,6 +54,7 @@ func main() {
 		log.Fatalf("hermex-fetchmail: schema: %v", err)
 	}
 	logger, logClose := logging.Build("hermex-fetchmail", cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
+	go logging.RunSpillLimit(context.Background(), "hermex-fetchmail", logger, dir.GetLogSpillLimitMB)
 	objectstore.SetDefaultLogger(logger)
 	mta.SetDefaultLogger(logger) // post-delivery pass failures route to the central log
 

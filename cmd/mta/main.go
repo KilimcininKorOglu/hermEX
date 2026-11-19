@@ -150,6 +150,7 @@ func openDaemon(cfgPath string) *mtaDaemon {
 	}
 	dir.SetLDAPVerifier(ldapauth.New())
 	logger, logClose := logging.Build(daemonName, cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
+	go logging.RunSpillLimit(context.Background(), daemonName, logger, dir.GetLogSpillLimitMB)
 	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
 	mta.SetDefaultLogger(logger)         // post-delivery pass failures route to the central log
 	return &mtaDaemon{cfg: cfg, db: db, dir: dir, logger: logger, logClose: logClose}
