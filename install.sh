@@ -672,8 +672,11 @@ main() {
 	install | update | rollback | status) ;;
 	admin)
 		require_root
-		admin_cli "$@"
-		return
+		# exec hands the exit status and output to hermex-admin itself; a usage
+		# error there is not a failure of this script and must not be reported
+		# as one by the ERR trap.
+		trap - ERR EXIT
+		exec runuser -u "$SVC_USER" -- "$PREFIX/current/bin/hermex-admin" -config "$CONFIG" "$@"
 		;;
 	*) die "usage: $0 install|update|rollback|status|admin [options]" ;;
 	esac
