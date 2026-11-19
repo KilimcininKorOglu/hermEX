@@ -1,6 +1,7 @@
 package imap
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -60,6 +61,21 @@ func TestRenderEnvelopeNIL(t *testing.T) {
 		`NIL NIL NIL NIL NIL)`
 	if got != want {
 		t.Errorf("ENVELOPE = %s\nwant %s", got, want)
+	}
+}
+
+// TestNStringEscapesSenderText takes its rules from RFC 3501 section 9: inside a
+// quoted string only quoted-specials (DQUOTE and backslash) are escaped, and CR,
+// LF and NUL cannot appear at all. A header value is the sender's text, so a
+// quote, a backslash or a line break in it must not end the string or the line.
+func TestNStringEscapesSenderText(t *testing.T) {
+	if got := nstring(`a"b\c`); got != `"a\"b\\c"` {
+		t.Errorf(`nstring(a"b\c) = %s, want "a\"b\\c"`, got)
+	}
+	for _, s := range []string{"x\r\n* BAD forged", "x\x00y"} {
+		if got := nstring(s); got != fmt.Sprintf("{%d}\r\n%s", len(s), s) {
+			t.Errorf("nstring(%q) = %q, want a literal", s, got)
+		}
 	}
 }
 
