@@ -286,6 +286,15 @@ func TestParseDMARCURI(t *testing.T) {
 		{"mailto:a@example.test!k", "", 0, false},
 		{"mailto:a@example.test!-1", "", 0, false},
 		{"mailto:a@example.test!99999999999999999999", "", 0, false},
+		// The record belongs to the sender's domain and is percent-decoded, so a
+		// decoded byte that is not part of a mailbox would land in the report's
+		// To header and the envelope recipient. Each is refused.
+		{"mailto:r@example.test%0D%0ABcc:%20x@example.test", "", 0, false},
+		{"mailto:r%0A@example.test", "", 0, false},
+		{"mailto:r@example.test%00", "", 0, false},
+		{"mailto:a%20b@example.test", "", 0, false},
+		{"mailto:r@example.test%3E%2C%3Cx@example.test", "", 0, false},
+		{"mailto:r@exa%7Fmple.test", "", 0, false},
 	} {
 		got, err := parseDMARCURI(tc.uri)
 		if (err == nil) != tc.ok {

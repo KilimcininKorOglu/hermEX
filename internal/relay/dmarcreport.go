@@ -210,7 +210,19 @@ func mailtoAddress(uri string) (string, error) {
 	if local, domain, ok := splitAddress(addr); !ok || local == "" || domain == "" {
 		return "", fmt.Errorf("report URI %q names no mailbox", uri)
 	}
+	// The record belongs to another domain's owner and the address goes into the
+	// report's To header and the envelope recipient, so a decoded control byte,
+	// space or address delimiter is refused rather than written there.
+	if strings.ContainsFunc(addr, notMailboxByte) {
+		return "", fmt.Errorf("report URI %q holds a character no mailbox has", uri)
+	}
 	return addr, nil
+}
+
+// notMailboxByte reports a rune that cannot appear in a mailbox written as a bare
+// addr-spec: a control character, a space, or a delimiter of an address list.
+func notMailboxByte(r rune) bool {
+	return r <= ' ' || r == 0x7f || strings.ContainsRune(`<>,;"()\`, r)
 }
 
 // parseDMARCSize reads a "!" size limit; an empty one means no limit.
