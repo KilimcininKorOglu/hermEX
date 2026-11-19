@@ -9,8 +9,9 @@ import (
 )
 
 // releaseNumber is the only form the VERSION file may hold: a plain x.y.z, with no
-// "v" prefix and no pre-release part, since the build derives those itself.
-var releaseNumber = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+// "v" prefix and no pre-release part, since the build derives those itself. The
+// patch number is a single digit: x.y.9 is followed by x.(y+1).0.
+var releaseNumber = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.[0-9]$`)
 
 // TestVersionFileIsTheOneReleaseNumber proves the SPA manifests carry the same
 // release number as the VERSION file. `make release` writes all three; a hand edit
@@ -23,7 +24,7 @@ func TestVersionFileIsTheOneReleaseNumber(t *testing.T) {
 	}
 	want := strings.TrimSpace(string(raw))
 	if !releaseNumber.MatchString(want) {
-		t.Fatalf("VERSION holds %q, want a plain x.y.z release number", want)
+		t.Fatalf("VERSION holds %q, want a plain x.y.z release number with a single-digit patch", want)
 	}
 
 	var pkg struct {

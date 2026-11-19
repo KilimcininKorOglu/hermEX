@@ -331,12 +331,13 @@ version:
 # Writes VERSION and the webmail's package.json/package-lock.json together, since
 # a test fails the gate when they disagree, and checks them. It stops before git:
 # the changelog, the commit and the v<VERSION> tag are the release process's own
-# steps. A new number must be a plain x.y.z above the current one with no tag yet.
+# steps. A new number must be a plain x.y.z above the current one with no tag yet,
+# and its patch is a single digit: x.y.9 is followed by x.(y+1).0.
 # If a step fails after VERSION was written, `git restore VERSION
 # internal/webmail2/package.json internal/webmail2/package-lock.json` undoes it.
 release:
-	@echo "$(VERSION)" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$$' || \
-		{ echo "set VERSION=x.y.z (a plain release number, no v prefix)"; exit 2; }
+	@echo "$(VERSION)" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.[0-9]$$' || \
+		{ echo "set VERSION=x.y.z (a plain release number, no v prefix, patch 0-9)"; exit 2; }
 	@cur="$(HERMEX_VERSION)"; \
 	if [ "$$cur" = "$(VERSION)" ] || [ "$$(printf '%s\n%s\n' "$$cur" "$(VERSION)" | sort -V | tail -1)" != "$(VERSION)" ]; then \
 		echo "VERSION=$(VERSION) is not above the current $$cur"; exit 2; fi
