@@ -65,19 +65,33 @@ func TestAdminSetUserSendAsRejectsUnknown(t *testing.T) {
 	}
 }
 
-// TestAdminUserSendAsRequiresSystem proves a domain admin cannot read or write a
-// user's send-as list through the system-scoped endpoints.
-func TestAdminUserSendAsRequiresSystem(t *testing.T) {
-	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}}}
-	ts := adminServer(t, d)
+// TestAdminUserSendAsOutsideScope proves a domain admin cannot read or write the
+// send-as list of a user in another domain through the user-scoped API, and cannot
+// use the panel form, which is system-only.
+func TestAdminUserSendAsOutsideScope(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		domains: []directory.DomainInfo{{ID: 1, Name: "acme.test"}, {ID: 2, Name: "hermex.test"}},
+		knownUsers: map[string]directory.UserDetail{
+			"alice@hermex.test": {Username: "alice@hermex.test", DomainID: 2, Maildir: "/mb/alice"},
+			"bob@acme.test":     {Username: "bob@acme.test", DomainID: 1, Maildir: "/mb/bob"},
+		}}
+	store := &fakeStore{}
+	ts := adminServerStore(t, d, store)
 	session, csrf := loginCookies(t, ts)
 
+	// The grantee is in the caller's own domain, so only the target user's scope
+	// can refuse this request.
 	get := authedGET(t, ts, "/admin/users/alice@hermex.test/sendas", session)
 	get.Body.Close()
-	put := authedPUT(t, ts, "/admin/users/alice@hermex.test/sendas", session, csrf, `["x@y.test"]`)
+	put := authedPUT(t, ts, "/admin/users/alice@hermex.test/sendas", session, csrf, `["bob@acme.test"]`)
 	put.Body.Close()
 	if get.StatusCode != http.StatusForbidden || put.StatusCode != http.StatusForbidden {
-		t.Errorf("domain-admin send-as = GET %d / PUT %d, want both 403", get.StatusCode, put.StatusCode)
+		t.Errorf("out-of-scope send-as = GET %d / PUT %d, want both 403", get.StatusCode, put.StatusCode)
+	}
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/sendas", session, csrf,
+		url.Values{"sendas": {"x@y.test"}}), http.StatusForbidden, "domain-admin UI send-as")
+	if store.setSendAsDir != "" {
+		t.Errorf("a refused caller stored send-as on %q: %v", store.setSendAsDir, store.setSendAsVal)
 	}
 }
 
