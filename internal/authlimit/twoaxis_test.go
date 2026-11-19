@@ -137,6 +137,56 @@ func TestTheTwoAxesDoNotShareCounters(t *testing.T) {
 	}
 }
 
+// TestOwnSuccessDoesNotLaunderOtherAccountsFailures sprays other accounts from one
+// address and signs in to the attacker's own account between guesses. A success
+// that cleared the whole address counter let all 100 guesses through; it may only
+// forgive the failures of the account that signed in, so the address still locks at
+// its threshold.
+func TestOwnSuccessDoesNotLaunderOtherAccountsFailures(t *testing.T) {
+	l := New(3, time.Minute, time.Minute)
+	l.now = func() time.Time { return time.Unix(0, 0) }
+	const attacker = "198.51.100.7:5000"
+	admitted := 0
+	for i := range 100 {
+		if i%10 == 9 {
+			l.Succeed(attacker, "mallory@hermex.test")
+		}
+		acct := fmt.Sprintf("user%d@hermex.test", i)
+		if l.Allowed(attacker, acct) {
+			admitted++
+			l.Fail(attacker, acct)
+		}
+	}
+	if want := 3 * ipFailFactor; admitted != want {
+		t.Errorf("guesses admitted from one address = %d, want the address threshold %d", admitted, want)
+	}
+}
+
+// TestSuccessForgivesItsOwnFailuresOnTheAddress proves a user who mistyped and then
+// signed in leaves nothing on the shared address: an office behind one NAT is not
+// locked out by typos its own people corrected.
+func TestSuccessForgivesItsOwnFailuresOnTheAddress(t *testing.T) {
+	l := New(3, time.Minute, time.Minute)
+	l.now = func() time.Time { return time.Unix(0, 0) }
+	const office = "198.51.100.20:6000"
+	l.Fail(office, "alice@hermex.test")
+	l.Fail(office, "alice@hermex.test")
+	l.Succeed(office, "alice@hermex.test")
+
+	limit := 3 * ipFailFactor
+	for i := range limit - 1 {
+		l.Fail(office, fmt.Sprintf("colleague%d@hermex.test", i%5))
+	}
+	if !l.Allowed(office, "bob@hermex.test") {
+		t.Errorf("the office was locked out after %d failures plus 2 forgiven ones, want the threshold %d",
+			limit-1, limit)
+	}
+	l.Fail(office, "colleague9@hermex.test")
+	if l.Allowed(office, "bob@hermex.test") {
+		t.Errorf("the office is still admitted after %d unforgiven failures", limit)
+	}
+}
+
 // TestSucceedClearsBothAxes proves a correct password clears the attempt's own two
 // counters and nothing else, so one user's success cannot launder another's.
 func TestSucceedClearsBothAxes(t *testing.T) {

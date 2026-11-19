@@ -62,12 +62,15 @@ func accountKey(user string) string {
 const maxKeys = 100_000
 
 // attempt is one key's failure counter, once tripped its lockout deadline, and
-// its place in the recency list.
+// its place in the recency list. On the address axis byAccount splits the count by
+// the account each failure named, so a success forgives only its own account's
+// failures on the address.
 type attempt struct {
 	count       int
 	windowStart time.Time
 	lockedUntil time.Time
 	elem        *list.Element // Value is the key
+	byAccount   map[string]int
 }
 
 // Limiter tracks failed-login counts per key and locks a key out after too many
@@ -165,12 +168,13 @@ func (l *Limiter) allowedKey(key string) bool {
 // ignored.
 func (l *Limiter) Fail(addr, account string) {
 	maxFails := l.maxFails.Load()
-	l.failKey(ipKey(addr), maxFails*ipFailFactor)
-	l.failKey(accountKey(account), maxFails)
+	l.failKey(ipKey(addr), maxFails*ipFailFactor, accountKey(account))
+	l.failKey(accountKey(account), maxFails, "")
 }
 
-// failKey records one failed attempt for one axis, locking it out at maxFails.
-func (l *Limiter) failKey(key string, maxFails int64) {
+// failKey records one failed attempt for one axis, locking it out at maxFails. On
+// the address axis owner names the account the failure was for ("" when none).
+func (l *Limiter) failKey(key string, maxFails int64, owner string) {
 	if key == "" {
 		return
 	}
@@ -186,22 +190,36 @@ func (l *Limiter) failKey(key string, maxFails int64) {
 	// A fresh window, or a lockout that has since elapsed, resets the counter so the
 	// key gets a clean slate rather than staying locked forever.
 	if now.Sub(a.windowStart) >= window || (!a.lockedUntil.IsZero() && now.After(a.lockedUntil)) {
-		a.count, a.windowStart, a.lockedUntil = 0, now, time.Time{}
+		a.count, a.windowStart, a.lockedUntil, a.byAccount = 0, now, time.Time{}, nil
 	}
 	a.count++
+	if owner != "" {
+		if a.byAccount == nil {
+			a.byAccount = make(map[string]int)
+		}
+		a.byAccount[owner]++
+	}
 	if int64(a.count) >= maxFails {
 		a.lockedUntil = now.Add(lockout)
 	}
 }
 
-// Succeed clears the failure state of both axes of a successful login, so a user
-// who eventually gets their password right is not held to a stale counter, and
-// neither is the address they signed in from.
+// Succeed clears the account's own counter and removes from the address's counter
+// the failures that named this account, so a user who mistyped and then signed in
+// leaves nothing behind. It does not touch failures against other accounts: an
+// attacker signing in to its own account between guesses must not reset the
+// address axis it is spraying from.
 func (l *Limiter) Succeed(addr, account string) {
+	acct := accountKey(account)
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	for _, key := range [...]string{ipKey(addr), accountKey(account)} {
-		if a := l.attempts[key]; a != nil {
+	if a := l.attempts[acct]; a != nil {
+		l.remove(a.elem)
+	}
+	if a := l.attempts[ipKey(addr)]; a != nil && acct != "" {
+		a.count -= a.byAccount[acct]
+		delete(a.byAccount, acct)
+		if a.count <= 0 {
 			l.remove(a.elem)
 		}
 	}
