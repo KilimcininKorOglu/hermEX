@@ -20,6 +20,30 @@ func releaseOutbox(ctx context.Context, st *objectstore.Store, deliver DeliverFu
 	return stats.Released, err
 }
 
+// TestStripBccDropsEveryFormOfTheField writes the Bcc field in the forms RFC
+// 5322 allows: a lowercase name, whitespace before the colon (the obsolete
+// syntax of 4.5.3 that a parser must accept), and a value folded onto
+// continuation lines (2.2.3), which belong to the same field. None of the blind
+// addresses may reach the wire, while a field whose name only starts with
+// "Bcc" and the body stay as they are.
+func TestStripBccDropsEveryFormOfTheField(t *testing.T) {
+	raw := "From: a@example.com\r\n" +
+		"bcc: one@example.com,\r\n two@example.com,\r\n\tthree@example.com\r\n" +
+		"BCC : four@example.com\r\n" +
+		"Bcc-Note: kept\r\n" +
+		"Subject: s\r\n" +
+		"\r\n" +
+		"body names nobody\r\n"
+	got := string(stripBcc([]byte(raw)))
+	for _, leak := range []string{"one@", "two@", "three@", "four@"} {
+		wantNotContains(t, got, leak, "the delivered copy leaks a blind address")
+	}
+	want := "From: a@example.com\r\nBcc-Note: kept\r\nSubject: s\r\n\r\nbody names nobody\r\n"
+	if got != want {
+		t.Errorf("stripBcc =\n%q\nwant\n%q", got, want)
+	}
+}
+
 // openStore provisions a fresh, fully seeded mailbox (Outbox and Sent present).
 func openStore(t *testing.T) *objectstore.Store {
 	t.Helper()
