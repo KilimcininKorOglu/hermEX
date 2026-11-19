@@ -28,6 +28,17 @@ func TestSaveLogRetention(t *testing.T) {
 	}
 }
 
+// TestSaveLogRetentionNeedsASystemAdmin proves a domain admin cannot shorten the
+// retention of the one log every domain's activity is recorded in.
+func TestSaveLogRetentionNeedsASystemAdmin(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 9, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/log-retention", session, csrf, url.Values{"log_retention_days": {"1"}}),
+		http.StatusForbidden, "domain-admin retention save")
+	wantFalse(t, d.logRetentionFound, "a domain admin stored a retention window")
+}
+
 // TestSaveLogRetentionRefusesWhatIsNotADayCount sends a typo and a negative count.
 // Both were read as 0, keep forever, and silently turned pruning off; now each is
 // refused and nothing is stored.
