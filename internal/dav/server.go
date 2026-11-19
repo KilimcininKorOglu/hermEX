@@ -7,6 +7,7 @@
 package dav
 
 import (
+	"errors"
 	"net/http"
 	"path"
 	"strings"
@@ -66,8 +67,13 @@ func (s *Server) SetSpool(spool *relay.Spool) { s.spool = spool }
 // library internals) never reach a DAV client. serve.New's logMiddleware already
 // emits a per-request http.request event carrying method, path, status and
 // RemoteAddr, so this records the failing error text alone. A 5xx logs at error
-// level, a 4xx (client fault) at warn.
+// level, a 4xx (client fault) at warn. A body over its cap answers 413 (RFC 9110
+// 15.5.14) whatever status the caller passed, so a client is told to send less
+// rather than that its content is malformed.
 func (s *Server) davError(w http.ResponseWriter, err error, status int) {
+	if errors.Is(err, serve.ErrBodyTooLarge) {
+		status = http.StatusRequestEntityTooLarge
+	}
 	level := logging.LevelError
 	if status < http.StatusInternalServerError {
 		level = logging.LevelWarn
