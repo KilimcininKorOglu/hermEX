@@ -142,7 +142,11 @@ func TestNearestPaletteSnaps(t *testing.T) {
 	if got := NearestPalette("not a colour"); got != 0 {
 		t.Errorf("an unparseable colour gave %d, want 0", got)
 	}
-	if got := HexForPalette(99); got != PaletteHex[0] {
-		t.Errorf("an out-of-range index gave %s", got)
+	// 99 is past the palette; -1 is what Decode stores for an unparseable color
+	// attribute a client wrote, and must not index before the slice.
+	for _, idx := range []int{99, len(PaletteHex), -1} {
+		if got := HexForPalette(idx); got != PaletteHex[0] {
+			t.Errorf("out-of-range index %d gave %s", idx, got)
+		}
 	}
 }
