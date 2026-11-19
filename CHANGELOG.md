@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-11-19
+
+### Added
+
+- The message submission port (RFC 6409, `submission_addr`, `:587` on a new bare-metal install): STARTTLS, and MAIL is refused with 530 until AUTH succeeds. `install.sh` opens it in the firewall.
+
+### Security
+
+- Builds use Go 1.26.11, golang.org/x/net v0.63.0 and klauspost/compress v1.20.4, which close 17 vulnerabilities reachable from the 0.3.0 binaries (net/http, crypto/x509, x/net, compress).
+- Webmail uses DOMPurify 3.4.18, which closes five DOM XSS advisories in the sanitizer that every mail-derived HTML sink goes through; the lint and test tools are updated past their advisories.
+
 ## [0.3.0] - 2026-11-19
 
 ### Added
