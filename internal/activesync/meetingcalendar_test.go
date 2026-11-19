@@ -41,7 +41,10 @@ func TestMeetingResponseFromTheCalendar(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if cal, _ := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar)); len(cal) != 0 {
+	// A failed read would return no items and pass as an emptied calendar.
+	cal, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
+	mustNoErr(t, "list the calendar", err)
+	if len(cal) != 0 {
 		t.Errorf("calendar holds %d items after the decline, want 0", len(cal))
 	}
 	got := organizerInbox(t, organizer)
