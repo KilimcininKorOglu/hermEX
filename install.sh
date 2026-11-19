@@ -2,7 +2,7 @@
 # hermEX bare-metal installer and updater.
 #
 #   install.sh install --hostname mail.example.com [--version X.Y.Z | --from FILE]
-#              [--domain example.com] [--acme-email you@example.com --agree-tos]
+#              [--domain example.com] [--acme-email you@example.com --agree-tos [--mtasts]]
 #   install.sh update  [--version X.Y.Z | --from FILE]
 #   install.sh rollback
 #   install.sh status
@@ -13,7 +13,7 @@
 #          installs and starts the release. It then asks for the first mail
 #          domain (or takes --domain), creates its postmaster administrator,
 #          DKIM key and antivirus setting, writes the DNS records to publish to
-#          /root/hermex-dns-<domain>.txt, and offers Let's Encrypt certificates.
+#          /root/hermex-dns-<domain>.txt, and offers Let's Encrypt certificates and an MTA-STS policy in testing mode.
 # update   backs up the directory database, stops every daemon, switches to the
 #          new release, applies its schema migrations and starts it again.
 # rollback switches back to the release before the last update and restores the
@@ -64,7 +64,7 @@ readonly DAEMONS=(
 )
 
 OS_FAMILY="" OS_ID="" OS_CODENAME="" ARCH="" WORK=""
-ARG_HOSTNAME="" ARG_VERSION="" ARG_FROM="" ARG_DOMAIN="" ARG_ACME_EMAIL="" ARG_AGREE_TOS=""
+ARG_HOSTNAME="" ARG_VERSION="" ARG_FROM="" ARG_DOMAIN="" ARG_ACME_EMAIL="" ARG_AGREE_TOS="" ARG_MTASTS=""
 
 log() { printf '==> %s\n' "$*"; }
 die() {
@@ -122,6 +122,7 @@ parse_args() {
 		--domain) ARG_DOMAIN="${2:?--domain needs a value}" && shift ;;
 		--acme-email) ARG_ACME_EMAIL="${2:?--acme-email needs a value}" && shift ;;
 		--agree-tos) ARG_AGREE_TOS="yes" ;;
+		--mtasts) ARG_MTASTS="yes" ;;
 		*) die "unknown option: $1" ;;
 		esac
 		shift
@@ -624,40 +625,74 @@ setup_mail() {
 	admin_cli grant-admin "$admin" system >/dev/null
 	admin_cli set-av-scan "$domain" on >/dev/null
 	admin_cli generate-dkim "$domain" >/dev/null
-	records="/root/hermex-dns-${domain}.txt"
+	log "created ${domain} and ${admin} (system administrator)"
+	printf '\n%s password (shown once, stored nowhere): %s\n\n' "$admin" "$password"
+	if setup_acme "$host" "$admin"; then
+		setup_mtasts "$host" "$domain"
+		# The gateway picks its certificate source and names at startup.
+		systemctl restart hermex-gateway.service
+		log "the gateway obtains its Let's Encrypt certificates now"
+	fi
+	write_records "$domain"
+}
+
+# write_records DOMAIN: saves the DNS records the domain needs to /root and
+# prints them. It runs after the ACME and MTA-STS choices, since publishing
+# MTA-STS adds its records to the list.
+write_records() {
+	local domain="$1" records="/root/hermex-dns-${1}.txt"
 	{
 		echo "# DNS records for ${domain}: type, name, value (tab separated)."
 		echo "# After the DKIM record is published, start signing with:"
 		echo "#   $0 admin enable-dkim ${domain}"
 		admin_cli dns-records "$domain"
 	} | write_file "$records" 0600 root:root
-	log "created ${domain} and ${admin} (system administrator)"
-	printf '\n%s password (shown once, stored nowhere): %s\n\n' "$admin" "$password"
 	log "DNS records to publish, also saved to ${records}:"
 	column -t -s $'\t' "$records" 2>/dev/null || cat "$records"
-	setup_acme "$host" "$admin"
+}
+
+# resolves_here NAME: whether NAME's IPv4 address is one of this server's.
+resolves_here() {
+	local addr
+	addr="$(getent ahostsv4 "$1" | awk 'NR==1{print $1}')"
+	[[ -n "$addr" ]] && ip -4 -o addr show | grep -qF " ${addr}/"
 }
 
 # setup_acme HOST CONTACT: switches the front door to Let's Encrypt when the
 # operator accepts the CA's terms and HOST already resolves to this server, since
-# the CA validates by connecting to it.
+# the CA validates by connecting to it. It returns 1 when ACME stays off; the
+# caller restarts the gateway.
 setup_acme() {
-	local host="$1" email agree resolved
+	local host="$1" email agree
 	email="${ARG_ACME_EMAIL:-$(ask "Let's Encrypt contact email (empty to keep the self-signed certificate)" "$2")}"
-	[[ -n "$email" ]] || return 0
+	[[ -n "$email" ]] || return 1
 	agree="${ARG_AGREE_TOS:-$(ask "Accept the Let's Encrypt terms (https://letsencrypt.org/repository/)? yes/no" "no")}"
 	if [[ "$agree" != "yes" ]]; then
 		log "ACME not enabled; the self-signed certificate stays"
-		return 0
+		return 1
 	fi
-	resolved="$(getent ahostsv4 "$host" | awk 'NR==1{print $1}')"
-	if [[ -z "$resolved" ]] || ! ip -4 -o addr show | grep -qF " ${resolved}/"; then
-		log "ACME not enabled: ${host} resolves to '${resolved:-nothing}', not to this server; publish its A record, then run: $0 admin set-tls-acme ${email} --agree-tos && systemctl restart hermex-gateway"
-		return 0
+	if ! resolves_here "$host"; then
+		log "ACME not enabled: ${host} does not resolve to this server; publish its A record, then run: $0 admin set-tls-acme ${email} --agree-tos && systemctl restart hermex-gateway"
+		return 1
 	fi
 	admin_cli set-tls-acme "$email" --agree-tos >/dev/null
-	systemctl restart hermex-gateway.service
-	log "ACME enabled; the gateway obtains the certificate for ${host} now"
+}
+
+# setup_mtasts HOST DOMAIN: publishes the MTA-STS policy in testing mode (RFC
+# 8461: senders report TLS failures but still deliver) when the operator agrees.
+# The policy is served from mta-sts.DOMAIN over HTTPS, so that name must already
+# point at this server for the gateway to get its certificate; otherwise the
+# steps to take later are printed.
+setup_mtasts() {
+	local host="$1" domain="$2" answer
+	answer="${ARG_MTASTS:-$(ask "Publish MTA-STS in testing mode for ${domain}? yes/no" "no")}"
+	[[ "$answer" == "yes" ]] || return 0
+	if ! resolves_here "mta-sts.${domain}"; then
+		log "MTA-STS not enabled: publish mta-sts.${domain} CNAME ${host}, then run: $0 admin set-mtasts testing && systemctl restart hermex-gateway && $0 admin dns-records ${domain}"
+		return 0
+	fi
+	admin_cli set-mtasts testing >/dev/null
+	log "MTA-STS published in testing mode"
 }
 
 print_next_steps() {
