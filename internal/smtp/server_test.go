@@ -631,6 +631,38 @@ func TestServerMTPriority(t *testing.T) {
 	expect(t, r, 501)
 }
 
+// TestServerBoundsRecipientsPerTransaction sends one recipient more than the
+// per-message limit. RFC 5321 4.5.3.1.8 requires at least 100 and 4.5.3.1.10
+// answers the excess with 452, which tells the client to send the remaining
+// recipients in a later transaction; 1000 is the Postfix smtpd_recipient_limit
+// default. The excess recipient never reaches the session, the accepted ones
+// still deliver, and a new transaction starts its count from zero.
+func TestServerBoundsRecipientsPerTransaction(t *testing.T) {
+	sess := &fakeSession{}
+	r, conn := dialServer(t, sess)
+	expect(t, r, 220)
+	send(t, conn, "EHLO client.test\r\nMAIL FROM:<alice@test>\r\n")
+	expect(t, r, 250)
+	expect(t, r, 250)
+	for i := range maxRecipients {
+		send(t, conn, fmt.Sprintf("RCPT TO:<r%d@test>\r\n", i))
+		expect(t, r, 250)
+	}
+	send(t, conn, "RCPT TO:<onemore@test>\r\n")
+	code, msg, _ := r.ReadResponse(0)
+	if code != 452 || !strings.HasPrefix(msg, "4.5.3") {
+		t.Fatalf("recipient %d answered %d %q, want 452 4.5.3", maxRecipients+1, code, msg)
+	}
+	wantEq(t, len(sess.rcpts), maxRecipients, "recipients the session accepted")
+	send(t, conn, "DATA\r\n")
+	expect(t, r, 354)
+	send(t, conn, "Subject: hi\r\n\r\nbody\r\n.\r\n")
+	expect(t, r, 250)
+	send(t, conn, "MAIL FROM:<alice@test>\r\nRCPT TO:<again@test>\r\n")
+	expect(t, r, 250)
+	expect(t, r, 250)
+}
+
 func TestServerSequencingAndSyntax(t *testing.T) {
 	sess := &fakeSession{}
 	r, conn := dialServer(t, sess)

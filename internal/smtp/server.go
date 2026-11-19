@@ -451,6 +451,10 @@ func (c *smtpConn) cmdRCPT(arg string) bool {
 		c.reply(501, "syntax: RCPT TO:<address>")
 		return true
 	}
+	if c.rcptCount >= maxRecipients {
+		c.reply(452, "4.5.3 too many recipients")
+		return true
+	}
 	// RFC 6531 §3.5: SMTPUTF8 is negotiated on MAIL, so a non-ASCII recipient
 	// belongs to a transaction that asked for it. 553 is the recipient-side code
 	// (550 is the sender's).
@@ -838,6 +842,13 @@ func (s *Server) greetEHLO(w *ew, arg string, isTLS, authAvailable bool) {
 	}
 	w.flush()
 }
+
+// maxRecipients bounds the recipients one transaction may name. Each accepted
+// recipient becomes a delivery target, so without a bound one message sent by an
+// unauthenticated peer fans out to every mailbox it can name. RFC 5321 4.5.3.1.8
+// requires at least 100, and 4.5.3.1.10 answers the excess with 452 so the client
+// sends the rest in a later transaction; 1000 is the Postfix default.
+const maxRecipients = 1000
 
 // defaultMaxCommandLine is the RFC 5321 4.5.3.1.4 limit on a command line including
 // the trailing CRLF, and the fallback when no operator limit has been set. Commands
