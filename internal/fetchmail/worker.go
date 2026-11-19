@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/lifecycle"
 )
 
 // Store is the configuration and dedup state the worker reads: the active poll entries and,
@@ -38,7 +39,14 @@ func Poll(ctx context.Context, s Store, deliver Deliverer, now time.Time) (int, 
 		if ctx.Err() != nil {
 			return total, errs
 		}
-		n, err := pollConfig(s, deliver, cfg, now)
+		// A panic while polling one account is that account's failure: the message
+		// that raised it stays on the source, so a crash would repeat every start.
+		var n int
+		err := lifecycle.Contain(func() error {
+			var perr error
+			n, perr = pollConfig(s, deliver, cfg, now)
+			return perr
+		})
 		total += n
 		if err != nil {
 			errs = append(errs, fmt.Errorf("fetchmail %s@%s: %w", cfg.SrcUser, cfg.SrcServer, err))
