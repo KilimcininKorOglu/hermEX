@@ -201,7 +201,7 @@ func RemoveCanceled(st *objectstore.Store, messageID int64, ics []byte) error {
 		return ErrNotCanceled
 	}
 	if item.body == nil {
-		return st.DeleteObject(item.appt)
+		return st.SoftDeleteObject(item.appt)
 	}
 	trimmed, ok := oxcical.CancelOccurrence(item.body, item.instance)
 	if !ok {

@@ -476,7 +476,7 @@ func removeAppointment(st *objectstore.Store, req *oxcmail.Message, tags Tags) e
 	if done, err := cancelOccurrence(st, existing, req); done {
 		return err
 	}
-	return st.DeleteObject(existing)
+	return st.SoftDeleteObject(existing)
 }
 
 // cancelOccurrence excludes ONE instance from a stored series instead of deleting

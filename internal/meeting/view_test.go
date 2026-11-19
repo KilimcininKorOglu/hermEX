@@ -136,6 +136,10 @@ func TestCanceledMeetingIsRemoved(t *testing.T) {
 	if objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar)); err != nil || len(objs) != 0 {
 		t.Errorf("calendar holds %d items (err %v), want the canceled meeting gone", len(objs), err)
 	}
+	// Removing is the user's own delete, so it stays recoverable like any other.
+	if gone, err := st.ListSoftDeleted(int64(mapi.PrivateFIDCalendar)); err != nil || len(gone) != 1 {
+		t.Errorf("Recoverable Items holds %d calendar items (err %v), want the removed meeting", len(gone), err)
+	}
 	if v := describe(t, st, id); v.Removable {
 		t.Error("the cancellation still offers a meeting that is gone")
 	}

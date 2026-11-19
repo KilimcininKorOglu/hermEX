@@ -299,4 +299,8 @@ func TestDeclinedSeriesStillRemovesTheAppointment(t *testing.T) {
 	if n := folderCount(t, st, int64(mapi.PrivateFIDCalendar)); n != 0 {
 		t.Errorf("Calendar holds %d items, want the declined series removed", n)
 	}
+	// Declining is the attendee's own delete, so the series stays recoverable.
+	if gone, err := st.ListSoftDeleted(int64(mapi.PrivateFIDCalendar)); err != nil || len(gone) != 1 {
+		t.Errorf("Recoverable Items holds %d calendar items (err %v), want the declined series", len(gone), err)
+	}
 }
