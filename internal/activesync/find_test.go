@@ -35,6 +35,7 @@ func findResponse(t *testing.T, root *wbxml.Node) *wbxml.Node {
 // Properties preview, under a Response naming the Mailbox store.
 func TestFindMailbox(t *testing.T) {
 	ts, dir := seededServer(t)
+	seedInbox(t, dir, 2) // "Message 1/2": must not match, so Total proves the filter
 	seedSearchMessage(t, dir, "Quarterly revenue report", "the body text")
 
 	_, root := postCommand(t, ts, "Find", findReq("quarterly", ""))
