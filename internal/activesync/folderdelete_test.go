@@ -53,24 +53,24 @@ func TestFolderDelete(t *testing.T) {
 	}
 }
 
-// TestFolderDeleteDistinguished proves a built-in folder (the Inbox) is protected
-// and reports Status 3 without being deleted.
+// TestFolderDeleteDistinguished proves every built-in folder a device sees is
+// protected ([MS-ASCMD] 2.2.3.177.4, Status 3 "the specified folder is a special
+// system folder") and survives the refused FolderDelete, not only the Inbox.
 func TestFolderDeleteDistinguished(t *testing.T) {
 	ts, dir := seededServer(t)
-	key := primeHierarchy(t, ts)
-
-	_, root := postCommand(t, ts, "FolderDelete", folderDeleteReq(key, inboxID()))
-	if s := root.ChildText(wbxml.FHStatus); s != "3" {
-		t.Errorf("delete-Inbox Status = %q, want 3 (special folder)", s)
+	builtins := []int64{
+		mapi.PrivateFIDInbox, mapi.PrivateFIDDraft, mapi.PrivateFIDDeletedItems,
+		mapi.PrivateFIDSentItems, mapi.PrivateFIDOutbox, mapi.PrivateFIDCalendar,
+		mapi.PrivateFIDContacts, mapi.PrivateFIDTasks, mapi.PrivateFIDNotes,
+		mapi.PrivateFIDJournal, mapi.PrivateFIDJunk,
 	}
-
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	if ok, _ := st.FolderExists(int64(mapi.PrivateFIDInbox)); !ok {
-		t.Error("Inbox must survive a rejected FolderDelete")
+	for _, fid := range builtins {
+		id := strconv.FormatInt(fid, 10)
+		_, root := postCommand(t, ts, "FolderDelete", folderDeleteReq(primeHierarchy(t, ts), id))
+		if s := root.ChildText(wbxml.FHStatus); s != "3" {
+			t.Errorf("FolderDelete of built-in %s: Status = %q, want 3 (special folder)", id, s)
+		}
+		wantFolderPresent(t, dir, id)
 	}
 }
 
