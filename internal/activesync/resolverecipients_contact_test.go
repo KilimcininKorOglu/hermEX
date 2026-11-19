@@ -162,6 +162,22 @@ func TestResolveRecipientsKeepsContactsPrivate(t *testing.T) {
 			t.Errorf("%q: resolved to %q, want no Recipient", q, rec.ChildText(wbxml.RREmailAddress))
 		}
 	}
+	// The control: alice's own live contact resolves, so the refusals above come
+	// from scoping, not from a search that finds nothing.
+	wantResolvesTo(t, ts, "Kept", "kept@partner.example")
+}
+
+// wantResolvesTo checks a ResolveRecipients query resolves to the address.
+func wantResolvesTo(t *testing.T, ts *httptest.Server, query, addr string) {
+	t.Helper()
+	_, resp := postCommand(t, ts, "ResolveRecipients", resolveReq(query))
+	r := responseFor(resp, query)
+	if r == nil || r.Child(wbxml.RRRecipient) == nil {
+		t.Fatalf("%q resolved to nothing, want %s", query, addr)
+	}
+	if got := r.Child(wbxml.RRRecipient).ChildText(wbxml.RREmailAddress); got != addr {
+		t.Errorf("%q resolved to %q, want %s", query, got, addr)
+	}
 }
 
 // TestResolveRecipientsReportsOneAddressOnce keeps a person who is both a
@@ -184,6 +200,6 @@ func TestResolveRecipientsReportsOneAddressOnce(t *testing.T) {
 		t.Fatal("the query resolved to no Recipient")
 	}
 	if got := rec.ChildText(wbxml.RRType); got != "1" {
-		t.Errorf("Recipient Type = %q, want 1: the address book answers first", got)
+		t.Errorf("Recipient Type = %q, want 1: the directory (GAL) entry is the one kept", got)
 	}
 }
