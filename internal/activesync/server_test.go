@@ -339,6 +339,9 @@ func TestAutodiscoverAnswersOnlyForTheCaller(t *testing.T) {
 	if resp.StatusCode == http.StatusOK && strings.Contains(out, "ceo@hermex.test") {
 		t.Errorf("autodiscover answered for another account:\n%s", out)
 	}
+	if resp.StatusCode == http.StatusOK && !strings.Contains(out, testUser) {
+		t.Errorf("autodiscover answered without naming the caller:\n%s", out)
+	}
 }
 
 // TestAutodiscoverUnauthenticated confirms Autodiscover requires credentials.
