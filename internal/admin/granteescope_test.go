@@ -66,8 +66,10 @@ func TestDomainAdminGranteeScope(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			ts, session, csrf := granteeScopeServer(t)
-			if s := statusOf(authedReq(t, ts, "PUT", c.path, session, csrf, c.inScope)); s == http.StatusForbidden {
-				t.Errorf("an own-domain %s grantee was refused (403)", c.name)
+			// Accepted, not merely some other refusal: a 400 or 500 here would make
+			// the 403 below prove nothing about the scope check.
+			if s := statusOf(authedReq(t, ts, "PUT", c.path, session, csrf, c.inScope)); s < 200 || s > 299 {
+				t.Errorf("an own-domain %s grantee = %d, want accepted", c.name, s)
 			}
 			if s := statusOf(authedReq(t, ts, "PUT", c.path, session, csrf, c.foreign)); s != http.StatusForbidden {
 				t.Errorf("a foreign-domain %s grantee = %d, want 403", c.name, s)
@@ -96,8 +98,8 @@ func TestSystemAdminGranteeUnrestricted(t *testing.T) {
 		"/admin/users/in@acme.test/sendas",
 		"/admin/users/in@acme.test/storeowners",
 	} {
-		if s := statusOf(authedReq(t, ts, "PUT", path, session, csrf, `["ceo@other.test"]`)); s == http.StatusForbidden {
-			t.Errorf("system admin refused a cross-domain grantee on %s", path)
+		if s := statusOf(authedReq(t, ts, "PUT", path, session, csrf, `["ceo@other.test"]`)); s < 200 || s > 299 {
+			t.Errorf("system admin cross-domain grantee on %s = %d, want accepted", path, s)
 		}
 	}
 }
