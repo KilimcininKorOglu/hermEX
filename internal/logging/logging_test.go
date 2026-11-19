@@ -102,6 +102,23 @@ func TestStderrSinkRedactsOutput(t *testing.T) {
 	}
 }
 
+// TestStderrSinkKeepsHostileValuesOnOneLine logs a login name and a field value
+// carrying CR and LF followed by a forged event. The login name comes from the
+// client, so an unescaped line break would let it write a log line of its own
+// choosing (CWE-117); the sink must emit exactly one line.
+func TestStderrSinkKeepsHostileValuesOnOneLine(t *testing.T) {
+	var buf bytes.Buffer
+	log := logging.New(logging.NewStderrSink(&buf))
+	forged := "x\r\n2026-01-01T00:00:00Z info  imap auth.ok user=admin"
+	log.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.IMAP, Name: "auth.fail",
+		User: forged, Fields: logging.Fields{"mailbox": forged}})
+
+	out := buf.String()
+	if n := strings.Count(out, "\n"); n != 1 || strings.Contains(out, "\r") {
+		t.Errorf("hostile values broke the line (%d newlines): %q", n, out)
+	}
+}
+
 // TestLevelString pins the stored level names.
 func TestLevelString(t *testing.T) {
 	cases := map[logging.Level]string{

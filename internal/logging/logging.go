@@ -17,6 +17,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -196,25 +197,35 @@ func NewStderrSink(w io.Writer) *StderrSink {
 	return &StderrSink{w: w}
 }
 
+// lineSafe returns s unchanged unless it holds a control character, in which case
+// it returns s Go-quoted. Values such as a login name come from the client, and a
+// raw CR or LF would let them start a log line of their own (CWE-117).
+func lineSafe(s string) string {
+	if strings.IndexFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f }) < 0 {
+		return s
+	}
+	return strconv.Quote(s)
+}
+
 // Write renders e as a single line: time, level, subsystem, name, then the
 // non-empty columns and sorted fields.
 func (s *StderrSink) Write(e Event) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s %-5s %s %s", e.Time.Format(time.RFC3339), e.Level, e.Subsystem, e.Name)
 	if e.User != "" {
-		fmt.Fprintf(&b, " user=%s", e.User)
+		fmt.Fprintf(&b, " user=%s", lineSafe(e.User))
 	}
 	if e.RemoteAddr != "" {
-		fmt.Fprintf(&b, " remote=%s", e.RemoteAddr)
+		fmt.Fprintf(&b, " remote=%s", lineSafe(e.RemoteAddr))
 	}
 	if e.RequestID != "" {
-		fmt.Fprintf(&b, " req=%s", e.RequestID)
+		fmt.Fprintf(&b, " req=%s", lineSafe(e.RequestID))
 	}
 	if e.DurationMs != 0 {
 		fmt.Fprintf(&b, " dur=%dms", e.DurationMs)
 	}
 	for _, k := range sortedKeys(e.Fields) {
-		fmt.Fprintf(&b, " %s=%v", k, e.Fields[k])
+		fmt.Fprintf(&b, " %s=%s", lineSafe(k), lineSafe(fmt.Sprint(e.Fields[k])))
 	}
 	if e.Err != "" {
 		fmt.Fprintf(&b, " err=%q", e.Err)
