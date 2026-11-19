@@ -230,6 +230,33 @@ func TestOrdinaryMailIsNotAReport(t *testing.T) {
 	}
 }
 
+// TestAnArchiveIsSearchedOnlyAsFarAsTheEntryCap builds the zip a reporter does
+// not send: the report's XML behind as many filler entries as the cap allows. An
+// archive of thousands of empty entries must cost a fixed amount to examine, so
+// an XML entry inside the cap is read and one past it is never reached.
+func TestAnArchiveIsSearchedOnlyAsFarAsTheEntryCap(t *testing.T) {
+	archive := func(fillers int) []byte {
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		for i := range fillers {
+			_, err := zw.Create(fmt.Sprintf("filler-%d.txt", i))
+			mustNoErr(t, "create a filler entry", err)
+		}
+		w, err := zw.Create("report.xml")
+		mustNoErr(t, "create the report entry", err)
+		_, err = w.Write([]byte("<feedback/>"))
+		mustNoErr(t, "write the report entry", err)
+		mustNoErr(t, "close the archive", zw.Close())
+		return buf.Bytes()
+	}
+	if got, err := unzipXML(archive(maxZipEntries - 1)); err != nil || string(got) != "<feedback/>" {
+		t.Errorf("XML as the last entry inside the cap = %q, %v, want it read", got, err)
+	}
+	if _, err := unzipXML(archive(maxZipEntries)); !errors.Is(err, ErrNotReport) {
+		t.Errorf("XML past the cap: err = %v, want ErrNotReport", err)
+	}
+}
+
 // TestAnExpandingArchiveIsRefused is the decompression bound. A few kilobytes of
 // gzip expand to the limit plus one byte; reading it whole would let one message
 // take as much memory as the sender likes.
