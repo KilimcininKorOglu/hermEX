@@ -171,25 +171,36 @@ const dmarcReportSender = "noreply"
 // parseDMARCURI reads a rua= entry (RFC 7489 §6.2): a URI with an optional "!"
 // size limit in bytes, which a k, m, g or t unit scales by powers of 1024.
 func parseDMARCURI(uri string) (dmarcTarget, error) {
-	const scheme = "mailto:"
 	u, limit, _ := strings.Cut(strings.TrimSpace(uri), "!")
-	if len(u) < len(scheme) || !strings.EqualFold(u[:len(scheme)], scheme) {
-		return dmarcTarget{}, fmt.Errorf("dmarc: unsupported report URI %q", uri)
-	}
-	addr, _, _ := strings.Cut(u[len(scheme):], "?")
-	addr, err := url.PathUnescape(addr)
+	addr, err := mailtoAddress(u)
 	if err != nil {
-		return dmarcTarget{}, fmt.Errorf("dmarc: report URI %q: %w", uri, err)
-	}
-	addr = strings.TrimSpace(addr)
-	if local, domain, ok := strings.Cut(addr, "@"); !ok || local == "" || domain == "" {
-		return dmarcTarget{}, fmt.Errorf("dmarc: report URI %q names no mailbox", uri)
+		return dmarcTarget{}, fmt.Errorf("dmarc: %w", err)
 	}
 	n, err := parseDMARCSize(limit)
 	if err != nil {
 		return dmarcTarget{}, fmt.Errorf("dmarc: report URI %q: %w", uri, err)
 	}
 	return dmarcTarget{addr: addr, limit: n}, nil
+}
+
+// mailtoAddress returns the mailbox a mailto: report URI names (RFC 6068): the
+// scheme in any case, the address before any "?" header fields, percent-decoded,
+// and holding a local part and a domain.
+func mailtoAddress(uri string) (string, error) {
+	const scheme = "mailto:"
+	if len(uri) < len(scheme) || !strings.EqualFold(uri[:len(scheme)], scheme) {
+		return "", fmt.Errorf("unsupported report URI %q", uri)
+	}
+	addr, _, _ := strings.Cut(uri[len(scheme):], "?")
+	addr, err := url.PathUnescape(addr)
+	if err != nil {
+		return "", fmt.Errorf("report URI %q: %w", uri, err)
+	}
+	addr = strings.TrimSpace(addr)
+	if local, domain, ok := strings.Cut(addr, "@"); !ok || local == "" || domain == "" {
+		return "", fmt.Errorf("report URI %q names no mailbox", uri)
+	}
+	return addr, nil
 }
 
 // parseDMARCSize reads a "!" size limit; an empty one means no limit.

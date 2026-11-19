@@ -129,6 +129,29 @@ func TestTLSReportMailtoDelivery(t *testing.T) {
 	}
 }
 
+// TestTLSReportMailtoIsPercentDecoded names the mailbox in the encoded form RFC
+// 6068 2 requires for a reserved character, and a target with no domain. The
+// report goes to the decoded mailbox, as the DMARC path already does, and the
+// target that names no mailbox is not queued at all.
+func TestTLSReportMailtoIsPercentDecoded(t *testing.T) {
+	sp := openSpool(t)
+	seedCounters(t, sp, "example.test")
+	w := &Worker{
+		Spool:        sp,
+		TLSResolver:  fixedResolver("v=TLSRPTv1; rua=mailto:tls%2Breports@example.test,mailto:nodomain"),
+		ReportOrg:    "hermex.test",
+		ReportDomain: "hermex.test",
+	}
+	if err := w.sendTLSReports(context.Background(), reportDay); err != nil {
+		t.Fatalf("sendTLSReports: %v", err)
+	}
+	total, distinct := queuedRecipients(t, sp)
+	wantEq(t, total, 1, "reports queued")
+	if !distinct["tls+reports@example.test"] {
+		t.Errorf("recipients = %v, want the decoded tls+reports@example.test", distinct)
+	}
+}
+
 // manyRUAs is a rua= value naming n distinct mailboxes at example.test, each
 // listed twice, the shape of the reflection attack measured in "You've Got
 // Report" (USENIX Security 2023): a receiver that sends to every listed URI

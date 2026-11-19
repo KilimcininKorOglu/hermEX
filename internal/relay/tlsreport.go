@@ -144,13 +144,9 @@ func (w *Worker) deliverReportHTTPS(uri string, jsonBytes []byte) error {
 // deliverReportMail queues an RFC 8460 report email to a mailto rua target through
 // the relay spool, so it goes out the ordinary external delivery path.
 func (w *Worker) deliverReportMail(uri, policyDomain string, report *tlsrpt.Report, jsonBytes []byte) error {
-	addr := strings.TrimPrefix(uri, "mailto:")
-	if i := strings.IndexByte(addr, '?'); i >= 0 {
-		addr = addr[:i] // drop any mailto query parameters
-	}
-	addr = strings.TrimSpace(addr)
-	if addr == "" {
-		return fmt.Errorf("tlsrpt: empty mailto target %q", uri)
+	addr, err := mailtoAddress(uri)
+	if err != nil {
+		return fmt.Errorf("tlsrpt: %w", err)
 	}
 	gz, err := gzipBytes(jsonBytes)
 	if err != nil {
