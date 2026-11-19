@@ -36,3 +36,17 @@ func TestUIDomainSenderNameSave(t *testing.T) {
 		t.Errorf("save response = %s, want a success acknowledgement", body)
 	}
 }
+
+// TestUIDomainSenderNameNeedsASystemAdmin proves the panel form that rewrites every
+// outgoing display name of a domain is refused to a domain admin.
+func TestUIDomainSenderNameNeedsASystemAdmin(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		domainDetail: directory.DomainDetail{ID: 1, Name: "acme.test"}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/domains/1/sendername", session, csrf,
+		url.Values{"sender_name_external": {"CEO"}}), http.StatusForbidden, "domain-admin sendername")
+	if d.senderInt != "" || d.senderExt != "" {
+		t.Errorf("a domain admin stored templates (%q, %q)", d.senderInt, d.senderExt)
+	}
+}
