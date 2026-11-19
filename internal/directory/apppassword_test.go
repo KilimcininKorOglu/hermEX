@@ -111,6 +111,26 @@ func TestEnrollingClosesTheAccountPasswordOnTheProtocols(t *testing.T) {
 	}
 }
 
+// TestASuspendedAccountsCredentialStopsWorking suspends an account that holds an
+// app password. Suspending is how an operator ends a compromised account, so
+// every credential the account minted must stop signing in with it.
+func TestASuspendedAccountsCredentialStopsWorking(t *testing.T) {
+	d := twoAccounts(t)
+	secret, err := d.CreateAppPassword("u@acme.test", "Phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := d.UpdateUser("u@acme.test", UserUpdate{Status: afUserSuspended, POP3IMAP: true}); err != nil || !ok {
+		t.Fatalf("suspend = ok %v err %v", ok, err)
+	}
+	if _, ok := d.AuthenticateProtocol("u@acme.test", secret); ok {
+		t.Error("a suspended account's app password still signs in")
+	}
+	if _, ok := d.AuthenticateProtocol("v@acme.test", "pw"); !ok {
+		t.Error("suspending one account closed another account's login")
+	}
+}
+
 // twoCredentials mints a phone and a laptop credential and returns them with the
 // phone's row id.
 func twoCredentials(t *testing.T, d *SQLDirectory) (phone, laptop string, phoneID int64) {
