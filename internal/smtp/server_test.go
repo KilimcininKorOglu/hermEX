@@ -644,16 +644,16 @@ func TestServerBoundsRecipientsPerTransaction(t *testing.T) {
 	send(t, conn, "EHLO client.test\r\nMAIL FROM:<alice@test>\r\n")
 	expect(t, r, 250)
 	expect(t, r, 250)
-	for i := range maxRecipients {
+	for i := range MaxRecipients {
 		send(t, conn, fmt.Sprintf("RCPT TO:<r%d@test>\r\n", i))
 		expect(t, r, 250)
 	}
 	send(t, conn, "RCPT TO:<onemore@test>\r\n")
 	code, msg, _ := r.ReadResponse(0)
 	if code != 452 || !strings.HasPrefix(msg, "4.5.3") {
-		t.Fatalf("recipient %d answered %d %q, want 452 4.5.3", maxRecipients+1, code, msg)
+		t.Fatalf("recipient %d answered %d %q, want 452 4.5.3", MaxRecipients+1, code, msg)
 	}
-	wantEq(t, len(sess.rcpts), maxRecipients, "recipients the session accepted")
+	wantEq(t, len(sess.rcpts), MaxRecipients, "recipients the session accepted")
 	send(t, conn, "DATA\r\n")
 	expect(t, r, 354)
 	send(t, conn, "Subject: hi\r\n\r\nbody\r\n.\r\n")

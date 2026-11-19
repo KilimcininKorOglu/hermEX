@@ -3,12 +3,14 @@ package mta
 import (
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"hermex/internal/directory"
 	"hermex/internal/relay"
+	"hermex/internal/smtp"
 )
 
 // sizedSend builds a local account and a spool with the message size limit set to
@@ -44,6 +46,42 @@ func TestDeliverAndRelayRefusesOversizedMessage(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Errorf("%d entries were queued despite the refusal", len(entries))
+	}
+}
+
+// TestSubmissionBoundsRecipientsPerMessage sends one message to one recipient
+// more than SMTP accepts in a transaction. Every client that is not SMTP
+// (webmail, EWS, ActiveSync, ROP, DAV scheduling, send-later) converges here, so
+// the RFC 5321 4.5.3.1.10 bound must hold here too: the send is refused whole
+// and terminally, nothing is filed or queued, and a message at the bound sends.
+func TestSubmissionBoundsRecipientsPerMessage(t *testing.T) {
+	accounts, spool := sizedSend(t, 0)
+	raw := []byte("Subject: many\r\n\r\nbody\r\n")
+	recipients := make([]string, smtp.MaxRecipients+1)
+	for i := range recipients {
+		recipients[i] = "r" + strconv.Itoa(i) + "@far.test"
+	}
+
+	_, err := DeliverAndRelay(accounts, spool, "alice@acme.test", recipients, raw, time.Unix(1000, 0))
+	if !errors.Is(err, ErrTooManyRecipients) {
+		t.Fatalf("err = %v, want ErrTooManyRecipients", err)
+	}
+	var terminal interface{ TerminalDelivery() bool }
+	if !errors.As(err, &terminal) || !terminal.TerminalDelivery() {
+		t.Error("the refusal must be terminal: the recipient list will not shrink on a retry")
+	}
+	if entries, err := spool.List(); err != nil || len(entries) != 0 {
+		t.Fatalf("queued %d entries (err %v) despite the refusal", len(entries), err)
+	}
+
+	keep, err := SendRenderings(accounts, spool, "alice@acme.test",
+		recipients[:smtp.MaxRecipients/2+1], raw, recipients[smtp.MaxRecipients/2+1:], raw, time.Unix(1000, 0))
+	if !errors.Is(err, ErrTooManyRecipients) || !keep {
+		t.Fatalf("two renderings over the bound: err = %v keep = %v, want ErrTooManyRecipients", err, keep)
+	}
+
+	if _, err := DeliverAndRelay(accounts, spool, "alice@acme.test", recipients[:smtp.MaxRecipients], raw, time.Unix(1000, 0)); err != nil {
+		t.Fatalf("a message at the bound: %v", err)
 	}
 }
 

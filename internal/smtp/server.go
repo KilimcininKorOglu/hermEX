@@ -451,7 +451,7 @@ func (c *smtpConn) cmdRCPT(arg string) bool {
 		c.reply(501, "syntax: RCPT TO:<address>")
 		return true
 	}
-	if c.rcptCount >= maxRecipients {
+	if c.rcptCount >= MaxRecipients {
 		c.reply(452, "4.5.3 too many recipients")
 		return true
 	}
@@ -843,12 +843,12 @@ func (s *Server) greetEHLO(w *ew, arg string, isTLS, authAvailable bool) {
 	w.flush()
 }
 
-// maxRecipients bounds the recipients one transaction may name. Each accepted
+// MaxRecipients bounds the recipients one transaction may name. Each accepted
 // recipient becomes a delivery target, so without a bound one message sent by an
 // unauthenticated peer fans out to every mailbox it can name. RFC 5321 4.5.3.1.8
 // requires at least 100, and 4.5.3.1.10 answers the excess with 452 so the client
 // sends the rest in a later transaction; 1000 is the Postfix default.
-const maxRecipients = 1000
+const MaxRecipients = 1000
 
 // defaultMaxCommandLine is the RFC 5321 4.5.3.1.4 limit on a command line including
 // the trailing CRLF, and the fallback when no operator limit has been set. Commands

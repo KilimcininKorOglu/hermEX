@@ -849,6 +849,10 @@ func SendAndRelay(accounts directory.Accounts, spool *relay.Spool, from string, 
 // group goes as a copy that files none, so the record is filed once. Every check
 // and limit applies to both.
 func SendRenderings(accounts directory.Accounts, spool *relay.Spool, from string, plainTo []string, plain []byte, richTo []string, rich []byte, received time.Time) (keepOwnCopy bool, err error) {
+	// The two renderings are one message, so the recipient bound counts both.
+	if len(plainTo)+len(richTo) > smtp.MaxRecipients {
+		return true, ErrTooManyRecipients
+	}
 	if len(plainTo) == 0 {
 		_, keepOwnCopy, err = SendAndRelay(accounts, spool, from, richTo, rich, received)
 		return keepOwnCopy, err
@@ -885,8 +889,8 @@ func deliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from, enve
 	// The operator's inbound size limit. SMTP refuses an oversized message during
 	// DATA; every other submission path arrives here instead, so the cap is applied
 	// once at the point they all converge on.
-	if overMessageSize(raw) {
-		return recipients, nil, ErrMessageTooLarge
+	if err := overSubmissionBounds(raw, len(recipients)); err != nil {
+		return recipients, nil, err
 	}
 	if scanMessage(accounts, avSubmission, from, recipients, raw, received) == avHandled {
 		return nil, nil, ErrVirusBlocked

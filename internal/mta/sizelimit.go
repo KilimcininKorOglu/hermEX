@@ -1,11 +1,13 @@
 package mta
 
 import (
+	"fmt"
 	"sync/atomic"
 	"time"
 
 	"hermex/internal/directory"
 	"hermex/internal/logging"
+	"hermex/internal/smtp"
 )
 
 // MessageSizeSettings is the stored inbound message size limit. The alias keeps
@@ -27,6 +29,34 @@ func (messageTooLarge) TerminalDelivery() bool { return true }
 // ErrMessageTooLarge is returned by DeliverAndRelay when the operator's inbound
 // size limit rejects a message. Submission callers surface it to the sender.
 var ErrMessageTooLarge error = messageTooLarge{}
+
+// tooManyRecipients is the error a send naming more recipients than one SMTP
+// transaction accepts fails with. It is terminal: the list will not shrink on a
+// retry.
+type tooManyRecipients struct{}
+
+func (tooManyRecipients) Error() string {
+	return fmt.Sprintf("message names more than %d recipients", smtp.MaxRecipients)
+}
+func (tooManyRecipients) TerminalDelivery() bool { return true }
+
+// ErrTooManyRecipients is returned by DeliverAndRelay when a message names more
+// recipients than smtp.MaxRecipients, the bound SMTP applies per transaction, so
+// a client that does not speak SMTP cannot fan one message out further.
+var ErrTooManyRecipients error = tooManyRecipients{}
+
+// overSubmissionBounds returns the terminal refusal for a submitted message that
+// is larger than the operator's limit or names more recipients than one SMTP
+// transaction accepts, and nil for one within both.
+func overSubmissionBounds(raw []byte, recipients int) error {
+	switch {
+	case overMessageSize(raw):
+		return ErrMessageTooLarge
+	case recipients > smtp.MaxRecipients:
+		return ErrTooManyRecipients
+	}
+	return nil
+}
 
 // maxMessageBytes is the operator's limit, 0 meaning no limit. SMTP enforces it
 // during DATA, which is better (the bytes are refused before they are read), so
