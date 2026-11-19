@@ -20,13 +20,30 @@ type fakeConn struct {
 	bindErr     map[string]error // DN -> error returned by Bind (absent = success)
 	searchRes   *ldap.SearchResult
 	searchErr   error
+	filters     []string // the filter of each Search call, in order
 	closed      bool
 }
 
 func (f *fakeConn) StartTLS(*tls.Config) error { return f.startTLSErr }
 func (f *fakeConn) Bind(dn, _ string) error    { f.binds = append(f.binds, dn); return f.bindErr[dn] }
-func (f *fakeConn) Search(*ldap.SearchRequest) (*ldap.SearchResult, error) {
+func (f *fakeConn) Search(r *ldap.SearchRequest) (*ldap.SearchResult, error) {
+	f.filters = append(f.filters, r.Filter)
 	return f.searchRes, f.searchErr
+}
+
+// TestVerifyEscapesTheLoginInTheFilter logs in with a name made of the filter
+// metacharacters. RFC 4515 section 3 writes '*', '(', ')', '\' and NUL in an
+// assertion value as a backslash and two hex digits; unescaped, "*" alone would
+// match every entry carrying the attribute, so a login name could pick an account.
+func TestVerifyEscapesTheLoginInTheFilter(t *testing.T) {
+	fc := &fakeConn{searchRes: &ldap.SearchResult{}}
+	_, _ = verifierWith(fc).Verify(cfg, "*)(uid=*\\", "pw")
+	if len(fc.filters) != 1 {
+		t.Fatalf("searches = %d, want 1", len(fc.filters))
+	}
+	if want := `(mail=\2a\29\28uid=\2a\5c)`; fc.filters[0] != want {
+		t.Errorf("filter = %s, want %s", fc.filters[0], want)
+	}
 }
 func (f *fakeConn) Close() error { f.closed = true; return nil }
 
