@@ -45,6 +45,26 @@ func TestRewriteFromDisplayName(t *testing.T) {
 	wantFromAddress(t, "the rewritten folded From", fm, "Bob", "alice@example.com")
 }
 
+// TestRewriteFromDisplayNameCannotAddAHeader feeds a display name carrying CR/LF and
+// a header. The name comes from a domain template filled with profile fields, so a
+// line break in either must stay inside the From value (RFC 5322 section 2.2 ends a
+// header field at CRLF), never start a Bcc or a second From.
+func TestRewriteFromDisplayNameCannotAddAHeader(t *testing.T) {
+	raw := []byte("From: Alice <alice@example.com>\r\nSubject: hi\r\n\r\nbody\r\n")
+	for _, name := range []string{"Eve\r\nBcc: victim@example.net", "Eve\nBcc: victim@example.net", "Eve\rBcc: victim@example.net"} {
+		out := RewriteFromDisplayName(raw, name)
+		m, err := mail.ReadMessage(bytes.NewReader(out))
+		mustNoErr(t, "parse the rewritten message", err)
+		if bcc := m.Header.Get("Bcc"); bcc != "" {
+			t.Errorf("name %q added a Bcc header %q:\n%s", name, bcc, out)
+		}
+		wantEq(t, "header count for "+fmt.Sprintf("%q", name), len(m.Header), 2)
+		from, err := mail.ParseAddress(m.Header.Get("From"))
+		mustNoErr(t, "parse the From", err)
+		wantEq(t, "the From address", from.Address, "alice@example.com")
+	}
+}
+
 // wantFromAddress checks a message's From display name and address.
 func wantFromAddress(t *testing.T, what string, m *mail.Message, name, address string) {
 	t.Helper()
