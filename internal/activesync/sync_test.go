@@ -166,6 +166,7 @@ func TestSyncFlagChangeDetected(t *testing.T) {
 	if chg.Child(wbxml.ASData).ChildText(wbxml.EMRead) != "1" {
 		t.Error("change did not report Read=1")
 	}
+	wantCommandFor(t, coll, wbxml.ASChange, uid)
 }
 
 // TestSyncDeleteDetected confirms a message removed from the store is reported as
@@ -187,10 +188,28 @@ func TestSyncDeleteDetected(t *testing.T) {
 	st.Close()
 
 	_, root := postCommand(t, ts, "Sync", syncReq("2", ""))
-	_, _, deletes := countCmds(respColl(t, root))
+	coll := respColl(t, root)
+	_, _, deletes := countCmds(coll)
 	if deletes != 1 {
 		t.Fatalf("got %d deletes, want 1", deletes)
 	}
+	wantCommandFor(t, coll, wbxml.ASDelete, uid)
+}
+
+// wantCommandFor checks the collection's first command of the tag names the
+// message with the uid, so a count cannot pass on the wrong message.
+func wantCommandFor(t *testing.T, coll *wbxml.Node, tag wbxml.Tag, uid uint32) {
+	t.Helper()
+	want := strconv.FormatUint(uint64(uid), 10)
+	for _, c := range coll.Child(wbxml.ASCommands).Children {
+		if c.Tag == tag {
+			if got := c.ChildText(wbxml.ASServerID); got != want {
+				t.Errorf("command names ServerId %q, want %q", got, want)
+			}
+			return
+		}
+	}
+	t.Errorf("no command of tag %v", tag)
 }
 
 // TestSyncClientChange confirms a client Change (mark read) is applied to the
@@ -291,6 +310,14 @@ func TestSyncWindow(t *testing.T) {
 	}
 	if coll2.Child(wbxml.ASMoreAvailable) != nil {
 		t.Error("second window should not set MoreAvailable")
+	}
+	// The two windows together are the three messages, each once.
+	seen := map[string]bool{}
+	for _, c := range append(coll.Child(wbxml.ASCommands).Children, coll2.Child(wbxml.ASCommands).Children...) {
+		seen[c.ChildText(wbxml.ASServerID)] = true
+	}
+	if len(seen) != 3 {
+		t.Errorf("the windows named %d distinct messages, want 3: %v", len(seen), seen)
 	}
 }
 
