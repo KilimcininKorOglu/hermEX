@@ -1,10 +1,9 @@
 package logging
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"encoding/json"
-	"io"
 	"os"
 )
 
@@ -41,24 +40,13 @@ func (s *MongoSink) replaySpill() {
 	if !s.hasSpill || s.spillPath == "" {
 		return
 	}
-	docs, err := readSpill(s.spillPath)
-	if err != nil {
-		return // cannot read it now; keep it and retry on the next success
-	}
-	if len(docs) == 0 {
-		// A failed removal only costs an empty re-read on the next drain.
-		_ = os.Remove(s.spillPath)
-		s.hasSpill = false
-		return
-	}
-	for i := 0; i < len(docs); i += mongoBatchSize {
-		end := min(i+mongoBatchSize, len(docs))
+	insert := func(batch []any) error {
 		ctx, cancel := context.WithTimeout(context.Background(), mongoWriteTimeout)
-		err := s.ins.InsertMany(ctx, docs[i:end])
-		cancel()
-		if err != nil {
-			return // unreachable again, keep the file, retry later
-		}
+		defer cancel()
+		return s.ins.InsertMany(ctx, batch)
+	}
+	if err := eachSpillBatch(s.spillPath, insert); err != nil {
+		return // unreadable now or unreachable again: keep the file, retry later
 	}
 	// The batches are already in Mongo. A failed removal replays them on the next
 	// drain, which duplicates events rather than losing them: the safe direction,
@@ -67,29 +55,40 @@ func (s *MongoSink) replaySpill() {
 	s.hasSpill = false
 }
 
-// readSpill decodes the newline-delimited JSON spill file into insertable
+// eachSpillBatch decodes the newline-delimited JSON spill file into insertable
 // documents (typed mongoDoc values, so the timestamp re-encodes as a BSON date on
-// re-insert). A torn trailing record from a crash mid-spill is tolerated: decoding
-// stops at the first malformed value and replays the records that decoded cleanly.
-func readSpill(path string) ([]any, error) {
+// re-insert) and hands them to fn at most mongoBatchSize at a time, reading the
+// file as it goes: a spill from a long outage can be larger than the daemon's
+// memory, so it is never loaded whole. A torn trailing record from a crash
+// mid-spill is tolerated: decoding stops at the first malformed value and the
+// records that decoded cleanly are replayed. The first error from fn stops the
+// pass and is returned.
+func eachSpillBatch(path string, fn func([]any) error) error {
 	// #nosec G304 -- the spill file lives in the daemon's own spill directory, derived from the config
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	var docs []any
-	dec := json.NewDecoder(bytes.NewReader(data))
+	defer f.Close()
+	dec := json.NewDecoder(bufio.NewReader(f))
+	batch := make([]any, 0, mongoBatchSize)
 	for {
 		var d mongoDoc
-		if err := dec.Decode(&d); err != nil {
-			if err == io.EOF {
-				break
-			}
-			break // a truncated final record, keep what decoded cleanly
+		if dec.Decode(&d) != nil {
+			break // end of file, or a truncated final record: keep what decoded cleanly
 		}
-		docs = append(docs, d)
+		if batch = append(batch, d); len(batch) < mongoBatchSize {
+			continue
+		}
+		if err := fn(batch); err != nil {
+			return err
+		}
+		batch = make([]any, 0, mongoBatchSize)
 	}
-	return docs, nil
+	if len(batch) == 0 {
+		return nil
+	}
+	return fn(batch)
 }
 
 // spillFileHasData reports whether path exists and is non-empty, so a starting
