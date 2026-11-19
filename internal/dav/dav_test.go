@@ -85,6 +85,38 @@ func TestRequiresAuth(t *testing.T) {
 	}
 }
 
+// TestRefusesForgedCredentials sends the credentials an attacker can forge: a
+// wrong password, an unknown account, an empty password, a header that is not
+// Basic base64, and a Bearer token. Each must be challenged with 401 and served
+// nothing.
+func TestRefusesForgedCredentials(t *testing.T) {
+	ts := davServer(t, "Ada Lovelace")
+	path := ts.URL + "/dav/addressbooks/" + testUser + "/contacts/"
+	for name, set := range map[string]func(*http.Request){
+		"wrong password":  func(r *http.Request) { r.SetBasicAuth(testUser, "wrong") },
+		"unknown account": func(r *http.Request) { r.SetBasicAuth("nobody@hermex.test", testPass) },
+		"empty password":  func(r *http.Request) { r.SetBasicAuth(testUser, "") },
+		"not base64":      func(r *http.Request) { r.Header.Set("Authorization", "Basic %%%not-base64") },
+		"bearer token":    func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+testPass) },
+	} {
+		req, err := http.NewRequest("PROPFIND", path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Depth", "1")
+		set(req)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized || strings.Contains(string(body), ".vcf") {
+			t.Errorf("%s: status %d, want 401 with no contact served", name, resp.StatusCode)
+		}
+	}
+}
+
 // TestWellKnownRedirect confirms RFC 6764 autodiscovery: /.well-known/{carddav,
 // caldav} redirects (301) to the DAV root so a client can bootstrap discovery,
 // and that the redirect is served without authentication (no credentials sent).
