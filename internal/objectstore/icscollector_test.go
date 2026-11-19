@@ -2,6 +2,7 @@ package objectstore
 
 import (
 	"database/sql"
+	"errors"
 	"testing"
 
 	"hermex/internal/ics"
@@ -230,6 +231,37 @@ func TestUploadStateStreamHierarchyRejectsContentsOnly(t *testing.T) {
 	wantErr(t, "hierarchy upload accepting a contents-only FAI seen set", hcol.BeginStateStream(cnsetSeenFAI))
 	wantErr(t, "hierarchy upload accepting a contents-only read set", hcol.BeginStateStream(cnsetRead))
 	mustNoErr(t, "hierarchy upload rejected the seen set valid for all sync types", hcol.BeginStateStream(cnsetSeen))
+}
+
+// TestStateStreamRefusesBytesPastTheUploadCap sends a state stream
+// ([MS-OXCFXICS] 2.2.3.2.2.2, RopSynchronizationUploadStateStreamContinue) chunk
+// after chunk. Both the upload and the download collector buffer the stream until
+// it ends, so past the operator's upload cap the next chunk is refused rather
+// than held.
+func TestStateStreamRefusesBytesPastTheUploadCap(t *testing.T) {
+	SetMaxUploadMessage(64 << 10)
+	t.Cleanup(func() { SetMaxUploadMessage(0) })
+	s := openSeededStore(t)
+
+	up := mustHierarchyUpload(t, s, int64(mapi.PrivateFIDIPMSubtree))
+	down, err := s.NewHierarchyDownloadCollector(int64(mapi.PrivateFIDIPMSubtree), 0, nil)
+	mustNoErr(t, "open a hierarchy download", err)
+	chunk := make([]byte, 16<<10)
+	for name, col := range map[string]interface {
+		BeginStateStream(uint32) error
+		ContinueStateStream([]byte) error
+	}{"upload": up, "download": down} {
+		mustNoErr(t, name+" begin state stream", col.BeginStateStream(cnsetSeen))
+		var refused error
+		for range 8 {
+			if refused = col.ContinueStateStream(chunk); refused != nil {
+				break
+			}
+		}
+		if !errors.Is(refused, ErrUploadTooLarge) {
+			t.Errorf("%s: 128 KiB of state against a 64 KiB cap: err = %v, want ErrUploadTooLarge", name, refused)
+		}
+	}
 }
 
 // mustTransferState renders the collector's transfer state or fails the test.

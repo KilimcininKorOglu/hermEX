@@ -97,8 +97,7 @@ func (c *DownloadCollector) ContinueStateStream(data []byte) error {
 	if c.streamTag == 0 {
 		return fmt.Errorf("objectstore: no open state stream")
 	}
-	c.streamBuf = append(c.streamBuf, data...)
-	return nil
+	return appendStateChunk(&c.streamBuf, data)
 }
 
 // EndStateStream folds the buffered idset into the download state under the open

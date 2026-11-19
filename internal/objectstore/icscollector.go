@@ -116,7 +116,17 @@ func (c *UploadCollector) ContinueStateStream(data []byte) error {
 	if ics.IsGivenStateMetaTag(c.streamTag) {
 		return nil
 	}
-	c.streamBuf = append(c.streamBuf, data...)
+	return appendStateChunk(&c.streamBuf, data)
+}
+
+// appendStateChunk adds one state-stream chunk to buf, refusing it once the stream
+// would pass the upload cap: the stream is buffered whole until it ends, and the
+// client decides how many chunks it sends.
+func appendStateChunk(buf *[]byte, data []byte) error {
+	if int64(len(*buf))+int64(len(data)) > uploadCap() {
+		return ErrUploadTooLarge
+	}
+	*buf = append(*buf, data...)
 	return nil
 }
 
