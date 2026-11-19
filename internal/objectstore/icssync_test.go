@@ -88,6 +88,14 @@ func eqSet(t *testing.T, name string, got []uint64, want ...uint64) {
 	}
 }
 
+// eqRanges asserts a range list equals want, in order.
+func eqRanges(t *testing.T, name string, got []IDRange, want ...IDRange) {
+	t.Helper()
+	if !slices.Equal(got, want) {
+		t.Errorf("%s = %v, want %v", name, got, want)
+	}
+}
+
 // TestGetContentSync exercises every output branch of the contents diff in one
 // scenario: an unchanged message, a content-changed one already in given, a
 // brand-new one, a read-state-only change (read and unread), an FAI message
@@ -145,7 +153,7 @@ func TestGetContentSync(t *testing.T) {
 	eqSet(t, "ChangedMIDs", res.ChangedMIDs, u(mUpdated), u(mNew))
 	eqSet(t, "UpdatedMIDs", res.UpdatedMIDs, u(mUpdated))
 	eqSet(t, "GivenMIDs", res.GivenMIDs, u(mUnchanged), u(mUpdated), u(mNew), u(mRead), u(mUnread))
-	eqSet(t, "DeletedMIDs", res.DeletedMIDs, phantom)
+	eqRanges(t, "DeletedMIDs", res.DeletedMIDs, IDRange{phantom, phantom})
 	eqSet(t, "NoLongerMIDs", res.NoLongerMIDs, u(mFAI))
 	eqSet(t, "ReadMIDs", res.ReadMIDs, u(mRead))
 	eqSet(t, "UnreadMIDs", res.UnreadMIDs, u(mUnread))
@@ -258,7 +266,7 @@ func TestGetHierarchySync(t *testing.T) {
 	}
 	eqSet(t, "initial ChangedFIDs", res.ChangedFIDs, uint64(fa), uint64(fb))
 	eqSet(t, "initial GivenFIDs", res.GivenFIDs, uint64(fa), uint64(fb))
-	eqSet(t, "initial DeletedFIDs", res.DeletedFIDs)
+	eqRanges(t, "initial DeletedFIDs", res.DeletedFIDs)
 
 	phantom := uint64(fa) + 1_000_000
 	res, err = s.GetHierarchySync(HierarchySyncRequest{
@@ -271,5 +279,5 @@ func TestGetHierarchySync(t *testing.T) {
 	}
 	eqSet(t, "ChangedFIDs", res.ChangedFIDs, uint64(fb))
 	eqSet(t, "GivenFIDs", res.GivenFIDs, uint64(fa), uint64(fb))
-	eqSet(t, "DeletedFIDs", res.DeletedFIDs, phantom)
+	eqRanges(t, "DeletedFIDs", res.DeletedFIDs, IDRange{phantom, phantom})
 }

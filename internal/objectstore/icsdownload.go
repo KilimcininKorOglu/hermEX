@@ -130,7 +130,7 @@ type DownloadContext struct {
 	flowPos    int
 
 	givenKeep    []uint64
-	deletedMIDs  []uint64
+	deletedMIDs  []IDRange
 	nolongerMIDs []uint64
 	readMIDs     []uint64
 	unreadMIDs   []uint64
@@ -394,7 +394,7 @@ func (dc *DownloadContext) writeMessageChange(mid uint64) error {
 	if err == sql.ErrNoRows {
 		// The message vanished between the delta scan and now; the client is told
 		// via the deletions set instead.
-		dc.deletedMIDs = append(dc.deletedMIDs, mid)
+		dc.deletedMIDs = append(dc.deletedMIDs, IDRange{mid, mid})
 		return nil
 	}
 	if err != nil {
@@ -535,7 +535,7 @@ func (dc *DownloadContext) writeProgressPerMessage(size int64, isFAI bool) error
 func (dc *DownloadContext) writeDeletions() error {
 	var props mapi.PropertyValues
 	if len(dc.deletedMIDs) > 0 {
-		b, err := looseIDSetBytes(dc.deletedMIDs)
+		b, err := looseRangeSetBytes(dc.deletedMIDs)
 		if err != nil {
 			return err
 		}
@@ -665,6 +665,16 @@ func looseIDSetBytes(vals []uint64) ([]byte, error) {
 	set := ics.NewIDSet(ics.FormIDLoose, nil)
 	for _, v := range vals {
 		set.AppendRange(homeReplID, v, v)
+	}
+	return set.Serialize()
+}
+
+// looseRangeSetBytes serializes home-replica id ranges the way looseIDSetBytes
+// serializes single ids.
+func looseRangeSetBytes(rs []IDRange) ([]byte, error) {
+	set := ics.NewIDSet(ics.FormIDLoose, nil)
+	for _, r := range rs {
+		set.AppendRange(homeReplID, r.Lo, r.Hi)
 	}
 	return set.Serialize()
 }

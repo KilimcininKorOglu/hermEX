@@ -16,6 +16,11 @@ import (
 // below builds its lookup EIDs in.
 const homeReplID uint16 = 1
 
+// IDRange is an inclusive range of home-replica GC values. Deletions are kept as
+// ranges because a client's given set can name billions of ids in one GLOBSET
+// Range command; the diff's cost follows the ids the store holds instead.
+type IDRange struct{ Lo, Hi uint64 }
+
 // ContentSyncRequest configures a contents (message) synchronization diff over
 // one folder ([MS-OXCFXICS] 3.3.5.13 GetContentsSync). Given holds the MIDs the
 // client already has; Seen, SeenFAI, and Read hold the change numbers it has
@@ -41,15 +46,15 @@ type ContentSyncRequest struct {
 // in LastCN / LastReadCN. The download path wraps each with mapi.MakeEIDEx(1, …)
 // for the wire markers and re-reads the changed messages' full content.
 type ContentSyncResult struct {
-	ChangedMIDs  []uint64 // messages to (re)download: new or content-changed
-	UpdatedMIDs  []uint64 // the subset of ChangedMIDs the client already had (a modification, not a create)
-	GivenMIDs    []uint64 // the store's current in-scope MIDs, the client's new given set
-	DeletedMIDs  []uint64 // given MIDs that no longer exist at all
-	NoLongerMIDs []uint64 // given MIDs still stored but outside this sync's scope (e.g. FAI when only SYNC_NORMAL)
-	ReadMIDs     []uint64 // body-up-to-date MIDs whose read state changed to read
-	UnreadMIDs   []uint64 // body-up-to-date MIDs whose read state changed to unread
-	LastCN       uint64   // the highest change number scanned (the client's new Seen high-water mark)
-	LastReadCN   uint64   // the highest read change number scanned (the client's new Read high-water mark)
+	ChangedMIDs  []uint64  // messages to (re)download: new or content-changed
+	UpdatedMIDs  []uint64  // the subset of ChangedMIDs the client already had (a modification, not a create)
+	GivenMIDs    []uint64  // the store's current in-scope MIDs, the client's new given set
+	DeletedMIDs  []IDRange // given MIDs that no longer exist at all, as ranges
+	NoLongerMIDs []uint64  // given MIDs still stored but outside this sync's scope (e.g. FAI when only SYNC_NORMAL)
+	ReadMIDs     []uint64  // body-up-to-date MIDs whose read state changed to read
+	UnreadMIDs   []uint64  // body-up-to-date MIDs whose read state changed to unread
+	LastCN       uint64    // the highest change number scanned (the client's new Seen high-water mark)
+	LastReadCN   uint64    // the highest read change number scanned (the client's new Read high-water mark)
 
 	// The count and total size of the associated and normal messages in
 	// ChangedMIDs, the totals a progress-mode download announces.
@@ -112,10 +117,11 @@ func (s *Store) GetContentSync(req ContentSyncRequest) (ContentSyncResult, error
 
 	for _, set := range [][]uint64{
 		res.ChangedMIDs, res.UpdatedMIDs, res.GivenMIDs,
-		res.DeletedMIDs, res.NoLongerMIDs, res.ReadMIDs, res.UnreadMIDs,
+		res.NoLongerMIDs, res.ReadMIDs, res.UnreadMIDs,
 	} {
 		slices.Sort(set)
 	}
+	sortRanges(res.DeletedMIDs)
 	return res, nil
 }
 
@@ -229,35 +235,69 @@ func (sc *contentScan) readStateChanged(row contentRow, ack *ics.IDSet) bool {
 // serves. A foreign-replica id (replid > 1) is unconditionally gone from this
 // store; a home id absent from the in-scope set is either still stored but out
 // of scope (no-longer) or truly gone.
+//
+// It visits only the stored ids inside each given range, so its cost follows the
+// folder's size, not the width of a range the client chose.
 func (sc *contentScan) appendDeletions(given *ics.IDSet, res *ContentSyncResult) {
 	if given == nil {
 		return
 	}
+	stored := sortedKeys(sc.allMIDs)
 	given.ForEachRange(func(replid uint16, lo, hi uint64) {
 		if replid != homeReplID {
 			if replid > homeReplID {
-				for v := lo; v <= hi; v++ {
-					res.DeletedMIDs = append(res.DeletedMIDs, v)
-				}
+				res.DeletedMIDs = append(res.DeletedMIDs, IDRange{lo, hi})
 			}
 			return
 		}
-		for v := lo; v <= hi; v++ {
-			sc.classifyMissing(v, res)
-		}
+		res.DeletedMIDs = appendGaps(res.DeletedMIDs, lo, hi, stored, func(v uint64) {
+			if _, ok := sc.existence[v]; !ok {
+				res.NoLongerMIDs = append(res.NoLongerMIDs, v)
+			}
+		})
 	})
 }
 
-// classifyMissing sorts one given id the scan did not put in scope.
-func (sc *contentScan) classifyMissing(v uint64, res *ContentSyncResult) {
-	if _, ok := sc.existence[v]; ok {
-		return
+// appendGaps appends to out the parts of [lo,hi] that hold no id of stored
+// (sorted), and calls each for every stored id inside [lo,hi].
+func appendGaps(out []IDRange, lo, hi uint64, stored []uint64, each func(uint64)) []IDRange {
+	next := lo
+	i, _ := slices.BinarySearch(stored, lo)
+	for ; i < len(stored) && stored[i] <= hi; i++ {
+		v := stored[i]
+		if v > next {
+			out = append(out, IDRange{next, v - 1})
+		}
+		each(v)
+		next = v + 1
 	}
-	if _, ok := sc.allMIDs[v]; ok {
-		res.NoLongerMIDs = append(res.NoLongerMIDs, v)
-		return
+	if next <= hi && next != 0 {
+		out = append(out, IDRange{next, hi})
 	}
-	res.DeletedMIDs = append(res.DeletedMIDs, v)
+	return out
+}
+
+// sortedKeys returns a set's members in ascending order.
+func sortedKeys(set map[uint64]struct{}) []uint64 {
+	out := make([]uint64, 0, len(set))
+	for v := range set {
+		out = append(out, v)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// sortRanges orders ranges by their low bound.
+func sortRanges(rs []IDRange) {
+	slices.SortFunc(rs, func(a, b IDRange) int {
+		switch {
+		case a.Lo < b.Lo:
+			return -1
+		case a.Lo > b.Lo:
+			return 1
+		}
+		return 0
+	})
 }
 
 // HierarchySyncRequest configures a folder-hierarchy synchronization diff
@@ -275,10 +315,10 @@ type HierarchySyncRequest struct {
 // LastCN). A hierarchy has no FAI, read state, or restriction, so there is no
 // no-longer set: a given FID absent from the live subtree is reported deleted.
 type HierarchySyncResult struct {
-	ChangedFIDs []uint64 // subfolders to (re)download
-	GivenFIDs   []uint64 // the store's current subtree FIDs, the client's new given set
-	DeletedFIDs []uint64 // given FIDs no longer in the live subtree
-	LastCN      uint64   // the highest change number scanned (the client's new Seen high-water mark)
+	ChangedFIDs []uint64  // subfolders to (re)download
+	GivenFIDs   []uint64  // the store's current subtree FIDs, the client's new given set
+	DeletedFIDs []IDRange // given FIDs no longer in the live subtree, as ranges
+	LastCN      uint64    // the highest change number scanned (the client's new Seen high-water mark)
 }
 
 // GetHierarchySync computes the subfolder delta for a folder subtree against the
@@ -326,7 +366,7 @@ func (s *Store) GetHierarchySync(req HierarchySyncRequest) (HierarchySyncResult,
 
 	slices.Sort(res.ChangedFIDs)
 	slices.Sort(res.GivenFIDs)
-	slices.Sort(res.DeletedFIDs)
+	sortRanges(res.DeletedFIDs)
 	return res, nil
 }
 
@@ -346,14 +386,11 @@ func appendDeletedFolders(given *ics.IDSet, existence map[uint64]struct{}, res *
 	if given == nil {
 		return
 	}
+	stored := sortedKeys(existence)
 	given.ForEachRange(func(replid uint16, lo, hi uint64) {
 		if replid != homeReplID && replid <= homeReplID {
 			return
 		}
-		for v := lo; v <= hi; v++ {
-			if _, ok := existence[v]; !ok {
-				res.DeletedFIDs = append(res.DeletedFIDs, v)
-			}
-		}
+		res.DeletedFIDs = appendGaps(res.DeletedFIDs, lo, hi, stored, func(uint64) {})
 	})
 }
