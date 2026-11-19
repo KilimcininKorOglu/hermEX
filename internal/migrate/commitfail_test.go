@@ -1,0 +1,34 @@
+package migrate
+
+import (
+	"context"
+	"testing"
+)
+
+// TestAFailedCommitLeavesNoOpenTransaction runs a migration whose steps succeed
+// but whose COMMIT fails: a deferred foreign key is still violated at commit, and
+// SQLite then keeps the transaction open. The run must fail, and the pooled
+// connection must not go back to the pool inside that transaction, or every later
+// write on the database would run in (or wait on) a transaction nobody ends.
+func TestAFailedCommitLeavesNoOpenTransaction(t *testing.T) {
+	db := openSQLite(t)
+	db.SetMaxOpenConns(1) // the next statement gets the connection the run used
+	migs := []Migration{{Version: 1, Steps: []string{
+		`CREATE TABLE parent (id INTEGER PRIMARY KEY)`,
+		`CREATE TABLE child (pid INTEGER REFERENCES parent(id) DEFERRABLE INITIALLY DEFERRED)`,
+		`INSERT INTO child (pid) VALUES (42)`,
+	}}}
+	if err := Run(context.Background(), &SQLiteDriver{DB: db, Ver: UserVersion()}, 0, migs); err == nil {
+		t.Fatal("a migration whose commit fails was reported as applied")
+	}
+
+	if _, err := db.Exec(`BEGIN IMMEDIATE`); err != nil {
+		t.Fatalf("a new transaction cannot start after the failed run: %v", err)
+	}
+	if _, err := db.Exec(`ROLLBACK`); err != nil {
+		t.Fatal(err)
+	}
+	if v := userVersion(t, db); v != 0 {
+		t.Errorf("user_version = %d after the failed run, want 0", v)
+	}
+}
