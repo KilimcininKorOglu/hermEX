@@ -328,6 +328,21 @@ func TestStripBcc(t *testing.T) {
 	}
 }
 
+// TestStripBccWithSpaceBeforeColon writes the field the way the obsolete
+// header syntax RFC 5322 4.5.3 lets a sender write it, with whitespace between
+// the name and the colon. A reader that accepts that syntax still treats the
+// line as Bcc, so the blind address must not reach the delivered copy.
+func TestStripBccWithSpaceBeforeColon(t *testing.T) {
+	raw := []byte("To: bob@hermex.test\r\nBCC : erin@hermex.test\r\nBcc-Note: kept\r\nSubject: x\r\n\r\nbody\r\n")
+	out := stripBcc(raw)
+	if bytes.Contains(out, []byte("erin")) {
+		t.Errorf("Bcc recipient survived:\n%s", out)
+	}
+	if !bytes.Contains(out, []byte("Bcc-Note: kept")) {
+		t.Errorf("a field whose name only starts with Bcc was dropped:\n%s", out)
+	}
+}
+
 // TestRecipientsOf confirms To, Cc, and Bcc addresses are all collected.
 func TestRecipientsOf(t *testing.T) {
 	raw := []byte("To: bob@hermex.test\r\nCc: carol@hermex.test\r\nBcc: dan@hermex.test\r\nSubject: x\r\n\r\nbody")

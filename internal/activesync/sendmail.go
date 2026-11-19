@@ -393,11 +393,22 @@ func stripBcc(raw []byte) []byte {
 			}
 			skipping = false
 		}
-		if bytes.HasPrefix(bytes.ToLower(trimmed), []byte("bcc:")) {
+		if isBccField(trimmed) {
 			skipping = true
 			continue
 		}
 		kept = append(kept, line)
 	}
 	return append(bytes.Join(kept, []byte("\n")), body...)
+}
+
+// isBccField reports whether a header line begins the Bcc field: the name up to
+// the colon, without the whitespace the obsolete syntax of RFC 5322 4.5.3
+// allows before it, is "Bcc" in any case. A continuation line is never a field.
+func isBccField(line []byte) bool {
+	if len(line) > 0 && (line[0] == ' ' || line[0] == '\t') {
+		return false
+	}
+	name, _, found := bytes.Cut(line, []byte(":"))
+	return found && bytes.EqualFold(bytes.TrimRight(name, " \t"), []byte("Bcc"))
 }
