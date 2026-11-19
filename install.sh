@@ -3,6 +3,7 @@
 #
 #   install.sh install --hostname mail.example.com [--version X.Y.Z | --from FILE]
 #              [--domain example.com] [--acme-email you@example.com --agree-tos [--mtasts]]
+#              [--admin-hostname admin.example.com]
 #   install.sh update  [--version X.Y.Z | --from FILE]
 #   install.sh rollback
 #   install.sh status
@@ -64,7 +65,8 @@ readonly DAEMONS=(
 )
 
 OS_FAMILY="" OS_ID="" OS_CODENAME="" ARCH="" WORK=""
-ARG_HOSTNAME="" ARG_VERSION="" ARG_FROM="" ARG_DOMAIN="" ARG_ACME_EMAIL="" ARG_AGREE_TOS="" ARG_MTASTS=""
+ARG_HOSTNAME="" ARG_VERSION="" ARG_FROM="" ARG_DOMAIN="" ARG_ACME_EMAIL="" ARG_AGREE_TOS="" ARG_MTASTS="" ARG_ADMIN_HOST=""
+MAIL_DOMAIN="" ADMIN_HOST=""
 
 log() { printf '==> %s\n' "$*"; }
 die() {
@@ -123,6 +125,7 @@ parse_args() {
 		--acme-email) ARG_ACME_EMAIL="${2:?--acme-email needs a value}" && shift ;;
 		--agree-tos) ARG_AGREE_TOS="yes" ;;
 		--mtasts) ARG_MTASTS="yes" ;;
+		--admin-hostname) ARG_ADMIN_HOST="${2:?--admin-hostname needs a value}" && shift ;;
 		*) die "unknown option: $1" ;;
 		esac
 		shift
@@ -360,6 +363,8 @@ write_config() {
   "gateway_backend_ews": "https://127.0.0.1:8604",
   "gateway_backend_mapi": "https://127.0.0.1:8605",
   "gateway_backend_mta": "https://127.0.0.1:8606",
+  "gateway_backend_admin": "https://127.0.0.1:8608",
+  "admin_hostname": "${ADMIN_HOST}",
   "notify_url": "https://127.0.0.1:8607",
   "webmail2_dist": "${PREFIX}/current/webmail2",
   "acme_storage": "${STATE}/acme",
@@ -578,6 +583,7 @@ cmd_install() {
 	host="${ARG_HOSTNAME:-$(hostname -f)}"
 	[[ "$host" == *.* ]] || die "--hostname must be the server's fully qualified name"
 	[[ -L "$PREFIX/current" ]] && die "hermEX is already installed; use update"
+	ask_setup "$host"
 	log "installing hermEX on $host (${OS_ID} ${OS_CODENAME:-} ${ARCH})"
 	if [[ "$OS_FAMILY" == "rhel" ]]; then install_rhel_packages; else install_debian_packages; fi
 	create_user
@@ -601,22 +607,44 @@ cmd_install() {
 	print_next_steps
 }
 
+# has_tty: whether an operator can be asked on a terminal.
+has_tty() { [[ -r /dev/tty ]] && { : </dev/tty; } 2>/dev/null; }
+
 # ask PROMPT DEFAULT: prints the answer read from the terminal, or DEFAULT when
 # there is no terminal, so an unattended install takes the flags and defaults.
 ask() {
 	local answer=""
-	if [[ -r /dev/tty ]] && { : </dev/tty; } 2>/dev/null; then
+	if has_tty; then
 		read -r -p "$1${2:+ [$2]}: " answer </dev/tty || true
 	fi
 	echo "${answer:-$2}"
+}
+
+# valid_name NAME: whether NAME is a DNS host name (letters, digits, hyphens and
+# dots, at least two labels). The names are written into config.json and into a
+# file path under /root, so nothing else may pass.
+valid_name() { [[ "$1" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$ ]]; }
+
+# ask_setup HOST: asks the install's questions up front, so the rest runs
+# unattended: the first mail domain and the host name the admin panel is
+# published under. The panel is published only when asked for: unattended, only
+# --admin-hostname publishes it, since it puts the operator login on the internet.
+ask_setup() {
+	local host="$1"
+	MAIL_DOMAIN="${ARG_DOMAIN:-$(ask "First mail domain (empty to skip)" "${host#*.}")}"
+	if [[ -n "$MAIL_DOMAIN" ]] && ! valid_name "$MAIL_DOMAIN"; then die "not a domain name: $MAIL_DOMAIN"; fi
+	ADMIN_HOST="$ARG_ADMIN_HOST"
+	if [[ -z "$ADMIN_HOST" && -n "$MAIL_DOMAIN" ]] && has_tty; then
+		ADMIN_HOST="$(ask "Publish the admin panel under this host name (empty: SSH tunnel only)" "admin.${MAIL_DOMAIN}")"
+	fi
+	if [[ -n "$ADMIN_HOST" ]] && ! valid_name "$ADMIN_HOST"; then die "not a host name: $ADMIN_HOST"; fi
 }
 
 # setup_mail HOST: creates the first domain with its postmaster account (a
 # system administrator), turns its antivirus scanning on, gives it a DKIM key
 # and writes the DNS records it needs to /root, then offers ACME certificates.
 setup_mail() {
-	local host="$1" domain admin password records
-	domain="${ARG_DOMAIN:-$(ask "First mail domain (empty to skip)" "${host#*.}")}"
+	local host="$1" domain="$MAIL_DOMAIN" admin password
 	[[ -n "$domain" ]] || return 0
 	admin="postmaster@${domain}"
 	password="$(openssl rand -base64 18)"
@@ -633,19 +661,21 @@ setup_mail() {
 		systemctl restart hermex-gateway.service
 		log "the gateway obtains its Let's Encrypt certificates now"
 	fi
-	write_records "$domain"
+	write_records "$domain" "$host"
 }
 
-# write_records DOMAIN: saves the DNS records the domain needs to /root and
+# write_records DOMAIN HOST: saves the DNS records the domain needs to /root and
 # prints them. It runs after the ACME and MTA-STS choices, since publishing
 # MTA-STS adds its records to the list.
 write_records() {
-	local domain="$1" records="/root/hermex-dns-${1}.txt"
+	local domain="$1" host="$2" records="/root/hermex-dns-${1}.txt"
 	{
 		echo "# DNS records for ${domain}: type, name, value (tab separated)."
 		echo "# After the DKIM record is published, start signing with:"
 		echo "#   $0 admin enable-dkim ${domain}"
 		admin_cli dns-records "$domain"
+		# The gateway serves the admin panel under this name and gets its certificate.
+		if [[ -n "$ADMIN_HOST" ]]; then printf 'CNAME\t%s\t%s\n' "$ADMIN_HOST" "$host"; fi
 	} | write_file "$records" 0600 root:root
 	log "DNS records to publish, also saved to ${records}:"
 	column -t -s $'\t' "$records" 2>/dev/null || cat "$records"
@@ -701,7 +731,8 @@ print_next_steps() {
 Next steps:
   1. Publish the DNS records listed above (saved under /root/hermex-dns-*.txt),
      then enable DKIM signing: $0 admin enable-dkim <domain>
-  2. The admin panel is reached through an SSH tunnel (ssh -L 8608:127.0.0.1:8608
+  2. Unless it was published under its own host name (admin_hostname in
+     $CONFIG), the admin panel is reached through an SSH tunnel (ssh -L 8608:127.0.0.1:8608
      root@<server>, then https://127.0.0.1:8608/admin/ui/ in a browser; the
      certificate is the self-signed internal one).
   3. Back up $CONFIG off this server: without it the stored keys are lost.
