@@ -21,11 +21,14 @@
 # release's SHA256SUMS. --from installs a local archive instead; the SHA256SUMS
 # file must sit next to it.
 #
-# Supported: RHEL, AlmaLinux and Rocky Linux 9 or later; Debian 12 or later;
-# Ubuntu 22.04 or later.
+# Supported: RHEL, AlmaLinux and Rocky Linux 9; Debian 12; Ubuntu 22.04 and
+# 24.04. These are the releases the package repositories below are verified for.
+#
+# No umask is set: the package managers and the tools this script runs create
+# files other system users must read. Every file this script writes itself gets
+# an explicit mode instead.
 
 set -Eeuo pipefail
-umask 027
 
 readonly REPO="KilimcininKorOglu/hermEX"
 readonly PREFIX="/opt/hermex"
@@ -92,21 +95,11 @@ detect_os() {
 	. /etc/os-release
 	OS_ID="$ID"
 	OS_CODENAME="${VERSION_CODENAME:-}"
-	local major="${VERSION_ID%%.*}"
-	case "$ID" in
-	rhel | almalinux | rocky | centos)
-		OS_FAMILY="rhel"
-		((major >= 9)) || die "$PRETTY_NAME is not supported; 9 or later is required"
-		;;
-	debian)
-		OS_FAMILY="debian"
-		((major >= 12)) || die "$PRETTY_NAME is not supported; Debian 12 or later is required"
-		;;
-	ubuntu)
-		OS_FAMILY="debian"
-		((major >= 22)) || die "$PRETTY_NAME is not supported; Ubuntu 22.04 or later is required"
-		;;
-	*) die "unsupported distribution: $PRETTY_NAME" ;;
+	case "$ID:${VERSION_ID%%.*}" in
+	rhel:9 | almalinux:9 | rocky:9) OS_FAMILY="rhel" ;;
+	debian:12) OS_FAMILY="debian" ;;
+	ubuntu:22 | ubuntu:24) OS_FAMILY="debian" ;;
+	*) die "unsupported distribution: $PRETTY_NAME (supported: RHEL/AlmaLinux/Rocky 9, Debian 12, Ubuntu 22.04/24.04)" ;;
 	esac
 	case "$(uname -m)" in
 	x86_64) ARCH="amd64" ;;
@@ -228,9 +221,9 @@ EOF
 	fi
 	log "fetching the ClamAV signature database (the first run downloads all of it)"
 	systemctl stop clamav-freshclam.service || true
-	# clamd reads the database as another user, so the files must be world
-	# readable; this script's own umask would make them owner and group only.
-	(umask 022 && freshclam --quiet)
+	# clamd reads the database as another user. An earlier version of this script
+	# ran freshclam under umask 027 and left the files unreadable to it.
+	freshclam --quiet
 	find /var/lib/clamav -maxdepth 1 -type f -name '*.c[lv]d' -exec chmod 0644 {} +
 	systemctl enable --now clamav-freshclam.service
 	systemctl enable --now "$(clamd_unit)"
@@ -420,14 +413,17 @@ activate() {
 	mv -Tf "$PREFIX/.current.new" "$PREFIX/current"
 }
 
+# prune_releases keeps the newest KEEP_RELEASES releases by install time (a
+# build id does not sort by age), and always the running one and the rollback
+# target recorded on the first line of previous-release.
 prune_releases() {
-	local keep current
+	local keep="" current
 	current="$(current_version)"
-	keep="$(cat "$STATE/previous-release" 2>/dev/null || true)"
-	find "$PREFIX/releases" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V | head -n "-${KEEP_RELEASES}" |
-		while read -r v; do
-			[[ "$v" == "$current" || "$v" == "$keep" ]] || rm -rf "${PREFIX:?}/releases/$v"
-		done
+	if [[ -s "$STATE/previous-release" ]]; then read -r keep <"$STATE/previous-release"; fi
+	find "$PREFIX/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %f\n' | sort -rn |
+		tail -n "+$((KEEP_RELEASES + 1))" | while read -r _ v; do
+		[[ "$v" == "$current" || "$v" == "$keep" ]] || rm -rf "${PREFIX:?}/releases/$v"
+	done
 }
 
 # ----------------------------------------------------------------- systemd ---
@@ -541,6 +537,7 @@ open_firewall() {
 backup_database() {
 	local dest
 	dest="$STATE/backup/email-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
+	install -m 0600 /dev/null "$dest.tmp"
 	mariadb-dump --single-transaction --routines --triggers email | gzip >"$dest.tmp"
 	sync "$dest.tmp"
 	mv -f "$dest.tmp" "$dest"
@@ -582,8 +579,10 @@ Next steps:
        $0 admin create-domain example.com
        $0 admin create-user postmaster@example.com '<password>'
        $0 admin grant-admin postmaster@example.com system
-  2. Reach the admin panel through an SSH tunnel to 127.0.0.1:8608, set the
-     DNS records it prescribes, and switch TLS to ACME there.
+  2. Open the admin panel through an SSH tunnel (ssh -L 8608:127.0.0.1:8608
+     root@<server>, then https://127.0.0.1:8608/admin/ui/ in a browser; the
+     certificate is the self-signed internal one), set the DNS records it
+     prescribes, and switch TLS to ACME there.
   3. Back up $CONFIG off this server: without it the stored keys are lost.
 EOF
 }
@@ -599,10 +598,12 @@ cmd_update() {
 		return 0
 	fi
 	place_release "$new"
-	dump="$(backup_database)"
-	log "database backed up to $dump"
 	write_units
 	stop_all
+	# The dump is taken with every daemon stopped, so it is the exact state the
+	# old release left and a rollback returns to it.
+	dump="$(backup_database)"
+	log "database backed up to $dump"
 	printf '%s\n%s\n' "$old" "$dump" | write_file "$STATE/previous-release" 0600 root:root
 	activate "$new"
 	admin_cli ensure-schema >/dev/null
@@ -611,6 +612,19 @@ cmd_update() {
 	register_health_targets
 	prune_releases
 	log "updated hermEX $old -> $new"
+}
+
+# check_rollback_schema refuses a rollback across a migration of the relay spool
+# or the mailbox stores. Those live in files on this server, are migrated in
+# place by the newer release and are not in the database dump, so the older
+# release would refuse every migrated store as newer than itself.
+check_rollback_schema() {
+	local previous="$PREFIX/releases/$1/SCHEMA" current="$PREFIX/releases/$2/SCHEMA" db
+	[[ -s "$previous" && -s "$current" ]] || die "a release lacks its SCHEMA list; cannot tell whether a rollback is safe"
+	for db in relay objects index; do
+		[[ "$(grep "^$db " "$previous")" == "$(grep "^$db " "$current")" ]] ||
+			die "$2 migrated the $db schema past $1; the mailboxes cannot be rolled back with the database dump"
+	done
 }
 
 cmd_rollback() {
@@ -623,8 +637,12 @@ cmd_rollback() {
 	current="$(current_version)"
 	[[ -d "$PREFIX/releases/$previous" ]] || die "release $previous is no longer on disk"
 	[[ -s "$dump" ]] || die "the database backup $dump is missing"
+	check_rollback_schema "$previous" "$current"
 	log "rolling back $current -> $previous and restoring $dump"
 	stop_all
+	# The dump holds only what the old schema had; recreating the database first
+	# also removes the tables and rows the newer release's migrations added.
+	mariadb -e 'DROP DATABASE email; CREATE DATABASE email CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;'
 	gunzip -c "$dump" | mariadb email
 	activate "$previous"
 	start_all

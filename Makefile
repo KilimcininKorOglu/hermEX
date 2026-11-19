@@ -93,6 +93,9 @@ PKG_DIR := $(BIN)/pkg
 # installer keys each release directory on it, so two builds of one VERSION
 # never share a directory.
 BUILD_ID := $(if $(HERMEX_TAGGED),$(HERMEX_VERSION),$(HERMEX_VERSION)-dev+$(HERMEX_COMMIT))
+# SCHEMA lists the newest migration of each migrated database, so the installer
+# can tell whether a rollback crosses a schema change it cannot undo.
+SCHEMA_SETS := directory=internal/directory/migrations relay=internal/relay/migrations objects=internal/objectstore/migrations/objects index=internal/objectstore/migrations/index
 
 ## package: release archives for linux/amd64 and linux/arm64 + SHA256SUMS into bin/pkg/
 package: build spa
@@ -107,6 +110,9 @@ package: build spa
 		cp -R internal/webmail2/dist $$stage/webmail2 && \
 		cp install.sh VERSION $$stage/ && \
 		echo "$(BUILD_ID)" > $$stage/BUILD && \
+		for s in $(SCHEMA_SETS); do \
+			echo "$${s%%=*} $$(ls $${s#*=} | sort | tail -1 | sed -E 's/^0*([0-9]+)_.*/\1/')"; \
+		done > $$stage/SCHEMA && \
 		(cd $(PKG_DIR)/$$name && COPYFILE_DISABLE=1 tar --no-xattrs -czf ../$$name.tar.gz hermex) && \
 		rm -rf $(PKG_DIR)/$$name || exit 1; \
 	done
