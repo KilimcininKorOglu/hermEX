@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"hermex/internal/directory"
+	"hermex/internal/objectstore"
 )
 
 // defaultIMAPLiteralMB and defaultEWSRequestMB mirror each protocol server's built-in
@@ -18,6 +19,9 @@ const (
 	defaultDAVVCardMB          = 4
 	defaultWebmailRequestMB    = 40
 	defaultMapiRequestMB       = 32
+	// defaultMapiUploadMB mirrors the object store's built-in cap on one message a
+	// MAPI client uploads across many requests.
+	defaultMapiUploadMB = objectstore.DefaultMaxUploadMessage >> 20
 	// defaultFreeBusyTargets is a count, not a size: how many mailboxes one
 	// availability request may fan out to. It mirrors each daemon's built-in value.
 	defaultFreeBusyTargets = 100
@@ -239,6 +243,7 @@ func (s *Server) fillSizeLimits(data map[string]any, failed readFailures) {
 		previewMB = sl.WebmailPreviewMaxBytes / (1024 * 1024)
 	}
 	fillCommandLineLimits(data, sl, found)
+	fillMapiUpload(data, sl, found)
 	data["IMAPLiteralMB"] = imapMB
 	data["EWSRequestMB"] = ewsMB
 	data["ActiveSyncRequestMB"] = easMB
@@ -250,6 +255,16 @@ func (s *Server) fillSizeLimits(data map[string]any, failed readFailures) {
 	data["WebmailPreviewMB"] = previewMB
 	data["TLSReportMB"] = tlsReportMB
 	fillSubscriptionTimeout(data, sl, found)
+}
+
+// fillMapiUpload sets the cap on one uploaded MAPI message on a page-data map. It
+// is filled on its own because fillSizeLimits is already at its branch budget.
+func fillMapiUpload(data map[string]any, sl directory.SizeLimits, found bool) {
+	mb := int64(defaultMapiUploadMB)
+	if found {
+		mb = sl.MapiUploadMessageBytes / (1024 * 1024)
+	}
+	data["MapiUploadMB"] = mb
 }
 
 // fillSubscriptionTimeout sets the EWS notification-subscription idle timeout on a
@@ -330,6 +345,7 @@ func (s *Server) handleUISaveLimits(w http.ResponseWriter, r *http.Request) {
 		FreeBusyMaxTargets:     int64(fbTargets),
 		WebmailPreviewMaxBytes: megabytes(mb["webmail_preview_mb"]),
 		TLSReportBytes:         megabytes(mb["tlsrpt_mb"]),
+		MapiUploadMessageBytes: megabytes(mb["mapi_upload_mb"]),
 		IMAPCommandLineBytes:   int64(imapLine),
 		POP3CommandLineBytes:   int64(pop3Line),
 		SMTPCommandLineBytes:   int64(smtpLine),
@@ -351,6 +367,7 @@ const minCommandLineBytes = 64
 var sizeLimitFields = [...]string{
 	"imap_literal_mb", "ews_request_mb", "activesync_request_mb", "dav_ical_mb",
 	"dav_vcard_mb", "webmail_request_mb", "mapi_request_mb", "webmail_preview_mb", "tlsrpt_mb",
+	"mapi_upload_mb",
 }
 
 // readSizeLimitMB reads every megabyte field, reporting false when any is below 1.

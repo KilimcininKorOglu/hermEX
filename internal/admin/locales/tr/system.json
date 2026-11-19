@@ -194,6 +194,8 @@
     "ewsRequest": "EWS en büyük SOAP isteği (MB)",
     "easRequest": "ActiveSync en büyük istek (MB)",
     "mapiRequest": "MAPI/HTTP en büyük istek (MB)",
+    "mapiUpload": "MAPI en büyük yüklenen mesaj (MB)",
+    "mapiUploadHint": "Outlook'un birden çok istekle yüklediği tek bir mesaj.",
     "davICal": "CalDAV en büyük iCalendar PUT (MB)",
     "davVCard": "CardDAV en büyük vCard PUT (MB)",
     "webmailRequest": "Webmail en büyük istek (MB)",

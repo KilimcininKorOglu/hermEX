@@ -81,8 +81,9 @@ func main() {
 	mta.StartMessageSizeLimit("hermex-mapihttp", logger, dir.GetMessageSizeSettings)
 	// MAPI/HTTP request-body cap: read at startup and re-read every minute so an admin's
 	// change applies without a restart; 0 keeps the built-in default.
-	applyMapiSizeLimit(logger, dir.GetSizeLimits, mapihttp.SetMaxRequestBody)
-	go runMapiSizeMaintenance(logger, dir.GetSizeLimits, mapihttp.SetMaxRequestBody)
+	sizeSetters := mapiSizeSetters{requestBody: mapihttp.SetMaxRequestBody, uploadMessage: objectstore.SetMaxUploadMessage}
+	applyMapiSizeLimit(logger, dir.GetSizeLimits, sizeSetters)
+	go runMapiSizeMaintenance(logger, dir.GetSizeLimits, sizeSetters)
 	// Per-client HTTP request limiter: read the stored settings at startup and
 	// re-read them every minute, so an operator's change applies without a restart.
 	// It is off until an operator enables it, and any read failure leaves it as it
@@ -183,27 +184,35 @@ func runUntilSignal(cfg *config.Config, db *sql.DB, provider *tlscert.Provider, 
 	}
 }
 
-// applyMapiSizeLimit reads the stored MAPI/HTTP request-body cap and applies it. A
-// missing row or a read error leaves the cap unchanged, so a settings failure never
-// shrinks it unexpectedly.
-func applyMapiSizeLimit(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
+// mapiSizeSetters are the two caps this daemon applies from the stored size
+// limits: one request body, and one message uploaded across many requests.
+type mapiSizeSetters struct {
+	requestBody   func(int64)
+	uploadMessage func(int64)
+}
+
+// applyMapiSizeLimit reads the stored MAPI caps and applies them. A missing row or a
+// read error leaves both unchanged, so a settings failure never shrinks them
+// unexpectedly.
+func applyMapiSizeLimit(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), set mapiSizeSetters) {
 	s, found, err := read()
 	if err != nil {
-		logging.SettingsReadFailed(logger, "hermex-mapihttp", "size-limits", "leaving the request cap unchanged", err)
+		logging.SettingsReadFailed(logger, "hermex-mapihttp", "size-limits", "leaving the request caps unchanged", err)
 		return
 	}
 	if !found {
 		return
 	}
-	setRequestBody(s.MapiRequestBytes)
+	set.requestBody(s.MapiRequestBytes)
+	set.uploadMessage(s.MapiUploadMessageBytes)
 }
 
-// runMapiSizeMaintenance re-applies the MAPI/HTTP request-body cap every minute so an
-// admin change takes effect without a restart. It runs until the process exits.
-func runMapiSizeMaintenance(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
+// runMapiSizeMaintenance re-applies the MAPI caps every minute so an admin change
+// takes effect without a restart. It runs until the process exits.
+func runMapiSizeMaintenance(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), set mapiSizeSetters) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for range tick.C {
-		applyMapiSizeLimit(logger, read, setRequestBody)
+		applyMapiSizeLimit(logger, read, set)
 	}
 }

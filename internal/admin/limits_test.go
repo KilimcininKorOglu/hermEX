@@ -41,6 +41,7 @@ func TestSaveLimits(t *testing.T) {
 		"imap_literal_mb": {"10"}, "ews_request_mb": {"4"}, "activesync_request_mb": {"2"},
 		"dav_ical_mb": {"3"}, "dav_vcard_mb": {"5"}, "webmail_request_mb": {"20"},
 		"mapi_request_mb": {"16"}, "freebusy_max_targets": {"25"}, "webmail_preview_mb": {"6"}, "tlsrpt_mb": {"7"},
+		"mapi_upload_mb":  {"90"},
 		"imap_line_bytes": {"32768"}, "pop3_line_bytes": {"4096"}, "smtp_line_bytes": {"1024"},
 		"ews_subscription_timeout_min": {"720"},
 	})
@@ -57,6 +58,7 @@ func TestSaveLimits(t *testing.T) {
 	wantEq(t, d.sizeLimits.MapiRequestBytes, int64(16*1024*1024), "MAPI request bytes")
 	wantEq(t, d.sizeLimits.WebmailPreviewMaxBytes, int64(6*1024*1024), "inline preview bytes")
 	wantEq(t, d.sizeLimits.TLSReportBytes, int64(7*1024*1024), "TLS report bytes")
+	wantEq(t, d.sizeLimits.MapiUploadMessageBytes, int64(90*1024*1024), "MAPI uploaded message bytes")
 	// The free/busy cap is a count, so it must persist unscaled by the megabyte factor.
 	wantEq(t, d.sizeLimits.FreeBusyMaxTargets, int64(25), "free/busy target cap")
 	// The command-line caps are byte counts, so they persist unscaled too.
@@ -79,6 +81,7 @@ func TestSaveLimitsRejectsAnOverflowingSize(t *testing.T) {
 		"imap_literal_mb": {"10"}, "ews_request_mb": {"17592186044416"}, "activesync_request_mb": {"2"},
 		"dav_ical_mb": {"3"}, "dav_vcard_mb": {"5"}, "webmail_request_mb": {"20"},
 		"mapi_request_mb": {"16"}, "freebusy_max_targets": {"25"}, "webmail_preview_mb": {"6"}, "tlsrpt_mb": {"7"},
+		"mapi_upload_mb":  {"90"},
 		"imap_line_bytes": {"32768"}, "pop3_line_bytes": {"4096"}, "smtp_line_bytes": {"1024"},
 		"ews_subscription_timeout_min": {"720"},
 	})
@@ -97,6 +100,7 @@ func TestSaveLimitsRejectsATinyCommandLine(t *testing.T) {
 		"imap_literal_mb": {"10"}, "ews_request_mb": {"4"}, "activesync_request_mb": {"2"},
 		"dav_ical_mb": {"3"}, "dav_vcard_mb": {"5"}, "webmail_request_mb": {"20"},
 		"mapi_request_mb": {"16"}, "freebusy_max_targets": {"25"}, "webmail_preview_mb": {"6"}, "tlsrpt_mb": {"7"},
+		"mapi_upload_mb":  {"90"},
 		"imap_line_bytes": {"8"}, "pop3_line_bytes": {"4096"}, "smtp_line_bytes": {"1024"},
 		"ews_subscription_timeout_min": {"30"},
 	})
@@ -119,6 +123,7 @@ func TestSaveLimitsRejectsAnOutOfRangeSubscriptionTimeout(t *testing.T) {
 		"imap_literal_mb": {"10"}, "ews_request_mb": {"4"}, "activesync_request_mb": {"2"},
 		"dav_ical_mb": {"3"}, "dav_vcard_mb": {"5"}, "webmail_request_mb": {"20"},
 		"mapi_request_mb": {"16"}, "freebusy_max_targets": {"25"}, "webmail_preview_mb": {"6"}, "tlsrpt_mb": {"7"},
+		"mapi_upload_mb":  {"90"},
 		"imap_line_bytes": {"32768"}, "pop3_line_bytes": {"4096"}, "smtp_line_bytes": {"1024"},
 		"ews_subscription_timeout_min": {"5000"},
 	})

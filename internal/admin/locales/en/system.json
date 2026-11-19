@@ -194,6 +194,8 @@
     "ewsRequest": "EWS maximum SOAP request (MB)",
     "easRequest": "ActiveSync maximum request (MB)",
     "mapiRequest": "MAPI/HTTP maximum request (MB)",
+    "mapiUpload": "MAPI maximum uploaded message (MB)",
+    "mapiUploadHint": "One message Outlook uploads across many requests.",
     "davICal": "CalDAV maximum iCalendar PUT (MB)",
     "davVCard": "CardDAV maximum vCard PUT (MB)",
     "webmailRequest": "Webmail maximum request (MB)",

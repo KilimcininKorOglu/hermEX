@@ -542,6 +542,50 @@ func TestImportRejectsEmbedded(t *testing.T) {
 	}
 }
 
+// TestImportRefusesAStreamPastTheUploadCap feeds a message stream that declares a
+// 4 GiB binary value ([MS-OXCFXICS] 2.2.4.1.1: a u32 byte count precedes the
+// value) and then keeps sending its bytes, chunk after chunk. The collector holds
+// every byte until the value completes, so without a cap one client grows the
+// daemon's memory without limit. Past the operator's cap the upload is refused;
+// a message under the cap still loads.
+func TestImportRefusesAStreamPastTheUploadCap(t *testing.T) {
+	SetMaxUploadMessage(64 << 10)
+	t.Cleanup(func() { SetMaxUploadMessage(0) })
+	s := openSeededStore(t)
+
+	um, err := s.ImportMessageChange(int64(mapi.PrivateFIDContacts), 0, importHeader(t, s, 0xE003))
+	if err != nil {
+		t.Fatal(err)
+	}
+	col := NewMessageCollector(um)
+	// A PtBinary property (tag 0x10000102) whose u32 byte count is 0xFFFFFFFF.
+	header := []byte{0x02, 0x01, 0x00, 0x10, 0xFF, 0xFF, 0xFF, 0xFF}
+	if err := col.PutBuffer(header); err != nil {
+		t.Fatalf("the header alone was refused: %v", err)
+	}
+	chunk := make([]byte, 16<<10)
+	var refused error
+	for range 8 {
+		if refused = col.PutBuffer(chunk); refused != nil {
+			break
+		}
+	}
+	if !errors.Is(refused, ErrUploadTooLarge) {
+		t.Fatalf("128 KiB fed against a 64 KiB cap: err = %v, want ErrUploadTooLarge", refused)
+	}
+
+	um, err = s.ImportMessageChange(int64(mapi.PrivateFIDContacts), 0, importHeader(t, s, 0xE004))
+	if err != nil {
+		t.Fatal(err)
+	}
+	small := encodeStream(t, ics.Item{Prop: &ics.StreamProp{
+		Tag: mapi.PropTag(0x0037001F), Value: strings.Repeat("s", 1000),
+	}})
+	if err := NewMessageCollector(um).PutBuffer(small); err != nil {
+		t.Errorf("a message under the cap was refused: %v", err)
+	}
+}
+
 // TestImportRejectsStateMetaTag checks that an ICS state idset meta-tag in the
 // content stream is rejected, state travels via the upload-state-stream ROPs, and
 // silently storing it as a message property would corrupt the message.

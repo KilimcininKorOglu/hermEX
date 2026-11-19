@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"hermex/internal/ics"
@@ -133,6 +134,33 @@ type MessageCollector struct {
 	um     *UploadMessage
 	parser ics.Parser
 	frame  *collectorFrame // the open recipient/attachment, or nil at the message root
+	fed    int64           // stream bytes received so far, held against the upload cap
+}
+
+// DefaultMaxUploadMessage bounds one uploaded message stream when no operator
+// limit is set: 150 MiB, the largest message Exchange Online accepts.
+const DefaultMaxUploadMessage = 150 << 20
+
+// ErrUploadTooLarge refuses a message stream past the upload cap.
+var ErrUploadTooLarge = errors.New("objectstore: uploaded message exceeds the size limit")
+
+// maxUploadMessage is the operator's cap on one uploaded message stream; 0 selects
+// DefaultMaxUploadMessage. The collector keeps every byte of a message in memory
+// until the message is committed, and the client decides how many chunks it sends,
+// so the cap is what bounds that memory.
+var maxUploadMessage atomic.Int64
+
+// SetMaxUploadMessage sets the cap on one uploaded message stream, in bytes. Zero
+// or a negative value restores the default: the cap bounds memory the client
+// controls, so "no limit" is never an option.
+func SetMaxUploadMessage(n int64) { maxUploadMessage.Store(max(n, 0)) }
+
+// uploadCap returns the cap in force.
+func uploadCap() int64 {
+	if n := maxUploadMessage.Load(); n > 0 {
+		return n
+	}
+	return DefaultMaxUploadMessage
 }
 
 // collectorFrame is one open child object on the (single-level) marker stack: the
@@ -152,6 +180,10 @@ func NewMessageCollector(um *UploadMessage) *MessageCollector {
 // complete element it now holds. A chunk may split an element at any byte
 // boundary; the parser retains the partial element until the next call.
 func (c *MessageCollector) PutBuffer(chunk []byte) error {
+	c.fed += int64(len(chunk))
+	if c.fed > uploadCap() {
+		return ErrUploadTooLarge
+	}
 	c.parser.Feed(chunk)
 	for {
 		it, ok, err := c.parser.Next()
