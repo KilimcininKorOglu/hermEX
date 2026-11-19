@@ -227,6 +227,16 @@ func TestUIRemoveFolderPerm(t *testing.T) {
 	if store.rmPermDir != "/mb/alice" || store.rmPermFolder != 12 || store.rmPermMember != 5 {
 		t.Errorf("captured = %q/%d/%d, want /mb/alice/12/5", store.rmPermDir, store.rmPermFolder, store.rmPermMember)
 	}
+
+	// A member id that is not a number read as 0, the default member, so a typo
+	// removed the folder's default grant; it is now refused and nothing is removed.
+	store.rmPermDir = ""
+	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/users/alice@hermex.test/folder-perms/remove", session, csrf,
+		url.Values{"fid": {"12"}, "memberID": {"five"}}), http.StatusOK, "forged member id")
+	wantContains(t, body, "member to remove is not valid", "a forged member id is refused")
+	if store.rmPermDir != "" {
+		t.Errorf("a forged member id removed member %d", store.rmPermMember)
+	}
 }
 
 // knownAlice is a directory that resolves only alice's primary address, so a grant to

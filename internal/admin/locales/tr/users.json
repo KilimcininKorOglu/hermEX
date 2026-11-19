@@ -250,6 +250,7 @@
     "lookupFailed": "Kullanıcı aranamadı.",
     "noSuchMember": "Böyle bir kullanıcı yok. İzni alıcının birincil adresine verin.",
     "rightsInvalid": "Listeden bir izin düzeyi seçin.",
+    "memberInvalid": "Kaldırılacak üye geçerli değil. Sayfayı yenileyip yeniden deneyin.",
     "grantFailed": "İzin verilemedi.",
     "removeFailed": "Kaldırılamadı."
   },

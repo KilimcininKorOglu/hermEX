@@ -250,6 +250,7 @@
     "lookupFailed": "Could not look up user.",
     "noSuchMember": "No such user. Grant to the recipient's primary address.",
     "rightsInvalid": "Choose a permission level from the list.",
+    "memberInvalid": "The member to remove is not valid. Reload the page and try again.",
     "grantFailed": "Could not grant.",
     "removeFailed": "Could not remove."
   },

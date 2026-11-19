@@ -100,6 +100,14 @@ func TestPublicFoldersManage(t *testing.T) {
 	wantContains(t, forged, "Choose a permission level", "a forged rights value is refused")
 	wantContains(t, forged, "<td>poster@local.test</td><td>Author</td>", "the refused change keeps the grant")
 
+	// A member id that is not a number read as 0, the default ("anyone") member, so a
+	// typo removed the org-wide grant; it is now refused and the row stays.
+	badRemove := wantBody(t, htmxPOST(t, ts, "/admin/ui/public-folders/grant/remove", session, csrf,
+		url.Values{"domain": {"local.test"}, "fid": {strconv.FormatInt(fid, 10)}, "memberID": {"x"}}),
+		http.StatusOK, "forged member id")
+	wantContains(t, badRemove, "member to remove is not valid", "a forged member id is refused")
+	wantContains(t, badRemove, "<td>anyone</td><td>Reviewer</td>", "the default grant survives")
+
 	deleteFolder := func(id int64) string {
 		t.Helper()
 		return wantBody(t, htmxPOST(t, ts, "/admin/ui/public-folders/folder/delete", session, csrf,

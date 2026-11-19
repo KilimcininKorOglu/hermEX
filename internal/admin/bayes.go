@@ -558,6 +558,14 @@ func formRights(r *http.Request) (uint32, bool) {
 	return uint32(n), err == nil
 }
 
+// formMemberID reads the permission member id of a remove form. ok is false when it
+// is not a number: read as 0 it named the default member, so a typo removed the
+// folder's default grant.
+func formMemberID(r *http.Request) (int64, bool) {
+	n, err := strconv.ParseInt(strings.TrimSpace(r.PostFormValue("memberID")), 10, 64)
+	return n, err == nil
+}
+
 // formFloat reads a non-negative float form field, returning 0 when absent or
 // unparseable so the caller's range check rejects it.
 func formFloat(r *http.Request, name string) float64 {

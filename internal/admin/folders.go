@@ -294,9 +294,11 @@ func (s *Server) handleUIRemoveFolderPerm(w http.ResponseWriter, r *http.Request
 		return
 	}
 	fid, _ := strconv.ParseInt(r.PostFormValue("fid"), 10, 64)
-	memberID, _ := strconv.ParseInt(r.PostFormValue("memberID"), 10, 64)
+	memberID, memberOK := formMemberID(r)
 	errMsg := ""
-	if err := s.store.RemoveFolderPermission(u.Maildir, fid, memberID); err != nil {
+	if !memberOK {
+		errMsg = "folderPerms.memberInvalid"
+	} else if err := s.store.RemoveFolderPermission(u.Maildir, fid, memberID); err != nil {
 		errMsg = s.notice("folderPerms.removeFailed", err)
 	}
 	s.renderFolderPerms(w, r, u.Username, u.Maildir, fid, csrfCookieValue(r), errMsg)

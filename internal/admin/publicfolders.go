@@ -176,10 +176,12 @@ func (s *Server) handleUIRemovePublicGrant(w http.ResponseWriter, r *http.Reques
 	}
 	domain := r.PostFormValue("domain")
 	fid, _ := strconv.ParseInt(r.PostFormValue("fid"), 10, 64)
-	memberID, _ := strconv.ParseInt(r.PostFormValue("memberID"), 10, 64)
+	memberID, memberOK := formMemberID(r)
 	errMsg := ""
 	change := objectstore.PermissionChange{Op: objectstore.PermRemove, MemberID: memberID}
-	if err := s.pub.Grant(domain, fid, change); err != nil {
+	if !memberOK {
+		errMsg = "folderPerms.memberInvalid"
+	} else if err := s.pub.Grant(domain, fid, change); err != nil {
 		errMsg = s.notice("publicFolders.removeFailed", err)
 	}
 	s.renderPublicPanel(w, r, domain, csrfCookieValue(r), errMsg)
