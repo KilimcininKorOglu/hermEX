@@ -110,9 +110,22 @@ func TestAdminAssignOrgDomain(t *testing.T) {
 
 // TestAdminOrgRequiresSystem proves a domain admin cannot manage organizations.
 func TestAdminOrgRequiresSystem(t *testing.T) {
-	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}}}
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		orgs: map[int64]directory.OrgInfo{1: {ID: 1, Name: "Acme"}}}
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
+
+	// Attaching a domain to an organization hands the organization's admins that
+	// domain, so the attach is refused on both surfaces, and so is every org write.
+	wantStatus(t, authedPUT(t, ts, "/admin/orgs/1/domains/1", session, csrf, ""), http.StatusForbidden, "attach")
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/orgs/1/domains", session, csrf, url.Values{"domainID": {"1"}}),
+		http.StatusForbidden, "UI attach")
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/orgs", session, csrf, url.Values{"name": {"Evil"}}), http.StatusForbidden, "UI create")
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/orgs/1/delete", session, csrf, url.Values{}), http.StatusForbidden, "UI delete")
+	wantEq(t, d.assignDomainID, int64(0), "the domain a refused attach reached")
+	if len(d.orgs) != 1 || d.orgs[1].Name != "Acme" {
+		t.Errorf("a domain admin changed the organizations: %+v", d.orgs)
+	}
 
 	get := authedGET(t, ts, "/admin/orgs", session)
 	get.Body.Close()
