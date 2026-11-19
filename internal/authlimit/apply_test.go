@@ -107,8 +107,8 @@ func TestApplyWithNoRowKeepsTheDefaults(t *testing.T) {
 }
 
 // TestPruneDropsElapsedCountersButNotLockouts proves the periodic sweep bounds the
-// tracking table without releasing a key that is still serving its lockout. The
-// table otherwise only swept when it hit its 100k cap, at which point it fails open.
+// tracking table without releasing a key that is still serving its lockout.
+// Without it the table fills to its cap and then evicts by recency alone.
 func TestPruneDropsElapsedCountersButNotLockouts(t *testing.T) {
 	now := time.Unix(0, 0)
 	l := New(2, time.Minute, time.Hour)
@@ -125,7 +125,7 @@ func TestPruneDropsElapsedCountersButNotLockouts(t *testing.T) {
 	_, lockedKept := l.attempts[accountKey("locked")]
 	l.mu.Unlock()
 	if staleKept {
-		t.Error("an elapsed counter was kept, so the table grows to its cap and fails open")
+		t.Error("an elapsed counter was kept, so the table grows to its cap")
 	}
 	if !lockedKept {
 		t.Error("an entry still inside its lockout was pruned, releasing it early")

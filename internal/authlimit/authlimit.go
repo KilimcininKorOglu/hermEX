@@ -244,8 +244,9 @@ func (l *Limiter) remove(e *list.Element) {
 }
 
 // Prune drops entries whose window has elapsed and are not actively locked out. A
-// daemon calls it periodically so the tracking table does not grow to its cap and
-// start failing open on hosts that see many distinct client addresses.
+// daemon calls it periodically so the tracking table does not grow to its cap on
+// hosts that see many distinct client addresses, where a full table evicts live
+// counters by recency alone.
 func (l *Limiter) Prune() {
 	now := l.now()
 	window := time.Duration(l.window.Load())
