@@ -146,8 +146,14 @@ func TestNotificationWaitWakesMidWait(t *testing.T) {
 		t.Fatal("session not found after Connect")
 	}
 	subscribeInbox(t, sc.ropSess)
+	// A window far longer than the delivery below can take, even on a loaded
+	// machine: with the shared 200ms window a slow delivery landed after the wait
+	// had already timed out. Returning well before the window ends is what proves
+	// the delivery woke it.
+	srv.notifyWait = 10 * time.Second
 
 	flags := make(chan uint32, 1)
+	start := time.Now()
 	go func() { flags <- notificationWaitFlags(t, ts, sid) }()
 
 	// Deliver after the wait has begun polling a quiet mailbox, so the wake can only
@@ -168,7 +174,10 @@ func TestNotificationWaitWakesMidWait(t *testing.T) {
 		if got != flagNotificationPending {
 			t.Errorf("mid-wait delivery: EventPending = %d, want %d (the long-poll did not wake on the delivery)", got, flagNotificationPending)
 		}
-	case <-time.After(2 * time.Second):
+		if elapsed := time.Since(start); elapsed >= srv.notifyWait {
+			t.Errorf("NotificationWait took %v, the whole window: it timed out instead of waking", elapsed)
+		}
+	case <-time.After(15 * time.Second):
 		t.Fatal("NotificationWait never returned")
 	}
 }
