@@ -63,6 +63,17 @@ func TestReadLineAtTheLimit(t *testing.T) {
 	if _, err := ReadLine(reader(exact+"x\r\n"), 16); !errors.Is(err, ErrTooLong) {
 		t.Errorf("one byte past the limit = %v, want ErrTooLong", err)
 	}
+	// A bare-LF line is held to the same limit: the room left for a CR must not
+	// admit a data byte in its place.
+	if got, err := ReadLine(reader(exact+"\n"), 16); err != nil || got != exact {
+		t.Errorf("a bare-LF line of exactly the limit = %q, %v, want it admitted", got, err)
+	}
+	if got, err := ReadLine(reader(exact+"x\n"), 16); !errors.Is(err, ErrTooLong) {
+		t.Errorf("a bare-LF line one byte past the limit = %q, %v, want ErrTooLong", got, err)
+	}
+	if got, err := ReadLine(reader(exact+"\r\r\n"), 16); !errors.Is(err, ErrTooLong) {
+		t.Errorf("a line ending in a stray CR past the limit = %q, %v, want ErrTooLong", got, err)
+	}
 }
 
 // TestReadLineUnboundedReadsEverything proves a limit of zero is unbounded, the

@@ -31,10 +31,7 @@ func ReadLine(br *bufio.Reader, max int) (string, error) {
 			}
 			return string(buf), nil
 		}
-		// The limit counts the line itself, not its terminator, so the buffer is
-		// allowed to reach one byte past it: that byte is the CR of a CRLF, which
-		// is stripped above.
-		if max > 0 && len(buf) > max {
+		if overLimit(len(buf), max, b) {
 			if err := discardLine(br); err != nil {
 				return "", err
 			}
@@ -46,6 +43,17 @@ func ReadLine(br *bufio.Reader, max int) (string, error) {
 
 // discardLine reads and drops bytes up to and including the next LF, so the stream
 // resumes at a line boundary.
+// overLimit reports whether appending b to a buffer of n bytes passes a limit of
+// max (0 is unbounded). The limit counts the line itself, not its terminator, so
+// the buffer may reach one byte past it only with the CR of a CRLF, which the
+// reader strips; any other byte there would admit a bare-LF line past the limit.
+func overLimit(n, max int, b byte) bool {
+	if max <= 0 {
+		return false
+	}
+	return n > max || (n == max && b != '\r')
+}
+
 func discardLine(br *bufio.Reader) error {
 	for {
 		b, err := br.ReadByte()
