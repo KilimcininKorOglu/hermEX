@@ -10,10 +10,11 @@ import (
 	"testing"
 )
 
-// directWrites are the os calls that create or replace a file without this
-// package's temporary-file, sync and rename sequence.
-var directWrites = map[string]bool{
-	"WriteFile": true, "Create": true, "CreateTemp": true, "Rename": true, "OpenFile": true,
+// directWrites are, per import path, the calls that create or replace a file
+// without this package's temporary-file, sync and rename sequence.
+var directWrites = map[string]map[string]bool{
+	"os":        {"WriteFile": true, "Create": true, "CreateTemp": true, "Rename": true, "OpenFile": true},
+	"io/ioutil": {"WriteFile": true, "TempFile": true},
 }
 
 // allowedDirectWrites names each production file that may still call one of
@@ -72,14 +73,38 @@ func checkFile(t *testing.T, path, rel string) {
 	if err != nil {
 		t.Fatalf("parse %s: %v", rel, err)
 	}
+	names := writeImports(t, fset, f)
 	ast.Inspect(f, func(n ast.Node) bool {
 		sel, ok := n.(*ast.SelectorExpr)
 		if !ok {
 			return true
 		}
-		if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "os" && directWrites[sel.Sel.Name] {
-			t.Errorf("%s: os.%s writes a file directly; use atomicfile", fset.Position(sel.Pos()), sel.Sel.Name)
+		if pkg, ok := sel.X.(*ast.Ident); ok && directWrites[names[pkg.Name]][sel.Sel.Name] {
+			t.Errorf("%s: %s.%s writes a file directly; use atomicfile", fset.Position(sel.Pos()), names[pkg.Name], sel.Sel.Name)
 		}
 		return true
 	})
+}
+
+// writeImports maps the name each guarded package is called by in f, its own or
+// an alias, to the package's import path, so a renamed import cannot hide a
+// direct write. A dot import would hide the package name altogether and fails.
+func writeImports(t *testing.T, fset *token.FileSet, f *ast.File) map[string]string {
+	t.Helper()
+	names := map[string]string{}
+	for _, imp := range f.Imports {
+		p := strings.Trim(imp.Path.Value, `"`)
+		if directWrites[p] == nil {
+			continue
+		}
+		name := filepath.Base(p)
+		if imp.Name != nil {
+			name = imp.Name.Name
+		}
+		if name == "." {
+			t.Errorf("%s: dot import of %s hides direct file writes from this check", fset.Position(imp.Pos()), p)
+		}
+		names[name] = p
+	}
+	return names
 }
