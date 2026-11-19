@@ -14,7 +14,7 @@
 package authlimit
 
 import (
-	"net"
+	"hermex/internal/clientnet"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -34,33 +34,13 @@ const (
 // locking a whole site out of webmail over five typos is worse than the attack.
 const ipFailFactor = 4
 
-// ipv6HostBits is the IPv6 prefix one subscriber is routed (RFC 6177 assigns a
-// site at least a /64): every address inside it is the same client.
-const ipv6HostBits = 64
-
-// ipKey reduces an "ip:port" remote address to the client it names, so every
-// connection from one host shares a counter; the source port changes on each new
-// connection. An IPv6 address is cut to its /64, because a single host may pick
-// any of 2^64 addresses there: per address, it would never reach the threshold,
-// and its fresh keys would fill the table until the limiter fails open for every
-// account. An address that does not parse is used as given.
+// ipKey reduces a remote address to the address-axis key of the client it names
+// (clientnet.Key: the port dropped, an IPv6 address cut to its /64).
 func ipKey(remoteAddr string) string {
-	if remoteAddr == "" {
-		return ""
+	if k := clientnet.Key(remoteAddr); k != "" {
+		return ipPrefix + k
 	}
-	host := remoteAddr
-	if h, _, err := net.SplitHostPort(remoteAddr); err == nil {
-		host = h
-	}
-	ip := net.ParseIP(host)
-	switch {
-	case ip == nil:
-		return ipPrefix + host
-	case ip.To4() != nil:
-		return ipPrefix + ip.To4().String()
-	default:
-		return ipPrefix + ip.Mask(net.CIDRMask(ipv6HostBits, 128)).String() + "/64"
-	}
+	return ""
 }
 
 // accountKey reduces a login name to its counter key, so a login differing only
