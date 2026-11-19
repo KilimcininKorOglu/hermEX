@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -341,6 +342,26 @@ func TestTruncated(t *testing.T) {
 	full := Marshal(Elem(FHFolderSync, Str(FHSyncKey, "0")))
 	if _, err := Unmarshal(full[:len(full)-1]); !errors.Is(err, ErrUnderflow) {
 		t.Errorf("err = %v, want ErrUnderflow", err)
+	}
+}
+
+// TestAnOpaqueLongerThanTheDocumentAllocatesNothing declares a 256 MiB OPAQUE in
+// a document of a few bytes, which a client can send after it authenticates. The
+// length must be checked against what the document holds before any buffer of
+// that size is made, so the request fails with ErrUnderflow and the server does
+// not allocate what the client merely claimed.
+func TestAnOpaqueLongerThanTheDocumentAllocatesNothing(t *testing.T) {
+	// Sync with content, OPAQUE, mb_u_int32 268435456 (0x81 0x80 0x80 0x80 0x00), END.
+	b := append(append([]byte{}, header...), 0x45, 0xC3, 0x81, 0x80, 0x80, 0x80, 0x00, 0x01)
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	_, err := Unmarshal(b)
+	runtime.ReadMemStats(&after)
+	if !errors.Is(err, ErrUnderflow) {
+		t.Errorf("err = %v, want ErrUnderflow", err)
+	}
+	if grew := after.TotalAlloc - before.TotalAlloc; grew > 1<<20 {
+		t.Errorf("decoding allocated %d bytes for a claimed OPAQUE, want the claim refused first", grew)
 	}
 }
 
