@@ -158,6 +158,10 @@ func (s *Server) handleCreateDomain(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "a domain name is required", http.StatusBadRequest)
 		return
 	}
+	if req.MaxUser < 0 {
+		http.Error(w, "the user limit cannot be negative", http.StatusBadRequest)
+		return
+	}
 	id, err := s.dir.CreateDomain(req.Name, s.paths.HomedirFor(req.Name))
 	if err != nil {
 		s.fail(w, "could not create domain", err, http.StatusBadRequest)

@@ -195,6 +195,30 @@ func TestUIDomainSave(t *testing.T) {
 	}
 }
 
+// TestUIDomainFormsNeverReadATypoAsZero forges values that are not numbers. Read as
+// 0 they reactivated a suspended domain, lifted its user limit and detached it from
+// its organization; the edit must hand the directory -1 for each, and the create
+// form must refuse a bad limit before any domain exists.
+func TestUIDomainFormsNeverReadATypoAsZero(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	htmxPUT(t, ts, "/admin/ui/domains/3", session, csrf,
+		url.Values{"status": {"off"}, "maxUser": {"1O"}, "org": {"x"}}).Body.Close()
+	if a := d.updateDomainArg; a.Status != -1 || a.MaxUser != -1 {
+		t.Errorf("forged edit reached the directory as status %d maxUser %d, want -1/-1", a.Status, a.MaxUser)
+	}
+	if d.assignOrgID != -1 && d.assignDomainID == 3 {
+		t.Errorf("forged org reached the directory as %d, want -1", d.assignOrgID)
+	}
+
+	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/domains", session, csrf, url.Values{"name": {"new.test"}, "maxUser": {"-5"}}),
+		http.StatusOK, "create with a negative limit")
+	wantContains(t, body, "user limit must be", "the refusal")
+	wantEq(t, d.createdDomain, "", "a domain created despite the refused limit")
+}
+
 // TestUIDomainDetailRequiresSystem proves the detail page is system-admin-only.
 func TestUIDomainDetailRequiresSystem(t *testing.T) {
 	d := &fakeDir{

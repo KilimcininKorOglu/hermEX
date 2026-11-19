@@ -53,10 +53,14 @@ func (s *Server) handleUICreateDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PostFormValue("name")
-	maxUser, _ := strconv.ParseInt(r.PostFormValue("maxUser"), 10, 64)
+	maxUser := int64(formInt(r, "maxUser"))
 	var errMsg string
 	if name == "" {
 		errMsg = "domains.nameRequired"
+	} else if maxUser < 0 {
+		// Checked before the domain exists, so a typo never leaves one created with
+		// no limit.
+		errMsg = "domains.maxUserInvalid"
 	} else if id, err := s.dir.CreateDomain(name, s.paths.HomedirFor(name)); err != nil {
 		errMsg = s.notice("domains.createFailed", err)
 	} else if maxUser > 0 {
@@ -224,11 +228,13 @@ func (s *Server) handleUISaveDomain(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid domain id", http.StatusBadRequest)
 		return
 	}
-	atoi := func(v string) int64 { n, _ := strconv.ParseInt(v, 10, 64); return n }
+	// A value that is not a number reads as -1, which the directory refuses: read as
+	// 0 it would reactivate a suspended domain, lift its user limit or detach it from
+	// its organization.
 	data := map[string]any{}
 	found, err := s.dir.UpdateDomain(id, directory.DomainUpdate{
-		Status:    int(atoi(r.PostFormValue("status"))),
-		MaxUser:   atoi(r.PostFormValue("maxUser")),
+		Status:    formInt(r, "status"),
+		MaxUser:   int64(formInt(r, "maxUser")),
 		Title:     r.PostFormValue("title"),
 		Address:   r.PostFormValue("address"),
 		AdminName: r.PostFormValue("adminName"),
@@ -240,7 +246,7 @@ func (s *Server) handleUISaveDomain(w http.ResponseWriter, r *http.Request) {
 	case !found:
 		data["Error"] = "domains.noSuchDomain"
 	default:
-		if _, err := s.dir.AssignDomainToOrg(id, atoi(r.PostFormValue("org"))); err != nil {
+		if _, err := s.dir.AssignDomainToOrg(id, int64(formInt(r, "org"))); err != nil {
 			data["Error"] = s.notice("domainDetail.orgFailed", err)
 		} else {
 			data["Saved"] = true

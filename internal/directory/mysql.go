@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -755,6 +756,14 @@ SELECT d.id, d.domainname, d.org_id, d.domain_status, d.homedir,
 // checked first (the UPDATE's affected-row count is 0 for an unchanged row, so it
 // cannot distinguish a missing domain from an idempotent write).
 func (d *SQLDirectory) UpdateDomain(id int64, u DomainUpdate) (bool, error) {
+	// Only 0 (active) and 1 (suspended) are domain states; max_user is unsigned,
+	// and 0 means no limit, so a negative count must not reach the column.
+	if u.Status != 0 && u.Status != 1 {
+		return false, fmt.Errorf("directory: unknown domain status %d", u.Status)
+	}
+	if u.MaxUser < 0 || u.MaxUser > math.MaxUint32 {
+		return false, fmt.Errorf("directory: user limit %d is outside the column range", u.MaxUser)
+	}
 	var exists int64
 	err := d.db.QueryRow(`SELECT id FROM domains WHERE id = ?`, id).Scan(&exists)
 	if errors.Is(err, sql.ErrNoRows) {

@@ -78,6 +78,24 @@ func TestDomainStatusEnforcement(t *testing.T) {
 	wantDomainServes(t, d, "reactivated domain", true)
 }
 
+// TestUpdateDomainRefusesAnUnknownStatusOrLimit writes a status other than active
+// (0) and suspended (1) and a negative user limit. A status of 2 also stops the
+// domain serving yet matches neither choice the admin offers, and max_user is
+// unsigned; both are refused and the stored row keeps serving with its limit.
+func TestUpdateDomainRefusesAnUnknownStatusOrLimit(t *testing.T) {
+	d, _ := freshDirectory(t)
+	root := t.TempDir()
+	id := mustCreateDomain(t, d, root, "acme.test")
+	for _, u := range []DomainUpdate{{Status: 2}, {Status: -1}, {MaxUser: -1}} {
+		if _, err := d.UpdateDomain(id, u); err == nil {
+			t.Errorf("UpdateDomain accepted %+v", u)
+		}
+	}
+	local, err := d.IsLocalDomain("acme.test")
+	mustNoErr(t, "is local domain", err)
+	wantEq(t, "the domain still serves after refused writes", local, true)
+}
+
 // setDomainStatus writes a domain's status through the admin path.
 func setDomainStatus(t *testing.T, d *SQLDirectory, id int64, status int) {
 	t.Helper()

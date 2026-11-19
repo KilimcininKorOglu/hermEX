@@ -60,6 +60,7 @@
     "none": "Henüz alan adı yok.",
     "defaultsUnread": "Oluşturma varsayılanları okunamadı. Yeni bir alan adı bunları atlamasın diye form gizlendi.",
     "nameRequired": "Alan adı gerekli.",
+    "maxUserInvalid": "Kullanıcı sınırı 0 veya daha büyük bir tam sayı olmalıdır.",
     "createFailed": "Alan adı oluşturulamadı.",
     "limitFailed": "Alan adı oluşturuldu, ancak kullanıcı sınırı ayarlanamadı.",
     "invalidID": "Geçersiz alan adı kimliği.",

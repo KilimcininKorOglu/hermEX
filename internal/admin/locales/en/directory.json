@@ -60,6 +60,7 @@
     "none": "No domains yet.",
     "defaultsUnread": "Could not read the create defaults. The form is hidden so a new domain does not skip them.",
     "nameRequired": "A domain name is required.",
+    "maxUserInvalid": "The user limit must be a whole number, 0 or more.",
     "createFailed": "Could not create domain.",
     "limitFailed": "Created the domain, but could not set the user limit.",
     "invalidID": "Invalid domain id.",

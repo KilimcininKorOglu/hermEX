@@ -210,6 +210,18 @@ func TestAdminCreateDomainWithMaxUser(t *testing.T) {
 	}
 }
 
+// TestAdminCreateDomainRefusesANegativeLimit sends a negative user limit. It was
+// skipped as "no limit" after the domain was created; now it is a 400 and no
+// domain exists.
+func TestAdminCreateDomainRefusesANegativeLimit(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	wantStatus(t, authedPOST(t, ts, "/admin/domains", session, csrf, `{"name":"new.test","maxUser":-5}`),
+		http.StatusBadRequest, "negative limit")
+	wantEq(t, d.createdDomain, "", "a domain created despite the refused limit")
+}
+
 // TestAdminCreateDomainNeedsCSRF proves the create route is CSRF-protected: a
 // POST with the session but no CSRF header is refused (and provisions nothing).
 func TestAdminCreateDomainNeedsCSRF(t *testing.T) {
