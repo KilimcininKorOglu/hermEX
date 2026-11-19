@@ -2,6 +2,7 @@ package admin
 
 import (
 	"io"
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -43,4 +44,16 @@ func TestUIDomainSplitSave(t *testing.T) {
 	if d.splitHost != "" {
 		t.Errorf("an empty field left the host %q", d.splitHost)
 	}
+}
+
+// TestUIDomainSplitNeedsASystemAdmin proves a domain admin cannot point the domain's
+// unknown recipients at another host: the split relay receives that mail.
+func TestUIDomainSplitNeedsASystemAdmin(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		domainDetail: directory.DomainDetail{ID: 1, Name: "acme.test"}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/domains/1/split", session, csrf,
+		url.Values{"split_relay_host": {"mx.attacker.test"}}), http.StatusForbidden, "domain-admin split")
+	wantEq(t, d.splitHost, "", "the split host after the refused save")
 }
