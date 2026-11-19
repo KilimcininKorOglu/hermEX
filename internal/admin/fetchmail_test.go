@@ -165,9 +165,22 @@ func TestUIUserDeleteFetchmail(t *testing.T) {
 
 // TestAdminFetchmailRequiresSystem proves a domain admin cannot list, create, or delete.
 func TestAdminFetchmailRequiresSystem(t *testing.T) {
-	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}}}
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		userDetail: directory.UserDetail{Username: "alice@hermex.test"}}
+	seedFetchmail(d, "alice@hermex.test", directory.FetchmailEntry{SrcServer: "kept.example.com", SrcUser: "u", Protocol: "POP3"})
+	keptID := d.fetchmail["alice@hermex.test"][0].ID
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
+
+	// The panel forms are refused too, and neither adds an entry nor removes one.
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/users/alice@hermex.test/fetchmail", session, csrf, url.Values{
+		"srcServer": {"attacker.example.com"}, "srcUser": {"x"}, "protocol": {"IMAP"},
+	}), http.StatusForbidden, "domain-admin UI add")
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/users/alice@hermex.test/fetchmail/"+itoa(keptID)+"/delete", session, csrf,
+		url.Values{}), http.StatusForbidden, "domain-admin UI delete")
+	if list := d.fetchmail["alice@hermex.test"]; len(list) != 1 || list[0].SrcServer != "kept.example.com" {
+		t.Errorf("a domain admin changed the fetchmail entries: %+v", list)
+	}
 
 	get := authedGET(t, ts, "/admin/users/alice@hermex.test/fetchmail", session)
 	get.Body.Close()
