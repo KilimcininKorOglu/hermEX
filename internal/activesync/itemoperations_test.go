@@ -104,10 +104,13 @@ func TestItemOperationsEmptyFolderMalformed(t *testing.T) {
 }
 
 // TestItemOperationsEmptyFolder confirms EmptyFolderContents removes every message
-// in a folder and echoes its collection id.
+// in a folder and echoes its collection id. Without the DeleteSubFolders option
+// ([MS-ASCMD] 2.2.3.47) a subfolder stays, and so does the mail filed in it: only
+// the named folder's own items are emptied.
 func TestItemOperationsEmptyFolder(t *testing.T) {
 	ts, dir := seededServer(t)
 	seedInbox(t, dir, 3)
+	sub := seedSubfolderMessage(t, dir)
 
 	req := wbxml.Elem(wbxml.IOItemOperations,
 		wbxml.Elem(wbxml.IOEmptyFolderContents,
@@ -129,6 +132,28 @@ func TestItemOperationsEmptyFolder(t *testing.T) {
 	if msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox)); err != nil || len(msgs) != 0 {
 		t.Errorf("inbox has %d messages after EmptyFolderContents (err %v), want 0", len(msgs), err)
 	}
+	ok, err := st.FolderExists(sub)
+	mustNoErr(t, "look up the subfolder", err)
+	wantEq(t, "the subfolder survives without DeleteSubFolders", ok, true)
+	msgs, err := st.ListMessages(sub)
+	mustNoErr(t, "list the subfolder", err)
+	wantEq(t, "messages left in the subfolder", len(msgs), 1)
+}
+
+// seedSubfolderMessage files one message in a new subfolder of the Inbox and
+// returns the subfolder's id.
+func seedSubfolderMessage(t *testing.T, dir string) int64 {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open the store", err)
+	defer st.Close()
+	inbox := int64(mapi.PrivateFIDInbox)
+	sub, err := st.CreateFolder(&inbox, "Kept")
+	mustNoErr(t, "create the subfolder", err)
+	raw := "From: a@example.com\r\nTo: b@example.com\r\nSubject: Kept\r\n\r\nbody\r\n"
+	_, err = st.AppendMessage(sub, []byte(raw), time.Now(), 0)
+	mustNoErr(t, "file the message", err)
+	return sub
 }
 
 // TestItemOperationsEmptyFolderOfObjects proves EmptyFolderContents empties an
