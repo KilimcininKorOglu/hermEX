@@ -11,7 +11,7 @@ import (
 // String8). The names in DNToMId carry no per-element presence byte (the
 // reference reads them outside the address-book encoding).
 func pullStringArray(p *ext.Pull) ([]string, error) {
-	n, err := p.Uint32()
+	n, err := pullStringCount(p, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -28,7 +28,7 @@ func pullStringArray(p *ext.Pull) ([]string, error) {
 // UTF-16LE). ResolveNamesW reads its names with the address-book encoding
 // disabled, so there is no per-element presence byte either.
 func pullWStringArray(p *ext.Pull) ([]string, error) {
-	n, err := p.Uint32()
+	n, err := pullStringCount(p, 2)
 	if err != nil {
 		return nil, err
 	}
@@ -39,6 +39,20 @@ func pullWStringArray(p *ext.Pull) ([]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// pullStringCount reads a string array's element count and refuses one the rest
+// of the buffer cannot hold at minSize bytes a string (its terminator), so a
+// forged count cannot size an allocation.
+func pullStringCount(p *ext.Pull, minSize int) (int, error) {
+	n, err := p.Uint32()
+	if err != nil {
+		return 0, err
+	}
+	if int64(n)*int64(minSize) > int64(p.Remaining()) {
+		return 0, ext.ErrUnderflow
+	}
+	return int(n), nil
 }
 
 // stripTypePrefix drops a leading "TYPE:" qualifier (e.g. "SMTP:user@host" ->
