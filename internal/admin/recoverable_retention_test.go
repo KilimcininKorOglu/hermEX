@@ -28,6 +28,17 @@ func TestSaveRecoverableRetention(t *testing.T) {
 	}
 }
 
+// TestSaveRecoverableRetentionNeedsASystemAdmin proves a domain admin cannot set
+// the window that purges every domain's deleted items.
+func TestSaveRecoverableRetentionNeedsASystemAdmin(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 9, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/recoverable-retention", session, csrf,
+		url.Values{"recoverable_retention_days": {"1"}}), http.StatusForbidden, "domain-admin retention save")
+	wantFalse(t, d.recoverableFound, "a domain admin stored a Recoverable Items window")
+}
+
 // TestSaveRecoverableRetentionRefusesWhatIsNotADayCount sends a typo and a negative
 // count. Both were read as 0 and silently disabled the purge; now each is refused
 // and nothing is stored.
