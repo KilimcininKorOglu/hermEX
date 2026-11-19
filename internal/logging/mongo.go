@@ -2,6 +2,8 @@ package logging
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"sync/atomic"
 	"time"
 
@@ -15,6 +17,11 @@ const (
 	mongoBatchSize     = 256              // most events written in one InsertMany
 	mongoFlushInterval = time.Second      // flush a partial batch at least this often
 	mongoWriteTimeout  = 10 * time.Second // per connect/insert deadline
+	// storeRetryInterval is how long the writer spills straight to disk after the
+	// store failed, rather than waiting a whole write deadline on it again for every
+	// batch. Waiting held the single writer, the buffer filled, and events were
+	// dropped instead of spilled.
+	storeRetryInterval = 5 * time.Second
 )
 
 // inserter is the slice of a Mongo collection the async writer needs, so the
@@ -63,6 +70,14 @@ type MongoSink struct {
 	// the cap turned away.
 	spillLimit   atomic.Int64
 	spillDropped atomic.Uint64
+
+	// writeTimeout bounds each connect and insert (mongoWriteTimeout; a test
+	// shortens it). downUntil is when the store may be tried again after a
+	// failure, and reportedDrops how many buffer drops stderr has been told of;
+	// both are touched only by the run() goroutine.
+	writeTimeout  atomic.Int64
+	downUntil     time.Time
+	reportedDrops uint64
 }
 
 // SetSpillLimit caps the spill file at limit bytes; zero or negative removes the
@@ -116,6 +131,7 @@ func newAsyncSink(connect connector, spillPath string) *MongoSink {
 		spillPath: spillPath,
 	}
 	s.hasSpill = spillFileHasData(spillPath)
+	s.writeTimeout.Store(int64(mongoWriteTimeout))
 	go s.run()
 	return s
 }
@@ -177,18 +193,36 @@ func (s *MongoSink) drain(batch *[]Event) {
 // flush writes the buffered batch and replays anything spilled earlier.
 func (s *MongoSink) flush(batch *[]Event) {
 	// Nothing buffered and nothing spilled, no reason to touch the store.
+	s.reportDrops()
 	if len(*batch) == 0 && !s.hasSpill {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), mongoWriteTimeout)
-	defer cancel()
-	if !s.ensureConnected(ctx, batch) {
+	if time.Now().Before(s.downUntil) {
+		// The store failed a moment ago: keep the writer moving by spilling.
+		if len(*batch) > 0 {
+			s.spill(*batch)
+			*batch = (*batch)[:0]
+		}
 		return
 	}
-	if !s.insertBatch(ctx, batch) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(s.writeTimeout.Load()))
+	defer cancel()
+	if !s.ensureConnected(ctx, batch) || !s.insertBatch(ctx, batch) {
+		s.downUntil = time.Now().Add(storeRetryInterval)
 		return
 	}
 	s.replaySpill() // connected and caught up, drain anything spilled earlier
+}
+
+// reportDrops tells stderr how many events the full buffer turned away since the
+// last report, so a loss is never silent.
+func (s *MongoSink) reportDrops() {
+	d := s.dropped.Load()
+	if d == s.reportedDrops {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "logging: %d events dropped, the log buffer was full\n", d-s.reportedDrops)
+	s.reportedDrops = d
 }
 
 // ensureConnected lazily opens the connection. While the store is down this fails, so
