@@ -325,6 +325,27 @@ func TestFetchPolicyIsSystemAdminOnly(t *testing.T) {
 	}
 }
 
+// TestLimitFormsNeedASystemAdmin proves a domain admin cannot change the
+// server-wide size limits, request rate or login lockout: each one applies to
+// every domain's clients.
+func TestLimitFormsNeedASystemAdmin(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 9, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	for path, form := range map[string]url.Values{
+		"/admin/ui/limits":              {"imap_literal_mb": {"1"}},
+		"/admin/ui/limits/requestrate":  {"enabled": {"1"}, "http_burst": {"1"}, "http_window": {"1"}},
+		"/admin/ui/limits/loginlockout": {"login_max_fails": {"1"}, "login_window": {"1"}, "login_lockout": {"1"}},
+	} {
+		wantStatus(t, htmxPOST(t, ts, path, session, csrf, form), http.StatusForbidden, path)
+	}
+	if d.sizeLimitsFound || d.httpRateLimitFound || d.loginLockoutFound {
+		t.Errorf("a domain admin saved limits: size %v, rate %v, lockout %v",
+			d.sizeLimitsFound, d.httpRateLimitFound, d.loginLockoutFound)
+	}
+}
+
 // TestFetchPolicyRefusesADomainAdmin is the security half: the role that can
 // create a fetchmail entry must not be able to lift the address block.
 func TestFetchPolicyRefusesADomainAdmin(t *testing.T) {
