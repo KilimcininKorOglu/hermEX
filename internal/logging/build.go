@@ -2,6 +2,8 @@ package logging
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -35,6 +37,24 @@ func (m *MultiSink) Write(e Event) {
 	for _, s := range m.sinks {
 		s.Write(e)
 	}
+}
+
+// legacySpillName is the spill file every daemon used before each got its own.
+const legacySpillName = "logspill.jsonl"
+
+// spillFile returns the daemon's own spill file in spillDir. Daemons on one host
+// share the directory, and a shared file loses lines: one daemon's replay reads
+// the file, inserts it and removes it, taking with it whatever another daemon
+// appended in between. A legacy file is from a deployment that gave each daemon
+// its own directory, so it belongs to this daemon and is moved to the new name,
+// unless that name already holds data, which is never overwritten.
+func spillFile(spillDir, daemon string) string {
+	path := filepath.Join(spillDir, daemon+".spill.jsonl")
+	legacy := filepath.Join(spillDir, legacySpillName)
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		_ = os.Rename(legacy, path) // absent legacy file: nothing to move
+	}
+	return path
 }
 
 // Build assembles the process logger from configuration. It always writes to
@@ -74,7 +94,7 @@ func Build(daemon, mongoURI, database, spillDir string) (*Logger, func() error) 
 		if err := os.MkdirAll(spillDir, 0o700); err != nil {
 			stderr.Write(Event{Level: LevelWarn, Subsystem: System, Name: "logging.spill.unavailable", Err: err.Error()})
 		} else {
-			spillPath = filepath.Join(spillDir, "logspill.jsonl")
+			spillPath = spillFile(spillDir, daemon)
 		}
 	}
 	ms, err := NewMongoSink(mongoURI, database, spillPath)

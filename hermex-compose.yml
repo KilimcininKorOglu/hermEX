@@ -149,9 +149,9 @@ services:
       - ./docker-data/mailboxes:/data/mailboxes
       - ./docker-data/config.json:/config/config.json:ro
       # Persist the log spill across container recreate so an outage+restart loses
-      # no buffered events (a fresh sink replays a leftover logspill.jsonl). A
-      # per-daemon subdir is required: each daemon writes its own logspill.jsonl, so
-      # a shared dir would race on concurrent append and replay-delete.
+      # no buffered events (a fresh sink replays the daemon's leftover
+      # <daemon>.spill.jsonl). Each daemon names its own file, so a shared directory
+      # is safe too; a per-daemon subdir keeps each container's mounts to its own.
       - ./docker-data/spill/mta:/data/logspill
     ports:
       - "8140:25"

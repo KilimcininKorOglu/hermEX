@@ -3,6 +3,8 @@ package logging
 import (
 	"context"
 	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -45,6 +47,74 @@ func TestSpillReplayAcrossRestart(t *testing.T) {
 	}
 	if spillFileHasData(spillPath) {
 		t.Error("the spill file was not drained after a successful replay")
+	}
+}
+
+// TestDaemonsSharingASpillDirectoryKeepEachOthersEvents runs two daemons on one
+// host with one log_spill_dir while the store is down. When the store returns and
+// one daemon replays, the other daemon's spilled events must still be on disk:
+// replay removes the file it read, so a file the two shared would lose them.
+func TestDaemonsSharingASpillDirectoryKeepEachOthersEvents(t *testing.T) {
+	dir := t.TempDir()
+	down := inserterFunc(func(context.Context, []any) error { return errors.New("mongo down") })
+	closeSink := func(s *MongoSink) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := s.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	imap := newAsyncSink(readyConn(down), spillFile(dir, "hermex-imap"))
+	imap.Write(Event{Subsystem: IMAP, Name: "imap.event"})
+	closeSink(imap)
+	pop3 := newAsyncSink(readyConn(down), spillFile(dir, "hermex-pop3"))
+	pop3.Write(Event{Subsystem: POP3, Name: "pop3.event"})
+	closeSink(pop3)
+
+	var got fakeInserter
+	closeSink(newAsyncSink(readyConn(&got), spillFile(dir, "hermex-pop3")))
+	if _, total := got.totals(); total != 1 {
+		t.Errorf("the pop3 replay inserted %d events, want only its own 1", total)
+	}
+	if docs, err := readSpill(spillFile(dir, "hermex-imap")); err != nil || len(docs) != 1 {
+		t.Errorf("imap's spill holds %d events (err %v) after pop3 replayed, want its 1 kept", len(docs), err)
+	}
+}
+
+// TestALegacySpillFileIsReplayedUnderTheNewName starts a daemon in a directory
+// left by a release that wrote every daemon's spill to one file name. That file
+// is this daemon's (each had its own directory then), and its events must still
+// be replayed; a file already under the new name is never overwritten by it.
+func TestALegacySpillFileIsReplayedUnderTheNewName(t *testing.T) {
+	dir := t.TempDir()
+	legacy := filepath.Join(dir, legacySpillName)
+	spillTo := func(path, name string) {
+		t.Helper()
+		down := inserterFunc(func(context.Context, []any) error { return errors.New("mongo down") })
+		s := newAsyncSink(readyConn(down), path)
+		s.Write(Event{Subsystem: IMAP, Name: name})
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := s.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	spillTo(legacy, "before.upgrade")
+	path := spillFile(dir, "hermex-imap")
+	if docs, err := readSpill(path); err != nil || len(docs) != 1 {
+		t.Fatalf("the daemon's spill holds %d events (err %v), want the legacy event", len(docs), err)
+	}
+	if _, err := os.Stat(legacy); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("legacy file still present (err %v), its events would replay twice", err)
+	}
+
+	spillTo(legacy, "stray")
+	spillFile(dir, "hermex-imap")
+	docs, err := readSpill(path)
+	if err != nil || len(docs) != 1 || docs[0].(mongoDoc).Name != "before.upgrade" {
+		t.Errorf("the daemon's spill holds %v (err %v), want its own before.upgrade event kept, not replaced", docs, err)
 	}
 }
 
