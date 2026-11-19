@@ -162,6 +162,15 @@ func TestAdminDefaultSyncPolicyRequiresSystem(t *testing.T) {
 	if get.StatusCode != http.StatusForbidden || put.StatusCode != http.StatusForbidden {
 		t.Errorf("domain-admin default policy = GET %d / PUT %d, want both 403", get.StatusCode, put.StatusCode)
 	}
+	// The panel forms are refused too: the server default and a user override both
+	// decide whether a device may sync with no password.
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/syncpolicy", session, csrf, url.Values{"DevicePasswordEnabled": {"0"}}),
+		http.StatusForbidden, "domain-admin UI default policy")
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/syncpolicy", session, csrf,
+		url.Values{"DevicePasswordEnabled": {"0"}}), http.StatusForbidden, "domain-admin UI user policy")
+	if d.defaultSyncPolicy != nil {
+		t.Errorf("a domain admin stored a default policy: %v", d.defaultSyncPolicy)
+	}
 }
 
 // TestUISyncPolicyPage proves the server-default editor page renders the fields with the
