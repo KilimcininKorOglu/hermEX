@@ -134,6 +134,9 @@ func TestSmartReplyWithReplaceMimeSendsTheDeviceMessage(t *testing.T) {
 	if strings.Contains(got, "hi alice") || strings.Contains(got, "plan.pdf") {
 		t.Errorf("ReplaceMime forward carries the original:\n%s", got)
 	}
+	if !strings.Contains(got, "sounds good") {
+		t.Errorf("ReplaceMime forward lost the device's own text:\n%s", got)
+	}
 }
 
 // TestSmartReplyLeavesASignedMessageAlone sends a multipart/signed reply without
