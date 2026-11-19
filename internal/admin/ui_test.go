@@ -85,6 +85,11 @@ func TestUILoginSubmitInvalid(t *testing.T) {
 	if !strings.Contains(string(body), "Invalid email or password") {
 		t.Errorf("invalid login page missing the error: %s", body)
 	}
+	for _, sc := range resp.Header["Set-Cookie"] {
+		if strings.HasPrefix(sc, sessionCookie+"=") {
+			t.Errorf("a refused login set a session cookie: %q", sc)
+		}
+	}
 }
 
 // TestUIDashboard proves the dashboard renders the resource counts for a
@@ -158,6 +163,12 @@ func TestUILogout(t *testing.T) {
 	r1.Body.Close()
 	if r1.StatusCode != http.StatusForbidden {
 		t.Errorf("logout without the CSRF field = %d, want 403", r1.StatusCode)
+	}
+	// A field that does not match the cookie is what a cross-site form can post.
+	forged := logout(csrf + "x")
+	forged.Body.Close()
+	if forged.StatusCode != http.StatusForbidden {
+		t.Errorf("logout with a forged CSRF field = %d, want 403", forged.StatusCode)
 	}
 
 	r2 := logout(csrf)
