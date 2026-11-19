@@ -109,14 +109,14 @@ func TestIdentityKeepsHostedAndBareValues(t *testing.T) {
 	if err := d.CreateAlias("sales@acme.test", owner); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.SetAltnames(owner, []string{"legacy-login", "user@partner.test"}); err != nil {
+	if _, err := d.SetAltnames(owner, []string{"legacy-login", "legacy@partner.test"}); err != nil {
 		t.Fatal(err)
 	}
 	ids, err := d.Identities(owner)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{owner, "sales@acme.test", "legacy-login", "user@partner.test"} {
+	for _, want := range []string{owner, "sales@acme.test", "legacy-login", "legacy@partner.test"} {
 		if !slices.Contains(ids, want) {
 			t.Errorf("%s went missing from %v", want, ids)
 		}

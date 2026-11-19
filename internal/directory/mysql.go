@@ -1233,6 +1233,12 @@ func (d *SQLDirectory) SetAltnames(username string, altnames []string) (bool, er
 		return false, err
 	}
 	for _, a := range clean {
+		// An altname is a resolution key like an alias, so one equal to an account
+		// or an alias leaves both ambiguous and both unreachable. The user's own
+		// altnames were deleted above, so re-saving the same set still passes.
+		if err := checkAliasFree(tx, a); err != nil {
+			return false, err
+		}
 		if _, err := tx.Exec(`INSERT INTO altnames (user_id, altname) VALUES (?, ?)`, id, a); err != nil {
 			return false, err
 		}

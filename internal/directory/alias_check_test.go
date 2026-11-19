@@ -70,6 +70,34 @@ func TestAliasOverAnotherAliasIsRefused(t *testing.T) {
 	}
 }
 
+// TestAltnameOverAnAccountOrAliasIsRefused proves an alternative name follows
+// the same collision rule as an alias. An altname equal to another account, to
+// the account's own address, or to an alias made the address ambiguous, so bob
+// could no longer sign in and the alias stopped delivering.
+func TestAltnameOverAnAccountOrAliasIsRefused(t *testing.T) {
+	d := aliasTestDir(t)
+	if err := d.CreateAlias("sales@hermex.test", "bob@hermex.test"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"bob@hermex.test", "alice@hermex.test", "sales@hermex.test"} {
+		if _, err := d.SetAltnames("alice@hermex.test", []string{name}); err == nil {
+			t.Errorf("altname %s was accepted", name)
+		}
+	}
+	if _, ok := d.Authenticate("bob@hermex.test", "secret"); !ok {
+		t.Error("bob can no longer sign in, so the collision was written")
+	}
+	if _, ok := d.Resolve("sales@hermex.test"); !ok {
+		t.Error("the alias stopped resolving, so the collision was written")
+	}
+	// Re-saving the account's own altnames still works.
+	for range 2 {
+		if _, err := d.SetAltnames("alice@hermex.test", []string{"ali"}); err != nil {
+			t.Fatalf("re-saving the same altname failed: %v", err)
+		}
+	}
+}
+
 // TestAliasInAnUnhostedDomainIsRefused is the sharp one. An alias is reported by
 // Identities as an address the account may send as, and both the webmail compose
 // gate and the SMTP submission MAIL FROM check honour that list. An alias in a
