@@ -88,7 +88,9 @@ func PrescribeDomainDNS(domain, hostname, dkimName, dkimValue string, sts direct
 		PrescribedRecord{Label: "CardDAV SRV", Name: "_carddavs._tcp." + domain, Type: "SRV", Value: "0 0 443 " + hostname,
 			Note: "Lets CardDAV clients discover the contacts server for this domain."},
 		PrescribedRecord{Label: "DAV TXT", Name: "_caldavs._tcp." + domain, Type: "TXT", Value: "path=/dav",
-			Note: "Advertises the DAV well-known path for autodiscovery; publish the same TXT at _carddavs._tcp." + domain + "."},
+			Note: "Advertises the CalDAV well-known path for autodiscovery."},
+		PrescribedRecord{Label: "CardDAV TXT", Name: "_carddavs._tcp." + domain, Type: "TXT", Value: "path=/dav",
+			Note: "Advertises the CardDAV well-known path for autodiscovery."},
 	)
 	if sts.Enabled {
 		// The policy id is derived from the served policy bytes (mode + max_age + this

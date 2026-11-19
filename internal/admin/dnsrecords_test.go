@@ -69,9 +69,10 @@ func TestPrescribeDomainDNS(t *testing.T) {
 	} {
 		wantRecordSuffix(t, by, c.label, "SRV", c.suffix)
 	}
-	// The DAV TXT advertises the well-known DAV path.
-	wantRecordType(t, by, "DAV TXT", "TXT")
-	wantRecordValue(t, by, "DAV TXT", "path=/dav")
+	// RFC 6764 section 6: each service's SRV name carries its own path TXT, so
+	// CalDAV and CardDAV are two records, both of which an owner must publish.
+	wantRecord(t, by, "DAV TXT", "TXT", "_caldavs._tcp.tenant.com", "path=/dav")
+	wantRecord(t, by, "CardDAV TXT", "TXT", "_carddavs._tcp.tenant.com", "path=/dav")
 }
 
 // TestNoMailHostCNAMEWhenTheServerIsMailOfTheDomain covers a server named
