@@ -382,15 +382,7 @@ func overReceiveQuota(path string) error {
 		return nil
 	}
 	defer st.Close()
-	q, err := st.GetQuota()
-	if err != nil || q.ReceiveKB == 0 {
-		return nil
-	}
-	size, err := st.MailboxSize()
-	if err != nil {
-		return nil
-	}
-	if size > int64(q.ReceiveKB)*1024 {
+	if over, err := st.OverReceiveQuota(); err == nil && over {
 		return &smtp.PermError{Message: "5.2.2 mailbox is full (over receive quota)"}
 	}
 	return nil

@@ -51,6 +51,23 @@ func (s *Store) SetQuota(q QuotaLimits) error {
 	})
 }
 
+// OverReceiveQuota reports whether the mailbox already holds more than its receive
+// quota, the Exchange "prohibit send and receive" limit: past it, nothing new may be
+// added to the mailbox, whether by delivery or by a client saving an item. A zero
+// limit is unlimited. The comparison is 64-bit, since the limit in bytes overflows
+// 32 bits.
+func (s *Store) OverReceiveQuota() (bool, error) {
+	q, err := s.GetQuota()
+	if err != nil || q.ReceiveKB == 0 {
+		return false, err
+	}
+	size, err := s.MailboxSize()
+	if err != nil {
+		return false, err
+	}
+	return size > int64(q.ReceiveKB)*1024, nil
+}
+
 // MailboxSize returns the mailbox's current used space in bytes, the sum of the
 // stored message sizes, computed on demand. It is the value the Exchange store
 // reports as PR_MESSAGE_SIZE_EXTENDED and the basis for quota enforcement.

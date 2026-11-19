@@ -111,6 +111,37 @@ func TestMailboxSizeExcludesSoftDeleted(t *testing.T) {
 		mustMailboxSize(t, s), liveSize)
 }
 
+// TestOverReceiveQuota pins the receive-quota rule every write path shares: a
+// zero limit never trips, a mailbox at or under its limit is not over, and one
+// whose used bytes pass the limit is. The limit is in KiB, so the boundary is
+// limit*1024 bytes.
+func TestOverReceiveQuota(t *testing.T) {
+	s := openSeededStore(t)
+	raw := []byte("From: a@hermex.test\r\nTo: u@hermex.test\r\nSubject: q\r\n\r\n" +
+		string(make([]byte, 2048)) + "\r\n")
+	mustAppendMessage(t, s, int64(mapi.PrivateFIDInbox), raw, time.Unix(1700000000, 0), 0)
+	used := mustMailboxSize(t, s)
+	if used <= 1024 || used > 3*1024 {
+		t.Fatalf("seeded usage %d bytes falls outside the 1-3 KiB the limits below assume", used)
+	}
+
+	for _, c := range []struct {
+		limitKB uint32
+		want    bool
+	}{
+		{0, false}, // unlimited
+		{1, true},  // 1 KiB, usage is over it
+		{3, false}, // 3 KiB, usage is under it
+	} {
+		mustNoErr(t, "set quota", s.SetQuota(QuotaLimits{ReceiveKB: c.limitKB}))
+		over, err := s.OverReceiveQuota()
+		mustNoErr(t, "over receive quota", err)
+		if over != c.want {
+			t.Errorf("ReceiveKB=%d with %d bytes used: over = %v, want %v", c.limitKB, used, over, c.want)
+		}
+	}
+}
+
 // mustMailboxSize returns the mailbox usage the quota path reports.
 func mustMailboxSize(t *testing.T, s *Store) int64 {
 	t.Helper()
