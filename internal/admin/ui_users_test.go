@@ -49,14 +49,21 @@ func TestUIUsersPage(t *testing.T) {
 
 // TestUIUsersPageRequiresSystem proves an org admin cannot view the users page.
 func TestUIUsersPageRequiresSystem(t *testing.T) {
-	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminOrg, ScopeID: 1}}}
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminOrg, ScopeID: 1}},
+		users:        []directory.UserInfo{{ID: 1, Username: "boss@other.test"}},
+		domainDetail: directory.DomainDetail{ID: 1, Name: "hermex.test"}}
 	ts := adminServer(t, d)
-	session, _ := loginCookies(t, ts)
+	session, csrf := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/users", session)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("org-admin users page = %d, want 403", resp.StatusCode)
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/users", session), http.StatusForbidden, "org-admin users page")
+	if strings.Contains(page, "boss@other.test") {
+		t.Error("the refused users page lists a user")
+	}
+	wantStatus(t, authedGET(t, ts, "/admin/ui/user-create-fields?domain=1", session), http.StatusForbidden, "org-admin prefill")
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/users", session, csrf,
+		url.Values{"local": {"new"}, "domain": {"1"}, "password": {"pw"}}), http.StatusForbidden, "org-admin create")
+	if d.createdUser != "" {
+		t.Errorf("a refused create provisioned %q", d.createdUser)
 	}
 }
 
