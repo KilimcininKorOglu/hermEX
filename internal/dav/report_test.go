@@ -2,9 +2,12 @@ package dav
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
+
+	"hermex/internal/directory"
 )
 
 const bobVCard = "BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Bob Bits\r\nEMAIL:bob@bits.test\r\nUID:bob-1\r\nEND:VCARD\r\n"
@@ -31,6 +34,32 @@ func TestReportMultiget(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("multiget missing %q\n%s", want, out)
 		}
+	}
+}
+
+// TestReportMultigetIgnoresAnotherAccountsHref names, inside alice's own
+// collection REPORT, the href of a contact in bob's address book. The REPORT is
+// authorized for alice's collection only, so the href must resolve to nothing
+// (404) rather than serve bob's card.
+func TestReportMultigetIgnoresAnotherAccountsHref(t *testing.T) {
+	accs := directory.StaticAccounts{
+		testUser:          {Password: testPass, MailboxPath: provisioned(t, "alice")},
+		"bob@hermex.test": {Password: testPass, MailboxPath: provisioned(t, "bob")},
+	}
+	ts := httptest.NewServer(NewServer(accs, accs, "hermex.test").Handler())
+	t.Cleanup(ts.Close)
+	bobURL := "/dav/addressbooks/bob@hermex.test/contacts/b.vcf"
+	if code := authReq(t, ts, "PUT", bobURL, "bob@hermex.test", bobVCard); code != http.StatusCreated {
+		t.Fatalf("bob PUT: status %d, want 201", code)
+	}
+	body := `<card:addressbook-multiget xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">` +
+		`<d:prop><card:address-data/></d:prop><d:href>` + bobURL + `</d:href></card:addressbook-multiget>`
+	resp, out := doFull(t, ts, "REPORT", contactURL(""), body, map[string]string{"Depth": "1"})
+	if resp.StatusCode != http.StatusMultiStatus {
+		t.Fatalf("status %d, want 207", resp.StatusCode)
+	}
+	if strings.Contains(out, "Bob Bits") || !strings.Contains(out, "404 Not Found") {
+		t.Errorf("multiget served another account's contact\n%s", out)
 	}
 }
 
