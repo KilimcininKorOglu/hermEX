@@ -210,6 +210,28 @@ func wantSelect(t *testing.T, what string, c *testClient, tag, cmd, access strin
 	return un
 }
 
+// TestRefusedPublicSelectDeselects selects Team (read-write), then a public folder
+// alice may see but not read. RFC 3501 6.3.1: a failed SELECT leaves no mailbox
+// selected, so a STORE after it must find nothing to act on; otherwise the client
+// believes nothing is selected while its next command edits Team.
+func TestRefusedPublicSelectDeselects(t *testing.T) {
+	root := t.TempDir()
+	mbox := filepath.Join(root, "alice")
+	emptyMailbox(t, mbox)
+	pub := seedPublicGrants(t, root)
+	ps, err := pub.OpenForDomain("local.test")
+	mustNoErr(t, "open the public store", err)
+	peek, _ := ps.CreateFolder(nil, "Peek")
+	grantUser(t, ps, peek, "alice@local.test", mapi.FrightsVisible) // listed, not readable
+	ps.Close()
+
+	accounts := directory.StaticAccounts{"alice@local.test": {Password: "secret", MailboxPath: mbox}}
+	c := dialLogin(t, publicServer(t, accounts, pub), "alice@local.test", "secret")
+	wantSelect(t, "SELECT Team", c, "s1", `SELECT "Public Folders/Team"`, "[READ-WRITE]")
+	wantStatus(t, "SELECT a visible, unreadable folder", c, "s2", `SELECT "Public Folders/Peek"`, "NO")
+	wantStatus(t, "STORE after the refused SELECT", c, "st", `STORE 1 +FLAGS (\Deleted)`, "NO")
+}
+
 // TestIMAPPublicFolderTenantIsolation proves an IMAP client only ever sees its own
 // domain's public folders: alice@local.test sees LocalNews and never OtherNews,
 // carol@other.test the reverse, even though both domains are served by one process.

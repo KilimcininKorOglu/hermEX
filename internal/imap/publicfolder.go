@@ -129,25 +129,21 @@ func (c *conn) resolveAppendDest(name string) (st *objectstore.Store, fid int64,
 // post rights (FrightsCreate). It mirrors the own-mailbox SELECT response.
 func (c *conn) selectPublic(tag, name, sub string, examine bool) {
 	if sub == "" {
-		c.state = stateAuth
-		c.sel = nil
-		c.no(tag, "the public folders root is not selectable")
+		c.failSelect(tag, "the public folders root is not selectable")
 		return
 	}
 	f, rights, found := c.resolvePublicFolder(sub)
 	if !found {
-		c.state = stateAuth
-		c.sel = nil
-		c.no(tag, "no such mailbox")
+		c.failSelect(tag, "no such mailbox")
 		return
 	}
 	if rights&mapi.FrightsReadAny == 0 {
-		c.no(tag, "[NOPERM] read access denied")
+		c.failSelect(tag, "[NOPERM] read access denied")
 		return
 	}
 	sel, err := loadMailbox(c.pubStore, f.ID, name)
 	if err != nil {
-		c.no(tag, "cannot open mailbox")
+		c.failSelect(tag, "cannot open mailbox")
 		return
 	}
 	c.sel = sel
@@ -162,6 +158,17 @@ func (c *conn) selectPublic(tag, name, sub string, examine bool) {
 	// cannot enforce the owned-only restriction over IMAP).
 	c.readOnly = examine || rights&(mapi.FrightsEditAny|mapi.FrightsDeleteAny) == 0
 	c.emitSelected(tag, sel, examine)
+}
+
+// failSelect refuses a SELECT or EXAMINE. RFC 3501 6.3.1: a failed SELECT leaves
+// no mailbox selected, so the previous selection is dropped before the NO; a
+// client that believes nothing is selected must not have its next command land on
+// the old mailbox.
+func (c *conn) failSelect(tag, text string) {
+	c.state = stateAuth
+	c.sel = nil
+	c.selPublic = false
+	c.no(tag, text)
 }
 
 // statusPublic answers STATUS for a public folder. A folder LIST advertises must

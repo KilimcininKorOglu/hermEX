@@ -674,20 +674,17 @@ func (c *conn) cmdSelect(tag string, args []token, examine bool) {
 	}
 	tree, err := loadFolderTree(c.st)
 	if err != nil {
-		c.no(tag, "cannot read mailbox list")
+		c.failSelect(tag, "cannot read mailbox list")
 		return
 	}
 	node, found := tree.resolve(name)
 	if !found {
-		c.state = stateAuth // a failed SELECT deselects any current mailbox
-		c.sel = nil
-		c.selPublic = false
-		c.no(tag, "no such mailbox")
+		c.failSelect(tag, "no such mailbox")
 		return
 	}
 	sel, err := loadMailbox(c.st, node.info.ID, node.path)
 	if err != nil {
-		c.no(tag, "cannot open mailbox")
+		c.failSelect(tag, "cannot open mailbox")
 		return
 	}
 	c.sel = sel
