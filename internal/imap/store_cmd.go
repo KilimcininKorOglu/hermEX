@@ -331,6 +331,23 @@ func (c *conn) cmdUnselect(tag string) {
 
 // cmdCopy handles COPY and (byUID) UID COPY: it copies the addressed messages
 // into another mailbox, preserving their flags and internal dates.
+// refuseOverQuota answers tag with NO [OVERQUOTA] (RFC 9208 4.3) and reports true
+// when st, the store a command would add messages to, is past its receive quota:
+// once a mailbox is full nothing new may be put in it, from delivery or from a
+// client. A store that cannot report its usage refuses the command as failed.
+func (c *conn) refuseOverQuota(tag string, st *objectstore.Store) bool {
+	over, err := st.OverReceiveQuota()
+	switch {
+	case err != nil:
+		c.no(tag, "cannot read the mailbox quota")
+		return true
+	case over:
+		c.no(tag, "[OVERQUOTA] mailbox is over its quota")
+		return true
+	}
+	return false
+}
+
 func (c *conn) cmdCopy(tag string, args []token, byUID bool) {
 	if c.state != stateSelected {
 		c.no(tag, "no mailbox selected")
@@ -350,6 +367,9 @@ func (c *conn) cmdCopy(tag string, args []token, byUID bool) {
 	destStore, destFID, ok, errText := c.resolveAppendDest(dest)
 	if !ok {
 		c.no(tag, errText)
+		return
+	}
+	if c.refuseOverQuota(tag, destStore) {
 		return
 	}
 
@@ -386,20 +406,8 @@ func (c *conn) cmdMove(tag string, args []token, byUID bool) {
 		c.no(tag, "mailbox is read-only")
 		return
 	}
-	if len(args) < 2 {
-		c.bad(tag, "MOVE requires a sequence set and a mailbox")
-		return
-	}
-	setText, _ := args[0].str()
-	set, err := parseSeqSet(setText)
-	if err != nil {
-		c.bad(tag, "invalid sequence set")
-		return
-	}
-	dest, _ := args[1].str()
-	destStore, destFID, ok, errText := c.resolveAppendDest(dest)
+	set, destStore, destFID, ok := c.moveTarget(tag, args)
 	if !ok {
-		c.no(tag, errText)
 		return
 	}
 
@@ -423,6 +431,34 @@ func (c *conn) cmdMove(tag string, args []token, byUID bool) {
 	c.expungeMoved(srcUIDs)
 	c.flush()
 	c.ok(tag, verb+" completed")
+}
+
+// moveTarget parses a MOVE's sequence set and destination and checks the
+// destination may take the messages. When ok is false the reply is already
+// written.
+func (c *conn) moveTarget(tag string, args []token) (seqSet, *objectstore.Store, int64, bool) {
+	if len(args) < 2 {
+		c.bad(tag, "MOVE requires a sequence set and a mailbox")
+		return seqSet{}, nil, 0, false
+	}
+	setText, _ := args[0].str()
+	set, err := parseSeqSet(setText)
+	if err != nil {
+		c.bad(tag, "invalid sequence set")
+		return seqSet{}, nil, 0, false
+	}
+	dest, _ := args[1].str()
+	destStore, destFID, ok, errText := c.resolveAppendDest(dest)
+	if !ok {
+		c.no(tag, errText)
+		return seqSet{}, nil, 0, false
+	}
+	// A move inside one store adds nothing to it, so a full mailbox can still file
+	// its own mail (to Deleted Items, say); only another store would grow.
+	if destStore != c.curStore() && c.refuseOverQuota(tag, destStore) {
+		return seqSet{}, nil, 0, false
+	}
+	return set, destStore, destFID, true
 }
 
 // copyToDest copies every message in the set into the destination folder,
@@ -495,6 +531,9 @@ func (c *conn) cmdAppend(tag string, args []token) {
 	destStore, destFID, ok, errText := c.resolveAppendDest(mailbox)
 	if !ok {
 		c.no(tag, errText)
+		return
+	}
+	if c.refuseOverQuota(tag, destStore) {
 		return
 	}
 
