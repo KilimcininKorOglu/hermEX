@@ -62,9 +62,14 @@ func (v *Verifier) Verify(cfg directory.LDAPConfig, login, password string) (boo
 	if len(res.Entries) != 1 {
 		return false, nil
 	}
-	// Bind as the user: a successful bind means the password is correct.
+	// Bind as the user: a successful bind means the password is correct, and
+	// invalidCredentials (RFC 4511 4.1.9) means it is not. Any other failure says
+	// nothing about the password and is returned as the directory error it is.
 	if err := c.Bind(res.Entries[0].DN, password); err != nil {
-		return false, nil
+		if ldap.IsErrorWithCode(err, ldap.LDAPResultInvalidCredentials) {
+			return false, nil
+		}
+		return false, err
 	}
 	return true, nil
 }

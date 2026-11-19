@@ -231,7 +231,11 @@ func (d *SQLDirectory) verifyPassword(row loginRow, login, password string) bool
 		return false
 	}
 	verified, err := d.verifier.Verify(cfg, login, password)
-	return err == nil && verified
+	if err != nil {
+		log.Printf("directory: LDAP password check for domain %d failed: %v", row.domainID, err)
+		return false
+	}
+	return verified
 }
 
 // upgradeHash re-stores a password at the current work factor once its owner has

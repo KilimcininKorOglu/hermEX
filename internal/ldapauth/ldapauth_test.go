@@ -95,15 +95,34 @@ func TestVerifySuccess(t *testing.T) {
 	}
 }
 
-// TestVerifyWrongPassword proves a failed user bind is a clean false, not an error.
+// TestVerifyWrongPassword proves a user bind the server refuses with
+// invalidCredentials (RFC 4511 4.1.9, result code 49), which is how a directory
+// answers a wrong password, is a clean false, not an error.
 func TestVerifyWrongPassword(t *testing.T) {
 	fc := &fakeConn{
 		searchRes: oneEntry("uid=alice,dc=hermex,dc=test"),
-		bindErr:   map[string]error{"uid=alice,dc=hermex,dc=test": errors.New("invalid credentials")},
+		bindErr: map[string]error{"uid=alice,dc=hermex,dc=test": ldap.NewError(
+			ldap.LDAPResultInvalidCredentials, errors.New("invalid credentials"))},
 	}
 	ok, err := verifierWith(fc).Verify(cfg, "alice@hermex.test", "wrong")
 	if ok || err != nil {
 		t.Errorf("wrong password = (%v, %v), want (false, nil)", ok, err)
+	}
+}
+
+// TestVerifyReportsADirectoryFailureDuringTheBind breaks the connection during the
+// user bind. That is not a verdict on the password: reporting it as a wrong one
+// counts it against the account's failed-login limit and hides a directory outage
+// from the operator. It must come back as an error, still with no access granted.
+func TestVerifyReportsADirectoryFailureDuringTheBind(t *testing.T) {
+	fc := &fakeConn{
+		searchRes: oneEntry("uid=alice,dc=hermex,dc=test"),
+		bindErr: map[string]error{"uid=alice,dc=hermex,dc=test": ldap.NewError(
+			ldap.ErrorNetwork, errors.New("connection reset"))},
+	}
+	ok, err := verifierWith(fc).Verify(cfg, "alice@hermex.test", "correct")
+	if ok || err == nil {
+		t.Errorf("bind over a broken connection = (%v, %v), want (false, an error)", ok, err)
 	}
 }
 
