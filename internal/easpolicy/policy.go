@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"hash/fnv"
 	"maps"
+	"math"
+	"slices"
 	"strconv"
 )
 
@@ -84,16 +86,56 @@ var known = func() map[string]Field {
 	return m
 }()
 
+// valueRule is the value set [MS-ASPROV] 2.2.2 states for one numeric field: a
+// closed range, or an explicit enumeration when set is non-empty.
+type valueRule struct {
+	min, max int
+	set      []int
+}
+
+// allows reports whether v is one of the rule's values.
+func (r valueRule) allows(v int) bool {
+	if len(r.set) > 0 {
+		return slices.Contains(r.set, v)
+	}
+	return v >= r.min && v <= r.max
+}
+
+// numericRules holds every numeric field whose [MS-ASPROV] 2.2.2 element page
+// states a value set. A field absent here only has to be non-negative, because
+// its page states no upper bound. The two truncation sizes admit -1, which the
+// spec defines as "no truncation".
+var numericRules = map[string]valueRule{
+	"AllowBluetooth":                           {min: 0, max: 2},
+	"MinDevicePasswordLength":                  {min: 1, max: 16},
+	"MaxDevicePasswordFailedAttempts":          {min: 4, max: 16},
+	"MinDevicePasswordComplexCharacters":       {min: 1, max: 4},
+	"MaxCalendarAgeFilter":                     {set: []int{0, 4, 5, 6, 7}},
+	"MaxEmailAgeFilter":                        {min: 0, max: 5},
+	"RequireSignedSMIMEAlgorithm":              {min: 0, max: 1},
+	"RequireEncryptionSMIMEAlgorithm":          {min: 0, max: 4},
+	"AllowSMIMEEncryptionAlgorithmNegotiation": {min: 0, max: 2},
+	"MaxEmailBodyTruncationSize":               {min: -1, max: math.MaxInt},
+	"MaxEmailHTMLBodyTruncationSize":           {min: -1, max: math.MaxInt},
+}
+
+// numericValid reports whether v is a value the named numeric field may carry.
+func numericValid(name string, v int) bool {
+	if r, ok := numericRules[name]; ok {
+		return r.allows(v)
+	}
+	return v >= 0
+}
+
 // Policy is a partial device policy: a field present in the map is enforced at its
 // value; an absent field is not enforced and inherits the lower layer.
 type Policy map[string]int
 
 // Validate rejects a field name not in the canonical set (so an unknown key can never be
 // stored and then silently ignored at provisioning) and an out-of-range value: a toggle
-// must be 0 or 1 and a numeric limit must not be negative. It does not enforce per-field
-// upper bounds (those vary by field and EAS version); the guard's purpose is to keep a
-// grossly invalid value, a negative limit, a non-boolean toggle, out of the document a
-// device might otherwise reject wholesale.
+// must be 0 or 1, and a numeric field must be in the value set its [MS-ASPROV] element
+// page states (numericRules), or non-negative where the page states none. A value
+// outside it would reach a device in a document it may reject wholesale.
 func (p Policy) Validate() error {
 	for name, v := range p {
 		f, ok := known[name]
@@ -106,8 +148,8 @@ func (p Policy) Validate() error {
 				return fmt.Errorf("sync-policy field %q is a toggle: want 0 or 1, got %d", name, v)
 			}
 		case Num:
-			if v < 0 {
-				return fmt.Errorf("sync-policy field %q cannot be negative: got %d", name, v)
+			if !numericValid(name, v) {
+				return fmt.Errorf("sync-policy field %q is out of range: got %d", name, v)
 			}
 		}
 	}

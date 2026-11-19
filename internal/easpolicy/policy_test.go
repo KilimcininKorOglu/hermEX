@@ -88,8 +88,45 @@ func TestValidateRejectsOutOfRange(t *testing.T) {
 	if err := (Policy{"MinDevicePasswordLength": -1}).Validate(); err == nil {
 		t.Error("a negative numeric limit was accepted; want rejected")
 	}
-	if err := (Policy{"DevicePasswordEnabled": 0, "MinDevicePasswordLength": 0, "MaxInactivityTimeDeviceLock": 900}).Validate(); err != nil {
+	if err := (Policy{"DevicePasswordEnabled": 0, "MinDevicePasswordLength": 1, "MaxInactivityTimeDeviceLock": 900}).Validate(); err != nil {
 		t.Errorf("in-range values were rejected: %v", err)
+	}
+}
+
+// TestValidateHoldsTheSpecValueSets checks each numeric field whose [MS-ASPROV]
+// 2.2.2 element page states a value set: both edges pass, the value just outside
+// each edge is refused, and an enumeration refuses a gap inside its span. The
+// expected sets are the element pages' own tables, not the code's.
+func TestValidateHoldsTheSpecValueSets(t *testing.T) {
+	cases := []struct {
+		field string
+		ok    []int
+		bad   []int
+	}{
+		{"AllowBluetooth", []int{0, 2}, []int{-1, 3}},
+		{"MinDevicePasswordLength", []int{1, 16}, []int{0, 17}},
+		{"MaxDevicePasswordFailedAttempts", []int{4, 16}, []int{3, 17}},
+		{"MinDevicePasswordComplexCharacters", []int{1, 4}, []int{0, 5}},
+		{"MaxCalendarAgeFilter", []int{0, 4, 7}, []int{1, 3, 8}},
+		{"MaxEmailAgeFilter", []int{0, 5}, []int{-1, 6}},
+		{"RequireSignedSMIMEAlgorithm", []int{0, 1}, []int{-1, 2}},
+		{"RequireEncryptionSMIMEAlgorithm", []int{0, 4}, []int{-1, 5}},
+		{"AllowSMIMEEncryptionAlgorithmNegotiation", []int{0, 2}, []int{-1, 3}},
+		{"MaxEmailBodyTruncationSize", []int{-1, 0, 51200}, []int{-2}},
+		{"MaxEmailHTMLBodyTruncationSize", []int{-1, 0, 51200}, []int{-2}},
+		{"DevicePasswordHistory", []int{0, 50}, []int{-1}},
+	}
+	for _, c := range cases {
+		for _, v := range c.ok {
+			if err := (Policy{c.field: v}).Validate(); err != nil {
+				t.Errorf("%s = %d was refused: %v", c.field, v, err)
+			}
+		}
+		for _, v := range c.bad {
+			if err := (Policy{c.field: v}).Validate(); err == nil {
+				t.Errorf("%s = %d was accepted; it is outside the spec's value set", c.field, v)
+			}
+		}
 	}
 }
 
