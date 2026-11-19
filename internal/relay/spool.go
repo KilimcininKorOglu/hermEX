@@ -204,6 +204,23 @@ func (s *Spool) EnqueueDSN(from, ret, envid string, recipients []DSNRecipient, b
 	if s.Signer != nil {
 		body = s.Signer.Sign(body)
 	}
+	return s.insert(from, ret, envid, recipients, body, now)
+}
+
+// EnqueueForward is EnqueueDSN without the author signature, for content this
+// server relays but did not authorize: mail from an unauthenticated sender that a
+// list or a forward sends on. The signer keys on the From header, so signing such
+// a message would give a forged From in a hosted domain that domain's valid DKIM
+// signature. The forwarder vouches for it with an ARC seal instead.
+func (s *Spool) EnqueueForward(from, ret, envid string, recipients []DSNRecipient, body []byte, now time.Time) error {
+	if len(recipients) == 0 {
+		return nil
+	}
+	return s.insert(from, ret, envid, recipients, body, now)
+}
+
+// insert stores one message and its recipients in a single transaction.
+func (s *Spool) insert(from, ret, envid string, recipients []DSNRecipient, body []byte, now time.Time) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err

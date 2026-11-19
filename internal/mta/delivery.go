@@ -711,7 +711,15 @@ func (s *session) queueRelay(raw []byte, received time.Time) error {
 	if len(s.relayTargets) == 0 {
 		return nil
 	}
-	if err := s.spool.EnqueueDSN(s.from, s.ret, s.envid, s.relayTargets, raw, received); err != nil {
+	// Only an authenticated submission has had its From checked by sendas, so only
+	// it carries the author's DKIM signature. The relay targets of an
+	// unauthenticated session are external list members, and its From is whatever
+	// the sender wrote.
+	enqueue := s.spool.EnqueueDSN
+	if s.authUser == "" {
+		enqueue = s.spool.EnqueueForward
+	}
+	if err := enqueue(s.from, s.ret, s.envid, s.relayTargets, raw, received); err != nil {
 		s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "relay.fail", User: s.authUser, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "recipients": len(s.relayTargets)}, Err: err.Error()})
 		// The spool is a local database; a write failure is transient, so defer.
 		return &smtp.TempError{Message: "4.3.0 could not queue the message, please retry later"}

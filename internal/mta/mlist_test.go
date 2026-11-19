@@ -1,11 +1,14 @@
 package mta
 
 import (
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/relay"
 	"hermex/internal/smtp"
 )
 
@@ -158,6 +161,54 @@ func TestRcptRoutesListMembers(t *testing.T) {
 			t.Errorf("targets = %d, want 1 (alice only; ghost dropped)", len(s.targets))
 		}
 	})
+}
+
+// countingSigner stands in for the DKIM signer and counts its calls.
+type countingSigner struct{ calls int }
+
+func (c *countingSigner) Sign(b []byte) []byte { c.calls++; return b }
+
+// listRelaySigns posts to a list with an external member through a session with
+// the given authenticated user, and reports how often the author signer ran.
+func listRelaySigns(t *testing.T, authUser string) int {
+	t.Helper()
+	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sp.Close() })
+	cs := &countingSigner{}
+	sp.Signer = cs
+	accounts := mlistDir{
+		StaticAccounts: directory.StaticAccounts{"alice@local": {MailboxPath: "/mb/alice"}},
+		lists:          fakeExpander{"team@local": ok("alice@local", "ext@remote.test")},
+	}
+	s := &session{accounts: accounts, from: "x@out.test", authUser: authUser, spool: sp}
+	if err := s.Rcpt("team@local", smtp.RcptParams{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.relayTargets) != 1 {
+		t.Fatalf("relay targets = %d, want the external member", len(s.relayTargets))
+	}
+	if err := s.queueRelay([]byte("From: ceo@local\r\nSubject: wire money\r\n\r\nbody"), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	return cs.calls
+}
+
+// TestUnauthenticatedListRelayIsNotAuthorSigned posts, without authentication,
+// a message claiming From: ceo@local to a list with an external member. The
+// signer keys on the From domain, so signing it would hand a forgery the hosted
+// domain's valid DKIM signature (RFC 6376 section 1.1: the signer takes
+// responsibility for the message). An authenticated sender's From passed sendas,
+// so that relay is still signed.
+func TestUnauthenticatedListRelayIsNotAuthorSigned(t *testing.T) {
+	if n := listRelaySigns(t, ""); n != 0 {
+		t.Errorf("an unauthenticated list relay was author-signed %d times", n)
+	}
+	if n := listRelaySigns(t, "alice@local"); n != 1 {
+		t.Errorf("an authenticated list relay was signed %d times, want 1", n)
+	}
 }
 
 // TestExpandRecipientListCollectsRefused proves the batch expander (used by

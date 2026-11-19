@@ -297,7 +297,7 @@ func (d *mtaDaemon) wireRuleHooks(lim limiters) {
 	// to keep the store free of any send dependency (like OnMeetingRequest). The
 	// envelope sender is the forwarding owner so bounces return to them and the relay
 	// DKIM path signs for their domain; the loop/backscatter guards already ran.
-	mta.OnRuleForward = ruleHook("forward", lim.outbound, d.spool.Enqueue, d.logger)
+	mta.OnRuleForward = ruleHook("forward", lim.outbound, forwardEnqueue(d.spool), d.logger)
 	// Reject bounces and vacation auto-replies a delivery-time inbox rule generated:
 	// enqueued from the owning mailbox (DKIM domain) under the same outbound cap. The
 	// store built the bytes and applied the backscatter/loop guards.
@@ -689,6 +689,19 @@ func antispamAccess(dir *directory.SQLDirectory) (*antispam.AccessList, uint64, 
 
 // enqueueFunc is the spool entry point a rule hook puts mail on: (*relay.Spool).Enqueue.
 type enqueueFunc func(from string, to []string, raw []byte, now time.Time) error
+
+// forwardEnqueue queues a rule forward without the author signature. The
+// forwarded bytes are the message as it arrived, so its From is the original
+// sender's claim, which this server never checked.
+func forwardEnqueue(spool *relay.Spool) enqueueFunc {
+	return func(from string, to []string, raw []byte, now time.Time) error {
+		rcpts := make([]relay.DSNRecipient, len(to))
+		for i, addr := range to {
+			rcpts[i] = relay.DSNRecipient{Addr: addr}
+		}
+		return spool.EnqueueForward(from, "", "", rcpts, raw, now)
+	}
+}
 
 // ruleHook builds the hook a delivery-time inbox rule calls to put mail on the wire,
 // either a forward or a rule-generated bounce/vacation reply (kind names which). Both
