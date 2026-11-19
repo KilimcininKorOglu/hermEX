@@ -141,12 +141,25 @@ func TestPublicFoldersManage(t *testing.T) {
 
 // TestPublicFoldersRequiresSystem proves an org admin cannot reach the page.
 func TestPublicFoldersRequiresSystem(t *testing.T) {
-	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminOrg, ScopeID: 1}}}
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminOrg, ScopeID: 1}},
+		domains: []directory.DomainInfo{{ID: 1, Name: "local.test"}}}
 	ts := adminServer(t, d)
-	session, _ := loginCookies(t, ts)
+	session, csrf := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/public-folders", session)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("org-admin public-folders page = %d, want 403", resp.StatusCode)
+	}
+
+	// The writes are refused too: a granted "anyone" right opens a folder to the
+	// whole domain.
+	for path, form := range map[string]url.Values{
+		"/admin/ui/public-folders/folder": {"domain": {"local.test"}, "name": {"Leak"}},
+		"/admin/ui/public-folders/grant": {"domain": {"local.test"}, "fid": {"5"}, "grantee": {"anyone"},
+			"rights": {rightsValue(mapi.RightsOwner)}},
+		"/admin/ui/public-folders/grant/remove":  {"domain": {"local.test"}, "fid": {"5"}, "memberID": {"0"}},
+		"/admin/ui/public-folders/folder/delete": {"domain": {"local.test"}, "fid": {"5"}},
+	} {
+		wantStatus(t, htmxPOST(t, ts, path, session, csrf, form), http.StatusForbidden, "org-admin "+path)
 	}
 }
