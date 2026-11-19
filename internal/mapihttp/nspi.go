@@ -35,7 +35,7 @@ func (s *Server) serveNspi(w http.ResponseWriter, r *http.Request) {
 	case "Bind":
 		s.nspiBind(w, r, user)
 	case "Unbind":
-		s.nspiUnbind(w, r)
+		s.nspiUnbind(w, r, user)
 	default:
 		s.nspiDispatch(w, r, user, reqType)
 	}
@@ -133,14 +133,14 @@ func (s *Server) nspiBind(w http.ResponseWriter, r *http.Request, user string) {
 // nspiUnbind drops the bound session (keyed by the sid cookie) and returns the
 // Unbind response. A request without a session cookie is rejected, matching the
 // transport's missing-cookie contract.
-func (s *Server) nspiUnbind(w http.ResponseWriter, r *http.Request) {
+func (s *Server) nspiUnbind(w http.ResponseWriter, r *http.Request, user string) {
 	sid, err := r.Cookie("sid")
 	if err != nil {
 		writeRespError(w, r, "Unbind", rcMissingCookie)
 		return
 	}
 	body := readBody(r)
-	s.nspiSessions.drop(sid.Value)
+	s.nspiSessions.drop(sid.Value, user)
 	writeNormal(w, r, "Unbind", s.nsp.Unbind(body))
 }
 

@@ -18,6 +18,30 @@ func testStore(t *testing.T) (*sessionStore, directory.StaticAccounts) {
 	return newSessionStore(sessionMaxAge), accs
 }
 
+// TestDisconnectDropsOnlyTheCallersSession presents another account's session
+// cookie on Disconnect and Unbind. The sid is a bearer value; Execute and the
+// wait already resolve it against the authenticated caller, so Disconnect must
+// too, or any account holding a captured sid ends that user's session.
+func TestDisconnectDropsOnlyTheCallersSession(t *testing.T) {
+	store, accs := testStore(t)
+	sid, seq := store.create(testUser, accs[testUser].MailboxPath, accs, nil, nil, rop.Locale{})
+	store.drop(sid, "intruder@hermex.test")
+	if store.lookup(sid, testUser) == nil {
+		t.Fatal("another account's Disconnect ended the session")
+	}
+	store.drop(sid, testUser)
+	if _, _, code := store.execute(sid, seq, testUser); code != rcInvalidCtxCookie {
+		t.Errorf("the owner's Disconnect left the session working (code %d)", code)
+	}
+
+	nspi := newNspiSessionStore()
+	nsid, nseq := nspi.bind(testUser)
+	nspi.drop(nsid, "intruder@hermex.test")
+	if _, code := nspi.validate(nsid, nseq, testUser); code != rcSuccess {
+		t.Errorf("another account's Unbind ended the NSPI session (code %d)", code)
+	}
+}
+
 // TestSweepReclaimsIdleSession proves a session whose client vanished without
 // Disconnect is reclaimed once it passes the idle limit, and that the client's
 // cookies stop working afterwards. Without this the store keeps the session, and

@@ -76,9 +76,12 @@ func (s *nspiSessionStore) sweep(now time.Time, ttl time.Duration) int {
 	return n
 }
 
-// drop discards a bound NSPI session (Unbind).
-func (s *nspiSessionStore) drop(sid string) {
+// drop discards the caller's bound NSPI session (Unbind). A sid that belongs to
+// another user is left alone, as validate refuses it.
+func (s *nspiSessionStore) drop(sid, user string) {
 	s.mu.Lock()
-	delete(s.m, sid)
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	if c := s.m[sid]; c != nil && c.user == user {
+		delete(s.m, sid)
+	}
 }

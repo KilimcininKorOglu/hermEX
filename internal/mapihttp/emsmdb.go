@@ -72,7 +72,7 @@ func (s *Server) emsDispatch(w http.ResponseWriter, r *http.Request, sess *sessi
 	case "Execute":
 		s.emsExecute(w, r, sess)
 	case "Disconnect":
-		s.emsDisconnect(w, r)
+		s.emsDisconnect(w, r, sess)
 	case "NotificationWait":
 		s.emsNotificationWait(w, r, sess)
 	case "PING":
@@ -189,14 +189,14 @@ func writeExecuteError(w http.ResponseWriter, r *http.Request, code uint32) {
 	writeNormal(w, r, "Execute", out.b)
 }
 
-// emsDisconnect drops the session context.
-func (s *Server) emsDisconnect(w http.ResponseWriter, r *http.Request) {
+// emsDisconnect drops the caller's session context.
+func (s *Server) emsDisconnect(w http.ResponseWriter, r *http.Request, sess *session) {
 	sid, err := r.Cookie("sid")
 	if err != nil {
 		writeRespError(w, r, "Disconnect", rcMissingCookie)
 		return
 	}
-	s.sessions.drop(sid.Value)
+	s.sessions.drop(sid.Value, sess.user)
 
 	var out writer
 	out.u32(rcSuccess) // StatusCode

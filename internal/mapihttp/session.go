@@ -119,14 +119,19 @@ func (s *sessionStore) lookup(sid, user string) *sessionContext {
 	return c
 }
 
-// drop discards a session (Disconnect), closing its ROP object table (and any
-// open store) outside the lock.
-func (s *sessionStore) drop(sid string) {
+// drop discards the caller's session (Disconnect), closing its ROP object table
+// (and any open store) outside the lock. A sid that belongs to another user is
+// left alone, as lookup and execute refuse it.
+func (s *sessionStore) drop(sid, user string) {
 	s.mu.Lock()
 	c := s.m[sid]
+	if c == nil || c.user != user {
+		s.mu.Unlock()
+		return
+	}
 	delete(s.m, sid)
 	s.mu.Unlock()
-	if c != nil && c.ropSess != nil {
+	if c.ropSess != nil {
 		c.ropSess.Close()
 	}
 }
