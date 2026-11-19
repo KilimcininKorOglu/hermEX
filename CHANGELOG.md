@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-11-19
+
+### Added
+
+- `install.sh install` sets up the first mail domain: it asks for the domain (or takes `--domain`), creates its `postmaster@` system administrator with a password shown once, turns on antivirus scanning, generates the DKIM key and saves the DNS records to publish to `/root/hermex-dns-<domain>.txt`.
+- `install.sh install` offers Let's Encrypt certificates (`--acme-email`, `--agree-tos`) when the host name already resolves to the server, and then an MTA-STS policy in testing mode (`--mtasts`, RFC 8461) when `mta-sts.<domain>` points at the server.
+- The admin panel can be published under its own host name (`admin_hostname`): the gateway routes only that name to the panel and obtains its certificate. `install.sh install` asks for it (`--admin-hostname`) and adds its CNAME to the DNS records file; with no name the panel stays reachable only through an SSH tunnel.
+- `hermex-admin` commands `generate-dkim`, `enable-dkim`, `dns-records`, `set-av-scan`, `set-tls-acme` and `set-mtasts`, so a domain's mail can be set up without the panel. `generate-dkim` keeps an existing key, and `set-mtasts enforce` needs `--confirm-enforce`, as in the panel.
+
+### Fixed
+
+- A fresh install stopped at the firewall step: firewalld names the 587/tcp service `smtp-submission`, not `submission`.
+- The DNS records prescribed for a domain served by `mail.<domain>` no longer include a `mail` CNAME, which RFC 1034 section 3.6.2 forbids beside the server's own address records.
+- The CardDAV `path=/dav` TXT record (RFC 6764 section 6) is prescribed as its own record instead of only in a note.
+
+### Changed
+
+- Tests now fail on implementations they passed before: ActiveSync Find, FolderCreate, FolderDelete, FolderUpdate, EmptyFolderContents and MeetingResponse, and the failed-login logging checks of ActiveSync, DAV, EWS and MAPI/HTTP, which now also reject a logged base64 Basic credential.
+
 ## [0.3.1] - 2026-11-19
 
 ### Added
