@@ -9,11 +9,13 @@
 // mailbox distributed over a botnet, and an account counter never sees one
 // password sprayed across the whole directory from one host.
 //
-// It fails open: an unkeyable caller or a full tracking table admits rather
-// than lock a legitimate user out, exactly like the MTA's inbound limiter.
+// It fails open for a caller it cannot key, rather than lock a legitimate user
+// out. A full tracking table evicts the key idle longest instead of admitting
+// untracked, so filling the table cannot switch the limiter off.
 package authlimit
 
 import (
+	"container/list"
 	"hermex/internal/clientnet"
 	"strings"
 	"sync"
@@ -54,14 +56,18 @@ func accountKey(user string) string {
 }
 
 // maxKeys bounds memory: distinct keys tracked at once. A full table of still-
-// live entries admits rather than evicting a live counter.
+// live entries evicts the key that failed least recently, as nginx limit_req
+// does with a full zone: a table that stopped tracking would let anyone who
+// filled it guess at any account without limit.
 const maxKeys = 100_000
 
-// attempt is one key's failure counter and, once tripped, its lockout deadline.
+// attempt is one key's failure counter, once tripped its lockout deadline, and
+// its place in the recency list.
 type attempt struct {
 	count       int
 	windowStart time.Time
 	lockedUntil time.Time
+	elem        *list.Element // Value is the key
 }
 
 // Limiter tracks failed-login counts per key and locks a key out after too many
@@ -75,6 +81,7 @@ type attempt struct {
 type Limiter struct {
 	mu       sync.Mutex
 	attempts map[string]*attempt
+	recency  *list.List // keys, most recently failed at the front
 	maxFails atomic.Int64
 	window   atomic.Int64     // rolling window in nanoseconds
 	lockout  atomic.Int64     // cooldown in nanoseconds
@@ -102,7 +109,7 @@ func New(maxFails int, window, lockout time.Duration) *Limiter {
 	if lockout <= 0 {
 		lockout = DefaultLockout
 	}
-	l := &Limiter{attempts: make(map[string]*attempt), now: time.Now}
+	l := &Limiter{attempts: make(map[string]*attempt), recency: list.New(), now: time.Now}
 	l.maxFails.Store(int64(maxFails))
 	l.window.Store(int64(window))
 	l.lockout.Store(int64(lockout))
@@ -173,12 +180,9 @@ func (l *Limiter) failKey(key string, maxFails int64) {
 	defer l.mu.Unlock()
 	a := l.attempts[key]
 	if a == nil {
-		if len(l.attempts) >= maxKeys && !l.sweep(now, window) {
-			return // table full of live entries → fail open, do not track
-		}
-		a = &attempt{windowStart: now}
-		l.attempts[key] = a
+		a = l.track(key, now, window)
 	}
+	l.recency.MoveToFront(a.elem)
 	// A fresh window, or a lockout that has since elapsed, resets the counter so the
 	// key gets a clean slate rather than staying locked forever.
 	if now.Sub(a.windowStart) >= window || (!a.lockedUntil.IsZero() && now.After(a.lockedUntil)) {
@@ -197,10 +201,28 @@ func (l *Limiter) Succeed(addr, account string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for _, key := range [...]string{ipKey(addr), accountKey(account)} {
-		if key != "" {
-			delete(l.attempts, key)
+		if a := l.attempts[key]; a != nil {
+			l.remove(a.elem)
 		}
 	}
+}
+
+// track starts counting a new key. A full table first drops the entries whose
+// window has elapsed and are not locked out and, when none has, the key that
+// failed least recently. The caller must hold l.mu.
+func (l *Limiter) track(key string, now time.Time, window time.Duration) *attempt {
+	if len(l.attempts) >= maxKeys && !l.sweep(now, window) {
+		l.remove(l.recency.Back())
+	}
+	a := &attempt{windowStart: now, elem: l.recency.PushFront(key)}
+	l.attempts[key] = a
+	return a
+}
+
+// remove drops one tracked key. The caller must hold l.mu.
+func (l *Limiter) remove(e *list.Element) {
+	delete(l.attempts, e.Value.(string))
+	l.recency.Remove(e)
 }
 
 // Prune drops entries whose window has elapsed and are not actively locked out. A
@@ -218,9 +240,9 @@ func (l *Limiter) Prune() {
 // reporting whether it freed a slot. The caller must hold l.mu.
 func (l *Limiter) sweep(now time.Time, window time.Duration) bool {
 	freed := false
-	for k, a := range l.attempts {
+	for _, a := range l.attempts {
 		if now.Sub(a.windowStart) >= window && now.After(a.lockedUntil) {
-			delete(l.attempts, k)
+			l.remove(a.elem)
 			freed = true
 		}
 	}
