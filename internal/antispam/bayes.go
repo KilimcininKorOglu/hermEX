@@ -3,6 +3,7 @@ package antispam
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"math"
@@ -88,7 +89,27 @@ func LoadBayesModel(r io.Reader) (*BayesModel, error) {
 	if m.HamTokens == nil {
 		m.HamTokens = map[string]int{}
 	}
+	if err := m.validCounts(); err != nil {
+		return nil, err
+	}
 	return m, nil
+}
+
+// validCounts refuses a model holding a negative count. Score takes the log of
+// every count, so one negative value turns the probability into NaN, which compares
+// false against every cutoff: the Bayes signal would be silently off, not reported.
+func (m *BayesModel) validCounts() error {
+	if m.SpamMsgs < 0 || m.HamMsgs < 0 {
+		return fmt.Errorf("antispam: bayes model has a negative message count (%d spam, %d ham)", m.SpamMsgs, m.HamMsgs)
+	}
+	for _, counts := range []map[string]int{m.SpamTokens, m.HamTokens} {
+		for tok, n := range counts {
+			if n < 0 {
+				return fmt.Errorf("antispam: bayes model token %q has a negative count %d", tok, n)
+			}
+		}
+	}
+	return nil
 }
 
 // TrainFromDir trains the model on every regular file in dir with the given label

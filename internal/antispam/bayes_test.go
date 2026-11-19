@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -121,6 +122,22 @@ func TestBayesClassifies(t *testing.T) {
 	}
 	if p := m.Score("project meeting schedule review report"); p >= 0.5 {
 		t.Errorf("ham-like text scored %.3f, want < 0.5", p)
+	}
+}
+
+// TestLoadBayesModelRefusesANegativeCount loads models a hand edit or a corrupted
+// write could leave behind. A negative count makes Score NaN, which no cutoff
+// catches, so the load must fail loudly instead of running with the signal off.
+func TestLoadBayesModelRefusesANegativeCount(t *testing.T) {
+	for _, raw := range []string{
+		`{"spam_msgs":-1,"ham_msgs":5}`,
+		`{"spam_msgs":5,"ham_msgs":5,"ham_tokens":{"meeting":-3}}`,
+		`{"spam_msgs":5,"ham_msgs":5,"spam_tokens":{"cheap":-1}}`,
+		`{"spam_msgs":"five"}`,
+	} {
+		if m, err := LoadBayesModel(strings.NewReader(raw)); err == nil {
+			t.Errorf("model %s loaded (score of a word: %v), want an error", raw, m.Score("cheap meeting"))
+		}
 	}
 }
 
