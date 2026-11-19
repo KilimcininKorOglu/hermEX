@@ -121,6 +121,32 @@ func TestTLSCertUploadStoresAndDelete(t *testing.T) {
 	}
 }
 
+// TestTLSFormsNeedASystemAdmin proves a domain admin can neither replace the
+// serving certificate, remove it, switch the certificate mode nor change MTA-STS:
+// each one decides how every domain on the server is reached.
+func TestTLSFormsNeedASystemAdmin(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	cert, key := genCertKeyPEM(t, "mail.attacker.test", []string{"mail.attacker.test"}, time.Now().Add(24*time.Hour))
+	for _, c := range []struct {
+		path string
+		form url.Values
+	}{
+		{"/admin/ui/tls/upload", url.Values{"name": {""}, "cert": {cert}, "key": {key}}},
+		{"/admin/ui/tls/delete", url.Values{"name": {""}}},
+		{"/admin/ui/tls/mode", url.Values{"mode": {"manual"}}},
+		{"/admin/ui/mtasts", url.Values{"mtasts_mode": {"testing"}}},
+	} {
+		wantStatus(t, htmxPOST(t, ts, c.path, session, csrf, c.form), http.StatusForbidden, "domain-admin "+c.path)
+	}
+	if len(d.tlsCerts) != 0 || d.tlsSettings != nil || d.mtastsSettings != nil {
+		t.Errorf("a domain admin changed TLS state: certs %d, mode %+v, mta-sts %+v", len(d.tlsCerts), d.tlsSettings, d.mtastsSettings)
+	}
+	wantStatus(t, authedGET(t, ts, "/admin/ui/tls", session), http.StatusForbidden, "domain-admin TLS page")
+}
+
 // TestTLSCertListReportsAReadFailure proves a failed certificate read says so in
 // the table. It rendered as "No uploaded certificates", which tells the operator
 // the listeners serve the config-file certificate when that is unknown.
