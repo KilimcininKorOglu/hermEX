@@ -453,11 +453,11 @@ func advanceFolderEID(q sqlExec, folderID int64, mid uint64) error {
 
 // ImportDeletes removes the messages a client reports gone from a folder
 // ([MS-OXCFXICS] 3.3.5.10). Each source key is a 22-byte XID; a home-replica one
-// names a message id, which is deleted when it is present in the folder.
+// names a message id, which is deleted when it is live in the folder.
 // Foreign-replica keys (cross-store) and ids absent from the folder are skipped,
-// so the operation is idempotent. v1 always hard-deletes, the store keeps no
-// soft-delete state, so the soft/hard distinction the wire carries is a
-// documented limitation. It returns the ids actually deleted.
+// so the operation is idempotent. A deletion routes to the Recoverable Items
+// dumpster, as every protocol's does, whatever the wire's soft/hard flag says;
+// only a purge removes the row. It returns the ids actually deleted.
 func (s *Store) ImportDeletes(folderID int64, sourceKeys [][]byte) ([]uint64, error) {
 	home, err := s.replicaGUID()
 	if err != nil {
@@ -474,7 +474,7 @@ func (s *Store) ImportDeletes(folderID int64, sourceKeys [][]byte) ([]uint64, er
 		}
 		var present int
 		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		err = s.objdb.QueryRow(`SELECT 1 FROM messages WHERE message_id=? AND parent_fid=?`, int64(mid), folderID).Scan(&present)
+		err = s.objdb.QueryRow(`SELECT 1 FROM messages WHERE message_id=? AND parent_fid=? AND is_deleted=0`, int64(mid), folderID).Scan(&present)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
@@ -482,7 +482,7 @@ func (s *Store) ImportDeletes(folderID int64, sourceKeys [][]byte) ([]uint64, er
 			return nil, err
 		}
 		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		if err := s.DeleteObject(int64(mid)); err != nil && !errors.Is(err, ErrNotFound) {
+		if err := s.SoftDeleteObject(int64(mid)); err != nil && !errors.Is(err, ErrNotFound) {
 			return nil, err
 		}
 		deleted = append(deleted, mid)

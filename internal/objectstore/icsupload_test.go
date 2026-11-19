@@ -621,8 +621,19 @@ func TestImportDeletes(t *testing.T) {
 	if len(deleted) != 1 || deleted[0] != uint64(m2) {
 		t.Fatalf("deleted = %v, want [%d]", deleted, m2)
 	}
-	if _, err := s.OpenMessage(m2); !errors.Is(err, ErrNotFound) {
-		t.Errorf("deleted message still present (err=%v)", err)
+	// A client's delete routes to Recoverable Items like every other protocol's,
+	// so the item can still be recovered: it leaves the live folder, not the store.
+	live, err := s.ListFolderObjects(fld)
+	mustNoErr(t, "list the live folder", err)
+	for _, o := range live {
+		if o.ID == m2 {
+			t.Errorf("the deleted message %d is still in the live folder", m2)
+		}
+	}
+	dumpster, err := s.ListSoftDeleted(fld)
+	mustNoErr(t, "list the dumpster", err)
+	if !slices.ContainsFunc(dumpster, func(d SoftDeletedMessage) bool { return d.MessageID == m2 }) {
+		t.Errorf("the deleted message %d is not recoverable; the dumpster holds %v", m2, dumpster)
 	}
 	mustOpenMessage(t, s, m1)
 
