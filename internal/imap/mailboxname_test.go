@@ -37,6 +37,22 @@ func TestCreateRefusesAControlCharacterInAMailboxName(t *testing.T) {
 	}
 }
 
+// TestMailboxSafeRefusesEveryControlCharacter takes CTL from RFC 3501 section 9
+// (%x00-1F / %x7F), which ASTRING-CHAR excludes: every one of them, not only CR
+// and LF, is refused, and printable names including 8-bit text pass.
+func TestMailboxSafeRefusesEveryControlCharacter(t *testing.T) {
+	for _, bad := range []string{"a\x00b", "a\tb", "a\x1fb", "a\x7fb", "a\rb", "a\nb"} {
+		if mailboxSafe(bad) {
+			t.Errorf("mailboxSafe(%q) = true, want false", bad)
+		}
+	}
+	for _, good := range []string{"Work", "Work/2026", "Arşiv", "a b", "~x"} {
+		if !mailboxSafe(good) {
+			t.Errorf("mailboxSafe(%q) = false, want true", good)
+		}
+	}
+}
+
 // TestRenameRefusesAControlCharacterInAMailboxName covers the second door into
 // the folder tree.
 func TestRenameRefusesAControlCharacterInAMailboxName(t *testing.T) {
