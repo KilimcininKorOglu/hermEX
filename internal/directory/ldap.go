@@ -188,19 +188,8 @@ func (d *SQLDirectory) UpsertLDAPUser(username string, externid []byte, maildir 
 	case !errors.Is(err, sql.ErrNoRows):
 		return false, err
 	}
-	at := strings.LastIndexByte(username, '@')
-	if at <= 0 {
-		return false, errors.New("directory: username must be an email address")
-	}
-	if err := ValidateAddress(username); err != nil {
-		return false, err
-	}
-	domain := username[at+1:]
-	var domainID int64
-	switch err = d.db.QueryRow(`SELECT id FROM domains WHERE domainname = ?`, domain).Scan(&domainID); {
-	case errors.Is(err, sql.ErrNoRows):
-		return false, fmt.Errorf("directory: domain %q not found", domain)
-	case err != nil:
+	domainID, err := d.newAccountDomainID(username)
+	if err != nil {
 		return false, err
 	}
 	tx, err := d.db.Begin()
@@ -222,6 +211,21 @@ func (d *SQLDirectory) UpsertLDAPUser(username string, externid []byte, maildir 
 		return false, err
 	}
 	return true, tx.Commit()
+}
+
+// newAccountDomainID validates an address a new account is to be created under
+// and returns the id of its domain, which must already exist.
+func (d *SQLDirectory) newAccountDomainID(username string) (int64, error) {
+	if err := ValidateAddress(username); err != nil {
+		return 0, err
+	}
+	domain := AddressDomain(username)
+	var domainID int64
+	err := d.db.QueryRow(`SELECT id FROM domains WHERE domainname = ?`, domain).Scan(&domainID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("directory: domain %q not found", domain)
+	}
+	return domainID, err
 }
 
 // ErrInsecureLDAP rejects a configuration that would bind in the clear. The
