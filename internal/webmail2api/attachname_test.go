@@ -13,7 +13,28 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcmail"
 )
+
+// TestInviteAndContactFilenamesCannotBreakTheHeader feeds the invitation SUMMARY
+// and the contact name, both chosen by an outside sender, into the two download
+// names. Each lands inside a quoted Content-Disposition filename (RFC 6266 4.1),
+// where a quote ends the value and CR LF ends the field, and a path separator
+// lets a saving client choose the directory, so none of them may survive.
+func TestInviteAndContactFilenamesCannotBreakTheHeader(t *testing.T) {
+	const hostile = "Q3\"; x=\"\r\nSet-Cookie: a=b/../..\\evil"
+	ics := []byte("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:" + strings.ReplaceAll(hostile, "\r\n", "") + "\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+	if got := icsFilename(ics); strings.ContainsAny(got, "\"\r\n/\\") || !strings.HasSuffix(got, ".ics") {
+		t.Errorf("icsFilename = %q, keeps a quote, line break or path separator", got)
+	}
+	if got := sanitizeICSName(hostile); strings.ContainsAny(got, "\"\r\n/\\") {
+		t.Errorf("sanitizeICSName = %q, keeps a quote, line break or path separator", got)
+	}
+	contact := &oxcmail.Message{Props: mapi.PropertyValues{{Tag: mapi.PrDisplayName, Value: hostile}}}
+	if got := contactFilename(contact); strings.ContainsAny(got, "\"\r\n/\\;=: ") {
+		t.Errorf("contactFilename = %q, keeps a header or path metacharacter", got)
+	}
+}
 
 // TestSafeAttachmentNameStripsTraversal proves a sender cannot choose where an
 // extracted file lands. The archive entry name is the sender's filename verbatim
