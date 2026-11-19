@@ -96,6 +96,27 @@ func TestPutReplace(t *testing.T) {
 	}
 }
 
+// TestPutRefusesWhatIsNotAVCard sends bodies a client or attacker can PUT to a
+// contact URL: empty, plain text, an unterminated vCard and an iCalendar object.
+// None is a vCard (RFC 6350 section 3.3), so each is refused and nothing is stored,
+// and a resource name carrying an encoded path separator or a NUL is refused too.
+func TestPutRefusesWhatIsNotAVCard(t *testing.T) {
+	ts := davServer(t)
+	for _, body := range []string{"", "not a vcard", "BEGIN:VCARD\r\nFN:x\r\n", "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"} {
+		if resp, _ := doFull(t, ts, "PUT", contactURL("bad.vcf"), body, nil); resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("PUT %q: status %d, want 400", body, resp.StatusCode)
+		}
+		if resp, _ := doFull(t, ts, "GET", contactURL("bad.vcf"), "", nil); resp.StatusCode != http.StatusNotFound {
+			t.Errorf("GET after refused PUT %q: status %d, want 404", body, resp.StatusCode)
+		}
+	}
+	for _, name := range []string{"..%2f..%2fx.vcf", "a%00b.vcf"} {
+		if resp, _ := doFull(t, ts, "PUT", contactURL(name), adaVCard, nil); resp.StatusCode < 400 {
+			t.Errorf("PUT to resource name %q: status %d, want a refusal", name, resp.StatusCode)
+		}
+	}
+}
+
 // TestIfNoneMatchCreateOnly confirms If-None-Match: * makes PUT create-only.
 func TestIfNoneMatchCreateOnly(t *testing.T) {
 	ts := davServer(t)
