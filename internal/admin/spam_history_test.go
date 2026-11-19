@@ -80,6 +80,24 @@ func TestSaveSpamRetention(t *testing.T) {
 	}
 }
 
+// TestSpamHistoryNeedsASystemAdmin proves a domain admin can neither read the
+// verdicts, which name every domain's senders and their addresses, nor change how
+// many are kept.
+func TestSpamHistoryNeedsASystemAdmin(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		verdicts: []directory.SpamVerdict{{MailFrom: "bad@spam.example", RemoteAddr: "203.0.113.9", Spam: true}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/spam-history", session), http.StatusForbidden, "domain-admin page")
+	if strings.Contains(page, "203.0.113.9") {
+		t.Error("the refusal carries a verdict's address")
+	}
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/spam-history/retention", session, csrf, url.Values{"retain": {"1"}}),
+		http.StatusForbidden, "domain-admin retention")
+	wantFalse(t, d.spamHistoryFound, "a domain admin stored a spam history bound")
+}
+
 // TestSaveSpamRetentionRejectsBadValues proves a retention below 1 (which would prune
 // the table to nothing on the next insert) is rejected and nothing is persisted.
 func TestSaveSpamRetentionRejectsBadValues(t *testing.T) {
