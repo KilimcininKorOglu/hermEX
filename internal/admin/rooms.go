@@ -2,7 +2,6 @@ package admin
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 )
 
@@ -36,7 +35,9 @@ func (s *Server) handleUICreateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	email := strings.TrimSpace(r.PostFormValue("email"))
-	capacity, _ := strconv.Atoi(r.PostFormValue("capacity"))
+	// A value that is not a number reads as -1, which the directory refuses: read as
+	// 0 it created the room with no capacity.
+	capacity := formInt(r, "capacity")
 	equipment := r.PostFormValue("kind") == "equipment"
 	var errMsg string
 	if email == "" {

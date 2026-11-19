@@ -87,6 +87,11 @@ func (d *SQLDirectory) scanRooms(q string, args ...any) ([]GALEntry, error) {
 // capacity, in one transaction. maildir is the resource's object-store path, which
 // the caller derives the same way it does for a user. It reports the new user id.
 func (d *SQLDirectory) CreateRoom(email, displayName, maildir string, capacity int, equipment bool) (int64, error) {
+	// 0 means the capacity was not given; a negative one is an error, not a silent
+	// "not given".
+	if capacity < 0 {
+		return 0, fmt.Errorf("directory: room capacity %d is negative", capacity)
+	}
 	email = strings.ToLower(strings.TrimSpace(email))
 	domainID, err := d.resourceDomainID(email)
 	if err != nil {

@@ -57,6 +57,9 @@ func TestCreateRoom(t *testing.T) {
 	mustNoErr(t, "create the conference room", err)
 	_, err = d.CreateRoom("projector-1@hermex.test", "Projector", filepath.Join(root, "proj"), 0, true)
 	mustNoErr(t, "create the equipment", err)
+	// A negative capacity is refused rather than stored as "not given".
+	_, err = d.CreateRoom("neg@hermex.test", "Neg", filepath.Join(root, "neg"), -3, false)
+	wantErr(t, "CreateRoom with a negative capacity succeeded", err)
 	// A room must belong to a known domain.
 	_, err = d.CreateRoom("ghost@nope.test", "Ghost", filepath.Join(root, "ghost"), 0, false)
 	wantErr(t, "CreateRoom into an unknown domain succeeded", err)

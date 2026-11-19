@@ -32,6 +32,14 @@ func TestUICreateRoom(t *testing.T) {
 	if !strings.Contains(string(body), `id="rooms-panel"`) {
 		t.Errorf("response is not the rooms panel fragment: %s", body)
 	}
+
+	// A capacity that is not a number must reach the directory as the refused -1,
+	// not as 0, which created the room with no capacity.
+	htmxPOST(t, ts, "/admin/ui/rooms", session, csrf,
+		url.Values{"email": {"r2@hermex.test"}, "capacity": {"twelve"}}).Body.Close()
+	if d.createdRoomCap != -1 {
+		t.Errorf("a forged capacity reached the directory as %d, want -1", d.createdRoomCap)
+	}
 }
 
 // TestUIDeleteRoomRejectsMailboxUser proves the rooms page deletes only resource
