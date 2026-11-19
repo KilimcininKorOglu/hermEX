@@ -20,71 +20,73 @@ type Authenticator interface {
 
 // handleAuth runs the AUTH exchange (RFC 4954) for PLAIN and LOGIN. AUTH is
 // refused on a plaintext link or by a session that cannot authenticate. A
-// successful exchange replies 235; a rejected credential replies 535.
-func (s *Server) handleAuth(w *ew, tp *textproto.Reader, arg string, sess Session, isTLS, canAuth bool) {
+// successful exchange replies 235 and returns true; a rejected credential
+// replies 535.
+func (s *Server) handleAuth(w *ew, tp *textproto.Reader, arg string, sess Session, isTLS, canAuth bool) bool {
 	auth, ok := sess.(Authenticator)
 	if !canAuth || !ok {
 		reply(w, 503, "5.5.1 AUTH not available")
-		return
+		return false
 	}
 	if !isTLS {
 		reply(w, 538, "5.7.11 STARTTLS required before AUTH")
-		return
+		return false
 	}
 	mechanism, initial, _ := strings.Cut(arg, " ")
 	switch strings.ToUpper(mechanism) {
 	case "PLAIN":
-		authPlain(w, tp, s.commandLineLimit(), initial, auth)
+		return authPlain(w, tp, s.commandLineLimit(), initial, auth)
 	case "LOGIN":
-		authLogin(w, tp, s.commandLineLimit(), initial, auth)
+		return authLogin(w, tp, s.commandLineLimit(), initial, auth)
 	default:
 		reply(w, 504, "5.5.4 Unrecognized authentication type")
+		return false
 	}
 }
 
 // authPlain handles AUTH PLAIN: the credential is a single base64 token decoding
 // to authzid\0authcid\0password (RFC 4616). It may arrive inline or in a
 // continuation line after a 334 challenge.
-func authPlain(w *ew, tp *textproto.Reader, max int, initial string, auth Authenticator) {
+func authPlain(w *ew, tp *textproto.Reader, max int, initial string, auth Authenticator) bool {
 	resp, ok := authResponse(w, tp, max, initial, "")
 	if !ok {
-		return
+		return false
 	}
 	decoded, err := base64.StdEncoding.DecodeString(resp)
 	if err != nil {
 		reply(w, 501, "5.5.2 invalid base64")
-		return
+		return false
 	}
 	user, pass, ok := sasl.ParsePlain(string(decoded))
 	if !ok {
 		reply(w, 501, "5.5.2 malformed PLAIN response")
-		return
+		return false
 	}
-	finishAuth(w, auth, user, pass)
+	return finishAuth(w, auth, user, pass)
 }
 
 // authLogin handles AUTH LOGIN: the server prompts for the base64 username then
 // password (the username may arrive inline with the AUTH command).
-func authLogin(w *ew, tp *textproto.Reader, max int, initial string, auth Authenticator) {
+func authLogin(w *ew, tp *textproto.Reader, max int, initial string, auth Authenticator) bool {
 	user, ok := authResponse(w, tp, max, initial, "VXNlcm5hbWU6") // "Username:"
 	if !ok {
-		return
+		return false
 	}
 	username, err := base64.StdEncoding.DecodeString(user)
 	if err != nil {
 		reply(w, 501, "5.5.2 invalid base64")
-		return
+		return false
 	}
 	pass, ok := authResponse(w, tp, max, "", "UGFzc3dvcmQ6") // "Password:"
 	if !ok {
-		return
+		return false
 	}
 	password, err := base64.StdEncoding.DecodeString(pass)
 	if err != nil {
 		reply(w, 501, "5.5.2 invalid base64")
-		return
+		return false
 	}
-	finishAuth(w, auth, string(username), string(password))
+	return finishAuth(w, auth, string(username), string(password))
 }
 
 // authResponse returns the client's response token: the inline value when
@@ -109,11 +111,12 @@ func authResponse(w *ew, tp *textproto.Reader, max int, inline, challenge string
 	return resp, true
 }
 
-// finishAuth validates the credentials and replies.
-func finishAuth(w *ew, auth Authenticator, user, password string) {
+// finishAuth validates the credentials, replies, and reports whether they held.
+func finishAuth(w *ew, auth Authenticator, user, password string) bool {
 	if !auth.Auth(user, password) {
 		reply(w, 535, "5.7.8 authentication failed")
-		return
+		return false
 	}
 	reply(w, 235, "2.7.0 authentication successful")
+	return true
 }

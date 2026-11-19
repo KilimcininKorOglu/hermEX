@@ -94,6 +94,27 @@ func (s *Server) SetMaxSize(n int64) {
 // Start to serve. Call it before Start.
 func (s *Server) AddListener(l net.Listener) { s.conns.AddListener(l) }
 
+// AddSubmissionListener serves l as a message submission port (RFC 6409, port
+// 587): plaintext with STARTTLS like port 25, but a MAIL before a successful
+// AUTH is refused.
+func (s *Server) AddSubmissionListener(l net.Listener) {
+	s.conns.AddListener(submissionListener{l})
+}
+
+// submissionListener tags each accepted connection as a submission one.
+type submissionListener struct{ net.Listener }
+
+func (l submissionListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return submissionConn{c}, nil
+}
+
+// submissionConn is a connection accepted on the submission port.
+type submissionConn struct{ net.Conn }
+
 // Start serves every registered listener until Shutdown, satisfying
 // lifecycle.Component.
 func (s *Server) Start() error {
@@ -170,6 +191,10 @@ type smtpConn struct {
 	remote  string
 	sess    Session
 	canAuth bool
+	// submission marks a connection on the message submission port (RFC 6409),
+	// where MAIL requires a prior successful AUTH; authed records that AUTH.
+	submission bool
+	authed     bool
 
 	// greeted records that the client has sent HELO/EHLO. RFC 5321 §4.1.4: a
 	// session carrying mail transactions MUST first be initialized by EHLO, so
@@ -238,15 +263,17 @@ func (s *Server) handle(conn net.Conn) {
 	// so the EHLO advertisement is also gated on the link being secured.
 	_, canAuth := sess.(Authenticator)
 	_, isTLS := conn.(*tls.Conn)
+	_, submission := conn.(submissionConn)
 	c := &smtpConn{
-		srv:     s,
-		conn:    conn,
-		w:       &ew{out: bufio.NewWriter(conn)},
-		tp:      textproto.NewReader(bufio.NewReader(conn)),
-		tls:     isTLS,
-		remote:  remote,
-		sess:    sess,
-		canAuth: canAuth,
+		srv:        s,
+		conn:       conn,
+		w:          &ew{out: bufio.NewWriter(conn)},
+		tp:         textproto.NewReader(bufio.NewReader(conn)),
+		tls:        isTLS,
+		remote:     remote,
+		sess:       sess,
+		canAuth:    canAuth,
+		submission: submission,
 	}
 	defer func() { _ = c.conn.Close() }() // closes the upgraded conn after a STARTTLS swap
 	defer sess.Logout()
@@ -337,7 +364,9 @@ func (c *smtpConn) cmdEHLO(arg string) bool {
 }
 
 func (c *smtpConn) cmdAUTH(arg string) bool {
-	c.srv.handleAuth(c.w, c.tp, arg, c.sess, c.tls, c.canAuth)
+	if c.srv.handleAuth(c.w, c.tp, arg, c.sess, c.tls, c.canAuth) {
+		c.authed = true
+	}
 	return true
 }
 
@@ -370,6 +399,12 @@ func (c *smtpConn) cmdSTARTTLS(string) bool {
 func (c *smtpConn) cmdMAIL(arg string) bool {
 	if !c.greeted {
 		c.reply(503, "5.5.1 send HELO/EHLO first")
+		return true
+	}
+	// RFC 6409 §4.3 and RFC 4954 §6: the submission port takes mail only from an
+	// authenticated client, so it cannot serve as a second, unauthenticated MX.
+	if c.submission && !c.authed {
+		c.reply(530, "5.7.0 Authentication required")
 		return true
 	}
 	addr, ok := extractPath(arg, "FROM:")

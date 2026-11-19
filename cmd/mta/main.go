@@ -386,7 +386,26 @@ func (d *mtaDaemon) startServer(scorer *antispam.Scorer, lim limiters, addr stri
 	srv.AddListener(ln)
 	log.Printf("hermex-mta listening on %s", addr)
 	d.addImplicitTLS(srv, provider)
+	d.addSubmission(srv, provider)
 	return srv, provider
+}
+
+// addSubmission serves the optional message submission port (RFC 6409, e.g.
+// :587). Submission needs AUTH and AUTH needs TLS, so a configured port without a
+// certificate is a configuration error, not a silently missing listener.
+func (d *mtaDaemon) addSubmission(srv *smtp.Server, provider *tlscert.Provider) {
+	if d.cfg.SubmissionAddr == "" {
+		return
+	}
+	if !provider.TLSEnabled() {
+		log.Fatalf("hermex-mta: submission on %s needs TLS, and none is configured", d.cfg.SubmissionAddr)
+	}
+	ln, err := net.Listen("tcp", d.cfg.SubmissionAddr)
+	if err != nil {
+		log.Fatalf("hermex-mta: submission on %s: %v", d.cfg.SubmissionAddr, err)
+	}
+	srv.AddSubmissionListener(ln)
+	log.Printf("hermex-mta listening on %s (submission)", d.cfg.SubmissionAddr)
 }
 
 // addImplicitTLS serves the optional implicit-TLS listener (e.g. :465) alongside

@@ -41,13 +41,16 @@ type Config struct {
 	// daemon's health name ("imap", "mta", "mapi", ...). Daemons that share one
 	// network namespace, as on a single host, need one each; in a container each
 	// daemon has its own namespace and the shared health_addr is enough.
-	HealthAddrs  map[string]string `json:"health_addrs"`
-	TLSCert      string            `json:"tls_cert"`      // PEM certificate (chain) for implicit-TLS/HTTPS listeners
-	TLSKey       string            `json:"tls_key"`       // PEM private key paired with tls_cert
-	IMAPSAddr    string            `json:"imaps_addr"`    // IMAP implicit-TLS listen address (e.g. ":993"); empty disables
-	POP3SAddr    string            `json:"pop3s_addr"`    // POP3 implicit-TLS listen address (e.g. ":995"); empty disables
-	SMTPSAddr    string            `json:"smtps_addr"`    // SMTP implicit-TLS listen address (e.g. ":465"); empty disables
-	DaneResolver string            `json:"dane_resolver"` // address of a DNSSEC-validating resolver for outbound DANE/TLSA (RFC 7672); bare host gets :53, empty disables DANE (opportunistic TLS only)
+	HealthAddrs map[string]string `json:"health_addrs"`
+	TLSCert     string            `json:"tls_cert"`   // PEM certificate (chain) for implicit-TLS/HTTPS listeners
+	TLSKey      string            `json:"tls_key"`    // PEM private key paired with tls_cert
+	IMAPSAddr   string            `json:"imaps_addr"` // IMAP implicit-TLS listen address (e.g. ":993"); empty disables
+	POP3SAddr   string            `json:"pop3s_addr"` // POP3 implicit-TLS listen address (e.g. ":995"); empty disables
+	SMTPSAddr   string            `json:"smtps_addr"` // SMTP implicit-TLS listen address (e.g. ":465"); empty disables
+	// SubmissionAddr is the message submission listener (RFC 6409, e.g. ":587"):
+	// STARTTLS, and MAIL only after AUTH. Empty disables it.
+	SubmissionAddr string `json:"submission_addr"`
+	DaneResolver   string `json:"dane_resolver"` // address of a DNSSEC-validating resolver for outbound DANE/TLSA (RFC 7672); bare host gets :53, empty disables DANE (opportunistic TLS only)
 
 	// Gateway front door. Only the gateway daemon reads these; every other daemon
 	// ignores them, so they stay optional in the one shared config. Each empty field
