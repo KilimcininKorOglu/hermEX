@@ -62,6 +62,35 @@ func TestDomainAdminScopedAccess(t *testing.T) {
 	}
 }
 
+// serverWideWrites are the panel writes that change the whole server: scoring,
+// limits, retention windows, TLS, the relay queue and health targets. None of
+// them belongs to one domain.
+var serverWideWrites = []string{
+	"/admin/ui/antispam/autoreply", "/admin/ui/antispam/digest", "/admin/ui/antispam/gateway",
+	"/admin/ui/antispam/gateway/delete", "/admin/ui/antispam/greylist", "/admin/ui/antispam/greylist-timings",
+	"/admin/ui/antispam/message-size", "/admin/ui/antispam/outbound", "/admin/ui/antispam/ratelimit",
+	"/admin/ui/antispam/relay", "/admin/ui/antispam/retrain", "/admin/ui/antispam/settings",
+	"/admin/ui/limits", "/admin/ui/limits/connections", "/admin/ui/limits/fetchpolicy",
+	"/admin/ui/limits/loginlockout", "/admin/ui/limits/requestrate", "/admin/ui/log-retention",
+	"/admin/ui/mailq/delete", "/admin/ui/mailq/retry", "/admin/ui/mtasts", "/admin/ui/recoverable-retention",
+	"/admin/ui/reports/dmarc-sending", "/admin/ui/reports/retention", "/admin/ui/spam-history/retention",
+	"/admin/ui/status/targets", "/admin/ui/tls/delete", "/admin/ui/tls/mode", "/admin/ui/tls/upload",
+}
+
+// TestServerWideWritesNeedASystemAdmin sends every server-wide write as a
+// domain administrator with a valid session and CSRF token. Each is refused
+// with 403, so a domain admin cannot change what every other domain runs under.
+func TestServerWideWritesNeedASystemAdmin(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	for _, path := range serverWideWrites {
+		if s := statusOf(authedReq(t, ts, "POST", path, session, csrf, "")); s != http.StatusForbidden {
+			t.Errorf("domain admin POST %s = %d, want 403", path, s)
+		}
+	}
+}
+
 // TestDomainAdminROReadOnly proves a read-only domain admin reads its domain's
 // users but cannot write them.
 func TestDomainAdminROReadOnly(t *testing.T) {
