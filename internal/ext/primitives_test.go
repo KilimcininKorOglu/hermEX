@@ -138,6 +138,20 @@ func TestString8Unterminated(t *testing.T) {
 	}
 }
 
+// TestUnicodeUnterminated refuses a UTF-16 string with no aligned 00 00
+// terminator: none at all, and a 00 00 pair that straddles two code units
+// (0x0041 0x4100 holds the bytes 00 00 at an odd offset), which is not one.
+func TestUnicodeUnterminated(t *testing.T) {
+	for name, buf := range map[string][]byte{
+		"no terminator":         {0x48, 0x00, 0x69, 0x00},
+		"misaligned zero bytes": {0x41, 0x00, 0x00, 0x41},
+	} {
+		if _, err := NewPull(buf, FlagUTF16).Unicode(); !errors.Is(err, ErrFormat) {
+			t.Errorf("%s: err = %v, want ErrFormat", name, err)
+		}
+	}
+}
+
 func TestPullUnderflow(t *testing.T) {
 	if _, err := NewPull([]byte{0x01, 0x02}, 0).Uint32(); !errors.Is(err, ErrUnderflow) {
 		t.Errorf("short Uint32 err = %v, want ErrUnderflow", err)
