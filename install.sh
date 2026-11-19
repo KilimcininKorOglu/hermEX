@@ -170,18 +170,33 @@ install_debian_packages() {
 	apt-get install -y ca-certificates curl gnupg openssl tar
 	install -d -m 0755 /etc/apt/keyrings
 	add_apt_key "https://mariadb.org/mariadb_release_signing_key.pgp" /etc/apt/keyrings/mariadb-keyring.gpg
-	add_apt_key "https://pgp.mongodb.com/server-${MONGODB_SERIES}.asc" /etc/apt/keyrings/mongodb-${MONGODB_SERIES}.gpg
-	local mongo_component="main"
-	[[ "$OS_ID" == "ubuntu" ]] && mongo_component="multiverse"
 	write_file /etc/apt/sources.list.d/mariadb.list 0644 root:root <<EOF
 deb [signed-by=/etc/apt/keyrings/mariadb-keyring.gpg] https://dlm.mariadb.com/repo/mariadb-server/${MARIADB_SERIES}/repo/${OS_ID} ${OS_CODENAME} main
 EOF
-	write_file /etc/apt/sources.list.d/mongodb-org-${MONGODB_SERIES}.list 0644 root:root <<EOF
-deb [signed-by=/etc/apt/keyrings/mongodb-${MONGODB_SERIES}.gpg] https://repo.mongodb.org/apt/${OS_ID} ${OS_CODENAME}/mongodb-org/${MONGODB_SERIES} ${mongo_component}
-EOF
+	local packages=(mariadb-server clamav-daemon clamav-freshclam)
+	if mongo_available; then
+		add_mongo_apt_repo
+		packages+=(mongodb-org)
+	fi
 	apt-get update
-	apt-get install -y mariadb-server mongodb-org clamav-daemon clamav-freshclam
+	apt-get install -y "${packages[@]}"
 }
+
+add_mongo_apt_repo() {
+	local component="main"
+	[[ "$OS_ID" == "ubuntu" ]] && component="multiverse"
+	add_apt_key "https://pgp.mongodb.com/server-${MONGODB_SERIES}.asc" /etc/apt/keyrings/mongodb-${MONGODB_SERIES}.gpg
+	write_file /etc/apt/sources.list.d/mongodb-org-${MONGODB_SERIES}.list 0644 root:root <<EOF
+deb [signed-by=/etc/apt/keyrings/mongodb-${MONGODB_SERIES}.gpg] https://repo.mongodb.org/apt/${OS_ID} ${OS_CODENAME}/mongodb-org/${MONGODB_SERIES} ${component}
+EOF
+}
+
+# mongo_available reports whether MongoDB publishes packages for this platform.
+# It publishes none for Debian on arm64; there hermEX runs without the central
+# log store and every daemon logs to the journal instead.
+mongo_available() { ! [[ "$OS_ID" == "debian" && "$ARCH" == "arm64" ]]; }
+
+mongo_uri() { if mongo_available; then echo "mongodb://127.0.0.1:27017"; fi; }
 
 clamd_socket() {
 	if [[ "$OS_FAMILY" == "rhel" ]]; then
@@ -211,7 +226,7 @@ EOF
 		usermod -aG virusgroup "$SVC_USER"
 		systemd-tmpfiles --create clamd.scan.conf
 	fi
-	log "fetching the ClamAV signature database (first run downloads about 300 MB)"
+	log "fetching the ClamAV signature database (the first run downloads all of it)"
 	systemctl stop clamav-freshclam.service || true
 	# clamd reads the database as another user, so the files must be world
 	# readable; this script's own umask would make them owner and group only.
@@ -223,7 +238,11 @@ EOF
 
 setup_services() {
 	systemctl enable --now mariadb.service
-	systemctl enable --now mongod.service
+	if mongo_available; then
+		systemctl enable --now mongod.service
+	else
+		log "MongoDB publishes no packages for ${OS_ID} ${ARCH}: no central log store, the daemons log to the journal"
+	fi
 }
 
 # ------------------------------------------------------------------ layout ---
@@ -324,7 +343,7 @@ write_config() {
   "notify_url": "https://127.0.0.1:8607",
   "webmail2_dist": "${PREFIX}/current/webmail2",
   "acme_storage": "${STATE}/acme",
-  "mongo_uri": "mongodb://127.0.0.1:27017",
+  "mongo_uri": "$(mongo_uri)",
   "log_database": "hermex",
   "log_spill_dir": "${STATE}/spill",
   "clamd_addr": "unix://$(clamd_socket)",
