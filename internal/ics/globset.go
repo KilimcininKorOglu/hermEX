@@ -1,6 +1,7 @@
 package ics
 
 import (
+	"errors"
 	"sort"
 
 	"hermex/internal/mapi"
@@ -178,19 +179,30 @@ func rangeCmd(out []byte, lo, hi []byte) []byte {
 // returns the number of bytes consumed (past the terminating end command). It
 // maintains the common-byte stack and handles push (incl. the depth-6 auto-emit
 // + auto-pop), range, pop, and the decode-only bitmask command. Ranges are
-// appended in wire order without coalescing. A truncated or malformed stream
-// stops at the current offset rather than panicking.
-func deserializeGlobset(data []byte) (rangeSet, int) {
+// appended in wire order without coalescing.
+//
+// The stream comes from the client, so anything [MS-OXCFXICS] 2.2.2.6 does not
+// allow is an error: a stream that ends without the End command, a command cut
+// short, an undefined command byte, or a Range whose low value is above its high
+// value. Keeping the ranges read so far would stand in for the client's whole
+// state, and the caller would read the next replica from the wrong offset.
+func deserializeGlobset(data []byte) (rangeSet, int, error) {
 	d := globsetDecoder{data: data}
 	for d.off < len(data) {
 		cmd := data[d.off]
 		d.off++
 		if d.command(cmd) {
-			return d.rs, d.off
+			break
 		}
 	}
-	return d.rs, d.off
+	if !d.ended {
+		return rangeSet{}, d.off, errMalformedGlobset
+	}
+	return d.rs, d.off, nil
 }
+
+// errMalformedGlobset reports a GLOBSET stream outside [MS-OXCFXICS] 2.2.2.6.
+var errMalformedGlobset = errors.New("ics: malformed GLOBSET")
 
 // globFrame is one pushed run of common bytes.
 type globFrame struct {
@@ -205,6 +217,7 @@ type globsetDecoder struct {
 	off   int
 	stack []globFrame
 	rs    rangeSet
+	ended bool // the End command was read; nothing else completes a stream
 }
 
 // common assembles the GLOBCNT prefix the stack currently holds, and its length.
@@ -233,7 +246,8 @@ func (d *globsetDecoder) command(cmd byte) (stop bool) {
 	case cmd == glbRange:
 		return d.readRange()
 	}
-	return true // glbEnd, and anything unrecognized
+	d.ended = cmd == glbEnd
+	return true // the End command, or an undefined one
 }
 
 // push reads a run of n common bytes. At depth 6 the frame names one value, so
@@ -297,7 +311,11 @@ func (d *globsetDecoder) readRange() (stop bool) {
 	d.off += cnt
 	copy(hiGC[cur:], d.data[d.off:d.off+cnt])
 	d.off += cnt
-	d.rs.appendRaw(mapi.GCToValue(loGC), mapi.GCToValue(hiGC))
+	lo, hi := mapi.GCToValue(loGC), mapi.GCToValue(hiGC)
+	if lo > hi {
+		return true // an empty range names no value; the stream is malformed
+	}
+	d.rs.appendRaw(lo, hi)
 	return false
 }
 

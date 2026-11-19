@@ -125,7 +125,10 @@ func TestSerializeMultiRangeVector(t *testing.T) {
 		t.Errorf("multi-range GLOBSET\n got %x\nwant %x", got, want)
 	}
 	// Round-trip the canonical encoding back to the same ranges.
-	dec, n := deserializeGlobset(want)
+	dec, n, err := deserializeGlobset(want)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
 	if n != len(want) {
 		t.Errorf("decode consumed %d of %d bytes", n, len(want))
 	}
@@ -144,7 +147,10 @@ func TestDeserializeBitmaskVector(t *testing.T) {
 		glbBitmask, 0x10, 0x05, // start 0x10, mask 0b00000101
 		glbEnd,
 	}
-	rs, n := deserializeGlobset(data)
+	rs, n, err := deserializeGlobset(data)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
 	if n != len(data) {
 		t.Fatalf("decode consumed %d of %d bytes", n, len(data))
 	}
@@ -176,7 +182,10 @@ func TestGlobsetRoundTripDense(t *testing.T) {
 	if enc[len(enc)-1] != glbEnd {
 		t.Fatalf("encoding not terminated by end: %x", enc)
 	}
-	dec, n := deserializeGlobset(enc)
+	dec, n, err := deserializeGlobset(enc)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
 	if n != len(enc) {
 		t.Fatalf("decode consumed %d of %d bytes", n, len(enc))
 	}

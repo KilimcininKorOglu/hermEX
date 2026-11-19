@@ -244,9 +244,9 @@ func (s *IDSet) Deserialize(data []byte) error {
 		default:
 			return fmt.Errorf("ics: cannot deserialize loose form %#x", uint8(s.form))
 		}
-		rs, consumed := deserializeGlobset(data[off:])
-		if consumed == 0 {
-			return fmt.Errorf("ics: empty GLOBSET block at offset %d", off)
+		rs, consumed, err := deserializeGlobset(data[off:])
+		if err != nil {
+			return fmt.Errorf("ics: GLOBSET block at offset %d: %w", off, err)
 		}
 		off += consumed
 		nd.ranges = rs

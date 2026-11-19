@@ -177,6 +177,27 @@ func TestIDLooseRoundTrip(t *testing.T) {
 	}
 }
 
+// TestDeserializeRefusesMalformedGlobset feeds a client-supplied IDSET (the
+// MetaTagIdsetGiven state of an ICS upload) GLOBSET blocks that [MS-OXCFXICS]
+// 2.2.2.6 does not allow: a stream with no End command, a Range cut short, a
+// command byte the section does not define, and a Range whose low value is above
+// its high value. Each is refused. Reading on would keep a partial set as the
+// client's whole state and parse the next replica from the wrong offset.
+func TestDeserializeRefusesMalformedGlobset(t *testing.T) {
+	replid := []byte{0x01, 0x00}
+	for name, globset := range map[string][]byte{
+		"no End command":    {0x06, 0, 0, 0, 0, 0, 0x10},
+		"truncated Range":   {glbRange, 0, 0, 0, 0, 0},
+		"undefined command": {0x99, glbEnd},
+		"Range low > high":  {glbRange, 0, 0, 0, 0, 0, 0x20, 0, 0, 0, 0, 0, 0x10, glbEnd},
+	} {
+		s := NewIDSet(FormIDPacked, nil)
+		if err := s.Deserialize(append(append([]byte{}, replid...), globset...)); err == nil {
+			t.Errorf("%s: a malformed GLOBSET was accepted", name)
+		}
+	}
+}
+
 // TestGUIDLooseRoundTrip serializes a GUID-keyed set (the wire carries the
 // 16-byte replica GUID) and reads it back. Before Convert a guid_packed set is
 // not queryable; Convert re-keys each GUID block to a replid via the mapper,
