@@ -53,6 +53,11 @@ func Forward(addr, forwarder string, secret []byte, now time.Time) string {
 	return out + "@" + forwarder
 }
 
+// IsSRS reports whether addr has the form of an SRS0 address, in any case.
+func IsSRS(addr string) bool {
+	return len(addr) > len(prefix) && strings.EqualFold(addr[:len(prefix)], prefix) && strings.Contains(addr, "@")
+}
+
 // Reverse returns the original address an SRS0 address stands for. The hash
 // and the day are checked; the address is matched without regard to case,
 // since a bounce may come back in another case.

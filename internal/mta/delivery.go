@@ -327,9 +327,18 @@ func (s *session) routeRecipient(to, notify, orcpt string) error {
 			return s.routeCatchAll(to, path)
 		}
 	}
+	if handled, err := s.srsBounce(to); handled {
+		return err
+	}
 	if s.authUser == "" {
 		return &smtp.PermError{Message: fmt.Sprintf("relay denied for <%s>", to)}
 	}
+	return s.routeSubmissionRelay(to, notify, orcpt)
+}
+
+// routeSubmissionRelay accepts an external recipient of an authenticated
+// submission, under the outbound abuse limit.
+func (s *session) routeSubmissionRelay(to, notify, orcpt string) error {
 	relayable, err := isRelayable(s.accounts, to)
 	if err != nil {
 		return s.tempRouteFailure(to, err)

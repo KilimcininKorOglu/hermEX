@@ -2,12 +2,15 @@ package mta
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"time"
 
 	"hermex/internal/arc"
 	"hermex/internal/dkimsign"
 	"hermex/internal/logging"
+	"hermex/internal/relay"
+	"hermex/internal/smtp"
 	"hermex/internal/srs"
 )
 
@@ -69,6 +72,39 @@ func (f *Forwarding) lookup() (arc.LookupTXT, func()) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), arcLookupBudget)
 	return func(name string) ([]string, error) { return net.DefaultResolver.LookupTXT(ctx, name) }, cancel
+}
+
+// srsBounce routes a recipient that is an SRS address at a hosted domain: the
+// return path of mail this server forwarded. handled is false for any other
+// address. Only a bounce (the null sender) may use one, and only an address
+// this server minted within srs.MaxAge reaches the original sender; anything
+// else is refused, so the rewritten addresses cannot be used as an open relay.
+func (s *session) srsBounce(to string) (handled bool, err error) {
+	if s.forwarding == nil || len(s.forwarding.SRSSecret) == 0 || !srs.IsSRS(to) {
+		return false, nil
+	}
+	external, lerr := isExternalDomain(s.accounts, to)
+	if lerr != nil {
+		return true, s.tempRouteFailure(to, lerr)
+	}
+	if external {
+		return false, nil
+	}
+	if s.from != "" {
+		return true, &smtp.PermError{Message: fmt.Sprintf("5.7.1 <%s> accepts only delivery status notifications", to)}
+	}
+	orig, rerr := srs.Reverse(to, s.forwarding.SRSSecret, time.Now())
+	if rerr != nil {
+		return true, &smtp.PermError{Message: fmt.Sprintf("5.1.1 <%s> is not a valid return address", to)}
+	}
+	if path, ok := s.accounts.Resolve(orig); ok {
+		return true, s.routeLocal(orig, path)
+	}
+	if s.spool == nil {
+		return true, &smtp.PermError{Message: fmt.Sprintf("relay denied for <%s>", to)}
+	}
+	s.relayTargets = append(s.relayTargets, relay.DSNRecipient{Addr: orig})
+	return true, nil
 }
 
 // skip records a forward that left without an ARC set.
