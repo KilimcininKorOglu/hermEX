@@ -105,11 +105,33 @@ func TestDKIMGenerateRejectsAnInvalidSelector(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/domains/1/dkim/generate", session, csrf, url.Values{"selector": {"bad selector!"}})
-	resp.Body.Close()
+	for _, sel := range []string{
+		"bad selector!", "-lead", "trail-", "a..b", ".a", "a.", "a_b", "../etc", "s\x00x", strings.Repeat("a", 64),
+	} {
+		resp := htmxPOST(t, ts, "/admin/ui/domains/1/dkim/generate", session, csrf, url.Values{"selector": {sel}})
+		resp.Body.Close()
+		if d.dkimFound {
+			t.Errorf("the invalid selector %q stored a key under %q", sel, d.dkimSelector)
+			d.dkimFound = false
+		}
+	}
+}
 
-	if d.dkimFound {
-		t.Error("an invalid selector must store no key")
+// TestDKIMGenerateAcceptsAValidSelector is the control for the refusals above: the
+// RFC 6376 selector grammar allows hyphens inside a label, dots between labels, and
+// a 63-character name.
+func TestDKIMGenerateAcceptsAValidSelector(t *testing.T) {
+	d := dkimTestDir()
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	for _, sel := range []string{"s-1", "2026.mail", strings.Repeat("a", 63)} {
+		d.dkimFound = false
+		resp := htmxPOST(t, ts, "/admin/ui/domains/1/dkim/generate", session, csrf, url.Values{"selector": {sel}})
+		resp.Body.Close()
+		if !d.dkimFound || d.dkimSelector != sel {
+			t.Errorf("selector %q stored found=%v as %q", sel, d.dkimFound, d.dkimSelector)
+		}
 	}
 }
 
@@ -171,6 +193,9 @@ func TestDKIMOutputKeyMode(t *testing.T) {
 
 	if strings.Contains(body, "v=DKIM1") {
 		t.Errorf("key mode must serve the key alone, without the record tags:\n%s", body)
+	}
+	if !strings.Contains(body, "AAA") {
+		t.Errorf("key mode does not serve the key at all:\n%s", body)
 	}
 }
 
