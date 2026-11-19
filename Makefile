@@ -88,6 +88,11 @@ spa:
 # fetch the newest release from the stable releases/latest/download/<name> URL;
 # the version travels inside, in VERSION.
 PKG_DIR := $(BIN)/pkg
+# BUILD_ID names one build exactly, as buildinfo.Display does: the release number
+# for the tagged commit, otherwise the number with -dev+<commit>[-dirty]. The
+# installer keys each release directory on it, so two builds of one VERSION
+# never share a directory.
+BUILD_ID := $(if $(HERMEX_TAGGED),$(HERMEX_VERSION),$(HERMEX_VERSION)-dev+$(HERMEX_COMMIT))
 
 ## package: release archives for linux/amd64 and linux/arm64 + SHA256SUMS into bin/pkg/
 package: build spa
@@ -101,6 +106,7 @@ package: build spa
 		done && \
 		cp -R internal/webmail2/dist $$stage/webmail2 && \
 		cp install.sh VERSION $$stage/ && \
+		echo "$(BUILD_ID)" > $$stage/BUILD && \
 		(cd $(PKG_DIR)/$$name && COPYFILE_DISABLE=1 tar --no-xattrs -czf ../$$name.tar.gz hermex) && \
 		rm -rf $(PKG_DIR)/$$name || exit 1; \
 	done

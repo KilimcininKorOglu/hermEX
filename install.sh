@@ -366,21 +366,29 @@ fetch_release() {
 	mv "$WORK/$asset" "$WORK/hermex.tar.gz"
 }
 
-# unpack_release extracts the verified archive next to the other releases and
-# prints its version. It is extracted in place under $PREFIX, never moved in from
-# /tmp, so SELinux labels it like the rest of the tree.
+# unpack_release extracts the verified archive into the work directory (under
+# $PREFIX, never /tmp, so SELinux labels it like the rest of the tree) and prints
+# its build id: the release number, or number-dev+commit for an untagged build.
+# Nothing under releases/ is touched yet.
 unpack_release() {
-	local version dest
+	local build
 	tar -xzf "$WORK/hermex.tar.gz" -C "$WORK"
-	version="$(tr -d '[:space:]' <"$WORK/hermex/VERSION")"
-	[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "the archive carries no valid VERSION"
-	dest="$PREFIX/releases/$version"
+	build="$(tr -d '[:space:]' <"$WORK/hermex/BUILD")"
+	[[ "$build" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-dev\+[0-9a-f]+(-dirty)?)?$ ]] || die "the archive carries no valid BUILD id"
+	echo "$build"
+}
+
+# place_release moves the unpacked build to releases/<build>. The directory the
+# running daemons execute from is never replaced: that build is installed
+# already, and the callers stop before reaching here.
+place_release() {
+	local build="$1" dest="$PREFIX/releases/$1"
+	[[ "$build" != "$(current_version)" ]] || die "refusing to replace the running release $build"
 	rm -rf "$dest"
 	mv "$WORK/hermex" "$dest"
 	chown -R root:root "$dest"
 	chmod -R u=rwX,go=rX "$dest"
 	if command -v restorecon >/dev/null; then restorecon -R "$dest"; fi
-	echo "$version"
 }
 
 current_version() { [[ -L "$PREFIX/current" ]] && basename "$(readlink "$PREFIX/current")" || true; }
@@ -535,6 +543,7 @@ cmd_install() {
 	write_config "$host"
 	fetch_release
 	version="$(unpack_release)"
+	place_release "$version"
 	activate "$version"
 	write_units
 	admin_cli ensure-schema >/dev/null
@@ -570,6 +579,7 @@ cmd_update() {
 		log "release $new is already installed"
 		return 0
 	fi
+	place_release "$new"
 	dump="$(backup_database)"
 	log "database backed up to $dump"
 	write_units
