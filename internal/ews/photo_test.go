@@ -2,9 +2,11 @@ package ews
 
 import (
 	"encoding/base64"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"hermex/internal/directory"
 	"hermex/internal/objectstore"
 )
 
@@ -33,6 +35,46 @@ func TestGetUserPhoto(t *testing.T) {
 	}
 	if want := base64.StdEncoding.EncodeToString(photo); !strings.Contains(out, want) {
 		t.Errorf("PictureData missing the photo bytes: %s", out)
+	}
+}
+
+// TestGetUserPhotoOfAHiddenUserIsNotServed asks for the portrait of a colleague
+// the operator hid from the address book. Serving it would confirm a mailbox the
+// directory hides, so the answer must be the same ErrorItemNotFound a missing
+// photo gets; the same colleague left visible is served, so the refusal comes from
+// the hide mask and not from a broken lookup.
+func TestGetUserPhotoOfAHiddenUserIsNotServed(t *testing.T) {
+	photo := []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 9, 9}
+	ask := func(mask uint32) string {
+		alexDir := provisionedDir(t)
+		st, err := objectstore.Open(alexDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetUserPhoto(photo); err != nil {
+			t.Fatal(err)
+		}
+		st.Close()
+		accs := hidingAccounts{
+			StaticAccounts: directory.StaticAccounts{
+				testUser:           {Password: testPass, MailboxPath: provisionedDir(t)},
+				"alex@hermex.test": {Password: testPass, MailboxPath: alexDir},
+			},
+			hidden: map[string]uint32{"alex@hermex.test": mask},
+			asked:  &[]uint32{},
+		}
+		ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
+		t.Cleanup(ts.Close)
+		_, out := soapPost(t, ts, wrapRequest(`<GetUserPhoto xmlns="`+nsMessages+
+			`"><Email>alex@hermex.test</Email></GetUserPhoto>`), true)
+		return out
+	}
+	want := base64.StdEncoding.EncodeToString(photo)
+	if out := ask(0); !strings.Contains(out, want) {
+		t.Fatalf("a visible colleague's portrait was not served: %s", out)
+	}
+	if out := ask(directory.HideFromGAL); strings.Contains(out, want) || !strings.Contains(out, "ErrorItemNotFound") {
+		t.Errorf("a hidden colleague's portrait answer = %s, want ErrorItemNotFound without the photo", out)
 	}
 }
 
