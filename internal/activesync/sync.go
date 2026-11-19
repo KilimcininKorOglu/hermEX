@@ -29,6 +29,11 @@ const (
 	// syncStatusObjectNotFound answers a Change or Delete naming no item of the
 	// collection (MS-ASCMD Status (Sync) 8, "Object not found").
 	syncStatusObjectNotFound = 8
+	// syncStatusCannotComplete refuses an Add into a mailbox past its receive
+	// quota (MS-ASCMD Status (Sync) 9, "The Sync command cannot be completed",
+	// whose stated cause is a user account out of disk space). It is item-scoped
+	// in every protocol version, unlike the 14.0+ common status 113.
+	syncStatusCannotComplete = 9
 	syncStatusWaitInterval   = 14
 )
 

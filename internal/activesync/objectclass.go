@@ -86,7 +86,9 @@ func applyObjectClientCommands(st *objectstore.Store, cls objectClass, cstate *c
 		}
 		switch cmd.Tag {
 		case wbxml.ASAdd:
-			if resp, sid := cls.addObject(st, cmd); resp != nil {
+			if refusal := refuseAddWhenFull(st, cmd); refusal != nil {
+				responses = append(responses, refusal)
+			} else if resp, sid := cls.addObject(st, cmd); resp != nil {
 				written[sid] = true
 				responses = append(responses, resp)
 			}
@@ -121,6 +123,19 @@ func refuseOutsideCollection(st *objectstore.Store, folderID int64, cmd *wbxml.N
 	return wbxml.Elem(cmd.Tag,
 		wbxml.Str(wbxml.ASServerID, sid),
 		wbxml.Str(wbxml.ASStatus, strconv.Itoa(syncStatusObjectNotFound)))
+}
+
+// refuseAddWhenFull answers an Add with Sync Status 9 when the mailbox is past its
+// receive quota, the limit past which nothing new may enter it, and returns nil
+// when the Add may proceed. A store that cannot report its usage refuses the Add
+// the same way rather than writing past a limit it could not check.
+func refuseAddWhenFull(st *objectstore.Store, cmd *wbxml.Node) *wbxml.Node {
+	if over, err := st.OverReceiveQuota(); err == nil && !over {
+		return nil
+	}
+	return wbxml.Elem(wbxml.ASAdd,
+		wbxml.Str(wbxml.ASClientID, cmd.ChildText(wbxml.ASClientID)),
+		wbxml.Str(wbxml.ASStatus, strconv.Itoa(syncStatusCannotComplete)))
 }
 
 // addObject creates one item from a device's Add command and builds the response
