@@ -95,6 +95,57 @@ func TestSharedCalendarDelegateAccess(t *testing.T) {
 	}
 }
 
+// TestNonDelegateIsRefusedOnEveryMethodAndSpelling sends every method a client
+// can aim at another account's collections, and spellings of that account's
+// principal a path check could miss (upper case, a percent-encoded '@', a dot
+// segment through the caller's own principal). Each must be refused, and the
+// owner's event must survive the attempted DELETE and MOVE.
+func TestNonDelegateIsRefusedOnEveryMethodAndSpelling(t *testing.T) {
+	accs := directory.StaticAccounts{
+		testUser:            {Password: testPass, MailboxPath: provisioned(t, "alice")},
+		"carol@hermex.test": {Password: testPass, MailboxPath: provisioned(t, "carol")},
+	}
+	ts := httptest.NewServer(NewServer(accs, accs, "hermex.test").Handler())
+	t.Cleanup(ts.Close)
+	event := "/dav/calendars/" + testUser + "/calendar/a.ics"
+	ev := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:s1\r\nSUMMARY:S\r\n" +
+		"DTSTART:20260701T140000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	if code := authReq(t, ts, "PUT", event, testUser, ev); code != http.StatusCreated {
+		t.Fatalf("owner PUT: status %d, want 201", code)
+	}
+	for _, c := range []struct{ method, path string }{
+		{"DELETE", event},
+		{"MOVE", event},
+		{"PROPFIND", "/dav/calendars/" + testUser + "/calendar/"},
+		{"REPORT", "/dav/calendars/" + testUser + "/calendar/"},
+		{"GET", "/dav/addressbooks/" + testUser + "/contacts/"},
+		{"PROPFIND", "/dav/addressbooks/" + testUser + "/contacts/"},
+		{"PROPFIND", "/dav/principals/" + testUser + "/"},
+		{"GET", "/dav/calendars/" + strings.ToUpper(testUser) + "/calendar/a.ics"},
+		{"GET", "/dav/calendars/" + strings.Replace(testUser, "@", "%40", 1) + "/calendar/a.ics"},
+		{"GET", "/dav/calendars/carol@hermex.test/../" + testUser + "/calendar/a.ics"},
+	} {
+		if code := authReq(t, ts, c.method, c.path, "carol@hermex.test", ""); code != http.StatusForbidden {
+			t.Errorf("non-delegate %s %s: status %d, want 403", c.method, c.path, code)
+		}
+	}
+	if code := authReq(t, ts, "GET", event, testUser, ""); code != http.StatusOK {
+		t.Errorf("owner GET after the refused writes: status %d, want 200", code)
+	}
+}
+
+// provisioned creates an empty mailbox store and returns its directory.
+func provisioned(t *testing.T, name string) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), name)
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	return dir
+}
+
 // authBody performs an authenticated request and returns the response body.
 func authBody(t *testing.T, ts *httptest.Server, method, path, user, depth string) string {
 	t.Helper()
