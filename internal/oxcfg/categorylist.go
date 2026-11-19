@@ -72,9 +72,10 @@ var modelled = map[string]bool{
 	"lastTimeUsed": true, "lastSessionUsed": true,
 }
 
-// Decode parses the XML of a category-list configuration message. An empty or
-// unparseable stream yields an empty list rather than an error at the call site's
-// discretion: the caller decides whether an absent list means "seed one".
+// Decode parses the XML of a category-list configuration message. An empty stream
+// yields an empty list, and the caller decides whether an absent list means "seed
+// one". An unparseable stream is an error, never an empty list: a caller that saved
+// over it would erase every category the user has.
 func Decode(raw []byte) (List, error) {
 	var doc xmlCategories
 	if len(strings.TrimSpace(string(raw))) == 0 {
