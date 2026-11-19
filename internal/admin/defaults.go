@@ -54,9 +54,10 @@ func quotasValid(u directory.UserCreateDefaults) bool {
 
 // createDefaultsFromForm builds the full system create-defaults from the editor.
 func createDefaultsFromForm(r *http.Request) directory.CreateDefaults {
-	maxUser, _ := strconv.ParseInt(r.PostFormValue("maxUser"), 10, 64)
+	// A value that is not a number reads as -1, which maxUserValid refuses: read as
+	// 0 it made "no limit" the default for every new domain.
 	return directory.CreateDefaults{
-		Domain: directory.DomainCreateDefaults{MaxUser: maxUser},
+		Domain: directory.DomainCreateDefaults{MaxUser: int64(formInt(r, "maxUser"))},
 		User:   userDefaultsFromForm(r),
 	}
 }
@@ -242,7 +243,7 @@ func (s *Server) handleGetDefaults(w http.ResponseWriter, r *http.Request) {
 // handleSetDefaults replaces the system-wide create-defaults (system administrators).
 func (s *Server) handleSetDefaults(w http.ResponseWriter, r *http.Request) {
 	var cd directory.CreateDefaults
-	if err := json.NewDecoder(r.Body).Decode(&cd); err != nil || !quotasValid(cd.User) {
+	if err := json.NewDecoder(r.Body).Decode(&cd); err != nil || !quotasValid(cd.User) || cd.Domain.MaxUser < 0 {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
@@ -280,6 +281,8 @@ func (s *Server) handleUISaveDefaults(w http.ResponseWriter, r *http.Request) {
 	cd := createDefaultsFromForm(r)
 	if !quotasValid(cd.User) {
 		data["Error"] = "userDetail.quotaInvalid"
+	} else if cd.Domain.MaxUser < 0 {
+		data["Error"] = "domains.maxUserInvalid"
 	} else if err := s.dir.SetCreateDefaults(0, cd); err != nil {
 		data["Error"] = s.notice("userDetail.saveFailed", err)
 	} else {

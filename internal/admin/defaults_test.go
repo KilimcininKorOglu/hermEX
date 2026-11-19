@@ -194,6 +194,29 @@ func TestDefaultsRefuseABadQuota(t *testing.T) {
 	}
 }
 
+// TestDefaultsRefuseABadMaxUser sends a default user limit that is a typo or
+// negative. Read as 0 it made "no limit" the default for every new domain; the form
+// and the JSON endpoint now refuse it and store nothing.
+func TestDefaultsRefuseABadMaxUser(t *testing.T) {
+	for _, bad := range []string{"5O", "-5"} {
+		d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+		ts := adminServer(t, d)
+		session, csrf := loginCookies(t, ts)
+		body := wantBody(t, htmxPUT(t, ts, "/admin/ui/defaults", session, csrf, url.Values{"maxUser": {bad}}), http.StatusOK, "form "+bad)
+		wantContains(t, body, "user limit must be", "the refusal for "+bad)
+		if len(d.createDefaults) != 0 {
+			t.Errorf("%s: stored %+v", bad, d.createDefaults)
+		}
+	}
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	wantStatus(t, authedPUT(t, ts, "/admin/defaults", session, csrf, `{"domain":{"maxUser":-1}}`), http.StatusBadRequest, "JSON")
+	if len(d.createDefaults) != 0 {
+		t.Errorf("a negative JSON limit was stored: %+v", d.createDefaults)
+	}
+}
+
 // deref reads an optional stored field, reporting the zero value when unset so an
 // assertion names the value that differs rather than a nil check.
 func deref[T any](p *T) T {
