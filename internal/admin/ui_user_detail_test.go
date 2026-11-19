@@ -146,6 +146,44 @@ func TestUIUserEditRequiresCSRF(t *testing.T) {
 	}
 }
 
+// TestUIUserDetailFormsNeedASystemAdmin proves every user-detail form is refused to
+// a domain admin and none reaches the directory. A role grant matters most: a domain
+// admin able to grant itself the system role would hold the whole server.
+func TestUIUserDetailFormsNeedASystemAdmin(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		userDetail: directory.UserDetail{ID: 7, Username: "admin@hermex.test", DomainID: 1}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	const user = "/admin/ui/users/admin@hermex.test"
+	wantStatus(t, authedGET(t, ts, user, session), http.StatusForbidden, "detail page")
+	for _, c := range []struct {
+		method, path string
+		form         url.Values
+	}{
+		{"POST", user + "/roles/grant", url.Values{"role": {"system"}}},
+		{"POST", user + "/roles/revoke", url.Values{"role": {"domain"}, "scopeID": {"1"}}},
+		{"PUT", user, url.Values{"status": {"0"}}},
+		{"POST", user + "/delete", url.Values{"deleteFiles": {"on"}}},
+		{"PUT", user + "/altnames", url.Values{"altnames": {"ceo"}}},
+		{"PUT", user + "/aliases", url.Values{"aliases": {"ceo@other.test"}}},
+		{"PUT", user + "/contact", url.Values{"displayname": {"CEO"}}},
+	} {
+		var resp *http.Response
+		if c.method == "PUT" {
+			resp = htmxPUT(t, ts, c.path, session, csrf, c.form)
+		} else {
+			resp = htmxPOST(t, ts, c.path, session, csrf, c.form)
+		}
+		wantStatus(t, resp, http.StatusForbidden, c.method+" "+c.path)
+	}
+	if d.grantedRole != "" || d.revokedRole != "" || d.updatedUser != "" || d.deletedUser != "" ||
+		d.setAltnamesUser != "" || d.setAliasesUser != "" || d.setPropsUser != "" {
+		t.Errorf("a refused form reached the directory: grant %q revoke %q update %q delete %q altnames %q aliases %q props %q",
+			d.grantedRole, d.revokedRole, d.updatedUser, d.deletedUser, d.setAltnamesUser, d.setAliasesUser, d.setPropsUser)
+	}
+}
+
 // TestUIUserAltnames proves the detail page seeds the alternative-names textarea
 // with the current set and the save splits the textarea on whitespace before
 // replacing the set through the directory.
