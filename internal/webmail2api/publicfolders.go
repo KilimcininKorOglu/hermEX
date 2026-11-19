@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -231,8 +232,5 @@ func (s *Server) markPublicRead(mailbox, owner string, messageID int64) {
 // publicOwner returns the caller's domain, the key the SPA shows beside the
 // public-folder section.
 func publicOwner(email string) string {
-	if _, domain, ok := strings.Cut(strings.ToLower(email), "@"); ok {
-		return domain
-	}
-	return ""
+	return directory.AddressDomain(email)
 }

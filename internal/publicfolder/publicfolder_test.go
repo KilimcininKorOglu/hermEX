@@ -17,6 +17,19 @@ func (p fakePaths) HomedirFor(domain string) string {
 	return filepath.Join(p.root, "domain", domain)
 }
 
+// TestCallerDomainIsTakenAfterTheLastAt routes a caller whose local part holds an
+// '@'. RFC 5321 4.1.2 allows one in a quoted local part, the directory accepts
+// it, and directory.ValidateAddress assigns the account to the domain after the
+// LAST '@'. The public store must be that same domain's, or the account reads a
+// store keyed on a domain it does not belong to.
+func TestCallerDomainIsTakenAfterTheLastAt(t *testing.T) {
+	paths := fakePaths{root: t.TempDir()}
+	got := New(paths).DirForCaller("x@other.test@Hermex.test")
+	if want := paths.HomedirFor("hermex.test"); got != want {
+		t.Errorf("DirForCaller = %s, want %s", got, want)
+	}
+}
+
 func grantUser(t *testing.T, st *objectstore.Store, fid int64, username string, rights uint32) {
 	t.Helper()
 	if err := st.ModifyPermissions(fid, false, []objectstore.PermissionChange{

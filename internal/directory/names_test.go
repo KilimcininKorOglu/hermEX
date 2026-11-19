@@ -6,6 +6,27 @@ import (
 	"testing"
 )
 
+// TestAddressDomainMatchesValidateAddress pins the split to the account's own
+// domain, the part after the last '@' (RFC 5321 4.1.2 allows an '@' in a quoted
+// local part), and checks that ValidateAddress accepts such an address so the
+// two agree on which domain owns it.
+func TestAddressDomainMatchesValidateAddress(t *testing.T) {
+	cases := map[string]string{
+		"alice@Hermex.test":        "hermex.test",
+		"x@other.test@hermex.test": "hermex.test",
+		"no-domain":                "",
+		"trailing@":                "",
+	}
+	for addr, want := range cases {
+		if got := AddressDomain(addr); got != want {
+			t.Errorf("AddressDomain(%q) = %q, want %q", addr, got, want)
+		}
+	}
+	if err := ValidateAddress("x@other.test@hermex.test"); err != nil {
+		t.Fatalf("ValidateAddress refused the address the split is tested on: %v", err)
+	}
+}
+
 // TestValidateAddressRejectsTraversal covers the payloads that would walk the
 // derived maildir out of the data root. filepath.Join resolves "..", so the join
 // itself is no defense and the name has to be refused before it reaches disk.

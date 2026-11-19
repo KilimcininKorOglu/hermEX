@@ -71,9 +71,9 @@ func (s *session) ingestReports(raw []byte, received time.Time, sc scoring) {
 func (s *session) postmasterDomains() map[string]bool {
 	out := map[string]bool{}
 	for _, t := range s.targets {
-		local, domain, ok := strings.Cut(t.addr, "@")
-		if ok && strings.EqualFold(local, reportMailbox) {
-			out[strings.ToLower(domain)] = true
+		at := strings.LastIndexByte(t.addr, '@')
+		if at > 0 && strings.EqualFold(t.addr[:at], reportMailbox) {
+			out[directory.AddressDomain(t.addr)] = true
 		}
 	}
 	return out

@@ -26,6 +26,20 @@ func pubFoldersDir() *fakeDir {
 	}
 }
 
+// TestPublicGrantTakesTheMemberDomainAfterTheLastAt grants to an account whose
+// quoted local part holds an '@' (RFC 5321 4.1.2). directory.ValidateAddress
+// assigns it to the domain after the last '@', so it is a member of local.test
+// and the grant must be accepted, not refused as another domain's user.
+func TestPublicGrantTakesTheMemberDomainAfterTheLastAt(t *testing.T) {
+	d := pubFoldersDir()
+	d.knownUsers["x@other.test@local.test"] = directory.UserDetail{Username: "x@other.test@local.test"}
+	s := &Server{dir: d}
+	change, errMsg := s.publicGrantChange("local.test", "x@other.test@local.test", 1)
+	if errMsg != "" || change.Username != "x@other.test@local.test" {
+		t.Errorf("grant = %+v, %q; want it accepted for the local.test member", change, errMsg)
+	}
+}
+
 func rightsValue(r uint32) string { return strconv.FormatUint(uint64(r), 10) }
 
 // pubFolderID reads the JSON list and returns the id of the folder named name.

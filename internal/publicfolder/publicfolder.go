@@ -16,6 +16,7 @@ import (
 	"errors"
 	"strings"
 
+	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -51,10 +52,9 @@ type Folder struct {
 }
 
 // domainOf extracts the lowercased domain from an email address, or "" when the
-// address carries no domain.
+// address carries no domain, split the way the directory assigns accounts.
 func domainOf(addr string) string {
-	_, domain, _ := strings.Cut(strings.ToLower(addr), "@")
-	return domain
+	return directory.AddressDomain(addr)
 }
 
 // Provision ensures the domain's public store exists, creating and seeding it if

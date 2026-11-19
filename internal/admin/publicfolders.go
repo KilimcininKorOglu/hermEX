@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/publicfolder"
@@ -201,7 +202,7 @@ func (s *Server) publicGrantChange(domain, grantee string, rights uint32) (objec
 		return objectstore.PermissionChange{Op: objectstore.PermAdd, MemberID: mapi.MemberIDDefault, Rights: rights}, ""
 	}
 	member, ok, err := s.canonicalMember(grantee)
-	_, memberDomain, _ := strings.Cut(member, "@")
+	memberDomain := directory.AddressDomain(member)
 	switch {
 	case err != nil:
 		return objectstore.PermissionChange{}, s.notice("publicFolders.lookupFailed", err)

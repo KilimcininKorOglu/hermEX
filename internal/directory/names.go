@@ -6,6 +6,18 @@ import (
 	"strings"
 )
 
+// AddressDomain returns the lowercased domain of an account address, or "" when
+// it has none. The domain follows the LAST '@': a quoted local part may hold an
+// '@' (RFC 5321 4.1.2), and ValidateAddress assigns the account to that domain,
+// so every surface that routes or authorizes by domain must split the same way.
+func AddressDomain(address string) string {
+	at := strings.LastIndexByte(address, '@')
+	if at < 0 {
+		return ""
+	}
+	return strings.ToLower(address[at+1:])
+}
+
 // ValidateAddress reports whether a mailbox address may be provisioned. Both of
 // its parts become path components: provisioning derives the maildir from the
 // address and then creates, and on deletion recursively removes, that directory.

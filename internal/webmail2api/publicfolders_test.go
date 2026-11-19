@@ -201,6 +201,25 @@ func grantPublicRead(t *testing.T, svc *publicfolder.Service, domain string, fid
 	}))
 }
 
+// TestPublicFoldersOwnerSplitsAtTheLastAt signs in an account whose quoted local
+// part holds an '@' (RFC 5321 4.1.2). directory.ValidateAddress assigns it to
+// hermex.test, so it reads hermex.test's public store and is told that owner.
+func TestPublicFoldersOwnerSplitsAtTheLastAt(t *testing.T) {
+	const domain, caller = "hermex.test", "x@other.test@hermex.test"
+	svc := publicfolder.New(fakePaths{t.TempDir()})
+	seedPublicFolder(t, svc, domain, "Announcements", caller)
+
+	srv, secret := newTestServer(t)
+	srv.Pub = svc
+	type folderList struct {
+		Owner   string             `json:"owner"`
+		Folders []publicFolderJSON `json:"folders"`
+	}
+	list := okBody[folderList](t, "public-folders", authedGet(t, srv, secret, caller, "/api/v1/public-folders"))
+	wantEq(t, "owner", list.Owner, domain)
+	wantEq(t, "Announcements total", namedPublicFolder(t, list.Folders, "Announcements").Total, 1)
+}
+
 // TestPublicFolders proves a granted caller sees the public folder with its
 // counts, lists its messages, and reads one message's body.
 func TestPublicFolders(t *testing.T) {

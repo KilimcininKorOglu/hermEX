@@ -140,6 +140,18 @@ func TestAReportToAnotherRecipientIsNotStored(t *testing.T) {
 	wantEq(t, "stored reports", len(r.reports.stored), 0)
 }
 
+// TestPostmasterDomainSplitsAtTheLastAt: an account whose quoted local part is
+// "postmaster@other.test" (RFC 5321 4.1.2) belongs to hermex.test, as
+// directory.ValidateAddress assigns it, and is not hermex.test's postmaster, so
+// it names no postmaster domain at all.
+func TestPostmasterDomainSplitsAtTheLastAt(t *testing.T) {
+	s := &session{targets: []target{{addr: "postmaster@other.test@hermex.test"}, {addr: "Postmaster@Hermex.test"}}}
+	got := s.postmasterDomains()
+	if len(got) != 1 || !got["hermex.test"] {
+		t.Errorf("postmaster domains = %v, want only hermex.test", got)
+	}
+}
+
 // TestAReportForAnotherDomainIsNotStored is the forgery guard: anyone can mail a
 // postmaster address, and a report naming another domain must not reach that
 // domain's page.

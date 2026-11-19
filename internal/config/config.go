@@ -200,7 +200,12 @@ func (c *Config) ServerHostname() string {
 // in that path and never re-derived for an existing mailbox.
 func (c *Config) MaildirFor(address string) string {
 	address = strings.ToLower(address)
-	local, domain, _ := strings.Cut(address, "@")
+	// The domain follows the last '@', as directory.ValidateAddress splits it: a
+	// quoted local part may hold an '@'.
+	local, domain := address, ""
+	if at := strings.LastIndexByte(address, '@'); at >= 0 {
+		local, domain = address[:at], address[at+1:]
+	}
 	return filepath.Join(c.maildirRoot(address), "user", domain, local)
 }
 

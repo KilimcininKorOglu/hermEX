@@ -48,6 +48,16 @@ func TestLoadAndDerivations(t *testing.T) {
 // across casing, always the same root, so a re-derivation never relocates a live
 // mailbox), always inside the pool, keeping the {root}/user/{domain}/{local}
 // shape, and actually using more than one partition.
+// TestMaildirForSplitsAtTheLastAt files an account whose quoted local part holds
+// an '@' (RFC 5321 4.1.2) under the domain directory.ValidateAddress assigns it
+// to, the one after the last '@', not under a directory named after the rest.
+func TestMaildirForSplitsAtTheLastAt(t *testing.T) {
+	c := &Config{DataDir: "/data/mb"}
+	if got, want := c.MaildirFor("x@other.test@example.com"), "/data/mb/user/example.com/x@other.test"; got != want {
+		t.Errorf("MaildirFor = %q, want %q", got, want)
+	}
+}
+
 func TestMaildirForPartitions(t *testing.T) {
 	// Empty pool: byte-identical to the single-root rule.
 	single := &Config{DataDir: "/data/mb"}
