@@ -52,8 +52,10 @@ func TestAdminSetUserMeeting(t *testing.T) {
 // TestAdminUserMeetingRequiresSystem proves a domain admin cannot read or write a
 // user's meeting settings through the system-scoped endpoints.
 func TestAdminUserMeetingRequiresSystem(t *testing.T) {
-	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}}}
-	ts := adminServer(t, d)
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		userDetail: directory.UserDetail{Username: "alice@hermex.test", Maildir: "/mb/alice"}}
+	store := &fakeStore{}
+	ts := adminServerStore(t, d, store)
 	session, csrf := loginCookies(t, ts)
 
 	get := authedGET(t, ts, "/admin/users/alice@hermex.test/meeting", session)
@@ -62,6 +64,11 @@ func TestAdminUserMeetingRequiresSystem(t *testing.T) {
 	put.Body.Close()
 	if get.StatusCode != http.StatusForbidden || put.StatusCode != http.StatusForbidden {
 		t.Errorf("domain-admin meeting = GET %d / PUT %d, want both 403", get.StatusCode, put.StatusCode)
+	}
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/meeting", session, csrf,
+		url.Values{"autoaccept": {"on"}}), http.StatusForbidden, "domain-admin UI meeting")
+	if store.setMeetingDir != "" {
+		t.Errorf("a domain admin wrote meeting settings to %q: %+v", store.setMeetingDir, store.setMeetingConfig)
 	}
 }
 
@@ -124,6 +131,10 @@ func TestUIUserMeetingProcessesCancellations(t *testing.T) {
 
 	resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/meeting", session, csrf, url.Values{"processcancellations": {"on"}})
 	resp.Body.Close()
+	// The zero config is also what an unwritten store reads, so the write must be seen.
+	if store.setMeetingDir != "/mb/alice" {
+		t.Errorf("the save wrote to %q, want alice's mailbox written", store.setMeetingDir)
+	}
 	if store.setMeetingConfig != (objectstore.MeetingConfig{}) {
 		t.Errorf("stored meeting = %+v, want the zero config", store.setMeetingConfig)
 	}
