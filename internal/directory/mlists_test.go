@@ -88,6 +88,24 @@ func TestExpandMListPrivilege(t *testing.T) {
 		wantExpands(t, d, "spec@hermex.test", "anyone@elsewhere.test", members) // domain match
 		wantRefuses(t, d, "spec@hermex.test", "carol@hermex.test", MListPrivilSpecified)
 	})
+
+	// The sender is whatever MAIL FROM said, so the domain checks compare whole
+	// domains: a domain that only ends with the allowed one, or contains it as a
+	// label, is a different domain. Case does not make a different address.
+	t.Run("lookalike domains are refused", func(t *testing.T) {
+		mkList(t, d, "dom2@hermex.test", mlistTypeNormal, mlistPrivDomain, members...)
+		wantRefuses(t, d, "dom2@hermex.test", "x@hermex.test.evil.example", MListPrivilDomain)
+		wantRefuses(t, d, "dom2@hermex.test", "x@nothermex.test", MListPrivilDomain)
+		wantExpands(t, d, "dom2@hermex.test", "Carol@HERMEX.TEST", members)
+		mkList(t, d, "spec2@hermex.test", mlistTypeNormal, mlistPrivSpecified, members...)
+		_, err := d.SetSpecifieds("spec2@hermex.test", []string{"elsewhere.test"})
+		mustNoErr(t, "set the specifieds", err)
+		wantRefuses(t, d, "spec2@hermex.test", "x@notelsewhere.test", MListPrivilSpecified)
+		wantRefuses(t, d, "spec2@hermex.test", "x@elsewhere.test.evil.example", MListPrivilSpecified)
+		wantExpands(t, d, "spec2@hermex.test", "X@ElseWhere.Test", members)
+		mkList(t, d, "int2@hermex.test", mlistTypeNormal, mlistPrivInternal, members...)
+		wantExpands(t, d, "int2@hermex.test", "ALICE@hermex.test", members)
+	})
 }
 
 // wantExpands checks a sender the privilege admits receives the whole member set.
