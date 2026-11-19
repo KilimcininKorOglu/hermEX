@@ -94,7 +94,13 @@ func TestSyncNotesClientAdd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	wantStoredNote(t, dir, id)
+}
 
+// wantStoredNote checks the device-added note is an IPM.StickyNote in the Notes
+// folder with the title and body the web backend reads.
+func wantStoredNote(t *testing.T, dir string, id int64) {
+	t.Helper()
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
