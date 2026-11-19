@@ -57,8 +57,9 @@ func TestAdminSetUserForward(t *testing.T) {
 // TestAdminUserForwardRequiresSystem proves a domain admin cannot read or write a
 // user's forward through the system-scoped endpoints.
 func TestAdminUserForwardRequiresSystem(t *testing.T) {
-	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}}}
-	ts := adminServer(t, d)
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		userDetail: directory.UserDetail{Username: "alice@hermex.test", Maildir: "/mb/alice"}}
+	ts := adminServerStore(t, d, &fakeStore{})
 	session, csrf := loginCookies(t, ts)
 
 	get := authedGET(t, ts, "/admin/users/alice@hermex.test/forward", session)
@@ -67,6 +68,11 @@ func TestAdminUserForwardRequiresSystem(t *testing.T) {
 	put.Body.Close()
 	if get.StatusCode != http.StatusForbidden || put.StatusCode != http.StatusForbidden {
 		t.Errorf("domain-admin forward = GET %d / PUT %d, want both 403", get.StatusCode, put.StatusCode)
+	}
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/forward", session, csrf,
+		url.Values{"forwardtype": {"redirect"}, "destination": {"x@y.test"}}), http.StatusForbidden, "domain-admin UI forward")
+	if d.setForwardUser != "" {
+		t.Errorf("a domain admin set a forward on %q to %q", d.setForwardUser, d.setForwardDest)
 	}
 }
 
@@ -151,6 +157,11 @@ func TestUIUserForwardClears(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("ui forward clear status %d, want 200", resp.StatusCode)
+	}
+	// The directory must be asked to clear: an empty destination alone also reads
+	// the same when no write happened at all.
+	if d.setForwardUser != "alice@hermex.test" {
+		t.Errorf("clear wrote for %q, want the directory asked to clear alice's forward", d.setForwardUser)
 	}
 	if d.setForwardDest != "" {
 		t.Errorf("clear passed destination %q, want empty (clears the directive)", d.setForwardDest)
