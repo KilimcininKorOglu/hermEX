@@ -59,3 +59,25 @@ func TestSaveDomainSpamThreshold(t *testing.T) {
 		t.Fatalf("domain threshold persisted = set %v val %v, want 9", d.domainSpamThresholdSet, d.domainSpamThreshold)
 	}
 }
+
+// TestSpamThresholdFormsRefuseWhatIsNotAPositiveCount sends a typo, zero and a
+// negative to both forms. Read as "no override" a typo would silently drop the
+// stricter threshold; each is refused with the message and nothing is stored.
+func TestSpamThresholdFormsRefuseWhatIsNotAPositiveCount(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		domainDetail: directory.DomainDetail{ID: 1, Name: "hermex.test"},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	for _, bad := range []string{"5O", "0", "-3"} {
+		for _, path := range []string{"/admin/ui/users/alice@test/spam-threshold", "/admin/ui/domains/1/spam-threshold"} {
+			d.userSpamThresholdSet, d.domainSpamThresholdSet = false, false
+			body := wantBody(t, htmxPUT(t, ts, path, session, csrf, url.Values{"spam_threshold": {bad}}), 200, path+" "+bad)
+			wantContains(t, body, "at least 1", "the refusal for "+bad+" on "+path)
+			if d.userSpamThresholdSet || d.domainSpamThresholdSet {
+				t.Errorf("%s on %s was stored", bad, path)
+			}
+		}
+	}
+}
