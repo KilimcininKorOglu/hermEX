@@ -107,6 +107,15 @@ type commandReader struct {
 	// lineBytes counts the bytes of the command line read so far, reset per command.
 	// A literal's payload is not counted: it carries its own cap.
 	lineBytes int
+	// literalBytes counts the literal payload of the current command, reset per
+	// command. The whole command is held in memory before it runs, so the literal
+	// cap bounds the sum of its literals, not each one alone.
+	literalBytes int64
+	// authed reports whether the session has authenticated; nil means it has.
+	// Before login the literal cap is the command-line cap: a user name and a
+	// password are all a client sends then, and an anonymous client must not make
+	// the server allocate a mail-sized buffer.
+	authed func() bool
 }
 
 // readByte reads one byte of the command line and counts it against the line cap.
@@ -154,7 +163,7 @@ func discardLine(br *bufio.Reader) error {
 // terminating CRLF is consumed and not emitted. An empty line yields no tokens.
 func (r *commandReader) readCommand() ([]token, error) {
 	var toks []token
-	r.lineBytes = 0
+	r.lineBytes, r.literalBytes = 0, 0
 	for {
 		b, err := r.readByte()
 		if err != nil {
@@ -309,9 +318,10 @@ func (r *commandReader) readLiteral() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if int64(n) > r.literalLimit() {
+	if r.literalBytes+int64(n) > r.literalLimit() {
 		return "", fmt.Errorf("%w: literal of %d bytes exceeds limit", errProtocol, n)
 	}
+	r.literalBytes += int64(n)
 	if err := r.expectCRLF(); err != nil {
 		return "", err
 	}
@@ -362,15 +372,20 @@ func (r *commandReader) readLiteralHeader() (n int, nonSync bool, err error) {
 	return n, nonSync, nil
 }
 
-// literalLimit is the largest literal this connection accepts, the operator's
-// setting when one is configured and the built-in default otherwise.
+// literalLimit is the most literal payload one command may carry: the
+// operator's setting when one is configured and the built-in default otherwise,
+// lowered to the command-line cap before the session authenticates.
 func (r *commandReader) literalLimit() int64 {
+	limit := int64(defaultMaxLiteralSize)
 	if r.maxLiteral != nil {
 		if v := r.maxLiteral.Load(); v > 0 {
-			return v
+			limit = v
 		}
 	}
-	return int64(defaultMaxLiteralSize)
+	if r.authed != nil && !r.authed() {
+		limit = min(limit, int64(r.lineLimit()))
+	}
+	return limit
 }
 
 // expectCRLF consumes the line ending after a literal's length, tolerating a bare

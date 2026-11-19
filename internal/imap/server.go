@@ -219,7 +219,8 @@ func (s *Server) handle(nc net.Conn) {
 			continue
 		}
 		if err != nil {
-			return // connection closed or unreadable
+			c.refuseMalformed(err)
+			return // connection closed, unreadable, or out of step with the client
 		}
 		c.dispatch(toks)
 		if c.werr != nil {
@@ -306,6 +307,20 @@ func (c *conn) cmdCompress(tag string, args []token) {
 	c.compressed = true
 }
 
+// refuseMalformed tells the client why the session ends when its command could
+// not be read: a literal past the cap, a bad literal header, a CR without LF. The
+// stream is no longer at a command boundary (a non-synchronizing literal's bytes
+// may follow), so the server closes it, with the untagged BYE RFC 3501 7.1.5
+// allows rather than in silence. An I/O error has no client left to tell.
+func (c *conn) refuseMalformed(err error) {
+	if !errors.Is(err, errProtocol) {
+		return
+	}
+	c.event(logging.LevelWarn, "command.malformed", logging.Fields{"reason": err.Error()})
+	c.untagged("BYE Malformed command")
+	c.flush()
+}
+
 // resetReader builds the command reader over src, the connection's current
 // inbound stream, carrying the server's live literal and line caps. STARTTLS and
 // COMPRESS replace the stream mid-session, and a reader built without the caps
@@ -314,6 +329,7 @@ func (c *conn) resetReader(src io.Reader) {
 	c.rd = &commandReader{
 		br: bufio.NewReader(src), bw: c.bw,
 		maxLiteral: &c.srv.maxLiteral, maxLine: &c.srv.maxCommandLine,
+		authed: func() bool { return c.state != stateNotAuth },
 	}
 }
 

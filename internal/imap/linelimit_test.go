@@ -2,8 +2,10 @@ package imap
 
 import (
 	"bufio"
+	"bytes"
 	"net"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"hermex/internal/directory"
@@ -97,23 +99,47 @@ func TestCommandLineCapLeavesAShortCommandAlone(t *testing.T) {
 	}
 }
 
-// TestCommandLineCapDoesNotBoundALiteral proves a literal keeps its own cap: the
-// line cap counts the command line, not the payload the client announces on it.
-func TestCommandLineCapDoesNotBoundALiteral(t *testing.T) {
+// TestServerBoundsALiteralBeforeLogin drives the same rule through a live
+// connection: an anonymous client's 200-byte literal against a 128-byte line cap
+// is refused as a protocol error, answered with BYE before the server closes the
+// out-of-step stream, where without the rule the server would read it and answer
+// the LOGIN with NO.
+func TestServerBoundsALiteralBeforeLogin(t *testing.T) {
 	ln := cappedLineServer(t, 128)
 	conn, br := dialIMAPLine(t, ln)
-
-	// A 300-byte literal on a short command line: the payload is far past the line
-	// cap, and must still be accepted.
-	body := strings.Repeat("y", 300)
-	if _, err := conn.Write([]byte("d LOGIN {300+}\r\n" + body + " pw\r\n")); err != nil {
+	if _, err := conn.Write([]byte("d LOGIN {200+}\r\n" + strings.Repeat("y", 200) + " pw\r\n")); err != nil {
 		t.Fatal(err)
 	}
 	line, err := br.ReadString('\n')
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if strings.Contains(line, "Command line too long") {
-		t.Errorf("the literal payload was counted against the command-line cap: %q", line)
+	if !strings.HasPrefix(line, "* BYE") {
+		t.Errorf("answer = %q, want BYE for a literal past the pre-login cap", line)
+	}
+}
+
+// TestCommandLineCapDoesNotBoundALiteral proves a literal of an authenticated
+// session keeps its own cap: the line cap counts the command line, not the
+// payload the client announces on it. (Before login the line cap does bound a
+// literal; TestLiteralBeforeLoginIsBoundByTheLineCap covers that.)
+func TestCommandLineCapDoesNotBoundALiteral(t *testing.T) {
+	var line, literal atomic.Int64
+	line.Store(128)
+	literal.Store(50 << 20)
+	// A 300-byte literal on a short command line: the payload is far past the line
+	// cap, and must still be accepted.
+	r := &commandReader{
+		br:         bufio.NewReader(strings.NewReader("d APPEND INBOX {300+}\r\n" + strings.Repeat("y", 300) + "\r\n")),
+		bw:         bufio.NewWriter(&bytes.Buffer{}),
+		maxLiteral: &literal, maxLine: &line,
+		authed: func() bool { return true },
+	}
+	toks, err := r.readCommand()
+	if err != nil {
+		t.Fatalf("the literal payload was counted against the command-line cap: %v", err)
+	}
+	if len(toks) != 4 || len(toks[3].val) != 300 {
+		t.Errorf("tokens = %d, want APPEND with a 300-byte literal", len(toks))
 	}
 }

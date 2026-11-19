@@ -40,6 +40,57 @@ func TestReadLiteralRespectsServerLimit(t *testing.T) {
 	}
 }
 
+// TestLiteralBeforeLoginIsBoundByTheLineCap reads a 200-byte literal from a
+// client that has not authenticated. Before login the only literals a client
+// needs are a user name and password, so the cap there is the command-line cap
+// (here 128), not the message-sized literal cap: an anonymous client must not be
+// able to make the server allocate a mail-sized buffer. The same literal after
+// login is accepted.
+func TestLiteralBeforeLoginIsBoundByTheLineCap(t *testing.T) {
+	var line, literal atomic.Int64
+	line.Store(128)
+	literal.Store(50 << 20)
+	input := "a LOGIN {200+}\r\n" + strings.Repeat("x", 200) + " pw\r\n"
+	for _, authed := range []bool{false, true} {
+		r := &commandReader{
+			br: bufio.NewReader(strings.NewReader(input)), bw: bufio.NewWriter(&bytes.Buffer{}),
+			maxLiteral: &literal, maxLine: &line, authed: func() bool { return authed },
+		}
+		_, err := r.readCommand()
+		if !authed && !errors.Is(err, errProtocol) {
+			t.Errorf("before login: a 200-byte literal under a 128-byte line cap = %v, want a protocol error", err)
+		}
+		if authed && err != nil {
+			t.Errorf("after login: a 200-byte literal = %v, want success", err)
+		}
+	}
+}
+
+// TestLiteralsOfOneCommandShareTheLiteralCap sends one command whose two
+// literals are each under the 8-byte cap but 12 bytes together. The reader keeps
+// a whole command in memory before it runs, so the cap bounds their sum: without
+// that, a command of many literals costs the cap times their number.
+func TestLiteralsOfOneCommandShareTheLiteralCap(t *testing.T) {
+	var limit atomic.Int64
+	limit.Store(8)
+	r := &commandReader{
+		br:         bufio.NewReader(strings.NewReader("a LOGIN {6+}\r\nabcdef {6+}\r\nghijkl\r\n")),
+		bw:         bufio.NewWriter(&bytes.Buffer{}),
+		maxLiteral: &limit,
+	}
+	if _, err := r.readCommand(); !errors.Is(err, errProtocol) {
+		t.Fatalf("two 6-byte literals under an 8-byte cap = %v, want a protocol error", err)
+	}
+	r = &commandReader{
+		br:         bufio.NewReader(strings.NewReader("a LOGIN {4+}\r\nabcd {4+}\r\nefgh\r\n")),
+		bw:         bufio.NewWriter(&bytes.Buffer{}),
+		maxLiteral: &limit,
+	}
+	if _, err := r.readCommand(); err != nil {
+		t.Fatalf("two 4-byte literals filling an 8-byte cap = %v, want success", err)
+	}
+}
+
 // lex runs the command reader over input and returns the tokens plus whatever
 // the server wrote back (continuation requests).
 func lex(t *testing.T, input string) ([]token, string) {
