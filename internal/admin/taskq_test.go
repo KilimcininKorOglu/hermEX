@@ -71,12 +71,14 @@ func TestTaskqReadIsNotShownAsEmpty(t *testing.T) {
 
 // TestTaskqRequiresSystem proves an org admin cannot reach the Task queue page.
 func TestTaskqRequiresSystem(t *testing.T) {
-	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminOrg, ScopeID: 1}}}
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminOrg, ScopeID: 1}},
+		tasks: []directory.TaskInfo{{ID: 1, Type: "ldapsync", Status: directory.TaskDone, CreatedBy: "admin@test", Message: "secret-result"}}}
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
-	resp := authedGET(t, ts, "/admin/ui/taskq", session)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("org-admin taskq page = %d, want 403", resp.StatusCode)
+	for _, path := range []string{"/admin/ui/taskq", "/admin/ui/taskq/panel", "/admin/tasq/status"} {
+		body := wantBody(t, authedGET(t, ts, path, session), http.StatusForbidden, "org-admin "+path)
+		if strings.Contains(body, "secret-result") {
+			t.Errorf("%s: the refusal carries a task's result", path)
+		}
 	}
 }
