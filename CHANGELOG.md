@@ -4,6 +4,53 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-11-19
+
+### Added
+
+- Bare-metal installation: `install.sh` installs MariaDB, MongoDB and ClamAV, a service user, one systemd unit per daemon and the firewall rules on RHEL/AlmaLinux/Rocky 9, Debian 12 and Ubuntu 22.04/24.04, then installs the release. `update` takes a database dump, swaps the release and migrates; `rollback` restores the previous release and its dump, and refuses a rollback across a mailbox-store migration. Each tagged release carries `hermex-linux-amd64.tar.gz`, `hermex-linux-arm64.tar.gz` and `SHA256SUMS`.
+- Every daemon can take its own health address (`health_addrs`) and its own log spill file, so all of them run on one host.
+- EWS calendar support: calendar items are served by FindItem (with CalendarView expansion of recurring series), GetItem and SyncFolderItems, and can be created, edited, moved, copied and deleted, including single occurrences and series a MAPI client wrote. Tasks and sticky notes are created and edited through the shared task model.
+- EWS search folders, FindItem and FindFolder restrictions, extended properties on reads and writes, InternetMessageHeaders, CalendarPermissions, and counter proposals from a meeting response.
+- MAPI search folders, folder entry ids, rights and counts, the store's size and owner, the replica id map, the connection locale, RopGetPropertiesList and RopReadRecipients past the inline table, and the TNEF form for recipients that take rich information.
+- ActiveSync moves calendar, contact, task and note items, answers one occurrence of a series, proposes new meeting times, honors MaxAmbiguousRecipients and sends read receipts.
+- Read receipts (RFC 8098) and delivery reports are read and written, and webmail prompts for read receipts by the reader's setting.
+- Incoming winmail.dat (TNEF) is read into the message, OpenPGP/MIME messages stay intact, vCard 2.1 is read, and attached contacts travel as vCards.
+- Webmail saved searches are store search folders, folders are addressed by id, meeting mail offers Outlook's answer choices, and messages can be viewed as source.
+- The exclusive sent-copy setting files the copy only in the represented mailbox.
+- The admin panel shares the webmail's design language, manages Directory Sync connections and domain bindings and the Live status targets, and shows times in the operator's chosen zone.
+- `hermex-admin add-health-target` registers a Live status target from the command line.
+
+### Changed
+
+- Account creation, LDAP sync and room creation create the mailbox with its standard folders at once; maintenance reads never create one.
+- Failed-login, connection and HTTP request limits count an IPv6 client by its /64 and evict the least recently used client when their tables are full.
+- Every file the server writes goes through one durable atomic replacement helper.
+- Builds target linux/amd64 and linux/arm64 only.
+
+### Fixed
+
+- Two daemons opening a new relay spool or mailbox at once no longer fail with SQLITE_BUSY or read a half-built schema.
+- Every protocol refuses writes into a mailbox over its quota with that protocol's quota error.
+- Writes stay inside the folder their item id or endpoint names, and requests for a mailbox that does not exist are refused.
+- Free/busy windows are bounded on every surface, BusyStatus values outside the defined set are refused, and every occurrence of a series is counted.
+- Folder names stay unique among siblings on create, rename and move across all protocols.
+- ActiveSync answers each failure with its MS-ASCMD status, keeps a cached Ping heartbeat at the 60-second floor, and updates its shared sync state inside one transaction.
+- Meeting replies, cancellations and delegate answers keep the right series, instance and response, and a meeting in another mailbox is answered only under a send grant.
+- Out-of-office windows that end before they start are refused on every surface.
+- A daily series that began years before the window is expanded.
+- Many admin panel, webmail and MAPI fixes for time zones, delegates, attachments and table columns.
+
+### Security
+
+- The SMTP DATA body, IMAP literals and IDLE lines, fetchmail responses, MIME part counts, ICS uploads and relay turns are bounded.
+- A submission or transaction past 1000 recipients is refused, and a DMARC report goes to at most 10 destinations.
+- The From of every client-built or scheduled message passes the send-as check; a PLAIN login cannot act as another user.
+- The SSRF guard refuses every non-global IANA block, zoned and shorthand hosts, and IPv6 addresses that embed a private IPv4 host.
+- MAPI/HTTP and RPC/HTTP sessions are bound to the authenticated user.
+- The ActiveSync policy key is given only to a compliant device that acknowledges it.
+- MTA-STS policies are read only when served as text/plain, and pkcs7 is bumped for BER length bounds.
+
 ## [0.2.0] - 2026-09-27
 
 ### Added
