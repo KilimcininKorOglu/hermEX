@@ -10,6 +10,8 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/ldapsync"
+	"hermex/internal/lifecycle"
+	"hermex/internal/logging"
 )
 
 // performLDAPSync runs the directory downsync of the bindings a task names and
@@ -81,8 +83,26 @@ func (s *Server) runNextTask() (bool, error) {
 	if err != nil || !ok {
 		return false, err
 	}
-	status, message := s.runTask(t)
+	var status, message string
+	// A panic in one task finishes that task as failed instead of ending the
+	// daemon and leaving the task marked running for good. The stack goes to the
+	// log; the task row, which the panel shows, gets a plain message.
+	if err := lifecycle.Contain(func() error { status, message = s.runTask(t); return nil }); err != nil {
+		s.logTaskPanic(t, err)
+		status, message = directory.TaskFailed, "tasks.crashed"
+	}
 	return true, s.dir.FinishTask(t.ID, status, message)
+}
+
+// logTaskPanic records a panic a task raised, with its stack, under the same
+// shape the protocol daemons use for a connection's panic.
+func (s *Server) logTaskPanic(t directory.TaskInfo, err error) {
+	fields := logging.Fields{"task": t.ID, "type": t.Type}
+	if pe, ok := errors.AsType[*lifecycle.PanicError](err); ok {
+		fields["stack"] = string(pe.Stack)
+	}
+	s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.Admin, Name: "task.panic",
+		Err: err.Error(), Fields: fields})
 }
 
 // RunTaskWorker drains the admin task queue until ctx is cancelled, running

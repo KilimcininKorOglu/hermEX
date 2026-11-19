@@ -408,6 +408,7 @@
     "syncFailed": "Eşitleme başarısız oldu.",
     "retrainFailed": "Yeniden eğitim başarısız oldu.",
     "retrained": "{0} spam ve {1} normal ileti ile yeniden eğitildi ({2} posta kutusu).",
-    "unknownType": "bilinmeyen görev türü: {0}"
+    "unknownType": "bilinmeyen görev türü: {0}",
+    "crashed": "Görev bir iç hata yüzünden durdu. Ayrıntılar yönetim günlüğüne yazıldı."
   }
 }

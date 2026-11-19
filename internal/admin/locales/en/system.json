@@ -408,6 +408,7 @@
     "syncFailed": "Sync failed.",
     "retrainFailed": "Retrain failed.",
     "retrained": "Retrained on {0} spam + {1} ham messages from {2} mailboxes.",
-    "unknownType": "unknown task type: {0}"
+    "unknownType": "unknown task type: {0}",
+    "crashed": "The task stopped on an internal error. The admin log records the details."
   }
 }
