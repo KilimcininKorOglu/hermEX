@@ -55,14 +55,18 @@ func TestSaveConnLimitRejectsBadValues(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/limits/connections", session, csrf,
-		url.Values{"enabled": {"1"}, "conn_max_total": {"0"}, "conn_max_per_client": {"8"}})
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if !strings.Contains(string(body), "at least 1") {
-		t.Errorf("expected a validation message:\n%s", body)
-	}
-	if d.connLimitFound {
-		t.Error("invalid connection caps must not be persisted")
+	for _, tc := range []struct{ total, perClient string }{
+		{"0", "8"}, {"400", "0"}, {"-5", "8"}, {"400", "abc"}, {"", "8"},
+	} {
+		resp := htmxPOST(t, ts, "/admin/ui/limits/connections", session, csrf,
+			url.Values{"enabled": {"1"}, "conn_max_total": {tc.total}, "conn_max_per_client": {tc.perClient}})
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if !strings.Contains(string(body), "at least 1") {
+			t.Errorf("%q/%q: expected a validation message:\n%s", tc.total, tc.perClient, body)
+		}
+		if d.connLimitFound {
+			t.Errorf("%q/%q: invalid connection caps were persisted: %+v", tc.total, tc.perClient, d.connLimit)
+		}
 	}
 }
