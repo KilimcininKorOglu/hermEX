@@ -210,6 +210,13 @@ func reserializeObject(st *objectstore.Store, req copyMoveRequest, srcID int64) 
 // writeCopy replaces an existing destination with the new copy and, for a MOVE,
 // routes the source through the dumpster so sync-collection reports a tombstone.
 func (s *Server) writeCopy(st *objectstore.Store, ends copyMoveEnds, msg *oxcmail.Message, move bool) error {
+	// A move takes the source out of the same mailbox, so it adds nothing and a
+	// full mailbox may still file its objects; a copy adds one.
+	if !move {
+		if err := checkQuota(st); err != nil {
+			return err
+		}
+	}
 	if ends.dstExists {
 		if err := st.DeleteObject(ends.dst.ID); err != nil {
 			return err

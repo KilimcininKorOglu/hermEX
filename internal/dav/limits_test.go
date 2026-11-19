@@ -1,11 +1,66 @@
 package dav
 
 import (
+	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
+
+// TestAWriteIntoAFullMailboxIsRefusedAs507 fills the mailbox past its receive
+// quota, past which nothing new may enter it. RFC 4331 section 6 has a write that
+// would exceed a quota answer 507 with the DAV:quota-not-exceeded precondition:
+// a PUT creating an event or a contact, and a COPY, each add an object and must
+// be refused with nothing stored. A PUT over an existing object and a MOVE add
+// nothing, so a full mailbox can still edit and file what it holds.
+func TestAWriteIntoAFullMailboxIsRefusedAs507(t *testing.T) {
+	accs := seedCalendar(t)
+	ts := httptest.NewServer(NewServer(accs, accs, "hermex.test").Handler())
+	t.Cleanup(ts.Close)
+	doFull(t, ts, "PUT", calURL("ev.ics"), timedEventICS, nil)
+	fillPastQuota(t, accs[testUser].MailboxPath)
+
+	refused := []struct{ method, path, body string }{
+		{"PUT", calURL("new.ics"), strings.ReplaceAll(timedEventICS, "UID:", "UID:fresh-")},
+		{"PUT", contactURL("new.vcf"), adaVCard},
+		{"COPY", calURL("ev.ics"), ""},
+	}
+	for _, c := range refused {
+		hdr := map[string]string{"Destination": calURL("copy.ics")}
+		resp, body := doFull(t, ts, c.method, c.path, c.body, hdr)
+		if resp.StatusCode != http.StatusInsufficientStorage || !strings.Contains(body, "quota-not-exceeded") {
+			t.Errorf("%s %s into a full mailbox: status %d body %q, want 507 quota-not-exceeded", c.method, c.path, resp.StatusCode, body)
+		}
+	}
+	for _, p := range []string{calURL("new.ics"), contactURL("new.vcf"), calURL("copy.ics")} {
+		if resp, _ := doFull(t, ts, "GET", p, "", nil); resp.StatusCode != http.StatusNotFound {
+			t.Errorf("a refused write was stored at %s: status %d", p, resp.StatusCode)
+		}
+	}
+	if resp, _ := doFull(t, ts, "PUT", calURL("ev.ics"), timedEventICS, nil); resp.StatusCode >= 300 {
+		t.Errorf("a PUT over an existing event in a full mailbox: status %d, want success", resp.StatusCode)
+	}
+}
+
+// fillPastQuota stores a 4 KiB message and sets a 1 KiB receive quota.
+func fillPastQuota(t *testing.T, dir string) {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	big := "Subject: big\r\n\r\n" + strings.Repeat("x", 4096)
+	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(big), time.Unix(3, 0), 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetQuota(objectstore.QuotaLimits{ReceiveKB: 1}); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // TestOversizedBodyIsRefusedAs413 sends a body one byte over the operator's cap
 // to each surface that reads one. RFC 9110 15.5.14 answers a body too large to

@@ -270,6 +270,9 @@ func storedPhotoNum(stored *oxcmail.Message) (uint32, bool) {
 // removed.
 func replaceObject(st *objectstore.Store, fid int64, msg *oxcmail.Message, existing objectstore.FolderObject, found bool, managed []mapi.PropTag) error {
 	if !found {
+		if err := checkQuota(st); err != nil {
+			return err
+		}
 		_, err := st.CreateMessage(fid, msg)
 		return err
 	}

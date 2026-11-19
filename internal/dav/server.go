@@ -69,8 +69,15 @@ func (s *Server) SetSpool(spool *relay.Spool) { s.spool = spool }
 // RemoteAddr, so this records the failing error text alone. A 5xx logs at error
 // level, a 4xx (client fault) at warn. A body over its cap answers 413 (RFC 9110
 // 15.5.14) whatever status the caller passed, so a client is told to send less
-// rather than that its content is malformed.
+// rather than that its content is malformed. A write into a full mailbox answers
+// 507 with the RFC 4331 DAV:quota-not-exceeded precondition.
 func (s *Server) davError(w http.ResponseWriter, err error, status int) {
+	if errors.Is(err, errQuotaExceeded) {
+		s.Logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.DAV, Name: "request.fail",
+			Fields: logging.Fields{"status": http.StatusInsufficientStorage}, Err: err.Error()})
+		writeQuotaExceeded(w)
+		return
+	}
 	if errors.Is(err, serve.ErrBodyTooLarge) {
 		status = http.StatusRequestEntityTooLarge
 	}
