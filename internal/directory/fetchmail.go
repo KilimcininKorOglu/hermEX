@@ -2,6 +2,7 @@ package directory
 
 import (
 	"fmt"
+	"log"
 	"strings"
 )
 
@@ -44,8 +45,20 @@ func (e FetchmailEntry) Validate() error {
 	if e.SrcPort < 0 || e.SrcPort > 65535 {
 		return fmt.Errorf("fetchmail: source port %d out of range", e.SrcPort)
 	}
+	if len(e.SrcPassword) > maxFetchmailPassword {
+		return fmt.Errorf("fetchmail: source password is longer than %d bytes", maxFetchmailPassword)
+	}
 	return nil
 }
+
+// maxFetchmailPassword bounds the source password so its wrapped form fits the
+// src_password column (VARCHAR(1024), migration 0065).
+const maxFetchmailPassword = 512
+
+// wrapFetchmail is the wrapping context of a poll configuration's source password.
+// It is a credential to another server's mailbox, so a dump of the directory must
+// not hand it over, the same as the LDAP bind and SMTP gateway passwords.
+const wrapFetchmail = "fetchmail-source-password"
 
 const fetchmailCols = `id, mailbox, active, src_server, src_port, src_user, src_password,
 	protocol, src_folder, fetchall, keep, use_ssl, ssl_verify`
@@ -64,39 +77,72 @@ func scanFetchmail(s interface{ Scan(...any) error }) (FetchmailEntry, error) {
 
 // ListFetchmail returns one mailbox's poll configurations, for the admin editor.
 func (d *SQLDirectory) ListFetchmail(mailbox string) ([]FetchmailEntry, error) {
-	rows, err := d.db.Query(`SELECT `+fetchmailCols+` FROM fetchmail WHERE mailbox = ? ORDER BY id`, mailbox)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []FetchmailEntry
-	for rows.Next() {
-		e, err := scanFetchmail(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, e)
-	}
-	return out, rows.Err()
+	return d.queryFetchmail(`SELECT `+fetchmailCols+` FROM fetchmail WHERE mailbox = ? ORDER BY id`, mailbox)
 }
 
 // ListActiveFetchmail returns every active poll configuration across all mailboxes, for
 // the fetch-worker.
 func (d *SQLDirectory) ListActiveFetchmail() ([]FetchmailEntry, error) {
-	rows, err := d.db.Query(`SELECT ` + fetchmailCols + ` FROM fetchmail WHERE active <> 0 ORDER BY id`)
+	return d.queryFetchmail(`SELECT ` + fetchmailCols + ` FROM fetchmail WHERE active <> 0 ORDER BY id`)
+}
+
+// queryFetchmail reads poll configurations and opens each source password. The
+// rows are read in full before any password is rewritten, so the rewrite never
+// runs while the result set holds the connection.
+func (d *SQLDirectory) queryFetchmail(query string, args ...any) ([]FetchmailEntry, error) {
+	rows, err := d.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var out []FetchmailEntry
 	for rows.Next() {
 		e, err := scanFetchmail(rows)
 		if err != nil {
+			rows.Close()
 			return nil, err
 		}
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if out[i].SrcPassword, err = d.openFetchmailPassword(out[i].ID, out[i].SrcPassword); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// openFetchmailPassword unwraps a stored source password and, when the row is
+// still plaintext and a secret is installed, rewrites it wrapped. The rewrite is
+// best-effort: the password was read, so a failed write must not stop the poll;
+// the failure is logged and the next read retries.
+func (d *SQLDirectory) openFetchmailPassword(id int64, stored string) (string, error) {
+	password, wrapped, err := d.unwrapKey(wrapFetchmail, stored)
+	if err != nil {
+		return "", fmt.Errorf("fetchmail entry %d: %w", id, err)
+	}
+	if d.rewrapNeeded(wrapped) {
+		if err := d.rewrapFetchmailPassword(id, stored, password); err != nil {
+			log.Printf("directory: could not wrap the source password of fetchmail entry %d: %v", id, err)
+		}
+	}
+	return password, nil
+}
+
+// rewrapFetchmailPassword writes a plaintext source password back wrapped, only
+// while the row still holds the plaintext it was read with (compare-and-set).
+func (d *SQLDirectory) rewrapFetchmailPassword(id int64, stored, password string) error {
+	sealed, err := d.wrapKey(wrapFetchmail, password)
+	if err != nil {
+		return err
+	}
+	_, err = d.db.Exec(`UPDATE fetchmail SET src_password = ? WHERE id = ? AND src_password = ?`, sealed, id, stored)
+	return err
 }
 
 // CreateFetchmail stores a new poll configuration and returns its id.
@@ -104,12 +150,16 @@ func (d *SQLDirectory) CreateFetchmail(e FetchmailEntry) (int64, error) {
 	if err := e.Validate(); err != nil {
 		return 0, err
 	}
+	sealed, err := d.wrapKey(wrapFetchmail, e.SrcPassword)
+	if err != nil {
+		return 0, err
+	}
 	res, err := d.db.Exec(
 		`INSERT INTO fetchmail
 			(mailbox, active, src_server, src_port, src_user, src_password,
 			 protocol, src_folder, fetchall, keep, use_ssl, ssl_verify)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.Mailbox, b2i(e.Active), e.SrcServer, e.SrcPort, e.SrcUser, e.SrcPassword,
+		e.Mailbox, b2i(e.Active), e.SrcServer, e.SrcPort, e.SrcUser, sealed,
 		strings.ToUpper(e.Protocol), e.SrcFolder, b2i(e.FetchAll), b2i(e.Keep), b2i(e.UseSSL), b2i(e.SSLVerify))
 	if err != nil {
 		return 0, err

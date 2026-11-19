@@ -1,6 +1,9 @@
 package directory
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestFetchmailCRUD covers the poll-config store: an entry round-trips its fields, the
 // active-only listing excludes a disabled entry, an unknown protocol is rejected, delete
@@ -56,6 +59,63 @@ func TestFetchmailCRUD(t *testing.T) {
 	_, err = d.DeleteUser("alice@hermex.test", false)
 	mustNoErr(t, "delete user", err)
 	wantEq(t, "fetchmail entries after the user delete", len(mustListFetchmail(t, d)), 0)
+}
+
+// storedFetchmailPassword reads an entry's src_password column as stored.
+func storedFetchmailPassword(t *testing.T, d *SQLDirectory, id int64) string {
+	t.Helper()
+	var s string
+	mustNoErr(t, "read the stored source password",
+		d.db.QueryRow(`SELECT src_password FROM fetchmail WHERE id = ?`, id).Scan(&s))
+	return s
+}
+
+// TestFetchmailPasswordIsEncryptedAtRest stores a source password with a key
+// secret installed. The password opens another server's mailbox, so a dump of
+// the directory must not contain it, while the worker still reads it back.
+func TestFetchmailPasswordIsEncryptedAtRest(t *testing.T) {
+	d, _ := freshDirectory(t)
+	d.SetKeySecret([]byte("test-key-secret"))
+	root := t.TempDir()
+	mustCreateDomain(t, d, root, "hermex.test")
+	mustCreateUser(t, d, root, "alice@hermex.test", "pw")
+	long := strings.Repeat("p", maxFetchmailPassword)
+	id, err := d.CreateFetchmail(FetchmailEntry{Mailbox: "alice@hermex.test", Active: true,
+		SrcServer: "s", SrcUser: "u", SrcPassword: long, Protocol: "IMAP"})
+	mustNoErr(t, "create an entry with the longest allowed password", err)
+	if s := storedFetchmailPassword(t, d, id); !strings.HasPrefix(s, wrapPrefix) || strings.Contains(s, "ppp") {
+		t.Errorf("the source password is stored readable: %.40q", s)
+	}
+	active, err := d.ListActiveFetchmail()
+	mustNoErr(t, "list active entries", err)
+	if len(active) != 1 || active[0].SrcPassword != long {
+		t.Errorf("the worker did not get the password back")
+	}
+	_, err = d.CreateFetchmail(FetchmailEntry{Mailbox: "alice@hermex.test", SrcServer: "s", SrcUser: "u",
+		SrcPassword: long + "p", Protocol: "IMAP"})
+	wantErr(t, "a password over the limit was accepted", err)
+}
+
+// TestFetchmailPlaintextPasswordIsRewrapped proves an entry written before the
+// secret existed converges on encryption at its first read.
+func TestFetchmailPlaintextPasswordIsRewrapped(t *testing.T) {
+	d, _ := freshDirectory(t)
+	root := t.TempDir()
+	mustCreateDomain(t, d, root, "hermex.test")
+	mustCreateUser(t, d, root, "alice@hermex.test", "pw")
+	id, err := d.CreateFetchmail(FetchmailEntry{Mailbox: "alice@hermex.test", Active: true,
+		SrcServer: "s", SrcUser: "u", SrcPassword: "legacy-secret", Protocol: "POP3"})
+	mustNoErr(t, "create a plaintext entry", err)
+	wantEq(t, "the entry starts as plaintext", storedFetchmailPassword(t, d, id), "legacy-secret")
+
+	d.SetKeySecret([]byte("test-key-secret"))
+	list := mustListFetchmail(t, d)
+	if len(list) != 1 || list[0].SrcPassword != "legacy-secret" {
+		t.Fatalf("list = %+v, want the original password", list)
+	}
+	if s := storedFetchmailPassword(t, d, id); !strings.HasPrefix(s, wrapPrefix) {
+		t.Errorf("the plaintext password was not rewritten: %q", s)
+	}
 }
 
 // mustListFetchmail lists alice's poll configurations.
