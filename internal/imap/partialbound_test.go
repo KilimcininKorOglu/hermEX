@@ -16,6 +16,9 @@ func TestPartialRefusesAnOutOfRangeNumber(t *testing.T) {
 		"<9223372036854775807.1>", // a start past the 32-bit width
 		"<4294967296.1>",          // one past the 32-bit ceiling
 		"<1.4294967296>",          // the same for the count
+		"<0.0>",                   // RFC 3501 section 9: the count is an nz-number
+		"<5>",                     // no count at all
+		"<.5>",                    // no start
 	} {
 		if p, err := parsePartial(spec); err == nil {
 			t.Errorf("parsePartial(%q) = %v, want a protocol error", spec, p)

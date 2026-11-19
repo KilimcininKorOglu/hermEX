@@ -587,7 +587,8 @@ func parsePartial(s string) (*[2]int, error) {
 		return nil, fmt.Errorf("%w: bad partial %q", errProtocol, s)
 	}
 	count, err := strconv.ParseUint(b, 10, 32)
-	if err != nil {
+	if err != nil || count == 0 { // RFC 3501 section 9: the count is an nz-number
+
 		return nil, fmt.Errorf("%w: bad partial %q", errProtocol, s)
 	}
 	return &[2]int{int(start), int(count)}, nil
