@@ -4,6 +4,7 @@ import (
 	"io"
 	"net"
 	"testing"
+	"time"
 )
 
 // addrConn is a connection that only reports a remote address, all ClientKey reads.
@@ -42,6 +43,25 @@ func TestARefusedConnectionIsToldWhyAndClosed(t *testing.T) {
 	got, err := io.ReadAll(client)
 	if err != nil || string(got) != line {
 		t.Errorf("client read %q, %v, want the refusal line then end of stream", got, err)
+	}
+}
+
+// TestRefusalToAClientThatNeverReadsReturns refuses a client that never reads.
+// The write must give up at its deadline and close the connection, or one stalled
+// client pins a goroutine and a socket per refused connection.
+func TestRefusalToAClientThatNeverReadsReturns(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+	_, refuse := Gate(New(), "* BYE too many connections\r\n", nil)
+	done := make(chan struct{})
+	go func() { refuse(server); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(refusalWriteTimeout + 5*time.Second):
+		t.Fatal("refuse is still blocked on a client that never reads")
+	}
+	if _, err := server.Write([]byte("x")); err == nil {
+		t.Error("the refused connection is still open")
 	}
 }
 
