@@ -129,6 +129,22 @@ func TestUIUserAddFetchmail(t *testing.T) {
 	}
 }
 
+// TestUIUserAddFetchmailRefusesAnUnreadablePort sends a port that is not a number.
+// Read as 0 it meant the protocol's default port, so the entry was stored and
+// polled a port the operator never entered; now nothing is stored.
+func TestUIUserAddFetchmailRefusesAnUnreadablePort(t *testing.T) {
+	d := folderUserDir()
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	htmxPOST(t, ts, "/admin/ui/users/alice@hermex.test/fetchmail", session, csrf, url.Values{
+		"srcServer": {"mail.example.com"}, "srcUser": {"alice"}, "protocol": {"IMAP"}, "srcPort": {"99three"},
+	}).Body.Close()
+	if list := d.fetchmail["alice@hermex.test"]; len(list) != 0 {
+		t.Errorf("an entry with an unreadable port was stored: %+v", list)
+	}
+}
+
 // TestUIUserDeleteFetchmail proves the detail-form delete removes the entry.
 func TestUIUserDeleteFetchmail(t *testing.T) {
 	d := folderUserDir()

@@ -144,10 +144,11 @@ func (s *Server) handleUIUserAddFetchmail(w http.ResponseWriter, r *http.Request
 		return
 	}
 	email := r.PathValue("email")
-	atoi := func(v string) int { n, _ := strconv.Atoi(v); return n }
+	// A port that is not a number reads as -1, which Validate refuses: read as 0 it
+	// meant the protocol's default port.
 	in := fetchmailInput{
 		SrcServer:   r.PostFormValue("srcServer"),
-		SrcPort:     atoi(r.PostFormValue("srcPort")),
+		SrcPort:     formInt(r, "srcPort"),
 		SrcUser:     r.PostFormValue("srcUser"),
 		SrcPassword: r.PostFormValue("srcPassword"),
 		Protocol:    r.PostFormValue("protocol"),
