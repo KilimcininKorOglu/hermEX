@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -108,6 +109,31 @@ func TestUIUserForward(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "Saved") {
 		t.Errorf("ui forward save did not report success:\n%s", body)
+	}
+}
+
+// TestUserForwardRefusesWhatIsNotOneAddress sends destinations that delivery cannot
+// route: no @, a list, a display name, a CRLF-injected header and a domain that is
+// not a host name. Under a Redirect each would bounce every message the account
+// receives, so the form and the JSON API refuse them and the directory is never
+// asked to store one.
+func TestUserForwardRefusesWhatIsNotOneAddress(t *testing.T) {
+	bad := []string{"boss", "a@x.test, b@x.test", "Boss <boss@x.test>", "boss@x.test\r\nBcc: e@evil.test", "boss@x_y.test"}
+	for _, dest := range bad {
+		d := forwardUserDir()
+		ts := adminServerStore(t, d, &fakeStore{})
+		session, csrf := loginCookies(t, ts)
+
+		resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/forward", session, csrf,
+			url.Values{"forwardtype": {"redirect"}, "destination": {dest}})
+		body := wantBody(t, resp, http.StatusOK, "form "+dest)
+		wantContains(t, body, "single email address", "the form names the refusal for "+dest)
+		payload, _ := json.Marshal(map[string]any{"forwardType": directory.ForwardRedirect, "destination": dest})
+		wantStatus(t, authedReq(t, ts, "PUT", "/admin/users/alice@hermex.test/forward", session, csrf, string(payload)),
+			http.StatusBadRequest, "JSON "+dest)
+		if d.setForwardDest != "" {
+			t.Errorf("%q reached the directory as %q", dest, d.setForwardDest)
+		}
 	}
 }
 

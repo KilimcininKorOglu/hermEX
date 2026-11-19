@@ -1331,6 +1331,11 @@ func (d *SQLDirectory) SetForward(username string, forwardType int, destination 
 	if destination != "" && forwardType != ForwardCC && forwardType != ForwardRedirect {
 		return false, fmt.Errorf("directory: invalid forward type %d", forwardType)
 	}
+	if destination != "" {
+		if err := ValidateForwardDestination(destination); err != nil {
+			return false, err
+		}
+	}
 	var id int64
 	err := d.db.QueryRow(`SELECT id FROM users WHERE username = ?`, username).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {

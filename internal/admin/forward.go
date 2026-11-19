@@ -39,6 +39,10 @@ func (s *Server) handleSetUserForward(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
+	if in.Destination != "" && directory.ValidateForwardDestination(in.Destination) != nil {
+		http.Error(w, "invalid forward destination", http.StatusBadRequest)
+		return
+	}
 	found, err := s.dir.SetForward(r.PathValue("email"), in.ForwardType, in.Destination)
 	if err != nil {
 		s.fail(w, "could not set forward", err, http.StatusBadRequest)
@@ -80,8 +84,13 @@ func (s *Server) handleUIUserForward(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ftype, destination := forwardFromForm(r)
-	found, err := s.dir.SetForward(r.PathValue("email"), ftype, destination)
 	data := map[string]any{}
+	if destination != "" && directory.ValidateForwardDestination(destination) != nil {
+		data["Error"] = "userDetail.forwardInvalid"
+		s.render(w, r, "user-status", data)
+		return
+	}
+	found, err := s.dir.SetForward(r.PathValue("email"), ftype, destination)
 	switch {
 	case err != nil:
 		data["Error"] = s.notice("userDetail.saveForwardFailed", err)

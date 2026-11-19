@@ -2,6 +2,7 @@ package directory
 
 import (
 	"fmt"
+	"net/mail"
 	"strings"
 )
 
@@ -22,6 +23,21 @@ func ValidateAddress(address string) error {
 		return err
 	}
 	return ValidateDomain(address[at+1:])
+}
+
+// ValidateForwardDestination reports whether a mail-forward destination is a
+// single RFC 5322 addr-spec with a host-name domain. Delivery adds the destination
+// as one more recipient, and one that cannot be routed is bounced: under a
+// Redirect, which drops the local copy, a typo would bounce every message the
+// account receives. A display name, a list or a domain that is not a host name is
+// refused for the same reason.
+func ValidateForwardDestination(destination string) error {
+	destination = strings.TrimSpace(destination)
+	a, err := mail.ParseAddress(destination)
+	if err != nil || a.Name != "" || a.Address != destination {
+		return fmt.Errorf("directory: forward destination %q is not a single address", destination)
+	}
+	return ValidateDomain(destination[strings.LastIndexByte(destination, '@')+1:])
 }
 
 // ValidateDomain reports whether a domain name may be provisioned. A domain

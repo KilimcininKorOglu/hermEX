@@ -225,6 +225,7 @@
     "saveOOFFailed": "Ofis dışı ayarları kaydedilemedi.",
     "oofWindowInvalid": "Bitiş zamanı başlangıçtan sonra olmalıdır.",
     "saveForwardFailed": "Yönlendirme kaydedilemedi.",
+    "forwardInvalid": "Yönlendirme hedefi tek bir e-posta adresi olmalıdır.",
     "saveMeetingFailed": "Toplantı ayarları kaydedilemedi.",
     "saveSentCopyFailed": "Kopya ayarları kaydedilemedi.",
     "saveGrantFailed": "{0} izinleri kaydedilemedi.",

@@ -100,6 +100,16 @@ func TestForwardDirective(t *testing.T) {
 	wantEq(t, "the alias resolves to the user's directive",
 		mustGetForward(t, d, "sales@hermex.test").Destination, "boss@external.test")
 
+	// A destination that is not one routable address is refused and the stored
+	// directive is kept: under a Redirect it would bounce every inbound message.
+	for _, bad := range []string{"boss", "a@x.test, b@x.test", "Boss <boss@x.test>", "boss@x_y.test"} {
+		if _, err := d.SetForward("alice@hermex.test", ForwardRedirect, bad); err == nil {
+			t.Errorf("SetForward accepted %q", bad)
+		}
+	}
+	wantEq(t, "the destination after refused writes",
+		mustGetForward(t, d, "alice@hermex.test").Destination, "boss@external.test")
+
 	// An empty destination clears the forward.
 	existed, err = d.SetForward("alice@hermex.test", ForwardCC, "")
 	mustNoErr(t, "clear forward", err)

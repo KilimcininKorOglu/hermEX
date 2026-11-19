@@ -225,6 +225,7 @@
     "saveOOFFailed": "Could not save out-of-office settings.",
     "oofWindowInvalid": "The end must be after the start.",
     "saveForwardFailed": "Could not save forward.",
+    "forwardInvalid": "The forward destination must be a single email address.",
     "saveMeetingFailed": "Could not save meeting settings.",
     "saveSentCopyFailed": "Could not save sent-copy settings.",
     "saveGrantFailed": "Could not save {0}.",
