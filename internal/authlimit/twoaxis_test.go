@@ -59,6 +59,51 @@ func TestSprayingTripsTheAddressAxis(t *testing.T) {
 	}
 }
 
+// TestSprayingFromOneIPv6SubnetTripsTheAddressAxis sprays from a fresh address on
+// every attempt, all inside one /64. A host is routed a whole /64 (RFC 6177), so
+// counting per address let it guess without end and fill the table until the
+// limiter failed open; the /64 must share one counter, and a neighbouring /64 not.
+func TestSprayingFromOneIPv6SubnetTripsTheAddressAxis(t *testing.T) {
+	l := New(3, time.Minute, time.Minute)
+	l.now = func() time.Time { return time.Unix(0, 0) }
+
+	limit := 3 * ipFailFactor
+	for i := range limit {
+		addr := fmt.Sprintf("[2001:db8:1:2::%x]:5000", i+1)
+		l.Fail(addr, fmt.Sprintf("user%d@hermex.test", i))
+	}
+	if l.Allowed("[2001:db8:1:2:ffff::9]:6000", "fresh@hermex.test") {
+		t.Errorf("a new address in the spraying /64 is still admitted after %d failures", limit)
+	}
+	if !l.Allowed("[2001:db8:1:3::1]:6000", "fresh@hermex.test") {
+		t.Error("the neighbouring /64 was locked out with the spraying one")
+	}
+	// IPv4, and IPv4 written as an IPv4-mapped IPv6 address, still count per host.
+	if !l.Allowed("198.51.100.8:1", "fresh@hermex.test") {
+		t.Error("an unrelated IPv4 host was locked out")
+	}
+	for range limit {
+		l.Fail("[::ffff:198.51.100.9]:1", "")
+	}
+	if l.Allowed("198.51.100.9:2", "fresh@hermex.test") {
+		t.Error("an IPv4-mapped address did not share the IPv4 host's counter")
+	}
+}
+
+// TestTheAccountAxisIgnoresCaseAndPadding guesses one mailbox under spellings
+// that log into the same account. Counted apart, each spelling would get its own
+// allowance of guesses against the one password.
+func TestTheAccountAxisIgnoresCaseAndPadding(t *testing.T) {
+	l := New(3, time.Minute, time.Minute)
+	l.now = func() time.Time { return time.Unix(0, 0) }
+	for i, login := range []string{"Alice@Hermex.test", " alice@hermex.test", "ALICE@HERMEX.TEST "} {
+		l.Fail(fmt.Sprintf("198.51.100.%d:1", i+20), login)
+	}
+	if l.Allowed("198.51.100.99:1", "alice@hermex.test") {
+		t.Error("three failures under different spellings did not lock the account")
+	}
+}
+
 // TestTheAddressAxisIsLooserThanTheAccountAxis states the ratio directly. One
 // address is many people (an office behind a NAT, a carrier gateway), so locking a
 // whole site out over a handful of typos would be worse than the attack.

@@ -34,17 +34,33 @@ const (
 // locking a whole site out of webmail over five typos is worse than the attack.
 const ipFailFactor = 4
 
-// ipKey reduces an "ip:port" remote address to its bare IP, so every connection
-// from one host shares a counter; the source port changes on each new connection.
-// An address with no port (or an empty one) is used as given.
+// ipv6HostBits is the IPv6 prefix one subscriber is routed (RFC 6177 assigns a
+// site at least a /64): every address inside it is the same client.
+const ipv6HostBits = 64
+
+// ipKey reduces an "ip:port" remote address to the client it names, so every
+// connection from one host shares a counter; the source port changes on each new
+// connection. An IPv6 address is cut to its /64, because a single host may pick
+// any of 2^64 addresses there: per address, it would never reach the threshold,
+// and its fresh keys would fill the table until the limiter fails open for every
+// account. An address that does not parse is used as given.
 func ipKey(remoteAddr string) string {
 	if remoteAddr == "" {
 		return ""
 	}
-	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
-		return ipPrefix + host
+	host := remoteAddr
+	if h, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		host = h
 	}
-	return ipPrefix + remoteAddr
+	ip := net.ParseIP(host)
+	switch {
+	case ip == nil:
+		return ipPrefix + host
+	case ip.To4() != nil:
+		return ipPrefix + ip.To4().String()
+	default:
+		return ipPrefix + ip.Mask(net.CIDRMask(ipv6HostBits, 128)).String() + "/64"
+	}
 }
 
 // accountKey reduces a login name to its counter key, so a login differing only
