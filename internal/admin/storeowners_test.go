@@ -65,20 +65,32 @@ func TestAdminSetUserStoreOwnersRejectsUnknown(t *testing.T) {
 	}
 }
 
-// TestAdminUserStoreOwnersRequiresSystem proves a domain admin cannot read or write a
-// user's store-owner list through the system-scoped endpoints, granting full mailbox
-// access is a system-administrator privilege.
+// TestAdminUserStoreOwnersRequiresSystem proves a domain admin cannot read or write the
+// store-owner list of a user outside its scope through the user-scoped API, and cannot
+// use the panel form, which is system-only. The owner is in the caller's own domain,
+// so only the target user's scope refuses the API write.
 func TestAdminUserStoreOwnersRequiresSystem(t *testing.T) {
-	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}}}
-	ts := adminServer(t, d)
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		domains: []directory.DomainInfo{{ID: 1, Name: "acme.test"}, {ID: 2, Name: "hermex.test"}},
+		knownUsers: map[string]directory.UserDetail{
+			"alice@hermex.test": {Username: "alice@hermex.test", DomainID: 2, Maildir: "/mb/alice"},
+			"bob@acme.test":     {Username: "bob@acme.test", DomainID: 1, Maildir: "/mb/bob"},
+		}}
+	store := &fakeStore{}
+	ts := adminServerStore(t, d, store)
 	session, csrf := loginCookies(t, ts)
 
 	get := authedGET(t, ts, "/admin/users/alice@hermex.test/storeowners", session)
 	get.Body.Close()
-	put := authedPUT(t, ts, "/admin/users/alice@hermex.test/storeowners", session, csrf, `["x@y.test"]`)
+	put := authedPUT(t, ts, "/admin/users/alice@hermex.test/storeowners", session, csrf, `["bob@acme.test"]`)
 	put.Body.Close()
 	if get.StatusCode != http.StatusForbidden || put.StatusCode != http.StatusForbidden {
-		t.Errorf("domain-admin store-owners = GET %d / PUT %d, want both 403", get.StatusCode, put.StatusCode)
+		t.Errorf("out-of-scope store-owners = GET %d / PUT %d, want both 403", get.StatusCode, put.StatusCode)
+	}
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/storeowners", session, csrf,
+		url.Values{"storeowners": {"bob@acme.test"}}), http.StatusForbidden, "domain-admin UI store-owners")
+	if store.setStoreOwnersDir != "" {
+		t.Errorf("a refused caller stored owners on %q: %v", store.setStoreOwnersDir, store.setStoreOwnersVal)
 	}
 }
 
