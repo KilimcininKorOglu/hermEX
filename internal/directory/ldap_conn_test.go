@@ -150,6 +150,23 @@ func TestLDAPDomainBindsOnce(t *testing.T) {
 	wantEq(t, "the moved binding's URI", cfg.URI, "ldaps://two.test")
 }
 
+// TestLDAPBindingRefusesMissingTargets binds a connection id and a domain id that
+// do not exist. Both ids come from the panel form, so a forged one must be refused
+// rather than stored as a binding that points at nothing.
+func TestLDAPBindingRefusesMissingTargets(t *testing.T) {
+	d, db := freshDirectory(t)
+	domID := mustCreateDomain(t, d, t.TempDir(), "ghost.test")
+	cID, err := d.CreateLDAPConnection(LDAPConnection{Name: "g", URI: "ldaps://g.test"})
+	mustNoErr(t, "create the connection", err)
+	if _, err := d.CreateLDAPBinding(LDAPBinding{ConnectionID: cID + 999, DomainID: domID}); err == nil {
+		t.Error("a binding to a missing connection was accepted")
+	}
+	if _, err := d.CreateLDAPBinding(LDAPBinding{ConnectionID: cID, DomainID: domID + 999}); err == nil {
+		t.Error("a binding to a missing domain was accepted")
+	}
+	wantRows(t, db, "bindings stored", 0, `SELECT COUNT(*) FROM ldap_bindings`)
+}
+
 // TestPurgeDomainRemovesLDAPBinding proves purging a domain drops its binding.
 func TestPurgeDomainRemovesLDAPBinding(t *testing.T) {
 	d, db := freshDirectory(t)
