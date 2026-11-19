@@ -79,9 +79,14 @@ func (r *Resolver) Lookup(domain string) (*Policy, error) {
 	if err != nil {
 		return nil, err
 	}
-	r.store(domain, p, now().Add(time.Duration(p.MaxAge)*time.Second))
+	r.store(domain, p, now().Add(time.Duration(min(p.MaxAge, maxPolicyAge))*time.Second))
 	return p, nil
 }
+
+// maxPolicyAge is the largest max_age RFC 8461 3.2 allows, in seconds. A larger
+// value is cached for this long, so a domain that relaxes its policy is seen
+// within a year and the conversion to a Duration cannot overflow.
+const maxPolicyAge = 31557600
 
 func (r *Resolver) cached(domain string, now time.Time) (cacheEntry, bool) {
 	r.mu.Lock()
