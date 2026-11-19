@@ -112,6 +112,28 @@ func TestUIDeleteMList(t *testing.T) {
 	}
 }
 
+// TestUIMListWritesNeedASystemAdmin proves a domain admin can neither create,
+// change nor delete a distribution list through the panel forms, and none of
+// those writes reaches the directory.
+func TestUIMListWritesNeedASystemAdmin(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, perms: []directory.Permission{{Name: directory.PermDomainAdmin, Params: "*"}},
+		mlists: []directory.MListInfo{{Listname: "team@hermex.test"}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	base := "/admin/ui/mlists/team@hermex.test"
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/mlists", session, csrf,
+		url.Values{"listname": {"x@hermex.test"}, "type": {"0"}, "privilege": {"0"}}), http.StatusForbidden, "create")
+	wantStatus(t, htmxPUT(t, ts, base+"/members", session, csrf, url.Values{"members": {"e@evil.test"}}), http.StatusForbidden, "members")
+	wantStatus(t, htmxPUT(t, ts, base+"/specifieds", session, csrf, url.Values{"specifieds": {"e@evil.test"}}), http.StatusForbidden, "specifieds")
+	wantStatus(t, htmxPUT(t, ts, base+"/owner", session, csrf, url.Values{"owner": {"e@evil.test"}}), http.StatusForbidden, "owner")
+	wantStatus(t, htmxPOST(t, ts, base+"/delete", session, csrf, url.Values{}), http.StatusForbidden, "delete")
+	if d.createdMList != "" || d.setMembersUser != "" || d.setOwnerUser != "" || d.deletedMList != "" {
+		t.Errorf("a domain admin changed lists: created %q, members %q, owner %q, deleted %q",
+			d.createdMList, d.setMembersUser, d.setOwnerUser, d.deletedMList)
+	}
+}
+
 // TestUIMListDetailRenders proves the detail page renders the list with its
 // privilege label and current members (and catches template syntax errors).
 func TestUIMListDetailRenders(t *testing.T) {
