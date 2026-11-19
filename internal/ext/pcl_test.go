@@ -32,6 +32,23 @@ func TestPCLRoundTrip(t *testing.T) {
 	}
 }
 
+// TestPCLRefusesMalformedEntries feeds the client-supplied predecessor change
+// list of an ICS upload a size byte outside the XID range ([MS-OXCDATA] 2.2.2.3:
+// 16-byte GUID plus a 1 to 8 byte LocalId, so 17 to 24) and an entry cut short.
+// Each must be refused rather than read as a shorter or longer XID.
+func TestPCLRefusesMalformedEntries(t *testing.T) {
+	body := make([]byte, 25)
+	for name, buf := range map[string][]byte{
+		"size 16 (no LocalId)":  append([]byte{16}, body[:16]...),
+		"size 25 (LocalId > 8)": append([]byte{25}, body...),
+		"truncated entry":       append([]byte{20}, body[:10]...),
+	} {
+		if _, err := NewPull(buf, 0).PCL(); err == nil {
+			t.Errorf("%s: a malformed PCL entry was accepted", name)
+		}
+	}
+}
+
 func TestPCLEmpty(t *testing.T) {
 	p := NewPush(0)
 	if err := p.PCL(nil); err != nil {
