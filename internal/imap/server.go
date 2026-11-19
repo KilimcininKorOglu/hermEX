@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"sync/atomic"
@@ -186,10 +187,7 @@ func (s *Server) Shutdown(ctx context.Context) error { return s.conns.Shutdown(c
 
 func (s *Server) handle(nc net.Conn) {
 	c := &conn{srv: s, bw: bufio.NewWriter(nc), state: stateNotAuth, nc: nc}
-	c.rd = &commandReader{
-		br: bufio.NewReader(nc), bw: c.bw,
-		maxLiteral: &c.srv.maxLiteral, maxLine: &c.srv.maxCommandLine,
-	}
+	c.resetReader(nc)
 	if _, ok := nc.(*tls.Conn); ok {
 		c.isTLS = true
 	}
@@ -304,9 +302,19 @@ func (c *conn) cmdCompress(tag string, args []token) {
 	}
 	c.fw = fw
 	c.bw = bufio.NewWriter(fw)
-	fr := flate.NewReader(c.rd.br)
-	c.rd = &commandReader{br: bufio.NewReader(fr), bw: c.bw, maxLiteral: &c.srv.maxLiteral}
+	c.resetReader(flate.NewReader(c.rd.br))
 	c.compressed = true
+}
+
+// resetReader builds the command reader over src, the connection's current
+// inbound stream, carrying the server's live literal and line caps. STARTTLS and
+// COMPRESS replace the stream mid-session, and a reader built without the caps
+// would fall back to the built-in defaults and ignore the operator's settings.
+func (c *conn) resetReader(src io.Reader) {
+	c.rd = &commandReader{
+		br: bufio.NewReader(src), bw: c.bw,
+		maxLiteral: &c.srv.maxLiteral, maxLine: &c.srv.maxCommandLine,
+	}
 }
 
 // dispatch routes one lexed command to its handler.
@@ -618,7 +626,7 @@ func (c *conn) cmdStartTLS(tag string) {
 	}
 	c.nc = tc
 	c.bw = bufio.NewWriter(tc)
-	c.rd = &commandReader{br: bufio.NewReader(tc), bw: c.bw, maxLiteral: &c.srv.maxLiteral}
+	c.resetReader(tc)
 	c.isTLS = true
 	c.event(logging.LevelInfo, "starttls", nil)
 }

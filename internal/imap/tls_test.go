@@ -2,8 +2,10 @@ package imap
 
 import (
 	"bufio"
+	"compress/flate"
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -119,6 +121,85 @@ func TestStartTLSUpgrade(t *testing.T) {
 		t.Errorf("STARTTLS still advertised after TLS: %v", un)
 	}
 	tc.mustOK("a4", "LOGOUT")
+}
+
+// TestLineCapSurvivesStartTLSAndCompress sets the operator's command-line cap to
+// 128 bytes, then switches the connection to TLS (RFC 3501 6.2.1) and to DEFLATE
+// (RFC 4978). Both rebuild the command reader over the new stream; the cap must
+// carry over, so a 500-byte line is still refused with an untagged BAD.
+func TestLineCapSurvivesStartTLSAndCompress(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alice")
+	seedOneMessage(t, path)
+	certPath, keyPath, err := tlstest.SelfSigned(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tlsCfg, err := (&config.Config{TLSCert: certPath, TLSKey: keyPath}).TLSConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	srv := &Server{Auth: directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}, Hostname: "mail.test", TLSConfig: tlsCfg}
+	srv.SetMaxCommandLine(128)
+	go func() { _ = srv.Serve(ln) }()
+
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	c := &testClient{t: t, conn: conn, br: bufio.NewReader(conn)}
+	c.expectUntagged("OK", "greeting")
+	c.mustOK("a1", "STARTTLS")
+	tconn := tls.Client(conn, &tls.Config{RootCAs: certPool(t, certPath), ServerName: "127.0.0.1"})
+	if err := tconn.Handshake(); err != nil {
+		t.Fatalf("client handshake: %v", err)
+	}
+	tc := &testClient{t: t, conn: tconn, br: bufio.NewReader(tconn)}
+	wantLongLineRefused(t, tconn, tc.br, "after STARTTLS")
+
+	tc.mustOK("a2", "LOGIN alice secret")
+	_, _ = fmt.Fprintf(tconn, "a3 COMPRESS DEFLATE\r\n")
+	if _, status := tc.collect("a3"); status != "OK" {
+		t.Fatalf("COMPRESS status = %s, want OK", status)
+	}
+	fw, err := flate.NewWriter(tconn, flate.DefaultCompression)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantLongLineRefused(t, flushingWriter{fw}, bufio.NewReader(flate.NewReader(tc.br)), "after COMPRESS")
+}
+
+// flushingWriter flushes a DEFLATE writer after every write, so each command
+// reaches the server whole.
+type flushingWriter struct{ fw *flate.Writer }
+
+func (w flushingWriter) Write(p []byte) (int, error) {
+	n, err := w.fw.Write(p)
+	if err != nil {
+		return n, err
+	}
+	return n, w.fw.Flush()
+}
+
+// wantLongLineRefused sends a 500-byte command and expects the untagged BAD the
+// line cap answers with.
+func wantLongLineRefused(t *testing.T, w io.Writer, br *bufio.Reader, when string) {
+	t.Helper()
+	if _, err := w.Write([]byte("z NOOP " + strings.Repeat("x", 500) + "\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	line, err := br.ReadString('\n')
+	if err != nil {
+		t.Fatalf("%s: read: %v", when, err)
+	}
+	if !strings.HasPrefix(line, "* BAD") {
+		t.Errorf("%s: a 500-byte line against a 128-byte cap answered %q, want an untagged BAD", when, line)
+	}
 }
 
 // TestStartTLSRejectsPipelinedInjection proves a command pipelined behind
