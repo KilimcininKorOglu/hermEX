@@ -53,7 +53,7 @@ func Parse(txt string) (*Policy, error) {
 			continue
 		}
 		for uri := range strings.SplitSeq(val, ",") {
-			uri = strings.TrimSpace(uri)
+			uri = lowerScheme(strings.TrimSpace(uri))
 			if !validURI(uri) {
 				return nil, fmt.Errorf("tlsrpt: unsupported report URI %q", uri)
 			}
@@ -64,6 +64,17 @@ func Parse(txt string) (*Policy, error) {
 		return nil, errors.New("tlsrpt: record has no usable rua= report URI")
 	}
 	return &Policy{RUAs: ruas}, nil
+}
+
+// lowerScheme returns uri with its scheme in lowercase. A scheme is
+// case-insensitive and lowercase is its canonical form (RFC 3986 3.1), so
+// "MAILTO:" names the same target as "mailto:"; the rest of the URI is kept.
+func lowerScheme(uri string) string {
+	scheme, rest, ok := strings.Cut(uri, ":")
+	if !ok {
+		return uri
+	}
+	return strings.ToLower(scheme) + ":" + rest
 }
 
 // validURI reports whether a rua target is a scheme this package can deliver to:

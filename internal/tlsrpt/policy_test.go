@@ -19,6 +19,9 @@ func TestParseValid(t *testing.T) {
 		{"https", "v=TLSRPTv1; rua=https://reporting.example.com/v1/tlsrpt", []string{"https://reporting.example.com/v1/tlsrpt"}},
 		{"two URIs", "v=TLSRPTv1; rua=mailto:a@example.com,https://r.example.com/x", []string{"mailto:a@example.com", "https://r.example.com/x"}},
 		{"extension ignored", "v=TLSRPTv1; rua=mailto:a@example.com; ext=value", []string{"mailto:a@example.com"}},
+		// RFC 3986 3.1: a scheme is case-insensitive, and the canonical form is
+		// lowercase. The rest of the URI keeps its case.
+		{"uppercase schemes", "v=TLSRPTv1; rua=MAILTO:A@example.com,HTTPS://r.example.com/X", []string{"mailto:A@example.com", "https://r.example.com/X"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
