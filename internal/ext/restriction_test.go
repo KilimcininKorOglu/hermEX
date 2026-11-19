@@ -54,6 +54,60 @@ func TestRestrictionPropertyVector(t *testing.T) {
 	roundTripRestriction(t, 0, r)
 }
 
+// TestRestrictionLeafVectors pins each leaf's wire layout to [MS-OXCDATA] 2.12:
+// RestrictType values (Content 0x03, CompareProps 0x05, Bitmask 0x06, Size 0x07,
+// Exist 0x08, SubObject 0x09, Comment 0x0A, Count 0x0B), the field order and
+// widths of each structure, RelOp (GE 0x03, NE 0x05) and BMR_NEZ 0x01. A
+// round-trip alone accepts an encoder and decoder that agree on a wrong layout.
+// The values are asymmetric so a swapped field or byte order shows.
+func TestRestrictionLeafVectors(t *testing.T) {
+	tagA := mapi.MakeTag(0x3001, mapi.PtLong) // 03 00 01 30
+	tagB := mapi.MakeTag(0x3002, mapi.PtLong) // 03 00 02 30
+	exist := mapi.Restriction{Type: mapi.ResExist, Value: mapi.ExistRestriction{PropTag: tagA}}
+	existBytes := []byte{0x08, 0x03, 0x00, 0x01, 0x30}
+	cases := []struct {
+		name string
+		r    mapi.Restriction
+		want []byte
+	}{
+		// FuzzyLevelLow FL_PREFIX (0x0002), then FuzzyLevelHigh FL_IGNORECASE (0x0001).
+		{"content", mapi.Restriction{Type: mapi.ResContent, Value: mapi.ContentRestriction{
+			FuzzyLevel: 0x00010002, PropTag: tagA, PropVal: mapi.TaggedPropVal{Tag: tagA, Value: int32(7)},
+		}}, []byte{0x03, 0x02, 0x00, 0x01, 0x00, 0x03, 0x00, 0x01, 0x30, 0x03, 0x00, 0x01, 0x30, 0x07, 0x00, 0x00, 0x00}},
+		{"compare", mapi.Restriction{Type: mapi.ResPropCompare, Value: mapi.ComparePropsRestriction{
+			Relop: mapi.RelopNE, PropTag1: tagA, PropTag2: tagB,
+		}}, []byte{0x05, 0x05, 0x03, 0x00, 0x01, 0x30, 0x03, 0x00, 0x02, 0x30}},
+		{"bitmask", mapi.Restriction{Type: mapi.ResBitmask, Value: mapi.BitmaskRestriction{
+			Relop: mapi.BmrNez, PropTag: tagA, Mask: 0x11223344,
+		}}, []byte{0x06, 0x01, 0x03, 0x00, 0x01, 0x30, 0x44, 0x33, 0x22, 0x11}},
+		{"size", mapi.Restriction{Type: mapi.ResSize, Value: mapi.SizeRestriction{
+			Relop: mapi.RelopGE, PropTag: tagA, Size: 0x01020304,
+		}}, []byte{0x07, 0x03, 0x03, 0x00, 0x01, 0x30, 0x04, 0x03, 0x02, 0x01}},
+		{"exist", exist, existBytes},
+		{"subobject", mapi.Restriction{Type: mapi.ResSub, Value: mapi.SubRestriction{SubObject: 0x0E12, Res: exist}},
+			append([]byte{0x09, 0x12, 0x0E, 0x00, 0x00}, existBytes...)},
+		{"count", mapi.Restriction{Type: mapi.ResCount, Value: mapi.CountRestriction{Count: 0x0102, SubRes: exist}},
+			append([]byte{0x0B, 0x02, 0x01, 0x00, 0x00}, existBytes...)},
+		// TaggedValuesCount 1, the value, RestrictionPresent 1, the restriction.
+		{"comment", mapi.Restriction{Type: mapi.ResComment, Value: mapi.CommentRestriction{
+			PropVals: []mapi.TaggedPropVal{{Tag: tagB, Value: int32(9)}}, Res: &exist,
+		}}, append([]byte{0x0A, 0x01, 0x03, 0x00, 0x02, 0x30, 0x09, 0x00, 0x00, 0x00, 0x01}, existBytes...)},
+	}
+	for _, c := range cases {
+		p := NewPush(0)
+		if err := p.Restriction(c.r); err != nil {
+			t.Fatalf("%s push: %v", c.name, err)
+		}
+		if !bytes.Equal(p.Bytes(), c.want) {
+			t.Errorf("%s bytes = % X, want % X", c.name, p.Bytes(), c.want)
+		}
+		got, err := NewPull(c.want, 0).Restriction()
+		if err != nil || !reflect.DeepEqual(got, c.r) {
+			t.Errorf("%s pull of the spec bytes = %#v (err %v), want %#v", c.name, got, err, c.r)
+		}
+	}
+}
+
 func TestRestrictionLeaves(t *testing.T) {
 	tag := mapi.MakeTag(0x3001, mapi.PtLong)
 	roundTripRestriction(t, 0, mapi.Restriction{Type: mapi.ResContent, Value: mapi.ContentRestriction{
