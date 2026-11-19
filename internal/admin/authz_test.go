@@ -273,7 +273,7 @@ func TestReadOnlyAdminReadWriteSplit(t *testing.T) {
 		{"PUT", "/admin/users/u@hermex.test", `{}`},
 		{"DELETE", "/admin/users/u@hermex.test", `{}`},
 		{"POST", "/admin/domains", `{"name":"x.test"}`},
-		{"POST", "/admin/aliases", `{"aliasname":"a@hermex.test","mainname":"u@hermex.test"}`},
+		{"POST", "/admin/aliases", `{"alias":"a@hermex.test","main":"u@hermex.test"}`},
 		{"POST", "/admin/orgs", `{"name":"X"}`},
 		{"PUT", "/admin/orgs/1", `{"name":"Y"}`},
 		{"DELETE", "/admin/orgs/1", ``},
@@ -293,6 +293,9 @@ func TestReadOnlyAdminReadWriteSplit(t *testing.T) {
 		if resp.StatusCode != http.StatusForbidden {
 			t.Errorf("mutation %s %s: read-only admin got %d, want 403", m.method, m.path, resp.StatusCode)
 		}
+	}
+	if d.createdAlias != "" {
+		t.Errorf("a read-only admin created alias %q", d.createdAlias)
 	}
 }
 
