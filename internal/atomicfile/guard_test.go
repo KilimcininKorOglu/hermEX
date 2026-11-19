@@ -22,6 +22,7 @@ var allowedDirectWrites = map[string]string{
 	"internal/atomicfile/atomicfile.go": "the helper itself",
 	"internal/objectstore/lock.go":      "opens the advisory lock file, whose content is never read",
 	"internal/objectstore/integrity.go": "opens the advisory lock file, whose content is never read",
+	"internal/initlock/initlock.go":     "opens the advisory lock file, whose content is never read",
 	"internal/logging/spill.go":         "an append-only log; a torn tail line is skipped on replay",
 	"internal/objectstore/recover.go":   "moves the damaged database aside; the rebuilt one goes through SyncRename",
 	"internal/tlstest/tlstest.go":       "test-support certificates in a test's own temporary directory",

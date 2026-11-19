@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"hermex/internal/atomicfile"
+	"hermex/internal/initlock"
 	"hermex/internal/logging"
 	"hermex/internal/migrate"
 
@@ -128,15 +129,21 @@ func dsn(path string) string {
 }
 
 // Open opens the relay spool at path, creating and initializing it if absent.
-func Open(path string) (*Spool, error) {
+// Every daemon opens the spool at startup, so on a fresh install several create
+// it at once; initlock serializes that.
+func Open(path string) (s *Spool, err error) {
+	unlock, err := initlock.Take(path + ".init-lock")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { err = errors.Join(err, unlock()) }()
 	db, err := sql.Open("sqlite", dsn(path))
 	if err != nil {
 		return nil, err
 	}
-	s := &Spool{db: db}
+	s = &Spool{db: db}
 	if err := s.ensureSchema(); err != nil {
-		_ = db.Close()
-		return nil, err
+		return nil, errors.Join(err, db.Close())
 	}
 	return s, nil
 }

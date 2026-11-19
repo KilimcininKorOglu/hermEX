@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"hermex/internal/initlock"
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/migrate"
@@ -306,6 +307,25 @@ func openKind(dir string, seedBuiltins bool, kind storeKind) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Two deliveries can open a fresh mailbox at once; initlock serializes the
+	// first connections and the schema run so neither sees a half-built file.
+	release, err := initlock.Take(filepath.Join(dir, ".init.lock"))
+	if err != nil {
+		return nil, errors.Join(err, lock.Close())
+	}
+	s, err := openDatabases(dir, lock, seedBuiltins, kind)
+	if rerr := release(); rerr != nil {
+		if s != nil {
+			rerr = errors.Join(rerr, s.Close())
+		}
+		return nil, errors.Join(err, rerr)
+	}
+	return s, err
+}
+
+// openDatabases opens both databases and brings their schemas current. It runs
+// under the mailbox's initialization lock and owns lock from here on.
+func openDatabases(dir string, lock *os.File, seedBuiltins bool, kind storeKind) (*Store, error) {
 	objdb, err := sql.Open("sqlite", dsn(filepath.Join(dir, "objects.sqlite3")))
 	if err != nil {
 		_ = lock.Close()

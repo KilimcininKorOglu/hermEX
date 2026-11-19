@@ -128,8 +128,15 @@ func TestSQLiteCustomVersionStore(t *testing.T) {
 // TestSQLiteConcurrentRunAppliesOnce proves two processes racing to migrate the
 // same database serialize on the write lock and apply each step exactly once. The
 // step has no IF NOT EXISTS, so a double application surfaces as a run error.
+//
+// The file is created before the race: switching a new file to WAL is a separate
+// race that each opener serializes itself (relay.Open), and it is not what this
+// test measures.
 func TestSQLiteConcurrentRunAppliesOnce(t *testing.T) {
 	db := openSQLite(t)
+	if err := db.Ping(); err != nil {
+		t.Fatal(err)
+	}
 	migs := []Migration{{Version: 1, Steps: []string{`CREATE TABLE once (id INTEGER PRIMARY KEY)`}}}
 
 	var wg sync.WaitGroup
