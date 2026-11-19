@@ -122,33 +122,31 @@ func TestSaveAntispamSettingsRejectsBadCutoffs(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	base := url.Values{
-		"spf_fail": {"5"}, "spf_softfail": {"2"}, "dkim_fail": {"3"}, "dmarc_fail": {"6"},
-		"dnsbl_hit": {"6"}, "bayes_spam": {"4"}, "sa_rules_hit": {"4"},
-		"threshold": {"10"}, "zones": {""},
-	}
-	// Bayes probability above 1 is rejected.
-	bad := cloneValues(base)
-	bad.Set("bayes_prob", "1.5")
-	bad.Set("sa_threshold", "5")
-	resp := htmxPOST(t, ts, "/admin/ui/antispam/settings", session, csrf, bad)
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if !strings.Contains(string(body), "between 0 and 1") {
-		t.Errorf("expected a Bayes-cutoff validation message:\n%s", body)
-	}
-	if d.settingsFound {
-		t.Error("an invalid Bayes cutoff must not be persisted")
+	for _, tc := range []struct{ bayes, sa, want string }{
+		{"1.5", "5", "between 0 and 1"},
+		{"-0.2", "5", "between 0 and 1"},
+		{"0", "5", "between 0 and 1"},
+		{"0.9", "0", "greater than 0"},
+		{"0.9", "-3", "greater than 0"},
+	} {
+		bad := validScoringForm()
+		bad.Set("bayes_prob", tc.bayes)
+		bad.Set("sa_threshold", tc.sa)
+		body := wantBody(t, htmxPOST(t, ts, "/admin/ui/antispam/settings", session, csrf, bad),
+			http.StatusOK, "cutoffs "+tc.bayes+"/"+tc.sa)
+		wantContains(t, body, tc.want, "the refusal of "+tc.bayes+"/"+tc.sa)
+		wantFalse(t, d.settingsFound, "cutoffs "+tc.bayes+"/"+tc.sa+" stored")
 	}
 }
 
-// cloneValues copies a url.Values so a test can vary one field without mutating the base.
-func cloneValues(v url.Values) url.Values {
-	out := url.Values{}
-	for k, vs := range v {
-		out[k] = append([]string(nil), vs...)
+// validScoringForm is a scoring form every field of which is accepted, so a test
+// that changes one field knows the refusal is that field's.
+func validScoringForm() url.Values {
+	return url.Values{
+		"spf_fail": {"5"}, "spf_softfail": {"2"}, "dkim_fail": {"3"}, "dmarc_fail": {"6"},
+		"dnsbl_hit": {"6"}, "bayes_spam": {"4"}, "sa_rules_hit": {"4"},
+		"threshold": {"10"}, "zones": {""}, "bayes_prob": {"0.9"}, "sa_threshold": {"4.5"},
 	}
-	return out
 }
 
 // TestToggleGreylist proves the greylisting toggle persists the new state and
@@ -215,12 +213,10 @@ func TestSaveAntispamSettingsRejectsBadThreshold(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/antispam/settings", session, csrf, url.Values{"threshold": {"0"}})
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if !strings.Contains(string(body), "at least 1") {
-		t.Errorf("expected a threshold validation message:\n%s", body)
-	}
+	form := validScoringForm()
+	form.Set("threshold", "0")
+	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/antispam/settings", session, csrf, form), http.StatusOK, "threshold 0")
+	wantContains(t, body, "Threshold must be at least 1", "the threshold refusal")
 	if d.settingsFound {
 		t.Error("an invalid threshold must not be persisted")
 	}
@@ -521,10 +517,9 @@ func TestRetrainBoundsOneMailboxsShare(t *testing.T) {
 	if err != nil || model == nil {
 		t.Fatalf("model file = (%v, %v), want a trained model", model, err)
 	}
-	// The cap for five mailboxes is 100, so the flooder contributes 100 of the 120
-	// trained messages instead of 400 of 420. The point of the assertion is the cap
-	// itself: the count is bounded by it, not by what one user chose to file.
-	if want := perMailboxCap(len(dirs)) + 20; model.SpamMsgs != want {
+	// The 500-message sample split over five mailboxes caps each at 100, so the
+	// flooder contributes 100 of the 120 trained messages instead of 400 of 420.
+	if want := 120; model.SpamMsgs != want {
 		t.Errorf("spam messages trained = %d, want %d (one mailbox capped)", model.SpamMsgs, want)
 	}
 }
