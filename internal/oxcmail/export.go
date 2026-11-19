@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	stdmime "mime"
 	"mime/multipart"
 	"mime/quotedprintable"
@@ -175,6 +176,18 @@ func renderBody(msg *Message, opt Options) (textproto.MIMEHeader, []byte, error)
 // receiving client renders the text it understands or processes the calendar
 // part; the method on the part's Content-Type must match the METHOD inside the
 // iCalendar, so it is carried through rather than re-parsed.
+// isCalendarMethod reports whether s is an iCalendar METHOD value: an iana-token
+// or x-name (RFC 5545 3.7.2), letters, digits and '-' only. The value goes into a
+// Content-Type parameter unquoted, so anything else could end the header field.
+func isCalendarMethod(s string) bool {
+	for _, r := range s {
+		if r != '-' && (r < '0' || r > '9') && (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') {
+			return false
+		}
+	}
+	return s != ""
+}
+
 func renderCalendarAlternative(plain string, html []byte, hasHTML bool, htmlCset string, ical []byte, method string) (textproto.MIMEHeader, []byte, error) {
 	var parts bytes.Buffer
 	mw := multipart.NewWriter(&parts)
@@ -188,6 +201,9 @@ func renderCalendarAlternative(plain string, html []byte, hasHTML bool, htmlCset
 	}
 	ct := "text/calendar; charset=utf-8"
 	if method != "" {
+		if !isCalendarMethod(method) {
+			return nil, nil, fmt.Errorf("oxcmail: calendar method %q is not an iCalendar token", method)
+		}
 		ct += "; method=" + method
 	}
 	if err := writeAlternativePart(mw, ct, ical); err != nil {

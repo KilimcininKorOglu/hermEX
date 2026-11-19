@@ -36,6 +36,30 @@ func TestMessageCarriesTheSchedulingPart(t *testing.T) {
 	}
 }
 
+// TestHostileSubjectAndMethodAddNoHeader feeds a subject and a method carrying a
+// CRLF and a forged header. The subject comes from a meeting's SUMMARY, which an
+// invitation from outside sets. RFC 5322 2.2 ends a header field at CRLF, so an
+// unencoded line break would let the sender add a Bcc to the outgoing mail; the
+// rendered head must hold no such field and the method must not leave its
+// Content-Type parameter.
+func TestHostileSubjectAndMethodAddNoHeader(t *testing.T) {
+	raw, err := Message(Mail{
+		From:     "alice@hermex.test",
+		To:       []string{"bob@hermex.test"},
+		Subject:  "Sync\r\nBcc: eve@evil.test",
+		Calendar: []byte("BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nEND:VCALENDAR\r\n"),
+		Method:   "REQUEST\r\nX-Injected: 1",
+	})
+	if err != nil {
+		return // refusing the message is also safe
+	}
+	for line := range strings.SplitSeq(string(raw), "\r\n") {
+		if strings.HasPrefix(strings.ToLower(line), "bcc:") || strings.HasPrefix(line, "X-Injected:") {
+			t.Errorf("a hostile value added its own line: %q", line)
+		}
+	}
+}
+
 // TestOnBehalfMessageNamesBothIdentities proves a delegate's scheduling message
 // carries the originator in From and the delegate in Sender.
 func TestOnBehalfMessageNamesBothIdentities(t *testing.T) {
