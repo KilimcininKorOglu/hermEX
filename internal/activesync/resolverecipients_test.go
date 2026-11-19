@@ -205,6 +205,14 @@ func TestResolveRecipientsRefusesABadCap(t *testing.T) {
 		if s := root.ChildText(wbxml.RRStatus); s != "5" {
 			t.Errorf("MaxAmbiguousRecipients %q: Status = %q, want 5", v, s)
 		}
+		if responseFor(root, "alice") != nil {
+			t.Errorf("MaxAmbiguousRecipients %q: a Response was served", v)
+		}
+	}
+	// 9999 is the top of the range, so it is served.
+	_, root := postCommand(t, ts, "ResolveRecipients", resolveReqMax("alice", "9999"))
+	if r := responseFor(root, "alice"); r == nil || r.ChildText(wbxml.RRStatus) != "1" {
+		t.Errorf("MaxAmbiguousRecipients 9999: overall Status %q, want the query resolved", root.ChildText(wbxml.RRStatus))
 	}
 }
 
