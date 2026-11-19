@@ -182,6 +182,27 @@ func TestDMARCReportExternalDestination(t *testing.T) {
 	}
 }
 
+// TestDMARCReportDestinationDomainIsAfterTheLastAt proves the authorization record
+// is looked up for the domain after the last '@' of the destination. A local part
+// may hold an '@' (here percent-encoded, RFC 6068), and the domain before the last
+// one is not where the report goes.
+func TestDMARCReportDestinationDomainIsAfterTheLastAt(t *testing.T) {
+	sp := openSpool(t)
+	seedDMARC(t, sp)
+	w := dmarcWorker(sp, "v=DMARC1; p=none; rua=mailto:a%40example.test@collector.test")
+	var asked string
+	w.DMARCLookupTXT = func(name string) ([]string, error) { asked = name; return []string{"v=DMARC1"}, nil }
+	if err := w.sendDMARCReports(context.Background(), reportDay); err != nil {
+		t.Fatal(err)
+	}
+	wantEq(t, asked, "example.test._report._dmarc.collector.test", "authorization record name")
+	queued, err := sp.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantEq(t, len(queued), 1, "reports queued")
+}
+
 // TestDMARCReportSameOrganizationSkipsCheck proves a destination in the policy
 // domain's own organization needs no authorization record.
 func TestDMARCReportSameOrganizationSkipsCheck(t *testing.T) {
@@ -260,6 +281,8 @@ func TestParseDMARCURI(t *testing.T) {
 		{"https://example.test/dmarc", "", 0, false},
 		{"mailto:", "", 0, false},
 		{"mailto:nobody", "", 0, false},
+		// The domain follows the last '@', so this names no domain at all.
+		{"mailto:a@example.test@", "", 0, false},
 		{"mailto:a@example.test!k", "", 0, false},
 		{"mailto:a@example.test!-1", "", 0, false},
 		{"mailto:a@example.test!99999999999999999999", "", 0, false},
