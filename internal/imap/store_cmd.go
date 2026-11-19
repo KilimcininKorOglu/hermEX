@@ -329,8 +329,6 @@ func (c *conn) cmdUnselect(tag string) {
 	c.ok(tag, "UNSELECT completed")
 }
 
-// cmdCopy handles COPY and (byUID) UID COPY: it copies the addressed messages
-// into another mailbox, preserving their flags and internal dates.
 // refuseOverQuota answers tag with NO [OVERQUOTA] (RFC 9208 4.3) and reports true
 // when st, the store a command would add messages to, is past its receive quota:
 // once a mailbox is full nothing new may be put in it, from delivery or from a
@@ -348,6 +346,8 @@ func (c *conn) refuseOverQuota(tag string, st *objectstore.Store) bool {
 	return false
 }
 
+// cmdCopy handles COPY and (byUID) UID COPY: it copies the addressed messages
+// into another mailbox, preserving their flags and internal dates.
 func (c *conn) cmdCopy(tag string, args []token, byUID bool) {
 	if c.state != stateSelected {
 		c.no(tag, "no mailbox selected")
