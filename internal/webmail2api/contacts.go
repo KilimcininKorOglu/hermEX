@@ -444,12 +444,21 @@ func saveContactEdit(st *objectstore.Store, rawID string, c contactJSON) (int64,
 	if done {
 		return old, err
 	}
-	// A kind change replaces the contact. The old object may already be gone
-	// (a stale id), and the edit is stored either way, so its delete error is
-	// not the caller's failure.
+	// A kind change replaces the contact. The replacement is written first, so a
+	// failed write leaves the contact as it was. The old object may already be
+	// gone (a stale id), and the edit is stored either way, so its delete error
+	// is not the caller's failure.
+	id, err := writeContact(st, c)
+	if err != nil {
+		return 0, err
+	}
 	_ = st.DeleteObject(old)
-	return storeContact(st, c)
+	return id, nil
 }
+
+// writeContact stores a new contact; a variable only so a test can make the
+// write fail.
+var writeContact = storeContact
 
 func (s *Server) handleDeleteContact(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
