@@ -83,23 +83,31 @@ func TestFolderUpdateReparent(t *testing.T) {
 	}
 }
 
-// TestFolderUpdateDistinguished proves a built-in folder cannot be renamed
-// (Status 3).
+// TestFolderUpdateDistinguished proves no built-in folder can be renamed
+// ([MS-ASCMD] 2.2.3.177.6, Status 3 "the specified folder is a special system
+// folder"), not only the Inbox, and that the refused rename creates no folder
+// under the new name.
 func TestFolderUpdateDistinguished(t *testing.T) {
-	ts, _ := seededServer(t)
-	key := primeHierarchy(t, ts)
-
-	inbox := strconv.FormatInt(int64(mapi.PrivateFIDInbox), 10)
-	_, root := postCommand(t, ts, "FolderUpdate", folderUpdateReq(key, inbox, "0", "MyInbox"))
-	if s := root.ChildText(wbxml.FHStatus); s != "3" {
-		t.Errorf("rename-Inbox Status = %q, want 3 (special folder)", s)
+	ts, dir := seededServer(t)
+	builtins := []int64{
+		mapi.PrivateFIDInbox, mapi.PrivateFIDDraft, mapi.PrivateFIDDeletedItems,
+		mapi.PrivateFIDSentItems, mapi.PrivateFIDOutbox, mapi.PrivateFIDCalendar,
+		mapi.PrivateFIDContacts, mapi.PrivateFIDTasks, mapi.PrivateFIDJunk,
+	}
+	for _, fid := range builtins {
+		id := strconv.FormatInt(fid, 10)
+		_, root := postCommand(t, ts, "FolderUpdate", folderUpdateReq(primeHierarchy(t, ts), id, "0", "Renamed"+id))
+		if s := root.ChildText(wbxml.FHStatus); s != "3" {
+			t.Errorf("FolderUpdate of built-in %s: Status = %q, want 3 (special folder)", id, s)
+		}
+		wantRootFolder(t, dir, "Renamed"+id, false)
 	}
 }
 
 // TestFolderUpdateDuplicate proves renaming a folder to a name already held by a
 // sibling reports Status 2.
 func TestFolderUpdateDuplicate(t *testing.T) {
-	ts, _ := seededServer(t)
+	ts, dir := seededServer(t)
 	key := primeHierarchy(t, ts)
 
 	_, a := postCommand(t, ts, "FolderCreate", folderCreateReq(key, "0", "Alpha"))
@@ -112,6 +120,9 @@ func TestFolderUpdateDuplicate(t *testing.T) {
 	if s := root.ChildText(wbxml.FHStatus); s != "2" {
 		t.Errorf("collision Status = %q, want 2 (name exists)", s)
 	}
+	// Both folders keep their names: the refused rename changed nothing.
+	wantRootFolder(t, dir, "Alpha", true)
+	wantRootFolder(t, dir, "Beta", true)
 }
 
 // TestFolderUpdateBadSyncKey proves a mismatched sync key reports Status 9
@@ -144,11 +155,12 @@ func TestFolderUpdateRefusesHostileTargets(t *testing.T) {
 	inner := c.ChildText(wbxml.FHServerID)
 	key = c.ChildText(wbxml.FHSyncKey)
 
-	for _, tc := range []struct{ id, parent, want string }{
-		{outer, "999999", "5"},
-		{"abc", "0", "4"},
+	for _, tc := range []struct{ id, parent, want, name string }{
+		{outer, "999999", "5", "Moved"},
+		{"abc", "0", "4", "Moved"},
+		{outer, "0", "10", ""}, // an empty DisplayName is a malformed request
 	} {
-		_, root := postCommand(t, ts, "FolderUpdate", folderUpdateReq(key, tc.id, tc.parent, "Moved"))
+		_, root := postCommand(t, ts, "FolderUpdate", folderUpdateReq(key, tc.id, tc.parent, tc.name))
 		wantEq(t, "Status for "+tc.id+" under "+tc.parent, root.ChildText(wbxml.FHStatus), tc.want)
 	}
 	_, root := postCommand(t, ts, "FolderUpdate", folderUpdateReq(key, outer, inner, "Outer"))
