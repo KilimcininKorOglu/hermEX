@@ -41,6 +41,8 @@ func TestRolePermissionValidation(t *testing.T) {
 		{Name: PermOrgAdmin},                         // scoped name without a scope
 		{Name: PermDomainAdmin, Params: "not-an-id"}, // scope is neither * nor a number
 		{Name: PermDomainAdminRO, Params: ""},        // scoped name without a scope
+		{Name: PermDomainAdmin, Params: "0"},         // id 0 names no domain
+		{Name: PermOrgAdmin, Params: "-5"},           // a negative id names no organization
 	}
 	for _, p := range bad {
 		if err := validatePermission(p); err == nil {

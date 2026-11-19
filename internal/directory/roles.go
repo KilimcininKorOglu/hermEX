@@ -77,7 +77,9 @@ func validatePermission(p Permission) error {
 			return fmt.Errorf("directory: permission %q needs a scope", p.Name)
 		}
 		if p.Params != "*" {
-			if _, err := strconv.ParseInt(p.Params, 10, 64); err != nil {
+			// Id 0 or below names no organization or domain, so the grant would
+			// give nothing while the role editor showed it as given.
+			if id, err := strconv.ParseInt(p.Params, 10, 64); err != nil || id < 1 {
 				return fmt.Errorf("directory: permission %q scope %q is not an id or *", p.Name, p.Params)
 			}
 		}
