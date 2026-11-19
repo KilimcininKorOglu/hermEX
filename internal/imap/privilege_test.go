@@ -69,4 +69,10 @@ func TestIMAPPrivilegeDenied(t *testing.T) {
 	if !strings.Contains(resp, "disabled") {
 		t.Errorf("denial response = %q, want it to mention the service is disabled", resp)
 	}
+	// The refusal leaves the session unauthenticated (RFC 3501 6.2.3: a NO to LOGIN
+	// keeps the not-authenticated state), so the mailbox stays out of reach.
+	_, _ = fmt.Fprintf(conn, "b SELECT INBOX\r\n")
+	if resp, _ = br.ReadString('\n'); strings.HasPrefix(resp, "b OK") || strings.HasPrefix(resp, "* ") {
+		t.Errorf("SELECT after the refused LOGIN = %q, want a refusal", resp)
+	}
 }
