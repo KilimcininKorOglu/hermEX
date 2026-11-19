@@ -2,6 +2,7 @@ package mailreport
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -35,5 +36,14 @@ func TestParseTLSKeepsTheParserBounds(t *testing.T) {
 	}
 	if _, err := ParseTLS([]byte("not gzip"), true); err == nil {
 		t.Error("a body labelled gzip that is not gzip parsed")
+	}
+	// One policy with more failure details than the row cap: each detail is a
+	// stored row, so a sender could otherwise write without bound.
+	details := strings.Repeat(`{"result-type":"starttls-not-supported","failed-session-count":1},`, maxRecords)
+	doc := `{"report-id":"x","policies":[{"policy":{"policy-type":"no-policy-found","policy-domain":"hermex.test"},` +
+		`"summary":{"total-successful-session-count":0,"total-failure-session-count":1},` +
+		`"failure-details":[` + strings.TrimSuffix(details, ",") + `]}]}`
+	if _, err := ParseTLS([]byte(doc), false); !errors.Is(err, ErrTooManyRecords) {
+		t.Errorf("too many failure details: err = %v, want ErrTooManyRecords", err)
 	}
 }
