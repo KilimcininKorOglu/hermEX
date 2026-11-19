@@ -259,6 +259,21 @@ func TestIMAPAuthenticatePlain(t *testing.T) {
 	c.mustOK("a2", "SELECT INBOX")
 }
 
+// TestAuthenticatePlainRefusesAnotherAuthorizationIdentity sends alice's valid
+// credentials asking to act as bob. RFC 4616 section 2: the server verifies that
+// the authentication identity may act as the authorization identity, and the
+// authentication fails if not. This server grants no proxy rights, so only an
+// empty authzid or one equal to the authcid may log in.
+func TestAuthenticatePlainRefusesAnotherAuthorizationIdentity(t *testing.T) {
+	c, _ := startServer(t)
+	ir := base64.StdEncoding.EncodeToString([]byte("bob\x00alice\x00secret"))
+	if _, status := c.do("a1", "AUTHENTICATE PLAIN "+ir); status == "OK" {
+		t.Fatal("alice's credentials logged in while asking to act as bob")
+	}
+	ir = base64.StdEncoding.EncodeToString([]byte("alice\x00alice\x00secret"))
+	c.mustOK("a2", "AUTHENTICATE PLAIN "+ir)
+}
+
 func TestIMAPFetch(t *testing.T) {
 	c, _ := startServer(t)
 	c.mustOK("a1", "LOGIN alice secret")

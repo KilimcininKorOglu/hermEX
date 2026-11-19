@@ -23,6 +23,7 @@ import (
 	"hermex/internal/notify"
 	"hermex/internal/objectstore"
 	"hermex/internal/publicfolder"
+	"hermex/internal/sasl"
 )
 
 // capabilities is the untagged CAPABILITY list. LITERAL+ is advertised because
@@ -549,11 +550,7 @@ func decodeSASLPlain(b64 string) (user, pass string, ok bool) {
 	if err != nil {
 		return "", "", false
 	}
-	parts := strings.Split(string(raw), "\x00")
-	if len(parts) != 3 {
-		return "", "", false
-	}
-	return parts[1], parts[2], true
+	return sasl.ParsePlain(string(raw))
 }
 
 // finishAuth validates credentials and, on success, opens the user's store and

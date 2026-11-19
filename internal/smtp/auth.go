@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"hermex/internal/netline"
+	"hermex/internal/sasl"
 )
 
 // Authenticator is an optional Session capability. A session that implements it
@@ -54,12 +55,12 @@ func authPlain(w *ew, tp *textproto.Reader, max int, initial string, auth Authen
 		reply(w, 501, "5.5.2 invalid base64")
 		return
 	}
-	parts := strings.SplitN(string(decoded), "\x00", 3)
-	if len(parts) != 3 {
+	user, pass, ok := sasl.ParsePlain(string(decoded))
+	if !ok {
 		reply(w, 501, "5.5.2 malformed PLAIN response")
 		return
 	}
-	finishAuth(w, auth, parts[1], parts[2])
+	finishAuth(w, auth, user, pass)
 }
 
 // authLogin handles AUTH LOGIN: the server prompts for the base64 username then

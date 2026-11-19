@@ -27,6 +27,7 @@ import (
 	"hermex/internal/mapi"
 	"hermex/internal/netline"
 	"hermex/internal/objectstore"
+	"hermex/internal/sasl"
 )
 
 // Server accepts POP3 connections and serves mailboxes resolved via Auth.
@@ -671,13 +672,13 @@ func (s *Server) authPlain(w *ew, tp *textproto.Reader, conn net.Conn, initial s
 		errLine(w, "[AUTH] invalid base64")
 		return "", nil, false
 	}
-	parts := strings.Split(string(raw), "\x00")
-	if len(parts) != 3 {
+	user, pass, ok := sasl.ParsePlain(string(raw))
+	if !ok {
 		errLine(w, "[AUTH] malformed PLAIN response")
 		return "", nil, false
 	}
-	m, okAuth := s.finishAuth(w, conn, parts[1], parts[2])
-	return parts[1], m, okAuth
+	m, okAuth := s.finishAuth(w, conn, user, pass)
+	return user, m, okAuth
 }
 
 // authLogin handles AUTH LOGIN: the server prompts (base64) for the username then
