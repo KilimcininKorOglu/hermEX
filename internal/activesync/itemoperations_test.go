@@ -178,6 +178,11 @@ func TestItemOperationsEmptyFolderOfObjects(t *testing.T) {
 	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
 	mustNoErr(t, "list the calendar", err)
 	wantEq(t, "appointments left in the emptied calendar", len(objs), 0)
+	// Emptying deletes the way every other client delete does: into Recoverable
+	// Items, where the appointment can still be recovered.
+	dumpster, err := st.ListSoftDeleted(int64(mapi.PrivateFIDCalendar))
+	mustNoErr(t, "list the calendar's dumpster", err)
+	wantEq(t, "appointments recoverable after the calendar was emptied", len(dumpster), 1)
 }
 
 // TestItemOperationsEmptyFolderDeleteSubs confirms the DeleteSubFolders option also

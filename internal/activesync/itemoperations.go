@@ -90,7 +90,7 @@ func deleteFolderItems(st *objectstore.Store, folderID int64) error {
 			return err
 		}
 		for _, o := range objs {
-			if err := st.DeleteObject(o.ID); err != nil {
+			if err := st.SoftDeleteObject(o.ID); err != nil {
 				return err
 			}
 		}
