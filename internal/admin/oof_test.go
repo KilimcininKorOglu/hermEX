@@ -136,8 +136,10 @@ func TestAdminUserOOFNotFound(t *testing.T) {
 // TestAdminUserOOFRequiresSystem proves a domain admin (not a system admin) cannot
 // read or write a user's OOF through the system-scoped endpoints.
 func TestAdminUserOOFRequiresSystem(t *testing.T) {
-	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}}}
-	ts := adminServer(t, d)
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		userDetail: directory.UserDetail{Username: "alice@hermex.test", Maildir: "/mb/alice"}}
+	store := &fakeStore{}
+	ts := adminServerStore(t, d, store)
 	session, csrf := loginCookies(t, ts)
 
 	get := authedGET(t, ts, "/admin/users/alice@hermex.test/oof", session)
@@ -146,6 +148,11 @@ func TestAdminUserOOFRequiresSystem(t *testing.T) {
 	put.Body.Close()
 	if get.StatusCode != http.StatusForbidden || put.StatusCode != http.StatusForbidden {
 		t.Errorf("domain-admin oof = GET %d / PUT %d, want both 403", get.StatusCode, put.StatusCode)
+	}
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/oof", session, csrf,
+		url.Values{"enabled": {"on"}, "internalsubject": {"x"}}), http.StatusForbidden, "domain-admin UI oof")
+	if store.setDir != "" {
+		t.Errorf("a domain admin wrote OOF settings to %q", store.setDir)
 	}
 }
 
@@ -198,8 +205,12 @@ func TestUIUserOOF(t *testing.T) {
 	}
 	got := store.setOOF
 	if !got.Enabled || got.InternalSubject != "Away" || !got.ExternalEnabled || got.ExternalSubject != "OOO" ||
-		got.ExternalAudience != objectstore.OOFExternalKnown || got.Start == 0 {
+		got.ExternalAudience != objectstore.OOFExternalKnown {
 		t.Errorf("stored oof = %+v, want the submitted form settings", got)
+	}
+	// The operator has no stored zone, so the wall clock entered is UTC.
+	if want := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC).Unix(); got.Start != want || got.End != 0 {
+		t.Errorf("stored window = [%d, %d], want [%d, 0]", got.Start, got.End, want)
 	}
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "Saved") {
