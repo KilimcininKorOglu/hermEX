@@ -120,8 +120,13 @@ func TestHoldForSyncTimesOut(t *testing.T) {
 	st2.Close()
 
 	collections := hangingSyncReq("2", "60").Child(wbxml.ASCollections)
+	start := time.Now()
 	if srv.holdForSync(context.Background(), dir, dev, collections, 300*time.Millisecond) {
 		t.Error("holdForSync returned true on a quiet mailbox; want false (timeout → empty response)")
+	}
+	// A false that came back at once would be no hold at all.
+	if waited := time.Since(start); waited < 300*time.Millisecond {
+		t.Errorf("holdForSync returned after %v, before its 300ms deadline", waited)
 	}
 }
 
@@ -161,6 +166,28 @@ func TestSyncHoldOutOfRange(t *testing.T) {
 		}
 		if lim := root.ChildText(wbxml.ASLimit); lim != tc.limit {
 			t.Errorf("heartbeat %s: Limit = %q, want %s", tc.heartbeat, lim, tc.limit)
+		}
+	}
+}
+
+// TestSyncHoldAcceptsTheRangeEdges proves 60 and 3540, the ends of the
+// [MS-ASCMD] HeartbeatInterval range, are accepted: the request is held, not
+// refused at once with Status 14.
+func TestSyncHoldAcceptsTheRangeEdges(t *testing.T) {
+	for _, hb := range []string{"60", "3540"} {
+		ts, _ := seededServer(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel) // ends the held request before the server's Close waits for it
+		reply := make(chan *wbxml.Node, 1)
+		go func() {
+			if _, root, err := postCommandErr(ctx, ts, "Sync", hangingSyncReq("1", hb)); err == nil {
+				reply <- root
+			}
+		}()
+		select {
+		case root := <-reply:
+			t.Errorf("heartbeat %s answered at once (Status %q), want it held", hb, root.ChildText(wbxml.ASStatus))
+		case <-time.After(time.Second):
 		}
 	}
 }
