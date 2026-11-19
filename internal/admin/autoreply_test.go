@@ -56,6 +56,20 @@ func TestTheSettingsPageOffersTheAutoReplyPrefix(t *testing.T) {
 	}
 }
 
+// TestADomainAdminCannotSetTheAutoReplyPrefix keeps the server-wide prefix, which
+// every mailbox's reply carries, out of reach of an administrator of one domain.
+func TestADomainAdminCannotSetTheAutoReplyPrefix(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, perms: []directory.Permission{{Name: directory.PermDomainAdmin, Params: "*"}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	if code := saveAutoReplyPrefix(t, ts, session, csrf, "Hijacked"); code != http.StatusForbidden {
+		t.Errorf("save = %d, want 403", code)
+	}
+	if d.autoReplyFound {
+		t.Errorf("a domain admin stored %+v", d.autoReply)
+	}
+}
+
 // TestAnEmptyPrefixRestoresTheDefault keeps an operator who clears the field
 // from sending every reply with no subject at all.
 func TestAnEmptyPrefixRestoresTheDefault(t *testing.T) {
