@@ -34,6 +34,21 @@ func TestUICreateMList(t *testing.T) {
 	}
 }
 
+// TestUICreateMListNeverReadsATypoAsAnOpenList forges a type and a privilege that are
+// not numbers. Read as 0 they created an ordinary list anyone may post to; they must
+// reach the directory as the refused -1.
+func TestUICreateMListNeverReadsATypoAsAnOpenList(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	htmxPOST(t, ts, "/admin/ui/mlists", session, csrf,
+		url.Values{"listname": {"team@hermex.test"}, "type": {"x"}, "privilege": {"internal"}}).Body.Close()
+	if d.createdMListType != -1 || d.createdMListPriv != -1 {
+		t.Errorf("forged type/privilege reached the directory as %d/%d, want -1/-1", d.createdMListType, d.createdMListPriv)
+	}
+}
+
 // TestUIMListMembers proves the members textarea is parsed to addresses and
 // written to the directory for the named list.
 func TestUIMListMembers(t *testing.T) {

@@ -232,6 +232,9 @@ func (d *SQLDirectory) CreateMList(listname string, listType, listPriv int) (int
 	if at <= 0 {
 		return 0, errors.New("directory: list name must be an email address")
 	}
+	if err := validListKind(listType, listPriv); err != nil {
+		return 0, err
+	}
 	domain := listname[at+1:]
 	var domainID int64
 	err := d.db.QueryRow(`SELECT id FROM domains WHERE domainname = ?`, domain).Scan(&domainID)
@@ -262,6 +265,19 @@ func (d *SQLDirectory) CreateMList(listname string, listType, listPriv int) (int
 		return 0, err
 	}
 	return id, tx.Commit()
+}
+
+// validListKind refuses a list type outside the two live ones and a privilege
+// outside 0..4. An unknown type expands to no members and an unknown privilege
+// admits no sender, so a list stored with either would silently swallow its mail.
+func validListKind(listType, listPriv int) error {
+	if listType != mlistTypeNormal && listType != mlistTypeDomain {
+		return fmt.Errorf("directory: unknown list type %d", listType)
+	}
+	if listPriv < mlistPrivAll || listPriv > mlistPrivOutgoing {
+		return fmt.Errorf("directory: unknown list privilege %d", listPriv)
+	}
+	return nil
 }
 
 // DeleteMList removes a distribution list. Deleting its users row cascades to the

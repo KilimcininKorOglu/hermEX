@@ -109,6 +109,22 @@ func wantRefuses(t *testing.T, d *SQLDirectory, list, from string, want MListRes
 	wantEq(t, "members returned on a refusal", len(got), 0)
 }
 
+// TestCreateMListRefusesAnUnknownTypeOrPrivilege creates lists with a type outside
+// the two live ones (normal 0, domain 2) and a privilege outside 0..4. Such a list
+// expands to nothing or admits no sender, so its mail would vanish; each create is
+// refused and no list exists afterwards.
+func TestCreateMListRefusesAnUnknownTypeOrPrivilege(t *testing.T) {
+	d := mlistTestDir(t)
+	for _, c := range []struct{ typ, priv int }{{1, mlistPrivAll}, {-1, mlistPrivAll}, {mlistTypeNormal, 5}, {mlistTypeNormal, -1}} {
+		if _, err := d.CreateMList("bad@hermex.test", c.typ, c.priv); err == nil {
+			t.Errorf("type %d privilege %d was accepted", c.typ, c.priv)
+		}
+	}
+	if _, res, err := d.ExpandMList("bad@hermex.test", "x@y.test"); err != nil || res != MListNone {
+		t.Errorf("a refused list exists: result %d err %v", res, err)
+	}
+}
+
 // TestExpandMListTypes pins the two live list types: normal returns its explicit
 // members verbatim (a sub-list member is NOT recursed, that is the caller's job),
 // and domain returns every mailbox user in the list's domain (and only mailbox

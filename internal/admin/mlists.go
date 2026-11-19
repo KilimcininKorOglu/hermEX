@@ -2,7 +2,6 @@ package admin
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 
 	"hermex/internal/directory"
@@ -86,8 +85,9 @@ func (s *Server) handleUICreateMList(w http.ResponseWriter, r *http.Request) {
 	case "":
 		errMsg = "mlists.addressRequired"
 	default:
-		listType, _ := strconv.Atoi(r.PostFormValue("type"))
-		listPriv, _ := strconv.Atoi(r.PostFormValue("privilege"))
+		// A value that is not a number reads as -1, which the directory refuses:
+		// read as 0 it would create an ordinary list anyone may post to.
+		listType, listPriv := formInt(r, "type"), formInt(r, "privilege")
 		if _, err := s.dir.CreateMList(name, listType, listPriv); err != nil {
 			errMsg = s.notice("mlists.createFailed", err)
 		}
