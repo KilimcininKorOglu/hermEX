@@ -143,6 +143,37 @@ func checkShrinks(t *testing.T, name string, in, comp []byte) {
 	}
 }
 
+// TestDecompressHoldsTheDeclaredSize sends streams that end before the size the
+// header declared, and a declared size below zero. The uncompressed size comes
+// from the client's RPC_HEADER_EXT, so a short result must be an error rather than
+// a buffer the caller has to measure, and no declared size may panic.
+func TestDecompressHoldsTheDeclaredSize(t *testing.T) {
+	short := Compress([]byte("Hello, hello, HELLO world!"))
+	cases := map[string]struct {
+		in   []byte
+		size int
+	}{
+		"empty stream, size 10":        {nil, 10},
+		"stream shorter than declared": {short, 4096},
+		"negative size":                {short, -1},
+	}
+	for name, c := range cases {
+		func() {
+			defer func() {
+				if x := recover(); x != nil {
+					t.Errorf("%s: panic: %v", name, x)
+				}
+			}()
+			if got, err := Decompress(c.in, c.size); err == nil {
+				t.Errorf("%s: Decompress = %d bytes, nil error; want ErrCorrupt", name, len(got))
+			}
+		}()
+	}
+	if got, err := Decompress(nil, 0); err != nil || len(got) != 0 {
+		t.Errorf("empty stream, size 0 = %d bytes, %v; want empty and no error", len(got), err)
+	}
+}
+
 // TestDecompressCorrupt confirms malformed streams return ErrCorrupt and never
 // panic or over-read.
 func TestDecompressCorrupt(t *testing.T) {

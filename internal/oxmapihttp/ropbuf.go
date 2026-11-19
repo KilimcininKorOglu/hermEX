@@ -52,10 +52,10 @@ func ropBuffer(in []byte) ([]byte, error) {
 	payload = deobfuscate(payload, flags)
 	if flags&rheFlagCompressed != 0 {
 		dec, derr := lzxpress.Decompress(payload, sizeActual)
-		if derr != nil || len(dec) < sizeActual {
+		if derr != nil {
 			return nil, ErrMalformed
 		}
-		return dec[:sizeActual], nil
+		return dec, nil
 	}
 	if sizeActual > len(payload) {
 		return nil, ErrMalformed

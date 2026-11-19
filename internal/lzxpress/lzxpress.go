@@ -30,8 +30,24 @@ var ErrCorrupt = errors.New("lzxpress: corrupt compressed data")
 
 // Decompress expands a Plain-LZ77 stream into exactly outSize bytes (the
 // uncompressed size the caller knows from the RPC_HEADER_EXT). It returns
-// ErrCorrupt rather than panicking on any malformed input.
+// ErrCorrupt rather than panicking on any malformed input, and for a stream that
+// ends before outSize bytes, because that size is the sender's claim.
 func Decompress(input []byte, outSize int) ([]byte, error) {
+	if outSize < 0 {
+		return nil, ErrCorrupt
+	}
+	out, err := decode(input, outSize)
+	if err != nil {
+		return nil, err
+	}
+	if len(out) != outSize {
+		return nil, ErrCorrupt
+	}
+	return out, nil
+}
+
+// decode expands input until it ends or outSize bytes are produced.
+func decode(input []byte, outSize int) ([]byte, error) {
 	if len(input) == 0 {
 		return nil, nil
 	}
