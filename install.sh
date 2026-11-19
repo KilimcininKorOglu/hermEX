@@ -1,0 +1,639 @@
+#!/usr/bin/env bash
+# hermEX bare-metal installer and updater.
+#
+#   install.sh install --hostname mail.example.com [--version X.Y.Z | --from FILE]
+#   install.sh update  [--version X.Y.Z | --from FILE]
+#   install.sh rollback
+#   install.sh status
+#
+# install  sets up MariaDB, MongoDB and ClamAV from their packages, creates the
+#          hermex system user, the directory database, /etc/hermex/config.json
+#          (only when absent), the systemd units and the firewall rules, then
+#          installs and starts the release.
+# update   backs up the directory database, stops every daemon, switches to the
+#          new release, applies its schema migrations and starts it again.
+# rollback switches back to the release before the last update and restores the
+#          database backup that update took, since the newer release may have
+#          migrated the schema past what the older one accepts.
+# status   prints the installed release and each daemon's health.
+#
+# Releases come from GitHub (linux/amd64 and linux/arm64), verified against the
+# release's SHA256SUMS. --from installs a local archive instead; the SHA256SUMS
+# file must sit next to it.
+#
+# Supported: RHEL, AlmaLinux and Rocky Linux 9 or later; Debian 12 or later;
+# Ubuntu 22.04 or later.
+
+set -Eeuo pipefail
+umask 027
+
+readonly REPO="KilimcininKorOglu/hermEX"
+readonly PREFIX="/opt/hermex"
+readonly ETC="/etc/hermex"
+readonly STATE="/var/lib/hermex"
+readonly CONFIG="${ETC}/config.json"
+readonly SVC_USER="hermex"
+readonly MARIADB_SERIES="11.8"
+readonly MONGODB_SERIES="8.0"
+readonly KEEP_RELEASES=3
+
+# Daemons: name, binary, extra arguments, whether it binds a port below 1024,
+# and its /healthz port on the loopback. The name is the one the daemon reports
+# itself as (config health_addrs key and Live status name).
+readonly DAEMONS=(
+	"mta|hermex-mta||bind|8701"
+	"imap|hermex-imap||bind|8702"
+	"pop3|hermex-pop3||bind|8703"
+	"webmail2|hermex-webmail2|||8704"
+	"dav|hermex-dav|||8705"
+	"activesync|hermex-activesync|||8706"
+	"ews|hermex-ews|||8707"
+	"mapi|hermex-mapi|||8708"
+	"notify|hermex-notify|||8709"
+	"gateway|hermex-gateway||bind|8710"
+	"admin|hermex-admin|serve||8711"
+	"fetchmail|hermex-fetchmail|||8712"
+)
+
+OS_FAMILY="" OS_ID="" OS_CODENAME="" ARCH="" WORK=""
+ARG_HOSTNAME="" ARG_VERSION="" ARG_FROM=""
+
+log() { printf '==> %s\n' "$*"; }
+die() {
+	printf 'install.sh: %s\n' "$*" >&2
+	exit 1
+}
+on_error() { die "failed at line $1: $2"; }
+trap 'on_error "$LINENO" "$BASH_COMMAND"' ERR
+# cleanup must end with status 0: under errtrace a failing EXIT trap command
+# fires the ERR trap and turns a clean run into a reported failure.
+cleanup() {
+	if [[ -n "$WORK" && -d "$WORK" ]]; then rm -rf "$WORK"; fi
+}
+trap cleanup EXIT
+
+# write_file PATH MODE OWNER: writes stdin to PATH atomically (temporary file in
+# the same directory, flushed, then renamed over the target), so a crash never
+# leaves a half-written file.
+write_file() {
+	local path="$1" mode="$2" owner="$3" tmp
+	tmp="$(mktemp "${path}.XXXXXX")"
+	cat >"$tmp"
+	chmod "$mode" "$tmp"
+	chown "$owner" "$tmp"
+	sync "$tmp"
+	mv -f "$tmp" "$path"
+}
+
+require_root() { [[ $EUID -eq 0 ]] || die "run as root"; }
+
+detect_os() {
+	# shellcheck disable=SC1091
+	. /etc/os-release
+	OS_ID="$ID"
+	OS_CODENAME="${VERSION_CODENAME:-}"
+	local major="${VERSION_ID%%.*}"
+	case "$ID" in
+	rhel | almalinux | rocky | centos)
+		OS_FAMILY="rhel"
+		((major >= 9)) || die "$PRETTY_NAME is not supported; 9 or later is required"
+		;;
+	debian)
+		OS_FAMILY="debian"
+		((major >= 12)) || die "$PRETTY_NAME is not supported; Debian 12 or later is required"
+		;;
+	ubuntu)
+		OS_FAMILY="debian"
+		((major >= 22)) || die "$PRETTY_NAME is not supported; Ubuntu 22.04 or later is required"
+		;;
+	*) die "unsupported distribution: $PRETTY_NAME" ;;
+	esac
+	case "$(uname -m)" in
+	x86_64) ARCH="amd64" ;;
+	aarch64 | arm64) ARCH="arm64" ;;
+	*) die "unsupported architecture: $(uname -m)" ;;
+	esac
+}
+
+parse_args() {
+	while (($#)); do
+		case "$1" in
+		--hostname) ARG_HOSTNAME="${2:?--hostname needs a value}" && shift ;;
+		--version) ARG_VERSION="${2:?--version needs a value}" && shift ;;
+		--from) ARG_FROM="${2:?--from needs a value}" && shift ;;
+		*) die "unknown option: $1" ;;
+		esac
+		shift
+	done
+	[[ -z "$ARG_VERSION" || "$ARG_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "--version takes X.Y.Z"
+	[[ -z "$ARG_VERSION" || -z "$ARG_FROM" ]] || die "--version and --from exclude each other"
+}
+
+# ---------------------------------------------------------------- packages ---
+
+install_rhel_packages() {
+	if [[ "$OS_ID" == "rhel" ]]; then
+		dnf -y install "https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm"
+	else
+		dnf -y install epel-release
+	fi
+	dnf -y module enable "mariadb:${MARIADB_SERIES}"
+	write_file "/etc/yum.repos.d/mongodb-org-${MONGODB_SERIES}.repo" 0644 root:root <<EOF
+[mongodb-org-${MONGODB_SERIES}]
+name=MongoDB ${MONGODB_SERIES}
+baseurl=https://repo.mongodb.org/yum/redhat/9/mongodb-org/${MONGODB_SERIES}/\$basearch/
+gpgcheck=1
+enabled=1
+gpgkey=https://pgp.mongodb.com/server-${MONGODB_SERIES}.asc
+EOF
+	dnf -y install mariadb-server mongodb-org clamd clamav-freshclam openssl tar curl policycoreutils
+}
+
+# add_apt_key URL DEST: stores a repository signing key in the binary form apt
+# reads from a signed-by path, whether the source serves it armored or not.
+add_apt_key() {
+	local url="$1" dest="$2" raw
+	raw="$(mktemp)"
+	curl -fsSL "$url" -o "$raw"
+	if grep -q -- '-----BEGIN PGP' "$raw"; then
+		gpg --batch --yes --dearmor -o "$dest" "$raw"
+	else
+		install -m 0644 "$raw" "$dest"
+	fi
+	chmod 0644 "$dest"
+	rm -f "$raw"
+}
+
+install_debian_packages() {
+	export DEBIAN_FRONTEND=noninteractive
+	apt-get update
+	apt-get install -y ca-certificates curl gnupg openssl tar
+	install -d -m 0755 /etc/apt/keyrings
+	add_apt_key "https://mariadb.org/mariadb_release_signing_key.pgp" /etc/apt/keyrings/mariadb-keyring.gpg
+	add_apt_key "https://pgp.mongodb.com/server-${MONGODB_SERIES}.asc" /etc/apt/keyrings/mongodb-${MONGODB_SERIES}.gpg
+	local mongo_component="main"
+	[[ "$OS_ID" == "ubuntu" ]] && mongo_component="multiverse"
+	write_file /etc/apt/sources.list.d/mariadb.list 0644 root:root <<EOF
+deb [signed-by=/etc/apt/keyrings/mariadb-keyring.gpg] https://dlm.mariadb.com/repo/mariadb-server/${MARIADB_SERIES}/repo/${OS_ID} ${OS_CODENAME} main
+EOF
+	write_file /etc/apt/sources.list.d/mongodb-org-${MONGODB_SERIES}.list 0644 root:root <<EOF
+deb [signed-by=/etc/apt/keyrings/mongodb-${MONGODB_SERIES}.gpg] https://repo.mongodb.org/apt/${OS_ID} ${OS_CODENAME}/mongodb-org/${MONGODB_SERIES} ${mongo_component}
+EOF
+	apt-get update
+	apt-get install -y mariadb-server mongodb-org clamav-daemon clamav-freshclam
+}
+
+clamd_socket() {
+	if [[ "$OS_FAMILY" == "rhel" ]]; then
+		echo "/run/clamd.scan/clamd.sock"
+	else
+		echo "/var/run/clamav/clamd.ctl"
+	fi
+}
+
+clamd_unit() {
+	if [[ "$OS_FAMILY" == "rhel" ]]; then echo "clamd@hermex.service"; else echo "clamav-daemon.service"; fi
+}
+
+# setup_clamav fetches the signature database before clamd starts, since clamd
+# refuses to start without one and an unreachable clamd temp-fails inbound mail.
+setup_clamav() {
+	if [[ "$OS_FAMILY" == "rhel" ]]; then
+		write_file /etc/clamd.d/hermex.conf 0644 root:root <<EOF
+# Written by hermEX install.sh: the clamd instance hermEX scans mail with.
+LogSyslog yes
+User clamscan
+LocalSocket $(clamd_socket)
+LocalSocketGroup virusgroup
+LocalSocketMode 660
+DatabaseDirectory /var/lib/clamav
+EOF
+		usermod -aG virusgroup "$SVC_USER"
+		systemd-tmpfiles --create clamd.scan.conf
+	fi
+	log "fetching the ClamAV signature database (first run downloads about 300 MB)"
+	systemctl stop clamav-freshclam.service || true
+	# clamd reads the database as another user, so the files must be world
+	# readable; this script's own umask would make them owner and group only.
+	(umask 022 && freshclam --quiet)
+	find /var/lib/clamav -maxdepth 1 -type f -name '*.c[lv]d' -exec chmod 0644 {} +
+	systemctl enable --now clamav-freshclam.service
+	systemctl enable --now "$(clamd_unit)"
+}
+
+setup_services() {
+	systemctl enable --now mariadb.service
+	systemctl enable --now mongod.service
+}
+
+# ------------------------------------------------------------------ layout ---
+
+create_user() {
+	getent group "$SVC_USER" >/dev/null || groupadd --system "$SVC_USER"
+	getent passwd "$SVC_USER" >/dev/null ||
+		useradd --system --gid "$SVC_USER" --home-dir "$STATE" --no-create-home --shell /usr/sbin/nologin "$SVC_USER"
+}
+
+create_dirs() {
+	install -d -m 0755 -o root -g root "$PREFIX" "$PREFIX/releases"
+	install -d -m 0750 -o root -g "$SVC_USER" "$ETC" "$ETC/tls"
+	install -d -m 0750 -o "$SVC_USER" -g "$SVC_USER" "$STATE" "$STATE/mail" "$STATE/acme" "$STATE/spill"
+	install -d -m 0700 -o root -g root "$STATE/backup"
+}
+
+random_secret() { openssl rand -hex 32; }
+
+# create_database makes the directory database and its account. It runs only
+# with a fresh configuration, which is where the generated password is kept.
+create_database() {
+	local password="$1"
+	mariadb --protocol=socket -u root <<EOF
+CREATE DATABASE IF NOT EXISTS email CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'hermex'@'localhost' IDENTIFIED BY '${password}';
+ALTER USER 'hermex'@'localhost' IDENTIFIED BY '${password}';
+GRANT ALL PRIVILEGES ON email.* TO 'hermex'@'localhost';
+FLUSH PRIVILEGES;
+EOF
+}
+
+# create_internal_cert issues the self-signed certificate every listener starts
+# with, so IMAPS, POP3S, SMTPS, the gateway and the loopback hops between the
+# gateway and its backends all speak TLS from the first start. A certificate the
+# admin panel stores or obtains through ACME replaces it per server name without
+# a restart.
+create_internal_cert() {
+	local host="$1"
+	[[ -s "$ETC/tls/cert.pem" ]] && return 0
+	openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 825 \
+		-subj "/CN=${host}" -addext "subjectAltName=DNS:${host},IP:127.0.0.1" \
+		-keyout "$ETC/tls/key.pem.new" -out "$ETC/tls/cert.pem.new" 2>/dev/null
+	chown root:"$SVC_USER" "$ETC/tls/key.pem.new" "$ETC/tls/cert.pem.new"
+	chmod 0640 "$ETC/tls/key.pem.new" "$ETC/tls/cert.pem.new"
+	mv -f "$ETC/tls/key.pem.new" "$ETC/tls/key.pem"
+	mv -f "$ETC/tls/cert.pem.new" "$ETC/tls/cert.pem"
+}
+
+health_addrs_json() {
+	local entry name port sep=""
+	for entry in "${DAEMONS[@]}"; do
+		IFS='|' read -r name _ _ _ port <<<"$entry"
+		printf '%s\n    "%s": "127.0.0.1:%s"' "$sep" "$name" "$port"
+		sep=","
+	done
+}
+
+# write_config creates config.json once. An existing file is never rewritten:
+# it holds key_secret, and losing it leaves every stored DKIM and TLS private key
+# undecryptable.
+write_config() {
+	local host="$1" db_password
+	if [[ -e "$CONFIG" ]]; then
+		log "keeping the existing $CONFIG"
+		return 0
+	fi
+	db_password="$(random_secret)"
+	create_database "$db_password"
+	write_file "$CONFIG" 0640 root:"$SVC_USER" <<EOF
+{
+  "database_dsn": "hermex:${db_password}@tcp(127.0.0.1:3306)/email?charset=utf8mb4",
+  "data_dir": "${STATE}/mail",
+  "hostname": "${host}",
+  "tls_cert": "${ETC}/tls/cert.pem",
+  "tls_key": "${ETC}/tls/key.pem",
+  "smtp_addr": ":25",
+  "smtps_addr": ":465",
+  "pop3_addr": ":110",
+  "pop3s_addr": ":995",
+  "imap_addr": ":143",
+  "imaps_addr": ":993",
+  "gateway_addr": ":443",
+  "webmail2_addr": "127.0.0.1:8601",
+  "dav_addr": "127.0.0.1:8602",
+  "activesync_addr": "127.0.0.1:8603",
+  "ews_addr": "127.0.0.1:8604",
+  "mapi_addr": "127.0.0.1:8605",
+  "mta_http_addr": "127.0.0.1:8606",
+  "notify_addr": "127.0.0.1:8607",
+  "admin_addr": "127.0.0.1:8608",
+  "gateway_backend_webmail": "https://127.0.0.1:8601",
+  "gateway_backend_dav": "https://127.0.0.1:8602",
+  "gateway_backend_activesync": "https://127.0.0.1:8603",
+  "gateway_backend_ews": "https://127.0.0.1:8604",
+  "gateway_backend_mapi": "https://127.0.0.1:8605",
+  "gateway_backend_mta": "https://127.0.0.1:8606",
+  "notify_url": "https://127.0.0.1:8607",
+  "webmail2_dist": "${PREFIX}/current/webmail2",
+  "acme_storage": "${STATE}/acme",
+  "mongo_uri": "mongodb://127.0.0.1:27017",
+  "log_database": "hermex",
+  "log_spill_dir": "${STATE}/spill",
+  "clamd_addr": "unix://$(clamd_socket)",
+  "health_addrs": {$(health_addrs_json)
+  },
+  "webmail2_secret": "$(random_secret)",
+  "admin_secret": "$(random_secret)",
+  "key_secret": "$(random_secret)",
+  "digest_secret": "$(random_secret)",
+  "notify_secret": "$(random_secret)"
+}
+EOF
+	log "wrote $CONFIG; back it up separately: its key_secret decrypts the stored DKIM and TLS keys"
+}
+
+# ----------------------------------------------------------------- release ---
+
+download() {
+	local url="$1" dest="$2"
+	curl -fsSL --retry 3 --proto '=https' --tlsv1.2 -o "$dest" "$url" || die "download failed: $url"
+}
+
+# fetch_release leaves the verified archive at $WORK/hermex.tar.gz.
+fetch_release() {
+	local asset="hermex-linux-${ARCH}.tar.gz" base
+	WORK="$(mktemp -d "${PREFIX}/.fetch.XXXXXX")"
+	if [[ -n "$ARG_FROM" ]]; then
+		[[ -f "$ARG_FROM" ]] || die "no such archive: $ARG_FROM"
+		cp "$ARG_FROM" "$WORK/$asset"
+		cp "$(dirname "$ARG_FROM")/SHA256SUMS" "$WORK/SHA256SUMS" || die "SHA256SUMS must sit next to $ARG_FROM"
+	else
+		base="https://github.com/${REPO}/releases/latest/download"
+		[[ -n "$ARG_VERSION" ]] && base="https://github.com/${REPO}/releases/download/v${ARG_VERSION}"
+		download "$base/$asset" "$WORK/$asset"
+		download "$base/SHA256SUMS" "$WORK/SHA256SUMS"
+	fi
+	(cd "$WORK" && grep -E "  ${asset}\$" SHA256SUMS | sha256sum -c --status -) ||
+		die "checksum mismatch for $asset; refusing to install it"
+	mv "$WORK/$asset" "$WORK/hermex.tar.gz"
+}
+
+# unpack_release extracts the verified archive next to the other releases and
+# prints its version. It is extracted in place under $PREFIX, never moved in from
+# /tmp, so SELinux labels it like the rest of the tree.
+unpack_release() {
+	local version dest
+	tar -xzf "$WORK/hermex.tar.gz" -C "$WORK"
+	version="$(tr -d '[:space:]' <"$WORK/hermex/VERSION")"
+	[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "the archive carries no valid VERSION"
+	dest="$PREFIX/releases/$version"
+	rm -rf "$dest"
+	mv "$WORK/hermex" "$dest"
+	chown -R root:root "$dest"
+	chmod -R u=rwX,go=rX "$dest"
+	if command -v restorecon >/dev/null; then restorecon -R "$dest"; fi
+	echo "$version"
+}
+
+current_version() { [[ -L "$PREFIX/current" ]] && basename "$(readlink "$PREFIX/current")" || true; }
+
+# activate points $PREFIX/current at a release with an atomic rename, so a
+# daemon never sees a half-switched tree.
+activate() {
+	local version="$1"
+	ln -sfn "$PREFIX/releases/$version" "$PREFIX/.current.new"
+	mv -Tf "$PREFIX/.current.new" "$PREFIX/current"
+}
+
+prune_releases() {
+	local keep current
+	current="$(current_version)"
+	keep="$(cat "$STATE/previous-release" 2>/dev/null || true)"
+	find "$PREFIX/releases" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V | head -n "-${KEEP_RELEASES}" |
+		while read -r v; do
+			[[ "$v" == "$current" || "$v" == "$keep" ]] || rm -rf "${PREFIX:?}/releases/$v"
+		done
+}
+
+# ----------------------------------------------------------------- systemd ---
+
+write_unit() {
+	local name="$1" binary="$2" args="$3" bind="$4" caps=""
+	[[ "$bind" == "bind" ]] && caps=$'AmbientCapabilities=CAP_NET_BIND_SERVICE\nCapabilityBoundingSet=CAP_NET_BIND_SERVICE'
+	[[ "$bind" == "bind" ]] || caps="CapabilityBoundingSet="
+	write_file "/etc/systemd/system/hermex-${name}.service" 0644 root:root <<EOF
+[Unit]
+Description=hermEX ${name}
+PartOf=hermex.target
+After=network-online.target mariadb.service mongod.service $(clamd_unit)
+Wants=network-online.target mariadb.service mongod.service $(clamd_unit)
+
+[Service]
+User=${SVC_USER}
+Group=${SVC_USER}
+ExecStart=${PREFIX}/current/bin/${binary} -config ${CONFIG} ${args}
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+${caps}
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+ReadWritePaths=${STATE}
+
+[Install]
+WantedBy=hermex.target
+EOF
+}
+
+write_units() {
+	local entry name binary args bind
+	for entry in "${DAEMONS[@]}"; do
+		IFS='|' read -r name binary args bind _ <<<"$entry"
+		write_unit "$name" "$binary" "$args" "$bind"
+	done
+	write_file /etc/systemd/system/hermex.target 0644 root:root <<EOF
+[Unit]
+Description=hermEX mail server
+After=network-online.target
+
+[Install]
+WantedBy=multi-user.target
+EOF
+	systemctl daemon-reload
+	systemctl enable hermex.target
+	for entry in "${DAEMONS[@]}"; do
+		IFS='|' read -r name _ <<<"$entry"
+		systemctl enable "hermex-${name}.service"
+	done
+}
+
+stop_all() { systemctl stop hermex.target; }
+start_all() { systemctl start hermex.target; }
+
+# wait_healthy polls every daemon's /healthz for up to 60 seconds and fails with
+# the names of those still down.
+wait_healthy() {
+	local entry name port down deadline=$((SECONDS + 60))
+	while :; do
+		down=""
+		for entry in "${DAEMONS[@]}"; do
+			IFS='|' read -r name _ _ _ port <<<"$entry"
+			curl -fsS --max-time 3 "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1 || down+=" $name"
+		done
+		[[ -z "$down" ]] && return 0
+		((SECONDS < deadline)) || die "not healthy after 60s:${down}; see journalctl -u 'hermex-*'"
+		sleep 2
+	done
+}
+
+admin_cli() { runuser -u "$SVC_USER" -- "$PREFIX/current/bin/hermex-admin" -config "$CONFIG" "$@"; }
+
+register_health_targets() {
+	local entry name port
+	for entry in "${DAEMONS[@]}"; do
+		IFS='|' read -r name _ _ _ port <<<"$entry"
+		admin_cli add-health-target "$name" "http://127.0.0.1:${port}/healthz" >/dev/null
+	done
+}
+
+# ---------------------------------------------------------------- firewall ---
+
+open_firewall() {
+	local services=(smtp smtps imap imaps pop3 pop3s https)
+	if systemctl is-active --quiet firewalld; then
+		local s
+		for s in "${services[@]}"; do firewall-cmd -q --permanent --add-service="$s"; done
+		firewall-cmd -q --reload
+		log "firewalld: opened ${services[*]}"
+	elif command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; then
+		local p
+		for p in 25 465 143 993 110 995 443; do ufw allow "${p}/tcp" >/dev/null; done
+		log "ufw: opened 25 465 143 993 110 995 443/tcp"
+	else
+		log "no active firewalld or ufw; open TCP 25 465 143 993 110 995 443 on your firewall"
+	fi
+}
+
+# ---------------------------------------------------------------- commands ---
+
+backup_database() {
+	local dest
+	dest="$STATE/backup/email-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
+	mariadb-dump --single-transaction --routines --triggers email | gzip >"$dest.tmp"
+	sync "$dest.tmp"
+	mv -f "$dest.tmp" "$dest"
+	echo "$dest"
+}
+
+cmd_install() {
+	local host version
+	host="${ARG_HOSTNAME:-$(hostname -f)}"
+	[[ "$host" == *.* ]] || die "--hostname must be the server's fully qualified name"
+	[[ -L "$PREFIX/current" ]] && die "hermEX is already installed; use update"
+	log "installing hermEX on $host (${OS_ID} ${OS_CODENAME:-} ${ARCH})"
+	if [[ "$OS_FAMILY" == "rhel" ]]; then install_rhel_packages; else install_debian_packages; fi
+	create_user
+	create_dirs
+	setup_services
+	setup_clamav
+	create_internal_cert "$host"
+	write_config "$host"
+	fetch_release
+	version="$(unpack_release)"
+	activate "$version"
+	write_units
+	admin_cli ensure-schema >/dev/null
+	start_all
+	wait_healthy
+	register_health_targets
+	open_firewall
+	log "hermEX $version is running"
+	print_next_steps
+}
+
+print_next_steps() {
+	cat <<EOF
+
+Next steps:
+  1. Create the first domain, mailbox and administrator:
+       $0 admin create-domain example.com
+       $0 admin create-user postmaster@example.com '<password>'
+       $0 admin grant-admin postmaster@example.com system
+  2. Reach the admin panel through an SSH tunnel to 127.0.0.1:8608, set the
+     DNS records it prescribes, and switch TLS to ACME there.
+  3. Back up $CONFIG off this server: without it the stored keys are lost.
+EOF
+}
+
+cmd_update() {
+	local old new dump
+	old="$(current_version)"
+	[[ -n "$old" ]] || die "hermEX is not installed; use install"
+	fetch_release
+	new="$(unpack_release)"
+	if [[ "$new" == "$old" ]]; then
+		log "release $new is already installed"
+		return 0
+	fi
+	dump="$(backup_database)"
+	log "database backed up to $dump"
+	write_units
+	stop_all
+	printf '%s\n%s\n' "$old" "$dump" | write_file "$STATE/previous-release" 0600 root:root
+	activate "$new"
+	admin_cli ensure-schema >/dev/null
+	start_all
+	wait_healthy
+	register_health_targets
+	prune_releases
+	log "updated hermEX $old -> $new"
+}
+
+cmd_rollback() {
+	local previous dump current
+	[[ -s "$STATE/previous-release" ]] || die "no update to roll back"
+	{
+		read -r previous
+		read -r dump
+	} <"$STATE/previous-release"
+	current="$(current_version)"
+	[[ -d "$PREFIX/releases/$previous" ]] || die "release $previous is no longer on disk"
+	[[ -s "$dump" ]] || die "the database backup $dump is missing"
+	log "rolling back $current -> $previous and restoring $dump"
+	stop_all
+	gunzip -c "$dump" | mariadb email
+	activate "$previous"
+	start_all
+	wait_healthy
+	rm -f "$STATE/previous-release"
+	log "rolled back to $previous; mail received since the update is still in the mailboxes"
+}
+
+cmd_status() {
+	local entry name port state
+	echo "release: $(current_version)"
+	for entry in "${DAEMONS[@]}"; do
+		IFS='|' read -r name _ _ _ port <<<"$entry"
+		state="$(systemctl is-active "hermex-${name}.service" || true)"
+		if curl -fsS --max-time 3 "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1; then
+			printf '  %-11s %-8s healthy\n' "$name" "$state"
+		else
+			printf '  %-11s %-8s NOT HEALTHY\n' "$name" "$state"
+		fi
+	done
+}
+
+main() {
+	local command="${1:-}"
+	[[ $# -gt 0 ]] && shift
+	case "$command" in
+	install | update | rollback | status) ;;
+	admin)
+		require_root
+		admin_cli "$@"
+		return
+		;;
+	*) die "usage: $0 install|update|rollback|status|admin [options]" ;;
+	esac
+	require_root
+	parse_args "$@"
+	detect_os
+	"cmd_${command}"
+}
+
+main "$@"

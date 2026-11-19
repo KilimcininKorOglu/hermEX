@@ -61,7 +61,7 @@ RUNFLAG := $(if $(RUN),-run '$(RUN)',)
 # benchmark in PKG.
 BENCH ?= .
 
-.PHONY: all build test test-host test-race bench vet fmt fmt-check gate gate-host lint lint-modernize require-golangci-lint audit-deps audit-go audit-npm require-govulncheck tidy up down images rebuild clean help compose-check dump-db dump-mail provision-mailboxes restore-db version release
+.PHONY: all build spa package test test-host test-race bench vet fmt fmt-check gate gate-host lint lint-modernize require-golangci-lint audit-deps audit-go audit-npm require-govulncheck tidy up down images rebuild clean help compose-check dump-db dump-mail provision-mailboxes restore-db version release
 
 all: build
 
@@ -76,6 +76,35 @@ build:
 		done; \
 	done
 	@echo "built $(words $(CMDS)) binaries for $(PLATFORMS) -> $(BIN)/"
+
+## spa: build the webmail2 SPA bundle into internal/webmail2/dist (host node; prebuild runs npm ci)
+spa:
+	cd internal/webmail2 && npm run build
+
+# Release archives: one per platform, each holding a hermex/ directory with the
+# binaries named as installed (hermex-<command>; mapihttp is hermex-mapi, as in
+# the image), the SPA, install.sh and VERSION, plus one SHA256SUMS the installer
+# verifies against. The archive names carry no version, so the installer can
+# fetch the newest release from the stable releases/latest/download/<name> URL;
+# the version travels inside, in VERSION.
+PKG_DIR := $(BIN)/pkg
+
+## package: release archives for linux/amd64 and linux/arm64 + SHA256SUMS into bin/pkg/
+package: build spa
+	@rm -rf $(PKG_DIR) && mkdir -p $(PKG_DIR)
+	@for p in $(PLATFORMS); do \
+		os=$${p%/*}; arch=$${p#*/}; name=hermex-$$os-$$arch; stage=$(PKG_DIR)/$$name/hermex; \
+		mkdir -p $$stage/bin && \
+		for c in $(CMDS); do \
+			dst=hermex-$$c; [ $$c = mapihttp ] && dst=hermex-mapi; \
+			cp $(BIN)/$$os-$$arch/$$c $$stage/bin/$$dst || exit 1; \
+		done && \
+		cp -R internal/webmail2/dist $$stage/webmail2 && \
+		cp install.sh VERSION $$stage/ && \
+		(cd $(PKG_DIR)/$$name && COPYFILE_DISABLE=1 tar --no-xattrs -czf ../$$name.tar.gz hermex) && \
+		rm -rf $(PKG_DIR)/$$name || exit 1; \
+	done
+	@cd $(PKG_DIR) && shasum -a 256 *.tar.gz > SHA256SUMS && cat SHA256SUMS
 
 ## test: canonical gate in the dev container (override PKG / RUN for a subset)
 test:
