@@ -138,14 +138,26 @@ func TestProvisionRefusesWhatItCannotServe(t *testing.T) {
 	wantPolicyStatus(t, "WAP type", provisionPolicy(t, ts, "MS-WAP-Provisioning-XML", ""), "3")
 	wantPolicyStatus(t, "made-up type", provisionPolicy(t, ts, "x", ""), "3")
 
-	key := provisionPolicy(t, ts, easProvisioningType, "").ChildText(wbxml.PVPolicyKey)
+	key := phaseOneKey(t, ts)
 	wantPolicyStatus(t, "ack of a made-up key", provisionPolicy(t, ts, easProvisioningType, "12345"), "5")
 	wantPolicyStatus(t, "ack of the current key", provisionPolicy(t, ts, easProvisioningType, key), "1")
 
 	setOverride(t, dir, easpolicy.Policy{"DevicePasswordEnabled": 1, "MinDevicePasswordLength": 6})
 	wantPolicyStatus(t, "ack of the key the policy replaced", provisionPolicy(t, ts, easProvisioningType, key), "5")
-	fresh := provisionPolicy(t, ts, easProvisioningType, "").ChildText(wbxml.PVPolicyKey)
+	fresh := phaseOneKey(t, ts)
 	wantPolicyStatus(t, "ack after a fresh phase one", provisionPolicy(t, ts, easProvisioningType, fresh), "1")
+}
+
+// phaseOneKey runs phase one and returns its temporary key. An empty key would
+// make the "acknowledgement" that follows carry no key, which the server reads
+// as another phase one and answers 1, so the acknowledgement would go untested.
+func phaseOneKey(t *testing.T, ts *httptest.Server) string {
+	t.Helper()
+	key := provisionPolicy(t, ts, easProvisioningType, "").ChildText(wbxml.PVPolicyKey)
+	if key == "" {
+		t.Fatal("phase one handed out no policy key")
+	}
+	return key
 }
 
 // TestProvisionServesDomainLayer proves the domain override is the middle layer:
