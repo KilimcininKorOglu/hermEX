@@ -533,6 +533,23 @@ func TestCalCopyMove(t *testing.T) {
 	}
 }
 
+// TestCalCopyRefusesAnotherPrincipal copies to a Destination under another
+// principal. The request path alone selects the mailbox, so such a copy cannot
+// reach the principal it names (RFC 4918 9.8 leaves a destination the server
+// cannot honour to a refusal): it must be 403, and nothing may be filed in the
+// caller's own collection under that name either.
+func TestCalCopyRefusesAnotherPrincipal(t *testing.T) {
+	ts := davServerCal(t)
+	doFull(t, ts, "PUT", calURL("ev.ics"), timedEventICS, nil)
+	other := "/dav/calendars/other@hermex.test/calendar/stray.ics"
+	if resp, _ := doFull(t, ts, "COPY", calURL("ev.ics"), "", map[string]string{"Destination": other}); resp.StatusCode != http.StatusForbidden {
+		t.Errorf("COPY to another principal: status %d, want 403", resp.StatusCode)
+	}
+	if resp, _ := doFull(t, ts, "GET", calURL("stray.ics"), "", nil); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("COPY to another principal filed the copy in the caller's store: status %d, want 404", resp.StatusCode)
+	}
+}
+
 // seedTimedCalendar imports a timed iCalendar event into a mailbox's Calendar
 // through the same converter a PUT uses, so the busy span round-trips.
 func seedTimedCalendar(t *testing.T, dir, ics string) {

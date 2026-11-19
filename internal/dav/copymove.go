@@ -76,7 +76,7 @@ type copyMoveEnds struct {
 // parseCopyMove reads the request path and the Destination header. A non-empty
 // failure is the message to answer with, at the given status.
 func parseCopyMove(r *http.Request) (copyMoveRequest, string, int) {
-	srcKind, _, srcColl, srcName := classify(r.URL.Path)
+	srcKind, srcUser, srcColl, srcName := classify(r.URL.Path)
 	isCal := strings.HasPrefix(r.URL.Path, "/dav/calendars/")
 	isCard := strings.HasPrefix(r.URL.Path, "/dav/addressbooks/")
 	req := copyMoveRequest{isCal: isCal, ext: ".vcf", srcColl: srcColl, srcName: srcName}
@@ -88,21 +88,35 @@ func parseCopyMove(r *http.Request) (copyMoveRequest, string, int) {
 		return req, "COPY/MOVE is supported only on calendar/contact objects", http.StatusForbidden
 	}
 
+	failure, status := parseDestination(r, &req, wantKind, srcUser)
+	return req, failure, status
+}
+
+// parseDestination reads the Destination header into req and checks it names an
+// object of wantKind, in the same protocol root and under the same principal as
+// the source (srcUser).
+func parseDestination(r *http.Request, req *copyMoveRequest, wantKind resourceKind, srcUser string) (string, int) {
 	dest := r.Header.Get("Destination")
 	if dest == "" {
-		return req, "missing Destination header", http.StatusBadRequest
+		return "missing Destination header", http.StatusBadRequest
 	}
 	destPath := dest
 	if u, err := url.Parse(dest); err == nil && u.Path != "" {
 		destPath = u.Path
 	}
-	dstKind, _, dstColl, dstName := classify(destPath)
+	dstKind, dstUser, dstColl, dstName := classify(destPath)
 	req.dstColl, req.dstName = dstColl, dstName
 	// The destination must be the same kind of object under the same protocol root.
-	if dstKind != wantKind || strings.HasPrefix(destPath, "/dav/calendars/") != isCal {
-		return req, "destination must be the same kind of collection", http.StatusForbidden
+	if dstKind != wantKind || strings.HasPrefix(destPath, "/dav/calendars/") != req.isCal {
+		return "destination must be the same kind of collection", http.StatusForbidden
 	}
-	return req, "", 0
+	// Both ends resolve in the one mailbox the request path selected, so a
+	// destination under another principal would land in the source's store under
+	// a name the client then cannot find there, and never in the principal it named.
+	if !strings.EqualFold(srcUser, dstUser) {
+		return "destination must be under the same principal", http.StatusForbidden
+	}
+	return "", 0
 }
 
 // resolveCopyMove resolves both collections and both objects, and applies the
