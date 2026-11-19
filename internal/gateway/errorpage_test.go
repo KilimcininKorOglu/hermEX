@@ -112,3 +112,23 @@ func TestErrorPageShowsTheRequestID(t *testing.T) {
 		t.Error("the page shows no reference id; a user reporting the outage has nothing to quote")
 	}
 }
+
+// TestErrorPageEscapesTheRequestID feeds the page a request id carrying markup.
+// The access-log middleware echoes an inbound X-Request-Id, so the value is the
+// client's own: written raw it would run script in the site's origin (reflected
+// XSS, OWASP A03). It must reach the page as text.
+func TestErrorPageEscapesTheRequestID(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept", "text/html")
+	rec := httptest.NewRecorder()
+	rec.Header().Set("X-Request-Id", `"><script>alert(1)</script>`)
+	unreachableGateway(t).ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if strings.Contains(body, "<script>") {
+		t.Fatalf("the request id reached the page as markup: %q", body)
+	}
+	if !strings.Contains(body, "&lt;script&gt;") {
+		t.Errorf("the request id was dropped rather than shown as text: %q", body)
+	}
+}
