@@ -757,11 +757,15 @@ func (s *Server) consumeData(tp *textproto.Reader, sess Session, trace string) e
 
 // dotReader decodes an SMTP dot-encoded message body: it removes dot-stuffing
 // and stops at the "." terminator line. Unlike textproto.DotReader it preserves
-// CRLF line endings, so the stored message stays byte-faithful to the wire.
+// CRLF line endings, so the stored message stays byte-faithful to the wire. It
+// reads at most one bufio buffer at a time, so a line with no line feed cannot
+// grow memory: the dot rules (RFC 5321 4.1.1.4 and 4.5.2) apply only to a chunk
+// that starts a line.
 type dotReader struct {
-	r    *bufio.Reader
-	buf  []byte
-	done bool
+	r       *bufio.Reader
+	buf     []byte
+	done    bool
+	midLine bool // the next chunk continues a line, so the dot rules do not apply
 }
 
 func newDotReader(r *bufio.Reader) *dotReader { return &dotReader{r: r} }
@@ -781,20 +785,23 @@ func (d *dotReader) Read(p []byte) (int, error) {
 }
 
 func (d *dotReader) fill() error {
-	line, err := d.r.ReadString('\n')
-	if len(line) == 0 {
+	chunk, err := d.r.ReadSlice('\n')
+	if len(chunk) == 0 {
 		d.done = true
 		return io.EOF
 	}
-	trimmed := strings.TrimRight(line, "\r\n")
-	if trimmed == "." {
-		// Terminator line: end of body, with no contribution to it.
-		d.done = true
-		return nil
+	startsLine := !d.midLine
+	d.midLine = errors.Is(err, bufio.ErrBufferFull)
+	if startsLine {
+		if string(bytes.TrimRight(chunk, "\r\n")) == "." && !d.midLine {
+			// Terminator line: end of body, with no contribution to it.
+			d.done = true
+			return nil
+		}
+		chunk = bytes.TrimPrefix(chunk, []byte(".")) // un-stuff a leading dot
 	}
-	line = strings.TrimPrefix(line, ".") // un-stuff a leading dot
-	d.buf = append(d.buf, line...)
-	if err != nil {
+	d.buf = append(d.buf[:0], chunk...) // ReadSlice's bytes are valid only until the next read
+	if err != nil && !d.midLine {
 		// Stream ended without a terminator; emit what we have, then finish.
 		d.done = true
 	}
