@@ -46,6 +46,8 @@ type fakeDir struct {
 	avOutbound         bool
 	splitHost          string
 	quarantine         []directory.QuarantineRecord
+	quarantineIDs      []int64 // the domain scope the last ListQuarantine was given
+	quarantineAll      bool
 	reports            fakeReports
 	senderRules        []directory.SenderRule
 	greylistOn         bool
@@ -615,7 +617,8 @@ func (f *fakeDir) SetSplitRelayHost(_ string, host string) error {
 	f.splitHost = host
 	return nil
 }
-func (f *fakeDir) ListQuarantine([]int64, bool, int) ([]directory.QuarantineRecord, error) {
+func (f *fakeDir) ListQuarantine(ids []int64, all bool, _ int) ([]directory.QuarantineRecord, error) {
+	f.quarantineIDs, f.quarantineAll = ids, all
 	return f.quarantine, nil
 }
 

@@ -45,6 +45,48 @@ func TestUIAVQuarantine(t *testing.T) {
 	}
 }
 
+// TestUIAVQuarantineEscapesTheSendersText proves the sender-chosen subject and
+// envelope sender render as text: a held message is attacker mail by definition,
+// and the page is read in the most privileged session on the system.
+func TestUIAVQuarantineEscapesTheSendersText(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		quarantine: []directory.QuarantineRecord{{ID: 1, Status: "held", QuarantineEntry: directory.QuarantineEntry{
+			MailFrom: `<img src=x onerror=alert(1)>@evil.test`, Subject: `<script>alert(2)</script>`, DomainID: 1,
+		}}},
+	}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+	resp := authedGET(t, ts, "/admin/ui/avquarantine", session)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	for _, raw := range []string{"<script>alert(2)", "<img src=x"} {
+		if strings.Contains(string(body), raw) {
+			t.Errorf("the page renders %q unescaped", raw)
+		}
+	}
+	if !strings.Contains(string(body), "&lt;script&gt;alert(2)") {
+		t.Error("the subject is not shown at all, so the escaping above proves nothing")
+	}
+}
+
+// TestUIAVQuarantineAsksOnlyForTheAdminsDomains proves a domain administrator's
+// page lists only its own domains' held messages: another domain's quarantine
+// holds that domain's users' mail.
+func TestUIAVQuarantineAsksOnlyForTheAdminsDomains(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, perms: []directory.Permission{{Name: directory.PermDomainAdmin, Params: "1"}}}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+	resp := authedGET(t, ts, "/admin/ui/avquarantine", session)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if d.quarantineAll || len(d.quarantineIDs) != 1 || d.quarantineIDs[0] != 1 {
+		t.Errorf("listed with all=%v ids=%v, want only domain 1", d.quarantineAll, d.quarantineIDs)
+	}
+}
+
 // TestUIAVQuarantineEmpty proves the page shows its empty state when nothing is
 // held, rather than an error.
 func TestUIAVQuarantineEmpty(t *testing.T) {
