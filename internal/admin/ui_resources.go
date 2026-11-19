@@ -211,7 +211,7 @@ func (s *Server) addDomainDNSRecords(data map[string]any, domain string) {
 	default:
 		dkimName, _ := data["DKIMRecordName"].(string)
 		dkimValue, _ := data["DKIMPublicTXT"].(string)
-		data["DNSRecords"] = prescribeDomainDNS(domain, s.paths.ServerHostname(), dkimName, dkimValue, sts)
+		data["DNSRecords"] = PrescribeDomainDNS(domain, s.paths.ServerHostname(), dkimName, dkimValue, sts)
 	}
 }
 

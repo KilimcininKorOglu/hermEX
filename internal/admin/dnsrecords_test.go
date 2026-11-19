@@ -11,8 +11,8 @@ import (
 )
 
 // byLabel indexes a prescription by record class for assertion.
-func byLabel(recs []prescribedRecord) map[string]prescribedRecord {
-	m := make(map[string]prescribedRecord, len(recs))
+func byLabel(recs []PrescribedRecord) map[string]PrescribedRecord {
+	m := make(map[string]PrescribedRecord, len(recs))
 	for _, r := range recs {
 		m[r.Label] = r
 	}
@@ -26,7 +26,7 @@ func byLabel(recs []prescribedRecord) map[string]prescribedRecord {
 // so the test pins the host the records point at, not merely that a row exists.
 func TestPrescribeDomainDNS(t *testing.T) {
 	const host = "mail.hermex.test"
-	recs := prescribeDomainDNS("tenant.com", host, "hermex._domainkey.tenant.com", "v=DKIM1; k=rsa; p=ABC",
+	recs := PrescribeDomainDNS("tenant.com", host, "hermex._domainkey.tenant.com", "v=DKIM1; k=rsa; p=ABC",
 		directory.MTASTSSettings{Enabled: false})
 	by := byLabel(recs)
 	// With MTA-STS publishing off, its records must be absent, their host serves no
@@ -74,8 +74,19 @@ func TestPrescribeDomainDNS(t *testing.T) {
 	wantRecordValue(t, by, "DAV TXT", "path=/dav")
 }
 
+// TestNoMailHostCNAMEWhenTheServerIsMailOfTheDomain covers a server named
+// mail.<domain> serving that same domain: mail.<domain> already holds the
+// server's address records, and RFC 1034 section 3.6.2 forbids a CNAME beside
+// them, so the prescription must not tell the owner to publish one (in any case).
+func TestNoMailHostCNAMEWhenTheServerIsMailOfTheDomain(t *testing.T) {
+	for _, host := range []string{"mail.tenant.com", "MAIL.Tenant.com", "mail.tenant.com."} {
+		recs := PrescribeDomainDNS("tenant.com", host, "", "", directory.MTASTSSettings{})
+		wantNoRecord(t, byLabel(recs), "Mail host")
+	}
+}
+
 // wantNoRecord fails the test when the prescription carries a record it must not.
-func wantNoRecord(t *testing.T, by map[string]prescribedRecord, label string) {
+func wantNoRecord(t *testing.T, by map[string]PrescribedRecord, label string) {
 	t.Helper()
 	if _, ok := by[label]; ok {
 		t.Errorf("%q present, want absent", label)
@@ -83,25 +94,25 @@ func wantNoRecord(t *testing.T, by map[string]prescribedRecord, label string) {
 }
 
 // wantRecordType asserts a prescribed record's DNS type.
-func wantRecordType(t *testing.T, by map[string]prescribedRecord, label, typ string) {
+func wantRecordType(t *testing.T, by map[string]PrescribedRecord, label, typ string) {
 	t.Helper()
 	wantEq(t, by[label].Type, typ, label+" type")
 }
 
 // wantRecordName asserts the owner name a prescribed record is published at.
-func wantRecordName(t *testing.T, by map[string]prescribedRecord, label, name string) {
+func wantRecordName(t *testing.T, by map[string]PrescribedRecord, label, name string) {
 	t.Helper()
 	wantEq(t, by[label].Name, name, label+" name")
 }
 
 // wantRecordValue asserts a prescribed record's exact value.
-func wantRecordValue(t *testing.T, by map[string]prescribedRecord, label, value string) {
+func wantRecordValue(t *testing.T, by map[string]PrescribedRecord, label, value string) {
 	t.Helper()
 	wantEq(t, by[label].Value, value, label+" value")
 }
 
 // wantRecord asserts a prescribed record's type, owner name and exact value.
-func wantRecord(t *testing.T, by map[string]prescribedRecord, label, typ, name, value string) {
+func wantRecord(t *testing.T, by map[string]PrescribedRecord, label, typ, name, value string) {
 	t.Helper()
 	wantRecordType(t, by, label, typ)
 	wantRecordName(t, by, label, name)
@@ -109,7 +120,7 @@ func wantRecord(t *testing.T, by map[string]prescribedRecord, label, typ, name, 
 }
 
 // wantRecordPrefix asserts a record's type and that its value begins with prefix.
-func wantRecordPrefix(t *testing.T, by map[string]prescribedRecord, label, typ, prefix string) {
+func wantRecordPrefix(t *testing.T, by map[string]PrescribedRecord, label, typ, prefix string) {
 	t.Helper()
 	wantRecordType(t, by, label, typ)
 	if !strings.HasPrefix(by[label].Value, prefix) {
@@ -118,7 +129,7 @@ func wantRecordPrefix(t *testing.T, by map[string]prescribedRecord, label, typ, 
 }
 
 // wantRecordSuffix asserts a record's type and that its value ends with suffix.
-func wantRecordSuffix(t *testing.T, by map[string]prescribedRecord, label, typ, suffix string) {
+func wantRecordSuffix(t *testing.T, by map[string]PrescribedRecord, label, typ, suffix string) {
 	t.Helper()
 	wantRecordType(t, by, label, typ)
 	if !strings.HasSuffix(by[label].Value, suffix) {
@@ -127,7 +138,7 @@ func wantRecordSuffix(t *testing.T, by map[string]prescribedRecord, label, typ, 
 }
 
 // wantRecordContains asserts a record's type and that its value carries sub.
-func wantRecordContains(t *testing.T, by map[string]prescribedRecord, label, typ, sub string) {
+func wantRecordContains(t *testing.T, by map[string]PrescribedRecord, label, typ, sub string) {
 	t.Helper()
 	wantRecordType(t, by, label, typ)
 	wantContains(t, by[label].Value, sub, label+" value")
@@ -138,7 +149,7 @@ func wantRecordContains(t *testing.T, by map[string]prescribedRecord, label, typ
 // knows it is needed) but, with no key, the row points at the DKIM panel instead
 // of a value, a placeholder must never read as a publishable record.
 func TestPrescribeDomainDNSWithoutDKIMKey(t *testing.T) {
-	recs := prescribeDomainDNS("tenant.com", "mail.hermex.test", "", "", directory.MTASTSSettings{Enabled: false})
+	recs := PrescribeDomainDNS("tenant.com", "mail.hermex.test", "", "", directory.MTASTSSettings{Enabled: false})
 	by := byLabel(recs)
 	dkim, ok := by["DKIM"]
 	if !ok {
@@ -158,7 +169,7 @@ func TestPrescribeDomainDNSWithoutDKIMKey(t *testing.T) {
 // id is a 32-char policy fingerprint, and the TLSRPT reporting record. The id must be
 // a real fingerprint, not a placeholder, or senders cannot detect a policy change.
 func TestPrescribeDomainDNSWithMTASTS(t *testing.T) {
-	recs := prescribeDomainDNS("tenant.com", "mail.hermex.test", "hermex._domainkey.tenant.com", "v=DKIM1; p=ABC",
+	recs := PrescribeDomainDNS("tenant.com", "mail.hermex.test", "hermex._domainkey.tenant.com", "v=DKIM1; p=ABC",
 		directory.MTASTSSettings{Enabled: true, Mode: "testing", MaxAge: 86400})
 	by := byLabel(recs)
 
@@ -183,7 +194,7 @@ func TestPrescribeDomainDNSWithMTASTS(t *testing.T) {
 // TestDomainDetailShowsDNSRecords proves the prescription actually reaches the
 // page a system admin sees, the section and records pointing at the server host
 // render in the domain detail HTML. It guards the handler wiring and the template
-// block, which the pure prescribeDomainDNS test cannot: a dropped template range
+// block, which the pure PrescribeDomainDNS test cannot: a dropped template range
 // or a renamed field would still pass the unit test but fail here.
 func TestDomainDetailShowsDNSRecords(t *testing.T) {
 	d := &fakeDir{

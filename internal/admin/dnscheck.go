@@ -157,7 +157,7 @@ func (c *dnsChecker) checkMX() {
 }
 
 // checkAuth reports the SPF/DKIM/DMARC triad. The DKIM signing key is published as
-// a TXT record at the domain's own selector, which prescribeDomainDNS instructs the
+// a TXT record at the domain's own selector, which PrescribeDomainDNS instructs the
 // owner to create, so the health check verifies the same record it prescribes.
 func (c *dnsChecker) checkAuth() {
 	c.txt("SPF", c.domain, "v=spf1", "no v=spf1 TXT record")
@@ -180,7 +180,7 @@ func (c *dnsChecker) checkAutodiscovery() {
 // checkServices reports the client-autoconfiguration service records: RFC 6186
 // (IMAP/POP3/submission) and RFC 6764 (CalDAV/CardDAV) let clients discover the
 // server by SRV lookup, and the DAV TXT advertises its well-known path.
-// prescribeDomainDNS publishes these, so the check verifies the same records it
+// PrescribeDomainDNS publishes these, so the check verifies the same records it
 // prescribes; they are optional conveniences, so a missing one is reported, not
 // treated as a failure.
 func (c *dnsChecker) checkServices() {
