@@ -98,6 +98,37 @@ func TestUISaveLDAPBindingKeepsSystemFields(t *testing.T) {
 	wantEq(t, got.ConnectionID, int64(1), "the connection keeps its stored value")
 }
 
+// TestUILDAPWritesOutsideScopeAreRefused proves a domain admin can neither create
+// nor change a connection, whose bind credentials serve every bound domain, nor save
+// or reset another domain's binding.
+func TestUILDAPWritesOutsideScopeAreRefused(t *testing.T) {
+	d := ldapAPIDir(directory.AdminRole{Role: directory.AdminDomain, ScopeID: 1})
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/ldap/connections", session, csrf,
+		url.Values{"name": {"evil"}, "uri": {"ldaps://attacker.test"}}), http.StatusForbidden, "create connection")
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/ldap/connections/1", session, csrf,
+		url.Values{"name": {"hq"}, "uri": {"ldaps://attacker.test"}}), http.StatusForbidden, "save connection")
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/ldap/bindings/2", session, csrf,
+		url.Values{"alias_attr": {"description"}}), http.StatusForbidden, "save other binding")
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/ldap/bindings/2/reset", session, csrf, url.Values{}),
+		http.StatusForbidden, "reset other binding")
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/ldap/connections/2/delete", session, csrf, url.Values{}),
+		http.StatusForbidden, "delete connection")
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/ldap/connections/2/bindings", session, csrf,
+		url.Values{"domain_id": {"1"}}), http.StatusForbidden, "bind a domain")
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/ldap/bindings/2/delete", session, csrf, url.Values{}),
+		http.StatusForbidden, "unbind other domain")
+
+	wantEq(t, len(d.ldapConns), 2, "the connection count")
+	wantEq(t, d.ldapConns[1].URI, "ldaps://dc.test", "the stored connection URI")
+	wantEq(t, len(d.ldapBindings), 2, "the binding count")
+	wantEq(t, d.ldapBindings[1].ConnectionID, int64(1), "the own binding's connection")
+	wantEq(t, d.ldapBindings[2].Mapping.AliasAttr, "", "the other binding's alias attribute")
+	wantFalse(t, d.ldapBindings[2].Mapping.Fields["displayName"].Enabled, "the other binding's preset fields")
+}
+
 // TestUISaveLDAPBindingRefusesMalformedAttribute proves the form refuses an
 // attribute carrying filter syntax and stores nothing.
 func TestUISaveLDAPBindingRefusesMalformedAttribute(t *testing.T) {
