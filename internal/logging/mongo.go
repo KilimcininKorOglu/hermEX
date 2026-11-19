@@ -57,7 +57,20 @@ type MongoSink struct {
 	// touched only by the single run() goroutine, so they need no synchronization.
 	spillPath string
 	hasSpill  bool
+	// spillLimit caps the spill file in bytes (0: no cap), so a long store outage
+	// cannot fill the disk the mailboxes live on. It is set from the operator's
+	// setting while the sink runs, hence atomic. spillDropped counts the events
+	// the cap turned away.
+	spillLimit   atomic.Int64
+	spillDropped atomic.Uint64
 }
+
+// SetSpillLimit caps the spill file at limit bytes; zero or negative removes the
+// cap. It takes effect on the next spill, without a restart.
+func (s *MongoSink) SetSpillLimit(limit int64) { s.spillLimit.Store(max(limit, 0)) }
+
+// SpillDropped reports how many events the spill cap turned away.
+func (s *MongoSink) SpillDropped() uint64 { return s.spillDropped.Load() }
 
 // NewMongoSink prepares a sink for the log collection "logs" in database at uri and
 // starts the background writer. It returns an error only for a permanently broken

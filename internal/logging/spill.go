@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 )
 
@@ -18,16 +19,43 @@ func (s *MongoSink) spill(events []Event) {
 	}
 	f, err := os.OpenFile(s.spillPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
+		s.spillLost(len(events), "open", err)
 		return
 	}
 	defer f.Close()
-	enc := json.NewEncoder(f)
-	for _, e := range events {
-		if err := enc.Encode(toDoc(e)); err != nil {
+	size := int64(0)
+	if info, err := f.Stat(); err == nil {
+		size = info.Size()
+	}
+	limit := s.spillLimit.Load()
+	for i, e := range events {
+		line, err := json.Marshal(toDoc(e))
+		if err != nil {
+			continue // an unencodable event cannot be stored anywhere
+		}
+		line = append(line, '\n')
+		if limit > 0 && size+int64(len(line)) > limit {
+			s.spillDropped.Add(uint64(len(events) - i))
+			s.spillLost(len(events)-i, "limit", nil)
 			return
 		}
+		if _, err := f.Write(line); err != nil {
+			s.spillLost(len(events)-i, "write", err)
+			return
+		}
+		size += int64(len(line))
+		s.hasSpill = true
 	}
-	s.hasSpill = true
+}
+
+// spillLost tells the operator, on stderr (the only place left once both the log
+// store and the spill file are out), how many events could not be kept and why.
+func (s *MongoSink) spillLost(n int, reason string, err error) {
+	msg := ""
+	if err != nil {
+		msg = ": " + err.Error()
+	}
+	fmt.Fprintf(os.Stderr, "logging: %d events not spilled to %s (%s)%s\n", n, s.spillPath, reason, msg)
 }
 
 // replaySpill re-inserts everything in the spill file in batches and removes the

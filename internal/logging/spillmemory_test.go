@@ -49,6 +49,48 @@ func TestReplayHoldsOneBatchAtATime(t *testing.T) {
 	}
 }
 
+// TestSpillStopsAtTheLimit fills the spill past the operator's cap during an
+// outage. The file must stay within the cap, so the disk the mailboxes share
+// never fills, and every event turned away must be counted rather than vanish.
+func TestSpillStopsAtTheLimit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "spill.jsonl")
+	s := &MongoSink{spillPath: path}
+	const limit = 64 << 10
+	s.SetSpillLimit(limit)
+
+	events := make([]Event, 100)
+	for i := range events {
+		events[i] = Event{Subsystem: IMAP, Name: "spill.fill", Err: strings.Repeat("x", 4096)}
+	}
+	s.spill(events)
+	s.spill(events)
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() > limit {
+		t.Errorf("spill file is %d bytes, want at most the %d byte limit", info.Size(), limit)
+	}
+	kept, err := readSpill(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept) == 0 {
+		t.Fatal("nothing was spilled below the limit")
+	}
+	if got, want := s.SpillDropped(), uint64(200-len(kept)); got != want {
+		t.Errorf("SpillDropped = %d, want %d (every event not kept)", got, want)
+	}
+
+	// Lifting the cap lets the next outage batch through again.
+	s.SetSpillLimit(0)
+	s.spill(events[:1])
+	if after, _ := readSpill(path); len(after) != len(kept)+1 {
+		t.Errorf("with no limit the spill holds %d events, want %d", len(after), len(kept)+1)
+	}
+}
+
 // readSpill collects every record the replay would insert from the spill file.
 func readSpill(path string) ([]any, error) {
 	var docs []any
