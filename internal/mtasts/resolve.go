@@ -187,13 +187,27 @@ func fetchOverHTTPS(domain string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return readPolicyBody(resp, domain)
+}
+
+// maxPolicyBytes is the policy size bound RFC 8461 3.3 suggests.
+const maxPolicyBytes = 64 * 1024
+
+// readPolicyBody reads a fetched policy and closes the response. Only a 200 is a
+// policy (RFC 8461 3.3), and a body over maxPolicyBytes is refused whole rather
+// than cut, because a cut body is a policy the domain never published; a policy
+// that cannot be fetched for any reason counts as none.
+func readPolicyBody(resp *http.Response, domain string) (string, error) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("mtasts: policy fetch for %s: HTTP %d", domain, resp.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxPolicyBytes+1))
 	if err != nil {
 		return "", err
+	}
+	if len(body) > maxPolicyBytes {
+		return "", fmt.Errorf("mtasts: policy for %s exceeds %d bytes", domain, maxPolicyBytes)
 	}
 	return string(body), nil
 }

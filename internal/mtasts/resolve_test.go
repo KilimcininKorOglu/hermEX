@@ -102,6 +102,36 @@ func TestPolicyClientRefusesRedirects(t *testing.T) {
 	}
 }
 
+// TestAnOversizedPolicyIsNotFetched serves a policy whose mx lines run past the
+// 64 KB bound RFC 8461 3.3 suggests. Cutting the body at the bound would parse
+// a prefix the domain never published, possibly ending inside an mx name; the
+// RFC instead treats a policy that cannot be fetched "for any reason" as no
+// policy. A body exactly at the bound still reads whole.
+func TestAnOversizedPolicyIsNotFetched(t *testing.T) {
+	head := "version: STSv1\nmode: enforce\nmax_age: 86400\n"
+	pad := func(n int) string {
+		body := head
+		for len(body) < n {
+			body += "mx: mx.example.com\n"
+		}
+		return body[:n]
+	}
+	serve := func(body string) *http.Response {
+		rec := httptest.NewRecorder()
+		rec.Header().Set("Content-Type", "text/plain")
+		rec.WriteHeader(http.StatusOK)
+		_, _ = rec.WriteString(body)
+		return rec.Result()
+	}
+	if got, err := readPolicyBody(serve(pad(maxPolicyBytes+1)), "example.com"); err == nil {
+		t.Fatalf("a %d-byte policy was read as %d bytes", maxPolicyBytes+1, len(got))
+	}
+	at := pad(maxPolicyBytes)
+	if got, err := readPolicyBody(serve(at), "example.com"); err != nil || got != at {
+		t.Fatalf("a policy at the bound: err = %v, read %d of %d bytes", err, len(got), len(at))
+	}
+}
+
 // TestDefaultTXTLookupHasADeadline proves the presence lookup gives up instead of
 // waiting forever on a nameserver that accepts the query and never answers. The
 // relay worker drains the outbound queue one item at a time, so an unbounded
