@@ -2,8 +2,11 @@ package fetchmail
 
 import (
 	"errors"
+	"io"
 	"net"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -87,6 +90,93 @@ func TestPOP3RetrRefusesAnOversizedMessage(t *testing.T) {
 	if string(body) != small+"\r\n" {
 		t.Errorf("retr(2) = %q, want the second message", body)
 	}
+}
+
+// endlessLineServer accepts one connection, sends prefix, then streams bytes
+// with no line end until the client hangs up: a source that never finishes a
+// status line or a listing. It reports how many bytes the client took.
+func endlessLineServer(t *testing.T, prefix string) (addr string, sent *atomic.Int64) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	sent = &atomic.Int64{}
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = io.WriteString(conn, prefix)
+		go func() { _, _ = io.Copy(io.Discard, conn) }()
+		chunk := []byte(strings.Repeat("A", 32<<10))
+		for sent.Load() < 256<<20 {
+			n, err := conn.Write(chunk)
+			sent.Add(int64(n))
+			if err != nil {
+				return
+			}
+		}
+	}()
+	return ln.Addr().String(), sent
+}
+
+// TestAnEndlessServerLineIsRefused points both clients at a source whose
+// greeting (and, for POP3, UIDL listing) never ends. The client must give up
+// with ErrResponseTooLarge once it has read about the message cap, instead of
+// buffering the line until the worker runs out of memory.
+func TestAnEndlessServerLineIsRefused(t *testing.T) {
+	allowLoopback(t)
+	SetMaxMessage(1024)
+	defer SetMaxMessage(0)
+	limit := int64(1024 + responseSlack + 1<<20) // the budget plus socket buffering
+
+	addr, sent := endlessLineServer(t, "")
+	host, port := splitAddr(t, addr)
+	if _, err := dialPOP3(host, port, false, false); !errors.Is(err, ErrResponseTooLarge) {
+		t.Errorf("POP3 endless greeting: err = %v, want ErrResponseTooLarge", err)
+	}
+	if n := sent.Load(); n > limit {
+		t.Errorf("POP3 client read %d bytes of one greeting line", n)
+	}
+
+	// A UIDL listing whose one line never ends.
+	addr, sent = endlessLineServer(t, "+OK ready\r\n+OK\r\n+OK\r\n+OK\r\n1 ")
+	host, port = splitAddr(t, addr)
+	c, err := dialPOP3(host, port, false, false)
+	mustNoErr(t, err, "dial")
+	mustNoErr(t, c.auth("alice", "secret"), "auth")
+	if _, err := c.uidl(); !errors.Is(err, ErrResponseTooLarge) {
+		t.Errorf("POP3 endless UIDL: err = %v, want ErrResponseTooLarge", err)
+	}
+	if n := sent.Load(); n > limit {
+		t.Errorf("POP3 client read %d bytes of one UIDL listing", n)
+	}
+
+	addr, sent = endlessLineServer(t, "")
+	host, port = splitAddr(t, addr)
+	if _, err := dialIMAP(host, port, false, false); !errors.Is(err, ErrResponseTooLarge) {
+		t.Errorf("IMAP endless greeting: err = %v, want ErrResponseTooLarge", err)
+	}
+	if n := sent.Load(); n > limit {
+		t.Errorf("IMAP client read %d bytes of one greeting line", n)
+	}
+}
+
+// splitAddr splits a listener address into host and port.
+func splitAddr(t *testing.T, addr string) (string, int) {
+	t.Helper()
+	h, p, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := strconv.Atoi(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h, n
 }
 
 // TestPOP3RetrAcceptsUpToTheCap is the negative control: a message under the cap

@@ -32,9 +32,19 @@ func setDeadline(conn net.Conn) {
 // pop3Conn is a minimal POP3 client: enough of RFC 1939 to list, identify, download, and
 // optionally delete messages.
 type pop3Conn struct {
-	conn net.Conn
-	tp   *textproto.Conn
+	conn   net.Conn
+	tp     *textproto.Conn
+	budget *responseBudget
 }
+
+// budgetedConn reads through the response budget and writes and closes the
+// connection directly.
+type budgetedConn struct {
+	io.Reader
+	net.Conn
+}
+
+func (b budgetedConn) Read(p []byte) (int, error) { return b.Reader.Read(p) }
 
 // dialPOP3 connects to a POP3 source. With ssl it uses implicit TLS (POP3S); otherwise a
 // plain connection. verify=false accepts a self-signed server certificate. A zero port
@@ -58,7 +68,8 @@ func dialPOP3(server string, port int, ssl, verify bool) (*pop3Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &pop3Conn{conn: conn, tp: textproto.NewConn(conn)}
+	budget := newResponseBudget(conn)
+	c := &pop3Conn{conn: conn, tp: textproto.NewConn(budgetedConn{Reader: budget, Conn: conn}), budget: budget}
 	setDeadline(conn)
 	if _, err := c.readOK(); err != nil { // server greeting
 		return nil, errors.Join(err, conn.Close())
@@ -72,6 +83,9 @@ func (c *pop3Conn) readOK() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if c.budget.spent() {
+		return "", ErrResponseTooLarge
+	}
 	if rest, ok := strings.CutPrefix(line, "+OK"); ok {
 		return strings.TrimSpace(rest), nil
 	}
@@ -81,6 +95,7 @@ func (c *pop3Conn) readOK() (string, error) {
 // cmd sends a command and reads its single-line status reply.
 func (c *pop3Conn) cmd(format string, args ...any) (string, error) {
 	setDeadline(c.conn)
+	c.budget.renew()
 	if err := c.tp.PrintfLine(format, args...); err != nil {
 		return "", err
 	}
@@ -108,6 +123,9 @@ func (c *pop3Conn) uidl() (map[int]string, error) {
 	lines, err := c.tp.ReadDotLines()
 	if err != nil {
 		return nil, err
+	}
+	if c.budget.spent() {
+		return nil, ErrResponseTooLarge
 	}
 	out := make(map[int]string, len(lines))
 	for _, ln := range lines {

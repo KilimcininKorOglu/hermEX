@@ -13,9 +13,10 @@ import (
 // imapConn is a minimal IMAP client: enough of RFC 3501 to select a folder, find
 // messages by UID, download a message body, and flag it seen or deleted.
 type imapConn struct {
-	conn net.Conn
-	r    *bufio.Reader
-	tag  int
+	conn   net.Conn
+	r      *bufio.Reader
+	budget *responseBudget
+	tag    int
 }
 
 // dialIMAP connects to an IMAP source. With ssl it uses implicit TLS (IMAPS); otherwise a
@@ -40,7 +41,8 @@ func dialIMAP(server string, port int, ssl, verify bool) (*imapConn, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &imapConn{conn: conn, r: bufio.NewReader(conn)}
+	budget := newResponseBudget(conn)
+	c := &imapConn{conn: conn, r: bufio.NewReader(budget), budget: budget}
 	setDeadline(conn)
 	line, err := c.r.ReadString('\n')
 	if err != nil {
@@ -56,6 +58,7 @@ func dialIMAP(server string, port int, ssl, verify bool) (*imapConn, error) {
 // lines. It is for line-based commands; fetchBody handles the literal-bearing FETCH.
 func (c *imapConn) do(cmd string) ([]string, error) {
 	setDeadline(c.conn)
+	c.budget.renew()
 	c.tag++
 	tag := fmt.Sprintf("a%d", c.tag)
 	if _, err := io.WriteString(c.conn, tag+" "+cmd+"\r\n"); err != nil {
@@ -128,6 +131,7 @@ func (c *imapConn) readLiteral(n int) (body []byte, over bool, err error) {
 // fetchBody downloads one message's full body by UID, reading the literal precisely.
 func (c *imapConn) fetchBody(uid string) ([]byte, error) {
 	setDeadline(c.conn)
+	c.budget.renew()
 	c.tag++
 	tag := fmt.Sprintf("a%d", c.tag)
 	if _, err := io.WriteString(c.conn, tag+" UID FETCH "+uid+" (BODY.PEEK[])\r\n"); err != nil {

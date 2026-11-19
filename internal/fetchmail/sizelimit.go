@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"io"
 	"net"
 	"sync/atomic"
 
@@ -44,6 +45,51 @@ func maxMessage() int64 {
 		return n
 	}
 	return defaultMaxMessage
+}
+
+// ErrResponseTooLarge reports a server response, other than a message body, that
+// ran past the per-command budget: an endless status line or listing.
+var ErrResponseTooLarge = errors.New("fetchmail: server response exceeds the size limit")
+
+// responseSlack is what one command may read beyond the message cap: room for the
+// status lines and literal framing around a message of the largest allowed size.
+const responseSlack = 64 << 10
+
+// responseBudget bounds every byte a client reads from the source within one
+// command. The source decides how much it sends, and a status line, a UIDL or
+// SEARCH listing is buffered whole, so without a budget a server that never ends
+// a line costs the worker its memory. The budget is renewed before each command,
+// so a long session of ordinary replies is not cut off.
+type responseBudget struct {
+	r    io.Reader
+	left int64
+}
+
+// renew restores the budget to the message cap plus the framing slack.
+func (b *responseBudget) renew() { b.left = maxMessage() + responseSlack }
+
+func (b *responseBudget) Read(p []byte) (int, error) {
+	if b.left <= 0 {
+		return 0, ErrResponseTooLarge
+	}
+	if int64(len(p)) > b.left {
+		p = p[:b.left]
+	}
+	n, err := b.r.Read(p)
+	b.left -= int64(n)
+	return n, err
+}
+
+// spent reports whether the budget ran out. A line reader hands back the bytes it
+// had buffered as if they were a whole line when the next read fails, so a caller
+// must check this rather than trust that a returned line was complete.
+func (b *responseBudget) spent() bool { return b.left <= 0 }
+
+// newResponseBudget wraps r with a budget already renewed for the greeting.
+func newResponseBudget(r io.Reader) *responseBudget {
+	b := &responseBudget{r: r}
+	b.renew()
+	return b
 }
 
 // allowInternalSources decides whether a configured source may resolve to a
