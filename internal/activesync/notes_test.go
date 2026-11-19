@@ -113,6 +113,13 @@ func TestSyncNotesClientAdd(t *testing.T) {
 	if got := contactStr(msg.Props, mapi.PrMessageClass); got != noteClass {
 		t.Errorf("stored class = %q, want %s", got, noteClass)
 	}
+	// OpenMessage finds an object in any folder, so the folder the add was sent
+	// to is checked on its own.
+	fid, err := st.MessageFolder(id)
+	mustNoErr(t, "read the note's folder", err)
+	if fid != int64(mapi.PrivateFIDNotes) {
+		t.Errorf("note stored in folder %d, want Notes (%d)", fid, mapi.PrivateFIDNotes)
+	}
 }
 
 // TestSyncNotesRefusesAnObjectOfAnotherFolder proves a Change or Delete in the
