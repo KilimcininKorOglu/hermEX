@@ -78,6 +78,9 @@ func IsPublicIP(ip net.IP) bool {
 // than read, which is the wrong shape for the check that decides whether an
 // attacker-named callback can reach the internal network.
 func isInternalIP(ip net.IP) bool {
+	if v4, ok := embeddedIPv4(ip); ok {
+		return isInternalIP(v4)
+	}
 	return ip.IsLoopback() ||
 		ip.IsLinkLocalUnicast() ||
 		ip.IsLinkLocalMulticast() ||
@@ -93,6 +96,38 @@ func isInternalIP(ip net.IP) bool {
 // and container networks. Without it an attacker-named callback resolving into the
 // range is dialed as if it were on the internet.
 var sharedAddressSpace = net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+
+// IPv6 prefixes that carry an IPv4 address the packet is delivered to: NAT64's
+// well-known prefix (RFC 6052 2.1, the address in the last 32 bits) and 6to4
+// (RFC 3056 2, the address in bits 16 to 47). RFC 8215's local-use NAT64 prefix
+// places the address by an operator-chosen length, so it cannot be decoded and is
+// internal by definition.
+var (
+	nat64WellKnown = net.IPNet{IP: net.ParseIP("64:ff9b::"), Mask: net.CIDRMask(96, 128)}
+	nat64LocalUse  = net.IPNet{IP: net.ParseIP("64:ff9b:1::"), Mask: net.CIDRMask(48, 128)}
+	sixToFour      = net.IPNet{IP: net.ParseIP("2002::"), Mask: net.CIDRMask(16, 128)}
+)
+
+// embeddedIPv4 returns the IPv4 address an IPv6 address delivers to, so it is
+// judged as that address. The local-use NAT64 prefix answers loopback, which is
+// internal, since its embedded address cannot be located.
+func embeddedIPv4(ip net.IP) (net.IP, bool) {
+	if ip.To4() != nil {
+		return nil, false
+	}
+	ip16 := ip.To16()
+	switch {
+	case ip16 == nil:
+		return nil, false
+	case nat64LocalUse.Contains(ip16):
+		return net.IPv4(127, 0, 0, 1), true
+	case nat64WellKnown.Contains(ip16):
+		return net.IPv4(ip16[12], ip16[13], ip16[14], ip16[15]), true
+	case sixToFour.Contains(ip16):
+		return net.IPv4(ip16[2], ip16[3], ip16[4], ip16[5]), true
+	}
+	return nil, false
+}
 
 // isSharedAddressSpace reports whether ip falls in RFC 6598 space.
 func isSharedAddressSpace(ip net.IP) bool {
