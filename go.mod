@@ -1,6 +1,6 @@
 module hermex
 
-go 1.26.6
+go 1.26.11
 
 require (
 	// A single-maintainer module, published from a personal domain rather than a
@@ -15,7 +15,7 @@ require (
 	github.com/emersion/go-msgauth v0.7.0
 	github.com/go-ldap/ldap/v3 v3.4.13
 	github.com/go-sql-driver/mysql v1.10.0
-	github.com/klauspost/compress v1.18.7
+	github.com/klauspost/compress v1.20.4
 	github.com/miekg/dns v1.1.72
 	// Deliberately a fork. The nominal "pkcs7" project (fullsailor/pkcs7) is
 	// unmaintained and no longer builds against a current Go toolchain, so every
@@ -26,9 +26,9 @@ require (
 	// a security-relevant change: read the diff rather than taking the tag.
 	github.com/smallstep/pkcs7 v0.2.3
 	go.mongodb.org/mongo-driver/v2 v2.7.0
-	golang.org/x/net v0.57.0
-	golang.org/x/sync v0.22.0
-	golang.org/x/text v0.41.0
+	golang.org/x/net v0.63.0
+	golang.org/x/sync v0.25.0
+	golang.org/x/text v0.44.0
 	modernc.org/sqlite v1.52.0
 	software.sslmate.com/src/go-pkcs12 v0.7.2
 )
@@ -55,10 +55,10 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.1 // indirect
 	go.uber.org/zap/exp v0.3.0 // indirect
-	golang.org/x/crypto v0.56.0 // indirect
-	golang.org/x/mod v0.38.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/tools v0.48.0 // indirect
+	golang.org/x/crypto v0.59.0 // indirect
+	golang.org/x/mod v0.42.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
+	golang.org/x/tools v0.52.0 // indirect
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect

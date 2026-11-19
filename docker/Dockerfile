@@ -6,7 +6,7 @@
 # of one commit have to produce the same binaries and the same runtime CVE surface.
 # The toolchain tag tracks the go directive in go.mod; update both together.
 # Refresh a digest with: docker buildx imagetools inspect <image>:<tag>
-FROM golang:1.26.6@sha256:0d1d3a794be25f809dd2cb3160d8c73276c4056a9f8242a138e908ddeee7b6b6 AS build
+FROM golang:1.26.11@sha256:4165ee6bf3b7811fd7b40373290405c83d0167dcb87ee5f29c427cdcef45ff8f AS build
 WORKDIR /src
 ENV CGO_ENABLED=0 GOFLAGS=-buildvcs=false
 
