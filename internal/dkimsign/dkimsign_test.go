@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/emersion/go-msgauth/dkim"
+
+	"hermex/internal/logging"
 )
 
 // fakeKeys serves one domain's key.
@@ -213,6 +215,41 @@ func TestSignFailsOpen(t *testing.T) {
 			t.Error("a key-lookup error must yield the original message")
 		}
 	})
+}
+
+// captureSink collects the events a Signer emits.
+type captureSink struct{ events []logging.Event }
+
+func (s *captureSink) Write(e logging.Event) { s.events = append(s.events, e) }
+
+// TestSignRecordsASwallowedFailure proves a signing failure the mail path swallows
+// still reaches the log with its domain and stage: mail leaves unsigned and fails
+// DMARC at the receiver, and the record is the operator's only view of why. A
+// domain with no key is not a failure and must stay silent.
+func TestSignRecordsASwallowedFailure(t *testing.T) {
+	for _, c := range []struct {
+		name, stage string
+		keys        fakeKeys
+	}{
+		{"malformed key", "key", fakeKeys{domain: "example.com", privPEM: []byte("not a pem key"), selector: "s"}},
+		{"lookup error", "lookup", fakeKeys{err: fmt.Errorf("db down")}},
+	} {
+		sink := &captureSink{}
+		(&Signer{Keys: c.keys, Logger: logging.New(sink)}).Sign([]byte(testMsg))
+		if len(sink.events) != 1 {
+			t.Fatalf("%s: %d events, want 1", c.name, len(sink.events))
+		}
+		e := sink.events[0]
+		if e.Name != "dkim.sign.error" || e.Level != logging.LevelError || e.Fields["domain"] != "example.com" || e.Fields["stage"] != c.stage || e.Err == "" {
+			t.Errorf("%s: event = %+v, want dkim.sign.error at error level for example.com, stage %s, with the error", c.name, e, c.stage)
+		}
+	}
+
+	sink := &captureSink{}
+	(&Signer{Keys: fakeKeys{domain: "other.test"}, Logger: logging.New(sink)}).Sign([]byte(testMsg))
+	if len(sink.events) != 0 {
+		t.Errorf("a domain with no key logged %d events, want none", len(sink.events))
+	}
 }
 
 // TestFromHeaderDomain covers the d= source: the first From address's domain,
