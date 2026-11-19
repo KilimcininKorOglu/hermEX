@@ -129,6 +129,44 @@ func TestPollPOP3KeepRecordsBeforeLaterFailure(t *testing.T) {
 	}
 }
 
+// TestPollDeleteModeKeepsAMessageItCouldNotDeliver fails delivery of the second
+// message on a non-kept account. Deleting it from the source anyway would lose
+// it, since the local copy was never made: only the delivered message may be
+// deleted, on POP3 and on IMAP.
+func TestPollDeleteModeKeepsAMessageItCouldNotDeliver(t *testing.T) {
+	allowLoopback(t)
+	failSecond := func() Deliverer {
+		calls := 0
+		return func(_ string, _ []byte, _ time.Time) error {
+			calls++
+			if calls == 2 {
+				return fmt.Errorf("delivery failed")
+			}
+			return nil
+		}
+	}
+
+	host, port, deleted := fakePOP3(t, []string{"From: a\r\n\r\none", "From: b\r\n\r\ntwo"})
+	store := &fakeWorkerStore{configs: []directory.FetchmailEntry{{
+		ID: 1, Mailbox: "alice@hermex.test", Active: true,
+		SrcServer: host, SrcPort: port, SrcUser: "alice", SrcPassword: "pw", Protocol: "POP3",
+	}}}
+	Poll(context.Background(), store, failSecond(), pollTime)
+	if len(*deleted) != 1 || (*deleted)[0] != 1 {
+		t.Errorf("POP3 deletions = %v, want only message 1", *deleted)
+	}
+
+	host, port, recorded := fakeIMAP(t, "From: a\r\n\r\nbody")
+	store = &fakeWorkerStore{configs: []directory.FetchmailEntry{{
+		ID: 2, Mailbox: "alice@hermex.test", Active: true,
+		SrcServer: host, SrcPort: port, SrcUser: "alice", SrcPassword: "pw", Protocol: "IMAP", SrcFolder: "INBOX",
+	}}}
+	Poll(context.Background(), store, failSecond(), pollTime)
+	if joined := strings.Join(*recorded, " | "); strings.Contains(joined, `102 +FLAGS (\Deleted)`) {
+		t.Errorf("IMAP deleted the undelivered message: %q", joined)
+	}
+}
+
 // TestPollIMAPDeleteMode proves a non-kept IMAP account delivers and deletes (store
 // \Deleted + expunge) each message.
 func TestPollIMAPDeleteMode(t *testing.T) {
