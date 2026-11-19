@@ -3,6 +3,7 @@ package admin
 import (
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -40,6 +41,8 @@ func TestPrescribeDomainDNS(t *testing.T) {
 	// SPF authorizes the MX host; the "mx" mechanism covers the server so no
 	// separate include is needed.
 	wantRecordPrefix(t, by, "SPF", "TXT", "v=spf1")
+	wantRecordName(t, by, "SPF", "tenant.com")
+	wantSPFAuthorizesOnlyTheMX(t, by["SPF"].Value)
 	// The DKIM row publishes exactly what the signer generated, name and value
 	// verbatim, so the operator copies the real key, not a guess.
 	wantRecordName(t, by, "DKIM", "hermex._domainkey.tenant.com")
@@ -47,6 +50,7 @@ func TestPrescribeDomainDNS(t *testing.T) {
 	// DMARC must target _dmarc.<domain> and declare an enforcing policy.
 	wantRecordName(t, by, "DMARC", "_dmarc.tenant.com")
 	wantRecordContains(t, by, "DMARC", "TXT", "v=DMARC1")
+	wantDMARCEnforces(t, by["DMARC"].Value, "tenant.com")
 	// The mail-host CNAME points IMAP/POP3/SMTP clients at the server and, in ACME
 	// mode, lets it obtain a certificate for mail.<domain>.
 	wantRecord(t, by, "Mail host", "CNAME", "mail.tenant.com", host)
@@ -84,6 +88,37 @@ func TestNoMailHostCNAMEWhenTheServerIsMailOfTheDomain(t *testing.T) {
 		recs := PrescribeDomainDNS("tenant.com", host, "", "", directory.MTASTSSettings{})
 		wantNoRecord(t, byLabel(recs), "Mail host")
 	}
+}
+
+// wantSPFAuthorizesOnlyTheMX checks an SPF record (RFC 7208) passes the domain's
+// MX hosts and ends in a fail or softfail "all": "+all" or "?all" would let any
+// host on the internet send as the domain.
+func wantSPFAuthorizesOnlyTheMX(t *testing.T, spf string) {
+	t.Helper()
+	terms := strings.Fields(spf)
+	if !slices.Contains(terms, "mx") {
+		t.Errorf("SPF %q does not authorize the MX hosts", spf)
+	}
+	if last := terms[len(terms)-1]; last != "~all" && last != "-all" {
+		t.Errorf("SPF %q ends in %q, want ~all or -all", spf, last)
+	}
+}
+
+// wantDMARCEnforces checks a DMARC record (RFC 7489) asks receivers to act on a
+// failure and sends aggregate reports to the domain's postmaster, the one address
+// whose reports this server stores for that domain.
+func wantDMARCEnforces(t *testing.T, dmarc, domain string) {
+	t.Helper()
+	tags := map[string]string{}
+	for tag := range strings.SplitSeq(dmarc, ";") {
+		if k, v, ok := strings.Cut(strings.TrimSpace(tag), "="); ok {
+			tags[k] = v
+		}
+	}
+	if p := tags["p"]; p != "quarantine" && p != "reject" {
+		t.Errorf("DMARC policy p=%q, want quarantine or reject", p)
+	}
+	wantEq(t, tags["rua"], "mailto:postmaster@"+domain, "DMARC aggregate report address")
 }
 
 // wantNoRecord fails the test when the prescription carries a record it must not.
