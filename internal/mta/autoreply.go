@@ -238,14 +238,10 @@ func bareAddress(s string) string {
 // sameDomain reports whether two addresses share a domain (case-insensitive). It
 // gates the internal-vs-external auto-reply decision so one tenant's out-of-office
 // body never reaches a sender in another domain. A missing domain on either side
-// is treated as no match.
+// is treated as no match. The domain follows the last '@' (directory.AddressDomain).
 func sameDomain(a, b string) bool {
-	_, da, ok1 := strings.Cut(a, "@")
-	_, db, ok2 := strings.Cut(b, "@")
-	if !ok1 || !ok2 || da == "" {
-		return false
-	}
-	return strings.EqualFold(da, db)
+	da := directory.AddressDomain(a)
+	return da != "" && da == directory.AddressDomain(b)
 }
 
 // isRoleMailbox reports whether an address' local part is a role or no-reply
