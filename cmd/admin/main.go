@@ -124,6 +124,9 @@ var commands = []command{
 	{name: "set-tls-acme", args: "<email> --agree-tos",
 		note:    "obtain the front door's certificates from Let's Encrypt; takes effect when the gateway restarts",
 		minArgs: 3, maxArgs: 3, run: runSetTLSACME},
+	{name: "set-mtasts", args: "<off|testing|none|enforce> [max-age] [--confirm-enforce]",
+		note:    "publish this server's MTA-STS policy, or stop with off; enforce needs --confirm-enforce",
+		minArgs: 2, maxArgs: 4, run: runSetMTASTS},
 	{name: "serve", note: "run the admin API HTTP server", run: runServe},
 }
 

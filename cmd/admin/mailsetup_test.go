@@ -16,6 +16,7 @@ type fakeSetupDir struct {
 	keyWrites int
 	av        map[string]bool
 	tls       *directory.TLSSettings
+	sts       *directory.MTASTSSettings
 }
 
 func newFakeSetupDir(domains ...string) *fakeSetupDir {
@@ -44,7 +45,49 @@ func (f *fakeSetupDir) SetDKIMEnabled(d string, on bool) error {
 }
 func (f *fakeSetupDir) SetDomainAVScan(d string, in, _ bool) error { f.av[d] = in; return nil }
 func (f *fakeSetupDir) GetMTASTSSettings() (directory.MTASTSSettings, bool, error) {
-	return directory.MTASTSSettings{}, false, nil
+	if f.sts != nil {
+		return *f.sts, true, nil
+	}
+	return directory.MTASTSSettings{Mode: "testing", MaxAge: directory.MTASTSDefaultMaxAge}, false, nil
+}
+func (f *fakeSetupDir) SetMTASTSSettings(s directory.MTASTSSettings) error { f.sts = &s; return nil }
+
+// TestSetMTASTSRefusesWhatThePanelRefuses covers RFC 8461's modes and max-age
+// range and the panel's rule that enforce, which makes senders refuse delivery
+// when TLS fails, is never set without its explicit confirmation.
+func TestSetMTASTSRefusesWhatThePanelRefuses(t *testing.T) {
+	d := newFakeSetupDir()
+	for _, bad := range []struct{ mode, age string }{
+		{"strict", ""}, {"", ""}, {"testing", "0"}, {"testing", "31557601"}, {"testing", "1d"}, {"enforce", ""},
+	} {
+		if err := setMTASTS(d, bad.mode, bad.age, false); err == nil {
+			t.Errorf("mode %q max age %q accepted", bad.mode, bad.age)
+		}
+	}
+	if d.sts != nil {
+		t.Fatalf("a refused call stored %+v", *d.sts)
+	}
+}
+
+// TestSetMTASTSStoresTheModeAndOffKeepsIt: testing takes the default max age,
+// and off stops publishing without losing the mode and max age set before.
+func TestSetMTASTSStoresTheModeAndOffKeepsIt(t *testing.T) {
+	d := newFakeSetupDir()
+	if err := setMTASTS(d, "testing", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if !d.sts.Enabled || d.sts.Mode != "testing" || d.sts.MaxAge != directory.MTASTSDefaultMaxAge {
+		t.Errorf("testing stored %+v, want enabled testing with the default max age", *d.sts)
+	}
+	if err := setMTASTS(d, "enforce", "604800", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := setMTASTS(d, "off", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if d.sts.Enabled || d.sts.Mode != "enforce" || d.sts.MaxAge != 604800 {
+		t.Errorf("off stored %+v, want publishing off with the mode and max age kept", *d.sts)
+	}
 }
 func (f *fakeSetupDir) SetTLSSettings(s directory.TLSSettings) error { f.tls = &s; return nil }
 

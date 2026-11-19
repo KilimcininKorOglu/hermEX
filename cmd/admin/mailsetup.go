@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 
 	"hermex/internal/admin"
@@ -22,7 +23,63 @@ type mailSetupDir interface {
 	SetDKIMEnabled(domain string, enabled bool) error
 	SetDomainAVScan(domain string, inbound, outbound bool) error
 	GetMTASTSSettings() (directory.MTASTSSettings, bool, error)
+	SetMTASTSSettings(s directory.MTASTSSettings) error
 	SetTLSSettings(s directory.TLSSettings) error
+}
+
+// setMTASTS publishes the server's MTA-STS policy in the given mode (RFC 8461
+// section 5: testing, enforce or none), or stops publishing it with "off", which
+// keeps the stored mode. The rules are the panel's: a max age is whole seconds
+// within RFC 8461's range, empty for the default, and enforce, which makes
+// senders refuse delivery when TLS fails, needs its explicit confirmation.
+func setMTASTS(d mailSetupDir, mode, maxAge string, confirmEnforce bool) error {
+	st, _, err := d.GetMTASTSSettings()
+	if err != nil {
+		return err
+	}
+	switch mode {
+	case "off":
+		st.Enabled = false
+	case "testing", "none", "enforce":
+		st.Enabled, st.Mode = true, mode
+	default:
+		return fmt.Errorf("set-mtasts: mode must be off, testing, none or enforce, got %q", mode)
+	}
+	if st.MaxAge, err = mtastsMaxAge(maxAge, st.MaxAge); err != nil {
+		return err
+	}
+	if st.Enabled && st.Mode == "enforce" && !confirmEnforce {
+		return errors.New("set-mtasts: enforce makes senders refuse mail when TLS fails; pass --confirm-enforce")
+	}
+	return d.SetMTASTSSettings(st)
+}
+
+// mtastsMaxAge reads a max age in whole seconds within RFC 8461's range, keeping
+// current when none is given.
+func mtastsMaxAge(text string, current int) (int, error) {
+	if text == "" {
+		return current, nil
+	}
+	n, err := strconv.Atoi(text)
+	if err != nil || n < 1 || n > directory.MTASTSMaxMaxAge {
+		return 0, fmt.Errorf("set-mtasts: max age %q is not 1..%d seconds", text, directory.MTASTSMaxMaxAge)
+	}
+	return n, nil
+}
+
+func runSetMTASTS(c *cmdContext) {
+	maxAge, confirm := "", false
+	for _, a := range c.args[2:] {
+		if a == "--confirm-enforce" {
+			confirm = true
+		} else {
+			maxAge = a
+		}
+	}
+	if err := setMTASTS(c.dir, c.args[1], maxAge, confirm); err != nil {
+		log.Fatalf("hermex-admin: %v", err)
+	}
+	fmt.Printf("MTA-STS publishing set to %s; publish the records dns-records prints\n", c.args[1])
 }
 
 var errUnknownDomain = errors.New("no such domain")
