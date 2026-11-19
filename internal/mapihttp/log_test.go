@@ -1,6 +1,7 @@
 package mapihttp
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/http/httptest"
 	"strings"
@@ -55,10 +56,13 @@ func TestFailedLoginIsRecordedWithoutThePassword(t *testing.T) {
 	if e.User != "alice@test" {
 		t.Errorf("auth.fail user = %q, want alice@test", e.User)
 	}
+	// Basic auth carries the password base64-encoded (RFC 7617), so a logged
+	// Authorization header leaks it without the plain text ever appearing.
+	encoded := base64.StdEncoding.EncodeToString([]byte("alice@test:" + tried))
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
 	for _, e := range sink.events {
-		if strings.Contains(fmt.Sprintf("%+v", e), tried) {
+		if dump := fmt.Sprintf("%+v", e); strings.Contains(dump, tried) || strings.Contains(dump, encoded) {
 			t.Errorf("event %q carries the password the client sent", e.Name)
 		}
 	}
