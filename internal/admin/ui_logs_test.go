@@ -104,12 +104,12 @@ func TestUILogsRecordAFailedQuery(t *testing.T) {
 // TestUILogsRequiresSystem proves the log viewer is system-admin only.
 func TestUILogsRequiresSystem(t *testing.T) {
 	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminOrg, ScopeID: 1}}}
-	ts := adminServer(t, d)
+	lr := &fakeLogReader{entries: []logging.LogEntry{{Name: "auth.ok", User: "boss@other.test", RemoteAddr: "1.2.3.4"}}}
+	ts := adminServerWithLogs(t, d, lr)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/logs", session)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("org-admin logs page = %d, want 403", resp.StatusCode)
+	body := wantBody(t, authedGET(t, ts, "/admin/ui/logs", session), http.StatusForbidden, "org-admin logs page")
+	if strings.Contains(body, "1.2.3.4") || strings.Contains(body, "boss@other.test") {
+		t.Errorf("the refusal carries a log entry:\n%s", body)
 	}
 }
