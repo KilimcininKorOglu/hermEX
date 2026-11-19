@@ -363,14 +363,17 @@ func (c *pop3Session) transactionCommand(cmd, arg string) (done bool) {
 	return false
 }
 
-// quit commits the session's deletions and says goodbye. A commit failure is
-// recorded rather than hidden; the client is told bye either way.
+// quit commits the session's deletions and says goodbye. A deletion the store
+// refused is recorded and answered with the -ERR RFC 1939 section 6 gives QUIT
+// for it, so the client does not believe the message is gone.
 func (c *pop3Session) quit() {
 	if failed := c.mb.commit(); len(failed) > 0 {
 		c.event(logging.LevelError, "quit.commit.fail", logging.Fields{
 			"folder": c.mb.folder,
 			"uids":   failed,
 		})
+		errLine(c.w, "some deleted messages not removed")
+		return
 	}
 	ok(c.w, "bye")
 }
@@ -553,11 +556,7 @@ func (mb *mailbox) dele(w *ew, arg string) {
 // commit applies the session's deletions to the store on QUIT (the POP3 UPDATE
 // state). Each deletion soft-deletes into the Recoverable Items dumpster rather
 // than purging, so a POP3-deleted message stays recoverable until retention.
-// It returns the UIDs it could not delete. QUIT answers +OK regardless, because
-// the deletions are already durable from the client's point of view and there is
-// no POP3 way to report a partial UPDATE, so the caller records them instead: a
-// message the client believes it deleted and the store still holds is otherwise
-// invisible.
+// It returns the UIDs it could not delete, which the caller records and reports.
 func (mb *mailbox) commit() []uint32 {
 	var failed []uint32
 	for i, del := range mb.deleted {
