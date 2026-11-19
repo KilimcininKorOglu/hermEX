@@ -1069,10 +1069,10 @@ func relayUnresolved(accounts directory.Accounts, spool *relay.Spool, from strin
 //
 // The destinations are routed by the caller through the ordinary local-then-relay
 // path, so a forwarded copy is never itself re-forwarded (one hop) and an
-// undeliverable destination becomes unresolved rather than vanishing. The copy keeps
-// the original envelope sender: a copy relayed to a foreign domain may therefore fail
-// SPF/DMARC and bounce to the original sender, sender rewriting (SRS) is a later
-// refinement, deliberately omitted in v1.
+// undeliverable destination becomes unresolved rather than vanishing. This is the
+// submission path: the envelope sender is the authenticated user, a hosted address,
+// so the copy needs no SRS rewrite and keeps the author signature its From earned.
+// Mail arriving over SMTP takes its forwards in session.routeResolved instead.
 func applyForwards(accounts directory.Accounts, recipients []string) (locals, dests []string) {
 	fwder, ok := accounts.(directory.Forwarder)
 	if !ok {
