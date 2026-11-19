@@ -42,12 +42,39 @@ func TestLoadAndDerivations(t *testing.T) {
 	}
 }
 
-// TestMaildirForPartitions proves data_partitions spreads new mailboxes across
-// roots by a stable hash: an empty pool leaves every mailbox under DataDir, while
-// a configured pool places each user deterministically (same address, even
-// across casing, always the same root, so a re-derivation never relocates a live
-// mailbox), always inside the pool, keeping the {root}/user/{domain}/{local}
-// shape, and actually using more than one partition.
+// TestEachDaemonGetsItsOwnHealthAddress loads the configuration of a single
+// host, where every daemon shares one network namespace and so needs its own
+// /healthz port. A daemon named in health_addrs listens there; a daemon left out
+// keeps the shared health_addr, so a container configuration that sets only
+// health_addr reads exactly as before. An unknown daemon name, or a lookup in a
+// file without either field, never borrows another daemon's port.
+func TestEachDaemonGetsItsOwnHealthAddress(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	doc := `{"database_dsn":"u:p@tcp(127.0.0.1:3306)/email","data_dir":"/srv/mail",
+	         "health_addr":"127.0.0.1:8090",
+	         "health_addrs":{"imap":"127.0.0.1:8091","mta":"127.0.0.1:8092"}}`
+	if err := os.WriteFile(p, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for daemon, want := range map[string]string{
+		"imap": "127.0.0.1:8091",
+		"mta":  "127.0.0.1:8092",
+		"pop3": "127.0.0.1:8090",
+		"IMAP": "127.0.0.1:8090",
+	} {
+		if got := c.HealthAddrFor(daemon); got != want {
+			t.Errorf("HealthAddrFor(%q) = %q, want %q", daemon, got, want)
+		}
+	}
+	if got := (&Config{}).HealthAddrFor("imap"); got != "" {
+		t.Errorf("HealthAddrFor with neither field set = %q, want the endpoint disabled", got)
+	}
+}
+
 // TestMaildirForSplitsAtTheLastAt files an account whose quoted local part holds
 // an '@' (RFC 5321 4.1.2) under the domain directory.ValidateAddress assigns it
 // to, the one after the last '@', not under a directory named after the rest.
@@ -58,6 +85,12 @@ func TestMaildirForSplitsAtTheLastAt(t *testing.T) {
 	}
 }
 
+// TestMaildirForPartitions proves data_partitions spreads new mailboxes across
+// roots by a stable hash: an empty pool leaves every mailbox under DataDir, while
+// a configured pool places each user deterministically (same address, even
+// across casing, always the same root, so a re-derivation never relocates a live
+// mailbox), always inside the pool, keeping the {root}/user/{domain}/{local}
+// shape, and actually using more than one partition.
 func TestMaildirForPartitions(t *testing.T) {
 	// Empty pool: byte-identical to the single-root rule.
 	single := &Config{DataDir: "/data/mb"}

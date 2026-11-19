@@ -36,13 +36,18 @@ type Config struct {
 	AdminSecret    string   `json:"admin_secret"`    // signing key for admin session tokens; required to serve the admin API
 	KeySecret      string   `json:"key_secret"`      // at-rest wrapping secret for the DKIM and TLS private keys the directory stores; empty falls back to admin_secret, and with neither set those keys are stored unencrypted
 	DigestSecret   string   `json:"digest_secret"`   // signing key for quarantine-digest release links; the MTA mints and webmail verifies, both daemons must share it, empty disables release links
-	HealthAddr     string   `json:"health_addr"`     // per-daemon /healthz listen address (e.g. ":8090"); empty disables the health endpoint
-	TLSCert        string   `json:"tls_cert"`        // PEM certificate (chain) for implicit-TLS/HTTPS listeners
-	TLSKey         string   `json:"tls_key"`         // PEM private key paired with tls_cert
-	IMAPSAddr      string   `json:"imaps_addr"`      // IMAP implicit-TLS listen address (e.g. ":993"); empty disables
-	POP3SAddr      string   `json:"pop3s_addr"`      // POP3 implicit-TLS listen address (e.g. ":995"); empty disables
-	SMTPSAddr      string   `json:"smtps_addr"`      // SMTP implicit-TLS listen address (e.g. ":465"); empty disables
-	DaneResolver   string   `json:"dane_resolver"`   // address of a DNSSEC-validating resolver for outbound DANE/TLSA (RFC 7672); bare host gets :53, empty disables DANE (opportunistic TLS only)
+	HealthAddr     string   `json:"health_addr"`     // /healthz listen address every daemon uses unless health_addrs names it (e.g. ":8090"); empty disables the health endpoint
+	// HealthAddrs gives a daemon its own /healthz listen address, keyed by the
+	// daemon's health name ("imap", "mta", "mapi", ...). Daemons that share one
+	// network namespace, as on a single host, need one each; in a container each
+	// daemon has its own namespace and the shared health_addr is enough.
+	HealthAddrs  map[string]string `json:"health_addrs"`
+	TLSCert      string            `json:"tls_cert"`      // PEM certificate (chain) for implicit-TLS/HTTPS listeners
+	TLSKey       string            `json:"tls_key"`       // PEM private key paired with tls_cert
+	IMAPSAddr    string            `json:"imaps_addr"`    // IMAP implicit-TLS listen address (e.g. ":993"); empty disables
+	POP3SAddr    string            `json:"pop3s_addr"`    // POP3 implicit-TLS listen address (e.g. ":995"); empty disables
+	SMTPSAddr    string            `json:"smtps_addr"`    // SMTP implicit-TLS listen address (e.g. ":465"); empty disables
+	DaneResolver string            `json:"dane_resolver"` // address of a DNSSEC-validating resolver for outbound DANE/TLSA (RFC 7672); bare host gets :53, empty disables DANE (opportunistic TLS only)
 
 	// Gateway front door. Only the gateway daemon reads these; every other daemon
 	// ignores them, so they stay optional in the one shared config. Each empty field
@@ -160,6 +165,15 @@ func (c *Config) TLSConfig() (*tls.Config, error) {
 		CurvePreferences:       []tls.CurveID{tls.X25519, tls.CurveP256},
 		SessionTicketsDisabled: false,
 	}, nil
+}
+
+// HealthAddrFor returns the /healthz listen address of the named daemon: its
+// health_addrs entry when there is one, otherwise the shared health_addr.
+func (c *Config) HealthAddrFor(daemon string) string {
+	if addr, ok := c.HealthAddrs[daemon]; ok {
+		return addr
+	}
+	return c.HealthAddr
 }
 
 // TLSEnabled reports whether a certificate and key are both configured, i.e.

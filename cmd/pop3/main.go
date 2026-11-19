@@ -171,7 +171,7 @@ func runUntilSignal(cfg *config.Config, db *sql.DB, provider *tlscert.Provider, 
 		checks = append(checks, tlscert.ExpiryCheck(provider))
 	}
 	comps := append([]lifecycle.Component{srv},
-		health.Components(cfg.HealthAddr, "pop3", checks...)...)
+		health.Components(cfg.HealthAddrFor("pop3"), "pop3", checks...)...)
 	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-pop3: %v", err)
 	}

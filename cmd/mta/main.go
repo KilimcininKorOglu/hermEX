@@ -608,7 +608,7 @@ func (d *mtaDaemon) run(provider *tlscert.Provider, comps []lifecycle.Component,
 		// failed shows as degraded before clients start failing handshakes.
 		checks = append(checks, tlscert.ExpiryCheck(provider))
 	}
-	comps = append(comps, health.Components(d.cfg.HealthAddr, "mta", checks...)...)
+	comps = append(comps, health.Components(d.cfg.HealthAddrFor("mta"), "mta", checks...)...)
 	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, d.spool.Close, d.logClose, d.db.Close); err != nil {
 		log.Fatalf("hermex-mta: %v", err)
 	}

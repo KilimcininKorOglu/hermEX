@@ -163,7 +163,7 @@ func runUntilSignal(cfg *config.Config, db *sql.DB, provider *tlscert.Provider, 
 		checks = append(checks, tlscert.ExpiryCheck(provider))
 	}
 	comps := append([]lifecycle.Component{srv},
-		health.Components(cfg.HealthAddr, "imap", checks...)...)
+		health.Components(cfg.HealthAddrFor("imap"), "imap", checks...)...)
 	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-imap: %v", err)
 	}

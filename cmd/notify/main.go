@@ -57,7 +57,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log.Printf("hermex-notify listening on %s", addr)
-	comps := append([]lifecycle.Component{hs}, health.Components(cfg.HealthAddr, "notify")...)
+	comps := append([]lifecycle.Component{hs}, health.Components(cfg.HealthAddrFor("notify"), "notify")...)
 	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, logClose); err != nil {
 		log.Fatalf("hermex-notify: %v", err)
 	}

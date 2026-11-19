@@ -92,7 +92,7 @@ func main() {
 		checks = append(checks, tlscert.ExpiryCheck(p))
 	}
 	comps := append([]lifecycle.Component{hs},
-		health.Components(cfg.HealthAddr, "gateway", checks...)...)
+		health.Components(cfg.HealthAddrFor("gateway"), "gateway", checks...)...)
 	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-gateway: %v", err)
 	}

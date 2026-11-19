@@ -177,7 +177,7 @@ func runUntilSignal(cfg *config.Config, db *sql.DB, provider *tlscert.Provider, 
 		checks = append(checks, tlscert.ExpiryCheck(provider))
 	}
 	comps := append([]lifecycle.Component{hs},
-		health.Components(cfg.HealthAddr, "mapi", checks...)...)
+		health.Components(cfg.HealthAddrFor("mapi"), "mapi", checks...)...)
 	cleanups = append(cleanups, db.Close)
 	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, cleanups...); err != nil {
 		log.Fatalf("hermex-mapi: %v", err)

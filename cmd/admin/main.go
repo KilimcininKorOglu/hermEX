@@ -476,7 +476,7 @@ func runServe(c *cmdContext) {
 	// and reconnecting, and no daemon depends on it at startup, so reporting the
 	// panel degraded when it is down would contradict that.
 	comps := append([]lifecycle.Component{hs},
-		health.Components(cfg.HealthAddr, "admin", adminHealthChecks(db, provider)...)...)
+		health.Components(cfg.HealthAddrFor("admin"), "admin", adminHealthChecks(db, provider)...)...)
 	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, cleanups...); err != nil {
 		log.Fatalf("hermex-admin: %v", err)
 	}
