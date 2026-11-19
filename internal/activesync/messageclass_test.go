@@ -139,8 +139,14 @@ func TestEmailAppDataSMIMEClientNoMIME(t *testing.T) {
 	if cls := data.ChildText(wbxml.EMMessageClass); cls != messageClassSMIMEMultipart {
 		t.Errorf("message class = %q, want %q (the class is reported even without MIME support)", cls, messageClassSMIMEMultipart)
 	}
-	if bt := data.Child(wbxml.ABBody).ChildText(wbxml.ABType); bt != strconv.Itoa(bodyTypePlain) {
+	body := data.Child(wbxml.ABBody)
+	if bt := body.ChildText(wbxml.ABType); bt != strconv.Itoa(bodyTypePlain) {
 		t.Errorf("body type = %q, want %d (a no-MIME client gets the extracted body)", bt, bodyTypePlain)
+	}
+	// The extracted body is the signed text part, not an empty placeholder.
+	d := body.Child(wbxml.ABData)
+	if d == nil || !bytes.Contains(d.Opaque, []byte("This is the signed body.")) {
+		t.Errorf("extracted body = %+v, want the signed text part", d)
 	}
 }
 
