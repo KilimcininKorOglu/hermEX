@@ -31,6 +31,21 @@ func validateTLSCert(certPEM, keyPEM string) (notAfter int64, dnsNames []string,
 	return leaf.NotAfter.UnixMilli(), leaf.DNSNames, nil
 }
 
+// certCoversName reports whether a certificate's DNS names cover the SNI name it
+// is to be stored under, which is the name every client asking for it will check.
+// A wildcard name must appear as itself; a plain name matches itself or a wildcard
+// one label above it (RFC 6125 6.4.3).
+func certCoversName(dnsNames []string, name string) bool {
+	_, parent, hasParent := strings.Cut(name, ".")
+	for _, dn := range dnsNames {
+		dn = strings.ToLower(dn)
+		if dn == name || (hasParent && !strings.HasPrefix(name, "*.") && dn == "*."+parent) {
+			return true
+		}
+	}
+	return false
+}
+
 // tlsCertView is a stored certificate's row for the panel: its SNI name (blank is
 // the default) and a human expiry date.
 type tlsCertView struct {
@@ -213,6 +228,9 @@ func (s *Server) handleUITLSCertUpload(w http.ResponseWriter, r *http.Request) {
 	certPEM := strings.TrimSpace(r.FormValue("cert")) + "\n"
 	keyPEM := strings.TrimSpace(r.FormValue("key")) + "\n"
 	notAfter, dnsNames, err := validateTLSCert(certPEM, keyPEM)
+	if err == nil && name != "" && !certCoversName(dnsNames, name) {
+		err = fmt.Errorf("the certificate does not cover %q; it names %s", name, strings.Join(dnsNames, ", "))
+	}
 	if err != nil {
 		// validateTLSCert describes the file the operator just pasted (not a pair,
 		// unparseable leaf, already expired), not a server internal, and it is the
