@@ -93,6 +93,33 @@ func TestProviderResolutionOrder(t *testing.T) {
 	}
 }
 
+// TestServerNameMatchIgnoresCase stores a certificate under a mixed-case name and
+// asks for it in another case. RFC 6066 3 and RFC 4343 make a host name
+// case-insensitive, so the named certificate must be served, not the default
+// that a byte-exact match would fall through to.
+func TestServerNameMatchIgnoresCase(t *testing.T) {
+	cert, key := genCertPEM(t, "mail.example.com")
+	defCert, defKey := genCertPEM(t, "default.example.com")
+	store := &fakeStore{
+		certs: []directory.TLSCertData{
+			{Name: "", CertPEM: defCert, KeyPEM: defKey},
+			{Name: "Mail.Example.com", CertPEM: cert, KeyPEM: key},
+		},
+		version: 1, count: 2,
+	}
+	p, err := New(nil, store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, _ := p.getCertificate(helloFor("unknown.example.com"))
+	for _, sni := range []string{"mail.example.com", "MAIL.EXAMPLE.COM", "mail.EXAMPLE.com"} {
+		got, err := p.getCertificate(helloFor(sni))
+		if err != nil || got == nil || got == def {
+			t.Errorf("SNI %q served the default (or nothing), want the named certificate", sni)
+		}
+	}
+}
+
 // TestProviderRefreshReloadsOnVersionChange proves the poll reloads only when the
 // store's version probe moves: an unchanged probe skips the (re-parsing) load, and
 // a bumped probe picks up the new material, so a renewal applies without a restart
