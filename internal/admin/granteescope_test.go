@@ -45,6 +45,12 @@ func TestDomainAdminGranteeScope(t *testing.T) {
 			foreign: `["ceo@other.test"]`,
 		},
 		{
+			name:    "send-on-behalf",
+			path:    "/admin/users/in@acme.test/sendonbehalf",
+			inScope: `["peer@acme.test"]`,
+			foreign: `["ceo@other.test"]`,
+		},
+		{
 			name:    "store owners",
 			path:    "/admin/users/in@acme.test/storeowners",
 			inScope: `["peer@acme.test"]`,
