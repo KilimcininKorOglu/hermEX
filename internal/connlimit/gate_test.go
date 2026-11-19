@@ -1,6 +1,7 @@
 package connlimit
 
 import (
+	"io"
 	"net"
 	"testing"
 )
@@ -12,6 +13,37 @@ type addrConn struct {
 }
 
 func (c addrConn) RemoteAddr() net.Addr { return c.remote }
+
+// TestARefusedConnectionIsToldWhyAndClosed proves the refusal path end to end:
+// the operator's hook learns the client and which cap refused it, and the client
+// reads the protocol's refusal line and then end of stream, so it backs off
+// instead of waiting on a greeting that never comes. The gate is the cap the
+// limiter holds (total, then per client), never a guess.
+func TestARefusedConnectionIsToldWhyAndClosed(t *testing.T) {
+	const line = "* BYE too many connections\r\n"
+	l := enabled(t, 1, 1)
+	var gotRemote string
+	var gotWhy Reason
+	gate, refuse := Gate(l, line, func(remote string, why Reason) { gotRemote, gotWhy = remote, why })
+	remote := &net.TCPAddr{IP: net.ParseIP("198.51.100.7"), Port: 4242}
+
+	if _, ok := gate(addrConn{remote: remote}); !ok {
+		t.Fatal("the first connection was refused under the cap")
+	}
+	server, client := net.Pipe()
+	defer client.Close()
+	if _, ok := gate(addrConn{Conn: server, remote: remote}); ok {
+		t.Fatal("a connection past the cap was admitted")
+	}
+	if gotRemote != remote.String() || gotWhy != ReasonTotal {
+		t.Errorf("onRefused(%q, %q), want (%q, %q)", gotRemote, gotWhy, remote, ReasonTotal)
+	}
+	go refuse(server)
+	got, err := io.ReadAll(client)
+	if err != nil || string(got) != line {
+		t.Errorf("client read %q, %v, want the refusal line then end of stream", got, err)
+	}
+}
 
 // TestPerClientCapCountsAnIPv6SubnetAsOneClient opens connections from a fresh
 // address of one /64 each time. A host is routed a whole /64 (RFC 6177), so keyed
