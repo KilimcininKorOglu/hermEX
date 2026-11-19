@@ -58,7 +58,7 @@ func TestRuleActionVectors(t *testing.T) {
 	fid := mapi.MakeEID(1, mapi.GlobCnt{0, 0, 0, 0, 0, 0x0D})
 	fidBytes := []byte{0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0D}
 	mid := mapi.MakeEID(1, mapi.GlobCnt{0, 0, 0, 0, 0, 0x2A})
-	midBytes := []byte{0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2A}
+	msgIDBytes := []byte{0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2A}
 	guid := sampleGUID()
 	tag := mapi.MakeTag(0x1234, mapi.PtLong)
 	header := func(length byte, op uint8, flavor, flags byte) []byte {
@@ -85,7 +85,7 @@ func TestRuleActionVectors(t *testing.T) {
 			join(header(17, 0x09, 0, 0), []byte{0x03, 0x00, 0x34, 0x12, 0x07, 0x00, 0x00, 0x00})},
 		{"reply", mapi.ActionBlock{Type: mapi.OpReply, Flavor: 2, Data: mapi.ReplyAction{
 			TemplateFolderID: fid, TemplateMessageID: mid, TemplateGUID: guid}},
-			join(header(9+32, 0x03, 2, 0), fidBytes, midBytes, guidBytes(t, guid))},
+			join(header(9+32, 0x03, 2, 0), fidBytes, msgIDBytes, guidBytes(t, guid))},
 		{"move", mapi.ActionBlock{Type: mapi.OpMove, Data: mapi.MoveCopyAction{
 			SameStore: true, FolderEID: mapi.SVREID{FolderID: fid}}},
 			join(header(9+1+3+2+21, 0x01, 0, 0), []byte{0x01, 0x01, 0x00, 0x00, 0x15, 0x00, 0x01},
