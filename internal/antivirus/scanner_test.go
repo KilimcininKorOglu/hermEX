@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"testing"
+	"time"
 )
 
 // fakeClamd is a minimal clamd that speaks just enough INSTREAM to drive the
@@ -138,6 +139,42 @@ func TestScanClamdError(t *testing.T) {
 	s, _ := New(f.addr())
 	if _, err := s.Scan([]byte("x")); err == nil {
 		t.Fatal("want error on clamd ERROR reply")
+	}
+}
+
+// TestScanGivesUpOnASilentClamd connects to a clamd that reads the whole stream
+// and never answers, the state of a wedged or overloaded daemon. The scan runs
+// inside the SMTP DATA phase, so it must fail within its deadline and let the
+// fail-open path deliver, rather than hold the session open indefinitely.
+func TestScanGivesUpOnASilentClamd(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = readInstream(conn)
+		<-release // read everything, answer nothing
+	}()
+
+	s, _ := New("tcp://" + ln.Addr().String())
+	s.timeout = 200 * time.Millisecond
+	done := make(chan error, 1)
+	go func() { _, err := s.Scan([]byte("payload")); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a silent clamd produced a verdict, want an error")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Scan still waiting on a silent clamd after 5s, want it bounded by its deadline")
 	}
 }
 
