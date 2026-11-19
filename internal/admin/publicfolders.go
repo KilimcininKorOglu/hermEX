@@ -156,9 +156,11 @@ func (s *Server) handleUISetPublicGrant(w http.ResponseWriter, r *http.Request) 
 	}
 	domain := r.PostFormValue("domain")
 	fid, _ := strconv.ParseInt(r.PostFormValue("fid"), 10, 64)
-	rights, _ := strconv.ParseUint(r.PostFormValue("rights"), 10, 32)
-	change, errMsg := s.publicGrantChange(domain, r.PostFormValue("grantee"), uint32(rights))
-	if errMsg == "" {
+	rights, rightsOK := formRights(r)
+	change, errMsg := s.publicGrantChange(domain, r.PostFormValue("grantee"), rights)
+	if !rightsOK {
+		errMsg = "folderPerms.rightsInvalid"
+	} else if errMsg == "" {
 		if err := s.pub.Grant(domain, fid, change); err != nil {
 			errMsg = s.notice("publicFolders.grantFailed", err)
 		}

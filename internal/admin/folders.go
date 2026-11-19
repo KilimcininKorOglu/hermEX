@@ -261,12 +261,14 @@ func (s *Server) handleUISetFolderPerm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fid, _ := strconv.ParseInt(r.PostFormValue("fid"), 10, 64)
-	rights, _ := strconv.ParseUint(r.PostFormValue("rights"), 10, 32)
+	rights, rightsOK := formRights(r)
 	username := r.PostFormValue("username")
 	member, memberOK, mErr := s.canonicalMember(username)
 	outOfScope, inScope := s.addressScopeError(s.adminPerms(cl.UserID), []string{username})
 	errMsg := ""
 	switch {
+	case !rightsOK:
+		errMsg = "folderPerms.rightsInvalid"
 	case !inScope:
 		errMsg = scopeRefusalMsg("scope.folderMember", outOfScope)
 	case mErr != nil:
@@ -274,7 +276,7 @@ func (s *Server) handleUISetFolderPerm(w http.ResponseWriter, r *http.Request) {
 	case !memberOK:
 		errMsg = "folderPerms.noSuchMember"
 	default:
-		if err := s.store.SetFolderPermission(u.Maildir, fid, member, uint32(rights)); err != nil {
+		if err := s.store.SetFolderPermission(u.Maildir, fid, member, rights); err != nil {
 			errMsg = s.notice("folderPerms.grantFailed", err)
 		}
 	}

@@ -249,6 +249,7 @@
     "permsUnread": "İzinler okunamadı.",
     "lookupFailed": "Kullanıcı aranamadı.",
     "noSuchMember": "Böyle bir kullanıcı yok. İzni alıcının birincil adresine verin.",
+    "rightsInvalid": "Listeden bir izin düzeyi seçin.",
     "grantFailed": "İzin verilemedi.",
     "removeFailed": "Kaldırılamadı."
   },

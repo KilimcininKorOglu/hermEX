@@ -551,6 +551,13 @@ func formInt(r *http.Request, name string) int {
 	return n
 }
 
+// formRights reads a folder rights mask. ok is false when the field is blank or not
+// a 32-bit unsigned number: read as 0 it silently revoked every right the member held.
+func formRights(r *http.Request) (uint32, bool) {
+	n, err := strconv.ParseUint(strings.TrimSpace(r.PostFormValue("rights")), 10, 32)
+	return uint32(n), err == nil
+}
+
 // formFloat reads a non-negative float form field, returning 0 when absent or
 // unparseable so the caller's range check rejects it.
 func formFloat(r *http.Request, name string) float64 {

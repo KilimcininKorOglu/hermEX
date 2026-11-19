@@ -195,6 +195,18 @@ func TestUISetFolderPerm(t *testing.T) {
 		t.Errorf("captured = %q/%d/%q/%#x, want /mb/alice/12/bob/Reviewer",
 			store.setPermDir, store.setPermFolder, store.setPermUser, store.setPermRights)
 	}
+
+	// A rights value that is not a number, or past 32 bits, read as 0 and silently
+	// revoked every right the member held; it is now refused and nothing is written.
+	for _, bad := range []string{"owner", "4294967296", ""} {
+		store.setPermUser = ""
+		body := wantBody(t, htmxPOST(t, ts, "/admin/ui/users/alice@hermex.test/folder-perms/set", session, csrf,
+			url.Values{"fid": {"12"}, "username": {"bob@hermex.test"}, "rights": {bad}}), http.StatusOK, "rights "+bad)
+		wantContains(t, body, "Choose a permission level", "the refusal for "+bad)
+		if store.setPermUser != "" {
+			t.Errorf("rights %q was written as %#x", bad, store.setPermRights)
+		}
+	}
 }
 
 // TestUIRemoveFolderPerm proves the remove control drops the addressed member.

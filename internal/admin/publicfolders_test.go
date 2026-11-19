@@ -92,6 +92,14 @@ func TestPublicFoldersManage(t *testing.T) {
 	wantContains(t, crossDomain, "user in this domain", "a cross-domain grantee is refused")
 	wantNotContains(t, crossDomain, "<td>intruder@other.test</td>", "the refused grantee is not stored")
 
+	// A rights value that is not a number read as 0 and silently stripped the
+	// poster's Author grant; it is now refused and the grant row keeps its level.
+	forged := wantBody(t, htmxPOST(t, ts, "/admin/ui/public-folders/grant", session, csrf,
+		url.Values{"domain": {"local.test"}, "fid": {strconv.FormatInt(fid, 10)},
+			"grantee": {"poster@local.test"}, "rights": {"owner"}}), http.StatusOK, "forged rights")
+	wantContains(t, forged, "Choose a permission level", "a forged rights value is refused")
+	wantContains(t, forged, "<td>poster@local.test</td><td>Author</td>", "the refused change keeps the grant")
+
 	deleteFolder := func(id int64) string {
 		t.Helper()
 		return wantBody(t, htmxPOST(t, ts, "/admin/ui/public-folders/folder/delete", session, csrf,
