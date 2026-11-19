@@ -498,13 +498,14 @@ func (s *Server) handleUIUserEdit(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.uiAuthorized(w, r); !ok {
 		return
 	}
-	atoi := func(v string) int { n, _ := strconv.Atoi(v); return n }
+	// A value that is not a number reads as -1, which the directory refuses: read as
+	// 0 it would reactivate a suspended account or turn a room into a mailbox.
 	found, err := s.dir.UpdateUser(r.PathValue("email"), directory.UserUpdate{
-		Status:      atoi(r.PostFormValue("status")),
+		Status:      formInt(r, "status"),
 		Lang:        r.PostFormValue("lang"),
 		Timezone:    r.PostFormValue("timezone"),
-		DisplayType: atoi(r.PostFormValue("displayType")),
-		Homeserver:  atoi(r.PostFormValue("homeserver")),
+		DisplayType: formInt(r, "displayType"),
+		Homeserver:  formInt(r, "homeserver"),
 		POP3IMAP:    r.PostFormValue("pop3_imap") != "",
 		SMTP:        r.PostFormValue("smtp") != "",
 		ChgPasswd:   r.PostFormValue("chgpasswd") != "",

@@ -1036,6 +1036,12 @@ type UserUpdate struct {
 // likewise preserved.
 func (d *SQLDirectory) UpdateUser(username string, u UserUpdate) (bool, error) {
 	username = strings.ToLower(strings.TrimSpace(username))
+	if err := validUserKind(u.Status, u.DisplayType); err != nil {
+		return false, err
+	}
+	if u.Homeserver < 0 || u.Homeserver > 255 { // users.homeserver is TINYINT UNSIGNED
+		return false, fmt.Errorf("directory: home server %d is outside 0..255", u.Homeserver)
+	}
 	var id int64
 	err := d.db.QueryRow(`SELECT id FROM users WHERE username = ?`, username).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1053,6 +1059,24 @@ func (d *SQLDirectory) UpdateUser(username string, u UserUpdate) (bool, error) {
 		u.Status&0x0F, u.Lang, u.Timezone, u.DisplayType, u.Homeserver,
 		^uint64(managedPrivileges), privilegeBitsFor(u), username)
 	return err == nil, err
+}
+
+// validUserKind refuses a status other than normal, suspended or shared and a
+// display type other than a mailbox user, room or equipment. The status was masked
+// into any of sixteen values, and a display type of a list or a contact turned a
+// mailbox into an object every login and delivery path treats differently.
+func validUserKind(status, displayType int) error {
+	switch status {
+	case afUserNormal, afUserSuspended, afUserSharedMbox:
+	default:
+		return fmt.Errorf("directory: unknown account status %d", status)
+	}
+	switch displayType {
+	case dtMailuser, dtRoom, dtEquipment:
+	default:
+		return fmt.Errorf("directory: unknown account type %d", displayType)
+	}
+	return nil
 }
 
 // managedPrivileges is the set of privilege_bits the admin update owns; UpdateUser

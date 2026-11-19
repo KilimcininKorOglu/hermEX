@@ -32,3 +32,20 @@ func TestUIUserEditPrivileges(t *testing.T) {
 		t.Errorf("privilege payload = %+v, want POP3IMAP+Web+DAV on and SMTP/EAS/ChgPasswd off", got)
 	}
 }
+
+// TestUIUserEditNeverReadsATypoAsNormal forges a status and a type that are not
+// numbers. Read as 0 they reactivated a suspended account and turned a room into a
+// mailbox; they must reach the directory as the refused -1.
+func TestUIUserEditNeverReadsATypoAsNormal(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test", session, csrf,
+		url.Values{"status": {"active"}, "displayType": {"x"}, "homeserver": {"-2"}}).Body.Close()
+	got := d.updateUser
+	if got.Status != -1 || got.DisplayType != -1 || got.Homeserver != -1 {
+		t.Errorf("forged values reached the directory as status %d type %d homeserver %d, want -1 each",
+			got.Status, got.DisplayType, got.Homeserver)
+	}
+}

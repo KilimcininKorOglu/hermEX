@@ -62,12 +62,23 @@ func wantForeignBitsPreserved(t *testing.T, d *SQLDirectory, db *sql.DB) {
 	t.Helper()
 	_, err := db.Exec(`UPDATE users SET address_status = 0x20 WHERE username = ?`, "alice@hermex.test")
 	mustNoErr(t, "seed the domain-status bits", err)
-	_, err = d.UpdateUser("alice@hermex.test", UserUpdate{Status: 3, POP3IMAP: true})
+	_, err = d.UpdateUser("alice@hermex.test", UserUpdate{Status: afUserSuspended, POP3IMAP: true})
 	mustNoErr(t, "update user", err)
 	var rawStatus int
 	mustNoErr(t, "read address_status",
 		db.QueryRow(`SELECT address_status FROM users WHERE username = ?`, "alice@hermex.test").Scan(&rawStatus))
-	wantEq(t, "address_status after a status edit (domain bits 0x20 preserved, status 3)", rawStatus, 0x23)
+	wantEq(t, "address_status after a status edit (domain bits 0x20 preserved, suspended 1)", rawStatus, 0x21)
+
+	// A status outside normal/suspended/shared and a display type of a list (1), a
+	// contact (6) or an unknown kind are refused, and the stored row is unchanged.
+	for _, u := range []UserUpdate{{Status: 3}, {Status: -1}, {DisplayType: dtDistlist}, {DisplayType: dtContact}, {DisplayType: -1}, {Homeserver: -1}, {Homeserver: 256}} {
+		if _, err := d.UpdateUser("alice@hermex.test", u); err == nil {
+			t.Errorf("UpdateUser accepted status %d display type %d", u.Status, u.DisplayType)
+		}
+	}
+	mustNoErr(t, "read address_status",
+		db.QueryRow(`SELECT address_status FROM users WHERE username = ?`, "alice@hermex.test").Scan(&rawStatus))
+	wantEq(t, "address_status after refused edits", rawStatus, 0x21)
 
 	_, err = db.Exec(`UPDATE users SET privilege_bits = 0x100 WHERE username = ?`, "alice@hermex.test")
 	mustNoErr(t, "seed a foreign privilege bit", err)
