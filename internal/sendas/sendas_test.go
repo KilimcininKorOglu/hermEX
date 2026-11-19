@@ -1,6 +1,7 @@
 package sendas
 
 import (
+	"errors"
 	"testing"
 
 	"hermex/internal/directory"
@@ -79,6 +80,56 @@ func TestResolveNamesTheGrant(t *testing.T) {
 		if repr != c.repr || sender != c.sender {
 			t.Errorf("%s: (repr,sender) = (%q,%q), want (%q,%q)", c.name, repr, sender, c.repr, c.sender)
 		}
+	}
+}
+
+// aliasAccounts is a directory whose caller owns an alias besides the login, or
+// whose identity lookup fails, the two shapes Identities has to handle.
+type aliasAccounts struct {
+	directory.StaticAccounts
+	ids []string
+	err error
+}
+
+func (a aliasAccounts) Identities(string) ([]string, error) { return a.ids, a.err }
+
+// TestAnAliasIsTheCallersOwnAndCarriesItsGrants proves a caller's alias is their
+// own identity (From names the alias, no Sender), and a mailbox that granted
+// send-as to the alias grants it to the caller who owns it. When the directory
+// cannot list the identities, the caller keeps the login alone: the alias and the
+// grant made to it are refused rather than assumed.
+func TestAnAliasIsTheCallersOwnAndCarriesItsGrants(t *testing.T) {
+	const alias = "sales@hermex.test"
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSendAs([]string{" SALES@hermex.test "}); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	base := directory.StaticAccounts{
+		caller:               {MailboxPath: t.TempDir()},
+		"shared@hermex.test": {Shared: true, MailboxPath: dir},
+	}
+
+	withAlias := aliasAccounts{StaticAccounts: base, ids: []string{caller, alias}}
+	if repr, sender, g := Resolve(withAlias, caller, "Sales@Hermex.test"); g != GrantOwn || repr != alias || sender != alias {
+		t.Errorf("alias: (%q,%q,%v), want (%q,%q,own)", repr, sender, g, alias, alias)
+	}
+	if _, _, g := Resolve(withAlias, caller, "shared@hermex.test"); g != GrantSendAs {
+		t.Errorf("grant to the caller's alias = %v, want send-as", g)
+	}
+
+	broken := aliasAccounts{StaticAccounts: base, err: errors.New("directory down")}
+	for _, want := range []string{alias, "shared@hermex.test"} {
+		if _, _, g := Resolve(broken, caller, want); g != GrantNone {
+			t.Errorf("identity lookup failed, %s: grant = %v, want none", want, g)
+		}
+	}
+	if _, _, g := Resolve(broken, caller, caller); g != GrantOwn {
+		t.Errorf("identity lookup failed, own login: grant = %v, want own", g)
 	}
 }
 
