@@ -78,6 +78,9 @@ func TestSyncTasksStreamsTask(t *testing.T) {
 	if body := data.Child(wbxml.ABBody); body == nil || string(body.Child(wbxml.ABData).Opaque) != "cut the tag" {
 		t.Errorf("task body not streamed: %+v", body)
 	}
+	if cats := data.Child(wbxml.TKCategories); cats == nil || cats.ChildText(wbxml.TKCategory) != "Work" {
+		t.Errorf("task category not streamed: %+v", cats)
+	}
 }
 
 // TestSyncTasksClientAdd confirms a device-created task is stored through oxtask (the
