@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -130,5 +131,13 @@ func TestAdminAccessLogNamesAFailedLogin(t *testing.T) {
 	}
 	if user != "admin@hermex.test" {
 		t.Errorf("logged user = %q, want the login the sign-in was attempted against", user)
+	}
+	// The attempted password names a credential, never something to log.
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	for _, e := range sink.events {
+		if strings.Contains(fmt.Sprintf("%+v", e), "wrong") {
+			t.Errorf("an event carries the attempted password: %+v", e)
+		}
 	}
 }
