@@ -70,6 +70,12 @@ func TestIMAPLoginThrottle(t *testing.T) {
 	if r := login("c"); !strings.Contains(r, "too many failed attempts") {
 		t.Fatalf("throttled LOGIN = %q, want too many failed attempts", r)
 	}
+	// A guess that hits the right password during the lockout is refused as well:
+	// otherwise the lockout only slows a guesser down by telling it which try won.
+	_, _ = fmt.Fprintf(conn, "d LOGIN alice secret\r\n")
+	if r, _ := br.ReadString('\n'); !strings.Contains(r, "too many failed attempts") {
+		t.Fatalf("correct password during the lockout = %q, want too many failed attempts", r)
+	}
 }
 
 // TestIMAPThrottleCountsTheAccountToo proves the account axis is wired at the
