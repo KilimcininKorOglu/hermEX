@@ -264,7 +264,11 @@ func (s *MongoSink) store(batch []Event) {
 		s.downUntil = time.Now().Add(storeRetryInterval)
 		return
 	}
-	s.replaySpill() // connected and caught up, drain anything spilled earlier
+	// Connected and caught up: drain anything spilled earlier. A replay that fails
+	// found the store down, so it backs off like a failed write.
+	if !s.replaySpill() {
+		s.downUntil = time.Now().Add(storeRetryInterval)
+	}
 }
 
 // reportDrops tells stderr how many events the full buffer turned away since the

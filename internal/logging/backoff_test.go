@@ -40,6 +40,32 @@ func TestASpillDuringReplayIsKept(t *testing.T) {
 	}
 }
 
+// TestAFailedReplayBacksOff replays a spill into a store that went down after the
+// sink connected. The failed replay must keep the store untried for the retry
+// interval, like a failed write, instead of hanging a write deadline on every
+// tick of the outage.
+func TestAFailedReplayBacksOff(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "spill.jsonl")
+	s := &MongoSink{spillPath: path}
+	s.writeTimeout.Store(int64(time.Second))
+	s.spill([]Event{{Subsystem: IMAP, Name: "kept"}})
+	var calls int
+	s.ins = inserterFunc(func(context.Context, []any) error {
+		calls++
+		return errors.New("store down")
+	})
+
+	s.store(nil)
+	s.store(nil)
+
+	if calls != 1 {
+		t.Errorf("the down store was tried %d times by two passes, want 1 (the second backing off)", calls)
+	}
+	if docs, err := readSpill(replayPath(path)); err != nil || len(docs) != 1 {
+		t.Errorf("the spill being replayed holds %d events (err %v), want its 1 kept", len(docs), err)
+	}
+}
+
 // TestADownStoreIsNotRetriedForEveryBatch takes the log store down after the sink
 // connected, so every insert hangs until its deadline. Retrying the store for each
 // batch held the single writer for the whole deadline per batch, the buffer filled,

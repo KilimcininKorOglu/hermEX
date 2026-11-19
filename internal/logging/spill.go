@@ -80,17 +80,18 @@ func (s *MongoSink) spillLost(n int, reason string, err error) {
 // logs). Only the store goroutine calls this. The spill is first moved aside to
 // replayPath under spillMu, so a batch spilled while the replay runs goes to a new
 // spill file and is replayed next time rather than removed unread; an earlier
-// replay that failed is finished before a new spill is moved aside.
-func (s *MongoSink) replaySpill() {
+// replay that failed is finished before a new spill is moved aside. It reports
+// false when the store refused the replay.
+func (s *MongoSink) replaySpill() bool {
 	if !s.hasSpill.Load() || s.spillPath == "" {
-		return
+		return true
 	}
 	replaying := replayPath(s.spillPath)
 	s.spillMu.Lock()
 	if _, err := os.Stat(replaying); errors.Is(err, fs.ErrNotExist) {
 		if err := os.Rename(s.spillPath, replaying); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			s.spillMu.Unlock()
-			return // cannot move it aside now; keep it and retry later
+			return true // a disk problem, not the store: keep the file, retry later
 		}
 	}
 	s.hasSpill.Store(false) // a spill from here on sets it again
@@ -102,15 +103,17 @@ func (s *MongoSink) replaySpill() {
 		return s.ins.InsertMany(ctx, batch)
 	}
 	if err := eachSpillBatch(replaying, insert); err != nil {
-		if !errors.Is(err, fs.ErrNotExist) {
-			s.hasSpill.Store(true) // unreachable again: keep it, retry later
+		if errors.Is(err, fs.ErrNotExist) {
+			return true
 		}
-		return
+		s.hasSpill.Store(true) // unreachable again: keep it, retry later
+		return false
 	}
 	// The batches are already in Mongo. A failed removal replays them on the next
 	// drain, which duplicates events rather than losing them: the safe direction,
 	// and the only one available to the logger itself.
 	_ = os.Remove(replaying)
+	return true
 }
 
 // eachSpillBatch decodes the newline-delimited JSON spill file into insertable
