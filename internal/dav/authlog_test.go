@@ -1,6 +1,7 @@
 package dav
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/http/httptest"
 	"strings"
@@ -24,12 +25,15 @@ func TestFailedLoginIsRecordedWithoutThePassword(t *testing.T) {
 	if _, _, ok := srv.basicAuth(httptest.NewRecorder(), r); ok {
 		t.Fatal("a wrong password was accepted")
 	}
+	// Basic auth carries the password base64-encoded (RFC 7617), so a logged
+	// Authorization header leaks it without the plain text ever appearing.
+	encoded := base64.StdEncoding.EncodeToString([]byte("alice@test:" + tried))
 	found := false
 	for _, e := range sink.events {
 		if e.Name == "auth.fail" && e.User == "alice@test" {
 			found = true
 		}
-		if strings.Contains(fmt.Sprintf("%+v", e), tried) {
+		if dump := fmt.Sprintf("%+v", e); strings.Contains(dump, tried) || strings.Contains(dump, encoded) {
 			t.Errorf("event %q carries the password the client sent", e.Name)
 		}
 	}
