@@ -106,6 +106,9 @@ type QueueEntry struct {
 	// retried: it is never handed back to delivery, because it may already have
 	// been accepted.
 	Interrupted bool
+	// Held marks a recipient parked after a fault inside this server (Hold). It is
+	// not retried until an administrator releases it with RetryNow.
+	Held bool
 }
 
 // journalSizeLimit is the size a checkpoint truncates the write-ahead log back
@@ -257,7 +260,7 @@ func (s *Spool) Claim(now time.Time, limit int) ([]Item, error) {
 	rows, err := s.db.Query(`
 SELECT r.id, m.envelope_from, r.recipient, m.body, r.attempts, r.notify
   FROM recipients r JOIN messages m ON m.id = r.message_id
- WHERE r.next_attempt <= ? AND r.delivery_started = 0 AND r.delivered = 0
+ WHERE r.next_attempt <= ? AND r.delivery_started = 0 AND r.delivered = 0 AND r.held = 0
  ORDER BY r.next_attempt, r.id
  LIMIT ?`, now.Unix(), limit)
 	if err != nil {
@@ -345,6 +348,14 @@ func (s *Spool) Retry(recipientID int64, nextAttempt time.Time, lastErr string) 
 	return err
 }
 
+// Hold parks a recipient whose delivery failed inside this server. Unlike Retry it
+// leaves the attempt count alone, and Claim skips the row until RetryNow releases
+// it, so the message is neither retried into the same fault nor bounced.
+func (s *Spool) Hold(recipientID int64, lastErr string) error {
+	_, err := s.db.Exec(`UPDATE recipients SET held = 1, last_error = ? WHERE id = ?`, lastErr, recipientID)
+	return err
+}
+
 // List returns every queued recipient delivery joined with its message, newest
 // enqueue first, for the administrative mail-queue view. It reads all rows: the
 // outbound spool is a transient backlog, not a mailbox, so no pagination.
@@ -352,7 +363,7 @@ func (s *Spool) List() ([]QueueEntry, error) {
 	rows, err := s.db.Query(`
 SELECT r.id, m.id, m.envelope_from, r.recipient, r.attempts,
        m.enqueued_at, r.next_attempt, r.last_error, LENGTH(m.body),
-       r.delivery_started, r.delivered
+       r.delivery_started, r.delivered, r.held
   FROM recipients r JOIN messages m ON m.id = r.message_id
  ORDER BY m.enqueued_at DESC, r.id`)
 	if err != nil {
@@ -364,7 +375,7 @@ SELECT r.id, m.id, m.envelope_from, r.recipient, r.attempts,
 		var e QueueEntry
 		var enq, next, started, delivered int64
 		if err := rows.Scan(&e.RecipientID, &e.MessageID, &e.From, &e.Recipient,
-			&e.Attempts, &enq, &next, &e.LastError, &e.Size, &started, &delivered); err != nil {
+			&e.Attempts, &enq, &next, &e.LastError, &e.Size, &started, &delivered, &e.Held); err != nil {
 			return nil, err
 		}
 		e.Interrupted = started > 0 || delivered > 0
@@ -380,7 +391,7 @@ SELECT r.id, m.id, m.envelope_from, r.recipient, r.attempts,
 // It is the administrative "flush" action; the attempt count and last error are
 // kept so the delivery history is preserved. A recipient already gone is a no-op.
 func (s *Spool) RetryNow(recipientID int64, when time.Time) error {
-	_, err := s.db.Exec(`UPDATE recipients SET next_attempt = ? WHERE id = ?`,
+	_, err := s.db.Exec(`UPDATE recipients SET next_attempt = ?, held = 0 WHERE id = ?`,
 		when.Unix(), recipientID)
 	return err
 }

@@ -45,7 +45,7 @@ func (w *Worker) sendDMARCReports(ctx context.Context, day time.Time) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		w.reportDMARCDomain(day, domain)
+		w.containReport("dmarc.report.panic", domain, func() { w.reportDMARCDomain(day, domain) })
 	}
 	return nil
 }

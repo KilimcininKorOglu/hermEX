@@ -11,6 +11,7 @@
     "statusPending": "Pending",
     "statusDeferred": "Deferred",
     "statusInterrupted": "Interrupted",
+    "statusHeld": "Held (internal error)",
     "tryOne": "{0} try",
     "tryMany": "{0} tries",
     "nextRetry": "Next retry",

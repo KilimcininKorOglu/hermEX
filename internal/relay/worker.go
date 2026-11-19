@@ -20,6 +20,7 @@ import (
 	"github.com/emersion/go-msgauth/dmarc"
 
 	"hermex/internal/dane"
+	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 	"hermex/internal/mtasts"
 	"hermex/internal/tlsrpt"
@@ -395,7 +396,9 @@ func (w *Worker) attempt(it Item, now time.Time) (bool, error) {
 	if me := w.Spool.MarkStarted(it.RecipientID, now); me != nil {
 		return false, me
 	}
-	e := w.deliver(it)
+	// A panic while delivering this recipient is its failed attempt, not the end of
+	// the daemon: the row is still queued, so a crash would repeat on every start.
+	e := lifecycle.Contain(func() error { return w.deliver(it) })
 	if e == nil {
 		if se := w.settleDelivered(it); se != nil {
 			return false, se
@@ -408,7 +411,27 @@ func (w *Worker) attempt(it Item, now time.Time) (bool, error) {
 	if ce := w.Spool.ClearStarted(it.RecipientID); ce != nil {
 		return false, ce
 	}
+	if errors.Is(e, lifecycle.ErrPanicked) {
+		return false, w.settleHeld(it, e)
+	}
 	return false, w.settleFailure(it, now, e)
+}
+
+// settleHeld parks a recipient whose delivery panicked. The fault is in this
+// server, not at the recipient's side, so a retry would hit it again and a bounce
+// would blame the sender: the message waits on the mail-queue page, with no
+// attempt counted, until an administrator retries or deletes it.
+func (w *Worker) settleHeld(it Item, e error) error {
+	if he := w.Spool.Hold(it.RecipientID, "held after an internal error: "+e.Error()); he != nil {
+		return he
+	}
+	fields := logging.Fields{"from": it.From, "attempts": it.Attempts}
+	if pe, ok := errors.AsType[*lifecycle.PanicError](e); ok {
+		fields["stack"] = string(pe.Stack)
+	}
+	w.Logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "relay.held",
+		User: it.Recipient, Err: e.Error(), Fields: fields})
+	return nil
 }
 
 // settleDelivered finishes the bookkeeping for an accepted message. The mail

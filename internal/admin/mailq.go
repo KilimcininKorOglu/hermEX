@@ -89,6 +89,10 @@ func (s *Server) mailqViews(c clock, lang string) ([]mailqView, error) {
 		if e.Interrupted {
 			status = "Interrupted"
 		}
+		// A held row waits for an administrator, so it has no next retry to show.
+		if e.Held {
+			status, next = "Held", stamp{}
+		}
 		out = append(out, mailqView{
 			ID: e.RecipientID, From: e.From, Recipient: e.Recipient, Attempts: e.Attempts,
 			Enqueued: c.at(e.EnqueuedAt), NextAttempt: next,

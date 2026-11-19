@@ -11,6 +11,7 @@
     "statusPending": "Bekliyor",
     "statusDeferred": "Ertelendi",
     "statusInterrupted": "Kesildi",
+    "statusHeld": "Bekletildi (iç hata)",
     "tryOne": "{0} deneme",
     "tryMany": "{0} deneme",
     "nextRetry": "Sonraki deneme",

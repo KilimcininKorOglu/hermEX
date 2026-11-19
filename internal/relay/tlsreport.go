@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 	"hermex/internal/tlsrpt"
 )
@@ -32,9 +33,18 @@ func (w *Worker) sendTLSReports(ctx context.Context, day time.Time) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		w.reportDomain(day, domain)
+		w.containReport("tlsrpt.report.panic", domain, func() { w.reportDomain(day, domain) })
 	}
 	return nil
+}
+
+// containReport runs one domain's report so that a panic fails that domain alone:
+// it is logged under name, the domain is still marked reported by the report's
+// own deferred mark, and the pass goes on to the next domain.
+func (w *Worker) containReport(name, domain string, report func()) {
+	if err := lifecycle.Contain(func() error { report(); return nil }); err != nil {
+		w.logReport(name, domain, err)
+	}
 }
 
 // reportDomain assembles, addresses, and delivers one domain's daily report. It
