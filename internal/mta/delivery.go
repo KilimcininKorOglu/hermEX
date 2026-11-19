@@ -75,11 +75,20 @@ type Backend struct {
 	Reports         ReportRecorder          // DMARC and TLS reports sent to postmaster; nil stores none
 	DMARC           DMARCRecorder           // counts for the DMARC aggregate reports this server sends; nil counts nothing
 	AuthServID      string                  // authserv-id of the Authentication-Results this server writes (its mail hostname); empty writes none
+	Forwarding      *Forwarding             // ARC and SRS for relayed mail; nil sends it unsealed with the original envelope sender
 }
 
 // NewSession implements smtp.Backend.
 func (b *Backend) NewSession(remoteAddr string) (smtp.Session, error) {
-	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer, history: b.History, greylist: b.Greylist, rateLimit: b.RateLimit, thresholds: b.Thresholds, recipAccess: b.RecipientAccess, outbound: b.Outbound, limiter: b.Limiter, reports: b.Reports, dmarc: b.DMARC, authservID: b.AuthServID}, nil
+	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer, history: b.History, greylist: b.Greylist, rateLimit: b.RateLimit, thresholds: b.Thresholds, recipAccess: b.RecipientAccess, outbound: b.Outbound, limiter: b.Limiter, reports: b.Reports, dmarc: b.DMARC, authservID: b.AuthServID, forwarding: b.Forwarding}, nil
+}
+
+// forwardGroup is the external recipients one local domain forwards a message
+// to: the members of its list, or the destinations its users forward to. The
+// group leaves under that domain's SRS envelope and ARC seal.
+type forwardGroup struct {
+	domain string
+	rcpts  []relay.DSNRecipient
 }
 
 type session struct {
@@ -105,6 +114,20 @@ type session struct {
 	authUser     string               // set on a successful AUTH; empty for unauthenticated intake
 	authMailbox  string               // the authenticated user's mailbox store path
 	authservID   string               // authserv-id of this server's Authentication-Results
+	forwarding   *Forwarding
+	forwards     []forwardGroup // external recipients of unauthenticated mail a local domain relays
+}
+
+// addForward adds an external recipient a local domain relays this message to.
+func (s *session) addForward(domain string, rcpt relay.DSNRecipient) {
+	domain = strings.ToLower(domain)
+	for i := range s.forwards {
+		if s.forwards[i].domain == domain {
+			s.forwards[i].rcpts = append(s.forwards[i].rcpts, rcpt)
+			return
+		}
+	}
+	s.forwards = append(s.forwards, forwardGroup{domain: domain, rcpts: []relay.DSNRecipient{rcpt}})
 }
 
 // Auth implements smtp.Authenticator: it validates submission credentials against
@@ -267,7 +290,7 @@ func (s *session) Rcpt(to string, params smtp.RcptParams) error {
 			// on a list post suppresses every member's bounce) but not its ORCPT,
 			// which named the list address, not the member.
 			for _, m := range leaves {
-				s.routeListMember(m, params.Notify)
+				s.routeListMember(m, params.Notify, domainPart(to))
 			}
 			return nil
 		}
@@ -358,18 +381,26 @@ func (s *session) routeCatchAll(to, path string) error {
 // becomes a delivery target (skipped when over its receive quota), an external
 // member is relayed when a spool is available. A member that resolves to nothing
 // is dropped, a list must not bounce because one member went stale.
-func (s *session) routeListMember(m, notify string) {
+func (s *session) routeListMember(m, notify, listDomain string) {
 	if path, ok := s.accounts.Resolve(m); ok {
 		if overReceiveQuota(path) == nil {
 			s.targets = append(s.targets, target{addr: m, path: path})
 		}
 		return
 	}
-	if s.spool != nil {
-		if ext, err := isRelayable(s.accounts, m); err == nil && ext {
-			s.relayTargets = append(s.relayTargets, relay.DSNRecipient{Addr: m, Notify: notify})
-		}
+	if s.spool == nil {
+		return
 	}
+	if ext, err := isRelayable(s.accounts, m); err != nil || !ext {
+		return
+	}
+	rcpt := relay.DSNRecipient{Addr: m, Notify: notify}
+	if s.authUser == "" {
+		// The list relays mail it did not author, so its domain vouches for it.
+		s.addForward(listDomain, rcpt)
+		return
+	}
+	s.relayTargets = append(s.relayTargets, rcpt)
 }
 
 // overReceiveQuota refuses a local recipient whose mailbox already sits at or
@@ -484,6 +515,9 @@ func (s *session) Data(r io.Reader) error {
 	if err := s.queueRelay(raw, received); err != nil {
 		return err
 	}
+	if err := s.queueForwards(sc.original, received); err != nil {
+		return err
+	}
 	// Last, so a report is stored only for a message the sender is told was
 	// accepted; a deferred message comes back and is read then.
 	s.ingestReports(raw, received, sc)
@@ -500,7 +534,11 @@ func (s *session) avVerdict(raw []byte, received time.Time) avDecision {
 	if s.authUser == "" {
 		mode = avInboundSMTP
 	}
-	return scanMessage(s.accounts, mode, s.from, avRecipients(s.targets, relayAddrs(s.relayTargets)), raw, received)
+	external := relayAddrs(s.relayTargets)
+	for _, g := range s.forwards {
+		external = append(external, relayAddrs(g.rcpts)...)
+	}
+	return scanMessage(s.accounts, mode, s.from, avRecipients(s.targets, external), raw, received)
 }
 
 // scoring is one message's spam verdict plus the message-level filing it implies.
@@ -529,7 +567,8 @@ func (s *session) scoreInbound(raw []byte, received time.Time) scoring {
 	// the message as it arrived, so a signature covering such a field verifies.
 	stripped := antispam.StripOwnAuthResults(raw, s.authservID)
 	sc.raw, sc.original = stripped, stripped
-	sc.scored = s.scorer != nil && len(s.targets) > 0
+	// A message only relayed onward is scored too: the seal records these results.
+	sc.scored = s.scorer != nil && (len(s.targets) > 0 || len(s.forwards) > 0)
 	if !sc.scored {
 		return sc
 	}
@@ -726,9 +765,9 @@ func (s *session) queueRelay(raw []byte, received time.Time) error {
 		return nil
 	}
 	// Only an authenticated submission has had its From checked by sendas, so only
-	// it carries the author's DKIM signature. The relay targets of an
-	// unauthenticated session are external list members, and its From is whatever
-	// the sender wrote.
+	// it carries the author's DKIM signature. An unauthenticated session relays
+	// only a bounce to a rewritten (SRS) sender, whose From is whatever the
+	// reporting server wrote.
 	enqueue := s.spool.EnqueueDSN
 	if s.authUser == "" {
 		enqueue = s.spool.EnqueueForward
@@ -742,10 +781,28 @@ func (s *session) queueRelay(raw []byte, received time.Time) error {
 	return nil
 }
 
+// queueForwards spools each forward group under its domain: the envelope sender
+// rewritten with SRS and the message sealed with ARC, never author-signed. body
+// is the inbound copy carrying this server's Authentication-Results, without the
+// local X-Spam tags.
+func (s *session) queueForwards(body []byte, received time.Time) error {
+	for _, g := range s.forwards {
+		from := s.forwarding.ReversePath(s.from, g.domain, received)
+		sealed := s.forwarding.Seal(body, g.domain, received)
+		if err := s.spool.EnqueueForward(from, s.ret, s.envid, g.rcpts, sealed, received); err != nil {
+			s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "forward.fail", RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "domain": g.domain, "recipients": len(g.rcpts)}, Err: err.Error()})
+			return &smtp.TempError{Message: "4.3.0 could not queue the message, please retry later"}
+		}
+		s.logger.Emit(logging.Event{Level: logging.LevelInfo, Subsystem: logging.MTA, Name: "forward.queued", RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "domain": g.domain, "recipients": len(g.rcpts)}})
+	}
+	return nil
+}
+
 func (s *session) Reset() {
 	s.from = ""
 	s.targets = nil
 	s.relayTargets = nil
+	s.forwards = nil
 	s.ret = ""
 	s.envid = ""
 }

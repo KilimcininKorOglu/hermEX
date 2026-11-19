@@ -120,6 +120,21 @@ func fromHeaderDomain(body []byte) string {
 	return strings.ToLower(addrs[0].Address[at+1:])
 }
 
+// SigningKey returns a domain's enabled key and selector, parsed, for a signer
+// other than the author signature (the ARC sealer). found is false when the
+// domain has no enabled key.
+func SigningKey(keys KeyProvider, domain string) (key crypto.Signer, selector string, found bool, err error) {
+	privPEM, selector, found, err := keys.DKIMKey(domain)
+	if err != nil || !found {
+		return nil, "", false, err
+	}
+	key, err = parsePrivateKey(privPEM)
+	if err != nil {
+		return nil, "", false, err
+	}
+	return key, selector, true, nil
+}
+
 // parsePrivateKey decodes a PEM private key (PKCS#1 or PKCS#8) into a crypto.Signer.
 func parsePrivateKey(privPEM []byte) (crypto.Signer, error) {
 	block, _ := pem.Decode(privPEM)

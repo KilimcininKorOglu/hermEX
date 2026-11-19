@@ -1,6 +1,7 @@
 package mta
 
 import (
+	"errors"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/dkimsign"
 	"hermex/internal/relay"
 	"hermex/internal/smtp"
 )
@@ -168,9 +170,35 @@ type countingSigner struct{ calls int }
 
 func (c *countingSigner) Sign(b []byte) []byte { c.calls++; return b }
 
-// listRelaySigns posts to a list with an external member through a session with
-// the given authenticated user, and reports how often the author signer ran.
-func listRelaySigns(t *testing.T, authUser string) int {
+// staticKeys is a KeyProvider holding one domain's signing key.
+type staticKeys struct {
+	domain string
+	pem    []byte
+}
+
+func (k staticKeys) DKIMKey(domain string) ([]byte, string, bool, error) {
+	if domain != k.domain {
+		return nil, "", false, nil
+	}
+	return k.pem, "s1", true, nil
+}
+
+// testForwarding is a Forwarding for the domain local with an RSA key and an
+// SRS secret, resolving no DNS.
+func testForwarding(t *testing.T) *Forwarding {
+	t.Helper()
+	pem, _, err := dkimsign.GenerateKey(dkimsign.KeyRSA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &Forwarding{Keys: staticKeys{domain: "local", pem: pem}, SRSSecret: []byte("srs secret"),
+		AuthServID: "mx.local", Lookup: func(string) ([]string, error) { return nil, errors.New("no DNS in tests") }}
+}
+
+// listRelay posts to a list with an external member through a session with the
+// given authenticated user. It returns how often the author signer ran and the
+// one queued delivery.
+func listRelay(t *testing.T, authUser string) (int, relay.Item) {
 	t.Helper()
 	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
 	if err != nil {
@@ -187,31 +215,48 @@ func listRelaySigns(t *testing.T, authUser string) int {
 		StaticAccounts: directory.StaticAccounts{"alice@local": {MailboxPath: "/mb/alice"}},
 		lists:          fakeExpander{"team@local": ok("alice@local", "ext@remote.test")},
 	}
-	s := &session{accounts: accounts, from: "x@out.test", authUser: authUser, spool: sp}
+	s := &session{accounts: accounts, from: "x@out.test", authUser: authUser, spool: sp, forwarding: testForwarding(t)}
 	if err := s.Rcpt("team@local", smtp.RcptParams{}); err != nil {
 		t.Fatal(err)
 	}
-	if len(s.relayTargets) != 1 {
-		t.Fatalf("relay targets = %d, want the external member", len(s.relayTargets))
-	}
-	if err := s.queueRelay([]byte("From: ceo@local\r\nSubject: wire money\r\n\r\nbody"), time.Now()); err != nil {
+	now := time.Now()
+	raw := []byte("From: ceo@local\r\nSubject: wire money\r\n\r\nbody\r\n")
+	if err := s.queueRelay(raw, now); err != nil {
 		t.Fatal(err)
 	}
-	return cs.calls
+	if err := s.queueForwards(raw, now); err != nil {
+		t.Fatal(err)
+	}
+	items, err := sp.Claim(now, 10)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("queued %d deliveries (%v), want the external member", len(items), err)
+	}
+	return cs.calls, items[0]
 }
 
 // TestUnauthenticatedListRelayIsNotAuthorSigned posts, without authentication,
 // a message claiming From: ceo@local to a list with an external member. The
 // signer keys on the From domain, so signing it would hand a forgery the hosted
 // domain's valid DKIM signature (RFC 6376 section 1.1: the signer takes
-// responsibility for the message). An authenticated sender's From passed sendas,
-// so that relay is still signed.
+// responsibility for the message). The list's domain vouches for the relay with
+// an ARC set (RFC 8617) and an SRS envelope sender at its own domain instead. An
+// authenticated sender's From passed sendas, so that relay is author-signed and
+// keeps its envelope sender.
 func TestUnauthenticatedListRelayIsNotAuthorSigned(t *testing.T) {
-	if n := listRelaySigns(t, ""); n != 0 {
+	n, item := listRelay(t, "")
+	if n != 0 {
 		t.Errorf("an unauthenticated list relay was author-signed %d times", n)
 	}
-	if n := listRelaySigns(t, "alice@local"); n != 1 {
-		t.Errorf("an authenticated list relay was signed %d times, want 1", n)
+	if !strings.HasPrefix(item.From, "SRS0=") || !strings.HasSuffix(item.From, "=out.test=x@local") {
+		t.Errorf("envelope sender = %q, want an SRS0 address at the list domain", item.From)
+	}
+	if !strings.HasPrefix(string(item.Body), "ARC-Seal: i=1; a=rsa-sha256; d=local; s=s1;") {
+		t.Errorf("the relayed copy carries no ARC set by the list domain:\n%s", item.Body)
+	}
+	n, item = listRelay(t, "alice@local")
+	if n != 1 || item.From != "x@out.test" || strings.Contains(string(item.Body), "ARC-Seal") {
+		t.Errorf("authenticated list relay: signed %d times, envelope %q, sealed %v; want 1, the sender, unsealed",
+			n, item.From, strings.Contains(string(item.Body), "ARC-Seal"))
 	}
 }
 

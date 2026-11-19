@@ -5,6 +5,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"flag"
@@ -15,6 +17,7 @@ import (
 	"net/mail"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -111,6 +114,7 @@ type mtaDaemon struct {
 	logClose func() error
 	spool    *relay.Spool
 	dmarc    *dmarcSwitch
+	forward  *mta.Forwarding
 }
 
 // limiters is the set of abuse controls the SMTP backend and the delivery hooks
@@ -176,6 +180,7 @@ func (d *mtaDaemon) wireDelivery() {
 	// drains it, so its maintenance failures are recorded here.
 	spool.Logger = d.logger
 	d.spool = spool
+	d.forward = newForwarding(d.cfg, d.dir, d.logger)
 
 	// DMARC aggregate reports to the domains whose mail arrives here: off until an
 	// operator turns them on, read at startup and re-read every minute. The switch
@@ -295,9 +300,10 @@ func (d *mtaDaemon) wireRuleHooks(lim limiters) {
 	// Wire delivery-time inbox-rule forwarding to the relay spool, gated by the
 	// outbound abuse limiter (the per-user cap). Wired here, not in the mta package,
 	// to keep the store free of any send dependency (like OnMeetingRequest). The
-	// envelope sender is the forwarding owner so bounces return to them and the relay
-	// DKIM path signs for their domain; the loop/backscatter guards already ran.
-	mta.OnRuleForward = ruleHook("forward", lim.outbound, forwardEnqueue(d.spool), d.logger)
+	// envelope sender is the forwarding owner so bounces return to them; the
+	// forwarded bytes are not author-signed but sealed with ARC by the owner's
+	// domain. The loop/backscatter guards already ran.
+	mta.OnRuleForward = ruleHook("forward", lim.outbound, forwardEnqueue(d.spool, d.forward), d.logger)
 	// Reject bounces and vacation auto-replies a delivery-time inbox rule generated:
 	// enqueued from the owning mailbox (DKIM domain) under the same outbound cap. The
 	// store built the bytes and applied the backscatter/loop guards.
@@ -348,7 +354,7 @@ func (d *mtaDaemon) startServer(scorer *antispam.Scorer, lim limiters, addr stri
 	// report otherwise. It now starts, sees the same toggle, and says on every run
 	// that it cannot send.
 	go runDigest(dir, []byte(cfg.DigestSecret), cfg.Hostname, d.lockPass(directory.LockDigest), logger)
-	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: d.spool, Logger: logger, Scorer: scorer, History: dir, Greylist: lim.greylist, RateLimit: lim.rate, Thresholds: dir, RecipientAccess: dir, Outbound: lim.outbound, Limiter: lim.login, Reports: dir, DMARC: gatedDMARC{sw: d.dmarc, rec: d.spool}, AuthServID: cfg.Hostname}, Hostname: cfg.Hostname, Logger: logger}
+	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: d.spool, Logger: logger, Scorer: scorer, History: dir, Greylist: lim.greylist, RateLimit: lim.rate, Thresholds: dir, RecipientAccess: dir, Outbound: lim.outbound, Limiter: lim.login, Reports: dir, DMARC: gatedDMARC{sw: d.dmarc, rec: d.spool}, AuthServID: cfg.Hostname, Forwarding: d.forward}, Hostname: cfg.Hostname, Logger: logger}
 	// The built-in ceiling holds from the first accepted connection, so a settings
 	// read that fails at startup still leaves inbound DATA bounded.
 	srv.SetMaxSize(directory.DefaultMaxInboundBytes)
@@ -690,17 +696,42 @@ func antispamAccess(dir *directory.SQLDirectory) (*antispam.AccessList, uint64, 
 // enqueueFunc is the spool entry point a rule hook puts mail on: (*relay.Spool).Enqueue.
 type enqueueFunc func(from string, to []string, raw []byte, now time.Time) error
 
+// newForwarding builds the ARC and SRS settings for relayed mail. The SRS hash
+// key is derived from the key-wrapping secret, so it needs no setting of its
+// own; with no secret configured, forwarded mail keeps its envelope sender and
+// that is recorded at startup.
+func newForwarding(cfg *config.Config, dir *directory.SQLDirectory, logger *logging.Logger) *mta.Forwarding {
+	f := &mta.Forwarding{Keys: dir, AuthServID: cfg.Hostname, Logger: logger}
+	if secret := cfg.KeyWrapSecret(); len(secret) > 0 {
+		m := hmac.New(sha256.New, secret)
+		m.Write([]byte("srs"))
+		f.SRSSecret = m.Sum(nil)
+	} else {
+		logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.MTA, Name: "srs.disabled",
+			Fields: logging.Fields{"detail": "no key_secret or admin_secret; forwarded mail keeps its envelope sender"}})
+	}
+	return f
+}
+
 // forwardEnqueue queues a rule forward without the author signature. The
 // forwarded bytes are the message as it arrived, so its From is the original
-// sender's claim, which this server never checked.
-func forwardEnqueue(spool *relay.Spool) enqueueFunc {
+// sender's claim, which this server never checked; the owner's domain seals it
+// with ARC instead. The envelope sender is the owner, an address of that domain,
+// so it needs no rewriting.
+func forwardEnqueue(spool *relay.Spool, fwd *mta.Forwarding) enqueueFunc {
 	return func(from string, to []string, raw []byte, now time.Time) error {
 		rcpts := make([]relay.DSNRecipient, len(to))
 		for i, addr := range to {
 			rcpts[i] = relay.DSNRecipient{Addr: addr}
 		}
-		return spool.EnqueueForward(from, "", "", rcpts, raw, now)
+		sealed := fwd.Seal(raw, ownerDomain(from), now)
+		return spool.EnqueueForward(from, "", "", rcpts, sealed, now)
 	}
+}
+
+// ownerDomain is the domain of an address, taken after its last '@'.
+func ownerDomain(addr string) string {
+	return addr[strings.LastIndexByte(addr, '@')+1:]
 }
 
 // ruleHook builds the hook a delivery-time inbox rule calls to put mail on the wire,
