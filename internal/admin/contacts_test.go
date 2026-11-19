@@ -97,6 +97,28 @@ func TestUIDeleteContact(t *testing.T) {
 	}
 }
 
+// TestUIContactWritesNeedASystemAdmin proves a domain administrator cannot create,
+// rename or delete a contact: a contact is a global address-book entry, outside
+// any one domain's authority.
+func TestUIContactWritesNeedASystemAdmin(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, perms: []directory.Permission{{Name: directory.PermDomainAdmin, Params: "*"}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	for _, req := range []*http.Response{
+		htmxPOST(t, ts, "/admin/ui/contacts", session, csrf,
+			url.Values{"email": {"john@partner.example"}, "displayname": {"J"}, "domain": {"hermex.test"}}),
+		htmxPUT(t, ts, "/admin/ui/contacts/john@partner.example", session, csrf, url.Values{"displayname": {"X"}}),
+		htmxPOST(t, ts, "/admin/ui/contacts/john@partner.example/delete", session, csrf, url.Values{}),
+	} {
+		wantStatus(t, req, http.StatusForbidden, req.Request.Method+" "+req.Request.URL.Path)
+	}
+	if d.createdContact != "" || d.updatedContact != "" || d.deletedContact != "" {
+		t.Errorf("a domain admin wrote contacts: created %q updated %q deleted %q",
+			d.createdContact, d.updatedContact, d.deletedContact)
+	}
+}
+
 // TestUIContactsListRenders proves the management page renders each contact with
 // its name, address and domain and offers the existing domains as filing choices
 // (and catches template syntax errors).
