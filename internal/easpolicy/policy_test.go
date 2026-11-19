@@ -130,6 +130,22 @@ func TestValidateHoldsTheSpecValueSets(t *testing.T) {
 	}
 }
 
+// TestCloneIsIndependentAndDropsEmpty proves a stored policy is a copy the caller
+// cannot change afterwards (an edit to the source must not rewrite what was saved),
+// and that an empty policy clones to nil so storage never persists an empty object.
+func TestCloneIsIndependentAndDropsEmpty(t *testing.T) {
+	if Policy(nil).Clone() != nil || (Policy{}).Clone() != nil {
+		t.Error("an empty policy cloned to a non-nil map, want nil")
+	}
+	src := Policy{"DevicePasswordEnabled": 1}
+	c := src.Clone()
+	src["DevicePasswordEnabled"] = 0
+	src["AllowCamera"] = 0
+	if len(c) != 1 || c["DevicePasswordEnabled"] != 1 {
+		t.Errorf("clone = %v after the source changed, want {DevicePasswordEnabled:1}", c)
+	}
+}
+
 // TestFieldsCoverTokens is a guard that the canonical field set stays the expected
 // size, so a field dropped in a refactor is caught rather than silently un-enforced.
 func TestFieldsCoverTokens(t *testing.T) {
