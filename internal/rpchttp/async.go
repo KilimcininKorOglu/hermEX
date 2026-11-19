@@ -1,8 +1,11 @@
 package rpchttp
 
 import (
+	"errors"
 	"time"
 
+	"hermex/internal/lifecycle"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/ndr"
 	"hermex/internal/notify"
@@ -55,6 +58,9 @@ type AsyncEMSMDB struct {
 	waitInterval time.Duration    // how long a parked wait holds before a timeout reply
 	cadence      time.Duration    // how often the parked wait polls the shared store
 	waker        notify.Registrar // push wake source; nil keeps the parked wait on its cadence only
+	// poll reports whether a session has a notification queued; nil is the ROP
+	// session's PollForChange. Tests replace it to drive the panic path.
+	poll func(*emsmdbSession) bool
 }
 
 // NewAsyncEMSMDB returns an AsyncEMSMDB stub over the given EMSMDB stub's sessions.
@@ -155,13 +161,43 @@ func (a *AsyncEMSMDB) parkAndReply(s *emsmdbSession, vc *vconn, callID uint32, c
 	wake, cancel := a.registerWake(s)
 	defer cancel()
 
-	flagsOut, ok := a.waitForChange(s, vc, wake)
+	// The poll reads the mailbox on a goroutine with nothing above it, so a panic
+	// there would end the gateway for every Outlook client. It is answered as a
+	// timeout instead, which the client renews.
+	var flagsOut uint32
+	ok := true
+	if err := lifecycle.Contain(func() error { flagsOut, ok = a.waitForChange(s, vc, wake); return nil }); err != nil {
+		a.logParkPanic(s, err)
+		flagsOut, ok = 0, true
+	}
 	if !ok {
 		return // the connection tore down; abandon the parked reply
 	}
 	for _, pdu := range fragmentResponse(callID, contextID, pushAsyncWaitExOut(flagsOut, ecSuccess), maxFrag) {
 		vc.send(pdu)
 	}
+}
+
+// pollChange reports whether the session has a notification queued.
+func (a *AsyncEMSMDB) pollChange(s *emsmdbSession) bool {
+	if a.poll != nil {
+		return a.poll(s)
+	}
+	return s.rop != nil && s.rop.PollForChange()
+}
+
+// logParkPanic records a panic raised while a wait was parked, with its stack, in
+// the shape the protocol daemons use for a connection's panic.
+func (a *AsyncEMSMDB) logParkPanic(s *emsmdbSession, err error) {
+	if a.ems.Logger == nil {
+		return
+	}
+	fields := logging.Fields{}
+	if pe, ok := errors.AsType[*lifecycle.PanicError](err); ok {
+		fields["stack"] = string(pe.Stack)
+	}
+	a.ems.Logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MAPI, Name: "asyncwait.panic",
+		User: s.user, Err: err.Error(), Fields: fields})
 }
 
 // registerWake registers the session's mailbox for a push wake before the first
@@ -181,7 +217,7 @@ func (a *AsyncEMSMDB) registerWake(s *emsmdbSession) (<-chan struct{}, func()) {
 func (a *AsyncEMSMDB) waitForChange(s *emsmdbSession, vc *vconn, wake <-chan struct{}) (uint32, bool) {
 	deadline := time.Now().Add(a.waitInterval)
 	for {
-		if s.rop != nil && s.rop.PollForChange() {
+		if a.pollChange(s) {
 			return flagNotificationPending, true
 		}
 		remaining := time.Until(deadline)
