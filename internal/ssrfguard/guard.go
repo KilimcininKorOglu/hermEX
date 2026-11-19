@@ -56,10 +56,39 @@ func ValidateURL(raw string, allowInternal bool) error {
 	if u.Host == "" {
 		return errors.New("the callback URL has no host")
 	}
-	if ip := net.ParseIP(u.Hostname()); ip != nil && !allowInternal && !IsPublicIP(ip) {
-		return fmt.Errorf("the callback address %s is not public", ip)
+	if allowInternal {
+		return nil
+	}
+	return checkHost(u.Hostname())
+}
+
+// checkHost refuses a host that names an internal address in any spelling a
+// resolver accepts. A zoned IPv6 literal (RFC 6874) names a link-local interface.
+// A host whose last label is all digits or hex is no DNS name (an all-numeric TLD
+// is invalid, RFC 3696 2) and, unless it is the RFC 3986 dotted-quad the IP parse
+// reads, a resolver still turns it into an address (2130706433, 127.1, 0x7f.1).
+func checkHost(host string) error {
+	if addr, zone, ok := strings.Cut(host, "%"); ok {
+		return fmt.Errorf("the callback address %s%%%s is link-local", addr, zone)
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if !IsPublicIP(ip) {
+			return fmt.Errorf("the callback address %s is not public", ip)
+		}
+		return nil
+	}
+	if numericLabel(host[strings.LastIndexByte(host, '.')+1:]) {
+		return fmt.Errorf("the callback host %q is neither a name nor a dotted-quad address", host)
 	}
 	return nil
+}
+
+// numericLabel reports whether a DNS label is a decimal or 0x-prefixed hex number.
+func numericLabel(label string) bool {
+	if hex, ok := strings.CutPrefix(strings.ToLower(label), "0x"); ok {
+		return hex != "" && strings.Trim(hex, "0123456789abcdef") == ""
+	}
+	return label != "" && strings.Trim(label, "0123456789") == ""
 }
 
 // IsPublicIP reports whether ip is a routable, non-internal address a callback is

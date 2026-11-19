@@ -79,6 +79,34 @@ func TestValidateURLRejectsInternalAddressLiterals(t *testing.T) {
 	}
 }
 
+// TestValidateURLRejectsDisguisedInternalLiterals covers the address spellings the
+// dial guard refuses but a plain IP parse misses. A zoned IPv6 literal (RFC 6874)
+// names a link-local interface, internal by definition. A decimal, shortened or
+// hex IPv4 host is neither the RFC 3986 dotted-quad nor a DNS name (an all-numeric
+// last label is no valid TLD, RFC 3696 2), yet resolvers read it as an address:
+// 2130706433, 127.1 and 0x7f.1 all reach 127.0.0.1. A dotted-quad and a name that
+// merely contains digits must still pass.
+func TestValidateURLRejectsDisguisedInternalLiterals(t *testing.T) {
+	for _, raw := range []string{
+		"https://[fe80::1%25lo0]/push",
+		"https://[::ffff:127.0.0.1]/push",
+		"https://2130706433/push",
+		"https://127.1/push",
+		"https://0x7f.1/push",
+		"https://0x7f000001/push",
+		"https://017700000001/push",
+	} {
+		if err := ValidateURL(raw, false); err == nil {
+			t.Errorf("ValidateURL(%s) accepted a disguised internal address", raw)
+		}
+	}
+	for _, raw := range []string{"https://9.9.9.9/push", "https://push1.example.com/x", "https://123.example/x"} {
+		if err := ValidateURL(raw, false); err != nil {
+			t.Errorf("ValidateURL(%s) = %v, want accepted", raw, err)
+		}
+	}
+}
+
 // TestGuardedDialRefusesLoopback proves the dial-time block is what actually stops
 // the request. The scheme gate alone would pass a loopback URL, so this is the check
 // that closes the window a name resolving to an internal address opens.
