@@ -1,0 +1,72 @@
+name: Release
+
+# Builds the bare-metal release archives for a pushed vX.Y.Z tag and attaches
+# them, with their SHA256SUMS, to the GitHub release install.sh downloads from.
+# One job and no matrix: `make package` cross-compiles both Linux targets, the
+# same command a developer runs. When the release does not exist yet this job
+# creates it with the tag's CHANGELOG section as the notes; when it already
+# exists it only uploads the archives, so the order in which this job and the
+# release step of the version bump finish does not matter.
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Package and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The full history and its tags, so the build recognises the tagged
+          # commit and stamps the binaries as that release rather than as -dev.
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: internal/webmail2/package-lock.json
+      - name: Check the tag names the release in VERSION
+        run: |
+          want="v$(cat VERSION)"
+          if [ "$GITHUB_REF_NAME" != "$want" ]; then
+            echo "tag $GITHUB_REF_NAME does not match VERSION ($want)" >&2
+            exit 1
+          fi
+      - name: Check the build is stamped as the tagged release
+        run: |
+          make version
+          if make version | grep -q -- '-dev'; then
+            echo "the build would carry a -dev version on a release tag" >&2
+            exit 1
+          fi
+      - name: make package
+        run: make package
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" bin/pkg/*.tar.gz bin/pkg/SHA256SUMS --clobber
+            exit 0
+          fi
+          awk -v h="## [${tag#v}]" 'index($0, h) == 1 {on = 1; next} on && /^## \[/ {exit} on' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "CHANGELOG.md has no section for ${tag#v}" >&2
+            exit 1
+          fi
+          gh release create "$tag" --title "$tag" --notes-file notes.md bin/pkg/*.tar.gz bin/pkg/SHA256SUMS
