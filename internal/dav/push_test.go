@@ -71,8 +71,15 @@ func TestPushPollWakesOnChange(t *testing.T) {
 		done <- resp.StatusCode
 	}()
 
-	// Let the long-poll register on the bus, then publish a change for its mailbox.
+	// Let the long-poll register on the bus. A change in another account's mailbox
+	// must not wake it: the wake would tell alice when someone else's mail moved.
 	time.Sleep(400 * time.Millisecond)
+	publisher.Publish(objectstore.ChangeEvent{MailboxDir: filepath.Join(t.TempDir(), "bob"), Op: "create"})
+	select {
+	case code := <-done:
+		t.Fatalf("push poll returned %d on another mailbox's change", code)
+	case <-time.After(1500 * time.Millisecond):
+	}
 	start := time.Now()
 	publisher.Publish(objectstore.ChangeEvent{MailboxDir: mboxDir, Op: "create"})
 
