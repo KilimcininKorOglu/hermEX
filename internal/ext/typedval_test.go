@@ -163,6 +163,15 @@ func TestFlaggedWithType(t *testing.T) {
 	wantEq(t, pullFlagged(t, wire, mapi.PtUnspecified, "unavailable"), un, "the unavailable round trip")
 }
 
+// TestFlaggedUnknownFlagRefused reads a flagged value whose flag byte is none of
+// 0x00 (available), 0x01 (unavailable) and 0x0A (error) ([MS-OXCDATA] 2.11.5):
+// what follows is undefined, so it must be refused, not read as a value.
+func TestFlaggedUnknownFlagRefused(t *testing.T) {
+	if _, err := NewPull([]byte{0x05, 0x2A, 0x00, 0x00, 0x00}, 0).FlaggedPropVal(mapi.PtLong); err == nil {
+		t.Error("a flagged value with an undefined flag byte was accepted")
+	}
+}
+
 func TestFlaggedABKRejected(t *testing.T) {
 	tag := mapi.MakeTag(0x1234, mapi.PtUnspecified)
 	p := NewPush(FlagABK)
