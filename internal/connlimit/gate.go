@@ -1,9 +1,10 @@
 package connlimit
 
 import (
-	"hermex/internal/clientnet"
 	"net"
 	"time"
+
+	"hermex/internal/clientnet"
 )
 
 // refusalWriteTimeout bounds how long the refusal write may take. A client that
