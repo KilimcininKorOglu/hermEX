@@ -140,6 +140,39 @@ func TestScoreSafeUnderConcurrentReload(t *testing.T) {
 	<-done
 }
 
+// TestReloadKeepsTheLiveModelOverACorruptFile proves a model file that no longer
+// loads (a hand edit or a write cut short) leaves the live model in place. Swapped
+// in, or swapped for nothing, it would silently turn the Bayes signal off.
+func TestReloadKeepsTheLiveModelOverACorruptFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ModelFileName)
+	trained := NewBayesModel()
+	for range 20 {
+		trained.Train("zzzspam", true)
+		trained.Train("ham words here", false)
+	}
+	mustNoErr(t, trained.SaveFile(path), "write the live model")
+	setMod(t, path, time.Now().Add(-time.Hour))
+
+	s := &Scorer{extractText: func(b []byte) string { return string(b) }}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: DefaultThreshold})
+	s.SetModel(trained)
+	var logged []string
+	r := NewReloader(s, dir, func(format string, _ ...any) { logged = append(logged, format) })
+
+	mustNoErr(t, os.WriteFile(path, []byte(`{"spam_msgs":-1}`), 0o644), "corrupt the model file")
+	setMod(t, path, time.Now())
+	if names := r.reloadOnce(); len(names) != 0 {
+		t.Errorf("reloadOnce over a corrupt model = %v, want none", names)
+	}
+	if v := s.Score(Input{Raw: []byte("zzzspam zzzspam")}); v.BayesProb < DefaultBayesProb {
+		t.Errorf("the live model was replaced: BayesProb = %v, want >= %v", v.BayesProb, DefaultBayesProb)
+	}
+	if len(logged) != 1 {
+		t.Errorf("the failed reload was logged %d times, want once", len(logged))
+	}
+}
+
 // TestReloadOnceHotSwapsModel proves a retrained model written to data_dir is
 // swapped into the live Scorer without a restart.
 func TestReloadOnceHotSwapsModel(t *testing.T) {
