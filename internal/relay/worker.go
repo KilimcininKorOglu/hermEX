@@ -227,7 +227,42 @@ const (
 	bounceRetryBackoff = maxBackoff
 	dialTimeout        = 30 * time.Second
 	sessionTimeout     = 5 * time.Minute
+	// maxServerTurnBytes bounds what one mail exchanger may send between two of
+	// our writes. net/smtp buffers a whole reply, however long, so without it an
+	// exchanger the recipient's domain names could stream one endless line until
+	// the session timeout. A real reply is under a few kilobytes (RFC 5321
+	// 4.5.3.1.5 caps a line at 512 octets) and a TLS server flight fits well
+	// inside; the count is taken below TLS, so it bounds both.
+	maxServerTurnBytes = 1 << 20
 )
+
+// errReplyTooLong reports a mail exchanger that sent more than maxServerTurnBytes
+// without waiting for the next command.
+var errReplyTooLong = errors.New("relay: mail exchanger reply exceeds the size bound")
+
+// turnCapConn caps the bytes read between two writes, the most one server turn
+// of the SMTP dialogue may carry.
+type turnCapConn struct {
+	net.Conn
+	turn int
+}
+
+func (c *turnCapConn) Read(p []byte) (int, error) {
+	if c.turn >= maxServerTurnBytes {
+		return 0, errReplyTooLong
+	}
+	if left := maxServerTurnBytes - c.turn; len(p) > left {
+		p = p[:left]
+	}
+	n, err := c.Conn.Read(p)
+	c.turn += n
+	return n, err
+}
+
+func (c *turnCapConn) Write(p []byte) (int, error) {
+	c.turn = 0
+	return c.Conn.Write(p)
+}
 
 // mxLookupTimeout bounds one MX or address lookup in the default Router. It is a
 // variable, and so is the resolver, so a test can point at a nameserver that
@@ -650,11 +685,12 @@ func (w *Worker) send(host string, it Item, requireTLS bool) error {
 	if dial == nil {
 		dial = dialPort25
 	}
-	conn, err := dial(host)
+	raw, err := dial(host)
 	if err != nil {
 		return err
 	}
-	_ = conn.SetDeadline(time.Now().Add(sessionTimeout))
+	_ = raw.SetDeadline(time.Now().Add(sessionTimeout))
+	conn := &turnCapConn{Conn: raw}
 	c, err := smtp.NewClient(conn, host)
 	if err != nil {
 		return errors.Join(err, conn.Close())
@@ -683,6 +719,7 @@ func (w *Worker) sendVia(gw Gateway, it Item) error {
 		return err
 	}
 	_ = conn.SetDeadline(time.Now().Add(sessionTimeout))
+	conn = &turnCapConn{Conn: conn}
 	if gw.ImplicitTLS {
 		conn = tls.Client(conn, &tls.Config{ServerName: gw.Host, MinVersion: tls.VersionTLS12})
 	}
