@@ -170,6 +170,25 @@ score M 4.0
 	}
 }
 
+// TestMetaCycleIsBounded loads metas that name themselves or each other. The rule
+// file comes from outside, so a cycle must neither hang nor crash the evaluation
+// that runs inline on every inbound message, and a cyclic meta must not fire.
+func TestMetaCycleIsBounded(t *testing.T) {
+	rs := ParseSARules("body A /alpha/\n" +
+		"meta SELF (SELF || A)\nscore SELF 5.0\n" +
+		"meta P (Q && A)\nscore P 5.0\n" +
+		"meta Q (P && A)\nscore Q 5.0\n")
+	if rs.DroppedMetas != 3 {
+		t.Errorf("DroppedMetas = %d, want 3: no cycle resolves to available rules", rs.DroppedMetas)
+	}
+	score, fired := rs.Evaluate([]byte("Subject: x\r\n\r\nalpha\r\n"))
+	for _, name := range []string{"SELF", "P", "Q"} {
+		if slices.Contains(fired, name) {
+			t.Errorf("cyclic meta %s fired; score=%v fired=%v", name, score, fired)
+		}
+	}
+}
+
 func TestMetaSyntaxErrorIsDropped(t *testing.T) {
 	rs := ParseSARules("body A /x/\nmeta BROKEN (A && )\nscore BROKEN 1.0\n")
 	if rs.DroppedMetas != 1 {
