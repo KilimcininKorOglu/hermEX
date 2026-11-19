@@ -32,6 +32,32 @@ func TestAccessListAction(t *testing.T) {
 	}
 }
 
+// TestAccessDomainIsAfterTheLastAt proves the domain tier reads the domain after
+// the last '@'. A quoted local part may hold an '@' (RFC 5321 section 4.1.2), so a
+// sender of the form "x@y"@blocked.example cut at the first '@' named no domain any
+// rule holds and walked past the operator's domain block.
+func TestAccessDomainIsAfterTheLastAt(t *testing.T) {
+	a := NewAccessList(map[string]string{"blocked.example": AccessBlock})
+	for _, from := range []string{`"x@y"@blocked.example`, "x@y@blocked.example"} {
+		if got := a.Action(from, ""); got != AccessBlock {
+			t.Errorf("Action(%q) = %q, want %q", from, got, AccessBlock)
+		}
+	}
+}
+
+// TestSPFAlignmentReadsTheDomainAfterTheLastAt proves DMARC's SPF alignment
+// (RFC 7489 section 3.1.2) compares the From domain with the envelope domain after
+// the last '@', so a quoted local part holding an '@' neither breaks a real
+// alignment nor creates a false one.
+func TestSPFAlignmentReadsTheDomainAfterTheLastAt(t *testing.T) {
+	if !spfAligned("example.com", `"x@y"@example.com`, AuthPass, true) {
+		t.Error(`"x@y"@example.com does not align with example.com`)
+	}
+	if spfAligned("y.example", `"x@y.example"@evil.example`, AuthPass, false) {
+		t.Error(`"x@y.example"@evil.example aligned with y.example, its local part`)
+	}
+}
+
 // TestAccessBlockForcesSpam proves a blocklisted sender is filed as spam even when
 // the message scores clean.
 func TestAccessBlockForcesSpam(t *testing.T) {

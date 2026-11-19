@@ -439,9 +439,12 @@ func Tag(raw []byte, v Verdict) []byte {
 }
 
 // domainOf extracts the lowercased domain from an address, or "" when it has none.
+// The domain follows the last '@', since a quoted local part may hold one
+// (RFC 5321 section 4.1.2).
 func domainOf(addr string) string {
-	if _, dom, ok := strings.Cut(strings.ToLower(strings.TrimSpace(addr)), "@"); ok {
-		return dom
+	a := strings.ToLower(strings.TrimSpace(addr))
+	if i := strings.LastIndexByte(a, '@'); i >= 0 {
+		return a[i+1:]
 	}
 	return ""
 }
