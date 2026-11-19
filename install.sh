@@ -332,6 +332,7 @@ write_config() {
   "tls_key": "${ETC}/tls/key.pem",
   "smtp_addr": ":25",
   "smtps_addr": ":465",
+  "submission_addr": ":587",
   "pop3_addr": ":110",
   "pop3s_addr": ":995",
   "imap_addr": ":143",
@@ -535,7 +536,8 @@ register_health_targets() {
 # ---------------------------------------------------------------- firewall ---
 
 open_firewall() {
-	local services=(smtp smtps imap imaps pop3 pop3s https)
+	local services=(smtp smtps submission imap imaps pop3 pop3s https)
+	local ports=(25 465 587 143 993 110 995 443)
 	if systemctl is-active --quiet firewalld; then
 		local s
 		for s in "${services[@]}"; do firewall-cmd -q --permanent --add-service="$s"; done
@@ -543,10 +545,10 @@ open_firewall() {
 		log "firewalld: opened ${services[*]}"
 	elif command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; then
 		local p
-		for p in 25 465 143 993 110 995 443; do ufw allow "${p}/tcp" >/dev/null; done
-		log "ufw: opened 25 465 143 993 110 995 443/tcp"
+		for p in "${ports[@]}"; do ufw allow "${p}/tcp" >/dev/null; done
+		log "ufw: opened ${ports[*]}/tcp"
 	else
-		log "no active firewalld or ufw; open TCP 25 465 143 993 110 995 443 on your firewall"
+		log "no active firewalld or ufw; open TCP ${ports[*]} on your firewall"
 	fi
 }
 
