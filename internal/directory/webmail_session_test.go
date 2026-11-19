@@ -33,6 +33,10 @@ func TestWebmailSessionRoundTrip(t *testing.T) {
 	}
 	wantEq(t, "listed jti", rows[0].Jti, "jti-1")
 	wantEq(t, "listed device", rows[0].DeviceType, "Chrome on macOS")
+	// Listing is owner-scoped too: another account sees none of u's devices.
+	foreign, err := d.ListWebmailSessions("other@hermex.test", now+1)
+	mustNoErr(t, "list another account's sessions", err)
+	wantEq(t, "sessions listed for another account", len(foreign), 0)
 
 	// Revoke is owner-scoped: a different email must NOT delete it.
 	crossUser, _ := d.DeleteWebmailSession("other@hermex.test", "jti-1")
