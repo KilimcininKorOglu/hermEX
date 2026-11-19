@@ -257,3 +257,31 @@ func TestPullCheckCount(t *testing.T) {
 		t.Errorf("max count over 4 bytes = %v, want ErrUnderflow", err)
 	}
 }
+
+// TestAlignPastTheEndLeavesNothingToRead aligns a 5-byte buffer that has been
+// read to its end. The padding the alignment asks for is not on the wire, so the
+// reader must report no bytes left: Rest returns an empty blob and the next
+// read fails, rather than the read position passing the end of the buffer.
+func TestAlignPastTheEndLeavesNothingToRead(t *testing.T) {
+	p := NewPull([]byte{1, 2, 3, 4, 5})
+	if _, err := p.Raw(5); err != nil {
+		t.Fatal(err)
+	}
+	p.Align(8)
+	if n := p.Remaining(); n != 0 {
+		t.Errorf("Remaining after aligning past the end = %d, want 0", n)
+	}
+	func() {
+		defer func() {
+			if x := recover(); x != nil {
+				t.Errorf("Rest after aligning past the end panics: %v", x)
+			}
+		}()
+		if rest := p.Rest(); len(rest) != 0 {
+			t.Errorf("Rest = % x, want empty", rest)
+		}
+	}()
+	if _, err := p.Uint8(); err != ErrUnderflow {
+		t.Errorf("read after the end = %v, want ErrUnderflow", err)
+	}
+}

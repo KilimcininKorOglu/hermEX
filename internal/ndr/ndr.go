@@ -125,10 +125,12 @@ func (p *Pull) need(n int) error {
 	return nil
 }
 
-// Align advances past padding to an n-byte boundary.
+// Align advances past padding to an n-byte boundary. Padding missing at the end
+// of the buffer leaves the position at the end, so the next read reports
+// ErrUnderflow and Remaining never goes below zero.
 func (p *Pull) Align(n int) {
 	if r := p.off % n; r != 0 {
-		p.off += n - r
+		p.off = min(p.off+n-r, len(p.buf))
 	}
 }
 
