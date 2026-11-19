@@ -51,6 +51,10 @@
 {{template "log-retention-panel" .}}
 </section>
 <section class="card">
+{{template "card-head" (dict "Icon" "hard-drive" "Title" "settings.logSpillTitle" "Desc" "settings.logSpillDesc")}}
+{{template "log-spill-panel" .}}
+</section>
+<section class="card">
 {{template "card-head" (dict "Icon" "archive" "Title" "settings.recoverableTitle" "Desc" "settings.recoverableDesc")}}
 {{template "recoverable-retention-panel" .}}
 </section>
@@ -67,6 +71,17 @@
 <form class="narrow" hx-post="/admin/ui/log-retention" hx-target="#log-retention-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>{{t "settings.daysToKeep"}} <input type="number" name="log_retention_days" value="{{.LogRetentionDays}}" min="0"></label>
 <button type="submit">{{t "settings.saveLogRetention"}}</button>
+</form>
+{{end}}
+</div>{{end}}
+
+{{define "log-spill-panel"}}<div id="log-spill-panel">
+{{template "notice" .Notice}}
+<p class="hint">{{t "settings.logSpillHintA"}} <strong>0</strong> {{t "settings.logSpillHintB"}}</p>
+{{with index .ReadFailed "log-spill"}}<p class="error">{{t .}}</p>{{else}}
+<form class="narrow" hx-post="/admin/ui/log-spill" hx-target="#log-spill-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>{{t "settings.spillMB"}} <input type="number" name="log_spill_limit_mb" value="{{.LogSpillLimitMB}}" min="0"></label>
+<button type="submit">{{t "settings.saveLogSpill"}}</button>
 </form>
 {{end}}
 </div>{{end}}

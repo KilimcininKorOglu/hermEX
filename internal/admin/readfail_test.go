@@ -73,6 +73,7 @@ func TestAFailedReadHidesTheFormItFeeds(t *testing.T) {
 		{"GetSizeLimits", "/admin/ui/settings", `hx-post="/admin/ui/limits"`, "the size limits"},
 		{"GetLoginLockoutSettings", "/admin/ui/settings", `/limits/loginlockout"`, "the login-lockout settings"},
 		{"GetLogRetentionDays", "/admin/ui/settings", `hx-post="/admin/ui/log-retention"`, "the log retention"},
+		{"GetLogSpillLimitMB", "/admin/ui/settings", `hx-post="/admin/ui/log-spill"`, "the log spill limit"},
 		{"GetRecoverableSettings", "/admin/ui/settings", `hx-post="/admin/ui/recoverable-retention"`, "the Recoverable Items retention"},
 		{"GetSpamHistorySettings", "/admin/ui/settings", `/spam-history/retention"`, "the spam history retention"},
 		{"GetSpamHistorySettings", "/admin/ui/spam-history", `/spam-history/retention"`, "the spam history retention"},

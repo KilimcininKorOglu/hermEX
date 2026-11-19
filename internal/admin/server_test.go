@@ -69,6 +69,8 @@ type fakeDir struct {
 	sizeLimitsFound    bool
 	logRetention       int
 	logRetentionFound  bool
+	logSpillMB         int
+	logSpillSet        bool
 	recoverable        directory.RecoverableSettings
 	recoverableFound   bool
 	outbound           directory.OutboundSettings
@@ -732,6 +734,16 @@ func (f *fakeDir) SetSizeLimits(s directory.SizeLimits) error {
 }
 func (f *fakeDir) GetLogRetentionDays() (int, bool, error) {
 	return f.logRetention, f.logRetentionFound, f.readErrs["GetLogRetentionDays"]
+}
+func (f *fakeDir) GetLogSpillLimitMB() (int, error) {
+	if !f.logSpillSet {
+		return directory.DefaultLogSpillLimitMB, f.readErrs["GetLogSpillLimitMB"]
+	}
+	return f.logSpillMB, f.readErrs["GetLogSpillLimitMB"]
+}
+func (f *fakeDir) SetLogSpillLimitMB(mb int) error {
+	f.logSpillMB, f.logSpillSet = mb, true
+	return nil
 }
 func (f *fakeDir) SetLogRetentionDays(days int) error {
 	f.logRetention, f.logRetentionFound = days, true

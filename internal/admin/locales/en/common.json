@@ -99,6 +99,7 @@
     "sizeLimits": "the size limits",
     "fetchPolicy": "the fetch policy",
     "logRetention": "the log retention",
+    "logSpill": "the log spill limit",
     "reportRetention": "the report retention",
     "dmarcSending": "the DMARC sending setting",
     "mlists": "the mailing lists",

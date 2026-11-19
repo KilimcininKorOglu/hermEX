@@ -164,6 +164,8 @@ type Directory interface {
 	SetFetchSettings(directory.FetchSettings) error
 	GetLogRetentionDays() (int, bool, error)
 	SetLogRetentionDays(int) error
+	GetLogSpillLimitMB() (int, error)
+	SetLogSpillLimitMB(int) error
 	GetRecoverableSettings() (directory.RecoverableSettings, bool, error)
 	SetRecoverableSettings(directory.RecoverableSettings) error
 	GetOutboundSettings() (directory.OutboundSettings, bool, error)
@@ -486,6 +488,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/ui/spam-history", s.handleUISpamHistory)
 	mux.HandleFunc("POST /admin/ui/spam-history/retention", s.handleUISaveSpamRetention)
 	mux.HandleFunc("POST /admin/ui/log-retention", s.handleUISaveLogRetention)
+	mux.HandleFunc("POST /admin/ui/log-spill", s.handleUISaveLogSpill)
 	mux.HandleFunc("POST /admin/ui/recoverable-retention", s.handleUISaveRecoverableRetention)
 	mux.HandleFunc("GET /admin/ui/limits", s.handleUILimits)
 	mux.HandleFunc("POST /admin/ui/limits", s.handleUISaveLimits)

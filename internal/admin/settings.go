@@ -24,6 +24,7 @@ func (s *Server) settingsPageData(r *http.Request, notice panelNotice) map[strin
 	failed := data["ReadFailed"].(readFailures)
 	s.addLimitSettings(data, failed)
 	s.fillLogRetention(data, failed)
+	s.fillLogSpill(data, failed)
 	s.fillRecoverableRetention(data, failed)
 	s.fillSpamRetention(data, failed)
 	return data

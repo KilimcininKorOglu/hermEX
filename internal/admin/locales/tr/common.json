@@ -99,6 +99,7 @@
     "sizeLimits": "Boyut sınırları",
     "fetchPolicy": "Posta çekme ilkesi",
     "logRetention": "Günlük saklama süresi",
+    "logSpill": "Günlük spill sınırı",
     "reportRetention": "Rapor saklama süresi",
     "dmarcSending": "DMARC gönderme ayarı",
     "mlists": "Posta listeleri",
