@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"hermex/internal/authlimit"
 	"hermex/internal/directory"
 	"hermex/internal/totp"
 )
@@ -231,6 +232,28 @@ func TestAPanelCodeIsNotReplayable(t *testing.T) {
 	apiLogin(t, other, ts)
 	if got := verifyCode(t, other, ts, code); got != http.StatusUnauthorized {
 		t.Errorf("the same code was accepted twice: %d", got)
+	}
+}
+
+// TestPanelCodeGuessingIsThrottled guesses codes past the failed-login limit. A
+// six-digit code has a million values, so without a limit the password alone
+// would reach the panel; past the limit even the right code must wait.
+func TestPanelCodeGuessingIsThrottled(t *testing.T) {
+	d, ts, client := enrolledAdminServer(t)
+	apiLogin(t, client, ts)
+	for i := range authlimit.DefaultMaxFails {
+		if code := verifyCode(t, client, ts, "000000"); code != http.StatusUnauthorized {
+			t.Fatalf("guess %d = %d, want 401", i+1, code)
+		}
+	}
+	if code := verifyCode(t, client, ts, "000000"); code != http.StatusTooManyRequests {
+		t.Errorf("a guess past the limit = %d, want 429", code)
+	}
+	if code := verifyCode(t, client, ts, nextCode(t, d)); code != http.StatusTooManyRequests {
+		t.Errorf("the right code during the lockout = %d, want 429", code)
+	}
+	if code := getStatus(t, client, ts, "/admin/whoami"); code != http.StatusForbidden {
+		t.Errorf("the session was upgraded during the lockout: %d", code)
 	}
 }
 
