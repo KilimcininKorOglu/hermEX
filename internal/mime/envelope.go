@@ -89,7 +89,11 @@ func parseAddrList(s string) []Address {
 	}
 	out := make([]Address, 0, len(parsed))
 	for _, a := range parsed {
-		mbox, host, _ := strings.Cut(a.Address, "@")
+		// The host follows the last '@': a quoted local part may hold one.
+		mbox, host := a.Address, ""
+		if i := strings.LastIndexByte(a.Address, '@'); i >= 0 {
+			mbox, host = a.Address[:i], a.Address[i+1:]
+		}
 		out = append(out, Address{Name: a.Name, Mailbox: mbox, Host: host})
 	}
 	return out

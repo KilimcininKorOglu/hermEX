@@ -38,6 +38,20 @@ func TestParseEnvelope(t *testing.T) {
 	wantEq(t, len(env.Bcc), 0, "Bcc addresses")
 }
 
+// TestParseEnvelopeSplitsAtTheLastAt proves the ENVELOPE host is the domain after
+// the last '@' (RFC 3501 host-name, RFC 5321 section 4.1.2). A quoted local part
+// may hold an '@'; split at the first one, the client showed the sender in a
+// domain that is part of its local part.
+func TestParseEnvelopeSplitsAtTheLastAt(t *testing.T) {
+	raw := "From: \"x@y\"@example.com\r\nSubject: s\r\n\r\nbody"
+	env, err := ParseEnvelope([]byte(raw))
+	mustNoErr(t, err, "parse the envelope")
+	if len(env.From) != 1 {
+		t.Fatalf("From = %#v, want one address", env.From)
+	}
+	wantAddr(t, env.From[0], "", "x@y", "example.com", "From")
+}
+
 func TestParseEnvelopeMalformed(t *testing.T) {
 	if _, err := ParseEnvelope([]byte("this is not a message")); err == nil {
 		t.Error("ParseEnvelope(garbage) = nil error, want error")
