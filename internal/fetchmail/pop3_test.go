@@ -2,6 +2,7 @@ package fetchmail
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -110,6 +111,35 @@ func TestPOP3Client(t *testing.T) {
 		t.Fatalf("server saw deletions %v, want one", *deleted)
 	}
 	wantEq(t, (*deleted)[0], 1, "the deleted message number")
+}
+
+// TestALineBreakInACredentialIsRefused stores a password carrying CRLF and a
+// second command. A line-based protocol would run that command on the remote
+// account (here DELE 1), so both clients must refuse the value before writing
+// anything, and the scripted server must see no deletion.
+func TestALineBreakInACredentialIsRefused(t *testing.T) {
+	allowLoopback(t)
+	host, port, deleted := fakePOP3(t, []string{"Subject: keep\r\n\r\nbody"})
+	c, err := dialPOP3(host, port, false, false)
+	mustNoErr(t, err, "dial")
+	if err := c.auth("alice", "secret\r\nDELE 1"); !errors.Is(err, ErrUnsafeCredential) {
+		t.Errorf("POP3 auth with CRLF in the password: err = %v, want ErrUnsafeCredential", err)
+	}
+	mustNoErr(t, c.quit(), "quit")
+	if len(*deleted) != 0 {
+		t.Errorf("the injected command ran on the source: deleted %v", *deleted)
+	}
+
+	im := &imapConn{}
+	for name, err := range map[string]error{
+		"login":  im.login("alice\n", "secret"),
+		"pass":   im.login("alice", "a\x00b"),
+		"folder": im.selectFolder("INBOX\r\na2 DELETE INBOX"),
+	} {
+		if !errors.Is(err, ErrUnsafeCredential) {
+			t.Errorf("IMAP %s with a line break: err = %v, want ErrUnsafeCredential", name, err)
+		}
+	}
 }
 
 // TestPOP3StallTimesOut proves the post-connect I/O deadline ends a session against a server

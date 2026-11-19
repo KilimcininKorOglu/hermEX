@@ -104,6 +104,9 @@ func (c *pop3Conn) cmd(format string, args ...any) (string, error) {
 
 // auth performs USER/PASS authentication.
 func (c *pop3Conn) auth(user, pass string) error {
+	if err := lineSafe(user, pass); err != nil {
+		return err
+	}
 	if _, err := c.cmd("USER %s", user); err != nil {
 		return err
 	}

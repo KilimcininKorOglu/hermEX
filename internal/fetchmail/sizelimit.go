@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strings"
 	"sync/atomic"
 
 	"hermex/internal/ssrfguard"
@@ -90,6 +91,24 @@ func newResponseBudget(r io.Reader) *responseBudget {
 	b := &responseBudget{r: r}
 	b.renew()
 	return b
+}
+
+// ErrUnsafeCredential refuses a configured user name, password or folder that
+// holds a CR, LF or NUL.
+var ErrUnsafeCredential = errors.New("fetchmail: a configured value holds a line break or NUL")
+
+// lineSafe refuses any value that would end the command line it is written into.
+// Both protocols are line-based and neither quoting form can carry a line break
+// (RFC 1939 section 3, RFC 3501 section 4.3 quoted strings), so a CR or LF in a
+// stored password would append a second command, such as a delete, to the
+// remote session.
+func lineSafe(values ...string) error {
+	for _, v := range values {
+		if strings.ContainsAny(v, "\r\n\x00") {
+			return ErrUnsafeCredential
+		}
+	}
+	return nil
 }
 
 // allowInternalSources decides whether a configured source may resolve to a

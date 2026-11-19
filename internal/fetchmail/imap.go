@@ -82,6 +82,9 @@ func (c *imapConn) do(cmd string) ([]string, error) {
 }
 
 func (c *imapConn) login(user, pass string) error {
+	if err := lineSafe(user, pass); err != nil {
+		return err
+	}
 	_, err := c.do("LOGIN " + quoteIMAP(user) + " " + quoteIMAP(pass))
 	return err
 }
@@ -89,6 +92,9 @@ func (c *imapConn) login(user, pass string) error {
 func (c *imapConn) selectFolder(name string) error {
 	if name == "" {
 		name = "INBOX"
+	}
+	if err := lineSafe(name); err != nil {
+		return err
 	}
 	_, err := c.do("SELECT " + quoteIMAP(name))
 	return err
