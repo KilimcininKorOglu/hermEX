@@ -63,6 +63,43 @@ func TestTaggedPropValKnownVector(t *testing.T) {
 	}
 }
 
+// TestScalarPropValueVectors pins the fixed-size scalar encodings of
+// [MS-OXCDATA] 2.11.1: PtShort 2 bytes, PtBoolean 1 byte, PtFloat and PtDouble
+// IEEE 754 little-endian, PtSysTime a 64-bit FILETIME. Values are chosen so a
+// wrong width or byte order changes the bytes.
+func TestScalarPropValueVectors(t *testing.T) {
+	cases := []struct {
+		typ  mapi.PropType
+		v    any
+		want []byte
+	}{
+		{mapi.PtShort, int16(0x0102), []byte{0x02, 0x01}},
+		{mapi.PtBoolean, true, []byte{0x01}},
+		{mapi.PtFloat, float32(1.5), []byte{0x00, 0x00, 0xC0, 0x3F}},
+		{mapi.PtDouble, float64(-2), []byte{0, 0, 0, 0, 0, 0, 0x00, 0xC0}},
+		{mapi.PtSysTime, uint64(0x0102030405060708), []byte{8, 7, 6, 5, 4, 3, 2, 1}},
+	}
+	for _, c := range cases {
+		p := NewPush(0)
+		if err := p.PropValue(c.typ, c.v); err != nil {
+			t.Fatalf("%#x push: %v", uint16(c.typ), err)
+		}
+		if !bytes.Equal(p.Bytes(), c.want) {
+			t.Errorf("%#x bytes = % X, want % X", uint16(c.typ), p.Bytes(), c.want)
+		}
+	}
+}
+
+// TestPropValueUnknownTypeRefusedOnPull reads a client tag whose type is not a
+// MAPI property type (0x0099): its width is unknown, so the decoder must refuse
+// it rather than guess and misread the rest of the buffer.
+func TestPropValueUnknownTypeRefusedOnPull(t *testing.T) {
+	buf := []byte{0x99, 0x00, 0x01, 0x30, 0xAA, 0xBB, 0xCC, 0xDD}
+	if _, err := NewPull(buf, 0).TaggedPropVal(); err == nil {
+		t.Error("a property of an unknown type was decoded")
+	}
+}
+
 func TestPropertyValuesRoundTrip(t *testing.T) {
 	pv := mapi.PropertyValues{
 		{Tag: mapi.MakeTag(0x0037, mapi.PtUnicode), Value: "subject"},
