@@ -53,6 +53,24 @@ func TestAddSenderRule(t *testing.T) {
 	}
 }
 
+// TestSenderRulesNeedASystemAdmin proves a domain admin can neither add nor remove
+// an operator sender rule: an operator block is absolute for every domain, so a
+// domain admin able to allow past it would lift it for all of them.
+func TestSenderRulesNeedASystemAdmin(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		senderRules: []directory.SenderRule{{Pattern: "spammy.example", Action: directory.SenderBlock}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/sender-access", session, csrf,
+		url.Values{"pattern": {"spammy.example"}, "action": {directory.SenderAllow}}), http.StatusForbidden, "domain-admin add")
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/sender-access/delete", session, csrf,
+		url.Values{"pattern": {"spammy.example"}}), http.StatusForbidden, "domain-admin delete")
+	if len(d.senderRules) != 1 || d.senderRules[0].Action != directory.SenderBlock {
+		t.Errorf("a domain admin changed the operator rules: %+v", d.senderRules)
+	}
+}
+
 // TestAddSenderRuleRejectsEmptyPattern proves an empty pattern is rejected and
 // nothing is stored.
 func TestAddSenderRuleRejectsEmptyPattern(t *testing.T) {
