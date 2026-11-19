@@ -97,8 +97,13 @@ func TestSessionTouchAndPush(t *testing.T) {
 	if !recs[0].Push {
 		t.Errorf("Ping begin not flagged push: %+v", recs[0])
 	}
-	if recs[0].ID != recs[2].ID {
+	if recs[0].ID != recs[1].ID || recs[0].ID != recs[2].ID {
 		t.Errorf("touch/finish wrote a different session id than begin")
+	}
+	// The clock was wound back one unit before touch, so a touch that refreshed
+	// last_update wrote at least the begin time again.
+	if recs[1].LastUpdate < first {
+		t.Errorf("touch wrote last_update %d, want it refreshed to at least %d", recs[1].LastUpdate, first)
 	}
 	if recs[2].EndedAt == 0 {
 		t.Errorf("finish did not stamp ended: %+v", recs[2])
@@ -117,6 +122,7 @@ func TestSessionWriteFailureLogged(t *testing.T) {
 	sess := &session{user: "carol@hermex.test", req: asRequest{cmd: "Ping", deviceID: "d3"}}
 
 	srv.beginSession(r, sess)
+	srv.touchSession(sess)
 	srv.finishSession(sess)
 
 	// The command path still completed: telemetry stayed on and both writes ran.
@@ -132,6 +138,11 @@ func TestSessionWriteFailureLogged(t *testing.T) {
 	}
 	if _, ok := sink.find("session.finish.fail"); !ok {
 		t.Errorf("finish write failure was not logged")
+	}
+	// A held Ping refreshes its row on every heartbeat, so a failing touch is the
+	// write most likely to break while a session is visible as live.
+	if _, ok := sink.find("session.touch.fail"); !ok {
+		t.Errorf("touch write failure was not logged")
 	}
 }
 

@@ -84,7 +84,9 @@ func (s *Server) touchSession(sess *session) {
 		return
 	}
 	sess.tel.LastUpdate = time.Now().Unix()
-	_ = s.Sessions.UpsertSession(sess.tel)
+	if err := s.Sessions.UpsertSession(sess.tel); err != nil {
+		s.logSessionFail("session.touch.fail", sess, err)
+	}
 }
 
 // finishSession stamps the session ended so the monitor shows it terminating and
