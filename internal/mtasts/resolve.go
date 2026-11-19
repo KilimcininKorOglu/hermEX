@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"strings"
@@ -201,6 +202,11 @@ func readPolicyBody(resp *http.Response, domain string) (string, error) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("mtasts: policy fetch for %s: HTTP %d", domain, resp.StatusCode)
+	}
+	// RFC 8461 3.2: the policy is text/plain, so a host that serves user files at
+	// the well-known path cannot have an HTML page read as the domain's policy.
+	if mt, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type")); err != nil || mt != "text/plain" {
+		return "", fmt.Errorf("mtasts: policy for %s is not served as text/plain", domain)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxPolicyBytes+1))
 	if err != nil {

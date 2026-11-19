@@ -132,6 +132,38 @@ func TestAnOversizedPolicyIsNotFetched(t *testing.T) {
 	}
 }
 
+// TestAPolicyMustBeServedAsTextPlain serves the same valid policy under several
+// media types. RFC 8461 3.2 has the sender check for "text/plain", so a host that
+// lets users publish HTML or other files at the well-known path cannot have one
+// of those read as the domain's policy; the type compares without regard to case
+// and its parameters are ignored.
+func TestAPolicyMustBeServedAsTextPlain(t *testing.T) {
+	const doc = "version: STSv1\nmode: enforce\nmx: mx.example.com\nmax_age: 86400\n"
+	serve := func(ctype string) *http.Response {
+		rec := httptest.NewRecorder()
+		if ctype != "" {
+			rec.Header().Set("Content-Type", ctype)
+		}
+		rec.WriteHeader(http.StatusOK)
+		_, _ = rec.WriteString(doc)
+		res := rec.Result()
+		if ctype == "" {
+			res.Header.Del("Content-Type")
+		}
+		return res
+	}
+	for _, ok := range []string{"text/plain", "TEXT/Plain; charset=utf-8", "text/plain;charset=us-ascii"} {
+		if _, err := readPolicyBody(serve(ok), "example.com"); err != nil {
+			t.Errorf("Content-Type %q refused: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"text/html", "application/octet-stream", "", "text/plainx"} {
+		if _, err := readPolicyBody(serve(bad), "example.com"); err == nil {
+			t.Errorf("Content-Type %q was read as a policy", bad)
+		}
+	}
+}
+
 // TestDefaultTXTLookupHasADeadline proves the presence lookup gives up instead of
 // waiting forever on a nameserver that accepts the query and never answers. The
 // relay worker drains the outbound queue one item at a time, so an unbounded
