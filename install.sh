@@ -536,7 +536,8 @@ register_health_targets() {
 # ---------------------------------------------------------------- firewall ---
 
 open_firewall() {
-	local services=(smtp smtps submission imap imaps pop3 pop3s https)
+	# firewalld names the 587/tcp service smtp-submission.
+	local services=(smtp smtps smtp-submission imap imaps pop3 pop3s https)
 	local ports=(25 465 587 143 993 110 995 443)
 	if systemctl is-active --quiet firewalld; then
 		local s
