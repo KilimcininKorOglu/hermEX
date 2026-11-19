@@ -315,25 +315,39 @@ func TestAdminDeleteUserNotFound(t *testing.T) {
 	}
 }
 
-// TestAdminUserDetailRequiresSystem proves a domain admin cannot read, edit, or
-// delete users through the system-scoped detail endpoints.
-func TestAdminUserDetailRequiresSystem(t *testing.T) {
+// TestAdminUserDetailOutsideScope proves a domain admin cannot read, edit, delete,
+// reset the password of, or create a user in another domain through the
+// user-scoped API, while a user in its own domain stays readable, so the refusal
+// comes from the scope check and not from a blanket denial.
+func TestAdminUserDetailOutsideScope(t *testing.T) {
 	d := &fakeDir{
 		authOK: true, uid: 7,
-		roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		roles:   []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		domains: []directory.DomainInfo{{ID: 1, Name: "acme.test"}, {ID: 2, Name: "hermex.test"}},
+		knownUsers: map[string]directory.UserDetail{
+			"alice@hermex.test": {Username: "alice@hermex.test", DomainID: 2},
+			"bob@acme.test":     {Username: "bob@acme.test", DomainID: 1},
+		},
 	}
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	get := authedGET(t, ts, "/admin/users/alice@hermex.test", session)
-	get.Body.Close()
-	put := authedPUT(t, ts, "/admin/users/alice@hermex.test", session, csrf, `{"status":0}`)
-	put.Body.Close()
-	del := authedDELETE(t, ts, "/admin/users/alice@hermex.test", session, csrf, "")
-	del.Body.Close()
-	if get.StatusCode != http.StatusForbidden || put.StatusCode != http.StatusForbidden || del.StatusCode != http.StatusForbidden {
-		t.Errorf("domain-admin detail access = GET %d / PUT %d / DELETE %d, want all 403",
-			get.StatusCode, put.StatusCode, del.StatusCode)
+	wantStatus(t, authedGET(t, ts, "/admin/users/bob@acme.test", session), http.StatusOK, "own-domain read")
+	const user = "/admin/users/alice@hermex.test"
+	wantStatus(t, authedGET(t, ts, user, session), http.StatusForbidden, "GET")
+	wantStatus(t, authedPUT(t, ts, user, session, csrf, `{"status":0}`), http.StatusForbidden, "PUT")
+	wantStatus(t, authedDELETE(t, ts, user, session, csrf, ""), http.StatusForbidden, "DELETE")
+	wantStatus(t, authedPUT(t, ts, user+"/altnames", session, csrf, `{"altnames":["ceo"]}`), http.StatusForbidden, "altnames")
+	wantStatus(t, authedPUT(t, ts, user+"/aliases", session, csrf, `{"aliases":["ceo@acme.test"]}`), http.StatusForbidden, "aliases")
+	wantStatus(t, authedPUT(t, ts, user+"/contact", session, csrf, `{}`), http.StatusForbidden, "contact")
+	wantStatus(t, authedPOST(t, ts, user+"/password", session, csrf, `{"password":"taken"}`), http.StatusForbidden, "password")
+	wantStatus(t, authedPOST(t, ts, "/admin/users", session, csrf, `{"email":"new@hermex.test","password":"pw"}`),
+		http.StatusForbidden, "create in another domain")
+
+	if d.updatedUser != "" || d.deletedUser != "" || d.setAltnamesUser != "" || d.setAliasesUser != "" ||
+		d.setPropsUser != "" || d.setPwUser != "" || d.createdUser != "" {
+		t.Errorf("a refused call reached the directory: update %q delete %q altnames %q aliases %q props %q password %q create %q",
+			d.updatedUser, d.deletedUser, d.setAltnamesUser, d.setAliasesUser, d.setPropsUser, d.setPwUser, d.createdUser)
 	}
 }
 
