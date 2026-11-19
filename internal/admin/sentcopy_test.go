@@ -8,8 +8,37 @@ import (
 	"strings"
 	"testing"
 
+	"hermex/internal/directory"
 	"hermex/internal/objectstore"
 )
+
+// TestSendOnBehalfAndSentCopyOutsideScope proves a domain admin cannot write the
+// on-behalf list or the sent-copy switches of a user in another domain through the
+// user-scoped API, nor use the panel forms, which are system-only. The grantee is in
+// the caller's own domain, so only the target user's scope refuses the API write.
+func TestSendOnBehalfAndSentCopyOutsideScope(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		domains: []directory.DomainInfo{{ID: 1, Name: "acme.test"}, {ID: 2, Name: "hermex.test"}},
+		knownUsers: map[string]directory.UserDetail{
+			"alice@hermex.test": {Username: "alice@hermex.test", DomainID: 2, Maildir: "/mb/alice"},
+			"bob@acme.test":     {Username: "bob@acme.test", DomainID: 1, Maildir: "/mb/bob"},
+		}}
+	store := &fakeStore{}
+	ts := adminServerStore(t, d, store)
+	session, csrf := loginCookies(t, ts)
+
+	const user = "/admin/users/alice@hermex.test"
+	wantStatus(t, authedPUT(t, ts, user+"/sendonbehalf", session, csrf, `["bob@acme.test"]`), http.StatusForbidden, "API on-behalf")
+	wantStatus(t, authedPUT(t, ts, user+"/sentcopy", session, csrf, `{"forSendAs":true}`), http.StatusForbidden, "API sent-copy")
+	const ui = "/admin/ui/users/alice@hermex.test"
+	wantStatus(t, htmxPUT(t, ts, ui+"/sendonbehalf", session, csrf,
+		url.Values{"sendonbehalf": {"bob@acme.test"}}), http.StatusForbidden, "UI on-behalf")
+	wantStatus(t, htmxPUT(t, ts, ui+"/sentcopy", session, csrf,
+		url.Values{"copysendas": {"on"}}), http.StatusForbidden, "UI sent-copy")
+	if store.setSendOnBehalfDir != "" || store.setSentCopyDir != "" {
+		t.Errorf("a refused caller wrote on-behalf to %q or sent-copy to %q", store.setSendOnBehalfDir, store.setSentCopyDir)
+	}
+}
 
 // TestAdminUserSendOnBehalf proves the on-behalf list is a second, independent list:
 // writing it leaves send-as alone, so a mailbox can grant one without the other.
