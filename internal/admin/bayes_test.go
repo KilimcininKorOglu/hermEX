@@ -139,6 +139,40 @@ func TestSaveAntispamSettingsRejectsBadCutoffs(t *testing.T) {
 	}
 }
 
+// TestSaveAntispamSettingsRejectsBadScores: a threshold below 1 would score every
+// message as spam, and a negative or non-numeric weight would let a failed check
+// lower the score. Each is refused and nothing is stored.
+func TestSaveAntispamSettingsRejectsBadScores(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	for _, tc := range []struct{ field, value string }{
+		{"threshold", "0"}, {"threshold", "-5"}, {"threshold", "ten"},
+		{"spf_fail", "-1"}, {"dmarc_fail", "x"}, {"sa_rules_hit", "-3"},
+	} {
+		bad := validScoringForm()
+		bad.Set(tc.field, tc.value)
+		wantBody(t, htmxPOST(t, ts, "/admin/ui/antispam/settings", session, csrf, bad),
+			http.StatusOK, tc.field+"="+tc.value)
+		wantFalse(t, d.settingsFound, tc.field+"="+tc.value+" stored")
+	}
+}
+
+// TestSaveAntispamSettingsNeedsASystemAdmin: the scoring settings apply to every
+// domain on the server, so a domain administrator is refused and nothing is
+// stored.
+func TestSaveAntispamSettingsNeedsASystemAdmin(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	resp := htmxPOST(t, ts, "/admin/ui/antispam/settings", session, csrf, validScoringForm())
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden || d.settingsFound {
+		t.Errorf("domain admin save = %d, stored %v; want 403 and nothing stored", resp.StatusCode, d.settingsFound)
+	}
+}
+
 // validScoringForm is a scoring form every field of which is accepted, so a test
 // that changes one field knows the refusal is that field's.
 func validScoringForm() url.Values {
