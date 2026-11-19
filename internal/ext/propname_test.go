@@ -87,6 +87,23 @@ func TestPropertyNameOversize(t *testing.T) {
 	}
 }
 
+// TestPropertyNameRefusesMalformedInput feeds the PropertyName a client sends in
+// RopGetPropertyIdsFromNames ([MS-OXCDATA] 2.6.1: Kind 0x00 LID, 0x01 name,
+// 0xFF none) a kind outside that set, a NameSize larger than the bytes that
+// follow, and a name whose NameSize bytes hold no terminator. Each is refused.
+func TestPropertyNameRefusesMalformedInput(t *testing.T) {
+	guid := make([]byte, 16)
+	for name, buf := range map[string][]byte{
+		"unknown kind":          append(append([]byte{0x02}, guid...), 0, 0, 0, 0),
+		"NameSize past the end": append(append([]byte{0x01}, guid...), 0x40, 'a', 0x00),
+		"no terminator":         append(append([]byte{0x01}, guid...), 0x02, 'a', 'b'),
+	} {
+		if _, err := NewPull(buf, 0).PropertyName(); err == nil {
+			t.Errorf("%s: a malformed property name was accepted", name)
+		}
+	}
+}
+
 func TestPropertyNamesArrayRoundTrip(t *testing.T) {
 	names := []mapi.PropertyName{
 		{Kind: mapi.MnidID, GUID: sampleGUID(), LID: 0x8001},

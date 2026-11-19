@@ -48,27 +48,40 @@ func (p *Pull) PropertyName() (mapi.PropertyName, error) {
 		n.LID, err = p.Uint32()
 		return n, err
 	case mapi.MnidString:
-		nameSize, err := p.Uint8()
-		if err != nil {
-			return n, err
-		}
-		if nameSize < 1 {
-			return n, ErrFormat
-		}
-		end := p.off + int(nameSize)
-		if end > len(p.buf) {
-			return n, ErrUnderflow
-		}
-		if n.Name, err = p.Unicode(); err != nil {
-			return n, err
-		}
-		if p.off > end {
-			return n, ErrFormat // the name overran its declared length
-		}
-		p.off = end // skip any padding up to the declared length
-		return n, nil
+		n.Name, err = p.propertyNameString()
+		return n, err
+	case mapi.KindNone:
+		return n, nil // nothing follows the GUID
 	}
-	return n, nil // KindNone (or any other kind): nothing follows the GUID
+	// [MS-OXCDATA] 2.6.1 defines only the three kinds above. Another value says
+	// nothing about how many bytes follow, so reading on would misparse every
+	// later name in the array.
+	return n, ErrFormat
+}
+
+// propertyNameString reads a named property's NameSize-prefixed string. The name
+// must end within NameSize bytes; padding up to that length is skipped.
+func (p *Pull) propertyNameString() (string, error) {
+	nameSize, err := p.Uint8()
+	if err != nil {
+		return "", err
+	}
+	if nameSize < 1 {
+		return "", ErrFormat
+	}
+	end := p.off + int(nameSize)
+	if end > len(p.buf) {
+		return "", ErrUnderflow
+	}
+	name, err := p.Unicode()
+	if err != nil {
+		return "", err
+	}
+	if p.off > end {
+		return "", ErrFormat // the name overran its declared length
+	}
+	p.off = end
+	return name, nil
 }
 
 // --- PROPNAME_ARRAY / PROPID_ARRAY ---
