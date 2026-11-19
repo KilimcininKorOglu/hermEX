@@ -154,6 +154,19 @@ func TestNamedPropInline(t *testing.T) {
 	wantName(t, decodeOne(t, wire).Prop.Name, strName, "the decoded MnidString name")
 }
 
+// TestNamedPropUnknownKindIsAnError feeds a named property whose kind byte is
+// 0x02, outside the three [MS-OXCDATA] 2.6.1 defines. Its length is unknown, so
+// the decoder must report an error rather than ask for more bytes: waiting would
+// buffer the client's stream until it gave up, and report nothing.
+func TestNamedPropUnknownKindIsAnError(t *testing.T) {
+	wire := []byte{0x06, 0x00, 0x05, 0x80} // PtLong 0x8005
+	wire = append(wire, make([]byte, 16)...)
+	wire = append(wire, 0x02, 0x07, 0x00, 0x00, 0x00)
+	if _, _, _, err := decodeElement(wire); err == nil {
+		t.Error("a named property of an undefined kind decoded without an error")
+	}
+}
+
 // TestMarkerRoundTrip verifies a marker word decodes as a marker, not a propdef.
 func TestMarkerRoundTrip(t *testing.T) {
 	data := []byte{0x03, 0x00, 0x09, 0x40} // STARTTOPFLD 0x40090003

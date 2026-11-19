@@ -184,14 +184,9 @@ func decodeElement(b []byte) (it Item, consumed int, complete bool, err error) {
 		valueType, tagType = mapi.PtBinary, mapi.PtBinary
 	}
 
-	var name *mapi.PropertyName
-	if propid >= 0x8000 {
-		n, c, ok := decodeName(b[r.pos:])
-		if !ok {
-			return Item{}, 0, false, nil
-		}
-		r.pos += c
-		name = &n
+	name, complete, err := readElementName(&r, propid)
+	if !complete || err != nil {
+		return Item{}, 0, false, err
 	}
 
 	if uint16(valueType)&fxCodepageFlag != 0 { // code-page string
@@ -212,6 +207,20 @@ func decodeElement(b []byte) (it Item, consumed int, complete bool, err error) {
 	r.pos += c
 	tag := mapi.PropTag(uint32(propid)<<16 | uint32(tagType))
 	return Item{Prop: &StreamProp{Tag: tag, Name: name, Value: val}}, r.pos, true, nil
+}
+
+// readElementName reads the inline PROPERTY_NAME a named property (id 0x8000 and
+// above) carries after its tag; an ordinary property has none.
+func readElementName(r *reader, propid uint16) (name *mapi.PropertyName, complete bool, err error) {
+	if propid < 0x8000 {
+		return nil, true, nil
+	}
+	n, c, complete, err := decodeName(r.b[r.pos:])
+	if !complete || err != nil {
+		return nil, false, err
+	}
+	r.pos += c
+	return &n, true, nil
 }
 
 // decodeValue reads a single value body of the given type. ok is false on a

@@ -2,6 +2,7 @@ package ics
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 
@@ -42,42 +43,47 @@ func appendName(b []byte, n mapi.PropertyName) ([]byte, error) {
 	return b, nil
 }
 
-// decodeName reads an inline PROPERTY_NAME. ok is false on a short read.
-func decodeName(b []byte) (mapi.PropertyName, int, bool) {
+// decodeName reads an inline PROPERTY_NAME. complete is false on a short read,
+// which more input can finish; err is set for a name no input can complete.
+func decodeName(b []byte) (n mapi.PropertyName, consumed int, complete bool, err error) {
 	r := reader{b: b}
 	raw, ok := r.bytes(16)
 	if !ok {
-		return mapi.PropertyName{}, 0, false
+		return mapi.PropertyName{}, 0, false, nil
 	}
 	var f mapi.FlatUID
 	copy(f[:], raw)
-	n := mapi.PropertyName{GUID: f.GUID()}
-	kind, ok := r.byte()
-	if !ok {
-		return mapi.PropertyName{}, 0, false
+	n.GUID = f.GUID()
+	if n.Kind, ok = r.byte(); !ok {
+		return mapi.PropertyName{}, 0, false, nil
 	}
-	n.Kind = kind
-	switch kind {
-	case mapi.MnidID:
-		lid, ok := r.u32()
-		if !ok {
-			return mapi.PropertyName{}, 0, false
-		}
-		n.LID = lid
-	case mapi.MnidString:
-		name, c, ok := readNakedUTF16(b[r.pos:])
-		if !ok {
-			return mapi.PropertyName{}, 0, false
-		}
-		n.Name = name
-		r.pos += c
-	case mapi.KindNone:
-		// nothing follows
-	default:
-		return mapi.PropertyName{}, 0, false
+	if complete, err = readNameTail(&r, &n); !complete || err != nil {
+		return mapi.PropertyName{}, 0, false, err
 	}
-	return n, r.pos, true
+	return n, r.pos, true, nil
 }
+
+// readNameTail reads what follows a PROPERTY_NAME's kind byte.
+func readNameTail(r *reader, n *mapi.PropertyName) (complete bool, err error) {
+	switch n.Kind {
+	case mapi.MnidID:
+		n.LID, complete = r.u32()
+		return complete, nil
+	case mapi.MnidString:
+		name, c, ok := readNakedUTF16(r.b[r.pos:])
+		n.Name, r.pos = name, r.pos+c
+		return ok, nil
+	case mapi.KindNone:
+		return true, nil // nothing follows
+	}
+	// [MS-OXCDATA] 2.6.1 defines only the three kinds above. Another value says
+	// nothing about how many bytes follow, so no amount of buffering completes it.
+	return false, fmt.Errorf("%w: named property kind %#x", errMalformedFX, n.Kind)
+}
+
+// errMalformedFX reports a FastTransfer element no amount of further input can
+// complete.
+var errMalformedFX = errors.New("ics: malformed FastTransfer element")
 
 // readNakedUTF16 reads UTF-16LE code units up to and including a 0x0000
 // terminator, returning the decoded string and bytes consumed. ok is false when
