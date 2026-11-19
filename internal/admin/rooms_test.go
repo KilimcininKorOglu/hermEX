@@ -42,6 +42,23 @@ func TestUICreateRoom(t *testing.T) {
 	}
 }
 
+// TestUIRoomWritesNeedASystemAdmin proves a domain admin can neither create nor
+// delete a room through the panel forms.
+func TestUIRoomWritesNeedASystemAdmin(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, perms: []directory.Permission{{Name: directory.PermDomainAdmin, Params: "*"}},
+		knownUsers: map[string]directory.UserDetail{"boardroom@hermex.test": {DisplayType: displayTypeRoom}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/rooms", session, csrf, url.Values{"email": {"r@hermex.test"}}),
+		http.StatusForbidden, "domain-admin room create")
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/rooms/boardroom@hermex.test/delete", session, csrf, url.Values{}),
+		http.StatusForbidden, "domain-admin room delete")
+	if d.createdRoom != "" || d.deletedUser != "" {
+		t.Errorf("a domain admin created %q or deleted %q", d.createdRoom, d.deletedUser)
+	}
+}
+
 // TestUIDeleteRoomRejectsMailboxUser proves the rooms page deletes only resource
 // mailboxes: a delete aimed at an ordinary user is refused (the directory delete is
 // never called) so the page can never remove a real mailbox, while a real room is
