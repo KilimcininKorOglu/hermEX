@@ -194,6 +194,10 @@ func TestFolderCreateDuplicate(t *testing.T) {
 	key := primeHierarchy(t, ts)
 
 	_, first := postCommand(t, ts, "FolderCreate", folderCreateReq(key, "0", "Dup"))
+	// The refusal below only proves the duplicate rule if the first create worked.
+	if s := first.ChildText(wbxml.FHStatus); s != "1" {
+		t.Fatalf("first FolderCreate Status = %q, want 1", s)
+	}
 	key2 := first.ChildText(wbxml.FHSyncKey)
 	if key2 == "" {
 		t.Fatal("first FolderCreate returned no advanced sync key")
