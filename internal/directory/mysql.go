@@ -217,7 +217,9 @@ func (d *SQLDirectory) verifyPassword(row loginRow, login, password string) bool
 		d.upgradeHash(login, row.password, password)
 		return true
 	}
-	if d.verifier == nil {
+	// An empty simple bind is an unauthenticated bind that many servers accept
+	// (RFC 4513 section 5.1.2), so it is refused here for every verifier.
+	if d.verifier == nil || password == "" {
 		return false
 	}
 	cfg, ok, err := d.LDAPConfigForDomain(row.domainID)

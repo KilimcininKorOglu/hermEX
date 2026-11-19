@@ -1,6 +1,7 @@
 package directory
 
 import (
+	"errors"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -65,6 +66,33 @@ func TestAuthenticateLDAPBranch(t *testing.T) {
 	// 4. A rejecting verifier denies the login.
 	d.SetLDAPVerifier(&stubVerifier{result: false})
 	wantEq(t, "an LDAP login the verifier rejected", admits("ext@hermex.test", "wrong"), false)
+}
+
+// TestLDAPLoginRefusesEmptyPasswordAndVerifierErrors covers two hostile cases. A
+// simple bind with an empty password is an unauthenticated bind that many servers
+// accept (RFC 4513 section 5.1.2), so it must never reach the verifier. A verifier
+// that fails must deny the login whatever verdict it returned with the error.
+func TestLDAPLoginRefusesEmptyPasswordAndVerifierErrors(t *testing.T) {
+	d, db := freshDirectory(t)
+	root := t.TempDir()
+	domID := mustCreateDomain(t, d, root, "hermex.test")
+	mustCreateUser(t, d, root, "ext@hermex.test", "ignored-local-hash")
+	_, err := db.Exec(`UPDATE users SET externid=? WHERE username=?`, []byte{0x01}, "ext@hermex.test")
+	mustNoErr(t, "master the account in LDAP", err)
+	mustBindDomain(t, d, domID, LDAPConnection{Name: "hq", URI: "ldaps://ad.hermex.test", UsernameAttr: "mail"})
+
+	stub := &stubVerifier{result: true}
+	d.SetLDAPVerifier(stub)
+	if _, ok := d.Authenticate("ext@hermex.test", ""); ok {
+		t.Error("an empty password was admitted through LDAP")
+	}
+	if stub.gotLogin != "" {
+		t.Error("an empty password reached the verifier")
+	}
+	d.SetLDAPVerifier(&stubVerifier{result: true, err: errors.New("directory unreachable")})
+	if _, ok := d.Authenticate("ext@hermex.test", "pw"); ok {
+		t.Error("a failing verifier admitted the login")
+	}
 }
 
 // mustBindDomain creates a connection and binds a domain to it.
