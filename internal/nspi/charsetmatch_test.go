@@ -6,6 +6,16 @@ import (
 	"hermex/internal/mapi"
 )
 
+// TestPrintableNameKeepsTheWholeLocalPart: [MS-OXOABK] 2.2.3.7 falls back to the
+// local part of the address. A quoted local part may hold an '@' (RFC 5321
+// 4.1.2); the local part is everything before the last '@', the split
+// directory.ValidateAddress uses for the account.
+func TestPrintableNameKeepsTheWholeLocalPart(t *testing.T) {
+	if got := printableName("Zoë", "x@other.test@hermex.test"); got != "x@other.test" {
+		t.Errorf("printableName = %q, want x@other.test", got)
+	}
+}
+
 // propEqFilter builds a relational equality restriction on one property tag,
 // what a client sends when it filters the address book on an exact value.
 func propEqFilter(tag mapi.PropTag, val any) mapi.Restriction {

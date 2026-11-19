@@ -70,7 +70,11 @@ func addPrintableName(props *mapi.PropertyValues, tags []mapi.PropTag, id *logon
 	if id == nil || id.owner == "" || (len(tags) > 0 && !slices.Contains(tags, mapi.PrAddressBookDisplayNamePrintable)) {
 		return
 	}
-	local, _, _ := strings.Cut(id.owner, "@")
+	// The local part ends at the last '@': a quoted local part may hold one.
+	local := id.owner
+	if at := strings.LastIndexByte(local, '@'); at >= 0 {
+		local = local[:at]
+	}
 	props.Set(mapi.PrAddressBookDisplayNamePrintable, local)
 }
 

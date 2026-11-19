@@ -11,6 +11,17 @@ import (
 	"hermex/internal/objectstore"
 )
 
+// TestPrintableStoreNameKeepsTheWholeLocalPart: the store's printable name is the
+// owner address's local part ([MS-OXOABK] 2.2.3.7), everything before the last
+// '@', since a quoted local part may hold one (RFC 5321 4.1.2).
+func TestPrintableStoreNameKeepsTheWholeLocalPart(t *testing.T) {
+	var props mapi.PropertyValues
+	addPrintableName(&props, nil, &logonIdentity{owner: "x@other.test@hermex.test"})
+	if got, _ := props.Get(mapi.PrAddressBookDisplayNamePrintable); got != "x@other.test" {
+		t.Errorf("printable name = %v, want x@other.test", got)
+	}
+}
+
 // storeRow logs on as owner and reads the given store columns.
 func storeRow(t *testing.T, dir, owner string, cols []mapi.PropTag, opts ...SessionOption) (mapi.PropertyValues, *objectstore.Store) {
 	t.Helper()

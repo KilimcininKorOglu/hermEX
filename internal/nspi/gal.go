@@ -426,8 +426,11 @@ func printableName(display, smtp string) string {
 	if display != "" && isPrintableASCII(display) {
 		return display
 	}
-	local, _, _ := strings.Cut(smtp, "@")
-	return local
+	// The local part ends at the last '@': a quoted local part may hold one.
+	if at := strings.LastIndexByte(smtp, '@'); at >= 0 {
+		return smtp[:at]
+	}
+	return smtp
 }
 
 // isPrintableASCII reports whether s holds only printable 7-bit characters.
