@@ -177,18 +177,20 @@ func TestHealthTargetReadFailure(t *testing.T) {
 // status page nor change what it monitors.
 func TestLiveStatusRequiresSystem(t *testing.T) {
 	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminOrg, ScopeID: 1}}}
-	ts := statusServer(t, d, nil)
+	ts := statusServer(t, d, []directory.HealthTarget{{ID: 1, Name: "imap", URL: "http://imap:8090/healthz"}})
 	session, csrf := loginCookies(t, ts)
-	resp := authedGET(t, ts, "/admin/ui/status", session)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("org-admin status page = %d, want 403", resp.StatusCode)
+	for _, path := range []string{"/admin/ui/status", "/admin/ui/status/panel", "/admin/status"} {
+		wantStatus(t, authedGET(t, ts, path, session), http.StatusForbidden, "org-admin "+path)
 	}
+	// The panel fetches every target URL from the server, so adding one is a request
+	// the server makes on the operator's behalf.
 	add := htmxPOST(t, ts, "/admin/ui/status/targets", session, csrf,
-		url.Values{"name": {"imap"}, "url": {"http://imap:8090/healthz"}})
+		url.Values{"name": {"internal"}, "url": {"http://169.254.169.254/latest"}})
 	add.Body.Close()
-	if add.StatusCode != http.StatusForbidden || len(d.healthTargets) != 0 {
-		t.Errorf("org-admin add = %d, stored %d; want 403 and nothing stored", add.StatusCode, len(d.healthTargets))
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/status/targets/1/delete", session, csrf, url.Values{}),
+		http.StatusForbidden, "org-admin delete")
+	if add.StatusCode != http.StatusForbidden || len(d.healthTargets) != 1 || d.healthTargets[0].Name != "imap" {
+		t.Errorf("org-admin add = %d, targets %+v; want 403 and the one target kept", add.StatusCode, d.healthTargets)
 	}
 }
 
