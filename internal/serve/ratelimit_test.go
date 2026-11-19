@@ -149,6 +149,32 @@ func TestForgedForwardedForEvadesLimiterWithoutFrontDoor(t *testing.T) {
 	}
 }
 
+// TestRateLimitCountsAnIPv6SubnetAsOneClient sends requests, as the gateway forwards
+// them, from a fresh address of one /64 each time. A host is routed a whole /64
+// (RFC 6177), so keyed per address it had a fresh budget per request; the second
+// request from that /64 must be refused and a neighbouring /64 still served.
+func TestRateLimitCountsAnIPv6SubnetAsOneClient(t *testing.T) {
+	limiter := httplimit.NewLimiter()
+	limiter.SetLimits(1, time.Minute)
+	limiter.SetEnabled(true)
+	url := startLimited(t, okHandler(), limiter)
+
+	get := func(client string) int {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		req.Header.Set("X-Forwarded-For", client)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	wantEq(t, get("2001:db8:1:2::1"), http.StatusOK, "the first request from the /64")
+	wantEq(t, get("2001:db8:1:2::2"), http.StatusTooManyRequests, "a second address of the same /64")
+	wantEq(t, get("2001:db8:1:3::1"), http.StatusOK, "the neighbouring /64")
+}
+
 // TestFrontDoorStripsForgedForwardedFor proves the outermost server drops the client's
 // X-Forwarded-For: the handler never sees the forged header, and the limiter counts
 // every request against the real peer, so a per-request forgery no longer escapes the

@@ -1,24 +1,21 @@
 package serve
 
 import (
-	"net"
 	"net/http"
 	"strconv"
 	"time"
 
+	"hermex/internal/clientnet"
 	"hermex/internal/httplimit"
 )
 
-// clientKey is the address the limiter counts a request against: the client address
-// with its port removed. The port must go, because a client opens a fresh source
-// port per connection and keying on it would give every connection its own budget,
-// which is no limit at all. A forwarded hop carries no port and is used as it is.
+// clientKey is the client the limiter counts a request against (clientnet.Key):
+// the port removed, because a client opens a fresh source port per connection, and
+// an IPv6 address cut to its /64, because a host may pick any address there. Keyed
+// any finer, every connection or address would get its own budget, which is no
+// limit at all.
 func clientKey(r *http.Request) string {
-	addr := ClientAddr(r)
-	if host, _, err := net.SplitHostPort(addr); err == nil {
-		return host
-	}
-	return addr
+	return clientnet.Key(ClientAddr(r))
 }
 
 // stripForwardedFor deletes any X-Forwarded-For the client supplied, so nothing
