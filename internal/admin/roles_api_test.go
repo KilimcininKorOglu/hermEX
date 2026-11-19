@@ -94,6 +94,25 @@ func TestAdminRoleCreateMapsError(t *testing.T) {
 	}
 }
 
+// TestAdminRoleChangeNeedsASystemAdmin proves a domain admin cannot rewrite or
+// delete a named role. Rewriting one to SystemAdmin with the caller as a member
+// would hand the caller every domain.
+func TestAdminRoleChangeNeedsASystemAdmin(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, perms: []directory.Permission{{Name: directory.PermDomainAdmin, Params: "1"}},
+		namedRoles: map[int64]directory.RoleDetail{1: roleDetail(1, "Helpdesk", "", nil, nil)}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	wantStatus(t, authedPUT(t, ts, "/admin/roles/1", session, csrf,
+		`{"name":"Helpdesk","permissions":[{"name":"SystemAdmin","params":""}],"userIDs":[7]}`),
+		http.StatusForbidden, "domain-admin role update")
+	wantStatus(t, authedDELETE(t, ts, "/admin/roles/1", session, csrf, ""), http.StatusForbidden, "domain-admin role delete")
+	got, ok := d.namedRoles[1]
+	if !ok || len(got.Permissions) != 0 || len(got.UserIDs) != 0 {
+		t.Errorf("a domain admin changed role 1: present %v, %+v", ok, got)
+	}
+}
+
 // TestAdminRoleNotFound proves get/update/delete on an unknown id are 404.
 func TestAdminRoleNotFound(t *testing.T) {
 	ts := adminServer(t, systemAdminDir())
