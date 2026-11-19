@@ -82,13 +82,17 @@ func TestUIMobileDevicesReportsAReadFailure(t *testing.T) {
 
 // TestUIMobileDevicesRequiresSystem proves an org admin cannot view the monitor.
 func TestUIMobileDevicesRequiresSystem(t *testing.T) {
-	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminOrg, ScopeID: 1}}}
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminOrg, ScopeID: 1}},
+		activeSessions: sampleSessions()}
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
-	resp := authedGET(t, ts, "/admin/ui/mobile-devices", session)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("org-admin monitor page = %d, want 403", resp.StatusCode)
+	// Every surface carrying the session table is refused, since each one lists
+	// other domains' users and their client addresses.
+	for _, path := range []string{"/admin/ui/mobile-devices", "/admin/ui/mobile-devices/panel", "/admin/mobile-devices"} {
+		body := wantBody(t, authedGET(t, ts, path, session), http.StatusForbidden, path)
+		if strings.Contains(body, "10.0.0.5") {
+			t.Errorf("%s: the refusal carries a session's address", path)
+		}
 	}
 }
 
