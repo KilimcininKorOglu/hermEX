@@ -177,14 +177,7 @@ func TestFolderCreateBadSyncKey(t *testing.T) {
 		t.Errorf("bad-sync-key Status = %q, want 9", s)
 	}
 
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	if _, exists, _ := st.FolderByName(nil, "Nope"); exists {
-		t.Error("a rejected FolderCreate must not create the folder")
-	}
+	wantRootFolder(t, dir, "Nope", false)
 }
 
 // TestFolderCreateDuplicate proves creating a second folder with a name already
@@ -250,13 +243,8 @@ func TestFolderCreateRefusesAMalformedRequest(t *testing.T) {
 		_, root := postCommand(t, ts, "FolderCreate", c.body)
 		wantEq(t, "the Status for "+c.name, root.ChildText(wbxml.FHStatus), c.want)
 	}
-	st, err := objectstore.Open(dir)
-	mustNoErr(t, "open the store", err)
-	defer st.Close()
 	for i := 1; i <= 8; i++ {
-		if _, exists, _ := st.FolderByName(nil, "Bad"+strconv.Itoa(i)); exists {
-			t.Errorf("refused folder Bad%d was created", i)
-		}
+		wantRootFolder(t, dir, "Bad"+strconv.Itoa(i), false)
 	}
 	for _, typ := range []string{"1", "12"} {
 		key = primeHierarchy(t, ts)

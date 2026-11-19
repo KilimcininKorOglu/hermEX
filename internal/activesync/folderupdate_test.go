@@ -37,17 +37,8 @@ func TestFolderUpdateRename(t *testing.T) {
 		t.Errorf("FolderUpdate sync key = %q, want a value advanced from %q", k, key2)
 	}
 
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	if _, exists, _ := st.FolderByName(nil, "New"); !exists {
-		t.Error("renamed folder not found under its new name")
-	}
-	if _, exists, _ := st.FolderByName(nil, "Old"); exists {
-		t.Error("old folder name still resolves after rename")
-	}
+	wantRootFolder(t, dir, "New", true)
+	wantRootFolder(t, dir, "Old", false)
 }
 
 // TestFolderUpdateReparent proves re-parenting a folder under another folder moves
@@ -72,15 +63,15 @@ func TestFolderUpdateReparent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
 	pid, _ := strconv.ParseInt(parentID, 10, 64)
 	// the child now resolves under the new parent, not at the root
-	if _, exists, _ := st.FolderByName(&pid, "Child"); !exists {
+	_, exists, err := st.FolderByName(&pid, "Child")
+	mustNoErr(t, "look up the child under its new parent", err)
+	if !exists {
 		t.Error("re-parented folder not found under its new parent")
 	}
-	if _, exists, _ := st.FolderByName(nil, "Child"); exists {
-		t.Error("re-parented folder still resolves at the mailbox root")
-	}
+	st.Close()
+	wantRootFolder(t, dir, "Child", false)
 }
 
 // TestFolderUpdateDistinguished proves no built-in folder can be renamed
@@ -180,7 +171,10 @@ func wantRootFolder(t *testing.T, dir, name string, present bool) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if _, exists, _ := st.FolderByName(nil, name); exists != present {
+	// A failed lookup reports no folder, which would pass every absence check.
+	_, exists, err := st.FolderByName(nil, name)
+	mustNoErr(t, "look up folder "+name, err)
+	if exists != present {
 		t.Errorf("top-level folder %q present = %v, want %v", name, exists, present)
 	}
 }

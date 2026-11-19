@@ -45,7 +45,10 @@ func TestFolderDelete(t *testing.T) {
 	}
 	defer st.Close()
 	fid, _ := strconv.ParseInt(newID, 10, 64)
-	if ok, _ := st.FolderExists(fid); ok {
+	// A failed lookup reports no folder, which would pass as a deletion.
+	ok, err := st.FolderExists(fid)
+	mustNoErr(t, "look up the deleted folder", err)
+	if ok {
 		t.Errorf("deleted folder %s still present in store", newID)
 	}
 	if folderSyncHasAdd(t, ts, newID) {
