@@ -51,3 +51,55 @@ func TestRouteHandlerReachesEachBackend(t *testing.T) {
 		}
 	}
 }
+
+// TestAdminPanelOnlyUnderItsHostName: the admin panel is published under its
+// configured host name and nowhere else. Every path of that name reaches the
+// panel; the panel's own paths under a mail host reach webmail, never the panel;
+// a client-sent X-Forwarded-Host cannot steer a request there; and with no host
+// name configured no request reaches it.
+func TestAdminPanelOnlyUnderItsHostName(t *testing.T) {
+	backend := func(name string) string {
+		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.WriteString(w, name)
+		}))
+		t.Cleanup(s.Close)
+		return s.URL
+	}
+	gw := gatewaySettings{
+		backendMapi: backend("mapi"), backendEws: backend("ews"), backendActiveSync: backend("activesync"),
+		backendDav: backend("dav"), backendWebmail: backend("webmail"), backendMta: backend("mta"),
+		backendAdmin: backend("admin"), adminHost: "admin.example.com",
+	}
+	h := routeHandler(gw)
+	reach := func(host, path string, header map[string]string) string {
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+		r.Host = host
+		for k, v := range header {
+			r.Header.Set(k, v)
+		}
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, r)
+		return rr.Body.String()
+	}
+	for _, c := range []struct{ host, path, want string }{
+		{"admin.example.com", "/admin/ui/", "admin"},
+		{"admin.example.com", "/", "admin"},
+		{"ADMIN.Example.COM:443", "/ews/exchange.asmx", "admin"},
+		{"admin.example.com.", "/admin/ui/login", "admin"},
+		{"mail.example.com", "/admin/ui/", "webmail"},
+		{"admin.example.com.evil.test", "/admin/ui/", "webmail"},
+		{"xadmin.example.com", "/admin/ui/", "webmail"},
+	} {
+		if got := reach(c.host, c.path, nil); got != c.want {
+			t.Errorf("Host %q %s reached %q, want %q", c.host, c.path, got, c.want)
+		}
+	}
+	if got := reach("mail.example.com", "/admin/ui/", map[string]string{"X-Forwarded-Host": "admin.example.com"}); got != "webmail" {
+		t.Errorf("a forged X-Forwarded-Host reached %q, want webmail", got)
+	}
+	gw.adminHost = ""
+	h = routeHandler(gw)
+	if got := reach("admin.example.com", "/admin/ui/", nil); got != "webmail" {
+		t.Errorf("with no admin host name the panel was reached (%q)", got)
+	}
+}

@@ -63,6 +63,8 @@ type Config struct {
 	GatewayBackendDAV        string `json:"gateway_backend_dav"`        // CalDAV/CardDAV backend base URL (default "http://dav:8080")
 	GatewayBackendWebmail    string `json:"gateway_backend_webmail"`    // webmail backend base URL (default "http://webmail:8080")
 	GatewayBackendMta        string `json:"gateway_backend_mta"`        // MTA HTTP backend base URL for posted TLS reports (default "http://mta:8080")
+	GatewayBackendAdmin      string `json:"gateway_backend_admin"`      // admin panel backend base URL (default "https://admin:8081")
+	AdminHostname            string `json:"admin_hostname"`             // host name the gateway serves the admin panel under; empty keeps the panel off the front door
 	ACMEStorage              string `json:"acme_storage"`               // CertMagic state dir in acme mode (default DataDir/acme)
 	ACMECARoot               string `json:"acme_ca_root"`               // PEM bundle trusting a private ACME CA (dev/pebble only; empty = system roots)
 

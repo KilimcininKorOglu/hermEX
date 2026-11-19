@@ -43,7 +43,7 @@ func gatewayTLS(cfg *config.Config, dir *directory.SQLDirectory, logger *logging
 		if err != nil {
 			return nil, nil, err
 		}
-		maintain := func() { acmeMaintain(acme, dir, cfg.Hostname, logger) }
+		maintain := func() { acmeMaintain(acme, dir, cfg.Hostname, cfg.AdminHostname, logger) }
 		return acme, maintain, nil
 	}
 
@@ -59,9 +59,9 @@ func gatewayTLS(cfg *config.Config, dir *directory.SQLDirectory, logger *logging
 // managed certificates on its own, so this mainly covers a newly added domain) and
 // then mirrors what it has into the tls_certs store. It runs after the gateway is
 // serving so the TLS-ALPN-01 challenge reaches the live listener.
-func acmeMaintain(acme *tlscert.ACMEProvider, dir *directory.SQLDirectory, hostname string, logger *logging.Logger) {
+func acmeMaintain(acme *tlscert.ACMEProvider, dir *directory.SQLDirectory, hostname, adminHost string, logger *logging.Logger) {
 	cycle := func() {
-		names, err := acmeNames(dir, hostname)
+		names, err := acmeNames(dir, hostname, adminHost)
 		if err != nil {
 			if logger != nil {
 				logger.Warn(logging.TLS, "acme.allowlist", logging.Fields{"detail": "could not read the domain allowlist", "error": err.Error()})
@@ -140,7 +140,7 @@ func warnMirror(logger *logging.Logger, detail, name string, err error) {
 // (domain_status != 0) is not served, and obtaining a certificate for it would waste
 // the CA's per-account rate limit. The MTA-STS policy host is added only when the
 // operator publishes MTA-STS (see expandACMENames).
-func acmeNames(dir *directory.SQLDirectory, hostname string) ([]string, error) {
+func acmeNames(dir *directory.SQLDirectory, hostname, adminHost string) ([]string, error) {
 	domains, err := dir.ListDomains()
 	if err != nil {
 		return nil, err
@@ -160,21 +160,24 @@ func acmeNames(dir *directory.SQLDirectory, hostname string) ([]string, error) {
 			active = append(active, d.Name)
 		}
 	}
-	return expandACMENames(active, hostname, sts.Enabled), nil
+	return expandACMENames(active, hostname, sts.Enabled, adminHost), nil
 }
 
 // expandACMENames builds the certificate name set: the server's own hostname plus,
 // for each domain, the mail/autodiscover/autoconfig hosts the owner points at the
-// server (the prescribed CNAMEs), and the mta-sts host when MTA-STS publishing is on.
+// server (the prescribed CNAMEs), the mta-sts host when MTA-STS publishing is on,
+// and each extra name, the admin panel's host when one is configured.
 // The apex is deliberately excluded, it is the tenant's own website, not the mail
 // front door, so it would not resolve here and TLS-ALPN-01 would fail for it. Each
 // included name must resolve to the gateway on :443. The result is deduplicated and
 // sorted so the obtain order is stable, and lowercased first, since names that
 // differ only in case are one DNS name (RFC 4343).
-func expandACMENames(domains []string, hostname string, mtastsEnabled bool) []string {
+func expandACMENames(domains []string, hostname string, mtastsEnabled bool, extra ...string) []string {
 	set := map[string]bool{}
-	if hostname != "" {
-		set[strings.ToLower(hostname)] = true
+	for _, h := range append([]string{hostname}, extra...) {
+		if h = normalizeHost(h); h != "" {
+			set[h] = true
+		}
 	}
 	for _, d := range domains {
 		d = strings.ToLower(d)

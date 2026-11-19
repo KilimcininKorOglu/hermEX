@@ -123,7 +123,29 @@ func routeHandler(gw gatewaySettings) http.Handler {
 	if err != nil {
 		log.Fatalf("hermex-gateway: %v", err)
 	}
-	return h
+	return withAdminHost(gw, h)
+}
+
+// withAdminHost sends every request whose Host is the configured admin host name
+// to the admin panel, and every other request to next, so the panel is reachable
+// only under its own name and never under a mail host. With no admin host name
+// configured the panel is not on the front door at all. Only Host decides: a
+// client-sent X-Forwarded-Host is not trusted at the outermost hop.
+func withAdminHost(gw gatewaySettings, next http.Handler) http.Handler {
+	if gw.adminHost == "" {
+		return next
+	}
+	admin, err := gateway.Handler([]gateway.Route{{Prefix: "/", Target: gw.backendAdmin}})
+	if err != nil {
+		log.Fatalf("hermex-gateway: %v", err)
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if normalizeHost(r.Host) == gw.adminHost {
+			admin.ServeHTTP(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // openCertStore opens the directory the TLS certificate store lives in.

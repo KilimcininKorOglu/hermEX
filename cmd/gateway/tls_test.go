@@ -77,6 +77,20 @@ func TestExpandACMENamesIgnoresCase(t *testing.T) {
 	}
 }
 
+// TestExpandACMENamesAddsTheAdminHost: the admin panel's host name is served by
+// the gateway, so it needs a certificate like the mail hosts. It is compared the
+// way DNS compares names (RFC 4343, root dot dropped), and an unset one adds none.
+func TestExpandACMENamesAddsTheAdminHost(t *testing.T) {
+	got := expandACMENames([]string{"tenant.com"}, "mail.tenant.com", false, "Admin.Tenant.com.")
+	want := []string{"admin.tenant.com", "autoconfig.tenant.com", "autodiscover.tenant.com", "mail.tenant.com"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("expandACMENames = %v, want %v", got, want)
+	}
+	if got := expandACMENames([]string{"tenant.com"}, "mail.tenant.com", false, ""); len(got) != 3 {
+		t.Errorf("an unset admin host added a name: %v", got)
+	}
+}
+
 // TestExpandACMENamesEmpty proves no domains and no hostname yield an empty list
 // rather than a slice with empty strings, CertMagic must not be asked to manage "".
 func TestExpandACMENamesEmpty(t *testing.T) {

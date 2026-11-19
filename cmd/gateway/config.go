@@ -1,6 +1,11 @@
 package main
 
-import "hermex/internal/config"
+import (
+	"net"
+	"strings"
+
+	"hermex/internal/config"
+)
 
 // gatewaySettings is the gateway's resolved routing configuration: the listen
 // address and the backend base URLs the front door proxies to. It is derived from
@@ -14,6 +19,8 @@ type gatewaySettings struct {
 	backendDav        string
 	backendWebmail    string
 	backendMta        string
+	backendAdmin      string
+	adminHost         string // lower-case host the admin panel is served under; "" serves it nowhere
 }
 
 // resolveGateway reads the gateway routing settings from the shared config,
@@ -29,7 +36,19 @@ func resolveGateway(cfg *config.Config) gatewaySettings {
 		backendDav:        orDefault(cfg.GatewayBackendDAV, "http://dav:8080"),
 		backendWebmail:    orDefault(cfg.GatewayBackendWebmail, "http://webmail2:8080"),
 		backendMta:        orDefault(cfg.GatewayBackendMta, "http://mta:8080"),
+		backendAdmin:      orDefault(cfg.GatewayBackendAdmin, "https://admin:8081"),
+		adminHost:         normalizeHost(cfg.AdminHostname),
 	}
+}
+
+// normalizeHost reduces a host name or Host header to the form two names are
+// compared in: the port dropped, lower case (RFC 4343) and without the trailing
+// dot of a fully qualified name.
+func normalizeHost(h string) string {
+	if host, _, err := net.SplitHostPort(h); err == nil {
+		h = host
+	}
+	return strings.TrimSuffix(strings.ToLower(h), ".")
 }
 
 // orDefault returns v when it is non-empty, otherwise def.

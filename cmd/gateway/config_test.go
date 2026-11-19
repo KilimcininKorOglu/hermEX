@@ -21,6 +21,10 @@ func TestResolveGatewayDefaults(t *testing.T) {
 		backendDav:        "http://dav:8080",
 		backendWebmail:    "http://webmail2:8080",
 		backendMta:        "http://mta:8080",
+		backendAdmin:      "https://admin:8081",
+		// No admin host name: the panel is not on the front door unless the
+		// operator names one.
+		adminHost: "",
 	}
 	if gw != want {
 		t.Errorf("resolveGateway(empty) = %+v, want %+v", gw, want)
@@ -41,6 +45,8 @@ func TestResolveGatewayFromConfig(t *testing.T) {
 		GatewayBackendDAV:        "https://dav:8080",
 		GatewayBackendWebmail:    "https://webmail:8080",
 		GatewayBackendMta:        "https://mta:8080",
+		GatewayBackendAdmin:      "https://127.0.0.1:8608",
+		AdminHostname:            "Admin.Example.com.",
 	}
 	gw := resolveGateway(cfg)
 	want := gatewaySettings{
@@ -51,6 +57,8 @@ func TestResolveGatewayFromConfig(t *testing.T) {
 		backendDav:        "https://dav:8080",
 		backendWebmail:    "https://webmail:8080",
 		backendMta:        "https://mta:8080",
+		backendAdmin:      "https://127.0.0.1:8608",
+		adminHost:         "admin.example.com", // RFC 4343: compared in lower case, root dot dropped
 	}
 	if gw != want {
 		t.Errorf("resolveGateway(configured) = %+v, want %+v", gw, want)

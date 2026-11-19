@@ -62,6 +62,7 @@ func TestDefaultBackendsAreComposeServices(t *testing.T) {
 	for field, raw := range map[string]string{
 		"mapi": gw.backendMapi, "ews": gw.backendEws, "activesync": gw.backendActiveSync,
 		"dav": gw.backendDav, "webmail": gw.backendWebmail, "mta": gw.backendMta,
+		"admin": gw.backendAdmin,
 	} {
 		wantComposeHost(t, services, field, raw)
 	}
