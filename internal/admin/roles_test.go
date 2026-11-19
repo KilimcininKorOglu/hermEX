@@ -94,4 +94,10 @@ func TestAdminRolesRequireSystem(t *testing.T) {
 	if d.grantedRole != "" {
 		t.Errorf("an unauthorized request still granted %q", d.grantedRole)
 	}
+	// A revoke is refused too: stripping another admin's role is the same authority.
+	wantStatus(t, authedDELETE(t, ts, "/admin/users/x@hermex.test/roles", session, csrf, `{"role":"system"}`),
+		http.StatusForbidden, "org-admin revoke role")
+	if d.revokedRole != "" {
+		t.Errorf("an unauthorized request still revoked %q", d.revokedRole)
+	}
 }
