@@ -43,6 +43,19 @@ func TestSettingsPageRenders(t *testing.T) {
 	}
 }
 
+// TestSettingsPageNeedsASystemAdmin proves the page holding every server-wide
+// setting, the outbound gateway among them, is refused to a domain admin.
+func TestSettingsPageNeedsASystemAdmin(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		gateways: map[string]directory.SMTPGateway{directory.GlobalGateway: {Enabled: true, Host: "relay.provider.test", Port: 2525}}}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/settings", session), http.StatusForbidden, "domain-admin settings")
+	if strings.Contains(page, "relay.provider.test") {
+		t.Error("the refusal carries the gateway host")
+	}
+}
+
 // TestSettingsPageHoldsTheGatewayLockoutAndFetchPolicy proves the Settings page
 // carries the outbound gateway, the login lockout and the fetch policy with their
 // stored values. The sidebar links no other page that holds them, so without them
