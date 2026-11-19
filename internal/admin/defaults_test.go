@@ -217,6 +217,24 @@ func TestDefaultsRefuseABadMaxUser(t *testing.T) {
 	}
 }
 
+// TestDefaultsNeedASystemAdmin proves a domain administrator, even over every
+// domain, writes neither the system defaults nor a domain override: both decide
+// the quotas and protocols every account created later is given.
+func TestDefaultsNeedASystemAdmin(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, perms: []directory.Permission{{Name: directory.PermDomainAdmin, Params: "*"}},
+		domainDetail: directory.DomainDetail{ID: 1, Name: "acme.test"}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	wantStatus(t, authedPUT(t, ts, "/admin/defaults", session, csrf, `{"domain":{"maxUser":0}}`), http.StatusForbidden, "system JSON")
+	wantStatus(t, authedPUT(t, ts, "/admin/domains/1/createdefaults", session, csrf, `{"web":true}`), http.StatusForbidden, "domain JSON")
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/defaults", session, csrf, url.Values{"maxUser": {"0"}}), http.StatusForbidden, "system form")
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/domains/1/createdefaults", session, csrf, url.Values{"web": {"1"}}), http.StatusForbidden, "domain form")
+	if len(d.createDefaults) != 0 {
+		t.Errorf("a domain admin stored defaults: %+v", d.createDefaults)
+	}
+}
+
 // deref reads an optional stored field, reporting the zero value when unset so an
 // assertion names the value that differs rather than a nil check.
 func deref[T any](p *T) T {
