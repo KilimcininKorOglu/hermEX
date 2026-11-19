@@ -29,11 +29,11 @@ func TestInjectedValuesWin(t *testing.T) {
 // toolchain records no vcs.revision, so this is the genuinely unstamped case.
 func TestUnstampedBuildIsHonest(t *testing.T) {
 	stamp(t, "", "")
-	if got := Revision(); got == "" {
-		t.Error("Revision() is empty, which reads as a value rather than as no answer")
+	if got := Revision(); got != "unknown" {
+		t.Errorf("Revision() = %q, want \"unknown\" for a build with nothing recorded", got)
 	}
-	if got := Built(); got == "" {
-		t.Error("Built() is empty, which reads as a value rather than as no answer")
+	if got := Built(); got != "unknown" {
+		t.Errorf("Built() = %q, want \"unknown\" for a build with nothing recorded", got)
 	}
 }
 
