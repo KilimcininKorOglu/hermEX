@@ -37,6 +37,30 @@ func TestExpandRecurrenceReport(t *testing.T) {
 	}
 }
 
+// TestExpandIsBoundedForAnEndlessSeries expands a daily series with no COUNT or
+// UNTIL over a century. The window and the rule are the client's to choose, so
+// without a bound one REPORT asks the server for 36,500 instances; the expansion
+// must stop at its cap of 4096.
+func TestExpandIsBoundedForAnEndlessSeries(t *testing.T) {
+	ts := davServerCal(t)
+	base := "/dav/calendars/" + testUser + "/calendar/"
+	ev := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:endless-1\r\nSUMMARY:Daily\r\n" +
+		"DTSTART:20260701T140000Z\r\nDTEND:20260701T143000Z\r\nRRULE:FREQ=DAILY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	if r := putCal(t, ts, "endless-1.ics", ev, ""); r.StatusCode != http.StatusCreated {
+		t.Fatalf("PUT status %d, want 201", r.StatusCode)
+	}
+	report := `<C:calendar-multiget xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">` +
+		`<D:prop><C:calendar-data><C:expand start="20260701T000000Z" end="21260701T000000Z"/></C:calendar-data></D:prop>` +
+		`<D:href>` + base + `endless-1.ics</D:href></C:calendar-multiget>`
+	resp, body := doFull(t, ts, "REPORT", base, report, nil)
+	if resp.StatusCode != http.StatusMultiStatus {
+		t.Fatalf("REPORT status %d, want 207", resp.StatusCode)
+	}
+	if n := strings.Count(body, "BEGIN:VEVENT"); n != 4096 {
+		t.Errorf("expanded VEVENT count = %d, want the cap of 4096", n)
+	}
+}
+
 // TestExpandNonRecurringUnchanged confirms expand leaves a non-recurring object as-is
 // (no RECURRENCE-ID synthesized for an event with no RRULE).
 func TestExpandNonRecurringUnchanged(t *testing.T) {
