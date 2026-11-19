@@ -22,6 +22,25 @@ const defaultContentType = "text/plain"
 // verbatim, only the structure below it is not enumerated.
 const maxNestingDepth = 50
 
+// maxParts bounds how many entities one message is parsed into, the root
+// included. An empty body part is a few bytes of input but a whole Part in
+// memory, so without it a message of tiny parts costs hundreds of times its
+// size. Dovecot uses the same cap; the parts past it are not enumerated and
+// their bytes stay retrievable through the enclosing entity.
+const maxParts = 10000
+
+// partBudget counts the entities a parse may still create.
+type partBudget struct{ left int }
+
+// take reports whether one more entity may be parsed, spending it if so.
+func (b *partBudget) take() bool {
+	if b.left <= 0 {
+		return false
+	}
+	b.left--
+	return true
+}
+
 // Part is one node of a parsed MIME tree. The exported fields carry everything
 // an IMAP BODYSTRUCTURE response needs; the unexported fields retain the exact
 // byte ranges (slices into the original message buffer) that BODY[...] section
@@ -50,7 +69,7 @@ type Part struct {
 // raw is taken as-is (CRLF line endings, as stored); no transfer decoding or
 // line-ending normalization is performed, so section fetches stay byte-exact.
 func ParseStructure(raw []byte) *Part {
-	return parseEntity(raw, 0)
+	return parseEntity(raw, 0, &partBudget{left: maxParts - 1})
 }
 
 // Header parses and returns this entity's header fields. Repeated fields are
@@ -77,8 +96,9 @@ func (p *Part) RawBody() []byte {
 // parseEntity parses one MIME entity (a message or a body part): its header,
 // then its body, recursing for multipart and message/rfc822 content. depth is
 // the entity's nesting level; at maxNestingDepth the entity is parsed as a leaf
-// rather than descended into.
-func parseEntity(raw []byte, depth int) *Part {
+// rather than descended into. budget has already been charged for this entity;
+// children are parsed only while it lasts.
+func parseEntity(raw []byte, depth int, budget *partBudget) *Part {
 	bodyOffset := headerEnd(raw)
 	header := parseHeader(raw[:bodyOffset])
 	body := raw[bodyOffset:]
@@ -94,21 +114,32 @@ func parseEntity(raw []byte, depth int) *Part {
 
 	switch {
 	case p.Type == "multipart" && p.Params["boundary"] != "" && depth < maxNestingDepth:
-		for _, seg := range splitParts(body, p.Params["boundary"]) {
-			p.Children = append(p.Children, parseEntity(seg, depth+1))
-		}
-	case p.Type == "message" && p.Subtype == "rfc822" && depth < maxNestingDepth:
+		p.parseChildren(body, depth, budget)
+	case p.Type == "message" && p.Subtype == "rfc822" && depth < maxNestingDepth && budget.take():
+		p.parseEmbedded(body, depth, budget)
+	case p.Type == "text":
 		p.Lines = lineCount(body)
-		p.MsgBody = parseEntity(body, depth+1)
-		if env, err := ParseEnvelope(body); err == nil {
-			p.MsgEnvelope = env
-		}
-	default:
-		if p.Type == "text" {
-			p.Lines = lineCount(body)
-		}
 	}
 	return p
+}
+
+// parseChildren parses a multipart body's parts while the budget lasts.
+func (p *Part) parseChildren(body []byte, depth int, budget *partBudget) {
+	for _, seg := range splitParts(body, p.Params["boundary"]) {
+		if !budget.take() {
+			return
+		}
+		p.Children = append(p.Children, parseEntity(seg, depth+1, budget))
+	}
+}
+
+// parseEmbedded parses a message/rfc822 body as the embedded message.
+func (p *Part) parseEmbedded(body []byte, depth int, budget *partBudget) {
+	p.Lines = lineCount(body)
+	p.MsgBody = parseEntity(body, depth+1, budget)
+	if env, err := ParseEnvelope(body); err == nil {
+		p.MsgEnvelope = env
+	}
 }
 
 // readContentHeaders fills the part's content metadata from its header block:

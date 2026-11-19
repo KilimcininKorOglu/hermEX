@@ -159,6 +159,39 @@ func TestParseStructureNestedMessage(t *testing.T) {
 	wantEq(t, string(mustExtract(t, root, Section{Path: []int{2, 1}}, "BODY[2.1]")), "inner body", "BODY[2.1]")
 }
 
+// TestParseStructurePartCountBound feeds a multipart of more empty parts than
+// maxParts. Each such part is seven bytes of input but a whole Part in memory,
+// so without a total cap a 10 MiB message from an unauthenticated SMTP peer
+// allocates gigabytes. Dovecot caps a message at 10000 parts and keeps the rest
+// unparsed; the parse must return the same way, enumerating at most maxParts.
+func TestParseStructurePartCountBound(t *testing.T) {
+	var b bytes.Buffer
+	b.WriteString("Content-Type: multipart/mixed; boundary=b\r\n\r\n")
+	for range maxParts * 3 {
+		b.WriteString("--b\r\n\r\n\r\n")
+	}
+	b.WriteString("--b--\r\n")
+
+	root := ParseStructure(b.Bytes())
+	if n := countParts(root); n > maxParts {
+		t.Errorf("parsed %d parts, want at most %d", n, maxParts)
+	}
+	if len(root.Children) == 0 {
+		t.Error("the parts within the cap were not enumerated")
+	}
+}
+
+func countParts(p *Part) int {
+	if p == nil {
+		return 0
+	}
+	n := 1 + countParts(p.MsgBody)
+	for _, c := range p.Children {
+		n += countParts(c)
+	}
+	return n
+}
+
 // TestParseStructureDepthBound proves the parser refuses to descend past
 // maxNestingDepth. The message is attacker-supplied on the unauthenticated SMTP
 // path, and each level costs a stack frame, so an unbounded descent would let one
