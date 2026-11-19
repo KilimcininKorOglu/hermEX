@@ -571,6 +571,7 @@ func (c *conn) appendGroups(rest []token, destStore *objectstore.Store, destFID 
 		flags, r2 := appendFlags(rest)
 		date, r3 := appendDate(r2)
 		if len(r3) < 1 || !r3[0].literal {
+			c.rollbackAppend(destStore, destFID, uids)
 			return nil, "APPEND requires a message literal", true
 		}
 		// An APPEND literal is client-supplied content that never passes through

@@ -289,6 +289,24 @@ func TestIMAPMultiAppend(t *testing.T) {
 	}
 }
 
+// TestMultiAppendIsAllOrNothing sends a MULTIAPPEND whose second group has flags
+// but no message literal. RFC 3502 section 6: if the server cannot append every
+// message, it appends none, so the first, well-formed message must not stay.
+func TestMultiAppendIsAllOrNothing(t *testing.T) {
+	c, _ := startServer(t)
+	c.mustOK("a1", "LOGIN alice secret")
+	c.mustOK("a2", "SELECT INBOX") // two messages already
+
+	m1 := "Subject: m1\r\n\r\nb1"
+	_, _ = fmt.Fprintf(c.conn, "a3 APPEND INBOX {%d+}\r\n%s (\\Seen) junk\r\n", len(m1), m1)
+	if a3 := c.collectTagged("a3"); !strings.HasPrefix(a3, "a3 BAD") {
+		t.Errorf("MULTIAPPEND with a malformed second group = %q, want BAD", a3)
+	}
+	if got := strings.Join(c.mustOK("a4", "SELECT INBOX"), " "); !strings.Contains(got, "2 EXISTS") {
+		t.Errorf("after the refused MULTIAPPEND, INBOX = %q, want the 2 messages it had", got)
+	}
+}
+
 // TestIMAPSort covers SORT (RFC 5256): ordering by subject, and REVERSE.
 func TestIMAPSort(t *testing.T) {
 	c, _ := startServer(t)
