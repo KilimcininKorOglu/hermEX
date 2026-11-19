@@ -247,8 +247,25 @@ func TestMeetingResponseRefusesABadProposal(t *testing.T) {
 			if n := len(organizerInbox(t, organizer)); n != 0 {
 				t.Errorf("organizer received %d responses to a refused request", n)
 			}
+			// A refused request is refused whole: no tentative appointment and no
+			// Sent Items copy is left behind.
+			if n := len(folderMessages(t, attendee, int64(mapi.PrivateFIDSentItems))); n != 0 {
+				t.Errorf("a refused request left %d messages in Sent Items", n)
+			}
+			wantCalendarEmpty(t, attendee)
 		})
 	}
+}
+
+// wantCalendarEmpty fails unless the mailbox's Calendar holds no item.
+func wantCalendarEmpty(t *testing.T, dir string) {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open the store", err)
+	defer st.Close()
+	cal, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
+	mustNoErr(t, "list the calendar", err)
+	wantEq(t, "calendar items after a refused request", len(cal), 0)
 }
 
 // TestMeetingResponseBody proves the response carries the text the attendee wrote
