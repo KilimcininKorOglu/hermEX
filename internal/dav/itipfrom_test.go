@@ -22,3 +22,21 @@ func TestITIPMailNamesItsSender(t *testing.T) {
 		t.Errorf("the iTIP mail carries no From naming its sender:\n%s", head)
 	}
 }
+
+// TestITIPSubjectCannotInjectAHeader builds an iTIP mail from a SUMMARY that
+// carries a line break and a header. The SUMMARY is the organizer's text, so a raw
+// CRLF in it would add a Bcc to mail sent under the server's name (RFC 5322
+// section 2.2 ends a header field at CRLF).
+func TestITIPSubjectCannotInjectAHeader(t *testing.T) {
+	raw, err := buildITIP("alice@hermex.test", []string{"mailto:boss@external.test"},
+		"Budget\r\nBcc: victim@evil.test", "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nEND:VCALENDAR\r\n", "REQUEST")
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, _, _ := strings.Cut(string(raw), "\r\n\r\n")
+	for line := range strings.SplitSeq(head, "\r\n") {
+		if strings.HasPrefix(strings.ToLower(line), "bcc:") {
+			t.Errorf("the SUMMARY injected a header line %q:\n%s", line, head)
+		}
+	}
+}
