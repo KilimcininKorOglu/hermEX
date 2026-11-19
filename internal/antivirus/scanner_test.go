@@ -142,6 +142,21 @@ func TestScanClamdError(t *testing.T) {
 	}
 }
 
+// TestScanNeverReadsAnUnclearReplyAsClean sends the replies a crashing, foreign or
+// misconfigured daemon gives: none at all, an unrelated answer, and a size-limit
+// refusal. None of them is a verdict, so each must be an error the caller's fail
+// policy handles, never a clean result that delivers the message unscanned.
+func TestScanNeverReadsAnUnclearReplyAsClean(t *testing.T) {
+	for _, reply := range []string{"", "PONG\x00", "INSTREAM size limit exceeded. ERROR\x00", "stream: \x00"} {
+		f := newFakeClamd(t, reply)
+		s, _ := New(f.addr())
+		res, err := s.Scan([]byte("payload"))
+		if err == nil || res.Clean {
+			t.Errorf("reply %q = %+v, err %v; want an error and no clean verdict", reply, res, err)
+		}
+	}
+}
+
 // TestScanGivesUpOnASilentClamd connects to a clamd that reads the whole stream
 // and never answers, the state of a wedged or overloaded daemon. The scan runs
 // inside the SMTP DATA phase, so it must fail within its deadline and let the
