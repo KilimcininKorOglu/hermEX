@@ -85,7 +85,13 @@ func pictureStatus(t *testing.T, root *wbxml.Node, query string) string {
 	if pic == nil {
 		t.Fatalf("%q: Recipient carried no Picture", query)
 	}
-	return pic.ChildText(wbxml.RRStatus)
+	status := pic.ChildText(wbxml.RRStatus)
+	// A withheld portrait is withheld: a cap that answered its status but still
+	// sent the bytes would cap nothing.
+	if status != "1" && pic.Child(wbxml.RRData) != nil {
+		t.Errorf("%q: Picture Status %s still carries Data", query, status)
+	}
+	return status
 }
 
 // TestResolveRecipientsPictureCaps proves the two caps a client sets on portraits
@@ -159,5 +165,8 @@ func TestResolveRecipientsPictureNone(t *testing.T) {
 	}
 	if s := pic.ChildText(wbxml.RRStatus); s != "173" {
 		t.Errorf("Picture Status = %q, want 173 (no picture)", s)
+	}
+	if pic.Child(wbxml.RRData) != nil {
+		t.Error("a Picture with no portrait carries a Data element")
 	}
 }
