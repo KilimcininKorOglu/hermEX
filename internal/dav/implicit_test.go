@@ -141,6 +141,15 @@ func TestSchedulingBrokerOrganizer(t *testing.T) {
 		wantContains(t, cancel.body, "STATUS:CANCELLED", "CANCEL body marks the event cancelled")
 	})
 
+	t.Run("forged organizer sends nothing", func(t *testing.T) {
+		// The calendar owner names someone else as ORGANIZER. Sending REQUEST or
+		// CANCEL would put iTIP in that person's name (RFC 6638 section 3.2.1
+		// lets only the organizer's own copy schedule as organizer).
+		forged := schedEvent("f-1", carol, "Fake", "20260701T140000Z", 0, bob)
+		wantNoMessages(t, schedulingMessages(alice, "", forged), "create naming another organizer")
+		wantNoMessages(t, schedulingMessages(alice, forged, ""), "delete naming another organizer")
+	})
+
 	t.Run("schedule-agent client excluded", func(t *testing.T) {
 		body := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:m-1\r\nDTSTART:20260701T140000Z\r\n" +
 			"ORGANIZER:mailto:" + alice + "\r\nATTENDEE;SCHEDULE-AGENT=CLIENT:mailto:" + bob + "\r\n" +
