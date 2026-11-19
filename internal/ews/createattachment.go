@@ -128,6 +128,9 @@ func (s *Server) openAttachmentParent(cache *storeCache, sess *session, parentID
 	if code != "" {
 		return oxews.ItemID{}, nil, 0, code
 	}
+	if code := quotaCode(st); code != "" {
+		return oxews.ItemID{}, nil, 0, code
+	}
 	msg, err := st.OpenMessage(parent.MessageID)
 	if err != nil {
 		return oxews.ItemID{}, nil, 0, "ErrorItemNotFound"

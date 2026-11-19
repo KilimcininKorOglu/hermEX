@@ -127,6 +127,12 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *ses
 		return
 	}
 	defer st.Close()
+	if req.storesItems(disp) {
+		if code := quotaCode(st); code != "" {
+			writeResponse(w, req.quotaRefusal(code))
+			return
+		}
+	}
 
 	send := disp == "SendOnly" || disp == "SendAndSaveCopy"
 	save := disp == "SaveOnly" || disp == "SendAndSaveCopy"

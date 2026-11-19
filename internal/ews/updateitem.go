@@ -579,6 +579,13 @@ func moveCopyOne(cache *storeCache, sess *session, dest moveCopyDest, itemID str
 	if code := checkMoveCopySource(cache, sess, dest, id, remove); code != "" {
 		return itemError(code)
 	}
+	// A copy adds to the destination, and so does a move out of another store; a
+	// move inside one store adds nothing, so a full mailbox can still file its mail.
+	if !remove || id.Mailbox != dest.mailbox {
+		if code := quotaCode(dest.st); code != "" {
+			return itemError(code)
+		}
+	}
 	if id.UID == 0 {
 		return moveCopyObject(dest, id, remove)
 	}

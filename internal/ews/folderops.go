@@ -552,6 +552,9 @@ func moveCopyOneFolder(st *objectstore.Store, src folderTarget, dest int64, copy
 		return folderError(code)
 	}
 	if copy {
+		if code := quotaCode(st); code != "" {
+			return folderError(code)
+		}
 		newID, err := st.CopyFolder(fid, dest, folderName, true)
 		return moveCopyResult(newID, err)
 	}
