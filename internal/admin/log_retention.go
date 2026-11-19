@@ -35,12 +35,17 @@ func (s *Server) logRetentionPanelData(r *http.Request, notice panelNotice) map[
 // handleUISaveLogRetention persists the central-log retention window (in whole days).
 // The admin daemon prunes the log store to match within about a minute, no restart. A
 // value of zero means keep logs forever, pruning is disabled, which is allowed and is
-// the safe default; formInt already maps a blank or negative entry to zero.
+// the safe default. A blank entry is zero; one that is not a whole number of days is
+// refused, so a typo never turns pruning off.
 func (s *Server) handleUISaveLogRetention(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.uiAuthorized(w, r); !ok {
 		return
 	}
 	days := formInt(r, "log_retention_days")
+	if days < 0 {
+		s.render(w, r, "log-retention-panel", s.logRetentionPanelData(r, errorNotice("settings.retentionInvalid")))
+		return
+	}
 	if err := s.dir.SetLogRetentionDays(days); err != nil {
 		s.render(w, r, "log-retention-panel", s.logRetentionPanelData(r, s.failNotice("settings.retentionFailed", err)))
 		return

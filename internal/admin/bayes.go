@@ -350,10 +350,10 @@ func (s *Server) handleUISaveMessageSize(w http.ResponseWriter, r *http.Request)
 	if _, ok := s.uiAuthorized(w, r); !ok {
 		return
 	}
-	mb := formInt(r, "max_mb") // megabytes; 0 disables the limit, negatives clamp to 0
+	mb := formInt(r, "max_mb") // megabytes; 0 disables the limit
 	// A count whose byte value overflows int64 would wrap, 2^44 to exactly 0, and
 	// silently turn the limit off.
-	if !fitsInBytes(int64(mb), 20) {
+	if mb < 0 || !fitsInBytes(int64(mb), 20) {
 		s.render(w, r, "message-size-panel", s.antispamPageData(r, errorNotice("antispam.sizeInvalid")))
 		return
 	}
@@ -524,6 +524,10 @@ func (s *Server) handleUISaveAntispamSettings(w http.ResponseWriter, r *http.Req
 		BayesProb:   bayesProb,
 		SAThreshold: saThreshold,
 	}
+	if min(st.SPFFail, st.SPFSoftFail, st.DKIMFail, st.DMARCFail, st.DNSBLHit, st.BayesSpam, st.SARulesHit) < 0 {
+		s.render(w, r, "scoring-panel", s.antispamPageData(r, errorNotice("antispam.weightInvalid")))
+		return
+	}
 	if err := s.dir.SetAntispamSettings(st); err != nil {
 		s.render(w, r, "scoring-panel", s.antispamPageData(r, s.failNotice("antispam.scoringFailed", err)))
 		return
@@ -531,12 +535,18 @@ func (s *Server) handleUISaveAntispamSettings(w http.ResponseWriter, r *http.Req
 	s.render(w, r, "scoring-panel", s.antispamPageData(r, okNotice("antispam.scoringSaved")))
 }
 
-// formInt reads a non-negative integer form field, returning 0 when absent or
-// unparseable.
+// formInt reads a non-negative integer form field: 0 when the field is blank, -1
+// when it holds anything that is not a non-negative whole number. Several fields
+// read 0 as off or keep forever, so a typo must not read as 0: every caller
+// refuses a negative value.
 func formInt(r *http.Request, name string) int {
-	n, err := strconv.Atoi(strings.TrimSpace(r.FormValue(name)))
-	if err != nil || n < 0 {
+	v := strings.TrimSpace(r.FormValue(name))
+	if v == "" {
 		return 0
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return -1
 	}
 	return n
 }

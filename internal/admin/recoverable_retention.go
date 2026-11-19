@@ -33,13 +33,18 @@ func (s *Server) recoverableRetentionPanelData(r *http.Request, notice panelNoti
 
 // handleUISaveRecoverableRetention persists the Recoverable Items retention window (in
 // whole days). The admin sweep purges expired soft-deleted items to match within about a
-// minute, no restart. A value of zero or less disables auto-purge (items are kept until
-// manually purged); formInt already maps a blank or negative entry to zero.
+// minute, no restart. Zero disables auto-purge (items are kept until manually
+// purged). A blank entry is zero; one that is not a whole number of days is refused,
+// so a typo never turns the purge off.
 func (s *Server) handleUISaveRecoverableRetention(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.uiAuthorized(w, r); !ok {
 		return
 	}
 	days := formInt(r, "recoverable_retention_days")
+	if days < 0 {
+		s.render(w, r, "recoverable-retention-panel", s.recoverableRetentionPanelData(r, errorNotice("settings.retentionInvalid")))
+		return
+	}
 	if err := s.dir.SetRecoverableSettings(directory.RecoverableSettings{RetentionDays: days}); err != nil {
 		s.render(w, r, "recoverable-retention-panel", s.recoverableRetentionPanelData(r, s.failNotice("settings.retentionFailed", err)))
 		return

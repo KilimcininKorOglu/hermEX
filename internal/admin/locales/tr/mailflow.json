@@ -163,6 +163,7 @@
     "badStart": "Başlangıç tarihi geçerli değil.",
     "badEnd": "Bitiş tarihi geçerli değil.",
     "retentionFailed": "Saklama ayarı kaydedilemedi.",
+    "retentionInvalid": "Her saklama süresi 0 veya daha büyük, tam sayı bir gün değeri olmalıdır. Ayar kaydedilmedi.",
     "retentionSaved": "Rapor saklama ayarı kaydedildi. Temizleme işlemi süresi dolan raporları yeniden başlatma olmadan bir dakika içinde siler.",
     "sendingFailed": "DMARC gönderme ayarı kaydedilemedi.",
     "sendingSaved": "DMARC raporu gönderme ayarı kaydedildi. Posta sunucusu bunu yeniden başlatma olmadan bir dakika içinde uygular."

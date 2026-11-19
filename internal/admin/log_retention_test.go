@@ -28,6 +28,20 @@ func TestSaveLogRetention(t *testing.T) {
 	}
 }
 
+// TestSaveLogRetentionRefusesWhatIsNotADayCount sends a typo and a negative count.
+// Both were read as 0, keep forever, and silently turned pruning off; now each is
+// refused and nothing is stored.
+func TestSaveLogRetentionRefusesWhatIsNotADayCount(t *testing.T) {
+	for _, bad := range []string{"9O", "-30"} {
+		d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+		ts := adminServer(t, d)
+		session, csrf := loginCookies(t, ts)
+		body := wantBody(t, htmxPOST(t, ts, "/admin/ui/log-retention", session, csrf, url.Values{"log_retention_days": {bad}}), http.StatusOK, bad)
+		wantContains(t, body, "whole number of days", "the refusal for "+bad)
+		wantFalse(t, d.logRetentionFound, bad+" was stored")
+	}
+}
+
 // TestSaveLogRetentionKeepForever proves zero is accepted and persisted as keep-forever
 // (pruning disabled), the safe default the dangerous "expire everything" path can never
 // reach because zero simply means never prune.

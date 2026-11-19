@@ -163,6 +163,7 @@
     "badStart": "The start date is not valid.",
     "badEnd": "The end date is not valid.",
     "retentionFailed": "Could not save the retention setting.",
+    "retentionInvalid": "Each retention must be a whole number of days, 0 or more; setting not saved.",
     "retentionSaved": "Report retention saved; the sweep deletes expired reports within a minute, no restart.",
     "sendingFailed": "Could not save the DMARC sending setting.",
     "sendingSaved": "DMARC report sending saved; the mail server applies it within a minute, no restart."

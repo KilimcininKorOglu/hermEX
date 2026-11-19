@@ -353,8 +353,8 @@ func (s *Server) fillMailReportRetention(data map[string]any, failed readFailure
 
 // handleUISaveMailReportRetention persists the report retention windows, in whole
 // days. The admin sweep deletes expired reports to match within about a minute,
-// no restart. A value of zero or less keeps that kind of report forever; formInt
-// already maps a blank or negative entry to zero.
+// no restart. Zero keeps that kind of report forever. A blank entry is zero; one that
+// is not a whole number of days is refused, so a typo never disables the sweep.
 func (s *Server) handleUISaveMailReportRetention(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.uiAuthorized(w, r); !ok {
 		return
@@ -365,6 +365,12 @@ func (s *Server) handleUISaveMailReportRetention(w http.ResponseWriter, r *http.
 	}
 	failed := readFailures{}
 	data := map[string]any{"CSRF": csrfCookieValue(r), "ReadFailed": failed}
+	if rs.AggregateDays < 0 || rs.FailureDays < 0 {
+		s.fillMailReportRetention(data, failed)
+		data["Notice"] = errorNotice("reports.retentionInvalid")
+		s.render(w, r, "report-retention-panel", data)
+		return
+	}
 	if err := s.dir.SetMailReportSettings(rs); err != nil {
 		s.fillMailReportRetention(data, failed)
 		data["Notice"] = s.failNotice("reports.retentionFailed", err)

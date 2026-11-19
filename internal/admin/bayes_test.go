@@ -60,6 +60,30 @@ func TestRetrainEnqueues(t *testing.T) {
 	}
 }
 
+// TestAntispamFormsRefuseWhatIsNotACount sends a typo and a negative value where 0
+// has a meaning: a score weight (0 turns that check off) and the message size limit
+// (0 removes it). Each bad entry was read as 0; now the save is refused and nothing
+// is stored.
+func TestAntispamFormsRefuseWhatIsNotACount(t *testing.T) {
+	for _, bad := range []string{"5x", "-5"} {
+		d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+		ts := adminServer(t, d)
+		session, csrf := loginCookies(t, ts)
+
+		body := wantBody(t, htmxPOST(t, ts, "/admin/ui/antispam/settings", session, csrf, url.Values{
+			"spf_fail": {"5"}, "spf_softfail": {"2"}, "dkim_fail": {"3"}, "dmarc_fail": {bad},
+			"dnsbl_hit": {"6"}, "bayes_spam": {"4"}, "sa_rules_hit": {"4"},
+			"threshold": {"10"}, "bayes_prob": {"0.9"}, "sa_threshold": {"4.5"},
+		}), http.StatusOK, "weights "+bad)
+		wantContains(t, body, "score weight must be", "the weight refusal for "+bad)
+		wantFalse(t, d.settingsFound, "weights with "+bad+" stored")
+
+		body = wantBody(t, htmxPOST(t, ts, "/admin/ui/antispam/message-size", session, csrf, url.Values{"max_mb": {bad}}), http.StatusOK, "size "+bad)
+		wantContains(t, body, "whole number of MB", "the size refusal for "+bad)
+		wantFalse(t, d.messageSizeFound, "size "+bad+" stored")
+	}
+}
+
 // TestSaveAntispamSettings proves the settings form persists the edited weights,
 // threshold, and zones and acknowledges the save.
 func TestSaveAntispamSettings(t *testing.T) {

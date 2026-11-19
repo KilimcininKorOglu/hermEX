@@ -238,6 +238,23 @@ func TestUIReportsWarnWhenPostmasterCannotReceive(t *testing.T) {
 	}
 }
 
+// TestUIReportRetentionRefusesWhatIsNotADayCount sends a typo and a negative count
+// in either field. Each was read as 0, keep forever, and disabled the sweep for
+// that kind of report; now the save is refused and nothing is stored.
+func TestUIReportRetentionRefusesWhatIsNotADayCount(t *testing.T) {
+	for _, form := range []url.Values{
+		{"aggregate_days": {"9O"}, "failure_days": {"7"}},
+		{"aggregate_days": {"90"}, "failure_days": {"-7"}},
+	} {
+		d := reportsDir(directory.AdminRole{Role: directory.AdminSystem})
+		ts := adminServer(t, d)
+		session, csrf := loginCookies(t, ts)
+		body := wantBody(t, htmxPOST(t, ts, "/admin/ui/reports/retention", session, csrf, form), http.StatusOK, form.Encode())
+		wantContains(t, body, "whole number of days", "the refusal for "+form.Encode())
+		wantFalse(t, d.reports.settingsFound, form.Encode()+" was stored")
+	}
+}
+
 // TestUIReportRetentionRequiresSystem: the retention window deletes every
 // domain's reports, so only a full system administrator may change it.
 func TestUIReportRetentionRequiresSystem(t *testing.T) {

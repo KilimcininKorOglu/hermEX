@@ -28,6 +28,20 @@ func TestSaveRecoverableRetention(t *testing.T) {
 	}
 }
 
+// TestSaveRecoverableRetentionRefusesWhatIsNotADayCount sends a typo and a negative
+// count. Both were read as 0 and silently disabled the purge; now each is refused
+// and nothing is stored.
+func TestSaveRecoverableRetentionRefusesWhatIsNotADayCount(t *testing.T) {
+	for _, bad := range []string{"3O", "-14"} {
+		d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+		ts := adminServer(t, d)
+		session, csrf := loginCookies(t, ts)
+		body := wantBody(t, htmxPOST(t, ts, "/admin/ui/recoverable-retention", session, csrf, url.Values{"recoverable_retention_days": {bad}}), http.StatusOK, bad)
+		wantContains(t, body, "whole number of days", "the refusal for "+bad)
+		wantFalse(t, d.recoverableFound, bad+" was stored")
+	}
+}
+
 // TestSaveRecoverableRetentionKeepForever proves zero is accepted and persisted as
 // keep-forever, disabling auto-purge.
 func TestSaveRecoverableRetentionKeepForever(t *testing.T) {
