@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"math"
 	"unicode/utf16"
+	"unicode/utf8"
 
 	"hermex/internal/mapi"
 )
@@ -198,7 +199,13 @@ func (p *Pull) Bin() ([]byte, error) {
 func (p *Push) String8(s string) {
 	b := []byte(s)
 	if p.flags&FlagTBLLMT != 0 && len(b) > 509 {
-		b = b[:509]
+		// Cut at a character boundary, so the cap never leaves half a
+		// multi-byte sequence for the client to render as a broken character.
+		n := 509
+		for n > 0 && !utf8.RuneStart(b[n]) {
+			n--
+		}
+		b = b[:n]
 	}
 	p.Raw(b)
 	p.Uint8(0)
@@ -229,6 +236,11 @@ func (p *Push) Unicode(s string) {
 	// 510 bytes, i.e. 254 content units plus the 00 00 terminator.
 	if p.flags&FlagTBLLMT != 0 && (len(units)+1)*2 > 510 {
 		units = units[:254]
+		// A high surrogate left last would be an unpaired half of a
+		// supplementary character, so the pair is dropped whole.
+		if utf16.IsSurrogate(rune(units[253])) && units[253] < 0xDC00 {
+			units = units[:253]
+		}
 	}
 	for _, u := range units {
 		p.Uint16(u)

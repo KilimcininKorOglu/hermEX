@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"hermex/internal/mapi"
 )
@@ -108,6 +109,30 @@ func TestTBLLMTUnicodeCap(t *testing.T) {
 	got, err := NewPull(p.Bytes(), FlagUTF16|FlagTBLLMT).Unicode()
 	if err != nil || len([]rune(got)) != 254 {
 		t.Fatalf("capped read runes = %d, err %v", len([]rune(got)), err)
+	}
+}
+
+// TestTBLLMTCapKeepsWholeCharacters puts a character that needs more than one
+// code unit (a supplementary-plane emoji: a UTF-16 surrogate pair, four UTF-8
+// bytes) across the table cap. The cap must drop it whole, as a client renders a
+// half character as a broken one: the decoded string is valid, ends in the last
+// whole character before the cap, and the emoji is gone.
+func TestTBLLMTCapKeepsWholeCharacters(t *testing.T) {
+	emoji := "\U0001F600"
+	wide := strings.Repeat("a", 253) + emoji + "bb" // the pair would take units 253 and 254
+	p := NewPush(FlagUTF16 | FlagTBLLMT)
+	p.Unicode(wide)
+	got, err := NewPull(p.Bytes(), FlagUTF16|FlagTBLLMT).Unicode()
+	if err != nil || got != strings.Repeat("a", 253) {
+		t.Errorf("Unicode cap across a surrogate pair = %q (err %v), want 253 a's", got, err)
+	}
+
+	narrow := strings.Repeat("a", 507) + emoji // the emoji's four bytes would straddle byte 509
+	p = NewPush(FlagTBLLMT)
+	p.String8(narrow)
+	got, err = NewPull(p.Bytes(), FlagTBLLMT).String8()
+	if err != nil || got != strings.Repeat("a", 507) || !utf8.ValidString(got) {
+		t.Errorf("String8 cap across a multi-byte character = %q (err %v), want 507 a's", got, err)
 	}
 }
 
