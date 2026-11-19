@@ -821,6 +821,24 @@ func TestOutboxDeliverReply(t *testing.T) {
 	}
 }
 
+// TestOutboxRefusesAReplyForAnotherAttendee posts, from alice's Outbox, a REPLY
+// that declines on carol's behalf. Only the attendee answering may send a REPLY
+// (RFC 5546 section 3.2.3), so it is refused and the organizer receives nothing.
+func TestOutboxRefusesAReplyForAnotherAttendee(t *testing.T) {
+	ts, bobDir := davServerWithPeer(t)
+	reply := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\nMETHOD:REPLY\r\n" +
+		"BEGIN:VEVENT\r\nUID:mtg-1\r\nSUMMARY:Planning\r\nDTSTART:20260615T140000Z\r\nDTEND:20260615T150000Z\r\n" +
+		"ORGANIZER:mailto:bob@hermex.test\r\nATTENDEE;PARTSTAT=DECLINED:mailto:carol@hermex.test\r\n" +
+		"END:VEVENT\r\nEND:VCALENDAR\r\n"
+	resp, out := doFull(t, ts, "POST", "/dav/calendars/"+testUser+"/outbox/", reply, nil)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("forged REPLY: status %d, want 403\n%s", resp.StatusCode, out)
+	}
+	if n, _, _ := inboxMessage(t, bobDir); n != 0 {
+		t.Errorf("the organizer received %d messages from a forged REPLY, want 0", n)
+	}
+}
+
 // TestScheduleDiscovery confirms the principal advertises the CalDAV scheduling
 // discovery properties (RFC 6638 §2.2/§2.4.1): the calendar user address set and the
 // scheduling Inbox/Outbox URLs a client needs to drive auto-scheduling.
