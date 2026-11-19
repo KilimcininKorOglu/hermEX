@@ -1144,7 +1144,13 @@ func sweepMailbox(ctx context.Context, path string, deliver spooler.DeliverFunc,
 		return stats, 0, 0
 	}
 	mbCtx, cancelMailbox := context.WithTimeout(ctx, perMailboxSweepBudget)
-	stats, err = spooler.ProcessDueOutboxStats(mbCtx, st, deliver, onGiveUp, time.Now())
+	// A panic releasing this mailbox's sends is this mailbox's failure: its message
+	// stays in the Outbox, so a crash would repeat on every start.
+	err = lifecycle.Contain(func() error {
+		var perr error
+		stats, perr = spooler.ProcessDueOutboxStats(mbCtx, st, deliver, onGiveUp, time.Now())
+		return perr
+	})
 	budgetSpent := mbCtx.Err() != nil && ctx.Err() == nil
 	cancelMailbox()
 	_ = st.Close()
