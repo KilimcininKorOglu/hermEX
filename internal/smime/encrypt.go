@@ -66,9 +66,26 @@ func Decrypt(raw []byte, cert *x509.Certificate, key crypto.PrivateKey) ([]byte,
 	if err != nil {
 		return nil, fmt.Errorf("smime: parse enveloped data: %w", err)
 	}
-	content, err := p7.Decrypt(cert, key)
+	content, err := decryptEnveloped(p7, cert, key)
 	if err != nil {
 		return nil, fmt.Errorf("smime: decrypt: %w", err)
 	}
 	return content, nil
+}
+
+// errBadPadding reports enveloped content whose CBC padding does not fit it.
+var errBadPadding = errors.New("smime: enveloped content padding is invalid")
+
+// decryptEnveloped runs the library decryption. The library's unpad slices the
+// content by the padding length the last plaintext byte states without checking
+// it against the content length, so a sender who alters the last ciphertext block
+// makes it panic. That panic is returned as errBadPadding; it is the only one
+// this call is known to raise, and the message is unreadable either way.
+func decryptEnveloped(p7 *pkcs7.PKCS7, cert *x509.Certificate, key crypto.PrivateKey) (content []byte, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			content, err = nil, fmt.Errorf("%w: %v", errBadPadding, p)
+		}
+	}()
+	return p7.Decrypt(cert, key)
 }
