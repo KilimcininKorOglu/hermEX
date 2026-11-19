@@ -39,6 +39,7 @@ readonly SVC_USER="hermex"
 readonly MARIADB_SERIES="11.8"
 readonly MONGODB_SERIES="8.0"
 readonly KEEP_RELEASES=3
+readonly MONGO_CACHE_GB=1
 
 # Daemons: name, binary, extra arguments, whether it binds a port below 1024,
 # and its /healthz port on the loopback. The name is the one the daemon reports
@@ -232,10 +233,27 @@ EOF
 setup_services() {
 	systemctl enable --now mariadb.service
 	if mongo_available; then
+		limit_mongo_cache || true
 		systemctl enable --now mongod.service
 	else
 		log "MongoDB publishes no packages for ${OS_ID} ${ARCH}: no central log store, the daemons log to the journal"
 	fi
+}
+
+# limit_mongo_cache caps the WiredTiger cache at MONGO_CACHE_GB. MongoDB holds
+# only the logs here, yet by default takes half of the memory less 1 GB, beside
+# clamd and every daemon. It edits mongod.conf only when no cache size is set, so
+# an operator's own value stays, and returns 0 only when it changed the file.
+limit_mongo_cache() {
+	local conf=/etc/mongod.conf
+	[[ -f "$conf" ]] || die "$conf is missing"
+	grep -q 'cacheSizeGB' "$conf" && return 1
+	grep -q '^storage:' "$conf" || die "$conf has no storage section to add the cache size to"
+	awk -v gb="$MONGO_CACHE_GB" '
+		{ print }
+		/^storage:/ { print "  wiredTiger:"; print "    engineConfig:"; print "      cacheSizeGB: " gb }
+	' "$conf" | write_file "$conf" 0644 root:root
+	log "capped the MongoDB cache at ${MONGO_CACHE_GB} GB in $conf"
 }
 
 # ------------------------------------------------------------------ layout ---
@@ -600,6 +618,8 @@ cmd_update() {
 	place_release "$new"
 	write_units
 	stop_all
+	# An install made before the cache cap existed gets it on its next update.
+	if mongo_available && limit_mongo_cache; then systemctl restart mongod.service; fi
 	# The dump is taken with every daemon stopped, so it is the exact state the
 	# old release left and a rollback returns to it.
 	dump="$(backup_database)"
