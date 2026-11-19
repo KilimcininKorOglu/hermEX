@@ -68,8 +68,7 @@ func Handler(service, version string, started time.Time, checks ...Check) http.H
 }
 
 // component runs the health Handler on its own HTTP listener as a daemon
-// lifecycle component (it satisfies lifecycle.Component structurally, so this
-// package need not import lifecycle).
+// lifecycle component; it satisfies lifecycle.Component.
 type component struct {
 	srv *http.Server
 }
