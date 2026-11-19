@@ -99,9 +99,11 @@ func (vc *vconn) isClosed() bool {
 }
 
 // vconnKey is the table key both channels rendezvous on: the connection cookie,
-// the proxied port, and the host, lowercased (matching the reference's join key).
-func vconnKey(connCookie mapi.GUID, host, port string) string {
-	return strings.ToLower(connCookie.String() + ":" + port + ":" + host)
+// the proxied port and the host, lowercased, plus the authenticated user. The
+// cookie is chosen by the client and authenticates nothing, so the user keeps
+// another account that presents the same cookie out of this connection.
+func vconnKey(connCookie mapi.GUID, host, port, user string) string {
+	return strings.ToLower(connCookie.String() + ":" + port + ":" + host + ":" + user)
 }
 
 // maxVirtualConnections bounds how many virtual connections this daemon holds at

@@ -161,7 +161,7 @@ func (s *Server) openChannel(w http.ResponseWriter, r *http.Request, user, mailb
 		http.Error(w, what+" missing cookie", http.StatusBadRequest)
 		return open, false
 	}
-	open.key = vconnKey(ck[0], host, port)
+	open.key = vconnKey(ck[0], host, port, user)
 	open.vc = s.getOrCreate(open.key, user, mailbox, serve.ClientAddr(r))
 	if open.vc == nil {
 		http.Error(w, "too many connections", http.StatusServiceUnavailable)

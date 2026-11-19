@@ -3,6 +3,8 @@ package rpchttp
 import (
 	"strconv"
 	"testing"
+
+	"hermex/internal/mapi"
 )
 
 // tableEntry reads the virtual connection the table currently holds for a key.
@@ -10,6 +12,23 @@ func tableEntry(s *Server, key string) *vconn {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.conns[key]
+}
+
+// TestAnotherUserCannotJoinAVirtualConnection opens channels for two accounts
+// that present the same connection cookie. The cookie is chosen by the client
+// ([MS-RPCH] 2.2.3.1), so it identifies a connection but authenticates nothing:
+// a second account presenting it must get a connection of its own, never the
+// first account's session, and cannot squat the first account's key either.
+func TestAnotherUserCannotJoinAVirtualConnection(t *testing.T) {
+	s := NewServer(Config{})
+	cookie := mapi.GUID{Data1: 7}
+	alice := s.getOrCreate(vconnKey(cookie, "mail.hermex.test", "6001", "alice@hermex.test"), "alice@hermex.test", "/mb/alice", "198.51.100.1:1")
+	bob := s.getOrCreate(vconnKey(cookie, "mail.hermex.test", "6001", "bob@hermex.test"), "bob@hermex.test", "/mb/bob", "198.51.100.2:1")
+	if bob == alice {
+		t.Fatal("a second account joined another account's virtual connection")
+	}
+	wantEq(t, bob.sess.User, "bob@hermex.test", "the second account's session user")
+	wantEq(t, alice.sess.User, "alice@hermex.test", "the first account's session user")
 }
 
 // TestTeardownLeavesAReplacementConnectionAlone is the load-bearing case. The IN and
