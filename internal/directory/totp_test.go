@@ -162,6 +162,27 @@ func TestRecoveryCodeIsSpentOnce(t *testing.T) {
 	}
 }
 
+// TestRecoveryCodeIsBoundToItsAccount spends one account's recovery code on
+// another enrolled account. A code is a second factor for the account that was
+// issued it, so it must open no other account and stay unspent for its owner.
+func TestRecoveryCodeIsBoundToItsAccount(t *testing.T) {
+	d, user := enrolledUser(t)
+	if _, err := d.CreateUser("v@acme.test", "pw", filepath.Join(t.TempDir(), "v")); err != nil {
+		t.Fatal(err)
+	}
+	beginEnrollment(t, d, user)
+	codes := activate(t, d, user, 0)
+	beginEnrollment(t, d, "v@acme.test")
+	activate(t, d, "v@acme.test", 0)
+
+	if ok, _ := d.ConsumeRecoveryCode("v@acme.test", codes[0]); ok {
+		t.Error("one account's recovery code opened another account")
+	}
+	if ok, _ := d.ConsumeRecoveryCode(user, codes[0]); !ok {
+		t.Error("the owner's code was spent by the other account's attempt")
+	}
+}
+
 // TestAnActiveEnrollmentIsNotSilentlyReplaced is the session-theft guard. Anyone
 // holding a live session could otherwise start a fresh enrollment, swap the
 // second factor for one of their own and keep the account after the password is
