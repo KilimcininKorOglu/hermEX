@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"hermex/internal/directory"
 )
 
 // TestUIUserDelegates proves the detail-form save writes the delegate list through
@@ -35,6 +37,24 @@ func TestUIUserDelegates(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "Saved") {
 		t.Errorf("ui delegates save did not report success:\n%s", body)
+	}
+}
+
+// TestUIUserDelegatesNeedASystemAdmin proves a domain administrator cannot name
+// a mailbox's delegates: a delegate reads and sends as the owner, so the list
+// grants mailbox access.
+func TestUIUserDelegatesNeedASystemAdmin(t *testing.T) {
+	d := oofUserDir()
+	d.roles = nil
+	d.perms = []directory.Permission{{Name: directory.PermDomainAdmin, Params: "*"}}
+	store := &fakeStore{}
+	ts := adminServerStore(t, d, store)
+	session, csrf := loginCookies(t, ts)
+
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/delegates", session, csrf,
+		url.Values{"delegates": {"intruder@hermex.test"}}), http.StatusForbidden, "delegates save")
+	if store.setDelegatesDir != "" || store.setDelegatesVal != nil {
+		t.Errorf("a domain admin stored delegates %v on %q", store.setDelegatesVal, store.setDelegatesDir)
 	}
 }
 
