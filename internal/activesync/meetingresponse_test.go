@@ -41,7 +41,8 @@ func TestMeetingResponseAccept(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	cal, _ := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
+	cal, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
+	mustNoErr(t, "list the calendar", err)
 	if len(cal) != 1 {
 		t.Fatalf("calendar = %d items, want 1 (the accepted appointment)", len(cal))
 	}
@@ -101,7 +102,10 @@ func TestMeetingResponseRefusesInvalidRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if cal, _ := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar)); len(cal) != 0 {
+	// A failed read would return no items and pass as "nothing filed".
+	cal, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
+	mustNoErr(t, "list the calendar", err)
+	if len(cal) != 0 {
 		t.Errorf("refused responses filed %d calendar items, want 0", len(cal))
 	}
 }
