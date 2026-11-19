@@ -104,21 +104,25 @@ func TestDomainAdminAliasValueScope(t *testing.T) {
 		`{"aliases":["sales@acme.test"]}`)); s == http.StatusForbidden {
 		t.Errorf("domain admin own-domain alias refused (403)")
 	}
+	wantEq(t, strings.Join(d.setAliases, ","), "sales@acme.test", "the stored own-domain alias")
 	// Foreign served-domain alias: refused, this is the interception boundary.
 	if s := statusOf(authedReq(t, ts, "PUT", "/admin/users/in@acme.test/aliases", session, csrf,
 		`{"aliases":["ceo@other.test"]}`)); s != http.StatusForbidden {
 		t.Errorf("domain admin foreign-domain alias = %d, want 403", s)
 	}
+	wantEq(t, strings.Join(d.setAliases, ","), "sales@acme.test", "the aliases after the refused foreign alias")
 	// Bare alternative-login name: allowed (no domain to claim).
 	if s := statusOf(authedReq(t, ts, "PUT", "/admin/users/in@acme.test/altnames", session, csrf,
 		`{"altnames":["ali"]}`)); s == http.StatusForbidden {
 		t.Errorf("domain admin bare altname refused (403)")
 	}
+	wantEq(t, strings.Join(d.setAltnames, ","), "ali", "the stored bare altname")
 	// Domain-qualified foreign altname: refused (it too feeds the resolver).
 	if s := statusOf(authedReq(t, ts, "PUT", "/admin/users/in@acme.test/altnames", session, csrf,
 		`{"altnames":["ceo@other.test"]}`)); s != http.StatusForbidden {
 		t.Errorf("domain admin foreign-domain altname = %d, want 403", s)
 	}
+	wantEq(t, strings.Join(d.setAltnames, ","), "ali", "the altnames after the refused foreign altname")
 }
 
 // TestSystemAdminAliasValueUnrestricted is the positive control: a full system
@@ -201,6 +205,9 @@ func TestDomainPurgeCapability(t *testing.T) {
 		sx, cx := loginCookies(t, tsx)
 		if s := statusOf(authedReq(t, tsx, "DELETE", "/admin/domains/9", sx, cx, "")); s != http.StatusForbidden {
 			t.Errorf("%s purge = %d, want 403", c.name, s)
+		}
+		if c.dir.purgedDomain != 0 {
+			t.Errorf("%s purged domain %d", c.name, c.dir.purgedDomain)
 		}
 	}
 
