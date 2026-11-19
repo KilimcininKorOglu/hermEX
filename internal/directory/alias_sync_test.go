@@ -1,6 +1,10 @@
 package directory
 
-import "testing"
+import (
+	"slices"
+	"strings"
+	"testing"
+)
 
 // aliasSyncDir builds a directory with one domain and two mailbox users, so a test can make
 // one account's alias collide with the other.
@@ -69,6 +73,42 @@ func TestSyncAliasesSkipsAForeignDomain(t *testing.T) {
 	skipped := mustSyncAliases(t, d, "alice@hermex.test", []string{"alice@partner.example"})
 
 	wantEq(t, "the foreign address was skipped", len(skipped), 1)
+}
+
+// TestSyncAliasesStayInTheAccountsOrganization gives one account aliases in
+// domains of its own organization, of another organization and of no
+// organization. The directory a downsync reads belongs to one customer, so an
+// alias it publishes in another customer's domain would take that customer's
+// mail and let the account send under that address. Only the account's own
+// organization may be aliased; a domain outside any organization only itself.
+func TestSyncAliasesStayInTheAccountsOrganization(t *testing.T) {
+	d, _ := freshDirectory(t)
+	root := t.TempDir()
+	home := mustCreateDomain(t, d, root, "hermex.test")
+	sister := mustCreateDomain(t, d, root, "hermex.de")
+	other := mustCreateDomain(t, d, root, "other.test")
+	mustCreateDomain(t, d, root, "loose.test")
+	mustCreateUser(t, d, root, "alice@hermex.test", "pw")
+	mustCreateUser(t, d, root, "carol@loose.test", "pw")
+	acme, err := d.CreateOrg("acme", "")
+	mustNoErr(t, "create acme", err)
+	rival, err := d.CreateOrg("rival", "")
+	mustNoErr(t, "create rival", err)
+	for _, a := range []struct{ domain, org int64 }{{home, acme}, {sister, acme}, {other, rival}} {
+		_, err := d.AssignDomainToOrg(a.domain, a.org)
+		mustNoErr(t, "assign a domain", err)
+	}
+
+	skipped := mustSyncAliases(t, d, "alice@hermex.test",
+		[]string{"sales@hermex.test", "sales@hermex.de", "ceo@other.test", "ceo@loose.test"})
+	wantEq(t, "the aliases outside acme that were skipped", strings.Join(skipped, ","), "ceo@other.test,ceo@loose.test")
+	got, err := d.ListAliasesFor("alice@hermex.test")
+	mustNoErr(t, "list alice's aliases", err)
+	slices.Sort(got)
+	wantEq(t, "alice's aliases", strings.Join(got, ","), "sales@hermex.de,sales@hermex.test")
+
+	skipped = mustSyncAliases(t, d, "carol@loose.test", []string{"info@loose.test", "info@hermex.test"})
+	wantEq(t, "the alias outside an organizationless domain that was skipped", strings.Join(skipped, ","), "info@hermex.test")
 }
 
 // TestSyncAliasesReportsAnUnknownAccount proves a sync for an account that does not exist

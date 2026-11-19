@@ -1286,7 +1286,7 @@ func (d *SQLDirectory) ListAliasesFor(username string) ([]string, error) {
 // user existed. The replace runs in one transaction; the aliasname UNIQUE key
 // rejects an address already in use, rolling the change back.
 func (d *SQLDirectory) SetAliasesFor(username string, aliases []string) (bool, error) {
-	_, found, err := d.replaceAliases(username, aliases, false)
+	_, found, err := d.replaceAliases(username, aliases, checkAlias, false)
 	return found, err
 }
 
@@ -1295,14 +1295,28 @@ func (d *SQLDirectory) SetAliasesFor(username string, aliases []string) (bool, e
 // caller to report. The LDAP downsync uses it: a directory listing one address that is not
 // in a local domain, or that already belongs to another account, must not cost the account
 // every other alias it publishes.
+//
+// The directory it reads belongs to one customer, so an address it publishes must also lie
+// in the account's own organization (checkAliasInOrg): an alias in another customer's
+// domain would take that customer's mail and let the account send under the address.
 func (d *SQLDirectory) SyncAliasesFor(username string, aliases []string) (skipped []string, found bool, err error) {
-	return d.replaceAliases(username, aliases, true)
+	return d.replaceAliases(username, aliases, checkSyncedAlias, true)
+}
+
+// checkSyncedAlias is checkAlias plus the organization bound a directory-published alias
+// must stay within.
+func checkSyncedAlias(q rowQuerier, alias, main string) error {
+	if err := checkAlias(q, alias, main); err != nil {
+		return err
+	}
+	return checkAliasInOrg(q, alias, main)
 }
 
 // replaceAliases is the shared body: it clears the user's aliases and re-inserts the given
-// set inside one transaction. skipRejected decides what a failed check does, abort the whole
-// replace or skip that one address.
-func (d *SQLDirectory) replaceAliases(username string, aliases []string, skipRejected bool) (skipped []string, found bool, err error) {
+// set inside one transaction, each address passing check. skipRejected decides what a failed
+// check does, abort the whole replace or skip that one address.
+func (d *SQLDirectory) replaceAliases(username string, aliases []string, check func(rowQuerier, string, string) error,
+	skipRejected bool) (skipped []string, found bool, err error) {
 	username = strings.ToLower(strings.TrimSpace(username))
 	var id int64
 	err = d.db.QueryRow(`SELECT id FROM users WHERE username = ?`, username).Scan(&id)
@@ -1323,7 +1337,7 @@ func (d *SQLDirectory) replaceAliases(username string, aliases []string, skipRej
 		return nil, false, err
 	}
 	for _, a := range normalizedAliases(aliases) {
-		if err := checkAlias(tx, a, username); err != nil {
+		if err := check(tx, a, username); err != nil {
 			if !skipRejected {
 				return nil, false, err
 			}

@@ -60,6 +60,22 @@ func checkAliasDomain(q rowQuerier, alias string) error {
 	return err
 }
 
+// checkAliasInOrg confirms the alias lies in the account's own domain or in another
+// domain of the same organization. org_id 0 is "no organization", so a domain
+// outside any organization reaches only itself, the bound GAL visibility follows.
+func checkAliasInOrg(q rowQuerier, alias, main string) error {
+	var one int
+	err := q.QueryRow(`
+SELECT 1 FROM domains a, domains m
+ WHERE a.domainname = ? AND m.domainname = ?
+   AND (a.id = m.id OR (a.org_id <> 0 AND a.org_id = m.org_id))`,
+		AddressDomain(alias), AddressDomain(main)).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: %s is outside the account's organization", ErrAliasNotLocal, alias)
+	}
+	return err
+}
+
 // checkAliasFree confirms the address is not already in use as an account, an
 // alternative name, or another alias.
 //

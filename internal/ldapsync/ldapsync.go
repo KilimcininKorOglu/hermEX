@@ -196,8 +196,9 @@ func runContactPass(cfg directory.LDAPConfig, syncer Syncer, store Store, logf f
 }
 
 // applyAliases replaces the account's aliases with the ones the directory publishes, after
-// the upsert so the account exists to alias. An alias in another local domain is kept:
-// only accounts, lists and contact filing are scoped to the bound domain. It runs only
+// the upsert so the account exists to alias. An alias in another domain of the account's
+// own organization is kept, one in any other domain is skipped and reported, so one
+// customer's directory cannot claim another customer's addresses. It runs only
 // while an alias attribute is configured, because a disabled alias sync must never remove
 // an alias an operator added by hand. An address the directory owns but this server cannot
 // bind is skipped and reported, not fatal: the account itself is already synced.
