@@ -27,6 +27,13 @@ func TestDKIMOutputRecordSplitsLongValue(t *testing.T) {
 	if strings.Count(got, `"`) != 4 {
 		t.Errorf("a 418-character value must become two quoted strings, got:\n%s", got)
 	}
+	// RFC 1035 3.3: a <character-string> holds at most 255 octets.
+	parts := strings.Split(got, `"`)
+	for i := 1; i < len(parts); i += 2 {
+		if len(parts[i]) > 255 {
+			t.Errorf("quoted string %d holds %d characters, over the 255 limit", i/2+1, len(parts[i]))
+		}
+	}
 }
 
 // TestDKIMOutputRecordWrapsSplitValue proves a multi-string record carries the parentheses
