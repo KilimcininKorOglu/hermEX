@@ -54,8 +54,9 @@ func TestAdminSetUserForward(t *testing.T) {
 	}
 }
 
-// TestAdminUserForwardRequiresSystem proves a domain admin cannot read or write a
-// user's forward through the system-scoped endpoints.
+// TestAdminUserForwardRequiresSystem proves a domain admin cannot read or write the
+// forward of a user outside its scope through the user-scoped API, and cannot use
+// the panel form, which is system-only.
 func TestAdminUserForwardRequiresSystem(t *testing.T) {
 	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
 		userDetail: directory.UserDetail{Username: "alice@hermex.test", Maildir: "/mb/alice"}}

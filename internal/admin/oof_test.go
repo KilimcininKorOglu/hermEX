@@ -133,8 +133,9 @@ func TestAdminUserOOFNotFound(t *testing.T) {
 	}
 }
 
-// TestAdminUserOOFRequiresSystem proves a domain admin (not a system admin) cannot
-// read or write a user's OOF through the system-scoped endpoints.
+// TestAdminUserOOFRequiresSystem proves a domain admin cannot read or write the OOF
+// of a user outside its scope through the user-scoped API, and cannot use the
+// panel form, which is system-only.
 func TestAdminUserOOFRequiresSystem(t *testing.T) {
 	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
 		userDetail: directory.UserDetail{Username: "alice@hermex.test", Maildir: "/mb/alice"}}

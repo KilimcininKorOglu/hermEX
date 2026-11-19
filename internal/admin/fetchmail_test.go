@@ -163,7 +163,9 @@ func TestUIUserDeleteFetchmail(t *testing.T) {
 	}
 }
 
-// TestAdminFetchmailRequiresSystem proves a domain admin cannot list, create, or delete.
+// TestAdminFetchmailRequiresSystem proves a domain admin cannot list, create or
+// delete the fetchmail entries of a user outside its scope through the user-scoped
+// API, and cannot use the panel forms, which are system-only.
 func TestAdminFetchmailRequiresSystem(t *testing.T) {
 	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
 		userDetail: directory.UserDetail{Username: "alice@hermex.test"}}

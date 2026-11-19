@@ -89,8 +89,9 @@ func TestAdminUserQuotaNotFound(t *testing.T) {
 	}
 }
 
-// TestAdminUserQuotaRequiresSystem proves a domain admin cannot read or write a
-// user's quota through the system-scoped endpoints.
+// TestAdminUserQuotaRequiresSystem proves a domain admin cannot read or write the
+// quota of a user outside its scope through the user-scoped API, and cannot use
+// the panel form, which is system-only.
 func TestAdminUserQuotaRequiresSystem(t *testing.T) {
 	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
 		userDetail: directory.UserDetail{Username: "alice@hermex.test", Maildir: "/mb/alice"}}

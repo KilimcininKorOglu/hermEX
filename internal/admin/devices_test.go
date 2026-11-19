@@ -100,8 +100,9 @@ func TestAdminUserDevicesNotFound(t *testing.T) {
 	}
 }
 
-// TestAdminUserDevicesRequiresSystem proves a domain admin cannot read or act on
-// a user's devices through the system-scoped endpoints.
+// TestAdminUserDevicesRequiresSystem proves a domain admin cannot read or act on the
+// devices of a user outside its scope through the user-scoped API, and cannot use
+// the panel form, which is system-only.
 func TestAdminUserDevicesRequiresSystem(t *testing.T) {
 	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
 		userDetail: directory.UserDetail{Username: "alice@hermex.test", Maildir: "/mb/alice"}}
