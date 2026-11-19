@@ -317,7 +317,7 @@ func (s *session) tempRouteFailure(to string, err error) error {
 // authenticated submission relaying to an external domain.
 func (s *session) routeRecipient(to, notify, orcpt string) error {
 	if path, ok := s.accounts.Resolve(to); ok {
-		return s.routeLocal(to, path)
+		return s.routeResolved(to, path, notify)
 	}
 	// A domain may collect the local parts it does not have in one mailbox. This is
 	// the only place that fallback applies: every other address lookup, authentication

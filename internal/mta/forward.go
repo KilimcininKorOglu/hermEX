@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"hermex/internal/arc"
+	"hermex/internal/directory"
 	"hermex/internal/dkimsign"
 	"hermex/internal/logging"
 	"hermex/internal/relay"
@@ -104,6 +106,80 @@ func (s *session) srsBounce(to string) (handled bool, err error) {
 		return true, &smtp.PermError{Message: fmt.Sprintf("relay denied for <%s>", to)}
 	}
 	s.relayTargets = append(s.relayTargets, relay.DSNRecipient{Addr: orig})
+	return true, nil
+}
+
+// routeResolved routes a recipient that resolved to a local mailbox, applying
+// its forward setting: a CC forward keeps the local copy and adds the
+// destination, a redirect sends only to the destination. A destination is
+// routed once and never forwarded again, so forwards cannot loop. A forward
+// setting that cannot be read, or a destination that cannot be routed, leaves
+// the message in the local mailbox rather than losing it.
+func (s *session) routeResolved(to, path, notify string) error {
+	dest, keepLocal := s.forwardOf(to)
+	if dest == "" {
+		return s.routeLocal(to, path)
+	}
+	if keepLocal {
+		if err := s.routeLocal(to, path); err != nil {
+			return err
+		}
+	}
+	routed, err := s.routeForwardDest(to, dest, notify)
+	if err != nil || routed || keepLocal {
+		return err
+	}
+	return s.routeLocal(to, path)
+}
+
+// forwardOf returns a recipient's forward destination and whether the local
+// copy stays. No destination means plain local delivery.
+func (s *session) forwardOf(to string) (dest string, keepLocal bool) {
+	fwder, ok := s.accounts.(directory.Forwarder)
+	if !ok {
+		return "", true
+	}
+	fi, has, err := fwder.GetForward(to)
+	if err != nil {
+		s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "forward.lookup.fail", User: to, RemoteAddr: s.remoteAddr, Err: err.Error()})
+		return "", true
+	}
+	dest = strings.ToLower(strings.TrimSpace(fi.Destination))
+	if !has || dest == "" || strings.EqualFold(dest, to) {
+		return "", true
+	}
+	return dest, fi.Type == directory.ForwardCC
+}
+
+// routeForwardDest routes one forward destination of owner. routed is false
+// when the destination cannot be reached from here, so the caller keeps the
+// message locally.
+func (s *session) routeForwardDest(owner, dest, notify string) (routed bool, err error) {
+	if path, ok := s.accounts.Resolve(dest); ok {
+		if overReceiveQuota(path) != nil {
+			return false, nil
+		}
+		s.targets = append(s.targets, target{addr: dest, path: path})
+		return true, nil
+	}
+	relayable, err := isRelayable(s.accounts, dest)
+	if err != nil {
+		return false, s.tempRouteFailure(dest, err)
+	}
+	if !relayable || s.spool == nil {
+		s.logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.MTA, Name: "forward.unroutable", User: owner, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"destination": dest}})
+		return false, nil
+	}
+	if s.outbound != nil && !s.outbound.Allow(owner) {
+		return false, &smtp.TempError{Message: "4.7.4 too many recipients in a short time, please retry later"}
+	}
+	rcpt := relay.DSNRecipient{Addr: dest, Notify: notify}
+	if s.authUser != "" {
+		// An authenticated sender's From passed sendas, so the copy is author-signed.
+		s.relayTargets = append(s.relayTargets, rcpt)
+		return true, nil
+	}
+	s.addForward(domainPart(owner), rcpt)
 	return true, nil
 }
 
