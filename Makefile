@@ -1,10 +1,10 @@
 # hermEX build & workflow entrypoint.
 #
 # All build, test, lint and container commands go through this Makefile, do not
-# invoke `go` or `docker` directly. Build outputs land in bin/.
+# invoke `go` or `docker` directly. Build outputs land in bin/<os>-<arch>/.
 #
 # Common use:
-#   make build                                  # build every command into bin/
+#   make build                                  # build every command for linux/amd64 and linux/arm64
 #   make gate                                   # fmt-check + vet + full test (dev container)
 #   make test PKG=./internal/rop                # one package, dev container
 #   make test PKG=./internal/rop RUN=TestCopyToSubObjects
@@ -18,6 +18,9 @@
 
 COMPOSE := docker compose -f hermex-compose.yml
 BIN     := bin
+# The only platforms hermEX is built for. Pure Go (no cgo), so both cross-compile
+# from any host; a host-architecture binary (darwin on a Mac) is never produced.
+PLATFORMS := linux/amd64 linux/arm64
 CMDS    := mta imap pop3 webmail2 dav activesync ews mapihttp gateway notify admin fetchmail antispam-bootstrap antispam-rules
 
 # Source state stamped into every binary this Makefile builds, and into every
@@ -62,14 +65,17 @@ BENCH ?= .
 
 all: build
 
-## build: compile every command binary into bin/
+## build: compile every command for linux/amd64 and linux/arm64 into bin/<os>-<arch>/
 build:
-	@mkdir -p $(BIN)
-	@for c in $(CMDS); do \
-		echo "  build $$c"; \
-		go build -ldflags '$(LDFLAGS)' -o $(BIN)/$$c ./cmd/$$c || exit 1; \
+	@for p in $(PLATFORMS); do \
+		os=$${p%/*}; arch=$${p#*/}; out=$(BIN)/$$os-$$arch; \
+		mkdir -p $$out; \
+		for c in $(CMDS); do \
+			echo "  build $$p $$c"; \
+			CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags '$(LDFLAGS)' -o $$out/$$c ./cmd/$$c || exit 1; \
+		done; \
 	done
-	@echo "built $(words $(CMDS)) binaries -> $(BIN)/"
+	@echo "built $(words $(CMDS)) binaries for $(PLATFORMS) -> $(BIN)/"
 
 ## test: canonical gate in the dev container (override PKG / RUN for a subset)
 test:
