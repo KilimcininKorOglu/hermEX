@@ -17,6 +17,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/logging"
 	"hermex/internal/notify"
+	"hermex/internal/objectstore"
 	"hermex/internal/publicfolder"
 	"hermex/internal/relay"
 	"hermex/internal/serve"
@@ -55,6 +56,9 @@ type Server struct {
 	pushOnce          sync.Once
 	pushHTTP          *http.Client
 	pushAllowInternal bool
+	// pushPoll reads a push subscription's pending events; nil is pollSubscription.
+	// Tests replace it to drive the worker's failure handling.
+	pushPoll func(*objectstore.Store, *ewsSubscription) ([]notifEvent, error)
 }
 
 // ensurePushClient builds the SSRF-guarded push callback client once, reading

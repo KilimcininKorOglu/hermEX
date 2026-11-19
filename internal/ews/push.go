@@ -2,9 +2,11 @@ package ews
 
 import (
 	"encoding/xml"
+	"errors"
 	"net/http"
 	"time"
 
+	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 	"hermex/internal/objectstore"
 )
@@ -162,7 +164,7 @@ func (s *Server) pushWorker(id string, sub *ewsSubscription) {
 		case <-sub.done:
 			return // dropped (Unsubscribe handler or another stop path)
 		case <-wake:
-			if !s.pushPollAndSend(id, sub, false, &failures) {
+			if !s.pushStep(id, sub, false, &failures) {
 				s.removeSubscription(id, sub.user)
 				return
 			}
@@ -171,7 +173,7 @@ func (s *Server) pushWorker(id string, sub *ewsSubscription) {
 				s.removeSubscription(id, sub.user)
 				return
 			}
-			if !s.pushPollAndSend(id, sub, true, &failures) {
+			if !s.pushStep(id, sub, true, &failures) {
 				s.removeSubscription(id, sub.user)
 				return
 			}
@@ -179,22 +181,54 @@ func (s *Server) pushWorker(id string, sub *ewsSubscription) {
 	}
 }
 
+// pushStep runs one poll-and-send under panic containment. A panic is one more
+// failed delivery: it is logged with its stack and counted against the same budget
+// as a callback error, so the EWS daemon serving every other user keeps running.
+func (s *Server) pushStep(id string, sub *ewsSubscription, heartbeat bool, failures *int) bool {
+	var keep bool
+	err := lifecycle.Contain(func() error { keep = s.pushPollAndSend(id, sub, heartbeat, failures); return nil })
+	if err == nil {
+		return keep
+	}
+	*failures++
+	if s.Logger != nil {
+		fields := logging.Fields{"failures": *failures}
+		if pe, ok := errors.AsType[*lifecycle.PanicError](err); ok {
+			fields["stack"] = string(pe.Stack)
+		}
+		s.Logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.EWS, Name: "push.panic",
+			Err: err.Error(), Fields: fields})
+	}
+	return *failures < pushMaxFailures
+}
+
+// pollPush reads the subscription's pending events with its lock held. The lock
+// and the store are released by defer, so a panic in the poll leaves neither the
+// subscription locked nor the mailbox marked in use.
+func (s *Server) pollPush(sub *ewsSubscription) ([]notifEvent, bool) {
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+	st, err := objectstore.OpenExisting(sub.mailbox)
+	if err != nil {
+		return nil, false
+	}
+	defer func() { _ = st.Close() }()
+	poll := s.pushPoll
+	if poll == nil {
+		poll = pollSubscription
+	}
+	events, err := poll(st, sub)
+	return events, err == nil
+}
+
 // pushPollAndSend polls the subscription and, when there are events (or a heartbeat
 // is due), POSTs a SendNotification to the callback. It returns false to stop the
 // worker: the client answered Unsubscribe, or the failure budget is exhausted. A
 // wake with nothing new sends nothing.
 func (s *Server) pushPollAndSend(id string, sub *ewsSubscription, heartbeat bool, failures *int) bool {
-	sub.mu.Lock()
-	st, err := objectstore.OpenExisting(sub.mailbox)
-	if err != nil {
-		sub.mu.Unlock()
-		return true // transient store error; keep the subscription
-	}
-	events, perr := pollSubscription(st, sub)
-	_ = st.Close()
-	sub.mu.Unlock()
-	if perr != nil {
-		return true
+	events, ok := s.pollPush(sub)
+	if !ok {
+		return true // transient store or poll error; keep the subscription
 	}
 	if len(events) == 0 {
 		if !heartbeat {
