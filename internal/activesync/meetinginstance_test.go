@@ -38,10 +38,15 @@ func TestMeetingResponseAnswersOneInstance(t *testing.T) {
 	uid := seedLocalRequest(t, attendee, dailyICS)
 	calendarID := acceptRequest(t, ts, "16.1", uid).ChildText(wbxml.MRCalendarID)
 	post := func(n *wbxml.Node) *wbxml.Node { return postVersioned(t, ts, "16.1", "MeetingResponse", n) }
+	before := calendarChangeNumber(t, attendee, calendarID)
 
 	result := answerInstance(t, post, calendarID, "3", "2026-07-08T09:00:00.000Z")
 	if got := result.ChildText(wbxml.MRStatus); got != "1" {
 		t.Fatalf("Status = %q, want 1", got)
+	}
+	// The write moves the change number, the signal the refusal test relies on.
+	if calendarChangeNumber(t, attendee, calendarID) == before {
+		t.Error("declining an instance left the series' change number where it was")
 	}
 	if got := result.ChildText(wbxml.MRInstanceID); got != "2026-07-08T09:00:00.000Z" {
 		t.Errorf("Result InstanceId = %q, want the request's", got)
@@ -69,7 +74,8 @@ func onlyCalendarICal(t *testing.T, dir string) []byte {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	cal, _ := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
+	cal, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
+	mustNoErr(t, "list the calendar", err)
 	if len(cal) != 1 {
 		t.Fatalf("calendar holds %d items, want the one series", len(cal))
 	}
@@ -77,9 +83,27 @@ func onlyCalendarICal(t *testing.T, dir string) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// An empty body would pass every "has no EXDATE" check, so a missing
+	// iCalendar is a failure, not an unchanged series.
 	stored, _ := pv.Get(mapi.PrIcalOriginal)
 	body, _ := stored.([]byte)
+	if !bytes.Contains(body, []byte("BEGIN:VEVENT")) {
+		t.Fatalf("the series carries no iCalendar: %q", body)
+	}
 	return body
+}
+
+// calendarChangeNumber returns the change number of the Calendar item serverID.
+func calendarChangeNumber(t *testing.T, dir, serverID string) uint64 {
+	t.Helper()
+	id, err := strconv.ParseInt(serverID, 10, 64)
+	mustNoErr(t, "parse the calendar item id", err)
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open the store", err)
+	defer st.Close()
+	cn, err := st.MessageChangeNumber(id)
+	mustNoErr(t, "read the change number", err)
+	return cn
 }
 
 // TestMeetingResponseInstanceStatuses proves the InstanceId failures ([MS-ASCMD]
@@ -102,6 +126,7 @@ func TestMeetingResponseInstanceStatuses(t *testing.T) {
 			ts, attendee, organizer := organizerServer(t)
 			uid := seedLocalRequest(t, attendee, tc.ics)
 			calendarID := acceptRequest(t, ts, "16.1", uid).ChildText(wbxml.MRCalendarID)
+			before := calendarChangeNumber(t, attendee, calendarID)
 			post := func(n *wbxml.Node) *wbxml.Node { return postVersioned(t, ts, "16.1", "MeetingResponse", n) }
 			if got := answerInstance(t, post, calendarID, "3", tc.instance).ChildText(wbxml.MRStatus); got != tc.want {
 				t.Errorf("Status = %q, want %s", got, tc.want)
@@ -109,9 +134,11 @@ func TestMeetingResponseInstanceStatuses(t *testing.T) {
 			if n := len(organizerInbox(t, organizer)); n != 0 {
 				t.Errorf("a refused response still sent %d messages", n)
 			}
-			if body := onlyCalendarICal(t, attendee); bytes.Contains(body, []byte("EXDATE")) {
-				t.Errorf("a refused response changed the series:\n%s", body)
-			}
+			// Every write to a message allocates a new change number, so an
+			// unchanged one proves the refused response wrote nothing, whether the
+			// item keeps an iCalendar (a series) or only properties (one meeting).
+			wantEq(t, "the item's change number after a refused response",
+				calendarChangeNumber(t, attendee, calendarID), before)
 		})
 	}
 }
