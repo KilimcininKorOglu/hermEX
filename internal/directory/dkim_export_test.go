@@ -88,6 +88,28 @@ func TestExportDKIMKeyReportsAbsence(t *testing.T) {
 	}
 }
 
+// TestExportDKIMKeyIsPerDomain stores a key for one domain and exports another.
+// A signing key lets its holder sign mail as that domain, so one tenant's export
+// must never answer with another tenant's key.
+func TestExportDKIMKeyIsPerDomain(t *testing.T) {
+	d := dkimTestDir(t)
+	if _, err := d.CreateDomain("other.test", filepath.Join(t.TempDir(), "other")); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetDKIMKey("acme.test", "hermex", testPEM, "v=DKIM1; p=AAAA"); err != nil {
+		t.Fatal(err)
+	}
+	for _, domain := range []string{"other.test", "unhosted.test", "", "%"} {
+		got, _, found, err := d.ExportDKIMKey(domain)
+		if err != nil {
+			t.Fatalf("export %q: %v", domain, err)
+		}
+		if found || got != nil {
+			t.Errorf("export %q returned acme.test's key", domain)
+		}
+	}
+}
+
 // TestExportDKIMKeySurvivesARegeneration proves the export always reflects the
 // current key: regenerating replaces it, and an operator exporting afterwards
 // must get the new one, not the copy the old DNS record matched.
