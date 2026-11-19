@@ -169,4 +169,13 @@ func TestUIRolesReadOnlyViewButNotEdit(t *testing.T) {
 	if save.StatusCode != http.StatusForbidden {
 		t.Errorf("read-only admin: role save status %d, want 403", save.StatusCode)
 	}
+	// Creating a role and deleting one are writes too: a read-only admin who could
+	// create a role holding SystemAdmin and assign it would lift its own rights.
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/roles", session, csrf, url.Values{"name": {"Escalate"}}),
+		http.StatusForbidden, "read-only admin: role create")
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/roles/1/delete", session, csrf, url.Values{}),
+		http.StatusForbidden, "read-only admin: role delete")
+	if len(d.namedRoles) != 1 || d.namedRoles[1].Name != "Helpdesk" {
+		t.Errorf("a read-only admin changed the roles: %+v", d.namedRoles)
+	}
 }
