@@ -32,7 +32,9 @@ func TestReplayHoldsOneBatchAtATime(t *testing.T) {
 		docs += len(batch)
 		return nil
 	})
-	s := &MongoSink{ins: ins, spillPath: path, hasSpill: true}
+	s := &MongoSink{ins: ins, spillPath: path}
+	s.hasSpill.Store(true)
+	s.writeTimeout.Store(int64(mongoWriteTimeout))
 	runtime.GC()
 	var base runtime.MemStats
 	runtime.ReadMemStats(&base)

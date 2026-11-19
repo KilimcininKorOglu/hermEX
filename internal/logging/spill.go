@@ -4,19 +4,24 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"time"
 )
 
 // spill appends the events' stored documents to the spill file as
 // newline-delimited JSON, to be replayed once MongoDB is reachable again. With no
 // spill path configured (or on an I/O error) the events are unrecorded, there is
-// nowhere left to put them. Only the run() goroutine calls this, so the file and
-// hasSpill need no synchronization.
+// nowhere left to put them. Both the batching and the store goroutine spill, so
+// spillMu keeps their appends whole and apart from the replay's hand-off.
 func (s *MongoSink) spill(events []Event) {
-	if s.spillPath == "" {
+	if s.spillPath == "" || len(events) == 0 {
 		return
 	}
+	s.spillMu.Lock()
+	defer s.spillMu.Unlock()
 	f, err := os.OpenFile(s.spillPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		s.spillLost(len(events), "open", err)
@@ -44,8 +49,17 @@ func (s *MongoSink) spill(events []Event) {
 			return
 		}
 		size += int64(len(line))
-		s.hasSpill = true
+		s.hasSpill.Store(true)
 	}
+}
+
+// replayPath is where a spill is moved while it is replayed, so events spilled
+// during the replay land in a fresh spill file instead of one about to be removed.
+func replayPath(spillPath string) string {
+	if spillPath == "" {
+		return ""
+	}
+	return spillPath + ".replay"
 }
 
 // spillLost tells the operator, on stderr (the only place left once both the log
@@ -63,24 +77,40 @@ func (s *MongoSink) spillLost(n int, reason string, err error) {
 // on the next successful write; because the documents carry no _id a retry may
 // re-insert an already-written batch, at-least-once delivery, which keeps the
 // audit trail complete at the cost of an occasional duplicate (acceptable for
-// logs). Only the run() goroutine calls this.
+// logs). Only the store goroutine calls this. The spill is first moved aside to
+// replayPath under spillMu, so a batch spilled while the replay runs goes to a new
+// spill file and is replayed next time rather than removed unread; an earlier
+// replay that failed is finished before a new spill is moved aside.
 func (s *MongoSink) replaySpill() {
-	if !s.hasSpill || s.spillPath == "" {
+	if !s.hasSpill.Load() || s.spillPath == "" {
 		return
 	}
+	replaying := replayPath(s.spillPath)
+	s.spillMu.Lock()
+	if _, err := os.Stat(replaying); errors.Is(err, fs.ErrNotExist) {
+		if err := os.Rename(s.spillPath, replaying); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			s.spillMu.Unlock()
+			return // cannot move it aside now; keep it and retry later
+		}
+	}
+	s.hasSpill.Store(false) // a spill from here on sets it again
+	s.spillMu.Unlock()
+
 	insert := func(batch []any) error {
-		ctx, cancel := context.WithTimeout(context.Background(), mongoWriteTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(s.writeTimeout.Load()))
 		defer cancel()
 		return s.ins.InsertMany(ctx, batch)
 	}
-	if err := eachSpillBatch(s.spillPath, insert); err != nil {
-		return // unreadable now or unreachable again: keep the file, retry later
+	if err := eachSpillBatch(replaying, insert); err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			s.hasSpill.Store(true) // unreachable again: keep it, retry later
+		}
+		return
 	}
 	// The batches are already in Mongo. A failed removal replays them on the next
 	// drain, which duplicates events rather than losing them: the safe direction,
 	// and the only one available to the logger itself.
-	_ = os.Remove(s.spillPath)
-	s.hasSpill = false
+	_ = os.Remove(replaying)
 }
 
 // eachSpillBatch decodes the newline-delimited JSON spill file into insertable

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -56,14 +58,21 @@ type MongoSink struct {
 	closed  chan struct{}
 	dropped atomic.Uint64
 	connect connector     // opens/validates the store connection; retried until it succeeds
-	ins     inserter      // run()-owned; nil until the first successful connect
+	ins     inserter      // storeLoop-owned; nil until the first successful connect
 	client  *mongo.Client // nil in unit tests that inject a connector; Close disconnects it
 
-	// Degradation: when a write fails, or the store is not yet reachable, the batch
-	// is appended to spillPath and a later flush replays it. spillPath/hasSpill are
-	// touched only by the single run() goroutine, so they need no synchronization.
+	// toStore carries batches from run to storeLoop; storeDone closes when
+	// storeLoop has written the last one.
+	toStore   chan []Event
+	storeDone chan struct{}
+
+	// Degradation: when a write fails, the store is not yet reachable, or storeLoop
+	// is still busy, the batch is appended to spillPath and a later write replays
+	// it. Both goroutines spill, so spillMu orders their appends and the replay's
+	// hand-off of the file.
 	spillPath string
-	hasSpill  bool
+	spillMu   sync.Mutex
+	hasSpill  atomic.Bool
 	// spillLimit caps the spill file in bytes (0: no cap), so a long store outage
 	// cannot fill the disk the mailboxes live on. It is set from the operator's
 	// setting while the sink runs, hence atomic. spillDropped counts the events
@@ -73,8 +82,8 @@ type MongoSink struct {
 
 	// writeTimeout bounds each connect and insert (mongoWriteTimeout; a test
 	// shortens it). downUntil is when the store may be tried again after a
-	// failure, and reportedDrops how many buffer drops stderr has been told of;
-	// both are touched only by the run() goroutine.
+	// failure (storeLoop only), and reportedDrops how many buffer drops stderr
+	// has been told of (run only).
 	writeTimeout  atomic.Int64
 	downUntil     time.Time
 	reportedDrops uint64
@@ -129,8 +138,10 @@ func newAsyncSink(connect connector, spillPath string) *MongoSink {
 		closed:    make(chan struct{}),
 		connect:   connect,
 		spillPath: spillPath,
+		toStore:   make(chan []Event, 1),
+		storeDone: make(chan struct{}),
 	}
-	s.hasSpill = spillFileHasData(spillPath)
+	s.hasSpill.Store(spillFileHasData(spillPath) || spillFileHasData(replayPath(spillPath)))
 	s.writeTimeout.Store(int64(mongoWriteTimeout))
 	go s.run()
 	return s
@@ -148,10 +159,17 @@ func (s *MongoSink) Write(e Event) {
 // Dropped reports how many events were dropped because the buffer was full.
 func (s *MongoSink) Dropped() uint64 { return s.dropped.Load() }
 
-// run is the single writer goroutine: it batches incoming events and flushes on a
-// full batch, on a tick, and once more while draining at shutdown.
+// run is the batching goroutine: it batches incoming events and flushes on a full
+// batch, on a tick, and once more while draining at shutdown. It hands batches to
+// the store goroutine and never waits on the store itself, so a store that hangs
+// until its write deadline cannot back the buffer up into dropped events.
 func (s *MongoSink) run() {
-	defer close(s.closed)
+	go s.storeLoop()
+	defer func() {
+		close(s.toStore)
+		<-s.storeDone
+		close(s.closed)
+	}()
 	t := time.NewTicker(mongoFlushInterval)
 	defer t.Stop()
 	batch := make([]Event, 0, mongoBatchSize)
@@ -190,24 +208,59 @@ func (s *MongoSink) drain(batch *[]Event) {
 	}
 }
 
-// flush writes the buffered batch and replays anything spilled earlier.
+// flush hands the buffered batch to the store goroutine, or spills it when that
+// goroutine is still busy with an earlier batch (a slow or hanging store).
 func (s *MongoSink) flush(batch *[]Event) {
-	// Nothing buffered and nothing spilled, no reason to touch the store.
 	s.reportDrops()
-	if len(*batch) == 0 && !s.hasSpill {
+	if len(*batch) == 0 {
 		return
 	}
-	if time.Now().Before(s.downUntil) {
-		// The store failed a moment ago: keep the writer moving by spilling.
-		if len(*batch) > 0 {
-			s.spill(*batch)
-			*batch = (*batch)[:0]
+	b := slices.Clone(*batch)
+	*batch = (*batch)[:0]
+	select {
+	case s.toStore <- b:
+	default:
+		s.spill(b)
+	}
+}
+
+// storeLoop is the only goroutine that talks to the store. It writes each batch
+// it is handed and, on a tick, replays a spill once the store is back.
+func (s *MongoSink) storeLoop() {
+	defer close(s.storeDone)
+	t := time.NewTicker(mongoFlushInterval)
+	defer t.Stop()
+	for {
+		select {
+		case b, ok := <-s.toStore:
+			if !ok {
+				// Shutting down: one last pass drains a spill, as the old final
+				// flush did, so a sink that wrote nothing still replays it.
+				if s.hasSpill.Load() {
+					s.store(nil)
+				}
+				return
+			}
+			s.store(b)
+		case <-t.C:
+			if s.hasSpill.Load() {
+				s.store(nil)
+			}
 		}
+	}
+}
+
+// store writes batch (which may be empty) and then replays anything spilled. A
+// failure spills the batch and keeps the store untried for storeRetryInterval.
+func (s *MongoSink) store(batch []Event) {
+	if time.Now().Before(s.downUntil) {
+		s.spill(batch)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(s.writeTimeout.Load()))
 	defer cancel()
-	if !s.ensureConnected(ctx, batch) || !s.insertBatch(ctx, batch) {
+	if !s.ensureConnected(ctx) || !s.insertBatch(ctx, batch) {
+		s.spill(batch)
 		s.downUntil = time.Now().Add(storeRetryInterval)
 		return
 	}
@@ -225,41 +278,30 @@ func (s *MongoSink) reportDrops() {
 	s.reportedDrops = d
 }
 
-// ensureConnected lazily opens the connection. While the store is down this fails, so
-// the batch is spilled and the connection is retried on the next flush.
-func (s *MongoSink) ensureConnected(ctx context.Context, batch *[]Event) bool {
+// ensureConnected lazily opens the connection. While the store is down this fails
+// and the caller spills; the connection is retried after storeRetryInterval.
+func (s *MongoSink) ensureConnected(ctx context.Context) bool {
 	if s.ins != nil {
 		return true
 	}
 	ins, err := s.connect(ctx)
 	if err != nil {
-		if len(*batch) > 0 {
-			s.spill(*batch)
-			*batch = (*batch)[:0]
-		}
 		return false
 	}
 	s.ins = ins
 	return true
 }
 
-// insertBatch writes the buffered events, spilling them for a later replay when the
-// write fails.
-func (s *MongoSink) insertBatch(ctx context.Context, batch *[]Event) bool {
-	if len(*batch) == 0 {
+// insertBatch writes the events; false means the caller must spill them.
+func (s *MongoSink) insertBatch(ctx context.Context, batch []Event) bool {
+	if len(batch) == 0 {
 		return true
 	}
-	docs := make([]any, len(*batch))
-	for i, e := range *batch {
+	docs := make([]any, len(batch))
+	for i, e := range batch {
 		docs[i] = toDoc(e)
 	}
-	if err := s.ins.InsertMany(ctx, docs); err != nil {
-		s.spill(*batch) // transient write failure, preserve and replay later
-		*batch = (*batch)[:0]
-		return false
-	}
-	*batch = (*batch)[:0]
-	return true
+	return s.ins.InsertMany(ctx, docs) == nil
 }
 
 // Close stops the writer (flushing buffered events) and disconnects the client,
