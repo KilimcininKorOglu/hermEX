@@ -162,6 +162,37 @@ func TestMailQueueRequiresSystem(t *testing.T) {
 	}
 }
 
+// TestMailQueueDeleteRequiresSystem proves an org admin can neither delete nor
+// flush a queued delivery, by the panel or the API: the queue holds every
+// domain's outgoing mail, so the entry must still be queued afterwards.
+func TestMailQueueDeleteRequiresSystem(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminOrg, ScopeID: 1}}}
+	ts, root := mailqServer(t, d)
+	spoolPath := filepath.Join(root, "relay.sqlite3")
+	sp, err := relay.Open(spoolPath)
+	mustNoErr(t, err, "open the relay spool")
+	mustNoErr(t, sp.Enqueue("boss@local.test", []string{"ext@remote.test"},
+		[]byte("Subject: hi\r\n\r\nbody"), time.Unix(1700000000, 0)), "enqueue")
+	entries, err := sp.List()
+	mustNoErr(t, err, "list the spool")
+	id := strconv.FormatInt(entries[0].RecipientID, 10)
+	mustNoErr(t, sp.Close(), "close the spool")
+	session, csrf := loginCookies(t, ts)
+
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/mailq/delete", session, csrf, url.Values{"id": {id}}),
+		http.StatusForbidden, "org-admin UI delete")
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/mailq/retry", session, csrf, url.Values{"id": {id}}),
+		http.StatusForbidden, "org-admin UI flush")
+	wantEq(t, authedMailqDo(t, ts, "DELETE", "/admin/mailq/"+id, session, csrf), http.StatusForbidden, "org-admin JSON delete")
+
+	sp, err = relay.Open(spoolPath)
+	mustNoErr(t, err, "reopen the relay spool")
+	left, err := sp.List()
+	mustNoErr(t, err, "list the spool")
+	mustNoErr(t, sp.Close(), "close the spool")
+	wantEq(t, len(left), 1, "queued entries after the refused delete")
+}
+
 // TestMailQueuePanelIsReachable pins the refresh path. The panel handler renders
 // the queue table on its own for a swap, and the page has to reach it: a handler
 // no page calls is a surface nobody can use.
