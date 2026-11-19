@@ -141,6 +141,22 @@ func TestSearchGALReturnsTheRangeAsked(t *testing.T) {
 		}
 	}
 	wantEq(t, "the Results returned", n, 1)
+	// The row is the second one, not the first under another label: 0-0 and 1-1
+	// name different entries.
+	_, first := postCommand(t, ts, "Search", withRange(searchReq("GAL", "al"), "0-0"))
+	if a, b := galResultAddress(t, first), galResultAddress(t, root); a == b {
+		t.Errorf("Range 1-1 returned %q, the same entry as Range 0-0", b)
+	}
+}
+
+// galResultAddress returns the address of a GAL Search reply's first Result.
+func galResultAddress(t *testing.T, root *wbxml.Node) string {
+	t.Helper()
+	result := searchStore(t, root).Child(wbxml.SRResult)
+	if result == nil || result.Child(wbxml.SRProperties) == nil {
+		t.Fatal("GAL search carried no Result")
+	}
+	return result.Child(wbxml.SRProperties).ChildText(wbxml.GALEmailAddress)
 }
 
 // TestSearchGALTotalCountsPastTheRange proves Total is every match, not the rows
