@@ -1,6 +1,7 @@
 package oxcical
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -115,6 +116,43 @@ func TestOccurrencesDayPins(t *testing.T) {
 			occ := mustRRule(t, c.rule).Occurrences(c.start, c.start, c.start.AddDate(2, 0, 0), 0)
 			wantDates(t, occ, c.want...)
 		})
+	}
+}
+
+// TestALongRunningSeriesStillOccursInTodaysWindow opens a window years after the
+// series began. RFC 5545 3.3.10 defines every instance from DTSTART on, however
+// far back DTSTART is, so a daily stand-up created in 2010 still occurs this week.
+// The expansion's work bound must therefore not be spent walking the years before
+// the window. With COUNT the skipped instances still count: a series whose COUNT
+// runs out before the window has none in it, and one that runs out inside it stops
+// there. Instances keep DTSTART's local clock time across every DST change.
+func TestALongRunningSeriesStillOccursInTodaysWindow(t *testing.T) {
+	berlin, err := time.LoadLocation("Europe/Berlin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2010, 1, 4, 9, 0, 0, 0, berlin)
+	ws := time.Date(2026, 1, 5, 0, 0, 0, 0, berlin)
+	we := ws.AddDate(0, 0, 7)
+
+	daily := mustRRule(t, "FREQ=DAILY").Occurrences(start, ws, we, 0)
+	wantDates(t, daily, "2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08", "2026-01-09", "2026-01-10", "2026-01-11")
+	for _, o := range daily {
+		if o.Hour() != 9 || o.Location() != berlin {
+			t.Errorf("occurrence %v, want 09:00 Europe/Berlin", o)
+		}
+	}
+	summer := mustRRule(t, "FREQ=DAILY").Occurrences(start, time.Date(2026, 7, 1, 0, 0, 0, 0, berlin), time.Date(2026, 7, 2, 0, 0, 0, 0, berlin), 0)
+	if len(summer) != 1 || summer[0].Hour() != 9 {
+		t.Errorf("summer occurrence = %v, want one at 09:00 local", summer)
+	}
+	wantDates(t, mustRRule(t, "FREQ=DAILY;INTERVAL=3").Occurrences(start, ws, we, 0), "2026-01-07", "2026-01-10")
+
+	// Instances from 2010-01-04 through 2026-01-07 inclusive, counted on the calendar.
+	upTo7th := int(time.Date(2026, 1, 7, 0, 0, 0, 0, time.UTC).Sub(time.Date(2010, 1, 4, 0, 0, 0, 0, time.UTC)).Hours()/24) + 1
+	wantDates(t, mustRRule(t, fmt.Sprintf("FREQ=DAILY;COUNT=%d", upTo7th)).Occurrences(start, ws, we, 0), "2026-01-05", "2026-01-06", "2026-01-07")
+	if got := mustRRule(t, "FREQ=DAILY;COUNT=5000").Occurrences(start, ws, we, 0); len(got) != 0 {
+		t.Errorf("a series whose COUNT ended in 2023 occurs %v in 2026, want none", got)
 	}
 }
 

@@ -138,9 +138,9 @@ func (r Recurrence) Occurrences(seriesStart, windowStart, windowEnd time.Time, l
 			r.weeklyByDay(seriesStart, windowEnd, interval, limit, add)
 			break
 		}
-		r.step(windowEnd, limit, add, func(i int) time.Time { return seriesStart.AddDate(0, 0, 7*interval*i) })
+		r.everyDays(sink, seriesStart, windowStart, windowEnd, 7*interval, limit)
 	case "DAILY":
-		r.step(windowEnd, limit, add, func(i int) time.Time { return seriesStart.AddDate(0, 0, interval*i) })
+		r.everyDays(sink, seriesStart, windowStart, windowEnd, interval, limit)
 	case "MONTHLY":
 		r.monthly(seriesStart, seriesStart.Month(), interval, windowEnd, limit, add)
 	case "YEARLY":
@@ -259,10 +259,45 @@ func (s *occurrenceSink) add(t time.Time) bool {
 	return true
 }
 
-// step walks i = 0, 1, 2, ... feeding gen(i) into add until add stops (COUNT/UNTIL),
-// the instance passes windowEnd, or the limit is hit.
-func (r Recurrence) step(windowEnd time.Time, limit int, add func(time.Time) bool, gen func(int) time.Time) {
-	for i := range limit {
+// everyDays expands a rule whose instances are a fixed number of calendar days
+// apart (DAILY, and WEEKLY without BYDAY), starting just before the window.
+func (r Recurrence) everyDays(sink *occurrenceSink, seriesStart, windowStart, windowEnd time.Time, periodDays, limit int) {
+	from, ok := sink.skipBefore(seriesStart, windowStart, periodDays)
+	if !ok {
+		return
+	}
+	r.step(from, windowEnd, limit, sink.add, func(i int) time.Time { return seriesStart.AddDate(0, 0, periodDays*i) })
+}
+
+// skipBefore returns the first step index worth generating for a rule that steps
+// a fixed number of calendar days: the one just before the window, so the work
+// bound is spent inside the window rather than on the years since DTSTART. The
+// skipped instances all fall before the window and still count toward COUNT; ok
+// is false when COUNT is used up before the window begins.
+func (s *occurrenceSink) skipBefore(seriesStart, windowStart time.Time, periodDays int) (from int, ok bool) {
+	from = max(civilDays(seriesStart, windowStart)/periodDays-1, 0)
+	if s.count > 0 {
+		if from >= s.count {
+			return 0, false
+		}
+		s.emitted = from
+	}
+	return from, true
+}
+
+// civilDays counts calendar days from a's date to b's date, read in a's zone, so
+// a DST change in between does not shorten the count.
+func civilDays(a, b time.Time) int {
+	b = b.In(a.Location())
+	da := time.Date(a.Year(), a.Month(), a.Day(), 0, 0, 0, 0, time.UTC)
+	db := time.Date(b.Year(), b.Month(), b.Day(), 0, 0, 0, 0, time.UTC)
+	return int(db.Sub(da).Hours() / 24)
+}
+
+// step walks i = from, from+1, ... feeding gen(i) into add until add stops
+// (COUNT/UNTIL), the instance passes windowEnd, or limit steps are taken.
+func (r Recurrence) step(from int, windowEnd time.Time, limit int, add func(time.Time) bool, gen func(int) time.Time) {
+	for i := from; i < from+limit; i++ {
 		t := gen(i)
 		if !add(t) {
 			return
