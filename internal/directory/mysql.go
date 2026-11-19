@@ -1207,6 +1207,22 @@ func (d *SQLDirectory) ListAltnames(username string) ([]string, error) {
 	return out, rows.Err()
 }
 
+// cleanAltnames lowercases and trims altnames, dropping blanks and repeats while
+// keeping the first-seen order.
+func cleanAltnames(altnames []string) []string {
+	seen := map[string]bool{}
+	var clean []string
+	for _, a := range altnames {
+		a = strings.ToLower(strings.TrimSpace(a))
+		if a == "" || seen[a] {
+			continue
+		}
+		seen[a] = true
+		clean = append(clean, a)
+	}
+	return clean
+}
+
 // SetAltnames replaces a user's alternative login names with the given set
 // (lowercased, trimmed, de-duplicated, blanks dropped), reporting whether the
 // user existed. The replace runs in one transaction; the altname UNIQUE key
@@ -1221,16 +1237,7 @@ func (d *SQLDirectory) SetAltnames(username string, altnames []string) (bool, er
 	if err != nil {
 		return false, err
 	}
-	seen := map[string]bool{}
-	var clean []string
-	for _, a := range altnames {
-		a = strings.ToLower(strings.TrimSpace(a))
-		if a == "" || seen[a] {
-			continue
-		}
-		seen[a] = true
-		clean = append(clean, a)
-	}
+	clean := cleanAltnames(altnames)
 	tx, err := d.db.Begin()
 	if err != nil {
 		return false, err
