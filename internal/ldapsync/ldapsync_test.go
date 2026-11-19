@@ -58,6 +58,7 @@ type fakeStore struct {
 	upsertedNames   map[string]string
 	contactDomain   string
 	deletedContacts []string
+	upsertErr       error // returned by every group and contact upsert when set
 }
 
 func (f *fakeStore) UpsertLDAPUser(u string, _ []byte, _ string) (bool, error) {
@@ -72,6 +73,9 @@ func (f *fakeStore) ApplyLDAPProfile(u string, v map[string]string) (bool, error
 	return true, nil
 }
 func (f *fakeStore) UpsertLDAPGroup(list string, _ []byte, owner string, members []string) (bool, error) {
+	if f.upsertErr != nil {
+		return false, f.upsertErr
+	}
 	if f.groupOwner == nil {
 		f.groupOwner, f.groupMembers = map[string]string{}, map[string][]string{}
 	}
@@ -93,6 +97,9 @@ func (f *fakeStore) DeleteMList(list string) (bool, error) {
 	return true, nil
 }
 func (f *fakeStore) UpsertLDAPContact(email string, _ []byte, displayName, domain string) (bool, error) {
+	if f.upsertErr != nil {
+		return false, f.upsertErr
+	}
 	if f.upsertedNames == nil {
 		f.upsertedNames = map[string]string{}
 	}
@@ -201,6 +208,32 @@ func TestRunSkipsForeignUsersButKeepsThemAsMembers(t *testing.T) {
 	}
 	if !strings.Contains(summary, "1 outside hermex.test") {
 		t.Errorf("summary %q does not count the skipped entries", summary)
+	}
+}
+
+// TestAFailedUpdateNeverPrunesAnEntryTheDirectoryStillHolds runs a pass in which
+// every group and contact update fails (a database hiccup, a lock timeout). The
+// prune pass removes only what the directory no longer publishes; the directory
+// still publishes these, so the local list and contact must survive with their
+// last synced state rather than be deleted by a transient write error.
+func TestAFailedUpdateNeverPrunesAnEntryTheDirectoryStillHolds(t *testing.T) {
+	syncer := &fakeSyncer{
+		groups:   []ldapauth.SyncedGroup{{Mail: "eng@hermex.test"}},
+		contacts: []ldapauth.SyncedContact{{Mail: "partner@remote.test"}},
+	}
+	store := &fakeStore{
+		lists:     map[int64][]directory.MListInfo{1: {{Listname: "eng@hermex.test", LDAPMastered: true}}},
+		contacts:  map[int64][]directory.ContactInfo{1: {{Address: "partner@remote.test", LDAPID: "aa"}}},
+		upsertErr: errors.New("lock wait timeout"),
+	}
+
+	mustRun(t, bound(directory.LDAPConfig{SyncGroups: true, SyncContacts: true}), syncer, store)
+
+	if len(store.deleted) != 0 {
+		t.Errorf("pruned lists = %v after a failed update, want none", store.deleted)
+	}
+	if len(store.deletedContacts) != 0 {
+		t.Errorf("pruned contacts = %v after a failed update, want none", store.deletedContacts)
 	}
 }
 

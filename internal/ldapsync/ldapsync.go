@@ -258,6 +258,9 @@ func syncGroups(groups []ldapauth.SyncedGroup, domain string, dnToEmail map[stri
 			res.foreign++
 			continue
 		}
+		// The directory still publishes the group, so a failed update below must
+		// leave the local list in place rather than let the prune pass delete it.
+		res.synced[strings.ToLower(g.Mail)] = true
 		owner := dnToEmail[strings.ToLower(g.OwnerDN)] // "" if none/unresolved
 		members := resolveMembers(g, dnToEmail, logf)
 		isNew, err := store.UpsertLDAPGroup(g.Mail, []byte(strings.ToLower(g.Mail)), owner, members)
@@ -265,7 +268,6 @@ func syncGroups(groups []ldapauth.SyncedGroup, domain string, dnToEmail map[stri
 			logf("skip group %s: %v", g.Mail, err)
 			continue
 		}
-		res.synced[strings.ToLower(g.Mail)] = true
 		if isNew {
 			res.created++
 		} else {
@@ -297,12 +299,14 @@ func resolveMembers(g ldapauth.SyncedGroup, dnToEmail map[string]string, logf fu
 func syncContacts(contacts []ldapauth.SyncedContact, domain string, store Store, logf func(string, ...any)) (synced map[string]bool, created, updated int) {
 	synced = make(map[string]bool, len(contacts))
 	for _, c := range contacts {
+		// Marked before the update, so a failed write does not get the contact the
+		// directory still publishes pruned in the same pass.
+		synced[strings.ToLower(c.Mail)] = true
 		isNew, err := store.UpsertLDAPContact(c.Mail, c.ExternID, c.DisplayName, domain)
 		if err != nil {
 			logf("skip contact %s: %v", c.Mail, err)
 			continue
 		}
-		synced[strings.ToLower(c.Mail)] = true
 		if isNew {
 			created++
 		} else {
