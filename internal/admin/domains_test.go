@@ -171,6 +171,9 @@ func TestAdminUpdateDomainReadOnly(t *testing.T) {
 	if s := statusOf(authedReq(t, ts, "PUT", "/admin/domains/1", session, csrf, `{"status":1}`)); s != http.StatusForbidden {
 		t.Errorf("read-only admin domain edit = %d, want 403", s)
 	}
+	if d.updatedDomain != 0 {
+		t.Errorf("a read-only admin updated domain %d: %+v", d.updatedDomain, d.updateDomainArg)
+	}
 }
 
 // TestAdminCreateDomain proves a system admin provisions a domain whose homedir
