@@ -1,6 +1,7 @@
 package directory
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -43,11 +44,45 @@ func TestRolePermissionValidation(t *testing.T) {
 		{Name: PermDomainAdminRO, Params: ""},        // scoped name without a scope
 		{Name: PermDomainAdmin, Params: "0"},         // id 0 names no domain
 		{Name: PermOrgAdmin, Params: "-5"},           // a negative id names no organization
+		{Name: PermDomainAdmin, Params: "05"},        // the panel matches the decimal form as text
+		{Name: PermDomainAdmin, Params: "+5"},        // so another spelling of an id is refused
+		{Name: PermDomainAdmin, Params: " 5"},        // with surrounding space too
 	}
 	for _, p := range bad {
 		if err := validatePermission(p); err == nil {
 			t.Errorf("validatePermission(%+v) = nil, want error", p)
 		}
+	}
+}
+
+// TestStoredScopeIsMadeCanonical stores scopes written before the validation
+// required the decimal form. The migration rewrites "05" and "+7" to "5" and
+// "7", drops "005" where "5" is already granted, and leaves "*" alone, so the
+// role grants exactly the domains its editor shows.
+func TestStoredScopeIsMadeCanonical(t *testing.T) {
+	d, db := freshDirectory(t)
+	id, err := d.CreateRole("Legacy", "", []Permission{{Name: PermDomainAdmin, Params: "*"}}, nil)
+	mustNoErr(t, "create role", err)
+	for _, p := range []string{"05", "005", "+7"} {
+		_, err := db.Exec(`INSERT INTO role_permissions (role_id, permission, params) VALUES (?, ?, ?)`, id, PermDomainAdminRO, p)
+		mustNoErr(t, "store scope "+p, err)
+	}
+	_, err = db.Exec(`DELETE FROM schema_migrations WHERE version >= 66`)
+	mustNoErr(t, "mark the migration as not applied", err)
+	mustNoErr(t, "apply the migration", d.EnsureSchema())
+
+	rows, err := db.Query(`SELECT permission, params FROM role_permissions WHERE role_id = ? ORDER BY permission, params`, id)
+	mustNoErr(t, "read the scopes", err)
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var name, params string
+		mustNoErr(t, "scan", rows.Scan(&name, &params))
+		got = append(got, name+"="+params)
+	}
+	want := []string{PermDomainAdmin + "=*", PermDomainAdminRO + "=5", PermDomainAdminRO + "=7"}
+	if !slices.Equal(got, want) {
+		t.Errorf("scopes = %v, want %v", got, want)
 	}
 }
 

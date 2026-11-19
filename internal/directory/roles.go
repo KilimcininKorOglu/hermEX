@@ -78,8 +78,10 @@ func validatePermission(p Permission) error {
 		}
 		if p.Params != "*" {
 			// Id 0 or below names no organization or domain, so the grant would
-			// give nothing while the role editor showed it as given.
-			if id, err := strconv.ParseInt(p.Params, 10, 64); err != nil || id < 1 {
+			// give nothing while the role editor showed it as given. The scope is
+			// matched as text against the decimal id, so only that form is
+			// accepted: "05" or "+5" would read one way and write another.
+			if id, err := strconv.ParseInt(p.Params, 10, 64); err != nil || id < 1 || strconv.FormatInt(id, 10) != p.Params {
 				return fmt.Errorf("directory: permission %q scope %q is not an id or *", p.Name, p.Params)
 			}
 		}
