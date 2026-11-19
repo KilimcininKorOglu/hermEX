@@ -40,6 +40,24 @@ func TestMTASTSSettingsDefaultsToDisabled(t *testing.T) {
 	}
 }
 
+// TestMTASTSSettingsRefuseAnOutOfRangeMaxAge writes a max_age outside 1..31557600
+// (RFC 8461 section 3.2): each is refused and the stored row is kept.
+func TestMTASTSSettingsRefuseAnOutOfRangeMaxAge(t *testing.T) {
+	d := setupMTASTSSettings(t)
+	want := MTASTSSettings{Enabled: true, Mode: "enforce", MaxAge: 604800}
+	if err := d.SetMTASTSSettings(want); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []int{0, -1, MTASTSMaxMaxAge + 1} {
+		if err := d.SetMTASTSSettings(MTASTSSettings{Mode: "testing", MaxAge: bad}); err == nil {
+			t.Errorf("max_age %d was accepted", bad)
+		}
+	}
+	if got, _, _ := d.GetMTASTSSettings(); got != want {
+		t.Errorf("after refused writes = %+v, want %+v", got, want)
+	}
+}
+
 // TestMTASTSSettingsRoundTripAndUpsert proves the publishing settings round-trip and
 // that re-saving replaces the single row rather than adding one, so the gateway always
 // reads exactly one current policy configuration.

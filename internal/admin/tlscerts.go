@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -152,20 +151,13 @@ func (s *Server) handleUIMTASTSSettings(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	oldSTS, _, oldErr := s.dir.GetMTASTSSettings()
-	enabled := r.FormValue("mtasts_enabled") == "on"
-	mode := strings.ToLower(strings.TrimSpace(r.FormValue("mtasts_mode")))
-	if mode != "enforce" && mode != "none" {
-		mode = "testing"
-	}
-	maxAge, _ := strconv.Atoi(strings.TrimSpace(r.FormValue("mtasts_max_age")))
-	if maxAge <= 0 {
-		maxAge = directory.MTASTSDefaultMaxAge
-	}
-	if enabled && mode == "enforce" && r.FormValue("mtasts_enforce_confirm") != "on" {
-		s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, errorNotice("tls.enforceNeedsConfirm")))
+	st, refusal := mtastsFromForm(r)
+	if refusal != "" {
+		s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, errorNotice(refusal)))
 		return
 	}
-	if err := s.dir.SetMTASTSSettings(directory.MTASTSSettings{Enabled: enabled, Mode: mode, MaxAge: maxAge}); err != nil {
+	enabled, mode := st.Enabled, st.Mode
+	if err := s.dir.SetMTASTSSettings(st); err != nil {
 		s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, s.failNotice("tls.mtastsFailed", err)))
 		return
 	}
@@ -174,6 +166,31 @@ func (s *Server) handleUIMTASTSSettings(w http.ResponseWriter, r *http.Request) 
 		"old_mode": auditOld(oldSTS.Mode, oldErr), "new_mode": mode,
 	})
 	s.render(w, r, "tls-certs-panel", s.tlsCertsPageData(r, okNotice("tls.mtastsSaved")))
+}
+
+// mtastsFromForm reads the MTA-STS form, returning the message key of the refusal
+// when the form cannot be saved. A blank max age takes the default; anything else
+// must be a whole number of seconds within RFC 8461's range, never silently swapped
+// for the default. Enforce needs its explicit confirmation.
+func mtastsFromForm(r *http.Request) (directory.MTASTSSettings, string) {
+	st := directory.MTASTSSettings{
+		Enabled: r.FormValue("mtasts_enabled") == "on",
+		Mode:    strings.ToLower(strings.TrimSpace(r.FormValue("mtasts_mode"))),
+		MaxAge:  formInt(r, "mtasts_max_age"),
+	}
+	if st.Mode != "enforce" && st.Mode != "none" {
+		st.Mode = "testing"
+	}
+	if st.MaxAge == 0 {
+		st.MaxAge = directory.MTASTSDefaultMaxAge
+	}
+	if st.MaxAge < 1 || st.MaxAge > directory.MTASTSMaxMaxAge {
+		return st, "tls.maxAgeInvalid"
+	}
+	if st.Enabled && st.Mode == "enforce" && r.FormValue("mtasts_enforce_confirm") != "on" {
+		return st, "tls.enforceNeedsConfirm"
+	}
+	return st, ""
 }
 
 // handleUITLSCerts renders the TLS-certificates page (system administrators only).

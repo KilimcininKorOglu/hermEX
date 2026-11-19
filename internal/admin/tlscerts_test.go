@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"hermex/internal/directory"
 	"io"
 	"math/big"
 	"net/http"
@@ -259,4 +260,18 @@ func TestMTASTSSettingsForm(t *testing.T) {
 	off := htmxPOST(t, ts, "/admin/ui/mtasts", session, csrf, url.Values{"mtasts_mode": {"testing"}})
 	off.Body.Close()
 	wantFalse(t, d.mtastsSettings.Enabled, "publishing after the disable")
+	wantEq(t, d.mtastsSettings.MaxAge, directory.MTASTSDefaultMaxAge, "a blank max age takes the default")
+
+	// A max age that is a typo, negative or past RFC 8461's one-year cap was swapped
+	// for the default (or stored past the cap); each is now refused with nothing saved.
+	for _, bad := range []string{"6048OO", "-1", "31557601"} {
+		d.mtastsSettings = nil
+		body := wantBody(t, htmxPOST(t, ts, "/admin/ui/mtasts", session, csrf, url.Values{
+			"mtasts_mode": {"testing"}, "mtasts_max_age": {bad},
+		}), http.StatusOK, "max age "+bad)
+		wantContains(t, body, "31557600", "the refusal names the range for "+bad)
+		if d.mtastsSettings != nil {
+			t.Errorf("max age %q was stored as %+v", bad, *d.mtastsSettings)
+		}
+	}
 }

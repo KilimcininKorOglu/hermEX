@@ -295,6 +295,7 @@
     "modeSaved": "Saved. Restart the gateway for a mode change to take effect.",
     "enforceNeedsConfirm": "Enforce mode makes senders refuse mail when the MX certificate does not validate. Tick the confirmation box to enable it, or use testing mode first.",
     "mtastsFailed": "Could not save the MTA-STS settings.",
+    "maxAgeInvalid": "The policy max age must be a whole number of seconds from 1 to 31557600 (one year).",
     "mtastsSaved": "Saved MTA-STS publishing. Publish each domain's prescribed mta-sts and _mta-sts records (see the domain page); senders adopt a change on their next fetch.",
     "uploadRejected": "Upload rejected: {0}",
     "storeFailed": "Could not store the certificate.",

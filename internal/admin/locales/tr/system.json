@@ -295,6 +295,7 @@
     "modeSaved": "Kaydedildi. Mod değişikliğinin geçerli olması için ağ geçidini yeniden başlatın.",
     "enforceNeedsConfirm": "Zorlama modu, MX sertifikası doğrulanmadığında gönderenlerin postayı reddetmesine yol açar. Açmak için onay kutusunu işaretleyin ya da önce test modunu kullanın.",
     "mtastsFailed": "MTA-STS ayarları kaydedilemedi.",
+    "maxAgeInvalid": "İlke geçerlilik süresi 1 ile 31557600 (bir yıl) arasında, tam sayı bir saniye değeri olmalıdır.",
     "mtastsSaved": "MTA-STS yayımlama kaydedildi. Her alan adı için belirtilen mta-sts ve _mta-sts kayıtlarını yayımlayın (alan adı sayfasına bakın). Gönderenler değişikliği bir sonraki alımda benimser.",
     "uploadRejected": "Yükleme reddedildi: {0}",
     "storeFailed": "Sertifika saklanamadı.",

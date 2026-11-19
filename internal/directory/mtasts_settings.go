@@ -3,6 +3,7 @@ package directory
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -11,6 +12,10 @@ import (
 // clears from senders' caches quickly. The operator raises it once the policy is
 // stable (RFC 8461 allows up to one year).
 const MTASTSDefaultMaxAge = 86400
+
+// MTASTSMaxMaxAge is the largest max_age a policy may carry: RFC 8461 section 3.2
+// caps it at 31557600 seconds (about one year).
+const MTASTSMaxMaxAge = 31557600
 
 // MTASTSSettings is the operator's choice of whether and how the server publishes an
 // MTA-STS policy (RFC 8461) for its own domains. Enabled gates publishing entirely.
@@ -48,6 +53,9 @@ func (d *SQLDirectory) GetMTASTSSettings() (MTASTSSettings, bool, error) {
 // row. The gateway reads them per request when serving the policy file, so a change
 // applies without a restart (a sender adopts it on its next fetch).
 func (d *SQLDirectory) SetMTASTSSettings(s MTASTSSettings) error {
+	if s.MaxAge < 1 || s.MaxAge > MTASTSMaxMaxAge {
+		return fmt.Errorf("directory: MTA-STS max_age %d is outside 1..%d", s.MaxAge, MTASTSMaxMaxAge)
+	}
 	enabled := 0
 	if s.Enabled {
 		enabled = 1
