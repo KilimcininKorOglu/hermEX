@@ -41,18 +41,30 @@ func TestMoveItems(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	dstUID, _ := strconv.ParseUint(dstMsg, 10, 32)
-	if _, err := st.MessageByUID(int64(mapi.PrivateFIDDeletedItems), uint32(dstUID)); err != nil {
+	if _, err := st.MessageByUID(int64(mapi.PrivateFIDDeletedItems), mustUID(t, dstMsg)); err != nil {
 		t.Errorf("moved message not found in Deleted Items: %v", err)
 	}
-	srcUID, _ := strconv.ParseUint(sid, 10, 32)
-	if _, err := st.MessageByUID(int64(mapi.PrivateFIDInbox), uint32(srcUID)); err == nil {
+	// The source id must be a real UID: an unparsable one reads as 0, which is
+	// never found, so the absence check below would pass without a move.
+	if _, err := st.MessageByUID(int64(mapi.PrivateFIDInbox), mustUID(t, sid)); err == nil {
 		t.Error("source message still present in Inbox after move")
 	}
 }
 
+// mustUID parses a MoveItems message id as the IMAP UID it carries, failing the
+// test on anything else.
+func mustUID(t *testing.T, id string) uint32 {
+	t.Helper()
+	uid, err := strconv.ParseUint(id, 10, 32)
+	if err != nil || uid == 0 {
+		t.Fatalf("message id %q is not a UID", id)
+	}
+	return uint32(uid)
+}
+
 // TestMoveItemsSameFolder confirms a move whose source and destination match
-// reports the same-source-and-destination status.
+// reports the same-source-and-destination status and leaves the message under
+// its UID: a move into its own folder must not re-file it with a new one.
 func TestMoveItemsSameFolder(t *testing.T) {
 	ts, dir := seededServer(t)
 	seedInbox(t, dir, 1)
@@ -60,6 +72,12 @@ func TestMoveItemsSameFolder(t *testing.T) {
 	_, root := postCommand(t, ts, "MoveItems", moveReq(sid, inboxID(), inboxID()))
 	if s := root.Child(wbxml.MOResponse).ChildText(wbxml.MOStatus); s != "4" {
 		t.Errorf("same-folder move Status = %q, want 4", s)
+	}
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open the store", err)
+	defer st.Close()
+	if _, err := st.MessageByUID(int64(mapi.PrivateFIDInbox), mustUID(t, sid)); err != nil {
+		t.Errorf("a same-folder move took the message off its UID: %v", err)
 	}
 }
 
@@ -85,8 +103,7 @@ func TestMoveItemsRefusesABadTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	uid, _ := strconv.ParseUint(sid, 10, 32)
-	if _, err := st.MessageByUID(int64(mapi.PrivateFIDInbox), uint32(uid)); err != nil {
+	if _, err := st.MessageByUID(int64(mapi.PrivateFIDInbox), mustUID(t, sid)); err != nil {
 		t.Errorf("a refused move took the message out of the Inbox: %v", err)
 	}
 }
