@@ -62,6 +62,21 @@ func TestBinExRoundTrip(t *testing.T) {
 	}
 }
 
+// TestBinaryLengthBeyondTheBufferIsRefused feeds a client-chosen length prefix
+// that claims more bytes than the buffer holds: 0xFFFF for BinShort and
+// 0xFFFFFFFF for BinEx, followed by two real bytes. The decoder must refuse it
+// without reserving the claimed length first.
+func TestBinaryLengthBeyondTheBufferIsRefused(t *testing.T) {
+	assertRefusedCheaply(t, "BinShort", func(p *Pull) error {
+		_, err := p.BinShort()
+		return err
+	}, []byte{0xFF, 0xFF, 0xAA, 0xBB})
+	assertRefusedCheaply(t, "BinEx", func(p *Pull) error {
+		_, err := p.BinEx()
+		return err
+	}, []byte{0xFF, 0xFF, 0xFF, 0xFF, 0xAA, 0xBB})
+}
+
 func TestBlobNoPrefix(t *testing.T) {
 	p := NewPush(0)
 	p.Blob([]byte{1, 2, 3})
