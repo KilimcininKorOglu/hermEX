@@ -1,6 +1,7 @@
 package activesync
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/objectstore"
+	"hermex/internal/wbxml"
 )
 
 // privDir wraps a static directory but reports a fixed privilege set, so a test
@@ -34,11 +36,13 @@ func privilegeStatus(t *testing.T, accs privDir, pass string) int {
 	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
 	defer ts.Close()
 	u := ts.URL + "/Microsoft-Server-ActiveSync?Cmd=FolderSync&User=" + testUser + "&DeviceId=dev1&DeviceType=iPhone"
-	req, err := http.NewRequest("POST", u, nil)
+	body := wbxml.Marshal(wbxml.Elem(wbxml.FHFolderSync, wbxml.Str(wbxml.FHSyncKey, "0")))
+	req, err := http.NewRequest("POST", u, bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.SetBasicAuth(testUser, pass)
+	req.Header.Set("Content-Type", "application/vnd.ms-sync.wbxml")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -72,6 +76,9 @@ func TestActiveSyncPrivilegeDenied(t *testing.T) {
 		{"privilege revoked", privDir{StaticAccounts: static, privs: noEAS}, testPass, http.StatusForbidden},
 		{"privilege unknown", privDir{StaticAccounts: static, privs: directory.ServicePrivileges{EAS: true}, unknown: true}, testPass, http.StatusForbidden},
 		{"wrong password", privDir{StaticAccounts: static, privs: noEAS}, "wrong", http.StatusUnauthorized},
+		// The control: the same account with EAS granted is served, so the 403s
+		// above come from the privilege, not from a server that refuses everyone.
+		{"privilege granted", privDir{StaticAccounts: static, privs: directory.ServicePrivileges{EAS: true}}, testPass, http.StatusOK},
 	} {
 		if got := privilegeStatus(t, tc.accs, tc.pass); got != tc.want {
 			t.Errorf("%s: status %d, want %d", tc.name, got, tc.want)
