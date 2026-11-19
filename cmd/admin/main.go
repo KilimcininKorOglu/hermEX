@@ -109,6 +109,9 @@ var commands = []command{
 		minArgs: 2, maxArgs: 2, run: func(c *cmdContext) { listSessions(c.dir, c.args[1]) }},
 	{name: "revoke-sessions", args: "<email>", note: "end every live session of the account; compromise response",
 		minArgs: 2, maxArgs: 2, run: func(c *cmdContext) { revokeSessions(c.dir, c.args[1]) }},
+	{name: "add-health-target", args: "<name> <url>",
+		note:    "add a daemon to the Live status page; a name already present is left unchanged",
+		minArgs: 3, maxArgs: 3, run: runAddHealthTarget},
 	{name: "serve", note: "run the admin API HTTP server", run: runServe},
 }
 
