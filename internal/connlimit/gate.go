@@ -1,6 +1,7 @@
 package connlimit
 
 import (
+	"hermex/internal/clientnet"
 	"net"
 	"time"
 )
@@ -9,19 +10,15 @@ import (
 // never reads its refusal must not delay the daemon's drain.
 const refusalWriteTimeout = 5 * time.Second
 
-// ClientKey is the key a connection is counted under: the host half of its remote
-// address, so one client's connections count together whatever source ports they
-// use. It is empty when the address cannot be read, and an empty key counts
-// against the total only.
+// ClientKey is the key a connection is counted under: the client its remote
+// address names (clientnet.Key), so one client's connections count together
+// whatever source ports, or IPv6 addresses inside its /64, they use. It is empty
+// when the address cannot be read, and an empty key counts against the total only.
 func ClientKey(nc net.Conn) string {
 	if nc == nil || nc.RemoteAddr() == nil {
 		return ""
 	}
-	host, _, err := net.SplitHostPort(nc.RemoteAddr().String())
-	if err != nil {
-		return ""
-	}
-	return host
+	return clientnet.Key(nc.RemoteAddr().String())
 }
 
 // Gate builds the admission gate and refusal writer a connection-oriented server
