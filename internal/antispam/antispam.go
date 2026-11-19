@@ -435,15 +435,15 @@ func Tag(raw []byte, v Verdict) []byte {
 		flag, v.Score, status, v.Score)
 	out := make([]byte, 0, len(hdr)+len(raw))
 	out = append(out, hdr...)
-	return appendWithoutSpamFields(out, raw)
+	// A sender can write its own "X-Spam-Flag: NO", and left beside the verdict a
+	// client reading the last occurrence would trust it.
+	return appendWithoutFields(out, raw, isSpamField)
 }
 
-// appendWithoutSpamFields appends raw to out without the X-Spam-* fields of its
-// header block. A sender can write its own "X-Spam-Flag: NO", and left beside the
-// verdict a client reading the last occurrence would trust it. Every other line,
-// and the body after the first empty line, is copied byte for byte, whatever its
-// line ending.
-func appendWithoutSpamFields(out, raw []byte) []byte {
+// appendWithoutFields appends raw to out without the header fields drop selects
+// by their first line. Every other line, and the body after the first empty line,
+// is copied byte for byte, whatever its line ending.
+func appendWithoutFields(out, raw []byte, drop func(line []byte) bool) []byte {
 	dropping := false
 	for i := 0; i < len(raw); {
 		line, next := lineAt(raw, i)
@@ -451,7 +451,7 @@ func appendWithoutSpamFields(out, raw []byte) []byte {
 			return append(append(out, line...), raw[next:]...)
 		}
 		if line[0] != ' ' && line[0] != '\t' {
-			dropping = isSpamField(line) // a continuation line follows its field
+			dropping = drop(line) // a continuation line follows its field
 		}
 		if !dropping {
 			out = append(out, line...)

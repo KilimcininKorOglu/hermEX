@@ -74,11 +74,12 @@ type Backend struct {
 	Limiter         *authlimit.Limiter      // failed-login throttle keyed by client IP; nil disables it
 	Reports         ReportRecorder          // DMARC and TLS reports sent to postmaster; nil stores none
 	DMARC           DMARCRecorder           // counts for the DMARC aggregate reports this server sends; nil counts nothing
+	AuthServID      string                  // authserv-id of the Authentication-Results this server writes (its mail hostname); empty writes none
 }
 
 // NewSession implements smtp.Backend.
 func (b *Backend) NewSession(remoteAddr string) (smtp.Session, error) {
-	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer, history: b.History, greylist: b.Greylist, rateLimit: b.RateLimit, thresholds: b.Thresholds, recipAccess: b.RecipientAccess, outbound: b.Outbound, limiter: b.Limiter, reports: b.Reports, dmarc: b.DMARC}, nil
+	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer, history: b.History, greylist: b.Greylist, rateLimit: b.RateLimit, thresholds: b.Thresholds, recipAccess: b.RecipientAccess, outbound: b.Outbound, limiter: b.Limiter, reports: b.Reports, dmarc: b.DMARC, authservID: b.AuthServID}, nil
 }
 
 type session struct {
@@ -103,6 +104,7 @@ type session struct {
 	envid        string               // RFC 3461 ENVID from MAIL FROM; "" when absent
 	authUser     string               // set on a successful AUTH; empty for unauthenticated intake
 	authMailbox  string               // the authenticated user's mailbox store path
+	authservID   string               // authserv-id of this server's Authentication-Results
 }
 
 // Auth implements smtp.Authenticator: it validates submission credentials against
@@ -519,7 +521,15 @@ type scoring struct {
 // copy are not scored.
 func (s *session) scoreInbound(raw []byte, received time.Time) scoring {
 	sc := scoring{raw: raw, original: raw, folder: int64(mapi.PrivateFIDInbox)}
-	sc.scored = s.scorer != nil && s.authUser == "" && len(s.targets) > 0
+	if s.authUser != "" {
+		return sc
+	}
+	// Results a sender wrote under this server's name are removed from every
+	// inbound copy, scored or not (RFC 8601 section 5). The scorer still reads
+	// the message as it arrived, so a signature covering such a field verifies.
+	stripped := antispam.StripOwnAuthResults(raw, s.authservID)
+	sc.raw, sc.original = stripped, stripped
+	sc.scored = s.scorer != nil && len(s.targets) > 0
 	if !sc.scored {
 		return sc
 	}
@@ -528,7 +538,11 @@ func (s *session) scoreInbound(raw []byte, received time.Time) scoring {
 	sc.verdict = s.scorer.Score(antispam.Input{
 		Raw: raw, ClientIP: ip, MailFrom: s.from, FromDomain: sc.fromDom,
 	})
-	sc.raw = antispam.Tag(raw, sc.verdict)
+	if s.authservID != "" {
+		ar := antispam.AuthResultsField(s.authservID, sc.verdict, s.from, sc.fromDom)
+		sc.original = append([]byte(ar), stripped...)
+	}
+	sc.raw = antispam.Tag(sc.original, sc.verdict)
 	if sc.verdict.Spam {
 		sc.folder = int64(mapi.PrivateFIDJunk)
 	}

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"hermex/internal/antispam"
 	"hermex/internal/directory"
@@ -40,6 +41,51 @@ func (r *recordingScorer) Score(in antispam.Input) antispam.Verdict {
 	r.calls++
 	r.last = in
 	return r.verdict
+}
+
+// forgedResults is an inbound message carrying an Authentication-Results field a
+// sender wrote under this server's name, claiming a DKIM pass.
+const forgedResults = "Authentication-Results: mx.hermex.test; dkim=pass header.d=bank.example\r\n" +
+	"From: ceo@bank.example\r\nSubject: wire money\r\n\r\nbody\r\n"
+
+// ownResults counts the Authentication-Results fields under our authserv-id in
+// the header block of a filed copy, and reports whether the forged pass is there.
+func ownResults(raw []byte) (n int, forged bool) {
+	head, _, _ := strings.Cut(string(raw), "\r\n\r\n")
+	for line := range strings.SplitSeq(head, "\r\n") {
+		if strings.HasPrefix(line, "Authentication-Results: mx.hermex.test") {
+			n++
+		}
+	}
+	return n, strings.Contains(head, "header.d=bank.example")
+}
+
+// TestInboundAuthResultsReplaceTheSendersClaim files inbound mail through a
+// session whose authserv-id is mx.hermex.test. The forged field must be gone
+// from the filed copy whether or not the message was scored (RFC 8601
+// section 5), a scored copy carries exactly one field, this server's, and an
+// authenticated submission is left as its sender wrote it.
+func TestInboundAuthResultsReplaceTheSendersClaim(t *testing.T) {
+	newSession := func(scorer SpamScorer, authUser string) *session {
+		return &session{authservID: "mx.hermex.test", scorer: scorer, authUser: authUser,
+			targets: []target{{addr: "alice@test", path: "/mb/alice"}}, from: "x@bank.example"}
+	}
+	scored := newSession(&recordingScorer{verdict: antispam.Verdict{SPF: antispam.AuthFail, DKIM: antispam.AuthFail, DMARC: antispam.AuthFail}}, "")
+	sc := scored.scoreInbound([]byte(forgedResults), time.Now())
+	if n, forged := ownResults(sc.raw); n != 1 || forged {
+		t.Errorf("scored copy: %d fields under our id, forged pass present %v; want 1 and false\n%s", n, forged, sc.raw)
+	}
+	if !strings.Contains(string(sc.raw), "dkim=fail") {
+		t.Errorf("the scored copy does not carry this server's dkim=fail\n%s", sc.raw)
+	}
+	unscored := newSession(nil, "").scoreInbound([]byte(forgedResults), time.Now())
+	if n, _ := ownResults(unscored.raw); n != 0 {
+		t.Errorf("an unscored copy kept %d fields under our id", n)
+	}
+	submitted := newSession(nil, "alice@test").scoreInbound([]byte(forgedResults), time.Now())
+	if string(submitted.raw) != forgedResults {
+		t.Error("an authenticated submission was rewritten")
+	}
 }
 
 // TestInboundSpamScoring proves inbound mail is scored exactly once with the
