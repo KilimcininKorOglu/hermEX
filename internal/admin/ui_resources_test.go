@@ -146,6 +146,34 @@ func TestUIDomainsPageRequiresSystem(t *testing.T) {
 	}
 }
 
+// TestUIDomainAndAliasWritesNeedASystemAdmin proves a domain admin can neither
+// create, edit nor purge a domain, its own included, nor read or create aliases
+// through the panel forms, and that a refused call reaches no directory write.
+func TestUIDomainAndAliasWritesNeedASystemAdmin(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		aliases: []directory.AliasInfo{{ID: 1, Alias: "sales@other.test", Main: "boss@other.test"}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/domains", session, csrf, url.Values{"name": {"new.test"}}),
+		http.StatusForbidden, "create domain")
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/domains/1", session, csrf, url.Values{"status": {"0"}, "maxUser": {"0"}}),
+		http.StatusForbidden, "save own domain")
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/domains/1/purge", session, csrf, url.Values{"deleteFiles": {"true"}}),
+		http.StatusForbidden, "purge own domain")
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/aliases", session, csrf,
+		url.Values{"alias": {"ceo@other.test"}, "main": {"x@hermex.test"}}), http.StatusForbidden, "create alias")
+	page := wantBody(t, authedGET(t, ts, "/admin/ui/aliases", session), http.StatusForbidden, "aliases page")
+	if strings.Contains(page, "sales@other.test") {
+		t.Error("the refused aliases page lists an alias")
+	}
+
+	if d.createdDomain != "" || d.updatedDomain != 0 || d.purgedDomain != 0 || d.createdAlias != "" {
+		t.Errorf("a refused caller wrote: domain %q, updated %d, purged %d, alias %q",
+			d.createdDomain, d.updatedDomain, d.purgedDomain, d.createdAlias)
+	}
+}
+
 // TestUIDomainDetailPage proves the domain detail page renders the editable
 // fields, the status/organization selectors, and the user counts.
 func TestUIDomainDetailPage(t *testing.T) {
