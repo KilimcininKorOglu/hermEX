@@ -86,34 +86,36 @@ func (t *folderTree) resolve(name string) (*folderNode, bool) {
 
 // imapMatch reports whether an IMAP mailbox name matches a LIST pattern. '*'
 // matches across hierarchy separators; '%' matches within a single level only
-// (RFC 3501 §6.3.8).
+// (RFC 3501 §6.3.8). The pattern is client input, so the match runs in
+// len(pattern)*len(name) steps with one row of state, never by backtracking,
+// which a pattern of many wildcards drives to exponential time.
 func imapMatch(pattern, name string) bool {
-	if pattern == "" {
-		return name == ""
+	// next[j] reports whether pattern[i+1:] matches name[j:]; cur is the row for
+	// pattern[i:]. The empty pattern matches only the empty rest of the name.
+	next := make([]bool, len(name)+1)
+	cur := make([]bool, len(name)+1)
+	next[len(name)] = true
+	for i := len(pattern) - 1; i >= 0; i-- {
+		matchRow(pattern[i], name, cur, next)
+		cur, next = next, cur
 	}
-	switch pattern[0] {
-	case '*':
-		return matchWildcard(pattern[1:], name, false)
-	case '%':
-		return matchWildcard(pattern[1:], name, true)
-	default:
-		if name == "" || name[0] != pattern[0] {
-			return false
-		}
-		return imapMatch(pattern[1:], name[1:])
-	}
+	return next[0]
 }
 
-// matchWildcard tries the rest of the pattern against every suffix of the name.
-// stopAtSep is set for '%', which cannot cross a hierarchy separator.
-func matchWildcard(rest, name string, stopAtSep bool) bool {
-	for i := 0; i <= len(name); i++ {
-		if imapMatch(rest, name[i:]) {
-			return true
-		}
-		if stopAtSep && i < len(name) && name[i] == hierarchySep[0] {
-			return false
+// matchRow fills cur, the row for a pattern starting with p, from next, the row
+// for the pattern after p. '*' consumes any run of characters, '%' a run without
+// the hierarchy separator, and any other byte matches only itself.
+func matchRow(p byte, name string, cur, next []bool) {
+	n := len(name)
+	cur[n] = (p == '*' || p == '%') && next[n]
+	for j := n - 1; j >= 0; j-- {
+		switch p {
+		case '*':
+			cur[j] = next[j] || cur[j+1]
+		case '%':
+			cur[j] = next[j] || (name[j] != hierarchySep[0] && cur[j+1])
+		default:
+			cur[j] = name[j] == p && next[j+1]
 		}
 	}
-	return false
 }
