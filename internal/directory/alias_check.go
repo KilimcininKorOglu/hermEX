@@ -85,6 +85,27 @@ LIMIT 1`, alias, alias, alias).Scan(&kind)
 	return fmt.Errorf("directory: %s is already %s", alias, kind)
 }
 
+// checkAddressUnclaimed confirms a new account row's address is not already an
+// alternative name or an alias. resolve() would then match the address twice and
+// answer nothing, so the existing route and the new account would both go dark.
+// Two account rows are kept apart by the username UNIQUE key, so that case keeps
+// its own duplicate-key error.
+func checkAddressUnclaimed(q rowQuerier, addr string) error {
+	var kind string
+	err := q.QueryRow(`
+SELECT 'an alternative name' FROM altnames WHERE altname = ?
+UNION
+SELECT 'an alias' FROM aliases WHERE aliasname = ?
+LIMIT 1`, addr, addr).Scan(&kind)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("directory: %s is already %s", addr, kind)
+}
+
 // checkAlias runs every alias precondition in order, cheapest and most specific
 // first so the reported error names the actual problem.
 func checkAlias(q rowQuerier, alias, main string) error {

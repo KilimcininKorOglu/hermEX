@@ -208,6 +208,9 @@ func (d *SQLDirectory) UpsertLDAPUser(username string, externid []byte, maildir 
 		return false, err
 	}
 	defer tx.Rollback()
+	if err = checkAddressUnclaimed(tx, username); err != nil {
+		return false, err
+	}
 	if _, err = tx.Exec(
 		`INSERT INTO users
 		   (username, password, domain_id, homeserver, maildir, lang, timezone, privilege_bits, address_status, display_type, externid)

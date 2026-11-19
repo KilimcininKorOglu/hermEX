@@ -106,6 +106,9 @@ func (d *SQLDirectory) CreateRoom(email, displayName, maildir string, capacity i
 		return 0, err
 	}
 	defer tx.Rollback()
+	if err := checkAddressUnclaimed(tx, email); err != nil {
+		return 0, err
+	}
 	res, err := tx.Exec(
 		`INSERT INTO users
 		   (username, password, domain_id, homeserver, maildir, lang, timezone, privilege_bits, address_status, display_type)

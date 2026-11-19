@@ -249,6 +249,9 @@ func (d *SQLDirectory) CreateMList(listname string, listType, listPriv int) (int
 		return 0, err
 	}
 	defer tx.Rollback()
+	if err := checkAddressUnclaimed(tx, listname); err != nil {
+		return 0, err
+	}
 	if _, err := tx.Exec(
 		`INSERT INTO users (username, domain_id, display_type, password, maildir) VALUES (?, ?, ?, '', '')`,
 		listname, domainID, dtDistlist); err != nil {

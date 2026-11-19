@@ -98,6 +98,50 @@ func TestAltnameOverAnAccountOrAliasIsRefused(t *testing.T) {
 	}
 }
 
+// TestNewAccountRowsCannotTakeAnAliasOrAltname creates an account, a room, a
+// contact, a mailing list and an LDAP-synced account at an address that is
+// already an alias or an alternative name. Each would make the address resolve
+// twice, so resolve() answers nothing and the existing route stops working.
+func TestNewAccountRowsCannotTakeAnAliasOrAltname(t *testing.T) {
+	d := aliasTestDir(t)
+	root := t.TempDir()
+	creators := map[string]func(addr string) error{
+		"user":    func(a string) error { _, err := d.CreateUser(a, "pw", filepath.Join(root, a)); return err },
+		"room":    func(a string) error { _, err := d.CreateRoom(a, "R", filepath.Join(root, a), 0, false); return err },
+		"contact": func(a string) error { _, err := d.CreateContact(a, "C", "hermex.test"); return err },
+		"list":    func(a string) error { _, err := d.CreateMList(a, 0, 0); return err },
+		"ldap": func(a string) error {
+			_, err := d.UpsertLDAPUser(a, []byte{0x09}, filepath.Join(root, a))
+			return err
+		},
+	}
+	var altnames []string
+	for name := range creators {
+		altnames = append(altnames, name+"-alt@hermex.test")
+		if err := d.CreateAlias(name+"-alias@hermex.test", "alice@hermex.test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := d.SetAltnames("bob@hermex.test", altnames); err != nil {
+		t.Fatal(err)
+	}
+	// Each creator gets its own alias and altname, so one accepted row cannot
+	// make a later creator fail on the username key instead of on the check.
+	for name, create := range creators {
+		for _, addr := range []string{name + "-alias@hermex.test", name + "-alt@hermex.test"} {
+			if create(addr) == nil {
+				t.Errorf("%s accepted %s", name, addr)
+			}
+		}
+		if _, ok := d.Resolve(name + "-alias@hermex.test"); !ok {
+			t.Errorf("%s: the alias stopped resolving", name)
+		}
+		if _, ok := d.Authenticate(name+"-alt@hermex.test", "secret"); !ok {
+			t.Errorf("%s: bob can no longer sign in under his alternative name", name)
+		}
+	}
+}
+
 // TestAliasInAnUnhostedDomainIsRefused is the sharp one. An alias is reported by
 // Identities as an address the account may send as, and both the webmail compose
 // gate and the SMTP submission MAIL FROM check honour that list. An alias in a

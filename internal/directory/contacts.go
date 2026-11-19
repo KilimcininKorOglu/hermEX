@@ -60,6 +60,9 @@ func (d *SQLDirectory) CreateContact(email, displayName, domain string) (int64, 
 		return 0, err
 	}
 	defer tx.Rollback()
+	if err := checkAddressUnclaimed(tx, email); err != nil {
+		return 0, err
+	}
 	res, err := tx.Exec(
 		`INSERT INTO users (username, domain_id, display_type, password, maildir) VALUES (?, ?, ?, '', '')`,
 		email, domainID, dtContact)
