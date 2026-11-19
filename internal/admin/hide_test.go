@@ -55,6 +55,20 @@ func TestUIUserHideClears(t *testing.T) {
 	}
 }
 
+// TestUIUserHideNeedsASystemAdmin proves a domain administrator cannot write the
+// hide mask: the global address list it shapes is read across domains.
+func TestUIUserHideNeedsASystemAdmin(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, perms: []directory.Permission{{Name: directory.PermDomainAdmin, Params: "*"}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/hide", session, csrf,
+		url.Values{"hide_gal": {"on"}}), http.StatusForbidden, "domain-admin hide")
+	if d.setPropsUser != "" {
+		t.Errorf("a domain admin wrote properties for %q: %v", d.setPropsUser, d.setProps)
+	}
+}
+
 // TestHideViewOf proves the pre-check decode mirrors the stored mask, including
 // the legacy-boolean fallback, so the form reflects what is actually enforced.
 func TestHideViewOf(t *testing.T) {
