@@ -24,7 +24,7 @@ require (
 	// Moving to the obvious-looking canonical name would be a regression, not a
 	// cleanup. It parses attacker-supplied ASN.1 in internal/smime, so a bump is
 	// a security-relevant change: read the diff rather than taking the tag.
-	github.com/smallstep/pkcs7 v0.2.1
+	github.com/smallstep/pkcs7 v0.2.3
 	go.mongodb.org/mongo-driver/v2 v2.7.0
 	golang.org/x/net v0.57.0
 	golang.org/x/sync v0.22.0
