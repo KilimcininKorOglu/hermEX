@@ -80,7 +80,8 @@ func TestStoredScopeIsMadeCanonical(t *testing.T) {
 		mustNoErr(t, "scan", rows.Scan(&name, &params))
 		got = append(got, name+"="+params)
 	}
-	want := []string{PermDomainAdmin + "=*", PermDomainAdminRO + "=5", PermDomainAdminRO + "=7"}
+	mustNoErr(t, "iterate the scopes", rows.Err())
+	want :=[]string{PermDomainAdmin + "=*", PermDomainAdminRO + "=5", PermDomainAdminRO + "=7"}
 	if !slices.Equal(got, want) {
 		t.Errorf("scopes = %v, want %v", got, want)
 	}
