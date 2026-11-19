@@ -206,6 +206,9 @@ func (c *conn) cmdExpunge(tag string) {
 	c.answerExpunge(tag, "EXPUNGE", c.doExpunge(true))
 }
 
+// isDeleted reports whether a message carries \Deleted, the mark EXPUNGE acts on.
+func isDeleted(m objectstore.MessageInfo) bool { return m.Flags&objectstore.FlagDeleted != 0 }
+
 // answerExpunge ends an expunging command: OK when every \Deleted message went,
 // NO when the store kept any (those keep their slot and get no EXPUNGE).
 func (c *conn) answerExpunge(tag, cmd string, failed int) {
@@ -220,7 +223,7 @@ func (c *conn) answerExpunge(tag, cmd string, failed int) {
 // dumpster and rebuilds the snapshot, reporting how many the store refused. When
 // emit is true it announces each removal (see expungeWhere).
 func (c *conn) doExpunge(emit bool) int {
-	vanished, failed := c.expungeWhere(nil, emit)
+	vanished, failed := c.expungeWhere(isDeleted, emit)
 	// QRESYNC (RFC 7162): one VANISHED line carries the expunged UIDs in place of the
 	// per-message EXPUNGE responses.
 	if emit && c.qresync && len(vanished) > 0 {
@@ -251,7 +254,10 @@ func (c *conn) cmdUIDExpunge(tag string, args []token) {
 		c.bad(tag, "invalid sequence set")
 		return
 	}
-	vanished, failed := c.expungeWhere(set, true)
+	max := c.sel.maxUID()
+	vanished, failed := c.expungeWhere(func(m objectstore.MessageInfo) bool {
+		return isDeleted(m) && set.contains(m.UID, max)
+	}, true)
 	if c.qresync && len(vanished) > 0 {
 		c.untagged("VANISHED %s", esearchSet(vanished))
 	}
@@ -259,18 +265,16 @@ func (c *conn) cmdUIDExpunge(tag string, args []token) {
 	c.answerExpunge(tag, "UID EXPUNGE", failed)
 }
 
-// expungeWhere soft-deletes every \Deleted message the set names (a nil set names
-// them all) and returns the UIDs that went plus how many the store refused. When
+// expungeWhere soft-deletes every message match selects and returns the UIDs that went plus how many the store refused. When
 // emit is set, each removal gets an EXPUNGE numbered against the shrinking mailbox
 // (RFC 3501 7.4.1); QRESYNC clients get one VANISHED from the caller instead. A
 // message the store refused stays in the snapshot and keeps its number, so the
 // client and the server keep counting the same mailbox, and the failure is logged.
-func (c *conn) expungeWhere(set seqSet, emit bool) (vanished []uint32, failed int) {
-	max := c.sel.maxUID()
+func (c *conn) expungeWhere(match func(objectstore.MessageInfo) bool, emit bool) (vanished []uint32, failed int) {
 	var survivors []objectstore.MessageInfo
 	seq := uint32(1)
 	for _, m := range c.sel.msgs {
-		if m.Flags&objectstore.FlagDeleted == 0 || (set != nil && !set.contains(m.UID, max)) {
+		if !match(m) {
 			survivors = append(survivors, m)
 			seq++
 			continue
@@ -428,9 +432,9 @@ func (c *conn) cmdMove(tag string, args []token, byUID bool) {
 
 	uidv, _ := destStore.UIDValidity(destFID)
 	c.untagged("OK [COPYUID %d %s %s]", uidv, uidList(srcUIDs), uidList(dstUIDs))
-	c.expungeMoved(srcUIDs)
+	failed := c.expungeMoved(srcUIDs)
 	c.flush()
-	c.ok(tag, verb+" completed")
+	c.answerExpunge(tag, verb, failed)
 }
 
 // moveTarget parses a MOVE's sequence set and destination and checks the
@@ -493,27 +497,18 @@ func (c *conn) copyToDest(set seqSet, byUID bool, destStore *objectstore.Store, 
 	return srcUIDs, dstUIDs, true
 }
 
-// expungeMoved soft-deletes each moved source message, emitting EXPUNGE against
-// the shrinking mailbox and leaving the session holding only the survivors.
-func (c *conn) expungeMoved(srcUIDs []uint32) {
+// expungeMoved soft-deletes each moved source message through expungeWhere, so a
+// message the store refused keeps its slot, and returns how many were refused.
+func (c *conn) expungeMoved(srcUIDs []uint32) int {
 	moved := make(map[uint32]bool, len(srcUIDs))
 	for _, uid := range srcUIDs {
 		moved[uid] = true
 	}
-	src := c.curStore()
-	var survivors []objectstore.MessageInfo
-	seq := uint32(1)
-	for _, m := range c.sel.msgs {
-		if moved[m.UID] {
-			if err := src.SoftDeleteMessage(c.sel.id, m.UID); err == nil {
-				c.untagged("%d EXPUNGE", seq)
-			}
-			continue
-		}
-		survivors = append(survivors, m)
-		seq++
+	vanished, failed := c.expungeWhere(func(m objectstore.MessageInfo) bool { return moved[m.UID] }, true)
+	if c.qresync && len(vanished) > 0 {
+		c.untagged("VANISHED %s", esearchSet(vanished)) // RFC 7162 3.2.10, in place of EXPUNGE
 	}
-	c.sel.msgs = survivors
+	return failed
 }
 
 // cmdAppend handles APPEND: it stores a supplied message into a mailbox with

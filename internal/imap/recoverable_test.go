@@ -47,6 +47,33 @@ func TestExpungeThatTheStoreRefusesKeepsTheMessage(t *testing.T) {
 	}
 }
 
+// TestMoveWhoseSourceDeleteFailsKeepsTheMessage covers the last step of MOVE
+// (RFC 6851 3.3): after the copy, each source message is removed with an
+// EXPUNGE. A source message the store refused to remove must keep its slot and
+// get no EXPUNGE (RFC 3501 7.4.1), and the failure is counted and recorded.
+func TestMoveWhoseSourceDeleteFailsKeepsTheMessage(t *testing.T) {
+	sink := &captureSink{}
+	var out bytes.Buffer
+	c := &conn{srv: &Server{Logger: logging.New(sink)}, user: "bob@hermex.test", st: closedStore(t), bw: bufio.NewWriter(&out)}
+	c.sel = &selectedMailbox{id: mapi.PrivateFIDInbox, msgs: []objectstore.MessageInfo{{UID: 7}, {UID: 8}}}
+
+	failed := c.expungeMoved([]uint32{7})
+	c.flush()
+
+	if failed != 1 {
+		t.Errorf("failed = %d, want 1", failed)
+	}
+	if strings.Contains(out.String(), "EXPUNGE") {
+		t.Errorf("an EXPUNGE was sent for a message the store kept: %q", out.String())
+	}
+	if len(c.sel.msgs) != 2 {
+		t.Errorf("the session holds %d messages, want both", len(c.sel.msgs))
+	}
+	if _, ok := find(sink.snapshot(), "expunge.fail"); !ok {
+		t.Error("the refused removal left no record")
+	}
+}
+
 // TestIMAPExpungeGoesToDumpster proves an IMAP EXPUNGE soft-deletes the \Deleted
 // message into the Recoverable Items dumpster rather than purging it: it leaves the
 // mailbox but stays recoverable. This is the IMAP leg of routing every hard-delete
