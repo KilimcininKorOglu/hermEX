@@ -112,6 +112,18 @@ var commands = []command{
 	{name: "add-health-target", args: "<name> <url>",
 		note:    "add a daemon to the Live status page; a name already present is left unchanged",
 		minArgs: 3, maxArgs: 3, run: runAddHealthTarget},
+	{name: "generate-dkim", args: "<domain>",
+		note:    "give the domain a DKIM key, stored disabled; a domain that has one keeps it",
+		minArgs: 2, maxArgs: 2, run: runGenerateDKIM},
+	{name: "enable-dkim", args: "<domain>", note: "start signing with the domain's key once its record is published",
+		minArgs: 2, maxArgs: 2, run: runEnableDKIM},
+	{name: "dns-records", args: "<domain>", note: "print the records the domain must publish: type, name, value per line",
+		minArgs: 2, maxArgs: 2, run: runDNSRecords},
+	{name: "set-av-scan", args: "<domain> <on|off>", note: "turn antivirus scanning of the domain's mail on or off",
+		minArgs: 3, maxArgs: 3, run: runSetAVScan},
+	{name: "set-tls-acme", args: "<email> --agree-tos",
+		note:    "obtain the front door's certificates from Let's Encrypt; takes effect when the gateway restarts",
+		minArgs: 3, maxArgs: 3, run: runSetTLSACME},
 	{name: "serve", note: "run the admin API HTTP server", run: runServe},
 }
 

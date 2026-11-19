@@ -47,17 +47,18 @@ func TestLookupFindsExactlyTheTable(t *testing.T) {
 }
 
 // helpArity reads the bounds a command's help text promises, counting the
-// command name: each <arg> is required, each [arg] optional, and a trailing
+// command name: each <arg> or bare literal is required, each [arg] optional, and a trailing
 // "..." on an argument lifts the upper bound.
 func helpArity(args string) (lo, hi int) {
 	lo, hi = 1, 1
 	variadic := false
 	for tok := range strings.FieldsSeq(args) {
-		switch {
-		case strings.HasPrefix(tok, "<"):
-			lo++
+		// A bare token, such as a flag the command insists on, is typed as written
+		// and so is required like a <placeholder>.
+		if strings.HasPrefix(tok, "[") {
 			hi++
-		case strings.HasPrefix(tok, "["):
+		} else {
+			lo++
 			hi++
 		}
 		variadic = variadic || strings.HasSuffix(tok, "...")
@@ -93,6 +94,7 @@ func TestHelpArityReadsTheNotation(t *testing.T) {
 		"<email>":                       {2, 2},
 		"<email> <password>":            {3, 3},
 		"<email> [days]":                {2, 3},
+		"<email> --agree-tos":           {3, 3},
 		"<email> <a> <b> <uid>... [-c]": {5, 0},
 	} {
 		if lo, hi := helpArity(args); lo != want[0] || hi != want[1] {

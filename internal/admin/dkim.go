@@ -16,6 +16,10 @@ import (
 // record value), and naming a new one moves the record.
 const dkimSelector = "hermex"
 
+// DefaultDKIMSelector is dkimSelector for the provisioning command line, so a key
+// it generates publishes under the same name the panel would choose.
+const DefaultDKIMSelector = dkimSelector
+
 // dkimData returns a domain's DKIM panel fields: whether a key exists, its selector and
 // enabled state, the TXT value to publish, the record name, and the record rendered in
 // the default output mode. The private key is never included. A failed read sets
