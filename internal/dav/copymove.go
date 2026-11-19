@@ -116,6 +116,11 @@ func parseDestination(r *http.Request, req *copyMoveRequest, wantKind resourceKi
 	if !strings.EqualFold(srcUser, dstUser) {
 		return "destination must be under the same principal", http.StatusForbidden
 	}
+	// The destination name is stored as the copy's resource name and echoed in
+	// PROPFIND and REPORT, so it passes the same guard a PUT's name does.
+	if !validObjectName(dstName) {
+		return "invalid resource name", http.StatusBadRequest
+	}
 	return "", 0
 }
 
