@@ -92,8 +92,10 @@ func TestAdminUserQuotaNotFound(t *testing.T) {
 // TestAdminUserQuotaRequiresSystem proves a domain admin cannot read or write a
 // user's quota through the system-scoped endpoints.
 func TestAdminUserQuotaRequiresSystem(t *testing.T) {
-	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}}}
-	ts := adminServer(t, d)
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		userDetail: directory.UserDetail{Username: "alice@hermex.test", Maildir: "/mb/alice"}}
+	store := &fakeStore{}
+	ts := adminServerStore(t, d, store)
 	session, csrf := loginCookies(t, ts)
 
 	get := authedGET(t, ts, "/admin/users/alice@hermex.test/quota", session)
@@ -102,6 +104,11 @@ func TestAdminUserQuotaRequiresSystem(t *testing.T) {
 	put.Body.Close()
 	if get.StatusCode != http.StatusForbidden || put.StatusCode != http.StatusForbidden {
 		t.Errorf("domain-admin quota = GET %d / PUT %d, want both 403", get.StatusCode, put.StatusCode)
+	}
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/quota", session, csrf,
+		url.Values{"storagemb": {"999999"}}), http.StatusForbidden, "domain-admin UI quota")
+	if store.setQuotaDir != "" {
+		t.Errorf("a domain admin stored a quota on %q: %+v", store.setQuotaDir, store.setQuotaVal)
 	}
 }
 
