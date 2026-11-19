@@ -63,12 +63,12 @@ func TestUIMailboxFailuresDisabled(t *testing.T) {
 // names mailbox paths across every domain.
 func TestUIMailboxFailuresRequiresSystem(t *testing.T) {
 	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminOrg, ScopeID: 1}}}
-	ts := adminServer(t, d)
+	lr := &fakeLogReader{entries: []logging.LogEntry{{Name: "delivery.mailbox_unusable", User: "alice@other.test"}}}
+	ts := adminServerWithLogs(t, d, lr)
 	session, _ := loginCookies(t, ts)
 
-	resp := authedGET(t, ts, "/admin/ui/mailbox-failures", session)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("org-admin mailbox failures page = %d, want 403", resp.StatusCode)
+	body := wantBody(t, authedGET(t, ts, "/admin/ui/mailbox-failures", session), http.StatusForbidden, "org-admin page")
+	if strings.Contains(body, "alice@other.test") {
+		t.Errorf("the refusal names a failed mailbox:\n%s", body)
 	}
 }
