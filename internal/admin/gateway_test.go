@@ -73,6 +73,30 @@ func TestGatewayPanelNeverShowsThePassword(t *testing.T) {
 	if strings.Contains(string(body), "s3cret") {
 		t.Errorf("the panel echoed the gateway password back to the browser:\n%s", body)
 	}
+	if !strings.Contains(string(body), "smtp.provider.example") {
+		t.Errorf("the response is not the gateway panel, so the absence above proves nothing:\n%s", body)
+	}
+}
+
+// TestGatewayNeedsASystemAdmin proves a domain administrator cannot set or remove a
+// gateway, global or its own domain's: a gateway receives every outgoing message
+// of the domains it serves.
+func TestGatewayNeedsASystemAdmin(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, perms: []directory.Permission{{Name: directory.PermDomainAdmin, Params: "*"}},
+		domainDetail: directory.DomainDetail{ID: 1, Name: "tenant.test"},
+		gateways:     map[string]directory.SMTPGateway{"tenant.test": {Host: "kept.example", Port: 587}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	form := gatewayForm()
+	form.Set("host", "attacker.example")
+
+	for _, path := range []string{"/admin/ui/antispam/gateway", "/admin/ui/domains/1/gateway"} {
+		wantStatus(t, htmxPOST(t, ts, path, session, csrf, form), http.StatusForbidden, path)
+		wantStatus(t, htmxPOST(t, ts, path+"/delete", session, csrf, url.Values{}), http.StatusForbidden, path+"/delete")
+	}
+	if len(d.gateways) != 1 || d.gateways["tenant.test"].Host != "kept.example" {
+		t.Errorf("a domain admin changed the gateways: %+v", d.gateways)
+	}
 }
 
 // TestDeleteGatewayRemovesTheGlobal proves the remove button clears the configuration.
