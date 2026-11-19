@@ -98,11 +98,12 @@ func (r *Resolver) timeout() time.Duration {
 
 // LookupTLSA queries the TLSA RRset for an SMTP server reached at host:port
 // (the query name is "_<port>._tcp.<host>"). It returns the usable records and
-// whether DANE is applicable: true only when the RRset is DNSSEC-secure (the
-// resolver set the AD bit) and at least one usable record was found. A SERVFAIL
-// (bogus) response is an error so the caller defers rather than downgrades; an
-// insecure or absent RRset returns (nil, false, nil) so the caller falls back to
-// opportunistic TLS.
+// whether TLS is mandatory: true when the RRset is DNSSEC-secure (the resolver
+// set the AD bit) and non-empty (RFC 7672 section 2.2). With usable records the
+// caller authenticates the server against them; with none, TLS is still
+// required but unauthenticated. A SERVFAIL (bogus) response is an error so the
+// caller defers rather than downgrades; an insecure or absent RRset returns
+// (nil, false, nil) so the caller falls back to opportunistic TLS.
 func (r *Resolver) LookupTLSA(host string, port int) ([]Record, bool, error) {
 	name := fmt.Sprintf("_%d._tcp.%s", port, dns.Fqdn(host))
 	resp, err := r.query(name)
@@ -122,12 +123,19 @@ func (r *Resolver) LookupTLSA(host string, port int) ([]Record, bool, error) {
 	if !resp.AuthenticatedData {
 		return nil, false, nil
 	}
-	var usable []Record
-	for _, rr := range resp.Answer {
+	usable, present := usableRecords(resp.Answer)
+	return usable, present, nil
+}
+
+// usableRecords returns the usable TLSA records of an answer and whether the
+// answer held any TLSA record at all, usable or not.
+func usableRecords(answer []dns.RR) (usable []Record, present bool) {
+	for _, rr := range answer {
 		t, ok := rr.(*dns.TLSA)
 		if !ok {
 			continue
 		}
+		present = true
 		data, err := hex.DecodeString(t.Certificate)
 		if err != nil {
 			continue // a malformed association is treated as unusable, not fatal
@@ -137,7 +145,7 @@ func (r *Resolver) LookupTLSA(host string, port int) ([]Record, bool, error) {
 			usable = append(usable, rec)
 		}
 	}
-	return usable, len(usable) > 0, nil
+	return usable, present
 }
 
 // query sends one TLSA question with DNSSEC requested (EDNS0 DO bit), retrying

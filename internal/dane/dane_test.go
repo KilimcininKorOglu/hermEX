@@ -191,6 +191,13 @@ func servfailResolver(t *testing.T) *Resolver {
 // pointed at it.
 func tlsaResolver(t *testing.T, secure bool) *Resolver {
 	t.Helper()
+	return tlsaResolverWithUsage(t, secure, usageDANEEE)
+}
+
+// tlsaResolverWithUsage is tlsaResolver answering with a record of the given
+// certificate usage, so a test can serve a record this package cannot use.
+func tlsaResolverWithUsage(t *testing.T, secure bool, usage uint8) *Resolver {
+	t.Helper()
 	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -201,7 +208,7 @@ func tlsaResolver(t *testing.T, secure bool) *Resolver {
 		m.AuthenticatedData = secure
 		m.Answer = []dns.RR{&dns.TLSA{
 			Hdr:   dns.RR_Header{Name: r.Question[0].Name, Rrtype: dns.TypeTLSA, Class: dns.ClassINET, Ttl: 300},
-			Usage: 3, Selector: 1, MatchingType: 1,
+			Usage: usage, Selector: 1, MatchingType: 1,
 			Certificate: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 		}}
 		_ = w.WriteMsg(m)
@@ -223,6 +230,22 @@ func TestLookupTLSATrustsOnlyAValidatedAnswer(t *testing.T) {
 	recs, applies, err = tlsaResolver(t, true).LookupTLSA("mx.example", 25)
 	if err != nil || !applies || len(recs) != 1 {
 		t.Errorf("validated answer = %d records, applies %v, err %v; want 1, true, nil", len(recs), applies, err)
+	}
+}
+
+// TestLookupTLSASecureButUnusableStillMandatesTLS serves a validated RRset whose
+// only record is PKIX-EE, which SMTP DANE cannot use. RFC 7672 section 2.2: a
+// secure non-empty RRset with all records unusable still means any connection
+// MUST be made via TLS, only without authentication, so the answer must not read
+// as "no DANE" and let delivery fall back to cleartext.
+func TestLookupTLSASecureButUnusableStillMandatesTLS(t *testing.T) {
+	recs, mandatory, err := tlsaResolverWithUsage(t, true, 1).LookupTLSA("mx.example", 25)
+	if err != nil || !mandatory || len(recs) != 0 {
+		t.Errorf("secure unusable answer = %d records, TLS mandatory %v, err %v; want none, true, nil", len(recs), mandatory, err)
+	}
+	recs, mandatory, err = tlsaResolverWithUsage(t, false, 1).LookupTLSA("mx.example", 25)
+	if err != nil || mandatory || len(recs) != 0 {
+		t.Errorf("insecure unusable answer = %d records, TLS mandatory %v, err %v; want none, false, nil", len(recs), mandatory, err)
 	}
 }
 

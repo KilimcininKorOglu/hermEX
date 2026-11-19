@@ -780,11 +780,11 @@ func gatewayAuth(c *smtp.Client, gw Gateway) error {
 // (RFC 7435): encrypt when advertised, accepting any certificate, since the
 // alternative is cleartext and encryption without authentication is still better.
 func (w *Worker) negotiateTLS(c *smtp.Client, host string, it Item, requireTLS bool) error {
-	daneRecs, err := w.lookupTLSA(host, it)
+	daneRecs, daneTLS, err := w.lookupTLSA(host, it)
 	if err != nil {
 		return err
 	}
-	policyType := tlsPolicyType(daneRecs, requireTLS)
+	policyType := tlsPolicyType(daneTLS, requireTLS)
 	if ok, _ := c.Extension("STARTTLS"); ok {
 		if err := c.StartTLS(tlsConfigFor(host, daneRecs, requireTLS)); err != nil {
 			w.recordTLS(it, host, policyType, tlsrpt.Classify(err))
@@ -797,23 +797,23 @@ func (w *Worker) negotiateTLS(c *smtp.Client, host string, it Item, requireTLS b
 		w.recordTLS(it, host, tlsrpt.PolicyTypeSTS, tlsrpt.ResultStartTLSNotSupported)
 		return fmt.Errorf("mtasts: %s requires STARTTLS but %s does not offer it", domainPart(it.Recipient), host)
 	}
-	if len(daneRecs) > 0 {
+	if daneTLS {
 		w.recordTLS(it, host, tlsrpt.PolicyTypeTLSA, tlsrpt.ResultStartTLSNotSupported)
 		return fmt.Errorf("dane: %s publishes TLSA records but %s does not offer STARTTLS", domainPart(it.Recipient), host)
 	}
 	return nil
 }
 
-// lookupTLSA reads a mail exchanger's DANE records (RFC 7672): when a
-// DNSSEC-validating resolver is configured and the host publishes usable secure
-// TLSA records, TLS is mandatory and the certificate is authenticated against
-// them. A TLSA lookup error (e.g. a bogus/SERVFAIL response) fails the host rather
-// than downgrading.
-func (w *Worker) lookupTLSA(host string, it Item) ([]dane.Record, error) {
+// lookupTLSA reads a mail exchanger's DANE records (RFC 7672 section 2.2): when
+// a DNSSEC-validating resolver is configured and the host publishes a secure
+// TLSA RRset, TLS is mandatory (mandatory=true), and its usable records, when
+// there are any, authenticate the certificate. A TLSA lookup error (e.g. a
+// bogus/SERVFAIL response) fails the host rather than downgrading.
+func (w *Worker) lookupTLSA(host string, it Item) (recs []dane.Record, mandatory bool, err error) {
 	if w.DANE == nil {
-		return nil, nil
+		return nil, false, nil
 	}
-	recs, applicable, err := w.DANE.LookupTLSA(host, 25)
+	recs, mandatory, err = w.DANE.LookupTLSA(host, 25)
 	if err != nil {
 		// A bogus (DNSSEC-invalid) TLSA answer is a reportable TLS-RPT failure
 		// (RFC 8460 dnssec-invalid); a transient lookup error is not (RFC 8460
@@ -821,19 +821,16 @@ func (w *Worker) lookupTLSA(host string, it Item) ([]dane.Record, error) {
 		if errors.Is(err, dane.ErrBogus) {
 			w.recordTLS(it, host, tlsrpt.PolicyTypeTLSA, tlsrpt.ResultDNSSECInvalid)
 		}
-		return nil, err
+		return nil, false, err
 	}
-	if !applicable {
-		return nil, nil
-	}
-	return recs, nil
+	return recs, mandatory, nil
 }
 
 // tlsPolicyType labels a recorded TLS-RPT session (RFC 8460) by the policy that
 // governed the attempt: DANE TLSA, MTA-STS enforce, or neither.
-func tlsPolicyType(daneRecs []dane.Record, requireTLS bool) string {
+func tlsPolicyType(daneTLS, requireTLS bool) string {
 	switch {
-	case len(daneRecs) > 0:
+	case daneTLS:
 		return tlsrpt.PolicyTypeTLSA
 	case requireTLS:
 		return tlsrpt.PolicyTypeSTS

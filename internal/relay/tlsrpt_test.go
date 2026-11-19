@@ -276,6 +276,63 @@ func servfailDNS(t *testing.T) string {
 	return pc.LocalAddr().String()
 }
 
+// secureUnusableTLSA starts a UDP DNS stub answering every query with a validated
+// (AD bit) TLSA RRset whose only record is PKIX-EE, a usage SMTP DANE cannot use,
+// and returns its address.
+func secureUnusableTLSA(t *testing.T) string {
+	t.Helper()
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &dns.Server{PacketConn: pc, Handler: dns.HandlerFunc(func(w dns.ResponseWriter, r *dns.Msg) {
+		m := new(dns.Msg)
+		m.SetReply(r)
+		m.AuthenticatedData = true
+		m.Answer = []dns.RR{&dns.TLSA{
+			Hdr:   dns.RR_Header{Name: r.Question[0].Name, Rrtype: dns.TypeTLSA, Class: dns.ClassINET, Ttl: 300},
+			Usage: 1, Selector: 1, MatchingType: 1,
+			Certificate: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		}}
+		_ = w.WriteMsg(m)
+	})}
+	go func() { _ = srv.ActivateAndServe() }()
+	t.Cleanup(func() { _ = srv.Shutdown() })
+	return pc.LocalAddr().String()
+}
+
+// TestWorkerRefusesCleartextUnderUnusableTLSA delivers to a host whose validated
+// TLSA RRset holds only unusable records and which offers no STARTTLS. RFC 7672
+// section 2.2: such a connection MUST be made via TLS, so the message must stay
+// queued rather than go out in the clear.
+func TestWorkerRefusesCleartextUnderUnusableTLSA(t *testing.T) {
+	_, addr := startSink(t) // plain sink: no STARTTLS
+	sp := openSpool(t)
+	now := time.Now()
+	if err := sp.Enqueue("a@local", []string{"bob@remote"}, []byte("hi\r\n"), now); err != nil {
+		t.Fatal(err)
+	}
+	w := &Worker{
+		Spool:       sp,
+		Router:      func(string) ([]string, error) { return []string{"sink"}, nil },
+		Dialer:      func(string) (net.Conn, error) { return net.Dial("tcp", addr) },
+		DANE:        &dane.Resolver{Addr: secureUnusableTLSA(t)},
+		TLSReporter: sp,
+	}
+	if sent, err := w.ProcessDue(context.Background(), now); err != nil || sent != 0 {
+		t.Fatalf("process: sent=%d err=%v, want the message kept back", sent, err)
+	}
+	rep, err := sp.TLSReport(now, "remote", "org", "c", "id")
+	if err != nil {
+		t.Fatalf("TLSReport: %v", err)
+	}
+	if rep == nil || len(rep.Policies) != 1 || rep.Policies[0].Policy.PolicyType != tlsrpt.PolicyTypeTLSA ||
+		len(rep.Policies[0].FailureDetails) != 1 ||
+		rep.Policies[0].FailureDetails[0].ResultType != tlsrpt.ResultStartTLSNotSupported {
+		t.Errorf("report = %+v, want one tlsa starttls-not-supported failure", rep)
+	}
+}
+
 // TestWorkerRecordsDNSSECInvalid proves a bogus (DNSSEC-invalid) TLSA lookup for
 // the destination records a dnssec-invalid failure under the tlsa policy type and
 // defers delivery, so a DANE security failure surfaces in the daily TLS-RPT
