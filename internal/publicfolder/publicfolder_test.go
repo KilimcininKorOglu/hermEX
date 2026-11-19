@@ -1,6 +1,9 @@
 package publicfolder
 
 import (
+	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -27,6 +30,43 @@ func TestCallerDomainIsTakenAfterTheLastAt(t *testing.T) {
 	got := New(paths).DirForCaller("x@other.test@Hermex.test")
 	if want := paths.HomedirFor("hermex.test"); got != want {
 		t.Errorf("DirForCaller = %s, want %s", got, want)
+	}
+}
+
+// TestAdminOpsNeverProvisionOrDeleteTheSkeleton covers the management calls on
+// hostile input. A read (Folders) or a grant on a domain with no public store
+// must not create one as a side effect; a delete naming a structural folder id
+// (the IPM subtree and the rest of the skeleton) is refused before the store is
+// touched; and a caller address without a domain opens nothing.
+func TestAdminOpsNeverProvisionOrDeleteTheSkeleton(t *testing.T) {
+	paths := fakePaths{root: t.TempDir()}
+	svc := New(paths)
+
+	folders, err := svc.Folders("unprov.test")
+	mustNoErr(t, err, "Folders on an un-provisioned domain")
+	wantEq(t, len(folders), 0, "folders of an un-provisioned domain")
+	if err := svc.Grant("unprov.test", int64(mapi.PublicFIDUnassignedStart), objectstore.PermissionChange{Op: objectstore.PermAdd, Username: "a@unprov.test", Rights: mapi.FrightsVisible}); !errors.Is(err, objectstore.ErrNotProvisioned) {
+		t.Errorf("Grant on an un-provisioned domain = %v, want ErrNotProvisioned", err)
+	}
+	if _, err := os.Stat(paths.HomedirFor("unprov.test")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("a read or grant created the domain's public store (stat err %v)", err)
+	}
+
+	mustNoErr(t, svc.Provision("local.test"), "Provision(local.test)")
+	for _, fid := range []int64{0, 1, int64(mapi.PublicFIDUnassignedStart) - 1} {
+		if err := svc.DeleteFolder("local.test", fid); !errors.Is(err, ErrStructuralFolder) {
+			t.Errorf("DeleteFolder(%d) = %v, want ErrStructuralFolder", fid, err)
+		}
+	}
+	if err := svc.DeleteFolder("unprov.test", int64(mapi.PublicFIDUnassignedStart)); !errors.Is(err, objectstore.ErrNotProvisioned) {
+		t.Errorf("DeleteFolder on an un-provisioned domain = %v, want ErrNotProvisioned", err)
+	}
+
+	for _, caller := range []string{"", "nodomain", "x@"} {
+		st, ok, err := svc.OpenForCaller(caller)
+		if st != nil || ok || err != nil {
+			t.Errorf("OpenForCaller(%q) = %v, %v, %v, want nothing opened", caller, st, ok, err)
+		}
 	}
 }
 
