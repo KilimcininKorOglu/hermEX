@@ -107,13 +107,21 @@ func (p *Provider) TLSConfig() (*tls.Config, error) {
 }
 
 // getCertificate picks the certificate for a handshake: an exact SNI match in the
-// store, else the store default (the "" name), else the configuration-file
-// fallback. A stored certificate takes precedence over the file so an upload
-// overrides the configured one.
+// store, else a wildcard stored for the name's parent, else the store default (the
+// "" name), else the configuration-file fallback. A stored certificate takes
+// precedence over the file so an upload overrides the configured one.
 func (p *Provider) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	byName := p.snap.Load().byName
-	if c, ok := byName[strings.ToLower(hello.ServerName)]; ok {
+	name := strings.ToLower(hello.ServerName)
+	if c, ok := byName[name]; ok {
 		return c, nil
+	}
+	// RFC 6125 6.4.3: "*.example.com" stands for exactly one leftmost label, so
+	// only the name's immediate parent is tried.
+	if _, parent, ok := strings.Cut(name, "."); ok && strings.Contains(parent, ".") {
+		if c, ok := byName["*."+parent]; ok {
+			return c, nil
+		}
 	}
 	if c, ok := byName[""]; ok {
 		return c, nil
