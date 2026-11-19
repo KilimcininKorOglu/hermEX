@@ -87,7 +87,56 @@ func isInternalIP(ip net.IP) bool {
 		ip.IsPrivate() ||
 		ip.IsUnspecified() ||
 		ip.IsMulticast() ||
-		isSharedAddressSpace(ip)
+		isSharedAddressSpace(ip) ||
+		!globallyReachable(ip)
+}
+
+// notGlobal lists the blocks the IANA IPv4 and IPv6 Special-Purpose Address
+// Registries mark "Globally Reachable: False" (RFC 6890) that the checks above do
+// not already cover, plus 240.0.0.0/4, which holds the limited broadcast address.
+// IPv6 outside 2000::/3 is refused separately.
+var notGlobal = []*net.IPNet{
+	cidr("0.0.0.0/8"), cidr("192.0.0.0/24"), cidr("192.0.2.0/24"), cidr("192.88.99.0/24"),
+	cidr("198.18.0.0/15"), cidr("198.51.100.0/24"), cidr("203.0.113.0/24"), cidr("240.0.0.0/4"),
+	cidr("2001::/23"), cidr("2001:db8::/32"), cidr("3fff::/20"),
+}
+
+// globalCarveOuts are the blocks inside a notGlobal block that the registries
+// mark "Globally Reachable: True".
+var globalCarveOuts = []*net.IPNet{
+	cidr("192.0.0.9/32"), cidr("192.0.0.10/32"),
+	cidr("2001:1::1/128"), cidr("2001:1::2/128"), cidr("2001:1::3/128"),
+	cidr("2001:3::/32"), cidr("2001:4:112::/48"), cidr("2001:20::/28"), cidr("2001:30::/28"),
+}
+
+// globalUnicast is the IPv6 space IANA allocates for global unicast; the rest
+// (IPv4-compatible and SIIT forms, site-local, SRv6 SIDs) is not a destination.
+var globalUnicast = cidr("2000::/3")
+
+// globallyReachable reports whether ip lies outside every special-purpose block
+// that is not globally reachable.
+func globallyReachable(ip net.IP) bool {
+	if ip.To4() == nil && !globalUnicast.Contains(ip) {
+		return false
+	}
+	return !inAny(notGlobal, ip) || inAny(globalCarveOuts, ip)
+}
+
+func inAny(nets []*net.IPNet, ip net.IP) bool {
+	for _, n := range nets {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func cidr(s string) *net.IPNet {
+	_, n, err := net.ParseCIDR(s)
+	if err != nil {
+		panic(err) // a malformed literal in this file is a programming error
+	}
+	return n
 }
 
 // sharedAddressSpace is RFC 6598 carrier-grade NAT space. IsPrivate covers RFC 1918

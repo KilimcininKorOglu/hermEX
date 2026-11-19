@@ -25,7 +25,7 @@ func TestIsPublicIP(t *testing.T) {
 			t.Errorf("IsPublicIP(%s) = true, want false (SSRF block)", s)
 		}
 	}
-	for _, s := range []string{"8.8.8.8", "1.1.1.1", "203.0.113.5", "2606:4700:4700::1111"} {
+	for _, s := range []string{"8.8.8.8", "1.1.1.1", "9.9.9.9", "2606:4700:4700::1111"} {
 		if !IsPublicIP(net.ParseIP(s)) {
 			t.Errorf("IsPublicIP(%s) = false, want true (routable)", s)
 		}
@@ -74,7 +74,7 @@ func TestValidateURLRejectsInternalAddressLiterals(t *testing.T) {
 			t.Errorf("ValidateURL(%s, allowInternal) = %v, want accepted", raw, err)
 		}
 	}
-	if err := ValidateURL("https://203.0.113.5/push", false); err != nil {
+	if err := ValidateURL("https://9.9.9.9/push", false); err != nil {
 		t.Errorf("a routable address literal must pass: %v", err)
 	}
 }
