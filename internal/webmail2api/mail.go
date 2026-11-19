@@ -638,6 +638,9 @@ func (s *Server) handleMailCopy(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 		return
 	}
+	if refuseOverQuota(w, st) {
+		return
+	}
 	m, err := st.MessageByUID(fid, uid)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "copy failed"})

@@ -283,6 +283,9 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
+	if refuseOverQuota(w, st) {
+		return
+	}
 	id, err := s.storeTask(st, jsonToTask(in))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save task"})
@@ -367,6 +370,9 @@ func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
+	if refuseOverQuota(w, st) {
+		return
+	}
 	var props mapi.PropertyValues
 	props.Set(mapi.PrMessageClass, "IPM.StickyNote")
 	props.Set(mapi.PrSubject, in.Title)
@@ -611,6 +617,9 @@ func (s *Server) handleCreateMailNote(w http.ResponseWriter, r *http.Request) {
 	link, status, reason := mailLinkFor(st, fid, uid)
 	if status != 0 {
 		writeJSON(w, status, map[string]string{"error": reason})
+		return
+	}
+	if refuseOverQuota(w, st) {
 		return
 	}
 

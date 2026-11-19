@@ -387,6 +387,9 @@ func (s *Server) handleCreateContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
+	if refuseOverQuota(w, st) {
+		return
+	}
 	id, err := storeContact(st, in)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save contact"})
@@ -824,10 +827,23 @@ func (s *Server) handleSetContactPhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
-	if !objectInKind(w, st, id, inFolder(mapi.PrivateFIDContacts)) {
+	if !objectInKind(w, st, id, inFolder(mapi.PrivateFIDContacts)) || refuseOverQuota(w, st) {
 		return
 	}
-	// Drop an existing photo first so the contact has at most one photo.
+	if err := replaceContactPhoto(st, id, data); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not attach photo"})
+		return
+	}
+	// Mark the contact as having a picture (PidLidHasPicture).
+	if tag, err := hasPictureTag(st, true); err == nil && tag != 0 {
+		_ = st.SetMessageProperties(id, mapi.PropertyValues{{Tag: tag, Value: true}})
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// replaceContactPhoto stores data as the contact's one photo attachment, dropping
+// an existing photo first so the contact has at most one.
+func replaceContactPhoto(st *objectstore.Store, id int64, data []byte) error {
 	if msg, err := st.OpenMessage(id); err == nil {
 		if num, _, has := objectstore.ContactPhotoAttachment(msg); has {
 			// #nosec G115 -- the signed and unsigned views of the same 32 bits
@@ -843,15 +859,8 @@ func (s *Server) handleSetContactPhoto(w http.ResponseWriter, r *http.Request) {
 		{Tag: mapi.PrRenderingPosition, Value: int32(-1)},
 		{Tag: mapi.PrAttachmentContactPhoto, Value: true},
 	}
-	if _, _, err := st.CreateAttachment(id, props); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not attach photo"})
-		return
-	}
-	// Mark the contact as having a picture (PidLidHasPicture).
-	if tag, err := hasPictureTag(st, true); err == nil && tag != 0 {
-		_ = st.SetMessageProperties(id, mapi.PropertyValues{{Tag: tag, Value: true}})
-	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	_, _, err := st.CreateAttachment(id, props)
+	return err
 }
 
 // readScannedPhoto reads the uploaded photo out of the multipart body and

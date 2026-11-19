@@ -377,6 +377,10 @@ func (s *Server) handleMailDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
+	// Checked before the previous draft is dropped, so a refused save keeps it.
+	if refuseOverQuota(w, st) {
+		return
+	}
 	// Replace the previous draft so autosave does not accumulate copies.
 	if folder, uid, ok := parseMessageID(req.ID); ok && folder == "drafts" {
 		_ = st.DeleteMessage(int64(mapi.PrivateFIDDraft), uid)

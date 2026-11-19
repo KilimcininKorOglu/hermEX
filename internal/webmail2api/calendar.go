@@ -693,7 +693,7 @@ func (s *Server) handleCreateEvent(w http.ResponseWriter, r *http.Request) {
 		organizer = c.Email
 	}
 	fid, ok := calendarOr404(w, st, in.CalendarID)
-	if !ok {
+	if !ok || refuseOverQuota(w, st) {
 		return
 	}
 	id, err := storeEvent(st, in, fid, organizer)

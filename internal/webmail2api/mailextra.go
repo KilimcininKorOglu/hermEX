@@ -717,8 +717,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown folder"})
 		return
 	}
-	if !s.importPassesScan(r, raw) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the message was rejected: a virus was detected"})
+	if !s.admitImport(w, r, mb.st, raw) {
 		return
 	}
 	info, err := mb.st.AppendMessage(fid, raw, importDate(raw, time.Now()), 0)
@@ -727,6 +726,20 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"uid": info.UID, "folder": folder})
+}
+
+// admitImport reports whether raw may enter st: the mailbox must be under its
+// receive quota and the message must pass the virus scan. A refusal is answered
+// on w.
+func (s *Server) admitImport(w http.ResponseWriter, r *http.Request, st *objectstore.Store, raw []byte) bool {
+	if refuseOverQuota(w, st) {
+		return false
+	}
+	if !s.importPassesScan(r, raw) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the message was rejected: a virus was detected"})
+		return false
+	}
+	return true
 }
 
 // decodeImportedEML decodes the uploaded file, reporting false for anything
