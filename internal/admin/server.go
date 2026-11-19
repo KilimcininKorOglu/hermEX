@@ -570,6 +570,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/ldap/bindings/{id}/sync", s.handleUISyncLDAPBinding)
 	mux.HandleFunc("POST /admin/ui/ldap/bindings/{id}/delete", s.handleUIUnbindLDAPDomain)
 	mux.HandleFunc("GET /admin/ui/", s.handleUIDashboard)
+	// The panel's own host name (admin_hostname) is opened at its root, so the
+	// root and the bare /admin prefix lead to the UI instead of a 404.
+	toUI := http.RedirectHandler("/admin/ui/", http.StatusFound)
+	mux.Handle("GET /{$}", toUI)
+	mux.Handle("GET /admin", toUI)
+	mux.Handle("GET /admin/{$}", toUI)
 	return noStoreAdmin(s.syncPrefs(boundBody(mux)))
 }
 
