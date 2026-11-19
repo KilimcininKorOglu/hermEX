@@ -219,6 +219,27 @@ func TestTLSConfigHandshake(t *testing.T) {
 	}
 }
 
+// TestTLSConfigRefusesALegacyClient dials with a client capped at TLS 1.1. RFC 8996
+// deprecates TLS 1.0 and 1.1, so the handshake must fail rather than settle on a
+// version the floor exists to exclude.
+func TestTLSConfigRefusesALegacyClient(t *testing.T) {
+	certPath, keyPath := writeSelfSignedCert(t, t.TempDir())
+	cfg, err := (&Config{TLSCert: certPath, TLSKey: keyPath}).TLSConfig()
+	if err != nil {
+		t.Fatalf("TLSConfig: %v", err)
+	}
+	addr := serveTLS(t, cfg)
+	client, err := tls.Dial("tcp", addr, &tls.Config{
+		RootCAs: certPool(t, certPath), ServerName: "localhost",
+		MinVersion: tls.VersionTLS10, MaxVersion: tls.VersionTLS11,
+	})
+	if err == nil {
+		v := client.ConnectionState().Version
+		_ = client.Close()
+		t.Fatalf("a TLS 1.1 client completed a handshake at version %#x", v)
+	}
+}
+
 // serveTLS listens on a loopback port with the built config and drives the server
 // side of one handshake, returning the dial address.
 func serveTLS(t *testing.T, cfg *tls.Config) string {
