@@ -32,6 +32,8 @@ type findItemRequest struct {
 	// CalendarView asks for a calendar's items as they appear in a window, each
 	// series expanded into its occurrences.
 	CalendarView *calendarView `xml:"CalendarView"`
+	// IndexedPage asks for one page of the view ([MS-OXWSSRCH] 2.2.4.6).
+	IndexedPage *indexedPageView `xml:"IndexedPageItemView"`
 }
 
 type getAttachmentRequest struct {
@@ -87,6 +89,9 @@ type itemsWrap struct {
 }
 
 type findItemRoot struct {
+	// IndexedPagingOffset is where the next page starts; written only for an
+	// IndexedPageItemView request.
+	IndexedPagingOffset     *int `xml:"IndexedPagingOffset,attr,omitempty"`
 	TotalItemsInView        int  `xml:"TotalItemsInView,attr"`
 	IncludesLastItemInRange bool `xml:"IncludesLastItemInRange,attr"`
 	// In Find* responses the collection under m:RootFolder is in the types
@@ -121,7 +126,11 @@ func (s *Server) handleFindItem(w http.ResponseWriter, inner []byte, sess *sessi
 
 	var msgs []findItemResponseMessage
 	for _, tgt := range resolveTargets(req.ParentFolderIDs) {
-		msgs = append(msgs, findItemForTarget(cache, sess, tgt, fields, req))
+		msg := findItemForTarget(cache, sess, tgt, fields, req)
+		if msg.RootFolder != nil && req.CalendarView == nil {
+			pageFindRoot(msg.RootFolder, req.IndexedPage)
+		}
+		msgs = append(msgs, msg)
 	}
 	writeResponse(w, findItemResponse{Messages: msgs})
 }
