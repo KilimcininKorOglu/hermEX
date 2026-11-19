@@ -50,6 +50,9 @@ func (d *SQLDirectory) SetRecipientRule(username, pattern, action string) error 
 	if pattern == "" {
 		return errors.New("recipient rule pattern is empty")
 	}
+	if err := ValidateAccessPattern(pattern); err != nil {
+		return err
+	}
 	if action != SenderAllow && action != SenderBlock {
 		return errors.New("recipient rule action must be allow or block")
 	}

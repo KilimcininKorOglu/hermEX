@@ -79,6 +79,14 @@ func TestRecipientRulesAPI(t *testing.T) {
 		do(http.MethodPost, "/api/v1/recipient-rules", `{"pattern":"x@x.test","action":"maybe"}`), http.StatusBadRequest)
 	wantEq(t, "store writes after a rejected action", len(auth.setArgs), 1)
 
+	// POST with a pattern no sender can match (rules are an exact lookup) is a 400
+	// before touching the store, not a 500 from the store's own refusal.
+	for _, pattern := range []string{"*", "*.x.test", "@x.test", "a@x.test, b@x.test"} {
+		wantStatus(t, "post pattern "+pattern,
+			do(http.MethodPost, "/api/v1/recipient-rules", `{"pattern":"`+pattern+`","action":"block"}`), http.StatusBadRequest)
+	}
+	wantEq(t, "store writes after a rejected pattern", len(auth.setArgs), 1)
+
 	// DELETE removes by pattern.
 	wantStatus(t, "delete rule",
 		do(http.MethodDelete, "/api/v1/recipient-rules?pattern=spam@x.test", ""), http.StatusOK)

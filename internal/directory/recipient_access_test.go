@@ -98,6 +98,19 @@ func TestRecipientRuleUnknownUser(t *testing.T) {
 	}
 }
 
+// TestRecipientRuleRefusesAPatternNoSenderMatches sets a wildcard personal rule.
+// Rules are matched by exact lookup, so it would be listed as active and block
+// nothing; it is refused and no row is kept.
+func TestRecipientRuleRefusesAPatternNoSenderMatches(t *testing.T) {
+	d, _, _ := setupRecipientAccess(t)
+	if err := d.SetRecipientRule("alice@hermex.test", "*.example.com", SenderBlock); err == nil {
+		t.Error("a wildcard personal rule was accepted")
+	}
+	if rules, err := d.ListRecipientRules("alice@hermex.test"); err != nil || len(rules) != 0 {
+		t.Errorf("personal rules after the refusal = %+v (err %v), want none", rules, err)
+	}
+}
+
 // TestRecipientRulesAreIsolated proves rules are per-recipient: one mailbox's rules
 // never leak into another's delivery-side map.
 func TestRecipientRulesAreIsolated(t *testing.T) {

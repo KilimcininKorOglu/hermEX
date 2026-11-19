@@ -16,6 +16,19 @@ func setupSenderAccess(t *testing.T) *SQLDirectory {
 	return d
 }
 
+// TestSenderRuleRefusesAPatternNoSenderMatches sets a wildcard operator rule.
+// Rules are matched by exact lookup, so it would be listed as active and block
+// nothing; it is refused and no row is kept.
+func TestSenderRuleRefusesAPatternNoSenderMatches(t *testing.T) {
+	d := setupSenderAccess(t)
+	if err := d.SetSenderRule("*", SenderBlock); err == nil {
+		t.Error("a wildcard operator rule was accepted")
+	}
+	if rules, err := d.ListSenderRules(); err != nil || len(rules) != 0 {
+		t.Errorf("operator rules after the refusal = %+v (err %v), want none", rules, err)
+	}
+}
+
 // TestSenderRuleRoundTrip proves rules are stored lowercased and listed back, and
 // that the pattern is normalised on the way in.
 func TestSenderRuleRoundTrip(t *testing.T) {

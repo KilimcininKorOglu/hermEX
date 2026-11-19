@@ -31,6 +31,9 @@ func (d *SQLDirectory) SetSenderRule(pattern, action string) error {
 	if pattern == "" {
 		return errors.New("sender rule pattern is empty")
 	}
+	if err := ValidateAccessPattern(pattern); err != nil {
+		return err
+	}
 	if action != SenderAllow && action != SenderBlock {
 		return errors.New("sender rule action must be allow or block")
 	}

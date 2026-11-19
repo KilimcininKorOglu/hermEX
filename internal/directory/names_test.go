@@ -59,6 +59,23 @@ func TestValidateDomainRejectsTraversal(t *testing.T) {
 	}
 }
 
+// TestValidateAccessPattern keeps allow/block patterns to what the exact-lookup
+// matcher can hit: one address or one bare domain. Anything else would be a rule
+// listed as active that matches no sender.
+func TestValidateAccessPattern(t *testing.T) {
+	for _, p := range []string{"partner@example.com", "Spammy.Example", "mail.example.co.uk"} {
+		if err := ValidateAccessPattern(p); err != nil {
+			t.Errorf("ValidateAccessPattern(%q) = %v, want nil", p, err)
+		}
+	}
+	for _, p := range []string{"*", "*.example.com", "@example.com", "a@b@c.com", "a@example.com, b@example.com",
+		"Name <a@example.com>", "exam ple.com", "example..com", ""} {
+		if err := ValidateAccessPattern(p); err == nil {
+			t.Errorf("ValidateAccessPattern(%q) = nil, want an error", p)
+		}
+	}
+}
+
 // TestValidatedAddressStaysUnderRoot states the property the validation exists
 // for: every accepted name joins to a path inside the root it was joined to.
 func TestValidatedAddressStaysUnderRoot(t *testing.T) {

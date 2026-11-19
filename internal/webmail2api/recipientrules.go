@@ -60,6 +60,10 @@ func (s *Server) handlePostRecipientRule(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "pattern is required"})
 		return
 	}
+	if directory.ValidateAccessPattern(req.Pattern) != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "pattern must be one email address or domain"})
+		return
+	}
 	if req.Action != directory.SenderAllow && req.Action != directory.SenderBlock {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action must be allow or block"})
 		return

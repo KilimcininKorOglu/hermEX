@@ -40,6 +40,20 @@ func ValidateForwardDestination(destination string) error {
 	return ValidateDomain(destination[strings.LastIndexByte(destination, '@')+1:])
 }
 
+// ValidateAccessPattern reports whether an allow/block pattern is one email address
+// or one bare domain. Rules are matched by exact lookup, so anything else (a "*", an
+// "@domain", a list) matches no sender while the rule is listed as active.
+func ValidateAccessPattern(pattern string) error {
+	pattern = strings.ToLower(strings.TrimSpace(pattern))
+	if strings.Contains(pattern, "@") {
+		if err := ValidateForwardDestination(pattern); err != nil {
+			return fmt.Errorf("directory: access pattern %q is not one address or domain", pattern)
+		}
+		return nil
+	}
+	return ValidateDomain(pattern)
+}
+
 // ValidateDomain reports whether a domain name may be provisioned. A domain
 // names the directory holding its public store, so it carries the same path
 // constraints as an address, narrowed to the characters a host name may hold.
