@@ -88,4 +88,22 @@ func TestUIDomainSyncPolicySave(t *testing.T) {
 	if !strings.Contains(string(body), `class="ok"`) {
 		t.Errorf("save response = %s, want a success acknowledgement", body)
 	}
+
+	// The form refuses what the JSON endpoint refuses ([MS-ASPROV] 2.2.2): a
+	// negative count, a toggle other than 0 or 1, and a value that is no number.
+	for _, bad := range []url.Values{
+		{"MinDevicePasswordLength": {"-1"}},
+		{"DevicePasswordEnabled": {"2"}},
+		{"MinDevicePasswordLength": {"8x"}},
+	} {
+		resp := htmxPUT(t, ts, "/admin/ui/domains/1/syncpolicy", session, csrf, bad)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if strings.Contains(string(body), `class="ok"`) {
+			t.Errorf("%v was acknowledged as saved", bad)
+		}
+		if d.domainSyncPolicy["MinDevicePasswordLength"] != 8 || len(d.domainSyncPolicy) != 1 {
+			t.Errorf("%v replaced the stored policy: %v", bad, d.domainSyncPolicy)
+		}
+	}
 }
