@@ -337,7 +337,7 @@ func (s *Session) ropCopyFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 	if !ok {
 		return true
 	}
-	if _, err := folder.store.CopyFolder(copiedFID, dest.folderID, newName, wantRecursive != 0); err != nil {
+	if _, err := copyFolderWithinQuota(folder.store, copiedFID, dest.folderID, newName, wantRecursive != 0); err != nil {
 		writeErr(out, ropCopyFolder, hindex, folderCopyError(err))
 		return true
 	}
@@ -382,8 +382,23 @@ func folderCopyError(err error) uint32 {
 		return ecFolderCycle
 	case errors.Is(err, objectstore.ErrNotFound):
 		return ecNotFound
+	case errors.Is(err, errQuotaExceeded):
+		return ecQuotaExceeded
 	}
 	return ecError
+}
+
+// copyFolderWithinQuota copies a folder unless the mailbox is past its receive
+// quota, since the copy adds every message the folder holds.
+func copyFolderWithinQuota(st *objectstore.Store, fid, destFID int64, name string, recursive bool) (int64, error) {
+	over, err := st.OverReceiveQuota()
+	if err != nil {
+		return 0, err
+	}
+	if over {
+		return 0, errQuotaExceeded
+	}
+	return st.CopyFolder(fid, destFID, name, recursive)
 }
 
 // ropHardDeleteMessagesAndSubfolders handles RopHardDeleteMessagesAndSubfolders

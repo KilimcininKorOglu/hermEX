@@ -341,6 +341,9 @@ func (um *UploadMessage) Commit() (uint64, error) {
 	return um.mid, nil
 }
 
+// IsNew reports whether Commit adds a message rather than replacing one.
+func (um *UploadMessage) IsNew() bool { return um.isNew }
+
 // clearTarget prepares the id the upload writes to: a new id advances the
 // folder's allocation cursor past it, so a later server-side allocation never
 // reuses it, while a replace deletes the existing row and lets the foreign keys

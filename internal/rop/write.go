@@ -295,6 +295,9 @@ func (s *Session) saveUploadedMessage(out *ext.Push, obj *object, hindex, ihinde
 		writeErr(out, ropSaveChangesMessage, hindex, ecError)
 		return
 	}
+	if obj.uploadMsg.IsNew() && refuseOverQuota(out, ropSaveChangesMessage, hindex, obj.store) {
+		return
+	}
 	mid, err := obj.uploadMsg.Commit()
 	if err != nil {
 		writeErr(out, ropSaveChangesMessage, hindex, ecError)
@@ -436,6 +439,9 @@ func mergeAttachProps(bag, written mapi.PropertyValues) mapi.PropertyValues {
 // creating it on the first save and editing it in place on any later one.
 func saveComposedMessage(out *ext.Push, obj *object, hindex, ihindex uint8) {
 	nm := obj.newMsg
+	if !nm.saved && refuseOverQuota(out, ropSaveChangesMessage, hindex, obj.store) {
+		return
+	}
 	id, err := persistComposedMessage(obj.store, nm)
 	if err != nil {
 		writeErr(out, ropSaveChangesMessage, hindex, ecError)

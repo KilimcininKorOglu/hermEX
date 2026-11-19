@@ -264,6 +264,10 @@ func (s *Session) ropMoveCopyMessages(p *ext.Pull, out *ext.Push, handles []uint
 	if !ok {
 		return true
 	}
+	// Both ends are one mailbox, so a move adds nothing; a copy adds the messages.
+	if wantCopy != 0 && refuseOverQuota(out, ropMoveCopyMessages, hindex, dst.store) {
+		return true
+	}
 	partial := moveCopyEach(src, dst, ids, wantCopy == 0)
 	out.Uint8(ropMoveCopyMessages)
 	out.Uint8(hindex)

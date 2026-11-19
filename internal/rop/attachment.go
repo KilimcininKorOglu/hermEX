@@ -219,14 +219,9 @@ func (s *Session) ropCreateAttachment(p *ext.Pull, out *ext.Push, handles []uint
 		writeErr(out, ropCreateAttachment, ohindex, ecNotSupported)
 		return true
 	}
-	initial := mapi.PropertyValues{
-		{Tag: mapi.PrRenderingPosition, Value: int32(-1)}, // 0xFFFFFFFF: not rendered in the body
-		{Tag: mapi.PrCreationTime, Value: now},
-		{Tag: mapi.PrLastModificationTime, Value: now},
-	}
-	aid, num, err := msg.store.CreateAttachment(messageID, initial)
-	if err != nil {
-		writeErr(out, ropCreateAttachment, ohindex, ecError)
+	aid, num, ec := createStoredAttachment(msg.store, messageID, now)
+	if ec != ecSuccess {
+		writeErr(out, ropCreateAttachment, ohindex, ec)
 		return true
 	}
 	h := s.alloc(&object{
@@ -241,6 +236,29 @@ func (s *Session) ropCreateAttachment(p *ext.Pull, out *ext.Push, handles []uint
 	out.Uint32(ecSuccess)
 	out.Uint32(num) // AttachmentID (= PidTagAttachNumber)
 	return true
+}
+
+// createStoredAttachment adds an empty attachment to a stored message and returns
+// its row id and attach number, or the ROP error code: ecQuotaExceeded when the
+// mailbox is past its receive quota, since an attachment adds to it.
+func createStoredAttachment(st *objectstore.Store, messageID int64, now uint64) (int64, uint32, uint32) {
+	over, err := st.OverReceiveQuota()
+	if err != nil {
+		return 0, 0, ecError
+	}
+	if over {
+		return 0, 0, ecQuotaExceeded
+	}
+	initial := mapi.PropertyValues{
+		{Tag: mapi.PrRenderingPosition, Value: int32(-1)}, // 0xFFFFFFFF: not rendered in the body
+		{Tag: mapi.PrCreationTime, Value: now},
+		{Tag: mapi.PrLastModificationTime, Value: now},
+	}
+	aid, num, err := st.CreateAttachment(messageID, initial)
+	if err != nil {
+		return 0, 0, ecError
+	}
+	return aid, num, ecSuccess
 }
 
 // nextNewAttachNum returns the attach number to assign to a new in-memory

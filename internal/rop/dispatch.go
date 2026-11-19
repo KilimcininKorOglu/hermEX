@@ -96,6 +96,7 @@ const (
 	ecError           uint32 = 0x80004005 // generic failure / unimplemented ROP
 	ecNotFound        uint32 = 0x8004010F // MAPI_E_NOT_FOUND (no such folder/object)
 	ecNotSupported    uint32 = 0x80040102 // MAPI_E_NO_SUPPORT (unsupported request)
+	ecQuotaExceeded   uint32 = 0x000004D9 // the write would exceed a resource quota
 	ecAccessDenied    uint32 = 0x80070005 // MAPI_E_NO_ACCESS (e.g. setting the in-conflict status bit)
 	ecInvalidParam    uint32 = 0x80070057 // MAPI_E_INVALID_PARAMETER (e.g. a bad stream-seek origin)
 	ecDstNullObject   uint32 = 0x00000503 // a copy's destination handle resolves to no object
