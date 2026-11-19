@@ -44,6 +44,10 @@ func TestDomainDetailScopedLists(t *testing.T) {
 	if !strings.Contains(page, "list@one.test") {
 		t.Errorf("domain detail missing the domain's group")
 	}
+	// The contact and group lists come from per-domain queries; the page must ask
+	// them for this domain, not another.
+	wantEq(t, d.contactsDomainID, int64(1), "the domain the contacts were listed for")
+	wantEq(t, d.mlistsDomainID, int64(1), "the domain the groups were listed for")
 	if !strings.Contains(page, "/admin/ui/public-folders?domain=one.test") {
 		t.Errorf("domain detail missing the per-domain public-folders link")
 	}

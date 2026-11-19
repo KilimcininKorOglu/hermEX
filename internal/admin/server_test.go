@@ -47,6 +47,8 @@ type fakeDir struct {
 	splitHost          string
 	quarantine         []directory.QuarantineRecord
 	quarantineIDs      []int64 // the domain scope the last ListQuarantine was given
+	contactsDomainID   int64   // the domain the last ListContactsInDomain named
+	mlistsDomainID     int64   // the domain the last ListMListsInDomain named
 	quarantineAll      bool
 	reports            fakeReports
 	senderRules        []directory.SenderRule
@@ -1150,10 +1152,12 @@ func (f *fakeDir) ListUsersInDomain(domainID int64) ([]directory.UserInfo, error
 	}
 	return out, f.readErrs["ListUsersInDomain"]
 }
-func (f *fakeDir) ListContactsInDomain(int64) ([]directory.ContactInfo, error) {
+func (f *fakeDir) ListContactsInDomain(id int64) ([]directory.ContactInfo, error) {
+	f.contactsDomainID = id
 	return f.contacts, f.readErrs["ListContactsInDomain"]
 }
-func (f *fakeDir) ListMListsInDomain(int64) ([]directory.MListInfo, error) {
+func (f *fakeDir) ListMListsInDomain(id int64) ([]directory.MListInfo, error) {
+	f.mlistsDomainID = id
 	return f.mlists, f.readErrs["ListMListsInDomain"]
 }
 func (f *fakeDir) CreateContact(email, displayName, domain string) (int64, error) {
