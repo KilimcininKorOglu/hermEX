@@ -1,11 +1,12 @@
 // Package httplimit caps how many HTTP requests one client may issue in a fixed
 // time window. It is the request-rate counterpart to the inbound-SMTP limiter in
-// internal/mta: the same fixed-window shape, the same fail-open discipline, and
-// the same admin-tunable-without-restart contract, applied to every HTTP daemon
+// internal/mta: the same fixed-window shape, fail-open for a client it cannot
+// key, and the same admin-tunable-without-restart contract, applied to every HTTP daemon
 // through the shared server base in internal/serve.
 package httplimit
 
 import (
+	"container/list"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,24 +23,27 @@ const (
 )
 
 // maxKeys bounds the limiter's memory: the number of distinct client addresses
-// tracked at once. When the table is full of still-live windows the limiter fails
-// open (admits) rather than evicting a live counter, so reclaiming memory can
-// never turn into blocking a legitimate client.
+// tracked at once. When the table is full of still-live windows the client that
+// has gone longest without a request is evicted, as nginx limit_req does with a
+// full zone. Admitting a newcomer untracked instead would let a client that
+// spreads its requests over enough addresses switch the limit off for everyone.
 const maxKeys = 100_000
 
-// window is one client's fixed-window counter.
+// window is one client's fixed-window counter and its place in the recency list.
 type window struct {
 	start time.Time
 	count int
+	elem  *list.Element // Value is the client key
 }
 
 // Limiter counts requests per client key in a fixed window and reports when a key
 // has passed its burst. It is in-process (per daemon), safe for concurrent use,
-// disabled until an operator enables it, and fails open on any inability to key
-// or track a client.
+// disabled until an operator enables it, and fails open for a client it cannot
+// key.
 type Limiter struct {
 	mu      sync.Mutex
 	windows map[string]*window
+	recency *list.List   // client keys, most recently used at the front
 	burst   atomic.Int64 // max requests per window (admin-tunable)
 	period  atomic.Int64 // window length in nanoseconds (admin-tunable)
 	enabled atomic.Bool
@@ -49,7 +53,7 @@ type Limiter struct {
 // NewLimiter builds a limiter with the default burst and window; it starts
 // disabled.
 func NewLimiter() *Limiter {
-	l := &Limiter{windows: make(map[string]*window), now: time.Now}
+	l := &Limiter{windows: make(map[string]*window), recency: list.New(), now: time.Now}
 	l.burst.Store(defaultBurst)
 	l.period.Store(int64(defaultWindow))
 	return l
@@ -101,14 +105,11 @@ func (l *Limiter) Allow(key string) (allowed bool, retryAfter time.Duration) {
 	w := l.windows[key]
 	switch {
 	case w == nil:
-		if len(l.windows) >= maxKeys && !l.sweepExpired(now, period) {
-			return true, 0 // table full of live windows → fail open
-		}
-		w = &window{start: now}
-		l.windows[key] = w
+		w = l.track(key, now, period)
 	case now.Sub(w.start) >= period:
 		w.start, w.count = now, 0 // window elapsed → reset
 	}
+	l.recency.MoveToFront(w.elem)
 	w.count++
 	if int64(w.count) <= burst {
 		return true, 0
@@ -128,13 +129,31 @@ func (l *Limiter) Prune() {
 	l.sweepExpired(now, period)
 }
 
+// track starts a window for a new client. A full table first drops the windows
+// whose period has elapsed and, when every window is still live, the least
+// recently used one. The caller must hold l.mu.
+func (l *Limiter) track(key string, now time.Time, period time.Duration) *window {
+	if len(l.windows) >= maxKeys && !l.sweepExpired(now, period) {
+		l.remove(l.recency.Back())
+	}
+	w := &window{start: now, elem: l.recency.PushFront(key)}
+	l.windows[key] = w
+	return w
+}
+
+// remove drops one tracked client. The caller must hold l.mu.
+func (l *Limiter) remove(e *list.Element) {
+	delete(l.windows, e.Value.(string))
+	l.recency.Remove(e)
+}
+
 // sweepExpired deletes windows whose period has elapsed and reports whether it
 // freed at least one slot. The caller must hold l.mu.
 func (l *Limiter) sweepExpired(now time.Time, period time.Duration) bool {
 	freed := false
-	for k, w := range l.windows {
+	for _, w := range l.windows {
 		if now.Sub(w.start) >= period {
-			delete(l.windows, k)
+			l.remove(w.elem)
 			freed = true
 		}
 	}

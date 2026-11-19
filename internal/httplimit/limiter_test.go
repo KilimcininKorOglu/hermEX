@@ -103,19 +103,38 @@ func TestAllowFailsOpenOnEmptyKey(t *testing.T) {
 	}
 }
 
-// TestAllowFailsOpenWhenTableFull proves a table full of live windows admits a new
-// client rather than evicting a live counter: reclaiming memory must never turn into
-// blocking a legitimate client.
-func TestAllowFailsOpenWhenTableFull(t *testing.T) {
+// TestAFullTableEvictsTheLeastRecentlyUsedClient fills the table with live
+// windows, the state a client spreading requests over many addresses (an IPv6
+// /48 alone holds 65536 /64 keys) can reach. Admitting every newcomer untracked
+// would switch the limit off for everyone, so the table instead drops the client
+// that has gone longest without a request, as nginx limit_req does with a full
+// zone: the newcomer is tracked and limited, a recently active client keeps its
+// count, and only the evicted one starts over.
+func TestAFullTableEvictsTheLeastRecentlyUsedClient(t *testing.T) {
 	l, _ := newTestLimiter(t, 1, time.Minute)
 	for i := range maxKeys {
 		l.Allow("live-" + strconv.Itoa(i))
 	}
-	// Every window is live, so the newcomer cannot be tracked and must be admitted.
-	for i := range 5 {
-		if allowed, _ := l.Allow("newcomer"); !allowed {
-			t.Fatalf("request %d refused with a full table, want fail open", i+1)
-		}
+	// live-0 was the first in, but this request makes it the most recently used.
+	if allowed, _ := l.Allow("live-0"); allowed {
+		t.Fatal("live-0's second request admitted, want it refused past the burst")
+	}
+
+	if allowed, _ := l.Allow("newcomer"); !allowed {
+		t.Fatal("newcomer's first request refused, want it admitted")
+	}
+	if allowed, _ := l.Allow("newcomer"); allowed {
+		t.Fatal("newcomer's second request admitted, want it tracked and refused past the burst")
+	}
+	if allowed, _ := l.Allow("live-0"); allowed {
+		t.Error("live-0 was evicted although it was the most recently used client")
+	}
+	if got := len(l.windows); got != maxKeys {
+		t.Errorf("table holds %d windows, want it kept at %d", got, maxKeys)
+	}
+	// live-1 was the least recently used, so it is the one that starts over.
+	if allowed, _ := l.Allow("live-1"); !allowed {
+		t.Error("live-1 still refused, want the least recently used client evicted")
 	}
 }
 
