@@ -71,7 +71,7 @@ func (w *Worker) reportDMARCDomain(day time.Time, domain string) {
 		w.logReport("dmarc.encode.fail", domain, err)
 		return
 	}
-	for _, uri := range ruas {
+	for _, uri := range reportTargets(ruas) {
 		if err := w.deliverDMARCReport(uri, domain, agg, doc); err != nil {
 			w.logReport("dmarc.deliver.fail", domain, err)
 		}

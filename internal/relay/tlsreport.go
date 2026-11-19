@@ -70,11 +70,37 @@ func (w *Worker) reportDomain(day time.Time, domain string) {
 		w.logReport("tlsrpt.encode.fail", domain, err)
 		return
 	}
-	for _, uri := range policy.RUAs {
+	for _, uri := range reportTargets(policy.RUAs) {
 		if err := w.deliverReport(uri, domain, report, jsonBytes); err != nil {
 			w.logReport("tlsrpt.deliver.fail", domain, err)
 		}
 	}
+}
+
+// maxReportTargets bounds how many destinations one domain's daily report goes
+// to. The list comes from the reported domain's own DNS record, so without a
+// bound one inbound message makes this server send as many reports as the record
+// names, to mailboxes the record's owner chose (the reflection measured in "You've
+// Got Report", USENIX Security 2023). RFC 7489 6.2 lets a receiver cap the list
+// as long as it serves at least two; 10 is the bound FastMail applies.
+const maxReportTargets = 10
+
+// reportTargets returns the destinations a report goes to: each distinct URI
+// once, in record order, and at most maxReportTargets of them.
+func reportTargets(uris []string) []string {
+	seen := make(map[string]bool, len(uris))
+	var out []string
+	for _, uri := range uris {
+		if seen[uri] {
+			continue
+		}
+		seen[uri] = true
+		out = append(out, uri)
+		if len(out) == maxReportTargets {
+			break
+		}
+	}
+	return out
 }
 
 // deliverReport sends one report to a single rua target, dispatching on its scheme.

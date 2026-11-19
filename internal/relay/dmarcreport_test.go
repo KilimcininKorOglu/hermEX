@@ -115,6 +115,21 @@ func TestDMARCReportCountsAndSends(t *testing.T) {
 	wantEq(t, len(agg.Records[1].DKIMResults), 0, "no DKIM results")
 }
 
+// TestDMARCReportBoundsItsDestinations is the aggregate-report half of the
+// destination bound: a DMARC record naming 50 mailboxes, each twice, is sent
+// at most 10 reports, one per distinct mailbox (RFC 7489 6.2).
+func TestDMARCReportBoundsItsDestinations(t *testing.T) {
+	sp := openSpool(t)
+	seedDMARC(t, sp)
+	w := dmarcWorker(sp, "v=DMARC1; p=none; rua="+manyRUAs(50))
+	if err := w.sendDMARCReports(context.Background(), reportDay); err != nil {
+		t.Fatal(err)
+	}
+	total, distinct := queuedRecipients(t, sp)
+	wantEq(t, total, 10, "reports queued for a record naming 50 mailboxes twice")
+	wantEq(t, len(distinct), 10, "distinct recipients among them")
+}
+
 // TestDMARCReportIsIdempotent proves a second pass over the same day sends
 // nothing more.
 func TestDMARCReportIsIdempotent(t *testing.T) {

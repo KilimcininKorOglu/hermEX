@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -126,6 +127,55 @@ func TestTLSReportMailtoDelivery(t *testing.T) {
 	if len(queued) != 1 || queued[0].Recipient != "tls-reports@example.test" {
 		t.Fatalf("queued = %+v, want one report to tls-reports@example.test", queued)
 	}
+}
+
+// manyRUAs is a rua= value naming n distinct mailboxes at example.test, each
+// listed twice, the shape of the reflection attack measured in "You've Got
+// Report" (USENIX Security 2023): a receiver that sends to every listed URI
+// multiplies one inbound message into many outbound reports.
+func manyRUAs(n int) string {
+	var uris []string
+	for i := range n {
+		uri := "mailto:r" + strconv.Itoa(i) + "@example.test"
+		uris = append(uris, uri, uri)
+	}
+	return strings.Join(uris, ",")
+}
+
+// queuedRecipients counts the distinct recipients the spool holds.
+func queuedRecipients(t *testing.T, sp *Spool) (total int, distinct map[string]bool) {
+	t.Helper()
+	queued, err := sp.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	distinct = map[string]bool{}
+	for _, q := range queued {
+		distinct[q.Recipient] = true
+	}
+	return len(queued), distinct
+}
+
+// TestTLSReportBoundsItsDestinations publishes a record naming 50 mailboxes,
+// each twice. RFC 7489 6.2 lets a receiver cap the destinations it reports to
+// as long as it serves at least two; the cap here is 10, the bound FastMail
+// applies in the same study, and a destination is sent one report however
+// often the record repeats it.
+func TestTLSReportBoundsItsDestinations(t *testing.T) {
+	sp := openSpool(t)
+	seedCounters(t, sp, "example.test")
+	w := &Worker{
+		Spool:        sp,
+		TLSResolver:  fixedResolver("v=TLSRPTv1; rua=" + manyRUAs(50)),
+		ReportOrg:    "hermex.test",
+		ReportDomain: "hermex.test",
+	}
+	if err := w.sendTLSReports(context.Background(), reportDay); err != nil {
+		t.Fatalf("sendTLSReports: %v", err)
+	}
+	total, distinct := queuedRecipients(t, sp)
+	wantEq(t, total, 10, "reports queued for a record naming 50 mailboxes twice")
+	wantEq(t, len(distinct), 10, "distinct recipients among them")
 }
 
 // TestTLSReportIsIdempotent proves a domain's report is dispatched at most once per
