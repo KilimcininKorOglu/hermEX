@@ -1,11 +1,51 @@
 package imap
 
 import (
+	"bufio"
+	"bytes"
+	"strings"
 	"testing"
 
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
+
+// TestExpungeThatTheStoreRefusesKeepsTheMessage selects two \Deleted messages
+// on a store that refuses every write. RFC 3501 7.4.1: an untagged EXPUNGE says
+// the message is gone and the numbers after it shift down. A message the store
+// did not remove must therefore get no EXPUNGE and keep its slot, or the client
+// and the server number the mailbox differently from then on; the command says
+// NO, and the failure is recorded.
+func TestExpungeThatTheStoreRefusesKeepsTheMessage(t *testing.T) {
+	sink := &captureSink{}
+	var out bytes.Buffer
+	c := &conn{srv: &Server{Logger: logging.New(sink)}, user: "bob@hermex.test", st: closedStore(t), bw: bufio.NewWriter(&out)}
+	c.state = stateSelected
+	c.sel = &selectedMailbox{
+		id: mapi.PrivateFIDInbox,
+		msgs: []objectstore.MessageInfo{
+			{UID: 7, Flags: objectstore.FlagDeleted},
+			{UID: 8, Flags: objectstore.FlagDeleted},
+		},
+	}
+
+	c.cmdExpunge("a")
+	c.flush()
+
+	if strings.Contains(out.String(), "EXPUNGE\r\n") && strings.Contains(out.String(), "* ") {
+		t.Errorf("an EXPUNGE was sent for a message the store kept: %q", out.String())
+	}
+	if !strings.HasPrefix(out.String(), "a NO") {
+		t.Errorf("reply = %q, want a tagged NO", out.String())
+	}
+	if len(c.sel.msgs) != 2 {
+		t.Errorf("the session dropped %d message(s) the store still holds", 2-len(c.sel.msgs))
+	}
+	if _, ok := find(sink.snapshot(), "expunge.fail"); !ok {
+		t.Error("the refused expunge left no record")
+	}
+}
 
 // TestIMAPExpungeGoesToDumpster proves an IMAP EXPUNGE soft-deletes the \Deleted
 // message into the Recoverable Items dumpster rather than purging it: it leaves the

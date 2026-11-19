@@ -203,38 +203,31 @@ func (c *conn) cmdExpunge(tag string) {
 		c.no(tag, "mailbox is read-only")
 		return
 	}
-	c.doExpunge(true)
-	c.ok(tag, "EXPUNGE completed")
+	c.answerExpunge(tag, "EXPUNGE", c.doExpunge(true))
+}
+
+// answerExpunge ends an expunging command: OK when every \Deleted message went,
+// NO when the store kept any (those keep their slot and get no EXPUNGE).
+func (c *conn) answerExpunge(tag, cmd string, failed int) {
+	if failed > 0 {
+		c.no(tag, fmt.Sprintf("%s: %d message(s) could not be expunged", cmd, failed))
+		return
+	}
+	c.ok(tag, cmd+" completed")
 }
 
 // doExpunge soft-deletes every \Deleted message into the Recoverable Items
-// dumpster and rebuilds the snapshot. The messages leave the mailbox but stay
-// recoverable until retention. When emit is true it sends an untagged EXPUNGE per
-// removed message, numbered against the shrinking mailbox (RFC 3501 §7.4.1).
-func (c *conn) doExpunge(emit bool) {
-	var survivors []objectstore.MessageInfo
-	var vanished []uint32
-	seq := uint32(1)
-	for _, m := range c.sel.msgs {
-		if m.Flags&objectstore.FlagDeleted != 0 {
-			if err := c.curStore().SoftDeleteMessage(c.sel.id, m.UID); err == nil {
-				vanished = append(vanished, m.UID)
-				if emit && !c.qresync {
-					c.untagged("%d EXPUNGE", seq) // removed; the next message takes this slot
-				}
-			}
-			continue
-		}
-		survivors = append(survivors, m)
-		seq++
-	}
-	c.sel.msgs = survivors
+// dumpster and rebuilds the snapshot, reporting how many the store refused. When
+// emit is true it announces each removal (see expungeWhere).
+func (c *conn) doExpunge(emit bool) int {
+	vanished, failed := c.expungeWhere(nil, emit)
 	// QRESYNC (RFC 7162): one VANISHED line carries the expunged UIDs in place of the
 	// per-message EXPUNGE responses.
 	if emit && c.qresync && len(vanished) > 0 {
 		c.untagged("VANISHED %s", esearchSet(vanished))
 	}
 	c.flush()
+	return failed
 }
 
 // cmdUIDExpunge handles UID EXPUNGE (RFC 4315): it expunges only the \Deleted
@@ -258,37 +251,44 @@ func (c *conn) cmdUIDExpunge(tag string, args []token) {
 		c.bad(tag, "invalid sequence set")
 		return
 	}
-	vanished := c.expungeDeleted(set)
+	vanished, failed := c.expungeWhere(set, true)
 	if c.qresync && len(vanished) > 0 {
 		c.untagged("VANISHED %s", esearchSet(vanished))
 	}
 	c.flush()
-	c.ok(tag, "UID EXPUNGE completed")
+	c.answerExpunge(tag, "UID EXPUNGE", failed)
 }
 
-// expungeDeleted soft-deletes every \Deleted message the set names, emitting an
-// EXPUNGE per message against the shrinking mailbox (QRESYNC clients get one
-// VANISHED from the caller instead), and returns the UIDs that went.
-func (c *conn) expungeDeleted(set seqSet) []uint32 {
+// expungeWhere soft-deletes every \Deleted message the set names (a nil set names
+// them all) and returns the UIDs that went plus how many the store refused. When
+// emit is set, each removal gets an EXPUNGE numbered against the shrinking mailbox
+// (RFC 3501 7.4.1); QRESYNC clients get one VANISHED from the caller instead. A
+// message the store refused stays in the snapshot and keeps its number, so the
+// client and the server keep counting the same mailbox, and the failure is logged.
+func (c *conn) expungeWhere(set seqSet, emit bool) (vanished []uint32, failed int) {
 	max := c.sel.maxUID()
 	var survivors []objectstore.MessageInfo
-	var vanished []uint32
 	seq := uint32(1)
 	for _, m := range c.sel.msgs {
-		if m.Flags&objectstore.FlagDeleted != 0 && set.contains(m.UID, max) {
-			if err := c.curStore().SoftDeleteMessage(c.sel.id, m.UID); err == nil {
-				vanished = append(vanished, m.UID)
-				if !c.qresync {
-					c.untagged("%d EXPUNGE", seq)
-				}
-			}
+		if m.Flags&objectstore.FlagDeleted == 0 || (set != nil && !set.contains(m.UID, max)) {
+			survivors = append(survivors, m)
+			seq++
 			continue
 		}
-		survivors = append(survivors, m)
-		seq++
+		if err := c.curStore().SoftDeleteMessage(c.sel.id, m.UID); err != nil {
+			c.event(logging.LevelError, "expunge.fail", logging.Fields{"folder": c.sel.id, "uid": m.UID, "error": err.Error()})
+			failed++
+			survivors = append(survivors, m)
+			seq++
+			continue
+		}
+		vanished = append(vanished, m.UID)
+		if emit && !c.qresync {
+			c.untagged("%d EXPUNGE", seq) // removed; the next message takes this slot
+		}
 	}
 	c.sel.msgs = survivors
-	return vanished
+	return vanished, failed
 }
 
 // uidList renders a comma-separated UID set for an APPENDUID/COPYUID response code.
