@@ -112,8 +112,8 @@ func TestStalePolicyKeyForcesReprovision(t *testing.T) {
 	if got := provisionDevice(t, ts); got != k1 {
 		t.Fatalf("acknowledgement earned %q, want %q", got, k1)
 	}
-	if code := commandStatusWithKey(t, ts, "FolderSync", folderSync(), k1); code == 449 {
-		t.Error("current-key FolderSync was refused with 449")
+	if code := commandStatusWithKey(t, ts, "FolderSync", folderSync(), k1); code != http.StatusOK {
+		t.Errorf("current-key FolderSync status %d, want 200", code)
 	}
 
 	// The policy changes; the key the device still holds is now stale until it
@@ -127,8 +127,8 @@ func TestStalePolicyKeyForcesReprovision(t *testing.T) {
 		t.Errorf("new key before acknowledging the new policy: status %d, want 449", code)
 	}
 	provisionDevice(t, ts)
-	if code := commandStatusWithKey(t, ts, "FolderSync", folderSync(), easpolicy.Key(p2)); code == 449 {
-		t.Error("the new policy key was refused with 449 after acknowledgement")
+	if code := commandStatusWithKey(t, ts, "FolderSync", folderSync(), easpolicy.Key(p2)); code != http.StatusOK {
+		t.Errorf("the new policy key after acknowledgement: status %d, want 200", code)
 	}
 }
 
@@ -159,8 +159,8 @@ func TestAPhaseOneKeyIsNotAcknowledgement(t *testing.T) {
 	final := provisionPolicy(t, ts, easProvisioningType, temp)
 	wantPolicyStatus(t, "acknowledgement of the phase-one key", final, "1")
 	key := final.ChildText(wbxml.PVPolicyKey)
-	if code := commandStatusWithKey(t, ts, "FolderSync", folderSync(), key); code == 449 {
-		t.Error("the key the acknowledgement returned was refused with 449")
+	if code := commandStatusWithKey(t, ts, "FolderSync", folderSync(), key); code != http.StatusOK {
+		t.Errorf("the key the acknowledgement returned: status %d, want 200", code)
 	}
 	if code := commandStatusOnDevice(t, ts, "dev2", "FolderSync", folderSync(), key); code != 449 {
 		t.Errorf("another device sending the key dev1 earned: FolderSync status %d, want 449", code)
@@ -174,7 +174,7 @@ func TestAPhaseOneKeyIsNotAcknowledgement(t *testing.T) {
 // not churned by this feature.
 func TestNoPolicyNoProvisioningRequired(t *testing.T) {
 	ts, _ := seededServer(t)
-	if code := commandStatusWithKey(t, ts, "FolderSync", folderSync(), ""); code == 449 {
-		t.Error("an unconfigured mailbox forced provisioning (449); it must not churn devices")
+	if code := commandStatusWithKey(t, ts, "FolderSync", folderSync(), ""); code != http.StatusOK {
+		t.Errorf("an unconfigured mailbox answered %d, want 200: it must not churn devices", code)
 	}
 }
