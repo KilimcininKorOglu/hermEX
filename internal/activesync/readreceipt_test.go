@@ -93,6 +93,7 @@ func TestSyncReadSendsReceipt(t *testing.T) {
 func TestSyncReadReceiptOnlyOnceAndOnlyToTheSender(t *testing.T) {
 	ts, dir, bobDir := receiptServerTo(t, "carol@hermex.test")
 	markFirstRead(t, ts, dir)
+	wantRead(t, dir, true)
 	carol := filepath.Join(filepath.Dir(bobDir), "carol")
 	if n := inboxCountIfAny(t, carol) + inboxCountIfAny(t, bobDir); n != 0 {
 		t.Errorf("receipts delivered for a request to a third party = %d, want 0", n)
@@ -104,12 +105,28 @@ func TestSyncReadReceiptOnlyOnceAndOnlyToTheSender(t *testing.T) {
 		wbxml.Str(wbxml.ASServerID, strconv.FormatUint(uint64(firstUID(t, dir)), 10)),
 		wbxml.Elem(wbxml.ASData, wbxml.Str(wbxml.EMRead, "0")))
 	_, root := postCommand(t, ts, "Sync", syncReq("3", "", unread))
+	// Each Change must land, or the count below stays 1 with no second read made.
+	wantRead(t, dir, false)
 	read := wbxml.Elem(wbxml.ASChange,
 		wbxml.Str(wbxml.ASServerID, strconv.FormatUint(uint64(firstUID(t, dir)), 10)),
 		wbxml.Elem(wbxml.ASData, wbxml.Str(wbxml.EMRead, "1")))
 	postCommand(t, ts, "Sync", syncReq(respColl(t, root).ChildText(wbxml.ASSyncKey), "", read))
+	wantRead(t, dir, true)
 	if n := inboxCount(t, bobDir); n != 1 {
 		t.Errorf("receipts delivered after reading twice = %d, want 1", n)
+	}
+}
+
+// wantRead checks the read state of the first Inbox message.
+func wantRead(t *testing.T, dir string, want bool) {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open the store", err)
+	defer st.Close()
+	flags, err := st.MessageFlags(int64(mapi.PrivateFIDInbox), firstUID(t, dir))
+	mustNoErr(t, "read the flags", err)
+	if got := flags&objectstore.FlagSeen != 0; got != want {
+		t.Fatalf("message read = %v, want %v: the Change did not land", got, want)
 	}
 }
 
@@ -144,6 +161,7 @@ func TestSyncReadReceiptSuppressed(t *testing.T) {
 	}
 	st.Close()
 	markFirstRead(t, ts, dir)
+	wantRead(t, dir, true)
 	if n := inboxCount(t, bobDir); n != 0 {
 		t.Errorf("receipts delivered = %d, want 0 with ActiveSync receipts turned off", n)
 	}
