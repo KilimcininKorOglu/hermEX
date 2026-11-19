@@ -71,4 +71,7 @@ func TestRequestZone(t *testing.T) {
 	wantEq(t, requestZone(withCookie("Mars/Olympus")), time.UTC, "an unknown cookie zone")
 	wantEq(t, requestZone(httptest.NewRequest(http.MethodGet, "/", nil)), time.UTC, "no zone")
 	wantEq(t, requestZone(withZone(withCookie("Europe/Istanbul"), "")), time.UTC, "a stored empty zone wins over the cookie")
+	wantEq(t, requestZone(withZone(withCookie("Europe/Istanbul"), "America/New_York")).String(), "America/New_York",
+		"a stored zone wins over the cookie")
+	wantEq(t, requestZone(withCookie("../../../etc/passwd")), time.UTC, "a path in the zone cookie")
 }
