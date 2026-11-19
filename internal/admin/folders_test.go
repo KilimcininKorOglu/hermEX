@@ -116,18 +116,25 @@ func TestRemoveFolderPermission(t *testing.T) {
 	}
 }
 
-// TestFolderPermissionsRequireSystem proves a domain admin cannot read or write a
-// user's folder permissions through the system-scoped endpoints.
+// TestFolderPermissionsRequireSystem proves a domain admin cannot read or write the
+// folder permissions of a user outside its scope through the user-scoped API, and
+// cannot use the panel forms, which are system-only.
 func TestFolderPermissionsRequireSystem(t *testing.T) {
 	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
-		userDetail: directory.UserDetail{Username: "alice@hermex.test", Maildir: "/mb/alice"}}
+		domains: []directory.DomainInfo{{ID: 1, Name: "acme.test"}, {ID: 2, Name: "hermex.test"}},
+		knownUsers: map[string]directory.UserDetail{
+			"alice@hermex.test": {Username: "alice@hermex.test", DomainID: 2, Maildir: "/mb/alice"},
+			"bob@acme.test":     {Username: "bob@acme.test", DomainID: 1, Maildir: "/mb/bob"},
+		}}
 	store := &fakeStore{}
 	ts := adminServerStore(t, d, store)
 	session, csrf := loginCookies(t, ts)
 
+	// alice is in another domain; the grantee bob is in the caller's own, so only
+	// the target user's scope can refuse the grant.
 	get := authedGET(t, ts, "/admin/users/alice@hermex.test/folders", session)
 	get.Body.Close()
-	put := authedPUT(t, ts, "/admin/users/alice@hermex.test/folders/12/permissions", session, csrf, `{"username":"x@y.test","rights":1}`)
+	put := authedPUT(t, ts, "/admin/users/alice@hermex.test/folders/12/permissions", session, csrf, `{"username":"bob@acme.test","rights":1}`)
 	put.Body.Close()
 	del := authedDELETE(t, ts, "/admin/users/alice@hermex.test/folders/12/permissions?memberID=5", session, csrf, "")
 	del.Body.Close()
