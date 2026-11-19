@@ -485,10 +485,12 @@ func (c *conn) copyToDest(set seqSet, byUID bool, destStore *objectstore.Store, 
 		}
 		raw, err := src.GetMessageRaw(c.sel.id, c.sel.msgs[i].UID)
 		if err != nil {
+			c.rollbackAppend(destStore, destFID, dstUIDs) // RFC 3501 6.4.7: restore the destination
 			return nil, nil, false
 		}
 		info, err := destStore.AppendMessage(destFID, raw, c.sel.msgs[i].InternalDate, c.sel.msgs[i].Flags)
 		if err != nil {
+			c.rollbackAppend(destStore, destFID, dstUIDs)
 			return nil, nil, false
 		}
 		srcUIDs = append(srcUIDs, c.sel.msgs[i].UID)

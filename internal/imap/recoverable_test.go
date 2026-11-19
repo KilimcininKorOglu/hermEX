@@ -47,6 +47,37 @@ func TestExpungeThatTheStoreRefusesKeepsTheMessage(t *testing.T) {
 	}
 }
 
+// TestCopyThatFailsPartwayLeavesTheDestinationAsItWas copies two messages where
+// the second cannot be read. RFC 3501 6.4.7: when COPY fails for any reason, the
+// destination mailbox is restored to its state before the attempt, so the first
+// copy must not stay behind.
+func TestCopyThatFailsPartwayLeavesTheDestinationAsItWas(t *testing.T) {
+	_, path := startServer(t)
+	st, err := objectstore.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	dest, err := st.CreateFolder(nil, "Projects")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &conn{srv: &Server{Logger: logging.New(&captureSink{})}, st: st}
+	c.sel = &selectedMailbox{id: mapi.PrivateFIDInbox, msgs: []objectstore.MessageInfo{{UID: 1}, {UID: 99}}}
+
+	all, _ := parseSeqSet("1:*")
+	if _, _, ok := c.copyToDest(all, true, st, dest); ok {
+		t.Fatal("copy of a message that cannot be read reported success")
+	}
+	left, err := st.ListMessages(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) != 0 {
+		t.Errorf("the failed COPY left %d message(s) in the destination, want none", len(left))
+	}
+}
+
 // TestMoveWhoseSourceDeleteFailsKeepsTheMessage covers the last step of MOVE
 // (RFC 6851 3.3): after the copy, each source message is removed with an
 // EXPUNGE. A source message the store refused to remove must keep its slot and
