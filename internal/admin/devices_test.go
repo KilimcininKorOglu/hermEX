@@ -103,16 +103,24 @@ func TestAdminUserDevicesNotFound(t *testing.T) {
 // TestAdminUserDevicesRequiresSystem proves a domain admin cannot read or act on
 // a user's devices through the system-scoped endpoints.
 func TestAdminUserDevicesRequiresSystem(t *testing.T) {
-	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}}}
-	ts := adminServer(t, d)
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		userDetail: directory.UserDetail{Username: "alice@hermex.test", Maildir: "/mb/alice"}}
+	store := &fakeStore{}
+	ts := adminServerStore(t, d, store)
 	session, csrf := loginCookies(t, ts)
 
 	get := authedGET(t, ts, "/admin/users/alice@hermex.test/devices", session)
 	get.Body.Close()
-	post := authedPOST(t, ts, "/admin/users/alice@hermex.test/devices/action", session, csrf, `{"deviceId":"dev1","action":"resync"}`)
+	post := authedPOST(t, ts, "/admin/users/alice@hermex.test/devices/action", session, csrf, `{"deviceId":"dev1","action":"wipe"}`)
 	post.Body.Close()
 	if get.StatusCode != http.StatusForbidden || post.StatusCode != http.StatusForbidden {
 		t.Errorf("domain-admin devices = GET %d / POST %d, want both 403", get.StatusCode, post.StatusCode)
+	}
+	ui := htmxPOST(t, ts, "/admin/ui/users/alice@hermex.test/devices/action", session, csrf,
+		url.Values{"deviceID": {"dev1"}, "action": {"wipe"}})
+	wantStatus(t, ui, http.StatusForbidden, "domain-admin UI device action")
+	if store.deviceAction != "" {
+		t.Errorf("a domain admin had the store %q a device", store.deviceAction)
 	}
 }
 
