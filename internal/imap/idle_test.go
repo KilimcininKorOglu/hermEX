@@ -2,10 +2,12 @@ package imap
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"net"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,6 +15,31 @@ import (
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
+
+// TestIdleEndIsBoundedAndMustBeDone reads the line that ends an IDLE. The client
+// has authenticated but is still hostile input: the line is read under the same
+// command-line cap as every other (here 128 bytes), so an endless line cannot grow
+// the server's memory, and RFC 2177 section 3 ends IDLE with DONE only, so any
+// other line is a protocol error. DONE ends it in any case, with or without CR.
+func TestIdleEndIsBoundedAndMustBeDone(t *testing.T) {
+	var line atomic.Int64
+	line.Store(128)
+	for _, c := range []struct {
+		in   string
+		want error
+	}{
+		{"DONE\r\n", nil},
+		{"done\n", nil},
+		{strings.Repeat("x", 1<<20) + "\r\n", errLineTooLong},
+		{"a NOOP\r\n", errProtocol},
+	} {
+		cn := &conn{rd: &commandReader{br: bufio.NewReader(strings.NewReader(c.in)), maxLine: &line}}
+		err := cn.readIdleEnd()
+		if (c.want == nil) != (err == nil) || (c.want != nil && !errors.Is(err, c.want)) {
+			t.Errorf("readIdleEnd(%.20q) = %v, want %v", c.in, err, c.want)
+		}
+	}
+}
 
 // fakeIdleWaker is a controllable wake source: Register hands back a channel the
 // test fires to simulate a push event for the idling mailbox.

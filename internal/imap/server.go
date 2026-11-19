@@ -1113,22 +1113,24 @@ func (c *conn) cmdIdle(tag string) {
 		wake = ch
 	}
 
-	// One goroutine blocks on the terminating line; the client sends only DONE while
-	// idling, so any line (or a read error/EOF on disconnect) ends the command.
+	// One goroutine blocks on the terminating line; any line (or a read error/EOF on
+	// disconnect) ends the command. endErr is written before done closes, so the
+	// main loop reads it only after the close.
 	done := make(chan struct{})
+	var endErr error
 	go func() {
-		_, _ = c.rd.br.ReadString('\n')
+		endErr = c.readIdleEnd()
 		close(done)
 	}()
 
 	for {
 		select {
 		case <-done:
-			// DONE (or the client dropped): flush any pending untagged, then the tagged
-			// response. The command loop resumes reading on the same reader.
+			// Flush any pending untagged, then the tagged response. The command loop
+			// resumes reading on the same reader.
 			c.poll()
 			c.flush()
-			c.ok(tag, "IDLE terminated")
+			c.endIdle(tag, endErr)
 			return
 		case <-wake:
 			c.poll()
@@ -1138,6 +1140,32 @@ func (c *conn) cmdIdle(tag string) {
 			c.flush()
 		}
 	}
+}
+
+// readIdleEnd reads the line that ends an IDLE. It carries the command-line cap,
+// so a client that never sends a line terminator cannot grow the server's memory,
+// and it accepts only DONE (RFC 2177 section 3).
+func (c *conn) readIdleEnd() error {
+	line, err := c.rd.readLine()
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(line, "DONE") {
+		return fmt.Errorf("%w: expected DONE to end IDLE", errProtocol)
+	}
+	return nil
+}
+
+// endIdle answers the IDLE command once its terminating line has been read. A
+// line other than DONE, or one past the cap, is answered BAD; the reader stands at
+// the next line either way. An I/O error leaves no client to answer, and the
+// command loop sees the same error on its next read.
+func (c *conn) endIdle(tag string, err error) {
+	if errors.Is(err, errProtocol) {
+		c.bad(tag, "IDLE must end with DONE")
+		return
+	}
+	c.ok(tag, "IDLE terminated")
 }
 
 // --- argument helpers ---
