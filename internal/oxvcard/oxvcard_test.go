@@ -206,6 +206,34 @@ func TestIMAddressRoundTripsVersion3(t *testing.T) {
 	}
 }
 
+// TestExportEscapesALineBreakInAValue exports a contact whose fields hold a line
+// break followed by a property. A contact is written by every protocol, so the
+// values are client input; RFC 6350 3.4 has a newline in a value written as "\n"
+// and ";" in a structured value as "\;", or the receiving client reads the rest
+// of the value as a property of its own.
+func TestExportEscapesALineBreakInAValue(t *testing.T) {
+	r := newResolver()
+	msg := &oxcmail.Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: "IPM.Contact"},
+		{Tag: mapi.PrDisplayName, Value: "Ada\r\nEMAIL:evil@example.test"},
+		{Tag: mapi.PrSurname, Value: "Love;lace\nTEL:+1-555-0000"},
+	}}
+	out, err := Export(msg, Options{Resolver: r.resolve})
+	mustNoErr(t, err, "export")
+	card, err := parseVCard(out)
+	mustNoErr(t, err, "parse the export")
+	if p := card.get("EMAIL"); p != nil {
+		t.Errorf("the display name added an EMAIL property: %q", p.text())
+	}
+	if p := card.get("TEL"); p != nil {
+		t.Errorf("the surname added a TEL property: %q", p.text())
+	}
+	back, err := Import(out, Options{Resolver: r.resolve})
+	mustNoErr(t, err, "re-import")
+	wantEq(t, str(back, mapi.PrDisplayName), "Ada\nEMAIL:evil@example.test", "the display name read back")
+	wantEq(t, str(back, mapi.PrSurname), "Love;lace\nTEL:+1-555-0000", "the surname read back")
+}
+
 // TestExportShape checks the emitted vCard opens and closes correctly and is
 // version 4.0.
 func TestExportShape(t *testing.T) {
