@@ -39,7 +39,12 @@ func TestImplicitTLSSession(t *testing.T) {
 	mustNoErr(t, "listen", err)
 	t.Cleanup(func() { _ = rawLn.Close() })
 	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
-	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test"}).Serve(tls.NewListener(rawLn, tlsCfg)) }()
+	// The server holds the TLS config too, as cmd/imap's does on port 993: the
+	// implicit-TLS link must count as encrypted, or the plaintext-login refusal
+	// would turn away every login there.
+	go func() {
+		_ = (&Server{Auth: auth, Hostname: "mail.test", TLSConfig: tlsCfg}).Serve(tls.NewListener(rawLn, tlsCfg))
+	}()
 
 	conn, err := tls.Dial("tcp", rawLn.Addr().String(), &tls.Config{RootCAs: certPool(t, certPath), ServerName: "127.0.0.1"})
 	mustNoErr(t, "dial over TLS", err)
