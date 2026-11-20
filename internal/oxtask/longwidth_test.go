@@ -37,6 +37,18 @@ func TestToPropsRejectsModelIntegersWiderThanPtLong(t *testing.T) {
 		}
 	})
 
+	t.Run("sensitivity", func(t *testing.T) {
+		task := New()
+		task.Sensitivity = wide
+		p, err := ToProps(task, staticResolver)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v, ok := p.Get(mapi.PrSensitivity); ok {
+			t.Errorf("sensitivity %d was stored as %v", wide, v)
+		}
+	})
+
 	t.Run("importance in range", func(t *testing.T) {
 		task := New()
 		task.Importance = 2

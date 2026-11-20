@@ -5,18 +5,28 @@
 package oxtask
 
 import (
-	"math"
 	"time"
 
 	"hermex/internal/mapi"
 	"hermex/internal/recurrence"
 )
 
-// fitsLong reports whether a model integer fits the 32-bit MAPI long it is about
-// to be written into. The model's ints come from protocol mappers fed by client
+// The highest value each enumerated property defines: PidTagImportance and
+// PidTagSensitivity ([MS-OXCMSG] 2.2.1.11, 2.2.1.13), PidLidTaskStatus and
+// PidLidTaskAcceptanceState ([MS-OXOTASK] 2.2.2.2.2, 2.2.2.2.10). Each starts at 0.
+const (
+	maxImportance      = 2
+	maxSensitivity     = 3
+	maxStatus          = 4
+	maxAcceptanceState = 3
+)
+
+// defined reports whether a model integer is one of the values 0..highest its
+// property defines. The model's ints come from protocol mappers fed by client
 // input (a JSON body, a WBXML element, a SOAP element), none of which is bound by
-// that width, so a value past it would wrap into a different valid setting.
-func fitsLong(v int) bool { return v >= math.MinInt32 && v <= math.MaxInt32 }
+// the property, so a value outside the range would be stored for every client to
+// read as a level that does not exist. Every value it admits fits a 32-bit long.
+func defined(v, highest int) bool { return v >= 0 && v <= highest }
 
 // MessageClass is the store message class for a task object.
 const MessageClass = "IPM.Task"
@@ -166,12 +176,12 @@ func (w taskWriter) writeCore(t Task) {
 	w.p.Set(mapi.PrMessageClass, MessageClass)
 	w.p.Set(mapi.PrSubject, t.Subject)
 	w.p.Set(mapi.PrBody, t.Body)
-	if t.Importance >= 0 && fitsLong(t.Importance) {
-		// #nosec G115 -- the guard on the same line refuses a value the property cannot carry
+	if defined(t.Importance, maxImportance) {
+		// #nosec G115 -- the guard on the line above admits only 0..2
 		w.p.Set(mapi.PrImportance, int32(t.Importance))
 	}
-	if t.Sensitivity >= 0 && fitsLong(t.Sensitivity) {
-		// #nosec G115 -- the guard on the same line refuses a value the property cannot carry
+	if defined(t.Sensitivity, maxSensitivity) {
+		// #nosec G115 -- the guard on the line above admits only 0..3
 		w.p.Set(mapi.PrSensitivity, int32(t.Sensitivity))
 	}
 }
@@ -199,8 +209,8 @@ func (w taskWriter) writeProgress(t Task) {
 // taskStatus is the status to store: the model's own value when set, otherwise
 // derived from Complete.
 func taskStatus(t Task) int32 {
-	if t.Status >= 0 && fitsLong(t.Status) {
-		// #nosec G115 -- the guard on the line above refuses a value the property cannot carry
+	if defined(t.Status, maxStatus) {
+		// #nosec G115 -- the guard on the line above admits only 0..4
 		return int32(t.Status)
 	}
 	if t.Complete {
@@ -212,7 +222,7 @@ func taskStatus(t Task) int32 {
 // taskPercent is the percentage to store: the model's own value when set, otherwise
 // derived from Complete.
 func taskPercent(t Task) float64 {
-	if t.PercentComplete >= 0 {
+	if t.PercentComplete >= 0 && t.PercentComplete <= 1 {
 		return t.PercentComplete
 	}
 	if t.Complete {
@@ -273,8 +283,8 @@ func (w taskWriter) writeAssignment(t Task) {
 // taskAcceptance is the acceptance state to store: the model's own value when set,
 // otherwise 0 (not assigned), the default Outlook writes for an unassigned task.
 func taskAcceptance(t Task) int32 {
-	if t.AcceptanceState >= 0 && fitsLong(t.AcceptanceState) {
-		// #nosec G115 -- the guard on the line above refuses a value the property cannot carry
+	if defined(t.AcceptanceState, maxAcceptanceState) {
+		// #nosec G115 -- the guard on the line above admits only 0..3
 		return int32(t.AcceptanceState)
 	}
 	return 0
