@@ -97,6 +97,24 @@ func TestValidateAccessPattern(t *testing.T) {
 	}
 }
 
+// TestValidateContactAddress keeps a contact to one routable RFC 5322 addr-spec:
+// it is offered to every client as a recipient, so anything a relay cannot route
+// would bounce on use.
+func TestValidateContactAddress(t *testing.T) {
+	for _, a := range []string{"john@partner.example", "j.o-hn+x@mail.partner.co.uk"} {
+		if err := ValidateContactAddress(a); err != nil {
+			t.Errorf("ValidateContactAddress(%q) = %v, want nil", a, err)
+		}
+	}
+	for _, a := range []string{"john@", "@partner.example", "john", "jo hn@partner.example",
+		"John <john@partner.example>", "a@example.com, b@example.com", "john@exam ple.com",
+		"john@example..com", "john@partner.example\r\nBcc: x@evil.example", ""} {
+		if err := ValidateContactAddress(a); err == nil {
+			t.Errorf("ValidateContactAddress(%q) = nil, want an error", a)
+		}
+	}
+}
+
 // TestValidatedAddressStaysUnderRoot states the property the validation exists
 // for: every accepted name joins to a path inside the root it was joined to.
 func TestValidatedAddressStaysUnderRoot(t *testing.T) {

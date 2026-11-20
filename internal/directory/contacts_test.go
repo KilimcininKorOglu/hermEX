@@ -1,6 +1,9 @@
 package directory
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // contactTestDir builds a directory with one active domain and one mailbox user,
 // ready for CreateContact calls. The user (a dt=0 row) is there so a dt=6 contact
@@ -72,6 +75,24 @@ func TestCreateContactDomainMustExist(t *testing.T) {
 	d := contactTestDir(t)
 	if _, err := d.CreateContact("x@partner.example", "X", "nope.test"); err == nil {
 		t.Fatal("CreateContact under a nonexistent domain should error")
+	}
+}
+
+// TestCreateContactRefusesAnUnroutableAddress proves a contact address that no
+// relay can route is refused before a row exists, on the one path both the panel
+// and the LDAP sync create contacts through.
+func TestCreateContactRefusesAnUnroutableAddress(t *testing.T) {
+	d := contactTestDir(t)
+	for _, addr := range []string{"john@", "jo hn@partner.example", "John <john@partner.example>"} {
+		if _, err := d.CreateContact(addr, "X", "hermex.test"); err == nil {
+			t.Errorf("CreateContact(%q) succeeded, want it refused", addr)
+		}
+		if _, _, found, _ := d.contactRowID(strings.ToLower(strings.TrimSpace(addr))); found {
+			t.Errorf("a contact row exists for %q", addr)
+		}
+	}
+	if _, err := d.UpsertLDAPContact("john@", []byte{1}, "X", "hermex.test"); err == nil {
+		t.Error("the LDAP sync created a contact for john@, want it refused")
 	}
 }
 

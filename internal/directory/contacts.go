@@ -43,8 +43,8 @@ var ErrContactInOtherDomain = errors.New("directory: the contact is filed under 
 // see it.
 func (d *SQLDirectory) CreateContact(email, displayName, domain string) (int64, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
-	if at := strings.LastIndexByte(email, '@'); at <= 0 {
-		return 0, errors.New("directory: contact address must be an email address")
+	if err := ValidateContactAddress(email); err != nil {
+		return 0, err
 	}
 	domain = strings.ToLower(strings.TrimSpace(domain))
 	var domainID int64

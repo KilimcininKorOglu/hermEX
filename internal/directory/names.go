@@ -44,12 +44,26 @@ func ValidateAddress(address string) error {
 // account receives. A display name, a list or a domain that is not a host name is
 // refused for the same reason.
 func ValidateForwardDestination(destination string) error {
-	destination = strings.TrimSpace(destination)
-	a, err := mail.ParseAddress(destination)
-	if err != nil || a.Name != "" || a.Address != destination {
-		return fmt.Errorf("directory: forward destination %q is not a single address", destination)
+	return validRoutableAddress(destination, "forward destination")
+}
+
+// ValidateContactAddress reports whether a mail contact's address is a single
+// RFC 5322 addr-spec with a host-name domain. A contact is a GAL entry users pick
+// as a recipient, so an address that cannot be routed ("john@", one holding a
+// space or a display name) would be offered to every client and bounce on use.
+func ValidateContactAddress(address string) error {
+	return validRoutableAddress(address, "contact address")
+}
+
+// validRoutableAddress reports whether s is exactly one addr-spec, with no
+// display name, whose domain is a host name.
+func validRoutableAddress(s, what string) error {
+	s = strings.TrimSpace(s)
+	a, err := mail.ParseAddress(s)
+	if err != nil || a.Name != "" || a.Address != s {
+		return fmt.Errorf("directory: %s %q is not a single address", what, s)
 	}
-	return ValidateDomain(destination[strings.LastIndexByte(destination, '@')+1:])
+	return ValidateDomain(s[strings.LastIndexByte(s, '@')+1:])
 }
 
 // ValidateAccessPattern reports whether an allow/block pattern is one email address
