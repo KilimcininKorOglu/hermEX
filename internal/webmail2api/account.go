@@ -1,7 +1,9 @@
 package webmail2api
 
 import (
+	"fmt"
 	"net/http"
+	"unicode/utf8"
 
 	"hermex/internal/directory"
 	"hermex/internal/logging"
@@ -35,15 +37,15 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "self-service password change is not available"})
 		return
 	}
-	if len(req.NewPassword) < 8 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the new password must be at least 8 characters"})
+	// Checked before the current password, so a too-short attempt costs the
+	// caller none of the sign-in throttle's budget.
+	if !s.newPasswordLongEnough(w, c.Email, req.NewPassword) {
 		return
 	}
 	if !s.currentPasswordOK(w, r, c.Email, req.CurrentPassword) {
 		return
 	}
-	if ok, err := setter.SetPassword(c.Email, req.NewPassword); err != nil || !ok {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not change your password"})
+	if !storeNewPassword(w, setter, c.Email, req.NewPassword) {
 		return
 	}
 	// Changing your own password satisfies (and clears) any admin-forced change
@@ -55,6 +57,61 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	revoked := s.revokeOtherSessions(c.Email, c.Jti)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "revokedSessions": revoked})
+}
+
+// newPasswordLongEnough checks a new password against the minimum and writes the
+// refusal when it is shorter or the minimum cannot be read.
+func (s *Server) newPasswordLongEnough(w http.ResponseWriter, email, password string) bool {
+	minLen, err := s.minPasswordLength()
+	if err != nil {
+		logError("read-password-policy", err, logging.Fields{"user": email})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not change your password"})
+		return false
+	}
+	if utf8.RuneCountInString(password) < minLen {
+		writeTooShort(w, minLen)
+		return false
+	}
+	return true
+}
+
+// storeNewPassword stores the new password and writes the refusal when the store
+// fails. The minimum may have been raised since newPasswordLongEnough read it, so
+// a too-short refusal from the directory is still the client's error.
+func storeNewPassword(w http.ResponseWriter, setter directory.PasswordSetter, email, password string) bool {
+	ok, err := setter.SetPassword(email, password)
+	if n, short := directory.MinPasswordLength(err); short {
+		writeTooShort(w, n)
+		return false
+	}
+	if err != nil || !ok {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not change your password"})
+		return false
+	}
+	return true
+}
+
+// minPasswordLength returns the minimum a new password must meet: the
+// directory's stored setting, or its default for a directory that keeps none. A
+// minimum that cannot be read is an error, never "no minimum".
+func (s *Server) minPasswordLength() (int, error) {
+	p, ok := s.auth.(interface {
+		GetMinPasswordLength() (int, bool, error)
+	})
+	if !ok {
+		return directory.DefaultMinPasswordLength, nil
+	}
+	n, _, err := p.GetMinPasswordLength()
+	return n, err
+}
+
+// writeTooShort answers a password under the minimum with a 400 that names the
+// minimum, both in the message and as a number the SPA can show.
+func writeTooShort(w http.ResponseWriter, minLen int) {
+	writeJSON(w, http.StatusBadRequest, map[string]any{
+		"error":     fmt.Sprintf("the new password must be at least %d characters", minLen),
+		"minLength": minLen,
+	})
 }
 
 // currentPasswordOK checks the caller's current password and writes the refusal
