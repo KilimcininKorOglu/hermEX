@@ -262,6 +262,12 @@ func (c *pop3Session) command(cmd, arg string) (done bool) {
 
 // authCommand runs an AUTHORIZATION-state command.
 func (c *pop3Session) authCommand(cmd, arg string) (done bool) {
+	if c.loginNeedsTLS(cmd) {
+		// RFC 2595 §4: no plaintext password before the link is encrypted,
+		// refused before any credential is read.
+		errLine(c.w, "run STLS before logging in")
+		return false
+	}
 	switch cmd {
 	case "USER":
 		c.user = arg
@@ -283,6 +289,16 @@ func (c *pop3Session) authCommand(cmd, arg string) (done bool) {
 		return true
 	default:
 		errLine(c.w, "command not allowed before authentication")
+	}
+	return false
+}
+
+// loginNeedsTLS reports whether cmd carries a password that must wait for STLS:
+// the server can encrypt the link and this one is not encrypted yet.
+func (c *pop3Session) loginNeedsTLS(cmd string) bool {
+	switch cmd {
+	case "USER", "PASS", "AUTH":
+		return c.s.TLSConfig != nil && !c.isTLS
 	}
 	return false
 }
@@ -740,9 +756,16 @@ func saslResponse(w *ew, tp *textproto.Reader, max int, inline, challenge string
 func (s *Server) writeCapa(w *ew, isTLS bool) {
 	w.str("+OK Capability list follows\r\n")
 	w.str("TOP\r\n")
-	w.str("USER\r\n")
+	// The login methods are offered only where they are accepted: on an
+	// encrypted link, or on a server that has no TLS to offer.
+	plaintext := s.TLSConfig != nil && !isTLS
+	if !plaintext {
+		w.str("USER\r\n")
+	}
 	w.str("UIDL\r\n")
-	w.str("SASL PLAIN LOGIN\r\n")
+	if !plaintext {
+		w.str("SASL PLAIN LOGIN\r\n")
+	}
 	w.str("PIPELINING\r\n")
 	w.str("RESP-CODES\r\n")
 	w.str("LOGIN-DELAY 0\r\n")

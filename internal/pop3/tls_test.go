@@ -86,6 +86,32 @@ func TestSTLSUpgrade(t *testing.T) {
 	mustPrefix(t, tbr, "+OK")
 }
 
+// TestPlaintextLoginWaitsForSTLS proves a server that can encrypt the link takes
+// no password before STLS (RFC 2595 §4): CAPA offers neither USER nor SASL, and
+// USER, PASS and AUTH with the right password are refused, so the session never
+// leaves AUTHORIZATION.
+func TestPlaintextLoginWaitsForSTLS(t *testing.T) {
+	addr, _ := startSTLSServer(t)
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	br := bufio.NewReader(conn)
+	mustPrefix(t, br, "+OK") // greeting
+
+	_, _ = io.WriteString(conn, "CAPA\r\n")
+	if capa := readUntilDot(t, br); strings.Contains(capa, "USER\r\n") || strings.Contains(capa, "SASL") {
+		t.Errorf("plaintext CAPA offers a login method:\n%s", capa)
+	}
+	for _, line := range []string{"USER alice", "PASS secret", "AUTH PLAIN AGFsaWNlAHNlY3JldA=="} {
+		_, _ = io.WriteString(conn, line+"\r\n")
+		mustPrefix(t, br, "-ERR")
+	}
+	_, _ = io.WriteString(conn, "STAT\r\n")
+	mustPrefix(t, br, "-ERR")
+}
+
 // TestSTLSRejectsPipelinedInjection proves a command pipelined behind STLS in a
 // single segment is never executed: the injected CAPA's distinctive listing must
 // never appear (the connection is torn down instead).
