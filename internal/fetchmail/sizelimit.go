@@ -138,7 +138,17 @@ func tlsDialSource(addr, serverName string, verify bool) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	conn := tls.Client(raw, &tls.Config{ServerName: serverName, InsecureSkipVerify: !verify}) // #nosec G402 -- verify is the admin's explicit choice, skipped only when the operator disabled it
+	return upgradeTLS(raw, serverName, verify)
+}
+
+// ErrNoStartTLS reports a plaintext source that would not switch to TLS. The
+// credentials are never sent over such a link.
+var ErrNoStartTLS = errors.New("fetchmail: source refused STARTTLS; credentials not sent")
+
+// upgradeTLS runs the client handshake over raw, for implicit TLS and for a link
+// a STARTTLS or STLS command has just switched. A failed handshake closes raw.
+func upgradeTLS(raw net.Conn, serverName string, verify bool) (net.Conn, error) {
+	conn := tls.Client(raw,&tls.Config{ServerName: serverName, InsecureSkipVerify: !verify}) // #nosec G402 -- verify is the admin's explicit choice, skipped only when the operator disabled it
 	// Bound the handshake: the TCP connect is timed by ssrfguard and post-connect
 	// reads by opTimeout, but a source that accepts the connection and then stalls
 	// mid-handshake would otherwise block the sequential poll indefinitely and

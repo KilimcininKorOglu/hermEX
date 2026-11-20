@@ -81,6 +81,27 @@ func (c *imapConn) do(cmd string) ([]string, error) {
 	}
 }
 
+// startTLS switches a plaintext session to TLS (RFC 3501 6.2.1) before any
+// credential is sent. A source that refuses the command gets no password. A byte
+// the source sent after its OK, before the handshake, would be read as if it came
+// over TLS, so it ends the session instead.
+func (c *imapConn) startTLS(serverName string, verify bool) error {
+	if _, err := c.do("STARTTLS"); err != nil {
+		return errors.Join(ErrNoStartTLS, err)
+	}
+	if c.r.Buffered() > 0 {
+		return errors.New("fetchmail: imap source sent data behind STARTTLS")
+	}
+	tc, err := upgradeTLS(c.conn, serverName, verify)
+	if err != nil {
+		return err
+	}
+	c.conn = tc
+	c.budget = newResponseBudget(tc)
+	c.r = bufio.NewReader(c.budget)
+	return nil
+}
+
 func (c *imapConn) login(user, pass string) error {
 	if err := lineSafe(user, pass); err != nil {
 		return err

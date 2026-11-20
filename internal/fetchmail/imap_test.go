@@ -2,6 +2,7 @@ package fetchmail
 
 import (
 	"bufio"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -21,12 +22,13 @@ func fakeIMAP(t *testing.T, body string) (host string, port int, stored *[]strin
 	}
 	t.Cleanup(func() { _ = ln.Close() })
 	rec := &[]string{}
+	tlsCfg := serverTLS(t)
 	go func() {
 		conn, err := ln.Accept()
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		r := bufio.NewReader(conn)
 		_, _ = io.WriteString(conn, "* OK ready\r\n")
 		for {
@@ -36,6 +38,12 @@ func fakeIMAP(t *testing.T, body string) (host string, port int, stored *[]strin
 			}
 			f := strings.Fields(line)
 			if len(f) < 2 {
+				continue
+			}
+			if strings.EqualFold(f[1], "STARTTLS") {
+				_, _ = io.WriteString(conn, f[0]+" OK begin TLS\r\n")
+				conn = tls.Server(conn, tlsCfg)
+				r = bufio.NewReader(conn)
 				continue
 			}
 			if done := serveIMAPCommand(conn, rec, line, f, body); done {

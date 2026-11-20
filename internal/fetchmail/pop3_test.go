@@ -2,6 +2,7 @@ package fetchmail
 
 import (
 	"bufio"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -23,12 +24,13 @@ func fakePOP3(t *testing.T, messages []string) (host string, port int, deleted *
 	}
 	t.Cleanup(func() { _ = ln.Close() })
 	del := &[]int{}
+	tlsCfg := serverTLS(t)
 	go func() {
 		conn, err := ln.Accept()
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		r := bufio.NewReader(conn)
 		_, _ = io.WriteString(conn, "+OK ready\r\n")
 		for {
@@ -38,6 +40,12 @@ func fakePOP3(t *testing.T, messages []string) (host string, port int, deleted *
 			}
 			f := strings.Fields(line)
 			if len(f) == 0 {
+				continue
+			}
+			if strings.EqualFold(f[0], "STLS") {
+				_, _ = io.WriteString(conn, "+OK begin TLS\r\n")
+				conn = tls.Server(conn, tlsCfg)
+				r = bufio.NewReader(conn)
 				continue
 			}
 			if done := servePOP3Command(conn, del, f, messages); done {

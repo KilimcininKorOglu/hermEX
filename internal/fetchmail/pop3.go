@@ -102,6 +102,26 @@ func (c *pop3Conn) cmd(format string, args ...any) (string, error) {
 	return c.readOK()
 }
 
+// startTLS switches a plaintext session to TLS with STLS (RFC 2595 4) before any
+// credential is sent. A source that refuses the command gets no password, and a
+// byte sent after the +OK, before the handshake, ends the session.
+func (c *pop3Conn) startTLS(serverName string, verify bool) error {
+	if _, err := c.cmd("STLS"); err != nil {
+		return errors.Join(ErrNoStartTLS, err)
+	}
+	if c.tp.R.Buffered() > 0 {
+		return errors.New("fetchmail: pop3 source sent data behind STLS")
+	}
+	tc, err := upgradeTLS(c.conn, serverName, verify)
+	if err != nil {
+		return err
+	}
+	c.conn = tc
+	c.budget = newResponseBudget(tc)
+	c.tp = textproto.NewConn(budgetedConn{Reader: c.budget, Conn: tc})
+	return nil
+}
+
 // auth performs USER/PASS authentication.
 func (c *pop3Conn) auth(user, pass string) error {
 	if err := lineSafe(user, pass); err != nil {

@@ -2,6 +2,7 @@ package fetchmail
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -67,11 +68,37 @@ func pollConfig(s Store, deliver Deliverer, cfg directory.FetchmailEntry, now ti
 	}
 }
 
+// connectPOP3 opens a POP3 source ready for credentials: implicit TLS when the
+// entry asks for SSL, otherwise a plaintext connection switched with STLS. The
+// password never crosses an unencrypted link.
+func connectPOP3(cfg directory.FetchmailEntry) (*pop3Conn, error) {
+	c, err := dialPOP3(cfg.SrcServer, cfg.SrcPort, cfg.UseSSL, cfg.SSLVerify)
+	if err != nil || cfg.UseSSL {
+		return c, err
+	}
+	if err := c.startTLS(cfg.SrcServer, cfg.SSLVerify); err != nil {
+		return nil, errors.Join(err, c.conn.Close())
+	}
+	return c, nil
+}
+
+// connectIMAP is connectPOP3 for an IMAP source, switched with STARTTLS.
+func connectIMAP(cfg directory.FetchmailEntry) (*imapConn, error) {
+	c, err := dialIMAP(cfg.SrcServer, cfg.SrcPort, cfg.UseSSL, cfg.SSLVerify)
+	if err != nil || cfg.UseSSL {
+		return c, err
+	}
+	if err := c.startTLS(cfg.SrcServer, cfg.SSLVerify); err != nil {
+		return nil, errors.Join(err, c.conn.Close())
+	}
+	return c, nil
+}
+
 // pollPOP3 fetches new mail from a POP3 source. A kept account skips ids recorded in the
 // seen store (unless fetchall) and records the newly delivered ones; a non-kept account
 // deletes each message after delivery, so the source itself prevents re-fetching.
 func pollPOP3(s Store, deliver Deliverer, cfg directory.FetchmailEntry, now time.Time) (int, error) {
-	c, err := dialPOP3(cfg.SrcServer, cfg.SrcPort, cfg.UseSSL, cfg.SSLVerify)
+	c, err := connectPOP3(cfg)
 	if err != nil {
 		return 0, err
 	}
@@ -124,7 +151,7 @@ func deliverPOP3(c *pop3Conn, s Store, deliver Deliverer, cfg directory.Fetchmai
 // with fetchall), delivers, and marks each \Seen so the next poll skips it; a non-kept
 // account searches ALL and deletes each after delivery.
 func pollIMAP(deliver Deliverer, cfg directory.FetchmailEntry, now time.Time) (int, error) {
-	c, err := dialIMAP(cfg.SrcServer, cfg.SrcPort, cfg.UseSSL, cfg.SSLVerify)
+	c, err := connectIMAP(cfg)
 	if err != nil {
 		return 0, err
 	}
