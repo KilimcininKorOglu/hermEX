@@ -39,6 +39,16 @@ func TestTokenRejectsTampering(t *testing.T) {
 		t.Error("a token with an edited payload verified")
 	}
 
+	// RFC 8725 3.1: a token naming "none" with an empty signature, and one that
+	// keeps a valid signature under a rewritten header, must both be refused.
+	noneHeader := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+	if _, err := verifyToken(secret, noneHeader+"."+parts[1]+"."); err == nil {
+		t.Error("an alg=none token with no signature verified")
+	}
+	if _, err := verifyToken(secret, noneHeader+"."+parts[1]+"."+parts[2]); err == nil {
+		t.Error("a token with a rewritten header verified")
+	}
+
 	for _, bad := range []string{"", "not-a-jwt", "a.b", "a.b.c.d"} {
 		if _, err := verifyToken(secret, bad); err == nil {
 			t.Errorf("a malformed token verified: %q", bad)
