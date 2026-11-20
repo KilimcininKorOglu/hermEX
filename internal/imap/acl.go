@@ -3,6 +3,7 @@ package imap
 import (
 	"strings"
 
+	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -186,6 +187,15 @@ func (c *conn) cmdSetACL(tag string, args []token) {
 	if !known {
 		c.bad(tag, "SETACL names an unrecognized right")
 		return
+	}
+	// A grant opens the mailbox to its identifier, and the mailbox surfaces keep
+	// that inside the organization, so an identifier outside the caller's
+	// organization is refused; a removal ("-") is always allowed.
+	if mode != '-' {
+		if reach, err := directory.MayReach(c.srv.Accounts, c.user, id); err != nil || !reach {
+			c.no(tag, "[ACL] the identifier is not an account of this organization")
+			return
+		}
 	}
 	newRights, err := adjustedRights(st, fid, id, mode, requested)
 	if err != nil {

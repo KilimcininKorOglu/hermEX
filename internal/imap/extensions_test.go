@@ -520,8 +520,8 @@ func parseNumAfter(t *testing.T, s, prefix string) uint64 {
 // TestIMAPACL covers ACL (RFC 4314): MYRIGHTS, granting and adjusting a member's
 // rights via SETACL, reading them with GETACL, and revoking with DELETEACL.
 func TestIMAPACL(t *testing.T) {
-	c, _ := startServer(t)
-	c.mustOK("a1", "LOGIN alice secret")
+	c, _ := startOrgServer(t)
+	c.mustOK("a1", "LOGIN alice@hermex.test secret")
 
 	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "ACL") {
 		t.Errorf("CAPABILITY missing ACL: %s", caps)
@@ -533,26 +533,36 @@ func TestIMAPACL(t *testing.T) {
 	}
 
 	// Grant bob read; GETACL reads it back.
-	c.mustOK("a3", "SETACL INBOX bob lr")
-	if got := aclRightsOf(strings.Join(c.mustOK("a4", "GETACL INBOX"), " "), "bob"); !strings.Contains(got, "r") || !strings.Contains(got, "l") {
+	c.mustOK("a3", "SETACL INBOX bob@hermex.test lr")
+	if got := aclRightsOf(strings.Join(c.mustOK("a4", "GETACL INBOX"), " "), "bob@hermex.test"); !strings.Contains(got, "r") || !strings.Contains(got, "l") {
 		t.Errorf("bob rights after grant = %q, want at least lr", got)
 	}
 
 	// +w adds the write right without dropping the existing ones.
-	c.mustOK("a5", "SETACL INBOX bob +w")
-	if got := aclRightsOf(strings.Join(c.mustOK("a6", "GETACL INBOX"), " "), "bob"); !strings.Contains(got, "w") || !strings.Contains(got, "r") {
+	c.mustOK("a5", "SETACL INBOX bob@hermex.test +w")
+	if got := aclRightsOf(strings.Join(c.mustOK("a6", "GETACL INBOX"), " "), "bob@hermex.test"); !strings.Contains(got, "w") || !strings.Contains(got, "r") {
 		t.Errorf("bob rights after +w = %q, want w added to r", got)
 	}
 
 	// RFC 4314 2.1.1: a grantable delete or create member right puts "d" and "c"
 	// in the LISTRIGHTS response.
-	if lr := strings.Join(c.mustOK("a7", "LISTRIGHTS INBOX bob"), " "); !strings.Contains(lr, "LISTRIGHTS") || !strings.HasSuffix(strings.TrimSpace(strings.SplitN(lr, "\r\n", 2)[0]), " c d") {
+	if lr := strings.Join(c.mustOK("a7", "LISTRIGHTS INBOX bob@hermex.test"), " "); !strings.Contains(lr, "LISTRIGHTS") || !strings.HasSuffix(strings.TrimSpace(strings.SplitN(lr, "\r\n", 2)[0]), " c d") {
 		t.Errorf("LISTRIGHTS = %q, want a LISTRIGHTS response that lists c and d", lr)
 	}
 
+	// A grant opens the mailbox to its identifier, which the mailbox surfaces keep
+	// inside the organization: an account of another organization, or an
+	// identifier that names no account, is refused and stored nowhere.
+	for i, id := range []string{"mallory@other-org.test", "ghost@nowhere.test"} {
+		wantStatus(t, "SETACL for "+id, c, fmt.Sprintf("x%d", i), "SETACL INBOX "+id+" lr", "NO")
+		if acl := strings.Join(c.mustOK(fmt.Sprintf("y%d", i), "GETACL INBOX"), " "); strings.Contains(acl, id) {
+			t.Errorf("GETACL after a refused SETACL for %s = %q", id, acl)
+		}
+	}
+
 	// Revoke bob entirely.
-	c.mustOK("a8", "DELETEACL INBOX bob")
-	if acl := strings.Join(c.mustOK("a9", "GETACL INBOX"), " "); strings.Contains(acl, `"bob"`) {
+	c.mustOK("a8", "DELETEACL INBOX bob@hermex.test")
+	if acl := strings.Join(c.mustOK("a9", "GETACL INBOX"), " "); strings.Contains(acl, `"bob@hermex.test"`) {
 		t.Errorf("GETACL after DELETEACL = %q, want bob removed", acl)
 	}
 }

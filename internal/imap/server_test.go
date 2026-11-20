@@ -28,6 +28,29 @@ type testClient struct {
 
 func startServer(t *testing.T) (*testClient, string) {
 	t.Helper()
+	path := seededMailbox(t)
+	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
+	return dialServer(t, &Server{Auth: auth, Hostname: "mail.test"}), path
+}
+
+// startOrgServer serves alice@hermex.test with the directory behind the
+// organization checks: bob is a colleague, mallory an account of another
+// organization (static accounts scope by domain).
+func startOrgServer(t *testing.T) (*testClient, string) {
+	t.Helper()
+	path := seededMailbox(t)
+	auth := directory.StaticAccounts{
+		"alice@hermex.test":      {Password: "secret", MailboxPath: path},
+		"bob@hermex.test":        {Password: "secret", MailboxPath: t.TempDir()},
+		"mallory@other-org.test": {Password: "secret", MailboxPath: t.TempDir()},
+	}
+	return dialServer(t, &Server{Auth: auth, Accounts: auth, Hostname: "mail.test"}), path
+}
+
+// seededMailbox creates a mailbox holding two Inbox messages, the first unseen
+// and the second \Seen.
+func seededMailbox(t *testing.T) string {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "alice")
 	st, err := objectstore.Open(path)
 	if err != nil {
@@ -42,14 +65,19 @@ func startServer(t *testing.T) (*testClient, string) {
 		t.Fatal(err)
 	}
 	st.Close()
+	return path
+}
 
-	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
+// dialServer serves srv on a loopback listener and returns a client past the
+// greeting.
+func dialServer(t *testing.T, srv *Server) *testClient {
+	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ln.Close() })
-	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test"}).Serve(ln) }()
+	go func() { _ = srv.Serve(ln) }()
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
@@ -58,7 +86,7 @@ func startServer(t *testing.T) (*testClient, string) {
 	t.Cleanup(func() { _ = conn.Close() })
 	c := &testClient{t: t, conn: conn, br: bufio.NewReader(conn)}
 	c.expectUntagged("OK", "greeting")
-	return c, path
+	return c
 }
 
 // TestLoginRefusesAnUnprovisionedMailbox proves a read path never creates a
