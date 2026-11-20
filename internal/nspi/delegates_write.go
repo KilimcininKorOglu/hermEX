@@ -130,11 +130,21 @@ func (g gal) applyDelegateEdits(list []string, entryIDs [][]byte, remove bool) [
 		switch {
 		case remove:
 			list = removeAddr(list, addr)
+		case !g.inScope(addr):
+			// g is the caller's own scope, so an address outside it (another
+			// organization, or no account at all) is never made a delegate.
+			continue
 		case !containsAddr(list, addr):
 			list = append(list, addr)
 		}
 	}
 	return list
+}
+
+// inScope reports whether addr is an entry of this caller-scoped GAL snapshot.
+func (g gal) inScope(addr string) bool {
+	_, ok := g.userByAddress(addr)
+	return ok
 }
 
 // entryIDToAddress reverses an address-book EntryID to its SMTP address. An

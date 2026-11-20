@@ -106,6 +106,35 @@ func TestModLinkAttDeniesEditingAnotherUsersList(t *testing.T) {
 	}
 }
 
+// TestModLinkAttKeepsDelegatesInsideTheOrganization names, by a permanent entry
+// id the caller can build by hand, an address the caller's address book does not
+// hold: an account of another organization, or none at all. A delegate is granted
+// send-on-behalf and the store-open right, and the mailbox and free/busy surfaces
+// already keep those inside the organization, so ModLinkAtt must not add such an
+// address; removing one already on the list stays possible.
+func TestModLinkAttKeepsDelegatesInsideTheOrganization(t *testing.T) {
+	s, w := delegateWriterServer()
+	g := s.snapshot(testCaller)
+	boss, _ := g.userByAddress("boss@hermex.test")
+	foreign := permanentEntryID(dtMailuser, userDN("mallory@other-org.test"))
+	add := modLinkAttRequest{proptag: uint32(mapi.PrEmsAbPublicDelegates), mid: boss.mid, entryIDs: [][]byte{foreign}}
+	if code := s.modLinkAttCore(add, "boss@hermex.test"); code != ecSuccess {
+		t.Fatalf("add result = %#x, want ecSuccess with the entry skipped", code)
+	}
+	if got := w.delegates["boss@hermex.test"]; len(got) != 0 {
+		t.Fatalf("an address outside the caller's organization became a delegate: %v", got)
+	}
+
+	w.delegates["boss@hermex.test"] = []string{"mallory@other-org.test"}
+	del := modLinkAttRequest{flags: modFlagDelete, proptag: uint32(mapi.PrEmsAbPublicDelegates), mid: boss.mid, entryIDs: [][]byte{foreign}}
+	if code := s.modLinkAttCore(del, "boss@hermex.test"); code != ecSuccess {
+		t.Fatalf("delete result = %#x", code)
+	}
+	if got := w.delegates["boss@hermex.test"]; len(got) != 0 {
+		t.Errorf("an out-of-scope delegate could not be removed: %v", got)
+	}
+}
+
 // TestModLinkAttRejectsBadRequests covers the guard rungs: a non-delegates proptag
 // is unsupported, a zero mid is an invalid object, and a malformed/short entry id
 // is skipped without a panic (the op still succeeds, adding nothing). The 25-byte
