@@ -105,6 +105,33 @@ func TestProcessReplyAcceptsTheAttendeesOwnReply(t *testing.T) {
 	}
 }
 
+// TestProcessReplyFromAnUninvitedSenderChangesNothing answers a meeting the
+// sender was never invited to, in the sender's own name. Anyone who learns the
+// UID could otherwise put themselves on the organizer's attendee list or touch
+// an invitee's row; Outlook leaves adding an uninvited respondent to the
+// organizer, so the server adds no one.
+func TestProcessReplyFromAnUninvitedSenderChangesNothing(t *testing.T) {
+	st, tags, recipID := organizerWithEvent(t, "meeting-4", "bob@hermex.test")
+	msgID := deliverReply(t, st, "meeting-4", "stranger@remote.test", "ACCEPTED")
+
+	_, err := ProcessReply(st, nil, "stranger@remote.test", msgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
+	if err != nil || len(events) != 1 {
+		t.Fatalf("calendar = %v (%v), want the one meeting", events, err)
+	}
+	recips, err := st.ListRecipients(events[0].ID)
+	if err != nil || len(recips) != 1 || recips[0].ID != recipID {
+		t.Errorf("recipients = %+v (%v), want only bob", recips, err)
+	}
+	if got := responseOf(t, st, tags, recipID); got != 0 {
+		t.Errorf("bob's tracking status = %d, want it untouched", got)
+	}
+}
+
 // TestProcessReplyRefusesEmptySender covers the bounce path: a null return-path
 // proves nothing about who answered.
 func TestProcessReplyRefusesEmptySender(t *testing.T) {
