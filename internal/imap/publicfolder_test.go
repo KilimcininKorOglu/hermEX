@@ -283,3 +283,27 @@ func TestIMAPPublicFolderTenantIsolation(t *testing.T) {
 		t.Errorf("carol leaked local.test's LocalNews: %v", carolList)
 	}
 }
+
+// TestPublicFolderACLNeedsTheAdministerRight proves GETACL and LISTRIGHTS on a
+// public folder need the administer right (RFC 4314 section 4): Announcements is
+// readable by everyone, and its member list must not be readable by a reader,
+// while a member holding the owner right gets it.
+func TestPublicFolderACLNeedsTheAdministerRight(t *testing.T) {
+	root := t.TempDir()
+	mbox := filepath.Join(root, "alice")
+	emptyMailbox(t, mbox)
+	pub := seedPublicGrants(t, root)
+	ps, err := pub.OpenForDomain("local.test")
+	mustNoErr(t, "open the public store", err)
+	ops, _ := ps.CreateFolder(nil, "Ops")
+	grantUser(t, ps, ops, "alice@local.test", mapi.RightsAll)
+	grantUser(t, ps, ops, "carol@local.test", mapi.FrightsVisible|mapi.FrightsReadAny)
+	ps.Close()
+
+	accounts := directory.StaticAccounts{"alice@local.test": {Password: "secret", MailboxPath: mbox}}
+	c := dialLogin(t, publicServer(t, accounts, pub), "alice@local.test", "secret")
+	wantStatus(t, "GETACL as a reader", c, "g1", `GETACL "Public Folders/Announcements"`, "NO")
+	wantStatus(t, "LISTRIGHTS as a reader", c, "g2", `LISTRIGHTS "Public Folders/Announcements" bob`, "NO")
+	wantLine(t, "GETACL as the administrator", c.mustOK("g3", `GETACL "Public Folders/Ops"`), "carol@local.test")
+	wantLine(t, "LISTRIGHTS as the administrator", c.mustOK("g4", `LISTRIGHTS "Public Folders/Ops" carol`), "LISTRIGHTS")
+}

@@ -99,25 +99,21 @@ func (c *conn) cmdMyRights(tag string, args []token) {
 	c.ok(tag, "MYRIGHTS completed")
 }
 
-// cmdGetACL handles GETACL <mailbox>: the mailbox's identifier/rights pairs. The
-// store owner is always listed with full rights, since the resolver elevates them
-// regardless of the stored rows.
+// cmdGetACL handles GETACL <mailbox>: the mailbox's identifier/rights pairs. Like
+// SETACL it needs the administer right (RFC 4314 section 4), since the list
+// names everyone the folder is shared with. The store owner is always listed with
+// full rights, since the resolver elevates them regardless of the stored rows.
 func (c *conn) cmdGetACL(tag string, args []token) {
-	if c.state == stateNotAuth {
-		c.no(tag, "must authenticate first")
-		return
-	}
-	name, ok := arg0(args)
+	st, fid, name, ok := c.aclAdminTarget(tag, args)
 	if !ok {
-		c.bad(tag, "GETACL requires a mailbox")
 		return
 	}
-	st, fid, ownPrivate, ok := c.resolveACLFolder(name)
-	if !ok {
-		c.no(tag, "no such mailbox")
+	ownPrivate := st == c.st
+	entries, err := st.ListPermissions(fid)
+	if err != nil {
+		c.no(tag, "could not read the access list")
 		return
 	}
-	entries, _ := st.ListPermissions(fid)
 	var parts []string
 	listed := false
 	for _, e := range entries {
@@ -199,18 +195,14 @@ func (c *conn) cmdDeleteACL(tag string, args []token) {
 // cmdListRights handles LISTRIGHTS <mailbox> <identifier>: the rights model. Lookup
 // is the always-granted right; the rest are individually grantable.
 func (c *conn) cmdListRights(tag string, args []token) {
-	if c.state == stateNotAuth {
-		c.no(tag, "must authenticate first")
-		return
-	}
-	name, ok1 := arg0(args)
-	id, ok2 := argN(args, 1)
-	if !ok1 || !ok2 {
+	id, hasID := argN(args, 1)
+	if c.state != stateNotAuth && !hasID {
 		c.bad(tag, "LISTRIGHTS requires a mailbox and identifier")
 		return
 	}
-	if _, _, _, ok := c.resolveACLFolder(name); !ok {
-		c.no(tag, "no such mailbox")
+	// RFC 4314 section 4: LISTRIGHTS needs the administer right, like GETACL.
+	_, _, name, ok := c.aclAdminTarget(tag, args)
+	if !ok {
 		return
 	}
 	c.untagged("LISTRIGHTS %s %s l r s w i p k x t e a", safeQuoted(name), safeQuoted(id))
