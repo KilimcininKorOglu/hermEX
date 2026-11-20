@@ -857,7 +857,7 @@
       "new": "New password",
       "confirm": "Confirm new password",
       "update": "Update password",
-      "tooShort": "New password must be at least 8 characters",
+      "tooShort": "New password must be at least {{count}} characters",
       "mismatch": "Passwords do not match",
       "updated": "Password updated",
       "changeFailed": "Failed to change password. Check your current password."
@@ -1589,7 +1589,7 @@
     "new": "New password",
     "confirm": "Confirm new password",
     "submit": "Update password",
-    "tooShort": "The new password must be at least 8 characters",
+    "tooShort": "The new password must be at least {{count}} characters",
     "mismatch": "The passwords do not match",
     "failed": "Could not change your password. Check your current password and try again."
   },

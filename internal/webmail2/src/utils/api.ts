@@ -1,5 +1,6 @@
 import type { VaultEnvelope } from './smimeVault'
 import { sharedSenderIdentity } from './senderIdentity'
+import { passwordChangeFailure } from './passwordChange'
 
 const API_URL = window.location.origin + '/api/v1'
 
@@ -999,9 +1000,21 @@ class API {
     await this.delete(`/account/app-passwords/${id}`)
   }
 
-  // changePassword updates the authenticated user's own password.
+  // changePassword updates the authenticated user's own password. A refusal is
+  // thrown as passwordChangeFailure reads it, so a too-short password carries the
+  // server's minimum.
   async changePassword(currentPassword: string, newPassword: string): Promise<void> {
-    await this.post('/account/password', { currentPassword, newPassword })
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`
+    const res = await fetch(`${API_URL}/account/password`, {
+      method: 'POST',
+      headers,
+      credentials: 'include',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    })
+    if (res.ok) return
+    const body: unknown = await res.json().catch(() => null)
+    throw passwordChangeFailure(res.status, body)
   }
 
   // avatarUrl returns the endpoint that serves a user's profile photo. Auth

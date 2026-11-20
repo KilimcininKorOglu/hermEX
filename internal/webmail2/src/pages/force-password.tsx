@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { useI18n } from "@/hooks/useI18n"
 import { useAuth } from "@/contexts/AuthContext"
 import api from "@/utils/api"
+import { PasswordTooShortError, passwordsMismatch } from "@/utils/passwordChange"
 
 // ForcePasswordChangePage is shown when an admin reset flagged the account
 // (must_change_password). The user must set a new password before reaching the
@@ -20,13 +21,9 @@ export function ForcePasswordChangePage() {
   const [confirm, setConfirm] = useState("")
   const [saving, setSaving] = useState(false)
 
-  const submit = async (e: React.FormEvent) => {
+  const submit = async (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault()
-    if (next.length < 8) {
-      toast.error(t("forcePassword.tooShort"))
-      return
-    }
-    if (next !== confirm) {
+    if (passwordsMismatch(next, confirm)) {
       toast.error(t("forcePassword.mismatch"))
       return
     }
@@ -35,8 +32,12 @@ export function ForcePasswordChangePage() {
       await api.changePassword(current, next)
       await refresh()
       navigate("/inbox", { replace: true })
-    } catch {
-      toast.error(t("forcePassword.failed"))
+    } catch (err) {
+      if (err instanceof PasswordTooShortError) {
+        toast.error(t("forcePassword.tooShort", { count: String(err.minLength) }))
+      } else {
+        toast.error(t("forcePassword.failed"))
+      }
       setSaving(false)
     }
   }

@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useI18n } from "@/hooks/useI18n"
 import api, { type ClientSession } from "@/utils/api"
+import { PasswordTooShortError, passwordsMismatch } from "@/utils/passwordChange"
 import { disablePushNotifications, enablePushNotifications, PushError, pushSupported } from "@/utils/push"
 import { SettingSection } from "./setting-layout"
 
@@ -111,15 +112,6 @@ export function SessionsSection() {
   )
 }
 
-const MIN_PASSWORD_LENGTH = 8
-
-// passwordError returns the i18n key of the reason a new password is refused
-// before it is sent, or null.
-function passwordError(next: string, confirm: string): string | null {
-  if (next.length < MIN_PASSWORD_LENGTH) return "settings.password.tooShort"
-  if (next !== confirm) return "settings.password.mismatch"
-  return null
-}
 
 const PASSWORD_FIELDS: { key: "current" | "next" | "confirm"; id: string; label: string; autoComplete: string }[] = [
   { key: "current", id: "pw-current", label: "settings.password.current", autoComplete: "current-password" },
@@ -135,9 +127,8 @@ function PasswordDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
   const [saving, setSaving] = useState(false)
 
   const submit = async () => {
-    const invalid = passwordError(values.next, values.confirm)
-    if (invalid) {
-      toast.error(t(invalid))
+    if (passwordsMismatch(values.next, values.confirm)) {
+      toast.error(t("settings.password.mismatch"))
       return
     }
     setSaving(true)
@@ -148,6 +139,10 @@ function PasswordDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
       setValues(EMPTY_PASSWORDS)
     } catch (err) {
       console.error("Failed to change password:", err)
+      if (err instanceof PasswordTooShortError) {
+        toast.error(t("settings.password.tooShort", { count: String(err.minLength) }))
+        return
+      }
       toast.error(t("settings.password.changeFailed"))
     } finally {
       setSaving(false)

@@ -857,7 +857,7 @@
       "new": "Yeni parola",
       "confirm": "Yeni parolayı onayla",
       "update": "Parolayı güncelle",
-      "tooShort": "Yeni parola en az 8 karakter olmalıdır",
+      "tooShort": "Yeni parola en az {{count}} karakter olmalıdır",
       "mismatch": "Parolalar eşleşmiyor",
       "updated": "Parola güncellendi",
       "changeFailed": "Parola değiştirilemedi. Mevcut parolanızı kontrol edin."
@@ -1589,7 +1589,7 @@
     "new": "Yeni şifre",
     "confirm": "Yeni şifreyi onaylayın",
     "submit": "Şifreyi güncelle",
-    "tooShort": "Yeni şifre en az 8 karakter olmalı",
+    "tooShort": "Yeni şifre en az {{count}} karakter olmalı",
     "mismatch": "Şifreler eşleşmiyor",
     "failed": "Şifreniz değiştirilemedi. Mevcut şifrenizi kontrol edip tekrar deneyin."
   },
