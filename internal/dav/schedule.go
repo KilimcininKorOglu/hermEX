@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"hermex/internal/directory"
 	"hermex/internal/ews"
 	"hermex/internal/itip"
 	"hermex/internal/mapi"
@@ -90,9 +91,13 @@ func (s *Server) outboxFreeBusy(w http.ResponseWriter, user string, vfb *icalNod
 // RFC 6638 3.8 when its calendar grants the organizer no free/busy right, or an
 // invalid-recipient status.
 func (s *Server) attendeeResponse(user, recipient string, rangeStart, rangeEnd time.Time, okS, okE bool) scheduleRespItem {
-	path, ok := s.accounts.Resolve(stripMailto(recipient))
+	addr := stripMailto(recipient)
+	path, ok := s.accounts.Resolve(addr)
 	if !ok {
 		return invalidRecipient(recipient)
+	}
+	if reach, err := directory.MayReach(s.accounts, user, addr); err != nil || !reach {
+		return scheduleRespItem{Recipient: href{Href: recipient}, RequestStatus: "3.8;No authority"}
 	}
 	data, err := attendeeFreeBusy(path, user, recipient, rangeStart, rangeEnd, okS, okE)
 	switch {

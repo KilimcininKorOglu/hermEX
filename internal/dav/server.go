@@ -375,20 +375,31 @@ func (s *Server) resolveTarget(r *http.Request, authUser, authMailbox, pathUser 
 	if !found {
 		return "", false, nil
 	}
-	st, err := objectstore.OpenExisting(ownerMaildir)
-	if err != nil {
-		// An owner whose mailbox was never provisioned shares nothing.
-		return "", false, nil
-	}
-	defer st.Close()
-	if open, err := canOpenMailbox(st, authUser); err != nil || !open {
+	// Folder grants speak for the owner's own organization only.
+	if reach, err := directory.MayReach(s.accounts, authUser, pathUser); err != nil || !reach {
 		return "", false, err
 	}
-	allowed, err := sharedRequestAllowed(st, r, authUser, kind, coll)
+	allowed, err := ownerAllows(r, ownerMaildir, authUser, kind, coll)
 	if err != nil || !allowed {
 		return "", false, err
 	}
 	return ownerMaildir, true, nil
+}
+
+// ownerAllows reports whether the owner's folder rights admit this request for
+// the caller: a grant in the mailbox at all, and the right the method needs on
+// the collection it names.
+func ownerAllows(r *http.Request, ownerMaildir, authUser string, kind resourceKind, coll string) (bool, error) {
+	st, err := objectstore.OpenExisting(ownerMaildir)
+	if err != nil {
+		// An owner whose mailbox was never provisioned shares nothing.
+		return false, nil
+	}
+	defer st.Close()
+	if open, err := canOpenMailbox(st, authUser); err != nil || !open {
+		return false, err
+	}
+	return sharedRequestAllowed(st, r, authUser, kind, coll)
 }
 
 // handleOptions advertises DAV capabilities. addressbook signals CardDAV (RFC
