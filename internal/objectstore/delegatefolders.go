@@ -19,6 +19,46 @@ var DelegateFolders = []int64{
 	mapi.PrivateFIDJournal,
 }
 
+// DelegateAccess is the access level every surface offers for a delegate's
+// folders: none, read (Reviewer) or write (Editor).
+type DelegateAccess string
+
+const (
+	DelegateNoAccess DelegateAccess = ""
+	DelegateRead     DelegateAccess = "read"
+	DelegateWrite    DelegateAccess = "write"
+)
+
+// Rights is the folder rights mask an access level sets on each delegate folder,
+// normalized with the free/busy bits the levels imply. An unknown level is none.
+func (a DelegateAccess) Rights() uint32 {
+	switch a {
+	case DelegateWrite:
+		return mapi.NormalizeRights(mapi.RightsEditor, true)
+	case DelegateRead:
+		return mapi.NormalizeRights(mapi.RightsReviewer, true)
+	}
+	return 0
+}
+
+// DelegateAccessOf reads the access level a grantee holds back from the rights
+// on the delegate folders, whichever surface granted them: write when any folder
+// lets them delete every item, the right the shared-mailbox write gate checks,
+// read when any lets them read every item.
+func DelegateAccessOf(byFolder map[int64]uint32) DelegateAccess {
+	var union uint32
+	for _, r := range byFolder {
+		union |= r
+	}
+	switch {
+	case union&mapi.FrightsDeleteAny != 0:
+		return DelegateWrite
+	case union&mapi.FrightsReadAny != 0:
+		return DelegateRead
+	}
+	return DelegateNoAccess
+}
+
 // SetDelegateFolderRights gives user the same rights on every delegate folder,
 // replacing the grant each held for user. Zero rights remove the grant. The
 // rights are stored as given; the caller normalizes them.

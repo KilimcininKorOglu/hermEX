@@ -174,16 +174,13 @@ func delegationRows(g storeGrants, saved []delegationJSON) []delegationJSON {
 // folder: "write" makes the delegate an Editor, "read" a Reviewer, and no choice
 // removes the folder grant.
 func folderRights(rights []string) uint32 {
-	var mask uint32
 	switch {
 	case slices.Contains(rights, "write"):
-		mask = mapi.RightsEditor
+		return objectstore.DelegateWrite.Rights()
 	case slices.Contains(rights, "read"):
-		mask = mapi.RightsReviewer
-	default:
-		return 0
+		return objectstore.DelegateRead.Rights()
 	}
-	return mapi.NormalizeRights(mask, true)
+	return 0
 }
 
 // accessNames reads the access a grantee holds back from the delegate folders,
