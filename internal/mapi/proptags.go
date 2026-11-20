@@ -185,6 +185,11 @@ const (
 	// bytes, which carry neither its class nor its contact fields; this keeps them,
 	// so the attachment reopens as the contact it was and is sent as a vCard.
 	PrEmbeddedContact = PropTag(0x67800102) // PtBinary
+	// PrAutoReplyHistory is the provider-defined store-root property (0x6781)
+	// holding, as a JSON string, the senders each automatic reply list (the
+	// out-of-office reply and each vacation rule) has already answered, so a sender
+	// is answered once per period (RFC 3834 section 2).
+	PrAutoReplyHistory = PropTag(0x6781001F) // PtUnicode
 )
 
 // Folder properties the store computes rather than stores ([MS-OXCFOLD]

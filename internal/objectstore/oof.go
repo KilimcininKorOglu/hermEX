@@ -125,6 +125,7 @@ func (s *Store) UpdateOOFSettings(update func(*OOFSettings) error) error {
 			return err
 		}
 	}
+	prev := cfg
 	if err := update(&cfg); err != nil {
 		return err
 	}
@@ -134,7 +135,21 @@ func (s *Store) UpdateOOFSettings(update func(*OOFSettings) error) error {
 	if err := s.txWriteOOF(tx, cfg); err != nil {
 		return err
 	}
+	if err := s.txEndOOFPeriod(tx, raw != "" && prev == cfg); err != nil {
+		return err
+	}
 	return tx.Commit()
+}
+
+// txEndOOFPeriod starts a new out-of-office period unless the settings were
+// rewritten unchanged: a reply turned off, rescheduled or reworded is a new reply
+// the senders already answered have not seen. EWS and ActiveSync clients re-send
+// unchanged settings, and such a write keeps the period.
+func (s *Store) txEndOOFPeriod(tx *sql.Tx, unchanged bool) error {
+	if unchanged {
+		return nil
+	}
+	return s.txDropAutoReplyList(tx, AutoReplyListOOF)
 }
 
 // txWriteOOF stores cfg and its PR_OOF_STATE inside tx.
@@ -164,16 +179,28 @@ func (s *Store) txWriteOOF(tx *sql.Tx, cfg OOFSettings) error {
 // SetOOFSettings stores the mailbox's out-of-office settings and keeps the
 // standard PR_OOF_STATE boolean in sync with Enabled, so a MAPI client and the
 // delivery path can read the on/off state directly.
+// A stored value that no longer decodes is replaced, not refused: this call sets
+// the whole value.
 func (s *Store) SetOOFSettings(cfg OOFSettings) error {
 	if err := cfg.checkWindow(); err != nil {
 		return err
 	}
-	b, err := json.Marshal(cfg)
+	tx, err := s.objdb.Begin()
 	if err != nil {
 		return err
 	}
-	return s.SetStoreProperties(mapi.PropertyValues{
-		{Tag: mapi.PrOOFSettings, Value: string(b)},
-		{Tag: mapi.PrOOFState, Value: cfg.Enabled},
-	})
+	defer tx.Rollback()
+	raw, err := s.txStoreString(tx, mapi.PrOOFSettings)
+	if err != nil {
+		return err
+	}
+	var prev OOFSettings
+	unchanged := raw != "" && json.Unmarshal([]byte(raw), &prev) == nil && prev == cfg
+	if err := s.txWriteOOF(tx, cfg); err != nil {
+		return err
+	}
+	if err := s.txEndOOFPeriod(tx, unchanged); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

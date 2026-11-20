@@ -519,6 +519,9 @@ func (s *Store) applyRulesToMessage(folderID int64, m MessageInfo, rules []Rule,
 			continue
 		}
 		terminal, sub, err := s.applyRuleActions(folderID, m.UID, r.Actions)
+		for i := range sub.AutoReplies {
+			sub.AutoReplies[i].RuleID = r.ID
+		}
 		eff.merge(sub)
 		if err != nil {
 			return acted, eff, err
@@ -911,8 +914,11 @@ type BounceRequest struct {
 
 // AutoReplyRequest is a vacation/auto-reply a matched rule asked for: the delivery
 // path sends a single reply carrying Message to the sender, under the same
-// suppression guards (never reply to a bounce/list/auto-submitted message).
+// suppression guards (never reply to a bounce/list/auto-submitted message). RuleID
+// names the rule, whose own sender history decides whether the sender was already
+// answered.
 type AutoReplyRequest struct {
+	RuleID  int64
 	Message string
 }
 

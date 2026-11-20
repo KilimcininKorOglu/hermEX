@@ -1281,7 +1281,7 @@ func applyInboxRules(st *objectstore.Store, m objectstore.MessageInfo, owner, en
 		return
 	}
 	runRuleBounces(acts.Bounces, owner, envelopeFrom, received)
-	runRuleAutoReplies(acts.AutoReplies, msg, owner, envelopeFrom, received)
+	runRuleAutoReplies(st, acts.AutoReplies, msg, owner, envelopeFrom, received)
 }
 
 // runRuleForwards redirects the original bytes (a faithful redirect); the marker
@@ -1308,15 +1308,23 @@ func runRuleBounces(bounces []objectstore.BounceRequest, owner, envelopeFrom str
 	}
 }
 
-// runRuleAutoReplies sends one vacation reply per auto-reply action.
-func runRuleAutoReplies(replies []objectstore.AutoReplyRequest, msg *mail.Message, owner, envelopeFrom string, received time.Time) {
+// runRuleAutoReplies sends one vacation reply per auto-reply action, to a sender
+// the rule has not answered yet (RFC 3834 section 2).
+func runRuleAutoReplies(st *objectstore.Store, replies []objectstore.AutoReplyRequest, msg *mail.Message, owner, envelopeFrom string, received time.Time) {
 	for _, ar := range replies {
 		reply, err := buildAutoReply(owner, envelopeFrom, ruleVacationSubject, ar.Message, msg.Header.Get("Message-ID"), received)
 		if err != nil {
 			logPassFailure("rule.autoreply", owner, nil, err)
 			continue
 		}
-		OnRuleSend(owner, []string{envelopeFrom}, reply)
+		first, err := st.ClaimAutoReply(objectstore.RuleAutoReplyList(ar.RuleID, ar.Message), bareAddress(envelopeFrom))
+		if err != nil {
+			logPassFailure("rule.autoreply", owner, nil, err)
+			continue
+		}
+		if first {
+			OnRuleSend(owner, []string{envelopeFrom}, reply)
+		}
 	}
 }
 

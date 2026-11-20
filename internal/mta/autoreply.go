@@ -90,12 +90,22 @@ func sendAutoReply(accounts directory.Accounts, st *objectstore.Store, selfAddr,
 	// is and which message it answers, which is what Outlook shows for the same
 	// mailbox on an Exchange server.
 	subject = composeAutoReplySubject(subject, msg.Header.Get("Subject"))
-
 	reply, err := buildAutoReply(selfAddr, to, subject, body, msg.Header.Get("Message-ID"), received)
 	if err != nil {
 		return err
 	}
+	return sendOnceToSender(accounts, st, selfAddr, to, reply, received)
+}
 
+// sendOnceToSender sends the out-of-office reply unless the sender was already
+// answered in this out-of-office period (RFC 3834 section 2). The claim comes
+// after every test that decides against a reply, so a suppressed message does not
+// use up the sender's reply, and before the send, so two deliveries racing from
+// one sender send one reply between them.
+func sendOnceToSender(accounts directory.Accounts, st *objectstore.Store, selfAddr, to string, reply []byte, received time.Time) error {
+	if first, err := st.ClaimAutoReply(objectstore.AutoReplyListOOF, to); err != nil || !first {
+		return err
+	}
 	// A local recipient receives the reply in their inbox; its Auto-Submitted
 	// header makes their own out-of-office suppress, so the exchange ends after one
 	// message. A recipient without a mailbox here leaves through the relay when its
