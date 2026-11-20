@@ -112,6 +112,52 @@ func TestPlaintextLoginWaitsForSTLS(t *testing.T) {
 	mustPrefix(t, br, "-ERR")
 }
 
+// TestImplicitTLSLoginIsAccepted serves the POP3S shape cmd/pop3 runs on port
+// 995: a server holding a TLS config behind an implicit-TLS listener. The link is
+// encrypted from the first byte, so USER/PASS must be accepted and CAPA must offer
+// them; the plaintext-login refusal applies only to an unencrypted link.
+func TestImplicitTLSLoginIsAccepted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alice")
+	st, err := objectstore.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	certPath, keyPath, err := tlstest.SelfSigned(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tlsCfg, err := (&config.Config{TLSCert: certPath, TLSKey: keyPath}).TLSConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
+	go func() {
+		_ = (&Server{Auth: auth, Hostname: "mail.test", TLSConfig: tlsCfg}).Serve(tls.NewListener(ln, tlsCfg))
+	}()
+
+	conn, err := tls.Dial("tcp", ln.Addr().String(), &tls.Config{RootCAs: certPool(t, certPath), ServerName: "127.0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	br := bufio.NewReader(conn)
+	mustPrefix(t, br, "+OK")
+	_, _ = io.WriteString(conn, "CAPA\r\n")
+	if capa := readUntilDot(t, br); !strings.Contains(capa, "USER\r\n") || strings.Contains(capa, "STLS") {
+		t.Errorf("CAPA over implicit TLS:\n%s\nwant USER offered and no STLS", capa)
+	}
+	_, _ = io.WriteString(conn, "USER alice\r\n")
+	mustPrefix(t, br, "+OK")
+	_, _ = io.WriteString(conn, "PASS secret\r\n")
+	mustPrefix(t, br, "+OK")
+}
+
 // TestSTLSRejectsPipelinedInjection proves a command pipelined behind STLS in a
 // single segment is never executed: the injected CAPA's distinctive listing must
 // never appear (the connection is torn down instead).
