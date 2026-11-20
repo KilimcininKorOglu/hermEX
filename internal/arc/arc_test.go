@@ -195,6 +195,35 @@ func TestSealRefusesAnEd25519Key(t *testing.T) {
 	}
 }
 
+// TestAChainStopsAtFiftySets: RFC 8617 section 4.2.1 caps a chain at 50 sets.
+// A valid chain of 50 verifies but takes no 51st set, and a chain whose seal
+// claims instance 51 fails.
+func TestAChainStopsAtFiftySets(t *testing.T) {
+	ring := keyring{}
+	s := rsaSealer(t, ring, "forward.example")
+	raw := []byte(inbound)
+	for range 50 {
+		raw = seal(t, s, raw)
+	}
+	if sealTag(raw, "i") != "50" || status(raw, ring.lookup) != cvPass {
+		t.Fatalf("50 sets: top i=%s status %s, want i=50 pass", sealTag(raw, "i"), status(raw, ring.lookup))
+	}
+	out, err := s.Seal(raw, time.Now())
+	if !errors.Is(err, ErrNotSealed) || string(out) != string(raw) {
+		t.Errorf("a 50-set chain took a 51st set (err %v)", err)
+	}
+	// A 51st set on top of the 50 is refused when the sets are read, before any
+	// signature is checked: its own signature would fail anyway, so only the
+	// set collection shows whether the bound holds.
+	over := "ARC-Seal: i=51; cv=pass; d=x; s=y; a=rsa-sha256; b=AA==\r\n" +
+		"ARC-Message-Signature: i=51; d=x; s=y; a=rsa-sha256; h=from; bh=AA==; b=AA==\r\n" +
+		"ARC-Authentication-Results: i=51; mx.x; none\r\n" + string(raw)
+	fields, _ := splitMessage([]byte(over))
+	if _, ok := collectSets(fields); ok {
+		t.Error("a chain with a 51st set was read as a valid set list")
+	}
+}
+
 // dropField removes the first header field with the given name.
 func dropField(raw, name string) string {
 	fields, body := splitMessage([]byte(raw))
