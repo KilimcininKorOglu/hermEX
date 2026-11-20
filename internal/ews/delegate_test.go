@@ -25,9 +25,15 @@ func delegateServer(t *testing.T) (*httptest.Server, map[string]string) {
 		testUser:          provisionedDir(t),
 		"bob@hermex.test": provisionedDir(t),
 	}
+	// A delegate must be an account of the owner's own organization, so the
+	// delegates the tests add are accounts here; mallory is one of another
+	// organization (static accounts scope by domain).
 	accs := directory.StaticAccounts{
-		testUser:          {Password: testPass, MailboxPath: paths[testUser]},
-		"bob@hermex.test": {Password: testPass, MailboxPath: paths["bob@hermex.test"]},
+		testUser:                 {Password: testPass, MailboxPath: paths[testUser]},
+		"bob@hermex.test":        {Password: testPass, MailboxPath: paths["bob@hermex.test"]},
+		"del@hermex.test":        {Password: testPass, MailboxPath: provisionedDir(t)},
+		"delegate@hermex.test":   {Password: testPass, MailboxPath: provisionedDir(t)},
+		"mallory@other-org.test": {Password: testPass, MailboxPath: provisionedDir(t)},
 	}
 	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
 	t.Cleanup(ts.Close)
@@ -314,6 +320,28 @@ func TestAddDelegateCreatesListAndGrants(t *testing.T) {
 	}
 	if r := resolveGrant(t, paths[testUser], int64(mapi.PrivateFIDInbox), "del@hermex.test"); r&mapi.FrightsReadAny == 0 || r&mapi.FrightsEditAny != 0 {
 		t.Errorf("Inbox Reviewer grant must be read-only, got %#x", r)
+	}
+}
+
+// TestAddDelegateKeepsDelegatesInsideTheOrganization: a delegate gains
+// send-on-behalf and the store-open right, which the mailbox surfaces keep inside
+// the organization, so AddDelegate refuses an account of another organization, an
+// address with no account, and the owner's own address, each with
+// ErrorDelegateNoUser, and none of them reaches the list or a folder grant.
+func TestAddDelegateKeepsDelegatesInsideTheOrganization(t *testing.T) {
+	ts, paths := delegateServer(t)
+	for _, addr := range []string{"mallory@other-org.test", "ghost@nowhere.test", testUser} {
+		_, out := soapPost(t, ts, mutateDelegateReq("AddDelegate", testUser, addr,
+			map[string]string{"Calendar": "Editor"}), true)
+		if !strings.Contains(out, "ErrorDelegateNoUser") {
+			t.Errorf("AddDelegate %s: want ErrorDelegateNoUser, got:\n%s", addr, out)
+		}
+		if containsFold(delegateListOf(t, paths[testUser]), addr) {
+			t.Errorf("AddDelegate %s put it on the delegate list", addr)
+		}
+		if _, found := ownFolderGrant(t, paths[testUser], int64(mapi.PrivateFIDCalendar), addr); found && !strings.EqualFold(addr, testUser) {
+			t.Errorf("AddDelegate %s wrote a calendar grant", addr)
+		}
 	}
 }
 

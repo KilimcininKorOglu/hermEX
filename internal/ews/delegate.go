@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"hermex/internal/directory"
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
@@ -461,7 +462,7 @@ func (s *Server) handleAddDelegate(w http.ResponseWriter, inner []byte, sess *se
 		return
 	}
 
-	msgs, added := s.grantNewDelegates(st, list, req.DelegateUsers)
+	msgs, added := s.grantNewDelegates(st, sess.user, list, req.DelegateUsers)
 	// The list is rewritten from the stored value inside one transaction, so a
 	// delegate another client added since the read above is kept.
 	err = st.UpdateDelegates(func(cur []string) []string {
@@ -479,11 +480,24 @@ func (s *Server) handleAddDelegate(w http.ResponseWriter, inner []byte, sess *se
 	writeDelegateMutationResponse(w, "AddDelegateResponse", msgs)
 }
 
+// delegateInScope reports whether addr is an account of the caller's own
+// organization. A delegate gains send-on-behalf and the store-open right, which
+// the mailbox surfaces keep inside the organization, so an address of another
+// organization or of no account is never made a delegate. The caller themself
+// is refused too, since a mailbox is no delegate of itself.
+func (s *Server) delegateInScope(caller, addr string) bool {
+	if strings.EqualFold(strings.TrimSpace(caller), strings.TrimSpace(addr)) {
+		return false
+	}
+	reach, err := directory.MayReach(s.accounts, caller, addr)
+	return err == nil && reach
+}
+
 // grantNewDelegates writes the folder grants of each requested delegate not yet on
 // list and returns the per-user response messages and the addresses to add. The
 // grants are written before the list entry, so a grant failure leaves no
 // half-configured delegate on the list.
-func (s *Server) grantNewDelegates(st *objectstore.Store, list []string, users []reqDelegateUser) ([]delegateWriteMessage, []string) {
+func (s *Server) grantNewDelegates(st *objectstore.Store, caller string, list []string, users []reqDelegateUser) ([]delegateWriteMessage, []string) {
 	msgs := make([]delegateWriteMessage, 0, len(users))
 	var added []string
 	for _, du := range users {
@@ -494,6 +508,9 @@ func (s *Server) grantNewDelegates(st *objectstore.Store, list []string, users [
 			continue
 		case containsFold(list, addr) || containsFold(added, addr):
 			msgs = append(msgs, delegateErr("ErrorDelegateAlreadyExists", "Delegate already exists", addr))
+			continue
+		case !s.delegateInScope(caller, addr):
+			msgs = append(msgs, delegateErr("ErrorDelegateNoUser", "The delegate does not map to a user in this organization", addr))
 			continue
 		}
 		if err := writeDelegateGrants(st, addr, du.DelegatePermissions); err != nil {
