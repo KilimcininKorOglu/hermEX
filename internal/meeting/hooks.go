@@ -16,7 +16,7 @@ import (
 // response or a cancellation sent through it unprocessed at the recipient. The
 // hooks live in mta as variables because this package imports mta.
 func InstallDeliveryHooks(logger *logging.Logger) {
-	mta.OnMeetingRequest = requestHook(AutoProcess, logger)
+	mta.OnMeetingRequest = requestHook(AutoProcess, UpdateFromOrganizer, logger)
 	mta.OnMeetingReply = ProcessReply
 	mta.OnMeetingCancel = ProcessCancellation
 }
@@ -24,6 +24,10 @@ func InstallDeliveryHooks(logger *logging.Logger) {
 // autoProcessFunc is the meeting auto-processing pass, taken as a parameter so the
 // hook's reporting can be exercised without a live store.
 type autoProcessFunc func(*objectstore.Store, directory.Accounts, *relay.Spool, string, int64) (bool, error)
+
+// organizerCheck reports whether a delivered request comes from the organizer of
+// the meeting it updates (UpdateFromOrganizer), taken as a parameter like the pass.
+type organizerCheck func(st *objectstore.Store, sender string, messageID int64) (bool, error)
 
 // requestHook builds the delivery-time meeting auto-processing hook. The organizer
 // notification is kept local-only (a nil spool): an internal organizer is notified,
@@ -33,9 +37,19 @@ type autoProcessFunc func(*objectstore.Store, directory.Accounts, *relay.Spool, 
 // succeeded), so this reports it to the central sink: without that line the
 // organizer is silently never told the request was accepted or declined, and
 // nothing in the operator's log says why.
-func requestHook(auto autoProcessFunc, logger *logging.Logger) func(*objectstore.Store, directory.Accounts, string, int64) bool {
-	return func(st *objectstore.Store, accounts directory.Accounts, recipient string, msgID int64) bool {
-		handled, err := auto(st, accounts, nil, recipient, msgID)
+func requestHook(auto autoProcessFunc, fromOrganizer organizerCheck, logger *logging.Logger) func(*objectstore.Store, directory.Accounts, string, string, int64) bool {
+	return func(st *objectstore.Store, accounts directory.Accounts, sender, recipient string, msgID int64) bool {
+		// An update of a meeting the calendar holds is applied only when its
+		// organizer sent it, like a cancellation; anything else is left for the
+		// mailbox owner, whose answer is refused the same way.
+		ok, err := fromOrganizer(st, sender, msgID)
+		if err == nil && !ok {
+			return false
+		}
+		handled := false
+		if err == nil {
+			handled, err = auto(st, accounts, nil, recipient, msgID)
+		}
 		if err != nil {
 			logger.Emit(logging.Event{
 				Level:     logging.LevelError,

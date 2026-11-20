@@ -25,6 +25,10 @@ func (s *hookSink) Write(e logging.Event) {
 	s.mu.Unlock()
 }
 
+// anySender is an organizer check that admits every request, so a test exercises
+// the hook's reporting without a store.
+func anySender(*objectstore.Store, string, int64) (bool, error) { return true, nil }
+
 // TestMeetingHookRecordsFailure is the swallowed-failure defect. The pass runs
 // after delivery has already succeeded, so its error is discarded on purpose; it
 // used to go to stderr instead of the central sink, which is where the sibling
@@ -37,8 +41,8 @@ func TestMeetingHookRecordsFailure(t *testing.T) {
 		return false, errors.New("directory unavailable")
 	}
 
-	hook := requestHook(failing, logging.New(sink))
-	if handled := hook(nil, nil, "room@hermex.test", 42); handled {
+	hook := requestHook(failing, anySender, logging.New(sink))
+	if handled := hook(nil, nil, "organizer@hermex.test", "room@hermex.test", 42); handled {
 		t.Errorf("a failed pass reported the request as handled")
 	}
 
@@ -145,8 +149,8 @@ func TestMeetingHookStaysQuietOnSuccess(t *testing.T) {
 		return true, nil
 	}
 
-	hook := requestHook(ok, logging.New(sink))
-	if handled := hook(nil, nil, "room@hermex.test", 42); !handled {
+	hook := requestHook(ok, anySender, logging.New(sink))
+	if handled := hook(nil, nil, "organizer@hermex.test", "room@hermex.test", 42); !handled {
 		t.Errorf("a successful pass did not report the request as handled")
 	}
 

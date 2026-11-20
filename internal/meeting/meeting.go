@@ -8,6 +8,7 @@ package meeting
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -57,6 +58,10 @@ var (
 	ErrNotARequest = errors.New("meeting: not a meeting request")
 	ErrOrganizer   = errors.New("meeting: the mailbox organizes this meeting")
 	ErrCanceled    = errors.New("meeting: the meeting was canceled")
+	// ErrForeignOrganizer wraps ErrNotARequest: a request that shares the UID of a
+	// meeting the calendar holds but names another organizer is no update of that
+	// meeting, so it is not a request this mailbox answers for it.
+	ErrForeignOrganizer = fmt.Errorf("%w: the request is not from the meeting's organizer", ErrNotARequest)
 )
 
 // openAnswerable opens the message a response answers and checks that an attendee
@@ -81,20 +86,57 @@ func openAnswerable(st *objectstore.Store, messageID int64, tags Tags) (*oxcmail
 // organizer keeps a copy of the invitation it sent, and that copy is a request like
 // the one each attendee got; answering it would file the organizer's own meeting as
 // one received from someone else. A meeting the calendar holds without the received
-// flag is the mailbox's own ([MS-OXOCAL] 2.2.1.10).
+// flag is the mailbox's own ([MS-OXOCAL] 2.2.1.10). A request naming another
+// organizer than the stored meeting is refused too: the UID alone would let anyone
+// who knows it move, rewrite or, by a decline, remove a meeting in this calendar.
 func requestAnswerable(st *objectstore.Store, req *oxcmail.Message, tags Tags) error {
 	appt, ok := findCalendarByUID(st, tags.UID, uidOf(req.Props, tags))
 	if !ok {
 		return nil
 	}
-	props, err := st.GetMessageProperties(appt, tags.State)
+	props, err := st.GetMessageProperties(appt, tags.State, mapi.PrSentRepresentingSmtpAddress)
 	if err != nil {
 		return err
 	}
 	if longVal(props, tags.State)&asfReceived == 0 {
 		return ErrOrganizer
 	}
+	if !sameAddress(propStr(props, mapi.PrSentRepresentingSmtpAddress), propStr(req.Props, mapi.PrSentRepresentingSmtpAddress)) {
+		return ErrForeignOrganizer
+	}
 	return nil
+}
+
+// sameAddress reports whether two addresses name the same mailbox. An empty one
+// matches nothing, so a meeting with no recorded organizer takes no update.
+func sameAddress(a, b string) bool {
+	a = strings.TrimSpace(a)
+	return a != "" && strings.EqualFold(a, strings.TrimSpace(b))
+}
+
+// UpdateFromOrganizer reports whether a delivered request may update the meeting
+// the calendar holds under its UID: true when the calendar holds none, or holds it
+// as a received meeting whose organizer is the envelope sender. It is the
+// delivery-time counterpart of the cancellation check, which compares the same
+// two addresses.
+func UpdateFromOrganizer(st *objectstore.Store, sender string, messageID int64) (bool, error) {
+	tags, err := ResolveTags(st)
+	if err != nil {
+		return false, err
+	}
+	req, err := st.OpenMessage(messageID)
+	if err != nil {
+		return false, err
+	}
+	appt, ok := findCalendarByUID(st, tags.UID, uidOf(req.Props, tags))
+	if !ok {
+		return true, nil
+	}
+	props, err := st.GetMessageProperties(appt, mapi.PrSentRepresentingSmtpAddress)
+	if err != nil {
+		return false, err
+	}
+	return sameAddress(propStr(props, mapi.PrSentRepresentingSmtpAddress), sender), nil
 }
 
 // appointmentAnswerable checks a calendar item's PidLidAppointmentStateFlags

@@ -25,7 +25,7 @@ func TestDeliverMeetingHookGatesAutoReply(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			prev := OnMeetingRequest
-			OnMeetingRequest = func(*objectstore.Store, directory.Accounts, string, int64) bool { return tc.handled }
+			OnMeetingRequest = func(*objectstore.Store, directory.Accounts, string, string, int64) bool { return tc.handled }
 			t.Cleanup(func() { OnMeetingRequest = prev })
 
 			dir := t.TempDir()

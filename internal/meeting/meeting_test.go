@@ -28,6 +28,7 @@ func TestRespondDeclineAfterAccept(t *testing.T) {
 		Props: mapi.PropertyValues{
 			{Tag: mapi.PrMessageClass, Value: "IPM.Schedule.Meeting.Request"},
 			{Tag: tags.UID, Value: "decline-me"},
+			{Tag: mapi.PrSentRepresentingSmtpAddress, Value: "organizer@hermex.test"},
 		},
 	})
 	if err != nil {

@@ -46,7 +46,7 @@ func seedAppointment(t *testing.T, st *objectstore.Store, tags apptTags, uid str
 }
 
 // markReceived marks the calendar item carrying uid as a meeting received as an
-// invitation, as the appointment an accept files is.
+// invitation from organizer@hermex.test, as the appointment an accept files is.
 func markReceived(t *testing.T, st *objectstore.Store, uid string) {
 	t.Helper()
 	tags, err := ResolveTags(st)
@@ -57,7 +57,10 @@ func markReceived(t *testing.T, st *objectstore.Store, uid string) {
 	if !ok {
 		t.Fatalf("no calendar item carries %q", uid)
 	}
-	if err := st.ModifyMessageProperties(id, mapi.PropertyValues{{Tag: tags.State, Value: asfMeeting | asfReceived}}); err != nil {
+	if err := st.ModifyMessageProperties(id, mapi.PropertyValues{
+		{Tag: tags.State, Value: asfMeeting | asfReceived},
+		{Tag: mapi.PrSentRepresentingSmtpAddress, Value: "organizer@hermex.test"},
+	}); err != nil {
 		t.Fatal(err)
 	}
 }

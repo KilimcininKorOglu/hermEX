@@ -1177,7 +1177,7 @@ func fileDelivery(accounts directory.Accounts, from, rcptAddr, path string, raw,
 	// Automatic meeting-request processing runs before the out-of-office pass: when it
 	// answers a meeting request the mailbox must not also emit an OOF reply (the
 	// organizer gets a meeting response, not an auto-reply).
-	if !autoProcessMeeting(accounts, st, rcptAddr, info) {
+	if !autoProcessMeeting(accounts, st, from, rcptAddr, info) {
 		maybeAutoReply(accounts, st, rcptAddr, from, raw, received)
 	}
 	// An inbound iTIP REPLY (an attendee's response) updates the organizer's
@@ -1194,8 +1194,10 @@ func fileDelivery(accounts directory.Accounts, from, rcptAddr, path string, raw,
 // meeting-request processing to a just-delivered message, returning whether it
 // handled a meeting request. It is wired by cmd/mta to the meeting package; the
 // indirection breaks the meeting→mta import cycle (meeting routes the organizer
-// notification back through this package).
-var OnMeetingRequest func(st *objectstore.Store, accounts directory.Accounts, recipient string, messageID int64) bool
+// notification back through this package). sender is the envelope sender, so
+// the processor can refuse an update that does not come from the meeting's
+// organizer.
+var OnMeetingRequest func(st *objectstore.Store, accounts directory.Accounts, sender, recipient string, messageID int64) bool
 
 // OnMeetingReply, when set, processes an inbound iTIP REPLY on the organizer's
 // side: it updates the matching attendee's response status on the organizer's
@@ -1218,7 +1220,7 @@ var OnMeetingCancel func(st *objectstore.Store, sender string, messageID int64) 
 // just-delivered message, swallowing any panic exactly like the other delivery-time
 // passes: a misbehaving processor must never fail delivery and make the sender retry.
 // It reports whether a meeting request was handled.
-func autoProcessMeeting(accounts directory.Accounts, st *objectstore.Store, recipient string, m objectstore.MessageInfo) (handled bool) {
+func autoProcessMeeting(accounts directory.Accounts, st *objectstore.Store, sender, recipient string, m objectstore.MessageInfo) (handled bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("mta: meeting auto-process panicked for uid %d, skipped: %v", m.UID, r)
@@ -1229,7 +1231,7 @@ func autoProcessMeeting(accounts directory.Accounts, st *objectstore.Store, reci
 	if OnMeetingRequest == nil {
 		return false
 	}
-	return OnMeetingRequest(st, accounts, recipient, m.ID)
+	return OnMeetingRequest(st, accounts, sender, recipient, m.ID)
 }
 
 // autoProcessReply runs the registered inbound-REPLY processor (if any) on a
