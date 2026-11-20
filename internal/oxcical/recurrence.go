@@ -135,7 +135,7 @@ func (r Recurrence) Occurrences(seriesStart, windowStart, windowEnd time.Time, l
 	switch strings.ToUpper(strings.TrimSpace(r.Freq)) {
 	case "WEEKLY":
 		if len(r.Weekdays) > 0 {
-			r.weeklyByDay(seriesStart, windowEnd, interval, limit, add)
+			r.weeklyByDay(sink, seriesStart, windowStart, windowEnd, interval, limit)
 			break
 		}
 		r.everyDays(sink, seriesStart, windowStart, windowEnd, 7*interval, limit)
@@ -310,23 +310,47 @@ func (r Recurrence) step(from int, windowEnd time.Time, limit int, add func(time
 
 // weeklyByDay enumerates a weekly BYDAY rule: within each interval-week period (from
 // the week of seriesStart), every listed weekday on or after seriesStart is an
-// instance, at seriesStart's clock time.
-func (r Recurrence) weeklyByDay(seriesStart, windowEnd time.Time, interval, limit int, add func(time.Time) bool) {
+// instance, at seriesStart's clock time. Like everyDays it starts at the period
+// just before the window, so limit bounds the periods walked inside the window
+// rather than the years since DTSTART.
+func (r Recurrence) weeklyByDay(sink *occurrenceSink, seriesStart, windowStart, windowEnd time.Time, interval, limit int) {
 	want := wantedWeekdays(r.Weekdays)
 	if len(want) == 0 {
 		return
 	}
 	weekStart := weekStartMonday(seriesStart)
-	scanned := 0
-	for period := range limit {
+	from, ok := sink.skipWeeks(weekStart, seriesStart, windowStart, want, interval)
+	if !ok {
+		return
+	}
+	for period := from; period < from+limit; period++ {
 		base := weekStart.AddDate(0, 0, 7*interval*period)
-		if !weekInstances(base, seriesStart, want, limit, &scanned, add) {
+		if !weekInstances(base, seriesStart, want, sink.add) {
 			return
 		}
 		if base.After(windowEnd) {
 			return
 		}
 	}
+}
+
+// skipWeeks returns the first period worth generating for a weekly BYDAY rule: the
+// one just before the window. The skipped periods' instances still count toward
+// COUNT: the first period holds those on or after seriesStart, every later one all
+// the listed weekdays. ok is false when COUNT is used up before the window begins.
+func (s *occurrenceSink) skipWeeks(weekStart, seriesStart, windowStart time.Time, want map[time.Weekday]bool, interval int) (from int, ok bool) {
+	from = max(civilDays(weekStart, windowStart)/(7*interval)-1, 0)
+	if from == 0 || s.count == 0 {
+		return from, true
+	}
+	first := 0
+	weekInstances(weekStart, seriesStart, want, func(time.Time) bool { first++; return true })
+	skipped := first + (from-1)*len(want)
+	if skipped >= s.count {
+		return 0, false
+	}
+	s.emitted = skipped
+	return from, true
 }
 
 // wantedWeekdays resolves the BYDAY tokens to the weekdays they name.
@@ -343,7 +367,7 @@ func wantedWeekdays(tokens []string) map[time.Weekday]bool {
 // weekInstances feeds one week's matching days into add, at seriesStart's clock
 // time. It reports false once the expansion must stop, either because the series
 // ended or because the scan limit was reached.
-func weekInstances(base, seriesStart time.Time, want map[time.Weekday]bool, limit int, scanned *int, add func(time.Time) bool) bool {
+func weekInstances(base, seriesStart time.Time, want map[time.Weekday]bool, add func(time.Time) bool) bool {
 	for off := range 7 {
 		day := base.AddDate(0, 0, off)
 		if !want[day.Weekday()] {
@@ -355,9 +379,6 @@ func weekInstances(base, seriesStart time.Time, want map[time.Weekday]bool, limi
 			continue
 		}
 		if !add(inst) {
-			return false
-		}
-		if *scanned++; *scanned >= limit {
 			return false
 		}
 	}

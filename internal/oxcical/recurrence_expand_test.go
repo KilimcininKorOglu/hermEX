@@ -156,6 +156,57 @@ func TestALongRunningSeriesStillOccursInTodaysWindow(t *testing.T) {
 	}
 }
 
+// TestALongRunningWeekdaySeriesStillOccursInTodaysWindow is the weekly BYDAY form
+// of the case above: a Monday-to-Friday stand-up created in 2006 still occurs
+// this week (RFC 5545 3.3.10), and COUNT still counts every weekday since DTSTART.
+// Each week holds five instances, so a walk that spends its bound from DTSTART
+// stops two decades short of the window.
+func TestALongRunningWeekdaySeriesStillOccursInTodaysWindow(t *testing.T) {
+	berlin, err := time.LoadLocation("Europe/Berlin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2006, 1, 2, 9, 0, 0, 0, berlin) // a Monday
+	ws := time.Date(2026, 1, 5, 0, 0, 0, 0, berlin)    // a Monday
+	we := ws.AddDate(0, 0, 7)
+	const rule = "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"
+
+	wantDates(t, mustRRule(t, rule).Occurrences(start, ws, we, 0),
+		"2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08", "2026-01-09")
+	wantDates(t, mustRRule(t, rule+";INTERVAL=2").Occurrences(start, ws, we.AddDate(0, 0, 7), 0),
+		fortnightOf(start, ws)...)
+
+	// Weekdays from 2006-01-02 through 2026-01-07 inclusive, counted on the calendar.
+	upTo7th := 0
+	for d := time.Date(2006, 1, 2, 0, 0, 0, 0, time.UTC); !d.After(time.Date(2026, 1, 7, 0, 0, 0, 0, time.UTC)); d = d.AddDate(0, 0, 1) {
+		if d.Weekday() != time.Saturday && d.Weekday() != time.Sunday {
+			upTo7th++
+		}
+	}
+	wantDates(t, mustRRule(t, fmt.Sprintf("%s;COUNT=%d", rule, upTo7th)).Occurrences(start, ws, we, 0),
+		"2026-01-05", "2026-01-06", "2026-01-07")
+	if got := mustRRule(t, rule+";COUNT=3000").Occurrences(start, ws, we, 0); len(got) != 0 {
+		t.Errorf("a series whose COUNT ended in 2017 occurs %v in 2026, want none", got)
+	}
+}
+
+// fortnightOf lists the weekdays of the two-week window from ws that an
+// every-other-week Monday-to-Friday series starting on the Monday start covers:
+// the week whose distance from start is an even number of weeks.
+func fortnightOf(start, ws time.Time) []string {
+	weeks := int(time.Date(ws.Year(), ws.Month(), ws.Day(), 0, 0, 0, 0, time.UTC).
+		Sub(time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)).Hours() / 24 / 7)
+	monday := ws
+	if weeks%2 == 1 {
+		monday = ws.AddDate(0, 0, 7)
+	}
+	var out []string
+	for i := range 5 {
+		out = append(out, monday.AddDate(0, 0, i).Format("2006-01-02"))
+	}
+	return out
+}
+
 // TestOccurrencesWindowOffset confirms pre-window occurrences are skipped from the
 // result but the window's own instances are returned.
 func TestOccurrencesWindowOffset(t *testing.T) {
