@@ -603,6 +603,47 @@ func TestOutboxFreeBusy(t *testing.T) {
 	}
 }
 
+// TestOutboxFreeBusyNeedsTheRight proves a CalDAV free/busy query answers only
+// for a calendar that grants the organizer a free/busy right, as EWS and
+// webmail2 do: once bob withdraws it from everyone, alice gets RFC 6638 status
+// 3.8 and none of his busy time, and a grant to alice alone restores it.
+func TestOutboxFreeBusyNeedsTheRight(t *testing.T) {
+	const bob = "bob@hermex.test"
+	bobDir := filepath.Join(t.TempDir(), "bob")
+	seedTimedCalendar(t, bobDir, timedEventICS)
+	setCalendarRight(t, bobDir, objectstore.PermissionChange{Op: objectstore.PermAdd, MemberID: mapi.MemberIDDefault, Rights: 0})
+	accs := directory.StaticAccounts{
+		testUser: {Password: testPass, MailboxPath: filepath.Join(t.TempDir(), "alice")},
+		bob:      {Password: testPass, MailboxPath: bobDir},
+	}
+	ts := httptest.NewServer(NewServer(accs, accs, "hermex.test").Handler())
+	t.Cleanup(ts.Close)
+
+	_, out := doFull(t, ts, "POST", "/dav/calendars/"+testUser+"/outbox/", freeBusyRequest(testUser, bob), nil)
+	if !strings.Contains(out, "3.8;No authority") || strings.Contains(out, "FREEBUSY;FBTYPE=BUSY") {
+		t.Errorf("a calendar with no free/busy right answered:\n%s", out)
+	}
+
+	setCalendarRight(t, bobDir, objectstore.PermissionChange{Op: objectstore.PermAdd, Username: testUser, Rights: mapi.FrightsFreeBusySimple})
+	_, out = doFull(t, ts, "POST", "/dav/calendars/"+testUser+"/outbox/", freeBusyRequest(testUser, bob), nil)
+	if !strings.Contains(out, "FREEBUSY;FBTYPE=BUSY:20260615T140000Z/20260615T150000Z") {
+		t.Errorf("a granted free/busy right did not answer:\n%s", out)
+	}
+}
+
+// setCalendarRight applies one permission change to a mailbox's calendar.
+func setCalendarRight(t *testing.T, dir string, change objectstore.PermissionChange) {
+	t.Helper()
+	st, err := objectstore.OpenExisting(dir)
+	if err != nil {
+		t.Fatalf("open %s: %v", dir, err)
+	}
+	defer st.Close()
+	if err := st.ModifyPermissions(int64(mapi.PrivateFIDCalendar), false, []objectstore.PermissionChange{change}); err != nil {
+		t.Fatalf("set calendar right: %v", err)
+	}
+}
+
 // TestOutboxFreeBusyNeedsItsWindow proves RFC 5546 3.3.2: a VFREEBUSY REQUEST
 // carries exactly one DTSTART and one DTEND, both UTC. A request without them,
 // or with an end that is not after the start, is not a valid scheduling message

@@ -2,6 +2,7 @@ package dav
 
 import (
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -80,23 +81,27 @@ func (s *Server) outboxFreeBusy(w http.ResponseWriter, user string, vfb *icalNod
 	resp := &scheduleResponse{}
 	for _, att := range attendees {
 		recipient := strings.TrimSpace(att.value)
-		path, ok := s.accounts.Resolve(stripMailto(recipient))
-		if !ok {
-			resp.Responses = append(resp.Responses, invalidRecipient(recipient))
-			continue
-		}
-		data, err := attendeeFreeBusy(path, user, recipient, rangeStart, rangeEnd, okS, okE)
-		if err != nil {
-			resp.Responses = append(resp.Responses, invalidRecipient(recipient))
-			continue
-		}
-		resp.Responses = append(resp.Responses, scheduleRespItem{
-			Recipient:     href{Href: recipient},
-			RequestStatus: "2.0;Success",
-			CalendarData:  data,
-		})
+		resp.Responses = append(resp.Responses, s.attendeeResponse(user, recipient, rangeStart, rangeEnd, okS, okE))
 	}
 	writeScheduleResponse(w, resp)
+}
+
+// attendeeResponse answers one attendee of a free/busy query: its busy time, an
+// RFC 6638 3.8 when its calendar grants the organizer no free/busy right, or an
+// invalid-recipient status.
+func (s *Server) attendeeResponse(user, recipient string, rangeStart, rangeEnd time.Time, okS, okE bool) scheduleRespItem {
+	path, ok := s.accounts.Resolve(stripMailto(recipient))
+	if !ok {
+		return invalidRecipient(recipient)
+	}
+	data, err := attendeeFreeBusy(path, user, recipient, rangeStart, rangeEnd, okS, okE)
+	switch {
+	case errors.Is(err, errNoFreeBusyRight):
+		return scheduleRespItem{Recipient: href{Href: recipient}, RequestStatus: "3.8;No authority"}
+	case err != nil:
+		return invalidRecipient(recipient)
+	}
+	return scheduleRespItem{Recipient: href{Href: recipient}, RequestStatus: "2.0;Success", CalendarData: data}
 }
 
 // outboxDeliver delivers an iTIP scheduling message (REQUEST/CANCEL from the
@@ -242,14 +247,33 @@ func invalidRecipient(recipient string) scheduleRespItem {
 	}
 }
 
+// errNoFreeBusyRight marks an attendee whose calendar grants the requester no
+// free/busy right.
+var errNoFreeBusyRight = errors.New("dav: no free/busy right on the attendee's calendar")
+
+// freeBusyRights is the rights mask that admits a free/busy read, the one EWS
+// and webmail2 apply.
+const freeBusyRights = mapi.FrightsFreeBusySimple | mapi.FrightsFreeBusyDetailed | mapi.FrightsReadAny
+
 // attendeeFreeBusy computes one local attendee's busy periods over the requested
-// window and renders them as an iTIP free-busy reply (RFC 5546 §3.3.2).
+// window and renders them as an iTIP free-busy reply (RFC 5546 §3.3.2). Another
+// user's calendar answers only when it grants the organizer a free/busy right,
+// so an attendee who withdrew it is not readable through CalDAV either.
 func attendeeFreeBusy(mailboxPath, organizer, recipient string, rangeStart, rangeEnd time.Time, okS, okE bool) (string, error) {
 	st, err := objectstore.OpenExisting(mailboxPath)
 	if err != nil {
 		return "", err
 	}
 	defer st.Close()
+	if !strings.EqualFold(stripMailto(recipient), organizer) {
+		perm, err := st.ResolvePermission(int64(mapi.PrivateFIDCalendar), organizer)
+		if err != nil {
+			return "", err
+		}
+		if perm&freeBusyRights == 0 {
+			return "", errNoFreeBusyRight
+		}
+	}
 	periods, err := busyPeriods(st, int64(mapi.PrivateFIDCalendar), rangeStart, rangeEnd, okS, okE)
 	if err != nil {
 		return "", err
