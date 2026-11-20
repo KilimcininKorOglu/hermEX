@@ -156,6 +156,9 @@ func TestDecompressHoldsTheDeclaredSize(t *testing.T) {
 		"empty stream, size 10":        {nil, 10},
 		"stream shorter than declared": {short, 4096},
 		"negative size":                {short, -1},
+		// A stream that expands past the declared size is a sender asking for more
+		// memory than it announced; it must stop at the size, not grow the buffer.
+		"stream longer than declared": {Compress(bytes.Repeat([]byte("a"), 70000)), 100},
 	}
 	for name, c := range cases {
 		func() {
@@ -168,6 +171,11 @@ func TestDecompressHoldsTheDeclaredSize(t *testing.T) {
 				t.Errorf("%s: Decompress = %d bytes, nil error; want ErrCorrupt", name, len(got))
 			}
 		}()
+	}
+	// The expansion itself stops at the declared size: a 70000-byte run declared
+	// as 100 bytes never allocates past those 100.
+	if out, err := decode(Compress(bytes.Repeat([]byte("a"), 70000)), 100); err == nil && cap(out) > 100 {
+		t.Errorf("decoding grew the buffer to %d bytes for a declared size of 100", cap(out))
 	}
 	if got, err := Decompress(nil, 0); err != nil || len(got) != 0 {
 		t.Errorf("empty stream, size 0 = %d bytes, %v; want empty and no error", len(got), err)
