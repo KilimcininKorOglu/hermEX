@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -70,6 +71,11 @@ func (s *Server) recallFromRecipient(addr, messageID, sender string) string {
 	path, ok := s.accounts.Resolve(addr)
 	if !ok {
 		return "unavailable" // external or unknown recipient: out of our reach
+	}
+	// A recipient in another organization is outside the sender's reach, as a
+	// recall in Exchange works inside the organization only.
+	if reach, err := directory.MayReach(s.accounts, sender, addr); err != nil || !reach {
+		return "unavailable"
 	}
 	rst, ok := openOtherMailbox(path, "recall-open", addr)
 	if !ok {

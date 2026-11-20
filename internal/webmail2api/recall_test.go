@@ -19,19 +19,24 @@ import (
 // (the intra-org-only limitation). A recipient cannot recall it (403, author-only).
 func TestRecallRetractsUnreadLocalCopies(t *testing.T) {
 	raw := []byte("From: alice@hermex.test\r\n" +
-		"To: bob@hermex.test, carol@hermex.test, ghost@external.invalid\r\n" +
+		"To: bob@hermex.test, carol@hermex.test, ghost@external.invalid, dave@other.test\r\n" +
 		"Message-ID: <recall-x@hermex.test>\r\n" +
 		"Subject: recall test\r\n\r\nbody\r\n")
 
-	senderDir, bobDir, carolDir := t.TempDir(), t.TempDir(), t.TempDir()
+	senderDir, bobDir, carolDir, daveDir := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
 
 	sentInfo := seedRecallCopy(t, senderDir, int64(mapi.PrivateFIDSentItems), raw, objectstore.FlagSeen, false)
 	seedRecallCopy(t, bobDir, int64(mapi.PrivateFIDInbox), raw, 0, false)
 	seedRecallCopy(t, carolDir, int64(mapi.PrivateFIDInbox), raw, 0, true) // carol read her copy
+	seedRecallCopy(t, daveDir, int64(mapi.PrivateFIDInbox), raw, 0, false)
 
+	// dave is hosted here too, in another organization (domain), so his copy is
+	// outside the sender's reach like an external recipient's.
 	accounts := directory.StaticAccounts{
+		"alice@hermex.test": {MailboxPath: senderDir},
 		"bob@hermex.test":   {MailboxPath: bobDir},
 		"carol@hermex.test": {MailboxPath: carolDir},
+		"dave@other.test":   {MailboxPath: daveDir},
 	}
 	secret := []byte("recall-test-secret")
 	srv := NewServer(accounts, accounts, nil, "mail.hermex.test", secret, "", false)
@@ -59,7 +64,7 @@ func TestRecallRetractsUnreadLocalCopies(t *testing.T) {
 	}
 	res := okBody[recallResponse](t, "author recall", recall("alice@hermex.test", senderDir, sentID))
 	wantEq(t, "recalled count", res.Recalled, 1)
-	wantEq(t, "recipient total", res.Total, 3)
+	wantEq(t, "recipient total", res.Total, 4)
 	status := map[string]string{}
 	for _, r := range res.Results {
 		status[r.Recipient] = r.Status
@@ -67,10 +72,12 @@ func TestRecallRetractsUnreadLocalCopies(t *testing.T) {
 	wantEq(t, "bob (unread, local)", status["bob@hermex.test"], "recalled")
 	wantEq(t, "carol (read, local)", status["carol@hermex.test"], "read")
 	wantEq(t, "ghost (external)", status["ghost@external.invalid"], "unavailable")
+	wantEq(t, "dave (another organization)", status["dave@other.test"], "unavailable")
 
-	// Bob's unread copy is gone; carol's read copy stays.
+	// Bob's unread copy is gone; carol's read copy and dave's copy stay.
 	wantInboxCount(t, bobDir, 0, "bob inbox (recalled)")
 	wantInboxCount(t, carolDir, 1, "carol inbox (read, kept)")
+	wantInboxCount(t, daveDir, 1, "dave inbox (other organization, kept)")
 }
 
 // seedRecallCopy files one copy of the message in a mailbox, optionally marking

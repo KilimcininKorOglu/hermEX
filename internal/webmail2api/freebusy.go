@@ -11,6 +11,7 @@ import (
 	"hermex/internal/ews"
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
 )
 
 // roomLister is the optional directory capability that lists bookable resource
@@ -101,15 +102,25 @@ func (s *Server) handleFreeBusy(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"freeBusy": out})
 }
 
+// openBusyTarget resolves and opens the mailbox a free/busy request names. A
+// calendar of another organization is not read, whatever its grants say.
+func (s *Server) openBusyTarget(c sessionClaims, email string) (string, *objectstore.Store, bool) {
+	targetPath, ok := s.accounts.Resolve(email)
+	if !ok {
+		return "", nil, false
+	}
+	if reach, err := directory.MayReach(s.accounts, c.Email, email); err != nil || !reach {
+		return "", nil, false
+	}
+	st, ok := openOtherMailbox(targetPath, "freebusy-open", email)
+	return targetPath, st, ok
+}
+
 // busyFor returns a target's busy intervals when the caller owns the mailbox or holds
 // a free/busy right on its calendar; otherwise an empty set, so a caller without
 // permission learns nothing about the target's calendar (OWASP A01).
 func (s *Server) busyFor(c sessionClaims, email string, start, end time.Time) []busyJSON {
-	targetPath, ok := s.accounts.Resolve(email)
-	if !ok {
-		return []busyJSON{}
-	}
-	st, ok := openOtherMailbox(targetPath, "freebusy-open", email)
+	targetPath, st, ok := s.openBusyTarget(c, email)
 	if !ok {
 		return []busyJSON{}
 	}
