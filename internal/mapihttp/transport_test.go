@@ -179,6 +179,17 @@ func TestExecuteFlow(t *testing.T) {
 		t.Errorf("Execute did not roll the sequence cookie (was %q, got %q)", seq, newSeq)
 	}
 
+	// Replaying the spent sequence -> invalid sequence (7), [MS-OXCMAPIHTTP]
+	// 2.2.3.3.3: a captured request cannot be sent a second time.
+	replay := mapiPost(t, ts, "/mapi/emsmdb", "Execute", executeBody(), func(r *http.Request) {
+		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
+		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
+	})
+	replay.Body.Close()
+	if got := replay.Header.Get("X-ResponseCode"); got != "7" {
+		t.Errorf("Execute with a spent sequence: X-ResponseCode = %q, want 7", got)
+	}
+
 	// Execute with a bogus sid -> invalid context cookie (2).
 	bad := mapiPost(t, ts, "/mapi/emsmdb", "Execute", executeBody(), func(r *http.Request) {
 		r.AddCookie(&http.Cookie{Name: "sid", Value: "nope"})
