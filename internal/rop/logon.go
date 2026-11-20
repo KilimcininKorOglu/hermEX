@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/directory"
 	"hermex/internal/ext"
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
@@ -69,6 +70,9 @@ func (s *Session) ropLogon(p *ext.Pull, out *ext.Push, handles []uint32, hindex 
 		return false
 	}
 	maildir, delegate, ownerSMTP := s.logonTarget(essdn)
+	if delegate && !s.mayReach(out, hindex, ownerSMTP) {
+		return true
+	}
 	st, ec := s.openLogonStore(maildir)
 	if ec != ecSuccess {
 		writeErr(out, ropLogon, hindex, ec)
@@ -109,26 +113,30 @@ func (s *Session) ropLogon(p *ext.Pull, out *ext.Push, handles []uint32, hindex 
 	for _, fid := range logonFolderFIDs {
 		out.Uint64(uint64(mapi.MakeEIDEx(1, fid)))
 	}
-	// An owner logon carries owner + send-as rights. A delegate logon carries the
-	// reserved bit, plus the send-as right when the caller is on the mailbox's
-	// delegate list and so may send on its behalf; a folder-grant-only delegate
-	// carries the reserved bit alone. (hermEX advertises send-on-behalf capability
-	// through this bit; it models no separate send-as list.)
-	responseFlags := uint8(ownerResponseFlags)
-	if delegate {
-		responseFlags = responseFlagReserved
-		if sendsOnBehalf {
-			responseFlags |= responseFlagSendAsRight
-		}
-	}
-	out.Uint8(responseFlags)             // ResponseFlags
-	out.GUID(mailboxGUID)                // MailboxGuid (PR_STORE_RECORD_KEY)
-	out.Uint16(privateReplID)            // ReplId
-	out.GUID(replGUID)                   // ReplGuid (PR_MAPPING_SIGNATURE)
-	pushLogonTime(out, time.Now().UTC()) // LogonTime (8 bytes)
-	out.Uint64(0)                        // GwartTime
-	out.Uint32(0)                        // StoreState
+	out.Uint8(logonResponseFlags(delegate, sendsOnBehalf)) // ResponseFlags
+	out.GUID(mailboxGUID)                                  // MailboxGuid (PR_STORE_RECORD_KEY)
+	out.Uint16(privateReplID)                              // ReplId
+	out.GUID(replGUID)                                     // ReplGuid (PR_MAPPING_SIGNATURE)
+	pushLogonTime(out, time.Now().UTC())                   // LogonTime (8 bytes)
+	out.Uint64(0)                                          // GwartTime
+	out.Uint32(0)                                          // StoreState
 	return true
+}
+
+// logonResponseFlags is a logon's ResponseFlags. An owner logon carries owner +
+// send-as rights. A delegate logon carries the reserved bit, plus the send-as
+// right when the caller is on the mailbox's delegate list and so may send on its
+// behalf; a folder-grant-only delegate carries the reserved bit alone. (hermEX
+// advertises send-on-behalf capability through this bit; it models no separate
+// send-as list.)
+func logonResponseFlags(delegate, sendsOnBehalf bool) uint8 {
+	switch {
+	case !delegate:
+		return ownerResponseFlags
+	case sendsOnBehalf:
+		return responseFlagReserved | responseFlagSendAsRight
+	}
+	return responseFlagReserved
 }
 
 // pullLogonRequest reads a RopLogon request. OpenFlags and StoreState are
@@ -168,6 +176,23 @@ func (s *Session) logonTarget(essdn []byte) (maildir string, delegate bool, owne
 		return s.mailbox, false, ""
 	}
 	return md, true, smtp
+}
+
+// mayReach reports whether the caller may open ownerSMTP's mailbox at all,
+// writing the logon error when not. A mailbox of another organization is never
+// opened, whatever its folder grants say: they speak for the owner's own
+// organization only.
+func (s *Session) mayReach(out *ext.Push, hindex uint8, ownerSMTP string) bool {
+	reach, err := directory.MayReach(s.accounts, s.owner, ownerSMTP)
+	switch {
+	case err != nil:
+		writeErr(out, ropLogon, hindex, ecError)
+		return false
+	case !reach:
+		writeErr(out, ropLogon, hindex, ecAccessDenied)
+		return false
+	}
+	return true
 }
 
 // authorizeLogon gates a delegate open and reports whether the caller may send
