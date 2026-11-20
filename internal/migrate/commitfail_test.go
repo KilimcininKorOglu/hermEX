@@ -32,3 +32,28 @@ func TestAFailedCommitLeavesNoOpenTransaction(t *testing.T) {
 		t.Errorf("user_version = %d after the failed run, want 0", v)
 	}
 }
+
+// TestAFailedStepLeavesNoHalfAppliedMigration fails the second statement of a
+// migration. A schema left with the first statement applied but the version not
+// recorded would make the next start re-run that statement and fail on it forever,
+// so the run must fail and leave neither the statement nor the version behind.
+func TestAFailedStepLeavesNoHalfAppliedMigration(t *testing.T) {
+	db := openSQLite(t)
+	migs := []Migration{{Version: 1, Steps: []string{
+		`CREATE TABLE half (id INTEGER PRIMARY KEY)`,
+		`INSERT INTO missing_table VALUES (1)`,
+	}}}
+	if err := Run(context.Background(), &SQLiteDriver{DB: db, Ver: UserVersion()}, 0, migs); err == nil {
+		t.Fatal("a migration with a failing statement was reported as applied")
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name = 'half'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Error("the statement before the failing one stayed applied")
+	}
+	if v := userVersion(t, db); v != 0 {
+		t.Errorf("user_version = %d after the failed run, want 0", v)
+	}
+}
