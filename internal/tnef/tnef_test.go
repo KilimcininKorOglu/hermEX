@@ -1,6 +1,7 @@
 package tnef_test
 
 import (
+	"encoding/binary"
 	"errors"
 	"testing"
 
@@ -104,6 +105,51 @@ func TestDecodeRefusesMalformedStreams(t *testing.T) {
 	if _, err := tnef.Decode(good, nil); err != nil {
 		t.Errorf("a conforming stream was refused: %v", err)
 	}
+}
+
+// TestDecodeRefusesATruncatedStream cuts a conforming stream at every length.
+// A winmail.dat arrives from unauthenticated SMTP, and every attribute carries
+// its length and checksum ([MS-OXTNEF] 2.1.3.1), so a stream that ends inside an
+// attribute or its header is malformed: it must be refused and never panic. The
+// format has no end marker, so a cut that falls between two attributes leaves a
+// shorter stream that conforms, and that one may decode.
+func TestDecodeRefusesATruncatedStream(t *testing.T) {
+	att := (&tneftest.Props{}).Long(mapi.PrAttachMethod, int32(mapi.AttachByValue))
+	full := tneftest.New().
+		Attr(1, tneftest.AttSubject, tneftest.CString("subject")).
+		Attr(2, tneftest.AttAttachRendData, tneftest.RendData()).
+		Attr(2, tneftest.AttAttachData, []byte("%PDF-1.4")).
+		Attr(2, tneftest.AttAttachment, att.Bytes()).
+		Bytes()
+	whole := attributeEnds(full)
+	for n := range len(full) {
+		func() {
+			defer func() {
+				if x := recover(); x != nil {
+					t.Errorf("a stream cut to %d of %d bytes panicked: %v", n, len(full), x)
+				}
+			}()
+			_, err := tnef.Decode(full[:n], nil)
+			if whole[n] && err != nil {
+				t.Errorf("a stream ending after a whole attribute (%d bytes) was refused: %v", n, err)
+			}
+			if !whole[n] && !errors.Is(err, tnef.ErrMalformed) {
+				t.Errorf("a stream cut inside an attribute (%d of %d bytes): err = %v, want ErrMalformed", n, len(full), err)
+			}
+		}()
+	}
+}
+
+// attributeEnds returns the stream lengths at which an attribute ends, by the
+// [MS-OXTNEF] 2.1.3 framing: a 6-byte signature and key, then per attribute a
+// level byte, a 4-byte id, a 4-byte length, the data and a 2-byte checksum.
+func attributeEnds(stream []byte) map[int]bool {
+	ends := map[int]bool{}
+	for pos := 6; pos+9 <= len(stream); {
+		pos += 9 + int(binary.LittleEndian.Uint32(stream[pos+5:])) + 2
+		ends[pos] = true
+	}
+	return ends
 }
 
 // TestDecodeEmbeddedMessage proves an attached message's object value decodes as
