@@ -167,6 +167,9 @@ func TestRoundsReadsStoredHashes(t *testing.T) {
 		{"explicit rounds", "$6$rounds=600000$salt$hash", 600000, true},
 		{"no rounds section", "$6$salt$hash", SHA512RoundsDefault, true},
 		{"below the minimum is clamped up", "$6$rounds=1$salt$hash", SHA512RoundsMin, true},
+		// The specification caps the count at 999,999,999, so a stored value past it
+		// cannot make one verification run for an unbounded time.
+		{"above the maximum is clamped down", "$6$rounds=99999999999$salt$hash", 999999999, true},
 		{"md5-crypt has no comparable factor", "$1$salt$hash", 0, false},
 		{"empty", "", 0, false},
 		{"unparseable rounds", "$6$rounds=abc$salt$hash", 0, false},
