@@ -1,6 +1,7 @@
 package webmail2api
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -70,6 +71,40 @@ func TestQuarantineRelease(t *testing.T) {
 	// A garbage token is refused, never reaching a mailbox.
 	rec = serve(httptest.NewRequest(http.MethodGet, "/quarantine/release?t=garbage", nil))
 	wantContains(t, "bad token page", rec.Body.String(), "invalid or has expired")
+}
+
+// TestAFailedReleaseIsRecorded makes the move out of Junk fail for a reason other
+// than the message being gone. The user is only asked to try again, so the
+// operator's record is the one place the cause can be found.
+func TestAFailedReleaseIsRecorded(t *testing.T) {
+	const alice = "alice@hermex.test"
+	sink := withSink(t)
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open store", err)
+	st.Close()
+	prev := releaseFromJunk
+	releaseFromJunk = func(*objectstore.Store, uint32) error { return errors.New("disk full") }
+	t.Cleanup(func() { releaseFromJunk = prev })
+
+	secret := []byte("digest-test-secret")
+	accs := directory.StaticAccounts{alice: {Password: "x", MailboxPath: dir}}
+	srv := NewServer(accs, accs, nil, "mail.hermex.test", []byte("session-secret"), "", false)
+	srv.DigestSecret = secret
+	tok, err := quarantine.Mint(secret, quarantine.Claims{Mailbox: alice, UID: 7, Expiry: time.Now().Add(time.Hour).Unix()})
+	mustNoErr(t, "mint token", err)
+	req := httptest.NewRequest(http.MethodPost, "/quarantine/release", strings.NewReader("t="+url.QueryEscape(tok)))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	wantStatus(t, "failed release", rec, http.StatusInternalServerError)
+	e, ok := sink.find("quarantine-release-move")
+	if !ok {
+		t.Fatal("the failed release was not recorded")
+	}
+	wantEq(t, "recorded cause", e.Err, "disk full")
+	wantEq(t, "recorded mailbox", e.Fields["mailbox"], any(alice))
 }
 
 // TestQuarantineDisabled proves the route 404s when no digest secret is set.

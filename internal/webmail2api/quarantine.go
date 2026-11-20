@@ -63,17 +63,26 @@ func (s *Server) handleQuarantineRelease(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defer st.Close()
-	if _, err := st.MoveMessage(int64(mapi.PrivateFIDJunk), claims.UID, int64(mapi.PrivateFIDInbox)); err != nil {
+	if err := releaseFromJunk(st, claims.UID); err != nil {
 		if errors.Is(err, objectstore.ErrNotFound) {
 			writeQuarantinePage(w, http.StatusOK, "Already handled",
 				"This message has already been handled, it is no longer in your Junk folder.", "")
 			return
 		}
+		// The user is told to retry; the operator must see why it failed.
+		logError("quarantine-release-move", err, logging.Fields{"mailbox": claims.Mailbox, "uid": claims.UID})
 		writeQuarantinePage(w, http.StatusInternalServerError, "Could not release",
 			"This message could not be released right now. Please try again later.", "")
 		return
 	}
 	writeQuarantinePage(w, http.StatusOK, "Released", "The message has been moved back to your inbox.", "")
+}
+
+// releaseFromJunk moves one quarantined message back to the Inbox; a variable
+// only so a test can make the move fail.
+var releaseFromJunk = func(st *objectstore.Store, uid uint32) error {
+	_, err := st.MoveMessage(int64(mapi.PrivateFIDJunk), uid, int64(mapi.PrivateFIDInbox))
+	return err
 }
 
 // writeQuarantinePage renders a minimal standalone result page (no SPA, the user
