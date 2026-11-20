@@ -193,6 +193,9 @@ func TestLDAPBindingSyncQueuesTask(t *testing.T) {
 	ts := adminServerWithSyncer(t, d, &fakeSyncer{})
 	session, csrf := loginCookies(t, ts)
 
+	// Another domain's binding: neither a sync nor a reset to its preset mapping.
+	wantStatus(t, authedPOST(t, ts, "/admin/ldap/bindings/2/sync", session, csrf, ``), http.StatusForbidden, "other domain sync")
+	wantStatus(t, authedPOST(t, ts, "/admin/ldap/bindings/2/reset", session, csrf, ``), http.StatusForbidden, "other domain reset")
 	wantStatus(t, authedPOST(t, ts, "/admin/ldap/bindings/1/sync", session, csrf, ``), http.StatusAccepted, "sync")
 	if len(d.tasks) != 1 || d.tasks[0].Type != "ldapsync" || d.tasks[0].Params != "1" {
 		t.Errorf("queued tasks = %+v, want one ldapsync task for binding 1", d.tasks)
