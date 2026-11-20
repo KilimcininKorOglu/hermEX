@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxews"
@@ -721,16 +722,9 @@ func (c *storeCache) open(sess *session, mailbox string) (*objectstore.Store, []
 	if mailbox == publicMailboxToken {
 		return c.openPublic(sess)
 	}
-	dir := sess.mailbox
-	isOwn := true
-	if mailbox != "" && !strings.EqualFold(mailbox, sess.user) {
-		path, ok := c.s.accounts.Resolve(mailbox)
-		if !ok {
-			return nil, nil, false, "ErrorNonExistentMailbox"
-		}
-		if path != sess.mailbox {
-			dir, isOwn = path, false
-		}
+	dir, isOwn, code := c.mailboxDir(sess, mailbox)
+	if code != "" {
+		return nil, nil, false, code
 	}
 	if st, ok := c.stores[dir]; ok {
 		return st, c.folders[dir], isOwn, ""
@@ -747,6 +741,26 @@ func (c *storeCache) open(sess *session, mailbox string) (*objectstore.Store, []
 	c.stores[dir] = st
 	c.folders[dir] = all
 	return st, all, isOwn, ""
+}
+
+// mailboxDir resolves the store directory an id's mailbox names, and whether it
+// is the caller's own. Another mailbox is reached only within the caller's
+// organization: folder grants speak for the owner's own organization only.
+func (c *storeCache) mailboxDir(sess *session, mailbox string) (dir string, isOwn bool, code string) {
+	if mailbox == "" || strings.EqualFold(mailbox, sess.user) {
+		return sess.mailbox, true, ""
+	}
+	path, ok := c.s.accounts.Resolve(mailbox)
+	if !ok {
+		return "", false, "ErrorNonExistentMailbox"
+	}
+	if path == sess.mailbox {
+		return path, true, ""
+	}
+	if reach, err := directory.MayReach(c.s.accounts, sess.user, mailbox); err != nil || !reach {
+		return "", false, "ErrorAccessDenied"
+	}
+	return path, false, ""
 }
 
 // openPublic resolves the caller's own domain public store (never another tenant's:

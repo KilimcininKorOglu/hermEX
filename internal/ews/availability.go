@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcical"
@@ -171,19 +172,33 @@ func (s *Server) handleGetUserAvailability(w http.ResponseWriter, inner []byte, 
 	writeResponse(w, resp)
 }
 
+// openFreeBusyTarget resolves and opens the mailbox a free/busy request names,
+// returning the error code to answer instead. A calendar of another organization
+// is not read, whatever its grants say.
+func (s *Server) openFreeBusyTarget(sess *session, email string) (string, *objectstore.Store, string) {
+	targetPath, ok := s.accounts.Resolve(email)
+	if !ok {
+		return "", nil, "ErrorMailRecipientNotFound"
+	}
+	if reach, err := directory.MayReach(s.accounts, sess.user, email); err != nil || !reach {
+		return "", nil, "ErrorFreeBusyGenerationFailed"
+	}
+	st, err := objectstore.OpenExisting(targetPath)
+	if err != nil {
+		return "", nil, "ErrorFreeBusyGenerationFailed"
+	}
+	return targetPath, st, ""
+}
+
 // freeBusyForTarget computes one mailbox's free/busy response. The caller's detail
 // level follows the reference: the mailbox owner querying their own calendar always
 // gets the detailed view (the reference passes a null actor, granting it implicitly),
 // while another caller is held to the free/busy rights granted on the target's
 // calendar, none of those rights means the data is denied, not shown as all-free.
 func (s *Server) freeBusyForTarget(sess *session, email string, windowStart, windowEnd time.Time) freeBusyResponse {
-	targetPath, ok := s.accounts.Resolve(email)
-	if !ok {
-		return errorFreeBusy("ErrorMailRecipientNotFound")
-	}
-	st, err := objectstore.OpenExisting(targetPath)
-	if err != nil {
-		return errorFreeBusy("ErrorFreeBusyGenerationFailed")
+	targetPath, st, code := s.openFreeBusyTarget(sess, email)
+	if code != "" {
+		return errorFreeBusy(code)
 	}
 	defer st.Close()
 
