@@ -104,6 +104,14 @@ func TestMatchDANETA(t *testing.T) {
 	if err := Match([]Record{taRec}, chain, "evil.example.com"); err == nil {
 		t.Error("DANE-TA must name-check the leaf; a mismatched host must fail")
 	}
+	// The matched anchor must have issued the leaf: a peer that sends the domain's
+	// published CA beside a leaf signed by its own CA, with the right name, fails
+	// (RFC 7671 section 5.2.2).
+	rogue, rogueKey := issue(t, "Rogue CA", "", true, nil, nil)
+	forged, _ := issue(t, "mx.example.com", "mx.example.com", false, rogue, rogueKey)
+	if err := Match([]Record{taRec}, []*x509.Certificate{forged, ca}, "mx.example.com"); err == nil {
+		t.Error("a leaf not issued by the matched trust anchor authenticated")
+	}
 	// A TA record whose digest matches nothing in the chain fails.
 	noMatch := Record{Usage: usageDANETA, Selector: selectorCert, MatchingType: matchSHA256, Data: sha256d([]byte("unknown CA"))}
 	if err := Match([]Record{noMatch}, chain, "mx.example.com"); err == nil {
