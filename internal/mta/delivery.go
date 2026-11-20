@@ -218,6 +218,11 @@ func (s *session) Mail(from string, params smtp.MailParams) error {
 			return err
 		}
 	}
+	if s.authUser == "" {
+		if err := refuseHostedSender(s.accounts, from); err != nil {
+			return err
+		}
+	}
 	// Rate-limit unauthenticated intake: a client network that has exhausted its
 	// message budget for the window is deferred so a legitimate server retries later.
 	// Authenticated submission is never rate limited.
@@ -230,6 +235,41 @@ func (s *session) Mail(from string, params smtp.MailParams) error {
 	// at the protocol layer; here they are recorded verbatim.
 	s.ret, s.envid = params.RET, params.ENVID
 	return nil
+}
+
+// refuseHostedSender refuses an unauthenticated envelope sender in a domain this
+// server hosts, as Exchange refuses an anonymous sender of an authoritative
+// domain. Such a sender can only be forged: this server's own users submit
+// authenticated. Without the refusal a forged hosted sender is trusted as itself
+// downstream, for example as the attendee of a meeting reply or the organizer of
+// a cancellation. The null sender (a bounce) passes, and so does a split domain,
+// whose other mail system sends as the domain without authenticating here. A
+// directory that cannot answer defers the message rather than guess.
+func refuseHostedSender(accounts directory.Accounts, from string) error {
+	at := strings.LastIndex(from, "@")
+	if from == "" || at < 0 || at == len(from)-1 {
+		return nil
+	}
+	external, err := isExternalDomain(accounts, from)
+	if err != nil {
+		return &smtp.TempError{Message: "4.3.0 could not check the sender, please retry later"}
+	}
+	if external {
+		return nil
+	}
+	if _, ok := accounts.(directory.LocalDomains); !ok {
+		return nil
+	}
+	if sd, ok := accounts.(directory.SplitDomains); ok {
+		host, err := sd.SplitRelayHost(from[at+1:])
+		if err != nil {
+			return &smtp.TempError{Message: "4.3.0 could not check the sender, please retry later"}
+		}
+		if host != "" {
+			return nil
+		}
+	}
+	return &smtp.PermError{Message: fmt.Sprintf("5.7.1 <%s> may send only after authenticating", from)}
 }
 
 // authorizedSender reports whether the authenticated user may use from as the

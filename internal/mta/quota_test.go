@@ -108,11 +108,11 @@ func TestMailSendQuota(t *testing.T) {
 		t.Errorf("under-send-quota MAIL FROM refused: %v", err)
 	}
 
-	// Unauthenticated intake is never blocked by send quota, the local user is
-	// not the one sending.
+	// Unauthenticated intake is never blocked by send quota: an external sender
+	// passes even while the local mailbox is over its quota.
 	setSendQuota(t, dir, 1)
-	if err := (&session{accounts: accounts}).Mail("bob@local", smtp.MailParams{}); err != nil {
-		t.Errorf("unauthenticated MAIL FROM refused: %v", err)
+	if err := (&session{accounts: accounts}).Mail("someone@remote.example", smtp.MailParams{}); err != nil {
+		t.Errorf("unauthenticated external MAIL FROM refused: %v", err)
 	}
 }
 
