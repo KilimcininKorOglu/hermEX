@@ -57,12 +57,31 @@ func domainOf(addr string) string {
 	return directory.AddressDomain(addr)
 }
 
+// ErrBadDomain refuses a domain name that is not a plain DNS name, so it can
+// never name a directory outside the domain root it is joined to.
+var ErrBadDomain = errors.New("publicfolder: not a domain name")
+
+// dirFor returns the public-store directory of domain. The name reaches here from
+// an admin request parameter, and the directory is the domain root joined with
+// it, so a path separator or a dot segment would open another directory's store.
+func (svc *Service) dirFor(domain string) (string, error) {
+	d := strings.ToLower(domain)
+	if d == "" || strings.HasPrefix(d, ".") || strings.Contains(d, "..") || strings.ContainsAny(d, `/\`) {
+		return "", ErrBadDomain
+	}
+	return svc.paths.HomedirFor(d), nil
+}
+
 // Provision ensures the domain's public store exists, creating and seeding it if
 // absent. It is idempotent and is the administrator's enable action: after it the
 // domain has public folders. domain is taken as given (an administrative input),
 // not derived from a caller.
 func (svc *Service) Provision(domain string) error {
-	st, err := objectstore.OpenPublic(svc.paths.HomedirFor(strings.ToLower(domain)))
+	dir, err := svc.dirFor(domain)
+	if err != nil {
+		return err
+	}
+	st, err := objectstore.OpenPublic(dir)
 	if err != nil {
 		return err
 	}
@@ -75,11 +94,11 @@ func (svc *Service) Provision(domain string) error {
 // caller (e.g. the EWS store cache) can key its own handle cache on, while keeping
 // the "domain comes from the authenticated caller" rule in this one place.
 func (svc *Service) DirForCaller(callerEmail string) string {
-	domain := domainOf(callerEmail)
-	if domain == "" {
+	dir, err := svc.dirFor(domainOf(callerEmail))
+	if err != nil {
 		return ""
 	}
-	return svc.paths.HomedirFor(domain)
+	return dir
 }
 
 // OpenForDomain opens an administrative handle on a domain's public store (read
@@ -88,7 +107,11 @@ func (svc *Service) DirForCaller(callerEmail string) string {
 // is for admin management, which addresses a domain directly; caller-facing
 // surfaces use OpenForCaller so tenant isolation cannot be bypassed.
 func (svc *Service) OpenForDomain(domain string) (*objectstore.Store, error) {
-	return objectstore.OpenPublicExisting(svc.paths.HomedirFor(strings.ToLower(domain)))
+	dir, err := svc.dirFor(domain)
+	if err != nil {
+		return nil, err
+	}
+	return objectstore.OpenPublicExisting(dir)
 }
 
 // OpenForCaller opens the public store of the CALLER's own domain for reading,
@@ -98,11 +121,11 @@ func (svc *Service) OpenForDomain(domain string) (*objectstore.Store, error) {
 // tenant-isolation chokepoint. The caller owns the returned store and must Close
 // it when ok is true.
 func (svc *Service) OpenForCaller(callerEmail string) (st *objectstore.Store, ok bool, err error) {
-	domain := domainOf(callerEmail)
-	if domain == "" {
-		return nil, false, nil
+	dir, err := svc.dirFor(domainOf(callerEmail))
+	if err != nil {
+		return nil, false, nil // no domain, or none a store can live under
 	}
-	st, err = objectstore.OpenPublicExisting(svc.paths.HomedirFor(domain))
+	st, err = objectstore.OpenPublicExisting(dir)
 	if errors.Is(err, objectstore.ErrNotProvisioned) {
 		return nil, false, nil
 	}
@@ -183,7 +206,11 @@ func (svc *Service) Folders(domain string) ([]FolderWithGrants, error) {
 // named name directly under its IPM subtree, returning the new folder id. Creating
 // the first folder is what enables a domain's public folders.
 func (svc *Service) CreateFolder(domain, name string) (int64, error) {
-	st, err := objectstore.OpenPublic(svc.paths.HomedirFor(strings.ToLower(domain)))
+	dir, err := svc.dirFor(domain)
+	if err != nil {
+		return 0, err
+	}
+	st, err := objectstore.OpenPublic(dir)
 	if err != nil {
 		return 0, err
 	}
