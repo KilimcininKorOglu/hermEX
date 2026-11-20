@@ -289,6 +289,29 @@ func TestUIDomainDNSCheckEscapesTheRecords(t *testing.T) {
 	wantContains(t, page, "&lt;script&gt;alert(1)", "the record is shown, escaped")
 }
 
+// TestDomainDNSCheckNeedsASystemAdmin proves a domain administrator, even over
+// every domain, is refused both DNS check endpoints and never receives a report:
+// the check is a system page, and the report names the domain's DKIM selector.
+func TestDomainDNSCheckNeedsASystemAdmin(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, perms: []directory.Permission{{Name: directory.PermDomainAdmin, Params: "*"}},
+		domainDetail: directory.DomainDetail{ID: 1, Name: "acme.test"},
+	}
+	ts := adminServerDNS(t, d, acmeResolver())
+	session, _ := loginCookies(t, ts)
+	for _, path := range []string{"/admin/domains/1/dnscheck", "/admin/ui/domains/1/dnscheck"} {
+		resp := authedGET(t, ts, path, session)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("%s = %d, want 403", path, resp.StatusCode)
+		}
+		if strings.Contains(string(body), "mail.acme.test") {
+			t.Errorf("%s served the report to a domain admin:\n%s", path, body)
+		}
+	}
+}
+
 // TestUIDomainDNSCheck proves the UI endpoint renders the report partial.
 func TestUIDomainDNSCheck(t *testing.T) {
 	d := &fakeDir{
