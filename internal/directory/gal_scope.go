@@ -55,6 +55,23 @@ func (d *SQLDirectory) SameScope(caller, other string) (bool, error) {
 	return b.orgID == 0 && a.domainID == b.domainID, nil
 }
 
+// MayReach reports whether caller may open other's mailbox at all, before any
+// folder permission is consulted. A folder grant, the Default member included,
+// speaks for the target's own organization only, as Exchange's Default covers
+// the authenticated users of that organization, so a mailbox in another scope is
+// never opened for the caller. Their own mailbox is always reachable; a
+// directory without a scope model reaches no one else, failing closed.
+func MayReach(dir any, caller, other string) (bool, error) {
+	if strings.EqualFold(strings.TrimSpace(caller), strings.TrimSpace(other)) {
+		return true, nil
+	}
+	sc, ok := dir.(ScopeChecker)
+	if !ok {
+		return false, nil
+	}
+	return sc.SameScope(caller, other)
+}
+
 // scopeRow resolves one address to the organization and domain that place it.
 func (d *SQLDirectory) scopeRow(address string) (loginRow, bool, error) {
 	address = strings.ToLower(strings.TrimSpace(address))
