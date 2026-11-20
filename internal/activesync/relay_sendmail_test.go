@@ -48,28 +48,30 @@ func relayServer(t *testing.T) (*httptest.Server, *relay.Spool) {
 // From domain, so a forged From that got queued would leave signed as another
 // user. The refusal is a ComposeMail Status, as for local delivery.
 func TestSendMailRelaysNothingUnderAForgedFrom(t *testing.T) {
-	for _, tc := range []struct{ name, from string }{
-		{"another user", "From: " + bobUser + "\r\n"},
+	// Each message names a recipient, so a refusal of a From that the header block
+	// lets the server read must be the From gate's AccessDenied (130); a refusal
+	// for "no recipient" there would mean the From was never checked. Only a header
+	// block that does not parse at all yields no recipients, MessageHasNoRecipient
+	// (119), before the From can be read.
+	for _, tc := range []struct{ name, from, want string }{
+		{"another user", "From: " + bobUser + "\r\n", "130"},
 		// RFC 5322 3.6.2: the caller's own address beside another's in one field.
-		{"a list naming another user", "From: " + testUser + ", " + bobUser + "\r\n"},
+		{"a list naming another user", "From: " + testUser + ", " + bobUser + "\r\n", "130"},
 		// RFC 5322 3.6 allows one From field; a second one names another user.
-		{"a second From field", "From: " + testUser + "\r\nFrom: " + bobUser + "\r\n"},
+		{"a second From field", "From: " + testUser + "\r\nFrom: " + bobUser + "\r\n", "130"},
 		// A field that does not parse cannot be shown to be the caller's.
-		{"an unparseable field", "From: " + bobUser + " <\r\n"},
+		{"an unparseable field", "From: " + bobUser + " <\r\n", "130"},
 		// Nor can a From in a header block that does not parse at all.
-		{"a header block that does not parse", "no colon here\r\nFrom: " + bobUser + "\r\n"},
+		{"a header block that does not parse", "no colon here\r\nFrom: " + bobUser + "\r\n", "119"},
 	} {
 		ts, sp := relayServer(t)
 		forged := tc.from + "To: carol@external.test\r\nSubject: Out\r\n\r\nhi carol\r\n"
 		sm := wbxml.Elem(wbxml.CMSendMail,
 			wbxml.Str(wbxml.CMClientID, "c1"),
 			wbxml.Opaque(wbxml.CMMIME, []byte(forged)))
-		// Refused either way: AccessDenied (130) at the From gate, or
-		// MessageHasNoRecipient (119) earlier when a header block that does not
-		// parse yields no recipients at all.
 		resp, out := postRaw(t, ts, "SendMail", wbxml.Marshal(sm))
-		if st := composeStatusOf(t, resp, out); st != "130" && st != "119" {
-			t.Errorf("%s: Status %q, want a refusal (130 or 119)", tc.name, st)
+		if st := composeStatusOf(t, resp, out); st != tc.want {
+			t.Errorf("%s: Status %q, want %s", tc.name, st, tc.want)
 		}
 		due, err := sp.Claim(time.Now(), 10)
 		if err != nil {
