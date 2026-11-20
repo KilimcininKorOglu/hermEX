@@ -48,11 +48,13 @@ func TestDomainAdminScopedAccess(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	if s := statusOf(authedGET(t, ts, "/admin/users/in@acme.test", session)); s == http.StatusForbidden {
-		t.Errorf("domain admin denied read of own-domain user (403)")
+	// The own-domain requests must succeed, not merely avoid a 403: a 500 there
+	// would leave the refusals below proving nothing about the scope.
+	if s := statusOf(authedGET(t, ts, "/admin/users/in@acme.test", session)); s != http.StatusOK {
+		t.Errorf("domain admin read of own-domain user = %d, want 200", s)
 	}
-	if s := statusOf(authedReq(t, ts, "PUT", "/admin/users/in@acme.test", session, csrf, `{}`)); s == http.StatusForbidden {
-		t.Errorf("domain admin denied write of own-domain user (403)")
+	if s := statusOf(authedReq(t, ts, "PUT", "/admin/users/in@acme.test", session, csrf, `{}`)); s != http.StatusNoContent {
+		t.Errorf("domain admin write of own-domain user = %d, want 204", s)
 	}
 	if s := statusOf(authedGET(t, ts, "/admin/users/out@other.test", session)); s != http.StatusForbidden {
 		t.Errorf("domain admin read of other-domain user = %d, want 403", s)
@@ -101,8 +103,8 @@ func TestDomainAdminROReadOnly(t *testing.T) {
 	}
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
-	if s := statusOf(authedGET(t, ts, "/admin/users/u@acme.test", session)); s == http.StatusForbidden {
-		t.Errorf("read-only domain admin denied read of own-domain user (403)")
+	if s := statusOf(authedGET(t, ts, "/admin/users/u@acme.test", session)); s != http.StatusOK {
+		t.Errorf("read-only domain admin read of own-domain user = %d, want 200", s)
 	}
 	if s := statusOf(authedReq(t, ts, "PUT", "/admin/users/u@acme.test", session, csrf, `{}`)); s != http.StatusForbidden {
 		t.Errorf("read-only domain admin write = %d, want 403", s)
