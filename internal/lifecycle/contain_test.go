@@ -26,6 +26,28 @@ func TestContainTurnsAPanicIntoAnError(t *testing.T) {
 	}
 }
 
+// TestContainBoundsTheRecordedStack panics from deep inside a recursion, whose
+// full trace is far larger than the bound. The *.panic event records the stack,
+// so an unbounded copy would let one bad item write megabytes per occurrence into
+// the log store.
+func TestContainBoundsTheRecordedStack(t *testing.T) {
+	var recurse func(n int) error
+	recurse = func(n int) error {
+		if n == 0 {
+			panic("deep")
+		}
+		return recurse(n - 1)
+	}
+
+	var pe *PanicError
+	if !errors.As(Contain(func() error { return recurse(20000) }), &pe) {
+		t.Fatal("Contain did not return a *PanicError")
+	}
+	if len(pe.Stack) == 0 || len(pe.Stack) > panicStackBytes {
+		t.Errorf("stack is %d bytes, want 1..%d", len(pe.Stack), panicStackBytes)
+	}
+}
+
 // TestContainPassesThroughAnItemsOwnResult keeps an item that returns normally
 // unchanged: its own error, or nil, is what the caller sees.
 func TestContainPassesThroughAnItemsOwnResult(t *testing.T) {
