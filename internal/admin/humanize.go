@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -147,7 +148,9 @@ var sizeUnits = []string{"size.bytes", "size.kb", "size.mb", "size.gb", "size.tb
 // with one decimal under 10 in lang's decimal separator ("1,5 MB" in Turkish).
 func sizeMsg(bytes int64, lang string) string {
 	v, i := float64(max(bytes, 0)), 0
-	for v >= 1024 && i < len(sizeUnits)-1 {
+	// Compare the value as it will be printed: 1023.9 KB rounds to "1024 KB",
+	// which belongs to the next unit.
+	for math.Round(v) >= 1024 && i < len(sizeUnits)-1 {
 		v /= 1024
 		i++
 	}

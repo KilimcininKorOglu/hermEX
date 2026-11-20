@@ -80,6 +80,13 @@ func TestSizeMsg(t *testing.T) {
 		{1536 * 1024, "1.5 MB", "1,5 MB"},
 		{2 << 30, "2 GB", "2 GB"},
 		{20480 * 1024, "20 MB", "20 MB"},
+		// Unit boundaries: the largest count a unit prints, then the step up.
+		{0, "0 B", "0 bayt"},
+		{1023, "1023 B", "1023 bayt"},
+		{1024, "1 KB", "1 KB"},
+		// 1023.999 KB would print as "1024 KB"; the printed value decides the unit.
+		{1<<20 - 1, "1 MB", "1 MB"},
+		{1<<30 - 1, "1 GB", "1 GB"},
 	}
 	for _, c := range cases {
 		wantEq(t, translate("en", sizeMsg(c.bytes, "en")), c.en, "English size")
