@@ -14,10 +14,11 @@ import (
 // Defaults. They are generous on purpose: a mail client opens several
 // connections per account (a desktop IMAP client commonly holds one per open
 // folder), and one client address is often a whole office behind a NAT. Like the
-// other two limiters, this one starts DISABLED so an operator opts in.
+// other two limiters, this one starts DISABLED so an operator opts in. The admin
+// panel shows these until an operator saves caps of their own.
 const (
-	defaultMaxTotal     = 1000
-	defaultMaxPerClient = 20
+	DefaultMaxTotal     = 1000
+	DefaultMaxPerClient = 20
 )
 
 // Limiter counts the connections a daemon is serving and reports when a new one
@@ -36,8 +37,8 @@ type Limiter struct {
 // New builds a limiter with the default caps; it starts disabled.
 func New() *Limiter {
 	l := &Limiter{perAddr: make(map[string]int)}
-	l.maxTotal.Store(defaultMaxTotal)
-	l.maxPerClient.Store(defaultMaxPerClient)
+	l.maxTotal.Store(DefaultMaxTotal)
+	l.maxPerClient.Store(DefaultMaxPerClient)
 	return l
 }
 

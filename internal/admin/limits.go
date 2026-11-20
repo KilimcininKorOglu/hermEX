@@ -3,7 +3,10 @@ package admin
 import (
 	"math"
 	"net/http"
+	"time"
 
+	"hermex/internal/authlimit"
+	"hermex/internal/connlimit"
 	"hermex/internal/directory"
 	"hermex/internal/objectstore"
 )
@@ -74,15 +77,6 @@ func (s *Server) addLimitSettings(data map[string]any, failed readFailures) {
 	s.fillFetchPolicy(data, failed)
 }
 
-// defaultLoginMaxFails, defaultLoginWindow and defaultLoginLockout mirror the login
-// limiter's own built-in tuning (five failures in 15 minutes locks out for 15
-// minutes), shown on the page until an operator saves one.
-const (
-	defaultLoginMaxFails = 5
-	defaultLoginWindow   = 900
-	defaultLoginLockout  = 900
-)
-
 // fillLoginLockout sets the failed-login limiter's tunables on a page-data map,
 // using the stored values or the limiter's built-in defaults.
 func (s *Server) fillLoginLockout(data map[string]any, failed readFailures) {
@@ -91,7 +85,12 @@ func (s *Server) fillLoginLockout(data map[string]any, failed readFailures) {
 		return
 	}
 	if !found {
-		st = directory.LoginLockoutSettings{MaxFails: defaultLoginMaxFails, WindowSeconds: defaultLoginWindow, LockoutSeconds: defaultLoginLockout}
+		// The login limiter's own built-in tuning, the one in force until a save.
+		st = directory.LoginLockoutSettings{
+			MaxFails:       authlimit.DefaultMaxFails,
+			WindowSeconds:  int(authlimit.DefaultWindow / time.Second),
+			LockoutSeconds: int(authlimit.DefaultLockout / time.Second),
+		}
 	}
 	data["LoginMaxFails"] = st.MaxFails
 	data["LoginWindow"] = st.WindowSeconds
@@ -168,14 +167,6 @@ func (s *Server) handleUISaveHTTPRateLimit(w http.ResponseWriter, r *http.Reques
 	s.render(w, r, "http-ratelimit-panel", s.limitsPageData(r, okNotice("limits.rateSaved")))
 }
 
-// defaultConnMaxTotal and defaultConnMaxPerClient mirror the limiter's own built-in
-// values (1000 connections per daemon, 20 per client address), shown on the page
-// until an operator saves one.
-const (
-	defaultConnMaxTotal     = 1000
-	defaultConnMaxPerClient = 20
-)
-
 // fillConnLimit sets the concurrent-connection cap's toggle and tunables on a
 // page-data map, using the stored values or the limiter's built-in defaults
 // (disabled). Shared by the Limits page and the unified Settings page.
@@ -185,7 +176,8 @@ func (s *Server) fillConnLimit(data map[string]any, failed readFailures) {
 		return
 	}
 	if !found {
-		st = directory.ConnLimitSettings{MaxTotal: defaultConnMaxTotal, MaxPerClient: defaultConnMaxPerClient}
+		// The limiter's own built-in caps, the ones in force until a save.
+		st = directory.ConnLimitSettings{MaxTotal: connlimit.DefaultMaxTotal, MaxPerClient: connlimit.DefaultMaxPerClient}
 	}
 	data["ConnLimitEnabled"] = st.Enabled
 	data["ConnMaxTotal"] = st.MaxTotal

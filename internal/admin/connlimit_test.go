@@ -1,11 +1,14 @@
 package admin
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+
+	"hermex/internal/connlimit"
 )
 
 // TestLimitsPageRendersConnLimit proves the connection-cap panel appears with the
@@ -23,8 +26,8 @@ func TestLimitsPageRendersConnLimit(t *testing.T) {
 	if !strings.Contains(page, `id="conn-limit-panel"`) {
 		t.Fatalf("the connection-cap panel is missing:\n%s", page)
 	}
-	if !strings.Contains(page, `name="conn_max_total" value="1000"`) ||
-		!strings.Contains(page, `name="conn_max_per_client" value="20"`) {
+	if !strings.Contains(page, fmt.Sprintf(`name="conn_max_total" value="%d"`, connlimit.DefaultMaxTotal)) ||
+		!strings.Contains(page, fmt.Sprintf(`name="conn_max_per_client" value="%d"`, connlimit.DefaultMaxPerClient)) {
 		t.Errorf("the panel does not show the built-in defaults:\n%s", page)
 	}
 }
