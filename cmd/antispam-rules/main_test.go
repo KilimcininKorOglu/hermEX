@@ -21,8 +21,10 @@ func TestWriteAtomic(t *testing.T) {
 	if got, _ := os.ReadFile(path); string(got) != "first" {
 		t.Errorf("content = %q, want %q", got, "first")
 	}
-	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
-		t.Errorf("temp file %s.tmp lingers after writeAtomic; rename did not clean up", path)
+	// Whatever name the temporary file had, the directory holds only the ruleset
+	// afterwards: a leftover would be a second, partial ruleset beside it.
+	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 1 || entries[0].Name() != "antispam-rules.cf" {
+		t.Errorf("directory after writeAtomic = %v (%v), want only antispam-rules.cf", entries, err)
 	}
 
 	// A second write replaces the contents rather than appending or failing.
