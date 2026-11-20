@@ -177,6 +177,7 @@
     "splitFailed": "Bölünmüş alan adı kaydedilemedi.",
     "senderNameFailed": "Şablonlar kaydedilemedi.",
     "brandingFailed": "Markalama kaydedilemedi.",
+    "brandingInvalid": "Markalama kaydedilmedi: logo https:// ile başlayan bir adres, renk #rgb veya #rrggbb olmalıdır. Uygulama adı en fazla 64, alt bilgi en fazla 200 karakter olabilir ve kontrol karakteri içeremez.",
     "avFailed": "Virüsten koruma ayarları kaydedilemedi.",
     "gatewayUnread": "Kayıtlı ağ geçidi okunamadı. Hiçbir şey kaydedilmedi.",
     "gatewayFailed": "Ağ geçidi kaydedilemedi.",

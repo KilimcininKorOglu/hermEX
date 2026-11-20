@@ -177,6 +177,7 @@
     "splitFailed": "Could not save the split domain.",
     "senderNameFailed": "Could not save the templates.",
     "brandingFailed": "Could not save branding.",
+    "brandingInvalid": "Branding not saved: the logo must be an https:// address, the colour #rgb or #rrggbb, the app name at most 64 and the footer at most 200 characters, with no control characters.",
     "avFailed": "Could not save the antivirus toggles.",
     "gatewayUnread": "Could not read the stored gateway; nothing was saved.",
     "gatewayFailed": "Could not save the gateway.",

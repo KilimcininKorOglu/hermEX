@@ -35,7 +35,9 @@ func (s *Server) handleUISaveDomainBranding(w http.ResponseWriter, r *http.Reque
 			PrimaryColor: strings.TrimSpace(r.PostFormValue("primary_color")),
 			FooterText:   strings.TrimSpace(r.PostFormValue("footer_text")),
 		}
-		if err := s.dir.SetDomainBranding(dd.Name, b); err != nil {
+		if b.Validate() != nil {
+			data["Error"] = "domainDetail.brandingInvalid"
+		} else if err := s.dir.SetDomainBranding(dd.Name, b); err != nil {
 			data["Error"] = s.notice("domainDetail.brandingFailed", err)
 		} else {
 			data["Saved"] = true
