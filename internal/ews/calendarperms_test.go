@@ -2,9 +2,11 @@ package ews
 
 import (
 	"encoding/xml"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"hermex/internal/directory"
 	"hermex/internal/mapi"
 )
 
@@ -80,5 +82,32 @@ func TestCalendarPermissionsRoundTrip(t *testing.T) {
 	}
 	if strings.Contains(out, "<PermissionLevel>") {
 		t.Errorf("a calendar member carries a PermissionLevel: %s", out)
+	}
+}
+
+// TestUpdateFolderKeepsGrantsInsideTheOrganization: a folder grant opens the
+// mailbox to its member, which the mailbox surfaces keep inside the
+// organization, so an UpdateFolder naming an account of another organization
+// drops that member from the stored ACL while a colleague is kept.
+func TestUpdateFolderKeepsGrantsInsideTheOrganization(t *testing.T) {
+	dir := provisionedDir(t)
+	accs := directory.StaticAccounts{
+		testUser:                 {Password: testPass, MailboxPath: dir},
+		"bob@hermex.test":        {Password: testPass, MailboxPath: provisionedDir(t)},
+		"mallory@other-org.test": {Password: testPass, MailboxPath: provisionedDir(t)},
+	}
+	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
+	t.Cleanup(ts.Close)
+	members := calendarMember(`<t:PrimarySmtpAddress>mallory@other-org.test</t:PrimarySmtpAddress>`, "Reviewer") +
+		calendarMember(`<t:PrimarySmtpAddress>bob@hermex.test</t:PrimarySmtpAddress>`, "Reviewer")
+	if _, out := soapPost(t, ts, updateCalendarPermsReq(members), true); !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Fatalf("UpdateFolder = %s", out)
+	}
+	stored := folderPerms(t, dir, int64(mapi.PrivateFIDCalendar))
+	if _, ok := stored["mallory@other-org.test"]; ok {
+		t.Errorf("a member of another organization was granted the calendar: %v", stored)
+	}
+	if _, ok := stored["bob@hermex.test"]; !ok {
+		t.Errorf("the colleague's grant was dropped: %v", stored)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxews"
@@ -334,13 +335,13 @@ func (s *Server) handleUpdateFolder(w http.ResponseWriter, inner []byte, sess *s
 
 	var msgs []folderResponseMessage
 	for _, ch := range req.FolderChanges.Changes {
-		msgs = append(msgs, s.updateOneFolder(st, ch))
+		msgs = append(msgs, s.updateOneFolder(st, sess.user, ch))
 	}
 	writeResponse(w, updateFolderResponse{Messages: msgs})
 }
 
 // updateOneFolder applies one folder change: a rename, a permission set, or both.
-func (s *Server) updateOneFolder(st *objectstore.Store, ch folderChange) folderResponseMessage {
+func (s *Server) updateOneFolder(st *objectstore.Store, owner string, ch folderChange) folderResponseMessage {
 	targets := resolveTargets(ch.folderRefs)
 	if len(targets) != 1 {
 		return folderError("ErrorInvalidRequest")
@@ -360,7 +361,7 @@ func (s *Server) updateOneFolder(st *objectstore.Store, ch folderChange) folderR
 		}
 	}
 	if permSet != nil {
-		if msg, ok := s.applyPermissionSet(st, fid, permSet); !ok {
+		if msg, ok := s.applyPermissionSet(st, owner, fid, permSet); !ok {
 			return msg
 		}
 	}
@@ -411,14 +412,14 @@ func applyFolderRename(st *objectstore.Store, fid int64, newName string) (folder
 // A CalendarPermissionSet states each member's free/busy access, so its rights
 // are stored as stated; a PermissionSet does not, so the free/busy access the
 // member's read rights imply is filled in.
-func (s *Server) applyPermissionSet(st *objectstore.Store, fid int64, set *oxews.PermissionSet) (folderResponseMessage, bool) {
+func (s *Server) applyPermissionSet(st *objectstore.Store, owner string, fid int64, set *oxews.PermissionSet) (folderResponseMessage, bool) {
 	members, statesFreeBusy := set.Permissions, false
 	if len(set.CalendarPermissions) > 0 {
 		members, statesFreeBusy = set.CalendarPermissions, true
 	}
 	changes := make([]objectstore.PermissionChange, 0, len(members))
 	for _, p := range members {
-		memberID, username, ok := s.resolvePermissionUser(p.UserID)
+		memberID, username, ok := s.resolvePermissionUser(owner, p.UserID)
 		if !ok {
 			continue
 		}
@@ -438,7 +439,7 @@ func (s *Server) applyPermissionSet(st *objectstore.Store, fid int64, set *oxews
 // member; a real member is keyed by its PrimarySmtpAddress, confirmed to exist in
 // the directory. An unresolvable or identity-less entry yields ok=false so the
 // caller skips it rather than faulting.
-func (s *Server) resolvePermissionUser(u oxews.UserID) (memberID int64, username string, ok bool) {
+func (s *Server) resolvePermissionUser(owner string, u oxews.UserID) (memberID int64, username string, ok bool) {
 	switch u.DistinguishedUser {
 	case "Default":
 		return mapi.MemberIDDefault, "", true
@@ -451,6 +452,11 @@ func (s *Server) resolvePermissionUser(u oxews.UserID) (memberID int64, username
 	}
 	if s.accounts != nil {
 		if _, ok := s.accounts.Resolve(smtp); !ok {
+			return 0, "", false
+		}
+		// A grant opens the mailbox to its member, which the mailbox surfaces keep
+		// inside the organization, so a member of another organization is skipped.
+		if reach, err := directory.MayReach(s.accounts, owner, smtp); err != nil || !reach {
 			return 0, "", false
 		}
 	}
