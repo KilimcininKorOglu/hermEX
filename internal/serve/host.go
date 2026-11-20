@@ -37,12 +37,26 @@ func ValidPublicHost(host string) bool {
 	return hostCharsetOK(host)
 }
 
-// hostCharsetOK guards the label charset so nothing exotic reaches a URL:
-// letters, digits, dot and hyphen only.
+// hostCharsetOK guards the labels so nothing exotic reaches a URL: each label is
+// 1 to 63 letters, digits and hyphens (RFC 1034 3.1) and does not start or end
+// with a hyphen (RFC 1123 2.1), so a name of dots or an empty label is refused.
 func hostCharsetOK(host string) bool {
-	for _, r := range host {
+	for label := range strings.SplitSeq(host, ".") {
+		if !labelOK(label) {
+			return false
+		}
+	}
+	return true
+}
+
+// labelOK reports whether one DNS label meets the rule hostCharsetOK applies.
+func labelOK(label string) bool {
+	if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+		return false
+	}
+	for _, r := range label {
 		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.' || r == '-':
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-':
 		default:
 			return false
 		}

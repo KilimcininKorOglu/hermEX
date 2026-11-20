@@ -25,6 +25,10 @@ func TestValidPublicHost(t *testing.T) {
 		"[::1]:443",        // bracketed IPv6 with port
 		"evil.com/../path", // separator in label
 		"a_b.example.com",  // underscore not allowed
+		// A name of dots: RFC 1034 3.1 gives every label of a name a length of 1
+		// to 63 octets, so an empty label is no host name at all.
+		"..", ".example.com", "mail..example.com", "mail.example.com..",
+		"-mail.example.com", // RFC 952/1123: a label does not start with a hyphen
 	}
 	for _, h := range invalid {
 		if ValidPublicHost(h) {
