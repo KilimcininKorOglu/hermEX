@@ -90,11 +90,12 @@ func TestUIRoleSave(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 	form := url.Values{
-		"name":        {"Helpdesk"},
-		"description": {"reset only"},
-		"cap":         {directory.PermResetPasswd},
-		"orgadmin":    {"*"},
-		"user":        {"5"},
+		"name":          {"Helpdesk"},
+		"description":   {"reset only"},
+		"cap":           {directory.PermResetPasswd},
+		"orgadmin":      {"*"},
+		"impersonation": {"3"},
+		"user":          {"5"},
 	}
 	resp := htmxPUT(t, ts, "/admin/ui/roles/1", session, csrf, form)
 	body, _ := io.ReadAll(resp.Body)
@@ -107,7 +108,8 @@ func TestUIRoleSave(t *testing.T) {
 	}
 	got := d.namedRoles[1]
 	if !hasPerm(got.Permissions, directory.PermResetPasswd, "") ||
-		!hasPerm(got.Permissions, directory.PermOrgAdmin, "*") {
+		!hasPerm(got.Permissions, directory.PermOrgAdmin, "*") ||
+		!hasPerm(got.Permissions, directory.PermImpersonation, "3") {
 		t.Errorf("saved permissions = %+v", got.Permissions)
 	}
 	if len(got.UserIDs) != 1 || got.UserIDs[0] != 5 {

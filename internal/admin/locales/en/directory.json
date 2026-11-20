@@ -399,6 +399,8 @@
     "domainAdminDesc": "Domains a holder manages.",
     "domainROTitle": "Domain administrator (read-only)",
     "domainRODesc": "Domains a holder may see but not change.",
+    "impersonationTitle": "Mailbox impersonation (EWS)",
+    "impersonationDesc": "Domains whose mailboxes a holder may act as over EWS, with every right, sending included. Meant for migration and backup service accounts. It gives no access to this panel.",
     "usersTitle": "Assigned users",
     "usersDesc": "The users who hold this role.",
     "noUsers": "No users yet.",

@@ -72,6 +72,14 @@
 </section>
 
 <section class="card">
+{{template "card-head" (dict "Icon" "users" "Title" "roleDetail.impersonationTitle" "Desc" "roleDetail.impersonationDesc")}}
+<div class="check-grid">
+{{range .Impersonation}}<label class="check"><input type="checkbox" name="impersonation" value="{{.ID}}"{{if .Checked}} checked{{end}}> {{t .Label}}</label>
+{{end}}
+</div>
+</section>
+
+<section class="card">
 {{template "card-head" (dict "Icon" "users" "Title" "roleDetail.usersTitle" "Desc" "roleDetail.usersDesc")}}
 <div class="check-list">
 {{range .Users}}<label class="check"><input type="checkbox" name="user" value="{{.ID}}"{{if .Assigned}} checked{{end}}> {{.Label}}</label>

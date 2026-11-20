@@ -26,6 +26,7 @@ var permissionDefs = []permissionDef{
 	{directory.PermDomainAdminRO, "domain"},
 	{directory.PermDomainPurge, ""},
 	{directory.PermResetPasswd, ""},
+	{directory.PermImpersonation, "domain"},
 }
 
 // roleIDParam parses the {roleID} path value, writing a 400 when it is not a

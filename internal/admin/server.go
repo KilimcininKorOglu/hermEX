@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"slices"
 	"time"
 
 	"hermex/internal/authlimit"
@@ -661,7 +662,7 @@ func (s *Server) authAdmin(login, password string) (uid int64, roles []directory
 	if err != nil {
 		return 0, nil, false, err
 	}
-	if len(perms) == 0 {
+	if !slices.ContainsFunc(perms, isPanelPermission) {
 		return 0, nil, false, nil
 	}
 	r, err := s.dir.AdminRoles(id)

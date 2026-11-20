@@ -20,6 +20,13 @@ func (s *Server) adminPerms(userID int64) []directory.Permission {
 	return perms
 }
 
+// isPanelPermission reports whether a permission is authority in this panel.
+// ApplicationImpersonation is not: it lets a service account act as mailboxes
+// over EWS, so a role holding only it must not open an admin session.
+func isPanelPermission(p directory.Permission) bool {
+	return p.Name != directory.PermImpersonation
+}
+
 // hasPerm reports whether a permission set contains an exact (name, params) pair.
 func hasPerm(perms []directory.Permission, name, params string) bool {
 	for _, p := range perms {

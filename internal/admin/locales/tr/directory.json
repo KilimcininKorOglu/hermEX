@@ -399,6 +399,8 @@
     "domainAdminDesc": "Rolü taşıyanın yönettiği alan adları.",
     "domainROTitle": "Alan adı yöneticisi (salt okunur)",
     "domainRODesc": "Rolü taşıyanın görebildiği ama değiştiremediği alan adları.",
+    "impersonationTitle": "Posta kutusu adına işlem (EWS)",
+    "impersonationDesc": "Rolü taşıyanın EWS üzerinden posta kutularının sahibi gibi işlem yapabildiği alan adları. Bu yetki gönderim dahil bütün hakları verir. Taşıma ve yedekleme servis hesapları içindir. Bu panele erişim vermez.",
     "usersTitle": "Atanan kullanıcılar",
     "usersDesc": "Bu rolü taşıyan kullanıcılar.",
     "noUsers": "Henüz kullanıcı yok.",

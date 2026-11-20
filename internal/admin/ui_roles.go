@@ -149,6 +149,7 @@ func addRoleChecks(data map[string]any, role directory.RoleDetail, orgs []direct
 	data["Caps"], data["OrgAdmin"], data["Users"] = caps, orgScopes, userChecks
 	data["DomainAdmin"] = domScopes(directory.PermDomainAdmin)
 	data["DomainRO"] = domScopes(directory.PermDomainAdminRO)
+	data["Impersonation"] = domScopes(directory.PermImpersonation)
 }
 
 // handleUIUpdateRole saves the role editor form: it rebuilds the permission set
@@ -202,6 +203,9 @@ func rolePermsFromForm(r *http.Request) []directory.Permission {
 	}
 	for _, v := range r.Form["domainadminro"] {
 		perms = append(perms, directory.Permission{Name: directory.PermDomainAdminRO, Params: v})
+	}
+	for _, v := range r.Form["impersonation"] {
+		perms = append(perms, directory.Permission{Name: directory.PermImpersonation, Params: v})
 	}
 	return perms
 }

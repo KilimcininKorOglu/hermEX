@@ -67,6 +67,31 @@ func TestUILoginSubmit(t *testing.T) {
 	}
 }
 
+// TestImpersonationRoleOpensNoPanelSession proves a service account whose only
+// permission is ApplicationImpersonation cannot sign in to the panel: the role
+// lets it act as mailboxes over EWS and is no administrative authority.
+func TestImpersonationRoleOpensNoPanelSession(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, perms: []directory.Permission{{Name: directory.PermImpersonation, Params: "*"}}}
+	ts := adminServer(t, d)
+
+	form := url.Values{"login": {"svc@hermex.test"}, "password": {"pw"}}
+	req, _ := http.NewRequest("POST", ts.URL+"/admin/ui/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := noRedirectClient().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	for _, sc := range resp.Header["Set-Cookie"] {
+		if strings.HasPrefix(sc, sessionCookie+"=") && !strings.HasPrefix(sc, sessionCookie+"=;") {
+			t.Fatalf("an impersonation-only account got a panel session (status %d): %s", resp.StatusCode, sc)
+		}
+	}
+	if resp.StatusCode == http.StatusSeeOther {
+		t.Fatalf("an impersonation-only account was redirected into the panel")
+	}
+}
+
 // TestUILoginSubmitInvalid proves a bad login re-renders the form with an error.
 func TestUILoginSubmitInvalid(t *testing.T) {
 	ts := adminServer(t, &fakeDir{authOK: false})
