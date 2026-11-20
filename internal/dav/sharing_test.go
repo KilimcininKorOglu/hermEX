@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"hermex/internal/directory"
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
 
@@ -37,29 +38,14 @@ func authReq(t *testing.T, ts *httptest.Server, method, path, user, body string)
 
 // TestSharedCalendarDelegateAccess confirms collection sharing routes a delegate's
 // request for an owner's principal to the owner's mailbox, while a non-delegate is
-// forbidden (the OWASP A01 broken-access-control guard, #117). alice grants only bob a
-// delegate; bob reads/writes alice's calendar, carol cannot, and the write lands in
-// alice's store rather than bob's own.
+// forbidden (the OWASP A01 broken-access-control guard, #117). alice makes only bob a
+// "write" delegate; bob reads/writes alice's calendar, carol cannot, and the write
+// lands in alice's store rather than bob's own.
 func TestSharedCalendarDelegateAccess(t *testing.T) {
-	aliceDir := filepath.Join(t.TempDir(), "alice")
-	bobDir := filepath.Join(t.TempDir(), "bob")
-	carolDir := filepath.Join(t.TempDir(), "carol")
-	for _, d := range []string{aliceDir, bobDir, carolDir} {
-		st, err := objectstore.Open(d)
-		if err != nil {
-			t.Fatal(err)
-		}
-		st.Close()
-	}
-	// alice grants bob (only) delegate access to her mailbox.
-	ast, err := objectstore.Open(aliceDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := ast.SetDelegates([]string{"bob@hermex.test"}); err != nil {
-		t.Fatal(err)
-	}
-	ast.Close()
+	aliceDir := provisioned(t, "alice")
+	bobDir := provisioned(t, "bob")
+	carolDir := provisioned(t, "carol")
+	grantWriteDelegate(t, aliceDir, "bob@hermex.test")
 
 	accs := directory.StaticAccounts{
 		testUser:            {Password: testPass, MailboxPath: aliceDir},
@@ -134,6 +120,25 @@ func TestNonDelegateIsRefusedOnEveryMethodAndSpelling(t *testing.T) {
 	}
 }
 
+// grantWriteDelegate makes grantee a delegate of the mailbox at dir the way
+// webmail2 does for a "write" delegate: on the delegate list, which only names a
+// send-on-behalf delegate, and Editor on the delegate folders, which is what opens
+// them.
+func grantWriteDelegate(t *testing.T, dir, grantee string) {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.SetDelegates([]string{grantee}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetDelegateFolderRights(grantee, mapi.NormalizeRights(mapi.RightsEditor, true)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // provisioned creates an empty mailbox store and returns its directory.
 func provisioned(t *testing.T, name string) string {
 	t.Helper()
@@ -184,7 +189,7 @@ func TestSharedMailboxInHomeSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tst.SetDelegates([]string{"bob@hermex.test"}); err != nil {
+	if err := tst.SetDelegateFolderRights("bob@hermex.test", mapi.NormalizeRights(mapi.RightsReviewer, true)); err != nil {
 		t.Fatal(err)
 	}
 	tst.Close()

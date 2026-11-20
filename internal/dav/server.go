@@ -163,12 +163,17 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	}
 	// Object methods dispatch by collection: a calendar .ics object is served by
 	// the CalDAV handlers, everything else by the CardDAV handlers.
-	kind, pathUser, _, _ := classify(r.URL.Path)
+	kind, pathUser, coll, _ := classify(r.URL.Path)
 	// The URL principal segment is authoritative: a request for another local user's
-	// principal is served from THAT owner's mailbox, but only when the caller is one of
-	// the owner's delegates (collection sharing, #117). A non-delegate is forbidden, so
-	// the principal segment can never reach a mailbox the caller was not granted.
-	target, authorized := s.resolveTarget(user, mailbox, pathUser)
+	// principal is served from THAT owner's mailbox, but only within the folder
+	// rights the owner granted the caller (collection sharing, #117). Anyone else is
+	// forbidden, so the principal segment can never reach a mailbox or a folder the
+	// caller was not granted.
+	target, authorized, err := s.resolveTarget(r, user, mailbox, pathUser, kind, coll)
+	if err != nil {
+		s.davError(w, err, http.StatusInternalServerError)
+		return
+	}
 	if !authorized {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
@@ -358,34 +363,32 @@ func (s *Server) logAuth(r *http.Request, user, name string) {
 
 // resolveTarget maps the URL's principal segment to the mailbox a request operates on.
 // For the caller's own principal (or the bare DAV root) it is the caller's own mailbox.
-// For another local principal it is that owner's mailbox, but only when the caller is
-// one of the owner's delegates: the per-mailbox delegate list (objectstore PrAbDelegates)
-// is the sharing grant, so a non-delegate is denied and the principal segment can never
-// reach a mailbox the caller was not granted (collection sharing, #117). authorized is
-// false when the caller is not permitted to act for the named principal.
-func (s *Server) resolveTarget(authUser, authMailbox, pathUser string) (mailbox string, authorized bool) {
+// For another local principal it is that owner's mailbox, and the request must pass
+// the owner's folder rights for the caller (access.go): the caller must hold a grant
+// in that mailbox at all, and the right this method needs on the collection it names.
+// authorized is false when the caller may not act there; err is a store failure.
+func (s *Server) resolveTarget(r *http.Request, authUser, authMailbox, pathUser string, kind resourceKind, coll string) (mailbox string, authorized bool, err error) {
 	if pathUser == "" || strings.EqualFold(pathUser, authUser) {
-		return authMailbox, true
+		return authMailbox, true, nil
 	}
 	ownerMaildir, found := s.accounts.Resolve(pathUser)
 	if !found {
-		return "", false
+		return "", false, nil
 	}
 	st, err := objectstore.OpenExisting(ownerMaildir)
 	if err != nil {
-		return "", false
+		// An owner whose mailbox was never provisioned shares nothing.
+		return "", false, nil
 	}
 	defer st.Close()
-	delegates, err := st.GetDelegates()
-	if err != nil {
-		return "", false
+	if open, err := canOpenMailbox(st, authUser); err != nil || !open {
+		return "", false, err
 	}
-	for _, d := range delegates {
-		if strings.EqualFold(d, authUser) {
-			return ownerMaildir, true
-		}
+	allowed, err := sharedRequestAllowed(st, r, authUser, kind, coll)
+	if err != nil || !allowed {
+		return "", false, err
 	}
-	return "", false
+	return ownerMaildir, true, nil
 }
 
 // handleOptions advertises DAV capabilities. addressbook signals CardDAV (RFC

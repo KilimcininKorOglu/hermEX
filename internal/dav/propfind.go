@@ -3,6 +3,7 @@ package dav
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
@@ -30,8 +31,25 @@ func (s *Server) handlePropfind(w http.ResponseWriter, r *http.Request, user, ma
 		http.Error(w, missing, http.StatusNotFound)
 		return
 	}
+	if !strings.EqualFold(pathUser, user) {
+		if responses, err = s.restrictShared(mailbox, user, responses); err != nil {
+			s.davError(w, err, http.StatusInternalServerError)
+			return
+		}
+	}
 
 	writeMultistatus(w, &multistatus{Responses: responses})
+}
+
+// restrictShared applies the caller's folder rights to a PROPFIND answer about
+// another account's mailbox (access.go).
+func (s *Server) restrictShared(mailbox, user string, responses []msResponse) ([]msResponse, error) {
+	st, err := objectstore.OpenExisting(mailbox)
+	if err != nil {
+		return nil, err
+	}
+	defer st.Close()
+	return restrictSharedResponses(st, user, responses)
 }
 
 // propfindResponses builds the multistatus responses one PROPFIND target calls
