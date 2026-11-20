@@ -111,16 +111,33 @@ func parseEntity(raw []byte, depth int, budget *partBudget) *Part {
 	}
 
 	p.readContentHeaders(header)
+	p.parseBody(body, depth, budget)
+	return p
+}
 
+// parseBody reads the entity's body by its media type: the children of a
+// multipart, the encapsulated message of a message/rfc822, the line count of a
+// text part. Past the nesting or part bound a container stays a leaf.
+func (p *Part) parseBody(body []byte, depth int, budget *partBudget) {
 	switch {
 	case p.Type == "multipart" && p.Params["boundary"] != "" && depth < maxNestingDepth:
 		p.parseChildren(body, depth, budget)
-	case p.Type == "message" && p.Subtype == "rfc822" && depth < maxNestingDepth && budget.take():
-		p.parseEmbedded(body, depth, budget)
+	case p.Type == "message" && p.Subtype == "rfc822":
+		p.parseRFC822(body, depth, budget)
 	case p.Type == "text":
 		p.Lines = lineCount(body)
 	}
-	return p
+}
+
+// parseRFC822 parses an encapsulated message while the bounds allow. Past them
+// the message stays unparsed (MsgBody nil), but its line count is still part of
+// what IMAP reports for the part.
+func (p *Part) parseRFC822(body []byte, depth int, budget *partBudget) {
+	if depth < maxNestingDepth && budget.take() {
+		p.parseEmbedded(body, depth, budget)
+		return
+	}
+	p.Lines = lineCount(body)
 }
 
 // parseChildren parses a multipart body's parts while the budget lasts.

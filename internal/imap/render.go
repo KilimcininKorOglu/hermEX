@@ -134,6 +134,17 @@ func renderEnvelope(e *mime.Envelope) string {
 // renderBodyStructure renders BODY (extended=false) or BODYSTRUCTURE
 // (extended=true) for a part, recursing through multipart children and
 // message/rfc822 encapsulation (RFC 3501 §7.4.2).
+// renderEncapsulated renders the body of a message/rfc822 part. A part the parser
+// did not descend into (nesting or part bound reached) has no parsed body, but
+// RFC 3501 body-type-msg requires one, so the encapsulated message is described
+// as one opaque text part of its size and line count.
+func renderEncapsulated(p *mime.Part, extended bool) string {
+	if p.MsgBody != nil {
+		return renderBodyStructure(p.MsgBody, extended)
+	}
+	return `("TEXT" "PLAIN" NIL NIL NIL "7BIT" ` + strconv.Itoa(p.Size) + " " + strconv.Itoa(p.Lines) + ")"
+}
+
 func renderBodyStructure(p *mime.Part, extended bool) string {
 	if p.Type == "multipart" {
 		var sb strings.Builder
@@ -174,7 +185,7 @@ func renderBodyStructure(p *mime.Part, extended bool) string {
 		sb.WriteByte(' ')
 		sb.WriteString(renderEnvelope(p.MsgEnvelope))
 		sb.WriteByte(' ')
-		sb.WriteString(renderBodyStructure(p.MsgBody, extended))
+		sb.WriteString(renderEncapsulated(p, extended))
 		sb.WriteByte(' ')
 		sb.WriteString(strconv.Itoa(p.Lines))
 	case p.Type == "text":

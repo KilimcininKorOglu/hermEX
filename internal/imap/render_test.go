@@ -47,6 +47,34 @@ func TestRenderBodyStructureMultipart(t *testing.T) {
 	}
 }
 
+// TestBodyStructureSurvivesNestingPastTheParseBound renders a message whose
+// message/rfc822 parts nest deeper than the parser descends, as any sender can
+// mail. The innermost parsed rfc822 part then has no parsed body, yet RFC 3501
+// body-type-msg still requires one after the envelope. The render must produce a
+// complete structure with the body's line count, not panic and drop the
+// client's connection on every fetch of the message.
+func TestBodyStructureSurvivesNestingPastTheParseBound(t *testing.T) {
+	const depth = 60
+	inner := "Subject: innermost\r\n\r\nline one\r\nline two\r\n"
+	for range depth {
+		inner = "Content-Type: message/rfc822\r\n\r\n" + inner
+	}
+
+	for _, extended := range []bool{false, true} {
+		got := renderBodyStructure(mime.ParseStructure([]byte(inner)), extended)
+
+		if strings.Count(got, "(") != strings.Count(got, ")") {
+			t.Fatalf("extended=%v: unbalanced structure: %s", extended, got)
+		}
+		if n := strings.Count(got, `"MESSAGE" "RFC822"`); n == 0 {
+			t.Errorf("extended=%v: no message/rfc822 part in %s", extended, got)
+		}
+		if !strings.Contains(got, `("TEXT" "PLAIN" NIL NIL NIL "7BIT" `) {
+			t.Errorf("extended=%v: the unparsed encapsulated message has no body: %s", extended, got)
+		}
+	}
+}
+
 func TestRenderEnvelopeNIL(t *testing.T) {
 	raw := []byte("Subject: hi there\r\nFrom: Alice <alice@example.com>\r\n\r\nbody")
 	env, err := mime.ParseEnvelope(raw)
