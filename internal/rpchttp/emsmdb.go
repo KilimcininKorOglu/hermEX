@@ -1,6 +1,7 @@
 package rpchttp
 
 import (
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -101,11 +102,11 @@ func (e *EMSMDB) Handle(sess *Session, opnum uint16, stub []byte) ([]byte, uint3
 	case opEcDoConnectEx:
 		return e.connectEx(sess, stub)
 	case opEcDoRpcExt2:
-		return e.rpcExt2(stub)
+		return e.rpcExt2(sess.User, stub)
 	case opEcDoAsyncConnectEx:
-		return e.asyncConnectEx(stub)
+		return e.asyncConnectEx(sess.User, stub)
 	case opEcDoDisconnect:
-		return e.disconnect(stub)
+		return e.disconnect(sess.User, stub)
 	default:
 		return nil, ndr.FaultOpRngError
 	}
@@ -117,12 +118,12 @@ func (e *EMSMDB) Handle(sess *Session, opnum uint16, stub []byte) ([]byte, uint3
 // with the async discriminator ([MS-OXCRPC] 3.1.4.4), so the async interface
 // resolves it back to this session by the GUID. IN is the CXH; OUT is the ACXH and
 // the result.
-func (e *EMSMDB) asyncConnectEx(stub []byte) ([]byte, uint32) {
+func (e *EMSMDB) asyncConnectEx(caller string, stub []byte) ([]byte, uint32) {
 	cxh, err := pullCtxHandle(ndr.NewPull(stub))
 	if err != nil {
 		return nil, ndr.FaultNdr
 	}
-	if _, ok := e.lookup(cxh.GUID); !ok {
+	if _, ok := e.lookup(caller, cxh.GUID); !ok {
 		return nil, ndr.FaultContextMismatch
 	}
 	out := ndr.NewPush()
@@ -136,12 +137,12 @@ func (e *EMSMDB) asyncConnectEx(stub []byte) ([]byte, uint32) {
 // MAPI/HTTP Execute uses (byte-for-byte the same buffer), and re-wraps the
 // response. A response that overflows the codec or the client's buffer is
 // reported as ecResponseTooBig rather than truncated.
-func (e *EMSMDB) rpcExt2(stub []byte) ([]byte, uint32) {
+func (e *EMSMDB) rpcExt2(caller string, stub []byte) ([]byte, uint32) {
 	in, err := pullRpcExt2(stub)
 	if err != nil {
 		return nil, ndr.FaultNdr
 	}
-	s, ok := e.lookup(in.cxh.GUID)
+	s, ok := e.lookup(caller, in.cxh.GUID)
 	if !ok {
 		return nil, ndr.FaultContextMismatch
 	}
@@ -196,13 +197,17 @@ func (e *EMSMDB) connectEx(sess *Session, stub []byte) ([]byte, uint32) {
 
 // disconnect handles EcDoDisconnect (opnum 1): it frees the session and returns
 // a zeroed context handle.
-func (e *EMSMDB) disconnect(stub []byte) ([]byte, uint32) {
+func (e *EMSMDB) disconnect(caller string, stub []byte) ([]byte, uint32) {
 	h, err := pullCtxHandle(ndr.NewPull(stub))
 	if err != nil {
 		return nil, ndr.FaultNdr
 	}
+	s, ok := e.lookup(caller, h.GUID)
+	if !ok {
+		return nil, ndr.FaultContextMismatch
+	}
 	e.mu.Lock()
-	if s, ok := e.sessions[h.GUID]; ok {
+	if e.sessions[h.GUID] == s {
 		s.rop.Close()
 		delete(e.sessions, h.GUID)
 	}
@@ -213,17 +218,20 @@ func (e *EMSMDB) disconnect(stub []byte) ([]byte, uint32) {
 	return out.Bytes(), 0
 }
 
-// lookup returns the session for a context handle, if live, stamping it as
-// touched so the sweep only reclaims sessions the client has genuinely stopped
-// using.
-func (e *EMSMDB) lookup(g mapi.GUID) (*emsmdbSession, bool) {
+// lookup returns the session for a context handle, if live and opened by the
+// calling account, stamping it as touched so the sweep only reclaims sessions the
+// client has genuinely stopped using. A handle is a counter the client echoes
+// back, so it proves nothing on its own: without the owner check any signed-in
+// account could name another account's handle and run ROPs in that mailbox.
+func (e *EMSMDB) lookup(caller string, g mapi.GUID) (*emsmdbSession, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	s, ok := e.sessions[g]
-	if ok {
-		s.lastSeen = time.Now()
+	if !ok || !strings.EqualFold(s.user, caller) {
+		return nil, false
 	}
-	return s, ok
+	s.lastSeen = time.Now()
+	return s, true
 }
 
 // Sweep closes and drops every session untouched for at least ttl, returning how

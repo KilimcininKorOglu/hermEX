@@ -71,7 +71,7 @@ func TestRpcExt2Logon(t *testing.T) {
 	out, _ := ems.Handle(&Session{User: "alice@hermex.test", Mailbox: provisionedDir(t)}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
 	cxh, _ := parseConnectExOut(t, out)
 
-	resp, fault := ems.Handle(&Session{}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, logonExecuteBuffer()))
+	resp, fault := ems.Handle(&Session{User: "alice@hermex.test"}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, logonExecuteBuffer()))
 	if fault != 0 {
 		t.Fatalf("EcDoRpcExt2 fault = %#x", fault)
 	}
@@ -124,7 +124,7 @@ func TestRpcExt2CrossExecuteHandle(t *testing.T) {
 	cxh, _ := parseConnectExOut(t, out)
 
 	// Execute #1: RopLogon -> the logon handle lands in the response handle table.
-	resp, fault := ems.Handle(&Session{}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, logonExecuteBuffer()))
+	resp, fault := ems.Handle(&Session{User: "alice@hermex.test"}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, logonExecuteBuffer()))
 	wantEq(t, fault, uint32(0), "logon EcDoRpcExt2 fault")
 	_, pout, result := parseRpcExt2Out(t, resp)
 	wantEq(t, result, uint32(ecSuccess), "logon result")
@@ -138,7 +138,7 @@ func TestRpcExt2CrossExecuteHandle(t *testing.T) {
 
 	// Execute #2 on the same context handle: RopOpenFolder(Inbox) reusing the logon
 	// handle the first Execute minted.
-	resp, fault = ems.Handle(&Session{}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, openFolderExecuteBuffer(logonH)))
+	resp, fault = ems.Handle(&Session{User: "alice@hermex.test"}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, openFolderExecuteBuffer(logonH)))
 	wantEq(t, fault, uint32(0), "open-folder EcDoRpcExt2 fault")
 	_, pout, result = parseRpcExt2Out(t, resp)
 	wantEq(t, result, uint32(ecSuccess), "open-folder EcDoRpcExt2 result")

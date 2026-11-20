@@ -196,7 +196,7 @@ func connectLogonRegister(t *testing.T, ems *EMSMDB, user, mailbox string) (Cont
 	out, _ := ems.Handle(&Session{User: user, Mailbox: mailbox}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
 	cxh, _ := parseConnectExOut(t, out)
 
-	lresp, fault := ems.Handle(&Session{}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, logonExecuteBuffer()))
+	lresp, fault := ems.Handle(&Session{User: user}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, logonExecuteBuffer()))
 	if fault != 0 {
 		t.Fatalf("logon fault = %#x", fault)
 	}
@@ -209,7 +209,7 @@ func connectLogonRegister(t *testing.T, ems *EMSMDB, user, mailbox string) (Cont
 		t.Fatalf("logon did not mint a handle: %v", lhandles)
 	}
 
-	resp, fault := ems.Handle(&Session{}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, registerNotifyExecuteBuffer(lhandles[0])))
+	resp, fault := ems.Handle(&Session{User: user}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, registerNotifyExecuteBuffer(lhandles[0])))
 	if fault != 0 {
 		t.Fatalf("register-notification fault = %#x", fault)
 	}
@@ -320,7 +320,7 @@ func TestAsyncWaitExParkAbortsOnTeardown(t *testing.T) {
 	const user = "alice@hermex.test"
 	cxh, _ := connectLogonRegister(t, ems, user, provisionedDir(t))
 	acxh := asyncConnect(t, ems, user, cxh)
-	s, _ := ems.lookup(cxh.GUID)
+	s, _ := ems.lookup(user, cxh.GUID)
 
 	vc := testVconn()
 	if _, fault := async.asyncWaitEx(&Session{User: user, vc: vc, maxFrag: 4096}, buildAsyncWaitExStub(acxh)); fault != faultParked {
@@ -365,7 +365,7 @@ func TestAsyncWaitExConcurrentParkAndExecute(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		for range 20 {
-			ems.Handle(&Session{}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, openFolderExecuteBuffer(logonH)))
+			ems.Handle(&Session{User: user}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, openFolderExecuteBuffer(logonH)))
 		}
 	})
 	wg.Go(func() {

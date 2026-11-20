@@ -127,8 +127,8 @@ func (a *AsyncEMSMDB) asyncWaitEx(sess *Session, stub []byte) ([]byte, uint32) {
 	if err != nil {
 		return nil, ndr.FaultNdr
 	}
-	s, ok := a.ems.lookup(in.acxh.GUID)
-	if !ok || s.user != sess.User {
+	s, ok := a.ems.lookup(sess.User, in.acxh.GUID)
+	if !ok {
 		return pushAsyncWaitExOut(0, ecRejected), 0
 	}
 	if s.rop != nil && s.rop.PollForChange() {

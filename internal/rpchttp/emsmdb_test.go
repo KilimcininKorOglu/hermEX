@@ -123,7 +123,7 @@ func TestConnectDisconnect(t *testing.T) {
 	if cxh.GUID == (mapi.GUID{}) {
 		t.Error("connect returned a zero context handle")
 	}
-	if _, ok := ems.lookup(cxh.GUID); !ok {
+	if _, ok := ems.lookup("alice@hermex.test", cxh.GUID); !ok {
 		t.Error("session not recorded after connect")
 	}
 
@@ -140,7 +140,7 @@ func TestConnectDisconnect(t *testing.T) {
 	if dres, _ := dp.Uint32(); dres != ecSuccess {
 		t.Errorf("disconnect result = %#x, want ecSuccess", dres)
 	}
-	if _, ok := ems.lookup(cxh.GUID); ok {
+	if _, ok := ems.lookup("alice@hermex.test", cxh.GUID); ok {
 		t.Error("session still present after disconnect")
 	}
 }
@@ -212,7 +212,7 @@ func TestEndToEndConnect(t *testing.T) {
 	pushCtxHandle(ds, cxh)
 	_, _ = pw.Write(buildRequestPDU(0x32, 0, opEcDoDisconnect, ds.Bytes(), ndr.PfcFirstFrag|ndr.PfcLastFrag))
 	wantPDUType(t, readReply(t, outResp.Body, "disconnect response"), ndr.PktResponse, "disconnect reply")
-	_, stillOpen := ems.lookup(cxh.GUID)
+	_, stillOpen := ems.lookup("alice@hermex.test", cxh.GUID)
 	wantFalse(t, stillOpen, "the session survives an end-to-end disconnect")
 
 	_ = pw.Close()
@@ -255,7 +255,7 @@ func TestIdleSessionIsReclaimed(t *testing.T) {
 	if n := ems.Sweep(time.Now(), time.Hour); n != 0 {
 		t.Fatalf("swept %d live session(s)", n)
 	}
-	if _, ok := ems.lookup(cxh.GUID); !ok {
+	if _, ok := ems.lookup("alice@hermex.test", cxh.GUID); !ok {
 		t.Fatal("a live session was dropped")
 	}
 
@@ -263,7 +263,7 @@ func TestIdleSessionIsReclaimed(t *testing.T) {
 	if n := ems.Sweep(time.Now().Add(2*time.Hour), time.Hour); n != 1 {
 		t.Fatalf("swept %d session(s), want 1", n)
 	}
-	if _, ok := ems.lookup(cxh.GUID); ok {
+	if _, ok := ems.lookup("alice@hermex.test", cxh.GUID); ok {
 		t.Error("the abandoned session is still in the table")
 	}
 }
@@ -277,7 +277,7 @@ func TestSessionTouchDefersReclaim(t *testing.T) {
 	cxh, _ := parseConnectExOut(t, out)
 
 	// A touch restamps the session, so a sweep with the same window finds it fresh.
-	if _, ok := ems.lookup(cxh.GUID); !ok {
+	if _, ok := ems.lookup("alice@hermex.test", cxh.GUID); !ok {
 		t.Fatal("session missing")
 	}
 	if n := ems.Sweep(time.Now(), time.Minute); n != 0 {
