@@ -16,6 +16,7 @@ import (
 // bind/search orchestration is exercised without a live directory.
 type fakeConn struct {
 	startTLSErr error
+	tlsConfigs  []*tls.Config    // the configuration of each StartTLS call
 	binds       []string         // DN of each Bind call, in order
 	bindErr     map[string]error // DN -> error returned by Bind (absent = success)
 	searchRes   *ldap.SearchResult
@@ -24,12 +25,16 @@ type fakeConn struct {
 	closed      bool
 }
 
-func (f *fakeConn) StartTLS(*tls.Config) error { return f.startTLSErr }
-func (f *fakeConn) Bind(dn, _ string) error    { f.binds = append(f.binds, dn); return f.bindErr[dn] }
+func (f *fakeConn) StartTLS(c *tls.Config) error {
+	f.tlsConfigs = append(f.tlsConfigs, c)
+	return f.startTLSErr
+}
+func (f *fakeConn) Bind(dn, _ string) error { f.binds = append(f.binds, dn); return f.bindErr[dn] }
 func (f *fakeConn) Search(r *ldap.SearchRequest) (*ldap.SearchResult, error) {
 	f.filters = append(f.filters, r.Filter)
 	return f.searchRes, f.searchErr
 }
+func (f *fakeConn) Close() error { f.closed = true; return nil }
 
 // TestVerifyEscapesTheLoginInTheFilter logs in with a name made of the filter
 // metacharacters. RFC 4515 section 3 writes '*', '(', ')', '\' and NUL in an
@@ -45,7 +50,44 @@ func TestVerifyEscapesTheLoginInTheFilter(t *testing.T) {
 		t.Errorf("filter = %s, want %s", fc.filters[0], want)
 	}
 }
-func (f *fakeConn) Close() error { f.closed = true; return nil }
+
+// TestVerifyStopsWhenStartTLSFails proves a refused StartTLS upgrade ends the
+// session before any bind: continuing would send the service password and then
+// the user's password over the plaintext connection the configuration forbids.
+func TestVerifyStopsWhenStartTLSFails(t *testing.T) {
+	fc := &fakeConn{startTLSErr: errors.New("StartTLS refused"), searchRes: oneEntry("uid=alice,dc=hermex,dc=test")}
+
+	ok, err := verifierWith(fc).Verify(cfg, "alice@hermex.test", "correct")
+
+	if ok || err == nil {
+		t.Errorf("Verify after a failed StartTLS = (%v, %v), want (false, an error)", ok, err)
+	}
+	if len(fc.binds) != 0 {
+		t.Errorf("a password crossed the unencrypted session: binds %v", fc.binds)
+	}
+	if !fc.closed {
+		t.Error("the connection was not closed")
+	}
+}
+
+// TestStartTLSVerifiesTheDirectorysCertificate proves the upgrade checks the
+// server certificate against the host the URI names (RFC 4513 section 3.1.3).
+// Without that check, anyone on the path presents their own certificate and
+// receives every password the verifier binds with.
+func TestStartTLSVerifiesTheDirectorysCertificate(t *testing.T) {
+	fc := &fakeConn{searchRes: oneEntry("uid=alice,dc=hermex,dc=test")}
+
+	if _, err := verifierWith(fc).Verify(cfg, "alice@hermex.test", "correct"); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(fc.tlsConfigs) != 1 {
+		t.Fatalf("StartTLS calls = %d, want 1", len(fc.tlsConfigs))
+	}
+	if c := fc.tlsConfigs[0]; c.InsecureSkipVerify || c.ServerName != "ad.hermex.test" {
+		t.Errorf("TLS config = {ServerName: %q, InsecureSkipVerify: %v}, want the URI host with verification on", c.ServerName, c.InsecureSkipVerify)
+	}
+}
 
 func verifierWith(fc *fakeConn) *Verifier {
 	return &Verifier{dial: func(string) (conn, error) { return fc, nil }}
