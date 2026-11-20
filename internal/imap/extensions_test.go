@@ -222,6 +222,8 @@ func TestIMAPQuota(t *testing.T) {
 	if !strings.Contains(joined, "STORAGE") || !strings.Contains(joined, "500000") {
 		t.Errorf("GETQUOTAROOT missing STORAGE quota 500000: %s", joined)
 	}
+	// RFC 9208 4.3: a mailbox that does not exist is answered NO.
+	wantStatus(t, "GETQUOTAROOT of a missing mailbox", c, "a2n", "GETQUOTAROOT NoSuchBox", "NO")
 
 	if got := strings.Join(c.mustOK("a3", `GETQUOTA ""`), " "); !strings.Contains(got, "STORAGE") {
 		t.Errorf("GETQUOTA missing STORAGE: %q", got)

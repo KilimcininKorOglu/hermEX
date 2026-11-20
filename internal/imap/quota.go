@@ -33,6 +33,11 @@ func (c *conn) cmdGetQuotaRoot(tag string, args []token) {
 		c.bad(tag, "GETQUOTAROOT requires a mailbox")
 		return
 	}
+	// RFC 9208 4.3: a mailbox that does not exist is answered NO.
+	if _, _, _, found := c.resolveACLFolder(mailbox); !found {
+		c.no(tag, "no such mailbox")
+		return
+	}
 	c.untagged(`QUOTAROOT %s ""`, safeQuoted(mailbox))
 	c.writeQuota("")
 	c.ok(tag, "GETQUOTAROOT completed")
