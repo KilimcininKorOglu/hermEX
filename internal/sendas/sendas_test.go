@@ -211,3 +211,21 @@ func TestResolveLeavesAnUnprovisionedMailboxAlone(t *testing.T) {
 		t.Error("resolving the identity created the mailbox")
 	}
 }
+
+// TestAGrantOfAnotherOrganizationIsNotHonored: a mailbox of another organization
+// that lists the caller on its send-as or send-on-behalf list (a grant written
+// before the grant surfaces refused one across organizations) gives the caller
+// no identity, since every mailbox grant speaks inside its own organization.
+func TestAGrantOfAnotherOrganizationIsNotHonored(t *testing.T) {
+	accounts := testAccounts(t)
+	accounts["boss@rival.test"] = directory.Account{MailboxPath: grantingMailbox(t, false)}
+	accounts["desk@rival.test"] = directory.Account{MailboxPath: grantingMailbox(t, true)}
+	for _, want := range []string{"boss@rival.test", "desk@rival.test"} {
+		if rep, snd, g := Resolve(accounts, caller, want); g != GrantNone || rep != "" || snd != "" {
+			t.Errorf("Resolve(%s) = %q, %q, %v; want a refusal", want, rep, snd, g)
+		}
+		if Allows(accounts, caller, want) {
+			t.Errorf("Allows(%s) = true across organizations", want)
+		}
+	}
+}

@@ -67,6 +67,13 @@ func Resolve(accounts directory.Accounts, caller, want string) (representing, se
 	if containsFold(ids, want) {
 		return want, want, GrantOwn
 	}
+	// A grant to another mailbox's identity speaks inside that mailbox's
+	// organization only, like every other mailbox grant; one stored for a caller
+	// of another organization (before the grant surfaces refused it) is not
+	// honored. Fail closed when the scope cannot be read.
+	if reach, err := directory.MayReach(accounts, caller, want); err != nil || !reach {
+		return "", "", GrantNone
+	}
 	switch grantOf(accounts, want, ids) {
 	case GrantSendAs:
 		return want, want, GrantSendAs
