@@ -182,6 +182,13 @@ func (s *Server) granteeLogin(w http.ResponseWriter, grantee, owner string) (str
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "you already own this folder"})
 		return "", false
 	}
+	// A folder grant opens the mailbox to its grantee, and the mailbox surfaces
+	// keep that inside the organization, so a grantee of another organization (or
+	// no account) is refused rather than stored as a grant nothing can use.
+	if reach, err := directory.MayReach(s.accounts, owner, login); err != nil || !reach {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no mailbox in your organization matches that address"})
+		return "", false
+	}
 	return login, true
 }
 

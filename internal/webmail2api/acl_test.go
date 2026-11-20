@@ -3,8 +3,10 @@ package webmail2api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 
+	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -49,6 +51,44 @@ func TestFolderDescendants(t *testing.T) {
 	}
 	if leaf := folderDescendants(folders, 4); len(leaf) != 0 {
 		t.Errorf("descendants(leaf 4) = %v, want none", leaf)
+	}
+}
+
+// TestAFolderShareStaysInsideTheOrganization: a folder grant opens the mailbox to
+// its grantee, and the mailbox surfaces keep that inside the organization, so a
+// share with an account of another organization or with no account is refused
+// with 400 and leaves no permission row; a colleague is granted.
+func TestAFolderShareStaysInsideTheOrganization(t *testing.T) {
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	accounts := directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: dir}}
+	for _, a := range []string{"bob@hermex.test", "mallory@other-org.test"} {
+		accounts[a] = directory.Account{Password: "pw", MailboxPath: t.TempDir()}
+	}
+	do := loginAs(t, accounts, "alice@hermex.test")
+	path := "/api/v1/mailboxes/alice@hermex.test/calendar/acl"
+	for _, grantee := range []string{"mallory@other-org.test", "ghost@nowhere.test"} {
+		wantStatus(t, "share with "+grantee, do(http.MethodPost, path, `{"grantee":"`+grantee+`","rights":1}`), http.StatusBadRequest)
+	}
+	wantStatus(t, "share with a colleague", do(http.MethodPost, path, `{"grantee":"bob@hermex.test","rights":1}`), http.StatusOK)
+
+	st, err = objectstore.OpenExisting(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	entries, err := st.ListPermissions(int64(mapi.PrivateFIDCalendar))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.EqualFold(e.Name, "mallory@other-org.test") || strings.EqualFold(e.Name, "ghost@nowhere.test") {
+			t.Errorf("a refused share left a permission row for %s", e.Name)
+		}
 	}
 }
 
