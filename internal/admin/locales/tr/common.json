@@ -94,6 +94,7 @@
     "gateway": "Giden ağ geçidi",
     "domainGateway": "Bu alan adının ağ geçidi",
     "loginLockout": "Giriş kilitleme ayarları",
+    "passwordPolicy": "Parola uzunluğu",
     "requestRate": "İstek hızı ayarları",
     "connLimit": "Bağlantı sınırları",
     "sizeLimits": "Boyut sınırları",

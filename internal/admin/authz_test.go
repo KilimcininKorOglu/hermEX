@@ -73,7 +73,7 @@ var serverWideWrites = []string{
 	"/admin/ui/antispam/message-size", "/admin/ui/antispam/outbound", "/admin/ui/antispam/ratelimit",
 	"/admin/ui/antispam/relay", "/admin/ui/antispam/retrain", "/admin/ui/antispam/settings",
 	"/admin/ui/limits", "/admin/ui/limits/connections", "/admin/ui/limits/fetchpolicy",
-	"/admin/ui/limits/loginlockout", "/admin/ui/limits/requestrate", "/admin/ui/log-retention", "/admin/ui/log-spill",
+	"/admin/ui/limits/loginlockout", "/admin/ui/limits/passwordpolicy", "/admin/ui/limits/requestrate", "/admin/ui/log-retention", "/admin/ui/log-spill",
 	"/admin/ui/mailq/delete", "/admin/ui/mailq/retry", "/admin/ui/mtasts", "/admin/ui/recoverable-retention",
 	"/admin/ui/reports/dmarc-sending", "/admin/ui/reports/retention", "/admin/ui/spam-history/retention",
 	"/admin/ui/status/targets", "/admin/ui/tls/delete", "/admin/ui/tls/mode", "/admin/ui/tls/upload",

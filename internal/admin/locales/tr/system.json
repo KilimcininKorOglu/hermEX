@@ -245,6 +245,13 @@
     "lockoutInvalid": "Başarısız deneme, süre penceresi ve kilitleme en az 1 olmalı. Ayarlar kaydedilmedi.",
     "lockoutFailed": "Giriş kilitleme ayarları kaydedilemedi.",
     "lockoutSaved": "Giriş kilitleme ayarları kaydedildi. Her giriş hizmeti bunları yeniden başlatma olmadan bir dakika içinde uygular.",
+    "passwordTitle": "Parola uzunluğu",
+    "passwordDesc": "Bu sunucunun kaydettiği her parolanın en az uzunluğu.",
+    "passwordHint": "Kural, yeni açılan her hesaba, yöneticinin sıfırladığı her parolaya ve kullanıcının değiştirdiği her parolaya uygulanır. Kayıttan sonraki ilk paroladan itibaren geçerlidir ve yeniden başlatma gerektirmez. Kayıtlı parolalar çalışmaya devam eder. Uzunluk karakter olarak sayılır. LDAP parolaları LDAP sunucusuna aittir ve bu kurala girmez.",
+    "passwordMin": "En az uzunluk (karakter)",
+    "passwordInvalid": "En az uzunluk 1 ile {0} arasında olmalı. Ayarlar kaydedilmedi.",
+    "passwordFailed": "Parola uzunluğu kaydedilemedi.",
+    "passwordSaved": "Parola uzunluğu kaydedildi. Bundan sonra kaydedilen her parola bu kurala uyar.",
     "rateFailed": "İstek hızı ayarları kaydedilemedi.",
     "rateSaved": "İstek hızı ayarları kaydedildi. Her HTTP hizmeti bunları yeniden başlatma olmadan bir dakika içinde uygular.",
     "connInvalid": "İki bağlantı sınırı da en az 1 olmalı. Ayarlar kaydedilmedi.",
@@ -402,6 +409,7 @@
     "required": "Geçerli parola ve yeni parola gerekli.",
     "wrongCurrent": "Geçerli parolanız yanlış.",
     "failed": "Parola değiştirilemedi.",
+    "tooShort": "Parola en az {0} karakter olmalı.",
     "changed": "Parolanız değiştirildi. Lütfen yeniden giriş yapın."
   },
   "secondFactor": {

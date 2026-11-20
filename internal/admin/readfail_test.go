@@ -69,6 +69,8 @@ func TestAFailedReadHidesTheFormItFeeds(t *testing.T) {
 		{"GetConnLimitSettings", "/admin/ui/limits", "The connection cap is", "the connection caps"},
 		{"GetLoginLockoutSettings", "/admin/ui/limits", `/limits/loginlockout"`, "the login-lockout settings"},
 		{"GetLoginLockoutSettings", "/admin/ui/limits", "A login that fails", "the login-lockout settings"},
+		{"GetMinPasswordLength", "/admin/ui/limits", `/limits/passwordpolicy"`, "the password length"},
+		{"GetMinPasswordLength", "/admin/ui/settings", `/limits/passwordpolicy"`, "the password length"},
 		{"GetFetchSettings", "/admin/ui/limits", `/limits/fetchpolicy"`, "the fetch policy"},
 		{"GetSizeLimits", "/admin/ui/settings", `hx-post="/admin/ui/limits"`, "the size limits"},
 		{"GetLoginLockoutSettings", "/admin/ui/settings", `/limits/loginlockout"`, "the login-lockout settings"},

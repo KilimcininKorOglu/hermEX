@@ -99,6 +99,10 @@ func (s *Server) handleUIChangePasswordSubmit(w http.ResponseWriter, r *http.Req
 	}
 	s.limiter.Succeed(addr, cl.Login)
 	if _, err := s.dir.SetPassword(cl.Login, newpw); err != nil {
+		if m, short := shortPasswordNotice(err); short {
+			result(false, m)
+			return
+		}
 		result(false, s.notice("changePassword.failed", err))
 		return
 	}
@@ -248,6 +252,9 @@ func (s *Server) createUserWithDefaults(r *http.Request, email string) string {
 	}
 	maildir := s.paths.MaildirFor(email)
 	if _, err := s.dir.CreateUser(email, r.PostFormValue("password"), maildir); err != nil {
+		if m, short := shortPasswordNotice(err); short {
+			return m
+		}
 		return s.notice("users.createFailed", err)
 	}
 	cb := func(name string) bool { return r.PostFormValue(name) != "" }

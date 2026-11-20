@@ -48,6 +48,9 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, err := s.dir.CreateUser(req.Email, req.Password, s.paths.MaildirFor(req.Email))
+	if writeShortPassword(w, err) {
+		return
+	}
 	if err != nil {
 		s.fail(w, "could not create user", err, http.StatusBadRequest)
 		return
@@ -91,6 +94,9 @@ func (s *Server) handleSetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	found, err := s.dir.SetPassword(r.PathValue("email"), req.Password)
+	if writeShortPassword(w, err) {
+		return
+	}
 	if err != nil {
 		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return
@@ -143,6 +149,9 @@ func (s *Server) handleChangeOwnPassword(w http.ResponseWriter, r *http.Request)
 	}
 	s.limiter.Succeed(addr, login)
 	found, err := s.dir.SetPassword(login, req.New)
+	if writeShortPassword(w, err) {
+		return
+	}
 	if err != nil {
 		s.fail(w, "server error", err, http.StatusInternalServerError)
 		return

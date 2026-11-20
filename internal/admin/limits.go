@@ -3,6 +3,7 @@ package admin
 import (
 	"math"
 	"net/http"
+	"strconv"
 	"time"
 
 	"hermex/internal/activesync"
@@ -82,7 +83,61 @@ func (s *Server) addLimitSettings(data map[string]any, failed readFailures) {
 	s.fillHTTPRateLimit(data, failed)
 	s.fillConnLimit(data, failed)
 	s.fillLoginLockout(data, failed)
+	s.fillPasswordPolicy(data, failed)
 	s.fillFetchPolicy(data, failed)
+}
+
+// fillPasswordPolicy sets the minimum password length on a page-data map: the
+// stored value, or the directory's default while none has been saved.
+func (s *Server) fillPasswordPolicy(data map[string]any, failed readFailures) {
+	n, _, err := s.dir.GetMinPasswordLength()
+	if !s.noteRead(failed, "passwordpolicy", "what.passwordPolicy", err) {
+		return
+	}
+	data["MinPasswordLength"] = n
+	data["MaxMinPasswordLength"] = directory.MaxMinPasswordLength
+}
+
+// handleUISavePasswordPolicy stores the minimum password length. The directory
+// reads it on every password it stores, so the next account created, reset or
+// changed is held to it, with no restart. Passwords already stored are not
+// re-checked.
+func (s *Server) handleUISavePasswordPolicy(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	n := formInt(r, "min_password_length")
+	if n < 1 || n > directory.MaxMinPasswordLength {
+		s.render(w, r, "passwordpolicy-panel", s.limitsPageData(r, errorNotice(msg("limits.passwordInvalid", strconv.Itoa(directory.MaxMinPasswordLength)))))
+		return
+	}
+	if err := s.dir.SetMinPasswordLength(n); err != nil {
+		s.render(w, r, "passwordpolicy-panel", s.limitsPageData(r, s.failNotice("limits.passwordFailed", err)))
+		return
+	}
+	s.render(w, r, "passwordpolicy-panel", s.limitsPageData(r, okNotice("limits.passwordSaved")))
+}
+
+// shortPasswordNotice returns the panel message for a password the directory
+// refused as shorter than the minimum, naming the minimum, and false for any
+// other error.
+func shortPasswordNotice(err error) (string, bool) {
+	n, ok := directory.MinPasswordLength(err)
+	if !ok {
+		return "", false
+	}
+	return msg("changePassword.tooShort", strconv.Itoa(n)), true
+}
+
+// writeShortPassword answers a password the directory refused as too short with
+// a 400 naming the minimum, and reports whether it did.
+func writeShortPassword(w http.ResponseWriter, err error) bool {
+	n, ok := directory.MinPasswordLength(err)
+	if !ok {
+		return false
+	}
+	http.Error(w, "the password must be at least "+strconv.Itoa(n)+" characters", http.StatusBadRequest)
+	return true
 }
 
 // fillLoginLockout sets the failed-login limiter's tunables on a page-data map,

@@ -8,6 +8,7 @@
 {{template "http-ratelimit-card" .}}
 {{template "conn-limit-card" .}}
 {{template "loginlockout-card" .}}
+{{template "passwordpolicy-card" .}}
 {{template "fetchpolicy-card" .}}
 </div>
 </main>
@@ -36,6 +37,22 @@
 {{template "card-head" (dict "Icon" "lock" "Title" "limits.lockoutTitle" "Desc" "limits.lockoutDesc")}}
 {{template "loginlockout-panel" .}}
 </section>{{end}}
+
+{{define "passwordpolicy-card"}}<section class="card">
+{{template "card-head" (dict "Icon" "key-round" "Title" "limits.passwordTitle" "Desc" "limits.passwordDesc")}}
+{{template "passwordpolicy-panel" .}}
+</section>{{end}}
+
+{{define "passwordpolicy-panel"}}<div id="passwordpolicy-panel">
+{{template "notice" .Notice}}
+{{with index .ReadFailed "passwordpolicy"}}<p class="error">{{t .}}</p>{{else}}
+<p class="hint">{{t "limits.passwordHint"}}</p>
+<form class="form-grid" hx-post="/admin/ui/limits/passwordpolicy" hx-target="#passwordpolicy-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>{{t "limits.passwordMin"}} <input type="number" name="min_password_length" value="{{.MinPasswordLength}}" min="1" max="{{.MaxMinPasswordLength}}"></label>
+<button type="submit">{{t "antispam.saveSettings"}}</button>
+</form>
+{{end}}
+</div>{{end}}
 
 {{define "fetchpolicy-card"}}<section class="card">
 {{template "card-head" (dict "Icon" "download" "Title" "limits.fetchTitle" "Desc" "limits.fetchDesc")}}

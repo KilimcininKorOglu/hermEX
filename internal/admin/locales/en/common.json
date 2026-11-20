@@ -94,6 +94,7 @@
     "gateway": "the outbound gateway",
     "domainGateway": "this domain's gateway",
     "loginLockout": "the login-lockout settings",
+    "passwordPolicy": "the password length",
     "requestRate": "the request-rate settings",
     "connLimit": "the connection caps",
     "sizeLimits": "the size limits",

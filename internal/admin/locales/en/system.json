@@ -245,6 +245,13 @@
     "lockoutInvalid": "Failures, window and lockout must each be at least 1; settings not saved.",
     "lockoutFailed": "Could not save the login-lockout settings.",
     "lockoutSaved": "Login-lockout settings saved. Every login daemon applies them within a minute, no restart.",
+    "passwordTitle": "Password length",
+    "passwordDesc": "The minimum length of every password this server stores.",
+    "passwordHint": "Applies to every account created, every password an administrator resets and every password a user changes, from the next one on, with no restart. Passwords already stored keep working. Length is counted in characters. LDAP passwords belong to the LDAP server and are not covered.",
+    "passwordMin": "Minimum length (characters)",
+    "passwordInvalid": "The minimum length must be between 1 and {0}; settings not saved.",
+    "passwordFailed": "Could not save the password length.",
+    "passwordSaved": "Password length saved. The next password set is held to it.",
     "rateFailed": "Could not save the request-rate settings.",
     "rateSaved": "Request-rate settings saved. Every HTTP daemon applies them within a minute, no restart.",
     "connInvalid": "Both connection caps must be at least 1; settings not saved.",
@@ -402,6 +409,7 @@
     "required": "The current and a new password are required.",
     "wrongCurrent": "Your current password is incorrect.",
     "failed": "Could not change the password.",
+    "tooShort": "The password must be at least {0} characters.",
     "changed": "Your password has been changed. Please sign in again."
   },
   "secondFactor": {

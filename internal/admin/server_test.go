@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"hermex/internal/activesync"
 	"hermex/internal/directory"
@@ -63,24 +64,27 @@ type fakeDir struct {
 	connLimitFound     bool
 	loginLockout       directory.LoginLockoutSettings
 	loginLockoutFound  bool
-	messageSize        directory.MessageSizeSettings
-	messageSizeFound   bool
-	sizeLimits         directory.SizeLimits
-	sizeLimitsFound    bool
-	logRetention       int
-	logRetentionFound  bool
-	logSpillMB         int
-	logSpillSet        bool
-	recoverable        directory.RecoverableSettings
-	recoverableFound   bool
-	outbound           directory.OutboundSettings
-	outboundFound      bool
-	autoReply          directory.AutoReplySettings
-	autoReplyFound     bool
-	relay              directory.RelaySettings
-	relayFound         bool
-	gateways           map[string]directory.SMTPGateway
-	gatewayErr         error
+	// minPwLen, when set, is the stored minimum password length the fake enforces
+	// on CreateUser and SetPassword the way the directory does.
+	minPwLen          int
+	messageSize       directory.MessageSizeSettings
+	messageSizeFound  bool
+	sizeLimits        directory.SizeLimits
+	sizeLimitsFound   bool
+	logRetention      int
+	logRetentionFound bool
+	logSpillMB        int
+	logSpillSet       bool
+	recoverable       directory.RecoverableSettings
+	recoverableFound  bool
+	outbound          directory.OutboundSettings
+	outboundFound     bool
+	autoReply         directory.AutoReplySettings
+	autoReplyFound    bool
+	relay             directory.RelaySettings
+	relayFound        bool
+	gateways          map[string]directory.SMTPGateway
+	gatewayErr        error
 	// readErrs makes the named read method fail, so a test can prove a page
 	// does not render a form from a read that failed.
 	readErrs      map[string]error
@@ -382,9 +386,12 @@ func (f *fakeDir) UpdateDomain(id int64, u directory.DomainUpdate) (bool, error)
 	f.updatedDomain, f.updateDomainArg = id, u
 	return !f.updateDomainMissing, nil
 }
-func (f *fakeDir) CreateUser(username, _, maildir string) (int64, error) {
+func (f *fakeDir) CreateUser(username, password, maildir string) (int64, error) {
 	if f.createErr != nil {
 		return 0, f.createErr
+	}
+	if err := f.checkPassword(password); err != nil {
+		return 0, err
 	}
 	f.createdUser, f.createdMaildir = username, maildir
 	return 43, nil
@@ -392,6 +399,9 @@ func (f *fakeDir) CreateUser(username, _, maildir string) (int64, error) {
 func (f *fakeDir) SetPassword(username, password string) (bool, error) {
 	if f.createErr != nil {
 		return false, f.createErr
+	}
+	if err := f.checkPassword(password); err != nil {
+		return false, err
 	}
 	f.setPwUser, f.setPwValue = username, password
 	return !f.setPwMissing, nil
@@ -598,6 +608,22 @@ func (f *fakeDir) GetLoginLockoutSettings() (directory.LoginLockoutSettings, boo
 }
 func (f *fakeDir) SetLoginLockoutSettings(s directory.LoginLockoutSettings) error {
 	f.loginLockout, f.loginLockoutFound = s, true
+	return nil
+}
+func (f *fakeDir) GetMinPasswordLength() (int, bool, error) {
+	if f.minPwLen == 0 {
+		return directory.DefaultMinPasswordLength, false, f.readErrs["GetMinPasswordLength"]
+	}
+	return f.minPwLen, true, f.readErrs["GetMinPasswordLength"]
+}
+func (f *fakeDir) SetMinPasswordLength(n int) error {
+	f.minPwLen = n
+	return nil
+}
+func (f *fakeDir) checkPassword(password string) error {
+	if f.minPwLen > 0 && utf8.RuneCountInString(password) < f.minPwLen {
+		return &directory.PasswordTooShortError{Min: f.minPwLen}
+	}
 	return nil
 }
 func (f *fakeDir) GetMessageSizeSettings() (directory.MessageSizeSettings, bool, error) {
