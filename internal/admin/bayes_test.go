@@ -507,6 +507,9 @@ func TestSaveDigestRejectsBadValues(t *testing.T) {
 	}{
 		{"interval", url.Values{"enabled": {"1"}, "interval": {"0"}, "base_url": {"https://m.test"}}, "at least 1 hour"},
 		{"bad url", url.Values{"enabled": {"1"}, "interval": {"24"}, "base_url": {"mail.example.com"}}, "http(s) address"},
+		// The base URL becomes the release link in every recipient's summary mail.
+		{"script url", url.Values{"enabled": {"1"}, "interval": {"24"}, "base_url": {"javascript:alert(1)"}}, "http(s) address"},
+		{"no host", url.Values{"enabled": {"1"}, "interval": {"24"}, "base_url": {"https:///release"}}, "http(s) address"},
 		{"enable no url", url.Values{"enabled": {"1"}, "interval": {"24"}, "base_url": {""}}, "base URL is required"},
 	}
 	for _, tc := range cases {
