@@ -166,7 +166,10 @@ func (s *Server) handleSetFolderPermission(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "no such member user", http.StatusNotFound)
 		return
 	}
-	if err := s.store.SetFolderPermission(maildir, fid, member, in.Rights); err != nil {
+	// The store persists rights verbatim, so mask to the bits a client may set, as
+	// every protocol's permission write does; a reserved bit stored here would
+	// reach every surface that reads the folder's permissions.
+	if err := s.store.SetFolderPermission(maildir, fid, member, in.Rights&mapi.RightsMaxROP); err != nil {
 		s.fail(w, "could not set permission", err, http.StatusInternalServerError)
 		return
 	}

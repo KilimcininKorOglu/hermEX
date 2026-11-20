@@ -99,6 +99,23 @@ func TestSetFolderPermission(t *testing.T) {
 	}
 }
 
+// TestSetFolderPermissionMasksReservedBits sends every bit set. The store keeps
+// rights verbatim, and every protocol masks a client's rights to RightsMaxROP
+// ([MS-OXCPERM] 2.2.7) before writing, so the admin API must store only those
+// bits, not the reserved ones a client could never set.
+func TestSetFolderPermissionMasksReservedBits(t *testing.T) {
+	d := folderUserDir()
+	store := &fakeStore{}
+	ts := adminServerStore(t, d, store)
+	session, csrf := loginCookies(t, ts)
+
+	wantStatus(t, authedPUT(t, ts, "/admin/users/alice@hermex.test/folders/12/permissions", session, csrf,
+		`{"username":"bob@hermex.test","rights":4294967295}`), http.StatusNoContent, "set all bits")
+	if store.setPermRights != mapi.RightsMaxROP {
+		t.Errorf("stored rights = %#x, want only the settable bits %#x", store.setPermRights, mapi.RightsMaxROP)
+	}
+}
+
 // TestRemoveFolderPermission proves a delete drops the member addressed by id.
 func TestRemoveFolderPermission(t *testing.T) {
 	d := folderUserDir()
