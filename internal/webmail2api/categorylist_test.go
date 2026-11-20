@@ -164,6 +164,29 @@ func TestCategoryEditKeepsOutlooksBookkeeping(t *testing.T) {
 	}
 }
 
+// TestCategoryEditKeepsOneEntryPerName proves an edit naming one category twice,
+// or in two cases, stores it once and keeps the stored entry's GUID. Outlook keys
+// a category by name case-insensitively; two entries would carry the same GUID.
+func TestCategoryEditKeepsOneEntryPerName(t *testing.T) {
+	do, dir := categoryHarness(t)
+	seedOutlookList(t, dir, oxcfg.List{Categories: []oxcfg.Category{{Name: "Project X", Color: 7, GUID: "{abc}"}}})
+
+	if rec := do(http.MethodPut, "/api/v1/categories",
+		`{"categories":[{"name":"project x","color":"#c0e2b1"},{"name":"Project X","color":"#b6cbe4"},{"name":"New","color":"#b6cbe4"},{"name":"NEW","color":"#b6cbe4"}]}`); rec.Code != http.StatusOK {
+		t.Fatalf("put: status %d", rec.Code)
+	}
+	l := storedList(t, dir)
+	if len(l.Categories) != 2 {
+		t.Fatalf("stored %d categories, want 2: %+v", len(l.Categories), l.Categories)
+	}
+	if c := l.Categories[0]; c.GUID != "{abc}" || c.Name != "project x" || c.Color != 4 {
+		t.Errorf("first entry = %+v, want the stored GUID under the edited name and colour", c)
+	}
+	if l.Categories[1].Name != "New" {
+		t.Errorf("second entry = %q, want New", l.Categories[1].Name)
+	}
+}
+
 // TestCategoryListSeedsFromTheOlderList keeps a user who already had categories
 // from finding an empty list after the storage moved.
 func TestCategoryListSeedsFromTheOlderList(t *testing.T) {

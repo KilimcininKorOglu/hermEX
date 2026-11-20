@@ -2,6 +2,7 @@ package webmail2api
 
 import (
 	"encoding/json"
+	"strings"
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
@@ -81,19 +82,26 @@ func categoriesFromList(l oxcfg.List) []categoryJSON {
 // appended. Rebuilding the list from the edit alone would hand Outlook a set of
 // categories it has never seen and lose that bookkeeping on the first save.
 func mergeCategories(stored oxcfg.List, edited []categoryJSON) oxcfg.List {
+	// Outlook keys a category by its name case-insensitively, so two entries that
+	// differ only in case are one category. A repeat in the edit is dropped:
+	// kept, both copies would carry the stored entry's GUID.
 	byName := make(map[string]oxcfg.Category, len(stored.Categories))
 	for _, c := range stored.Categories {
-		byName[c.Name] = c
+		byName[strings.ToLower(c.Name)] = c
 	}
+	seen := make(map[string]bool, len(edited))
 	out := oxcfg.List{Default: stored.Default, LastSaved: stored.LastSaved}
 	for _, e := range edited {
-		if e.Name == "" {
+		key := strings.ToLower(e.Name)
+		if e.Name == "" || seen[key] {
 			continue
 		}
-		c, ok := byName[e.Name]
+		seen[key] = true
+		c, ok := byName[key]
 		if !ok {
-			c = oxcfg.Category{Name: e.Name}
+			c = oxcfg.Category{}
 		}
+		c.Name = e.Name
 		c.Color = oxcfg.NearestPalette(e.Color)
 		out.Categories = append(out.Categories, c)
 	}
