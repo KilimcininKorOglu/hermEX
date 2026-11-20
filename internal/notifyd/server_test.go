@@ -212,6 +212,23 @@ func TestPublishBadBody(t *testing.T) {
 	}
 }
 
+// TestPublishRefusesAnOversizedEvent posts a well-formed event whose mailbox path
+// is a megabyte long. An event is a path and a few ids, so the relay reads at
+// most 8 KiB of a body: anything longer is refused, never decoded into memory
+// and copied to every consumer.
+func TestPublishRefusesAnOversizedEvent(t *testing.T) {
+	ts := httptest.NewServer(New(testSecret, nil).Handler())
+	defer ts.Close()
+
+	huge := Event{Mailbox: "/data/" + strings.Repeat("a", 1<<20), Op: "create"}
+	pr := publish(t, ts, testSecret, huge)
+	pr.Body.Close()
+
+	if pr.StatusCode != http.StatusBadRequest {
+		t.Errorf("oversized publish = %d, want 400", pr.StatusCode)
+	}
+}
+
 // TestSlowConsumerDropsRatherThanBlock proves a full consumer buffer drops events
 // instead of blocking the publisher: publishing far more than the buffer holds, to
 // a consumer that never reads, still returns promptly every time.
