@@ -343,6 +343,10 @@ func TestIMAPStoreAndSearch(t *testing.T) {
 	if un := c.mustOK("a6", "SEARCH UNSEEN"); !containsSubstr(un, "* SEARCH 1") {
 		t.Errorf("SEARCH UNSEEN = %v", un)
 	}
+	// RFC 3501 6.4.4: KEYWORD and UNKEYWORD take a flag-keyword, so the bare key
+	// is a syntax error and the command is answered BAD.
+	wantStatus(t, "SEARCH KEYWORD without its argument", c, "a6k", "SEARCH KEYWORD", "BAD")
+	wantStatus(t, "SEARCH UNKEYWORD before a list", c, "a6u", "SEARCH UNKEYWORD (SEEN)", "BAD")
 	if un := c.mustOK("a7", `SEARCH SUBJECT "two"`); !containsSubstr(un, "* SEARCH 2") {
 		t.Errorf(`SEARCH SUBJECT "two" = %v`, un)
 	}

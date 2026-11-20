@@ -303,7 +303,10 @@ func init() {
 // parseKeywordKey consumes the keyword and resolves to a constant: a keyword is
 // never stored, so KEYWORD never matches and UNKEYWORD always does.
 func parseKeywordKey(cur *tokenCursor, key string) (matcher, error) {
-	cur.next()
+	// RFC 3501 6.4.4: KEYWORD and UNKEYWORD each take a flag-keyword argument.
+	if t, ok := cur.next(); !ok || t.kind == tLParen || t.kind == tRParen {
+		return nil, errProtocol
+	}
 	if key == "KEYWORD" {
 		return matchNone, nil
 	}
