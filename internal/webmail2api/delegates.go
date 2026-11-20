@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -264,6 +265,13 @@ func (s *Server) handlePostDelegation(w http.ResponseWriter, r *http.Request) {
 	grantee := strings.TrimSpace(in.Grantee)
 	if grantee == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a grantee address is required"})
+		return
+	}
+	// A delegate gains the store-open and send rights, which the mailbox surfaces
+	// keep inside the organization: the grantee must be another account of the
+	// caller's own organization.
+	if reach, err := directory.MayReach(s.accounts, c.Email, grantee); err != nil || !reach || strings.EqualFold(grantee, c.Email) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no mailbox in your organization matches that address"})
 		return
 	}
 	d := delegationJSON{

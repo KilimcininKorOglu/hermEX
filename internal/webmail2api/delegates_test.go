@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 
 	"hermex/internal/directory"
@@ -31,7 +32,13 @@ func delegationHarness(t *testing.T) (requestFunc, string) {
 		t.Fatal(err)
 	}
 	st.Close()
+	// A delegate must be an account of the owner's organization, so the grantees
+	// the tests add are accounts here; mallory is one of another organization
+	// (static accounts scope by domain).
 	accounts := directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: dir}}
+	for _, a := range []string{"bob@hermex.test", "carol@hermex.test", "dave@hermex.test", "mallory@other-org.test"} {
+		accounts[a] = directory.Account{Password: "pw", MailboxPath: t.TempDir()}
+	}
 	return loginAs(t, accounts, "alice@hermex.test"), dir
 }
 
@@ -98,6 +105,24 @@ func TestDelegationsShowGrantsMadeElsewhere(t *testing.T) {
 	}
 	if carol.ID == "" || dave.ID == "" || carol.ID == dave.ID {
 		t.Errorf("ids %q and %q must be distinct and non-empty", carol.ID, dave.ID)
+	}
+}
+
+// TestADelegationStaysInsideTheOrganization: a delegate gains the store-open and
+// send rights, which the mailbox surfaces keep inside the organization, so an
+// account of another organization, an address with no account and the owner's
+// own address are each refused with 400, and none reaches a store list.
+func TestADelegationStaysInsideTheOrganization(t *testing.T) {
+	do, dir := delegationHarness(t)
+	for _, grantee := range []string{"mallory@other-org.test", "ghost@nowhere.test", "alice@hermex.test"} {
+		rec := do(http.MethodPost, "/api/v1/delegations", `{"grantee":"`+grantee+`","rights":["read"],"canSendOnBehalf":true}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("POST %s = %d, want 400", grantee, rec.Code)
+		}
+		delegates, _, onBehalf := storeLists(t, dir)
+		if slices.ContainsFunc(append(delegates, onBehalf...), func(a string) bool { return strings.EqualFold(a, grantee) }) {
+			t.Errorf("POST %s put it on a store list", grantee)
+		}
 	}
 }
 
