@@ -219,7 +219,12 @@ func (s *Server) handleDeleteACL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	grantee := r.PathValue("grantee")
-	entries, _ := st.ListPermissions(fid)
+	entries, err := st.ListPermissions(fid)
+	if err != nil {
+		logError("acl-list", err, logging.Fields{"user": c.Email, "folder": fid})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read permissions"})
+		return
+	}
 	var memberID int64
 	for _, e := range entries {
 		if e.MemberID > 0 && strings.EqualFold(e.Name, grantee) {
