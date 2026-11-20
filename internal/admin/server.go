@@ -435,6 +435,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/users/{email}/quarantine/release", s.handleUIQuarantineRelease)
 	mux.HandleFunc("POST /admin/ui/users/{email}/quarantine/delete", s.handleUIQuarantineDelete)
 	mux.HandleFunc("PUT /admin/ui/users/{email}/delegates", s.handleUIUserDelegates)
+	mux.HandleFunc("PUT /admin/ui/users/{email}/delegate-access", s.handleUIUserDelegateAccess)
 	mux.HandleFunc("PUT /admin/ui/users/{email}/sendas", s.handleUIUserSendAs)
 	mux.HandleFunc("PUT /admin/ui/users/{email}/sendonbehalf", s.handleUIUserSendOnBehalf)
 	mux.HandleFunc("PUT /admin/ui/users/{email}/sentcopy", s.handleUIUserSentCopy)

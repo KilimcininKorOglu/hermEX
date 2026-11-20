@@ -1,5 +1,6 @@
 {
   "help": {
+    "delegateAccess": "Temsilcinin Gelen Kutusu, Takvim, Kişiler, Görevler, Notlar ve Günlük klasörlerine webmail, Outlook, EWS, CalDAV ve CardDAV üzerinden erişimi. Listede olmak tek başına hiçbir klasörü açmaz.",
     "antispam": {
       "unconfirmedTTL": "Ertelenen bir gönderenin, sunucu yeniden denemesini beklerken ne kadar süre hatırlanacağı. Bu sürenin ardından gelen deneme yeni bir ilk temas sayılır ve yine ertelenir.",
       "confirmedTTL": "Yeniden deneyip kabul edilen bir gönderenin ne kadar süre hatırlanacağı. Bu süre boyunca postası yeniden ertelenmez.",

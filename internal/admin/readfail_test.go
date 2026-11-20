@@ -329,6 +329,7 @@ func TestAUserDetailReadHidesTheFormItFeeds(t *testing.T) {
 		{"GetSentCopyConfig", `/sentcopy"`, "the sent-copy settings"},
 		{"GetSyncPolicy", "Save device policy", "the device policy of this user"},
 		{"GetDelegates", `/delegates"`, "the delegates"},
+		{"GetDelegateAccess", `/delegate-access"`, "the folder access of the delegates"},
 		{"GetStoreOwners", `/storeowners"`, "the store owners"},
 		{"GetSendAs", `/sendas"`, "the send-as grants"},
 		{"GetSendOnBehalf", `/sendonbehalf"`, "the send-on-behalf grants"},

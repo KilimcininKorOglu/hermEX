@@ -1269,6 +1269,7 @@ type fakeStore struct {
 	setQuotaVal objectstore.QuotaLimits
 
 	delegates       map[string][]string
+	delegateAccess  map[string]objectstore.DelegateAccess
 	setDelegatesDir string
 	setDelegatesVal []string
 
@@ -1394,6 +1395,28 @@ func (f *fakeStore) SetDelegates(maildir string, list []string) error {
 	}
 	f.delegates[maildir] = list
 	f.setDelegatesDir, f.setDelegatesVal = maildir, list
+	return nil
+}
+
+func (f *fakeStore) GetDelegateAccess(maildir string, grantees []string) (map[string]objectstore.DelegateAccess, error) {
+	if err := f.readErrs["GetDelegateAccess"]; err != nil {
+		return nil, err
+	}
+	out := map[string]objectstore.DelegateAccess{}
+	for _, g := range grantees {
+		out[g] = f.delegateAccess[maildir+"|"+g]
+	}
+	return out, nil
+}
+
+func (f *fakeStore) SetDelegateAccess(maildir, grantee string, access objectstore.DelegateAccess) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
+	if f.delegateAccess == nil {
+		f.delegateAccess = map[string]objectstore.DelegateAccess{}
+	}
+	f.delegateAccess[maildir+"|"+grantee] = access
 	return nil
 }
 

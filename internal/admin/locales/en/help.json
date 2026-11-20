@@ -1,5 +1,6 @@
 {
   "help": {
+    "delegateAccess": "The access a delegate has to Inbox, Calendar, Contacts, Tasks, Notes and Journal, over webmail, Outlook, EWS, CalDAV and CardDAV. Being on the list alone opens no folder.",
     "antispam": {
       "unconfirmedTTL": "How long a deferred sender is remembered while the server waits for its retry. A retry after this window counts as a new first contact and is deferred again.",
       "confirmedTTL": "How long a sender that retried and was accepted stays remembered. Its mail is not deferred again during this time.",

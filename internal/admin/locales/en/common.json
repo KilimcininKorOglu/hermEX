@@ -140,6 +140,7 @@
     "sentCopy": "the sent-copy settings",
     "userPolicy": "the device policy of this user",
     "delegates": "the delegates",
+    "delegateAccess": "the folder access of the delegates",
     "storeOwners": "the store owners",
     "sendAs": "the send-as grants",
     "sendOnBehalf": "the send-on-behalf grants"

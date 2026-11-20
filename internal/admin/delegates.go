@@ -2,7 +2,10 @@ package admin
 
 import (
 	"net/http"
+	"slices"
 	"strings"
+
+	"hermex/internal/objectstore"
 )
 
 // handleUIUserDelegates saves the user's public-delegate list from the detail form
@@ -29,4 +32,49 @@ func (s *Server) handleUIUserDelegates(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.render(w, r, "user-status", data)
+}
+
+// handleUIUserDelegateAccess sets the folder access one delegate holds on the
+// mailbox's delegate folders: none, read (Reviewer) or write (Editor), the same
+// levels webmail2 offers. Only a name already on the delegate list is accepted,
+// so the form cannot hand folder rights to someone the list does not name.
+func (s *Server) handleUIUserDelegateAccess(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	data := map[string]any{}
+	if errKey := s.saveDelegateAccess(r); errKey != "" {
+		data["Error"] = errKey
+	} else {
+		data["Saved"] = true
+	}
+	s.render(w, r, "user-status", data)
+}
+
+// saveDelegateAccess validates and stores one delegate's access level, returning
+// the notice key for a refusal or a failure, or "" on success.
+func (s *Server) saveDelegateAccess(r *http.Request) string {
+	access := objectstore.DelegateAccess(r.PostFormValue("access"))
+	if access != objectstore.DelegateNoAccess && access != objectstore.DelegateRead && access != objectstore.DelegateWrite {
+		return "userDetail.delegateAccessInvalid"
+	}
+	u, ok, err := s.dir.GetUser(r.PathValue("email"))
+	switch {
+	case err != nil:
+		return s.notice(userUnread, err)
+	case !ok:
+		return "userDetail.noSuchUser"
+	}
+	list, err := s.store.GetDelegates(u.Maildir)
+	if err != nil {
+		return s.notice("userDetail.saveDelegateAccessFailed", err)
+	}
+	grantee := strings.TrimSpace(r.PostFormValue("grantee"))
+	if !slices.ContainsFunc(list, func(d string) bool { return strings.EqualFold(d, grantee) }) {
+		return "userDetail.delegateAccessNotListed"
+	}
+	if err := s.store.SetDelegateAccess(u.Maildir, grantee, access); err != nil {
+		return s.notice("userDetail.saveDelegateAccessFailed", err)
+	}
+	return ""
 }

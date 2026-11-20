@@ -140,6 +140,7 @@
     "sentCopy": "Gönderilmiş kopya ayarları",
     "userPolicy": "Bu kullanıcının cihaz ilkesi",
     "delegates": "Temsilciler",
+    "delegateAccess": "Temsilcilerin klasör erişimi",
     "storeOwners": "Depo sahipleri",
     "sendAs": "Olarak gönder izinleri",
     "sendOnBehalf": "Adına gönder izinleri"

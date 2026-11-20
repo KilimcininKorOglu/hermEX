@@ -368,8 +368,32 @@ func (s *Server) addUserGrants(data map[string]any, failed readFailures, maildir
 		list, err := g.read(maildir)
 		if s.noteRead(failed, g.section, g.what, err) {
 			data[g.key] = strings.Join(list, "\n")
+			if g.key == "Delegates" {
+				s.addDelegateAccess(data, failed, maildir, list)
+			}
 		}
 	}
+}
+
+// delegateAccessRow is one delegate with the folder access they hold.
+type delegateAccessRow struct {
+	Grantee string
+	Access  string
+}
+
+// addDelegateAccess fills the access level each listed delegate holds on the
+// delegate folders. Being on the list grants send-on-behalf only; this level is
+// what opens the folders, so the panel shows and sets it beside the list.
+func (s *Server) addDelegateAccess(data map[string]any, failed readFailures, maildir string, list []string) {
+	access, err := s.store.GetDelegateAccess(maildir, list)
+	if !s.noteRead(failed, "delegateaccess", "what.delegateAccess", err) {
+		return
+	}
+	rows := make([]delegateAccessRow, 0, len(list))
+	for _, g := range list {
+		rows = append(rows, delegateAccessRow{Grantee: g, Access: string(access[g])})
+	}
+	data["DelegateAccess"] = rows
 }
 
 // addUserLists fills the user detail lists: the mobile devices, the remote accounts,

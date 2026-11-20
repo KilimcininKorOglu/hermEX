@@ -27,6 +27,8 @@ type MailboxStore interface {
 	SetQuota(maildir string, q objectstore.QuotaLimits) error
 	GetDelegates(maildir string) ([]string, error)
 	SetDelegates(maildir string, list []string) error
+	GetDelegateAccess(maildir string, grantees []string) (map[string]objectstore.DelegateAccess, error)
+	SetDelegateAccess(maildir, grantee string, access objectstore.DelegateAccess) error
 	GetSendAs(maildir string) ([]string, error)
 	SetSendAs(maildir string, list []string) error
 	GetSendOnBehalf(maildir string) ([]string, error)
@@ -112,6 +114,32 @@ func (mailboxStore) GetDelegates(maildir string) (list []string, err error) {
 
 func (mailboxStore) SetDelegates(maildir string, list []string) error {
 	return withStore(maildir, func(st *objectstore.Store) error { return st.SetDelegates(list) })
+}
+
+// GetDelegateAccess reads the folder access each grantee holds on the delegate
+// folders, whichever surface granted it, so the panel shows the same level
+// webmail2, Outlook and EWS set.
+func (mailboxStore) GetDelegateAccess(maildir string, grantees []string) (map[string]objectstore.DelegateAccess, error) {
+	out := make(map[string]objectstore.DelegateAccess, len(grantees))
+	err := readStore(maildir, func(st *objectstore.Store) error {
+		for _, g := range grantees {
+			byFolder, err := st.DelegateFolderRights(g)
+			if err != nil {
+				return err
+			}
+			out[g] = objectstore.DelegateAccessOf(byFolder)
+		}
+		return nil
+	})
+	return out, err
+}
+
+// SetDelegateAccess sets one grantee's access on every delegate folder, the
+// rights that open them to CalDAV, CardDAV, EWS and webmail2.
+func (mailboxStore) SetDelegateAccess(maildir, grantee string, access objectstore.DelegateAccess) error {
+	return withStore(maildir, func(st *objectstore.Store) error {
+		return st.SetDelegateFolderRights(grantee, access.Rights())
+	})
 }
 
 func (mailboxStore) GetSendAs(maildir string) (list []string, err error) {

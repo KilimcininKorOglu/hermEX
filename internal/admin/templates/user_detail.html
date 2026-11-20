@@ -252,6 +252,22 @@
 <label>{{t "userDetail.delegates"}} <textarea name="delegates" rows="4" placeholder="assistant@example.com">{{.Delegates}}</textarea></label>
 <button type="submit">{{t "userDetail.saveDelegates"}}</button>
 </form>
+{{with index $.ReadFailed "delegateaccess"}}<p class="error">{{t .}}</p>{{else}}{{if $.DelegateAccess}}
+<h4>{{t "userDetail.delegateAccessTitle"}}{{template "help" "help.delegateAccess"}}</h4>
+<table class="dense"><tbody>
+{{range $.DelegateAccess}}<tr><td>{{.Grantee}}</td><td>
+<form hx-put="/admin/ui/users/{{$.User.Username}}/delegate-access" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}' class="inline">
+<input type="hidden" name="grantee" value="{{.Grantee}}">
+<select name="access" aria-label="{{t "userDetail.delegateAccessTitle"}}">
+<option value=""{{if eq .Access ""}} selected{{end}}>{{t "userDetail.delegateAccessNone"}}</option>
+<option value="read"{{if eq .Access "read"}} selected{{end}}>{{t "userDetail.delegateAccessRead"}}</option>
+<option value="write"{{if eq .Access "write"}} selected{{end}}>{{t "userDetail.delegateAccessWrite"}}</option>
+</select>
+<button type="submit">{{t "userDetail.saveDelegateAccess"}}</button>
+</form></td></tr>{{end}}
+</tbody></table>
+{{end}}{{end}}
 {{end}}
 </section>
 
