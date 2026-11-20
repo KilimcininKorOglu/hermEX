@@ -36,6 +36,20 @@ func TestDKIMOutputRecordSplitsLongValue(t *testing.T) {
 	}
 }
 
+// TestDKIMOutputRecordSplitsAtTheLimit pins the RFC 1035 3.3 boundary: 255 octets
+// are one character string, 256 are two, and no split leaves an empty string.
+func TestDKIMOutputRecordSplitsAtTheLimit(t *testing.T) {
+	for _, tc := range []struct{ n, strings int }{{255, 1}, {256, 2}, {510, 2}, {511, 3}} {
+		got := dkimOutput(dkimOutputRecord, "s._domainkey.acme.test", strings.Repeat("A", tc.n))
+		if q := strings.Count(got, `"`) / 2; q != tc.strings {
+			t.Errorf("%d octets became %d strings, want %d:\n%s", tc.n, q, tc.strings, got)
+		}
+		if strings.Contains(got, `""`) {
+			t.Errorf("%d octets left an empty string:\n%s", tc.n, got)
+		}
+	}
+}
+
 // TestDKIMOutputRecordWrapsSplitValue proves a multi-string record carries the parentheses
 // a zone file requires around it.
 func TestDKIMOutputRecordWrapsSplitValue(t *testing.T) {
