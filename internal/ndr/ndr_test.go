@@ -137,6 +137,28 @@ func TestParseBindVector(t *testing.T) {
 	wantEq(t, len(pdu.Bind.AuthInfo), 0, "the auth info length (auth-none)")
 }
 
+// TestATruncatedBindIsRefused cuts the bind vector at every length short of the
+// presentation contexts it declares. The bytes come from an unauthenticated RPC
+// client, so a short PDU must be an error, never a panic or a bind decoded from
+// bytes the client did not send.
+func TestATruncatedBindIsRefused(t *testing.T) {
+	full := bindVector()
+	// The context list ends where the auth verifier would start; any cut before
+	// that leaves a declared syntax unread.
+	for n := range len(full) {
+		func() {
+			defer func() {
+				if x := recover(); x != nil {
+					t.Errorf("a bind cut to %d bytes panicked: %v", n, x)
+				}
+			}()
+			if pdu, err := ParsePDU(full[:n]); err == nil {
+				t.Errorf("a bind cut to %d bytes parsed as %+v", n, pdu.Bind)
+			}
+		}()
+	}
+}
+
 // TestBigEndianRejected proves a big-endian peer is rejected (the NDR
 // primitives are little-endian only).
 func TestBigEndianRejected(t *testing.T) {
