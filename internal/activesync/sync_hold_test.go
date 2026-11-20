@@ -179,14 +179,22 @@ func TestSyncHoldAcceptsTheRangeEdges(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		t.Cleanup(cancel) // ends the held request before the server's Close waits for it
 		reply := make(chan *wbxml.Node, 1)
+		errs := make(chan error, 1)
 		go func() {
-			if _, root, err := postCommandErr(ctx, ts, "Sync", hangingSyncReq("1", hb)); err == nil {
-				reply <- root
+			_, root, err := postCommandErr(ctx, ts, "Sync", hangingSyncReq("1", hb))
+			if err != nil {
+				errs <- err
+				return
 			}
+			reply <- root
 		}()
+		// Within the second nothing cancels ctx, so an error here is the server
+		// answering the request at once (an HTTP failure), not holding it.
 		select {
 		case root := <-reply:
 			t.Errorf("heartbeat %s answered at once (Status %q), want it held", hb, root.ChildText(wbxml.ASStatus))
+		case err := <-errs:
+			t.Errorf("heartbeat %s failed at once (%v), want it held", hb, err)
 		case <-time.After(time.Second):
 		}
 	}
