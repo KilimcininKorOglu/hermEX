@@ -262,8 +262,11 @@ type conn struct {
 // already encrypted (RFC 3501 §6.2.1).
 func (c *conn) caps() string {
 	caps := capabilities
-	if c.srv.TLSConfig != nil && !c.isTLS {
-		caps += " STARTTLS"
+	if c.loginNeedsTLS() {
+		// RFC 3501 §6.2.3: no plaintext password before the link is encrypted,
+		// so LOGIN is announced disabled and no AUTH= mechanism is offered.
+		caps = strings.Replace(caps, " AUTH=PLAIN AUTH=LOGIN", "", 1)
+		caps += " STARTTLS LOGINDISABLED"
 	}
 	// COMPRESS=DEFLATE is advertised only until it is turned on (RFC 4978).
 	if !c.compressed {
@@ -446,9 +449,28 @@ func (c *conn) cmdCheck(tag string) {
 
 // --- authentication ---
 
+// loginNeedsTLS reports whether a password must wait for STARTTLS: the server
+// can encrypt the link and this one is not encrypted yet.
+func (c *conn) loginNeedsTLS() bool {
+	return c.srv.TLSConfig != nil && !c.isTLS
+}
+
+// refusePlaintextLogin refuses a password command on a link STARTTLS could still
+// protect, before any credential is read, the way the SMTP submission port does.
+func (c *conn) refusePlaintextLogin(tag string) bool {
+	if !c.loginNeedsTLS() {
+		return false
+	}
+	c.no(tag, "[PRIVACYREQUIRED] run STARTTLS before logging in")
+	return true
+}
+
 func (c *conn) cmdLogin(tag string, args []token) {
 	if c.state != stateNotAuth {
 		c.no(tag, "already authenticated")
+		return
+	}
+	if c.refusePlaintextLogin(tag) {
 		return
 	}
 	if len(args) < 2 {
@@ -463,6 +485,9 @@ func (c *conn) cmdLogin(tag string, args []token) {
 func (c *conn) cmdAuthenticate(tag string, args []token) {
 	if c.state != stateNotAuth {
 		c.no(tag, "already authenticated")
+		return
+	}
+	if c.refusePlaintextLogin(tag) {
 		return
 	}
 	mech, _ := arg0(args)

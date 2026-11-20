@@ -123,6 +123,35 @@ func TestStartTLSUpgrade(t *testing.T) {
 	tc.mustOK("a4", "LOGOUT")
 }
 
+// TestPlaintextLoginWaitsForTLS proves a server that can encrypt the link takes no
+// password before STARTTLS (RFC 3501 §6.2.3): CAPABILITY announces LOGINDISABLED
+// and offers no AUTH= mechanism, and LOGIN and AUTHENTICATE with the right
+// password are both refused with NO, so the password is never accepted in clear.
+func TestPlaintextLoginWaitsForTLS(t *testing.T) {
+	addr, _ := startSTARTTLSServer(t)
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	c := &testClient{t: t, conn: conn, br: bufio.NewReader(conn)}
+	c.expectUntagged("OK", "greeting")
+	un, _ := c.do("a0", "CAPABILITY")
+	if !containsSub(un, "LOGINDISABLED") || containsSub(un, "AUTH=PLAIN") {
+		t.Errorf("plaintext CAPABILITY = %v, want LOGINDISABLED and no AUTH=", un)
+	}
+	if _, status := c.do("a1", "LOGIN alice secret"); status != "NO" {
+		t.Errorf("plaintext LOGIN = %q, want NO", status)
+	}
+	// AGFsaWNlAHNlY3JldA== is base64("\x00alice\x00secret").
+	if _, status := c.do("a2", "AUTHENTICATE PLAIN AGFsaWNlAHNlY3JldA=="); status != "NO" {
+		t.Errorf("plaintext AUTHENTICATE = %q, want NO", status)
+	}
+	if _, status := c.do("a3", "SELECT INBOX"); status == "OK" {
+		t.Errorf("SELECT after the refused logins = %q, want a refusal", status)
+	}
+}
+
 // TestLineCapSurvivesStartTLSAndCompress sets the operator's command-line cap to
 // 128 bytes, then switches the connection to TLS (RFC 3501 6.2.1) and to DEFLATE
 // (RFC 4978). Both rebuild the command reader over the new stream; the cap must
