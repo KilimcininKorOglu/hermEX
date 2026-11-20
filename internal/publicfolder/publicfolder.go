@@ -64,12 +64,13 @@ var ErrBadDomain = errors.New("publicfolder: not a domain name")
 // dirFor returns the public-store directory of domain. The name reaches here from
 // an admin request parameter, and the directory is the domain root joined with
 // it, so a path separator or a dot segment would open another directory's store.
+// The name must pass directory.ValidateDomain, the rule every domain is created
+// under, so no store can live under a name no domain could have.
 func (svc *Service) dirFor(domain string) (string, error) {
-	d := strings.ToLower(domain)
-	if d == "" || strings.HasPrefix(d, ".") || strings.Contains(d, "..") || strings.ContainsAny(d, `/\`) {
+	if directory.ValidateDomain(domain) != nil {
 		return "", ErrBadDomain
 	}
-	return svc.paths.HomedirFor(d), nil
+	return svc.paths.HomedirFor(strings.ToLower(strings.TrimSpace(domain))), nil
 }
 
 // Provision ensures the domain's public store exists, creating and seeding it if
