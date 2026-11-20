@@ -323,6 +323,10 @@ func TestIMAPSort(t *testing.T) {
 	if un := strings.Join(c.mustOK("a4", "SORT (REVERSE SUBJECT) UTF-8 ALL"), " "); !strings.Contains(un, "SORT 2 1") {
 		t.Errorf("SORT (REVERSE SUBJECT) = %q, want \"SORT 2 1\"", un)
 	}
+	// RFC 5256 section 3: a sort key outside the grammar is a syntax error, so the
+	// command is answered BAD rather than sorted in an undefined order.
+	wantStatus(t, "SORT by an unknown key", c, "a5", "SORT (COLOUR) UTF-8 ALL", "BAD")
+	wantStatus(t, "SORT ending in REVERSE", c, "a6", "SORT (SUBJECT REVERSE) UTF-8 ALL", "BAD")
 }
 
 // TestIMAPThread covers THREAD (RFC 5256): a reply nests under its parent for both

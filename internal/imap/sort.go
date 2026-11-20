@@ -20,6 +20,12 @@ type sortCrit struct {
 	reverse bool
 }
 
+// sortKeyNames are the sort-key values of the RFC 5256 section 3 grammar; any
+// other key is a syntax error the command answers with BAD.
+var sortKeyNames = map[string]bool{
+	"ARRIVAL": true, "CC": true, "DATE": true, "FROM": true, "SIZE": true, "SUBJECT": true, "TO": true,
+}
+
 // parseSortCriteria consumes the "(crit ...)" SORT criteria list; REVERSE applies
 // to the criterion that follows it.
 func parseSortCriteria(cur *tokenCursor) ([]sortCrit, bool) {
@@ -37,14 +43,19 @@ func parseSortCriteria(cur *tokenCursor) ([]sortCrit, bool) {
 		if t.kind == tRParen {
 			break
 		}
-		if key := strings.ToUpper(t.val); key == "REVERSE" {
+		key := strings.ToUpper(t.val)
+		switch {
+		case key == "REVERSE":
 			reverse = true
-		} else {
+		case !sortKeyNames[key] || t.kind == tLParen:
+			return nil, false
+		default:
 			crits = append(crits, sortCrit{key: key, reverse: reverse})
 			reverse = false
 		}
 	}
-	if len(crits) == 0 {
+	// A REVERSE with no key after it is outside the grammar.
+	if len(crits) == 0 || reverse {
 		return nil, false
 	}
 	return crits, true
