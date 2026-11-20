@@ -11,9 +11,9 @@ import (
 	"hermex/internal/serve"
 )
 
-// defaultMaxRequestBody caps a SOAP request body; it is the fallback when no operator
+// DefaultMaxRequestBody caps a SOAP request body; it is the fallback when no operator
 // limit has been set.
-const defaultMaxRequestBody = 8 << 20
+const DefaultMaxRequestBody = 8 << 20
 
 // reqBodyLimit holds the operator-set SOAP request-body cap (bytes; 0 = use the
 // default), set by SetMaxRequestBody and read live by readEnvelope, so the EWS daemon's
@@ -31,11 +31,11 @@ func SetMaxRequestBody(n int64) {
 	reqBodyLimit.Store(n)
 }
 
-// defaultFreeBusyTargets caps how many mailboxes one availability request may fan
+// DefaultFreeBusyTargets caps how many mailboxes one availability request may fan
 // out to when no operator limit is set. Each target costs a store open and a full
 // calendar scan, and the request body admits tens of thousands of list entries, so
 // the count needs its own bound; the byte cap does not provide one.
-const defaultFreeBusyTargets = 100
+const DefaultFreeBusyTargets = 100
 
 // freeBusyTargetLimit holds the operator-set availability target cap (0 = use the
 // default), set by SetMaxFreeBusyTargets and read live per request.
@@ -56,10 +56,10 @@ func maxFreeBusyTargets() int {
 	if n := freeBusyTargetLimit.Load(); n > 0 {
 		return int(n)
 	}
-	return defaultFreeBusyTargets
+	return DefaultFreeBusyTargets
 }
 
-// defaultSubscriptionTimeoutMin is how long a notification subscription may stay
+// DefaultSubscriptionTimeoutMin is how long a notification subscription may stay
 // UNUSED before the server drops it, in minutes, when no operator value is set.
 //
 // [MS-OXWSNTIF] lets a PULL subscription carry its own Timeout, so this is the
@@ -67,7 +67,7 @@ func maxFreeBusyTargets() int {
 // subscription, whose request has no Timeout element at all. A client gap longer
 // than this loses the subscription, and the client cannot tell without
 // subscribing again, so an operator whose clients sleep or roam raises it.
-const defaultSubscriptionTimeoutMin = 30
+const DefaultSubscriptionTimeoutMin = 30
 
 // subTimeoutLimit holds the operator-set subscription idle timeout in minutes
 // (0 = use the default), set by SetSubscriptionTimeout and read when a
@@ -94,7 +94,7 @@ func SetSubscriptionTimeout(minutes int64) {
 func subscriptionTimeoutMin() int {
 	n := subTimeoutLimit.Load()
 	if n <= 0 {
-		return defaultSubscriptionTimeoutMin
+		return DefaultSubscriptionTimeoutMin
 	}
 	return min(int(n), maxSubscriptionTimeoutMin)
 }
@@ -174,7 +174,7 @@ func (h soapHeader) target() *impersonationTarget {
 // XML for the handler to unmarshal, and the ExchangeImpersonation target (nil when
 // the header is absent).
 func readEnvelope(r *http.Request) (op string, inner []byte, imp *impersonationTarget, err error) {
-	limit := int64(defaultMaxRequestBody)
+	limit := int64(DefaultMaxRequestBody)
 	if v := reqBodyLimit.Load(); v > 0 {
 		limit = v
 	}

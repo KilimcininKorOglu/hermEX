@@ -119,14 +119,14 @@ func (s *Server) icalLimit() int64 {
 	if v := s.maxICal.Load(); v > 0 {
 		return v
 	}
-	return defaultMaxICal
+	return DefaultMaxICal
 }
 
 func (s *Server) vcardLimit() int64 {
 	if v := s.maxVCard.Load(); v > 0 {
 		return v
 	}
-	return defaultMaxVCard
+	return DefaultMaxVCard
 }
 
 // Handler returns the HTTP handler for the DAV server. Every path is routed

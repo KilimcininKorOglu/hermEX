@@ -39,18 +39,18 @@ type Server struct {
 	Limiter   *authlimit.Limiter // failed-login throttle keyed by client IP; nil disables it
 
 	// maxCommandLine is the cap on ONE line read from the client in bytes (0 = the
-	// built-in defaultMaxCommandLine), held atomically so the daemon's poll can
+	// built-in DefaultMaxCommandLine), held atomically so the daemon's poll can
 	// apply an operator's edit while connections run, with no restart.
 	maxCommandLine atomic.Int64
 
 	conns lifecycle.ConnGroup
 }
 
-// defaultMaxCommandLine caps one line read from the client. A POP3 command is short
+// DefaultMaxCommandLine caps one line read from the client. A POP3 command is short
 // (RFC 1939), but a SASL continuation carries a base64 token, so the default leaves
 // room for one. Without a cap a client that never sends a line terminator grows the
 // daemon's memory without limit, and it reaches this reader before it authenticates.
-const defaultMaxCommandLine = 8 << 10 // 8 KiB
+const DefaultMaxCommandLine = 8 << 10 // 8 KiB
 
 // SetMaxCommandLine sets the maximum accepted line in bytes (0 restores the
 // built-in default). It is safe to call concurrently with active connections, so an
@@ -67,7 +67,7 @@ func (s *Server) commandLineLimit() int {
 	if n := s.maxCommandLine.Load(); n > 0 {
 		return int(n)
 	}
-	return defaultMaxCommandLine
+	return DefaultMaxCommandLine
 }
 
 // AddListener registers a listener (the plaintext and any implicit-TLS one) for

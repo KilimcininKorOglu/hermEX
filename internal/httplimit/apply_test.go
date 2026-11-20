@@ -77,7 +77,7 @@ func TestApplyKeepsDefaultsWhenUnset(t *testing.T) {
 	if l.Enabled() {
 		t.Error("limiter enabled with no stored row, want disabled")
 	}
-	if l.Burst() != defaultBurst || l.Period() != defaultWindow {
-		t.Errorf("limits = %d/%v, want the defaults %d/%v", l.Burst(), l.Period(), defaultBurst, defaultWindow)
+	if l.Burst() != DefaultBurst || l.Period() != DefaultWindow {
+		t.Errorf("limits = %d/%v, want the defaults %d/%v", l.Burst(), l.Period(), DefaultBurst, DefaultWindow)
 	}
 }

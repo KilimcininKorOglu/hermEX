@@ -5,36 +5,44 @@ import (
 	"net/http"
 	"time"
 
+	"hermex/internal/activesync"
 	"hermex/internal/authlimit"
 	"hermex/internal/connlimit"
+	"hermex/internal/dav"
 	"hermex/internal/directory"
+	"hermex/internal/ews"
+	"hermex/internal/httplimit"
+	"hermex/internal/imap"
+	"hermex/internal/mapihttp"
 	"hermex/internal/objectstore"
+	"hermex/internal/pop3"
+	"hermex/internal/smtp"
+	"hermex/internal/webmail2api"
 )
 
-// defaultIMAPLiteralMB and defaultEWSRequestMB mirror each protocol server's built-in
-// cap (50 MiB / 8 MiB), shown on the page until an operator saves one. The servers' own
-// constants are unexported.
+// The page shows each daemon's own built-in cap until an operator saves one, read
+// from the package that enforces it so the two cannot drift apart.
 const (
-	defaultIMAPLiteralMB       = 50
-	defaultEWSRequestMB        = 8
-	defaultActiveSyncRequestMB = 4
-	defaultDAVICalMB           = 4
-	defaultDAVVCardMB          = 4
-	defaultWebmailRequestMB    = 40
-	defaultMapiRequestMB       = 32
+	defaultIMAPLiteralMB       = imap.DefaultMaxLiteralSize >> 20
+	defaultEWSRequestMB        = ews.DefaultMaxRequestBody >> 20
+	defaultActiveSyncRequestMB = activesync.DefaultMaxRequestBody >> 20
+	defaultDAVICalMB           = dav.DefaultMaxICal >> 20
+	defaultDAVVCardMB          = dav.DefaultMaxVCard >> 20
+	defaultWebmailRequestMB    = webmail2api.DefaultMaxRequestBody >> 20
+	defaultMapiRequestMB       = mapihttp.DefaultMaxRequestBody >> 20
 	// defaultMapiUploadMB mirrors the object store's built-in cap on one message a
 	// MAPI client uploads across many requests.
 	defaultMapiUploadMB = objectstore.DefaultMaxUploadMessage >> 20
 	// defaultFreeBusyTargets is a count, not a size: how many mailboxes one
 	// availability request may fan out to. It mirrors each daemon's built-in value.
-	defaultFreeBusyTargets = 100
-	// defaultWebmailPreviewMB mirrors webmail2api's built-in inline-preview cap: the
+	defaultFreeBusyTargets = ews.DefaultFreeBusyTargets
+	// defaultWebmailPreviewMB is webmail2api's built-in inline-preview cap: the
 	// largest attachment the message view previews without being asked.
-	defaultWebmailPreviewMB = 2
+	defaultWebmailPreviewMB = webmail2api.DefaultMaxPreviewBytes >> 20
 	// defaultEWSSubscriptionTimeoutMin is a duration in minutes, not a size: how
 	// long an EWS notification subscription may stay unused before the server drops
-	// it. It mirrors the EWS daemon's own built-in value.
-	defaultEWSSubscriptionTimeoutMin = 30
+	// it.
+	defaultEWSSubscriptionTimeoutMin = ews.DefaultSubscriptionTimeoutMin
 	// defaultTLSReportMB mirrors the MTA's built-in cap on an HTTPS TLS report body.
 	defaultTLSReportMB = directory.DefaultTLSReportBytes >> 20
 )
@@ -119,11 +127,11 @@ func (s *Server) handleUISaveLoginLockout(w http.ResponseWriter, r *http.Request
 	s.render(w, r, "loginlockout-panel", s.limitsPageData(r, okNotice("limits.lockoutSaved")))
 }
 
-// defaultHTTPRateBurst and defaultHTTPRateWindow mirror the limiter's own built-in
-// values (600 requests per 60 s), shown on the page until an operator saves one.
+// defaultHTTPRateBurst and defaultHTTPRateWindow are the limiter's own built-in
+// values, shown on the page until an operator saves one.
 const (
-	defaultHTTPRateBurst  = 600
-	defaultHTTPRateWindow = 60
+	defaultHTTPRateBurst  = httplimit.DefaultBurst
+	defaultHTTPRateWindow = int(httplimit.DefaultWindow / time.Second)
 )
 
 // fillHTTPRateLimit sets the per-client HTTP request limiter's toggle and tunables on
@@ -271,12 +279,12 @@ func fillSubscriptionTimeout(data map[string]any, sl directory.SizeLimits, found
 }
 
 // defaultIMAPCommandLineBytes, defaultPOP3CommandLineBytes and
-// defaultSMTPCommandLineBytes mirror each daemon's own built-in line cap, shown on
+// defaultSMTPCommandLineBytes are each daemon's own built-in line cap, shown on
 // the page until an operator saves one.
 const (
-	defaultIMAPCommandLineBytes = 65536
-	defaultPOP3CommandLineBytes = 8192
-	defaultSMTPCommandLineBytes = 512
+	defaultIMAPCommandLineBytes = imap.DefaultMaxCommandLine
+	defaultPOP3CommandLineBytes = pop3.DefaultMaxCommandLine
+	defaultSMTPCommandLineBytes = smtp.DefaultMaxCommandLine
 )
 
 // fillCommandLineLimits sets the per-protocol command-line caps on a page-data map.

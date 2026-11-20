@@ -12,14 +12,14 @@ import (
 	"time"
 )
 
-// Defaults. A fixed window of defaultWindow admits up to defaultBurst requests
+// Defaults. A fixed window of DefaultWindow admits up to DefaultBurst requests
 // from one client address. The burst is deliberately generous: Outlook, EWS and
 // ActiveSync clients issue legitimate bursts during an initial sync, and a limit
 // that trips on normal sync traffic would be a wire-compatibility regression.
 // Like the inbound-SMTP limiter, this one starts DISABLED so an operator opts in.
 const (
-	defaultWindow = time.Minute
-	defaultBurst  = 600
+	DefaultWindow = time.Minute
+	DefaultBurst  = 600
 )
 
 // maxKeys bounds the limiter's memory: the number of distinct client addresses
@@ -54,8 +54,8 @@ type Limiter struct {
 // disabled.
 func NewLimiter() *Limiter {
 	l := &Limiter{windows: make(map[string]*window), recency: list.New(), now: time.Now}
-	l.burst.Store(defaultBurst)
-	l.period.Store(int64(defaultWindow))
+	l.burst.Store(DefaultBurst)
+	l.period.Store(int64(DefaultWindow))
 	return l
 }
 

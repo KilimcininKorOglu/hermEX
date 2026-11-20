@@ -73,7 +73,7 @@ type Server struct {
 	// run, with no restart. Set it via SetMaxSize.
 	maxSize atomic.Int64
 	// maxCommandLine is the cap on ONE line read from the client in bytes (0 = the
-	// built-in defaultMaxCommandLine), held atomically like maxSize so the MTA's
+	// built-in DefaultMaxCommandLine), held atomically like maxSize so the MTA's
 	// poll can apply an operator's edit while sessions run.
 	maxCommandLine atomic.Int64
 
@@ -885,14 +885,14 @@ func (s *Server) greetEHLO(w *ew, arg string, isTLS, authAvailable bool) {
 // sends the rest in a later transaction; 1000 is the Postfix default.
 const MaxRecipients = 1000
 
-// defaultMaxCommandLine is the RFC 5321 4.5.3.1.4 limit on a command line including
+// DefaultMaxCommandLine is the RFC 5321 4.5.3.1.4 limit on a command line including
 // the trailing CRLF, and the fallback when no operator limit has been set. Commands
 // are tiny, so anything approaching this is malformed or a memory-exhaustion probe;
 // the reader caps the read rather than buffering without bound. The DATA body's
 // per-line limit (4.5.3.1.6) is deliberately not enforced as a hard reject: major
 // senders routinely exceed 1000 octets and total-size abuse is already bounded by
 // SIZE, so a strict line cap would only break interop.
-const defaultMaxCommandLine = 512
+const DefaultMaxCommandLine = 512
 
 // SetMaxCommandLine sets the maximum accepted command line in bytes (0 restores the
 // built-in default). It is safe to call concurrently with active sessions, so an
@@ -909,7 +909,7 @@ func (s *Server) commandLineLimit() int {
 	if n := s.maxCommandLine.Load(); n > 0 {
 		return int(n)
 	}
-	return defaultMaxCommandLine
+	return DefaultMaxCommandLine
 }
 
 // errLineTooLong is returned when a command line exceeds the cap; the caller

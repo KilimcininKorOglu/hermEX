@@ -2,12 +2,12 @@ package webmail2api
 
 import "sync/atomic"
 
-// defaultMaxPreviewBytes is the largest attachment the SPA previews inline on its
+// DefaultMaxPreviewBytes is the largest attachment the SPA previews inline on its
 // own when a message opens; a larger one waits for a click. A PDF preview renders
 // through an <object>, which the browser does not defer the way it defers a lazy
 // <img>, so an unbounded preview downloads every PDF in the message before the
 // reader has asked for any of them.
-const defaultMaxPreviewBytes = 2 * 1024 * 1024
+const DefaultMaxPreviewBytes = 2 * 1024 * 1024
 
 // previewLimit holds the operator-set inline-preview cap (bytes; 0 = use the
 // default), set by SetMaxPreviewBytes and read live when the appearance settings
@@ -28,5 +28,5 @@ func maxPreviewBytes() int64 {
 	if n := previewLimit.Load(); n > 0 {
 		return n
 	}
-	return defaultMaxPreviewBytes
+	return DefaultMaxPreviewBytes
 }

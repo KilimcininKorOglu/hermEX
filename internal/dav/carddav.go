@@ -14,9 +14,9 @@ import (
 	"hermex/internal/serve"
 )
 
-// defaultMaxVCard caps a PUT body; a vCard, even with an embedded photo, is far
+// DefaultMaxVCard caps a PUT body; a vCard, even with an embedded photo, is far
 // smaller. It is the fallback when no operator limit is set.
-const defaultMaxVCard = 4 << 20
+const DefaultMaxVCard = 4 << 20
 
 // davResourceName stores the client-chosen object URL segment (e.g. "abc.vcf")
 // as a string property on the contact, so a URL resolves back to its stored

@@ -16,9 +16,9 @@ import (
 	"hermex/internal/serve"
 )
 
-// defaultMaxICal caps a calendar PUT body; an event, even a recurring one preserved
+// DefaultMaxICal caps a calendar PUT body; an event, even a recurring one preserved
 // verbatim, is far smaller. It is the fallback when no operator limit is set.
-const defaultMaxICal = 4 << 20
+const DefaultMaxICal = 4 << 20
 
 // icalOptions adapts the store's named-property allocator to oxcical.
 func icalOptions(st *objectstore.Store) oxcical.Options {

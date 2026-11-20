@@ -73,7 +73,7 @@ func TestStreamingFallsBackToTheBuiltInTimeout(t *testing.T) {
 
 	id := subscribe(t, srv, sess, streamingInner())
 
-	want := time.Duration(defaultSubscriptionTimeoutMin) * time.Minute
+	want := time.Duration(DefaultSubscriptionTimeoutMin) * time.Minute
 	if got := registeredTimeout(t, srv, id); got != want {
 		t.Errorf("streaming subscription timeout = %v, want the built-in %v", got, want)
 	}

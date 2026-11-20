@@ -12,16 +12,16 @@ import (
 	"hermex/internal/netline"
 )
 
-// defaultMaxLiteralSize caps a single IMAP literal so a hostile client cannot force an
+// DefaultMaxLiteralSize caps a single IMAP literal so a hostile client cannot force an
 // unbounded allocation. It is generous enough for ordinary mail APPENDs, and is the
 // fallback when no operator limit has been set.
-const defaultMaxLiteralSize = 50 << 20 // 50 MiB
+const DefaultMaxLiteralSize = 50 << 20 // 50 MiB
 
-// defaultMaxCommandLine caps ONE command line so a client that never sends a line
+// DefaultMaxCommandLine caps ONE command line so a client that never sends a line
 // terminator cannot grow the server's memory without limit. It is the fallback when
 // no operator limit has been set, and is generous: a long UID set or SEARCH key is
 // legitimate. A literal's payload is bounded separately by the literal cap.
-const defaultMaxCommandLine = 64 << 10 // 64 KiB
+const DefaultMaxCommandLine = 64 << 10 // 64 KiB
 
 // errProtocol marks a malformed command line (a client/syntax error), as
 // distinct from an I/O error on the connection.
@@ -97,11 +97,11 @@ type commandReader struct {
 	br *bufio.Reader
 	bw *bufio.Writer
 	// maxLiteral points at the server's live literal-size cap (bytes); nil or a
-	// non-positive value means use defaultMaxLiteralSize. Read live in readLiteral so
+	// non-positive value means use DefaultMaxLiteralSize. Read live in readLiteral so
 	// an operator's edit applies to an existing connection on its next literal.
 	maxLiteral *atomic.Int64
 	// maxLine points at the server's live command-line cap (bytes); nil or a
-	// non-positive value means use defaultMaxCommandLine. Read live at the start of
+	// non-positive value means use DefaultMaxCommandLine. Read live at the start of
 	// each command, so an operator's edit applies to an existing connection.
 	maxLine *atomic.Int64
 	// lineBytes counts the bytes of the command line read so far, reset per command.
@@ -143,7 +143,7 @@ func (r *commandReader) lineLimit() int {
 			return int(n)
 		}
 	}
-	return defaultMaxCommandLine
+	return DefaultMaxCommandLine
 }
 
 // discardLine reads and drops bytes up to and including the next LF.
@@ -376,7 +376,7 @@ func (r *commandReader) readLiteralHeader() (n int, nonSync bool, err error) {
 // operator's setting when one is configured and the built-in default otherwise,
 // lowered to the command-line cap before the session authenticates.
 func (r *commandReader) literalLimit() int64 {
-	limit := int64(defaultMaxLiteralSize)
+	limit := int64(DefaultMaxLiteralSize)
 	if r.maxLiteral != nil {
 		if v := r.maxLiteral.Load(); v > 0 {
 			limit = v

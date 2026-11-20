@@ -7,11 +7,11 @@ import (
 	"sync/atomic"
 )
 
-// defaultMaxRequestBody caps any request body the API accepts; it is the fallback
+// DefaultMaxRequestBody caps any request body the API accepts; it is the fallback
 // when no operator limit has been set. It matches maxImportBytes, the largest
 // legitimate body on this path (a base64-inflated .eml import), so the shared cap
 // never rejects what a purpose-built endpoint already allows.
-const defaultMaxRequestBody = maxImportBytes
+const DefaultMaxRequestBody = maxImportBytes
 
 // reqBodyLimit holds the operator-set request-body cap (bytes; 0 = use the default),
 // set by SetMaxRequestBody and read live by boundBody, so the webmail daemon's poll
@@ -34,7 +34,7 @@ func maxRequestBody() int64 {
 	if n := reqBodyLimit.Load(); n > 0 {
 		return n
 	}
-	return defaultMaxRequestBody
+	return DefaultMaxRequestBody
 }
 
 // boundBody caps every request body at the routing chokepoint rather than in each

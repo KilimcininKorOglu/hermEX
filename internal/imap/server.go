@@ -61,12 +61,12 @@ type Server struct {
 	Accounts directory.Accounts
 
 	// maxLiteral is the cap on a single IMAP literal in bytes (0 = the built-in
-	// defaultMaxLiteralSize), held atomically so the IMAP daemon's poll can apply an
+	// DefaultMaxLiteralSize), held atomically so the IMAP daemon's poll can apply an
 	// operator's edit while connections run, with no restart. Set it via
 	// SetMaxLiteralSize; readLiteral reads it live.
 	maxLiteral atomic.Int64
 	// maxCommandLine is the cap on ONE command line in bytes (0 = the built-in
-	// defaultMaxCommandLine), held atomically like maxLiteral. A literal's payload is
+	// DefaultMaxCommandLine), held atomically like maxLiteral. A literal's payload is
 	// not counted against it, because a literal carries its own cap.
 	maxCommandLine atomic.Int64
 

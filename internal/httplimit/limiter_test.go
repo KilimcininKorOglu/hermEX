@@ -179,11 +179,11 @@ func TestPruneDropsElapsedWindows(t *testing.T) {
 func TestSetLimitsRejectsNonsense(t *testing.T) {
 	l := NewLimiter()
 	l.SetLimits(0, 0)
-	if l.Burst() != defaultBurst || l.Period() != defaultWindow {
-		t.Errorf("limits = %d/%v, want the defaults %d/%v", l.Burst(), l.Period(), defaultBurst, defaultWindow)
+	if l.Burst() != DefaultBurst || l.Period() != DefaultWindow {
+		t.Errorf("limits = %d/%v, want the defaults %d/%v", l.Burst(), l.Period(), DefaultBurst, DefaultWindow)
 	}
 	l.SetLimits(-5, -time.Second)
-	if l.Burst() != defaultBurst || l.Period() != defaultWindow {
+	if l.Burst() != DefaultBurst || l.Period() != DefaultWindow {
 		t.Errorf("limits after negatives = %d/%v, want the defaults", l.Burst(), l.Period())
 	}
 }

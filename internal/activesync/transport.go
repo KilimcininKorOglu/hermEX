@@ -14,9 +14,9 @@ import (
 	"hermex/internal/wbxml"
 )
 
-// defaultMaxRequestBody caps a command's WBXML request body; it is the fallback when no
+// DefaultMaxRequestBody caps a command's WBXML request body; it is the fallback when no
 // operator limit has been set.
-const defaultMaxRequestBody = 4 << 20
+const DefaultMaxRequestBody = 4 << 20
 
 // reqBodyLimit holds the operator-set WBXML request-body cap (bytes; 0 = use the
 // default), set by SetMaxRequestBody and read live at each request, so the ActiveSync
@@ -40,7 +40,7 @@ func maxBodyLimit() int64 {
 	if v := reqBodyLimit.Load(); v > 0 {
 		return v
 	}
-	return defaultMaxRequestBody
+	return DefaultMaxRequestBody
 }
 
 // readWBXML reads and decodes the WBXML request body.

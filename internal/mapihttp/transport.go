@@ -13,11 +13,11 @@ import (
 // serverApp is announced in X-ServerApplication; clients log but do not gate on it.
 const serverApp = "Exchange/15.02.0390.000"
 
-// defaultMaxRequestBody caps a MAPI/HTTP request body when no operator limit has
+// DefaultMaxRequestBody caps a MAPI/HTTP request body when no operator limit has
 // been set. A ROP Execute buffer is bounded well under this (the client negotiates
 // RopBufferSize in the tens of KB), so a generous 32 MiB ceiling never truncates a
 // legitimate request while it stops an unbounded read from exhausting server memory.
-const defaultMaxRequestBody = 32 << 20
+const DefaultMaxRequestBody = 32 << 20
 
 // reqBodyLimit holds the operator-set request-body cap (bytes; 0 = use the default),
 // set by SetMaxRequestBody and read live by readBody, so the MAPI/HTTP daemon's poll
@@ -41,7 +41,7 @@ func SetMaxRequestBody(n int64) {
 func readBody(r *http.Request) []byte {
 	limit := reqBodyLimit.Load()
 	if limit <= 0 {
-		limit = defaultMaxRequestBody
+		limit = DefaultMaxRequestBody
 	}
 	// An oversized body reads as empty, which every handler refuses as an invalid
 	// request body, rather than as a prefix cut at the cap.

@@ -97,11 +97,11 @@ func TestOversizedBodyIsRefusedAs413(t *testing.T) {
 // daemon's poll drives, read live by the PUT handlers, applied without a restart.
 func TestBodyLimitResolution(t *testing.T) {
 	s := NewServer(nil, nil, "mail.test")
-	if got := s.icalLimit(); got != defaultMaxICal {
-		t.Errorf("default iCal = %d, want %d", got, defaultMaxICal)
+	if got := s.icalLimit(); got != DefaultMaxICal {
+		t.Errorf("default iCal = %d, want %d", got, DefaultMaxICal)
 	}
-	if got := s.vcardLimit(); got != defaultMaxVCard {
-		t.Errorf("default vCard = %d, want %d", got, defaultMaxVCard)
+	if got := s.vcardLimit(); got != DefaultMaxVCard {
+		t.Errorf("default vCard = %d, want %d", got, DefaultMaxVCard)
 	}
 
 	s.SetMaxICal(123456)
@@ -112,7 +112,7 @@ func TestBodyLimitResolution(t *testing.T) {
 
 	s.SetMaxICal(0) // 0 restores the default
 	s.SetMaxVCard(0)
-	if s.icalLimit() != defaultMaxICal || s.vcardLimit() != defaultMaxVCard {
+	if s.icalLimit() != DefaultMaxICal || s.vcardLimit() != DefaultMaxVCard {
 		t.Errorf("after reset = ical %d / vcard %d, want the defaults", s.icalLimit(), s.vcardLimit())
 	}
 }

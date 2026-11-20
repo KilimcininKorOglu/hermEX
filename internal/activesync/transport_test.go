@@ -14,16 +14,16 @@ import (
 // drives, read live at each request.
 func TestMaxBodyLimitResolution(t *testing.T) {
 	defer SetMaxRequestBody(0)
-	if got := maxBodyLimit(); got != defaultMaxRequestBody {
-		t.Errorf("default = %d, want %d", got, defaultMaxRequestBody)
+	if got := maxBodyLimit(); got != DefaultMaxRequestBody {
+		t.Errorf("default = %d, want %d", got, DefaultMaxRequestBody)
 	}
 	SetMaxRequestBody(123456)
 	if got := maxBodyLimit(); got != 123456 {
 		t.Errorf("after set = %d, want 123456", got)
 	}
 	SetMaxRequestBody(0) // 0 restores the default
-	if got := maxBodyLimit(); got != defaultMaxRequestBody {
-		t.Errorf("after reset = %d, want the default %d", got, defaultMaxRequestBody)
+	if got := maxBodyLimit(); got != DefaultMaxRequestBody {
+		t.Errorf("after reset = %d, want the default %d", got, DefaultMaxRequestBody)
 	}
 }
 

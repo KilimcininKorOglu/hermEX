@@ -132,11 +132,11 @@ func TestRequestBodyCapIgnoresNonPositiveValues(t *testing.T) {
 	t.Cleanup(func() { SetMaxRequestBody(0) })
 
 	SetMaxRequestBody(0)
-	if got := maxRequestBody(); got != defaultMaxRequestBody {
-		t.Errorf("cap after 0 = %d, want the built-in default %d", got, defaultMaxRequestBody)
+	if got := maxRequestBody(); got != DefaultMaxRequestBody {
+		t.Errorf("cap after 0 = %d, want the built-in default %d", got, DefaultMaxRequestBody)
 	}
 	SetMaxRequestBody(-1)
-	if got := maxRequestBody(); got != defaultMaxRequestBody {
-		t.Errorf("cap after a negative value = %d, want the built-in default %d", got, defaultMaxRequestBody)
+	if got := maxRequestBody(); got != DefaultMaxRequestBody {
+		t.Errorf("cap after a negative value = %d, want the built-in default %d", got, DefaultMaxRequestBody)
 	}
 }
