@@ -33,7 +33,8 @@
     "fetchmail": {
       "imapFolder": "IMAP kaynağında okunan klasör. POP3'te klasör yoktur, bu alan yok sayılır.",
       "fetchAll": "Her yoklamada yalnızca yeni iletileri değil, tüm iletileri çeker. Sunucuda sakla açıksa aynı iletiler her yoklamada yeniden teslim edilir.",
-      "verifyCert": "Kaynak sunucunun TLS sertifikasını denetler. Yalnızca kendinden imzalı sertifikası olan bir sunucu için kapatın."
+      "verifyCert": "Kaynak sunucunun TLS sertifikasını denetler. Yalnızca kendinden imzalı sertifikası olan bir sunucu için kapatın.",
+      "useSSL": "Açık: bağlantı baştan TLS ile kurulur (993 veya 995 portu). Kapalı: bağlantı 143 veya 110 portundan kurulur ve STARTTLS ile TLS'e geçilir. STARTTLS sunmayan bir kaynak yoklanmaz. Bu sayede parola hiçbir zaman şifresiz gönderilmez."
     },
     "mlists": {
       "type": "Normal, listenin sayfasında girdiğiniz üyelere teslim eder. Alan adı, listenin alan adındaki her posta kutusuna teslim eder.",

@@ -33,7 +33,8 @@
     "fetchmail": {
       "imapFolder": "The folder read on an IMAP source. POP3 has no folders and ignores it.",
       "fetchAll": "Fetch every message on each poll, not only the new ones. With Keep on server this delivers the same messages again on every poll.",
-      "verifyCert": "Check the source server's TLS certificate. Turn it off only for a server with a self-signed certificate."
+      "verifyCert": "Check the source server's TLS certificate. Turn it off only for a server with a self-signed certificate.",
+      "useSSL": "On: connect with TLS from the start (port 993 or 995). Off: connect on port 143 or 110 and switch to TLS with STARTTLS. A source that does not offer STARTTLS is not polled, so the password is never sent unencrypted."
     },
     "mlists": {
       "type": "Normal delivers to the members you enter on the list's page. Domain delivers to every mailbox of the list's domain.",
