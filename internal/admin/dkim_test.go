@@ -233,6 +233,44 @@ func TestDKIMEnableThenDisable(t *testing.T) {
 	}
 }
 
+// TestDKIMNeedsASystemAdmin proves a domain administrator, even over every domain,
+// can neither read, generate, toggle nor delete a DKIM key: the key signs mail as
+// the domain, so replacing or deleting it breaks or hijacks the domain's signature.
+func TestDKIMNeedsASystemAdmin(t *testing.T) {
+	d := dkimTestDir()
+	d.roles = nil
+	d.perms = []directory.Permission{{Name: directory.PermDomainAdmin, Params: "*"}}
+	d.dkimFound, d.dkimSelector, d.dkimPublicTXT = true, "hermex", "v=DKIM1; k=rsa; p=AAA"
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/domains/1/dkim/generate", session, csrf, url.Values{"selector": {"evil"}}), http.StatusForbidden, "generate")
+	wantStatus(t, htmxPUT(t, ts, "/admin/ui/domains/1/dkim/enable", session, csrf, url.Values{"enabled": {"1"}}), http.StatusForbidden, "enable")
+	wantStatus(t, htmxPOST(t, ts, "/admin/ui/domains/1/dkim/delete", session, csrf, url.Values{}), http.StatusForbidden, "delete")
+	wantStatus(t, authedGET(t, ts, "/admin/ui/domains/1/dkim/output?mode=txt", session), http.StatusForbidden, "output")
+	if !d.dkimFound || d.dkimSelector != "hermex" || d.dkimEnabled {
+		t.Errorf("a domain admin changed the key: found=%v selector=%q enabled=%v", d.dkimFound, d.dkimSelector, d.dkimEnabled)
+	}
+}
+
+// TestDKIMGenerateNeverShowsThePrivateKey proves the generate response carries the
+// public record only. The private key is stored, wrapped, in the directory and is
+// exported only from the operator's shell, never over the panel.
+func TestDKIMGenerateNeverShowsThePrivateKey(t *testing.T) {
+	d := dkimTestDir()
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	body := wantBody(t, htmxPOST(t, ts, "/admin/ui/domains/1/dkim/generate", session, csrf, url.Values{}), http.StatusOK, "generate")
+	if strings.Contains(body, "PRIVATE KEY") {
+		t.Errorf("the generate response carries the private key:\n%s", body)
+	}
+	_, output := dkimOutputFragment(t, ts, "/admin/ui/domains/1/dkim/output?mode=record", session)
+	if strings.Contains(output, "PRIVATE KEY") {
+		t.Errorf("the output fragment carries the private key:\n%s", output)
+	}
+}
+
 // TestDKIMDelete proves deleting removes the key.
 func TestDKIMDelete(t *testing.T) {
 	d := dkimTestDir()
