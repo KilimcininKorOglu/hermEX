@@ -1,6 +1,7 @@
 package directory
 
 import (
+	"errors"
 	"fmt"
 	"net/mail"
 	"strings"
@@ -55,15 +56,23 @@ func ValidateContactAddress(address string) error {
 	return validRoutableAddress(address, "contact address")
 }
 
+// ErrUnroutableAddress reports an address no relay can route: not exactly one
+// addr-spec, or a domain that is not a host name. A caller answers it as the
+// client's error.
+var ErrUnroutableAddress = errors.New("directory: not a single routable address")
+
 // validRoutableAddress reports whether s is exactly one addr-spec, with no
 // display name, whose domain is a host name.
 func validRoutableAddress(s, what string) error {
 	s = strings.TrimSpace(s)
 	a, err := mail.ParseAddress(s)
 	if err != nil || a.Name != "" || a.Address != s {
-		return fmt.Errorf("directory: %s %q is not a single address", what, s)
+		return fmt.Errorf("%w: %s %q", ErrUnroutableAddress, what, s)
 	}
-	return ValidateDomain(s[strings.LastIndexByte(s, '@')+1:])
+	if err := ValidateDomain(s[strings.LastIndexByte(s, '@')+1:]); err != nil {
+		return fmt.Errorf("%w: %s %q: %v", ErrUnroutableAddress, what, s, err)
+	}
+	return nil
 }
 
 // ValidateAccessPattern reports whether an allow/block pattern is one email address

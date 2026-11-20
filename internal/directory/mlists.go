@@ -430,6 +430,14 @@ func (d *SQLDirectory) UpsertLDAPGroup(listname string, externid []byte, owner s
 // (lowercased, trimmed, de-duplicated, blanks dropped), in one transaction,
 // reporting whether the list existed.
 func (d *SQLDirectory) SetMembers(listname string, members []string) (bool, error) {
+	// Each member becomes a recipient of every list message, so one no relay can
+	// route would bounce on every post. The set is refused whole, before anything
+	// is replaced.
+	for _, m := range cleanAddrs(members) {
+		if err := validRoutableAddress(m, "list member"); err != nil {
+			return false, err
+		}
+	}
 	id, ok, err := d.editableMlistID(listname)
 	if err != nil || !ok {
 		return false, err

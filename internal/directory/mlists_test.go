@@ -45,6 +45,26 @@ func mkList(t *testing.T, d *SQLDirectory, addr string, listType, listPriv int, 
 	}
 }
 
+// TestSetMembersRefusesAnUnroutableMember proves a member set holding one address no
+// relay can route is refused whole, and the list keeps its members: each member is
+// a recipient of every post, so a bad one would bounce on each message.
+func TestSetMembersRefusesAnUnroutableMember(t *testing.T) {
+	d := mlistTestDir(t)
+	mkList(t, d, "team@hermex.test", 0, 0, "alice@hermex.test")
+	for _, bad := range []string{"bob", "bob@", "Bob <bob@hermex.test>", "a@b@hermex.test"} {
+		if _, err := d.SetMembers("team@hermex.test", []string{"carol@hermex.test", bad}); err == nil {
+			t.Errorf("SetMembers with %q succeeded, want it refused", bad)
+		}
+	}
+	got, err := d.ListMembers("team@hermex.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, []string{"alice@hermex.test"}) {
+		t.Errorf("members after the refusals = %v, want [alice@hermex.test]", got)
+	}
+}
+
 func expandSorted(t *testing.T, d *SQLDirectory, list, from string) ([]string, MListResult) {
 	t.Helper()
 	got, res, err := d.ExpandMList(list, from)
