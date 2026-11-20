@@ -10,7 +10,7 @@ func TestUserZoneReadsTheStoredTimezone(t *testing.T) {
 	d, _ := freshDirectory(t)
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "acme.test")
-	mustCreateUser(t, d, root, "u@acme.test", "pw")
+	mustCreateUser(t, d, root, "u@acme.test", "password1")
 
 	if loc := UserZone(d, "u@acme.test"); loc != nil {
 		t.Fatalf("a user with no stored timezone answered %v, want no zone", loc)
@@ -33,7 +33,7 @@ func TestUserZoneFailsSoft(t *testing.T) {
 	d, _ := freshDirectory(t)
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "acme.test")
-	mustCreateUser(t, d, root, "u@acme.test", "pw")
+	mustCreateUser(t, d, root, "u@acme.test", "password1")
 
 	if loc := UserZone(d, "nobody@acme.test"); loc != nil {
 		t.Errorf("an unknown user answered %v, want no zone", loc)

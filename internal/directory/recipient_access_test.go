@@ -23,10 +23,10 @@ func setupRecipientAccess(t *testing.T) (d *SQLDirectory, aliceDir, bobDir strin
 	}
 	aliceDir = filepath.Join(root, "users", "alice")
 	bobDir = filepath.Join(root, "users", "bob")
-	if _, err := d.CreateUser("alice@hermex.test", "secret", aliceDir); err != nil {
+	if _, err := d.CreateUser("alice@hermex.test", "secret-pw1", aliceDir); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.CreateUser("bob@hermex.test", "secret", bobDir); err != nil {
+	if _, err := d.CreateUser("bob@hermex.test", "secret-pw1", bobDir); err != nil {
 		t.Fatal(err)
 	}
 	return d, aliceDir, bobDir

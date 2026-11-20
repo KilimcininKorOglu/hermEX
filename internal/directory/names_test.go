@@ -154,7 +154,7 @@ func TestCreateUserRefusesEscapingMaildir(t *testing.T) {
 	// local part walks out of the data root.
 	address := "../../../escaped@hermex.test"
 	escaped := filepath.Join(root, "user", "hermex.test", "../../../escaped")
-	if _, err := d.CreateUser(address, "pw", escaped); err == nil {
+	if _, err := d.CreateUser(address, "password1", escaped); err == nil {
 		t.Fatal("CreateUser accepted an address that escapes the data root")
 	}
 	if _, err := os.Stat(escaped); err == nil {

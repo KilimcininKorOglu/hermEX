@@ -73,7 +73,7 @@ func TestOutgoingDisplayNames(t *testing.T) {
 	d, _ := freshDirectory(t)
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "ali@hermex.test", "pw")
+	mustCreateUser(t, d, root, "ali@hermex.test", "password1")
 	_, err := d.SetUserProperties("ali@hermex.test", map[uint32]string{
 		0x3001001F: "Ali Veli", 0x3A16001F: "Acme", 0x3A17001F: "Sales",
 	})

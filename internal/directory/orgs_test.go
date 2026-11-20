@@ -148,7 +148,7 @@ func seedOrgScopedConfig(t *testing.T, d *SQLDirectory, db *sql.DB, root string,
 	mustBindDomain(t, d, domID, LDAPConnection{Name: "acme", URI: "ldaps://acme"})
 	_, err = db.Exec(`INSERT INTO sync_policy (org_id, policy) VALUES (?, '{}')`, orgID)
 	mustNoErr(t, "insert the org sync policy", err)
-	uid = mustCreateUser(t, d, root, "admin@acme.test", "pw")
+	uid = mustCreateUser(t, d, root, "admin@acme.test", "password1")
 	mustNoErr(t, "grant org admin", d.GrantAdminRole(uid, AdminOrg, orgID))
 	return domID, uid
 }

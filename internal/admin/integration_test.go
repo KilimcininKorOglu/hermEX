@@ -113,7 +113,7 @@ func seedIntegrationDirectory(t *testing.T) *directory.SQLDirectory {
 	root := t.TempDir()
 	_, err := dir.CreateDomain("hermex.test", root+"/dom")
 	mustNoErr(t, err, "create domain")
-	uid, err := dir.CreateUser("boss@hermex.test", "s3cret", root+"/boss")
+	uid, err := dir.CreateUser("boss@hermex.test", "s3cret-pw1", root+"/boss")
 	mustNoErr(t, err, "create admin user")
 	mustNoErr(t, dir.GrantAdminRole(uid, directory.AdminSystem, 0), "grant system role")
 	return dir
@@ -132,7 +132,7 @@ func postBossLogin(t *testing.T, ts *httptest.Server, password string) *http.Res
 // CSRF cookie values.
 func loginBoss(t *testing.T, ts *httptest.Server) (session, csrf string) {
 	t.Helper()
-	resp := postBossLogin(t, ts, "s3cret")
+	resp := postBossLogin(t, ts, "s3cret-pw1")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("login status %d, want 200", resp.StatusCode)
@@ -156,7 +156,7 @@ func loginBoss(t *testing.T, ts *httptest.Server) (session, csrf string) {
 // the config-derived maildir end-to-end.
 func checkAPICreateUser(t *testing.T, ts *httptest.Server, dir *directory.SQLDirectory, session, csrf string) {
 	t.Helper()
-	cr := authedPOST(t, ts, "/admin/users", session, csrf, `{"email":"intern@hermex.test","password":"pw2"}`)
+	cr := authedPOST(t, ts, "/admin/users", session, csrf, `{"email":"intern@hermex.test","password":"password2"}`)
 	wantStatus(t, cr, http.StatusCreated, "API create-user")
 	_, ok, _ := dir.UserID("intern@hermex.test")
 	wantTrue(t, ok, "the API-created user lands in the directory")
@@ -186,14 +186,14 @@ func checkLDAPConnectionRoundTrip(t *testing.T, ts *httptest.Server, session, cs
 // the user changes it.
 func checkPasswordReset(t *testing.T, ts *httptest.Server, dir *directory.SQLDirectory, session, csrf string) {
 	t.Helper()
-	reset := authedPOST(t, ts, "/admin/users/intern@hermex.test/password", session, csrf, `{"password":"pw3"}`)
+	reset := authedPOST(t, ts, "/admin/users/intern@hermex.test/password", session, csrf, `{"password":"password3"}`)
 	wantStatus(t, reset, http.StatusNoContent, "password reset")
 
-	_, lenient := dir.AuthenticateAllowingPasswordChange("intern@hermex.test", "pw3")
+	_, lenient := dir.AuthenticateAllowingPasswordChange("intern@hermex.test", "password3")
 	wantTrue(t, lenient, "the reset password authenticates through the lenient path")
-	_, strict := dir.Authenticate("intern@hermex.test", "pw3")
+	_, strict := dir.Authenticate("intern@hermex.test", "password3")
 	wantFalse(t, strict, "the strict path denies a must-change account")
-	_, old := dir.Authenticate("intern@hermex.test", "pw2")
+	_, old := dir.Authenticate("intern@hermex.test", "password2")
 	wantFalse(t, old, "the old password stops authenticating after a reset")
 
 	u, found, _ := dir.GetUser("intern@hermex.test")

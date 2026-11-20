@@ -70,7 +70,7 @@ func cleanTables(t *testing.T, db *sql.DB) {
 	t.Helper()
 	for _, tbl := range []string{"app_passwords", "user_totp_recovery", "user_totp", "altnames", "aliases", "forwards", "fetchmail_seen", "fetchmail", "admin_roles", "user_roles", "role_permissions", "roles", "associations", "specifieds", "mlists", "ldap_bindings", "ldap_connections", "users", "domains", "orgs", "ldap_config", "sync_policy", "create_defaults", "active_sessions", "webmail_sessions", "admin_sessions", "push_subscriptions", "dkim_keys", "tls_certs", "smtp_gateways", "conn_limit_settings",
 		"dmarc_report_records", "dmarc_reports", "tlsrpt_report_policies", "tlsrpt_reports", "dmarc_failure_reports",
-		"mail_report_settings", "dmarc_report_settings", "av_quarantine", "health_targets"} {
+		"mail_report_settings", "dmarc_report_settings", "av_quarantine", "health_targets", "password_policy_settings"} {
 		if _, err := db.Exec("DELETE FROM " + tbl); err != nil {
 			t.Fatalf("clean %s: %v", tbl, err)
 		}
@@ -85,7 +85,7 @@ func TestForwardDirective(t *testing.T) {
 	d, db := freshDirectory(t)
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "secret")
+	mustCreateUser(t, d, root, "alice@hermex.test", "secret-pw1")
 	mustNoErr(t, "create alias", d.CreateAlias("sales@hermex.test", "alice@hermex.test"))
 
 	// Set a Redirect and read it back by canonical username.
@@ -148,7 +148,7 @@ func TestSQLDirectoryFaithfulResolution(t *testing.T) {
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "hermex.test")
 	maildir := filepath.Join(root, "users", "hermex.test", "alice")
-	_, err := d.CreateUser("Alice@Hermex.Test", "secret", maildir)
+	_, err := d.CreateUser("Alice@Hermex.Test", "secret-pw1", maildir)
 	mustNoErr(t, "create user", err)
 	mustNoErr(t, "create alias", d.CreateAlias("postmaster@hermex.test", "alice@hermex.test"))
 
@@ -157,12 +157,12 @@ func TestSQLDirectoryFaithfulResolution(t *testing.T) {
 
 	// Authentication: correct password (case-insensitive login), wrong password,
 	// and unknown user.
-	path, ok := d.Authenticate("alice@hermex.test", "secret")
+	path, ok := d.Authenticate("alice@hermex.test", "secret-pw1")
 	wantEq(t, "Authenticate admitted the correct password", ok, true)
 	wantEq(t, "the authenticated mailbox path", path, maildir)
 	_, wrong := d.Authenticate("alice@hermex.test", "wrong")
 	wantEq(t, "Authenticate admitted a wrong password", wrong, false)
-	_, ghost := d.Authenticate("ghost@hermex.test", "secret")
+	_, ghost := d.Authenticate("ghost@hermex.test", "secret-pw1")
 	wantEq(t, "Authenticate admitted an unknown user", ghost, false)
 
 	// Recipient resolution: the user, an alias to the user, and an unknown.
@@ -178,7 +178,7 @@ func TestSQLDirectoryFaithfulResolution(t *testing.T) {
 	// A suspended account (address_status != NORMAL) must not log in.
 	_, err = db.Exec(`UPDATE users SET address_status = ? WHERE username = ?`, afUserSuspended, "alice@hermex.test")
 	mustNoErr(t, "suspend the account", err)
-	_, suspended := d.Authenticate("alice@hermex.test", "secret")
+	_, suspended := d.Authenticate("alice@hermex.test", "secret-pw1")
 	wantEq(t, "Authenticate admitted a suspended account", suspended, false)
 }
 
@@ -231,9 +231,9 @@ func TestResolveOpensStoreAcrossPartitions(t *testing.T) {
 	part0, part1 := t.TempDir(), t.TempDir()
 	aliceDir := filepath.Join(part0, "user", "hermex.test", "alice")
 	bobDir := filepath.Join(part1, "user", "hermex.test", "bob")
-	_, err := d.CreateUser("alice@hermex.test", "pw", aliceDir)
+	_, err := d.CreateUser("alice@hermex.test", "password1", aliceDir)
 	mustNoErr(t, "create alice", err)
-	_, err = d.CreateUser("bob@hermex.test", "pw", bobDir)
+	_, err = d.CreateUser("bob@hermex.test", "password1", bobDir)
 	mustNoErr(t, "create bob", err)
 	mustNoErr(t, "create the alias", d.CreateAlias("a@hermex.test", "alice@hermex.test"))
 
@@ -259,7 +259,7 @@ func TestCreatingAnAccountProvisionsItsMailbox(t *testing.T) {
 	mustCreateDomain(t, d, t.TempDir(), "hermex.test")
 	root := t.TempDir()
 
-	_, err := d.CreateUser("alice@hermex.test", "pw", filepath.Join(root, "alice"))
+	_, err := d.CreateUser("alice@hermex.test", "password1", filepath.Join(root, "alice"))
 	mustNoErr(t, "create alice", err)
 	_, err = d.UpsertLDAPUser("bob@hermex.test", []byte{0x01}, filepath.Join(root, "bob"))
 	mustNoErr(t, "sync bob from LDAP", err)
@@ -272,14 +272,14 @@ func TestCreatingAnAccountProvisionsItsMailbox(t *testing.T) {
 	// A path under a regular file cannot become a directory.
 	blocker := filepath.Join(root, "blocker")
 	mustNoErr(t, "write the blocker file", os.WriteFile(blocker, nil, 0o600))
-	_, err = d.CreateUser("carol@hermex.test", "pw", filepath.Join(blocker, "carol"))
+	_, err = d.CreateUser("carol@hermex.test", "password1", filepath.Join(blocker, "carol"))
 	if err == nil {
 		t.Fatal("creating an account whose mailbox cannot be made succeeded")
 	}
 	if _, ok := d.Resolve("carol@hermex.test"); ok {
 		t.Error("a failed create left the account behind")
 	}
-	_, err = d.CreateUser("carol@hermex.test", "pw", filepath.Join(root, "carol"))
+	_, err = d.CreateUser("carol@hermex.test", "password1", filepath.Join(root, "carol"))
 	mustNoErr(t, "retry the create", err)
 	wantProvisioned(t, filepath.Join(root, "carol"))
 }
@@ -294,7 +294,7 @@ func TestProvisionMissingMailboxesRepairsOlderAccounts(t *testing.T) {
 	mustCreateDomain(t, d, t.TempDir(), "hermex.test")
 	root := t.TempDir()
 	alice := filepath.Join(root, "alice")
-	_, err := d.CreateUser("alice@hermex.test", "pw", alice)
+	_, err := d.CreateUser("alice@hermex.test", "password1", alice)
 	mustNoErr(t, "create alice", err)
 	st, err := objectstore.OpenExisting(alice)
 	mustNoErr(t, "open alice", err)
@@ -401,7 +401,7 @@ func mailboxListFixture(t *testing.T) (d *SQLDirectory, aliceDir, bobDir string)
 		"bob@hermex.test":   bobDir,
 		"carol@hermex.test": carolDir,
 	} {
-		if _, err := d.CreateUser(addr, "secret", dir); err != nil {
+		if _, err := d.CreateUser(addr, "secret-pw1", dir); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -468,7 +468,7 @@ func TestSQLDirectorySharedMailboxes(t *testing.T) {
 		"support@hermex.test": supportDir,
 		"archive@old.test":    filepath.Join(root, "users", "archive"),
 	} {
-		_, err := d.CreateUser(addr, "secret", dir)
+		_, err := d.CreateUser(addr, "secret-pw1", dir)
 		mustNoErr(t, "create "+addr, err)
 	}
 	// Flag the two shared mailboxes, then disable the old.test domain.
@@ -496,7 +496,7 @@ func TestSQLDirectorySearchGAL(t *testing.T) {
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "hermex.test")
 	for _, u := range []string{"alice@hermex.test", "albert@hermex.test", "bob@hermex.test"} {
-		mustCreateUser(t, d, root, u, "secret")
+		mustCreateUser(t, d, root, u, "secret-pw1")
 	}
 	// Suspend albert: a disabled account must not surface in the address list.
 	_, err := db.Exec(`UPDATE users SET address_status = ? WHERE username = ?`, afUserSuspended, "albert@hermex.test")

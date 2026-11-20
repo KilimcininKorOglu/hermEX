@@ -23,7 +23,7 @@ func twoAccounts(t *testing.T) *SQLDirectory {
 		t.Fatal(err)
 	}
 	for _, u := range []string{"u@acme.test", "v@acme.test"} {
-		if _, err := d.CreateUser(u, "pw", filepath.Join(root, u)); err != nil {
+		if _, err := d.CreateUser(u, "password1", filepath.Join(root, u)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -62,7 +62,7 @@ func TestAnAppPasswordSignsInOnTheProtocols(t *testing.T) {
 	if !ok {
 		t.Fatal("a freshly minted credential was refused")
 	}
-	if want, _ := d.Authenticate("u@acme.test", "pw"); path != want {
+	if want, _ := d.Authenticate("u@acme.test", "password1"); path != want {
 		t.Errorf("the credential resolved to %q, want the account's own mailbox %q", path, want)
 	}
 	// It is the account's, not anyone else's.
@@ -82,23 +82,23 @@ func TestEnrollingClosesTheAccountPasswordOnTheProtocols(t *testing.T) {
 	d := twoAccounts(t)
 
 	// Before enrolling, the account password is what a mail client uses.
-	if _, ok := d.AuthenticateProtocol("u@acme.test", "pw"); !ok {
+	if _, ok := d.AuthenticateProtocol("u@acme.test", "password1"); !ok {
 		t.Fatal("an unenrolled account could not sign in with its own password")
 	}
 
 	enableSecondFactor(t, d, "u@acme.test")
 
-	if _, ok := d.AuthenticateProtocol("u@acme.test", "pw"); ok {
+	if _, ok := d.AuthenticateProtocol("u@acme.test", "password1"); ok {
 		t.Error("the account password still works on a client protocol after enrolling")
 	}
 	// The account password is still the account password everywhere a second
 	// factor CAN be asked for: the webmail and panel logins go through
 	// Authenticate, which is unchanged.
-	if _, ok := d.Authenticate("u@acme.test", "pw"); !ok {
+	if _, ok := d.Authenticate("u@acme.test", "password1"); !ok {
 		t.Error("enrolling broke the account password on the web login")
 	}
 	// And the other account is untouched.
-	if _, ok := d.AuthenticateProtocol("v@acme.test", "pw"); !ok {
+	if _, ok := d.AuthenticateProtocol("v@acme.test", "password1"); !ok {
 		t.Error("enrolling one account closed another account's protocol login")
 	}
 
@@ -126,7 +126,7 @@ func TestASuspendedAccountsCredentialStopsWorking(t *testing.T) {
 	if _, ok := d.AuthenticateProtocol("u@acme.test", secret); ok {
 		t.Error("a suspended account's app password still signs in")
 	}
-	if _, ok := d.AuthenticateProtocol("v@acme.test", "pw"); !ok {
+	if _, ok := d.AuthenticateProtocol("v@acme.test", "password1"); !ok {
 		t.Error("suspending one account closed another account's login")
 	}
 }
@@ -270,8 +270,8 @@ func TestSQLDirectorySatisfiesAppPasswordStore(t *testing.T) {
 // no app passwords working exactly as it did, which is what every test double in
 // the protocol packages is.
 func TestAuthenticateClientFallsBackWithoutTheCapability(t *testing.T) {
-	accs := StaticAccounts{"a@acme.test": {Password: "pw", MailboxPath: "/tmp/a"}}
-	if path, ok := AuthenticateClient(accs, "a@acme.test", "pw"); !ok || path != "/tmp/a" {
+	accs := StaticAccounts{"a@acme.test": {Password: "password1", MailboxPath: "/tmp/a"}}
+	if path, ok := AuthenticateClient(accs, "a@acme.test", "password1"); !ok || path != "/tmp/a" {
 		t.Errorf("AuthenticateClient = %q, %v", path, ok)
 	}
 	if _, ok := AuthenticateClient(accs, "a@acme.test", "wrong"); ok {

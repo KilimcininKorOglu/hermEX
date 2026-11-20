@@ -94,8 +94,8 @@ func TestRoleCRUD(t *testing.T) {
 	d, db := freshDirectory(t)
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "acme.test")
-	alice := mustCreateUser(t, d, root, "alice@acme.test", "pw")
-	bob := mustCreateUser(t, d, root, "bob@acme.test", "pw")
+	alice := mustCreateUser(t, d, root, "alice@acme.test", "password1")
+	bob := mustCreateUser(t, d, root, "bob@acme.test", "password1")
 
 	wantRoleNameRules(t, d)
 
@@ -216,7 +216,7 @@ func TestEffectivePermissionsUnionBridge(t *testing.T) {
 	mustCreateDomain(t, d, root, "acme.test")
 	mk := func(login string) int64 {
 		t.Helper()
-		return mustCreateUser(t, d, root, login+"@acme.test", "pw")
+		return mustCreateUser(t, d, root, login+"@acme.test", "password1")
 	}
 
 	// A user with ONLY a legacy direct grant must still resolve to authority.

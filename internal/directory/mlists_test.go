@@ -25,7 +25,7 @@ func mlistTestDir(t *testing.T) *SQLDirectory {
 		}
 	}
 	for _, u := range []string{"alice@hermex.test", "bob@hermex.test", "carol@hermex.test", "dave@partner.test"} {
-		if _, err := d.CreateUser(u, "pw", filepath.Join(root, "users", u)); err != nil {
+		if _, err := d.CreateUser(u, "password1", filepath.Join(root, "users", u)); err != nil {
 			t.Fatalf("create user %s: %v", u, err)
 		}
 	}

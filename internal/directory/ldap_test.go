@@ -144,7 +144,7 @@ func TestUpsertLDAPUser(t *testing.T) {
 	d, _ := freshDirectory(t)
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "localpw")
+	mustCreateUser(t, d, root, "alice@hermex.test", "local-password")
 
 	// An existing user gains its externid (created=false).
 	created, err := d.UpsertLDAPUser("alice@hermex.test", []byte{0x01, 0x02}, "")

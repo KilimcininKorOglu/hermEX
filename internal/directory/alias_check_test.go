@@ -22,7 +22,7 @@ func aliasTestDir(t *testing.T) *SQLDirectory {
 		t.Fatal(err)
 	}
 	for _, u := range []string{"alice@hermex.test", "bob@hermex.test"} {
-		if _, err := d.CreateUser(u, "secret", filepath.Join(root, u)); err != nil {
+		if _, err := d.CreateUser(u, "secret-pw1", filepath.Join(root, u)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -43,7 +43,7 @@ func TestAliasOverAnAccountIsRefused(t *testing.T) {
 	if _, ok := d.Resolve("bob@hermex.test"); !ok {
 		t.Error("bob no longer resolves, so the collision was written anyway")
 	}
-	if _, ok := d.Authenticate("bob@hermex.test", "secret"); !ok {
+	if _, ok := d.Authenticate("bob@hermex.test", "secret-pw1"); !ok {
 		t.Error("bob can no longer sign in, so the collision was written anyway")
 	}
 }
@@ -84,7 +84,7 @@ func TestAltnameOverAnAccountOrAliasIsRefused(t *testing.T) {
 			t.Errorf("altname %s was accepted", name)
 		}
 	}
-	if _, ok := d.Authenticate("bob@hermex.test", "secret"); !ok {
+	if _, ok := d.Authenticate("bob@hermex.test", "secret-pw1"); !ok {
 		t.Error("bob can no longer sign in, so the collision was written")
 	}
 	if _, ok := d.Resolve("sales@hermex.test"); !ok {
@@ -106,7 +106,7 @@ func TestNewAccountRowsCannotTakeAnAliasOrAltname(t *testing.T) {
 	d := aliasTestDir(t)
 	root := t.TempDir()
 	creators := map[string]func(addr string) error{
-		"user":    func(a string) error { _, err := d.CreateUser(a, "pw", filepath.Join(root, a)); return err },
+		"user":    func(a string) error { _, err := d.CreateUser(a, "password1", filepath.Join(root, a)); return err },
 		"room":    func(a string) error { _, err := d.CreateRoom(a, "R", filepath.Join(root, a), 0, false); return err },
 		"contact": func(a string) error { _, err := d.CreateContact(a, "C", "hermex.test"); return err },
 		"list":    func(a string) error { _, err := d.CreateMList(a, 0, 0); return err },
@@ -136,7 +136,7 @@ func TestNewAccountRowsCannotTakeAnAliasOrAltname(t *testing.T) {
 		if _, ok := d.Resolve(name + "-alias@hermex.test"); !ok {
 			t.Errorf("%s: the alias stopped resolving", name)
 		}
-		if _, ok := d.Authenticate(name+"-alt@hermex.test", "secret"); !ok {
+		if _, ok := d.Authenticate(name+"-alt@hermex.test", "secret-pw1"); !ok {
 			t.Errorf("%s: bob can no longer sign in under his alternative name", name)
 		}
 	}

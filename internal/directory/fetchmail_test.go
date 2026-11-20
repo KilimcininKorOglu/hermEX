@@ -12,7 +12,7 @@ func TestFetchmailCRUD(t *testing.T) {
 	d, _ := freshDirectory(t)
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "pw")
+	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
 
 	wantEq(t, "entries of a fresh mailbox", len(mustListFetchmail(t, d)), 0)
 
@@ -78,7 +78,7 @@ func TestFetchmailPasswordIsEncryptedAtRest(t *testing.T) {
 	d.SetKeySecret([]byte("test-key-secret"))
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "pw")
+	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
 	long := strings.Repeat("p", maxFetchmailPassword)
 	id, err := d.CreateFetchmail(FetchmailEntry{Mailbox: "alice@hermex.test", Active: true,
 		SrcServer: "s", SrcUser: "u", SrcPassword: long, Protocol: "IMAP"})
@@ -102,7 +102,7 @@ func TestFetchmailPlaintextPasswordIsRewrapped(t *testing.T) {
 	d, _ := freshDirectory(t)
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "pw")
+	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
 	id, err := d.CreateFetchmail(FetchmailEntry{Mailbox: "alice@hermex.test", Active: true,
 		SrcServer: "s", SrcUser: "u", SrcPassword: "legacy-secret", Protocol: "POP3"})
 	mustNoErr(t, "create a plaintext entry", err)
@@ -145,7 +145,7 @@ func TestFetchmailSeen(t *testing.T) {
 	d, _ := freshDirectory(t)
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "pw")
+	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
 	id, err := d.CreateFetchmail(FetchmailEntry{
 		Mailbox: "alice@hermex.test", Active: true, SrcServer: "s", SrcUser: "u", Protocol: "POP3", Keep: true,
 	})

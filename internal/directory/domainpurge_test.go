@@ -20,7 +20,7 @@ func TestPurgeDomainCascade(t *testing.T) {
 	alice := seedPurgeableUser(t, d, root)
 
 	// Landmine: another domain's user and its domain-scoped role permission must survive.
-	mustCreateUser(t, d, root, "bob@other.test", "pw")
+	mustCreateUser(t, d, root, "bob@other.test", "password1")
 	acmeStr, otherStr := strconv.FormatInt(acme, 10), strconv.FormatInt(other, 10)
 	roleID, err := d.CreateRole("Helpdesk", "",
 		[]Permission{
@@ -48,7 +48,7 @@ func TestPurgeDomainCascade(t *testing.T) {
 // a mailing list in the same domain.
 func seedPurgeableUser(t *testing.T, d *SQLDirectory, root string) int64 {
 	t.Helper()
-	alice := mustCreateUser(t, d, root, "alice@acme.test", "pw")
+	alice := mustCreateUser(t, d, root, "alice@acme.test", "password1")
 	ok, err := d.SetAltnames("alice@acme.test", []string{"alice2@acme.test"})
 	mustNoErr(t, "set altnames", err)
 	wantEq(t, "SetAltnames found the user", ok, true)
@@ -131,7 +131,7 @@ func seedDomainOnDisk(t *testing.T, d *SQLDirectory, root, domain string) (id in
 	mustNoErr(t, "write a marker file", os.WriteFile(filepath.Join(maildir, "marker"), []byte("x"), 0o644))
 	id, err := d.CreateDomain(domain, homedir)
 	mustNoErr(t, "create domain "+domain, err)
-	_, err = d.CreateUser("u@"+domain, "pw", maildir)
+	_, err = d.CreateUser("u@"+domain, "password1", maildir)
 	mustNoErr(t, "create user", err)
 	return id, homedir, maildir
 }

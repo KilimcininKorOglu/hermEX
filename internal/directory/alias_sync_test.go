@@ -13,8 +13,8 @@ func aliasSyncDir(t *testing.T) *SQLDirectory {
 	d, _ := freshDirectory(t)
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "pw")
-	mustCreateUser(t, d, root, "bob@hermex.test", "pw")
+	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
+	mustCreateUser(t, d, root, "bob@hermex.test", "password1")
 	return d
 }
 
@@ -88,8 +88,8 @@ func TestSyncAliasesStayInTheAccountsOrganization(t *testing.T) {
 	sister := mustCreateDomain(t, d, root, "hermex.de")
 	other := mustCreateDomain(t, d, root, "other.test")
 	mustCreateDomain(t, d, root, "loose.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "pw")
-	mustCreateUser(t, d, root, "carol@loose.test", "pw")
+	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
+	mustCreateUser(t, d, root, "carol@loose.test", "password1")
 	acme, err := d.CreateOrg("acme", "")
 	mustNoErr(t, "create acme", err)
 	rival, err := d.CreateOrg("rival", "")

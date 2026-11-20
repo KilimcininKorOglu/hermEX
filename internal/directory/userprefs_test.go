@@ -13,7 +13,7 @@ func TestUserPrefsRoundTrip(t *testing.T) {
 	d, _ := freshDirectory(t)
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "acme.test")
-	mustCreateUser(t, d, root, "u@acme.test", "pw")
+	mustCreateUser(t, d, root, "u@acme.test", "password1")
 	prefs := func(what string) UserPrefs {
 		t.Helper()
 		p, found, err := d.GetUserPrefs("u@acme.test")

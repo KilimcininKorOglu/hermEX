@@ -19,10 +19,10 @@ func TestListRooms(t *testing.T) {
 	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "dom")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.CreateUser("alice@hermex.test", "secret", filepath.Join(root, "alice")); err != nil {
+	if _, err := d.CreateUser("alice@hermex.test", "secret-pw1", filepath.Join(root, "alice")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.CreateUser("boardroom@hermex.test", "secret", filepath.Join(root, "room")); err != nil {
+	if _, err := d.CreateUser("boardroom@hermex.test", "secret-pw1", filepath.Join(root, "room")); err != nil {
 		t.Fatal(err)
 	}
 	// Promote the boardroom mailbox to a DT_ROOM resource.
@@ -52,7 +52,7 @@ func TestCreateRoom(t *testing.T) {
 	mustCreateDomain(t, d, root, "hermex.test")
 	// The room list is scoped to the caller, so the domain needs an account to
 	// ask as; a room is looked up on behalf of a person, never on its own.
-	mustCreateUser(t, d, root, "alice@hermex.test", "secret")
+	mustCreateUser(t, d, root, "alice@hermex.test", "secret-pw1")
 	_, err := d.CreateRoom("conf-a@hermex.test", "Conference A", filepath.Join(root, "conf-a"), 8, false)
 	mustNoErr(t, "create the conference room", err)
 	_, err = d.CreateRoom("projector-1@hermex.test", "Projector", filepath.Join(root, "proj"), 0, true)
@@ -106,7 +106,7 @@ func TestSearchGALRoomCapacity(t *testing.T) {
 	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "dom")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.CreateUser("alice@hermex.test", "secret", filepath.Join(root, "alice")); err != nil {
+	if _, err := d.CreateUser("alice@hermex.test", "secret-pw1", filepath.Join(root, "alice")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.CreateRoom("conf-a@hermex.test", "Conference A", filepath.Join(root, "conf"), 8, false); err != nil {

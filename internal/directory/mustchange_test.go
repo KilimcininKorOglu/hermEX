@@ -10,7 +10,7 @@ func TestRequirePasswordChange(t *testing.T) {
 	d, _ := freshDirectory(t)
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "acme.test")
-	mustCreateUser(t, d, root, "u@acme.test", "pw")
+	mustCreateUser(t, d, root, "u@acme.test", "password1")
 
 	// A fresh account does not require a password change.
 	wantEq(t, "a fresh account requires a password change",
@@ -46,7 +46,7 @@ func TestAuthenticateDeniesMustChange(t *testing.T) {
 	d, _ := freshDirectory(t)
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "acme.test")
-	mustCreateUser(t, d, root, "u@acme.test", "pw")
+	mustCreateUser(t, d, root, "u@acme.test", "password1")
 	strict := func(password string) bool {
 		t.Helper()
 		_, ok := d.Authenticate("u@acme.test", password)
@@ -59,18 +59,18 @@ func TestAuthenticateDeniesMustChange(t *testing.T) {
 	}
 
 	// Unflagged: both paths admit the correct password.
-	wantEq(t, "a fresh account authenticates on the strict path", strict("pw"), true)
+	wantEq(t, "a fresh account authenticates on the strict path", strict("password1"), true)
 
 	setMustChange(t, d, true)
 
 	// Flagged: the strict path denies even the correct password...
-	wantEq(t, "a flagged account on the strict path", strict("pw"), false)
+	wantEq(t, "a flagged account on the strict path", strict("password1"), false)
 	// ...but the remediation path still admits it so the user can change it.
-	wantEq(t, "a flagged account on the remediation path", remediation("pw"), true)
+	wantEq(t, "a flagged account on the remediation path", remediation("password1"), true)
 	// A wrong password is denied by both paths regardless of the flag.
 	wantEq(t, "a wrong password on the remediation path", remediation("nope"), false)
 
 	// Clearing the flag restores normal strict authentication.
 	setMustChange(t, d, false)
-	wantEq(t, "the strict path after clearing the flag", strict("pw"), true)
+	wantEq(t, "the strict path after clearing the flag", strict("password1"), true)
 }

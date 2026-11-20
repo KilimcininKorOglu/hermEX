@@ -12,7 +12,7 @@ func TestSetUserLocale(t *testing.T) {
 	d, _ := freshDirectory(t)
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "acme.test")
-	mustCreateUser(t, d, root, "u@acme.test", "pw")
+	mustCreateUser(t, d, root, "u@acme.test", "password1")
 
 	// A fresh user has no locale set; capture the record to diff against later.
 	before := mustGetUser(t, d, "u@acme.test")
@@ -28,7 +28,7 @@ func TestSetUserLocale(t *testing.T) {
 	wantEq(t, "lang after the write", after.Lang, "en")
 
 	// No-clobber: the narrow write must not disturb the rest of the record.
-	_, authed := d.Authenticate("u@acme.test", "pw")
+	_, authed := d.Authenticate("u@acme.test", "password1")
 	wantEq(t, "the password still authenticates after a locale write", authed, true)
 	wantEq(t, "maildir after a locale write", after.Maildir, before.Maildir)
 }

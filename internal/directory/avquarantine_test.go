@@ -72,9 +72,9 @@ func TestDomainOrgAdminEmails(t *testing.T) {
 	_, err = d.AssignDomainToOrg(dom, org)
 	mustNoErr(t, "assign the domain to the org", err)
 
-	dadmin := mustCreateUser(t, d, root, "dadmin@acme.test", "pw")
-	oadmin := mustCreateUser(t, d, root, "oadmin@acme.test", "pw")
-	mustCreateUser(t, d, root, "plain@acme.test", "pw") // no admin role
+	dadmin := mustCreateUser(t, d, root, "dadmin@acme.test", "password1")
+	oadmin := mustCreateUser(t, d, root, "oadmin@acme.test", "password1")
+	mustCreateUser(t, d, root, "plain@acme.test", "password1") // no admin role
 
 	mustNoErr(t, "grant domain admin", d.GrantAdminRole(dadmin, AdminDomain, dom))
 	mustNoErr(t, "grant org admin", d.GrantAdminRole(oadmin, AdminOrg, org))

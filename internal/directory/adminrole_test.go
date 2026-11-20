@@ -8,7 +8,7 @@ func TestAdminRoles(t *testing.T) {
 	d, _ := freshDirectory(t)
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "hermex.test")
-	uid := mustCreateUser(t, d, root, "admin@hermex.test", "pw")
+	uid := mustCreateUser(t, d, root, "admin@hermex.test", "password1")
 
 	id, ok, err := d.UserID("admin@hermex.test")
 	mustNoErr(t, "resolve the login", err)

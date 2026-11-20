@@ -23,7 +23,7 @@ func enrolledUser(t *testing.T) (*SQLDirectory, string) {
 	if _, err := d.CreateDomain("acme.test", filepath.Join(root, "acme.test")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.CreateUser("u@acme.test", "pw", filepath.Join(root, "u")); err != nil {
+	if _, err := d.CreateUser("u@acme.test", "password1", filepath.Join(root, "u")); err != nil {
 		t.Fatal(err)
 	}
 	return d, "u@acme.test"
@@ -167,7 +167,7 @@ func TestRecoveryCodeIsSpentOnce(t *testing.T) {
 // issued it, so it must open no other account and stay unspent for its owner.
 func TestRecoveryCodeIsBoundToItsAccount(t *testing.T) {
 	d, user := enrolledUser(t)
-	if _, err := d.CreateUser("v@acme.test", "pw", filepath.Join(t.TempDir(), "v")); err != nil {
+	if _, err := d.CreateUser("v@acme.test", "password1", filepath.Join(t.TempDir(), "v")); err != nil {
 		t.Fatal(err)
 	}
 	beginEnrollment(t, d, user)

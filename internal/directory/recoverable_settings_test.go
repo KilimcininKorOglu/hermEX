@@ -53,7 +53,7 @@ func TestSweepRecoverableItemsHonorsRetention(t *testing.T) {
 	_, err := d.CreateDomain("hermex.test", filepath.Join(root, "domains", "hermex.test"))
 	mustNoErr(t, "create domain", err)
 	maildir := filepath.Join(root, "alice")
-	_, err = d.CreateUser("alice@hermex.test", "pw", maildir)
+	_, err = d.CreateUser("alice@hermex.test", "password1", maildir)
 	mustNoErr(t, "create user", err)
 	seedAgedDumpster(t, maildir)
 
@@ -82,7 +82,7 @@ func TestMaintenanceReadsNeverCreateAMailbox(t *testing.T) {
 	_, err := d.CreateDomain("hermex.test", filepath.Join(root, "domains", "hermex.test"))
 	mustNoErr(t, "create domain", err)
 	maildir := filepath.Join(root, "alice")
-	_, err = d.CreateUser("alice@hermex.test", "pw", maildir)
+	_, err = d.CreateUser("alice@hermex.test", "password1", maildir)
 	mustNoErr(t, "create user", err)
 	mustNoErr(t, "remove the mailbox", os.RemoveAll(maildir))
 	mustNoErr(t, "set a window", d.SetRecoverableSettings(RecoverableSettings{RetentionDays: 14}))

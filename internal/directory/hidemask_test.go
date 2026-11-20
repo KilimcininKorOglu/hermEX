@@ -56,7 +56,7 @@ func TestSearchGALHidesBeforeTheLimit(t *testing.T) {
 	d, _ := freshDirectory(t)
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "caller@hermex.test", "pw")
+	mustCreateUser(t, d, root, "caller@hermex.test", "password1")
 	for _, a := range []string{"aa-hidden@hermex.test", "ab-hidden@hermex.test", "zz-visible@hermex.test"} {
 		_, err := d.CreateContact(a, a, "hermex.test")
 		mustNoErr(t, "create contact "+a, err)
@@ -84,7 +84,7 @@ func TestCountGALCountsWhatTheSearchFinds(t *testing.T) {
 	d, _ := freshDirectory(t)
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "caller@hermex.test", "pw")
+	mustCreateUser(t, d, root, "caller@hermex.test", "password1")
 	for _, a := range []string{"aa-x@hermex.test", "ab-x@hermex.test", "ac-x@hermex.test"} {
 		_, err := d.CreateContact(a, a, "hermex.test")
 		mustNoErr(t, "create contact "+a, err)

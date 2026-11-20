@@ -17,7 +17,7 @@ func TestSQLDirectoryUserDetailLifecycle(t *testing.T) {
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "hermex.test")
 	maildir := filepath.Join(root, "users", "alice")
-	_, err := d.CreateUser("alice@hermex.test", "secret", maildir)
+	_, err := d.CreateUser("alice@hermex.test", "secret-pw1", maildir)
 	mustNoErr(t, "create user", err)
 	mustNoErr(t, "create alias", d.CreateAlias("a.lias@hermex.test", "alice@hermex.test"))
 
@@ -136,7 +136,7 @@ func TestSQLDirectoryDeleteUserKeepsFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	maildir := filepath.Join(root, "users", "bob")
-	if _, err := d.CreateUser("bob@hermex.test", "secret", maildir); err != nil {
+	if _, err := d.CreateUser("bob@hermex.test", "secret-pw1", maildir); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(maildir, 0o700); err != nil {
@@ -159,8 +159,8 @@ func TestSQLDirectoryAltnames(t *testing.T) {
 	d, _ := freshDirectory(t)
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "pw")
-	mustCreateUser(t, d, root, "bob@hermex.test", "pw")
+	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
+	mustCreateUser(t, d, root, "bob@hermex.test", "password1")
 
 	// Set normalizes (lowercase/trim), de-duplicates, and drops blanks.
 	found, err := d.SetAltnames("alice@hermex.test", []string{"  Ali  ", "ali", "", "alice2"})
@@ -207,8 +207,8 @@ func TestSQLDirectoryUserAliases(t *testing.T) {
 	d, _ := freshDirectory(t)
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "pw")
-	mustCreateUser(t, d, root, "bob@hermex.test", "pw")
+	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
+	mustCreateUser(t, d, root, "bob@hermex.test", "password1")
 
 	found, err := d.SetAliasesFor("alice@hermex.test",
 		[]string{"  Sales@Hermex.Test ", "sales@hermex.test", "", "info@hermex.test"})
@@ -259,7 +259,7 @@ func TestSQLDirectoryUserProperties(t *testing.T) {
 	d, db := freshDirectory(t)
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "pw")
+	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
 	var uid int64
 	mustNoErr(t, "read alice's user id",
 		db.QueryRow(`SELECT id FROM users WHERE username = ?`, "alice@hermex.test").Scan(&uid))

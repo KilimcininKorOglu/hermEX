@@ -10,8 +10,8 @@ func catchAllDir(t *testing.T) *SQLDirectory {
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "hermex.test")
 	mustCreateDomain(t, d, root, "other.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "pw")
-	mustCreateUser(t, d, root, "bob@other.test", "pw")
+	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
+	mustCreateUser(t, d, root, "bob@other.test", "password1")
 	return d
 }
 
@@ -120,7 +120,7 @@ func TestCatchAllDoesNotAuthenticate(t *testing.T) {
 	d := catchAllDir(t)
 	mustSetCatchAll(t, d, "hermex.test", "alice@hermex.test")
 
-	if _, ok := d.Authenticate("nosuchuser@hermex.test", "pw"); ok {
+	if _, ok := d.Authenticate("nosuchuser@hermex.test", "password1"); ok {
 		t.Error("an unknown address authenticated through the catch-all")
 	}
 }

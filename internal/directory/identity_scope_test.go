@@ -26,7 +26,7 @@ func twoDomainDir(t *testing.T) (*SQLDirectory, int64) {
 		if dom == "partner.test" {
 			partnerID = id
 		}
-		if _, err := d.CreateUser("user@"+dom, "secret", filepath.Join(root, "users", dom)); err != nil {
+		if _, err := d.CreateUser("user@"+dom, "secret-pw1", filepath.Join(root, "users", dom)); err != nil {
 			t.Fatal(err)
 		}
 	}

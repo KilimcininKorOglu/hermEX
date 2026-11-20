@@ -18,12 +18,12 @@ func TestDomainDetailAndCounts(t *testing.T) {
 	id := mustCreateDomain(t, d, root, "acme.test")
 
 	// One user per count bucket.
-	mustCreateUser(t, d, root, "active@acme.test", "pw")
-	mustCreateUser(t, d, root, "suspended@acme.test", "pw")
+	mustCreateUser(t, d, root, "active@acme.test", "password1")
+	mustCreateUser(t, d, root, "suspended@acme.test", "password1")
 	ok, err := d.UpdateUser("suspended@acme.test", UserUpdate{Status: afUserSuspended})
 	mustNoErr(t, "suspend the user", err)
 	wantEq(t, "the suspend found the user", ok, true)
-	_, err = d.CreateUser("virtual@acme.test", "pw", "") // no maildir
+	_, err = d.CreateUser("virtual@acme.test", "password1", "") // no maildir
 	mustNoErr(t, "create the virtual user", err)
 
 	ok, err = d.UpdateDomain(id, DomainUpdate{
@@ -64,7 +64,7 @@ func TestDomainStatusEnforcement(t *testing.T) {
 	d, _ := freshDirectory(t)
 	root := t.TempDir()
 	id := mustCreateDomain(t, d, root, "acme.test")
-	mustCreateUser(t, d, root, "alice@acme.test", "pw")
+	mustCreateUser(t, d, root, "alice@acme.test", "password1")
 
 	// Active domain: login and local-delivery both succeed.
 	wantDomainServes(t, d, "active domain", true)
@@ -108,7 +108,7 @@ func setDomainStatus(t *testing.T, d *SQLDirectory, id int64, status int) {
 // delivery, agree on whether the domain is serving.
 func wantDomainServes(t *testing.T, d *SQLDirectory, what string, serves bool) {
 	t.Helper()
-	_, authed := d.Authenticate("alice@acme.test", "pw")
+	_, authed := d.Authenticate("alice@acme.test", "password1")
 	wantEq(t, what+": Authenticate admitted the login", authed, serves)
 	local, err := d.IsLocalDomain("acme.test")
 	mustNoErr(t, "is local domain", err)
@@ -131,17 +131,17 @@ func TestCreateUserMaxUser(t *testing.T) {
 	}
 
 	// Default max_user 0 means unlimited, creation is not blocked.
-	mustCreateUser(t, d, root, "u1@acme.test", "pw")
+	mustCreateUser(t, d, root, "u1@acme.test", "password1")
 
 	// Cap at 2: one more is allowed (count 1 < 2), then the next is refused.
 	setMaxUser(2)
-	mustCreateUser(t, d, root, "u2@acme.test", "pw")
-	_, err := d.CreateUser("u3@acme.test", "pw", filepath.Join(root, "u3"))
+	mustCreateUser(t, d, root, "u2@acme.test", "password1")
+	_, err := d.CreateUser("u3@acme.test", "password1", filepath.Join(root, "u3"))
 	wantErr(t, "a create over the cap succeeded", err)
 
 	// Clearing the cap reopens creation.
 	setMaxUser(0)
-	mustCreateUser(t, d, root, "u3@acme.test", "pw")
+	mustCreateUser(t, d, root, "u3@acme.test", "password1")
 }
 
 // TestSchemaUpgradeAddsDomainColumns proves the idempotent ALTERs actually upgrade
@@ -161,7 +161,7 @@ func TestSchemaUpgradeAddsDomainColumns(t *testing.T) {
 	root := t.TempDir()
 	id := mustCreateDomain(t, d, root, "acme.test")
 	// CreateUser reads max_user, this fails outright if the column was not re-added.
-	mustCreateUser(t, d, root, "u@acme.test", "pw")
+	mustCreateUser(t, d, root, "u@acme.test", "password1")
 	ok, err := d.UpdateDomain(id, DomainUpdate{MaxUser: 5, Title: "Acme"})
 	mustNoErr(t, "update domain after the upgrade", err)
 	wantEq(t, "UpdateDomain found the domain", ok, true)

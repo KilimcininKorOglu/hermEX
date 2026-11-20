@@ -18,7 +18,7 @@ func setupSpamThreshold(t *testing.T) (*SQLDirectory, string) {
 		t.Fatal(err)
 	}
 	maildir := filepath.Join(root, "users", "alice")
-	if _, err := d.CreateUser("alice@hermex.test", "secret", maildir); err != nil {
+	if _, err := d.CreateUser("alice@hermex.test", "secret-pw1", maildir); err != nil {
 		t.Fatal(err)
 	}
 	return d, maildir

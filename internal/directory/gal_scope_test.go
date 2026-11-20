@@ -39,7 +39,7 @@ func seedScopedPrincipals(t *testing.T, d *SQLDirectory, db *sql.DB, root, dom s
 	t.Helper()
 	for _, local := range []string{"user", "shared", "room"} {
 		addr := local + "@" + dom
-		_, err := d.CreateUser(addr, "secret", filepath.Join(root, "users", addr))
+		_, err := d.CreateUser(addr, "secret-pw1", filepath.Join(root, "users", addr))
 		mustNoErr(t, "create "+addr, err)
 	}
 	_, err := db.Exec(`UPDATE users SET address_status = ? WHERE username = ?`, afUserSharedMbox, "shared@"+dom)

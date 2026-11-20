@@ -252,7 +252,7 @@ func (d *SQLDirectory) upgradeHash(login, stored, password string) {
 	if !needsRehash(stored) {
 		return
 	}
-	if _, err := d.SetPassword(login, password); err != nil {
+	if _, err := d.storePassword(login, password); err != nil {
 		log.Printf("directory: could not re-hash %s at the current work factor: %v", login, err)
 	}
 }
@@ -794,6 +794,9 @@ func (d *SQLDirectory) CreateUser(username, password, maildir string) (int64, er
 	if err != nil {
 		return 0, err
 	}
+	if err := d.checkNewPassword(password); err != nil {
+		return 0, err
+	}
 	hash, err := sqlCryptNewHash(password)
 	if err != nil {
 		return 0, err
@@ -878,6 +881,16 @@ func (d *SQLDirectory) domainWithRoom(username string) (int64, error) {
 // existed. For an LDAP-mastered account the stored hash is inert (authentication
 // goes to LDAP), but it is updated regardless.
 func (d *SQLDirectory) SetPassword(username, password string) (bool, error) {
+	if err := d.checkNewPassword(password); err != nil {
+		return false, err
+	}
+	return d.storePassword(username, password)
+}
+
+// storePassword writes a password hash with no policy check. Only the sign-in
+// re-hash uses it directly: the password there is the one the account already
+// has, and refusing it would leave a short password at the old work factor.
+func (d *SQLDirectory) storePassword(username, password string) (bool, error) {
 	hash, err := sqlCryptNewHash(password)
 	if err != nil {
 		return false, err

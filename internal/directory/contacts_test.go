@@ -13,7 +13,7 @@ func contactTestDir(t *testing.T) *SQLDirectory {
 	d, _ := freshDirectory(t)
 	root := t.TempDir()
 	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "pw")
+	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
 	return d
 }
 
