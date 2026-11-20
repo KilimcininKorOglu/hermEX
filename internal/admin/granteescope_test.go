@@ -1,8 +1,11 @@
 package admin
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
 	"hermex/internal/directory"
@@ -84,6 +87,9 @@ func TestDomainAdminGranteeScope(t *testing.T) {
 func TestSystemAdminGranteeUnrestricted(t *testing.T) {
 	d := &fakeDir{
 		authOK: true, uid: 1,
+		// acme and other are two domains of one organization, so a grant across
+		// them stays inside it; the gate under test is the admin's own scope.
+		sameOrg: map[string]bool{"acme.test": true, "other.test": true},
 		roles:   []directory.AdminRole{{Role: directory.AdminSystem}},
 		domains: []directory.DomainInfo{{ID: 1, Name: "acme.test"}, {ID: 2, Name: "other.test"}},
 		knownUsers: map[string]directory.UserDetail{
@@ -101,5 +107,42 @@ func TestSystemAdminGranteeUnrestricted(t *testing.T) {
 		if s := statusOf(authedReq(t, ts, "PUT", path, session, csrf, `["ceo@other.test"]`)); s < 200 || s > 299 {
 			t.Errorf("system admin cross-domain grantee on %s = %d, want accepted", path, s)
 		}
+	}
+}
+
+// TestGrantsStayInsideTheOwnersOrganization: a send-as, send-on-behalf,
+// store-owner or delegate grant opens the mailbox or its identity to the grantee,
+// which every client surface keeps inside the organization, so even a system
+// administrator cannot grant one to an account of another organization, through
+// the API or the detail form, and nothing is stored.
+func TestGrantsStayInsideTheOwnersOrganization(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 1,
+		roles:   []directory.AdminRole{{Role: directory.AdminSystem}},
+		domains: []directory.DomainInfo{{ID: 1, Name: "acme.test"}, {ID: 2, Name: "rival.test"}},
+		knownUsers: map[string]directory.UserDetail{
+			"in@acme.test":   {Username: "in@acme.test", ID: 10, DomainID: 1, Maildir: "/mb/in"},
+			"spy@rival.test": {Username: "spy@rival.test", ID: 12, DomainID: 2, Maildir: "/mb/spy"},
+		},
+	}
+	store := &fakeStore{}
+	ts := adminServerStore(t, d, store)
+	session, csrf := loginCookies(t, ts)
+
+	for _, path := range []string{"/admin/users/in@acme.test/sendas", "/admin/users/in@acme.test/sendonbehalf", "/admin/users/in@acme.test/storeowners"} {
+		if s := statusOf(authedReq(t, ts, "PUT", path, session, csrf, `["spy@rival.test"]`)); s != http.StatusForbidden {
+			t.Errorf("PUT %s with a grantee of another organization = %d, want 403", path, s)
+		}
+	}
+	for field, path := range map[string]string{"delegates": "delegates", "sendas": "sendas", "storeowners": "storeowners"} {
+		resp := htmxPUT(t, ts, "/admin/ui/users/in@acme.test/"+path, session, csrf, url.Values{field: {"spy@rival.test"}})
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if strings.Contains(string(body), "Saved") {
+			t.Errorf("form %s saved a grantee of another organization", path)
+		}
+	}
+	if store.setSendAsVal != nil || store.setSendOnBehalfVal != nil || store.setDelegatesVal != nil {
+		t.Errorf("a grant to another organization was stored: send-as %v, delegates %v", store.setSendAsVal, store.setDelegatesVal)
 	}
 }

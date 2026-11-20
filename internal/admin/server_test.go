@@ -19,6 +19,9 @@ import (
 
 // fakeDir is a scripted Directory for the admin server tests.
 type fakeDir struct {
+	// sameOrg names the domains that belong to one organization, so SameScope
+	// joins them; a domain absent from it stands alone.
+	sameOrg            map[string]bool
 	authOK             bool
 	password           string // when set, Authenticate accepts only this password (else authOK alone governs)
 	uid                int64
@@ -1735,4 +1738,22 @@ func TestAdminWhoamiNoSession(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("no-session whoami status %d, want 401", resp.StatusCode)
 	}
+}
+
+// SameScope implements directory.ScopeChecker with the directory's rule: two
+// addresses share a scope when their domains (after the last '@') are equal, or
+// when sameOrg puts both domains in one organization.
+func (f *fakeDir) SameScope(caller, other string) (bool, error) {
+	domain := func(a string) string {
+		a = strings.ToLower(strings.TrimSpace(a))
+		if at := strings.LastIndex(a, "@"); at >= 0 {
+			return a[at+1:]
+		}
+		return ""
+	}
+	a, b := domain(caller), domain(other)
+	if a == "" || b == "" {
+		return false, nil
+	}
+	return a == b || (f.sameOrg[a] && f.sameOrg[b]), nil
 }

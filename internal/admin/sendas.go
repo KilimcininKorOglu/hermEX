@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"hermex/internal/directory"
 )
 
 // canonicalGrantees lowercases each grantee address and confirms it names a real
@@ -115,6 +117,10 @@ func (s *Server) saveGrantList(w http.ResponseWriter, r *http.Request, kind stri
 		http.Error(w, "no such user: "+bad, http.StatusNotFound)
 		return
 	}
+	if foreign := s.outsideOwnerOrg(r.PathValue("email"), list); foreign != "" {
+		http.Error(w, "not another account of the owner's organization: "+foreign, http.StatusForbidden)
+		return
+	}
 	if err := set(maildir, list); err != nil {
 		s.fail(w, "could not set "+kind, err, http.StatusInternalServerError)
 		return
@@ -138,7 +144,7 @@ func (s *Server) saveGrantListForm(w http.ResponseWriter, r *http.Request, kind,
 		data["Error"] = "userDetail.noSuchUser"
 	default:
 		grantees := strings.Fields(r.PostFormValue(field))
-		if msg := s.storeGrantList(cl.UserID, u.Maildir, kind, grantees, set); msg != "" {
+		if msg := s.storeGrantList(cl.UserID, u.Username, u.Maildir, kind, grantees, set); msg != "" {
 			data["Error"] = msg
 		} else {
 			data["Saved"] = true
@@ -147,10 +153,24 @@ func (s *Server) saveGrantListForm(w http.ResponseWriter, r *http.Request, kind,
 	s.render(w, r, "user-status", data)
 }
 
+// outsideOwnerOrg returns the first grantee that is not another account of the
+// owner's organization, or "" when every one is. A delegate or send grant opens
+// the mailbox or its identity to the grantee, which every surface keeps inside the
+// organization, so the panel refuses the same grantees the clients do.
+func (s *Server) outsideOwnerOrg(owner string, grantees []string) string {
+	for _, g := range grantees {
+		reach, err := directory.MayReach(s.dir, owner, g)
+		if err != nil || !reach || strings.EqualFold(strings.TrimSpace(g), strings.TrimSpace(owner)) {
+			return g
+		}
+	}
+	return ""
+}
+
 // storeGrantList canonicalizes the grantees, checks the caller may grant to each of
 // them, and stores the list. It returns the message to show the operator, or "" when
 // the list was stored.
-func (s *Server) storeGrantList(adminID int64, maildir, kind string, grantees []string, set func(string, []string) error) string {
+func (s *Server) storeGrantList(adminID int64, owner, maildir, kind string, grantees []string, set func(string, []string) error) string {
 	list, bad, gErr := s.canonicalGrantees(grantees)
 	outOfScope, inScope := s.addressScopeError(s.adminPerms(adminID), grantees)
 	kindKey, granteeKey := grantKindKeys(kind)
@@ -161,6 +181,9 @@ func (s *Server) storeGrantList(adminID int64, maildir, kind string, grantees []
 		return s.notice(granteesUnread, gErr)
 	case bad != "":
 		return msg("userDetail.noSuchUserNamed", bad)
+	}
+	if foreign := s.outsideOwnerOrg(owner, list); foreign != "" {
+		return msg("userDetail.granteeOutsideOrg", foreign)
 	}
 	if err := set(maildir, list); err != nil {
 		return s.notice(msg("userDetail.saveGrantFailed", kindKey), err)

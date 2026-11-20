@@ -222,6 +222,7 @@
     "saved": "Kaydedildi.",
     "noSuchUser": "Böyle bir kullanıcı yok.",
     "noSuchUserNamed": "Böyle bir kullanıcı yok: {0}.",
+    "granteeOutsideOrg": "{0} bu posta kutusunun organizasyonundaki başka bir hesap değil.",
     "userUnread": "Kullanıcı okunamadı.",
     "saveFailed": "Kaydedilemedi.",
     "quotaInvalid": "Her kota 0 veya daha büyük, tam sayı bir MB değeri olmalıdır.",

@@ -222,6 +222,7 @@
     "saved": "Saved.",
     "noSuchUser": "No such user.",
     "noSuchUserNamed": "No such user: {0}.",
+    "granteeOutsideOrg": "{0} is not another account of this mailbox's organization.",
     "userUnread": "Could not read the user.",
     "saveFailed": "Could not save.",
     "quotaInvalid": "Each quota must be a whole number of MB, 0 or more.",

@@ -52,6 +52,10 @@ func (s *Server) handleSetUserStoreOwners(w http.ResponseWriter, r *http.Request
 		http.Error(w, "no such user: "+bad, http.StatusNotFound)
 		return
 	}
+	if foreign := s.outsideOwnerOrg(r.PathValue("email"), list); foreign != "" {
+		http.Error(w, "not another account of the owner's organization: "+foreign, http.StatusForbidden)
+		return
+	}
 	if err := s.store.SetStoreOwners(maildir, list); err != nil {
 		s.fail(w, "could not set store owners", err, http.StatusInternalServerError)
 		return
@@ -85,6 +89,8 @@ func (s *Server) handleUIUserStoreOwners(w http.ResponseWriter, r *http.Request)
 			data["Error"] = s.notice(granteesUnread, gErr)
 		case bad != "":
 			data["Error"] = msg("userDetail.noSuchUserNamed", bad)
+		case s.outsideOwnerOrg(u.Username, list) != "":
+			data["Error"] = msg("userDetail.granteeOutsideOrg", s.outsideOwnerOrg(u.Username, list))
 		default:
 			if err := s.store.SetStoreOwners(u.Maildir, list); err != nil {
 				data["Error"] = s.notice("userDetail.saveStoreOwnersFailed", err)
