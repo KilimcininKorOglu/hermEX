@@ -538,8 +538,10 @@ func TestIMAPACL(t *testing.T) {
 		t.Errorf("bob rights after +w = %q, want w added to r", got)
 	}
 
-	if lr := strings.Join(c.mustOK("a7", "LISTRIGHTS INBOX bob"), " "); !strings.Contains(lr, "LISTRIGHTS") {
-		t.Errorf("LISTRIGHTS = %q, want a LISTRIGHTS response", lr)
+	// RFC 4314 2.1.1: a grantable delete or create member right puts "d" and "c"
+	// in the LISTRIGHTS response.
+	if lr := strings.Join(c.mustOK("a7", "LISTRIGHTS INBOX bob"), " "); !strings.Contains(lr, "LISTRIGHTS") || !strings.HasSuffix(strings.TrimSpace(strings.SplitN(lr, "\r\n", 2)[0]), " c d") {
+		t.Errorf("LISTRIGHTS = %q, want a LISTRIGHTS response that lists c and d", lr)
 	}
 
 	// Revoke bob entirely.

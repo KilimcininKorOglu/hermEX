@@ -28,7 +28,9 @@ var aclRights = []struct {
 	{'a', mapi.FrightsOwner},           // administer
 }
 
-// rightsToACL renders a MAPI rights bitfield as the RFC 4314 right letters.
+// rightsToACL renders a MAPI rights bitfield as the RFC 4314 right letters. When
+// any member of the delete ("et") or create ("kx") right is held, the virtual
+// "d" or "c" right is listed too, as RFC 4314 2.1.1 requires for RFC 2086 clients.
 func rightsToACL(r uint32) string {
 	var b []byte
 	for _, m := range aclRights {
@@ -36,7 +38,14 @@ func rightsToACL(r uint32) string {
 			b = append(b, m.letter)
 		}
 	}
-	return string(b)
+	s := string(b)
+	if strings.ContainsAny(s, "kx") {
+		s += "c"
+	}
+	if strings.ContainsAny(s, "et") {
+		s += "d"
+	}
+	return s
 }
 
 // virtualRights are the obsolete RFC 2086 rights RFC 4314 2.1.1 keeps as
@@ -233,7 +242,7 @@ func (c *conn) cmdListRights(tag string, args []token) {
 	if !ok {
 		return
 	}
-	c.untagged("LISTRIGHTS %s %s l r s w i p k x t e a", safeQuoted(name), safeQuoted(id))
+	c.untagged("LISTRIGHTS %s %s l r s w i p k x t e a c d", safeQuoted(name), safeQuoted(id))
 	c.ok(tag, "LISTRIGHTS completed")
 }
 

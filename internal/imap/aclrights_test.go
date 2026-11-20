@@ -2,6 +2,7 @@ package imap
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"hermex/internal/mapi"
@@ -35,6 +36,29 @@ func TestACLRightsFollowRFC4314(t *testing.T) {
 	}
 	if r, ok := aclToRights(""); !ok || r != 0 {
 		t.Errorf("an empty rights string = %#x, %v; want no rights, accepted", r, ok)
+	}
+}
+
+// TestACLListingsCarryTheVirtualRights follows RFC 4314 2.1.1: when any member of
+// the delete right ("e", "t") or create right ("k", "x") is held, a MYRIGHTS or
+// ACL response must also include "d" or "c"; with none held, neither appears.
+func TestACLListingsCarryTheVirtualRights(t *testing.T) {
+	cases := []struct {
+		rights string
+		wantC  bool
+		wantD  bool
+	}{
+		{"lr", false, false},
+		{"lrt", false, true},
+		{"lrk", true, false},
+		{"lrswipkxtea", true, true},
+	}
+	for _, tc := range cases {
+		r, _ := aclToRights(tc.rights)
+		got := rightsToACL(r)
+		if strings.Contains(got, "c") != tc.wantC || strings.Contains(got, "d") != tc.wantD {
+			t.Errorf("rights %q render as %q; want c=%v d=%v", tc.rights, got, tc.wantC, tc.wantD)
+		}
 	}
 }
 
