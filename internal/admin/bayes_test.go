@@ -3,6 +3,7 @@ package admin
 import (
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -424,6 +425,54 @@ func TestSaveOutboundRejectsBadValues(t *testing.T) {
 	if d.outboundFound {
 		t.Error("invalid outbound settings must not be persisted")
 	}
+}
+
+// TestTimingFormsRefuseEveryBadField sends 0, a negative number and a typo in each
+// field of the greylist, rate-limit, relay, outbound and digest forms, every one a
+// count or a duration that must be at least 1. The tests above try one field per
+// form; this one proves no field's check is missing, since a field read as 0 or
+// below would collapse a window, admit no mail or remove a delay.
+func TestTimingFormsRefuseEveryBadField(t *testing.T) {
+	type form struct {
+		path   string
+		valid  url.Values
+		stored func(*fakeDir) bool
+	}
+	forms := []form{
+		{"/admin/ui/antispam/greylist-timings", url.Values{"min_delay": {"600"}, "unconfirmed_ttl": {"7200"}, "confirmed_ttl": {"1000"}},
+			func(d *fakeDir) bool { return d.greylistTimingsSet }},
+		{"/admin/ui/antispam/ratelimit", url.Values{"enabled": {"1"}, "burst": {"10"}, "window": {"30"}},
+			func(d *fakeDir) bool { return d.rateLimitFound }},
+		{"/admin/ui/antispam/relay", url.Values{"backoff": {"60"}, "attempts": {"5"}},
+			func(d *fakeDir) bool { return d.relayFound }},
+		{"/admin/ui/antispam/outbound", url.Values{"enabled": {"1"}, "cap": {"10"}, "window": {"60"}},
+			func(d *fakeDir) bool { return d.outboundFound }},
+		{"/admin/ui/antispam/digest", url.Values{"enabled": {"1"}, "interval": {"24"}, "base_url": {"https://m.test"}},
+			func(d *fakeDir) bool { return d.digestFound }},
+	}
+	for _, f := range forms {
+		for field := range f.valid {
+			if field == "enabled" || field == "base_url" {
+				continue
+			}
+			for _, bad := range []string{"0", "-1", "5x"} {
+				refuseOneField(t, f.path, f.valid, field, bad, f.stored)
+			}
+		}
+	}
+}
+
+// refuseOneField posts valid with field set to bad and checks nothing is stored.
+func refuseOneField(t *testing.T, path string, valid url.Values, field, bad string, stored func(*fakeDir) bool) {
+	t.Helper()
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	form := url.Values{}
+	maps.Copy(form, valid)
+	form.Set(field, bad)
+	wantStatus(t, htmxPOST(t, ts, path, session, csrf, form), http.StatusOK, path+" "+field+"="+bad)
+	wantFalse(t, stored(d), path+" stored with "+field+"="+bad)
 }
 
 // TestSaveDigestSettings proves the digest form persists the toggle, interval, and
