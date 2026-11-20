@@ -227,10 +227,38 @@ func applyModify(t *testing.T, sess *Session, folderH uint32, modifyFlags uint8,
 	}
 }
 
-// testAccounts is a directory with one resolvable member, so a real-member AddRow can
-// be confirmed to exist.
+// testAccounts is a directory with one resolvable member beside the session owner,
+// so a real-member AddRow can be confirmed to exist; a member is granted only when
+// it shares the owner's organization (static accounts scope by domain).
 func testAccounts(addr string) directory.Accounts {
-	return directory.StaticAccounts{addr: {MailboxPath: "/tmp/" + addr}}
+	return directory.StaticAccounts{
+		addr:                {MailboxPath: "/tmp/" + addr},
+		"owner@hermex.test": {MailboxPath: "/tmp/owner@hermex.test"},
+	}
+}
+
+// TestModifyMemberOfAnotherOrganizationSkipped: a grant opens the mailbox to its
+// member, which the logon keeps inside the organization, so an AddRow naming an
+// account of another organization (by EntryID or by SMTP address) is skipped
+// like an unknown member and stores no row.
+func TestModifyMemberOfAnotherOrganizationSkipped(t *testing.T) {
+	dir := provisionedDir(t)
+	sess, folderH := openFolderSession(t, dir, testAccounts("mallory@other-org.test"), mapi.PrivateFIDInbox)
+	applyModify(t, sess, folderH, 0, []permDataRow{
+		{flags: permRowAdd, props: []mapi.TaggedPropVal{
+			{Tag: mapi.PrEntryID, Value: abMemberEntryID("mallory@other-org.test")},
+			{Tag: mapi.PrMemberRights, Value: int32(mapi.RightsReviewer)},
+		}},
+		{flags: permRowAdd, props: []mapi.TaggedPropVal{
+			{Tag: mapi.PrSmtpAddress, Value: "mallory@other-org.test"},
+			{Tag: mapi.PrMemberRights, Value: int32(mapi.RightsReviewer)},
+		}},
+	})
+	for _, r := range readPermRows(t, sess, folderH, true) {
+		if name, _ := r.Get(mapi.PrMemberName); name == "mallory@other-org.test" {
+			t.Fatal("a member of another organization was granted folder access")
+		}
+	}
 }
 
 // TestModifyAddMemberViaEntryID drives the primary AddRow path: a real member

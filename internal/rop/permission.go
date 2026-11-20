@@ -3,6 +3,7 @@ package rop
 import (
 	"bytes"
 
+	"hermex/internal/directory"
 	"hermex/internal/ext"
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
@@ -304,6 +305,11 @@ func (s *Session) resolvePermissionMember(propvals mapi.PropertyValues) (string,
 	if s.accounts != nil {
 		if _, ok := s.accounts.Resolve(smtp); !ok {
 			return "", false // unknown member; skip
+		}
+		// A grant opens the mailbox to its member, which the logon keeps inside
+		// the organization, so a member of another organization is skipped.
+		if reach, err := directory.MayReach(s.accounts, s.owner, smtp); err != nil || !reach {
+			return "", false
 		}
 	}
 	return smtp, true
