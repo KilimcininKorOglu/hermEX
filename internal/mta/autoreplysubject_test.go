@@ -100,6 +100,31 @@ func TestTheOriginalSubjectCannotSplitTheHeader(t *testing.T) {
 	}
 }
 
+// TestAConfiguredSubjectCannotSplitTheHeader covers the two subjects that skip
+// the incoming subject's control-character strip: the operator's prefix, saved in
+// the admin panel, and the subject a mailbox stored over webmail or the admin API.
+// Either one with a CR or LF must still reach the reply as one Subject field.
+func TestAConfiguredSubjectCannotSplitTheHeader(t *testing.T) {
+	t.Cleanup(func() { SetAutoReplyPrefix("") })
+	SetAutoReplyPrefix("Away\r\nBcc: prefix@elsewhere.test")
+	for name, subject := range map[string]string{
+		"the operator's prefix":        composeAutoReplySubject("", "Q3 budget"),
+		"the mailbox's stored subject": composeAutoReplySubject("Away\r\nBcc: stored@elsewhere.test", "Q3 budget"),
+	} {
+		raw, err := buildAutoReply("a@acme.test", "b@acme.test", subject, "away", "", time.Now())
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		msg, err := mail.ReadMessage(strings.NewReader(string(raw)))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := msg.Header.Get("Bcc"); got != "" {
+			t.Errorf("%s injected a Bcc header: %q", name, got)
+		}
+	}
+}
+
 // TestTheOriginalSubjectIsBounded keeps an absurd incoming subject from becoming
 // an absurd outgoing header. The value is attacker-controlled and unbounded on
 // the wire.
