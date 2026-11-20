@@ -211,6 +211,31 @@ func TestRunSkipsForeignUsersButKeepsThemAsMembers(t *testing.T) {
 	}
 }
 
+// TestRunMatchesTheWholeDomainName proves the bound-domain check compares the
+// whole domain, so a directory cannot create an account or a list in a domain
+// whose name merely ends in the bound one (evilhermex.test is another customer's
+// domain, not hermex.test) or extends it (hermex.test.example).
+func TestRunMatchesTheWholeDomainName(t *testing.T) {
+	syncer := &fakeSyncer{
+		users: []ldapauth.SyncedUser{
+			{Username: "Alice@HERMEX.test"},
+			{Username: "mallory@evilhermex.test"},
+			{Username: "mallory@hermex.test.example"},
+		},
+		groups: []ldapauth.SyncedGroup{{Mail: "staff@evilhermex.test"}},
+	}
+	store := &fakeStore{}
+
+	mustRun(t, bound(directory.LDAPConfig{SyncGroups: true}), syncer, store)
+
+	if !slices.Equal(store.upsertedUsers, []string{"Alice@HERMEX.test"}) {
+		t.Errorf("upserted users = %v, want only the bound domain's account", store.upsertedUsers)
+	}
+	if len(store.groupOwner) != 0 {
+		t.Errorf("synced lists = %v, want none outside the bound domain", store.groupOwner)
+	}
+}
+
 // TestAFailedUpdateNeverPrunesAnEntryTheDirectoryStillHolds runs a pass in which
 // every group and contact update fails (a database hiccup, a lock timeout). The
 // prune pass removes only what the directory no longer publishes; the directory
