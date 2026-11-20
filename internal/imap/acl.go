@@ -39,17 +39,40 @@ func rightsToACL(r uint32) string {
 	return string(b)
 }
 
-// aclToRights parses RFC 4314 right letters into a MAPI rights bitfield.
-func aclToRights(s string) uint32 {
+// virtualRights are the obsolete RFC 2086 rights RFC 4314 2.1.1 keeps as
+// shorthands: "d" for the delete right ("et", as the RFC example expands it) and
+// "c" for the create right ("kx").
+var virtualRights = map[byte]string{'d': "et", 'c': "kx"}
+
+// aclToRights parses RFC 4314 right letters into a MAPI rights bitfield. ok is
+// false when a letter is no right this server knows, which RFC 4314 3.1 answers
+// with BAD rather than ignoring it.
+func aclToRights(s string) (uint32, bool) {
 	var r uint32
 	for i := 0; i < len(s); i++ {
-		for _, m := range aclRights {
-			if s[i] == m.letter {
-				r |= m.fright
+		letters := string(s[i])
+		if v, isVirtual := virtualRights[s[i]]; isVirtual {
+			letters = v
+		}
+		for j := 0; j < len(letters); j++ {
+			bit, known := rightOf(letters[j])
+			if !known {
+				return 0, false
 			}
+			r |= bit
 		}
 	}
-	return r
+	return r, true
+}
+
+// rightOf returns the MAPI right one RFC 4314 letter maps to.
+func rightOf(letter byte) (uint32, bool) {
+	for _, m := range aclRights {
+		if m.letter == letter {
+			return m.fright, true
+		}
+	}
+	return 0, false
 }
 
 // resolveACLFolder resolves a mailbox name to the store and folder id its ACL lives
@@ -150,7 +173,12 @@ func (c *conn) cmdSetACL(tag string, args []token) {
 	if strings.HasPrefix(rightsStr, "+") || strings.HasPrefix(rightsStr, "-") {
 		mode, rightsStr = rightsStr[0], rightsStr[1:]
 	}
-	newRights, err := adjustedRights(st, fid, id, mode, aclToRights(rightsStr))
+	requested, known := aclToRights(rightsStr)
+	if !known {
+		c.bad(tag, "SETACL names an unrecognized right")
+		return
+	}
+	newRights, err := adjustedRights(st, fid, id, mode, requested)
 	if err != nil {
 		c.no(tag, "cannot read the access list")
 		return
