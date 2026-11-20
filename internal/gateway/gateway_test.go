@@ -102,7 +102,9 @@ func TestForwardedForNamesTheClient(t *testing.T) {
 	if got == "" {
 		t.Fatal("backend received no X-Forwarded-For, so it cannot tell one client from another")
 	}
-	if strings.Contains(got, ",") {
-		t.Errorf("X-Forwarded-For = %q, want a single hop: the front door strips the client's own", got)
+	// The test client dials the front door over loopback, so that is the address
+	// the gateway accepted and the only value the backend may be told.
+	if got != "127.0.0.1" {
+		t.Errorf("X-Forwarded-For = %q, want the accepted client 127.0.0.1 as the single hop", got)
 	}
 }
