@@ -221,7 +221,9 @@ export function formatText(kind: FormatKind, selected: string, placeholder: stri
 // formatSize renders a byte count for the attachment list.
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return bytes + " B"
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB"
+  // Compare the printed value: 1023.95 KB would print as "1024.0 KB".
+  const kb = (bytes / 1024).toFixed(1)
+  if (Number(kb) < 1024) return kb + " KB"
   return (bytes / (1024 * 1024)).toFixed(1) + " MB"
 }
 

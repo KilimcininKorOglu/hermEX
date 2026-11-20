@@ -8,7 +8,8 @@ export type ViewMode = "list" | "compact"
 export function formatSize(bytes: number): string {
   if (!bytes || bytes < 1024) return "< 1 KB"
   const kb = bytes / 1024
-  if (kb < 1024) return `${Math.round(kb)} KB`
+  // Compare the printed value: 1023.6 KB would print as "1024 KB".
+  if (Math.round(kb) < 1024) return `${Math.round(kb)} KB`
   return `${(kb / 1024).toFixed(1)} MB`
 }
 

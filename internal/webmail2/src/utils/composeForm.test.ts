@@ -119,6 +119,9 @@ describe("text helpers", () => {
     expect(formatSize(512)).toBe("512 B")
     expect(formatSize(2048)).toBe("2.0 KB")
     expect(formatSize(3 * 1024 * 1024)).toBe("3.0 MB")
+    // A byte under a unit rounds up to that unit, not to "1024.0" of the one below.
+    expect(formatSize(1024 * 1024 - 1)).toBe("1.0 MB")
+    expect(formatSize(1023)).toBe("1023 B")
     expect(safeFileBase(" Q3: plan/v2 ", "message")).toBe("Q3_ plan_v2")
     expect(safeFileBase("", "message")).toBe("message")
   })

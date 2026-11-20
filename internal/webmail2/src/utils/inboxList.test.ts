@@ -9,6 +9,8 @@ describe("formatSize", () => {
     [1536, "2 KB"],
     [1024 * 1024, "1.0 MB"],
     [5.25 * 1024 * 1024, "5.3 MB"],
+    // 1023.6 KB rounds to 1024, which is the next unit, not "1024 KB".
+    [1024 * 1024 - 400, "1.0 MB"],
   ])("renders %d bytes as %s", (bytes, want) => {
     expect(formatSize(bytes)).toBe(want)
   })
