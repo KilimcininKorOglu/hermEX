@@ -204,12 +204,14 @@ func (s *Server) compareMidsCore(req compareMidsRequest, caller string) compareM
 	if !ok1 || !ok2 {
 		return compareMidsResult{result: ecError}
 	}
+	// [MS-OXNSPI] 3.1.4.1.9: negative when MId1 comes before MId2 in the table,
+	// positive when it comes after, zero when both name the same object.
 	p1, p2 := g.position(req.mid1), g.position(req.mid2)
 	var cmp int32
 	switch {
-	case p2 < p1:
+	case p1 < p2:
 		cmp = -1
-	case p2 > p1:
+	case p1 > p2:
 		cmp = 1
 	}
 	return compareMidsResult{result: ecSuccess, cmp: cmp}

@@ -196,8 +196,10 @@ func TestRPCCompareMids(t *testing.T) {
 		t.Fatalf("fault %#x", fault)
 	}
 	cmp := int32(binary.LittleEndian.Uint32(out[0:4]))
-	if cmp != 1 {
-		t.Errorf("cmp(alice, carol) = %d, want 1 (carol sorts later)", cmp)
+	// [MS-OXNSPI] 3.1.4.1.9: MId1 (alice) comes before MId2 (carol), so the
+	// result is less than 0.
+	if cmp >= 0 {
+		t.Errorf("cmp(alice, carol) = %d, want negative (alice comes first)", cmp)
 	}
 	if tailResult(out) != ecSuccess {
 		t.Errorf("result %#x, want ecSuccess", tailResult(out))

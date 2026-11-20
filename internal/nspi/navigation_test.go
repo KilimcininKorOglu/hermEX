@@ -122,18 +122,18 @@ func decodeCompareMids(t *testing.T, resp []byte) (cmp int32, result uint32) {
 	return cmp, result
 }
 
-// TestCompareMids proves the comparison reflects the entries' table order: the
-// result is negative when the second MId precedes the first, positive when it
-// follows, and zero when they are equal.
+// TestCompareMids follows [MS-OXNSPI] 3.1.4.1.9: the result is less than 0 when
+// MId1 comes before MId2 in the table, greater than 0 when it comes after, and 0
+// when both name the same object.
 func TestCompareMids(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test", "carol@hermex.test")
 	alice, carol := midBase, midBase+2
 
-	if cmp, result := decodeCompareMids(t, s.CompareMids(buildCompareMids(carol, alice), testCaller)); result != ecSuccess || cmp != -1 {
-		t.Errorf("compare(carol, alice) = (cmp %d, result %#x), want (-1, ok), alice precedes carol", cmp, result)
+	if cmp, result := decodeCompareMids(t, s.CompareMids(buildCompareMids(alice, carol), testCaller)); result != ecSuccess || cmp >= 0 {
+		t.Errorf("compare(alice, carol) = (cmp %d, result %#x), want negative: MId1 alice comes before carol", cmp, result)
 	}
-	if cmp, result := decodeCompareMids(t, s.CompareMids(buildCompareMids(alice, carol), testCaller)); result != ecSuccess || cmp != 1 {
-		t.Errorf("compare(alice, carol) = (cmp %d, result %#x), want (1, ok)", cmp, result)
+	if cmp, result := decodeCompareMids(t, s.CompareMids(buildCompareMids(carol, alice), testCaller)); result != ecSuccess || cmp <= 0 {
+		t.Errorf("compare(carol, alice) = (cmp %d, result %#x), want positive: MId1 carol comes after alice", cmp, result)
 	}
 	if cmp, _ := decodeCompareMids(t, s.CompareMids(buildCompareMids(alice, alice), testCaller)); cmp != 0 {
 		t.Errorf("compare(alice, alice) cmp = %d, want 0", cmp)
