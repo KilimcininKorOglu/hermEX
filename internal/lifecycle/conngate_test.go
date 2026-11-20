@@ -102,6 +102,63 @@ func TestNoGateServesEveryConnection(t *testing.T) {
 	}
 }
 
+// TestAStalledRefusalDoesNotStopTheAcceptLoop refuses a client whose refusal
+// never finishes, as a client that never reads would hold a refusal write. The
+// next client must still be served: a refusal on the accept loop itself would let
+// one such client shut the daemon to everyone, which is the flood the cap guards.
+func TestAStalledRefusalDoesNotStopTheAcceptLoop(t *testing.T) {
+	stall := make(chan struct{})
+	t.Cleanup(func() { close(stall) })
+	var calls atomic.Int64
+	gate := func(net.Conn) (func(), bool) { return nil, calls.Add(1) > 1 }
+	refuse := func(nc net.Conn) {
+		<-stall
+		_ = nc.Close()
+	}
+	ln, _ := gatedGroup(t, gate, refuse)
+
+	first, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	for calls.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+
+	if got := readAll(t, ln); got != "served" {
+		t.Errorf("second connection read %q, want it served while the first refusal stalls", got)
+	}
+}
+
+// TestAPanickingHandlerReleasesItsSlot proves a handler that panics still gives
+// its slot back. Otherwise every panicking command would leak one slot until the
+// cap refuses all clients.
+func TestAPanickingHandlerReleasesItsSlot(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	released := make(chan struct{}, 1)
+	var g lifecycle.ConnGroup
+	g.AddListener(ln)
+	g.SetGate(func(net.Conn) (func(), bool) { return func() { released <- struct{}{} }, true }, nil)
+	go func() { _ = g.Start(func(net.Conn) { panic("bad command") }) }()
+
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	select {
+	case <-released:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the slot of a panicking handler was never released")
+	}
+}
+
 // TestRefusedConnectionClosesWithoutARefusalWriter proves a gate installed with no
 // refusal writer still closes the connection rather than leaking the socket.
 func TestRefusedConnectionClosesWithoutARefusalWriter(t *testing.T) {
