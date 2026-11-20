@@ -150,15 +150,10 @@ func (c *conn) cmdSetACL(tag string, args []token) {
 	if strings.HasPrefix(rightsStr, "+") || strings.HasPrefix(rightsStr, "-") {
 		mode, rightsStr = rightsStr[0], rightsStr[1:]
 	}
-	delta := aclToRights(rightsStr)
-	var newRights uint32
-	switch mode {
-	case '+':
-		newRights = currentACLRights(st, fid, id) | delta
-	case '-':
-		newRights = currentACLRights(st, fid, id) &^ delta
-	default:
-		newRights = delta
+	newRights, err := adjustedRights(st, fid, id, mode, aclToRights(rightsStr))
+	if err != nil {
+		c.no(tag, "cannot read the access list")
+		return
 	}
 	change := objectstore.PermissionChange{
 		Op:       objectstore.PermAdd,
@@ -184,7 +179,12 @@ func (c *conn) cmdDeleteACL(tag string, args []token) {
 		c.bad(tag, "DELETEACL requires a mailbox and identifier")
 		return
 	}
-	change := objectstore.PermissionChange{Op: objectstore.PermRemove, Username: id, MemberID: aclMemberID(st, fid, id)}
+	memberID, err := aclMemberID(st, fid, id)
+	if err != nil {
+		c.no(tag, "cannot read the access list")
+		return
+	}
+	change := objectstore.PermissionChange{Op: objectstore.PermRemove, Username: id, MemberID: memberID}
 	if err := st.ModifyPermissions(fid, false, []objectstore.PermissionChange{change}); err != nil {
 		c.no(tag, "cannot delete ACL")
 		return
@@ -238,25 +238,42 @@ func (c *conn) aclAdminTarget(tag string, args []token) (st *objectstore.Store, 
 	return st, fid, name, true
 }
 
-// currentACLRights returns an identifier's stored rights on a folder, or 0.
-func currentACLRights(st *objectstore.Store, fid int64, id string) uint32 {
-	entries, _ := st.ListPermissions(fid)
-	for _, e := range entries {
-		if e.Name == id {
-			return e.Rights
-		}
+// adjustedRights applies a SETACL rights string: mode '+' adds delta to the
+// identifier's stored rights, '-' removes it, anything else replaces them. A
+// failed read is returned, since treating it as no rights would let "+r"
+// overwrite the stored rights with r alone.
+func adjustedRights(st *objectstore.Store, fid int64, id string, mode byte, delta uint32) (uint32, error) {
+	if mode != '+' && mode != '-' {
+		return delta, nil
 	}
-	return 0
+	e, err := aclEntry(st, fid, id)
+	if err != nil {
+		return 0, err
+	}
+	if mode == '+' {
+		return e.Rights | delta, nil
+	}
+	return e.Rights &^ delta, nil
 }
 
 // aclMemberID returns the stored member id for an identifier, or 0 (the default
 // member) when none is stored, DELETEACL of a real member needs its row id.
-func aclMemberID(st *objectstore.Store, fid int64, id string) int64 {
-	entries, _ := st.ListPermissions(fid)
+func aclMemberID(st *objectstore.Store, fid int64, id string) (int64, error) {
+	e, err := aclEntry(st, fid, id)
+	return e.MemberID, err
+}
+
+// aclEntry returns an identifier's stored permission row, or the zero row when
+// it has none.
+func aclEntry(st *objectstore.Store, fid int64, id string) (objectstore.PermissionEntry, error) {
+	entries, err := st.ListPermissions(fid)
+	if err != nil {
+		return objectstore.PermissionEntry{}, err
+	}
 	for _, e := range entries {
 		if e.Name == id {
-			return e.MemberID
+			return e, nil
 		}
 	}
-	return 0
+	return objectstore.PermissionEntry{}, nil
 }
