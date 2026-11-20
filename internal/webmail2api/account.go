@@ -5,6 +5,7 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/logging"
+	"hermex/internal/serve"
 )
 
 // handleChangePassword verifies the caller's current password and stores a new
@@ -38,11 +39,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the new password must be at least 8 characters"})
 		return
 	}
-	// Verify the current password with the lenient path: a must-change account is
-	// the very caller this flow exists for, so the strict Authenticate (which
-	// denies it) must not block proving the temporary password.
-	if _, ok := s.authenticateForChange(c.Email, req.CurrentPassword); !ok {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "your current password is incorrect"})
+	if !s.currentPasswordOK(w, r, c.Email, req.CurrentPassword) {
 		return
 	}
 	if ok, err := setter.SetPassword(c.Email, req.NewPassword); err != nil || !ok {
@@ -58,6 +55,28 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	revoked := s.revokeOtherSessions(c.Email, c.Jti)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "revokedSessions": revoked})
+}
+
+// currentPasswordOK checks the caller's current password and writes the refusal
+// when it fails. The check is a credential test like a sign-in, so it runs under
+// the same throttle: without it a stolen session could guess the account's
+// password here without limit.
+func (s *Server) currentPasswordOK(w http.ResponseWriter, r *http.Request, email, password string) bool {
+	addr := serve.ClientAddr(r)
+	if !s.limiter.Allowed(addr, email) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many failed attempts, try again later"})
+		return false
+	}
+	// The lenient path: a must-change account is the very caller this flow exists
+	// for, so the strict Authenticate (which denies it) must not block proving the
+	// temporary password.
+	if _, ok := s.authenticateForChange(email, password); !ok {
+		s.limiter.Fail(addr, email)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "your current password is incorrect"})
+		return false
+	}
+	s.limiter.Succeed(addr, email)
+	return true
 }
 
 // revokeOtherSessions ends every signed-in browser but the caller's own, and
