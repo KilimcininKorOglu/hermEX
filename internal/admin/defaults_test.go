@@ -217,6 +217,28 @@ func TestDefaultsRefuseABadMaxUser(t *testing.T) {
 	}
 }
 
+// TestDefaultsRefuseAnUnknownLanguage sends a default language the interface does
+// not ship. A new account takes the default as its own language, so this was the
+// one path that stored a value the user preference setter refuses. Both forms and
+// both JSON endpoints now refuse it and store nothing.
+func TestDefaultsRefuseAnUnknownLanguage(t *testing.T) {
+	const bad = "xx"
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		domainDetail: directory.DomainDetail{ID: 1, Name: "acme.test"}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	body := wantBody(t, htmxPUT(t, ts, "/admin/ui/defaults", session, csrf, url.Values{"lang": {bad}}), http.StatusOK, "system form")
+	wantContains(t, body, "language must be one", "the system form names the refusal")
+	body = wantBody(t, htmxPUT(t, ts, "/admin/ui/domains/1/createdefaults", session, csrf, url.Values{"lang": {bad}}), http.StatusOK, "domain form")
+	wantContains(t, body, "language must be one", "the domain form names the refusal")
+	wantStatus(t, authedPUT(t, ts, "/admin/defaults", session, csrf, `{"user":{"lang":"xx"}}`), http.StatusBadRequest, "system JSON")
+	wantStatus(t, authedPUT(t, ts, "/admin/domains/1/createdefaults", session, csrf, `{"lang":"xx"}`), http.StatusBadRequest, "domain JSON")
+	if len(d.createDefaults) != 0 {
+		t.Errorf("an unknown language was stored: %+v", d.createDefaults)
+	}
+}
+
 // TestDefaultsNeedASystemAdmin proves a domain administrator, even over every
 // domain, writes neither the system defaults nor a domain override: both decide
 // the quotas and protocols every account created later is given.

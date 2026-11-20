@@ -1,6 +1,26 @@
 package directory
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
+
+// TestCreateDefaultsRefuseAnUnknownLanguage proves the store itself refuses a
+// default language the interface does not ship, with the error a user preference
+// gets, so no caller can hand new accounts a language SetUserPrefs would refuse.
+func TestCreateDefaultsRefuseAnUnknownLanguage(t *testing.T) {
+	d, _ := freshDirectory(t)
+	err := d.SetCreateDefaults(0, CreateDefaults{User: UserCreateDefaults{Lang: new("xx")}})
+	if !errors.Is(err, ErrInvalidPref) {
+		t.Fatalf("SetCreateDefaults(lang xx) = %v, want ErrInvalidPref", err)
+	}
+	_, ok, err := d.GetCreateDefaults(0)
+	mustNoErr(t, "read the system scope", err)
+	wantEq(t, "a refused set stored a row", ok, false)
+	for _, lang := range []string{"", "en", "tr"} {
+		mustNoErr(t, "set lang "+lang, d.SetCreateDefaults(0, CreateDefaults{User: UserCreateDefaults{Lang: new(lang)}}))
+	}
+}
 
 // TestCreateDefaultsRoundTrip proves a scope's defaults store and read back, and
 // that a per-domain scope is independent of the system scope.

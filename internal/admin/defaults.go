@@ -188,7 +188,7 @@ func (s *Server) handleSetDomainDefaults(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var u directory.UserCreateDefaults
-	if err := json.NewDecoder(r.Body).Decode(&u); err != nil || !quotasValid(u) {
+	if err := json.NewDecoder(r.Body).Decode(&u); err != nil || !quotasValid(u) || !u.LangValid() {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
@@ -212,6 +212,8 @@ func (s *Server) handleUISaveDomainDefaults(w http.ResponseWriter, r *http.Reque
 		data["Error"] = "domains.invalidID"
 	} else if !quotasValid(u) {
 		data["Error"] = "userDetail.quotaInvalid"
+	} else if !u.LangValid() {
+		data["Error"] = "userDetail.langInvalid"
 	} else if err := s.storeDomainOverride(id, u); err != nil {
 		data["Error"] = s.notice("userDetail.saveFailed", err)
 	} else {
@@ -243,7 +245,7 @@ func (s *Server) handleGetDefaults(w http.ResponseWriter, r *http.Request) {
 // handleSetDefaults replaces the system-wide create-defaults (system administrators).
 func (s *Server) handleSetDefaults(w http.ResponseWriter, r *http.Request) {
 	var cd directory.CreateDefaults
-	if err := json.NewDecoder(r.Body).Decode(&cd); err != nil || !quotasValid(cd.User) || cd.Domain.MaxUser < 0 {
+	if err := json.NewDecoder(r.Body).Decode(&cd); err != nil || !quotasValid(cd.User) || !cd.User.LangValid() || cd.Domain.MaxUser < 0 {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
@@ -281,6 +283,8 @@ func (s *Server) handleUISaveDefaults(w http.ResponseWriter, r *http.Request) {
 	cd := createDefaultsFromForm(r)
 	if !quotasValid(cd.User) {
 		data["Error"] = "userDetail.quotaInvalid"
+	} else if !cd.User.LangValid() {
+		data["Error"] = "userDetail.langInvalid"
 	} else if cd.Domain.MaxUser < 0 {
 		data["Error"] = "domains.maxUserInvalid"
 	} else if err := s.dir.SetCreateDefaults(0, cd); err != nil {

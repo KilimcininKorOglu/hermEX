@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"slices"
 )
 
 // CreateDefaults holds the default parameters pre-filled into the create forms for
@@ -34,6 +36,13 @@ type UserCreateDefaults struct {
 	StorageKB *int64  `json:"storageQuota,omitempty"`
 	ReceiveKB *int64  `json:"receiveQuota,omitempty"`
 	SendKB    *int64  `json:"sendQuota,omitempty"`
+}
+
+// LangValid reports whether the language is unset, empty (the built-in default)
+// or one the interface ships. A new account takes this value as its own, so it
+// follows the rule SetUserPrefs applies to a language a user picks.
+func (u UserCreateDefaults) LangValid() bool {
+	return u.Lang == nil || *u.Lang == "" || slices.Contains(UILanguages, *u.Lang)
 }
 
 // ResolvedUserDefaults is the concrete user-create defaults after merging the
@@ -80,6 +89,9 @@ func (d *SQLDirectory) GetCreateDefaults(scopeID int64) (CreateDefaults, bool, e
 
 // SetCreateDefaults stores the defaults for a scope, replacing any prior value.
 func (d *SQLDirectory) SetCreateDefaults(scopeID int64, cd CreateDefaults) error {
+	if !cd.User.LangValid() {
+		return fmt.Errorf("%w: language %q", ErrInvalidPref, *cd.User.Lang)
+	}
 	b, err := json.Marshal(cd)
 	if err != nil {
 		return err

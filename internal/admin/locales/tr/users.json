@@ -218,6 +218,7 @@
     "userUnread": "Kullanıcı okunamadı.",
     "saveFailed": "Kaydedilemedi.",
     "quotaInvalid": "Her kota 0 veya daha büyük, tam sayı bir MB değeri olmalıdır.",
+    "langInvalid": "Dil, arayüzün sunduğu dillerden biri olmalıdır.",
     "saveContactFailed": "İletişim bilgileri kaydedilemedi.",
     "saveAliasesFailed": "Takma adlar kaydedilemedi.",
     "saveAltnamesFailed": "Alternatif adlar kaydedilemedi.",
