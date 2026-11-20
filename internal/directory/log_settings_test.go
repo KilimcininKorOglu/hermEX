@@ -42,32 +42,30 @@ func TestLogRetentionRoundTrip(t *testing.T) {
 // the retention window and the cap never overwrite each other in the shared row.
 func TestLogSpillLimitIsItsOwnSetting(t *testing.T) {
 	d := setupLogSettings(t)
-	if mb, err := d.GetLogSpillLimitMB(); err != nil || mb != DefaultLogSpillLimitMB {
-		t.Fatalf("Get on empty = %d (err %v), want the default %d", mb, err, DefaultLogSpillLimitMB)
-	}
-	if err := d.SetLogRetentionDays(30); err != nil {
-		t.Fatal(err)
-	}
-	if mb, err := d.GetLogSpillLimitMB(); err != nil || mb != DefaultLogSpillLimitMB {
-		t.Errorf("after saving retention the cap = %d (err %v), want the default %d", mb, err, DefaultLogSpillLimitMB)
-	}
-	if err := d.SetLogSpillLimitMB(200); err != nil {
-		t.Fatal(err)
-	}
-	if mb, err := d.GetLogSpillLimitMB(); err != nil || mb != 200 {
-		t.Errorf("cap = %d (err %v), want 200", mb, err)
-	}
-	if days, _, err := d.GetLogRetentionDays(); err != nil || days != 30 {
-		t.Errorf("saving the cap changed retention to %d (err %v), want 30", days, err)
+	wantSpillLimit(t, d, DefaultLogSpillLimitMB, "the cap on an empty table")
+	mustNoErr(t, "save the retention", d.SetLogRetentionDays(30))
+	wantSpillLimit(t, d, DefaultLogSpillLimitMB, "the cap after saving the retention")
+	mustNoErr(t, "save the cap", d.SetLogSpillLimitMB(200))
+	wantSpillLimit(t, d, 200, "the saved cap")
+	days, _, err := d.GetLogRetentionDays()
+	mustNoErr(t, "read the retention", err)
+	if days != 30 {
+		t.Errorf("saving the cap changed retention to %d, want 30", days)
 	}
 	if err := d.SetLogSpillLimitMB(-1); err == nil {
 		t.Error("a negative cap was accepted")
 	}
-	if err := d.SetLogSpillLimitMB(0); err != nil {
-		t.Fatal(err)
-	}
-	if mb, _ := d.GetLogSpillLimitMB(); mb != 0 {
-		t.Errorf("cap = %d after saving 0, want 0 (no cap)", mb)
+	mustNoErr(t, "save no cap", d.SetLogSpillLimitMB(0))
+	wantSpillLimit(t, d, 0, "the cap after saving 0 (no cap)")
+}
+
+// wantSpillLimit reads the spill cap and checks it.
+func wantSpillLimit(t *testing.T, d *SQLDirectory, want int, what string) {
+	t.Helper()
+	mb, err := d.GetLogSpillLimitMB()
+	mustNoErr(t, "read the cap", err)
+	if mb != want {
+		t.Errorf("%s = %d, want %d", what, mb, want)
 	}
 }
 
