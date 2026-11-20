@@ -21,6 +21,10 @@ const (
 	PermDomainAdminRO = "DomainAdminRO"
 	PermDomainPurge   = "DomainPurge"
 	PermResetPasswd   = "ResetPasswd"
+	// PermImpersonation lets a service account act as any mailbox of the scoped
+	// domains over EWS ExchangeImpersonation, Exchange's ApplicationImpersonation
+	// role. It is no admin-panel authority.
+	PermImpersonation = "ApplicationImpersonation"
 )
 
 // roleNameMaxLen bounds a role name (matches the roles.name column width).
@@ -58,7 +62,7 @@ func permScoped(name string) (scoped, known bool) {
 	switch name {
 	case PermSystemAdmin, PermSystemAdminRO, PermDomainPurge, PermResetPasswd:
 		return false, true
-	case PermOrgAdmin, PermDomainAdmin, PermDomainAdminRO:
+	case PermOrgAdmin, PermDomainAdmin, PermDomainAdminRO, PermImpersonation:
 		return true, true
 	}
 	return false, false

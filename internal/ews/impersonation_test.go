@@ -15,9 +15,9 @@ const impersonationTargetAddr = "boss@hermex.test"
 // seededImpersonationEWS builds an EWS server with the caller (alice) and a target
 // mailbox. The target holds a uniquely named folder directly under its inbox so an
 // operation running against it is distinguishable from the caller's own mailbox.
-// When delegated is true the target names the caller a delegate, authorizing
-// impersonation; otherwise the caller holds no grant.
-func seededImpersonationEWS(t *testing.T, marker string, delegated bool) *httptest.Server {
+// granted gives the caller the impersonation role; delegated puts the caller on
+// the target's delegate list, which must authorize nothing by itself.
+func seededImpersonationEWS(t *testing.T, marker string, granted, delegated bool) *httptest.Server {
 	t.Helper()
 	callerDir := provisionedDir(t)
 	cst, err := objectstore.Open(callerDir)
@@ -45,7 +45,7 @@ func seededImpersonationEWS(t *testing.T, marker string, delegated bool) *httpte
 	tst.Close()
 
 	accs := directory.StaticAccounts{
-		testUser:                {Password: testPass, MailboxPath: callerDir},
+		testUser:                {Password: testPass, MailboxPath: callerDir, Impersonate: granted},
 		impersonationTargetAddr: {Password: "irrelevant", MailboxPath: targetDir},
 	}
 	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
@@ -86,13 +86,13 @@ func findInboxChildren() string {
 }
 
 // TestExchangeImpersonationSwapsMailbox proves an accepted impersonation header
-// binds the operation to the TARGET's mailbox: a delegate impersonating the target
+// binds the operation to the TARGET's mailbox: a role holder impersonating the target
 // sees the target's uniquely named folder, while the same caller without the header
 // sees only their own mailbox (which has no such folder). Asserting no fault would
 // prove nothing about whether the mailbox actually changed.
 func TestExchangeImpersonationSwapsMailbox(t *testing.T) {
 	const marker = "BossSecretRoom"
-	ts := seededImpersonationEWS(t, marker, true)
+	ts := seededImpersonationEWS(t, marker, true, false)
 
 	_, out := soapPost(t, ts, impersonatedEnvelope(impersonationTargetAddr, findInboxChildren()), true)
 	if !strings.Contains(out, marker) {
@@ -105,15 +105,16 @@ func TestExchangeImpersonationSwapsMailbox(t *testing.T) {
 	}
 }
 
-// TestExchangeImpersonationNonDelegateDenied proves a caller the target has NOT
-// delegated to is refused. This is the security-critical without-grant path: a gate
-// that never denies in tests is an untested gate.
-func TestExchangeImpersonationNonDelegateDenied(t *testing.T) {
-	ts := seededImpersonationEWS(t, "Secret", false)
+// TestExchangeImpersonationNeedsTheRole proves a caller without the
+// ApplicationImpersonation role is refused even when the target lists them as a
+// delegate: Exchange delegates reach the owner's folders within the folder
+// permissions, while impersonation would give every right and send-as.
+func TestExchangeImpersonationNeedsTheRole(t *testing.T) {
+	ts := seededImpersonationEWS(t, "Secret", false, true)
 
 	_, out := soapPost(t, ts, impersonatedEnvelope(impersonationTargetAddr, findInboxChildren()), true)
 	if !strings.Contains(out, "ErrorImpersonateUserDenied") {
-		t.Fatalf("non-delegate impersonation: want ErrorImpersonateUserDenied, got %s", out)
+		t.Fatalf("delegate without the role: want ErrorImpersonateUserDenied, got %s", out)
 	}
 	// And it must NOT have leaked the target's content.
 	if strings.Contains(out, "Secret") {
@@ -125,7 +126,7 @@ func TestExchangeImpersonationNonDelegateDenied(t *testing.T) {
 // with the SAME code as a forbidden one, so the response is not a mailbox-existence
 // oracle (OWASP A01).
 func TestExchangeImpersonationUnknownTargetDenied(t *testing.T) {
-	ts := seededImpersonationEWS(t, "Secret", true)
+	ts := seededImpersonationEWS(t, "Secret", true, false)
 
 	_, out := soapPost(t, ts, impersonatedEnvelope("ghost@hermex.test", findInboxChildren()), true)
 	if !strings.Contains(out, "ErrorImpersonateUserDenied") {
@@ -136,7 +137,7 @@ func TestExchangeImpersonationUnknownTargetDenied(t *testing.T) {
 // TestExchangeImpersonationSIDUnsupported proves a SID-based ConnectingSID fails the
 // request (hermEX resolves identities by address, not by Windows SID).
 func TestExchangeImpersonationSIDUnsupported(t *testing.T) {
-	ts := seededImpersonationEWS(t, "Secret", true)
+	ts := seededImpersonationEWS(t, "Secret", true, false)
 
 	_, out := soapPost(t, ts, sidImpersonatedEnvelope("S-1-5-21-1-2-3", findInboxChildren()), true)
 	if !strings.Contains(out, "ErrorImpersonationFailed") {
@@ -148,7 +149,7 @@ func TestExchangeImpersonationSIDUnsupported(t *testing.T) {
 // permitted no-op: the operation runs (no fault) against the caller's own store,
 // needing no delegate grant.
 func TestExchangeImpersonationSelfAllowed(t *testing.T) {
-	ts := seededImpersonationEWS(t, "Secret", false)
+	ts := seededImpersonationEWS(t, "Secret", false, false)
 
 	_, out := soapPost(t, ts, impersonatedEnvelope(testUser, findInboxChildren()), true)
 	if strings.Contains(out, "Fault") || strings.Contains(out, "ErrorImpersonate") {

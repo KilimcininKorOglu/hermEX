@@ -3,16 +3,16 @@ package ews
 import (
 	"net/http"
 
+	"hermex/internal/directory"
 	"hermex/internal/logging"
-	"hermex/internal/objectstore"
 )
 
 // ExchangeImpersonation ([MS-OXWSCDATA] 2.2.4.14) lets an authenticated caller act
 // on another user's mailbox by carrying a <t:ExchangeImpersonation><t:ConnectingSID>
-// SOAP header. hermEX authorizes it with the delegate model the rest of the server
-// uses for cross-mailbox access: the caller may impersonate a target only when the
-// target has named the caller a delegate (objectstore GetDelegates), or when the
-// target is the caller's own mailbox. The header is processed before the operation,
+// SOAP header. As in Exchange, only the ApplicationImpersonation role an
+// administrator assigns authorizes it (directory.Impersonator); the target's
+// delegate list does not. Impersonating one's own mailbox is always permitted.
+// The header is processed before the operation,
 // so a failure is a SOAP Fault rather than a per-operation response.
 //
 // On success the session's effective identity (user + mailbox) becomes the target
@@ -48,23 +48,27 @@ func (s *Server) applyImpersonation(w http.ResponseWriter, sess *session, imp *i
 	// The denial path is deliberately identical for an unknown target and a known
 	// target that has not delegated to the caller, so the response is not a
 	// mailbox-existence oracle (OWASP A01).
+	// Only the ApplicationImpersonation role an administrator assigns admits the
+	// caller. The target's delegate list does not: a delegate reaches the owner's
+	// folders within the folder permissions, while impersonation acts as the owner
+	// with every right, sending included. A directory without the capability
+	// grants nothing.
 	targetPath, ok := s.accounts.Resolve(imp.addr)
 	if !ok {
 		writeSOAPFault(w, "ErrorImpersonateUserDenied", "ExchangeImpersonation: not permitted")
 		return false
 	}
-	st, err := objectstore.OpenExisting(targetPath)
+	imper, hasCap := s.accounts.(directory.Impersonator)
+	if !hasCap {
+		writeSOAPFault(w, "ErrorImpersonateUserDenied", "ExchangeImpersonation: not permitted")
+		return false
+	}
+	allowed, err := imper.MayImpersonate(sess.realUser, imp.addr)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return false
 	}
-	delegates, err := st.GetDelegates()
-	_ = st.Close()
-	if err != nil {
-		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
-		return false
-	}
-	if !containsFold(delegates, sess.realUser) {
+	if !allowed {
 		writeSOAPFault(w, "ErrorImpersonateUserDenied", "ExchangeImpersonation: not permitted")
 		return false
 	}

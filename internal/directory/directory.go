@@ -22,6 +22,10 @@ type Account struct {
 	// EWS room finder. The static directory has no separate resource table, so the
 	// flag is the room marker; a real deployment uses the SQL directory instead.
 	Room bool
+	// Impersonate lets the account act as any other account of the static
+	// directory over EWS ExchangeImpersonation, the static stand-in for the
+	// ApplicationImpersonation role.
+	Impersonate bool
 }
 
 // Accounts resolves a recipient email address to its mailbox store path. ok is
@@ -461,6 +465,17 @@ func (a StaticAccounts) Authenticate(user, password string) (string, bool) {
 		return "", false
 	}
 	return acc.MailboxPath, true
+}
+
+// MayImpersonate implements Impersonator: caller must carry Impersonate and the
+// target must be an account of the directory.
+func (a StaticAccounts) MayImpersonate(caller, target string) (bool, error) {
+	c, ok := a[strings.ToLower(caller)]
+	if !ok || !c.Impersonate {
+		return false, nil
+	}
+	_, ok = a[strings.ToLower(target)]
+	return ok, nil
 }
 
 // Privileges implements Authenticator: a static account has no privilege model,
