@@ -434,7 +434,10 @@ func TestSyncBodyPreferenceTruncation(t *testing.T) {
 	if n := len(body.Child(wbxml.ABData).Opaque); n != 2 {
 		t.Errorf("truncated body length = %d, want 2", n)
 	}
-	if sz := body.ChildText(wbxml.ABEstimatedDataSize); sz == "2" || sz == "" {
-		t.Errorf("EstimatedDataSize = %q, want the full (untruncated) length", sz)
+	// seedInbox writes the text "Body 1", so the untruncated body is at least
+	// those six bytes; a number below that is the truncated size.
+	sz := body.ChildText(wbxml.ABEstimatedDataSize)
+	if n, err := strconv.Atoi(sz); err != nil || n < len("Body 1") {
+		t.Errorf("EstimatedDataSize = %q, want the full (untruncated) length, at least %d", sz, len("Body 1"))
 	}
 }
