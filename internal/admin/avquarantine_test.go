@@ -130,6 +130,37 @@ func TestUIDomainAVScanSave(t *testing.T) {
 	}
 }
 
+// TestUIDomainSettingsNeedASystemAdmin proves the panel's domain antivirus,
+// catch-all and split-delivery saves take a full system administrator, as every
+// panel write does (uiAuthorized): a domain administrator is refused for another
+// domain and for its own, since turning scanning off or pointing the catch-all or
+// the relay host elsewhere exposes a domain's mail. A system administrator is the
+// control: the same save is admitted, so the refusals come from the authority.
+func TestUIDomainSettingsNeedASystemAdmin(t *testing.T) {
+	form := url.Values{"av_scan_inbound": {"on"}, "catchall": {"x@acme.test"}, "split_relay_host": {"relay.acme.test"}}
+	for _, setting := range []string{"avscan", "catchall", "split"} {
+		for _, id := range []string{"1", "2"} {
+			d := &fakeDir{
+				authOK: true, uid: 7, perms: []directory.Permission{{Name: directory.PermDomainAdmin, Params: "1"}},
+				domainDetail: directory.DomainDetail{ID: 1, Name: "acme.test"},
+			}
+			ts := adminServer(t, d)
+			session, csrf := loginCookies(t, ts)
+			wantStatus(t, htmxPUT(t, ts, "/admin/ui/domains/"+id+"/"+setting, session, csrf, form), http.StatusForbidden,
+				"a domain admin of domain 1 saving domain "+id+"'s "+setting)
+			wantFalse(t, d.avInbound, "inbound scanning after the refused "+setting+" save")
+		}
+		sys := &fakeDir{
+			authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+			domainDetail: directory.DomainDetail{ID: 1, Name: "acme.test"},
+		}
+		ts := adminServer(t, sys)
+		session, csrf := loginCookies(t, ts)
+		wantStatus(t, htmxPUT(t, ts, "/admin/ui/domains/1/"+setting, session, csrf, form), http.StatusOK,
+			"a system admin saving domain 1's "+setting)
+	}
+}
+
 // TestUIDomainAVScanEmitsAudit proves changing a domain's antivirus toggles records
 // a setting.change audit event naming the operator and the before/after values, so
 // an incident responder can answer who turned AV scanning off and when.
