@@ -117,6 +117,10 @@ func (s *Server) handleGroupSetMembers(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "this group is managed by directory sync and cannot be edited here"})
 			return
 		}
+		if errors.Is(err, directory.ErrUnroutableAddress) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "every member must be a single email address"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save members"})
 		return
 	}

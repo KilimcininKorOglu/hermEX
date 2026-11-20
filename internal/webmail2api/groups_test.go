@@ -2,6 +2,7 @@ package webmail2api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -120,5 +121,33 @@ func TestGroupsLDAPMastered(t *testing.T) {
 
 	if rec := do(http.MethodPut, "/api/v1/groups/members", `{"address":"ad-grp@hermex.test","members":["z@hermex.test"]}`); rec.Code != http.StatusForbidden {
 		t.Errorf("put members of mastered group = %d, want 403", rec.Code)
+	}
+}
+
+// unroutableAuth refuses every member set the way the directory refuses one holding
+// an address no relay can route.
+type unroutableAuth struct{ groupStoreAuth }
+
+func (a *unroutableAuth) SetMembers(string, []string) (bool, error) {
+	return false, fmt.Errorf("%w: list member %q", directory.ErrUnroutableAddress, "bob@")
+}
+
+// TestGroupsRefuseAnUnroutableMemberAsTheClientsError proves a member the directory
+// refuses as unroutable is answered 400 with a message the owner can act on, not
+// 500 "could not save", which reads as a server fault.
+func TestGroupsRefuseAnUnroutableMemberAsTheClientsError(t *testing.T) {
+	auth := &unroutableAuth{groupStoreAuth{owned: map[string][]directory.MListInfo{
+		"alice@hermex.test": {{Listname: "crew@hermex.test"}},
+	}}}
+	secret := []byte("groups-unroutable-secret")
+	srv := NewServer(auth, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
+	token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: t.TempDir(), Exp: time.Now().Add(time.Hour).Unix()})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/groups/members",
+		strings.NewReader(`{"address":"crew@hermex.test","members":["bob@"]}`))
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "single email address") {
+		t.Errorf("put an unroutable member = %d %s, want 400 naming the rule", rec.Code, rec.Body.String())
 	}
 }
