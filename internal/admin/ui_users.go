@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/serve"
 )
 
 // uiAuthorized authorizes a UI state-changing request: a valid session, a
@@ -83,10 +84,20 @@ func (s *Server) handleUIChangePasswordSubmit(w http.ResponseWriter, r *http.Req
 		result(false, "changePassword.required")
 		return
 	}
+	// The current password is checked under the sign-in throttle, so a stolen
+	// session cannot guess the operator's password here without limit.
+	addr := serve.ClientAddr(r)
+	if !s.limiter.Allowed(addr, cl.Login) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		result(false, "login.tooMany")
+		return
+	}
 	if _, authed := s.dir.Authenticate(cl.Login, old); !authed {
+		s.limiter.Fail(addr, cl.Login)
 		result(false, "changePassword.wrongCurrent")
 		return
 	}
+	s.limiter.Succeed(addr, cl.Login)
 	if _, err := s.dir.SetPassword(cl.Login, newpw); err != nil {
 		result(false, s.notice("changePassword.failed", err))
 		return

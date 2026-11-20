@@ -7,6 +7,7 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
+	"hermex/internal/serve"
 )
 
 // handleListUsers lists the users the caller may read: a system read admin (or
@@ -128,10 +129,19 @@ func (s *Server) handleChangeOwnPassword(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	login := claimsOf(r).Login
+	// Checked under the sign-in throttle, so a stolen session cannot guess the
+	// operator's password here without limit.
+	addr := serve.ClientAddr(r)
+	if !s.limiter.Allowed(addr, login) {
+		http.Error(w, "too many failed attempts, try again later", http.StatusTooManyRequests)
+		return
+	}
 	if _, ok := s.dir.Authenticate(login, req.Old); !ok {
+		s.limiter.Fail(addr, login)
 		http.Error(w, "incorrect current password", http.StatusForbidden)
 		return
 	}
+	s.limiter.Succeed(addr, login)
 	found, err := s.dir.SetPassword(login, req.New)
 	if err != nil {
 		s.fail(w, "server error", err, http.StatusInternalServerError)
