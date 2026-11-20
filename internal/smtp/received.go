@@ -16,8 +16,8 @@ import (
 // "unknown" when it did not resolve); an IPv6 client address carries the "IPv6:"
 // address-literal tag. The header is CRLF-terminated and folds onto continuation
 // lines, matching the dot-decoded body it is prepended to. helo is recorded
-// verbatim (it cannot carry a CRLF, arriving on a single command line); an empty
-// value is reported as "unknown".
+// verbatim when it is a printable name; an empty value, or one carrying a space
+// or control byte, is reported as "unknown".
 func buildReceived(helo, remoteAddr, rdns, hostname string, tls bool, now time.Time) string {
 	with := "SMTP"
 	if tls {
@@ -31,8 +31,11 @@ func buildReceived(helo, remoteAddr, rdns, hostname string, tls bool, now time.T
 	if strings.Contains(ip, ":") {
 		ipTag = "IPv6:" + ip
 	}
+	// The command reader ends a line at its LF, so a bare CR or another control
+	// byte the client sent stays in the argument; it is held to the same rule as
+	// the PTR name below.
 	from := helo
-	if from == "" {
+	if from == "" || !printableName(from) {
 		from = "unknown"
 	}
 	// A PTR record is free-form data from an unauthenticated source the sending

@@ -30,6 +30,28 @@ func TestReceivedRejectsInjectedReverseDNS(t *testing.T) {
 	}
 }
 
+// TestReceivedRejectsAControlByteInHELO feeds the HELO argument the command reader
+// hands over for "EHLO evil.example\rX-Injected: header\r\n": the line ends at the
+// LF, so the bare CR stays in the argument. RFC 5322 2.2 allows no CR or LF in a
+// field outside a CRLF, and a reader that takes the CR as a line end sees a header
+// field the client wrote. The client's name must stay on its line like the PTR
+// name, and an argument that is not a printable name is reported as unknown.
+func TestReceivedRejectsAControlByteInHELO(t *testing.T) {
+	for _, helo := range []string{"evil.example\rX-Injected: header", "evil.example\x00x", "two words"} {
+		got := buildReceived(helo, "203.0.113.9:2525", "mx.sender.example", "mail.hermex.test", false,
+			time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
+		if strings.ContainsAny(strings.ReplaceAll(got, "\r\n", ""), "\r\n\x00") || strings.Contains(got, "X-Injected") {
+			t.Errorf("HELO %q reached the header:\n%q", helo, got)
+		}
+		if !strings.HasPrefix(got, "Received: from unknown (") {
+			t.Errorf("HELO %q: header = %q, want the client name reported as unknown", helo, got)
+		}
+	}
+	if got := buildReceived("[203.0.113.9]", "203.0.113.9:2525", "", "mail.hermex.test", false, time.Now()); !strings.HasPrefix(got, "Received: from [203.0.113.9] (") {
+		t.Errorf("an address-literal HELO was not kept: %q", got)
+	}
+}
+
 // TestReceivedKeepsOrdinaryReverseDNS keeps the trace informative for the normal
 // case, which is the whole point of the lookup.
 func TestReceivedKeepsOrdinaryReverseDNS(t *testing.T) {
