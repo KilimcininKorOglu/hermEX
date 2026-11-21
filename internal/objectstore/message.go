@@ -2,6 +2,7 @@ package objectstore
 
 import (
 	"database/sql"
+	"errors"
 	"strconv"
 	"time"
 
@@ -18,7 +19,7 @@ import (
 // offloaded to content files by the property layer. It returns the new message
 // EID.
 func (s *Store) CreateMessage(folderID int64, msg *oxcmail.Message) (int64, error) {
-	if err := s.stampGlobalObjectID(msg); err != nil {
+	if err := s.prepareNewMessage(folderID, msg); err != nil {
 		return 0, err
 	}
 	tx, err := s.objdb.Begin()
@@ -143,6 +144,35 @@ func midString(eid uint64) string {
 // is folder-associated (FAI, a hidden setting/rule/form, not a visible item)
 // when it carries PidTagAssociated set true. The flag is fixed at creation; the
 // contents-table query splits associated from normal messages by this column.
+// ErrSearchFolderTarget reports a normal message written into a search folder.
+// A search folder's contents are the messages its criteria find, so a message
+// stored in it is shown by no surface and is lost to its owner.
+var ErrSearchFolderTarget = errors.New("objectstore: a search folder holds no messages of its own")
+
+// prepareNewMessage checks the destination folder and stamps the identity a new
+// message carries before CreateMessage writes it.
+func (s *Store) prepareNewMessage(folderID int64, msg *oxcmail.Message) error {
+	if err := s.checkMessageTarget(folderID, isAssociated(msg.Props) == 1); err != nil {
+		return err
+	}
+	return s.stampGlobalObjectID(msg)
+}
+
+// checkMessageTarget refuses a destination a new message would be lost in: a
+// folder that does not exist or was deleted (ErrNotFound), and a search folder
+// for anything but an associated (FAI) message, which is how a client keeps a
+// view definition on the search folder itself.
+func (s *Store) checkMessageTarget(folderID int64, associated bool) error {
+	isSearch, err := s.IsSearchFolder(folderID)
+	if err != nil {
+		return err
+	}
+	if isSearch && !associated {
+		return ErrSearchFolderTarget
+	}
+	return nil
+}
+
 func isAssociated(props mapi.PropertyValues) int {
 	if v, ok := props.Get(mapi.PrAssociated); ok {
 		if b, ok := v.(bool); ok && b {

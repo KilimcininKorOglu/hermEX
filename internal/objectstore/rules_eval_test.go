@@ -1,10 +1,12 @@
 package objectstore
 
 import (
+	"errors"
 	"testing"
 	"time"
 
 	"hermex/internal/mapi"
+	"hermex/internal/oxcmail"
 )
 
 // sampleBag is the property bag of a representative delivered message, used to
@@ -778,5 +780,48 @@ func TestRuleOOFActiveCondition(t *testing.T) {
 	}
 	if msgs, _ := s.ListMessages(filed); len(msgs) != 1 {
 		t.Errorf("Filed has %d, want 1 (moved while OOF active)", len(msgs))
+	}
+}
+
+// TestRuleMoveIntoASearchFolderKeepsTheMessage: a search folder's contents are
+// the messages its criteria find ([MS-OXOSRCH]), so a message filed into one is
+// shown by no surface. A rule naming a search folder as its destination must
+// fail and leave the message where it is, not delete it from the source.
+func TestRuleMoveIntoASearchFolderKeepsTheMessage(t *testing.T) {
+	s := openSeededStore(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+	search, err := s.CreateSearchFolder(int64(mapi.PrivateFIDFinder), "Invoices")
+	mustNoErr(t, "create the search folder", err)
+	info := deliverTo(t, s, inbox, ruleMsg("invoice", "a@example.com", ""))
+
+	// #nosec G115 -- test folder ids are small positive store ids
+	move := mapi.MoveCopyAction{SameStore: true, FolderEID: mapi.SVREID{FolderID: mapi.EID(search)}}
+	if _, err := s.moveRuleMessage(inbox, info.UID, move); !errors.Is(err, ErrSearchFolderTarget) {
+		t.Fatalf("rule move into a search folder = %v, want ErrSearchFolderTarget", err)
+	}
+	if _, err := s.MessageByUID(inbox, info.UID); err != nil {
+		t.Errorf("the message left the Inbox: %v", err)
+	}
+	wantRows(t, s, "messages stored in the search folder", 0,
+		`SELECT COUNT(*) FROM messages WHERE parent_fid=?`, search)
+
+	// A view definition is an associated message the client keeps on the search
+	// folder itself, so that one is still accepted.
+	fai := &oxcmail.Message{Props: mapi.PropertyValues{{Tag: mapi.PrAssociated, Value: true}, {Tag: mapi.PrMessageClass, Value: "IPM.Microsoft.FolderDesign.NamedView"}}}
+	if _, err := s.CreateMessage(search, fai); err != nil {
+		t.Errorf("an associated view message on a search folder was refused: %v", err)
+	}
+}
+
+// TestCreateMessageRefusesADeletedFolder: a message written into a folder that
+// was deleted is shown by no surface either.
+func TestCreateMessageRefusesADeletedFolder(t *testing.T) {
+	s := openSeededStore(t)
+	gone, err := s.CreateFolder(nil, "Gone")
+	mustNoErr(t, "create a folder", err)
+	mustNoErr(t, "delete the folder", s.DeleteFolder(gone))
+	msg := &oxcmail.Message{Props: mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "lost"}}}
+	if _, err := s.CreateMessage(gone, msg); !errors.Is(err, ErrNotFound) {
+		t.Errorf("CreateMessage into a deleted folder = %v, want ErrNotFound", err)
 	}
 }
