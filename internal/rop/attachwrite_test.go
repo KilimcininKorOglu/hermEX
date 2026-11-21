@@ -124,6 +124,20 @@ func TestAttachmentWriteChain(t *testing.T) {
 
 	// The first attachment reads back the saved filename + data.
 	wantOpenAttachment(t, sess, msgH, num0, ecSuccess, "OpenAttachment(num0) after save")
+	attID0, err := store.AttachmentIDByNumber(int64(mid), num0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := store.GetAttachmentProperties(attID0, mapi.PrAttachLongFilename, mapi.PrAttachDataBin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name, _ := saved.Get(mapi.PrAttachLongFilename); name != "w.bin" {
+		t.Errorf("saved filename = %v, want w.bin", name)
+	}
+	if data, _ := saved.Get(mapi.PrAttachDataBin); string(asBytes(data)) != "WDATA" {
+		t.Errorf("saved data = %v, want WDATA", data)
+	}
 	assertAttachmentCount(t, store, mid, 2, "message")
 
 	// Delete the first attachment; the second must keep number 1 (not renumber).
