@@ -536,6 +536,31 @@ func (s *Store) MoveMessageImport(srcFolderID, srcMID, destFolderID, dstMID int6
 	return assoc != 0, nil
 }
 
+// ErrMoveTargetInUse reports an ICS move-import whose client-chosen destination id
+// already names a message in another folder. The client allocates that id from its
+// own replica range ([MS-OXCFXICS] 3.3.5.9), so an id the store already holds
+// elsewhere is not a retry and must not replace that message.
+var ErrMoveTargetInUse = errors.New("objectstore: move destination id names a message in another folder")
+
+// clearMoveTarget removes a row a retried move already committed under dstMID in
+// the destination folder, so the move can be replayed. A row under that id in any
+// other folder belongs to another message and refuses the move.
+func clearMoveTarget(tx *sql.Tx, destFolderID, dstMID int64) error {
+	var parent int64
+	err := tx.QueryRow(`SELECT parent_fid FROM messages WHERE message_id=?`, dstMID).Scan(&parent)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if parent != destFolderID {
+		return ErrMoveTargetInUse
+	}
+	_, err = tx.Exec(`DELETE FROM messages WHERE message_id=?`, dstMID)
+	return err
+}
+
 // renameMovedMessage rewrites the message row to its destination id and folder.
 // A retried move that re-sends a committed destination id replaces it. The time
 // index is repointed explicitly because it keys on (folder_id, message_id) and
@@ -543,7 +568,7 @@ func (s *Store) MoveMessageImport(srcFolderID, srcMID, destFolderID, dstMID int6
 // through ON UPDATE CASCADE.
 func renameMovedMessage(tx *sql.Tx, srcFolderID, srcMID, destFolderID, dstMID int64, cn uint64) error {
 	if dstMID != srcMID {
-		if _, err := tx.Exec(`DELETE FROM messages WHERE message_id=?`, dstMID); err != nil {
+		if err := clearMoveTarget(tx, destFolderID, dstMID); err != nil {
 			return err
 		}
 	}

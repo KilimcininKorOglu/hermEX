@@ -95,3 +95,44 @@ func TestMoveMessageImportObjectDeleted(t *testing.T) {
 		t.Fatalf("MoveMessageImport of an absent source: err = %v, want ErrObjectDeleted", err)
 	}
 }
+
+// TestMoveMessageImportRefusesAnIDHeldInAnotherFolder: the client chooses the
+// destination id from its own replica range ([MS-OXCFXICS] 3.3.5.9), so an id the
+// store already holds in another folder is not a retried move. Taking it would
+// delete that unrelated message. The move is refused and both messages survive.
+func TestMoveMessageImportRefusesAnIDHeldInAnotherFolder(t *testing.T) {
+	s := openSeededStore(t)
+	src := int64(mapi.PrivateFIDInbox)
+	dst := int64(mapi.PrivateFIDSentItems)
+	other := int64(mapi.PrivateFIDDeletedItems)
+
+	mid := mustCreateMessage(t, s, src, richMsg("move me"))
+	victim := mustCreateMessage(t, s, other, richMsg("must survive"))
+
+	if _, err := s.MoveMessageImport(src, mid, dst, victim); !errors.Is(err, ErrMoveTargetInUse) {
+		t.Fatalf("move onto an id held in another folder = %v, want ErrMoveTargetInUse", err)
+	}
+	var parent int64
+	mustScan(t, s.objdb.QueryRow(`SELECT parent_fid FROM messages WHERE message_id=?`, victim), &parent)
+	wantEq(t, "the other folder's message stays where it was", parent, other)
+	mustScan(t, s.objdb.QueryRow(`SELECT parent_fid FROM messages WHERE message_id=?`, mid), &parent)
+	wantEq(t, "the refused source stays in its folder", parent, src)
+}
+
+// TestMoveMessageImportReplaysIntoTheSameFolder: a retried move that re-sends a
+// destination id already committed in the destination folder replaces that row.
+func TestMoveMessageImportReplaysIntoTheSameFolder(t *testing.T) {
+	s := openSeededStore(t)
+	src := int64(mapi.PrivateFIDInbox)
+	dst := int64(mapi.PrivateFIDSentItems)
+
+	first := mustCreateMessage(t, s, src, richMsg("first"))
+	dstMID := first + 0x100000
+	_, err := s.MoveMessageImport(src, first, dst, dstMID)
+	mustNoErr(t, "first move", err)
+
+	second := mustCreateMessage(t, s, src, richMsg("second"))
+	_, err = s.MoveMessageImport(src, second, dst, dstMID)
+	mustNoErr(t, "replayed move under the committed id", err)
+	wantRows(t, s, "rows under the destination id", 1, `SELECT COUNT(*) FROM messages WHERE message_id=? AND parent_fid=?`, dstMID, dst)
+}
