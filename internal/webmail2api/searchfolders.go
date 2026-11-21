@@ -64,6 +64,8 @@ func searchFolderFailure(err error) settingsFailure {
 		return settingsFailure{status: http.StatusNotFound, msg: "saved search not found"}
 	case errors.Is(err, objectstore.ErrFolderExists):
 		return settingsFailure{status: http.StatusConflict, msg: "a saved search with that name exists"}
+	case errors.Is(err, objectstore.ErrBuiltinFolder):
+		return settingsFailure{status: http.StatusForbidden, msg: "this saved search cannot be renamed"}
 	case errors.Is(err, errBadSearchFolder):
 		return settingsFailure{status: http.StatusBadRequest, msg: "unknown folder"}
 	}

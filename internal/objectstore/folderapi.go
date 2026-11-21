@@ -321,8 +321,13 @@ func countReparent(tx *sql.Tx, oldParent sql.NullInt64, newParent int64) error {
 // index projection's name (keeping the IMAP listing in step) without changing the
 // folder's parent, the half of RenameFolder a pure rename needs. It refuses a
 // name already held by a live sibling (ErrFolderExists) so name-based resolution
-// stays unambiguous, and reports ErrNotFound when the folder is missing.
+// stays unambiguous, and reports ErrNotFound when the folder is missing. A folder
+// the store provisions itself refuses with ErrBuiltinFolder, as RenameFolder does,
+// so no protocol renames it by either path.
 func (s *Store) SetFolderName(folderID int64, newName string) error {
+	if s.isBuiltinFolder(folderID) {
+		return ErrBuiltinFolder
+	}
 	var parentFID int64
 	err := s.objdb.QueryRow(
 		`SELECT parent_id FROM folders WHERE folder_id=? AND is_deleted=0`, folderID).Scan(&parentFID)

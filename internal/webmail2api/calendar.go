@@ -903,6 +903,20 @@ func calendarProps(st *objectstore.Store, in calendarJSON) mapi.PropertyValues {
 
 // handleUpdateCalendar renames, recolors and describes a calendar (PATCH;
 // fields are optional).
+// writeCalendarRenameError answers a refused calendar rename: the default
+// calendar keeps its name (403), a name a sibling holds conflicts (409), and any
+// other failure is a 500.
+func writeCalendarRenameError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, objectstore.ErrBuiltinFolder):
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "this calendar cannot be renamed"})
+	case errors.Is(err, objectstore.ErrFolderExists):
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "a calendar with that name already exists"})
+	default:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not rename calendar"})
+	}
+}
+
 func (s *Server) handleUpdateCalendar(w http.ResponseWriter, r *http.Request) {
 	var in calendarJSON
 	if err := decodeJSON(r, &in); err != nil {
@@ -921,7 +935,7 @@ func (s *Server) handleUpdateCalendar(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(in.Name) != "" {
 		if err := st.SetFolderName(fid, in.Name); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not rename calendar"})
+			writeCalendarRenameError(w, err)
 			return
 		}
 	}

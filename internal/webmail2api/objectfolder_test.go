@@ -148,3 +148,21 @@ func TestWritesRefuseAnObjectOfAnotherFolder(t *testing.T) {
 		wantUntouched(t, mbox, "PUT photo", seed)
 	}
 }
+
+// TestDefaultCalendarKeepsItsName: the default calendar is a folder the store
+// provisions, so a calendar PATCH naming it is refused and the name stays.
+func TestDefaultCalendarKeepsItsName(t *testing.T) {
+	do, mbox := apiHarness(t)
+	cal := strconv.FormatInt(int64(mapi.PrivateFIDCalendar), 10)
+	wantStatus(t, "rename the default calendar",
+		do(http.MethodPatch, "/api/v1/calendar/calendars/"+cal, `{"name":"Renamed"}`), http.StatusForbidden)
+
+	st, err := objectstore.Open(mbox)
+	mustNoErr(t, "reopen the mailbox", err)
+	defer st.Close()
+	props, err := st.GetFolderProperties(int64(mapi.PrivateFIDCalendar), mapi.PrDisplayName)
+	mustNoErr(t, "read the calendar name", err)
+	if propStr(props, mapi.PrDisplayName) == "Renamed" {
+		t.Error("the default calendar was renamed")
+	}
+}

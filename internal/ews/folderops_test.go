@@ -443,3 +443,20 @@ func TestGetFolderPermissionSetSynthesizesDefaults(t *testing.T) {
 		t.Errorf("Anonymous level = %q, want None", levels["Anonymous"])
 	}
 }
+
+// TestUpdateFolderRefusesABuiltinFolderByItsID: a well-known folder addressed by
+// its plain FolderId instead of its DistinguishedFolderId keeps its name too.
+func TestUpdateFolderRefusesABuiltinFolderByItsID(t *testing.T) {
+	ts, _ := seededEWS(t)
+	_, out := soapPost(t, ts, distinguishedGetFolder("inbox"), true)
+	m := folderIDRE.FindStringSubmatch(out)
+	if len(m) != 2 {
+		t.Fatalf("GetFolder(inbox) returned no FolderId: %s", out)
+	}
+	if _, out := soapPost(t, ts, updateFolderRenameReq(m[1], "Hacked"), true); !strings.Contains(out, "ErrorAccessDenied") {
+		t.Errorf("renaming the Inbox by its FolderId must be ErrorAccessDenied: %s", out)
+	}
+	if _, out := soapPost(t, ts, distinguishedGetFolder("inbox"), true); strings.Contains(out, "Hacked") {
+		t.Errorf("the Inbox was renamed: %s", out)
+	}
+}

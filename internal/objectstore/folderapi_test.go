@@ -420,3 +420,27 @@ func TestBuiltinFolderCannotBeRemovedOrRenamed(t *testing.T) {
 		t.Errorf("DeleteFolder on a user folder: %v", err)
 	}
 }
+
+// displayName reads a folder's display name, empty when it has none.
+func displayName(pv mapi.PropertyValues) string {
+	v, _ := pv.Get(mapi.PrDisplayName)
+	s, _ := v.(string)
+	return s
+}
+
+// TestSetFolderNameRefusesABuiltinFolder: a folder the store provisions keeps its
+// name on every path, the in-place rename included, exactly as RenameFolder
+// refuses it; every surface addresses it by its PrivateFID_* constant.
+func TestSetFolderNameRefusesABuiltinFolder(t *testing.T) {
+	s := openSeededStore(t)
+	for _, fid := range []int64{int64(mapi.PrivateFIDInbox), int64(mapi.PrivateFIDCalendar)} {
+		before, err := s.GetFolderProperties(fid, mapi.PrDisplayName)
+		mustNoErr(t, "read the built-in name", err)
+		if err := s.SetFolderName(fid, "Hacked"); !errors.Is(err, ErrBuiltinFolder) {
+			t.Errorf("SetFolderName(built-in %d) = %v, want ErrBuiltinFolder", fid, err)
+		}
+		after, err := s.GetFolderProperties(fid, mapi.PrDisplayName)
+		mustNoErr(t, "read the built-in name again", err)
+		wantEq(t, "the built-in folder's name", displayName(after), displayName(before))
+	}
+}
