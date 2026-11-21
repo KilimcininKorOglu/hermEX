@@ -509,3 +509,54 @@ func folderNamedUnder(t *testing.T, store *objectstore.Store, parentID int64, na
 	}
 	return false
 }
+
+// TestMoveFolderOntoANonFolderHandleRenamesInPlace: a destination handle that
+// names no folder asks only for a rename, so the folder keeps its parent. A
+// subfolder of the Inbox renamed this way must stay under the Inbox, not move to
+// the top of the IPM subtree.
+func TestMoveFolderOntoANonFolderHandleRenamesInPlace(t *testing.T) {
+	dir := provisionedDir(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := st.CreateFolder(&inbox, "Nested")
+	st.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
+	inboxH := h[1]
+
+	body := ext.NewPush(ext.FlagUTF16)
+	body.Uint8(1) // DestHandleIndex: the logon, not a folder
+	body.Uint8(0) // WantAsynchronous
+	body.Uint8(1) // UseUnicode
+	body.Uint64(uint64(mapi.MakeEIDEx(1, uint64(sub))))
+	body.Unicode("Renamed")
+	resp, _ := sess.Dispatch(toROPRequest(ropMoveFolder, 0, body.Bytes()), []uint32{inboxH, logonH})
+	if ec := readEC(t, resp, ropMoveFolder); ec != ecSuccess {
+		t.Fatalf("MoveFolder ec = %#x", ec)
+	}
+	store := sess.get(inboxH).store
+	kids, err := childFolders(store, inbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, k := range kids {
+		found = found || k.ID == sub
+	}
+	if !found {
+		t.Error("the renamed folder left the Inbox")
+	}
+	props, _ := store.GetFolderProperties(sub, mapi.PrDisplayName)
+	if v, _ := props.Get(mapi.PrDisplayName); v != "Renamed" {
+		t.Errorf("display name = %v, want Renamed", v)
+	}
+}

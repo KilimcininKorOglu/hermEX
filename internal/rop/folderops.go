@@ -236,7 +236,7 @@ func (s *Session) ropMoveFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 	if !ok {
 		return true
 	}
-	if err := folder.store.RenameFolder(movedFID, newParent, newName); err != nil {
+	if err := moveOrRename(folder.store, movedFID, newParent, newName); err != nil {
 		writeErr(out, ropMoveFolder, hindex, folderMoveErrorCode(err))
 		return true
 	}
@@ -245,6 +245,16 @@ func (s *Session) ropMoveFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 	out.Uint32(ecSuccess)
 	out.Uint8(0) // PartialCompletion
 	return true
+}
+
+// moveOrRename applies a RopMoveFolder: a nil parent renames in place.
+// RenameFolder reads a nil parent as the IPM subtree root, which would reparent
+// the folder there without the CreateSubfolder check a real reparent passes.
+func moveOrRename(st *objectstore.Store, fid int64, newParent *int64, name string) error {
+	if newParent == nil {
+		return st.SetFolderName(fid, name)
+	}
+	return st.RenameFolder(fid, newParent, name)
 }
 
 // folderMoveErrorCode maps a failed folder move to its ROP error: a sibling
