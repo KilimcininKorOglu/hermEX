@@ -9,6 +9,7 @@ import (
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
 	"hermex/internal/mta"
+	"hermex/internal/objectstore"
 )
 
 // scanDir is the directory capability the scanner gates on: one domain with
@@ -61,14 +62,31 @@ func TestSaveChangesAttachmentRefusesInfectedContent(t *testing.T) {
 	logonH := h[0]
 	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
 	msgH := h[1]
-	_, attH := createAttachmentNum(t, sess, msgH)
+	num, attH := createAttachmentNum(t, sess, msgH)
 
 	ec := saveAttachmentWith(t, sess, msgH, attH, mapi.PropertyValues{
 		{Tag: mapi.PrAttachLongFilename, Value: "invoice.exe"},
 		{Tag: mapi.PrAttachDataBin, Value: []byte("MZ malware bytes")},
 	})
-	if ec == ecSuccess {
-		t.Error("an infected attachment was saved into the mailbox")
+	if ec != ecAccessDenied {
+		t.Errorf("SaveChangesAttachment of infected content = %#x, want ecAccessDenied", ec)
+	}
+	// The refusal must keep the bytes out of the store, not only answer an error.
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	attID, err := st.AttachmentIDByNumber(int64(mid), num)
+	if err != nil {
+		return // no attachment row at all: nothing was stored
+	}
+	props, err := st.GetAttachmentProperties(attID, mapi.PrAttachDataBin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, stored := props.Get(mapi.PrAttachDataBin); stored {
+		t.Error("the infected bytes were written into the mailbox")
 	}
 }
 
