@@ -5,6 +5,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/mail"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -42,7 +43,7 @@ func TestBuildReadReceiptMDN(t *testing.T) {
 	wantEq(t, "the X-Auto-Response-Suppress loop guard", msg.Header.Get("X-Auto-Response-Suppress"), "All")
 	subj, err := (&mime.WordDecoder{}).DecodeHeader(msg.Header.Get("Subject"))
 	mustNoErr(t, "decode the subject", err)
-	wantEq(t, "the subject", subj, readReceiptSubject)
+	wantEq(t, "the subject", subj, "Read: Quarterly numbers")
 
 	mediaType, params, err := mime.ParseMediaType(msg.Header.Get("Content-Type"))
 	mustNoErr(t, "parse the Content-Type", err)
@@ -165,5 +166,30 @@ func TestBuildReadReceiptOmitsAbsentFields(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "Time:") {
 		t.Errorf("Time line emitted with no submit time")
+	}
+}
+
+// TestReadReceiptSubjectNamesTheOriginal: the receipt carries the original
+// subject after "Read: ", the Outlook and Exchange form, so a sender can tell
+// which message was read. A message with no subject gets "Read:" alone, a
+// non-ASCII subject survives the encoded-word round trip, and a subject that
+// carries a line break (a client-set property) cannot add a header field.
+func TestReadReceiptSubjectNamesTheOriginal(t *testing.T) {
+	when := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)
+	for orig, want := range map[string]string{
+		"":                       "Read:",
+		"Çeyrek rakamları":       "Read: Çeyrek rakamları",
+		"hi\r\nBcc: x@evil.test": "Read: hi\r\nBcc: x@evil.test",
+	} {
+		raw, err := buildReadReceipt(ReadReceiptInfo{Reader: "reader@hermex.test", To: "sender@hermex.test", OrigSubject: orig}, when)
+		mustNoErr(t, "build the receipt", err)
+		msg, err := mail.ReadMessage(strings.NewReader(string(raw)))
+		mustNoErr(t, "parse the receipt", err)
+		subj, err := (&mime.WordDecoder{}).DecodeHeader(msg.Header.Get("Subject"))
+		mustNoErr(t, "decode the subject", err)
+		wantEq(t, "the subject for "+strconv.Quote(orig), subj, want)
+		if msg.Header.Get("Bcc") != "" {
+			t.Errorf("subject %q added a Bcc field to the receipt", orig)
+		}
 	}
 }

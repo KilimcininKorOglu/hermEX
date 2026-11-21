@@ -111,7 +111,7 @@ func TestReadReceiptGeneratedOnFirstRead(t *testing.T) {
 		t.Fatalf("sender inbox = %d after first read, want 1 read receipt", n)
 	}
 	raw := string(firstInboxRaw(t, senderDir))
-	if !strings.Contains(raw, "Your message has been read!") {
+	if !strings.Contains(raw, "Subject: Read: PingMe") {
 		t.Errorf("delivered message is not the read notification:\n%s", raw)
 	}
 	if !strings.Contains(raw, "displayed") {

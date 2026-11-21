@@ -15,9 +15,12 @@ import (
 	"hermex/internal/relay"
 )
 
-// readReceiptSubject is the fixed subject of a read-receipt MDN, matching the
-// reference's read-notification template.
-const readReceiptSubject = "Your message has been read!"
+// readReceiptSubject is the subject of a read-receipt MDN: the original subject
+// after "Read: ", the form Outlook and Exchange give a read notification, so the
+// sender sees which message was read. RFC 8098 leaves the MDN subject open.
+func readReceiptSubject(orig string) string {
+	return strings.TrimSpace("Read: " + orig)
+}
 
 // ReadReceiptInfo carries the fields a read-receipt MDN needs, extracted by the
 // caller from the message being marked read. Reader is the mailbox owner who read
@@ -259,7 +262,7 @@ func buildReadReceipt(info ReadReceiptInfo, when time.Time) ([]byte, error) {
 	var msg bytes.Buffer
 	writeReplyField(&msg, "From", info.Reader)
 	writeReplyField(&msg, "To", info.To)
-	writeReplyField(&msg, "Subject", mime.QEncoding.Encode("utf-8", readReceiptSubject))
+	writeReplyField(&msg, "Subject", mime.QEncoding.Encode("utf-8", readReceiptSubject(info.OrigSubject)))
 	writeReplyField(&msg, "Date", when.UTC().Format(dateLayout))
 	writeReplyField(&msg, "Message-ID", "<"+newToken()+"@"+domainOf(info.Reader)+">")
 	writeReplyField(&msg, "X-Auto-Response-Suppress", "All")
