@@ -95,7 +95,8 @@
 .badge-prefs svg { width: 1rem; height: 1rem; }
 
 /* The badge: ID-1 card proportion on wide screens, a portrait badge on narrow
-   ones. It grows past the proportion when its content needs the room. */
+   ones. It grows past the proportion when its content needs the room, which
+   is why it clips nothing (overflow: hidden would pin it to the proportion). */
 .badge {
 	display: grid;
 	grid-template-rows: auto 1fr;
@@ -109,7 +110,6 @@
 	box-shadow: var(--badge-shadow);
 	align-items: stretch;
 	align-content: stretch;
-	overflow: hidden;
 }
 
 .badge-band {
@@ -118,6 +118,7 @@
 	align-items: center;
 	gap: 1rem;
 	min-height: 4rem;
+	border-radius: 17px 17px 0 0;
 	padding: 0 1.25rem;
 	background: var(--badge-brand);
 	color: var(--badge-brand-ink);
@@ -180,6 +181,7 @@
 }
 
 .badge-body {
+	border-radius: 0 0 17px 17px;
 	display: grid;
 	align-self: stretch;
 	grid-template-columns: 10rem 1fr;
@@ -273,6 +275,35 @@
 	font-size: 14px;
 	font-weight: 500;
 }
+
+.badge-title {
+	margin: 0;
+	color: var(--badge-text);
+	font-size: 17px;
+	font-weight: 650;
+	line-height: 1.3;
+}
+.badge-note {
+	margin: 0.25rem 0 0;
+	color: var(--badge-muted);
+	font-size: 13px;
+	line-height: 1.45;
+}
+.badge-page .badge-field input.badge-code { text-align: center; font-size: 18px; letter-spacing: 0.3em; }
+.badge-page .badge-link {
+	width: 100%;
+	height: auto;
+	margin: 0;
+	padding: 0.25rem;
+	border: 0;
+	background: none;
+	color: var(--badge-muted);
+	font: inherit;
+	font-size: 14px;
+	box-shadow: none;
+	cursor: pointer;
+}
+.badge-page .badge-link:hover { background: none; color: var(--badge-text); text-decoration: underline; text-underline-offset: 4px; }
 
 .badge-foot {
 	margin: 1rem 0 0;

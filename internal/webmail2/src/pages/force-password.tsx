@@ -1,10 +1,9 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { Lock } from "lucide-react"
 import { toast } from "sonner"
-import { Button } from "@/components/ui/button"
 import { useI18n } from "@/hooks/useI18n"
 import { useAuth } from "@/contexts/AuthContext"
+import { SignInBadge, useBranding } from "@/components/sign-in-badge"
 import api from "@/utils/api"
 import { PasswordTooShortError, passwordsMismatch } from "@/utils/passwordChange"
 
@@ -16,15 +15,23 @@ export function ForcePasswordChangePage() {
   const navigate = useNavigate()
   const { t } = useI18n()
   const { refresh } = useAuth()
+  const branding = useBranding()
   const [current, setCurrent] = useState("")
   const [next, setNext] = useState("")
   const [confirm, setConfirm] = useState("")
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+
+  const fail = (message: string) => {
+    toast.error(message)
+    setError(message)
+  }
 
   const submit = async (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault()
+    setError("")
     if (passwordsMismatch(next, confirm)) {
-      toast.error(t("forcePassword.mismatch"))
+      fail(t("forcePassword.mismatch"))
       return
     }
     setSaving(true)
@@ -33,78 +40,62 @@ export function ForcePasswordChangePage() {
       await refresh()
       navigate("/inbox", { replace: true })
     } catch (err) {
-      if (err instanceof PasswordTooShortError) {
-        toast.error(t("forcePassword.tooShort", { count: String(err.minLength) }))
-      } else {
-        toast.error(t("forcePassword.failed"))
-      }
+      fail(err instanceof PasswordTooShortError
+        ? t("forcePassword.tooShort", { count: String(err.minLength) })
+        : t("forcePassword.failed"))
       setSaving(false)
     }
   }
 
-  const inputClass =
-    "w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
-
   return (
-    <div className="min-h-screen flex items-center justify-center bg-muted/30 p-4">
-      <form onSubmit={submit} className="w-full max-w-md rounded-2xl border bg-card p-6 shadow-lg">
-        <div className="flex flex-col items-center text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary/80 shadow-lg shadow-primary/25">
-            <Lock className="h-6 w-6 text-primary-foreground" />
-          </div>
-          <h1 className="mt-3 text-xl font-bold">{t("forcePassword.title")}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{t("forcePassword.subtitle")}</p>
+    <SignInBadge branding={branding} state={saving ? "pending" : error ? "refused" : undefined}>
+      <form onSubmit={submit} className="badge-form">
+        <div>
+          <h2 className="badge-title">{t("forcePassword.title")}</h2>
+          <p className="badge-note">{t("forcePassword.subtitle")}</p>
         </div>
-
-        <div className="mt-6 space-y-4">
-          <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="fp-current">
-              {t("forcePassword.current")}
-            </label>
-            <input
-              id="fp-current"
-              type="password"
-              autoComplete="current-password"
-              value={current}
-              onChange={(e) => setCurrent(e.target.value)}
-              required
-              className={inputClass}
-            />
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="fp-new">
-              {t("forcePassword.new")}
-            </label>
-            <input
-              id="fp-new"
-              type="password"
-              autoComplete="new-password"
-              value={next}
-              onChange={(e) => setNext(e.target.value)}
-              required
-              className={inputClass}
-            />
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="fp-confirm">
-              {t("forcePassword.confirm")}
-            </label>
-            <input
-              id="fp-confirm"
-              type="password"
-              autoComplete="new-password"
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              required
-              className={inputClass}
-            />
-          </div>
-        </div>
-
-        <Button type="submit" className="mt-6 w-full" disabled={saving}>
+        {error && (
+          <p className="badge-error" role="alert">
+            {error}
+          </p>
+        )}
+        <label className="badge-field" htmlFor="fp-current">
+          {t("forcePassword.current")}
+          <input
+            id="fp-current"
+            type="password"
+            autoComplete="current-password"
+            value={current}
+            onChange={(e) => setCurrent(e.target.value)}
+            required
+          />
+        </label>
+        <label className="badge-field" htmlFor="fp-new">
+          {t("forcePassword.new")}
+          <input
+            id="fp-new"
+            type="password"
+            autoComplete="new-password"
+            value={next}
+            onChange={(e) => setNext(e.target.value)}
+            required
+          />
+        </label>
+        <label className="badge-field" htmlFor="fp-confirm">
+          {t("forcePassword.confirm")}
+          <input
+            id="fp-confirm"
+            type="password"
+            autoComplete="new-password"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            required
+          />
+        </label>
+        <button type="submit" className="badge-submit" disabled={saving}>
           {saving ? t("common.saving") : t("forcePassword.submit")}
-        </Button>
+        </button>
       </form>
-    </div>
+    </SignInBadge>
   )
 }

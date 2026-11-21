@@ -1,13 +1,24 @@
 {{define "second_factor.html"}}{{template "head" .}}
-<main class="login">
-<div class="login-brand">{{template "brand"}}<div><h1>{{t "secondFactor.title"}}</h1><p class="page-desc">{{t "secondFactor.desc"}}</p></div></div>
-{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
-<form method="post" action="/admin/ui/second-factor">
+<link rel="stylesheet" href="{{asset "badge.css"}}">
+<div class="badge-page">
+<main class="badge"{{if .Error}} data-state="refused"{{end}}>
+<div class="badge-band">
+<p class="badge-name">hermEX</p>
+<span class="badge-slot" aria-hidden="true"></span>
+<span class="badge-door">{{t "login.badgeRole"}}<span class="badge-led" aria-hidden="true"></span></span>
+</div>
+<div class="badge-body">
+<div class="badge-photo" aria-hidden="true"><img src="{{asset "favicon.svg"}}" alt=""></div>
+<form class="badge-form" method="post" action="/admin/ui/second-factor" data-badge-form>
 <input type="hidden" name="_csrf" value="{{.CSRF}}">
-<label>{{t "secondFactor.code"}}
-<input type="text" name="code" autocomplete="one-time-code" required autofocus>
+<div><h1 class="badge-title">{{t "secondFactor.title"}}</h1><p class="badge-note">{{t "secondFactor.desc"}}</p></div>
+{{if .Error}}<p class="badge-error" role="alert">{{t .Error}}</p>{{end}}
+<label class="badge-field">{{t "secondFactor.code"}}
+<input class="badge-code" type="text" name="code" autocomplete="one-time-code" required autofocus>
 </label>
-<button type="submit">{{t "secondFactor.verify"}}</button>
+<button class="badge-submit" type="submit">{{t "secondFactor.verify"}}</button>
 </form>
+</div>
 </main>
+</div>
 {{template "foot" .}}{{end}}
