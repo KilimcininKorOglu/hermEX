@@ -881,3 +881,23 @@ func TestICSReplaceRefreshesTheCachedEML(t *testing.T) {
 		t.Errorf("the replaced message does not carry the uploaded subject:\n%s", got)
 	}
 }
+
+// TestImportMessageChangeRefusesAMessageOfAnotherFolder: a message-change import
+// ([MS-OXCFXICS] 3.3.5.10) names a message of the folder the upload targets. A
+// source key naming a message held in another folder must not replace it: that
+// would delete it from a folder the import's rights were never checked against.
+// Moving it is RopSynchronizationImportMessageMove's job.
+func TestImportMessageChangeRefusesAMessageOfAnotherFolder(t *testing.T) {
+	s := openSeededStore(t)
+	other := int64(mapi.PrivateFIDInbox)
+	target := int64(mapi.PrivateFIDContacts)
+	victim := mustCreateMessage(t, s, other, richMsg("must stay in the Inbox"))
+
+	// #nosec G115 -- test ids are small positive store ids
+	if _, err := s.ImportMessageChange(target, 0, importHeader(t, s, uint64(victim))); !errors.Is(err, ErrMessageInOtherFolder) {
+		t.Fatalf("import naming another folder's message = %v, want ErrMessageInOtherFolder", err)
+	}
+	var parent int64
+	mustScan(t, s.objdb.QueryRow(`SELECT parent_fid FROM messages WHERE message_id=?`, victim), &parent)
+	wantEq(t, "the other folder's message stays where it was", parent, other)
+}

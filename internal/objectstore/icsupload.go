@@ -42,6 +42,10 @@ type UploadMessage struct {
 	msg        *oxcmail.Message
 }
 
+// ErrMessageInOtherFolder reports an ICS message-change import whose source key
+// names a message held in another folder than the one the import targets.
+var ErrMessageInOtherFolder = errors.New("objectstore: imported message belongs to another folder")
+
 // ImportMessageChange resolves a message-change header into an UploadMessage
 // ([MS-OXCFXICS] 3.3.5.10). The header carries the four identity properties the
 // wire sends in fixed order, PR_SOURCE_KEY, PR_LAST_MODIFICATION_TIME,
@@ -76,11 +80,8 @@ func (s *Store) ImportMessageChange(folderID int64, importFlags uint8, header ma
 	if foreign {
 		return nil, fmt.Errorf("objectstore: cross-store message import is not supported in v1")
 	}
-	var exists int
-	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-	err = s.objdb.QueryRow(`SELECT 1 FROM messages WHERE message_id=?`, int64(mid)).Scan(&exists)
-	isNew := err == sql.ErrNoRows
-	if err != nil && !isNew {
+	isNew, err := s.importTargetIsNew(folderID, mid)
+	if err != nil {
 		return nil, err
 	}
 	return &UploadMessage{
@@ -91,6 +92,27 @@ func (s *Store) ImportMessageChange(folderID int64, importFlags uint8, header ma
 		isNew:      isNew,
 		msg:        &oxcmail.Message{},
 	}, nil
+}
+
+// importTargetIsNew reports whether an imported message id is unused, so the
+// upload adds a message rather than replacing one. A change names a message of
+// folderID; one held in another folder is moved with
+// RopSynchronizationImportMessageMove, never replaced here, which would delete it
+// from a folder the import's rights were never checked against.
+func (s *Store) importTargetIsNew(folderID int64, mid uint64) (bool, error) {
+	var parent int64
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	err := s.objdb.QueryRow(`SELECT parent_fid FROM messages WHERE message_id=?`, int64(mid)).Scan(&parent)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if parent != folderID {
+		return false, ErrMessageInOtherFolder
+	}
+	return false, nil
 }
 
 // parseSourceKeyMID reads a 22-byte PR_SOURCE_KEY the way the store builds it (the
