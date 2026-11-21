@@ -145,6 +145,15 @@ func TestAttachmentWriteChain(t *testing.T) {
 	ropOK(t, del, ropDeleteAttachment, "DeleteAttachment")
 	wantOpenAttachment(t, sess, msgH, num1, ecSuccess, "surviving attachment after sibling delete")
 	wantOpenAttachment(t, sess, msgH, num0, ecNotFound, "deleted attachment")
+	// A number with no attachment behind it, the one just deleted or one never
+	// created, is MAPI_E_NOT_FOUND and leaves the survivor in place.
+	for _, missing := range []uint32{num0, 99} {
+		again, _ := sess.Dispatch(buildDeleteAttachment(0, missing), []uint32{msgH})
+		if ec := ropResultEC(t, again); ec != ecNotFound {
+			t.Errorf("DeleteAttachment(%d) of a missing attachment = %#x, want ecNotFound", missing, ec)
+		}
+	}
+	wantOpenAttachment(t, sess, msgH, num1, ecSuccess, "survivor after deletes of missing numbers")
 
 	assertAttachmentEditsBumpedCN(t, store, inboxFID, mid, cn1)
 
