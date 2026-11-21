@@ -22,10 +22,9 @@ const permTableIncludeFreeBusy uint8 = 0x02
 // , no row count, matching the reference's no-extra-body encoding, so the output
 // handle (HandleIndex) is the only thing the client needs to start paging.
 //
-// Access is store-owner authorized: a hermEX session only ever opens its own mailbox,
-// so the caller is always the folder's owner and the [MS-OXCPERM] frightsOwner gate
-// passes by the owner bypass. When delegate/shared-mailbox opens arrive, a non-owner
-// caller must be checked against frightsOwner|frightsVisible here.
+// The table lists who holds which rights on the folder, so reading it takes owner
+// rights on the folder ([MS-OXCPERM]), the same right ModifyPermissions needs. A
+// mailbox owner passes by the owner bypass; a delegate needs the grant.
 func (s *Session) ropGetPermissionsTable(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8() // OutputHandleIndex
 	flags, e2 := p.Uint8()   // TableFlags
@@ -34,6 +33,9 @@ func (s *Session) ropGetPermissionsTable(p *ext.Pull, out *ext.Push, handles []u
 	}
 	folder, ok := s.openFolder(out, ropGetPermissionsTable, handles, hindex, ohindex)
 	if !ok {
+		return true
+	}
+	if s.denyWrite(out, ropGetPermissionsTable, ohindex, folder.store, folder.folderID, mapi.FrightsOwner) {
 		return true
 	}
 	bags, err := permissionBags(folder.store, folder.folderID, flags&permTableIncludeFreeBusy != 0)

@@ -938,3 +938,24 @@ func TestDelegateNotificationsSkipFoldersWithoutRights(t *testing.T) {
 		t.Error("the delegate was notified about a folder created where it has no right")
 	}
 }
+
+// TestDelegatePermissionsTableNeedsOwner: the permissions table lists who holds
+// which rights on a folder, which only the folder's owner may see ([MS-OXCPERM]).
+// A delegate holding Editor rights is refused; one holding Owner reads it.
+func TestDelegatePermissionsTableNeedsOwner(t *testing.T) {
+	for _, tc := range []struct {
+		rights uint32
+		want   uint32
+	}{{mapi.RightsEditor, ecAccessDenied}, {mapi.RightsOwner, ecSuccess}} {
+		dir := provisionedDir(t)
+		const delegate = "delegate@hermex.test"
+		grantFolderPermission(t, dir, int64(mapi.PrivateFIDInbox), delegate, tc.rights)
+		sess, logonH := delegateLogon(t, dir, delegate)
+		_, h := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
+		resp, _ := sess.Dispatch(buildGetPermissionsTable(0, 1, 0), []uint32{h[1], 0xFFFFFFFF})
+		if ec := ropResultEC(t, resp); ec != tc.want {
+			t.Errorf("rights %#x: GetPermissionsTable ec = %#x, want %#x", tc.rights, ec, tc.want)
+		}
+		sess.Close()
+	}
+}
