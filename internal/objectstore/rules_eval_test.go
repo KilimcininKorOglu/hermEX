@@ -210,7 +210,8 @@ func TestEvalContentWordsAndDiacritics(t *testing.T) {
 			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
 		}
 	}
-	if got := withoutMarks("a\xffé"); got != "a�e" && got != "a\xffe" {
+	// The chain replaces an invalid byte with U+FFFD (the comment on withoutMarks).
+	if got := withoutMarks("a\xffé"); got != "a\uFFFDe" {
 		t.Errorf("withoutMarks on invalid UTF-8 = %q", got)
 	}
 }
