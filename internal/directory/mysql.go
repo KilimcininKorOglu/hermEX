@@ -1313,16 +1313,7 @@ func (d *SQLDirectory) SetAliasesFor(username string, aliases []string) (bool, e
 // in the account's own organization (checkAliasInOrg): an alias in another customer's
 // domain would take that customer's mail and let the account send under the address.
 func (d *SQLDirectory) SyncAliasesFor(username string, aliases []string) (skipped []string, found bool, err error) {
-	return d.replaceAliases(username, aliases, checkSyncedAlias, true)
-}
-
-// checkSyncedAlias is checkAlias plus the organization bound a directory-published alias
-// must stay within.
-func checkSyncedAlias(q rowQuerier, alias, main string) error {
-	if err := checkAlias(q, alias, main); err != nil {
-		return err
-	}
-	return checkAliasInOrg(q, alias, main)
+	return d.replaceAliases(username, aliases, checkAlias, true)
 }
 
 // replaceAliases is the shared body: it clears the user's aliases and re-inserts the given

@@ -18,15 +18,28 @@ func twoDomainDir(t *testing.T) (*SQLDirectory, int64) {
 	cleanTables(t, db)
 	root := t.TempDir()
 	var partnerID int64
+	var domainIDs []int64
 	for _, dom := range []string{"acme.test", "partner.test"} {
 		id, err := d.CreateDomain(dom, filepath.Join(root, "domains", dom))
 		if err != nil {
 			t.Fatal(err)
 		}
+		domainIDs = append(domainIDs, id)
 		if dom == "partner.test" {
 			partnerID = id
 		}
 		if _, err := d.CreateUser("user@"+dom, "secret-pw1", filepath.Join(root, "users", dom)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// One customer runs both domains, so an alias may cross them (an alias
+	// stays inside its account's organization).
+	org, err := d.CreateOrg("acme", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range domainIDs {
+		if _, err := d.AssignDomainToOrg(id, org); err != nil {
 			t.Fatal(err)
 		}
 	}

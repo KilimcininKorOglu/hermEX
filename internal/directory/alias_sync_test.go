@@ -1,6 +1,7 @@
 package directory
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -134,4 +135,44 @@ func TestSetAliasesStillRefusesTheWholeSet(t *testing.T) {
 	got, err := d.ListAliasesFor("alice@hermex.test")
 	mustNoErr(t, "list the aliases", err)
 	wantEq(t, "nothing was written", len(got), 0)
+}
+
+// TestManualAliasesStayInTheAccountsOrganization: an alias is an inbound route
+// and a send-as identity whichever surface creates it, so the admin and CLI
+// paths (CreateAlias, SetAliasesFor) keep it inside the account's organization
+// exactly as the LDAP downsync does. A sister domain of the same organization is
+// allowed; another organization's domain and an organizationless one are not.
+func TestManualAliasesStayInTheAccountsOrganization(t *testing.T) {
+	d, _ := freshDirectory(t)
+	root := t.TempDir()
+	home := mustCreateDomain(t, d, root, "hermex.test")
+	sister := mustCreateDomain(t, d, root, "hermex.de")
+	other := mustCreateDomain(t, d, root, "other.test")
+	mustCreateDomain(t, d, root, "loose.test")
+	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
+	acme, err := d.CreateOrg("acme", "")
+	mustNoErr(t, "create acme", err)
+	rival, err := d.CreateOrg("rival", "")
+	mustNoErr(t, "create rival", err)
+	for _, a := range []struct{ domain, org int64 }{{home, acme}, {sister, acme}, {other, rival}} {
+		_, err := d.AssignDomainToOrg(a.domain, a.org)
+		mustNoErr(t, "assign a domain", err)
+	}
+
+	mustNoErr(t, "alias in a sister domain", d.CreateAlias("sales@hermex.de", "alice@hermex.test"))
+	for _, foreign := range []string{"ceo@other.test", "ceo@loose.test"} {
+		if err := d.CreateAlias(foreign, "alice@hermex.test"); !errors.Is(err, ErrAliasNotLocal) {
+			t.Errorf("CreateAlias(%s) = %v, want ErrAliasNotLocal", foreign, err)
+		}
+		if _, err := d.SetAliasesFor("alice@hermex.test", []string{"sales@hermex.de", foreign}); !errors.Is(err, ErrAliasNotLocal) {
+			t.Errorf("SetAliasesFor with %s = %v, want ErrAliasNotLocal", foreign, err)
+		}
+	}
+	ids, err := d.Identities("alice@hermex.test")
+	mustNoErr(t, "read alice's identities", err)
+	for _, foreign := range []string{"ceo@other.test", "ceo@loose.test"} {
+		if slices.Contains(ids, foreign) {
+			t.Errorf("alice may send as %s, an address of another organization: %v", foreign, ids)
+		}
+	}
 }

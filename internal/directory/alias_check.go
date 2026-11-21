@@ -123,7 +123,11 @@ LIMIT 1`, addr, addr).Scan(&kind)
 }
 
 // checkAlias runs every alias precondition in order, cheapest and most specific
-// first so the reported error names the actual problem.
+// first so the reported error names the actual problem. An alias is an inbound
+// route and a send-as identity, so it must also lie in the account's own
+// organization (checkAliasInOrg), whichever surface creates it: one in another
+// customer's domain would take that customer's mail and let the account send
+// under the address.
 func checkAlias(q rowQuerier, alias, main string) error {
 	if err := checkAliasDomain(q, alias); err != nil {
 		return err
@@ -131,5 +135,8 @@ func checkAlias(q rowQuerier, alias, main string) error {
 	if err := checkAliasFree(q, alias); err != nil {
 		return err
 	}
-	return checkAliasTarget(q, main)
+	if err := checkAliasTarget(q, main); err != nil {
+		return err
+	}
+	return checkAliasInOrg(q, alias, main)
 }
