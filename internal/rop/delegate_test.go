@@ -2,6 +2,7 @@ package rop
 
 import (
 	"bytes"
+	"encoding/binary"
 	"testing"
 	"time"
 
@@ -892,5 +893,48 @@ func TestDelegateGetMessageStatusNeedsReadAny(t *testing.T) {
 	resp := mustDispatch(sess, buildGetMessageStatus(0, uint64(mapi.MakeEIDEx(1, uint64(msg)))), h[1], 0xFFFFFFFF)
 	if ec := ropResultEC(t, resp); ec != ecAccessDenied {
 		t.Errorf("GetMessageStatus with Visible only ec = %#x, want ecAccessDenied", ec)
+	}
+}
+
+// TestDelegateNotificationsSkipFoldersWithoutRights: a whole-store subscription
+// reports message and folder events across the mailbox. A delegate reads only the
+// folders it holds rights on, so it must be told about a message in a folder it
+// may read and nothing about a message, or a new subfolder, in one it may not.
+func TestDelegateNotificationsSkipFoldersWithoutRights(t *testing.T) {
+	dir := provisionedDir(t)
+	const delegate = "delegate@hermex.test"
+	grantFolderPermission(t, dir, int64(mapi.PrivateFIDInbox), delegate, mapi.RightsReviewer)
+
+	sess, logonH := delegateLogon(t, dir, delegate)
+	defer sess.Close()
+	_, h := sess.Dispatch(buildRegisterNotification(0, 1, uint8(fnevObjectCreated), 1, 0, 0), []uint32{logonH, 0xFFFFFFFF})
+	if h[1] == 0xFFFFFFFF {
+		t.Fatal("subscription handle not set")
+	}
+	st := sess.get(logonH).store
+	inbox, sent := int64(mapi.PrivateFIDInbox), int64(mapi.PrivateFIDSentItems)
+	if _, err := st.AppendMessage(inbox, []byte("From: a@test\r\n\r\nseen\r\n"), time.Unix(1700000000, 0), 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AppendMessage(sent, []byte("From: a@test\r\n\r\nhidden\r\n"), time.Unix(1700000000, 0), 0); err != nil {
+		t.Fatal(err)
+	}
+	hiddenFolder, err := st.CreateFolder(&sent, "HiddenChild")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, _ := sess.Dispatch(nil, nil)
+	eid := func(id int64) []byte {
+		return binary.LittleEndian.AppendUint64(nil, uint64(mapi.MakeEIDEx(1, uint64(id))))
+	}
+	if !bytes.Contains(resp, eid(inbox)) {
+		t.Error("no notification for the message in the Inbox the delegate may read")
+	}
+	if bytes.Contains(resp, eid(sent)) {
+		t.Error("the delegate was notified about Sent Items, a folder it has no right on")
+	}
+	if bytes.Contains(resp, eid(hiddenFolder)) {
+		t.Error("the delegate was notified about a folder created where it has no right")
 	}
 }

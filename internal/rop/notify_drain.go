@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"hermex/internal/ext"
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
 
@@ -78,6 +79,12 @@ func (s *Session) pollFolder(o *object, folderID int64, prev folderSnapshot) fol
 	if err != nil {
 		return prev
 	}
+	// A message event reveals the folder's contents, so a delegate is told only
+	// about folders it may read. The check runs per poll, so a revoked right
+	// stops the events at once.
+	if ok, err := s.authorize(o.store, folderID, mapi.FrightsReadAny); err != nil || !ok {
+		return snap
+	}
 	for i := range events {
 		scopeMessageID, typeBit := classifyScope(&events[i])
 		if o.sub.matches(folderID, scopeMessageID, typeBit) {
@@ -136,11 +143,26 @@ func (s *Session) enqueueFolderHierarchy(o *object, folders []objectstore.Folder
 	for i := range events {
 		// #nosec G115 -- the event type is the low byte of the flags, as the line says
 		typeBit := uint8(events[i].flags) // the fnev type is the low byte; modifiers ride above it
-		if o.sub.matches(0, 0, typeBit) {
+		if o.sub.matches(0, 0, typeBit) && s.folderEventVisible(o, events[i]) {
 			s.pending = append(s.pending, queuedNotify{handle: o.sub.handle, logonID: o.sub.logonID, n: events[i]})
 		}
 	}
 	o.subFolderMeta = cur
+}
+
+// folderEventVisible reports whether the subscriber may see a folder-hierarchy
+// event: a delegate needs Visible on the folder, the right that lists it in the
+// hierarchy table. A deleted folder has no rights left to resolve, so its delete
+// event is judged by its former parent.
+func (s *Session) folderEventVisible(o *object, n notification) bool {
+	id := n.folderID
+	if n.flags&0xFF == fnevObjectDeleted {
+		id = n.parentID
+	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	fid := int64(mapi.EID(id).GCValue())
+	ok, err := s.authorize(o.store, fid, mapi.FrightsVisible)
+	return err == nil && ok
 }
 
 // drainNotifications serializes queued notifications into the response until the next
