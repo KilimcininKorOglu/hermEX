@@ -104,13 +104,29 @@ func TestSaveChangesAttachmentAcceptsCleanContent(t *testing.T) {
 	logonH := h[0]
 	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
 	msgH := h[1]
-	_, attH := createAttachmentNum(t, sess, msgH)
+	num, attH := createAttachmentNum(t, sess, msgH)
 
 	ec := saveAttachmentWith(t, sess, msgH, attH, mapi.PropertyValues{
 		{Tag: mapi.PrAttachLongFilename, Value: "notes.txt"},
 		{Tag: mapi.PrAttachDataBin, Value: []byte("harmless")},
 	})
 	if ec != ecSuccess {
-		t.Errorf("a clean attachment was refused: %#x", ec)
+		t.Fatalf("a clean attachment was refused: %#x", ec)
+	}
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	attID, err := st.AttachmentIDByNumber(int64(mid), num)
+	if err != nil {
+		t.Fatalf("the saved attachment is not in the store: %v", err)
+	}
+	props, err := st.GetAttachmentProperties(attID, mapi.PrAttachDataBin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := props.Get(mapi.PrAttachDataBin); string(asBytes(v)) != "harmless" {
+		t.Errorf("stored attachment data = %v, want the saved bytes", v)
 	}
 }
