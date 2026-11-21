@@ -58,6 +58,7 @@ type Pull struct {
 	flags    Flags
 	resDepth int // current Restriction recursion depth, bounded in Restriction
 	valDepth int // current TypedPropVal recursion depth, bounded in TypedPropVal
+	actDepth int // current RuleActions recursion depth, bounded in RuleActions
 }
 
 // NewPull returns a Pull over buf using the given encoding flags.

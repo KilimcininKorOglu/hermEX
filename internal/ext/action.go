@@ -2,6 +2,7 @@ package ext
 
 import (
 	"encoding/binary"
+	"errors"
 
 	"hermex/internal/mapi"
 )
@@ -31,9 +32,24 @@ func (p *Push) RuleActions(r mapi.RuleActions) error {
 	return nil
 }
 
+// maxActionsDepth bounds how deeply a rule action list may nest. An OP_TAG action
+// carries a tagged value, and a value of type PtActions is another action list, so
+// the reader recurses once per 17 input bytes. Unbounded, a few hundred megabytes
+// of nested lists exceed the goroutine stack, a runtime throw no caller can
+// recover from. Real rules never nest an action list; this cap is far above that.
+const maxActionsDepth = 100
+
+// errActionsTooDeep reports an action list nested past maxActionsDepth.
+var errActionsTooDeep = errors.New("rule action list nested past the depth limit")
+
 // RuleActions reads a rule action list; the block count must be
 // at least one.
 func (p *Pull) RuleActions() (mapi.RuleActions, error) {
+	p.actDepth++
+	defer func() { p.actDepth-- }()
+	if p.actDepth > maxActionsDepth {
+		return mapi.RuleActions{}, errActionsTooDeep
+	}
 	count, err := p.Uint16()
 	if err != nil {
 		return mapi.RuleActions{}, err

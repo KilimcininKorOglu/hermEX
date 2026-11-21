@@ -2,6 +2,7 @@ package ext
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"reflect"
 	"testing"
@@ -204,5 +205,43 @@ func TestRuleActionsPropValueDispatch(t *testing.T) {
 	}
 	if !reflect.DeepEqual(v, r) {
 		t.Fatalf("dispatch round-trip = %#v, want %#v", v, r)
+	}
+}
+
+// nestedTagActions builds a rule action list whose OP_TAG value is another action
+// list, depth levels deep, ending in an OP_TAG that sets a PtLong.
+func nestedTagActions(depth int) []byte {
+	var b []byte
+	block := func(tag uint32) {
+		b = binary.LittleEndian.AppendUint16(b, 1)    // block count
+		b = binary.LittleEndian.AppendUint16(b, 0x11) // block length
+		b = append(b, mapi.OpTag)
+		b = binary.LittleEndian.AppendUint32(b, 0) // flavor
+		b = binary.LittleEndian.AppendUint32(b, 0) // flags
+		b = binary.LittleEndian.AppendUint32(b, tag)
+	}
+	for range depth {
+		block(uint32(mapi.PtActions) | 0x0001_0000)
+	}
+	block(uint32(mapi.PtLong) | 0x0002_0000)
+	return binary.LittleEndian.AppendUint32(b, 7)
+}
+
+// TestRuleActionsRejectsSelfNesting is the stack-overflow guard: an OP_TAG action
+// whose value is itself an action list makes the reader recurse once per 17
+// bytes, and a stack overflow is a runtime throw the daemon cannot recover from,
+// so a list nested past the cap is refused.
+func TestRuleActionsRejectsSelfNesting(t *testing.T) {
+	_, err := NewPull(nestedTagActions(maxActionsDepth+50), 0).RuleActions()
+	if !errors.Is(err, errActionsTooDeep) {
+		t.Fatalf("self-nesting action list gave %v, want the depth-limit refusal", err)
+	}
+}
+
+// TestRuleActionsKeepsShallowNesting is the control: a list nested below the cap
+// still decodes, so the guard refuses only the attack.
+func TestRuleActionsKeepsShallowNesting(t *testing.T) {
+	if _, err := NewPull(nestedTagActions(3), 0).RuleActions(); err != nil {
+		t.Fatalf("a shallow nested action list was refused: %v", err)
 	}
 }
