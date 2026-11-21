@@ -74,20 +74,18 @@ func SpendSecondFactor(dir any, user, code string, now time.Time) (bool, error) 
 	return sf.ConsumeRecoveryCode(user, code)
 }
 
-// userIDFor resolves a username to its row id, reporting ok=false for an unknown
-// user rather than an error, because every caller here treats an unknown user
-// and an unenrolled one the same way.
-func (d *SQLDirectory) userIDFor(username string) (int64, bool, error) {
-	var id int64
-	err := d.db.QueryRow(`SELECT id FROM users WHERE username = ?`,
-		strings.ToLower(strings.TrimSpace(username))).Scan(&id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, false, nil
-	}
-	if err != nil {
+// userIDFor resolves a login to its account's row id, reporting ok=false for an
+// unknown login rather than an error, because every caller here treats an unknown
+// user and an unenrolled one the same way. It resolves exactly as a password login
+// does (username, altname or alias), so the second-factor state belongs to the
+// account whichever of its names signs in: a lookup by username alone would let an
+// enrolled account's alias pass a client protocol with the account password.
+func (d *SQLDirectory) userIDFor(login string) (int64, bool, error) {
+	row, found, err := d.resolve(strings.ToLower(strings.TrimSpace(login)))
+	if err != nil || !found {
 		return 0, false, err
 	}
-	return id, true, nil
+	return row.id, true, nil
 }
 
 // TOTPEnrollment returns the account's second-factor state. ok is false when the

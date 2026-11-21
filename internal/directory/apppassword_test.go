@@ -278,3 +278,37 @@ func TestAuthenticateClientFallsBackWithoutTheCapability(t *testing.T) {
 		t.Error("a wrong password was accepted")
 	}
 }
+
+// TestEnrollingClosesTheAccountPasswordForEveryLoginName: a password login
+// resolves an alias and an altname to the account, so the second factor must too.
+// Otherwise an attacker holding the account password signs in to IMAP with the
+// alias instead of the username and the second factor protects nothing.
+func TestEnrollingClosesTheAccountPasswordForEveryLoginName(t *testing.T) {
+	d := twoAccounts(t)
+	if err := d.CreateAlias("sales@acme.test", "u@acme.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.SetAltnames("u@acme.test", []string{"uu@acme.test"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"sales@acme.test", "uu@acme.test"} {
+		if _, ok := d.AuthenticateProtocol(name, "password1"); !ok {
+			t.Fatalf("before enrolling, %s could not sign in with the account password", name)
+		}
+	}
+
+	enableSecondFactor(t, d, "u@acme.test")
+
+	for _, name := range []string{"u@acme.test", "sales@acme.test", "uu@acme.test", "SALES@acme.test "} {
+		if _, ok := d.AuthenticateProtocol(name, "password1"); ok {
+			t.Errorf("after enrolling, %q still signs in to a client protocol with the account password", name)
+		}
+	}
+	secret, err := d.CreateAppPassword("u@acme.test", "Phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := d.AuthenticateProtocol("sales@acme.test", secret); !ok {
+		t.Error("the account's app password does not work under its alias")
+	}
+}
