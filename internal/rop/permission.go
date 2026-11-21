@@ -286,33 +286,44 @@ func ingestRights(propvals mapi.PropertyValues, includeFreeBusy bool) uint32 {
 // precedence. When the session has a directory the address is confirmed to exist; an
 // unresolvable row yields ("", false) so the caller skips it rather than faulting.
 func (s *Session) resolvePermissionMember(propvals mapi.PropertyValues) (string, bool) {
-	var smtp string
+	smtp := permissionMemberAddress(propvals)
+	if smtp == "" || !s.permissionMemberAllowed(smtp) {
+		return "", false
+	}
+	return smtp, true
+}
+
+// permissionMemberAddress reads a member row's SMTP address: from its PR_ENTRYID
+// first, then from a literal PR_SMTP_ADDRESS. It returns "" when neither holds one.
+func permissionMemberAddress(propvals mapi.PropertyValues) string {
 	if v, ok := propvals.Get(mapi.PrEntryID); ok {
 		if b, ok := v.([]byte); ok {
-			smtp = smtpFromABEntryID(b)
-		}
-	}
-	if smtp == "" {
-		if v, ok := propvals.Get(mapi.PrSmtpAddress); ok {
-			if addr, ok := v.(string); ok {
-				smtp = addr
+			if smtp := smtpFromABEntryID(b); smtp != "" {
+				return smtp
 			}
 		}
 	}
-	if smtp == "" {
-		return "", false
-	}
-	if s.accounts != nil {
-		if _, ok := s.accounts.Resolve(smtp); !ok {
-			return "", false // unknown member; skip
-		}
-		// A grant opens the mailbox to its member, which the logon keeps inside
-		// the organization, so a member of another organization is skipped.
-		if reach, err := directory.MayReach(s.accounts, s.owner, smtp); err != nil || !reach {
-			return "", false
+	if v, ok := propvals.Get(mapi.PrSmtpAddress); ok {
+		if addr, ok := v.(string); ok {
+			return addr
 		}
 	}
-	return smtp, true
+	return ""
+}
+
+// permissionMemberAllowed reports whether the directory knows the member and the
+// mailbox owner may reach it. A grant opens the mailbox to its member, which the
+// logon keeps inside the organization, so a member of another organization is
+// skipped. A session without a directory accepts the address as given.
+func (s *Session) permissionMemberAllowed(smtp string) bool {
+	if s.accounts == nil {
+		return true
+	}
+	if _, ok := s.accounts.Resolve(smtp); !ok {
+		return false
+	}
+	reach, err := directory.MayReach(s.accounts, s.owner, smtp)
+	return err == nil && reach
 }
 
 // smtpFromABEntryID extracts the SMTP address a member EntryID carries: it reads the
