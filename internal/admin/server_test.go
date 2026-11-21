@@ -1744,6 +1744,9 @@ func TestAdminWhoamiNoSession(t *testing.T) {
 // addresses share a scope when their domains (after the last '@') are equal, or
 // when sameOrg puts both domains in one organization.
 func (f *fakeDir) SameScope(caller, other string) (bool, error) {
+	if err := f.readErrs["SameScope"]; err != nil {
+		return false, err
+	}
 	domain := func(a string) string {
 		a = strings.ToLower(strings.TrimSpace(a))
 		if at := strings.LastIndex(a, "@"); at >= 0 {

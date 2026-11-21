@@ -117,8 +117,7 @@ func (s *Server) saveGrantList(w http.ResponseWriter, r *http.Request, kind stri
 		http.Error(w, "no such user: "+bad, http.StatusNotFound)
 		return
 	}
-	if foreign := s.outsideOwnerOrg(r.PathValue("email"), list); foreign != "" {
-		http.Error(w, "not another account of the owner's organization: "+foreign, http.StatusForbidden)
+	if s.refuseOutsideOrg(w, r.PathValue("email"), list) {
 		return
 	}
 	if err := set(maildir, list); err != nil {
@@ -157,14 +156,46 @@ func (s *Server) saveGrantListForm(w http.ResponseWriter, r *http.Request, kind,
 // owner's organization, or "" when every one is. A delegate or send grant opens
 // the mailbox or its identity to the grantee, which every surface keeps inside the
 // organization, so the panel refuses the same grantees the clients do.
-func (s *Server) outsideOwnerOrg(owner string, grantees []string) string {
+func (s *Server) outsideOwnerOrg(owner string, grantees []string) (string, error) {
 	for _, g := range grantees {
 		reach, err := directory.MayReach(s.dir, owner, g)
-		if err != nil || !reach || strings.EqualFold(strings.TrimSpace(g), strings.TrimSpace(owner)) {
-			return g
+		if err != nil {
+			return "", err
+		}
+		if !reach || strings.EqualFold(strings.TrimSpace(g), strings.TrimSpace(owner)) {
+			return g, nil
 		}
 	}
+	return "", nil
+}
+
+// orgRefusal is the detail-form notice for a grant list outside the owner's
+// organization, or "" when every grantee is inside it. A failed scope read is
+// recorded and shown as one, not as a refusal.
+func (s *Server) orgRefusal(owner string, grantees []string) string {
+	foreign, err := s.outsideOwnerOrg(owner, grantees)
+	switch {
+	case err != nil:
+		return s.notice(granteesUnread, err)
+	case foreign != "":
+		return msg("userDetail.granteeOutsideOrg", foreign)
+	}
 	return ""
+}
+
+// refuseOutsideOrg answers an API grant list outside the owner's organization
+// with 403, and a failed scope read with 500. It reports whether it answered.
+func (s *Server) refuseOutsideOrg(w http.ResponseWriter, owner string, grantees []string) bool {
+	foreign, err := s.outsideOwnerOrg(owner, grantees)
+	switch {
+	case err != nil:
+		s.fail(w, "server error", err, http.StatusInternalServerError)
+		return true
+	case foreign != "":
+		http.Error(w, "not another account of the owner's organization: "+foreign, http.StatusForbidden)
+		return true
+	}
+	return false
 }
 
 // storeGrantList canonicalizes the grantees, checks the caller may grant to each of
@@ -182,8 +213,8 @@ func (s *Server) storeGrantList(adminID int64, owner, maildir, kind string, gran
 	case bad != "":
 		return msg("userDetail.noSuchUserNamed", bad)
 	}
-	if foreign := s.outsideOwnerOrg(owner, list); foreign != "" {
-		return msg("userDetail.granteeOutsideOrg", foreign)
+	if refusal := s.orgRefusal(owner, list); refusal != "" {
+		return refusal
 	}
 	if err := set(maildir, list); err != nil {
 		return s.notice(msg("userDetail.saveGrantFailed", kindKey), err)

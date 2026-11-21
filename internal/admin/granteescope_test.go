@@ -146,3 +146,47 @@ func TestGrantsStayInsideTheOwnersOrganization(t *testing.T) {
 		t.Errorf("a grant to another organization was stored: send-as %v, delegates %v", store.setSendAsVal, store.setDelegatesVal)
 	}
 }
+
+// TestAFailedScopeReadIsNotAnOrganizationRefusal: when the directory cannot say
+// whether a grantee shares the owner's organization, the panel stores nothing,
+// answers the API with a 500 that keeps the error server-side and records it, and
+// shows the form the read failure rather than claiming the grantee is outside the
+// organization.
+func TestAFailedScopeReadIsNotAnOrganizationRefusal(t *testing.T) {
+	errs := map[string]error{}
+	d := &fakeDir{
+		authOK: true, uid: 1,
+		roles:   []directory.AdminRole{{Role: directory.AdminSystem}},
+		domains: []directory.DomainInfo{{ID: 1, Name: "acme.test"}},
+		knownUsers: map[string]directory.UserDetail{
+			"in@acme.test":   {Username: "in@acme.test", ID: 10, DomainID: 1, Maildir: "/mb/in"},
+			"peer@acme.test": {Username: "peer@acme.test", ID: 11, DomainID: 1, Maildir: "/mb/peer"},
+		},
+		readErrs: errs,
+	}
+	store := &fakeStore{}
+	ts, sink := loggingAdminServerStore(t, d, store)
+	session, csrf := loginCookies(t, ts)
+	errs["SameScope"] = errReadFailed
+
+	resp := authedReq(t, ts, "PUT", "/admin/users/in@acme.test/sendas", session, csrf, `["peer@acme.test"]`)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError || strings.Contains(string(body), errReadFailed.Error()) {
+		t.Errorf("API: status %d body %q, want a generic 500", resp.StatusCode, body)
+	}
+	if e, ok := sink.find("request.fail"); !ok || e.Err != errReadFailed.Error() {
+		t.Errorf("the failed scope read was not recorded (event %+v)", e)
+	}
+	for field, path := range map[string]string{"delegates": "delegates", "sendas": "sendas", "storeowners": "storeowners"} {
+		form := htmxPUT(t, ts, "/admin/ui/users/in@acme.test/"+path, session, csrf, url.Values{field: {"peer@acme.test"}})
+		page, _ := io.ReadAll(form.Body)
+		form.Body.Close()
+		if !strings.Contains(string(page), "Could not read the grantees") || strings.Contains(string(page), "organization") {
+			t.Errorf("form %s did not report the failed read:\n%s", path, page)
+		}
+	}
+	if store.setSendAsVal != nil || store.setDelegatesVal != nil {
+		t.Errorf("a list was stored after a failed scope read: send-as %v, delegates %v", store.setSendAsVal, store.setDelegatesVal)
+	}
+}

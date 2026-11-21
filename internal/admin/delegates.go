@@ -26,8 +26,8 @@ func (s *Server) handleUIUserDelegates(w http.ResponseWriter, r *http.Request) {
 		data["Error"] = "userDetail.noSuchUser"
 	default:
 		list := strings.Fields(r.PostFormValue("delegates"))
-		if foreign := s.outsideOwnerOrg(u.Username, list); foreign != "" {
-			data["Error"] = msg("userDetail.granteeOutsideOrg", foreign)
+		if refusal := s.orgRefusal(u.Username, list); refusal != "" {
+			data["Error"] = refusal
 			break
 		}
 		if err := s.store.SetDelegates(u.Maildir, list); err != nil {

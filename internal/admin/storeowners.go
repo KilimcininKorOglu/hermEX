@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"hermex/internal/directory"
 )
 
 // handleGetUserStoreOwners returns the user's additional store-owner list, the users
@@ -52,8 +54,7 @@ func (s *Server) handleSetUserStoreOwners(w http.ResponseWriter, r *http.Request
 		http.Error(w, "no such user: "+bad, http.StatusNotFound)
 		return
 	}
-	if foreign := s.outsideOwnerOrg(r.PathValue("email"), list); foreign != "" {
-		http.Error(w, "not another account of the owner's organization: "+foreign, http.StatusForbidden)
+	if s.refuseOutsideOrg(w, r.PathValue("email"), list) {
 		return
 	}
 	if err := s.store.SetStoreOwners(maildir, list); err != nil {
@@ -79,25 +80,33 @@ func (s *Server) handleUIUserStoreOwners(w http.ResponseWriter, r *http.Request)
 	case !ok:
 		data["Error"] = "userDetail.noSuchUser"
 	default:
-		grantees := strings.Fields(r.PostFormValue("storeowners"))
-		list, bad, gErr := s.canonicalGrantees(grantees)
-		outOfScope, inScope := s.addressScopeError(s.adminPerms(cl.UserID), grantees)
-		switch {
-		case !inScope:
-			data["Error"] = scopeRefusalMsg("scope.storeOwner", outOfScope)
-		case gErr != nil:
-			data["Error"] = s.notice(granteesUnread, gErr)
-		case bad != "":
-			data["Error"] = msg("userDetail.noSuchUserNamed", bad)
-		case s.outsideOwnerOrg(u.Username, list) != "":
-			data["Error"] = msg("userDetail.granteeOutsideOrg", s.outsideOwnerOrg(u.Username, list))
-		default:
-			if err := s.store.SetStoreOwners(u.Maildir, list); err != nil {
-				data["Error"] = s.notice("userDetail.saveStoreOwnersFailed", err)
-			} else {
-				data["Saved"] = true
-			}
+		if refusal := s.saveStoreOwnersForm(cl.UserID, u, strings.Fields(r.PostFormValue("storeowners"))); refusal != "" {
+			data["Error"] = refusal
+		} else {
+			data["Saved"] = true
 		}
 	}
 	s.render(w, r, "user-status", data)
+}
+
+// saveStoreOwnersForm checks and stores a store-owner list from the detail form,
+// returning the notice to show, or "" when the list was stored.
+func (s *Server) saveStoreOwnersForm(adminID int64, u directory.UserDetail, grantees []string) string {
+	list, bad, gErr := s.canonicalGrantees(grantees)
+	outOfScope, inScope := s.addressScopeError(s.adminPerms(adminID), grantees)
+	switch {
+	case !inScope:
+		return scopeRefusalMsg("scope.storeOwner", outOfScope)
+	case gErr != nil:
+		return s.notice(granteesUnread, gErr)
+	case bad != "":
+		return msg("userDetail.noSuchUserNamed", bad)
+	}
+	if refusal := s.orgRefusal(u.Username, list); refusal != "" {
+		return refusal
+	}
+	if err := s.store.SetStoreOwners(u.Maildir, list); err != nil {
+		return s.notice("userDetail.saveStoreOwnersFailed", err)
+	}
+	return ""
 }
