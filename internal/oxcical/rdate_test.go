@@ -106,14 +106,60 @@ func TestExpandRecurrenceRefusesAPlainEvent(t *testing.T) {
 	}
 }
 
-// TestAddedPeriodIsNotRead states the measured limit: an RDATE PERIOD value
-// carries a duration of its own, which an expansion built on the series duration
-// cannot honor, so it adds no instance.
-func TestAddedPeriodIsNotRead(t *testing.T) {
-	ical := strings.Replace(rdateSeriesICal,
-		"RDATE:20260305T170000Z\r\n",
-		"RDATE;VALUE=PERIOD:20260305T170000Z/20260305T190000Z\r\n", 1)
-	if spans := spansIn(t, ical, day(5, 16), day(5, 20)); len(spans) != 0 {
-		t.Errorf("spans = %v, want none: a PERIOD value is not read", spans)
+// withRDate replaces the fixture's RDATE line.
+func withRDate(line string) string {
+	return strings.Replace(rdateSeriesICal, "RDATE:20260305T170000Z\r\n", line+"\r\n", 1)
+}
+
+// TestAddedPeriodKeepsItsOwnLength: RFC 5545 section 3.8.5.2 lets RDATE name a
+// PERIOD, and section 3.3.9 gives it an explicit end or a duration, so the
+// instance it adds occupies that period, not the series' one hour. The window
+// holds the whole period, and the instance must end at the period's end.
+func TestAddedPeriodKeepsItsOwnLength(t *testing.T) {
+	for name, line := range map[string]string{
+		"explicit end": "RDATE;VALUE=PERIOD:20260305T170000Z/20260305T190000Z",
+		"duration":     "RDATE;VALUE=PERIOD:20260305T170000Z/PT2H",
+		"zoned":        "RDATE;VALUE=PERIOD;TZID=Europe/Berlin:20260305T180000/20260305T200000",
+	} {
+		spans := spansIn(t, withRDate(line), day(5, 16), day(5, 20))
+		if len(spans) != 1 || !spans[0].Start.Equal(day(5, 17)) || !spans[0].End.Equal(day(5, 19)) {
+			t.Errorf("%s: spans = %v, want 17:00 to 19:00 on 5 March", name, spans)
+		}
+	}
+}
+
+// TestAddedPeriodExpandsAtItsOwnLength: the CalDAV expansion writes the period's
+// end on the instance it adds.
+func TestAddedPeriodExpandsAtItsOwnLength(t *testing.T) {
+	out, ok := ExpandRecurrence([]byte(withRDate("RDATE;VALUE=PERIOD:20260305T170000Z/PT2H")), day(5, 0), day(6, 0))
+	if !ok {
+		t.Fatal("ExpandRecurrence refused the series")
+	}
+	if !strings.Contains(string(out), "DTEND:20260305T190000Z") {
+		t.Errorf("expanded instance does not end at 19:00:\n%s", out)
+	}
+}
+
+// TestUnusablePeriodAddsNothing: a value the RFC grammar does not allow adds no
+// instance. A period must end after it starts, its halves must parse, a "/" value
+// is a period only under VALUE=PERIOD (section 3.8.5.2), and a period is a
+// date-time, which an all-day series has no place for.
+func TestUnusablePeriodAddsNothing(t *testing.T) {
+	cases := map[string]string{
+		"end before start":  withRDate("RDATE;VALUE=PERIOD:20260305T190000Z/20260305T170000Z"),
+		"zero duration":     withRDate("RDATE;VALUE=PERIOD:20260305T170000Z/PT0S"),
+		"unparseable end":   withRDate("RDATE;VALUE=PERIOD:20260305T170000Z/tomorrow"),
+		"missing end":       withRDate("RDATE;VALUE=PERIOD:20260305T170000Z"),
+		"undeclared period": withRDate("RDATE:20260305T170000Z/20260305T190000Z"),
+		"all-day series": strings.NewReplacer(
+			"DTSTART:20260302T170000Z", "DTSTART;VALUE=DATE:20260302",
+			"DTEND:20260302T180000Z", "DTEND;VALUE=DATE:20260303",
+			"RDATE:20260305T170000Z", "RDATE;VALUE=PERIOD:20260305T170000Z/PT2H",
+		).Replace(rdateSeriesICal),
+	}
+	for name, ical := range cases {
+		if spans := spansIn(t, ical, day(5, 0), day(6, 0)); len(spans) != 0 {
+			t.Errorf("%s: spans = %v, want none on 5 March", name, spans)
+		}
 	}
 }

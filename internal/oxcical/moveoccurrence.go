@@ -20,7 +20,7 @@ func HasInstance(ical []byte, at time.Time) bool {
 	if len(seriesInstants(master, s, skip, at, at.Add(time.Second))) == 0 {
 		return false
 	}
-	_, live := instanceSpan(overrides[instantKey(at)], at, s.dur)
+	_, live := instanceSpan(overrides[instantKey(at)], at, s.durAt(at))
 	return live
 }
 

@@ -34,7 +34,7 @@ func ExpandRecurrence(ical []byte, rangeStart, rangeEnd time.Time) ([]byte, bool
 			writeComponent(b, ov)
 			continue
 		}
-		writeInstance(b, master, t, t.Add(s.dur), s.allDay)
+		writeInstance(b, master, t, t.Add(s.durAt(t)), s.allDay)
 	}
 	b.add("END:VCALENDAR")
 	return b.buf.Bytes(), true

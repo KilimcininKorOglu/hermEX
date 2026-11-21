@@ -52,12 +52,12 @@ func InstancesIn(ical []byte, rangeStart, rangeEnd time.Time) ([]Instance, bool)
 		return nil, false
 	}
 	skip := excludedInstants(master)
-	out := overrideInstances(overrides, skip, s.dur, rangeStart, rangeEnd)
+	out := overrideInstances(overrides, skip, s, rangeStart, rangeEnd)
 	for _, t := range seriesInstants(master, s, skip, rangeStart, rangeEnd) {
 		if _, overridden := overrides[instantKey(t)]; overridden {
 			continue // already tested at its own time
 		}
-		if span := (Span{Start: t, End: t.Add(s.dur)}); overlapsRange(span.Start, span.End, rangeStart, rangeEnd) {
+		if span := (Span{Start: t, End: t.Add(s.durAt(t))}); overlapsRange(span.Start, span.End, rangeStart, rangeEnd) {
 			out = append(out, Instance{At: t, Span: span})
 		}
 	}
@@ -93,6 +93,20 @@ type series struct {
 	dur     time.Duration
 	rec     Recurrence
 	hasRule bool
+	// periods holds the own duration of each instance an RDATE PERIOD adds,
+	// keyed by instantKey.
+	periods map[string]time.Duration
+}
+
+// durAt is the duration of the instance generated at t: a PERIOD states its own
+// (RFC 5545 section 3.8.5.2), every other instance takes the series duration. A
+// PERIOD that starts on an RRULE instant names that one instance, which the
+// recurrence set counts once, so its stated duration is the one it keeps.
+func (s series) durAt(t time.Time) time.Duration {
+	if d, ok := s.periods[instantKey(t)]; ok {
+		return d
+	}
+	return s.dur
 }
 
 // seriesShape reads the master's expansion inputs. ok is false when the component
@@ -113,7 +127,7 @@ func seriesShape(master *icomp) (series, bool) {
 		// across a daylight saving switch rather than keeping its UTC offset.
 		start = start.In(dtstart.loc)
 	}
-	s := series{start: start, allDay: allDay}
+	s := series{start: start, allDay: allDay, periods: addedPeriods(master, allDay)}
 	switch rrule := master.prop("RRULE"); {
 	case rrule != nil:
 		rec, ok := parseRRule(rrule.value)
@@ -121,7 +135,7 @@ func seriesShape(master *icomp) (series, bool) {
 			return series{}, false
 		}
 		s.rec, s.hasRule = rec, true
-	case len(addedInstants(master)) == 0:
+	case len(addedInstants(master, allDay)) == 0:
 		// Neither a rule nor an added date: a single event, not a series.
 		return series{}, false
 	}
@@ -159,7 +173,7 @@ func seriesInstants(master *icomp, s series, skip map[string]bool, rangeStart, r
 		// once in DTSTART and never repeats it (RFC 5545 section 3.8.5.2).
 		add(s.start)
 	}
-	for _, t := range addedInstants(master) {
+	for _, t := range addedInstants(master, s.allDay) {
 		if inRange(t) {
 			add(t)
 		}
@@ -168,21 +182,96 @@ func seriesInstants(master *icomp, s series, skip map[string]bool, rangeStart, r
 	return out
 }
 
-// addedInstants collects the occurrences the master's RDATE lines add. A PERIOD
-// value is not read, because an instance carries the series duration here and a
-// period states a duration of its own.
-func addedInstants(master *icomp) []time.Time {
-	var out []time.Time
+// addedDate is one RDATE value: its start and, for a PERIOD, its own duration.
+type addedDate struct {
+	at     time.Time
+	dur    time.Duration
+	period bool
+}
+
+// addedDates reads the master's RDATE values. A PERIOD value (VALUE=PERIOD, RFC
+// 5545 section 3.3.9) is "start/end" or "start/duration" and adds an instance of
+// that length. A PERIOD is always a date-time, so an all-day series takes none,
+// and one whose end is not after its start, or that does not parse, is dropped
+// like any unreadable RDATE value.
+func addedDates(master *icomp, allDay bool) []addedDate {
+	var out []addedDate
 	for _, l := range master.propLines("RDATE") {
+		isPeriod := strings.EqualFold(l.param("VALUE"), "PERIOD")
 		for v := range strings.SplitSeq(l.value, ",") {
 			v = strings.TrimSpace(v)
-			if v == "" || strings.Contains(v, "/") {
+			if v == "" {
 				continue
 			}
-			rd := iline{name: "RDATE", params: l.params, value: v, loc: l.loc}
-			if t, _, ok := parseICalTime(&rd); ok {
-				out = append(out, t)
+			if d, ok := readAddedDate(&l, v, isPeriod, allDay); ok {
+				out = append(out, d)
 			}
+		}
+	}
+	return out
+}
+
+// readAddedDate parses one RDATE value of line l.
+func readAddedDate(l *iline, v string, isPeriod, allDay bool) (addedDate, bool) {
+	if !isPeriod {
+		if strings.Contains(v, "/") {
+			return addedDate{}, false
+		}
+		t, _, ok := parseICalTime(&iline{name: "RDATE", params: l.params, value: v, loc: l.loc})
+		return addedDate{at: t}, ok
+	}
+	if allDay {
+		return addedDate{}, false
+	}
+	start, dur, ok := parsePeriodValue(l, v)
+	return addedDate{at: start, dur: dur, period: true}, ok
+}
+
+// parsePeriodValue parses an RDATE PERIOD value in the line's zone: an explicit
+// end or a duration after the start. ok is false unless the length is positive.
+func parsePeriodValue(l *iline, v string) (time.Time, time.Duration, bool) {
+	a, b, found := strings.Cut(v, "/")
+	if !found {
+		return time.Time{}, 0, false
+	}
+	start, ok := parseICalDateTime(l, strings.TrimSpace(a))
+	if !ok {
+		return time.Time{}, 0, false
+	}
+	b = strings.TrimSpace(b)
+	var dur time.Duration
+	if strings.HasPrefix(b, "P") || strings.HasPrefix(b, "+P") {
+		dur, ok = parseICalDuration(strings.TrimPrefix(b, "+"))
+	} else {
+		var end time.Time
+		end, ok = parseICalDateTime(l, b)
+		dur = end.Sub(start)
+	}
+	if !ok || dur <= 0 {
+		return time.Time{}, 0, false
+	}
+	return start, dur, true
+}
+
+// addedInstants returns the instants the master's RDATE values add.
+func addedInstants(master *icomp, allDay bool) []time.Time {
+	dates := addedDates(master, allDay)
+	out := make([]time.Time, len(dates))
+	for i, d := range dates {
+		out[i] = d.at
+	}
+	return out
+}
+
+// addedPeriods maps each instant an RDATE PERIOD adds to its own duration.
+func addedPeriods(master *icomp, allDay bool) map[string]time.Duration {
+	var out map[string]time.Duration
+	for _, d := range addedDates(master, allDay) {
+		if d.period {
+			if out == nil {
+				out = map[string]time.Duration{}
+			}
+			out[instantKey(d.at)] = d.dur
 		}
 	}
 	return out
@@ -192,7 +281,7 @@ func addedInstants(master *icomp) []time.Time {
 // window. An override carries its own time and may sit anywhere, including outside
 // the span its generated instant would have had, so each one is tested directly
 // rather than through the enumeration.
-func overrideInstances(overrides map[string]*icomp, skip map[string]bool, dur time.Duration, rangeStart, rangeEnd time.Time) []Instance {
+func overrideInstances(overrides map[string]*icomp, skip map[string]bool, s series, rangeStart, rangeEnd time.Time) []Instance {
 	var out []Instance
 	for key, ov := range overrides {
 		if skip[key] {
@@ -202,7 +291,7 @@ func overrideInstances(overrides map[string]*icomp, skip map[string]bool, dur ti
 		if !ok {
 			continue
 		}
-		if span, live := instanceSpan(ov, at, dur); live && overlapsRange(span.Start, span.End, rangeStart, rangeEnd) {
+		if span, live := instanceSpan(ov, at, s.durAt(at)); live && overlapsRange(span.Start, span.End, rangeStart, rangeEnd) {
 			out = append(out, Instance{At: at, Span: span})
 		}
 	}
@@ -232,7 +321,7 @@ func CancelledInstancesIn(ical []byte, rangeStart, rangeEnd time.Time) []Instanc
 		if skip[key] || !ok || !isCancelledComp(ov) {
 			continue
 		}
-		if span := overrideSpan(ov, at, s.dur); overlapsRange(span.Start, span.End, rangeStart, rangeEnd) {
+		if span := overrideSpan(ov, at, s.durAt(at)); overlapsRange(span.Start, span.End, rangeStart, rangeEnd) {
 			out = append(out, Instance{At: at, Span: span})
 		}
 	}

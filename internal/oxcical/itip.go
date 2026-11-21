@@ -252,7 +252,7 @@ func instanceComp(master, override *icomp, at time.Time, s series) *icomp {
 		contentLine("DTSTAMP:"+formatICalUTC(time.Now())),
 		contentLine(dtLine("RECURRENCE-ID", at, s.allDay)),
 		contentLine(dtLine("DTSTART", at, s.allDay)),
-		contentLine(dtLine("DTEND", at.Add(s.dur), s.allDay)),
+		contentLine(dtLine("DTEND", at.Add(s.durAt(at)), s.allDay)),
 	)
 	return ev
 }
