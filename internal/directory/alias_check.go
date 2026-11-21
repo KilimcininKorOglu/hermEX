@@ -76,6 +76,26 @@ SELECT 1 FROM domains a, domains m
 	return err
 }
 
+// checkAltnameInOrg keeps an alternative name in a hosted domain inside the
+// account's organization. Such a name resolves mail to the account and is a
+// send-as identity, exactly like an alias. A bare name, or one in a domain this
+// server does not host, is a login name only (Identities leaves it out), so it
+// passes.
+func checkAltnameInOrg(q rowQuerier, altname, main string) error {
+	if !strings.Contains(altname, "@") {
+		return nil
+	}
+	var one int
+	err := q.QueryRow(`SELECT 1 FROM domains WHERE domainname = ?`, AddressDomain(altname)).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return checkAliasInOrg(q, altname, main)
+}
+
 // checkAliasFree confirms the address is not already in use as an account, an
 // alternative name, or another alias.
 //

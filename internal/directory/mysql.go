@@ -1266,6 +1266,9 @@ func (d *SQLDirectory) SetAltnames(username string, altnames []string) (bool, er
 		if err := checkAliasFree(tx, a); err != nil {
 			return false, err
 		}
+		if err := checkAltnameInOrg(tx, a, username); err != nil {
+			return false, err
+		}
 		if _, err := tx.Exec(`INSERT INTO altnames (user_id, altname) VALUES (?, ?)`, id, a); err != nil {
 			return false, err
 		}

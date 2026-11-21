@@ -176,3 +176,38 @@ func TestManualAliasesStayInTheAccountsOrganization(t *testing.T) {
 		}
 	}
 }
+
+// TestAltnamesInAHostedDomainStayInTheAccountsOrganization: an alternative name
+// resolves mail to the account and, in a hosted domain, is a send-as identity, so
+// it keeps to the account's organization like an alias. A bare login name and one
+// in a domain this server does not host are login names only and stay allowed.
+func TestAltnamesInAHostedDomainStayInTheAccountsOrganization(t *testing.T) {
+	d, _ := freshDirectory(t)
+	root := t.TempDir()
+	home := mustCreateDomain(t, d, root, "hermex.test")
+	sister := mustCreateDomain(t, d, root, "hermex.de")
+	other := mustCreateDomain(t, d, root, "other.test")
+	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
+	acme, err := d.CreateOrg("acme", "")
+	mustNoErr(t, "create acme", err)
+	rival, err := d.CreateOrg("rival", "")
+	mustNoErr(t, "create rival", err)
+	for _, a := range []struct{ domain, org int64 }{{home, acme}, {sister, acme}, {other, rival}} {
+		_, err := d.AssignDomainToOrg(a.domain, a.org)
+		mustNoErr(t, "assign a domain", err)
+	}
+
+	_, err = d.SetAltnames("alice@hermex.test", []string{"a.legacy", "alice@hermex.de", "alice@old-company.example"})
+	mustNoErr(t, "altnames inside the organization and unhosted ones", err)
+	if _, err := d.SetAltnames("alice@hermex.test", []string{"a.legacy", "ceo@other.test"}); !errors.Is(err, ErrAliasNotLocal) {
+		t.Errorf("an altname in another organization's domain = %v, want ErrAliasNotLocal", err)
+	}
+	ids, err := d.Identities("alice@hermex.test")
+	mustNoErr(t, "read alice's identities", err)
+	if slices.Contains(ids, "ceo@other.test") {
+		t.Errorf("alice may send as an address of another organization: %v", ids)
+	}
+	if !slices.Contains(ids, "alice@hermex.de") {
+		t.Errorf("the refused set replaced the earlier one: %v", ids)
+	}
+}
