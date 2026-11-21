@@ -300,7 +300,7 @@ const tableFlagNoNotifications uint8 = 0x10
 // contentsTableIDs lists the messages a contents table of folder shows: the
 // soft-deleted ones when asked for, the messages a search folder finds, and the
 // folder's own messages otherwise.
-func contentsTableIDs(folder *object, softDeleted bool) ([]int64, error) {
+func (s *Session) contentsTableIDs(folder *object, softDeleted bool) ([]int64, error) {
 	if softDeleted {
 		return folder.store.ListSoftDeletedIDs(folder.folderID)
 	}
@@ -309,9 +309,41 @@ func contentsTableIDs(folder *object, softDeleted bool) ([]int64, error) {
 		return nil, err
 	}
 	if isSearch {
-		return folder.store.SearchFolderMessageIDs(folder.folderID)
+		ids, err := folder.store.SearchFolderMessageIDs(folder.folderID)
+		if err != nil {
+			return nil, err
+		}
+		return s.readableResults(folder.store, ids)
 	}
 	return folder.store.ListMessageIDs(folder.folderID)
+}
+
+// readableResults keeps the search results a delegate may read: a search folder
+// gathers messages from its scope folders, their subfolders when recursive, so
+// each result needs ReadAny on the folder it lives in. An owner keeps them all.
+func (s *Session) readableResults(store *objectstore.Store, ids []int64) ([]int64, error) {
+	if _, delegate := s.delegateCallers[store]; !delegate {
+		return ids, nil
+	}
+	allowed := map[int64]bool{}
+	out := ids[:0:0]
+	for _, id := range ids {
+		fid, err := store.MessageFolder(id)
+		if err != nil {
+			return nil, err
+		}
+		ok, seen := allowed[fid]
+		if !seen {
+			if ok, err = s.authorize(store, fid, mapi.FrightsReadAny); err != nil {
+				return nil, err
+			}
+			allowed[fid] = ok
+		}
+		if ok {
+			out = append(out, id)
+		}
+	}
+	return out, nil
 }
 
 // ropGetContentsTable handles RopGetContentsTable ([MS-OXCFOLD] 2.2.1.14): it
@@ -342,7 +374,7 @@ func (s *Session) ropGetContentsTable(p *ext.Pull, out *ext.Push, handles []uint
 	// RopQueryRows serves it, so the index row's subject, sender and preview would
 	// be built for every message in the folder and never read.
 	softDeleted := tableFlags&tableFlagSoftDeletes != 0
-	ids, err := contentsTableIDs(folder, softDeleted)
+	ids, err := s.contentsTableIDs(folder, softDeleted)
 	if err != nil {
 		writeErr(out, ropGetContentsTable, ohindex, ecError)
 		return true

@@ -959,3 +959,49 @@ func TestDelegatePermissionsTableNeedsOwner(t *testing.T) {
 		sess.Close()
 	}
 }
+
+// TestDelegateSearchFolderShowsOnlyReadableResults: a search folder gathers
+// messages from its scope folders and, when recursive, their subfolders. A
+// delegate reads a message only with ReadAny on the folder it lives in, so the
+// search folder's contents table must leave out a result from a folder the
+// delegate may not read, whoever set the criteria.
+func TestDelegateSearchFolderShowsOnlyReadableResults(t *testing.T) {
+	dir := provisionedDir(t)
+	const delegate = "delegate@hermex.test"
+	inbox, sent := int64(mapi.PrivateFIDInbox), int64(mapi.PrivateFIDSentItems)
+	seedFolderMessage(t, dir, inbox, "Invoice readable")
+	seedFolderMessage(t, dir, sent, "Invoice private")
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	search, err := st.CreateSearchFolder(int64(mapi.PrivateFIDFinder), "Invoices")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := objectstore.RuleSubjectContains("invoice")
+	err = st.SetSearchCriteria(search, objectstore.SearchCriteria{
+		Restriction: &res, Scope: []int64{int64(mapi.PrivateFIDIPMSubtree)},
+		Flags: mapi.SearchRestart | mapi.SearchRecursive,
+	})
+	st.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantFolderPermission(t, dir, inbox, delegate, mapi.RightsReviewer)
+	grantFolderPermission(t, dir, search, delegate, mapi.RightsReviewer)
+
+	sess, logonH := delegateLogon(t, dir, delegate)
+	defer sess.Close()
+	_, h := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, uint64(search)))), []uint32{logonH, 0xFFFFFFFF})
+	resp, _ := sess.Dispatch(buildGetContentsTable(0, 1), []uint32{h[1], 0xFFFFFFFF})
+	p := ext.NewPull(resp, ext.FlagUTF16)
+	mustU8(t, p, "RopId")
+	mustU8(t, p, "OutputHandleIndex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("GetContentsTable ec = %#x", ec)
+	}
+	if rows := mustU32(t, p, "RowCount"); rows != 1 {
+		t.Errorf("search folder rows = %d, want 1 (only the Inbox result)", rows)
+	}
+}
