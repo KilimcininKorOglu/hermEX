@@ -258,10 +258,13 @@ func folderMoveErrorCode(err error) uint32 {
 }
 
 // emptyFolderContents soft-deletes every message in the folder and removes every
-// subfolder subtree. The returned flag is the PartialCompletion the response
-// carries: 1 when any single removal failed. An error means the folder could not
-// be enumerated at all, which is a failed ROP rather than a partial one.
-func emptyFolderContents(folder *object) (uint8, error) {
+// subfolder subtree. Removing a subfolder takes owner rights on it, the right
+// RopDeleteFolder requires, so a delegate holding only DeleteAny on the parent
+// keeps the subfolders it does not own. The returned flag is the
+// PartialCompletion the response carries: 1 when any single removal failed or was
+// refused. An error means the folder could not be enumerated at all, which is a
+// failed ROP rather than a partial one.
+func (s *Session) emptyFolderContents(folder *object) (uint8, error) {
 	var partial uint8
 	msgs, err := folder.store.ListMessages(folder.folderID)
 	if err != nil {
@@ -277,6 +280,10 @@ func emptyFolderContents(folder *object) (uint8, error) {
 		return 0, err
 	}
 	for _, c := range children {
+		if ok, err := s.authorize(folder.store, c.ID, mapi.FrightsOwner); err != nil || !ok {
+			partial = 1
+			continue
+		}
 		if err := folder.store.DeleteFolder(c.ID); err != nil {
 			partial = 1
 		}
@@ -424,7 +431,7 @@ func (s *Session) ropHardDeleteMessagesAndSubfolders(p *ext.Pull, out *ext.Push,
 	if s.denyWrite(out, ropHardDelMsgsAndSubfolders, hindex, folder.store, folder.folderID, mapi.FrightsDeleteAny) {
 		return true
 	}
-	partial, err := emptyFolderContents(folder)
+	partial, err := s.emptyFolderContents(folder)
 	if err != nil {
 		writeErr(out, ropHardDelMsgsAndSubfolders, hindex, ecError)
 		return true
@@ -459,7 +466,7 @@ func (s *Session) ropEmptyFolder(p *ext.Pull, out *ext.Push, handles []uint32, h
 	}
 	// EmptyFolder drops the folder's messages and its subfolders, each subfolder
 	// with its whole subtree.
-	partial, err := emptyFolderContents(folder)
+	partial, err := s.emptyFolderContents(folder)
 	if err != nil {
 		writeErr(out, ropEmptyFolder, hindex, ecError)
 		return true

@@ -747,3 +747,67 @@ func sentItemsCount(t *testing.T, dir string) int {
 	}
 	return len(msgs)
 }
+
+// TestDelegateEmptyFolderKeepsSubfoldersItDoesNotOwn: removing a folder takes owner
+// rights on it, the right RopDeleteFolder requires. RopEmptyFolder and
+// RopHardDeleteMessagesAndSubfolders gate on DeleteAny on the parent, so a delegate
+// with Editor rights there must not delete a subfolder it does not own; it reports
+// PartialCompletion ([MS-OXCFOLD] 2.2.1.9) and the subfolder stays.
+func TestDelegateEmptyFolderKeepsSubfoldersItDoesNotOwn(t *testing.T) {
+	for _, rop := range []uint8{ropEmptyFolder, ropHardDelMsgsAndSubfolders} {
+		dir := provisionedDir(t)
+		const delegate = "delegate@hermex.test"
+		inbox := int64(mapi.PrivateFIDInbox)
+		owned := createSubfolder(t, dir, inbox, "Owned")
+		foreign := createSubfolder(t, dir, inbox, "NotOwned")
+		grantFolderPermission(t, dir, inbox, delegate, mapi.RightsEditor)
+		grantFolderPermission(t, dir, owned, delegate, mapi.RightsOwner)
+		grantFolderPermission(t, dir, foreign, delegate, mapi.RightsEditor)
+
+		sess, logonH := delegateLogon(t, dir, delegate)
+		_, h := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
+		inboxH := h[1]
+		resp, _ := sess.Dispatch(toROPRequest(rop, 0, clearFolderRequest()), []uint32{inboxH})
+		p := ropOK(t, resp, rop, "clear the Inbox")
+		wantU8(t, p, "PartialCompletion with a subfolder refused", 1)
+
+		kids := childFolderSet(t, sess.get(inboxH).store, inbox)
+		if !kids[foreign] {
+			t.Errorf("rop %#x: the delegate deleted a subfolder it does not own", rop)
+		}
+		if kids[owned] {
+			t.Errorf("rop %#x: the subfolder the delegate owns was not removed", rop)
+		}
+		sess.Close()
+	}
+}
+
+// createSubfolder creates a folder under parent through the store directly and
+// returns its id.
+func createSubfolder(t *testing.T, dir string, parent int64, name string) int64 {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	id, err := st.CreateFolder(&parent, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// childFolderSet returns the ids of the live direct subfolders of parent.
+func childFolderSet(t *testing.T, st *objectstore.Store, parent int64) map[int64]bool {
+	t.Helper()
+	kids, err := childFolders(st, parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := make(map[int64]bool, len(kids))
+	for _, k := range kids {
+		set[k.ID] = true
+	}
+	return set
+}
