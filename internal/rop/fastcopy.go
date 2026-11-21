@@ -148,7 +148,10 @@ func (s *Session) ropFastTransferSourceCopyFolder(p *ext.Pull, out *ext.Push, ha
 	}
 
 	subfolders := copyFlags&(fastCopyFolderFlagMove|fastCopyFolderFlagCopySubfolder) != 0
-	col, err := src.store.NewCopyFolderSource(src.folderID, subfolders)
+	readable := func(fid int64) (bool, error) {
+		return s.authorize(src.store, fid, mapi.FrightsReadAny)
+	}
+	col, err := src.store.NewCopyFolderSource(src.folderID, subfolders, readable)
 	if err != nil {
 		writeErr(out, ropFastTransferSourceCopyFolder, ohindex, ecError)
 		return true

@@ -7,6 +7,7 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/ext"
+	"hermex/internal/ics"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -810,4 +811,36 @@ func childFolderSet(t *testing.T, st *objectstore.Store, parent int64) map[int64
 		set[k.ID] = true
 	}
 	return set
+}
+
+// TestDelegateCopyFolderSkipsSubfoldersWithoutReadAny: a delegate reads a folder's
+// contents only with ReadAny on that folder. A recursive
+// RopFastTransferSourceCopyFolder must apply that to every descendant, so a
+// subfolder the delegate may not read stays out of the stream together with its
+// messages, while a readable one is streamed.
+func TestDelegateCopyFolderSkipsSubfoldersWithoutReadAny(t *testing.T) {
+	dir := provisionedDir(t)
+	const delegate = "delegate@hermex.test"
+	inbox := int64(mapi.PrivateFIDInbox)
+	open := createSubfolder(t, dir, inbox, "Readable")
+	closed := createSubfolder(t, dir, inbox, "Private")
+	seedFolderMessage(t, dir, closed, "SECRETSUBJECT")
+	grantFolderPermission(t, dir, inbox, delegate, mapi.RightsReviewer)
+	grantFolderPermission(t, dir, open, delegate, mapi.RightsReviewer)
+	grantFolderPermission(t, dir, closed, delegate, mapi.FrightsVisible)
+
+	sess, logonH := delegateLogon(t, dir, delegate)
+	defer sess.Close()
+	_, h := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
+	sr, h := sess.Dispatch(buildFastCopyFolder(1, 2, fastCopyFolderFlagCopySubfolder), []uint32{logonH, h[1], 0xFFFFFFFF})
+	if ec := ropResultEC(t, sr); ec != ecSuccess {
+		t.Fatalf("CopyFolder ec = %#x, want success (ReadAny on the root)", ec)
+	}
+	items := drainSyncDownload(t, sess, h, 2)
+	if n := ropMarkerCount(items, ics.MarkerStartSubFld); n != 1 {
+		t.Errorf("streamed %d subfolders, want 1 (only the readable one)", n)
+	}
+	if n := ropMarkerCount(items, ics.MarkerStartMessage); n != 0 {
+		t.Errorf("streamed %d messages, want 0 (the only message is in the unreadable subfolder)", n)
+	}
 }

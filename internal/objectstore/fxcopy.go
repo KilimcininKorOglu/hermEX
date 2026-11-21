@@ -217,10 +217,13 @@ func (s *Store) messageIsAssociated(folderID, messageID int64) (bool, error) {
 // MetaTagFXDelProp / PR_CONTAINER_HIERARCHY collection delimiters, each message's
 // StartMessage/StartFAIMsg marker already carries its associated flag, so the FAI
 // and normal lists need no separating tag.
-func (s *Store) NewCopyFolderSource(folderID int64, subfolders bool) (*CopyContext, error) {
+//
+// include, when non-nil, decides each descendant folder: one it rejects is left
+// out together with its subtree, so a caller without rights on it never reads it.
+func (s *Store) NewCopyFolderSource(folderID int64, subfolders bool, include func(int64) (bool, error)) (*CopyContext, error) {
 	pr := &ics.Producer{}
 	pr.WriteMarker(ics.MarkerStartTopFld)
-	if err := s.writeFolderContentNoDelProps(pr, folderID, subfolders); err != nil {
+	if err := s.writeFolderContentNoDelProps(pr, folderID, subfolders, include); err != nil {
 		return nil, err
 	}
 	pr.WriteMarker(ics.MarkerEndFolder)
@@ -231,7 +234,7 @@ func (s *Store) NewCopyFolderSource(folderID int64, subfolders bool) (*CopyConte
 // property bag, its associated (FAI) message list, its normal message list, then,
 // when subfolders is set, each direct subfolder wrapped in STARTSUBFLD/ENDFOLDER,
 // recursing. It mirrors the reference record_foldercontentnodelprops.
-func (s *Store) writeFolderContentNoDelProps(pr *ics.Producer, folderID int64, subfolders bool) error {
+func (s *Store) writeFolderContentNoDelProps(pr *ics.Producer, folderID int64, subfolders bool, include func(int64) (bool, error)) error {
 	props, err := s.GetFolderProperties(folderID)
 	if err != nil {
 		return err
@@ -248,13 +251,28 @@ func (s *Store) writeFolderContentNoDelProps(pr *ics.Producer, folderID int64, s
 	if !subfolders {
 		return nil
 	}
+	return s.writeSubfolders(pr, folderID, include)
+}
+
+// writeSubfolders emits each direct subfolder of folderID that include admits,
+// wrapped in STARTSUBFLD/ENDFOLDER, recursing into its subtree.
+func (s *Store) writeSubfolders(pr *ics.Producer, folderID int64, include func(int64) (bool, error)) error {
 	subs, err := s.childFolderIDs(folderID)
 	if err != nil {
 		return err
 	}
 	for _, sub := range subs {
+		if include != nil {
+			ok, err := include(sub)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				continue
+			}
+		}
 		pr.WriteMarker(ics.MarkerStartSubFld)
-		if err := s.writeFolderContentNoDelProps(pr, sub, true); err != nil {
+		if err := s.writeFolderContentNoDelProps(pr, sub, true, include); err != nil {
 			return err
 		}
 		pr.WriteMarker(ics.MarkerEndFolder)

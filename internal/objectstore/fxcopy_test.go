@@ -316,7 +316,7 @@ func TestCopyFolderTopFolder(t *testing.T) {
 	sub := mustCreateFolder(t, s, &parent, "CopyFolderSub")
 	mustCreateMessage(t, s, sub, richMsg("sub message"))
 
-	src, err := s.NewCopyFolderSource(parent, true)
+	src, err := s.NewCopyFolderSource(parent, true, nil)
 	mustNoErr(t, "new copy folder source", err)
 	items := parseCopyItems(t, drainCopy(t, src))
 
@@ -352,7 +352,7 @@ func TestCopyFolderNoSubfolders(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	src, err := s.NewCopyFolderSource(parent, false)
+	src, err := s.NewCopyFolderSource(parent, false, nil)
 	if err != nil {
 		t.Fatalf("NewCopyFolderSource: %v", err)
 	}
