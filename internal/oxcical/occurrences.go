@@ -53,7 +53,7 @@ func InstancesIn(ical []byte, rangeStart, rangeEnd time.Time) ([]Instance, bool)
 	}
 	skip := excludedInstants(master)
 	out := overrideInstances(overrides, skip, s, rangeStart, rangeEnd)
-	for _, t := range seriesInstants(master, s, skip, rangeStart, rangeEnd) {
+	for _, t := range overlappingInstants(master, s, skip, rangeStart, rangeEnd) {
 		if _, overridden := overrides[instantKey(t)]; overridden {
 			continue // already tested at its own time
 		}
@@ -180,6 +180,29 @@ func seriesInstants(master *icomp, s series, skip map[string]bool, rangeStart, r
 	}
 	slices.SortFunc(out, func(a, b time.Time) int { return a.Compare(b) })
 	return out
+}
+
+// overlappingInstants returns the generated instants whose instance overlaps
+// [rangeStart, rangeEnd), in order. An instance that starts before the window and
+// is still running in it occupies the window too (RFC 4791 section 9.9 counts an
+// event by overlap), so the generation reaches back by the longest instance.
+func overlappingInstants(master *icomp, s series, skip map[string]bool, rangeStart, rangeEnd time.Time) []time.Time {
+	var out []time.Time
+	for _, t := range seriesInstants(master, s, skip, rangeStart.Add(-s.longest()), rangeEnd) {
+		if overlapsRange(t, t.Add(s.durAt(t)), rangeStart, rangeEnd) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// longest is the longest instance duration the series generates.
+func (s series) longest() time.Duration {
+	d := s.dur
+	for _, p := range s.periods {
+		d = max(d, p)
+	}
+	return d
 }
 
 // addedDate is one RDATE value: its start and, for a PERIOD, its own duration.

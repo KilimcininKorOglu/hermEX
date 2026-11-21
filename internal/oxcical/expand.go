@@ -29,7 +29,7 @@ func ExpandRecurrence(ical []byte, rangeStart, rangeEnd time.Time) ([]byte, bool
 	b.add("BEGIN:VCALENDAR")
 	b.add("VERSION:2.0")
 	b.add("PRODID:-//hermEX//CalDAV//EN")
-	for _, t := range seriesInstants(master, s, skip, rangeStart, rangeEnd) {
+	for _, t := range overlappingInstants(master, s, skip, rangeStart, rangeEnd) {
 		if ov, ok := overrides[instantKey(t)]; ok {
 			writeComponent(b, ov)
 			continue

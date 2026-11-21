@@ -108,3 +108,36 @@ func TestOccurrencesInRefusesANonSeries(t *testing.T) {
 		t.Error("OccurrencesIn expanded an object carrying no series master")
 	}
 }
+
+// TestInstanceRunningIntoTheWindowIsFound: an event occupies a window when it
+// overlaps it (RFC 4791 section 9.9), so an instance that starts before the window
+// and is still running in it is returned. The window holds only the second half
+// of the 16 March 17:00-18:00 instance, and only the second hour of a two-hour
+// RDATE PERIOD.
+func TestInstanceRunningIntoTheWindowIsFound(t *testing.T) {
+	spans := spansIn(t, seriesICal, day(16, 17).Add(30*time.Minute), day(16, 18))
+	if len(spans) != 1 || !spans[0].Start.Equal(day(16, 17)) || !spans[0].End.Equal(day(16, 18)) {
+		t.Errorf("rule instance: spans = %v, want 17:00 to 18:00 on 16 March", spans)
+	}
+	period := withRDate("RDATE;VALUE=PERIOD:20260305T170000Z/PT2H")
+	spans = spansIn(t, period, day(5, 18), day(5, 20))
+	if len(spans) != 1 || !spans[0].Start.Equal(day(5, 17)) || !spans[0].End.Equal(day(5, 19)) {
+		t.Errorf("period instance: spans = %v, want 17:00 to 19:00 on 5 March", spans)
+	}
+	out, ok := ExpandRecurrence([]byte(seriesICal), day(16, 17).Add(30*time.Minute), day(16, 18))
+	if !ok || !strings.Contains(string(out), "RECURRENCE-ID:20260316T170000Z") {
+		t.Errorf("expand did not return the running 16 March instance:\n%s", out)
+	}
+}
+
+// TestInstanceEndedBeforeTheWindowIsNotFound: reaching back for a running
+// instance must not return one that already ended; the 16 March instance ends at
+// 18:00, so a window that opens then holds none of it.
+func TestInstanceEndedBeforeTheWindowIsNotFound(t *testing.T) {
+	if spans := spansIn(t, seriesICal, day(16, 18), day(16, 20)); len(spans) != 0 {
+		t.Errorf("spans = %v, want none: the instance ended at the window's start", spans)
+	}
+	if out, _ := ExpandRecurrence([]byte(seriesICal), day(16, 18), day(16, 20)); strings.Contains(string(out), "RECURRENCE-ID:20260316T170000Z") {
+		t.Errorf("expand returned the ended 16 March instance:\n%s", out)
+	}
+}
