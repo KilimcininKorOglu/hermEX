@@ -844,3 +844,53 @@ func TestDelegateCopyFolderSkipsSubfoldersWithoutReadAny(t *testing.T) {
 		t.Errorf("streamed %d messages, want 0 (the only message is in the unreadable subfolder)", n)
 	}
 }
+
+// TestDelegateMessageStatusStaysInTheHandleFolder: the status ROPs take a folder
+// handle and a message id. The right is checked on the handle's folder, so a
+// message of another folder must answer as not found ([MS-OXCMSG] 2.2.3.9 /
+// 2.2.3.10), and its status must not be read or changed through a folder the
+// delegate may edit.
+func TestDelegateMessageStatusStaysInTheHandleFolder(t *testing.T) {
+	dir := provisionedDir(t)
+	const delegate = "delegate@hermex.test"
+	foreign := seedFolderMessage(t, dir, int64(mapi.PrivateFIDSentItems), "PRIVATE")
+	grantFolderPermission(t, dir, int64(mapi.PrivateFIDInbox), delegate, mapi.RightsEditor)
+
+	sess, logonH := delegateLogon(t, dir, delegate)
+	defer sess.Close()
+	_, h := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
+	inboxH := h[1]
+	eid := uint64(mapi.MakeEIDEx(1, uint64(foreign)))
+
+	if ec := ropResultEC(t, mustDispatch(sess, buildGetMessageStatus(0, eid), inboxH, 0xFFFFFFFF)); ec != ecNotFound {
+		t.Errorf("GetMessageStatus of another folder's message ec = %#x, want ecNotFound", ec)
+	}
+	if ec := ropResultEC(t, mustDispatch(sess, buildSetMessageStatus(0, eid, 0x1000, 0x1000), inboxH, 0xFFFFFFFF)); ec != ecNotFound {
+		t.Errorf("SetMessageStatus of another folder's message ec = %#x, want ecNotFound", ec)
+	}
+	st := sess.get(inboxH).store
+	props, err := st.GetMessageProperties(foreign, mapi.PrMsgStatus)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := props.Get(mapi.PrMsgStatus); v != int32(0) {
+		t.Errorf("the other folder's message status = %v, want it unchanged at 0", v)
+	}
+}
+
+// TestDelegateGetMessageStatusNeedsReadAny: reading a message's status reads the
+// message, so a delegate with only Visible on the folder is refused.
+func TestDelegateGetMessageStatusNeedsReadAny(t *testing.T) {
+	dir := provisionedDir(t)
+	const delegate = "delegate@hermex.test"
+	msg := seedFolderMessage(t, dir, int64(mapi.PrivateFIDInbox), "HIDDEN")
+	grantFolderPermission(t, dir, int64(mapi.PrivateFIDInbox), delegate, mapi.FrightsVisible)
+
+	sess, logonH := delegateLogon(t, dir, delegate)
+	defer sess.Close()
+	_, h := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
+	resp := mustDispatch(sess, buildGetMessageStatus(0, uint64(mapi.MakeEIDEx(1, uint64(msg)))), h[1], 0xFFFFFFFF)
+	if ec := ropResultEC(t, resp); ec != ecAccessDenied {
+		t.Errorf("GetMessageStatus with Visible only ec = %#x, want ecAccessDenied", ec)
+	}
+}

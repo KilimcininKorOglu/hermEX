@@ -65,8 +65,17 @@ func (s *Session) ropGetMessageStatus(p *ext.Pull, out *ext.Push, handles []uint
 		writeErr(out, ropGetMessageStatus, hindex, ecNotSupported)
 		return true
 	}
+	// Reading a message's status reads the message: a delegate needs ReadAny.
+	if s.denyWrite(out, ropGetMessageStatus, hindex, folder.store, folder.folderID, mapi.FrightsReadAny) {
+		return true
+	}
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	mid := int64(mapi.EID(msgEID).GCValue())
+	// The right was checked on the handle's folder, so the message must be in it.
+	if !inHandleFolder(folder, mid) {
+		writeErr(out, ropGetMessageStatus, hindex, ecNotFound)
+		return true
+	}
 	props, err := folder.store.GetMessageProperties(mid, mapi.PrMsgStatus)
 	if err != nil {
 		writeErr(out, ropGetMessageStatus, hindex, notFoundOrError(err))
@@ -99,6 +108,10 @@ func (s *Session) ropGetMessageStatus(p *ext.Pull, out *ext.Push, handles []uint
 // The mask selects which bits the request may touch; every other bit keeps its
 // stored value. The in-conflict bit is server-owned and a client may not set it.
 func mergeMessageStatus(folder *object, mid int64, newStatus, mask uint32) (merged, ec uint32, ok bool) {
+	// The right was checked on the handle's folder, so the message must be in it.
+	if !inHandleFolder(folder, mid) {
+		return 0, ecNotFound, false
+	}
 	props, err := folder.store.GetMessageProperties(mid, mapi.PrMsgStatus)
 	if err != nil {
 		return 0, notFoundOrError(err), false
