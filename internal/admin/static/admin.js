@@ -324,4 +324,14 @@
       input.value = Intl.DateTimeFormat().resolvedOptions().timeZone;
     }
   });
+
+  // The sign-in badge's reader light shows the request as pending until the
+  // server answers with the next page.
+  document.addEventListener("submit", (evt) => {
+    const form = evt.target instanceof HTMLFormElement && evt.target.matches("[data-badge-form]") ? evt.target : null;
+    const badge = form ? form.closest(".badge") : null;
+    if (badge) {
+      badge.dataset.state = "pending";
+    }
+  });
 })();

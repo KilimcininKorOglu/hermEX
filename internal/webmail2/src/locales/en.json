@@ -1425,11 +1425,11 @@
   },
   "login": {
     "webmail": "Webmail",
-    "emailAddress": "Email Address",
+    "emailAddress": "Email",
     "password": "Password",
-    "passwordPlaceholder": "Enter your password",
+    "badgeRole": "Staff",
     "emailPlaceholder": "you@example.com",
-    "signIn": "Sign In",
+    "signIn": "Sign in",
     "signingIn": "Signing in...",
     "invalidCredentials": "Invalid email or password",
     "connectionError": "Connection error. Please try again."

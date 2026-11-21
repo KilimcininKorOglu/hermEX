@@ -17,6 +17,8 @@
   },
   "login": {
     "email": "Email",
+    "emailPlaceholder": "you@example.com",
+    "badgeRole": "Administrator",
     "password": "Password",
     "submit": "Sign in",
     "tooMany": "Too many failed attempts, try again later.",

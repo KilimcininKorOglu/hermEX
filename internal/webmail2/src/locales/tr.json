@@ -1425,11 +1425,11 @@
   },
   "login": {
     "webmail": "Webmail",
-    "emailAddress": "E-posta Adresi",
+    "emailAddress": "E-posta",
     "password": "Parola",
-    "passwordPlaceholder": "Parolanızı girin",
+    "badgeRole": "Personel",
     "emailPlaceholder": "siz@ornek.com",
-    "signIn": "Giriş Yap",
+    "signIn": "Giriş yap",
     "signingIn": "Giriş yapılıyor...",
     "invalidCredentials": "Geçersiz e-posta veya parola",
     "connectionError": "Bağlantı hatası. Lütfen tekrar deneyin."

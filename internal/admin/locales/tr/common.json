@@ -17,6 +17,8 @@
   },
   "login": {
     "email": "E-posta",
+    "emailPlaceholder": "siz@ornek.com",
+    "badgeRole": "Yönetici",
     "password": "Parola",
     "submit": "Giriş yap",
     "tooMany": "Çok fazla başarısız deneme oldu. Daha sonra yeniden deneyin.",

@@ -1,0 +1,289 @@
+/* Sign-in badge: the shared look of the webmail and admin sign-in pages.
+   This file exists twice, byte for byte: internal/admin/static/badge.css (the
+   admin panel serves it) and internal/webmail2/src/styles/badge.css (the SPA
+   bundles it). TestSignInBadgeStylesAreShared fails when the copies differ.
+   Every property is set here, because the two pages start from different base
+   styles (Tailwind preflight in the SPA, the panel's own element rules). */
+
+.badge-page {
+	/* One neutral ramp feeds every surface; dark is the same ramp read from the
+	   other end. The band colour is the organization's; the ink on it is chosen
+	   for contrast. */
+	--badge-ground: #ecebe7;
+	--badge-body: #ffffff;
+	--badge-panel: #f6f6f3;
+	--badge-input: #ffffff;
+	--badge-line: #dedcd6;
+	--badge-line-strong: #c6c3bc;
+	--badge-text: #151413;
+	--badge-muted: #5f5c57;
+	--badge-refused: #c62828;
+	--badge-pending: #e0a100;
+	--badge-brand: #4f46e5;
+	--badge-brand-ink: #ffffff;
+	--badge-shadow: 0 1px 2px rgb(21 20 19 / 0.06), 0 18px 40px -18px rgb(21 20 19 / 0.35);
+
+	box-sizing: border-box;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	min-height: 100vh;
+	margin: 0;
+	padding: 4.5rem 1rem 2rem;
+	background: var(--badge-ground);
+	color: var(--badge-text);
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif;
+	font-size: 15px;
+	line-height: 1.5;
+}
+
+:where(.dark, [data-theme="dark"]) .badge-page {
+	--badge-ground: #0a0a0a;
+	--badge-body: #151515;
+	--badge-panel: #1d1d1c;
+	--badge-input: #0f0f0f;
+	--badge-line: #2b2b2a;
+	--badge-line-strong: #3d3d3b;
+	--badge-text: #f2f2f0;
+	--badge-muted: #a3a29e;
+	--badge-refused: #ff6b6b;
+	--badge-pending: #f5bd2f;
+	--badge-shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 18px 40px -18px rgb(0 0 0 / 0.9);
+}
+
+.badge-page *,
+.badge-page *::before,
+.badge-page *::after { box-sizing: border-box; }
+
+.badge-page ::selection { background: var(--badge-brand); color: var(--badge-brand-ink); }
+
+/* Language and theme sit in the page corner, outside the badge. */
+.badge-prefs {
+	position: fixed;
+	top: 1rem;
+	right: 1rem;
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+.badge-prefs .badge-pref,
+.badge-prefs .lang-select,
+.badge-prefs .theme-toggle {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.375rem;
+	height: 2.25rem;
+	min-width: 2.25rem;
+	margin: 0;
+	padding: 0 0.75rem;
+	border: 1px solid var(--badge-line);
+	border-radius: 8px;
+	background-color: var(--badge-body);
+	color: var(--badge-text);
+	font: inherit;
+	font-size: 14px;
+	box-shadow: none;
+	cursor: pointer;
+}
+.badge-prefs .theme-toggle { padding: 0; }
+.badge-prefs .lang-select { padding-right: 2rem; }
+.badge-prefs .badge-pref:hover,
+.badge-prefs .lang-select:hover,
+.badge-prefs .theme-toggle:hover { border-color: var(--badge-line-strong); background-color: var(--badge-panel); }
+.badge-prefs svg { width: 1rem; height: 1rem; }
+
+/* The badge: ID-1 card proportion on wide screens, a portrait badge on narrow
+   ones. It grows past the proportion when its content needs the room. */
+.badge {
+	display: grid;
+	grid-template-rows: auto 1fr;
+	width: min(37.5rem, 100%);
+	aspect-ratio: 85.6 / 54;
+	margin: 0;
+	padding: 0;
+	border: 1px solid var(--badge-line);
+	border-radius: 18px;
+	background: var(--badge-body);
+	box-shadow: var(--badge-shadow);
+	align-items: stretch;
+	align-content: stretch;
+	overflow: hidden;
+}
+
+.badge-band {
+	display: grid;
+	grid-template-columns: 1fr auto 1fr;
+	align-items: center;
+	gap: 1rem;
+	min-height: 4rem;
+	padding: 0 1.25rem;
+	background: var(--badge-brand);
+	color: var(--badge-brand-ink);
+}
+.badge-name {
+	margin: 0;
+	overflow: hidden;
+	color: inherit;
+	font-size: 17px;
+	font-weight: 650;
+	line-height: 1.2;
+	letter-spacing: -0.01em;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+/* The lanyard slot is punched through the band, so the page shows through it. */
+.badge-slot {
+	width: 3rem;
+	height: 0.625rem;
+	border-radius: 999px;
+	background: var(--badge-ground);
+	box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.35);
+}
+.badge-door {
+	display: flex;
+	align-items: center;
+	justify-self: end;
+	gap: 0.625rem;
+	font-size: 13px;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+}
+
+/* The reader light: idle, pending while the request runs, refused after a
+   failed attempt. The words in .badge-error carry the meaning; the light
+   only repeats it. */
+.badge-led {
+	width: 0.625rem;
+	height: 0.625rem;
+	border-radius: 50%;
+	background: currentColor;
+	opacity: 0.45;
+	box-shadow: 0 0 0 3px rgb(255 255 255 / 0.18);
+}
+.badge[data-state="pending"] .badge-led { background: var(--badge-pending); opacity: 1; animation: badge-blink 0.8s steps(2, jump-none) infinite; }
+.badge[data-state="refused"] .badge-led { background: var(--badge-refused); opacity: 1; }
+.badge[data-state="refused"] { animation: badge-refuse 0.32s cubic-bezier(0.16, 1, 0.3, 1) 1; }
+
+@keyframes badge-blink { to { opacity: 0.35; } }
+@keyframes badge-refuse {
+	0%, 100% { transform: translateX(0); }
+	25% { transform: translateX(-6px); }
+	50% { transform: translateX(5px); }
+	75% { transform: translateX(-3px); }
+}
+@media (prefers-reduced-motion: reduce) {
+	.badge[data-state="refused"],
+	.badge[data-state="pending"] .badge-led { animation: none; }
+}
+
+.badge-body {
+	display: grid;
+	align-self: stretch;
+	grid-template-columns: 10rem 1fr;
+	gap: 1.5rem;
+	padding: 1.5rem;
+}
+
+/* The photo panel holds the organization's logo, or its initial. */
+.badge-photo {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	align-self: stretch;
+	min-height: 9rem;
+	border: 1px solid var(--badge-line);
+	border-radius: 10px;
+	background: var(--badge-panel);
+}
+.badge-photo img { width: 55%; max-width: 6rem; height: auto; max-height: 70%; object-fit: contain; }
+
+.badge-form {
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	gap: 0.875rem;
+	margin: 0;
+	padding: 0;
+}
+.badge-field {
+	display: flex;
+	flex-direction: column;
+	gap: 0.375rem;
+	margin: 0;
+	color: var(--badge-muted);
+	font-size: 13px;
+	font-weight: 500;
+	line-height: 1.2;
+}
+.badge-field input {
+	width: 100%;
+	height: 2.75rem;
+	margin: 0;
+	padding: 0 0.75rem;
+	border: 1px solid var(--badge-line-strong);
+	border-radius: 8px;
+	background: var(--badge-input);
+	color: var(--badge-text);
+	font: inherit;
+	font-size: 15px;
+	font-weight: 400;
+	box-shadow: none;
+	outline: none;
+	caret-color: var(--badge-brand);
+}
+:where(.dark, [data-theme="dark"]) .badge-field input { caret-color: var(--badge-text); }
+.badge-field input::placeholder { color: var(--badge-muted); opacity: 1; }
+.badge-field input:focus-visible {
+	border-color: var(--badge-brand);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--badge-brand) 28%, transparent);
+}
+:where(.dark, [data-theme="dark"]) .badge-field input:focus-visible {
+	border-color: var(--badge-text);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--badge-text) 25%, transparent);
+}
+
+.badge-page .badge-submit {
+	width: 100%;
+	height: 2.75rem;
+	margin: 0.25rem 0 0;
+	padding: 0 1rem;
+	border: 0;
+	border-radius: 8px;
+	background: var(--badge-brand);
+	color: var(--badge-brand-ink);
+	font: inherit;
+	font-size: 15px;
+	font-weight: 600;
+	box-shadow: none;
+	cursor: pointer;
+}
+.badge-page .badge-submit:hover { background: color-mix(in srgb, var(--badge-brand) 86%, #000000); }
+.badge-page .badge-submit:focus-visible { outline: 2px solid var(--badge-text); outline-offset: 2px; }
+.badge-page .badge-submit:disabled { opacity: 0.6; cursor: progress; }
+
+.badge-error {
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--badge-refused);
+	font-size: 14px;
+	font-weight: 500;
+}
+
+.badge-foot {
+	margin: 1rem 0 0;
+	color: var(--badge-muted);
+	font-size: 13px;
+	text-align: center;
+}
+
+@media (max-width: 640px) {
+	.badge { width: min(22rem, 100%); aspect-ratio: auto; }
+	.badge-band { min-height: 3.5rem; padding: 0 1rem; }
+	.badge-body { grid-template-columns: 1fr; gap: 1.25rem; padding: 1.25rem; }
+	.badge-photo { min-height: 6.5rem; }
+}

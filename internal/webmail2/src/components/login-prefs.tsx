@@ -1,7 +1,6 @@
-import { Check, Languages, Moon, Sun } from "lucide-react"
+import { Check, ChevronDown, Moon, Sun } from "lucide-react"
 import { useTheme } from "@/components/theme-provider"
 import { useI18n } from "@/hooks/useI18n"
-import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,16 +12,18 @@ import { LOCALE_NAMES } from "@/utils/locale"
 // LoginPrefs is the language menu and theme toggle of the sign-in page. Nobody is
 // signed in yet, so a choice is kept in its cookie only; once the user signs in,
 // the users record wins where it holds a choice and adopts the cookie where not.
+// The language button names the current language, like the admin panel's select.
 export function LoginPrefs() {
   const { t, locale, applyStoredLocale, supportedLocales } = useI18n()
   const { resolvedTheme, applyStoredTheme } = useTheme()
   return (
-    <div className="flex items-center gap-1">
+    <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" title={t("sidebar.selectLanguage")} aria-label={t("sidebar.selectLanguage")}>
-            <Languages className="h-5 w-5" />
-          </Button>
+          <button type="button" className="badge-pref" title={t("sidebar.selectLanguage")} aria-label={t("sidebar.selectLanguage")}>
+            {LOCALE_NAMES[locale] ?? locale.toUpperCase()}
+            <ChevronDown aria-hidden="true" />
+          </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-44">
           {supportedLocales.map((code) => (
@@ -37,15 +38,15 @@ export function LoginPrefs() {
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
-      <Button
-        variant="ghost"
-        size="icon"
+      <button
+        type="button"
+        className="badge-pref theme-toggle"
         onClick={() => applyStoredTheme(resolvedTheme === "dark" ? "light" : "dark")}
         title={t("header.toggleTheme")}
         aria-label={t("header.toggleTheme")}
       >
-        {resolvedTheme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-      </Button>
-    </div>
+        {resolvedTheme === "dark" ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
+      </button>
+    </>
   )
 }

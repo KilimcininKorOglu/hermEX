@@ -1,19 +1,29 @@
 {{define "login.html"}}{{template "head" .}}
-<div class="login-prefs" data-prefs-local>
+<link rel="stylesheet" href="{{asset "badge.css"}}">
+<div class="badge-page">
+<div class="badge-prefs" data-prefs-local>
 {{template "lang-select"}}
 {{template "theme-toggle"}}
 </div>
-<main class="login">
-<div class="login-brand">{{template "brand"}}<div><h1>{{t "common.appTitle"}}</h1></div></div>
-{{if .Error}}<p class="error">{{t .Error}}</p>{{end}}
-<form method="post" action="/admin/ui/login">
-<label>{{t "login.email"}}
-<input type="email" name="login" autocomplete="username" required autofocus>
+<main class="badge"{{if .Error}} data-state="refused"{{end}}>
+<div class="badge-band">
+<h1 class="badge-name">hermEX</h1>
+<span class="badge-slot" aria-hidden="true"></span>
+<span class="badge-door">{{t "login.badgeRole"}}<span class="badge-led" aria-hidden="true"></span></span>
+</div>
+<div class="badge-body">
+<div class="badge-photo" aria-hidden="true"><img src="{{asset "favicon.svg"}}" alt=""></div>
+<form class="badge-form" method="post" action="/admin/ui/login" data-badge-form>
+{{if .Error}}<p class="badge-error" role="alert">{{t .Error}}</p>{{end}}
+<label class="badge-field">{{t "login.email"}}
+<input type="email" name="login" autocomplete="username" placeholder="{{t "login.emailPlaceholder"}}" required autofocus>
 </label>
-<label>{{t "login.password"}}
+<label class="badge-field">{{t "login.password"}}
 <input type="password" name="password" autocomplete="current-password" required>
 </label>
-<button type="submit">{{t "login.submit"}}</button>
+<button class="badge-submit" type="submit">{{t "login.submit"}}</button>
 </form>
+</div>
 </main>
+</div>
 {{template "foot" .}}{{end}}

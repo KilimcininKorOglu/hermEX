@@ -1,8 +1,9 @@
-import { useState, useEffect, type SubmitEvent } from 'react'
+import { useState, useEffect, type CSSProperties, type SubmitEvent } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useI18n } from '@/hooks/useI18n'
 import { LoginPrefs } from '@/components/login-prefs'
+import '@/styles/badge.css'
 
 interface Branding {
   app_name: string
@@ -11,40 +12,47 @@ interface Branding {
   footer_text: string
 }
 
-// brandStyle paints an element in the tenant's primary colour, when one is set.
-function brandStyle(branding: Branding | null) {
-  return branding?.primary_color ? { backgroundColor: branding.primary_color } : undefined
+const DARK_INK = '#151413'
+const LIGHT_INK = '#ffffff'
+
+// channel converts one sRGB channel (0-255) to linear light (WCAG 2.x).
+function channel(v: number): number {
+  const c = v / 255
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
 }
 
-// BrandMark shows the tenant logo, or the default mark in the tenant colour.
-function BrandMark({ branding, appName }: { branding: Branding | null; appName: string }) {
-  if (branding?.logo_url) {
-    return (
-      <img
-        src={branding.logo_url}
-        alt={appName}
-        className="w-16 h-16 rounded-2xl object-contain mx-auto mb-4"
-      />
-    )
-  }
-  return (
-    <div
-      className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4"
-      style={brandStyle(branding)}
-    >
-      <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-      </svg>
-    </div>
-  )
+function luminance(r: number, g: number, b: number): number {
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
 }
 
-// LoginHeader shows the brand mark and the app name.
-function LoginHeader({ branding, appName }: { branding: Branding | null; appName: string }) {
+function contrast(a: number, b: number): number {
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+}
+
+// inkFor picks the text colour for the organization's band: whichever of the
+// dark and light ink has the higher WCAG contrast against it. A colour it cannot
+// read as #rgb or #rrggbb gets the light ink of the default band.
+export function inkFor(color: string): string {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(color.trim())
+  if (!m) return LIGHT_INK
+  const hex = m[1].length === 3 ? [...m[1]].map((c) => c + c).join('') : m[1]
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16))
+  const band = luminance(r, g, b)
+  return contrast(band, luminance(0x15, 0x14, 0x13)) > contrast(band, 1) ? DARK_INK : LIGHT_INK
+}
+
+// badgeStyle paints the band in the organization's colour, when one is set.
+function badgeStyle(branding: Branding | null): CSSProperties | undefined {
+  const color = branding?.primary_color
+  if (!color) return undefined
+  return { '--badge-brand': color, '--badge-brand-ink': inkFor(color) } as CSSProperties
+}
+
+// BadgePhoto shows the organization's logo, or the hermEX logo when it set none.
+function BadgePhoto({ branding }: { branding: Branding | null }) {
   return (
-    <div className="text-center mb-8">
-      <BrandMark branding={branding} appName={appName} />
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{appName}</h1>
+    <div className="badge-photo" aria-hidden="true">
+      <img src={branding?.logo_url || '/favicon.svg'} alt="" />
     </div>
   )
 }
@@ -52,18 +60,11 @@ function LoginHeader({ branding, appName }: { branding: Branding | null; appName
 // LoginFooter shows the tenant footer text, or the app name. It shows no server
 // version: the sign-in page is public, and the version is on the About page.
 export function LoginFooter({ branding, appName }: { branding: Branding | null; appName: string }) {
-  return <p className="text-center text-xs text-gray-400 mt-4">{branding?.footer_text || appName}</p>
+  return <p className="badge-foot">{branding?.footer_text || appName}</p>
 }
 
-export function LoginPage() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
+function useBranding(): Branding | null {
   const [branding, setBranding] = useState<Branding | null>(null)
-  const { login, isAuthenticated } = useAuth()
-  const { t } = useI18n()
-
   // Resolve per-tenant branding from the address-bar hostname, so the login screen
   // reflects the tenant immediately, before the user types anything. The server maps
   // the accessed hostname to a registered domain.
@@ -83,6 +84,17 @@ export function LoginPage() {
       cancelled = true
     }
   }, [host])
+  return branding
+}
+
+export function LoginPage() {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const branding = useBranding()
+  const { login, isAuthenticated } = useAuth()
+  const { t } = useI18n()
 
   const appName = branding?.app_name || 'hermEX'
   useEffect(() => {
@@ -110,26 +122,32 @@ export function LoginPage() {
     }
   }
 
+  const state = loading ? 'pending' : error ? 'refused' : undefined
+
   return (
-    <div className="relative min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-slate-900 dark:to-slate-950">
-      <div className="absolute top-4 right-4 text-gray-700 dark:text-gray-200">
+    <div className="badge-page" style={badgeStyle(branding)}>
+      <div className="badge-prefs">
         <LoginPrefs />
       </div>
-      <div className="max-w-md w-full mx-4">
-        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-8">
-          <LoginHeader branding={branding} appName={appName} />
-
-          <form onSubmit={handleSubmit} className="space-y-6">
+      <main className="badge" data-state={state}>
+        <div className="badge-band">
+          <h1 className="badge-name">{appName}</h1>
+          <span className="badge-slot" aria-hidden="true" />
+          <span className="badge-door">
+            {t('login.badgeRole')}
+            <span className="badge-led" aria-hidden="true" />
+          </span>
+        </div>
+        <div className="badge-body">
+          <BadgePhoto branding={branding} />
+          <form onSubmit={handleSubmit} className="badge-form">
             {error && (
-              <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-300 px-4 py-3 rounded-lg text-sm">
+              <p className="badge-error" role="alert">
                 {error}
-              </div>
+              </p>
             )}
-
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                {t('login.emailAddress')}
-              </label>
+            <label htmlFor="email" className="badge-field">
+              {t('login.emailAddress')}
               <input
                 id="email"
                 type="email"
@@ -138,39 +156,27 @@ export function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder={t('login.emailPlaceholder')}
                 required
-                className="w-full px-4 py-3 border border-gray-300 dark:border-slate-600 dark:bg-slate-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                autoFocus
               />
-            </div>
-
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                {t('login.password')}
-              </label>
+            </label>
+            <label htmlFor="password" className="badge-field">
+              {t('login.password')}
               <input
                 id="password"
                 type="password"
                 autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder={t('login.passwordPlaceholder')}
                 required
-                className="w-full px-4 py-3 border border-gray-300 dark:border-slate-600 dark:bg-slate-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
               />
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              style={brandStyle(branding)}
-              className="w-full bg-indigo-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-indigo-700 focus:ring-4 focus:ring-indigo-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            >
+            </label>
+            <button type="submit" disabled={loading} className="badge-submit">
               {loading ? t('login.signingIn') : t('login.signIn')}
             </button>
           </form>
         </div>
-
-        <LoginFooter branding={branding} appName={appName} />
-      </div>
+      </main>
+      <LoginFooter branding={branding} appName={appName} />
     </div>
   )
 }
