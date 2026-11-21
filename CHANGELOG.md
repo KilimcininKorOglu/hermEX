@@ -4,6 +4,40 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-11-21
+
+### Added
+- Unified the webmail and administrator sign-in pages into a shared badge interface that contains both password entry and two-factor authentication steps.
+- Added the original message subject to read receipt notifications.
+- Added an organization boundary check that prevents sharing or granting mailbox access to users in other organizations.
+- Added the ability to assign the application impersonation role from the administrator role editor.
+- Added controls on the user management page to configure delegate folder permissions directly.
+- Added a configurable minimum password length setting in the administration panel that enforces password length during user creation and password changes.
+- Added an administrative setting to cap on-disk log spill files across all daemons and report dropped log events.
+- Added Sender Rewriting Scheme support for forwarded messages, Authenticated Received Chain message sealing for relays, and validation of incoming authentication headers.
+
+### Fixed
+- Enforced organization boundaries across all protocols to prevent cross-tenant sharing, delegation, alias creation, send-as permissions, free/busy queries, and mailbox logons.
+- Restricted delegate search results, notifications, folder copies, deletions, and shared calendar queries to folders where the delegate holds explicit access rights.
+- Routed deleted calendar items, contacts, and emptied folders into Recoverable Items across all sync and access protocols.
+- Contained unexpected background worker panics in mail transfer, relay, directory fetch, push notifications, and administrative tasks to prevent service crashes.
+- Fixed email address parsing across routing, antispam, relay, and MIME components by splitting domain names at the final at-sign.
+- Prohibited plaintext password transmission prior to establishing TLS encryption on IMAP, POP3, and remote mail retrieval connections.
+- Enforced rate limits on password verification in webmail and administration endpoints, encrypted stored retrieval passwords at rest, and revoked app passwords during forced password resets.
+- Improved IMAP standards compliance for quota lookups, search and sort commands, access control list validation, administrator privilege checks, and nested message rendering.
+- Corrected mailbox object store validations to prevent renaming default folders, writing directly into search folders, or moving items onto conflicting identifiers during synchronization.
+- Corrected recurring calendar event expansion for weekly series and explicit recurrence dates, and rejected meeting update requests from non-organizers.
+- Improved logging reliability during log store outages by spilling directly to disk, replaying in batches with backoff, and isolating log writes to a dedicated background task.
+- Corrected interface display values for storage size units and password requirements, sanitized login page branding settings, and recorded detailed failure reasons for quarantine releases.
+- Added directory validations to reject unroutable contact and group member addresses, prevent naming collisions between accounts and alternate names, and reject unsupported interface languages.
+- Fixed mail transfer handling to apply user forwarding rules on incoming connections, limit out-of-office responses to once per sender, remove pre-existing spam header tags, and sanitize received header lines.
+- Corrected TLS wildcard certificate matching, rejected mismatched certificate domain assignments, and enforced policy lifetimes and query deadlines for MTA-STS and DANE TLSA lookups.
+- Ensured contact replacements and file copies write new destination data before removing old entries, and prevented duplicate master category names in webmail.
+- Hardened binary decoders and remote procedure call parsers against truncated compression streams, buffer misalignments, invalid S/MIME padding, deeply nested rule action lists, and unauthorized context handle reuse.
+
+### Changed
+- Restricted release version numbers to single-digit patch values.
+
 ## [0.3.3] - 2026-11-19
 
 ### Fixed
