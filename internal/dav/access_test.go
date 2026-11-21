@@ -169,3 +169,47 @@ func putVCard(t *testing.T, ts *httptest.Server, path, user string) int {
 	resp.Body.Close()
 	return resp.StatusCode
 }
+
+// TestCopyMoveStaysUnderItsPrincipal: RFC 4918 section 9.9 moves a resource to
+// the URL in Destination. Both ends resolve in the one mailbox the request path
+// selects, so an editor of alice's calendar who names ed's own calendar as the
+// Destination must be refused, for MOVE and COPY alike, and alice's event must
+// stay where it was rather than land under a name the client cannot find.
+func TestCopyMoveStaysUnderItsPrincipal(t *testing.T) {
+	aliceDir := provisioned(t, "alice")
+	accs := directory.StaticAccounts{
+		testUser:         {Password: testPass, MailboxPath: aliceDir},
+		"ed@hermex.test": {Password: testPass, MailboxPath: provisioned(t, "ed")},
+	}
+	st, err := objectstore.Open(aliceDir)
+	mustOK(t, err)
+	mustOK(t, st.ModifyPermissions(int64(mapi.PrivateFIDCalendar), false, []objectstore.PermissionChange{
+		{Op: objectstore.PermAdd, Username: "ed@hermex.test", Rights: mapi.NormalizeRights(mapi.RightsEditor, true)},
+	}))
+	st.Close()
+	ts := httptest.NewServer(NewServer(accs, accs, "hermex.test").Handler())
+	t.Cleanup(ts.Close)
+	cal := "/dav/calendars/" + testUser + "/calendar/"
+	if code := authReq(t, ts, "PUT", cal+"a.ics", testUser, eventBody("a")); code != http.StatusCreated {
+		t.Fatalf("owner PUT event: %d", code)
+	}
+	foreign := "/dav/calendars/ed@hermex.test/calendar/taken.ics"
+	for _, method := range []string{"MOVE", "COPY"} {
+		req, err := http.NewRequest(method, ts.URL+cal+"a.ics", nil)
+		mustOK(t, err)
+		req.SetBasicAuth("ed@hermex.test", testPass)
+		req.Header.Set("Destination", ts.URL+foreign)
+		resp, err := http.DefaultClient.Do(req)
+		mustOK(t, err)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("%s to another principal: status %d, want 403", method, resp.StatusCode)
+		}
+	}
+	if code := authReq(t, ts, "GET", cal+"a.ics", testUser, ""); code != http.StatusOK {
+		t.Errorf("alice's event after the refused moves: status %d, want 200", code)
+	}
+	if code := authReq(t, ts, "GET", cal+"taken.ics", testUser, ""); code != http.StatusNotFound {
+		t.Errorf("a copy landed in alice's calendar under the foreign name: status %d, want 404", code)
+	}
+}
