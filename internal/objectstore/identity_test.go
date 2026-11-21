@@ -116,3 +116,45 @@ func TestAllocateRange(t *testing.T) {
 		t.Errorf("second range begin = %#x, want 0x20000", b2)
 	}
 }
+
+// TestAllocateLocalIDsAcrossARangeBoundary: RopGetLocalReplicaIds reserves IdCount
+// contiguous ids ([MS-OXCFXICS] 2.2.3.2.1.3). A block that does not fit in what
+// remains of the current range must still be granted, from ids no other
+// allocation has handed out or will hand out, and repeating the request must not
+// fail at the same boundary. A block wider than one range is granted too.
+func TestAllocateLocalIDsAcrossARangeBoundary(t *testing.T) {
+	s := openTestStore(t)
+	maxEID := configVal(t, s, cfgMaximumEID)
+	if _, err := s.objdb.Exec(`UPDATE configurations SET config_value=? WHERE config_id=?`, maxEID-0x10, cfgCurrentEID); err != nil {
+		t.Fatal(err)
+	}
+
+	const count = 0x20
+	begin, _, err := s.AllocateLocalIDs(count)
+	if err != nil {
+		t.Fatalf("a block straddling the range end was refused: %v", err)
+	}
+	if begin < maxEID {
+		t.Errorf("block begins at %#x, inside the old range that ends at %#x", begin, maxEID)
+	}
+	next, err := allocateEID(s.objdb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next < begin+count {
+		t.Errorf("the next server id %#x falls inside the client's block [%#x, %#x)", next, begin, begin+count)
+	}
+
+	wide := uint32(3 * 0x10000)
+	wbegin, _, err := s.AllocateLocalIDs(wide)
+	if err != nil {
+		t.Fatalf("a block wider than one range was refused: %v", err)
+	}
+	after, err := allocateEID(s.objdb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wbegin <= next || after < wbegin+uint64(wide) {
+		t.Errorf("wide block [%#x, %#x) overlaps the ids around it (%#x before, %#x after)", wbegin, wbegin+uint64(wide), next, after)
+	}
+}

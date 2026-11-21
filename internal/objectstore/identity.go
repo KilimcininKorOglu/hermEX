@@ -167,31 +167,39 @@ func allocateEID(q sqlExec) (uint64, error) {
 	return eid, nil
 }
 
-// allocateLocalIDs reserves count contiguous store EIDs and returns the first. It
-// reuses the single-id allocator and verifies contiguity rather than duplicating
-// the range-carving: if the block would straddle an allocation-range boundary it
-// fails loudly, and the caller retries against the fresh range. With
-// AllocatedEIDRange-wide ranges this is rare for the small counts a client reserves.
+// allocateLocalIDs reserves count contiguous store EIDs and returns the first, in
+// one step whatever the count. A block that does not fit in what remains of the
+// current range is carved from a fresh range at least count wide, so a
+// reservation never fails for straddling a range boundary (a rolled-back attempt
+// would fail at the same boundary on every retry) and the ids skipped at the end
+// of the old range are simply never handed out.
 func allocateLocalIDs(q sqlExec, count uint64) (uint64, error) {
 	if count == 0 {
 		return 0, fmt.Errorf("objectstore: zero-count id reservation")
 	}
-	begin, err := allocateEID(q)
-	if err != nil {
+	var curEID, maxEID uint64
+	if err := q.QueryRow(`SELECT config_value FROM configurations WHERE config_id=?`, cfgCurrentEID).Scan(&curEID); err != nil {
 		return 0, err
 	}
-	prev := begin
-	for i := uint64(1); i < count; i++ {
-		next, err := allocateEID(q)
+	if err := q.QueryRow(`SELECT config_value FROM configurations WHERE config_id=?`, cfgMaximumEID).Scan(&maxEID); err != nil {
+		return 0, err
+	}
+	if curEID+count > maxEID {
+		begin, end, err := allocateRangeOf(q, max(count, mapi.AllocatedEIDRange))
 		if err != nil {
 			return 0, err
 		}
-		if next != prev+1 {
-			return 0, fmt.Errorf("objectstore: id reservation crossed a range boundary at %d, cannot return %d contiguous ids", next, count)
+		curEID, maxEID = begin, end+1
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		if _, err := q.Exec(`UPDATE configurations SET config_value=? WHERE config_id=?`, int64(maxEID), cfgMaximumEID); err != nil {
+			return 0, err
 		}
-		prev = next
 	}
-	return begin, nil
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	if _, err := q.Exec(`UPDATE configurations SET config_value=? WHERE config_id=?`, int64(curEID+count), cfgCurrentEID); err != nil {
+		return 0, err
+	}
+	return curEID, nil
 }
 
 // AllocateLocalIDs reserves count contiguous local ids for a client
@@ -251,12 +259,18 @@ func allocateEIDFromFolder(q sqlExec, folderID int64) (uint64, error) {
 // folder, returning [begin, end]. It mirrors how a built-in folder's initial
 // cur_eid/max_eid are carved from the EID space.
 func allocateRange(q sqlExec) (begin, end uint64, err error) {
+	return allocateRangeOf(q, mapi.AllocatedEIDRange)
+}
+
+// allocateRangeOf reserves a fresh range width ids wide after every range carved
+// so far, returning [begin, end].
+func allocateRangeOf(q sqlExec, width uint64) (begin, end uint64, err error) {
 	var rangeEnd uint64
 	if err = q.QueryRow(`SELECT MAX(range_end) FROM allocated_eids`).Scan(&rangeEnd); err != nil {
 		return 0, 0, err
 	}
 	begin = rangeEnd + 1
-	end = begin + mapi.AllocatedEIDRange - 1
+	end = begin + width - 1
 	if _, err = q.Exec(
 		`INSERT INTO allocated_eids (range_begin, range_end, allocate_time, is_system) VALUES (?, ?, ?, 1)`,
 		int64(begin), int64(end), time.Now().Unix()); err != nil {
