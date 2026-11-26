@@ -3,6 +3,7 @@ package webmail2api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -73,10 +74,13 @@ func TestOccurrenceEditRefusesWhatIsNotAnInstance(t *testing.T) {
 	series := createEvent(t, do, berlinStandup)
 	single := createEvent(t, do, `{"summary":"Once","start":"2026-03-30T07:00:00Z","end":"2026-03-30T08:00:00Z"}`)
 	move := `{"occurrence":"2026-03-30T07:00:00Z","start":"2026-03-30T11:00:00Z","end":"2026-03-30T11:30:00Z"}`
+	before := strings.Join(windowStarts(t, do), ",")
 
 	wantStatus(t, "off pattern", do(http.MethodPut, occurrencePath(series),
 		`{"occurrence":"2026-03-30T08:00:00Z","start":"2026-03-30T11:00:00Z","end":"2026-03-30T11:30:00Z"}`), http.StatusNotFound)
 	wantStatus(t, "single event", do(http.MethodPut, occurrencePath(single), move), http.StatusNotFound)
 	wantStatus(t, "unknown id", do(http.MethodPut, occurrencePath(1<<40), move), http.StatusNotFound)
 	wantStatus(t, "bad instant", do(http.MethodDelete, occurrencePath(series)+"?at=soon", ""), http.StatusBadRequest)
+	// None of the refused edits may have moved or removed an instance.
+	wantEq(t, "instance starts after the refusals", strings.Join(windowStarts(t, do), ","), before)
 }
