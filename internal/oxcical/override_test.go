@@ -101,6 +101,17 @@ func TestMergeOverrideRefusesWithoutASeries(t *testing.T) {
 	}
 }
 
+// TestMergeOverrideRefusesAnotherMeetingsInstance proves an update whose instance
+// carries another UID is not folded into the series: RFC 5545 3.8.4.4 ties a
+// RECURRENCE-ID to the series of the same UID, and the update's bytes come from
+// whoever sent the message.
+func TestMergeOverrideRefusesAnotherMeetingsInstance(t *testing.T) {
+	foreign := strings.Replace(occurrenceICal, "UID:series-1", "UID:someone-elses", 1)
+	if out, ok := MergeOverride([]byte(seriesICal), []byte(foreign)); ok || out != nil {
+		t.Errorf("MergeOverride folded another meeting's instance (%v):\n%s", ok, out)
+	}
+}
+
 // TestOccurrenceInstantReadsTheInstance proves an occurrence update is recognised by
 // its RECURRENCE-ID, and a series is not.
 func TestOccurrenceInstantReadsTheInstance(t *testing.T) {
@@ -158,7 +169,10 @@ func TestCancelOccurrenceDropsItsOverride(t *testing.T) {
 // second EXDATE for the same instant.
 func TestCancelOccurrenceIsIdempotent(t *testing.T) {
 	at := time.Date(2026, 3, 9, 17, 0, 0, 0, time.UTC)
-	once, _ := CancelOccurrence([]byte(seriesICal), at)
+	once, ok := CancelOccurrence([]byte(seriesICal), at)
+	if !ok {
+		t.Fatal("the first cancellation was refused")
+	}
 
 	twice, ok := CancelOccurrence(once, at)
 	if !ok {

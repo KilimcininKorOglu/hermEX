@@ -63,15 +63,8 @@ func MergeOverride(stored, update []byte) ([]byte, bool) {
 	if err != nil {
 		return nil, false
 	}
-	if master, _ := findSeriesMaster(storedCal); master == nil {
-		return nil, false
-	}
-	at, ok := occurrenceInstantOf(updateCal)
+	at, override, ok := seriesOverride(storedCal, updateCal)
 	if !ok {
-		return nil, false
-	}
-	override := overrideAt(updateCal, at)
-	if override == nil {
 		return nil, false
 	}
 
@@ -92,6 +85,26 @@ func MergeOverride(stored, update []byte) ([]byte, bool) {
 	writeComponent(b, override)
 	b.add("END:VCALENDAR")
 	return b.buf.Bytes(), true
+}
+
+// seriesOverride picks the instance an occurrence update carries for the stored
+// series. A RECURRENCE-ID names an instance of the series with the same UID (RFC
+// 5545 3.8.4.4), so an instance of another meeting is refused, as is an update to
+// an object that is not a series.
+func seriesOverride(storedCal, updateCal *icomp) (time.Time, *icomp, bool) {
+	master, _ := findSeriesMaster(storedCal)
+	if master == nil {
+		return time.Time{}, nil, false
+	}
+	at, ok := occurrenceInstantOf(updateCal)
+	if !ok {
+		return time.Time{}, nil, false
+	}
+	override := overrideAt(updateCal, at)
+	if override == nil || override.propText("UID") != master.propText("UID") {
+		return time.Time{}, nil, false
+	}
+	return at, override, true
 }
 
 // CancelOccurrence removes one instance from a stored recurring object: its
