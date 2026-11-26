@@ -2,6 +2,7 @@ package directory
 
 import (
 	"database/sql"
+	"slices"
 	"strings"
 	"testing"
 
@@ -41,15 +42,30 @@ func TestOrgCRUD(t *testing.T) {
 	got = mustGetOrg(t, d, id)
 	wantEq(t, "name after update", got.Name, "Acme Inc")
 	wantEq(t, "description after update", got.Description, "new desc")
-	unknown, _ := d.UpdateOrg(999999, "x", "")
+	unknown, err := d.UpdateOrg(999999, "x", "")
+	mustNoErr(t, "update an unknown org", err)
 	wantEq(t, "UpdateOrg on an unknown id", unknown, false)
+
+	// A refused rename keeps the stored name: an empty name, one over the limit,
+	// and another organization's name.
+	_, err = d.CreateOrg("Other", "")
+	mustNoErr(t, "create a second org", err)
+	for _, bad := range []string{"", strings.Repeat("a", 33), "Other"} {
+		_, err := d.UpdateOrg(id, bad, "changed")
+		wantErr(t, "UpdateOrg accepted the name "+bad, err)
+		got = mustGetOrg(t, d, id)
+		wantEq(t, "name after a refused rename", got.Name, "Acme Inc")
+		wantEq(t, "description after a refused rename", got.Description, "new desc")
+	}
 
 	orgs, err := d.ListOrgs()
 	mustNoErr(t, "list orgs", err)
-	if len(orgs) != 1 {
-		t.Fatalf("ListOrgs = %+v, want one org", orgs)
+	if len(orgs) != 2 {
+		t.Fatalf("ListOrgs = %+v, want two orgs", orgs)
 	}
-	wantEq(t, "listed org name", orgs[0].Name, "Acme Inc")
+	names := []string{orgs[0].Name, orgs[1].Name}
+	slices.Sort(names)
+	wantEq(t, "listed org names", strings.Join(names, ","), "Acme Inc,Other")
 }
 
 // wantDomainAttachDetach proves a domain attaches to an org and detaches back to
@@ -64,6 +80,7 @@ func wantDomainAttachDetach(t *testing.T, d *SQLDirectory, orgID, domID int64) {
 
 	_, err = d.AssignDomainToOrg(domID, 999999)
 	wantErr(t, "assigning a domain to a nonexistent org accepted", err)
+	wantEq(t, "domain count after the refused move", mustGetOrg(t, d, orgID).DomainCount, 1)
 	unknownDomain, err := d.AssignDomainToOrg(888888, orgID)
 	mustNoErr(t, "assign an unknown domain", err)
 	wantEq(t, "assigning an unknown domain", unknownDomain, false)
@@ -104,12 +121,14 @@ func TestDeleteOrgCascade(t *testing.T) {
 	refused, err := d.DeleteOrg(0)
 	wantEq(t, "DeleteOrg(0) removed the reserved sentinel", refused, false)
 	wantErr(t, "DeleteOrg(0) accepted the reserved sentinel", err)
+	wantEq(t, "the org's domain count after the refused delete", mustGetOrg(t, d, id).DomainCount, 1)
 
 	deleted, err := d.DeleteOrg(id)
 	mustNoErr(t, "delete org", err)
 	wantEq(t, "DeleteOrg reported the org existed", deleted, true)
 
-	_, stillThere, _ := d.GetOrg(id)
+	_, stillThere, err := d.GetOrg(id)
+	mustNoErr(t, "read the deleted org", err)
 	wantEq(t, "org present after delete", stillThere, false)
 	var domOrg int64
 	mustNoErr(t, "the domain was deleted with its org",
@@ -127,7 +146,9 @@ func TestDeleteOrgCascade(t *testing.T) {
 		}
 	}
 	// The landmine: the global default sync policy (org_id 0) must be untouched.
-	if got, _ := d.GetDefaultSyncPolicy(); got == nil || got["DevicePasswordEnabled"] != 1 {
+	got, err := d.GetDefaultSyncPolicy()
+	mustNoErr(t, "read the default sync policy", err)
+	if got == nil || got["DevicePasswordEnabled"] != 1 {
 		t.Errorf("global default sync policy (org 0) wiped by an org delete: %v", got)
 	}
 

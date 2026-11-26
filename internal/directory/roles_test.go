@@ -138,13 +138,26 @@ func TestRoleCRUD(t *testing.T) {
 	wantPermissions(t, got.Permissions, newPerms)
 	wantEq(t, "user count after update", got.UserCount, 1)
 	wantOneID(t, "users after update", got.UserIDs, bob)
-	unknown, _ := d.UpdateRole(999999, "x", "", nil, nil)
+	unknown, err := d.UpdateRole(999999, "x", "", nil, nil)
+	mustNoErr(t, "update an unknown role", err)
 	wantEq(t, "UpdateRole on an unknown id", unknown, false)
+
+	// A refused update changes nothing: neither the name, the permissions nor the users.
+	_, err = d.UpdateRole(id, "Renamed", "x", []Permission{{Name: "Nonsense"}}, []int64{alice})
+	wantErr(t, "an update with an unknown permission accepted", err)
+	_, err = d.UpdateRole(id, "", "x", newPerms, []int64{alice})
+	wantErr(t, "an update to an empty name accepted", err)
+	got = mustGetRole(t, d, id)
+	wantEq(t, "name after the refused updates", got.Name, "Helpdesk RO")
+	wantEq(t, "permission count after the refused updates", got.PermCount, 1)
+	wantPermissions(t, got.Permissions, newPerms)
+	wantOneID(t, "users after the refused updates", got.UserIDs, bob)
 
 	deleted, err := d.DeleteRole(id)
 	mustNoErr(t, "delete role", err)
 	wantEq(t, "DeleteRole reported the role existed", deleted, true)
-	_, stillThere, _ := d.GetRole(id)
+	_, stillThere, err := d.GetRole(id)
+	mustNoErr(t, "read the deleted role", err)
 	wantEq(t, "role present after delete", stillThere, false)
 	// Assignment rows cascade with the role.
 	wantRows(t, db, "user_roles rows after the role delete (cascade)", 0,
@@ -236,6 +249,11 @@ func TestEffectivePermissionsUnionBridge(t *testing.T) {
 		{Name: PermOrgAdmin, Params: "5"},
 		{Name: PermDomainAdmin, Params: "7"},
 	})
+	// A scoped grant never widens into system authority or another scope.
+	if hasPerm(perms, PermSystemAdmin, "") || hasPerm(perms, PermDomainAdmin, "*") || hasPerm(perms, PermOrgAdmin, "*") {
+		t.Errorf("scoped grants resolved to wider authority: %+v", perms)
+	}
+	wantEq(t, "permissions of the scoped user", len(perms), 2)
 
 	// A named role's permissions surface, and overlapping the legacy bridge does
 	// not duplicate the permission.

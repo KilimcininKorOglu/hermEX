@@ -43,8 +43,7 @@ func TestSenderRuleRoundTrip(t *testing.T) {
 	if err != nil || len(rules) != 2 {
 		t.Fatalf("ListSenderRules = %+v (err %v), want 2 rules", rules, err)
 	}
-	// ORDER BY action, pattern: "block" sorts before "allow"? No, alphabetical:
-	// allow < block, so the allow row leads.
+	// The list is ordered by action, then pattern; "allow" sorts before "block".
 	if rules[0].Pattern != "partner@example.com" || rules[0].Action != SenderAllow {
 		t.Errorf("rule[0] = %+v, want the normalised allow rule", rules[0])
 	}
@@ -97,7 +96,16 @@ func TestSenderRuleRejectsBadInput(t *testing.T) {
 	if err := d.SetSenderRule("a@example.com", "maybe"); err == nil {
 		t.Error("unknown action should be rejected")
 	}
-	if rules, _ := d.ListSenderRules(); len(rules) != 0 {
-		t.Errorf("nothing should have been stored, got %+v", rules)
+	rules, err := d.ListSenderRules()
+	mustNoErr(t, "list the rules after the refusals", err)
+	wantEq(t, "rules stored by the refused writes", len(rules), 0)
+
+	// A refused action leaves an existing rule as it was.
+	mustNoErr(t, "set a rule", d.SetSenderRule("a@example.com", SenderBlock))
+	wantErr(t, "an unknown action replaced the rule", d.SetSenderRule("a@example.com", "maybe"))
+	rules, err = d.ListSenderRules()
+	mustNoErr(t, "list the rules", err)
+	if len(rules) != 1 || rules[0].Action != SenderBlock {
+		t.Errorf("rules after the refused flip = %+v, want the one block rule", rules)
 	}
 }

@@ -32,6 +32,22 @@ func setupRecipientAccess(t *testing.T) (d *SQLDirectory, aliceDir, bobDir strin
 	return d, aliceDir, bobDir
 }
 
+// mustRules lists a user's rules.
+func mustRules(t *testing.T, d *SQLDirectory, user string) []RecipientRule {
+	t.Helper()
+	rules, err := d.ListRecipientRules(user)
+	mustNoErr(t, "list "+user+"'s rules", err)
+	return rules
+}
+
+// mustRuleMap reads the delivery-side rule map of a maildir.
+func mustRuleMap(t *testing.T, d *SQLDirectory, maildir string) map[string]string {
+	t.Helper()
+	m, err := d.RecipientRulesForMaildir(maildir)
+	mustNoErr(t, "read the rules of "+maildir, err)
+	return m
+}
+
 // TestRecipientRuleRoundTrip proves a rule is stored normalised (lowercased) and read
 // back through both the management list and the delivery-side maildir map.
 func TestRecipientRuleRoundTrip(t *testing.T) {
@@ -39,18 +55,11 @@ func TestRecipientRuleRoundTrip(t *testing.T) {
 	if err := d.SetRecipientRule("alice@hermex.test", "News@Example.com", SenderAllow); err != nil {
 		t.Fatal(err)
 	}
-	rules, err := d.ListRecipientRules("alice@hermex.test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	rules := mustRules(t, d, "alice@hermex.test")
 	if len(rules) != 1 || rules[0].Pattern != "news@example.com" || rules[0].Action != SenderAllow {
 		t.Fatalf("list = %+v, want one lowercased allow rule", rules)
 	}
-	m, err := d.RecipientRulesForMaildir(aliceDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m["news@example.com"] != SenderAllow {
+	if m := mustRuleMap(t, d, aliceDir); m["news@example.com"] != SenderAllow {
 		t.Errorf("maildir map = %v, want news@example.com -> allow", m)
 	}
 }
@@ -65,9 +74,24 @@ func TestRecipientRuleUpsertFlips(t *testing.T) {
 	if err := d.SetRecipientRule("alice@hermex.test", "x@example.com", SenderBlock); err != nil {
 		t.Fatal(err)
 	}
-	rules, _ := d.ListRecipientRules("alice@hermex.test")
-	if len(rules) != 1 || rules[0].Action != SenderBlock {
+	if rules := mustRules(t, d, "alice@hermex.test"); len(rules) != 1 || rules[0].Action != SenderBlock {
 		t.Errorf("list = %+v, want a single block rule after the flip", rules)
+	}
+}
+
+// TestRecipientRuleRefusesAnUnknownAction proves only allow and block are stored, and
+// a refused action leaves the existing rule as it was.
+func TestRecipientRuleRefusesAnUnknownAction(t *testing.T) {
+	d, _, _ := setupRecipientAccess(t)
+	mustNoErr(t, "set the rule", d.SetRecipientRule("alice@hermex.test", "x@example.com", SenderAllow))
+	for _, bad := range []string{"", "ALLOW", "allowall", "quarantine"} {
+		if err := d.SetRecipientRule("alice@hermex.test", "x@example.com", bad); err == nil {
+			t.Errorf("the action %q was accepted", bad)
+		}
+	}
+	rules := mustRules(t, d, "alice@hermex.test")
+	if len(rules) != 1 || rules[0].Action != SenderAllow {
+		t.Errorf("rules after the refusals = %+v, want the one allow rule", rules)
 	}
 }
 
@@ -81,12 +105,21 @@ func TestRecipientRuleDelete(t *testing.T) {
 	if ok, err := d.DeleteRecipientRule("alice@hermex.test", "X@Example.com"); err != nil || !ok {
 		t.Fatalf("delete = (%v, %v), want (true, nil), pattern is matched case-insensitively", ok, err)
 	}
-	if ok, _ := d.DeleteRecipientRule("alice@hermex.test", "x@example.com"); ok {
-		t.Error("deleting a missing rule must report ok=false")
-	}
-	if m, _ := d.RecipientRulesForMaildir(aliceDir); len(m) != 0 {
-		t.Errorf("maildir map = %v, want empty after delete", m)
-	}
+	ok, err := d.DeleteRecipientRule("alice@hermex.test", "x@example.com")
+	mustNoErr(t, "delete a missing rule", err)
+	wantEq(t, "deleting a missing rule reported a deletion", ok, false)
+	wantEq(t, "rules in the maildir map after the delete", len(mustRuleMap(t, d, aliceDir)), 0)
+}
+
+// TestRecipientRuleDeleteStaysOnItsOwner proves one user deleting a pattern never
+// removes another user's rule with the same pattern.
+func TestRecipientRuleDeleteStaysOnItsOwner(t *testing.T) {
+	d, aliceDir, _ := setupRecipientAccess(t)
+	mustNoErr(t, "set alice's rule", d.SetRecipientRule("alice@hermex.test", "x@example.com", SenderBlock))
+	ok, err := d.DeleteRecipientRule("bob@hermex.test", "x@example.com")
+	mustNoErr(t, "delete as bob", err)
+	wantEq(t, "bob's delete found a rule", ok, false)
+	wantEq(t, "alice's rule after bob's delete", mustRuleMap(t, d, aliceDir)["x@example.com"], SenderBlock)
 }
 
 // TestRecipientRuleUnknownUser proves a rule cannot be set for a user that does not
@@ -106,8 +139,8 @@ func TestRecipientRuleRefusesAPatternNoSenderMatches(t *testing.T) {
 	if err := d.SetRecipientRule("alice@hermex.test", "*.example.com", SenderBlock); err == nil {
 		t.Error("a wildcard personal rule was accepted")
 	}
-	if rules, err := d.ListRecipientRules("alice@hermex.test"); err != nil || len(rules) != 0 {
-		t.Errorf("personal rules after the refusal = %+v (err %v), want none", rules, err)
+	if rules := mustRules(t, d, "alice@hermex.test"); len(rules) != 0 {
+		t.Errorf("personal rules after the refusal = %+v, want none", rules)
 	}
 }
 
@@ -118,15 +151,15 @@ func TestRecipientRulesAreIsolated(t *testing.T) {
 	if err := d.SetRecipientRule("alice@hermex.test", "friend@partner.example", SenderAllow); err != nil {
 		t.Fatal(err)
 	}
-	if m, _ := d.RecipientRulesForMaildir(bobDir); len(m) != 0 {
+	if m := mustRuleMap(t, d, bobDir); len(m) != 0 {
 		t.Errorf("bob sees %v, but alice's rule must not apply to bob", m)
 	}
-	if m, _ := d.RecipientRulesForMaildir(aliceDir); m["friend@partner.example"] != SenderAllow {
+	if m := mustRuleMap(t, d, aliceDir); m["friend@partner.example"] != SenderAllow {
 		t.Errorf("alice's own rule missing from her map: %v", m)
 	}
 }
 
-// TestRecipientRulesMatchServerWideParity is the parity teeth (the invariant that a
+// TestRecipientRulesMatchServerWideParity is the parity check (the invariant that a
 // per-recipient rule must match a sender identically to a server-wide rule): the
 // stored rules, fed to the same matcher the operator list uses, must resolve the
 // exact-address > envelope-domain > From-header-domain precedence and ignore a bounce.
@@ -141,11 +174,7 @@ func TestRecipientRulesMatchServerWideParity(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	m, err := d.RecipientRulesForMaildir(aliceDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	list := antispam.NewAccessList(m)
+	list := antispam.NewAccessList(mustRuleMap(t, d, aliceDir))
 	cases := []struct{ mailFrom, fromDomain, want string }{
 		{"vip@example.com", "", antispam.AccessAllow},                // exact beats the domain block
 		{"other@example.com", "", antispam.AccessBlock},              // domain rule applies to non-exact
@@ -172,14 +201,6 @@ func TestRecipientRulesCascadeOnUserDelete(t *testing.T) {
 	if ok, err := d.DeleteUser("alice@hermex.test", false); err != nil || !ok {
 		t.Fatalf("delete user = (%v, %v), want (true, nil)", ok, err)
 	}
-	var n int
-	if err := d.db.QueryRow(`SELECT COUNT(*) FROM recipient_access`).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
-	if n != 0 {
-		t.Errorf("recipient_access has %d rows after the owner was deleted, want 0 (cascade failed)", n)
-	}
-	if m, _ := d.RecipientRulesForMaildir(aliceDir); len(m) != 0 {
-		t.Errorf("maildir map = %v, want empty after the owner was deleted", m)
-	}
+	wantRows(t, d.db, "recipient_access rows after the owner was deleted", 0, `SELECT COUNT(*) FROM recipient_access`)
+	wantEq(t, "rules in the maildir map after the owner was deleted", len(mustRuleMap(t, d, aliceDir)), 0)
 }

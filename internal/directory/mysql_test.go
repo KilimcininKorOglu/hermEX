@@ -164,6 +164,11 @@ func TestSQLDirectoryFaithfulResolution(t *testing.T) {
 	wantEq(t, "Authenticate admitted a wrong password", wrong, false)
 	_, ghost := d.Authenticate("ghost@hermex.test", "secret-pw1")
 	wantEq(t, "Authenticate admitted an unknown user", ghost, false)
+	// The password is compared exactly: no case folding, no empty match, no prefix.
+	for _, bad := range []string{"", "Secret-pw1", "secret-pw", "secret-pw1 "} {
+		_, ok := d.Authenticate("alice@hermex.test", bad)
+		wantEq(t, "Authenticate admitted the password "+bad, ok, false)
+	}
 
 	// Recipient resolution: the user, an alias to the user, and an unknown.
 	path, ok = d.Resolve("alice@hermex.test")
@@ -536,6 +541,12 @@ func TestSQLDirectorySearchGAL(t *testing.T) {
 	}
 	wantEq(t, "bob's address", bob[0].Address, "bob@hermex.test")
 	wantEq(t, "bob's display name", bob[0].DisplayName, "Bob Builder")
+
+	// LIKE metacharacters in a query match themselves only: "%" and "_" must not
+	// turn a search into a listing of the whole address book.
+	for _, q := range []string{"%", "_", "a%e", "b_b"} {
+		wantEq(t, "results for the wildcard query "+q, len(mustSearchGAL(t, d, q, 0)), 0)
+	}
 }
 
 // mustSearchGAL runs a GAL search as alice.

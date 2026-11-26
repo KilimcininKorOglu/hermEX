@@ -17,7 +17,7 @@ func TestSessionUpsertRefresh(t *testing.T) {
 		IP: "10.0.0.1", Command: "Ping", ASVersion: "14.1", StartAt: now, LastUpdate: now, Push: true,
 	}))
 	mustNoErr(t, "refresh the session", d.UpsertSession(SessionRecord{
-		ID: "s1", Username: "a@x.test", DeviceID: "dev1", Command: "Sync",
+		ID: "s1", Username: "other@x.test", DeviceID: "dev2", DeviceType: "Android", IP: "10.0.0.9", Command: "Sync",
 		StartAt: now, LastUpdate: now + 5, Push: false, AddInfo: "working",
 	}))
 
@@ -100,5 +100,11 @@ func TestSessionStalenessAndPurge(t *testing.T) {
 	// The fresh rows survive the purge.
 	after, err := d.ListActiveSessions(now)
 	mustNoErr(t, "list active sessions", err)
+	kept := map[string]bool{}
+	for _, s := range after {
+		kept[s.ID] = true
+	}
 	wantEq(t, "sessions shown after the purge", len(after), 2)
+	wantEq(t, "the fresh session after the purge", kept["fresh"], true)
+	wantEq(t, "the recently ended session after the purge", kept["ended-recent"], true)
 }

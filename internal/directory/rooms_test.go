@@ -63,6 +63,8 @@ func TestCreateRoom(t *testing.T) {
 	// A room must belong to a known domain.
 	_, err = d.CreateRoom("ghost@nope.test", "Ghost", filepath.Join(root, "ghost"), 0, false)
 	wantErr(t, "CreateRoom into an unknown domain succeeded", err)
+	wantRows(t, db, "rows left by the refused room creates", 0,
+		`SELECT COUNT(*) FROM users WHERE username IN (?, ?)`, "neg@hermex.test", "ghost@nope.test")
 
 	rooms, err := d.ListRooms("alice@hermex.test")
 	mustNoErr(t, "list rooms", err)
@@ -78,6 +80,10 @@ func TestCreateRoom(t *testing.T) {
 	mustNoErr(t, "read the room's password",
 		db.QueryRow("SELECT password FROM users WHERE username = ?", "conf-a@hermex.test").Scan(&pw))
 	wantEq(t, "room password (a resource cannot sign in)", pw, "")
+	for _, guess := range []string{"", "x"} {
+		_, ok := d.Authenticate("conf-a@hermex.test", guess)
+		wantEq(t, "the room signed in with the password "+guess, ok, false)
+	}
 }
 
 // wantResource checks one listed resource carries its name, capacity and kind.

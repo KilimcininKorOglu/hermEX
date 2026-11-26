@@ -27,14 +27,18 @@ func TestExpiredSessionsArePruned(t *testing.T) {
 	n, err := d.PurgeExpiredWebmailSessions(now)
 	mustNoErr(t, "prune webmail sessions", err)
 	wantEq(t, "webmail sessions pruned (only the expired one)", n, int64(1))
-	liveWeb, _ := d.WebmailSessionActive("jti-live", now)
+	liveWeb, err := d.WebmailSessionActive("jti-live", now)
+	mustNoErr(t, "read the live webmail session", err)
 	wantEq(t, "the live webmail session survived (the sweep must not log anyone out)", liveWeb, true)
+	wantRows(t, d.db, "expired webmail rows after the prune", 0, `SELECT COUNT(*) FROM webmail_sessions WHERE jti = ?`, "jti-old")
 
 	an, err := d.PurgeExpiredAdminSessions(now)
 	mustNoErr(t, "prune panel sessions", err)
 	wantEq(t, "panel sessions pruned (only the expired one)", an, int64(1))
-	livePanel, _ := d.AdminSessionActive("admin-live", now)
+	livePanel, err := d.AdminSessionActive("admin-live", now)
+	mustNoErr(t, "read the live panel session", err)
 	wantEq(t, "the live panel session survived", livePanel, true)
+	wantRows(t, d.db, "expired panel rows after the prune", 0, `SELECT COUNT(*) FROM admin_sessions WHERE jti = ?`, "admin-old")
 
 	// A second pass finds nothing left, so the sweep is idempotent and safe to run
 	// from several instances.

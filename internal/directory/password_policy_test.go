@@ -76,6 +76,10 @@ func TestASavedMinimumAppliesToTheNextPassword(t *testing.T) {
 	if _, ok := d.Authenticate("old@acme.test", "abcd"); !ok {
 		t.Error("a password stored under the older minimum no longer signs in")
 	}
+	// Lowering the minimum applies to the next password too.
+	mustNoErr(t, "lower the minimum", d.SetMinPasswordLength(4))
+	_, err := d.SetPassword("new@acme.test", "wxyz")
+	mustNoErr(t, "set a 4-character password under a 4 minimum", err)
 }
 
 // TestTheMinimumIsBounded proves a minimum below 1 or above the cap is refused and
@@ -90,7 +94,8 @@ func TestTheMinimumIsBounded(t *testing.T) {
 			t.Errorf("minimum %d accepted", bad)
 		}
 	}
-	if got, _, _ := d.GetMinPasswordLength(); got != 10 {
-		t.Errorf("stored minimum after the refusals = %d, want 10", got)
-	}
+	got, found, err := d.GetMinPasswordLength()
+	mustNoErr(t, "read the minimum after the refusals", err)
+	wantEq(t, "minimum found after the refusals", found, true)
+	wantEq(t, "stored minimum after the refusals", got, 10)
 }

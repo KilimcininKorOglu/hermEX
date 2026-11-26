@@ -45,6 +45,8 @@ func TestValidateAddressRejectsTraversal(t *testing.T) {
 		"alice",
 		"al ice@example.com",
 		"alice\x00@example.com",
+		"alice@example.com\r\nBcc: x@evil.example",
+		"ali\nce@example.com",
 	}
 	for _, address := range bad {
 		if err := ValidateAddress(address); err == nil {
@@ -160,6 +162,7 @@ func TestCreateUserRefusesEscapingMaildir(t *testing.T) {
 	if _, err := os.Stat(escaped); err == nil {
 		t.Errorf("a directory was created at %q, outside the data root", escaped)
 	}
+	wantRows(t, db, "user rows after the refused create", 0, `SELECT COUNT(*) FROM users`)
 }
 
 // TestCreateDomainRefusesEscapingHomedir is the same property for a domain's
@@ -180,4 +183,5 @@ func TestCreateDomainRefusesEscapingHomedir(t *testing.T) {
 	if _, err := os.Stat(escaped); err == nil {
 		t.Errorf("a directory was created at %q, outside the data root", escaped)
 	}
+	wantRows(t, db, "domain rows after the refused create", 0, `SELECT COUNT(*) FROM domains`)
 }

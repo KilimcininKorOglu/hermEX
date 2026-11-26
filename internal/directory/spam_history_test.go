@@ -84,6 +84,10 @@ func TestSpamHistoryRetention(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(got) != 3 {
-		t.Errorf("retention cap not enforced: %d rows survived, want 3", len(got))
+		t.Fatalf("retention cap not enforced: %d rows survived, want 3", len(got))
+	}
+	// The prune keeps the newest rows, not the first ones written.
+	for i, want := range []string{"s5@x", "s4@x", "s3@x"} {
+		wantEq(t, fmt.Sprintf("surviving verdict %d", i), got[i].MailFrom, want)
 	}
 }
