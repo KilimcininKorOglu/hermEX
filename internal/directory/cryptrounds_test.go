@@ -120,7 +120,7 @@ func TestLoginUpgradesAnOldHash(t *testing.T) {
 	var stored string
 	mustNoErr(t, "read the stored hash",
 		db.QueryRow(`SELECT password FROM users WHERE username = ?`, user).Scan(&stored))
-	wantEq(t, "the stored hash is still below the current factor after a login", needsRehash(stored), false)
+	wantEq(t, "the stored hash needs a re-hash after a login", needsRehash(stored), false)
 
 	// The upgrade must not have changed what the password is.
 	_, ok = d.Authenticate(user, pass)
