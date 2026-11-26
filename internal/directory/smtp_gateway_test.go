@@ -34,8 +34,9 @@ func TestGatewayStoresItsHostAndPort(t *testing.T) {
 	d, _ := freshDirectory(t)
 	mustSetGateway(t, d, GlobalGateway, aGateway())
 
-	got, _, err := d.GetSMTPGateway(GlobalGateway)
+	got, found, err := d.GetSMTPGateway(GlobalGateway)
 	mustNoErr(t, "read the gateway", err)
+	wantEq(t, "the gateway was found", found, true)
 
 	wantEq(t, "the stored host", got.Host, "smtp.provider.example")
 	wantEq(t, "the stored port", got.Port, 587)
@@ -76,8 +77,9 @@ func TestGatewayPasswordUnwrapsForTheMTA(t *testing.T) {
 	d.SetKeySecret([]byte("test-key-secret"))
 	mustSetGateway(t, d, GlobalGateway, aGateway())
 
-	got, _, err := d.GetSMTPGateway(GlobalGateway)
+	got, found, err := d.GetSMTPGateway(GlobalGateway)
 	mustNoErr(t, "read the gateway", err)
+	wantEq(t, "the gateway was found", found, true)
 
 	wantEq(t, "the unwrapped password", got.Password, "s3cret")
 }
@@ -169,6 +171,60 @@ func TestDeleteGatewayRemovesTheOverride(t *testing.T) {
 	mustNoErr(t, "delete the override", err)
 
 	wantEq(t, "the delete removed the override", removed, true)
+	_, found, err := d.GetSMTPGateway("tenant.test")
+	mustNoErr(t, "read the removed override", err)
+	wantEq(t, "the override after the delete", found, false)
+}
+
+// TestDeleteGatewayLeavesTheGlobalOne proves removing a domain's override never
+// takes the global gateway with it.
+func TestDeleteGatewayLeavesTheGlobalOne(t *testing.T) {
+	d, _ := freshDirectory(t)
+	mustSetGateway(t, d, GlobalGateway, aGateway())
+	mustSetGateway(t, d, "tenant.test", aGateway())
+	_, err := d.DeleteSMTPGateway("tenant.test")
+	mustNoErr(t, "delete the override", err)
+	_, found, err := d.GetSMTPGateway(GlobalGateway)
+	mustNoErr(t, "read the global gateway", err)
+	wantEq(t, "the global gateway after the override delete", found, true)
+}
+
+// TestGatewayAcceptsAnIPHost proves an IP literal, the other usable host form, is
+// still stored.
+func TestGatewayAcceptsAnIPHost(t *testing.T) {
+	d, _ := freshDirectory(t)
+	for _, host := range []string{"192.0.2.25", "2001:db8::25"} {
+		g := aGateway()
+		g.Host = host
+		mustSetGateway(t, d, GlobalGateway, g)
+	}
+}
+
+// TestGatewayRefusalKeepsTheStoredOne proves every refused write leaves the stored
+// gateway as it was, so a typo in the form never breaks relaying.
+func TestGatewayRefusalKeepsTheStoredOne(t *testing.T) {
+	d, _ := freshDirectory(t)
+	mustSetGateway(t, d, GlobalGateway, aGateway())
+	for name, mutate := range map[string]func(*SMTPGateway){
+		"unknown encryption":  func(g *SMTPGateway) { g.Encryption = "quantum" },
+		"no host":             func(g *SMTPGateway) { g.Host = "" },
+		"port 70000":          func(g *SMTPGateway) { g.Port = 70000 },
+		"port 0":              func(g *SMTPGateway) { g.Port = 0 },
+		"negative port":       func(g *SMTPGateway) { g.Port = -25 },
+		"host with a newline": func(g *SMTPGateway) { g.Host = "smtp.example\r\nMAIL FROM:<x@evil.example>" },
+		"host with a port":    func(g *SMTPGateway) { g.Host = "smtp.example:25" },
+	} {
+		g := aGateway()
+		g.Host = "changed.example"
+		mutate(&g)
+		if err := d.SetSMTPGateway(GlobalGateway, g); err == nil {
+			t.Errorf("the gateway with %s was accepted", name)
+		}
+		got, found, err := d.GetSMTPGateway(GlobalGateway)
+		mustNoErr(t, "read the gateway after the refusal", err)
+		wantEq(t, "gateway found after the refused "+name, found, true)
+		wantEq(t, "host after the refused "+name, got.Host, "smtp.provider.example")
+	}
 }
 
 // TestDeleteGatewayReportsNothingRemoved proves deleting an absent gateway is not an error

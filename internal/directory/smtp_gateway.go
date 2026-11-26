@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 )
@@ -90,6 +91,9 @@ func (d *SQLDirectory) SetSMTPGateway(domain string, g SMTPGateway) error {
 	}
 	if g.Enabled && g.Host == "" {
 		return errors.New("directory: an enabled gateway needs a host")
+	}
+	if g.Host != "" && net.ParseIP(g.Host) == nil && ValidateDomain(g.Host) != nil {
+		return fmt.Errorf("directory: gateway host %q is neither a host name nor an IP address", g.Host)
 	}
 	stored, err := d.wrapKey(wrapGateway, g.Password)
 	if err != nil {
