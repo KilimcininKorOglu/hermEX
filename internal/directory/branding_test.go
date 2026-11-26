@@ -2,6 +2,7 @@ package directory
 
 import (
 	"database/sql"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -72,4 +73,26 @@ func TestDomainBrandingRoundtrip(t *testing.T) {
 	mustNoErr(t, "clear the branding", d.SetDomainBranding("hermex.test", DomainBranding{}))
 	_, has = branding("read the branding after clearing it")
 	wantEq(t, "the domain still has branding after clearing every field", has, false)
+}
+
+// TestSetDomainBrandingRefusesHostileValues sends a colour carrying CSS and a
+// script logo through the store path, not only Validate: the login page renders
+// what is stored, so a refused save must leave the earlier branding in place.
+func TestSetDomainBrandingRefusesHostileValues(t *testing.T) {
+	d, _ := freshDirectory(t)
+	mustCreateDomain(t, d, t.TempDir(), "hermex.test")
+	kept := DomainBranding{AppName: "Acme Mail", PrimaryColor: "#ff0000"}
+	mustNoErr(t, "set the branding", d.SetDomainBranding("hermex.test", kept))
+	for name, b := range map[string]DomainBranding{
+		"colour with CSS": {PrimaryColor: "red;}</style><script>x</script>"},
+		"script logo":     {LogoURL: "javascript:alert(1)"},
+	} {
+		if err := d.SetDomainBranding("hermex.test", b); !errors.Is(err, ErrInvalidBranding) {
+			t.Errorf("%s: %v, want ErrInvalidBranding", name, err)
+		}
+	}
+	got, has, err := d.GetDomainBranding("hermex.test")
+	mustNoErr(t, "read the branding back", err)
+	wantEq(t, "the domain keeps its branding", has, true)
+	wantEq(t, "the branding after refused saves", got, kept)
 }
