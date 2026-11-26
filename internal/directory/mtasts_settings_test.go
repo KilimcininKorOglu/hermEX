@@ -53,7 +53,9 @@ func TestMTASTSSettingsRefuseAnOutOfRangeMaxAge(t *testing.T) {
 			t.Errorf("max_age %d was accepted", bad)
 		}
 	}
-	if got, _, _ := d.GetMTASTSSettings(); got != want {
+	got, _, err := d.GetMTASTSSettings()
+	mustNoErr(t, "read the settings after the refusals", err)
+	if got != want {
 		t.Errorf("after refused writes = %+v, want %+v", got, want)
 	}
 }
@@ -79,7 +81,8 @@ func TestMTASTSSettingsRoundTripAndUpsert(t *testing.T) {
 	if err := d.SetMTASTSSettings(MTASTSSettings{Enabled: false, Mode: "testing", MaxAge: 86400}); err != nil {
 		t.Fatal(err)
 	}
-	got, _, _ = d.GetMTASTSSettings()
+	got, _, err = d.GetMTASTSSettings()
+	mustNoErr(t, "read the settings after the re-save", err)
 	if got.Enabled || got.Mode != "testing" {
 		t.Errorf("after re-save = %+v, want disabled testing mode", got)
 	}
