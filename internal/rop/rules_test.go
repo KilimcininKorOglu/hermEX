@@ -91,7 +91,7 @@ func readRuleRows(t *testing.T, sess *Session, folderH uint32) map[int64]mapi.Pr
 	tableH := h[1]
 
 	cols := []mapi.PropTag{mapi.PrRuleID, mapi.PrRuleName, mapi.PrRuleState, mapi.PrRuleSequence}
-	sess.Dispatch(buildSetColumns(0, cols), []uint32{tableH})
+	ropOK(t, dispatchOn(sess, buildSetColumns(0, cols), tableH), ropSetColumns, "SetColumns")
 	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 64), []uint32{tableH})
 
 	_, rows := queryRowsResponse(t, qr, cols)

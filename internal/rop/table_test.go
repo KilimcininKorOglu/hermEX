@@ -180,7 +180,7 @@ func TestQueryRowsContents(t *testing.T) {
 	tableH := h[1]
 
 	cols := []mapi.PropTag{mapi.PrSubject}
-	sess.Dispatch(buildSetColumns(0, cols), []uint32{tableH})
+	ropOK(t, dispatchOn(sess, buildSetColumns(0, cols), tableH), ropSetColumns, "SetColumns")
 	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
 
 	seekPos, rows := queryRowsResponse(t, qr, cols)
@@ -225,7 +225,7 @@ func TestQueryRowsHierarchy(t *testing.T) {
 	tableH := h[1]
 
 	cols := []mapi.PropTag{mapi.PrDisplayName}
-	sess.Dispatch(buildSetColumns(0, cols), []uint32{tableH})
+	ropOK(t, dispatchOn(sess, buildSetColumns(0, cols), tableH), ropSetColumns, "SetColumns")
 	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 64), []uint32{tableH})
 
 	_, rows := queryRowsResponse(t, qr, cols)
