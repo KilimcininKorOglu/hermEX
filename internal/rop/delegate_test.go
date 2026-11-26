@@ -475,6 +475,30 @@ func TestDelegateWritesDeniedForReviewer(t *testing.T) {
 			t.Errorf("%s ec = %#x, want AccessDenied (read-only delegate)", w.name, ec)
 		}
 	}
+	assertInboxUntouched(t, sess.get(logonH).store, msgID, "X")
+}
+
+// assertInboxUntouched checks that the refused writes left the Inbox as seeded:
+// the one message still there, its subject unchanged, and no subfolder created.
+func assertInboxUntouched(t *testing.T, st *objectstore.Store, msgID int64, subject string) {
+	t.Helper()
+	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 1 {
+		t.Errorf("Inbox holds %d messages after refused writes, want 1", len(msgs))
+	}
+	props, err := st.GetMessageProperties(msgID, mapi.PrSubject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := props.Get(mapi.PrSubject); v != subject {
+		t.Errorf("subject after refused writes = %v, want %q", v, subject)
+	}
+	if kids := childFolderSet(t, st, int64(mapi.PrivateFIDInbox)); len(kids) != 0 {
+		t.Errorf("refused writes left %d subfolders under the Inbox", len(kids))
+	}
 }
 
 // TestDelegateEditorWritesAndSendBoundary proves the gates are rights-aware, not a
