@@ -39,7 +39,7 @@ func TestRespondDeclineAfterAccept(t *testing.T) {
 	if _, err := Respond(st, nil, nil, "alice@hermex.test", reqID, ResponseAccepted, false); err != nil {
 		t.Fatal(err)
 	}
-	if cal, _ := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar)); len(cal) != 1 {
+	if cal := calendarItems(t, st); len(cal) != 1 {
 		t.Fatalf("after accept: calendar = %d items, want 1 (the appointment)", len(cal))
 	}
 
@@ -47,7 +47,7 @@ func TestRespondDeclineAfterAccept(t *testing.T) {
 	if _, err := Respond(st, nil, nil, "alice@hermex.test", reqID, ResponseDeclined, false); err != nil {
 		t.Fatal(err)
 	}
-	if cal, _ := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar)); len(cal) != 0 {
+	if cal := calendarItems(t, st); len(cal) != 0 {
 		t.Errorf("after decline: calendar = %d items, want 0 (the appointment was removed)", len(cal))
 	}
 }
@@ -82,7 +82,7 @@ func TestRespondStripsInboundCruft(t *testing.T) {
 	if _, err := Respond(st, nil, nil, "alice@hermex.test", reqID, ResponseAccepted, false); err != nil {
 		t.Fatal(err)
 	}
-	cal, _ := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
+	cal := calendarItems(t, st)
 	if len(cal) != 1 {
 		t.Fatalf("calendar = %d items, want 1 (the appointment)", len(cal))
 	}

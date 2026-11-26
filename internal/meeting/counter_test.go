@@ -166,7 +166,7 @@ func TestResponseFindsAMeetingByATerminatedForeignID(t *testing.T) {
 // the tentative response it is.
 func TestCounterWithoutPartstatIsTentative(t *testing.T) {
 	st, tags, recipID := organizerWithEvent(t, "counter-2", "bob@hermex.test")
-	if handled, _ := ProcessReply(st, nil, "bob@hermex.test", deliverCounter(t, st, "counter-2", "bob@hermex.test", "")); !handled {
+	if !processReply(t, st, "bob@hermex.test", deliverCounter(t, st, "counter-2", "bob@hermex.test", "")) {
 		t.Fatal("a COUNTER without PARTSTAT was not processed")
 	}
 	if got := responseOf(t, st, tags, recipID); got != ResponseTentative {
@@ -182,7 +182,7 @@ func TestCounterWithoutPartstatIsTentative(t *testing.T) {
 func TestCounterFromAnotherSenderIsIgnored(t *testing.T) {
 	st, _, recipID := organizerWithEvent(t, "counter-3", "bob@hermex.test")
 	msgID := deliverCounter(t, st, "counter-3", "bob@hermex.test", "TENTATIVE")
-	if handled, _ := ProcessReply(st, nil, "mallory@hermex.test", msgID); handled {
+	if processReply(t, st, "mallory@hermex.test", msgID) {
 		t.Error("a COUNTER from another sender was processed")
 	}
 	if got := readProposalState(t, st, recipID); got != (proposalState{}) {

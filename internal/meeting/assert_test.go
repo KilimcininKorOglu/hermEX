@@ -1,6 +1,11 @@
 package meeting
 
-import "testing"
+import (
+	"testing"
+
+	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
+)
 
 // This file is the package's assertion vocabulary. A test states one fact per call,
 // so a failure names the fact that broke rather than the condition that evaluated.
@@ -22,6 +27,23 @@ func wantEq[T comparable](t *testing.T, got, want T, what string) {
 }
 
 // wantTrue fails the test unless the fact holds.
+// processReply runs ProcessReply and fails the test on an error, so a refused
+// reply is told apart from a failed tracking write: a refusal answers (false, nil).
+func processReply(t *testing.T, st *objectstore.Store, sender string, messageID int64) bool {
+	t.Helper()
+	handled, err := ProcessReply(st, nil, sender, messageID)
+	mustNoErr(t, err, "process the reply")
+	return handled
+}
+
+// calendarItems lists the Calendar folder and fails the test when the read fails.
+func calendarItems(t *testing.T, st *objectstore.Store) []objectstore.FolderObject {
+	t.Helper()
+	cal, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
+	mustNoErr(t, err, "list the calendar")
+	return cal
+}
+
 func wantTrue(t *testing.T, got bool, what string) {
 	t.Helper()
 	if !got {
