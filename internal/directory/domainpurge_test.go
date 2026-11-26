@@ -137,7 +137,8 @@ func TestPurgeDomainReportsFilesItCouldNotRemove(t *testing.T) {
 	d, db := freshDirectory(t)
 	root := t.TempDir()
 	id, _, maildir := seedDomainOnDisk(t, d, root, "stuck.test")
-	_, err := db.Exec(`UPDATE users SET maildir = ? WHERE username = ?`, maildir+"/.", "u@stuck.test")
+	unremovable := maildir + "/."
+	_, err := db.Exec(`UPDATE users SET maildir = ? WHERE username = ?`, unremovable, "u@stuck.test")
 	mustNoErr(t, "point the mailbox at an unremovable path", err)
 
 	ok, err := d.PurgeDomain(id, true)
