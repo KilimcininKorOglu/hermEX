@@ -150,6 +150,23 @@ func TestRoomsAreScopedToTheCaller(t *testing.T) {
 	}
 }
 
+// TestScopedListsReportAFailedCallerLookup proves a directory that cannot be read
+// answers with an error, not with an empty address book: an empty list reads as
+// "nobody here" and hides the outage from every surface that shows it.
+func TestScopedListsReportAFailedCallerLookup(t *testing.T) {
+	d := scopedDirectory(t)
+	mustNoErr(t, "close the database", d.db.Close())
+	const caller = "user@sales.acme.test"
+	_, err := d.SearchGAL(caller, "", 0, 0)
+	wantErr(t, "SearchGAL on a closed database", err)
+	_, err = d.CountGAL(caller, "", 0)
+	wantErr(t, "CountGAL on a closed database", err)
+	_, err = d.ListRooms(caller)
+	wantErr(t, "ListRooms on a closed database", err)
+	_, err = d.SharedMailboxes(caller)
+	wantErr(t, "SharedMailboxes on a closed database", err)
+}
+
 // TestListAllRoomsStaysUnscoped proves the operator view is deliberately not
 // narrowed: the admin panel manages resources across domains and is gated by the
 // administrator's own role, not by an address-book scope.

@@ -418,9 +418,9 @@ SELECT u.username, u.maildir
 // has been granted access to. The username column is the mailbox's e-mail
 // address.
 func (d *SQLDirectory) SharedMailboxes(caller string) ([]SharedMailbox, error) {
-	scope, ok := d.galScope(caller)
-	if !ok {
-		return nil, nil
+	scope, ok, err := d.galScope(caller)
+	if err != nil || !ok {
+		return nil, err
 	}
 	const q = `
 SELECT u.username, u.maildir
@@ -463,9 +463,9 @@ func (d *SQLDirectory) SearchGAL(caller, query string, limit int, hide uint32) (
 	if limit <= 0 {
 		limit = 20
 	}
-	scope, ok := d.galScope(caller)
-	if !ok {
-		return nil, nil
+	scope, ok, err := d.galScope(caller)
+	if err != nil || !ok {
+		return nil, err
 	}
 	const prDisplayName = 0x3001001F // PR_DISPLAY_NAME (PtUnicode)
 	// The caller's hide bits are applied on users.hide_mask before the LIMIT, so
@@ -493,27 +493,37 @@ SELECT u.username, u.display_type, u.maildir, dn.propval_str, hg.propval_str, hb
 	defer rows.Close()
 	var out []GALEntry
 	for rows.Next() {
-		var addr, maildir string
-		var displayType int
-		var name, hideMask, hideBool, capStr, ownerStr sql.NullString
-		if err := rows.Scan(&addr, &displayType, &maildir, &name, &hideMask, &hideBool, &capStr, &ownerStr); err != nil {
+		e, err := d.scanGALEntry(rows)
+		if err != nil {
 			return nil, err
 		}
-		display := addr
-		if name.Valid && name.String != "" {
-			display = name.String
-		}
-		var storePath string
-		if maildir != "" {
-			storePath = d.storePath(maildir)
-		}
-		capacity := 0
-		if capStr.Valid {
-			capacity, _ = strconv.Atoi(capStr.String)
-		}
-		out = append(out, GALEntry{DisplayName: display, Address: addr, DisplayType: displayType, HiddenFrom: hideMaskFromProps(hideMask, hideBool), StorePath: storePath, Capacity: capacity, Owner: ownerStr.String})
+		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// scanGALEntry reads one SearchGAL row. A display name falls back to the
+// address, and a mailbox path is resolved only for an object that has one.
+func (d *SQLDirectory) scanGALEntry(rows *sql.Rows) (GALEntry, error) {
+	var addr, maildir string
+	var displayType int
+	var name, hideMask, hideBool, capStr, ownerStr sql.NullString
+	if err := rows.Scan(&addr, &displayType, &maildir, &name, &hideMask, &hideBool, &capStr, &ownerStr); err != nil {
+		return GALEntry{}, err
+	}
+	display := addr
+	if name.Valid && name.String != "" {
+		display = name.String
+	}
+	var storePath string
+	if maildir != "" {
+		storePath = d.storePath(maildir)
+	}
+	capacity := 0
+	if capStr.Valid {
+		capacity, _ = strconv.Atoi(capStr.String)
+	}
+	return GALEntry{DisplayName: display, Address: addr, DisplayType: displayType, HiddenFrom: hideMaskFromProps(hideMask, hideBool), StorePath: storePath, Capacity: capacity, Owner: ownerStr.String}, nil
 }
 
 // galMatchWhere selects the address-book objects a GAL query matches: the object
@@ -545,13 +555,13 @@ func galMatchArgs(query string, hide uint32, scope []any) []any {
 // CountGAL implements GALCounter: how many address-book objects SearchGAL would
 // return for the same caller, query and hide bits with no limit.
 func (d *SQLDirectory) CountGAL(caller, query string, hide uint32) (int, error) {
-	scope, ok := d.galScope(caller)
-	if !ok {
-		return 0, nil
+	scope, ok, err := d.galScope(caller)
+	if err != nil || !ok {
+		return 0, err
 	}
 	const q = `SELECT COUNT(*) FROM users u JOIN domains d ON u.domain_id = d.id` + galMatchWhere
 	var n int
-	err := d.db.QueryRow(q, galMatchArgs(query, hide, scope)...).Scan(&n)
+	err = d.db.QueryRow(q, galMatchArgs(query, hide, scope)...).Scan(&n)
 	return n, err
 }
 

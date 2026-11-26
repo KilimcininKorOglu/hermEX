@@ -23,16 +23,19 @@ const galScopePredicate = ` AND ((? <> 0 AND d.org_id = ?) OR (? = 0 AND u.domai
 // has to fail in: a surface that forgets to pass its authenticated user shows an
 // empty address book, which is visible and reported, instead of quietly serving
 // the whole deployment again.
-func (d *SQLDirectory) galScope(caller string) (args []any, ok bool) {
+//
+// A failed lookup is returned as an error, never as ok=false: an empty list
+// would hide the outage behind an answer that reads as "nobody here".
+func (d *SQLDirectory) galScope(caller string) (args []any, ok bool, err error) {
 	caller = strings.ToLower(strings.TrimSpace(caller))
 	if caller == "" {
-		return nil, false
+		return nil, false, nil
 	}
 	row, found, err := d.resolve(caller)
 	if err != nil || !found {
-		return nil, false
+		return nil, false, err
 	}
-	return []any{row.orgID, row.orgID, row.orgID, row.domainID}, true
+	return []any{row.orgID, row.orgID, row.orgID, row.domainID}, true, nil
 }
 
 // SameScope implements ScopeChecker with the rule galScopePredicate encodes: two

@@ -41,9 +41,9 @@ SELECT u.username, u.display_type, COALESCE(dn.propval_str, ''), COALESCE(cap.pr
 // SearchGAL is: without that, an address the caller cannot find in the GAL would
 // still be listed here.
 func (d *SQLDirectory) ListRooms(caller string) ([]GALEntry, error) {
-	scope, ok := d.galScope(caller)
-	if !ok {
-		return nil, nil
+	scope, ok, err := d.galScope(caller)
+	if err != nil || !ok {
+		return nil, err
 	}
 	args := append([]any{prDisplayName, prRoomCapacity, dtRoom, dtEquipment, afUserMask, afUserNormal, afDomainMask}, scope...)
 	return d.scanRooms(roomQuery(galScopePredicate), args...)
