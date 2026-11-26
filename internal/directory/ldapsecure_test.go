@@ -25,6 +25,12 @@ func TestEncryptedTransport(t *testing.T) {
 		{URI: "ldap://dc.example.com:389"},
 		{URI: "dc.example.com:389"},
 		{URI: "ldap://dc.example.com"},
+		// Spellings that only resemble the TLS scheme.
+		{URI: "ldapsx://dc.example.com:636"},
+		{URI: "x-ldaps://dc.example.com:636"},
+		{URI: "ldap://ldaps://dc.example.com"},
+		{URI: "ldaps:/dc.example.com"},
+		{URI: ""},
 	}
 	for _, cfg := range plain {
 		if cfg.EncryptedTransport() {
