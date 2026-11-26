@@ -76,6 +76,17 @@ func TestCreateContactDomainMustExist(t *testing.T) {
 	if _, err := d.CreateContact("x@partner.example", "X", "nope.test"); err == nil {
 		t.Fatal("CreateContact under a nonexistent domain should error")
 	}
+	wantNoContactRow(t, d, "x@partner.example")
+}
+
+// wantNoContactRow requires that no contact row exists for addr after a refusal.
+func wantNoContactRow(t *testing.T, d *SQLDirectory, addr string) {
+	t.Helper()
+	_, _, found, err := d.contactRowID(strings.ToLower(strings.TrimSpace(addr)))
+	mustNoErr(t, "look up the contact row of "+addr, err)
+	if found {
+		t.Errorf("a contact row exists for %q", addr)
+	}
 }
 
 // TestCreateContactRefusesAnUnroutableAddress proves a contact address that no
@@ -87,9 +98,7 @@ func TestCreateContactRefusesAnUnroutableAddress(t *testing.T) {
 		if _, err := d.CreateContact(addr, "X", "hermex.test"); err == nil {
 			t.Errorf("CreateContact(%q) succeeded, want it refused", addr)
 		}
-		if _, _, found, _ := d.contactRowID(strings.ToLower(strings.TrimSpace(addr))); found {
-			t.Errorf("a contact row exists for %q", addr)
-		}
+		wantNoContactRow(t, d, addr)
 	}
 	if _, err := d.UpsertLDAPContact("john@", []byte{1}, "X", "hermex.test"); err == nil {
 		t.Error("the LDAP sync created a contact for john@, want it refused")
@@ -146,7 +155,8 @@ func TestDeleteContact(t *testing.T) {
 	mustNoErr(t, "delete the contact", err)
 	wantEq(t, "the delete removed one", removed, true)
 
-	entries, _ := d.SearchGAL("alice@hermex.test", "john@partner.example", 20, 0)
+	entries, err := d.SearchGAL("alice@hermex.test", "john@partner.example", 20, 0)
+	mustNoErr(t, "search the GAL", err)
 	for _, e := range entries {
 		if e.Address == "john@partner.example" {
 			t.Errorf("deleted contact still in GAL: %+v", e)
