@@ -274,33 +274,45 @@ func TestSyncCollectorTransferStateRoundTrip(t *testing.T) {
 	handles = []uint32{logonH, folderH, collectorH, 0xFFFFFFFF}
 	h, _ = mustDispatchOK(t, sess, buildGetTransferState(2, 3), handles, ropSyncGetTransferState)
 	handles = []uint32{logonH, folderH, collectorH, h[3]}
-	items := drainSyncDownload(t, sess, handles, 3)
+	got := transferStateSet(t, dir, drainSyncDownload(t, sess, handles, 3), cnsetSeen)
+	if !got.Contains(mapi.MakeEIDEx(1, 10)) {
+		t.Error("round-tripped seen set lost a change number inside [1,20]")
+	}
+	if got.Contains(mapi.MakeEIDEx(1, 21)) {
+		t.Error("round-tripped seen set gained a change number outside [1,20]")
+	}
+}
 
-	var seenBytes []byte
+// transferStateSet finds the idset property tag in a drained transfer state and
+// decodes it against the mailbox's replica map.
+func transferStateSet(t *testing.T, dir string, items []ics.Item, tag uint32) *ics.IDSet {
+	t.Helper()
+	var raw []byte
 	for _, it := range items {
-		if !it.IsMarker && it.Prop != nil && it.Prop.Tag == mapi.PropTag(cnsetSeen) {
-			seenBytes, _ = it.Prop.Value.([]byte)
+		if !it.IsMarker && it.Prop != nil && it.Prop.Tag == mapi.PropTag(tag) {
+			raw, _ = it.Prop.Value.([]byte)
 		}
 	}
-	if seenBytes == nil {
-		t.Fatal("transfer state missing the seen change-number set")
+	if raw == nil {
+		t.Fatalf("transfer state missing property %#x", tag)
 	}
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	m, _ := st.ReplicaMapper()
+	m, err := st.ReplicaMapper()
+	if err != nil {
+		t.Fatal(err)
+	}
 	got := ics.NewIDSet(ics.FormGUIDPacked, m)
-	if err := got.Deserialize(seenBytes); err != nil {
+	if err := got.Deserialize(raw); err != nil {
 		t.Fatal(err)
 	}
 	if !got.Convert() {
-		t.Fatal("cannot resolve the round-tripped seen set")
+		t.Fatal("cannot resolve the round-tripped idset")
 	}
-	if !got.Contains(mapi.MakeEIDEx(1, 10)) {
-		t.Error("round-tripped seen set lost a change number inside [1,20]")
-	}
+	return got
 }
 
 // TestSyncCollectorImportReadState opens a content collector and marks a seeded
@@ -549,6 +561,13 @@ func TestSyncUploadBatchAlignment(t *testing.T) {
 		if ec := mustU32(t, p, "ec"); ec != ecSuccess {
 			t.Fatalf("ROP %#x ec = %#x", want, ec)
 		}
+	}
+	// Both imports took effect, so each parser read its own fields.
+	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), readID); f&objectstore.FlagSeen == 0 {
+		t.Errorf("batched read-state import left flags=%#x, want FlagSeen", f)
+	}
+	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), delID); f != -1 {
+		t.Errorf("batched delete left the message in the Inbox (flags=%#x)", f)
 	}
 }
 
