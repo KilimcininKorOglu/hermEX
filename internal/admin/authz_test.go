@@ -197,6 +197,9 @@ func TestDomainAdminCannotGrantRoles(t *testing.T) {
 	if s := statusOf(authedGET(t, ts, "/admin/users/u@acme.test/roles", session)); s != http.StatusForbidden {
 		t.Errorf("domain admin list user roles = %d, want 403", s)
 	}
+	if len(d.namedRoles) != 0 || d.grantedRole != "" {
+		t.Errorf("a refused caller wrote roles: named %v, granted %q", d.namedRoles, d.grantedRole)
+	}
 }
 
 // TestDomainPurgeCapability proves the destructive domain-purge endpoint honors

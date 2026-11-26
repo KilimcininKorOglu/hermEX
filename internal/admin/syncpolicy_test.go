@@ -222,7 +222,8 @@ func TestUISaveSyncPolicy(t *testing.T) {
 // a value the policy refuses. They answered "Invalid value." alone, which left the
 // operator to find the field among forty.
 func TestSyncPolicyFormNamesTheRefusedField(t *testing.T) {
-	ts := adminServerStore(t, folderUserDir(), &fakeStore{})
+	d, store := folderUserDir(), &fakeStore{}
+	ts := adminServerStore(t, d, store)
 	session, csrf := loginCookies(t, ts)
 	for _, path := range []string{
 		"/admin/ui/syncpolicy",
@@ -234,6 +235,11 @@ func TestSyncPolicyFormNamesTheRefusedField(t *testing.T) {
 			body := wantBody(t, resp, http.StatusOK, path)
 			wantContains(t, body, "MinDevicePasswordLength", path+" "+v+": the refused field is named")
 		}
+	}
+	// A refused form stores no policy at any of the three levels.
+	if len(d.defaultSyncPolicy) != 0 || d.setDomainSyncPolicyDomain != "" || len(store.syncPolicy) != 0 {
+		t.Errorf("a refused form stored a policy: default %+v, domain %q, user %v",
+			d.defaultSyncPolicy, d.setDomainSyncPolicyDomain, store.syncPolicy)
 	}
 }
 
