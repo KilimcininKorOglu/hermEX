@@ -104,16 +104,43 @@ func TestLDAPConnectionCRUD(t *testing.T) {
 // TestLDAPConnectionRefusesPlaintext proves a connection that would bind in the
 // clear is refused, on create and on update.
 func TestLDAPConnectionRefusesPlaintext(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d, db := freshDirectory(t)
 	c := LDAPConnection{Name: "clear", URI: "ldap://ad.test"}
 	_, err := d.CreateLDAPConnection(c)
 	wantEq(t, "a plaintext create is refused", errors.Is(err, ErrInsecureLDAP), true)
+	wantRows(t, db, "connections stored by the refused create", 0, `SELECT COUNT(*) FROM ldap_connections`)
 	c.StartTLS = true
 	id, err := d.CreateLDAPConnection(c)
 	mustNoErr(t, "create with StartTLS", err)
 	c.ID, c.StartTLS = id, false
 	_, err = d.UpdateLDAPConnection(c)
 	wantEq(t, "a plaintext update is refused", errors.Is(err, ErrInsecureLDAP), true)
+	got, _, err := d.GetLDAPConnection(id)
+	mustNoErr(t, "read the connection after the refused update", err)
+	wantEq(t, "StartTLS after the refused update", got.StartTLS, true)
+}
+
+// TestLDAPConnectionForgedIDTouchesNothing proves an update or delete naming a
+// connection that does not exist (the id comes from the panel form) reports not
+// found and leaves the existing connection as it was.
+func TestLDAPConnectionForgedIDTouchesNothing(t *testing.T) {
+	d, _ := freshDirectory(t)
+	keep := LDAPConnection{Name: "keep", URI: "ldaps://keep.test", BaseDN: "dc=keep"}
+	id, err := d.CreateLDAPConnection(keep)
+	mustNoErr(t, "create the connection", err)
+	keep.ID = id
+
+	found, err := d.UpdateLDAPConnection(LDAPConnection{ID: id + 999, Name: "keep", URI: "ldaps://evil.test"})
+	mustNoErr(t, "update a missing connection", err)
+	wantEq(t, "the update found a missing connection", found, false)
+	deleted, err := d.DeleteLDAPConnection(id + 999)
+	mustNoErr(t, "delete a missing connection", err)
+	wantEq(t, "the delete found a missing connection", deleted, false)
+
+	got, ok, err := d.GetLDAPConnection(id)
+	mustNoErr(t, "read the kept connection", err)
+	wantEq(t, "the kept connection exists", ok, true)
+	wantEq(t, "the kept connection", got, keep)
 }
 
 // TestLDAPDomainBindsOnce proves a domain binds to one connection only, an unknown
