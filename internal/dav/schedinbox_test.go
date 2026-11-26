@@ -1,7 +1,6 @@
 package dav
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -25,9 +24,7 @@ func bobDav(t *testing.T, ts *httptest.Server, method, path, depth, body string)
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	return resp, string(out)
+	return resp, readBody(t, resp)
 }
 
 // TestScheduleInboxReceiving covers the pure-CalDAV receiving path (RFC 6638 §4.1):

@@ -23,9 +23,19 @@ func doFull(t *testing.T, ts *httptest.Server, method, path, body string, header
 	if err != nil {
 		t.Fatal(err)
 	}
-	rb, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	return resp, string(rb)
+	return resp, readBody(t, resp)
+}
+
+// readBody reads and closes a response body, failing the test when the read fails,
+// so a cut-off body is never asserted on as if it were the whole answer.
+func readBody(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read the response body: %v", err)
+	}
+	return string(b)
 }
 
 const adaVCard = "BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Ada Lovelace\r\nEMAIL:ada@analytical.test\r\nUID:ada-1\r\nEND:VCARD\r\n"

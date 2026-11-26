@@ -1,7 +1,6 @@
 package dav
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -68,9 +67,7 @@ func do(t *testing.T, ts *httptest.Server, method, path, depth string, auth bool
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	return resp, string(body)
+	return resp, readBody(t, resp)
 }
 
 // TestRequiresAuth confirms an unauthenticated request is challenged, not served.
@@ -109,9 +106,8 @@ func TestRefusesForgedCredentials(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusUnauthorized || strings.Contains(string(body), ".vcf") {
+		body := readBody(t, resp)
+		if resp.StatusCode != http.StatusUnauthorized || strings.Contains(body, ".vcf") {
 			t.Errorf("%s: status %d, want 401 with no contact served", name, resp.StatusCode)
 		}
 	}

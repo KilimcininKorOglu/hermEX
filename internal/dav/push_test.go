@@ -58,10 +58,13 @@ func TestPushPollWakesOnChange(t *testing.T) {
 	// fire-and-forget, so a pre-connection event would be missed).
 	time.Sleep(400 * time.Millisecond)
 
+	req, err := http.NewRequest("GET", ts.URL+"/dav/push", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.SetBasicAuth(testUser, testPass)
 	done := make(chan int, 1)
 	go func() {
-		req, _ := http.NewRequest("GET", ts.URL+"/dav/push", nil)
-		req.SetBasicAuth(testUser, testPass)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			done <- -1

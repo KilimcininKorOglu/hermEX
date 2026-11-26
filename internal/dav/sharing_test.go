@@ -166,9 +166,7 @@ func authBody(t *testing.T, ts *httptest.Server, method, path, user, depth strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	return string(b)
+	return readBody(t, resp)
 }
 
 // TestSharedMailboxInHomeSet confirms a shared mailbox the caller is delegated into
