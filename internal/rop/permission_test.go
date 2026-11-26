@@ -65,10 +65,15 @@ func readPermRows(t *testing.T, sess *Session, folderH uint32, includeFreeBusy b
 	tableH := h[1]
 
 	cols := []mapi.PropTag{mapi.PrMemberID, mapi.PrMemberName, mapi.PrMemberRights}
-	sess.Dispatch(buildSetColumns(0, cols), []uint32{tableH})
+	ropOK(t, dispatchOn(sess, buildSetColumns(0, cols), tableH), ropSetColumns, "SetColumns(permissions)")
 	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 64), []uint32{tableH})
 
 	_, rows := queryRowsResponse(t, qr, cols)
+	// Every folder carries its default and anonymous rows ([MS-OXCPERM] 2.2.4), so
+	// an empty table is a failed read, not a folder without members.
+	if len(rows) == 0 {
+		t.Fatal("the permissions table returned no rows")
+	}
 	out := make(map[int64]mapi.PropertyValues, len(rows))
 	for _, r := range rows {
 		id, _ := r.Get(mapi.PrMemberID)
