@@ -1,6 +1,7 @@
 package oxcical
 
 import (
+	"bytes"
 	"regexp"
 	"testing"
 
@@ -20,7 +21,9 @@ func exportedUID(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := uidLine.FindSubmatch(raw)
+	// A UID longer than 75 octets is folded (RFC 5545 section 3.1); unfold it so
+	// the whole value is compared, not its first line.
+	m := uidLine.FindSubmatch(bytes.ReplaceAll(raw, []byte("\r\n "), nil))
 	if m == nil {
 		t.Fatalf("no UID line:\n%s", raw)
 	}
