@@ -258,13 +258,21 @@ func TestTheCredentialListIsBounded(t *testing.T) {
 	if _, err := d.CreateAppPassword("u@acme.test", "one too many"); !errors.Is(err, ErrTooManyAppPasswords) {
 		t.Errorf("mint past the cap = %v, want ErrTooManyAppPasswords", err)
 	}
+	list, err := d.ListAppPasswords("u@acme.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != MaxAppPasswords {
+		t.Errorf("credentials after the refused mint = %d, want %d", len(list), MaxAppPasswords)
+	}
 }
 
-// TestSQLDirectorySatisfiesAppPasswordStore is what the callers type-assert to.
-func TestSQLDirectorySatisfiesAppPasswordStore(t *testing.T) {
-	var _ AppPasswordStore = (*SQLDirectory)(nil)
-	var _ ClientAuthenticator = (*SQLDirectory)(nil)
-}
+// The callers type-assert to these interfaces; the compiler checks that
+// SQLDirectory still satisfies them.
+var (
+	_ AppPasswordStore    = (*SQLDirectory)(nil)
+	_ ClientAuthenticator = (*SQLDirectory)(nil)
+)
 
 // TestAuthenticateClientFallsBackWithoutTheCapability keeps a directory that has
 // no app passwords working exactly as it did, which is what every test double in
