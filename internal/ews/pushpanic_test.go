@@ -32,7 +32,12 @@ func TestAPanickingPushPollKeepsTheWorker(t *testing.T) {
 
 	got := make(chan string, 4)
 	cb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			// A handler goroutine cannot fail the test; hand the reader a body no
+			// assertion accepts.
+			body = []byte("callback body read failed: " + err.Error())
+		}
 		got <- string(body)
 		_, _ = io.WriteString(w, notificationResult("OK"))
 	}))

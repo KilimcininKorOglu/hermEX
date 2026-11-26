@@ -65,7 +65,10 @@ func TestRequestsNeverCreateAMissingMailbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, _ := io.ReadAll(resp.Body)
+	out, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
 	resp.Body.Close()
 	if strings.Contains(string(out), "NoError") {
 		t.Errorf("GetUserOofSettings on a missing mailbox succeeded:\n%s", out)
@@ -97,7 +100,10 @@ func soapPost(t *testing.T, ts *httptest.Server, body string, auth bool) (*http.
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, _ := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
 	resp.Body.Close()
 	return resp, string(data)
 }
@@ -220,7 +226,10 @@ func TestAutodiscover(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
 	body := string(data)
 	if !strings.Contains(body, "https://mail.hermex.test/EWS/Exchange.asmx") {
 		t.Errorf("autodiscover missing EwsUrl, got: %s", body)

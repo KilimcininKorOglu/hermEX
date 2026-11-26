@@ -36,7 +36,10 @@ func adSoapPostHost(t *testing.T, ts *httptest.Server, host, body string) (*http
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, _ := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
 	resp.Body.Close()
 	return resp, string(data)
 }
