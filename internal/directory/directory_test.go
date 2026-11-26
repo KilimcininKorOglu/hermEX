@@ -115,13 +115,13 @@ func TestStaticAccountsSearchGAL(t *testing.T) {
 	}
 
 	// Matching is case-insensitive.
-	if got, _ := a.SearchGAL("alice@hermex.test", "BOB", 0, 0); len(got) != 1 || got[0].Address != "bob@hermex.test" {
+	if got := mustStaticGAL(t, a, "alice@hermex.test", "BOB", 0); len(got) != 1 || got[0].Address != "bob@hermex.test" {
 		t.Errorf("SearchGAL(%q) = %v, want [bob@hermex.test]", "BOB", got)
 	}
 
 	// A domain-wide substring returns one entry per distinct mailbox, ordered by
 	// address; the empty-mailbox account is excluded.
-	all, _ := a.SearchGAL("alice@hermex.test", "@hermex.test", 0, 0)
+	all := mustStaticGAL(t, a, "alice@hermex.test", "@hermex.test", 0)
 	if len(all) != 3 {
 		t.Fatalf("SearchGAL(domain) = %v, want 3 distinct mailboxes", all)
 	}
@@ -130,7 +130,31 @@ func TestStaticAccountsSearchGAL(t *testing.T) {
 	}
 
 	// The limit caps the result count.
-	if got, _ := a.SearchGAL("alice@hermex.test", "@hermex.test", 2, 0); len(got) != 2 {
-		t.Errorf("SearchGAL(domain, limit 2) returned %d entries, want 2", len(got))
+	wantEq(t, "entries under limit 2", len(mustStaticGAL(t, a, "alice@hermex.test", "@hermex.test", 2)), 2)
+}
+
+// mustStaticGAL searches the static GAL as caller.
+func mustStaticGAL(t *testing.T, a StaticAccounts, caller, query string, limit int) []GALEntry {
+	t.Helper()
+	got, err := a.SearchGAL(caller, query, limit, 0)
+	mustNoErr(t, "search the static GAL", err)
+	return got
+}
+
+// TestStaticAccountsFailClosedForAnUnknownCaller holds the static directory to
+// the GAL contract every surface relies on: an empty or unresolvable caller gets
+// no address book and no shared mailboxes.
+func TestStaticAccountsFailClosedForAnUnknownCaller(t *testing.T) {
+	a := StaticAccounts{
+		"alice@hermex.test": {Password: "x", MailboxPath: "/m/alice"},
+		"team@hermex.test":  {Password: "x", MailboxPath: "/m/team", Shared: true},
 	}
+	for _, caller := range []string{"", "stranger@elsewhere.example"} {
+		wantEq(t, "GAL entries for caller "+caller, len(mustStaticGAL(t, a, caller, "", 0)), 0)
+		shared, err := a.SharedMailboxes(caller)
+		mustNoErr(t, "list shared mailboxes", err)
+		wantEq(t, "shared mailboxes for caller "+caller, len(shared), 0)
+	}
+	// A known caller written in another case is still the same account.
+	wantEq(t, "GAL entries for a mixed-case caller", len(mustStaticGAL(t, a, "Alice@Hermex.Test", "", 0)), 2)
 }

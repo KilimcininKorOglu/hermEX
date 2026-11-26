@@ -380,13 +380,21 @@ func (a StaticAccounts) MailboxOwners() ([]MailboxOwner, error) {
 	return out, nil
 }
 
-// SharedMailboxes implements SharedMailboxLister: the accounts flagged Shared,
-// by address and mailbox path, ordered by address for a stable listing. caller
-// is ignored for the reason SearchGAL gives.
-func (a StaticAccounts) SharedMailboxes(string) ([]SharedMailbox, error) {
+// staticVisible reports whether addr is in caller's scope. The scope is the one
+// SameScope uses: the caller must be a known account and addr must share its
+// domain. An empty or unknown caller sees nothing.
+func staticVisible(a StaticAccounts, caller, addr string) bool {
+	ok, err := a.SameScope(caller, addr)
+	return err == nil && ok
+}
+
+// SharedMailboxes implements SharedMailboxLister: the accounts flagged Shared in
+// caller's scope, by address and mailbox path, ordered by address for a stable
+// listing.
+func (a StaticAccounts) SharedMailboxes(caller string) ([]SharedMailbox, error) {
 	out := make([]SharedMailbox, 0)
 	for addr, acc := range a {
-		if acc.Shared && acc.MailboxPath != "" {
+		if acc.Shared && acc.MailboxPath != "" && staticVisible(a, caller, addr) {
 			out = append(out, SharedMailbox{Address: addr, StorePath: acc.MailboxPath})
 		}
 	}
@@ -399,14 +407,13 @@ func (a StaticAccounts) SharedMailboxes(string) ([]SharedMailbox, error) {
 // do not suggest the same person twice. Results are ordered by address and
 // capped at limit (limit <= 0 means no cap). DisplayName mirrors the address.
 //
-// caller is ignored: a static directory is one flat map with no domains, so
-// every account is in the same scope by construction. hide is ignored too: a
-// static directory records no hide mask, so no entry carries a bit.
-func (a StaticAccounts) SearchGAL(_, query string, limit int, _ uint32) ([]GALEntry, error) {
+// Only accounts in caller's scope are listed (see staticVisible). hide is
+// ignored: a static directory records no hide mask, so no entry carries a bit.
+func (a StaticAccounts) SearchGAL(caller, query string, limit int, _ uint32) ([]GALEntry, error) {
 	q := strings.ToLower(strings.TrimSpace(query))
 	addrs := make([]string, 0, len(a))
 	for addr := range a {
-		if q == "" || strings.Contains(strings.ToLower(addr), q) {
+		if (q == "" || strings.Contains(strings.ToLower(addr), q)) && staticVisible(a, caller, addr) {
 			addrs = append(addrs, addr)
 		}
 	}
@@ -434,15 +441,14 @@ func (a StaticAccounts) CountGAL(caller, query string, hide uint32) (int, error)
 	return len(out), err
 }
 
-// Authenticate implements Authenticator using a constant-time password compare.
-// ListRooms implements RoomLister. It returns the accounts flagged Room, each as
-// a GALEntry addressed by its map key with the room display type, sorted by
-// address for a stable order. The static directory holds no capacity, so it is
-// reported as zero, and caller is ignored for the reason SearchGAL gives.
-func (a StaticAccounts) ListRooms(string) ([]GALEntry, error) {
+// ListRooms implements RoomLister. It returns the accounts flagged Room in
+// caller's scope, each as a GALEntry addressed by its map key with the room
+// display type, sorted by address for a stable order. The static directory holds
+// no capacity, so it is reported as zero.
+func (a StaticAccounts) ListRooms(caller string) ([]GALEntry, error) {
 	addrs := make([]string, 0, len(a))
 	for addr, acc := range a {
-		if acc.Room {
+		if acc.Room && staticVisible(a, caller, addr) {
 			addrs = append(addrs, addr)
 		}
 	}
@@ -454,6 +460,7 @@ func (a StaticAccounts) ListRooms(string) ([]GALEntry, error) {
 	return out, nil
 }
 
+// Authenticate implements Authenticator using a constant-time password compare.
 func (a StaticAccounts) Authenticate(user, password string) (string, bool) {
 	acc, ok := a[strings.ToLower(user)]
 	if !ok {

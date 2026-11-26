@@ -32,6 +32,7 @@ func TestSharedAsOwnerListsOwnedMailboxes(t *testing.T) {
 	st2.Close()
 
 	accounts := directory.StaticAccounts{
+		"alice@hermex.test": {Password: "password1", MailboxPath: t.TempDir()},
 		"team@hermex.test":  {Shared: true, MailboxPath: owned},
 		"other@hermex.test": {Shared: true, MailboxPath: other},
 	}
