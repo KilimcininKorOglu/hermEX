@@ -80,15 +80,31 @@ func TestDomainOrgAdminEmails(t *testing.T) {
 	mustNoErr(t, "grant domain admin", d.GrantAdminRole(dadmin, AdminDomain, dom))
 	mustNoErr(t, "grant org admin", d.GrantAdminRole(oadmin, AdminOrg, org))
 
+	// Admins of another tenant: a domain admin of another domain and an org admin
+	// of another organization must not learn of acme.test's quarantine.
+	otherDom := mustCreateDomain(t, d, root, "other.test")
+	otherOrg, err := d.CreateOrg("other-org", "")
+	mustNoErr(t, "create the other org", err)
+	_, err = d.AssignDomainToOrg(otherDom, otherOrg)
+	mustNoErr(t, "assign the other domain to the other org", err)
+	odadmin := mustCreateUser(t, d, root, "dadmin@other.test", "password1")
+	ooadmin := mustCreateUser(t, d, root, "oadmin@other.test", "password1")
+	mustNoErr(t, "grant the other domain admin", d.GrantAdminRole(odadmin, AdminDomain, otherDom))
+	mustNoErr(t, "grant the other org admin", d.GrantAdminRole(ooadmin, AdminOrg, otherOrg))
+
 	emails, err := d.DomainOrgAdminEmails(dom)
 	mustNoErr(t, "resolve the notification addresses", err)
 	got := map[string]bool{}
 	for _, e := range emails {
 		got[e] = true
 	}
-	wantEq(t, "the domain admin is notified", got["dadmin@acme.test"], true)
-	wantEq(t, "the org admin is notified", got["oadmin@acme.test"], true)
-	if got["plain@acme.test"] {
-		t.Error("DomainOrgAdminEmails included a non-admin")
+	for addr, want := range map[string]bool{
+		"dadmin@acme.test":  true,
+		"oadmin@acme.test":  true,
+		"plain@acme.test":   false,
+		"dadmin@other.test": false,
+		"oadmin@other.test": false,
+	} {
+		wantEq(t, addr+" is notified", got[addr], want)
 	}
 }
