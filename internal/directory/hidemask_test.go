@@ -28,6 +28,9 @@ func TestHideMaskColumnFollowsTheProperty(t *testing.T) {
 	const addr = "hidden@hermex.test"
 	_, err := d.CreateContact(addr, "Hidden", "hermex.test")
 	mustNoErr(t, "create contact", err)
+	const bystander = "bystander@hermex.test"
+	_, err = d.CreateContact(bystander, "Bystander", "hermex.test")
+	mustNoErr(t, "create the bystander contact", err)
 
 	for _, tc := range []struct {
 		name  string
@@ -44,6 +47,7 @@ func TestHideMaskColumnFollowsTheProperty(t *testing.T) {
 		mustNoErr(t, tc.name, err)
 		wantEq(t, tc.name+": user found", found, true)
 		wantEq(t, tc.name+": hide_mask", storedHideMask(t, db, addr), tc.want)
+		wantEq(t, tc.name+": the bystander's hide_mask", storedHideMask(t, db, bystander), uint32(0))
 	}
 }
 
