@@ -55,8 +55,9 @@ func TestResolvableGALDropsBoth(t *testing.T) {
 	if contains(got, "noanr@hermex.test") {
 		t.Error("an address hidden from name resolution was resolvable")
 	}
-	if !contains(got, "open@hermex.test") {
-		t.Errorf("a visible address was dropped: %v", got)
+	// Hiding from the typed address lists is not hiding from resolution.
+	if !contains(got, "open@hermex.test") || !contains(got, "nolist@hermex.test") {
+		t.Errorf("a resolvable address was dropped: %v", got)
 	}
 }
 
@@ -66,8 +67,10 @@ func TestFiltersLeaveTheInputAlone(t *testing.T) {
 	in := galSet()
 	VisibleGAL(in)
 	ResolvableGAL(in)
-	if len(in) != 4 {
-		t.Errorf("input length = %d after filtering, want 4 untouched", len(in))
+	// An in-place filter keeps the caller's length but shifts and zeroes the
+	// elements, so the contents are what is compared.
+	if !slices.Equal(in, galSet()) {
+		t.Errorf("input after filtering = %v, want it untouched", in)
 	}
 	if VisibleGAL(nil) != nil || ResolvableGAL(nil) != nil {
 		t.Error("filtering nil should stay nil")
