@@ -148,6 +148,9 @@ func TestDeleteRule(t *testing.T) {
 	if err := s.DeleteRule(id2); !errors.Is(err, ErrNotFound) {
 		t.Errorf("DeleteRule of a missing rule = %v, want ErrNotFound", err)
 	}
+	if rules := mustListRules(t, s, inbox); len(rules) != 1 || rules[0].ID != id1 {
+		t.Errorf("a refused delete changed the rules: %+v", rules)
+	}
 }
 
 // TestSetRuleEnabled checks the enable/disable toggle flips only ST_ENABLED,
@@ -184,8 +187,11 @@ func TestSetRuleEnabled(t *testing.T) {
 		t.Errorf("rule not enabled after enable")
 	}
 
-	if err := s.SetRuleEnabled(999999, true); !errors.Is(err, ErrNotFound) {
+	if err := s.SetRuleEnabled(999999, false); !errors.Is(err, ErrNotFound) {
 		t.Errorf("SetRuleEnabled on a missing rule = %v, want ErrNotFound", err)
+	}
+	if rules = mustListRules(t, s, inbox); !rules[0].Enabled() {
+		t.Errorf("a refused toggle disabled the existing rule")
 	}
 }
 
@@ -325,6 +331,12 @@ func TestModifyRulesForeignRuleNoOp(t *testing.T) {
 	if len(rules) != 1 || rules[0].State != mapi.RuleStateEnabled {
 		t.Errorf("a Sent-folder modify altered the Inbox rule: state = %#x, want unchanged ST_ENABLED", rules[0].State)
 	}
+	if err := s.ModifyRules(sent, false, []RuleChange{{Op: RuleRemove, RuleID: id}}); err != nil {
+		t.Fatalf("ModifyRules remove: %v", err)
+	}
+	if rules := mustListRules(t, s, inbox); len(rules) != 1 {
+		t.Errorf("a Sent-folder remove deleted the Inbox rule: %d rules left", len(rules))
+	}
 }
 
 // firstRuleName is a small helper for failure messages.
@@ -354,10 +366,7 @@ func TestSetRuleSequence(t *testing.T) {
 	a := mk("a")
 	b := mk("b")
 
-	rules, err := s.ListRules(inbox)
-	if err != nil {
-		t.Fatal(err)
-	}
+	rules := mustListRules(t, s, inbox)
 	if rules[0].ID != a {
 		t.Fatalf("rule a should be first, got %d", rules[0].ID)
 	}
@@ -372,5 +381,8 @@ func TestSetRuleSequence(t *testing.T) {
 	}
 	if err := s.SetRuleSequence(999999, 1); !errors.Is(err, ErrNotFound) {
 		t.Errorf("SetRuleSequence on unknown id = %v, want ErrNotFound", err)
+	}
+	if rules = mustListRules(t, s, inbox); len(rules) != 2 || rules[0].ID != b || rules[1].ID != a {
+		t.Errorf("a refused reorder changed the order: %+v", rules)
 	}
 }
