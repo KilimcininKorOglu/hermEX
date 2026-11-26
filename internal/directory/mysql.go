@@ -519,9 +519,9 @@ func (d *SQLDirectory) scanGALEntry(rows *sql.Rows) (GALEntry, error) {
 	if maildir != "" {
 		storePath = d.storePath(maildir)
 	}
-	capacity := 0
-	if capStr.Valid {
-		capacity, _ = strconv.Atoi(capStr.String)
+	capacity, err := parseRoomCapacity(capStr.String)
+	if err != nil {
+		return GALEntry{}, fmt.Errorf("directory: %s: %w", addr, err)
 	}
 	return GALEntry{DisplayName: display, Address: addr, DisplayType: displayType, HiddenFrom: hideMaskFromProps(hideMask, hideBool), StorePath: storePath, Capacity: capacity, Owner: ownerStr.String}, nil
 }
@@ -1511,6 +1511,11 @@ func (d *SQLDirectory) SetUserProperties(username string, props map[uint32]strin
 func writeUserProperties(tx *sql.Tx, id int64, props map[uint32]string) error {
 	for tag, val := range props {
 		val = strings.TrimSpace(val)
+		if tag == prRoomCapacity {
+			if _, err := parseRoomCapacity(val); err != nil {
+				return fmt.Errorf("directory: %w", err)
+			}
+		}
 		if val == "" {
 			if _, err := tx.Exec(
 				`DELETE FROM user_properties WHERE user_id = ? AND proptag = ? AND order_id = 1`,

@@ -120,3 +120,33 @@ func TestSearchGALRoomCapacity(t *testing.T) {
 		t.Errorf("SearchGAL room = %+v, want conf-a@hermex.test with Capacity 8", entries)
 	}
 }
+
+// TestRoomCapacityMustBeAWholeNumber proves PidTagAddressBookRoomCapacity, a
+// PtLong, is stored only as a non-negative whole number, and that a stored value
+// which is not one is reported by every reader instead of shown as capacity 0.
+func TestRoomCapacityMustBeAWholeNumber(t *testing.T) {
+	d, db := freshDirectory(t)
+	root := t.TempDir()
+	mustCreateDomain(t, d, root, "hermex.test")
+	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
+	_, err := d.CreateRoom("conf-a@hermex.test", "Conference A", filepath.Join(root, "conf"), 8, false)
+	mustNoErr(t, "create the room", err)
+
+	for _, bad := range []string{"twelve", "-3", "8.5", "99999999999999999999"} {
+		_, err := d.SetUserProperties("conf-a@hermex.test", map[uint32]string{prRoomCapacity: bad})
+		wantErr(t, "capacity "+bad+" was stored", err)
+	}
+	rooms, err := d.ListAllRooms()
+	mustNoErr(t, "list rooms after the refused writes", err)
+	wantEq(t, "capacity after the refused writes", rooms[0].Capacity, 8)
+
+	// A row written behind the directory's back is corruption, not "unknown".
+	_, err = db.Exec(`UPDATE user_properties SET propval_str = 'twelve' WHERE proptag = ?`, prRoomCapacity)
+	mustNoErr(t, "corrupt the stored capacity", err)
+	_, err = d.ListAllRooms()
+	wantErr(t, "ListAllRooms read a non-numeric capacity", err)
+	_, err = d.ListRooms("alice@hermex.test")
+	wantErr(t, "ListRooms read a non-numeric capacity", err)
+	_, err = d.SearchGAL("alice@hermex.test", "conf-a", 20, 0)
+	wantErr(t, "SearchGAL read a non-numeric capacity", err)
+}

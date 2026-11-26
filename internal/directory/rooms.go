@@ -75,10 +75,28 @@ func (d *SQLDirectory) scanRooms(q string, args ...any) ([]GALEntry, error) {
 		if name == "" {
 			name = addr
 		}
-		capacity, _ := strconv.Atoi(capStr) // empty/non-numeric -> 0 (capacity unknown)
+		capacity, err := parseRoomCapacity(capStr)
+		if err != nil {
+			return nil, fmt.Errorf("directory: room %s: %w", addr, err)
+		}
 		out = append(out, GALEntry{DisplayName: name, Address: addr, DisplayType: dt, Capacity: capacity})
 	}
 	return out, rows.Err()
+}
+
+// parseRoomCapacity reads a stored seating capacity. An empty value is "not
+// given" (0); anything else must be a non-negative whole number. Every write path
+// stores only such a value, so a row that is not one is corruption and is
+// reported rather than shown as an unknown capacity.
+func parseRoomCapacity(s string) (int, error) {
+	if s == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("room capacity %q is not a non-negative whole number", s)
+	}
+	return n, nil
 }
 
 // CreateRoom provisions a bookable resource mailbox: a directory user with
