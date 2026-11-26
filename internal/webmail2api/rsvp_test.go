@@ -137,11 +137,14 @@ func TestRSVPDeclineIsRecorded(t *testing.T) {
 // TestRSVPRefusesAnUnknownResponse keeps a word the model has no value for from
 // being recorded as one.
 func TestRSVPRefusesAnUnknownResponse(t *testing.T) {
-	do, _, id := rsvpHarness(t)
+	do, mbox, id := rsvpHarness(t)
 	rec := do(`{"id":"` + id + `","response":"maybe"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("an unknown response = %d, want 400: %s", rec.Code, rec.Body.String())
 	}
+	// A refused answer neither sends a response nor files the meeting.
+	wantEq(t, "responses in Sent Items", sentItems(t, mbox), 0)
+	wantEq(t, "appointments on the calendar", calendarCount(t, mbox), 0)
 }
 
 // TestRSVPKeepsTheSentResponse proves the response sent to the organizer is kept in

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/objectstore"
 )
 
 // rawMessage builds a minimal RFC 5322 message carrying the given From header
@@ -31,12 +32,22 @@ func rawMessage(fromHeader string) string {
 
 // sendRawServer builds a server whose only account is alice, so every other
 // address is one she may not send as.
-func sendRawServer(t *testing.T) (*Server, string) {
+// It also returns the provisioned mailbox of ceo@hermex.test, the local recipient
+// postSendRaw addresses, so a test can see whether a message was delivered.
+func sendRawServerWithTarget(t *testing.T) (*Server, string, string) {
 	t.Helper()
 	box := t.TempDir()
+	ceoBox := t.TempDir()
+	for _, dir := range []string{box, ceoBox} {
+		st, err := objectstore.Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.Close()
+	}
 	accounts := directory.StaticAccounts{
 		"alice@hermex.test": {MailboxPath: box},
-		"ceo@hermex.test":   {MailboxPath: t.TempDir()},
+		"ceo@hermex.test":   {MailboxPath: ceoBox},
 	}
 	secret := []byte("send-raw-test-secret")
 	srv := NewServer(accounts, accounts, nil, "mail.hermex.test", secret, "", false)
@@ -46,13 +57,13 @@ func sendRawServer(t *testing.T) (*Server, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return srv, token
+	return srv, token, ceoBox
 }
 
 // postSendRaw posts a raw message plus its recipient list to the raw send route.
 func postSendRaw(t *testing.T, srv *Server, token, raw string) *httptest.ResponseRecorder {
 	t.Helper()
-	body, err := json.Marshal(map[string]any{"raw": raw, "to": []string{"victim@example.org"}})
+	body, err := json.Marshal(map[string]any{"raw": raw, "to": []string{"ceo@hermex.test"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,30 +80,32 @@ func postSendRaw(t *testing.T, srv *Server, token, raw string) *httptest.Respons
 // they assert. The outbound signer keys DKIM off that header, so an unauthorized
 // From left the server DMARC-aligned for a domain the caller does not own.
 func TestSendRawRefusesForgedFrom(t *testing.T) {
-	srv, token := sendRawServer(t)
+	srv, token, ceoBox := sendRawServerWithTarget(t)
 
 	rec := postSendRaw(t, srv, token, rawMessage("ceo@hermex.test"))
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("forged From answered %d, want %d; the send-as gate did not run", rec.Code, http.StatusForbidden)
 	}
+	wantEq(t, "messages delivered to the recipient", inboxCount(t, ceoBox), 0)
 }
 
 // TestSendRawAllowsOwnFrom is the control: the gate must not break the ordinary
 // browser-mode S/MIME flow, which posts back a message whose From is the caller.
 func TestSendRawAllowsOwnFrom(t *testing.T) {
-	srv, token := sendRawServer(t)
+	srv, token, ceoBox := sendRawServerWithTarget(t)
 
 	rec := postSendRaw(t, srv, token, rawMessage("alice@hermex.test"))
-	if rec.Code == http.StatusForbidden {
-		t.Errorf("the caller's own From was refused with %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("the caller's own From answered %d, want 200: %s", rec.Code, rec.Body.String())
 	}
+	wantEq(t, "messages delivered to the recipient", inboxCount(t, ceoBox), 1)
 }
 
 // TestSendRawRefusesUnusableFrom covers the two shapes that carry no single
 // authorizable identity: no From header at all, and a From list hiding a second
 // address behind the one that would be checked.
 func TestSendRawRefusesUnusableFrom(t *testing.T) {
-	srv, token := sendRawServer(t)
+	srv, token, ceoBox := sendRawServerWithTarget(t)
 
 	cases := []struct {
 		name string
@@ -111,4 +124,5 @@ func TestSendRawRefusesUnusableFrom(t *testing.T) {
 			t.Errorf("%s: accepted with %d, want a refusal", tc.name, rec.Code)
 		}
 	}
+	wantEq(t, "messages delivered to the recipient", inboxCount(t, ceoBox), 0)
 }
