@@ -74,6 +74,9 @@ func TestSyncAliasesSkipsAForeignDomain(t *testing.T) {
 	skipped := mustSyncAliases(t, d, "alice@hermex.test", []string{"alice@partner.example"})
 
 	wantEq(t, "the foreign address was skipped", len(skipped), 1)
+	got, err := d.ListAliasesFor("alice@hermex.test")
+	mustNoErr(t, "list the aliases", err)
+	wantEq(t, "aliases stored for the foreign address", len(got), 0)
 }
 
 // TestSyncAliasesStayInTheAccountsOrganization gives one account aliases in
