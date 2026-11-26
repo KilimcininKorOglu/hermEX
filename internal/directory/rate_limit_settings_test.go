@@ -39,6 +39,26 @@ func TestRateLimitSettingsRoundTrip(t *testing.T) {
 	}
 }
 
+// TestRateLimitSettingsRefuseANonPositiveLimit proves a burst or window below 1 is
+// refused and the stored row is kept.
+func TestRateLimitSettingsRefuseANonPositiveLimit(t *testing.T) {
+	d := setupRateLimitSettings(t)
+	want := RateLimitSettings{Enabled: true, Burst: 120, WindowSeconds: 30}
+	mustNoErr(t, "save the starting settings", d.SetRateLimitSettings(want))
+	for _, bad := range []RateLimitSettings{
+		{Enabled: true, Burst: 0, WindowSeconds: 30},
+		{Enabled: true, Burst: -5, WindowSeconds: 30},
+		{Enabled: true, Burst: 120, WindowSeconds: 0},
+		{Enabled: true, Burst: 120, WindowSeconds: -1},
+	} {
+		wantErr(t, "SetRateLimitSettings accepted a non-positive limit", d.SetRateLimitSettings(bad))
+		got, found, err := d.GetRateLimitSettings()
+		mustNoErr(t, "read the settings after a refusal", err)
+		wantEq(t, "settings found after a refusal", found, true)
+		wantEq(t, "settings after a refusal", got, want)
+	}
+}
+
 // TestRateLimitSettingsUpsert proves a second save replaces the single row rather
 // than inserting a second.
 func TestRateLimitSettingsUpsert(t *testing.T) {

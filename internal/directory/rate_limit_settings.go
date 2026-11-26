@@ -35,6 +35,9 @@ func (d *SQLDirectory) GetRateLimitSettings() (RateLimitSettings, bool, error) {
 // SetRateLimitSettings persists the rate-limit settings, upserting the single row so
 // the MTA's poll observes the change and applies it without a restart.
 func (d *SQLDirectory) SetRateLimitSettings(s RateLimitSettings) error {
+	if s.Burst < 1 || s.WindowSeconds < 1 {
+		return errors.New("directory: the rate-limit burst and window must be at least 1")
+	}
 	_, err := d.db.Exec(
 		`INSERT INTO rate_limit_settings (id, enabled, burst, window_seconds, updated_at)
 		 VALUES (1, ?, ?, ?, ?)
