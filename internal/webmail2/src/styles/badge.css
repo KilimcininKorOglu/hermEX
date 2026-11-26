@@ -243,6 +243,27 @@
 	font-size: 12px;
 }
 
+/* The full-height brand panel on the left, holding the logo, as on the
+   Outlook on the web sign-in page. The form column starts to its right. */
+@media (min-width: 641px) {
+	.badge-page { padding-left: calc(38vw + 4rem); }
+	.badge-page::before {
+		content: "";
+		position: fixed;
+		inset: 0 auto 0 0;
+		width: 38vw;
+		background: var(--badge-brand);
+	}
+	.badge-photo {
+		position: fixed;
+		top: 50%;
+		left: 19vw;
+		margin: 0;
+		transform: translate(-50%, -50%);
+	}
+	.badge-photo img { width: 9rem; height: 9rem; }
+}
+
 @media (max-width: 640px) {
 	.badge-page { padding-left: 1.5rem; padding-right: 1.5rem; }
 	.badge-name { font-size: 32px; }
