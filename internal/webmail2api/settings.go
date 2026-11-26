@@ -896,6 +896,10 @@ func (s *Server) handlePutProfile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := s.writeProfile(c, props, prof.Timezone, prof.Locale, prof.Onboarded); err != nil {
+		if errors.Is(err, directory.ErrInvalidPref) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid timezone or language"})
+			return
+		}
 		logError("profile-save", err, nil)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save profile"})
 		return

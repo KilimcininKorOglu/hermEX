@@ -105,6 +105,12 @@ func TestProfileSaveReportsAFailedWrite(t *testing.T) {
 			t.Errorf("PUT %s with a failing directory = %d, want 500", body, rec.Code)
 		}
 	}
+	// A value the directory refuses is the caller's mistake, not a server fault.
+	refused := failingProfileDir{StaticAccounts: accounts, localeErr: directory.ErrInvalidPref}
+	refusing := NewServer(refused, accounts, nil, "mail.hermex.test", secret, "", false)
+	if rec := putProfile(t, refusing, secret, mbox, `{"timezone":"Mars/Olympus"}`); rec.Code != http.StatusBadRequest {
+		t.Errorf("PUT a refused timezone = %d, want 400", rec.Code)
+	}
 	// The onboarded flag lives in the mailbox; a missing mailbox cannot hold it.
 	gone := filepath.Join(t.TempDir(), "missing")
 	if rec := putProfile(t, srv, secret, gone, `{"onboarded":true}`); rec.Code != http.StatusInternalServerError {
