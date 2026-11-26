@@ -2,6 +2,7 @@ package webmail2api
 
 import (
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -144,10 +145,17 @@ func TestSeriesEditKeepsExceptionsWhileThePatternHolds(t *testing.T) {
 // CalDAV client stores such an edit.
 func moveInstance(t *testing.T, st *objectstore.Store, id int64) {
 	t.Helper()
-	moved := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:x\r\nSUMMARY:Standup\r\n" +
+	stored := icalOriginal(t, st, id)
+	// A RECURRENCE-ID names an instance of the series with the same UID (RFC 5545
+	// 3.8.4.4), so the moved instance carries the stored series' UID.
+	uid := regexp.MustCompile(`(?m)^UID:([^\r\n]+)`).FindSubmatch(stored)
+	if uid == nil {
+		t.Fatal("the stored series carries no UID")
+	}
+	moved := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:" + string(uid[1]) + "\r\nSUMMARY:Standup\r\n" +
 		"RECURRENCE-ID:20260331T070000Z\r\nDTSTART:20260331T080000Z\r\nDTEND:20260331T083000Z\r\n" +
 		"END:VEVENT\r\nEND:VCALENDAR\r\n"
-	merged, ok := oxcical.MergeOverride(icalOriginal(t, st, id), []byte(moved))
+	merged, ok := oxcical.MergeOverride(stored, []byte(moved))
 	if !ok {
 		t.Fatal("MergeOverride refused the instance")
 	}
