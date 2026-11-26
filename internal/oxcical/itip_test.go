@@ -42,8 +42,8 @@ func TestInstanceCancelDropsOnlyThatInstance(t *testing.T) {
 	if !ok {
 		t.Fatal("CancelInstance refused a live instance")
 	}
-	inst, _ := InstancesIn(marked, march9.Add(-8*24*time.Hour), march9.Add(15*24*time.Hour))
-	if len(inst) != 3 {
+	inst, ok := InstancesIn(marked, march9.Add(-8*24*time.Hour), march9.Add(15*24*time.Hour))
+	if !ok || len(inst) != 3 {
 		t.Errorf("instances after the cancellation = %d, want 3 of the 4 in the window", len(inst))
 	}
 	for _, i := range inst {
@@ -73,7 +73,10 @@ func TestInstanceCancelledReadsTheAttendeeCopy(t *testing.T) {
 	if cancelled, _ := InstanceCancelled(marked, march9.Add(7*24*time.Hour)); cancelled {
 		t.Error("an instance that is still on reads as cancelled")
 	}
-	removed, _ := CancelOccurrence(marked, march9)
+	removed, ok := CancelOccurrence(marked, march9)
+	if !ok {
+		t.Fatal("CancelOccurrence refused the cancelled instance")
+	}
 	if cancelled, series := InstanceCancelled(removed, march9); cancelled || !series {
 		t.Errorf("a removed instance reads cancelled=%v series=%v, want a series without it", cancelled, series)
 	}
@@ -136,7 +139,10 @@ func TestInstanceBodyRefusesAnAbsentInstance(t *testing.T) {
 	if _, ok := InstanceBody([]byte(seriesICal), march9.Add(time.Hour), "CANCEL", 1); ok {
 		t.Error("an instant the rule never generates was accepted")
 	}
-	removed, _ := CancelOccurrence([]byte(seriesICal), march9)
+	removed, ok := CancelOccurrence([]byte(seriesICal), march9)
+	if !ok {
+		t.Fatal("CancelOccurrence refused a live instance")
+	}
 	if _, ok := InstanceBody(removed, march9, "CANCEL", 1); ok {
 		t.Error("an instance already excluded was accepted")
 	}
