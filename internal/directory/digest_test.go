@@ -46,19 +46,20 @@ func TestDigestWatermark(t *testing.T) {
 	d := setupDigest(t)
 	const mbox = "/data/mb/alice"
 
-	if uid, err := d.GetDigestWatermark(mbox); err != nil || uid != 0 {
-		t.Fatalf("watermark before any digest = (%d, %v), want (0, nil)", uid, err)
-	}
-	if err := d.SetDigestWatermark(mbox, 42); err != nil {
-		t.Fatal(err)
-	}
-	if uid, err := d.GetDigestWatermark(mbox); err != nil || uid != 42 {
-		t.Fatalf("watermark after set = (%d, %v), want (42, nil)", uid, err)
-	}
-	if err := d.SetDigestWatermark(mbox, 99); err != nil {
-		t.Fatal(err)
-	}
-	if uid, err := d.GetDigestWatermark(mbox); err != nil || uid != 99 {
-		t.Errorf("watermark after upsert = (%d, %v), want (99, nil)", uid, err)
-	}
+	wantWatermark(t, d, "before any digest", mbox, 0)
+	mustNoErr(t, "set the watermark", d.SetDigestWatermark(mbox, 42))
+	wantWatermark(t, d, "after set", mbox, 42)
+	mustNoErr(t, "upsert the watermark", d.SetDigestWatermark(mbox, 99))
+	wantWatermark(t, d, "after upsert", mbox, 99)
+	// Another mailbox keeps its own watermark: one user's digest must not skip
+	// another's quarantined mail.
+	wantWatermark(t, d, "of another mailbox", "/data/mb/bob", 0)
+}
+
+// wantWatermark reads one mailbox's digest watermark and compares it.
+func wantWatermark(t *testing.T, d *SQLDirectory, label, mbox string, want uint32) {
+	t.Helper()
+	uid, err := d.GetDigestWatermark(mbox)
+	mustNoErr(t, "read the watermark "+label, err)
+	wantEq(t, "watermark "+label, uid, want)
 }
