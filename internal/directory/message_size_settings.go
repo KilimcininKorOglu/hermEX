@@ -22,8 +22,8 @@ type MessageSizeSettings struct {
 }
 
 // GetMessageSizeSettings returns the stored message size limit and whether a row has
-// been saved. When none has, found is false and the caller keeps the server's built-in
-// behavior (no limit).
+// been saved. When none has, found is false and the caller applies
+// DefaultMaxInboundBytes; a saved 0 is found and means no limit.
 func (d *SQLDirectory) GetMessageSizeSettings() (MessageSizeSettings, bool, error) {
 	var s MessageSizeSettings
 	err := d.db.QueryRow(
