@@ -60,6 +60,29 @@ func TestMTASTSSettingsRefuseAnOutOfRangeMaxAge(t *testing.T) {
 	}
 }
 
+// TestMTASTSSettingsRefuseAnUnknownMode writes modes outside RFC 8461 section 3.2's
+// three (enforce, testing, none, matched exactly): each is refused and the stored
+// row is kept, and the three valid modes are accepted enabled and disabled.
+func TestMTASTSSettingsRefuseAnUnknownMode(t *testing.T) {
+	d := setupMTASTSSettings(t)
+	want := MTASTSSettings{Enabled: true, Mode: "testing", MaxAge: 86400}
+	mustNoErr(t, "save the starting settings", d.SetMTASTSSettings(want))
+	for _, bad := range []string{"", "bogus", "Enforce", " enforce", "testing\r\nmx: *.evil.example"} {
+		if err := d.SetMTASTSSettings(MTASTSSettings{Enabled: true, Mode: bad, MaxAge: 86400}); err == nil {
+			t.Errorf("mode %q was accepted", bad)
+		}
+		got, _, err := d.GetMTASTSSettings()
+		mustNoErr(t, "read the settings after a refusal", err)
+		wantEq(t, "the settings after refusing mode "+bad, got, want)
+	}
+	for _, mode := range []string{"enforce", "testing", "none"} {
+		for _, enabled := range []bool{true, false} {
+			s := MTASTSSettings{Enabled: enabled, Mode: mode, MaxAge: 86400}
+			mustNoErr(t, "save mode "+mode, d.SetMTASTSSettings(s))
+		}
+	}
+}
+
 // TestMTASTSSettingsRoundTripAndUpsert proves the publishing settings round-trip and
 // that re-saving replaces the single row rather than adding one, so the gateway always
 // reads exactly one current policy configuration.

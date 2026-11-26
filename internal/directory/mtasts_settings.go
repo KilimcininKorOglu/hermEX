@@ -56,6 +56,11 @@ func (d *SQLDirectory) SetMTASTSSettings(s MTASTSSettings) error {
 	if s.MaxAge < 1 || s.MaxAge > MTASTSMaxMaxAge {
 		return fmt.Errorf("directory: MTA-STS max_age %d is outside 1..%d", s.MaxAge, MTASTSMaxMaxAge)
 	}
+	switch s.Mode {
+	case "enforce", "testing", "none":
+	default:
+		return fmt.Errorf("directory: MTA-STS mode %q is not enforce, testing or none", s.Mode)
+	}
 	enabled := 0
 	if s.Enabled {
 		enabled = 1
