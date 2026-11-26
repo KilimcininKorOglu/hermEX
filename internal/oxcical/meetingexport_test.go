@@ -32,9 +32,10 @@ const specSeriesBlob = "043004300C200300000060AE00000300000000000000410000000300
 
 // meetingResolver is a resolver holding every named property a MAPI client writes
 // on a meeting, allocated before a test builds one.
-func meetingResolver() *resolver {
+func meetingResolver(t *testing.T) *resolver {
+	t.Helper()
 	r := newResolver()
-	_, _ = r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole, mapi.NameAppointmentEndWhole,
+	r.allocate(t, []mapi.PropertyName{mapi.NameAppointmentStartWhole, mapi.NameAppointmentEndWhole,
 		mapi.NameGlobalObjectId, mapi.NameExceptionReplaceTime, mapi.NameAppointmentRecur, mapi.NameAppointmentSubType,
 		mapi.NameAppointmentTimeZoneDefRecur, mapi.NameAppointmentTimeZoneDefStartDisplay, mapi.NameAppointmentLocation})
 	return r
@@ -89,7 +90,7 @@ func wantLines(t *testing.T, s string, lines ...string) {
 // submitted: it carries METHOD:REQUEST and the UID its global object id exports as.
 // Without either, the request reached an outside attendee as a plain mail.
 func TestExportOutlookRequestIsAnITIPRequest(t *testing.T) {
-	r := meetingResolver()
+	r := meetingResolver(t)
 	goid := mustHex(t, specUID)
 	start := time.Date(2026, 7, 1, 14, 0, 0, 0, time.UTC)
 	msg := outlookMeeting(r, "IPM.Schedule.Meeting.Request", start, start.Add(time.Hour),
@@ -106,7 +107,7 @@ func TestExportOutlookRequestIsAnITIPRequest(t *testing.T) {
 // instance cancellation: the date in the global object id and the wall-clock start
 // make the RECURRENCE-ID, the UID drops the date, and the zone rides along.
 func TestExportInstanceCancellationNamesItsOccurrence(t *testing.T) {
-	r := meetingResolver()
+	r := meetingResolver(t)
 	pacific := mustZone(t, "America/Los_Angeles")
 	start := time.Date(2008, 5, 28, 21, 0, 0, 0, time.UTC)
 	goid := mapi.TaggedPropVal{Tag: 0, Value: mustHex(t, specInstanceGOID)}
@@ -130,7 +131,7 @@ func TestExportInstanceCancellationNamesItsOccurrence(t *testing.T) {
 // TestExportInstanceWithoutAZoneStaysUTC keeps an instance whose zone is unknown
 // exact: the RECURRENCE-ID is the instant, written in UTC.
 func TestExportInstanceWithoutAZoneStaysUTC(t *testing.T) {
-	r := meetingResolver()
+	r := meetingResolver(t)
 	start := time.Date(2008, 5, 28, 21, 0, 0, 0, time.UTC)
 	msg := outlookMeeting(r, "IPM.Schedule.Meeting.Canceled", start, start.Add(30*time.Minute))
 	msg.Props = append(msg.Props, mapi.TaggedPropVal{Tag: r.tag(mapi.NameGlobalObjectId, mapi.PtBinary), Value: mustHex(t, specInstanceGOID)})
@@ -144,7 +145,7 @@ func TestExportInstanceWithoutAZoneStaysUTC(t *testing.T) {
 // TestExportReplaceTimeWins takes the RECURRENCE-ID from the replace time when it is
 // stored, as [MS-OXCICAL] orders the two sources.
 func TestExportReplaceTimeWins(t *testing.T) {
-	r := meetingResolver()
+	r := meetingResolver(t)
 	start := time.Date(2008, 5, 29, 18, 0, 0, 0, time.UTC)
 	msg := outlookMeeting(r, "IPM.Schedule.Meeting.Request", start, start.Add(time.Hour))
 	msg.Props = append(msg.Props,
@@ -198,7 +199,7 @@ func TestGlobalObjectIDInvertsTheUID(t *testing.T) {
 // modified occurrences as overrides, and no EXDATE on the days they came from, so an
 // expansion shows the moved occurrence once, at its new time.
 func TestExportOutlookSeries(t *testing.T) {
-	r := meetingResolver()
+	r := meetingResolver(t)
 	pacific := mustZone(t, "America/Los_Angeles")
 	start := time.Date(2008, 2, 9, 14, 0, 0, 0, pacific)
 	msg := outlookMeeting(r, "IPM.Schedule.Meeting.Request", start, start.Add(3*time.Hour),
@@ -221,7 +222,7 @@ func TestExportOutlookSeries(t *testing.T) {
 // carried only the ExceptionInfo fields, so the text the organizer wrote for that
 // one occurrence never reached an attendee.
 func TestExportOverrideCarriesItsExceptionBody(t *testing.T) {
-	r := meetingResolver()
+	r := meetingResolver(t)
 	pacific := mustZone(t, "America/Los_Angeles")
 	start := time.Date(2008, 2, 9, 14, 0, 0, 0, pacific)
 	msg := outlookMeeting(r, "IPM.Schedule.Meeting.Request", start, start.Add(3*time.Hour),
@@ -249,7 +250,7 @@ func TestExportOverrideCarriesItsExceptionBody(t *testing.T) {
 // TestExportSeriesExcludesADeletedDay excludes a deleted occurrence at the series'
 // own time of day, read from the start when the pattern records none.
 func TestExportSeriesExcludesADeletedDay(t *testing.T) {
-	r := meetingResolver()
+	r := meetingResolver(t)
 	istanbul := mustZone(t, "Europe/Istanbul")
 	start := time.Date(2026, 6, 1, 9, 0, 0, 0, istanbul)
 	blob := weeklyWithDeletedDay(t, start, time.Date(2026, 6, 8, 0, 0, 0, 0, time.UTC))
@@ -295,7 +296,7 @@ func weeklyWithDeletedDay(t *testing.T, start, deleted time.Time) []byte {
 // TestExportAllDayOnItsLocalDate writes an all-day event stored as local midnight on
 // the date it falls on in its zone, not on the UTC date before it.
 func TestExportAllDayOnItsLocalDate(t *testing.T) {
-	r := meetingResolver()
+	r := meetingResolver(t)
 	istanbul := mustZone(t, "Europe/Istanbul")
 	start := time.Date(2026, 6, 12, 0, 0, 0, 0, istanbul)
 	msg := outlookMeeting(r, "IPM.Appointment", start, start.AddDate(0, 0, 1),
@@ -308,7 +309,7 @@ func TestExportAllDayOnItsLocalDate(t *testing.T) {
 // it was, with METHOD:REQUEST, and synthesizes an instance message instead, whose
 // preserved body would describe the whole series.
 func TestExportVerbatimRequestKeepsItsBody(t *testing.T) {
-	r := meetingResolver()
+	r := meetingResolver(t)
 	body := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:rec-1\r\nDTSTART:20260601T090000Z\r\n" +
 		"RRULE:FREQ=WEEKLY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
 	start := time.Date(2026, 6, 8, 9, 0, 0, 0, time.UTC)

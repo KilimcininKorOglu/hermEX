@@ -13,7 +13,7 @@ import (
 func exportWithBusyStatus(t *testing.T, status int32) string {
 	t.Helper()
 	r := newResolver()
-	_, _ = r.resolve(true, []mapi.PropertyName{
+	r.allocate(t, []mapi.PropertyName{
 		mapi.NameAppointmentStartWhole, mapi.NameAppointmentEndWhole, mapi.NameBusyStatus,
 	})
 	start := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)

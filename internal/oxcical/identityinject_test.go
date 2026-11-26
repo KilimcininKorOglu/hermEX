@@ -17,7 +17,7 @@ import (
 // injected property reaches other clients.
 func TestOrganizerIdentityCannotInjectLines(t *testing.T) {
 	r := newResolver()
-	_, _ = r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole, nameICalUID})
+	r.allocate(t, []mapi.PropertyName{mapi.NameAppointmentStartWhole, nameICalUID})
 	msg := &oxcmail.Message{Props: mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: "IPM.Schedule.Meeting.Resp.Neg"},
 		{Tag: r.tag(mapi.NameAppointmentStartWhole, mapi.PtSysTime), Value: mapi.UnixToNTTime(time.Date(2026, 7, 1, 14, 0, 0, 0, time.UTC))},
@@ -48,7 +48,7 @@ func TestOrganizerIdentityCannotInjectLines(t *testing.T) {
 // ordinary organizer or attendee line.
 func TestOrdinaryIdentitySurvives(t *testing.T) {
 	r := newResolver()
-	_, _ = r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole, nameICalUID})
+	r.allocate(t, []mapi.PropertyName{mapi.NameAppointmentStartWhole, nameICalUID})
 	msg := &oxcmail.Message{Props: mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: "IPM.Schedule.Meeting.Resp.Neg"},
 		{Tag: r.tag(mapi.NameAppointmentStartWhole, mapi.PtSysTime), Value: mapi.UnixToNTTime(time.Date(2026, 7, 1, 14, 0, 0, 0, time.UTC))},

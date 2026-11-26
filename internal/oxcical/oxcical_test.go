@@ -45,12 +45,21 @@ func (r *resolver) resolve(create bool, names []mapi.PropertyName) ([]uint16, er
 
 func (r *resolver) opt() Options { return Options{Resolver: r.resolve} }
 
+// allocate assigns ids to names the way a store writer would before an export.
+func (r *resolver) allocate(t *testing.T, names []mapi.PropertyName) {
+	t.Helper()
+	if _, err := r.resolve(true, names); err != nil {
+		t.Fatalf("allocate named ids: %v", err)
+	}
+}
+
+// tag is the proptag an allocated name carries, or 0 for a name never allocated.
 func (r *resolver) tag(name mapi.PropertyName, typ mapi.PropType) mapi.PropTag {
-	ids, _ := r.resolve(false, []mapi.PropertyName{name})
-	if ids[0] == 0 {
+	id, ok := r.ids[nameKey(name)]
+	if !ok {
 		return 0
 	}
-	return mapi.PropTag(uint32(ids[0])<<16 | uint32(typ))
+	return mapi.PropTag(uint32(id)<<16 | uint32(typ))
 }
 
 func (r *resolver) timeVal(m *oxcmail.Message, name mapi.PropertyName) (uint64, bool) {
@@ -231,7 +240,7 @@ func TestImportOrganizer(t *testing.T) {
 // ATTENDEE from the first and the ORGANIZER from the second.
 func TestExportReplyIdentity(t *testing.T) {
 	r := newResolver()
-	_, _ = r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole, nameICalUID}) // allocate named ids, as a writer would
+	r.allocate(t, []mapi.PropertyName{mapi.NameAppointmentStartWhole, nameICalUID}) // allocate named ids, as a writer would
 	msg := &oxcmail.Message{Props: mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: "IPM.Schedule.Meeting.Resp.Neg"},
 		{Tag: r.tag(mapi.NameAppointmentStartWhole, mapi.PtSysTime), Value: mapi.UnixToNTTime(time.Date(2026, 7, 1, 14, 0, 0, 0, time.UTC))},
@@ -268,7 +277,7 @@ func TestExportReplyIdentity(t *testing.T) {
 // while the attendee stays the one answering.
 func TestExportReplyNamesTheDelegate(t *testing.T) {
 	r := newResolver()
-	_, _ = r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole, nameICalUID})
+	r.allocate(t, []mapi.PropertyName{mapi.NameAppointmentStartWhole, nameICalUID})
 	msg := &oxcmail.Message{Props: mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: "IPM.Schedule.Meeting.Resp.Pos"},
 		{Tag: r.tag(nameICalUID, mapi.PtUnicode), Value: "meeting-43"},
@@ -289,7 +298,7 @@ func TestExportReplyNamesTheDelegate(t *testing.T) {
 // recipient it is addressed to, not a copy recipient listed before it.
 func TestExportReplyOrganizerIsTheToRecipient(t *testing.T) {
 	r := newResolver()
-	_, _ = r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole, nameICalUID})
+	r.allocate(t, []mapi.PropertyName{mapi.NameAppointmentStartWhole, nameICalUID})
 	msg := &oxcmail.Message{Props: mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: "IPM.Schedule.Meeting.Resp.Pos"},
 		{Tag: r.tag(nameICalUID, mapi.PtUnicode), Value: "meeting-44"},
@@ -314,7 +323,7 @@ func TestExportReplyOrganizerIsTheToRecipient(t *testing.T) {
 func TestExportCounterProposal(t *testing.T) {
 	r := newResolver()
 	at := func(h int) uint64 { return mapi.UnixToNTTime(time.Date(2026, 7, 1, h, 0, 0, 0, time.UTC)) }
-	_, _ = r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole, mapi.NameAppointmentEndWhole,
+	r.allocate(t, []mapi.PropertyName{mapi.NameAppointmentStartWhole, mapi.NameAppointmentEndWhole,
 		mapi.NameAppointmentCounterProposal, mapi.NameAppointmentProposedStartWhole, mapi.NameAppointmentProposedEndWhole})
 	msg := &oxcmail.Message{Props: mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: "IPM.Schedule.Meeting.Resp.Tent"},
@@ -354,7 +363,7 @@ func TestExportCounterProposal(t *testing.T) {
 // organizer with the attendee's PARTSTAT, never echo the invitation back.
 func TestExportReplyOverridesVerbatim(t *testing.T) {
 	r := newResolver()
-	_, _ = r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole, nameICalUID})
+	r.allocate(t, []mapi.PropertyName{mapi.NameAppointmentStartWhole, nameICalUID})
 	verbatimRequest := "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:rec-1\r\n" +
 		"RRULE:FREQ=WEEKLY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
 	msg := &oxcmail.Message{Props: mapi.PropertyValues{
@@ -387,7 +396,7 @@ func TestExportReplyOverridesVerbatim(t *testing.T) {
 // ordinary calendar event.
 func TestExportPlainAppointmentNoItip(t *testing.T) {
 	r := newResolver()
-	_, _ = r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole}) // allocate named ids, as a writer would
+	r.allocate(t, []mapi.PropertyName{mapi.NameAppointmentStartWhole}) // allocate named ids, as a writer would
 	msg := &oxcmail.Message{Props: mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: "IPM.Appointment"},
 		{Tag: r.tag(mapi.NameAppointmentStartWhole, mapi.PtSysTime), Value: mapi.UnixToNTTime(time.Date(2026, 7, 1, 14, 0, 0, 0, time.UTC))},
