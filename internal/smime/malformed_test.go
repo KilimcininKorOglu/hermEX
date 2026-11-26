@@ -41,7 +41,10 @@ func TestDecryptRefusesBadPadding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	head, body, _ := bytes.Cut(enc, []byte("\r\n\r\n"))
+	head, body, found := bytes.Cut(enc, []byte("\r\n\r\n"))
+	if !found {
+		t.Fatal("the encrypted message has no header/body separator")
+	}
 	der, err := decodeBase64Body(body)
 	if err != nil {
 		t.Fatal(err)

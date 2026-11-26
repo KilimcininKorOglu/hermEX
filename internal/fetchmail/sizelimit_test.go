@@ -288,5 +288,7 @@ func TestSourceDialFollowsTheOperatorSwitch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial with internal sources allowed: %v", err)
 	}
-	_ = c.quit()
+	if err := c.quit(); err != nil {
+		t.Errorf("quit: %v", err)
+	}
 }

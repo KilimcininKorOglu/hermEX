@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -57,8 +56,7 @@ func refusingSource(t *testing.T, greeting string, reply func(tag string) string
 			_, _ = io.WriteString(conn, reply(tag))
 		}
 	}()
-	h, p, _ := net.SplitHostPort(ln.Addr().String())
-	pn, _ := strconv.Atoi(p)
+	h, pn := listenerHostPort(t, ln)
 	return h, pn, func() []string {
 		mu.Lock()
 		defer mu.Unlock()

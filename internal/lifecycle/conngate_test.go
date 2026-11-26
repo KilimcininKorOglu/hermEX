@@ -41,7 +41,9 @@ func readAll(t *testing.T, ln net.Listener) string {
 		t.Fatalf("dial: %v", err)
 	}
 	defer conn.Close()
-	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("set the read deadline: %v", err)
+	}
 	b, err := io.ReadAll(conn)
 	if err != nil {
 		t.Fatalf("read: %v", err)

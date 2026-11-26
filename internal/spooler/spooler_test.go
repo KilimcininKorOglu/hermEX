@@ -286,7 +286,10 @@ func TestProcessDueOutboxAttemptBudgetIsPerMessage(t *testing.T) {
 		return nil, true, nil
 	}
 	for range maxReleaseAttempts - 1 {
-		_, _ = releaseOutbox(context.Background(), st, deliver, nil, time.Now())
+		// A failing transport releases nothing and reports the failure.
+		if n, err := releaseOutbox(context.Background(), st, deliver, nil, time.Now()); n != 0 || err == nil {
+			t.Fatalf("a failed pass released %d with err %v, want 0 and the transport error", n, err)
+		}
 	}
 	if n := count(t, st, int64(mapi.PrivateFIDOutbox)); n != 2 {
 		t.Fatalf("Outbox holds %d, want both messages still waiting", n)

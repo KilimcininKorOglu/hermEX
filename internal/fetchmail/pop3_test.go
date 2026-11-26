@@ -53,9 +53,23 @@ func fakePOP3(t *testing.T, messages []string) (host string, port int, deleted *
 			}
 		}
 	}()
-	h, p, _ := net.SplitHostPort(ln.Addr().String())
-	pn, _ := strconv.Atoi(p)
+	h, pn := listenerHostPort(t, ln)
 	return h, pn, del
+}
+
+// listenerHostPort splits a test listener's address into the host and numeric
+// port the clients dial, failing the test when the address cannot be split.
+func listenerHostPort(t *testing.T, ln net.Listener) (string, int) {
+	t.Helper()
+	h, p, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		t.Fatalf("split the listener address: %v", err)
+	}
+	pn, err := strconv.Atoi(p)
+	if err != nil {
+		t.Fatalf("parse the listener port %q: %v", p, err)
+	}
+	return h, pn
 }
 
 // servePOP3Command answers one scripted command, reporting whether the session
@@ -173,8 +187,7 @@ func TestPOP3StallTimesOut(t *testing.T) {
 		<-stop // accept but never send the greeting; hold the conn open until cleanup
 	}()
 
-	h, p, _ := net.SplitHostPort(ln.Addr().String())
-	pn, _ := strconv.Atoi(p)
+	h, pn := listenerHostPort(t, ln)
 
 	start := time.Now()
 	if _, err := dialPOP3(h, pn, false, false); err == nil {

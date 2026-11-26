@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -51,8 +50,7 @@ func fakeIMAP(t *testing.T, body string) (host string, port int, stored *[]strin
 			}
 		}
 	}()
-	h, p, _ := net.SplitHostPort(ln.Addr().String())
-	pn, _ := strconv.Atoi(p)
+	h, pn := listenerHostPort(t, ln)
 	return h, pn, rec
 }
 
