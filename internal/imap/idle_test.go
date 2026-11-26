@@ -97,10 +97,11 @@ func TestIMAPIdle(t *testing.T) {
 	appendTo(t, path, inbox, "Subject: new\r\n\r\nbody", time.Unix(3, 0))
 	waker.fire()
 
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second)) // bound the wait: cadence is 30s
+	// Bound the wait: the cadence is 30s.
+	mustNoErr(t, "set the read deadline", conn.SetReadDeadline(time.Now().Add(2*time.Second)))
 	for !strings.Contains(c.line(), "EXISTS") {
 	}
-	_ = conn.SetReadDeadline(time.Time{}) // clear
+	mustNoErr(t, "clear the read deadline", conn.SetReadDeadline(time.Time{}))
 
 	// End IDLE with DONE; the server sends the tagged completion.
 	_, _ = fmt.Fprintf(c.conn, "DONE\r\n")

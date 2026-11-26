@@ -58,11 +58,7 @@ func TestIMAPPrivilegeDenied(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _ = fmt.Fprintf(conn, "a LOGIN alice secret\r\n")
-	resp, err := br.ReadString('\n')
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := exchangeLine(t, conn, br, "a LOGIN alice secret")
 	if !strings.HasPrefix(resp, "a NO") {
 		t.Fatalf("LOGIN with a valid password but no POP3/IMAP privilege got %q, want a tagged NO", resp)
 	}
@@ -71,8 +67,22 @@ func TestIMAPPrivilegeDenied(t *testing.T) {
 	}
 	// The refusal leaves the session unauthenticated (RFC 3501 6.2.3: a NO to LOGIN
 	// keeps the not-authenticated state), so the mailbox stays out of reach.
-	_, _ = fmt.Fprintf(conn, "b SELECT INBOX\r\n")
-	if resp, _ = br.ReadString('\n'); strings.HasPrefix(resp, "b OK") || strings.HasPrefix(resp, "* ") {
+	resp = exchangeLine(t, conn, br, "b SELECT INBOX")
+	if strings.HasPrefix(resp, "b OK") || strings.HasPrefix(resp, "* ") {
 		t.Errorf("SELECT after the refused LOGIN = %q, want a refusal", resp)
 	}
+}
+
+// exchangeLine sends one command line and returns the first reply line, failing
+// the test when either the write or the read fails.
+func exchangeLine(t *testing.T, conn net.Conn, br *bufio.Reader, cmd string) string {
+	t.Helper()
+	if _, err := fmt.Fprintf(conn, "%s\r\n", cmd); err != nil {
+		t.Fatalf("send %q: %v", cmd, err)
+	}
+	resp, err := br.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read the reply to %q: %v", cmd, err)
+	}
+	return resp
 }

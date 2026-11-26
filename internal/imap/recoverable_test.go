@@ -65,7 +65,8 @@ func TestCopyThatFailsPartwayLeavesTheDestinationAsItWas(t *testing.T) {
 	c := &conn{srv: &Server{Logger: logging.New(&captureSink{})}, st: st}
 	c.sel = &selectedMailbox{id: mapi.PrivateFIDInbox, msgs: []objectstore.MessageInfo{{UID: 1}, {UID: 99}}}
 
-	all, _ := parseSeqSet("1:*")
+	all, err := parseSeqSet("1:*")
+	mustNoErr(t, "parse 1:*", err)
 	if _, _, ok := c.copyToDest(all, true, st, dest); ok {
 		t.Fatal("copy of a message that cannot be read reported success")
 	}

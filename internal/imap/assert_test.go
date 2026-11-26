@@ -3,6 +3,8 @@ package imap
 import (
 	"strings"
 	"testing"
+
+	"hermex/internal/objectstore"
 )
 
 // The IMAP tests assert against protocol transcripts, and one exchange carries
@@ -27,6 +29,15 @@ func mustNoErr(t *testing.T, what string, err error) {
 	if err != nil {
 		t.Fatalf("%s: %v", what, err)
 	}
+}
+
+// mustCreateFolder creates a top-level folder and fails the test when the store
+// refuses it, so a grant is never applied to folder id 0.
+func mustCreateFolder(t *testing.T, st *objectstore.Store, name string) int64 {
+	t.Helper()
+	fid, err := st.CreateFolder(nil, name)
+	mustNoErr(t, "create folder "+name, err)
+	return fid
 }
 
 // wantContains fails when the transcript does not carry the given fragment.

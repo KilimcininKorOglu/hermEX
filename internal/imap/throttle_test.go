@@ -72,8 +72,7 @@ func TestIMAPLoginThrottle(t *testing.T) {
 	}
 	// A guess that hits the right password during the lockout is refused as well:
 	// otherwise the lockout only slows a guesser down by telling it which try won.
-	_, _ = fmt.Fprintf(conn, "d LOGIN alice secret\r\n")
-	if r, _ := br.ReadString('\n'); !strings.Contains(r, "too many failed attempts") {
+	if r := exchangeLine(t, conn, br, "d LOGIN alice secret"); !strings.Contains(r, "too many failed attempts") {
 		t.Fatalf("correct password during the lockout = %q, want too many failed attempts", r)
 	}
 }

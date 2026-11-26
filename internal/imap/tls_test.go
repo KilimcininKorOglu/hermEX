@@ -5,6 +5,7 @@ import (
 	"compress/flate"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -253,8 +254,12 @@ func TestStartTLSRejectsPipelinedInjection(t *testing.T) {
 	if _, err := conn.Write([]byte("a1 STARTTLS\r\na2 NOOP\r\n")); err != nil {
 		t.Fatal(err)
 	}
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	rest, _ := io.ReadAll(conn)
+	mustNoErr(t, "set the read deadline", conn.SetReadDeadline(time.Now().Add(2*time.Second)))
+	// The read ends at the deadline or when the server closes; only the bytes matter.
+	rest, err := io.ReadAll(conn)
+	if err != nil && !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("read after STARTTLS: %v", err)
+	}
 	if strings.Contains(string(rest), "a2 OK") {
 		t.Errorf("injected command executed across the TLS boundary: %q", rest)
 	}

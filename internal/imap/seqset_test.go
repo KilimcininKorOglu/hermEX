@@ -24,12 +24,14 @@ func TestParseSeqSetContains(t *testing.T) {
 
 func TestParseSeqSetStar(t *testing.T) {
 	// "*" alone resolves to the single largest value in use.
-	ss, _ := parseSeqSet("*")
+	ss, err := parseSeqSet("*")
+	mustNoErr(t, "parse *", err)
 	if !ss.contains(8, 8) || ss.contains(7, 8) {
 		t.Errorf("'*' with max 8 should match only 8")
 	}
 	// A reversed range b:a denotes the same span as a:b (order-independent).
-	ss, _ = parseSeqSet("7:3")
+	ss, err = parseSeqSet("7:3")
+	mustNoErr(t, "parse 7:3", err)
 	for n := uint32(3); n <= 7; n++ {
 		if !ss.contains(n, 100) {
 			t.Errorf("7:3 should contain %d", n)

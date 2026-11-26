@@ -164,10 +164,10 @@ func seedPublicGrants(t *testing.T, root string) *publicfolder.Service {
 	ps, err := pub.OpenForDomain("local.test")
 	mustNoErr(t, "open the public store", err)
 	defer ps.Close()
-	ann, _ := ps.CreateFolder(nil, "Announcements")
-	bul, _ := ps.CreateFolder(nil, "Bulletin")
-	staff, _ := ps.CreateFolder(nil, "Staff")
-	team, _ := ps.CreateFolder(nil, "Team")
+	ann := mustCreateFolder(t, ps, "Announcements")
+	bul := mustCreateFolder(t, ps, "Bulletin")
+	staff := mustCreateFolder(t, ps, "Staff")
+	team := mustCreateFolder(t, ps, "Team")
 	grantAnyone(t, ps, ann, mapi.FrightsVisible|mapi.FrightsReadAny)                                      // read-only for everyone
 	grantUser(t, ps, bul, "alice@local.test", mapi.FrightsVisible|mapi.FrightsReadAny|mapi.FrightsCreate) // alice may post, not modify
 	grantUser(t, ps, staff, "bob@local.test", mapi.FrightsVisible|mapi.FrightsReadAny)                    // bob only
@@ -221,7 +221,7 @@ func TestRefusedPublicSelectDeselects(t *testing.T) {
 	pub := seedPublicGrants(t, root)
 	ps, err := pub.OpenForDomain("local.test")
 	mustNoErr(t, "open the public store", err)
-	peek, _ := ps.CreateFolder(nil, "Peek")
+	peek := mustCreateFolder(t, ps, "Peek")
 	grantUser(t, ps, peek, "alice@local.test", mapi.FrightsVisible) // listed, not readable
 	ps.Close()
 
@@ -254,7 +254,7 @@ func TestIMAPPublicFolderTenantIsolation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fid, _ := st.CreateFolder(nil, d.folder)
+		fid := mustCreateFolder(t, st, d.folder)
 		grantAnyone(t, st, fid, mapi.FrightsVisible|mapi.FrightsReadAny)
 		st.Close()
 	}
@@ -295,7 +295,7 @@ func TestPublicFolderACLNeedsTheAdministerRight(t *testing.T) {
 	pub := seedPublicGrants(t, root)
 	ps, err := pub.OpenForDomain("local.test")
 	mustNoErr(t, "open the public store", err)
-	ops, _ := ps.CreateFolder(nil, "Ops")
+	ops := mustCreateFolder(t, ps, "Ops")
 	grantUser(t, ps, ops, "alice@local.test", mapi.RightsAll)
 	grantUser(t, ps, ops, "carol@local.test", mapi.FrightsVisible|mapi.FrightsReadAny)
 	ps.Close()

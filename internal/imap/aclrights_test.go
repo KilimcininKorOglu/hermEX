@@ -81,7 +81,9 @@ func TestSetACLAdjustmentNeedsTheStoredRights(t *testing.T) {
 	if got != mapi.RightsEditor&^mapi.FrightsDeleteAny {
 		t.Errorf("-t on an editor = %#x, want %#x", got, mapi.RightsEditor&^mapi.FrightsDeleteAny)
 	}
-	if got, _ := adjustedRights(st, fid, "bob@local.test", 0, mapi.FrightsReadAny); got != mapi.FrightsReadAny {
+	got, err = adjustedRights(st, fid, "bob@local.test", 0, mapi.FrightsReadAny)
+	mustNoErr(t, "replace the rights", err)
+	if got != mapi.FrightsReadAny {
 		t.Errorf("a plain rights string = %#x, want it to replace the rights", got)
 	}
 
