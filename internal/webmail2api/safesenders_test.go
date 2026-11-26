@@ -60,7 +60,7 @@ func TestSafeSendersRoundTrip(t *testing.T) {
 	secret := []byte("safesenders-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
 	do := func(method, body string) *httptest.ResponseRecorder {
-		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
 		var req *http.Request
 		if body == "" {
 			req = httptest.NewRequest(method, "/api/v1/safe-senders", nil)
@@ -76,7 +76,9 @@ func TestSafeSendersRoundTrip(t *testing.T) {
 		var out struct {
 			SafeSenders []string `json:"safeSenders"`
 		}
-		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode safe senders: %v (status %d, body %s)", err, rec.Code, rec.Body.String())
+		}
 		return out.SafeSenders
 	}
 

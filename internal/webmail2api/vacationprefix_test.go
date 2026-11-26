@@ -118,7 +118,9 @@ func TestVacationRefusesABrokenSchedule(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if cfg, _ := st.GetOOFSettings(); cfg.Enabled {
+	cfg, err := st.GetOOFSettings()
+	mustNoErr(t, "read the OOF settings", err)
+	if cfg.Enabled {
 		t.Errorf("a refused schedule was stored: %+v", cfg)
 	}
 }

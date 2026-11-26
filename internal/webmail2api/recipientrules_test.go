@@ -43,7 +43,7 @@ func TestRecipientRulesAPI(t *testing.T) {
 	secret := []byte("recipient-rules-secret")
 	srv := NewServer(auth, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
 	do := func(method, target, body string) *httptest.ResponseRecorder {
-		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: t.TempDir(), Exp: time.Now().Add(time.Hour).Unix()})
+		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: t.TempDir(), Exp: time.Now().Add(time.Hour).Unix()})
 		var req *http.Request
 		if body == "" {
 			req = httptest.NewRequest(method, target, nil)

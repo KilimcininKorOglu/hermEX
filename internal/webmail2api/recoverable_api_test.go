@@ -43,7 +43,7 @@ func TestRecoverableListRecoverPurge(t *testing.T) {
 	wantEq(t, "live trash messages after recover", len(live), 1)
 	wantEq(t, "dumpster items after recover", len(mustListDumpster(t, st2, trash)), 0)
 	// Soft-delete the recovered copy again so it can be purged.
-	_ = st2.SoftDeleteMessage(trash, live[0].UID)
+	mustNoErr(t, "soft-delete the recovered copy", st2.SoftDeleteMessage(trash, live[0].UID))
 	st2.Close()
 
 	// Purge it: gone for good.

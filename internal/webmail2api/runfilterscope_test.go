@@ -30,7 +30,9 @@ func TestRunFiltersScope(t *testing.T) {
 		st, err := objectstore.Open(dir)
 		mustNoErr(t, "reopen mailbox", err)
 		defer st.Close()
-		if fl, _ := st.MessageFlags(junk, junkMsg.UID); fl&objectstore.FlagSeen == 0 {
+		fl, err := st.MessageFlags(junk, junkMsg.UID)
+		mustNoErr(t, "read the Junk message flags", err)
+		if fl&objectstore.FlagSeen == 0 {
 			t.Error("the Junk message was not touched, so the folder selection was ignored")
 		}
 	})

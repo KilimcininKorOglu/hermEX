@@ -41,7 +41,7 @@ func TestRecallRetractsUnreadLocalCopies(t *testing.T) {
 	secret := []byte("recall-test-secret")
 	srv := NewServer(accounts, accounts, nil, "mail.hermex.test", secret, "", false)
 	recall := func(email, mailbox, id string) *httptest.ResponseRecorder {
-		token, _ := mintToken(secret, sessionClaims{Email: email, Mailbox: mailbox, Exp: time.Now().Add(time.Hour).Unix()})
+		token := mustMintToken(t, secret, sessionClaims{Email: email, Mailbox: mailbox, Exp: time.Now().Add(time.Hour).Unix()})
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/mail/recall?id="+url.QueryEscape(id), nil)
 		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
 		rec := httptest.NewRecorder()

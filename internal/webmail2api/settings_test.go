@@ -27,7 +27,7 @@ func TestSettingsConcurrentPutsDoNotLoseUpdates(t *testing.T) {
 
 	secret := []byte("settings-race-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
-	token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+	token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
 
 	const n = 40
 	var wg sync.WaitGroup
@@ -54,7 +54,10 @@ func TestSettingsConcurrentPutsDoNotLoseUpdates(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st2.Close()
-	got, _ := sharedSettings(st2)
+	got, ok := sharedSettings(st2)
+	if !ok {
+		t.Fatal("read the shared settings")
+	}
 	missing := 0
 	for i := range n {
 		if _, ok := got[fmt.Sprintf("key%d", i)]; !ok {

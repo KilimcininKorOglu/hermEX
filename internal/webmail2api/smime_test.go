@@ -41,7 +41,8 @@ func TestSmimeServerMode(t *testing.T) {
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "reopen mailbox", err)
 	defer st.Close()
-	id, ok, _ := st.GetSmimeIdentity()
+	id, ok, err := st.GetSmimeIdentity()
+	mustNoErr(t, "read the stored identity", err)
 	if !ok || len(id.P12) == 0 {
 		t.Fatalf("not stored as server mode: ok=%v p12=%d bytes", ok, len(id.P12))
 	}
@@ -114,7 +115,7 @@ func smimePost(t *testing.T, srv *Server, secret []byte, dir string, body any) *
 // smimeReq issues an authenticated GET/DELETE to the certificate endpoint.
 func smimeReq(t *testing.T, srv *Server, secret []byte, method, dir string) *httptest.ResponseRecorder {
 	t.Helper()
-	token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+	token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
 	req := httptest.NewRequest(method, "/api/v1/smime/certificate", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
 	rec := httptest.NewRecorder()
@@ -145,8 +146,7 @@ func TestSmimePublishViewDelete(t *testing.T) {
 		t.Errorf("delete = %d", rec.Code)
 	}
 	rec := smimeReq(t, srv, secret, http.MethodGet, dir)
-	var got map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	got := okBody[map[string]any](t, "view after delete", rec)
 	if got["hasKeys"] != false {
 		t.Errorf("after delete, view = %v, want hasKeys:false", got)
 	}

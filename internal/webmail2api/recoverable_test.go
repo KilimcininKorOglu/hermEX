@@ -32,7 +32,7 @@ func TestDeleteFromTrashGoesToDumpster(t *testing.T) {
 
 	secret := []byte("recoverable-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
-	token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+	token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
 	req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/v1/mail/delete?id=trash:%d", info.UID), nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
 	rec := httptest.NewRecorder()
