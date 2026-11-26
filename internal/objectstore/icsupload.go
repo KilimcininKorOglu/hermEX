@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"sync/atomic"
 	"time"
 
+	"hermex/internal/atomicfile"
 	"hermex/internal/ics"
 	"hermex/internal/mapi"
 	"hermex/internal/oxcmail"
@@ -660,7 +660,7 @@ func (s *Store) moveIndexEntry(srcMID, destFolderID, dstMID int64) error {
 	}
 	// The cache holds the bytes the recorded size counts, so it moves with the id.
 	// A missing one is regenerated on the next read.
-	if err := os.Rename(s.emlPath(srcName), s.emlPath(dstName)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := atomicfile.SyncRename(s.emlPath(srcName), s.emlPath(dstName)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
 	return nil
