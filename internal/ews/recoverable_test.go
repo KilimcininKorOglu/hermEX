@@ -21,7 +21,7 @@ func TestFindItemRecoverableItemsDeletions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inbox, _ := st.ListMessages(int64(mapi.PrivateFIDInbox))
+	inbox := mustListMessages(t, st, int64(mapi.PrivateFIDInbox))
 	if len(inbox) != 1 {
 		st.Close()
 		t.Fatalf("seed inbox = %d, want 1", len(inbox))
@@ -62,7 +62,7 @@ func TestMoveItemRecoverFromDumpster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inbox, _ := st.ListMessages(int64(mapi.PrivateFIDInbox))
+	inbox := mustListMessages(t, st, int64(mapi.PrivateFIDInbox))
 	if len(inbox) != 1 {
 		st.Close()
 		t.Fatalf("seed inbox = %d, want 1", len(inbox))
@@ -91,13 +91,13 @@ func TestMoveItemRecoverFromDumpster(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st2.Close()
-	if drafts, _ := st2.ListMessages(int64(mapi.PrivateFIDDraft)); len(drafts) != 1 {
+	if drafts := mustListMessages(t, st2, int64(mapi.PrivateFIDDraft)); len(drafts) != 1 {
 		t.Errorf("drafts after recover = %d, want 1 (restored to the chosen target)", len(drafts))
 	}
-	if live, _ := st2.ListMessages(int64(mapi.PrivateFIDInbox)); len(live) != 0 {
+	if live := mustListMessages(t, st2, int64(mapi.PrivateFIDInbox)); len(live) != 0 {
 		t.Errorf("inbox after recover = %d, want 0 (restored to Drafts, not the original parent)", len(live))
 	}
-	if dump, _ := st2.ListAllSoftDeleted(); len(dump) != 0 {
+	if dump := mustListAllSoftDeleted(t, st2); len(dump) != 0 {
 		t.Errorf("dumpster after recover = %d, want 0 (item left the dumpster)", len(dump))
 	}
 }

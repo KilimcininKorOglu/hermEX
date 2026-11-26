@@ -57,9 +57,9 @@ func TestSendItemDeliversAndConsumesDraft(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	inbox, _ := st.ListMessages(int64(mapi.PrivateFIDInbox))
-	sent, _ := st.ListMessages(int64(mapi.PrivateFIDSentItems))
-	drafts, _ := st.ListMessages(int64(mapi.PrivateFIDDraft))
+	inbox := mustListMessages(t, st, int64(mapi.PrivateFIDInbox))
+	sent := mustListMessages(t, st, int64(mapi.PrivateFIDSentItems))
+	drafts := mustListMessages(t, st, int64(mapi.PrivateFIDDraft))
 	if len(inbox) != 1 {
 		t.Errorf("inbox = %d, want 1 (delivered to self)", len(inbox))
 	}
@@ -87,9 +87,9 @@ func TestSendItemNoSaveConsumesDraft(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	inbox, _ := st.ListMessages(int64(mapi.PrivateFIDInbox))
-	sent, _ := st.ListMessages(int64(mapi.PrivateFIDSentItems))
-	drafts, _ := st.ListMessages(int64(mapi.PrivateFIDDraft))
+	inbox := mustListMessages(t, st, int64(mapi.PrivateFIDInbox))
+	sent := mustListMessages(t, st, int64(mapi.PrivateFIDSentItems))
+	drafts := mustListMessages(t, st, int64(mapi.PrivateFIDDraft))
 	if len(inbox) != 1 {
 		t.Errorf("inbox = %d, want 1 (delivered to self)", len(inbox))
 	}
@@ -118,7 +118,7 @@ func TestSendItemInvalidSaveSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if drafts, _ := st.ListMessages(int64(mapi.PrivateFIDDraft)); len(drafts) != 1 {
+	if drafts := mustListMessages(t, st, int64(mapi.PrivateFIDDraft)); len(drafts) != 1 {
 		t.Errorf("drafts = %d, want 1 (rejected send must not consume the draft)", len(drafts))
 	}
 }
@@ -226,7 +226,7 @@ func TestSendItemRelaysExternal(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if drafts, _ := st.ListMessages(int64(mapi.PrivateFIDDraft)); len(drafts) != 0 {
+	if drafts := mustListMessages(t, st, int64(mapi.PrivateFIDDraft)); len(drafts) != 0 {
 		t.Errorf("drafts = %d, want 0 (sent draft consumed)", len(drafts))
 	}
 }

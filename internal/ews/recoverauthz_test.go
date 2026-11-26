@@ -70,10 +70,10 @@ func TestMoveItemRecoveryRefusesForeignParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if dump, _ := st.ListAllSoftDeleted(); len(dump) != 1 {
+	if dump := mustListAllSoftDeleted(t, st); len(dump) != 1 {
 		t.Errorf("dumpster = %d items, want the message left untouched", len(dump))
 	}
-	if drafts, _ := st.ListMessages(int64(mapi.PrivateFIDDraft)); len(drafts) != 0 {
+	if drafts := mustListMessages(t, st, int64(mapi.PrivateFIDDraft)); len(drafts) != 0 {
 		t.Errorf("drafts = %d items, want the message never restored there", len(drafts))
 	}
 }

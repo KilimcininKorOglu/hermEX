@@ -101,7 +101,7 @@ func TestCreateItemRefusesAnUnownedFrom(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if msgs, _ := st.ListMessages(int64(mapi.PrivateFIDDraft)); len(msgs) != 0 {
+	if msgs := mustListMessages(t, st, int64(mapi.PrivateFIDDraft)); len(msgs) != 0 {
 		t.Errorf("drafts = %d, want 0: a refused identity must store nothing", len(msgs))
 	}
 }

@@ -55,7 +55,7 @@ func TestDeleteItemHard(t *testing.T) {
 	if len(msgs) != 0 {
 		t.Errorf("inbox = %d, want 0 after hard delete", len(msgs))
 	}
-	if dump, _ := st.ListSoftDeleted(int64(mapi.PrivateFIDInbox)); len(dump) != 1 {
+	if dump := mustListSoftDeleted(t, st, int64(mapi.PrivateFIDInbox)); len(dump) != 1 {
 		t.Errorf("dumpster = %d, want 1 after EWS HardDelete (recoverable)", len(dump))
 	}
 }
@@ -75,8 +75,8 @@ func TestDeleteItemSoft(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	inbox, _ := st.ListMessages(int64(mapi.PrivateFIDInbox))
-	deleted, _ := st.ListMessages(int64(mapi.PrivateFIDDeletedItems))
+	inbox := mustListMessages(t, st, int64(mapi.PrivateFIDInbox))
+	deleted := mustListMessages(t, st, int64(mapi.PrivateFIDDeletedItems))
 	if len(inbox) != 0 {
 		t.Errorf("inbox = %d, want 0 after soft delete", len(inbox))
 	}
@@ -102,8 +102,8 @@ func TestMoveItem(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	inbox, _ := st.ListMessages(int64(mapi.PrivateFIDInbox))
-	drafts, _ := st.ListMessages(int64(mapi.PrivateFIDDraft))
+	inbox := mustListMessages(t, st, int64(mapi.PrivateFIDInbox))
+	drafts := mustListMessages(t, st, int64(mapi.PrivateFIDDraft))
 	if len(inbox) != 0 || len(drafts) != 1 {
 		t.Errorf("after move: inbox=%d drafts=%d, want 0 and 1", len(inbox), len(drafts))
 	}

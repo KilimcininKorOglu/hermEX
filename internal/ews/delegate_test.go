@@ -983,7 +983,7 @@ func TestSendItemCrossMailboxNeedsASendGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if drafts, _ := st.ListMessages(int64(mapi.PrivateFIDDraft)); len(drafts) != 1 {
+	if drafts := mustListMessages(t, st, int64(mapi.PrivateFIDDraft)); len(drafts) != 1 {
 		t.Errorf("a refused draft must stay in place, got %d drafts", len(drafts))
 	}
 }
@@ -1007,7 +1007,7 @@ func TestSendItemCrossMailboxWithGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if drafts, _ := st.ListMessages(int64(mapi.PrivateFIDDraft)); len(drafts) != 0 {
+	if drafts := mustListMessages(t, st, int64(mapi.PrivateFIDDraft)); len(drafts) != 0 {
 		t.Errorf("the sent draft must be consumed in the target mailbox, got %d", len(drafts))
 	}
 }

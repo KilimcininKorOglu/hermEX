@@ -52,8 +52,8 @@ func TestCreateItemSendAndSave(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	inbox, _ := st.ListMessages(int64(mapi.PrivateFIDInbox))
-	sent, _ := st.ListMessages(int64(mapi.PrivateFIDSentItems))
+	inbox := mustListMessages(t, st, int64(mapi.PrivateFIDInbox))
+	sent := mustListMessages(t, st, int64(mapi.PrivateFIDSentItems))
 	if len(inbox) != 1 {
 		t.Errorf("inbox = %d, want 1 (delivered to self)", len(inbox))
 	}
@@ -74,8 +74,8 @@ func TestCreateItemSaveOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	drafts, _ := st.ListMessages(int64(mapi.PrivateFIDDraft))
-	inbox, _ := st.ListMessages(int64(mapi.PrivateFIDInbox))
+	drafts := mustListMessages(t, st, int64(mapi.PrivateFIDDraft))
+	inbox := mustListMessages(t, st, int64(mapi.PrivateFIDInbox))
 	if len(drafts) != 1 {
 		t.Errorf("drafts = %d, want 1", len(drafts))
 	}
@@ -105,8 +105,8 @@ func TestCreateItemSendOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	inbox, _ := st.ListMessages(int64(mapi.PrivateFIDInbox))
-	sent, _ := st.ListMessages(int64(mapi.PrivateFIDSentItems))
+	inbox := mustListMessages(t, st, int64(mapi.PrivateFIDInbox))
+	sent := mustListMessages(t, st, int64(mapi.PrivateFIDSentItems))
 	if len(inbox) != 1 {
 		t.Errorf("inbox = %d, want 1 (delivered to self)", len(inbox))
 	}
@@ -193,7 +193,7 @@ func TestCreateItemLeavesTheOnlyCopyToAnExclusiveMailbox(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		sent, _ := st.ListMessages(int64(mapi.PrivateFIDSentItems))
+		sent := mustListMessages(t, st, int64(mapi.PrivateFIDSentItems))
 		st.Close()
 		if len(sent) != want {
 			t.Errorf("%s Sent Items holds %d, want %d", d, len(sent), want)
