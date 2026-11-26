@@ -107,6 +107,9 @@ func TestANamelessGroupIsRefused(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("a nameless group = %d, want 400: %s", rec.Code, rec.Body.String())
 	}
+	if names := contactNames(t, do); len(names) != 0 {
+		t.Errorf("the refused group was stored: %v", names)
+	}
 }
 
 // TestARefusedEditKeepsTheContact is why the check runs before the delete: an

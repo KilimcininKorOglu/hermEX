@@ -75,8 +75,8 @@ func TestDelegationAccessGrantsTheDelegateFolders(t *testing.T) {
 				t.Errorf("%s: folder %#x rights %#x, want %#x set and %#x clear", tc.body, fid, r, tc.wantBits, tc.wantNoBit)
 			}
 		}
-		if got, _ := listedRights(t, do, "bob@hermex.test"); got != tc.listed {
-			t.Errorf("%s: listed rights %q, want %q", tc.body, got, tc.listed)
+		if got, found := listedRights(t, do, "bob@hermex.test"); !found || got != tc.listed {
+			t.Errorf("%s: listed rights %q (listed %v), want %q", tc.body, got, found, tc.listed)
 		}
 	}
 }
@@ -96,8 +96,8 @@ func TestDelegationListShowsAccessGrantedElsewhere(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := listedRights(t, do, "carol@hermex.test"); got != "read,write" {
-		t.Errorf("carol listed rights %q, want read,write", got)
+	if got, found := listedRights(t, do, "carol@hermex.test"); !found || got != "read,write" {
+		t.Errorf("carol listed rights %q (listed %v), want read,write", got, found)
 	}
 	if got, _ := listedRights(t, do, "dave@hermex.test"); got != "" {
 		t.Errorf("dave listed rights %q, want none", got)
