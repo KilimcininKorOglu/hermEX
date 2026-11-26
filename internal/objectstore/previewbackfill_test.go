@@ -32,6 +32,9 @@ func TestBackfillPreviewsRepairsAnOldRow(t *testing.T) {
 	if _, err := st.idxdb.Exec(`UPDATE messages SET preview='', has_attach=0`); err != nil {
 		t.Fatal(err)
 	}
+	// A message indexed after the upgrade is already current: it is not counted
+	// and its row is not rewritten.
+	mustAppendMessage(t, st, int64(mapi.PrivateFIDInbox), []byte(plainMail), time.Now(), 0)
 
 	n, err := st.BackfillPreviews()
 	if err != nil {
@@ -49,6 +52,9 @@ func TestBackfillPreviewsRepairsAnOldRow(t *testing.T) {
 	}
 	if !msgs[0].HasAttachments {
 		t.Error("the attachment flag was not backfilled")
+	}
+	if !strings.HasPrefix(msgs[1].Preview, "The numbers are in.") {
+		t.Errorf("the current message's preview changed to %q", msgs[1].Preview)
 	}
 
 	assertBackfillIsIdempotent(t, st)

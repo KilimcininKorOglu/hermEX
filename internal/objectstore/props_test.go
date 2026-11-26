@@ -78,6 +78,12 @@ func TestStorePropertiesRoundTrip(t *testing.T) {
 	sub, err := s.GetStoreProperties(tag(0x1A, mapi.PtString8), tag(0x1C, mapi.PtBinary))
 	mustNoErr(t, "filtered get", err)
 	wantEq(t, "props returned by the filtered get", len(sub), 2)
+	subMap := asMap(sub)
+	for _, tg := range []mapi.PropTag{tag(0x1A, mapi.PtString8), tag(0x1C, mapi.PtBinary)} {
+		if _, ok := subMap[tg]; !ok {
+			t.Errorf("filtered get dropped the requested %s and returned %v", tg, sub)
+		}
+	}
 
 	// Overwrite replaces the value (upsert).
 	mustNoErr(t, "upsert store property",
@@ -102,6 +108,17 @@ func wantSameValues(t *testing.T, want mapi.PropertyValues, got map[mapi.PropTag
 			t.Errorf("%s = %#v (%T), want %#v (%T)", w.Tag, g, g, w.Value, w.Value)
 		}
 	}
+}
+
+// TestFolderPropertiesRefuseAMissingFolder: a property write aimed at a folder
+// the store does not hold is refused and leaves no orphan property row.
+func TestFolderPropertiesRefuseAMissingFolder(t *testing.T) {
+	s := openTestStore(t)
+	const missing = int64(0x7777)
+	if err := s.SetFolderProperties(missing, allTypeProps()); err == nil {
+		t.Error("a property write to a missing folder succeeded")
+	}
+	wantRows(t, s, "orphan folder property rows", 0, `SELECT COUNT(*) FROM folder_properties WHERE folder_id=?`, missing)
 }
 
 func TestFolderPropertiesRoundTrip(t *testing.T) {
