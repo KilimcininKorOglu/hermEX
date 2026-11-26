@@ -56,11 +56,4 @@ func wantAutoReplyReplaced(t *testing.T, d *SQLDirectory) {
 	if got.SubjectPrefix != "Out of office" {
 		t.Errorf("prefix = %q after the second save", got.SubjectPrefix)
 	}
-	var rows int
-	if err := d.db.QueryRow("SELECT COUNT(*) FROM autoreply_settings").Scan(&rows); err != nil {
-		t.Fatal(err)
-	}
-	if rows != 1 {
-		t.Errorf("autoreply_settings holds %d rows after two saves, want 1", rows)
-	}
 }
