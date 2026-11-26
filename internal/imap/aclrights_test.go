@@ -21,6 +21,17 @@ func TestACLRightsFollowRFC4314(t *testing.T) {
 			t.Errorf("rights %q were accepted, want BAD for the unrecognized right", bad)
 		}
 	}
+	if r, ok := aclToRights("lrswipkxtea"); !ok || r == 0 {
+		t.Errorf("the standard rights were refused (%#x, %v)", r, ok)
+	}
+	if r, ok := aclToRights(""); !ok || r != 0 {
+		t.Errorf("an empty rights string = %#x, %v; want no rights, accepted", r, ok)
+	}
+}
+
+// TestACLObsoleteRightsExpand follows RFC 4314 2.1.1: the obsolete "d" names
+// the delete right ("et") and "c" the create right ("kx").
+func TestACLObsoleteRightsExpand(t *testing.T) {
 	d, ok := aclToRights("d")
 	et, _ := aclToRights("et")
 	if !ok || d != et {
@@ -30,12 +41,6 @@ func TestACLRightsFollowRFC4314(t *testing.T) {
 	kx, _ := aclToRights("kx")
 	if !ok || c != kx {
 		t.Errorf(`"c" = %#x (ok %v), want the rights of "kx" %#x`, c, ok, kx)
-	}
-	if r, ok := aclToRights("lrswipkxtea"); !ok || r == 0 {
-		t.Errorf("the standard rights were refused (%#x, %v)", r, ok)
-	}
-	if r, ok := aclToRights(""); !ok || r != 0 {
-		t.Errorf("an empty rights string = %#x, %v; want no rights, accepted", r, ok)
 	}
 }
 

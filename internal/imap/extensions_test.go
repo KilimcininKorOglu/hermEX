@@ -544,26 +544,37 @@ func TestIMAPACL(t *testing.T) {
 		t.Errorf("bob rights after +w = %q, want w added to r", got)
 	}
 
-	// RFC 4314 2.1.1: a grantable delete or create member right puts "d" and "c"
-	// in the LISTRIGHTS response.
-	if lr := strings.Join(c.mustOK("a7", "LISTRIGHTS INBOX bob@hermex.test"), " "); !strings.Contains(lr, "LISTRIGHTS") || !strings.HasSuffix(strings.TrimSpace(strings.SplitN(lr, "\r\n", 2)[0]), " c d") {
-		t.Errorf("LISTRIGHTS = %q, want a LISTRIGHTS response that lists c and d", lr)
-	}
-
-	// A grant opens the mailbox to its identifier, which the mailbox surfaces keep
-	// inside the organization: an account of another organization, or an
-	// identifier that names no account, is refused and stored nowhere.
-	for i, id := range []string{"mallory@other-org.test", "ghost@nowhere.test"} {
-		wantStatus(t, "SETACL for "+id, c, fmt.Sprintf("x%d", i), "SETACL INBOX "+id+" lr", "NO")
-		if acl := strings.Join(c.mustOK(fmt.Sprintf("y%d", i), "GETACL INBOX"), " "); strings.Contains(acl, id) {
-			t.Errorf("GETACL after a refused SETACL for %s = %q", id, acl)
-		}
-	}
+	checkListRightsVirtual(t, c)
+	checkSetACLRefusesOutsiders(t, c)
 
 	// Revoke bob entirely.
 	c.mustOK("a8", "DELETEACL INBOX bob@hermex.test")
 	if acl := strings.Join(c.mustOK("a9", "GETACL INBOX"), " "); strings.Contains(acl, `"bob@hermex.test"`) {
 		t.Errorf("GETACL after DELETEACL = %q, want bob removed", acl)
+	}
+}
+
+// checkListRightsVirtual asserts RFC 4314 2.1.1: a grantable delete or create
+// member right puts "d" and "c" in the LISTRIGHTS response.
+func checkListRightsVirtual(t *testing.T, c *testClient) {
+	t.Helper()
+	lr := strings.Join(c.mustOK("a7", "LISTRIGHTS INBOX bob@hermex.test"), " ")
+	if !strings.Contains(lr, "LISTRIGHTS") || !strings.HasSuffix(strings.TrimSpace(strings.SplitN(lr, "\r\n", 2)[0]), " c d") {
+		t.Errorf("LISTRIGHTS = %q, want a LISTRIGHTS response that lists c and d", lr)
+	}
+}
+
+// checkSetACLRefusesOutsiders asserts that a grant, which opens the mailbox to
+// its identifier, stays inside the organization: an account of another
+// organization, or an identifier that names no account, is refused and stored
+// nowhere.
+func checkSetACLRefusesOutsiders(t *testing.T, c *testClient) {
+	t.Helper()
+	for i, id := range []string{"mallory@other-org.test", "ghost@nowhere.test"} {
+		wantStatus(t, "SETACL for "+id, c, fmt.Sprintf("x%d", i), "SETACL INBOX "+id+" lr", "NO")
+		if acl := strings.Join(c.mustOK(fmt.Sprintf("y%d", i), "GETACL INBOX"), " "); strings.Contains(acl, id) {
+			t.Errorf("GETACL after a refused SETACL for %s = %q", id, acl)
+		}
 	}
 }
 

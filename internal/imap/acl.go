@@ -179,23 +179,14 @@ func (c *conn) cmdSetACL(tag string, args []token) {
 		c.bad(tag, "SETACL requires a mailbox, identifier, and rights")
 		return
 	}
-	mode := byte(0)
-	if strings.HasPrefix(rightsStr, "+") || strings.HasPrefix(rightsStr, "-") {
-		mode, rightsStr = rightsStr[0], rightsStr[1:]
-	}
-	requested, known := aclToRights(rightsStr)
+	mode, requested, known := parseACLChange(rightsStr)
 	if !known {
 		c.bad(tag, "SETACL names an unrecognized right")
 		return
 	}
-	// A grant opens the mailbox to its identifier, and the mailbox surfaces keep
-	// that inside the organization, so an identifier outside the caller's
-	// organization is refused; a removal ("-") is always allowed.
-	if mode != '-' {
-		if reach, err := directory.MayReach(c.srv.Accounts, c.user, id); err != nil || !reach {
-			c.no(tag, "[ACL] the identifier is not an account of this organization")
-			return
-		}
+	if !c.mayGrantTo(mode, id) {
+		c.no(tag, "[ACL] the identifier is not an account of this organization")
+		return
 	}
 	newRights, err := adjustedRights(st, fid, id, mode, requested)
 	if err != nil {
@@ -212,6 +203,29 @@ func (c *conn) cmdSetACL(tag string, args []token) {
 		return
 	}
 	c.ok(tag, "SETACL completed")
+}
+
+// parseACLChange splits a SETACL rights argument into its mode ('+', '-' or 0
+// for a replacement) and the rights it names; known is false when it names an
+// unrecognized right.
+func parseACLChange(s string) (mode byte, rights uint32, known bool) {
+	if strings.HasPrefix(s, "+") || strings.HasPrefix(s, "-") {
+		mode, s = s[0], s[1:]
+	}
+	rights, known = aclToRights(s)
+	return mode, rights, known
+}
+
+// mayGrantTo reports whether the caller may give id rights. A grant opens the
+// mailbox to its identifier, and the mailbox surfaces keep that inside the
+// organization, so an identifier outside the caller's organization is refused;
+// a removal ("-") is always allowed.
+func (c *conn) mayGrantTo(mode byte, id string) bool {
+	if mode == '-' {
+		return true
+	}
+	reach, err := directory.MayReach(c.srv.Accounts, c.user, id)
+	return err == nil && reach
 }
 
 // cmdDeleteACL handles DELETEACL <mailbox> <identifier>: it drops an identifier's

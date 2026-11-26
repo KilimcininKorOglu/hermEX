@@ -43,15 +43,8 @@ func parseSortCriteria(cur *tokenCursor) ([]sortCrit, bool) {
 		if t.kind == tRParen {
 			break
 		}
-		key := strings.ToUpper(t.val)
-		switch {
-		case key == "REVERSE":
-			reverse = true
-		case !sortKeyNames[key] || t.kind == tLParen:
+		if crits, reverse, ok = addSortCrit(crits, reverse, t); !ok {
 			return nil, false
-		default:
-			crits = append(crits, sortCrit{key: key, reverse: reverse})
-			reverse = false
 		}
 	}
 	// A REVERSE with no key after it is outside the grammar.
@@ -59,6 +52,20 @@ func parseSortCriteria(cur *tokenCursor) ([]sortCrit, bool) {
 		return nil, false
 	}
 	return crits, true
+}
+
+// addSortCrit applies one criteria token: REVERSE marks the next key, a known
+// key is appended with the pending REVERSE, anything else fails.
+func addSortCrit(crits []sortCrit, reverse bool, t token) ([]sortCrit, bool, bool) {
+	key := strings.ToUpper(t.val)
+	switch {
+	case key == "REVERSE":
+		return crits, true, true
+	case !sortKeyNames[key] || t.kind == tLParen:
+		return nil, false, false
+	default:
+		return append(crits, sortCrit{key: key, reverse: reverse}), false, true
+	}
 }
 
 // sortKeys holds one message's sortable attributes.
