@@ -207,7 +207,10 @@ func TestUpdateItemStillMarksRead(t *testing.T) {
 	}
 	st, msgs := inboxUIDs(t, dir)
 	defer st.Close()
-	flags, _ := st.MessageFlags(int64(mapi.PrivateFIDInbox), msgs[0].UID)
+	flags, err := st.MessageFlags(int64(mapi.PrivateFIDInbox), msgs[0].UID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if flags&objectstore.FlagSeen == 0 {
 		t.Error("the read flag did not survive the content rewrite")
 	}

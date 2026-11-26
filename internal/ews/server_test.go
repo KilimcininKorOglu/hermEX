@@ -123,7 +123,10 @@ func TestRequiresAuth(t *testing.T) {
 // TestOptions confirms OPTIONS advertises POST.
 func TestOptions(t *testing.T) {
 	ts := newTestServer(t)
-	req, _ := http.NewRequest(http.MethodOptions, ts.URL+"/EWS/Exchange.asmx", nil)
+	req, err := http.NewRequest(http.MethodOptions, ts.URL+"/EWS/Exchange.asmx", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	req.SetBasicAuth(testUser, testPass)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -219,7 +222,10 @@ func TestMalformedEnvelope(t *testing.T) {
 // the /rpc/rpcproxy.dll endpoint.
 func TestAutodiscover(t *testing.T) {
 	ts := newTestServer(t)
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/autodiscover/autodiscover.xml", strings.NewReader("<Autodiscover/>"))
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/autodiscover/autodiscover.xml", strings.NewReader("<Autodiscover/>"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	req.SetBasicAuth(testUser, testPass)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

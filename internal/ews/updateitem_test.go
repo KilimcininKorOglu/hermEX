@@ -32,7 +32,10 @@ func TestUpdateItemMarkRead(t *testing.T) {
 	}
 	st, msgs := inboxUIDs(t, dir)
 	defer st.Close()
-	flags, _ := st.MessageFlags(int64(mapi.PrivateFIDInbox), msgs[0].UID)
+	flags, err := st.MessageFlags(int64(mapi.PrivateFIDInbox), msgs[0].UID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if flags&objectstore.FlagSeen == 0 {
 		t.Errorf("IsRead=true did not set the Seen flag")
 	}
@@ -133,12 +136,16 @@ func TestCreateAndDeleteFolder(t *testing.T) {
 
 // TestDeleteBuiltinFolderRejected confirms a built-in folder cannot be deleted.
 func TestDeleteBuiltinFolderRejected(t *testing.T) {
-	ts, _ := seededWithMessage(t)
+	ts, dir := seededWithMessage(t, "Subject: keep\r\n\r\nbody\r\n")
 	inboxID := oxews.EncodeFolderID(int64(mapi.PrivateFIDInbox))
 	df := wrapRequest(`<DeleteFolder DeleteType="HardDelete" xmlns="` + nsMessages + `">` +
 		`<FolderIds><t:FolderId Id="` + inboxID + `" xmlns:t="` + nsTypes + `"/></FolderIds></DeleteFolder>`)
 	_, out := soapPost(t, ts, df, true)
 	if !strings.Contains(out, "ErrorDeleteDistinguishedFolder") {
 		t.Errorf("built-in folder delete should be rejected: %s", out)
+	}
+	// The refused delete must leave the Inbox and its seeded message in place.
+	if n := folderCount(t, dir, int64(mapi.PrivateFIDInbox)); n != 1 {
+		t.Errorf("Inbox holds %d messages after the refused delete, want 1", n)
 	}
 }

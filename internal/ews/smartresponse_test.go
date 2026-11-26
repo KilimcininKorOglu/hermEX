@@ -176,7 +176,11 @@ func TestSentReplyMarksTheOriginal(t *testing.T) {
 	if v, _ := props.Get(mapi.PrLastVerbExecuted); v != mapi.NoteVerbReplyToSender {
 		t.Errorf("PidTagLastVerbExecuted = %v, want %d", v, mapi.NoteVerbReplyToSender)
 	}
-	if flags, _ := st.MessageFlags(int64(mapi.PrivateFIDInbox), uid); flags&objectstore.FlagAnswered == 0 {
+	flags, err := st.MessageFlags(int64(mapi.PrivateFIDInbox), uid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flags&objectstore.FlagAnswered == 0 {
 		t.Error("the original is not marked \\Answered")
 	}
 }

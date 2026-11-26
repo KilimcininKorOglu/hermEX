@@ -145,7 +145,9 @@ func grantingServer(t *testing.T, other string, onBehalf bool) (*httptest.Server
 	if err := grant([]string{testUser}); err != nil {
 		t.Fatal(err)
 	}
-	_ = st.Close()
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
 	accs := directory.StaticAccounts{
 		testUser: {Password: testPass, MailboxPath: dir},
 		other:    {Password: testPass, MailboxPath: otherDir},
