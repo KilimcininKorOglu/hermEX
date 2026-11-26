@@ -137,7 +137,9 @@ func statusFrom(t *testing.T, addr string, comps []lifecycle.Component) Status {
 	go func() { errc <- comps[0].Start() }()
 	t.Cleanup(func() {
 		_ = comps[0].Shutdown(context.Background())
-		<-errc
+		if err := <-errc; !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("health server Start returned %v, want http.ErrServerClosed", err)
+		}
 	})
 	var resp *http.Response
 	var err error
