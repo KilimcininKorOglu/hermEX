@@ -80,7 +80,7 @@ func TestCopyPropertiesAndCopyTo(t *testing.T) {
 	cp, _ := sess.Dispatch(buildCopyProperties(0, 1, 0, []mapi.PropTag{mapi.PrSubject}), []uint32{srcH, dstH})
 	copyOK(cp, ropCopyProperties, "CopyProperties")
 	dstID := int64(mapi.EID(saveChangesEID(t, mustDispatch(sess, buildSaveChangesMessage(0, 1), logonH, dstH))).GCValue())
-	cpProps, _ := store.GetMessageProperties(dstID, mapi.PrSubject, mapi.PrImportance)
+	cpProps := mustMessageProps(t, store, dstID, mapi.PrSubject, mapi.PrImportance)
 	if v, _ := cpProps.Get(mapi.PrSubject); v != "COPYSRC" {
 		t.Errorf("CopyProperties subject = %v, want COPYSRC", v)
 	}
@@ -94,7 +94,7 @@ func TestCopyPropertiesAndCopyTo(t *testing.T) {
 	ct, _ := sess.Dispatch(buildCopyTo(0, 1, 0, []mapi.PropTag{mapi.PrImportance}), []uint32{srcH, dst2H})
 	copyOK(ct, ropCopyTo, "CopyTo")
 	dst2ID := int64(mapi.EID(saveChangesEID(t, mustDispatch(sess, buildSaveChangesMessage(0, 1), logonH, dst2H))).GCValue())
-	ctProps, _ := store.GetMessageProperties(dst2ID, mapi.PrSubject, mapi.PrImportance)
+	ctProps := mustMessageProps(t, store, dst2ID, mapi.PrSubject, mapi.PrImportance)
 	if v, _ := ctProps.Get(mapi.PrSubject); v != "COPYSRC" {
 		t.Errorf("CopyTo subject = %v, want COPYSRC", v)
 	}
@@ -176,11 +176,12 @@ func TestCopyReflectsBufferedEdits(t *testing.T) {
 	// CopyTo into a fresh compose message, excluding nothing, then save it.
 	_, h = sess.Dispatch(buildCreateMessage(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
 	dstH := h[1]
-	sess.Dispatch(buildCopyTo(0, 1, 0, nil), []uint32{srcH, dstH})
+	ct, _ := sess.Dispatch(buildCopyTo(0, 1, 0, nil), []uint32{srcH, dstH})
+	ropOK(t, ct, ropCopyTo, "CopyTo")
 	dstID := int64(mapi.EID(saveChangesEID(t, mustDispatch(sess, buildSaveChangesMessage(0, 1), logonH, dstH))).GCValue())
 
 	// The destination carries the buffered importance, not the source's stored 1.
-	props, _ := store.GetMessageProperties(dstID, mapi.PrImportance)
+	props := mustMessageProps(t, store, dstID, mapi.PrImportance)
 	if v, ok := props.Get(mapi.PrImportance); !ok || v != int32(7) {
 		t.Errorf("CopyTo importance = %v (present=%v), want the source's buffered 7", v, ok)
 	}
@@ -296,6 +297,17 @@ func wantSubObjectCounts(t *testing.T, m *oxcmail.Message, recips, attachs int, 
 		t.Fatalf("%s: copied recips=%d attachs=%d, want recips=%d attachs=%d",
 			what, len(m.Recipients), len(m.Attachments), recips, attachs)
 	}
+}
+
+// mustMessageProps reads tags from a stored message and fails the test when the
+// read itself fails, so an absence check never passes on an empty result.
+func mustMessageProps(t *testing.T, store *objectstore.Store, id int64, tags ...mapi.PropTag) mapi.PropertyValues {
+	t.Helper()
+	props, err := store.GetMessageProperties(id, tags...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return props
 }
 
 // asBytes coerces a property value to its byte slice (PtBinary), or nil.
