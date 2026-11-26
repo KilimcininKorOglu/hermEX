@@ -16,18 +16,42 @@ type PushSubscription struct {
 	CreatedAt int64
 }
 
+// ErrPushEndpointTaken reports a save naming an endpoint another account already
+// holds.
+var ErrPushEndpointTaken = errors.New("directory: the push endpoint belongs to another account")
+
 // SavePushSubscription stores or refreshes a subscription, keyed by endpoint, so a
 // browser re-subscribing with new keys updates its row rather than duplicating it.
+// An endpoint stays with the account that saved it first: a save by another account
+// changes nothing and reports ErrPushEndpointTaken, because moving the row would send
+// one user's mail notices to the other's browser.
 func (d *SQLDirectory) SavePushSubscription(s PushSubscription) error {
 	if s.Endpoint == "" || s.Email == "" || s.P256dh == "" || s.Auth == "" {
 		return errors.New("push subscription needs endpoint, email, p256dh and auth")
 	}
-	_, err := d.db.Exec(
+	email := strings.ToLower(s.Email)
+	res, err := d.db.Exec(
 		`INSERT INTO push_subscriptions (endpoint, email, p256dh, auth, created_at)
 		 VALUES (?, ?, ?, ?, ?)
-		 ON DUPLICATE KEY UPDATE email = VALUES(email), p256dh = VALUES(p256dh), auth = VALUES(auth)`,
-		s.Endpoint, strings.ToLower(s.Email), s.P256dh, s.Auth, s.CreatedAt)
-	return err
+		 ON DUPLICATE KEY UPDATE p256dh = IF(email = VALUES(email), VALUES(p256dh), p256dh),
+		   auth = IF(email = VALUES(email), VALUES(auth), auth)`,
+		s.Endpoint, email, s.P256dh, s.Auth, s.CreatedAt)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n > 0 {
+		return err
+	}
+	// Nothing changed: either the owner re-saved the same keys, or another account
+	// named this endpoint.
+	var owner string
+	if err := d.db.QueryRow(`SELECT email FROM push_subscriptions WHERE endpoint = ?`, s.Endpoint).Scan(&owner); err != nil {
+		return err
+	}
+	if owner != email {
+		return ErrPushEndpointTaken
+	}
+	return nil
 }
 
 // ListPushSubscriptions returns a user's subscriptions (their browser devices).
