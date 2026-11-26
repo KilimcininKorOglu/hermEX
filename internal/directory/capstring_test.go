@@ -25,9 +25,14 @@ func TestCapStringKeepsWholeCharacters(t *testing.T) {
 func TestAQuarantineSubjectCutInsideACharacterIsStored(t *testing.T) {
 	d, _ := freshDirectory(t)
 	dom := mustCreateDomain(t, d, t.TempDir(), "acme.test")
-	_, err := d.QuarantineMessage(QuarantineEntry{
+	id, err := d.QuarantineMessage(QuarantineEntry{
 		Direction: "inbound", MailFrom: "a@b.example", Recipients: []string{"x@acme.test"},
 		Subject: strings.Repeat("a", 254) + "şşş", VirusName: "Eicar", DomainID: dom, CreatedAt: 1,
 	})
 	mustNoErr(t, "quarantine a message with a long non-ASCII subject", err)
+	rec, ok, err := d.GetQuarantine(id)
+	mustNoErr(t, "read the record back", err)
+	wantEq(t, "record found", ok, true)
+	// The cut backs off to the last whole character within 255 bytes.
+	wantEq(t, "stored subject", rec.Subject, strings.Repeat("a", 254))
 }
