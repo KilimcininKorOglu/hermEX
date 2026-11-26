@@ -932,6 +932,8 @@ const (
 	userExistsQuery   = `SELECT 1 FROM users WHERE username = ?`
 	orgExistsQuery    = `SELECT 1 FROM orgs WHERE id = ?`
 	domainExistsQuery = `SELECT 1 FROM domains WHERE id = ?`
+	// domainNameExistsQuery confirms a domain addressed by its name.
+	domainNameExistsQuery = `SELECT 1 FROM domains WHERE domainname = ?`
 )
 
 // updateFound reports whether an UPDATE found its row. MariaDB counts only the
