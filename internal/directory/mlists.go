@@ -300,7 +300,10 @@ func (d *SQLDirectory) DeleteMList(listname string) (bool, error) {
 	if _, err := tx.Exec(`DELETE FROM aliases WHERE mainname = ?`, listname); err != nil {
 		return false, err
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
 	return n > 0, tx.Commit()
 }
 

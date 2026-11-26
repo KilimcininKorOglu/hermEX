@@ -261,6 +261,8 @@ func (d *SQLDirectory) contactRowID(email string) (id int64, domain string, foun
 // DeleteLDAPContact removes a contact the downsync owns, used when it disappears from the
 // LDAP directory. A contact with no LDAP id is left alone, so a hand-made contact is never
 // pruned by a sync.
+// DeleteLDAPContact removes a contact the LDAP downsync filed, reporting whether one
+// was removed. A hand-made contact carries no LDAP id and is never removed here.
 func (d *SQLDirectory) DeleteLDAPContact(email string) (bool, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	res, err := d.db.Exec(
@@ -268,7 +270,10 @@ func (d *SQLDirectory) DeleteLDAPContact(email string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
 	return n > 0, nil
 }
 

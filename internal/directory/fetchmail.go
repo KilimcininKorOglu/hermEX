@@ -174,7 +174,10 @@ func (d *SQLDirectory) DeleteFetchmail(id int64) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
 	return n > 0, nil
 }
 
