@@ -30,7 +30,8 @@ func TestSQLDirectoryUserDetailLifecycle(t *testing.T) {
 	wantEq(t, "SMTP", u.SMTP, true)
 	wantEq(t, "LDAP-mastered", u.LDAP, false)
 	wantEq(t, "status", u.Status, 0)
-	_, ok, _ := d.GetUser("ghost@hermex.test")
+	_, ok, err := d.GetUser("ghost@hermex.test")
+	mustNoErr(t, "read an unknown user", err)
 	wantEq(t, "GetUser(unknown) found", ok, false)
 
 	// UpdateUser writes the editable subset; identity (username/maildir) is
@@ -48,7 +49,8 @@ func TestSQLDirectoryUserDetailLifecycle(t *testing.T) {
 	wantEq(t, "POP3IMAP after update", u.POP3IMAP, true)
 	wantEq(t, "SMTP after update", u.SMTP, false)
 	wantEq(t, "maildir after update (identity is immutable)", u.Maildir, maildir)
-	unknown, _ := d.UpdateUser("ghost@hermex.test", UserUpdate{})
+	unknown, err := d.UpdateUser("ghost@hermex.test", UserUpdate{})
+	mustNoErr(t, "update an unknown user", err)
 	wantEq(t, "UpdateUser(unknown) found", unknown, false)
 
 	wantForeignBitsPreserved(t, d, db)
@@ -99,14 +101,16 @@ func wantUserDeleteFreesAddress(t *testing.T, d *SQLDirectory, db *sql.DB, maild
 	gone, err := d.DeleteUser("alice@hermex.test", true)
 	mustNoErr(t, "delete user", err)
 	wantEq(t, "DeleteUser reported the user existed", gone, true)
-	_, stillThere, _ := d.GetUser("alice@hermex.test")
+	_, stillThere, err := d.GetUser("alice@hermex.test")
+	mustNoErr(t, "read the deleted user", err)
 	wantEq(t, "user present after deletion", stillThere, false)
 	if _, err := os.Stat(maildir); !os.IsNotExist(err) {
 		t.Errorf("deleteFiles left the maildir at %q (stat err %v)", maildir, err)
 	}
 	wantRows(t, db, "orphaned alias rows (they would keep the address blocked)", 0,
 		`SELECT COUNT(*) FROM aliases WHERE aliasname = ?`, "a.lias@hermex.test")
-	again, _ := d.DeleteUser("alice@hermex.test", false)
+	again, err := d.DeleteUser("alice@hermex.test", false)
+	mustNoErr(t, "delete the user again", err)
 	wantEq(t, "DeleteUser(already gone)", again, false)
 }
 
@@ -174,7 +178,8 @@ func TestSQLDirectoryAltnames(t *testing.T) {
 	wantAltnames(t, d, "after the replace", "alice3")
 
 	// An unknown user is reported not-found.
-	ghost, _ := d.SetAltnames("ghost@hermex.test", []string{"x"})
+	ghost, err := d.SetAltnames("ghost@hermex.test", []string{"x"})
+	mustNoErr(t, "set altnames for an unknown user", err)
 	wantEq(t, "SetAltnames(unknown) found a user", ghost, false)
 
 	// A name owned by another account is rejected (the altname UNIQUE key), and
@@ -227,7 +232,8 @@ func TestSQLDirectoryUserAliases(t *testing.T) {
 	wantEq(t, "a removed alias still resolves", stillResolves, false)
 
 	// Unknown user → not-found.
-	ghost, _ := d.SetAliasesFor("ghost@hermex.test", []string{"x@hermex.test"})
+	ghost, err := d.SetAliasesFor("ghost@hermex.test", []string{"x@hermex.test"})
+	mustNoErr(t, "set aliases for an unknown user", err)
 	wantEq(t, "SetAliasesFor(unknown) found a user", ghost, false)
 
 	// An address already in use is rejected and alice's set is preserved.
@@ -294,7 +300,8 @@ func TestSQLDirectoryUserProperties(t *testing.T) {
 	wantEq(t, "the foreign property after clearing the nickname", got[foreignTag], "do-not-touch")
 
 	// Unknown user → not found.
-	ghost, _ := d.SetUserProperties("ghost@hermex.test", map[uint32]string{prDisplayName: "x"})
+	ghost, err := d.SetUserProperties("ghost@hermex.test", map[uint32]string{prDisplayName: "x"})
+	mustNoErr(t, "set properties for an unknown user", err)
 	wantEq(t, "SetUserProperties(unknown) found a user", ghost, false)
 }
 

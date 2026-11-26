@@ -15,30 +15,29 @@ func enrolledUser(t *testing.T) (*SQLDirectory, string) {
 	t.Helper()
 	db := openTestDB(t)
 	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "ensure the schema", d.EnsureSchema())
 	cleanTables(t, db)
 	root := t.TempDir()
-	if _, err := d.CreateDomain("acme.test", filepath.Join(root, "acme.test")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.CreateUser("u@acme.test", "password1", filepath.Join(root, "u")); err != nil {
-		t.Fatal(err)
-	}
+	_, err := d.CreateDomain("acme.test", filepath.Join(root, "acme.test"))
+	mustNoErr(t, "create the domain", err)
+	_, err = d.CreateUser("u@acme.test", "password1", filepath.Join(root, "u"))
+	mustNoErr(t, "create the user", err)
 	return d, "u@acme.test"
+}
+
+// newSecret mints a TOTP secret and requires the mint to succeed.
+func newSecret(t *testing.T) string {
+	t.Helper()
+	secret, err := totp.NewSecret()
+	mustNoErr(t, "mint a secret", err)
+	return secret
 }
 
 // beginEnrollment starts an enrollment and returns its secret.
 func beginEnrollment(t *testing.T, d *SQLDirectory, user string) string {
 	t.Helper()
-	secret, err := totp.NewSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := d.BeginTOTPEnrollment(user, secret); err != nil {
-		t.Fatal(err)
-	}
+	secret := newSecret(t)
+	mustNoErr(t, "begin the enrollment", d.BeginTOTPEnrollment(user, secret))
 	return secret
 }
 
@@ -46,13 +45,41 @@ func beginEnrollment(t *testing.T, d *SQLDirectory, user string) string {
 func activate(t *testing.T, d *SQLDirectory, user string, step int64) []string {
 	t.Helper()
 	codes, hashes, err := totp.NewRecoveryCodes()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := d.ActivateTOTP(user, step, hashes); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "mint recovery codes", err)
+	mustNoErr(t, "activate the enrollment", d.ActivateTOTP(user, step, hashes))
 	return codes
+}
+
+// enrollment reads user's enrollment, requiring the read to succeed.
+func enrollment(t *testing.T, d *SQLDirectory, user string) (TOTPEnrollment, bool) {
+	t.Helper()
+	e, ok, err := d.TOTPEnrollment(user)
+	mustNoErr(t, "read the enrollment", err)
+	return e, ok
+}
+
+// stepAccepted presents step for user and reports whether it was accepted.
+func stepAccepted(t *testing.T, d *SQLDirectory, user string, step int64) bool {
+	t.Helper()
+	ok, err := d.ConsumeTOTPStep(user, step)
+	mustNoErr(t, "consume a step", err)
+	return ok
+}
+
+// codeAccepted presents a recovery code for user and reports whether it was accepted.
+func codeAccepted(t *testing.T, d *SQLDirectory, user, code string) bool {
+	t.Helper()
+	ok, err := d.ConsumeRecoveryCode(user, code)
+	mustNoErr(t, "consume a recovery code", err)
+	return ok
+}
+
+// codesRemaining counts user's unspent recovery codes.
+func codesRemaining(t *testing.T, d *SQLDirectory, user string) int {
+	t.Helper()
+	n, err := d.RecoveryCodesRemaining(user)
+	mustNoErr(t, "count the recovery codes", err)
+	return n
 }
 
 // TestAnEnrollmentIsPendingUntilActivated keeps an abandoned enrollment from
@@ -60,27 +87,18 @@ func activate(t *testing.T, d *SQLDirectory, user string, step int64) []string {
 // enrolled until a code has proved the user can produce one.
 func TestAnEnrollmentIsPendingUntilActivated(t *testing.T) {
 	d, user := enrolledUser(t)
-
-	if _, ok, err := d.TOTPEnrollment(user); err != nil || ok {
-		t.Fatalf("a fresh account reports an enrollment: ok %v err %v", ok, err)
-	}
+	_, ok := enrollment(t, d, user)
+	wantEq(t, "a fresh account reports an enrollment", ok, false)
 
 	secret := beginEnrollment(t, d, user)
-	e, ok, err := d.TOTPEnrollment(user)
-	if err != nil || !ok {
-		t.Fatalf("TOTPEnrollment = ok %v err %v", ok, err)
-	}
-	if e.Secret != secret {
-		t.Errorf("secret = %q, want %q", e.Secret, secret)
-	}
-	if e.Enabled {
-		t.Error("a pending enrollment reports as enabled")
-	}
+	e, ok := enrollment(t, d, user)
+	wantEq(t, "the pending enrollment is found", ok, true)
+	wantEq(t, "the pending secret", e.Secret, secret)
+	wantEq(t, "a pending enrollment reports as enabled", e.Enabled, false)
 
 	activate(t, d, user, 100)
-	if e, _, _ := d.TOTPEnrollment(user); !e.Enabled {
-		t.Error("the enrollment is still pending after activation")
-	}
+	e, _ = enrollment(t, d, user)
+	wantEq(t, "enabled after activation", e.Enabled, true)
 }
 
 // TestAPendingEnrollmentAcceptsNoCode is why the pending state exists. A secret
@@ -89,9 +107,7 @@ func TestAnEnrollmentIsPendingUntilActivated(t *testing.T) {
 func TestAPendingEnrollmentAcceptsNoCode(t *testing.T) {
 	d, user := enrolledUser(t)
 	beginEnrollment(t, d, user)
-	if ok, err := d.ConsumeTOTPStep(user, 100); err != nil || ok {
-		t.Errorf("a pending enrollment accepted a step: ok %v err %v", ok, err)
-	}
+	wantEq(t, "a pending enrollment accepted a step", stepAccepted(t, d, user, 100), false)
 }
 
 // TestActivationRecordsTheProvingStep is the first half of the replay guard. The
@@ -102,12 +118,8 @@ func TestActivationRecordsTheProvingStep(t *testing.T) {
 	beginEnrollment(t, d, user)
 	step := totp.StepAt(time.Now())
 	activate(t, d, user, step)
-	if ok, err := d.ConsumeTOTPStep(user, step); err != nil || ok {
-		t.Errorf("the enrollment code was accepted again as a login: ok %v err %v", ok, err)
-	}
-	if ok, err := d.ConsumeTOTPStep(user, step+1); err != nil || !ok {
-		t.Errorf("the next step was refused: ok %v err %v", ok, err)
-	}
+	wantEq(t, "the enrollment code accepted again as a login", stepAccepted(t, d, user, step), false)
+	wantEq(t, "the next step accepted", stepAccepted(t, d, user, step+1), true)
 }
 
 // TestOneStepIsSpentOnce is the replay guard itself. A code stays valid for its
@@ -117,20 +129,12 @@ func TestOneStepIsSpentOnce(t *testing.T) {
 	d, user := enrolledUser(t)
 	beginEnrollment(t, d, user)
 	activate(t, d, user, 0)
-	if ok, _ := d.ConsumeTOTPStep(user, 500); !ok {
-		t.Fatal("the first use was refused")
-	}
-	if ok, _ := d.ConsumeTOTPStep(user, 500); ok {
-		t.Error("the same step was accepted twice")
-	}
+	wantEq(t, "the first use accepted", stepAccepted(t, d, user, 500), true)
+	wantEq(t, "the same step accepted twice", stepAccepted(t, d, user, 500), false)
 	// An earlier step is refused too: a code captured before this one must not
 	// become usable again just because it is older.
-	if ok, _ := d.ConsumeTOTPStep(user, 499); ok {
-		t.Error("an earlier step was accepted after a later one")
-	}
-	if ok, _ := d.ConsumeTOTPStep(user, 501); !ok {
-		t.Error("a later step was refused")
-	}
+	wantEq(t, "an earlier step accepted after a later one", stepAccepted(t, d, user, 499), false)
+	wantEq(t, "a later step accepted", stepAccepted(t, d, user, 501), true)
 }
 
 // TestRecoveryCodeIsSpentOnce covers the other way in. A recovery code is the
@@ -141,25 +145,13 @@ func TestRecoveryCodeIsSpentOnce(t *testing.T) {
 	beginEnrollment(t, d, user)
 	codes := activate(t, d, user, 0)
 
-	if n, err := d.RecoveryCodesRemaining(user); err != nil || n != totp.RecoveryCodeCount {
-		t.Fatalf("remaining = %d err %v, want %d", n, err, totp.RecoveryCodeCount)
-	}
-	if ok, err := d.ConsumeRecoveryCode(user, codes[2]); err != nil || !ok {
-		t.Fatalf("a valid code was refused: ok %v err %v", ok, err)
-	}
-	if ok, _ := d.ConsumeRecoveryCode(user, codes[2]); ok {
-		t.Error("the same recovery code was accepted twice")
-	}
-	if n, _ := d.RecoveryCodesRemaining(user); n != totp.RecoveryCodeCount-1 {
-		t.Errorf("remaining = %d, want %d", n, totp.RecoveryCodeCount-1)
-	}
+	wantEq(t, "codes before any use", codesRemaining(t, d, user), totp.RecoveryCodeCount)
+	wantEq(t, "a valid code accepted", codeAccepted(t, d, user, codes[2]), true)
+	wantEq(t, "the same code accepted twice", codeAccepted(t, d, user, codes[2]), false)
+	wantEq(t, "codes after one use", codesRemaining(t, d, user), totp.RecoveryCodeCount-1)
 	// Another code from the same set still works.
-	if ok, _ := d.ConsumeRecoveryCode(user, codes[3]); !ok {
-		t.Error("a second code from the set was refused")
-	}
-	if ok, _ := d.ConsumeRecoveryCode(user, "NOTACODE"); ok {
-		t.Error("an unknown recovery code was accepted")
-	}
+	wantEq(t, "a second code from the set accepted", codeAccepted(t, d, user, codes[3]), true)
+	wantEq(t, "an unknown code accepted", codeAccepted(t, d, user, "NOTACODE"), false)
 }
 
 // TestRecoveryCodeIsBoundToItsAccount spends one account's recovery code on
@@ -167,20 +159,15 @@ func TestRecoveryCodeIsSpentOnce(t *testing.T) {
 // issued it, so it must open no other account and stay unspent for its owner.
 func TestRecoveryCodeIsBoundToItsAccount(t *testing.T) {
 	d, user := enrolledUser(t)
-	if _, err := d.CreateUser("v@acme.test", "password1", filepath.Join(t.TempDir(), "v")); err != nil {
-		t.Fatal(err)
-	}
+	_, err := d.CreateUser("v@acme.test", "password1", filepath.Join(t.TempDir(), "v"))
+	mustNoErr(t, "create the second user", err)
 	beginEnrollment(t, d, user)
 	codes := activate(t, d, user, 0)
 	beginEnrollment(t, d, "v@acme.test")
 	activate(t, d, "v@acme.test", 0)
 
-	if ok, _ := d.ConsumeRecoveryCode("v@acme.test", codes[0]); ok {
-		t.Error("one account's recovery code opened another account")
-	}
-	if ok, _ := d.ConsumeRecoveryCode(user, codes[0]); !ok {
-		t.Error("the owner's code was spent by the other account's attempt")
-	}
+	wantEq(t, "one account's code opened another", codeAccepted(t, d, "v@acme.test", codes[0]), false)
+	wantEq(t, "the owner's code after the other account's attempt", codeAccepted(t, d, user, codes[0]), true)
 }
 
 // TestAnActiveEnrollmentIsNotSilentlyReplaced is the session-theft guard. Anyone
@@ -192,29 +179,21 @@ func TestAnActiveEnrollmentIsNotSilentlyReplaced(t *testing.T) {
 	first := beginEnrollment(t, d, user)
 	activate(t, d, user, 0)
 
-	second, _ := totp.NewSecret()
+	second := newSecret(t)
 	if err := d.BeginTOTPEnrollment(user, second); !errors.Is(err, ErrTOTPAlreadyEnabled) {
 		t.Fatalf("BeginTOTPEnrollment over an active one = %v, want ErrTOTPAlreadyEnabled", err)
 	}
-	if e, _, _ := d.TOTPEnrollment(user); e.Secret != first {
-		t.Error("the active secret was replaced")
-	}
+	e, _ := enrollment(t, d, user)
+	wantEq(t, "the active secret after the refused replace", e.Secret, first)
 
 	// A pending enrollment, by contrast, is replaced freely: a user who reloaded
 	// the setup page must get the secret their new QR code shows.
-	if err := d.DisableTOTP(user); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.BeginTOTPEnrollment(user, second); err != nil {
-		t.Fatal(err)
-	}
-	third, _ := totp.NewSecret()
-	if err := d.BeginTOTPEnrollment(user, third); err != nil {
-		t.Fatal(err)
-	}
-	if e, _, _ := d.TOTPEnrollment(user); e.Secret != third {
-		t.Error("a pending secret was not replaced")
-	}
+	mustNoErr(t, "disable the second factor", d.DisableTOTP(user))
+	mustNoErr(t, "begin a new enrollment", d.BeginTOTPEnrollment(user, second))
+	third := newSecret(t)
+	mustNoErr(t, "replace the pending enrollment", d.BeginTOTPEnrollment(user, third))
+	e, _ = enrollment(t, d, user)
+	wantEq(t, "the replaced pending secret", e.Secret, third)
 }
 
 // TestDisableRemovesTheRecoveryCodes keeps a later enrollment from silently
@@ -223,18 +202,11 @@ func TestDisableRemovesTheRecoveryCodes(t *testing.T) {
 	d, user := enrolledUser(t)
 	beginEnrollment(t, d, user)
 	codes := activate(t, d, user, 0)
-	if err := d.DisableTOTP(user); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok, err := d.TOTPEnrollment(user); err != nil || ok {
-		t.Errorf("the enrollment survived disabling: ok %v err %v", ok, err)
-	}
-	if n, err := d.RecoveryCodesRemaining(user); err != nil || n != 0 {
-		t.Errorf("remaining = %d err %v, want 0", n, err)
-	}
-	if ok, _ := d.ConsumeRecoveryCode(user, codes[0]); ok {
-		t.Error("a recovery code from the removed enrollment still works")
-	}
+	mustNoErr(t, "disable the second factor", d.DisableTOTP(user))
+	_, ok := enrollment(t, d, user)
+	wantEq(t, "the enrollment survived disabling", ok, false)
+	wantEq(t, "codes after disabling", codesRemaining(t, d, user), 0)
+	wantEq(t, "a code from the removed enrollment accepted", codeAccepted(t, d, user, codes[0]), false)
 }
 
 // TestAnUnknownUserIsNotAnError keeps the login path simple: an address with no
@@ -243,18 +215,11 @@ func TestDisableRemovesTheRecoveryCodes(t *testing.T) {
 // exists.
 func TestAnUnknownUserIsNotAnError(t *testing.T) {
 	d, _ := enrolledUser(t)
-	if _, ok, err := d.TOTPEnrollment("nobody@acme.test"); err != nil || ok {
-		t.Errorf("TOTPEnrollment(unknown) = ok %v err %v", ok, err)
-	}
-	if ok, err := d.ConsumeTOTPStep("nobody@acme.test", 1); err != nil || ok {
-		t.Errorf("ConsumeTOTPStep(unknown) = ok %v err %v", ok, err)
-	}
-	if ok, err := d.ConsumeRecoveryCode("nobody@acme.test", "X"); err != nil || ok {
-		t.Errorf("ConsumeRecoveryCode(unknown) = ok %v err %v", ok, err)
-	}
-	if err := d.DisableTOTP("nobody@acme.test"); err != nil {
-		t.Errorf("DisableTOTP(unknown) = %v", err)
-	}
+	_, ok := enrollment(t, d, "nobody@acme.test")
+	wantEq(t, "an unknown user's enrollment", ok, false)
+	wantEq(t, "an unknown user's step", stepAccepted(t, d, "nobody@acme.test", 1), false)
+	wantEq(t, "an unknown user's recovery code", codeAccepted(t, d, "nobody@acme.test", "X"), false)
+	mustNoErr(t, "disable for an unknown user", d.DisableTOTP("nobody@acme.test"))
 }
 
 // TestSQLDirectorySatisfiesSecondFactorStore is what the login paths type-assert
