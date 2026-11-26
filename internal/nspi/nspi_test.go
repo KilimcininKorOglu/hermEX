@@ -62,7 +62,7 @@ func decodeBindResp(t *testing.T, resp []byte) (status, result uint32, guid mapi
 	if err != nil {
 		t.Fatalf("decode server GUID: %v", err)
 	}
-	aux, _ := p.Uint32()
+	aux := mustU32(t, p, "AuxiliaryBufferSize")
 	if aux != 0 {
 		t.Errorf("AuxiliaryBufferSize = %d, want 0", aux)
 	}
@@ -124,9 +124,9 @@ func TestUnbindSucceeds(t *testing.T) {
 	s := NewServer(nil, testGUID)
 	resp := s.Unbind([]byte{0, 0, 0, 0, 0, 0, 0, 0}) // reserved u32 + cb_auxin u32
 	p := ext.NewPull(resp, abkFlags)
-	status, _ := p.Uint32()
-	result, _ := p.Uint32()
-	aux, _ := p.Uint32()
+	status := mustU32(t, p, "status")
+	result := mustU32(t, p, "result")
+	aux := mustU32(t, p, "AuxiliaryBufferSize")
 	if status != 0 || result != ecSuccess || aux != 0 {
 		t.Errorf("Unbind response = (status %#x, result %#x, aux %d), want (0, 0, 0)", status, result, aux)
 	}

@@ -71,11 +71,14 @@ func TestRPCUpdateStat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	ref, _ := q.Uint32()
+	ref := ndrU32(t, q, "referent")
 	if ref == 0 {
 		t.Fatal("delta referent absent, want present")
 	}
-	delta, _ := q.Int32()
+	delta, err := q.Int32()
+	if err != nil {
+		t.Fatalf("read the delta: %v", err)
+	}
 	if tailResult(out) != ecSuccess {
 		t.Errorf("result %#x, want ecSuccess", tailResult(out))
 	}
@@ -108,11 +111,11 @@ func TestRPCQueryRowsExplicit(t *testing.T) {
 	if _, err := pullStatNDR(q); err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	ref, _ := q.Uint32()
+	ref := ndrU32(t, q, "referent")
 	if ref == 0 {
 		t.Fatal("rowset referent absent on success")
 	}
-	crows, _ := q.Uint32()
+	crows := ndrU32(t, q, "row count")
 	if crows != 2 {
 		t.Errorf("rowset crows = %d, want 2", crows)
 	}
@@ -139,7 +142,7 @@ func TestRPCQueryRowsInvalid(t *testing.T) {
 	if _, err := pullStatNDR(q); err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	ref, _ := q.Uint32()
+	ref := ndrU32(t, q, "referent")
 	if ref != 0 {
 		t.Error("rowset referent present on failure, want null")
 	}
@@ -171,7 +174,7 @@ func TestRPCSeekEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	ref, _ := q.Uint32()
+	ref := ndrU32(t, q, "referent")
 	if ref == 0 {
 		t.Fatal("rowset referent absent on success")
 	}
@@ -247,7 +250,7 @@ func TestRPCGetProps(t *testing.T) {
 		t.Fatalf("fault %#x", fault)
 	}
 	q := ndr.NewPull(out)
-	ref, _ := q.Uint32()
+	ref := ndrU32(t, q, "referent")
 	if ref == 0 {
 		t.Fatal("row referent absent on success")
 	}
@@ -330,11 +333,11 @@ func TestRPCGetSpecialTable(t *testing.T) {
 		t.Fatalf("fault %#x", fault)
 	}
 	q := ndr.NewPull(out)
-	version, _ := q.Uint32()
+	version := ndrU32(t, q, "version")
 	if version != galTableVersion {
 		t.Errorf("version = %d, want %d", version, galTableVersion)
 	}
-	ref, _ := q.Uint32()
+	ref := ndrU32(t, q, "referent")
 	if ref == 0 {
 		t.Fatal("rowset referent absent on success")
 	}
@@ -490,8 +493,8 @@ func TestRPCGetMatchesPropName(t *testing.T) {
 	if _, err := pullStatNDR(q); err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	midRef, _ := q.Uint32()
-	rowRef, _ := q.Uint32()
+	midRef := ndrU32(t, q, "MId referent")
+	rowRef := ndrU32(t, q, "row referent")
 	if midRef != 0 || rowRef != 0 {
 		t.Errorf("error path referents = (%#x, %#x), want both null", midRef, rowRef)
 	}
@@ -530,7 +533,7 @@ func assertResolve(t *testing.T, opnum uint16, wide bool) {
 	if len(mids) != 1 || mids[0] != midResolved {
 		t.Errorf("resolve status = %v, want [midResolved %#x]", mids, midResolved)
 	}
-	ref, _ := q.Uint32() // rowset referent
+	ref := ndrU32(t, q, "referent") // rowset referent
 	if ref == 0 {
 		t.Error("rowset referent absent on a resolved name")
 	}

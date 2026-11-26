@@ -164,7 +164,7 @@ func TestNDRRowSet(t *testing.T) {
 	mustU32NDR(t, pl, "crows actual", 1)
 	mustU32NDR(t, pl, "row reserved", 0)
 	mustU32NDR(t, pl, "row cValues", 1)
-	if ref, _ := pl.Uint32(); ref == 0 {
+	if ref := ndrU32(t, pl, "row values referent"); ref == 0 {
 		t.Error("row values referent is null, want non-zero")
 	}
 	mustU32NDR(t, pl, "value-array max_count", 1)
@@ -172,7 +172,7 @@ func TestNDRRowSet(t *testing.T) {
 	mustU32NDR(t, pl, "value proptag", uint32(mapi.PrDisplayName))
 	mustU32NDR(t, pl, "value reserved", 0)
 	mustU32NDR(t, pl, "value ptype", uint32(mapi.PtUnicode))
-	if ref, _ := pl.Uint32(); ref == 0 {
+	if ref := ndrU32(t, pl, "string value referent"); ref == 0 {
 		t.Error("string value referent is null, want non-zero")
 	}
 	// Value content: the conformant string.
@@ -230,7 +230,7 @@ func TestNDRPropertyRow(t *testing.T) {
 	pl := ndr.NewPull(p.Bytes())
 	mustU32NDR(t, pl, "reserved", 0)
 	mustU32NDR(t, pl, "cValues", 1)
-	if ref, _ := pl.Uint32(); ref == 0 {
+	if ref := ndrU32(t, pl, "values referent"); ref == 0 {
 		t.Error("values referent is null, want non-zero")
 	}
 	mustU32NDR(t, pl, "value-array max_count", 1)
