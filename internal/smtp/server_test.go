@@ -649,7 +649,10 @@ func TestServerBoundsRecipientsPerTransaction(t *testing.T) {
 		expect(t, r, 250)
 	}
 	send(t, conn, "RCPT TO:<onemore@test>\r\n")
-	code, msg, _ := r.ReadResponse(0)
+	code, msg, err := r.ReadResponse(0)
+	if err != nil {
+		t.Fatalf("read the reply to recipient %d: %v", MaxRecipients+1, err)
+	}
 	if code != 452 || !strings.HasPrefix(msg, "4.5.3") {
 		t.Fatalf("recipient %d answered %d %q, want 452 4.5.3", MaxRecipients+1, code, msg)
 	}

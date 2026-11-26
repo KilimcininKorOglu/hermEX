@@ -76,7 +76,7 @@ func TestStartTLSUpgrade(t *testing.T) {
 	_, _ = fmt.Fprint(tconn, "RCPT TO:<bob@test>\r\n")
 	readCodedReply(t, tr, 250, "RCPT over TLS")
 	_, _ = fmt.Fprint(tconn, "QUIT\r\n")
-	_, _, _ = tr.ReadResponse(221)
+	readCodedReply(t, tr, 221, "QUIT over TLS")
 
 	wantEq(t, sess.from, "alice@test", "the envelope sender recorded over TLS")
 }
@@ -99,7 +99,9 @@ func TestStartTLSRejectsPipelinedInjection(t *testing.T) {
 	if _, err := conn.Write([]byte("STARTTLS\r\nMAIL FROM:<evil@test>\r\n")); err != nil {
 		t.Fatal(err)
 	}
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("set the read deadline: %v", err)
+	}
 	rest, _ := io.ReadAll(conn)
 	if strings.Contains(string(rest), "250") {
 		t.Errorf("injected MAIL accepted across the TLS boundary: %q", rest)

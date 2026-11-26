@@ -47,7 +47,11 @@ func TestDotReaderDecodesAcrossChunks(t *testing.T) {
 	if string(got) != want {
 		t.Errorf("decoded body differs: got %d bytes, want %d", len(got), len(want))
 	}
-	if rest, _ := io.ReadAll(br); string(rest) != "AFTER" {
+	rest, err := io.ReadAll(br)
+	if err != nil {
+		t.Fatalf("read past the terminator: %v", err)
+	}
+	if string(rest) != "AFTER" {
 		t.Errorf("after the terminator the stream holds %q, want AFTER", rest)
 	}
 }
