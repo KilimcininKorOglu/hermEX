@@ -69,7 +69,9 @@ func openInboxForCreate(t *testing.T) (*Session, uint32) {
 	sess := NewSession(provisionedDir(t), nil, "")
 	t.Cleanup(sess.Close)
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
-	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{h[0], 0xFFFFFFFF})
+	logonH := h[0]
+	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
+	requireHandles(t, "openInboxForCreate", logonH, h[1])
 	return sess, h[1]
 }
 
@@ -131,6 +133,9 @@ func TestCreateFolderRefusesOtherTypes(t *testing.T) {
 		if ec := readEC(t, resp, ropCreateFolder); ec != want {
 			t.Errorf("FolderType %d: ec = %#x, want %#x", ft, ec, want)
 		}
+	}
+	if folderNamedUnder(t, sess.get(inboxH).store, int64(mapi.PrivateFIDInbox), "Typed") {
+		t.Error("a refused FolderType still created the folder")
 	}
 }
 
@@ -245,10 +250,10 @@ func clearFolderRequest() []byte {
 // something to remove, so an empty result afterwards means something happened.
 func assertInboxHasContent(t *testing.T, st *objectstore.Store, inboxFID int64) {
 	t.Helper()
-	if msgs, _ := st.ListMessages(inboxFID); len(msgs) == 0 {
+	if msgs := mustListMessages(t, st, inboxFID); len(msgs) == 0 {
 		t.Fatal("expected messages in Inbox")
 	}
-	if kids, _ := childFolders(st, inboxFID); len(kids) == 0 {
+	if kids := mustChildFolders(t, st, inboxFID); len(kids) == 0 {
 		t.Fatal("expected a subfolder under Inbox")
 	}
 }
@@ -258,14 +263,13 @@ func assertInboxHasContent(t *testing.T, st *objectstore.Store, inboxFID int64) 
 // the subfolder gone.
 func assertFolderCleared(t *testing.T, st *objectstore.Store, inboxFID, subID int64, wantDumpster int, what string) {
 	t.Helper()
-	if after, _ := st.ListMessages(inboxFID); len(after) != 0 {
+	if after := mustListMessages(t, st, inboxFID); len(after) != 0 {
 		t.Errorf("%d messages remain after %s", len(after), what)
 	}
-	if dump, _ := st.ListSoftDeleted(inboxFID); len(dump) != wantDumpster {
+	if dump := mustListSoftDeleted(t, st, inboxFID); len(dump) != wantDumpster {
 		t.Errorf("dumpster = %d, want %d after %s (cleared messages stay recoverable)", len(dump), wantDumpster, what)
 	}
-	kids, _ := childFolders(st, inboxFID)
-	for _, k := range kids {
+	for _, k := range mustChildFolders(t, st, inboxFID) {
 		if k.ID == subID {
 			t.Errorf("subfolder %d was not deleted by %s", subID, what)
 		}
@@ -330,11 +334,11 @@ func TestHardDeleteMessagesToDumpster(t *testing.T) {
 		t.Fatalf("HardDeleteMessages ec = %#x", ec)
 	}
 	// A and B leave the live inbox but go to the dumpster (recoverable); C stays.
-	live, _ := store.ListMessages(mapi.PrivateFIDInbox)
+	live := mustListMessages(t, store, mapi.PrivateFIDInbox)
 	if len(live) != 1 {
 		t.Errorf("live inbox = %d messages, want 1 (only C)", len(live))
 	}
-	if dump, _ := store.ListSoftDeleted(mapi.PrivateFIDInbox); len(dump) != 2 {
+	if dump := mustListSoftDeleted(t, store, mapi.PrivateFIDInbox); len(dump) != 2 {
 		t.Errorf("dumpster = %d, want 2 (A and B recoverable)", len(dump))
 	}
 	if _, err := store.OpenMessage(midC); err != nil {
@@ -365,16 +369,48 @@ func TestDeleteFolder(t *testing.T) {
 	if ec := readEC(t, resp, ropDeleteFolder); ec != ecSuccess {
 		t.Fatalf("DeleteFolder ec = %#x", ec)
 	}
-	seen := false
-	all, _ := store.ListFolders()
+	all, err := store.ListFolders()
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, f := range all {
 		if f.ID == subFID {
-			seen = true
+			t.Error("folder still listed after DeleteFolder")
 		}
 	}
-	if seen {
-		t.Error("folder still listed after DeleteFolder")
+}
+
+// mustListMessages lists a folder's live messages and fails the test on a read
+// error, so an emptiness check never passes on a failed read.
+func mustListMessages(t *testing.T, st *objectstore.Store, folderID int64) []objectstore.MessageInfo {
+	t.Helper()
+	msgs, err := st.ListMessages(folderID)
+	if err != nil {
+		t.Fatal(err)
 	}
+	return msgs
+}
+
+// mustListSoftDeleted lists a folder's recoverable messages and fails the test on
+// a read error.
+func mustListSoftDeleted(t *testing.T, st *objectstore.Store, folderID int64) []objectstore.SoftDeletedMessage {
+	t.Helper()
+	dump, err := st.ListSoftDeleted(folderID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dump
+}
+
+// mustChildFolders lists a folder's direct subfolders and fails the test on a
+// read error.
+func mustChildFolders(t *testing.T, st *objectstore.Store, parentID int64) []objectstore.FolderInfo {
+	t.Helper()
+	kids, err := childFolders(st, parentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return kids
 }
 
 func TestMoveFolder(t *testing.T) {
