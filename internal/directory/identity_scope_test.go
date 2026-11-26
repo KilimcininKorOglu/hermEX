@@ -61,8 +61,10 @@ func TestIdentityDropsWhenItsDomainIsPurged(t *testing.T) {
 	if err := d.CreateAlias(claimed, owner); err != nil {
 		t.Fatal(err)
 	}
-	if ids, _ := d.Identities(owner); !slices.Contains(ids, claimed) {
-		t.Fatalf("the alias is not an identity to begin with: %v", ids)
+	before, err := d.Identities(owner)
+	mustNoErr(t, "identities before the purge", err)
+	if !slices.Contains(before, claimed) {
+		t.Fatalf("the alias is not an identity to begin with: %v", before)
 	}
 
 	if ok, err := d.PurgeDomain(partnerID, false); err != nil || !ok {
@@ -98,17 +100,34 @@ func TestIdentityIgnoresAnUnhostedDomain(t *testing.T) {
 	d, _ := twoDomainDir(t)
 	const owner = "user@acme.test"
 
-	// Write straight to the table, the shape a legacy row has.
+	// Write straight to the tables, the shape a legacy row has.
 	if _, err := d.db.Exec(`INSERT INTO aliases (aliasname, mainname) VALUES (?, ?)`,
 		"ceo@victim.test", owner); err != nil {
 		t.Fatal(err)
 	}
+	_, err := d.db.Exec(`INSERT INTO altnames (user_id, altname) SELECT id, ? FROM users WHERE username = ?`,
+		"cfo@victim.test", owner)
+	mustNoErr(t, "write a legacy altname", err)
 	ids, err := d.Identities(owner)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if slices.Contains(ids, "ceo@victim.test") {
-		t.Errorf("a legacy row in an unhosted domain is still a send-as identity: %v", ids)
+	for _, unhosted := range []string{"ceo@victim.test", "cfo@victim.test"} {
+		if slices.Contains(ids, unhosted) {
+			t.Errorf("a legacy row in an unhosted domain is still a send-as identity: %s in %v", unhosted, ids)
+		}
+	}
+}
+
+// TestIdentityStaysOnItsAccount proves an alias belongs only to the account it
+// names: another account in the same organization does not gain it as a From.
+func TestIdentityStaysOnItsAccount(t *testing.T) {
+	d, _ := twoDomainDir(t)
+	mustNoErr(t, "alias for the partner account", d.CreateAlias("support@acme.test", "user@partner.test"))
+	ids, err := d.Identities("user@acme.test")
+	mustNoErr(t, "identities of the other account", err)
+	if !slices.Equal(ids, []string{"user@acme.test"}) {
+		t.Errorf("identities of an account with no aliases = %v, want only its own address", ids)
 	}
 }
 
