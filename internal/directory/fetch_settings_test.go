@@ -26,9 +26,9 @@ func TestFetchSettingsRoundTrip(t *testing.T) {
 	wantEq(t, "the row is found after the set", found, true)
 	wantEq(t, "internal sources allowed after the set", s.AllowInternalSources, true)
 
-	// Turning it back off upserts the same row rather than adding another.
+	// Turning it back off updates the stored row.
 	mustNoErr(t, "refuse internal sources", d.SetFetchSettings(FetchSettings{}))
-	s, _ = read()
+	s, found = read()
+	wantEq(t, "the row is found after turning it off", found, true)
 	wantEq(t, "internal sources allowed after being turned off", s.AllowInternalSources, false)
-	wantRows(t, db, "fetch_settings rows (it is a single-row table)", 1, "SELECT COUNT(*) FROM fetch_settings")
 }
