@@ -243,14 +243,15 @@ func TestMListCRUD(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("DeleteMList = %v, %v; want true", ok, err)
 	}
-	lists, _ = d.ListMLists()
+	lists, err = d.ListMLists()
+	mustNoErr(t, "list after the delete", err)
 	if len(lists) != 0 {
 		t.Errorf("after delete, ListMLists = %v, want empty", lists)
 	}
 	// The cascade removed membership; expanding the gone address is now "not a list".
-	if _, res, _ := d.ExpandMList("crew@hermex.test", "x@y.test"); res != MListNone {
-		t.Errorf("expand of deleted list res = %d, want MListNone", res)
-	}
+	_, res, err := d.ExpandMList("crew@hermex.test", "x@y.test")
+	mustNoErr(t, "expand the deleted list", err)
+	wantEq(t, "expand of the deleted list", res, MListNone)
 }
 
 // TestMListOwner proves a distribution list's owner (the Exchange managedBy
@@ -280,14 +281,16 @@ func TestMListOwner(t *testing.T) {
 		t.Fatalf("ListMListsOwnedBy(alice) = %+v, want [crew]", owned)
 	}
 	wantEq(t, "the list alice owns", owned[0].Listname, "crew@hermex.test")
-	notOwned, _ := d.ListMListsOwnedBy("bob@hermex.test")
+	notOwned, err := d.ListMListsOwnedBy("bob@hermex.test")
+	mustNoErr(t, "list bob's lists", err)
 	wantEq(t, "lists bob owns", len(notOwned), 0)
 
 	_, err = d.SetMListOwner("crew@hermex.test", "")
 	mustNoErr(t, "clear the owner", err)
 	wantEq(t, "owner after clearing", mustOneMList(t, d, "after clearing the owner").Owner, "")
 
-	ghost, _ := d.SetMListOwner("ghost@hermex.test", "alice@hermex.test")
+	ghost, err := d.SetMListOwner("ghost@hermex.test", "alice@hermex.test")
+	mustNoErr(t, "set the owner of an unknown list", err)
 	wantEq(t, "SetMListOwner found an unknown list", ghost, false)
 }
 
@@ -326,6 +329,8 @@ func TestUpsertLDAPGroup(t *testing.T) {
 	wantLDAPMastered(t, "SetMembers on a mastered list", err)
 	_, err = d.SetMListOwner("eng@hermex.test", "bob@hermex.test")
 	wantLDAPMastered(t, "SetMListOwner on a mastered list", err)
+	wantMembers(t, d, "after the refused edits", "bob@hermex.test", "carol@hermex.test")
+	wantEq(t, "the owner after the refused edits", mustOneMList(t, d, "after the refused edits").Owner, "alice@hermex.test")
 
 	// A second sync mirrors membership exactly (carol dropped).
 	syncGroup("bob@hermex.test")
