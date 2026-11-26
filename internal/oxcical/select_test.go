@@ -40,7 +40,10 @@ func TestSelectCalendarDataNoValue(t *testing.T) {
 		Name:  "VCALENDAR",
 		Comps: []CompSelect{{Name: "VEVENT", Props: []PropSelect{{Name: "SUMMARY", NoValue: true}}}},
 	}
-	out, _ := SelectCalendarData([]byte(selectFullEvent), sel)
+	out, ok := SelectCalendarData([]byte(selectFullEvent), sel)
+	if !ok {
+		t.Fatal("SelectCalendarData returned ok=false")
+	}
 	s := string(out)
 	if !strings.Contains(s, "SUMMARY:\r\n") {
 		t.Errorf("novalue should yield a bare 'SUMMARY:'\n%s", s)
@@ -58,7 +61,10 @@ func TestSelectCalendarDataAllProp(t *testing.T) {
 		AllProp: true,
 		Comps:   []CompSelect{{Name: "VEVENT", AllProp: true}},
 	}
-	out, _ := SelectCalendarData([]byte(selectFullEvent), sel)
+	out, ok := SelectCalendarData([]byte(selectFullEvent), sel)
+	if !ok {
+		t.Fatal("SelectCalendarData returned ok=false")
+	}
 	s := string(out)
 	if !strings.Contains(s, "VERSION:2.0") || !strings.Contains(s, "PRODID") || !strings.Contains(s, "DESCRIPTION:Daily") {
 		t.Errorf("allprop should keep every property\n%s", s)
