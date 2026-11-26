@@ -67,7 +67,19 @@ func copyToSession(t *testing.T) (sess *Session, logonH, msgH uint32) {
 	logonH = h[0]
 	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, msgEID), []uint32{logonH, 0xFFFFFFFF})
 	msgH = h[1]
+	requireHandles(t, "copyToSession", logonH, msgH)
 	return
+}
+
+// requireHandles fails the test when a setup ROP left a handle unset, so a
+// refusal asserted later is the handler's own and not one for a null handle.
+func requireHandles(t *testing.T, what string, handles ...uint32) {
+	t.Helper()
+	for i, h := range handles {
+		if h == 0xFFFFFFFF {
+			t.Fatalf("%s: handle %d was not set", what, i)
+		}
+	}
 }
 
 // TestFastTransferSourceCopyTo opens a generic-copy download on a stored message and
@@ -109,6 +121,7 @@ func TestFastTransferSourceCopyToRejectsFolder(t *testing.T) {
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	_, h := sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
 	folderH := h[1]
+	requireHandles(t, "OpenFolder(Inbox)", folderH)
 	handles := []uint32{logonH, folderH, 0xFFFFFFFF}
 	sr, _ := sess.Dispatch(buildFastCopyTo(1, 2, 0, 0, nil), handles)
 	p := ext.NewPull(sr, ext.FlagUTF16)
@@ -174,6 +187,7 @@ func copyMessagesSession(t *testing.T) (sess *Session, logonH, folderH uint32, m
 	logonH = h[0]
 	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
 	folderH = h[1]
+	requireHandles(t, "copyMessagesSession", logonH, folderH)
 	return sess, logonH, folderH, []int64{mid1, mid2}
 }
 
