@@ -263,11 +263,13 @@ func TestFolderCreateRefusesAMalformedRequest(t *testing.T) {
 // TestFolderCreateBadParent proves a FolderCreate under a non-existent parent
 // reports Status 5.
 func TestFolderCreateBadParent(t *testing.T) {
-	ts, _ := seededServer(t)
+	ts, dir := seededServer(t)
 	key := primeHierarchy(t, ts)
 
 	_, root := postCommand(t, ts, "FolderCreate", folderCreateReq(key, "888888", "Orphan"))
 	if s := root.ChildText(wbxml.FHStatus); s != "5" {
 		t.Errorf("missing-parent Status = %q, want 5", s)
 	}
+	// The refused folder is not created anywhere, the root included.
+	wantRootFolder(t, dir, "Orphan", false)
 }

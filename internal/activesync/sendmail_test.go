@@ -202,10 +202,13 @@ func TestComposeMailRefusalsCarryTheirStatus(t *testing.T) {
 // TestSmartReplyRefusalNamesSmartReply checks a refused SmartReply answers with a
 // SmartReply element, not a SendMail one (6.44 SmartReply Response Schema).
 func TestSmartReplyRefusalNamesSmartReply(t *testing.T) {
-	ts, _, _ := sendServer(t)
+	ts, _, bobDir := sendServer(t)
 	forged := "From: bob@hermex.test\r\nTo: bob@hermex.test\r\nSubject: spoof\r\n\r\nx\r\n"
 	resp, out := postRaw(t, ts, "SmartReply", wbxml.Marshal(wbxml.Elem(wbxml.CMSmartReply, wbxml.Opaque(wbxml.CMMIME, []byte(forged)))))
 	wantComposeStatus(t, resp, out, wbxml.CMSmartReply, "130")
+	if n := folderCount(t, bobDir, int64(mapi.PrivateFIDInbox)); n != 0 {
+		t.Errorf("bob's Inbox has %d messages after a refused SmartReply", n)
+	}
 }
 
 // TestSmartResponseToAMissingSourceSendsNothing names reply and forward sources

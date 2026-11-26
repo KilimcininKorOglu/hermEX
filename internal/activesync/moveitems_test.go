@@ -111,11 +111,17 @@ func TestMoveItemsRefusesABadTarget(t *testing.T) {
 // TestMoveItemsInvalidSource confirms a move of an unknown message reports an
 // invalid-source status.
 func TestMoveItemsInvalidSource(t *testing.T) {
-	ts, _ := seededServer(t)
+	ts, dir := seededServer(t)
 	_, root := postCommand(t, ts, "MoveItems", moveReq("999999", inboxID(), deletedID()))
 	if s := root.Child(wbxml.MOResponse).ChildText(wbxml.MOStatus); s != "1" {
 		t.Errorf("invalid-source move Status = %q, want 1", s)
 	}
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open the store", err)
+	defer st.Close()
+	msgs, err := st.ListMessages(int64(mapi.PrivateFIDDeletedItems))
+	mustNoErr(t, "list Deleted Items", err)
+	wantEq(t, "messages in Deleted Items after a refused move", len(msgs), 0)
 }
 
 // TestMoveItemsReportsAStoreFailureAsRetryable proves a move the store cannot
