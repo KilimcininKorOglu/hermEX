@@ -38,12 +38,29 @@ func TestAutoReplySettingsRoundTrip(t *testing.T) {
 		t.Errorf("settings = %+v, want %+v", got, want)
 	}
 
-	// A second save replaces the row rather than adding one, which is what makes
-	// the MTA's poll see exactly one answer.
+	wantAutoReplyReplaced(t, d)
+}
+
+// wantAutoReplyReplaced saves a second prefix and requires it to replace the
+// row rather than add one, which is what makes the MTA's poll see exactly one
+// answer.
+func wantAutoReplyReplaced(t *testing.T, d *SQLDirectory) {
+	t.Helper()
 	if err := d.SetAutoReplySettings(AutoReplySettings{SubjectPrefix: "Out of office"}); err != nil {
 		t.Fatal(err)
 	}
-	if got, _, _ := d.GetAutoReplySettings(); got.SubjectPrefix != "Out of office" {
+	got, _, err := d.GetAutoReplySettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SubjectPrefix != "Out of office" {
 		t.Errorf("prefix = %q after the second save", got.SubjectPrefix)
+	}
+	var rows int
+	if err := d.db.QueryRow("SELECT COUNT(*) FROM autoreply_settings").Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 {
+		t.Errorf("autoreply_settings holds %d rows after two saves, want 1", rows)
 	}
 }
