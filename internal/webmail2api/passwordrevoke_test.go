@@ -158,6 +158,38 @@ func TestPasswordChangeKeepsTheCallersOwnSession(t *testing.T) {
 	}
 }
 
+// clearFailAuth is a directory whose must-change-password flag cannot be cleared.
+type clearFailAuth struct{ *revokeAuth }
+
+func (clearFailAuth) RequirePasswordChange(string, bool) (bool, error) {
+	return false, errors.New("flag write failed")
+}
+
+// TestPasswordChangeReportsAFlagItCouldNotClear proves a forced-change flag that
+// stays set after the user changed their password is recorded and reported, and
+// that the other sessions are still revoked: the flag keeps every client protocol
+// refusing the new password, which the user cannot otherwise tell.
+func TestPasswordChangeReportsAFlagItCouldNotClear(t *testing.T) {
+	sink := withSink(t)
+	mbox := t.TempDir()
+	secret := []byte("password-revoke-secret")
+	a := newRevokeAuth(mbox, "mine", "stolen")
+	st, err := objectstore.Open(mbox)
+	mustNoErr(t, "open the mailbox", err)
+	st.Close()
+	srv := NewServer(clearFailAuth{a}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
+
+	code, body := changePassword(t, srv, secret, mbox, "mine")
+	wantEq(t, "change password status", code, http.StatusOK)
+	wantEq(t, "forcedChangeCleared", body["forcedChangeCleared"], any(false))
+	if a.alive("stolen") {
+		t.Error("the other session survived a password change whose flag write failed")
+	}
+	if _, ok := sink.find("password-change-clear-flag"); !ok {
+		t.Error("the flag write failure was not recorded")
+	}
+}
+
 // TestPasswordChangeSucceedsWhenRevocationFails proves the eviction is best-effort.
 // The password is already stored by the time this runs, so failing the response
 // would tell the user their change did not happen when it did. The reported count

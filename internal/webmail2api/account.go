@@ -48,15 +48,26 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	if !storeNewPassword(w, setter, c.Email, req.NewPassword) {
 		return
 	}
-	// Changing your own password satisfies (and clears) any admin-forced change
-	// requirement set by a password reset.
-	if clr, ok := s.auth.(interface {
-		RequirePasswordChange(string, bool) (bool, error)
-	}); ok {
-		_, _ = clr.RequirePasswordChange(c.Email, false)
-	}
+	cleared := s.clearForcedChange(c.Email)
 	revoked := s.revokeOtherSessions(c.Email, c.Jti)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "revokedSessions": revoked})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "revokedSessions": revoked, "forcedChangeCleared": cleared})
+}
+
+// clearForcedChange clears the admin-forced change requirement a password reset
+// set, since the user has now changed the password. The new password is already
+// stored, so a failure is recorded and reported, never turned into a refusal.
+func (s *Server) clearForcedChange(email string) bool {
+	clr, ok := s.auth.(interface {
+		RequirePasswordChange(string, bool) (bool, error)
+	})
+	if !ok {
+		return true
+	}
+	if _, err := clr.RequirePasswordChange(email, false); err != nil {
+		logError("password-change-clear-flag", err, logging.Fields{"user": email})
+		return false
+	}
+	return true
 }
 
 // newPasswordLongEnough checks a new password against the minimum and writes the
