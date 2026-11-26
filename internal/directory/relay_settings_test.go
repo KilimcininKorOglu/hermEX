@@ -38,6 +38,27 @@ func TestRelaySettingsRoundTrip(t *testing.T) {
 	}
 }
 
+// TestRelaySettingsRefuseANonPositiveValue proves a backoff or attempt count below
+// 1 is refused and the stored row kept: zero attempts bounces every relayed message
+// at once, and a zero backoff retries in a tight loop.
+func TestRelaySettingsRefuseANonPositiveValue(t *testing.T) {
+	d := setupRelaySettings(t)
+	want := RelaySettings{BackoffSeconds: 120, MaxAttempts: 5}
+	mustNoErr(t, "save the starting settings", d.SetRelaySettings(want))
+	for _, bad := range []RelaySettings{
+		{BackoffSeconds: 0, MaxAttempts: 5},
+		{BackoffSeconds: -1, MaxAttempts: 5},
+		{BackoffSeconds: 120, MaxAttempts: 0},
+		{BackoffSeconds: 120, MaxAttempts: -3},
+	} {
+		wantErr(t, "SetRelaySettings accepted a non-positive value", d.SetRelaySettings(bad))
+		got, found, err := d.GetRelaySettings()
+		mustNoErr(t, "read the settings after a refusal", err)
+		wantEq(t, "settings found after a refusal", found, true)
+		wantEq(t, "settings after a refusal", got, want)
+	}
+}
+
 // TestRelaySettingsUpsert proves a second save replaces the single row.
 func TestRelaySettingsUpsert(t *testing.T) {
 	d := setupRelaySettings(t)

@@ -35,6 +35,9 @@ func (d *SQLDirectory) GetRelaySettings() (RelaySettings, bool, error) {
 // SetRelaySettings persists the relay settings, upserting the single row so the MTA's
 // poll observes the change and applies it without a restart.
 func (d *SQLDirectory) SetRelaySettings(s RelaySettings) error {
+	if s.BackoffSeconds < 1 || s.MaxAttempts < 1 {
+		return errors.New("directory: the relay backoff and attempt count must be at least 1")
+	}
 	_, err := d.db.Exec(
 		`INSERT INTO relay_settings (id, backoff_seconds, max_attempts, updated_at)
 		 VALUES (1, ?, ?, ?)
