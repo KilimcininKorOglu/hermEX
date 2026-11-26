@@ -117,8 +117,14 @@ func TestLogonReplicaGUIDResolves(t *testing.T) {
 	p = ext.NewPull(lt, ext.FlagUTF16)
 	mustU8(t, p, "RopId")
 	mustU8(t, p, "hindex")
-	mustU32(t, p, "ec")
-	if guid, _ := p.GUID(); guid != sig {
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("LongTermIdFromId ec = %#x, want success", ec)
+	}
+	guid, err := p.GUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if guid != sig {
 		t.Errorf("LongTermIdFromId GUID = %v, want the mapping signature %v", guid, sig)
 	}
 }

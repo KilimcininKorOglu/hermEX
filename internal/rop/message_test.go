@@ -184,7 +184,7 @@ func TestReadReflectsBufferedEdits(t *testing.T) {
 
 	// The store is untouched until SaveChangesMessage: the persisted subject is
 	// still there and importance is not the buffered value.
-	stored, _ := store.GetMessageProperties(int64(mid), mapi.PrSubject, mapi.PrImportance)
+	stored := mustMessageProps(t, store, int64(mid), mapi.PrSubject, mapi.PrImportance)
 	if _, ok := stored.Get(mapi.PrSubject); !ok {
 		t.Error("the buffered delete was persisted before SaveChangesMessage")
 	}

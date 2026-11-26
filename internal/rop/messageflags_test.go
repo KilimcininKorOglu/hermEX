@@ -49,6 +49,9 @@ func TestMessageFlagsReachAMAPIClient(t *testing.T) {
 	mustDispatchOK(t, sess, buildSetColumns(0, tcols), []uint32{tableH}, ropSetColumns)
 	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
 	_, rows := queryRowsResponse(t, qr, tcols)
+	if len(rows) != 2 {
+		t.Fatalf("contents table rows = %d, want the 2 seeded messages", len(rows))
+	}
 	for _, r := range rows {
 		subject, _ := r.Get(mapi.PrSubject)
 		want := int32(0)
