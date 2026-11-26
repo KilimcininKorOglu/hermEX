@@ -82,6 +82,7 @@ func (brokenScope) SameScope(string, string) (bool, error) {
 // TestGroupsReportAScopeReadFailure proves a scope that cannot be read answers the
 // group listing with an error, not 200 and a list silently missing its groups.
 func TestGroupsReportAScopeReadFailure(t *testing.T) {
+	sink := withSink(t)
 	auth := &groupStoreAuth{owned: map[string][]directory.MListInfo{"alice@hermex.test": {{Listname: "crew@hermex.test"}}}}
 	secret := []byte("groups-broken-secret")
 	srv := NewServer(auth, brokenScope{groupAccounts}, nil, "mail.hermex.test", secret, "", false)
@@ -91,6 +92,9 @@ func TestGroupsReportAScopeReadFailure(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	wantEq(t, "groups status when the scope cannot be read", rec.Code, http.StatusInternalServerError)
+	if _, ok := sink.find("groups-list"); !ok {
+		t.Error("the failed group listing was not recorded")
+	}
 }
 
 // TestGroupsAPI proves the caller lists only the groups they own, reads and replaces

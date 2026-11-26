@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 )
 
 // groupDir is the narrow directory view the webmail group-management surface needs:
@@ -74,6 +75,7 @@ func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 	}
 	owned, err := ownedInScope(gd, s.accounts, c.Email)
 	if err != nil {
+		logError("groups-list", err, logging.Fields{"user": c.Email})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not list your groups"})
 		return
 	}
