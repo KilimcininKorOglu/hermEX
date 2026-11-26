@@ -44,6 +44,9 @@ func TestInternetHeaderNamesStopAtTheQuota(t *testing.T) {
 	if got[2] != ids[0] {
 		t.Errorf("a held name resolved to %#x, want %#x", got[2], ids[0])
 	}
+	looked, err := s.GetNamedPropIDs(false, []mapi.PropertyName{over})
+	mustNoErr(t, "look up the refused name", err)
+	wantEq(t, "id held for the refused name", looked[0], uint16(0))
 }
 
 // TestDeliveredHeaderFieldSurvivesRegeneration proves the whole path: a received

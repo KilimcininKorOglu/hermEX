@@ -24,9 +24,16 @@ func TestSweepRefusesWhileTheMailboxIsOpen(t *testing.T) {
 		t.Fatalf("a second open of a live mailbox failed: %v", err)
 	}
 	defer second.Close()
+	orphan := filepath.Join(first.Dir(), "cid", "S-ab")
+	mustNoErr(t, "make the orphan directory", os.MkdirAll(orphan, 0o700))
+	path := filepath.Join(orphan, "cdef.zst")
+	mustNoErr(t, "write an orphan", os.WriteFile(path, []byte("not referenced"), 0o600))
 
 	if _, err := second.SweepOrphanContent(); !errors.Is(err, ErrMailboxBusy) {
 		t.Errorf("sweep with the mailbox open elsewhere = %v, want ErrMailboxBusy", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("the refused sweep removed a file: %v", err)
 	}
 }
 

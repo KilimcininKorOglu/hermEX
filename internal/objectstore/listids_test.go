@@ -43,6 +43,8 @@ func wantSameIDs(t *testing.T, got []int64, want []MessageInfo, what string) {
 // addresses rows use the cheaper one.
 func TestListMessageIDsMatchesListMessages(t *testing.T) {
 	st := seedListIDs(t, 5)
+	elsewhere := mustAppendMessage(t, st, int64(mapi.PrivateFIDSentItems),
+		[]byte("From: o@x.test\r\nTo: a@x.test\r\nSubject: Sent\r\n\r\nbody\r\n"), time.Unix(1718300000, 0), 0)
 
 	full, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
 	if err != nil {
@@ -53,6 +55,12 @@ func TestListMessageIDsMatchesListMessages(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantSameIDs(t, ids, full, "ListMessageIDs")
+	wantEq(t, "Inbox id count (five seeded, the Sent message excluded)", len(ids), 5)
+	for _, id := range ids {
+		if id == elsewhere.ID {
+			t.Errorf("the Sent Items message %d is listed in the Inbox", id)
+		}
+	}
 }
 
 // TestListMessageIDsEmptyFolder proves an empty folder yields no ids and no error,

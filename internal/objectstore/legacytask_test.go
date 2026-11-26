@@ -50,7 +50,9 @@ func TestOpenUpgradesAJSONBodyTask(t *testing.T) {
 	legacy := storeTaskBody(t, s, "Write the report",
 		`{"uid":"","summary":"Write the report","description":"Q2","due":"2026-06-30","completed":true}`)
 	other := storeTaskBody(t, s, "Notes", `{"summary":"Notes","colour":"red"}`)
-	s.Close()
+	const truncated = `{"uid":"","summary":"Broken","description":"x","due":"2026-06-`
+	broken := storeTaskBody(t, s, "Broken", truncated)
+	mustNoErr(t, "close", s.Close())
 
 	s, err = Open(dir)
 	if err != nil {
@@ -66,5 +68,8 @@ func TestOpenUpgradesAJSONBodyTask(t *testing.T) {
 	}
 	if body := readTask(t, s, other).Body; body != `{"summary":"Notes","colour":"red"}` {
 		t.Errorf("a body outside the early shape was rewritten to %q", body)
+	}
+	if body := readTask(t, s, broken).Body; body != truncated {
+		t.Errorf("a body that is not valid JSON was rewritten to %q", body)
 	}
 }
