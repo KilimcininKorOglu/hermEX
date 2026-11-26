@@ -73,12 +73,12 @@ func TestEndToEndNSPI(t *testing.T) {
 		}
 		inDone <- err
 	}()
-	_, _ = pw.Write(connB1())
+	mustWrite(t, pw, connB1(), "CONN/B1")
 	_, err = readPDU(outResp.Body) // CONN/C2
 	mustNoErr(t, err, "read CONN/C2")
 
 	// Bind the NSPI interface (UUID f5cc5a18…, version 56).
-	_, _ = pw.Write(buildBindPDU(0x30, nspi.RPCInterfaceUUID, nspi.RPCInterfaceVersion, 0))
+	mustWrite(t, pw, buildBindPDU(0x30, nspi.RPCInterfaceUUID, nspi.RPCInterfaceVersion, 0), "the bind")
 	wantPDUType(t, readReply(t, outResp.Body, "bind_ack"), ndr.PktBindAck, "bind reply")
 
 	// NspiBind (opnum 0): flags + STAT + an [in,out] server-GUID pointer.
@@ -87,15 +87,15 @@ func TestEndToEndNSPI(t *testing.T) {
 	pushNspiStat(bindStub, 1252, 0)
 	bindStub.Uint32(0x00020000) // server GUID referent (non-null)
 	bindStub.Raw(make([]byte, 16))
-	_, _ = pw.Write(buildRequestPDU(0x31, 0, 0, bindStub.Bytes(), ndr.PfcFirstFrag|ndr.PfcLastFrag))
+	mustWrite(t, pw, buildRequestPDU(0x31, 0, 0, bindStub.Bytes(), ndr.PfcFirstFrag|ndr.PfcLastFrag), "NspiBind")
 	bindResp := readReply(t, outResp.Body, "NspiBind response")
 	wantPDUType(t, bindResp, ndr.PktResponse, "NspiBind reply")
 	bp := ndr.NewPull(responseStub(t, bindResp))
-	_, _ = bp.Uint32() // server GUID referent
-	_, _ = bp.Raw(16)  // server GUID flat bytes
+	mustU32(t, bp, "server GUID referent")
+	mustRaw(t, bp, 16, "server GUID")
 	handle, err := pullCtxHandle(bp)
 	mustNoErr(t, err, "pull the NspiBind handle")
-	bindResult, _ := bp.Uint32()
+	bindResult := mustU32(t, bp, "NspiBind result")
 	wantEq(t, bindResult, uint32(ecSuccess), "NspiBind result")
 	wantTrue(t, handle.GUID != (mapi.GUID{}), "the NspiBind reply carries a handle")
 
@@ -109,7 +109,7 @@ func TestEndToEndNSPI(t *testing.T) {
 	qrStub.Uint32(0)  // null MID referent
 	qrStub.Uint32(10) // requested rows
 	qrStub.Uint32(0)  // null column referent
-	_, _ = pw.Write(buildRequestPDU(0x32, 0, 3, qrStub.Bytes(), ndr.PfcFirstFrag|ndr.PfcLastFrag))
+	mustWrite(t, pw, buildRequestPDU(0x32, 0, 3, qrStub.Bytes(), ndr.PfcFirstFrag|ndr.PfcLastFrag), "NspiQueryRows")
 	qrResp := readReply(t, outResp.Body, "NspiQueryRows response")
 	wantPDUType(t, qrResp, ndr.PktResponse, "NspiQueryRows reply")
 	qstub := responseStub(t, qrResp)

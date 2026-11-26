@@ -29,8 +29,7 @@ func parseAsyncConnectExOut(t *testing.T, stub []byte) (ContextHandle, uint32) {
 	if err != nil {
 		t.Fatalf("async ctx handle: %v", err)
 	}
-	result, _ := p.Uint32()
-	return acxh, result
+	return acxh, mustU32(t, p, "connect result")
 }
 
 // buildAsyncWaitExStub assembles an EcDoAsyncWaitEx request: the async context
@@ -46,9 +45,7 @@ func buildAsyncWaitExStub(acxh ContextHandle) []byte {
 func parseAsyncWaitExOut(t *testing.T, stub []byte) (flagsOut, result uint32) {
 	t.Helper()
 	p := ndr.NewPull(stub)
-	flagsOut, _ = p.Uint32()
-	result, _ = p.Uint32()
-	return flagsOut, result
+	return mustU32(t, p, "flags_out"), mustU32(t, p, "wait result")
 }
 
 // registerNotifyExecuteBuffer builds a ROP buffer for a whole-store
@@ -371,10 +368,13 @@ func TestAsyncWaitExConcurrentParkAndExecute(t *testing.T) {
 	wg.Go(func() {
 		st, err := objectstore.Open(mailbox)
 		if err != nil {
+			t.Errorf("open the mailbox to deliver: %v", err)
 			return
 		}
 		defer st.Close()
-		_, _ = st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0)
+		if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0); err != nil {
+			t.Errorf("deliver the waking message: %v", err)
+		}
 	})
 	wg.Wait()
 

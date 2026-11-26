@@ -1,8 +1,11 @@
 package rpchttp
 
 import (
+	"io"
 	"strconv"
 	"testing"
+
+	"hermex/internal/ndr"
 )
 
 // This file is the package's assertion vocabulary. A test states one fact per call,
@@ -38,6 +41,55 @@ func mustNoErr(t *testing.T, err error, what string) {
 	if err != nil {
 		t.Fatalf("%s: %v", what, err)
 	}
+}
+
+// mustU32 reads one NDR uint32 and stops the test when the stub is too short, so a
+// truncated reply fails as truncated instead of reading as a zero field.
+func mustU32(t *testing.T, p *ndr.Pull, what string) uint32 {
+	t.Helper()
+	v, err := p.Uint32()
+	mustNoErr(t, err, "read "+what)
+	return v
+}
+
+// mustU16 reads one NDR uint16, stopping the test on a short stub.
+func mustU16(t *testing.T, p *ndr.Pull, what string) uint16 {
+	t.Helper()
+	v, err := p.Uint16()
+	mustNoErr(t, err, "read "+what)
+	return v
+}
+
+// mustU8 reads one NDR byte, stopping the test on a short stub.
+func mustU8(t *testing.T, p *ndr.Pull, what string) uint8 {
+	t.Helper()
+	v, err := p.Uint8()
+	mustNoErr(t, err, "read "+what)
+	return v
+}
+
+// mustRaw reads n raw bytes, stopping the test on a short stub.
+func mustRaw(t *testing.T, p *ndr.Pull, n int, what string) []byte {
+	t.Helper()
+	b, err := p.Raw(n)
+	mustNoErr(t, err, "read "+what)
+	return b
+}
+
+// mustWrite sends one PDU on a channel body, stopping the test when the write
+// fails, so a closed channel shows as a write failure rather than a missing reply.
+func mustWrite(t *testing.T, w io.Writer, pdu []byte, what string) {
+	t.Helper()
+	_, err := w.Write(pdu)
+	mustNoErr(t, err, "write "+what)
+}
+
+// mustHeader parses a PDU's common header, stopping the test on a malformed PDU.
+func mustHeader(t *testing.T, pdu []byte) ndr.Header {
+	t.Helper()
+	h, err := ndr.ParseHeader(pdu)
+	mustNoErr(t, err, "parse the PDU header")
+	return h
 }
 
 // wantCommands fails the test unless an RTS PDU decodes to exactly the given

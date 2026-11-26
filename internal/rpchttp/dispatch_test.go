@@ -81,9 +81,9 @@ func responseStub(t *testing.T, pdu []byte) []byte {
 	if _, err := p.Raw(16); err != nil { // header
 		t.Fatal(err)
 	}
-	_, _ = p.Uint32() // alloc_hint
-	_, _ = p.Uint16() // context_id
-	_, _ = p.Uint8()  // cancel_count
+	mustU32(t, p, "alloc_hint")
+	mustU16(t, p, "context_id")
+	mustU8(t, p, "cancel_count")
 	p.Align(8)
 	return p.Rest()
 }
@@ -134,7 +134,7 @@ func TestRequestDispatch(t *testing.T) {
 	if len(out) != 1 {
 		t.Fatalf("request produced %d PDUs, want 1", len(out))
 	}
-	h, _ := ndr.ParseHeader(out[0])
+	h := mustHeader(t, out[0])
 	if h.Type != ndr.PktResponse {
 		t.Fatalf("reply type = %#x, want RESPONSE", h.Type)
 	}
@@ -148,7 +148,7 @@ func TestRequestDispatch(t *testing.T) {
 func TestRequestUnboundContextFaults(t *testing.T) {
 	d := echoDispatcher()
 	out := d.Dispatch(&Session{}, buildRequestPDU(0x11, 9, 0, nil, ndr.PfcFirstFrag|ndr.PfcLastFrag))
-	h, _ := ndr.ParseHeader(out[0])
+	h := mustHeader(t, out[0])
 	if h.Type != ndr.PktFault {
 		t.Errorf("unbound-context reply type = %#x, want FAULT", h.Type)
 	}
@@ -171,7 +171,7 @@ func TestResponseFragmentation(t *testing.T) {
 
 	var reassembled []byte
 	for i, pdu := range out {
-		h, _ := ndr.ParseHeader(pdu)
+		h := mustHeader(t, pdu)
 		if h.Type != ndr.PktResponse {
 			t.Fatalf("fragment %d type = %#x, want RESPONSE", i, h.Type)
 		}

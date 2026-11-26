@@ -29,21 +29,45 @@ func buildRpcExt2Stub(cxh ContextHandle, pin []byte) []byte {
 func parseRpcExt2Out(t *testing.T, stub []byte) (ContextHandle, []byte, uint32) {
 	t.Helper()
 	p := ndr.NewPull(stub)
-	cxh, _ := pullCtxHandle(p)
-	_, _ = p.Uint32()   // flags
-	mc, _ := p.Uint32() // cb_out max_count
-	_, _ = p.Uint32()   // offset
-	_, _ = p.Uint32()   // actual_count
-	pout, _ := p.Raw(int(mc))
-	_, _ = p.Uint32()    // cb_out (redundant)
-	amc, _ := p.Uint32() // AUX max_count
-	_, _ = p.Uint32()    // offset
-	_, _ = p.Uint32()    // actual_count
-	_, _ = p.Raw(int(amc))
-	_, _ = p.Uint32() // cb_auxout (redundant)
-	_, _ = p.Uint32() // trans_time
-	result, _ := p.Uint32()
-	return cxh, pout, result
+	cxh, err := pullCtxHandle(p)
+	mustNoErr(t, err, "pull the echoed context handle")
+	mustU32(t, p, "flags")
+	mc := mustU32(t, p, "cb_out max_count")
+	mustU32(t, p, "cb_out offset")
+	mustU32(t, p, "cb_out actual_count")
+	pout := mustRaw(t, p, int(mc), "ROP output")
+	mustU32(t, p, "cb_out")
+	amc := mustU32(t, p, "AUX max_count")
+	mustU32(t, p, "AUX offset")
+	mustU32(t, p, "AUX actual_count")
+	mustRaw(t, p, int(amc), "AUX output")
+	mustU32(t, p, "cb_auxout")
+	mustU32(t, p, "trans_time")
+	return cxh, pout, mustU32(t, p, "rpc result")
+}
+
+// connectFresh runs EcDoConnectEx against a fresh on-disk mailbox and returns the
+// minted context handle; the ROP store opens at RopLogon.
+func connectFresh(t *testing.T, ems *EMSMDB) ContextHandle {
+	t.Helper()
+	out, fault := ems.Handle(&Session{User: "alice@hermex.test", Mailbox: provisionedDir(t)}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
+	wantEq(t, fault, uint32(0), "connect fault")
+	cxh, result := parseConnectExOut(t, out)
+	wantEq(t, result, uint32(ecSuccess), "connect result")
+	return cxh
+}
+
+// ropHeader reads a ROP response's RopId and ReturnValue, skipping the output
+// handle index between them.
+func ropHeader(t *testing.T, rp *ext.Pull) (uint8, uint32) {
+	t.Helper()
+	id, err := rp.Uint8()
+	mustNoErr(t, err, "read the RopId")
+	_, err = rp.Uint8()
+	mustNoErr(t, err, "read the OutputHandleIndex")
+	rv, err := rp.Uint32()
+	mustNoErr(t, err, "read the ReturnValue")
+	return id, rv
 }
 
 // logonExecuteBuffer builds the ROP buffer Outlook carries in EcDoRpcExt2 for a
@@ -68,8 +92,7 @@ func logonExecuteBuffer() []byte {
 func TestRpcExt2Logon(t *testing.T) {
 	ems := NewEMSMDB(nil)
 	// Connect against a fresh on-disk mailbox; the ROP store opens at RopLogon.
-	out, _ := ems.Handle(&Session{User: "alice@hermex.test", Mailbox: provisionedDir(t)}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
-	cxh, _ := parseConnectExOut(t, out)
+	cxh := connectFresh(t, ems)
 
 	resp, fault := ems.Handle(&Session{User: "alice@hermex.test"}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, logonExecuteBuffer()))
 	if fault != 0 {
@@ -88,9 +111,7 @@ func TestRpcExt2Logon(t *testing.T) {
 		t.Fatalf("decode ROP response: %v", err)
 	}
 	rp := ext.NewPull(rops, ext.FlagUTF16)
-	ropID, _ := rp.Uint8()
-	_, _ = rp.Uint8()    // OutputHandleIndex
-	rv, _ := rp.Uint32() // ReturnValue
+	ropID, rv := ropHeader(t, rp)
 	if ropID != 0xFE || rv != ecSuccess {
 		t.Errorf("ROP response = (RopId %#x, ReturnValue %#x), want (0xFE, 0), a RopLogon success", ropID, rv)
 	}
@@ -120,8 +141,7 @@ func openFolderExecuteBuffer(logonH uint32) []byte {
 // fail to resolve the logon handle and return ecError.
 func TestRpcExt2CrossExecuteHandle(t *testing.T) {
 	ems := NewEMSMDB(nil)
-	out, _ := ems.Handle(&Session{User: "alice@hermex.test", Mailbox: provisionedDir(t)}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
-	cxh, _ := parseConnectExOut(t, out)
+	cxh := connectFresh(t, ems)
 
 	// Execute #1: RopLogon -> the logon handle lands in the response handle table.
 	resp, fault := ems.Handle(&Session{User: "alice@hermex.test"}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, logonExecuteBuffer()))
@@ -146,9 +166,7 @@ func TestRpcExt2CrossExecuteHandle(t *testing.T) {
 	mustNoErr(t, err, "decode the open-folder response")
 
 	rp := ext.NewPull(rops, ext.FlagUTF16)
-	ropID, _ := rp.Uint8()
-	_, _ = rp.Uint8()    // OutputHandleIndex
-	rv, _ := rp.Uint32() // ReturnValue
+	ropID, rv := ropHeader(t, rp)
 	wantEq(t, ropID, uint8(0x02), "open-folder RopId")
 	// A non-zero return value here means the logon handle did not survive into the
 	// second Execute.

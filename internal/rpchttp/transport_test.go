@@ -71,7 +71,8 @@ func TestRTSRoundTrip(t *testing.T) {
 	wantEq(t, c2[1].U32, uint32(0x10000), "CONN/C2 window")
 
 	// The cookies helper recovers both cookies from a CONN/A1 in order.
-	_, a1cmds, _ := parseRTS(connA1())
+	_, a1cmds, err := parseRTS(connA1())
+	mustNoErr(t, err, "parse CONN/A1")
 	ck := cookies(a1cmds)
 	if len(ck) != 2 {
 		t.Fatalf("cookies(A1) = %v, want two", ck)
@@ -91,7 +92,7 @@ func TestRendezvous(t *testing.T) {
 	url := srv.URL + "/rpc/rpcproxy.dll?testhost:6001"
 
 	// Open the OUT channel and read the immediate CONN/A3.
-	outReq, _ := http.NewRequest("RPC_OUT_DATA", url, bytes.NewReader(connA1()))
+	outReq := mustReq(t, "RPC_OUT_DATA", url, bytes.NewReader(connA1()))
 	outResp, err := http.DefaultClient.Do(outReq)
 	mustNoErr(t, err, "OUT request")
 	defer outResp.Body.Close()
@@ -99,13 +100,14 @@ func TestRendezvous(t *testing.T) {
 
 	a3, err := readPDU(outResp.Body)
 	mustNoErr(t, err, "read CONN/A3")
-	_, a3cmds, _ := parseRTS(a3)
+	_, a3cmds, err := parseRTS(a3)
+	mustNoErr(t, err, "parse CONN/A3")
 	wantCommands(t, a3cmds, "the first OUT PDU", rtsConnectionTimeout)
 
 	// Open the IN channel via a pipe body so it stays open while we read the OUT
 	// stream.
 	pr, pw := io.Pipe()
-	inReq, _ := http.NewRequest("RPC_IN_DATA", url, pr)
+	inReq := mustReq(t, "RPC_IN_DATA", url, pr)
 	inDone := make(chan error, 1)
 	go func() {
 		resp, err := http.DefaultClient.Do(inReq)
@@ -120,7 +122,8 @@ func TestRendezvous(t *testing.T) {
 	// The virtual connection is now complete: CONN/C2 must arrive on OUT.
 	c2, err := readPDU(outResp.Body)
 	mustNoErr(t, err, "read CONN/C2")
-	_, cmds, _ := parseRTS(c2)
+	_, cmds, err := parseRTS(c2)
+	mustNoErr(t, err, "parse CONN/C2")
 	wantCommands(t, cmds, "the second OUT PDU", rtsVersion, rtsReceiveWindowSize, rtsConnectionTimeout)
 
 	_ = pw.Close()
@@ -133,8 +136,7 @@ func TestRendezvous(t *testing.T) {
 func TestUnknownMethodRejected(t *testing.T) {
 	srv := httptest.NewServer(NewServer(Config{Auth: okAuth}))
 	defer srv.Close()
-	req, _ := http.NewRequest("GET", srv.URL+"/rpc/rpcproxy.dll?h:6001", nil)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(mustReq(t, "GET", srv.URL+"/rpc/rpcproxy.dll?h:6001", nil))
 	if err != nil {
 		t.Fatal(err)
 	}

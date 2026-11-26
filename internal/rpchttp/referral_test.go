@@ -22,11 +22,11 @@ func TestRfrGetNewDSA(t *testing.T) {
 		t.Fatalf("fault %#x", fault)
 	}
 	q := ndr.NewPull(out)
-	if unused, _ := q.Uint32(); unused != 0 {
+	if unused := mustU32(t, q, "ppszUnused referent"); unused != 0 {
 		t.Errorf("ppszUnused referent = %#x, want null", unused)
 	}
-	outer, _ := q.Uint32()
-	inner, _ := q.Uint32()
+	outer := mustU32(t, q, "outer server pointer")
+	inner := mustU32(t, q, "inner server pointer")
 	if outer == 0 || inner == 0 {
 		t.Fatalf("ppszServer pointers = (%#x, %#x), want both present", outer, inner)
 	}
@@ -37,7 +37,7 @@ func TestRfrGetNewDSA(t *testing.T) {
 	if server != rfrHost {
 		t.Errorf("server = %q, want %q", server, rfrHost)
 	}
-	if result, _ := q.Uint32(); result != ecSuccess {
+	if result := mustU32(t, q, "result"); result != ecSuccess {
 		t.Errorf("result = %#x, want ecSuccess", result)
 	}
 }
@@ -54,8 +54,7 @@ func TestRfrGetFQDN(t *testing.T) {
 		t.Fatalf("fault %#x", fault)
 	}
 	q := ndr.NewPull(out)
-	ref, _ := q.Uint32()
-	if ref == 0 {
+	if ref := mustU32(t, q, "FQDN referent"); ref == 0 {
 		t.Fatal("FQDN referent absent")
 	}
 	fqdn, err := pullRfrString(q, 1024)
@@ -65,7 +64,7 @@ func TestRfrGetFQDN(t *testing.T) {
 	if fqdn != rfrHost {
 		t.Errorf("fqdn = %q, want %q", fqdn, rfrHost)
 	}
-	if result, _ := q.Uint32(); result != ecSuccess {
+	if result := mustU32(t, q, "result"); result != ecSuccess {
 		t.Errorf("result = %#x, want ecSuccess", result)
 	}
 }

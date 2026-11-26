@@ -69,13 +69,13 @@ func TestConnectExReadsTheLocale(t *testing.T) {
 }
 
 // pullConfString reads a unique-pointer conformant-varying string.
-func pullConfString(p *ndr.Pull) string {
-	_, _ = p.Uint32() // referent id
-	_, _ = p.Uint32() // max_count
-	_, _ = p.Uint32() // offset
-	n, _ := p.Uint32()
-	b, _ := p.Raw(int(n))
-	return trimNUL(b)
+func pullConfString(t *testing.T, p *ndr.Pull) string {
+	t.Helper()
+	mustU32(t, p, "string referent id")
+	mustU32(t, p, "string max_count")
+	mustU32(t, p, "string offset")
+	n := mustU32(t, p, "string actual_count")
+	return trimNUL(mustRaw(t, p, int(n), "string bytes"))
 }
 
 // parseConnectExOut decodes an EcDoConnectEx response stub, returning the minted
@@ -87,23 +87,22 @@ func parseConnectExOut(t *testing.T, stub []byte) (ContextHandle, uint32) {
 	if err != nil {
 		t.Fatalf("ctx handle: %v", err)
 	}
-	_, _ = p.Uint32() // max_polls
-	_, _ = p.Uint32() // max_retry
-	_, _ = p.Uint32() // retry_delay
-	_, _ = p.Uint16() // cxr
-	pullConfString(p)
-	pullConfString(p)
+	mustU32(t, p, "max_polls")
+	mustU32(t, p, "max_retry")
+	mustU32(t, p, "retry_delay")
+	mustU16(t, p, "cxr")
+	pullConfString(t, p)
+	pullConfString(t, p)
 	for range 6 { // server + best versions
-		_, _ = p.Uint16()
+		mustU16(t, p, "version word")
 	}
-	_, _ = p.Uint32()     // timestamp
-	mc, _ := p.Uint32()   // AUX max_count
-	_, _ = p.Uint32()     // offset
-	_, _ = p.Uint32()     // actual_count
-	_, _ = p.Raw(int(mc)) // AUX bytes
-	_, _ = p.Uint32()     // cb_auxout (redundant)
-	result, _ := p.Uint32()
-	return cxh, result
+	mustU32(t, p, "timestamp")
+	mc := mustU32(t, p, "AUX max_count")
+	mustU32(t, p, "AUX offset")
+	mustU32(t, p, "AUX actual_count")
+	mustRaw(t, p, int(mc), "AUX bytes")
+	mustU32(t, p, "cb_auxout")
+	return cxh, mustU32(t, p, "connect result")
 }
 
 // TestConnectDisconnect proves the EMSMDB stub mints a context handle on
@@ -137,7 +136,7 @@ func TestConnectDisconnect(t *testing.T) {
 	if _, err := pullCtxHandle(dp); err != nil {
 		t.Fatal(err)
 	}
-	if dres, _ := dp.Uint32(); dres != ecSuccess {
+	if dres := mustU32(t, dp, "disconnect result"); dres != ecSuccess {
 		t.Errorf("disconnect result = %#x, want ecSuccess", dres)
 	}
 	if _, ok := ems.lookup("alice@hermex.test", cxh.GUID); ok {
@@ -191,16 +190,16 @@ func TestEndToEndConnect(t *testing.T) {
 		}
 		inDone <- err
 	}()
-	_, _ = pw.Write(connB1())
+	mustWrite(t, pw, connB1(), "CONN/B1")
 	_, err = readPDU(outResp.Body) // CONN/C2
 	mustNoErr(t, err, "read CONN/C2")
 
 	// Bind the EMSMDB interface.
-	_, _ = pw.Write(buildBindPDU(0x30, EMSMDBUUID, EMSMDBVersion, 0))
+	mustWrite(t, pw, buildBindPDU(0x30, EMSMDBUUID, EMSMDBVersion, 0), "the bind")
 	wantPDUType(t, readReply(t, outResp.Body, "bind_ack"), ndr.PktBindAck, "bind reply")
 
 	// EcDoConnectEx.
-	_, _ = pw.Write(buildRequestPDU(0x31, 0, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"), ndr.PfcFirstFrag|ndr.PfcLastFrag))
+	mustWrite(t, pw, buildRequestPDU(0x31, 0, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"), ndr.PfcFirstFrag|ndr.PfcLastFrag), "EcDoConnectEx")
 	connResp := readReply(t, outResp.Body, "connect response")
 	wantPDUType(t, connResp, ndr.PktResponse, "connect reply")
 	cxh, result := parseConnectExOut(t, responseStub(t, connResp))
@@ -210,7 +209,7 @@ func TestEndToEndConnect(t *testing.T) {
 	// EcDoDisconnect.
 	ds := ndr.NewPush()
 	pushCtxHandle(ds, cxh)
-	_, _ = pw.Write(buildRequestPDU(0x32, 0, opEcDoDisconnect, ds.Bytes(), ndr.PfcFirstFrag|ndr.PfcLastFrag))
+	mustWrite(t, pw, buildRequestPDU(0x32, 0, opEcDoDisconnect, ds.Bytes(), ndr.PfcFirstFrag|ndr.PfcLastFrag), "EcDoDisconnect")
 	wantPDUType(t, readReply(t, outResp.Body, "disconnect response"), ndr.PktResponse, "disconnect reply")
 	_, stillOpen := ems.lookup("alice@hermex.test", cxh.GUID)
 	wantFalse(t, stillOpen, "the session survives an end-to-end disconnect")
@@ -251,7 +250,8 @@ func TestIdleSessionIsReclaimed(t *testing.T) {
 	if fault != 0 {
 		t.Fatalf("connect fault = %#x", fault)
 	}
-	cxh, _ := parseConnectExOut(t, out)
+	cxh, result := parseConnectExOut(t, out)
+	wantEq(t, result, uint32(ecSuccess), "connect result")
 
 	// Not yet idle: a sweep must leave a session the client is still using.
 	if n := ems.Sweep(time.Now(), time.Hour); n != 0 {
@@ -275,8 +275,10 @@ func TestIdleSessionIsReclaimed(t *testing.T) {
 func TestSessionTouchDefersReclaim(t *testing.T) {
 	ems := NewEMSMDB(nil)
 	sess := &Session{User: "alice@hermex.test", Mailbox: provisionedDir(t)}
-	out, _ := ems.Handle(sess, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
-	cxh, _ := parseConnectExOut(t, out)
+	out, fault := ems.Handle(sess, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
+	wantEq(t, fault, uint32(0), "connect fault")
+	cxh, result := parseConnectExOut(t, out)
+	wantEq(t, result, uint32(ecSuccess), "connect result")
 
 	// A touch restamps the session, so a sweep with the same window finds it fresh.
 	if _, ok := ems.lookup("alice@hermex.test", cxh.GUID); !ok {
