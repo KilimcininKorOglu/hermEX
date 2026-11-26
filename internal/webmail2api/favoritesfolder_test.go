@@ -87,7 +87,10 @@ func TestDeletingAFolderKeepsItsNameInTheTrash(t *testing.T) {
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
 	defer st.Close()
-	fid, _ := parseCustomSlug(x)
+	fid, ok := parseCustomSlug(x)
+	if !ok {
+		t.Fatalf("%q is not a folder slug", x)
+	}
 	props, err := st.GetFolderProperties(fid, mapi.PrDisplayName)
 	mustNoErr(t, "read the name", err)
 	wantEq(t, "the name under Deleted Items", propStr(props, mapi.PrDisplayName), "Project X")

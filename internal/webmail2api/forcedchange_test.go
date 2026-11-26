@@ -40,7 +40,7 @@ func TestForcedPasswordChangeGate(t *testing.T) {
 
 	call := func(flagged bool, method, target string) int {
 		srv := NewServer(flaggedAuth{mbox: mbox, flagged: flagged}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
-		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: mbox, Exp: time.Now().Add(time.Hour).Unix()})
+		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: mbox, Exp: time.Now().Add(time.Hour).Unix()})
 		req := httptest.NewRequest(method, target, nil)
 		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
 		rec := httptest.NewRecorder()

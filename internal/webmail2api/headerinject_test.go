@@ -5,17 +5,36 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
 )
 
 // composeHarness builds a server with one account and a session token for it.
 func composeHarness(t *testing.T) (*Server, string) {
 	t.Helper()
+	srv, token, _ := composeHarnessWithMailbox(t)
+	return srv, token
+}
+
+// composeHarnessWithMailbox is composeHarness that also returns the mailbox
+// directory, for a test that checks what a refused request left in the store.
+func composeHarnessWithMailbox(t *testing.T) (*Server, string, string) {
+	t.Helper()
 	mbox := t.TempDir()
+	// Provision the mailbox, as account creation does, so a request that gets
+	// past the checks can really write and a refusal is the handler's, not a
+	// missing store's.
+	st, err := objectstore.Open(mbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
 	secret := []byte("header-inject-test-secret")
 	accounts := directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: mbox}}
 	srv := NewServer(accounts, accounts, nil, "mail.hermex.test", secret, "", false)
@@ -25,7 +44,7 @@ func composeHarness(t *testing.T) (*Server, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return srv, token
+	return srv, token, mbox
 }
 
 // post sends one JSON body to a compose endpoint.
@@ -47,7 +66,7 @@ const injected = "attacker@evil.test\r\nBcc: victim@hermex.test"
 // only the local part, so the domain half of such a string lands in the header
 // block verbatim.
 func TestComposeRejectsUnparseableRecipient(t *testing.T) {
-	srv, token := composeHarness(t)
+	srv, token, mbox := composeHarnessWithMailbox(t)
 	body, _ := json.Marshal(map[string]any{
 		"to": []string{injected}, "subject": "hi", "body": "text",
 	})
@@ -57,6 +76,16 @@ func TestComposeRejectsUnparseableRecipient(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("%s status = %d, want 400: %s", path, rec.Code, rec.Body.String())
 		}
+	}
+	// Send files a copy in Sent Items and draft one in Drafts; a refused request
+	// must leave both empty, or the injected header reaches the store anyway.
+	st, err := objectstore.Open(mbox)
+	mustNoErr(t, "open the mailbox", err)
+	defer st.Close()
+	for _, fid := range []int64{int64(mapi.PrivateFIDSentItems), int64(mapi.PrivateFIDDraft)} {
+		msgs, err := st.ListMessages(fid)
+		mustNoErr(t, "list a folder", err)
+		wantEq(t, "messages in folder "+strconv.FormatInt(fid, 10), len(msgs), 0)
 	}
 }
 

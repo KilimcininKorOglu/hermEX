@@ -47,7 +47,7 @@ func TestGroupsAPI(t *testing.T) {
 	secret := []byte("groups-secret")
 	srv := NewServer(auth, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
 	do := func(method, target, body string) *httptest.ResponseRecorder {
-		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: t.TempDir(), Exp: time.Now().Add(time.Hour).Unix()})
+		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: t.TempDir(), Exp: time.Now().Add(time.Hour).Unix()})
 		var req *http.Request
 		if body == "" {
 			req = httptest.NewRequest(method, target, nil)
@@ -99,7 +99,7 @@ func TestGroupsLDAPMastered(t *testing.T) {
 	secret := []byte("groups-mastered-secret")
 	srv := NewServer(auth, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
 	do := func(method, target, body string) *httptest.ResponseRecorder {
-		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: t.TempDir(), Exp: time.Now().Add(time.Hour).Unix()})
+		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: t.TempDir(), Exp: time.Now().Add(time.Hour).Unix()})
 		var req *http.Request
 		if body == "" {
 			req = httptest.NewRequest(method, target, nil)
@@ -114,7 +114,9 @@ func TestGroupsLDAPMastered(t *testing.T) {
 
 	rec := do(http.MethodGet, "/api/v1/groups", "")
 	var groups []map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &groups)
+	if err := json.Unmarshal(rec.Body.Bytes(), &groups); err != nil {
+		t.Fatalf("decode groups: %v (status %d, body %s)", err, rec.Code, rec.Body.String())
+	}
 	if len(groups) != 1 || groups[0]["ldapMastered"] != true {
 		t.Fatalf("get groups = %+v, want ad-grp flagged ldapMastered", groups)
 	}
@@ -141,7 +143,7 @@ func TestGroupsRefuseAnUnroutableMemberAsTheClientsError(t *testing.T) {
 	}}}
 	secret := []byte("groups-unroutable-secret")
 	srv := NewServer(auth, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
-	token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: t.TempDir(), Exp: time.Now().Add(time.Hour).Unix()})
+	token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: t.TempDir(), Exp: time.Now().Add(time.Hour).Unix()})
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/groups/members",
 		strings.NewReader(`{"address":"crew@hermex.test","members":["bob@"]}`))
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})

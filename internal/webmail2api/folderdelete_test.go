@@ -101,8 +101,12 @@ func TestDeleteBuiltinFolderIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if _, err := st.ListMessages(int64(mapi.PrivateFIDInbox)); err != nil {
-		t.Errorf("the Inbox did not survive the refused delete: %v", err)
+	props, err := st.GetFolderProperties(int64(mapi.PrivateFIDInbox), mapi.PrDisplayName)
+	if err != nil {
+		t.Fatalf("the Inbox did not survive the refused delete: %v", err)
+	}
+	if name := propStr(props, mapi.PrDisplayName); name != "Inbox" {
+		t.Errorf("Inbox display name after the refused delete = %q, want Inbox", name)
 	}
 }
 

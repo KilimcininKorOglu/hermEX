@@ -51,7 +51,7 @@ func TestDirectoryOmitsHiddenUser(t *testing.T) {
 	secret := []byte("directory-hide-test-secret")
 	srv := NewServer(accs, accs, nil, "mail.hermex.test", secret, "", false)
 
-	token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: mbox, Exp: time.Now().Add(time.Hour).Unix()})
+	token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: mbox, Exp: time.Now().Add(time.Hour).Unix()})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/directory?q=al", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
 	rec := httptest.NewRecorder()

@@ -47,7 +47,7 @@ func newTwinFolders(t *testing.T) twinFolders {
 	secret := []byte("folder-slug-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
 	tf.call = func(method, target, body string) *httptest.ResponseRecorder {
-		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: tf.dir, Exp: time.Now().Add(time.Hour).Unix()})
+		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: tf.dir, Exp: time.Now().Add(time.Hour).Unix()})
 		req := httptest.NewRequest(method, target, strings.NewReader(body))
 		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
 		rec := httptest.NewRecorder()
