@@ -18,11 +18,17 @@ func TestAttendeePartstatRoundTrips(t *testing.T) {
 		"ORGANIZER:mailto:alice@example.test\r\n" +
 		"ATTENDEE;PARTSTAT=DECLINED:mailto:bob@example.test\r\n" +
 		"ATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:carol@example.test\r\n" +
+		"ATTENDEE;PARTSTAT=X-ACCEPTED-BY-FORCE:mailto:dave@example.test\r\n" +
 		"END:VEVENT\r\nEND:VCALENDAR\r\n"
 	msg, err := Import([]byte(body), r.opt())
 	mustNoErr(t, err, "import")
-	if len(msg.Recipients) != 2 {
-		t.Fatalf("recipients = %d, want 2", len(msg.Recipients))
+	if len(msg.Recipients) != 3 {
+		t.Fatalf("recipients = %d, want 3", len(msg.Recipients))
+	}
+	// RFC 5545 3.2.12: an unrecognized PARTSTAT is read as NEEDS-ACTION, so a value
+	// the sender made up is never recorded as an answer.
+	if got, _ := msg.Recipients[2].Get(mapi.PrRecipientTrackStatus); got != int32(0) {
+		t.Errorf("dave's made-up status = %v, want 0 (no response)", got)
 	}
 	if got, _ := msg.Recipients[0].Get(mapi.PrRecipientTrackStatus); got != int32(4) {
 		t.Errorf("bob's track status = %v, want 4 (declined)", got)
