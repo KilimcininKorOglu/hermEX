@@ -137,7 +137,11 @@ func TestInstanceEndedBeforeTheWindowIsNotFound(t *testing.T) {
 	if spans := spansIn(t, seriesICal, day(16, 18), day(16, 20)); len(spans) != 0 {
 		t.Errorf("spans = %v, want none: the instance ended at the window's start", spans)
 	}
-	if out, _ := ExpandRecurrence([]byte(seriesICal), day(16, 18), day(16, 20)); strings.Contains(string(out), "RECURRENCE-ID:20260316T170000Z") {
+	out, ok := ExpandRecurrence([]byte(seriesICal), day(16, 18), day(16, 20))
+	if !ok {
+		t.Fatal("ExpandRecurrence refused the series")
+	}
+	if strings.Contains(string(out), "RECURRENCE-ID:20260316T170000Z") {
 		t.Errorf("expand returned the ended 16 March instance:\n%s", out)
 	}
 }

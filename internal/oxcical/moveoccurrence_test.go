@@ -52,7 +52,10 @@ func TestHasInstanceNamesOnlyLiveInstances(t *testing.T) {
 	if HasInstance([]byte(berlinDaily), day(30, 8)) {
 		t.Error("an instant off the pattern is accepted")
 	}
-	cancelled, _ := CancelOccurrence([]byte(berlinDaily), day(30, 7))
+	cancelled, ok := CancelOccurrence([]byte(berlinDaily), day(30, 7))
+	if !ok {
+		t.Fatal("CancelOccurrence refused a live instance")
+	}
 	if HasInstance(cancelled, day(30, 7)) {
 		t.Error("a cancelled instant is accepted")
 	}
