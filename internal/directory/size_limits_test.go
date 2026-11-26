@@ -47,6 +47,27 @@ func TestSizeLimitsRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSizeLimitsRefuseANegativeValue proves a negative limit is refused and the
+// stored row kept. Zero means "the protocol's built-in default"; a negative byte
+// count or target count means nothing.
+func TestSizeLimitsRefuseANegativeValue(t *testing.T) {
+	d := setupSizeLimits(t)
+	want := SizeLimits{IMAPLiteralBytes: 1048576, FreeBusyMaxTargets: 10}
+	mustNoErr(t, "save the starting limits", d.SetSizeLimits(want))
+	for _, bad := range []SizeLimits{
+		{IMAPLiteralBytes: -1},
+		{FreeBusyMaxTargets: -1},
+		{EWSSubscriptionTimeoutMinutes: -5},
+		{MapiUploadMessageBytes: -1048576},
+	} {
+		wantErr(t, "SetSizeLimits accepted a negative limit", d.SetSizeLimits(bad))
+		got, found, err := d.GetSizeLimits()
+		mustNoErr(t, "read the limits after a refusal", err)
+		wantEq(t, "limits found after a refusal", found, true)
+		wantEq(t, "limits after a refusal", got, want)
+	}
+}
+
 // TestSizeLimitsUpsert proves a second save replaces the single row.
 func TestSizeLimitsUpsert(t *testing.T) {
 	d := setupSizeLimits(t)

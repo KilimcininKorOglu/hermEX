@@ -81,6 +81,14 @@ func (d *SQLDirectory) GetSizeLimits() (SizeLimits, bool, error) {
 // SetSizeLimits persists the size limits, upserting the single row so each protocol
 // daemon's poll observes the change and applies it without a restart.
 func (d *SQLDirectory) SetSizeLimits(s SizeLimits) error {
+	for _, v := range []int64{s.IMAPLiteralBytes, s.EWSRequestBytes, s.ActiveSyncRequestBytes, s.DAVICalBytes,
+		s.DAVVCardBytes, s.WebmailRequestBytes, s.MapiRequestBytes, s.FreeBusyMaxTargets, s.WebmailPreviewMaxBytes,
+		s.IMAPCommandLineBytes, s.POP3CommandLineBytes, s.SMTPCommandLineBytes, s.EWSSubscriptionTimeoutMinutes,
+		s.TLSReportBytes, s.MapiUploadMessageBytes} {
+		if v < 0 {
+			return errors.New("directory: a size limit cannot be negative; 0 keeps the protocol default")
+		}
+	}
 	_, err := d.db.Exec(
 		`INSERT INTO size_limits
 		   (id, imap_literal_bytes, ews_request_bytes, activesync_request_bytes, dav_ical_bytes, dav_vcard_bytes,
