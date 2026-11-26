@@ -105,7 +105,12 @@ func (s *Server) Handler() http.Handler {
 
 // route dispatches the EWS SOAP endpoint and the Outlook Autodiscover endpoint.
 func (s *Server) route(w http.ResponseWriter, r *http.Request) {
-	switch strings.ToLower(r.URL.Path) {
+	path := strings.ToLower(r.URL.Path)
+	if path == autodiscoverJSONPrefix || strings.HasPrefix(path, autodiscoverJSONPrefix+"/") {
+		s.serveAutodiscoverJSON(w, r)
+		return
+	}
+	switch path {
 	case "/ews/exchange.asmx":
 		s.serveEWS(w, r)
 	case "/autodiscover/autodiscover.xml":
