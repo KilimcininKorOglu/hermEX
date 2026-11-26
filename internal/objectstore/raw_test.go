@@ -52,6 +52,11 @@ func TestGetMessageRaw(t *testing.T) {
 	if _, err := s.GetMessageRaw(mapi.PrivateFIDInbox, 9999); !errors.Is(err, ErrNotFound) {
 		t.Errorf("GetMessageRaw(missing) err = %v, want ErrNotFound", err)
 	}
+	// A UID is scoped to its folder (RFC 3501 2.3.1.1): the Inbox UID read through
+	// another folder serves nothing.
+	if leaked, err := s.GetMessageRaw(mapi.PrivateFIDSentItems, info.UID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("GetMessageRaw(Sent Items, inbox uid) = %d bytes, err %v; want ErrNotFound", len(leaked), err)
+	}
 }
 
 // regenerateAfterCacheMiss forces a stale index size and drops the cache, then

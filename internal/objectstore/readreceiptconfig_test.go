@@ -7,18 +7,10 @@ import "testing"
 // outside the three choices is refused rather than stored.
 func TestReadReceiptConfigRoundTrip(t *testing.T) {
 	st, err := Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "open", err)
 	defer st.Close()
 
-	cfg, err := st.GetReadReceiptConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg != (ReadReceiptConfig{Response: ReadReceiptAsk}) {
-		t.Errorf("an unset config read as %+v, want ask and ActiveSync sending", cfg)
-	}
+	wantReadReceiptConfig(t, st, ReadReceiptConfig{Response: ReadReceiptAsk})
 
 	for _, want := range []ReadReceiptConfig{
 		{Response: ReadReceiptAlways},
@@ -26,19 +18,24 @@ func TestReadReceiptConfigRoundTrip(t *testing.T) {
 		{Response: ReadReceiptAsk, SuppressActiveSync: true},
 		{},
 	} {
-		if err := st.SetReadReceiptConfig(want); err != nil {
-			t.Fatalf("set %+v: %v", want, err)
-		}
-		got, err := st.GetReadReceiptConfig()
-		if err != nil {
-			t.Fatalf("get after %+v: %v", want, err)
-		}
-		if got != want {
-			t.Errorf("config = %+v, want %+v", got, want)
-		}
+		mustNoErr(t, "set the config", st.SetReadReceiptConfig(want))
+		wantReadReceiptConfig(t, st, want)
 	}
 
+	kept := ReadReceiptConfig{Response: ReadReceiptNever, SuppressActiveSync: true}
+	mustNoErr(t, "set the kept config", st.SetReadReceiptConfig(kept))
 	if err := st.SetReadReceiptConfig(ReadReceiptConfig{Response: 3}); err == nil {
 		t.Error("a response outside the three choices was stored")
+	}
+	wantReadReceiptConfig(t, st, kept)
+}
+
+// wantReadReceiptConfig reads the stored config and compares it with want.
+func wantReadReceiptConfig(t *testing.T, st *Store, want ReadReceiptConfig) {
+	t.Helper()
+	got, err := st.GetReadReceiptConfig()
+	mustNoErr(t, "get the config", err)
+	if got != want {
+		t.Errorf("config = %+v, want %+v", got, want)
 	}
 }

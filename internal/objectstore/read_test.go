@@ -166,6 +166,17 @@ func TestSetReadStateNoOp(t *testing.T) {
 	}
 }
 
+// TestSetReadStateRefusesAMissingMessage: a read flip aimed at a message the store
+// does not hold is refused and allocates no change number.
+func TestSetReadStateRefusesAMissingMessage(t *testing.T) {
+	s := openSeededStore(t)
+	counterBefore := configVal(t, s, cfgLastChangeNumber)
+	if err := s.SetMessageReadState(987654, true); err == nil {
+		t.Error("a read-state write to a missing message succeeded")
+	}
+	wantEq(t, "change-number counter after the refused flip", configVal(t, s, cfgLastChangeNumber), counterBefore)
+}
+
 // TestSetMessageFlagsWritesReadCN confirms the IMAP flag-store path also records a
 // read_cn when \Seen first appears, so a message read in IMAP propagates to a
 // MAPI/ICS client.
