@@ -28,7 +28,7 @@ func TestMoveToArchiveFilesTheMail(t *testing.T) {
 
 	secret := []byte("archive-move-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
-	token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+	token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/mail/move", strings.NewReader(`{"id":"inbox:1","to":"archive"}`))
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
 	rec := httptest.NewRecorder()

@@ -39,7 +39,9 @@ func TestLoginThrottle(t *testing.T) {
 	}
 	// The fifth failure trips the lockout; the next attempt is refused with 429
 	// before credentials are even checked.
-	_ = post()
+	if code := post(); code != http.StatusUnauthorized {
+		t.Fatalf("fifth attempt = %d, want 401 (the lockout starts after it)", code)
+	}
 	if code := post(); code != http.StatusTooManyRequests {
 		t.Fatalf("after threshold = %d, want 429", code)
 	}

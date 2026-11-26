@@ -281,7 +281,10 @@ func TestPublicFoldersAccessGate(t *testing.T) {
 		var list struct {
 			Folders []publicFolderJSON `json:"folders"`
 		}
-		_ = json.Unmarshal(rec.Body.Bytes(), &list)
+		// An undecodable body would read as an empty list and pass, so it fails.
+		if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+			t.Fatalf("%s: decode the folder list: %v (status %d, body %s)", who, err, rec.Code, rec.Body.String())
+		}
 		if len(list.Folders) != 0 {
 			t.Errorf("%s saw folders: %+v", who, list.Folders)
 		}
