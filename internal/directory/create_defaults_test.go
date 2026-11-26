@@ -89,13 +89,13 @@ func TestPurgeDomainClearsCreateDefaults(t *testing.T) {
 	if err := d.SetCreateDefaults(id, CreateDefaults{User: UserCreateDefaults{Web: new(false)}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, _ := d.GetCreateDefaults(id); !ok {
-		t.Fatal("override not stored")
-	}
+	mustCreateDefaults(t, d, id)
 	if ok, err := d.PurgeDomain(id, false); err != nil || !ok {
 		t.Fatalf("PurgeDomain = %v, %v", ok, err)
 	}
-	if _, ok, _ := d.GetCreateDefaults(id); ok {
+	_, ok, err := d.GetCreateDefaults(id)
+	mustNoErr(t, "read the purged domain's defaults", err)
+	if ok {
 		t.Error("create-defaults override survived the domain purge")
 	}
 }
