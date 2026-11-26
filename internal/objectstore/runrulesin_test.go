@@ -104,6 +104,25 @@ func TestRunRulesInIgnoresAnUnknownRule(t *testing.T) {
 	}
 }
 
+// TestRunRulesInRefusesAnotherFoldersRule: a rule id names a rule of the rule
+// folder only. An id stored on another folder must not run under the Inbox's name.
+func TestRunRulesInRefusesAnotherFoldersRule(t *testing.T) {
+	s := openSeededStore(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+	m := deliverTo(t, s, inbox, ruleMsg("Project update", "lead@acme.com", ""))
+	foreign := mustAddRule(t, s, Rule{
+		FolderID: int64(mapi.PrivateFIDSentItems), Name: "sent rule", State: mapi.RuleStateEnabled,
+		Condition: RuleSubjectContains("project"),
+		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{RuleMarkReadAction()}},
+	})
+	res, err := s.RunRulesIn(RunRulesOptions{RuleFolderID: inbox, TargetFolderID: inbox, RuleID: foreign}, 0)
+	mustNoErr(t, "run rules in", err)
+	wantEq(t, "affected", res.Affected, 0)
+	if fl := mustMessageFlags(t, s, inbox, m.UID); fl&FlagSeen != 0 {
+		t.Error("a rule stored on Sent Items ran over the Inbox")
+	}
+}
+
 // TestRunRulesInSkipsAMoveOntoItsOwnFolder is the self-move guard. Sweeping the
 // folder a rule files into would otherwise re-append every message under a fresh
 // UID and delete the original, invalidating every client's cache for nothing.
