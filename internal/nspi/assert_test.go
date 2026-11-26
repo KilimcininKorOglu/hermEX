@@ -20,6 +20,15 @@ func wantEq[T comparable](t *testing.T, label string, got, want T) {
 }
 
 // mustNoErr fails the test when err is set, naming the operation.
+// mustPush stops a request builder whose encoding failed. The builders run before
+// any assertion and take no *testing.T, so the panic is what fails the test; a
+// half-encoded request must never reach the server as if it were well formed.
+func mustPush(err error) {
+	if err != nil {
+		panic("encode the test request: " + err.Error())
+	}
+}
+
 func mustNoErr(t *testing.T, what string, err error) {
 	t.Helper()
 	if err != nil {

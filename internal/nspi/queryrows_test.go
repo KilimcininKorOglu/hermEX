@@ -26,9 +26,11 @@ func TestPushPropertyRowForms(t *testing.T) {
 	wantEq(t, "the NONE row flag", b[0], uint8(propRowNone))
 	pull := ext.NewPull(b, abkFlags)
 	mustU8(t, pull, "flag")
-	v, _ := pull.PropValue(mapi.PtUnicode)
+	v, err := pull.PropValue(mapi.PtUnicode)
+	mustNoErr(t, "read the NONE row display name", err)
 	wantEq(t, "the NONE row display name", v, any("Alice"))
-	v, _ = pull.PropValue(mapi.PtLong)
+	v, err = pull.PropValue(mapi.PtLong)
+	mustNoErr(t, "read the NONE row object type", err)
 	wantEq(t, "the NONE row object type", v, any(int32(6)))
 
 	// FLAGGED form: PrSmtpAddress is absent -> a PT_ERROR (ecNotFound) marker.
@@ -59,13 +61,13 @@ func buildQueryRows(st stat, explicit []uint32, count uint32, columns []mapi.Pro
 	for i, m := range explicit {
 		tags[i] = mapi.PropTag(m)
 	}
-	_ = p.PropTagsLong(tags) // explicit MId list (empty when nil)
+	mustPush(p.PropTagsLong(tags)) // explicit MId list (empty when nil)
 	p.Uint32(count)
 	if columns == nil {
 		p.Uint8(0)
 	} else {
 		p.Uint8(1)
-		_ = p.PropTagsLong(columns)
+		mustPush(p.PropTagsLong(columns))
 	}
 	p.Uint32(0) // cb_auxin
 	return p.Bytes()
@@ -140,9 +142,11 @@ func TestQueryRowsExplicit(t *testing.T) {
 		t.Fatalf("result = %#x", result)
 	}
 	mustU8(t, p, "STAT marker")
-	_, _ = pullStat(p)
+	_, err := pullStat(p)
+	mustNoErr(t, "read the STAT", err)
 	mustU8(t, p, "rows marker")
-	cols, _ := p.PropTagsLong()
+	cols, err := p.PropTagsLong()
+	mustNoErr(t, "read the columns", err)
 	if n := mustU32(t, p, "row count"); n != 2 {
 		t.Fatalf("row count = %d, want 2 (one per explicit id)", n)
 	}
@@ -173,7 +177,8 @@ func TestUpdateStatAdvance(t *testing.T) {
 		t.Fatalf("result = %#x", result)
 	}
 	mustU8(t, pr, "STAT marker")
-	st, _ := pullStat(pr)
+	st, err := pullStat(pr)
+	mustNoErr(t, "read the STAT", err)
 	if st.numPos != 2 {
 		t.Errorf("num_pos = %d, want 2", st.numPos)
 	}
@@ -201,7 +206,8 @@ func TestQueryColumns(t *testing.T) {
 	if m := mustU8(t, p, "columns marker"); m != 0xFF {
 		t.Fatalf("columns marker = %#x, want 0xFF", m)
 	}
-	cols, _ := p.PropTagsLong()
+	cols, err := p.PropTagsLong()
+	mustNoErr(t, "read the columns", err)
 	if len(cols) != len(defaultColumns) {
 		t.Errorf("columns = %d, want %d", len(cols), len(defaultColumns))
 	}

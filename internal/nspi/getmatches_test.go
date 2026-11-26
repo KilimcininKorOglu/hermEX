@@ -34,7 +34,7 @@ func buildGetMatches(st stat, filter *mapi.Restriction, rowCount uint32, cols []
 		p.Uint8(0)
 	} else {
 		p.Uint8(1)
-		_ = p.Restriction(*filter)
+		mustPush(p.Restriction(*filter))
 	}
 	p.Uint8(0) // hasPropName = 0
 	p.Uint32(rowCount)
@@ -42,7 +42,7 @@ func buildGetMatches(st stat, filter *mapi.Restriction, rowCount uint32, cols []
 		p.Uint8(0)
 	} else {
 		p.Uint8(1)
-		_ = p.PropTagsLong(cols)
+		mustPush(p.PropTagsLong(cols))
 	}
 	p.Uint32(0) // cb_auxin
 	return p.Bytes()

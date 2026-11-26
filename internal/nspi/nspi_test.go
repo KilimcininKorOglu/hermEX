@@ -56,8 +56,8 @@ func buildBind(flags uint32, withStat bool, codePage uint32) []byte {
 func decodeBindResp(t *testing.T, resp []byte) (status, result uint32, guid mapi.GUID) {
 	t.Helper()
 	p := ext.NewPull(resp, abkFlags)
-	status, _ = p.Uint32()
-	result, _ = p.Uint32()
+	status = mustU32(t, p, "status")
+	result = mustU32(t, p, "result")
 	g, err := p.GUID()
 	if err != nil {
 		t.Fatalf("decode server GUID: %v", err)

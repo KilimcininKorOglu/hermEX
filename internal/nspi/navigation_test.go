@@ -15,18 +15,18 @@ func buildSeekEntries(st stat, target string, table []uint32, cols []mapi.PropTa
 	p.Uint8(1)
 	pushStat(p, st)
 	p.Uint8(1) // hasTarget
-	_ = p.TaggedPropVal(mapi.TaggedPropVal{Tag: mapi.PrDisplayName, Value: target})
+	mustPush(p.TaggedPropVal(mapi.TaggedPropVal{Tag: mapi.PrDisplayName, Value: target}))
 	if table == nil {
 		p.Uint8(0)
 	} else {
 		p.Uint8(1)
-		_ = midArray(p, table)
+		mustPush(midArray(p, table))
 	}
 	if cols == nil {
 		p.Uint8(0)
 	} else {
 		p.Uint8(1)
-		_ = p.PropTagsLong(cols)
+		mustPush(p.PropTagsLong(cols))
 	}
 	p.Uint32(0) // cb_auxin
 	return p.Bytes()
@@ -153,7 +153,7 @@ func buildResort(st stat, inmids []uint32) []byte {
 		p.Uint8(0)
 	} else {
 		p.Uint8(1)
-		_ = midArray(p, inmids)
+		mustPush(midArray(p, inmids))
 	}
 	p.Uint32(0) // cb_auxin
 	return p.Bytes()

@@ -69,7 +69,7 @@ func buildGetProps(st stat, cols []mapi.PropTag) []byte {
 		p.Uint8(0)
 	} else {
 		p.Uint8(1)
-		_ = p.PropTagsLong(cols)
+		mustPush(p.PropTagsLong(cols))
 	}
 	p.Uint32(0) // cb_auxin
 	return p.Bytes()

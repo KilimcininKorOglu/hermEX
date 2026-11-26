@@ -179,7 +179,10 @@ func TestNDRRowSet(t *testing.T) {
 	mustU32NDR(t, pl, "string max_count", 6) // "alice\0" = 6 code units
 	mustU32NDR(t, pl, "string offset", 0)
 	mustU32NDR(t, pl, "string actual", 6)
-	raw, _ := pl.Raw(12)
+	raw, err := pl.Raw(12)
+	if err != nil {
+		t.Fatalf("read the string units: %v", err)
+	}
 	if got := decodeUTF16LE(raw); got != "alice" {
 		t.Errorf("decoded string = %q, want %q", got, "alice")
 	}
@@ -199,18 +202,18 @@ func TestNDRRowSetProjection(t *testing.T) {
 	mustU32NDR(t, pl, "crows actual", 1)
 	mustU32NDR(t, pl, "row reserved", 0)
 	mustU32NDR(t, pl, "row cValues", 2) // both columns present in the row, the 2nd an error
-	_, _ = pl.Uint32()                  // referent
+	ndrU32(t, pl, "value-array referent")
 	mustU32NDR(t, pl, "value-array max_count", 2)
 	// First value: PrDisplayName (unicode, present).
 	mustU32NDR(t, pl, "v0 proptag", uint32(mapi.PrDisplayName))
-	_, _ = pl.Uint32() // reserved
+	ndrU32(t, pl, "v0 reserved")
 	mustU32NDR(t, pl, "v0 ptype", uint32(mapi.PtUnicode))
-	_, _ = pl.Uint32() // string referent
+	ndrU32(t, pl, "v0 string referent")
 	// Second value: the absent column rewritten to PT_ERROR.
-	if tag, _ := pl.Uint32(); mapi.PropTag(tag).Type() != mapi.PtError {
+	if tag := ndrU32(t, pl, "v1 proptag"); mapi.PropTag(tag).Type() != mapi.PtError {
 		t.Errorf("absent column type = %#x, want PtError", mapi.PropTag(tag).Type())
 	}
-	_, _ = pl.Uint32() // reserved
+	ndrU32(t, pl, "v1 reserved")
 	mustU32NDR(t, pl, "v1 ptype", uint32(mapi.PtError))
 	mustU32NDR(t, pl, "v1 scode", uint32(ecNotFound))
 }
@@ -304,6 +307,17 @@ func TestNDRCtxHandle(t *testing.T) {
 }
 
 // mustU32NDR reads a u32 and fails if it does not equal want.
+// ndrU32 reads one NDR uint32 and fails the test when the stream is short, so a
+// truncated reply is never read as a zero.
+func ndrU32(t *testing.T, p *ndr.Pull, label string) uint32 {
+	t.Helper()
+	v, err := p.Uint32()
+	if err != nil {
+		t.Fatalf("%s: %v", label, err)
+	}
+	return v
+}
+
 func mustU32NDR(t *testing.T, p *ndr.Pull, label string, want uint32) {
 	t.Helper()
 	got, err := p.Uint32()

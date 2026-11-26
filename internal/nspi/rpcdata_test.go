@@ -283,8 +283,11 @@ func TestRPCGetPropList(t *testing.T) {
 	p2.Uint32(0)
 	p2.Uint32(0) // MId 0
 	p2.Uint32(1252)
-	out2, _ := s.DispatchRPC(opNspiGetPropList, p2.Bytes(), testCaller)
-	if ref, _ := ndr.NewPull(out2).Uint32(); ref != 0 {
+	out2, fault := s.DispatchRPC(opNspiGetPropList, p2.Bytes(), testCaller)
+	if fault != 0 {
+		t.Fatalf("GetPropList for MId 0 faulted %#x; it must answer ecInvalidObject", fault)
+	}
+	if ref := ndrU32(t, ndr.NewPull(out2), "proptag referent"); ref != 0 {
 		t.Error("proptag referent present for MId 0, want null")
 	}
 	if tailResult(out2) != ecInvalidObject {
@@ -386,7 +389,7 @@ func TestRPCGetTemplateInfoNoTemplate(t *testing.T) {
 	if fault != 0 {
 		t.Fatalf("GetTemplateInfo faulted %#x; it must answer, not fault", fault)
 	}
-	if ref, _ := ndr.NewPull(out).Uint32(); ref != 0 {
+	if ref := ndrU32(t, ndr.NewPull(out), "pData referent"); ref != 0 {
 		t.Errorf("pData referent = %#x, want 0 (no template row)", ref)
 	}
 	if tailResult(out) != ecUnknownLcid {
@@ -405,7 +408,7 @@ func TestRPCGetTemplateInfoScriptNotSupported(t *testing.T) {
 	if fault != 0 {
 		t.Fatalf("GetTemplateInfo faulted %#x", fault)
 	}
-	if ref, _ := ndr.NewPull(out).Uint32(); ref != 0 {
+	if ref := ndrU32(t, ndr.NewPull(out), "pData referent"); ref != 0 {
 		t.Errorf("pData referent = %#x, want 0", ref)
 	}
 	if tailResult(out) != ecNotSupported {
