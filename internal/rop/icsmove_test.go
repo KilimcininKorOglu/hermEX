@@ -1,6 +1,7 @@
 package rop
 
 import (
+	"errors"
 	"testing"
 
 	"hermex/internal/directory"
@@ -82,17 +83,33 @@ func TestSyncImportMessageMove(t *testing.T) {
 		t.Fatalf("second response RopId = %#x; move over/under-consumed its request", id)
 	}
 
+	// The message leaves the Inbox and is filed in the destination folder under
+	// the client's id.
+	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), msgID); f != -1 {
+		t.Errorf("source message %#x is still in the Inbox after the move", msgID)
+	}
+	if fid := storedMessageFolder(t, dir, int64(dstMID)); fid != int64(destFID) {
+		t.Errorf("destination message %#x is in folder %d after the move, want Sent Items", dstMID, fid)
+	}
+}
+
+// storedMessageFolder reads the folder a message row is filed in, or -1 when the
+// store holds no row under that id.
+func storedMessageFolder(t *testing.T, dir string, mid int64) int64 {
+	t.Helper()
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if _, err := st.OpenMessage(int64(msgID)); err == nil {
-		t.Errorf("source message %#x still present in the store after move", msgID)
+	fid, err := st.MessageFolder(mid)
+	if errors.Is(err, objectstore.ErrNotFound) {
+		return -1
 	}
-	if _, err := st.OpenMessage(int64(dstMID)); err != nil {
-		t.Fatalf("destination message %#x not found after move: %v", dstMID, err)
+	if err != nil {
+		t.Fatal(err)
 	}
+	return fid
 }
 
 // TestSyncImportMessageMoveNeedsDeleteOnTheSource proves a delegate's move is gated
@@ -134,6 +151,9 @@ func TestSyncImportMessageMoveNeedsDeleteOnTheSource(t *testing.T) {
 	}
 	if f := messageFlags(t, bossDir, int64(mapi.PrivateFIDInbox), msgID); f == -1 {
 		t.Error("the boss's Inbox message left the Inbox")
+	}
+	if fid := storedMessageFolder(t, bossDir, int64(dstMID)); fid != -1 {
+		t.Error("the refused move still filed a message in Sent Items")
 	}
 }
 
