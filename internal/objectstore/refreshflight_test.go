@@ -53,4 +53,12 @@ func TestRefreshEMLCollapsesConcurrentRegenerations(t *testing.T) {
 	if n := entered.Load(); n != 1 {
 		t.Errorf("the message was regenerated %d times concurrently, want 1", n)
 	}
+
+	// The invariant the collapse protects: the recorded RFC822.SIZE is the length
+	// of the bytes a fetch serves.
+	s.regenHook = nil
+	var recorded int64
+	mustScan(t, s.idxdb.QueryRow(`SELECT size FROM messages WHERE message_id=?`, info.ID), &recorded)
+	served := mustGetMessageRaw(t, s, mapi.PrivateFIDInbox, info.UID)
+	wantEq(t, "recorded size against the served bytes", recorded, int64(len(served)))
 }

@@ -124,9 +124,32 @@ func TestRegenerationGivesEachCallerItsOwnSlice(t *testing.T) {
 	s := openSeededStore(t)
 	info := mustAppendMessage(t, s, mapi.PrivateFIDInbox, multipartRaw(), time.Unix(1700000000, 0), 0)
 	mustNoErr(t, "drop the eml cache", os.Remove(s.emlPath(midString(uint64(info.ID)))))
-	first := mustGetMessageRaw(t, s, mapi.PrivateFIDInbox, info.UID)
+
+	// Hold the first reader inside the regeneration so the second joins the same
+	// flight and both receive its one result.
+	inside, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	s.regenHook = func() {
+		once.Do(func() { close(inside) })
+		<-release
+	}
+	var first, second []byte
+	var errFirst, errSecond error
+	var wg sync.WaitGroup
+	wg.Go(func() { first, errFirst = s.GetMessageRaw(mapi.PrivateFIDInbox, info.UID) })
+	<-inside
+	wg.Go(func() { second, errSecond = s.GetMessageRaw(mapi.PrivateFIDInbox, info.UID) })
+	time.Sleep(200 * time.Millisecond) // let the second reader reach the flight
+	close(release)
+	wg.Wait()
+	s.regenHook = nil
+	mustNoErr(t, "first read", errFirst)
+	mustNoErr(t, "second read", errSecond)
+
+	if len(first) == 0 || len(second) == 0 {
+		t.Fatalf("a reader got nothing: %d and %d bytes", len(first), len(second))
+	}
 	first[0] = 'X'
-	second := mustGetMessageRaw(t, s, mapi.PrivateFIDInbox, info.UID)
 	if second[0] == 'X' {
 		t.Error("a caller's write reached another caller's copy")
 	}
