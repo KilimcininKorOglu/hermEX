@@ -17,15 +17,33 @@ type groupDir interface {
 	SetMembers(listname string, members []string) (bool, error)
 }
 
+// ownedInScope returns the lists email owns that it can still reach. Ownership is a
+// grant over the list's members and stays inside the list's organization, so a
+// stored owner outside it (a row written before the owner rule, or an account that
+// has since moved) manages nothing. A scope that cannot be read drops the list.
+func ownedInScope(gd groupDir, accounts directory.Accounts, email string) ([]directory.MListInfo, error) {
+	owned, err := gd.ListMListsOwnedBy(email)
+	if err != nil {
+		return nil, err
+	}
+	out := owned[:0:0]
+	for _, l := range owned {
+		if reach, err := directory.MayReach(accounts, l.Listname, email); err == nil && reach {
+			out = append(out, l)
+		}
+	}
+	return out, nil
+}
+
 // ownsList reports whether email owns the list at addr (the managedBy owner). Every
 // member operation is gated on it so a caller can only manage lists they own, never
 // another owner's list (Broken Access Control / IDOR).
-func ownsList(gd groupDir, email, addr string) bool {
+func ownsList(gd groupDir, accounts directory.Accounts, email, addr string) bool {
 	addr = strings.ToLower(strings.TrimSpace(addr))
 	if addr == "" {
 		return false
 	}
-	owned, err := gd.ListMListsOwnedBy(email)
+	owned, err := ownedInScope(gd, accounts, email)
 	if err != nil {
 		return false
 	}
@@ -49,7 +67,7 @@ func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, []any{})
 		return
 	}
-	owned, err := gd.ListMListsOwnedBy(c.Email)
+	owned, err := ownedInScope(gd, s.accounts, c.Email)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not list your groups"})
 		return
@@ -74,7 +92,7 @@ func (s *Server) handleGroupMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	addr := r.URL.Query().Get("address")
-	if !ownsList(gd, c.Email, addr) {
+	if !ownsList(gd, s.accounts, c.Email, addr) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "you do not own this group"})
 		return
 	}
@@ -108,7 +126,7 @@ func (s *Server) handleGroupSetMembers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	if !ownsList(gd, c.Email, req.Address) {
+	if !ownsList(gd, s.accounts, c.Email, req.Address) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "you do not own this group"})
 		return
 	}

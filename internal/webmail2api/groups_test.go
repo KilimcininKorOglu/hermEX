@@ -36,6 +36,41 @@ func (a *groupStoreAuth) SetMembers(listname string, members []string) (bool, er
 	return true, nil
 }
 
+// groupAccounts places the caller and the lists in their domains, so the owner
+// scope check sees hermex.test lists as reachable and partner.test ones as not.
+var groupAccounts = directory.StaticAccounts{
+	"alice@hermex.test": {}, "crew@hermex.test": {}, "ad-grp@hermex.test": {}, "other@hermex.test": {},
+	"foreign@partner.test": {},
+}
+
+// TestGroupsIgnoreAnOwnerOutsideTheListsScope seeds a stored owner row for a list
+// of another organization, as one written before the owner rule would be: the
+// caller neither sees the list nor reads or replaces its members.
+func TestGroupsIgnoreAnOwnerOutsideTheListsScope(t *testing.T) {
+	auth := &groupStoreAuth{
+		owned:   map[string][]directory.MListInfo{"alice@hermex.test": {{Listname: "foreign@partner.test"}}},
+		members: []string{"x@partner.test"},
+	}
+	secret := []byte("groups-scope-secret")
+	srv := NewServer(auth, groupAccounts, nil, "mail.hermex.test", secret, "", false)
+	do := func(method, target, body string) *httptest.ResponseRecorder {
+		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: t.TempDir(), Exp: time.Now().Add(time.Hour).Unix()})
+		req := httptest.NewRequest(method, target, strings.NewReader(body))
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+
+	groups := okBody[[]map[string]any](t, "get groups", do(http.MethodGet, "/api/v1/groups", ""))
+	wantEq(t, "groups listed across the organization line", len(groups), 0)
+	wantStatus(t, "read the foreign list's members",
+		do(http.MethodGet, "/api/v1/groups/members?address=foreign@partner.test", ""), http.StatusForbidden)
+	wantStatus(t, "replace the foreign list's members", do(http.MethodPut, "/api/v1/groups/members",
+		`{"address":"foreign@partner.test","members":["y@partner.test"]}`), http.StatusForbidden)
+	wantEq(t, "members written to the foreign list", auth.setUser, "")
+}
+
 // TestGroupsAPI proves the caller lists only the groups they own, reads and replaces
 // members of an owned group, and is refused (403) on a group they do not own (the
 // Broken Access Control / IDOR guard).
@@ -45,7 +80,7 @@ func TestGroupsAPI(t *testing.T) {
 		members: []string{"bob@hermex.test"},
 	}
 	secret := []byte("groups-secret")
-	srv := NewServer(auth, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
+	srv := NewServer(auth, groupAccounts, nil, "mail.hermex.test", secret, "", false)
 	do := func(method, target, body string) *httptest.ResponseRecorder {
 		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: t.TempDir(), Exp: time.Now().Add(time.Hour).Unix()})
 		var req *http.Request
@@ -97,7 +132,7 @@ func TestGroupsLDAPMastered(t *testing.T) {
 		masteredLists: map[string]bool{"ad-grp@hermex.test": true},
 	}
 	secret := []byte("groups-mastered-secret")
-	srv := NewServer(auth, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
+	srv := NewServer(auth, groupAccounts, nil, "mail.hermex.test", secret, "", false)
 	do := func(method, target, body string) *httptest.ResponseRecorder {
 		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: t.TempDir(), Exp: time.Now().Add(time.Hour).Unix()})
 		var req *http.Request
@@ -142,7 +177,7 @@ func TestGroupsRefuseAnUnroutableMemberAsTheClientsError(t *testing.T) {
 		"alice@hermex.test": {{Listname: "crew@hermex.test"}},
 	}}}
 	secret := []byte("groups-unroutable-secret")
-	srv := NewServer(auth, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
+	srv := NewServer(auth, groupAccounts, nil, "mail.hermex.test", secret, "", false)
 	token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: t.TempDir(), Exp: time.Now().Add(time.Hour).Unix()})
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/groups/members",
 		strings.NewReader(`{"address":"crew@hermex.test","members":["bob@"]}`))
