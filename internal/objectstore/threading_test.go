@@ -29,9 +29,12 @@ func TestConversationThreading(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	th, err := s.ConversationThreading([]int64{root.ID, reply.ID, plain.ID})
+	th, err := s.ConversationThreading([]int64{root.ID, reply.ID, plain.ID, 1 << 40})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, ok := th[1<<40]; ok || len(th) != 3 {
+		t.Errorf("threading returned %d entries (missing id present: %v), want the three stored messages", len(th), ok)
 	}
 	if got := th[root.ID].MessageID; got != "<a@x>" {
 		t.Errorf("root Message-ID = %q, want <a@x>", got)
