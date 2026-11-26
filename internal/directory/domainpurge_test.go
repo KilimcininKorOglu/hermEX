@@ -67,7 +67,8 @@ func seedPurgeableUser(t *testing.T, d *SQLDirectory, root string) int64 {
 // it.
 func wantDomainRowsGone(t *testing.T, d *SQLDirectory, db *sql.DB, acme, alice int64, acmeStr string) {
 	t.Helper()
-	_, stillThere, _ := d.GetUser("alice@acme.test")
+	_, stillThere, err := d.GetUser("alice@acme.test")
+	mustNoErr(t, "look up the purged user", err)
 	wantEq(t, "purged-domain user present", stillThere, false)
 	wantRows(t, db, "domain rows", 0, `SELECT COUNT(*) FROM domains WHERE id = ?`, acme)
 	wantRows(t, db, "alias rows", 0, `SELECT COUNT(*) FROM aliases WHERE mainname = ?`, "alice@acme.test")
@@ -84,7 +85,8 @@ func wantDomainRowsGone(t *testing.T, d *SQLDirectory, db *sql.DB, acme, alice i
 func wantOtherDomainIntact(t *testing.T, d *SQLDirectory, db *sql.DB, other int64, otherStr string, roleID int64) {
 	t.Helper()
 	wantRows(t, db, "the other domain's rows", 1, `SELECT COUNT(*) FROM domains WHERE id = ?`, other)
-	_, ok, _ := d.GetUser("bob@other.test")
+	_, ok, err := d.GetUser("bob@other.test")
+	mustNoErr(t, "look up the other domain's user", err)
 	wantEq(t, "the other domain's user survived", ok, true)
 	wantRows(t, db, "the other domain's role permission", 1,
 		`SELECT COUNT(*) FROM role_permissions WHERE permission = ? AND params = ?`, PermDomainAdmin, otherStr)
@@ -105,6 +107,7 @@ func TestPurgeDomainDeleteFiles(t *testing.T) {
 	}
 
 	id, homedir, maildir := seedDomainOnDisk(t, d, root, "purge.test")
+	id2, _, maildir2 := seedDomainOnDisk(t, d, root, "keep.test")
 	purge(id, true)
 	if _, err := os.Stat(maildir); !os.IsNotExist(err) {
 		t.Errorf("maildir survived a deleteFiles purge: %v", err)
@@ -112,9 +115,12 @@ func TestPurgeDomainDeleteFiles(t *testing.T) {
 	if _, err := os.Stat(homedir); !os.IsNotExist(err) {
 		t.Errorf("domain directory survived a deleteFiles purge: %v", err)
 	}
+	// Another domain's mailbox is not the purge's to delete.
+	if _, err := os.Stat(filepath.Join(maildir2, "marker")); err != nil {
+		t.Errorf("a deleteFiles purge removed another domain's mailbox: %v", err)
+	}
 
 	// Without deleteFiles, the on-disk mailbox is left in place.
-	id2, _, maildir2 := seedDomainOnDisk(t, d, root, "keep.test")
 	purge(id2, false)
 	if _, err := os.Stat(maildir2); err != nil {
 		t.Errorf("maildir removed without deleteFiles: %v", err)
