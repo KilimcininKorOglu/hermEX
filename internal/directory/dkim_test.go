@@ -43,9 +43,23 @@ func TestDKIMKeyDisabledUntilEnabled(t *testing.T) {
 	}
 
 	// Case-insensitive lookup (DKIM domains are case-insensitive).
-	if _, _, found, _ := d.DKIMKey("EXAMPLE.COM"); !found {
-		t.Error("domain lookup must be case-insensitive")
-	}
+	wantSigningKey(t, d, "EXAMPLE.COM", true)
+}
+
+// wantSigningKey asserts whether the signer is handed a key for domain.
+func wantSigningKey(t *testing.T, d *SQLDirectory, domain string, want bool) {
+	t.Helper()
+	_, _, found, err := d.DKIMKey(domain)
+	mustNoErr(t, "signing lookup for "+domain, err)
+	wantEq(t, "signing key for "+domain, found, want)
+}
+
+// mustDKIMInfo reads a domain's key metadata.
+func mustDKIMInfo(t *testing.T, d *SQLDirectory, domain string) (DKIMKeyInfo, bool) {
+	t.Helper()
+	info, found, err := d.GetDKIMKeyInfo(domain)
+	mustNoErr(t, "read key info for "+domain, err)
+	return info, found
 }
 
 // TestDKIMKeyInfo proves the display metadata reads back without exposing the private
@@ -71,29 +85,36 @@ func TestDKIMKeyInfo(t *testing.T) {
 // rotated key cannot keep signing before its new DNS record is published.
 func TestDKIMRegenerateResetsEnabled(t *testing.T) {
 	d := setupDKIM(t)
-	_ = d.SetDKIMKey("example.com", "sel1", []byte("OLD"), "txt-old")
-	_ = d.SetDKIMEnabled("example.com", true)
+	mustNoErr(t, "store the old key", d.SetDKIMKey("example.com", "sel1", []byte("OLD"), "txt-old"))
+	mustNoErr(t, "enable the old key", d.SetDKIMEnabled("example.com", true))
+	wantSigningKey(t, d, "example.com", true)
 
 	if err := d.SetDKIMKey("example.com", "sel2", []byte("NEW"), "txt-new"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, found, _ := d.DKIMKey("example.com"); found {
-		t.Error("regenerating a key must reset it to disabled")
-	}
-	info, _, _ := d.GetDKIMKeyInfo("example.com")
-	if info.Selector != "sel2" || info.Enabled {
-		t.Errorf("after regenerate = %+v, want sel2 / disabled", info)
+	wantSigningKey(t, d, "example.com", false)
+	info, found := mustDKIMInfo(t, d, "example.com")
+	if !found || info.Selector != "sel2" || info.Enabled {
+		t.Errorf("after regenerate = %+v (found %v), want sel2 / disabled", info, found)
 	}
 }
 
-// TestDeleteDKIMKey proves removal.
-func TestDeleteDKIMKey(t *testing.T) {
+// TestDKIMChangesStayOnTheirDomain enables and deletes one domain's key while
+// another domain holds one: a signing key lets its holder sign as that domain,
+// so neither change may reach the other tenant's key.
+func TestDKIMChangesStayOnTheirDomain(t *testing.T) {
 	d := setupDKIM(t)
-	_ = d.SetDKIMKey("example.com", "sel1", []byte("PEM"), "txt")
-	if err := d.DeleteDKIMKey("example.com"); err != nil {
-		t.Fatal(err)
-	}
-	if _, found, _ := d.GetDKIMKeyInfo("example.com"); found {
+	mustNoErr(t, "store example.com", d.SetDKIMKey("example.com", "sel1", []byte("PEM"), "txt"))
+	mustNoErr(t, "store other.test", d.SetDKIMKey("other.test", "sel1", []byte("OTHER"), "txt"))
+
+	mustNoErr(t, "enable example.com", d.SetDKIMEnabled("example.com", true))
+	wantSigningKey(t, d, "other.test", false)
+
+	mustNoErr(t, "delete example.com", d.DeleteDKIMKey("example.com"))
+	if _, found := mustDKIMInfo(t, d, "example.com"); found {
 		t.Error("key should be gone after delete")
+	}
+	if _, found := mustDKIMInfo(t, d, "other.test"); !found {
+		t.Error("deleting example.com's key removed other.test's key")
 	}
 }
