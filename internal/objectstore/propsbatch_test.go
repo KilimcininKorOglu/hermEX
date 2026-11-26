@@ -1,6 +1,7 @@
 package objectstore
 
 import (
+	"fmt"
 	"testing"
 
 	"hermex/internal/mapi"
@@ -33,6 +34,24 @@ func wantSameBags(t *testing.T, st *Store, ids []int64, got map[int64]mapi.Prope
 	}
 }
 
+// wantSeededSubjects checks the batch against what seedListIDs wrote, not against
+// another reader: every "Row i" subject comes back exactly once.
+func wantSeededSubjects(t *testing.T, n int, got map[int64]mapi.PropertyValues) {
+	t.Helper()
+	seen := map[string]int{}
+	for _, bag := range got {
+		if v, ok := bag.Get(mapi.PrSubject); ok {
+			seen[v.(string)]++
+		}
+	}
+	for i := range n {
+		if want := fmt.Sprintf("Row %d", i); seen[want] != 1 {
+			t.Errorf("subject %q came back %d times, want 1", want, seen[want])
+		}
+	}
+	wantEq(t, "distinct subjects returned", len(seen), n)
+}
+
 // TestMessagePropertiesBatchMatchesPerMessageRead proves the batched reader
 // returns what the per-message reader returns, which is what lets a caller that
 // reads the same tags for a whole folder use it.
@@ -48,6 +67,7 @@ func TestMessagePropertiesBatchMatchesPerMessageRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantSameBags(t, st, ids, got)
+	wantSeededSubjects(t, 5, got)
 }
 
 // TestMessagePropertiesBatchSpansChunks proves no id is dropped when the ids do
@@ -78,6 +98,7 @@ func TestMessagePropertiesBatchSpansChunks(t *testing.T) {
 		t.Errorf("batched read covered %d of %d messages", len(got), len(ids))
 	}
 	wantSameBags(t, st, ids, got)
+	wantSeededSubjects(t, 12, got)
 }
 
 // TestMessagePropertiesBatchEdgeCases proves an unknown id is absent from the

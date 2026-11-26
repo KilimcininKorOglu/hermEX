@@ -66,6 +66,19 @@ func TestRecipientWriteReachesASyncedClient(t *testing.T) {
 	eqSet(t, "UpdatedMIDs", res.UpdatedMIDs, uint64(id))
 }
 
+// TestRecipientWriteRefusesAMissingRecipient: a write aimed at a recipient row the
+// store does not hold is refused and leaves no property row behind.
+func TestRecipientWriteRefusesAMissingRecipient(t *testing.T) {
+	s := openSeededStore(t)
+	const missing = int64(987654)
+	err := s.SetRecipientProperties(missing, mapi.PropertyValues{{Tag: mapi.PrRecipientProposed, Value: true}})
+	if err == nil {
+		t.Fatal("a write to a missing recipient succeeded")
+	}
+	wantRows(t, s, "orphan recipient property rows", 0,
+		`SELECT COUNT(*) FROM recipients_properties WHERE recipient_id=?`, missing)
+}
+
 // TestRuleTagReachesASyncedClient is the same claim through the rules engine, which
 // is where it matters most: running rules over a folder after the fact touches mail
 // every client synced long ago. A tag action that does not advance the change number
