@@ -44,6 +44,9 @@ func (d *SQLDirectory) GetTLSSettings() (TLSSettings, bool, error) {
 // gateway reads them at startup to choose its certificate source; switching mode is
 // structural and takes effect on the next gateway start.
 func (d *SQLDirectory) SetTLSSettings(s TLSSettings) error {
+	if err := validTLSSettings(s); err != nil {
+		return err
+	}
 	agreed := 0
 	if s.ACMEAgreed {
 		agreed = 1
@@ -56,4 +59,19 @@ func (d *SQLDirectory) SetTLSSettings(s TLSSettings) error {
 		   updated_at = VALUES(updated_at)`,
 		s.Mode, s.ACMEEmail, s.ACMECAURL, agreed, time.Now().UnixMilli())
 	return err
+}
+
+// validTLSSettings refuses a mode the gateway does not know, and an ACME mode
+// without the contact address and accepted terms a CA account needs.
+func validTLSSettings(s TLSSettings) error {
+	switch s.Mode {
+	case "manual":
+		return nil
+	case "acme":
+		if s.ACMEEmail == "" || !s.ACMEAgreed {
+			return errors.New("directory: ACME mode needs a contact email and the accepted terms")
+		}
+		return nil
+	}
+	return errors.New("directory: the TLS mode must be manual or acme")
 }

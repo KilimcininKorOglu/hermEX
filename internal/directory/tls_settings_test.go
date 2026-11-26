@@ -6,13 +6,10 @@ func setupTLSSettings(t *testing.T) *SQLDirectory {
 	t.Helper()
 	db := openTestDB(t)
 	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "ensure the schema", d.EnsureSchema())
 	cleanTables(t, db)
-	if _, err := db.Exec("DELETE FROM tls_settings"); err != nil {
-		t.Fatal(err)
-	}
+	_, err := db.Exec("DELETE FROM tls_settings")
+	mustNoErr(t, "clear the TLS settings", err)
 	return d
 }
 
@@ -22,15 +19,9 @@ func setupTLSSettings(t *testing.T) *SQLDirectory {
 func TestTLSSettingsDefaultsToManual(t *testing.T) {
 	d := setupTLSSettings(t)
 	s, found, err := d.GetTLSSettings()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if found {
-		t.Error("found = true on an empty table; want false")
-	}
-	if s.Mode != "manual" {
-		t.Errorf("default mode = %q, want manual", s.Mode)
-	}
+	mustNoErr(t, "read the TLS settings", err)
+	wantEq(t, "found on an empty table", found, false)
+	wantEq(t, "default mode", s.Mode, "manual")
 }
 
 // TestTLSSettingsRoundTripAndUpsert proves the ACME configuration round-trips,
@@ -39,30 +30,40 @@ func TestTLSSettingsDefaultsToManual(t *testing.T) {
 func TestTLSSettingsRoundTripAndUpsert(t *testing.T) {
 	d := setupTLSSettings(t)
 	want := TLSSettings{Mode: "acme", ACMEEmail: "ops@example.com", ACMECAURL: "https://acme-staging.example/dir", ACMEAgreed: true}
-	if err := d.SetTLSSettings(want); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "save the ACME settings", d.SetTLSSettings(want))
 	got, found, err := d.GetTLSSettings()
-	if err != nil || !found {
-		t.Fatalf("GetTLSSettings found=%v err=%v; want a saved row", found, err)
-	}
-	if got != want {
-		t.Errorf("round-trip = %+v, want %+v", got, want)
-	}
+	mustNoErr(t, "read the TLS settings", err)
+	wantEq(t, "a saved row was found", found, true)
+	wantEq(t, "round-trip", got, want)
 
 	// Re-save with manual mode and ToS withdrawn: a replacement, not a second row.
-	if err := d.SetTLSSettings(TLSSettings{Mode: "manual"}); err != nil {
-		t.Fatal(err)
-	}
-	got, _, _ = d.GetTLSSettings()
-	if got.Mode != "manual" || got.ACMEAgreed {
-		t.Errorf("after re-save = %+v, want manual mode with agreed=false", got)
-	}
+	mustNoErr(t, "save manual mode", d.SetTLSSettings(TLSSettings{Mode: "manual"}))
+	got, _, err = d.GetTLSSettings()
+	mustNoErr(t, "read the TLS settings again", err)
+	wantEq(t, "mode after re-save", got.Mode, "manual")
+	wantEq(t, "agreed after re-save", got.ACMEAgreed, false)
 	var n int
-	if err := d.db.QueryRow("SELECT COUNT(*) FROM tls_settings").Scan(&n); err != nil {
-		t.Fatal(err)
-	}
-	if n != 1 {
-		t.Errorf("tls_settings has %d rows after two saves, want exactly 1", n)
+	mustNoErr(t, "count the rows", d.db.QueryRow("SELECT COUNT(*) FROM tls_settings").Scan(&n))
+	wantEq(t, "rows after two saves", n, 1)
+}
+
+// TestTLSSettingsRefusalKeepsTheStoredOne proves a mode the gateway does not know,
+// and an ACME mode without the contact address or the accepted terms a CA account
+// requires (RFC 8555 section 7.3), are refused and leave the stored row as it was.
+func TestTLSSettingsRefusalKeepsTheStoredOne(t *testing.T) {
+	d := setupTLSSettings(t)
+	keep := TLSSettings{Mode: "acme", ACMEEmail: "ops@example.com", ACMEAgreed: true}
+	mustNoErr(t, "save the ACME settings", d.SetTLSSettings(keep))
+	for name, bad := range map[string]TLSSettings{
+		"unknown mode":      {Mode: "selfsigned"},
+		"empty mode":        {Mode: ""},
+		"mode with newline": {Mode: "manual\n"},
+		"acme without mail": {Mode: "acme", ACMEAgreed: true},
+		"acme not agreed":   {Mode: "acme", ACMEEmail: "ops@example.com"},
+	} {
+		wantErr(t, "the "+name+" was accepted", d.SetTLSSettings(bad))
+		got, _, err := d.GetTLSSettings()
+		mustNoErr(t, "read the TLS settings after the "+name, err)
+		wantEq(t, "settings after the refused "+name, got, keep)
 	}
 }
