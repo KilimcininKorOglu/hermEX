@@ -20,7 +20,8 @@ type groupDir interface {
 // ownedInScope returns the lists email owns that it can still reach. Ownership is a
 // grant over the list's members and stays inside the list's organization, so a
 // stored owner outside it (a row written before the owner rule, or an account that
-// has since moved) manages nothing. A scope that cannot be read drops the list.
+// has since moved) manages nothing. A scope that cannot be read is an error, never a
+// shorter list.
 func ownedInScope(gd groupDir, accounts directory.Accounts, email string) ([]directory.MListInfo, error) {
 	owned, err := gd.ListMListsOwnedBy(email)
 	if err != nil {
@@ -28,7 +29,11 @@ func ownedInScope(gd groupDir, accounts directory.Accounts, email string) ([]dir
 	}
 	out := owned[:0:0]
 	for _, l := range owned {
-		if reach, err := directory.MayReach(accounts, l.Listname, email); err == nil && reach {
+		reach, err := directory.MayReach(accounts, l.Listname, email)
+		if err != nil {
+			return nil, err
+		}
+		if reach {
 			out = append(out, l)
 		}
 	}

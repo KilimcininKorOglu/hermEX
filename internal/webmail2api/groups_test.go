@@ -2,6 +2,7 @@ package webmail2api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -69,6 +70,27 @@ func TestGroupsIgnoreAnOwnerOutsideTheListsScope(t *testing.T) {
 	wantStatus(t, "replace the foreign list's members", do(http.MethodPut, "/api/v1/groups/members",
 		`{"address":"foreign@partner.test","members":["y@partner.test"]}`), http.StatusForbidden)
 	wantEq(t, "members written to the foreign list", auth.setUser, "")
+}
+
+// brokenScope is an account directory whose scope cannot be read.
+type brokenScope struct{ directory.StaticAccounts }
+
+func (brokenScope) SameScope(string, string) (bool, error) {
+	return false, errors.New("scope read failed")
+}
+
+// TestGroupsReportAScopeReadFailure proves a scope that cannot be read answers the
+// group listing with an error, not 200 and a list silently missing its groups.
+func TestGroupsReportAScopeReadFailure(t *testing.T) {
+	auth := &groupStoreAuth{owned: map[string][]directory.MListInfo{"alice@hermex.test": {{Listname: "crew@hermex.test"}}}}
+	secret := []byte("groups-broken-secret")
+	srv := NewServer(auth, brokenScope{groupAccounts}, nil, "mail.hermex.test", secret, "", false)
+	token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: t.TempDir(), Exp: time.Now().Add(time.Hour).Unix()})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/groups", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	wantEq(t, "groups status when the scope cannot be read", rec.Code, http.StatusInternalServerError)
 }
 
 // TestGroupsAPI proves the caller lists only the groups they own, reads and replaces
