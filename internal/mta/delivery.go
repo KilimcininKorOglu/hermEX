@@ -1073,6 +1073,9 @@ func outgoingCopies(accounts directory.Accounts, from string, raw []byte) (local
 	}
 	in, ex, err := r.OutgoingDisplayNames(from)
 	if err != nil {
+		// The message still goes out with the sender's own From; the operator needs
+		// to see why the tenant's display name was not applied.
+		logPassFailure("outgoing-display-name", from, nil, err)
 		return raw, raw
 	}
 	return RewriteFromDisplayName(raw, in), RewriteFromDisplayName(raw, ex)
