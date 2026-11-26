@@ -17,7 +17,7 @@ func setupMessageSizeSettings(t *testing.T) *SQLDirectory {
 }
 
 // TestMessageSizeSettingsRoundTrip proves a fresh database reports no settings (so the
-// MTA keeps the server's no-limit default), and that a saved limit reads back.
+// MTA keeps DefaultMaxInboundBytes), and that a saved limit reads back.
 func TestMessageSizeSettingsRoundTrip(t *testing.T) {
 	d := setupMessageSizeSettings(t)
 
@@ -54,4 +54,17 @@ func TestMessageSizeSettingsUpsert(t *testing.T) {
 	if got.MaxInboundBytes != 52428800 {
 		t.Errorf("after upsert = %+v, want 52428800", got)
 	}
+}
+
+// TestMessageSizeZeroIsAStoredChoice proves a saved 0 (no limit) reads back as a
+// stored row, so it is told apart from the unsaved state that falls back to
+// DefaultMaxInboundBytes.
+func TestMessageSizeZeroIsAStoredChoice(t *testing.T) {
+	d := setupMessageSizeSettings(t)
+	mustNoErr(t, "save a limit", d.SetMessageSizeSettings(MessageSizeSettings{MaxInboundBytes: 10485760}))
+	mustNoErr(t, "save no limit", d.SetMessageSizeSettings(MessageSizeSettings{MaxInboundBytes: 0}))
+	got, found, err := d.GetMessageSizeSettings()
+	mustNoErr(t, "read the settings", err)
+	wantEq(t, "the no-limit row is stored", found, true)
+	wantEq(t, "the stored limit", got.MaxInboundBytes, int64(0))
 }
