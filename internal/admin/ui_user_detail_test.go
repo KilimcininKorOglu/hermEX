@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -46,7 +45,7 @@ func TestUIUserDetail(t *testing.T) {
 	if d.gotUser != "alice@hermex.test" {
 		t.Errorf("GetUser called for %q, want alice@hermex.test", d.gotUser)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	for _, want := range []string{"alice@hermex.test", `name="status"`, `name="pop3_imap"`, "Delete user"} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("detail page missing %q:\n%s", want, body)
@@ -96,7 +95,7 @@ func TestUIUserEdit(t *testing.T) {
 		d.updateUser.Homeserver != 2 || !d.updateUser.POP3IMAP || d.updateUser.SMTP {
 		t.Errorf("edit payload = %+v, want the submitted fields with smtp unchecked", d.updateUser)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "Saved") {
 		t.Errorf("edit response = %s, want a success acknowledgement", body)
 	}
@@ -197,7 +196,7 @@ func TestUIUserAltnames(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	page := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
-	body, _ := io.ReadAll(page.Body)
+	body := readBody(t, page)
 	page.Body.Close()
 	if !strings.Contains(string(body), "ali") || !strings.Contains(string(body), "Alternative login names") {
 		t.Errorf("detail page missing the altnames section/values:\n%s", body)
@@ -212,7 +211,7 @@ func TestUIUserAltnames(t *testing.T) {
 	if d.setAltnamesUser != "alice@hermex.test" || len(d.setAltnames) != 3 {
 		t.Errorf("SetAltnames = (%q, %v), want alice@hermex.test split into 3 names", d.setAltnamesUser, d.setAltnames)
 	}
-	if rb, _ := io.ReadAll(resp.Body); !strings.Contains(string(rb), "Saved") {
+	if rb := readBody(t, resp); !strings.Contains(string(rb), "Saved") {
 		t.Errorf("altnames save response = %s, want a success acknowledgement", rb)
 	}
 }
@@ -229,7 +228,7 @@ func TestUIUserAliases(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	page := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
-	body, _ := io.ReadAll(page.Body)
+	body := readBody(t, page)
 	page.Body.Close()
 	if !strings.Contains(string(body), "sales@hermex.test") || !strings.Contains(string(body), "E-mail aliases") {
 		t.Errorf("detail page missing the aliases section/values:\n%s", body)
@@ -257,7 +256,7 @@ func TestUIUserRoles(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	page := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
-	body, _ := io.ReadAll(page.Body)
+	body := readBody(t, page)
 	page.Body.Close()
 	if !strings.Contains(string(body), "Grant role") || !strings.Contains(string(body), "Admin roles") {
 		t.Errorf("detail page missing the roles panel:\n%s", body)
@@ -305,7 +304,7 @@ func TestUIUserContact(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	page := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
-	body, _ := io.ReadAll(page.Body)
+	body := readBody(t, page)
 	page.Body.Close()
 	if !strings.Contains(string(body), "Contact details") || !strings.Contains(string(body), "Alice Liddell") {
 		t.Errorf("detail page missing the contact section/values:\n%s", body)

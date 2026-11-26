@@ -1597,6 +1597,17 @@ func adminServerDNS(t *testing.T, d Directory, resolver dnsResolver) *httptest.S
 	return ts
 }
 
+// readBody reads a response body and fails the test when the read fails, so a
+// truncated body is never asserted on as if it were the whole page.
+func readBody(t *testing.T, resp *http.Response) []byte {
+	t.Helper()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read the response body: %v", err)
+	}
+	return body
+}
+
 func login(t *testing.T, ts *httptest.Server) (*http.Response, string) {
 	t.Helper()
 	resp, err := http.Post(ts.URL+"/admin/login", "application/json",
@@ -1654,7 +1665,7 @@ func TestAdminLoginAndWhoami(t *testing.T) {
 	if who.StatusCode != http.StatusOK {
 		t.Fatalf("whoami status %d, want 200", who.StatusCode)
 	}
-	body, _ := io.ReadAll(who.Body)
+	body := readBody(t, who)
 	if !strings.Contains(string(body), "admin@hermex.test") || !strings.Contains(string(body), "system") {
 		t.Errorf("whoami body = %s, want the login and the system role", body)
 	}

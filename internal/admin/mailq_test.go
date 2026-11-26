@@ -214,7 +214,7 @@ func TestMailQueuePanelIsReachable(t *testing.T) {
 
 	// The page carries a control that fetches the panel.
 	resp := authedGET(t, ts, "/admin/ui/mailq", session)
-	page, _ := io.ReadAll(resp.Body)
+	page := readBody(t, resp)
 	resp.Body.Close()
 	if !strings.Contains(string(page), `hx-get="/admin/ui/mailq/panel"`) {
 		t.Errorf("the page never fetches the panel, so the handler cannot be reached:\n%s", page)

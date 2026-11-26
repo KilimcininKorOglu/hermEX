@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -60,7 +59,7 @@ func TestAdminGetUserOOF(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("get oof status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), `"internalSubject":"Away until Monday"`) || !strings.Contains(string(body), `"externalAudience":1`) {
 		t.Errorf("oof body = %s, want the canonical settings", body)
 	}
@@ -106,7 +105,7 @@ func TestAdminOOFRefusesABrokenWindow(t *testing.T) {
 	resp = htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/oof", session, csrf, url.Values{
 		"enabled": {"on"}, "start": {"2026-06-10T09:00"}, "end": {"2026-06-01T09:00"},
 	})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if !strings.Contains(string(body), "The end must be after the start") {
 		t.Errorf("form does not name the window error:\n%s", body)
@@ -170,7 +169,7 @@ func TestUIUserDetailShowsOOF(t *testing.T) {
 
 	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	for _, want := range []string{"Out of office", `name="internalsubject"`, "On holiday", `name="externalknownonly"`} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("detail page OOF section missing %q", want)
@@ -202,7 +201,7 @@ func TestUIUserOOF(t *testing.T) {
 		t.Fatalf("ui oof save status %d, want 200", resp.StatusCode)
 	}
 	wantStoredOOF(t, store)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "Saved") {
 		t.Errorf("ui oof save did not report success:\n%s", body)
 	}

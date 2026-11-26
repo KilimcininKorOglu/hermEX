@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -136,7 +135,7 @@ func TestGrantsStayInsideTheOwnersOrganization(t *testing.T) {
 	}
 	for field, path := range map[string]string{"delegates": "delegates", "sendas": "sendas", "storeowners": "storeowners"} {
 		resp := htmxPUT(t, ts, "/admin/ui/users/in@acme.test/"+path, session, csrf, url.Values{field: {"spy@rival.test"}})
-		body, _ := io.ReadAll(resp.Body)
+		body := readBody(t, resp)
 		resp.Body.Close()
 		if strings.Contains(string(body), "Saved") {
 			t.Errorf("form %s saved a grantee of another organization", path)
@@ -170,7 +169,7 @@ func TestAFailedScopeReadIsNotAnOrganizationRefusal(t *testing.T) {
 	errs["SameScope"] = errReadFailed
 
 	resp := authedReq(t, ts, "PUT", "/admin/users/in@acme.test/sendas", session, csrf, `["peer@acme.test"]`)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusInternalServerError || strings.Contains(string(body), errReadFailed.Error()) {
 		t.Errorf("API: status %d body %q, want a generic 500", resp.StatusCode, body)
@@ -180,7 +179,7 @@ func TestAFailedScopeReadIsNotAnOrganizationRefusal(t *testing.T) {
 	}
 	for field, path := range map[string]string{"delegates": "delegates", "sendas": "sendas", "storeowners": "storeowners"} {
 		form := htmxPUT(t, ts, "/admin/ui/users/in@acme.test/"+path, session, csrf, url.Values{field: {"peer@acme.test"}})
-		page, _ := io.ReadAll(form.Body)
+		page := readBody(t, form)
 		form.Body.Close()
 		if !strings.Contains(string(page), "Could not read the grantees") || strings.Contains(string(page), "organization") {
 			t.Errorf("form %s did not report the failed read:\n%s", path, page)

@@ -8,7 +8,6 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"hermex/internal/directory"
-	"io"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -90,7 +89,7 @@ func TestTLSCertUploadStoresAndDelete(t *testing.T) {
 
 	cert, key := genCertKeyPEM(t, "mail.example.com", []string{"mail.example.com"}, time.Now().Add(365*24*time.Hour))
 	resp := htmxPOST(t, ts, "/admin/ui/tls/upload", session, csrf, url.Values{"name": {""}, "cert": {cert}, "key": {key}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("upload status = %d, want 200", resp.StatusCode)
@@ -104,7 +103,7 @@ func TestTLSCertUploadStoresAndDelete(t *testing.T) {
 
 	// A garbage upload is rejected and leaves the store untouched.
 	bad := htmxPOST(t, ts, "/admin/ui/tls/upload", session, csrf, url.Values{"cert": {"nope"}, "key": {"nope"}})
-	badBody, _ := io.ReadAll(bad.Body)
+	badBody := readBody(t, bad)
 	bad.Body.Close()
 	if !strings.Contains(string(badBody), "Upload rejected") {
 		t.Errorf("garbage upload was not rejected; got: %s", badBody)
@@ -205,7 +204,7 @@ func TestTLSSettingsModeSwitch(t *testing.T) {
 
 	// acme without agreeing to the terms is rejected and changes nothing.
 	bad := htmxPOST(t, ts, "/admin/ui/tls/mode", session, csrf, url.Values{"mode": {"acme"}, "acme_email": {"ops@example.com"}})
-	bb, _ := io.ReadAll(bad.Body)
+	bb := readBody(t, bad)
 	bad.Body.Close()
 	if !strings.Contains(string(bb), "terms of service") {
 		t.Errorf("acme without agreement was not rejected; got: %s", bb)
@@ -219,7 +218,7 @@ func TestTLSSettingsModeSwitch(t *testing.T) {
 	noURL := htmxPOST(t, ts, "/admin/ui/tls/mode", session, csrf, url.Values{
 		"mode": {"acme"}, "acme_email": {"ops@example.com"}, "acme_agreed": {"on"},
 	})
-	nb, _ := io.ReadAll(noURL.Body)
+	nb := readBody(t, noURL)
 	noURL.Body.Close()
 	if !strings.Contains(string(nb), "CA directory URL") {
 		t.Errorf("acme with a blank CA URL was not rejected; got: %s", nb)

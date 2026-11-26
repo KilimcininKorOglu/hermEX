@@ -2,7 +2,6 @@ package admin
 
 import (
 	"context"
-	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -236,7 +235,7 @@ func TestAdminDomainDNSCheck(t *testing.T) {
 	ts := adminServerDNS(t, d, acmeResolver())
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/domains/1/dnscheck", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("dns check status %d, want 200", resp.StatusCode)
@@ -301,7 +300,7 @@ func TestDomainDNSCheckNeedsASystemAdmin(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 	for _, path := range []string{"/admin/domains/1/dnscheck", "/admin/ui/domains/1/dnscheck"} {
 		resp := authedGET(t, ts, path, session)
-		body, _ := io.ReadAll(resp.Body)
+		body := readBody(t, resp)
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusForbidden {
 			t.Errorf("%s = %d, want 403", path, resp.StatusCode)
@@ -321,7 +320,7 @@ func TestUIDomainDNSCheck(t *testing.T) {
 	ts := adminServerDNS(t, d, acmeResolver())
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/domains/1/dnscheck", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("ui dns check status %d, want 200", resp.StatusCode)

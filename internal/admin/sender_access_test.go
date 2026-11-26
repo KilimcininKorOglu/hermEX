@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -24,7 +23,7 @@ func TestSenderAccessPageRenders(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/ui/sender-access", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("page = %d, want 200", resp.StatusCode)
@@ -43,7 +42,7 @@ func TestAddSenderRule(t *testing.T) {
 
 	resp := htmxPOST(t, ts, "/admin/ui/sender-access", session, csrf,
 		url.Values{"pattern": {"block@evil.example"}, "action": {directory.SenderBlock}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Rule saved") {
 		t.Fatalf("add = %d body=%q, want 200 with ack", resp.StatusCode, body)
@@ -80,7 +79,7 @@ func TestAddSenderRuleRejectsEmptyPattern(t *testing.T) {
 
 	resp := htmxPOST(t, ts, "/admin/ui/sender-access", session, csrf,
 		url.Values{"pattern": {"   "}, "action": {directory.SenderAllow}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if !strings.Contains(string(body), "required") {
 		t.Errorf("expected a validation message:\n%s", body)
@@ -101,7 +100,7 @@ func TestDeleteSenderRule(t *testing.T) {
 
 	resp := htmxPOST(t, ts, "/admin/ui/sender-access/delete", session, csrf,
 		url.Values{"pattern": {"gone@example.com"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Rule removed") {
 		t.Fatalf("delete = %d body=%q, want 200 with ack", resp.StatusCode, body)

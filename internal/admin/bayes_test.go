@@ -2,7 +2,6 @@ package admin
 
 import (
 	"fmt"
-	"io"
 	"maps"
 	"net/http"
 	"net/url"
@@ -25,7 +24,7 @@ func TestAntispamPageRenders(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/ui/antispam", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("antispam page = %d, want 200", resp.StatusCode)
@@ -48,7 +47,7 @@ func TestRetrainEnqueues(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/retrain", session, csrf, url.Values{})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("retrain POST = %d, want 200", resp.StatusCode)
@@ -99,7 +98,7 @@ func TestSaveAntispamSettings(t *testing.T) {
 		"bayes_prob": {"0.9"}, "sa_threshold": {"4.5"},
 	}
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/settings", session, csrf, form)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("save settings = %d, want 200", resp.StatusCode)
@@ -192,7 +191,7 @@ func TestToggleGreylist(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/greylist", session, csrf, url.Values{"enabled": {"1"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "enabled") {
 		t.Fatalf("toggle = %d body=%q, want 200 acknowledging enable", resp.StatusCode, body)
@@ -212,7 +211,7 @@ func TestSaveGreylistTimings(t *testing.T) {
 
 	form := url.Values{"min_delay": {"600"}, "unconfirmed_ttl": {"7200"}, "confirmed_ttl": {"1000000"}}
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/greylist-timings", session, csrf, form)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Greylist timings saved") {
 		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", resp.StatusCode, body)
@@ -231,7 +230,7 @@ func TestSaveGreylistTimingsRejectsBadValues(t *testing.T) {
 
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/greylist-timings", session, csrf,
 		url.Values{"min_delay": {"0"}, "unconfirmed_ttl": {"7200"}, "confirmed_ttl": {"1000000"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if !strings.Contains(string(body), "at least 1 second") {
 		t.Errorf("expected a validation message:\n%s", body)
@@ -266,7 +265,7 @@ func TestSaveRateLimitSettings(t *testing.T) {
 
 	form := url.Values{"enabled": {"1"}, "burst": {"120"}, "window": {"30"}}
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/ratelimit", session, csrf, form)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("save = %d, want 200", resp.StatusCode)
@@ -288,7 +287,7 @@ func TestSaveRateLimitRejectsBadValues(t *testing.T) {
 
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/ratelimit", session, csrf,
 		url.Values{"enabled": {"1"}, "burst": {"0"}, "window": {"60"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if !strings.Contains(string(body), "at least 1") {
 		t.Errorf("expected a validation message:\n%s", body)
@@ -307,7 +306,7 @@ func TestSaveMessageSize(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/message-size", session, csrf, url.Values{"max_mb": {"25"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Message size limit saved") {
 		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", resp.StatusCode, body)
@@ -340,7 +339,7 @@ func TestSaveMessageSizeRefusesAnOverflow(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/message-size", session, csrf, url.Values{"max_mb": {"17592186044416"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if d.messageSizeFound {
 		t.Errorf("an overflowing limit was persisted as %d bytes", d.messageSize.MaxInboundBytes)
@@ -358,7 +357,7 @@ func TestSaveRelaySettings(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/relay", session, csrf, url.Values{"backoff": {"120"}, "attempts": {"5"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Relay settings saved") {
 		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", resp.StatusCode, body)
@@ -376,7 +375,7 @@ func TestSaveRelaySettingsRejectsBadValues(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/relay", session, csrf, url.Values{"backoff": {"0"}, "attempts": {"5"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if !strings.Contains(string(body), "at least 1") {
 		t.Errorf("expected a validation message:\n%s", body)
@@ -395,7 +394,7 @@ func TestSaveOutboundSettings(t *testing.T) {
 
 	form := url.Values{"enabled": {"1"}, "cap": {"250"}, "window": {"1800"}}
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/outbound", session, csrf, form)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("save = %d, want 200", resp.StatusCode)
@@ -417,7 +416,7 @@ func TestSaveOutboundRejectsBadValues(t *testing.T) {
 
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/outbound", session, csrf,
 		url.Values{"enabled": {"1"}, "cap": {"0"}, "window": {"3600"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if !strings.Contains(string(body), "at least 1") {
 		t.Errorf("expected a validation message:\n%s", body)
@@ -484,7 +483,7 @@ func TestSaveDigestSettings(t *testing.T) {
 
 	form := url.Values{"enabled": {"1"}, "interval": {"12"}, "base_url": {"https://mail.example.com"}}
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/digest", session, csrf, form)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("save = %d, want 200", resp.StatusCode)
@@ -519,7 +518,7 @@ func TestSaveDigestRejectsBadValues(t *testing.T) {
 			session, csrf := loginCookies(t, ts)
 
 			resp := htmxPOST(t, ts, "/admin/ui/antispam/digest", session, csrf, tc.form)
-			body, _ := io.ReadAll(resp.Body)
+			body := readBody(t, resp)
 			resp.Body.Close()
 			if !strings.Contains(string(body), tc.want) {
 				t.Errorf("expected %q in response:\n%s", tc.want, body)

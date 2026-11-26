@@ -2,7 +2,6 @@ package admin
 
 import (
 	"errors"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -30,7 +29,7 @@ func TestUILoginPage(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("login page status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), `name="login"`) || !strings.Contains(string(body), `name="password"`) {
 		t.Errorf("login page missing the form fields: %s", body)
 	}
@@ -106,7 +105,7 @@ func TestUILoginSubmitInvalid(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("invalid login status %d, want 401", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "Invalid email or password") {
 		t.Errorf("invalid login page missing the error: %s", body)
 	}
@@ -138,7 +137,7 @@ func TestUIDashboard(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("dashboard status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "admin@hermex.test") || !strings.Contains(string(body), "Dashboard") {
 		t.Errorf("dashboard missing the identity or title: %s", body)
 	}
@@ -233,7 +232,7 @@ func TestUIDashboardScopesCountsToTheCallersDomains(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	page := string(body)
 
 	// Two users, one domain, one alias, all from mine.test.
@@ -269,7 +268,7 @@ func TestUIDashboardReportsADirectoryFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	page := string(body)
 	if !strings.Contains(page, "Could not read the directory") {
 		t.Errorf("a failed read rendered without an error:\n%s", page)

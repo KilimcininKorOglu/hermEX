@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"slices"
@@ -22,7 +21,7 @@ func TestAdminGetUserStoreOwners(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("get store-owners status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), `"data":["boss@hermex.test"]`) {
 		t.Errorf("store-owners body = %s, want the owner list", body)
 	}
@@ -103,7 +102,7 @@ func TestUIUserDetailShowsStoreOwners(t *testing.T) {
 
 	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	for _, want := range []string{"<h2>Additional store owners</h2>", `name="storeowners"`, "boss@hermex.test"} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("detail page store-owner section missing %q", want)
@@ -129,7 +128,7 @@ func TestUIUserStoreOwners(t *testing.T) {
 	if !slices.Equal(store.setStoreOwnersVal, want) {
 		t.Errorf("stored store-owners = %v, want %v (trimmed, blanks dropped)", store.setStoreOwnersVal, want)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "Saved") {
 		t.Errorf("ui store-owners save did not report success:\n%s", body)
 	}
@@ -146,7 +145,7 @@ func TestUIUserStoreOwnersRejectsUnknown(t *testing.T) {
 		"storeowners": {"ghost@hermex.test"},
 	})
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if store.setStoreOwnersVal != nil {
 		t.Errorf("unknown owner stored as %v, want no store call", store.setStoreOwnersVal)
 	}

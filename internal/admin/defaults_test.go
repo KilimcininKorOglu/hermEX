@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -28,7 +27,7 @@ func TestAdminDefaultsRoundTrip(t *testing.T) {
 	}
 
 	get := authedGET(t, ts, "/admin/defaults", session)
-	body, _ := io.ReadAll(get.Body)
+	body := readBody(t, get)
 	get.Body.Close()
 	if !strings.Contains(string(body), `"maxUser":50`) || !strings.Contains(string(body), `"lang":"tr"`) {
 		t.Errorf("get defaults body = %s, want the stored values", body)
@@ -56,7 +55,7 @@ func TestAdminDomainDefaultsRoundTrip(t *testing.T) {
 	}
 
 	get := authedGET(t, ts, "/admin/domains/3/createdefaults", session)
-	body, _ := io.ReadAll(get.Body)
+	body := readBody(t, get)
 	get.Body.Close()
 	if !strings.Contains(string(body), `"web":false`) || !strings.Contains(string(body), `"lang":"tr"`) {
 		t.Errorf("get override body = %s, want the stored values", body)
@@ -81,7 +80,7 @@ func TestUISaveDomainDefaults(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPUT(t, ts, "/admin/ui/domains/3/createdefaults", session, csrf,
 		url.Values{"lang": {"tr"}, "web": {"0"}, "smtp": {""}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("save override status %d, want 200", resp.StatusCode)
@@ -109,7 +108,7 @@ func TestUIDomainDetailShowsOverride(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/domains/3", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("domain detail status %d, want 200", resp.StatusCode)
@@ -131,7 +130,7 @@ func TestUIDefaultsPage(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/defaults", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("defaults page status %d, want 200", resp.StatusCode)

@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -25,7 +24,7 @@ func TestAdminListUsers(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("list users status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "boss@hermex.test") {
 		t.Errorf("list body = %s, want the user", body)
 	}
@@ -48,7 +47,7 @@ func TestAdminListUsersScopeFiltered(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/users", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("domain-admin list users = %d, want 200", resp.StatusCode)
@@ -199,7 +198,7 @@ func TestAdminGetUser(t *testing.T) {
 	if d.gotUser != "alice@hermex.test" {
 		t.Errorf("GetUser called for %q, want alice@hermex.test", d.gotUser)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "alice@hermex.test") || !strings.Contains(string(body), `"Lang":"de"`) {
 		t.Errorf("get user body = %s, want the detail record", body)
 	}
@@ -365,7 +364,7 @@ func TestAdminListAltnames(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("list altnames status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "ali") || !strings.Contains(string(body), "alice2") {
 		t.Errorf("altnames body = %s, want the names", body)
 	}
@@ -418,7 +417,7 @@ func TestAdminListUserAliases(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("list user aliases status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "sales@hermex.test") {
 		t.Errorf("aliases body = %s, want the aliases", body)
 	}
@@ -474,7 +473,7 @@ func TestAdminGetContact(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("get contact status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), `"displayname":"Alice Liddell"`) || !strings.Contains(string(body), `"nickname":"Ali"`) {
 		t.Errorf("contact body = %s, want the named fields", body)
 	}

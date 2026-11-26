@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"slices"
@@ -63,7 +62,7 @@ func TestAdminUserSendOnBehalf(t *testing.T) {
 
 	get := authedGET(t, ts, "/admin/users/alice@hermex.test/sendonbehalf", session)
 	defer get.Body.Close()
-	body, _ := io.ReadAll(get.Body)
+	body := readBody(t, get)
 	if !strings.Contains(string(body), `"data":["carol@hermex.test"]`) {
 		t.Errorf("on-behalf body = %s, want the grantee list", body)
 	}
@@ -109,7 +108,7 @@ func TestAdminUserSentCopy(t *testing.T) {
 
 	get := authedGET(t, ts, "/admin/users/alice@hermex.test/sentcopy", session)
 	defer get.Body.Close()
-	body, _ := io.ReadAll(get.Body)
+	body := readBody(t, get)
 	if !strings.Contains(string(body), `"forSendAs":true`) ||
 		!strings.Contains(string(body), `"forSendOnBehalf":false`) {
 		t.Errorf("sent-copy body = %s, want the two flags", body)
@@ -128,7 +127,7 @@ func TestUIUserDetailShowsSendOnBehalfAndSentCopy(t *testing.T) {
 
 	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	for _, want := range []string{
 		"<h2>Send on behalf</h2>", `name="sendonbehalf"`, "carol@hermex.test",
 		`name="copysendonbehalf" checked`, `name="copyexclusive"`,
@@ -166,7 +165,7 @@ func TestUIUserSentCopy(t *testing.T) {
 		t.Errorf("stored sent-copy = %+v, want %+v (the unchecked box turns its setting off)",
 			store.setSentCopyVal, want)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "Saved") {
 		t.Errorf("ui sent-copy save did not report success:\n%s", body)
 	}
@@ -187,7 +186,7 @@ func TestUIUserSendOnBehalf(t *testing.T) {
 	if !slices.Equal(store.setSendOnBehalfVal, want) {
 		t.Errorf("stored on-behalf = %v, want %v", store.setSendOnBehalfVal, want)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "Saved") {
 		t.Errorf("ui on-behalf save did not report success:\n%s", body)
 	}

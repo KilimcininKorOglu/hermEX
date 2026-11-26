@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -148,7 +147,7 @@ func TestUIOrgsPage(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/orgs", session)
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Acme") {
 		t.Errorf("orgs page = %d, body lacks the org: %s", resp.StatusCode, body)
 	}
@@ -168,7 +167,7 @@ func TestUIOrgCreate(t *testing.T) {
 	if len(d.orgs) != 1 {
 		t.Fatalf("org not stored: %v", d.orgs)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "Acme") {
 		t.Errorf("refreshed panel missing the new org: %s", body)
 	}
@@ -186,7 +185,7 @@ func TestUIOrgDetailAttach(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	get := authedGET(t, ts, "/admin/ui/orgs/1", session)
-	gbody, _ := io.ReadAll(get.Body)
+	gbody := readBody(t, get)
 	get.Body.Close()
 	if get.StatusCode != http.StatusOK || !strings.Contains(string(gbody), "acme.test") {
 		t.Errorf("detail = %d, body lacks the available domain: %s", get.StatusCode, gbody)

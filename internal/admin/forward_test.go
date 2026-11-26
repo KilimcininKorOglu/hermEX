@@ -2,7 +2,6 @@ package admin
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -31,7 +30,7 @@ func TestAdminGetUserForward(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("get forward status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), `"forwardType":1`) || !strings.Contains(string(body), `"destination":"boss@hermex.test"`) {
 		t.Errorf("forward body = %s, want the directive", body)
 	}
@@ -87,7 +86,7 @@ func TestUIUserDetailShowsForward(t *testing.T) {
 
 	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	for _, want := range []string{">Forward<", `name="forwardtype"`, `value="redirect" selected`, `value="boss@hermex.test"`} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("detail page forward section missing %q", want)
@@ -113,7 +112,7 @@ func TestUIUserForward(t *testing.T) {
 	if d.setForwardUser != "alice@hermex.test" || d.setForwardType != directory.ForwardRedirect || d.setForwardDest != "boss@hermex.test" {
 		t.Errorf("captured forward = %q/%d/%q, want alice/Redirect/boss", d.setForwardUser, d.setForwardType, d.setForwardDest)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "Saved") {
 		t.Errorf("ui forward save did not report success:\n%s", body)
 	}

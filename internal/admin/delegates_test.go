@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"slices"
@@ -35,7 +34,7 @@ func TestUIUserDelegates(t *testing.T) {
 	if got := store.setDelegatesVal; !slices.Equal(got, []string{"boss@hermex.test", "assistant@hermex.test"}) {
 		t.Errorf("stored delegates = %v, want [boss assistant] (trimmed, blanks dropped)", got)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "Saved") {
 		t.Errorf("ui delegates save did not report success:\n%s", body)
 	}
@@ -57,7 +56,7 @@ func TestUIUserDelegateAccess(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("delegate access %s=%s: status %d", grantee, access, resp.StatusCode)
 		}
-		b, _ := io.ReadAll(resp.Body)
+		b := readBody(t, resp)
 		return string(b)
 	}
 
@@ -121,7 +120,7 @@ func TestUIUserDetailShowsDelegates(t *testing.T) {
 
 	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	for _, want := range []string{"<h2>Delegates</h2>", `name="delegates"`, "boss@hermex.test"} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("detail page delegates section missing %q", want)

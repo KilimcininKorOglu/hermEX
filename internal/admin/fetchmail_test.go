@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -37,7 +36,7 @@ func TestAdminListUserFetchmail(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("list status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "mail.example.com") {
 		t.Errorf("list did not include the entry: %s", body)
 	}
@@ -123,7 +122,7 @@ func TestUIUserAddFetchmail(t *testing.T) {
 	if list := d.fetchmail["alice@hermex.test"]; len(list) != 1 || !list[0].UseSSL || !list[0].Active {
 		t.Errorf("entry not stored with flags: %v", d.fetchmail["alice@hermex.test"])
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "mail.example.com") {
 		t.Errorf("refreshed panel missing the entry:\n%s", body)
 	}
@@ -207,7 +206,7 @@ func TestUIUserDetailShowsFetchmail(t *testing.T) {
 
 	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	for _, want := range []string{"Fetchmail (remote accounts)", "remote.example.com", `name="srcServer"`} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("detail page fetchmail section missing %q", want)

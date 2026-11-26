@@ -2,7 +2,6 @@ package admin
 
 import (
 	"errors"
-	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -27,7 +26,7 @@ func TestUIMobileDevicesPage(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/mobile-devices", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("mobile devices page status %d, want 200", resp.StatusCode)
@@ -50,7 +49,7 @@ func TestUIMobileDevicesPanel(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/mobile-devices/panel", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("panel status %d, want 200", resp.StatusCode)
@@ -105,7 +104,7 @@ func TestAdminMobileDevicesJSON(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/mobile-devices", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("sessions JSON status %d, want 200", resp.StatusCode)

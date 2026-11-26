@@ -2,7 +2,6 @@ package admin
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -97,7 +96,7 @@ func TestUIUserSyncPolicy(t *testing.T) {
 	if _, set := got["AllowCamera"]; set {
 		t.Errorf("a blank field was stored: %v (should inherit)", got)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "Saved") {
 		t.Errorf("ui save did not report success:\n%s", body)
 	}
@@ -183,7 +182,7 @@ func TestUISyncPolicyPage(t *testing.T) {
 
 	resp := authedGET(t, ts, "/admin/ui/syncpolicy", session)
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	for _, want := range []string{"device policy (server default)", `name="MinDevicePasswordLength"`, `value="6"`} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("server-default page missing %q", want)
@@ -213,7 +212,7 @@ func TestUISaveSyncPolicy(t *testing.T) {
 	if _, set := d.defaultSyncPolicy["AllowBluetooth"]; set {
 		t.Errorf("an unset field was stored: %v", d.defaultSyncPolicy)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "Saved") {
 		t.Errorf("save did not report success:\n%s", body)
 	}
@@ -249,7 +248,7 @@ func TestUIUserDetailShowsSyncPolicy(t *testing.T) {
 
 	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	for _, want := range []string{"ActiveSync device policy", `name="DevicePasswordEnabled"`, `name="MinDevicePasswordLength"`, `value="8"`} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("detail page sync-policy editor missing %q", want)

@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"slices"
@@ -22,7 +21,7 @@ func TestAdminGetUserSendAs(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("get send-as status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), `"data":["bob@hermex.test"]`) {
 		t.Errorf("send-as body = %s, want the grantee list", body)
 	}
@@ -104,7 +103,7 @@ func TestUIUserDetailShowsSendAs(t *testing.T) {
 
 	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	for _, want := range []string{"<h2>Send as</h2>", `name="sendas"`, "bob@hermex.test"} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("detail page send-as section missing %q", want)
@@ -130,7 +129,7 @@ func TestUIUserSendAs(t *testing.T) {
 	if !slices.Equal(store.setSendAsVal, want) {
 		t.Errorf("stored send-as = %v, want %v (trimmed, blanks dropped)", store.setSendAsVal, want)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "Saved") {
 		t.Errorf("ui send-as save did not report success:\n%s", body)
 	}
@@ -147,7 +146,7 @@ func TestUIUserSendAsRejectsUnknown(t *testing.T) {
 		"sendas": {"ghost@hermex.test"},
 	})
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if store.setSendAsVal != nil {
 		t.Errorf("unknown grantee stored as %v, want no store call", store.setSendAsVal)
 	}

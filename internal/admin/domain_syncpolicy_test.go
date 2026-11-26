@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -22,7 +21,7 @@ func TestAdminGetDomainSyncPolicy(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/domains/1/syncpolicy", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("get domain sync policy status %d, want 200", resp.StatusCode)
@@ -77,7 +76,7 @@ func TestUIDomainSyncPolicySave(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPUT(t, ts, "/admin/ui/domains/1/syncpolicy", session, csrf,
 		url.Values{"MinDevicePasswordLength": {"8"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("ui domain sync policy save status %d, want 200", resp.StatusCode)
@@ -97,7 +96,7 @@ func TestUIDomainSyncPolicySave(t *testing.T) {
 		{"MinDevicePasswordLength": {"8x"}},
 	} {
 		resp := htmxPUT(t, ts, "/admin/ui/domains/1/syncpolicy", session, csrf, bad)
-		body, _ := io.ReadAll(resp.Body)
+		body := readBody(t, resp)
 		resp.Body.Close()
 		if strings.Contains(string(body), `class="ok"`) {
 			t.Errorf("%v was acknowledged as saved", bad)

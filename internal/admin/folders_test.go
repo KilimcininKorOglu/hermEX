@@ -2,7 +2,6 @@ package admin
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -53,7 +52,7 @@ func TestListUserFolders(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("list folders status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), `"displayName":"Inbox"`) || !strings.Contains(string(body), `"displayName":"Project"`) {
 		t.Errorf("folder body = %s, want both folders", body)
 	}
@@ -74,7 +73,7 @@ func TestListFolderPermissions(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("list permissions status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), `"name":"bob@hermex.test"`) || !strings.Contains(string(body), `"level":"Editor"`) {
 		t.Errorf("permission body = %s, want bob as Editor", body)
 	}
@@ -181,7 +180,7 @@ func TestUIUserDetailShowsFolders(t *testing.T) {
 
 	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	for _, want := range []string{"<h2>Folders</h2>", `id="folder-perms"`, ">Project<"} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("detail page folders section missing %q", want)
@@ -204,7 +203,7 @@ func TestUIFolderPerms(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("folder-perms status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	for _, want := range []string{"bob@hermex.test", "Editor", "Grant", ">Owner<", ">Reviewer<"} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("folder-perms panel missing %q:\n%s", want, body)
@@ -333,7 +332,7 @@ func TestUISetFolderPermRejectsUnknownMember(t *testing.T) {
 		"rights":   {fmt.Sprintf("%d", mapi.RightsReviewer)},
 	})
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if store.setPermUser != "" {
 		t.Errorf("unknown member was stored as %q, want no store call", store.setPermUser)
 	}

@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -33,7 +32,7 @@ func TestUIAVQuarantine(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/ui/avquarantine", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
@@ -58,7 +57,7 @@ func TestUIAVQuarantineEscapesTheSendersText(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/avquarantine", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	for _, raw := range []string{"<script>alert(2)", "<img src=x"} {
 		if strings.Contains(string(body), raw) {
@@ -95,7 +94,7 @@ func TestUIAVQuarantineEmpty(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/ui/avquarantine", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
@@ -117,7 +116,7 @@ func TestUIDomainAVScanSave(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPUT(t, ts, "/admin/ui/domains/1/avscan", session, csrf,
 		url.Values{"av_scan_inbound": {"on"}}) // outbound omitted: unchecked
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("ui domain avscan save status %d, want 200", resp.StatusCode)

@@ -2,7 +2,6 @@ package admin
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -20,7 +19,7 @@ func TestLimitsPageRendersConnLimit(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/ui/limits", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	page := string(body)
 	if !strings.Contains(page, `id="conn-limit-panel"`) {
@@ -41,7 +40,7 @@ func TestSaveConnLimit(t *testing.T) {
 
 	resp := htmxPOST(t, ts, "/admin/ui/limits/connections", session, csrf,
 		url.Values{"enabled": {"1"}, "conn_max_total": {"400"}, "conn_max_per_client": {"8"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Connection caps saved") {
 		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", resp.StatusCode, body)
@@ -63,7 +62,7 @@ func TestSaveConnLimitRejectsBadValues(t *testing.T) {
 	} {
 		resp := htmxPOST(t, ts, "/admin/ui/limits/connections", session, csrf,
 			url.Values{"enabled": {"1"}, "conn_max_total": {tc.total}, "conn_max_per_client": {tc.perClient}})
-		body, _ := io.ReadAll(resp.Body)
+		body := readBody(t, resp)
 		resp.Body.Close()
 		if !strings.Contains(string(body), "at least 1") {
 			t.Errorf("%q/%q: expected a validation message:\n%s", tc.total, tc.perClient, body)

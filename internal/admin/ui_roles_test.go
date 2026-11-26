@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -19,7 +18,7 @@ func TestUIRolesPage(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/roles", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d, want 200", resp.StatusCode)
@@ -35,7 +34,7 @@ func TestUIRoleCreate(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPOST(t, ts, "/admin/ui/roles", session, csrf, url.Values{"name": {"Helpdesk"}, "description": {"d"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("create status %d, want 200", resp.StatusCode)
@@ -62,7 +61,7 @@ func TestUIRoleDetailEditor(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/roles/1", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d, want 200", resp.StatusCode)
@@ -98,7 +97,7 @@ func TestUIRoleSave(t *testing.T) {
 		"user":          {"5"},
 	}
 	resp := htmxPUT(t, ts, "/admin/ui/roles/1", session, csrf, form)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("save status %d, want 200", resp.StatusCode)

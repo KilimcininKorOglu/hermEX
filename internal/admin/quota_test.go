@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -28,7 +27,7 @@ func TestAdminGetUserQuota(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("get quota status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), `"receiveKB":2048`) || !strings.Contains(string(body), `"usedBytes":5242880`) {
 		t.Errorf("quota body = %s, want the limits and usage", body)
 	}
@@ -126,7 +125,7 @@ func TestUIUserDetailShowsQuota(t *testing.T) {
 
 	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	for _, want := range []string{"Storage quota", "Used space: 3 MB", `name="receivemb" value="2"`} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("detail page quota section missing %q", want)
@@ -155,7 +154,7 @@ func TestUIUserQuota(t *testing.T) {
 	if store.setQuotaDir != "/mb/alice" || got.SendKB != 10*1024 || got.ReceiveKB != 20*1024 || got.StorageKB != 30*1024 {
 		t.Errorf("stored quota = dir %q %+v, want the MiB inputs converted to KiB", store.setQuotaDir, got)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "Saved") {
 		t.Errorf("ui quota save did not report success:\n%s", body)
 	}
@@ -171,7 +170,7 @@ func TestUIUserQuotaRefusesWhatIsNotASize(t *testing.T) {
 		ts := adminServerStore(t, oofUserDir(), store)
 		session, csrf := loginCookies(t, ts)
 		resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/quota", session, csrf, url.Values{"storagemb": {bad}})
-		body, _ := io.ReadAll(resp.Body)
+		body := readBody(t, resp)
 		resp.Body.Close()
 		if store.setQuotaDir != "" {
 			t.Errorf("%s: a quota was stored: %+v", bad, store.setQuotaVal)

@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -41,7 +40,7 @@ func TestUIUsersPage(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("users page status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "boss@hermex.test") || !strings.Contains(string(body), "Add user") {
 		t.Errorf("users page missing the user or the create form: %s", body)
 	}
@@ -86,7 +85,7 @@ func TestUICreateUser(t *testing.T) {
 	if d.createdUser != "new@hermex.test" {
 		t.Errorf("created user %q, want new@hermex.test", d.createdUser)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), `id="users-panel"`) {
 		t.Errorf("response is not the users panel fragment: %s", body)
 	}
@@ -133,7 +132,7 @@ func TestUICreateUserPrefill(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/user-create-fields?domain=1", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("prefill status %d, want 200", resp.StatusCode)
@@ -179,7 +178,7 @@ func TestUICreateUserValidation(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("validation response status %d, want 200 (panel with error)", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "required") {
 		t.Errorf("validation panel missing the error: %s", body)
 	}

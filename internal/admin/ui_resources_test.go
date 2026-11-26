@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -23,7 +22,7 @@ func TestUIDomainsPage(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("domains page status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "hermex.test") || !strings.Contains(string(body), "Add domain") {
 		t.Errorf("domains page missing content: %s", body)
 	}
@@ -41,7 +40,7 @@ func TestUIDomainsPageNamesOrganization(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/domains", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	s := string(body)
 	if !strings.Contains(s, "<td>Acme Group</td>") {
@@ -65,7 +64,7 @@ func TestUICreateDomain(t *testing.T) {
 	if d.createdDomain != "new.test" {
 		t.Errorf("created domain %q, want new.test", d.createdDomain)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), `id="domains-panel"`) {
 		t.Errorf("response is not the domains panel: %s", body)
 	}
@@ -97,7 +96,7 @@ func TestUIDomainsPagePrefillsMaxUser(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/domains", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("domains page status %d, want 200", resp.StatusCode)
@@ -117,7 +116,7 @@ func TestUIDomainPurge(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPOST(t, ts, "/admin/ui/domains/3/purge", session, csrf, url.Values{"deleteFiles": {"true"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("purge status %d, want 200", resp.StatusCode)
@@ -185,7 +184,7 @@ func TestUIDomainDetailPage(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/domains/3", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("domain detail status %d, want 200", resp.StatusCode)
@@ -207,7 +206,7 @@ func TestUIDomainSave(t *testing.T) {
 	resp := htmxPUT(t, ts, "/admin/ui/domains/3", session, csrf, url.Values{
 		"status": {"1"}, "maxUser": {"10"}, "title": {"X"}, "org": {"2"},
 	})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("domain save status %d, want 200", resp.StatusCode)
@@ -296,7 +295,7 @@ func TestUIAliasesPage(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("aliases page status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "sales@hermex.test") || !strings.Contains(string(body), "Add alias") {
 		t.Errorf("aliases page missing content: %s", body)
 	}
@@ -316,7 +315,7 @@ func TestUICreateAlias(t *testing.T) {
 	if d.createdAlias != "sales@hermex.test" || d.createdAliasTo != "boss@hermex.test" {
 		t.Errorf("created alias %q -> %q, want sales -> boss", d.createdAlias, d.createdAliasTo)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), `id="aliases-panel"`) {
 		t.Errorf("response is not the aliases panel: %s", body)
 	}

@@ -2,7 +2,6 @@ package admin
 
 import (
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -40,7 +39,7 @@ func TestPanelNoticeDoesNotLeakStorePath(t *testing.T) {
 
 	resp := authedReq(t, ts, http.MethodPut, "/admin/ui/users/bob@hermex.test/delegates",
 		session, csrf, url.Values{"delegates": {"carol@hermex.test"}}.Encode())
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 
 	for _, leak := range []string{"/var/lib/hermex", "objects.sqlite3", "permission denied"} {
@@ -89,7 +88,7 @@ func TestRenderedPanelNoticeDoesNotLeakDriverText(t *testing.T) {
 
 	resp := htmxPOST(t, ts, "/admin/ui/mlists", session, csrf,
 		url.Values{"listname": {"team@hermex.test"}, "type": {"1"}, "privilege": {"0"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 
 	for _, leak := range []string{"1062", "Duplicate entry", "users.username"} {
@@ -143,7 +142,7 @@ func TestCertificateUploadKeepsItsValidationMessage(t *testing.T) {
 
 	resp := htmxPOST(t, ts, "/admin/ui/tls/upload", session, csrf,
 		url.Values{"name": {""}, "cert": {"not a certificate"}, "key": {"not a key"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 
 	if !strings.Contains(string(body), "Upload rejected") {

@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -22,7 +21,7 @@ func TestUIChangePasswordPage(t *testing.T) {
 	ts := adminServer(t, cpFakeDir())
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/ui/change-password", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("change-password page status %d, want 200", resp.StatusCode)
@@ -42,7 +41,7 @@ func TestUIChangePasswordSubmit(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPUT(t, ts, "/admin/ui/change-password", session, csrf,
 		url.Values{"old": {"pw"}, "new": {"newsecret"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("submit status %d, want 200", resp.StatusCode)
@@ -105,7 +104,7 @@ func TestUIChangePasswordWrongCurrent(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 	resp := htmxPUT(t, ts, "/admin/ui/change-password", session, csrf,
 		url.Values{"old": {"wrong"}, "new": {"newsecret"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("submit status %d, want 200", resp.StatusCode)

@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -25,7 +24,7 @@ func TestAdminGetUserMeeting(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("get meeting status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), `"autoAccept":true`) || !strings.Contains(string(body), `"declineRecurring":false`) || !strings.Contains(string(body), `"declineConflict":true`) {
 		t.Errorf("meeting body = %s, want the config", body)
 	}
@@ -84,7 +83,7 @@ func TestUIUserDetailShowsMeeting(t *testing.T) {
 
 	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	for _, want := range []string{"Meeting requests", `name="autoaccept" checked`, `name="declinerecurring"`, `name="removerequest"`,
 		`name="processcancellations" checked`} {
 		if !strings.Contains(string(body), want) {
@@ -117,7 +116,7 @@ func TestUIUserMeeting(t *testing.T) {
 	if store.setMeetingConfig != want {
 		t.Errorf("stored meeting = %+v, want %+v", store.setMeetingConfig, want)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "Saved") {
 		t.Errorf("ui meeting save did not report success:\n%s", body)
 	}

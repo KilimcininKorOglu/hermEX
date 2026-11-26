@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -27,7 +26,7 @@ func TestUICreateContact(t *testing.T) {
 		t.Errorf("created contact = %q name=%q domain=%q, want john@partner.example / John Partner / hermex.test",
 			d.createdContact, d.createdContactName, d.createdContactDomain)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), `id="contacts-panel"`) {
 		t.Errorf("response is not the contacts panel fragment: %s", body)
 	}
@@ -47,7 +46,7 @@ func TestUICreateContactRequiresDomain(t *testing.T) {
 	if d.createdContact != "" {
 		t.Errorf("created a contact %q despite a missing filing domain", d.createdContact)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "filing domain are required") {
 		t.Errorf("missing-domain error not reported: %s", body)
 	}
@@ -70,7 +69,7 @@ func TestUIUpdateContact(t *testing.T) {
 		t.Errorf("updated contact = %q name=%q, want john@partner.example / Jonathan Partner",
 			d.updatedContact, d.updatedContactName)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), `id="contacts-panel"`) {
 		t.Errorf("response is not the contacts panel fragment: %s", body)
 	}
@@ -91,7 +90,7 @@ func TestUIDeleteContact(t *testing.T) {
 	if d.deletedContact != "john@partner.example" {
 		t.Errorf("deleted %q, want john@partner.example", d.deletedContact)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), `id="contacts-panel"`) {
 		t.Errorf("response is not the contacts panel fragment: %s", body)
 	}
@@ -136,7 +135,7 @@ func TestUIContactsListRenders(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("contacts page status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	for _, want := range []string{"John Partner", "john@partner.example", "hermex.test", `<option value="hermex.test"`} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("contacts page missing %q", want)
@@ -160,7 +159,7 @@ func TestUIContactsListShowsTheLDAPID(t *testing.T) {
 
 	resp := authedGET(t, ts, "/admin/ui/contacts", session)
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 
 	if !strings.Contains(string(body), "aabbccdd") {
 		t.Errorf("contacts page missing the LDAP id column value:\n%s", body)

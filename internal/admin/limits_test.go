@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -140,7 +139,7 @@ func TestSaveLimitsRejectsBadValues(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/limits", session, csrf, url.Values{"imap_literal_mb": {"0"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if !strings.Contains(string(body), "at least 1 MB") {
 		t.Errorf("expected a validation message:\n%s", body)
@@ -158,7 +157,7 @@ func TestLimitsPageRendersRequestRate(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/ui/limits", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	page := string(body)
 	if !strings.Contains(page, "Request rate limiting is <strong>off</strong>") {
@@ -178,7 +177,7 @@ func TestSaveHTTPRateLimit(t *testing.T) {
 
 	resp := htmxPOST(t, ts, "/admin/ui/limits/requestrate", session, csrf,
 		url.Values{"enabled": {"1"}, "http_burst": {"900"}, "http_window": {"30"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Request-rate settings saved") {
 		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", resp.StatusCode, body)
@@ -197,7 +196,7 @@ func TestSaveHTTPRateLimitRejectsBadValues(t *testing.T) {
 
 	resp := htmxPOST(t, ts, "/admin/ui/limits/requestrate", session, csrf,
 		url.Values{"enabled": {"1"}, "http_burst": {"0"}, "http_window": {"60"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if !strings.Contains(string(body), "at least 1") {
 		t.Errorf("expected a validation message:\n%s", body)
@@ -216,7 +215,7 @@ func TestLimitsPageRendersLoginLockout(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/ui/limits", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	page := string(body)
 	if !strings.Contains(page, "Login lockout") {
@@ -240,7 +239,7 @@ func TestSaveLoginLockout(t *testing.T) {
 
 	resp := htmxPOST(t, ts, "/admin/ui/limits/loginlockout", session, csrf,
 		url.Values{"login_max_fails": {"3"}, "login_window": {"300"}, "login_lockout": {"1800"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Login-lockout settings saved") {
 		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", resp.StatusCode, body)
@@ -271,7 +270,7 @@ func TestSaveLoginLockoutRejectsBadValues(t *testing.T) {
 		session, csrf := loginCookies(t, ts)
 
 		resp := htmxPOST(t, ts, "/admin/ui/limits/loginlockout", session, csrf, bad)
-		body, _ := io.ReadAll(resp.Body)
+		body := readBody(t, resp)
 		resp.Body.Close()
 		if !strings.Contains(string(body), "at least 1") {
 			t.Errorf("%v: expected a validation message:\n%s", bad, body)
@@ -298,7 +297,7 @@ func TestFetchPolicyIsSystemAdminOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page, _ := io.ReadAll(resp.Body)
+	page := readBody(t, resp)
 	resp.Body.Close()
 	if !strings.Contains(string(page), `name="fetch_allow_internal"`) {
 		t.Errorf("limits page missing the fetch policy switch:\n%s", page)
@@ -309,7 +308,7 @@ func TestFetchPolicyIsSystemAdminOnly(t *testing.T) {
 
 	// A system admin can turn it on.
 	saved := htmxPOST(t, ts, "/admin/ui/limits/fetchpolicy", session, csrf, url.Values{"fetch_allow_internal": {"1"}})
-	body, _ := io.ReadAll(saved.Body)
+	body := readBody(t, saved)
 	saved.Body.Close()
 	if saved.StatusCode != http.StatusOK || !strings.Contains(string(body), "Fetch policy saved") {
 		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", saved.StatusCode, body)

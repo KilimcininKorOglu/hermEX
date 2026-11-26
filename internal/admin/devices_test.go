@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -35,7 +34,7 @@ func TestAdminGetUserDevices(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("get devices status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), `"deviceId":"dev1"`) || !strings.Contains(string(body), `"foldersSynced":3`) {
 		t.Errorf("devices body = %s, want dev1 listed", body)
 	}
@@ -137,7 +136,7 @@ func TestUIUserDetailShowsDevices(t *testing.T) {
 
 	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	for _, want := range []string{"Mobile devices", "phone-1", "Wipe pending", `value="cancel"`} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("detail page devices section missing %q", want)
@@ -166,7 +165,7 @@ func TestUIUserDeviceAction(t *testing.T) {
 	if store.deviceAction != "resync" || store.deviceActionID != "phone-1" {
 		t.Errorf("stored action = %q id=%q, want resync phone-1", store.deviceAction, store.deviceActionID)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "phone-1") {
 		t.Errorf("device action did not return the refreshed panel:\n%s", body)
 	}

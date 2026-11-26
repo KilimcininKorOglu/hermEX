@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -54,7 +53,7 @@ func TestAdminListDomains(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("list domains status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "hermex.test") {
 		t.Errorf("list body = %s, want the domain", body)
 	}
@@ -74,7 +73,7 @@ func TestAdminListDomainsScopeFiltered(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/domains", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("domain-admin list domains = %d, want 200", resp.StatusCode)
@@ -94,7 +93,7 @@ func TestAdminGetDomain(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/domains/1", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("get domain status %d, want 200", resp.StatusCode)

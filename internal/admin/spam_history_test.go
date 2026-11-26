@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -42,7 +41,7 @@ func TestSpamHistoryPageRenders(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/ui/spam-history", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("spam-history page = %d, want 200", resp.StatusCode)
@@ -67,7 +66,7 @@ func TestSaveSpamRetention(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/spam-history/retention", session, csrf, url.Values{"retain": {"500"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("save = %d, want 200", resp.StatusCode)
@@ -106,7 +105,7 @@ func TestSaveSpamRetentionRejectsBadValues(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/spam-history/retention", session, csrf, url.Values{"retain": {"0"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if !strings.Contains(string(body), "at least 1") {
 		t.Errorf("expected a validation message:\n%s", body)
