@@ -36,6 +36,9 @@ func TestCryptInterop(t *testing.T) {
 	// An empty hash or an unrecognized scheme never matches.
 	for _, bad := range []string{"", "plaintext", "$2y$10$unsupportedbcrypthashvalue"} {
 		wantVerify(t, "the empty or unsupported hash "+bad, "x", bad, false)
+		// A stored value is never compared as plain text, so typing the stored
+		// string itself must not log in either.
+		wantVerify(t, "the stored string "+bad+" typed as the password", bad, bad, false)
 	}
 }
 
