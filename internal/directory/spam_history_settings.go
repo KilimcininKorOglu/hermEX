@@ -32,6 +32,9 @@ func (d *SQLDirectory) GetSpamHistorySettings() (SpamHistorySettings, bool, erro
 // SetSpamHistorySettings persists the retention setting, upserting the single row so
 // the MTA's poll observes the change and applies it without a restart.
 func (d *SQLDirectory) SetSpamHistorySettings(s SpamHistorySettings) error {
+	if s.Retain < 1 {
+		return errors.New("directory: the spam history retention must be at least 1")
+	}
 	_, err := d.db.Exec(
 		`INSERT INTO spam_history_settings (id, retain_count, updated_at)
 		 VALUES (1, ?, ?)

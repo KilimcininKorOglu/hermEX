@@ -57,6 +57,21 @@ func TestSpamHistorySettingsUpsert(t *testing.T) {
 	}
 }
 
+// TestSpamHistorySettingsRefuseANonPositiveRetain proves the stored setting holds
+// the same guard as the runtime bound: a value below 1 is refused and the stored
+// row kept, so the next poll cannot load a value that prunes every row.
+func TestSpamHistorySettingsRefuseANonPositiveRetain(t *testing.T) {
+	d := setupSpamHistorySettings(t)
+	mustNoErr(t, "save the retention", d.SetSpamHistorySettings(SpamHistorySettings{Retain: 500}))
+	for _, bad := range []int{0, -1} {
+		wantErr(t, "a non-positive retention was accepted", d.SetSpamHistorySettings(SpamHistorySettings{Retain: bad}))
+		got, found, err := d.GetSpamHistorySettings()
+		mustNoErr(t, "read the retention after a refusal", err)
+		wantEq(t, "retention found after a refusal", found, true)
+		wantEq(t, "retention after a refusal", got.Retain, 500)
+	}
+}
+
 // TestSetSpamHistoryRetainGuard proves a value below 1 is ignored, so a
 // misconfiguration can never set the runtime bound to a value that prunes the table
 // to nothing on the next insert.
@@ -65,6 +80,7 @@ func TestSetSpamHistoryRetainGuard(t *testing.T) {
 	d := NewSQL(nil)
 	d.SetSpamHistoryRetain(42)
 	d.SetSpamHistoryRetain(0)
+	d.SetSpamHistoryRetain(-7)
 	if got := d.spamRetain.Load(); got != 42 {
 		t.Errorf("retain after guarded set = %d, want unchanged 42", got)
 	}
