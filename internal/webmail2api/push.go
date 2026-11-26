@@ -110,6 +110,11 @@ func (s *Server) handlePushSubscribe(w http.ResponseWriter, r *http.Request) {
 		Auth:      body.Keys.Auth,
 		CreatedAt: time.Now().Unix(),
 	}); err != nil {
+		if errors.Is(err, directory.ErrPushEndpointTaken) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "subscription belongs to another account"})
+			return
+		}
+		logError("push-subscribe", err, logging.Fields{"user": c.Email})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save subscription"})
 		return
 	}
@@ -137,14 +142,20 @@ func (s *Server) handlePushUnsubscribe(w http.ResponseWriter, r *http.Request) {
 	}
 	subs, err := store.ListPushSubscriptions(c.Email)
 	if err != nil {
+		logError("push-unsubscribe", err, logging.Fields{"user": c.Email})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not unsubscribe"})
 		return
 	}
 	for _, sub := range subs {
-		if sub.Endpoint == endpoint {
-			_ = store.DeletePushSubscription(endpoint)
-			break
+		if sub.Endpoint != endpoint {
+			continue
 		}
+		if err := store.DeletePushSubscription(endpoint); err != nil {
+			logError("push-unsubscribe", err, logging.Fields{"user": c.Email})
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not unsubscribe"})
+			return
+		}
+		break
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
