@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
 )
 
 // TestGetPropertiesOnTheStoreAndAFolder proves RopGetPropertiesSpecific answers on
@@ -13,19 +14,31 @@ import (
 func TestGetPropertiesOnTheStoreAndAFolder(t *testing.T) {
 	dir := provisionedDir(t)
 	seedInboxMessage(t, dir, "x")
+	// Turn the Out of Office reply on, so the store property read below must come
+	// from the mailbox and not from a default.
+	st, err := objectstore.OpenExisting(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetOOFSettings(objectstore.OOFSettings{Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
 	logonH := h[0]
 
+	// [MS-OXOOF] 2.2.5.2 PidTagOutOfOfficeState: TRUE while the reply is on.
 	cols := []mapi.PropTag{mapi.PrOOFState}
 	out, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{logonH})
-	ropOK(t, out, ropGetPropertiesSpecific, "GetPropertiesSpecific(store)")
+	p := ropOK(t, out, ropGetPropertiesSpecific, "GetPropertiesSpecific(store)")
+	wantProp(t, decodeRow(t, p, cols), mapi.PrOOFState, true, "store OOF state")
 
 	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
 	cols = []mapi.PropTag{mapi.PrDisplayName, mapi.PrContentCount, mapi.PrContentUnreadCount}
 	out, _ = sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{h[1]})
-	p := ropOK(t, out, ropGetPropertiesSpecific, "GetPropertiesSpecific(folder)")
+	p = ropOK(t, out, ropGetPropertiesSpecific, "GetPropertiesSpecific(folder)")
 	row := decodeRow(t, p, cols)
 	if name, _ := row.Get(mapi.PrDisplayName); name != "Inbox" {
 		t.Errorf("folder display name = %v, want Inbox", name)
