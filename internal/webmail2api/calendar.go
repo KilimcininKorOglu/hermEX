@@ -583,9 +583,7 @@ func (sc *eventScan) event(id int64, calendarID string) (eventJSON, []byte, bool
 	flags, _ := propInt32(msg.Props, sc.stateTag)
 	e.Canceled = sc.stateTag != 0 && flags&asfCanceled != 0
 	// Categories are the shared PidNameKeywords list, read directly.
-	if cats, err := sc.st.GetCategories(id); err == nil && len(cats) > 0 {
-		e.Categories = cats
-	}
+	e.Categories = storedCategories(sc.st, id)
 	sc.addAttendees(&e, id)
 	return e, ics, true
 }
@@ -1005,7 +1003,9 @@ func storeEvent(st *objectstore.Store, e eventJSON, folderID int64, organizer st
 	// protocol reads), set directly rather than through the iCal CATEGORIES path
 	// oxcical's VEVENT does not parse.
 	if len(e.Categories) > 0 {
-		_ = st.SetCategories(id, e.Categories)
+		if err := st.SetCategories(id, e.Categories); err != nil {
+			st.LogSwallowedError("calendar.categories", err)
+		}
 	}
 	return id, nil
 }

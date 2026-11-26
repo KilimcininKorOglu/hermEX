@@ -3,6 +3,7 @@ package webmail2api
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -332,15 +333,35 @@ func markReadOnOpen(d *mailDetailJSON, mb *mailboxCtx, fid int64, uid uint32) (*
 // addStoredProps surfaces what the stored message carries beyond its wire
 // form: the rich follow-up flag and the category labels (PidNameKeywords), so
 // a label set in the reader or by another client shows on the next read.
+//
+// The message itself was already read, so a failure here leaves the detail
+// without its labels or flag rather than failing the read; each one is recorded,
+// because a label that silently vanishes from the reader is otherwise invisible.
 func addStoredProps(d *mailDetailJSON, st *objectstore.Store, fid int64, uid uint32) {
 	m, err := st.MessageByUID(fid, uid)
 	if err != nil {
+		// A concurrent delete between the read and this lookup is not a failure.
+		if !errors.Is(err, objectstore.ErrNotFound) {
+			st.LogSwallowedError("mail.stored_props", err)
+		}
 		return
 	}
 	addFollowupFlag(d, st, m.ID)
-	if cats, err := st.GetCategories(m.ID); err == nil {
-		d.Labels = cats
+	d.Labels = storedCategories(st, m.ID)
+}
+
+// storedCategories reads a message's category list for a rendered view, and
+// records a failed read rather than passing it off as "no categories".
+func storedCategories(st *objectstore.Store, messageID int64) []string {
+	cats, err := st.GetCategories(messageID)
+	if err != nil {
+		st.LogSwallowedError("categories.read", err)
+		return nil
 	}
+	if len(cats) == 0 {
+		return nil
+	}
+	return cats
 }
 
 // addFollowupFlag surfaces the rich follow-up flag (colour + due date +
@@ -348,6 +369,7 @@ func addStoredProps(d *mailDetailJSON, st *objectstore.Store, fid int64, uid uin
 func addFollowupFlag(d *mailDetailJSON, st *objectstore.Store, messageID int64) {
 	f, err := st.GetFollowupFlag(messageID)
 	if err != nil {
+		st.LogSwallowedError("mail.followup_read", err)
 		return
 	}
 	d.FollowupStatus = f.Status

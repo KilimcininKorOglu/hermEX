@@ -279,9 +279,7 @@ func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			continue
 		}
-		if cats, err := st.GetCategories(o.ID); err == nil && len(cats) > 0 {
-			c.Categories = cats
-		}
+		c.Categories = storedCategories(st, o.ID)
 		contacts = append(contacts, c)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"contacts": contacts, "total": len(contacts)})
@@ -561,14 +559,22 @@ func storeContact(st *objectstore.Store, c contactJSON) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	// The contact is stored; a follow-up write that fails must not report the
+	// create as failed, or a retry stores it twice. Each failure is recorded so
+	// the operator sees the field that was lost.
+	//
 	// oxvcard's vCard path does not carry anniversary/assistant/manager/office, so
 	// set them directly as MAPI props after the import (the organizer's rich fields).
 	if rich := richContactProps(st, c); len(rich) > 0 {
-		_ = st.SetMessageProperties(id, rich)
+		if err := st.SetMessageProperties(id, rich); err != nil {
+			st.LogSwallowedError("contact.rich_props", err)
+		}
 	}
 	// Categories ride the shared PidNameKeywords named prop (the same list every
 	// protocol reads). Empty list clears any prior categories on a replace.
-	_ = st.SetCategories(id, c.Categories)
+	if err := st.SetCategories(id, c.Categories); err != nil {
+		st.LogSwallowedError("contact.categories", err)
+	}
 	return id, nil
 }
 
@@ -788,6 +794,20 @@ func hasPictureTag(st *objectstore.Store, create bool) (mapi.PropTag, error) {
 	return mapi.PropTag(uint32(ids[0])<<16 | uint32(mapi.PtBoolean)), nil
 }
 
+// markHasPicture sets PidLidHasPicture on a contact. The named property is
+// allocated on demand, so a zero tag after an allocating lookup means the store
+// refused it, which is a failure rather than a flag with nowhere to go.
+func markHasPicture(st *objectstore.Store, id int64) error {
+	tag, err := hasPictureTag(st, true)
+	if err != nil {
+		return err
+	}
+	if tag == 0 {
+		return errors.New("webmail2api: no named property id for PidLidHasPicture")
+	}
+	return st.SetMessageProperties(id, mapi.PropertyValues{{Tag: tag, Value: true}})
+}
+
 // handleGetContactPhoto streams the contact's photo attachment bytes. JPEG is
 // the canonical format; the content type defaults to image/jpeg.
 func (s *Server) handleGetContactPhoto(w http.ResponseWriter, r *http.Request) {
@@ -843,9 +863,14 @@ func (s *Server) handleSetContactPhoto(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not attach photo"})
 		return
 	}
-	// Mark the contact as having a picture (PidLidHasPicture).
-	if tag, err := hasPictureTag(st, true); err == nil && tag != 0 {
-		_ = st.SetMessageProperties(id, mapi.PropertyValues{{Tag: tag, Value: true}})
+	// Mark the contact as having a picture (PidLidHasPicture); a client that reads
+	// the flag rather than the attachment shows no photo without it. Replacing
+	// the photo is idempotent, so a failure here is reported and the client may
+	// simply retry.
+	if err := markHasPicture(st, id); err != nil {
+		logError("contact-photo-flag", err, nil)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not attach photo"})
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
