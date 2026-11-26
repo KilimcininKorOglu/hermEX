@@ -83,13 +83,16 @@ func TestEmergencySessionRevoke(t *testing.T) {
 	wantEq(t, "revoked panel sessions", adm, int64(2))
 
 	for _, jti := range []string{"web-1", "web-2"} {
-		active, _ := d.WebmailSessionActive(jti, now+1)
+		active, err := d.WebmailSessionActive(jti, now+1)
+		mustNoErr(t, "read webmail session "+jti, err)
 		wantEq(t, "webmail session "+jti+" survived the revoke", active, false)
 	}
 	for _, jti := range []string{"adm-1", "adm-2"} {
-		active, _ := d.AdminSessionActive(jti, now+1)
+		active, err := d.AdminSessionActive(jti, now+1)
+		mustNoErr(t, "read panel session "+jti, err)
 		wantEq(t, "panel session "+jti+" survived the revoke", active, false)
 	}
-	other, _ := d.WebmailSessionActive("web-other", now+1)
+	other, err := d.WebmailSessionActive("web-other", now+1)
+	mustNoErr(t, "read another account's session", err)
 	wantEq(t, "another account's session survived (the revoke must not reach it)", other, true)
 }
