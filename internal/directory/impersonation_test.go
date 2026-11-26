@@ -40,6 +40,9 @@ func TestMayImpersonateNeedsTheRoleForTheTargetsDomain(t *testing.T) {
 		{"plain@acme.test", "boss@acme.test", false},
 		{"svc@acme.test", "nobody@acme.test", false},
 		{"nobody@acme.test", "boss@acme.test", false},
+		{"", "boss@acme.test", false},
+		{"backup@acme.test", "", false},
+		{"backup@acme.test", "   ", false},
 	} {
 		got, err := d.MayImpersonate(c.caller, c.target)
 		mustNoErr(t, "MayImpersonate", err)
