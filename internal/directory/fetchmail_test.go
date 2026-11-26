@@ -47,12 +47,19 @@ func TestFetchmailCRUD(t *testing.T) {
 		Mailbox: "alice@hermex.test", SrcServer: "x", SrcUser: "x", Protocol: "FTP",
 	})
 	wantErr(t, "an unknown protocol was accepted", err)
+	wantEq(t, "entries after the refused create", len(mustListFetchmail(t, d)), 2)
+
+	// Another mailbox sees none of alice's entries.
+	other, err := d.ListFetchmail("bob@hermex.test")
+	mustNoErr(t, "list another mailbox's entries", err)
+	wantEq(t, "entries listed for another mailbox", len(other), 0)
 
 	// Delete reports existence.
 	deleted, err := d.DeleteFetchmail(id)
 	mustNoErr(t, "delete fetchmail entry", err)
 	wantEq(t, "DeleteFetchmail reported the entry existed", deleted, true)
-	again, _ := d.DeleteFetchmail(id)
+	again, err := d.DeleteFetchmail(id)
+	mustNoErr(t, "delete the entry again", err)
 	wantEq(t, "the second delete", again, false)
 
 	// Deleting the user removes its remaining entries.
@@ -94,6 +101,7 @@ func TestFetchmailPasswordIsEncryptedAtRest(t *testing.T) {
 	_, err = d.CreateFetchmail(FetchmailEntry{Mailbox: "alice@hermex.test", SrcServer: "s", SrcUser: "u",
 		SrcPassword: long + "p", Protocol: "IMAP"})
 	wantErr(t, "a password over the limit was accepted", err)
+	wantEq(t, "entries after the refused password", len(mustListFetchmail(t, d)), 1)
 }
 
 // TestFetchmailPlaintextPasswordIsRewrapped proves an entry written before the
