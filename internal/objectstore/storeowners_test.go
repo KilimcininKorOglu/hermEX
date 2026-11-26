@@ -46,8 +46,10 @@ func TestIsStoreOwnerCaseFold(t *testing.T) {
 	if ok, err := s.IsStoreOwner("boss@hermex.TEST"); err != nil || !ok {
 		t.Errorf("IsStoreOwner(case-variant) = %v, %v; want true", ok, err)
 	}
-	if ok, err := s.IsStoreOwner("stranger@hermex.test"); err != nil || ok {
-		t.Error("IsStoreOwner(non-owner) = true; want false")
+	for _, forged := range []string{"stranger@hermex.test", "", "boss@hermex.test.evil", "xboss@hermex.test", "boss"} {
+		if ok, err := s.IsStoreOwner(forged); err != nil || ok {
+			t.Errorf("IsStoreOwner(%q) = %v, %v; want false", forged, ok, err)
+		}
 	}
 }
 
