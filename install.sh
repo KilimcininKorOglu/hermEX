@@ -349,6 +349,7 @@ write_config() {
   "imap_addr": ":143",
   "imaps_addr": ":993",
   "gateway_addr": ":443",
+  "gateway_http_addr": ":80",
   "webmail2_addr": "127.0.0.1:8601",
   "dav_addr": "127.0.0.1:8602",
   "activesync_addr": "127.0.0.1:8603",
@@ -550,8 +551,8 @@ register_health_targets() {
 
 open_firewall() {
 	# firewalld names the 587/tcp service smtp-submission.
-	local services=(smtp smtps smtp-submission imap imaps pop3 pop3s https)
-	local ports=(25 465 587 143 993 110 995 443)
+	local services=(smtp smtps smtp-submission imap imaps pop3 pop3s http https)
+	local ports=(25 465 587 143 993 110 995 80 443)
 	if systemctl is-active --quiet firewalld; then
 		local s
 		for s in "${services[@]}"; do firewall-cmd -q --permanent --add-service="$s"; done

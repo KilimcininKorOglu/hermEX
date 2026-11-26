@@ -94,6 +94,15 @@ func main() {
 	}
 	comps := append([]lifecycle.Component{hs},
 		health.Components(cfg.HealthAddrFor("gateway"), "gateway", checks...)...)
+	if cfg.GatewayHTTPAddr != "" {
+		// Plain-HTTP listener that only redirects to https, so a bare name or an
+		// http:// link reaches the TLS front door.
+		rs, err := serve.New(cfg.GatewayHTTPAddr, httpsRedirect(), plainHTTP{}, logger, logging.Gateway, httpLimiter, serve.FrontDoor())
+		if err != nil {
+			log.Fatalf("hermex-gateway: http redirect: %v", err)
+		}
+		comps = append(comps, rs)
+	}
 	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-gateway: %v", err)
 	}

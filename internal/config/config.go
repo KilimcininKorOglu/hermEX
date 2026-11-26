@@ -57,6 +57,7 @@ type Config struct {
 	// falls back to a built-in default (see cmd/gateway resolveGateway): the listen
 	// address and the backend base URLs default to the compose service names.
 	GatewayAddr              string `json:"gateway_addr"`               // gateway listen address (default ":8080")
+	GatewayHTTPAddr          string `json:"gateway_http_addr"`          // plain-HTTP listener that redirects every request to https:// ("" = none)
 	GatewayBackendMapi       string `json:"gateway_backend_mapi"`       // MAPI/RPC backend base URL (default "http://mapi:8080")
 	GatewayBackendEws        string `json:"gateway_backend_ews"`        // EWS/autodiscover backend base URL (default "http://ews:8080")
 	GatewayBackendActiveSync string `json:"gateway_backend_activesync"` // ActiveSync backend base URL (default "http://activesync:8080")
