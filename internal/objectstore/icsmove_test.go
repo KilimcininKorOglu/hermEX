@@ -3,6 +3,7 @@ package objectstore
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"hermex/internal/mapi"
 )
@@ -146,4 +147,36 @@ func TestMoveMessageImportReplaysIntoTheSameFolder(t *testing.T) {
 	_, err = s.MoveMessageImport(src, second, dst, dstMID)
 	mustNoErr(t, "replayed move under the committed id", err)
 	wantRows(t, s, "rows under the destination id", 1, `SELECT COUNT(*) FROM messages WHERE message_id=? AND parent_fid=?`, dstMID, dst)
+}
+
+// TestMoveMessageImportKeepsMailVisibleToIMAP proves a mail message Outlook moves
+// through ICS stays visible to IMAP, POP3 and webmail in the destination folder:
+// the move is one message changing folders (RFC 3501 sees it leave one mailbox
+// and arrive in another), so the destination lists it with its \Seen flag and
+// serves the same bytes, and the source no longer lists it.
+func TestMoveMessageImportKeepsMailVisibleToIMAP(t *testing.T) {
+	s := openSeededStore(t)
+	src := int64(mapi.PrivateFIDInbox)
+	dst := int64(mapi.PrivateFIDSentItems)
+	raw := []byte("From: a@example.test\r\nTo: b@example.test\r\nSubject: moved\r\n" +
+		"Date: Thu, 01 Jan 2026 09:00:00 +0000\r\nMessage-ID: <moved-1@example.test>\r\n\r\nBody.\r\n")
+	info, err := s.AppendMessage(src, raw, time.Unix(1767258000, 0), FlagSeen)
+	mustNoErr(t, "append", err)
+	before, err := s.GetMessageRaw(src, info.UID)
+	mustNoErr(t, "raw before the move", err)
+	dstMID := info.ID + 0x100000
+
+	_, err = s.MoveMessageImport(src, info.ID, dst, dstMID)
+	mustNoErr(t, "move message import", err)
+
+	wantEq(t, "messages left in the source", len(mustListMessages(t, s, src)), 0)
+	moved := mustListMessages(t, s, dst)
+	if len(moved) != 1 || moved[0].ID != dstMID {
+		t.Fatalf("destination lists %+v, want the moved message %d", moved, dstMID)
+	}
+	wantEq(t, "\\Seen after the move", mustMessageFlags(t, s, dst, moved[0].UID)&FlagSeen, int64(FlagSeen))
+	after, err := s.GetMessageRaw(dst, moved[0].UID)
+	mustNoErr(t, "raw after the move", err)
+	wantEq(t, "served bytes after the move", string(after), string(before))
+	wantEq(t, "recorded size", moved[0].Size, int64(len(after)))
 }

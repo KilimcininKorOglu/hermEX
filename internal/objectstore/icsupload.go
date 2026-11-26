@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"sync/atomic"
 	"time"
@@ -550,7 +551,7 @@ func (s *Store) MoveMessageImport(srcFolderID, srcMID, destFolderID, dstMID int6
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
-	if err := s.dropMovedSourceIndex(srcMID); err != nil {
+	if err := s.moveIndexEntry(srcMID, destFolderID, dstMID); err != nil {
 		return assoc != 0, err
 	}
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
@@ -609,23 +610,79 @@ func renameMovedMessage(tx *sql.Tx, srcFolderID, srcMID, destFolderID, dstMID in
 	return advanceFolderEID(tx, destFolderID, uint64(dstMID))
 }
 
-// dropMovedSourceIndex removes the IMAP index rows the moved message left
-// behind. The object store renamed and reparented the message, but the index is
-// a separate database with no cross-store cascade, so a source that was mail
-// (indexed by AppendMessage) keeps a row pointing at the now-gone source id. The
-// rows go, along with the cached eml, exactly as DeleteObject does. The
-// destination is not re-indexed: the ICS upload path indexes only mail, like
-// ImportMessageChange.
-func (s *Store) dropMovedSourceIndex(srcMID int64) error {
-	if _, err := s.idxdb.Exec(`DELETE FROM messages WHERE message_id=?`, srcMID); err != nil {
+// movedIndexEntry is what a moved mail message keeps of its IMAP index row: the
+// served size, the arrival time and the flags.
+type movedIndexEntry struct {
+	size, received                          int64
+	unsent, read, flagged, replied, deleted bool
+}
+
+// flags is the entry's flag set in the form indexMessageTx takes.
+func (e movedIndexEntry) flags() int64 {
+	var f int64
+	for _, b := range []struct {
+		on  bool
+		bit int64
+	}{{e.unsent, FlagDraft}, {e.read, FlagSeen}, {e.flagged, FlagFlagged}, {e.replied, FlagAnswered}, {e.deleted, FlagDeleted}} {
+		if b.on {
+			f |= b.bit
+		}
+	}
+	return f
+}
+
+// moveIndexEntry carries a moved mail message's IMAP index entry to its
+// destination. The object store renamed and reparented the message, but the index
+// is a separate database with no cross-store cascade, so without this the message
+// vanishes from IMAP, POP3 and webmail although it still exists. The destination
+// gets a fresh UID, as any arrival in a mailbox does (RFC 3501 2.3.1.1), with the
+// size, arrival time and flags the source had, and the cached wire form follows
+// the id. A message with no index row is not mail and stays unindexed.
+func (s *Store) moveIndexEntry(srcMID, destFolderID, dstMID int64) error {
+	var e movedIndexEntry
+	err := s.idxdb.QueryRow(
+		`SELECT size, received, unsent, read, flagged, replied, deleted FROM messages WHERE message_id=?`,
+		srcMID).Scan(&e.size, &e.received, &e.unsent, &e.read, &e.flagged, &e.replied, &e.deleted)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
 		return err
 	}
-	if _, err := s.idxdb.Exec(`DELETE FROM mapping WHERE message_id=?`, srcMID); err != nil {
+	msg, err := s.OpenMessage(dstMID)
+	if err != nil {
 		return err
 	}
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-	_ = os.Remove(s.emlPath(midString(uint64(srcMID))))
+	srcName, dstName := midString(uint64(srcMID)), midString(uint64(dstMID))
+	if err := s.reindexMoved(srcMID, destFolderID, dstMID, dstName, msg, e); err != nil {
+		return err
+	}
+	// The cache holds the bytes the recorded size counts, so it moves with the id.
+	// A missing one is regenerated on the next read.
+	if err := os.Rename(s.emlPath(srcName), s.emlPath(dstName)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
 	return nil
+}
+
+// reindexMoved replaces the source's index rows, and any a replayed move left
+// under the destination id, with one row in the destination folder.
+func (s *Store) reindexMoved(srcMID, destFolderID, dstMID int64, dstName string, msg *oxcmail.Message, e movedIndexEntry) error {
+	tx, err := s.idxdb.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, q := range []string{`DELETE FROM messages WHERE message_id IN (?, ?)`, `DELETE FROM mapping WHERE message_id IN (?, ?)`} {
+		if _, err := tx.Exec(q, srcMID, dstMID); err != nil {
+			return err
+		}
+	}
+	if _, err := s.indexMessageTx(tx, destFolderID, dstMID, dstName, msg, e.size, time.Unix(e.received, 0), e.flags()); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ReadStateChange is one entry of a RopSynchronizationImportReadStateChanges
