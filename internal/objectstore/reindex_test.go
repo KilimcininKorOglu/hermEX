@@ -33,13 +33,25 @@ func TestReindexFolder(t *testing.T) {
 	_, err := s.objdb.Exec(`DELETE FROM messages WHERE message_id=?`, infoB.ID)
 	mustNoErr(t, "drop object B", err)
 
+	// C: the same orphan state in another folder, which a reindex of the Inbox
+	// does not own and must leave alone.
+	infoC := mustAppendMessage(t, s, mapi.PrivateFIDSentItems, rawB, time.Unix(1700000000, 0), 0)
+	_, err = s.objdb.Exec(`DELETE FROM messages WHERE message_id=?`, infoC.ID)
+	mustNoErr(t, "drop object C", err)
+
 	mustNoErr(t, "reindex folder", s.ReindexFolder(mapi.PrivateFIDInbox))
 
 	// A is now indexed; B is pruned.
 	foundA := indexedAfterReindex(t, s, eidA, infoB.ID)
-	if foundA.UID == 0 || foundA.Size == 0 {
-		t.Errorf("A indexed with uid=%d size=%d, want both nonzero", foundA.UID, foundA.Size)
+	if foundA.Size == 0 {
+		t.Errorf("A indexed with size 0")
 	}
+	// UIDs are never reused within a UIDVALIDITY (RFC 3501 2.3.1.1): A takes a UID
+	// above B's, even though B's row is gone.
+	if foundA.UID <= infoB.UID {
+		t.Errorf("A indexed with uid %d, want above the pruned B's %d", foundA.UID, infoB.UID)
+	}
+	wantEq(t, "Sent Items index rows after an Inbox reindex", idxCount(t, s, infoC.ID), 1)
 
 	// A's eml was generated and its index size matches the served bytes.
 	emlA, err := os.ReadFile(s.emlPath(midString(uint64(eidA))))

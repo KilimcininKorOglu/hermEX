@@ -85,4 +85,8 @@ func TestReindexMessageRefusesAnUnindexedObject(t *testing.T) {
 	if _, err := s.ReindexMessage(id); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
+	wantEq(t, "index rows for the calendar item after the refusal", idxCount(t, s, id), 0)
+	if _, err := s.ReindexMessage(1 << 40); !errors.Is(err, ErrNotFound) {
+		t.Errorf("reindex of a missing id: err = %v, want ErrNotFound", err)
+	}
 }
