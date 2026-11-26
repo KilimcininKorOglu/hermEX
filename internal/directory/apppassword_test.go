@@ -273,11 +273,24 @@ func TestTheCredentialListIsBounded(t *testing.T) {
 // all of them insert.
 func TestConcurrentMintsStayWithinTheCap(t *testing.T) {
 	d := twoAccounts(t)
-	for i := range MaxAppPasswords - 1 {
-		if _, err := d.CreateAppPassword("u@acme.test", "client"); err != nil {
-			t.Fatalf("mint %d: %v", i, err)
+	// One race rarely interleaves; many rounds make an unlocked count fail every run.
+	for round := range 20 {
+		if _, err := d.db.Exec(`DELETE FROM app_passwords`); err != nil {
+			t.Fatal(err)
 		}
+		for i := range MaxAppPasswords - 1 {
+			if _, err := d.CreateAppPassword("u@acme.test", "client"); err != nil {
+				t.Fatalf("round %d mint %d: %v", round, i, err)
+			}
+		}
+		raceMintsAtTheCap(t, d)
 	}
+}
+
+// raceMintsAtTheCap starts many mints at once against an account one short of
+// the cap and requires exactly one to succeed.
+func raceMintsAtTheCap(t *testing.T, d *SQLDirectory) {
+	t.Helper()
 	const racers = 50
 	errs := make(chan error, racers)
 	var start sync.WaitGroup
