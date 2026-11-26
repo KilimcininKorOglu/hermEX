@@ -55,8 +55,23 @@ func TestLogSpillLimitIsItsOwnSetting(t *testing.T) {
 	if err := d.SetLogSpillLimitMB(-1); err == nil {
 		t.Error("a negative cap was accepted")
 	}
+	wantSpillLimit(t, d, 200, "the cap after a refused negative save")
 	mustNoErr(t, "save no cap", d.SetLogSpillLimitMB(0))
 	wantSpillLimit(t, d, 0, "the cap after saving 0 (no cap)")
+}
+
+// TestLogSpillLimitSurvivesARetentionSave saves the cap first, on an empty
+// table, so the retention save is the one that meets an existing row: it must
+// update the window and leave the cap as saved.
+func TestLogSpillLimitSurvivesARetentionSave(t *testing.T) {
+	d := setupLogSettings(t)
+	mustNoErr(t, "save the cap", d.SetLogSpillLimitMB(64))
+	mustNoErr(t, "save the retention", d.SetLogRetentionDays(14))
+	wantSpillLimit(t, d, 64, "the cap after saving the retention")
+	days, found, err := d.GetLogRetentionDays()
+	mustNoErr(t, "read the retention", err)
+	wantEq(t, "the retention row exists", found, true)
+	wantEq(t, "the saved retention", days, 14)
 }
 
 // wantSpillLimit reads the spill cap and checks it.
