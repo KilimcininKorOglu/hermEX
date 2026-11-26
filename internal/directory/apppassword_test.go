@@ -3,6 +3,7 @@ package directory
 import (
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"hermex/internal/totp"
@@ -264,6 +265,47 @@ func TestTheCredentialListIsBounded(t *testing.T) {
 	}
 	if len(list) != MaxAppPasswords {
 		t.Errorf("credentials after the refused mint = %d, want %d", len(list), MaxAppPasswords)
+	}
+}
+
+// TestConcurrentMintsStayWithinTheCap races mints at an account one short of the
+// cap. The count and the insert must be one step, or every racer reads 19 and
+// all of them insert.
+func TestConcurrentMintsStayWithinTheCap(t *testing.T) {
+	d := twoAccounts(t)
+	for i := range MaxAppPasswords - 1 {
+		if _, err := d.CreateAppPassword("u@acme.test", "client"); err != nil {
+			t.Fatalf("mint %d: %v", i, err)
+		}
+	}
+	const racers = 50
+	errs := make(chan error, racers)
+	var start sync.WaitGroup
+	start.Add(1)
+	for range racers {
+		go func() {
+			start.Wait()
+			_, err := d.CreateAppPassword("u@acme.test", "racer")
+			errs <- err
+		}()
+	}
+	start.Done()
+	minted := 0
+	for range racers {
+		err := <-errs
+		switch {
+		case err == nil:
+			minted++
+		case !errors.Is(err, ErrTooManyAppPasswords):
+			t.Errorf("a racing mint failed with %v", err)
+		}
+	}
+	list, err := d.ListAppPasswords("u@acme.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if minted != 1 || len(list) != MaxAppPasswords {
+		t.Errorf("racing mints: %d succeeded, %d stored; want 1 and %d", minted, len(list), MaxAppPasswords)
 	}
 }
 

@@ -72,24 +72,43 @@ func (d *SQLDirectory) CreateAppPassword(user, name string) (string, error) {
 	if len(name) > 64 {
 		name = name[:64]
 	}
-	var n int
-	if err := d.db.QueryRow(`SELECT COUNT(*) FROM app_passwords WHERE user_id = ?`, id).Scan(&n); err != nil {
-		return "", err
-	}
-	if n >= MaxAppPasswords {
-		return "", ErrTooManyAppPasswords
-	}
 	b := make([]byte, appSecretBytes)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
 	secret := appEncoding.EncodeToString(b)
-	if _, err := d.db.Exec(
-		`INSERT INTO app_passwords (user_id, name, secret_hash, created_at, last_used_at) VALUES (?, ?, ?, ?, 0)`,
-		id, name, hashAppSecret(secret), time.Now().Unix()); err != nil {
+	if err := d.insertAppPassword(id, name, hashAppSecret(secret)); err != nil {
 		return "", err
 	}
 	return secret, nil
+}
+
+// insertAppPassword stores one credential unless the account already holds
+// MaxAppPasswords. The account row is locked for the count and the insert, so
+// concurrent mints cannot all read a count under the cap and all insert.
+func (d *SQLDirectory) insertAppPassword(userID int64, name, hash string) error {
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var locked int64
+	if err := tx.QueryRow(`SELECT id FROM users WHERE id = ? FOR UPDATE`, userID).Scan(&locked); err != nil {
+		return err
+	}
+	var n int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM app_passwords WHERE user_id = ?`, userID).Scan(&n); err != nil {
+		return err
+	}
+	if n >= MaxAppPasswords {
+		return ErrTooManyAppPasswords
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO app_passwords (user_id, name, secret_hash, created_at, last_used_at) VALUES (?, ?, ?, ?, 0)`,
+		userID, name, hash, time.Now().Unix()); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ListAppPasswords returns the account's credentials, newest first, without
