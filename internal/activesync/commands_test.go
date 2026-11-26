@@ -176,14 +176,16 @@ func TestProvisionRemoteWipe(t *testing.T) {
 	if root.Child(wbxml.PVRemoteWipe) == nil {
 		t.Error("Provision response missing the RemoteWipe directive")
 	}
-	st, _ = objectstore.Open(dir)
+	st, err = objectstore.Open(dir)
+	mustNoErr(t, "reopen the store after the delivery", err)
 	wantDeviceWipe(t, st, "after the delivery", "dev1", WipeStatusRequested)
 	st.Close()
 
 	ack := wbxml.Elem(wbxml.PVProvision,
 		wbxml.Elem(wbxml.PVRemoteWipe, wbxml.Str(wbxml.PVStatus, "1")))
 	postCommand(t, ts, "Provision", ack)
-	st, _ = objectstore.Open(dir)
+	st, err = objectstore.Open(dir)
+	mustNoErr(t, "reopen the store after the acknowledgement", err)
 	wantDeviceWipe(t, st, "after the acknowledgement", "dev1", WipeStatusWiped)
 	st.Close()
 
@@ -226,7 +228,9 @@ func TestFolderSyncPrime(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if raw, _ := st.GetActiveSyncState(); raw == "" {
+	raw, err := st.GetActiveSyncState()
+	mustNoErr(t, "read the ActiveSync state", err)
+	if raw == "" {
 		t.Error("FolderSync prime did not persist the ActiveSync state")
 	}
 }

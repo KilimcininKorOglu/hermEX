@@ -63,7 +63,8 @@ func TestFolderUpdateReparent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pid, _ := strconv.ParseInt(parentID, 10, 64)
+	pid, err := strconv.ParseInt(parentID, 10, 64)
+	mustNoErr(t, "parse the parent id", err)
 	// the child now resolves under the new parent, not at the root
 	_, exists, err := st.FolderByName(&pid, "Child")
 	mustNoErr(t, "look up the child under its new parent", err)

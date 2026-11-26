@@ -110,8 +110,10 @@ func TestPingRefusesAMalformedHeartbeat(t *testing.T) {
 		wantEq(t, "the status for heartbeat "+hb, s, "5")
 		wantEq(t, "the bound for heartbeat "+hb, got, longest)
 	}
-	lo, _ := strconv.Atoi(shortest)
-	hi, _ := strconv.Atoi(longest)
+	lo, err := strconv.Atoi(shortest)
+	mustNoErr(t, "parse the shortest heartbeat", err)
+	hi, err := strconv.Atoi(longest)
+	mustNoErr(t, "parse the longest heartbeat", err)
 	if lo <= 0 || lo >= hi {
 		t.Errorf("shortest %q and longest %q are not an allowed range", shortest, longest)
 	}
@@ -137,7 +139,8 @@ func postEmptyPing(t *testing.T, ts *httptest.Server) *wbxml.Node {
 	resp, err := http.DefaultClient.Do(req)
 	mustNoErr(t, "send the empty Ping", err)
 	defer resp.Body.Close()
-	out, _ := io.ReadAll(resp.Body)
+	out, err := io.ReadAll(resp.Body)
+	mustNoErr(t, "read the empty Ping reply", err)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("empty Ping status %d: %s", resp.StatusCode, out)
 	}

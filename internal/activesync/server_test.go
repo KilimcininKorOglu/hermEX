@@ -66,7 +66,8 @@ func do(t *testing.T, ts *httptest.Server, method, path, body string, auth bool)
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	out, _ := io.ReadAll(resp.Body)
+	out, err := io.ReadAll(resp.Body)
+	mustNoErr(t, "read the reply", err)
 	return resp, string(out)
 }
 
@@ -231,7 +232,8 @@ func TestBase64GUIDDeviceIDsKeepTheirOwnState(t *testing.T) {
 		resp, err := http.DefaultClient.Do(req)
 		mustNoErr(t, "send the request", err)
 		defer resp.Body.Close()
-		out, _ := io.ReadAll(resp.Body)
+		out, err := io.ReadAll(resp.Body)
+		mustNoErr(t, "read the reply", err)
 		root, err := wbxml.Unmarshal(out)
 		mustNoErr(t, "decode the reply", err)
 		return root.ChildText(wbxml.FHStatus)

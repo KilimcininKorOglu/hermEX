@@ -58,7 +58,8 @@ func postRaw(t *testing.T, ts *httptest.Server, cmd string, body []byte) (*http.
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	out, _ := io.ReadAll(resp.Body)
+	out, err := io.ReadAll(resp.Body)
+	mustNoErr(t, "read the reply", err)
 	return resp, out
 }
 

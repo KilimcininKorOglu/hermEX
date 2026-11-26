@@ -44,7 +44,8 @@ func TestFolderDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	fid, _ := strconv.ParseInt(newID, 10, 64)
+	fid, err := strconv.ParseInt(newID, 10, 64)
+	mustNoErr(t, "parse the folder id", err)
 	// A failed lookup reports no folder, which would pass as a deletion.
 	ok, err := st.FolderExists(fid)
 	mustNoErr(t, "look up the deleted folder", err)
@@ -136,7 +137,9 @@ func wantFolderPresent(t *testing.T, dir, serverID string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ok, _ := st.FolderExists(fid); !ok {
+	ok, err := st.FolderExists(fid)
+	mustNoErr(t, "look the folder up", err)
+	if !ok {
 		t.Errorf("folder %s was deleted by a refused FolderDelete", serverID)
 	}
 }

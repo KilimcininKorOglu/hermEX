@@ -74,11 +74,16 @@ func TestFolderCreate(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	fid, _ := strconv.ParseInt(newID, 10, 64)
-	if ok, _ := st.FolderExists(fid); !ok {
+	fid, err := strconv.ParseInt(newID, 10, 64)
+	mustNoErr(t, "parse the new folder id", err)
+	ok, err := st.FolderExists(fid)
+	mustNoErr(t, "look the folder up", err)
+	if !ok {
 		t.Errorf("created folder %s not found in store", newID)
 	}
-	if _, exists, _ := st.FolderByName(nil, "Projects"); !exists {
+	_, exists, err := st.FolderByName(nil, "Projects")
+	mustNoErr(t, "look the folder up by name", err)
+	if !exists {
 		t.Error("created folder not found by name at the mailbox root")
 	}
 	if !folderSyncHasAdd(t, ts, newID) {
@@ -121,7 +126,8 @@ func TestFolderCreateMakesTheKindAsked(t *testing.T) {
 			t.Fatalf("Type %s: Status = %q, want 1", c.typ, s)
 		}
 		id := root.ChildText(wbxml.FHServerID)
-		fid, _ := strconv.ParseInt(id, 10, 64)
+		fid, err := strconv.ParseInt(id, 10, 64)
+		mustNoErr(t, "parse the folder id", err)
 		st, err := objectstore.Open(dir)
 		mustNoErr(t, "open the store", err)
 		cls, err := folderClass(st, fid)
@@ -156,7 +162,8 @@ func TestSyncServesAUserTaskFolder(t *testing.T) {
 	if addResp == nil || addResp.ChildText(wbxml.ASStatus) != "1" {
 		t.Fatalf("no successful Add response for the task: %+v", addResp)
 	}
-	mid, _ := strconv.ParseInt(addResp.ChildText(wbxml.ASServerID), 10, 64)
+	mid, err := strconv.ParseInt(addResp.ChildText(wbxml.ASServerID), 10, 64)
+	mustNoErr(t, "parse the task id", err)
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
 	defer st.Close()

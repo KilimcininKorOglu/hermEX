@@ -102,7 +102,8 @@ func postVersioned(t *testing.T, ts *httptest.Server, version, cmd string, root 
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	out, _ := io.ReadAll(resp.Body)
+	out, err := io.ReadAll(resp.Body)
+	mustNoErr(t, "read the reply", err)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("%s status %d: %s", cmd, resp.StatusCode, out)
 	}

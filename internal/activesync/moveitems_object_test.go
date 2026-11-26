@@ -94,7 +94,8 @@ func TestMoveItemsMovesACalendarItem(t *testing.T) {
 	wantEq(t, "Status", status, "3")
 	dstID, err := strconv.ParseInt(dst, 10, 64)
 	mustNoErr(t, "parse DstMsgId", err)
-	teamID, _ := strconv.ParseInt(team, 10, 64)
+	teamID, err := strconv.ParseInt(team, 10, 64)
+	mustNoErr(t, "parse the team folder id", err)
 	wantEq(t, "the folder holding the DstMsgId", liveFolderOf(t, dir, dstID), teamID)
 }
 
