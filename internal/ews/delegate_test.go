@@ -421,11 +421,15 @@ func TestRemoveDelegateDropsListKeepsGrants(t *testing.T) {
 // TestRemoveDelegateNotFound confirms removing a non-member reports ErrorDelegateNotFound.
 func TestRemoveDelegateNotFound(t *testing.T) {
 	ts, paths := delegateServer(t)
-	_ = paths
+	setDelegateList(t, paths[testUser], []string{"del@hermex.test"})
 
 	_, out := soapPost(t, ts, removeDelegateReq(testUser, "nobody@hermex.test"), true)
 	if !strings.Contains(out, "ErrorDelegateNotFound") {
 		t.Errorf("removing a non-member must report ErrorDelegateNotFound:\n%s", out)
+	}
+	// The refused removal must leave the existing delegate list as it was.
+	if got := delegateListOf(t, paths[testUser]); len(got) != 1 || !containsFold(got, "del@hermex.test") {
+		t.Errorf("delegate list after the refused removal = %v, want [del@hermex.test]", got)
 	}
 }
 
