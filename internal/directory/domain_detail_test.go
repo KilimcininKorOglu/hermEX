@@ -86,7 +86,10 @@ func TestUpdateDomainRefusesAnUnknownStatusOrLimit(t *testing.T) {
 	d, _ := freshDirectory(t)
 	root := t.TempDir()
 	id := mustCreateDomain(t, d, root, "acme.test")
-	for _, u := range []DomainUpdate{{Status: 2}, {Status: -1}, {MaxUser: -1}} {
+	ok, err := d.UpdateDomain(id, DomainUpdate{MaxUser: 5, Title: "Acme"})
+	mustNoErr(t, "set the starting row", err)
+	wantEq(t, "UpdateDomain found the domain", ok, true)
+	for _, u := range []DomainUpdate{{Status: 2, Title: "x"}, {Status: -1, Title: "x"}, {MaxUser: -1, Title: "x"}} {
 		if _, err := d.UpdateDomain(id, u); err == nil {
 			t.Errorf("UpdateDomain accepted %+v", u)
 		}
@@ -94,6 +97,9 @@ func TestUpdateDomainRefusesAnUnknownStatusOrLimit(t *testing.T) {
 	local, err := d.IsLocalDomain("acme.test")
 	mustNoErr(t, "is local domain", err)
 	wantEq(t, "the domain still serves after refused writes", local, true)
+	dd := mustGetDomain(t, d, id)
+	wantEq(t, "max user after refused writes", dd.MaxUser, int64(5))
+	wantEq(t, "title after refused writes", dd.Title, "Acme")
 }
 
 // setDomainStatus writes a domain's status through the admin path.
@@ -138,6 +144,10 @@ func TestCreateUserMaxUser(t *testing.T) {
 	mustCreateUser(t, d, root, "u2@acme.test", "password1")
 	_, err := d.CreateUser("u3@acme.test", "password1", filepath.Join(root, "u3"))
 	wantErr(t, "a create over the cap succeeded", err)
+	var rows int
+	mustNoErr(t, "count the refused account",
+		d.db.QueryRow(`SELECT COUNT(*) FROM users WHERE username = ?`, "u3@acme.test").Scan(&rows))
+	wantEq(t, "rows for the refused account", rows, 0)
 
 	// Clearing the cap reopens creation.
 	setMaxUser(0)
