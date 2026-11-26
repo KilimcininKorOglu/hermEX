@@ -28,6 +28,12 @@ func TestHideMaskFromProps(t *testing.T) {
 		{"both absent", nsNull(), nsNull(), 0},
 		{"empty mask falls back to boolean", ns(""), ns("1"), 0x03},
 		{"unparsable mask, no boolean", ns("abc"), nsNull(), 0},
+		{"padded mask is trimmed", ns(" 3 "), nsNull(), 0x03},
+		// A mask that is not a PtLong must not unhide a user the boolean hides.
+		{"unparsable mask falls back to boolean", ns("abc"), ns("1"), 0x03},
+		{"negative mask falls back to boolean", ns("-1"), ns("1"), 0x03},
+		{"mask over 32 bits falls back to boolean", ns("0x100000000"), ns("1"), 0x03},
+		{"largest PtLong mask", ns("0xFFFFFFFF"), nsNull(), 0xFFFFFFFF},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
