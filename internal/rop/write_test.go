@@ -341,17 +341,17 @@ func TestSubmitOverwritesForgedRepresenting(t *testing.T) {
 	msgH := h[1]
 
 	// The client forges the representing address to a co-worker before submitting.
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+	ropOK(t, dispatchOn(sess, buildSetProperties(0, mapi.PropertyValues{
 		{Tag: mapi.PrSubject, Value: "FORGED"},
 		{Tag: mapi.PrBody, Value: "spoof attempt"},
 		{Tag: mapi.PrSentRepresentingSmtpAddress, Value: "victim@hermex.test"},
 		{Tag: mapi.PrSentRepresentingEmailAddress, Value: "victim@hermex.test"},
 		{Tag: mapi.PrSentRepresentingAddrType, Value: "SMTP"},
-	}), []uint32{msgH})
+	}), msgH), ropSetProperties, "SetProperties(representing)")
 
 	toRow := buildSMTPRecipientRow(0, mapi.RecipTo, "alice@hermex.test", "Alice")
-	sess.Dispatch(buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), []uint32{msgH})
-	sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
+	ropOK(t, dispatchOn(sess, buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), msgH), ropModifyRecipients, "ModifyRecipients")
+	saveChangesEID(t, dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, msgH))
 
 	sub, _ := sess.Dispatch(buildSubmitMessage(0), []uint32{msgH})
 	p := ext.NewPull(sub, ext.FlagUTF16)
@@ -440,16 +440,16 @@ func submitFromShared(t *testing.T, grant func(*objectstore.Store) error) (raw [
 	logonH := h[0]
 	_, h = sess.Dispatch(buildCreateMessage(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))), []uint32{logonH, 0xFFFFFFFF})
 	msgH := h[1]
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+	ropOK(t, dispatchOn(sess, buildSetProperties(0, mapi.PropertyValues{
 		{Tag: mapi.PrSubject, Value: "From the team"},
 		{Tag: mapi.PrBody, Value: "hello"},
 		{Tag: mapi.PrSentRepresentingSmtpAddress, Value: "shared@hermex.test"},
 		{Tag: mapi.PrSentRepresentingEmailAddress, Value: "shared@hermex.test"},
 		{Tag: mapi.PrSentRepresentingAddrType, Value: "SMTP"},
-	}), []uint32{msgH})
+	}), msgH), ropSetProperties, "SetProperties(representing)")
 	toRow := buildSMTPRecipientRow(0, mapi.RecipTo, "alice@hermex.test", "Alice")
-	sess.Dispatch(buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), []uint32{msgH})
-	sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
+	ropOK(t, dispatchOn(sess, buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), msgH), ropModifyRecipients, "ModifyRecipients")
+	saveChangesEID(t, dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, msgH))
 	sub, _ := sess.Dispatch(buildSubmitMessage(0), []uint32{msgH})
 	p := ext.NewPull(sub, ext.FlagUTF16)
 	mustU8(t, p, "RopId")
