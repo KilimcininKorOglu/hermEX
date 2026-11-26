@@ -2,9 +2,11 @@ package webmail2api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -324,24 +326,22 @@ func (s *Server) handlePutAppearanceSettings(w http.ResponseWriter, r *http.Requ
 // setOnboardedFlag records that the caller finished first-run onboarding. It
 // leaves the blob alone when it could not be read, because writing back what was
 // assembled from an unreadable one replaces the user's settings.
-func setOnboardedFlag(mailbox string, done bool) {
+func (s *Server) setOnboardedFlag(mailbox string, done bool) error {
 	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
-		return
+		return err
 	}
 	defer st.Close()
+	// The same per-mailbox lock as withSettings, so a concurrent settings PUT
+	// cannot read the blob before this write and then save over it.
+	unlock := s.lockSettings(mailbox)
+	defer unlock()
 	m, loaded := settingsForWrite(st)
 	if !loaded {
-		return
+		return errors.New("webmail settings could not be read")
 	}
-	b, err := json.Marshal(done)
-	if err != nil {
-		return
-	}
-	m["onboarded"] = b
-	if err := saveSharedSettings(st, m); err != nil {
-		st.LogSwallowedError("settings.onboarded", err)
-	}
+	m["onboarded"] = json.RawMessage(strconv.FormatBool(done))
+	return saveSharedSettings(st, m)
 }
 
 // mustJSON marshals v, returning nil on error (the input is a controlled struct).
@@ -891,52 +891,78 @@ func (s *Server) handlePutProfile(w http.ResponseWriter, r *http.Request) {
 			props[uint32(f.tag)] = *f.value
 		}
 	}
-	s.writeUserProperties(c.Email, props)
-	s.writeUserLocale(c.Email, prof.Timezone, prof.Locale)
-	// The onboarded flag lives in the shared webmail settings blob (per-mailbox
-	// store), set true when the user finishes the first-run onboarding step.
-	if prof.Onboarded != nil {
-		setOnboardedFlag(c.Mailbox, *prof.Onboarded)
+	if err := s.writeProfile(c, props, prof.Timezone, prof.Locale, prof.Onboarded); err != nil {
+		logError("profile-save", err, nil)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save profile"})
+		return
 	}
 	// Return the re-read profile so the SPA reflects the persisted directory state.
 	s.handleGetProfile(w, r)
 }
 
+// writeProfile stores the three field families of a profile change, each in its
+// own store, stopping at the first that fails.
+func (s *Server) writeProfile(c sessionClaims, props map[uint32]string, timezone, locale *string, onboarded *bool) error {
+	if err := s.writeUserProperties(c.Email, props); err != nil {
+		return err
+	}
+	if err := s.writeUserLocale(c.Email, timezone, locale); err != nil {
+		return err
+	}
+	// The onboarded flag lives in the shared webmail settings blob (per-mailbox
+	// store), set true when the user finishes the first-run onboarding step.
+	if onboarded != nil {
+		return s.setOnboardedFlag(c.Mailbox, *onboarded)
+	}
+	return nil
+}
+
 // writeUserProperties persists the directory-backed profile fields the request
 // carried, when the directory supports writing them at all.
-func (s *Server) writeUserProperties(email string, props map[uint32]string) {
+func (s *Server) writeUserProperties(email string, props map[uint32]string) error {
 	if len(props) == 0 {
-		return
+		return nil
 	}
 	setter, ok := s.auth.(interface {
 		SetUserProperties(string, map[uint32]string) (bool, error)
 	})
 	if !ok {
-		return
+		return nil
 	}
-	_, _ = setter.SetUserProperties(email, props)
+	_, err := setter.SetUserProperties(email, props)
+	return err
 }
 
 // writeUserLocale persists timezone and locale to the directory
 // (users.timezone / users.lang) so they survive a reload and are available
 // cross-protocol. The pair is read-merge-written: an absent field keeps its
 // current value rather than clearing it.
-func (s *Server) writeUserLocale(email string, timezone, locale *string) {
+func (s *Server) writeUserLocale(email string, timezone, locale *string) error {
 	if timezone == nil && locale == nil {
-		return
+		return nil
 	}
 	wr, ok := s.auth.(userLocaleWriter)
 	if !ok {
-		return
+		return nil
 	}
-	tz, loc := s.userLocale(email)
+	// The merge needs the stored pair: writing back a field that could not be read
+	// would clear it.
+	var tz, loc string
+	if rd, ok := s.auth.(userLocaleReader); ok {
+		u, _, err := rd.GetUser(email)
+		if err != nil {
+			return err
+		}
+		tz, loc = u.Timezone, u.Lang
+	}
 	if timezone != nil {
 		tz = *timezone
 	}
 	if locale != nil {
 		loc = *locale
 	}
-	_, _ = wr.SetUserLocale(email, tz, loc)
+	_, err := wr.SetUserLocale(email, tz, loc)
+	return err
 }
 
 // ---- Mailboxes ----
