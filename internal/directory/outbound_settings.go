@@ -34,6 +34,9 @@ func (d *SQLDirectory) GetOutboundSettings() (OutboundSettings, bool, error) {
 // SetOutboundSettings persists the outbound-abuse settings, upserting the single row
 // so the MTA's poll observes the change and applies it without a restart.
 func (d *SQLDirectory) SetOutboundSettings(s OutboundSettings) error {
+	if s.RecipientCap < 1 || s.WindowSeconds < 1 {
+		return errors.New("directory: the outbound recipient cap and window must be at least 1")
+	}
 	_, err := d.db.Exec(
 		`INSERT INTO outbound_settings (id, enabled, recipient_cap, window_seconds, updated_at)
 		 VALUES (1, ?, ?, ?, ?)

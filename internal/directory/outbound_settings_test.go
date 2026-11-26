@@ -39,6 +39,27 @@ func TestOutboundSettingsRoundTrip(t *testing.T) {
 	}
 }
 
+// TestOutboundSettingsRefuseANonPositiveLimit proves a cap or window below 1 is
+// refused and the stored row is kept: a zero window counts nothing and a zero or
+// negative cap blocks or disables the limit, whichever reader comes first.
+func TestOutboundSettingsRefuseANonPositiveLimit(t *testing.T) {
+	d := setupOutboundSettings(t)
+	want := OutboundSettings{Enabled: true, RecipientCap: 250, WindowSeconds: 1800}
+	mustNoErr(t, "save the starting settings", d.SetOutboundSettings(want))
+	for _, bad := range []OutboundSettings{
+		{Enabled: true, RecipientCap: 0, WindowSeconds: 1800},
+		{Enabled: true, RecipientCap: -1, WindowSeconds: 1800},
+		{Enabled: true, RecipientCap: 250, WindowSeconds: 0},
+		{Enabled: true, RecipientCap: 250, WindowSeconds: -60},
+	} {
+		wantErr(t, "SetOutboundSettings accepted a non-positive limit", d.SetOutboundSettings(bad))
+		got, found, err := d.GetOutboundSettings()
+		mustNoErr(t, "read the settings after a refusal", err)
+		wantEq(t, "settings found after a refusal", found, true)
+		wantEq(t, "settings after a refusal", got, want)
+	}
+}
+
 // TestOutboundSettingsUpsert proves a second save replaces the single row rather than
 // inserting a second.
 func TestOutboundSettingsUpsert(t *testing.T) {
