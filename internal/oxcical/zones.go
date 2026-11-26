@@ -34,17 +34,40 @@ type ZoneLosses struct {
 	ids   map[string]bool
 }
 
+// A zone id is written by the sender and goes to the shared log, so the summary
+// keeps a bounded number of ids of bounded length, and never an address. No
+// IANA or Windows zone name comes near either bound.
+const (
+	maxLoggedZoneIDLen = 64
+	maxLoggedZoneIDs   = 16
+	// AddressZoneID replaces a zone id that carries a mail address.
+	AddressZoneID = "(address)"
+)
+
 // Add records one reported time.
 func (z *ZoneLosses) Add(n ZoneNote) {
 	if z.ids == nil {
 		z.ids = map[string]bool{}
 	}
-	id := n.TZID
-	if id == "" {
-		id = FloatingZoneID
+	z.times++
+	id := loggableZoneID(n.TZID)
+	if len(z.ids) >= maxLoggedZoneIDs && !z.ids[id] {
+		return
 	}
 	z.ids[id] = true
-	z.times++
+}
+
+// loggableZoneID is the form of a sender's zone id that may be logged.
+func loggableZoneID(id string) string {
+	switch {
+	case id == "":
+		return FloatingZoneID
+	case strings.Contains(id, "@"):
+		return AddressZoneID
+	case len(id) > maxLoggedZoneIDLen:
+		return strings.ToValidUTF8(id[:maxLoggedZoneIDLen], "")
+	}
+	return id
 }
 
 // Times is how many date-times were read as UTC without a zone, and is zero when

@@ -112,6 +112,24 @@ func TestDeliveredInviteLogsAnUnresolvableZone(t *testing.T) {
 	wantNoAddresses(t, e.Fields)
 }
 
+// TestDeliveredInviteBoundsASenderZoneID proves a TZID the sender wrote reaches
+// the shared log neither as an address nor at the length the sender chose.
+func TestDeliveredInviteBoundsASenderZoneID(t *testing.T) {
+	for _, tzid := range []string{"alice@hermex.test", strings.Repeat("Z", 10000)} {
+		_, _, sink := deliverInvite(t, inviteWithZone(";TZID="+tzid))
+		e, ok := sink.find("calendar.zone_unresolved")
+		if !ok {
+			t.Fatalf("TZID %.20q: no zone_unresolved event", tzid)
+		}
+		zones, _ := e.Fields["zones"].([]string)
+		for _, z := range zones {
+			if strings.Contains(z, "@") || len(z) > 64 {
+				t.Errorf("logged zone %.80q (%d bytes), want no address and at most 64 bytes", z, len(z))
+			}
+		}
+	}
+}
+
 // wantNoAddresses fails when a logged field carries a mail address. Every event
 // here goes to the shared log sink any operator with panel access can browse, so
 // the participants of a meeting must not travel with it.

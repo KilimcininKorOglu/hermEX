@@ -354,3 +354,20 @@ func TestParseUTCOffset(t *testing.T) {
 		}
 	}
 }
+
+// TestZoneLossesBoundsWhatTheSenderWrote proves a calendar carrying many distinct
+// unresolvable TZIDs logs at most maxLoggedZoneIDs of them, while every lost time
+// is still counted.
+func TestZoneLossesBoundsWhatTheSenderWrote(t *testing.T) {
+	var z ZoneLosses
+	const sent = 1000
+	for i := range sent {
+		z.Add(ZoneNote{Property: "DTSTART", TZID: fmt.Sprintf("Fake/Zone%04d", i)})
+	}
+	if got := len(z.ZoneIDs()); got != maxLoggedZoneIDs {
+		t.Errorf("logged %d zone ids, want %d", got, maxLoggedZoneIDs)
+	}
+	if z.Times() != sent {
+		t.Errorf("times = %d, want %d", z.Times(), sent)
+	}
+}
