@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net"
 	"strings"
 	"time"
 )
@@ -111,7 +110,7 @@ func validateGateway(g SMTPGateway) error {
 	if g.Enabled && g.Host == "" {
 		return errors.New("directory: an enabled gateway needs a host")
 	}
-	if g.Host != "" && net.ParseIP(g.Host) == nil && ValidateDomain(g.Host) != nil {
+	if g.Host != "" && !validHost(g.Host) {
 		return fmt.Errorf("directory: gateway host %q is neither a host name nor an IP address", g.Host)
 	}
 	return nil

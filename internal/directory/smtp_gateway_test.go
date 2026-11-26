@@ -213,6 +213,8 @@ func TestGatewayRefusalKeepsTheStoredOne(t *testing.T) {
 		"negative port":       func(g *SMTPGateway) { g.Port = -25 },
 		"host with a newline": func(g *SMTPGateway) { g.Host = "smtp.example\r\nMAIL FROM:<x@evil.example>" },
 		"host with a port":    func(g *SMTPGateway) { g.Host = "smtp.example:25" },
+		"label with a hyphen": func(g *SMTPGateway) { g.Host = "-smtp.example" },
+		"label with _":        func(g *SMTPGateway) { g.Host = "smtp_relay.example" },
 	} {
 		g := aGateway()
 		g.Host = "changed.example"
