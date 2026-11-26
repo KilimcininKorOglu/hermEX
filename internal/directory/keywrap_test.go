@@ -160,8 +160,22 @@ func TestWrappedRowNeedsTheSecret(t *testing.T) {
 	}
 
 	d.SetKeySecret(nil)
-	if got, _, err := d.unwrapKey(wrapDKIM, sealed); err == nil {
-		t.Errorf("unwrap without a secret returned %q, want an error", got)
+	if got, _, err := d.unwrapKey(wrapDKIM, sealed); err == nil || got != "" {
+		t.Errorf("unwrap without a secret = (%q, %v), want nothing and an error", got, err)
+	}
+}
+
+// TestWrapRefusesAMalformedValue proves a stored value carrying the wrap prefix
+// but no openable body is an error with nothing returned: not base64, and shorter
+// than the nonce. Read as plaintext, either would reach a signer as a "key".
+func TestWrapRefusesAMalformedValue(t *testing.T) {
+	d := &SQLDirectory{}
+	d.SetKeySecret([]byte("a-long-operator-secret"))
+	for _, stored := range []string{wrapPrefix + "!!not base64!!", wrapPrefix + "AAAA", wrapPrefix} {
+		got, wrapped, err := d.unwrapKey(wrapDKIM, stored)
+		if err == nil || got != "" || !wrapped {
+			t.Errorf("unwrapKey(%q) = (%q, wrapped %v, %v), want nothing, wrapped and an error", stored, got, wrapped, err)
+		}
 	}
 }
 
