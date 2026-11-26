@@ -71,19 +71,33 @@ func TestCatchAllIsPerDomain(t *testing.T) {
 // tenant's mailbox.
 func TestCatchAllRefusesAnAccountInAnotherDomain(t *testing.T) {
 	d := catchAllDir(t)
+	mustSetCatchAll(t, d, "hermex.test", "alice@hermex.test")
 
 	if err := d.SetDomainCatchAll("hermex.test", "bob@other.test"); err == nil {
 		t.Error("a catch-all in another domain must be refused")
 	}
+	wantCatchAll(t, d, "hermex.test", "alice@hermex.test")
 }
 
 // TestCatchAllRefusesAnUnknownAccount proves a typo is reported rather than stored.
 func TestCatchAllRefusesAnUnknownAccount(t *testing.T) {
 	d := catchAllDir(t)
+	mustSetCatchAll(t, d, "hermex.test", "alice@hermex.test")
 
 	if err := d.SetDomainCatchAll("hermex.test", "ghost@hermex.test"); err == nil {
 		t.Error("an unknown account must be refused as a catch-all")
 	}
+	wantCatchAll(t, d, "hermex.test", "alice@hermex.test")
+}
+
+// wantCatchAll requires a domain's stored catch-all to still be want after a
+// refused change.
+func wantCatchAll(t *testing.T, d *SQLDirectory, domain, want string) {
+	t.Helper()
+	got, found, err := d.GetDomainCatchAll(domain)
+	mustNoErr(t, "read the catch-all", err)
+	wantEq(t, "the catch-all is still set", found, true)
+	wantEq(t, "the catch-all after the refusal", got, want)
 }
 
 // TestCatchAllClears proves an empty address returns the domain to refusing unknown
