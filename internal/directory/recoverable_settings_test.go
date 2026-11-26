@@ -62,7 +62,17 @@ func TestSweepRecoverableItemsHonorsRetention(t *testing.T) {
 	n, err := d.SweepRecoverableItems(time.Now())
 	mustNoErr(t, "sweep", err)
 	wantEq(t, "items swept (only the 40-day-old one)", n, 1)
-	wantEq(t, "dumpster items after the sweep (the fresh item is kept)", dumpsterCount(t, maildir), 1)
+	kept := dumpster(t, maildir)
+	wantEq(t, "dumpster items after the sweep (the fresh item is kept)", len(kept), 1)
+	if age := time.Since(kept[0].DeletedOn); age > time.Hour {
+		t.Errorf("the sweep kept an item deleted %v ago, want the fresh one", age)
+	}
+
+	// Zero turns the purge off: nothing is swept, however old.
+	mustNoErr(t, "turn the purge off", d.SetRecoverableSettings(RecoverableSettings{RetentionDays: 0}))
+	n, err = d.SweepRecoverableItems(time.Now().Add(100 * 365 * 24 * time.Hour))
+	mustNoErr(t, "sweep with the purge off", err)
+	wantEq(t, "items swept with the purge off", n, 0)
 
 	// Re-injection: widening the window so nothing is old enough takes effect on the
 	// next sweep without a restart.
@@ -124,13 +134,26 @@ func seedAgedDumpster(t *testing.T, maildir string) {
 	}))
 }
 
-// dumpsterCount reports how many soft-deleted items a mailbox still holds.
-func dumpsterCount(t *testing.T, maildir string) int {
+// dumpster lists the soft-deleted items a mailbox still holds.
+func dumpster(t *testing.T, maildir string) []objectstore.SoftDeletedMessage {
 	t.Helper()
-	st, err := objectstore.Open(maildir)
+	st, err := objectstore.OpenExisting(maildir)
 	mustNoErr(t, "open mailbox", err)
 	defer st.Close()
 	dump, err := st.ListSoftDeleted(int64(mapi.PrivateFIDDeletedItems))
 	mustNoErr(t, "list soft-deleted items", err)
-	return len(dump)
+	return dump
+}
+
+// TestRecoverableSettingsRefuseANegativeWindow proves a negative window is refused
+// and the stored one kept: zero is the documented "never purge" value, and a
+// negative number would turn the purge off without anyone choosing that.
+func TestRecoverableSettingsRefuseANegativeWindow(t *testing.T) {
+	d := setupRecoverableSettings(t)
+	mustNoErr(t, "save a window", d.SetRecoverableSettings(RecoverableSettings{RetentionDays: 30}))
+	wantErr(t, "a negative window was accepted", d.SetRecoverableSettings(RecoverableSettings{RetentionDays: -1}))
+	got, found, err := d.GetRecoverableSettings()
+	mustNoErr(t, "read the window", err)
+	wantEq(t, "window found", found, true)
+	wantEq(t, "window after the refusal", got.RetentionDays, 30)
 }

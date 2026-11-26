@@ -41,6 +41,9 @@ func (d *SQLDirectory) GetRecoverableSettings() (RecoverableSettings, bool, erro
 // SetRecoverableSettings persists the retention window, upserting the single row so
 // the sweep's poll observes the change and applies it without a restart.
 func (d *SQLDirectory) SetRecoverableSettings(s RecoverableSettings) error {
+	if s.RetentionDays < 0 {
+		return fmt.Errorf("directory: recoverable-items retention %d is negative; 0 keeps items forever", s.RetentionDays)
+	}
 	_, err := d.db.Exec(
 		`INSERT INTO recoverable_settings (id, retention_days, updated_at)
 		 VALUES (1, ?, ?)
