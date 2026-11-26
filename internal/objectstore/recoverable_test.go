@@ -124,6 +124,12 @@ func TestPurgeSoftDeletedOlderThan(t *testing.T) {
 	if err := s.SoftDeleteMessage(mapi.PrivateFIDInbox, info.UID); err != nil {
 		t.Fatal(err)
 	}
+	// A live message is never the sweep's to purge, whatever its age. One that was
+	// deleted and then recovered is the case that matters: it was in the dumpster.
+	live := mustAppendMessage(t, s, mapi.PrivateFIDInbox, raw, time.Unix(1600000000, 0), 0)
+	mustNoErr(t, "soft delete the recovered one", s.SoftDeleteMessage(mapi.PrivateFIDInbox, live.UID))
+	_, err = s.RecoverMessage(mapi.PrivateFIDInbox, live.ID)
+	mustNoErr(t, "recover it", err)
 
 	// Cutoff in the past: the just-deleted item is newer, so it is kept.
 	n, err := s.PurgeSoftDeletedOlderThan(time.Now().Add(-1 * time.Hour))
@@ -148,4 +154,18 @@ func TestPurgeSoftDeletedOlderThan(t *testing.T) {
 	if got := countRows(t, s, `SELECT COUNT(*) FROM messages WHERE message_id=?`, info.ID); got != 0 {
 		t.Errorf("item survived retention purge: rows=%d", got)
 	}
+	wantRows(t, s, "live message after the retention sweep", 1,
+		`SELECT COUNT(*) FROM messages WHERE message_id=?`, live.ID)
+}
+
+// TestRecoverMessageRefusesALiveMessage: recovering a message that was never
+// soft-deleted is refused and does not index it a second time.
+func TestRecoverMessageRefusesALiveMessage(t *testing.T) {
+	s := openSeededStore(t)
+	raw := []byte("From: a@example.test\r\nSubject: canlı\r\n\r\nx\r\n")
+	info := mustAppendMessage(t, s, mapi.PrivateFIDInbox, raw, time.Unix(1700000000, 0), 0)
+	if _, err := s.RecoverMessage(mapi.PrivateFIDInbox, info.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("recovering a live message: err = %v, want ErrNotFound", err)
+	}
+	wantEq(t, "live messages after the refused recover", len(mustListMessages(t, s, mapi.PrivateFIDInbox)), 1)
 }

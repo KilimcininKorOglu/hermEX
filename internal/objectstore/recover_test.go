@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -203,7 +204,24 @@ func TestRecoveredMailboxOpensAgain(t *testing.T) {
 // declines while the mailbox is open.
 func TestRecoverMailboxDatabasesRefusesABusyMailbox(t *testing.T) {
 	s := openSeededStore(t)
-	if _, err := RecoverMailboxDatabases(s.Dir(), []string{indexDBName}); err == nil {
-		t.Fatal("the recovery ran while the mailbox was open")
+	before := dirEntries(t, s.Dir())
+	reports, err := RecoverMailboxDatabases(s.Dir(), []string{indexDBName})
+	if !errors.Is(err, ErrMailboxBusy) {
+		t.Fatalf("recovery of an open mailbox: err = %v, want ErrMailboxBusy", err)
 	}
+	wantEq(t, "databases attempted while busy", len(reports), 0)
+	// Nothing was rebuilt or set aside: the directory holds the same files.
+	wantEq(t, "mailbox directory after the refused recovery", dirEntries(t, s.Dir()), before)
+}
+
+// dirEntries lists a directory's entry names, sorted.
+func dirEntries(t *testing.T, dir string) string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	mustNoErr(t, "read the mailbox directory", err)
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return strings.Join(names, ",")
 }
