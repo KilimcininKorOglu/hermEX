@@ -83,17 +83,8 @@ func (d *SQLDirectory) SetSMTPGateway(domain string, g SMTPGateway) error {
 	if g.Encryption == "" {
 		g.Encryption = GatewaySTARTTLS
 	}
-	if !validGatewayEncryption(g.Encryption) {
-		return fmt.Errorf("directory: unknown gateway encryption %q", g.Encryption)
-	}
-	if g.Port <= 0 || g.Port > 65535 {
-		return fmt.Errorf("directory: gateway port %d is out of range", g.Port)
-	}
-	if g.Enabled && g.Host == "" {
-		return errors.New("directory: an enabled gateway needs a host")
-	}
-	if g.Host != "" && net.ParseIP(g.Host) == nil && ValidateDomain(g.Host) != nil {
-		return fmt.Errorf("directory: gateway host %q is neither a host name nor an IP address", g.Host)
+	if err := validateGateway(g); err != nil {
+		return err
 	}
 	stored, err := d.wrapKey(wrapGateway, g.Password)
 	if err != nil {
@@ -107,6 +98,23 @@ func (d *SQLDirectory) SetSMTPGateway(domain string, g SMTPGateway) error {
 		   updated_at = VALUES(updated_at)`,
 		gatewayKey(domain), g.Enabled, g.Host, g.Port, g.Encryption, g.Username, stored, time.Now().UnixMilli())
 	return err
+}
+
+// validateGateway refuses a configuration the MTA could not dial.
+func validateGateway(g SMTPGateway) error {
+	if !validGatewayEncryption(g.Encryption) {
+		return fmt.Errorf("directory: unknown gateway encryption %q", g.Encryption)
+	}
+	if g.Port <= 0 || g.Port > 65535 {
+		return fmt.Errorf("directory: gateway port %d is out of range", g.Port)
+	}
+	if g.Enabled && g.Host == "" {
+		return errors.New("directory: an enabled gateway needs a host")
+	}
+	if g.Host != "" && net.ParseIP(g.Host) == nil && ValidateDomain(g.Host) != nil {
+		return fmt.Errorf("directory: gateway host %q is neither a host name nor an IP address", g.Host)
+	}
+	return nil
 }
 
 // DeleteSMTPGateway removes one gateway configuration, reporting whether a row went. Removing
