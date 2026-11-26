@@ -157,6 +157,17 @@ func TestUpsertLDAPUser(t *testing.T) {
 	mustNoErr(t, "upsert a new user", err)
 	wantEq(t, "the upsert created the new user", created, true)
 	wantMastered(t, d, "bob@hermex.test")
+
+	// A directory entry whose address is in no hosted domain, or is no address,
+	// creates nothing: the downsync must not mint accounts for domains it does
+	// not serve.
+	for _, bad := range []string{"eve@unhosted.test", "not-an-address", ""} {
+		_, err := d.UpsertLDAPUser(bad, []byte{0x05}, filepath.Join(root, "eve"))
+		wantErr(t, "an upsert for "+bad+" was accepted", err)
+		_, ok, err := d.resolve(bad)
+		mustNoErr(t, "resolve "+bad, err)
+		wantEq(t, bad+" exists after the refused upsert", ok, false)
+	}
 }
 
 // wantMastered checks a login exists and carries an externid, which is what marks
