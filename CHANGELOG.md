@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2026-11-26
+
+### Added
+- Redirected plain HTTP requests on port 80 to HTTPS; new installations open port 80 and set `gateway_http_addr`.
+- Served mail client autoconfiguration (`config-v1.1.xml`) for hosted domains with IMAP, POP3 and SMTP over TLS.
+- Listed IMAP, POP3, SMTP and, for clients that ask for it, MAPI/HTTP in the Outlook Autodiscover reply.
+- Answered Autodiscover v2 JSON requests for EWS, ActiveSync and Autodiscover v1.
+- Answered ActiveSync devices in the mobilesync Autodiscover schema.
+- Laid out the webmail and administrator sign-in pages like Outlook on the web, with a full-height brand panel.
+
+### Fixed
+- Let the administration panel content use the full page width.
+
 ## [0.3.4] - 2026-11-21
 
 ### Added
