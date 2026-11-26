@@ -106,15 +106,17 @@ func (s *Server) handleSetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// An admin-set password is temporary: force the user to change it on next login.
-	if _, err := s.dir.RequirePasswordChange(r.PathValue("email"), true); err != nil {
-		s.fail(w, "server error", err, http.StatusInternalServerError)
-		return
-	}
+	_, flagErr := s.dir.RequirePasswordChange(r.PathValue("email"), true)
 	// A reset is often the response to a compromise, so it must also end every
 	// session that account already holds, on the panel and in webmail alike. The
 	// webmail half is the one that matters here: the account being reset is
-	// usually an ordinary mailbox user who has no panel session at all.
+	// usually an ordinary mailbox user who has no panel session at all. The new
+	// password is already stored, so this runs even when the flag write failed.
 	s.revokeAllSessions(r.PathValue("email"))
+	if flagErr != nil {
+		s.fail(w, "server error", flagErr, http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

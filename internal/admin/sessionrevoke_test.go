@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -190,5 +191,41 @@ func TestPasswordResetEndsWebmailSessions(t *testing.T) {
 	}
 	if _, ok := d.webmail["bystander"]; !ok {
 		t.Error("the reset revoked another account's session")
+	}
+}
+
+// flagFailDir is a directory that stores the reset password but cannot set the
+// forced-change flag.
+type flagFailDir struct{ *webmailSessionDir }
+
+func (flagFailDir) RequirePasswordChange(string, bool) (bool, error) {
+	return false, errors.New("flag write failed")
+}
+
+// TestPasswordResetEndsSessionsWhenTheFlagFails proves a reset whose forced-change
+// flag cannot be written still ends the account's sessions. The new password is
+// already stored by then, so returning early would leave a stolen cookie working
+// after the operator's remediation.
+func TestPasswordResetEndsSessionsWhenTheFlagFails(t *testing.T) {
+	base := newSessionDir(&fakeDir{authOK: true, password: "pw", uid: 7,
+		roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		knownUsers: map[string]directory.UserDetail{
+			"victim@hermex.test": {Username: "victim@hermex.test", ID: 11},
+		}})
+	d := flagFailDir{&webmailSessionDir{sessionDir: base, webmail: map[string]string{
+		"stolen-jti": "victim@hermex.test",
+	}}}
+	srv := NewServer(d, fakePaths{root: t.TempDir()}, []byte("test-secret"))
+	srv.store = &fakeStore{}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedReq(t, ts, "POST", "/admin/users/victim@hermex.test/password", session, csrf, `{"password":"newpass"}`)
+	if s := statusOf(resp); s != http.StatusInternalServerError {
+		t.Errorf("password reset with a failed flag write = %d, want 500", s)
+	}
+	if _, ok := d.webmail["stolen-jti"]; ok {
+		t.Error("a reset whose flag write failed left the user's webmail session alive")
 	}
 }
