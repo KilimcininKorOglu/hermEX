@@ -154,15 +154,27 @@ func (d *SQLDirectory) CreateFetchmail(e FetchmailEntry) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	// The row is written only while a mailbox account of that name exists, in the
+	// same statement: nothing else ties fetchmail.mailbox to a user, and an entry
+	// for an absent address would later feed a newly created namesake.
 	res, err := d.db.Exec(
 		`INSERT INTO fetchmail
 			(mailbox, active, src_server, src_port, src_user, src_password,
 			 protocol, src_folder, fetchall, keep, use_ssl, ssl_verify)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		   FROM users WHERE username = ? AND maildir <> ''`,
 		e.Mailbox, b2i(e.Active), e.SrcServer, e.SrcPort, e.SrcUser, sealed,
-		strings.ToUpper(e.Protocol), e.SrcFolder, b2i(e.FetchAll), b2i(e.Keep), b2i(e.UseSSL), b2i(e.SSLVerify))
+		strings.ToUpper(e.Protocol), e.SrcFolder, b2i(e.FetchAll), b2i(e.Keep), b2i(e.UseSSL), b2i(e.SSLVerify),
+		e.Mailbox)
 	if err != nil {
 		return 0, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if n == 0 {
+		return 0, fmt.Errorf("directory: no mailbox %q to fetch into", e.Mailbox)
 	}
 	return res.LastInsertId()
 }

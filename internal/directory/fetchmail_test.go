@@ -68,6 +68,23 @@ func TestFetchmailCRUD(t *testing.T) {
 	wantEq(t, "fetchmail entries after the user delete", len(mustListFetchmail(t, d)), 0)
 }
 
+// TestFetchmailRefusesAMailboxThatDoesNotExist proves a poll configuration needs
+// a live account to deliver into. Nothing ties fetchmail.mailbox to a user row,
+// so an entry for an unknown address would sit idle until someone is later
+// created under that name and then pull another server's mail into that account.
+func TestFetchmailRefusesAMailboxThatDoesNotExist(t *testing.T) {
+	d, _ := freshDirectory(t)
+	root := t.TempDir()
+	mustCreateDomain(t, d, root, "hermex.test")
+	for _, mbox := range []string{"ghost@hermex.test", "ghost@unhosted.test", ""} {
+		_, err := d.CreateFetchmail(FetchmailEntry{Mailbox: mbox, SrcServer: "s", SrcUser: "u", Protocol: "IMAP"})
+		wantErr(t, "an entry for mailbox "+mbox+" was accepted", err)
+		list, err := d.ListFetchmail(mbox)
+		mustNoErr(t, "list entries of "+mbox, err)
+		wantEq(t, "entries stored for "+mbox, len(list), 0)
+	}
+}
+
 // storedFetchmailPassword reads an entry's src_password column as stored.
 func storedFetchmailPassword(t *testing.T, d *SQLDirectory, id int64) string {
 	t.Helper()
