@@ -49,7 +49,8 @@ func TestQuarantineCRUD(t *testing.T) {
 	wantEq(t, "records an empty scope sees", len(mustListQuarantine(t, d, nil, false)), 0)
 
 	mustNoErr(t, "delete quarantine record", d.DeleteQuarantine(id))
-	_, stillThere, _ := d.GetQuarantine(id)
+	_, stillThere, err := d.GetQuarantine(id)
+	mustNoErr(t, "get the deleted record", err)
 	wantEq(t, "record present after delete", stillThere, false)
 }
 
