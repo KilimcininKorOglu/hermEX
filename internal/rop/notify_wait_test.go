@@ -100,7 +100,8 @@ func TestSessionConcurrentDispatchPollClose(t *testing.T) {
 	inbox := int64(mapi.PrivateFIDInbox)
 	// A whole-store subscription so the concurrent poll exercises the all-folders
 	// sweep (which mutates the per-folder snapshot map), not just one folder.
-	sess.Dispatch(buildRegisterNotification(0, 1, uint8(fnevObjectCreated|fnevObjectModified|fnevObjectDeleted), 1, 0, 0), []uint32{logonH, 0xFFFFFFFF})
+	reg, _ := sess.Dispatch(buildRegisterNotification(0, 1, uint8(fnevObjectCreated|fnevObjectModified|fnevObjectDeleted), 1, 0, 0), []uint32{logonH, 0xFFFFFFFF})
+	ropOK(t, reg, ropRegisterNotification, "RegisterNotification(whole store)")
 
 	// The writer opens its own store handle on the same mailbox, mirroring a
 	// separate delivering daemon, the session's handle is never touched outside its
