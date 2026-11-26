@@ -217,7 +217,11 @@ func TestSetAliasesForAppliesTheSameChecks(t *testing.T) {
 		t.Error("SetAliasesFor accepted an alias in a domain we do not host")
 	}
 	// Neither refusal may have left a partial write behind.
-	if ids, _ := d.Identities("alice@hermex.test"); len(ids) != 1 || ids[0] != "alice@hermex.test" {
+	ids, err := d.Identities("alice@hermex.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != "alice@hermex.test" {
 		t.Errorf("a refused edit left aliases behind: %v", ids)
 	}
 	if _, ok := d.Resolve("bob@hermex.test"); !ok {
