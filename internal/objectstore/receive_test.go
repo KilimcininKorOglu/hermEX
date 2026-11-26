@@ -33,6 +33,9 @@ func TestReceiveFolder(t *testing.T) {
 	check("IPC", root, "IPC")
 	check("IPM.Note.Foo", inbox, "IPM") // longest existing prefix is the seeded "IPM"
 	check("XYZ.Unknown", inbox, "")     // no prefix matches → empty default → Inbox
+	// Prefixes match whole dot-separated components: "IPCX" is not under "IPC",
+	// so it takes the empty-class default rather than the IPC root mapping.
+	check("IPCX.Note", inbox, "")
 
 	// A custom mapping is resolved through a longer sub-class.
 	sent := int64(mapi.PrivateFIDSentItems)

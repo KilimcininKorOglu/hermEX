@@ -94,6 +94,12 @@ func TestReplaceRecipientsCarriesOneRowOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(msg.Recipients) != 2 {
+		t.Fatalf("message has %d recipients, want the 2 written", len(msg.Recipients))
+	}
+	if v, _ := msg.Recipients[0].Get(testResponseTag); v != int32(3) {
+		t.Errorf("the first Bob row = %v, want his stored response 3", v)
+	}
 	if _, ok := msg.Recipients[1].Get(testResponseTag); ok {
 		t.Error("the second row with Bob's address also inherited his response status")
 	}
@@ -107,4 +113,6 @@ func TestReplaceRecipientsRefusesAMissingMessage(t *testing.T) {
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
+	wantRows(t, s, "recipient rows written for the missing message", 0,
+		`SELECT COUNT(*) FROM recipients WHERE message_id=?`, int64(1<<40))
 }
