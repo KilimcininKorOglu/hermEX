@@ -100,11 +100,11 @@ func TestEditStoredEmbeddedMessageAdvancesTheChangeNumber(t *testing.T) {
 	mid, msgH, embH := embeddedCarrier(t, sess, logonH, mapiModify)
 	before := messageChangeNumber(t, store, mid)
 
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+	ropOK(t, dispatchOn(sess, buildSetProperties(0, mapi.PropertyValues{
 		{Tag: mapi.PrSubject, Value: "Edited Inner"},
 		{Tag: mapi.PrNormalizedSubject, Value: "Edited Inner"},
-	}), []uint32{embH})
-	sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, embH})
+	}), embH), ropSetProperties, "SetProperties(stored embedded)")
+	ropOK(t, dispatchOn(sess, buildSaveChangesMessage(0, 1), logonH, embH), ropSaveChangesMessage, "SaveChangesMessage(stored embedded)")
 	sc, _ := sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
 	ropOK(t, sc, ropSaveChangesMessage, "SaveChangesMessage(carrier)")
 

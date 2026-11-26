@@ -47,7 +47,7 @@ func TestDeleteMessageProperties(t *testing.T) {
 	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrImportance, Value: int32(2)}}), []uint32{msgH})
 	sc, _ := sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
 	saveChangesEID(t, sc)
-	before, _ := store.GetMessageProperties(int64(mid), mapi.PrSubject, mapi.PrImportance)
+	before := mustMessageProps(t, store, int64(mid), mapi.PrSubject, mapi.PrImportance)
 	if _, ok := before.Get(mapi.PrImportance); !ok {
 		t.Fatal("PrImportance missing before delete")
 	}
@@ -64,7 +64,7 @@ func TestDeleteMessageProperties(t *testing.T) {
 	saveChangesEID(t, sc2)
 
 	// All three are gone from the store; the buffered sensitivity set did not leak.
-	after, _ := store.GetMessageProperties(int64(mid), deleted...)
+	after := mustMessageProps(t, store, int64(mid), deleted...)
 	for _, tag := range deleted {
 		if _, ok := after.Get(tag); ok {
 			t.Errorf("property %s survived DeleteProperties", tag)
@@ -102,17 +102,17 @@ func TestSetAfterDeleteWins(t *testing.T) {
 
 	// PrImportance is present on the seeded message. Delete it, then set it to a new
 	// value in the same edit session, then save.
-	before, _ := store.GetMessageProperties(int64(mid), mapi.PrImportance)
+	before := mustMessageProps(t, store, int64(mid), mapi.PrImportance)
 	if _, ok := before.Get(mapi.PrImportance); !ok {
 		t.Fatal("PrImportance missing on the seeded message")
 	}
-	sess.Dispatch(buildDeletePropsOp(ropDeleteProperties, 0, []mapi.PropTag{mapi.PrImportance}), []uint32{msgH})
-	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrImportance, Value: int32(2)}}), []uint32{msgH})
+	ropOK(t, dispatchOn(sess, buildDeletePropsOp(ropDeleteProperties, 0, []mapi.PropTag{mapi.PrImportance}), msgH), ropDeleteProperties, "DeleteProperties")
+	ropOK(t, dispatchOn(sess, buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrImportance, Value: int32(2)}}), msgH), ropSetProperties, "SetProperties")
 	sc, _ := sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
 	saveChangesEID(t, sc)
 
 	// The set wins: the stored value is the one set after the delete, not absent.
-	after, _ := store.GetMessageProperties(int64(mid), mapi.PrImportance)
+	after := mustMessageProps(t, store, int64(mid), mapi.PrImportance)
 	v, ok := after.Get(mapi.PrImportance)
 	if !ok {
 		t.Fatal("PrImportance was dropped: the buffered delete overrode the later set")
