@@ -266,8 +266,10 @@ func importClassification(p *mapi.PropertyValues, named map[mapi.PropertyName]ma
 		p.Set(mapi.PrImportance, imp)
 	}
 	// The sequence lands in a 32-bit named long, so parse at that width: an
-	// iCalendar body may carry any integer, and a wider one would wrap.
-	if n, err := strconv.ParseInt(strings.TrimSpace(vev.propText("SEQUENCE")), 10, 32); err == nil {
+	// iCalendar body may carry any integer, and a wider one would wrap. RFC 5545
+	// 3.8.7.4 makes it non-negative; a negative one would rank as older than the
+	// first revision.
+	if n, err := strconv.ParseInt(strings.TrimSpace(vev.propText("SEQUENCE")), 10, 32); err == nil && n >= 0 {
 		setNamedLong(p, named, mapi.NameAppointmentSequence, int32(n))
 	}
 }

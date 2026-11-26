@@ -164,8 +164,14 @@ func Sequence(ical []byte, at *time.Time) int {
 	if ev == nil {
 		return 0
 	}
-	n, _ := strconv.Atoi(strings.TrimSpace(ev.propText("SEQUENCE")))
-	return n
+	// An absent, unparseable or negative SEQUENCE (RFC 5545 3.8.7.4 allows only a
+	// non-negative integer) is the first revision. The width is the 32-bit named
+	// long Import stores it in, so both read one value the same way.
+	n, err := strconv.ParseInt(strings.TrimSpace(ev.propText("SEQUENCE")), 10, 32)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return int(n)
 }
 
 // SetSequence writes seq as the SEQUENCE of the object's primary VEVENT, or of the

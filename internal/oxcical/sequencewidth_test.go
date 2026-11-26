@@ -23,6 +23,8 @@ func TestSequenceRejectsWiderThanPtLong(t *testing.T) {
 		{"in range", "7", 7, true},
 		{"above int32", "2147483648", 0, false},
 		{"below int32", "-2147483649", 0, false},
+		// RFC 5545 3.8.7.4: SEQUENCE is a non-negative integer.
+		{"negative", "-1", 0, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -35,6 +37,9 @@ func TestSequenceRejectsWiderThanPtLong(t *testing.T) {
 			if !tc.set {
 				if ok {
 					t.Fatalf("SEQUENCE %q was accepted as %d", tc.in, got)
+				}
+				if seq := Sequence([]byte(head+"SEQUENCE:"+tc.in+"\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"), nil); seq != 0 {
+					t.Errorf("Sequence read %q as %d, want 0", tc.in, seq)
 				}
 				return
 			}
