@@ -65,6 +65,7 @@
     "limitFailed": "Created the domain, but could not set the user limit.",
     "invalidID": "Invalid domain id.",
     "purgeFailed": "Could not purge domain.",
+    "purgeFilesRemain": "The domain was purged, but some of its mailbox files could not be removed. The server log names them.",
     "noSuchDomain": "No such domain."
   },
   "domainDetail": {

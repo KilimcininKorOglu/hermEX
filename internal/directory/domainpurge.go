@@ -3,6 +3,7 @@ package directory
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 )
@@ -23,8 +24,10 @@ import (
 // removed too; an emptied role is left in place (harmless, admin-deletable), a
 // deliberate, safe deviation from deleting it.
 //
-// File deletion is best-effort and happens only after the database transaction
-// commits, so a storage error never leaves the directory half-purged.
+// File deletion happens only after the database transaction commits, so a
+// storage error never leaves the directory half-purged. A path it cannot remove
+// is reported with ok=true and an error wrapping ErrPurgeFilesRemain: the domain
+// is gone, but its leftover files need an operator.
 func (d *SQLDirectory) PurgeDomain(domainID int64, deleteFiles bool) (bool, error) {
 	var homedir, domainname string
 	err := d.db.QueryRow(`SELECT homedir, domainname FROM domains WHERE id = ?`, domainID).Scan(&homedir, &domainname)
@@ -46,10 +49,16 @@ func (d *SQLDirectory) PurgeDomain(domainID int64, deleteFiles bool) (bool, erro
 		return false, err
 	}
 	if deleteFiles {
-		removeDomainFiles(maildirs, homedir)
+		if err := removeDomainFiles(maildirs, homedir); err != nil {
+			return true, fmt.Errorf("%w: %w", ErrPurgeFilesRemain, err)
+		}
 	}
 	return true, nil
 }
+
+// ErrPurgeFilesRemain marks a purge whose rows are gone but whose on-disk files
+// could not all be removed.
+var ErrPurgeFilesRemain = errors.New("directory: domain purged, but some of its files could not be removed")
 
 // purgeDomainTx runs the whole cascade in one transaction, so a failure leaves
 // the directory as it was.
@@ -66,15 +75,16 @@ func (d *SQLDirectory) purgeDomainTx(domainID int64, domainname string) error {
 }
 
 // removeDomainFiles drops the mailboxes and the domain directory. It runs only
-// after the transaction commits, and is best-effort: a storage error never
-// leaves the directory half-purged.
-func removeDomainFiles(maildirs []string, homedir string) {
+// after the transaction commits and tries every path, returning each failure.
+func removeDomainFiles(maildirs []string, homedir string) error {
+	var errs []error
 	for _, m := range maildirs {
-		_ = os.RemoveAll(m)
+		errs = append(errs, os.RemoveAll(m))
 	}
 	if homedir != "" {
-		_ = os.RemoveAll(homedir)
+		errs = append(errs, os.RemoveAll(homedir))
 	}
+	return errors.Join(errs...)
 }
 
 // domainMaildirs lists the on-disk mailbox paths of a domain's users, read

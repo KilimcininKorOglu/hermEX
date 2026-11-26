@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -187,6 +188,10 @@ func (s *Server) handleDeleteDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ok, err := s.dir.PurgeDomain(id, r.URL.Query().Get("deleteFiles") == "true")
+	if errors.Is(err, directory.ErrPurgeFilesRemain) {
+		s.fail(w, "domain purged, but some of its files could not be removed", err, http.StatusInternalServerError)
+		return
+	}
 	if err != nil {
 		s.fail(w, "could not purge domain", err, http.StatusInternalServerError)
 		return

@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -126,6 +127,32 @@ func TestUIDomainPurge(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `id="domains-panel"`) {
 		t.Errorf("response is not the domains panel: %s", body)
+	}
+}
+
+// TestDomainPurgeReportsLeftoverFiles proves a purge whose files could not all be
+// removed is shown as that, on the panel and on the API: reading it as a clean
+// success hides mailboxes still on disk, and reading it as a failed purge sends
+// the operator to retry a domain that is already gone.
+func TestDomainPurgeReportsLeftoverFiles(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		domains:  []directory.DomainInfo{{ID: 3, Name: "acme.test"}},
+		purgeErr: fmt.Errorf("%w: remove /m/u: device busy", directory.ErrPurgeFilesRemain),
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	resp := htmxPOST(t, ts, "/admin/ui/domains/3/purge", session, csrf, url.Values{"deleteFiles": {"true"}})
+	body := string(readBody(t, resp))
+	resp.Body.Close()
+	if !strings.Contains(body, "some of its mailbox files could not be removed") {
+		t.Errorf("the panel does not report the leftover files:\n%s", body)
+	}
+	if strings.Contains(body, "Could not purge domain.") {
+		t.Errorf("the panel reports a failed purge for a domain that is gone:\n%s", body)
+	}
+	if s := statusOf(authedReq(t, ts, "DELETE", "/admin/domains/3?deleteFiles=true", session, csrf, "")); s != http.StatusInternalServerError {
+		t.Errorf("API purge with leftover files = %d, want 500", s)
 	}
 }
 

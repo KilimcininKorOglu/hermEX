@@ -65,6 +65,7 @@
     "limitFailed": "Alan adı oluşturuldu, ancak kullanıcı sınırı ayarlanamadı.",
     "invalidID": "Geçersiz alan adı kimliği.",
     "purgeFailed": "Alan adı temizlenemedi.",
+    "purgeFilesRemain": "Alan adı temizlendi, ancak bazı posta kutusu dosyaları silinemedi. Silinemeyen dosyalar sunucu kaydında yer alıyor.",
     "noSuchDomain": "Böyle bir alan adı yok."
   },
   "domainDetail": {

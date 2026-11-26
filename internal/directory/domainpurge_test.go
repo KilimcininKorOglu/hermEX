@@ -2,6 +2,7 @@ package directory
 
 import (
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -125,6 +126,26 @@ func TestPurgeDomainDeleteFiles(t *testing.T) {
 	if _, err := os.Stat(maildir2); err != nil {
 		t.Errorf("maildir removed without deleteFiles: %v", err)
 	}
+}
+
+// TestPurgeDomainReportsFilesItCouldNotRemove proves a mailbox the purge cannot
+// delete is reported, not left on disk without a trace. The rows are already
+// gone by then, so the purge still counts as done (ok) and the error names the
+// leftover; os.RemoveAll refuses a path ending in "." with EINVAL, which stands
+// in for a storage failure the root-run dev container cannot produce by mode bits.
+func TestPurgeDomainReportsFilesItCouldNotRemove(t *testing.T) {
+	d, db := freshDirectory(t)
+	root := t.TempDir()
+	id, _, maildir := seedDomainOnDisk(t, d, root, "stuck.test")
+	_, err := db.Exec(`UPDATE users SET maildir = ? WHERE username = ?`, maildir+"/.", "u@stuck.test")
+	mustNoErr(t, "point the mailbox at an unremovable path", err)
+
+	ok, err := d.PurgeDomain(id, true)
+	wantEq(t, "PurgeDomain found the domain", ok, true)
+	if !errors.Is(err, ErrPurgeFilesRemain) {
+		t.Fatalf("PurgeDomain error = %v, want ErrPurgeFilesRemain", err)
+	}
+	wantRows(t, db, "domain rows after the purge", 0, `SELECT COUNT(*) FROM domains WHERE id = ?`, id)
 }
 
 // seedDomainOnDisk creates a domain and one user whose directories exist on

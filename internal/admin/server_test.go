@@ -136,10 +136,12 @@ type fakeDir struct {
 	namedRoles                 map[int64]directory.RoleDetail
 	nextRoleID                 int64
 
-	// captured by PurgeDomain; purgeDomainMissing makes it report ok=false
+	// captured by PurgeDomain; purgeDomainMissing makes it report ok=false and
+	// purgeErr is the error it returns
 	purgedDomain       int64
 	purgeFiles         bool
 	purgeDomainMissing bool
+	purgeErr           error
 
 	// GetDomain returns domainDetail (getDomainMissing => not found); UpdateDomain
 	// records its id and argument (updateDomainMissing => not found)
@@ -371,7 +373,7 @@ func (f *fakeDir) CreateDomain(name, homedir string) (int64, error) {
 
 func (f *fakeDir) PurgeDomain(domainID int64, deleteFiles bool) (bool, error) {
 	f.purgedDomain, f.purgeFiles = domainID, deleteFiles
-	return !f.purgeDomainMissing, nil
+	return !f.purgeDomainMissing, f.purgeErr
 }
 func (f *fakeDir) GetDomain(id int64) (directory.DomainDetail, bool, error) {
 	if err := f.readErrs["GetDomain"]; err != nil {

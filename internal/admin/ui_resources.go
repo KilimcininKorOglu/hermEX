@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"maps"
 	"net/http"
 	"strconv"
@@ -82,7 +83,9 @@ func (s *Server) handleUIPurgeDomain(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64)
 	if err != nil {
 		errMsg = "domains.invalidID"
-	} else if _, err := s.dir.PurgeDomain(id, r.PostFormValue("deleteFiles") == "true"); err != nil {
+	} else if _, err := s.dir.PurgeDomain(id, r.PostFormValue("deleteFiles") == "true"); errors.Is(err, directory.ErrPurgeFilesRemain) {
+		errMsg = s.notice("domains.purgeFilesRemain", err)
+	} else if err != nil {
 		errMsg = s.notice("domains.purgeFailed", err)
 	}
 	// From the domain detail page the domain is gone, so navigate back to the
