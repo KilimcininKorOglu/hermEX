@@ -50,7 +50,10 @@ func TestAntispamSettingsUpsert(t *testing.T) {
 	if err := d.SetAntispamSettings(AntispamSettings{Threshold: 8, Zones: "a.example"}); err != nil {
 		t.Fatal(err)
 	}
-	first, _, _ := d.GetAntispamSettings()
+	first, _, err := d.GetAntispamSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if err := d.SetAntispamSettings(AntispamSettings{Threshold: 12, Zones: "b.example"}); err != nil {
 		t.Fatal(err)
@@ -61,6 +64,13 @@ func TestAntispamSettingsUpsert(t *testing.T) {
 	}
 	if got.Threshold != 12 || got.Zones != "b.example" {
 		t.Errorf("after upsert = threshold %d zones %q, want 12 / b.example", got.Threshold, got.Zones)
+	}
+	var rows int
+	if err := d.db.QueryRow("SELECT COUNT(*) FROM antispam_settings").Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 {
+		t.Errorf("antispam_settings holds %d rows after two saves, want 1", rows)
 	}
 	if got.UpdatedAt < first.UpdatedAt {
 		t.Errorf("UpdatedAt went backwards: %d then %d", first.UpdatedAt, got.UpdatedAt)
