@@ -107,7 +107,7 @@ func TestSetMessageReadFlag(t *testing.T) {
 	// rfGenerateReceiptOnly manages a read receipt only; from the unread seed the
 	// message must stay unread. A per-bit test on rfClearReadFlag would wrongly
 	// mark it read here, so this guards the exact-value dispatch.
-	sess.Dispatch(buildSetMessageReadFlag(0, 1, rfGenerateReceiptOnly), []uint32{logonH, msgH})
+	ropOK(t, dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfGenerateReceiptOnly), logonH, msgH), ropSetMessageReadFlag, "SetMessageReadFlag(rfGenerateReceiptOnly)")
 	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), msgID); f&objectstore.FlagSeen != 0 {
 		t.Errorf("rfGenerateReceiptOnly changed read state (flags=%#x), want still unread", f)
 	}
@@ -128,13 +128,13 @@ func TestSetMessageReadFlag(t *testing.T) {
 	}
 
 	// rfClearNotifyRead clears a pending notification only; the message stays read.
-	sess.Dispatch(buildSetMessageReadFlag(0, 1, rfClearNotifyRead), []uint32{logonH, msgH})
+	ropOK(t, dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfClearNotifyRead), logonH, msgH), ropSetMessageReadFlag, "SetMessageReadFlag(rfClearNotifyRead)")
 	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), msgID); f&objectstore.FlagSeen == 0 {
 		t.Errorf("rfClearNotifyRead changed read state (flags=%#x), want still read", f)
 	}
 
 	// Mark unread (rfClearReadFlag).
-	sess.Dispatch(buildSetMessageReadFlag(0, 1, rfClearReadFlag), []uint32{logonH, msgH})
+	ropOK(t, dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfClearReadFlag), logonH, msgH), ropSetMessageReadFlag, "SetMessageReadFlag(rfClearReadFlag)")
 	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), msgID); f&objectstore.FlagSeen != 0 {
 		t.Errorf("after mark-unread, flags=%#x, want FlagSeen clear", f)
 	}
