@@ -12,6 +12,14 @@ func TestGreylistEnabledRoundTrip(t *testing.T) {
 	wantEq(t, "greylisting enabled after the toggle", greylistEnabled(t, d), true)
 	mustNoErr(t, "disable greylisting", d.SetGreylistEnabled(false))
 	wantEq(t, "greylisting enabled after disabling", greylistEnabled(t, d), false)
+
+	// The toggle alone created the row, so its timings are the column defaults,
+	// which migration 0016 sets to the greylister's built-in values: 300 s delay,
+	// 24 h unconfirmed, 36 d confirmed. A zero default would remove the delay.
+	got, found, err := d.GetGreylistTimings()
+	mustNoErr(t, "read the timings of a toggle-only row", err)
+	wantEq(t, "timings found after the toggle", found, true)
+	wantEq(t, "timings of a toggle-only row", got, GreylistTimings{MinDelay: 300, UnconfirmedTTL: 86400, ConfirmedTTL: 3110400})
 }
 
 // freshGreylist opens an empty directory with no stored greylist row.
