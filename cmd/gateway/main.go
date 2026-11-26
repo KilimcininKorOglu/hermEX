@@ -113,8 +113,7 @@ func main() {
 // front door fronts.
 //
 // Both EWS and ActiveSync serve /autodiscover/autodiscover.xml; the gateway routes
-// it to EWS for the Outlook-desktop settings. Mobile (ActiveSync) autodiscover via
-// the gateway would need request-body inspection and is not wired here.
+// it to EWS, which answers in the mobilesync schema when the device asks for it.
 func routeHandler(gw gatewaySettings) http.Handler {
 	h, err := gateway.Handler([]gateway.Route{
 		{Prefix: "/mapi/", Target: gw.backendMapi},

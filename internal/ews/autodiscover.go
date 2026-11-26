@@ -119,6 +119,7 @@ func (s *Server) serveAutodiscover(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	mobile := wantsMobileSync(r.Body)
 	_, _ = io.Copy(io.Discard, io.LimitReader(r.Body, maxAutodiscoverBody))
 
 	host := s.hostname
@@ -132,6 +133,10 @@ func (s *Server) serveAutodiscover(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "autodiscover unavailable: server hostname not configured", http.StatusServiceUnavailable)
 			return
 		}
+	}
+	if mobile {
+		s.writeMobileSyncAutodiscover(w, r, host, user)
+		return
 	}
 	resp := autodiscoverResponse{
 		Response: outlookResponse{
