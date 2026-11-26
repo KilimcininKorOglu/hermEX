@@ -90,6 +90,19 @@ func (s *Store) requireRow(query string, id int64) error {
 	return err
 }
 
+// requireMessageTx reports ErrNotFound when no message row has messageID, read
+// inside tx. A write aimed at a stale or forged id then fails as not found, the
+// answer every caller maps to a client error, rather than as the foreign-key
+// failure of the property insert.
+func requireMessageTx(tx *sql.Tx, messageID int64) error {
+	var one int
+	err := tx.QueryRow(`SELECT 1 FROM messages WHERE message_id = ?`, messageID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
+}
+
 // SetMessageProperties upserts properties on a message, allocating a fresh change
 // number and waking the change consumers, which is what ModifyMessageProperties
 // does with no deletes.
@@ -131,6 +144,9 @@ func (s *Store) ModifyMessageProperties(messageID int64, props mapi.PropertyValu
 		return err
 	}
 	defer tx.Rollback()
+	if err := requireMessageTx(tx, messageID); err != nil {
+		return err
+	}
 	if err := s.insertProps(tx, "message_properties", "message_id", messageID, rectifyTopic(props, false)); err != nil {
 		return err
 	}

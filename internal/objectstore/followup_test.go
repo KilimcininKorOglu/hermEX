@@ -1,6 +1,7 @@
 package objectstore
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -62,6 +63,26 @@ func TestFollowupFlagCompleteAndClear(t *testing.T) {
 	mustNoErr(t, "clear followup flag", s.ClearFollowupFlag(info.ID))
 	wantEq(t, "status after clear", mustFollowupFlag(t, s, info.ID).Status, FlagStatusNone)
 	wantEq(t, `\Flagged after clearing a flag`, messageFlagged(t, s, inbox, info.ID), false)
+}
+
+// TestFollowupAndCategoriesOnAMissingMessage proves a flag or category write
+// aimed at a message id the store does not hold (a stale or forged client id) is
+// refused with ErrNotFound and creates no property row.
+func TestFollowupAndCategoriesOnAMissingMessage(t *testing.T) {
+	s := openSeededStore(t)
+	const missing = int64(987654)
+	before := countRows(t, s, `SELECT COUNT(*) FROM message_properties`)
+	if err := s.SetFollowupFlag(missing, FollowupFlag{Status: FlagStatusFlagged}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("flag on a missing message: err = %v, want ErrNotFound", err)
+	}
+	if err := s.SetCategories(missing, []string{"Work"}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("categories on a missing message: err = %v, want ErrNotFound", err)
+	}
+	// A delete-only edit goes through the same write and is refused the same way.
+	if err := s.ModifyMessageProperties(missing, nil, mapi.PrSubject); !errors.Is(err, ErrNotFound) {
+		t.Errorf("delete-only edit on a missing message: err = %v, want ErrNotFound", err)
+	}
+	wantEq(t, "property rows after the refused writes", countRows(t, s, `SELECT COUNT(*) FROM message_properties`), before)
 }
 
 // mustFollowupFlag reads a message's follow-up flag.
