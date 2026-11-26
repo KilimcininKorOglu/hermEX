@@ -127,6 +127,9 @@ func TestSearchCriteriaRefusals(t *testing.T) {
 	if err := s.SetSearchCriteria(fid, SearchCriteria{Restriction: &res, Scope: []int64{int64(mapi.PrivateFIDRoot)}}); !errors.Is(err, ErrSearchScope) {
 		t.Errorf("scope over the search folder: %v, want ErrSearchScope", err)
 	}
+	if c, state, err := s.GetSearchCriteria(fid); err != nil || c.Restriction != nil || state != 0 {
+		t.Errorf("criteria after the refused scope = %+v, %#x, %v; want still unset", c, state, err)
+	}
 }
 
 // TestSearchFolderChildrenListsSearchFolders proves a search folder is listed
