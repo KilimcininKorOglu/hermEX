@@ -98,8 +98,7 @@ func (d *SQLDirectory) UpdateOrg(id int64, name, description string) (bool, erro
 	if err != nil {
 		return false, err
 	}
-	n, err := res.RowsAffected()
-	return n > 0, err
+	return d.updateFound(res, orgExistsQuery, id)
 }
 
 // DeleteOrg deletes an organization and detaches its dependents in one
@@ -159,6 +158,5 @@ func (d *SQLDirectory) AssignDomainToOrg(domainID, orgID int64) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	n, err := res.RowsAffected()
-	return n > 0, err
+	return d.updateFound(res, domainExistsQuery, domainID)
 }

@@ -27,6 +27,27 @@ func TestRequirePasswordChange(t *testing.T) {
 		mustGetUser(t, d, "u@acme.test").MustChangePassword, false)
 }
 
+// TestRequirePasswordChangeStaysOnItsAccount proves the flag lands on the named
+// account only, and that naming an account that does not exist reports not found
+// and flags no one.
+func TestRequirePasswordChangeStaysOnItsAccount(t *testing.T) {
+	d, _ := freshDirectory(t)
+	root := t.TempDir()
+	mustCreateDomain(t, d, root, "acme.test")
+	mustCreateUser(t, d, root, "u@acme.test", "password1")
+	mustCreateUser(t, d, root, "bystander@acme.test", "password1")
+
+	setMustChange(t, d, true)
+	wantEq(t, "the bystander's flag", mustGetUser(t, d, "bystander@acme.test").MustChangePassword, false)
+	// Setting the flag it already carries still finds the account.
+	setMustChange(t, d, true)
+
+	ok, err := d.RequirePasswordChange("ghost@acme.test", true)
+	mustNoErr(t, "flag a missing account", err)
+	wantEq(t, "RequirePasswordChange found a missing account", ok, false)
+	wantEq(t, "the bystander's flag after the missing account", mustGetUser(t, d, "bystander@acme.test").MustChangePassword, false)
+}
+
 // setMustChange writes the forced-change flag, requiring the user to exist.
 func setMustChange(t *testing.T, d *SQLDirectory, required bool) {
 	t.Helper()

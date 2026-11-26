@@ -923,8 +923,32 @@ func (d *SQLDirectory) SetUserLocale(username, timezone, lang string) (bool, err
 	if err != nil {
 		return false, err
 	}
+	return d.updateFound(res, userExistsQuery, strings.ToLower(strings.TrimSpace(username)))
+}
+
+// userExistsQuery and the queries beside it confirm a row an UPDATE matched but
+// did not change.
+const (
+	userExistsQuery   = `SELECT 1 FROM users WHERE username = ?`
+	orgExistsQuery    = `SELECT 1 FROM orgs WHERE id = ?`
+	domainExistsQuery = `SELECT 1 FROM domains WHERE id = ?`
+)
+
+// updateFound reports whether an UPDATE found its row. MariaDB counts only the
+// rows a statement changed, so an update that writes the values a row already
+// holds affects none; existsQuery, run with arg, tells that case apart from a
+// missing row.
+func (d *SQLDirectory) updateFound(res sql.Result, existsQuery string, arg any) (bool, error) {
 	n, err := res.RowsAffected()
-	return n > 0, err
+	if err != nil || n > 0 {
+		return n > 0, err
+	}
+	var one int
+	err = d.db.QueryRow(existsQuery, arg).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // RequirePasswordChange sets or clears the must-change-password flag. An admin
@@ -941,8 +965,7 @@ func (d *SQLDirectory) RequirePasswordChange(username string, required bool) (bo
 	if err != nil {
 		return false, err
 	}
-	n, err := res.RowsAffected()
-	return n > 0, err
+	return d.updateFound(res, userExistsQuery, strings.ToLower(strings.TrimSpace(username)))
 }
 
 // UserDetail is a user's full administrative record for the detail/edit view.
