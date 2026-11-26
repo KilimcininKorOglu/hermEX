@@ -567,6 +567,17 @@ open_firewall() {
 	fi
 }
 
+# Keep the system journal across reboots. With Storage=auto, journald writes to
+# disk only when /var/log/journal exists; without it the journal of a crashed
+# or hung boot is gone after the restart that recovers it.
+persistent_journal() {
+	[[ -d /var/log/journal ]] && return 0
+	mkdir -p /var/log/journal
+	systemd-tmpfiles --create --prefix /var/log/journal
+	journalctl --flush
+	log "system journal is now kept on disk"
+}
+
 # ---------------------------------------------------------------- commands ---
 
 backup_database() {
@@ -589,6 +600,7 @@ cmd_install() {
 	if [[ "$OS_FAMILY" == "rhel" ]]; then install_rhel_packages; else install_debian_packages; fi
 	create_user
 	create_dirs
+	persistent_journal
 	setup_services
 	setup_clamav
 	create_internal_cert "$host"
@@ -752,6 +764,8 @@ cmd_update() {
 	fi
 	place_release "$new"
 	write_units
+	# An install made before the journal was kept on disk gets it on its next update.
+	persistent_journal
 	stop_all
 	# An install made before the cache cap existed gets it on its next update.
 	if mongo_available && limit_mongo_cache; then systemctl restart mongod.service; fi
