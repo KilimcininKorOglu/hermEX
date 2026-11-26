@@ -80,6 +80,17 @@ func TestSpamThresholdRefusesBelowOne(t *testing.T) {
 	wantSet(t, "the domain threshold after the refusals", dom, 6)
 }
 
+// TestSpamThresholdRefusesAnUnknownAccount proves a threshold for an account that
+// does not exist is reported as an error, so the panel cannot show "Saved" for a
+// change that stored nothing; re-saving an existing account's same value is not.
+func TestSpamThresholdRefusesAnUnknownAccount(t *testing.T) {
+	d, _ := setupSpamThreshold(t)
+	n := 6
+	wantErr(t, "a threshold for an unknown account was accepted", d.SetUserSpamThreshold("nobody@hermex.test", &n))
+	mustNoErr(t, "set the user threshold", d.SetUserSpamThreshold("alice@hermex.test", &n))
+	mustNoErr(t, "re-save the same threshold", d.SetUserSpamThreshold("alice@hermex.test", &n))
+}
+
 // TestSpamThresholdGetReflectsSet proves the per-scope getters read back what was set
 // and report nil (inherit) once cleared.
 func TestSpamThresholdGetReflectsSet(t *testing.T) {

@@ -3,6 +3,7 @@ package directory
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 )
 
 // SpamThresholdForMaildir resolves the per-recipient spam-threshold override for the
@@ -44,7 +45,14 @@ func (d *SQLDirectory) SetUserSpamThreshold(username string, threshold *int) err
 	if err := validSpamThreshold(threshold); err != nil {
 		return err
 	}
-	_, err := d.db.Exec(`UPDATE users SET spam_threshold = ? WHERE username = ?`, nullableInt(threshold), username)
+	res, err := d.db.Exec(`UPDATE users SET spam_threshold = ? WHERE username = ?`, nullableInt(threshold), username)
+	if err != nil {
+		return err
+	}
+	found, err := d.updateFound(res, userExistsQuery, username)
+	if err == nil && !found {
+		err = fmt.Errorf("directory: no account %q", username)
+	}
 	return err
 }
 
