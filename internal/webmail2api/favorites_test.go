@@ -29,7 +29,7 @@ func TestFavoritesTogglePersists(t *testing.T) {
 	secret := []byte("favorites-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
 	do := func(method, target, body string) *httptest.ResponseRecorder {
-		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
 		var req *http.Request
 		if body == "" {
 			req = httptest.NewRequest(method, target, nil)
@@ -45,7 +45,9 @@ func TestFavoritesTogglePersists(t *testing.T) {
 		var out struct {
 			Favorites []string `json:"favorites"`
 		}
-		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode favorites: %v (body %s)", err, rec.Body.String())
+		}
 		return out.Favorites
 	}
 

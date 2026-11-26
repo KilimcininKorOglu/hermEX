@@ -31,7 +31,7 @@ func TestDiagnosticsSurfacesOwnFailedDeliveries(t *testing.T) {
 	secret := []byte("diagnostics-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, spool, "mail.hermex.test", secret, "", false)
 	do := func(target string) *httptest.ResponseRecorder {
-		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: "/tmp/alice", Exp: time.Now().Add(time.Hour).Unix()})
+		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: "/tmp/alice", Exp: time.Now().Add(time.Hour).Unix()})
 		req := httptest.NewRequest(http.MethodGet, target, nil)
 		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
 		rec := httptest.NewRecorder()

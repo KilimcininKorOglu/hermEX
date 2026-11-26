@@ -33,7 +33,7 @@ func TestContactRichFieldsRoundTrip(t *testing.T) {
 	secret := []byte("contacts-rich-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
 	do := func(method, target, body string) *httptest.ResponseRecorder {
-		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
 		var req *http.Request
 		if body == "" {
 			req = httptest.NewRequest(method, target, nil)
@@ -119,7 +119,7 @@ func TestContactPhotoRoundTrip(t *testing.T) {
 	secret := []byte("contacts-photo-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
 	do := func(method, target, body string, contentType string) *httptest.ResponseRecorder {
-		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
 		var req *http.Request
 		if body == "" {
 			req = httptest.NewRequest(method, target, nil)
@@ -192,7 +192,7 @@ func TestContactExport(t *testing.T) {
 	secret := []byte("contacts-export-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
 	do := func(method, target, body string) *httptest.ResponseRecorder {
-		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
 		var req *http.Request
 		if body == "" {
 			req = httptest.NewRequest(method, target, nil)
@@ -248,7 +248,7 @@ func TestContactExportDistributionList(t *testing.T) {
 	secret := []byte("contacts-dl-export-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
 	do := func(method, target, body string) *httptest.ResponseRecorder {
-		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
 		var req *http.Request
 		if body == "" {
 			req = httptest.NewRequest(method, target, nil)
@@ -332,7 +332,8 @@ func TestContactEditKeepsIdPhotoAndForeignProperties(t *testing.T) {
 	}
 	// PidTagHobbies (MS-OXPROPS), a contact property the webmail editor has no field for.
 	hobbies := mapi.PropTag(0x3A43001F)
-	mid, _ := strconv.ParseInt(id, 10, 64)
+	mid, err := strconv.ParseInt(id, 10, 64)
+	mustNoErr(t, "parse the contact id", err)
 	setOnStore(t, mbox, mid, hobbies, "chess")
 
 	edit := func(body string) contactJSON {
@@ -367,7 +368,10 @@ func TestContactEditKeepsIdPhotoAndForeignProperties(t *testing.T) {
 	if v := propString(msg, hobbies); v != "chess" {
 		t.Errorf("hobbies = %q, want the other client's value kept", v)
 	}
-	c, _ := contactFromMessage(st, mid, msg, oxvcard.Options{Resolver: st.GetNamedPropIDs})
+	c, ok := contactFromMessage(st, mid, msg, oxvcard.Options{Resolver: st.GetNamedPropIDs})
+	if !ok {
+		t.Fatal("the stored contact could not be read back")
+	}
 	if c.JobTitle != "" || c.HomeCity != "Izmir" {
 		t.Errorf("jobTitle = %q, homeCity = %q; want the cleared title gone and the new city stored", c.JobTitle, c.HomeCity)
 	}

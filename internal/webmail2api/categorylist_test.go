@@ -26,7 +26,7 @@ func categoryHarness(t *testing.T) (func(method, target, body string) *httptest.
 	secret := []byte("category-list-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
 	return func(method, target, body string) *httptest.ResponseRecorder {
-		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
 		var req *http.Request
 		if body == "" {
 			req = httptest.NewRequest(method, target, nil)
@@ -196,7 +196,10 @@ func TestCategoryListSeedsFromTheOlderList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, _ := sharedSettings(st)
+	m, ok := sharedSettings(st)
+	if !ok {
+		t.Fatal("read the shared settings")
+	}
 	m["categories"] = json.RawMessage(`[{"name":"Old","color":"#e7a1a2"}]`)
 	if err := saveSharedSettings(st, m); err != nil {
 		t.Fatal(err)

@@ -33,7 +33,7 @@ func TestExportSelectedAsZip(t *testing.T) {
 	secret := []byte("export-zip-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
 	get := func(query string) *httptest.ResponseRecorder {
-		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/mail/export-zip"+query, nil)
 		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
 		rec := httptest.NewRecorder()
@@ -78,8 +78,9 @@ func zipEntries(t *testing.T, rec *httptest.ResponseRecorder) map[string][]byte 
 	for _, f := range zr.File {
 		rc, err := f.Open()
 		mustNoErr(t, "open entry "+f.Name, err)
-		b, _ := io.ReadAll(rc)
+		b, err := io.ReadAll(rc)
 		rc.Close()
+		mustNoErr(t, "read entry "+f.Name, err)
 		out[f.Name] = b
 	}
 	return out

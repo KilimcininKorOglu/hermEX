@@ -37,7 +37,7 @@ func TestCopyMessageToFolder(t *testing.T) {
 
 	secret := []byte("copy-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
-	token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+	token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
 	body := strings.NewReader(`{"id":"inbox:` + strconv.FormatUint(uint64(uid), 10) + `","to":"` + customSlug(pfid) + `"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/mail/copy", body)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
