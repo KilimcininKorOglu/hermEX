@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -190,6 +191,8 @@ func (s *Server) handleUIDeleteMList(w http.ResponseWriter, r *http.Request) {
 func (s *Server) mlistStatus(found bool, err error, what string) map[string]any {
 	data := map[string]any{}
 	switch {
+	case errors.Is(err, directory.ErrMListOwnerScope):
+		data["Error"] = "mlistDetail.ownerScope"
 	case err != nil:
 		data["Error"] = s.notice(msg("mlistDetail.saveFailed", what), err)
 	case !found:

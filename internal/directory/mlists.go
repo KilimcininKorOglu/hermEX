@@ -371,6 +371,11 @@ func (d *SQLDirectory) ListMListsOwnedBy(owner string) ([]MListInfo, error) {
 	return out, rows.Err()
 }
 
+// ErrMListOwnerScope refuses a list owner that is no account the list can reach.
+// The owner manages the list's members from webmail, a grant that stays inside the
+// list's organization like every other mailbox grant.
+var ErrMListOwnerScope = errors.New("directory: a list owner must be an account of the list's organization")
+
 // SetMListOwner sets or clears a distribution list's owner (the Exchange managedBy
 // attribute): the address of the user who manages it. An empty owner clears it. It
 // reports whether the list existed.
@@ -382,6 +387,13 @@ func (d *SQLDirectory) SetMListOwner(listname, owner string) (bool, error) {
 	owner = strings.ToLower(strings.TrimSpace(owner))
 	var val any
 	if owner != "" {
+		reach, err := MayReach(d, listname, owner)
+		if err != nil {
+			return false, err
+		}
+		if !reach {
+			return false, ErrMListOwnerScope
+		}
 		val = owner
 	}
 	_, err = d.db.Exec(`UPDATE mlists SET owner = ? WHERE id = ?`, val, id)

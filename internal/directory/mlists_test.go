@@ -294,6 +294,29 @@ func TestMListOwner(t *testing.T) {
 	wantEq(t, "SetMListOwner found an unknown list", ghost, false)
 }
 
+// TestMListOwnerStaysInTheListsScope proves an owner is an account the list can
+// reach: ownership lets that account manage the list's members from webmail, so
+// it is a grant and stays inside the list's organization like every other one.
+// A refused owner leaves the stored owner as it was.
+func TestMListOwnerStaysInTheListsScope(t *testing.T) {
+	d := mlistTestDir(t)
+	mkList(t, d, "crew@hermex.test", mlistTypeNormal, mlistPrivAll)
+	_, err := d.SetMListOwner("crew@hermex.test", "alice@hermex.test")
+	mustNoErr(t, "set the owner", err)
+
+	for _, bad := range []string{"dave@partner.test", "ghost@hermex.test", "bob", "Bob <bob@hermex.test>"} {
+		_, err := d.SetMListOwner("crew@hermex.test", bad)
+		if !errors.Is(err, ErrMListOwnerScope) {
+			t.Errorf("owner %q: err = %v, want ErrMListOwnerScope", bad, err)
+		}
+		wantEq(t, "the owner after refusing "+bad, mustOneMList(t, d, "after a refused owner").Owner, "alice@hermex.test")
+	}
+
+	_, err = d.SetMListOwner("crew@hermex.test", "  BOB@Hermex.Test ")
+	mustNoErr(t, "set a padded mixed-case owner", err)
+	wantEq(t, "the normalized owner", mustOneMList(t, d, "after a padded owner").Owner, "bob@hermex.test")
+}
+
 // mustOneMList reads the mailing-list summary, requiring exactly one list.
 func mustOneMList(t *testing.T, d *SQLDirectory, what string) MListInfo {
 	t.Helper()

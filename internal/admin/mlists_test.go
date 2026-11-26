@@ -91,6 +91,26 @@ func TestUIMListOwner(t *testing.T) {
 	}
 }
 
+// TestUIMListOwnerOutsideTheOrg proves an owner the directory refuses as outside
+// the list's organization is named on the page, not reported as a save failure.
+func TestUIMListOwnerOutsideTheOrg(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		mlists:    []directory.MListInfo{{Listname: "team@hermex.test"}},
+		createErr: directory.ErrMListOwnerScope,
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPUT(t, ts, "/admin/ui/mlists/team@hermex.test/owner", session, csrf,
+		url.Values{"owner": {"dave@partner.test"}})
+	body := readBody(t, resp)
+	resp.Body.Close()
+	if !strings.Contains(string(body), "organization") {
+		t.Errorf("the refusal does not name the organization rule:\n%s", body)
+	}
+}
+
 // TestUIDeleteMList proves deletion reaches the directory and redirects htmx back
 // to the lists page.
 func TestUIDeleteMList(t *testing.T) {

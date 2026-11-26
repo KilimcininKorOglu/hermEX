@@ -285,7 +285,8 @@
     "whatSenders": "permitted senders",
     "whatOwner": "owner",
     "saveFailed": "Could not save {0}.",
-    "noSuchList": "No such list."
+    "noSuchList": "No such list.",
+    "ownerScope": "The owner must be an account of this list's organization."
   },
   "contacts": {
     "title": "Contacts",

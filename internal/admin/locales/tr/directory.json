@@ -285,7 +285,8 @@
     "whatSenders": "İzin verilen gönderenler",
     "whatOwner": "Sahip",
     "saveFailed": "{0} kaydedilemedi.",
-    "noSuchList": "Böyle bir liste yok."
+    "noSuchList": "Böyle bir liste yok.",
+    "ownerScope": "Sahip, bu listenin kurumundaki bir hesap olmalı."
   },
   "contacts": {
     "title": "Kişiler",
