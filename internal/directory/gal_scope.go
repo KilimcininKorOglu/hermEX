@@ -63,9 +63,14 @@ func (d *SQLDirectory) SameScope(caller, other string) (bool, error) {
 // speaks for the target's own organization only, as Exchange's Default covers
 // the authenticated users of that organization, so a mailbox in another scope is
 // never opened for the caller. Their own mailbox is always reachable; a
-// directory without a scope model reaches no one else, failing closed.
+// directory without a scope model reaches no one else, failing closed. A blank
+// caller is unbound and reaches nothing, a blank target included.
 func MayReach(dir any, caller, other string) (bool, error) {
-	if strings.EqualFold(strings.TrimSpace(caller), strings.TrimSpace(other)) {
+	caller = strings.TrimSpace(caller)
+	if caller == "" {
+		return false, nil
+	}
+	if strings.EqualFold(caller, strings.TrimSpace(other)) {
 		return true, nil
 	}
 	sc, ok := dir.(ScopeChecker)

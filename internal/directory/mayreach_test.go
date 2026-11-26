@@ -18,6 +18,11 @@ func TestMayReachFailsClosed(t *testing.T) {
 		{accs, "a@one.test", "ghost@one.test", false},
 		{struct{}{}, "a@one.test", "b@one.test", false},
 		{struct{}{}, "a@one.test", "a@one.test", true},
+		// An unbound caller reaches nothing, not even an equally blank target.
+		{accs, "", "", false},
+		{accs, "  ", " ", false},
+		{struct{}{}, "", "", false},
+		{accs, "", "a@one.test", false},
 	} {
 		got, err := MayReach(c.dir, c.caller, c.other)
 		if err != nil || got != c.want {
