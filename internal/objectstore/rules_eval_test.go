@@ -591,7 +591,29 @@ func TestCompoundRuleRoundTrips(t *testing.T) {
 	if _, err := s.MessageByUID(inbox, subjOnly.UID); err != nil {
 		t.Errorf("subject-only message should remain in inbox: %v", err)
 	}
-	_ = both
+	if _, err := s.MessageByUID(inbox, both.UID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("the message matching both leaves is still in the inbox: %v", err)
+	}
+}
+
+// TestRuleMoveToADeletedFolderKeepsTheMessage: a stored move rule can outlive
+// its target folder. Running it must fail and leave the message in the Inbox,
+// never delete it from the source with nowhere to file it.
+func TestRuleMoveToADeletedFolderKeepsTheMessage(t *testing.T) {
+	s := openSeededStore(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+	gone := mustCreateFolder(t, s, nil, "Gone")
+	mustNoErr(t, "delete the target", s.DeleteFolder(gone))
+	info := deliverTo(t, s, inbox, ruleMsg("invoice", "a@example.com", ""))
+
+	// #nosec G115 -- test folder ids are small positive store ids
+	move := mapi.MoveCopyAction{SameStore: true, FolderEID: mapi.SVREID{FolderID: mapi.EID(gone)}}
+	if _, err := s.moveRuleMessage(inbox, info.UID, move); err == nil {
+		t.Fatal("a rule move into a deleted folder succeeded")
+	}
+	if _, err := s.MessageByUID(inbox, info.UID); err != nil {
+		t.Errorf("the message left the Inbox: %v", err)
+	}
 }
 
 // TestRuleExceptionRoundTrips de-risks the rule-exception form: a
