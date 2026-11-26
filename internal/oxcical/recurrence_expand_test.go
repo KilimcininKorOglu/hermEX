@@ -207,6 +207,16 @@ func fortnightOf(start, ws time.Time) []string {
 	return out
 }
 
+// TestOccurrencesHonoursTheBound covers a rule a sender controls: a window of
+// decades returns no more instances than the caller's bound.
+func TestOccurrencesHonoursTheBound(t *testing.T) {
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	occ := mustRRule(t, "FREQ=DAILY").Occurrences(start, start, start.AddDate(30, 0, 0), 5)
+	if len(occ) != 5 {
+		t.Errorf("bounded expansion = %d instances, want the bound 5", len(occ))
+	}
+}
+
 // TestOccurrencesWindowOffset confirms pre-window occurrences are skipped from the
 // result but the window's own instances are returned.
 func TestOccurrencesWindowOffset(t *testing.T) {
