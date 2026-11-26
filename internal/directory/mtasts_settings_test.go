@@ -67,7 +67,7 @@ func TestMTASTSSettingsRefuseAnUnknownMode(t *testing.T) {
 	d := setupMTASTSSettings(t)
 	want := MTASTSSettings{Enabled: true, Mode: "testing", MaxAge: 86400}
 	mustNoErr(t, "save the starting settings", d.SetMTASTSSettings(want))
-	for _, bad := range []string{"", "bogus", "Enforce", " enforce", "testing\r\nmx: *.evil.example"} {
+	for _, bad := range []string{"", "bogus", "Enforce", " enforce", "testing\r\nmx: *", "none\n"} {
 		if err := d.SetMTASTSSettings(MTASTSSettings{Enabled: true, Mode: bad, MaxAge: 86400}); err == nil {
 			t.Errorf("mode %q was accepted", bad)
 		}
