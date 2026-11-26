@@ -32,3 +32,25 @@ func TestSetUserLocale(t *testing.T) {
 	wantEq(t, "the password still authenticates after a locale write", authed, true)
 	wantEq(t, "maildir after a locale write", after.Maildir, before.Maildir)
 }
+
+// TestSetUserLocaleRefusalKeepsTheStoredPair proves a zone that is not an IANA name
+// (a path, the server's own "Local") and a language outside the supported set are
+// refused, the same rule the preference write applies, and the stored pair stays.
+func TestSetUserLocaleRefusalKeepsTheStoredPair(t *testing.T) {
+	d, _ := freshDirectory(t)
+	root := t.TempDir()
+	mustCreateDomain(t, d, root, "acme.test")
+	mustCreateUser(t, d, root, "u@acme.test", "password1")
+	_, err := d.SetUserLocale("u@acme.test", "Europe/Istanbul", "tr")
+	mustNoErr(t, "set user locale", err)
+	for _, bad := range [][2]string{{"Mars/Olympus", "tr"}, {"../../etc/passwd", "tr"}, {"Local", "tr"}, {"Europe/Istanbul", "xx"}, {"Europe/Istanbul", "tr\r\nX: y"}} {
+		_, err := d.SetUserLocale("u@acme.test", bad[0], bad[1])
+		wantErr(t, "the locale "+bad[0]+"/"+bad[1]+" was accepted", err)
+		u := mustGetUser(t, d, "u@acme.test")
+		wantEq(t, "timezone after refusing "+bad[0], u.Timezone, "Europe/Istanbul")
+		wantEq(t, "lang after refusing "+bad[1], u.Lang, "tr")
+	}
+	ok, err := d.SetUserLocale("u@acme.test", "", "")
+	mustNoErr(t, "clear the locale", err)
+	wantEq(t, "the clear found the user", ok, true)
+}

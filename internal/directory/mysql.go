@@ -918,6 +918,9 @@ func (d *SQLDirectory) storePassword(username, password string) (bool, error) {
 // webmail-editable subset of their directory record, leaving every other column
 // untouched. It reports whether a matching row was updated.
 func (d *SQLDirectory) SetUserLocale(username, timezone, lang string) (bool, error) {
+	if !ValidPrefs(UserPrefsUpdate{Lang: &lang, Timezone: &timezone}) {
+		return false, ErrInvalidPref
+	}
 	res, err := d.db.Exec(`UPDATE users SET timezone = ?, lang = ? WHERE username = ?`,
 		timezone, lang, strings.ToLower(strings.TrimSpace(username)))
 	if err != nil {
