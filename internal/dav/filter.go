@@ -3,6 +3,8 @@ package dav
 import (
 	"strings"
 	"time"
+
+	"hermex/internal/oxcical"
 )
 
 // CalDAV/CardDAV query filters (RFC 4791 §9.7, RFC 6352 §10.5). The filter tree is
@@ -391,7 +393,7 @@ func eventSpan(c *icalNode) (start, end time.Time, ok bool) {
 			end = e
 		}
 	} else if du := c.propsByName("DURATION"); len(du) > 0 {
-		if d, ok := parseDuration(du[0].value); ok {
+		if d, ok := oxcical.ParseDuration(du[0].value); ok {
 			end = start.Add(d)
 		}
 	} else if allDay {
@@ -476,84 +478,6 @@ func parseDateTime(p icalProp, v string) (time.Time, bool) {
 		return dt.UTC(), true
 	}
 	return time.Time{}, false
-}
-
-// parseDuration parses an RFC 5545 DURATION (weeks/days/hours/minutes/seconds).
-func parseDuration(s string) (time.Duration, bool) {
-	body, neg, ok := splitDurationSign(strings.TrimSpace(s))
-	if !ok {
-		return 0, false
-	}
-	d := sumDurationUnits(body)
-	if neg {
-		return -d, true
-	}
-	return d, true
-}
-
-// splitDurationSign strips the optional sign and the mandatory "P" designator,
-// returning the unit sequence that follows.
-func splitDurationSign(s string) (body string, neg, ok bool) {
-	switch {
-	case strings.HasPrefix(s, "-"):
-		neg, s = true, s[1:]
-	case strings.HasPrefix(s, "+"):
-		s = s[1:]
-	}
-	if !strings.HasPrefix(s, "P") {
-		return "", false, false
-	}
-	return s[1:], neg, true
-}
-
-// sumDurationUnits adds up the "<number><unit>" pairs of a duration body. The "T"
-// designator switches to the time part, where "M" means minutes rather than months.
-func sumDurationUnits(s string) time.Duration {
-	var d time.Duration
-	inTime := false
-	num := ""
-	for i := 0; i < len(s); i++ {
-		ch := s[i]
-		switch {
-		case ch == 'T':
-			inTime = true
-		case ch >= '0' && ch <= '9':
-			num += string(ch)
-		default:
-			d += durationUnit(ch, parseDigits(num), inTime)
-			num = ""
-		}
-	}
-	return d
-}
-
-// durationUnit scales a count by its unit designator; an unknown designator, and a
-// month "M" outside the time part, contribute nothing.
-func durationUnit(unit byte, n int, inTime bool) time.Duration {
-	switch unit {
-	case 'W':
-		return time.Duration(n) * 7 * 24 * time.Hour
-	case 'D':
-		return time.Duration(n) * 24 * time.Hour
-	case 'H':
-		return time.Duration(n) * time.Hour
-	case 'M':
-		if inTime {
-			return time.Duration(n) * time.Minute
-		}
-	case 'S':
-		return time.Duration(n) * time.Second
-	}
-	return 0
-}
-
-// parseDigits reads an all-digit string as an integer; an empty string is zero.
-func parseDigits(s string) int {
-	n := 0
-	for _, c := range s {
-		n = n*10 + int(c-'0')
-	}
-	return n
 }
 
 // unescapeText reverses RFC 5545/6350 TEXT escaping for matching.

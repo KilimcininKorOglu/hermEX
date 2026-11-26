@@ -299,6 +299,10 @@ func formatICalUTC(t time.Time) string { return t.UTC().Format("20060102T150405Z
 // formatICalDate renders an instant as an iCalendar DATE value (date only).
 func formatICalDate(t time.Time) string { return t.UTC().Format("20060102") }
 
+// ParseDuration parses an RFC 5545 DURATION value for a caller outside this
+// package; ok is false for a value parseICalDuration refuses.
+func ParseDuration(s string) (time.Duration, bool) { return parseICalDuration(s) }
+
 // parseICalDuration parses an RFC 5545 DURATION (e.g. "PT15M", "-PT1H30M", "P1D",
 // "P1W") into a signed Go duration. Month/year designators are not supported.
 func parseICalDuration(s string) (time.Duration, bool) {
