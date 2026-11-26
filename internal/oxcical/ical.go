@@ -3,6 +3,7 @@ package oxcical
 import (
 	"bytes"
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -305,7 +306,10 @@ func parseICalDuration(s string) (time.Duration, bool) {
 	if !ok {
 		return 0, false
 	}
-	d := sumDurationUnits(body)
+	d, ok := sumDurationUnits(body)
+	if !ok {
+		return 0, false
+	}
 	if neg {
 		return -d, true
 	}
@@ -329,7 +333,9 @@ func splitDurationSign(s string) (body string, neg, ok bool) {
 
 // sumDurationUnits adds up the "<number><unit>" pairs of a duration body. The "T"
 // designator switches to the time part, where "M" means minutes rather than months.
-func sumDurationUnits(s string) time.Duration {
+// ok is false when a designator has no digits, digits have no designator (RFC 5545
+// section 3.3.6), or the total does not fit a time.Duration (about 292 years).
+func sumDurationUnits(s string) (time.Duration, bool) {
 	var d time.Duration
 	inTime := false
 	num := ""
@@ -341,30 +347,47 @@ func sumDurationUnits(s string) time.Duration {
 		case ch >= '0' && ch <= '9':
 			num += string(ch)
 		default:
-			n, _ := strconv.Atoi(num)
-			d += durationUnit(ch, n, inTime)
+			part, ok := durationPart(num, ch, inTime)
+			if !ok || part > math.MaxInt64-d {
+				return 0, false
+			}
+			d += part
 			num = ""
 		}
 	}
-	return d
+	return d, num == ""
 }
 
-// durationUnit scales a count by its unit designator. Month and year designators
+// durationPart is one "<number><unit>" pair as a duration. ok is false when the
+// number is missing or the product does not fit a time.Duration.
+func durationPart(num string, unit byte, inTime bool) (time.Duration, bool) {
+	n, err := strconv.ParseInt(num, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	scale := durationUnit(unit, inTime)
+	if scale != 0 && n > math.MaxInt64/int64(scale) {
+		return 0, false
+	}
+	return time.Duration(n) * scale, true
+}
+
+// durationUnit is the length of one unit designator. Month and year designators
 // are not supported, and an "M" outside the time part contributes nothing.
-func durationUnit(unit byte, n int, inTime bool) time.Duration {
+func durationUnit(unit byte, inTime bool) time.Duration {
 	switch unit {
 	case 'W':
-		return time.Duration(n) * 7 * 24 * time.Hour
+		return 7 * 24 * time.Hour
 	case 'D':
-		return time.Duration(n) * 24 * time.Hour
+		return 24 * time.Hour
 	case 'H':
-		return time.Duration(n) * time.Hour
+		return time.Hour
 	case 'M':
 		if inTime {
-			return time.Duration(n) * time.Minute
+			return time.Minute
 		}
 	case 'S':
-		return time.Duration(n) * time.Second
+		return time.Second
 	}
 	return 0
 }
