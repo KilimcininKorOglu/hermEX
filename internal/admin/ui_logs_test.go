@@ -2,7 +2,6 @@ package admin
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -56,7 +55,7 @@ func TestUILogs(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("logs page status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "auth.ok") || !strings.Contains(string(body), "imap") ||
 		!strings.Contains(string(body), "1.2.3.4") {
 		t.Errorf("logs page missing the event details: %s", body)
@@ -75,7 +74,7 @@ func TestUILogsDisabled(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("logs page status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "not configured") {
 		t.Errorf("logs page should report logging unconfigured: %s", body)
 	}

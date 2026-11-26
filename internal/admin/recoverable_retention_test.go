@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -18,7 +17,7 @@ func TestSaveRecoverableRetention(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/recoverable-retention", session, csrf, url.Values{"recoverable_retention_days": {"30"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Recoverable Items retention saved") {
 		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", resp.StatusCode, body)
@@ -61,7 +60,7 @@ func TestSaveRecoverableRetentionKeepForever(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/recoverable-retention", session, csrf, url.Values{"recoverable_retention_days": {"0"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "keep forever") {
 		t.Fatalf("save = %d body=%q, want 200 acknowledging keep-forever", resp.StatusCode, body)

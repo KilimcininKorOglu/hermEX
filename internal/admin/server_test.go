@@ -1608,6 +1608,17 @@ func readBody(t *testing.T, resp *http.Response) []byte {
 	return body
 }
 
+// newRequest builds a client request and fails the test when it cannot, so a
+// malformed URL is never sent as a nil request.
+func newRequest(t *testing.T, method, url string, body io.Reader) *http.Request {
+	t.Helper()
+	req, err := http.NewRequest(method, url, body)
+	if err != nil {
+		t.Fatalf("build %s %s: %v", method, url, err)
+	}
+	return req
+}
+
 func login(t *testing.T, ts *httptest.Server) (*http.Response, string) {
 	t.Helper()
 	resp, err := http.Post(ts.URL+"/admin/login", "application/json",
@@ -1655,7 +1666,7 @@ func TestAdminLoginAndWhoami(t *testing.T) {
 		t.Fatalf("login set no session cookie: %q", setCookie)
 	}
 
-	req, _ := http.NewRequest("GET", ts.URL+"/admin/whoami", nil)
+	req := newRequest(t, "GET", ts.URL+"/admin/whoami", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: cookieValue(setCookie, sessionCookie)})
 	who, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -1711,7 +1722,7 @@ func TestAdminCSRF(t *testing.T) {
 	}
 
 	withCookies := func(header string) int {
-		req, _ := http.NewRequest("POST", ts.URL+"/admin/logout", nil)
+		req := newRequest(t, "POST", ts.URL+"/admin/logout", nil)
 		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 		req.AddCookie(&http.Cookie{Name: csrfCookie, Value: csrf})
 		if header != "" {

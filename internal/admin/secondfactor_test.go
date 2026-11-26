@@ -2,7 +2,6 @@ package admin
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -120,7 +119,7 @@ func apiLogin(t *testing.T, client *http.Client, ts *httptest.Server) map[string
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("login = %d: %s", resp.StatusCode, body)
 	}

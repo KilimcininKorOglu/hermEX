@@ -42,7 +42,7 @@ func TestUILoginSubmit(t *testing.T) {
 	ts := adminServer(t, d)
 
 	form := url.Values{"login": {"admin@hermex.test"}, "password": {"pw"}}
-	req, _ := http.NewRequest("POST", ts.URL+"/admin/ui/login", strings.NewReader(form.Encode()))
+	req := newRequest(t, "POST", ts.URL+"/admin/ui/login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := noRedirectClient().Do(req)
 	if err != nil {
@@ -74,7 +74,7 @@ func TestImpersonationRoleOpensNoPanelSession(t *testing.T) {
 	ts := adminServer(t, d)
 
 	form := url.Values{"login": {"svc@hermex.test"}, "password": {"pw"}}
-	req, _ := http.NewRequest("POST", ts.URL+"/admin/ui/login", strings.NewReader(form.Encode()))
+	req := newRequest(t, "POST", ts.URL+"/admin/ui/login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := noRedirectClient().Do(req)
 	if err != nil {
@@ -95,7 +95,7 @@ func TestImpersonationRoleOpensNoPanelSession(t *testing.T) {
 func TestUILoginSubmitInvalid(t *testing.T) {
 	ts := adminServer(t, &fakeDir{authOK: false})
 	form := url.Values{"login": {"x@hermex.test"}, "password": {"wrong"}}
-	req, _ := http.NewRequest("POST", ts.URL+"/admin/ui/login", strings.NewReader(form.Encode()))
+	req := newRequest(t, "POST", ts.URL+"/admin/ui/login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := noRedirectClient().Do(req)
 	if err != nil {
@@ -127,7 +127,7 @@ func TestUIDashboard(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
-	req, _ := http.NewRequest("GET", ts.URL+"/admin/ui/", nil)
+	req := newRequest(t, "GET", ts.URL+"/admin/ui/", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 	resp, err := noRedirectClient().Do(req)
 	if err != nil {
@@ -151,7 +151,7 @@ func TestUIDashboard(t *testing.T) {
 // session.
 func TestUIDashboardNoSession(t *testing.T) {
 	ts := adminServer(t, &fakeDir{})
-	req, _ := http.NewRequest("GET", ts.URL+"/admin/ui/", nil)
+	req := newRequest(t, "GET", ts.URL+"/admin/ui/", nil)
 	resp, err := noRedirectClient().Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -171,7 +171,7 @@ func TestUILogout(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	logout := func(field string) *http.Response {
-		req, _ := http.NewRequest("POST", ts.URL+"/admin/ui/logout",
+		req := newRequest(t, "POST", ts.URL+"/admin/ui/logout",
 			strings.NewReader(url.Values{"_csrf": {field}}.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
@@ -225,7 +225,7 @@ func TestUIDashboardScopesCountsToTheCallersDomains(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
-	req, _ := http.NewRequest("GET", ts.URL+"/admin/ui/", nil)
+	req := newRequest(t, "GET", ts.URL+"/admin/ui/", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 	resp, err := noRedirectClient().Do(req)
 	if err != nil {
@@ -261,7 +261,7 @@ func TestUIDashboardReportsADirectoryFailure(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
-	req, _ := http.NewRequest("GET", ts.URL+"/admin/ui/", nil)
+	req := newRequest(t, "GET", ts.URL+"/admin/ui/", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 	resp, err := noRedirectClient().Do(req)
 	if err != nil {

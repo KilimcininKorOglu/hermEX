@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/url"
 	"strings"
 	"testing"
@@ -31,7 +30,7 @@ func TestSaveUserSpamThreshold(t *testing.T) {
 
 	d.userSpamThresholdSet = false
 	resp = htmxPUT(t, ts, "/admin/ui/users/alice@test/spam-threshold", session, csrf, url.Values{"spam_threshold": {"0"}})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if d.userSpamThresholdSet {
 		t.Error("a threshold below 1 must not be persisted")

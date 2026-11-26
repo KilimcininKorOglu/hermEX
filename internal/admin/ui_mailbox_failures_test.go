@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -30,7 +29,7 @@ func TestUIMailboxFailures(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("mailbox failures page status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "alice@hermex.test") ||
 		!strings.Contains(string(body), "not a database") {
 		t.Errorf("mailbox failures page missing the recorded failure: %s", body)
@@ -53,7 +52,7 @@ func TestUIMailboxFailuresDisabled(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("mailbox failures page status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "not configured") {
 		t.Errorf("the page should report logging unconfigured: %s", body)
 	}

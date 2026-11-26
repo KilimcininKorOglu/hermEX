@@ -2,7 +2,6 @@ package admin
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -24,7 +23,7 @@ func TestTaskqPageAndStatus(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/ui/taskq", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("taskq page = %d, want 200", resp.StatusCode)

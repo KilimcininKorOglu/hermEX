@@ -2,7 +2,6 @@ package admin
 
 import (
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -65,7 +64,7 @@ func TestCreateUserDoesNotLeakDriverText(t *testing.T) {
 
 	resp := authedPOST(t, ts, "/admin/users", session, csrf,
 		`{"email":"bob@hermex.test","password":"pw"}`)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 
 	if resp.StatusCode != http.StatusBadRequest {
@@ -192,7 +191,7 @@ func TestSyncPolicyValidationStillNamesTheField(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := authedReq(t, ts, http.MethodPut, "/admin/syncpolicy", session, csrf, `{"NoSuchField":1}`)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("unknown policy field = %d, want 400: %s", resp.StatusCode, body)

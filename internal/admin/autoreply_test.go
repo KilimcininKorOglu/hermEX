@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,7 +15,7 @@ import (
 func saveAutoReplyPrefix(t *testing.T, ts *httptest.Server, session, csrf, prefix string) int {
 	t.Helper()
 	form := url.Values{"subject_prefix": {prefix}}.Encode()
-	req, _ := http.NewRequest("POST", ts.URL+"/admin/ui/antispam/autoreply", strings.NewReader(form))
+	req := newRequest(t, "POST", ts.URL+"/admin/ui/antispam/autoreply", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 	req.AddCookie(&http.Cookie{Name: csrfCookie, Value: csrf})
@@ -38,7 +37,7 @@ func TestTheSettingsPageOffersTheAutoReplyPrefix(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/ui/settings", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	page := string(body)
 	if !strings.Contains(page, "/admin/ui/antispam/autoreply") {

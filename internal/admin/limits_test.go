@@ -291,7 +291,7 @@ func TestFetchPolicyIsSystemAdminOnly(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	// The page renders the switch, off by default.
-	req, _ := http.NewRequest("GET", ts.URL+"/admin/ui/limits", nil)
+	req := newRequest(t, "GET", ts.URL+"/admin/ui/limits", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 	resp, err := noRedirectClient().Do(req)
 	if err != nil {

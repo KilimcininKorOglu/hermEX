@@ -30,7 +30,8 @@ func TestQuarantineListReleaseDelete(t *testing.T) {
 	mustNoErr(t, err, "append the first junk message")
 	_, err = st.AppendMessage(int64(mapi.PrivateFIDJunk), []byte("Subject: spam two\r\n\r\ndiscount"), when, 0)
 	mustNoErr(t, err, "append the second junk message")
-	junk, _ := st.ListMessages(int64(mapi.PrivateFIDJunk))
+	junk, err := st.ListMessages(int64(mapi.PrivateFIDJunk))
+	mustNoErr(t, err, "list the Junk folder")
 	st.Close()
 	if len(junk) != 2 {
 		t.Fatalf("seeded Junk has %d messages, want 2", len(junk))
@@ -82,7 +83,8 @@ func TestQuarantineActionsRefuseAnUnauthorizedCaller(t *testing.T) {
 	mustNoErr(t, err, "open mailbox")
 	_, err = st.AppendMessage(int64(mapi.PrivateFIDJunk), []byte("Subject: held\r\n\r\nx"), time.Now(), 0)
 	mustNoErr(t, err, "append the junk message")
-	junk, _ := st.ListMessages(int64(mapi.PrivateFIDJunk))
+	junk, err := st.ListMessages(int64(mapi.PrivateFIDJunk))
+	mustNoErr(t, err, "list the Junk folder")
 	st.Close()
 	uid := url.Values{"uid": {strconv.FormatUint(uint64(junk[0].UID), 10)}}
 
@@ -103,7 +105,7 @@ func TestQuarantineActionsRefuseAnUnauthorizedCaller(t *testing.T) {
 		// A cross-site request carries the victim's cookies but cannot read the CSRF
 		// cookie, so its header is missing or wrong.
 		for _, header := range []string{"", "forged"} {
-			req, _ := http.NewRequest("POST", ts.URL+"/admin/ui/users/alice@test/quarantine/"+action,
+			req := newRequest(t, "POST", ts.URL+"/admin/ui/users/alice@test/quarantine/"+action,
 				strings.NewReader(uid.Encode()))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			if header != "" {
@@ -128,7 +130,9 @@ func junkAndInbox(t *testing.T, mbox string) (junk, inbox []objectstore.MessageI
 	st, err := objectstore.Open(mbox)
 	mustNoErr(t, err, "reopen mailbox")
 	defer st.Close()
-	junk, _ = st.ListMessages(int64(mapi.PrivateFIDJunk))
-	inbox, _ = st.ListMessages(int64(mapi.PrivateFIDInbox))
+	junk, err = st.ListMessages(int64(mapi.PrivateFIDJunk))
+	mustNoErr(t, err, "list the Junk folder")
+	inbox, err = st.ListMessages(int64(mapi.PrivateFIDInbox))
+	mustNoErr(t, err, "list the Inbox")
 	return junk, inbox
 }

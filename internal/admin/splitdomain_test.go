@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -23,7 +22,7 @@ func TestUIDomainSplitSave(t *testing.T) {
 	save := func(host string) string {
 		t.Helper()
 		resp := htmxPUT(t, ts, "/admin/ui/domains/1/split", session, csrf, url.Values{"split_relay_host": {host}})
-		body, _ := io.ReadAll(resp.Body)
+		body := readBody(t, resp)
 		resp.Body.Close()
 		return string(body)
 	}

@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"slices"
@@ -28,7 +27,7 @@ func TestUICreateMList(t *testing.T) {
 		t.Errorf("created list = %q type=%d priv=%d, want team@hermex.test type=2 priv=3",
 			d.createdMList, d.createdMListType, d.createdMListPriv)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), `id="mlists-panel"`) {
 		t.Errorf("response is not the lists panel fragment: %s", body)
 	}
@@ -150,7 +149,7 @@ func TestUIMListDetailRenders(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("detail status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	for _, want := range []string{"team@hermex.test", "Members only", "alice@hermex.test"} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("detail page missing %q", want)

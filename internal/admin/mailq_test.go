@@ -2,7 +2,6 @@ package admin
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -38,7 +37,8 @@ func TestMailQueueManage(t *testing.T) {
 	mustNoErr(t, err, "open the relay spool")
 	mustNoErr(t, sp.Enqueue("boss@local.test", []string{"ext@remote.test"},
 		[]byte("Subject: hi\r\n\r\nbody"), time.Unix(1700000000, 0)), "enqueue")
-	entries, _ := sp.List()
+	entries, err := sp.List()
+	mustNoErr(t, err, "list the seeded queue")
 	if len(entries) != 1 {
 		t.Fatalf("seeded %d entries, want 1", len(entries))
 	}
@@ -78,7 +78,7 @@ func TestMailQueueManage(t *testing.T) {
 // CSRF) against the mail-queue API and returns the status code.
 func authedMailqDo(t *testing.T, ts *httptest.Server, method, path, session, csrf string) int {
 	t.Helper()
-	req, _ := http.NewRequest(method, ts.URL+path, nil)
+	req := newRequest(t, method, ts.URL+path, nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 	req.AddCookie(&http.Cookie{Name: csrfCookie, Value: csrf})
 	req.Header.Set(csrfHeader, csrf)
@@ -107,7 +107,8 @@ func TestMailQueueJSONMutations(t *testing.T) {
 		[]byte("Subject: hi\r\n\r\nbody"), time.Unix(1700000000, 0)); err != nil {
 		t.Fatal(err)
 	}
-	entries, _ := sp.List()
+	entries, err := sp.List()
+	mustNoErr(t, err, "list the seeded queue")
 	if len(entries) != 1 {
 		t.Fatalf("seeded %d entries, want 1", len(entries))
 	}
@@ -117,7 +118,7 @@ func TestMailQueueJSONMutations(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	// A flush without the CSRF header is refused (state-changing route).
-	noCSRF, _ := http.NewRequest("POST", ts.URL+"/admin/mailq/"+id+"/retry", nil)
+	noCSRF := newRequest(t, "POST", ts.URL+"/admin/mailq/"+id+"/retry", nil)
 	noCSRF.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 	noCSRF.AddCookie(&http.Cookie{Name: csrfCookie, Value: csrf})
 	if resp, err := http.DefaultClient.Do(noCSRF); err != nil {
@@ -133,21 +134,29 @@ func TestMailQueueJSONMutations(t *testing.T) {
 	if code := authedMailqDo(t, ts, "POST", "/admin/mailq/"+id+"/retry", session, csrf); code != http.StatusNoContent {
 		t.Errorf("JSON flush = %d, want 204", code)
 	}
-	sp, _ = relay.Open(spoolPath)
-	if entries, _ := sp.List(); len(entries) != 1 {
-		t.Errorf("after flush %d entries, want 1 (flush must not drop)", len(entries))
+	if n := spoolCount(t, spoolPath); n != 1 {
+		t.Errorf("after flush %d entries, want 1 (flush must not drop)", n)
 	}
-	_ = sp.Close()
 
 	// Delete answers 204 and removes the entry.
 	if code := authedMailqDo(t, ts, "DELETE", "/admin/mailq/"+id, session, csrf); code != http.StatusNoContent {
 		t.Errorf("JSON delete = %d, want 204", code)
 	}
-	sp, _ = relay.Open(spoolPath)
-	if entries, _ := sp.List(); len(entries) != 0 {
-		t.Errorf("after delete %d entries, want 0", len(entries))
+	if n := spoolCount(t, spoolPath); n != 0 {
+		t.Errorf("after delete %d entries, want 0", n)
 	}
-	_ = sp.Close()
+}
+
+// spoolCount reopens the relay spool and counts its entries, failing the test
+// when the spool cannot be opened or listed.
+func spoolCount(t *testing.T, path string) int {
+	t.Helper()
+	sp, err := relay.Open(path)
+	mustNoErr(t, err, "reopen the relay spool")
+	defer sp.Close()
+	entries, err := sp.List()
+	mustNoErr(t, err, "list the relay spool")
+	return len(entries)
 }
 
 // TestMailQueueRequiresSystem proves an org admin cannot reach the mail-queue page.
@@ -222,7 +231,7 @@ func TestMailQueuePanelIsReachable(t *testing.T) {
 
 	// And the panel answers with the table alone, not the whole page.
 	resp = authedGET(t, ts, "/admin/ui/mailq/panel", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "ext@remote.test") {
 		t.Fatalf("panel (%d) missing the queued recipient:\n%s", resp.StatusCode, body)

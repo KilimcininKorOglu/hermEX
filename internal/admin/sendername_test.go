@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -24,7 +23,7 @@ func TestUIDomainSenderNameSave(t *testing.T) {
 			"sender_name_internal": {"{name} ({title})"},
 			"sender_name_external": {"{name} ({company} - {title})"},
 		})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("ui domain sendername save status %d, want 200", resp.StatusCode)

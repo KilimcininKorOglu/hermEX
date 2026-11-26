@@ -3,7 +3,6 @@ package admin
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -31,7 +30,7 @@ func TestAdminNamedRolesCRUD(t *testing.T) {
 		t.Fatalf("create status %d, want 201", resp.StatusCode)
 	}
 	var created struct{ ID int64 }
-	_ = json.NewDecoder(resp.Body).Decode(&created)
+	mustNoErr(t, json.NewDecoder(resp.Body).Decode(&created), "decode the created role")
 	resp.Body.Close()
 	if created.ID == 0 {
 		t.Fatal("create returned id 0")
@@ -63,7 +62,7 @@ func TestAdminRolePermissionsCatalog(t *testing.T) {
 	ts := adminServer(t, systemAdminDir())
 	session, _ := loginCookies(t, ts)
 	resp := authedGET(t, ts, "/admin/roles/permissions", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d, want 200", resp.StatusCode)

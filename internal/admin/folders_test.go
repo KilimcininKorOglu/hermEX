@@ -17,7 +17,7 @@ import (
 // (the UI panel endpoints authorize every method, GET included).
 func htmxGET(t *testing.T, ts *httptest.Server, path, session, csrf string) *http.Response {
 	t.Helper()
-	req, _ := http.NewRequest("GET", ts.URL+path, nil)
+	req := newRequest(t, "GET", ts.URL+path, nil)
 	req.Header.Set(csrfHeader, csrf)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 	req.AddCookie(&http.Cookie{Name: csrfCookie, Value: csrf})

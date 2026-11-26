@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -24,7 +23,7 @@ func TestUIDomainBrandingSave(t *testing.T) {
 			"app_name": {"Acme Mail"}, "primary_color": {"#ff0000"}, "footer_text": {"Mail by Acme"},
 			"logo_url": {""},
 		})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("ui domain branding save status %d, want 200", resp.StatusCode)

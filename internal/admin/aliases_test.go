@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -25,7 +24,7 @@ func TestAdminListAliases(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("list aliases status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "sales@hermex.test") || !strings.Contains(string(body), "boss@hermex.test") {
 		t.Errorf("list body = %s, want the alias mapping", body)
 	}

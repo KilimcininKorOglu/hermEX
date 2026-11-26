@@ -14,7 +14,7 @@ import (
 // X-CSRF-Token header (the double-submit htmx sends).
 func htmxPOST(t *testing.T, ts *httptest.Server, path, session, csrf string, form url.Values) *http.Response {
 	t.Helper()
-	req, _ := http.NewRequest("POST", ts.URL+path, strings.NewReader(form.Encode()))
+	req := newRequest(t, "POST", ts.URL+path, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set(csrfHeader, csrf)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
@@ -149,7 +149,7 @@ func TestUICreateUserNoCSRF(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
-	req, _ := http.NewRequest("POST", ts.URL+"/admin/ui/users",
+	req := newRequest(t, "POST", ts.URL+"/admin/ui/users",
 		strings.NewReader("local=x&domain=1&password=pw"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})

@@ -2,7 +2,6 @@ package admin
 
 import (
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -67,7 +66,7 @@ func TestGatewayPanelNeverShowsThePassword(t *testing.T) {
 	_, ts, session, csrf := gatewayAdmin(t)
 
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/gateway", session, csrf, gatewayForm())
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 
 	if strings.Contains(string(body), "s3cret") {

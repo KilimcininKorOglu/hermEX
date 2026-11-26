@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,7 +13,7 @@ import (
 // CSRF header.
 func authedDELETE(t *testing.T, ts *httptest.Server, path, session, csrf, body string) *http.Response {
 	t.Helper()
-	req, _ := http.NewRequest("DELETE", ts.URL+path, strings.NewReader(body))
+	req := newRequest(t, "DELETE", ts.URL+path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 	req.AddCookie(&http.Cookie{Name: csrfCookie, Value: csrf})
@@ -40,7 +39,7 @@ func TestAdminListRoles(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("list roles status %d, want 200", resp.StatusCode)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), "system") || !strings.Contains(string(body), "org") {
 		t.Errorf("body = %s, want the roles", body)
 	}

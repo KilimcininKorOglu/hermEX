@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -61,7 +60,7 @@ func TestAFailedReadIsRecordedByTheJSONAPI(t *testing.T) {
 
 		name := tc.path + " " + tc.read
 		resp := authedGET(t, ts, tc.path, session)
-		body, _ := io.ReadAll(resp.Body)
+		body := readBody(t, resp)
 		resp.Body.Close()
 		// The error stays server-side: the client gets a generic message.
 		if strings.Contains(string(body), errReadFailed.Error()) {

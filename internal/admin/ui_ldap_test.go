@@ -292,13 +292,16 @@ func TestTaskWorkerLDAPSync(t *testing.T) {
 	if len(d.upsertedUsers) != 2 {
 		t.Errorf("worker upserted %v, want both directory entries", d.upsertedUsers)
 	}
-	got, ok, _ := d.GetTask(id)
+	got, ok, err := d.GetTask(id)
+	mustNoErr(t, err, "read the task")
 	if !ok || got.Status != directory.TaskDone ||
 		!strings.Contains(got.Message, "a.test: Synced 2 directory entries: 1 created") ||
 		!strings.Contains(got.Message, "b.test: Synced 2 directory entries: 1 created") {
 		t.Errorf("task = %+v, want done with each binding's counts", got)
 	}
-	if ran, _ := srv.runNextTask(); ran {
+	ran, err = srv.runNextTask()
+	mustNoErr(t, err, "run the next task on an empty queue")
+	if ran {
 		t.Errorf("a second runNextTask ran, want the queue empty")
 	}
 }
@@ -342,7 +345,9 @@ func TestTaskWorkerRecordsUnreadableBindings(t *testing.T) {
 	if ran, err := srv.runNextTask(); !ran || err != nil {
 		t.Fatalf("runNextTask ran=%v err=%v, want it to run the task", ran, err)
 	}
-	if got, ok, _ := d.GetTask(id); !ok || got.Status != directory.TaskFailed {
+	got, ok, err := d.GetTask(id)
+	mustNoErr(t, err, "read the task")
+	if !ok || got.Status != directory.TaskFailed {
 		t.Errorf("task = %+v, want failed", got)
 	}
 	if e, ok := sink.find("panel.fail"); !ok || !strings.Contains(e.Err, errReadFailed.Error()) {

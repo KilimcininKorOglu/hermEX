@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -28,7 +27,7 @@ func TestUICreateRoom(t *testing.T) {
 		t.Errorf("created room = %q name=%q cap=%d equip=%v, want boardroom@hermex.test / Boardroom / 12 / true",
 			d.createdRoom, d.createdRoomName, d.createdRoomCap, d.createdRoomEquip)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	if !strings.Contains(string(body), `id="rooms-panel"`) {
 		t.Errorf("response is not the rooms panel fragment: %s", body)
 	}

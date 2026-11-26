@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -31,7 +30,7 @@ func saveDigest(t *testing.T, ts *httptest.Server, enabled bool) string {
 		form.Set("enabled", "1")
 	}
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/digest", session, csrf, form)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("save = %d, want 200", resp.StatusCode)

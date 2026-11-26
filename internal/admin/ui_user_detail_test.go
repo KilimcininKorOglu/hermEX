@@ -14,7 +14,7 @@ import (
 // X-CSRF-Token header (the double-submit htmx sends on hx-put).
 func htmxPUT(t *testing.T, ts *httptest.Server, path, session, csrf string, form url.Values) *http.Response {
 	t.Helper()
-	req, _ := http.NewRequest("PUT", ts.URL+path, strings.NewReader(form.Encode()))
+	req := newRequest(t, "PUT", ts.URL+path, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set(csrfHeader, csrf)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
@@ -129,7 +129,7 @@ func TestUIUserEditRequiresCSRF(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
-	req, _ := http.NewRequest("PUT", ts.URL+"/admin/ui/users/alice@hermex.test", strings.NewReader("status=1"))
+	req := newRequest(t, "PUT", ts.URL+"/admin/ui/users/alice@hermex.test", strings.NewReader("status=1"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 	resp, err := http.DefaultClient.Do(req)

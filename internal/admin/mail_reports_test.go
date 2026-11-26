@@ -273,7 +273,7 @@ func TestUIReportRetentionRequiresSystem(t *testing.T) {
 	ts = adminServer(t, system)
 	session, csrf = loginCookies(t, ts)
 	resp = htmxPOST(t, ts, "/admin/ui/reports/retention", session, csrf, form)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("system admin: status %d, want 200", resp.StatusCode)
@@ -306,7 +306,7 @@ func TestUIDMARCSendingRequiresSystemAndReadsTheWholeForm(t *testing.T) {
 	ts = adminServer(t, system)
 	session, csrf = loginCookies(t, ts)
 	resp = htmxPOST(t, ts, "/admin/ui/reports/dmarc-sending", session, csrf, on)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || !system.reports.dmarcSending.Enabled {
 		t.Fatalf("system admin: status %d, enabled %v; want 200 and on", resp.StatusCode, system.reports.dmarcSending.Enabled)

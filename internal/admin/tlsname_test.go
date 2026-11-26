@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/url"
 	"slices"
 	"strings"
@@ -40,7 +39,7 @@ func TestTLSCertUploadNameMustBeCovered(t *testing.T) {
 		before := len(d.tlsCerts)
 		resp := htmxPOST(t, ts, "/admin/ui/tls/upload", session, csrf,
 			url.Values{"name": {c.name}, "cert": {c.cert}, "key": {c.key}})
-		body, _ := io.ReadAll(resp.Body)
+		body := readBody(t, resp)
 		resp.Body.Close()
 		stored := slices.ContainsFunc(d.tlsCerts, func(ci directory.TLSCertInfo) bool {
 			return ci.Name == strings.ToLower(c.name)

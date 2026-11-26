@@ -12,7 +12,7 @@ import (
 // authedGET issues a GET carrying the session cookie and returns the response.
 func authedGET(t *testing.T, ts *httptest.Server, path, session string) *http.Response {
 	t.Helper()
-	req, _ := http.NewRequest("GET", ts.URL+path, nil)
+	req := newRequest(t, "GET", ts.URL+path, nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -25,7 +25,7 @@ func authedGET(t *testing.T, ts *httptest.Server, path, session string) *http.Re
 // header.
 func authedPOST(t *testing.T, ts *httptest.Server, path, session, csrf, body string) *http.Response {
 	t.Helper()
-	req, _ := http.NewRequest("POST", ts.URL+path, strings.NewReader(body))
+	req := newRequest(t, "POST", ts.URL+path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 	req.AddCookie(&http.Cookie{Name: csrfCookie, Value: csrf})
@@ -231,7 +231,7 @@ func TestAdminCreateDomainNeedsCSRF(t *testing.T) {
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
-	req, _ := http.NewRequest("POST", ts.URL+"/admin/domains", strings.NewReader(`{"name":"x.test"}`))
+	req := newRequest(t, "POST", ts.URL+"/admin/domains", strings.NewReader(`{"name":"x.test"}`))
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

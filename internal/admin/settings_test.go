@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -18,7 +17,7 @@ func TestSettingsPageRenders(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/ui/settings", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("settings page = %d, want 200", resp.StatusCode)
@@ -71,7 +70,7 @@ func TestSettingsPageHoldsTheGatewayLockoutAndFetchPolicy(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/ui/settings", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("settings page = %d, want 200", resp.StatusCode)

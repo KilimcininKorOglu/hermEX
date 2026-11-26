@@ -62,7 +62,7 @@ func TestAdminStaticIsCacheable(t *testing.T) {
 	}
 
 	// A conditional request with the served ETag revalidates to 304.
-	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/admin/static/style.css", nil)
+	req := newRequest(t, http.MethodGet, ts.URL+"/admin/static/style.css", nil)
 	req.Header.Set("If-None-Match", etag)
 	resp2, err := http.DefaultClient.Do(req)
 	if err != nil {

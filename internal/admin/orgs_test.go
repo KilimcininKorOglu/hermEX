@@ -14,7 +14,7 @@ import (
 // header.
 func authedPUT(t *testing.T, ts *httptest.Server, path, session, csrf, body string) *http.Response {
 	t.Helper()
-	req, _ := http.NewRequest("PUT", ts.URL+path, strings.NewReader(body))
+	req := newRequest(t, "PUT", ts.URL+path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 	req.AddCookie(&http.Cookie{Name: csrfCookie, Value: csrf})

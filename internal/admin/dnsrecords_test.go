@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -241,7 +240,7 @@ func TestDomainDetailShowsDNSRecords(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/ui/domains/1", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)

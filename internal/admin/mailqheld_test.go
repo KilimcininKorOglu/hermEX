@@ -25,7 +25,8 @@ func TestMailQueueShowsAHeldDelivery(t *testing.T) {
 	mustNoErr(t, err, "open the relay spool")
 	mustNoErr(t, sp.Enqueue("boss@local.test", []string{"ext@remote.test"},
 		[]byte("Subject: hi\r\n\r\nbody"), time.Unix(1700000000, 0)), "enqueue")
-	entries, _ := sp.List()
+	entries, err := sp.List()
+	mustNoErr(t, err, "list the seeded queue")
 	mustNoErr(t, sp.Hold(entries[0].RecipientID, "held after an internal error"), "hold")
 	_ = sp.Close()
 	id := strconv.FormatInt(entries[0].RecipientID, 10)
@@ -40,7 +41,8 @@ func TestMailQueueShowsAHeldDelivery(t *testing.T) {
 	sp, err = relay.Open(spoolPath)
 	mustNoErr(t, err, "reopen the relay spool")
 	defer sp.Close()
-	after, _ := sp.List()
+	after, err := sp.List()
+	mustNoErr(t, err, "list the queue after the retry")
 	if len(after) != 1 || after[0].Held {
 		t.Errorf("queue after retry = %+v, want the delivery released", after)
 	}

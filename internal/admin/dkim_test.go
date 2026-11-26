@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -29,7 +28,7 @@ func TestDKIMGenerateStoresDisabled(t *testing.T) {
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/domains/1/dkim/generate", session, csrf, url.Values{})
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("generate = %d, want 200", resp.StatusCode)
@@ -78,7 +77,7 @@ func dkimOutputFragment(t *testing.T, ts *httptest.Server, path, session string)
 	t.Helper()
 	resp := authedGET(t, ts, path, session)
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	return resp.StatusCode, string(body)
 }
 

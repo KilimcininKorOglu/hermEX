@@ -158,7 +158,8 @@ func checkAPICreateUser(t *testing.T, ts *httptest.Server, dir *directory.SQLDir
 	t.Helper()
 	cr := authedPOST(t, ts, "/admin/users", session, csrf, `{"email":"intern@hermex.test","password":"password2"}`)
 	wantStatus(t, cr, http.StatusCreated, "API create-user")
-	_, ok, _ := dir.UserID("intern@hermex.test")
+	_, ok, err := dir.UserID("intern@hermex.test")
+	mustNoErr(t, err, "look the API-created user up")
 	wantTrue(t, ok, "the API-created user lands in the directory")
 }
 
@@ -196,7 +197,8 @@ func checkPasswordReset(t *testing.T, ts *httptest.Server, dir *directory.SQLDir
 	_, old := dir.Authenticate("intern@hermex.test", "password2")
 	wantFalse(t, old, "the old password stops authenticating after a reset")
 
-	u, found, _ := dir.GetUser("intern@hermex.test")
+	u, found, err := dir.GetUser("intern@hermex.test")
+	mustNoErr(t, err, "read the reset user")
 	wantTrue(t, found && u.MustChangePassword, "an admin reset sets must_change_password")
 }
 
@@ -204,19 +206,22 @@ func checkPasswordReset(t *testing.T, ts *httptest.Server, dir *directory.SQLDir
 // the real admin_roles table, and confirms an unknown role tier is rejected.
 func checkRoleGrantRevoke(t *testing.T, ts *httptest.Server, dir *directory.SQLDirectory, session, csrf string) {
 	t.Helper()
-	internUID, ok, _ := dir.UserID("intern@hermex.test")
+	internUID, ok, err := dir.UserID("intern@hermex.test")
+	mustNoErr(t, err, "look the intern user up")
 	if !ok {
 		t.Fatal("the intern user vanished")
 	}
 	grant := authedPOST(t, ts, "/admin/users/intern@hermex.test/roles", session, csrf, `{"role":"org","scopeID":5}`)
 	wantStatus(t, grant, http.StatusNoContent, "grant role")
-	granted, _ := dir.AdminRoles(internUID)
+	granted, err := dir.AdminRoles(internUID)
+	mustNoErr(t, err, "read the roles after the grant")
 	wantEq(t, len(granted), 1, "role count after grant")
 	wantTrue(t, granted[0].Role == directory.AdminOrg && granted[0].ScopeID == 5, "the granted role is org:5")
 
 	revoke := authedDELETE(t, ts, "/admin/users/intern@hermex.test/roles", session, csrf, `{"role":"org","scopeID":5}`)
 	wantStatus(t, revoke, http.StatusNoContent, "revoke role")
-	left, _ := dir.AdminRoles(internUID)
+	left, err := dir.AdminRoles(internUID)
+	mustNoErr(t, err, "read the roles after the revoke")
 	wantEq(t, len(left), 0, "role count after revoke")
 
 	badRole := authedPOST(t, ts, "/admin/users/intern@hermex.test/roles", session, csrf, `{"role":"wizard"}`)

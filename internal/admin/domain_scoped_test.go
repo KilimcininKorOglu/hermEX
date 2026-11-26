@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -26,7 +25,7 @@ func TestDomainDetailScopedLists(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/ui/domains/1", session)
-	body, _ := io.ReadAll(resp.Body)
+	body := readBody(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
