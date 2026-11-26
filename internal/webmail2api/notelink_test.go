@@ -153,4 +153,10 @@ func TestCreateMailNoteRefusesAnUnknownMail(t *testing.T) {
 	if rec := do(http.MethodPost, "/api/v1/mail/notes", `{"id":"inbox:999","body":"x"}`); rec.Code == http.StatusOK {
 		t.Errorf("a note was attached to a message that does not exist: %s", rec.Body.String())
 	}
+	type listing struct {
+		Notes []noteJSON `json:"notes"`
+	}
+	if notes := okBody[listing](t, "list notes", do(http.MethodGet, "/api/v1/notes", "")).Notes; len(notes) != 0 {
+		t.Errorf("the refused note was stored: %+v", notes)
+	}
 }
