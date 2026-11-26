@@ -19,7 +19,9 @@ func TestDomainAVScan(t *testing.T) {
 	wantEq(t, "inbound scanning by default", in, false)
 	wantEq(t, "outbound scanning by default", out, false)
 
-	// Set via a mixed-case name; read via lowercase proves normalization.
+	// Set via a mixed-case name and read via lowercase: an operator may type the
+	// domain in any case. The column's collation already compares without case,
+	// so this does not isolate the ToLower call.
 	mustNoErr(t, "set the AV toggles", d.SetDomainAVScan("ACME.test", true, false))
 	in, out = scan("acme.test")
 	wantEq(t, "inbound scanning after the set", in, true)
