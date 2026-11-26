@@ -63,10 +63,11 @@ func TestImportPromotesUnmappedHeaders(t *testing.T) {
 // and that a stored value cannot splice further fields into the message.
 func TestExportWritesInternetHeaderProperties(t *testing.T) {
 	resolver, names := namedResolver()
-	ids, _ := resolver(true, []mapi.PropertyName{
+	ids, err := resolver(true, []mapi.PropertyName{
 		{Kind: mapi.MnidString, GUID: mapi.PsInternetHeaders, Name: "X-Ticket"},
 		{Kind: mapi.MnidString, GUID: mapi.PsInternetHeaders, Name: "X-Injected"},
 	})
+	mustNoErr(t, err, "resolve the header names")
 	msg := &Message{}
 	msg.Props.Set(mapi.PrSubject, "headers")
 	msg.Props.Set(mapi.MakeTag(ids[0], mapi.PtUnicode), "café")
@@ -93,7 +94,8 @@ func TestExportSkipsInternetHeadersAnotherPropertyWrites(t *testing.T) {
 	for i, f := range fields {
 		pn[i] = mapi.PropertyName{Kind: mapi.MnidString, GUID: mapi.PsInternetHeaders, Name: f}
 	}
-	ids, _ := resolver(true, pn)
+	ids, err := resolver(true, pn)
+	mustNoErr(t, err, "resolve the header names")
 	msg := &Message{}
 	msg.Props.Set(mapi.PrSubject, "real subject")
 	for _, id := range ids {

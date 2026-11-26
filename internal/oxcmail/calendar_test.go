@@ -2,6 +2,7 @@ package oxcmail
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	stdmime "mime"
 	"mime/multipart"
@@ -67,11 +68,14 @@ func readAlternatives(t *testing.T, body io.Reader, boundary string) map[string]
 	mr := multipart.NewReader(body, boundary)
 	for {
 		p, err := mr.NextPart()
-		if err != nil {
+		if errors.Is(err, io.EOF) {
 			return out
 		}
-		mt, pp, _ := stdmime.ParseMediaType(p.Header.Get("Content-Type"))
-		raw, _ := io.ReadAll(p)
+		mustNoErr(t, err, "read the next part")
+		mt, pp, err := stdmime.ParseMediaType(p.Header.Get("Content-Type"))
+		mustNoErr(t, err, "parse the part Content-Type")
+		raw, err := io.ReadAll(p)
+		mustNoErr(t, err, "read the part body")
 		out[mt] = alternativePart{params: pp, body: string(raw)}
 	}
 }

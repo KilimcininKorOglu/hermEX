@@ -2,6 +2,7 @@ package oxcmail
 
 import (
 	"bytes"
+	"io"
 	stdmime "mime"
 	"net/mail"
 	"strconv"
@@ -72,9 +73,9 @@ func TestExportWellFormed(t *testing.T) {
 	checkExportedRecipients(t, m)
 	checkExportedEnvelope(t, m)
 
-	body := make([]byte, 1024)
-	n, _ := m.Body.Read(body)
-	wantEq(t, string(body[:n]), "Hello,\r\nThis is the body.\r\n", "body")
+	body, err := io.ReadAll(m.Body)
+	mustNoErr(t, err, "read the exported body")
+	wantEq(t, string(body), "Hello,\r\nThis is the body.\r\n", "body")
 }
 
 // checkExportedOriginator asserts the From identity survives the export, and that
