@@ -36,7 +36,7 @@ func apiHarnessFor(t *testing.T, dir string) requestFunc {
 	secret := []byte("webmail2api-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
 	return func(method, target, body string) *httptest.ResponseRecorder {
-		token, _ := mintToken(secret, sessionClaims{
+		token := mustMintToken(t, secret, sessionClaims{
 			Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix(),
 		})
 		var req *http.Request
@@ -66,6 +66,16 @@ func wantContains(t *testing.T, label, got, substr string) {
 	if !strings.Contains(got, substr) {
 		t.Errorf("%s = %q, want it to contain %q", label, got, substr)
 	}
+}
+
+// mustMintToken signs a session token and fails the test when signing fails, so
+// a request never goes out with an empty session cookie and passes as an
+// unauthenticated one.
+func mustMintToken(t *testing.T, secret []byte, c sessionClaims) string {
+	t.Helper()
+	token, err := mintToken(secret, c)
+	mustNoErr(t, "mint the session token", err)
+	return token
 }
 
 // mustNoErr fails the test when err is set, naming the operation.

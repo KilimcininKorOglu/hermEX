@@ -32,7 +32,7 @@ func meetingHarness(t *testing.T) (requestFunc, string, string) {
 	secret := []byte("meeting-test-secret")
 	srv := NewServer(accs, accs, nil, "mail.hermex.test", secret, "", false)
 	return func(method, target, body string) *httptest.ResponseRecorder {
-		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: alice, Exp: time.Now().Add(time.Hour).Unix()})
+		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: alice, Exp: time.Now().Add(time.Hour).Unix()})
 		req := httptest.NewRequest(method, target, strings.NewReader(body))
 		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
 		rec := httptest.NewRecorder()
