@@ -1,6 +1,7 @@
 package oxcical
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -80,7 +81,7 @@ func TestCancelOccurrenceHandlesASeriesWithoutAStart(t *testing.T) {
 	if !ok {
 		t.Fatal("CancelOccurrence refused a series with no DTSTART")
 	}
-	if len(out) == 0 {
-		t.Error("CancelOccurrence returned an empty object")
+	if !strings.Contains(string(out), "EXDATE:20260101T000000Z\r\n") {
+		t.Errorf("CancelOccurrence did not exclude the instant:\n%s", out)
 	}
 }
