@@ -234,7 +234,8 @@ func TestPruneMailReportsHonoursEachWindow(t *testing.T) {
 	n, err := d.PruneMailReports(now)
 	mustNoErr(t, "prune with the defaults", err)
 	wantEq(t, "reports deleted under the defaults", n, int64(1))
-	_, ok, _ := d.GetDMARCReport(aggID)
+	_, ok, err := d.GetDMARCReport(aggID)
+	mustNoErr(t, "read the aggregate report", err)
 	wantEq(t, "the aggregate report kept", ok, true)
 
 	mustNoErr(t, "shorten the window", d.SetMailReportSettings(MailReportSettings{AggregateDays: 30, FailureDays: 30}))
