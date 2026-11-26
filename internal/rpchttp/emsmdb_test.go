@@ -216,7 +216,9 @@ func TestEndToEndConnect(t *testing.T) {
 	wantFalse(t, stillOpen, "the session survives an end-to-end disconnect")
 
 	_ = pw.Close()
-	<-inDone
+	if err := <-inDone; err != nil {
+		t.Errorf("RPC_IN_DATA request: %v", err)
+	}
 }
 
 // readReply reads one PDU off the OUT channel, stopping the test when the channel

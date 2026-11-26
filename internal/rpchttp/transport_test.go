@@ -124,7 +124,9 @@ func TestRendezvous(t *testing.T) {
 	wantCommands(t, cmds, "the second OUT PDU", rtsVersion, rtsReceiveWindowSize, rtsConnectionTimeout)
 
 	_ = pw.Close()
-	<-inDone
+	if err := <-inDone; err != nil {
+		t.Errorf("RPC_IN_DATA request: %v", err)
+	}
 }
 
 // TestUnknownMethodRejected proves a non-RPC verb is refused.

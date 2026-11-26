@@ -116,5 +116,7 @@ func TestEndToEndNSPI(t *testing.T) {
 	wantEq(t, binary.LittleEndian.Uint32(qstub[len(qstub)-4:]), uint32(ecSuccess), "NspiQueryRows result")
 
 	_ = pw.Close()
-	<-inDone
+	if err := <-inDone; err != nil {
+		t.Errorf("RPC_IN_DATA request: %v", err)
+	}
 }
