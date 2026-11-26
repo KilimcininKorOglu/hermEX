@@ -46,6 +46,13 @@ func TestListInDomainScoping(t *testing.T) {
 	}
 	wantEq(t, "the list under domain two", m2[0].Listname, "list@two.test")
 	wantEq(t, "mailing lists under domain one", len(mustListMLists(t, d, id1)), 0)
+
+	// An id no domain holds lists nothing at all.
+	ghost, err := d.ListUsersInDomain(id2 + 1000)
+	mustNoErr(t, "list users of an unknown domain", err)
+	wantEq(t, "users under an unknown domain", len(ghost), 0)
+	wantEq(t, "contacts under an unknown domain", len(mustListContacts(t, d, id2+1000)), 0)
+	wantEq(t, "mailing lists under an unknown domain", len(mustListMLists(t, d, id2+1000)), 0)
 }
 
 // mustListContacts lists one domain's contacts.
