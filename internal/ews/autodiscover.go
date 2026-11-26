@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"io"
 	"net/http"
+	"net/url"
 
 	"hermex/internal/logging"
 	"hermex/internal/serve"
@@ -31,15 +32,24 @@ type adUser struct {
 }
 
 type adAccount struct {
-	AccountType string     `xml:"AccountType"`
-	Action      string     `xml:"Action"`
-	Protocol    adProtocol `xml:"Protocol"`
+	AccountType string       `xml:"AccountType"`
+	Action      string       `xml:"Action"`
+	Protocol    []adProtocol `xml:"Protocol"`
 }
 
+// adProtocol is one Protocol element ([MS-OXDSCLI] 2.2.4.1.1.2.3). The classic
+// providers name their type in a Type child; MAPI/HTTP names it in Type and
+// Version attributes and carries MailStore and AddressBook URLs instead.
 type adProtocol struct {
-	Type   string `xml:"Type"`
-	Server string `xml:"Server"`
-	EwsURL string `xml:"EwsUrl"`
+	TypeAttr    string       `xml:"Type,attr,omitempty"`
+	Version     string       `xml:"Version,attr,omitempty"`
+	Type        string       `xml:"Type,omitempty"`
+	Server      string       `xml:"Server,omitempty"`
+	Port        int          `xml:"Port,omitempty"`
+	LoginName   string       `xml:"LoginName,omitempty"`
+	EwsURL      string       `xml:"EwsUrl,omitempty"`
+	MailStore   *adEndpoints `xml:"MailStore,omitempty"`
+	AddressBook *adEndpoints `xml:"AddressBook,omitempty"`
 	// Outlook Anywhere (RPC/HTTP, [MS-OXDSCLI] 2.2.4.1.1.2.3) advertising: the
 	// EXPR provider's Server is the RPC proxy host, so a desktop Outlook builds
 	// https://<Server>/rpc/rpcproxy.dll and connects with HTTP Basic over TLS.
@@ -50,6 +60,45 @@ type adProtocol struct {
 	// the profile picture, so the pair names the webmail settings page.
 	EcpURL      string `xml:"EcpUrl,omitempty"`
 	EcpURLPhoto string `xml:"EcpUrl-photo,omitempty"`
+	// Internet-protocol providers: Encryption names the transport security
+	// ("SSL" for implicit TLS) and AuthRequired marks SMTP as authenticated.
+	Encryption   string `xml:"Encryption,omitempty"`
+	AuthRequired string `xml:"AuthRequired,omitempty"`
+	SPA          string `xml:"SPA,omitempty"`
+}
+
+// adEndpoints is a MAPI/HTTP MailStore or AddressBook URL pair.
+type adEndpoints struct {
+	InternalURL string `xml:"InternalUrl"`
+	ExternalURL string `xml:"ExternalUrl"`
+}
+
+// accountProtocols lists what a client may connect with: MAPI/HTTP first when
+// the client said it speaks it (X-MapiHttpCapability, [MS-OXDSCLI] 2.2.2.1),
+// then Outlook Anywhere, then IMAP, POP3 and authenticated SMTP over implicit
+// TLS. Only TLS endpoints are advertised.
+func accountProtocols(host, user string, mapiHTTP bool) []adProtocol {
+	base := "https://" + host
+	id := url.QueryEscape(user)
+	var out []adProtocol
+	if mapiHTTP {
+		out = append(out, adProtocol{
+			TypeAttr: "mapiHttp", Version: "1",
+			MailStore:   &adEndpoints{base + "/mapi/emsmdb/?MailboxId=" + id, base + "/mapi/emsmdb/?MailboxId=" + id},
+			AddressBook: &adEndpoints{base + "/mapi/nspi/?MailboxId=" + id, base + "/mapi/nspi/?MailboxId=" + id},
+		})
+	}
+	out = append(out, adProtocol{
+		Type: "EXPR", Server: host, EwsURL: base + "/EWS/Exchange.asmx",
+		SSL: "On", AuthPackage: "Basic", ServerExclusiveConnect: "On",
+		EcpURL: base + "/", EcpURLPhoto: ecpPhotoPath,
+	})
+	inet := func(typ string, port int) adProtocol {
+		return adProtocol{Type: typ, Server: host, Port: port, LoginName: user, SSL: "On", Encryption: "SSL", SPA: "Off"}
+	}
+	smtp := inet("SMTP", 465)
+	smtp.AuthRequired = "On"
+	return append(out, inet("IMAP", 993), inet("POP3", 995), smtp)
 }
 
 // ecpPhotoPath is the webmail page, relative to the web frontend root, where
@@ -90,16 +139,7 @@ func (s *Server) serveAutodiscover(w http.ResponseWriter, r *http.Request) {
 			Account: adAccount{
 				AccountType: "email",
 				Action:      "settings",
-				Protocol: adProtocol{
-					Type:                   "EXPR",
-					Server:                 host,
-					EwsURL:                 "https://" + host + "/EWS/Exchange.asmx",
-					SSL:                    "On",
-					AuthPackage:            "Basic",
-					ServerExclusiveConnect: "On",
-					EcpURL:                 "https://" + host + "/",
-					EcpURLPhoto:            ecpPhotoPath,
-				},
+				Protocol:    accountProtocols(host, user, r.Header.Get("X-MapiHttpCapability") != ""),
 			},
 		},
 	}
