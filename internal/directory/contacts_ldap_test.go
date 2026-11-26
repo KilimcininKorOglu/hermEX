@@ -45,6 +45,15 @@ func TestUpsertLDAPContactUpdatesTheSecondTime(t *testing.T) {
 	created := mustUpsertLDAPContact(t, d, "partner@remote.example", "Partner International")
 
 	wantEq(t, "the second upsert updated the contact", created, false)
+	wantEq(t, "contacts after two syncs", len(allContacts(t, d)), 1)
+}
+
+// allContacts lists every contact.
+func allContacts(t *testing.T, d *SQLDirectory) []ContactInfo {
+	t.Helper()
+	got, err := d.ListContacts()
+	mustNoErr(t, "list the contacts", err)
+	return got
 }
 
 // TestUpsertLDAPContactRenames proves a display name changed in the directory reaches the
@@ -73,8 +82,11 @@ func TestUpsertLDAPContactRefusesAMailboxUser(t *testing.T) {
 // mailbox user still resolves.
 func TestUpsertLDAPContactLeavesTheMailboxIntact(t *testing.T) {
 	d := contactTestDir(t)
-	_, _ = d.UpsertLDAPContact("alice@hermex.test", syncedContactID, "Imposter", "hermex.test")
+	if _, err := d.UpsertLDAPContact("alice@hermex.test", syncedContactID, "Imposter", "hermex.test"); err == nil {
+		t.Fatal("upserting a contact over a mailbox user must be an error")
+	}
 
+	wantEq(t, "contacts after the refused upsert", len(allContacts(t, d)), 0)
 	if _, ok := d.Resolve("alice@hermex.test"); !ok {
 		t.Error("the refused upsert removed or converted a mailbox user")
 	}
@@ -90,8 +102,10 @@ func TestUpsertLDAPContactRefusesOtherDomain(t *testing.T) {
 	_, err := d.UpsertLDAPContact("partner@remote.example", syncedContactID, "Taken", "other.test")
 
 	wantEq(t, "the takeover is refused", errors.Is(err, ErrContactInOtherDomain), true)
-	got, err := d.ListContacts()
-	mustNoErr(t, "list the contacts", err)
+	got := allContacts(t, d)
+	if len(got) != 1 {
+		t.Fatalf("contacts = %d, want 1", len(got))
+	}
 	wantEq(t, "the contact's domain", got[0].Domain, "hermex.test")
 	wantGALName(t, d, "partner@remote.example", "Partner Inc")
 }
@@ -131,6 +145,7 @@ func TestUpdateContactRefusesAMasteredContact(t *testing.T) {
 	if !errors.Is(err, ErrLDAPMasteredContact) {
 		t.Errorf("UpdateContact on a synced contact = %v, want ErrLDAPMasteredContact", err)
 	}
+	wantGALName(t, d, "partner@remote.example", "Partner Inc")
 }
 
 // TestDeleteContactRefusesAMasteredContact proves a manual delete of a synced contact is
@@ -144,6 +159,7 @@ func TestDeleteContactRefusesAMasteredContact(t *testing.T) {
 	if !errors.Is(err, ErrLDAPMasteredContact) {
 		t.Errorf("DeleteContact on a synced contact = %v, want ErrLDAPMasteredContact", err)
 	}
+	wantEq(t, "contacts after the refused delete", len(allContacts(t, d)), 1)
 }
 
 // TestDeleteLDAPContactRemovesASyncedContact proves the prune path removes a contact the
@@ -156,6 +172,7 @@ func TestDeleteLDAPContactRemovesASyncedContact(t *testing.T) {
 	mustNoErr(t, "prune the synced contact", err)
 
 	wantEq(t, "the prune removed the contact", removed, true)
+	wantEq(t, "contacts after the prune", len(allContacts(t, d)), 0)
 }
 
 // TestDeleteLDAPContactKeepsAHandMadeContact proves the prune path never removes a contact
@@ -168,4 +185,5 @@ func TestDeleteLDAPContactKeepsAHandMadeContact(t *testing.T) {
 	mustNoErr(t, "prune a hand-made contact", err)
 
 	wantEq(t, "the prune left the hand-made contact", removed, false)
+	wantEq(t, "contacts after the refused prune", len(allContacts(t, d)), 1)
 }
