@@ -151,6 +151,19 @@ func TestOOFSettingsLegacySubject(t *testing.T) {
 	}
 }
 
+// TestOOFSettingsRefusesACorruptBlob: a stored settings blob that is not JSON is
+// reported as an error rather than read as "out of office is off", which would
+// silently stop the replies the user set up.
+func TestOOFSettingsRefusesACorruptBlob(t *testing.T) {
+	s := openTestStore(t)
+	mustNoErr(t, "store a corrupt blob", s.SetStoreProperties(mapi.PropertyValues{
+		{Tag: mapi.PrOOFSettings, Value: `{"enabled":true,"internalReply":`},
+	}))
+	if _, err := s.GetOOFSettings(); err == nil {
+		t.Error("a corrupt OOF settings blob read back without an error")
+	}
+}
+
 // TestOOFActive covers the on/off and schedule-window gate that decides whether
 // an auto-reply fires for a given delivery time.
 func TestOOFActive(t *testing.T) {
@@ -185,6 +198,8 @@ func TestOOFWindowIsChecked(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
+	kept := OOFSettings{Enabled: true, InternalReply: "kept", Start: 1000, End: 2000}
+	mustNoErr(t, "store a valid schedule", st.SetOOFSettings(kept))
 	bad := []OOFSettings{
 		{Enabled: true, Start: 2000, End: 1000},
 		{Enabled: true, Start: 1000, End: 1000},
@@ -202,8 +217,8 @@ func TestOOFWindowIsChecked(t *testing.T) {
 	}
 	got, err := st.GetOOFSettings()
 	mustNoErr(t, "read the OOF settings", err)
-	if got.Enabled {
-		t.Errorf("a refused window was stored: %+v", got)
+	if got != kept {
+		t.Errorf("settings after the refused windows = %+v, want the stored %+v", got, kept)
 	}
 	for _, cfg := range []OOFSettings{{Enabled: true, Start: 1000}, {Enabled: true, End: 2000}, {Enabled: true, Start: 1000, End: 2000}} {
 		if err := st.SetOOFSettings(cfg); err != nil {

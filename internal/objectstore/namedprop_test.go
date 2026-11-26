@@ -2,6 +2,7 @@ package objectstore
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"hermex/internal/mapi"
@@ -90,6 +91,22 @@ func TestNamedPropDistinctKinds(t *testing.T) {
 	if ids[2] != 0 {
 		t.Errorf("unrepresentable name = %#x, want 0", ids[2])
 	}
+}
+
+// TestNamedPropRefusesAnOversizedName: a sender-supplied MNID_STRING name of 1024
+// bytes or more is not allocated, so one header name cannot store an unbounded key;
+// a name just under the bound still is.
+func TestNamedPropRefusesAnOversizedName(t *testing.T) {
+	s := openTestStore(t)
+	long := mapi.PropertyName{Kind: mapi.MnidString, GUID: npGUID, Name: strings.Repeat("x", 1024)}
+	fits := mapi.PropertyName{Kind: mapi.MnidString, GUID: npGUID, Name: strings.Repeat("x", 1023)}
+	ids, err := s.GetNamedPropIDs(true, []mapi.PropertyName{long, fits})
+	mustNoErr(t, "resolve", err)
+	wantEq(t, "id for a 1024-byte name", ids[0], uint16(0))
+	if ids[1] == 0 {
+		t.Error("a 1023-byte name was refused")
+	}
+	wantRows(t, s, "named_properties rows (only the name that fits)", 1, `SELECT COUNT(*) FROM named_properties`)
 }
 
 // TestNamedPropStableAcrossReopen checks that allocated ids persist when the
