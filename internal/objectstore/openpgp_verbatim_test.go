@@ -2,6 +2,7 @@ package objectstore
 
 import (
 	"bytes"
+	"os"
 	"testing"
 	"time"
 
@@ -31,5 +32,14 @@ func TestOpenPGPEncryptedIsServedVerbatim(t *testing.T) {
 	}
 	if !bytes.Equal(got, raw) {
 		t.Errorf("served form differs from the arrival bytes:\n%s", got)
+	}
+
+	// The eml file is a cache: with it gone the message is rebuilt from the store,
+	// and the encrypted form must still come back byte for byte.
+	mustNoErr(t, "drop the eml cache", os.Remove(st.emlPath(midString(uint64(info.ID)))))
+	again, err := st.GetMessageRaw(int64(mapi.PrivateFIDInbox), info.UID)
+	mustNoErr(t, "read after the cache drop", err)
+	if !bytes.Equal(again, raw) {
+		t.Errorf("served form after the cache drop differs from the arrival bytes:\n%s", again)
 	}
 }

@@ -55,7 +55,7 @@ func TestListRowCarriesAPreview(t *testing.T) {
 func TestPreviewFallsBackToTheHtmlBody(t *testing.T) {
 	raw := "From: alice@hermex.test\r\nTo: bob@hermex.test\r\nSubject: html only\r\n" +
 		"Content-Type: text/html; charset=utf-8\r\n\r\n" +
-		"<html><head><style>p{color:red}</style></head><body><p>Hello &amp; welcome</p></body></html>\r\n"
+		"<html><head><style>p{color:red}</style></head><body><script>steal(document.cookie)</script><p>Hello &amp; welcome</p></body></html>\r\n"
 	m := listOne(t, raw)
 	if !strings.Contains(m.Preview, "Hello & welcome") {
 		t.Errorf("preview = %q, want the text of the HTML body", m.Preview)
@@ -63,6 +63,9 @@ func TestPreviewFallsBackToTheHtmlBody(t *testing.T) {
 	// Style and script text is markup, not the message.
 	if strings.Contains(m.Preview, "color:red") {
 		t.Errorf("preview carries stylesheet text: %q", m.Preview)
+	}
+	if strings.Contains(m.Preview, "steal(") {
+		t.Errorf("preview carries script text: %q", m.Preview)
 	}
 }
 

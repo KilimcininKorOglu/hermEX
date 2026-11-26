@@ -1,6 +1,7 @@
 package objectstore
 
 import (
+	"errors"
 	"testing"
 
 	"hermex/internal/mapi"
@@ -151,6 +152,39 @@ func TestAddRealMemberThenModifyAndRemove(t *testing.T) {
 	}
 	if m := permByMember(t, s, fid); len(m) != 0 {
 		t.Errorf("after Remove got %d rows, want 0", len(m))
+	}
+}
+
+// TestPermissionRowsStayInTheirFolder: a member id is a row of one folder's table
+// ([MS-OXCPERM] 2.2.1.2), so a Modify or Remove sent to another folder with that id
+// must leave the row alone, and a grant on one folder confers nothing on another.
+func TestPermissionRowsStayInTheirFolder(t *testing.T) {
+	s := openSeededStore(t)
+	inbox, notes := int64(mapi.PrivateFIDInbox), int64(mapi.PrivateFIDNotes)
+	mustNoErr(t, "grant on the Inbox", s.ModifyPermissions(inbox, false, []PermissionChange{
+		{Op: PermAdd, Username: "bob@test", Rights: mapi.RightsReviewer},
+	}))
+	bob := realMember(permByMember(t, s, inbox))
+
+	// Edits addressed to the Notes folder with the Inbox row's id.
+	for _, c := range []PermissionChange{
+		{Op: PermModify, MemberID: bob.MemberID, Rights: mapi.RightsOwner},
+		{Op: PermRemove, MemberID: bob.MemberID},
+	} {
+		if err := s.ModifyPermissions(notes, false, []PermissionChange{c}); err != nil && !errors.Is(err, ErrNotFound) {
+			t.Fatalf("edit sent to another folder (op %v): unexpected error %v", c.Op, err)
+		}
+	}
+
+	got, ok := permByMember(t, s, inbox)[bob.MemberID]
+	if !ok {
+		t.Fatal("a Remove sent to another folder deleted the Inbox row")
+	}
+	wantEq(t, "Inbox rights after edits sent to another folder", got.Rights, mapi.RightsReviewer)
+	r, err := s.ResolvePermission(notes, "bob@test")
+	mustNoErr(t, "resolve on Notes", err)
+	if r == mapi.RightsReviewer || r == mapi.RightsOwner {
+		t.Errorf("bob's Inbox grant applies on Notes: 0x%X", r)
 	}
 }
 
