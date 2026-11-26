@@ -22,7 +22,10 @@ func TestWholeStoreFolderBaselineSuppressesPreExisting(t *testing.T) {
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
 	logonH := h[0]
 	const ntypes = uint8(fnevObjectCreated | fnevObjectModified | fnevObjectDeleted)
-	sess.Dispatch(buildRegisterNotification(0, 1, ntypes, 1, 0, 0), []uint32{logonH, 0xFFFFFFFF})
+	// The subscription must exist, or an empty poll proves nothing.
+	reg, h := sess.Dispatch(buildRegisterNotification(0, 1, ntypes, 1, 0, 0), []uint32{logonH, 0xFFFFFFFF})
+	ropOK(t, reg, ropRegisterNotification, "RegisterNotification")
+	requireHandles(t, "RegisterNotification", h[1])
 
 	resp, _ := sess.Dispatch(nil, nil)
 	if len(resp) != 0 {
