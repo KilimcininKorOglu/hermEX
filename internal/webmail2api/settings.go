@@ -775,7 +775,11 @@ type userLocaleWriter interface {
 // directory, both empty when the capability or the user is unavailable.
 func (s *Server) userLocale(email string) (timezone, locale string) {
 	if rd, ok := s.auth.(userLocaleReader); ok {
-		if u, found, err := rd.GetUser(email); err == nil && found {
+		u, found, err := rd.GetUser(email)
+		if err != nil {
+			logError("profile-locale-read", err, nil)
+		}
+		if err == nil && found {
 			return u.Timezone, u.Lang
 		}
 	}
