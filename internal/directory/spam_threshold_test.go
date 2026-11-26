@@ -61,6 +61,25 @@ func TestSpamThresholdResolution(t *testing.T) {
 	wantEq(t, "the resolved threshold", th, 12)
 }
 
+// TestSpamThresholdRefusesBelowOne proves a threshold below 1, which flags every
+// message as spam, is refused at both scopes and the stored override kept.
+func TestSpamThresholdRefusesBelowOne(t *testing.T) {
+	d, _ := setupSpamThreshold(t)
+	keep := 6
+	mustNoErr(t, "set the user threshold", d.SetUserSpamThreshold("alice@hermex.test", &keep))
+	mustNoErr(t, "set the domain threshold", d.SetDomainSpamThreshold("hermex.test", &keep))
+	for _, bad := range []int{0, -3} {
+		wantErr(t, "a user threshold below 1 was accepted", d.SetUserSpamThreshold("alice@hermex.test", &bad))
+		wantErr(t, "a domain threshold below 1 was accepted", d.SetDomainSpamThreshold("hermex.test", &bad))
+	}
+	u, err := d.GetUserSpamThreshold("alice@hermex.test")
+	mustNoErr(t, "read the user threshold", err)
+	wantSet(t, "the user threshold after the refusals", u, 6)
+	dom, err := d.GetDomainSpamThreshold("hermex.test")
+	mustNoErr(t, "read the domain threshold", err)
+	wantSet(t, "the domain threshold after the refusals", dom, 6)
+}
+
 // TestSpamThresholdGetReflectsSet proves the per-scope getters read back what was set
 // and report nil (inherit) once cleared.
 func TestSpamThresholdGetReflectsSet(t *testing.T) {

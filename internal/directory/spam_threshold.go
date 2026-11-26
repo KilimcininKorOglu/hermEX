@@ -41,6 +41,9 @@ func (d *SQLDirectory) GetUserSpamThreshold(username string) (*int, error) {
 // SetUserSpamThreshold sets or clears a user's spam-threshold override. A nil
 // threshold clears it so the user inherits the domain or global threshold.
 func (d *SQLDirectory) SetUserSpamThreshold(username string, threshold *int) error {
+	if err := validSpamThreshold(threshold); err != nil {
+		return err
+	}
 	_, err := d.db.Exec(`UPDATE users SET spam_threshold = ? WHERE username = ?`, nullableInt(threshold), username)
 	return err
 }
@@ -54,8 +57,20 @@ func (d *SQLDirectory) GetDomainSpamThreshold(domain string) (*int, error) {
 // SetDomainSpamThreshold sets or clears a domain's spam-threshold override. A nil
 // threshold clears it so the domain inherits the global threshold.
 func (d *SQLDirectory) SetDomainSpamThreshold(domain string, threshold *int) error {
+	if err := validSpamThreshold(threshold); err != nil {
+		return err
+	}
 	_, err := d.db.Exec(`UPDATE domains SET spam_threshold = ? WHERE domainname = ?`, nullableInt(threshold), domain)
 	return err
+}
+
+// validSpamThreshold refuses an override below 1, which would flag every message
+// as spam; nil (inherit) is always valid.
+func validSpamThreshold(threshold *int) error {
+	if threshold != nil && *threshold < 1 {
+		return errors.New("directory: a spam threshold override must be at least 1")
+	}
+	return nil
 }
 
 // scanThreshold reads a nullable spam_threshold column into *int (nil when NULL or no
