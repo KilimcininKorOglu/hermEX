@@ -51,14 +51,14 @@ func TestMailboxSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("append 1: %v", err)
 	}
-	size1, _ := s.MailboxSize()
+	size1 := mustMailboxSize(t, s)
 	if size1 <= 0 {
 		t.Fatalf("after one message size = %d, want > 0", size1)
 	}
 	if _, err := s.AppendMessage(inbox, raw2, when, 0); err != nil {
 		t.Fatalf("append 2: %v", err)
 	}
-	size2, _ := s.MailboxSize()
+	size2 := mustMailboxSize(t, s)
 	if size2 <= size1 {
 		t.Fatalf("after two messages size = %d, want > %d", size2, size1)
 	}
@@ -66,7 +66,7 @@ func TestMailboxSize(t *testing.T) {
 	if err := s.DeleteMessage(inbox, info1.UID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	size3, _ := s.MailboxSize()
+	size3 := mustMailboxSize(t, s)
 	if size3 != size2-size1 {
 		t.Errorf("after delete size = %d, want %d (second message only)", size3, size2-size1)
 	}

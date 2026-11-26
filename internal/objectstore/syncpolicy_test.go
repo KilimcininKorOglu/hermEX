@@ -30,7 +30,9 @@ func TestSyncPolicyRoundTrip(t *testing.T) {
 	if err := s.SetSyncPolicy(nil); err != nil {
 		t.Fatalf("clear: %v", err)
 	}
-	if got, _ := s.GetSyncPolicy(); got != nil {
+	got, err = s.GetSyncPolicy()
+	mustNoErr(t, "read the policy after clear", err)
+	if got != nil {
 		t.Errorf("after clear = %v, want nil", got)
 	}
 }

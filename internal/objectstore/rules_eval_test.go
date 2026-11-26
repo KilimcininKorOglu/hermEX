@@ -338,7 +338,7 @@ func TestRuleCopyActionIsNonTerminal(t *testing.T) {
 		t.Fatalf("inbox has %d messages, want 1 (copy must keep the original)", len(inboxMsgs))
 	}
 	// ...the later rule still ran on it (copy was non-terminal)...
-	if fl, _ := s.MessageFlags(inbox, m.UID); fl&FlagSeen == 0 {
+	if fl := mustMessageFlags(t, s, inbox, m.UID); fl&FlagSeen == 0 {
 		t.Errorf("original not marked read: copy was wrongly treated as terminal")
 	}
 	// ...and a duplicate landed in Filed.
@@ -380,13 +380,13 @@ func TestRuleExitLevelStopsProcessing(t *testing.T) {
 		t.Fatalf("RunRules: %v", err)
 	}
 
-	if fl, _ := s.MessageFlags(inbox, m.UID); fl&FlagSeen == 0 {
+	if fl := mustMessageFlags(t, s, inbox, m.UID); fl&FlagSeen == 0 {
 		t.Errorf("the stop rule did not mark the message read")
 	}
-	if msgs, _ := s.ListMessages(inbox); len(msgs) != 1 {
+	if msgs := mustListMessages(t, s, inbox); len(msgs) != 1 {
 		t.Errorf("inbox has %d, want 1 (the later move must not run after a stop rule)", len(msgs))
 	}
-	if msgs, _ := s.ListMessages(filed); len(msgs) != 0 {
+	if msgs := mustListMessages(t, s, filed); len(msgs) != 0 {
 		t.Errorf("Filed has %d, want 0 (no rule should run after exit-level)", len(msgs))
 	}
 }
@@ -585,7 +585,7 @@ func TestCompoundRuleRoundTrips(t *testing.T) {
 		t.Fatalf("RunRules: %v", err)
 	}
 	// Only the both-match message moved to Filed; the subject-only one stayed.
-	if msgs, _ := s.ListMessages(filed); len(msgs) != 1 {
+	if msgs := mustListMessages(t, s, filed); len(msgs) != 1 {
 		t.Errorf("Filed has %d, want 1 (only the AND-match moves)", len(msgs))
 	}
 	if _, err := s.MessageByUID(inbox, subjOnly.UID); err != nil {
@@ -617,17 +617,17 @@ func TestRuleExceptionRoundTrips(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AddRule: %v", err)
 	}
-	if rules, _ := s.ListRules(inbox); len(rules) != 1 || rules[0].Condition.Type != mapi.ResAnd {
+	if rules := mustListRules(t, s, inbox); len(rules) != 1 || rules[0].Condition.Type != mapi.ResAnd {
 		t.Fatalf("exception rule did not round-trip as a ResAnd condition")
 	}
 	if _, err := s.RunRules(inbox, 0); err != nil {
 		t.Fatalf("RunRules: %v", err)
 	}
 	// Only the non-excepted invoice moved.
-	if msgs, _ := s.ListMessages(filed); len(msgs) != 1 {
+	if msgs := mustListMessages(t, s, filed); len(msgs) != 1 {
 		t.Errorf("Filed has %d, want 1 (the acme invoice is excepted)", len(msgs))
 	}
-	if msgs, _ := s.ListMessages(inbox); len(msgs) != 1 {
+	if msgs := mustListMessages(t, s, inbox); len(msgs) != 1 {
 		t.Errorf("inbox has %d, want 1 (the excepted invoice stays)", len(msgs))
 	}
 }
@@ -778,7 +778,7 @@ func TestRuleOOFActiveCondition(t *testing.T) {
 	if _, err := s.MessageByUID(inbox, m2.UID); err == nil {
 		t.Errorf("with OOF on the rule should move the message out of the inbox")
 	}
-	if msgs, _ := s.ListMessages(filed); len(msgs) != 1 {
+	if msgs := mustListMessages(t, s, filed); len(msgs) != 1 {
 		t.Errorf("Filed has %d, want 1 (moved while OOF active)", len(msgs))
 	}
 }

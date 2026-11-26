@@ -68,7 +68,7 @@ func TestRunRulesInRunsOnlyTheNamedRule(t *testing.T) {
 	if res.Affected != 1 {
 		t.Fatalf("affected %d, want 1", res.Affected)
 	}
-	if fl, _ := s.MessageFlags(inbox, m.UID); fl&FlagSeen == 0 {
+	if fl := mustMessageFlags(t, s, inbox, m.UID); fl&FlagSeen == 0 {
 		t.Error("the named rule did not run")
 	}
 	if msgs, err := s.ListMessages(filed); err != nil {
@@ -99,7 +99,7 @@ func TestRunRulesInIgnoresAnUnknownRule(t *testing.T) {
 	if res.Affected != 0 {
 		t.Errorf("affected %d, want 0", res.Affected)
 	}
-	if fl, _ := s.MessageFlags(inbox, m.UID); fl&FlagSeen != 0 {
+	if fl := mustMessageFlags(t, s, inbox, m.UID); fl&FlagSeen != 0 {
 		t.Error("an unknown rule id fell back to running every rule")
 	}
 }

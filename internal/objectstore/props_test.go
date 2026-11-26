@@ -82,7 +82,8 @@ func TestStorePropertiesRoundTrip(t *testing.T) {
 	// Overwrite replaces the value (upsert).
 	mustNoErr(t, "upsert store property",
 		s.SetStoreProperties(mapi.PropertyValues{{Tag: tag(0x12, mapi.PtLong), Value: int32(-1)}}))
-	again, _ := s.GetStoreProperties(tag(0x12, mapi.PtLong))
+	again, err := s.GetStoreProperties(tag(0x12, mapi.PtLong))
+	mustNoErr(t, "read the upserted store property", err)
 	if len(again) != 1 || again[0].Value != int32(-1) {
 		t.Errorf("upsert: got %#v, want int32(-1)", again)
 	}

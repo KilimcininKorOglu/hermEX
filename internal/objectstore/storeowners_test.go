@@ -28,7 +28,9 @@ func TestStoreOwnersRoundTrip(t *testing.T) {
 	if err := s.SetStoreOwners(nil); err != nil {
 		t.Fatalf("clear: %v", err)
 	}
-	if got, _ := s.GetStoreOwners(); len(got) != 0 {
+	got, err = s.GetStoreOwners()
+	mustNoErr(t, "read the owners after clear", err)
+	if len(got) != 0 {
 		t.Errorf("after clear = %v, want empty", got)
 	}
 }
@@ -44,7 +46,7 @@ func TestIsStoreOwnerCaseFold(t *testing.T) {
 	if ok, err := s.IsStoreOwner("boss@hermex.TEST"); err != nil || !ok {
 		t.Errorf("IsStoreOwner(case-variant) = %v, %v; want true", ok, err)
 	}
-	if ok, _ := s.IsStoreOwner("stranger@hermex.test"); ok {
+	if ok, err := s.IsStoreOwner("stranger@hermex.test"); err != nil || ok {
 		t.Error("IsStoreOwner(non-owner) = true; want false")
 	}
 }

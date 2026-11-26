@@ -1,6 +1,7 @@
 package objectstore
 
 import (
+	"errors"
 	"strconv"
 	"sync"
 	"testing"
@@ -24,7 +25,13 @@ func TestUpdateActiveSyncStateLosesNoWrite(t *testing.T) {
 		stores[i] = st
 	}
 	increment := func(cur string) (string, bool, error) {
-		n, _ := strconv.Atoi(cur)
+		if cur == "" { // no state stored yet
+			cur = "0"
+		}
+		n, err := strconv.Atoi(cur)
+		if err != nil {
+			return "", false, err
+		}
 		return strconv.Itoa(n + 1), true, nil
 	}
 	var wg sync.WaitGroup
@@ -54,6 +61,24 @@ func TestUpdateActiveSyncStateLosesNoWrite(t *testing.T) {
 	}
 }
 
+// TestUpdateActiveSyncStateFailedUpdateWritesNothing proves an update that fails
+// returns its error to the caller and leaves the stored value as it was, so a
+// half-built state can never replace a good one.
+func TestUpdateActiveSyncStateFailedUpdateWritesNothing(t *testing.T) {
+	st, err := Open(t.TempDir())
+	mustNoErr(t, "open store", err)
+	defer st.Close()
+	mustNoErr(t, "seed state", st.SetActiveSyncState("kept"))
+	refused := errors.New("refused")
+	err = st.UpdateActiveSyncState(func(string) (string, bool, error) { return "dropped", true, refused })
+	if !errors.Is(err, refused) {
+		t.Fatalf("update error = %v, want the update's own error", err)
+	}
+	got, err := st.GetActiveSyncState()
+	mustNoErr(t, "read the state", err)
+	wantEq(t, "state after a failed update", got, "kept")
+}
+
 // TestUpdateActiveSyncStateSkipsAnUnchangedWrite proves an update reporting no
 // change writes nothing, so it cannot replace a value with a stale copy.
 func TestUpdateActiveSyncStateSkipsAnUnchangedWrite(t *testing.T) {
@@ -68,7 +93,9 @@ func TestUpdateActiveSyncStateSkipsAnUnchangedWrite(t *testing.T) {
 	if err := st.UpdateActiveSyncDevices(func(string) (string, bool, error) { return "dropped", false, nil }); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := st.GetActiveSyncDevices(); got != "kept" {
+	got, err := st.GetActiveSyncDevices()
+	mustNoErr(t, "read the devices", err)
+	if got != "kept" {
 		t.Errorf("devices = %q after an update that reported no change, want kept", got)
 	}
 }

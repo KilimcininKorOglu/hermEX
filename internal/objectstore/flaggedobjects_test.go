@@ -54,7 +54,8 @@ func TestListFolderObjectsWithFlag(t *testing.T) {
 // nothing rather than everything.
 func TestListFolderObjectsWithFlagEmpty(t *testing.T) {
 	s := openSeededStore(t)
-	ids, _ := s.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameRecurring})
+	ids, err := s.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameRecurring})
+	mustNoErr(t, "resolve the recurring named property", err)
 	recur := mapi.MakeTag(ids[0], mapi.PtBoolean)
 	storeFlagged(t, s, recur, false)
 

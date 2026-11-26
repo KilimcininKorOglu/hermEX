@@ -239,7 +239,11 @@ func TestBackupOmitsTheEMLCache(t *testing.T) {
 	if err := s.Backup(dest); err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
-	if entries, err := os.ReadDir(filepath.Join(dest, "eml")); err == nil && len(entries) > 0 {
+	entries, err := os.ReadDir(filepath.Join(dest, "eml"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read the copy's eml directory: %v", err)
+	}
+	if len(entries) > 0 {
 		t.Errorf("the backup carried %d cached wire copies", len(entries))
 	}
 

@@ -2,6 +2,7 @@ package objectstore
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -58,6 +59,27 @@ func TestAppendMessage(t *testing.T) {
 
 	wantCachedEMLSize(t, s, info)
 	wantServedContent(t, s, info)
+}
+
+// TestAppendToMissingFolderStoresNothing proves an append aimed at a folder the
+// store does not hold is refused and leaves no object row, index row or cached
+// wire form behind, so a failed append cannot leave a message no protocol lists.
+func TestAppendToMissingFolderStoresNothing(t *testing.T) {
+	s := openSeededStore(t)
+	before := countRows(t, s, `SELECT COUNT(*) FROM messages`)
+	raw := []byte("From: a@example.test\r\nTo: b@example.test\r\nSubject: x\r\n\r\nhi\r\n")
+	if _, err := s.AppendMessage(987654, raw, time.Unix(1700000000, 0), 0); err == nil {
+		t.Fatal("append to a missing folder succeeded, want an error")
+	}
+	wantEq(t, "object rows after the refused append", countRows(t, s, `SELECT COUNT(*) FROM messages`), before)
+	var indexed int
+	mustScan(t, s.idxdb.QueryRow(`SELECT COUNT(*) FROM messages`), &indexed)
+	wantEq(t, "index rows after the refused append", indexed, 0)
+	entries, err := os.ReadDir(filepath.Join(s.Dir(), "eml"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read the eml directory: %v", err)
+	}
+	wantEq(t, "cached wire forms after the refused append", len(entries), 0)
 }
 
 // wantCachedEMLSize proves the served eml was cached and its length matches

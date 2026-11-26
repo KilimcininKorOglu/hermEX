@@ -121,7 +121,8 @@ func TestOOFSettingsRoundTrip(t *testing.T) {
 	if err := s.SetOOFSettings(want); err != nil {
 		t.Fatal(err)
 	}
-	props, _ = s.GetStoreProperties(mapi.PrOOFState)
+	props, err = s.GetStoreProperties(mapi.PrOOFState)
+	mustNoErr(t, "read PR_OOF_STATE", err)
 	if v, _ := props.Get(mapi.PrOOFState); v != false {
 		t.Errorf("PR_OOF_STATE = %v, want false after disabling", v)
 	}
@@ -199,7 +200,9 @@ func TestOOFWindowIsChecked(t *testing.T) {
 			t.Errorf("UpdateOOFSettings(%d..%d) = %v, want ErrInvalidOOFWindow", cfg.Start, cfg.End, err)
 		}
 	}
-	if got, _ := st.GetOOFSettings(); got.Enabled {
+	got, err := st.GetOOFSettings()
+	mustNoErr(t, "read the OOF settings", err)
+	if got.Enabled {
 		t.Errorf("a refused window was stored: %+v", got)
 	}
 	for _, cfg := range []OOFSettings{{Enabled: true, Start: 1000}, {Enabled: true, End: 2000}, {Enabled: true, Start: 1000, End: 2000}} {

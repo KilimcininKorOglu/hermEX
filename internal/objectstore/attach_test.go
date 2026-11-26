@@ -88,6 +88,22 @@ func TestCreateDeleteAttachmentStableNumbers(t *testing.T) {
 	wantEq(t, "next attach number (continues past max, no reuse of 0)", n2, uint32(2))
 }
 
+// TestAttachmentOnMissingMessageIsRefused proves an attachment aimed at a message
+// id the store does not hold (a stale or forged client id) is refused and leaves
+// no attachment row, and a delete against it reports ErrNotFound.
+func TestAttachmentOnMissingMessageIsRefused(t *testing.T) {
+	s := openSeededStore(t)
+	const missing = int64(987654)
+	before := countRows(t, s, `SELECT COUNT(*) FROM attachments`)
+	if _, _, err := s.CreateAttachment(missing, mapi.PropertyValues{{Tag: mapi.PrAttachLongFilename, Value: "x.txt"}}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("attachment on a missing message: err = %v, want ErrNotFound", err)
+	}
+	wantEq(t, "attachment rows after the refused create", countRows(t, s, `SELECT COUNT(*) FROM attachments`), before)
+	if err := s.DeleteAttachment(missing, 0); !errors.Is(err, ErrNotFound) {
+		t.Errorf("delete on a missing message: err = %v, want ErrNotFound", err)
+	}
+}
+
 // mustCreateAttachment adds one attachment and returns the number it took. An
 // empty name creates the attachment with no properties at all.
 func mustCreateAttachment(t *testing.T, s *Store, messageID int64, name string) uint32 {

@@ -65,8 +65,10 @@ func TestContentRoundTripAndDedup(t *testing.T) {
 	}
 
 	// Dedup: storing identical content twice yields the same cid and one file.
-	cid1, _ := s.putContent(allBytes)
-	cid2, _ := s.putContent(allBytes)
+	cid1, err := s.putContent(allBytes)
+	mustNoErr(t, "store the content", err)
+	cid2, err := s.putContent(allBytes)
+	mustNoErr(t, "store the content again", err)
 	wantEq(t, "dedup cid", cid2, cid1)
 	if fi, err := os.Stat(s.cidPath(cid1)); err != nil || fi.Size() == 0 {
 		t.Errorf("content file missing or empty for %q: %v", cid1, err)
@@ -92,10 +94,6 @@ func roundTripContent(t *testing.T, s *Store, i int, v []byte) string {
 	return cid
 }
 
-// TestSweepOrphanContent proves the content sweep reclaims only unreferenced
-// files: a stray content file no property points to is removed, while a content
-// file two messages share (dedup) survives and both messages still read it. This
-// is the safety property the inline-delete alternative would violate.
 // TestSweepRemovesCrashLeftovers proves the sweep deletes a temporary file a
 // crash left between its creation and its rename, and keeps referenced content:
 // with the mailbox held exclusively no write is in flight, so such a file can
@@ -128,6 +126,10 @@ func TestSweepRemovesCrashLeftovers(t *testing.T) {
 	}
 }
 
+// TestSweepOrphanContent proves the content sweep reclaims only unreferenced
+// files: a stray content file no property points to is removed, while a content
+// file two messages share (dedup) survives and both messages still read it. This
+// is the safety property the inline-delete alternative would violate.
 func TestSweepOrphanContent(t *testing.T) {
 	s := openSeededStore(t)
 

@@ -168,7 +168,7 @@ func TestSetRuleEnabled(t *testing.T) {
 	if err := s.SetRuleEnabled(id, false); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
-	rules, _ := s.ListRules(inbox)
+	rules := mustListRules(t, s, inbox)
 	if rules[0].Enabled() {
 		t.Errorf("rule still enabled after disable")
 	}
@@ -179,7 +179,7 @@ func TestSetRuleEnabled(t *testing.T) {
 	if err := s.SetRuleEnabled(id, true); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
-	rules, _ = s.ListRules(inbox)
+	rules = mustListRules(t, s, inbox)
 	if !rules[0].Enabled() {
 		t.Errorf("rule not enabled after enable")
 	}
@@ -277,7 +277,7 @@ func TestModifyRulesRemove(t *testing.T) {
 	if err := s.ModifyRules(inbox, false, []RuleChange{{Op: RuleRemove, RuleID: id}}); err != nil {
 		t.Fatalf("ModifyRules remove: %v", err)
 	}
-	rules, _ := s.ListRules(inbox)
+	rules := mustListRules(t, s, inbox)
 	if len(rules) != 0 {
 		t.Errorf("got %d rules after remove, want 0", len(rules))
 	}
@@ -299,7 +299,7 @@ func TestModifyRulesReplace(t *testing.T) {
 	if err := s.ModifyRules(inbox, true, []RuleChange{{Op: RuleAdd, Patch: fullPatch(fresh)}}); err != nil {
 		t.Fatalf("ModifyRules replace: %v", err)
 	}
-	rules, _ := s.ListRules(inbox)
+	rules := mustListRules(t, s, inbox)
 	if len(rules) != 1 || rules[0].Name != "fresh" {
 		t.Errorf("after replace got %d rules (first %q), want just [fresh]", len(rules), firstRuleName(rules))
 	}
@@ -321,7 +321,7 @@ func TestModifyRulesForeignRuleNoOp(t *testing.T) {
 	if err := s.ModifyRules(sent, false, []RuleChange{{Op: RuleModify, RuleID: id, Patch: RulePatch{State: &cleared}}}); err != nil {
 		t.Fatalf("ModifyRules: %v", err)
 	}
-	rules, _ := s.ListRules(inbox)
+	rules := mustListRules(t, s, inbox)
 	if len(rules) != 1 || rules[0].State != mapi.RuleStateEnabled {
 		t.Errorf("a Sent-folder modify altered the Inbox rule: state = %#x, want unchanged ST_ENABLED", rules[0].State)
 	}
@@ -367,7 +367,7 @@ func TestSetRuleSequence(t *testing.T) {
 	if err := s.SetRuleSequence(b, rules[0].Sequence); err != nil {
 		t.Fatal(err)
 	}
-	if rules, _ = s.ListRules(inbox); rules[0].ID != b {
+	if rules = mustListRules(t, s, inbox); rules[0].ID != b {
 		t.Errorf("after swap rule b should be first, got %d", rules[0].ID)
 	}
 	if err := s.SetRuleSequence(999999, 1); !errors.Is(err, ErrNotFound) {

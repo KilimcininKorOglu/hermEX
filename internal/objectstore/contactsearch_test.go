@@ -109,8 +109,12 @@ func TestSearchContactsHonoursTheLimit(t *testing.T) {
 	if names := searchNames(t, s, "Ann", 2); len(names) != 2 {
 		t.Errorf("got %d matches under a limit of 2: %v", len(names), names)
 	}
-	if names := searchNames(t, s, "Ann", 0); len(names) != 0 {
-		t.Errorf("a limit of zero returned %v", names)
+	// SQLite reads LIMIT -1 as no limit at all, so a negative client limit must
+	// answer nothing rather than the whole address book.
+	for _, limit := range []int{0, -1} {
+		if names := searchNames(t, s, "Ann", limit); len(names) != 0 {
+			t.Errorf("a limit of %d returned %v", limit, names)
+		}
 	}
 }
 

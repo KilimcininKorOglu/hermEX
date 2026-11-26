@@ -30,7 +30,8 @@ func TestUIDFacade(t *testing.T) {
 	mustNoErr(t, "alloc uid", err)
 	wantEq(t, "first allocated UID", u1, uint32(1))
 	wantEq(t, "second allocated UID", u2, uint32(2))
-	uidnext, _ = s.UIDNext(mapi.PrivateFIDInbox)
+	uidnext, err = s.UIDNext(mapi.PrivateFIDInbox)
+	mustNoErr(t, "read UIDNEXT", err)
 	wantEq(t, "UIDNEXT after two allocations", uidnext, uint32(3))
 
 	// UIDVALIDITY is stable across reopen.
@@ -38,6 +39,7 @@ func TestUIDFacade(t *testing.T) {
 	s2, err := Open(dir)
 	mustNoErr(t, "reopen store", err)
 	defer s2.Close()
-	v2, _ := s2.UIDValidity(mapi.PrivateFIDInbox)
+	v2, err := s2.UIDValidity(mapi.PrivateFIDInbox)
+	mustNoErr(t, "read UIDVALIDITY after reopen", err)
 	wantEq(t, "UIDVALIDITY across reopen", v2, validity)
 }

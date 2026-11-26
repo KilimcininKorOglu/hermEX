@@ -124,6 +124,24 @@ func mustAppendMessage(t *testing.T, s *Store, folderID int64, raw []byte, inter
 	return info
 }
 
+// mustFolderByName looks a folder up by name and fails the test when the lookup
+// errors, so a failed query is never read as "no such folder".
+func mustFolderByName(t *testing.T, s *Store, parent *int64, name string) (int64, bool) {
+	t.Helper()
+	id, ok, err := s.FolderByName(parent, name)
+	mustNoErr(t, "look up folder "+name, err)
+	return id, ok
+}
+
+// mustMessageFlags reads one message's IMAP flags and fails the test when the read
+// fails, so a missing message is never read as a message with no flags set.
+func mustMessageFlags(t *testing.T, s *Store, folderID int64, uid uint32) int64 {
+	t.Helper()
+	fl, err := s.MessageFlags(folderID, uid)
+	mustNoErr(t, "read the message flags", err)
+	return fl
+}
+
 // mustListMessages returns a folder's index rows.
 func mustListMessages(t *testing.T, s *Store, folderID int64) []MessageInfo {
 	t.Helper()

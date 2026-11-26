@@ -160,7 +160,7 @@ func TestCreateAndFindFolder(t *testing.T) {
 	if !ok || id != top {
 		t.Fatalf("FolderByName(Projects) = (%d,%v), want (%d,true)", id, ok, top)
 	}
-	_, ok, _ = s.FolderByName(nil, "Nope")
+	_, ok = mustFolderByName(t, s, nil, "Nope")
 	wantEq(t, "FolderByName(Nope) found", ok, false)
 
 	// A nested folder reports its real parent.
@@ -168,7 +168,7 @@ func TestCreateAndFindFolder(t *testing.T) {
 	folders := folderByName(t, s)
 	wantParent(t, folders, "Projects", nil)
 	wantParent(t, folders, "2026", &top)
-	if id, ok, _ := s.FolderByName(&top, "2026"); !ok || id != sub {
+	if id, ok := mustFolderByName(t, s, &top, "2026"); !ok || id != sub {
 		t.Errorf("FolderByName(under Projects, 2026) = (%d,%v), want (%d,true)", id, ok, sub)
 	}
 }
@@ -240,7 +240,7 @@ func TestRenameFolder(t *testing.T) {
 	if err := s.RenameFolder(id, nil, "New"); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, _ := s.FolderByName(nil, "Old"); ok {
+	if _, ok := mustFolderByName(t, s, nil, "Old"); ok {
 		t.Error("old name still resolves after rename")
 	}
 	got, ok, err := s.FolderByName(nil, "New")
@@ -278,10 +278,10 @@ func TestSetFolderName(t *testing.T) {
 	if err := s.SetFolderName(a, "A2"); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, _ := s.FolderByName(&parent, "A2"); !ok {
+	if _, ok := mustFolderByName(t, s, &parent, "A2"); !ok {
 		t.Error("renamed folder not found under its original parent (name or parent lost)")
 	}
-	if _, ok, _ := s.FolderByName(&parent, "A"); ok {
+	if _, ok := mustFolderByName(t, s, &parent, "A"); ok {
 		t.Error("old name still resolves after rename")
 	}
 	if err := s.SetFolderName(a, "B"); !errors.Is(err, ErrFolderExists) {

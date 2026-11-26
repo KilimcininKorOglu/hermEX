@@ -28,7 +28,9 @@ func TestSmimeIdentityRoundTrip(t *testing.T) {
 	if err := s.ClearSmimeIdentity(); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, _ := s.GetSmimeIdentity(); ok {
+	_, ok, err = s.GetSmimeIdentity()
+	mustNoErr(t, "read the identity after clear", err)
+	if ok {
 		t.Error("identity still present after clear")
 	}
 }
@@ -62,7 +64,8 @@ func TestRecipientCertStore(t *testing.T) {
 	wantEq(t, "certificate count", len(mustListRecipientCerts(t, s)), 2)
 
 	mustNoErr(t, "delete bob certificate", s.DeleteRecipientCert("bob@hermex.test"))
-	_, ok, _ = s.GetRecipientCert("bob@hermex.test")
+	_, ok, err = s.GetRecipientCert("bob@hermex.test")
+	mustNoErr(t, "read bob's certificate after delete", err)
 	wantEq(t, "bob certificate present after delete", ok, false)
 	wantEq(t, "certificate count after delete", len(mustListRecipientCerts(t, s)), 1)
 }
