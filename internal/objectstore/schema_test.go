@@ -94,6 +94,22 @@ func setObjectVersion(t *testing.T, dir string, v int) {
 	}
 }
 
+// objectVersionOnDisk reads the recorded object-store schema version without
+// opening the store, so a refused open can be checked for leaving it alone.
+func objectVersionOnDisk(t *testing.T, dir string) int {
+	t.Helper()
+	db, err := sql.Open("sqlite", dsn(filepath.Join(dir, "objects.sqlite3")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var v int
+	if err := db.QueryRow(`SELECT config_value FROM configurations WHERE config_id=?`, cfgSchemaVersion).Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
 // TestOpenRefusesNewerSchema proves a store recorded newer than this binary is
 // refused rather than opened, the downgrade guard that protects data written
 // under a schema the binary does not understand.
@@ -110,6 +126,7 @@ func TestOpenRefusesNewerSchema(t *testing.T) {
 		s.Close()
 		t.Fatalf("opened a store at version %d (binary supports %d); want refusal", target+1, target)
 	}
+	wantEq(t, "recorded version after the refusal", objectVersionOnDisk(t, dir), target+1)
 }
 
 // TestOpenRefusesPreBaselineSchema proves a store below the baseline, a
@@ -126,6 +143,7 @@ func TestOpenRefusesPreBaselineSchema(t *testing.T) {
 		s.Close()
 		t.Fatalf("opened a pre-baseline store at version %d; want refusal", objectSchemaVersion-1)
 	}
+	wantEq(t, "recorded version after the refusal", objectVersionOnDisk(t, dir), objectSchemaVersion-1)
 }
 
 func TestReopenIsIdempotent(t *testing.T) {

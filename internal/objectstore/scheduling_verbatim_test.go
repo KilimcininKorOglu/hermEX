@@ -45,9 +45,6 @@ func TestSchedulingMessageServedVerbatim(t *testing.T) {
 	if !bytes.Equal(got, []byte(raw)) {
 		t.Fatalf("scheduling message not served verbatim:\n got %q\nwant %q", got, raw)
 	}
-	if !bytes.Contains(got, []byte("Content-Type: text/calendar")) {
-		t.Error("served message lost its text/calendar body")
-	}
 
 	// Fallback: with the eml cache gone, the preserved original regenerates it
 	// verbatim rather than re-exporting (which would demote the invitation).
