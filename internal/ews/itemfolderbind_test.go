@@ -79,6 +79,19 @@ func TestCreateAttachmentRefusesMessageOutsideTheClaimedFolder(t *testing.T) {
 	if strings.Contains(out, `ResponseClass="Success"`) {
 		t.Errorf("the forged item id accepted an attachment write:\n%s", out)
 	}
+	// The refused write must leave the boss's message without an attachment.
+	st, err := objectstore.OpenExisting(paths["bob@hermex.test"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	has, err := st.HasAttachments(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if has {
+		t.Error("the refused write still stored an attachment on the boss's message")
+	}
 }
 
 // TestGetItemStillServesTheGrantedFolder keeps ordinary delegate access working:

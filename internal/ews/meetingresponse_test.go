@@ -303,9 +303,11 @@ func TestMeetingResponseRefusesWhatIsNotAnInvitation(t *testing.T) {
 		name string
 		seed func(t *testing.T, st *objectstore.Store) oxews.ItemID
 		want string
+		// calendar is the Calendar item count the seed itself leaves.
+		calendar int
 	}{
-		{"a meeting response", seedMeetingReply, "ErrorInvalidReferenceItem"},
-		{"the organizer's meeting", seedOrganizedMeeting, "ErrorCalendarIsOrganizerForAccept"},
+		{"a meeting response", seedMeetingReply, "ErrorInvalidReferenceItem", 0},
+		{"the organizer's meeting", seedOrganizedMeeting, "ErrorCalendarIsOrganizerForAccept", 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := provisionedDir(t)
@@ -316,8 +318,25 @@ func TestMeetingResponseRefusesWhatIsNotAnInvitation(t *testing.T) {
 			ts := meetingServer(t, dir)
 			_, out := soapPost(t, ts, meetingResponseReq("AcceptItem", oxews.EncodeItemID(id)), true)
 			wantContains(t, "the refusal", out, "<ResponseCode>"+tc.want+"</ResponseCode>")
+			wantNoMeetingResponseFiled(t, dir, tc.calendar)
 		})
 	}
+}
+
+// wantNoMeetingResponseFiled fails when a refused meeting response still changed
+// the mailbox: the Calendar must hold only the items it held before (calendarBefore)
+// and Sent Items no copy of a response.
+func wantNoMeetingResponseFiled(t *testing.T, dir string, calendarBefore int) {
+	t.Helper()
+	st, err := objectstore.OpenExisting(dir)
+	mustNoErr(t, "open the store", err)
+	defer st.Close()
+	cal, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
+	mustNoErr(t, "list the Calendar", err)
+	wantEq(t, "Calendar items after the refusal", len(cal), calendarBefore)
+	sent, err := st.ListMessages(int64(mapi.PrivateFIDSentItems))
+	mustNoErr(t, "list Sent Items", err)
+	wantEq(t, "Sent Items after the refusal", len(sent), 0)
 }
 
 // seedMeetingReply files an attendee's response to the mailbox's meeting in its Inbox.

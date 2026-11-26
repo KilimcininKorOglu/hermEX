@@ -77,6 +77,7 @@ func TestMeetingResponseRefusesABadProposal(t *testing.T) {
 			itemID := oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDInbox), MessageID: reqID})
 			_, out := soapPost(t, ts, meetingResponseReqWith("TentativelyAcceptItem", itemID, "SendAndSaveCopy", tc.extra), true)
 			wantContains(t, "the refusal", out, "<ResponseCode>"+tc.want+"</ResponseCode>")
+			wantNoMeetingResponseFiled(t, dir, 0)
 		})
 	}
 }
