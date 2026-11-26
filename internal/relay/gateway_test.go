@@ -116,7 +116,7 @@ func TestGatewayKeepsTheMessageQueuedOnAFailedUpgrade(t *testing.T) {
 		t.Fatalf("process: %v", err)
 	}
 
-	if due, _ := w.Spool.Claim(t0.Add(24*time.Hour), 10); len(due) != 1 {
+	if due := mustClaim(t, w.Spool, t0.Add(24*time.Hour), 10); len(due) != 1 {
 		t.Errorf("spool holds %d recipients, want the undelivered one still queued", len(due))
 	}
 }

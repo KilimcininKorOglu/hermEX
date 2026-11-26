@@ -99,7 +99,7 @@ func TestAcceptedMessageSurvivesFailedQuit(t *testing.T) {
 	if n := atomic.LoadInt32(accepted); n != 1 {
 		t.Errorf("the mail exchanger accepted %d copies, want 1", n)
 	}
-	if due, _ := sp.Claim(t0, 10); len(due) != 0 {
+	if due := mustClaim(t, sp, t0, 10); len(due) != 0 {
 		t.Errorf("spool still holds %d recipients, so the message would be sent again", len(due))
 	}
 }

@@ -235,7 +235,7 @@ func TestWorkerDeliversToSink(t *testing.T) {
 	if !bytes.Contains(m.data, []byte("hi bob")) {
 		t.Errorf("sink body missing payload: %q", m.data)
 	}
-	if due, _ := sp.Claim(t0, 10); len(due) != 0 {
+	if due := mustClaim(t, sp, t0, 10); len(due) != 0 {
 		t.Errorf("spool not drained after delivery: %v", due)
 	}
 }
@@ -323,7 +323,7 @@ func TestWorkerRetriesTransientFailure(t *testing.T) {
 	wantEq(t, len(sink.recorded()), 0, "messages at the sink after a failed dial")
 
 	// It is not due again until the backoff elapses.
-	early, _ := w.ProcessDue(context.Background(), t0.Add(time.Minute))
+	early := mustProcess(t, w, t0.Add(time.Minute))
 	wantEq(t, early, 0, "deliveries before the backoff elapsed")
 
 	// After the backoff, the retry succeeds.
@@ -363,7 +363,7 @@ func TestWorkerBouncesPermanentFailure(t *testing.T) {
 	if len(bounced) != 1 || bounced[0].Recipient != "bob@remote" {
 		t.Fatalf("OnGiveUp fired %v, want once for bob@remote", bounced)
 	}
-	if due, _ := sp.Claim(t0, 10); len(due) != 0 {
+	if due := mustClaim(t, sp, t0, 10); len(due) != 0 {
 		t.Errorf("a permanently-failed recipient was left in the spool: %v", due)
 	}
 }
@@ -389,20 +389,20 @@ func TestWorkerGivesUpAfterMaxAttempts(t *testing.T) {
 	}
 
 	// First attempt: transient failure, deferred.
-	if sent, _ := w.ProcessDue(context.Background(), t0); sent != 0 {
+	if sent := mustProcess(t, w, t0); sent != 0 {
 		t.Fatal("first attempt should not deliver")
 	}
 	if len(bounced) != 0 {
 		t.Fatal("a recipient was abandoned before its attempts were exhausted")
 	}
 	// Second attempt, after the backoff: attempts are now exhausted, so it bounces.
-	if sent, _ := w.ProcessDue(context.Background(), t0.Add(time.Minute)); sent != 0 {
+	if sent := mustProcess(t, w, t0.Add(time.Minute)); sent != 0 {
 		t.Fatal("second attempt should not deliver")
 	}
 	if len(bounced) != 1 || bounced[0].Recipient != "bob@remote" {
 		t.Fatalf("OnGiveUp fired %v, want once after attempts exhausted", bounced)
 	}
-	if due, _ := sp.Claim(t0.Add(time.Hour), 10); len(due) != 0 {
+	if due := mustClaim(t, sp, t0.Add(time.Hour), 10); len(due) != 0 {
 		t.Errorf("an exhausted recipient was left in the spool: %v", due)
 	}
 }
@@ -434,7 +434,7 @@ func TestWorkerGuardRefusalSkipsThePass(t *testing.T) {
 	if msgs := sink.recorded(); len(msgs) != 0 {
 		t.Errorf("a refused pass delivered %d message(s), want none", len(msgs))
 	}
-	if due, _ := sp.Claim(t0, 10); len(due) != 1 {
+	if due := mustClaim(t, sp, t0, 10); len(due) != 1 {
 		t.Errorf("spool holds %d due recipient(s), want the message untouched", len(due))
 	}
 }
@@ -465,7 +465,7 @@ func TestWorkerGuardPermissionIsReleased(t *testing.T) {
 	if msgs := sink.recorded(); len(msgs) != 1 {
 		t.Fatalf("a permitted pass delivered %d message(s), want 1", len(msgs))
 	}
-	if due, _ := sp.Claim(t0, 10); len(due) != 0 {
+	if due := mustClaim(t, sp, t0, 10); len(due) != 0 {
 		t.Errorf("spool not drained after a permitted pass: %v", due)
 	}
 }
@@ -573,10 +573,10 @@ func TestWorkerKeepsItemWhenBounceCannotBeDelivered(t *testing.T) {
 	}
 	// It is deferred, not due again immediately: every expiry also re-contacts the
 	// mail exchanger that already refused the message for good.
-	if due, _ := sp.Claim(t0, 10); len(due) != 0 {
+	if due := mustClaim(t, sp, t0, 10); len(due) != 0 {
 		t.Errorf("the stuck item is due again at once: %v", due)
 	}
-	if due, _ := sp.Claim(t0.Add(bounceRetryBackoff), 10); len(due) != 1 {
+	if due := mustClaim(t, sp, t0.Add(bounceRetryBackoff), 10); len(due) != 1 {
 		t.Errorf("the stuck item never becomes due again; the bounce would never be retried")
 	}
 }

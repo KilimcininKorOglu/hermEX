@@ -1,7 +1,9 @@
 package relay
 
 import (
+	"context"
 	"testing"
+	"time"
 )
 
 // This file is the package's assertion vocabulary. A test states one fact per call,
@@ -37,6 +39,23 @@ func mustNoErr(t *testing.T, err error, what string) {
 	if err != nil {
 		t.Fatalf("%s: %v", what, err)
 	}
+}
+
+// mustClaim claims the due recipients and fails the test when the claim fails,
+// so a broken spool is never read as an empty queue.
+func mustClaim(t *testing.T, s *Spool, now time.Time, limit int) []Item {
+	t.Helper()
+	items, err := s.Claim(now, limit)
+	mustNoErr(t, err, "claim the due recipients")
+	return items
+}
+
+// mustProcess runs one worker pass and fails the test when the pass errors.
+func mustProcess(t *testing.T, w *Worker, now time.Time) int {
+	t.Helper()
+	sent, err := w.ProcessDue(context.Background(), now)
+	mustNoErr(t, err, "run a worker pass")
+	return sent
 }
 
 // mustCount runs a single-value COUNT-style query on the spool and returns it.

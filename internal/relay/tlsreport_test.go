@@ -78,7 +78,8 @@ func TestTLSReportHTTPSDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("report body is not gzip: %v", err)
 	}
-	raw, _ := io.ReadAll(zr)
+	raw, err := io.ReadAll(zr)
+	mustNoErr(t, err, "decompress the report body")
 	var report map[string]any
 	if err := json.Unmarshal(raw, &report); err != nil {
 		t.Fatalf("decode report JSON: %v", err)
@@ -269,10 +270,14 @@ func TestPruneTLSReports(t *testing.T) {
 	if err := sp.PruneTLSReports(reportDay.AddDate(0, 0, -7)); err != nil {
 		t.Fatal(err)
 	}
-	if left, _ := sp.UnreportedDomains(oldDay); len(left) != 0 {
+	left, err := sp.UnreportedDomains(oldDay)
+	mustNoErr(t, err, "list the old day's domains")
+	if len(left) != 0 {
 		t.Errorf("old day counters survived pruning: %v", left)
 	}
-	if left, _ := sp.UnreportedDomains(reportDay); len(left) != 1 || left[0] != "new.test" {
+	left, err = sp.UnreportedDomains(reportDay)
+	mustNoErr(t, err, "list the report day's domains")
+	if len(left) != 1 || left[0] != "new.test" {
 		t.Errorf("recent day counters were lost: %v", left)
 	}
 }

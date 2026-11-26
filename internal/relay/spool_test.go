@@ -76,7 +76,7 @@ func TestSpoolListRetryDelete(t *testing.T) {
 	mustNoErr(t, s.Enqueue("a@local", []string{"x@remote", "y@remote"}, body, t0), "enqueue")
 
 	// Defer x far into the future with a recorded error (a transient failure).
-	due, _ := s.Claim(t0, 10)
+	due := mustClaim(t, s, t0, 10)
 	xID, yID := recipientIDs(due)
 	future := t0.Add(time.Hour)
 	mustNoErr(t, s.Retry(xID, future, "451 greylisted"), "defer x")
@@ -124,14 +124,14 @@ func checkQueueEntry(t *testing.T, s *Spool, xID int64, body []byte, future time
 // keeping its history.
 func checkRetryNow(t *testing.T, s *Spool, xID, yID int64, t0 time.Time) {
 	t.Helper()
-	before, _ := s.Claim(t0, 10)
+	before := mustClaim(t, s, t0, 10)
 	if len(before) != 1 {
 		t.Fatalf("before flush %d items are due, want only y", len(before))
 	}
 	wantEq(t, before[0].RecipientID, yID, "the only due recipient before the flush")
 
 	mustNoErr(t, s.RetryNow(xID, t0), "retry-now")
-	after, _ := s.Claim(t0, 10)
+	after := mustClaim(t, s, t0, 10)
 	if len(after) != 2 {
 		t.Fatalf("after flush %d items are due, want both", len(after))
 	}
@@ -148,14 +148,16 @@ func checkRetryNow(t *testing.T, s *Spool, xID, yID int64, t0 time.Time) {
 func checkQueueDelete(t *testing.T, s *Spool, xID, yID int64) {
 	t.Helper()
 	mustNoErr(t, s.Delete(xID), "delete x")
-	list, _ := s.List()
+	list, err := s.List()
+	mustNoErr(t, err, "list after deleting x")
 	if len(list) != 1 {
 		t.Fatalf("after deleting x the queue holds %d entries, want only y", len(list))
 	}
 	wantEq(t, list[0].RecipientID, yID, "the remaining recipient")
 
 	mustNoErr(t, s.Delete(yID), "delete y")
-	list, _ = s.List()
+	list, err = s.List()
+	mustNoErr(t, err, "list after deleting y")
 	wantEq(t, len(list), 0, "queue entries after deleting every recipient")
 
 	mustNoErr(t, s.Delete(xID), "delete an already-gone recipient")
@@ -199,7 +201,7 @@ func TestSpoolPerRecipientLifecycle(t *testing.T) {
 	// Defer y by an hour: it must drop out of the now-claim and reappear later
 	// with an incremented attempt count.
 	mustNoErr(t, s.Retry(after[0].RecipientID, t0.Add(time.Hour), "452 try later"), "defer y")
-	now, _ := s.Claim(t0, 10)
+	now := mustClaim(t, s, t0, 10)
 	wantEq(t, len(now), 0, "items claimable now after y was deferred")
 
 	later, err := s.Claim(t0.Add(time.Hour), 10)
@@ -211,7 +213,7 @@ func TestSpoolPerRecipientLifecycle(t *testing.T) {
 
 	// Settling the last recipient drops the message body too.
 	mustNoErr(t, s.Sent(later[0].RecipientID), "settle y as sent")
-	final, _ := s.Claim(t0.Add(2*time.Hour), 10)
+	final := mustClaim(t, s, t0.Add(2*time.Hour), 10)
 	wantEq(t, len(final), 0, "items left after every recipient settled")
 }
 

@@ -62,7 +62,7 @@ func TestEnqueueNilSignerUnchanged(t *testing.T) {
 	if err := sp.Enqueue("from@local", []string{"a@remote"}, raw, now); err != nil {
 		t.Fatal(err)
 	}
-	items, _ := sp.Claim(now, 10)
+	items := mustClaim(t, sp, now, 10)
 	if len(items) != 1 || !bytes.Equal(items[0].Body, raw) {
 		t.Errorf("a nil signer must leave the body unchanged, got %q", items[0].Body)
 	}
