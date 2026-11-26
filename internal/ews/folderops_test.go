@@ -101,6 +101,9 @@ func TestUpdateFolderDistinguishedRejected(t *testing.T) {
 	if _, out := soapPost(t, ts, req, true); !strings.Contains(out, "ErrorAccessDenied") {
 		t.Errorf("renaming a distinguished folder must be ErrorAccessDenied: %s", out)
 	}
+	if _, out := soapPost(t, ts, distinguishedGetFolder("inbox"), true); strings.Contains(out, "Hacked") {
+		t.Errorf("the refused rename still renamed the Inbox: %s", out)
+	}
 }
 
 // TestUpdateFolderNameCollision confirms renaming a folder to a name a sibling
@@ -112,6 +115,9 @@ func TestUpdateFolderNameCollision(t *testing.T) {
 
 	if _, out := soapPost(t, ts, updateFolderRenameReq(beta, "Alpha"), true); !strings.Contains(out, "ErrorFolderExists") {
 		t.Errorf("renaming onto a sibling's name must be ErrorFolderExists: %s", out)
+	}
+	if _, listing := soapPost(t, ts, findFolderReq("inbox", "Shallow"), true); !strings.Contains(listing, "Beta") {
+		t.Errorf("the refused rename changed Beta's name: %s", listing)
 	}
 }
 
@@ -148,6 +154,9 @@ func TestMoveFolderDistinguishedRejected(t *testing.T) {
 		`</MoveFolder>`)
 	if _, out := soapPost(t, ts, req, true); !strings.Contains(out, "ErrorMoveDistinguishedFolder") {
 		t.Errorf("moving a distinguished folder must be ErrorMoveDistinguishedFolder: %s", out)
+	}
+	if _, listing := soapPost(t, ts, findFolderByIDReq(dest, "Shallow"), true); strings.Contains(listing, "Inbox") {
+		t.Errorf("the refused move still filed the Inbox under the destination: %s", listing)
 	}
 }
 
