@@ -80,4 +80,11 @@ func TestHTTPRateLimitSettingsSeparateFromSMTP(t *testing.T) {
 	if got != smtp {
 		t.Errorf("SMTP settings = %+v, want %+v (unchanged)", got, smtp)
 	}
+
+	// And the other way: an SMTP save leaves the HTTP row as it was.
+	mustNoErr(t, "save new SMTP settings", d.SetRateLimitSettings(RateLimitSettings{Enabled: false, Burst: 5, WindowSeconds: 5}))
+	gotHTTP, found, err := d.GetHTTPRateLimitSettings()
+	mustNoErr(t, "read the HTTP settings", err)
+	wantEq(t, "HTTP settings found", found, true)
+	wantEq(t, "HTTP settings after an SMTP save", gotHTTP, HTTPRateLimitSettings{Enabled: false, Burst: 1200, WindowSeconds: 120})
 }
