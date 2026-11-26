@@ -149,4 +149,31 @@ func TestChangePublisherNilIsNoop(t *testing.T) {
 	if _, err := s.AppendMessage(int64(mapi.PrivateFIDInbox), publishTestMessage(), time.Unix(1700000000, 0), 0); err != nil {
 		t.Fatalf("AppendMessage with nil publisher: %v", err)
 	}
+	msgs, err := s.ListMessages(int64(mapi.PrivateFIDInbox))
+	mustNoErr(t, "list the inbox", err)
+	wantEq(t, "messages filed with no publisher", len(msgs), 1)
+}
+
+// TestChangePublisherRefusedWriteIsSilent: a mutation that changes nothing (a
+// flag store or delete aimed at a UID the folder does not hold) must not wake
+// every push consumer of the mailbox for a diff that finds nothing.
+func TestChangePublisherRefusedWriteIsSilent(t *testing.T) {
+	s := openSeededStore(t)
+	cap := &capturedEvents{dir: s.Dir()}
+	SetChangePublisher(cap.publish)
+	t.Cleanup(func() { SetChangePublisher(nil) })
+
+	inbox := int64(mapi.PrivateFIDInbox)
+	info := mustAppendMessage(t, s, inbox, publishTestMessage(), time.Unix(1700000000, 0), 0)
+	cap.drain()
+
+	if err := s.SetMessageFlags(inbox, info.UID+50, FlagSeen); err == nil {
+		t.Error("a flag store on a missing UID succeeded")
+	}
+	if err := s.DeleteMessage(inbox, info.UID+50); err == nil {
+		t.Error("a delete of a missing UID succeeded")
+	}
+	if got := cap.drain(); len(got) != 0 {
+		t.Errorf("refused writes published %+v, want nothing", got)
+	}
 }
