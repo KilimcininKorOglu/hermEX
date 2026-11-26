@@ -25,25 +25,30 @@ func stateRuleStore(t *testing.T, state uint32) (*Store, int64) {
 	return s, filed
 }
 
-// ruleMoved reports whether the rule moved a delivered message out of the inbox.
-func ruleMoved(t *testing.T, s *Store) bool {
+// ruleMoved reports whether the rule moved a delivered message out of the inbox,
+// failing when the message is in neither the inbox nor the rule's target.
+func ruleMoved(t *testing.T, s *Store, filed int64) bool {
 	t.Helper()
 	inbox := int64(mapi.PrivateFIDInbox)
 	m := deliverTo(t, s, inbox, ruleMsg("urgent", "x@y.com", ""))
 	if _, err := s.ApplyInboxRules(m, 1000); err != nil {
 		t.Fatalf("ApplyInboxRules: %v", err)
 	}
-	_, err := s.MessageByUID(inbox, m.UID)
-	return err != nil
+	inInbox := len(mustListMessages(t, s, inbox))
+	inFiled := len(mustListMessages(t, s, filed))
+	if inInbox+inFiled != 1 {
+		t.Fatalf("inbox holds %d and the target %d, want the one message in exactly one", inInbox, inFiled)
+	}
+	return inFiled == 1
 }
 
 // TestOnlyWhenOOFRuleWaitsForTheAwayState is the load-bearing case: Outlook sets
 // ST_ONLY_WHEN_OOF on a rule the user wants only while away, so it must not act on mail
 // the user is there to read.
 func TestOnlyWhenOOFRuleWaitsForTheAwayState(t *testing.T) {
-	s, _ := stateRuleStore(t, mapi.RuleStateEnabled|mapi.RuleStateOnlyWhenOOF)
+	s, filed := stateRuleStore(t, mapi.RuleStateEnabled|mapi.RuleStateOnlyWhenOOF)
 
-	if ruleMoved(t, s) {
+	if ruleMoved(t, s, filed) {
 		t.Error("an ST_ONLY_WHEN_OOF rule acted while the mailbox was not out of office")
 	}
 }
@@ -51,12 +56,12 @@ func TestOnlyWhenOOFRuleWaitsForTheAwayState(t *testing.T) {
 // TestOnlyWhenOOFRuleRunsWhileAway proves the same rule does act once the mailbox is out
 // of office, so the bit gates the rule rather than disabling it.
 func TestOnlyWhenOOFRuleRunsWhileAway(t *testing.T) {
-	s, _ := stateRuleStore(t, mapi.RuleStateEnabled|mapi.RuleStateOnlyWhenOOF)
+	s, filed := stateRuleStore(t, mapi.RuleStateEnabled|mapi.RuleStateOnlyWhenOOF)
 	if err := s.SetOOFSettings(OOFSettings{Enabled: true}); err != nil {
 		t.Fatalf("SetOOFSettings: %v", err)
 	}
 
-	if !ruleMoved(t, s) {
+	if !ruleMoved(t, s, filed) {
 		t.Error("an ST_ONLY_WHEN_OOF rule did not act while the mailbox was out of office")
 	}
 }
@@ -65,9 +70,9 @@ func TestOnlyWhenOOFRuleRunsWhileAway(t *testing.T) {
 // client clears the bit, because re-running a rule known to be broken would repeat the
 // failure on every message.
 func TestErroredRuleDoesNotRun(t *testing.T) {
-	s, _ := stateRuleStore(t, mapi.RuleStateEnabled|mapi.RuleStateError)
+	s, filed := stateRuleStore(t, mapi.RuleStateEnabled|mapi.RuleStateError)
 
-	if ruleMoved(t, s) {
+	if ruleMoved(t, s, filed) {
 		t.Error("a rule marked ST_ERROR still acted")
 	}
 }
@@ -75,9 +80,9 @@ func TestErroredRuleDoesNotRun(t *testing.T) {
 // TestAnOrdinaryRuleStillRuns proves the state checks did not switch off a plain enabled
 // rule.
 func TestAnOrdinaryRuleStillRuns(t *testing.T) {
-	s, _ := stateRuleStore(t, mapi.RuleStateEnabled)
+	s, filed := stateRuleStore(t, mapi.RuleStateEnabled)
 
-	if !ruleMoved(t, s) {
+	if !ruleMoved(t, s, filed) {
 		t.Error("an enabled rule with no other state bits did not act")
 	}
 }
