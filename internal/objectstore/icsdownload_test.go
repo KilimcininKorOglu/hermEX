@@ -1,6 +1,7 @@
 package objectstore
 
 import (
+	"errors"
 	"testing"
 
 	"hermex/internal/ics"
@@ -101,6 +102,31 @@ func TestContentDownloadInitialSync(t *testing.T) {
 	wantEq(t, "INCRSYNCSTATEEND count", countMarkers(items, ics.MarkerIncrSyncStateEnd), 1)
 	wantStreamProp(t, items, metaTagCnsetSeen, "state block seen change-number set")
 	wantStreamEnd(t, items)
+}
+
+// TestContentDownloadStreamsOnlyTheFolderLiveObjects asserts a sync of one folder
+// streams that folder's live objects and nothing else: an object in the dumpster
+// and an object filed in another folder are not changes of this folder, and a
+// folder the store does not hold cannot be synced at all.
+func TestContentDownloadStreamsOnlyTheFolderLiveObjects(t *testing.T) {
+	s := openSeededStore(t)
+	fld := int64(mapi.PrivateFIDContacts)
+	mustCreateMessage(t, s, fld, contactMsg("Ada Lovelace"))
+	gone := mustCreateMessage(t, s, fld, contactMsg("Deleted Person"))
+	mustNoErr(t, "soft-delete", s.SoftDeleteObject(gone))
+	mustCreateMessage(t, s, int64(mapi.PrivateFIDTasks), contactMsg("Elsewhere"))
+
+	dc, err := s.NewContentDownload(fld, downloadState(t, s), SyncNormal, 0, nil)
+	mustNoErr(t, "new content download", err)
+	items := drainDownload(t, dc, 4096)
+	wantEq(t, "INCRSYNCCHG count (the one live object of the folder)", countMarkers(items, ics.MarkerIncrSyncChg), 1)
+
+	if _, err := s.NewContentDownload(987654, downloadState(t, s), SyncNormal, 0, nil); !errors.Is(err, ErrNotFound) {
+		t.Errorf("content download of a folder the store does not hold: err = %v, want ErrNotFound", err)
+	}
+	if _, err := s.NewHierarchyDownload(987654, hierarchyState(t, s), 0, nil); !errors.Is(err, ErrNotFound) {
+		t.Errorf("hierarchy download of a folder the store does not hold: err = %v, want ErrNotFound", err)
+	}
 }
 
 // The state-block meta tags a download stream carries, by their wire values.

@@ -80,6 +80,9 @@ type ContentSyncResult struct {
 // a well-formed idset sized to a real mailbox.
 func (s *Store) GetContentSync(req ContentSyncRequest) (ContentSyncResult, error) {
 	var res ContentSyncResult
+	if err := s.requireLiveFolder(req.FolderID); err != nil {
+		return res, err
+	}
 	rows, err := s.objdb.Query(
 		`SELECT message_id, change_number, is_associated, read_state, read_cn, message_size
 		   FROM messages WHERE parent_fid=? AND is_deleted=0`, req.FolderID)
@@ -328,6 +331,9 @@ type HierarchySyncResult struct {
 // live (is_deleted=0) folders, so a soft-deleted given FID is reported deleted.
 func (s *Store) GetHierarchySync(req HierarchySyncRequest) (HierarchySyncResult, error) {
 	var res HierarchySyncResult
+	if err := s.requireLiveFolder(req.FolderID); err != nil {
+		return res, err
+	}
 	rows, err := s.objdb.Query(
 		`WITH RECURSIVE subtree(folder_id, change_number) AS (
 			SELECT folder_id, change_number FROM folders WHERE parent_id=? AND is_deleted=0

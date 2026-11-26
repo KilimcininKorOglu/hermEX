@@ -520,6 +520,21 @@ func (s *Store) childFolderIDs(folderID int64) ([]int64, error) {
 	return ids, rows.Err()
 }
 
+// requireLiveFolder reports ErrNotFound when folderID names no live folder. A
+// sync must check this before it reads the folder's rows: an empty result for a
+// folder that is not there reads as "every object the client holds was deleted",
+// and the client acts on that by discarding its copies.
+func (s *Store) requireLiveFolder(folderID int64) error {
+	ok, err := s.FolderExists(folderID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // FolderExists reports whether a live (non-deleted) folder with the given id
 // exists in the object store.
 func (s *Store) FolderExists(folderID int64) (bool, error) {
