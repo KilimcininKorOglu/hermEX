@@ -14,7 +14,8 @@ func TestAdminRoles(t *testing.T) {
 	mustNoErr(t, "resolve the login", err)
 	wantEq(t, "UserID found the login", ok, true)
 	wantEq(t, "resolved user id", id, uid)
-	_, found, _ := d.UserID("ghost@hermex.test")
+	_, found, err := d.UserID("ghost@hermex.test")
+	mustNoErr(t, "resolve an unknown login", err)
 	wantEq(t, "UserID resolved an unknown login", found, false)
 
 	wantEq(t, "roles of a fresh user", len(mustAdminRoles(t, d, uid)), 0)
@@ -36,6 +37,7 @@ func TestAdminRoles(t *testing.T) {
 	wantErr(t, "GrantAdminRole accepted an org role with scope 0", d.GrantAdminRole(uid, AdminOrg, 0))
 	wantErr(t, "GrantAdminRole accepted a domain role with scope -1", d.GrantAdminRole(uid, AdminDomain, -1))
 	wantErr(t, "GrantAdminRole accepted a system role with a scope", d.GrantAdminRole(uid, AdminSystem, 3))
+	wantEq(t, "grants after the refused ones", len(mustAdminRoles(t, d, uid)), 2)
 }
 
 // mustAdminRoles reads a user's direct admin grants.
