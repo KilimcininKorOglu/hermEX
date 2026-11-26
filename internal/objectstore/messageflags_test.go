@@ -1,6 +1,7 @@
 package objectstore
 
 import (
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -98,6 +99,28 @@ func TestMessageComputedPropsBatch(t *testing.T) {
 		if v != (i%2 == 0) {
 			t.Fatalf("message %d read = %v, want %v", i, v, i%2 == 0)
 		}
+	}
+}
+
+// TestReadStateOfAMissingMessage: a read flag aimed at an id the store does not
+// hold is refused as not found and moves no change number, and the batch read
+// leaves such an id out instead of inventing flags for it.
+func TestReadStateOfAMissingMessage(t *testing.T) {
+	s := openSeededStore(t)
+	live := createInFolder(t, s, int64(mapi.PrivateFIDInbox), mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "live"}})
+	before := configVal(t, s, cfgLastChangeNumber)
+	if err := s.SetMessageReadState(987654, true); !errors.Is(err, ErrNotFound) {
+		t.Errorf("SetMessageReadState on a missing id: err = %v, want ErrNotFound", err)
+	}
+	wantEq(t, "LAST_CHANGE_NUMBER after the refused write", configVal(t, s, cfgLastChangeNumber), before)
+
+	got, err := s.MessageComputedPropsBatch([]int64{live, 987654}, nil)
+	mustNoErr(t, "batch read", err)
+	if _, ok := got[987654]; ok {
+		t.Error("the batch read answered flags for an id the store does not hold")
+	}
+	if _, ok := got[live]; !ok {
+		t.Error("the batch read dropped the live message")
 	}
 }
 

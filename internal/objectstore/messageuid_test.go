@@ -30,6 +30,12 @@ func TestMessageUIDByID(t *testing.T) {
 	if uid != info.UID {
 		t.Errorf("uid = %d, want %d", uid, info.UID)
 	}
+	// The same id asked under a folder that does not hold it has no UID there.
+	if _, ok, err := s.MessageUIDByID(int64(mapi.PrivateFIDSentItems), info.ID); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Error("an Inbox message resolved a UID in Sent Items")
+	}
 
 	// A calendar item created via CreateMessage is not indexed → no UID.
 	mid, err := s.CreateMessage(int64(mapi.PrivateFIDCalendar), &oxcmail.Message{

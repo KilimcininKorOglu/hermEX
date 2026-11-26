@@ -49,4 +49,12 @@ func TestMessageSizeFollowsAnEdit(t *testing.T) {
 	if got := storedSize(t, st, id); got < grown+8000 {
 		t.Errorf("size after an 8 KB attachment = %d, was %d before it", got, grown)
 	}
+
+	// The size follows a shrinking edit too: a size that only ever grows would
+	// charge the quota for bytes the message no longer holds.
+	withAttachment := storedSize(t, st, id)
+	mustNoErr(t, "shrink the body", st.SetMessageProperties(id, mapi.PropertyValues{{Tag: mapi.PrBody, Value: "short"}}))
+	if got := storedSize(t, st, id); got > withAttachment-4000 {
+		t.Errorf("size after shrinking a 4 KB body = %d, was %d before", got, withAttachment)
+	}
 }
