@@ -38,9 +38,10 @@ func TestUserZoneFailsSoft(t *testing.T) {
 	if loc := UserZone(d, "nobody@acme.test"); loc != nil {
 		t.Errorf("an unknown user answered %v, want no zone", loc)
 	}
-	if _, err := d.SetUserLocale("u@acme.test", "Mars/Olympus", "tr"); err != nil {
-		t.Fatalf("set user locale: %v", err)
-	}
+	// SetUserLocale refuses such a name, so a row written before that check is
+	// planted directly.
+	_, err := d.db.Exec(`UPDATE users SET timezone = 'Mars/Olympus' WHERE username = 'u@acme.test'`)
+	mustNoErr(t, "plant an unloadable zone", err)
 	if loc := UserZone(d, "u@acme.test"); loc != nil {
 		t.Errorf("an unloadable zone name answered %v, want no zone", loc)
 	}
