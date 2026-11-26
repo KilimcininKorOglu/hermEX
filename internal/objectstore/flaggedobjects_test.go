@@ -34,6 +34,15 @@ func TestListFolderObjectsWithFlag(t *testing.T) {
 
 	want := storeFlagged(t, s, recur, true)
 	storeFlagged(t, s, recur, false)
+	// A flagged object in the dumpster is gone to the user and must not be listed.
+	mustNoErr(t, "soft-delete a flagged object", s.SoftDeleteObject(storeFlagged(t, s, recur, true)))
+	// A flagged object in another folder belongs to that folder's listing only.
+	if _, err := s.CreateMessage(int64(mapi.PrivateFIDTasks), &oxcmail.Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: "IPM.Appointment"},
+		{Tag: recur, Value: true},
+	}}); err != nil {
+		t.Fatal(err)
+	}
 	// An object with no such property at all must not be reported either.
 	if _, err := s.CreateMessage(int64(mapi.PrivateFIDCalendar), &oxcmail.Message{Props: mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: "IPM.Appointment"},

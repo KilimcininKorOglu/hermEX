@@ -24,16 +24,6 @@ func TestUpdateActiveSyncStateLosesNoWrite(t *testing.T) {
 		defer st.Close()
 		stores[i] = st
 	}
-	increment := func(cur string) (string, bool, error) {
-		if cur == "" { // no state stored yet
-			cur = "0"
-		}
-		n, err := strconv.Atoi(cur)
-		if err != nil {
-			return "", false, err
-		}
-		return strconv.Itoa(n + 1), true, nil
-	}
 	var wg sync.WaitGroup
 	errs := make(chan error, writers*rounds)
 	for _, st := range stores {
@@ -41,7 +31,7 @@ func TestUpdateActiveSyncStateLosesNoWrite(t *testing.T) {
 		go func(st *Store) {
 			defer wg.Done()
 			for range rounds {
-				errs <- st.UpdateActiveSyncState(increment)
+				errs <- st.UpdateActiveSyncState(incrementCounter)
 			}
 		}(st)
 	}
@@ -59,6 +49,19 @@ func TestUpdateActiveSyncStateLosesNoWrite(t *testing.T) {
 	if want := strconv.Itoa(writers * rounds); got != want {
 		t.Errorf("counter = %s after %s increments", got, want)
 	}
+}
+
+// incrementCounter is an update that reads the stored state as a decimal counter
+// (none stored yet reads as zero) and writes it back one higher.
+func incrementCounter(cur string) (string, bool, error) {
+	if cur == "" {
+		cur = "0"
+	}
+	n, err := strconv.Atoi(cur)
+	if err != nil {
+		return "", false, err
+	}
+	return strconv.Itoa(n + 1), true, nil
 }
 
 // TestUpdateActiveSyncStateFailedUpdateWritesNothing proves an update that fails

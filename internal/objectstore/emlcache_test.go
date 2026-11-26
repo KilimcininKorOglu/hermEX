@@ -248,7 +248,7 @@ func TestEditOfANonMailObjectWritesNoCache(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(s.emlPath(midString(uint64(id)))); err == nil {
-		t.Error("editing a contact created a wire-form cache for it")
+	if _, err := os.Stat(s.emlPath(midString(uint64(id)))); !os.IsNotExist(err) {
+		t.Errorf("editing a contact left a wire-form cache for it (stat err = %v)", err)
 	}
 }

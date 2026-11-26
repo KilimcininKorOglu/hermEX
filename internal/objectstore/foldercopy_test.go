@@ -51,6 +51,20 @@ func TestCopyFolder(t *testing.T) {
 	if _, err := s.CopyFolder(src, sub, "Loop", true); !errors.Is(err, ErrFolderCycle) {
 		t.Errorf("copy into own subtree err = %v, want ErrFolderCycle", err)
 	}
+	wantEq(t, "folders created by the refused cycle copy", countFolders(t, s, "Loop"), 0)
+
+	// A copy onto a sibling's name is refused ([MS-OXCFOLD] 3.2.5.2) and adds no
+	// second folder under that name.
+	if _, err := s.CopyFolder(src, ipm, "Copy", true); !errors.Is(err, ErrFolderExists) {
+		t.Errorf("copy onto an existing sibling name err = %v, want ErrFolderExists", err)
+	}
+	wantEq(t, "folders named Copy after the refused copy", countFolders(t, s, "Copy"), 1)
+
+	// A source id the store does not hold is not found, and creates nothing.
+	if _, err := s.CopyFolder(987654, ipm, "Ghost", true); !errors.Is(err, ErrNotFound) {
+		t.Errorf("copy of a missing folder err = %v, want ErrNotFound", err)
+	}
+	wantEq(t, "folders created by the refused missing-source copy", countFolders(t, s, "Ghost"), 0)
 }
 
 // mustCopyFolder copies a folder and returns the new folder id.

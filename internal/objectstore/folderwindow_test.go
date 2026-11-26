@@ -92,22 +92,17 @@ func TestListFolderObjectsInWindowSkipsDeleted(t *testing.T) {
 	}
 	defer st.Close()
 
-	startTag, endTag, ok := func() (mapi.PropTag, mapi.PropTag, bool) {
-		ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{
-			mapi.NameAppointmentStartWhole, mapi.NameAppointmentEndWhole,
-		})
-		if err != nil {
-			return 0, 0, false
-		}
-		return mapi.MakeTag(ids[0], mapi.PtSysTime), mapi.MakeTag(ids[1], mapi.PtSysTime), true
-	}()
-	if !ok {
-		t.Fatal("could not allocate the appointment time tags")
-	}
+	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{
+		mapi.NameAppointmentStartWhole, mapi.NameAppointmentEndWhole,
+	})
+	mustNoErr(t, "allocate the appointment time tags", err)
+	startTag, endTag := mapi.MakeTag(ids[0], mapi.PtSysTime), mapi.MakeTag(ids[1], mapi.PtSysTime)
 
+	// A user delete leaves the object in the dumpster (is_deleted=1), the row the
+	// window query has to skip; a purge would remove the row and prove nothing.
 	start := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
 	id := seedAppointment(t, st, startTag, endTag, start, start.Add(time.Hour))
-	if err := st.DeleteObject(id); err != nil {
+	if err := st.SoftDeleteObject(id); err != nil {
 		t.Fatal(err)
 	}
 	got, err := st.ListFolderObjectsInWindow(int64(mapi.PrivateFIDCalendar), startTag, endTag,

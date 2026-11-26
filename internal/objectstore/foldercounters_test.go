@@ -1,6 +1,7 @@
 package objectstore
 
 import (
+	"errors"
 	"testing"
 
 	"hermex/internal/mapi"
@@ -28,34 +29,22 @@ func TestHierarchyChangeNumberCountsSubfolderChanges(t *testing.T) {
 	hcn := func(fid int64) int32 { return folderCounter(t, st, fid, mapi.PrHierarchyChangeNum) }
 	a0, b0 := hcn(a), hcn(b)
 
-	child, err := st.CreateFolder(&a, "Projects")
-	if err != nil {
-		t.Fatal(err)
+	child := mustCreateFolder(t, st, &a, "Projects")
+	wantEq(t, "after adding a subfolder", hcn(a), a0+1)
+	// A create refused for a sibling's name adds no subfolder, so it must not move
+	// the counter a client diffs the hierarchy by.
+	if _, err := st.CreateFolder(&a, "Projects"); !errors.Is(err, ErrFolderExists) {
+		t.Fatalf("second Projects: err = %v, want ErrFolderExists", err)
 	}
-	if got := hcn(a); got != a0+1 {
-		t.Errorf("after adding a subfolder: %d, want %d", got, a0+1)
-	}
-	if err := st.RenameFolder(child, &b, "Projects"); err != nil {
-		t.Fatal(err)
-	}
-	if got := hcn(a); got != a0+2 {
-		t.Errorf("after a subfolder left: %d, want %d", got, a0+2)
-	}
-	if got := hcn(b); got != b0+1 {
-		t.Errorf("after a subfolder arrived: %d, want %d", got, b0+1)
-	}
-	if err := st.RenameFolder(child, &b, "Renamed"); err != nil {
-		t.Fatal(err)
-	}
-	if got := hcn(b); got != b0+1 {
-		t.Errorf("a rename in place counted as a subfolder change: %d, want %d", got, b0+1)
-	}
-	if err := st.DeleteFolder(child); err != nil {
-		t.Fatal(err)
-	}
-	if got := hcn(b); got != b0+2 {
-		t.Errorf("after removing a subfolder: %d, want %d", got, b0+2)
-	}
+	wantEq(t, "after a refused create", hcn(a), a0+1)
+
+	mustNoErr(t, "move the subfolder", st.RenameFolder(child, &b, "Projects"))
+	wantEq(t, "after a subfolder left", hcn(a), a0+2)
+	wantEq(t, "after a subfolder arrived", hcn(b), b0+1)
+	mustNoErr(t, "rename in place", st.RenameFolder(child, &b, "Renamed"))
+	wantEq(t, "a rename in place (not a subfolder change)", hcn(b), b0+1)
+	mustNoErr(t, "delete the subfolder", st.DeleteFolder(child))
+	wantEq(t, "after removing a subfolder", hcn(b), b0+2)
 }
 
 // TestDeletedCountTotalCountsDeletedMessages proves a folder's

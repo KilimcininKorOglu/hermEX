@@ -54,6 +54,9 @@ func TestHasDateHeader(t *testing.T) {
 		"From: a\r\nSubject: Date: tomorrow\r\n\r\n":               false,
 		"From: a\r\n\r\nDate: in the body\r\n":                     false,
 		"X-Date: x\r\n":                                            false,
+		// RFC 5322 2.2.3: a line starting with whitespace continues the previous
+		// field, so a folded Subject is not a Date field.
+		"Subject: meet\r\n Date: tomorrow\r\n\r\n": false,
 	}
 	for in, want := range cases {
 		if got := hasDateHeader(in); got != want {

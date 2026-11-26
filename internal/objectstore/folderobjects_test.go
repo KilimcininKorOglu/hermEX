@@ -120,6 +120,16 @@ func TestFindObjectByProperty(t *testing.T) {
 	if _, ok, err := s.FindObjectByProperty(cal, mapi.PrInternetMessageID, "absent@hermex.test"); err != nil || ok {
 		t.Errorf("absent value = ok %v err %v, want not found", ok, err)
 	}
+	// The value comes from an inbound message the sender wrote, so the lookup is
+	// held to the folder it names: the same value on an Inbox object is no match.
+	var inboxProps mapi.PropertyValues
+	inboxProps.Set(mapi.PrInternetMessageID, "inbox-only@hermex.test")
+	if _, err := s.CreateMessage(int64(mapi.PrivateFIDInbox), &oxcmail.Message{Props: inboxProps}); err != nil {
+		t.Fatal(err)
+	}
+	if id, ok, err := s.FindObjectByProperty(cal, mapi.PrInternetMessageID, "inbox-only@hermex.test"); err != nil || ok {
+		t.Errorf("a value held only in the Inbox matched in the Calendar: id %d ok %v err %v", id, ok, err)
+	}
 	assertDuplicateResolvesToTheOldest(t, s, first, second)
 }
 

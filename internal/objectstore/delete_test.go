@@ -47,3 +47,18 @@ func TestDeleteMessage(t *testing.T) {
 		t.Errorf("repeat delete err = %v, want ErrNotFound", err)
 	}
 }
+
+// TestDeleteMessageInAnotherFolderIsRefused proves a UID is resolved inside the
+// folder the caller named: the same UID number under another folder deletes
+// nothing, so a client cannot remove an Inbox message by naming Sent Items.
+func TestDeleteMessageInAnotherFolderIsRefused(t *testing.T) {
+	s := openSeededStore(t)
+	raw := []byte("From: a@example.test\r\nTo: b@example.test\r\nSubject: kept\r\n\r\nbody\r\n")
+	info := mustAppendMessage(t, s, mapi.PrivateFIDInbox, raw, time.Unix(1700000000, 0), 0)
+
+	if err := s.DeleteMessage(mapi.PrivateFIDSentItems, info.UID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("delete under another folder: err = %v, want ErrNotFound", err)
+	}
+	wantRows(t, s, "object rows after the refused delete", 1, `SELECT COUNT(*) FROM messages WHERE message_id=?`, info.ID)
+	wantEq(t, "inbox messages after the refused delete", len(mustListMessages(t, s, mapi.PrivateFIDInbox)), 1)
+}

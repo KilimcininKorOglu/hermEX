@@ -43,6 +43,19 @@ func TestCreateFolderRefusesASiblingName(t *testing.T) {
 	if err := s.RenameFolder(other, nil, "Inner"); err != nil {
 		t.Errorf("rename to its own name: %v", err)
 	}
+	wantSiblingRefusalsChangedNothing(t, s, other)
+}
+
+// wantSiblingRefusalsChangedNothing checks the refused creates, renames and moves
+// left the tree as it was: one Projects, and both Inner folders still under their
+// own parents, the top-level one being other.
+func wantSiblingRefusalsChangedNothing(t *testing.T, s *Store, other int64) {
+	t.Helper()
+	wantEq(t, "folders named Projects after the refusals", countFolders(t, s, "Projects"), 1)
+	wantEq(t, "folders named Inner after the refusals", countFolders(t, s, "Inner"), 2)
+	id, ok := mustFolderByName(t, s, nil, "Inner")
+	wantEq(t, "top-level Inner found", ok, true)
+	wantEq(t, "top-level Inner id (a refused move must not relocate it)", id, other)
 }
 
 // TestRenameClaimsItsNameInTheCheckingTransaction proves a rename's new name is
