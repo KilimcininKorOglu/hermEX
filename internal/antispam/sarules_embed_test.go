@@ -63,7 +63,10 @@ func TestLoadRulesUsesExistingFileWithoutReseeding(t *testing.T) {
 		t.Errorf("live rules = %d, want 1 (the operator's file, not the baseline)", rules)
 	}
 	// The file was not re-seeded over.
-	data, _ := os.ReadFile(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the operator's ruleset back: %v", err)
+	}
 	if string(data) != custom {
 		t.Errorf("existing ruleset was overwritten:\n%s", data)
 	}

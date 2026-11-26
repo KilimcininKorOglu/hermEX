@@ -89,7 +89,10 @@ func TestReloadOnceHotSwapsRuleset(t *testing.T) {
 
 	s := &Scorer{}
 	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: DefaultThreshold})
-	rs, _ := LoadRulesFile(path)
+	rs, err := LoadRulesFile(path)
+	if err != nil {
+		t.Fatalf("load the starting ruleset: %v", err)
+	}
 	s.SetRules(rs)
 	r := NewReloader(s, dir, nil)
 
