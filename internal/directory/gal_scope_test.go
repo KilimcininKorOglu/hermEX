@@ -143,8 +143,10 @@ func TestRoomsAreScopedToTheCaller(t *testing.T) {
 	}
 	assertNoDomain(t, "the room list", addrs, "other.test")
 
-	if got, err := d.ListRooms(""); err != nil || len(got) != 0 {
-		t.Errorf("ListRooms with no caller = %v (err %v), want nothing", got, err)
+	for _, caller := range []string{"", "nobody@nowhere.test"} {
+		if got, err := d.ListRooms(caller); err != nil || len(got) != 0 {
+			t.Errorf("ListRooms for caller %q = %v (err %v), want nothing", caller, got, err)
+		}
 	}
 }
 
@@ -180,8 +182,10 @@ func TestSharedMailboxesAreScopedToTheCaller(t *testing.T) {
 	}
 	assertNoDomain(t, "the shared-mailbox list", addrs, "other.test")
 
-	if got, err := d.SharedMailboxes(""); err != nil || len(got) != 0 {
-		t.Errorf("SharedMailboxes with no caller = %v (err %v), want nothing", got, err)
+	for _, caller := range []string{"", "nobody@nowhere.test"} {
+		if got, err := d.SharedMailboxes(caller); err != nil || len(got) != 0 {
+			t.Errorf("SharedMailboxes for caller %q = %v (err %v), want nothing", caller, got, err)
+		}
 	}
 }
 
