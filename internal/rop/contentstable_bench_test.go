@@ -62,14 +62,25 @@ func openAndPage(tb testing.TB, dir string, prepare func(tb testing.TB, sess *Se
 	defer sess.Close()
 
 	tableH := openInboxContentsTable(tb, sess)
-	if _, _ = sess.Dispatch(buildSetColumns(0, benchColumns), []uint32{tableH}); tableH == 0 {
-		tb.Fatal("no table handle")
-	}
+	resp, _ := sess.Dispatch(buildSetColumns(0, benchColumns), []uint32{tableH})
+	benchROPOK(tb, resp, ropSetColumns, "SetColumns")
 	if prepare != nil {
 		prepare(tb, sess, tableH)
 	}
-	resp, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 50), []uint32{tableH})
+	resp, _ = sess.Dispatch(buildQueryRows(0, 0, 1, 50), []uint32{tableH})
 	return benchRowCount(tb, resp)
+}
+
+// benchROPOK fails the benchmark when a setup ROP did not succeed, so a sort or a
+// restriction the server refused is not timed as if it had run.
+func benchROPOK(tb testing.TB, resp []byte, ropID uint8, what string) {
+	tb.Helper()
+	if len(resp) < 6 || resp[0] != ropID {
+		tb.Fatalf("%s: response %x is not the expected ROP %#x", what, resp, ropID)
+	}
+	if ec := uint32(resp[2]) | uint32(resp[3])<<8 | uint32(resp[4])<<16 | uint32(resp[5])<<24; ec != ecSuccess {
+		tb.Fatalf("%s ec = %#x", what, ec)
+	}
 }
 
 // benchRowCount reads the RowCount field out of a QueryRows response, so a
@@ -120,7 +131,8 @@ func BenchmarkContentsTableOpen(b *testing.B) {
 func BenchmarkContentsTableSorted(b *testing.B) {
 	runFolderOpenBenchmark(b, func(tb testing.TB, sess *Session, tableH uint32) {
 		tb.Helper()
-		sess.Dispatch(buildSortTable(0, 0, 0, []sortOrderEntry{{mapi.PrSubject, sortAscend}}), []uint32{tableH})
+		resp, _ := sess.Dispatch(buildSortTable(0, 0, 0, []sortOrderEntry{{mapi.PrSubject, sortAscend}}), []uint32{tableH})
+		benchROPOK(tb, resp, ropSortTable, "SortTable")
 	})
 }
 
@@ -130,6 +142,7 @@ func BenchmarkContentsTableSorted(b *testing.B) {
 func BenchmarkContentsTableRestricted(b *testing.B) {
 	runFolderOpenBenchmark(b, func(tb testing.TB, sess *Session, tableH uint32) {
 		tb.Helper()
-		sess.Dispatch(buildRestrict(0, propEq(mapi.PrSubject, benchSubject(0))), []uint32{tableH})
+		resp, _ := sess.Dispatch(buildRestrict(0, propEq(mapi.PrSubject, benchSubject(0))), []uint32{tableH})
+		benchROPOK(tb, resp, ropRestrict, "Restrict")
 	})
 }
