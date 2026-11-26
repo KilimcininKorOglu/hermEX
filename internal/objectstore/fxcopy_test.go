@@ -1,6 +1,7 @@
 package objectstore
 
 import (
+	"errors"
 	"testing"
 
 	"hermex/internal/ics"
@@ -248,8 +249,24 @@ func TestCopyMessagesRejectsForeignMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.NewCopyMessagesSource(int64(mapi.PrivateFIDInbox), []int64{mid}, nil); err == nil {
-		t.Errorf("NewCopyMessagesSource accepted a message outside the source folder")
+	contacts := int64(mapi.PrivateFIDContacts)
+	gone, err := s.CreateMessage(contacts, richMsg("in the dumpster"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustNoErr(t, "soft-delete", s.SoftDeleteObject(gone))
+	for _, c := range []struct {
+		name   string
+		folder int64
+		id     int64
+	}{
+		{"a message of another folder", int64(mapi.PrivateFIDInbox), mid},
+		{"a soft-deleted message of the folder", contacts, gone},
+		{"an id the store does not hold", contacts, 987654},
+	} {
+		if _, err := s.NewCopyMessagesSource(c.folder, []int64{c.id}, nil); !errors.Is(err, ErrNotFound) {
+			t.Errorf("%s: err = %v, want ErrNotFound", c.name, err)
+		}
 	}
 }
 

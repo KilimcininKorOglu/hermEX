@@ -38,6 +38,12 @@ func TestAppointmentsGetAnIdentity(t *testing.T) {
 	if len(a) < 40 || bytes.Equal(a, b) {
 		t.Errorf("two appointments without an identity got %x and %x, want two distinct ids", a, b)
 	}
+	// [MS-OXOCAL] 2.2.1.27: every global object id opens with this fixed
+	// 16-byte ByteArrayID.
+	spec := []byte{0x04, 0x00, 0x00, 0x00, 0x82, 0x00, 0xE0, 0x00, 0x74, 0xC5, 0xB7, 0x10, 0x1A, 0x82, 0xE0, 0x08}
+	if !bytes.HasPrefix(a, spec) {
+		t.Errorf("fresh global object id %x does not open with the [MS-OXOCAL] ByteArrayID %x", a, spec)
+	}
 
 	ids, err := s.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameICalUID, mapi.NameGlobalObjectId})
 	if err != nil {

@@ -94,6 +94,17 @@ func TestMoveMessageImportObjectDeleted(t *testing.T) {
 	if !errors.Is(err, ErrObjectDeleted) {
 		t.Fatalf("MoveMessageImport of an absent source: err = %v, want ErrObjectDeleted", err)
 	}
+	wantRows(t, s, "rows created under the refused destination id", 0, `SELECT COUNT(*) FROM messages WHERE message_id=?`, 0x100000)
+
+	// A source named under a folder it is not in is not that folder's message: the
+	// client cannot move a message out of a folder it did not sync.
+	mid := mustCreateMessage(t, s, int64(mapi.PrivateFIDDeletedItems), richMsg("elsewhere"))
+	if _, err := s.MoveMessageImport(src, mid, dst, mid+0x100000); !errors.Is(err, ErrObjectDeleted) {
+		t.Errorf("move with a source folder that does not hold the message: err = %v, want ErrObjectDeleted", err)
+	}
+	var parent int64
+	mustScan(t, s.objdb.QueryRow(`SELECT parent_fid FROM messages WHERE message_id=?`, mid), &parent)
+	wantEq(t, "the message named under the wrong folder stays put", parent, int64(mapi.PrivateFIDDeletedItems))
 }
 
 // TestMoveMessageImportRefusesAnIDHeldInAnotherFolder: the client chooses the

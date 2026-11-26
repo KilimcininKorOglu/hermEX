@@ -117,6 +117,19 @@ func TestAllocateRange(t *testing.T) {
 	}
 }
 
+// TestAllocateLocalIDsRefusesAZeroCount: an IdCount of zero reserves no block
+// ([MS-OXCFXICS] 2.2.3.2.1.3 asks for at least one id), so the request is refused
+// and moves neither the store cursor nor its maximum.
+func TestAllocateLocalIDsRefusesAZeroCount(t *testing.T) {
+	s := openTestStore(t)
+	cur, maxEID := configVal(t, s, cfgCurrentEID), configVal(t, s, cfgMaximumEID)
+	if _, _, err := s.AllocateLocalIDs(0); err == nil {
+		t.Error("a zero-count id reservation was granted")
+	}
+	wantEq(t, "CURRENT_EID after the refused reservation", configVal(t, s, cfgCurrentEID), cur)
+	wantEq(t, "MAXIMUM_EID after the refused reservation", configVal(t, s, cfgMaximumEID), maxEID)
+}
+
 // TestAllocateLocalIDsAcrossARangeBoundary: RopGetLocalReplicaIds reserves IdCount
 // contiguous ids ([MS-OXCFXICS] 2.2.3.2.1.3). A block that does not fit in what
 // remains of the current range must still be granted, from ids no other

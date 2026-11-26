@@ -189,6 +189,25 @@ func TestContentSyncNormalClassDisabled(t *testing.T) {
 	eqSet(t, "NoLongerMIDs", res.NoLongerMIDs, uint64(m))
 }
 
+// TestContentSyncReportsASoftDeletedGivenAsDeleted: a message the client holds
+// that went to the dumpster is no longer in the folder, so the diff reports it
+// deleted and does not keep it ([MS-OXCFXICS] 3.2.5.3, idset deleted).
+func TestContentSyncReportsASoftDeletedGivenAsDeleted(t *testing.T) {
+	s := openSeededStore(t)
+	fld := int64(mapi.PrivateFIDContacts)
+	kept := mustCreateMessage(t, s, fld, contactMsg("kept"))
+	gone := mustCreateMessage(t, s, fld, contactMsg("gone"))
+	mustNoErr(t, "soft-delete", s.SoftDeleteObject(gone))
+
+	res, err := s.GetContentSync(ContentSyncRequest{
+		FolderID: fld, Given: looseSet(uint64(kept), uint64(gone)), Seen: looseSet(msgCN(t, s, kept)),
+	})
+	mustNoErr(t, "GetContentSync", err)
+	eqSet(t, "GivenMIDs", res.GivenMIDs, uint64(kept))
+	eqRanges(t, "DeletedMIDs", res.DeletedMIDs, IDRange{uint64(gone), uint64(gone)})
+	eqSet(t, "ChangedMIDs", res.ChangedMIDs)
+}
+
 // TestContentSyncGivenSurvivesGUIDConvert pins the replid-1 binding across the
 // full download-path idset conversion: a client given/seen idset keyed by the
 // store's replica GUID, serialized and read back as a packed GUID set, then

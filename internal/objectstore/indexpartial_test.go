@@ -3,6 +3,7 @@ package objectstore
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -106,5 +107,8 @@ func TestOpenKeepsServingWhenOneMessageIsUnreadable(t *testing.T) {
 	mustNoErr(t, "list", err)
 	if len(msgs) != 1 {
 		t.Fatalf("inbox holds %d messages, want the one whose content is readable", len(msgs))
+	}
+	if raw := mustGetMessageRaw(t, s3, inbox, msgs[0].UID); !strings.Contains(string(raw), "second") {
+		t.Errorf("the indexed message is not the readable one:\n%s", raw)
 	}
 }

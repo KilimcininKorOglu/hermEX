@@ -298,6 +298,21 @@ func TestUploadStateStreamGate(t *testing.T) {
 	wantErr(t, "EndStateStream after an import", ocol.EndStateStream())
 }
 
+// TestUploadStateStreamRefusesAMalformedSet asserts a state stream whose bytes do
+// not decode as an IDSET ([MS-OXCFXICS] 2.2.2.4) is refused when it closes, and
+// leaves the collector's state exactly as a collector that never received it.
+func TestUploadStateStreamRefusesAMalformedSet(t *testing.T) {
+	s := openSeededStore(t)
+	fresh := mustTransferState(t, mustContentUpload(t, s, int64(mapi.PrivateFIDContacts)))
+
+	col := mustContentUpload(t, s, int64(mapi.PrivateFIDContacts))
+	mustNoErr(t, "begin state stream", col.BeginStateStream(cnsetSeen))
+	mustNoErr(t, "continue state stream", col.ContinueStateStream([]byte{0xFF, 0xFF, 0xFF, 0xFF, 0x42}))
+	wantErr(t, "EndStateStream accepting bytes that are no IDSET", col.EndStateStream())
+	wantEq(t, "transfer state after the refused stream (same as a fresh collector)",
+		string(mustTransferState(t, col)), string(fresh))
+}
+
 // mustImportHierarchyChange imports one folder into a hierarchy upload.
 func mustImportHierarchyChange(t *testing.T, s *Store, col *UploadCollector, fid uint64, name string) {
 	t.Helper()

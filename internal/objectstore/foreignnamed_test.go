@@ -35,6 +35,11 @@ func TestForeignNamesStopAtTheQuota(t *testing.T) {
 	if got[1] != ids[0] {
 		t.Errorf("a known name resolved to %#x, want %#x", got[1], ids[0])
 	}
+	// The refused name was not stored either: a lookup that does not allocate
+	// still finds no id for it.
+	looked, err := s.GetNamedPropIDs(false, []mapi.PropertyName{over})
+	mustNoErr(t, "look up the refused name", err)
+	wantEq(t, "id held for the refused name", looked[0], uint16(0))
 	own, err := s.GetNamedPropIDs(true, []mapi.PropertyName{over})
 	if err != nil || own[0] == 0 {
 		t.Errorf("the store's own allocation failed at the foreign quota: %v", err)

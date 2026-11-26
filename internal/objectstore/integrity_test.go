@@ -190,6 +190,9 @@ func TestRepairMailboxReconcilesTheIndex(t *testing.T) {
 // while a daemon holds the mailbox.
 func TestRepairMailboxRefusesABusyMailbox(t *testing.T) {
 	s := openSeededStore(t)
+	info := mustAppendMessage(t, s, int64(mapi.PrivateFIDInbox), checkRaw("one"), time.Unix(1700000000, 0), 0)
+	_, err := s.idxdb.Exec(`DELETE FROM messages WHERE message_id=?`, info.ID)
+	mustNoErr(t, "drop the index row", err)
 	other, err := Open(s.Dir())
 	mustNoErr(t, "second open", err)
 	defer func() { _ = other.Close() }()
@@ -199,4 +202,6 @@ func TestRepairMailboxRefusesABusyMailbox(t *testing.T) {
 	} else if !errors.Is(err, ErrMailboxBusy) {
 		t.Errorf("repair error = %v, want ErrMailboxBusy", err)
 	}
+	// The refused repair rewrote nothing: the dropped row is still missing.
+	wantIdxRows(t, s, "index rows after the refused repair", 0, `SELECT COUNT(*) FROM messages WHERE message_id=?`, info.ID)
 }

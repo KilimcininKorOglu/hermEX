@@ -524,6 +524,13 @@ func TestImportNamedPropertyRemap(t *testing.T) {
 	}
 }
 
+// wantNoMessage checks a refused import left no message row under mid.
+func wantNoMessage(t *testing.T, s *Store, mid int64) {
+	t.Helper()
+	wantRows(t, s, fmt.Sprintf("message rows under the refused id %#x", mid), 0,
+		`SELECT COUNT(*) FROM messages WHERE message_id=?`, mid)
+}
+
 // TestImportRejectsEmbedded locks the conscious v1 fork: an embedded-message
 // marker fails loud rather than silently dropping the embedded content.
 func TestImportRejectsEmbedded(t *testing.T) {
@@ -540,6 +547,7 @@ func TestImportRejectsEmbedded(t *testing.T) {
 	if err := col.PutBuffer(body); err == nil {
 		t.Fatal("expected embedded-message upload to be rejected")
 	}
+	wantNoMessage(t, s, 0xE001)
 }
 
 // TestImportRefusesAStreamPastTheUploadCap feeds a message stream that declares a
@@ -573,6 +581,7 @@ func TestImportRefusesAStreamPastTheUploadCap(t *testing.T) {
 	if !errors.Is(refused, ErrUploadTooLarge) {
 		t.Fatalf("128 KiB fed against a 64 KiB cap: err = %v, want ErrUploadTooLarge", refused)
 	}
+	wantNoMessage(t, s, 0xE003)
 
 	um, err = s.ImportMessageChange(int64(mapi.PrivateFIDContacts), 0, importHeader(t, s, 0xE004))
 	if err != nil {
@@ -603,6 +612,7 @@ func TestImportRejectsStateMetaTag(t *testing.T) {
 	if err := col.PutBuffer(body); err == nil {
 		t.Fatal("expected an ICS state meta-tag in the content stream to be rejected")
 	}
+	wantNoMessage(t, s, 0xE002)
 }
 
 // TestImportDeletes deletes one of two messages by its home-replica source key and
@@ -640,6 +650,24 @@ func TestImportDeletes(t *testing.T) {
 	again, err := s.ImportDeletes(fld, [][]byte{sourceKey(home, uint64(m2))})
 	mustNoErr(t, "import deletes", err)
 	wantEq(t, "ids reported by a re-delete of an absent id", len(again), 0)
+}
+
+// TestImportDeletesLeavesAnotherFolderAlone: a deletion import names messages of
+// the folder the upload targets ([MS-OXCFXICS] 3.3.5.11). A source key naming a
+// message held in another folder must not delete it, because the import's rights
+// were checked against the target folder only.
+func TestImportDeletesLeavesAnotherFolderAlone(t *testing.T) {
+	s := openSeededStore(t)
+	victim := mustCreateMessage(t, s, int64(mapi.PrivateFIDInbox), richMsg("must stay"))
+	home, err := s.replicaGUID()
+	mustNoErr(t, "replica guid", err)
+
+	deleted, err := s.ImportDeletes(int64(mapi.PrivateFIDContacts), [][]byte{sourceKey(home, uint64(victim))})
+	if err == nil {
+		wantEq(t, "ids reported deleted for another folder's message", len(deleted), 0)
+	}
+	wantRows(t, s, "the other folder's message still live", 1,
+		`SELECT COUNT(*) FROM messages WHERE message_id=? AND parent_fid=? AND is_deleted=0`, victim, int64(mapi.PrivateFIDInbox))
 }
 
 // TestImportReadStateChanges marks a message read by its source key and asserts the
