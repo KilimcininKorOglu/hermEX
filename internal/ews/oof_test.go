@@ -147,7 +147,11 @@ func TestOofRefusesABrokenDuration(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if cfg, _ := st.GetOOFSettings(); cfg.Enabled {
+	cfg, err := st.GetOOFSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Enabled {
 		t.Errorf("a refused Duration was stored: %+v", cfg)
 	}
 }

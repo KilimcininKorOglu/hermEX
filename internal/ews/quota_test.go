@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
 
@@ -44,6 +45,11 @@ func TestAWriteIntoAFullMailboxIsQuotaExceeded(t *testing.T) {
 		if _, out := soapPost(t, ts, req, true); !strings.Contains(out, "ErrorQuotaExceeded") {
 			t.Errorf("%s into a full mailbox: want ErrorQuotaExceeded, got %s", op, out)
 		}
+	}
+	// CreateItem SaveOnly and CopyItem both target Drafts, so a refused write
+	// that still stored something shows up there.
+	if n := folderCount(t, dir, int64(mapi.PrivateFIDDraft)); n != 0 {
+		t.Errorf("Drafts holds %d messages after the refused writes, want 0", n)
 	}
 	if _, out := soapPost(t, ts, moveItemReq(item, "drafts", ""), true); !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Errorf("MoveItem inside a full mailbox must still succeed: %s", out)

@@ -220,7 +220,10 @@ func TestFindPeopleReportsOneAddressOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ids, _ := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameEmail1Address})
+	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameEmail1Address})
+	if err != nil || len(ids) != 1 || ids[0] == 0 {
+		t.Fatalf("resolve the Email1 named property: ids=%v err=%v", ids, err)
+	}
 	// #nosec G115 -- a named-property id is a 16-bit value shifted into the tag's high half
 	emailTag := mapi.PropTag(uint32(ids[0])<<16 | uint32(mapi.PtUnicode))
 	// The same address the GAL already answers with.
