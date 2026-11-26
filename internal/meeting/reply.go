@@ -47,13 +47,13 @@ func ProcessReply(st *objectstore.Store, accounts directory.Accounts, sender str
 	if !ok {
 		return false, nil
 	}
+	// From here on report every failure rather than swallowing it: the REPLY was
+	// understood and authorized, so "handled" is true, but the tracking write is the
+	// whole point and losing it silently leaves the organizer with a stale Tracking tab.
 	tags, err := ResolveTags(st)
 	if err != nil {
-		return false, nil
+		return true, err
 	}
-	// Report the failure rather than swallowing it: the REPLY was understood and
-	// authorized, so "handled" is true, but the tracking write is the whole point
-	// and losing it silently leaves the organizer with a stale Tracking tab.
 	proposal, err := readProposal(st, messageID)
 	if err != nil {
 		return true, err

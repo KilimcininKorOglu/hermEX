@@ -1,0 +1,40 @@
+package meeting
+
+import (
+	"database/sql"
+	"path/filepath"
+	"testing"
+
+	"hermex/internal/objectstore"
+
+	_ "modernc.org/sqlite"
+)
+
+// TestProcessReplyReportsATagResolutionFailure proves an authorized REPLY whose
+// tracking tags cannot be resolved is reported as handled with the error, not as
+// an unhandled message: the caller logs only a returned error, so a swallowed one
+// leaves the organizer's Tracking tab stale with nothing in the log.
+func TestProcessReplyReportsATagResolutionFailure(t *testing.T) {
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	msgID := deliverReply(t, st, "meeting-tags", "bob@hermex.test", "ACCEPTED")
+
+	db, err := sql.Open("sqlite", filepath.Join(dir, "objects.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TRIGGER refuse_names BEFORE INSERT ON named_properties
+		BEGIN SELECT RAISE(ABORT, 'injected name failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+
+	handled, err := ProcessReply(st, nil, "bob@hermex.test", msgID)
+	if !handled || err == nil {
+		t.Fatalf("ProcessReply = %v, %v; want handled with the tag error", handled, err)
+	}
+}
