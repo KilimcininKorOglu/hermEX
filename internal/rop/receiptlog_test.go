@@ -49,7 +49,7 @@ func TestReadReceiptFailureIsRecorded(t *testing.T) {
 	sess, logonH, msgH, readerDir := brokenSenderSession(t, sink)
 	defer sess.Close()
 
-	sess.Dispatch(buildSetMessageReadFlag(0, 1, rfDefault), []uint32{logonH, msgH})
+	ropOK(t, dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfDefault), logonH, msgH), ropSetMessageReadFlag, "SetMessageReadFlag(rfDefault)")
 
 	e, ok := sink.find("readreceipt.fail")
 	if !ok {
@@ -112,7 +112,7 @@ func TestSuccessfulReadReceiptRecordsNoFailure(t *testing.T) {
 	_, h = sess.Dispatch(buildOpenMessage(0, 1,
 		uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox)),
 		uint64(mapi.MakeEIDEx(1, uint64(msgID)))), []uint32{logonH, 0xFFFFFFFF})
-	sess.Dispatch(buildSetMessageReadFlag(0, 1, rfDefault), []uint32{logonH, h[1]})
+	ropOK(t, dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfDefault), logonH, h[1]), ropSetMessageReadFlag, "SetMessageReadFlag(rfDefault)")
 
 	if n := inboxCount(t, senderDir); n != 1 {
 		t.Fatalf("sender inbox = %d, want the receipt to have been delivered", n)

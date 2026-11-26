@@ -105,7 +105,7 @@ func TestReadReceiptGeneratedOnFirstRead(t *testing.T) {
 	sess, logonH, msgH, msgID, readerDir, senderDir := readReceiptSession(t)
 	defer sess.Close()
 
-	sess.Dispatch(buildSetMessageReadFlag(0, 1, rfDefault), []uint32{logonH, msgH})
+	ropOK(t, dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfDefault), logonH, msgH), ropSetMessageReadFlag, "SetMessageReadFlag(rfDefault)")
 
 	if n := inboxCount(t, senderDir); n != 1 {
 		t.Fatalf("sender inbox = %d after first read, want 1 read receipt", n)
@@ -145,7 +145,7 @@ func TestReadReceiptRelaysToExternalSender(t *testing.T) {
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
 	logonH := h[0]
 	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, msgEID), []uint32{logonH, 0xFFFFFFFF})
-	sess.Dispatch(buildSetMessageReadFlag(0, 1, rfDefault), []uint32{logonH, h[1]})
+	ropOK(t, dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfDefault), logonH, h[1]), ropSetMessageReadFlag, "SetMessageReadFlag(rfDefault)")
 
 	due, err := sp.Claim(time.Now(), 10)
 	if err != nil {
@@ -167,13 +167,13 @@ func TestReadReceiptFiresOnceViaFlagClear(t *testing.T) {
 	sess, logonH, msgH, _, _, senderDir := readReceiptSession(t)
 	defer sess.Close()
 
-	sess.Dispatch(buildSetMessageReadFlag(0, 1, rfDefault), []uint32{logonH, msgH})
+	ropOK(t, dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfDefault), logonH, msgH), ropSetMessageReadFlag, "SetMessageReadFlag(rfDefault)")
 	if n := inboxCount(t, senderDir); n != 1 {
 		t.Fatalf("sender inbox = %d after first read, want 1", n)
 	}
 	// Re-create the unread→read transition; the flag-clear must still block a resend.
-	sess.Dispatch(buildSetMessageReadFlag(0, 1, rfClearReadFlag), []uint32{logonH, msgH})
-	sess.Dispatch(buildSetMessageReadFlag(0, 1, rfDefault), []uint32{logonH, msgH})
+	ropOK(t, dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfClearReadFlag), logonH, msgH), ropSetMessageReadFlag, "SetMessageReadFlag(rfClearReadFlag)")
+	ropOK(t, dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfDefault), logonH, msgH), ropSetMessageReadFlag, "SetMessageReadFlag(rfDefault)")
 	if n := inboxCount(t, senderDir); n != 1 {
 		t.Errorf("sender inbox = %d after re-read, want still 1 (fire-once via flag clear)", n)
 	}
@@ -202,7 +202,7 @@ func TestReadReceiptTransitionGate(t *testing.T) {
 	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, msgEID), []uint32{logonH, 0xFFFFFFFF})
 	msgH := h[1]
 
-	sess.Dispatch(buildSetMessageReadFlag(0, 1, rfDefault), []uint32{logonH, msgH})
+	ropOK(t, dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfDefault), logonH, msgH), ropSetMessageReadFlag, "SetMessageReadFlag(rfDefault)")
 	if n := inboxCount(t, senderDir); n != 0 {
 		t.Errorf("sender inbox = %d, want 0 (no transition → no receipt)", n)
 	}
@@ -216,7 +216,7 @@ func TestReadReceiptSuppressed(t *testing.T) {
 	sess, logonH, msgH, msgID, readerDir, senderDir := readReceiptSession(t)
 	defer sess.Close()
 
-	sess.Dispatch(buildSetMessageReadFlag(0, 1, rfSuppressReceipt), []uint32{logonH, msgH})
+	ropOK(t, dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfSuppressReceipt), logonH, msgH), ropSetMessageReadFlag, "SetMessageReadFlag(rfSuppressReceipt)")
 
 	if n := inboxCount(t, senderDir); n != 0 {
 		t.Errorf("sender inbox = %d after suppressed read, want 0", n)

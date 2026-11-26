@@ -68,7 +68,7 @@ func TestContentsTableShowSoftDeletes(t *testing.T) {
 	tableH := h[1]
 
 	cols := []mapi.PropTag{mapi.PrSubject}
-	sess.Dispatch(buildSetColumns(0, cols), []uint32{tableH})
+	ropOK(t, dispatchOn(sess, buildSetColumns(0, cols), tableH), ropSetColumns, "SetColumns")
 	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
 	_, rows := queryRowsResponse(t, qr, cols)
 	if len(rows) != 1 {
