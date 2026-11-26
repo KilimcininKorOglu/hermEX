@@ -124,20 +124,7 @@ func TestAttachmentWriteChain(t *testing.T) {
 
 	// The first attachment reads back the saved filename + data.
 	wantOpenAttachment(t, sess, msgH, num0, ecSuccess, "OpenAttachment(num0) after save")
-	attID0, err := store.AttachmentIDByNumber(int64(mid), num0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	saved, err := store.GetAttachmentProperties(attID0, mapi.PrAttachLongFilename, mapi.PrAttachDataBin)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if name, _ := saved.Get(mapi.PrAttachLongFilename); name != "w.bin" {
-		t.Errorf("saved filename = %v, want w.bin", name)
-	}
-	if data, _ := saved.Get(mapi.PrAttachDataBin); string(asBytes(data)) != "WDATA" {
-		t.Errorf("saved data = %v, want WDATA", data)
-	}
+	checkSavedAttachment(t, store, mid, num0, "w.bin", "WDATA")
 	assertAttachmentCount(t, store, mid, 2, "message")
 
 	// Delete the first attachment; the second must keep number 1 (not renumber).
@@ -179,6 +166,26 @@ func wantOpenAttachment(t *testing.T, sess *Session, msgH uint32, num uint32, wa
 }
 
 // assertAttachmentCount asserts how many attachments a stored message holds.
+// checkSavedAttachment asserts the stored attachment num of message mid
+// carries the filename and data the client set before saving.
+func checkSavedAttachment(t *testing.T, store *objectstore.Store, mid uint64, num uint32, wantName, wantData string) {
+	t.Helper()
+	attID, err := store.AttachmentIDByNumber(int64(mid), num)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := store.GetAttachmentProperties(attID, mapi.PrAttachLongFilename, mapi.PrAttachDataBin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name, _ := saved.Get(mapi.PrAttachLongFilename); name != wantName {
+		t.Errorf("saved filename = %v, want %s", name, wantName)
+	}
+	if data, _ := saved.Get(mapi.PrAttachDataBin); string(asBytes(data)) != wantData {
+		t.Errorf("saved data = %v, want %s", data, wantData)
+	}
+}
+
 func assertAttachmentCount(t *testing.T, store *objectstore.Store, mid uint64, want int, label string) {
 	t.Helper()
 	msg, err := store.OpenMessage(int64(mid))
