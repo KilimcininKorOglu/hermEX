@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"hermex/internal/logging"
 	"hermex/internal/mtasts"
 	hsmtp "hermex/internal/smtp"
 )
@@ -189,8 +190,8 @@ func startSink(t *testing.T) (*recordingBackend, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = ln.Close() })
-	go func() { _ = (&hsmtp.Server{Backend: be, Hostname: "sink.test"}).Serve(ln) }()
+	srv := &hsmtp.Server{Backend: be, Hostname: "sink.test"}
+	serveUntilCleanup(t, ln, func() error { return srv.Serve(ln) })
 	return be, ln.Addr().String()
 }
 
@@ -250,16 +251,20 @@ func TestWorkerMTASTSEnforceSkipsUnlistedMX(t *testing.T) {
 	if err := sp.Enqueue("alice@local", []string{"bob@remote"}, []byte("hi\r\n"), t0); err != nil {
 		t.Fatal(err)
 	}
+	// The sink offers no STARTTLS, so an enforce delivery to it fails either way;
+	// only the dial count shows whether the unlisted MX was contacted at all.
+	var dialed []string
 	w := &Worker{
 		Spool:  sp,
 		Router: func(string) ([]string, error) { return []string{"sink"}, nil },
-		Dialer: func(string) (net.Conn, error) { return net.Dial("tcp", addr) },
+		Dialer: func(host string) (net.Conn, error) { dialed = append(dialed, host); return net.Dial("tcp", addr) },
 		Policy: func(string) (*mtasts.Policy, error) {
 			return &mtasts.Policy{Mode: mtasts.ModeEnforce, MX: []string{"approved.mx"}}, nil
 		},
 	}
-	if _, err := w.ProcessDue(context.Background(), t0); err != nil {
-		t.Fatalf("process: %v", err)
+	wantEq(t, mustProcess(t, w, t0), 0, "recipients sent to an MX the policy does not list")
+	if len(dialed) != 0 {
+		t.Errorf("opened a session to %v, an MX the enforce policy does not list", dialed)
 	}
 	if got := len(sink.recorded()); got != 0 {
 		t.Errorf("delivered to an unlisted MX %d time(s), want 0", got)
@@ -284,9 +289,7 @@ func TestWorkerMTASTSEnforceRequiresTLS(t *testing.T) {
 			return &mtasts.Policy{Mode: mtasts.ModeEnforce, MX: []string{"sink"}}, nil
 		},
 	}
-	if _, err := w.ProcessDue(context.Background(), t0); err != nil {
-		t.Fatalf("process: %v", err)
-	}
+	wantEq(t, mustProcess(t, w, t0), 0, "recipients sent in the clear under an enforce policy")
 	if got := len(sink.recorded()); got != 0 {
 		t.Errorf("delivered in the clear to a STARTTLS-less MX %d time(s), want 0", got)
 	}
@@ -485,9 +488,21 @@ func TestWorkerWithoutGuardStillDrains(t *testing.T) {
 		Router:   func(string) ([]string, error) { return []string{"sink"}, nil },
 		Dialer:   func(string) (net.Conn, error) { return net.Dial("tcp", addr) },
 	}
+	events := &eventSink{}
+	w.Logger = logging.New(events)
 	w.guardedPass(context.Background())
 	if msgs := sink.recorded(); len(msgs) != 1 {
 		t.Errorf("delivered %d message(s) with no guard, want 1", len(msgs))
+	}
+	// The pass reports how many recipients it delivered.
+	var scans []logging.Event
+	for _, e := range events.events {
+		if e.Name == "relay.scan.sent" {
+			scans = append(scans, e)
+		}
+	}
+	if len(scans) != 1 || scans[0].Fields["sent"] != 1 {
+		t.Errorf("relay.scan.sent events = %+v, want one with sent=1", scans)
 	}
 }
 

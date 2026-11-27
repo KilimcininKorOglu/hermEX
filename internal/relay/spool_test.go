@@ -15,7 +15,7 @@ func openSpool(t *testing.T) *Spool {
 	if err != nil {
 		t.Fatalf("open spool: %v", err)
 	}
-	t.Cleanup(func() { _ = s.Close() })
+	t.Cleanup(func() { closeT(t, s, "spool") })
 	return s
 }
 
@@ -40,12 +40,12 @@ func TestSpoolBaselineAdoption(t *testing.T) {
 	var v int
 	mustNoErr(t, raw.QueryRow("PRAGMA user_version").Scan(&v), "read the seeded user_version")
 	wantEq(t, v, 0, "the seeded user_version")
-	raw.Close()
+	mustNoErr(t, raw.Close(), "close the raw database")
 
 	// Opening through the spool adopts the baseline and records the version.
 	s, err := Open(path)
 	mustNoErr(t, err, "open the existing spool")
-	defer s.Close()
+	defer closeT(t, s, "spool")
 	wantEq(t, mustCount(t, s, "PRAGMA user_version"), newestSpoolVersion(), "user_version after adoption")
 	wantEq(t, mustCount(t, s, "SELECT COUNT(*) FROM messages"), 1,
 		"messages after adoption (adoption must not disturb data)")
@@ -238,7 +238,7 @@ func TestSpoolDurableAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	defer reopened.Close()
+	defer closeT(t, reopened, "reopened spool")
 	due, err := reopened.Claim(t0, 10)
 	if err != nil {
 		t.Fatalf("claim after reopen: %v", err)
@@ -310,7 +310,7 @@ func TestSpoolBackupSnapshotsQueuedMail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the backup does not open as a spool: %v", err)
 	}
-	defer copySpool.Close()
+	defer closeT(t, copySpool, "backup spool")
 	queued, err := copySpool.List()
 	if err != nil {
 		t.Fatal(err)

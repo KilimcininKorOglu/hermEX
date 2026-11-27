@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -54,7 +55,13 @@ func TestTLSReportHTTPSDelivery(t *testing.T) {
 	var gotBody []byte
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotCT = r.Header.Get("Content-Type")
-		gotBody, _ = io.ReadAll(r.Body)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read the posted report: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		gotBody = body
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -96,7 +103,9 @@ func TestTLSReportHTTPSDelivery(t *testing.T) {
 // deliver a report to an rua endpoint that resolves to a non-public address, so a
 // hostile rua= cannot turn report delivery into an SSRF probe of internal services.
 func TestTLSReportHTTPSRefusesInternalTarget(t *testing.T) {
+	var reached atomic.Int32
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached.Add(1)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -104,6 +113,7 @@ func TestTLSReportHTTPSRefusesInternalTarget(t *testing.T) {
 	if err := w.deliverReportHTTPS(srv.URL, []byte(`{"organization-name":"x"}`)); err == nil {
 		t.Fatal("delivery to an internal https target was allowed; the SSRF guard did not block it")
 	}
+	wantEq(t, reached.Load(), int32(0), "requests that reached the internal target")
 }
 
 // TestTLSReportMailtoDelivery proves a mailto rua target queues one report email to
@@ -300,6 +310,10 @@ func TestBuildReportMail(t *testing.T) {
 	}
 	s := string(raw)
 	for _, want := range []string{
+		// RFC 5322 and RFC 2045 header lines, and RFC 3834 for a generated report.
+		"\r\nTo: tls-reports@example.test\r\n",
+		"\r\nMIME-Version: 1.0\r\n",
+		"\r\nAuto-Submitted: auto-generated\r\n",
 		"Report Domain: example.test",
 		"application/tlsrpt+gzip",
 		"hermex.test!example.test!",

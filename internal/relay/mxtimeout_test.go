@@ -29,18 +29,22 @@ func TestLookupMXIsBounded(t *testing.T) {
 	mxResolver, mxLookupTimeout = hangingResolver(), 200*time.Millisecond
 	t.Cleanup(func() { mxResolver, mxLookupTimeout = oldResolver, oldTimeout })
 
-	done := make(chan error, 1)
+	type answer struct {
+		hosts []string
+		err   error
+	}
+	done := make(chan answer, 1)
 	go func() {
-		_, err := LookupMX("blackhole.invalid")
-		done <- err
+		hosts, err := LookupMX("blackhole.invalid")
+		done <- answer{hosts, err}
 	}()
 
 	select {
-	case err := <-done:
+	case got := <-done:
 		// Timing out is a resolution failure, the same answer any other failed
 		// lookup gives, so the item is retried rather than lost.
-		if err == nil {
-			t.Error("an unanswerable domain resolved successfully")
+		if got.err == nil || len(got.hosts) != 0 {
+			t.Errorf("an unanswerable domain resolved to %v (err %v), want an error and no host", got.hosts, got.err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("LookupMX did not return, so one bad recipient domain stalls the drainer")

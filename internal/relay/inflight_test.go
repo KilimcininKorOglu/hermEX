@@ -1,7 +1,6 @@
 package relay
 
 import (
-	"context"
 	"errors"
 	"net"
 	"testing"
@@ -37,8 +36,7 @@ func TestSettleFailureDoesNotRedeliver(t *testing.T) {
 	wantEq(t, len(sink.recorded()), 1, "messages the sink recorded after the first delivery")
 
 	// Second pass, the one that used to duplicate the message.
-	_, err := w.ProcessDue(context.Background(), t0.Add(time.Minute))
-	mustNoErr(t, err, "second pass")
+	wantEq(t, mustProcess(t, w, t0.Add(time.Minute)), 0, "recipients sent by the second pass")
 	wantEq(t, len(sink.recorded()), 1, "messages the recipient received (a settle failure must not redeliver)")
 
 	// The bookkeeping is finished on that pass, so the queue is empty.
@@ -84,8 +82,7 @@ func TestInterruptedDeliveryGoesBackToTheSender(t *testing.T) {
 			return nil
 		},
 	}
-	_, err := w.ProcessDue(context.Background(), t0.Add(time.Minute))
-	mustNoErr(t, err, "process")
+	wantEq(t, mustProcess(t, w, t0.Add(time.Minute)), 0, "recipients sent after an interrupted delivery")
 	wantEq(t, len(sink.recorded()), 0, "messages at the sink (an interrupted delivery must not be sent again)")
 	if len(told) != 1 {
 		t.Fatalf("the sender was told %d times, want once: %v", len(told), told)
@@ -115,9 +112,7 @@ func TestFailedDeliveryClearsTheStamp(t *testing.T) {
 		Dialer:   func(string) (net.Conn, error) { return nil, errors.New("connection refused") },
 		OnGiveUp: func(Item, error) error { gaveUp++; return nil },
 	}
-	if _, err := w.ProcessDue(context.Background(), t0); err != nil {
-		t.Fatalf("process: %v", err)
-	}
+	wantEq(t, mustProcess(t, w, t0), 0, "recipients sent while the dial fails")
 	if gaveUp != 0 {
 		t.Errorf("a transient failure was treated as terminal (%d give-ups)", gaveUp)
 	}
@@ -159,13 +154,11 @@ func TestInterruptedBounceStuckClearsStampAndBacksOff(t *testing.T) {
 		OnGiveUp: func(Item, error) error { gaveUp++; return errors.New("bounce undeliverable") },
 	}
 
-	_, err := w.ProcessDue(context.Background(), t0.Add(time.Minute))
-	mustNoErr(t, err, "first pass")
+	wantEq(t, mustProcess(t, w, t0.Add(time.Minute)), 0, "recipients sent by the first pass")
 	wantEq(t, gaveUp, 1, "give-ups after the first pass")
 
 	// Second pass well before the 6h backoff expires: the row must be untouched.
-	_, err = w.ProcessDue(context.Background(), t0.Add(2*time.Minute))
-	mustNoErr(t, err, "second pass")
+	wantEq(t, mustProcess(t, w, t0.Add(2*time.Minute)), 0, "recipients sent by the second pass")
 	wantEq(t, gaveUp, 1, "give-ups after the second pass (the stamp must have been cleared)")
 
 	queued, err := sp.List()

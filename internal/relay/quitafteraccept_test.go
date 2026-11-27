@@ -13,16 +13,17 @@ import (
 // serveHangupSession speaks just enough SMTP to accept one message, then drops
 // the connection the moment it has answered the end-of-data dot, without ever
 // replying to QUIT. Many production mail exchangers behave exactly this way.
-func serveHangupSession(conn net.Conn, accepted *int32) {
-	defer func() { _ = conn.Close() }()
+func serveHangupSession(t *testing.T, conn net.Conn, accepted *int32) {
+	defer closeT(t, conn, "hangup sink connection")
 	r := bufio.NewReader(conn)
-	write := func(s string) { _, _ = conn.Write([]byte(s + "\r\n")) }
+	rw := &replyWriter{conn: conn}
+	write := func(s string) { rw.send(s + "\r\n") }
 
 	write("220 sink.test ESMTP")
 	inData := false
 	for {
 		line, err := r.ReadString('\n')
-		if err != nil {
+		if err != nil || rw.err != nil {
 			return
 		}
 		if inData {
@@ -55,16 +56,15 @@ func startHangupSink(t *testing.T) (*int32, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = ln.Close() })
-	go func() {
+	serveUntilCleanup(t, ln, func() error {
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
-				return
+				return err
 			}
-			go serveHangupSession(conn, accepted)
+			go serveHangupSession(t, conn, accepted)
 		}
-	}()
+	})
 	return accepted, ln.Addr().String()
 }
 

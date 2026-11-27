@@ -203,6 +203,23 @@ func TestDMARCReportDestinationDomainIsAfterTheLastAt(t *testing.T) {
 	wantEq(t, len(queued), 1, "reports queued")
 }
 
+// TestDMARCDestinationWithoutDomainIsRefused proves a destination with no domain
+// after its last '@' is refused before any lookup: RFC 7489 section 7.1 names the
+// authorization record by the destination domain, so without one there is no
+// record that could authorize it.
+func TestDMARCDestinationWithoutDomainIsRefused(t *testing.T) {
+	w := dmarcWorker(openSpool(t), "")
+	w.DMARCLookupTXT = func(name string) ([]string, error) {
+		t.Errorf("authorization lookup %q for a destination with no domain", name)
+		return []string{"v=DMARC1"}, nil
+	}
+	for _, addr := range []string{"reports", "reports@"} {
+		if err := w.dmarcDestinationAllowed("example.test", addr); !errors.Is(err, errDestinationNotAuthorized) {
+			t.Errorf("dmarcDestinationAllowed(%q) = %v, want errDestinationNotAuthorized", addr, err)
+		}
+	}
+}
+
 // TestDMARCReportSameOrganizationSkipsCheck proves a destination in the policy
 // domain's own organization needs no authorization record.
 func TestDMARCReportSameOrganizationSkipsCheck(t *testing.T) {
@@ -232,8 +249,12 @@ func TestDMARCReportSizeLimit(t *testing.T) {
 	if err := w.sendDMARCReports(context.Background(), reportDay); err != nil {
 		t.Fatal(err)
 	}
-	it, _, _ := queuedReport(t, sp)
+	it, raw, agg := queuedReport(t, sp)
 	wantEq(t, it.Recipient, "big@example.test", "the destination with room")
+	// RFC 7489 6.2: the small destination was skipped because the report exceeds
+	// its 100-byte limit, and the one sent is the domain's aggregate report.
+	wantTrue(t, len(raw) > 100, "the report exceeds the small destination's limit")
+	wantEq(t, agg.Domain, "example.test", "the report's policy domain")
 }
 
 // TestDMARCReportDisabledSendsNothingButPrunes proves the operator setting stops
@@ -316,7 +337,9 @@ func TestDMARCReportAttachmentIsGzipXML(t *testing.T) {
 	if err := w.sendDMARCReports(context.Background(), reportDay); err != nil {
 		t.Fatal(err)
 	}
-	_, raw, _ := queuedReport(t, sp)
+	it, raw, agg := queuedReport(t, sp)
+	wantEq(t, it.Recipient, "dmarc@example.test", "the report's recipient")
+	wantEq(t, agg.Domain, "example.test", "the report's policy domain")
 	root := mime.ParseStructure(raw)
 	if len(root.Children) != 2 {
 		t.Fatalf("parts = %d, want a note and the report", len(root.Children))

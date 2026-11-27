@@ -24,7 +24,7 @@ func TestEnqueueSignsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sp.Close()
+	defer closeT(t, sp, "spool")
 	ps := &prefixSigner{}
 	sp.Signer = ps
 
@@ -56,14 +56,17 @@ func TestEnqueueNilSignerUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sp.Close()
+	defer closeT(t, sp, "spool")
 	now := time.Now()
 	raw := []byte("Subject: hi\r\n\r\nbody")
 	if err := sp.Enqueue("from@local", []string{"a@remote"}, raw, now); err != nil {
 		t.Fatal(err)
 	}
 	items := mustClaim(t, sp, now, 10)
-	if len(items) != 1 || !bytes.Equal(items[0].Body, raw) {
+	if len(items) != 1 {
+		t.Fatalf("claimed %d items, want 1", len(items))
+	}
+	if !bytes.Equal(items[0].Body, raw) {
 		t.Errorf("a nil signer must leave the body unchanged, got %q", items[0].Body)
 	}
 }

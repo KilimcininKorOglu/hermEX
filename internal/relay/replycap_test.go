@@ -18,7 +18,7 @@ func TestAnEndlessReplyLineIsCut(t *testing.T) {
 	client, server := net.Pipe()
 	var sent atomic.Int64
 	go func() {
-		defer server.Close()
+		defer closeT(t, server, "hostile server pipe")
 		chunk := bytes.Repeat([]byte("a"), 32<<10)
 		if _, err := server.Write([]byte("220 ")); err != nil {
 			return

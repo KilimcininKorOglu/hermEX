@@ -54,16 +54,15 @@ func TestGatewayDeliversThroughTheConfiguredHost(t *testing.T) {
 // TestGatewayPerDomainOverridesTheGlobal proves a domain's own gateway wins for mail whose
 // envelope sender is in that domain.
 func TestGatewayPerDomainOverridesTheGlobal(t *testing.T) {
-	_, addr := startSink(t)
+	be, addr := startSink(t)
 	w, t0 := gatewayWorker(t, addr, "alice@tenant.test")
 	var dialed string
 	w.GatewayDialer = func(a string) (net.Conn, error) { dialed = a; return net.Dial("tcp", addr) }
 	w.SetGateways(&Gateway{Host: "global.test", Port: 25},
 		map[string]Gateway{"tenant.test": {Host: "tenant-gw.test", Port: 2525}})
 
-	if _, err := w.ProcessDue(context.Background(), t0); err != nil {
-		t.Fatalf("process: %v", err)
-	}
+	wantEq(t, mustProcess(t, w, t0), 1, "recipients sent through the domain's gateway")
+	wantEq(t, len(be.recorded()), 1, "messages the domain's gateway received")
 
 	if dialed != "tenant-gw.test:2525" {
 		t.Errorf("dialed %q, want the domain's own gateway tenant-gw.test:2525", dialed)
@@ -73,16 +72,15 @@ func TestGatewayPerDomainOverridesTheGlobal(t *testing.T) {
 // TestGatewayUsesTheGlobalForAnUnlistedDomain proves a domain with no override falls back
 // to the global gateway.
 func TestGatewayUsesTheGlobalForAnUnlistedDomain(t *testing.T) {
-	_, addr := startSink(t)
+	be, addr := startSink(t)
 	w, t0 := gatewayWorker(t, addr, "alice@other.test")
 	var dialed string
 	w.GatewayDialer = func(a string) (net.Conn, error) { dialed = a; return net.Dial("tcp", addr) }
 	w.SetGateways(&Gateway{Host: "global.test", Port: 25},
 		map[string]Gateway{"tenant.test": {Host: "tenant-gw.test", Port: 2525}})
 
-	if _, err := w.ProcessDue(context.Background(), t0); err != nil {
-		t.Fatalf("process: %v", err)
-	}
+	wantEq(t, mustProcess(t, w, t0), 1, "recipients sent through the global gateway")
+	wantEq(t, len(be.recorded()), 1, "messages the global gateway received")
 
 	if dialed != "global.test:25" {
 		t.Errorf("dialed %q, want the global gateway global.test:25", dialed)
@@ -96,9 +94,7 @@ func TestGatewayRequiresSTARTTLSWhenConfigured(t *testing.T) {
 	w, t0 := gatewayWorker(t, addr, "alice@hermex.test")
 	w.SetGateways(&Gateway{Host: "gateway.test", Port: 587, RequireSTARTTLS: true}, nil)
 
-	if _, err := w.ProcessDue(context.Background(), t0); err != nil {
-		t.Fatalf("process: %v", err)
-	}
+	wantEq(t, mustProcess(t, w, t0), 0, "recipients sent to a gateway that does not offer STARTTLS")
 
 	if len(be.recorded()) != 0 {
 		t.Error("the message was delivered in the clear to a gateway configured for STARTTLS")
@@ -108,13 +104,12 @@ func TestGatewayRequiresSTARTTLSWhenConfigured(t *testing.T) {
 // TestGatewayKeepsTheMessageQueuedOnAFailedUpgrade proves the refused delivery stays in the
 // spool for a retry rather than being dropped.
 func TestGatewayKeepsTheMessageQueuedOnAFailedUpgrade(t *testing.T) {
-	_, addr := startSink(t)
+	be, addr := startSink(t)
 	w, t0 := gatewayWorker(t, addr, "alice@hermex.test")
 	w.SetGateways(&Gateway{Host: "gateway.test", Port: 587, RequireSTARTTLS: true}, nil)
 
-	if _, err := w.ProcessDue(context.Background(), t0); err != nil {
-		t.Fatalf("process: %v", err)
-	}
+	wantEq(t, mustProcess(t, w, t0), 0, "recipients sent after a failed upgrade")
+	wantEq(t, len(be.recorded()), 0, "messages the gateway received after a failed upgrade")
 
 	if due := mustClaim(t, w.Spool, t0.Add(24*time.Hour), 10); len(due) != 1 {
 		t.Errorf("spool holds %d recipients, want the undelivered one still queued", len(due))
@@ -130,9 +125,7 @@ func TestGatewayAbsentKeepsTheDirectPath(t *testing.T) {
 	w.Router = func(domain string) ([]string, error) { routed = domain; return []string{"sink"}, nil }
 	w.Dialer = func(string) (net.Conn, error) { return net.Dial("tcp", addr) }
 
-	if _, err := w.ProcessDue(context.Background(), t0); err != nil {
-		t.Fatalf("process: %v", err)
-	}
+	wantEq(t, mustProcess(t, w, t0), 1, "recipients sent on the direct path")
 
 	if routed != "remote.test" || len(be.recorded()) != 1 {
 		t.Errorf("routed %q and received %d messages, want the recipient domain resolved and delivered",
@@ -150,29 +143,29 @@ func startAuthSink(t *testing.T) (*int32, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = ln.Close() })
-	go func() {
+	serveUntilCleanup(t, ln, func() error {
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
-				return
+				return err
 			}
-			go serveAuthSession(conn, authed)
+			go serveAuthSession(t, conn, authed)
 		}
-	}()
+	})
 	return authed, ln.Addr().String()
 }
 
 // serveAuthSession answers one session, counting an AUTH command and accepting the message.
-func serveAuthSession(conn net.Conn, authed *int32) {
-	defer func() { _ = conn.Close() }()
+func serveAuthSession(t *testing.T, conn net.Conn, authed *int32) {
+	defer closeT(t, conn, "auth sink connection")
 	r := bufio.NewReader(conn)
-	write := func(line string) { _, _ = conn.Write([]byte(line + "\r\n")) }
+	rw := &replyWriter{conn: conn}
+	write := func(line string) { rw.send(line + "\r\n") }
 
 	write("220 gateway.test ESMTP")
 	for {
 		line, err := r.ReadString('\n')
-		if err != nil {
+		if err != nil || rw.err != nil {
 			return
 		}
 		cmd := strings.ToUpper(strings.TrimRight(line, "\r\n"))
@@ -203,9 +196,7 @@ func TestGatewayAuthenticatesWhenAUsernameIsSet(t *testing.T) {
 	w.SetGateways(&Gateway{Host: "127.0.0.1", Port: 587, Username: "relay", Password: "pw"}, nil)
 	w.GatewayDialer = func(string) (net.Conn, error) { return net.Dial("tcp", addr) }
 
-	if _, err := w.ProcessDue(context.Background(), t0); err != nil {
-		t.Fatalf("process: %v", err)
-	}
+	wantEq(t, mustProcess(t, w, t0), 1, "recipients sent through the authenticating gateway")
 
 	if atomic.LoadInt32(authed) != 1 {
 		t.Error("the gateway received no AUTH command, so the credentials never left")

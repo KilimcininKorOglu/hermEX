@@ -17,7 +17,7 @@ func openSpoolAt(t *testing.T) (*Spool, string) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	t.Cleanup(func() { _ = s.Close() })
+	t.Cleanup(func() { closeT(t, s, "spool") })
 	return s, path
 }
 

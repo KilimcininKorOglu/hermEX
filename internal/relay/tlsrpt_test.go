@@ -111,13 +111,13 @@ func TestTLSReportDurableAcrossReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	record(t, sp, day, "remote.example", tlsrpt.PolicyTypeSTS, "mx.remote.example", "")
-	_ = sp.Close()
+	mustNoErr(t, sp.Close(), "close the spool")
 
 	reopened, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reopened.Close()
+	defer closeT(t, reopened, "reopened spool")
 	rep, err := reopened.TLSReport(day, "remote.example", "org", "c", "id")
 	if err != nil {
 		t.Fatalf("TLSReport after reopen: %v", err)
@@ -144,9 +144,8 @@ func startTLSSink(t *testing.T) (*recordingBackend, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = ln.Close() })
 	srv := &hsmtp.Server{Backend: be, Hostname: "sink.test", TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}}}
-	go func() { _ = srv.Serve(ln) }()
+	serveUntilCleanup(t, ln, func() error { return srv.Serve(ln) })
 	return be, ln.Addr().String()
 }
 
@@ -156,7 +155,7 @@ func startTLSSink(t *testing.T) (*recordingBackend, string) {
 // TLS (no policy) accepts any certificate, so the self-signed sink authenticates
 // and the session is a no-policy-found success.
 func TestWorkerRecordsTLSSuccess(t *testing.T) {
-	_, addr := startTLSSink(t)
+	be, addr := startTLSSink(t)
 	sp := openSpool(t)
 	now := time.Now()
 	if err := sp.Enqueue("a@local", []string{"bob@remote"}, []byte("hi\r\n"), now); err != nil {
@@ -172,6 +171,7 @@ func TestWorkerRecordsTLSSuccess(t *testing.T) {
 	if sent, err := w.ProcessDue(context.Background(), now); err != nil || sent != 1 {
 		t.Fatalf("process: sent=%d err=%v", sent, err)
 	}
+	wantEq(t, len(be.recorded()), 1, "messages the sink received")
 	rep, err := sp.TLSReport(now, "remote", "org", "c", "id")
 	if err != nil {
 		t.Fatalf("TLSReport: %v", err)
@@ -193,7 +193,7 @@ func TestWorkerRecordsTLSSuccess(t *testing.T) {
 // a starttls-not-supported failure under the sts policy type, the negotiation
 // failure TLS-RPT exists to surface.
 func TestWorkerRecordsStartTLSNotSupported(t *testing.T) {
-	_, addr := startSink(t) // plain sink: no STARTTLS
+	be, addr := startSink(t) // plain sink: no STARTTLS
 	sp := openSpool(t)
 	now := time.Now()
 	if err := sp.Enqueue("a@local", []string{"bob@remote"}, []byte("hi\r\n"), now); err != nil {
@@ -208,9 +208,8 @@ func TestWorkerRecordsStartTLSNotSupported(t *testing.T) {
 			return &mtasts.Policy{Mode: mtasts.ModeEnforce, MX: []string{"sink"}}, nil
 		},
 	}
-	if _, err := w.ProcessDue(context.Background(), now); err != nil {
-		t.Fatalf("process: %v", err)
-	}
+	wantEq(t, mustProcess(t, w, now), 0, "recipients sent in the clear under an enforce policy")
+	wantEq(t, len(be.recorded()), 0, "messages the sink received in the clear")
 	rep, err := sp.TLSReport(now, "remote", "org", "c", "id")
 	if err != nil {
 		t.Fatalf("TLSReport: %v", err)
@@ -233,7 +232,7 @@ func TestWorkerRecordsStartTLSNotSupported(t *testing.T) {
 // legacy plaintext hop to a domain that published no policy has no report to
 // pollute.
 func TestWorkerOpportunisticPlaintextNotRecorded(t *testing.T) {
-	_, addr := startSink(t) // plain sink: no STARTTLS
+	be, addr := startSink(t) // plain sink: no STARTTLS
 	sp := openSpool(t)
 	now := time.Now()
 	if err := sp.Enqueue("a@local", []string{"bob@remote"}, []byte("hi\r\n"), now); err != nil {
@@ -248,6 +247,7 @@ func TestWorkerOpportunisticPlaintextNotRecorded(t *testing.T) {
 	if sent, err := w.ProcessDue(context.Background(), now); err != nil || sent != 1 {
 		t.Fatalf("process: sent=%d err=%v", sent, err)
 	}
+	wantEq(t, len(be.recorded()), 1, "messages the sink received")
 	rep, err := sp.TLSReport(now, "remote", "org", "c", "id")
 	if err != nil {
 		t.Fatalf("TLSReport: %v", err)
@@ -266,13 +266,32 @@ func servfailDNS(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := &dns.Server{PacketConn: pc, Handler: dns.HandlerFunc(func(w dns.ResponseWriter, r *dns.Msg) {
+	return startDNSStub(t, pc, func(r *dns.Msg) *dns.Msg {
 		m := new(dns.Msg)
 		m.SetRcode(r, dns.RcodeServerFailure)
-		_ = w.WriteMsg(m)
-	})}
-	go func() { _ = srv.ActivateAndServe() }()
-	t.Cleanup(func() { _ = srv.Shutdown() })
+		return m
+	})
+}
+
+// startDNSStub serves answer on pc until the test ends. It waits until the
+// server runs, so the cleanup shutdown always stops a started server, and fails
+// the test on a reply it could not write or a server that did not stop cleanly.
+func startDNSStub(t *testing.T, pc net.PacketConn, answer func(*dns.Msg) *dns.Msg) string {
+	t.Helper()
+	started := make(chan struct{})
+	srv := &dns.Server{PacketConn: pc, NotifyStartedFunc: func() { close(started) },
+		Handler: dns.HandlerFunc(func(w dns.ResponseWriter, r *dns.Msg) {
+			if err := w.WriteMsg(answer(r)); err != nil {
+				t.Errorf("DNS stub reply: %v", err)
+			}
+		})}
+	done := make(chan error, 1)
+	go func() { done <- srv.ActivateAndServe() }()
+	<-started
+	t.Cleanup(func() {
+		mustNoErr(t, srv.Shutdown(), "shut the DNS stub down")
+		mustNoErr(t, <-done, "DNS stub serve")
+	})
 	return pc.LocalAddr().String()
 }
 
@@ -285,7 +304,7 @@ func secureUnusableTLSA(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := &dns.Server{PacketConn: pc, Handler: dns.HandlerFunc(func(w dns.ResponseWriter, r *dns.Msg) {
+	return startDNSStub(t, pc, func(r *dns.Msg) *dns.Msg {
 		m := new(dns.Msg)
 		m.SetReply(r)
 		m.AuthenticatedData = true
@@ -294,11 +313,8 @@ func secureUnusableTLSA(t *testing.T) string {
 			Usage: 1, Selector: 1, MatchingType: 1,
 			Certificate: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 		}}
-		_ = w.WriteMsg(m)
-	})}
-	go func() { _ = srv.ActivateAndServe() }()
-	t.Cleanup(func() { _ = srv.Shutdown() })
-	return pc.LocalAddr().String()
+		return m
+	})
 }
 
 // TestWorkerRefusesCleartextUnderUnusableTLSA delivers to a host whose validated
@@ -306,7 +322,7 @@ func secureUnusableTLSA(t *testing.T) string {
 // section 2.2: such a connection MUST be made via TLS, so the message must stay
 // queued rather than go out in the clear.
 func TestWorkerRefusesCleartextUnderUnusableTLSA(t *testing.T) {
-	_, addr := startSink(t) // plain sink: no STARTTLS
+	be, addr := startSink(t) // plain sink: no STARTTLS
 	sp := openSpool(t)
 	now := time.Now()
 	if err := sp.Enqueue("a@local", []string{"bob@remote"}, []byte("hi\r\n"), now); err != nil {
@@ -322,6 +338,7 @@ func TestWorkerRefusesCleartextUnderUnusableTLSA(t *testing.T) {
 	if sent, err := w.ProcessDue(context.Background(), now); err != nil || sent != 0 {
 		t.Fatalf("process: sent=%d err=%v, want the message kept back", sent, err)
 	}
+	wantEq(t, len(be.recorded()), 0, "messages the sink received in the clear")
 	rep, err := sp.TLSReport(now, "remote", "org", "c", "id")
 	if err != nil {
 		t.Fatalf("TLSReport: %v", err)
@@ -339,7 +356,7 @@ func TestWorkerRefusesCleartextUnderUnusableTLSA(t *testing.T) {
 // report rather than passing silently. A transient lookup error, by contrast, is
 // not reportable (RFC 8460 4.3.4); only the bogus signal is recorded.
 func TestWorkerRecordsDNSSECInvalid(t *testing.T) {
-	_, addr := startSink(t) // plain sink: delivery fails at the TLSA lookup, before STARTTLS
+	be, addr := startSink(t) // plain sink: delivery fails at the TLSA lookup, before STARTTLS
 	sp := openSpool(t)
 	now := time.Now()
 	if err := sp.Enqueue("a@local", []string{"bob@remote"}, []byte("hi\r\n"), now); err != nil {
@@ -352,9 +369,8 @@ func TestWorkerRecordsDNSSECInvalid(t *testing.T) {
 		DANE:        &dane.Resolver{Addr: servfailDNS(t)},
 		TLSReporter: sp,
 	}
-	if _, err := w.ProcessDue(context.Background(), now); err != nil {
-		t.Fatalf("process: %v", err)
-	}
+	wantEq(t, mustProcess(t, w, now), 0, "recipients sent after a bogus TLSA lookup")
+	wantEq(t, len(be.recorded()), 0, "messages the sink received after a bogus TLSA lookup")
 	rep, err := sp.TLSReport(now, "remote", "org", "c", "id")
 	if err != nil {
 		t.Fatalf("TLSReport: %v", err)

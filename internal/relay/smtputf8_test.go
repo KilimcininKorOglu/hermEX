@@ -39,28 +39,28 @@ func startLegacySink(t *testing.T) (*legacySink, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = ln.Close() })
-	go func() {
+	serveUntilCleanup(t, ln, func() error {
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
-				return
+				return err
 			}
-			go sink.serve(conn)
+			go sink.serve(t, conn)
 		}
-	}()
+	})
 	return sink, ln.Addr().String()
 }
 
-func (s *legacySink) serve(conn net.Conn) {
-	defer conn.Close()
+func (s *legacySink) serve(t *testing.T, conn net.Conn) {
+	defer closeT(t, conn, "legacy sink connection")
 	br := bufio.NewReader(conn)
-	write := func(reply string) { _, _ = conn.Write([]byte(reply)) }
+	rw := &replyWriter{conn: conn}
+	write := rw.send
 	write("220 legacy.test ESMTP\r\n")
 	inData := false
 	for {
 		line, err := br.ReadString('\n')
-		if err != nil {
+		if err != nil || rw.err != nil {
 			return
 		}
 		line = strings.TrimRight(line, "\r\n")
@@ -123,6 +123,12 @@ func TestWorkerRefusesAUTF8EnvelopeOnAHostWithoutSMTPUTF8(t *testing.T) {
 		if strings.HasPrefix(strings.ToUpper(cmd), "MAIL") {
 			t.Errorf("a UTF-8 envelope reached a host that does not offer SMTPUTF8: %q", cmd)
 		}
+	}
+	// The host is refused, not the message: it stays queued for the next attempt.
+	queued, err := sp.List()
+	mustNoErr(t, err, "list the queue")
+	if len(queued) != 1 || queued[0].Recipient != "alıcı@örnek.test" {
+		t.Errorf("queue = %+v, want the refused recipient still queued", queued)
 	}
 }
 
