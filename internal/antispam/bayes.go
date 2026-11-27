@@ -146,7 +146,7 @@ func (m *BayesModel) SaveFile(path string) error {
 
 // LoadModelFile reads a Bayes model from path. A missing file returns (nil, nil)
 // so the caller can run with the model dormant; any other error is returned.
-func LoadModelFile(path string) (*BayesModel, error) {
+func LoadModelFile(path string) (m *BayesModel, err error) {
 	// #nosec G304 -- the model path comes from the operator's config, never from a client
 	f, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -155,7 +155,11 @@ func LoadModelFile(path string) (*BayesModel, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 	return LoadBayesModel(f)
 }
 

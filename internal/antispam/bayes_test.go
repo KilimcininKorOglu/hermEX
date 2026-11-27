@@ -131,14 +131,35 @@ func TestBayesClassifies(t *testing.T) {
 func TestLoadBayesModelRefusesANegativeCount(t *testing.T) {
 	for _, raw := range []string{
 		`{"spam_msgs":-1,"ham_msgs":5}`,
+		`{"spam_msgs":5,"ham_msgs":-1}`,
 		`{"spam_msgs":5,"ham_msgs":5,"ham_tokens":{"meeting":-3}}`,
 		`{"spam_msgs":5,"ham_msgs":5,"spam_tokens":{"cheap":-1}}`,
 		`{"spam_msgs":"five"}`,
+		`{`,
+		``,
 	} {
-		if m, err := LoadBayesModel(strings.NewReader(raw)); err == nil {
-			t.Errorf("model %s loaded (score of a word: %v), want an error", raw, m.Score("cheap meeting"))
+		if m, err := LoadBayesModel(strings.NewReader(raw)); err == nil || m != nil {
+			t.Errorf("model %q = (%v, %v), want (nil, error)", raw, m, err)
 		}
 	}
+}
+
+// TestTrainFromDirMissingDirLeavesModelUnchanged proves a failed directory read
+// returns an error and leaves previously trained counts and tokens untouched.
+func TestTrainFromDirMissingDirLeavesModelUnchanged(t *testing.T) {
+	m := NewBayesModel()
+	m.Train("cheap pills", true)
+	m.Train("project notes", false)
+
+	n, err := TrainFromDir(m, filepath.Join(t.TempDir(), "does-not-exist"), true)
+	if err == nil {
+		t.Fatal("TrainFromDir on missing dir succeeded, want error")
+	}
+	wantEq(t, n, 0, "trained count on missing dir")
+	wantEq(t, m.SpamMsgs, 1, "SpamMsgs unchanged")
+	wantEq(t, m.HamMsgs, 1, "HamMsgs unchanged")
+	wantEq(t, m.SpamTokens["cheap"], 1, "SpamTokens unchanged")
+	wantEq(t, m.HamTokens["project"], 1, "HamTokens unchanged")
 }
 
 // TestBayesUntrainedNeutral proves a model lacking a baseline in either class
