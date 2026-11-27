@@ -82,16 +82,9 @@ func TestReadReceiptFailureDoesNotFailTheRead(t *testing.T) {
 	sess, logonH, msgH, _ := brokenSenderSession(t, sink)
 	defer sess.Close()
 
-	buf, _ := sess.Dispatch(buildSetMessageReadFlag(0, 1, rfDefault), []uint32{logonH, msgH})
-	if len(buf) == 0 {
-		t.Fatal("SetMessageReadFlag produced no response")
-	}
-	// The response's status word is the last 4 bytes of the ROP's reply; a success
-	// is ecSuccess. Reading it exactly is the point: a failure here would mean the
-	// receipt's problem escaped onto the client's read.
-	if got := buf[len(buf)-4:]; got[0] != 0 || got[1] != 0 || got[2] != 0 || got[3] != 0 {
-		t.Errorf("SetMessageReadFlag returned a non-zero status %v, so the receipt failure escaped", got)
-	}
+	// ReturnValue follows RopId and the handle index ([MS-OXCMSG] 2.2.3.10.2); a
+	// non-success there would mean the receipt's problem escaped onto the read.
+	ropOK(t, dispatchOn(sess, buildSetMessageReadFlag(0, 1, rfDefault), logonH, msgH), ropSetMessageReadFlag, "SetMessageReadFlag with a failing receipt")
 }
 
 // TestSuccessfulReadReceiptRecordsNoFailure guards the other direction. A path that
