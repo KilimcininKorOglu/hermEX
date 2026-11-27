@@ -31,8 +31,12 @@ func TestAParkedWaitThatPanicsAnswersAsATimeout(t *testing.T) {
 	// The renewal parks again rather than being dropped as a second wait.
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		_, fault := async.asyncWaitEx(&Session{User: user, vc: testVconn(), maxFrag: 4096}, buildAsyncWaitExStub(acxh))
+		vc2 := testVconn()
+		_, fault := async.asyncWaitEx(&Session{User: user, vc: vc2, maxFrag: 4096}, buildAsyncWaitExStub(acxh))
 		if fault == faultParked {
+			if flags, result := parseAsyncWaitExOut(t, readParkedReply(t, vc2)); flags != 0 || result != ecSuccess {
+				t.Errorf("renewed reply after panic = (flags %#x, result %#x), want (0, ecSuccess)", flags, result)
+			}
 			return
 		}
 		if time.Now().After(deadline) {
