@@ -181,7 +181,11 @@ func (d *mtaDaemon) wireDelivery() {
 	// drains it, so its maintenance failures are recorded here.
 	spool.Logger = d.logger
 	d.spool = spool
-	d.forward = newForwarding(d.cfg, d.dir, d.logger)
+	fwd, err := newForwarding(d.cfg, d.dir, d.logger)
+	if err != nil {
+		log.Fatalf("hermex-mta: forwarding: %v", err)
+	}
+	d.forward = fwd
 
 	// DMARC aggregate reports to the domains whose mail arrives here: off until an
 	// operator turns them on, read at startup and re-read every minute. The switch
@@ -694,7 +698,11 @@ func antispamAccess(dir *directory.SQLDirectory) (*antispam.AccessList, uint64, 
 	for _, r := range rules {
 		m[r.Pattern] = r.Action
 	}
-	return antispam.NewAccessList(m), accessHash(rules), nil
+	sum, err := accessHash(rules)
+	if err != nil {
+		return nil, 0, err
+	}
+	return antispam.NewAccessList(m), sum, nil
 }
 
 // enqueueFunc is the spool entry point a rule hook puts mail on: (*relay.Spool).Enqueue.
@@ -704,17 +712,30 @@ type enqueueFunc func(from string, to []string, raw []byte, now time.Time) error
 // key is derived from the key-wrapping secret, so it needs no setting of its
 // own; with no secret configured, forwarded mail keeps its envelope sender and
 // that is recorded at startup.
-func newForwarding(cfg *config.Config, dir *directory.SQLDirectory, logger *logging.Logger) *mta.Forwarding {
+func newForwarding(cfg *config.Config, dir *directory.SQLDirectory, logger *logging.Logger) (*mta.Forwarding, error) {
 	f := &mta.Forwarding{Keys: dir, AuthServID: cfg.Hostname, Logger: logger}
-	if secret := cfg.KeyWrapSecret(); len(secret) > 0 {
-		m := hmac.New(sha256.New, secret)
-		m.Write([]byte("srs"))
-		f.SRSSecret = m.Sum(nil)
-	} else {
+	secret := cfg.KeyWrapSecret()
+	if len(secret) == 0 {
 		logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.MTA, Name: "srs.disabled",
 			Fields: logging.Fields{"detail": "no key_secret or admin_secret; forwarded mail keeps its envelope sender"}})
+		return f, nil
 	}
-	return f
+	key, err := srsKey(secret)
+	if err != nil {
+		return nil, err
+	}
+	f.SRSSecret = key
+	return f, nil
+}
+
+// srsKey derives the SRS hash key as HMAC-SHA256(secret, "srs"), so the
+// key-wrapping secret is never used as the SRS key itself.
+func srsKey(secret []byte) ([]byte, error) {
+	m := hmac.New(sha256.New, secret)
+	if _, err := m.Write([]byte("srs")); err != nil {
+		return nil, fmt.Errorf("derive the srs key: %w", err)
+	}
+	return m.Sum(nil), nil
 }
 
 // forwardEnqueue queues a rule forward without the author signature. The
@@ -762,15 +783,16 @@ func ruleHook(kind string, limiter *mta.OutboundLimiter, enqueue enqueueFunc, lo
 
 // accessHash folds the rules (already returned in a deterministic order) into a
 // content hash so any add, edit, or delete changes the value.
-func accessHash(rules []directory.SenderRule) uint64 {
+func accessHash(rules []directory.SenderRule) (uint64, error) {
 	h := fnv.New64a()
 	for _, r := range rules {
-		_, _ = h.Write([]byte(r.Pattern))
-		_, _ = h.Write([]byte{0})
-		_, _ = h.Write([]byte(r.Action))
-		_, _ = h.Write([]byte{'\n'})
+		for _, part := range [][]byte{[]byte(r.Pattern), {0}, []byte(r.Action), {'\n'}} {
+			if _, err := h.Write(part); err != nil {
+				return 0, fmt.Errorf("hash the sender rules: %w", err)
+			}
+		}
 	}
-	return h.Sum64()
+	return h.Sum64(), nil
 }
 
 // applyGreylistSettings reads the stored greylist on/off toggle and timings and
