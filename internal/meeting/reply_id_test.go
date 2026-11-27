@@ -17,7 +17,7 @@ import (
 func TestProcessReplyResolvesTheMessageID(t *testing.T) {
 	st, err := objectstore.Open(t.TempDir())
 	mustNoErr(t, err, "Open")
-	defer st.Close()
+	defer mustClose(t, st, "the store")
 
 	tags, err := ResolveTags(st)
 	mustNoErr(t, err, "ResolveTags")
@@ -74,6 +74,34 @@ func trackedResponse(t *testing.T, st *objectstore.Store, tags Tags, eventID int
 	if !ok {
 		t.Fatal("the attendee's tracking status was never written")
 	}
-	n, _ := v.(int32)
+	n, ok := v.(int32)
+	if !ok {
+		t.Fatalf("the attendee's tracking status holds %T, want int32", v)
+	}
 	return n
+}
+
+// TestProcessReplyIgnoresAnUnknownMessageID hands ProcessReply an id no message
+// carries, as a stale or forged delivery hand-off would. Nothing is read under it,
+// so the attendee's tracking status stays unwritten.
+func TestProcessReplyIgnoresAnUnknownMessageID(t *testing.T) {
+	st, err := objectstore.Open(t.TempDir())
+	mustNoErr(t, err, "Open")
+	defer mustClose(t, st, "the store")
+	tags, err := ResolveTags(st)
+	mustNoErr(t, err, "ResolveTags")
+	eventID := seedTrackedEvent(t, st, tags)
+	appendTrackedReply(t, st)
+
+	if handled, err := ProcessReply(st, nil, "bob@hermex.test", 999999); handled && err == nil {
+		t.Error("ProcessReply reported an unknown message as a processed reply")
+	}
+	recips, err := st.ListRecipients(eventID)
+	mustNoErr(t, err, "ListRecipients")
+	mustCount(t, len(recips), 1, "the event recipients")
+	props, err := st.GetRecipientProperties(recips[0].ID)
+	mustNoErr(t, err, "GetRecipientProperties")
+	if v, ok := props.Get(tags.Resp); ok {
+		t.Errorf("an unknown message id wrote tracking status %v", v)
+	}
 }
