@@ -7,6 +7,7 @@ package health
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 
@@ -62,7 +63,9 @@ func Handler(service, version string, started time.Time, checks ...Check) http.H
 		if !st.OK {
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
-		_ = json.NewEncoder(w).Encode(&st)
+		if err := json.NewEncoder(w).Encode(&st); err != nil {
+			log.Printf("health: encode /healthz response for %s: %v", service, err)
+		}
 	})
 	return mux
 }
