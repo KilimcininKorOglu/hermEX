@@ -662,21 +662,37 @@ func (s *Server) handleMailCopy(w http.ResponseWriter, r *http.Request) {
 	if refuseOverQuota(w, st) {
 		return
 	}
-	m, err := st.MessageByUID(fid, uid)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "copy failed"})
-		return
-	}
-	raw, err := st.GetMessageRaw(fid, uid)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "copy failed"})
-		return
-	}
-	if _, err := st.AppendMessage(dst, raw, m.InternalDate, m.Flags); err != nil {
+	if err := copyMessage(st, fid, uid, dst); err != nil {
+		if errors.Is(err, objectstore.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
+		}
+		logError("mail-copy", err, logging.Fields{"folder": fid, "uid": uid, "to": dst})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "copy failed"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// copyMessage appends the message (fid, uid) to dst with its arrival date and
+// flags, as IMAP COPY does (RFC 9051 section 6.4.7).
+func copyMessage(st *objectstore.Store, fid int64, uid uint32, dst int64) error {
+	m, err := st.MessageByUID(fid, uid)
+	if err != nil {
+		return err
+	}
+	raw, err := st.GetMessageRaw(fid, uid)
+	if err != nil {
+		return err
+	}
+	info, err := st.AppendMessage(dst, raw, m.InternalDate, m.Flags)
+	if err != nil {
+		return err
+	}
+	if info.UID == 0 {
+		return errors.New("webmail2api: the copy was stored without a UID")
+	}
+	return nil
 }
 
 // handleMailDelete removes a message: from Trash it goes to the Recoverable Items
