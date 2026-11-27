@@ -44,7 +44,11 @@ func TestAdminReportsItsDirectoryConnection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close the health response: %v", err)
+		}
+	}()
 
 	var st health.Status
 	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
@@ -71,7 +75,11 @@ func TestAdminReportsHealthyWhenTheDirectoryAnswers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close the health response: %v", err)
+		}
+	}()
 
 	var st health.Status
 	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
@@ -89,6 +97,28 @@ func TestAdminHealthOmitsTheCertificateWithoutTLS(t *testing.T) {
 	if checks := adminHealthChecks(stubPinger{}, nil); len(checks) != 1 {
 		t.Errorf("checks without TLS = %d, want only the directory probe", len(checks))
 	}
+}
+
+// fetchHealth serves the checks through the health handler and returns the
+// decoded /healthz answer.
+func fetchHealth(t *testing.T, checks []health.Check) health.Status {
+	t.Helper()
+	ts := httptest.NewServer(health.Handler("admin", "", time.Now(), checks...))
+	defer ts.Close()
+	resp, err := http.Get(ts.URL + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close the health response: %v", err)
+		}
+	}()
+	var st health.Status
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+		t.Fatal(err)
+	}
+	return st
 }
 
 // certStore serves one stored certificate to a tlscert.Provider.
@@ -137,17 +167,7 @@ func TestAdminHealthReportsTheCertificateWithTLS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(health.Handler("admin", "", time.Now(), adminHealthChecks(stubPinger{}, provider)...))
-	defer ts.Close()
-	resp, err := http.Get(ts.URL + "/healthz")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	var st health.Status
-	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
-		t.Fatal(err)
-	}
+	st := fetchHealth(t, adminHealthChecks(stubPinger{}, provider))
 	if st.OK || st.Checks["directory"] != "ok" {
 		t.Errorf("ok = %v checks = %v, want unhealthy on the certificate alone", st.OK, st.Checks)
 	}
