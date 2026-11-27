@@ -1,6 +1,9 @@
 package webmail2api
 
-import "strings"
+import (
+	"strings"
+	"unicode"
+)
 
 // logSafeMax bounds a logged value. The stub handler answers every unrouted API
 // path, so without a cap one request writes as much of the log as it likes.
@@ -21,7 +24,9 @@ func logSafe(s string) string {
 		s = s[:logSafeMax] + "..."
 	}
 	return strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
+		// C0, DEL and C1 (U+0085 NEL is a line break, U+009B a terminal CSI),
+		// plus the Unicode line and paragraph separators.
+		if unicode.IsControl(r) || r == ' ' || r == ' ' {
 			return -1
 		}
 		return r
