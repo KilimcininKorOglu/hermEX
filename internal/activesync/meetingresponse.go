@@ -151,9 +151,14 @@ func calendarItem(st *objectstore.Store, serverID string) (int64, bool) {
 	if err != nil {
 		return 0, false
 	}
-	state, _ := props.Get(tags.State)
-	flags, _ := state.(int32)
-	return id, flags&appointmentReceived != 0
+	// An item with no state flags, or flags of another type, is no received
+	// meeting, so it is refused like one the user organized.
+	state, ok := props.Get(tags.State)
+	if !ok {
+		return 0, false
+	}
+	flags, ok := state.(int32)
+	return id, ok && flags&appointmentReceived != 0
 }
 
 // appointmentReceived is the PidLidAppointmentStateFlags bit of a meeting received

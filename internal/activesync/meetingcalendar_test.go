@@ -40,7 +40,7 @@ func TestMeetingResponseFromTheCalendar(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	// A failed read would return no items and pass as an emptied calendar.
 	cal, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
 	mustNoErr(t, "list the calendar", err)
@@ -72,14 +72,17 @@ func TestMeetingResponseRefusesTheOrganizersOwnMeeting(t *testing.T) {
 		{Tag: mapi.PrSubject, Value: "My own meeting"},
 		{Tag: tags.State, Value: int32(0x1)}, // a meeting, organized here
 	}})
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 	if err != nil {
 		t.Fatal(err)
 	}
+	sid := strconv.FormatInt(id, 10)
+	before := calendarChangeNumber(t, attendee, sid)
 	post := func(n *wbxml.Node) *wbxml.Node { return postVersioned(t, ts, "16.1", "MeetingResponse", n) }
-	if got := respondInCalendar(t, post, strconv.FormatInt(id, 10), "1"); got != "2" {
+	if got := respondInCalendar(t, post, sid, "1"); got != "2" {
 		t.Errorf("Status = %q, want 2 (the user is the organizer)", got)
 	}
+	wantEq(t, "the organizer's item change number after the refusal", calendarChangeNumber(t, attendee, sid), before)
 	if n := len(organizerInbox(t, organizer)); n != 0 {
 		t.Errorf("a refused response still sent %d messages", n)
 	}
@@ -99,16 +102,19 @@ func TestMeetingResponseRefusesWhatIsNoMeeting(t *testing.T) {
 		{Tag: mapi.PrMessageClass, Value: "IPM.Appointment"},
 		{Tag: mapi.PrSubject, Value: "Dentist"},
 	}})
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 	if err != nil {
 		t.Fatal(err)
 	}
+	sid := strconv.FormatInt(id, 10)
+	before := calendarChangeNumber(t, attendee, sid)
 	post := func(n *wbxml.Node) *wbxml.Node { return postVersioned(t, ts, "16.1", "MeetingResponse", n) }
-	for _, rid := range []string{strconv.FormatInt(id, 10), "abc", "-1", "999999999"} {
+	for _, rid := range []string{sid, "abc", "-1", "999999999"} {
 		if got := respondInCalendar(t, post, rid, "1"); got != "2" {
 			t.Errorf("RequestId %q Status = %q, want 2", rid, got)
 		}
 	}
+	wantEq(t, "the appointment's change number after the refusals", calendarChangeNumber(t, attendee, sid), before)
 	if n := len(organizerInbox(t, organizer)); n != 0 {
 		t.Errorf("a refused response still sent %d messages", n)
 	}
