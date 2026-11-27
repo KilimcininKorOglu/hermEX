@@ -69,8 +69,7 @@ func registerNotifyExecuteBuffer(logonH uint32) []byte {
 func TestAsyncConnectEx(t *testing.T) {
 	ems := NewEMSMDB(nil)
 	const user = "alice@hermex.test"
-	out, _ := ems.Handle(&Session{User: user, Mailbox: provisionedDir(t)}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
-	cxh, _ := parseConnectExOut(t, out)
+	cxh := connectAt(t, ems, user, provisionedDir(t))
 
 	aout, fault := ems.Handle(&Session{User: user}, opEcDoAsyncConnectEx, buildAsyncConnectExStub(cxh))
 	if fault != 0 {
@@ -100,10 +99,8 @@ func TestAsyncWaitExRejectsForeignHandles(t *testing.T) {
 	ems := NewEMSMDB(nil)
 	async := NewAsyncEMSMDB(ems)
 	const user = "alice@hermex.test"
-	out, _ := ems.Handle(&Session{User: user, Mailbox: provisionedDir(t)}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
-	cxh, _ := parseConnectExOut(t, out)
-	aout, _ := ems.Handle(&Session{User: user}, opEcDoAsyncConnectEx, buildAsyncConnectExStub(cxh))
-	acxh, _ := parseAsyncConnectExOut(t, aout)
+	cxh := connectAt(t, ems, user, provisionedDir(t))
+	acxh := asyncConnect(t, ems, user, cxh)
 
 	// Unknown handle.
 	bogus := ContextHandle{HandleType: asyncHandleType, GUID: mapi.GUID{Data1: 0xDEAD}}
@@ -116,7 +113,8 @@ func TestAsyncWaitExRejectsForeignHandles(t *testing.T) {
 	}
 
 	// Valid handle, wrong user.
-	wout, _ = async.Handle(&Session{User: "bob@hermex.test"}, opEcDoAsyncWaitEx, buildAsyncWaitExStub(acxh))
+	wout, fault = async.Handle(&Session{User: "bob@hermex.test"}, opEcDoAsyncWaitEx, buildAsyncWaitExStub(acxh))
+	wantEq(t, fault, uint32(0), "foreign-user wait fault")
 	if flags, result := parseAsyncWaitExOut(t, wout); flags != 0 || result != ecRejected {
 		t.Errorf("foreign-user wait = (flags %#x, result %#x), want (0, ecRejected)", flags, result)
 	}
@@ -129,10 +127,8 @@ func TestAsyncWaitExNoNotification(t *testing.T) {
 	ems := NewEMSMDB(nil)
 	async := NewAsyncEMSMDB(ems)
 	const user = "alice@hermex.test"
-	out, _ := ems.Handle(&Session{User: user, Mailbox: provisionedDir(t)}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
-	cxh, _ := parseConnectExOut(t, out)
-	aout, _ := ems.Handle(&Session{User: user}, opEcDoAsyncConnectEx, buildAsyncConnectExStub(cxh))
-	acxh, _ := parseAsyncConnectExOut(t, aout)
+	cxh := connectAt(t, ems, user, provisionedDir(t))
+	acxh := asyncConnect(t, ems, user, cxh)
 
 	wout, fault := async.Handle(&Session{User: user}, opEcDoAsyncWaitEx, buildAsyncWaitExStub(acxh))
 	if fault != 0 {
@@ -155,13 +151,13 @@ func TestAsyncWaitExNotificationPending(t *testing.T) {
 	mailbox := provisionedDir(t)
 	cxh, _ := connectLogonRegister(t, ems, user, mailbox)
 
-	aout, _ := ems.Handle(&Session{User: user}, opEcDoAsyncConnectEx, buildAsyncConnectExStub(cxh))
-	acxh, _ := parseAsyncConnectExOut(t, aout)
+	acxh := asyncConnect(t, ems, user, cxh)
 
 	// A quiet wait first: nothing pending yet.
-	wout, _ := async.Handle(&Session{User: user}, opEcDoAsyncWaitEx, buildAsyncWaitExStub(acxh))
-	if flags, _ := parseAsyncWaitExOut(t, wout); flags != 0 {
-		t.Fatalf("wait before delivery = flags %#x, want 0", flags)
+	wout, fault := async.Handle(&Session{User: user}, opEcDoAsyncWaitEx, buildAsyncWaitExStub(acxh))
+	wantEq(t, fault, uint32(0), "quiet wait fault")
+	if flags, result := parseAsyncWaitExOut(t, wout); flags != 0 || result != ecSuccess {
+		t.Fatalf("wait before delivery = (flags %#x, result %#x), want (0, ecSuccess)", flags, result)
 	}
 
 	// A message is delivered into the mailbox through a separate store handle, as a
@@ -175,7 +171,7 @@ func TestAsyncWaitExNotificationPending(t *testing.T) {
 		t.Fatalf("append: %v", err)
 	}
 
-	wout, fault := async.Handle(&Session{User: user}, opEcDoAsyncWaitEx, buildAsyncWaitExStub(acxh))
+	wout, fault = async.Handle(&Session{User: user}, opEcDoAsyncWaitEx, buildAsyncWaitExStub(acxh))
 	if fault != 0 {
 		t.Fatalf("async wait fault = %#x", fault)
 	}
@@ -190,14 +186,14 @@ func TestAsyncWaitExNotificationPending(t *testing.T) {
 // handle and the logon handle.
 func connectLogonRegister(t *testing.T, ems *EMSMDB, user, mailbox string) (ContextHandle, uint32) {
 	t.Helper()
-	out, _ := ems.Handle(&Session{User: user, Mailbox: mailbox}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
-	cxh, _ := parseConnectExOut(t, out)
+	cxh := connectAt(t, ems, user, mailbox)
 
 	lresp, fault := ems.Handle(&Session{User: user}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, logonExecuteBuffer()))
 	if fault != 0 {
 		t.Fatalf("logon fault = %#x", fault)
 	}
-	_, lpout, _ := parseRpcExt2Out(t, lresp)
+	_, lpout, lresult := parseRpcExt2Out(t, lresp)
+	wantEq(t, lresult, uint32(ecSuccess), "logon rpc result")
 	_, lhandles, derr := oxmapihttp.DecodeExecute(lpout)
 	if derr != nil {
 		t.Fatalf("decode logon response: %v", derr)
@@ -238,8 +234,10 @@ func readParkedReply(t *testing.T, vc *vconn) []byte {
 // asyncConnect runs EcDoAsyncConnectEx and returns the async context handle.
 func asyncConnect(t *testing.T, ems *EMSMDB, user string, cxh ContextHandle) ContextHandle {
 	t.Helper()
-	aout, _ := ems.Handle(&Session{User: user}, opEcDoAsyncConnectEx, buildAsyncConnectExStub(cxh))
-	acxh, _ := parseAsyncConnectExOut(t, aout)
+	aout, fault := ems.Handle(&Session{User: user}, opEcDoAsyncConnectEx, buildAsyncConnectExStub(cxh))
+	wantEq(t, fault, uint32(0), "async connect fault")
+	acxh, result := parseAsyncConnectExOut(t, aout)
+	wantEq(t, result, uint32(ecSuccess), "async connect result")
 	return acxh
 }
 
@@ -317,7 +315,10 @@ func TestAsyncWaitExParkAbortsOnTeardown(t *testing.T) {
 	const user = "alice@hermex.test"
 	cxh, _ := connectLogonRegister(t, ems, user, provisionedDir(t))
 	acxh := asyncConnect(t, ems, user, cxh)
-	s, _ := ems.lookup(user, cxh.GUID)
+	s, ok := ems.lookup(user, cxh.GUID)
+	if !ok {
+		t.Fatal("the connected session is not in the table")
+	}
 
 	vc := testVconn()
 	if _, fault := async.asyncWaitEx(&Session{User: user, vc: vc, maxFrag: 4096}, buildAsyncWaitExStub(acxh)); fault != faultParked {

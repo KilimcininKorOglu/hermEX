@@ -50,7 +50,14 @@ func parseRpcExt2Out(t *testing.T, stub []byte) (ContextHandle, []byte, uint32) 
 // minted context handle; the ROP store opens at RopLogon.
 func connectFresh(t *testing.T, ems *EMSMDB) ContextHandle {
 	t.Helper()
-	out, fault := ems.Handle(&Session{User: "alice@hermex.test", Mailbox: provisionedDir(t)}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
+	return connectAt(t, ems, "alice@hermex.test", provisionedDir(t))
+}
+
+// connectAt runs EcDoConnectEx for user against mailbox, failing the test unless
+// it succeeds, and returns the minted context handle.
+func connectAt(t *testing.T, ems *EMSMDB, user, mailbox string) ContextHandle {
+	t.Helper()
+	out, fault := ems.Handle(&Session{User: user, Mailbox: mailbox}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
 	wantEq(t, fault, uint32(0), "connect fault")
 	cxh, result := parseConnectExOut(t, out)
 	wantEq(t, result, uint32(ecSuccess), "connect result")
