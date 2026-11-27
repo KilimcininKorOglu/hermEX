@@ -131,7 +131,7 @@ func repairMailbox(maildir string) {
 		log.Printf("hermex-admin: open mailbox %s: %v", maildir, err)
 		return
 	}
-	defer func() { _ = store.Close() }()
+	defer closeLogged("mailbox "+maildir, store)
 	report, err := store.RepairMailbox()
 	if errors.Is(err, objectstore.ErrMailboxBusy) {
 		log.Fatalf("hermex-admin: %s is open by a running daemon or another session; "+

@@ -76,7 +76,7 @@ func runMoveMail(c *cmdContext) {
 	if err != nil {
 		log.Fatalf("hermex-admin: open mailbox %s: %v", maildir, err)
 	}
-	defer store.Close()
+	defer closeLogged("mailbox "+maildir, store)
 
 	reportRelocation(relocateAll(store, src, dst, uids, copyOnly), len(uids), target, copyOnly)
 }

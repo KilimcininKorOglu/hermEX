@@ -130,6 +130,15 @@ var commands = []command{
 	{name: "serve", note: "run the admin API HTTP server", run: runServe},
 }
 
+// closeLogged closes c and prints a failure, so a store, spool or database that
+// could not release its lock or flush its last write leaves a line in the
+// operator's output instead of a clean-looking run.
+func closeLogged(what string, c interface{ Close() error }) {
+	if err := c.Close(); err != nil {
+		log.Printf("hermex-admin: close %s: %v", what, err)
+	}
+}
+
 // lookup returns the command with that name.
 func lookup(name string) (command, bool) {
 	for _, c := range commands {
@@ -199,7 +208,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("hermex-admin: %v", err)
 	}
-	defer db.Close()
+	defer closeLogged("the directory database", db)
 	dir := directory.NewSQL(db)
 	// At-rest wrapping for the private keys the directory stores (DKIM signing
 	// keys, uploaded TLS keys). An unset secret leaves them in plaintext and says
@@ -303,7 +312,7 @@ func runSweepContent(c *cmdContext) {
 	if err != nil {
 		log.Fatalf("hermex-admin: open mailbox %s: %v", maildir, err)
 	}
-	defer store.Close()
+	defer closeLogged("mailbox "+maildir, store)
 	removed, err := store.SweepOrphanContent()
 	if errors.Is(err, objectstore.ErrMailboxBusy) {
 		// The sweep deletes content a live writer may be about to reference, so
@@ -670,7 +679,7 @@ func pruneEML(dir *directory.SQLDirectory, target string, days int) {
 		}
 		opened++
 		n, bytes, err := store.PruneEMLCache(cutoff)
-		_ = store.Close()
+		closeLogged("mailbox "+md, store)
 		if err != nil {
 			log.Printf("hermex-admin: prune %s: %v", md, err)
 		}
@@ -700,7 +709,7 @@ func backfillPreviews(dir *directory.SQLDirectory, target string) {
 		}
 		opened++
 		n, err := store.BackfillPreviews()
-		_ = store.Close()
+		closeLogged("mailbox "+md, store)
 		if err != nil {
 			log.Printf("hermex-admin: backfill %s: %v", md, err)
 		}
@@ -821,7 +830,7 @@ func copyStores(sources []backupSource, dest string) (done, opened int) {
 		}
 		opened++
 		err = store.Backup(filepath.Join(dest, src.rel))
-		_ = store.Close()
+		closeLogged("mailbox "+src.dir, store)
 		if err != nil {
 			log.Printf("hermex-admin: back up %s: %v", src.dir, err)
 			continue
@@ -858,7 +867,7 @@ func backupSpool(cfg *config.Config, dest string) error {
 	if err != nil {
 		return err
 	}
-	defer sp.Close()
+	defer closeLogged("the relay spool", sp)
 	return sp.Backup(dest)
 }
 
