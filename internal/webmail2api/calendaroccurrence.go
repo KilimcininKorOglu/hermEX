@@ -75,11 +75,11 @@ func (s *Server) editOccurrence(w http.ResponseWriter, r *http.Request, ch occur
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	st, c, ok := s.openStore(w, r)
+	st, c, ok := s.openStoreSession(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	if !objectInKind(w, st, id, inCalendar) {
 		return
 	}

@@ -74,7 +74,18 @@ func verifyToken(secret []byte, token string, now time.Time) (sessionClaims, err
 
 // sign returns the base64url HMAC-SHA256 of msg under secret.
 func sign(secret []byte, msg string) string {
-	m := hmac.New(sha256.New, secret)
-	m.Write([]byte(msg))
-	return base64.RawURLEncoding.EncodeToString(m.Sum(nil))
+	return base64.RawURLEncoding.EncodeToString(macSHA256(secret, []byte(msg)))
+}
+
+// macSHA256 returns the HMAC-SHA256 of the concatenated parts under key.
+func macSHA256(key []byte, parts ...[]byte) []byte {
+	m := hmac.New(sha256.New, key)
+	for _, p := range parts {
+		// hash.Hash.Write is documented never to return an error; a MAC must never
+		// be taken over a partial input, so a failure stops rather than signing.
+		if _, err := m.Write(p); err != nil {
+			panic(err)
+		}
+	}
+	return m.Sum(nil)
 }

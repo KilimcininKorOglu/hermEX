@@ -2,7 +2,6 @@ package webmail2api
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"slices"
 	"strconv"
@@ -175,7 +174,12 @@ func colorOf(st *objectstore.Store, folderID int64, colorTag mapi.PropTag) strin
 // stable id "calendar", always the default) plus every folder whose container
 // class is IPF.Appointment. Color comes from webmail's per-calendar named prop.
 func listCalendars(st *objectstore.Store) []calendarJSON {
-	colorTag, _ := calendarColorTag(st, true)
+	// A color tag that cannot be resolved shows every calendar uncolored; the
+	// list itself is still right, so the failure is recorded, not answered.
+	colorTag, err := calendarColorTag(st, true)
+	if err != nil {
+		logError("calendar-color-tag", err, logging.Fields{})
+	}
 	defName := "Calendar"
 	if props, err := st.GetFolderProperties(mapi.PrivateFIDCalendar, mapi.PrDisplayName); err == nil {
 		if n := propStr(props, mapi.PrDisplayName); n != "" {
@@ -252,86 +256,84 @@ func headerSafe(s string) string {
 // literal \n, and a bare CR is dropped. This keeps a user-supplied SUMMARY or
 // LOCATION from breaking out of its content line and injecting extra properties.
 func icalText(s string) string {
-	var b strings.Builder
+	out := make([]byte, 0, len(s))
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
 		case '\\', ',', ';':
-			b.WriteByte('\\')
-			b.WriteByte(s[i])
+			out = append(out, '\\', s[i])
 		case '\n':
-			b.WriteString(`\n`)
+			out = append(out, '\\', 'n')
 		case '\r':
 			// drop bare CR; the \n handling carries the line break
 		default:
-			b.WriteByte(s[i])
+			out = append(out, s[i])
 		}
 	}
-	return b.String()
+	return string(out)
 }
 
 // buildICal renders a minimal VEVENT for the proven oxcical import path. organizer
 // names the meeting's organizer (empty for an appointment, or for a meeting
 // organized before this webmail recorded one), and seq is the meeting revision.
 func buildICal(e eventJSON, organizer string, seq int) []byte {
-	var b strings.Builder
-	b.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//webmail2//EN\r\n")
+	lines := []string{"BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//hermEX//webmail2//EN"}
 	loc := eventLocation(e)
-	writeVTimezone(&b, loc, e.Start)
-	b.WriteString("BEGIN:VEVENT\r\n")
-	fmt.Fprintf(&b, "UID:%s\r\n", e.UID)
-	fmt.Fprintf(&b, "SUMMARY:%s\r\n", icalText(e.Summary))
-	fmt.Fprintf(&b, "DTSTART%s\r\n", icalTimeIn(e.Start, e.AllDay, loc))
+	lines = append(lines, vTimezoneLines(loc, e.Start)...)
+	lines = append(lines,
+		"BEGIN:VEVENT",
+		"UID:"+e.UID,
+		"SUMMARY:"+icalText(e.Summary),
+		"DTSTART"+icalTimeIn(e.Start, e.AllDay, loc))
 	if e.End != "" {
-		fmt.Fprintf(&b, "DTEND%s\r\n", icalTimeIn(e.End, e.AllDay, loc))
+		lines = append(lines, "DTEND"+icalTimeIn(e.End, e.AllDay, loc))
 	}
 	if validRRule(e.Recurrence) {
-		fmt.Fprintf(&b, "RRULE:%s\r\n", e.Recurrence)
+		lines = append(lines, "RRULE:"+e.Recurrence)
 	}
-	fmt.Fprintf(&b, "SEQUENCE:%d\r\n", seq)
+	lines = append(lines, "SEQUENCE:"+strconv.Itoa(seq))
 	if organizer != "" {
-		fmt.Fprintf(&b, "ORGANIZER:mailto:%s\r\n", organizer)
+		lines = append(lines, "ORGANIZER:mailto:"+organizer)
 	}
-	writeAttendees(&b, e)
-	writeICalText(&b, "DESCRIPTION:%s\r\n", e.Description)
-	writeICalText(&b, "LOCATION:%s\r\n", e.Location)
-	writeICalAlarm(&b, e.ReminderMinutes)
-	b.WriteString(icalClass(e.Sensitivity))
-	b.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
-	return []byte(b.String())
+	lines = append(lines, attendeeLines(e)...)
+	lines = appendICalText(lines, "DESCRIPTION:", e.Description)
+	lines = appendICalText(lines, "LOCATION:", e.Location)
+	lines = append(lines, alarmLines(e.ReminderMinutes)...)
+	text := strings.Join(lines, "\r\n") + "\r\n"
+	return []byte(text + icalClass(e.Sensitivity) + "END:VEVENT\r\nEND:VCALENDAR\r\n")
 }
 
-// writeAttendees writes an ATTENDEE line for each attendee that parses as an
+// attendeeLines returns an ATTENDEE line for each attendee that parses as an
 // address, required ones first. An optional attendee who is also required is
 // written once, as required.
-func writeAttendees(b *strings.Builder, e eventJSON) {
+func attendeeLines(e eventJSON) []string {
+	var out []string
 	required := cleanAddresses(e.Attendees)
 	for _, a := range required {
-		fmt.Fprintf(b, "ATTENDEE;CN=%s;ROLE=REQ-PARTICIPANT;RSVP=TRUE:mailto:%s\r\n", a, a)
+		out = append(out, "ATTENDEE;CN="+a+";ROLE=REQ-PARTICIPANT;RSVP=TRUE:mailto:"+a)
 	}
 	for _, a := range cleanAddresses(e.OptionalAttendees) {
 		if !slices.Contains(required, a) {
-			fmt.Fprintf(b, "ATTENDEE;CN=%s;ROLE=OPT-PARTICIPANT;RSVP=TRUE:mailto:%s\r\n", a, a)
+			out = append(out, "ATTENDEE;CN="+a+";ROLE=OPT-PARTICIPANT;RSVP=TRUE:mailto:"+a)
 		}
 	}
+	return out
 }
 
-// writeICalText emits one escaped text property, skipping an empty value.
-func writeICalText(b *strings.Builder, format, value string) {
+// appendICalText appends one escaped text property, skipping an empty value.
+func appendICalText(lines []string, name, value string) []string {
 	if value == "" {
-		return
+		return lines
 	}
-	fmt.Fprintf(b, format, icalText(value))
+	return append(lines, name+icalText(value))
 }
 
-// writeICalAlarm emits the display VALARM for a reminder set to a positive lead
+// alarmLines returns the display VALARM for a reminder set to a positive lead
 // time.
-func writeICalAlarm(b *strings.Builder, minutes *int) {
+func alarmLines(minutes *int) []string {
 	if minutes == nil || *minutes <= 0 {
-		return
+		return nil
 	}
-	b.WriteString("BEGIN:VALARM\r\nACTION:DISPLAY\r\n")
-	fmt.Fprintf(b, "TRIGGER:-PT%dM\r\n", *minutes)
-	b.WriteString("END:VALARM\r\n")
+	return []string{"BEGIN:VALARM", "ACTION:DISPLAY", "TRIGGER:-PT" + strconv.Itoa(*minutes) + "M", "END:VALARM"}
 }
 
 // icalClass maps sensitivity to the iCalendar CLASS line (PRIVATE for
@@ -350,11 +352,24 @@ func icalClass(sensitivity *int) string {
 	return ""
 }
 
+// icalValue returns a property's value in the first VEVENT, without its
+// parameters.
+func icalValue(ics []byte, name string) string {
+	return icalProp(ics, name).value
+}
+
+// icalLine is one property read from a VEVENT: its value and the part of the
+// key after its name (the parameters).
+type icalLine struct {
+	value  string
+	params string
+}
+
 // icalProp returns a property's value in the first VEVENT (its alarm included)
 // and the part of the key after its name (the parameters), ignoring folding. Lines
 // outside the event are skipped, because a VTIMEZONE ahead of it carries DTSTART
 // lines of its own.
-func icalProp(ics []byte, name string) (value, params string) {
+func icalProp(ics []byte, name string) icalLine {
 	inEvent := false
 	for line := range strings.SplitSeq(string(ics), "\n") {
 		line = strings.TrimRight(line, "\r")
@@ -372,35 +387,35 @@ func icalProp(ics []byte, name string) (value, params string) {
 		if !found {
 			continue
 		}
-		base := key
+		base, params := key, ""
 		if semi := strings.IndexByte(key, ';'); semi >= 0 {
 			base, params = key[:semi], key[semi:]
 		}
 		if strings.EqualFold(base, name) {
-			return val, params
+			return icalLine{value: val, params: params}
 		}
 	}
-	return "", ""
+	return icalLine{}
 }
 
 func icalToEvent(ics []byte, id int64) eventJSON {
 	e := eventJSON{UID: strconv.FormatInt(id, 10)}
-	if v, _ := icalProp(ics, "UID"); v != "" {
+	if v := icalValue(ics, "UID"); v != "" {
 		e.UID = v
 	}
-	e.Summary, _ = icalProp(ics, "SUMMARY")
-	e.Description, _ = icalProp(ics, "DESCRIPTION")
-	e.Location, _ = icalProp(ics, "LOCATION")
-	e.Recurrence, _ = icalProp(ics, "RRULE")
+	e.Summary = icalValue(ics, "SUMMARY")
+	e.Description = icalValue(ics, "DESCRIPTION")
+	e.Location = icalValue(ics, "LOCATION")
+	e.Recurrence = icalValue(ics, "RRULE")
 	icalSpan(ics, &e)
-	if v, _ := icalProp(ics, "TRIGGER"); v != "" {
+	if v := icalValue(ics, "TRIGGER"); v != "" {
 		// A VALARM trigger is an iCal duration like "-PT15M"; the lead time in
 		// minutes is its absolute value (oxcical emits "-PT<n>M").
 		if mins, ok := icalDurationMinutes(v); ok && mins > 0 {
 			e.ReminderMinutes = &mins
 		}
 	}
-	if c, _ := icalProp(ics, "CLASS"); c != "" {
+	if c := icalValue(ics, "CLASS"); c != "" {
 		// CLASS maps back to PR_SENSITIVITY (PRIVATE⇒private, CONFIDENTIAL⇒confidential);
 		// PUBLIC/absent stays the default normal, so no Sensitivity is set.
 		switch strings.ToUpper(strings.TrimSpace(c)) {
@@ -421,11 +436,7 @@ func icalToEvent(ics []byte, id int64) eventJSON {
 // the full oxcical duration parser.
 func icalDurationMinutes(v string) (int, bool) {
 	v = strings.TrimSpace(v)
-	neg := false
-	if strings.HasPrefix(v, "-") {
-		neg = true
-		v = v[1:]
-	} else if strings.HasPrefix(v, "+") {
+	if strings.HasPrefix(v, "-") || strings.HasPrefix(v, "+") {
 		v = v[1:]
 	}
 	if !strings.HasPrefix(v, "PT") {
@@ -440,18 +451,17 @@ func icalDurationMinutes(v string) (int, bool) {
 	if err != nil || n < 0 {
 		return 0, false
 	}
-	_ = neg
 	return n, true
 }
 
 // handleGetEvents returns every event across all of the mailbox's calendars, each
 // tagged with its calendarId so the SPA can filter and color per calendar.
 func (s *Server) handleGetEvents(w http.ResponseWriter, r *http.Request) {
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	// Optional [start,end) window. When both params parse, an object is pruned by
 	// its cheap start/end named props before the costly per-object iCal export
 	// (mirrors today.go's appointmentsOn). Absent or malformed params keep the
@@ -497,10 +507,15 @@ func newEventWindowScan(st *objectstore.Store, r *http.Request) *eventScan {
 	sc := &eventScan{st: st, opt: oxcical.Options{Resolver: st.GetNamedPropIDs}}
 	// busyTag resolves PidLidBusyStatus once; an absent tag (fresh store) means
 	// the busy status is read from the iCal-derived default and stays nil.
-	sc.busyTag, _ = busyStatusTag(st, false)
+	var err error
+	if sc.busyTag, err = busyStatusTag(st, false); err != nil {
+		logError("busy-status-tag", err, logging.Fields{})
+	}
 	// respTag resolves PidLidResponseStatus once; the organizer's TrackingTab
 	// reads each attendee's response from its recipient row.
-	sc.respTag, _ = responseStatusTag(st, false)
+	if sc.respTag, err = responseStatusTag(st, false); err != nil {
+		logError("response-status-tag", err, logging.Fields{})
+	}
 	// stateTag resolves PidLidAppointmentStateFlags once; its cancelled bit marks a
 	// meeting its organizer called off.
 	sc.stateTag = namedLongTag(st, mapi.NameAppointmentStateFlags)
@@ -679,11 +694,11 @@ func (s *Server) handleCreateEvent(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	// A meeting records its organizer, the signed-in user; an appointment with
 	// nobody to meet records none.
 	organizer := ""
@@ -723,11 +738,11 @@ func (s *Server) handleUpdateEvent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	if !eventEditTarget(w, st, id, in.CalendarID) {
 		return
 	}
@@ -765,11 +780,11 @@ func (s *Server) handleExportEvent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	msg, err := st.OpenMessage(id)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such event"})
@@ -787,18 +802,18 @@ func (s *Server) handleExportEvent(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`.ics"`)
 	// #nosec G705 -- the daemon stamps X-Content-Type-Options: nosniff and the Content-Type is set explicitly, so the bytes are never interpreted as a document
-	_, _ = w.Write(ics)
+	writeBody(w, ics)
 }
 
 // filenameFrom sanitizes a free-form string to a safe filename (alnum + -/_).
 func filenameFrom(name string) string {
-	var b strings.Builder
-	for _, r := range name {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
-			b.WriteRune(r)
+	out := make([]byte, 0, len(name))
+	for i := 0; i < len(name); i++ {
+		if c := name[i]; (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' {
+			out = append(out, c)
 		}
 	}
-	return b.String()
+	return string(out)
 }
 
 func (s *Server) handleDeleteEvent(w http.ResponseWriter, r *http.Request) {
@@ -807,11 +822,11 @@ func (s *Server) handleDeleteEvent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	if !objectInKind(w, st, id, inCalendar) {
 		return
 	}
@@ -846,11 +861,11 @@ func attendeeAddresses(st *objectstore.Store, id int64) []string {
 
 // handleGetCalendars lists the mailbox's calendars.
 func (s *Server) handleGetCalendars(w http.ResponseWriter, r *http.Request) {
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	writeJSON(w, http.StatusOK, map[string]any{"calendars": listCalendars(st)})
 }
 
@@ -861,11 +876,19 @@ func (s *Server) handleCreateCalendar(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
+	// The properties are resolved before the folder exists, so a failure leaves
+	// no half-made folder behind.
+	extra, err := calendarProps(st, in)
+	if err != nil {
+		logError("calendar-props", err, logging.Fields{})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not configure calendar"})
+		return
+	}
 	fid, err := st.CreateFolder(nil, in.Name)
 	if errors.Is(err, objectstore.ErrFolderExists) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "a folder with that name already exists"})
@@ -877,7 +900,7 @@ func (s *Server) handleCreateCalendar(w http.ResponseWriter, r *http.Request) {
 	}
 	// CreateFolder seeds IPF.Note; overwrite the container class so the folder is a
 	// real calendar, and store the chosen color and description.
-	props := append(mapi.PropertyValues{{Tag: mapi.PrContainerClass, Value: mapi.ContainerClassAppointment}}, calendarProps(st, in)...)
+	props := append(mapi.PropertyValues{{Tag: mapi.PrContainerClass, Value: mapi.ContainerClassAppointment}}, extra...)
 	if err := st.SetFolderProperties(fid, props); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not configure calendar"})
 		return
@@ -888,15 +911,25 @@ func (s *Server) handleCreateCalendar(w http.ResponseWriter, r *http.Request) {
 // calendarProps returns the color and description properties a calendar
 // create or update writes: the color when one is given, and the description
 // when the request carries one ("" clears it).
-func calendarProps(st *objectstore.Store, in calendarJSON) mapi.PropertyValues {
+//
+// A color whose property id cannot be resolved is an error, so the caller never
+// reports a color saved that was dropped.
+func calendarProps(st *objectstore.Store, in calendarJSON) (mapi.PropertyValues, error) {
 	var props mapi.PropertyValues
-	if colorTag, _ := calendarColorTag(st, true); colorTag != 0 && in.Color != "" {
+	if in.Color != "" {
+		colorTag, err := calendarColorTag(st, true)
+		if err != nil {
+			return nil, err
+		}
+		if colorTag == 0 {
+			return nil, errors.New("calendar color property id not allocated")
+		}
 		props = append(props, mapi.TaggedPropVal{Tag: colorTag, Value: in.Color})
 	}
 	if in.Description != nil {
 		props = append(props, mapi.TaggedPropVal{Tag: mapi.PrComment, Value: *in.Description})
 	}
-	return props
+	return props, nil
 }
 
 // handleUpdateCalendar renames, recolors and describes a calendar (PATCH;
@@ -921,14 +954,21 @@ func (s *Server) handleUpdateCalendar(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	id := r.PathValue("id")
 	fid, ok := calendarOr404(w, st, id)
 	if !ok {
+		return
+	}
+	// Resolved before the rename, so a failure leaves the calendar unchanged.
+	props, err := calendarProps(st, in)
+	if err != nil {
+		logError("calendar-props", err, logging.Fields{"folder": fid})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not update calendar"})
 		return
 	}
 	if strings.TrimSpace(in.Name) != "" {
@@ -937,7 +977,7 @@ func (s *Server) handleUpdateCalendar(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if props := calendarProps(st, in); len(props) > 0 {
+	if len(props) > 0 {
 		if err := st.SetFolderProperties(fid, props); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not update calendar"})
 			return
@@ -950,11 +990,11 @@ func (s *Server) handleUpdateCalendar(w http.ResponseWriter, r *http.Request) {
 // calendar cannot be deleted.
 func (s *Server) handleDeleteCalendar(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	fid, ok := calendarOr404(w, st, id)
 	if !ok {
 		return

@@ -144,7 +144,7 @@ func afterSend(c sessionClaims, raw []byte, draftID, kind string, keepOwnCopy bo
 		logError("file-sent-copy", err, logging.Fields{"user": c.Email, "kind": kind})
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	if keepOwnCopy {
 		fileSentCopy(st, raw, c.Email, kind)
 	}
@@ -207,7 +207,7 @@ func (s *Server) scheduleSend(w http.ResponseWriter, c sessionClaims, raw []byte
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	if err := scheduleOutbox(st, raw, sendAt); err != nil {
 		logError("schedule-send", err, logging.Fields{"user": c.Email})
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not schedule the message"})
@@ -344,6 +344,20 @@ func (s *Server) handleMailSendRaw(w http.ResponseWriter, r *http.Request) {
 
 // handleMailDraft saves (or replaces) a draft in the Drafts folder and returns
 // its id so the SPA's autosave can replace the same draft on the next save.
+// dropPreviousDraft replaces the previous draft so autosave does not accumulate
+// copies. The previous draft may already be gone (sent or deleted elsewhere), so
+// a failed delete does not refuse the save; it is recorded, since it leaves a
+// duplicate draft behind.
+func dropPreviousDraft(st *objectstore.Store, id string) {
+	folder, uid, ok := parseMessageID(id)
+	if !ok || folder != "drafts" {
+		return
+	}
+	if err := st.DeleteMessage(int64(mapi.PrivateFIDDraft), uid); err != nil {
+		logError("draft-replace-delete", err, logging.Fields{"uid": uid})
+	}
+}
+
 func (s *Server) handleMailDraft(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.session(r)
 	if !ok {
@@ -376,15 +390,12 @@ func (s *Server) handleMailDraft(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	// Checked before the previous draft is dropped, so a refused save keeps it.
 	if refuseOverQuota(w, st) {
 		return
 	}
-	// Replace the previous draft so autosave does not accumulate copies.
-	if folder, uid, ok := parseMessageID(req.ID); ok && folder == "drafts" {
-		_ = st.DeleteMessage(int64(mapi.PrivateFIDDraft), uid)
-	}
+	dropPreviousDraft(st, req.ID)
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDDraft), raw, time.Now(), objectstore.FlagSeen)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save the draft"})
@@ -619,6 +630,11 @@ func scheduleOutbox(st *objectstore.Store, raw []byte, sendAt string) error {
 // randomHex returns a short random hex token for a Message-ID local part.
 func randomHex() string {
 	b := make([]byte, 12)
-	_, _ = rand.Read(b)
+	// crypto/rand.Read is documented never to fail (it crashes the process
+	// instead); an id must never be built from an unfilled buffer, so a failure
+	// here stops rather than returning zeros.
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
 	return hex.EncodeToString(b)
 }

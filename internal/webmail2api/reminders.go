@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcmail"
@@ -28,22 +29,38 @@ type reminderJSON struct {
 // passed (the MS-OXOCAL "FlagDueBy <= now" rule, simplified to non-recurring for v1).
 // Mirrors the reference reminderlistmodule's enumerate-then-filter, capped at 99.
 func (s *Server) handleGetReminders(w http.ResponseWriter, r *http.Request) {
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	now := time.Now().UTC()
-	reminders := listReminders(st, mapi.PrivateFIDCalendar, "appointment", now)
-	reminders = append(reminders, listReminders(st, mapi.PrivateFIDTasks, "task", now)...)
-	writeJSON(w, http.StatusOK, map[string]any{"reminders": reminders})
+	appts, err := listReminders(st, mapi.PrivateFIDCalendar, "appointment", now)
+	if err != nil {
+		logError("list-reminders", err, logging.Fields{"folder": "calendar"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reminders unavailable"})
+		return
+	}
+	tasks, err := listReminders(st, mapi.PrivateFIDTasks, "task", now)
+	if err != nil {
+		logError("list-reminders", err, logging.Fields{"folder": "tasks"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reminders unavailable"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"reminders": append(appts, tasks...)})
 }
 
 // listReminders enumerates one folder's objects and returns those with a fired
 // reminder. Appointment reminders read PidLidReminderSet/Time from the named props
 // oxcical stores; task reminders reuse oxtask.FromProps.
-func listReminders(st *objectstore.Store, folderID int64, kind string, now time.Time) []reminderJSON {
-	objs, _ := st.ListFolderObjects(folderID)
+//
+// A folder that cannot be listed is an error, so a store failure is never shown
+// as "no reminders due".
+func listReminders(st *objectstore.Store, folderID int64, kind string, now time.Time) ([]reminderJSON, error) {
+	objs, err := st.ListFolderObjects(folderID)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]reminderJSON, 0, len(objs))
 	for _, o := range objs {
 		msg, err := st.OpenMessage(o.ID)
@@ -71,7 +88,7 @@ func listReminders(st *objectstore.Store, folderID int64, kind string, now time.
 			break
 		}
 	}
-	return out
+	return out, nil
 }
 
 // appointmentReminder reads a calendar item's reminder; a zero time means no due
@@ -210,11 +227,11 @@ func (s *Server) handleSnoozeReminder(w http.ResponseWriter, r *http.Request) {
 // (dismiss). The builder receives a zero MakeTag placeholder; the real tags are
 // substituted here from the store's resolver.
 func (s *Server) mutateReminder(w http.ResponseWriter, r *http.Request, build func(due time.Time) (mapi.PropertyValues, []mapi.PropTag), keepSet bool) {
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})

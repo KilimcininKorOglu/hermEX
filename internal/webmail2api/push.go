@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"hermex/internal/directory"
@@ -36,11 +37,8 @@ type pushStore interface {
 // the negligibly rare case where it is out of range.
 func vapidKeys(secret []byte) (public, private string, err error) {
 	for i := range byte(16) {
-		h := sha256.New()
-		h.Write([]byte("webmail2-vapid-p256"))
-		h.Write([]byte{i})
-		h.Write(secret)
-		priv, e := ecdh.P256().NewPrivateKey(h.Sum(nil))
+		seed := sha256.Sum256(slices.Concat([]byte("webmail2-vapid-p256"), []byte{i}, secret))
+		priv, e := ecdh.P256().NewPrivateKey(seed[:])
 		if e == nil {
 			return base64.RawURLEncoding.EncodeToString(priv.PublicKey().Bytes()),
 				base64.RawURLEncoding.EncodeToString(priv.Bytes()), nil
@@ -215,7 +213,11 @@ func (s *Server) sendPush(sub directory.PushSubscription, payload []byte) {
 		logError("push-send", err, logging.Fields{"endpoint": sub.Endpoint})
 		return
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			logError("push-close", err, logging.Fields{"endpoint": sub.Endpoint})
+		}
+	}()
 	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
 		if store, ok := s.auth.(pushStore); ok {
 			if err := store.DeletePushSubscription(sub.Endpoint); err != nil {
@@ -312,7 +314,7 @@ func (s *Server) inboxTotal(email string) (int, bool) {
 	if !ok {
 		return 0, false
 	}
-	defer st.Close()
+	defer closeStore(st)
 	total, _, err := st.CountMessages(mapi.PrivateFIDInbox)
 	if err != nil {
 		logError("push-inbox-count", err, logging.Fields{"user": email})

@@ -60,20 +60,17 @@ func eventLocation(e eventJSON) *time.Location {
 	return oxcical.ZoneByID(e.Timezone)
 }
 
-// writeVTimezone writes the VTIMEZONE a TZID in the event needs (RFC 5545
+// vTimezoneLines returns the VTIMEZONE a TZID in the event needs (RFC 5545
 // section 3.6.5), describing the zone in the year the event starts.
-func writeVTimezone(b *strings.Builder, loc *time.Location, start string) {
+func vTimezoneLines(loc *time.Location, start string) []string {
 	if loc == nil {
-		return
+		return nil
 	}
 	t, err := time.Parse(time.RFC3339, start)
 	if err != nil {
-		return
+		return nil
 	}
-	for _, line := range oxcical.VTimezone(loc, t.In(loc).Year()) {
-		b.WriteString(line)
-		b.WriteString("\r\n")
-	}
+	return oxcical.VTimezone(loc, t.In(loc).Year())
 }
 
 // icalTimeIn renders a DTSTART or DTEND value after its property name: the wall
@@ -93,34 +90,44 @@ func icalTimeIn(v string, allDay bool, loc *time.Location) string {
 // icalSpan fills the event's start and end from DTSTART and DTEND, reading a
 // value with a TZID in that zone and reporting the zone as the event's timezone.
 func icalSpan(ics []byte, e *eventJSON) {
-	if v, p := icalProp(ics, "DTSTART"); v != "" {
-		var zone string
-		e.Start, e.AllDay, zone = fromICalTimeIn(v, p)
-		if zone != "" {
-			e.Timezone = zone
+	if l := icalProp(ics, "DTSTART"); l.value != "" {
+		start := fromICalTimeIn(l.value, l.params)
+		e.Start, e.AllDay = start.value, start.allDay
+		if start.zone != "" {
+			e.Timezone = start.zone
 		}
 	}
-	if v, p := icalProp(ics, "DTEND"); v != "" {
-		e.End, _, _ = fromICalTimeIn(v, p)
+	// The event's day kind and zone come from DTSTART; DTEND gives the end
+	// instant only.
+	if l := icalProp(ics, "DTEND"); l.value != "" {
+		e.End = fromICalTimeIn(l.value, l.params).value
 	}
+}
+
+// icalTime is one iCalendar date or date-time read back: the value as the SPA
+// takes it, whether it is a whole day, and the IANA zone it was written in.
+type icalTime struct {
+	value  string
+	allDay bool
+	zone   string
 }
 
 // fromICalTimeIn is fromICalTime for a value whose parameters may name a zone: a
 // wall-clock value with a resolvable TZID is read in that zone and returned as a
 // UTC instant together with the zone's IANA name.
-func fromICalTimeIn(v, params string) (string, bool, string) {
+func fromICalTimeIn(v, params string) icalTime {
 	loc := oxcical.ZoneByID(icalParam(params, "TZID"))
 	v = strings.TrimSpace(v)
 	if loc == nil || strings.HasSuffix(v, "Z") {
 		s, allDay := fromICalTime(v)
-		return s, allDay, ""
+		return icalTime{value: s, allDay: allDay}
 	}
 	t, err := time.ParseInLocation("20060102T150405", v, loc)
 	if err != nil {
 		s, allDay := fromICalTime(v)
-		return s, allDay, ""
+		return icalTime{value: s, allDay: allDay}
 	}
-	return t.UTC().Format(time.RFC3339), false, loc.String()
+	return icalTime{value: t.UTC().Format(time.RFC3339), zone: loc.String()}
 }
 
 // icalParam returns one parameter's value from a property key's parameter part

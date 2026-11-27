@@ -83,7 +83,7 @@ func openSharedStore(w http.ResponseWriter, b directory.SharedMailbox, caller st
 		return nil, false
 	}
 	if !callerMayOpenShared(st, caller) {
-		_ = st.Close()
+		closeStore(st)
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return nil, false
 	}

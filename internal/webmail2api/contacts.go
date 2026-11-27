@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
@@ -81,21 +82,19 @@ type distListBody struct {
 // fields map to vCard properties oxvcard parses into MAPI (TEL/ADR/BDAY/TITLE/
 // ROLE/NOTE/URL), so they survive cross-protocol.
 func buildVCard(c contactJSON) []byte {
-	var b strings.Builder
-	b.WriteString("BEGIN:VCARD\r\nVERSION:4.0\r\n")
-	fmt.Fprintf(&b, "FN:%s\r\n", c.Name)
+	b := []string{"BEGIN:VCARD\r\nVERSION:4.0\r\n", "FN:" + c.Name + "\r\n"}
 	// N is the structured name: Family ; Given ; Middle ; Prefix ; Suffix.
 	// oxvcard imports N's five components to PrSurname/GivenName/MiddleName/
 	// DisplayNamePrefix/Generation respectively.
-	writeVCardGroup(&b, "N:%s;%s;%s;%s;%s\r\n", c.LastName, c.FirstName, c.MiddleName, c.Prefix, c.Suffix)
+	b = appendVCardGroup(b, "N:%s;%s;%s;%s;%s\r\n", c.LastName, c.FirstName, c.MiddleName, c.Prefix, c.Suffix)
 	for _, line := range vcardSingleLines(c) {
-		writeVCardLine(&b, line.format, line.value)
+		b = appendVCardLine(b, line.format, line.value)
 	}
-	writeVCardAddresses(&b, c)
-	writeVCardLine(&b, "IMPP:%s\r\n", c.IMAddress)
-	writeVCardLine(&b, "URL:%s\r\n", c.WebPage)
-	b.WriteString("END:VCARD\r\n")
-	return []byte(b.String())
+	b = appendVCardAddresses(b, c)
+	b = appendVCardLine(b, "IMPP:%s\r\n", c.IMAddress)
+	b = appendVCardLine(b, "URL:%s\r\n", c.WebPage)
+	b = append(b, "END:VCARD\r\n")
+	return []byte(strings.Join(b, ""))
 }
 
 // vcardLine pairs a vCard line format with the single value that fills it.
@@ -129,40 +128,40 @@ func vcardSingleLines(c contactJSON) []vcardLine {
 	}
 }
 
-// writeVCardAddresses emits the three ADR groups. ADR is semicolon-delimited:
+// appendVCardAddresses appends the three ADR groups. ADR is semicolon-delimited:
 // pobox ; ext ; street ; city ; state ; postal ; country, and the two leading
 // components are always empty here.
-func writeVCardAddresses(b *strings.Builder, c contactJSON) {
-	writeVCardGroup(b, "ADR;TYPE=HOME:;;%s;%s;%s;%s;%s\r\n",
+func appendVCardAddresses(b []string, c contactJSON) []string {
+	b = appendVCardGroup(b, "ADR;TYPE=HOME:;;%s;%s;%s;%s;%s\r\n",
 		c.HomeStreet, c.HomeCity, c.HomeState, c.HomePostal, c.HomeCountry)
-	writeVCardGroup(b, "ADR;TYPE=WORK:;;%s;%s;%s;%s;%s\r\n",
+	b = appendVCardGroup(b, "ADR;TYPE=WORK:;;%s;%s;%s;%s;%s\r\n",
 		c.WorkStreet, c.WorkCity, c.WorkState, c.WorkPostal, c.WorkCountry)
-	writeVCardGroup(b, "ADR;TYPE=OTHER:;;%s;%s;%s;%s;%s\r\n",
+	return appendVCardGroup(b, "ADR;TYPE=OTHER:;;%s;%s;%s;%s;%s\r\n",
 		c.OtherStreet, c.OtherCity, c.OtherState, c.OtherPostal, c.OtherCountry)
 }
 
-// writeVCardLine emits one line when its value is set. An empty value emits
+// appendVCardLine appends one line when its value is set. An empty value emits
 // nothing, so oxvcard never imports a blank MAPI property.
-func writeVCardLine(b *strings.Builder, format, value string) {
+func appendVCardLine(b []string, format, value string) []string {
 	if value == "" {
-		return
+		return b
 	}
-	fmt.Fprintf(b, format, value)
+	return append(b, fmt.Sprintf(format, value))
 }
 
-// writeVCardGroup emits a structured line when ANY component is set, leaving
+// appendVCardGroup appends a structured line when ANY component is set, leaving
 // the unset components empty in place. Dropping the line because its first
 // component is empty would move every later component into the wrong field on
 // import.
-func writeVCardGroup(b *strings.Builder, format string, parts ...string) {
+func appendVCardGroup(b []string, format string, parts ...string) []string {
 	if !anyNonEmpty(parts) {
-		return
+		return b
 	}
 	args := make([]any, len(parts))
 	for i, p := range parts {
 		args[i] = p
 	}
-	fmt.Fprintf(b, format, args...)
+	return append(b, fmt.Sprintf(format, args...))
 }
 
 // vcardGroupValue joins a structured value's components with the vCard
@@ -252,11 +251,11 @@ func vcardTypedField(vcf []byte, name, typeParam string) string {
 }
 
 func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	objs, err := st.ListFolderObjects(mapi.PrivateFIDContacts)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"contacts": []contactJSON{}, "total": 0})
@@ -288,13 +287,11 @@ func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 // distListContact renders a contact group for the listing: its members live as
 // JSON in the body, with the group name in PR_SUBJECT.
 func distListContact(id int64, msg *oxcmail.Message) contactJSON {
-	var body distListBody
-	_ = json.Unmarshal([]byte(propString(msg, mapi.PrBody)), &body)
 	return contactJSON{
 		ID:      strconv.FormatInt(id, 10),
 		Name:    propString(msg, mapi.PrSubject),
 		IsGroup: true,
-		Members: body.Members,
+		Members: distListMembers(id, msg),
 	}
 }
 
@@ -380,11 +377,11 @@ func (s *Server) handleCreateContact(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	if refuseOverQuota(w, st) {
 		return
 	}
@@ -409,11 +406,11 @@ func (s *Server) handleUpdateContact(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	// A numeric id that names an object outside Contacts is refused before the
 	// edit can replace it; an id that names nothing still stores a new contact.
 	if old, err := strconv.ParseInt(r.PathValue("id"), 10, 64); err == nil {
@@ -445,12 +442,15 @@ func saveContactEdit(st *objectstore.Store, rawID string, c contactJSON) (int64,
 	// A kind change replaces the contact. The replacement is written first, so a
 	// failed write leaves the contact as it was. The old object may already be
 	// gone (a stale id), and the edit is stored either way, so its delete error
-	// is not the caller's failure.
+	// is not the caller's failure; it is recorded, since a failed delete leaves
+	// the old contact beside its replacement.
 	id, err := writeContact(st, c)
 	if err != nil {
 		return 0, err
 	}
-	_ = st.DeleteObject(old)
+	if err := st.DeleteObject(old); err != nil {
+		logError("contact-replace-delete", err, logging.Fields{"old": old, "new": id})
+	}
 	return id, nil
 }
 
@@ -464,11 +464,11 @@ func (s *Server) handleDeleteContact(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	if !objectInKind(w, st, id, inFolder(mapi.PrivateFIDContacts)) {
 		return
 	}
@@ -489,11 +489,11 @@ func (s *Server) handleExpandDistList(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	msg, err := st.OpenMessage(id)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -503,12 +503,10 @@ func (s *Server) handleExpandDistList(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a distribution list"})
 		return
 	}
-	var body distListBody
-	_ = json.Unmarshal([]byte(propString(msg, mapi.PrBody)), &body)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id":      strconv.FormatInt(id, 10),
 		"name":    propString(msg, mapi.PrSubject),
-		"members": body.Members,
+		"members": distListMembers(id, msg),
 	})
 }
 
@@ -816,11 +814,11 @@ func (s *Server) handleGetContactPhoto(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	msg, err := st.OpenMessage(id)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such contact"})
@@ -834,7 +832,7 @@ func (s *Server) handleGetContactPhoto(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Cache-Control", "no-store")
 	// #nosec G705 -- the daemon stamps X-Content-Type-Options: nosniff and the Content-Type is set explicitly, so the bytes are never interpreted as a document
-	_, _ = w.Write(data)
+	writeBody(w, data)
 }
 
 // handleSetContactPhoto replaces the contact's photo. A prior photo (if any) is
@@ -851,11 +849,11 @@ func (s *Server) handleSetContactPhoto(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	if !objectInKind(w, st, id, inFolder(mapi.PrivateFIDContacts)) || refuseOverQuota(w, st) {
 		return
 	}
@@ -878,10 +876,16 @@ func (s *Server) handleSetContactPhoto(w http.ResponseWriter, r *http.Request) {
 // replaceContactPhoto stores data as the contact's one photo attachment, dropping
 // an existing photo first so the contact has at most one.
 func replaceContactPhoto(st *objectstore.Store, id int64, data []byte) error {
-	if msg, err := st.OpenMessage(id); err == nil {
-		if num, _, has := objectstore.ContactPhotoAttachment(msg); has {
-			// #nosec G115 -- the signed and unsigned views of the same 32 bits
-			_ = st.DeleteAttachment(id, uint32(num))
+	// A contact that cannot be read, or an old photo that cannot be dropped,
+	// fails the upload: adding the new one would leave the contact with two.
+	msg, err := st.OpenMessage(id)
+	if err != nil {
+		return err
+	}
+	if num, _, has := objectstore.ContactPhotoAttachment(msg); has {
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
+		if err := st.DeleteAttachment(id, uint32(num)); err != nil {
+			return err
 		}
 	}
 	props := mapi.PropertyValues{
@@ -893,7 +897,7 @@ func replaceContactPhoto(st *objectstore.Store, id int64, data []byte) error {
 		{Tag: mapi.PrRenderingPosition, Value: int32(-1)},
 		{Tag: mapi.PrAttachmentContactPhoto, Value: true},
 	}
-	_, _, err := st.CreateAttachment(id, props)
+	_, _, err = st.CreateAttachment(id, props)
 	return err
 }
 
@@ -914,8 +918,10 @@ func (s *Server) readScannedPhoto(w http.ResponseWriter, r *http.Request) ([]byt
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing file field"})
 		return nil, false
 	}
-	defer file.Close()
 	data, err := io.ReadAll(file)
+	if cerr := file.Close(); cerr != nil {
+		logError("contact-photo-upload-close", cerr, logging.Fields{})
+	}
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not read upload"})
 		return nil, false
@@ -940,11 +946,11 @@ func (s *Server) handleDeleteContactPhoto(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	if !objectInKind(w, st, id, inFolder(mapi.PrivateFIDContacts)) {
 		return
 	}
@@ -953,14 +959,32 @@ func (s *Server) handleDeleteContactPhoto(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such contact"})
 		return
 	}
-	if num, _, has := objectstore.ContactPhotoAttachment(msg); has {
-		// #nosec G115 -- the signed and unsigned views of the same 32 bits
-		_ = st.DeleteAttachment(id, uint32(num))
-	}
-	if tag, err := hasPictureTag(st, true); err == nil && tag != 0 {
-		_ = st.ModifyMessageProperties(id, mapi.PropertyValues{}, tag)
+	if err := clearContactPhoto(st, id, msg); err != nil {
+		logError("contact-photo-delete", err, logging.Fields{"id": id})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not remove photo"})
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// clearContactPhoto drops the contact's photo attachment and clears
+// PidLidHasPicture, returning the first failure so a photo that is still there
+// is never answered as removed.
+func clearContactPhoto(st *objectstore.Store, id int64, msg *oxcmail.Message) error {
+	if num, _, has := objectstore.ContactPhotoAttachment(msg); has {
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
+		if err := st.DeleteAttachment(id, uint32(num)); err != nil {
+			return err
+		}
+	}
+	tag, err := hasPictureTag(st, true)
+	if err != nil {
+		return err
+	}
+	if tag == 0 {
+		return nil
+	}
+	return st.ModifyMessageProperties(id, mapi.PropertyValues{}, tag)
 }
 
 // handleExportContact streams a contact as a vCard 4.0 download (.vcf). It uses
@@ -972,11 +996,11 @@ func (s *Server) handleExportContact(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	msg, err := st.OpenMessage(id)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such contact"})
@@ -986,10 +1010,11 @@ func (s *Server) handleExportContact(w http.ResponseWriter, r *http.Request) {
 	// member (FN + EMAIL), the shape Outlook saves for a personal DL.
 	var vcf []byte
 	if propString(msg, mapi.PrMessageClass) == "IPM.DistList" {
-		vcf = distListVCards(msg)
+		vcf = distListVCards(id, msg)
 	} else {
 		vcf, err = oxvcard.Export(msg, oxvcard.Options{Resolver: st.GetNamedPropIDs})
 		if err != nil {
+			logError("contact-export", err, logging.Fields{"id": id})
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not export"})
 			return
 		}
@@ -997,20 +1022,33 @@ func (s *Server) handleExportContact(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/vcard; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+contactFilename(msg)+`.vcf"`)
 	// #nosec G705 -- the daemon stamps X-Content-Type-Options: nosniff and the Content-Type is set explicitly, so the bytes are never interpreted as a document
-	_, _ = w.Write(vcf)
+	writeBody(w, vcf)
 }
 
 // distListVCards renders a distribution list as one minimal vCard per member.
-func distListVCards(msg *oxcmail.Message) []byte {
-	var body distListBody
-	_ = json.Unmarshal([]byte(propString(msg, mapi.PrBody)), &body)
-	var vb strings.Builder
-	for _, m := range body.Members {
-		vb.WriteString("BEGIN:VCARD\r\nVERSION:4.0\r\n")
-		fmt.Fprintf(&vb, "FN:%s\r\nEMAIL:%s\r\n", m, m)
-		vb.WriteString("END:VCARD\r\n")
+func distListVCards(id int64, msg *oxcmail.Message) []byte {
+	var out []byte
+	for _, m := range distListMembers(id, msg) {
+		out = append(out, "BEGIN:VCARD\r\nVERSION:4.0\r\nFN:"+m+"\r\nEMAIL:"+m+"\r\nEND:VCARD\r\n"...)
 	}
-	return []byte(vb.String())
+	return out
+}
+
+// distListMembers decodes a contact group's members from the JSON body webmail
+// writes. A group another client wrote (Outlook keeps its notes in the body) has
+// no such list, so it shows no members rather than failing; the body that did not
+// decode is recorded.
+func distListMembers(id int64, msg *oxcmail.Message) []string {
+	text := propString(msg, mapi.PrBody)
+	if text == "" {
+		return nil
+	}
+	var body distListBody
+	if err := json.Unmarshal([]byte(text), &body); err != nil {
+		logError("contact-group-body", err, logging.Fields{"id": id})
+		return nil
+	}
+	return body.Members
 }
 
 // contactFilename is the contact's (or list's) name reduced to the characters
@@ -1021,16 +1059,16 @@ func contactFilename(msg *oxcmail.Message) string {
 	if name == "" {
 		name = propString(msg, mapi.PrSubject)
 	}
-	var fb strings.Builder
+	var kept []rune
 	for _, r := range name {
 		if isSafeFilenameRune(r) {
-			fb.WriteRune(r)
+			kept = append(kept, r)
 		}
 	}
-	if fb.Len() == 0 {
+	if len(kept) == 0 {
 		return "contact"
 	}
-	return fb.String()
+	return string(kept)
 }
 
 // isSafeFilenameRune reports whether a rune may appear in a download filename.

@@ -29,17 +29,12 @@ type delegationJSON struct {
 	CreatedAt       string   `json:"createdAt"`
 }
 
-func readDelegations(m map[string]json.RawMessage) []delegationJSON {
+// readDelegations decodes the stored delegation rows. A list that does not
+// decode is an error, so an edit never saves over rows it could not read.
+func readDelegations(m map[string]json.RawMessage) ([]delegationJSON, error) {
 	var d []delegationJSON
-	if raw, ok := m["webmail2Delegations"]; ok {
-		_ = json.Unmarshal(raw, &d)
-	}
-	return d
-}
-
-func writeDelegations(m map[string]json.RawMessage, d []delegationJSON) {
-	raw, _ := json.Marshal(d)
-	m["webmail2Delegations"] = raw
+	err := decodeSetting(m, "webmail2Delegations", &d)
+	return d, err
 }
 
 // delegationOut builds the SPA's Delegation object. owner and mailbox are the
@@ -234,7 +229,11 @@ func (s *Server) handleGetDelegations(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return grantsUnavailable(err), false
 		}
-		rows := delegationRows(g, readDelegations(m))
+		saved, err := readDelegations(m)
+		if err != nil {
+			return grantsUnavailable(err), false
+		}
+		rows := delegationRows(g, saved)
 		if err := withFolderAccess(st, rows); err != nil {
 			return grantsUnavailable(err), false
 		}
@@ -283,17 +282,32 @@ func (s *Server) handlePostDelegation(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:       time.Now().UTC().Format(time.RFC3339),
 	}
 	s.withSettings(w, r, func(st *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		edit := func(g *storeGrants) { g.set(grantee, d.CanSendAs, d.CanSendOnBehalf) }
-		if err := applyGrants(st, edit); err != nil {
-			return grantsUnsaved(err), false
+		if f, failed := saveDelegation(st, m, d); failed {
+			return f, false
 		}
-		if err := st.SetDelegateFolderRights(grantee, folderRights(d.Rights)); err != nil {
-			return grantsUnsaved(err), false
-		}
-		saved := slices.DeleteFunc(readDelegations(m), func(o delegationJSON) bool { return strings.EqualFold(o.Grantee, grantee) })
-		writeDelegations(m, append(saved, d))
 		return delegationOut(c.Email, d), true
 	})
+}
+
+// saveDelegation grants d's rights in the store and records d in place of any
+// earlier row for the same grantee, reporting the failure to answer with.
+func saveDelegation(st *objectstore.Store, m map[string]json.RawMessage, d delegationJSON) (settingsFailure, bool) {
+	stored, err := readDelegations(m)
+	if err != nil {
+		return grantsUnavailable(err), true
+	}
+	edit := func(g *storeGrants) { g.set(d.Grantee, d.CanSendAs, d.CanSendOnBehalf) }
+	if err := applyGrants(st, edit); err != nil {
+		return grantsUnsaved(err), true
+	}
+	if err := st.SetDelegateFolderRights(d.Grantee, folderRights(d.Rights)); err != nil {
+		return grantsUnsaved(err), true
+	}
+	saved := slices.DeleteFunc(stored, func(o delegationJSON) bool { return strings.EqualFold(o.Grantee, d.Grantee) })
+	if err := putSetting(m, "webmail2Delegations", append(saved, d)); err != nil {
+		return grantsUnsaved(err), true
+	}
+	return settingsFailure{}, false
 }
 
 func (s *Server) handleDeleteDelegation(w http.ResponseWriter, r *http.Request) {
@@ -303,7 +317,10 @@ func (s *Server) handleDeleteDelegation(w http.ResponseWriter, r *http.Request) 
 		if err != nil {
 			return grantsUnavailable(err), false
 		}
-		saved := readDelegations(m)
+		saved, err := readDelegations(m)
+		if err != nil {
+			return grantsUnavailable(err), false
+		}
 		rows := delegationRows(g, saved)
 		i := slices.IndexFunc(rows, func(d delegationJSON) bool { return d.ID == id })
 		if i < 0 {
@@ -316,7 +333,9 @@ func (s *Server) handleDeleteDelegation(w http.ResponseWriter, r *http.Request) 
 		if err := st.SetDelegateFolderRights(grantee, 0); err != nil {
 			return grantsUnsaved(err), false
 		}
-		writeDelegations(m, slices.DeleteFunc(saved, func(d delegationJSON) bool { return strings.EqualFold(d.Grantee, grantee) }))
+		if err := putSetting(m, "webmail2Delegations", slices.DeleteFunc(saved, func(d delegationJSON) bool { return strings.EqualFold(d.Grantee, grantee) })); err != nil {
+			return grantsUnsaved(err), false
+		}
 		return map[string]bool{"ok": true}, true
 	})
 }

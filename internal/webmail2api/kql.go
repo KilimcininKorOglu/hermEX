@@ -95,23 +95,23 @@ func kqlBool(v string) bool {
 // stripped from the returned tokens.
 func tokenizeKQL(q string) []string {
 	var tokens []string
-	var b strings.Builder
+	var cur []rune
 	inQuote := false
 	for _, r := range q {
 		switch {
 		case r == '"':
 			inQuote = !inQuote
 		case (r == ' ' || r == '\t') && !inQuote:
-			if b.Len() > 0 {
-				tokens = append(tokens, b.String())
-				b.Reset()
+			if len(cur) > 0 {
+				tokens = append(tokens, string(cur))
+				cur = cur[:0]
 			}
 		default:
-			b.WriteRune(r)
+			cur = append(cur, r)
 		}
 	}
-	if b.Len() > 0 {
-		tokens = append(tokens, b.String())
+	if len(cur) > 0 {
+		tokens = append(tokens, string(cur))
 	}
 	return tokens
 }

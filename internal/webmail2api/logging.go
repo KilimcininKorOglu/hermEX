@@ -1,6 +1,7 @@
 package webmail2api
 
 import (
+	"io"
 	"sync/atomic"
 	"time"
 
@@ -26,6 +27,15 @@ func SetDefaultLogger(l *logging.Logger) {
 // skipped a subfolder. The request still succeeds for the user, so this line is
 // the only trace the operator gets; without it a storage fault that breaks every
 // Sent copy on the instance produces no signal anywhere.
+// writeBody writes a response body after the status is sent. A failed write
+// means the client went away mid-response; nothing can be answered any more, so
+// it is recorded.
+func writeBody(w io.Writer, b []byte) {
+	if _, err := w.Write(b); err != nil {
+		logError("response-write", err, logging.Fields{"bytes": len(b)})
+	}
+}
+
 func logError(op string, err error, f logging.Fields) {
 	l := defaultLogger.Load()
 	if l == nil || err == nil {
@@ -42,6 +52,14 @@ func logError(op string, err error, f logging.Fields) {
 		Fields:    f,
 		Err:       err.Error(),
 	})
+}
+
+// closeStore closes a mailbox store and records a failed close. The request's
+// outcome is already decided, so the failure is the operator's only trace.
+func closeStore(st *objectstore.Store) {
+	if err := st.Close(); err != nil {
+		logError("store-close", err, logging.Fields{"store": st.Dir()})
+	}
 }
 
 // fileSentCopy files a copy of an outgoing message in Sent Items. The message is
@@ -66,6 +84,6 @@ func (s *Server) fileCallerSentCopy(mb *mailboxCtx, c sessionClaims, raw []byte,
 		logError("file-sent-copy", err, logging.Fields{"user": c.Email, "kind": kind})
 		return
 	}
-	defer own.Close()
+	defer closeStore(own)
 	fileSentCopy(own, raw, c.Email, kind)
 }

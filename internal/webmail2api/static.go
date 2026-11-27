@@ -5,6 +5,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"hermex/internal/logging"
 )
 
 // assetPrefix is where the build puts its content-hashed bundles. A file under
@@ -51,7 +53,10 @@ func spaHandler(distDir string) http.Handler {
 			http.ServeFile(w, r, index)
 			return
 		}
-		_ = f.Close()
+		// The open only proved the file exists; the file server opens it again.
+		if err := f.Close(); err != nil {
+			logError("spa-close", err, logging.Fields{"path": clean})
+		}
 		if asset {
 			w.Header().Set("Cache-Control", immutableCache)
 		} else {

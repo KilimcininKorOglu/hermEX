@@ -26,7 +26,7 @@ func (s *Server) handleRecall(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer mb.st.Close()
+	defer closeStore(mb.st)
 	st := mb.st
 	m, err := st.MessageByUID(fid, uid)
 	if err != nil {
@@ -81,7 +81,7 @@ func (s *Server) recallFromRecipient(addr, messageID, sender string) string {
 	if !ok {
 		return "unavailable"
 	}
-	defer rst.Close()
+	defer closeStore(rst)
 	objs, err := rst.ListFolderObjects(mapi.PrivateFIDInbox)
 	if err != nil {
 		return "unavailable"

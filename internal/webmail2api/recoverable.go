@@ -15,7 +15,7 @@ func (s *Server) handleRecoverableList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer mb.st.Close()
+	defer closeStore(mb.st)
 	folder := r.URL.Query().Get("folder")
 	if folder == "" {
 		folder = "trash"
@@ -62,7 +62,7 @@ func (s *Server) handleRecoverableRecover(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	defer mb.st.Close()
+	defer closeStore(mb.st)
 	fid, mid, ok := s.recoverableTarget(w, r, mb)
 	if !ok {
 		return
@@ -81,7 +81,7 @@ func (s *Server) handleRecoverablePurge(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	defer mb.st.Close()
+	defer closeStore(mb.st)
 	fid, mid, ok := s.recoverableTarget(w, r, mb)
 	if !ok {
 		return

@@ -52,7 +52,7 @@ func (s *Server) publishedCert(address string) (der []byte, ok bool) {
 	if !ok {
 		return nil, false
 	}
-	defer st.Close()
+	defer closeStore(st)
 	id, ok, err := st.GetSmimeIdentity()
 	if err != nil || !ok || len(id.Cert) == 0 {
 		return nil, false

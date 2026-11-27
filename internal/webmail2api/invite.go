@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
@@ -81,7 +82,7 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	raw, err := st.GetMessageRaw(fid, uid)
 	if err != nil {
 		writeJSON(w, http.StatusOK, inviteJSON{})
@@ -104,9 +105,8 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
 // inviteDetails reads the meeting a calendar part describes.
 func inviteDetails(ics []byte) inviteJSON {
 	e := icalToEvent(ics, 0)
-	organizer, _ := icalProp(ics, "ORGANIZER")
 	return inviteJSON{IsInvite: true, UID: e.UID, Summary: e.Summary, Start: e.Start, End: e.End,
-		Location: e.Location, Organizer: organizerAddress(organizer)}
+		Location: e.Location, Organizer: organizerAddress(icalValue(ics, "ORGANIZER"))}
 }
 
 // describeMeeting adds to out what the meeting workflow knows about the meeting
@@ -142,7 +142,7 @@ func (s *Server) handleExportICS(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	raw, err := st.GetMessageRaw(fid, uid)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
@@ -156,15 +156,15 @@ func (s *Server) handleExportICS(w http.ResponseWriter, r *http.Request) {
 	name := icsFilename(ics)
 	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
 	w.Header().Set("Content-Disposition", "attachment; filename=\""+name+"\"")
-	_, _ = w.Write(ics)
+	writeBody(w, ics)
 }
 
 // icsFilename derives a safe download name from the invite's SUMMARY (falling
 // back to its UID, then a constant), always ending in ".ics".
 func icsFilename(ics []byte) string {
-	base, _ := icalProp(ics, "SUMMARY")
+	base := icalValue(ics, "SUMMARY")
 	if strings.TrimSpace(base) == "" {
-		base, _ = icalProp(ics, "UID")
+		base = icalValue(ics, "UID")
 	}
 	base = sanitizeICSName(base)
 	if base == "" {
@@ -177,16 +177,16 @@ func icsFilename(ics []byte) string {
 // drops path separators, quotes, and control characters, collapses whitespace to
 // underscores, and bounds the length.
 func sanitizeICSName(s string) string {
-	var b strings.Builder
+	var out []byte
 	for _, r := range strings.TrimSpace(s) {
 		if repl, keep := icsNameRune(r); keep {
-			b.WriteRune(repl)
+			out = utf8.AppendRune(out, repl)
 		}
-		if b.Len() >= 80 {
+		if len(out) >= 80 {
 			break
 		}
 	}
-	return strings.Trim(b.String(), "_.")
+	return strings.Trim(string(out), "_.")
 }
 
 // icsNameRune maps one rune to what the filename may carry: whitespace becomes
@@ -249,7 +249,7 @@ func (s *Server) handleRemoveFromCalendar(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	defer mb.st.Close()
+	defer closeStore(mb.st)
 	if !mb.writeAllowed(int64(mapi.PrivateFIDCalendar)) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
@@ -352,7 +352,7 @@ func (s *Server) handleRSVP(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer mb.st.Close()
+	defer closeStore(mb.st)
 	attendee, actor, allowed := s.rsvpIdentity(mb, reply.Send)
 	if !allowed {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
@@ -366,7 +366,13 @@ func (s *Server) handleRSVP(w http.ResponseWriter, r *http.Request) {
 	// This is the reader's own answer, so it also clears the request mail when the
 	// mailbox asked for that. The response sent to the organizer is kept in the
 	// caller's own Sent Items, like everything else sent from here.
-	c, _ := s.session(r)
+	c, signed := s.session(r)
+	if !signed {
+		// locateMailbox already required a session; one that expired between the
+		// two reads is refused rather than filing the copy under no caller.
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
 	reply.SentCopy = func(raw []byte) { s.fileCallerSentCopy(mb, c, raw, "meeting-response") }
 	if _, err := meeting.RespondOnBehalfWith(mb.st, s.accounts, s.spool, attendee, actor, info.ID, response, reply); err != nil {
 		rsvpFailure(w, err, mb.user)

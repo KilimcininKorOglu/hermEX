@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxtask"
@@ -48,11 +49,11 @@ type todayTask struct {
 // today's calendar appointments, and tasks due today (or overdue and not complete),
 // plus simple counts for the notes and contacts widgets.
 func (s *Server) handleGetToday(w http.ResponseWriter, r *http.Request) {
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	now := time.Now().UTC()
 	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	dayEnd := dayStart.Add(24 * time.Hour)
@@ -104,22 +105,12 @@ func inboxUnread(st *objectstore.Store, n int) (int, []todayMail) {
 // It reads PidLidAppointmentStartWhole/EndWhole/SubType directly (no per-item iCal
 // export), so the dashboard is cheap even for a large calendar.
 func appointmentsOn(st *objectstore.Store, dayStart, dayEnd time.Time) []todayItem {
-	ids, _ := st.GetNamedPropIDs(false, []mapi.PropertyName{mapi.NameAppointmentStartWhole, mapi.NameAppointmentEndWhole, mapi.NameAppointmentSubType})
-	var startTag, endTag, subTag mapi.PropTag
-	if len(ids) == 3 {
-		startTag = mapi.MakeTag(ids[0], mapi.PtSysTime)
-		endTag = mapi.MakeTag(ids[1], mapi.PtSysTime)
-		subTag = mapi.MakeTag(ids[2], mapi.PtBoolean)
-	}
-	// Let the store apply the day window. Its predicate is wider than the one
-	// below (it keeps a span that merely overlaps, and an object with no start),
-	// so the exact test still runs, but it runs over the day rather than over the
-	// whole calendar.
-	var objs []objectstore.FolderObject
-	if startTag != 0 && endTag != 0 {
-		objs, _ = st.ListFolderObjectsInWindow(mapi.PrivateFIDCalendar, startTag, endTag, dayStart, dayEnd)
-	} else {
-		objs, _ = st.ListFolderObjects(mapi.PrivateFIDCalendar)
+	// The dashboard is best-effort per widget: a read that fails is recorded and
+	// leaves this widget empty, the rest of the page still loads.
+	startTag, endTag, subTag, objs, err := dayCalendarObjects(st, dayStart, dayEnd)
+	if err != nil {
+		logError("today-appointments", err, logging.Fields{})
+		return []todayItem{}
 	}
 	out := make([]todayItem, 0, len(objs))
 	for _, o := range objs {
@@ -134,6 +125,29 @@ func appointmentsOn(st *objectstore.Store, dayStart, dayEnd time.Time) []todayIt
 		out = append(out, todayAppointment(o.ID, props, start, endTag, subTag))
 	}
 	return out
+}
+
+// dayCalendarObjects resolves the start, end and all-day tags and lists the
+// calendar objects the store places in the day. The store's predicate is wider
+// than the dashboard's (it keeps a span that merely overlaps, and an object with
+// no start), so the caller still tests each start; it just tests the day rather
+// than the whole calendar. A store that never stored the tags lists everything.
+func dayCalendarObjects(st *objectstore.Store, dayStart, dayEnd time.Time) (startTag, endTag, subTag mapi.PropTag, objs []objectstore.FolderObject, err error) {
+	ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{mapi.NameAppointmentStartWhole, mapi.NameAppointmentEndWhole, mapi.NameAppointmentSubType})
+	if err != nil {
+		return 0, 0, 0, nil, err
+	}
+	if len(ids) == 3 {
+		startTag = mapi.MakeTag(ids[0], mapi.PtSysTime)
+		endTag = mapi.MakeTag(ids[1], mapi.PtSysTime)
+		subTag = mapi.MakeTag(ids[2], mapi.PtBoolean)
+	}
+	if startTag != 0 && endTag != 0 {
+		objs, err = st.ListFolderObjectsInWindow(mapi.PrivateFIDCalendar, startTag, endTag, dayStart, dayEnd)
+	} else {
+		objs, err = st.ListFolderObjects(mapi.PrivateFIDCalendar)
+	}
+	return startTag, endTag, subTag, objs, err
 }
 
 // todayAppointment renders one appointment for the dashboard.
@@ -155,7 +169,11 @@ func todayAppointment(id int64, props mapi.PropertyValues, start time.Time, endT
 // tasksDueBy returns the incomplete tasks due on or before the cutoff (today's end,
 // so overdue tasks surface too), the to-do view the dashboard's TasksWidget shows.
 func tasksDueBy(st *objectstore.Store, cutoff time.Time) []todayTask {
-	objs, _ := st.ListFolderObjects(mapi.PrivateFIDTasks)
+	objs, err := st.ListFolderObjects(mapi.PrivateFIDTasks)
+	if err != nil {
+		logError("today-tasks", err, logging.Fields{})
+		return []todayTask{}
+	}
 	out := make([]todayTask, 0, len(objs))
 	for _, o := range objs {
 		msg, err := st.OpenMessage(o.ID)

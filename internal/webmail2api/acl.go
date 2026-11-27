@@ -99,7 +99,7 @@ func (s *Server) handleGetACL(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	fid, ok := aclFolderID(st, r.PathValue("mailbox"))
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown folder"})
@@ -144,7 +144,7 @@ func (s *Server) handleSetACL(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	fid, ok := aclFolderID(st, r.PathValue("mailbox"))
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown folder"})
@@ -219,7 +219,7 @@ func (s *Server) handleDeleteACL(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	fid, ok := aclFolderID(st, r.PathValue("mailbox"))
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown folder"})

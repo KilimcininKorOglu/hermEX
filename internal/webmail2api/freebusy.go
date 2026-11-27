@@ -124,7 +124,7 @@ func (s *Server) busyFor(c sessionClaims, email string, start, end time.Time) []
 	if !ok {
 		return []busyJSON{}
 	}
-	defer st.Close()
+	defer closeStore(st)
 
 	owner := strings.EqualFold(email, c.Email) || targetPath == c.Mailbox
 	if !owner {

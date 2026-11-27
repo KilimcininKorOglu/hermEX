@@ -238,7 +238,7 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer mb.st.Close()
+	defer closeStore(mb.st)
 	folder, uid, ok := parseMessageID(r.URL.Query().Get("id"))
 	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
@@ -274,8 +274,7 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 	addStoredProps(&d, st, fid, uid)
 	// A note links to its mail by the Message-ID, so the reader offers one only
 	// where handleCreateMailNote accepts it.
-	_, status, _ := mailLinkFor(st, fid, uid)
-	d.Annotatable = status == 0
+	d.Annotatable = mailLinkFor(st, fid, uid).status == 0
 	writeJSON(w, http.StatusOK, d)
 }
 
@@ -466,12 +465,12 @@ func (s *Server) locateMailbox(w http.ResponseWriter, r *http.Request, id string
 	// store has to be open before a custom folder can be resolved by name.
 	fid, ok := resolveFolder(mb.st, folder)
 	if !ok {
-		_ = mb.st.Close()
+		closeStore(mb.st)
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown folder"})
 		return nil, 0, 0, false
 	}
 	if !mb.allowed(fid, access) {
-		_ = mb.st.Close()
+		closeStore(mb.st)
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return nil, 0, 0, false
 	}
@@ -503,7 +502,7 @@ func (s *Server) handleMailFlag(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer mb.st.Close()
+	defer closeStore(mb.st)
 	m, err := mb.st.MessageByUID(fid, uid)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -547,7 +546,7 @@ func (s *Server) handleMailFollowup(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	m, err := st.MessageByUID(fid, uid)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -615,7 +614,7 @@ func (s *Server) handleMailMove(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer mb.st.Close()
+	defer closeStore(mb.st)
 	if !mb.writeAllowed(dst) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
@@ -645,7 +644,7 @@ func (s *Server) handleMailCopy(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer mb.st.Close()
+	defer closeStore(mb.st)
 	st := mb.st
 	dst, ok := resolveFolder(st, req.To)
 	if !ok {
@@ -688,7 +687,7 @@ func (s *Server) handleMailDelete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer mb.st.Close()
+	defer closeStore(mb.st)
 	st := mb.st
 	if !mb.writeAllowed(mapi.PrivateFIDDeletedItems) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})

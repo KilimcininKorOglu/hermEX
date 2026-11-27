@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -52,7 +53,7 @@ func (s *Server) visiblePublicFolders(email string, readSet map[int64]bool) []pu
 	if err != nil || !ok {
 		return folders
 	}
-	defer st.Close()
+	defer closeStore(st)
 	all, err := st.ListFolders()
 	if err != nil {
 		return folders
@@ -106,7 +107,7 @@ func (s *Server) handlePublicFolderMessages(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	// Read state is per-user (from the caller's own store). It replaces the shared
 	// public flag rather than OR-ing with it; that flag is never set on read.
 	readSet := s.publicReadSet(c.Mailbox, publicOwner(c.Email))
@@ -148,7 +149,7 @@ func (s *Server) handlePublicMessage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	raw, err := st.GetMessageRaw(fid, uint32(uid64))
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -177,7 +178,7 @@ func (s *Server) publicTarget(email string, fid int64) (*objectstore.Store, stri
 	}
 	all, err := st.ListFolders()
 	if err != nil {
-		_ = st.Close()
+		closeStore(st)
 		return nil, "", false
 	}
 	name := ""
@@ -188,12 +189,12 @@ func (s *Server) publicTarget(email string, fid int64) (*objectstore.Store, stri
 		}
 	}
 	if name == "" {
-		_ = st.Close()
+		closeStore(st)
 		return nil, "", false
 	}
 	rights, err := st.ResolvePermission(fid, strings.ToLower(email))
 	if err != nil || rights&mapi.FrightsReadAny == 0 {
-		_ = st.Close()
+		closeStore(st)
 		return nil, "", false
 	}
 	return st, name, true
@@ -209,7 +210,7 @@ func (s *Server) publicReadSet(mailbox, owner string) map[int64]bool {
 	if err != nil {
 		return map[int64]bool{}
 	}
-	defer own.Close()
+	defer closeStore(own)
 	set, err := own.PublicReadSet(owner)
 	if err != nil {
 		return map[int64]bool{}
@@ -223,10 +224,13 @@ func (s *Server) publicReadSet(mailbox, owner string) map[int64]bool {
 func (s *Server) markPublicRead(mailbox, owner string, messageID int64) {
 	own, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
+		logError("public-mark-read", err, logging.Fields{"id": messageID})
 		return
 	}
-	defer own.Close()
-	_ = own.MarkPublicMessageRead(owner, messageID)
+	defer closeStore(own)
+	if err := own.MarkPublicMessageRead(owner, messageID); err != nil {
+		logError("public-mark-read", err, logging.Fields{"id": messageID})
+	}
 }
 
 // publicOwner returns the caller's domain, the key the SPA shows beside the

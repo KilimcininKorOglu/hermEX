@@ -404,12 +404,30 @@ func decodeJSON(r *http.Request, v any) error {
 // openStore authenticates the request and opens the caller's mailbox store,
 // writing the error response and reporting false on failure. The caller closes
 // the returned store.
-func (s *Server) openStore(w http.ResponseWriter, r *http.Request) (*objectstore.Store, sessionClaims, bool) {
+func (s *Server) openStore(w http.ResponseWriter, r *http.Request) (*objectstore.Store, bool) {
+	c, ok := s.session(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return nil, false
+	}
+	return openSessionStore(w, c)
+}
+
+// openStoreSession is openStore for a handler that also needs the caller's
+// session claims.
+func (s *Server) openStoreSession(w http.ResponseWriter, r *http.Request) (*objectstore.Store, sessionClaims, bool) {
 	c, ok := s.session(r)
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return nil, sessionClaims{}, false
 	}
+	st, ok := openSessionStore(w, c)
+	return st, c, ok
+}
+
+// openSessionStore opens the mailbox of an authenticated session, answering the
+// client itself when it cannot.
+func openSessionStore(w http.ResponseWriter, c sessionClaims) (*objectstore.Store, bool) {
 	st, err := objectstore.OpenExisting(c.Mailbox)
 	if err != nil {
 		logError("open-store", err, logging.Fields{"user": c.Email})
@@ -418,9 +436,9 @@ func (s *Server) openStore(w http.ResponseWriter, r *http.Request) (*objectstore
 		// infrastructure fault (a corrupt database, a failing disk, a held lock),
 		// exactly the class that cannot be diagnosed from the status alone.
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
-		return nil, sessionClaims{}, false
+		return nil, false
 	}
-	return st, c, true
+	return st, true
 }
 
 // session reads and verifies the session cookie.
@@ -595,11 +613,13 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	}
 	hasAvatar, onboarded := false, false
 	if st, err := objectstore.OpenExisting(c.Mailbox); err == nil {
-		if photo, _ := st.UserPhoto(); photo != nil {
-			hasAvatar = true
+		photo, err := st.UserPhoto()
+		if err != nil {
+			logError("avatar-read", err, logging.Fields{})
 		}
+		hasAvatar = photo != nil
 		onboarded = onboardedFlag(st)
-		_ = st.Close()
+		closeStore(st)
 	}
 	// Timezone + locale come from the directory so the SPA restores the chosen
 	// zone on reload instead of clearing it; empty means follow-the-device.
@@ -669,7 +689,7 @@ func (s *Server) handleMailFolder(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer mb.st.Close()
+	defer closeStore(mb.st)
 	fid, ok := resolveFolder(mb.st, r.PathValue("folder"))
 	if !ok {
 		writeJSON(w, http.StatusOK, map[string]any{"emails": []mailJSON{}})
@@ -777,5 +797,9 @@ func (s *Server) handleStub(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	// The status is already sent, so an encode or write failure cannot be
+	// answered; it is recorded.
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		logError("response-encode", err, logging.Fields{"status": status})
+	}
 }

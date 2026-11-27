@@ -19,11 +19,11 @@ type meetingSettingsJSON struct {
 
 // handleGetMeetingSettings returns the caller's meeting handling settings.
 func (s *Server) handleGetMeetingSettings(w http.ResponseWriter, r *http.Request) {
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	cfg, err := st.GetMeetingConfig()
 	if err != nil {
 		logError("meeting-settings", err, logging.Fields{})
@@ -41,11 +41,11 @@ func (s *Server) handlePutMeetingSettings(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	st, c, ok := s.openStore(w, r)
+	st, c, ok := s.openStoreSession(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	// Only the flags the request names are written, so the operator's automatic
 	// acceptance, which the admin panel writes from another process, is kept.
 	var leave *bool

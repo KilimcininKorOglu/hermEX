@@ -252,19 +252,30 @@ func noteColorOf(st *objectstore.Store, msg *oxcmail.Message) int {
 // ---- Tasks ----
 
 func (s *Server) handleGetTasks(w http.ResponseWriter, r *http.Request) {
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
-	objs, _ := st.ListFolderObjects(mapi.PrivateFIDTasks)
+	defer closeStore(st)
+	objs, err := st.ListFolderObjects(mapi.PrivateFIDTasks)
+	if err != nil {
+		logError("list-tasks", err, logging.Fields{})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "tasks unavailable"})
+		return
+	}
 	tasks := make([]taskJSON, 0, len(objs))
 	for _, o := range objs {
 		msg, err := st.OpenMessage(o.ID)
 		if err != nil {
 			continue
 		}
-		t, _ := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
+		t, err := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
+		if err != nil {
+			// One task this server cannot read must not hide the others; it is
+			// recorded and left out.
+			logError("read-task", err, logging.Fields{"id": o.ID})
+			continue
+		}
 		j := taskToJSON(t)
 		j.UID = strconv.FormatInt(o.ID, 10)
 		tasks = append(tasks, j)
@@ -278,11 +289,11 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	if refuseOverQuota(w, st) {
 		return
 	}
@@ -306,11 +317,11 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	if !objectInKind(w, st, id, inFolder(mapi.PrivateFIDTasks)) {
 		return
 	}
@@ -336,12 +347,17 @@ func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 // ---- Notes ----
 
 func (s *Server) handleGetNotes(w http.ResponseWriter, r *http.Request) {
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
-	objs, _ := st.ListFolderObjects(mapi.PrivateFIDNotes)
+	defer closeStore(st)
+	objs, err := st.ListFolderObjects(mapi.PrivateFIDNotes)
+	if err != nil {
+		logError("list-notes", err, logging.Fields{})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "notes unavailable"})
+		return
+	}
 	notes := make([]noteJSON, 0, len(objs))
 	for _, o := range objs {
 		msg, err := st.OpenMessage(o.ID)
@@ -365,11 +381,11 @@ func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	if refuseOverQuota(w, st) {
 		return
 	}
@@ -404,11 +420,11 @@ func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || !isNote(st, id) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "note not found"})
@@ -464,11 +480,11 @@ func (s *Server) deleteObjectByPath(w http.ResponseWriter, r *http.Request, seg 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	if !objectInKind(w, st, id, inFolder(fid)) {
 		return
 	}
@@ -499,7 +515,7 @@ func (s *Server) handleGetMailNotes(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer mb.st.Close()
+	defer closeStore(mb.st)
 	st := mb.st
 	// The notes live in the Notes folder of the same mailbox, which a shared
 	// mailbox gates on its own.
@@ -519,20 +535,34 @@ func (s *Server) handleGetMailNotes(w http.ResponseWriter, r *http.Request) {
 	}
 	notes := make([]noteJSON, 0)
 	if link := propString(msg, mapi.PrInternetMessageID); link != "" {
-		notes = notesLinkedTo(st, link)
+		notes, err = notesLinkedTo(st, link)
+		if err != nil {
+			logError("list-linked-notes", err, logging.Fields{})
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "notes unavailable"})
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"notes": notes})
 }
 
 // notesLinkedTo collects the mailbox's notes annotating the given Message-ID. A
 // store that has never stored such a note resolves no tag and matches nothing.
-func notesLinkedTo(st *objectstore.Store, messageID string) []noteJSON {
+//
+// A tag or folder read that fails is an error, so a store failure is never
+// shown as "no notes on this message".
+func notesLinkedTo(st *objectstore.Store, messageID string) ([]noteJSON, error) {
 	out := make([]noteJSON, 0)
 	tag, err := noteLinkTag(st, false)
-	if err != nil || tag == 0 {
-		return out
+	if err != nil {
+		return nil, err
 	}
-	objs, _ := st.ListFolderObjects(mapi.PrivateFIDNotes)
+	if tag == 0 {
+		return out, nil
+	}
+	objs, err := st.ListFolderObjects(mapi.PrivateFIDNotes)
+	if err != nil {
+		return nil, err
+	}
 	for _, o := range objs {
 		msg, err := st.OpenMessage(o.ID)
 		if err != nil {
@@ -549,27 +579,36 @@ func notesLinkedTo(st *objectstore.Store, messageID string) []noteJSON {
 			LinkedMessageID: messageID,
 		})
 	}
-	return out
+	return out, nil
 }
 
 // mailLinkFor reads the Message-ID of one mail server-side. A non-zero status is
 // the failure to report, with the reason to send back; the browser never handles
 // the Message-ID and so cannot link a note to a mail it cannot open.
-func mailLinkFor(st *objectstore.Store, fid int64, uid uint32) (link string, status int, reason string) {
+func mailLinkFor(st *objectstore.Store, fid int64, uid uint32) mailLink {
 	info, err := st.MessageByUID(fid, uid)
 	if err != nil {
-		return "", http.StatusNotFound, "not found"
+		return mailLink{status: http.StatusNotFound, reason: "not found"}
 	}
 	msg, err := st.OpenMessage(info.ID)
 	if err != nil {
-		return "", http.StatusNotFound, "not found"
+		return mailLink{status: http.StatusNotFound, reason: "not found"}
 	}
-	link = propString(msg, mapi.PrInternetMessageID)
+	link := propString(msg, mapi.PrInternetMessageID)
 	if link == "" {
 		// A draft or an item this server composed, not received mail.
-		return "", http.StatusBadRequest, "this message cannot be annotated"
+		return mailLink{status: http.StatusBadRequest, reason: "this message cannot be annotated"}
 	}
-	return link, 0, ""
+	return mailLink{link: link}
+}
+
+// mailLink is what mailLinkFor resolves: the Message-ID a note links to, or the
+// status and reason to answer when the mail cannot be annotated (status 0 when
+// it can).
+type mailLink struct {
+	link   string
+	status int
+	reason string
 }
 
 // noteProps builds the sticky note that carries the link back to the mail.
@@ -608,22 +647,22 @@ func (s *Server) handleCreateMailNote(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer mb.st.Close()
+	defer closeStore(mb.st)
 	st := mb.st
 	if !mb.writeAllowed(mapi.PrivateFIDNotes) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
-	link, status, reason := mailLinkFor(st, fid, uid)
-	if status != 0 {
-		writeJSON(w, status, map[string]string{"error": reason})
+	ml := mailLinkFor(st, fid, uid)
+	if ml.status != 0 {
+		writeJSON(w, ml.status, map[string]string{"error": ml.reason})
 		return
 	}
 	if refuseOverQuota(w, st) {
 		return
 	}
 
-	props := noteProps(st, in.Title, in.Body, in.Color, link)
+	props := noteProps(st, in.Title, in.Body, in.Color, ml.link)
 	id, err := st.CreateMessage(mapi.PrivateFIDNotes, &oxcmail.Message{Props: props})
 	if err != nil {
 		logError("create-mail-note", err, logging.Fields{})
@@ -632,6 +671,6 @@ func (s *Server) handleCreateMailNote(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, noteJSON{
 		ID: strconv.FormatInt(id, 10), Title: in.Title, Body: in.Body,
-		Color: in.Color, LinkedMessageID: link,
+		Color: in.Color, LinkedMessageID: ml.link,
 	})
 }

@@ -62,7 +62,7 @@ func (s *Server) handleQuarantineRelease(w http.ResponseWriter, r *http.Request)
 			"Your mailbox is temporarily unavailable. Please try again later.", "")
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	if err := releaseFromJunk(st, claims.UID); err != nil {
 		if errors.Is(err, objectstore.ErrNotFound) {
 			writeQuarantinePage(w, http.StatusOK, "Already handled",
@@ -101,7 +101,7 @@ func writeQuarantinePage(w http.ResponseWriter, status int, heading, message, co
 		form = `<form method="post" action="/quarantine/release"><input type="hidden" name="t" value="` +
 			html.EscapeString(confirmToken) + `"><button type="submit">Release to inbox</button></form>`
 	}
-	_, _ = fmt.Fprintf(w, `<!doctype html><html lang="en"><head><meta charset="utf-8">`+
+	writeBody(w, fmt.Appendf(nil, `<!doctype html><html lang="en"><head><meta charset="utf-8">`+
 		`<meta name="viewport" content="width=device-width,initial-scale=1"><title>hermEX</title>`+
 		`<style>body{font-family:system-ui,sans-serif;background:#f4f4f5;margin:0;display:flex;`+
 		`min-height:100vh;align-items:center;justify-content:center}.card{background:#fff;border-radius:12px;`+
@@ -110,5 +110,5 @@ func writeQuarantinePage(w http.ResponseWriter, status int, heading, message, co
 		`button{margin-top:1rem;background:#4f46e5;color:#fff;border:0;border-radius:8px;padding:.6rem 1.2rem;`+
 		`font-size:1rem;cursor:pointer}</style></head><body><div class="card"><h1>hermEX</h1>`+
 		`<h2>%s</h2><p>%s</p>%s</div></body></html>`,
-		html.EscapeString(heading), html.EscapeString(message), form)
+		html.EscapeString(heading), html.EscapeString(message), form))
 }

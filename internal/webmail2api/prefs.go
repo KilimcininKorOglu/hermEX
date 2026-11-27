@@ -68,7 +68,17 @@ func (s *Server) handlePutPrefs(w http.ResponseWriter, r *http.Request) {
 	case !found:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such user"})
 	default:
-		p, _ := s.callerPrefs(c.Email)
-		writeJSON(w, http.StatusOK, prefsFields(p))
+		s.answerStoredPrefs(w, c.Email)
 	}
+}
+
+// answerStoredPrefs answers a saved update with the stored record, so a read-back
+// that fails is not answered with empty preferences the client would then show.
+func (s *Server) answerStoredPrefs(w http.ResponseWriter, email string) {
+	p, read := s.callerPrefs(email)
+	if !read {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read the preferences back"})
+		return
+	}
+	writeJSON(w, http.StatusOK, prefsFields(p))
 }

@@ -90,11 +90,11 @@ func vacationToOOF(v vacationJSON) objectstore.OOFSettings {
 // the empty settings: the form would show a blank reply, and saving it would
 // overwrite the one that is stored.
 func (s *Server) handleGetVacation(w http.ResponseWriter, r *http.Request) {
-	st, c, ok := s.openStore(w, r)
+	st, c, ok := s.openStoreSession(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	o, err := st.GetOOFSettings()
 	if err != nil {
 		logError("vacation-read", err, logging.Fields{"user": c.Email})
@@ -130,11 +130,11 @@ func (s *Server) handlePutVacation(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	st, c, ok := s.openStore(w, r)
+	st, c, ok := s.openStoreSession(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	if err := st.SetOOFSettings(vacationToOOF(v)); errors.Is(err, objectstore.ErrInvalidOOFWindow) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the end date must follow the start date"})
 		return
@@ -152,11 +152,11 @@ func (s *Server) handlePutVacation(w http.ResponseWriter, r *http.Request) {
 // handleDeleteVacation turns the auto-reply off. It answers ok only when the
 // cleared settings were stored, so a failure never reads as replies stopped.
 func (s *Server) handleDeleteVacation(w http.ResponseWriter, r *http.Request) {
-	st, c, ok := s.openStore(w, r)
+	st, c, ok := s.openStoreSession(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	if err := st.SetOOFSettings(objectstore.OOFSettings{}); err != nil {
 		logError("vacation-delete", err, logging.Fields{"user": c.Email})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save"})

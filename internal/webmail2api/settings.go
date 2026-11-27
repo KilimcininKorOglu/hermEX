@@ -91,6 +91,51 @@ type settingsFailure struct {
 	err    error
 }
 
+// settingsUnreadable answers a callback whose stored value does not decode: what
+// is stored is unknown, so a writer must not replace it with a list built from
+// nothing.
+func settingsUnreadable(err error) settingsFailure {
+	return settingsFailure{status: http.StatusInternalServerError, msg: "settings unavailable", event: "settings.read", err: err}
+}
+
+// settingsUnsaved answers a callback whose new value could not be encoded.
+func settingsUnsaved(err error) settingsFailure {
+	return settingsFailure{status: http.StatusInternalServerError, msg: "could not save settings", event: "settings.write", err: err}
+}
+
+// decodeSetting decodes the value stored under key into v. A key never stored
+// leaves v as it is; a stored value that does not decode is an error, so the
+// caller decides whether a default may stand in for it.
+func decodeSetting(m map[string]json.RawMessage, key string, v any) error {
+	raw, ok := m[key]
+	if !ok {
+		return nil
+	}
+	if err := json.Unmarshal(raw, v); err != nil {
+		return fmt.Errorf("stored %s: %w", key, err)
+	}
+	return nil
+}
+
+// readSetting is decodeSetting for a value that is only shown: an undecodable
+// one is recorded and v keeps its default, since the next save replaces the
+// whole value anyway.
+func readSetting(m map[string]json.RawMessage, key string, v any) {
+	if err := decodeSetting(m, key, v); err != nil {
+		logError("settings-decode", err, logging.Fields{"key": key})
+	}
+}
+
+// putSetting stores v under key.
+func putSetting(m map[string]json.RawMessage, key string, v any) error {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("encode %s: %w", key, err)
+	}
+	m[key] = raw
+	return nil
+}
+
 // withSettings opens the caller's store and runs fn against its shared settings
 // map, persisting it when fn returns true.
 func (s *Server) withSettings(w http.ResponseWriter, r *http.Request, fn func(st *objectstore.Store, m map[string]json.RawMessage) (any, bool)) {
@@ -104,7 +149,7 @@ func (s *Server) withSettings(w http.ResponseWriter, r *http.Request, fn func(st
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	// Serialize the whole read-modify-write per mailbox, so a concurrent PUT on a
 	// different settings key cannot read the same starting blob and overwrite this
 	// change (or have this one overwrite it).
@@ -139,9 +184,7 @@ func (s *Server) withSettings(w http.ResponseWriter, r *http.Request, fn func(st
 func (s *Server) handleGetPreferences(w http.ResponseWriter, r *http.Request) {
 	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
 		prefs := map[string]bool{}
-		if raw, ok := m["webmail2Preferences"]; ok {
-			_ = json.Unmarshal(raw, &prefs)
-		}
+		readSetting(m, "webmail2Preferences", &prefs)
 		return map[string]any{"preferences": prefs}, false
 	})
 }
@@ -153,8 +196,9 @@ func (s *Server) handlePutPreferences(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		raw, _ := json.Marshal(prefs)
-		m["webmail2Preferences"] = raw
+		if err := putSetting(m, "webmail2Preferences", prefs); err != nil {
+			return settingsUnsaved(err), false
+		}
 		return map[string]any{"preferences": prefs}, true
 	})
 }
@@ -219,9 +263,13 @@ func defaultMailListColumns() mailListColumnsJSON {
 // first-then-last name order when none are stored.
 func readAppearanceSettings(m map[string]json.RawMessage) appearanceSettingsJSON {
 	a := appearanceSettingsJSON{Theme: "system", Language: "system", DateFormat: "iso", TimeFormat: "24", NameDisplay: "firstlast", ShortcutMode: "extended", IconSet: "breeze", FilePreview: true, PdfZoom: "page-width", InboxNavMode: "pagination", InboxPageSize: defaultInboxPageSize}
-	if raw, ok := m["webmail2AppearanceSettings"]; ok {
-		_ = json.Unmarshal(raw, &a)
-	}
+	readSetting(m, "webmail2AppearanceSettings", &a)
+	return clampAppearance(a)
+}
+
+// clampAppearance narrows every appearance field to a value the SPA renders, so
+// a stored blob and a fresh PUT are narrowed the same way.
+func clampAppearance(a appearanceSettingsJSON) appearanceSettingsJSON {
 	// Every stored value is client-supplied, so each is narrowed back to the set
 	// the SPA renders; anything else takes the default rather than reaching the UI.
 	a.Theme = oneOf(a.Theme, "system", "light", "dark", "system")
@@ -314,9 +362,10 @@ func (s *Server) handlePutAppearanceSettings(w http.ResponseWriter, r *http.Requ
 		if in.MailListColumns != nil {
 			a.MailListColumns = in.MailListColumns
 		}
-		clamped := readAppearanceSettings(map[string]json.RawMessage{"webmail2AppearanceSettings": mustJSON(a)})
-		raw, _ := json.Marshal(clamped)
-		m["webmail2AppearanceSettings"] = raw
+		clamped := clampAppearance(a)
+		if err := putSetting(m, "webmail2AppearanceSettings", clamped); err != nil {
+			return settingsUnsaved(err), false
+		}
 		// The stored blob holds the user's settings only; the operator's preview cap
 		// rides back on the response so a save does not leave the client without it.
 		return appearanceResponseJSON{appearanceSettingsJSON: clamped, PreviewMaxBytes: maxPreviewBytes()}, true
@@ -331,7 +380,7 @@ func (s *Server) setOnboardedFlag(mailbox string, done bool) error {
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer closeStore(st)
 	// The same per-mailbox lock as withSettings, so a concurrent settings PUT
 	// cannot read the blob before this write and then save over it.
 	unlock := s.lockSettings(mailbox)
@@ -342,15 +391,6 @@ func (s *Server) setOnboardedFlag(mailbox string, done bool) error {
 	}
 	m["onboarded"] = json.RawMessage(strconv.FormatBool(done))
 	return saveSharedSettings(st, m)
-}
-
-// mustJSON marshals v, returning nil on error (the input is a controlled struct).
-func mustJSON(v any) json.RawMessage {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return nil
-	}
-	return b
 }
 
 // handleResetSettings drops every webmail2-owned settings key (appearance,
@@ -389,9 +429,7 @@ type calendarSettingsJSON struct {
 // (showing all hours) when none are stored yet.
 func readCalendarSettings(m map[string]json.RawMessage) calendarSettingsJSON {
 	cs := calendarSettingsJSON{FirstDayOfWeek: 1, Resolution: 30, WorkDayStart: 9, WorkDayEnd: 18, ShowNonWorkingHours: true, WorkDays: []int{1, 2, 3, 4, 5}, DefaultDuration: 30, DefaultReminder: 15}
-	if raw, ok := m["webmail2CalendarSettings"]; ok {
-		_ = json.Unmarshal(raw, &cs)
-	}
+	readSetting(m, "webmail2CalendarSettings", &cs)
 	clampCalendarSettings(&cs)
 	return cs
 }
@@ -454,8 +492,9 @@ func (s *Server) handlePutCalendarSettings(w http.ResponseWriter, r *http.Reques
 	}
 	clampCalendarSettings(&in)
 	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		raw, _ := json.Marshal(in)
-		m["webmail2CalendarSettings"] = raw
+		if err := putSetting(m, "webmail2CalendarSettings", in); err != nil {
+			return settingsUnsaved(err), false
+		}
 		return in, true
 	})
 }
@@ -480,9 +519,7 @@ func (s *Server) handleGetCategories(w http.ResponseWriter, r *http.Request) {
 			// stream this server cannot parse is Outlook's, and the user still has
 			// categories on their messages either way.
 			cats := []categoryJSON{}
-			if raw, hasRaw := m["categories"]; hasRaw {
-				_ = json.Unmarshal(raw, &cats)
-			}
+			readSetting(m, "categories", &cats)
 			return map[string]any{"categories": cats}, false
 		}
 		if !ok {
@@ -507,18 +544,21 @@ func (s *Server) handlePutCategories(w http.ResponseWriter, r *http.Request) {
 	s.withSettings(w, r, func(st *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
 		// Fold the edit onto the stored list so each surviving category keeps the
 		// guid, shortcut and usage counts Outlook owns.
+		// A list that cannot be read is not replaced: merging onto nothing would
+		// drop the guids and categories Outlook stored there.
 		stored, _, err := readCategoryList(st)
 		if err != nil {
-			logError("read-category-list", err, logging.Fields{})
+			return settingsFailure{status: http.StatusInternalServerError, msg: "categories unavailable", event: "categories.read", err: err}, false
 		}
 		merged := mergeCategories(stored, body.Categories)
 		if err := writeCategoryList(st, merged); err != nil {
-			logError("write-category-list", err, logging.Fields{})
+			return settingsFailure{status: http.StatusInternalServerError, msg: "could not save categories", event: "categories.write", err: err}, false
 		}
 		// The webmail-private copy is kept in step so a client reading the settings
 		// blob directly does not see a stale list.
-		raw, _ := json.Marshal(body.Categories)
-		m["categories"] = raw
+		if err := putSetting(m, "categories", body.Categories); err != nil {
+			return settingsUnsaved(err), false
+		}
 		return map[string]any{"categories": categoriesFromList(merged)}, true
 	})
 }
@@ -529,9 +569,10 @@ func (s *Server) handlePutCategories(w http.ResponseWriter, r *http.Request) {
 // safeSenders reads the shared safe-sender allowlist from the settings blob.
 func safeSenders(st *objectstore.Store) []string {
 	list := []string{}
-	stored, _ := sharedSettings(st)
-	if raw, ok := stored["safeSenders"]; ok {
-		_ = json.Unmarshal(raw, &list)
+	// An unreadable blob (already recorded by sharedSettings) trusts nobody, so
+	// remote content stays blocked.
+	if stored, loaded := sharedSettings(st); loaded {
+		readSetting(stored, "safeSenders", &list)
 	}
 	return list
 }
@@ -581,9 +622,7 @@ func isSafeSender(list []string, addr string) bool {
 func (s *Server) handleGetSafeSenders(w http.ResponseWriter, r *http.Request) {
 	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
 		list := []string{}
-		if raw, ok := m["safeSenders"]; ok {
-			_ = json.Unmarshal(raw, &list)
-		}
+		readSetting(m, "safeSenders", &list)
 		return map[string]any{"safeSenders": list}, false
 	})
 }
@@ -598,8 +637,9 @@ func (s *Server) handlePutSafeSenders(w http.ResponseWriter, r *http.Request) {
 	}
 	list := normalizeSafeSenders(body.SafeSenders)
 	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		raw, _ := json.Marshal(list)
-		m["safeSenders"] = raw
+		if err := putSetting(m, "safeSenders", list); err != nil {
+			return settingsUnsaved(err), false
+		}
 		return map[string]any{"safeSenders": list}, true
 	})
 }
@@ -621,17 +661,20 @@ type signatureJSON struct {
 	Ord    int    `json:"ord"`
 }
 
-func readSigs(m map[string]json.RawMessage) []webmailSig {
+// readSigs decodes the stored signatures. A list that does not decode is an
+// error, so an edit never saves one signature over the ones it could not read.
+func readSigs(m map[string]json.RawMessage) ([]webmailSig, error) {
 	var sigs []webmailSig
-	if raw, ok := m["signatures"]; ok {
-		_ = json.Unmarshal(raw, &sigs)
-	}
-	return sigs
+	err := decodeSetting(m, "signatures", &sigs)
+	return sigs, err
 }
 
 func (s *Server) handleGetSignatures(w http.ResponseWriter, r *http.Request) {
 	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		sigs := readSigs(m)
+		sigs, err := readSigs(m)
+		if err != nil {
+			return settingsUnreadable(err), false
+		}
 		out := make([]signatureJSON, 0, len(sigs))
 		for i, sig := range sigs {
 			out = append(out, signatureJSON{Name: sig.Name, Body: sig.HTML, IsHTML: sig.IsHTML, Ord: i})
@@ -642,7 +685,10 @@ func (s *Server) handleGetSignatures(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetSignature(w http.ResponseWriter, r *http.Request) {
 	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		sigs := readSigs(m)
+		sigs, err := readSigs(m)
+		if err != nil {
+			return settingsUnreadable(err), false
+		}
 		body := ""
 		if len(sigs) > 0 {
 			body = sigs[0].HTML
@@ -658,7 +704,10 @@ func (s *Server) handlePostSignature(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		sigs := readSigs(m)
+		sigs, err := readSigs(m)
+		if err != nil {
+			return settingsUnreadable(err), false
+		}
 		updated := false
 		for i := range sigs {
 			if sigs[i].Name == in.Name {
@@ -670,8 +719,9 @@ func (s *Server) handlePostSignature(w http.ResponseWriter, r *http.Request) {
 		if !updated {
 			sigs = append(sigs, webmailSig{ID: randomHex()[:8], Name: in.Name, HTML: in.Body, IsHTML: in.IsHTML})
 		}
-		raw, _ := json.Marshal(sigs)
-		m["signatures"] = raw
+		if err := putSetting(m, "signatures", sigs); err != nil {
+			return settingsUnsaved(err), false
+		}
 		return map[string]any{"signature": in}, true
 	})
 }
@@ -679,15 +729,19 @@ func (s *Server) handlePostSignature(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteSignature(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		sigs := readSigs(m)
+		sigs, err := readSigs(m)
+		if err != nil {
+			return settingsUnreadable(err), false
+		}
 		kept := sigs[:0]
 		for _, sig := range sigs {
 			if sig.Name != name {
 				kept = append(kept, sig)
 			}
 		}
-		raw, _ := json.Marshal(kept)
-		m["signatures"] = raw
+		if err := putSetting(m, "signatures", kept); err != nil {
+			return settingsUnsaved(err), false
+		}
 		return map[string]bool{"ok": true}, true
 	})
 }
@@ -701,17 +755,21 @@ type templateJSON struct {
 	IsHTML  bool   `json:"is_html"`
 }
 
-func readTemplates(m map[string]json.RawMessage) []templateJSON {
+// readTemplates decodes the stored templates; like readSigs, a list that does not
+// decode is an error rather than an empty list an edit would save over.
+func readTemplates(m map[string]json.RawMessage) ([]templateJSON, error) {
 	var t []templateJSON
-	if raw, ok := m["webmail2Templates"]; ok {
-		_ = json.Unmarshal(raw, &t)
-	}
-	return t
+	err := decodeSetting(m, "webmail2Templates", &t)
+	return t, err
 }
 
 func (s *Server) handleGetTemplates(w http.ResponseWriter, r *http.Request) {
 	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		return map[string]any{"templates": readTemplates(m)}, false
+		ts, err := readTemplates(m)
+		if err != nil {
+			return settingsUnreadable(err), false
+		}
+		return map[string]any{"templates": ts}, false
 	})
 }
 
@@ -722,7 +780,10 @@ func (s *Server) handlePostTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		ts := readTemplates(m)
+		ts, err := readTemplates(m)
+		if err != nil {
+			return settingsUnreadable(err), false
+		}
 		updated := false
 		for i := range ts {
 			if ts[i].Name == in.Name {
@@ -734,8 +795,9 @@ func (s *Server) handlePostTemplate(w http.ResponseWriter, r *http.Request) {
 		if !updated {
 			ts = append(ts, in)
 		}
-		raw, _ := json.Marshal(ts)
-		m["webmail2Templates"] = raw
+		if err := putSetting(m, "webmail2Templates", ts); err != nil {
+			return settingsUnsaved(err), false
+		}
 		return map[string]any{"template": in}, true
 	})
 }
@@ -743,15 +805,19 @@ func (s *Server) handlePostTemplate(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		ts := readTemplates(m)
+		ts, err := readTemplates(m)
+		if err != nil {
+			return settingsUnreadable(err), false
+		}
 		kept := ts[:0]
 		for _, t := range ts {
 			if t.Name != name {
 				kept = append(kept, t)
 			}
 		}
-		raw, _ := json.Marshal(kept)
-		m["webmail2Templates"] = raw
+		if err := putSetting(m, "webmail2Templates", kept); err != nil {
+			return settingsUnsaved(err), false
+		}
 		return map[string]bool{"ok": true}, true
 	})
 }
@@ -804,14 +870,15 @@ func (s *Server) callerZone(r *http.Request) *time.Location {
 // The flag lives in the shared webmail settings blob; an absent flag means a
 // fresh account that has not onboarded yet, so the onboarding gate still fires.
 func onboardedFlag(st *objectstore.Store) bool {
-	m, _ := sharedSettings(st)
-	if raw, ok := m["onboarded"]; ok {
-		var b bool
-		if json.Unmarshal(raw, &b) == nil {
-			return b
-		}
+	// An unreadable blob (recorded by sharedSettings) reads as not onboarded,
+	// which shows onboarding again rather than skipping it.
+	m, loaded := sharedSettings(st)
+	if !loaded {
+		return false
 	}
-	return false
+	var done bool
+	readSetting(m, "onboarded", &done)
+	return done
 }
 
 func (s *Server) handleGetProfile(w http.ResponseWriter, r *http.Request) {
@@ -842,7 +909,7 @@ func (s *Server) handleGetProfile(w http.ResponseWriter, r *http.Request) {
 			prof["quota_used"] = used
 		}
 		prof["onboarded"] = onboardedFlag(st)
-		_ = st.Close()
+		closeStore(st)
 	}
 	writeJSON(w, http.StatusOK, prof)
 }
@@ -976,11 +1043,11 @@ func (s *Server) writeUserLocale(email string, timezone, locale *string) error {
 // ---- Mailboxes ----
 
 func (s *Server) handleGetMailboxes(w http.ResponseWriter, r *http.Request) {
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	// The SPA lists these as the user's custom folders in the sidebar, so return
 	// only user-created folders (id at/above the unassigned start); the built-in
 	// folders are rendered from the SPA's own fixed navigation.
@@ -1052,7 +1119,7 @@ func (s *Server) handleGetSharedMailboxes(w http.ResponseWriter, r *http.Request
 						"sendGrant":   s.sendGrant(c.Email, b.Address),
 					})
 				}
-				_ = st.Close()
+				closeStore(st)
 			}
 		}
 	}
@@ -1091,7 +1158,7 @@ func (s *Server) handleGetSharedAsOwner(w http.ResponseWriter, r *http.Request) 
 				if owner, err := st.IsStoreOwner(c.Email); err == nil && owner {
 					owned = append(owned, b.Address)
 				}
-				_ = st.Close()
+				closeStore(st)
 			}
 		}
 	}

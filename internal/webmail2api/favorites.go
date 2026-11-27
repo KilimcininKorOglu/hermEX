@@ -18,33 +18,46 @@ const favoritesKey = "webmail2FavoriteFolders"
 // by id. It is read once, converted into favoritesKey and removed.
 const legacyFavoritesKey = "webmail2Favorites"
 
+// favoritesLoad is the pinned folder slugs and whether loading them rewrote m.
+type favoritesLoad struct {
+	slugs    []string
+	migrated bool
+}
+
 // loadFavorites returns the pinned folder slugs, converting a legacy list of
 // display names into slugs (and reporting that m changed) the first time it is
 // read. A name converts to the folder it reached before, the folder the user
-// pinned; a name that no longer reaches a folder is dropped.
-func loadFavorites(st *objectstore.Store, m map[string]json.RawMessage) ([]string, bool) {
+// pinned; a name that no longer reaches a folder is dropped. A stored list that
+// does not decode is an error: converting or toggling it would replace the pins
+// it holds with an empty list.
+func loadFavorites(st *objectstore.Store, m map[string]json.RawMessage) (favoritesLoad, error) {
 	fav := []string{}
-	if raw, ok := m[favoritesKey]; ok {
-		_ = json.Unmarshal(raw, &fav)
+	if _, ok := m[favoritesKey]; ok {
+		if err := decodeSetting(m, favoritesKey, &fav); err != nil {
+			return favoritesLoad{}, err
+		}
 		if fav == nil {
 			fav = []string{}
 		}
-		return fav, false
-	}
-	raw, ok := m[legacyFavoritesKey]
-	if !ok {
-		return fav, false
+		return favoritesLoad{slugs: fav}, nil
 	}
 	var names []string
-	_ = json.Unmarshal(raw, &names)
+	if err := decodeSetting(m, legacyFavoritesKey, &names); err != nil {
+		return favoritesLoad{}, err
+	}
+	if names == nil {
+		return favoritesLoad{slugs: fav}, nil
+	}
 	for _, name := range names {
 		if fid, found := legacyFolder(st, name); found && !slices.Contains(fav, slugOf(fid)) {
 			fav = append(fav, slugOf(fid))
 		}
 	}
-	writeFavorites(m, fav)
+	if err := putSetting(m, favoritesKey, fav); err != nil {
+		return favoritesLoad{}, err
+	}
 	delete(m, legacyFavoritesKey)
-	return fav, true
+	return favoritesLoad{slugs: fav, migrated: true}, nil
 }
 
 // legacyFolder resolves a folder reference stored before folders were addressed
@@ -56,17 +69,15 @@ func legacyFolder(st *objectstore.Store, name string) (int64, bool) {
 	return folderByName(st, name)
 }
 
-func writeFavorites(m map[string]json.RawMessage, fav []string) {
-	raw, _ := json.Marshal(fav)
-	m[favoritesKey] = raw
-}
-
 // handleGetFavorites returns the user's pinned favourite folders, the slugs of
 // the folders the sidebar shows in a "Favorites" section above the folder list.
 func (s *Server) handleGetFavorites(w http.ResponseWriter, r *http.Request) {
 	s.withSettings(w, r, func(st *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		fav, migrated := loadFavorites(st, m)
-		return map[string]any{"favorites": fav}, migrated
+		fl, err := loadFavorites(st, m)
+		if err != nil {
+			return settingsUnreadable(err), false
+		}
+		return map[string]any{"favorites": fl.slugs}, fl.migrated
 	})
 }
 
@@ -86,14 +97,20 @@ func (s *Server) handleToggleFavorite(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return settingsFailure{status: http.StatusNotFound, msg: "folder not found"}, false
 		}
-		fav, _ := loadFavorites(st, m)
+		fl, err := loadFavorites(st, m)
+		if err != nil {
+			return settingsUnreadable(err), false
+		}
+		fav := fl.slugs
 		slug := slugOf(fid)
 		if i := slices.Index(fav, slug); i >= 0 {
 			fav = slices.Delete(fav, i, i+1)
 		} else {
 			fav = append(fav, slug)
 		}
-		writeFavorites(m, fav)
+		if err := putSetting(m, favoritesKey, fav); err != nil {
+			return settingsUnsaved(err), false
+		}
 		return map[string]any{"favorites": fav}, true
 	})
 }
@@ -114,15 +131,23 @@ func (s *Server) unpinFolder(st *objectstore.Store, mailbox string, fid int64) {
 		// pin.
 		return
 	}
-	fav, migrated := loadFavorites(st, m)
+	fl, err := loadFavorites(st, m)
+	if err != nil {
+		st.LogSwallowedError("favorites.unpin", err)
+		return
+	}
+	fav := fl.slugs
 	i := slices.Index(fav, slugOf(fid))
-	if i < 0 && !migrated {
+	if i < 0 && !fl.migrated {
 		return
 	}
 	if i >= 0 {
 		fav = slices.Delete(fav, i, i+1)
 	}
-	writeFavorites(m, fav)
+	if err := putSetting(m, favoritesKey, fav); err != nil {
+		st.LogSwallowedError("favorites.unpin", err)
+		return
+	}
 	if err := saveSharedSettings(st, m); err != nil {
 		st.LogSwallowedError("favorites.unpin", err)
 	}

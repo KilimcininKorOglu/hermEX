@@ -73,7 +73,11 @@ func (s *Server) sessionActive(c sessionClaims) bool {
 		return true
 	}
 	if active {
-		_ = store.TouchWebmailSession(c.Jti, now)
+		// The session is active either way; a failed touch only ages its idle
+		// clock, so it is recorded rather than refusing the request.
+		if err := store.TouchWebmailSession(c.Jti, now); err != nil {
+			logError("session-touch", err, logging.Fields{})
+		}
 	}
 	return active
 }

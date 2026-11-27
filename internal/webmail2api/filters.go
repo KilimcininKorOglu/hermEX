@@ -2,7 +2,10 @@ package webmail2api
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -38,25 +41,43 @@ type filterJSON struct {
 	Priority   int                `json:"priority"`
 }
 
-func readFilters(m map[string]json.RawMessage) []filterJSON {
+// readFilters decodes the stored filters. A list that does not decode is an
+// error, so an edit never saves over filters it could not read.
+func readFilters(m map[string]json.RawMessage) ([]filterJSON, error) {
 	var f []filterJSON
-	if raw, ok := m["webmail2Filters"]; ok {
-		_ = json.Unmarshal(raw, &f)
-	}
-	return f
+	err := decodeSetting(m, "webmail2Filters", &f)
+	return f, err
 }
 
-func writeFilters(m map[string]json.RawMessage, f []filterJSON) {
-	raw, _ := json.Marshal(f)
-	m["webmail2Filters"] = raw
+// storeFilters rebuilds the inbox rules from f and then puts f in m, so a filter
+// is never reported saved while delivery runs without its rule. A rebuild that
+// fails part way puts back the rules of the list still in m, so the refused
+// edit leaves the stored list and the delivery rules as they were.
+func storeFilters(st *objectstore.Store, m map[string]json.RawMessage, f []filterJSON) error {
+	old, err := readFilters(m)
+	if err != nil {
+		return err
+	}
+	if err := rebuildInboxRules(st, f); err != nil {
+		if rerr := rebuildInboxRules(st, old); rerr != nil {
+			logError("filters-restore", rerr, logging.Fields{})
+		}
+		return err
+	}
+	return putSetting(m, "webmail2Filters", f)
 }
 
 func (s *Server) handleGetFilters(w http.ResponseWriter, r *http.Request) {
 	s.withSettings(w, r, func(st *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		f := readFilters(m)
+		f, err := readFilters(m)
+		if err != nil {
+			return settingsUnreadable(err), false
+		}
 		migrated := slugFilterTargets(st, f)
 		if migrated {
-			writeFilters(m, f)
+			if err := putSetting(m, "webmail2Filters", f); err != nil {
+				return settingsUnsaved(err), false
+			}
 		}
 		return map[string]any{"filters": f}, migrated
 	})
@@ -99,12 +120,16 @@ func (s *Server) handlePostFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.withSettings(w, r, func(st *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		filters := readFilters(m)
+		filters, err := readFilters(m)
+		if err != nil {
+			return settingsUnreadable(err), false
+		}
 		in.ID = randomHex()[:8]
 		in.Priority = len(filters)
 		filters = append(filters, in)
-		writeFilters(m, filters)
-		rebuildInboxRules(st, filters)
+		if err := storeFilters(st, m, filters); err != nil {
+			return settingsUnsaved(err), false
+		}
 		return in, true
 	})
 }
@@ -117,7 +142,10 @@ func (s *Server) handlePutFilter(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	s.withSettings(w, r, func(st *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		filters := readFilters(m)
+		filters, err := readFilters(m)
+		if err != nil {
+			return settingsUnreadable(err), false
+		}
 		for i := range filters {
 			if filters[i].ID == id {
 				in.ID = id
@@ -126,8 +154,9 @@ func (s *Server) handlePutFilter(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
-		writeFilters(m, filters)
-		rebuildInboxRules(st, filters)
+		if err := storeFilters(st, m, filters); err != nil {
+			return settingsUnsaved(err), false
+		}
 		return in, true
 	})
 }
@@ -135,15 +164,19 @@ func (s *Server) handlePutFilter(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteFilter(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	s.withSettings(w, r, func(st *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		filters := readFilters(m)
+		filters, err := readFilters(m)
+		if err != nil {
+			return settingsUnreadable(err), false
+		}
 		kept := filters[:0]
 		for _, f := range filters {
 			if f.ID != id {
 				kept = append(kept, f)
 			}
 		}
-		writeFilters(m, kept)
-		rebuildInboxRules(st, kept)
+		if err := storeFilters(st, m, kept); err != nil {
+			return settingsUnsaved(err), false
+		}
 		return map[string]bool{"ok": true}, true
 	})
 }
@@ -157,7 +190,10 @@ func (s *Server) handleReorderFilters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.withSettings(w, r, func(st *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		filters := readFilters(m)
+		filters, err := readFilters(m)
+		if err != nil {
+			return settingsUnreadable(err), false
+		}
 		byID := make(map[string]filterJSON, len(filters))
 		for _, f := range filters {
 			byID[f.ID] = f
@@ -176,8 +212,9 @@ func (s *Server) handleReorderFilters(w http.ResponseWriter, r *http.Request) {
 				ordered = append(ordered, f)
 			}
 		}
-		writeFilters(m, ordered)
-		rebuildInboxRules(st, ordered)
+		if err := storeFilters(st, m, ordered); err != nil {
+			return settingsUnsaved(err), false
+		}
 		return map[string]bool{"ok": true}, true
 	})
 }
@@ -189,11 +226,10 @@ func (s *Server) handleReorderFilters(w http.ResponseWriter, r *http.Request) {
 // existed. It runs the stored rules as-is and never rebuilds them, so rules set
 // by other clients are left untouched.
 func (s *Server) handleRunFilters(w http.ResponseWriter, r *http.Request) {
-	var req runFiltersRequest
-	// An empty body is the whole-inbox run, which is what the button sent before
-	// either selection existed.
-	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&req)
+	req, err := decodeRunFilters(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
 	}
 	target := int64(mapi.PrivateFIDInbox)
 	if req.Folder != "" {
@@ -204,19 +240,24 @@ func (s *Server) handleRunFilters(w http.ResponseWriter, r *http.Request) {
 		}
 		target = fid
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 
 	opt := objectstore.RunRulesOptions{
 		RuleFolderID:   mapi.PrivateFIDInbox,
 		TargetFolderID: target,
 	}
 	if req.Filter != "" {
-		id, ok := ruleIDForFilter(st, req.Filter)
-		if !ok {
+		id, found, err := ruleIDForFilter(st, req.Filter)
+		if err != nil {
+			logError("run-filters", err, logging.Fields{"filter": req.Filter})
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not run filters"})
+			return
+		}
+		if !found {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown filter"})
 			return
 		}
@@ -239,70 +280,105 @@ type runFiltersRequest struct {
 	Filter string `json:"filter,omitempty"`
 }
 
+// decodeRunFilters reads a manual run's selection. An empty body is the
+// whole-inbox run, which is what the button sent before either selection
+// existed; a body that does not decode is refused, so a malformed selection
+// never widens into a run over everything.
+func decodeRunFilters(r *http.Request) (runFiltersRequest, error) {
+	var req runFiltersRequest
+	if r.Body == nil {
+		return req, nil
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		return req, err
+	}
+	return req, nil
+}
+
 // ruleIDForFilter resolves a SPA filter id to the stored rule rebuildInboxRules
 // wrote for it. The two are tied by position: a filter's index in the saved list is
 // the Sequence of its rule. A filter with no rule (its condition or action is not
 // one the engine evaluates) resolves to nothing, so a run over it does not silently
 // fall back to running everything.
-func ruleIDForFilter(st *objectstore.Store, filterID string) (int64, bool) {
-	seq := -1
-	stored, _ := sharedSettings(st)
-	for i, f := range readFilters(stored) {
-		if f.ID == filterID {
-			seq = i
-			break
-		}
+func ruleIDForFilter(st *objectstore.Store, filterID string) (int64, bool, error) {
+	stored, loaded := sharedSettings(st)
+	if !loaded {
+		return 0, false, errors.New("webmail settings could not be read")
 	}
+	filters, err := readFilters(stored)
+	if err != nil {
+		return 0, false, err
+	}
+	seq := slices.IndexFunc(filters, func(f filterJSON) bool { return f.ID == filterID })
 	if seq < 0 {
-		return 0, false
+		return 0, false, nil
 	}
 	rules, err := st.ListRules(mapi.PrivateFIDInbox)
 	if err != nil {
-		return 0, false
+		return 0, false, err
 	}
 	for _, r := range rules {
 		if int(r.Sequence) == seq {
-			return r.ID, true
+			return r.ID, true, nil
 		}
 	}
-	return 0, false
+	return 0, false, nil
 }
 
 // rebuildInboxRules replaces the inbox's stored rules with the evaluatable subset
 // of the SPA filters, so the supported conditions/actions actually fire at
 // delivery. Filters with no supported condition or action are kept in the JSON
-// (for the UI) but contribute no engine rule.
-func rebuildInboxRules(st *objectstore.Store, filters []filterJSON) {
-	if existing, err := st.ListRules(mapi.PrivateFIDInbox); err == nil {
-		for _, r := range existing {
-			_ = st.DeleteRule(r.ID)
+// (for the UI) but contribute no engine rule. The first store failure is
+// returned, so the caller never reports filters saved that delivery cannot run.
+func rebuildInboxRules(st *objectstore.Store, filters []filterJSON) error {
+	existing, err := st.ListRules(mapi.PrivateFIDInbox)
+	if err != nil {
+		return err
+	}
+	for _, r := range existing {
+		if err := st.DeleteRule(r.ID); err != nil {
+			return err
 		}
 	}
 	for i, f := range filters {
-		if !f.Enabled {
-			continue
-		}
-		cond, ok := filterCondition(f)
+		rule, ok := filterRule(st, i, f)
 		if !ok {
 			continue
 		}
-		blocks, stop, ok := filterActions(st, f)
-		if !ok {
-			continue
+		if _, err := st.AddRule(rule); err != nil {
+			return err
 		}
-		state := uint32(mapi.RuleStateEnabled)
-		if stop {
-			state |= mapi.RuleStateExitLevel
-		}
-		_, _ = st.AddRule(objectstore.Rule{
-			FolderID:  mapi.PrivateFIDInbox,
-			Name:      f.Name,
-			Sequence:  int32(i),
-			State:     state,
-			Condition: cond,
-			Actions:   mapi.RuleActions{Blocks: blocks},
-		})
 	}
+	return nil
+}
+
+// filterRule builds the engine rule for the filter at position i, or reports
+// false for a disabled filter or one with no condition or action the engine
+// evaluates.
+func filterRule(st *objectstore.Store, i int, f filterJSON) (objectstore.Rule, bool) {
+	if !f.Enabled {
+		return objectstore.Rule{}, false
+	}
+	cond, ok := filterCondition(f)
+	if !ok {
+		return objectstore.Rule{}, false
+	}
+	blocks, stop, ok := filterActions(st, f)
+	if !ok {
+		return objectstore.Rule{}, false
+	}
+	state := uint32(mapi.RuleStateEnabled)
+	if stop {
+		state |= mapi.RuleStateExitLevel
+	}
+	return objectstore.Rule{
+		FolderID:  mapi.PrivateFIDInbox,
+		Name:      f.Name,
+		Sequence:  int32(i),
+		State:     state,
+		Condition: cond,
+		Actions:   mapi.RuleActions{Blocks: blocks},
+	}, true
 }
 
 // filterCondition maps a filter's supported conditions to a MAPI restriction.

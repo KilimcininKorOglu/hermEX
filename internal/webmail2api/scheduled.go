@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/mime"
 )
@@ -11,12 +12,17 @@ import (
 // handleScheduled lists the Outbox's deferred ("send later") messages so the SPA
 // can show them. Each carries its absolute send time from PR_DEFERRED_SEND_TIME.
 func (s *Server) handleScheduled(w http.ResponseWriter, r *http.Request) {
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
-	msgs, _ := st.ListMessages(mapi.PrivateFIDOutbox)
+	defer closeStore(st)
+	msgs, err := st.ListMessages(mapi.PrivateFIDOutbox)
+	if err != nil {
+		logError("list-scheduled", err, logging.Fields{})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "scheduled messages unavailable"})
+		return
+	}
 	items := make([]map[string]any, 0, len(msgs))
 	for _, m := range msgs {
 		sendAt := ""
@@ -59,11 +65,11 @@ func (s *Server) handleCancelScheduled(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	if _, err := st.MoveMessage(int64(mapi.PrivateFIDOutbox), uid, int64(mapi.PrivateFIDDraft)); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not cancel the scheduled send"})
 		return

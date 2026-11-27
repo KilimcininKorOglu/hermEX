@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"hermex/internal/logging"
 	"hermex/internal/objectstore"
 )
 
@@ -26,8 +27,15 @@ func (s *Server) handleGetAvatar(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no avatar", http.StatusNotFound)
 		return
 	}
-	defer st.Close()
-	photo, _ := st.UserPhoto()
+	defer closeStore(st)
+	photo, err := st.UserPhoto()
+	if err != nil {
+		// A store that cannot be read is a server failure, not a user without a
+		// portrait: answering 404 would hide it behind the initials fallback.
+		logError("avatar-read", err, logging.Fields{})
+		http.Error(w, "avatar unavailable", http.StatusInternalServerError)
+		return
+	}
 	if photo == nil {
 		http.Error(w, "no avatar", http.StatusNotFound)
 		return
@@ -40,7 +48,7 @@ func (s *Server) handleGetAvatar(w http.ResponseWriter, r *http.Request) {
 	// request misses the cache and the server runs the owner-only check again.
 	w.Header().Set("Vary", "Cookie")
 	w.Header().Set("Cache-Control", "private, max-age=300")
-	_, _ = w.Write(photo)
+	writeBody(w, photo)
 }
 
 // handlePutAvatar stores the caller's portrait (an image data URL) as the
@@ -72,7 +80,7 @@ func (s *Server) handlePutAvatar(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	if err := st.SetUserPhoto(data); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save the avatar"})
 		return
@@ -92,8 +100,12 @@ func (s *Server) handleDeleteAvatar(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return
 	}
-	defer st.Close()
-	_ = st.SetUserPhoto(nil)
+	defer closeStore(st)
+	if err := st.SetUserPhoto(nil); err != nil {
+		logError("avatar-delete", err, logging.Fields{})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not remove the avatar"})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

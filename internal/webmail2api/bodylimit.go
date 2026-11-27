@@ -118,7 +118,7 @@ func (w *overflowWriter) WriteHeader(status int) {
 		h.Set("Content-Type", "application/json")
 		h.Del("Content-Length")
 		w.ResponseWriter.WriteHeader(http.StatusRequestEntityTooLarge)
-		_, _ = w.ResponseWriter.Write([]byte(`{"error":"request body too large"}`))
+		writeBody(w.ResponseWriter, []byte(`{"error":"request body too large"}`))
 		return
 	}
 	w.ResponseWriter.WriteHeader(status)

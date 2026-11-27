@@ -73,11 +73,11 @@ func decodedLen(s string) int {
 // handleGetSmimeVault returns the caller's sealed identity, 404 when they keep
 // none on the server. The envelope is theirs alone and is never cached.
 func (s *Server) handleGetSmimeVault(w http.ResponseWriter, r *http.Request) {
-	st, c, ok := s.openStore(w, r)
+	st, c, ok := s.openStoreSession(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	w.Header().Set("Cache-Control", "no-store")
 	id, found, err := st.GetSmimeIdentity()
 	if err != nil {

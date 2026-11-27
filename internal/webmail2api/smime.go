@@ -41,7 +41,7 @@ func (s *Server) handleRecipientCert(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, nil)
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	id, ok, err := st.GetSmimeIdentity()
 	if err != nil || !ok || len(id.Cert) == 0 {
 		writeJSON(w, http.StatusOK, nil)
@@ -91,7 +91,7 @@ func (s *Server) handleGetSmimeCert(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	id, ok, err := st.GetSmimeIdentity()
 	if err != nil || !ok || len(id.Cert) == 0 {
 		writeJSON(w, http.StatusOK, map[string]any{"hasKeys": false})
@@ -139,7 +139,7 @@ func (s *Server) handleUploadSmimeCert(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 
 	if req.Mode == "server" || req.P12 != "" {
 		s.storeServerIdentity(w, st, req.P12, req.Passphrase)
@@ -223,7 +223,7 @@ func (s *Server) handleDeleteSmimeCert(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	if err := st.ClearSmimeIdentity(); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not remove certificate"})
 		return

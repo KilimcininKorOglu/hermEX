@@ -2,6 +2,7 @@ package webmail2api
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -53,7 +54,11 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// keeps the endpoint on the same policy noStoreAPI stamps on the rest of the API.
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Connection", "keep-alive")
-	_, _ = fmt.Fprint(w, ": connected\n\n") // SSE preamble; a failed write means the client is gone and the stream loop will end
+	// SSE preamble; a failed write means the client is gone, so the stream ends
+	// here rather than polling for a reader that left.
+	if _, err := io.WriteString(w, ": connected\n\n"); err != nil {
+		return
+	}
 	flusher.Flush()
 
 	lastTotal, lastUnread := -1, -1
@@ -91,7 +96,7 @@ func sampleInbox(mailbox string, lastTotal, lastUnread *int) string {
 	if err != nil {
 		return ""
 	}
-	defer st.Close()
+	defer closeStore(st)
 	total, unread, err := st.CountMessages(mapi.PrivateFIDInbox)
 	if err != nil {
 		return ""

@@ -51,11 +51,11 @@ func (s *Server) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	fid, err := st.CreateFolder(nil, body.Name)
 	if errors.Is(err, objectstore.ErrFolderExists) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "a folder with that name already exists"})
@@ -78,11 +78,11 @@ func (s *Server) handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	id, found := userFolderByRef(st, current)
 	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "folder not found"})
@@ -106,11 +106,11 @@ func (s *Server) handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 // handleDeleteFolder removes a user folder by its slug.
 func (s *Server) handleDeleteFolder(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	st, c, ok := s.openStore(w, r)
+	st, c, ok := s.openStoreSession(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	id, found := userFolderByRef(st, name)
 	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "folder not found"})
@@ -168,11 +168,11 @@ func (s *Server) handleDeleteFolder(w http.ResponseWriter, r *http.Request) {
 // slug (trash/spam/...) or a user folder by its id slug.
 func (s *Server) handleEmptyFolder(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	fid, ok := folderFID(name)
 	if !ok {
 		id, found := userFolderByRef(st, name)

@@ -28,7 +28,7 @@ func (s *Server) handleGetSentCopy(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	cfg, err := st.GetSentCopyConfig()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read"})
@@ -55,7 +55,7 @@ func (s *Server) handlePutSentCopy(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	if err := st.SetSentCopyConfig(objectstore.SentCopyConfig(in)); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save"})
 		return

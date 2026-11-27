@@ -33,11 +33,11 @@ type readReceiptSettingsJSON struct {
 
 // handleGetReadReceiptSettings returns the caller's read-receipt settings.
 func (s *Server) handleGetReadReceiptSettings(w http.ResponseWriter, r *http.Request) {
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	cfg, err := st.GetReadReceiptConfig()
 	if err != nil {
 		logError("read-receipt-settings", err, logging.Fields{})
@@ -67,11 +67,11 @@ func (s *Server) handlePutReadReceiptSettings(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown response"})
 		return
 	}
-	st, c, ok := s.openStore(w, r)
+	st, c, ok := s.openStoreSession(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	if err := st.SetReadReceiptConfig(cfg); err != nil {
 		logError("read-receipt-settings", err, logging.Fields{"user": c.Email})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save settings"})
@@ -137,7 +137,7 @@ func (s *Server) handleMailReadReceipt(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer mb.st.Close()
+	defer closeStore(mb.st)
 	m, err := mb.st.MessageByUID(fid, uid)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})

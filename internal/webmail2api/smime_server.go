@@ -3,8 +3,6 @@ package webmail2api
 import (
 	"bytes"
 	"crypto"
-	"crypto/hmac"
-	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"errors"
@@ -13,6 +11,7 @@ import (
 
 	pkcs12 "software.sslmate.com/src/go-pkcs12"
 
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/smime"
@@ -37,10 +36,7 @@ type smimeStatus struct {
 // password, and a single container that leaks together with the server secret
 // opens all of them.
 func smimeP12Password(secret []byte, mailboxGUID mapi.GUID) string {
-	h := hmac.New(sha256.New, secret)
-	h.Write([]byte("smime-p12-at-rest-v2"))
-	h.Write([]byte(mailboxGUID.String()))
-	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+	return base64.RawURLEncoding.EncodeToString(macSHA256(secret, []byte("smime-p12-at-rest-v2"), []byte(mailboxGUID.String())))
 }
 
 // legacySmimeP12Password is the deployment-wide password identities uploaded
@@ -48,9 +44,7 @@ func smimeP12Password(secret []byte, mailboxGUID mapi.GUID) string {
 // after the current one fails, and a container it opens is rewritten under the
 // current one, so the migration happens on first use with nothing to run.
 func legacySmimeP12Password(secret []byte) string {
-	h := hmac.New(sha256.New, secret)
-	h.Write([]byte("smime-p12-at-rest-v1"))
-	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+	return base64.RawURLEncoding.EncodeToString(macSHA256(secret, []byte("smime-p12-at-rest-v1")))
 }
 
 // smimeStorePassword returns the at-rest password for the store's mailbox.
@@ -83,8 +77,14 @@ func unlockSmimeIdentity(st *objectstore.Store, secret []byte) (crypto.PrivateKe
 	if err != nil {
 		return nil, nil, false
 	}
-	if reP12, eerr := pkcs12.Modern.Encode(key, cert, nil, password); eerr == nil {
-		_ = st.SetSmimeIdentity(objectstore.SmimeIdentity{Mode: "server", Cert: cert.Raw, P12: reP12})
+	// The key is already open, so a failed migration does not refuse its owner;
+	// it is recorded, and the next use tries the rewrite again.
+	reP12, err := pkcs12.Modern.Encode(key, cert, nil, password)
+	if err == nil {
+		err = st.SetSmimeIdentity(objectstore.SmimeIdentity{Mode: "server", Cert: cert.Raw, P12: reP12})
+	}
+	if err != nil {
+		logError("smime-migrate", err, logging.Fields{})
 	}
 	return key, cert, true
 }
@@ -106,7 +106,7 @@ func (s *Server) recipientCert(addr string) (*x509.Certificate, bool) {
 	if !ok {
 		return nil, false
 	}
-	defer st.Close()
+	defer closeStore(st)
 	id, ok, err := st.GetSmimeIdentity()
 	if err != nil || !ok || len(id.Cert) == 0 {
 		return nil, false
@@ -125,7 +125,7 @@ func (s *Server) applySmime(mailbox string, raw []byte, recipients []string, sig
 	if err != nil {
 		return nil, errors.New("mailbox unavailable")
 	}
-	defer st.Close()
+	defer closeStore(st)
 	identity, inner := splitForSmime(raw)
 	if sign {
 		key, cert, ok := unlockSmimeIdentity(st, s.secret)
@@ -189,22 +189,19 @@ func splitForSmime(raw []byte) (identityHeaders, innerEntity []byte) {
 	if !found {
 		return raw, nil
 	}
-	var ident, content bytes.Buffer
+	var ident, content []byte
 	for _, line := range splitHeaderLines(hdr) {
 		name := strings.ToLower(headerName(line))
 		switch {
 		case name == "mime-version":
 		case strings.HasPrefix(name, "content-"):
-			content.Write(line)
-			content.WriteString("\r\n")
+			content = append(append(content, line...), '\r', '\n')
 		default:
-			ident.Write(line)
-			ident.WriteString("\r\n")
+			ident = append(append(ident, line...), '\r', '\n')
 		}
 	}
-	content.WriteString("\r\n")
-	content.Write(body)
-	return ident.Bytes(), content.Bytes()
+	content = append(append(content, '\r', '\n'), body...)
+	return ident, content
 }
 
 // splitHeaderLines splits a CRLF header block into logical headers, keeping each

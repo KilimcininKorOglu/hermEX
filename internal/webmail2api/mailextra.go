@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
@@ -58,21 +59,21 @@ func isEmptyName(name string) bool {
 // sanitizeNameRunes drops control characters, replaces the quote that would end
 // a Content-Disposition parameter early, and caps the length.
 func sanitizeNameRunes(base string) string {
-	var b strings.Builder
+	var out []byte
 	for _, r := range base {
 		switch {
 		case r < 0x20 || r == 0x7f:
 			// drop control characters
 		case r == '"':
-			b.WriteByte('_')
+			out = append(out, '_')
 		default:
-			b.WriteRune(r)
+			out = utf8.AppendRune(out, r)
 		}
-		if b.Len() >= 200 {
+		if len(out) >= 200 {
 			break
 		}
 	}
-	return b.String()
+	return string(out)
 }
 
 // servedAttachmentType picks the Content-Type an attachment is served with.
@@ -126,8 +127,19 @@ func (s *Server) handleAttachment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer st.Close()
-	index, _ := strconv.Atoi(r.URL.Query().Get("index"))
+	defer closeStore(st)
+	// An absent index is the first attachment; one that is not a number is
+	// refused rather than read as 0, which would serve an attachment the caller
+	// did not ask for.
+	index := 0
+	if v := r.URL.Query().Get("index"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			http.Error(w, "bad attachment index", http.StatusBadRequest)
+			return
+		}
+		index = n
+	}
 	raw, err := st.GetMessageRaw(fid, uid)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
@@ -148,7 +160,7 @@ func (s *Server) handleAttachment(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", served)
 	w.Header().Set("Content-Disposition", attachmentDisposition(served, r.URL.Query().Get("disposition"), filename))
 	// #nosec G705 -- servedAttachmentType serves anything but a sniffer-confirmed PDF or image as opaque octet-stream, the daemon stamps X-Content-Type-Options: nosniff, and the Content-Type is set explicitly, so the bytes are never interpreted as a document
-	_, _ = w.Write(body)
+	writeBody(w, body)
 }
 
 // nthAttachment walks a MIME tree in the order collectAttachments assigns and
@@ -195,7 +207,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	raw, err := st.GetMessageRaw(fid, uid)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
@@ -204,7 +216,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "message/rfc822")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"message.eml\"")
 	// #nosec G705 -- the daemon stamps X-Content-Type-Options: nosniff and the Content-Type is set explicitly, so the bytes are never interpreted as a document
-	_, _ = w.Write(raw)
+	writeBody(w, raw)
 }
 
 // maxBulkExport caps a bulk EML export so one request cannot stream an unbounded zip.
@@ -235,7 +247,7 @@ func (s *Server) handleExportBulk(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer mb.st.Close()
+	defer closeStore(mb.st)
 	ids := r.URL.Query()["id"]
 	if len(ids) == 0 {
 		http.Error(w, "no messages selected", http.StatusBadRequest)
@@ -249,7 +261,7 @@ func (s *Server) handleExportBulk(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"messages.zip\"")
 	zw := zip.NewWriter(w)
-	defer zw.Close()
+	defer closeZip(zw)
 	used := map[string]bool{}
 	for _, id := range ids {
 		folder, uid, ok := parseMessageID(id)
@@ -262,13 +274,28 @@ func (s *Server) handleExportBulk(w http.ResponseWriter, r *http.Request) {
 		}
 		raw, err := mb.st.GetMessageRaw(fid, uid)
 		if err != nil {
+			// The status is already sent, so the archive goes out without this
+			// message; the operator's log says which one is missing.
+			logError("export-zip-read", err, logging.Fields{"folder": fid, "uid": uid})
 			continue
 		}
 		f, err := zw.Create(uniqueEntryName(used, uid))
 		if err != nil {
+			logError("export-zip-write", err, logging.Fields{"uid": uid})
 			return
 		}
-		_, _ = f.Write(raw)
+		if _, err := f.Write(raw); err != nil {
+			logError("export-zip-write", err, logging.Fields{"uid": uid})
+			return
+		}
+	}
+}
+
+// closeZip finishes an archive streamed after the status was sent. A failure
+// leaves the client a truncated archive, so it is recorded.
+func closeZip(zw *zip.Writer) {
+	if err := zw.Close(); err != nil {
+		logError("zip-close", err, logging.Fields{})
 	}
 }
 
@@ -317,7 +344,7 @@ func (s *Server) handleSource(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	raw, err := st.GetMessageRaw(fid, uid)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
@@ -325,7 +352,7 @@ func (s *Server) handleSource(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	// #nosec G705 -- the daemon stamps X-Content-Type-Options: nosniff and the Content-Type is set explicitly, so the bytes are never interpreted as a document
-	_, _ = w.Write(raw)
+	writeBody(w, raw)
 }
 
 // handleHeaders serves only a message's internet (RFC822) header block (the bytes
@@ -336,7 +363,7 @@ func (s *Server) handleHeaders(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	raw, err := st.GetMessageRaw(fid, uid)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
@@ -344,7 +371,7 @@ func (s *Server) handleHeaders(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	// #nosec G705 -- the daemon stamps X-Content-Type-Options: nosniff and the Content-Type is set explicitly, so the bytes are never interpreted as a document
-	_, _ = w.Write(headerBlock(raw))
+	writeBody(w, headerBlock(raw))
 }
 
 // headerBlock returns the RFC822 header section of raw: everything up to and
@@ -368,7 +395,7 @@ func (s *Server) handleAttachmentsZip(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	raw, err := st.GetMessageRaw(fid, uid)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
@@ -390,15 +417,22 @@ func (s *Server) handleAttachmentsZip(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"attachments.zip\"")
 	zw := zip.NewWriter(w)
-	defer zw.Close()
+	defer closeZip(zw)
 	for _, i := range wanted {
 		body, err := parts[i].DecodedContent()
 		if err != nil {
+			logError("attachments-zip-decode", err, logging.Fields{"index": i})
 			continue
 		}
 		fn := safeAttachmentName(parts[i].Filename(), "attachment-"+strconv.Itoa(i))
-		if fw, err := zw.Create(fn); err == nil {
-			_, _ = fw.Write(body)
+		fw, err := zw.Create(fn)
+		if err != nil {
+			logError("attachments-zip-write", err, logging.Fields{"index": i})
+			return
+		}
+		if _, err := fw.Write(body); err != nil {
+			logError("attachments-zip-write", err, logging.Fields{"index": i})
+			return
 		}
 	}
 }
@@ -461,7 +495,7 @@ func (s *Server) handleRecover(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer mb.st.Close()
+	defer closeStore(mb.st)
 	if !mb.writeAllowed(mapi.PrivateFIDInbox) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
@@ -487,7 +521,7 @@ func (s *Server) handleLabels(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	info, err := st.MessageByUID(fid, uid)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -505,11 +539,11 @@ func (s *Server) handleLabels(w http.ResponseWriter, r *http.Request) {
 // general terms matched against subject/sender/body. Bare tokens preserve the
 // legacy plain-text behaviour.
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
-	st, _, ok := s.openStore(w, r)
+	st, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer closeStore(st)
 	raw := strings.TrimSpace(r.URL.Query().Get("q"))
 	if raw == "" {
 		writeJSON(w, http.StatusOK, map[string]any{"emails": []mailJSON{}, "total": 0, "query": raw})
@@ -632,15 +666,14 @@ func searchResult(slug string, m objectstore.MessageInfo) mailJSON {
 // recipientsOf collects To/Cc/Bcc display strings from a MIME tree so the KQL
 // "to:" filter can match addressees (the index's sender-only row misses them).
 func recipientsOf(root *mime.Part) string {
-	var b strings.Builder
+	var parts []string
 	hdr := root.Header()
 	for _, h := range []string{"To", "Cc", "Bcc"} {
 		if v := hdr.Get(h); v != "" {
-			b.WriteString(v)
-			b.WriteByte(' ')
+			parts = append(parts, v)
 		}
 	}
-	return b.String()
+	return strings.Join(parts, " ")
 }
 
 // mimeHasAttachment reports whether a MIME tree contains a part with
@@ -703,7 +736,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer mb.st.Close()
+	defer closeStore(mb.st)
 	if mb.shared {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "import into a shared mailbox is not supported"})
 		return
@@ -862,7 +895,7 @@ func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer mb.st.Close()
+	defer closeStore(mb.st)
 	fid, ok := resolveFolder(mb.st, "inbox")
 	if !ok {
 		writeJSON(w, http.StatusOK, map[string]any{"threads": []threadJSON{}})
@@ -894,7 +927,7 @@ func (s *Server) handleMarkAllRead(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	defer mb.st.Close()
+	defer closeStore(mb.st)
 	fid, ok := folderFID(req.Folder)
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown folder"})

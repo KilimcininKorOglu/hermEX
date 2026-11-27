@@ -113,8 +113,8 @@ func mergeCategories(stored oxcfg.List, edited []categoryJSON) oxcfg.List {
 // an empty list to a user who already had categories.
 func seedCategoryList(st *objectstore.Store, m map[string]json.RawMessage) (oxcfg.List, error) {
 	cats := []categoryJSON{}
-	if raw, ok := m["categories"]; ok {
-		_ = json.Unmarshal(raw, &cats)
+	if err := decodeSetting(m, "categories", &cats); err != nil {
+		return oxcfg.List{}, err
 	}
 	l := mergeCategories(oxcfg.List{}, cats)
 	if len(l.Categories) == 0 {
