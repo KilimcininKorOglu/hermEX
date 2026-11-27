@@ -221,7 +221,10 @@ func wantRefreshErr(t *testing.T, p *Provider, want error) {
 // omitted from the snapshot while the good one still serves.
 func TestProviderRefreshSkipsBadRow(t *testing.T) {
 	good, goodKey := genCertPEM(t, "good.example.com")
-	otherCert, _ := genCertPEM(t, "other.example.com")
+	otherCert, otherKey := genCertPEM(t, "other.example.com")
+	if otherKey == goodKey {
+		t.Fatal("the two generated keys are equal, so the mismatched row below is a matching pair")
+	}
 	store := &fakeStore{
 		certs: []directory.TLSCertData{
 			{Name: "good.example.com", CertPEM: good, KeyPEM: goodKey},
