@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"hermex/internal/logging"
 	"hermex/internal/objectstore"
 )
 
@@ -25,12 +26,14 @@ func (s *Server) handleGetSentCopy(w http.ResponseWriter, r *http.Request) {
 	}
 	st, err := objectstore.OpenExisting(c.Mailbox)
 	if err != nil {
+		logError("sent-copy-read", err, logging.Fields{"user": c.Email})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return
 	}
 	defer closeStore(st)
 	cfg, err := st.GetSentCopyConfig()
 	if err != nil {
+		logError("sent-copy-read", err, logging.Fields{"user": c.Email})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read"})
 		return
 	}
@@ -52,11 +55,13 @@ func (s *Server) handlePutSentCopy(w http.ResponseWriter, r *http.Request) {
 	}
 	st, err := objectstore.OpenExisting(c.Mailbox)
 	if err != nil {
+		logError("sent-copy-write", err, logging.Fields{"user": c.Email})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return
 	}
 	defer closeStore(st)
 	if err := st.SetSentCopyConfig(objectstore.SentCopyConfig(in)); err != nil {
+		logError("sent-copy-write", err, logging.Fields{"user": c.Email})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save"})
 		return
 	}
