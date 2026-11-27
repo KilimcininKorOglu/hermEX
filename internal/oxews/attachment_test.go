@@ -65,3 +65,19 @@ func TestEmbeddedAttachmentRoutedAsItemAttachment(t *testing.T) {
 	wantContains(t, string(out), "<ItemAttachment>", "the marshaled attachment")
 	wantContains(t, string(out), "Inner Subject", "the marshaled nested item")
 }
+
+// TestEmbeddedAttachmentWithBrokenBytes routes an embedded attachment whose bytes
+// a sender broke (binary noise, then nothing at all). The item stays an
+// ItemAttachment with its declared type, and its nested item carries none of
+// the noise as a subject.
+func TestEmbeddedAttachmentWithBrokenBytes(t *testing.T) {
+	for _, data := range [][]byte{{0x00, 0xff, 0x13, 0x37, '\r', '\n'}, nil} {
+		att := embeddedAtt()
+		att.Props.Set(mapi.PrAttachDataBin, data)
+		ia := BuildItemAttachmentContent(13, 42, 0, att, "")
+		wantEq(t, ia.ContentType, "message/rfc822", "the ItemAttachment ContentType")
+		if ia.Message != nil && ia.Message.Subject != "" {
+			t.Errorf("broken bytes %q produced subject %q", data, ia.Message.Subject)
+		}
+	}
+}
