@@ -20,14 +20,14 @@ func TestProcessReplyReportsATagResolutionFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() { mustClose(t, st, "the store") })
 	msgID := deliverReply(t, st, "meeting-tags", "bob@hermex.test", "ACCEPTED")
 
 	db, err := sql.Open("sqlite", filepath.Join(dir, "objects.sqlite3"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer mustClose(t, db, "the raw database handle")
 	if _, err := db.Exec(`CREATE TRIGGER refuse_names BEFORE INSERT ON named_properties
 		BEGIN SELECT RAISE(ABORT, 'injected name failure'); END`); err != nil {
 		t.Fatal(err)

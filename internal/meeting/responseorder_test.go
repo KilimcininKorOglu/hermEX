@@ -19,18 +19,16 @@ import (
 // filing step fails for real rather than through a seam.
 func TestOrganizerIsToldOnlyAfterTheMeetingIsStored(t *testing.T) {
 	organizerDir := t.TempDir()
-	if st, err := objectstore.Open(organizerDir); err != nil {
-		t.Fatal(err)
-	} else {
-		st.Close()
-	}
+	org, err := objectstore.Open(organizerDir)
+	mustNoErr(t, err, "provision the organizer's store")
+	mustClose(t, org, "the organizer's store")
 	accs := directory.StaticAccounts{"bob@hermex.test": {MailboxPath: organizerDir}}
 
 	st, err := objectstore.OpenPublic(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st, "the store")
 	fid, err := st.CreateFolder(nil, "Requests")
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +57,7 @@ func organizerInbox(t *testing.T, dir string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st, "the store")
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
 	if err != nil {
 		t.Fatal(err)

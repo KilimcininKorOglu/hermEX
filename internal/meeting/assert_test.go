@@ -26,7 +26,15 @@ func wantEq[T comparable](t *testing.T, got, want T, what string) {
 	}
 }
 
-// wantTrue fails the test unless the fact holds.
+// mustClose closes a store or database and fails the test when the close fails,
+// since a store that cannot close may not have written what the test asserted.
+func mustClose(t *testing.T, c interface{ Close() error }, what string) {
+	t.Helper()
+	if err := c.Close(); err != nil {
+		t.Errorf("close %s: %v", what, err)
+	}
+}
+
 // processReply runs ProcessReply and fails the test on an error, so a refused
 // reply is told apart from a failed tracking write: a refusal answers (false, nil).
 func processReply(t *testing.T, st *objectstore.Store, sender string, messageID int64) bool {
@@ -44,6 +52,7 @@ func calendarItems(t *testing.T, st *objectstore.Store) []objectstore.FolderObje
 	return cal
 }
 
+// wantTrue fails the test unless the fact holds.
 func wantTrue(t *testing.T, got bool, what string) {
 	t.Helper()
 	if !got {
