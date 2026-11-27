@@ -49,7 +49,7 @@ func appendMessage(t *testing.T, c *testClient, tag, msg string) string {
 // a mail client is a way to place malware in a mailbox unchecked.
 func TestAppendRefusesInfectedContent(t *testing.T) {
 	withScanner(t, avtest.Infected)
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 	c.mustOK("a2", "SELECT INBOX")
 
@@ -64,7 +64,7 @@ func TestAppendRefusesInfectedContent(t *testing.T) {
 // TestAppendAcceptsCleanContent keeps ordinary APPEND working with the scanner on.
 func TestAppendAcceptsCleanContent(t *testing.T) {
 	withScanner(t, avtest.Clean)
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 	c.mustOK("a2", "SELECT INBOX")
 
@@ -72,4 +72,21 @@ func TestAppendAcceptsCleanContent(t *testing.T) {
 		t.Errorf("clean APPEND = %q, want OK", reply)
 	}
 	assertMessageCount(t, c, "a4", "INBOX", 3)
+}
+
+// TestMultiAppendRefusesInfectedSecondMessage proves an infected second message
+// rolls back the first message too, leaving the mailbox count unchanged.
+func TestMultiAppendRefusesInfectedSecondMessage(t *testing.T) {
+	withScanner(t, avtest.Infected)
+	c := startServer(t).client
+	c.mustOK("a1", "LOGIN alice secret")
+	c.mustOK("a2", "SELECT INBOX")
+
+	m1 := "Subject: m1\r\n\r\nbody1"
+	m2 := "Subject: m2\r\n\r\nMZ malware"
+	mustSend(c.t, c.conn, "a3 APPEND INBOX {%d+}\r\n%s {%d+}\r\n%s\r\n", len(m1), m1, len(m2), m2)
+	if reply := c.collectTagged("a3"); !strings.HasPrefix(reply, "a3 NO") {
+		t.Errorf("MULTIAPPEND with infected message = %q, want NO", reply)
+	}
+	assertMessageCount(t, c, "a4", "INBOX", 2)
 }

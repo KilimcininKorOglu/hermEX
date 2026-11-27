@@ -1,11 +1,73 @@
 package imap
 
 import (
+	"errors"
+	"io"
+	"net"
 	"strings"
 	"testing"
+	"time"
 
+	"hermex/internal/logging"
 	"hermex/internal/objectstore"
 )
+
+// serveOn starts srv on a loopback listener and returns it. At cleanup it closes
+// the listener and fails the test if Serve stopped for any reason other than that
+// close, so an accept-loop failure is never lost in a discarded return value.
+func serveOn(t *testing.T, srv *Server) net.Listener {
+	t.Helper()
+	return serveWrapped(t, srv, func(l net.Listener) net.Listener { return l })
+}
+
+// serveWrapped is serveOn for a server that accepts on wrap(ln), such as an
+// implicit-TLS listener; it returns the raw listener, whose address clients dial.
+func serveWrapped(t *testing.T, srv *Server, wrap func(net.Listener) net.Listener) net.Listener {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(wrap(ln)) }()
+	t.Cleanup(func() {
+		if err := ln.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			t.Errorf("close the listener: %v", err)
+		}
+		if err := <-done; err != nil && !errors.Is(err, net.ErrClosed) {
+			t.Errorf("Serve stopped with %v", err)
+		}
+	})
+	return ln
+}
+
+// mustClose closes c and fails the test when the close reports an unexpected error.
+func mustClose(t *testing.T, c io.Closer) {
+	t.Helper()
+	if err := c.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+		t.Errorf("close: %v", err)
+	}
+}
+
+// mustAppend appends a message to fid and fails the test on error or zero UID.
+func mustAppend(t *testing.T, st *objectstore.Store, fid int64, raw string, when time.Time, flags int64) {
+	t.Helper()
+	info, err := st.AppendMessage(fid, []byte(raw), when, flags)
+	mustNoErr(t, "append message", err)
+	if info.UID == 0 {
+		t.Fatal("appended message returned UID 0")
+	}
+}
+
+// findEvent returns the first captured event with the given name, or nil when absent.
+func findEvent(events []logging.Event, name string) *logging.Event {
+	for i := range events {
+		if events[i].Name == name {
+			return &events[i]
+		}
+	}
+	return nil
+}
 
 // The IMAP tests assert against protocol transcripts, and one exchange carries
 // many small facts at once: the tagged status, the untagged lines, and the values

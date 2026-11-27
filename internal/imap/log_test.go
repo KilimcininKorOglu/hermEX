@@ -31,16 +31,6 @@ func (c *captureSink) snapshot() []logging.Event {
 	return append([]logging.Event(nil), c.events...)
 }
 
-// find returns the first captured event with the given name.
-func find(events []logging.Event, name string) (logging.Event, bool) {
-	for _, e := range events {
-		if e.Name == name {
-			return e, true
-		}
-	}
-	return logging.Event{}, false
-}
-
 // TestInstrumentationLogsConnAndAuth proves the IMAP server emits the audit events
 // , a connection accept, a successful auth tagged with the user, and a failed auth
 // tagged with the attempted login, and that no password reaches the log.
@@ -48,14 +38,11 @@ func TestInstrumentationLogsConnAndAuth(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "alice")
 	st, err := objectstore.Open(path)
 	mustNoErr(t, "open the mailbox", err)
-	st.Close()
+	mustClose(t, st)
 
 	sink := &captureSink{}
 	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	mustNoErr(t, "listen", err)
-	defer ln.Close()
-	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test", Logger: logging.New(sink)}).Serve(ln) }()
+	ln := serveOn(t, &Server{Auth: auth, Hostname: "mail.test", Logger: logging.New(sink)})
 
 	// The failed login goes first: it leaves the connection unauthenticated, so the
 	// successful one still runs. (A second LOGIN after success would be rejected as
@@ -63,7 +50,7 @@ func TestInstrumentationLogsConnAndAuth(t *testing.T) {
 	loginTranscript(t, ln.Addr().String(), "a LOGIN bob hunter2", "b LOGIN alice secret")
 
 	events := sink.snapshot()
-	if _, ok := find(events, "conn.accept"); !ok {
+	if findEvent(events, "conn.accept") == nil {
 		t.Error("no conn.accept event")
 	}
 	wantAuthEvent(t, events, "auth.ok", "alice", logging.LevelInfo)
@@ -86,23 +73,29 @@ func loginTranscript(t *testing.T, addr string, lines ...string) {
 	t.Helper()
 	conn, err := net.Dial("tcp", addr)
 	mustNoErr(t, "dial", err)
-	defer conn.Close()
+	defer mustClose(t, conn)
 	br := bufio.NewReader(conn)
-	_, err = br.ReadString('\n') // greeting
+	greeting, err := br.ReadString('\n')
 	mustNoErr(t, "read the greeting", err)
+	wantPrefix(t, "greeting", greeting, "* OK")
 	for _, line := range lines {
-		_, err := conn.Write([]byte(line + "\r\n"))
-		mustNoErr(t, "write "+line, err)
-		_, err = br.ReadString('\n')
+		n, err := conn.Write([]byte(line + "\r\n"))
+		if err != nil || n == 0 {
+			t.Fatalf("write %q (n=%d): %v", line, n, err)
+		}
+		reply, err := br.ReadString('\n')
 		mustNoErr(t, "read the response to "+line, err)
+		if !strings.Contains(reply, " ") {
+			t.Errorf("unexpected response to %q: %q", line, reply)
+		}
 	}
 }
 
 // wantAuthEvent checks one authentication event's user and level.
 func wantAuthEvent(t *testing.T, events []logging.Event, name, user string, level logging.Level) {
 	t.Helper()
-	e, ok := find(events, name)
-	if !ok {
+	e := findEvent(events, name)
+	if e == nil {
 		t.Errorf("no %s event", name)
 		return
 	}

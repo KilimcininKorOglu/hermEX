@@ -23,8 +23,8 @@ func TestReadLiteralRespectsServerLimit(t *testing.T) {
 		bw:         bufio.NewWriter(&out),
 		maxLiteral: &limit,
 	}
-	if _, err := over.readCommand(); !errors.Is(err, errProtocol) {
-		t.Fatalf("20-byte literal under an 8-byte cap = %v, want a protocol error", err)
+	if toks, err := over.readCommand(); !errors.Is(err, errProtocol) {
+		t.Fatalf("20-byte literal under an 8-byte cap = (%v, %v), want a protocol error", toks, err)
 	}
 
 	// Raising the cap (what the poll does) admits a literal the old cap would reject.
@@ -35,8 +35,8 @@ func TestReadLiteralRespectsServerLimit(t *testing.T) {
 		bw:         bufio.NewWriter(&out2),
 		maxLiteral: &limit,
 	}
-	if _, err := ok.readCommand(); err != nil {
-		t.Fatalf("2-byte literal under a raised cap = %v, want success", err)
+	if toks, err := ok.readCommand(); err != nil || len(toks) != 3 {
+		t.Fatalf("2-byte literal under a raised cap = (%v, %v), want 3 tokens", toks, err)
 	}
 }
 
@@ -56,12 +56,12 @@ func TestLiteralBeforeLoginIsBoundByTheLineCap(t *testing.T) {
 			br: bufio.NewReader(strings.NewReader(input)), bw: bufio.NewWriter(&bytes.Buffer{}),
 			maxLiteral: &literal, maxLine: &line, authed: func() bool { return authed },
 		}
-		_, err := r.readCommand()
+		toks, err := r.readCommand()
 		if !authed && !errors.Is(err, errProtocol) {
-			t.Errorf("before login: a 200-byte literal under a 128-byte line cap = %v, want a protocol error", err)
+			t.Errorf("before login: a 200-byte literal under a 128-byte line cap = (%v, %v), want a protocol error", toks, err)
 		}
-		if authed && err != nil {
-			t.Errorf("after login: a 200-byte literal = %v, want success", err)
+		if authed && (err != nil || len(toks) != 4) {
+			t.Errorf("after login: a 200-byte literal = (%v, %v), want 4 tokens", toks, err)
 		}
 	}
 }
@@ -78,22 +78,27 @@ func TestLiteralsOfOneCommandShareTheLiteralCap(t *testing.T) {
 		bw:         bufio.NewWriter(&bytes.Buffer{}),
 		maxLiteral: &limit,
 	}
-	if _, err := r.readCommand(); !errors.Is(err, errProtocol) {
-		t.Fatalf("two 6-byte literals under an 8-byte cap = %v, want a protocol error", err)
+	if toks, err := r.readCommand(); !errors.Is(err, errProtocol) {
+		t.Fatalf("two 6-byte literals under an 8-byte cap = (%v, %v), want a protocol error", toks, err)
 	}
 	r = &commandReader{
 		br:         bufio.NewReader(strings.NewReader("a LOGIN {4+}\r\nabcd {4+}\r\nefgh\r\n")),
 		bw:         bufio.NewWriter(&bytes.Buffer{}),
 		maxLiteral: &limit,
 	}
-	if _, err := r.readCommand(); err != nil {
-		t.Fatalf("two 4-byte literals filling an 8-byte cap = %v, want success", err)
+	if toks, err := r.readCommand(); err != nil || len(toks) != 4 {
+		t.Fatalf("two 4-byte literals filling an 8-byte cap = (%v, %v), want 4 tokens", toks, err)
 	}
+}
+
+type lexResult struct {
+	toks []token
+	cont string
 }
 
 // lex runs the command reader over input and returns the tokens plus whatever
 // the server wrote back (continuation requests).
-func lex(t *testing.T, input string) ([]token, string) {
+func lex(t *testing.T, input string) lexResult {
 	t.Helper()
 	var out bytes.Buffer
 	r := &commandReader{
@@ -104,11 +109,15 @@ func lex(t *testing.T, input string) ([]token, string) {
 	if err != nil {
 		t.Fatalf("readCommand(%q): %v", input, err)
 	}
-	return toks, out.String()
+	return lexResult{toks: toks, cont: out.String()}
 }
 
 func TestLexSimpleCommand(t *testing.T) {
-	toks, _ := lex(t, "a1 LOGIN admin secret\r\n")
+	res := lex(t, "a1 LOGIN admin secret\r\n")
+	if res.cont != "" {
+		t.Errorf("unexpected continuation %q", res.cont)
+	}
+	toks := res.toks
 	want := []string{"a1", "LOGIN", "admin", "secret"}
 	if len(toks) != len(want) {
 		t.Fatalf("got %d tokens, want %d: %+v", len(toks), len(want), toks)
@@ -122,7 +131,11 @@ func TestLexSimpleCommand(t *testing.T) {
 
 func TestLexParensBracketsQuoted(t *testing.T) {
 	// FETCH body section: brackets are structural and survive spaces inside.
-	toks, _ := lex(t, `a UID FETCH 1:* (FLAGS BODY.PEEK[HEADER.FIELDS (DATE FROM)]<0.512>)`+"\r\n")
+	res := lex(t, `a UID FETCH 1:* (FLAGS BODY.PEEK[HEADER.FIELDS (DATE FROM)]<0.512>)`+"\r\n")
+	if res.cont != "" {
+		t.Errorf("unexpected continuation %q", res.cont)
+	}
+	toks := res.toks
 	var kinds []tokenKind
 	for _, tk := range toks {
 		kinds = append(kinds, tk.kind)
@@ -153,7 +166,8 @@ func TestLexParensBracketsQuoted(t *testing.T) {
 func TestLexSynchronizingLiteral(t *testing.T) {
 	// "admin" arrives as a synchronizing literal; the server must request
 	// continuation before the bytes, and the bytes are taken verbatim.
-	toks, cont := lex(t, "a LOGIN {5}\r\nadmin secret\r\n")
+	res := lex(t, "a LOGIN {5}\r\nadmin secret\r\n")
+	toks, cont := res.toks, res.cont
 	if cont != "+ Ready for literal data\r\n" {
 		t.Errorf("continuation = %q, want the literal-ready line", cont)
 	}
@@ -167,7 +181,8 @@ func TestLexSynchronizingLiteral(t *testing.T) {
 
 func TestLexNonSynchronizingLiteral(t *testing.T) {
 	// {n+} must NOT trigger a continuation request, and may carry CRLF bytes.
-	toks, cont := lex(t, "a APPEND INBOX {6+}\r\nab\r\ncd\r\n")
+	res := lex(t, "a APPEND INBOX {6+}\r\nab\r\ncd\r\n")
+	toks, cont := res.toks, res.cont
 	if cont != "" {
 		t.Errorf("non-sync literal wrote a continuation %q, want none", cont)
 	}
@@ -180,11 +195,38 @@ func TestLexNonSynchronizingLiteral(t *testing.T) {
 }
 
 func TestLexQuotedEscapes(t *testing.T) {
-	toks, _ := lex(t, `a LOGIN "she said \"hi\"" "back\\slash"`+"\r\n")
+	res := lex(t, `a LOGIN "she said \"hi\"" "back\\slash"`+"\r\n")
+	if res.cont != "" {
+		t.Errorf("unexpected continuation %q", res.cont)
+	}
+	toks := res.toks
 	if toks[2].kind != tString || toks[2].val != `she said "hi"` {
 		t.Errorf("quoted = %+v, want she said \"hi\"", toks[2])
 	}
 	if toks[3].val != `back\slash` {
 		t.Errorf("quoted backslash = %q, want back\\slash", toks[3].val)
+	}
+}
+
+// TestLexRejectsMalformedSyntax feeds hostile command framing per RFC 3501
+// section 9 (bare CR, multiline quoted string, invalid literal counts, and
+// unterminated quote).
+func TestLexRejectsMalformedSyntax(t *testing.T) {
+	for _, in := range []string{
+		"a NOOP\rx",
+		"a LOGIN \"un\r\nclosed\" pw\r\n",
+		"a LOGIN {-1}\r\n",
+		"a LOGIN {abc}\r\n",
+		"a LOGIN {5+1}\r\n",
+		"a LOGIN \"unterminated",
+	} {
+		r := &commandReader{
+			br: bufio.NewReader(strings.NewReader(in)),
+			bw: bufio.NewWriter(&bytes.Buffer{}),
+		}
+		toks, err := r.readCommand()
+		if err == nil {
+			t.Errorf("readCommand(%q) succeeded with %+v, want error", in, toks)
+		}
 	}
 }

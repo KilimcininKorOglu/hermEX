@@ -26,17 +26,30 @@ type testClient struct {
 	br   *bufio.Reader
 }
 
-func startServer(t *testing.T) (*testClient, string) {
+// testServer pairs a dialed testClient with the backing mailbox path.
+type testServer struct {
+	client *testClient
+	path   string
+}
+
+// cmdReply holds one IMAP command's untagged lines, status word, and full tagged line.
+type cmdReply struct {
+	untagged []string
+	status   string
+	tagged   string
+}
+
+func startServer(t *testing.T) testServer {
 	t.Helper()
 	path := seededMailbox(t)
 	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
-	return dialServer(t, &Server{Auth: auth, Hostname: "mail.test"}), path
+	return testServer{client: dialServer(t, &Server{Auth: auth, Hostname: "mail.test"}), path: path}
 }
 
 // startOrgServer serves alice@hermex.test with the directory behind the
 // organization checks: bob is a colleague, mallory an account of another
 // organization (static accounts scope by domain).
-func startOrgServer(t *testing.T) (*testClient, string) {
+func startOrgServer(t *testing.T) testServer {
 	t.Helper()
 	path := seededMailbox(t)
 	auth := directory.StaticAccounts{
@@ -44,7 +57,7 @@ func startOrgServer(t *testing.T) (*testClient, string) {
 		"bob@hermex.test":        {Password: "secret", MailboxPath: t.TempDir()},
 		"mallory@other-org.test": {Password: "secret", MailboxPath: t.TempDir()},
 	}
-	return dialServer(t, &Server{Auth: auth, Accounts: auth, Hostname: "mail.test"}), path
+	return testServer{client: dialServer(t, &Server{Auth: auth, Accounts: auth, Hostname: "mail.test"}), path: path}
 }
 
 // seededMailbox creates a mailbox holding two Inbox messages, the first unseen
@@ -58,13 +71,9 @@ func seededMailbox(t *testing.T) string {
 	}
 	inbox := int64(mapi.PrivateFIDInbox)
 	// Two messages: the first unseen, the second \Seen.
-	if _, err := st.AppendMessage(inbox, []byte("Subject: one\r\n\r\nbody"), time.Unix(1, 0), 0); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AppendMessage(inbox, []byte("Subject: two\r\n\r\nbody"), time.Unix(2, 0), objectstore.FlagSeen); err != nil {
-		t.Fatal(err)
-	}
-	st.Close()
+	mustAppend(t, st, inbox, "Subject: one\r\n\r\nbody", time.Unix(1, 0), 0)
+	mustAppend(t, st, inbox, "Subject: two\r\n\r\nbody", time.Unix(2, 0), objectstore.FlagSeen)
+	mustClose(t, st)
 	return path
 }
 
@@ -72,18 +81,12 @@ func seededMailbox(t *testing.T) string {
 // greeting.
 func dialServer(t *testing.T, srv *Server) *testClient {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
-	go func() { _ = srv.Serve(ln) }()
-
+	ln := serveOn(t, srv)
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = conn.Close() })
+	t.Cleanup(func() { mustClose(t, conn) })
 	c := &testClient{t: t, conn: conn, br: bufio.NewReader(conn)}
 	c.expectUntagged("OK", "greeting")
 	return c
@@ -97,25 +100,13 @@ func dialServer(t *testing.T, srv *Server) *testClient {
 func TestLoginRefusesAnUnprovisionedMailbox(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "gone")
 	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
-	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test"}).Serve(ln) }()
-	conn, err := net.Dial("tcp", ln.Addr().String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-	c := &testClient{t: t, conn: conn, br: bufio.NewReader(conn)}
-	c.expectUntagged("OK", "greeting")
+	c := dialServer(t, &Server{Auth: auth, Hostname: "mail.test"})
 
-	if _, status := c.do("a1", "LOGIN alice secret"); status != "NO" {
-		t.Errorf("LOGIN to a missing mailbox = %q, want NO", status)
+	if r := c.do("a1", "LOGIN alice secret"); r.status != "NO" {
+		t.Errorf("LOGIN to a missing mailbox = %q, want NO", r.status)
 	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Errorf("LOGIN created the missing mailbox: %v", err)
+	if info, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("LOGIN created the missing mailbox (info=%v, err=%v)", info, err)
 	}
 }
 
@@ -134,8 +125,9 @@ func (c *testClient) line() string {
 			return line
 		}
 		buf := make([]byte, n)
-		if _, err := io.ReadFull(c.br, buf); err != nil {
-			c.t.Fatalf("read literal: %v", err)
+		n, err := io.ReadFull(c.br, buf)
+		if err != nil || n != len(buf) {
+			c.t.Fatalf("read literal (%d/%d): %v", n, len(buf), err)
 		}
 		more, err := c.br.ReadString('\n')
 		if err != nil {
@@ -173,8 +165,8 @@ func (c *testClient) expectUntagged(word, what string) string {
 }
 
 // do sends a tagged command and returns the untagged lines plus the tagged
-// status word (OK/NO/BAD).
-func (c *testClient) do(tag, cmd string) (untagged []string, status string) {
+// status word and full tagged line.
+func (c *testClient) do(tag, cmd string) cmdReply {
 	c.t.Helper()
 	mustSend(c.t, c.conn, "%s %s\r\n", tag, cmd)
 	return c.collect(tag)
@@ -185,19 +177,20 @@ func (c *testClient) do(tag, cmd string) (untagged []string, status string) {
 // timeout further on.
 func mustSend(t *testing.T, w io.Writer, format string, args ...any) {
 	t.Helper()
-	if _, err := fmt.Fprintf(w, format, args...); err != nil {
-		t.Fatalf("send %q: %v", format, err)
+	if n, err := fmt.Fprintf(w, format, args...); err != nil || n == 0 {
+		t.Fatalf("send %q (n=%d): %v", format, n, err)
 	}
 }
 
 // collect reads untagged responses until the tagged completion for tag,
-// returning the untagged lines and the tagged status word.
-func (c *testClient) collect(tag string) (untagged []string, status string) {
+// returning the untagged lines, status word, and full tagged line.
+func (c *testClient) collect(tag string) cmdReply {
 	c.t.Helper()
+	var untagged []string
 	for {
 		l := c.line()
 		if strings.HasPrefix(l, tag+" ") {
-			return untagged, strings.Fields(l)[1]
+			return cmdReply{untagged: untagged, status: strings.Fields(l)[1], tagged: l}
 		}
 		untagged = append(untagged, l)
 	}
@@ -212,28 +205,27 @@ func (c *testClient) appendMsg(tag, mailbox, msg string) string {
 		c.t.Fatalf("APPEND continuation = %q, want +", cont)
 	}
 	mustSend(c.t, c.conn, "%s\r\n", msg)
-	_, status := c.collect(tag)
-	return status
+	return c.collect(tag).status
 }
 
 func (c *testClient) mustOK(tag, cmd string) []string {
 	c.t.Helper()
-	un, status := c.do(tag, cmd)
-	if status != "OK" {
-		c.t.Fatalf("%s: status %s, want OK", cmd, status)
+	r := c.do(tag, cmd)
+	if r.status != "OK" {
+		c.t.Fatalf("%s: status %s, want OK", cmd, r.status)
 	}
-	return un
+	return r.untagged
 }
 
 func TestIMAPLoginSelectListStatus(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 
 	if un := c.mustOK("a1", "CAPABILITY"); !hasPrefixAny(un, "* CAPABILITY IMAP4rev1") {
 		t.Errorf("CAPABILITY untagged = %v", un)
 	}
 
-	if _, status := c.do("a2", "LOGIN alice wrong"); status != "NO" {
-		t.Errorf("bad LOGIN status = %s, want NO", status)
+	if r := c.do("a2", "LOGIN alice wrong"); r.status != "NO" {
+		t.Errorf("bad LOGIN status = %s, want NO", r.status)
 	}
 	c.mustOK("a3", "LOGIN alice secret")
 
@@ -255,14 +247,14 @@ func TestIMAPLoginSelectListStatus(t *testing.T) {
 		t.Errorf("STATUS = %v", un)
 	}
 
-	_, status := c.do("a7", "LOGOUT")
-	if status != "OK" {
-		t.Errorf("LOGOUT status = %s", status)
+	r := c.do("a7", "LOGOUT")
+	if r.status != "OK" {
+		t.Errorf("LOGOUT status = %s, untagged=%v", r.status, r.untagged)
 	}
 }
 
 func TestIMAPCreateSubscribeLsub(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 
 	c.mustOK("a2", "CREATE Projects")
@@ -287,10 +279,18 @@ func TestIMAPCreateSubscribeLsub(t *testing.T) {
 	if un := c.mustOK("a9", `LIST "" "*"`); containsSubstr(un, `"Projects"`) {
 		t.Errorf("LIST still has deleted Projects: %v", un)
 	}
+
+	// Deleting INBOX is refused and leaves INBOX in LIST (RFC 3501 6.3.4).
+	if r := c.do("a10", "DELETE INBOX"); r.status != "NO" {
+		t.Errorf("DELETE INBOX = %s, want NO", r.status)
+	}
+	if un := c.mustOK("a11", `LIST "" "*"`); !containsSubstr(un, `"INBOX"`) {
+		t.Errorf("INBOX missing from LIST after refused DELETE: %v", un)
+	}
 }
 
 func TestIMAPAuthenticatePlain(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	// SASL PLAIN initial response: base64( authzid NUL authcid NUL passwd ).
 	ir := base64.StdEncoding.EncodeToString([]byte("\x00alice\x00secret"))
 	c.mustOK("a1", "AUTHENTICATE PLAIN "+ir)
@@ -303,17 +303,20 @@ func TestIMAPAuthenticatePlain(t *testing.T) {
 // authentication fails if not. This server grants no proxy rights, so only an
 // empty authzid or one equal to the authcid may log in.
 func TestAuthenticatePlainRefusesAnotherAuthorizationIdentity(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	ir := base64.StdEncoding.EncodeToString([]byte("bob\x00alice\x00secret"))
-	if _, status := c.do("a1", "AUTHENTICATE PLAIN "+ir); status == "OK" {
+	if r := c.do("a1", "AUTHENTICATE PLAIN "+ir); r.status == "OK" {
 		t.Fatal("alice's credentials logged in while asking to act as bob")
+	}
+	if r := c.do("a1s", "SELECT INBOX"); r.status != "NO" {
+		t.Errorf("SELECT after refused AUTHENTICATE = %s, want NO", r.status)
 	}
 	ir = base64.StdEncoding.EncodeToString([]byte("alice\x00alice\x00secret"))
 	c.mustOK("a2", "AUTHENTICATE PLAIN "+ir)
 }
 
 func TestIMAPFetch(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 	c.mustOK("a2", "SELECT INBOX")
 
@@ -339,7 +342,7 @@ func TestIMAPFetch(t *testing.T) {
 }
 
 func TestIMAPFetchSeenSemantics(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 	c.mustOK("a2", "SELECT INBOX")
 
@@ -361,7 +364,7 @@ func TestIMAPFetchSeenSemantics(t *testing.T) {
 }
 
 func TestIMAPStoreAndSearch(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 	c.mustOK("a2", "SELECT INBOX")
 
@@ -406,7 +409,7 @@ func TestIMAPStoreAndSearch(t *testing.T) {
 }
 
 func TestIMAPCopyAndAppend(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 	c.mustOK("a2", "CREATE Projects")
 	c.mustOK("a3", "SELECT INBOX")
@@ -429,7 +432,7 @@ func TestIMAPCopyAndAppend(t *testing.T) {
 }
 
 func TestIMAPExpungeAndClose(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 	c.mustOK("a2", "SELECT INBOX")
 
@@ -444,12 +447,12 @@ func TestIMAPExpungeAndClose(t *testing.T) {
 
 	// CLOSE expunges silently (no untagged EXPUNGE) and deselects.
 	c.mustOK("a6", `STORE 1 +FLAGS (\Deleted)`)
-	if un, status := c.do("a7", "CLOSE"); status != "OK" || containsSubstr(un, "EXPUNGE") {
-		t.Errorf("CLOSE un=%v status=%s", un, status)
+	if r := c.do("a7", "CLOSE"); r.status != "OK" || containsSubstr(r.untagged, "EXPUNGE") {
+		t.Errorf("CLOSE un=%v status=%s", r.untagged, r.status)
 	}
 	// After CLOSE no mailbox is selected, so FETCH is rejected.
-	if _, status := c.do("a8", "FETCH 1 FLAGS"); status != "NO" {
-		t.Errorf("FETCH after CLOSE status = %s, want NO", status)
+	if r := c.do("a8", "FETCH 1 FLAGS"); r.status != "NO" {
+		t.Errorf("FETCH after CLOSE status = %s, want NO", r.status)
 	}
 }
 

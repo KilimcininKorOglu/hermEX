@@ -42,7 +42,7 @@ func TestExpungeThatTheStoreRefusesKeepsTheMessage(t *testing.T) {
 	if len(c.sel.msgs) != 2 {
 		t.Errorf("the session dropped %d message(s) the store still holds", 2-len(c.sel.msgs))
 	}
-	if _, ok := find(sink.snapshot(), "expunge.fail"); !ok {
+	if findEvent(sink.snapshot(), "expunge.fail") == nil {
 		t.Error("the refused expunge left no record")
 	}
 }
@@ -52,12 +52,12 @@ func TestExpungeThatTheStoreRefusesKeepsTheMessage(t *testing.T) {
 // destination mailbox is restored to its state before the attempt, so the first
 // copy must not stay behind.
 func TestCopyThatFailsPartwayLeavesTheDestinationAsItWas(t *testing.T) {
-	_, path := startServer(t)
-	st, err := objectstore.Open(path)
+	ts := startServer(t)
+	st, err := objectstore.Open(ts.path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	dest, err := st.CreateFolder(nil, "Projects")
 	if err != nil {
 		t.Fatal(err)
@@ -67,8 +67,8 @@ func TestCopyThatFailsPartwayLeavesTheDestinationAsItWas(t *testing.T) {
 
 	all, err := parseSeqSet("1:*")
 	mustNoErr(t, "parse 1:*", err)
-	if _, _, ok := c.copyToDest(all, true, st, dest); ok {
-		t.Fatal("copy of a message that cannot be read reported success")
+	if src, dst, ok := c.copyToDest(all, true, st, dest); ok {
+		t.Fatalf("copy of a message that cannot be read reported success (src=%v, dst=%v)", src, dst)
 	}
 	left, err := st.ListMessages(dest)
 	if err != nil {
@@ -101,7 +101,7 @@ func TestMoveWhoseSourceDeleteFailsKeepsTheMessage(t *testing.T) {
 	if len(c.sel.msgs) != 2 {
 		t.Errorf("the session holds %d messages, want both", len(c.sel.msgs))
 	}
-	if _, ok := find(sink.snapshot(), "expunge.fail"); !ok {
+	if findEvent(sink.snapshot(), "expunge.fail") == nil {
 		t.Error("the refused removal left no record")
 	}
 }
@@ -111,7 +111,8 @@ func TestMoveWhoseSourceDeleteFailsKeepsTheMessage(t *testing.T) {
 // mailbox but stays recoverable. This is the IMAP leg of routing every hard-delete
 // into the dumpster.
 func TestIMAPExpungeGoesToDumpster(t *testing.T) {
-	c, path := startServer(t)
+	ts := startServer(t)
+	c := ts.client
 	c.mustOK("a1", "LOGIN alice secret")
 	c.mustOK("a2", "SELECT INBOX")
 	c.mustOK("a3", `STORE 1 +FLAGS (\Deleted)`)
@@ -119,11 +120,11 @@ func TestIMAPExpungeGoesToDumpster(t *testing.T) {
 
 	// A second handle (WAL allows concurrent reads) sees the expunged message in the
 	// dumpster, not gone.
-	st, err := objectstore.Open(path)
+	st, err := objectstore.Open(ts.path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	dump, err := st.ListSoftDeleted(int64(mapi.PrivateFIDInbox))
 	if err != nil {
 		t.Fatal(err)

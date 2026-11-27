@@ -17,7 +17,7 @@ const injected = "x\r\n* BAD forged\r\n"
 // takes a name that would break the response framing. A literal argument carries
 // raw octets, so CREATE is the door a CR or LF walks through.
 func TestCreateRefusesAControlCharacterInAMailboxName(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 
 	mustSend(c.t, c.conn, "a2 CREATE {%d}\r\n", len(injected))
@@ -25,8 +25,8 @@ func TestCreateRefusesAControlCharacterInAMailboxName(t *testing.T) {
 		t.Fatalf("CREATE continuation = %q, want +", cont)
 	}
 	mustSend(c.t, c.conn, "%s\r\n", injected)
-	if _, status := c.collect("a2"); status != "NO" {
-		t.Errorf("CREATE with an embedded CRLF = %s, want NO", status)
+	if r := c.collect("a2"); r.status != "NO" {
+		t.Errorf("CREATE with an embedded CRLF = %s, want NO", r.status)
 	}
 
 	// The name is not in the tree, so nothing renders it later either.
@@ -56,7 +56,7 @@ func TestMailboxSafeRefusesEveryControlCharacter(t *testing.T) {
 // TestRenameRefusesAControlCharacterInAMailboxName covers the second door into
 // the folder tree.
 func TestRenameRefusesAControlCharacterInAMailboxName(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 	c.mustOK("a2", "CREATE plain")
 
@@ -65,9 +65,14 @@ func TestRenameRefusesAControlCharacterInAMailboxName(t *testing.T) {
 		t.Fatalf("RENAME continuation = %q, want +", cont)
 	}
 	mustSend(c.t, c.conn, "%s\r\n", injected)
-	if _, status := c.collect("a3"); status != "NO" {
-		t.Errorf("RENAME to a name with an embedded CRLF = %s, want NO", status)
+	if r := c.collect("a3"); r.status != "NO" {
+		t.Errorf("RENAME to a name with an embedded CRLF = %s, want NO", r.status)
 	}
+
+	// Refused RENAME leaves plain in place and nothing forged in LIST.
+	list := strings.Join(c.mustOK("a4", `LIST "" *`), "\n")
+	wantContains(t, "LIST after refused RENAME", list, `"plain"`)
+	wantNotContains(t, "LIST after refused RENAME", list, "forged")
 }
 
 // TestAStoredControlCharacterNameGoesOutAsALiteral covers the name IMAP did not
@@ -76,15 +81,14 @@ func TestRenameRefusesAControlCharacterInAMailboxName(t *testing.T) {
 // sent as a length-prefixed literal and the client reads it as data rather than
 // parsing the forged line inside it.
 func TestAStoredControlCharacterNameGoesOutAsALiteral(t *testing.T) {
-	c, path := startServer(t)
-	st, err := objectstore.Open(path)
+	ts := startServer(t)
+	c := ts.client
+	st, err := objectstore.Open(ts.path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.CreateFolder(nil, injected); err != nil {
-		t.Fatal(err)
-	}
-	st.Close()
+	mustCreateFolder(t, st, injected)
+	mustClose(t, st)
 
 	c.mustOK("a1", "LOGIN alice secret")
 	lines := c.mustOK("a2", `LIST "" *`)

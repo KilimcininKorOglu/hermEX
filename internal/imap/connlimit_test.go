@@ -2,6 +2,7 @@ package imap
 
 import (
 	"bufio"
+	"errors"
 	"net"
 	"strings"
 	"testing"
@@ -10,26 +11,25 @@ import (
 	"hermex/internal/directory"
 )
 
+type greetedConn struct {
+	conn net.Conn
+	line string
+}
+
 // cappedServer serves IMAP with a connection cap of one per client address, and
 // returns the listener.
 func cappedServer(t *testing.T) net.Listener {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
 	limiter := connlimit.New()
 	limiter.SetLimits(100, 1)
 	limiter.SetEnabled(true)
 	srv := &Server{Auth: directory.StaticAccounts{}, Hostname: "mail.test"}
 	srv.SetConnLimiter(limiter)
-	go func() { _ = srv.Serve(ln) }()
-	return ln
+	return serveOn(t, srv)
 }
 
 // firstLine dials the listener and returns the first line the server sends.
-func firstLine(t *testing.T, ln net.Listener) (net.Conn, string) {
+func firstLine(t *testing.T, ln net.Listener) greetedConn {
 	t.Helper()
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
@@ -37,10 +37,9 @@ func firstLine(t *testing.T, ln net.Listener) (net.Conn, string) {
 	}
 	line, err := bufio.NewReader(conn).ReadString('\n')
 	if err != nil {
-		_ = conn.Close()
-		t.Fatalf("read greeting: %v", err)
+		t.Fatalf("read greeting: %v", errors.Join(err, conn.Close()))
 	}
-	return conn, strings.TrimRight(line, "\r\n")
+	return greetedConn{conn: conn, line: strings.TrimRight(line, "\r\n")}
 }
 
 // TestConnCapRefusesWithBye is the load-bearing case: a client past the cap is told
@@ -49,20 +48,26 @@ func firstLine(t *testing.T, ln net.Listener) (net.Conn, string) {
 func TestConnCapRefusesWithBye(t *testing.T) {
 	ln := cappedServer(t)
 
-	first, greeting := firstLine(t, ln)
-	defer first.Close()
-	if !strings.HasPrefix(greeting, "* OK") {
-		t.Fatalf("first connection greeting = %q, want an OK greeting", greeting)
+	first := firstLine(t, ln)
+	defer mustClose(t, first.conn)
+	if !strings.HasPrefix(first.line, "* OK") {
+		t.Fatalf("first connection greeting = %q, want an OK greeting", first.line)
 	}
 
-	second, refusal := firstLine(t, ln)
-	defer second.Close()
-	if !strings.HasPrefix(refusal, "* BYE") {
-		t.Errorf("second connection greeting = %q, want an untagged BYE", refusal)
+	second := firstLine(t, ln)
+	defer mustClose(t, second.conn)
+	if !strings.HasPrefix(second.line, "* BYE") {
+		t.Errorf("second connection greeting = %q, want an untagged BYE", second.line)
 	}
-	if !strings.Contains(refusal, "too many connections") {
-		t.Errorf("refusal = %q, want it to name the cap", refusal)
+	if !strings.Contains(second.line, "too many connections") {
+		t.Errorf("refusal = %q, want it to name the cap", second.line)
 	}
+
+	// Refusing the second connection leaves the first session alive.
+	mustSend(t, first.conn, "a1 NOOP\r\n")
+	resp, err := bufio.NewReader(first.conn).ReadString('\n')
+	mustNoErr(t, "read NOOP on first conn", err)
+	wantPrefix(t, "NOOP on first conn", resp, "a1 OK")
 }
 
 // TestConnCapAdmitsAfterAClose proves the cap is a concurrency bound, not a
@@ -70,16 +75,17 @@ func TestConnCapRefusesWithBye(t *testing.T) {
 func TestConnCapAdmitsAfterAClose(t *testing.T) {
 	ln := cappedServer(t)
 
-	first, _ := firstLine(t, ln)
-	_ = first.Close()
+	first := firstLine(t, ln)
+	wantPrefix(t, "first connection greeting", first.line, "* OK")
+	mustClose(t, first.conn)
 
 	// The release runs when the handler returns, which happens once the server
 	// notices the close, so retry briefly rather than racing it.
 	var greeting string
 	for range 100 {
-		conn, line := firstLine(t, ln)
-		greeting = line
-		_ = conn.Close()
+		gc := firstLine(t, ln)
+		greeting = gc.line
+		mustClose(t, gc.conn)
 		if strings.HasPrefix(greeting, "* OK") {
 			return
 		}

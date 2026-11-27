@@ -10,8 +10,8 @@ func TestFlagBitCaseInsensitive(t *testing.T) {
 	if bit, ok := flagBit(`\seen`); !ok || bit != objectstore.FlagSeen {
 		t.Errorf("flagBit(\\seen) = %d, %v; want %d, true", bit, ok, objectstore.FlagSeen)
 	}
-	if _, ok := flagBit(`$label1`); ok {
-		t.Errorf("flagBit(keyword) ok = true, want false (keywords not persisted)")
+	if bit, ok := flagBit(`$label1`); ok {
+		t.Errorf("flagBit(keyword) = %d, ok = true; want false (keywords not persisted)", bit)
 	}
 }
 

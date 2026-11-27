@@ -1,6 +1,9 @@
 package imap
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestPartialRefusesAnOutOfRangeNumber is the load-bearing case: the octet window
 // is two numbers the client sends, and they reach an expression that slices the
@@ -79,16 +82,19 @@ func TestApplyPartialNeverSlicesOutOfRange(t *testing.T) {
 // reach the client as a status, and the connection must go on serving. Before the
 // bound, this command panicked inside the FETCH render and took the daemon with it.
 func TestFetchSurvivesABadPartial(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 	c.mustOK("a2", "SELECT INBOX")
 
 	for _, spec := range []string{"<1.9223372036854775807>", "<-1.10>", "<4294967296.1>"} {
-		if _, status := c.do("a3", "FETCH 1 BODY[]"+spec); status != "BAD" {
-			t.Errorf("FETCH with %s: status %s, want BAD", spec, status)
+		if r := c.do("a3", "FETCH 1 BODY[]"+spec); r.status != "BAD" {
+			t.Errorf("FETCH with %s: status %s, want BAD", spec, r.status)
 		}
 	}
-	if _, status := c.do("a4", "NOOP"); status != "OK" {
-		t.Errorf("the connection must keep serving, NOOP status %s", status)
+	if flags := strings.Join(c.mustOK("a3f", "FETCH 1 FLAGS"), " "); strings.Contains(flags, `\Seen`) {
+		t.Errorf("refused partial FETCH marked message \\Seen: %q", flags)
+	}
+	if r := c.do("a4", "NOOP"); r.status != "OK" {
+		t.Errorf("the connection must keep serving, NOOP status %s", r.status)
 	}
 }

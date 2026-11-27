@@ -2,6 +2,7 @@ package imap
 
 import (
 	"bufio"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"path/filepath"
@@ -35,28 +36,25 @@ func TestIMAPPrivilegeDenied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	auth := privDir{
 		StaticAccounts: directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}},
 		privs:          directory.ServicePrivileges{POP3IMAP: false, SMTP: true, Web: true, EAS: true, DAV: true},
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test"}).Serve(ln) }()
+	ln := serveOn(t, &Server{Auth: auth, Hostname: "mail.test"})
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer mustClose(t, conn)
 	br := bufio.NewReader(conn)
-	if _, err := br.ReadString('\n'); err != nil { // greeting
+	greeting, err := br.ReadString('\n')
+	if err != nil {
 		t.Fatal(err)
 	}
+	wantPrefix(t, "greeting", greeting, "* OK")
 
 	resp := exchangeLine(t, conn, br, "a LOGIN alice secret")
 	if !strings.HasPrefix(resp, "a NO") {
@@ -64,6 +62,11 @@ func TestIMAPPrivilegeDenied(t *testing.T) {
 	}
 	if !strings.Contains(resp, "disabled") {
 		t.Errorf("denial response = %q, want it to mention the service is disabled", resp)
+	}
+	ir := base64.StdEncoding.EncodeToString([]byte("\x00alice\x00secret"))
+	authResp := exchangeLine(t, conn, br, "a2 AUTHENTICATE PLAIN "+ir)
+	if !strings.HasPrefix(authResp, "a2 NO") {
+		t.Fatalf("AUTHENTICATE PLAIN with disabled privilege got %q, want tagged NO", authResp)
 	}
 	// The refusal leaves the session unauthenticated (RFC 3501 6.2.3: a NO to LOGIN
 	// keeps the not-authenticated state), so the mailbox stays out of reach.
@@ -77,8 +80,8 @@ func TestIMAPPrivilegeDenied(t *testing.T) {
 // the test when either the write or the read fails.
 func exchangeLine(t *testing.T, conn net.Conn, br *bufio.Reader, cmd string) string {
 	t.Helper()
-	if _, err := fmt.Fprintf(conn, "%s\r\n", cmd); err != nil {
-		t.Fatalf("send %q: %v", cmd, err)
+	if n, err := fmt.Fprintf(conn, "%s\r\n", cmd); err != nil || n == 0 {
+		t.Fatalf("send %q (n=%d): %v", cmd, n, err)
 	}
 	resp, err := br.ReadString('\n')
 	if err != nil {

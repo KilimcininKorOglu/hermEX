@@ -35,7 +35,7 @@ func (c *testClient) taggedLine(tag, cmd string) string {
 // UNSELECT capabilities, ID returning the server name in any state, and UNSELECT
 // returning to the authenticated state WITHOUT expunging \Deleted messages.
 func TestIMAPIDUnselectCapability(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 
 	caps := strings.Join(c.mustOK("a1", "CAPABILITY"), " ")
 	for _, want := range []string{"CHILDREN", "ID", "UNSELECT"} {
@@ -45,17 +45,17 @@ func TestIMAPIDUnselectCapability(t *testing.T) {
 	}
 
 	// ID is valid in any state (here before login) and returns the server name.
-	un, status := c.do("a2", `ID ("name" "TestClient")`)
-	if status != "OK" {
-		t.Fatalf("ID status = %s, want OK", status)
+	r := c.do("a2", `ID ("name" "TestClient")`)
+	if r.status != "OK" {
+		t.Fatalf("ID status = %s, want OK", r.status)
 	}
-	if !strings.Contains(strings.Join(un, " "), `"name" "hermEX"`) {
-		t.Errorf("ID response = %v, want the server name", un)
+	if !strings.Contains(strings.Join(r.untagged, " "), `"name" "hermEX"`) {
+		t.Errorf("ID response = %v, want the server name", r.untagged)
 	}
 
 	// UNSELECT needs a selected mailbox.
-	if _, status := c.do("a3", "UNSELECT"); status != "NO" {
-		t.Errorf("UNSELECT with no mailbox = %s, want NO", status)
+	if r := c.do("a3", "UNSELECT"); r.status != "NO" {
+		t.Errorf("UNSELECT with no mailbox = %s, want NO", r.status)
 	}
 
 	// Mark a message \Deleted, then UNSELECT: it must NOT be expunged, so a
@@ -73,7 +73,7 @@ func TestIMAPIDUnselectCapability(t *testing.T) {
 // TestIMAPUIDPlus covers UIDPLUS (RFC 4315): APPENDUID on APPEND, COPYUID on COPY,
 // and selective UID EXPUNGE.
 func TestIMAPUIDPlus(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 	c.mustOK("a2", "SELECT INBOX") // two messages, UIDs 1 and 2
 
@@ -101,18 +101,18 @@ func TestIMAPUIDPlus(t *testing.T) {
 	// UID EXPUNGE removes only the targeted \Deleted UID; the other \Deleted
 	// message (UID 2, outside the set) survives.
 	c.mustOK("a6", `STORE 1:2 +FLAGS (\Deleted)`)
-	un, status := c.do("a7", "UID EXPUNGE 1")
-	if status != "OK" {
-		t.Fatalf("UID EXPUNGE status = %s, want OK", status)
+	r := c.do("a7", "UID EXPUNGE 1")
+	if r.status != "OK" {
+		t.Fatalf("UID EXPUNGE status = %s, want OK", r.status)
 	}
 	exp := 0
-	for _, l := range un {
+	for _, l := range r.untagged {
 		if strings.HasSuffix(l, "EXPUNGE") {
 			exp++
 		}
 	}
 	if exp != 1 {
-		t.Errorf("UID EXPUNGE 1 emitted %d EXPUNGE lines, want exactly 1: %v", exp, un)
+		t.Errorf("UID EXPUNGE 1 emitted %d EXPUNGE lines, want exactly 1: %v", exp, r.untagged)
 	}
 	if got := strings.Join(c.mustOK("a8", "UID FETCH 2 (UID)"), " "); !strings.Contains(got, "UID 2") {
 		t.Errorf("UID 2 (\\Deleted but outside the set) should survive UID EXPUNGE 1: %q", got)
@@ -122,7 +122,7 @@ func TestIMAPUIDPlus(t *testing.T) {
 // TestIMAPMove covers MOVE (RFC 6851): the message leaves the source (COPYUID +
 // EXPUNGE) and lands in the destination.
 func TestIMAPMove(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 	c.mustOK("a2", "SELECT INBOX") // UIDs 1, 2
 	c.mustOK("a3", "CREATE Projects")
@@ -131,16 +131,16 @@ func TestIMAPMove(t *testing.T) {
 		t.Errorf("CAPABILITY missing MOVE: %s", caps)
 	}
 
-	un, status := c.do("a4", "MOVE 1 Projects")
-	if status != "OK" {
-		t.Fatalf("MOVE status = %s, want OK", status)
+	r := c.do("a4", "MOVE 1 Projects")
+	if r.status != "OK" {
+		t.Fatalf("MOVE status = %s, want OK", r.status)
 	}
-	joined := strings.Join(un, " ")
+	joined := strings.Join(r.untagged, " ")
 	if !strings.Contains(joined, "[COPYUID ") {
-		t.Errorf("MOVE missing the [COPYUID ...] untagged OK: %v", un)
+		t.Errorf("MOVE missing the [COPYUID ...] untagged OK: %v", r.untagged)
 	}
 	if !strings.Contains(joined, "EXPUNGE") {
-		t.Errorf("MOVE missing the untagged EXPUNGE: %v", un)
+		t.Errorf("MOVE missing the untagged EXPUNGE: %v", r.untagged)
 	}
 
 	if got := strings.Join(c.mustOK("a5", "SELECT INBOX"), " "); !strings.Contains(got, "1 EXISTS") {
@@ -154,7 +154,7 @@ func TestIMAPMove(t *testing.T) {
 // TestIMAPSpecialUse covers SPECIAL-USE (RFC 6154): LIST tags the well-known
 // folders with \Sent/\Drafts/\Trash/\Junk so clients auto-discover them.
 func TestIMAPSpecialUse(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 
 	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "SPECIAL-USE") {
@@ -172,7 +172,7 @@ func TestIMAPSpecialUse(t *testing.T) {
 // TestIMAPAuthLogin covers the AUTHENTICATE LOGIN SASL mechanism: the base64
 // username/password challenge exchange, and AUTH=LOGIN in the capability list.
 func TestIMAPAuthLogin(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "AUTH=LOGIN") {
 		t.Errorf("CAPABILITY missing AUTH=LOGIN: %s", caps)
 	}
@@ -187,8 +187,8 @@ func TestIMAPAuthLogin(t *testing.T) {
 		t.Fatalf("password challenge = %q, want %q", l, "+ "+enc("Password:"))
 	}
 	mustSend(c.t, c.conn, "%s\r\n", enc("secret"))
-	if _, status := c.collect("a1"); status != "OK" {
-		t.Fatalf("AUTHENTICATE LOGIN status = %s, want OK", status)
+	if r := c.collect("a1"); r.status != "OK" {
+		t.Fatalf("AUTHENTICATE LOGIN status = %s, want OK (%s)", r.status, r.tagged)
 	}
 
 	// Authenticated: a TRANSACTION command now works.
@@ -198,20 +198,21 @@ func TestIMAPAuthLogin(t *testing.T) {
 // TestIMAPQuota covers QUOTA (RFC 2087): GETQUOTAROOT/GETQUOTA report the mailbox
 // STORAGE quota read from the store, and SETQUOTA is refused for a regular client.
 func TestIMAPQuota(t *testing.T) {
-	c, path := startServer(t)
+	ts := startServer(t)
+	c := ts.client
 	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "QUOTA") {
 		t.Errorf("CAPABILITY missing QUOTA: %s", caps)
 	}
 
 	// Set a storage quota directly in the store before login.
-	st, err := objectstore.Open(path)
+	st, err := objectstore.Open(ts.path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := st.SetQuota(objectstore.QuotaLimits{StorageKB: 500000}); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	c.mustOK("a1", "LOGIN alice secret")
 
@@ -235,8 +236,8 @@ func TestIMAPQuota(t *testing.T) {
 // limit it asked for is stored nowhere.
 func checkSetQuotaRefused(t *testing.T, c *testClient) {
 	t.Helper()
-	if _, status := c.do("a4", `SETQUOTA "" (STORAGE 999999)`); status != "NO" {
-		t.Errorf("SETQUOTA = %s, want NO (not permitted for a client)", status)
+	if r := c.do("a4", `SETQUOTA "" (STORAGE 999999)`); r.status != "NO" {
+		t.Errorf("SETQUOTA = %s, want NO (not permitted for a client)", r.status)
 	}
 	if got := strings.Join(c.mustOK("a5", `GETQUOTA ""`), " "); strings.Contains(got, "999999") {
 		t.Errorf("GETQUOTA after the refused SETQUOTA = %q, the client's limit was stored", got)
@@ -246,7 +247,7 @@ func checkSetQuotaRefused(t *testing.T, c *testClient) {
 // TestIMAPESearch covers ESEARCH (RFC 4731): SEARCH RETURN (...) yields an ESEARCH
 // response with only the requested result options.
 func TestIMAPESearch(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 	c.mustOK("a2", "SELECT INBOX") // two messages, seq 1 and 2
 
@@ -254,13 +255,13 @@ func TestIMAPESearch(t *testing.T) {
 		t.Errorf("CAPABILITY missing ESEARCH: %s", caps)
 	}
 
-	un, status := c.do("a3", "SEARCH RETURN (MIN MAX COUNT ALL) ALL")
-	if status != "OK" {
-		t.Fatalf("ESEARCH status = %s, want OK", status)
+	r := c.do("a3", "SEARCH RETURN (MIN MAX COUNT ALL) ALL")
+	if r.status != "OK" {
+		t.Fatalf("ESEARCH status = %s, want OK", r.status)
 	}
-	joined := strings.Join(un, " ")
+	joined := strings.Join(r.untagged, " ")
 	if !strings.Contains(joined, "ESEARCH") {
-		t.Fatalf("want an ESEARCH response, got %v", un)
+		t.Fatalf("want an ESEARCH response, got %v", r.untagged)
 	}
 	for _, want := range []string{"COUNT 2", "MIN 1", "MAX 2", "ALL 1:2"} {
 		if !strings.Contains(joined, want) {
@@ -272,7 +273,7 @@ func TestIMAPESearch(t *testing.T) {
 // TestIMAPMultiAppend covers MULTIAPPEND (RFC 3502): one APPEND carrying two
 // message literals stores both and reports a uid-set in APPENDUID.
 func TestIMAPMultiAppend(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 	c.mustOK("a2", "SELECT INBOX") // two messages already
 
@@ -304,7 +305,7 @@ func TestIMAPMultiAppend(t *testing.T) {
 // but no message literal. RFC 3502 section 6: if the server cannot append every
 // message, it appends none, so the first, well-formed message must not stay.
 func TestMultiAppendIsAllOrNothing(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 	c.mustOK("a2", "SELECT INBOX") // two messages already
 
@@ -320,7 +321,7 @@ func TestMultiAppendIsAllOrNothing(t *testing.T) {
 
 // TestIMAPSort covers SORT (RFC 5256): ordering by subject, and REVERSE.
 func TestIMAPSort(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 	c.mustOK("a2", "SELECT INBOX") // seq 1 = "one", seq 2 = "two"
 
@@ -343,7 +344,7 @@ func TestIMAPSort(t *testing.T) {
 // TestIMAPThread covers THREAD (RFC 5256): a reply nests under its parent for both
 // the REFERENCES and ORDEREDSUBJECT algorithms.
 func TestIMAPThread(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 	c.mustOK("a2", "CREATE Thr")
 
@@ -367,12 +368,13 @@ func TestIMAPThread(t *testing.T) {
 	if un := strings.Join(c.mustOK("a7", "THREAD ORDEREDSUBJECT UTF-8 ALL"), " "); !strings.Contains(un, "(1 2)") {
 		t.Errorf("THREAD ORDEREDSUBJECT = %q, want \"(1 2)\" (same base subject)", un)
 	}
+	wantStatus(t, "THREAD with unsupported algorithm", c, "a8", "THREAD UNKNOWN UTF-8 ALL", "BAD")
 }
 
 // TestIMAPBinary covers BINARY (RFC 3516): FETCH BINARY[] returns the body decoded
 // from its Content-Transfer-Encoding, and BINARY.SIZE[] reports the decoded length.
 func TestIMAPBinary(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 	c.mustOK("a2", "CREATE Bin")
 
@@ -398,7 +400,7 @@ func TestIMAPBinary(t *testing.T) {
 // TestIMAPCompress covers COMPRESS DEFLATE (RFC 4978): after activation, commands
 // round-trip over the compressed link and COMPRESS=DEFLATE is no longer advertised.
 func TestIMAPCompress(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 
 	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "COMPRESS=DEFLATE") {
@@ -407,8 +409,8 @@ func TestIMAPCompress(t *testing.T) {
 
 	// Activate compression; the tagged OK arrives uncompressed.
 	mustSend(c.t, c.conn, "a2 COMPRESS DEFLATE\r\n")
-	if _, status := c.collect("a2"); status != "OK" {
-		t.Fatalf("COMPRESS status = %s, want OK", status)
+	if r := c.collect("a2"); r.status != "OK" {
+		t.Fatalf("COMPRESS status = %s, want OK (%s)", r.status, r.tagged)
 	}
 
 	// Both directions are DEFLATE now; wrap the client I/O to match.
@@ -416,31 +418,47 @@ func TestIMAPCompress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.br = bufio.NewReader(flate.NewReader(c.br))
+	fr := flate.NewReader(c.br)
+	t.Cleanup(func() { mustClose(t, fr) })
+	c.br = bufio.NewReader(fr)
 
 	// A command over the compressed link must round-trip.
 	mustSend(t, fw, "a3 CAPABILITY\r\n")
 	if err := fw.Flush(); err != nil {
 		t.Fatal(err)
 	}
-	un, status := c.collect("a3")
-	if status != "OK" {
-		t.Fatalf("compressed CAPABILITY status = %s, want OK", status)
+	r := c.collect("a3")
+	if r.status != "OK" {
+		t.Fatalf("compressed CAPABILITY status = %s, want OK (%s)", r.status, r.tagged)
 	}
-	joined := strings.Join(un, " ")
+	joined := strings.Join(r.untagged, " ")
 	if !strings.Contains(joined, "IMAP4rev1") {
 		t.Errorf("compressed CAPABILITY = %q, want IMAP4rev1", joined)
 	}
 	if strings.Contains(joined, "COMPRESS=DEFLATE") {
 		t.Errorf("COMPRESS=DEFLATE still advertised after activation: %q", joined)
 	}
+
+	// Duplicate COMPRESS DEFLATE returns NO [COMPRESSIONACTIVE] while the stream stays usable.
+	mustSend(t, fw, "a4 COMPRESS DEFLATE\r\n")
+	if err := fw.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	dup := c.collect("a4")
+	wantEq(t, "duplicate COMPRESS status", dup.status, "NO")
+	wantContains(t, "duplicate COMPRESS code", dup.tagged, "[COMPRESSIONACTIVE]")
+	mustSend(t, fw, "a5 NOOP\r\n")
+	if err := fw.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	wantEq(t, "NOOP after duplicate COMPRESS", c.collect("a5").status, "OK")
 }
 
 // TestIMAPCondstore covers CONDSTORE (RFC 7162): HIGHESTMODSEQ in SELECT, MODSEQ in
 // FETCH, the UNCHANGEDSINCE conditional STORE with a [MODIFIED] rejection, ENABLE,
 // and HIGHESTMODSEQ in STATUS.
 func TestIMAPCondstore(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 
 	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "CONDSTORE") || !strings.Contains(caps, "ENABLE") {
@@ -480,7 +498,7 @@ func TestIMAPCondstore(t *testing.T) {
 // enabled, and a fresh SELECT (QRESYNC ...) reports the UIDs gone since the client's
 // modseq as VANISHED (EARLIER).
 func TestIMAPQResync(t *testing.T) {
-	c, _ := startServer(t)
+	c := startServer(t).client
 	c.mustOK("a1", "LOGIN alice secret")
 
 	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "QRESYNC") {
@@ -505,6 +523,10 @@ func TestIMAPQResync(t *testing.T) {
 	if !strings.Contains(rsel, "VANISHED (EARLIER) 1") {
 		t.Errorf("SELECT (QRESYNC) = %q, want \"VANISHED (EARLIER) 1\"", rsel)
 	}
+
+	// A mismatched UIDVALIDITY emits no VANISHED (EARLIER) (RFC 7162 3.2.5.2).
+	mismatch := strings.Join(c.mustOK("a7", fmt.Sprintf("SELECT INBOX (QRESYNC (%d %d))", uidv+99, base)), "\n")
+	wantNotContains(t, "SELECT QRESYNC with mismatched UIDVALIDITY", mismatch, "VANISHED (EARLIER)")
 }
 
 // parseNumAfter extracts the run of digits immediately following prefix.
@@ -529,7 +551,7 @@ func parseNumAfter(t *testing.T, s, prefix string) uint64 {
 // TestIMAPACL covers ACL (RFC 4314): MYRIGHTS, granting and adjusting a member's
 // rights via SETACL, reading them with GETACL, and revoking with DELETEACL.
 func TestIMAPACL(t *testing.T) {
-	c, _ := startOrgServer(t)
+	c := startOrgServer(t).client
 	c.mustOK("a1", "LOGIN alice@hermex.test secret")
 
 	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "ACL") {

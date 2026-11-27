@@ -56,9 +56,9 @@ func TestParseSeqSetLargestNumberIsNotStar(t *testing.T) {
 }
 
 func TestParseSeqSetRejects(t *testing.T) {
-	for _, bad := range []string{"", "0", "1,0", "a", "1:b", "1,,2", "4294967296", "-1", "1:", ":1", "**"} {
-		if _, err := parseSeqSet(bad); err == nil {
-			t.Errorf("parseSeqSet(%q) = nil error, want rejection", bad)
+	for _, bad := range []string{"", "0", "1,0", "a", "1:b", "1,,2", "4294967296", "-1", "1:", ":1", "**", "1:2:3"} {
+		if ss, err := parseSeqSet(bad); err == nil {
+			t.Errorf("parseSeqSet(%q) = %+v, nil error, want rejection", bad, ss)
 		}
 	}
 }

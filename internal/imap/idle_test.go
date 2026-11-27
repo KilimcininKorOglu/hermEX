@@ -63,21 +63,20 @@ func TestIMAPIdle(t *testing.T) {
 	appendTo(t, path, inbox, "Subject: one\r\n\r\nbody", time.Unix(1, 0))
 
 	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	mustNoErr(t, "listen", err)
-	t.Cleanup(func() { _ = ln.Close() })
 	srv := &Server{Auth: auth, Hostname: "mail.test"}
 	waker := &fakeIdleWaker{ch: make(chan struct{}, 1)}
 	srv.waker = waker
-	go func() { _ = srv.Serve(ln) }()
+	ln := serveOn(t, srv)
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	mustNoErr(t, "dial", err)
-	t.Cleanup(func() { _ = conn.Close() })
+	t.Cleanup(func() { mustClose(t, conn) })
 	c := &testClient{t: t, conn: conn, br: bufio.NewReader(conn)}
 	c.expectUntagged("OK", "greeting")
 
 	c.mustOK("a1", "LOGIN alice secret")
+	// RFC 2177: IDLE requires a selected mailbox.
+	wantStatus(t, "IDLE before SELECT", c, "a1i", "IDLE", "BAD")
 	c.mustOK("a2", "SELECT INBOX")
 
 	// IDLE must be advertised in CAPABILITY (RFC 2177 §3).
@@ -104,8 +103,13 @@ func TestIMAPIdle(t *testing.T) {
 
 	// End IDLE with DONE; the server sends the tagged completion.
 	mustSend(c.t, c.conn, "DONE\r\n")
-	_, status := c.collect("a4")
-	wantEq(t, "the IDLE termination status", status, "OK")
+	wantEq(t, "the IDLE termination status", c.collect("a4").status, "OK")
+
+	// A non-DONE line during IDLE ends it with BAD and keeps the connection usable.
+	mustSend(c.t, c.conn, "a4b IDLE\r\n")
+	wantPrefix(t, "the second IDLE continuation", c.line(), "+")
+	mustSend(c.t, c.conn, "NOTDONE\r\n")
+	wantEq(t, "non-DONE IDLE termination status", c.collect("a4b").status, "BAD")
 
 	// The reader resumed cleanly: a normal command after IDLE still parses.
 	c.mustOK("a5", "NOOP")
@@ -117,7 +121,6 @@ func appendTo(t *testing.T, path string, folderID int64, raw string, when time.T
 	t.Helper()
 	st, err := objectstore.Open(path)
 	mustNoErr(t, "open the mailbox", err)
-	defer st.Close()
-	_, err = st.AppendMessage(folderID, []byte(raw), when, 0)
-	mustNoErr(t, "append the message", err)
+	defer mustClose(t, st)
+	mustAppend(t, st, folderID, raw, when, 0)
 }

@@ -43,6 +43,8 @@ func TestIMAPMatch(t *testing.T) {
 		{"INBOX", "Inbox", false}, // matcher itself is case-sensitive
 		{"Sent", "Sent", true},
 		{"Sent", "Sentinel", false},
+		{"", "", true},
+		{"", "INBOX", false},
 	}
 	for _, tc := range cases {
 		if got := imapMatch(tc.pattern, tc.name); got != tc.want {

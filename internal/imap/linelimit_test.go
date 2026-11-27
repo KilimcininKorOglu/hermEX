@@ -15,15 +15,9 @@ import (
 // listener.
 func cappedLineServer(t *testing.T, limit int64) net.Listener {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
 	srv := &Server{Auth: directory.StaticAccounts{}, Hostname: "mail.test"}
 	srv.SetMaxCommandLine(limit)
-	go func() { _ = srv.Serve(ln) }()
-	return ln
+	return serveOn(t, srv)
 }
 
 // dialIMAPLine opens a connection and reads the greeting.
@@ -33,11 +27,13 @@ func dialIMAPLine(t *testing.T, ln net.Listener) (net.Conn, *bufio.Reader) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	t.Cleanup(func() { _ = conn.Close() })
+	t.Cleanup(func() { mustClose(t, conn) })
 	br := bufio.NewReader(conn)
-	if _, err := br.ReadString('\n'); err != nil {
+	greeting, err := br.ReadString('\n')
+	if err != nil {
 		t.Fatalf("greeting: %v", err)
 	}
+	wantPrefix(t, "greeting", greeting, "* OK")
 	return conn, br
 }
 
@@ -48,8 +44,8 @@ func TestLongCommandLineIsRefused(t *testing.T) {
 	ln := cappedLineServer(t, 128)
 	conn, br := dialIMAPLine(t, ln)
 
-	if _, err := conn.Write([]byte("a NOOP " + strings.Repeat("x", 500) + "\r\n")); err != nil {
-		t.Fatal(err)
+	if n, err := conn.Write([]byte("a NOOP " + strings.Repeat("x", 500) + "\r\n")); err != nil || n == 0 {
+		t.Fatalf("write long line (n=%d): %v", n, err)
 	}
 	line, err := br.ReadString('\n')
 	if err != nil {
@@ -66,12 +62,14 @@ func TestConnectionSurvivesALongLine(t *testing.T) {
 	ln := cappedLineServer(t, 128)
 	conn, br := dialIMAPLine(t, ln)
 
-	if _, err := conn.Write([]byte(strings.Repeat("x", 500) + "\r\nb NOOP\r\n")); err != nil {
-		t.Fatal(err)
+	if n, err := conn.Write([]byte(strings.Repeat("x", 500) + "\r\nb NOOP\r\n")); err != nil || n == 0 {
+		t.Fatalf("write (n=%d): %v", n, err)
 	}
-	if _, err := br.ReadString('\n'); err != nil { // the BAD
+	refusal, err := br.ReadString('\n')
+	if err != nil {
 		t.Fatalf("read the refusal: %v", err)
 	}
+	wantPrefix(t, "refusal", refusal, "* BAD")
 	line, err := br.ReadString('\n')
 	if err != nil {
 		t.Fatalf("read after the refusal: %v", err)
@@ -87,8 +85,8 @@ func TestCommandLineCapLeavesAShortCommandAlone(t *testing.T) {
 	ln := cappedLineServer(t, 128)
 	conn, br := dialIMAPLine(t, ln)
 
-	if _, err := conn.Write([]byte("c NOOP\r\n")); err != nil {
-		t.Fatal(err)
+	if n, err := conn.Write([]byte("c NOOP\r\n")); err != nil || n == 0 {
+		t.Fatalf("write (n=%d): %v", n, err)
 	}
 	line, err := br.ReadString('\n')
 	if err != nil {
@@ -107,8 +105,8 @@ func TestCommandLineCapLeavesAShortCommandAlone(t *testing.T) {
 func TestServerBoundsALiteralBeforeLogin(t *testing.T) {
 	ln := cappedLineServer(t, 128)
 	conn, br := dialIMAPLine(t, ln)
-	if _, err := conn.Write([]byte("d LOGIN {200+}\r\n" + strings.Repeat("y", 200) + " pw\r\n")); err != nil {
-		t.Fatal(err)
+	if n, err := conn.Write([]byte("d LOGIN {200+}\r\n" + strings.Repeat("y", 200) + " pw\r\n")); err != nil || n == 0 {
+		t.Fatalf("write (n=%d): %v", n, err)
 	}
 	line, err := br.ReadString('\n')
 	if err != nil {

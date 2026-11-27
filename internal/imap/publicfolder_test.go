@@ -28,7 +28,7 @@ func emptyMailbox(t *testing.T, path string) {
 	if err != nil {
 		t.Fatalf("open mailbox %s: %v", path, err)
 	}
-	st.Close()
+	mustClose(t, st)
 }
 
 func grantAnyone(t *testing.T, st *objectstore.Store, fid int64, rights uint32) {
@@ -53,12 +53,7 @@ func grantUser(t *testing.T, st *objectstore.Store, fid int64, user string, righ
 // address so a test can dial one or more clients.
 func publicServer(t *testing.T, accounts directory.StaticAccounts, pub *publicfolder.Service) string {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
-	go func() { _ = (&Server{Auth: accounts, Hostname: "mail.test", Pub: pub}).Serve(ln) }()
+	ln := serveOn(t, &Server{Auth: accounts, Hostname: "mail.test", Pub: pub})
 	return ln.Addr().String()
 }
 
@@ -69,25 +64,11 @@ func dialLogin(t *testing.T, addr, user, pass string) *testClient {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = conn.Close() })
+	t.Cleanup(func() { mustClose(t, conn) })
 	c := &testClient{t: t, conn: conn, br: bufio.NewReader(conn)}
 	c.expectUntagged("OK", "greeting")
 	c.mustOK("login", "LOGIN "+user+" "+pass)
 	return c
-}
-
-// doFull sends a command and returns the untagged lines and the full tagged
-// completion line (so a test can inspect a response code like [READ-ONLY]).
-func (c *testClient) doFull(tag, cmd string) (untagged []string, tagged string) {
-	c.t.Helper()
-	mustSend(c.t, c.conn, "%s %s\r\n", tag, cmd)
-	for {
-		l := c.line()
-		if strings.HasPrefix(l, tag+" ") {
-			return untagged, l
-		}
-		untagged = append(untagged, l)
-	}
 }
 
 func hasLine(lines []string, substr string) bool {
@@ -150,10 +131,11 @@ func TestIMAPPublicFolders(t *testing.T) {
 	wantStatus(t, "STORE on an editor's public selection", c, "st2", `STORE 1 +FLAGS (\Flagged)`, "OK")
 
 	// STATUS answers for a LIST-advertised public folder (clients poll it for badges).
-	stUn, _ := c.doFull("status", `STATUS "Public Folders/Announcements" (MESSAGES UNSEEN)`)
+	stReply := c.do("status", `STATUS "Public Folders/Announcements" (MESSAGES UNSEEN)`)
+	wantEq(t, "STATUS on a public folder status", stReply.status, "OK")
 	// Announcements was seeded empty and the APPEND to it was refused, so it still
 	// holds nothing.
-	wantLine(t, "STATUS on a public folder", stUn, "MESSAGES 0")
+	wantLine(t, "STATUS on a public folder", stReply.untagged, "MESSAGES 0")
 }
 
 // seedPublicGrants provisions one domain's public store with four folders whose
@@ -165,7 +147,7 @@ func seedPublicGrants(t *testing.T, root string) *publicfolder.Service {
 	mustNoErr(t, "provision the public store", pub.Provision("local.test"))
 	ps, err := pub.OpenForDomain("local.test")
 	mustNoErr(t, "open the public store", err)
-	defer ps.Close()
+	defer mustClose(t, ps)
 	ann := mustCreateFolder(t, ps, "Announcements")
 	bul := mustCreateFolder(t, ps, "Bulletin")
 	staff := mustCreateFolder(t, ps, "Staff")
@@ -174,8 +156,7 @@ func seedPublicGrants(t *testing.T, root string) *publicfolder.Service {
 	grantUser(t, ps, bul, "alice@local.test", mapi.FrightsVisible|mapi.FrightsReadAny|mapi.FrightsCreate) // alice may post, not modify
 	grantUser(t, ps, staff, "bob@local.test", mapi.FrightsVisible|mapi.FrightsReadAny)                    // bob only
 	grantUser(t, ps, team, "alice@local.test", mapi.RightsEditor)                                         // alice may edit/delete any
-	_, err = ps.AppendMessage(team, []byte("Subject: t\r\n\r\nteam body"), time.Unix(2, 0), 0)
-	mustNoErr(t, "seed the team message", err)
+	mustAppend(t, ps, team, "Subject: t\r\n\r\nteam body", time.Unix(2, 0), 0)
 	return pub
 }
 
@@ -198,18 +179,17 @@ func wantNoLine(t *testing.T, what string, lines []string, unwanted string) {
 // wantStatus runs one command and checks the tagged status it answers.
 func wantStatus(t *testing.T, what string, c *testClient, tag, cmd, want string) {
 	t.Helper()
-	_, status := c.do(tag, cmd)
-	wantEq(t, what, status, want)
+	wantEq(t, what, c.do(tag, cmd).status, want)
 }
 
 // wantSelect runs a SELECT, requires it to succeed with the given access code,
 // and returns its untagged responses.
 func wantSelect(t *testing.T, what string, c *testClient, tag, cmd, access string) []string {
 	t.Helper()
-	un, tagged := c.doFull(tag, cmd)
-	wantContains(t, what, tagged, "OK")
-	wantContains(t, what+" access", tagged, access)
-	return un
+	r := c.do(tag, cmd)
+	wantContains(t, what, r.tagged, "OK")
+	wantContains(t, what+" access", r.tagged, access)
+	return r.untagged
 }
 
 // TestRefusedPublicSelectDeselects selects Team (read-write), then a public folder
@@ -225,7 +205,7 @@ func TestRefusedPublicSelectDeselects(t *testing.T) {
 	mustNoErr(t, "open the public store", err)
 	peek := mustCreateFolder(t, ps, "Peek")
 	grantUser(t, ps, peek, "alice@local.test", mapi.FrightsVisible) // listed, not readable
-	ps.Close()
+	mustClose(t, ps)
 
 	accounts := directory.StaticAccounts{"alice@local.test": {Password: "secret", MailboxPath: mbox}}
 	c := dialLogin(t, publicServer(t, accounts, pub), "alice@local.test", "secret")
@@ -258,7 +238,7 @@ func TestIMAPPublicFolderTenantIsolation(t *testing.T) {
 		}
 		fid := mustCreateFolder(t, st, d.folder)
 		grantAnyone(t, st, fid, mapi.FrightsVisible|mapi.FrightsReadAny)
-		st.Close()
+		mustClose(t, st)
 	}
 
 	accounts := directory.StaticAccounts{
@@ -275,6 +255,7 @@ func TestIMAPPublicFolderTenantIsolation(t *testing.T) {
 	if hasLine(aliceList, "OtherNews") {
 		t.Errorf("alice leaked other.test's OtherNews: %v", aliceList)
 	}
+	wantStatus(t, "alice selecting other.test folder", alice, "sx", `SELECT "Public Folders/OtherNews"`, "NO")
 
 	carol := dialLogin(t, addr, "carol@other.test", "secret")
 	carolList := carol.mustOK("l", `LIST "" "*"`)
@@ -300,7 +281,7 @@ func TestPublicFolderACLNeedsTheAdministerRight(t *testing.T) {
 	ops := mustCreateFolder(t, ps, "Ops")
 	grantUser(t, ps, ops, "alice@local.test", mapi.RightsAll)
 	grantUser(t, ps, ops, "carol@local.test", mapi.FrightsVisible|mapi.FrightsReadAny)
-	ps.Close()
+	mustClose(t, ps)
 
 	accounts := directory.StaticAccounts{"alice@local.test": {Password: "secret", MailboxPath: mbox}}
 	c := dialLogin(t, publicServer(t, accounts, pub), "alice@local.test", "secret")

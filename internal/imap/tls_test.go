@@ -35,20 +35,16 @@ func TestImplicitTLSSession(t *testing.T) {
 	tlsCfg, err := (&config.Config{TLSCert: certPath, TLSKey: keyPath}).TLSConfig()
 	mustNoErr(t, "build the TLS config", err)
 
-	rawLn, err := net.Listen("tcp", "127.0.0.1:0")
-	mustNoErr(t, "listen", err)
-	t.Cleanup(func() { _ = rawLn.Close() })
 	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
 	// The server holds the TLS config too, as cmd/imap's does on port 993: the
 	// implicit-TLS link must count as encrypted, or the plaintext-login refusal
 	// would turn away every login there.
-	go func() {
-		_ = (&Server{Auth: auth, Hostname: "mail.test", TLSConfig: tlsCfg}).Serve(tls.NewListener(rawLn, tlsCfg))
-	}()
+	srv := &Server{Auth: auth, Hostname: "mail.test", TLSConfig: tlsCfg}
+	rawLn := serveWrapped(t, srv, func(l net.Listener) net.Listener { return tls.NewListener(l, tlsCfg) })
 
 	conn, err := tls.Dial("tcp", rawLn.Addr().String(), &tls.Config{RootCAs: certPool(t, certPath), ServerName: "127.0.0.1"})
 	mustNoErr(t, "dial over TLS", err)
-	t.Cleanup(func() { _ = conn.Close() })
+	t.Cleanup(func() { mustClose(t, conn) })
 	if v := conn.ConnectionState().Version; v < tls.VersionTLS12 {
 		t.Errorf("negotiated TLS version = %#x, want >= 1.2", v)
 	}
@@ -56,11 +52,11 @@ func TestImplicitTLSSession(t *testing.T) {
 	c := &testClient{t: t, conn: conn, br: bufio.NewReader(conn)}
 	c.expectUntagged("OK", "greeting")
 	c.mustOK("a1", "LOGIN alice secret")
-	un, status := c.do("a2", "SELECT INBOX")
-	if status != "OK" {
-		t.Fatalf("SELECT status = %s, want OK", status)
+	r := c.do("a2", "SELECT INBOX")
+	if r.status != "OK" {
+		t.Fatalf("SELECT status = %s, want OK", r.status)
 	}
-	wantLine(t, "SELECT INBOX over TLS", un, "EXISTS")
+	wantLine(t, "SELECT INBOX over TLS", r.untagged, "EXISTS")
 	c.mustOK("a3", "LOGOUT")
 }
 
@@ -69,14 +65,18 @@ func seedOneMessage(t *testing.T, path string) {
 	t.Helper()
 	st, err := objectstore.Open(path)
 	mustNoErr(t, "open the mailbox", err)
-	defer st.Close()
-	_, err = st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("Subject: one\r\n\r\nbody"), time.Unix(1, 0), 0)
-	mustNoErr(t, "append the message", err)
+	defer mustClose(t, st)
+	mustAppend(t, st, int64(mapi.PrivateFIDInbox), "Subject: one\r\n\r\nbody", time.Unix(1, 0), 0)
+}
+
+type tlsServer struct {
+	addr     string
+	certPath string
 }
 
 // startSTARTTLSServer brings up a plaintext IMAP listener whose server has a TLS
 // config, returning the dial address and the cert path for a client trust pool.
-func startSTARTTLSServer(t *testing.T) (addr, certPath string) {
+func startSTARTTLSServer(t *testing.T) tlsServer {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "alice")
 	seedOneMessage(t, path)
@@ -89,41 +89,44 @@ func startSTARTTLSServer(t *testing.T) (addr, certPath string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
 	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
-	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test", TLSConfig: tlsCfg}).Serve(ln) }()
-	return ln.Addr().String(), certPath
+	ln := serveOn(t, &Server{Auth: auth, Hostname: "mail.test", TLSConfig: tlsCfg})
+	return tlsServer{addr: ln.Addr().String(), certPath: certPath}
 }
 
 // TestStartTLSUpgrade proves CAPABILITY advertises STARTTLS, the command upgrades
 // the link in place, an authenticated command runs over TLS, and STARTTLS is no
 // longer advertised once encrypted.
 func TestStartTLSUpgrade(t *testing.T) {
-	addr, certPath := startSTARTTLSServer(t)
-	conn, err := net.Dial("tcp", addr)
+	ts := startSTARTTLSServer(t)
+	conn, err := net.Dial("tcp", ts.addr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer mustClose(t, conn)
 	c := &testClient{t: t, conn: conn, br: bufio.NewReader(conn)}
 	c.expectUntagged("OK", "greeting")
-	if un, _ := c.do("a0", "CAPABILITY"); !containsSub(un, "STARTTLS") {
-		t.Errorf("CAPABILITY does not advertise STARTTLS: %v", un)
+	capReply := c.do("a0", "CAPABILITY")
+	wantEq(t, "CAPABILITY status", capReply.status, "OK")
+	if !containsSub(capReply.untagged, "STARTTLS") {
+		t.Errorf("CAPABILITY does not advertise STARTTLS: %v", capReply.untagged)
 	}
 	c.mustOK("a1", "STARTTLS")
 
-	tconn := tls.Client(conn, &tls.Config{RootCAs: certPool(t, certPath), ServerName: "127.0.0.1"})
+	tconn := tls.Client(conn, &tls.Config{RootCAs: certPool(t, ts.certPath), ServerName: "127.0.0.1"})
 	if err := tconn.Handshake(); err != nil {
 		t.Fatalf("client handshake: %v", err)
 	}
 	tc := &testClient{t: t, conn: tconn, br: bufio.NewReader(tconn)}
+	// A second STARTTLS over an encrypted connection is refused with BAD.
+	if r := tc.do("a1b", "STARTTLS"); r.status != "BAD" {
+		t.Errorf("second STARTTLS status = %s, want BAD", r.status)
+	}
 	tc.mustOK("a2", "LOGIN alice secret")
-	if un, _ := tc.do("a3", "CAPABILITY"); containsSub(un, "STARTTLS") {
-		t.Errorf("STARTTLS still advertised after TLS: %v", un)
+	tlsCap := tc.do("a3", "CAPABILITY")
+	wantEq(t, "TLS CAPABILITY status", tlsCap.status, "OK")
+	if containsSub(tlsCap.untagged, "STARTTLS") {
+		t.Errorf("STARTTLS still advertised after TLS: %v", tlsCap.untagged)
 	}
 	tc.mustOK("a4", "LOGOUT")
 }
@@ -133,27 +136,28 @@ func TestStartTLSUpgrade(t *testing.T) {
 // and offers no AUTH= mechanism, and LOGIN and AUTHENTICATE with the right
 // password are both refused with NO, so the password is never accepted in clear.
 func TestPlaintextLoginWaitsForTLS(t *testing.T) {
-	addr, _ := startSTARTTLSServer(t)
-	conn, err := net.Dial("tcp", addr)
+	ts := startSTARTTLSServer(t)
+	conn, err := net.Dial("tcp", ts.addr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer mustClose(t, conn)
 	c := &testClient{t: t, conn: conn, br: bufio.NewReader(conn)}
 	c.expectUntagged("OK", "greeting")
-	un, _ := c.do("a0", "CAPABILITY")
-	if !containsSub(un, "LOGINDISABLED") || containsSub(un, "AUTH=PLAIN") {
-		t.Errorf("plaintext CAPABILITY = %v, want LOGINDISABLED and no AUTH=", un)
+	capReply := c.do("a0", "CAPABILITY")
+	wantEq(t, "plaintext CAPABILITY status", capReply.status, "OK")
+	if !containsSub(capReply.untagged, "LOGINDISABLED") || containsSub(capReply.untagged, "AUTH=PLAIN") {
+		t.Errorf("plaintext CAPABILITY = %v, want LOGINDISABLED and no AUTH=", capReply.untagged)
 	}
-	if _, status := c.do("a1", "LOGIN alice secret"); status != "NO" {
-		t.Errorf("plaintext LOGIN = %q, want NO", status)
+	if r := c.do("a1", "LOGIN alice secret"); r.status != "NO" {
+		t.Errorf("plaintext LOGIN = %q, want NO", r.status)
 	}
 	// AGFsaWNlAHNlY3JldA== is base64("\x00alice\x00secret").
-	if _, status := c.do("a2", "AUTHENTICATE PLAIN AGFsaWNlAHNlY3JldA=="); status != "NO" {
-		t.Errorf("plaintext AUTHENTICATE = %q, want NO", status)
+	if r := c.do("a2", "AUTHENTICATE PLAIN AGFsaWNlAHNlY3JldA=="); r.status != "NO" {
+		t.Errorf("plaintext AUTHENTICATE = %q, want NO", r.status)
 	}
-	if _, status := c.do("a3", "SELECT INBOX"); status == "OK" {
-		t.Errorf("SELECT after the refused logins = %q, want a refusal", status)
+	if r := c.do("a3", "SELECT INBOX"); r.status == "OK" {
+		t.Errorf("SELECT after the refused logins = %q, want a refusal", r.status)
 	}
 }
 
@@ -172,20 +176,15 @@ func TestLineCapSurvivesStartTLSAndCompress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
 	srv := &Server{Auth: directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}, Hostname: "mail.test", TLSConfig: tlsCfg}
 	srv.SetMaxCommandLine(128)
-	go func() { _ = srv.Serve(ln) }()
+	ln := serveOn(t, srv)
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer mustClose(t, conn)
 	c := &testClient{t: t, conn: conn, br: bufio.NewReader(conn)}
 	c.expectUntagged("OK", "greeting")
 	c.mustOK("a1", "STARTTLS")
@@ -198,14 +197,16 @@ func TestLineCapSurvivesStartTLSAndCompress(t *testing.T) {
 
 	tc.mustOK("a2", "LOGIN alice secret")
 	mustSend(t, tconn, "a3 COMPRESS DEFLATE\r\n")
-	if _, status := tc.collect("a3"); status != "OK" {
-		t.Fatalf("COMPRESS status = %s, want OK", status)
+	if r := tc.collect("a3"); r.status != "OK" {
+		t.Fatalf("COMPRESS status = %s, want OK (%s)", r.status, r.tagged)
 	}
 	fw, err := flate.NewWriter(tconn, flate.DefaultCompression)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantLongLineRefused(t, flushingWriter{fw}, bufio.NewReader(flate.NewReader(tc.br)), "after COMPRESS")
+	fr := flate.NewReader(tc.br)
+	t.Cleanup(func() { mustClose(t, fr) })
+	wantLongLineRefused(t, flushingWriter{fw}, bufio.NewReader(fr), "after COMPRESS")
 }
 
 // flushingWriter flushes a DEFLATE writer after every write, so each command
@@ -224,8 +225,8 @@ func (w flushingWriter) Write(p []byte) (int, error) {
 // line cap answers with.
 func wantLongLineRefused(t *testing.T, w io.Writer, br *bufio.Reader, when string) {
 	t.Helper()
-	if _, err := w.Write([]byte("z NOOP " + strings.Repeat("x", 500) + "\r\n")); err != nil {
-		t.Fatal(err)
+	if n, err := w.Write([]byte("z NOOP " + strings.Repeat("x", 500) + "\r\n")); err != nil || n == 0 {
+		t.Fatalf("%s: write (n=%d): %v", when, n, err)
 	}
 	line, err := br.ReadString('\n')
 	if err != nil {
@@ -240,24 +241,29 @@ func wantLongLineRefused(t *testing.T, w io.Writer, br *bufio.Reader, when strin
 // STARTTLS in one segment is never executed: the distinctive tagged OK for the
 // injected command must never appear (the connection is torn down instead).
 func TestStartTLSRejectsPipelinedInjection(t *testing.T) {
-	addr, _ := startSTARTTLSServer(t)
-	conn, err := net.Dial("tcp", addr)
+	ts := startSTARTTLSServer(t)
+	conn, err := net.Dial("tcp", ts.addr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer mustClose(t, conn)
 	br := bufio.NewReader(conn)
-	if _, err := br.ReadString('\n'); err != nil { // greeting
+	greeting, err := br.ReadString('\n')
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := conn.Write([]byte("a1 STARTTLS\r\na2 NOOP\r\n")); err != nil {
-		t.Fatal(err)
+	wantPrefix(t, "greeting", greeting, "* OK")
+	if n, err := conn.Write([]byte("a1 STARTTLS\r\na2 NOOP\r\n")); err != nil || n == 0 {
+		t.Fatalf("write pipelined STARTTLS (n=%d): %v", n, err)
 	}
 	mustNoErr(t, "set the read deadline", conn.SetReadDeadline(time.Now().Add(2*time.Second)))
 	// The read ends at the deadline or when the server closes; only the bytes matter.
 	rest, err := io.ReadAll(conn)
 	if err != nil && !errors.Is(err, os.ErrDeadlineExceeded) {
 		t.Fatalf("read after STARTTLS: %v", err)
+	}
+	if strings.Contains(string(rest), "a1 OK") {
+		t.Errorf("STARTTLS acknowledged despite pipelined injection: %q", rest)
 	}
 	if strings.Contains(string(rest), "a2 OK") {
 		t.Errorf("injected command executed across the TLS boundary: %q", rest)

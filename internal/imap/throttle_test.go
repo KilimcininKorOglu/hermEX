@@ -21,7 +21,7 @@ func provisionedMailbox(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 	return dir
 }
 
@@ -33,22 +33,19 @@ func provisionedMailbox(t *testing.T) string {
 func TestIMAPLoginThrottle(t *testing.T) {
 	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: t.TempDir()}}
 	srv := &Server{Auth: auth, Hostname: "mail.test", Limiter: authlimit.New(2, time.Minute, time.Minute)}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	go func() { _ = srv.Serve(ln) }()
+	ln := serveOn(t, srv)
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer mustClose(t, conn)
 	br := bufio.NewReader(conn)
-	if _, err := br.ReadString('\n'); err != nil { // greeting
+	greeting, err := br.ReadString('\n')
+	if err != nil {
 		t.Fatal(err)
 	}
+	wantPrefix(t, "greeting", greeting, "* OK")
 
 	login := func(tag string) string {
 		mustSend(t, conn, "%s LOGIN alice wrongpass\r\n", tag)
@@ -74,6 +71,10 @@ func TestIMAPLoginThrottle(t *testing.T) {
 	if r := exchangeLine(t, conn, br, "d LOGIN alice secret"); !strings.Contains(r, "too many failed attempts") {
 		t.Fatalf("correct password during the lockout = %q, want too many failed attempts", r)
 	}
+	// Throttled LOGIN leaves session unauthenticated.
+	if r := exchangeLine(t, conn, br, "e SELECT INBOX"); !strings.HasPrefix(r, "e NO") {
+		t.Errorf("SELECT after throttled LOGIN = %q, want e NO", r)
+	}
 }
 
 // TestIMAPThrottleCountsTheAccountToo proves the account axis is wired at the
@@ -87,12 +88,7 @@ func TestIMAPThrottleCountsTheAccountToo(t *testing.T) {
 		"bob":   {Password: "secret", MailboxPath: provisionedMailbox(t)},
 	}
 	srv := &Server{Auth: auth, Hostname: "mail.test", Limiter: authlimit.New(2, time.Minute, time.Minute)}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	go func() { _ = srv.Serve(ln) }()
+	ln := serveOn(t, srv)
 
 	// Each attempt opens its own connection, the shape a guesser uses.
 	login := func(user, pass string) string {
@@ -101,11 +97,13 @@ func TestIMAPThrottleCountsTheAccountToo(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer conn.Close()
+		defer mustClose(t, conn)
 		br := bufio.NewReader(conn)
-		if _, err := br.ReadString('\n'); err != nil { // greeting
+		greeting, err := br.ReadString('\n')
+		if err != nil {
 			t.Fatal(err)
 		}
+		wantPrefix(t, "greeting", greeting, "* OK")
 		mustSend(t, conn, "a LOGIN %s %s\r\n", user, pass)
 		resp, err := br.ReadString('\n')
 		if err != nil {

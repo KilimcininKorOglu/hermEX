@@ -18,11 +18,9 @@ func fillPastQuota(t *testing.T, path string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	big := "Subject: big\r\n\r\n" + strings.Repeat("x", 4096)
-	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(big), time.Unix(3, 0), 0); err != nil {
-		t.Fatal(err)
-	}
+	mustAppend(t, st, int64(mapi.PrivateFIDInbox), big, time.Unix(3, 0), 0)
 	if err := st.SetQuota(objectstore.QuotaLimits{ReceiveKB: 1}); err != nil {
 		t.Fatal(err)
 	}
@@ -34,8 +32,9 @@ func fillPastQuota(t *testing.T, path string) {
 // MOVE inside the same mailbox adds nothing, so it must still succeed: a full
 // mailbox has to be able to file its mail away to free space.
 func TestAWriteIntoAFullMailboxIsRefusedAsOverQuota(t *testing.T) {
-	c, path := startServer(t)
-	fillPastQuota(t, path)
+	ts := startServer(t)
+	c := ts.client
+	fillPastQuota(t, ts.path)
 	c.mustOK("a1", "LOGIN alice secret")
 	c.mustOK("a2", "CREATE Projects")
 	c.mustOK("a3", "SELECT INBOX")
@@ -50,8 +49,8 @@ func TestAWriteIntoAFullMailboxIsRefusedAsOverQuota(t *testing.T) {
 	// messages plus the one that filled it, and Projects is still empty.
 	assertMessageCount(t, c, "a5a", "INBOX", 3)
 	assertMessageCount(t, c, "a5b", "Projects", 0)
-	if _, status := c.do("a6", "MOVE 1 Projects"); status != "OK" {
-		t.Errorf("MOVE inside a full mailbox = %s, want OK", status)
+	if r := c.do("a6", "MOVE 1 Projects"); r.status != "OK" {
+		t.Errorf("MOVE inside a full mailbox = %s, want OK", r.status)
 	}
 }
 
