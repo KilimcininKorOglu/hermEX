@@ -2,6 +2,7 @@ package ndr
 
 import (
 	"bytes"
+	"slices"
 	"testing"
 
 	"hermex/internal/mapi"
@@ -156,7 +157,8 @@ func TestATruncatedBindIsRefused(t *testing.T) {
 					t.Errorf("a bind cut to %d bytes panicked: %v", n, x)
 				}
 			}()
-			if pdu, err := ParsePDU(full[:n]); err == nil {
+			// Clipped, so a read past the cut cannot reach the rest of the vector.
+			if pdu, err := ParsePDU(slices.Clip(full[:n])); err == nil {
 				t.Errorf("a bind cut to %d bytes parsed as %+v", n, pdu.Bind)
 			}
 		}()
