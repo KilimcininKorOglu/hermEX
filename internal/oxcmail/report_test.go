@@ -53,8 +53,8 @@ func TestImportNDR(t *testing.T) {
 		mapi.PrNonDeliveryReportDiagCode:   35,
 		mapi.PrNonDeliveryReportReasonCode: 1,
 	} {
-		if got, _ := propInt32(r, tag); got != want {
-			t.Errorf("%v = %d, want %d", tag, got, want)
+		if got, ok := propInt32(r, tag); !ok || got != want {
+			t.Errorf("%v = %d (set %v), want %d", tag, got, ok, want)
 		}
 	}
 	if r.Has(mapi.PrDeliverTime) {
@@ -96,9 +96,26 @@ func TestImportMDN(t *testing.T) {
 	wantProp(t, "report text", propString(msg.Props, mapi.PrReportText), "manual-action/MDN-sent-manually; displayed")
 	wantProp(t, "original display to", propString(msg.Props, mapi.PrOriginalDisplayTo), "reader@example.net")
 	wantProp(t, "original message id", propString(msg.Props, mapi.PrOriginalMessageID), "<orig@example.org>")
-	if key, _ := bytesProp(msg.Props, mapi.PrParentKey); string(key) != "\x01\x02\x03" {
-		t.Errorf("parent key = %x, want 010203", key)
+	if key, ok := bytesProp(msg.Props, mapi.PrParentKey); !ok || string(key) != "\x01\x02\x03" {
+		t.Errorf("parent key = %x (set %v), want 010203", key, ok)
 	}
+}
+
+// TestImportSkipsARecipientBlockWithoutAnAddress delivers a report whose blocks a
+// sender broke: RFC 3464 2.3.2 makes Final-Recipient required, so a block without
+// one, or with an empty address, names nobody and must not become a reported
+// recipient row; the well-formed block beside it still does.
+func TestImportSkipsARecipientBlockWithoutAnAddress(t *testing.T) {
+	broken := "Action: failed\r\nStatus: 5.1.1\r\n\r\n" +
+		"Final-Recipient: rfc822;\r\nAction: failed\r\nStatus: 5.1.1\r\n\r\n"
+	msg, err := Import([]byte(dsnMail(broken+failedBlock)), Options{})
+	mustImport(t, err)
+	for _, r := range msg.Recipients {
+		if isReportedRecipient(r) && propString(r, mapi.PrSmtpAddress) == "" {
+			t.Errorf("a block with no address became a reported row: %v", r)
+		}
+	}
+	reportedRow(t, msg, "gone@example.net")
 }
 
 // TestExportReportIsMultipartReport proves a stored report goes out as the
