@@ -64,7 +64,9 @@ func deleteFolder(st *objectstore.Store, dev *deviceState, root *wbxml.Node) int
 		return fhStatusBadSyncKey
 	}
 	fid, err := strconv.ParseInt(serverID, 10, 64)
-	if err != nil {
+	// An id no folder can have (not a number, or below 1) names no folder; only a
+	// real id below the user range is a special system folder.
+	if err != nil || fid < 1 {
 		return fhStatusNotFound
 	}
 	if fid < mapi.PrivateFIDUnassignedStart {

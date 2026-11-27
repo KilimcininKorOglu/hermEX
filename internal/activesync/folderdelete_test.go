@@ -43,7 +43,7 @@ func TestFolderDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	fid, err := strconv.ParseInt(newID, 10, 64)
 	mustNoErr(t, "parse the folder id", err)
 	// A failed lookup reports no folder, which would pass as a deletion.
@@ -116,7 +116,7 @@ func TestFolderDeleteRefusesAMalformedServerID(t *testing.T) {
 	_, created := postCommand(t, ts, "FolderCreate", folderCreateReq(key, "0", "Keep"))
 	keep := created.ChildText(wbxml.FHServerID)
 	key = created.ChildText(wbxml.FHSyncKey)
-	for id, want := range map[string]string{"": "10", "abc": "4", "../" + keep: "4", keep + " ": "4"} {
+	for id, want := range map[string]string{"": "10", "abc": "4", "../" + keep: "4", keep + " ": "4", "-" + keep: "4", "99999999999999999999": "4"} {
 		_, root := postCommand(t, ts, "FolderDelete", folderDeleteReq(key, id))
 		if s := root.ChildText(wbxml.FHStatus); s != want {
 			t.Errorf("ServerId %q Status = %q, want %s", id, s, want)
@@ -132,7 +132,7 @@ func wantFolderPresent(t *testing.T, dir, serverID string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	fid, err := strconv.ParseInt(serverID, 10, 64)
 	if err != nil {
 		t.Fatal(err)
