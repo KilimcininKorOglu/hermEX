@@ -112,7 +112,7 @@ func TestAuthRequired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", resp.StatusCode)
 	}
@@ -125,7 +125,7 @@ func TestMissingHeader(t *testing.T) {
 	resp := mapiPost(t, ts, "/mapi/emsmdb", "PING", nil, func(r *http.Request) {
 		r.Header.Del("X-RequestId")
 	})
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 	if got := resp.Header.Get("X-ResponseCode"); got != "3" {
 		t.Errorf("X-ResponseCode = %q, want 3 (missing header)", got)
 	}
@@ -135,7 +135,7 @@ func TestMissingHeader(t *testing.T) {
 func TestInvalidRequestType(t *testing.T) {
 	ts := newTestServer(t)
 	resp := mapiPost(t, ts, "/mapi/emsmdb", "Bogus", nil, nil)
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 	if got := resp.Header.Get("X-ResponseCode"); got != "8" {
 		t.Errorf("X-ResponseCode = %q, want 8 (invalid request type)", got)
 	}
@@ -146,7 +146,7 @@ func TestInvalidRequestType(t *testing.T) {
 func TestConnectFraming(t *testing.T) {
 	ts := newTestServer(t)
 	resp := mapiPost(t, ts, "/mapi/emsmdb", "Connect", connectBody(), nil)
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 	if got := resp.Header.Get("X-ResponseCode"); got != "0" {
 		t.Errorf("X-ResponseCode = %q, want 0", got)
 	}
@@ -167,7 +167,7 @@ func TestConnectFraming(t *testing.T) {
 func TestExecuteFlow(t *testing.T) {
 	ts := newTestServer(t)
 	conn := mapiPost(t, ts, "/mapi/emsmdb", "Connect", connectBody(), nil)
-	conn.Body.Close()
+	closeBody(t, conn)
 	sid, seq := cookieByName(conn, "sid"), cookieByName(conn, "sequence")
 	if sid == "" || seq == "" {
 		t.Fatal("no cookies from Connect")
@@ -175,7 +175,7 @@ func TestExecuteFlow(t *testing.T) {
 
 	// Execute without cookies -> missing cookie (6).
 	noCookie := mapiPost(t, ts, "/mapi/emsmdb", "Execute", executeBody(), nil)
-	noCookie.Body.Close()
+	closeBody(t, noCookie)
 	if got := noCookie.Header.Get("X-ResponseCode"); got != "6" {
 		t.Errorf("Execute without cookies: X-ResponseCode = %q, want 6", got)
 	}
@@ -185,7 +185,7 @@ func TestExecuteFlow(t *testing.T) {
 		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
 	})
-	ok.Body.Close()
+	closeBody(t, ok)
 	if got := ok.Header.Get("X-ResponseCode"); got != "0" {
 		t.Errorf("Execute with cookies: X-ResponseCode = %q, want 0", got)
 	}
@@ -199,7 +199,7 @@ func TestExecuteFlow(t *testing.T) {
 		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
 	})
-	replay.Body.Close()
+	closeBody(t, replay)
 	if got := replay.Header.Get("X-ResponseCode"); got != "7" {
 		t.Errorf("Execute with a spent sequence: X-ResponseCode = %q, want 7", got)
 	}
@@ -209,7 +209,7 @@ func TestExecuteFlow(t *testing.T) {
 		r.AddCookie(&http.Cookie{Name: "sid", Value: "nope"})
 		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
 	})
-	bad.Body.Close()
+	closeBody(t, bad)
 	if got := bad.Header.Get("X-ResponseCode"); got != "2" {
 		t.Errorf("Execute with bad sid: X-ResponseCode = %q, want 2", got)
 	}
@@ -220,13 +220,13 @@ func TestExecuteFlow(t *testing.T) {
 func TestDisconnect(t *testing.T) {
 	ts := newTestServer(t)
 	conn := mapiPost(t, ts, "/mapi/emsmdb", "Connect", connectBody(), nil)
-	conn.Body.Close()
+	closeBody(t, conn)
 	sid, seq := cookieByName(conn, "sid"), cookieByName(conn, "sequence")
 
 	disc := mapiPost(t, ts, "/mapi/emsmdb", "Disconnect", nil, func(r *http.Request) {
 		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 	})
-	disc.Body.Close()
+	closeBody(t, disc)
 	if got := disc.Header.Get("X-ResponseCode"); got != "0" {
 		t.Errorf("Disconnect: X-ResponseCode = %q, want 0", got)
 	}
@@ -235,7 +235,7 @@ func TestDisconnect(t *testing.T) {
 		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
 	})
-	after.Body.Close()
+	closeBody(t, after)
 	if got := after.Header.Get("X-ResponseCode"); got != "2" {
 		t.Errorf("Execute after Disconnect: X-ResponseCode = %q, want 2 (invalid context)", got)
 	}
@@ -246,7 +246,7 @@ func TestDisconnect(t *testing.T) {
 func TestNspiRouted(t *testing.T) {
 	ts := newTestServer(t)
 	resp := mapiPost(t, ts, "/mapi/nspi", "PING", nil, nil)
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 	if got := resp.Header.Get("X-ResponseCode"); got != "0" {
 		t.Errorf("NSPI PING: X-ResponseCode = %q, want 0", got)
 	}
@@ -259,7 +259,7 @@ func TestNspiRouted(t *testing.T) {
 func TestExecuteRopFraming(t *testing.T) {
 	ts := newTestServer(t)
 	conn := mapiPost(t, ts, "/mapi/emsmdb", "Connect", connectBody(), nil)
-	conn.Body.Close()
+	closeBody(t, conn)
 	sid, seq := cookieByName(conn, "sid"), cookieByName(conn, "sequence")
 
 	// Execute carrying a truncated ROP (RopId only): dispatch can't read the
@@ -275,7 +275,7 @@ func TestExecuteRopFraming(t *testing.T) {
 		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
 	})
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 	body := mustReadAll(t, resp.Body)
 	// strip the meta preamble; payload = execute_response: Status|Error|Flags|RopBufferSize|RopBuffer|AuxBufSize
 	_, payload, found := bytes.Cut(body, []byte("\r\n\r\n"))
@@ -306,7 +306,7 @@ func TestExecuteRopFraming(t *testing.T) {
 func TestExecuteRopLogon(t *testing.T) {
 	ts := newTestServer(t)
 	conn := mapiPost(t, ts, "/mapi/emsmdb", "Connect", connectBody(), nil)
-	conn.Body.Close()
+	closeBody(t, conn)
 	sid, seq := cookieByName(conn, "sid"), cookieByName(conn, "sequence")
 
 	// RopLogon request: header (RopId, LogonId, OutputHandleIndex) + private
@@ -327,7 +327,7 @@ func TestExecuteRopLogon(t *testing.T) {
 		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
 	})
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 	rops, handles := decodeExecuteResponse(t, resp)
 	if len(handles) != 1 {
 		t.Fatalf("logon handles = %v, want one", handles)

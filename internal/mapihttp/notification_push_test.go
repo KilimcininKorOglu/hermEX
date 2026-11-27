@@ -61,7 +61,7 @@ func TestNotificationWaitWakesViaPush(t *testing.T) {
 		t.Fatalf("open store: %v", err)
 	}
 	_, err = st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0)
-	st.Close()
+	closeStore(t, st)
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}

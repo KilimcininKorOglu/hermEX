@@ -76,7 +76,7 @@ func TestReclaimedSessionIsRejectedEndToEnd(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	resp := mapiPost(t, ts, "/mapi/emsmdb", "Connect", connectBody(), nil)
-	resp.Body.Close()
+	closeBody(t, resp)
 	sid, seq := cookieByName(resp, "sid"), cookieByName(resp, "sequence")
 	if sid == "" || seq == "" {
 		t.Fatalf("Connect returned no session cookies (sid=%q seq=%q)", sid, seq)
@@ -90,7 +90,7 @@ func TestReclaimedSessionIsRejectedEndToEnd(t *testing.T) {
 		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
 	})
-	resp.Body.Close()
+	closeBody(t, resp)
 	if got, want := resp.Header.Get("X-ResponseCode"), strconv.Itoa(rcInvalidCtxCookie); got != want {
 		t.Errorf("X-ResponseCode after reclaim = %q, want %q (invalid context cookie)", got, want)
 	}
@@ -120,7 +120,10 @@ func TestExecuteKeepsASessionAlive(t *testing.T) {
 // idle while it runs.
 func TestLookupKeepsAParkedWaitAlive(t *testing.T) {
 	store, accs := testStore(t)
-	sid, _ := store.create(testUser, accs[testUser].MailboxPath, accs, nil, nil, rop.Locale{})
+	sid, seq := store.create(testUser, accs[testUser].MailboxPath, accs, nil, nil, rop.Locale{})
+	if seq == "" || seq == sid {
+		t.Fatalf("sequence cookie = %q, want a token distinct from the session id", seq)
+	}
 
 	if store.lookup(sid, testUser) == nil {
 		t.Fatal("lookup did not resolve a live session")

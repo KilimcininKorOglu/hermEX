@@ -64,7 +64,7 @@ func TestNSPIQueryRowsIsScopedToTheAuthenticatedUser(t *testing.T) {
 
 	sid, seq := boundSession(t, ts)
 	qr := mapiPost(t, ts, "/mapi/nspi", "QueryRows", queryRowsBody(), withSession(sid, seq))
-	defer qr.Body.Close()
+	defer closeBody(t, qr)
 	if got := qr.Header.Get("X-ResponseCode"); got != "0" {
 		t.Fatalf("QueryRows: X-ResponseCode = %q, want 0", got)
 	}
@@ -89,7 +89,7 @@ func TestNSPIQueryRowsRefusesAnUnauthenticatedBrowse(t *testing.T) {
 		r.Header.Del("Authorization")
 		withSession(sid, seq)(r)
 	})
-	defer qr.Body.Close()
+	defer closeBody(t, qr)
 	if qr.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", qr.StatusCode)
 	}

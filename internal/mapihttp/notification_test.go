@@ -34,7 +34,7 @@ func notifyTestServer(t *testing.T, mailbox string) (*httptest.Server, *Server) 
 func notifyConnect(t *testing.T, ts *httptest.Server) string {
 	t.Helper()
 	conn := mapiPost(t, ts, "/mapi/emsmdb", "Connect", connectBody(), nil)
-	conn.Body.Close()
+	closeBody(t, conn)
 	sid := cookieByName(conn, "sid")
 	if sid == "" {
 		t.Fatal("Connect did not set a sid cookie")
@@ -51,7 +51,7 @@ func notificationWaitFlags(t *testing.T, ts *httptest.Server, sid string) uint32
 	resp := mapiPost(t, ts, "/mapi/emsmdb", "NotificationWait", nil, func(r *http.Request) {
 		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 	})
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 	body := mustReadAll(t, resp.Body)
 	_, payload, found := bytes.Cut(body, []byte("\r\n\r\n"))
 	if !found {
@@ -75,7 +75,8 @@ func subscribeInbox(t *testing.T, sess *rop.Session) {
 	logon = binary.LittleEndian.AppendUint32(logon, 0)
 	logon = binary.LittleEndian.AppendUint32(logon, 0)
 	logon = binary.LittleEndian.AppendUint16(logon, 0)
-	_, h := sess.Dispatch(logon, []uint32{0xFFFFFFFF})
+	lrops, h := sess.Dispatch(logon, []uint32{0xFFFFFFFF})
+	mustRopOK(t, lrops, 0xFE, "Logon")
 	logonH := h[0]
 	if logonH == 0xFFFFFFFF {
 		t.Fatal("logon handle not set")
@@ -86,16 +87,27 @@ func subscribeInbox(t *testing.T, sess *rop.Session) {
 	reg := []byte{0x29, 0x00, 0x00, 0x01, 0x04, 0x00, 0x00}
 	reg = binary.LittleEndian.AppendUint64(reg, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox)))
 	reg = binary.LittleEndian.AppendUint64(reg, 0)
-	sess.Dispatch(reg, []uint32{logonH, 0xFFFFFFFF})
+	rops, hs := sess.Dispatch(reg, []uint32{logonH, 0xFFFFFFFF})
+	// [MS-OXCNOTIF] 2.2.1.2.1: RopId, OutputHandleIndex, then a 4-byte ReturnValue.
+	if len(rops) < 6 || rops[0] != 0x29 || binary.LittleEndian.Uint32(rops[2:]) != 0 {
+		t.Fatalf("RegisterNotification response = % x, want RopId 0x29 with ReturnValue 0", rops)
+	}
+	if len(hs) < 2 || hs[1] == 0xFFFFFFFF {
+		t.Fatalf("RegisterNotification handle table = %#x, want a subscription handle in slot 1", hs)
+	}
 }
 
 // TestNotificationWaitTimeout: a quiet mailbox holds the wait for its interval and
 // returns EventPending=0.
 func TestNotificationWaitTimeout(t *testing.T) {
-	ts, _ := notifyTestServer(t, provisionedDir(t))
+	ts, srv := notifyTestServer(t, provisionedDir(t))
 	sid := notifyConnect(t, ts)
 	if flags := notificationWaitFlags(t, ts, sid); flags != 0 {
 		t.Errorf("EventPending flags = %d, want 0 (no subscription, no change)", flags)
+	}
+	// A quiet wait is not a failure: the session stays usable for the next wait.
+	if srv.sessions.lookup(sid, testUser) == nil {
+		t.Error("the session was dropped after a wait that timed out")
 	}
 }
 
@@ -120,7 +132,7 @@ func TestNotificationWaitPending(t *testing.T) {
 		t.Fatalf("open store: %v", err)
 	}
 	_, err = st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0)
-	st.Close()
+	closeStore(t, st)
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}
@@ -163,7 +175,7 @@ func TestNotificationWaitWakesMidWait(t *testing.T) {
 		t.Fatalf("open store: %v", err)
 	}
 	_, err = st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0)
-	st.Close()
+	closeStore(t, st)
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}

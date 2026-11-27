@@ -47,7 +47,10 @@ func TestBusySessionIsRefusedAtItsAbsoluteLifetime(t *testing.T) {
 // and the open store would leave the leak the cap exists to bound.
 func TestBusySessionIsSweptAtItsAbsoluteLifetime(t *testing.T) {
 	store, accs := testStore(t)
-	sid, _ := store.create(testUser, accs[testUser].MailboxPath, accs, nil, nil, rop.Locale{})
+	sid, seq := store.create(testUser, accs[testUser].MailboxPath, accs, nil, nil, rop.Locale{})
+	if seq == "" || seq == sid {
+		t.Fatalf("sequence cookie = %q, want a token distinct from the session id", seq)
+	}
 	backdateSession(t, store, sid, sessionMaxAge+time.Minute)
 
 	// now is the session's lastSeen, so the idle rule alone would keep it.
@@ -107,7 +110,7 @@ func TestNotificationWaitRefusesAnotherUsersSession(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	resp := mapiPost(t, ts, "/mapi/emsmdb", "Connect", connectBody(), nil)
-	resp.Body.Close()
+	closeBody(t, resp)
 	sid := cookieByName(resp, "sid")
 	if sid == "" {
 		t.Fatal("Connect returned no sid")
@@ -117,7 +120,7 @@ func TestNotificationWaitRefusesAnotherUsersSession(t *testing.T) {
 		r.SetBasicAuth(otherUser, testPass) // authenticated, but not the session's owner
 		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 	})
-	resp.Body.Close()
+	closeBody(t, resp)
 	if got, want := resp.Header.Get("X-ResponseCode"), strconv.Itoa(rcInvalidCtxCookie); got != want {
 		t.Errorf("X-ResponseCode = %q, want %q; another account parked a wait on this mailbox", got, want)
 	}
@@ -126,7 +129,7 @@ func TestNotificationWaitRefusesAnotherUsersSession(t *testing.T) {
 	resp = mapiPost(t, ts, "/mapi/emsmdb", "NotificationWait", nil, func(r *http.Request) {
 		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 	})
-	resp.Body.Close()
+	closeBody(t, resp)
 	if got, want := resp.Header.Get("X-ResponseCode"), strconv.Itoa(rcSuccess); got != want {
 		t.Errorf("the owner's wait = %q, want %q", got, want)
 	}

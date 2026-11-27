@@ -81,7 +81,7 @@ func TestMAPILogsNspiBind(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	resp := mapiPost(t, ts, "/mapi/nspi", "Bind", nil, nil)
-	resp.Body.Close()
+	closeBody(t, resp)
 
 	e, ok := sink.find("bind")
 	if !ok {

@@ -24,7 +24,7 @@ func seedSyncMessage(t *testing.T, dir, subject string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer closeStore(t, st)
 	raw := []byte("From: bob@hermex.test\r\nTo: " + testUser + "\r\nSubject: " + subject +
 		"\r\nDate: Mon, 01 Jan 2024 10:00:00 +0000\r\n\r\nbody\r\n")
 	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), raw, time.Now(), 0); err != nil {
@@ -48,7 +48,7 @@ func execRops(t *testing.T, ts *httptest.Server, sid string, seq *string, ropByt
 		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 		r.AddCookie(&http.Cookie{Name: "sequence", Value: *seq})
 	})
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 	if got := resp.Header.Get("X-ResponseCode"); got != "0" {
 		t.Fatalf("Execute X-ResponseCode = %q, want 0", got)
 	}
@@ -159,14 +159,15 @@ func TestExecuteRopSyncDownload(t *testing.T) {
 	defer ts.Close()
 
 	conn := mapiPost(t, ts, "/mapi/emsmdb", "Connect", connectBody(), nil)
-	conn.Body.Close()
+	closeBody(t, conn)
 	sid, seq := cookieByName(conn, "sid"), cookieByName(conn, "sequence")
 	if sid == "" || seq == "" {
 		t.Fatal("no cookies from Connect")
 	}
 
 	// Logon -> slot 0 = logon handle.
-	_, h := execRops(t, ts, sid, &seq, ropLogonReq(0), []uint32{0xFFFFFFFF})
+	rops, h := execRops(t, ts, sid, &seq, ropLogonReq(0), []uint32{0xFFFFFFFF})
+	mustRopOK(t, rops, 0xFE, "Logon")
 	logonH := h[0]
 	if logonH == 0xFFFFFFFF {
 		t.Fatal("Logon did not return a handle over the transport")
@@ -174,7 +175,8 @@ func TestExecuteRopSyncDownload(t *testing.T) {
 
 	// OpenFolder(Inbox) -> slot 1 = folder handle.
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
-	_, h = execRops(t, ts, sid, &seq, ropOpenFolderReq(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	rops, h = execRops(t, ts, sid, &seq, ropOpenFolderReq(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	mustRopOK(t, rops, 0x02, "OpenFolder")
 	folderH := h[1]
 	if folderH == 0xFFFFFFFF {
 		t.Fatal("OpenFolder did not return a handle over the transport")
@@ -182,7 +184,8 @@ func TestExecuteRopSyncDownload(t *testing.T) {
 
 	// SyncConfigure(contents, no property filter) -> slot 2 = sync-context handle.
 	cfg := ropSyncConfigureReq(1, 2, objectstore.SyncTypeContents, objectstore.SyncNormal, nil)
-	_, h = execRops(t, ts, sid, &seq, cfg, []uint32{logonH, folderH, 0xFFFFFFFF})
+	rops, h = execRops(t, ts, sid, &seq, cfg, []uint32{logonH, folderH, 0xFFFFFFFF})
+	mustRopOK(t, rops, 0x70, "SynchronizationConfigure")
 	syncH := h[2]
 	if syncH == 0xFFFFFFFF {
 		t.Fatal("SyncConfigure did not return a sync-context handle over the transport")
@@ -207,7 +210,12 @@ func drainSyncStream(t *testing.T, ts *httptest.Server, sid string, seq *string,
 	t.Helper()
 	var stream []byte
 	for range 100 {
-		rops, _ := execRops(t, ts, sid, seq, ropGetBufferReq(0, 256), []uint32{syncH})
+		rops, handles := execRops(t, ts, sid, seq, ropGetBufferReq(0, 256), []uint32{syncH})
+		// [MS-OXCRPC] 3.1.4.2: the response handle table echoes the server object
+		// handles, so the sync handle must still be there on every chunk.
+		if len(handles) == 0 || handles[0] != syncH {
+			t.Fatalf("GetBuffer handle table = %#x, want the sync handle %#x first", handles, syncH)
+		}
 		status, chunk := parseGetBuffer(t, rops)
 		stream = append(stream, chunk...)
 		switch status {

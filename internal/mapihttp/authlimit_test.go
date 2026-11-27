@@ -51,7 +51,7 @@ func attempt(t *testing.T, ts *httptest.Server, user, pass string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	closeBody(t, resp)
 	return resp.StatusCode
 }
 
@@ -81,20 +81,24 @@ func TestBasicAuthThrottlesGuessing(t *testing.T) {
 // TestBasicAuthThrottleIsPerAccount proves one account's lockout does not take
 // the whole deployment down with it.
 func TestBasicAuthThrottleIsPerAccount(t *testing.T) {
-	ts, _ := throttledServer(t)
+	ts, calls := throttledServer(t)
 
 	for range authlimit.DefaultMaxFails + 1 {
 		attempt(t, ts, testUser, "wrong")
 	}
+	before := *calls
 	if code := attempt(t, ts, "bob@hermex.test", testPass); code == http.StatusTooManyRequests {
 		t.Error("another account was locked out too")
+	}
+	if *calls != before+1 {
+		t.Errorf("the other account's password was checked %d times, want 1", *calls-before)
 	}
 }
 
 // TestBasicAuthSuccessClearsTheCount proves a working client that mistypes a few
 // times is not locked out later for those old failures.
 func TestBasicAuthSuccessClearsTheCount(t *testing.T) {
-	ts, _ := throttledServer(t)
+	ts, calls := throttledServer(t)
 
 	for range authlimit.DefaultMaxFails - 1 {
 		attempt(t, ts, testUser, "wrong")
@@ -103,7 +107,11 @@ func TestBasicAuthSuccessClearsTheCount(t *testing.T) {
 	for range authlimit.DefaultMaxFails - 1 {
 		attempt(t, ts, testUser, "wrong")
 	}
+	before := *calls
 	if code := attempt(t, ts, testUser, testPass); code == http.StatusTooManyRequests {
 		t.Error("a successful login did not clear the failure count")
+	}
+	if *calls != before+1 {
+		t.Errorf("the password was checked %d times after the cleared count, want 1", *calls-before)
 	}
 }

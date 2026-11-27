@@ -77,14 +77,14 @@ func TestNspiModLinkAttWritesOwnDelegateList(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	bind := mapiPost(t, ts, "/mapi/nspi", "Bind", bindBody(0), nil)
-	bind.Body.Close()
+	closeBody(t, bind)
 	sid, seq := mustSession(t, bind, "Bind")
 	modLink := func(mid uint32, eid []byte) uint32 {
 		resp := mapiPost(t, ts, "/mapi/nspi", "ModLinkAtt", modLinkAttBody(0, uint32(mapi.PrEmsAbPublicDelegates), mid, [][]byte{eid}), func(r *http.Request) {
 			r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 			r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
 		})
-		defer resp.Body.Close()
+		defer closeBody(t, resp)
 		// The op must be routed, not rejected; the result inside the payload is
 		// what carries the access decision.
 		wantResponseCode(t, resp, "0", "ModLinkAtt")

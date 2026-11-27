@@ -24,7 +24,7 @@ func seedLargeMessage(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer closeStore(t, st)
 	raw := []byte("From: bob@hermex.test\r\nTo: " + testUser + "\r\nSubject: BIG\r\n" +
 		"Date: Mon, 01 Jan 2024 10:00:00 +0000\r\n\r\n" + strings.Repeat("x", 200*1024) + "\r\n")
 	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), raw, time.Now(), 0); err != nil {
@@ -47,7 +47,7 @@ func executeRaw(t *testing.T, ts *httptest.Server, sid string, seq *string, ropB
 		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 		r.AddCookie(&http.Cookie{Name: "sequence", Value: *seq})
 	})
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 	if ns := cookieByName(resp, "sequence"); ns != "" {
 		*seq = ns
 	}
@@ -75,21 +75,24 @@ func TestExecuteRefusesUnframeableRopResponse(t *testing.T) {
 	defer ts.Close()
 
 	conn := mapiPost(t, ts, "/mapi/emsmdb", "Connect", connectBody(), nil)
-	conn.Body.Close()
+	closeBody(t, conn)
 	sid, seq := cookieByName(conn, "sid"), cookieByName(conn, "sequence")
 	if sid == "" || seq == "" {
 		t.Fatal("no cookies from Connect")
 	}
 
-	_, h := execRops(t, ts, sid, &seq, ropLogonReq(0), []uint32{0xFFFFFFFF})
+	rops, h := execRops(t, ts, sid, &seq, ropLogonReq(0), []uint32{0xFFFFFFFF})
+	mustRopOK(t, rops, 0xFE, "Logon")
 	logonH := h[0]
 
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
-	_, h = execRops(t, ts, sid, &seq, ropOpenFolderReq(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	rops, h = execRops(t, ts, sid, &seq, ropOpenFolderReq(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	mustRopOK(t, rops, 0x02, "OpenFolder")
 	folderH := h[1]
 
 	cfg := ropSyncConfigureReq(1, 2, objectstore.SyncTypeContents, objectstore.SyncNormal, nil)
-	_, h = execRops(t, ts, sid, &seq, cfg, []uint32{logonH, folderH, 0xFFFFFFFF})
+	rops, h = execRops(t, ts, sid, &seq, cfg, []uint32{logonH, folderH, 0xFFFFFFFF})
+	mustRopOK(t, rops, 0x70, "SynchronizationConfigure")
 	syncH := h[2]
 
 	// One GetBuffer at the largest buffer the field can name. The stream is far

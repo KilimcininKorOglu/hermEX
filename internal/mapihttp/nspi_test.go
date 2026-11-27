@@ -101,7 +101,7 @@ func TestNspiBindUnbind(t *testing.T) {
 	ts := newTestServer(t)
 
 	bind := mapiPost(t, ts, "/mapi/nspi", "Bind", bindBody(0), nil)
-	defer bind.Body.Close()
+	defer closeBody(t, bind)
 	if got := bind.Header.Get("X-ResponseCode"); got != "0" {
 		t.Fatalf("Bind: X-ResponseCode = %q, want 0", got)
 	}
@@ -122,7 +122,7 @@ func TestNspiBindUnbind(t *testing.T) {
 
 	// Unbind without a cookie -> missing cookie (6).
 	noCookie := mapiPost(t, ts, "/mapi/nspi", "Unbind", []byte{0, 0, 0, 0, 0, 0, 0, 0}, nil)
-	noCookie.Body.Close()
+	closeBody(t, noCookie)
 	if got := noCookie.Header.Get("X-ResponseCode"); got != "6" {
 		t.Errorf("Unbind without cookie: X-ResponseCode = %q, want 6", got)
 	}
@@ -131,7 +131,7 @@ func TestNspiBindUnbind(t *testing.T) {
 	unb := mapiPost(t, ts, "/mapi/nspi", "Unbind", []byte{0, 0, 0, 0, 0, 0, 0, 0}, func(r *http.Request) {
 		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 	})
-	defer unb.Body.Close()
+	defer closeBody(t, unb)
 	if got := unb.Header.Get("X-ResponseCode"); got != "0" {
 		t.Errorf("Unbind: X-ResponseCode = %q, want 0", got)
 	}
@@ -143,7 +143,7 @@ func TestNspiBindUnbind(t *testing.T) {
 func TestNspiBindAnonymousRejected(t *testing.T) {
 	ts := newTestServer(t)
 	bind := mapiPost(t, ts, "/mapi/nspi", "Bind", bindBody(0x20), nil) // fAnonymousLogin
-	defer bind.Body.Close()
+	defer closeBody(t, bind)
 	if got := bind.Header.Get("X-ResponseCode"); got != "0" {
 		t.Errorf("anonymous Bind: X-ResponseCode = %q, want 0 (processed)", got)
 	}
@@ -165,12 +165,12 @@ func TestNspiBindAnonymousRejected(t *testing.T) {
 func TestNspiGetSpecialTable(t *testing.T) {
 	ts := newTestServer(t)
 	bind := mapiPost(t, ts, "/mapi/nspi", "Bind", bindBody(0), nil)
-	bind.Body.Close()
+	closeBody(t, bind)
 	sid, seq := mustSession(t, bind, "Bind")
 
 	// Without cookies -> missing cookie (6).
 	noCookie := mapiPost(t, ts, "/mapi/nspi", "GetSpecialTable", specialTableBody(), nil)
-	noCookie.Body.Close()
+	closeBody(t, noCookie)
 	wantResponseCode(t, noCookie, "6", "GetSpecialTable without cookies")
 
 	// With the bound session -> success, sequence rolled, the GAL + named-list rows.
@@ -178,7 +178,7 @@ func TestNspiGetSpecialTable(t *testing.T) {
 		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
 	})
-	defer gst.Body.Close()
+	defer closeBody(t, gst)
 	wantResponseCode(t, gst, "0", "GetSpecialTable")
 	newSeq := cookieByName(gst, "sequence")
 	wantTrue(t, newSeq != "" && newSeq != seq, "GetSpecialTable rolls the sequence")
@@ -198,7 +198,7 @@ func TestNspiGetSpecialTable(t *testing.T) {
 func TestNspiQueryRows(t *testing.T) {
 	ts := newTestServer(t)
 	bind := mapiPost(t, ts, "/mapi/nspi", "Bind", bindBody(0), nil)
-	bind.Body.Close()
+	closeBody(t, bind)
 	sid, seq := cookieByName(bind, "sid"), cookieByName(bind, "sequence")
 	if sid == "" || seq == "" {
 		t.Fatal("no cookies from Bind")
@@ -207,7 +207,7 @@ func TestNspiQueryRows(t *testing.T) {
 		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
 	})
-	defer qr.Body.Close()
+	defer closeBody(t, qr)
 	if got := qr.Header.Get("X-ResponseCode"); got != "0" {
 		t.Fatalf("QueryRows: X-ResponseCode = %q, want 0", got)
 	}
@@ -242,7 +242,7 @@ func TestNspiQueryRows(t *testing.T) {
 func TestNspiQueryRowsNamedContainer(t *testing.T) {
 	ts := newTestServer(t)
 	bind := mapiPost(t, ts, "/mapi/nspi", "Bind", bindBody(0), nil)
-	bind.Body.Close()
+	closeBody(t, bind)
 	sid, seq := cookieByName(bind, "sid"), cookieByName(bind, "sequence")
 	if sid == "" || seq == "" {
 		t.Fatal("no cookies from Bind")
@@ -252,7 +252,7 @@ func TestNspiQueryRowsNamedContainer(t *testing.T) {
 			r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 			r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
 		})
-		defer resp.Body.Close()
+		defer closeBody(t, resp)
 		if got := resp.Header.Get("X-ResponseCode"); got != "0" {
 			t.Fatalf("QueryRows(container %#x): X-ResponseCode = %q, want 0", container, got)
 		}
@@ -275,7 +275,7 @@ func TestNspiQueryRowsNamedContainer(t *testing.T) {
 func TestNspiResolveNames(t *testing.T) {
 	ts := newTestServer(t)
 	bind := mapiPost(t, ts, "/mapi/nspi", "Bind", bindBody(0), nil)
-	bind.Body.Close()
+	closeBody(t, bind)
 	sid, seq := cookieByName(bind, "sid"), cookieByName(bind, "sequence")
 	if sid == "" || seq == "" {
 		t.Fatal("no cookies from Bind")
@@ -284,7 +284,7 @@ func TestNspiResolveNames(t *testing.T) {
 		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
 	})
-	defer rn.Body.Close()
+	defer closeBody(t, rn)
 	if got := rn.Header.Get("X-ResponseCode"); got != "0" {
 		t.Fatalf("ResolveNamesW: X-ResponseCode = %q, want 0", got)
 	}
@@ -354,7 +354,7 @@ func getMatchesBody(token string) []byte {
 func TestNspiGetMatches(t *testing.T) {
 	ts := newTestServer(t)
 	bind := mapiPost(t, ts, "/mapi/nspi", "Bind", bindBody(0), nil)
-	bind.Body.Close()
+	closeBody(t, bind)
 	sid, seq := cookieByName(bind, "sid"), cookieByName(bind, "sequence")
 	if sid == "" || seq == "" {
 		t.Fatal("no cookies from Bind")
@@ -363,7 +363,7 @@ func TestNspiGetMatches(t *testing.T) {
 		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
 	})
-	defer gm.Body.Close()
+	defer closeBody(t, gm)
 	if got := gm.Header.Get("X-ResponseCode"); got != "0" {
 		t.Fatalf("GetMatches: X-ResponseCode = %q, want 0", got)
 	}
@@ -393,7 +393,7 @@ func TestNspiGetMatches(t *testing.T) {
 func TestNspiGetProps(t *testing.T) {
 	ts := newTestServer(t)
 	bind := mapiPost(t, ts, "/mapi/nspi", "Bind", bindBody(0), nil)
-	bind.Body.Close()
+	closeBody(t, bind)
 	sid, seq := cookieByName(bind, "sid"), cookieByName(bind, "sequence")
 	if sid == "" || seq == "" {
 		t.Fatal("no cookies from Bind")
@@ -408,7 +408,7 @@ func TestNspiGetProps(t *testing.T) {
 		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
 	})
-	defer gp.Body.Close()
+	defer closeBody(t, gp)
 	if got := gp.Header.Get("X-ResponseCode"); got != "0" {
 		t.Fatalf("GetProps: X-ResponseCode = %q, want 0", got)
 	}
@@ -433,7 +433,7 @@ func TestNspiGetProps(t *testing.T) {
 func TestNspiGetPropList(t *testing.T) {
 	ts := newTestServer(t)
 	bind := mapiPost(t, ts, "/mapi/nspi", "Bind", bindBody(0), nil)
-	bind.Body.Close()
+	closeBody(t, bind)
 	sid, seq := cookieByName(bind, "sid"), cookieByName(bind, "sequence")
 	if sid == "" || seq == "" {
 		t.Fatal("no cookies from Bind")
@@ -447,7 +447,7 @@ func TestNspiGetPropList(t *testing.T) {
 		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
 	})
-	defer gpl.Body.Close()
+	defer closeBody(t, gpl)
 	if got := gpl.Header.Get("X-ResponseCode"); got != "0" {
 		t.Fatalf("GetPropList: X-ResponseCode = %q, want 0", got)
 	}
@@ -490,7 +490,7 @@ func seekEntriesBody(target string) []byte {
 func boundSession(t *testing.T, ts *httptest.Server) (sid, seq string) {
 	t.Helper()
 	bind := mapiPost(t, ts, "/mapi/nspi", "Bind", bindBody(0), nil)
-	bind.Body.Close()
+	closeBody(t, bind)
 	sid, seq = cookieByName(bind, "sid"), cookieByName(bind, "sequence")
 	if sid == "" || seq == "" {
 		t.Fatal("no cookies from Bind")
@@ -512,7 +512,7 @@ func TestNspiSeekEntries(t *testing.T) {
 	ts := newTestServer(t)
 	sid, seq := boundSession(t, ts)
 	se := mapiPost(t, ts, "/mapi/nspi", "SeekEntries", seekEntriesBody("alice"), withSession(sid, seq))
-	defer se.Body.Close()
+	defer closeBody(t, se)
 	if got := se.Header.Get("X-ResponseCode"); got != "0" {
 		t.Fatalf("SeekEntries: X-ResponseCode = %q, want 0", got)
 	}
@@ -548,7 +548,7 @@ func TestNspiCompareMids(t *testing.T) {
 	body = binary.LittleEndian.AppendUint32(body, 0x10) // mid2 = midBase
 	body = binary.LittleEndian.AppendUint32(body, 0)    // cb_auxin
 	cm := mapiPost(t, ts, "/mapi/nspi", "CompareMIds", body, withSession(sid, seq))
-	defer cm.Body.Close()
+	defer closeBody(t, cm)
 	if got := cm.Header.Get("X-ResponseCode"); got != "0" {
 		t.Fatalf("CompareMIds: X-ResponseCode = %q, want 0", got)
 	}
@@ -579,7 +579,7 @@ func TestNspiResortRestriction(t *testing.T) {
 	body = binary.LittleEndian.AppendUint32(body, 0x10) // midBase
 	body = binary.LittleEndian.AppendUint32(body, 0)    // cb_auxin
 	rr := mapiPost(t, ts, "/mapi/nspi", "ResortRestriction", body, withSession(sid, seq))
-	defer rr.Body.Close()
+	defer closeBody(t, rr)
 	if got := rr.Header.Get("X-ResponseCode"); got != "0" {
 		t.Fatalf("ResortRestriction: X-ResponseCode = %q, want 0", got)
 	}
