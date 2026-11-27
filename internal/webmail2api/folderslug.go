@@ -99,6 +99,7 @@ func userFolderBySlug(st *objectstore.Store, slug string) (int64, bool) {
 	}
 	folders, err := userFolders(st)
 	if err != nil {
+		st.LogSwallowedError("folder-slug.list", err)
 		return 0, false
 	}
 	for _, f := range folders {
