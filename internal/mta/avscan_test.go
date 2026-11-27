@@ -8,12 +8,37 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"hermex/internal/antivirus"
 	"hermex/internal/directory"
 )
+
+// TestScanIncompleteTrustsANamedVirus: authenticated submission and fetchmail fail
+// open on an incomplete scan, so a scan that named a virus and then reported a
+// connection error must count as a verdict, or the infected message is delivered.
+// Only a scan with no verdict at all hands the message to the fail policy.
+func TestScanIncompleteTrustsANamedVirus(t *testing.T) {
+	scanErr := errors.New("close clamd connection: refused")
+	for _, c := range []struct {
+		name string
+		res  antivirus.Result
+		err  error
+		want bool
+	}{
+		{"virus beside an error", antivirus.Result{VirusName: "Eicar-Test-Signature"}, scanErr, false},
+		{"no verdict", antivirus.Result{}, scanErr, true},
+		{"clean beside an error", antivirus.Result{Clean: true}, scanErr, true},
+		{"clean", antivirus.Result{Clean: true}, nil, false},
+		{"virus", antivirus.Result{VirusName: "Eicar-Test-Signature"}, nil, false},
+	} {
+		if got := scanIncomplete(c.res, c.err); got != c.want {
+			t.Errorf("%s: scanIncomplete = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
 
 // fakeClamd starts a minimal clamd that drains one INSTREAM and replies the given
 // record, for every connection until the test ends.
@@ -23,37 +48,67 @@ func fakeClamd(t *testing.T, reply string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = ln.Close() })
-	go func() {
+	var (
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		errs []error
+	)
+	record := func(err error) {
+		if err != nil {
+			mu.Lock()
+			errs = append(errs, err)
+			mu.Unlock()
+		}
+	}
+	wg.Go(func() {
 		for {
 			c, err := ln.Accept()
 			if err != nil {
+				// Closing the listener at cleanup ends Accept with ErrClosed.
+				if !errors.Is(err, net.ErrClosed) {
+					record(err)
+				}
 				return
 			}
-			go func(c net.Conn) {
-				defer c.Close()
-				cmd := make([]byte, len("zINSTREAM\x00"))
-				if _, err := io.ReadFull(c, cmd); err != nil {
-					return
-				}
-				var hdr [4]byte
-				for {
-					if _, err := io.ReadFull(c, hdr[:]); err != nil {
-						return
-					}
-					n := binary.BigEndian.Uint32(hdr[:])
-					if n == 0 {
-						break
-					}
-					if _, err := io.CopyN(io.Discard, c, int64(n)); err != nil {
-						return
-					}
-				}
-				_, _ = io.WriteString(c, reply)
-			}(c)
+			wg.Go(func() {
+				record(errors.Join(answerInstream(c, reply), c.Close()))
+			})
 		}
-	}()
+	})
+	t.Cleanup(func() {
+		if err := ln.Close(); err != nil {
+			t.Errorf("close fake clamd listener: %v", err)
+		}
+		wg.Wait()
+		for _, err := range errs {
+			t.Errorf("fake clamd: %v", err)
+		}
+	})
 	return "tcp://" + ln.Addr().String()
+}
+
+// answerInstream drains one zINSTREAM command and its chunks up to the
+// zero-length terminator, then writes reply.
+func answerInstream(c net.Conn, reply string) error {
+	cmd := make([]byte, len("zINSTREAM\x00"))
+	if _, err := io.ReadFull(c, cmd); err != nil {
+		return err
+	}
+	var hdr [4]byte
+	for {
+		if _, err := io.ReadFull(c, hdr[:]); err != nil {
+			return err
+		}
+		n := binary.BigEndian.Uint32(hdr[:])
+		if n == 0 {
+			break
+		}
+		if _, err := io.CopyN(io.Discard, c, int64(n)); err != nil {
+			return err
+		}
+	}
+	_, err := io.WriteString(c, reply)
+	return err
 }
 
 // fakeAVDir is an in-memory avDirectory recording quarantine inserts.

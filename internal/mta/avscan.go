@@ -149,6 +149,13 @@ func scanStored(accounts directory.Accounts, owner, label string, raw []byte, wh
 	return scanMessageLabelled(accounts, avStored, owner, []string{owner}, raw, when, label)
 }
 
+// scanIncomplete reports whether a scan gave no verdict, so the caller's fail
+// policy applies. A named virus is a verdict even beside an error: failing open
+// on it would deliver mail clamd identified as infected.
+func scanIncomplete(res antivirus.Result, err error) bool {
+	return err != nil && res.VirusName == ""
+}
+
 // scanMessage scans raw at a delivery point and reports what the caller should do.
 // from is the envelope sender, recipients the envelope recipients. On a virus hit
 // it quarantines the message, writes the raw bytes to disk, and notifies the
@@ -176,13 +183,9 @@ func scanMessageLabelled(accounts directory.Accounts, mode avMode, from string, 
 		return avProceed
 	}
 
-	res, err := av.scanner.Scan(raw)
-	if err != nil {
-		av.emit(logging.LevelError, "av.scanner.unavailable", from, logging.Fields{"err": err.Error()})
-		if mode == avInboundSMTP {
-			return avTempFail
-		}
-		return avProceed // authenticated submission and fetchmail fail open
+	res, failed, decision := av.scanRaw(mode, from, raw)
+	if failed {
+		return decision
 	}
 	if res.Clean {
 		return avProceed
@@ -213,6 +216,25 @@ func scanMessageLabelled(accounts directory.Accounts, mode avMode, from string, 
 	av.fileQuarantine(accounts, id, entry, raw, when)
 	av.emit(logging.LevelWarn, "av.quarantined", from, logging.Fields{"id": id, "virus": res.VirusName, "direction": direction})
 	return avHandled
+}
+
+// scanRaw runs the scan and applies the fail policy to a scan with no verdict:
+// failed is true and decision is what the caller returns. A verdict that came
+// back beside an error is logged and returned, because the verdict stands.
+func (av *avConfig) scanRaw(mode avMode, from string, raw []byte) (res antivirus.Result, failed bool, decision avDecision) {
+	res, err := av.scanner.Scan(raw)
+	if scanIncomplete(res, err) {
+		av.emit(logging.LevelError, "av.scanner.unavailable", from, logging.Fields{"err": err.Error()})
+		if mode == avInboundSMTP {
+			return res, true, avTempFail
+		}
+		return res, true, avProceed // authenticated submission and fetchmail fail open
+	}
+	if err != nil {
+		// clamd named a virus and the connection then failed: the verdict stands.
+		av.emit(logging.LevelError, "av.scanner.error", from, logging.Fields{"err": err.Error(), "virus": res.VirusName})
+	}
+	return res, false, avProceed
 }
 
 // fileQuarantine writes the quarantined message to disk and notifies the affected
