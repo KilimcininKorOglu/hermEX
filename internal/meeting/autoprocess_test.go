@@ -75,7 +75,7 @@ func apSetup(t *testing.T, cfg objectstore.MeetingConfig) (*objectstore.Store, a
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { mustClose(t, st, "the store") })
 	if err := st.SetMeetingConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestAutoProcessDeliveredInvite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := stored.Props.Get(mapi.PrMessageClass); got != "IPM.Schedule.Meeting.Request" {
+	if got := propStr(stored.Props, mapi.PrMessageClass); got != "IPM.Schedule.Meeting.Request" {
 		t.Fatalf("delivered invite class = %v, want IPM.Schedule.Meeting.Request", got)
 	}
 	if _, ok := ntTime(stored.Props, tags.start); !ok {
