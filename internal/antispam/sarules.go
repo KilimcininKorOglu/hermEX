@@ -304,9 +304,11 @@ type saMessage struct {
 func newSAMessage(raw []byte) *saMessage {
 	root := mime.ParseStructure(raw)
 	m := &saMessage{header: root.Header(), rawHeader: string(root.RawHeader())}
-	var rb strings.Builder
-	collectText(root, &rb)
-	m.rawbody = rb.String()
+	var parts []string
+	collectText(root, &parts)
+	if len(parts) > 0 {
+		m.rawbody = strings.Join(parts, " ") + " "
+	}
 	m.body = collapseWS(html.UnescapeString(htmlTag.ReplaceAllString(m.rawbody, " ")))
 	m.uris = uriPattern.FindAllString(m.rawbody, -1)
 	return m
@@ -436,8 +438,10 @@ func compileBodyRegex(s string) (*regexp.Regexp, bool) {
 // modifiers request is approximated by matching the raw header value, which is
 // adequate for the rule subset and never over-matches.
 func normHeaderName(h string) string {
-	name, _, _ := strings.Cut(h, ":")
-	return name
+	if i := strings.IndexByte(h, ':'); i >= 0 {
+		return h[:i]
+	}
+	return h
 }
 
 // extractRegex pulls the /pattern/flags out of a rule body. For header rules the

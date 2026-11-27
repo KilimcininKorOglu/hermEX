@@ -49,9 +49,10 @@ var resolver = net.DefaultResolver
 func realSPF(ip net.IP, helo, mailFrom string) AuthResult {
 	ctx, cancel := context.WithTimeout(context.Background(), spfTimeout)
 	defer cancel()
-	res, _ := spf.CheckHostWithSender(ip, helo, mailFrom,
-		spf.WithContext(ctx), spf.WithResolver(resolver))
-	switch res {
+	// The error only explains a TempError or PermError result, which already
+	// decides the verdict, so the result alone is mapped.
+	switch res := spfResult(spf.CheckHostWithSender(ip, helo, mailFrom,
+		spf.WithContext(ctx), spf.WithResolver(resolver))); res {
 	case spf.Pass:
 		return AuthPass
 	case spf.Fail:
@@ -65,6 +66,20 @@ func realSPF(ip net.IP, helo, mailFrom string) AuthResult {
 	default: // TempError, PermError
 		return AuthError
 	}
+}
+
+// spfResult keeps an RFC 7208 result; an error beside one is the library's
+// explanation of it, and an error beside anything else turns it into a
+// TempError, so a failed lookup can never read as a verdict.
+func spfResult(res spf.Result, err error) spf.Result {
+	switch res {
+	case spf.Pass, spf.Fail, spf.SoftFail, spf.Neutral, spf.None, spf.TempError, spf.PermError:
+		return res
+	}
+	if err != nil {
+		return spf.TempError
+	}
+	return res
 }
 
 // realDKIM verifies the message's DKIM signatures and returns each signature's
@@ -152,28 +167,29 @@ func isListed(addrs []net.IP) bool {
 // best-effort, on a parse error it returns whatever was gathered (possibly just
 // the subject).
 func MessageText(raw []byte) string {
-	var b strings.Builder
+	var parts []string
 	if env, err := mime.ParseEnvelope(raw); err == nil {
-		b.WriteString(env.Subject)
-		b.WriteByte(' ')
+		parts = append(parts, env.Subject)
 	}
-	collectText(mime.ParseStructure(raw), &b)
-	return b.String()
+	collectText(mime.ParseStructure(raw), &parts)
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " ") + " "
 }
 
 // collectText appends the decoded text of every text/* part in the tree.
-func collectText(p *mime.Part, b *strings.Builder) {
+func collectText(p *mime.Part, parts *[]string) {
 	if p == nil {
 		return
 	}
 	if p.Type == "text" {
 		if t, err := p.DecodedText(); err == nil {
-			b.WriteString(t)
-			b.WriteByte(' ')
+			*parts = append(*parts, t)
 		}
 	}
 	for _, c := range p.Children {
-		collectText(c, b)
+		collectText(c, parts)
 	}
 }
 
@@ -185,12 +201,12 @@ func dnsblQuery(ip net.IP, zone string) string {
 		return fmt.Sprintf("%d.%d.%d.%d.%s", v4[3], v4[2], v4[1], v4[0], zone)
 	}
 	if v6 := ip.To16(); v6 != nil {
-		var b strings.Builder
+		parts := make([]string, 0, len(v6)+1)
 		for _, v := range slices.Backward(v6) {
-			fmt.Fprintf(&b, "%x.%x.", v&0x0f, v>>4)
+			parts = append(parts, fmt.Sprintf("%x.%x", v&0x0f, v>>4))
 		}
-		b.WriteString(zone)
-		return b.String()
+		parts = append(parts, zone)
+		return strings.Join(parts, ".")
 	}
 	return ""
 }

@@ -157,16 +157,16 @@ score M 4.0
 	}
 
 	// Two of A/B fire -> A+B>=2 true -> M fires.
-	if score, _ := rs.Evaluate([]byte("Subject: x\r\n\r\nalpha and bravo\r\n")); score != 4.0 {
-		t.Errorf("alpha+bravo: M score = %v, want 4.0", score)
+	if score, fired := rs.Evaluate([]byte("Subject: x\r\n\r\nalpha and bravo\r\n")); score != 4.0 || !slices.Contains(fired, "M") {
+		t.Errorf("alpha+bravo: M = (%v, %v), want (4.0, [M])", score, fired)
 	}
 	// Only C fires -> the || branch fires M.
-	if score, _ := rs.Evaluate([]byte("Subject: x\r\n\r\njust charlie here\r\n")); score != 4.0 {
-		t.Errorf("charlie: M score = %v, want 4.0", score)
+	if score, fired := rs.Evaluate([]byte("Subject: x\r\n\r\njust charlie here\r\n")); score != 4.0 || !slices.Contains(fired, "M") {
+		t.Errorf("charlie: M = (%v, %v), want (4.0, [M])", score, fired)
 	}
 	// Only A fires -> A+B==1 and no C -> M must not fire.
-	if score, _ := rs.Evaluate([]byte("Subject: x\r\n\r\nalpha only\r\n")); score != 0 {
-		t.Errorf("alpha only: M score = %v, want 0", score)
+	if score, fired := rs.Evaluate([]byte("Subject: x\r\n\r\nalpha only\r\n")); score != 0 || len(fired) != 0 {
+		t.Errorf("alpha only: M = (%v, %v), want (0, nil)", score, fired)
 	}
 }
 
@@ -197,4 +197,32 @@ func TestMetaSyntaxErrorIsDropped(t *testing.T) {
 	if _, metas := rs.RuleCount(); metas != 0 {
 		t.Errorf("live metas = %d, want 0", metas)
 	}
+}
+
+// TestParseSARulesDropsHostileAndKeepsValid checks malformed regexes, /x flag,
+// unbalanced parentheses, unknown operators, and division-by-zero metas while
+// verifying a valid sibling rule still scores accurately.
+func TestParseSARulesDropsHostileAndKeepsValid(t *testing.T) {
+	rules := `
+body GOOD /hello/
+score GOOD 2.0
+body FREESPACE /a b/x
+body UNCLOSED /abc
+meta UNBAL_OPEN ((GOOD && GOOD)
+meta UNBAL_CLOSE GOOD && GOOD)
+meta BAD_OP (GOOD & GOOD)
+meta BAD_CHAR (GOOD $ GOOD)
+meta DIVZERO (GOOD / 0)
+score DIVZERO 5.0
+`
+	rs := ParseSARules(rules)
+	wantEq(t, rs.SkippedRules, 2, "skipped rules (/x and unclosed)")
+	wantEq(t, rs.DroppedMetas, 4, "dropped malformed metas")
+	liveRules, liveMetas := rs.RuleCount()
+	wantEq(t, liveRules, 1, "valid sibling rule retained")
+	wantEq(t, liveMetas, 1, "DIVZERO meta compiled")
+
+	score, fired := rs.Evaluate([]byte("Subject: x\r\n\r\nhello\r\n"))
+	wantEq(t, score, 2.0, "only GOOD scores; DIVZERO evaluates to 0")
+	wantEq(t, len(fired), 1, "only GOOD fired")
 }

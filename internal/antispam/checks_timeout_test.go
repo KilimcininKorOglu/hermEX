@@ -2,9 +2,12 @@ package antispam
 
 import (
 	"context"
+	"errors"
 	"net"
 	"testing"
 	"time"
+
+	"blitiri.com.ar/go/spf"
 )
 
 // hangingResolver answers nothing at all, the shape of a nameserver a sender
@@ -61,6 +64,7 @@ func TestSPFIsBounded(t *testing.T) {
 	if got == AuthPass {
 		t.Errorf("an unanswerable SPF lookup reported %v", got)
 	}
+	wantEq(t, got, AuthError, "timed-out SPF lookup result")
 }
 
 // TestDMARCIsBounded proves the same for the DMARC policy lookup, which queries
@@ -133,5 +137,50 @@ func TestScoreIsBoundedWithUnanswerableDNS(t *testing.T) {
 		FromDomain: "sender.invalid",
 		Raw:        []byte("Subject: hi\r\n\r\nbody\r\n"),
 	}
-	mustReturnWithin(t, 10*time.Second, "Score", func() { s.Score(in) })
+	var v Verdict
+	mustReturnWithin(t, 10*time.Second, "Score", func() { v = s.Score(in) })
+	if v.SPF == AuthPass {
+		t.Errorf("unanswerable SPF reported pass: %+v", v)
+	}
+	wantEq(t, v.DMARC, AuthNone, "unanswerable DMARC fails open to AuthNone")
+	wantEq(t, len(v.DNSBL), 0, "unanswerable DNSBL reports no listings")
+	if v.DKIM == AuthPass {
+		t.Errorf("unsigned message under unanswerable DNS reported DKIM pass: %+v", v)
+	}
+}
+
+// TestRealChecksRefuseHostileInputs verifies malformed inputs (nil IP, malformed
+// message bytes) fail safe without reporting a listing or a valid signature.
+func TestRealChecksRefuseHostileInputs(t *testing.T) {
+	boundedChecks(t, 200*time.Millisecond)
+	wantEq(t, realDNSBL(nil, "bl.example.invalid"), false, "nil IP must not be listed")
+	for _, r := range realDKIM([]byte("not a valid rfc5322 message")) {
+		if r.Valid {
+			t.Errorf("malformed message reported valid DKIM for %q", r.Domain)
+		}
+	}
+}
+
+// TestSPFResultNeverReadsAFailedLookupAsAVerdict follows RFC 7208 section 2.6:
+// a definite result stands even when the library explains it with an error, and
+// a lookup that failed without one (an unknown or empty result with an error) is
+// a temperror, never a pass or none.
+func TestSPFResultNeverReadsAFailedLookupAsAVerdict(t *testing.T) {
+	lookup := errors.New("dns: server failure")
+	for _, tc := range []struct {
+		res  spf.Result
+		err  error
+		want spf.Result
+	}{
+		{spf.Pass, nil, spf.Pass},
+		{spf.Fail, lookup, spf.Fail},
+		{spf.None, lookup, spf.None},
+		{spf.PermError, lookup, spf.PermError},
+		{"", lookup, spf.TempError},
+		{"forged", lookup, spf.TempError},
+	} {
+		if got := spfResult(tc.res, tc.err); got != tc.want {
+			t.Errorf("spfResult(%q, %v) = %q, want %q", tc.res, tc.err, got, tc.want)
+		}
+	}
 }
