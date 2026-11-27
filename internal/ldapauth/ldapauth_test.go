@@ -415,7 +415,10 @@ func TestSyncContactsSkipsAnEntryWithNoIdentifier(t *testing.T) {
 		contactEntry("cn=noid,dc=hermex,dc=test", "noid@remote.test", "No Id", nil),
 	}}}
 
-	contacts, _ := verifierWith(fc).SyncContacts(contactCfg)
+	contacts, err := verifierWith(fc).SyncContacts(contactCfg)
+	if err != nil {
+		t.Fatalf("SyncContacts: %v", err)
+	}
 
 	if len(contacts) != 0 {
 		t.Errorf("contacts = %+v, want none: the entry carries no stable identifier", contacts)
@@ -432,7 +435,10 @@ func TestSyncContactsFallsBackToCN(t *testing.T) {
 	}}
 	fc := &fakeConn{searchRes: &ldap.SearchResult{Entries: []*ldap.Entry{e}}}
 
-	contacts, _ := verifierWith(fc).SyncContacts(contactCfg)
+	contacts, err := verifierWith(fc).SyncContacts(contactCfg)
+	if err != nil {
+		t.Fatalf("SyncContacts: %v", err)
+	}
 
 	if len(contacts) != 1 || contacts[0].DisplayName != "Partner Inc" {
 		t.Errorf("contacts = %+v, want the cn as the display name", contacts)
@@ -443,8 +449,10 @@ func TestSyncContactsFallsBackToCN(t *testing.T) {
 func TestSyncContactsDisabledIsANoOp(t *testing.T) {
 	fc := &fakeConn{searchRes: &ldap.SearchResult{}}
 
-	got, _ := verifierWith(fc).SyncContacts(directory.LDAPConfig{})
-
+	got, err := verifierWith(fc).SyncContacts(directory.LDAPConfig{})
+	if err != nil {
+		t.Fatalf("SyncContacts disabled: %v", err)
+	}
 	if got != nil {
 		t.Errorf("SyncContacts disabled = %v, want nil (no-op)", got)
 	}
