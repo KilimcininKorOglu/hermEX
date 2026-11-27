@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"log"
 	"net/http"
 	"slices"
 	"strconv"
@@ -55,7 +56,11 @@ func readWBXML(r *http.Request) (*wbxml.Node, error) {
 // writeWBXML encodes a response tree and writes it with the EAS content type.
 func writeWBXML(w http.ResponseWriter, root *wbxml.Node) {
 	w.Header().Set("Content-Type", "application/vnd.ms-sync.wbxml")
-	_, _ = w.Write(wbxml.Marshal(root))
+	if _, err := w.Write(wbxml.Marshal(root)); err != nil {
+		// The status line is already sent; the device went away mid-reply, and
+		// the request log records the request itself.
+		log.Printf("activesync: write reply: %v", err)
+	}
 }
 
 // supportedProtocols is the set of EAS protocol versions advertised and served,

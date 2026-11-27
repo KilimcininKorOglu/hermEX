@@ -3,6 +3,7 @@ package activesync
 import (
 	"encoding/xml"
 	"io"
+	"log"
 	"net/http"
 
 	"hermex/internal/serve"
@@ -57,7 +58,12 @@ func (s *Server) serveAutodiscover(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(r.Body, maxAutodiscoverBody))
+	// The request body names nothing the answer needs, but a body that cannot be
+	// read is a broken request, not one to answer.
+	if _, err := io.Copy(io.Discard, io.LimitReader(r.Body, maxAutodiscoverBody)); err != nil {
+		s.failRequest(w, r, "autodiscover.read.fail", err, http.StatusBadRequest, "the request body could not be read")
+		return
+	}
 
 	host := s.hostname
 	if host == "" {
@@ -85,6 +91,8 @@ func (s *Server) serveAutodiscover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
-	_, _ = w.Write([]byte(xml.Header))
-	_, _ = w.Write(out)
+	if _, err := w.Write(append([]byte(xml.Header), out...)); err != nil {
+		// The status line is already sent; the client went away mid-reply.
+		log.Printf("activesync: write autodiscover reply: %v", err)
+	}
 }

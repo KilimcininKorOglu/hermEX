@@ -3,6 +3,7 @@ package activesync
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -65,7 +66,7 @@ func do(t *testing.T, ts *httptest.Server, method, path, body string, auth bool)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer mustClose(t, resp.Body)
 	out, err := io.ReadAll(resp.Body)
 	mustNoErr(t, "read the reply", err)
 	return resp, string(out)
@@ -231,7 +232,7 @@ func TestBase64GUIDDeviceIDsKeepTheirOwnState(t *testing.T) {
 		req.Header.Set("Content-Type", "application/vnd.ms-sync.wbxml")
 		resp, err := http.DefaultClient.Do(req)
 		mustNoErr(t, "send the request", err)
-		defer resp.Body.Close()
+		defer mustClose(t, resp.Body)
 		out, err := io.ReadAll(resp.Body)
 		mustNoErr(t, "read the reply", err)
 		root, err := wbxml.Unmarshal(out)
@@ -247,7 +248,7 @@ func TestBase64GUIDDeviceIDsKeepTheirOwnState(t *testing.T) {
 
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	m, err := loadDevices(st)
 	mustNoErr(t, "load the devices", err)
 	wantEq(t, "recorded devices", len(m.Devices), 2)
@@ -338,11 +339,34 @@ func TestAutodiscoverAnswersOnlyForTheCaller(t *testing.T) {
 	ts := testServer(t)
 	body := `<Autodiscover xmlns="http://schemas.microsoft.com/exchange/autodiscover/mobilesync/requestschema/2006"><Request><EMailAddress>ceo@hermex.test</EMailAddress></Request></Autodiscover>`
 	resp, out := do(t, ts, "POST", "/autodiscover/autodiscover.xml", body, true)
-	if resp.StatusCode == http.StatusOK && strings.Contains(out, "ceo@hermex.test") {
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200: the caller's own settings are still answered\n%s", resp.StatusCode, out)
+	}
+	if strings.Contains(out, "ceo@hermex.test") {
 		t.Errorf("autodiscover answered for another account:\n%s", out)
 	}
-	if resp.StatusCode == http.StatusOK && !strings.Contains(out, testUser) {
+	if !strings.Contains(out, testUser) {
 		t.Errorf("autodiscover answered without naming the caller:\n%s", out)
+	}
+}
+
+// failingBody is a request body whose read fails partway, like a client that
+// drops the connection mid-upload.
+type failingBody struct{}
+
+func (failingBody) Read([]byte) (int, error) { return 0, errors.New("connection reset") }
+
+// TestAutodiscoverRefusesAnUnreadableBody: a request whose body cannot be read is
+// broken, so it is answered 400 and no settings are sent.
+func TestAutodiscoverRefusesAnUnreadableBody(t *testing.T) {
+	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: t.TempDir()}}
+	req := httptest.NewRequest(http.MethodPost, "/autodiscover/autodiscover.xml", failingBody{})
+	req.SetBasicAuth(testUser, testPass)
+	rec := httptest.NewRecorder()
+	NewServer(accs, accs, "mail.hermex.test").Handler().ServeHTTP(rec, req)
+	wantEq(t, "status", rec.Code, http.StatusBadRequest)
+	if strings.Contains(rec.Body.String(), "MobileSync") {
+		t.Errorf("an unreadable request still got the server settings:\n%s", rec.Body.String())
 	}
 }
 
