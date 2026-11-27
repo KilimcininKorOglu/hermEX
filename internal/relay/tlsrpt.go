@@ -32,7 +32,7 @@ DO UPDATE SET sessions = sessions + 1`,
 // successful and failed sessions and listing each failure result type. It returns
 // (nil, nil) when no sessions were recorded, so the caller can skip an empty
 // report. org, contact, and reportID populate the report's identifying fields.
-func (s *Spool) TLSReport(day time.Time, policyDomain, org, contact, reportID string) (*tlsrpt.Report, error) {
+func (s *Spool) TLSReport(day time.Time, policyDomain, org, contact, reportID string) (got *tlsrpt.Report, err error) {
 	d := day.UTC().Truncate(24 * time.Hour)
 	rows, err := s.db.Query(`
 SELECT policy_type, mx_host, result_type, sessions
@@ -43,7 +43,7 @@ SELECT policy_type, mx_host, result_type, sessions
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 
 	// Group rows into one report policy per (policy_type, mx_host) pair, in stable
 	// first-seen order so the report is deterministic.
@@ -102,7 +102,7 @@ SELECT policy_type, mx_host, result_type, sessions
 // counters for the UTC day containing day but whose daily report has not yet been
 // dispatched (no tlsrpt_reports_sent row). The daily pass iterates these to send one
 // report per domain.
-func (s *Spool) UnreportedDomains(day time.Time) ([]string, error) {
+func (s *Spool) UnreportedDomains(day time.Time) (got []string, err error) {
 	d := day.UTC().Truncate(24 * time.Hour).Format(dayFormat)
 	rows, err := s.db.Query(`
 SELECT DISTINCT c.policy_domain
@@ -115,7 +115,7 @@ SELECT DISTINCT c.policy_domain
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var domains []string
 	for rows.Next() {
 		var dom string

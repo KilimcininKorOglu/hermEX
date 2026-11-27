@@ -69,7 +69,7 @@ func encodeAuthResults(in []mailreport.AuthResult) (string, error) {
 // DMARCRecords returns the report rows recorded for one policy domain over the UTC
 // day that contains day, in a stable order. An empty result means nothing was
 // recorded and no report is due.
-func (s *Spool) DMARCRecords(day time.Time, policyDomain string) ([]mailreport.Record, error) {
+func (s *Spool) DMARCRecords(day time.Time, policyDomain string) (got []mailreport.Record, err error) {
 	d := day.UTC().Truncate(24 * time.Hour).Format(dayFormat)
 	rows, err := s.db.Query(`
 SELECT source_ip, envelope_from, dkim_eval, spf_eval, disposition, dkim_results, spf_results, messages
@@ -80,7 +80,7 @@ SELECT source_ip, envelope_from, dkim_eval, spf_eval, disposition, dkim_results,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var out []mailreport.Record
 	for rows.Next() {
 		r := mailreport.Record{HeaderFrom: policyDomain}
@@ -101,7 +101,7 @@ SELECT source_ip, envelope_from, dkim_eval, spf_eval, disposition, dkim_results,
 
 // UnreportedDMARCDomains returns the policy domains that recorded DMARC counters
 // for the UTC day containing day and whose report has not been dispatched yet.
-func (s *Spool) UnreportedDMARCDomains(day time.Time) ([]string, error) {
+func (s *Spool) UnreportedDMARCDomains(day time.Time) (got []string, err error) {
 	d := day.UTC().Truncate(24 * time.Hour).Format(dayFormat)
 	rows, err := s.db.Query(`
 SELECT DISTINCT c.policy_domain
@@ -114,7 +114,7 @@ SELECT DISTINCT c.policy_domain
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var domains []string
 	for rows.Next() {
 		var dom string

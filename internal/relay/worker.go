@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"net"
 	"net/http"
@@ -304,8 +305,12 @@ func (w *Worker) guardedPass(ctx context.Context) {
 		}
 		defer release()
 	}
-	if _, err := w.ProcessDue(ctx, time.Now()); err != nil {
+	sent, err := w.ProcessDue(ctx, time.Now())
+	if err != nil {
 		w.Logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "relay.scan.fail", Err: err.Error()})
+	}
+	if sent > 0 {
+		w.Logger.Emit(logging.Event{Level: logging.LevelInfo, Subsystem: logging.MTA, Name: "relay.scan.sent", Fields: logging.Fields{"sent": sent}})
 	}
 	// Dispatch the previous day's TLS-RPT reports at most once per UTC day, while the
 	// drain guard is still held so only one instance sends them.
@@ -703,7 +708,7 @@ func (w *Worker) stsPolicy(domain string, it Item) *mtasts.Policy {
 // set (the recipient's MTA-STS policy is in enforce mode and this host matched
 // it), STARTTLS is mandatory and the certificate is validated; otherwise TLS is
 // opportunistic.
-func (w *Worker) send(host string, it Item, requireTLS bool) error {
+func (w *Worker) send(host string, it Item, requireTLS bool) (err error) {
 	dial := w.Dialer
 	if dial == nil {
 		dial = dialPort25
@@ -712,13 +717,16 @@ func (w *Worker) send(host string, it Item, requireTLS bool) error {
 	if err != nil {
 		return err
 	}
-	_ = raw.SetDeadline(time.Now().Add(sessionTimeout))
+	// A session without its deadline could hang on a stalled exchanger forever.
+	if err := raw.SetDeadline(time.Now().Add(sessionTimeout)); err != nil {
+		return errors.Join(err, raw.Close())
+	}
 	conn := &turnCapConn{Conn: raw}
 	c, err := smtp.NewClient(conn, host)
 	if err != nil {
 		return errors.Join(err, conn.Close())
 	}
-	defer c.Close()
+	defer closeSession(c, &err)
 
 	if err := c.Hello(w.heloName(conn.LocalAddr())); err != nil {
 		return err
@@ -735,13 +743,15 @@ func (w *Worker) send(host string, it Item, requireTLS bool) error {
 // to the operator's relay instead. Transport security comes from the gateway's own setting,
 // and starttls is both mandatory and certificate-validated, so a gateway that stops
 // offering it fails the delivery rather than sending the mail in the clear.
-func (w *Worker) sendVia(gw Gateway, it Item) error {
+func (w *Worker) sendVia(gw Gateway, it Item) (err error) {
 	addr := net.JoinHostPort(gw.Host, strconv.Itoa(gw.Port))
 	conn, err := w.dialGateway(addr)
 	if err != nil {
 		return err
 	}
-	_ = conn.SetDeadline(time.Now().Add(sessionTimeout))
+	if err := conn.SetDeadline(time.Now().Add(sessionTimeout)); err != nil {
+		return errors.Join(err, conn.Close())
+	}
 	conn = &turnCapConn{Conn: conn}
 	if gw.ImplicitTLS {
 		conn = tls.Client(conn, &tls.Config{ServerName: gw.Host, MinVersion: tls.VersionTLS12})
@@ -750,7 +760,7 @@ func (w *Worker) sendVia(gw Gateway, it Item) error {
 	if err != nil {
 		return errors.Join(err, conn.Close())
 	}
-	defer c.Close()
+	defer closeSession(c, &err)
 
 	if err := c.Hello(w.heloName(conn.LocalAddr())); err != nil {
 		return err
@@ -907,8 +917,18 @@ func sendMessage(c *smtp.Client, it Item, host string) error {
 	// politely, and many servers hang up as soon as they have accepted, so a QUIT
 	// error must not undo the acceptance: reporting it as a failure would send the
 	// same message again to the next host and again on the next pass.
-	_ = c.Quit()
+	if err := c.Quit(); err != nil {
+		slog.Info("relay: QUIT after accepted message failed", "host", host, "err", err)
+	}
 	return nil
+}
+
+// closeSession closes an SMTP client and joins a close failure into *err. A
+// connection QUIT already closed is the normal end of a session, not a failure.
+func closeSession(c *smtp.Client, err *error) {
+	if cerr := c.Close(); cerr != nil && !errors.Is(cerr, net.ErrClosed) {
+		*err = errors.Join(*err, cerr)
+	}
 }
 
 // recordTLS reports one TLS session outcome to the TLS-RPT store (RFC 8460),

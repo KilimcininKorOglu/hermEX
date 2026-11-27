@@ -128,7 +128,7 @@ func (w *Worker) deliverReport(uri, policyDomain string, report *tlsrpt.Report, 
 // deliverReportHTTPS POSTs the gzip-compressed report to an https rua target as
 // application/tlsrpt+gzip (RFC 8460 §3). The client is the SSRF-guarded one, so a
 // target that resolves to a non-public address is refused at dial.
-func (w *Worker) deliverReportHTTPS(uri string, jsonBytes []byte) error {
+func (w *Worker) deliverReportHTTPS(uri string, jsonBytes []byte) (err error) {
 	// The target comes from the destination domain's own DNS record, so every safety
 	// property of this call lives in the injected client: its timeout, its refusal to
 	// follow redirects, and its dial-time address check. Falling back to the default
@@ -144,7 +144,7 @@ func (w *Worker) deliverReportHTTPS(uri string, jsonBytes []byte) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer closeInto(resp.Body, &err)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("tlsrpt: report POST to %s returned %d", uri, resp.StatusCode)
 	}
@@ -200,15 +200,10 @@ func (m reportMail) build() ([]byte, error) {
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
 
-	var h bytes.Buffer
-	fmt.Fprintf(&h, "From: %s <%s>\r\n", m.fromName, m.from)
-	fmt.Fprintf(&h, "To: %s\r\n", m.to)
-	fmt.Fprintf(&h, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", m.subject))
-	fmt.Fprintf(&h, "Date: %s\r\n", time.Now().UTC().Format(time.RFC1123Z))
-	fmt.Fprintf(&h, "Message-ID: <%s>\r\n", m.messageID)
-	h.WriteString("MIME-Version: 1.0\r\n")
-	h.WriteString("Auto-Submitted: auto-generated\r\n")
-	fmt.Fprintf(&h, "Content-Type: multipart/mixed; boundary=%q\r\n\r\n", mw.Boundary())
+	h := fmt.Appendf(nil, "From: %s <%s>\r\nTo: %s\r\nSubject: %s\r\nDate: %s\r\nMessage-ID: <%s>\r\n"+
+		"MIME-Version: 1.0\r\nAuto-Submitted: auto-generated\r\nContent-Type: multipart/mixed; boundary=%q\r\n\r\n",
+		m.fromName, m.from, m.to, mime.QEncoding.Encode("utf-8", m.subject),
+		time.Now().UTC().Format(time.RFC1123Z), m.messageID, mw.Boundary())
 
 	note, err := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {"text/plain; charset=utf-8"}})
 	if err != nil {
@@ -232,7 +227,7 @@ func (m reportMail) build() ([]byte, error) {
 	if err := mw.Close(); err != nil {
 		return nil, err
 	}
-	return append(h.Bytes(), body.Bytes()...), nil
+	return append(h, body.Bytes()...), nil
 }
 
 // gzipBytes returns data gzip-compressed, the on-the-wire form of a TLS-RPT report.

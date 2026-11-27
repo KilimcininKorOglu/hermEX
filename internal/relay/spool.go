@@ -223,12 +223,12 @@ func (s *Spool) EnqueueForward(from, ret, envid string, recipients []DSNRecipien
 }
 
 // insert stores one message and its recipients in a single transaction.
-func (s *Spool) insert(from, ret, envid string, recipients []DSNRecipient, body []byte, now time.Time) error {
+func (s *Spool) insert(from, ret, envid string, recipients []DSNRecipient, body []byte, now time.Time) (err error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	res, err := tx.Exec(`INSERT INTO messages (envelope_from, body, enqueued_at, ret, envid) VALUES (?, ?, ?, ?, ?)`,
 		from, body, now.Unix(), ret, envid)
 	if err != nil {
@@ -256,7 +256,7 @@ func (s *Spool) insert(from, ret, envid string, recipients []DSNRecipient, body 
 // may already have been accepted by the recipient's mail exchanger, and handing it
 // back here would send the message a second time. Unsettled reports those rows for
 // the worker to resolve without a new SMTP session.
-func (s *Spool) Claim(now time.Time, limit int) ([]Item, error) {
+func (s *Spool) Claim(now time.Time, limit int) (got []Item, err error) {
 	rows, err := s.db.Query(`
 SELECT r.id, m.envelope_from, r.recipient, m.body, r.attempts, r.notify
   FROM recipients r JOIN messages m ON m.id = r.message_id
@@ -266,7 +266,7 @@ SELECT r.id, m.envelope_from, r.recipient, m.body, r.attempts, r.notify
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var items []Item
 	for rows.Next() {
 		var it Item
@@ -307,7 +307,7 @@ func (s *Spool) MarkDelivered(recipientID int64) error {
 // whose row was never removed, oldest first. Delivered separates the two cases the
 // worker must treat differently: a delivered row needs only its settle retried,
 // while a started-but-not-delivered row has an unknowable outcome.
-func (s *Spool) Unsettled() ([]Item, error) {
+func (s *Spool) Unsettled() (got []Item, err error) {
 	rows, err := s.db.Query(`
 SELECT r.id, m.envelope_from, r.recipient, m.body, r.attempts, r.notify, r.delivered
   FROM recipients r JOIN messages m ON m.id = r.message_id
@@ -316,7 +316,7 @@ SELECT r.id, m.envelope_from, r.recipient, m.body, r.attempts, r.notify, r.deliv
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var items []Item
 	for rows.Next() {
 		var it Item
@@ -359,7 +359,7 @@ func (s *Spool) Hold(recipientID int64, lastErr string) error {
 // List returns every queued recipient delivery joined with its message, newest
 // enqueue first, for the administrative mail-queue view. It reads all rows: the
 // outbound spool is a transient backlog, not a mailbox, so no pagination.
-func (s *Spool) List() ([]QueueEntry, error) {
+func (s *Spool) List() (got []QueueEntry, err error) {
 	rows, err := s.db.Query(`
 SELECT r.id, m.id, m.envelope_from, r.recipient, r.attempts,
        m.enqueued_at, r.next_attempt, r.last_error, LENGTH(m.body),
@@ -369,7 +369,7 @@ SELECT r.id, m.id, m.envelope_from, r.recipient, r.attempts,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var out []QueueEntry
 	for rows.Next() {
 		var e QueueEntry
@@ -403,12 +403,12 @@ func (s *Spool) Delete(recipientID int64) error { return s.settle(recipientID) }
 
 // settle deletes a recipient row and, when its message has no recipients left,
 // the message itself. A recipient already gone is treated as settled.
-func (s *Spool) settle(recipientID int64) error {
+func (s *Spool) settle(recipientID int64) (err error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	var mid int64
 	if err := tx.QueryRow(`SELECT message_id FROM recipients WHERE id = ?`, recipientID).Scan(&mid); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

@@ -193,6 +193,16 @@ func splitAddress(addr string) (local, domain string, ok bool) {
 	return addr[:i], addr[i+1:], true
 }
 
+// addressDomain returns the domain after an address's last '@'; ok is false when
+// there is no '@' or nothing follows it.
+func addressDomain(addr string) (string, bool) {
+	i := strings.LastIndexByte(addr, '@')
+	if i < 0 || i == len(addr)-1 {
+		return "", false
+	}
+	return addr[i+1:], true
+}
+
 // mailtoAddress returns the mailbox a mailto: report URI names (RFC 6068): the
 // scheme in any case, the address before any "?" header fields, percent-decoded,
 // and holding a local part and a domain.
@@ -251,7 +261,10 @@ var errDestinationNotAuthorized = errors.New("dmarc: report destination has not 
 // <policy-domain>._report._dmarc.<destination-domain>. Without the check anyone
 // could publish a record that makes this server mail reports to a third party.
 func (w *Worker) dmarcDestinationAllowed(policyDomain, addr string) error {
-	_, destDomain, _ := splitAddress(strings.ToLower(addr))
+	destDomain, ok := addressDomain(strings.ToLower(addr))
+	if !ok {
+		return errDestinationNotAuthorized
+	}
 	if organization(destDomain) == organization(policyDomain) {
 		return nil
 	}
