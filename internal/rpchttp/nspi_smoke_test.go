@@ -60,24 +60,31 @@ func TestEndToEndNSPI(t *testing.T) {
 	// RTS handshake: OUT channel opens (CONN/A3), IN channel joins (CONN/C2).
 	outResp, err := http.DefaultClient.Do(mustReq(t, "RPC_OUT_DATA", url, bytes.NewReader(connA1())))
 	mustNoErr(t, err, "OUT request")
-	defer outResp.Body.Close()
+	defer func() {
+		if cerr := outResp.Body.Close(); cerr != nil {
+			t.Errorf("close OUT body: %v", cerr)
+		}
+	}()
+	wantEq(t, outResp.StatusCode, http.StatusOK, "OUT status")
 	_, err = readPDU(outResp.Body) // CONN/A3
 	mustNoErr(t, err, "read CONN/A3")
 
 	pr, pw := io.Pipe()
 	inDone := make(chan error, 1)
 	go func() {
-		resp, err := http.DefaultClient.Do(mustReq(t, "RPC_IN_DATA", url, pr))
+		resp, doErr := http.DefaultClient.Do(mustReq(t, "RPC_IN_DATA", url, pr))
 		if resp != nil {
-			resp.Body.Close()
+			if cerr := resp.Body.Close(); cerr != nil && doErr == nil {
+				doErr = cerr
+			}
 		}
-		inDone <- err
+		inDone <- doErr
 	}()
 	mustWrite(t, pw, connB1(), "CONN/B1")
 	_, err = readPDU(outResp.Body) // CONN/C2
 	mustNoErr(t, err, "read CONN/C2")
 
-	// Bind the NSPI interface (UUID f5cc5a18…, version 56).
+	// Bind the NSPI interface (UUID f5cc5a18..., version 56).
 	mustWrite(t, pw, buildBindPDU(0x30, nspi.RPCInterfaceUUID, nspi.RPCInterfaceVersion, 0), "the bind")
 	wantPDUType(t, readReply(t, outResp.Body, "bind_ack"), ndr.PktBindAck, "bind reply")
 
@@ -92,15 +99,34 @@ func TestEndToEndNSPI(t *testing.T) {
 	wantPDUType(t, bindResp, ndr.PktResponse, "NspiBind reply")
 	bp := ndr.NewPull(responseStub(t, bindResp))
 	mustU32(t, bp, "server GUID referent")
-	mustRaw(t, bp, 16, "server GUID")
+	gotGUID, err := bp.GUID()
+	mustNoErr(t, err, "read server GUID")
+	wantEq(t, gotGUID, mapi.GUID{Data1: 0xABCD1234}, "server GUID")
 	handle, err := pullCtxHandle(bp)
 	mustNoErr(t, err, "pull the NspiBind handle")
 	bindResult := mustU32(t, bp, "NspiBind result")
 	wantEq(t, bindResult, uint32(ecSuccess), "NspiBind result")
 	wantTrue(t, handle.GUID != (mapi.GUID{}), "the NspiBind reply carries a handle")
 
-	// NspiQueryRows (opnum 3): the bound handle + flags + STAT + an empty inline
-	// MID array (so the cursor walks) + the requested count + a null column set.
+	// An unknown NSPI opnum (99) must fault without disturbing the live session.
+	mustWrite(t, pw, buildRequestPDU(0x32, 0, 99, nil, ndr.PfcFirstFrag|ndr.PfcLastFrag), "unknown NSPI opnum")
+	wantPDUType(t, readReply(t, outResp.Body, "unknown NSPI opnum response"), ndr.PktFault, "unknown NSPI opnum reply")
+
+	// NspiQueryRows (opnum 3) with the live bound handle still succeeds.
+	mustWrite(t, pw, buildRequestPDU(0x33, 0, 3, buildNspiQueryRowsStub(handle), ndr.PfcFirstFrag|ndr.PfcLastFrag), "NspiQueryRows")
+	qrResp := readReply(t, outResp.Body, "NspiQueryRows response")
+	wantPDUType(t, qrResp, ndr.PktResponse, "NspiQueryRows reply")
+	qstub := responseStub(t, qrResp)
+	wantEq(t, binary.LittleEndian.Uint32(qstub[len(qstub)-4:]), uint32(ecSuccess), "NspiQueryRows result")
+
+	mustNoErr(t, pw.Close(), "close IN pipe")
+	if err := <-inDone; err != nil {
+		t.Errorf("RPC_IN_DATA request: %v", err)
+	}
+}
+
+// buildNspiQueryRowsStub builds an NspiQueryRows (opnum 3) request stub for handle.
+func buildNspiQueryRowsStub(handle ContextHandle) []byte {
 	qrStub := ndr.NewPush()
 	pushCtxHandle(qrStub, handle)
 	qrStub.Uint32(0) // flags
@@ -109,14 +135,5 @@ func TestEndToEndNSPI(t *testing.T) {
 	qrStub.Uint32(0)  // null MID referent
 	qrStub.Uint32(10) // requested rows
 	qrStub.Uint32(0)  // null column referent
-	mustWrite(t, pw, buildRequestPDU(0x32, 0, 3, qrStub.Bytes(), ndr.PfcFirstFrag|ndr.PfcLastFrag), "NspiQueryRows")
-	qrResp := readReply(t, outResp.Body, "NspiQueryRows response")
-	wantPDUType(t, qrResp, ndr.PktResponse, "NspiQueryRows reply")
-	qstub := responseStub(t, qrResp)
-	wantEq(t, binary.LittleEndian.Uint32(qstub[len(qstub)-4:]), uint32(ecSuccess), "NspiQueryRows result")
-
-	_ = pw.Close()
-	if err := <-inDone; err != nil {
-		t.Errorf("RPC_IN_DATA request: %v", err)
-	}
+	return qrStub.Bytes()
 }
