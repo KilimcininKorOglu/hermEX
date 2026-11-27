@@ -119,6 +119,31 @@ func TestApplySpillLimitReachesTheSpillingSink(t *testing.T) {
 	}
 }
 
+// TestSpillRefusesOversizedEventWithoutDroppingExisting verifies that an event
+// larger than the configured spill cap is refused and counted while previously
+// spilled events remain intact on disk.
+func TestSpillRefusesOversizedEventWithoutDroppingExisting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "spill.jsonl")
+	s := &MongoSink{spillPath: path}
+	const limit = 1024
+	s.SetSpillLimit(limit)
+
+	s.spill([]Event{{Subsystem: IMAP, Name: "kept.small"}})
+	s.spill([]Event{{Subsystem: IMAP, Name: "too.big", Err: strings.Repeat("z", 2048)}})
+
+	wantEq(t, s.SpillDropped(), uint64(1), "SpillDropped count for oversized event")
+	info, err := os.Stat(path)
+	mustNoErr(t, err, "stat spill file")
+	if info.Size() > limit {
+		t.Errorf("spill file size = %d, want at most %d", info.Size(), limit)
+	}
+	docs, err := readSpill(path)
+	mustNoErr(t, err, "read spill file")
+	if len(docs) != 1 || docs[0].(mongoDoc).Name != "kept.small" {
+		t.Errorf("spill holds %v, want only the 1 pre-existing kept.small event", docs)
+	}
+}
+
 // readSpill collects every record the replay would insert from the spill file.
 func readSpill(path string) ([]any, error) {
 	var docs []any
@@ -136,7 +161,11 @@ func writeLargeSpill(t *testing.T, path string, size int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			t.Errorf("close large spill: %v", err)
+		}
+	}()
 	enc := json.NewEncoder(f)
 	doc := toDoc(Event{Subsystem: IMAP, Name: "spill.fill", Err: strings.Repeat("x", 4096)})
 	for written := 0; written < size; {
