@@ -232,6 +232,9 @@ func TestIMAPQuota(t *testing.T) {
 	if _, status := c.do("a4", `SETQUOTA "" (STORAGE 999999)`); status != "NO" {
 		t.Errorf("SETQUOTA = %s, want NO (not permitted for a client)", status)
 	}
+	if got := strings.Join(c.mustOK("a5", `GETQUOTA ""`), " "); strings.Contains(got, "999999") {
+		t.Errorf("GETQUOTA after the refused SETQUOTA = %q, the client's limit was stored", got)
+	}
 }
 
 // TestIMAPESearch covers ESEARCH (RFC 4731): SEARCH RETURN (...) yields an ESEARCH
