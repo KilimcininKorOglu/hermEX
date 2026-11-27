@@ -23,7 +23,9 @@ type vcard struct {
 }
 
 // parseVCard parses the first BEGIN:VCARD…END:VCARD block in raw. Lines are
-// unfolded first (RFC 6350 §3.2). It returns an error if no card is present.
+// unfolded first (RFC 6350 §3.2). It returns an error if no complete card is
+// present: a card cut before its END:VCARD (RFC 6350 §3.3) may have lost fields,
+// so it is refused rather than read as whole.
 func parseVCard(raw []byte) (*vcard, error) {
 	c := &vcard{}
 	in := false
@@ -37,17 +39,14 @@ func parseVCard(raw []byte) (*vcard, error) {
 		case isCardBoundary(upper, "BEGIN", value):
 			in = true
 		case isCardBoundary(upper, "END", value):
-			if in {
+			if in && len(c.lines) > 0 {
 				return c, nil
 			}
 		case in:
 			c.lines = append(c.lines, vline{name: upper, params: params, value: decodeValue(params, value)})
 		}
 	}
-	if !in || len(c.lines) == 0 {
-		return nil, errNoCard
-	}
-	return c, nil
+	return nil, errNoCard
 }
 
 // isCardBoundary reports whether a content line opens or closes a card.

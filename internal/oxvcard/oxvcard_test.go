@@ -44,7 +44,8 @@ func (r *resolver) resolve(create bool, names []mapi.PropertyName) ([]uint16, er
 // resolver, so a test can assert which slot a vCard field landed in.
 func namedVal(t *testing.T, r *resolver, m *oxcmail.Message, name mapi.PropertyName) string {
 	t.Helper()
-	ids, _ := r.resolve(false, []mapi.PropertyName{name})
+	ids, err := r.resolve(false, []mapi.PropertyName{name})
+	mustNoErr(t, err, "resolve the name")
 	if ids[0] == 0 {
 		return ""
 	}
@@ -53,7 +54,10 @@ func namedVal(t *testing.T, r *resolver, m *oxcmail.Message, name mapi.PropertyN
 	if !ok {
 		return ""
 	}
-	s, _ := v.(string)
+	s, ok := v.(string)
+	if !ok {
+		t.Errorf("named %v holds %T, want a string", name, v)
+	}
 	return s
 }
 
@@ -180,8 +184,8 @@ func TestImportVersion21(t *testing.T) {
 		mapi.PrBusinessTelephoneNumber: "+90 212 555 0101",
 		mapi.PrMobileTelephoneNumber:   "+90 532 555 0102",
 	} {
-		if got, _ := m.Props.Get(tag); got != want {
-			t.Errorf("%#x = %q, want %q", uint32(tag), got, want)
+		if got, ok := m.Props.Get(tag); !ok || got != want {
+			t.Errorf("%#x = %q (set: %v), want %q", uint32(tag), got, ok, want)
 		}
 	}
 	if got := namedVal(t, r, m, mapi.NameEmail1Address); got != "ayse@example.test" {
@@ -234,12 +238,34 @@ func TestExportEscapesALineBreakInAValue(t *testing.T) {
 	wantEq(t, str(back, mapi.PrSurname), "Love;lace\nTEL:+1-555-0000", "the surname read back")
 }
 
+// TestImportRefusesMalformedCards follows RFC 6350 3.3: a vCard is a
+// BEGIN:VCARD ... END:VCARD object. A contact arrives from any client or mail
+// sender, so input that is not one is refused, and the refusal builds no message.
+func TestImportRefusesMalformedCards(t *testing.T) {
+	for name, card := range map[string]string{
+		"empty":          "",
+		"no BEGIN":       "VERSION:4.0\r\nFN:x\r\nEND:VCARD\r\n",
+		"no END":         "BEGIN:VCARD\r\nVERSION:4.0\r\nFN:x\r\n",
+		"another object": "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n",
+		"plain text":     "not a card at all",
+	} {
+		m, err := Import([]byte(card), Options{Resolver: newResolver().resolve})
+		if err == nil {
+			t.Errorf("%s: Import accepted it", name)
+		}
+		if m != nil {
+			t.Errorf("%s: a refused card still built a message", name)
+		}
+	}
+}
+
 // TestExportShape checks the emitted vCard opens and closes correctly and is
 // version 4.0.
 func TestExportShape(t *testing.T) {
 	r := newResolver()
 	opt := Options{Resolver: r.resolve}
-	m, _ := Import([]byte(sampleVCard), opt)
+	m, err := Import([]byte(sampleVCard), opt)
+	mustNoErr(t, err, "import")
 	out, err := Export(m, opt)
 	if err != nil {
 		t.Fatal(err)
