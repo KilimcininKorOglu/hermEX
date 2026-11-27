@@ -46,9 +46,13 @@ func TestReceiveFolderROPs(t *testing.T) {
 	wantReceiveFolder(t, sess, logonH, "IPM.Note.Custom.Sub", sentEID, "IPM.Note.Custom")
 
 	// IPM is not settable.
-	wantSetReceiveFolder(t, sess, logonH, inboxEID, "IPM", ecAccessDenied)
+	// It is pointed elsewhere, so a refusal that still wrote would show below.
+	wantSetReceiveFolder(t, sess, logonH, sentEID, "IPM", ecAccessDenied)
 	// The empty default cannot be removed with a zero folder.
 	wantSetReceiveFolder(t, sess, logonH, 0, "", ecError)
+	// Both refusals left the mappings as they were.
+	wantReceiveFolder(t, sess, logonH, "IPM.Note", inboxEID, "IPM")
+	wantReceiveFolder(t, sess, logonH, "", inboxEID, "")
 
 	// GetReceiveFolderTable: the mappings (seeded 4 + the custom one), first row decodable.
 	tblResp, _ := sess.Dispatch(toROPRequest(ropGetReceiveFolderTable, 0, nil), []uint32{logonH})
