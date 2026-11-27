@@ -14,6 +14,19 @@ func mustNoErr(t *testing.T, err error, what string) {
 }
 
 // wantEq fails the test unless the value equals what the caller expected.
+// decoder returns a function that passes a decoded value through and fails the
+// test when its read failed, so a short or malformed PDU stops the test instead
+// of shifting every field read after it.
+func decoder[T any](t *testing.T) func(T, error) T {
+	return func(v T, err error) T {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return v
+	}
+}
+
 func wantEq[T comparable](t *testing.T, got, want T, what string) {
 	t.Helper()
 	if got != want {

@@ -188,25 +188,26 @@ func TestBindAckRoundTrip(t *testing.T) {
 	wantEq(t, h.Flags, uint8(PfcFirstFrag|PfcLastFrag), "the fragment flags")
 	wantEq(t, int(h.FragLen), len(pduBytes), "the fragment length (the whole PDU)")
 
-	maxXmit, _ := p.Uint16()
-	maxRecv, _ := p.Uint16()
-	assoc, _ := p.Uint32()
+	u8, u16, u32 := decoder[uint8](t), decoder[uint16](t), decoder[uint32](t)
+	maxXmit := u16(p.Uint16())
+	maxRecv := u16(p.Uint16())
+	assoc := u32(p.Uint32())
 	wantEq(t, maxXmit, uint16(0x16D0), "the max transmit frame size")
 	wantEq(t, maxRecv, uint16(0x16D0), "the max receive frame size")
 	wantEq(t, assoc, uint32(0x1234), "the association group id")
 
-	saLen, _ := p.Uint16()
+	saLen := u16(p.Uint16())
 	wantEq(t, saLen, uint16(5), `the secondary address length ("6001" plus its terminator)`)
 	_, err = p.Raw(int(saLen))
 	mustNoErr(t, err, "the secondary address")
 
 	p.Align(4)
-	n, _ := p.Uint8()
+	n := u8(p.Uint8())
 	mustCount(t, int(n), 1, "the ack result count")
 	p.Align(4)
-	result, _ := p.Uint16()
-	reason, _ := p.Uint16()
-	syn, _ := pullSyntax(p)
+	result := u16(p.Uint16())
+	reason := u16(p.Uint16())
+	syn := decoder[SyntaxID](t)(pullSyntax(p))
 	wantEq(t, result, uint16(AckResultAccept), "the context result")
 	wantEq(t, reason, uint16(AckReasonNotSpecified), "the rejection reason")
 	wantEq(t, syn, TransferSyntaxNDR, "the negotiated transfer syntax")
@@ -258,7 +259,7 @@ func TestFrameFault(t *testing.T) {
 	if _, err := p.Uint8(); err != nil { // cancel_count
 		t.Fatal(err)
 	}
-	status, _ := p.Uint32()
+	status := decoder[uint32](t)(p.Uint32())
 	if status != FaultOpRngError {
 		t.Errorf("fault status = %#x, want %#x", status, FaultOpRngError)
 	}
