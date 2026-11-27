@@ -152,8 +152,11 @@ func scanQuarantine(s rowScanner) (QuarantineRecord, error) {
 
 // capString caps s to at most n bytes for a VARCHAR-bounded column. The cut backs
 // off to the start of a character, because a cut inside a multi-byte character
-// leaves invalid UTF-8 and MariaDB then refuses the whole row.
+// leaves invalid UTF-8 and MariaDB then refuses the whole row. For the same
+// reason, bytes that are not UTF-8 (a sender writes these fields) are replaced
+// with U+FFFD first.
 func capString(s string, n int) string {
+	s = strings.ToValidUTF8(s, "�")
 	if len(s) <= n {
 		return s
 	}

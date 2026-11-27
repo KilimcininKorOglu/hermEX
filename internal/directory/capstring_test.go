@@ -23,6 +23,24 @@ func TestCapStringKeepsWholeCharacters(t *testing.T) {
 	wantEq(t, "four-byte character at the cap", capString(strings.Repeat("a", 253)+"😀", 255), strings.Repeat("a", 253))
 }
 
+// TestAQuarantineSubjectWithInvalidBytesIsStored sends the subject a hostile
+// sender controls as raw bytes that are not UTF-8. The quarantine row must still
+// be written, or the infected message would have no record to release or audit.
+func TestAQuarantineSubjectWithInvalidBytesIsStored(t *testing.T) {
+	d := freshSQL(t)
+	dom := mustCreateDomain(t, d, t.TempDir(), "acme.test")
+	id, err := d.QuarantineMessage(QuarantineEntry{
+		Direction: "inbound", MailFrom: "a@b.example", Recipients: []string{"x@acme.test"},
+		Subject: "pay\xff\xfenow", VirusName: "Eicar", DomainID: dom, CreatedAt: 1,
+	})
+	mustNoErr(t, "quarantine a message with a non-UTF-8 subject", err)
+	rec, ok, err := d.GetQuarantine(id)
+	mustNoErr(t, "read the record back", err)
+	wantEq(t, "record found", ok, true)
+	wantEq(t, "stored subject is valid UTF-8", utf8.ValidString(rec.Subject), true)
+	wantEq(t, "stored subject keeps its readable text", strings.HasPrefix(rec.Subject, "pay") && strings.HasSuffix(rec.Subject, "now"), true)
+}
+
 // TestAQuarantineSubjectCutInsideACharacterIsStored is the failure the helper
 // caused: the subject column is capped at 255 bytes, and a subject whose 255th
 // byte falls inside a character made the insert fail.
