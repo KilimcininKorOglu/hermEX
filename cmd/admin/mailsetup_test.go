@@ -131,6 +131,9 @@ func TestSetupCommandsRefuseAnUnknownDomain(t *testing.T) {
 	if d.keyWrites != 0 {
 		t.Errorf("%d keys written for refused commands", d.keyWrites)
 	}
+	if len(d.av) != 0 {
+		t.Errorf("scan settings %v written for refused commands", d.av)
+	}
 }
 
 // TestSetAVScanTakesOnlyOnOrOff: any other word must be refused, not read as off.
