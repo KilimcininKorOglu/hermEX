@@ -59,15 +59,18 @@ func (r *Reader) RecentByEvent(ctx context.Context, event string, limit int64) (
 }
 
 // find runs one newest-first query and decodes every matching entry.
-func (r *Reader) find(ctx context.Context, filter bson.D, limit int64) ([]LogEntry, error) {
+func (r *Reader) find(ctx context.Context, filter bson.D, limit int64) (entries []LogEntry, err error) {
 	cur, err := r.coll.Find(ctx, filter,
 		options.Find().SetSort(bson.D{{Key: "ts", Value: -1}}).SetLimit(limit))
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = cur.Close(ctx) }() // deferred cursor teardown; its error is unactionable here
+	defer func() {
+		if cerr := cur.Close(ctx); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 
-	var entries []LogEntry
 	for cur.Next(ctx) {
 		var e LogEntry
 		if err := cur.Decode(&e); err != nil {
@@ -108,8 +111,8 @@ func (r *Reader) DropLegacyTTLIndex(ctx context.Context) error {
 		if _, ok := m["expireAfterSeconds"]; !ok {
 			continue
 		}
-		name, _ := m["name"].(string)
-		if name == "" {
+		name, ok := m["name"].(string)
+		if !ok || name == "" {
 			continue
 		}
 		if err := r.coll.Indexes().DropOne(ctx, name); err != nil {

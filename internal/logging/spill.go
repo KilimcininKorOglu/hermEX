@@ -27,7 +27,7 @@ func (s *MongoSink) spill(events []Event) {
 		s.spillLost(len(events), "open", err)
 		return
 	}
-	defer f.Close()
+	defer s.closeSpillFile(f, len(events))
 	size := int64(0)
 	if info, err := f.Stat(); err == nil {
 		size = info.Size()
@@ -53,6 +53,13 @@ func (s *MongoSink) spill(events []Event) {
 	}
 }
 
+// closeSpillFile closes f and reports any close error to stderr.
+func (s *MongoSink) closeSpillFile(f *os.File, n int) {
+	if cerr := f.Close(); cerr != nil {
+		s.spillLost(n, "close", cerr)
+	}
+}
+
 // replayPath is where a spill is moved while it is replayed, so events spilled
 // during the replay land in a fresh spill file instead of one about to be removed.
 func replayPath(spillPath string) string {
@@ -69,7 +76,9 @@ func (s *MongoSink) spillLost(n int, reason string, err error) {
 	if err != nil {
 		msg = ": " + err.Error()
 	}
-	fmt.Fprintf(os.Stderr, "logging: %d events not spilled to %s (%s)%s\n", n, s.spillPath, reason, msg)
+	if _, werr := fmt.Fprintf(os.Stderr, "logging: %d events not spilled to %s (%s)%s\n", n, s.spillPath, reason, msg); werr != nil {
+		s.stderrErrors.Add(1)
+	}
 }
 
 // replaySpill re-inserts everything in the spill file in batches and removes the
@@ -112,7 +121,9 @@ func (s *MongoSink) replaySpill() bool {
 	// The batches are already in Mongo. A failed removal replays them on the next
 	// drain, which duplicates events rather than losing them: the safe direction,
 	// and the only one available to the logger itself.
-	_ = os.Remove(replaying)
+	if err := os.Remove(replaying); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		s.spillLost(0, "remove", err)
+	}
 	return true
 }
 
@@ -124,13 +135,17 @@ func (s *MongoSink) replaySpill() bool {
 // mid-spill is tolerated: decoding stops at the first malformed value and the
 // records that decoded cleanly are replayed. The first error from fn stops the
 // pass and is returned.
-func eachSpillBatch(path string, fn func([]any) error) error {
+func eachSpillBatch(path string, fn func([]any) error) (err error) {
 	// #nosec G304 -- the spill file lives in the daemon's own spill directory, derived from the config
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 	dec := json.NewDecoder(bufio.NewReader(f))
 	batch := make([]any, 0, mongoBatchSize)
 	for {

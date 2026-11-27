@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -186,8 +187,12 @@ func redact(f Fields) Fields {
 // MongoDB sink augments rather than replaces, and it keeps the dev/Docker logs
 // working. It is safe for concurrent use: each Write is a single io.Writer call.
 type StderrSink struct {
-	w io.Writer
+	w           io.Writer
+	writeErrors atomic.Uint64
 }
+
+// WriteErrors reports how many writes to the underlying writer failed.
+func (s *StderrSink) WriteErrors() uint64 { return s.writeErrors.Load() }
 
 // NewStderrSink returns a StderrSink writing to w, or os.Stderr when w is nil.
 func NewStderrSink(w io.Writer) *StderrSink {
@@ -210,30 +215,29 @@ func lineSafe(s string) string {
 // Write renders e as a single line: time, level, subsystem, name, then the
 // non-empty columns and sorted fields.
 func (s *StderrSink) Write(e Event) {
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s %-5s %s %s", e.Time.Format(time.RFC3339), e.Level, e.Subsystem, e.Name)
+	buf := fmt.Appendf(nil, "%s %-5s %s %s", e.Time.Format(time.RFC3339), e.Level, e.Subsystem, e.Name)
 	if e.User != "" {
-		fmt.Fprintf(&b, " user=%s", lineSafe(e.User))
+		buf = fmt.Appendf(buf, " user=%s", lineSafe(e.User))
 	}
 	if e.RemoteAddr != "" {
-		fmt.Fprintf(&b, " remote=%s", lineSafe(e.RemoteAddr))
+		buf = fmt.Appendf(buf, " remote=%s", lineSafe(e.RemoteAddr))
 	}
 	if e.RequestID != "" {
-		fmt.Fprintf(&b, " req=%s", lineSafe(e.RequestID))
+		buf = fmt.Appendf(buf, " req=%s", lineSafe(e.RequestID))
 	}
 	if e.DurationMs != 0 {
-		fmt.Fprintf(&b, " dur=%dms", e.DurationMs)
+		buf = fmt.Appendf(buf, " dur=%dms", e.DurationMs)
 	}
 	for _, k := range sortedKeys(e.Fields) {
-		fmt.Fprintf(&b, " %s=%s", lineSafe(k), lineSafe(fmt.Sprint(e.Fields[k])))
+		buf = fmt.Appendf(buf, " %s=%s", lineSafe(k), lineSafe(fmt.Sprint(e.Fields[k])))
 	}
 	if e.Err != "" {
-		fmt.Fprintf(&b, " err=%q", e.Err)
+		buf = fmt.Appendf(buf, " err=%q", e.Err)
 	}
-	b.WriteByte('\n')
-	// This is the fallback stderr sink itself; a failed write to it has nowhere to
-	// be reported, so the error is deliberately discarded.
-	_, _ = io.WriteString(s.w, b.String())
+	buf = append(buf, '\n')
+	if _, err := s.w.Write(buf); err != nil {
+		s.writeErrors.Add(1)
+	}
 }
 
 // sortedKeys returns f's keys in sorted order, for a stable one-line rendering.

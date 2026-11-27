@@ -79,6 +79,7 @@ type MongoSink struct {
 	// the cap turned away.
 	spillLimit   atomic.Int64
 	spillDropped atomic.Uint64
+	stderrErrors atomic.Uint64
 
 	// writeTimeout bounds each connect and insert (mongoWriteTimeout; a test
 	// shortens it). downUntil is when the store may be tried again after a
@@ -278,8 +279,9 @@ func (s *MongoSink) reportDrops() {
 	if d == s.reportedDrops {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "logging: %d events dropped, the log buffer was full\n", d-s.reportedDrops)
-	s.reportedDrops = d
+	if _, err := fmt.Fprintf(os.Stderr, "logging: %d events dropped, the log buffer was full\n", d-s.reportedDrops); err == nil {
+		s.reportedDrops = d
+	}
 }
 
 // ensureConnected lazily opens the connection. While the store is down this fails
