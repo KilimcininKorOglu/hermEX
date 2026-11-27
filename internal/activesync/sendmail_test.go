@@ -397,8 +397,8 @@ func sourceVerb(t *testing.T, dir string, id int64) (int32, bool) {
 	if !ok {
 		return 0, false
 	}
-	n, _ := v.(int32)
-	return n, true
+	n, ok := v.(int32)
+	return n, ok
 }
 
 // TestSmartReplyMarksSource proves a SmartReply stamps the reply verb
