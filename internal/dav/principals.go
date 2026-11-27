@@ -135,7 +135,7 @@ func (s *Server) reportExpandProperty(w http.ResponseWriter, r *http.Request, us
 		s.davError(w, err, http.StatusBadRequest)
 		return
 	}
-	_, pathUser, _, _ := classify(r.URL.Path)
+	pathUser := classify(r.URL.Path).user
 	if pathUser == "" {
 		pathUser = user
 	}

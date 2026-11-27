@@ -144,7 +144,8 @@ func (c *calDataReq) bound(data string) string {
 // collection: addressbook-multiget, addressbook-query, and sync-collection
 // (RFC 6578). Each returns 207 Multistatus with the requested vCards.
 func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, caller, mailbox string) {
-	_, user, coll, _ := classify(r.URL.Path)
+	dp := classify(r.URL.Path)
+	user, coll := dp.user, dp.collection
 	req, body, ok := s.parseReport(w, r)
 	if !ok {
 		return

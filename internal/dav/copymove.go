@@ -76,19 +76,19 @@ type copyMoveEnds struct {
 // parseCopyMove reads the request path and the Destination header. A non-empty
 // failure is the message to answer with, at the given status.
 func parseCopyMove(r *http.Request) (copyMoveRequest, string, int) {
-	srcKind, srcUser, srcColl, srcName := classify(r.URL.Path)
+	src := classify(r.URL.Path)
 	isCal := strings.HasPrefix(r.URL.Path, "/dav/calendars/")
 	isCard := strings.HasPrefix(r.URL.Path, "/dav/addressbooks/")
-	req := copyMoveRequest{isCal: isCal, ext: ".vcf", srcColl: srcColl, srcName: srcName}
+	req := copyMoveRequest{isCal: isCal, ext: ".vcf", srcColl: src.collection, srcName: src.object}
 	wantKind := kindObject
 	if isCal {
 		wantKind, req.ext = kindCalObject, ".ics"
 	}
-	if (!isCal && !isCard) || srcKind != wantKind {
+	if (!isCal && !isCard) || src.kind != wantKind {
 		return req, "COPY/MOVE is supported only on calendar/contact objects", http.StatusForbidden
 	}
 
-	failure, status := parseDestination(r, &req, wantKind, srcUser)
+	failure, status := parseDestination(r, &req, wantKind, src.user)
 	return req, failure, status
 }
 
@@ -104,10 +104,11 @@ func parseDestination(r *http.Request, req *copyMoveRequest, wantKind resourceKi
 	if u, err := url.Parse(dest); err == nil && u.Path != "" {
 		destPath = u.Path
 	}
-	dstKind, dstUser, dstColl, dstName := classify(destPath)
-	req.dstColl, req.dstName = dstColl, dstName
+	dst := classify(destPath)
+	dstUser, dstName := dst.user, dst.object
+	req.dstColl, req.dstName = dst.collection, dstName
 	// The destination must be the same kind of object under the same protocol root.
-	if dstKind != wantKind || strings.HasPrefix(destPath, "/dav/calendars/") != req.isCal {
+	if dst.kind != wantKind || strings.HasPrefix(destPath, "/dav/calendars/") != req.isCal {
 		return "destination must be the same kind of collection", http.StatusForbidden
 	}
 	// Both ends resolve in the one mailbox the request path selected, so a
@@ -261,8 +262,9 @@ var (
 // that accept a client-chosen resource name.
 func (s *Server) openObjectCollection(w http.ResponseWriter, r *http.Request, mailbox string,
 	t objectTarget, validateName bool) (*objectstore.Store, int64, string, bool) {
-	kind, _, coll, name := classify(r.URL.Path)
-	if kind != t.kind {
+	dp := classify(r.URL.Path)
+	coll, name := dp.collection, dp.object
+	if dp.kind != t.kind {
 		http.Error(w, t.notObject, http.StatusMethodNotAllowed)
 		return nil, 0, "", false
 	}

@@ -70,7 +70,8 @@ func (s *Server) makeCollection(w http.ResponseWriter, r *http.Request, mailbox 
 // mkcolTarget validates a create request's path and reports which home set it names
 // plus the collection segment to create. A non-empty failure is the 403 message.
 func mkcolTarget(r *http.Request, mkcalendar bool) (isCal bool, coll string, failure string) {
-	kind, _, coll, _ := classify(r.URL.Path)
+	dp := classify(r.URL.Path)
+	kind, coll := dp.kind, dp.collection
 	isCal = strings.HasPrefix(r.URL.Path, "/dav/calendars/")
 	isCard := strings.HasPrefix(r.URL.Path, "/dav/addressbooks/")
 	if mkcalendar && !isCal {

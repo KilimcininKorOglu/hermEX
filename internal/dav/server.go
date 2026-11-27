@@ -163,7 +163,8 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	}
 	// Object methods dispatch by collection: a calendar .ics object is served by
 	// the CalDAV handlers, everything else by the CardDAV handlers.
-	kind, pathUser, coll, _ := classify(r.URL.Path)
+	dp := classify(r.URL.Path)
+	kind, pathUser, coll := dp.kind, dp.user, dp.collection
 	// The URL principal segment is authoritative: a request for another local user's
 	// principal is served from THAT owner's mailbox, but only within the folder
 	// rights the owner granted the caller (collection sharing, #117). Anyone else is
@@ -511,70 +512,86 @@ func validObjectName(name string) bool {
 // name segment and, for an object, its resource name. Any collection name is
 // accepted (the well-known "calendar"/"contacts" plus user-created subfolders); the
 // handler resolves the name to a folder. It does not consult the store.
-func classify(p string) (kind resourceKind, user, collection, object string) {
+func classify(p string) davPath {
 	switch p {
 	case "", "/", "/dav", "/dav/":
-		return kindRoot, "", "", ""
+		return davPath{kind: kindRoot}
 	}
 	trimmed := strings.Trim(p, "/")
 	parts := strings.Split(trimmed, "/")
 	// parts[0] == "dav"
 	if len(parts) < 2 || parts[0] != "dav" {
-		return kindUnknown, "", "", ""
+		return davPath{kind: kindUnknown}
 	}
 	switch parts[1] {
 	case "principals":
 		if len(parts) >= 3 {
-			return kindPrincipal, parts[2], "", ""
+			return davPath{kind: kindPrincipal, user: parts[2]}
 		}
 	case "addressbooks":
 		return classifyAddressbook(parts)
 	case "calendars":
 		return classifyCalendar(parts)
 	}
-	return kindUnknown, "", "", ""
+	return davPath{kind: kindUnknown}
+}
+
+// davPath is a request path classified by classify: the resource kind, the
+// principal it belongs to, the collection name segment and the object name. A
+// segment the kind does not carry is empty.
+type davPath struct {
+	kind       resourceKind
+	user       string
+	collection string
+	object     string
 }
 
 // classifyAddressbook resolves a path under the CardDAV root, whose depth alone
 // names the resource: home set, collection, or object.
-func classifyAddressbook(parts []string) (kind resourceKind, user, collection, object string) {
+func classifyAddressbook(parts []string) davPath {
 	switch len(parts) {
 	case 3:
-		return kindHomeSet, parts[2], "", ""
+		return davPath{kind: kindHomeSet, user: parts[2]}
 	case 4:
-		return kindAddressbook, parts[2], parts[3], ""
+		return davPath{kind: kindAddressbook, user: parts[2], collection: parts[3]}
 	case 5:
-		return kindObject, parts[2], parts[3], parts[4]
+		return davPath{kind: kindObject, user: parts[2], collection: parts[3], object: parts[4]}
 	}
-	return kindUnknown, "", "", ""
+	return davPath{kind: kindUnknown}
 }
 
 // classifyCalendar resolves a path under the CalDAV root. Depth names the resource
 // as it does for address books, except that the two reserved scheduling collection
 // names are their own kinds (RFC 6638 2.2).
-func classifyCalendar(parts []string) (kind resourceKind, user, collection, object string) {
+func classifyCalendar(parts []string) davPath {
 	switch len(parts) {
 	case 3:
-		return kindCalHomeSet, parts[2], "", ""
+		return davPath{kind: kindCalHomeSet, user: parts[2]}
 	case 4:
-		switch parts[3] {
-		case scheduleInboxName:
-			return kindScheduleInbox, parts[2], parts[3], ""
-		case scheduleOutboxName:
-			return kindScheduleOutbox, parts[2], parts[3], ""
-		}
-		return kindCalendar, parts[2], parts[3], ""
+		return davPath{kind: calendarCollectionKind(parts[3]), user: parts[2], collection: parts[3]}
 	case 5:
 		switch parts[3] {
 		case scheduleInboxName:
-			return kindScheduleInboxObject, parts[2], parts[3], parts[4]
+			return davPath{kind: kindScheduleInboxObject, user: parts[2], collection: parts[3], object: parts[4]}
 		case scheduleOutboxName:
 			// The Outbox holds no addressable members (POST-only).
-			return kindUnknown, "", "", ""
+			return davPath{kind: kindUnknown}
 		}
-		return kindCalObject, parts[2], parts[3], parts[4]
+		return davPath{kind: kindCalObject, user: parts[2], collection: parts[3], object: parts[4]}
 	}
-	return kindUnknown, "", "", ""
+	return davPath{kind: kindUnknown}
+}
+
+// calendarCollectionKind names a collection under a calendar home: the two
+// reserved scheduling collections are their own kinds, any other name a calendar.
+func calendarCollectionKind(name string) resourceKind {
+	switch name {
+	case scheduleInboxName:
+		return kindScheduleInbox
+	case scheduleOutboxName:
+		return kindScheduleOutbox
+	}
+	return kindCalendar
 }
 
 // URL builders for the fixed DAV layout.

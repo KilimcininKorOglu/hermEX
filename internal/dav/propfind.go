@@ -16,7 +16,8 @@ import (
 // set is not filtered: a useful standard set is returned for each resource (a
 // documented v1 simplification; clients ignore properties they did not ask for).
 func (s *Server) handlePropfind(w http.ResponseWriter, r *http.Request, user, mailbox string) {
-	kind, pathUser, coll, _ := classify(r.URL.Path)
+	dp := classify(r.URL.Path)
+	kind, pathUser, coll := dp.kind, dp.user, dp.collection
 	if pathUser == "" {
 		pathUser = user
 	}

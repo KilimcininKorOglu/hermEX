@@ -64,9 +64,10 @@ const displayNameKey = nsDAV + " displayname"
 // a protected property, nothing changes and the response reports 403 for those and
 // 424 for the rest.
 func (s *Server) handleProppatch(w http.ResponseWriter, r *http.Request, mailbox string) {
-	kind, _, coll, _ := classify(r.URL.Path)
+	dp := classify(r.URL.Path)
+	coll := dp.collection
 	isCal := strings.HasPrefix(r.URL.Path, "/dav/calendars/")
-	if !proppatchableCollection(kind, isCal, strings.HasPrefix(r.URL.Path, "/dav/addressbooks/")) {
+	if !proppatchableCollection(dp.kind, isCal, strings.HasPrefix(r.URL.Path, "/dav/addressbooks/")) {
 		http.Error(w, "PROPPATCH is supported only on collections", http.StatusForbidden)
 		return
 	}

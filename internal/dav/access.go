@@ -180,8 +180,8 @@ func privilegeSetFor(rights uint32) *privilegeSet {
 func restrictSharedResponses(st *objectstore.Store, user string, in []msResponse) ([]msResponse, error) {
 	out := in[:0]
 	for _, resp := range in {
-		kind, _, coll, _ := classify(hrefPath(resp.Href))
-		fid, ok, err := sharedCollectionFID(st, kind, coll)
+		dp := classify(hrefPath(resp.Href))
+		fid, ok, err := sharedCollectionFID(st, dp.kind, dp.collection)
 		if err != nil {
 			return nil, err
 		}
