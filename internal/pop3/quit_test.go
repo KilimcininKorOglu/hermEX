@@ -23,10 +23,11 @@ func TestQuitReportsDeletionsTheStoreRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	// A closed store refuses every write, the failure this test needs.
+	mustClose(t, st)
 	server, client := net.Pipe()
-	defer server.Close()
-	defer client.Close()
+	defer mustClose(t, server)
+	defer mustClose(t, client)
 
 	sink := &captureSink{}
 	var out bytes.Buffer
