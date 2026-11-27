@@ -28,14 +28,20 @@ func (f failingProfileDir) SetUserLocale(string, string, string) (bool, error) {
 	return false, f.localeErr
 }
 
-// unreadableLocaleDir answers every locale read with an error and records any
-// locale write it receives.
+// unreadableLocaleDir answers the forced-change gate's read (the first) with
+// an unflagged account and every later locale read with an error, and records
+// any locale write it receives.
 type unreadableLocaleDir struct {
 	directory.StaticAccounts
 	wrote *bool
+	reads *int
 }
 
 func (u unreadableLocaleDir) GetUser(string) (directory.UserDetail, bool, error) {
+	*u.reads++
+	if *u.reads == 1 {
+		return directory.UserDetail{}, true, nil
+	}
 	return directory.UserDetail{}, false, errors.New("db down")
 }
 
@@ -53,8 +59,8 @@ func TestProfileLocaleReadFailure(t *testing.T) {
 	mbox := filepath.Join(t.TempDir(), "alice")
 	secret := []byte("profile-locale-secret")
 	accounts := directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: mbox}}
-	wrote := false
-	srv := NewServer(unreadableLocaleDir{StaticAccounts: accounts, wrote: &wrote}, accounts, nil, "mail.hermex.test", secret, "", false)
+	wrote, reads := false, 0
+	srv := NewServer(unreadableLocaleDir{StaticAccounts: accounts, wrote: &wrote, reads: &reads}, accounts, nil, "mail.hermex.test", secret, "", false)
 
 	if rec := putProfile(t, srv, secret, mbox, `{"timezone":"Europe/Istanbul"}`); rec.Code != http.StatusInternalServerError {
 		t.Errorf("PUT timezone with an unreadable locale = %d, want 500", rec.Code)

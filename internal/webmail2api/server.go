@@ -338,15 +338,20 @@ func forcedChangeAllowed(path string) bool {
 }
 
 // mustChangePassword reports whether the session user is flagged for a forced
-// password change. A directory that cannot report it (no GetUser capability) never
-// gates, so the API degrades open rather than locking every caller out.
-func (s *Server) mustChangePassword(email string) bool {
+// password change. A directory without the GetUser capability has no such flag
+// and never gates. A directory that has it but fails to answer returns the
+// error, so the gate refuses: answering "not flagged" would admit a flagged
+// session while the directory is down.
+func (s *Server) mustChangePassword(email string) (bool, error) {
 	rd, ok := s.auth.(userLocaleReader)
 	if !ok {
-		return false
+		return false, nil
 	}
 	u, found, err := rd.GetUser(email)
-	return err == nil && found && u.MustChangePassword
+	if err != nil {
+		return false, err
+	}
+	return found && u.MustChangePassword, nil
 }
 
 // gateForcedPasswordChange refuses every API call except the remediation allowlist
@@ -357,9 +362,17 @@ func (s *Server) mustChangePassword(email string) bool {
 func (s *Server) gateForcedPasswordChange(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/v1/") && !forcedChangeAllowed(r.URL.Path) {
-			if c, ok := s.session(r); ok && s.mustChangePassword(c.Email) {
-				writeJSON(w, http.StatusForbidden, map[string]string{"error": "password change required"})
-				return
+			if c, ok := s.session(r); ok {
+				must, err := s.mustChangePassword(c.Email)
+				if err != nil {
+					logError("forced-change-lookup", err, logging.Fields{"user": c.Email})
+					writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "account state unavailable"})
+					return
+				}
+				if must {
+					writeJSON(w, http.StatusForbidden, map[string]string{"error": "password change required"})
+					return
+				}
 			}
 		}
 		next.ServeHTTP(w, r)
