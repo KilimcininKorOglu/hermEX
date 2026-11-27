@@ -91,6 +91,24 @@ func TestPermissionCustomLevel(t *testing.T) {
 	}
 }
 
+// TestPermissionUnknownValuesGrantNothing sends the names a client may invent:
+// an unknown PermissionLevel, ReadItems, EditItems and DeleteItems value. None
+// is in the [MS-OXWSCDATA] enumerations, so none may grant a right; the member
+// must end with no read, edit, delete or owner bit.
+func TestPermissionUnknownValuesGrantNothing(t *testing.T) {
+	stored := storedRights(Permission{
+		PermissionLevel: "SuperOwner",
+		ReadItems:       "Everything",
+		EditItems:       "Any",
+		DeleteItems:     "Every",
+	})
+	const granting = mapi.FrightsReadAny | mapi.FrightsEditAny | mapi.FrightsEditOwned |
+		mapi.FrightsDeleteAny | mapi.FrightsDeleteOwned | mapi.FrightsOwner | mapi.FrightsCreate
+	if stored&granting != 0 {
+		t.Errorf("unknown values stored rights %#x, want none of %#x", stored, uint32(granting))
+	}
+}
+
 // TestPermissionUserIDMapping confirms the member id maps to the right UserId form:
 // the special Default/Anonymous members to DistinguishedUser, a real member to its
 // SMTP address.
