@@ -1,6 +1,7 @@
 package imap
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -45,7 +46,25 @@ func TestAWriteIntoAFullMailboxIsRefusedAsOverQuota(t *testing.T) {
 	if reply := c.taggedLine("a5", "COPY 1 Projects"); !strings.HasPrefix(reply, "a5 NO [OVERQUOTA]") {
 		t.Errorf("COPY inside a full mailbox = %q, want NO [OVERQUOTA]", reply)
 	}
+	// The refused writes stored nothing: the Inbox still holds the two seeded
+	// messages plus the one that filled it, and Projects is still empty.
+	assertMessageCount(t, c, "a5a", "INBOX", 3)
+	assertMessageCount(t, c, "a5b", "Projects", 0)
 	if _, status := c.do("a6", "MOVE 1 Projects"); status != "OK" {
 		t.Errorf("MOVE inside a full mailbox = %s, want OK", status)
 	}
+}
+
+// assertMessageCount reads STATUS (MESSAGES) for mailbox and fails unless it
+// reports want (RFC 3501 6.3.10).
+func assertMessageCount(t *testing.T, c *testClient, tag, mailbox string, want int) {
+	t.Helper()
+	untagged := c.mustOK(tag, "STATUS "+mailbox+" (MESSAGES)")
+	wantField := fmt.Sprintf("(MESSAGES %d)", want)
+	for _, line := range untagged {
+		if strings.HasPrefix(line, "* STATUS") && strings.Contains(line, wantField) {
+			return
+		}
+	}
+	t.Errorf("STATUS %s = %q, want %s", mailbox, untagged, wantField)
 }
