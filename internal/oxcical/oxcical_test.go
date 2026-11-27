@@ -76,8 +76,8 @@ func (r *resolver) boolVal(m *oxcmail.Message, name mapi.PropertyName) bool {
 	if !ok {
 		return false
 	}
-	b, _ := v.(bool)
-	return b
+	b, isBool := v.(bool)
+	return isBool && b
 }
 
 func (r *resolver) longVal(m *oxcmail.Message, name mapi.PropertyName) (int32, bool) {
@@ -94,14 +94,18 @@ func (r *resolver) strVal(m *oxcmail.Message, name mapi.PropertyName) string {
 	if !ok {
 		return ""
 	}
-	s, _ := v.(string)
+	s, isStr := v.(string)
+	if !isStr {
+		return ""
+	}
 	return s
 }
 
 func str(m *oxcmail.Message, tag mapi.PropTag) string {
 	if v, ok := m.Props.Get(tag); ok {
-		s, _ := v.(string)
-		return s
+		if s, isStr := v.(string); isStr {
+			return s
+		}
 	}
 	return ""
 }
@@ -159,6 +163,7 @@ func TestImportMethodMessageClass(t *testing.T) {
 		{"reply-tentative", "METHOD:REPLY\r\n", "ATTENDEE;PARTSTAT=TENTATIVE:mailto:a@x.test\r\n", "IPM.Schedule.Meeting.Resp.Tent"},
 		{"counter", "METHOD:COUNTER\r\n", "ATTENDEE;PARTSTAT=TENTATIVE:mailto:a@x.test\r\n", "IPM.Schedule.Meeting.Resp.Tent"},
 		{"publish", "METHOD:PUBLISH\r\n", "", "IPM.Appointment"},
+		{"unknown", "METHOD:X-FORGED\r\n", "", "IPM.Appointment"},
 		{"none", "", "", "IPM.Appointment"},
 	}
 	for _, tc := range cases {
@@ -547,7 +552,10 @@ func TestRecurringVerbatim(t *testing.T) {
 	if !ok {
 		t.Fatal("recurring event did not set PrIcalOriginal")
 	}
-	raw, _ := v.([]byte)
+	raw, isBytes := v.([]byte)
+	if !isBytes {
+		t.Fatalf("PrIcalOriginal has type %T, want []byte", v)
+	}
 	wantEq(t, string(raw), recICS, "the preserved source")
 	wantEq(t, str(msg, mapi.PrSubject), "Weekly", "the listing subject")
 
@@ -557,7 +565,10 @@ func TestRecurringVerbatim(t *testing.T) {
 	if !ok {
 		t.Fatal("recurring event did not set PidLidAppointmentRecur blob")
 	}
-	b, _ := blob.([]byte)
+	b, isBytes := blob.([]byte)
+	if !isBytes {
+		t.Fatalf("PidLidAppointmentRecur has type %T, want []byte", blob)
+	}
 	if len(b) < 8 {
 		t.Fatalf("RecurrencePattern blob too short: %d bytes", len(b))
 	}
@@ -595,31 +606,54 @@ func TestImportSemantics(t *testing.T) {
 		"BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT15M\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
 	r := newResolver()
 	msg, err := Import([]byte(ics), r.opt())
-	if err != nil {
-		t.Fatal(err)
+	mustNoErr(t, err, "import")
+	imp, ok := msg.Props.Get(mapi.PrImportance)
+	wantTrue(t, ok, "PRIORITY:1 sets PrImportance")
+	wantEq(t, imp, any(int32(mapi.ImportanceHigh)), "PRIORITY:1 importance")
+	sens, ok := msg.Props.Get(mapi.PrSensitivity)
+	wantTrue(t, ok, "CLASS:PRIVATE sets PrSensitivity")
+	wantEq(t, sens, any(int32(mapi.SensitivityPrivate)), "CLASS:PRIVATE sensitivity")
+	busy, ok := r.longVal(msg, mapi.NameBusyStatus)
+	wantTrue(t, ok, "TRANSP:TRANSPARENT sets NameBusyStatus")
+	wantEq(t, busy, int32(busyFree), "TRANSP:TRANSPARENT busy")
+	wantTrue(t, r.boolVal(msg, mapi.NameReminderSet), "VALARM sets ReminderSet")
+	delta, ok := r.longVal(msg, mapi.NameReminderDelta)
+	wantTrue(t, ok, "VALARM sets ReminderDelta")
+	wantEq(t, delta, int32(15), "reminder delta")
+}
+
+// TestNoEvent rejects a calendar with no VEVENT without allocating named properties.
+func TestNoEvent(t *testing.T) {
+	const noev = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n"
+	r := newResolver()
+	msg, err := Import([]byte(noev), r.opt())
+	if !errors.Is(err, errNoEvent) || msg != nil {
+		t.Errorf("Import = (%v, %v), want (nil, errNoEvent)", msg, err)
 	}
-	if v, _ := msg.Props.Get(mapi.PrImportance); v != int32(mapi.ImportanceHigh) {
-		t.Errorf("PRIORITY:1 importance %v, want High", v)
-	}
-	if v, _ := msg.Props.Get(mapi.PrSensitivity); v != int32(mapi.SensitivityPrivate) {
-		t.Errorf("CLASS:PRIVATE sensitivity %v, want Private", v)
-	}
-	if got, ok := r.longVal(msg, mapi.NameBusyStatus); !ok || got != busyFree {
-		t.Errorf("TRANSP:TRANSPARENT busy %d (ok=%v), want free", got, ok)
-	}
-	if !r.boolVal(msg, mapi.NameReminderSet) {
-		t.Error("VALARM did not set ReminderSet")
-	}
-	if got, ok := r.longVal(msg, mapi.NameReminderDelta); !ok || got != 15 {
-		t.Errorf("reminder delta %d (ok=%v), want 15", got, ok)
+	if len(r.ids) != 0 {
+		t.Errorf("refused Import allocated %d named properties, want 0", len(r.ids))
 	}
 }
 
-// TestNoEvent rejects a calendar with no VEVENT.
-func TestNoEvent(t *testing.T) {
-	const noev = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n"
-	if _, err := Import([]byte(noev), newResolver().opt()); !errors.Is(err, errNoEvent) {
-		t.Errorf("err = %v, want errNoEvent", err)
+// TestImportHostileInputs covers malformed iCalendar, missing UID, and invalid DTSTART.
+func TestImportHostileInputs(t *testing.T) {
+	r := newResolver()
+	if msg, err := Import([]byte("TRUNCATED-DATA"), r.opt()); !errors.Is(err, errNoCalendar) || msg != nil {
+		t.Errorf("Import malformed = (%v, %v), want (nil, errNoCalendar)", msg, err)
+	}
+	if len(r.ids) != 0 {
+		t.Errorf("refused Import allocated %d named properties, want 0", len(r.ids))
+	}
+
+	const badDateNoUID = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n" +
+		"SUMMARY:No UID Event\r\nDTSTART:20260230T999999Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	msg, err := Import([]byte(badDateNoUID), r.opt())
+	mustNoErr(t, err, "import missing UID and invalid DTSTART")
+	if got := r.strVal(msg, nameICalUID); got != "hermex-no-uid-event" {
+		t.Errorf("generated UID = %q, want hermex-no-uid-event", got)
+	}
+	if _, ok := r.timeVal(msg, mapi.NameAppointmentStartWhole); ok {
+		t.Error("invalid DTSTART must not store NameAppointmentStartWhole")
 	}
 }
 
@@ -641,8 +675,15 @@ func TestAttendeeRoleRoundTrip(t *testing.T) {
 	mustNoErr(t, err, "import")
 	types := map[string]int32{}
 	for i := range msg.Recipients {
-		v, _ := msg.Recipients[i].Get(mapi.PrRecipientType)
-		types[recipSmtp(msg.Recipients[i])], _ = v.(int32)
+		v, ok := msg.Recipients[i].Get(mapi.PrRecipientType)
+		if !ok {
+			t.Fatalf("recipient %d missing PrRecipientType", i)
+		}
+		rt, isInt := v.(int32)
+		if !isInt {
+			t.Fatalf("recipient %d PrRecipientType has type %T, want int32", i, v)
+		}
+		types[recipSmtp(msg.Recipients[i])] = rt
 	}
 	wantEq(t, types["bob@hermex.test"], int32(mapi.RecipTo), "a required attendee's recipient type")
 	wantEq(t, types["carol@hermex.test"], int32(mapi.RecipCc), "an optional attendee's recipient type")
