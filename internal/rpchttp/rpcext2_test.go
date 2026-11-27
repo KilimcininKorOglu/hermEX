@@ -192,4 +192,75 @@ func TestRpcExt2UnknownHandleFaults(t *testing.T) {
 	if _, fault := ems.Handle(&Session{}, opEcDoRpcExt2, buildRpcExt2Stub(bogus, nil)); fault != ndr.FaultContextMismatch {
 		t.Errorf("unknown-handle fault = %#x, want context mismatch", fault)
 	}
+	ems.mu.Lock()
+	n := len(ems.sessions)
+	ems.mu.Unlock()
+	wantEq(t, n, 0, "sessions after unknown-handle refusal")
+}
+
+// buildRpcExt2WithCb builds an EcDoRpcExt2 stub with caller-chosen cb_in and cb_out.
+func buildRpcExt2WithCb(cxh ContextHandle, pin []byte, cbIn, cbOut uint32) []byte {
+	p := ndr.NewPush()
+	pushCtxHandle(p, cxh)
+	p.Uint32(0)                // flags
+	p.Uint32(uint32(len(pin))) // pin max_count
+	p.Raw(pin)
+	p.Uint32(cbIn)
+	p.Uint32(cbOut)
+	p.Uint32(0) // AUX-in max_count
+	p.Uint32(0) // cb_auxin
+	p.Uint32(0) // cb_auxout
+	return p.Bytes()
+}
+
+// TestRpcExt2RefusesHostileCallersAndStubs proves EcDoRpcExt2 rejects cross-account
+// callers, mismatched cb_in, truncated stubs, malformed ROP envelopes, and
+// undersized cb_out buffers without disturbing the owner's live session or handles.
+func TestRpcExt2RefusesHostileCallersAndStubs(t *testing.T) {
+	ems := NewEMSMDB(nil)
+	cxh := connectFresh(t, ems)
+
+	// Log on as Alice so a live ROP logon handle exists in the session.
+	resp, fault := ems.Handle(&Session{User: "alice@hermex.test"}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, logonExecuteBuffer()))
+	wantEq(t, fault, uint32(0), "alice logon fault")
+	_, pout, result := parseRpcExt2Out(t, resp)
+	wantEq(t, result, uint32(ecSuccess), "alice logon result")
+	_, handles, err := oxmapihttp.DecodeExecute(pout)
+	mustNoErr(t, err, "decode alice logon")
+	logonH := handles[0]
+
+	// Cross-account caller presenting Alice's context handle is refused.
+	_, fault = ems.Handle(&Session{User: "bob@hermex.test"}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, openFolderExecuteBuffer(logonH)))
+	wantEq(t, fault, uint32(ndr.FaultContextMismatch), "cross-account fault")
+
+	// Truncated stub, mismatched cb_in, and malformed ROP payload all fault with FaultNdr.
+	badStubs := []struct {
+		name string
+		stub []byte
+	}{
+		{"truncated", []byte{1, 2, 3}},
+		{"mismatched cb_in", buildRpcExt2WithCb(cxh, logonExecuteBuffer(), 1, 0x40000)},
+		{"malformed ROP envelope", buildRpcExt2Stub(cxh, []byte{0xFF, 0xFF, 0x01, 0x02})},
+	}
+	for _, tc := range badStubs {
+		_, fault = ems.Handle(&Session{User: "alice@hermex.test"}, opEcDoRpcExt2, tc.stub)
+		wantEq(t, fault, uint32(ndr.FaultNdr), tc.name+" fault")
+	}
+
+	// Undersized cb_out returns ecResponseTooBig ([MS-OXCRPC] 3.1.4.2) with empty pout.
+	resp, fault = ems.Handle(&Session{User: "alice@hermex.test"}, opEcDoRpcExt2, buildRpcExt2WithCb(cxh, openFolderExecuteBuffer(logonH), uint32(len(openFolderExecuteBuffer(logonH))), 4))
+	wantEq(t, fault, uint32(0), "small cb_out fault")
+	_, smallOut, smallRes := parseRpcExt2Out(t, resp)
+	wantEq(t, smallRes, uint32(ecResponseTooBig), "small cb_out result")
+	wantEq(t, len(smallOut), 0, "small cb_out buffer length")
+
+	// State unchanged: Alice's session and logon handle still open Inbox.
+	resp, fault = ems.Handle(&Session{User: "alice@hermex.test"}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, openFolderExecuteBuffer(logonH)))
+	wantEq(t, fault, uint32(0), "post-hostile open-folder fault")
+	_, pout, result = parseRpcExt2Out(t, resp)
+	wantEq(t, result, uint32(ecSuccess), "post-hostile open-folder result")
+	rops, _, err := oxmapihttp.DecodeExecute(pout)
+	mustNoErr(t, err, "decode post-hostile open-folder")
+	_, rv := ropHeader(t, ext.NewPull(rops, ext.FlagUTF16))
+	wantEq(t, rv, uint32(ecSuccess), "post-hostile open-folder ReturnValue")
 }
