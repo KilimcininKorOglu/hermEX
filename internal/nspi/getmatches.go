@@ -54,7 +54,7 @@ func pullGetMatches(body []byte) (getMatchesRequest, error) {
 	if err := skipOptionalPropTags(p); err != nil {
 		return r, err
 	}
-	if _, err = p.Uint32(); err != nil { // reserved
+	if err = p.Skip(4); err != nil { // reserved
 		return r, err
 	}
 	if r.filter, err = pullOptionalRestriction(p); err != nil {

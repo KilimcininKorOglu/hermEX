@@ -227,7 +227,7 @@ type compareMidsRequest struct {
 func pullCompareMids(body []byte) (compareMidsRequest, error) {
 	p := ext.NewPull(body, abkFlags)
 	var r compareMidsRequest
-	if _, err := p.Uint32(); err != nil { // reserved
+	if err := p.Skip(4); err != nil { // reserved
 		return r, err
 	}
 	hasStat, err := p.Uint8()
@@ -322,7 +322,7 @@ type resortRestrictionRequest struct {
 func pullResortRestriction(body []byte) (resortRestrictionRequest, error) {
 	p := ext.NewPull(body, abkFlags)
 	var r resortRestrictionRequest
-	if _, err := p.Uint32(); err != nil { // reserved
+	if err := p.Skip(4); err != nil { // reserved
 		return r, err
 	}
 	hasStat, err := p.Uint8()

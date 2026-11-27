@@ -207,14 +207,14 @@ func pullPropertyRestriction(p *ndr.Pull) (any, error) {
 // pullExistRestriction decodes a property-exists node, whose two reserved fields
 // are read and discarded.
 func pullExistRestriction(p *ndr.Pull) (any, error) {
-	if _, err := p.Uint32(); err != nil { // reserved1
+	if err := p.SkipAligned(4); err != nil { // reserved1
 		return nil, err
 	}
 	tag, err := p.Uint32()
 	if err != nil {
 		return nil, err
 	}
-	if _, err := p.Uint32(); err != nil { // reserved2
+	if err := p.SkipAligned(4); err != nil { // reserved2
 		return nil, err
 	}
 	return mapi.ExistRestriction{PropTag: mapi.PropTag(tag)}, nil

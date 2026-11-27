@@ -134,7 +134,7 @@ func (s *Server) rpcBind(stub []byte) ([]byte, uint32) {
 	}
 	hadGUID := ref != 0
 	if hadGUID {
-		if _, err := p.Raw(16); err != nil { // the client's cached GUID, ignored
+		if err := p.Skip(16); err != nil { // the client's cached GUID, ignored
 			return nil, ndr.FaultNdr
 		}
 	}

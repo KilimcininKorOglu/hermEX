@@ -61,7 +61,7 @@ func skipAuxIn(p *ext.Pull) error {
 		return err
 	}
 	if cb > 0 {
-		if _, err := p.Raw(int(cb)); err != nil {
+		if err := p.Skip(int(cb)); err != nil {
 			return err
 		}
 	}
@@ -101,7 +101,7 @@ func pullBindRequest(body []byte) (bindRequest, error) {
 // carries no actionable fields.
 func pullUnbindRequest(body []byte) error {
 	p := ext.NewPull(body, abkFlags)
-	if _, err := p.Uint32(); err != nil { // Reserved
+	if err := p.Skip(4); err != nil { // Reserved
 		return err
 	}
 	return skipAuxIn(p)

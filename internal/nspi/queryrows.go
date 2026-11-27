@@ -26,7 +26,7 @@ type queryRowsRequest struct {
 func pullQueryRows(body []byte) (queryRowsRequest, error) {
 	p := ext.NewPull(body, abkFlags)
 	var r queryRowsRequest
-	if _, err := p.Uint32(); err != nil { // flags (Ephemeral/Unicode; v1 emits permanent EIDs)
+	if err := p.Skip(4); err != nil { // flags (Ephemeral/Unicode; v1 emits permanent EIDs)
 		return r, err
 	}
 	stat, err := pullOptionalStat(p)
@@ -179,7 +179,7 @@ type updateStatRequest struct {
 func pullUpdateStat(body []byte) (updateStatRequest, error) {
 	p := ext.NewPull(body, abkFlags)
 	var r updateStatRequest
-	if _, err := p.Uint32(); err != nil { // reserved
+	if err := p.Skip(4); err != nil { // reserved
 		return r, err
 	}
 	hasStat, err := p.Uint8()
@@ -276,10 +276,10 @@ func (s *Server) encodeUpdateStat(result uint32, st stat, hasDelta bool, delta i
 // the server can supply for address-book rows.
 func (s *Server) QueryColumns(body []byte) []byte {
 	p := ext.NewPull(body, abkFlags)
-	if _, err := p.Uint32(); err != nil { // reserved
+	if err := p.Skip(4); err != nil { // reserved
 		return s.encodeQueryColumns(ecError, nil)
 	}
-	if _, err := p.Uint32(); err != nil { // flags
+	if err := p.Skip(4); err != nil { // flags
 		return s.encodeQueryColumns(ecError, nil)
 	}
 	if err := skipAuxIn(p); err != nil {

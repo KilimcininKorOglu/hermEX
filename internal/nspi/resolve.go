@@ -78,7 +78,7 @@ func midArray(p *ext.Push, mids []uint32) error {
 // SMTP address as the final cn= component, so the reverse is a snapshot lookup.
 func (s *Server) DNToMId(body []byte, caller string) []byte {
 	p := ext.NewPull(body, abkFlags)
-	if _, err := p.Uint32(); err != nil { // reserved
+	if err := p.Skip(4); err != nil { // reserved
 		return s.encodeDNToMId(ecError, nil)
 	}
 	hasNames, err := p.Uint8()
@@ -139,7 +139,7 @@ type resolveNamesRequest struct {
 func pullResolveNames(body []byte) (resolveNamesRequest, error) {
 	p := ext.NewPull(body, abkFlags)
 	var r resolveNamesRequest
-	if _, err := p.Uint32(); err != nil { // reserved
+	if err := p.Skip(4); err != nil { // reserved
 		return r, err
 	}
 	stat, err := pullOptionalStat(p)

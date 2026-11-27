@@ -337,7 +337,7 @@ func pullPropValNDR(p *ndr.Pull) (mapi.TaggedPropVal, error) {
 	if err != nil {
 		return tv, err
 	}
-	if _, err = p.Uint32(); err != nil { // reserved
+	if err = p.SkipAligned(4); err != nil { // reserved
 		return tv, err
 	}
 	ptype, err := p.Uint32()
@@ -411,10 +411,10 @@ func pullConfStringNDR(p *ndr.Pull, wide bool) (string, error) {
 	if ref == 0 {
 		return "", nil
 	}
-	if _, err = p.Uint32(); err != nil { // max_count
+	if err = p.SkipAligned(4); err != nil { // max_count
 		return "", err
 	}
-	if _, err = p.Uint32(); err != nil { // offset
+	if err = p.SkipAligned(4); err != nil { // offset
 		return "", err
 	}
 	actual, err := p.Uint32()
@@ -581,10 +581,10 @@ func pullStringsArrayHeaderNDR(p *ndr.Pull) ([]bool, error) {
 // offset, actual_count, then the characters), which is what each present element
 // of a strings array carries.
 func pullVaryingStringNDR(p *ndr.Pull, wide bool) (string, error) {
-	if _, err := p.Uint32(); err != nil { // max_count
+	if err := p.SkipAligned(4); err != nil { // max_count
 		return "", err
 	}
-	if _, err := p.Uint32(); err != nil { // offset
+	if err := p.SkipAligned(4); err != nil { // offset
 		return "", err
 	}
 	actual, err := p.Uint32()

@@ -112,7 +112,7 @@ func (s *Server) rpcUpdateStat(stub []byte, caller string) ([]byte, uint32) {
 	if err := pullHandle(p); err != nil {
 		return nil, ndr.FaultNdr
 	}
-	if _, err := p.Uint32(); err != nil { // reserved
+	if err := p.SkipAligned(4); err != nil { // reserved
 		return nil, ndr.FaultNdr
 	}
 	st, err := pullStatNDR(p)
@@ -148,7 +148,7 @@ func (s *Server) rpcQueryRows(stub []byte, caller string) ([]byte, uint32) {
 	if err := pullHandle(p); err != nil {
 		return nil, ndr.FaultNdr
 	}
-	if _, err := p.Uint32(); err != nil { // flags
+	if err := p.SkipAligned(4); err != nil { // flags
 		return nil, ndr.FaultNdr
 	}
 	st, err := pullStatNDR(p)
@@ -213,7 +213,7 @@ func (s *Server) rpcCompareMids(stub []byte, caller string) ([]byte, uint32) {
 	if err := pullHandle(p); err != nil {
 		return nil, ndr.FaultNdr
 	}
-	if _, err := p.Uint32(); err != nil { // reserved
+	if err := p.SkipAligned(4); err != nil { // reserved
 		return nil, ndr.FaultNdr
 	}
 	st, err := pullStatNDR(p)
@@ -244,7 +244,7 @@ func (s *Server) rpcResortRestriction(stub []byte, caller string) ([]byte, uint3
 	if err := pullHandle(p); err != nil {
 		return nil, ndr.FaultNdr
 	}
-	if _, err := p.Uint32(); err != nil { // reserved
+	if err := p.SkipAligned(4); err != nil { // reserved
 		return nil, ndr.FaultNdr
 	}
 	st, err := pullStatNDR(p)
@@ -278,7 +278,7 @@ func (s *Server) rpcGetProps(stub []byte, caller string) ([]byte, uint32) {
 	if err := pullHandle(p); err != nil {
 		return nil, ndr.FaultNdr
 	}
-	if _, err := p.Uint32(); err != nil { // flags
+	if err := p.SkipAligned(4); err != nil { // flags
 		return nil, ndr.FaultNdr
 	}
 	st, err := pullStatNDR(p)
@@ -337,10 +337,10 @@ func (s *Server) rpcQueryColumns(stub []byte) ([]byte, uint32) {
 	if err := pullHandle(p); err != nil {
 		return nil, ndr.FaultNdr
 	}
-	if _, err := p.Uint32(); err != nil { // reserved
+	if err := p.SkipAligned(4); err != nil { // reserved
 		return nil, ndr.FaultNdr
 	}
-	if _, err := p.Uint32(); err != nil { // flags
+	if err := p.SkipAligned(4); err != nil { // flags
 		return nil, ndr.FaultNdr
 	}
 	out := ndr.NewPush()
@@ -365,7 +365,7 @@ func (s *Server) rpcGetSpecialTable(stub []byte) ([]byte, uint32) {
 	if err != nil {
 		return nil, ndr.FaultNdr
 	}
-	if _, err := p.Uint32(); err != nil { // the client's cached version, ignored
+	if err := p.SkipAligned(4); err != nil { // the client's cached version, ignored
 		return nil, ndr.FaultNdr
 	}
 	r := s.getSpecialTableCore(getSpecialTableRequest{flags: flags, stat: st})
@@ -450,7 +450,7 @@ func (s *Server) rpcDNToMid(stub []byte, caller string) ([]byte, uint32) {
 	if err := pullHandle(p); err != nil {
 		return nil, ndr.FaultNdr
 	}
-	if _, err := p.Uint32(); err != nil { // reserved
+	if err := p.SkipAligned(4); err != nil { // reserved
 		return nil, ndr.FaultNdr
 	}
 	names, err := pullStringsArrayNDR(p, false)
@@ -520,7 +520,7 @@ func pullGetMatchesPreludeNDR(p *ndr.Pull) (getMatchesRequest, error) {
 	if _, err := pullPtrMIDs(p); err != nil {
 		return req, err
 	}
-	if _, err := p.Uint32(); err != nil { // reserved
+	if err := p.SkipAligned(4); err != nil { // reserved
 		return req, err
 	}
 	req = getMatchesRequest{reserved1: reserved1, stat: st}
@@ -557,7 +557,7 @@ func (s *Server) rpcResolveNames(stub []byte, wide bool, caller string) ([]byte,
 	if err := pullHandle(p); err != nil {
 		return nil, ndr.FaultNdr
 	}
-	if _, err := p.Uint32(); err != nil { // reserved
+	if err := p.SkipAligned(4); err != nil { // reserved
 		return nil, ndr.FaultNdr
 	}
 	st, err := pullStatNDR(p)

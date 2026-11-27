@@ -22,7 +22,7 @@ type getPropsRequest struct {
 func pullGetProps(body []byte) (getPropsRequest, error) {
 	p := ext.NewPull(body, abkFlags)
 	var r getPropsRequest
-	if _, err := p.Uint32(); err != nil { // flags (fEphID; v1 emits permanent EIDs)
+	if err := p.Skip(4); err != nil { // flags (fEphID; v1 emits permanent EIDs)
 		return r, err
 	}
 	hasStat, err := p.Uint8()

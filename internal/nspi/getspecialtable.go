@@ -48,7 +48,7 @@ func pullGetSpecialTable(body []byte) (getSpecialTableRequest, error) {
 		return r, err
 	}
 	if hasVersion != 0 {
-		if _, err = p.Uint32(); err != nil { // client's cached version (ignored)
+		if err = p.Skip(4); err != nil { // client's cached version (ignored)
 			return r, err
 		}
 	}
