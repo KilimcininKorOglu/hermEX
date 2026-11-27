@@ -92,7 +92,7 @@ func (s *Server) handleScheduleInboxGet(w http.ResponseWriter, r *http.Request, 
 		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
-	defer st.Close()
+	defer s.closeStore(st)
 
 	items, err := scheduleInboxItems(st)
 	if err != nil {
@@ -121,9 +121,9 @@ func (s *Server) handleScheduleInboxGet(w http.ResponseWriter, r *http.Request, 
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	// Final response body; a write failure means the client is gone, with no recourse.
-	// #nosec G705 -- the daemon stamps X-Content-Type-Options: nosniff and the Content-Type is set explicitly, so the bytes are never interpreted as a document
-	_, _ = w.Write(ics)
+	// The daemon stamps X-Content-Type-Options: nosniff and the Content-Type is set
+	// explicitly, so the bytes are never interpreted as a document.
+	s.writeBody(w, ics)
 }
 
 // handleScheduleInboxDelete removes a scheduling Inbox member, soft-deleting the
@@ -135,7 +135,7 @@ func (s *Server) handleScheduleInboxDelete(w http.ResponseWriter, r *http.Reques
 		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
-	defer st.Close()
+	defer s.closeStore(st)
 
 	items, err := scheduleInboxItems(st)
 	if err != nil {

@@ -29,9 +29,8 @@ func checkQuota(st *objectstore.Store) error {
 // writeQuotaExceeded answers 507 Insufficient Storage with the
 // DAV:quota-not-exceeded precondition RFC 4331 section 6 names for a request
 // that would take a collection past its quota.
-func writeQuotaExceeded(w http.ResponseWriter) {
+func (s *Server) writeQuotaExceeded(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	w.WriteHeader(http.StatusInsufficientStorage)
-	// Final response body; a write failure means the client is gone, with no recourse.
-	_, _ = fmt.Fprintf(w, "%s<D:error xmlns:D=\"DAV:\"><D:quota-not-exceeded/></D:error>\n", xml.Header)
+	s.writeBody(w, fmt.Appendf(nil, "%s<D:error xmlns:D=\"DAV:\"><D:quota-not-exceeded/></D:error>\n", xml.Header))
 }

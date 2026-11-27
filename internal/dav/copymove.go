@@ -28,7 +28,7 @@ func (s *Server) handleCopyMove(w http.ResponseWriter, r *http.Request, mailbox 
 		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
-	defer st.Close()
+	defer s.closeStore(st)
 
 	ends, failure, status, err := resolveCopyMove(st, r, req)
 	if err != nil {
@@ -277,12 +277,12 @@ func (s *Server) openObjectCollection(w http.ResponseWriter, r *http.Request, ma
 	}
 	fid, found, err := collectionByKind(st, t.isCal, coll)
 	if err != nil {
-		_ = st.Close()
+		s.closeStore(st)
 		s.davError(w, err, http.StatusInternalServerError)
 		return nil, 0, "", false
 	}
 	if !found {
-		_ = st.Close()
+		s.closeStore(st)
 		http.Error(w, t.noColl, http.StatusNotFound)
 		return nil, 0, "", false
 	}

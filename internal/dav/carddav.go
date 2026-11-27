@@ -86,7 +86,7 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request, mailbox strin
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer s.closeStore(st)
 
 	obj, found, err := findObjectByName(st, fid, ".vcf", name)
 	if err != nil {
@@ -114,8 +114,9 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request, mailbox strin
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	// #nosec G705 -- the daemon stamps X-Content-Type-Options: nosniff and the Content-Type is set explicitly, so the bytes are never interpreted as a document
-	_, _ = w.Write(vcf) // final response body; a failed write means the client is gone
+	// The daemon stamps X-Content-Type-Options: nosniff and the Content-Type is set
+	// explicitly, so the bytes are never interpreted as a document.
+	s.writeBody(w, vcf)
 }
 
 // handlePut creates or replaces a contact from a vCard body. It honors
@@ -126,7 +127,7 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request, mailbox strin
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer s.closeStore(st)
 
 	existing, found, err := findObjectByName(st, fid, ".vcf", name)
 	if err != nil {
@@ -291,7 +292,7 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request, mailbox st
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer s.closeStore(st)
 
 	obj, found, err := findObjectByName(st, fid, ".vcf", name)
 	if err != nil {

@@ -81,7 +81,7 @@ func (s *Server) handleProppatch(w http.ResponseWriter, r *http.Request, mailbox
 		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
-	defer st.Close()
+	defer s.closeStore(st)
 
 	fid, found, err := collectionByKind(st, isCal, coll)
 	if err != nil {
@@ -96,7 +96,7 @@ func (s *Server) handleProppatch(w http.ResponseWriter, r *http.Request, mailbox
 	instrs := proppatchInstructions(pu)
 	// Atomic failure: a protected property poisons the whole request.
 	if hasProtected(instrs) {
-		writeMultistatus(w, protectedRefusal(r.URL.Path, instrs))
+		s.writeMultistatus(w, protectedRefusal(r.URL.Path, instrs))
 		return
 	}
 
@@ -105,7 +105,7 @@ func (s *Server) handleProppatch(w http.ResponseWriter, r *http.Request, mailbox
 		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
-	writeMultistatus(w, &multistatus{Responses: []msResponse{{
+	s.writeMultistatus(w, &multistatus{Responses: []msResponse{{
 		Href: r.URL.Path,
 		Propstat: []msPropstat{{
 			Prop:   msProp{Extra: []byte(strings.Join(okNames, ""))},
@@ -223,14 +223,14 @@ func applyDeadProps(prop *msProp, dead []objectstore.DeadProp) {
 	if len(dead) == 0 {
 		return
 	}
-	var b strings.Builder
+	var b []byte
 	for _, d := range dead {
 		if d.Name == displayNameKey {
 			prop.DisplayName = ""
 		}
-		b.WriteString(d.Raw)
+		b = append(b, d.Raw...)
 	}
-	prop.Extra = []byte(b.String())
+	prop.Extra = b
 }
 
 // propKey is the "{namespace} local" identity of a property element.

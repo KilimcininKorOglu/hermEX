@@ -32,7 +32,7 @@ func (s *Server) handleCalGet(w http.ResponseWriter, r *http.Request, mailbox st
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer s.closeStore(st)
 
 	obj, found, err := findObjectByName(st, fid, ".ics", name)
 	if err != nil {
@@ -65,9 +65,9 @@ func (s *Server) handleCalGet(w http.ResponseWriter, r *http.Request, mailbox st
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	// Final response body; a write failure means the client is gone, with no recourse.
-	// #nosec G705 -- the daemon stamps X-Content-Type-Options: nosniff and the Content-Type is set explicitly, so the bytes are never interpreted as a document
-	_, _ = w.Write(ics)
+	// The daemon stamps X-Content-Type-Options: nosniff and the Content-Type is set
+	// explicitly, so the bytes are never interpreted as a document.
+	s.writeBody(w, ics)
 }
 
 // exportCalObject serializes a stored object as the iCalendar its collection
@@ -95,7 +95,7 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer s.closeStore(st)
 
 	existing, found, err := findObjectByName(st, fid, ".ics", name)
 	if err != nil {
@@ -294,7 +294,7 @@ func (s *Server) handleCalDelete(w http.ResponseWriter, r *http.Request, user, m
 	if !ok {
 		return
 	}
-	defer st.Close()
+	defer s.closeStore(st)
 
 	obj, found, err := findObjectByName(st, fid, ".ics", name)
 	if err != nil {

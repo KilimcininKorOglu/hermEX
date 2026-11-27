@@ -162,7 +162,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, caller, ma
 	if !ok {
 		return
 	}
-	defer target.st.Close()
+	defer s.closeStore(target.st)
 	s.dispatchReport(w, target, req)
 }
 
@@ -198,7 +198,7 @@ func (s *Server) directoryReport(w http.ResponseWriter, r *http.Request, caller,
 	case "principal-property-search":
 		s.reportPrincipalSearch(w, caller, body)
 	case "principal-search-property-set":
-		reportPrincipalSearchPropSet(w)
+		s.reportPrincipalSearchPropSet(w)
 	case "expand-property":
 		s.reportExpandProperty(w, r, user, body)
 	default:
@@ -224,12 +224,12 @@ func (s *Server) openReportCollection(w http.ResponseWriter, r *http.Request, ma
 	}
 	fid, found, err := collectionByKind(st, target.isCal, coll)
 	if err != nil {
-		_ = st.Close()
+		s.closeStore(st)
 		s.davError(w, err, http.StatusInternalServerError)
 		return target, false
 	}
 	if !found {
-		_ = st.Close()
+		s.closeStore(st)
 		http.Error(w, "no such collection", http.StatusNotFound)
 		return target, false
 	}
@@ -295,7 +295,7 @@ func (s *Server) reportMultiget(w http.ResponseWriter, st *objectstore.Store, fi
 		}
 		ms.Responses = append(ms.Responses, addressDataResponse(h, obj.ChangeNumber, ad.bound(data)))
 	}
-	writeMultistatus(w, ms)
+	s.writeMultistatus(w, ms)
 }
 
 // reportQueryOrSync returns address-data for the collection's members. For
@@ -335,7 +335,7 @@ func (s *Server) reportQueryOrSync(w http.ResponseWriter, st *objectstore.Store,
 			return
 		}
 	}
-	writeMultistatus(w, ms)
+	s.writeMultistatus(w, ms)
 }
 
 // appendSyncTail closes a sync-collection response: each member removed since the
@@ -372,22 +372,21 @@ func (s *Server) handleFreeBusy(w http.ResponseWriter, st *objectstore.Store, fi
 		return
 	}
 
-	var b strings.Builder
-	b.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//CalDAV//EN\r\nBEGIN:VFREEBUSY\r\n")
+	b := []byte("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//CalDAV//EN\r\nBEGIN:VFREEBUSY\r\n")
 	if okS {
-		fmt.Fprintf(&b, "DTSTART:%s\r\n", formatICalUTCZ(rangeStart))
+		b = fmt.Appendf(b, "DTSTART:%s\r\n", formatICalUTCZ(rangeStart))
 	}
 	if okE {
-		fmt.Fprintf(&b, "DTEND:%s\r\n", formatICalUTCZ(rangeEnd))
+		b = fmt.Appendf(b, "DTEND:%s\r\n", formatICalUTCZ(rangeEnd))
 	}
-	fmt.Fprintf(&b, "DTSTAMP:%s\r\n", formatICalUTCZ(time.Now()))
+	b = fmt.Appendf(b, "DTSTAMP:%s\r\n", formatICalUTCZ(time.Now()))
 	for _, p := range periods {
-		fmt.Fprintf(&b, "FREEBUSY;FBTYPE=BUSY:%s\r\n", p)
+		b = fmt.Appendf(b, "FREEBUSY;FBTYPE=BUSY:%s\r\n", p)
 	}
-	b.WriteString("END:VFREEBUSY\r\nEND:VCALENDAR\r\n")
+	b = append(b, "END:VFREEBUSY\r\nEND:VCALENDAR\r\n"...)
 	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(b.String()))
+	s.writeBody(w, b)
 }
 
 // freeBusyRange reads a free-busy-query's time-range. RFC 4791 7.10 requires
@@ -463,7 +462,7 @@ func (s *Server) reportCalMultiget(w http.ResponseWriter, st *objectstore.Store,
 		}
 		ms.Responses = append(ms.Responses, calendarDataResponse(h, obj.ChangeNumber, cd.bound(data)))
 	}
-	writeMultistatus(w, ms)
+	s.writeMultistatus(w, ms)
 }
 
 // reportCalQueryOrSync returns calendar-data for the Calendar folder's members,
@@ -506,7 +505,7 @@ func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Sto
 			return
 		}
 	}
-	writeMultistatus(w, ms)
+	s.writeMultistatus(w, ms)
 }
 
 // calendarData exports a stored appointment to its iCalendar text.

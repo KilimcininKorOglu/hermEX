@@ -38,7 +38,7 @@ func (s *Server) handlePropfind(w http.ResponseWriter, r *http.Request, user, ma
 		}
 	}
 
-	writeMultistatus(w, &multistatus{Responses: responses})
+	s.writeMultistatus(w, &multistatus{Responses: responses})
 }
 
 // restrictShared applies the caller's folder rights to a PROPFIND answer about
@@ -48,7 +48,7 @@ func (s *Server) restrictShared(mailbox, user string, responses []msResponse) ([
 	if err != nil {
 		return nil, err
 	}
-	defer st.Close()
+	defer s.closeStore(st)
 	return restrictSharedResponses(st, user, responses)
 }
 
@@ -208,7 +208,7 @@ func (s *Server) addressbookResponses(mailbox, user, coll, depth string) ([]msRe
 	if err != nil {
 		return nil, err
 	}
-	defer st.Close()
+	defer s.closeStore(st)
 
 	fid, ok, err := cardCollectionFID(st, coll)
 	if err != nil {
@@ -256,7 +256,7 @@ func (s *Server) allAddressbookCollections(mailbox, user string) ([]msResponse, 
 	if err != nil {
 		return nil, err
 	}
-	defer st.Close()
+	defer s.closeStore(st)
 
 	wk, err := cardCollectionResponse(st, user, addressbookName, "Contacts", int64(mapi.PrivateFIDContacts))
 	if err != nil {
@@ -351,7 +351,7 @@ func (s *Server) calendarResponses(mailbox, user, coll, depth string) ([]msRespo
 	if err != nil {
 		return nil, err
 	}
-	defer st.Close()
+	defer s.closeStore(st)
 
 	fid, ok, err := calCollectionFID(st, coll)
 	if err != nil {
@@ -399,7 +399,7 @@ func (s *Server) allCalendarCollections(mailbox, user string) ([]msResponse, err
 	if err != nil {
 		return nil, err
 	}
-	defer st.Close()
+	defer s.closeStore(st)
 
 	wk, err := calCollectionResponse(st, user, calendarName, "Calendar", int64(mapi.PrivateFIDCalendar))
 	if err != nil {
@@ -488,7 +488,7 @@ func (s *Server) scheduleInboxResponses(mailbox, user, depth string) ([]msRespon
 	if err != nil {
 		return nil, err
 	}
-	defer st.Close()
+	defer s.closeStore(st)
 
 	cr, err := scheduleInboxCollectionResponse(st, user)
 	if err != nil {
@@ -539,7 +539,7 @@ func scheduleOutboxResponse(user string) msResponse {
 }
 
 // writeMultistatus serializes and writes a 207 Multistatus response.
-func writeMultistatus(w http.ResponseWriter, ms *multistatus) {
+func (s *Server) writeMultistatus(w http.ResponseWriter, ms *multistatus) {
 	body, err := marshalMultistatus(ms)
 	if err != nil {
 		// ms is a server-built struct, so a marshal failure is an internal bug,
@@ -549,7 +549,7 @@ func writeMultistatus(w http.ResponseWriter, ms *multistatus) {
 	}
 	w.Header().Set("Content-Type", `application/xml; charset=utf-8`)
 	w.WriteHeader(http.StatusMultiStatus)
-	_, _ = w.Write(body) // final response body; a failed write means the client is gone
+	s.writeBody(w, body)
 }
 
 // etag is a quoted entity tag derived from an object's change number.

@@ -75,7 +75,7 @@ func (s *Server) davError(w http.ResponseWriter, err error, status int) {
 	if errors.Is(err, errQuotaExceeded) {
 		s.Logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.DAV, Name: "request.fail",
 			Fields: logging.Fields{"status": http.StatusInsufficientStorage}, Err: err.Error()})
-		writeQuotaExceeded(w)
+		s.writeQuotaExceeded(w)
 		return
 	}
 	if errors.Is(err, serve.ErrBodyTooLarge) {
@@ -343,6 +343,27 @@ func (s *Server) basicAuth(w http.ResponseWriter, r *http.Request) (user, mailbo
 	return "", "", false
 }
 
+// closeStore closes a mailbox store a request opened. The reply is already
+// decided by then, so a failed close is recorded for the operator rather than
+// answered: it can mean the request saw or left an inconsistent store.
+func (s *Server) closeStore(st *objectstore.Store) {
+	if err := st.Close(); err != nil {
+		s.Logger.Emit(logging.Event{
+			Level: logging.LevelError, Subsystem: logging.DAV, Name: "store.close.fail", Err: err.Error(),
+		})
+	}
+}
+
+// writeBody sends a response body after the status line. The status is already
+// on the wire, so a failed write (the client went away) is recorded, not answered.
+func (s *Server) writeBody(w http.ResponseWriter, body []byte) {
+	if _, err := w.Write(body); err != nil {
+		s.Logger.Emit(logging.Event{
+			Level: logging.LevelWarn, Subsystem: logging.DAV, Name: "response.write.fail", Err: err.Error(),
+		})
+	}
+}
+
 // logThrottled records a refused-before-checked login so the operator sees a
 // guessing wave rather than silence.
 func (s *Server) logThrottled(r *http.Request, user string) {
@@ -379,7 +400,7 @@ func (s *Server) resolveTarget(r *http.Request, authUser, authMailbox, pathUser 
 	if reach, err := directory.MayReach(s.accounts, authUser, pathUser); err != nil || !reach {
 		return "", false, err
 	}
-	allowed, err := ownerAllows(r, ownerMaildir, authUser, kind, coll)
+	allowed, err := s.ownerAllows(r, ownerMaildir, authUser, kind, coll)
 	if err != nil || !allowed {
 		return "", false, err
 	}
@@ -389,13 +410,13 @@ func (s *Server) resolveTarget(r *http.Request, authUser, authMailbox, pathUser 
 // ownerAllows reports whether the owner's folder rights admit this request for
 // the caller: a grant in the mailbox at all, and the right the method needs on
 // the collection it names.
-func ownerAllows(r *http.Request, ownerMaildir, authUser string, kind resourceKind, coll string) (bool, error) {
+func (s *Server) ownerAllows(r *http.Request, ownerMaildir, authUser string, kind resourceKind, coll string) (bool, error) {
 	st, err := objectstore.OpenExisting(ownerMaildir)
 	if err != nil {
 		// An owner whose mailbox was never provisioned shares nothing.
 		return false, nil
 	}
-	defer st.Close()
+	defer s.closeStore(st)
 	if open, err := canOpenMailbox(st, authUser); err != nil || !open {
 		return false, err
 	}

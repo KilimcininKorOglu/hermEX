@@ -42,7 +42,7 @@ func (s *Server) makeCollection(w http.ResponseWriter, r *http.Request, mailbox 
 		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
-	defer st.Close()
+	defer s.closeStore(st)
 
 	// MKCOL/MKCALENDAR on an existing resource (the reserved name or a prior
 	// collection) fails (RFC 4918 §9.3.1, RFC 4791 §5.3.1).

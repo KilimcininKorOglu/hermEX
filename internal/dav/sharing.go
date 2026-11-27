@@ -34,7 +34,7 @@ func (s *Server) readableShared(user string, fid int64) ([]sharedCollection, err
 		if strings.EqualFold(m.Address, user) {
 			continue
 		}
-		rights, ok := sharedRights(m.StorePath, fid, user)
+		rights, ok := s.sharedRights(m.StorePath, fid, user)
 		if ok && rights&mapi.FrightsReadAny != 0 {
 			out = append(out, sharedCollection{owner: m, rights: rights})
 		}
@@ -45,12 +45,12 @@ func (s *Server) readableShared(user string, fid int64) ([]sharedCollection, err
 // sharedRights reads the caller's rights on fid in one owner's mailbox. A mailbox
 // that cannot be opened or read shares nothing, so it is left out of the listing
 // rather than failing the caller's own home set.
-func sharedRights(storePath string, fid int64, user string) (uint32, bool) {
+func (s *Server) sharedRights(storePath string, fid int64, user string) (uint32, bool) {
 	ost, err := objectstore.OpenExisting(storePath)
 	if err != nil {
 		return 0, false
 	}
-	defer ost.Close()
+	defer s.closeStore(ost)
 	rights, err := ost.ResolvePermission(fid, permissionName(user))
 	return rights, err == nil
 }
@@ -85,7 +85,7 @@ func (s *Server) sharedResponses(user string, fid int64, build func(*objectstore
 			continue
 		}
 		cr, cerr := build(ost, c.owner.Address)
-		_ = ost.Close()
+		s.closeStore(ost)
 		if cerr != nil {
 			continue
 		}

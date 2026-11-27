@@ -204,40 +204,38 @@ func replyMessage(newEv, oldEv *icalNode, organizer, owner, partstat string) iti
 	}
 	summary := eventSummary(newEv, oldEv)
 
-	var b strings.Builder
-	b.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//CalDAV//EN\r\nMETHOD:REPLY\r\nBEGIN:VEVENT\r\n")
-	fmt.Fprintf(&b, "UID:%s\r\n", uid)
-	fmt.Fprintf(&b, "DTSTAMP:%s\r\n", formatICalUTCZ(time.Now()))
-	fmt.Fprintf(&b, "SEQUENCE:%d\r\n", seq)
-	fmt.Fprintf(&b, "ORGANIZER:%s\r\n", organizer)
-	fmt.Fprintf(&b, "ATTENDEE;PARTSTAT=%s:mailto:%s\r\n", partstat, stripMailto(owner))
+	b := []byte("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//CalDAV//EN\r\nMETHOD:REPLY\r\nBEGIN:VEVENT\r\n")
+	b = fmt.Appendf(b, "UID:%s\r\n", uid)
+	b = fmt.Appendf(b, "DTSTAMP:%s\r\n", formatICalUTCZ(time.Now()))
+	b = fmt.Appendf(b, "SEQUENCE:%d\r\n", seq)
+	b = fmt.Appendf(b, "ORGANIZER:%s\r\n", organizer)
+	b = fmt.Appendf(b, "ATTENDEE;PARTSTAT=%s:mailto:%s\r\n", partstat, stripMailto(owner))
 	if summary != "" {
-		fmt.Fprintf(&b, "SUMMARY:%s\r\n", summary)
+		b = fmt.Appendf(b, "SUMMARY:%s\r\n", summary)
 	}
-	b.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
-	return itipMsg{method: "REPLY", recipients: []string{organizer}, body: b.String(), summary: summary}
+	b = append(b, "END:VEVENT\r\nEND:VCALENDAR\r\n"...)
+	return itipMsg{method: "REPLY", recipients: []string{organizer}, body: string(b), summary: summary}
 }
 
 // cancelBody builds a METHOD:CANCEL iCalendar for the given event addressed to the
 // cancelled attendees, with STATUS:CANCELLED and a bumped SEQUENCE (RFC 5546 §3.2.5).
 func cancelBody(ev *icalNode, organizer string, cancelTo []string) string {
-	var b strings.Builder
-	b.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//CalDAV//EN\r\nMETHOD:CANCEL\r\nBEGIN:VEVENT\r\n")
-	fmt.Fprintf(&b, "UID:%s\r\n", nodeProp(ev, "UID"))
-	fmt.Fprintf(&b, "DTSTAMP:%s\r\n", formatICalUTCZ(time.Now()))
-	fmt.Fprintf(&b, "SEQUENCE:%d\r\n", sequenceOf(ev)+1)
-	fmt.Fprintf(&b, "ORGANIZER:%s\r\n", organizer)
+	b := []byte("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//CalDAV//EN\r\nMETHOD:CANCEL\r\nBEGIN:VEVENT\r\n")
+	b = fmt.Appendf(b, "UID:%s\r\n", nodeProp(ev, "UID"))
+	b = fmt.Appendf(b, "DTSTAMP:%s\r\n", formatICalUTCZ(time.Now()))
+	b = fmt.Appendf(b, "SEQUENCE:%d\r\n", sequenceOf(ev)+1)
+	b = fmt.Appendf(b, "ORGANIZER:%s\r\n", organizer)
 	if ds := ev.propsByName("DTSTART"); len(ds) > 0 {
-		fmt.Fprintf(&b, "%s\r\n", renderProp(ds[0]))
+		b = fmt.Appendf(b, "%s\r\n", renderProp(ds[0]))
 	}
 	if summary := nodeProp(ev, "SUMMARY"); summary != "" {
-		fmt.Fprintf(&b, "SUMMARY:%s\r\n", summary)
+		b = fmt.Appendf(b, "SUMMARY:%s\r\n", summary)
 	}
 	for _, addr := range cancelTo {
-		fmt.Fprintf(&b, "ATTENDEE:%s\r\n", addr)
+		b = fmt.Appendf(b, "ATTENDEE:%s\r\n", addr)
 	}
-	b.WriteString("STATUS:CANCELLED\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
-	return b.String()
+	b = append(b, "STATUS:CANCELLED\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"...)
+	return string(b)
 }
 
 // withMethod returns the iCalendar body with its VCALENDAR METHOD set to method,
@@ -387,16 +385,15 @@ func sequenceOf(ev *icalNode) int {
 // renderProp serializes a parsed property back to a content line, carrying its
 // parameters (e.g. DTSTART;TZID=Europe/Istanbul:...).
 func renderProp(p icalProp) string {
-	var b strings.Builder
-	b.WriteString(p.name)
+	b := []byte(p.name)
 	for key, vals := range p.params {
 		for _, v := range vals {
-			fmt.Fprintf(&b, ";%s=%s", key, v)
+			b = fmt.Appendf(b, ";%s=%s", key, v)
 		}
 	}
-	b.WriteString(":")
-	b.WriteString(p.value)
-	return b.String()
+	b = append(b, ':')
+	b = append(b, p.value...)
+	return string(b)
 }
 
 // normalizeCalAddr reduces a calendar user address to a comparison key (lowercased,

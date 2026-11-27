@@ -55,7 +55,7 @@ func (s *Server) reportPrincipalSearch(w http.ResponseWriter, caller string, bod
 			ms.Responses = append(ms.Responses, principalEntryResponse(e))
 		}
 	}
-	writeMultistatus(w, ms)
+	s.writeMultistatus(w, ms)
 }
 
 // principalEntryResponse renders one matched GAL entry as a principal response with
@@ -95,7 +95,7 @@ type searchableProp struct {
 
 // reportPrincipalSearchPropSet answers DAV:principal-search-property-set with the
 // properties a client may search on: the display name and the calendar user address.
-func reportPrincipalSearchPropSet(w http.ResponseWriter) {
+func (s *Server) reportPrincipalSearchPropSet(w http.ResponseWriter) {
 	set := &principalSearchPropSet{Props: []principalSearchProp{
 		{Prop: searchableProp{DisplayName: empty}, Description: "Display Name"},
 		{Prop: searchableProp{CalendarUserAddressSet: empty}, Description: "Calendar User Address"},
@@ -109,7 +109,7 @@ func reportPrincipalSearchPropSet(w http.ResponseWriter) {
 	}
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(append([]byte(xml.Header), body...))
+	s.writeBody(w, append([]byte(xml.Header), body...))
 }
 
 // expandProperty is a DAV:expand-property body (RFC 3253 §3.8): a tree of property
@@ -139,15 +139,15 @@ func (s *Server) reportExpandProperty(w http.ResponseWriter, r *http.Request, us
 	if pathUser == "" {
 		pathUser = user
 	}
-	var inner strings.Builder
+	var inner []byte
 	for _, p := range req.Props {
-		inner.WriteString(expandPrincipalProp(pathUser, p))
+		inner = append(inner, expandPrincipalProp(pathUser, p)...)
 	}
 	resp := msResponse{
 		Href:     r.URL.Path,
-		Propstat: []msPropstat{{Prop: msProp{Extra: []byte(inner.String())}, Status: statusOK}},
+		Propstat: []msPropstat{{Prop: msProp{Extra: inner}, Status: statusOK}},
 	}
-	writeMultistatus(w, &multistatus{Responses: []msResponse{resp}})
+	s.writeMultistatus(w, &multistatus{Responses: []msResponse{resp}})
 }
 
 // expandPrincipalProp renders one requested property of a principal. A simple
@@ -173,21 +173,20 @@ func expandPrincipalProp(user string, p expandProp) string {
 // sub-properties it lists the bare hrefs; otherwise each href that names a known
 // resource is expanded into a nested DAV:response carrying the sub-properties.
 func expandHrefProp(ns, name string, hrefs []string, sub []expandProp) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "<%s xmlns=\"%s\">", name, ns)
+	b := fmt.Appendf(nil, "<%s xmlns=\"%s\">", name, ns)
 	for _, h := range hrefs {
 		if len(sub) == 0 {
-			fmt.Fprintf(&b, "<href xmlns=\"DAV:\">%s</href>", xmlEscape(h))
+			b = fmt.Appendf(b, "<href xmlns=\"DAV:\">%s</href>", xmlEscape(h))
 			continue
 		}
-		fmt.Fprintf(&b, "<response xmlns=\"DAV:\"><href>%s</href><propstat><prop>", xmlEscape(h))
+		b = fmt.Appendf(b, "<response xmlns=\"DAV:\"><href>%s</href><propstat><prop>", xmlEscape(h))
 		for _, sp := range sub {
-			b.WriteString(referencedSubProp(h, sp.Name))
+			b = append(b, referencedSubProp(h, sp.Name)...)
 		}
-		b.WriteString("</prop><status>HTTP/1.1 200 OK</status></propstat></response>")
+		b = append(b, "</prop><status>HTTP/1.1 200 OK</status></propstat></response>"...)
 	}
-	fmt.Fprintf(&b, "</%s>", name)
-	return b.String()
+	b = fmt.Appendf(b, "</%s>", name)
+	return string(b)
 }
 
 // referencedSubProp renders one sub-property of a referenced resource. Only the

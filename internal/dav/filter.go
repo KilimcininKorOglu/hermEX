@@ -482,19 +482,19 @@ func parseDateTime(p icalProp, v string) (time.Time, bool) {
 
 // unescapeText reverses RFC 5545/6350 TEXT escaping for matching.
 func unescapeText(s string) string {
-	var b strings.Builder
+	b := make([]byte, 0, len(s))
 	for i := 0; i < len(s); i++ {
 		if s[i] == '\\' && i+1 < len(s) {
 			switch s[i+1] {
 			case 'n', 'N':
-				b.WriteByte('\n')
+				b = append(b, '\n')
 			default:
-				b.WriteByte(s[i+1])
+				b = append(b, s[i+1])
 			}
 			i++
 			continue
 		}
-		b.WriteByte(s[i])
+		b = append(b, s[i])
 	}
-	return b.String()
+	return string(b)
 }

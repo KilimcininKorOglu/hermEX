@@ -37,7 +37,7 @@ func (s *Server) handleOutboxPost(w http.ResponseWriter, r *http.Request, user s
 	}
 	root := parseICalNode(string(body))
 	if root == nil || !strings.EqualFold(root.name, "VCALENDAR") {
-		schedulePreconditionFail(w, "valid-scheduling-message", http.StatusBadRequest)
+		s.schedulePreconditionFail(w, "valid-scheduling-message", http.StatusBadRequest)
 		return
 	}
 	for _, c := range root.kids {
@@ -59,7 +59,7 @@ func (s *Server) outboxFreeBusy(w http.ResponseWriter, user string, vfb *icalNod
 	// valid-organizer (RFC 6638 §5.2.6): the ORGANIZER must be a calendar user
 	// address of the Outbox owner.
 	if !addrMatchesOwner(user, firstPropValue(vfb, "ORGANIZER")) {
-		schedulePreconditionFail(w, "valid-organizer", http.StatusForbidden)
+		s.schedulePreconditionFail(w, "valid-organizer", http.StatusForbidden)
 		return
 	}
 
@@ -69,7 +69,7 @@ func (s *Server) outboxFreeBusy(w http.ResponseWriter, user string, vfb *icalNod
 	rangeStart, okS := propTimeValue(vfb, "DTSTART")
 	rangeEnd, okE := propTimeValue(vfb, "DTEND")
 	if !okS || !okE || !rangeEnd.After(rangeStart) || rangeEnd.Sub(rangeStart) > ews.MaxAvailabilityWindow {
-		schedulePreconditionFail(w, "valid-scheduling-message", http.StatusBadRequest)
+		s.schedulePreconditionFail(w, "valid-scheduling-message", http.StatusBadRequest)
 		return
 	}
 
@@ -84,7 +84,7 @@ func (s *Server) outboxFreeBusy(w http.ResponseWriter, user string, vfb *icalNod
 		recipient := strings.TrimSpace(att.value)
 		resp.Responses = append(resp.Responses, s.attendeeResponse(user, recipient, rangeStart, rangeEnd, okS, okE))
 	}
-	writeScheduleResponse(w, resp)
+	s.writeScheduleResponse(w, resp)
 }
 
 // attendeeResponse answers one attendee of a free/busy query: its busy time, an
@@ -99,7 +99,7 @@ func (s *Server) attendeeResponse(user, recipient string, rangeStart, rangeEnd t
 	if reach, err := directory.MayReach(s.accounts, user, addr); err != nil || !reach {
 		return scheduleRespItem{Recipient: href{Href: recipient}, RequestStatus: "3.8;No authority"}
 	}
-	data, err := attendeeFreeBusy(path, user, recipient, rangeStart, rangeEnd, okS, okE)
+	data, err := s.attendeeFreeBusy(path, user, recipient, rangeStart, rangeEnd, okS, okE)
 	switch {
 	case errors.Is(err, errNoFreeBusyRight):
 		return scheduleRespItem{Recipient: href{Href: recipient}, RequestStatus: "3.8;No authority"}
@@ -117,7 +117,7 @@ func (s *Server) attendeeResponse(user, recipient string, rangeStart, rangeEnd t
 // and relays external ones when a spool is configured.
 func (s *Server) outboxDeliver(w http.ResponseWriter, user string, root, comp *icalNode, body string) {
 	method := strings.ToUpper(firstPropValue(root, "METHOD"))
-	recipients, ok := itipRecipients(w, user, method, comp)
+	recipients, ok := s.itipRecipients(w, user, method, comp)
 	if !ok {
 		return
 	}
@@ -132,14 +132,14 @@ func (s *Server) outboxDeliver(w http.ResponseWriter, user string, root, comp *i
 		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
-	writeScheduleResponse(w, deliveryResponse(recipients, unresolved))
+	s.writeScheduleResponse(w, deliveryResponse(recipients, unresolved))
 }
 
 // itipRecipients resolves who an outbox POST is addressed to and enforces the
 // originator preconditions. An attendee-originated method (a reply) is addressed
 // to the organizer; an organizer-originated one (a request/cancel) to the
 // attendees. On a refusal the response is already written.
-func itipRecipients(w http.ResponseWriter, user, method string, comp *icalNode) ([]string, bool) {
+func (s *Server) itipRecipients(w http.ResponseWriter, user, method string, comp *icalNode) ([]string, bool) {
 	organizer := firstPropValue(comp, "ORGANIZER")
 	attendees := allPropValues(comp, "ATTENDEE")
 
@@ -149,20 +149,20 @@ func itipRecipients(w http.ResponseWriter, user, method string, comp *icalNode) 
 		// The Outbox owner must be one of the attendees on whose behalf the reply is
 		// sent, and the organizer is the sole recipient.
 		if !ownerAmong(user, attendees) || organizer == "" {
-			schedulePreconditionFail(w, "valid-organizer", http.StatusForbidden)
+			s.schedulePreconditionFail(w, "valid-organizer", http.StatusForbidden)
 			return nil, false
 		}
 		recipients = []string{organizer}
 	default:
 		// valid-organizer (RFC 6638 §5.2.6): the ORGANIZER must be the Outbox owner.
 		if !addrMatchesOwner(user, organizer) {
-			schedulePreconditionFail(w, "valid-organizer", http.StatusForbidden)
+			s.schedulePreconditionFail(w, "valid-organizer", http.StatusForbidden)
 			return nil, false
 		}
 		recipients = attendees
 	}
 	if len(recipients) == 0 || method == "" {
-		schedulePreconditionFail(w, "valid-scheduling-message", http.StatusBadRequest)
+		s.schedulePreconditionFail(w, "valid-scheduling-message", http.StatusBadRequest)
 		return nil, false
 	}
 	return recipients, true
@@ -264,12 +264,12 @@ const freeBusyRights = mapi.FrightsFreeBusySimple | mapi.FrightsFreeBusyDetailed
 // window and renders them as an iTIP free-busy reply (RFC 5546 §3.3.2). Another
 // user's calendar answers only when it grants the organizer a free/busy right,
 // so an attendee who withdrew it is not readable through CalDAV either.
-func attendeeFreeBusy(mailboxPath, organizer, recipient string, rangeStart, rangeEnd time.Time, okS, okE bool) (string, error) {
+func (s *Server) attendeeFreeBusy(mailboxPath, organizer, recipient string, rangeStart, rangeEnd time.Time, okS, okE bool) (string, error) {
 	st, err := objectstore.OpenExisting(mailboxPath)
 	if err != nil {
 		return "", err
 	}
-	defer st.Close()
+	defer s.closeStore(st)
 	if !strings.EqualFold(stripMailto(recipient), organizer) {
 		perm, err := st.ResolvePermission(int64(mapi.PrivateFIDCalendar), organizer)
 		if err != nil {
@@ -284,22 +284,21 @@ func attendeeFreeBusy(mailboxPath, organizer, recipient string, rangeStart, rang
 		return "", err
 	}
 
-	var b strings.Builder
-	b.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//CalDAV//EN\r\nMETHOD:REPLY\r\nBEGIN:VFREEBUSY\r\n")
+	b := []byte("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//CalDAV//EN\r\nMETHOD:REPLY\r\nBEGIN:VFREEBUSY\r\n")
 	if okS {
-		fmt.Fprintf(&b, "DTSTART:%s\r\n", formatICalUTCZ(rangeStart))
+		b = fmt.Appendf(b, "DTSTART:%s\r\n", formatICalUTCZ(rangeStart))
 	}
 	if okE {
-		fmt.Fprintf(&b, "DTEND:%s\r\n", formatICalUTCZ(rangeEnd))
+		b = fmt.Appendf(b, "DTEND:%s\r\n", formatICalUTCZ(rangeEnd))
 	}
-	fmt.Fprintf(&b, "ORGANIZER:mailto:%s\r\n", organizer)
-	fmt.Fprintf(&b, "ATTENDEE:%s\r\n", recipient)
-	fmt.Fprintf(&b, "DTSTAMP:%s\r\n", formatICalUTCZ(time.Now()))
+	b = fmt.Appendf(b, "ORGANIZER:mailto:%s\r\n", organizer)
+	b = fmt.Appendf(b, "ATTENDEE:%s\r\n", recipient)
+	b = fmt.Appendf(b, "DTSTAMP:%s\r\n", formatICalUTCZ(time.Now()))
 	for _, p := range periods {
-		fmt.Fprintf(&b, "FREEBUSY;FBTYPE=BUSY:%s\r\n", p)
+		b = fmt.Appendf(b, "FREEBUSY;FBTYPE=BUSY:%s\r\n", p)
 	}
-	b.WriteString("END:VFREEBUSY\r\nEND:VCALENDAR\r\n")
-	return b.String(), nil
+	b = append(b, "END:VFREEBUSY\r\nEND:VCALENDAR\r\n"...)
+	return string(b), nil
 }
 
 // busyPeriods aggregates the BUSY (non-transparent) VEVENT spans in a calendar
@@ -494,15 +493,14 @@ func stripMailto(uri string) string {
 
 // schedulePreconditionFail writes a DAV:error carrying the named CalDAV
 // precondition at the given status (RFC 6638 §5.2).
-func schedulePreconditionFail(w http.ResponseWriter, precondition string, status int) {
+func (s *Server) schedulePreconditionFail(w http.ResponseWriter, precondition string, status int) {
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	w.WriteHeader(status)
-	// Final response body; a write failure means the client is gone, with no recourse.
-	_, _ = fmt.Fprintf(w, "%s<D:error xmlns:D=\"DAV:\" xmlns:C=\"urn:ietf:params:xml:ns:caldav\"><C:%s/></D:error>\n", xml.Header, precondition)
+	s.writeBody(w, fmt.Appendf(nil, "%s<D:error xmlns:D=\"DAV:\" xmlns:C=\"urn:ietf:params:xml:ns:caldav\"><C:%s/></D:error>\n", xml.Header, precondition))
 }
 
 // writeScheduleResponse serializes a CALDAV:schedule-response (RFC 6638 §5.2).
-func writeScheduleResponse(w http.ResponseWriter, resp *scheduleResponse) {
+func (s *Server) writeScheduleResponse(w http.ResponseWriter, resp *scheduleResponse) {
 	body, err := xml.Marshal(resp)
 	if err != nil {
 		// resp is a server-built struct, so a marshal failure is an internal bug,
@@ -512,7 +510,7 @@ func writeScheduleResponse(w http.ResponseWriter, resp *scheduleResponse) {
 	}
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(append([]byte(xml.Header), body...))
+	s.writeBody(w, append([]byte(xml.Header), body...))
 }
 
 // defaultFreeBusyTargets caps how many mailboxes one availability request may fan
