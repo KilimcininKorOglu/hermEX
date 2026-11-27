@@ -198,7 +198,7 @@ func (p *Pull) storeEntryIDWrapper() (mapi.StoreEntryID, error) {
 // storeEntryIDRecord reads the full wrapped record an inline flag of 0 carries:
 // the DLL name (not retained) and the wrapped provider's own fields.
 func (p *Pull) storeEntryIDRecord(s *mapi.StoreEntryID) error {
-	if _, err := p.Raw(14); err != nil { // DLL name, not retained
+	if err := p.Skip(14); err != nil { // DLL name, not retained
 		return err
 	}
 	var err error

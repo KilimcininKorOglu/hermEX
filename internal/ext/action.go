@@ -249,7 +249,7 @@ func (p *Pull) moveCopyAction() (mapi.MoveCopyAction, error) {
 	}
 	if ss != 0 {
 		m.SameStore = true
-		if _, err := p.Raw(int(eidSize)); err != nil { // skip the placeholder store eid
+		if err := p.Skip(int(eidSize)); err != nil { // the placeholder store eid
 			return m, err
 		}
 		svr, err := p.SVREID()
@@ -324,7 +324,7 @@ func (p *Push) recipientBlock(rb mapi.RecipientBlock) error {
 }
 
 func (p *Pull) recipientBlock() (mapi.RecipientBlock, error) {
-	if _, err := p.Uint8(); err != nil { // reserved, ignored
+	if err := p.Skip(1); err != nil { // reserved, ignored
 		return mapi.RecipientBlock{}, err
 	}
 	count, err := p.Uint16()
