@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"crypto/tls"
 	"errors"
-	"io"
 	"net"
 	"strings"
 	"sync"
@@ -32,30 +31,31 @@ func refusingSource(t *testing.T, greeting string, reply func(tag string) string
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	mustNoErr(t, err, "listen")
-	t.Cleanup(func() { _ = ln.Close() })
 	var mu sync.Mutex
 	var lines []string
-	go func() {
-		conn, err := ln.Accept()
-		if err != nil {
-			return
+	serveOne(t, ln, func(conn net.Conn) (net.Conn, error) {
+		if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			return conn, err
 		}
-		defer conn.Close()
-		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 		r := bufio.NewReader(conn)
-		_, _ = io.WriteString(conn, greeting)
-		for {
+		w := &scriptWriter{w: conn}
+		w.send(greeting)
+		for w.err == nil {
 			line, err := r.ReadString('\n')
 			if err != nil {
-				return
+				if readEnded(err) {
+					return conn, nil
+				}
+				return conn, err
 			}
 			mu.Lock()
 			lines = append(lines, strings.TrimSpace(line))
 			mu.Unlock()
 			tag, _, _ := strings.Cut(line, " ")
-			_, _ = io.WriteString(conn, reply(tag))
+			w.send(reply(tag))
 		}
-	}()
+		return conn, w.err
+	})
 	h, pn := listenerHostPort(t, ln)
 	return h, pn, func() []string {
 		mu.Lock()
@@ -72,21 +72,23 @@ func TestAPlaintextSourceWithoutSTARTTLSGetsNoPassword(t *testing.T) {
 	allowLoopback(t)
 	// A distinctive marker stands in for the source password.
 	marker := strings.Repeat("m", 3) + "-source-marker"
-	deliver, _ := capture()
+	deliver, got := capture()
 
 	host, port, seen := refusingSource(t, "+OK ready\r\n", func(string) string { return "-ERR not supported\r\n" })
 	cfg := directory.FetchmailEntry{Mailbox: "alice@example.com", SrcServer: host, SrcPort: port,
 		SrcUser: "alice", SrcPassword: marker, Protocol: "pop3", Keep: true}
-	if _, err := pollPOP3(&fakeWorkerStore{}, deliver, cfg, time.Now()); !errors.Is(err, ErrNoStartTLS) {
-		t.Errorf("POP3 poll err = %v, want ErrNoStartTLS", err)
+	if n, err := pollPOP3(&fakeWorkerStore{}, deliver, cfg, time.Now()); !errors.Is(err, ErrNoStartTLS) || n != 0 {
+		t.Errorf("POP3 poll = %d, %v, want 0 and ErrNoStartTLS", n, err)
 	}
 	wantNoSecret(t, "POP3", seen(), marker)
 
 	host, port, seen = refusingSource(t, "* OK ready\r\n", func(tag string) string { return tag + " BAD unknown\r\n" })
 	cfg.SrcServer, cfg.SrcPort, cfg.Protocol = host, port, "imap"
-	if _, err := pollIMAP(deliver, cfg, time.Now()); !errors.Is(err, ErrNoStartTLS) {
-		t.Errorf("IMAP poll err = %v, want ErrNoStartTLS", err)
+	if n, err := pollIMAP(deliver, cfg, time.Now()); !errors.Is(err, ErrNoStartTLS) || n != 0 {
+		t.Errorf("IMAP poll = %d, %v, want 0 and ErrNoStartTLS", n, err)
 	}
+	// The refused sessions filed nothing locally.
+	wantEq(t, len(*got), 0, "messages delivered from sources that refused TLS")
 	wantNoSecret(t, "IMAP", seen(), marker)
 }
 

@@ -40,17 +40,43 @@ func capture() (Deliverer, *[]string) {
 	}, &got
 }
 
+// failSecond is a deliverer whose second delivery fails.
+func failSecond() Deliverer {
+	calls := 0
+	return func(_ string, _ []byte, _ time.Time) error {
+		calls++
+		if calls == 2 {
+			return fmt.Errorf("delivery failed")
+		}
+		return nil
+	}
+}
+
+// pop3Entry is a POP3 poll configuration for src.
+func pop3Entry(src *pop3Source, keep bool) directory.FetchmailEntry {
+	return directory.FetchmailEntry{
+		ID: 1, Mailbox: "alice@hermex.test", Active: true,
+		SrcServer: src.host, SrcPort: src.port, SrcUser: "alice", SrcPassword: "pw",
+		Protocol: "POP3", Keep: keep,
+	}
+}
+
+// imapEntry is an IMAP poll configuration for src.
+func imapEntry(src *imapSource, keep bool) directory.FetchmailEntry {
+	return directory.FetchmailEntry{
+		ID: 2, Mailbox: "alice@hermex.test", Active: true,
+		SrcServer: src.host, SrcPort: src.port, SrcUser: "alice", SrcPassword: "pw",
+		Protocol: "IMAP", SrcFolder: "INBOX", Keep: keep,
+	}
+}
+
 // TestPollPOP3DeleteMode proves a non-kept POP3 account delivers every message and deletes
 // each from the source (so the source itself prevents a re-fetch).
 func TestPollPOP3DeleteMode(t *testing.T) {
 	allowLoopback(t)
 	msgs := []string{"From: a\r\n\r\none", "From: b\r\n\r\ntwo"}
-	host, port, deleted := fakePOP3(t, msgs)
-	store := &fakeWorkerStore{configs: []directory.FetchmailEntry{{
-		ID: 1, Mailbox: "alice@hermex.test", Active: true,
-		SrcServer: host, SrcPort: port, SrcUser: "alice", SrcPassword: "pw",
-		Protocol: "POP3", Keep: false,
-	}}}
+	src := fakePOP3(t, msgs)
+	store := &fakeWorkerStore{configs: []directory.FetchmailEntry{pop3Entry(src, false)}}
 	deliver, got := capture()
 
 	n, errs := Poll(context.Background(), store, deliver, pollTime)
@@ -60,8 +86,8 @@ func TestPollPOP3DeleteMode(t *testing.T) {
 	if n != 2 || len(*got) != 2 || (*got)[0] != msgs[0]+"\r\n" {
 		t.Errorf("delivered %d %q, want both messages", n, *got)
 	}
-	if len(*deleted) != 2 {
-		t.Errorf("server deletions = %v, want both messages deleted", *deleted)
+	if deleted := src.deleted(); len(deleted) != 2 {
+		t.Errorf("server deletions = %v, want both messages deleted", deleted)
 	}
 }
 
@@ -70,14 +96,10 @@ func TestPollPOP3DeleteMode(t *testing.T) {
 func TestPollPOP3KeepDedup(t *testing.T) {
 	allowLoopback(t)
 	msgs := []string{"From: a\r\n\r\none", "From: b\r\n\r\ntwo"}
-	host, port, deleted := fakePOP3(t, msgs)
+	src := fakePOP3(t, msgs)
 	store := &fakeWorkerStore{
-		configs: []directory.FetchmailEntry{{
-			ID: 1, Mailbox: "alice@hermex.test", Active: true,
-			SrcServer: host, SrcPort: port, SrcUser: "alice", SrcPassword: "pw",
-			Protocol: "POP3", Keep: true,
-		}},
-		seen: map[int64]map[string]bool{1: {"uid1": true}},
+		configs: []directory.FetchmailEntry{pop3Entry(src, true)},
+		seen:    map[int64]map[string]bool{1: {"uid1": true}},
 	}
 	deliver, got := capture()
 
@@ -91,8 +113,8 @@ func TestPollPOP3KeepDedup(t *testing.T) {
 	if want := []string{"uid2"}; len(store.marked[1]) != 1 || store.marked[1][0] != want[0] {
 		t.Errorf("recorded seen = %v, want %v", store.marked[1], want)
 	}
-	if len(*deleted) != 0 {
-		t.Errorf("a kept account deleted from the source: %v", *deleted)
+	if deleted := src.deleted(); len(deleted) != 0 {
+		t.Errorf("a kept account deleted from the source: %v", deleted)
 	}
 }
 
@@ -101,31 +123,21 @@ func TestPollPOP3KeepDedup(t *testing.T) {
 // already delivered stay recorded so the next poll does not re-deliver them.
 func TestPollPOP3KeepRecordsBeforeLaterFailure(t *testing.T) {
 	allowLoopback(t)
-	msgs := []string{"From: a\r\n\r\none", "From: b\r\n\r\ntwo"}
-	host, port, _ := fakePOP3(t, msgs)
-	store := &fakeWorkerStore{configs: []directory.FetchmailEntry{{
-		ID: 1, Mailbox: "alice@hermex.test", Active: true,
-		SrcServer: host, SrcPort: port, SrcUser: "alice", SrcPassword: "pw",
-		Protocol: "POP3", Keep: true,
-	}}}
-	calls := 0
-	deliver := func(_ string, _ []byte, _ time.Time) error {
-		calls++
-		if calls == 2 {
-			return fmt.Errorf("delivery failed")
-		}
-		return nil
-	}
+	src := fakePOP3(t, []string{"From: a\r\n\r\none", "From: b\r\n\r\ntwo"})
+	store := &fakeWorkerStore{configs: []directory.FetchmailEntry{pop3Entry(src, true)}}
 
-	n, errs := Poll(context.Background(), store, deliver, pollTime)
-	if len(errs) == 0 {
-		t.Fatal("expected the later delivery failure to be reported")
+	n, errs := Poll(context.Background(), store, failSecond(), pollTime)
+	if len(errs) != 1 {
+		t.Fatalf("poll errors = %v, want the later delivery failure reported once", errs)
 	}
 	if n != 1 {
 		t.Errorf("delivered %d, want 1 before the failure", n)
 	}
 	if got := store.marked[1]; len(got) != 1 || got[0] != "uid1" {
 		t.Errorf("recorded seen = %v, want [uid1]: the delivered message must survive the failure", got)
+	}
+	if deleted := src.deleted(); len(deleted) != 0 {
+		t.Errorf("a kept account deleted from the source: %v", deleted)
 	}
 }
 
@@ -135,35 +147,57 @@ func TestPollPOP3KeepRecordsBeforeLaterFailure(t *testing.T) {
 // deleted, on POP3 and on IMAP.
 func TestPollDeleteModeKeepsAMessageItCouldNotDeliver(t *testing.T) {
 	allowLoopback(t)
-	failSecond := func() Deliverer {
-		calls := 0
-		return func(_ string, _ []byte, _ time.Time) error {
-			calls++
-			if calls == 2 {
-				return fmt.Errorf("delivery failed")
-			}
-			return nil
-		}
+
+	src := fakePOP3(t, []string{"From: a\r\n\r\none", "From: b\r\n\r\ntwo"})
+	store := &fakeWorkerStore{configs: []directory.FetchmailEntry{pop3Entry(src, false)}}
+	n, errs := Poll(context.Background(), store, failSecond(), pollTime)
+	wantEq(t, n, 1, "POP3 messages delivered before the failure")
+	wantEq(t, len(errs), 1, "POP3 poll errors")
+	if deleted := src.deleted(); len(deleted) != 1 || deleted[0] != 1 {
+		t.Errorf("POP3 deletions = %v, want only message 1", deleted)
 	}
 
-	host, port, deleted := fakePOP3(t, []string{"From: a\r\n\r\none", "From: b\r\n\r\ntwo"})
-	store := &fakeWorkerStore{configs: []directory.FetchmailEntry{{
-		ID: 1, Mailbox: "alice@hermex.test", Active: true,
-		SrcServer: host, SrcPort: port, SrcUser: "alice", SrcPassword: "pw", Protocol: "POP3",
-	}}}
-	Poll(context.Background(), store, failSecond(), pollTime)
-	if len(*deleted) != 1 || (*deleted)[0] != 1 {
-		t.Errorf("POP3 deletions = %v, want only message 1", *deleted)
-	}
-
-	host, port, recorded := fakeIMAP(t, "From: a\r\n\r\nbody")
-	store = &fakeWorkerStore{configs: []directory.FetchmailEntry{{
-		ID: 2, Mailbox: "alice@hermex.test", Active: true,
-		SrcServer: host, SrcPort: port, SrcUser: "alice", SrcPassword: "pw", Protocol: "IMAP", SrcFolder: "INBOX",
-	}}}
-	Poll(context.Background(), store, failSecond(), pollTime)
-	if joined := strings.Join(*recorded, " | "); strings.Contains(joined, `102 +FLAGS (\Deleted)`) {
+	isrc := fakeIMAP(t, "From: a\r\n\r\nbody")
+	store = &fakeWorkerStore{configs: []directory.FetchmailEntry{imapEntry(isrc, false)}}
+	n, errs = Poll(context.Background(), store, failSecond(), pollTime)
+	wantEq(t, n, 1, "IMAP messages delivered before the failure")
+	wantEq(t, len(errs), 1, "IMAP poll errors")
+	if joined := strings.Join(isrc.recorded(), " | "); strings.Contains(joined, `102 +FLAGS (\Deleted)`) {
 		t.Errorf("IMAP deleted the undelivered message: %q", joined)
+	}
+}
+
+// TestPollReportsAFailedPOP3Quit proves a refused QUIT is not lost. RFC 1939 6
+// applies the deletions only when QUIT succeeds, so a source that answers -ERR
+// keeps every message the account deleted, and the next poll fetches them again.
+// The poll must report that failure instead of reading as a clean run.
+func TestPollReportsAFailedPOP3Quit(t *testing.T) {
+	allowLoopback(t)
+	src := startPOP3Source(t, []string{"From: a\r\n\r\none", "From: b\r\n\r\ntwo"}, "-ERR maildrop locked\r\n")
+	store := &fakeWorkerStore{configs: []directory.FetchmailEntry{pop3Entry(src, false)}}
+	deliver, got := capture()
+
+	n, errs := Poll(context.Background(), store, deliver, pollTime)
+	wantEq(t, n, 2, "messages delivered before the QUIT")
+	wantEq(t, len(*got), 2, "messages filed locally")
+	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "quit") || !strings.Contains(errs[0].Error(), "maildrop locked") {
+		t.Errorf("poll errors = %v, want the refused QUIT reported", errs)
+	}
+}
+
+// TestPollReportsAFailedIMAPLogout proves a refused LOGOUT is reported the same
+// way, so the operator sees a source that did not close the session cleanly.
+func TestPollReportsAFailedIMAPLogout(t *testing.T) {
+	allowLoopback(t)
+	src := startIMAPSource(t, "From: a\r\n\r\nbody", "NO logout refused")
+	store := &fakeWorkerStore{configs: []directory.FetchmailEntry{imapEntry(src, true)}}
+	deliver, got := capture()
+
+	n, errs := Poll(context.Background(), store, deliver, pollTime)
+	wantEq(t, n, 2, "messages delivered before the LOGOUT")
+	wantEq(t, len(*got), 2, "messages filed locally")
+	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "logout") || !strings.Contains(errs[0].Error(), "logout refused") {
+		t.Errorf("poll errors = %v, want the refused LOGOUT reported", errs)
 	}
 }
 
@@ -171,12 +205,8 @@ func TestPollDeleteModeKeepsAMessageItCouldNotDeliver(t *testing.T) {
 // \Deleted + expunge) each message.
 func TestPollIMAPDeleteMode(t *testing.T) {
 	allowLoopback(t)
-	host, port, recorded := fakeIMAP(t, "From: a\r\n\r\nbody")
-	store := &fakeWorkerStore{configs: []directory.FetchmailEntry{{
-		ID: 1, Mailbox: "alice@hermex.test", Active: true,
-		SrcServer: host, SrcPort: port, SrcUser: "alice", SrcPassword: "pw",
-		Protocol: "IMAP", SrcFolder: "INBOX", Keep: false,
-	}}}
+	src := fakeIMAP(t, "From: a\r\n\r\nbody")
+	store := &fakeWorkerStore{configs: []directory.FetchmailEntry{imapEntry(src, false)}}
 	deliver, got := capture()
 
 	n, errs := Poll(context.Background(), store, deliver, pollTime)
@@ -186,7 +216,7 @@ func TestPollIMAPDeleteMode(t *testing.T) {
 	if n != 2 || len(*got) != 2 {
 		t.Errorf("delivered %d, want 2 (both searched UIDs)", n)
 	}
-	joined := strings.Join(*recorded, " | ")
+	joined := strings.Join(src.recorded(), " | ")
 	if !strings.Contains(joined, `\Deleted`) || !strings.Contains(joined, "EXPUNGE") {
 		t.Errorf("non-kept IMAP did not delete+expunge: %q", joined)
 	}
@@ -199,12 +229,8 @@ func TestPollIMAPDeleteMode(t *testing.T) {
 // dedup for the next poll) without deleting.
 func TestPollIMAPKeepMarksSeen(t *testing.T) {
 	allowLoopback(t)
-	host, port, recorded := fakeIMAP(t, "From: a\r\n\r\nbody")
-	store := &fakeWorkerStore{configs: []directory.FetchmailEntry{{
-		ID: 1, Mailbox: "alice@hermex.test", Active: true,
-		SrcServer: host, SrcPort: port, SrcUser: "alice", SrcPassword: "pw",
-		Protocol: "IMAP", SrcFolder: "INBOX", Keep: true,
-	}}}
+	src := fakeIMAP(t, "From: a\r\n\r\nbody")
+	store := &fakeWorkerStore{configs: []directory.FetchmailEntry{imapEntry(src, true)}}
 	deliver, got := capture()
 
 	n, errs := Poll(context.Background(), store, deliver, pollTime)
@@ -214,7 +240,7 @@ func TestPollIMAPKeepMarksSeen(t *testing.T) {
 	if n != 2 || len(*got) != 2 {
 		t.Errorf("delivered %d, want 2", n)
 	}
-	joined := strings.Join(*recorded, " | ")
+	joined := strings.Join(src.recorded(), " | ")
 	if !strings.Contains(joined, `\Seen`) {
 		t.Errorf("kept IMAP did not mark \\Seen: %q", joined)
 	}

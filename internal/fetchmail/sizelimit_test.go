@@ -1,12 +1,15 @@
 package fetchmail
 
 import (
+	"bufio"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -20,20 +23,15 @@ func TestTLSDialSourceHandshakeIsBounded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
 	// The server accepts and then holds the connection open without ever speaking
 	// TLS, until the test is done. Keeping it open past the 1s assertion window is
 	// what gives the test teeth: only the handshake deadline can end the dial in
 	// under a second, so an unbounded handshake would blow the budget.
 	done := make(chan struct{})
-	go func() {
-		c, err := ln.Accept()
-		if err != nil {
-			return
-		}
+	serveOne(t, ln, func(conn net.Conn) (net.Conn, error) {
 		<-done
-		_ = c.Close()
-	}()
+		return conn, nil
+	})
 	t.Cleanup(func() { close(done) })
 
 	old := opTimeout
@@ -68,20 +66,20 @@ func TestPOP3RetrRefusesAnOversizedMessage(t *testing.T) {
 	allowLoopback(t)
 	big := "From: a@example.com\r\nSubject: Big\r\n\r\n" + strings.Repeat("x", 4096)
 	small := "From: b@example.com\r\nSubject: Small\r\n\r\nfits"
-	host, port, _ := fakePOP3(t, []string{big, small})
+	src := fakePOP3(t, []string{big, small})
 
 	SetMaxMessage(1024)
 	defer SetMaxMessage(0)
 
-	c, err := dialPOP3(host, port, false, false)
+	c, err := dialPOP3(src.host, src.port, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := c.auth("alice", "secret"); err != nil {
 		t.Fatalf("auth: %v", err)
 	}
-	if _, err := c.retr(1); !errors.Is(err, ErrMessageTooLarge) {
-		t.Fatalf("retr of an oversized message = %v, want ErrMessageTooLarge", err)
+	if body, err := c.retr(1); !errors.Is(err, ErrMessageTooLarge) || body != nil {
+		t.Fatalf("retr of an oversized message = %d bytes, %v, want none and ErrMessageTooLarge", len(body), err)
 	}
 	body, err := c.retr(2)
 	if err != nil {
@@ -90,6 +88,43 @@ func TestPOP3RetrRefusesAnOversizedMessage(t *testing.T) {
 	if string(body) != small+"\r\n" {
 		t.Errorf("retr(2) = %q, want the second message", body)
 	}
+	mustNoErr(t, c.quit(), "quit after the refusal")
+}
+
+// TestPOP3RetrReportsADrainCutShort sends an over-cap message and hangs up before
+// its terminating dot. The refusal drains the rest of the message to keep the
+// session in step; a drain that fails leaves the session mid-message, so the
+// next command would read message bytes as its reply. The failure must come
+// back beside ErrMessageTooLarge, so the worker stops instead of carrying on.
+func TestPOP3RetrReportsADrainCutShort(t *testing.T) {
+	allowLoopback(t)
+	SetMaxMessage(1024)
+	defer SetMaxMessage(0)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	mustNoErr(t, err, "listen")
+	serveOne(t, ln, func(conn net.Conn) (net.Conn, error) {
+		r := bufio.NewReader(conn)
+		w := &scriptWriter{w: conn}
+		w.send("+OK ready\r\n")
+		for _, reply := range []string{"+OK\r\n", "+OK\r\n", "+OK\r\n" + strings.Repeat("x", 4096) + "\r\n"} {
+			if _, err := r.ReadString('\n'); err != nil {
+				return conn, err
+			}
+			w.send(reply)
+		}
+		return conn, w.err // hang up with no terminating dot
+	})
+	h, pn := listenerHostPort(t, ln)
+
+	c, err := dialPOP3(h, pn, false, false)
+	mustNoErr(t, err, "dial")
+	mustNoErr(t, c.auth("alice", "secret"), "auth")
+	body, err := c.retr(1)
+	if !errors.Is(err, ErrMessageTooLarge) || !strings.Contains(fmt.Sprint(err), "drain") || body != nil {
+		t.Errorf("retr cut short = %d bytes, %v, want none, ErrMessageTooLarge and the drain failure", len(body), err)
+	}
+	mustNoErr(t, c.conn.Close(), "hang up")
 }
 
 // endlessLineServer accepts one connection, sends prefix, then streams bytes
@@ -101,26 +136,46 @@ func endlessLineServer(t *testing.T, prefix string) (addr string, sent *atomic.I
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = ln.Close() })
 	sent = &atomic.Int64{}
-	go func() {
-		conn, err := ln.Accept()
-		if err != nil {
-			return
+	serveOne(t, ln, func(conn net.Conn) (net.Conn, error) {
+		if _, err := io.WriteString(conn, prefix); err != nil {
+			return conn, err
 		}
-		defer conn.Close()
-		_, _ = io.WriteString(conn, prefix)
-		go func() { _, _ = io.Copy(io.Discard, conn) }()
-		chunk := []byte(strings.Repeat("A", 32<<10))
-		for sent.Load() < 256<<20 {
-			n, err := conn.Write(chunk)
-			sent.Add(int64(n))
-			if err != nil {
-				return
-			}
+		drained := make(chan error, 1)
+		go func() {
+			_, err := io.Copy(io.Discard, conn)
+			drained <- err
+		}()
+		err := streamUntilHangUp(conn, sent)
+		if derr := <-drained; derr != nil && !peerGone(derr) {
+			err = errors.Join(err, derr)
 		}
-	}()
+		return conn, err
+	})
 	return ln.Addr().String(), sent
+}
+
+// streamUntilHangUp writes line bytes with no line end until the client hangs
+// up or 256 MiB have gone out. Only the client's hang-up ends the stream early;
+// any other write failure is returned.
+func streamUntilHangUp(conn net.Conn, sent *atomic.Int64) error {
+	chunk := []byte(strings.Repeat("A", 32<<10))
+	for sent.Load() < 256<<20 {
+		n, err := conn.Write(chunk)
+		sent.Add(int64(n))
+		if err != nil {
+			if peerGone(err) {
+				return nil
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+// peerGone reports whether a socket error means the client closed its end.
+func peerGone(err error) bool {
+	return errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET)
 }
 
 // TestAnEndlessServerLineIsRefused points both clients at a source whose
@@ -152,9 +207,12 @@ func TestAnEndlessServerLineIsRefused(t *testing.T) {
 	c, err := dialPOP3(host, port, false, false)
 	mustNoErr(t, err, "dial")
 	mustNoErr(t, c.auth("alice", "secret"), "auth")
-	if _, err := c.uidl(); !errors.Is(err, ErrResponseTooLarge) {
-		t.Errorf("POP3 endless UIDL: err = %v, want ErrResponseTooLarge", err)
+	if uids, err := c.uidl(); !errors.Is(err, ErrResponseTooLarge) || uids != nil {
+		t.Errorf("POP3 endless UIDL: %d ids, err = %v, want none and ErrResponseTooLarge", len(uids), err)
 	}
+	// The session is out of step after the refusal, so the worker hangs up rather
+	// than sending QUIT into the unfinished line.
+	mustNoErr(t, c.conn.Close(), "hang up on the endless source")
 	if n := sent.Load(); n > limit {
 		t.Errorf("POP3 client read %d bytes of one UIDL listing", n)
 	}
@@ -188,12 +246,12 @@ func splitAddr(t *testing.T, addr string) (string, int) {
 func TestPOP3RetrAcceptsUpToTheCap(t *testing.T) {
 	allowLoopback(t)
 	msg := "From: a@example.com\r\nSubject: Fits\r\n\r\n" + strings.Repeat("y", 900)
-	host, port, _ := fakePOP3(t, []string{msg})
+	src := fakePOP3(t, []string{msg})
 
 	SetMaxMessage(4096)
 	defer SetMaxMessage(0)
 
-	c, err := dialPOP3(host, port, false, false)
+	c, err := dialPOP3(src.host, src.port, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,6 +265,7 @@ func TestPOP3RetrAcceptsUpToTheCap(t *testing.T) {
 	if string(body) != msg+"\r\n" {
 		t.Errorf("retr = %q, want the message verbatim", body)
 	}
+	mustNoErr(t, c.quit(), "quit")
 }
 
 // TestIMAPFetchRefusesAnOversizedLiteral proves the advertised literal size is
@@ -215,12 +274,12 @@ func TestPOP3RetrAcceptsUpToTheCap(t *testing.T) {
 func TestIMAPFetchRefusesAnOversizedLiteral(t *testing.T) {
 	allowLoopback(t)
 	msg := "From: a@example.com\r\nSubject: Big\r\n\r\n" + strings.Repeat("z", 4096)
-	host, port, _ := fakeIMAP(t, msg)
+	src := fakeIMAP(t, msg)
 
 	SetMaxMessage(1024)
 	defer SetMaxMessage(0)
 
-	c, err := dialIMAP(host, port, false, false)
+	c, err := dialIMAP(src.host, src.port, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,8 +289,8 @@ func TestIMAPFetchRefusesAnOversizedLiteral(t *testing.T) {
 	if err := c.selectFolder("INBOX"); err != nil {
 		t.Fatalf("select: %v", err)
 	}
-	if _, err := c.fetchBody("101"); !errors.Is(err, ErrMessageTooLarge) {
-		t.Fatalf("fetchBody of an oversized literal = %v, want ErrMessageTooLarge", err)
+	if body, err := c.fetchBody("101"); !errors.Is(err, ErrMessageTooLarge) || body != nil {
+		t.Fatalf("fetchBody of an oversized literal = %d bytes, %v, want none and ErrMessageTooLarge", len(body), err)
 	}
 	// The literal was drained, so the connection is still in step.
 	if err := c.logout(); err != nil {
@@ -263,18 +322,18 @@ func TestMaxMessageAlwaysHasACeiling(t *testing.T) {
 // deployment's own databases and admin API, or a sweep of the internal network
 // read off the failure modes.
 func TestSourceDialRefusesInternalAddressesByDefault(t *testing.T) {
-	host, port, _ := fakePOP3(t, []string{"From: a@example.com\r\n\r\nbody"})
+	src := fakePOP3(t, []string{"From: a@example.com\r\n\r\nbody"})
 
 	SetAllowInternalSources(false) // the production default
-	if _, err := dialPOP3(host, port, false, false); err == nil {
-		t.Fatal("dialled a loopback source with the block on")
+	if c, err := dialPOP3(src.host, src.port, false, false); err == nil {
+		t.Fatalf("dialled a loopback source with the block on: %v", c.quit())
 	} else if !strings.Contains(err.Error(), "non-public address") {
 		t.Errorf("err = %v, want the address-range refusal", err)
 	}
 
-	ihost, iport, _ := fakeIMAP(t, "From: a@example.com\r\n\r\nbody")
-	if _, err := dialIMAP(ihost, iport, false, false); err == nil {
-		t.Error("dialled a loopback IMAP source with the block on")
+	isrc := fakeIMAP(t, "From: a@example.com\r\n\r\nbody")
+	if c, err := dialIMAP(isrc.host, isrc.port, false, false); err == nil {
+		t.Errorf("dialled a loopback IMAP source with the block on: %v", c.logout())
 	}
 }
 
@@ -283,8 +342,8 @@ func TestSourceDialRefusesInternalAddressesByDefault(t *testing.T) {
 // same dial succeeds, so the block is a policy rather than a wall.
 func TestSourceDialFollowsTheOperatorSwitch(t *testing.T) {
 	allowLoopback(t)
-	host, port, _ := fakePOP3(t, []string{"From: a@example.com\r\n\r\nbody"})
-	c, err := dialPOP3(host, port, false, false)
+	src := fakePOP3(t, []string{"From: a@example.com\r\n\r\nbody"})
+	c, err := dialPOP3(src.host, src.port, false, false)
 	if err != nil {
 		t.Fatalf("dial with internal sources allowed: %v", err)
 	}
