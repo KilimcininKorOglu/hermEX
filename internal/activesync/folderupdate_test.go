@@ -71,7 +71,7 @@ func TestFolderUpdateReparent(t *testing.T) {
 	if !exists {
 		t.Error("re-parented folder not found under its new parent")
 	}
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 	wantRootFolder(t, dir, "Child", false)
 }
 
@@ -150,6 +150,8 @@ func TestFolderUpdateRefusesHostileTargets(t *testing.T) {
 	for _, tc := range []struct{ id, parent, want, name string }{
 		{outer, "999999", "5", "Moved"},
 		{"abc", "0", "4", "Moved"},
+		{"-" + outer, "0", "4", "Moved"},
+		{"99999999999999999999", "0", "4", "Moved"},
 		{outer, "0", "10", ""}, // an empty DisplayName is a malformed request
 	} {
 		_, root := postCommand(t, ts, "FolderUpdate", folderUpdateReq(key, tc.id, tc.parent, tc.name))
@@ -171,7 +173,7 @@ func wantRootFolder(t *testing.T, dir, name string, present bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	// A failed lookup reports no folder, which would pass every absence check.
 	_, exists, err := st.FolderByName(nil, name)
 	mustNoErr(t, "look up folder "+name, err)

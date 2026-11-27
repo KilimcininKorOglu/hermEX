@@ -80,7 +80,8 @@ func folderUpdateTarget(dev *deviceState, root *wbxml.Node, name string) (int64,
 		return 0, fhStatusBadSyncKey
 	}
 	fid, err := strconv.ParseInt(serverID, 10, 64)
-	if err != nil {
+	// An id no folder can have (not a number, or below 1) names no folder.
+	if err != nil || fid < 1 {
 		return 0, fhStatusNotFound
 	}
 	if fid < mapi.PrivateFIDUnassignedStart {
