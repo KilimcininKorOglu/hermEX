@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/xml"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -73,7 +74,10 @@ func withAutoconfig(hostname string, dir domainLister, logger *logging.Logger, n
 			http.Error(w, "no configuration", http.StatusNotFound)
 			return
 		}
-		writeClientConfig(w, hostname, domain)
+		if err := writeClientConfig(w, hostname, domain); err != nil {
+			logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.Gateway,
+				Name: "autoconfig.write.fail", RemoteAddr: serve.ClientAddr(r), Err: err.Error()})
+		}
 	})
 }
 
@@ -106,8 +110,9 @@ func isActiveDomain(dir domainLister, domain string) (bool, error) {
 
 // writeClientConfig writes the account settings: IMAP and POP3 over implicit
 // TLS, and submission on 465 (implicit TLS) and 587 (STARTTLS), all signing in
-// with the full address. Only TLS endpoints are advertised.
-func writeClientConfig(w http.ResponseWriter, hostname, domain string) {
+// with the full address. Only TLS endpoints are advertised. A build or write
+// failure is returned so the caller records it.
+func writeClientConfig(w http.ResponseWriter, hostname, domain string) error {
 	server := func(typ string, port int, socket string) mailServerAd {
 		return mailServerAd{Type: typ, Hostname: hostname, Port: port, SocketType: socket,
 			Username: "%EMAILADDRESS%", Auth: "password-cleartext"}
@@ -120,9 +125,11 @@ func writeClientConfig(w http.ResponseWriter, hostname, domain string) {
 	out, err := xml.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		http.Error(w, "autoconfig unavailable", http.StatusInternalServerError)
-		return
+		return fmt.Errorf("build the autoconfig document: %w", err)
 	}
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
-	_, _ = w.Write([]byte(xml.Header))
-	_, _ = w.Write(out)
+	if _, err := w.Write(append([]byte(xml.Header), out...)); err != nil {
+		return fmt.Errorf("write the autoconfig document: %w", err)
+	}
+	return nil
 }

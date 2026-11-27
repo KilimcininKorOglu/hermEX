@@ -100,6 +100,10 @@ func serveMTASTSPolicy(w http.ResponseWriter, r *http.Request, cfg *config.Confi
 	// that re-fetch with the old body would pin the sender to the old policy under
 	// the new id, so every fetch must reach this server.
 	w.Header().Set("Cache-Control", "no-cache")
-	// Final response body; a write failure means the client is gone, with no recourse.
-	_, _ = io.WriteString(w, mtasts.Build(policy))
+	// Final response body; a write failure means the client is gone, so it is
+	// recorded rather than answered.
+	if _, err := io.WriteString(w, mtasts.Build(policy)); err != nil {
+		logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.Gateway,
+			Name: "mtasts.write.fail", RemoteAddr: serve.ClientAddr(r), Err: err.Error()})
+	}
 }

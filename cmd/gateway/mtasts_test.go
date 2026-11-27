@@ -44,6 +44,27 @@ func doRequest(h http.Handler, host, path string) *httptest.ResponseRecorder {
 	return rec
 }
 
+// TestMTASTSRecordsAFailedWrite proves a policy the sender never received leaves an
+// mtasts.write.fail event: a sender that cannot fetch the policy falls back to
+// opportunistic TLS (RFC 8461 5), and the log is the only trace of why.
+func TestMTASTSRecordsAFailedWrite(t *testing.T) {
+	dir := &fakeMTASTSDir{
+		settings: directory.MTASTSSettings{Enabled: true, Mode: "testing", MaxAge: 86400}, found: true,
+		domains: []directory.DomainInfo{{Name: "tenant.com"}},
+	}
+	sink := &eventSink{}
+	h := withMTASTS(&config.Config{Hostname: "mail.hermex.test"}, dir, logging.New(sink), http.HandlerFunc(proxied))
+	req := httptest.NewRequest(http.MethodGet, "http://mta-sts.tenant.com"+mtastsPolicyPath, nil)
+	h.ServeHTTP(goneWriter{httptest.NewRecorder()}, req)
+
+	for _, e := range sink.events {
+		if e.Name == "mtasts.write.fail" && strings.Contains(e.Err, "client gone") {
+			return
+		}
+	}
+	t.Fatalf("events = %+v, want an mtasts.write.fail naming the error", sink.events)
+}
+
 // TestMTASTSServesPolicyForActiveDomain proves an enabled deployment serves a valid,
 // exact policy for an active domain's policy host: the mx is the server hostname (the
 // MX every domain routes to), the mode and max_age are the operator's, and the bytes

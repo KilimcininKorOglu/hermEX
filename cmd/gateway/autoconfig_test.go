@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 )
 
 type fakeDomains struct {
@@ -27,6 +28,33 @@ func autoconfigGet(t *testing.T, dir domainLister, host, target string) *httptes
 	rec := httptest.NewRecorder()
 	withAutoconfig("mail.example.com", dir, nil, passed).ServeHTTP(rec, req)
 	return rec
+}
+
+// goneWriter is a response writer whose client has disconnected: every body write
+// fails.
+type goneWriter struct{ *httptest.ResponseRecorder }
+
+func (goneWriter) Write([]byte) (int, error) { return 0, errors.New("client gone") }
+
+// WriteString overrides the recorder's own, which io.WriteString would otherwise
+// call and so bypass the failing Write.
+func (goneWriter) WriteString(string) (int, error) { return 0, errors.New("client gone") }
+
+// TestAutoconfigRecordsAFailedWrite proves a document the client never received
+// leaves an autoconfig.write.fail event, so a client that reports no settings has
+// a cause in the operator's log.
+func TestAutoconfigRecordsAFailedWrite(t *testing.T) {
+	sink := &eventSink{}
+	req := httptest.NewRequest(http.MethodGet, autoconfigPath+"?emailaddress=a@example.com", nil)
+	h := withAutoconfig("mail.example.com", hostedExample, logging.New(sink), http.NotFoundHandler())
+	h.ServeHTTP(goneWriter{httptest.NewRecorder()}, req)
+
+	for _, e := range sink.events {
+		if e.Name == "autoconfig.write.fail" && strings.Contains(e.Err, "client gone") {
+			return
+		}
+	}
+	t.Fatalf("events = %+v, want an autoconfig.write.fail naming the error", sink.events)
 }
 
 var hostedExample = fakeDomains{list: []directory.DomainInfo{{Name: "example.com"}, {Name: "off.example", Status: 1}}}
