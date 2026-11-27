@@ -275,7 +275,8 @@ func TestSetReadFlags(t *testing.T) {
 	}
 
 	// Mark all unread via an EMPTY id list (every message in the folder), rfClearReadFlag.
-	sess.Dispatch(buildSetReadFlags(0, rfClearReadFlag), []uint32{folderH})
+	clr := ropOK(t, dispatchOn(sess, buildSetReadFlags(0, rfClearReadFlag), folderH), ropSetReadFlags, "SetReadFlags(empty list, clear)")
+	wantU8(t, clr, "empty-list PartialCompletion", 0)
 	for _, id := range []int64{id1, id2} {
 		if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), id); f&objectstore.FlagSeen != 0 {
 			t.Errorf("message %d still read after empty-list clear (flags=%#x)", id, f)
