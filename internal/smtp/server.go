@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"hermex/internal/connlimit"
 	"hermex/internal/lifecycle"
@@ -447,6 +448,10 @@ func (c *smtpConn) cmdMAIL(arg string) bool {
 		c.reply(550, "5.6.7 non-ASCII address requires the SMTPUTF8 extension")
 		return true
 	}
+	if badPath(addr) {
+		c.reply(501, "5.1.7 sender path is too long or not UTF-8")
+		return true
+	}
 	mailDSN, code, msg, ok := c.checkMailParams(arg, params)
 	if !ok {
 		c.reply(code, msg)
@@ -519,6 +524,10 @@ func (c *smtpConn) cmdRCPT(arg string) bool {
 	// (550 is the sender's).
 	if needsUTF8Keyword(addr, c.smtputf8) {
 		c.reply(553, "5.6.7 non-ASCII address requires the SMTPUTF8 extension")
+		return true
+	}
+	if badPath(addr) {
+		c.reply(501, "5.1.3 recipient path is too long or not UTF-8")
 		return true
 	}
 	// RFC 3461 §5.1(b): a malformed or duplicated NOTIFY/ORCPT MUST be refused
@@ -1044,6 +1053,18 @@ func extractPath(arg, prefix string) (string, bool) {
 // carries a byte outside ASCII, which only the SMTPUTF8 extension permits
 // (RFC 6531 §3.2), and the transaction did not ask for it. An empty
 // reverse-path (the null sender) is ASCII and always passes.
+// maxPathOctets is the RFC 5321 section 4.5.3.1.3 limit on a reverse-path or
+// forward-path, counted with its angle brackets.
+const maxPathOctets = 256
+
+// badPath reports whether an envelope path must be refused: longer than RFC 5321
+// allows, or not UTF-8, which RFC 6531 section 3.3 requires of an SMTPUTF8
+// address. Downstream stores refuse such bytes, and a refused store write must
+// never be how a check is skipped.
+func badPath(addr string) bool {
+	return len(addr)+2 > maxPathOctets || !utf8.ValidString(addr)
+}
+
 func needsUTF8Keyword(addr string, negotiated bool) bool {
 	if negotiated {
 		return false
