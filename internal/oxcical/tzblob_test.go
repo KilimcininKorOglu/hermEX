@@ -72,30 +72,36 @@ func TestImportWritesOutlookZones(t *testing.T) {
 	msg, err := Import([]byte(series), r.opt())
 	mustNoErr(t, err, "import")
 
-	if got := ruleFlags(t, r, msg, mapi.NameAppointmentTimeZoneDefStartDisplay); got != tzRuleEffective {
-		t.Errorf("StartDisplay rule flags = %#x, want 0x0002", got)
-	}
-	if got := ruleFlags(t, r, msg, mapi.NameAppointmentTimeZoneDefRecur); got != tzRuleEffective|tzRuleRecurCurrent {
-		t.Errorf("Recur rule flags = %#x, want 0x0003", got)
-	}
-	if v, _ := msg.Props.Get(r.tag(mapi.NameTimeZoneDescription, mapi.PtUnicode)); v != "W. Europe Standard Time" {
-		t.Errorf("TimeZoneDescription = %v, want W. Europe Standard Time", v)
-	}
-	if v, ok := msg.Props.Get(r.tag(mapi.NameTimeZoneStruct, mapi.PtBinary)); !ok || len(v.([]byte)) != 48 {
-		t.Errorf("TimeZoneStruct = %v, want a 48-byte TZREG", v)
-	}
-	blob, ok := msg.Props.Get(r.tag(mapi.NameAppointmentRecur, mapi.PtBinary))
-	if !ok {
-		t.Fatal("the series stored no recurrence blob")
-	}
+	wantEq(t, ruleFlags(t, r, msg, mapi.NameAppointmentTimeZoneDefStartDisplay), tzRuleEffective, "StartDisplay rule flags")
+	wantEq(t, ruleFlags(t, r, msg, mapi.NameAppointmentTimeZoneDefRecur), tzRuleEffective|tzRuleRecurCurrent, "Recur rule flags")
+	desc, ok := msg.Props.Get(r.tag(mapi.NameTimeZoneDescription, mapi.PtUnicode))
+	wantTrue(t, ok, "TimeZoneDescription present")
+	wantEq(t, desc, any("W. Europe Standard Time"), "TimeZoneDescription")
+	tzStruct := mustPropBytes(t, msg, r.tag(mapi.NameTimeZoneStruct, mapi.PtBinary), "TimeZoneStruct")
+	wantEq(t, len(tzStruct), 48, "TimeZoneStruct length")
+	blobBytes := mustPropBytes(t, msg, r.tag(mapi.NameAppointmentRecur, mapi.PtBinary), "NameAppointmentRecur")
 	// [MS-OXOCAL] 2.2.1.44.5: StartDate is the first day's midnight and the time of
 	// day every occurrence starts at is StartTimeOffset.
-	pattern, err := recurrence.DecodeAppointment(blob.([]byte))
+	pattern, err := recurrence.DecodeAppointment(blobBytes)
 	mustNoErr(t, err, "decode pattern")
 	if pattern.StartDate%(24*60) != 0 || pattern.StartTimeOffset != 9*60 || pattern.EndTimeOffset != 9*60+30 {
 		t.Errorf("pattern = start %d offsets %d-%d, want midnight and 540-570 (09:00 Berlin)",
 			pattern.StartDate, pattern.StartTimeOffset, pattern.EndTimeOffset)
 	}
+}
+
+// mustPropBytes reads a binary MAPI property or fails the test.
+func mustPropBytes(t *testing.T, msg *oxcmail.Message, tag mapi.PropTag, name string) []byte {
+	t.Helper()
+	v, ok := msg.Props.Get(tag)
+	if !ok {
+		t.Fatalf("%s not stored", name)
+	}
+	b, isBytes := v.([]byte)
+	if !isBytes {
+		t.Fatalf("%s has type %T, want []byte", name, v)
+	}
+	return b
 }
 
 // TestImportWritesNoZoneForUnzonedTimes keeps the properties off events that name
@@ -138,7 +144,10 @@ func ruleFlags(t *testing.T, r *resolver, msg *oxcmail.Message, name mapi.Proper
 	if !ok {
 		t.Fatalf("%v not stored", name)
 	}
-	b := v.([]byte)
+	b, isBytes := v.([]byte)
+	if !isBytes {
+		t.Fatalf("%v has type %T, want []byte", name, v)
+	}
 	header := 4 + int(binary.LittleEndian.Uint16(b[2:4]))
 	return binary.LittleEndian.Uint16(b[header+4 : header+6])
 }
