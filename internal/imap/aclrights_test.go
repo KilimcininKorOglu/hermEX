@@ -33,15 +33,26 @@ func TestACLRightsFollowRFC4314(t *testing.T) {
 // the delete right ("et") and "c" the create right ("kx").
 func TestACLObsoleteRightsExpand(t *testing.T) {
 	d, ok := aclToRights("d")
-	et, _ := aclToRights("et")
+	et := mustRights(t, "et")
 	if !ok || d != et {
 		t.Errorf(`"d" = %#x (ok %v), want the rights of "et" %#x`, d, ok, et)
 	}
 	c, ok := aclToRights("c")
-	kx, _ := aclToRights("kx")
+	kx := mustRights(t, "kx")
 	if !ok || c != kx {
 		t.Errorf(`"c" = %#x (ok %v), want the rights of "kx" %#x`, c, ok, kx)
 	}
+}
+
+// mustRights parses a rights string the test relies on as valid and fails the
+// test when it is refused, so a refusal cannot read as an empty right set.
+func mustRights(t *testing.T, s string) uint32 {
+	t.Helper()
+	r, ok := aclToRights(s)
+	if !ok {
+		t.Fatalf("rights %q were refused", s)
+	}
+	return r
 }
 
 // TestACLListingsCarryTheVirtualRights follows RFC 4314 2.1.1: when any member of
@@ -59,8 +70,7 @@ func TestACLListingsCarryTheVirtualRights(t *testing.T) {
 		{"lrswipkxtea", true, true},
 	}
 	for _, tc := range cases {
-		r, _ := aclToRights(tc.rights)
-		got := rightsToACL(r)
+		got := rightsToACL(mustRights(t, tc.rights))
 		if strings.Contains(got, "c") != tc.wantC || strings.Contains(got, "d") != tc.wantD {
 			t.Errorf("rights %q render as %q; want c=%v d=%v", tc.rights, got, tc.wantC, tc.wantD)
 		}
