@@ -262,4 +262,17 @@ func TestPruneMailReportsHonoursEachWindow(t *testing.T) {
 	mustNoErr(t, "read the settings", err)
 	wantEq(t, "settings saved", found, true)
 	wantEq(t, "the aggregate window", st.AggregateDays, 30)
+
+	// A window past what time.Duration holds (150000 days wraps int64 nanoseconds
+	// negative) keeps the reports: it must never become a cutoff in the future.
+	freshID, err := d.StoreDMARCAggregate(source(dom, now), sampleAggregate("r-fresh", reportDay1))
+	mustNoErr(t, "store a fresh aggregate report", err)
+	mustNoErr(t, "set a very wide window", d.SetMailReportSettings(MailReportSettings{AggregateDays: 150000, FailureDays: 150000}))
+	n, err = d.PruneMailReports(now)
+	mustNoErr(t, "prune with a very wide window", err)
+	wantEq(t, "reports deleted under a very wide window", n, int64(0))
+	kept, ok, err = d.GetDMARCReport(freshID)
+	mustNoErr(t, "read the aggregate report after the wide window", err)
+	wantEq(t, "the aggregate report kept by the wide window", ok, true)
+	wantEq(t, "the aggregate report id after the wide window", kept.ReportID, "r-fresh")
 }

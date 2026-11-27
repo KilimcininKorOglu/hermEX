@@ -86,7 +86,9 @@ func (d *SQLDirectory) pruneReportTable(table string, days int, now time.Time) (
 	if days <= 0 {
 		return 0, nil
 	}
-	cutoff := now.Add(-time.Duration(days) * 24 * time.Hour).Unix()
+	// AddDate, not a Duration: days * 24h overflows int64 nanoseconds past about
+	// 106751 days and wraps into a cutoff in the future that deletes every report.
+	cutoff := now.AddDate(0, 0, -days).Unix()
 	// #nosec G202 -- table is one of three literal table names from PruneMailReports, never input
 	res, err := d.db.Exec(`DELETE FROM `+table+` WHERE received_at < ?`, cutoff)
 	if err != nil {
