@@ -2,10 +2,10 @@ package meeting
 
 import (
 	"errors"
-	"hermex/internal/directory"
 	"testing"
 	"time"
 
+	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcmail"
@@ -47,7 +47,7 @@ func TestRespondKeepsRequestByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st, "the store")
 
 	reqID := appendRequest(t, st)
 	if _, err := Respond(st, nil, nil, "alice@hermex.test", reqID, ResponseAccepted, false); err != nil {
@@ -71,7 +71,7 @@ func TestRespondRemovesRequestWhenConfigured(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer st.Close()
+			defer mustClose(t, st, "the store")
 			if err := st.SetMeetingConfig(objectstore.MeetingConfig{RemoveRequestOnResponse: true}); err != nil {
 				t.Fatal(err)
 			}
@@ -98,7 +98,7 @@ func TestRespondSurvivesAnUnindexedRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st, "the store")
 	if err := st.SetMeetingConfig(objectstore.MeetingConfig{RemoveRequestOnResponse: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestMeetingConfigRoundTripsTheFlag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st, "the store")
 
 	if cfg, err := st.GetMeetingConfig(); err != nil || cfg.RemoveRequestOnResponse {
 		t.Fatalf("a fresh store reports %+v, err %v; want the flag off", cfg, err)
@@ -176,7 +176,7 @@ func TestRespondSurvivesAFailedCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st, "the store")
 	if err := st.SetMeetingConfig(objectstore.MeetingConfig{RemoveRequestOnResponse: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestRespondFromCalendarNeverFilesTheAppointment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st, "the store")
 	if err := st.SetMeetingConfig(objectstore.MeetingConfig{RemoveRequestOnResponse: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +264,7 @@ func TestRespondFromCalendarRemovesTheRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st, "the store")
 	if err := st.SetMeetingConfig(objectstore.MeetingConfig{RemoveRequestOnResponse: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +297,7 @@ func TestRespondFromCalendarLeavesOtherMeetings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st, "the store")
 	if err := st.SetMeetingConfig(objectstore.MeetingConfig{RemoveRequestOnResponse: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +326,7 @@ func TestRespondFromCalendarRemovesEveryInvitation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st, "the store")
 	if err := st.SetMeetingConfig(objectstore.MeetingConfig{RemoveRequestOnResponse: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +360,7 @@ func TestAutoProcessKeepsTheRequestMail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st, "the store")
 	if err := st.SetMeetingConfig(objectstore.MeetingConfig{
 		AutoAccept:              true,
 		RemoveRequestOnResponse: true,
