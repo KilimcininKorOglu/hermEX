@@ -81,7 +81,7 @@ func TestRangeSetErase(t *testing.T) {
 func TestSerializeSingletonVector(t *testing.T) {
 	var rs rangeSet
 	rs.insert(0x010203040506, 0x010203040506)
-	want := []byte{0x06, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, glbEnd}
+	want := []byte{0x06, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x00} // push 6, End 0x00
 	if got := serializeGlobset(rs); !bytes.Equal(got, want) {
 		t.Errorf("singleton GLOBSET\n got %x\nwant %x", got, want)
 	}
@@ -93,10 +93,10 @@ func TestSerializeSingleRangeVector(t *testing.T) {
 	var rs rangeSet
 	rs.insert(0x102030, 0x102040)
 	want := []byte{
-		glbRange,
+		0x52,                               // Range command
 		0x00, 0x00, 0x00, 0x10, 0x20, 0x30, // low (big-endian)
 		0x00, 0x00, 0x00, 0x10, 0x20, 0x40, // high
-		glbEnd,
+		0x00, // End command
 	}
 	if got := serializeGlobset(rs); !bytes.Equal(got, want) {
 		t.Errorf("single-range GLOBSET\n got %x\nwant %x", got, want)
@@ -116,10 +116,10 @@ func TestSerializeMultiRangeVector(t *testing.T) {
 		0x04, 0x00, 0x00, 0x00, 0x00, // push 4 (global prefix 00 00 00 00)
 		0x02, 0x00, 0x10, // push 2 -> depth 6 -> emit {0x10}, auto-pop
 		0x01, 0xA0, // inner push 1 (A0)
-		glbRange, 0xB0, 0xC0, // range, low/high tail (1 byte each)
-		glbPop, // inner pop
-		glbPop, // global pop
-		glbEnd,
+		0x52, 0xB0, 0xC0, // Range, low/high tail (1 byte each)
+		0x50, // inner Pop
+		0x50, // global Pop
+		0x00, // End
 	}
 	if got := serializeGlobset(rs); !bytes.Equal(got, want) {
 		t.Errorf("multi-range GLOBSET\n got %x\nwant %x", got, want)
@@ -144,8 +144,8 @@ func TestSerializeMultiRangeVector(t *testing.T) {
 func TestDeserializeBitmaskVector(t *testing.T) {
 	data := []byte{
 		0x05, 0x00, 0x00, 0x00, 0x00, 0x00, // push 5 -> stack depth 5
-		glbBitmask, 0x10, 0x05, // start 0x10, mask 0b00000101
-		glbEnd,
+		0x42, 0x10, 0x05, // Bitmask, start 0x10, mask 0b00000101
+		0x00, // End
 	}
 	rs, n, err := deserializeGlobset(data)
 	if err != nil {
