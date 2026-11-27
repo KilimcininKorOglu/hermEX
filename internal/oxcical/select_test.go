@@ -73,3 +73,14 @@ func TestSelectCalendarDataAllProp(t *testing.T) {
 		t.Errorf("no allcomp should still exclude VTIMEZONE\n%s", s)
 	}
 }
+
+// TestSelectCalendarDataRefusesHostileInputs confirms malformed iCalendar and a
+// mismatched root component name return nil and false with no partial output.
+func TestSelectCalendarDataRefusesHostileInputs(t *testing.T) {
+	if out, ok := SelectCalendarData([]byte("TRUNCATED"), CompSelect{Name: "VCALENDAR", AllProp: true}); ok || out != nil {
+		t.Errorf("malformed input returned (%d bytes, %v), want (nil, false)", len(out), ok)
+	}
+	if out, ok := SelectCalendarData([]byte(selectFullEvent), CompSelect{Name: "VEVENT", AllProp: true}); ok || out != nil {
+		t.Errorf("mismatched root returned (%d bytes, %v), want (nil, false)", len(out), ok)
+	}
+}
