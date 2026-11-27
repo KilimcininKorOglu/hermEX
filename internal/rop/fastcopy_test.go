@@ -123,13 +123,14 @@ func TestFastTransferSourceCopyToRejectsFolder(t *testing.T) {
 	folderH := h[1]
 	requireHandles(t, "OpenFolder(Inbox)", folderH)
 	handles := []uint32{logonH, folderH, 0xFFFFFFFF}
-	sr, _ := sess.Dispatch(buildFastCopyTo(1, 2, 0, 0, nil), handles)
+	sr, h := sess.Dispatch(buildFastCopyTo(1, 2, 0, 0, nil), handles)
 	p := ext.NewPull(sr, ext.FlagUTF16)
 	mustU8(t, p, "RopId")
 	mustU8(t, p, "ohindex")
 	if ec := mustU32(t, p, "ec"); ec != ecError {
 		t.Fatalf("folder source ReturnValue = %#x, want ecError", ec)
 	}
+	wantNoDownload(t, sess, h[2], "CopyTo(folder)")
 }
 
 // buildFastCopyMessages frames a RopFastTransferSourceCopyMessages request: the
@@ -232,13 +233,14 @@ func TestFastTransferSourceCopyMessagesRejectsMessage(t *testing.T) {
 	defer sess.Close()
 
 	handles := []uint32{logonH, msgH, 0xFFFFFFFF}
-	sr, _ := sess.Dispatch(buildFastCopyMessages(1, 2, []int64{1}), handles)
+	sr, h := sess.Dispatch(buildFastCopyMessages(1, 2, []int64{1}), handles)
 	p := ext.NewPull(sr, ext.FlagUTF16)
 	mustU8(t, p, "RopId")
 	mustU8(t, p, "ohindex")
 	if ec := mustU32(t, p, "ec"); ec != ecError {
 		t.Fatalf("message source ReturnValue = %#x, want ecError", ec)
 	}
+	wantNoDownload(t, sess, h[2], "CopyMessages(message)")
 }
 
 // buildFastCopyFolder frames a RopFastTransferSourceCopyFolder request: the source
@@ -298,12 +300,22 @@ func TestFastTransferSourceCopyFolderRejectsMessage(t *testing.T) {
 	defer sess.Close()
 
 	handles := []uint32{logonH, msgH, 0xFFFFFFFF}
-	sr, _ := sess.Dispatch(buildFastCopyFolder(1, 2, 0), handles)
+	sr, h := sess.Dispatch(buildFastCopyFolder(1, 2, 0), handles)
 	p := ext.NewPull(sr, ext.FlagUTF16)
 	mustU8(t, p, "RopId")
 	mustU8(t, p, "ohindex")
 	if ec := mustU32(t, p, "ec"); ec != ecError {
 		t.Fatalf("message source ReturnValue = %#x, want ecError", ec)
+	}
+	wantNoDownload(t, sess, h[2], "CopyFolder(message)")
+}
+
+// wantNoDownload asserts a refused FastTransfer source left the output slot
+// without a live download object, so the client holds nothing to drain.
+func wantNoDownload(t *testing.T, sess *Session, outH uint32, what string) {
+	t.Helper()
+	if outH != 0xFFFFFFFF && sess.get(outH) != nil {
+		t.Errorf("%s: the refused source still minted download handle %#x", what, outH)
 	}
 }
 
