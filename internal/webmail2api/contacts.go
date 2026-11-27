@@ -82,7 +82,7 @@ type distListBody struct {
 // fields map to vCard properties oxvcard parses into MAPI (TEL/ADR/BDAY/TITLE/
 // ROLE/NOTE/URL), so they survive cross-protocol.
 func buildVCard(c contactJSON) []byte {
-	b := []string{"BEGIN:VCARD\r\nVERSION:4.0\r\n", "FN:" + c.Name + "\r\n"}
+	b := []string{"BEGIN:VCARD\r\nVERSION:4.0\r\n", "FN:" + vcardEscape(c.Name) + "\r\n"}
 	// N is the structured name: Family ; Given ; Middle ; Prefix ; Suffix.
 	// oxvcard imports N's five components to PrSurname/GivenName/MiddleName/
 	// DisplayNamePrefix/Generation respectively.
@@ -91,8 +91,8 @@ func buildVCard(c contactJSON) []byte {
 		b = appendVCardLine(b, line.format, line.value)
 	}
 	b = appendVCardAddresses(b, c)
-	b = appendVCardLine(b, "IMPP:%s\r\n", c.IMAddress)
-	b = appendVCardLine(b, "URL:%s\r\n", c.WebPage)
+	b = appendVCardLine(b, "IMPP:%s\r\n", vcardEscape(c.IMAddress))
+	b = appendVCardLine(b, "URL:%s\r\n", vcardEscape(c.WebPage))
 	b = append(b, "END:VCARD\r\n")
 	return []byte(strings.Join(b, ""))
 }
@@ -108,7 +108,7 @@ type vcardLine struct {
 // oxvcard reads to pick the MAPI property, so this order and these formats are
 // the wire contract.
 func vcardSingleLines(c contactJSON) []vcardLine {
-	return []vcardLine{
+	lines := []vcardLine{
 		{"EMAIL:%s\r\n", c.Email},
 		{"EMAIL:%s\r\n", c.Email2},
 		{"EMAIL:%s\r\n", c.Email3},
@@ -126,7 +126,23 @@ func vcardSingleLines(c contactJSON) []vcardLine {
 		// vCard BDAY is YYYY-MM-DD; oxvcard's parseBirthday accepts it.
 		{"BDAY:%s\r\n", c.Birthday},
 	}
+	for i := range lines {
+		// ORG's components are escaped one by one in vcardGroupValue.
+		if !strings.HasPrefix(lines[i].format, "ORG:") {
+			lines[i].value = vcardEscape(lines[i].value)
+		}
+	}
+	return lines
 }
+
+// vcardEscape escapes a text value per RFC 6350 section 3.4: backslash, comma,
+// semicolon and line breaks, so a value can neither start a line of its own nor
+// move the components of a structured value.
+func vcardEscape(s string) string {
+	return vcardEscaper.Replace(s)
+}
+
+var vcardEscaper = strings.NewReplacer(`\`, `\\`, ",", `\,`, ";", `\;`, "\r\n", `\n`, "\n", `\n`, "\r", `\n`)
 
 // appendVCardAddresses appends the three ADR groups. ADR is semicolon-delimited:
 // pobox ; ext ; street ; city ; state ; postal ; country, and the two leading
@@ -159,7 +175,7 @@ func appendVCardGroup(b []string, format string, parts ...string) []string {
 	}
 	args := make([]any, len(parts))
 	for i, p := range parts {
-		args[i] = p
+		args[i] = vcardEscape(p)
 	}
 	return append(b, fmt.Sprintf(format, args...))
 }
@@ -171,7 +187,11 @@ func vcardGroupValue(parts ...string) string {
 	if !anyNonEmpty(parts) {
 		return ""
 	}
-	return strings.Join(parts, ";")
+	escaped := make([]string, len(parts))
+	for i, p := range parts {
+		escaped[i] = vcardEscape(p)
+	}
+	return strings.Join(escaped, ";")
 }
 
 // anyNonEmpty reports whether at least one component carries a value.
