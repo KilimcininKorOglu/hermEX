@@ -32,7 +32,7 @@ func commandStatusOnDevice(t *testing.T, ts *httptest.Server, device, cmd string
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	mustNoErr(t, "close the reply", resp.Body.Close())
 	return resp.StatusCode
 }
 
@@ -42,7 +42,7 @@ func setOverride(t *testing.T, dir string, p easpolicy.Policy) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if err := st.SetSyncPolicy(p); err != nil {
 		t.Fatal(err)
 	}
