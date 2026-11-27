@@ -200,13 +200,17 @@ func (s *Server) handleDismissReminder(w http.ResponseWriter, r *http.Request) {
 	}, false)
 }
 
+const maxSnoozeMinutes = 365 * 24 * 60
+
 // handleSnoozeReminder postpones a reminder by the requested minutes: PidLidReminderTime
 // advances to now+minutes while PidLidReminderSet stays true.
 func (s *Server) handleSnoozeReminder(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Minutes int `json:"minutes"`
 	}
-	if err := decodeJSON(r, &req); err != nil || req.Minutes <= 0 {
+	// A year bounds the snooze: minutes beyond it overflow time.Duration and
+	// wrap the reminder into the past.
+	if err := decodeJSON(r, &req); err != nil || req.Minutes <= 0 || req.Minutes > maxSnoozeMinutes {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "minutes required"})
 		return
 	}
