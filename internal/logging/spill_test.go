@@ -1,7 +1,9 @@
 package logging
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -162,5 +164,77 @@ func TestConnectFailureSpillsThenRecovers(t *testing.T) {
 	}
 	if spillFileHasData(spillPath) {
 		t.Error("spill not drained after the store recovered")
+	}
+}
+
+// TestSpillReplayHandlesCorruptAndTruncatedLine writes two valid spill lines
+// followed by a truncated JSON record (as left by a crash mid-write) and verifies
+// the two valid events are replayed without loss while the corrupt tail is ignored.
+func TestSpillReplayHandlesCorruptAndTruncatedLine(t *testing.T) {
+	spillPath := filepath.Join(t.TempDir(), "spill.jsonl")
+	line1, err := json.Marshal(toDoc(Event{Time: time.Now().UTC(), Level: LevelInfo, Subsystem: IMAP, Name: "ok.1"}))
+	mustNoErr(t, err, "marshal line 1")
+	line2, err := json.Marshal(toDoc(Event{Time: time.Now().UTC(), Level: LevelInfo, Subsystem: IMAP, Name: "ok.2"}))
+	mustNoErr(t, err, "marshal line 2")
+
+	content := append(append(line1, '\n'), line2...)
+	content = append(content, '\n')
+	content = append(content, `{"ts":"2026-01-01T00:00:00Z","event":"truncated`...)
+	mustNoErr(t, os.WriteFile(spillPath, content, 0o600), "write spill with corrupt tail")
+
+	var got fakeInserter
+	s := newAsyncSink(readyConn(&got), spillPath)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	mustNoErr(t, s.Close(ctx), "Close")
+
+	if _, total := got.totals(); total != 2 {
+		t.Fatalf("replayed %d docs, want 2 valid events", total)
+	}
+	wantEq(t, got.docs[0].(mongoDoc).Name, "ok.1", "first replayed event")
+	wantEq(t, got.docs[1].(mongoDoc).Name, "ok.2", "second replayed event")
+	if spillFileHasData(spillPath) {
+		t.Error("spill file was not removed after replaying valid records")
+	}
+}
+
+// TestSpillToUnwritablePathKeepsStateUnchanged proves spilling to a path whose
+// parent is a regular file does not set hasSpill and leaves the blocking file
+// unmodified.
+func TestSpillToUnwritablePathKeepsStateUnchanged(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	mustNoErr(t, os.WriteFile(blocker, []byte("keep"), 0o600), "write blocker")
+
+	s := &MongoSink{spillPath: filepath.Join(blocker, "spill.jsonl")}
+	s.spill([]Event{{Subsystem: IMAP, Name: "blocked"}})
+
+	if s.hasSpill.Load() {
+		t.Error("hasSpill became true even though opening the spill file failed")
+	}
+	raw, err := os.ReadFile(blocker)
+	mustNoErr(t, err, "read blocker")
+	wantEq(t, string(raw), "keep", "blocker file content")
+}
+
+// TestSpillNeverWritesRawPasswordToDisk verifies sensitive fields are redacted
+// before reaching the spill file while the store is down.
+func TestSpillNeverWritesRawPasswordToDisk(t *testing.T) {
+	spillPath := filepath.Join(t.TempDir(), "spill.jsonl")
+	down := inserterFunc(func(context.Context, []any) error { return errors.New("mongo down") })
+	s := newAsyncSink(readyConn(down), spillPath)
+	log := New(s)
+	log.Info(Auth, "login", Fields{"password": "spill-secret-pw", "cookie": "sess=xyz"})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	mustNoErr(t, s.Close(ctx), "Close")
+
+	raw, err := os.ReadFile(spillPath)
+	mustNoErr(t, err, "read spill file")
+	if bytes.Contains(raw, []byte("spill-secret-pw")) || bytes.Contains(raw, []byte("sess=xyz")) {
+		t.Errorf("sensitive value leaked into spill file: %s", raw)
+	}
+	if !bytes.Contains(raw, []byte("[redacted]")) {
+		t.Errorf("spill file missing [redacted] marker: %s", raw)
 	}
 }
