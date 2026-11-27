@@ -16,7 +16,10 @@ func TestStripOwnAuthResultsRemovesOnlyOurs(t *testing.T) {
 		"Authentication-Results: relay.other.example; spf=fail\r\n" +
 		"Subject: hi\r\n\r\nAuthentication-Results: mx.hermex.test; body text\r\n"
 	got := string(StripOwnAuthResults([]byte(raw), "mx.hermex.test"))
-	head, body, _ := strings.Cut(got, "\r\n\r\n")
+	head, body, found := strings.Cut(got, "\r\n\r\n")
+	if !found {
+		t.Fatalf("stripped message missing header/body separator: %q", got)
+	}
 	if strings.Contains(strings.ToLower(head), "mx.hermex.test") || strings.Contains(head, "spf=pass") {
 		t.Errorf("a forged field under our authserv-id survived:\n%s", head)
 	}
@@ -55,4 +58,19 @@ func TestAuthResultsFieldReportsTheChecks(t *testing.T) {
 	if !strings.Contains(none, "dkim=fail") {
 		t.Errorf("an unverified message did not report dkim=fail: %s", none)
 	}
+}
+
+// TestStripOwnAuthResultsHostileShapes checks space-before-colon, bare LF,
+// prefix-similar foreign authserv-ids, and input slice immutability (RFC 8601 5).
+func TestStripOwnAuthResultsHostileShapes(t *testing.T) {
+	raw := []byte("Authentication-Results : mx.hermex.test; spf=pass\n" +
+		"Authentication-Results: mx.hermex.test.evil.example; spf=pass\n" +
+		"Subject: hi\n\nbody\n")
+	orig := append([]byte(nil), raw...)
+	got := string(StripOwnAuthResults(raw, "mx.hermex.test"))
+	if string(raw) != string(orig) {
+		t.Errorf("StripOwnAuthResults mutated input slice")
+	}
+	want := "Authentication-Results: mx.hermex.test.evil.example; spf=pass\nSubject: hi\n\nbody\n"
+	wantEq(t, got, want, "stripped hostile Authentication-Results")
 }
