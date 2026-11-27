@@ -47,7 +47,7 @@ func TestProvisionServesMergedPolicy(t *testing.T) {
 	if err := st.SetSyncPolicy(easpolicy.Policy{"MinDevicePasswordLength": 8, "AllowCamera": 0}); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 
 	accs := policyAccounts{
 		StaticAccounts: directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}},
@@ -173,7 +173,7 @@ func TestProvisionServesDomainLayer(t *testing.T) {
 	if err := st.SetSyncPolicy(easpolicy.Policy{"AllowCamera": 1, "AllowHTMLEmail": 1}); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 
 	accs := policyAccounts{
 		StaticAccounts: directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}},
