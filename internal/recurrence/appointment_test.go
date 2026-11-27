@@ -3,6 +3,7 @@ package recurrence
 import (
 	"encoding/hex"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -91,10 +92,13 @@ func TestDecodeAppointmentReadsAPlainPattern(t *testing.T) {
 
 // TestDecodeAppointmentRefusesACutBlob holds every truncation of the example to an
 // error or a clean decode, never a panic, and refuses a cut inside the exceptions.
+// A refused cut returns no pattern, so nothing half-read reaches an export.
 func TestDecodeAppointmentRefusesACutBlob(t *testing.T) {
 	full := specBlob(t)
 	for n := range full {
-		_, _ = DecodeAppointment(full[:n]) // the property under test is that no length panics
+		if p, err := DecodeAppointment(full[:n]); err != nil && !reflect.DeepEqual(p, AppointmentPattern{}) {
+			t.Errorf("a blob cut to %d bytes was refused (%v) but still returned %+v", n, err, p)
+		}
 	}
 	if _, err := DecodeAppointment(full[:len(full)-30]); !errors.Is(err, errTruncated) {
 		t.Errorf("cut inside the extended exceptions: err = %v, want errTruncated", err)
@@ -126,8 +130,8 @@ func TestRRuleUntilEndsAtTheLastStart(t *testing.T) {
 	if !ok || rule != "FREQ=DAILY;INTERVAL=1;UNTIL=20260610T070000Z" {
 		t.Errorf("rule = %q %v", rule, ok)
 	}
-	if plain, _ := p.RRuleUntil(time.Time{}); plain != "FREQ=DAILY;INTERVAL=1;UNTIL=20260610T000000Z" {
-		t.Errorf("zero until changed the rule: %q", plain)
+	if plain, ok := p.RRuleUntil(time.Time{}); !ok || plain != "FREQ=DAILY;INTERVAL=1;UNTIL=20260610T000000Z" {
+		t.Errorf("zero until changed the rule: %q %v", plain, ok)
 	}
 }
 
