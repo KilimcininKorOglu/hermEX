@@ -78,7 +78,9 @@ func (a *Aggregate) XML() ([]byte, error) {
 		out.Records = append(out.Records, recordOut(r))
 	}
 	var buf bytes.Buffer
-	buf.WriteString(xml.Header)
+	if _, err := buf.WriteString(xml.Header); err != nil {
+		return nil, err
+	}
 	enc := xml.NewEncoder(&buf)
 	enc.Indent("", "  ")
 	if err := enc.Encode(out); err != nil {
@@ -87,7 +89,9 @@ func (a *Aggregate) XML() ([]byte, error) {
 	if err := enc.Close(); err != nil {
 		return nil, err
 	}
-	buf.WriteByte('\n')
+	if err := buf.WriteByte('\n'); err != nil {
+		return nil, err
+	}
 	return buf.Bytes(), nil
 }
 
