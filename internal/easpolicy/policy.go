@@ -7,7 +7,6 @@ package easpolicy
 
 import (
 	"fmt"
-	"hash/fnv"
 	"maps"
 	"math"
 	"slices"
@@ -189,16 +188,30 @@ func Key(p Policy) string {
 	if len(p) == 0 {
 		return "1"
 	}
-	h := fnv.New32a()
+	var buf []byte
 	for _, f := range Fields {
 		if v, ok := p[f.Name]; ok {
-			// Writing to a hash.Hash never returns an error (hash.Hash contract).
-			_, _ = fmt.Fprintf(h, "%s=%d;", f.Name, v)
+			buf = append(buf, f.Name...)
+			buf = append(buf, '=')
+			buf = strconv.AppendInt(buf, int64(v), 10)
+			buf = append(buf, ';')
 		}
 	}
-	sum := h.Sum32()
+	sum := fnv1a32(buf)
 	if sum <= 1 {
 		sum += 2
 	}
 	return strconv.FormatUint(uint64(sum), 10)
+}
+
+// fnv1a32 is 32-bit FNV-1a over b, the same function hash/fnv's New32a computes,
+// written out so the key has no write call whose error would have to be discarded.
+func fnv1a32(b []byte) uint32 {
+	const offset, prime = 2166136261, 16777619
+	h := uint32(offset)
+	for _, c := range b {
+		h ^= uint32(c)
+		h *= prime
+	}
+	return h
 }

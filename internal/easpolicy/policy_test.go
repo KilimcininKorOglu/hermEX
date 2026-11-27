@@ -1,6 +1,35 @@
 package easpolicy
 
-import "testing"
+import (
+	"hash/fnv"
+	"strconv"
+	"testing"
+)
+
+// TestKeyIsStandardFNV1a pins the token to 32-bit FNV-1a over the canonical
+// "name=value;" text, the function every issued key was computed with. Devices
+// hold those keys, so a different hash would mark every provisioned device stale
+// on upgrade. The expected value comes from the standard library's FNV-1a.
+func TestKeyIsStandardFNV1a(t *testing.T) {
+	p := Policy{"DevicePasswordEnabled": 1, "MinDevicePasswordLength": 6}
+	text := ""
+	for _, f := range Fields {
+		if v, ok := p[f.Name]; ok {
+			text += f.Name + "=" + strconv.Itoa(int(v)) + ";"
+		}
+	}
+	h := fnv.New32a()
+	if _, err := h.Write([]byte(text)); err != nil {
+		t.Fatal(err)
+	}
+	want := h.Sum32()
+	if want <= 1 {
+		want += 2
+	}
+	if got := Key(p); got != strconv.FormatUint(uint64(want), 10) {
+		t.Errorf("Key = %s, want the FNV-1a token %d of %q", got, want, text)
+	}
+}
 
 // TestKey proves the policy-generation token behaves as the staleness detector requires:
 // an empty policy is the reserved baseline "1" (so an unconfigured server never forces
