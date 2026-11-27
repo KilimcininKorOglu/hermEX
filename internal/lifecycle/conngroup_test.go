@@ -26,8 +26,7 @@ func TestConnGroupDrainsInFlight(t *testing.T) {
 	handle := func(nc net.Conn) {
 		entered <- struct{}{}
 		<-release
-		_, _ = nc.Write([]byte("drained"))
-		_ = nc.Close()
+		writeAndClose(t, nc, "drained")
 	}
 
 	var g lifecycle.ConnGroup
@@ -39,7 +38,7 @@ func TestConnGroupDrainsInFlight(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer conn.Close()
+	defer closeOrFail(t, conn)
 	<-entered // the handler is now in-flight
 
 	shutDone := make(chan error, 1)
@@ -65,7 +64,7 @@ func TestConnGroupDrainsInFlight(t *testing.T) {
 		t.Errorf("Start = %v, want nil after a graceful stop", err)
 	}
 	if c, err := net.Dial("tcp", ln.Addr().String()); err == nil {
-		_ = c.Close()
+		closeOrFail(t, c)
 		t.Error("listener still accepting connections after Shutdown")
 	}
 }
@@ -80,23 +79,29 @@ func TestConnGroupShutdownTimeout(t *testing.T) {
 	}
 	entered := make(chan struct{}, 1)
 	stuck := make(chan struct{})
-	defer close(stuck) // release the stuck handler when the test ends
 
 	var g lifecycle.ConnGroup
 	g.AddListener(ln)
+	startDone := make(chan error, 1)
 	go func() {
-		_ = g.Start(func(nc net.Conn) {
+		startDone <- g.Start(func(nc net.Conn) {
 			entered <- struct{}{}
 			<-stuck
-			_ = nc.Close()
+			closeOrFail(t, nc)
 		})
 	}()
+	t.Cleanup(func() {
+		if err := <-startDone; err != nil {
+			t.Errorf("Start = %v, want nil after Shutdown", err)
+		}
+	})
+	t.Cleanup(func() { close(stuck) })
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer closeOrFail(t, conn)
 	<-entered
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -108,5 +113,71 @@ func TestConnGroupShutdownTimeout(t *testing.T) {
 	}
 	if d := time.Since(start); d > 2*time.Second {
 		t.Errorf("Shutdown blocked %v, far past its 50ms deadline", d)
+	}
+	if c, err := net.Dial("tcp", ln.Addr().String()); err == nil {
+		closeOrFail(t, c)
+		t.Error("listener still accepting connections after Shutdown timed out")
+	}
+}
+
+// TestConnGroupShutdownCanceledContext proves Shutdown with an already-cancelled
+// context returns context.Canceled immediately while still closing the listener.
+func TestConnGroupShutdownCanceledContext(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{}, 1)
+	stuck := make(chan struct{})
+
+	var g lifecycle.ConnGroup
+	g.AddListener(ln)
+	startDone := make(chan error, 1)
+	go func() {
+		startDone <- g.Start(func(nc net.Conn) {
+			entered <- struct{}{}
+			<-stuck
+			closeOrFail(t, nc)
+		})
+	}()
+	t.Cleanup(func() {
+		if err := <-startDone; err != nil {
+			t.Errorf("Start = %v, want nil after Shutdown", err)
+		}
+	})
+	t.Cleanup(func() { close(stuck) })
+
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeOrFail(t, conn)
+	<-entered
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := g.Shutdown(ctx); !errors.Is(err, context.Canceled) {
+		t.Errorf("Shutdown = %v, want context.Canceled", err)
+	}
+	if c, err := net.Dial("tcp", ln.Addr().String()); err == nil {
+		closeOrFail(t, c)
+		t.Error("listener still accepting connections after Shutdown with canceled context")
+	}
+}
+
+// TestConnGroupStartReturnsAcceptError proves Start surfaces an unexpected
+// listener accept error when Shutdown was not requested.
+func TestConnGroupStartReturnsAcceptError(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ln.Close(); err != nil {
+		t.Fatalf("close listener: %v", err)
+	}
+	var g lifecycle.ConnGroup
+	g.AddListener(ln)
+	if err := g.Start(func(net.Conn) {}); err == nil {
+		t.Error("Start = nil on a closed listener without Shutdown, want an accept error")
 	}
 }
