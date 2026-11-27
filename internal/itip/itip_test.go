@@ -22,7 +22,10 @@ func TestMessageCarriesTheSchedulingPart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	head, body, _ := strings.Cut(string(raw), "\r\n\r\n")
+	head, body, found := strings.Cut(string(raw), "\r\n\r\n")
+	if !found {
+		t.Fatalf("the message has no blank line between header and body:\n%s", raw)
+	}
 	for _, want := range []string{"From: <alice@hermex.test>", "Date: ", "Message-ID: <", "bob@hermex.test", "carol@hermex.test", "Subject: Canceled: Sync"} {
 		if !strings.Contains(head, want) {
 			t.Errorf("header lacks %q:\n%s", want, head)
@@ -70,8 +73,11 @@ func TestOnBehalfMessageNamesBothIdentities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	head := string(raw[:bytes.Index(raw, []byte("\r\n\r\n"))])
-	if !strings.Contains(head, "From: <erin@hermex.test>") || !strings.Contains(head, "Sender: <alice@hermex.test>") {
+	head, _, found := bytes.Cut(raw, []byte("\r\n\r\n"))
+	if !found {
+		t.Fatalf("the message has no blank line between header and body:\n%s", raw)
+	}
+	if !bytes.Contains(head, []byte("From: <erin@hermex.test>")) || !bytes.Contains(head, []byte("Sender: <alice@hermex.test>")) {
 		t.Errorf("headers do not name both identities:\n%s", head)
 	}
 }
