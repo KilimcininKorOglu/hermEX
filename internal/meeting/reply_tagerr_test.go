@@ -38,3 +38,21 @@ func TestProcessReplyReportsATagResolutionFailure(t *testing.T) {
 		t.Fatalf("ProcessReply = %v, %v; want handled with the tag error", handled, err)
 	}
 }
+
+// TestDeliveryPassesReportAFailedRead proves a store read that fails while a
+// delivered REPLY or CANCEL is read is reported, not taken for "no calendar part":
+// the delivery pass logs only a returned error, so reading the failure as an
+// ordinary mail loses the tracking or cancellation with nothing in the log.
+func TestDeliveryPassesReportAFailedRead(t *testing.T) {
+	st, err := objectstore.Open(t.TempDir())
+	mustNoErr(t, err, "Open")
+	msgID := deliverReply(t, st, "meeting-read", "bob@hermex.test", "ACCEPTED")
+	mustClose(t, st, "the store")
+
+	if _, err := ProcessReply(st, nil, "bob@hermex.test", msgID); err == nil {
+		t.Error("ProcessReply on an unreadable store reported no error")
+	}
+	if _, err := ProcessCancellation(st, "bob@hermex.test", msgID); err == nil {
+		t.Error("ProcessCancellation on an unreadable store reported no error")
+	}
+}

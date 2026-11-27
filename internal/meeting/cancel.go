@@ -1,6 +1,7 @@
 package meeting
 
 import (
+	"errors"
 	"math"
 	"strings"
 	"time"
@@ -97,14 +98,23 @@ func readCancellation(st *objectstore.Store, sender string, messageID int64) (*c
 // mailbox that processes cancellations, with its iCalendar body.
 func pendingCancellation(st *objectstore.Store, messageID int64) (mapi.PropertyValues, []byte, bool, error) {
 	msg, err := st.OpenMessage(messageID)
-	if err != nil || propStr(msg.Props, mapi.PrMessageClass) != cancelClass || boolVal(msg.Props, mapi.PrProcessed) {
+	if errors.Is(err, objectstore.ErrNotFound) {
+		return nil, nil, false, nil
+	}
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if propStr(msg.Props, mapi.PrMessageClass) != cancelClass || boolVal(msg.Props, mapi.PrProcessed) {
 		return nil, nil, false, nil
 	}
 	cfg, err := st.GetMeetingConfig()
 	if err != nil || cfg.LeaveCancellationsUnprocessed {
 		return nil, nil, false, err
 	}
-	ics, ok := inboxCalendarPart(st, messageID)
+	ics, ok, err := inboxCalendarPart(st, messageID)
+	if err != nil {
+		return nil, nil, false, err
+	}
 	if !ok || !strings.EqualFold(strings.TrimSpace(icalLine(ics, "METHOD")), "CANCEL") {
 		return nil, nil, false, nil
 	}

@@ -1,6 +1,7 @@
 package meeting
 
 import (
+	"errors"
 	"strings"
 
 	"hermex/internal/directory"
@@ -35,9 +36,9 @@ import (
 // unauthorized REPLY is left as an ordinary email the organizer can read, not a
 // delivery failure.
 func ProcessReply(st *objectstore.Store, accounts directory.Accounts, sender string, messageID int64) (bool, error) {
-	ics, ok := inboxCalendarPart(st, messageID)
-	if !ok {
-		return false, nil
+	ics, ok, err := inboxCalendarPart(st, messageID)
+	if err != nil || !ok {
+		return false, err
 	}
 	fallback, ok := responseMethods[strings.ToUpper(strings.TrimSpace(icalLine(ics, "METHOD")))]
 	if !ok {
@@ -94,21 +95,26 @@ var responseMethods = map[string]int32{
 }
 
 // inboxCalendarPart reads the delivered message and returns its calendar body.
-func inboxCalendarPart(st *objectstore.Store, messageID int64) ([]byte, bool) {
+func inboxCalendarPart(st *objectstore.Store, messageID int64) ([]byte, bool, error) {
 	// The delivery pass hands an object-store message id; the raw read is keyed by
 	// IMAP UID, and the two diverge as soon as a mailbox holds any non-mail object
 	// (a calendar item consumes an id but no UID). Resolving one to the other is
 	// what makes tracking work in a mailbox that has ever held an appointment.
+	// A message that is not in the Inbox is no calendar message; a failed read is
+	// an error, because treating it as "no calendar part" loses the update silently.
 	uidOf, ok, err := st.MessageUIDByID(int64(mapi.PrivateFIDInbox), messageID)
 	if err != nil || !ok {
-		return nil, false
+		return nil, false, err
 	}
 	raw, err := st.GetMessageRaw(int64(mapi.PrivateFIDInbox), uidOf)
+	if errors.Is(err, objectstore.ErrNotFound) {
+		return nil, false, nil
+	}
 	if err != nil {
-		return nil, false
+		return nil, false, err
 	}
 	ics := findCalendarPart(mime.ParseStructure(raw))
-	return ics, ics != nil
+	return ics, ics != nil, nil
 }
 
 // authorizedReply reads the REPLY's UID, attendee and response status. It reports ok

@@ -132,7 +132,7 @@ func TestAutomaticResponseNamesTheResponder(t *testing.T) {
 			t.Errorf("response property %#x = %q, want %q", uint32(tag), got, want)
 		}
 	}
-	ics, _ := inboxCalendarPart(organizer, msgs[0].ID)
+	ics := mustCalendarPart(t, organizer, msgs[0].ID)
 	if a := parseAttendee(ics); icalLine(ics, "METHOD") != "REPLY" || a.addr != "room@hermex.test" || a.partstat != "ACCEPTED" {
 		t.Errorf("response calendar answers for %q with %q, want a REPLY from room@hermex.test with ACCEPTED:\n%s", a.addr, a.partstat, ics)
 	}

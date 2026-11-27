@@ -35,6 +35,18 @@ func mustClose(t *testing.T, c interface{ Close() error }, what string) {
 	}
 }
 
+// mustCalendarPart reads the calendar body of an Inbox message and stops the test
+// when the read fails or the message carries none.
+func mustCalendarPart(t *testing.T, st *objectstore.Store, messageID int64) []byte {
+	t.Helper()
+	ics, ok, err := inboxCalendarPart(st, messageID)
+	mustNoErr(t, err, "read the calendar part")
+	if !ok {
+		t.Fatalf("message %d carries no calendar part", messageID)
+	}
+	return ics
+}
+
 // processReply runs ProcessReply and fails the test on an error, so a refused
 // reply is told apart from a failed tracking write: a refusal answers (false, nil).
 func processReply(t *testing.T, st *objectstore.Store, sender string, messageID int64) bool {

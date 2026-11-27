@@ -12,9 +12,15 @@ import (
 )
 
 // describe reads the view of an Inbox message, with the calendar part it carries.
+// A message created as an object rather than delivered as mail has no part, and
+// Describe then reads its stored properties alone; a failed read stops the test.
 func describe(t *testing.T, st *objectstore.Store, id int64) View {
 	t.Helper()
-	ics, _ := inboxCalendarPart(st, id)
+	ics, delivered, err := inboxCalendarPart(st, id)
+	mustNoErr(t, err, "read the calendar part")
+	if !delivered {
+		ics = nil
+	}
 	v, ok, err := Describe(st, id, ics)
 	if err != nil || !ok {
 		t.Fatalf("Describe = ok %v, err %v; want a meeting message", ok, err)
@@ -39,7 +45,7 @@ func requestInInbox(t *testing.T, uid string) (*objectstore.Store, int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { mustClose(t, st, "the store") })
 	tags, err := ResolveTags(st)
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +131,7 @@ func TestCanceledMeetingIsRemoved(t *testing.T) {
 	deliverScheduling(t, accounts, "organizer@hermex.test", "REQUEST", singleEvent("0"))
 	deliverScheduling(t, accounts, "organizer@hermex.test", "CANCEL", singleEvent("1")+"STATUS:CANCELLED\r\n")
 	id := lastInboxID(t, st)
-	ics, _ := inboxCalendarPart(st, id)
+	ics := mustCalendarPart(t, st, id)
 
 	if v := describe(t, st, id); v.Kind != KindCancellation || !v.Removable {
 		t.Fatalf("the cancellation = %+v, want its meeting removable", v)
@@ -156,7 +162,7 @@ func TestForgedCancellationRemovesNothing(t *testing.T) {
 	deliverScheduling(t, accounts, "organizer@hermex.test", "REQUEST", singleEvent("0"))
 	deliverScheduling(t, accounts, "mallory@evil.example", "CANCEL", singleEvent("1"))
 	id := lastInboxID(t, st)
-	ics, _ := inboxCalendarPart(st, id)
+	ics := mustCalendarPart(t, st, id)
 
 	if v := describe(t, st, id); v.Removable {
 		t.Error("a forged cancellation offers the meeting for removal")
@@ -176,7 +182,7 @@ func TestCanceledInstanceIsRemoved(t *testing.T) {
 	deliverScheduling(t, accounts, "organizer@hermex.test", "CANCEL",
 		"RECURRENCE-ID:20260621T100000Z\r\nDTSTART:20260621T100000Z\r\nDTEND:20260621T110000Z\r\nSEQUENCE:1\r\nSTATUS:CANCELLED\r\n")
 	id := lastInboxID(t, st)
-	ics, _ := inboxCalendarPart(st, id)
+	ics := mustCalendarPart(t, st, id)
 
 	if v := describe(t, st, id); !v.Removable {
 		t.Fatal("the canceled instance is not offered for removal")
@@ -184,8 +190,11 @@ func TestCanceledInstanceIsRemoved(t *testing.T) {
 	if err := RemoveCanceled(st, id, ics); err != nil {
 		t.Fatal(err)
 	}
-	v, _ := theMeeting(t, st).Get(mapi.PrIcalOriginal)
-	ical, _ := v.([]byte)
+	v, stored := theMeeting(t, st).Get(mapi.PrIcalOriginal)
+	ical, isBytes := v.([]byte)
+	if !stored || !isBytes {
+		t.Fatalf("the series holds no iCalendar body (set: %v, %T)", stored, v)
+	}
 	if !strings.Contains(string(ical), "EXDATE:20260621T100000Z") || strings.Contains(string(ical), "RECURRENCE-ID") {
 		t.Errorf("the instance is not excluded from the series:\n%s", ical)
 	}
@@ -196,9 +205,30 @@ func TestRemoveCanceledNeedsACancellation(t *testing.T) {
 	st, accounts := cancelHarness(t, objectstore.MeetingConfig{})
 	deliverScheduling(t, accounts, "organizer@hermex.test", "REQUEST", singleEvent("0"))
 	id := lastInboxID(t, st)
-	ics, _ := inboxCalendarPart(st, id)
+	ics := mustCalendarPart(t, st, id)
 	if err := RemoveCanceled(st, id, ics); !errors.Is(err, ErrNotCanceled) {
 		t.Errorf("removing through a request: err = %v, want ErrNotCanceled", err)
+	}
+	theMeeting(t, st)
+}
+
+// TestRemoveCanceledRefusesTheRequestOfACanceledMeeting removes through the request
+// of a meeting its organizer did cancel. The calendar holds the meeting as canceled,
+// so only the message class tells a request from the cancellation; a request
+// removes nothing, and the meeting stays for the user to remove through the
+// cancellation itself ([MS-OXOCAL] 3.1.4.9.2).
+func TestRemoveCanceledRefusesTheRequestOfACanceledMeeting(t *testing.T) {
+	st, accounts := cancelHarness(t, objectstore.MeetingConfig{})
+	deliverScheduling(t, accounts, "organizer@hermex.test", "REQUEST", singleEvent("0"))
+	reqID := lastInboxID(t, st)
+	reqICS := mustCalendarPart(t, st, reqID)
+	deliverScheduling(t, accounts, "organizer@hermex.test", "CANCEL", singleEvent("1")+"STATUS:CANCELLED\r\n")
+	if v := describe(t, st, lastInboxID(t, st)); !v.Removable {
+		t.Fatal("the cancellation does not mark the meeting canceled, so the case is not set up")
+	}
+
+	if err := RemoveCanceled(st, reqID, reqICS); !errors.Is(err, ErrNotCanceled) {
+		t.Errorf("removing through the request: err = %v, want ErrNotCanceled", err)
 	}
 	theMeeting(t, st)
 }

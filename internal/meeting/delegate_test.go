@@ -26,7 +26,7 @@ func bossMailbox(t *testing.T, onBehalf []string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st, "the store")
 	if err := st.SetSendOnBehalf(onBehalf); err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func bossWithRequest(t *testing.T, uid string) (*objectstore.Store, int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = boss.Close() }) // a close failure after the test ends changes no result
+	t.Cleanup(func() { mustClose(t, boss, "the principal's store") })
 	at, err := resolveApptTags(boss)
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +130,7 @@ func TestDelegateAnswerIsFromTheAttendee(t *testing.T) {
 	if got := headerAddress(t, raw, "Sender"); got != assistantAddr {
 		t.Errorf("Sender = %q, want the assistant", got)
 	}
-	ics, _ := inboxCalendarPart(organizer, answerID)
+	ics := mustCalendarPart(t, organizer, answerID)
 	want := replyAttendee{addr: bossAddr, partstat: "ACCEPTED", sentBy: assistantAddr}
 	if got := parseAttendee(ics); got != want {
 		t.Errorf("answer's attendee = %+v, want %+v\n%s", got, want, ics)
