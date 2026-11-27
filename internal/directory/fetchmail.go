@@ -3,7 +3,7 @@ package directory
 import (
 	"errors"
 	"fmt"
-	"log"
+	"hermex/internal/logging"
 	"strings"
 )
 
@@ -127,9 +127,7 @@ func (d *SQLDirectory) openFetchmailPassword(id int64, stored string) (string, e
 		return "", fmt.Errorf("fetchmail entry %d: %w", id, err)
 	}
 	if d.rewrapNeeded(u.wrapped) {
-		if err := d.rewrapFetchmailPassword(id, stored, u.plain); err != nil {
-			log.Printf("directory: could not wrap the source password of fetchmail entry %d: %v", id, err)
-		}
+		d.warn("directory.fetchmail_rewrap.fail", d.rewrapFetchmailPassword(id, stored, u.plain), logging.Fields{"fetchmail_id": id})
 	}
 	return u.plain, nil
 }

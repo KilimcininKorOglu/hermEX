@@ -261,7 +261,7 @@ func (d *SQLDirectory) verifyPassword(row loginRow, login, password string) bool
 	}
 	cfg, ok, err := d.LDAPConfigForDomain(row.domainID)
 	if err != nil {
-		log.Printf("directory: could not resolve the LDAP binding of domain %d: %v", row.domainID, err)
+		d.warn("directory.ldap_binding.fail", err, logging.Fields{"domain_id": row.domainID})
 		return false
 	}
 	if !ok {
@@ -269,7 +269,7 @@ func (d *SQLDirectory) verifyPassword(row loginRow, login, password string) bool
 	}
 	verified, err := d.verifier.Verify(cfg, login, password)
 	if err != nil {
-		log.Printf("directory: LDAP password check for domain %d failed: %v", row.domainID, err)
+		d.warn("directory.ldap_verify.fail", err, logging.Fields{"domain_id": row.domainID})
 		return false
 	}
 	return verified
@@ -289,12 +289,15 @@ func (d *SQLDirectory) upgradeHash(login, stored, password string) {
 	if !needsRehash(stored) {
 		return
 	}
-	if updated, err := d.storePassword(login, password); err != nil {
-		log.Printf("directory: could not re-hash %s at the current work factor: %v", login, err)
-	} else if !updated {
-		log.Printf("directory: could not re-hash %s at the current work factor: user not updated", login)
+	updated, err := d.storePassword(login, password)
+	if err == nil && !updated {
+		err = errRehashNotStored
 	}
+	d.warn("directory.rehash.fail", err, logging.Fields{"user": login})
 }
+
+// errRehashNotStored reports a sign-in re-hash whose update matched no account.
+var errRehashNotStored = errors.New("directory: the re-hashed password matched no account")
 
 // Resolve maps a recipient address to the store path it is delivered to,
 // accepting it only when the account can receive (NORMAL or shared mailbox) and

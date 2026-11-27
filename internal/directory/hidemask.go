@@ -3,7 +3,7 @@ package directory
 import (
 	"database/sql"
 	"errors"
-	"log"
+	"hermex/internal/logging"
 )
 
 // syncHideMask recomputes one user's users.hide_mask from its PR_ATTR_HIDDEN
@@ -49,13 +49,11 @@ func syncHideMask(tx *sql.Tx, userID int64) error {
 func (d *SQLDirectory) syncHideMasks() {
 	ids, err := d.hideMaskCandidates()
 	if err != nil {
-		log.Printf("directory: could not list users to recompute address-book hide masks: %v", err)
+		d.warn("directory.hide_mask_list.fail", err, nil)
 		return
 	}
 	for _, id := range ids {
-		if err := d.syncHideMaskOf(id); err != nil {
-			log.Printf("directory: could not recompute the address-book hide mask of user %d: %v", id, err)
-		}
+		d.warn("directory.hide_mask.fail", d.syncHideMaskOf(id), logging.Fields{"user_id": id})
 	}
 }
 

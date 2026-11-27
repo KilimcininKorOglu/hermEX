@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"hermex/internal/crypt"
+	"hermex/internal/logging"
 )
 
 // TestNewHashesCarryTheCurrentWorkFactor is the defect itself. The scheme's own
@@ -159,6 +160,34 @@ func TestWrongPasswordDoesNotUpgrade(t *testing.T) {
 	if stored != weak {
 		t.Error("a failed login rewrote the stored hash")
 	}
+}
+
+// TestRehashFailureIsLogged proves a re-hash the store refuses still admits the
+// correct password, keeps the old hash, and records the failure in the central
+// log, so an account stuck below the target rounds is visible to the operator.
+func TestRehashFailureIsLogged(t *testing.T) {
+	d, db := freshDirectory(t)
+	root := t.TempDir()
+	seedDomain(t, d, root, "acme.test")
+	const user, pass = "dave@acme.test", "correct horse battery staple"
+	seedUser(t, d, root, user, pass)
+	weak, err := crypt.NewSHA512(pass, crypt.SHA512RoundsDefault)
+	mustNoErr(t, "hash with the default rounds", err)
+	execRows(t, "store the old-style hash", 1)(db.Exec(`UPDATE users SET password = ? WHERE username = ?`, weak, user))
+	sink := &captureSink{}
+	d.SetLogger(logging.New(sink))
+	installFailTrigger(t, db, "test_rehash_fail", "UPDATE", "users")
+
+	path, ok := d.Authenticate(user, pass)
+	wantEq(t, "the correct password signs in", ok, true)
+	if path == "" {
+		t.Error("the sign-in returned an empty maildir")
+	}
+	var stored string
+	mustNoErr(t, "read the stored hash", db.QueryRow(`SELECT password FROM users WHERE username = ?`, user).Scan(&stored))
+	wantEq(t, "the refused re-hash kept the old hash", stored, weak)
+	e := wantWarnEvent(t, sink, "directory.rehash.fail")
+	wantEq(t, "the failed account", e.Fields["user"], any(user))
 }
 
 // TestUpgradeIsOncePerAccount proves a logged-in account is not re-hashed on every

@@ -3,6 +3,8 @@ package directory
 import (
 	"strings"
 	"testing"
+
+	"hermex/internal/logging"
 )
 
 // TestFetchmailCRUD covers the poll-config store: an entry round-trips its fields, the
@@ -146,6 +148,30 @@ func TestFetchmailPlaintextPasswordIsRewrapped(t *testing.T) {
 	if s := storedFetchmailPassword(t, d, id); !strings.HasPrefix(s, wrapPrefix) {
 		t.Errorf("the plaintext password was not rewritten: %q", s)
 	}
+}
+
+// TestFetchmailRewrapFailureIsLogged proves a failed best-effort re-wrap still
+// serves the readable password and records the failure in the central log, so
+// the operator learns the row is still stored in plaintext.
+func TestFetchmailRewrapFailureIsLogged(t *testing.T) {
+	d := freshSQL(t)
+	root := t.TempDir()
+	seedDomain(t, d, root, "hermex.test")
+	seedUser(t, d, root, "alice@hermex.test", "password1")
+	id, err := d.CreateFetchmail(FetchmailEntry{Mailbox: "alice@hermex.test", Active: true,
+		SrcServer: "s", SrcUser: "u", SrcPassword: "legacy-secret", Protocol: "POP3"})
+	mustNoErr(t, "create a plaintext entry", err)
+	sink := &captureSink{}
+	d.SetLogger(logging.New(sink))
+	d.SetKeySecret([]byte("test-key-secret"))
+	installFailTrigger(t, d.db, "test_fetchmail_rewrap_fail", "UPDATE", "fetchmail")
+
+	list := mustListFetchmail(t, d)
+	wantEq(t, "entries listed", len(list), 1)
+	wantEq(t, "the password still served", list[0].SrcPassword, "legacy-secret")
+	wantEq(t, "the refused rewrite left the row plaintext", storedFetchmailPassword(t, d, id), "legacy-secret")
+	e := wantWarnEvent(t, sink, "directory.fetchmail_rewrap.fail")
+	wantEq(t, "the failed entry", e.Fields["fetchmail_id"], any(id))
 }
 
 // mustListFetchmail lists alice's poll configurations.

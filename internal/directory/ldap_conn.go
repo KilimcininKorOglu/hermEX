@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"hermex/internal/logging"
 	"strings"
 
 	mysqldriver "github.com/go-sql-driver/mysql"
@@ -175,9 +175,7 @@ func (d *SQLDirectory) openLDAPBindPassword(id int64, stored string) (string, er
 		return "", err
 	}
 	if d.rewrapNeeded(u.wrapped) {
-		if err := d.rewrapLDAPBindPassword(id, stored, u.plain); err != nil {
-			log.Printf("directory: could not wrap the bind password of LDAP connection %d: %v", id, err)
-		}
+		d.warn("directory.ldap_bind_rewrap.fail", d.rewrapLDAPBindPassword(id, stored, u.plain), logging.Fields{"connection_id": id})
 	}
 	return u.plain, nil
 }
@@ -205,13 +203,11 @@ func (d *SQLDirectory) wrapLDAPBindPasswords() {
 	}
 	plain, err := d.plaintextLDAPBindPasswords()
 	if err != nil {
-		log.Printf("directory: could not list LDAP bind passwords to wrap: %v", err)
+		d.warn("directory.ldap_bind_list.fail", err, nil)
 		return
 	}
 	for id, stored := range plain {
-		if err := d.rewrapLDAPBindPassword(id, stored, stored); err != nil {
-			log.Printf("directory: could not wrap the bind password of LDAP connection %d: %v", id, err)
-		}
+		d.warn("directory.ldap_bind_rewrap.fail", d.rewrapLDAPBindPassword(id, stored, stored), logging.Fields{"connection_id": id})
 	}
 }
 

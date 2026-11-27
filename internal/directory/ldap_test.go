@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 )
 
@@ -94,10 +95,15 @@ func TestLDAPLoginRefusesEmptyPasswordAndVerifierErrors(t *testing.T) {
 	if stub.gotLogin != "" {
 		t.Error("an empty password reached the verifier")
 	}
+	sink := &captureSink{}
+	d.SetLogger(logging.New(sink))
 	d.SetLDAPVerifier(&stubVerifier{result: true, err: errors.New("directory unreachable")})
 	if maildir, ok := d.Authenticate("ext@hermex.test", "pw"); ok || maildir != "" {
 		t.Errorf("a failing verifier admitted the login: %q %v", maildir, ok)
 	}
+	// The denial is recorded where the operator looks: the daemon's central log.
+	e := wantWarnEvent(t, sink, "directory.ldap_verify.fail")
+	wantEq(t, "the failed verify's domain", e.Fields["domain_id"], any(domID))
 }
 
 // mustBindDomain creates a connection and binds a domain to it.

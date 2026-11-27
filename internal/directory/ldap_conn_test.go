@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"hermex/internal/logging"
 )
 
 // storedBindPassword reads a connection's bind_password column as stored.
@@ -236,6 +238,35 @@ func TestLDAPBindPasswordWrappedAtStartup(t *testing.T) {
 	mustNoErr(t, "read the connection", err)
 	wantEq(t, "connection found", ok, true)
 	wantEq(t, "the unwrapped bind password", c.BindPassword, "plain")
+}
+
+// TestLDAPBindRewrapFailureIsLogged proves both re-wrap paths of a plaintext bind
+// password, the startup sweep and the read, record a failed write in the central
+// log and still serve the password, which stays in plaintext.
+func TestLDAPBindRewrapFailureIsLogged(t *testing.T) {
+	d, db := freshDirectory(t)
+	res, err := db.Exec(`INSERT INTO ldap_connections (name, uri, bind_password) VALUES ('legacy', 'ldaps://l.test', 'plain')`)
+	mustNoErr(t, "seed a plaintext row", err)
+	id, err := res.LastInsertId()
+	mustNoErr(t, "read the row id", err)
+	sink := &captureSink{}
+	d.SetLogger(logging.New(sink))
+	d.SetKeySecret([]byte("test-key-secret"))
+	installFailTrigger(t, db, "test_ldap_bind_rewrap_fail", "UPDATE", "ldap_connections")
+
+	mustNoErr(t, "ensure schema", d.EnsureSchema())
+	e := wantWarnEvent(t, sink, "directory.ldap_bind_rewrap.fail")
+	wantEq(t, "the startup sweep's connection", e.Fields["connection_id"], any(id))
+
+	read := &captureSink{}
+	d.SetLogger(logging.New(read))
+	c, ok, err := d.GetLDAPConnection(id)
+	mustNoErr(t, "read the connection", err)
+	wantEq(t, "connection found", ok, true)
+	wantEq(t, "the bind password still served", c.BindPassword, "plain")
+	wantEq(t, "the refused rewrite left the row plaintext", storedBindPassword(t, db, id), "plain")
+	e = wantWarnEvent(t, read, "directory.ldap_bind_rewrap.fail")
+	wantEq(t, "the read path's connection", e.Fields["connection_id"], any(id))
 }
 
 // TestLDAPPresets proves every listed preset resolves and an unknown one does not.

@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"strconv"
 	"testing"
+
+	"hermex/internal/logging"
 )
 
 // storedHideMask reads the numeric copy of a user's hide mask.
@@ -156,6 +158,20 @@ func TestEnsureSchemaHealsAStaleHideMask(t *testing.T) {
 	res, err = db.Exec(`UPDATE users SET hide_mask = 8 WHERE username = ?`, shown)
 	mustNoErr(t, "leave a stale column", err)
 	wantAffected(t, "users left with a stale column", res)
+
+	// A refused column write is recorded and leaves the column as it was.
+	sink := &captureSink{}
+	d.SetLogger(logging.New(sink))
+	installFailTrigger(t, db, "test_hide_mask_fail", "UPDATE", "users")
+	mustNoErr(t, "ensure schema with the column write refused", d.EnsureSchema())
+	e := wantWarnEvent(t, sink, "directory.hide_mask.fail")
+	var shownID int64
+	mustNoErr(t, "shown's id", db.QueryRow(`SELECT id FROM users WHERE username = ?`, shown).Scan(&shownID))
+	if u := e.Fields["user_id"]; u != any(id) && u != any(shownID) {
+		t.Errorf("the hide mask failure names user %v, want %d or %d", u, id, shownID)
+	}
+	wantEq(t, "hide_mask after the refused write", storedHideMask(t, db, shown), uint32(8))
+	execRows(t, "drop the failure trigger", 0)(db.Exec("DROP TRIGGER `test_hide_mask_fail`"))
 
 	mustNoErr(t, "ensure schema", d.EnsureSchema())
 	wantEq(t, "hide_mask of the user hidden behind the directory", storedHideMask(t, db, hidden), uint32(0x01))
