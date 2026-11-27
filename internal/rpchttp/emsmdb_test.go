@@ -133,9 +133,11 @@ func TestConnectDisconnect(t *testing.T) {
 		t.Fatalf("disconnect fault = %#x", fault)
 	}
 	dp := ndr.NewPull(dout)
-	if _, err := pullCtxHandle(dp); err != nil {
+	zeroH, err := pullCtxHandle(dp)
+	if err != nil {
 		t.Fatal(err)
 	}
+	wantEq(t, zeroH, ContextHandle{}, "disconnect returns zeroed handle")
 	if dres := mustU32(t, dp, "disconnect result"); dres != ecSuccess {
 		t.Errorf("disconnect result = %#x, want ecSuccess", dres)
 	}
@@ -177,7 +179,11 @@ func TestEndToEndConnect(t *testing.T) {
 
 	outResp, err := http.DefaultClient.Do(mustReq(t, "RPC_OUT_DATA", url, bytes.NewReader(connA1())))
 	mustNoErr(t, err, "OUT request")
-	defer outResp.Body.Close()
+	defer func() {
+		if cerr := outResp.Body.Close(); cerr != nil {
+			t.Errorf("close OUT response body: %v", cerr)
+		}
+	}()
 	_, err = readPDU(outResp.Body) // CONN/A3
 	mustNoErr(t, err, "read CONN/A3")
 
@@ -186,7 +192,9 @@ func TestEndToEndConnect(t *testing.T) {
 	go func() {
 		resp, err := http.DefaultClient.Do(mustReq(t, "RPC_IN_DATA", url, pr))
 		if resp != nil {
-			resp.Body.Close()
+			if cerr := resp.Body.Close(); cerr != nil && err == nil {
+				err = cerr
+			}
 		}
 		inDone <- err
 	}()
@@ -214,7 +222,9 @@ func TestEndToEndConnect(t *testing.T) {
 	_, stillOpen := ems.lookup("alice@hermex.test", cxh.GUID)
 	wantFalse(t, stillOpen, "the session survives an end-to-end disconnect")
 
-	_ = pw.Close()
+	if err := pw.Close(); err != nil {
+		t.Errorf("close IN pipe: %v", err)
+	}
 	if err := <-inDone; err != nil {
 		t.Errorf("RPC_IN_DATA request: %v", err)
 	}
@@ -301,4 +311,106 @@ func TestSessionTouchDefersReclaim(t *testing.T) {
 	if n := ems.Sweep(time.Now(), time.Minute); n != 0 {
 		t.Errorf("swept %d session(s) the owner just used", n)
 	}
+}
+
+// buildBadUserDNStub builds a full EcDoConnectEx stub with explicit conformant-varying
+// string header fields followed by valid trailing scalars, so only the DN guard rejects it.
+func buildBadUserDNStub(maxCount, offset, actualCount uint32, raw []byte) []byte {
+	p := ndr.NewPush()
+	p.Uint32(maxCount)
+	p.Uint32(offset)
+	p.Uint32(actualCount)
+	p.Raw(raw)
+	for range 7 { // flags, conmod, limit, cpid, lcid_string, lcid_sort, cxr_link
+		p.Uint32(0)
+	}
+	for range 4 { // cnvt_cps + client_vers[3]
+		p.Uint16(0)
+	}
+	for range 4 { // timestamp, AUX-in max_count, cb_auxin, cb_auxout
+		p.Uint32(0)
+	}
+	return p.Bytes()
+}
+
+// TestConnectExRejectsHostileStubs proves EcDoConnectEx faults with FaultNdr on
+// truncated, non-zero-offset, inconsistent-length, and oversized DN stubs without
+// recording any session.
+func TestConnectExRejectsHostileStubs(t *testing.T) {
+	ems := NewEMSMDB(nil)
+	sess := &Session{User: "alice@hermex.test", Mailbox: provisionedDir(t)}
+	cases := map[string][]byte{
+		"truncated":      nil,
+		"nonzero-offset": buildBadUserDNStub(4, 1, 2, []byte("ab")),
+		"len-gt-size":    buildBadUserDNStub(2, 0, 4, []byte("abcd")),
+		"oversized-dn":   buildBadUserDNStub(1025, 0, 1025, make([]byte, 1025)),
+	}
+	for name, stub := range cases {
+		if _, fault := ems.Handle(sess, opEcDoConnectEx, stub); fault != ndr.FaultNdr {
+			t.Errorf("%s connect fault = %#x, want FaultNdr", name, fault)
+		}
+	}
+	ems.mu.Lock()
+	count := len(ems.sessions)
+	ems.mu.Unlock()
+	wantEq(t, count, 0, "sessions recorded after hostile connect stubs")
+}
+
+// TestDisconnectRejectsHostileStubs proves EcDoDisconnect refuses truncated stubs
+// and unknown handles without removing an unrelated live session.
+func TestDisconnectRejectsHostileStubs(t *testing.T) {
+	ems := NewEMSMDB(nil)
+	const user = "alice@hermex.test"
+	cxh := connectAt(t, ems, user, provisionedDir(t))
+
+	if _, fault := ems.Handle(&Session{User: user}, opEcDoDisconnect, make([]byte, 8)); fault != ndr.FaultNdr {
+		t.Errorf("truncated disconnect fault = %#x, want FaultNdr", fault)
+	}
+	bogus := ndr.NewPush()
+	pushCtxHandle(bogus, ContextHandle{GUID: mapi.GUID{Data1: 0xDEAD}})
+	if _, fault := ems.Handle(&Session{User: user}, opEcDoDisconnect, bogus.Bytes()); fault != ndr.FaultContextMismatch {
+		t.Errorf("unknown-handle disconnect fault = %#x, want FaultContextMismatch", fault)
+	}
+	_, stillLive := ems.lookup(user, cxh.GUID)
+	wantTrue(t, stillLive, "live session survives hostile disconnects")
+}
+
+// buildRpcExt2CustomStub builds an EcDoRpcExt2 stub with explicit cbIn and cbOut.
+func buildRpcExt2CustomStub(cxh ContextHandle, pin []byte, cbIn, cbOut uint32) []byte {
+	p := ndr.NewPush()
+	pushCtxHandle(p, cxh)
+	p.Uint32(0)                // flags
+	p.Uint32(uint32(len(pin))) // pin max_count
+	p.Raw(pin)
+	p.Uint32(cbIn)  // cb_in
+	p.Uint32(cbOut) // cb_out
+	p.Uint32(0)     // AUX-in max_count
+	return p.Bytes()
+}
+
+// TestRpcExt2RejectsHostileStubs proves EcDoRpcExt2 refuses truncated stubs,
+// mismatched cb_in, malformed ROP buffers, and undersized cb_out without dropping
+// the session.
+func TestRpcExt2RejectsHostileStubs(t *testing.T) {
+	ems := NewEMSMDB(nil)
+	const user = "alice@hermex.test"
+	cxh := connectAt(t, ems, user, provisionedDir(t))
+	sess := &Session{User: user}
+
+	if _, fault := ems.Handle(sess, opEcDoRpcExt2, make([]byte, 8)); fault != ndr.FaultNdr {
+		t.Errorf("truncated rpcExt2 fault = %#x, want FaultNdr", fault)
+	}
+	if _, fault := ems.Handle(sess, opEcDoRpcExt2, buildRpcExt2CustomStub(cxh, []byte{1, 2}, 99, 0x4000)); fault != ndr.FaultNdr {
+		t.Errorf("cb_in mismatch fault = %#x, want FaultNdr", fault)
+	}
+	if _, fault := ems.Handle(sess, opEcDoRpcExt2, buildRpcExt2CustomStub(cxh, []byte{0xFF}, 1, 0x4000)); fault != ndr.FaultNdr {
+		t.Errorf("malformed ROP envelope fault = %#x, want FaultNdr", fault)
+	}
+	out, fault := ems.Handle(sess, opEcDoRpcExt2, buildRpcExt2CustomStub(cxh, logonExecuteBuffer(), uint32(len(logonExecuteBuffer())), 4))
+	wantEq(t, fault, uint32(0), "small cb_out fault")
+	_, pout, res := parseRpcExt2Out(t, out)
+	wantEq(t, res, ecResponseTooBig, "small cb_out result")
+	wantEq(t, len(pout), 0, "small cb_out payload length")
+	_, stillLive := ems.lookup(user, cxh.GUID)
+	wantTrue(t, stillLive, "session survives hostile rpcExt2 calls")
 }
