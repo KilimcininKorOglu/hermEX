@@ -397,12 +397,7 @@ func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 	props.Set(mapi.PrBody, in.Body)
 	// Color 0 means unset; an absent PidLidNoteColor reads back as yellow (3),
 	// the Outlook default. A non-zero color is stamped explicitly.
-	if in.Color != 0 && fitsMAPILong(in.Color) {
-		if tag, err := noteColorTag(st, true); err == nil && tag != 0 {
-			// #nosec G115 -- the fitsMAPILong guard on the same line refuses a value the property cannot carry
-			props.Set(tag, int32(in.Color))
-		}
-	}
+	setNoteColor(st, &props, in.Color)
 	setNoteLink(st, &props, in.LinkedMessageID)
 	id, err := st.CreateMessage(mapi.PrivateFIDNotes, &oxcmail.Message{Props: props})
 	if err != nil {
@@ -410,7 +405,7 @@ func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.ID = strconv.FormatInt(id, 10)
-	if in.Color == 0 {
+	if !noteColorSet(in.Color) {
 		in.Color = 3
 	}
 	writeJSON(w, http.StatusOK, in)
@@ -452,14 +447,19 @@ func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, in)
 }
 
-// setNoteColor adds the note color to props when the editor sent one the
-// property can carry; zero leaves the stored color as it is.
+// noteColorSet reports whether color names a PidLidNoteColor value
+// (MS-OXONOTE: 0 blue .. 4 yellow). Zero means "unset" on this API, so only
+// 1..4 are written; anything else is no colour a client can show.
+func noteColorSet(color int) bool { return color >= 1 && color <= 4 }
+
+// setNoteColor adds the note color to props when the editor sent a valid one;
+// any other value leaves the stored color as it is.
 func setNoteColor(st *objectstore.Store, props *mapi.PropertyValues, color int) {
-	if color == 0 || !fitsMAPILong(color) {
+	if !noteColorSet(color) {
 		return
 	}
 	if tag, err := noteColorTag(st, true); err == nil && tag != 0 {
-		// #nosec G115 -- the fitsMAPILong guard above refuses a value the property cannot carry
+		// #nosec G115 -- noteColorSet above admits only 1..4
 		props.Set(tag, int32(color))
 	}
 }
@@ -621,12 +621,7 @@ func noteProps(st *objectstore.Store, title, body string, color int, link string
 	props.Set(mapi.PrMessageClass, "IPM.StickyNote")
 	props.Set(mapi.PrSubject, title)
 	props.Set(mapi.PrBody, body)
-	if color != 0 && fitsMAPILong(color) {
-		if tag, err := noteColorTag(st, true); err == nil && tag != 0 {
-			// #nosec G115 -- the fitsMAPILong guard on the same line refuses a value the property cannot carry
-			props.Set(tag, int32(color))
-		}
-	}
+	setNoteColor(st, &props, color)
 	setNoteLink(st, &props, link)
 	return props
 }
