@@ -1,6 +1,7 @@
 package oxcmail
 
 import (
+	"bytes"
 	"encoding/base64"
 	"testing"
 
@@ -74,8 +75,28 @@ func TestImportReadsTNEF(t *testing.T) {
 	a := msg.Attachments[0].Props
 	wantProp(t, "attachment name", propString(a, mapi.PrAttachLongFilename), "report.pdf")
 	wantProp(t, "attachment type", propString(a, mapi.PrAttachMimeTag), "application/pdf")
-	if data, _ := bytesProp(a, mapi.PrAttachDataBin); string(data) != "%PDF-1.4" {
-		t.Errorf("attachment data = %q", data)
+	if data, ok := bytesProp(a, mapi.PrAttachDataBin); !ok || string(data) != "%PDF-1.4" {
+		t.Errorf("attachment data = %q (set %v), want the stream's file", data, ok)
+	}
+}
+
+// TestImportKeepsACorruptTNEFAsAnAttachment delivers a winmail.dat a sender cut
+// short. A stream that does not decode carries nothing to apply, so the mail must
+// still import, keep its MIME body, and keep the part as an opaque attachment
+// rather than lose it.
+func TestImportKeepsACorruptTNEFAsAnAttachment(t *testing.T) {
+	stream := outlookStream()
+	for _, cut := range [][]byte{stream[:len(stream)/2], stream[:3], []byte("not a TNEF stream")} {
+		msg, err := Import([]byte(tnefMail("<key@example.org>", cut)), Options{})
+		mustImport(t, err)
+		wantProp(t, "class", propString(msg.Props, mapi.PrMessageClass), "IPM.Note")
+		wantProp(t, "body", propString(msg.Props, mapi.PrBody), "plain body")
+		if len(msg.Attachments) != 1 {
+			t.Fatalf("attachments = %d, want winmail.dat kept", len(msg.Attachments))
+		}
+		if data, ok := bytesProp(msg.Attachments[0].Props, mapi.PrAttachDataBin); !ok || !bytes.Equal(data, cut) {
+			t.Errorf("kept winmail.dat holds %d bytes (set %v), want the %d the sender sent", len(data), ok, len(cut))
+		}
 	}
 }
 
