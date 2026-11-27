@@ -136,7 +136,7 @@ func TestForgedForwardedForEvadesLimiterWithoutFrontDoor(t *testing.T) {
 	url := startLimited(t, okHandler(), limiter) // no FrontDoor option
 
 	for i := range 5 {
-		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		req := mustGet(t, url)
 		req.Header.Set("X-Forwarded-For", "203.0.113."+strconv.Itoa(i))
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -161,7 +161,7 @@ func TestRateLimitCountsAnIPv6SubnetAsOneClient(t *testing.T) {
 
 	get := func(client string) int {
 		t.Helper()
-		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		req := mustGet(t, url)
 		req.Header.Set("X-Forwarded-For", client)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -192,7 +192,7 @@ func TestFrontDoorStripsForgedForwardedFor(t *testing.T) {
 
 	statuses := make([]int, 0, 3)
 	for i := range 3 {
-		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		req := mustGet(t, url)
 		req.Header.Set("X-Forwarded-For", "203.0.113."+strconv.Itoa(i))
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {

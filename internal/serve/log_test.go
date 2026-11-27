@@ -139,7 +139,10 @@ func TestHostileRequestIDAndUserAreBounded(t *testing.T) {
 		if got == id || len(got) > 64 || got == "" {
 			t.Errorf("returned id %.40q for a hostile one, want a minted id", got)
 		}
-		e, _ := sink.last()
+		e, ok := sink.last()
+		if !ok {
+			t.Fatal("the request left no log event")
+		}
 		if e.RequestID != got {
 			t.Errorf("logged id %.40q differs from the returned %q", e.RequestID, got)
 		}
@@ -162,7 +165,7 @@ func TestRequestIDEchoesTheClientsOwn(t *testing.T) {
 	if got := rec.Header().Get("X-Request-Id"); got != "caller-supplied-id" {
 		t.Errorf("returned id = %q, want the caller's own", got)
 	}
-	if e, _ := sink.last(); e.RequestID != "caller-supplied-id" {
+	if e, ok := sink.last(); !ok || e.RequestID != "caller-supplied-id" {
 		t.Errorf("logged id = %q, want the caller's own", e.RequestID)
 	}
 }

@@ -47,7 +47,11 @@ func TestServePlaintext(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200", resp.StatusCode)
 	}
-	if body, _ := io.ReadAll(resp.Body); string(body) != "ok" {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read the body: %v", err)
+	}
+	if string(body) != "ok" {
 		t.Errorf("body = %q, want ok", body)
 	}
 }
@@ -131,8 +135,8 @@ func TestServerGracefulDrain(t *testing.T) {
 			return
 		}
 		defer resp.Body.Close()
-		b, _ := io.ReadAll(resp.Body)
-		resc <- result{body: string(b)}
+		b, err := io.ReadAll(resp.Body)
+		resc <- result{body: string(b), err: err}
 	}()
 
 	<-handlerEntered // the request is now in-flight inside the handler
@@ -211,6 +215,17 @@ func (c *captureSink) Write(e logging.Event) {
 	c.mu.Lock()
 	c.events = append(c.events, e)
 	c.mu.Unlock()
+}
+
+// mustGet builds a GET request for url and fails the test when the URL does not
+// parse, so a malformed test URL is not sent as a nil request.
+func mustGet(t *testing.T, url string) *http.Request {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("build GET %s: %v", url, err)
+	}
+	return req
 }
 
 func (c *captureSink) last() (logging.Event, bool) {
@@ -295,7 +310,7 @@ func TestRequestLoggingEmitsEvent(t *testing.T) {
 	go func() { _ = hs.Start() }()
 	defer func() { _ = hs.Shutdown(context.Background()) }()
 
-	req, _ := http.NewRequest(http.MethodGet, "http://"+hs.Addr().String()+"/mail/inbox", nil)
+	req := mustGet(t, "http://"+hs.Addr().String()+"/mail/inbox")
 	req.SetBasicAuth("alice@hermex.test", "hunter2")
 	req.Header.Set("X-Forwarded-For", "203.0.113.7, 10.0.0.1")
 	req.Header.Set("X-Request-Id", "req-123")
