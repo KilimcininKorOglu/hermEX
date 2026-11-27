@@ -93,3 +93,23 @@ func TestTaskWithoutAUIDIsServedUnderItsName(t *testing.T) {
 		t.Errorf("a task stored without a UID is not served under its name:\n%s", got)
 	}
 }
+
+// TestTaskWithoutAUIDBesideOneWithAUID stores a task with a UID first, so the
+// mailbox already holds the UID property, then one without; the second must
+// still be served under its resource name, never with an empty or borrowed UID.
+func TestTaskWithoutAUIDBesideOneWithAUID(t *testing.T) {
+	ts := davServerCal(t)
+	base := "/dav/calendars/" + testUser + "/tasks/"
+	if resp, body := doFull(t, ts, "PUT", base+"withuid.ics", taskBody("kept-uid", "First"), map[string]string{"Content-Type": "text/calendar"}); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("PUT with UID status = %d: %s", resp.StatusCode, body)
+	}
+	noUID := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\n" +
+		"BEGIN:VTODO\r\nDTSTAMP:20260620T100000Z\r\nSUMMARY:Second\r\nEND:VTODO\r\nEND:VCALENDAR\r\n"
+	if resp, body := doFull(t, ts, "PUT", base+"bare.ics", noUID, map[string]string{"Content-Type": "text/calendar"}); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("PUT without UID status = %d: %s", resp.StatusCode, body)
+	}
+	got := doBody(t, ts, "GET", base+"bare.ics", "", true)
+	if !strings.Contains(got, "UID:bare.ics\r\n") || strings.Contains(got, "kept-uid") {
+		t.Errorf("the task without a UID is not served under its own name:\n%s", got)
+	}
+}
