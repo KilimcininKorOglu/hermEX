@@ -216,8 +216,11 @@ func TestResolveRecipientsAvailabilityOwner(t *testing.T) {
 func TestResolveRecipientsAvailabilityOmitted(t *testing.T) {
 	ts, _ := seededServer(t)
 	_, root := postCommand(t, ts, "ResolveRecipients", resolveReq(testUser))
-	rec := responseFor(root, testUser).Child(wbxml.RRRecipient)
-	if rec.Child(wbxml.RRAvailability) != nil {
+	resp := responseFor(root, testUser)
+	if resp == nil || resp.Child(wbxml.RRRecipient) == nil {
+		t.Fatal("the query resolved no Recipient")
+	}
+	if resp.Child(wbxml.RRRecipient).Child(wbxml.RRAvailability) != nil {
 		t.Error("a request without Availability must not return an Availability element")
 	}
 }
@@ -238,18 +241,24 @@ func TestMergedFreeBusyGate(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	start := time.Date(2026, 6, 27, 9, 0, 0, 0, time.UTC)
 	win := availabilityWindow{start: start, end: start.Add(time.Hour), ok: true}
 	e := directory.GALEntry{Address: "target@hermex.test", StorePath: dir}
 
-	stranger := &session{user: "stranger@hermex.test", mailbox: "/elsewhere"}
-	if _, ok := mergedFreeBusy(e, win, stranger); ok {
-		t.Error("a caller without free/busy permission must be denied, not shown all-free")
+	// Neither a stranger nor one who spells the owner's address with a suffix
+	// holds the owner's identity.
+	for _, user := range []string{"stranger@hermex.test", "target@hermex.test.rival.test"} {
+		stranger := &session{user: user, mailbox: "/elsewhere"}
+		if mfb, ok := mergedFreeBusy(e, win, stranger); ok || mfb != "" {
+			t.Errorf("%s: mergedFreeBusy = (%q, %v), want withheld, not shown all-free", user, mfb, ok)
+		}
 	}
 	owner := &session{user: "target@hermex.test", mailbox: dir}
-	if _, ok := mergedFreeBusy(e, win, owner); !ok {
-		t.Error("the owner must see their own free/busy")
+	if mfb, ok := mergedFreeBusy(e, win, owner); !ok || mfb != "00" {
+		t.Errorf("owner: mergedFreeBusy = (%q, %v), want (\"00\", true): an empty calendar over two slots", mfb, ok)
 	}
 }

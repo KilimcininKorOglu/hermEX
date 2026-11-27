@@ -92,7 +92,7 @@ func availabilityNode(e directory.GALEntry, win availabilityWindow, sess *sessio
 // the target's free/busy: in every such case the data is withheld (the caller
 // learns nothing about the target's calendar), never returned as all-free (OWASP
 // A01).
-func mergedFreeBusy(e directory.GALEntry, win availabilityWindow, sess *session) (string, bool) {
+func mergedFreeBusy(e directory.GALEntry, win availabilityWindow, sess *session) (mfb string, ok bool) {
 	if e.StorePath == "" {
 		return "", false // an external contact has no local calendar to read
 	}
@@ -100,7 +100,12 @@ func mergedFreeBusy(e directory.GALEntry, win availabilityWindow, sess *session)
 	if err != nil {
 		return "", false
 	}
-	defer st.Close()
+	// A store that does not close cleanly may not have read consistently.
+	defer func() {
+		if err := st.Close(); err != nil {
+			mfb, ok = "", false
+		}
+	}()
 
 	owner := strings.EqualFold(e.Address, sess.user) || e.StorePath == sess.mailbox
 	if !owner {
