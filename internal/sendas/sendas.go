@@ -102,8 +102,9 @@ func Allows(accounts directory.Accounts, caller, want string) bool {
 
 // grantOf reads the grant the mailbox that owns want extends to the caller. A
 // send-as grant wins over an on-behalf grant, because it is the narrower message:
-// a caller who holds both should not have the real sender disclosed.
-func grantOf(accounts directory.Accounts, want string, ids []string) Grant {
+// a caller who holds both should not have the real sender disclosed. A list that
+// will not read, or a store that will not close cleanly, denies the grant.
+func grantOf(accounts directory.Accounts, want string, ids []string) (g Grant) {
 	path, ok := accounts.Resolve(want)
 	if !ok {
 		return GrantNone
@@ -114,11 +115,28 @@ func grantOf(accounts directory.Accounts, want string, ids []string) Grant {
 	if err != nil {
 		return GrantNone
 	}
-	defer st.Close()
-	if list, err := st.GetSendAs(); err == nil && grants(list, ids) {
+	defer func() {
+		if err := st.Close(); err != nil {
+			g = GrantNone
+		}
+	}()
+	return grantIn(st, ids)
+}
+
+// grantIn reads the two grant lists of an open store, send-as first.
+func grantIn(st *objectstore.Store, ids []string) Grant {
+	sendAs, err := st.GetSendAs()
+	if err != nil {
+		return GrantNone
+	}
+	if grants(sendAs, ids) {
 		return GrantSendAs
 	}
-	if list, err := st.GetSendOnBehalf(); err == nil && grants(list, ids) {
+	onBehalf, err := st.GetSendOnBehalf()
+	if err != nil {
+		return GrantNone
+	}
+	if grants(onBehalf, ids) {
 		return GrantOnBehalf
 	}
 	return GrantNone

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"hermex/internal/directory"
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
 
@@ -19,12 +20,32 @@ func grantingMailbox(t *testing.T, onBehalf bool) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
 	grant := st.SetSendAs
 	if onBehalf {
 		grant = st.SetSendOnBehalf
 	}
-	if err := grant([]string{caller}); err != nil {
+	return closeMailbox(t, st, dir, grant([]string{caller}))
+}
+
+// listMailbox provisions a mailbox whose send-as list names exactly list.
+func listMailbox(t *testing.T, list []string) string {
+	t.Helper()
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return closeMailbox(t, st, dir, st.SetSendAs(list))
+}
+
+// closeMailbox fails the test on the setup error err or on the store's Close,
+// and returns dir.
+func closeMailbox(t *testing.T, st *objectstore.Store, dir string, err error) string {
+	t.Helper()
+	if cerr := st.Close(); cerr != nil {
+		t.Fatal(cerr)
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
 	return dir
@@ -34,10 +55,11 @@ func grantingMailbox(t *testing.T, onBehalf bool) string {
 func emptyMailbox(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if st, err := objectstore.Open(dir); err == nil {
-		st.Close()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return dir
+	return closeMailbox(t, st, dir, nil)
 }
 
 // testAccounts wires the four mailboxes the cases use.
@@ -105,10 +127,7 @@ func TestAnAliasIsTheCallersOwnAndCarriesItsGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSendAs([]string{" SALES@hermex.test "}); err != nil {
-		t.Fatal(err)
-	}
-	st.Close()
+	closeMailbox(t, st, dir, st.SetSendAs([]string{" SALES@hermex.test "}))
 	base := directory.StaticAccounts{
 		caller:               {MailboxPath: t.TempDir()},
 		"shared@hermex.test": {Shared: true, MailboxPath: dir},
@@ -145,10 +164,7 @@ func TestSendAsWinsOverOnBehalf(t *testing.T) {
 	if err := st.SetSendAs([]string{caller}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetSendOnBehalf([]string{caller}); err != nil {
-		t.Fatal(err)
-	}
-	st.Close()
+	closeMailbox(t, st, dir, st.SetSendOnBehalf([]string{caller}))
 
 	accounts := directory.StaticAccounts{
 		caller:             {MailboxPath: t.TempDir()},
@@ -209,6 +225,43 @@ func TestResolveLeavesAnUnprovisionedMailboxAlone(t *testing.T) {
 	}
 	if _, err := objectstore.OpenExisting(dir); err == nil {
 		t.Error("resolving the identity created the mailbox")
+	}
+}
+
+// TestAGrantListNamesExactAddresses: a grant list entry is one whole address, so
+// an entry that only contains the caller's address, or extends it, grants
+// nothing. A substring or prefix match would let a mailbox's grant to
+// xalice@hermex.test or alice@hermex.test.rival.test reach alice.
+func TestAGrantListNamesExactAddresses(t *testing.T) {
+	accounts := testAccounts(t)
+	accounts["lure@hermex.test"] = directory.Account{Shared: true, MailboxPath: listMailbox(t,
+		[]string{"x" + caller, caller + ".rival.test", "alice", "*@hermex.test", ""})}
+	if rep, snd, g := Resolve(accounts, caller, "lure@hermex.test"); g != GrantNone || rep != "" || snd != "" {
+		t.Errorf("Resolve = %q, %q, %v; want a refusal", rep, snd, g)
+	}
+}
+
+// TestAnUnreadableSendAsListDeniesTheGrant keeps the documented fail-closed
+// rule: a send-as list that will not read denies the grant. Falling through to
+// the on-behalf list would answer for a mailbox whose grants were never read.
+func TestAnUnreadableSendAsListDeniesTheGrant(t *testing.T) {
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSendOnBehalf([]string{caller}); err != nil {
+		closeMailbox(t, st, dir, err)
+	}
+	closeMailbox(t, st, dir, st.SetStoreProperties(mapi.PropertyValues{
+		{Tag: mapi.PrAbSendAs, Value: "not a json list"},
+	}))
+	accounts := directory.StaticAccounts{
+		caller:             {MailboxPath: t.TempDir()},
+		"torn@hermex.test": {Shared: true, MailboxPath: dir},
+	}
+	if rep, snd, g := Resolve(accounts, caller, "torn@hermex.test"); g != GrantNone || rep != "" || snd != "" {
+		t.Errorf("Resolve = %q, %q, %v; want a refusal", rep, snd, g)
 	}
 }
 
