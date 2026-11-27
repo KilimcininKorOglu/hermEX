@@ -18,6 +18,15 @@ import (
 	"hermex/internal/spooler"
 )
 
+// mustClose closes a store or spool the test opened and fails the test when the
+// close fails, so a store that could not release its lock or flush is reported.
+func mustClose(t *testing.T, c interface{ Close() error }) {
+	t.Helper()
+	if err := c.Close(); err != nil {
+		t.Errorf("close: %v", err)
+	}
+}
+
 // TestSweepOutboxesDeliversDueScheduledSend is a light integration test of the
 // send-later worker's one-pass sweep: a past-due message in one mailbox's Outbox
 // is delivered to a second mailbox through the real local-delivery path, filed to
@@ -42,11 +51,11 @@ func TestSweepOutboxesDeliversDueScheduledSend(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	alice.Close()
+	mustClose(t, alice)
 	if bob, err := objectstore.Open(bobDir); err != nil { // provision bob's mailbox
 		t.Fatal(err)
 	} else {
-		bob.Close()
+		mustClose(t, bob)
 	}
 
 	accounts := directory.StaticAccounts{
@@ -72,7 +81,7 @@ func folderCount(t *testing.T, path string, fid int64) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(fid)
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +110,7 @@ func TestGuardedSweepRefusalLeavesTheOutboxAlone(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	alice.Close()
+	mustClose(t, alice)
 
 	accounts := directory.StaticAccounts{"alice@hermex.test": {MailboxPath: aliceDir}}
 	delivered := 0
@@ -208,7 +217,7 @@ func outboxTotal(t *testing.T, paths []string, skip string) int {
 			t.Fatal(err)
 		}
 		msgs, err := st.ListMessages(int64(mapi.PrivateFIDOutbox))
-		st.Close()
+		mustClose(t, st)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -249,7 +258,7 @@ func scheduleFor(t *testing.T, root, name string, when time.Time) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	raw := "From: " + name + "@hermex.test\r\nTo: sink@hermex.test\r\nSubject: s\r\n\r\nbody\r\n"
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDOutbox), []byte(raw), time.Unix(1, 0), objectstore.FlagSeen)
 	if err != nil {
@@ -394,7 +403,7 @@ func scheduleInto(t *testing.T, dir, name string, when time.Time) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	raw := "From: " + name + "@hermex.test\r\nTo: sink@hermex.test\r\nSubject: s\r\n\r\nbody\r\n"
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDOutbox), []byte(raw), time.Unix(1, 0), objectstore.FlagSeen)
 	if err != nil {
@@ -503,12 +512,12 @@ func sharedScheduleWorld(t *testing.T, cfg objectstore.SentCopyConfig) (accounts
 	if err := shared.SetSentCopyConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
-	shared.Close()
+	mustClose(t, shared)
 	alice, err := objectstore.Open(aliceDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer alice.Close()
+	defer mustClose(t, alice)
 	raw := "From: shared@hermex.test\r\nTo: shared@hermex.test\r\nSubject: team\r\n\r\nbody\r\n"
 	info, err := alice.AppendMessage(int64(mapi.PrivateFIDOutbox), []byte(raw), time.Unix(1, 0), objectstore.FlagSeen)
 	if err != nil {
@@ -570,7 +579,7 @@ func TestScheduledSendInAnUngrantedNameIsRefused(t *testing.T) {
 	if err := shared.SetSendAs(nil); err != nil {
 		t.Fatal(err)
 	}
-	shared.Close()
+	mustClose(t, shared)
 	sweepOutboxes(context.Background(), accounts, sendAsOwner(accounts, nil, "mail.hermex.test", logging.New(&sweepSink{})), logging.New(&sweepSink{}))
 	if n := folderCount(t, sharedDir, int64(mapi.PrivateFIDInbox)); n != 0 {
 		t.Errorf("the message was delivered under an ungranted From (%d in the recipient's Inbox)", n)

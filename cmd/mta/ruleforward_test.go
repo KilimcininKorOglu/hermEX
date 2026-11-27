@@ -35,7 +35,7 @@ func TestRuleForwardIsNotAuthorSigned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sp.Close()
+	defer mustClose(t, sp)
 	fs := &forwardSigner{}
 	sp.Signer = fs
 	pem, _, err := dkimsign.GenerateKey(dkimsign.KeyRSA)

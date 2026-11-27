@@ -20,7 +20,7 @@ func queueDueSend(t *testing.T, dir, from string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	raw := "From: " + from + "\r\nTo: bob@hermex.test\r\nSubject: scheduled\r\n\r\nbody\r\n"
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDOutbox), []byte(raw), time.Unix(1, 0), objectstore.FlagSeen)
 	if err != nil {
@@ -46,7 +46,7 @@ func TestAPanickingMailboxFailsOnlyItself(t *testing.T) {
 	if bob, err := objectstore.Open(bobDir); err != nil {
 		t.Fatal(err)
 	} else {
-		bob.Close()
+		mustClose(t, bob)
 	}
 	accounts := directory.StaticAccounts{
 		"carol@hermex.test": {MailboxPath: carolDir},
