@@ -30,7 +30,7 @@ func organizerServer(t *testing.T) (ts *httptest.Server, attendee, organizer str
 		if err != nil {
 			t.Fatal(err)
 		}
-		st.Close()
+		mustNoErr(t, "close the store", st.Close())
 	}
 	accs := directory.StaticAccounts{
 		testUser:       {Password: testPass, MailboxPath: attendee},
@@ -49,7 +49,7 @@ func seedLocalRequest(t *testing.T, dir, ics string) uint32 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	raw := "From: " + localOrganizer + "\r\nTo: " + testUser + "\r\nSubject: Planning\r\n" +
 		"MIME-Version: 1.0\r\nContent-Type: text/calendar; method=REQUEST; charset=UTF-8\r\n\r\n" + ics
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), time.Now(), 0)
@@ -73,7 +73,7 @@ func seedRequestWithText(t *testing.T, dir string) uint32 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	raw := "From: " + localOrganizer + "\r\nTo: " + testUser + "\r\nSubject: Planning\r\n" +
 		"MIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=b\r\n\r\n" +
 		"--b\r\nContent-Type: text/plain\r\n\r\nOrganizer agenda text.\r\n" +
@@ -101,7 +101,7 @@ func postVersioned(t *testing.T, ts *httptest.Server, version, cmd string, root 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { mustNoErr(t, "close the reply body", resp.Body.Close()) }()
 	out, err := io.ReadAll(resp.Body)
 	mustNoErr(t, "read the reply", err)
 	if resp.StatusCode != http.StatusOK {
@@ -144,7 +144,7 @@ func folderMessages(t *testing.T, dir string, fid int64) [][]byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(fid)
 	if err != nil {
 		t.Fatal(err)
@@ -263,7 +263,7 @@ func wantCalendarEmpty(t *testing.T, dir string) {
 	t.Helper()
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	cal, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
 	mustNoErr(t, "list the calendar", err)
 	wantEq(t, "calendar items after a refused request", len(cal), 0)
