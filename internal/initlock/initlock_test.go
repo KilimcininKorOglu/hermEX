@@ -35,8 +35,11 @@ func TestTakeWaitsForTheHolder(t *testing.T) {
 	}
 	select {
 	case r, ok := <-got:
-		if ok {
-			_ = r()
+		if !ok {
+			t.Fatal("the second Take failed after the release")
+		}
+		if err := r(); err != nil {
+			t.Fatalf("release of the second holder: %v", err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("the second Take still waits after the release")
