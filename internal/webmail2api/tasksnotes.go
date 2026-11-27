@@ -541,12 +541,12 @@ func (s *Server) handleGetMailNotes(w http.ResponseWriter, r *http.Request) {
 	}
 	info, err := st.MessageByUID(fid, uid)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		answerMailNotesFailure(w, err)
 		return
 	}
 	msg, err := st.OpenMessage(info.ID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		answerMailNotesFailure(w, err)
 		return
 	}
 	notes := make([]noteJSON, 0)
@@ -559,6 +559,18 @@ func (s *Server) handleGetMailNotes(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"notes": notes})
+}
+
+// answerMailNotesFailure answers a mail lookup that failed: a mail that is not
+// there is 404, any other failure is a recorded 500, so a damaged store is never
+// reported as a missing mail.
+func answerMailNotesFailure(w http.ResponseWriter, err error) {
+	if errors.Is(err, objectstore.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	logError("mail-notes-open", err, logging.Fields{})
+	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "notes unavailable"})
 }
 
 // notesLinkedTo collects the mailbox's notes annotating the given Message-ID. A
