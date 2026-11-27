@@ -410,9 +410,6 @@ func inboxCount(t *testing.T, dir string) int {
 	return len(msgs)
 }
 
-// hasFromOwner reports whether the message header block carries a From line that
-// names owner, the proof that submit stamped (and Export emitted) the sender
-// identity rather than shipping a From-less message.
 // submitFromShared submits a message the owner composed in their own store with
 // shared@ as the representing address, after grant ran on shared@'s store, and
 // returns the copy delivered to alice with the owner's and shared@'s mailboxes.
@@ -514,6 +511,9 @@ func TestSubmitLeavesTheOnlyCopyToAnExclusiveMailbox(t *testing.T) {
 	}
 }
 
+// hasFromOwner reports whether the message header block carries a From line that
+// names owner, the proof that submit stamped (and Export emitted) the sender
+// identity rather than shipping a From-less message.
 func hasFromOwner(raw []byte, owner string) bool {
 	for line := range bytes.SplitSeq(raw, []byte("\r\n")) {
 		if len(line) == 0 {
