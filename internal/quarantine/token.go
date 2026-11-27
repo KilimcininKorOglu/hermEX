@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -48,7 +49,11 @@ func Mint(secret []byte, c Claims) (string, error) {
 		return "", err
 	}
 	enc := base64.RawURLEncoding.EncodeToString(payload)
-	return enc + "." + mac(secret, enc), nil
+	sig, err := mac(secret, enc)
+	if err != nil {
+		return "", err
+	}
+	return enc + "." + sig, nil
 }
 
 // Verify checks a token's signature in constant time and its expiry against now, and
@@ -62,7 +67,11 @@ func Verify(secret []byte, token string, now time.Time) (Claims, error) {
 	if !ok {
 		return Claims{}, ErrBadToken
 	}
-	if !hmac.Equal([]byte(sig), []byte(mac(secret, enc))) {
+	want, err := mac(secret, enc)
+	if err != nil {
+		return Claims{}, err
+	}
+	if !hmac.Equal([]byte(sig), []byte(want)) {
 		return Claims{}, ErrBadToken
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(enc)
@@ -80,8 +89,10 @@ func Verify(secret []byte, token string, now time.Time) (Claims, error) {
 }
 
 // mac returns the base64url HMAC-SHA256 of signing under secret.
-func mac(secret []byte, signing string) string {
+func mac(secret []byte, signing string) (string, error) {
 	h := hmac.New(sha256.New, secret)
-	h.Write([]byte(signing))
-	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+	if _, err := h.Write([]byte(signing)); err != nil {
+		return "", fmt.Errorf("quarantine: sign token: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(h.Sum(nil)), nil
 }
