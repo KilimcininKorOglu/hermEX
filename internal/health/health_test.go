@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,7 +25,9 @@ func freeAddr(t *testing.T) string {
 		t.Fatal(err)
 	}
 	addr := ln.Addr().String()
-	_ = ln.Close()
+	if err := ln.Close(); err != nil {
+		t.Fatalf("close probe listener: %v", err)
+	}
 	return addr
 }
 
@@ -121,7 +125,11 @@ func TestComponentServesAndStops(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	}()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -136,7 +144,9 @@ func statusFrom(t *testing.T, addr string, comps []lifecycle.Component) Status {
 	errc := make(chan error, 1)
 	go func() { errc <- comps[0].Start() }()
 	t.Cleanup(func() {
-		_ = comps[0].Shutdown(context.Background())
+		if err := comps[0].Shutdown(context.Background()); err != nil {
+			t.Errorf("health server Shutdown: %v", err)
+		}
 		if err := <-errc; !errors.Is(err, http.ErrServerClosed) {
 			t.Errorf("health server Start returned %v, want http.ErrServerClosed", err)
 		}
@@ -152,7 +162,11 @@ func statusFrom(t *testing.T, addr string, comps []lifecycle.Component) Status {
 	if err != nil {
 		t.Fatalf("GET /healthz: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	}()
 	var st Status
 	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
 		t.Fatal(err)
@@ -192,5 +206,57 @@ func TestComponentsReportAnUnstampedBuildHonestly(t *testing.T) {
 	addr := freeAddr(t)
 	if st := statusFrom(t, addr, Components(addr, "imap")); st.Version == "" {
 		t.Error("an unstamped build reports an empty version, which reads as a value")
+	}
+}
+
+// TestHandlerRejectsHostileRequests proves that disallowed HTTP methods and
+// unknown or oversized paths are refused (RFC 9110 405 / 404) without invoking
+// any readiness probe, leaving handler state unchanged.
+func TestHandlerRejectsHostileRequests(t *testing.T) {
+	var probeCalls atomic.Int32
+	h := Handler("imap", "test", time.Now(), Check{
+		Name: "directory",
+		Probe: func(context.Context) error {
+			probeCalls.Add(1)
+			return nil
+		},
+	})
+
+	cases := []struct {
+		name       string
+		method     string
+		target     string
+		wantStatus int
+	}{
+		{name: "POST method", method: http.MethodPost, target: "/healthz", wantStatus: http.StatusMethodNotAllowed},
+		{name: "PUT method", method: http.MethodPut, target: "/healthz", wantStatus: http.StatusMethodNotAllowed},
+		{name: "DELETE method", method: http.MethodDelete, target: "/healthz", wantStatus: http.StatusMethodNotAllowed},
+		{name: "root path", method: http.MethodGet, target: "/", wantStatus: http.StatusNotFound},
+		{name: "forged subpath", method: http.MethodGet, target: "/healthz/extra", wantStatus: http.StatusNotFound},
+		{name: "unrelated path", method: http.MethodGet, target: "/admin", wantStatus: http.StatusNotFound},
+		{name: "oversized path", method: http.MethodGet, target: "/" + strings.Repeat("a", 4096), wantStatus: http.StatusNotFound},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.target, nil))
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("%s %s: status = %d, want %d", tc.method, tc.target, rec.Code, tc.wantStatus)
+			}
+			if got := probeCalls.Load(); got != 0 {
+				t.Fatalf("probe invoked %d times on refused request, want 0", got)
+			}
+		})
+	}
+
+	// Verify a legitimate GET /healthz still succeeds after the refused requests.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /healthz after refusals: status = %d, want 200", rec.Code)
+	}
+	if got := probeCalls.Load(); got != 1 {
+		t.Fatalf("probe invoked %d times after valid GET, want 1", got)
 	}
 }
