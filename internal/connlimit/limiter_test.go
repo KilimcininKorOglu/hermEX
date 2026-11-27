@@ -15,7 +15,7 @@ func enabled(t *testing.T, total, perClient int) *Limiter {
 func acquire(t *testing.T, l *Limiter, key string, want bool) func() {
 	t.Helper()
 	release, ok, why := l.Acquire(key)
-	if ok != want {
+	if ok != want || (ok && why != "") {
 		t.Fatalf("Acquire(%q) = %v (why %q), want %v", key, ok, why, want)
 	}
 	return release
@@ -27,8 +27,8 @@ func TestDisabledAdmitsEverything(t *testing.T) {
 	l := New()
 	l.SetLimits(1, 1)
 	for i := range 5 {
-		if release, ok, _ := l.Acquire("10.0.0.1"); !ok {
-			t.Fatalf("connection %d refused while the cap is off", i)
+		if release, ok, why := l.Acquire("10.0.0.1"); !ok || why != "" {
+			t.Fatalf("connection %d = %v, %q while the cap is off, want admitted with no reason", i, ok, why)
 		} else {
 			release()
 		}
