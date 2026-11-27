@@ -529,7 +529,12 @@ func (c *smtpConn) cmdDATA(string) bool {
 		return true
 	}
 	c.reply(354, "end data with <CR><LF>.<CR><LF>")
-	c.reportBody(c.srv.consumeData(c.tp, c.sess, c.trace()))
+	err := c.srv.consumeData(c.tp, c.sess, c.trace())
+	if errors.Is(err, errBodyUnreadable) {
+		c.event(logging.LevelWarn, "message.read.fail", logging.Fields{"error": err.Error()})
+		return false
+	}
+	c.reportBody(err)
 	c.resetTxn()
 	return true
 }
@@ -789,10 +794,18 @@ func (s *Server) consumeData(tp *textproto.Reader, sess Session, trace string) e
 	r := io.MultiReader(strings.NewReader(trace), body)
 	err := sess.Data(r)
 	// Always drain the underlying dot-encoded body so the next command reads
-	// cleanly, even when delivery was rejected or the size limit tripped.
-	_, _ = io.Copy(io.Discard, dot)
+	// cleanly, even when delivery was rejected or the size limit tripped. A drain
+	// that fails left the stream short of the terminator, so the next "command"
+	// would be message text: report it so the caller ends the session.
+	if _, derr := io.Copy(io.Discard, dot); derr != nil {
+		return fmt.Errorf("%w: %w", errBodyUnreadable, derr)
+	}
 	return err
 }
+
+// errBodyUnreadable marks a message body that could not be read to its end, after
+// which the connection is out of step with the protocol and must be closed.
+var errBodyUnreadable = errors.New("smtp: message body could not be read to its end")
 
 // dotReader decodes an SMTP dot-encoded message body: it removes dot-stuffing
 // and stops at the "." terminator line. Unlike textproto.DotReader it preserves
@@ -804,13 +817,17 @@ type dotReader struct {
 	r       *bufio.Reader
 	buf     []byte
 	done    bool
-	midLine bool // the next chunk continues a line, so the dot rules do not apply
+	midLine bool  // the next chunk continues a line, so the dot rules do not apply
+	err     error // the stream failed before the terminator; returned once buf drains
 }
 
 func newDotReader(r *bufio.Reader) *dotReader { return &dotReader{r: r} }
 
 func (d *dotReader) Read(p []byte) (int, error) {
 	for len(d.buf) == 0 {
+		if d.err != nil {
+			return 0, d.err
+		}
 		if d.done {
 			return 0, io.EOF
 		}
@@ -826,8 +843,10 @@ func (d *dotReader) Read(p []byte) (int, error) {
 func (d *dotReader) fill() error {
 	chunk, err := d.r.ReadSlice('\n')
 	if len(chunk) == 0 {
-		d.done = true
-		return io.EOF
+		// RFC 5321 4.1.1.4: a body is complete only at its "." line, so a stream
+		// that ends first carries a truncated message, never a whole one.
+		d.err = truncated(err)
+		return nil
 	}
 	startsLine := !d.midLine
 	d.midLine = errors.Is(err, bufio.ErrBufferFull)
@@ -841,10 +860,20 @@ func (d *dotReader) fill() error {
 	}
 	d.buf = append(d.buf[:0], chunk...) // ReadSlice's bytes are valid only until the next read
 	if err != nil && !d.midLine {
-		// Stream ended without a terminator; emit what we have, then finish.
-		d.done = true
+		// Stream ended without a terminator: hand over what arrived, then report
+		// the body truncated so it is never accepted as a whole message.
+		d.err = truncated(err)
 	}
 	return nil
+}
+
+// truncated names a stream that ended before the body's terminator: a clean EOF
+// becomes io.ErrUnexpectedEOF, any other read error is kept as it is.
+func truncated(err error) error {
+	if err == nil || errors.Is(err, io.EOF) {
+		return io.ErrUnexpectedEOF
+	}
+	return err
 }
 
 func (s *Server) greetEHLO(w *ew, arg string, isTLS, authAvailable bool) {
