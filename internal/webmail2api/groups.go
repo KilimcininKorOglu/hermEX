@@ -137,7 +137,8 @@ func (s *Server) handleGroupSetMembers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "you do not own this group"})
 		return
 	}
-	if _, err := gd.SetMembers(req.Address, req.Members); err != nil {
+	existed, err := gd.SetMembers(req.Address, req.Members)
+	if err != nil {
 		if errors.Is(err, directory.ErrLDAPMastered) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "this group is managed by directory sync and cannot be edited here"})
 			return
@@ -146,7 +147,12 @@ func (s *Server) handleGroupSetMembers(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "every member must be a single email address"})
 			return
 		}
+		logError("groups-set-members", err, logging.Fields{"list": req.Address})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save members"})
+		return
+	}
+	if !existed {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such group"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
