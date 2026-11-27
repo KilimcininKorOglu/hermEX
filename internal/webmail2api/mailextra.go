@@ -108,6 +108,10 @@ func attachmentDisposition(served, want, filename string) string {
 func servedAttachmentType(declared string, body []byte) string {
 	const opaque = "application/octet-stream"
 	sniffed, _, _ := strings.Cut(http.DetectContentType(body), ";")
+	// RFC 2045 5.1: the type and subtype are case-insensitive and may be
+	// followed by parameters, so compare only the lower-cased media type.
+	declared, _, _ = strings.Cut(declared, ";")
+	declared = strings.ToLower(strings.TrimSpace(declared))
 	switch {
 	case declared == "application/pdf" && sniffed == "application/pdf":
 		return declared
