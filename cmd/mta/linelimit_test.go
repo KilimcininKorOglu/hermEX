@@ -27,10 +27,12 @@ func TestApplySMTPLineLimit(t *testing.T) {
 	}
 
 	// A read error must NOT call the setter, the running cap stays as it is.
+	// found is true beside the error, so only the error guard stands between a
+	// half-read row and the setter: the !found guard cannot hide its loss.
 	got = sentinel
 	applySMTPLineLimit(nil,
 		func() (directory.SizeLimits, bool, error) {
-			return directory.SizeLimits{}, false, errors.New("db down")
+			return directory.SizeLimits{}, true, errors.New("db down")
 		},
 		func(n int64) { got = n })
 	if got != sentinel {
