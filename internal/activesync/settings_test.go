@@ -127,6 +127,10 @@ func TestSettingsOofRefusesABrokenWindow(t *testing.T) {
 			wbxml.Str(wbxml.STStartTime, "tomorrow"), wbxml.Str(wbxml.STEndTime, end)}},
 		{"ends before it starts", "6", []*wbxml.Node{wbxml.Str(wbxml.STOofState, "2"),
 			wbxml.Str(wbxml.STStartTime, end), wbxml.Str(wbxml.STEndTime, start)}},
+		// A window that ends the moment it starts is empty: it does not end after
+		// it starts, so it is refused the same way.
+		{"ends when it starts", "6", []*wbxml.Node{wbxml.Str(wbxml.STOofState, "2"),
+			wbxml.Str(wbxml.STStartTime, start), wbxml.Str(wbxml.STEndTime, start)}},
 	}
 	for _, c := range cases {
 		fields := append(c.fields, oofMessageNode(wbxml.STAppliesToInternal, "1", "away"))
