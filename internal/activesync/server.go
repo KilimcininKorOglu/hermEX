@@ -276,7 +276,8 @@ func (s *Server) basicAuth(w http.ResponseWriter, r *http.Request) (user, mailbo
 			if s.Limiter != nil {
 				s.Limiter.Succeed(addr, u)
 			}
-			if privs, _ := s.auth.Privileges(u); !privs.EAS {
+			// A directory that cannot name the account's privileges grants none.
+			if privs, known := s.auth.Privileges(u); !known || !privs.EAS {
 				http.Error(w, "ActiveSync access is disabled for this account", http.StatusForbidden)
 				return "", "", false
 			}

@@ -52,8 +52,29 @@ func attempt(t *testing.T, ts *httptest.Server, user, pass string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	if err := resp.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
 	return resp.StatusCode
+}
+
+// failTimes makes n attempts with a wrong password and requires each to be
+// refused as unauthenticated, so the lockout a test builds on is real.
+func failTimes(t *testing.T, ts *httptest.Server, user string, n int) {
+	t.Helper()
+	for i := range n {
+		if code := attempt(t, ts, user, "wrong"); code != http.StatusUnauthorized {
+			t.Fatalf("wrong-password attempt %d status = %d, want 401", i, code)
+		}
+	}
+}
+
+// wantStatus fails the test when one attempt does not answer want.
+func wantStatus(t *testing.T, ts *httptest.Server, user, pass string, want int) {
+	t.Helper()
+	if code := attempt(t, ts, user, pass); code != want {
+		t.Errorf("%s status = %d, want %d", user, code, want)
+	}
 }
 
 // TestBasicAuthThrottlesGuessing proves repeated failures lock the account out
@@ -85,9 +106,7 @@ func TestBasicAuthThrottlesGuessing(t *testing.T) {
 // than handed a fresh budget of attempts.
 func TestBasicAuthThrottleIgnoresAddressCase(t *testing.T) {
 	ts, calls := throttledServer(t)
-	for range authlimit.DefaultMaxFails {
-		attempt(t, ts, testUser, "wrong")
-	}
+	failTimes(t, ts, testUser, authlimit.DefaultMaxFails)
 	before := *calls
 	if code := attempt(t, ts, strings.ToUpper(testUser), "wrong"); code != http.StatusTooManyRequests {
 		t.Errorf("status for the upper-case address after the lockout = %d, want 429", code)
@@ -102,12 +121,29 @@ func TestBasicAuthThrottleIgnoresAddressCase(t *testing.T) {
 func TestBasicAuthThrottleIsPerAccount(t *testing.T) {
 	ts, _ := throttledServer(t)
 
-	for range authlimit.DefaultMaxFails + 1 {
-		attempt(t, ts, testUser, "wrong")
-	}
-	if code := attempt(t, ts, "bob@hermex.test", testPass); code == http.StatusTooManyRequests {
-		t.Error("another account was locked out too")
-	}
+	failTimes(t, ts, testUser, authlimit.DefaultMaxFails)
+	wantStatus(t, ts, testUser, "wrong", http.StatusTooManyRequests)
+	// The other account still signs in: OPTIONS with valid credentials is 200.
+	wantStatus(t, ts, "bob@hermex.test", testPass, http.StatusOK)
+}
+
+// unknownPrivileges authenticates the password but reports the account unknown
+// to the privilege lookup, while the privileges it returns beside that answer
+// would permit every service.
+type unknownPrivileges struct{ directory.StaticAccounts }
+
+func (unknownPrivileges) Privileges(string) (directory.ServicePrivileges, bool) {
+	return directory.ServicePrivileges{EAS: true, Web: true, DAV: true, SMTP: true, POP3IMAP: true}, false
+}
+
+// TestBasicAuthRefusesAnAccountWithUnknownPrivileges keeps the service gate
+// fail-closed: the Authenticator contract says ok=false means the directory does
+// not know the user, so whatever privileges came with it grant nothing.
+func TestBasicAuthRefusesAnAccountWithUnknownPrivileges(t *testing.T) {
+	accs := unknownPrivileges{directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: t.TempDir()}}}
+	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
+	t.Cleanup(ts.Close)
+	wantStatus(t, ts, testUser, testPass, http.StatusForbidden)
 }
 
 // TestBasicAuthSuccessClearsTheCount proves a working client that mistypes a few
@@ -115,14 +151,8 @@ func TestBasicAuthThrottleIsPerAccount(t *testing.T) {
 func TestBasicAuthSuccessClearsTheCount(t *testing.T) {
 	ts, _ := throttledServer(t)
 
-	for range authlimit.DefaultMaxFails - 1 {
-		attempt(t, ts, testUser, "wrong")
-	}
-	attempt(t, ts, testUser, testPass)
-	for range authlimit.DefaultMaxFails - 1 {
-		attempt(t, ts, testUser, "wrong")
-	}
-	if code := attempt(t, ts, testUser, testPass); code == http.StatusTooManyRequests {
-		t.Error("a successful login did not clear the failure count")
-	}
+	failTimes(t, ts, testUser, authlimit.DefaultMaxFails-1)
+	wantStatus(t, ts, testUser, testPass, http.StatusOK)
+	failTimes(t, ts, testUser, authlimit.DefaultMaxFails-1)
+	wantStatus(t, ts, testUser, testPass, http.StatusOK)
 }
