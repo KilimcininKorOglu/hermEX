@@ -22,7 +22,7 @@ func seedInbox(t *testing.T, dir string, n int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	when := time.Date(2026, 6, 15, 9, 0, 0, 0, time.UTC)
 	for i := 1; i <= n; i++ {
 		raw := fmt.Sprintf("From: sender%d@hermex.test\r\nTo: alice@hermex.test\r\nSubject: Message %d\r\nDate: Mon, 15 Jun 2026 09:00:00 +0000\r\nMessage-ID: <m%d@hermex.test>\r\n\r\nBody %d\r\n", i, i, i, i)
@@ -85,7 +85,7 @@ func firstUID(t *testing.T, dir string) uint32 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
 	if err != nil || len(msgs) == 0 {
 		t.Fatalf("no inbox messages: %v", err)
@@ -154,7 +154,7 @@ func TestSyncFlagChangeDetected(t *testing.T) {
 	if err := st.SetMessageFlags(int64(mapi.PrivateFIDInbox), uid, objectstore.FlagSeen); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 
 	_, root := postCommand(t, ts, "Sync", syncReq("2", ""))
 	coll := respColl(t, root)
@@ -185,7 +185,7 @@ func TestSyncDeleteDetected(t *testing.T) {
 	if err := st.DeleteMessage(int64(mapi.PrivateFIDInbox), uid); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 
 	_, root := postCommand(t, ts, "Sync", syncReq("2", ""))
 	coll := respColl(t, root)
@@ -231,7 +231,7 @@ func TestSyncClientChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	flags, err := st.MessageFlags(int64(mapi.PrivateFIDInbox), uid)
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestSyncUnknownServerIDIsObjectNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	flags, err := st.MessageFlags(int64(mapi.PrivateFIDInbox), firstUID(t, dir))
 	if err != nil || flags&objectstore.FlagSeen != 0 {
 		t.Errorf("the real message changed: flags %d, err %v", flags, err)
@@ -327,13 +327,60 @@ func TestSyncInvalidKey(t *testing.T) {
 	seedInbox(t, dir, 1)
 	postCommand(t, ts, "Sync", syncReq("0", ""))
 
-	_, root := postCommand(t, ts, "Sync", syncReq("99", ""))
-	coll := respColl(t, root)
-	if coll.ChildText(wbxml.ASStatus) != "3" {
-		t.Errorf("status = %q, want 3", coll.ChildText(wbxml.ASStatus))
+	// The key comes from the device: stale, non-numeric, negative and oversized
+	// keys are all MS-ASCMD Sync Status 3 (invalid synchronization key), and none
+	// of them may stream the mailbox.
+	for _, key := range []string{"99", "abc", "-1", "99999999999999999999999"} {
+		_, root := postCommand(t, ts, "Sync", syncReq(key, ""))
+		coll := respColl(t, root)
+		if coll.ChildText(wbxml.ASStatus) != "3" {
+			t.Errorf("key %q: status = %q, want 3", key, coll.ChildText(wbxml.ASStatus))
+		}
+		if coll.ChildText(wbxml.ASSyncKey) != "0" {
+			t.Errorf("key %q: sync key = %q, want 0 (re-prime)", key, coll.ChildText(wbxml.ASSyncKey))
+		}
+		if coll.Child(wbxml.ASCommands) != nil {
+			t.Errorf("key %q: an invalid key still received Commands", key)
+		}
 	}
-	if coll.ChildText(wbxml.ASSyncKey) != "0" {
-		t.Errorf("sync key = %q, want 0 (re-prime)", coll.ChildText(wbxml.ASSyncKey))
+}
+
+// TestLessSIDOrdersNumerically pins the order of Delete commands: ServerIds are
+// uids, so 9 comes before 10 (a text order would put 10 first), and an id that
+// is not a number orders after every numeric id rather than as 0.
+func TestLessSIDOrdersNumerically(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want bool
+	}{
+		{"9", "10", true},
+		{"10", "9", false},
+		{"1", "x", true},
+		{"x", "1", false},
+		{"a", "b", true},
+	} {
+		if got := lessSID(c.a, c.b); got != c.want {
+			t.Errorf("lessSID(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+// TestParseBodyPrefReadsOptionalCounts: [MS-ASAIRS] TruncationSize and
+// MIMESupport are unsignedInt values from the device. A negative, non-numeric or
+// oversized value reads as absent (0: untruncated, no verbatim S/MIME), never as a
+// negative size.
+func TestParseBodyPrefReadsOptionalCounts(t *testing.T) {
+	pref := func(trunc, mime string) bodyPref {
+		return parseBodyPref(wbxml.Elem(wbxml.ASCollection, wbxml.Elem(wbxml.ASOptions,
+			wbxml.Elem(wbxml.ABBodyPreference, wbxml.Str(wbxml.ABType, "1"), wbxml.Str(wbxml.ABTruncationSize, trunc)),
+			wbxml.Str(wbxml.ASMIMESupport, mime))))
+	}
+	wantEq(t, "TruncationSize 100", pref("100", "2").truncation, 100)
+	wantEq(t, "MIMESupport 2", pref("100", "2").mimeSupport, 2)
+	for _, bad := range []string{"-5", "abc", "99999999999999999999", ""} {
+		got := pref(bad, bad)
+		wantEq(t, "TruncationSize "+bad, got.truncation, 0)
+		wantEq(t, "MIMESupport "+bad, got.mimeSupport, 0)
 	}
 }
 
@@ -345,7 +392,7 @@ func seedInboxHTML(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	raw := "From: s@hermex.test\r\nTo: alice@hermex.test\r\nSubject: HTML msg\r\nMIME-Version: 1.0\r\n" +
 		"Content-Type: multipart/alternative; boundary=b\r\n\r\n" +
 		"--b\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nplain part\r\n" +

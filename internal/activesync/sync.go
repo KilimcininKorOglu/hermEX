@@ -604,11 +604,10 @@ func parseBodyPref(c *wbxml.Node) bodyPref {
 		switch ch.Tag {
 		case wbxml.ABBodyPreference:
 			if t, err := strconv.Atoi(ch.ChildText(wbxml.ABType)); err == nil {
-				n, _ := strconv.Atoi(ch.ChildText(wbxml.ABTruncationSize))
-				trunc[t] = n
+				trunc[t] = optionalCount(ch.ChildText(wbxml.ABTruncationSize))
 			}
 		case wbxml.ASMIMESupport:
-			pref.mimeSupport, _ = strconv.Atoi(ch.Text)
+			pref.mimeSupport = optionalCount(ch.Text)
 		}
 	}
 	for _, t := range []int{bodyTypeHTML, bodyTypeMIME, bodyTypePlain} {
@@ -818,9 +817,31 @@ func parseWindow(s string) int {
 	return n
 }
 
-// lessSID orders two numeric server ids numerically.
+// optionalCount reads an optional unsignedInt option such as TruncationSize or
+// MIMESupport. An absent value and one that is not a non-negative integer both
+// read as 0, the value [MS-ASAIRS] gives an absent option: untruncated, and no
+// S/MIME as verbatim MIME.
+func optionalCount(s string) int {
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
+// lessSID orders two numeric server ids numerically. An id that is not a number
+// (none is issued, but the snapshot is read back from storage) orders by its text
+// after every numeric id, so the order stays total.
 func lessSID(a, b string) bool {
-	ai, _ := strconv.ParseUint(a, 10, 64)
-	bi, _ := strconv.ParseUint(b, 10, 64)
-	return ai < bi
+	ai, aerr := strconv.ParseUint(a, 10, 64)
+	bi, berr := strconv.ParseUint(b, 10, 64)
+	switch {
+	case aerr == nil && berr == nil:
+		return ai < bi
+	case aerr == nil:
+		return true
+	case berr == nil:
+		return false
+	}
+	return a < b
 }

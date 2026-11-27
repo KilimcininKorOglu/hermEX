@@ -209,7 +209,10 @@ func sentItemsCopy(st *objectstore.Store) func([]byte) {
 // parseMeetingRequest reads one Request: the item it answers, the answer, and what
 // the organizer receives. status is mrStatusOK when the Request is usable.
 func parseMeetingRequest(st *objectstore.Store, protocol string, req *wbxml.Node) (messageID int64, response int32, reply meeting.Reply, status int) {
-	ur, _ := strconv.Atoi(req.ChildText(wbxml.MRUserResponse))
+	ur, err := strconv.Atoi(req.ChildText(wbxml.MRUserResponse))
+	if err != nil {
+		return 0, 0, reply, mrStatusInvalid
+	}
 	response, ok := userResponse(ur)
 	if !ok {
 		return 0, 0, reply, mrStatusInvalid

@@ -118,7 +118,14 @@ func (s *Server) handleMailboxSearch(w http.ResponseWriter, store *wbxml.Node, s
 	for _, h := range page {
 		collID := strconv.FormatInt(h.fid, 10)
 		sid := strconv.FormatUint(uint64(h.m.UID), 10)
-		raw, _ := st.GetMessageRaw(h.fid, h.m.UID)
+		raw, err := st.GetMessageRaw(h.fid, h.m.UID)
+		if err != nil {
+			// A hit whose bytes will not read cannot be described; answering it
+			// with an empty body would show the device a message that is not there.
+			s.recordSwallowed(sess, "search.read.fail", err)
+			writeWBXML(w, mailboxSearchReply(srStatusServerError, nil, 0, 0, 0))
+			return
+		}
 		appdata := emailAppData(mailRender{st: st, pref: pref, protocol: sess.protocol}, raw, h.m, collID, sid)
 		results = append(results, wbxml.Elem(wbxml.SRResult,
 			wbxml.Str(wbxml.ASClass, "Email"),
