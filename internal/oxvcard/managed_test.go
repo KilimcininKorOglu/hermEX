@@ -60,7 +60,11 @@ func TestManagedTagsKeepFileAs(t *testing.T) {
 	allocated := len(r.ids)
 	managed, err := ManagedTags(opt)
 	mustNoErr(t, err, "managed tags")
-	ids, _ := r.resolve(false, []mapi.PropertyName{mapi.NameFileAs})
+	ids, err := r.resolve(false, []mapi.PropertyName{mapi.NameFileAs})
+	mustNoErr(t, err, "resolve the file-as name")
+	if ids[0] == 0 {
+		t.Fatal("namedTags did not allocate the file-as name, so the check below proves nothing")
+	}
 	fileAs := mapi.PropTag(uint32(ids[0])<<16 | uint32(mapi.PtUnicode))
 	if slices.Contains(managed, fileAs) {
 		t.Error("ManagedTags holds the file-as name")
