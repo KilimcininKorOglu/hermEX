@@ -157,6 +157,25 @@ func TestUnicodeUnterminated(t *testing.T) {
 	}
 }
 
+// TestSkipPassesAReservedField skips a 4-byte reserved field and reads the
+// field after it; a negative count or one past the end is refused and leaves
+// the read position where it was.
+func TestSkipPassesAReservedField(t *testing.T) {
+	p := NewPull([]byte{0xAA, 0xBB, 0xCC, 0xDD, 0x02, 0x01}, 0)
+	mustNoErr(t, p.Skip(4), "skip reserved")
+	v, err := p.Uint16()
+	mustNoErr(t, err, "read after skip")
+	wantEq(t, v, uint16(0x0102), "field after the reserved one")
+
+	q := NewPull([]byte{0x01, 0x02, 0x03}, 0)
+	for _, n := range []int{-1, 4} {
+		if err := q.Skip(n); !errors.Is(err, ErrUnderflow) {
+			t.Errorf("Skip(%d) err = %v, want ErrUnderflow", n, err)
+		}
+		wantEq(t, q.Remaining(), 3, "remaining after a refused skip")
+	}
+}
+
 func TestPullUnderflow(t *testing.T) {
 	if _, err := NewPull([]byte{0x01, 0x02}, 0).Uint32(); !errors.Is(err, ErrUnderflow) {
 		t.Errorf("short Uint32 err = %v, want ErrUnderflow", err)

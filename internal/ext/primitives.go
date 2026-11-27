@@ -122,6 +122,17 @@ func (p *Pull) Raw(n int) ([]byte, error) {
 	return out, nil
 }
 
+// Skip advances past n bytes the decoder has no use for, such as a field the
+// specification reserves or tells the receiver to ignore. A negative n or one past
+// the end of the buffer fails with ErrUnderflow and moves nothing.
+func (p *Pull) Skip(n int) error {
+	if err := p.need(n); err != nil {
+		return err
+	}
+	p.off += n
+	return nil
+}
+
 // --- GUID (field-wise: Data1-3 little-endian, Data4 verbatim) ---
 
 // GUID writes a 128-bit GUID in the canonical field-wise wire layout.
