@@ -32,9 +32,8 @@ func TestLoadRulesSeedsDataDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadRules: %v", err)
 	}
-	rules, metas := rs.RuleCount()
-	if rules < 100 || metas < 0 {
-		t.Errorf("seeded ruleset has %d rules / %d metas, want the baseline", rules, metas)
+	if rules, _ := rs.RuleCount(); rules < 100 {
+		t.Errorf("seeded ruleset has %d rules, want the baseline (>=100)", rules)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, RulesFileName))
 	if err != nil {
