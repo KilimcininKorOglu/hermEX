@@ -574,7 +574,13 @@ func dropLegacyTTL(ctx context.Context, reader *logging.Reader) {
 // seedLogRetention writes the config value into the directory once, so an existing
 // deployment keeps its behaviour and the admin panel is the source of truth after.
 func seedLogRetention(dir *directory.SQLDirectory, seedDays int) {
-	if _, found, err := dir.GetLogRetentionDays(); err != nil || found {
+	days, found, err := dir.GetLogRetentionDays()
+	if err != nil {
+		log.Printf("hermex-admin: read log retention before seeding: %v", err)
+		return
+	}
+	if found {
+		log.Printf("hermex-admin: log retention stays at the stored %d days", days)
 		return
 	}
 	if err := dir.SetLogRetentionDays(seedDays); err != nil {
@@ -592,13 +598,13 @@ func retentionCutoff(now time.Time, days int) time.Time {
 // pruneLogs deletes the events older than the stored window. A window of zero or less
 // means keep forever, so nothing is pruned.
 func pruneLogs(ctx context.Context, dir *directory.SQLDirectory, reader *logging.Reader) {
-	days, _, err := dir.GetLogRetentionDays()
+	days, found, err := dir.GetLogRetentionDays()
 	if err != nil {
 		log.Printf("hermex-admin: read log retention: %v", err)
 		return
 	}
-	if days <= 0 {
-		return // keep forever, never prune
+	if !found || days <= 0 {
+		return // no stored window, or keep forever: never prune
 	}
 	cutoff := retentionCutoff(time.Now(), days)
 	pruneCtx, cancel := context.WithTimeout(ctx, 30*time.Second)

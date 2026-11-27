@@ -1,9 +1,45 @@
 package main
 
 import (
+	"bytes"
+	"database/sql"
+	"log"
+	"strings"
 	"testing"
 	"time"
+
+	"hermex/internal/directory"
 )
+
+// TestSeedLogRetentionReportsAFailedRead proves a directory that cannot be read
+// leaves a line naming the failure, instead of a silent skip that leaves the
+// operator thinking the config window was seeded, and that no write is tried.
+func TestSeedLogRetentionReportsAFailedRead(t *testing.T) {
+	db, err := sql.Open("mysql", "u:p@tcp(127.0.0.1:1)/none")
+	mustNoErrMain(t, "open a handle", err)
+	mustNoErrMain(t, "close the handle so every read fails", db.Close())
+	var out bytes.Buffer
+	prev, prevFlags := log.Writer(), log.Flags()
+	log.SetOutput(&out)
+	log.SetFlags(0)
+	t.Cleanup(func() { log.SetOutput(prev); log.SetFlags(prevFlags) })
+
+	seedLogRetention(directory.NewSQL(db), 30)
+	got := out.String()
+	if !strings.Contains(got, "read log retention before seeding") || !strings.Contains(got, "closed") {
+		t.Errorf("output = %q, want the failed read and its error", got)
+	}
+	if strings.Contains(got, "seed log retention:") {
+		t.Errorf("output = %q: a write was tried after the failed read", got)
+	}
+}
+
+func mustNoErrMain(t *testing.T, what string, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s: %v", what, err)
+	}
+}
 
 // TestRetentionCutoffNeverReachesTheFuture proves a retention window, however
 // wide, puts the prune cutoff in the past: the log prune and prune-eml delete
