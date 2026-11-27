@@ -1,15 +1,42 @@
 package imap
 
+import (
+	"hermex/internal/logging"
+	"hermex/internal/objectstore"
+)
+
 // QUOTA (RFC 2087). hermEX has one quota root per mailbox, the store root,
 // addressed by the empty name "", so the resource model is a single STORAGE
 // limit read from the objectstore quota properties against the live mailbox size.
 
 // writeQuota emits an untagged QUOTA response for the mailbox's single root. The
 // STORAGE values are in units of 1024 octets (RFC 2087); an unlimited mailbox
-// (no limit set) reports an empty resource list.
-func (c *conn) writeQuota(root string) {
-	q, _ := c.st.GetQuota()
-	used, _ := c.st.MailboxSize()
+// (no limit set) reports an empty resource list. A limit or usage that cannot be
+// read is recorded and reported false, so the caller answers NO instead of telling
+// the client it has no limit.
+func (c *conn) writeQuota(root string) bool {
+	q, err := c.st.GetQuota()
+	if err != nil {
+		c.quotaReadFailed(err)
+		return false
+	}
+	used, err := c.st.MailboxSize()
+	if err != nil {
+		c.quotaReadFailed(err)
+		return false
+	}
+	c.emitQuota(root, q, used)
+	return true
+}
+
+// quotaReadFailed records a quota or mailbox-size read that failed.
+func (c *conn) quotaReadFailed(err error) {
+	c.event(logging.LevelError, "quota.read.fail", logging.Fields{"error": err.Error()})
+}
+
+// emitQuota writes the QUOTA response for root from the stored limits and the
+// mailbox size in bytes.
+func (c *conn) emitQuota(root string, q objectstore.QuotaLimits, used int64) {
 	limitKB := q.StorageKB
 	if limitKB == 0 {
 		limitKB = q.ReceiveKB // fall back to the hard receive limit
@@ -39,7 +66,10 @@ func (c *conn) cmdGetQuotaRoot(tag string, args []token) {
 		return
 	}
 	c.untagged(`QUOTAROOT %s ""`, safeQuoted(mailbox))
-	c.writeQuota("")
+	if !c.writeQuota("") {
+		c.no(tag, "cannot read the mailbox quota")
+		return
+	}
 	c.ok(tag, "GETQUOTAROOT completed")
 }
 
@@ -59,7 +89,10 @@ func (c *conn) cmdGetQuota(tag string, args []token) {
 		c.no(tag, "no such quota root")
 		return
 	}
-	c.writeQuota("")
+	if !c.writeQuota("") {
+		c.no(tag, "cannot read the mailbox quota")
+		return
+	}
 	c.ok(tag, "GETQUOTA completed")
 }
 

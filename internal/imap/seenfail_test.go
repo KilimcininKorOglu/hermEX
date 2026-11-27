@@ -1,7 +1,10 @@
 package imap
 
 import (
+	"bufio"
+	"bytes"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,6 +75,29 @@ func TestImplicitSeenFailureLeavesTheRowUnread(t *testing.T) {
 	}
 	if c.sel.msgs[0].Flags&objectstore.FlagSeen != 0 {
 		t.Error("the cached row was marked seen even though the store refused the write")
+	}
+}
+
+// TestGetQuotaOnAnUnreadableStoreFails proves a quota that cannot be read is not
+// reported as unlimited. Reporting "QUOTA () " for a store whose limits failed to
+// load tells the client it has no limit while delivery still enforces one, so the
+// command must fail and the cause must be recorded.
+func TestGetQuotaOnAnUnreadableStoreFails(t *testing.T) {
+	sink := &captureSink{}
+	var out bytes.Buffer
+	c := &conn{srv: &Server{Logger: logging.New(sink)}, user: "bob@hermex.test", st: closedStore(t), bw: bufio.NewWriter(&out), state: stateAuth}
+
+	c.cmdGetQuota("q", []token{{val: ""}})
+	c.flush()
+
+	if strings.Contains(out.String(), "* QUOTA") {
+		t.Errorf("a quota that could not be read was reported: %q", out.String())
+	}
+	if !strings.HasPrefix(out.String(), "q NO") {
+		t.Errorf("reply = %q, want a tagged NO", out.String())
+	}
+	if _, ok := find(sink.snapshot(), "quota.read.fail"); !ok {
+		t.Error("the failed quota read left no record")
 	}
 }
 
