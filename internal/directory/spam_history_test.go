@@ -72,6 +72,24 @@ func TestSpamHistoryReasonsTruncated(t *testing.T) {
 	}
 }
 
+// TestSpamHistoryKeepsAHostileSendersVerdict records what an unauthenticated
+// sender controls: an 8-bit MAIL FROM that is not UTF-8, and reasons that run
+// past the column in non-ASCII text. A refused insert would drop the verdict
+// from the operator's only view of why mail was scored.
+func TestSpamHistoryKeepsAHostileSendersVerdict(t *testing.T) {
+	d := setupSpamHistory(t)
+	mustNoErr(t, "record a hostile verdict", d.RecordSpamVerdict(SpamVerdict{
+		Time: 1, MailFrom: "spam\xff\xfe@evil.example", Reasons: "x" + strings.Repeat("ş", 300),
+	}))
+	got, err := d.RecentSpamVerdicts(1)
+	mustNoErr(t, "list verdicts", err)
+	if len(got) != 1 {
+		t.Fatalf("list = %+v, want the hostile verdict", got)
+	}
+	wantEq(t, "the sender keeps its readable parts", strings.HasPrefix(got[0].MailFrom, "spam") && strings.HasSuffix(got[0].MailFrom, "@evil.example"), true)
+	wantEq(t, "reasons cut on a character", got[0].Reasons, "x"+strings.Repeat("ş", 255))
+}
+
 // TestSpamHistoryRetention proves the table is bounded: with the cap lowered, only
 // roughly the newest cap rows survive after more inserts than the cap.
 func TestSpamHistoryRetention(t *testing.T) {

@@ -37,13 +37,10 @@ func (d *SQLDirectory) SetSpamHistoryRetain(n int64) {
 // the retention cap. The MTA calls it fail-open, a delivery must never fail
 // because history could not be written, so the caller logs and ignores any error.
 func (d *SQLDirectory) RecordSpamVerdict(v SpamVerdict) error {
-	if len(v.Reasons) > 512 {
-		v.Reasons = v.Reasons[:512]
-	}
 	res, err := d.db.Exec(
 		`INSERT INTO spam_history (ts, mail_from, remote_addr, score, spam, reasons)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
-		v.Time, v.MailFrom, v.RemoteAddr, v.Score, v.Spam, v.Reasons)
+		v.Time, capString(v.MailFrom, 320), capString(v.RemoteAddr, 64), v.Score, v.Spam, capString(v.Reasons, 512))
 	if err != nil {
 		return err
 	}
