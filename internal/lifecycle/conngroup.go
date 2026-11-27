@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"runtime"
 	"sync"
@@ -57,7 +58,7 @@ func (g *ConnGroup) guard(handle func(net.Conn), nc net.Conn) {
 		if v == nil {
 			return
 		}
-		_ = nc.Close()
+		closeConn(nc)
 		g.mu.Lock()
 		onPanic := g.onPanic
 		g.mu.Unlock()
@@ -180,10 +181,18 @@ func admit(gate Gate, nc net.Conn) (release func(), ok bool) {
 // itself when there is none.
 func refuseConn(refuse func(net.Conn), nc net.Conn) {
 	if refuse == nil {
-		_ = nc.Close()
+		closeConn(nc)
 		return
 	}
 	refuse(nc)
+}
+
+// closeConn closes nc and reports a close failure at warn level, which the
+// default handler writes to stderr; a conn already closed is not a failure.
+func closeConn(nc net.Conn) {
+	if err := nc.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+		slog.Warn("lifecycle: close connection", "remote", remoteAddr(nc), "err", err)
+	}
 }
 
 func (g *ConnGroup) isDraining() bool {
