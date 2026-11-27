@@ -64,7 +64,12 @@ func (s *Server) handleResolveRecipients(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	gal, _ := s.accounts.(directory.GAL)
+	// A directory without an address book leaves gal nil: only the caller's own
+	// contacts are searched.
+	var gal directory.GAL
+	if g, ok := s.accounts.(directory.GAL); ok {
+		gal = g
+	}
 	children := []*wbxml.Node{wbxml.Str(wbxml.RRStatus, strconv.Itoa(rrStatusOK))}
 	// Each entry can resolve to many mailboxes and, with availability requested,
 	// each match opens a store and scans a calendar, so bound the entry count.
