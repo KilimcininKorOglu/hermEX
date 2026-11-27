@@ -226,6 +226,7 @@ func emptyMessages(st *objectstore.Store, fid int64, msgs []objectstore.MessageI
 func folderByName(st *objectstore.Store, name string) (int64, bool) {
 	folders, err := st.ListFolders()
 	if err != nil {
+		logError("folder-by-name", err, logging.Fields{"name": name})
 		return 0, false
 	}
 	parent := make(map[int64]int64, len(folders))
