@@ -530,6 +530,9 @@ func TestCopyFolderRecursiveAndCycle(t *testing.T) {
 	if ec := readEC(t, resp2, ropCopyFolder); ec != ecFolderCycle {
 		t.Errorf("cycle CopyFolder ec = %#x, want ecFolderCycle (%#x)", ec, ecFolderCycle)
 	}
+	if folderNamedUnder(t, store, sub, "Loop") {
+		t.Error("the refused cycle copy still created \"Loop\" inside its own subtree")
+	}
 }
 
 // folderNamedUnder reports whether a folder with the given display name exists
