@@ -54,6 +54,28 @@ func TestExportCalendarAlternative(t *testing.T) {
 	wantNotContains(t, string(plain), "text/calendar", "an export without CalendarBody emits no calendar part")
 }
 
+// TestExportRefusesACalendarMethodThatIsNoToken passes a method carrying a line
+// break. RFC 5322 2.2 ends a field at CRLF, so a break inside the Content-Type
+// parameter would start a header field of the caller's choosing, and RFC 5545
+// 3.7.2 makes METHOD an iana-token, which holds no such character: the export
+// must refuse it rather than emit any bytes.
+func TestExportRefusesACalendarMethodThatIsNoToken(t *testing.T) {
+	msg := &Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrSubject, Value: "Accepted"},
+		{Tag: mapi.PrBody, Value: "ok"},
+	}}
+	ical := []byte("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REPLY\r\nEND:VCALENDAR\r\n")
+	for _, method := range []string{"REPLY\r\nBcc: evil@attacker.example", "REPLY\nX: y", "RE PLY", "REPLY;x=y"} {
+		wire, err := Export(msg, Options{CalendarBody: ical, CalendarMethod: method})
+		if err == nil {
+			t.Errorf("method %q was accepted:\n%s", method, wire)
+		}
+		if wire != nil {
+			t.Errorf("method %q was refused but %d bytes came back", method, len(wire))
+		}
+	}
+}
+
 // alternativePart is one branch of a multipart/alternative: its Content-Type
 // parameters and its decoded body.
 type alternativePart struct {
