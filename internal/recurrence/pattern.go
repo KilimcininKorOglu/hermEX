@@ -140,64 +140,85 @@ func setFreq(r *rrule, val string) error {
 	return nil
 }
 
+// positiveInt reads a field RFC 5545 3.3.10 makes a positive integer, refusing
+// anything else with the field named.
+func positiveInt(field, val string) (int, error) {
+	n, err := strconv.Atoi(val)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("%w: %s %q is not a positive integer", ErrInvalidRRule, field, val)
+	}
+	return n, nil
+}
+
 // setInterval stores INTERVAL, rejecting a value wider than the pattern fields carry.
 func setInterval(r *rrule, val string) error {
-	n, err := strconv.Atoi(val)
+	n, err := positiveInt("INTERVAL", val)
 	if err != nil {
-		return nil
+		return err
 	}
 	if n > maxRRuleInterval {
 		return fmt.Errorf("%w: INTERVAL %d exceeds %d", ErrInvalidRRule, n, maxRRuleInterval)
 	}
-	if n > 0 {
-		r.Interval = n
-	}
+	r.Interval = n
 	return nil
 }
 
 // setCount stores COUNT, rejecting a value the 32-bit OccurrenceCount cannot carry.
 func setCount(r *rrule, val string) error {
-	n, err := strconv.Atoi(val)
+	n, err := positiveInt("COUNT", val)
 	if err != nil {
-		return nil
+		return err
 	}
 	if n > math.MaxUint32 {
 		return fmt.Errorf("%w: COUNT %d exceeds %d", ErrInvalidRRule, n, uint32(math.MaxUint32))
 	}
-	if n > 0 {
-		r.Count = n
-	}
+	r.Count = n
 	return nil
 }
 
-// setUntil stores UNTIL when it parses as one of the three RRULE date forms.
+// setUntil stores UNTIL, refusing a value that is none of the three RRULE date
+// forms.
 func setUntil(r *rrule, val string) error {
-	if t, ok := parseRRuleUntil(val); ok {
-		r.Until = t
+	t, ok := parseRRuleUntil(val)
+	if !ok {
+		return fmt.Errorf("%w: UNTIL %q is not a date or date-time", ErrInvalidRRule, val)
 	}
+	r.Until = t
 	return nil
 }
 
-// setByDayParam stores the BYDAY weekday tokens and any ordinal prefix.
+// rfc5545Weekdays are the weekday codes a BYDAY value may name (RFC 5545 3.3.10).
+var rfc5545Weekdays = map[string]bool{"SU": true, "MO": true, "TU": true, "WE": true, "TH": true, "FR": true, "SA": true}
+
+// setByDayParam stores the BYDAY weekday tokens and any ordinal prefix, refusing
+// a token that names no weekday.
 func setByDayParam(r *rrule, val string) error {
-	r.Weekdays, r.SetPos = parseByDay(val)
+	days, setPos := parseByDay(val)
+	for _, d := range days {
+		if !rfc5545Weekdays[d] {
+			return fmt.Errorf("%w: BYDAY %q names no weekday", ErrInvalidRRule, d)
+		}
+	}
+	r.Weekdays, r.SetPos = days, setPos
 	return nil
 }
 
 // setMonthDayParam stores BYMONTHDAY.
-func setMonthDayParam(r *rrule, val string) error { return setInt(&r.MonthDay, val) }
+func setMonthDayParam(r *rrule, val string) error { return setInt("BYMONTHDAY", &r.MonthDay, val) }
 
 // setMonthParam stores BYMONTH.
-func setMonthParam(r *rrule, val string) error { return setInt(&r.Month, val) }
+func setMonthParam(r *rrule, val string) error { return setInt("BYMONTH", &r.Month, val) }
 
 // setSetPosParam stores BYSETPOS.
-func setSetPosParam(r *rrule, val string) error { return setInt(&r.SetPos, val) }
+func setSetPosParam(r *rrule, val string) error { return setInt("BYSETPOS", &r.SetPos, val) }
 
-// setInt stores an integer parameter, ignoring a value that is not an integer.
-func setInt(dst *int, val string) error {
-	if n, err := strconv.Atoi(val); err == nil {
-		*dst = n
+// setInt stores an integer parameter, refusing a value that is not an integer.
+func setInt(field string, dst *int, val string) error {
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		return fmt.Errorf("%w: %s %q is not an integer", ErrInvalidRRule, field, val)
 	}
+	*dst = n
 	return nil
 }
 

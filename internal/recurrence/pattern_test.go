@@ -110,13 +110,42 @@ func TestFromRRuleUntil(t *testing.T) {
 }
 
 // TestFromRRuleInvalid rejects an empty / malformed RRULE so a bad store value never
-// produces a misleading Outlook blob.
+// produces a misleading Outlook blob. RFC 5545 3.3.10 makes INTERVAL and COUNT
+// positive integers and BYDAY a list of weekday codes, so a zero, negative or
+// unknown value is refused, and a refusal returns no blob.
 func TestFromRRuleInvalid(t *testing.T) {
-	if _, err := FromRRule("", time.Now()); err == nil {
-		t.Error("empty RRULE should error")
+	start := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
+	for _, rule := range []string{
+		"", "FREQ=BOGUS", "FREQ=DAILY;INTERVAL=0", "FREQ=DAILY;INTERVAL=-1",
+		"FREQ=DAILY;COUNT=-1", "FREQ=DAILY;INTERVAL=x", "FREQ=WEEKLY;BYDAY=XX",
+		"FREQ=DAILY;UNTIL=tomorrow", "FREQ=MONTHLY;BYMONTHDAY=x",
+	} {
+		blob, err := FromRRule(rule, start)
+		if err == nil {
+			t.Errorf("%q was accepted", rule)
+		}
+		if blob != nil {
+			t.Errorf("%q: a refused rule still returned a %d-byte blob", rule, len(blob))
+		}
 	}
-	if _, err := FromRRule("FREQ=BOGUS", time.Now()); err == nil {
-		t.Error("unknown FREQ should error")
+}
+
+// TestToRRuleRefusesAMalformedBlob reads a PidLidAppointmentRecur value a client
+// wrote, so a blob shorter than the [MS-OXOCAL] RecurrencePattern it claims, or
+// none at all, must be refused with no rule rather than read past its end.
+func TestToRRuleRefusesAMalformedBlob(t *testing.T) {
+	good, err := FromRRule("FREQ=WEEKLY;INTERVAL=1;COUNT=5;BYDAY=MO", time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, blob := range map[string][]byte{
+		"nil":        nil,
+		"header cut": good[:6],
+		"body cut":   good[:len(good)-4],
+	} {
+		if rule, ok := ToRRule(blob); ok || rule != "" {
+			t.Errorf("%s: ToRRule = %q, %v, want no rule", name, rule, ok)
+		}
 	}
 }
 
