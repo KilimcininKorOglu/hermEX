@@ -19,7 +19,7 @@ func fillPastQuota(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	big := "Subject: big\r\n\r\n" + strings.Repeat("x", 4096)
 	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(big), time.Unix(3, 0), 0); err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestSyncAddIntoAFullMailboxIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	notes, err := st.ListFolderObjects(int64(mapi.PrivateFIDNotes))
 	if err != nil {
 		t.Fatal(err)

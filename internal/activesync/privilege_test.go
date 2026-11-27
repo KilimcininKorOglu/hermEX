@@ -47,7 +47,7 @@ func privilegeStatus(t *testing.T, accs privDir, pass string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	mustNoErr(t, "close the reply", resp.Body.Close())
 	return resp.StatusCode
 }
 
@@ -63,7 +63,7 @@ func TestActiveSyncPrivilegeDenied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 	static := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
 	noEAS := directory.ServicePrivileges{EAS: false, POP3IMAP: true, SMTP: true, Web: true, DAV: true}
 
