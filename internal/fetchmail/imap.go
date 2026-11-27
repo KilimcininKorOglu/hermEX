@@ -43,7 +43,9 @@ func dialIMAP(server string, port int, ssl, verify bool) (*imapConn, error) {
 	}
 	budget := newResponseBudget(conn)
 	c := &imapConn{conn: conn, r: bufio.NewReader(budget), budget: budget}
-	setDeadline(conn)
+	if err := setDeadline(conn); err != nil {
+		return nil, errors.Join(err, conn.Close())
+	}
 	line, err := c.r.ReadString('\n')
 	if err != nil {
 		return nil, errors.Join(err, conn.Close())
@@ -57,7 +59,9 @@ func dialIMAP(server string, port int, ssl, verify bool) (*imapConn, error) {
 // do sends a tagged command and reads to its completion, returning the untagged response
 // lines. It is for line-based commands; fetchBody handles the literal-bearing FETCH.
 func (c *imapConn) do(cmd string) ([]string, error) {
-	setDeadline(c.conn)
+	if err := setDeadline(c.conn); err != nil {
+		return nil, err
+	}
 	c.budget.renew()
 	c.tag++
 	tag := fmt.Sprintf("a%d", c.tag)
@@ -157,7 +161,9 @@ func (c *imapConn) readLiteral(n int) (body []byte, over bool, err error) {
 
 // fetchBody downloads one message's full body by UID, reading the literal precisely.
 func (c *imapConn) fetchBody(uid string) ([]byte, error) {
-	setDeadline(c.conn)
+	if err := setDeadline(c.conn); err != nil {
+		return nil, err
+	}
 	c.budget.renew()
 	c.tag++
 	tag := fmt.Sprintf("a%d", c.tag)
@@ -192,7 +198,9 @@ func (c *imapConn) fetchBody(uid string) ([]byte, error) {
 
 // readLiteralSegment reads one literal and the line that closes it.
 func (c *imapConn) readLiteralSegment(n int) (body []byte, over bool, err error) {
-	setDeadline(c.conn)
+	if err := setDeadline(c.conn); err != nil {
+		return nil, false, err
+	}
 	body, over, err = c.readLiteral(n)
 	if err != nil {
 		return nil, false, err

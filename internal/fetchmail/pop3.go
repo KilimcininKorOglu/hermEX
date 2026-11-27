@@ -24,9 +24,14 @@ var opTimeout = 2 * time.Minute
 
 // setDeadline arms the post-connect I/O deadline. Called before each read phase; because the
 // deadline is absolute and re-armed each time, a stalled remote read fails after opTimeout
-// while a transfer that keeps making progress is never interrupted.
-func setDeadline(conn net.Conn) {
-	_ = conn.SetDeadline(time.Now().Add(opTimeout))
+// while a transfer that keeps making progress is never interrupted. A connection
+// that refuses the deadline would let a stalled remote hang the worker, so the
+// failure ends the operation.
+func setDeadline(conn net.Conn) error {
+	if err := conn.SetDeadline(time.Now().Add(opTimeout)); err != nil {
+		return fmt.Errorf("fetchmail: set the I/O deadline: %w", err)
+	}
+	return nil
 }
 
 // pop3Conn is a minimal POP3 client: enough of RFC 1939 to list, identify, download, and
@@ -70,7 +75,9 @@ func dialPOP3(server string, port int, ssl, verify bool) (*pop3Conn, error) {
 	}
 	budget := newResponseBudget(conn)
 	c := &pop3Conn{conn: conn, tp: textproto.NewConn(budgetedConn{Reader: budget, Conn: conn}), budget: budget}
-	setDeadline(conn)
+	if err := setDeadline(conn); err != nil {
+		return nil, errors.Join(err, conn.Close())
+	}
 	if _, err := c.readOK(); err != nil { // server greeting
 		return nil, errors.Join(err, conn.Close())
 	}
@@ -94,7 +101,9 @@ func (c *pop3Conn) readOK() (string, error) {
 
 // cmd sends a command and reads its single-line status reply.
 func (c *pop3Conn) cmd(format string, args ...any) (string, error) {
-	setDeadline(c.conn)
+	if err := setDeadline(c.conn); err != nil {
+		return "", err
+	}
 	c.budget.renew()
 	if err := c.tp.PrintfLine(format, args...); err != nil {
 		return "", err
@@ -142,7 +151,9 @@ func (c *pop3Conn) uidl() (map[int]string, error) {
 	if _, err := c.cmd("UIDL"); err != nil {
 		return nil, err
 	}
-	setDeadline(c.conn)
+	if err := setDeadline(c.conn); err != nil {
+		return nil, err
+	}
 	lines, err := c.tp.ReadDotLines()
 	if err != nil {
 		return nil, err
@@ -169,7 +180,9 @@ func (c *pop3Conn) retr(n int) ([]byte, error) {
 	if _, err := c.cmd("RETR %d", n); err != nil {
 		return nil, err
 	}
-	setDeadline(c.conn)
+	if err := setDeadline(c.conn); err != nil {
+		return nil, err
+	}
 	dot := c.tp.DotReader()
 	limit := maxMessage()
 	body, err := io.ReadAll(io.LimitReader(dot, limit+1))
@@ -177,7 +190,11 @@ func (c *pop3Conn) retr(n int) ([]byte, error) {
 		return nil, err
 	}
 	if int64(len(body)) > limit {
-		_, _ = io.Copy(io.Discard, dot)
+		// A drain that fails leaves the session mid-message, so the next command
+		// would read this message's bytes as its reply; the caller must stop.
+		if _, err := io.Copy(io.Discard, dot); err != nil {
+			return nil, errors.Join(ErrMessageTooLarge, fmt.Errorf("fetchmail: drain the over-cap message: %w", err))
+		}
 		return nil, ErrMessageTooLarge
 	}
 	// DotReader hands back LF endings; the wire form is CRLF, which is what

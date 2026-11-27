@@ -97,15 +97,30 @@ func connectIMAP(cfg directory.FetchmailEntry) (*imapConn, error) {
 // pollPOP3 fetches new mail from a POP3 source. A kept account skips ids recorded in the
 // seen store (unless fetchall) and records the newly delivered ones; a non-kept account
 // deletes each message after delivery, so the source itself prevents re-fetching.
-func pollPOP3(s Store, deliver Deliverer, cfg directory.FetchmailEntry, now time.Time) (int, error) {
+//
+// QUIT is what commits the deletions (RFC 1939 6), so a failed QUIT leaves every
+// deleted message on the source to be fetched again; its error is returned with
+// the poll's own rather than dropped.
+func pollPOP3(s Store, deliver Deliverer, cfg directory.FetchmailEntry, now time.Time) (delivered int, err error) {
 	c, err := connectPOP3(cfg)
 	if err != nil {
 		return 0, err
 	}
-	defer func() { _ = c.quit() }()
+	defer func() {
+		if qerr := c.quit(); qerr != nil {
+			err = errors.Join(err, fmt.Errorf("pop3 quit: %w", qerr))
+		}
+	}()
 	if err := c.auth(cfg.SrcUser, cfg.SrcPassword); err != nil {
 		return 0, err
 	}
+	return deliverUnseenPOP3(c, s, deliver, cfg, now)
+}
+
+// deliverUnseenPOP3 lists the maildrop and delivers every message a kept
+// account has not recorded yet (every message for a non-kept one), returning
+// the number delivered before any failure.
+func deliverUnseenPOP3(c *pop3Conn, s Store, deliver Deliverer, cfg directory.FetchmailEntry, now time.Time) (int, error) {
 	uids, err := c.uidl()
 	if err != nil {
 		return 0, err
@@ -150,12 +165,16 @@ func deliverPOP3(c *pop3Conn, s Store, deliver Deliverer, cfg directory.Fetchmai
 // pollIMAP fetches new mail from an IMAP source. A kept account searches UNSEEN (or ALL
 // with fetchall), delivers, and marks each \Seen so the next poll skips it; a non-kept
 // account searches ALL and deletes each after delivery.
-func pollIMAP(deliver Deliverer, cfg directory.FetchmailEntry, now time.Time) (int, error) {
+func pollIMAP(deliver Deliverer, cfg directory.FetchmailEntry, now time.Time) (delivered int, err error) {
 	c, err := connectIMAP(cfg)
 	if err != nil {
 		return 0, err
 	}
-	defer func() { _ = c.logout() }()
+	defer func() {
+		if lerr := c.logout(); lerr != nil {
+			err = errors.Join(err, fmt.Errorf("imap logout: %w", lerr))
+		}
+	}()
 	if err := c.login(cfg.SrcUser, cfg.SrcPassword); err != nil {
 		return 0, err
 	}
@@ -170,7 +189,6 @@ func pollIMAP(deliver Deliverer, cfg directory.FetchmailEntry, now time.Time) (i
 	if err != nil {
 		return 0, err
 	}
-	delivered := 0
 	for _, uid := range uids {
 		if err := deliverIMAP(c, deliver, cfg, uid, now); err != nil {
 			return delivered, err
