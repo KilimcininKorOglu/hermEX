@@ -37,7 +37,7 @@ func receiptServerTo(t *testing.T, notifyTo string) (ts *httptest.Server, dir, b
 	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), time.Now(), 0); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 	accs := directory.StaticAccounts{
 		testUser:            {Password: testPass, MailboxPath: dir},
 		"bob@hermex.test":   {Password: "x", MailboxPath: bobDir},
@@ -67,7 +67,7 @@ func inboxCount(t *testing.T, dir string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
 	if err != nil {
 		t.Fatal(err)
@@ -122,7 +122,7 @@ func wantRead(t *testing.T, dir string, want bool) {
 	t.Helper()
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	flags, err := st.MessageFlags(int64(mapi.PrivateFIDInbox), firstUID(t, dir))
 	mustNoErr(t, "read the flags", err)
 	if got := flags&objectstore.FlagSeen != 0; got != want {
@@ -140,7 +140,7 @@ func inboxCountIfAny(t *testing.T, dir string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +159,7 @@ func TestSyncReadReceiptSuppressed(t *testing.T) {
 	if err := st.SetReadReceiptConfig(objectstore.ReadReceiptConfig{SuppressActiveSync: true}); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 	markFirstRead(t, ts, dir)
 	wantRead(t, dir, true)
 	if n := inboxCount(t, bobDir); n != 0 {
