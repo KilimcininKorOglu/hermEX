@@ -72,20 +72,22 @@ func StepAt(t time.Time) int64 {
 // UNSIGNED counter, so a step before the Unix epoch has no code at all rather
 // than one taken from a counter that wrapped to near 2^64; it returns the empty
 // string, which no submitted code can equal.
-func codeAtStep(key []byte, step int64) string {
+func codeAtStep(key []byte, step int64) (string, error) {
 	if step < 0 {
-		return ""
+		return "", nil
 	}
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], uint64(step))
 	m := hmac.New(sha1.New, key)
-	m.Write(buf[:])
+	if _, err := m.Write(buf[:]); err != nil {
+		return "", fmt.Errorf("totp: hash the counter: %w", err)
+	}
 	sum := m.Sum(nil)
 	// RFC 4226 dynamic truncation: the low nibble of the last byte picks the
 	// offset of the four bytes that carry the code.
 	off := sum[len(sum)-1] & 0x0f
 	v := binary.BigEndian.Uint32(sum[off:off+4]) & 0x7fffffff
-	return fmt.Sprintf("%0*d", Digits, v%1_000_000)
+	return fmt.Sprintf("%0*d", Digits, v%1_000_000), nil
 }
 
 // Code returns the code a correct authenticator app shows at t.
@@ -94,7 +96,7 @@ func Code(secret string, t time.Time) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return codeAtStep(key, StepAt(t)), nil
+	return codeAtStep(key, StepAt(t))
 }
 
 // Verify checks a submitted code against the steps within skew of t and returns
@@ -125,7 +127,11 @@ func Verify(secret, code string, t time.Time, skew int) (int64, bool) {
 	found := 0
 	for d := -skew; d <= skew; d++ {
 		step := now + int64(d)
-		eq := subtle.ConstantTimeCompare([]byte(codeAtStep(key, step)), []byte(code))
+		want, err := codeAtStep(key, step)
+		if err != nil {
+			return 0, false // a code that cannot be computed admits nobody
+		}
+		eq := subtle.ConstantTimeCompare([]byte(want), []byte(code))
 		found |= eq
 		matched |= int64(eq) * step
 	}
