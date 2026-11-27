@@ -73,8 +73,8 @@ func TestParseAttendeeReadsAQuotedSentBy(t *testing.T) {
 // tracking can store, and an empty one must map to no update.
 func TestParseAttendeePartStatDrivesTheResponse(t *testing.T) {
 	a := parseAttendee([]byte("ATTENDEE;PARTSTAT=ACCEPTED:mailto:b@hermex.test\r\n"))
-	if got := partstatResponse(a.partstat); got == 0 {
-		t.Error("an accepted reply mapped to no response status; tracking would never update")
+	if got := partstatResponse(a.partstat); got != ResponseAccepted {
+		t.Errorf("an accepted reply mapped to %d, want accepted (%d)", got, ResponseAccepted)
 	}
 	if got := partstatResponse(""); got != 0 {
 		t.Errorf("an absent partstat mapped to %d, want 0 (no update)", got)
