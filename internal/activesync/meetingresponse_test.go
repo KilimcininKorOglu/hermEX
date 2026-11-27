@@ -40,7 +40,7 @@ func TestMeetingResponseAccept(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	cal, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
 	mustNoErr(t, "list the calendar", err)
 	if len(cal) != 1 {
@@ -57,7 +57,7 @@ func TestMeetingResponseAccept(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v, _ := pv.Get(uidTag); v != "eas-meeting-1" {
+	if v, ok := pv.Get(uidTag); !ok || v != "eas-meeting-1" {
 		t.Errorf("filed appointment UID = %v, want eas-meeting-1 (from the parsed invite)", v)
 	}
 }
@@ -75,7 +75,7 @@ func TestMeetingResponseRefusesInvalidRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(convMsgRoot), time.Now(), 0)
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,6 +86,9 @@ func TestMeetingResponseRefusesInvalidRequests(t *testing.T) {
 		{"response not a number", "yes", inbox, invite},
 		{"ordinary mail", "1", inbox, strconv.FormatUint(uint64(plain.UID), 10)},
 		{"no such message", "1", inbox, "4000000"},
+		{"negative request id", "1", inbox, "-1"},
+		{"request id past uint32", "1", inbox, "99999999999999999999"},
+		{"invite named under another folder", "1", strconv.FormatInt(int64(mapi.PrivateFIDSentItems), 10), invite},
 		{"folder not a number", "1", "inbox", invite},
 	} {
 		req := wbxml.Elem(wbxml.MRMeetingResponse, wbxml.Elem(wbxml.MRRequest,
@@ -101,7 +104,7 @@ func TestMeetingResponseRefusesInvalidRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	// A failed read would return no items and pass as "nothing filed".
 	cal, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
 	mustNoErr(t, "list the calendar", err)
@@ -121,7 +124,7 @@ func seedMeetingRequest(t *testing.T, dir string) uint32 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	const ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\n" +
 		"BEGIN:VEVENT\r\nUID:eas-meeting-1\r\nSUMMARY:Quarterly Review\r\n" +
 		"DTSTART:20260701T140000Z\r\nDTEND:20260701T150000Z\r\n" +
