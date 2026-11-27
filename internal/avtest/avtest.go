@@ -66,35 +66,48 @@ func Clamd(t *testing.T, reply string) string {
 	return "tcp://" + ln.Addr().String()
 }
 
-// serve drains one INSTREAM (the command line, then length-prefixed chunks up to
-// the zero-length terminator) and answers with reply. A client that hangs up
-// before the terminator gets no verdict, which is not the stub's failure; a
-// verdict that cannot be written, or a close that fails, is.
+// instream is the null-terminated clamd command a scan must open with.
+const instream = "zINSTREAM\x00"
+
+// serve drains one INSTREAM (the command, then length-prefixed chunks up to the
+// zero-length terminator) and answers with reply. Any other command, a stream
+// cut before its terminator, a verdict that cannot be written or a close that
+// fails is the scanner's or the stub's failure, so each is returned.
 func serve(c net.Conn, reply string) (err error) {
 	defer func() {
 		if cerr := c.Close(); cerr != nil {
 			err = errors.Join(err, fmt.Errorf("close connection: %w", cerr))
 		}
 	}()
-	cmd := make([]byte, len("zINSTREAM\x00"))
+	cmd := make([]byte, len(instream))
 	if _, err := io.ReadFull(c, cmd); err != nil {
-		return nil
+		return fmt.Errorf("read command: %w", err)
 	}
-	var hdr [4]byte
-	for {
-		if _, err := io.ReadFull(c, hdr[:]); err != nil {
-			return nil
-		}
-		n := binary.BigEndian.Uint32(hdr[:])
-		if n == 0 {
-			break
-		}
-		if _, err := io.CopyN(io.Discard, c, int64(n)); err != nil {
-			return nil
-		}
+	if string(cmd) != instream {
+		return fmt.Errorf("command %q, want %q", cmd, instream)
+	}
+	if err := drainChunks(c); err != nil {
+		return err
 	}
 	if _, err := io.WriteString(c, reply); err != nil {
 		return fmt.Errorf("write verdict: %w", err)
 	}
 	return nil
+}
+
+// drainChunks reads length-prefixed chunks up to the zero-length terminator.
+func drainChunks(c net.Conn) error {
+	var hdr [4]byte
+	for {
+		if _, err := io.ReadFull(c, hdr[:]); err != nil {
+			return fmt.Errorf("read chunk length: %w", err)
+		}
+		n := binary.BigEndian.Uint32(hdr[:])
+		if n == 0 {
+			return nil
+		}
+		if _, err := io.CopyN(io.Discard, c, int64(n)); err != nil {
+			return fmt.Errorf("read chunk: %w", err)
+		}
+	}
 }
