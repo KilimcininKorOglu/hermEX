@@ -114,8 +114,20 @@ func (s *Server) SetConnLimiter(l *connlimit.Limiter) {
 	if l == nil {
 		return
 	}
-	gate, refuse := connlimit.Gate(l, "* BYE hermEX: too many connections\r\n", s.logConnRefused)
+	gate, refuse := connlimit.Gate(l, "* BYE hermEX: too many connections\r\n", s.logConnRefused, s.logRefusalFailed)
 	s.conns.SetGate(gate, refuse)
+}
+
+// logRefusalFailed records a refusal line that did not reach the client or a
+// refused connection that did not close.
+func (s *Server) logRefusalFailed(remote string, err error) {
+	s.Logger.Emit(logging.Event{
+		Level:      logging.LevelWarn,
+		Subsystem:  logging.IMAP,
+		Name:       "conn.refuse_failed",
+		RemoteAddr: remote,
+		Fields:     logging.Fields{"error": err.Error()},
+	})
 }
 
 // logConnRefused records a connection the cap refused, naming which cap it was so

@@ -1,6 +1,8 @@
 package connlimit
 
 import (
+	"errors"
+	"fmt"
 	"net"
 	"time"
 
@@ -27,8 +29,10 @@ func ClientKey(nc net.Conn) string {
 // untagged BYE, a POP3 -ERR, an SMTP 421), written before the connection closes so
 // the client is told why rather than seeing a bare disconnect. onRefused reports
 // the client address and the cap that refused it, so each protocol logs the event
-// under its own subsystem; it may be nil.
-func Gate(l *Limiter, line string, onRefused func(remote string, why Reason)) (
+// under its own subsystem; it may be nil. onRefusalFailed reports a refusal that
+// did not reach the client or a connection that did not close; it may be nil.
+func Gate(l *Limiter, line string, onRefused func(remote string, why Reason),
+	onRefusalFailed func(remote string, err error)) (
 	gate func(net.Conn) (func(), bool), refuse func(net.Conn)) {
 	gate = func(nc net.Conn) (func(), bool) {
 		release, ok, why := l.Acquire(ClientKey(nc))
@@ -38,11 +42,29 @@ func Gate(l *Limiter, line string, onRefused func(remote string, why Reason)) (
 		return release, ok
 	}
 	refuse = func(nc net.Conn) {
-		defer func() { _ = nc.Close() }()
-		_ = nc.SetWriteDeadline(time.Now().Add(refusalWriteTimeout))
-		_, _ = nc.Write([]byte(line))
+		if err := deliverRefusal(nc, line); err != nil && onRefusalFailed != nil {
+			onRefusalFailed(remoteAddr(nc), err)
+		}
 	}
 	return gate, refuse
+}
+
+// deliverRefusal writes line within refusalWriteTimeout and closes nc. Without
+// the deadline the write is not attempted, since a client that never reads would
+// hold it; the connection is closed either way.
+func deliverRefusal(nc net.Conn, line string) (err error) {
+	defer func() {
+		if cerr := nc.Close(); cerr != nil {
+			err = errors.Join(err, fmt.Errorf("close: %w", cerr))
+		}
+	}()
+	if err := nc.SetWriteDeadline(time.Now().Add(refusalWriteTimeout)); err != nil {
+		return fmt.Errorf("set write deadline: %w", err)
+	}
+	if _, err := nc.Write([]byte(line)); err != nil {
+		return fmt.Errorf("write refusal: %w", err)
+	}
+	return nil
 }
 
 // remoteAddr returns a connection's remote address for the log line, or "".

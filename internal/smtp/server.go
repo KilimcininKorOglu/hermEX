@@ -155,8 +155,20 @@ func (s *Server) SetConnLimiter(l *connlimit.Limiter) {
 		return
 	}
 	line := fmt.Sprintf("421 %s Service not available, too many connections\r\n", s.hostname())
-	gate, refuse := connlimit.Gate(l, line, s.logConnRefused)
+	gate, refuse := connlimit.Gate(l, line, s.logConnRefused, s.logRefusalFailed)
 	s.conns.SetGate(gate, refuse)
+}
+
+// logRefusalFailed records a refusal line that did not reach the client or a
+// refused connection that did not close.
+func (s *Server) logRefusalFailed(remote string, err error) {
+	s.Logger.Emit(logging.Event{
+		Level:      logging.LevelWarn,
+		Subsystem:  logging.SMTP,
+		Name:       "conn.refuse_failed",
+		RemoteAddr: remote,
+		Fields:     logging.Fields{"error": err.Error()},
+	})
 }
 
 // logConnRefused records a connection the cap refused, naming which cap it was so

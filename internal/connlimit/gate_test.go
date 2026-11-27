@@ -1,8 +1,10 @@
 package connlimit
 
 import (
+	"errors"
 	"io"
 	"net"
+	"os"
 	"testing"
 	"time"
 )
@@ -25,14 +27,16 @@ func TestARefusedConnectionIsToldWhyAndClosed(t *testing.T) {
 	l := enabled(t, 1, 1)
 	var gotRemote string
 	var gotWhy Reason
-	gate, refuse := Gate(l, line, func(remote string, why Reason) { gotRemote, gotWhy = remote, why })
+	failed := make(chan error, 1)
+	gate, refuse := Gate(l, line, func(remote string, why Reason) { gotRemote, gotWhy = remote, why },
+		func(_ string, err error) { failed <- err })
 	remote := &net.TCPAddr{IP: net.ParseIP("198.51.100.7"), Port: 4242}
 
 	if _, ok := gate(addrConn{remote: remote}); !ok {
 		t.Fatal("the first connection was refused under the cap")
 	}
 	server, client := net.Pipe()
-	defer client.Close()
+	t.Cleanup(func() { closeConn(t, client) })
 	if _, ok := gate(addrConn{Conn: server, remote: remote}); ok {
 		t.Fatal("a connection past the cap was admitted")
 	}
@@ -44,15 +48,30 @@ func TestARefusedConnectionIsToldWhyAndClosed(t *testing.T) {
 	if err != nil || string(got) != line {
 		t.Errorf("client read %q, %v, want the refusal line then end of stream", got, err)
 	}
+	select {
+	case err := <-failed:
+		t.Errorf("a refusal the client read was reported as failed: %v", err)
+	default:
+	}
+}
+
+// closeConn closes a test connection and fails the test when it cannot.
+func closeConn(t *testing.T, c net.Conn) {
+	t.Helper()
+	if err := c.Close(); err != nil {
+		t.Errorf("close: %v", err)
+	}
 }
 
 // TestRefusalToAClientThatNeverReadsReturns refuses a client that never reads.
 // The write must give up at its deadline and close the connection, or one stalled
-// client pins a goroutine and a socket per refused connection.
+// client pins a goroutine and a socket per refused connection. The refusal that
+// never arrived is reported, so the operator sees it.
 func TestRefusalToAClientThatNeverReadsReturns(t *testing.T) {
 	server, client := net.Pipe()
-	defer client.Close()
-	_, refuse := Gate(New(), "* BYE too many connections\r\n", nil)
+	t.Cleanup(func() { closeConn(t, client) })
+	failed := make(chan error, 1)
+	_, refuse := Gate(New(), "* BYE too many connections\r\n", nil, func(_ string, err error) { failed <- err })
 	done := make(chan struct{})
 	go func() { refuse(server); close(done) }()
 	select {
@@ -62,6 +81,49 @@ func TestRefusalToAClientThatNeverReadsReturns(t *testing.T) {
 	}
 	if _, err := server.Write([]byte("x")); err == nil {
 		t.Error("the refused connection is still open")
+	}
+	select {
+	case err := <-failed:
+		if !errors.Is(err, os.ErrDeadlineExceeded) {
+			t.Errorf("the reported refusal failure is %v, want the write deadline", err)
+		}
+	default:
+		t.Error("a refusal that never reached the client was not reported")
+	}
+}
+
+// closeFails is a connection whose Close fails, as a socket the kernel refuses
+// to release does.
+type closeFails struct {
+	net.Conn
+	err error
+}
+
+func (c closeFails) Close() error { return errors.Join(c.err, c.Conn.Close()) }
+
+// TestAFailedCloseOfARefusedConnectionIsReported: the refusal reached the client,
+// but the connection did not close, so the operator must learn of the socket.
+func TestAFailedCloseOfARefusedConnectionIsReported(t *testing.T) {
+	server, client := net.Pipe()
+	t.Cleanup(func() { closeConn(t, client) })
+	closeErr := errors.New("close refused")
+	var got error
+	_, refuse := Gate(New(), "-ERR busy\r\n", nil, func(_ string, err error) { got = err })
+	type readResult struct {
+		b   []byte
+		err error
+	}
+	read := make(chan readResult, 1)
+	go func() {
+		b, err := io.ReadAll(client)
+		read <- readResult{b, err}
+	}()
+	refuse(closeFails{Conn: server, err: closeErr})
+	if r := <-read; r.err != nil || string(r.b) != "-ERR busy\r\n" {
+		t.Errorf("client read %q, %v; want the refusal line then end of stream", r.b, r.err)
+	}
+	if !errors.Is(got, closeErr) {
+		t.Errorf("reported %v, want the close error", got)
 	}
 }
 
@@ -74,7 +136,7 @@ func TestPerClientCapCountsAnIPv6SubnetAsOneClient(t *testing.T) {
 	from := func(ip string) net.Conn {
 		return addrConn{remote: &net.TCPAddr{IP: net.ParseIP(ip), Port: 993}}
 	}
-	gate, _ := Gate(l, "", nil)
+	gate, _ := Gate(l, "", nil, nil)
 	for _, ip := range []string{"2001:db8:1:2::1", "2001:db8:1:2::2"} {
 		if _, ok := gate(from(ip)); !ok {
 			t.Fatalf("connection from %s refused under the cap", ip)
