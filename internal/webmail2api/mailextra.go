@@ -379,6 +379,11 @@ func (s *Server) handleHeaders(w http.ResponseWriter, r *http.Request) {
 // line that separates headers from the body. A message with no blank line is all
 // headers.
 func headerBlock(raw []byte) []byte {
+	// A message that opens with the blank line has no header section at all
+	// (RFC 5322 section 2.1); what follows it is body.
+	if bytes.HasPrefix(raw, []byte("\r\n")) || bytes.HasPrefix(raw, []byte("\n")) {
+		return nil
+	}
 	if i := bytes.Index(raw, []byte("\r\n\r\n")); i >= 0 {
 		return raw[:i+2]
 	}
