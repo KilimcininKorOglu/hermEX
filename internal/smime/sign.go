@@ -36,19 +36,20 @@ func Sign(content []byte, cert *x509.Certificate, key crypto.PrivateKey) ([]byte
 	if err != nil {
 		return nil, err
 	}
-	var b bytes.Buffer
-	fmt.Fprintf(&b, "Content-Type: multipart/signed; protocol=\"application/pkcs7-signature\"; micalg=\"sha-256\"; boundary=\"%s\"\r\n", boundary)
-	b.WriteString("MIME-Version: 1.0\r\n\r\n")
-	b.WriteString("This is an S/MIME signed message\r\n\r\n")
-	fmt.Fprintf(&b, "--%s\r\n", boundary)
-	b.Write(content)
-	fmt.Fprintf(&b, "\r\n--%s\r\n", boundary)
-	b.WriteString("Content-Type: application/pkcs7-signature; name=\"smime.p7s\"\r\n")
-	b.WriteString("Content-Transfer-Encoding: base64\r\n")
-	b.WriteString("Content-Disposition: attachment; filename=\"smime.p7s\"\r\n\r\n")
-	b.WriteString(base64Wrap(der))
-	fmt.Fprintf(&b, "\r\n--%s--\r\n", boundary)
-	return b.Bytes(), nil
+	head := "Content-Type: multipart/signed; protocol=\"application/pkcs7-signature\"; micalg=\"sha-256\"; boundary=\"" + boundary + "\"\r\n" +
+		"MIME-Version: 1.0\r\n\r\n" +
+		"This is an S/MIME signed message\r\n\r\n" +
+		"--" + boundary + "\r\n"
+	tail := "\r\n--" + boundary + "\r\n" +
+		"Content-Type: application/pkcs7-signature; name=\"smime.p7s\"\r\n" +
+		"Content-Transfer-Encoding: base64\r\n" +
+		"Content-Disposition: attachment; filename=\"smime.p7s\"\r\n\r\n" +
+		base64Wrap(der) +
+		"\r\n--" + boundary + "--\r\n"
+	out := make([]byte, 0, len(head)+len(content)+len(tail))
+	out = append(out, head...)
+	out = append(out, content...)
+	return append(out, tail...), nil
 }
 
 // Signature is a checked S/MIME signature: the leaf certificate that produced it,

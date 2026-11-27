@@ -46,14 +46,12 @@ func randomBoundary() (string, error) {
 // transfer encoding S/MIME parts use.
 func base64Wrap(der []byte) string {
 	enc := base64.StdEncoding.EncodeToString(der)
-	var b strings.Builder
+	lines := make([]string, 0, len(enc)/64+1)
 	for len(enc) > 64 {
-		b.WriteString(enc[:64])
-		b.WriteString("\r\n")
+		lines = append(lines, enc[:64])
 		enc = enc[64:]
 	}
-	b.WriteString(enc)
-	return b.String()
+	return strings.Join(append(lines, enc), "\r\n")
 }
 
 // topMediaType parses the leading Content-Type of a MIME entity (the header block
@@ -80,13 +78,12 @@ func headerValue(headerBlock []byte, name string) string {
 		if colon < 0 || strings.ToLower(strings.TrimSpace(lines[i][:colon])) != want {
 			continue
 		}
-		var val strings.Builder
-		val.WriteString(lines[i][colon+1:])
+		val := []string{lines[i][colon+1:]}
 		for i+1 < len(lines) && len(lines[i+1]) > 0 && (lines[i+1][0] == ' ' || lines[i+1][0] == '\t') {
 			i++
-			val.WriteString(lines[i])
+			val = append(val, lines[i])
 		}
-		return strings.TrimSpace(val.String())
+		return strings.TrimSpace(strings.Join(val, ""))
 	}
 	return ""
 }

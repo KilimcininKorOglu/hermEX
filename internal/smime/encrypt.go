@@ -32,14 +32,11 @@ func Encrypt(inner []byte, recipients []*x509.Certificate) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("smime: encrypt: %w", err)
 	}
-	var b bytes.Buffer
-	b.WriteString("Content-Type: application/pkcs7-mime; smime-type=enveloped-data; name=\"smime.p7m\"\r\n")
-	b.WriteString("Content-Transfer-Encoding: base64\r\n")
-	b.WriteString("Content-Disposition: attachment; filename=\"smime.p7m\"\r\n")
-	b.WriteString("MIME-Version: 1.0\r\n\r\n")
-	b.WriteString(base64Wrap(der))
-	b.WriteString("\r\n")
-	return b.Bytes(), nil
+	return []byte("Content-Type: application/pkcs7-mime; smime-type=enveloped-data; name=\"smime.p7m\"\r\n" +
+		"Content-Transfer-Encoding: base64\r\n" +
+		"Content-Disposition: attachment; filename=\"smime.p7m\"\r\n" +
+		"MIME-Version: 1.0\r\n\r\n" +
+		base64Wrap(der) + "\r\n"), nil
 }
 
 // Decrypt recovers the inner MIME entity from an RFC 5751 application/pkcs7-mime
