@@ -89,6 +89,40 @@ func TestACMENamesRecordAnUnreadableMTASTSSetting(t *testing.T) {
 	}
 }
 
+// TestACMENamesLeaveOutASuspendedDomain proves a suspended domain gets no
+// certificate order: its hosts may already point elsewhere, so an order for them
+// fails validation and spends the CA rate limit. The active domain keeps its mail
+// and mta-sts hosts.
+func TestACMENamesLeaveOutASuspendedDomain(t *testing.T) {
+	dir := &fakeMTASTSDir{
+		settings: directory.MTASTSSettings{Enabled: true, Mode: "testing", MaxAge: 86400}, found: true,
+		domains: []directory.DomainInfo{{Name: "tenant.com"}, {Name: "gone.example", Status: 1}},
+	}
+	names, err := acmeNames(dir, "mail.hermex.test", "", nil)
+	if err != nil {
+		t.Fatalf("acmeNames: %v", err)
+	}
+	for _, n := range names {
+		if strings.HasSuffix(n, "gone.example") {
+			t.Errorf("suspended domain host %q is in the ACME names %v", n, names)
+		}
+	}
+	if !slices.Contains(names, "mail.tenant.com") || !slices.Contains(names, "mta-sts.tenant.com") {
+		t.Errorf("names = %v, want the active domain's mail and mta-sts hosts", names)
+	}
+}
+
+// TestACMENamesReturnADomainListFailure proves an unreadable domain list is an
+// error, not an empty allowlist: an empty list would let every stored
+// certificate expire without renewal while the gateway reports nothing.
+func TestACMENamesReturnADomainListFailure(t *testing.T) {
+	dir := &fakeMTASTSDir{domainsErr: errors.New("db down: domains")}
+	names, err := acmeNames(dir, "mail.hermex.test", "", nil)
+	if err == nil || names != nil {
+		t.Fatalf("acmeNames = %v, %v; want nil names and the error", names, err)
+	}
+}
+
 // TestExpandACMENamesDedupesHostname proves the server hostname is not duplicated when
 // it is also one of a domain's derived hosts (hostname mail.tenant.com vs the domain
 // tenant.com's mail. host), so the obtain list carries each name exactly once.

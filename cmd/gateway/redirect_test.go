@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -31,7 +32,10 @@ func TestHTTPSRedirectKeepsHostPathAndQuery(t *testing.T) {
 // A hostile Host header must not shape the Location: anything that is not a
 // plain host name is refused instead of redirected.
 func TestHTTPSRedirectRefusesHostileHost(t *testing.T) {
-	for _, host := range []string{"", "evil.example/@good", "a b", "evil.example\\x", "x\r\nSet-Cookie:a=b", string(make([]byte, 300))} {
+	for _, host := range []string{"", "evil.example/@good", "a b", "evil.example\\x", "x\r\nSet-Cookie:a=b", string(make([]byte, 300)),
+		// Valid characters only, one byte past the 253-byte DNS name limit
+		// (RFC 1035 2.3.4), so the length guard alone must refuse it.
+		strings.Repeat("a", 254)} {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.Host = host
 		rec := httptest.NewRecorder()

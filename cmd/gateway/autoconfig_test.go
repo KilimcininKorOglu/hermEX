@@ -102,13 +102,18 @@ func checkClientConfig(t *testing.T, body []byte) {
 // The server must not advertise itself for a domain it does not host, nor
 // for a suspended one, nor when the address names no domain.
 func TestAutoconfigRefusesForeignOrInactiveDomain(t *testing.T) {
-	for _, target := range []string{
-		"/mail/config-v1.1.xml?emailaddress=x%40other.example",
-		"/mail/config-v1.1.xml?emailaddress=x%40off.example",
-		"/mail/config-v1.1.xml?emailaddress=noat",
+	for _, c := range []struct{ host, target string }{
+		{"autoconfig.example.com", "/mail/config-v1.1.xml?emailaddress=x%40other.example"},
+		{"autoconfig.example.com", "/mail/config-v1.1.xml?emailaddress=x%40off.example"},
+		{"autoconfig.example.com", "/mail/config-v1.1.xml?emailaddress=noat"},
+		// With no address the domain comes from the Host header, which the
+		// client chooses: a Host naming a domain this server does not host, or
+		// a suspended one, must get no document either.
+		{"autoconfig.other.example", "/mail/config-v1.1.xml"},
+		{"autoconfig.off.example", "/mail/config-v1.1.xml"},
 	} {
-		if rec := autoconfigGet(t, hostedExample, "autoconfig.example.com", target); rec.Code != http.StatusNotFound {
-			t.Fatalf("%s: status %d, want 404", target, rec.Code)
+		if rec := autoconfigGet(t, hostedExample, c.host, c.target); rec.Code != http.StatusNotFound {
+			t.Fatalf("%s%s: status %d, want 404", c.host, c.target, rec.Code)
 		}
 	}
 }
