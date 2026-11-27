@@ -19,21 +19,28 @@ func TestAContextHandleServesOnlyItsOwner(t *testing.T) {
 
 	disc := ndr.NewPush()
 	pushCtxHandle(disc, cxh)
-	for name, call := range map[string]struct {
+	calls := map[string]struct {
 		opnum uint16
 		stub  []byte
 	}{
-		"EcDoRpcExt2":        {opEcDoRpcExt2, buildRpcExt2Stub(cxh, nil)},
+		"EcDoRpcExt2":        {opEcDoRpcExt2, buildRpcExt2Stub(cxh, logonExecuteBuffer())},
 		"EcDoAsyncConnectEx": {opEcDoAsyncConnectEx, buildAsyncConnectExStub(cxh)},
 		"EcDoDisconnect":     {opEcDoDisconnect, disc.Bytes()},
-	} {
-		if _, fault := ems.Handle(bob, call.opnum, call.stub); fault != ndr.FaultContextMismatch {
-			t.Errorf("%s with alice's handle from bob: fault = %#x, want context mismatch", name, fault)
+	}
+	for _, caller := range []*Session{bob, {User: ""}} {
+		for name, call := range calls {
+			if _, fault := ems.Handle(caller, call.opnum, call.stub); fault != ndr.FaultContextMismatch {
+				t.Errorf("%s with alice's handle from %q: fault = %#x, want context mismatch", name, caller.User, fault)
+			}
 		}
 	}
 	if _, ok := ems.lookup("alice@hermex.test", cxh.GUID); !ok {
 		t.Fatal("bob's calls closed alice's session")
 	}
+	ems.mu.Lock()
+	count := len(ems.sessions)
+	ems.mu.Unlock()
+	wantEq(t, count, 1, "session table size after foreign calls")
 	// The owner keeps the handle, whatever case the address is written in.
 	if _, fault := ems.Handle(&Session{User: "Alice@HERMEX.test"}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, nil)); fault != 0 {
 		t.Errorf("the owner's own handle faulted %#x", fault)
