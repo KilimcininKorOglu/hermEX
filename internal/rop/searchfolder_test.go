@@ -259,6 +259,10 @@ func TestDelegateSearchCriteriaRights(t *testing.T) {
 	if ec := ropResultEC(t, mustDispatch(sess, toROPRequest(ropSetSearchCriteria, 0, body), searchH, 0xFFFFFFFF)); ec != ecAccessDenied {
 		t.Errorf("without read rights on the Inbox ec = %#x, want ecAccessDenied", ec)
 	}
+	// Both refusals left the search folder with no criteria at all.
+	if c, state, err := st.GetSearchCriteria(fid); err != nil || c.Restriction != nil || state != 0 {
+		t.Errorf("criteria after the refused sets = %+v state %#x (err %v), want none", c, state, err)
+	}
 	if err := st.ModifyPermissions(int64(mapi.PrivateFIDInbox), false, []objectstore.PermissionChange{{Op: objectstore.PermAdd, Username: delegate, Rights: mapi.RightsReviewer}}); err != nil {
 		t.Fatal(err)
 	}
