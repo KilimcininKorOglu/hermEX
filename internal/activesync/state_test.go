@@ -2,6 +2,8 @@ package activesync
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,7 +16,7 @@ import (
 )
 
 // primeDeviceHierarchy sends one FolderSync prime as the named device.
-func primeDeviceHierarchy(ts *httptest.Server, deviceID string) error {
+func primeDeviceHierarchy(ts *httptest.Server, deviceID string) (err error) {
 	url := ts.URL + "/Microsoft-Server-ActiveSync?Cmd=FolderSync&User=" + testUser + "&DeviceId=" + deviceID + "&DeviceType=iPhone"
 	body := wbxml.Marshal(wbxml.Elem(wbxml.FHFolderSync, wbxml.Str(wbxml.FHSyncKey, "0")))
 	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
@@ -27,7 +29,10 @@ func primeDeviceHierarchy(ts *httptest.Server, deviceID string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { err = errors.Join(err, resp.Body.Close()) }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("device %s: FolderSync answered %d", deviceID, resp.StatusCode)
+	}
 	_, err = io.Copy(io.Discard, resp.Body)
 	return err
 }
@@ -58,7 +63,7 @@ func TestConcurrentDevicesKeepTheirState(t *testing.T) {
 
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	state, err := loadState(st)
 	mustNoErr(t, "load the state", err)
 	for i := range devices {
@@ -81,7 +86,7 @@ func TestQueuedWipeSurvivesOtherDevicesContacts(t *testing.T) {
 	open := func() *objectstore.Store {
 		st, err := objectstore.Open(dir)
 		mustNoErr(t, "open the store", err)
-		t.Cleanup(func() { st.Close() })
+		t.Cleanup(func() { mustClose(t, st) })
 		return st
 	}
 	daemon, panel := open(), open()
