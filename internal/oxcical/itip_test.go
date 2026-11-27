@@ -70,8 +70,8 @@ func TestInstanceCancelledReadsTheAttendeeCopy(t *testing.T) {
 	if cancelled, series := InstanceCancelled(marked, march9); !cancelled || !series {
 		t.Errorf("the cancelled instance reads cancelled=%v series=%v, want both", cancelled, series)
 	}
-	if cancelled, _ := InstanceCancelled(marked, march9.Add(7*24*time.Hour)); cancelled {
-		t.Error("an instance that is still on reads as cancelled")
+	if cancelled, series := InstanceCancelled(marked, march9.Add(7*24*time.Hour)); cancelled || !series {
+		t.Errorf("an instance that is still on reads cancelled=%v series=%v, want false true", cancelled, series)
 	}
 	removed, ok := CancelOccurrence(marked, march9)
 	if !ok {
@@ -185,4 +185,30 @@ func TestWithMethodReplacesTheMethod(t *testing.T) {
 	if !strings.Contains(string(out), "RRULE:FREQ=WEEKLY;COUNT=6") {
 		t.Errorf("the series was lost:\n%s", out)
 	}
+}
+
+// wantRefused fails unless an iTIP builder returned nil and false.
+func wantRefused(t *testing.T, name string, out []byte, ok bool) {
+	t.Helper()
+	if ok || out != nil {
+		t.Errorf("%s on malformed input = (%d bytes, %v), want (nil, false)", name, len(out), ok)
+	}
+}
+
+// TestITIPRefusesMalformedInput ensures malformed or truncated iCalendar bytes
+// produce no partial iTIP body and safe zero defaults.
+func TestITIPRefusesMalformedInput(t *testing.T) {
+	bad := []byte("NOT-ICALENDAR\r\n")
+	out, ok := WithMethod(bad, "REQUEST")
+	wantRefused(t, "WithMethod", out, ok)
+	out, ok = CancelBody(bad, 1)
+	wantRefused(t, "CancelBody", out, ok)
+	out, ok = InstanceBody(bad, march9, "CANCEL", 1)
+	wantRefused(t, "InstanceBody", out, ok)
+	out, ok = CancelInstance(bad, march9)
+	wantRefused(t, "CancelInstance", out, ok)
+	out, ok = SetSequence(bad, 1, nil)
+	wantRefused(t, "SetSequence", out, ok)
+	wantEq(t, Method(bad), "", "Method on malformed input")
+	wantEq(t, Sequence(bad, nil), 0, "Sequence on malformed input")
 }
