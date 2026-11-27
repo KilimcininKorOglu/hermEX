@@ -1,15 +1,18 @@
 package logging
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // inserterFunc adapts a function to inserter.
@@ -97,7 +100,9 @@ func TestMongoSinkWriteNeverBlocks(t *testing.T) {
 	close(block) // let the writer drain so Close can finish
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_ = s.Close(ctx)
+	if err := s.Close(ctx); err != nil {
+		t.Errorf("Close: %v", err)
+	}
 }
 
 // TestMongoSinkIntegration drives a real MongoDB (the dev container's mongo): it
@@ -140,20 +145,10 @@ func TestMongoSinkIntegration(t *testing.T) {
 // expiring documents. A stray TTL index here would silently delete logs on a stale
 // schedule and could override the operator's retention window, so there must be none.
 func TestMongoSinkCreatesNoTTLIndex(t *testing.T) {
-	uri := os.Getenv("HERMEX_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("HERMEX_TEST_MONGO_URI not set (needs the dev container's mongo)")
-	}
+	uri := mustMongoURI(t)
 	const db = "hermex_logttltest"
 	bg := context.Background()
-
-	raw, err := mongo.Connect(options.Client().ApplyURI(uri))
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	defer func() { _ = raw.Disconnect(bg) }()
-	mustNoErr(t, raw.Database(db).Drop(bg), "drop the leftover test database")
-	defer func() { _ = raw.Database(db).Drop(bg) }()
+	raw := openTestMongo(t, bg, uri, db)
 
 	sink, err := NewMongoSink(uri, db, "")
 	if err != nil {
@@ -183,5 +178,46 @@ func TestMongoSinkCreatesNoTTLIndex(t *testing.T) {
 	}
 	if len(idx) < 4 {
 		t.Errorf("got %d indexes, want >= 4 (3 filter indexes + _id, no TTL)", len(idx))
+	}
+}
+
+// TestNewMongoSinkRefusesMalformedURI verifies NewMongoSink rejects a malformed
+// URI and does not create or touch the spill file.
+func TestNewMongoSinkRefusesMalformedURI(t *testing.T) {
+	spillPath := filepath.Join(t.TempDir(), "spill.jsonl")
+	sink, err := NewMongoSink("http://invalid", "hermex", spillPath)
+	if err == nil {
+		t.Fatal("NewMongoSink accepted a malformed URI")
+	}
+	if sink != nil {
+		t.Error("NewMongoSink returned a non-nil sink on error")
+	}
+	if _, statErr := os.Stat(spillPath); !errors.Is(statErr, fs.ErrNotExist) {
+		t.Errorf("spill file state changed on refused URI: stat err = %v", statErr)
+	}
+}
+
+// TestMongoSinkNeverStoresRawPassword proves credentials passed through Logger
+// are redacted before MongoSink converts and inserts them.
+func TestMongoSinkNeverStoresRawPassword(t *testing.T) {
+	fi := &fakeInserter{}
+	s := newAsyncSink(readyConn(fi), "")
+	log := New(s)
+	log.Info(Auth, "login", Fields{"user": "alice", "password": "mongo-secret-pw"})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	mustNoErr(t, s.Close(ctx), "Close")
+
+	if _, docs := fi.totals(); docs != 1 {
+		t.Fatalf("inserted %d docs, want 1", docs)
+	}
+	raw, err := json.Marshal(fi.docs[0])
+	mustNoErr(t, err, "marshal stored doc")
+	if bytes.Contains(raw, []byte("mongo-secret-pw")) {
+		t.Errorf("raw password reached MongoSink inserter: %s", raw)
+	}
+	if !bytes.Contains(raw, []byte("[redacted]")) {
+		t.Errorf("redacted marker missing from stored doc: %s", raw)
 	}
 }
