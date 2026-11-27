@@ -46,14 +46,20 @@ func TestRoutingByLongestPrefix(t *testing.T) {
 		{"/", "webmail"},
 	}
 	for _, tc := range cases {
-		req, _ := http.NewRequest("GET", front.URL+tc.path, nil)
+		req, err := http.NewRequest("GET", front.URL+tc.path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
 		req.Header.Set("Authorization", "Basic dGVzdA==")
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("GET %s: %v", tc.path, err)
 		}
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		if err != nil {
+			t.Fatalf("read GET %s: %v", tc.path, err)
+		}
 		got := string(body)
 		if !strings.HasPrefix(got, tc.want+" ") {
 			t.Errorf("GET %s routed to %q, want backend %s", tc.path, got, tc.want)
