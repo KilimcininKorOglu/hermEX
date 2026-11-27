@@ -33,17 +33,12 @@ func mustSend(t *testing.T, w io.Writer, format string, args ...any) {
 func TestLoginRefusesAnUnprovisionedMailbox(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "gone")
 	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test"}).Serve(ln) }()
+	ln := serveOn(t, &Server{Auth: auth, Hostname: "mail.test"})
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer mustClose(t, conn)
 	r := textproto.NewReader(bufio.NewReader(conn))
 	wantReply(t, r, "+OK")
 	mustSend(t, conn, "USER alice\r\n")
@@ -73,21 +68,15 @@ func TestPOP3RetrieveAndDelete(t *testing.T) {
 	if _, err := st.AppendMessage(inbox, []byte(msgB), time.Unix(2, 0), 0); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test"}).Serve(ln) }()
-
+	ln := serveOn(t, &Server{Auth: auth, Hostname: "mail.test"})
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer mustClose(t, conn)
 	r := textproto.NewReader(bufio.NewReader(conn))
 
 	send := func(s string) { mustSend(t, conn, "%s\r\n", s) }
@@ -148,8 +137,20 @@ func TestPOP3RetrieveAndDelete(t *testing.T) {
 	wantContains(t, string(body), "Subject: two", "the retrieved body")
 	wantContains(t, string(body), ".dotted line", "the retrieved body after de-stuffing")
 
+	// RFC 1939: a msg argument names an existing, undeleted message (1-based); any
+	// other number, or none, is answered -ERR and changes nothing.
+	for _, cmd := range []string{"RETR 0", "RETR -1", "RETR 3", "RETR 99999999999999999999", "RETR abc",
+		"DELE 0", "DELE 3", "DELE x", "LIST 0", "LIST 3"} {
+		send(cmd)
+		wantERR()
+	}
+	send("STAT")
+	wantLinePrefix(t, wantOK(), "+OK 2 ", "STAT after the refused commands")
+
 	send("DELE 1")
 	wantOK()
+	send("DELE 1")
+	wantERR() // already marked deleted (RFC 1939 DELE)
 	send("RETR 1")
 	wantERR() // deleted message is no longer retrievable
 	send("QUIT")
@@ -167,7 +168,7 @@ func checkDeletionCommitted(t *testing.T, path string, inbox int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(inbox)
 	if err != nil {
 		t.Fatal(err)
