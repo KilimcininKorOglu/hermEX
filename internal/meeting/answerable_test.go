@@ -85,7 +85,7 @@ func TestAnsweringACalendarItemNeedsAnInvitation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer st.Close()
+			defer mustClose(t, st, "the store")
 			tags, err := ResolveTags(st)
 			if err != nil {
 				t.Fatal(err)
@@ -100,6 +100,15 @@ func TestAnsweringACalendarItemNeedsAnInvitation(t *testing.T) {
 			}
 			if _, err := Respond(st, nil, nil, "alice@hermex.test", id, ResponseTentative, false); !errors.Is(err, tc.want) {
 				t.Errorf("err = %v, want %v", err, tc.want)
+			}
+			if tc.want == nil {
+				return
+			}
+			props, err := st.GetMessageProperties(id, tags.State, tags.Resp)
+			mustNoErr(t, err, "read the refused item")
+			wantEq(t, longVal(props, tags.State), tc.state, "the refused item's state")
+			if _, ok := props.Get(tags.Resp); ok {
+				t.Error("the refused item gained a response")
 			}
 		})
 	}
