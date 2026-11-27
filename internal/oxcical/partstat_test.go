@@ -27,14 +27,14 @@ func TestAttendeePartstatRoundTrips(t *testing.T) {
 	}
 	// RFC 5545 3.2.12: an unrecognized PARTSTAT is read as NEEDS-ACTION, so a value
 	// the sender made up is never recorded as an answer.
-	if got, _ := msg.Recipients[2].Get(mapi.PrRecipientTrackStatus); got != int32(0) {
-		t.Errorf("dave's made-up status = %v, want 0 (no response)", got)
+	if got, ok := msg.Recipients[2].Get(mapi.PrRecipientTrackStatus); !ok || got != int32(0) {
+		t.Errorf("dave's made-up status = %v (ok=%v), want 0 (no response)", got, ok)
 	}
-	if got, _ := msg.Recipients[0].Get(mapi.PrRecipientTrackStatus); got != int32(4) {
-		t.Errorf("bob's track status = %v, want 4 (declined)", got)
+	if got, ok := msg.Recipients[0].Get(mapi.PrRecipientTrackStatus); !ok || got != int32(4) {
+		t.Errorf("bob's track status = %v (ok=%v), want 4 (declined)", got, ok)
 	}
-	if got, _ := msg.Recipients[1].Get(mapi.PrRecipientTrackStatus); got != int32(0) {
-		t.Errorf("carol's track status = %v, want 0 (no response)", got)
+	if got, ok := msg.Recipients[1].Get(mapi.PrRecipientTrackStatus); !ok || got != int32(0) {
+		t.Errorf("carol's track status = %v (ok=%v), want 0 (no response)", got, ok)
 	}
 	raw, err := Export(msg, r.opt())
 	mustNoErr(t, err, "export")
