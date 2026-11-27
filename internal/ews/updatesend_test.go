@@ -36,6 +36,17 @@ func spooledServer(t *testing.T) (*httptest.Server, string, *relay.Spool) {
 	return ts, dir, sp
 }
 
+// claimDue claims what the relay spool holds and fails the test when the spool
+// cannot be read, so a read error is not taken for an empty queue.
+func claimDue(t *testing.T, sp *relay.Spool) []relay.Item {
+	t.Helper()
+	due, err := sp.Claim(time.Now(), 10)
+	if err != nil {
+		t.Fatalf("claim the relay spool: %v", err)
+	}
+	return due
+}
+
 // updateSendReq builds an UpdateItem that rewrites the recipients and sends.
 func updateSendReq(disposition, itemID, to string) string {
 	return wrapRequest(`<UpdateItem ConflictResolution="AutoResolve" MessageDisposition="` + disposition +
@@ -88,7 +99,7 @@ func TestUpdateItemSendOnlyFilesNoCopy(t *testing.T) {
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("UpdateItem not success: %s", out)
 	}
-	if due, _ := sp.Claim(time.Now(), 10); len(due) != 1 {
+	if due := claimDue(t, sp); len(due) != 1 {
 		t.Fatalf("relay spool = %v, want one queued message", due)
 	}
 	if n := folderCount(t, dir, int64(mapi.PrivateFIDDraft)); n != 0 {
@@ -109,7 +120,7 @@ func TestUpdateItemSaveOnlyDoesNotSend(t *testing.T) {
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Fatalf("UpdateItem not success: %s", out)
 	}
-	if due, _ := sp.Claim(time.Now(), 10); len(due) != 0 {
+	if due := claimDue(t, sp); len(due) != 0 {
 		t.Errorf("SaveOnly queued %v", due)
 	}
 	if n := folderCount(t, dir, int64(mapi.PrivateFIDDraft)); n != 1 {
@@ -127,7 +138,7 @@ func TestUpdateItemRefusesAnUnknownDisposition(t *testing.T) {
 	if !strings.Contains(out, "ErrorInvalidRequest") {
 		t.Fatalf("an unknown disposition answered %s", out)
 	}
-	if due, _ := sp.Claim(time.Now(), 10); len(due) != 0 {
+	if due := claimDue(t, sp); len(due) != 0 {
 		t.Errorf("the refused request queued %v", due)
 	}
 	if n := folderCount(t, dir, int64(mapi.PrivateFIDDraft)); n != 1 {
