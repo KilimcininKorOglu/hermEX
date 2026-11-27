@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"hermex/internal/mapi"
@@ -112,7 +113,7 @@ func (s *Server) handleGetSearchFolders(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handlePostSearchFolder(w http.ResponseWriter, r *http.Request) {
 	var in searchFolderJSON
-	if err := decodeJSON(r, &in); err != nil || in.Name == "" {
+	if err := decodeJSON(r, &in); err != nil || !validSearchInput(in) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
@@ -121,10 +122,25 @@ func (s *Server) handlePostSearchFolder(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// validSearchInput reports whether a saved search can be stored as asked: it
+// has a name, and each date it gives can be read. A date that cannot be read
+// would otherwise be dropped and widen the search to every day.
+func validSearchInput(in searchFolderJSON) bool {
+	if in.Name == "" {
+		return false
+	}
+	for _, d := range []string{in.DateFrom, in.DateTo} {
+		if strings.TrimSpace(d) != "" && parseSearchDate(d, time.UTC).IsZero() {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Server) handlePutSearchFolder(w http.ResponseWriter, r *http.Request) {
 	var in searchFolderJSON
 	fid, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil || decodeJSON(r, &in) != nil || in.Name == "" {
+	if err != nil || decodeJSON(r, &in) != nil || !validSearchInput(in) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
