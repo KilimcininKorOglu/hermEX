@@ -22,13 +22,18 @@ func tableEntry(s *Server, key string) *vconn {
 func TestAnotherUserCannotJoinAVirtualConnection(t *testing.T) {
 	s := NewServer(Config{})
 	cookie := mapi.GUID{Data1: 7}
-	alice := s.getOrCreate(vconnKey(cookie, "mail.hermex.test", "6001", "alice@hermex.test"), "alice@hermex.test", "/mb/alice", "198.51.100.1:1")
+	aliceKey := vconnKey(cookie, "mail.hermex.test", "6001", "alice@hermex.test")
+	alice := s.getOrCreate(aliceKey, "alice@hermex.test", "/mb/alice", "198.51.100.1:1")
 	bob := s.getOrCreate(vconnKey(cookie, "mail.hermex.test", "6001", "bob@hermex.test"), "bob@hermex.test", "/mb/bob", "198.51.100.2:1")
 	if bob == alice {
 		t.Fatal("a second account joined another account's virtual connection")
 	}
 	wantEq(t, bob.sess.User, "bob@hermex.test", "the second account's session user")
 	wantEq(t, alice.sess.User, "alice@hermex.test", "the first account's session user")
+	wantEq(t, tableEntry(s, aliceKey), alice, "alice table entry after bob lookup")
+	wantEq(t, alice.sess.Mailbox, "/mb/alice", "alice mailbox after bob lookup")
+	wantEq(t, alice.sess.RemoteAddr, "198.51.100.1:1", "alice remote addr after bob lookup")
+	wantFalse(t, alice.isClosed(), "alice connection closed after bob lookup")
 }
 
 // TestTeardownLeavesAReplacementConnectionAlone is the load-bearing case. The IN and
@@ -114,4 +119,22 @@ func TestTableCapRefusesANewKeyButAllowsAReplacement(t *testing.T) {
 		t.Fatal("replacing a closed entry was refused at the ceiling")
 	}
 	wantFalse(t, replacement.isClosed(), "the replacement connection is closed")
+}
+
+// TestTeardownNilAndMarkReadyGuards proves nil teardown does not drop a live
+// connection and markReady triggers CONN/C2 exactly once when both channels join.
+func TestTeardownNilAndMarkReadyGuards(t *testing.T) {
+	s := NewServer(Config{})
+	const key = "vkey"
+	vc := s.getOrCreate(key, "alice@hermex.test", "/mb/alice", "203.0.113.7:50000")
+
+	s.teardown(key, nil)
+	wantEq(t, tableEntry(s, key), vc, "table entry after nil teardown")
+	wantFalse(t, vc.isClosed(), "connection closed after nil teardown")
+
+	wantFalse(t, vc.markReady("in"), "first in ready")
+	wantFalse(t, vc.markReady("in"), "duplicate in ready")
+	wantTrue(t, vc.markReady("out"), "out completes pair")
+	wantFalse(t, vc.markReady("out"), "duplicate out after CONN/C2")
+	wantFalse(t, vc.markReady("in"), "duplicate in after CONN/C2")
 }
