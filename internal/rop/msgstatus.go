@@ -16,7 +16,7 @@ const msgStatusInConflict uint32 = 0x00000800
 // handle), so a client that refreshes after an edit reads the same shape it got
 // when it first opened the message.
 func (s *Session) ropReloadCachedInformation(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	if _, err := p.Uint16(); err != nil { // Reserved
+	if err := p.Skip(2); err != nil { // Reserved
 		return false
 	}
 	msg := s.get(handleAt(handles, hindex))

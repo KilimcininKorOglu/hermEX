@@ -114,14 +114,14 @@ func pullSyncConfigureRequest(p *ext.Pull) (syncConfigureRequest, bool) {
 	var req syncConfigureRequest
 	ohindex, e1 := p.Uint8()
 	syncType, e2 := p.Uint8()
-	_, e3 := p.Uint8() // SendOptions, the stream codec always emits UTF-16
+	e3 := p.Skip(1) // SendOptions, the stream codec always emits UTF-16
 	syncFlags, e4 := p.Uint16()
 	restrictionSize, e5 := p.Uint16()
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil || e5 != nil {
 		return req, false
 	}
 	if restrictionSize != 0 {
-		if _, err := p.Raw(int(restrictionSize)); err != nil {
+		if err := p.Skip(int(restrictionSize)); err != nil {
 			return req, false
 		}
 	}
@@ -170,7 +170,7 @@ var errUnknownSyncType = errors.New("rop: unknown synchronization type")
 // sync context. BufferSize is the informational total the client will send.
 func (s *Session) ropSyncUploadStateStreamBegin(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	stateProp, e1 := p.Uint32()
-	_, e2 := p.Uint32() // BufferSize, informational
+	e2 := p.Skip(4) // BufferSize, informational
 	if e1 != nil || e2 != nil {
 		return false
 	}
@@ -357,7 +357,7 @@ func (s *Session) ropSyncImportHierarchyChange(p *ext.Pull, out *ext.Push, handl
 // 2.2.3.2.4.5): the request carries one multivalue-binary property whose values
 // are the source keys to hard-delete.
 func (s *Session) ropSyncImportDeletes(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	_, e1 := p.Uint8() // ImportDeleteFlags, v1 always hard-deletes
+	e1 := p.Skip(1) // ImportDeleteFlags, v1 always hard-deletes
 	propvals, e2 := p.PropertyValues()
 	if e1 != nil || e2 != nil {
 		return false
@@ -432,9 +432,9 @@ func (s *Session) ropSyncImportReadStateChanges(p *ext.Pull, out *ext.Push, hand
 func (s *Session) ropSyncImportMessageMove(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	srcFolderKey, e1 := p.BinEx()
 	srcMsgKey, e2 := p.BinEx()
-	_, e3 := p.BinEx() // PredecessorChangeList, accepted but not compared (last-writer-wins)
+	e3 := p.SkipBinEx() // PredecessorChangeList, accepted but not compared (last-writer-wins)
 	dstMsgKey, e4 := p.BinEx()
-	_, e5 := p.BinEx() // ChangeNumber, the server allocates its own
+	e5 := p.SkipBinEx() // ChangeNumber, the server allocates its own
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil || e5 != nil {
 		return false
 	}
@@ -533,7 +533,7 @@ func (s *Session) ropSyncImportMessageChange(p *ext.Pull, out *ext.Push, handles
 func (s *Session) ropFastTransferDestConfigure(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8()
 	sourceOp, e2 := p.Uint8()
-	_, e3 := p.Uint8() // CopyFlags, only MOVE (0x01); the ICS message copy sets none
+	e3 := p.Skip(1) // CopyFlags, only MOVE (0x01); the ICS message copy sets none
 	if e1 != nil || e2 != nil || e3 != nil {
 		return false
 	}

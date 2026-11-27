@@ -32,7 +32,7 @@ const ropProgress uint8 = 0x50
 // client to poll, so there is no asynchronous operation to report on; the request is
 // answered ecNotSupported.
 func (s *Session) ropProgress(p *ext.Pull, out *ext.Push, _ []uint32, hindex uint8) bool {
-	if _, err := p.Uint8(); err != nil { // WantCancel
+	if err := p.Skip(1); err != nil { // WantCancel
 		return false
 	}
 	writeErr(out, ropProgress, hindex, ecNotSupported)
@@ -85,8 +85,8 @@ func (s *Session) openCopySource(out *ext.Push, ropID uint8, handles []uint32, h
 func (s *Session) ropFastTransferSourceCopyMessages(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8()
 	eids, e2 := p.Uint64ArrayShort() // MessageIds (EID_ARRAY, a 16-bit count of 8-byte ids)
-	_, e3 := p.Uint8()               // CopyFlags, Move/SendEntryId not honored (plain content copy)
-	_, e4 := p.Uint8()               // SendOptions, the stream codec is always UTF-16
+	e3 := p.Skip(1)                  // CopyFlags, Move/SendEntryId not honored (plain content copy)
+	e4 := p.Skip(1)                  // SendOptions, the stream codec is always UTF-16
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil {
 		return false
 	}
@@ -128,7 +128,7 @@ func (s *Session) ropFastTransferSourceCopyMessages(p *ext.Pull, out *ext.Push, 
 func (s *Session) ropFastTransferSourceCopyFolder(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8()
 	copyFlags, e2 := p.Uint8()
-	_, e3 := p.Uint8() // SendOptions, the stream codec is always UTF-16
+	e3 := p.Skip(1) // SendOptions, the stream codec is always UTF-16
 	if e1 != nil || e2 != nil || e3 != nil {
 		return false
 	}
@@ -171,9 +171,9 @@ func (s *Session) ropFastTransferSourceCopyFolder(p *ext.Pull, out *ext.Push, ha
 // (the stream codec is always UTF-16) are parsed but not honored.
 func (s *Session) ropFastTransferSourceCopyTo(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8()
-	_, e2 := p.Uint8()  // Level, embedded-message recursion depth, flat in v1
-	_, e3 := p.Uint32() // CopyFlags, not applicable to a read-only download source
-	_, e4 := p.Uint8()  // SendOptions, the stream codec is always UTF-16
+	e2 := p.Skip(1) // Level, embedded-message recursion depth, flat in v1
+	e3 := p.Skip(4) // CopyFlags, not applicable to a read-only download source
+	e4 := p.Skip(1) // SendOptions, the stream codec is always UTF-16
 	excluded, e5 := p.PropTags()
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil || e5 != nil {
 		return false
@@ -190,9 +190,9 @@ func (s *Session) ropFastTransferSourceCopyTo(p *ext.Pull, out *ext.Push, handle
 // The Level byte and SendOptions are parsed but not honored (as for CopyTo).
 func (s *Session) ropFastTransferSourceCopyProperties(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8()
-	_, e2 := p.Uint8() // Level, embedded-message recursion depth, flat in v1
-	_, e3 := p.Uint8() // CopyFlags, not applicable to a read-only download source
-	_, e4 := p.Uint8() // SendOptions, the stream codec is always UTF-16
+	e2 := p.Skip(1) // Level, embedded-message recursion depth, flat in v1
+	e3 := p.Skip(1) // CopyFlags, not applicable to a read-only download source
+	e4 := p.Skip(1) // SendOptions, the stream codec is always UTF-16
 	included, e5 := p.PropTags()
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil || e5 != nil {
 		return false

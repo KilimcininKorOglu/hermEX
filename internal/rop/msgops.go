@@ -91,7 +91,7 @@ func (s *Session) ropSetMessageReadFlag(p *ext.Pull, out *ext.Push, handles []ui
 // rfSuppressReceipt suppresses the read receipt; rfGenerateReceiptOnly sends one
 // without a state change). PartialCompletion reports whether any message failed.
 func (s *Session) ropSetReadFlags(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	_, e1 := p.Uint8()              // WantAsynchronous (v1 is always synchronous)
+	e1 := p.Skip(1)                 // WantAsynchronous (v1 is always synchronous)
 	flags, e2 := p.Uint8()          // ReadFlags
 	ids, e3 := p.Uint64ArrayShort() // MessageIds (EID_ARRAY); empty => every message in the folder
 	if e1 != nil || e2 != nil || e3 != nil {
@@ -216,8 +216,8 @@ func (s *Session) applyReadFlag(folder *object, mid int64, action readFlagAction
 }
 
 func (s *Session) ropDeleteMessages(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	_, e1 := p.Uint8()              // WantAsynchronous (v1 is always synchronous)
-	_, e2 := p.Uint8()              // NotifyNonRead (notifications out of scope)
+	e1 := p.Skip(1)                 // WantAsynchronous (v1 is always synchronous)
+	e2 := p.Skip(1)                 // NotifyNonRead (notifications out of scope)
 	ids, e3 := p.Uint64ArrayShort() // MessageIds (EID_ARRAY)
 	if e1 != nil || e2 != nil || e3 != nil {
 		return false
@@ -255,7 +255,7 @@ func (s *Session) ropDeleteMessages(p *ext.Pull, out *ext.Push, handles []uint32
 func (s *Session) ropMoveCopyMessages(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	dhindex, e1 := p.Uint8()        // DestHandleIndex
 	ids, e2 := p.Uint64ArrayShort() // MessageIds (EID_ARRAY)
-	_, e3 := p.Uint8()              // WantAsynchronous (v1 is always synchronous)
+	e3 := p.Skip(1)                 // WantAsynchronous (v1 is always synchronous)
 	wantCopy, e4 := p.Uint8()       // WantCopy (0 = move)
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil {
 		return false

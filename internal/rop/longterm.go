@@ -43,7 +43,7 @@ func (s *Session) ropLongTermIdFromId(p *ext.Pull, out *ext.Push, handles []uint
 func (s *Session) ropIdFromLongTermId(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	guid, e1 := p.GUID()
 	gcBytes, e2 := p.Raw(6) // GlobalCounter
-	_, e3 := p.Uint16()     // Padding
+	e3 := p.Skip(2)         // Padding
 	if e1 != nil || e2 != nil || e3 != nil {
 		return false
 	}

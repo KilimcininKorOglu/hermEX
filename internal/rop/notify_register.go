@@ -79,7 +79,7 @@ func pullRegisterNotificationRequest(p *ext.Pull) (registerNotificationRequest, 
 	var req registerNotificationRequest
 	ohindex, e1 := p.Uint8()   // OutputHandleIndex
 	ntypes, e2 := p.Uint8()    // NotificationTypes (one byte; subscribable types fit 0x02..0x80)
-	_, e3 := p.Uint8()         // Reserved
+	e3 := p.Skip(1)            // Reserved
 	wantWhole, e4 := p.Uint8() // WantWholeStore
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil {
 		return req, false

@@ -21,7 +21,7 @@ const maxReadRecipientRows = 0xFE
 // RopOpenMessage announced. A row id past the last recipient is ecNotFound.
 func (s *Session) ropReadRecipients(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	rowID, e1 := p.Uint32() // RowId
-	_, e2 := p.Uint16()     // Reserved
+	e2 := p.Skip(2)         // Reserved
 	if e1 != nil || e2 != nil {
 		return false
 	}

@@ -19,7 +19,7 @@ const (
 // it returns the long-term ids of the public folders the user has per-user read state
 // for. A private logon owns no such set, so the response is an empty array.
 func (s *Session) ropGetPerUserLongTermIds(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	if _, err := p.GUID(); err != nil { // DatabaseGuid, names the store; unused on a private logon
+	if err := p.Skip(16); err != nil { // DatabaseGuid, names the store; unused on a private logon
 		return false
 	}
 	o := s.get(handleAt(handles, hindex))
@@ -34,11 +34,15 @@ func (s *Session) ropGetPerUserLongTermIds(p *ext.Pull, out *ext.Push, handles [
 	return true
 }
 
+// longTermIDSize is the wire size of a LongTermID ([MS-OXCDATA] 2.2.1.3.1): a
+// 16-byte GUID, a 6-byte global counter and 2 bytes of padding.
+const longTermIDSize = 24
+
 // ropGetPerUserGuid handles RopGetPerUserGuid ([MS-OXCSTOR] 2.2.3.11): it maps a
 // long-term id back to the database guid that holds the user's per-user read state.
 // A private logon holds none, so the lookup reports ecNotFound.
 func (s *Session) ropGetPerUserGuid(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	if _, err := p.LongTermID(); err != nil { // LongTermId, the folder whose guid is sought
+	if err := p.Skip(longTermIDSize); err != nil { // LongTermId, the folder whose guid is sought
 		return false
 	}
 	o := s.get(handleAt(handles, hindex))
@@ -54,10 +58,10 @@ func (s *Session) ropGetPerUserGuid(p *ext.Pull, out *ext.Push, handles []uint32
 // 2.2.3.12): it reads a chunk of the per-user read-state blob for a public folder.
 // hermEX keeps no such blob, so it reports an empty, already-finished read.
 func (s *Session) ropReadPerUserInformation(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	_, e1 := p.LongTermID() // FolderId, the public folder whose blob is read
-	_, e2 := p.Uint8()      // Reserved
-	_, e3 := p.Uint32()     // DataOffset
-	_, e4 := p.Uint16()     // MaxDataSize
+	e1 := p.Skip(longTermIDSize) // FolderId, the public folder whose blob is read
+	e2 := p.Skip(1)              // Reserved
+	e3 := p.Skip(4)              // DataOffset
+	e4 := p.Skip(2)              // MaxDataSize
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil {
 		return false
 	}
@@ -80,15 +84,15 @@ func (s *Session) ropReadPerUserInformation(p *ext.Pull, out *ext.Push, handles 
 // (DataOffset 0) carries a trailing ReplGuid, which is consumed to keep the batch
 // framed.
 func (s *Session) ropWritePerUserInformation(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	_, e1 := p.LongTermID() // FolderId
-	_, e2 := p.Uint8()      // HasFinished
+	e1 := p.Skip(longTermIDSize) // FolderId
+	e2 := p.Skip(1)              // HasFinished
 	offset, e3 := p.Uint32()
-	_, e4 := p.BinShort() // Data
+	e4 := p.SkipBinShort() // Data
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil {
 		return false
 	}
 	if offset == 0 {
-		if _, err := p.GUID(); err != nil { // ReplGuid, present only on a private logon's first chunk
+		if err := p.Skip(16); err != nil { // ReplGuid, present only on a private logon's first chunk
 			return false
 		}
 	}

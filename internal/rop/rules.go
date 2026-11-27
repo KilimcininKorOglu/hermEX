@@ -17,7 +17,7 @@ import (
 // are its own RopSetColumns selection.
 func (s *Session) ropGetRulesTable(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8() // OutputHandleIndex
-	_, e2 := p.Uint8()       // TableFlags
+	e2 := p.Skip(1)          // TableFlags
 	if e1 != nil || e2 != nil {
 		return false
 	}

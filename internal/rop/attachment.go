@@ -74,7 +74,7 @@ func resolveAttachment(bags []mapi.PropertyValues, attachID uint32) (mapi.Proper
 // is not in the open response, unlike the contents/hierarchy tables).
 func (s *Session) ropGetAttachmentTable(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8() // OutputHandleIndex
-	_, e2 := p.Uint8()       // TableFlags
+	e2 := p.Skip(1)          // TableFlags
 	if e1 != nil || e2 != nil {
 		return false
 	}
@@ -108,7 +108,7 @@ func (s *Session) ropGetAttachmentTable(p *ext.Pull, out *ext.Push, handles []ui
 // on PrAttachDataBin.
 func (s *Session) ropOpenAttachment(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8()   // OutputHandleIndex
-	_, e2 := p.Uint8()         // OpenAttachmentFlags
+	e2 := p.Skip(1)            // OpenAttachmentFlags
 	attachID, e3 := p.Uint32() // AttachmentId (= PR_ATTACH_NUM)
 	if e1 != nil || e2 != nil || e3 != nil {
 		return false

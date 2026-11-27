@@ -29,7 +29,7 @@ const (
 // destination object (the handle at DestHandleIndex).
 func (s *Session) ropCopyProperties(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	dhindex, e1 := p.Uint8() // DestHandleIndex
-	_, e2 := p.Uint8()       // WantAsynchronous
+	e2 := p.Skip(1)          // WantAsynchronous
 	copyFlags, e3 := p.Uint8()
 	tags, e4 := p.PropTags()
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil {
@@ -48,7 +48,7 @@ func (s *Session) ropCopyProperties(p *ext.Pull, out *ext.Push, handles []uint32
 // PR_MESSAGE_RECIPIENTS / PR_MESSAGE_ATTACHMENTS.
 func (s *Session) ropCopyTo(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	dhindex, e1 := p.Uint8() // DestHandleIndex
-	_, e2 := p.Uint8()       // WantAsynchronous
+	e2 := p.Skip(1)          // WantAsynchronous
 	wantSub, e3 := p.Uint8() // WantSubObjects
 	copyFlags, e4 := p.Uint8()
 	excluded, e5 := p.PropTags()

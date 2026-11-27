@@ -167,7 +167,7 @@ func (s *Session) ropQueryRows(p *ext.Pull, out *ext.Push, handles []uint32, hin
 func pullSeekRowRequest(p *ext.Pull) (seekPos uint8, offset uint32, ok bool) {
 	seekPos, e1 := p.Uint8()
 	offset, e2 := p.Uint32() // Offset, signed
-	_, e3 := p.Uint8()       // WantRowMovedCount
+	e3 := p.Skip(1)          // WantRowMovedCount
 	return seekPos, offset, e1 == nil && e2 == nil && e3 == nil
 }
 
@@ -550,7 +550,7 @@ func (s *Session) ropSortTable(p *ext.Pull, out *ext.Push, handles []uint32, hin
 // are discarded; the category counts are returned because a non-zero one asks
 // for a categorized table, which this server refuses rather than flattening.
 func pullSortHeader(p *ext.Pull) (count, catCount, expanded uint16, ok bool) {
-	_, e1 := p.Uint8()         // TableFlags
+	e1 := p.Skip(1)            // TableFlags
 	count, e2 := p.Uint16()    // SortOrderCount
 	catCount, e3 := p.Uint16() // CategoryCount
 	expanded, e4 := p.Uint16() // ExpandedCount
@@ -597,7 +597,7 @@ func sortOrderSupported(order uint8, ptype mapi.PropType) bool {
 // returning an unfiltered table the client would trust, the silent-error class
 // this handler closes.
 func (s *Session) ropRestrict(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	_, e1 := p.Uint8()        // RestrictFlags
+	e1 := p.Skip(1)           // RestrictFlags
 	resSize, e2 := p.Uint16() // RestrictionDataSize
 	if e1 != nil || e2 != nil {
 		return false
@@ -1065,7 +1065,7 @@ func pullFindRowRequest(p *ext.Pull) (findRowRequest, bool) {
 		return req, false
 	}
 	seekPos, e4 := p.Uint8()
-	_, e5 := p.BinShort() // Bookmark (used only for the custom origin, deferred)
+	e5 := p.SkipBinShort() // Bookmark (used only for the custom origin, deferred)
 	if e4 != nil || e5 != nil {
 		return req, false
 	}
@@ -1295,8 +1295,8 @@ func (s *Session) ropAbort(_ *ext.Pull, out *ext.Push, handles []uint32, hindex 
 // The request body (row id + instance) is consumed so the ROP can sit anywhere in a
 // batch, matching RopSetCollapseState's not-supported answer.
 func (s *Session) ropGetCollapseState(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	_, e1 := p.Uint64() // RowId
-	_, e2 := p.Uint32() // RowInstanceNumber
+	e1 := p.Skip(8) // RowId
+	e2 := p.Skip(4) // RowInstanceNumber
 	if e1 != nil || e2 != nil {
 		return false
 	}
@@ -1389,7 +1389,7 @@ func (s *Session) ropCreateBookmark(_ *ext.Pull, out *ext.Push, handles []uint32
 func (s *Session) ropSeekRowBookmark(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	bk, e1 := p.BinShort()   // Bookmark
 	offset, e2 := p.Uint32() // Offset, signed
-	_, e3 := p.Uint8()       // WantRowMovedCount
+	e3 := p.Skip(1)          // WantRowMovedCount
 	if e1 != nil || e2 != nil || e3 != nil {
 		return false
 	}

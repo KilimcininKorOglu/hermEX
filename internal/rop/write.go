@@ -81,7 +81,7 @@ func (s *Session) ropCreateMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 // page is discarded: this session speaks Unicode throughout.
 func pullCreateMessageRequest(p *ext.Pull) (ohindex uint8, folderEID uint64, associated uint8, ok bool) {
 	ohindex, e1 := p.Uint8()    // OutputHandleIndex
-	_, e2 := p.Uint16()         // CodePageId
+	e2 := p.Skip(2)             // CodePageId
 	folderEID, e3 := p.Uint64() // FolderId
 	associated, e4 := p.Uint8() // AssociatedFlag
 	return ohindex, folderEID, associated, e1 == nil && e2 == nil && e3 == nil && e4 == nil
@@ -274,7 +274,7 @@ func (s *Session) ropSaveChangesMessage(p *ext.Pull, out *ext.Push, handles []ui
 // save flags are discarded: this implementation always saves.
 func pullSaveChangesRequest(p *ext.Pull) (ihindex uint8, ok bool) {
 	ihindex, e1 := p.Uint8() // InputHandleIndex (indexes the message object)
-	_, e2 := p.Uint8()       // SaveFlags
+	e2 := p.Skip(1)          // SaveFlags
 	return ihindex, e1 == nil && e2 == nil
 }
 
@@ -613,11 +613,10 @@ func (r *recipientRow) pullX500(rd rowReader) bool {
 // skipDistributionList consumes a distribution list's entry id and search key,
 // which v1 does not model but must read to keep the stream framed.
 func skipDistributionList(p *ext.Pull) bool {
-	if _, err := p.Bin(); err != nil { // EntryId
+	if err := p.SkipBin(); err != nil { // EntryId
 		return false
 	}
-	_, err := p.Bin() // SearchKey
-	return err == nil
+	return p.SkipBin() == nil // SearchKey
 }
 
 // pullNames reads the optional name members, each present only when its flag is
@@ -757,7 +756,7 @@ func pullFlaggedValue(p *ext.Pull, col mapi.PropTag, marker uint8, bag *mapi.Pro
 	case mapi.FlaggedUnavailable:
 		// no value present for this column
 	case mapi.FlaggedError:
-		if _, err := p.Uint32(); err != nil { // error code, discarded
+		if err := p.Skip(4); err != nil { // error code, not stored
 			return err
 		}
 	default:
@@ -774,7 +773,7 @@ func pullFlaggedValue(p *ext.Pull, col mapi.PropTag, marker uint8, bag *mapi.Pro
 // consumes the source draft so the submitted message is not left duplicated.
 // Single input handle; the response is the bare header.
 func (s *Session) ropSubmitMessage(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	if _, err := p.Uint8(); err != nil { // SubmitFlags (PreProcess/NeedsSpooler, v1 ignores)
+	if err := p.Skip(1); err != nil { // SubmitFlags (PreProcess/NeedsSpooler, v1 ignores)
 		return false
 	}
 	obj := s.get(handleAt(handles, hindex))

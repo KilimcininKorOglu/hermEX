@@ -21,7 +21,7 @@ func (s *Session) ropSetLocalReplicaMidsetDeleted(p *ext.Pull, out *ext.Push, _ 
 	if e1 != nil {
 		return false
 	}
-	if _, err := p.Raw(int(dataSize)); err != nil {
+	if err := p.Skip(int(dataSize)); err != nil {
 		return false
 	}
 	out.Uint8(ropSetLocalReplicaMidsetDeleted)

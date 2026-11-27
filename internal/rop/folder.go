@@ -246,7 +246,7 @@ func (t *tableState) messageRow(store *objectstore.Store, base int) (mapi.Proper
 func (s *Session) ropOpenFolder(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8()    // OutputHandleIndex
 	folderEID, e2 := p.Uint64() // FolderId
-	_, e3 := p.Uint8()          // OpenModeFlags
+	e3 := p.Skip(1)             // OpenModeFlags
 	if e1 != nil || e2 != nil || e3 != nil {
 		return false
 	}
@@ -402,7 +402,7 @@ func (s *Session) ropGetContentsTable(p *ext.Pull, out *ext.Push, handles []uint
 // QueryRows) and reports the table complete. It operates on the table handle in
 // place, so there is no output handle.
 func (s *Session) ropSetColumns(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	_, e1 := p.Uint8() // SetColumnsFlags
+	e1 := p.Skip(1) // SetColumnsFlags
 	cols, e2 := p.PropTags()
 	if e1 != nil || e2 != nil {
 		return false

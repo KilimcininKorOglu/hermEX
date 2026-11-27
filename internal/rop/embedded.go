@@ -37,7 +37,7 @@ const (
 // stable and non-zero for this open.
 func (s *Session) ropOpenEmbeddedMessage(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8() // OutputHandleIndex
-	_, e2 := p.Uint16()      // Cpid
+	e2 := p.Skip(2)          // Cpid
 	flags, e3 := p.Uint8()   // OpenEmbeddedMessageFlags (MAPI_MODIFY / MAPI_CREATE)
 	if e1 != nil || e2 != nil || e3 != nil {
 		return false

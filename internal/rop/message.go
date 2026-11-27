@@ -47,9 +47,9 @@ func stringProp(pv mapi.PropertyValues, tag mapi.PropTag) string {
 // the same way.
 func pullOpenMessageRequest(p *ext.Pull) (ohindex uint8, messageEID uint64, ok bool) {
 	ohindex, e1 := p.Uint8()     // OutputHandleIndex
-	_, e2 := p.Uint16()          // Cpid
-	_, e3 := p.Uint64()          // FolderId
-	_, e4 := p.Uint8()           // OpenModeFlags
+	e2 := p.Skip(2)              // Cpid
+	e3 := p.Skip(8)              // FolderId
+	e4 := p.Skip(1)              // OpenModeFlags
 	messageEID, e5 := p.Uint64() // MessageId
 	return ohindex, messageEID, e1 == nil && e2 == nil && e3 == nil && e4 == nil && e5 == nil
 }
@@ -276,8 +276,8 @@ func selectProps(all mapi.PropertyValues, tags []mapi.PropTag) mapi.PropertyValu
 // 2.2.2.10): it returns the requested columns of the open message as a single
 // PROPERTY_ROW.
 func (s *Session) ropGetPropertiesSpecific(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	_, e1 := p.Uint16() // PropertySizeLimit
-	_, e2 := p.Uint16() // WantUnicode
+	e1 := p.Skip(2) // PropertySizeLimit
+	e2 := p.Skip(2) // WantUnicode
 	cols, e3 := p.PropTags()
 	if e1 != nil || e2 != nil || e3 != nil {
 		return false
@@ -310,8 +310,8 @@ func (s *Session) ropGetPropertiesSpecific(p *ext.Pull, out *ext.Push, handles [
 // returns the open message's full property bag as a TPROPVAL_ARRAY. v1 does not
 // honor the size limit (large body properties are returned inline).
 func (s *Session) ropGetPropertiesAll(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	_, e1 := p.Uint16() // PropertySizeLimit
-	_, e2 := p.Uint16() // WantUnicode
+	e1 := p.Skip(2) // PropertySizeLimit
+	e2 := p.Skip(2) // WantUnicode
 	if e1 != nil || e2 != nil {
 		return false
 	}

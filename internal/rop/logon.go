@@ -144,8 +144,8 @@ func logonResponseFlags(delegate, sendsOnBehalf bool) uint8 {
 // response.
 func pullLogonRequest(p *ext.Pull) (logonFlags uint8, essdn []byte, ok bool) {
 	logonFlags, e1 := p.Uint8()
-	_, e2 := p.Uint32() // OpenFlags
-	_, e3 := p.Uint32() // StoreState
+	e2 := p.Skip(4) // OpenFlags
+	e3 := p.Skip(4) // StoreState
 	essdnSize, e4 := p.Uint16()
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil {
 		return 0, nil, false
