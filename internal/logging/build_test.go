@@ -67,7 +67,9 @@ func TestBuildIntegration(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 	defer func() { _ = raw.Disconnect(bg) }()
-	_ = raw.Database(db).Drop(bg)
+	if err := raw.Database(db).Drop(bg); err != nil {
+		t.Fatalf("drop the leftover test database: %v", err)
+	}
 	defer func() { _ = raw.Database(db).Drop(bg) }()
 
 	log, closeFn := logging.Build("test", uri, db, t.TempDir())

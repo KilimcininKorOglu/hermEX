@@ -59,7 +59,7 @@ func openTestMongo(t *testing.T, ctx context.Context, uri, db string) *mongo.Cli
 		_ = raw.Database(db).Drop(ctx)
 		_ = raw.Disconnect(ctx)
 	})
-	_ = raw.Database(db).Drop(ctx)
+	mustNoErr(t, raw.Database(db).Drop(ctx), "drop the leftover test database")
 	return raw
 }
 

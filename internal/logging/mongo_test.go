@@ -152,7 +152,7 @@ func TestMongoSinkCreatesNoTTLIndex(t *testing.T) {
 		t.Fatalf("connect: %v", err)
 	}
 	defer func() { _ = raw.Disconnect(bg) }()
-	_ = raw.Database(db).Drop(bg)
+	mustNoErr(t, raw.Database(db).Drop(bg), "drop the leftover test database")
 	defer func() { _ = raw.Database(db).Drop(bg) }()
 
 	sink, err := NewMongoSink(uri, db, "")

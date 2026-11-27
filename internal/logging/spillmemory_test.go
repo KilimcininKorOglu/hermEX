@@ -90,7 +90,9 @@ func TestSpillStopsAtTheLimit(t *testing.T) {
 	// Lifting the cap lets the next outage batch through again.
 	s.SetSpillLimit(0)
 	s.spill(events[:1])
-	if after, _ := readSpill(path); len(after) != len(kept)+1 {
+	after, err := readSpill(path)
+	mustNoErr(t, err, "read the spill file")
+	if len(after) != len(kept)+1 {
 		t.Errorf("with no limit the spill holds %d events, want %d", len(after), len(kept)+1)
 	}
 }
