@@ -113,7 +113,7 @@ func TestInvitationWithoutTimesCarriesNoMeetingRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer mustClose(t, st)
-	const ics ="BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\n" +
+	const ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\n" +
 		"BEGIN:VEVENT\r\nUID:eas-no-times\r\nSUMMARY:No time\r\n" +
 		"ORGANIZER:mailto:organizer@external.test\r\nATTENDEE:mailto:alice@hermex.test\r\n" +
 		"END:VEVENT\r\nEND:VCALENDAR\r\n"
