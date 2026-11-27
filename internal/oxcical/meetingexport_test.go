@@ -237,8 +237,14 @@ func TestExportOverrideCarriesItsExceptionBody(t *testing.T) {
 	}}}
 
 	s := exportString(t, msg, r)
-	_, rest, _ := strings.Cut(s, "RECURRENCE-ID;TZID=America/Los_Angeles:20080510T140000")
-	moved, _, _ := strings.Cut(rest, "END:VEVENT")
+	_, rest, found := strings.Cut(s, "RECURRENCE-ID;TZID=America/Los_Angeles:20080510T140000")
+	if !found {
+		t.Fatalf("export missing moved RECURRENCE-ID:\n%s", s)
+	}
+	moved, _, found := strings.Cut(rest, "END:VEVENT")
+	if !found {
+		t.Fatalf("export missing END:VEVENT for moved occurrence:\n%s", s)
+	}
 	if !strings.Contains(moved, "DESCRIPTION:Moved to Sunday this time.") {
 		t.Errorf("the moved occurrence lacks its own body:\n%s", s)
 	}
@@ -322,5 +328,24 @@ func TestExportVerbatimRequestKeepsItsBody(t *testing.T) {
 	wantLines(t, s, "METHOD:REQUEST", "RECURRENCE-ID:20260608T090000Z")
 	if strings.Contains(s, "RRULE") {
 		t.Errorf("an instance request carries the series rule:\n%s", s)
+	}
+}
+
+// TestGlobalObjectIDRefusesForgedInputs covers truncated or wrong-class global
+// object IDs and incomplete exception attachments ([MS-OXOCAL] 2.2.1.27).
+func TestGlobalObjectIDRefusesForgedInputs(t *testing.T) {
+	wrongClass := make([]byte, goidDataOffset+16)
+	wrongClass[0] = 0xFF
+	if got := globalObjectUID(wrongClass); got != "" {
+		t.Errorf("wrong class ID exported UID %q, want empty", got)
+	}
+	if forms := GlobalObjectIDForms(""); forms != nil {
+		t.Errorf("GlobalObjectIDForms(\"\") = %v, want nil", forms)
+	}
+	if tm, raw, ok := exceptionAttachment(mapi.PropertyValues{
+		{Tag: mapi.PrAttachmentFlags, Value: int32(0)},
+		{Tag: mapi.PrAttachMethod, Value: int32(mapi.AttachEmbeddedMsg)},
+	}); ok || !tm.IsZero() || raw != nil {
+		t.Errorf("non-exception attachment returned (%v, %v, %v), want zero nil false", tm, raw, ok)
 	}
 }

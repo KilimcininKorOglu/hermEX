@@ -51,7 +51,7 @@ func GlobalObjectUID(goid []byte) string {
 // hex of the id with its instance date cleared, so every instance of a meeting
 // shares the UID of the series. It returns "" for a value too short to be an id.
 func globalObjectUID(goid []byte) string {
-	if len(goid) < goidDataOffset {
+	if len(goid) < goidDataOffset || !bytes.HasPrefix(goid, goidClassID) {
 		return ""
 	}
 	data := goid[goidDataOffset:]
