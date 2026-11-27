@@ -50,18 +50,26 @@ func (s *Server) visiblePublicFolders(email string, readSet map[int64]bool) []pu
 		return folders
 	}
 	st, ok, err := s.Pub.OpenForCaller(email)
+	if err != nil {
+		logError("public-folder-open", err, logging.Fields{"user": email})
+	}
 	if err != nil || !ok {
 		return folders
 	}
 	defer closeStore(st)
 	all, err := st.ListFolders()
 	if err != nil {
+		logError("public-folder-list", err, logging.Fields{"user": email})
 		return folders
 	}
 	user := strings.ToLower(email)
 	for _, f := range all {
 		rights, err := st.ResolvePermission(f.ID, user)
-		if err != nil || rights&mapi.FrightsVisible == 0 {
+		if err != nil {
+			logError("public-folder-rights", err, logging.Fields{"user": email, "folder": f.ID})
+			continue
+		}
+		if rights&mapi.FrightsVisible == 0 {
 			continue
 		}
 		total, unread := publicFolderCounts(st, f.ID, readSet)
@@ -173,11 +181,15 @@ func (s *Server) publicTarget(email string, fid int64) (*objectstore.Store, stri
 		return nil, "", false
 	}
 	st, ok, err := s.Pub.OpenForCaller(email)
+	if err != nil {
+		logError("public-folder-open", err, logging.Fields{"user": email})
+	}
 	if err != nil || !ok {
 		return nil, "", false
 	}
 	all, err := st.ListFolders()
 	if err != nil {
+		logError("public-folder-list", err, logging.Fields{"user": email})
 		closeStore(st)
 		return nil, "", false
 	}
@@ -193,6 +205,9 @@ func (s *Server) publicTarget(email string, fid int64) (*objectstore.Store, stri
 		return nil, "", false
 	}
 	rights, err := st.ResolvePermission(fid, strings.ToLower(email))
+	if err != nil {
+		logError("public-folder-rights", err, logging.Fields{"user": email, "folder": fid})
+	}
 	if err != nil || rights&mapi.FrightsReadAny == 0 {
 		closeStore(st)
 		return nil, "", false
