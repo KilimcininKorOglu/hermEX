@@ -56,6 +56,19 @@ func issue(t *testing.T, cn, dnsName string, isCA bool, parent *x509.Certificate
 	return cert, key
 }
 
+// issueLeaf is issue for a caller that needs only the certificate: it checks the
+// returned key is the one the certificate carries, so the key is consumed rather
+// than dropped and a helper that paired a cert with the wrong key fails here.
+func issueLeaf(t *testing.T, cn, dnsName string, isCA bool, parent *x509.Certificate, parentKey *ecdsa.PrivateKey) *x509.Certificate {
+	t.Helper()
+	cert, key := issue(t, cn, dnsName, isCA, parent, parentKey)
+	pub, ok := cert.PublicKey.(*ecdsa.PublicKey)
+	if !ok || !pub.Equal(&key.PublicKey) {
+		t.Fatalf("certificate %q does not carry the generated key", cn)
+	}
+	return cert
+}
+
 func sha256d(b []byte) []byte { s := sha256.Sum256(b); return s[:] }
 func sha512d(b []byte) []byte { s := sha512.Sum512(b); return s[:] }
 
@@ -63,7 +76,7 @@ func sha512d(b []byte) []byte { s := sha512.Sum512(b); return s[:] }
 // name check (the defining property: a TLSA match binds the key directly, so the
 // SAN is irrelevant), and that a wrong digest does not match.
 func TestMatchDANEEE(t *testing.T) {
-	leaf, _ := issue(t, "mx.example.com", "mx.example.com", false, nil, nil)
+	leaf := issueLeaf(t, "mx.example.com", "mx.example.com", false, nil, nil)
 
 	// selector=full-cert, SHA-256.
 	eeCert := Record{Usage: usageDANEEE, Selector: selectorCert, MatchingType: matchSHA256, Data: sha256d(leaf.Raw)}
@@ -91,7 +104,7 @@ func TestMatchDANEEE(t *testing.T) {
 // the leaf to the SMTP hostname (so a TA match alone, with a wrong name, fails).
 func TestMatchDANETA(t *testing.T) {
 	ca, caKey := issue(t, "Example CA", "", true, nil, nil)
-	leaf, _ := issue(t, "mx.example.com", "mx.example.com", false, ca, caKey)
+	leaf := issueLeaf(t, "mx.example.com", "mx.example.com", false, ca, caKey)
 	chain := []*x509.Certificate{leaf, ca}
 
 	taRec := Record{Usage: usageDANETA, Selector: selectorCert, MatchingType: matchSHA256, Data: sha256d(ca.Raw)}
@@ -109,7 +122,7 @@ func TestMatchDANETA(t *testing.T) {
 	// published CA beside a leaf signed by its own CA, with the right name, fails
 	// (RFC 7671 section 5.2.2).
 	rogue, rogueKey := issue(t, "Rogue CA", "", true, nil, nil)
-	forged, _ := issue(t, "mx.example.com", "mx.example.com", false, rogue, rogueKey)
+	forged := issueLeaf(t, "mx.example.com", "mx.example.com", false, rogue, rogueKey)
 	if err := Match([]Record{taRec}, []*x509.Certificate{forged, ca}, "mx.example.com"); err == nil {
 		t.Error("a leaf not issued by the matched trust anchor authenticated")
 	}
@@ -124,7 +137,7 @@ func TestMatchDANETA(t *testing.T) {
 // matching-type set are ignored, so a set containing only unusable records does
 // not authenticate (the caller treats that as no-DANE, not a pass).
 func TestMatchUnusableRecords(t *testing.T) {
-	leaf, _ := issue(t, "mx.example.com", "mx.example.com", false, nil, nil)
+	leaf := issueLeaf(t, "mx.example.com", "mx.example.com", false, nil, nil)
 	unusable := []Record{
 		{Usage: 0, Selector: selectorCert, MatchingType: matchSHA256, Data: sha256d(leaf.Raw)}, // PKIX-TA
 		{Usage: 1, Selector: selectorCert, MatchingType: matchSHA256, Data: sha256d(leaf.Raw)}, // PKIX-EE
@@ -294,8 +307,11 @@ func TestLookupTLSASecureButUnusableStillMandatesTLS(t *testing.T) {
 // signal a caller relies on to defer delivery and report a TLS-RPT
 // dnssec-invalid result rather than silently downgrade to cleartext.
 func TestLookupTLSABogus(t *testing.T) {
-	_, _, err := servfailResolver(t).LookupTLSA("mx.example", 25)
+	recs, applies, err := servfailResolver(t).LookupTLSA("mx.example", 25)
 	if !errors.Is(err, ErrBogus) {
 		t.Fatalf("LookupTLSA on SERVFAIL = %v, want it to wrap ErrBogus", err)
+	}
+	if len(recs) != 0 || applies {
+		t.Errorf("a bogus answer returned %d records, applies %v; want none and false", len(recs), applies)
 	}
 }
