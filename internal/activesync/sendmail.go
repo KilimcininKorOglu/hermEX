@@ -91,7 +91,7 @@ var errSourceNotFound = errors.New("reply/forward source not found")
 // the WBXML Source or the URL query, and confirms it exists in the caller's own
 // mailbox. Resolving only against sess.mailbox keeps the reference scoped to the
 // authenticated identity (OWASP A01). A plain SendMail has no source (nil).
-func findSource(sess *session, cm composeMail, r *http.Request) (*replySource, error) {
+func findSource(sess *session, cm composeMail, r *http.Request) (_ *replySource, err error) {
 	forward := sess.req.cmd == "SmartForward"
 	if !forward && sess.req.cmd != "SmartReply" {
 		return nil, nil
@@ -105,7 +105,11 @@ func findSource(sess *session, cm composeMail, r *http.Request) (*replySource, e
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = st.Close() }()
+	defer func() {
+		if cerr := st.Close(); cerr != nil {
+			err = errors.Join(err, cerr)
+		}
+	}()
 	src, err := locateSource(st, fid, itemID)
 	if err != nil {
 		return nil, err
@@ -152,17 +156,36 @@ func (s *Server) fileSentCopy(sess *session, cm composeMail, src *replySource) {
 	}
 	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err != nil {
+		s.recordSwallowed(sess, "sent_copy.open", err)
 		return
 	}
-	defer func() { _ = st.Close() }()
+	defer func() {
+		if err := st.Close(); err != nil {
+			s.recordSwallowed(sess, "sent_copy.close", err)
+		}
+	}()
 	if cm.saveToSent {
 		if _, err := st.AppendMessage(int64(mapi.PrivateFIDSentItems), cm.mime, time.Now(), objectstore.FlagSeen); err != nil {
 			st.LogSwallowedError("activesync.sent-copy", err)
 		}
 	}
 	if src != nil {
-		markReplyForwardSource(st, *src)
+		if err := markReplyForwardSource(st, *src); err != nil {
+			st.LogSwallowedError("activesync.source-mark", err)
+		}
 	}
+}
+
+// recordSwallowed records a failure the send path absorbs because the message is
+// already delivered, so the operator still sees it.
+func (s *Server) recordSwallowed(sess *session, name string, err error) {
+	s.Logger.Emit(logging.Event{
+		Level:     logging.LevelWarn,
+		Subsystem: logging.ActiveSync,
+		Name:      name,
+		User:      sess.user,
+		Fields:    logging.Fields{"error": err.Error()},
+	})
 }
 
 // ComposeMail failure statuses ([MS-ASCMD] 2.2.2 Common Status Codes). Every
@@ -327,7 +350,7 @@ func resolveSource(cm composeMail, r *http.Request) (folderID, itemID string) {
 // merged into the current flags so the read state survives (SetMessageFlags
 // rewrites the whole mask). Best-effort: a source removed since findSource is
 // skipped, never failing a send whose mail already left.
-func markReplyForwardSource(st *objectstore.Store, src replySource) {
+func markReplyForwardSource(st *objectstore.Store, src replySource) error {
 	verb := mapi.NoteVerbReplyToSender
 	if src.forward {
 		verb = mapi.NoteVerbForward
@@ -337,17 +360,19 @@ func markReplyForwardSource(st *objectstore.Store, src replySource) {
 	props.Set(mapi.PrLastVerbExecutionTime, mapi.UnixToNTTime(time.Now()))
 	if src.objID != 0 {
 		// An object-store item has no IMAP flags; the verb is its whole mark.
-		_ = st.ModifyMessageProperties(src.objID, props)
-		return
+		return st.ModifyMessageProperties(src.objID, props)
 	}
 	info, err := st.MessageByUID(src.fid, src.uid)
 	if err != nil {
-		return
+		return err
 	}
-	_ = st.ModifyMessageProperties(info.ID, props)
+	if err := st.ModifyMessageProperties(info.ID, props); err != nil {
+		return err
+	}
 	if !src.forward {
-		_ = st.SetMessageFlags(src.fid, src.uid, info.Flags|objectstore.FlagAnswered)
+		return st.SetMessageFlags(src.fid, src.uid, info.Flags|objectstore.FlagAnswered)
 	}
+	return nil
 }
 
 // recipientsOf collects the To, Cc, and Bcc addresses from a message's headers.
@@ -370,18 +395,17 @@ func recipientsOf(raw []byte) []string {
 }
 
 // stripBcc removes the Bcc header field, including any folded continuation
-// lines, from a message's header block. It leaves the body untouched.
+// lines, from a message's header block. It leaves the body untouched. A message
+// without a body (RFC 5322 3.5) has no empty line, so all of it is header.
 func stripBcc(raw []byte) []byte {
-	sep := []byte("\r\n\r\n")
-	idx := bytes.Index(raw, sep)
+	idx := bytes.Index(raw, []byte("\r\n\r\n"))
 	if idx < 0 {
-		sep = []byte("\n\n")
-		idx = bytes.Index(raw, sep)
+		idx = bytes.Index(raw, []byte("\n\n"))
 	}
-	if idx < 0 {
-		return raw // no header/body boundary; nothing safe to do
+	header, body := raw, []byte(nil)
+	if idx >= 0 {
+		header, body = raw[:idx], raw[idx:]
 	}
-	header, body := raw[:idx], raw[idx:]
 	var kept [][]byte
 	skipping := false
 	for line := range bytes.SplitSeq(header, []byte("\n")) {

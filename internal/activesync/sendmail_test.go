@@ -31,7 +31,7 @@ func sendServer(t *testing.T) (ts *httptest.Server, aliceDir, bobDir string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		st.Close()
+		closeStore(t, st)
 	}
 	accs := directory.StaticAccounts{
 		testUser: {Password: testPass, MailboxPath: aliceDir},
@@ -57,10 +57,17 @@ func postRaw(t *testing.T, ts *httptest.Server, cmd string, body []byte) (*http.
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
 	out, err := io.ReadAll(resp.Body)
 	mustNoErr(t, "read the reply", err)
+	mustNoErr(t, "close the reply", resp.Body.Close())
 	return resp, out
+}
+
+// closeStore closes a mailbox store the test opened and fails the test when it
+// cannot, since an unclosed store keeps the mailbox marked in use.
+func closeStore(t *testing.T, st *objectstore.Store) {
+	t.Helper()
+	mustNoErr(t, "close the store", st.Close())
 }
 
 func folderCount(t *testing.T, dir string, fid int64) int {
@@ -69,7 +76,7 @@ func folderCount(t *testing.T, dir string, fid int64) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer closeStore(t, st)
 	msgs, err := st.ListMessages(fid)
 	if err != nil {
 		t.Fatal(err)
@@ -180,7 +187,7 @@ func composeStatusOf(t *testing.T, resp *http.Response, out []byte) string {
 // delivers nothing: no recipient (119), no MIME element (103), bytes that are
 // not WBXML past the version byte (102).
 func TestComposeMailRefusalsCarryTheirStatus(t *testing.T) {
-	ts, _, bobDir := sendServer(t)
+	ts, aliceDir, bobDir := sendServer(t)
 	noRcpt := "From: alice@hermex.test\r\nSubject: nobody\r\n\r\nbody\r\n"
 	cases := []struct {
 		name, status string
@@ -197,17 +204,24 @@ func TestComposeMailRefusalsCarryTheirStatus(t *testing.T) {
 	if n := folderCount(t, bobDir, int64(mapi.PrivateFIDInbox)); n != 0 {
 		t.Errorf("bob's Inbox has %d messages after refused requests", n)
 	}
+	if n := folderCount(t, aliceDir, int64(mapi.PrivateFIDSentItems)); n != 0 {
+		t.Errorf("alice's Sent has %d messages after refused requests", n)
+	}
 }
 
 // TestSmartReplyRefusalNamesSmartReply checks a refused SmartReply answers with a
 // SmartReply element, not a SendMail one (6.44 SmartReply Response Schema).
 func TestSmartReplyRefusalNamesSmartReply(t *testing.T) {
-	ts, _, bobDir := sendServer(t)
+	ts, aliceDir, bobDir := sendServer(t)
 	forged := "From: bob@hermex.test\r\nTo: bob@hermex.test\r\nSubject: spoof\r\n\r\nx\r\n"
-	resp, out := postRaw(t, ts, "SmartReply", wbxml.Marshal(wbxml.Elem(wbxml.CMSmartReply, wbxml.Opaque(wbxml.CMMIME, []byte(forged)))))
+	resp, out := postRaw(t, ts, "SmartReply", wbxml.Marshal(wbxml.Elem(wbxml.CMSmartReply,
+		wbxml.Empty(wbxml.CMSaveInSentItems), wbxml.Opaque(wbxml.CMMIME, []byte(forged)))))
 	wantComposeStatus(t, resp, out, wbxml.CMSmartReply, "130")
 	if n := folderCount(t, bobDir, int64(mapi.PrivateFIDInbox)); n != 0 {
 		t.Errorf("bob's Inbox has %d messages after a refused SmartReply", n)
+	}
+	if n := folderCount(t, aliceDir, int64(mapi.PrivateFIDSentItems)); n != 0 {
+		t.Errorf("alice's Sent has %d messages after a refused SmartReply", n)
 	}
 }
 
@@ -216,7 +230,7 @@ func TestSmartReplyRefusalNamesSmartReply(t *testing.T) {
 // ItemNotFound, and nothing may be delivered for a reply to nothing.
 func TestSmartResponseToAMissingSourceSendsNothing(t *testing.T) {
 	ts, aliceDir, bobDir := sendServer(t)
-	uid, _ := seedSource(t, aliceDir, 0)
+	uid, srcID := seedSource(t, aliceDir, 0)
 	inbox := strconv.FormatInt(int64(mapi.PrivateFIDInbox), 10)
 	sent := strconv.FormatInt(int64(mapi.PrivateFIDSentItems), 10)
 	item := strconv.FormatUint(uint64(uid), 10)
@@ -247,6 +261,9 @@ func TestSmartResponseToAMissingSourceSendsNothing(t *testing.T) {
 	if n := folderCount(t, bobDir, int64(mapi.PrivateFIDInbox)); n != 0 {
 		t.Errorf("bob's Inbox has %d messages; a reply to a missing source was sent", n)
 	}
+	if v, ok := sourceVerb(t, aliceDir, srcID); ok {
+		t.Errorf("the real message was marked with verb %d by requests that named another source", v)
+	}
 }
 
 // TestSmartForwardOfAnAppointment forwards a calendar item by the ServerId a
@@ -263,7 +280,7 @@ func TestSmartForwardOfAnAppointment(t *testing.T) {
 	props.Set(mapi.PrMessageClass, "IPM.Appointment")
 	props.Set(mapi.PrSubject, "Planning")
 	id, err := st.CreateMessage(int64(mapi.PrivateFIDCalendar), &oxcmail.Message{Props: props})
-	st.Close()
+	closeStore(t, st)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,39 +328,31 @@ func TestSendMailLegacyRawMIME(t *testing.T) {
 	}
 }
 
-// TestStripBcc confirms the Bcc field and its folded continuation are removed
-// while the other headers and the body survive.
+// TestStripBcc removes the Bcc field in each form RFC 5322 allows and a device
+// may send: folded onto a continuation line (2.2.3), with whitespace before the
+// colon (the obsolete syntax of 4.5.3), and in a message with no body, which has
+// no empty line after the header (3.5), with CRLF and with the bare LF some
+// devices write. A field whose name only starts with Bcc stays, and a body line
+// that reads like a Bcc field is body, not header, so it stays too.
 func TestStripBcc(t *testing.T) {
-	raw := []byte("To: bob@hermex.test\r\nBcc: carol@hermex.test,\r\n dan@hermex.test\r\nSubject: x\r\n\r\nbody\r\n")
-	out := stripBcc(raw)
-	if bytes.Contains(bytes.ToLower(out), []byte("bcc:")) {
-		t.Error("Bcc field not removed")
+	cases := []struct{ name, raw, want string }{
+		{"folded",
+			"To: bob@hermex.test\r\nBcc: carol@hermex.test,\r\n dan@hermex.test\r\nSubject: x\r\n\r\nbody\r\nBcc: body line\r\n",
+			"To: bob@hermex.test\r\nSubject: x\r\n\r\nbody\r\nBcc: body line\r\n"},
+		{"space before colon",
+			"To: bob@hermex.test\r\nBCC : erin@hermex.test\r\nBcc-Note: kept\r\nSubject: x\r\n\r\nbody\r\n",
+			"To: bob@hermex.test\r\nBcc-Note: kept\r\nSubject: x\r\n\r\nbody\r\n"},
+		{"no body, CRLF",
+			"To: bob@hermex.test\r\nBcc: hidden@hermex.test\r\nSubject: x\r\n",
+			"To: bob@hermex.test\r\nSubject: x\r\n"},
+		{"no body, LF",
+			"To: bob@hermex.test\nBcc: hidden@hermex.test\nSubject: x\n",
+			"To: bob@hermex.test\nSubject: x\n"},
 	}
-	for _, gone := range []string{"carol", "dan"} {
-		if bytes.Contains(out, []byte(gone)) {
-			t.Errorf("Bcc recipient %q survived (folded continuation not stripped)", gone)
+	for _, c := range cases {
+		if got := string(stripBcc([]byte(c.raw))); got != c.want {
+			t.Errorf("%s: stripBcc =\n%q\nwant\n%q", c.name, got, c.want)
 		}
-	}
-	if !bytes.Contains(out, []byte("To: bob@hermex.test")) {
-		t.Error("To header was dropped")
-	}
-	if !bytes.Contains(out, []byte("body")) {
-		t.Error("body was dropped")
-	}
-}
-
-// TestStripBccWithSpaceBeforeColon writes the field the way the obsolete
-// header syntax RFC 5322 4.5.3 lets a sender write it, with whitespace between
-// the name and the colon. A reader that accepts that syntax still treats the
-// line as Bcc, so the blind address must not reach the delivered copy.
-func TestStripBccWithSpaceBeforeColon(t *testing.T) {
-	raw := []byte("To: bob@hermex.test\r\nBCC : erin@hermex.test\r\nBcc-Note: kept\r\nSubject: x\r\n\r\nbody\r\n")
-	out := stripBcc(raw)
-	if bytes.Contains(out, []byte("erin")) {
-		t.Errorf("Bcc recipient survived:\n%s", out)
-	}
-	if !bytes.Contains(out, []byte("Bcc-Note: kept")) {
-		t.Errorf("a field whose name only starts with Bcc was dropped:\n%s", out)
 	}
 }
 
@@ -371,7 +380,7 @@ func seedSource(t *testing.T, dir string, flags int64) (uid uint32, id int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer closeStore(t, st)
 	raw := []byte("From: bob@hermex.test\r\nTo: alice@hermex.test\r\nSubject: Original\r\n" +
 		"Message-ID: <orig@hermex.test>\r\n\r\nhi alice\r\n")
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), raw, time.Now(), flags)
@@ -388,7 +397,7 @@ func sourceVerb(t *testing.T, dir string, id int64) (int32, bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer closeStore(t, st)
 	props, err := st.GetMessageProperties(id, mapi.PrLastVerbExecuted)
 	if err != nil {
 		t.Fatal(err)
@@ -425,7 +434,7 @@ func TestSmartReplyMarksSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	flags, err := st.MessageFlags(int64(mapi.PrivateFIDInbox), srcUID)
-	st.Close()
+	closeStore(t, st)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,6 +446,24 @@ func TestSmartReplyMarksSource(t *testing.T) {
 	}
 	if v, ok := sourceVerb(t, aliceDir, srcID); !ok || v != mapi.NoteVerbReplyToSender {
 		t.Errorf("source PidTagLastVerbExecuted = %d (present=%v), want %d", v, ok, mapi.NoteVerbReplyToSender)
+	}
+}
+
+// TestMarkingAVanishedSourceIsReported: a source that is gone by the time the
+// send finishes (deleted on another device) cannot be marked, and the failure is
+// returned so the send path records it rather than claiming the mark landed.
+func TestMarkingAVanishedSourceIsReported(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "alice")
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open the store", err)
+	defer closeStore(t, st)
+	for _, src := range []replySource{
+		{fid: int64(mapi.PrivateFIDInbox), uid: 4242},
+		{fid: int64(mapi.PrivateFIDCalendar), objID: 4242},
+	} {
+		if err := markReplyForwardSource(st, src); err == nil {
+			t.Errorf("marking the missing source %+v reported success", src)
+		}
 	}
 }
 
@@ -466,7 +493,7 @@ func TestSmartForwardMarksSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	flags, err := st.MessageFlags(int64(mapi.PrivateFIDInbox), srcUID)
-	st.Close()
+	closeStore(t, st)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -496,7 +523,7 @@ func TestSmartReplyURLQuerySource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	mustNoErr(t, "close the reply", resp.Body.Close())
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d, want 200", resp.StatusCode)
 	}
@@ -506,7 +533,7 @@ func TestSmartReplyURLQuerySource(t *testing.T) {
 		t.Fatal(err)
 	}
 	flags, err := st.MessageFlags(int64(mapi.PrivateFIDInbox), srcUID)
-	st.Close()
+	closeStore(t, st)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -533,7 +560,7 @@ func TestSendMailLeavesTheOnlyCopyToAnExclusiveMailbox(t *testing.T) {
 	if err := st.SetSentCopyConfig(objectstore.SentCopyConfig{ForSendAs: true, Exclusive: true}); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	closeStore(t, st)
 	asBob := "From: bob@hermex.test\r\nTo: bob@hermex.test\r\nSubject: team\r\n" +
 		"Date: Mon, 15 Jun 2026 09:00:00 +0000\r\nMessage-ID: <x1@hermex.test>\r\n\r\nhi\r\n"
 	sm := wbxml.Elem(wbxml.CMSendMail,
