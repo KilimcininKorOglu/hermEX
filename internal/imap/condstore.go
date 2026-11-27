@@ -3,6 +3,8 @@ package imap
 import (
 	"strconv"
 	"strings"
+
+	"hermex/internal/logging"
 )
 
 // CONDSTORE/QRESYNC (RFC 7162). MODSEQ is the objectstore's IMAP-local per-message
@@ -37,15 +39,24 @@ func (c *conn) cmdEnable(tag string, args []token) {
 
 // modseqMap reads the selected folder's per-UID modification sequences fresh, so a
 // STORE reports the new modseq it just assigned (never a cached SELECT snapshot).
-func (c *conn) modseqMap() map[uint32]uint64 {
-	m, _ := c.curStore().MessageModSeqs(c.sel.id)
-	return m
+func (c *conn) modseqMap() (map[uint32]uint64, error) {
+	m, err := c.curStore().MessageModSeqs(c.sel.id)
+	if err != nil {
+		c.event(logging.LevelError, "condstore.modseq.fail", logging.Fields{"folder": c.sel.id, "error": err.Error()})
+		return nil, err
+	}
+	return m, nil
 }
 
-// highestModSeq returns the selected folder's HIGHESTMODSEQ.
-func (c *conn) highestModSeq() uint64 {
-	hi, _ := c.curStore().FolderHighestModSeq(c.sel.id)
-	return hi
+// highestModSeq returns the selected folder's HIGHESTMODSEQ and whether it was
+// read cleanly.
+func (c *conn) highestModSeq() (uint64, bool) {
+	hi, err := c.curStore().FolderHighestModSeq(c.sel.id)
+	if err != nil {
+		c.event(logging.LevelError, "condstore.highestmodseq.fail", logging.Fields{"folder": c.sel.id, "error": err.Error()})
+		return 0, false
+	}
+	return hi, true
 }
 
 // selectEnablesCondstore reports whether a SELECT/EXAMINE parameter list carries
@@ -86,10 +97,16 @@ func (c *conn) emitQResync(sel *selectedMailbox) {
 	if c.qrUIDValidity != sel.uidValidity {
 		return
 	}
-	if vanished, _ := c.curStore().VanishedSince(sel.id, c.qrModSeq); len(vanished) > 0 {
+	vanished, err := c.curStore().VanishedSince(sel.id, c.qrModSeq)
+	if err != nil {
+		c.event(logging.LevelError, "condstore.vanished.fail", logging.Fields{"folder": sel.id, "error": err.Error()})
+	} else if len(vanished) > 0 {
 		c.untagged("VANISHED (EARLIER) %s", esearchSet(vanished))
 	}
-	modseqs := c.modseqMap()
+	modseqs, err := c.modseqMap()
+	if err != nil {
+		return
+	}
 	for i := range sel.msgs {
 		if modseqs[sel.msgs[i].UID] > c.qrModSeq {
 			c.untagged("%d FETCH (UID %d FLAGS (%s) MODSEQ (%d))",

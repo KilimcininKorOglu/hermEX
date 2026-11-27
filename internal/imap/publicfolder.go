@@ -70,18 +70,24 @@ func (c *conn) openPub() (*objectstore.Store, bool) {
 	return st, true
 }
 
+// publicFolderMatch holds a visible public folder and the caller's effective rights.
+type publicFolderMatch struct {
+	info   objectstore.FolderInfo
+	rights uint32
+}
+
 // resolvePublicFolder finds a top-level public folder by name in the caller's
 // domain store and returns it with the caller's effective rights, but only when
 // the caller may at least see it (FrightsVisible). v1 public folders are a flat
 // set directly under the IPM subtree, so a name with a further "/" never matches.
-func (c *conn) resolvePublicFolder(sub string) (objectstore.FolderInfo, uint32, bool) {
+func (c *conn) resolvePublicFolder(sub string) *publicFolderMatch {
 	st, ok := c.openPub()
 	if !ok {
-		return objectstore.FolderInfo{}, 0, false
+		return nil
 	}
 	all, err := st.ListFolders()
 	if err != nil {
-		return objectstore.FolderInfo{}, 0, false
+		return nil
 	}
 	for _, f := range all {
 		if f.ParentID != nil || f.DisplayName != sub {
@@ -89,11 +95,11 @@ func (c *conn) resolvePublicFolder(sub string) (objectstore.FolderInfo, uint32, 
 		}
 		rights, err := st.ResolvePermission(f.ID, c.user)
 		if err != nil || rights&mapi.FrightsVisible == 0 {
-			return objectstore.FolderInfo{}, 0, false
+			return nil
 		}
-		return f, rights, true
+		return &publicFolderMatch{info: f, rights: rights}
 	}
-	return objectstore.FolderInfo{}, 0, false
+	return nil
 }
 
 // resolveAppendDest resolves an APPEND/COPY destination mailbox to the store and
@@ -104,14 +110,14 @@ func (c *conn) resolveAppendDest(name string) (st *objectstore.Store, fid int64,
 		if sub == "" {
 			return nil, 0, false, "the public folders root is not a mailbox"
 		}
-		f, rights, found := c.resolvePublicFolder(sub)
-		if !found {
+		m := c.resolvePublicFolder(sub)
+		if m == nil {
 			return nil, 0, false, "[TRYCREATE] no such mailbox"
 		}
-		if rights&mapi.FrightsCreate == 0 {
+		if m.rights&mapi.FrightsCreate == 0 {
 			return nil, 0, false, "[NOPERM] no post rights on this public folder"
 		}
-		return c.pubStore, f.ID, true, ""
+		return c.pubStore, m.info.ID, true, ""
 	}
 	tree, err := loadFolderTree(c.st)
 	if err != nil {
@@ -132,16 +138,16 @@ func (c *conn) selectPublic(tag, name, sub string, examine bool) {
 		c.failSelect(tag, "the public folders root is not selectable")
 		return
 	}
-	f, rights, found := c.resolvePublicFolder(sub)
-	if !found {
+	m := c.resolvePublicFolder(sub)
+	if m == nil {
 		c.failSelect(tag, "no such mailbox")
 		return
 	}
-	if rights&mapi.FrightsReadAny == 0 {
+	if m.rights&mapi.FrightsReadAny == 0 {
 		c.failSelect(tag, "[NOPERM] read access denied")
 		return
 	}
-	sel, err := loadMailbox(c.pubStore, f.ID, name)
+	sel, err := loadMailbox(c.pubStore, m.info.ID, name)
 	if err != nil {
 		c.failSelect(tag, "cannot open mailbox")
 		return
@@ -156,7 +162,7 @@ func (c *conn) selectPublic(tag, name, sub string, examine bool) {
 	// APPEND, the post-without-modify semantics public folders want; this is also
 	// why FrightsEditOwned/DeleteOwned alone do not grant read-write (the store
 	// cannot enforce the owned-only restriction over IMAP).
-	c.readOnly = examine || rights&(mapi.FrightsEditAny|mapi.FrightsDeleteAny) == 0
+	c.readOnly = examine || m.rights&(mapi.FrightsEditAny|mapi.FrightsDeleteAny) == 0
 	c.emitSelected(tag, sel, examine)
 }
 
@@ -171,6 +177,34 @@ func (c *conn) failSelect(tag, text string) {
 	c.no(tag, text)
 }
 
+// statusMeta holds folder-level counters reported by STATUS.
+type statusMeta struct {
+	uidValidity uint32
+	uidNext     uint32
+	highModSeq  uint64
+}
+
+// readStatusMeta reads UIDVALIDITY, UIDNEXT, and HIGHESTMODSEQ for a folder,
+// recording and returning any store read error.
+func (c *conn) readStatusMeta(st *objectstore.Store, fid int64) (statusMeta, error) {
+	uidv, err := st.UIDValidity(fid)
+	if err != nil {
+		c.event(logging.LevelError, "status.read.fail", logging.Fields{"folder": fid, "error": err.Error()})
+		return statusMeta{}, err
+	}
+	uidn, err := st.UIDNext(fid)
+	if err != nil {
+		c.event(logging.LevelError, "status.read.fail", logging.Fields{"folder": fid, "error": err.Error()})
+		return statusMeta{}, err
+	}
+	hms, err := st.FolderHighestModSeq(fid)
+	if err != nil {
+		c.event(logging.LevelError, "status.read.fail", logging.Fields{"folder": fid, "error": err.Error()})
+		return statusMeta{}, err
+	}
+	return statusMeta{uidValidity: uidv, uidNext: uidn, highModSeq: hms}, nil
+}
+
 // statusPublic answers STATUS for a public folder. A folder LIST advertises must
 // also answer STATUS (clients poll it for unread badges), so the gate is the same
 // visibility check LIST uses; the counts come from the public store.
@@ -179,22 +213,34 @@ func (c *conn) statusPublic(tag, name, sub string, items []string) {
 		c.no(tag, "no such mailbox")
 		return
 	}
-	f, _, found := c.resolvePublicFolder(sub)
-	if !found {
+	m := c.resolvePublicFolder(sub)
+	if m == nil {
 		c.no(tag, "no such mailbox")
 		return
 	}
 	st := c.pubStore // resolvePublicFolder opened it
-	msgs, err := st.ListMessages(f.ID)
+	msgs, err := st.ListMessages(m.info.ID)
 	if err != nil {
 		c.no(tag, "cannot read mailbox")
 		return
 	}
-	uidv, _ := st.UIDValidity(f.ID)
-	uidn, _ := st.UIDNext(f.ID)
-	hms, _ := st.FolderHighestModSeq(f.ID)
-	c.untagged("STATUS %s (%s)", safeQuoted(name), statusParts(items, msgs, uidv, uidn, hms))
+	meta, err := c.readStatusMeta(st, m.info.ID)
+	if err != nil {
+		c.no(tag, "cannot read mailbox")
+		return
+	}
+	c.untagged("STATUS %s (%s)", safeQuoted(name), statusParts(items, msgs, meta.uidValidity, meta.uidNext, meta.highModSeq))
 	c.ok(tag, "STATUS completed")
+}
+
+// emitHighestModSeq reports HIGHESTMODSEQ or NOMODSEQ when the folder modseq
+// cannot be read (RFC 7162 3.1.2).
+func (c *conn) emitHighestModSeq() {
+	if hi, ok := c.highestModSeq(); ok {
+		c.untagged("OK [HIGHESTMODSEQ %d] modseq", hi)
+		return
+	}
+	c.untagged("OK [NOMODSEQ] no mod-sequences")
 }
 
 // emitSelected writes the untagged SELECT/EXAMINE response and the tagged OK,
@@ -217,7 +263,7 @@ func (c *conn) emitSelected(tag string, sel *selectedMailbox, examine bool) {
 	// CONDSTORE (RFC 7162): report the mailbox HIGHESTMODSEQ once the session has
 	// enabled CONDSTORE, so the client has a sync baseline.
 	if c.condstore {
-		c.untagged("OK [HIGHESTMODSEQ %d] modseq", c.highestModSeq())
+		c.emitHighestModSeq()
 	}
 	// QRESYNC SELECT (RFC 7162): emit VANISHED (EARLIER) and the changed-message
 	// FETCH before the tagged OK, then clear the pending request.

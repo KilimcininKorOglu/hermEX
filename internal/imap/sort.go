@@ -93,7 +93,7 @@ func (c *conn) cmdSort(tag string, args []token, byUID bool) {
 		c.bad(tag, "invalid SORT criteria")
 		return
 	}
-	if _, ok := cur.next(); !ok { // a charset is mandatory in the grammar; ignore it
+	if !cur.nextText() { // a charset is mandatory in the grammar; ignore it
 		c.bad(tag, "SORT requires a charset and search keys")
 		return
 	}
@@ -248,7 +248,7 @@ func (c *conn) cmdThread(tag string, args []token, byUID bool) {
 		return
 	}
 	algo := strings.ToUpper(algoTok.val)
-	if _, ok := cur.next(); !ok { // charset
+	if !cur.nextText() { // charset
 		c.bad(tag, "THREAD requires a charset and search keys")
 		return
 	}
@@ -336,18 +336,18 @@ func (c *conn) threadOrderedSubject(matched []int, byUID bool) string {
 	}
 	sort.SliceStable(threads, func(a, b int) bool { return threads[a].earliest.Before(threads[b].earliest) })
 
-	var sb strings.Builder
+	var b []byte
 	for _, th := range threads {
-		sb.WriteString("(")
+		b = append(b, '(')
 		for i, mm := range th.members {
 			if i > 0 {
-				sb.WriteString(" ")
+				b = append(b, ' ')
 			}
-			fmt.Fprintf(&sb, "%d", c.threadID(mm.idx, byUID))
+			b = fmt.Appendf(b, "%d", c.threadID(mm.idx, byUID))
 		}
-		sb.WriteString(")")
+		b = append(b, ')')
 	}
-	return sb.String()
+	return string(b)
 }
 
 // tnode is a node in the REFERENCES thread forest.
@@ -384,13 +384,13 @@ func (c *conn) threadReferences(matched []int, byUID bool) string {
 	}
 	sort.SliceStable(roots, func(a, b int) bool { return roots[a].date.Before(roots[b].date) })
 
-	var sb strings.Builder
+	var b []byte
 	for _, r := range roots {
-		sb.WriteString("(")
-		sb.WriteString(c.renderThread(r, byUID))
-		sb.WriteString(")")
+		b = append(b, '(')
+		b = append(b, c.renderThread(r, byUID)...)
+		b = append(b, ')')
 	}
-	return sb.String()
+	return string(b)
 }
 
 // threadParent picks a message's parent: the last of its References that names a
@@ -423,17 +423,17 @@ func (c *conn) renderThread(n *tnode, byUID bool) string {
 		cur = cur.children[0]
 		members = append(members, fmt.Sprintf("%d", c.threadID(cur.idx, byUID)))
 	}
-	var sb strings.Builder
-	sb.WriteString(strings.Join(members, " "))
+	var b []byte
+	b = append(b, strings.Join(members, " ")...)
 	if len(cur.children) > 1 {
-		sb.WriteByte(' ')
+		b = append(b, ' ')
 		for _, ch := range cur.children {
-			sb.WriteByte('(')
-			sb.WriteString(c.renderThread(ch, byUID))
-			sb.WriteByte(')')
+			b = append(b, '(')
+			b = append(b, c.renderThread(ch, byUID)...)
+			b = append(b, ')')
 		}
 	}
-	return sb.String()
+	return string(b)
 }
 
 // firstAngle returns the first <...> token in a header, or "".

@@ -28,8 +28,7 @@ func (c *conn) cmdStore(tag string, args []token, byUID bool) {
 		c.bad(tag, "STORE requires a sequence set and flags")
 		return
 	}
-	setText, _ := args[0].str()
-	set, err := parseSeqSet(setText)
+	set, err := parseSeqArg(args[0])
 	if err != nil {
 		c.bad(tag, "invalid sequence set")
 		return
@@ -39,16 +38,14 @@ func (c *conn) cmdStore(tag string, args []token, byUID bool) {
 		c.bad(tag, problem)
 		return
 	}
-	modified, reported := c.applyStore(set, byUID, req)
-
-	// The new modseq is read fresh after the modifications, never the pre-store map.
-	var postModseqs map[uint32]uint64
-	if c.condstore {
-		postModseqs = c.modseqMap()
+	modified, reported, err := c.applyStore(set, byUID, req)
+	if err != nil {
+		c.no(tag, "cannot read message modseqs")
+		return
 	}
-	for _, i := range reported {
-		// #nosec G115 -- an IMAP sequence number, an index into the selected mailbox's in-memory message list
-		c.untagged("%d FETCH (%s)", uint32(i+1), storeFetchFields(c.sel.msgs[i], byUID, c.condstore, postModseqs))
+	if err := c.emitStoreFetches(reported, byUID); err != nil {
+		c.no(tag, "cannot read message modseqs")
+		return
 	}
 
 	verb := "STORE"
@@ -60,6 +57,24 @@ func (c *conn) cmdStore(tag string, args []token, byUID bool) {
 		return
 	}
 	c.ok(tag, verb+" completed")
+}
+
+// emitStoreFetches emits untagged FETCH replies for STORE, reading fresh
+// modseqs when CONDSTORE is active.
+func (c *conn) emitStoreFetches(reported []int, byUID bool) error {
+	var postModseqs map[uint32]uint64
+	if c.condstore {
+		var err error
+		postModseqs, err = c.modseqMap()
+		if err != nil {
+			return err
+		}
+	}
+	for _, i := range reported {
+		// #nosec G115 -- an IMAP sequence number, an index into the selected mailbox's in-memory message list
+		c.untagged("%d FETCH (%s)", uint32(i+1), storeFetchFields(c.sel.msgs[i], byUID, c.condstore, postModseqs))
+	}
+	return nil
 }
 
 // parseStoreRequest reads the part of a STORE after its sequence set: an optional
@@ -76,7 +91,10 @@ func (c *conn) parseStoreRequest(args []token) (storeRequest, string) {
 	if len(rest) < 2 {
 		return storeRequest{}, "STORE requires an item and flags"
 	}
-	itemText, _ := rest[0].str()
+	itemText, ok := rest[0].str()
+	if !ok {
+		return storeRequest{}, "invalid STORE item"
+	}
 	mode, silent, ok := parseStoreItem(itemText)
 	if !ok {
 		return storeRequest{}, "invalid STORE item"
@@ -103,22 +121,14 @@ type storeRequest struct {
 // applyStore writes the requested flag change to every message in the set. It
 // returns the UIDs UNCHANGEDSINCE rejected (their modseq had moved on) and the
 // message indices to report back via FETCH.
-func (c *conn) applyStore(set seqSet, byUID bool, req storeRequest) (modified []uint32, reported []int) {
-	var preModseqs map[uint32]uint64
-	if req.condUsed {
-		preModseqs = c.modseqMap() // pre-store: the UNCHANGEDSINCE comparison basis
+func (c *conn) applyStore(set seqSet, byUID bool, req storeRequest) (modified []uint32, reported []int, err error) {
+	preModseqs, err := c.loadPreModseqs(req.condUsed)
+	if err != nil {
+		return nil, nil, err
 	}
-	max := c.sel.maxSeq()
-	if byUID {
-		max = c.sel.maxUID()
-	}
+	max := c.storeMaxID(byUID)
 	for i := range c.sel.msgs {
-		// #nosec G115 -- an IMAP sequence number, an index into the selected mailbox's in-memory message list
-		key := uint32(i + 1)
-		if byUID {
-			key = c.sel.msgs[i].UID
-		}
-		if !set.contains(key, max) {
+		if !set.contains(c.storeMsgKey(i, byUID), max) {
 			continue
 		}
 		if req.condUsed && preModseqs[c.sel.msgs[i].UID] > req.unchangedSince {
@@ -132,7 +142,29 @@ func (c *conn) applyStore(set seqSet, byUID bool, req storeRequest) (modified []
 			reported = append(reported, i)
 		}
 	}
-	return modified, reported
+	return modified, reported, nil
+}
+
+func (c *conn) loadPreModseqs(condUsed bool) (map[uint32]uint64, error) {
+	if !condUsed {
+		return nil, nil
+	}
+	return c.modseqMap()
+}
+
+func (c *conn) storeMaxID(byUID bool) uint32 {
+	if byUID {
+		return c.sel.maxUID()
+	}
+	return c.sel.maxSeq()
+}
+
+func (c *conn) storeMsgKey(i int, byUID bool) uint32 {
+	if byUID {
+		return c.sel.msgs[i].UID
+	}
+	// #nosec G115 -- an IMAP sequence number, an index into the selected mailbox's in-memory message list
+	return uint32(i + 1)
 }
 
 // storeFlags applies the flag change to one message, updating the session copy
@@ -248,8 +280,7 @@ func (c *conn) cmdUIDExpunge(tag string, args []token) {
 		c.bad(tag, "UID EXPUNGE requires a sequence set")
 		return
 	}
-	setText, _ := args[0].str()
-	set, err := parseSeqSet(setText)
+	set, err := parseSeqArg(args[0])
 	if err != nil {
 		c.bad(tag, "invalid sequence set")
 		return
@@ -350,6 +381,29 @@ func (c *conn) refuseOverQuota(tag string, st *objectstore.Store) bool {
 	return false
 }
 
+// destUIDValidity reads UIDVALIDITY for a UIDPLUS response code, recording
+// any failure instead of silently emitting a zero validity.
+func (c *conn) destUIDValidity(st *objectstore.Store, fid int64) (uint32, bool) {
+	uidv, err := st.UIDValidity(fid)
+	if err != nil {
+		c.event(logging.LevelError, "uidplus.uidvalidity.fail", logging.Fields{"folder": fid, "error": err.Error()})
+		return 0, false
+	}
+	return uidv, true
+}
+
+// replyCopyOK completes a COPY command, carrying [COPYUID ...] when messages
+// were copied and destination UIDVALIDITY is readable.
+func (c *conn) replyCopyOK(tag, verb string, destStore *objectstore.Store, destFID int64, srcUIDs, dstUIDs []uint32) {
+	if len(srcUIDs) > 0 {
+		if uidv, ok := c.destUIDValidity(destStore, destFID); ok {
+			c.ok(tag, fmt.Sprintf("[COPYUID %d %s %s] %s completed", uidv, uidList(srcUIDs), uidList(dstUIDs), verb))
+			return
+		}
+	}
+	c.ok(tag, verb+" completed")
+}
+
 // cmdCopy handles COPY and (byUID) UID COPY: it copies the addressed messages
 // into another mailbox, preserving their flags and internal dates.
 func (c *conn) cmdCopy(tag string, args []token, byUID bool) {
@@ -361,13 +415,16 @@ func (c *conn) cmdCopy(tag string, args []token, byUID bool) {
 		c.bad(tag, "COPY requires a sequence set and a mailbox")
 		return
 	}
-	setText, _ := args[0].str()
-	set, err := parseSeqSet(setText)
+	set, err := parseSeqArg(args[0])
 	if err != nil {
 		c.bad(tag, "invalid sequence set")
 		return
 	}
-	dest, _ := args[1].str()
+	dest, ok := args[1].str()
+	if !ok {
+		c.bad(tag, "COPY requires a mailbox name")
+		return
+	}
 	destStore, destFID, ok, errText := c.resolveAppendDest(dest)
 	if !ok {
 		c.no(tag, errText)
@@ -386,14 +443,7 @@ func (c *conn) cmdCopy(tag string, args []token, byUID bool) {
 	if byUID {
 		verb = "UID COPY"
 	}
-	// UIDPLUS (RFC 4315): report the source→destination UID mapping so the client
-	// need not re-sync the destination to learn the new UIDs.
-	if len(srcUIDs) > 0 {
-		uidv, _ := destStore.UIDValidity(destFID)
-		c.ok(tag, fmt.Sprintf("[COPYUID %d %s %s] %s completed", uidv, uidList(srcUIDs), uidList(dstUIDs), verb))
-		return
-	}
-	c.ok(tag, verb+" completed")
+	c.replyCopyOK(tag, verb, destStore, destFID, srcUIDs, dstUIDs)
 }
 
 // cmdMove handles MOVE and (byUID) UID MOVE (RFC 6851): it copies the addressed
@@ -430,8 +480,9 @@ func (c *conn) cmdMove(tag string, args []token, byUID bool) {
 		return
 	}
 
-	uidv, _ := destStore.UIDValidity(destFID)
-	c.untagged("OK [COPYUID %d %s %s]", uidv, uidList(srcUIDs), uidList(dstUIDs))
+	if uidv, ok := c.destUIDValidity(destStore, destFID); ok {
+		c.untagged("OK [COPYUID %d %s %s]", uidv, uidList(srcUIDs), uidList(dstUIDs))
+	}
 	failed := c.expungeMoved(srcUIDs)
 	c.flush()
 	c.answerExpunge(tag, verb, failed)
@@ -445,13 +496,16 @@ func (c *conn) moveTarget(tag string, args []token) (seqSet, *objectstore.Store,
 		c.bad(tag, "MOVE requires a sequence set and a mailbox")
 		return seqSet{}, nil, 0, false
 	}
-	setText, _ := args[0].str()
-	set, err := parseSeqSet(setText)
+	set, err := parseSeqArg(args[0])
 	if err != nil {
 		c.bad(tag, "invalid sequence set")
 		return seqSet{}, nil, 0, false
 	}
-	dest, _ := args[1].str()
+	dest, ok := args[1].str()
+	if !ok {
+		c.bad(tag, "MOVE requires a mailbox name")
+		return seqSet{}, nil, 0, false
+	}
 	destStore, destFID, ok, errText := c.resolveAppendDest(dest)
 	if !ok {
 		c.no(tag, errText)
@@ -524,13 +578,8 @@ func (c *conn) cmdAppend(tag string, args []token) {
 		c.bad(tag, "APPEND requires a mailbox and a message")
 		return
 	}
-	mailbox, _ := args[0].str()
-	destStore, destFID, ok, errText := c.resolveAppendDest(mailbox)
+	destStore, destFID, ok := c.resolveAppendTarget(tag, args[0])
 	if !ok {
-		c.no(tag, errText)
-		return
-	}
-	if c.refuseOverQuota(tag, destStore) {
 		return
 	}
 
@@ -555,8 +604,30 @@ func (c *conn) cmdAppend(tag string, args []token) {
 	}
 	// UIDPLUS (RFC 4315): report the assigned UID(s) so the client need not search
 	// for the messages it just uploaded.
-	uidv, _ := destStore.UIDValidity(destFID)
-	c.ok(tag, fmt.Sprintf("[APPENDUID %d %s] APPEND completed", uidv, uidList(uids)))
+	if uidv, ok := c.destUIDValidity(destStore, destFID); ok {
+		c.ok(tag, fmt.Sprintf("[APPENDUID %d %s] APPEND completed", uidv, uidList(uids)))
+		return
+	}
+	c.ok(tag, "APPEND completed")
+}
+
+// resolveAppendTarget parses the destination mailbox token, resolves it, and
+// refuses when over quota.
+func (c *conn) resolveAppendTarget(tag string, mailboxTok token) (*objectstore.Store, int64, bool) {
+	mailbox, ok := mailboxTok.str()
+	if !ok {
+		c.bad(tag, "APPEND requires a mailbox name")
+		return nil, 0, false
+	}
+	destStore, destFID, ok, errText := c.resolveAppendDest(mailbox)
+	if !ok {
+		c.no(tag, errText)
+		return nil, 0, false
+	}
+	if c.refuseOverQuota(tag, destStore) {
+		return nil, 0, false
+	}
+	return destStore, destFID, true
 }
 
 // appendGroups stores every (flags? date? message) group a MULTIAPPEND (RFC 3502)

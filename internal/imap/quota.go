@@ -61,7 +61,7 @@ func (c *conn) cmdGetQuotaRoot(tag string, args []token) {
 		return
 	}
 	// RFC 9208 4.3: a mailbox that does not exist is answered NO.
-	if _, _, _, found := c.resolveACLFolder(mailbox); !found {
+	if c.resolveACLFolder(mailbox) == nil {
 		c.no(tag, "no such mailbox")
 		return
 	}

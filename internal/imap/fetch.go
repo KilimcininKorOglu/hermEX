@@ -20,6 +20,16 @@ type fetchItem struct {
 	partial *[2]int      // SECTION: optional <start.count>
 }
 
+// parseSeqArg parses a sequence-set argument token, returning errProtocol when
+// the token is a structural delimiter or fails sequence-set syntax.
+func parseSeqArg(t token) (seqSet, error) {
+	s, ok := t.str()
+	if !ok {
+		return nil, errProtocol
+	}
+	return parseSeqSet(s)
+}
+
 // cmdFetch handles FETCH and (when byUID) UID FETCH.
 func (c *conn) cmdFetch(tag string, args []token, byUID bool) {
 	if c.state != stateSelected {
@@ -30,8 +40,7 @@ func (c *conn) cmdFetch(tag string, args []token, byUID bool) {
 		c.bad(tag, "FETCH requires a sequence set and items")
 		return
 	}
-	setText, _ := args[0].str()
-	set, err := parseSeqSet(setText)
+	set, err := parseSeqArg(args[0])
 	if err != nil {
 		c.bad(tag, "invalid sequence set")
 		return
@@ -47,9 +56,10 @@ func (c *conn) cmdFetch(tag string, args []token, byUID bool) {
 		return
 	}
 	items = c.completeFetchItems(items, byUID, changedSince)
-	var modseqs map[uint32]uint64
-	if changedSince > 0 || hasKind(items, "MODSEQ") {
-		modseqs = c.modseqMap()
+	modseqs, err := c.loadFetchModSeqs(items, changedSince)
+	if err != nil {
+		c.no(tag, "cannot read message modseqs")
+		return
 	}
 	c.writeFetches(set, byUID, items, modseqs, changedSince)
 
@@ -58,6 +68,15 @@ func (c *conn) cmdFetch(tag string, args []token, byUID bool) {
 		verb = "UID FETCH"
 	}
 	c.ok(tag, verb+" completed")
+}
+
+// loadFetchModSeqs reads per-UID modseqs only when a FETCH item or modifier
+// requires them.
+func (c *conn) loadFetchModSeqs(items []fetchItem, changedSince uint64) (map[uint32]uint64, error) {
+	if changedSince == 0 && !hasKind(items, "MODSEQ") {
+		return nil, nil
+	}
+	return c.modseqMap()
 }
 
 // completeFetchItems adds the items the protocol requires beyond what the client
@@ -189,7 +208,15 @@ type fetchRenderer struct {
 // loadRaw returns the message's wire form, reading it once.
 func (r *fetchRenderer) loadRaw() []byte {
 	if !r.rawLoaded {
-		r.raw, _ = r.c.curStore().GetMessageRaw(r.c.sel.id, r.msg.UID)
+		raw, err := r.c.curStore().GetMessageRaw(r.c.sel.id, r.msg.UID)
+		if err != nil {
+			r.c.event(logging.LevelError, "fetch.read.fail", logging.Fields{
+				"folder": r.c.sel.id,
+				"uid":    r.msg.UID,
+				"error":  err.Error(),
+			})
+		}
+		r.raw = raw
 		r.rawLoaded = true
 	}
 	return r.raw
@@ -246,14 +273,27 @@ func (r *fetchRenderer) metaField(it fetchItem, modseqs map[uint32]uint64) (stri
 	case "RFC822.SIZE":
 		return fmt.Sprintf("RFC822.SIZE %d", r.msg.Size), true
 	case "ENVELOPE":
-		env, _ := mime.ParseEnvelope(r.loadRaw())
-		return "ENVELOPE " + renderEnvelope(env), true
+		return r.renderEnvelopeField(), true
 	case "BODY":
 		return "BODY " + renderBodyStructure(r.need(), false), true
 	case "BODYSTRUCTURE":
 		return "BODYSTRUCTURE " + renderBodyStructure(r.need(), true), true
 	}
 	return "", false
+}
+
+// renderEnvelopeField parses and renders the message ENVELOPE, recording any
+// parse failure before falling back to the all-NIL envelope.
+func (r *fetchRenderer) renderEnvelopeField() string {
+	env, err := mime.ParseEnvelope(r.loadRaw())
+	if err != nil {
+		r.c.event(logging.LevelWarn, "fetch.envelope.fail", logging.Fields{
+			"folder": r.c.sel.id,
+			"uid":    r.msg.UID,
+			"error":  err.Error(),
+		})
+	}
+	return "ENVELOPE " + renderEnvelope(env)
 }
 
 // markSeen sets \Seen on a message as the side effect of a body read, and reports
@@ -382,38 +422,51 @@ func expandNames(names []string) []fetchItem {
 // parseOneItem parses a single FETCH item (which may span several tokens for a
 // BODY[...] section). It returns a slice to allow RFC822 aliases to expand.
 func parseOneItem(cur *tokenCursor) ([]fetchItem, error) {
-	t, _ := cur.next()
+	t, ok := cur.next()
+	if !ok {
+		return nil, errProtocol
+	}
 	name, ok := t.str()
 	if !ok {
 		return nil, errProtocol
 	}
 	upper := strings.ToUpper(name)
-
 	if item, ok := plainFetchItems[upper]; ok {
 		return []fetchItem{item}, nil
 	}
+	if items, handled, err := parseSectionItem(cur, upper); handled {
+		return items, err
+	}
+	return nil, fmt.Errorf("%w: unknown FETCH item %q", errProtocol, name)
+}
+
+// parseSectionItem parses BODY/BODY.PEEK/BINARY/BINARY.PEEK/BINARY.SIZE items.
+func parseSectionItem(cur *tokenCursor, upper string) ([]fetchItem, bool, error) {
 	hasSection := sectionFollows(cur)
 	switch upper {
 	case "BODY", "BODY.PEEK":
 		if !hasSection {
 			if upper == "BODY.PEEK" {
-				return nil, errProtocol // BODY.PEEK must carry a section
+				return nil, true, errProtocol // BODY.PEEK must carry a section
 			}
-			return []fetchItem{{kind: "BODY"}}, nil // BODY without section = BODYSTRUCTURE
+			return []fetchItem{{kind: "BODY"}}, true, nil // BODY without section = BODYSTRUCTURE
 		}
-		return parseBodySection(cur, upper == "BODY.PEEK")
+		items, err := parseBodySection(cur, upper == "BODY.PEEK")
+		return items, true, err
 	case "BINARY", "BINARY.PEEK":
 		if !hasSection {
-			return nil, errProtocol // BINARY requires a section
+			return nil, true, errProtocol // BINARY requires a section
 		}
-		return parseBinarySection(cur, upper == "BINARY.PEEK", false)
+		items, err := parseBinarySection(cur, upper == "BINARY.PEEK", false)
+		return items, true, err
 	case "BINARY.SIZE":
 		if !hasSection {
-			return nil, errProtocol
+			return nil, true, errProtocol
 		}
-		return parseBinarySection(cur, true, true) // SIZE is metadata; never sets \Seen
+		items, err := parseBinarySection(cur, true, true) // SIZE is metadata; never sets \Seen
+		return items, true, err
 	}
-	return nil, fmt.Errorf("%w: unknown FETCH item %q", errProtocol, name)
+	return nil, false, nil
 }
 
 // sectionFollows reports whether the next token opens a section specifier.
@@ -596,23 +649,23 @@ func parsePartial(s string) (*[2]int, error) {
 
 // sectionString renders a mime.Section back to its BODY[...] inner text.
 func sectionString(s mime.Section) string {
-	var sb strings.Builder
+	var b []byte
 	for i, n := range s.Path {
 		if i > 0 {
-			sb.WriteByte('.')
+			b = append(b, '.')
 		}
-		sb.WriteString(strconv.Itoa(n))
+		b = strconv.AppendInt(b, int64(n), 10)
 	}
 	if s.Specifier != "" {
 		if len(s.Path) > 0 {
-			sb.WriteByte('.')
+			b = append(b, '.')
 		}
-		sb.WriteString(s.Specifier)
+		b = append(b, s.Specifier...)
 		if len(s.Fields) > 0 {
-			sb.WriteString(" (")
-			sb.WriteString(strings.Join(s.Fields, " "))
-			sb.WriteByte(')')
+			b = append(b, " ("...)
+			b = append(b, strings.Join(s.Fields, " ")...)
+			b = append(b, ')')
 		}
 	}
-	return sb.String()
+	return string(b)
 }

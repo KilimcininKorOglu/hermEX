@@ -109,13 +109,13 @@ func renderAddressList(addrs []mime.Address) string {
 	if len(addrs) == 0 {
 		return "NIL"
 	}
-	var sb strings.Builder
-	sb.WriteByte('(')
+	var b []byte
+	b = append(b, '(')
 	for _, a := range addrs {
-		sb.WriteString(renderAddress(a))
+		b = append(b, renderAddress(a)...)
 	}
-	sb.WriteByte(')')
-	return sb.String()
+	b = append(b, ')')
+	return string(b)
 }
 
 // renderEnvelope renders an IMAP ENVELOPE structure. The date and subject use
@@ -147,58 +147,58 @@ func renderEncapsulated(p *mime.Part, extended bool) string {
 
 func renderBodyStructure(p *mime.Part, extended bool) string {
 	if p.Type == "multipart" {
-		var sb strings.Builder
-		sb.WriteByte('(')
+		var b []byte
+		b = append(b, '(')
 		for _, ch := range p.Children {
-			sb.WriteString(renderBodyStructure(ch, extended))
+			b = append(b, renderBodyStructure(ch, extended)...)
 		}
-		sb.WriteByte(' ')
-		sb.WriteString(typeStr(p.Subtype))
+		b = append(b, ' ')
+		b = append(b, typeStr(p.Subtype)...)
 		if extended {
-			sb.WriteByte(' ')
-			sb.WriteString(renderParamList(p.Params))
-			sb.WriteByte(' ')
-			sb.WriteString(renderDisposition(p))
-			sb.WriteString(" NIL NIL") // body-fld-lang, body-fld-loc
+			b = append(b, ' ')
+			b = append(b, renderParamList(p.Params)...)
+			b = append(b, ' ')
+			b = append(b, renderDisposition(p)...)
+			b = append(b, " NIL NIL"...) // body-fld-lang, body-fld-loc
 		}
-		sb.WriteByte(')')
-		return sb.String()
+		b = append(b, ')')
+		return string(b)
 	}
 
-	var sb strings.Builder
-	sb.WriteByte('(')
-	sb.WriteString(typeStr(p.Type))
-	sb.WriteByte(' ')
-	sb.WriteString(typeStr(p.Subtype))
-	sb.WriteByte(' ')
-	sb.WriteString(renderParamList(p.Params))
-	sb.WriteByte(' ')
-	sb.WriteString(nstring(p.ID))
-	sb.WriteByte(' ')
-	sb.WriteString(nstring(p.Description))
-	sb.WriteByte(' ')
-	sb.WriteString(typeStr(p.Encoding))
-	sb.WriteByte(' ')
-	sb.WriteString(strconv.Itoa(p.Size))
+	var b []byte
+	b = append(b, '(')
+	b = append(b, typeStr(p.Type)...)
+	b = append(b, ' ')
+	b = append(b, typeStr(p.Subtype)...)
+	b = append(b, ' ')
+	b = append(b, renderParamList(p.Params)...)
+	b = append(b, ' ')
+	b = append(b, nstring(p.ID)...)
+	b = append(b, ' ')
+	b = append(b, nstring(p.Description)...)
+	b = append(b, ' ')
+	b = append(b, typeStr(p.Encoding)...)
+	b = append(b, ' ')
+	b = strconv.AppendInt(b, int64(p.Size), 10)
 	switch {
 	case p.Type == "message" && p.Subtype == "rfc822":
-		sb.WriteByte(' ')
-		sb.WriteString(renderEnvelope(p.MsgEnvelope))
-		sb.WriteByte(' ')
-		sb.WriteString(renderEncapsulated(p, extended))
-		sb.WriteByte(' ')
-		sb.WriteString(strconv.Itoa(p.Lines))
+		b = append(b, ' ')
+		b = append(b, renderEnvelope(p.MsgEnvelope)...)
+		b = append(b, ' ')
+		b = append(b, renderEncapsulated(p, extended)...)
+		b = append(b, ' ')
+		b = strconv.AppendInt(b, int64(p.Lines), 10)
 	case p.Type == "text":
-		sb.WriteByte(' ')
-		sb.WriteString(strconv.Itoa(p.Lines))
+		b = append(b, ' ')
+		b = strconv.AppendInt(b, int64(p.Lines), 10)
 	}
 	if extended {
-		sb.WriteString(" NIL ") // body-fld-md5
-		sb.WriteString(renderDisposition(p))
-		sb.WriteString(" NIL NIL") // body-fld-lang, body-fld-loc
+		b = append(b, " NIL "...) // body-fld-md5
+		b = append(b, renderDisposition(p)...)
+		b = append(b, " NIL NIL"...) // body-fld-lang, body-fld-loc
 	}
-	sb.WriteByte(')')
-	return sb.String()
+	b = append(b, ')')
+	return string(b)
 }
 
 // renderDisposition renders body-fld-dsp: NIL when absent, otherwise

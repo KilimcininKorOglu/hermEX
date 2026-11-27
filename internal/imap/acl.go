@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -85,27 +86,42 @@ func rightOf(letter byte) (uint32, bool) {
 	return 0, false
 }
 
+// aclFolder identifies a resolved mailbox and whether the caller owns it as a
+// private mailbox.
+type aclFolder struct {
+	st         *objectstore.Store
+	fid        int64
+	ownPrivate bool
+}
+
+// aclTarget identifies a resolved mailbox that passed the administer check.
+type aclTarget struct {
+	st   *objectstore.Store
+	fid  int64
+	name string
+}
+
 // resolveACLFolder resolves a mailbox name to the store and folder id its ACL lives
 // in, covering both the caller's own folders and public folders. ownPrivate marks a
 // folder in the caller's own mailbox, the directory already established the caller
 // owns it, so they hold full rights there regardless of any stored permission row.
-func (c *conn) resolveACLFolder(name string) (st *objectstore.Store, fid int64, ownPrivate, ok bool) {
+func (c *conn) resolveACLFolder(name string) *aclFolder {
 	if sub, isPub := isPublicName(name); isPub {
-		f, _, found := c.resolvePublicFolder(sub)
-		if !found {
-			return nil, 0, false, false
+		m := c.resolvePublicFolder(sub)
+		if m == nil {
+			return nil
 		}
-		return c.pubStore, f.ID, false, true
+		return &aclFolder{st: c.pubStore, fid: m.info.ID, ownPrivate: false}
 	}
 	tree, err := loadFolderTree(c.st)
 	if err != nil {
-		return nil, 0, false, false
+		return nil
 	}
 	node, found := tree.resolve(name)
 	if !found {
-		return nil, 0, false, false
+		return nil
 	}
-	return c.st, node.info.ID, true, true
+	return &aclFolder{st: c.st, fid: node.info.ID, ownPrivate: true}
 }
 
 // cmdMyRights handles MYRIGHTS <mailbox>: the caller's effective rights on it.
@@ -119,17 +135,34 @@ func (c *conn) cmdMyRights(tag string, args []token) {
 		c.bad(tag, "MYRIGHTS requires a mailbox")
 		return
 	}
-	st, fid, ownPrivate, ok := c.resolveACLFolder(name)
-	if !ok {
+	af := c.resolveACLFolder(name)
+	if af == nil {
 		c.no(tag, "no such mailbox")
 		return
 	}
 	rights := mapi.RightsAll
-	if !ownPrivate {
-		rights, _ = st.ResolvePermission(fid, c.user)
+	if !af.ownPrivate {
+		var err error
+		rights, err = af.st.ResolvePermission(af.fid, c.user)
+		if err != nil {
+			c.event(logging.LevelError, "acl.resolve.fail", logging.Fields{"folder": af.fid, "error": err.Error()})
+			c.no(tag, "could not read permissions")
+			return
+		}
 	}
 	c.untagged("MYRIGHTS %s %s", safeQuoted(name), rightsToACL(rights))
 	c.ok(tag, "MYRIGHTS completed")
+}
+
+// isPublicOwner checks whether the caller is the owner of a public store,
+// logging and returning any store read error.
+func (c *conn) isPublicOwner(st *objectstore.Store, fid int64) (bool, error) {
+	owner, err := st.IsStoreOwner(c.user)
+	if err != nil {
+		c.event(logging.LevelError, "acl.owner.fail", logging.Fields{"folder": fid, "error": err.Error()})
+		return false, err
+	}
+	return owner, nil
 }
 
 // cmdGetACL handles GETACL <mailbox>: the mailbox's identifier/rights pairs. Like
@@ -137,12 +170,12 @@ func (c *conn) cmdMyRights(tag string, args []token) {
 // names everyone the folder is shared with. The store owner is always listed with
 // full rights, since the resolver elevates them regardless of the stored rows.
 func (c *conn) cmdGetACL(tag string, args []token) {
-	st, fid, name, ok := c.aclAdminTarget(tag, args)
-	if !ok {
+	target := c.aclAdminTarget(tag, args)
+	if target == nil {
 		return
 	}
-	ownPrivate := st == c.st
-	entries, err := st.ListPermissions(fid)
+	ownPrivate := target.st == c.st
+	entries, err := target.st.ListPermissions(target.fid)
 	if err != nil {
 		c.no(tag, "could not read the access list")
 		return
@@ -157,20 +190,24 @@ func (c *conn) cmdGetACL(tag string, args []token) {
 	}
 	owner := ownPrivate
 	if !owner {
-		owner, _ = st.IsStoreOwner(c.user)
+		owner, err = c.isPublicOwner(target.st, target.fid)
+		if err != nil {
+			c.no(tag, "could not verify mailbox owner")
+			return
+		}
 	}
 	if owner && !listed {
 		parts = append([]string{safeQuoted(c.user) + " " + rightsToACL(mapi.RightsAll)}, parts...)
 	}
-	c.untagged("ACL %s %s", safeQuoted(name), strings.Join(parts, " "))
+	c.untagged("ACL %s %s", safeQuoted(target.name), strings.Join(parts, " "))
 	c.ok(tag, "GETACL completed")
 }
 
 // cmdSetACL handles SETACL <mailbox> <identifier> <rights>: the rights string may
 // be replaced outright, or adjusted with a leading + or - (RFC 4314).
 func (c *conn) cmdSetACL(tag string, args []token) {
-	st, fid, _, ok := c.aclAdminTarget(tag, args)
-	if !ok {
+	target := c.aclAdminTarget(tag, args)
+	if target == nil {
 		return
 	}
 	id, ok1 := argN(args, 1)
@@ -188,7 +225,7 @@ func (c *conn) cmdSetACL(tag string, args []token) {
 		c.no(tag, "[ACL] the identifier is not an account of this organization")
 		return
 	}
-	newRights, err := adjustedRights(st, fid, id, mode, requested)
+	newRights, err := adjustedRights(target.st, target.fid, id, mode, requested)
 	if err != nil {
 		c.no(tag, "cannot read the access list")
 		return
@@ -198,7 +235,7 @@ func (c *conn) cmdSetACL(tag string, args []token) {
 		Username: id,
 		Rights:   mapi.NormalizeRights(newRights&mapi.RightsMaxROP, false),
 	}
-	if err := st.ModifyPermissions(fid, false, []objectstore.PermissionChange{change}); err != nil {
+	if err := target.st.ModifyPermissions(target.fid, false, []objectstore.PermissionChange{change}); err != nil {
 		c.no(tag, "cannot set ACL")
 		return
 	}
@@ -231,8 +268,8 @@ func (c *conn) mayGrantTo(mode byte, id string) bool {
 // cmdDeleteACL handles DELETEACL <mailbox> <identifier>: it drops an identifier's
 // rights row.
 func (c *conn) cmdDeleteACL(tag string, args []token) {
-	st, fid, _, ok := c.aclAdminTarget(tag, args)
-	if !ok {
+	target := c.aclAdminTarget(tag, args)
+	if target == nil {
 		return
 	}
 	id, ok := argN(args, 1)
@@ -240,13 +277,13 @@ func (c *conn) cmdDeleteACL(tag string, args []token) {
 		c.bad(tag, "DELETEACL requires a mailbox and identifier")
 		return
 	}
-	memberID, err := aclMemberID(st, fid, id)
+	memberID, err := aclMemberID(target.st, target.fid, id)
 	if err != nil {
 		c.no(tag, "cannot read the access list")
 		return
 	}
 	change := objectstore.PermissionChange{Op: objectstore.PermRemove, Username: id, MemberID: memberID}
-	if err := st.ModifyPermissions(fid, false, []objectstore.PermissionChange{change}); err != nil {
+	if err := target.st.ModifyPermissions(target.fid, false, []objectstore.PermissionChange{change}); err != nil {
 		c.no(tag, "cannot delete ACL")
 		return
 	}
@@ -262,41 +299,47 @@ func (c *conn) cmdListRights(tag string, args []token) {
 		return
 	}
 	// RFC 4314 section 4: LISTRIGHTS needs the administer right, like GETACL.
-	_, _, name, ok := c.aclAdminTarget(tag, args)
-	if !ok {
+	target := c.aclAdminTarget(tag, args)
+	if target == nil {
 		return
 	}
-	c.untagged("LISTRIGHTS %s %s l r s w i p k x t e a c d", safeQuoted(name), safeQuoted(id))
+	c.untagged("LISTRIGHTS %s %s l r s w i p k x t e a c d", safeQuoted(target.name), safeQuoted(id))
 	c.ok(tag, "LISTRIGHTS completed")
 }
 
 // aclAdminTarget resolves the mailbox for a SETACL/DELETEACL and verifies the caller
-// holds the administer right, replying NO when they do not. ok=false means a reply
+// holds the administer right, replying NO when they do not. nil means a reply
 // was already sent.
-func (c *conn) aclAdminTarget(tag string, args []token) (st *objectstore.Store, fid int64, name string, ok bool) {
+func (c *conn) aclAdminTarget(tag string, args []token) *aclTarget {
 	if c.state == stateNotAuth {
 		c.no(tag, "must authenticate first")
-		return nil, 0, "", false
+		return nil
 	}
 	name, has := arg0(args)
 	if !has {
 		c.bad(tag, "ACL command requires a mailbox")
-		return nil, 0, "", false
+		return nil
 	}
-	st, fid, ownPrivate, found := c.resolveACLFolder(name)
-	if !found {
+	af := c.resolveACLFolder(name)
+	if af == nil {
 		c.no(tag, "no such mailbox")
-		return nil, 0, "", false
+		return nil
 	}
 	// The caller owns their own mailbox outright; for a public folder the administer
 	// right must be granted explicitly.
-	if !ownPrivate {
-		if rights, _ := st.ResolvePermission(fid, c.user); rights&mapi.FrightsOwner == 0 {
+	if !af.ownPrivate {
+		rights, err := af.st.ResolvePermission(af.fid, c.user)
+		if err != nil {
+			c.event(logging.LevelError, "acl.resolve.fail", logging.Fields{"folder": af.fid, "error": err.Error()})
+			c.no(tag, "could not verify administer rights")
+			return nil
+		}
+		if rights&mapi.FrightsOwner == 0 {
 			c.no(tag, "[ACL] insufficient rights to administer this mailbox")
-			return nil, 0, "", false
+			return nil
 		}
 	}
-	return st, fid, name, true
+	return &aclTarget{st: af.st, fid: af.fid, name: name}
 }
 
 // adjustedRights applies a SETACL rights string: mode '+' adds delta to the

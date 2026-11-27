@@ -91,6 +91,12 @@ func (c *tokenCursor) next() (token, bool) {
 	return t, ok
 }
 
+// nextText consumes the next token and reports whether it was an atom or string.
+func (c *tokenCursor) nextText() bool {
+	t, ok := c.next()
+	return ok && (t.kind == tAtom || t.kind == tString)
+}
+
 // commandReader lexes whole IMAP command lines off a connection, resolving
 // literals inline (issuing a continuation request for synchronizing literals).
 type commandReader struct {
@@ -265,46 +271,48 @@ func isAtomDelimiter(b byte) bool {
 // readAtom reads a maximal run of non-delimiter bytes. It is only called once a
 // non-delimiter byte has been unread, so it always returns a non-empty atom.
 func (r *commandReader) readAtom() (string, error) {
-	var sb strings.Builder
+	var b []byte
 	for {
-		b, err := r.readByte()
+		ch, err := r.readByte()
 		if err != nil {
 			if errors.Is(err, errLineTooLong) {
 				return "", err
 			}
-			return sb.String(), nil // end of stream: the atom is what was read
+			return string(b), nil // end of stream: the atom is what was read
 		}
-		if isAtomDelimiter(b) {
-			_ = r.br.UnreadByte() // the ReadByte above succeeded, so this cannot fail
-			r.lineBytes--         // the delimiter is read again by the caller
-			return sb.String(), nil
+		if isAtomDelimiter(ch) {
+			if err := r.br.UnreadByte(); err != nil {
+				return "", err
+			}
+			r.lineBytes-- // the delimiter is read again by the caller
+			return string(b), nil
 		}
-		sb.WriteByte(b)
+		b = append(b, ch)
 	}
 }
 
 // readQuoted reads a quoted string body after the opening quote, honoring the
 // \\ and \" escapes. A quoted string may not span lines.
 func (r *commandReader) readQuoted() (string, error) {
-	var sb strings.Builder
+	var b []byte
 	for {
-		b, err := r.readByte()
+		ch, err := r.readByte()
 		if err != nil {
 			return "", err
 		}
-		switch b {
+		switch ch {
 		case '"':
-			return sb.String(), nil
+			return string(b), nil
 		case '\\':
 			esc, err := r.readByte()
 			if err != nil {
 				return "", err
 			}
-			sb.WriteByte(esc)
+			b = append(b, esc)
 		case '\r', '\n':
 			return "", fmt.Errorf("%w: CR/LF in quoted string", errProtocol)
 		default:
-			sb.WriteByte(b)
+			b = append(b, ch)
 		}
 	}
 }
@@ -344,7 +352,7 @@ func (r *commandReader) readLiteral() (string, error) {
 // whether the client marked the literal non-synchronizing (a trailing '+', which
 // means it will not wait for the continuation response).
 func (r *commandReader) readLiteralHeader() (n int, nonSync bool, err error) {
-	var digits strings.Builder
+	var digits []byte
 	for {
 		b, err := r.readByte()
 		if err != nil {
@@ -363,9 +371,9 @@ func (r *commandReader) readLiteralHeader() (n int, nonSync bool, err error) {
 		if nonSync {
 			return 0, false, fmt.Errorf("%w: digit after '+' in literal", errProtocol)
 		}
-		digits.WriteByte(b)
+		digits = append(digits, b)
 	}
-	n, err = strconv.Atoi(digits.String())
+	n, err = strconv.Atoi(string(digits))
 	if err != nil || n < 0 {
 		return 0, false, fmt.Errorf("%w: bad literal length", errProtocol)
 	}

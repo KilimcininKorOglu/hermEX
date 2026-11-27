@@ -198,20 +198,31 @@ func (s *Server) logConnPanic(remote string, v any, stack []byte) {
 // Shutdown stops accepting and drains in-flight sessions within ctx's deadline.
 func (s *Server) Shutdown(ctx context.Context) error { return s.conns.Shutdown(ctx) }
 
+// recordCloseErr records an unexpected close error, ignoring net.ErrClosed.
+func (c *conn) recordCloseErr(level logging.Level, event string, err error) {
+	if err != nil && !errors.Is(err, net.ErrClosed) {
+		c.event(level, event, logging.Fields{"error": err.Error()})
+	}
+}
+
+// closeStore closes st if non-nil and records any close error.
+func (c *conn) closeStore(event string, st *objectstore.Store) {
+	if st == nil {
+		return
+	}
+	c.recordCloseErr(logging.LevelError, event, st.Close())
+}
+
 func (s *Server) handle(nc net.Conn) {
 	c := &conn{srv: s, bw: bufio.NewWriter(nc), state: stateNotAuth, nc: nc}
 	c.resetReader(nc)
 	if _, ok := nc.(*tls.Conn); ok {
 		c.isTLS = true
 	}
-	defer func() { _ = c.nc.Close() }() // closes the upgraded conn after a STARTTLS swap
+	defer func() { c.recordCloseErr(logging.LevelWarn, "conn.close.fail", c.nc.Close()) }() // closes the upgraded conn after a STARTTLS swap
 	defer func() {
-		if c.st != nil {
-			_ = c.st.Close()
-		}
-		if c.pubStore != nil {
-			_ = c.pubStore.Close()
-		}
+		c.closeStore("mailbox.close.fail", c.st)
+		c.closeStore("publicfolder.close.fail", c.pubStore)
 	}()
 
 	c.event(logging.LevelInfo, "conn.accept", logging.Fields{"tls": c.isTLS})
@@ -363,7 +374,11 @@ func (c *conn) dispatch(toks []token) {
 		c.bad(tag, "missing command")
 		return
 	}
-	name, _ := toks[1].str()
+	name, ok := toks[1].str()
+	if !ok {
+		c.bad(tag, "invalid command")
+		return
+	}
 	args := toks[2:]
 
 	// Per-command audit at debug level, the command name only, never its
@@ -489,8 +504,12 @@ func (c *conn) cmdLogin(tag string, args []token) {
 		c.bad(tag, "LOGIN requires a username and password")
 		return
 	}
-	user, _ := args[0].str()
-	pass, _ := args[1].str()
+	user, ok1 := args[0].str()
+	pass, ok2 := args[1].str()
+	if !ok1 || !ok2 {
+		c.bad(tag, "LOGIN requires a username and password")
+		return
+	}
 	c.finishAuth(tag, user, pass)
 }
 
@@ -502,7 +521,11 @@ func (c *conn) cmdAuthenticate(tag string, args []token) {
 	if c.refusePlaintextLogin(tag) {
 		return
 	}
-	mech, _ := arg0(args)
+	mech, ok := arg0(args)
+	if !ok {
+		c.bad(tag, "AUTHENTICATE requires a mechanism")
+		return
+	}
 	switch strings.ToUpper(mech) {
 	case "PLAIN":
 		c.authPlain(tag, args)
@@ -518,7 +541,12 @@ func (c *conn) cmdAuthenticate(tag string, args []token) {
 func (c *conn) authPlain(tag string, args []token) {
 	var resp string
 	if len(args) >= 2 {
-		resp, _ = args[1].str() // initial response (SASL-IR)
+		r, ok := args[1].str() // initial response (SASL-IR)
+		if !ok {
+			c.bad(tag, "invalid SASL response")
+			return
+		}
+		resp = r
 	} else {
 		r, ok := c.saslChallenge("")
 		if !ok {
@@ -540,7 +568,12 @@ func (c *conn) authPlain(tag string, args []token) {
 func (c *conn) authLogin(tag string, args []token) {
 	var u string
 	if len(args) >= 2 {
-		u, _ = args[1].str()
+		r, ok := args[1].str()
+		if !ok {
+			c.bad(tag, "invalid base64")
+			return
+		}
+		u = r
 	} else {
 		r, ok := c.saslChallenge("VXNlcm5hbWU6") // base64("Username:")
 		if !ok {
@@ -617,7 +650,7 @@ func (c *conn) finishAuth(tag, user, pass string) {
 	if c.srv.Limiter != nil {
 		c.srv.Limiter.Succeed(host, user)
 	}
-	if privs, _ := c.srv.Auth.Privileges(user); !privs.POP3IMAP {
+	if privs, ok := c.srv.Auth.Privileges(user); !ok || !privs.POP3IMAP {
 		c.srv.Logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.IMAP, Name: "auth.denied", User: user, RemoteAddr: remoteHost(c.nc), Fields: logging.Fields{"service": "pop3imap"}})
 		c.no(tag, "[AUTHORIZATIONFAILED] IMAP access is disabled for this account")
 		return
@@ -839,10 +872,12 @@ func (c *conn) cmdStatus(tag string, args []token) {
 		c.no(tag, "cannot read mailbox")
 		return
 	}
-	uidv, _ := c.st.UIDValidity(node.info.ID)
-	uidn, _ := c.st.UIDNext(node.info.ID)
-	hms, _ := c.st.FolderHighestModSeq(node.info.ID)
-	c.untagged("STATUS %s (%s)", safeQuoted(node.path), statusParts(items, msgs, uidv, uidn, hms))
+	meta, err := c.readStatusMeta(c.st, node.info.ID)
+	if err != nil {
+		c.no(tag, "cannot read mailbox")
+		return
+	}
+	c.untagged("STATUS %s (%s)", safeQuoted(node.path), statusParts(items, msgs, meta.uidValidity, meta.uidNext, meta.highModSeq))
 	c.ok(tag, "STATUS completed")
 }
 
@@ -902,15 +937,27 @@ func (c *conn) cmdCreate(tag string, args []token) {
 		c.no(tag, "cannot read mailbox list")
 		return
 	}
-	if _, exists := tree.resolve(name); exists {
+	if tree.has(name) {
 		c.no(tag, "mailbox already exists")
 		return
 	}
-	if _, err := c.createPath(tree, name); err != nil {
+	if err := c.createMailbox(tree, name); err != nil {
 		c.no(tag, "cannot create mailbox")
 		return
 	}
 	c.ok(tag, "CREATE completed")
+}
+
+// createMailbox creates a mailbox path and rejects a zero folder id.
+func (c *conn) createMailbox(tree *folderTree, path string) error {
+	id, err := c.createPath(tree, path)
+	if err != nil {
+		return err
+	}
+	if id == 0 {
+		return fmt.Errorf("imap: created folder has zero id")
+	}
+	return nil
 }
 
 // createPath creates a mailbox path, creating any missing intermediate folders,
@@ -1012,7 +1059,7 @@ func (c *conn) renameFolder(tree *folderTree, from, to string) string {
 	if !found {
 		return "no such mailbox"
 	}
-	if _, exists := tree.resolve(to); exists {
+	if tree.has(to) {
 		return "destination already exists"
 	}
 	parent, leaf, err := c.resolveParent(tree, to)

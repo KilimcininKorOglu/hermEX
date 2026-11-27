@@ -3,7 +3,9 @@ package imap
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"net/mail"
 	"net/textproto"
 	"slices"
@@ -11,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/logging"
 	"hermex/internal/objectstore"
 )
 
@@ -34,10 +37,27 @@ func (s *searchCtx) load() {
 		return
 	}
 	s.loaded = true
-	s.raw, _ = s.c.curStore().GetMessageRaw(s.c.sel.id, s.msg.UID)
+	raw, err := s.c.curStore().GetMessageRaw(s.c.sel.id, s.msg.UID)
+	if err != nil {
+		s.c.event(logging.LevelError, "search.read.fail", logging.Fields{
+			"folder": s.c.sel.id,
+			"uid":    s.msg.UID,
+			"error":  err.Error(),
+		})
+		return
+	}
+	s.raw = raw
 	off := bodyStart(s.raw)
 	tr := textproto.NewReader(bufio.NewReader(bytes.NewReader(s.raw[:off])))
-	s.hdr, _ = tr.ReadMIMEHeader()
+	hdr, err := tr.ReadMIMEHeader()
+	if err != nil && !errors.Is(err, io.EOF) {
+		s.c.event(logging.LevelWarn, "search.header.fail", logging.Fields{
+			"folder": s.c.sel.id,
+			"uid":    s.msg.UID,
+			"error":  err.Error(),
+		})
+	}
+	s.hdr = hdr
 	s.body = s.raw[off:]
 }
 
@@ -142,26 +162,25 @@ func (c *conn) writeESearch(tag string, byUID bool, opts []string, results []uin
 	want := func(o string) bool {
 		return slices.Contains(opts, o)
 	}
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "ESEARCH (TAG %s)", safeQuoted(tag))
+	b := fmt.Appendf(nil, "ESEARCH (TAG %s)", safeQuoted(tag))
 	if byUID {
-		sb.WriteString(" UID")
+		b = append(b, " UID"...)
 	}
 	if want("COUNT") {
-		fmt.Fprintf(&sb, " COUNT %d", len(results))
+		b = fmt.Appendf(b, " COUNT %d", len(results))
 	}
 	if len(results) > 0 {
 		if want("MIN") {
-			fmt.Fprintf(&sb, " MIN %d", results[0])
+			b = fmt.Appendf(b, " MIN %d", results[0])
 		}
 		if want("MAX") {
-			fmt.Fprintf(&sb, " MAX %d", results[len(results)-1])
+			b = fmt.Appendf(b, " MAX %d", results[len(results)-1])
 		}
 		if want("ALL") {
-			fmt.Fprintf(&sb, " ALL %s", esearchSet(results))
+			b = fmt.Appendf(b, " ALL %s", esearchSet(results))
 		}
 	}
-	c.untagged("%s", sb.String())
+	c.untagged("%s", b)
 }
 
 // esearchSet compresses an ascending id list into an IMAP sequence-set, collapsing

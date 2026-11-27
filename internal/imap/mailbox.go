@@ -84,6 +84,16 @@ func (t *folderTree) resolve(name string) (*folderNode, bool) {
 	return n, ok
 }
 
+// has reports whether a mailbox named name exists in the tree.
+func (t *folderTree) has(name string) bool {
+	if strings.EqualFold(name, inboxName) {
+		_, ok := t.byPath[inboxName]
+		return ok
+	}
+	_, ok := t.byPath[name]
+	return ok
+}
+
 // imapMatch reports whether an IMAP mailbox name matches a LIST pattern. '*'
 // matches across hierarchy separators; '%' matches within a single level only
 // (RFC 3501 §6.3.8). The pattern is client input, so the match runs in
