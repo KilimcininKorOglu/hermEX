@@ -53,7 +53,7 @@ type rtsCommand struct {
 // the parse rather than guessing a length.
 func parseRTS(pdu []byte) (flags uint16, cmds []rtsCommand, err error) {
 	p := ndr.NewPull(pdu)
-	if _, err = p.Raw(16); err != nil { // skip the NCACN header
+	if err = p.Skip(16); err != nil { // the NCACN header
 		return 0, nil, err
 	}
 	if flags, err = p.Uint16(); err != nil {
@@ -103,14 +103,17 @@ func pullRTSCommand(p *ndr.Pull) (rtsCommand, error) {
 // skipFlowControlAck discards a FLOW_CONTROL_ACK body: bytes_received plus
 // available_window plus the channel cookie.
 func skipFlowControlAck(p *ndr.Pull) error {
-	if _, err := p.Uint32(); err != nil {
+	if err := p.SkipAligned(4); err != nil {
 		return err
 	}
-	if _, err := p.Uint32(); err != nil {
+	if err := p.SkipAligned(4); err != nil {
 		return err
 	}
-	_, err := p.GUID()
-	return err
+	// A GUID is an aligned uint32 followed by 12 bytes that need no padding.
+	if err := p.SkipAligned(4); err != nil {
+		return err
+	}
+	return p.Skip(12)
 }
 
 // skipRTSPadding discards a PADDING body: a length and that many filler bytes.
@@ -119,8 +122,7 @@ func skipRTSPadding(p *ndr.Pull) error {
 	if err != nil {
 		return err
 	}
-	_, err = p.Raw(int(n))
-	return err
+	return p.Skip(int(n))
 }
 
 // cookies returns the COOKIE command GUIDs in order. CONN/A1 and CONN/B1 both

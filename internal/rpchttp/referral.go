@@ -88,7 +88,7 @@ func pushRfrString(p *ndr.Push, s string) {
 // a double unique pointer, then the result.
 func (r *RFR) getNewDSA(stub []byte) ([]byte, uint32) {
 	p := ndr.NewPull(stub)
-	if _, err := p.Uint32(); err != nil { // flags
+	if err := p.SkipAligned(4); err != nil { // flags
 		return nil, ndr.FaultNdr
 	}
 	if _, err := pullRfrString(p, 1024); err != nil { // pUserDN
@@ -128,7 +128,7 @@ func (r *RFR) getNewDSA(stub []byte) ([]byte, uint32) {
 // unique pointer, then the result.
 func (r *RFR) getFQDN(stub []byte) ([]byte, uint32) {
 	p := ndr.NewPull(stub)
-	if _, err := p.Uint32(); err != nil { // flags
+	if err := p.SkipAligned(4); err != nil { // flags
 		return nil, ndr.FaultNdr
 	}
 	cb, err := p.Uint32()

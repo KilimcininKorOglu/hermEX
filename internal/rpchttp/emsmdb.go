@@ -350,7 +350,7 @@ func pullConnectExScalars(p *ndr.Pull, r *connectExIn) error {
 	if err = skipUint32(p, 1); err != nil { // cxr_link
 		return err
 	}
-	if _, err = p.Uint16(); err != nil { // cnvt_cps
+	if err = p.SkipAligned(2); err != nil { // cnvt_cps
 		return err
 	}
 	for i := range r.clientVers {
@@ -365,7 +365,7 @@ func pullConnectExScalars(p *ndr.Pull, r *connectExIn) error {
 // skipUint32 discards n 32-bit fields the server does not act on.
 func skipUint32(p *ndr.Pull, n int) error {
 	for range n {
-		if _, err := p.Uint32(); err != nil {
+		if err := p.SkipAligned(4); err != nil {
 			return err
 		}
 	}
@@ -379,8 +379,7 @@ func skipAuxIn(p *ndr.Pull) error {
 	if err != nil {
 		return err
 	}
-	_, err = p.Raw(int(auxSize))
-	return err
+	return p.Skip(int(auxSize))
 }
 
 // pushConnectExOut marshals the EcDoConnectEx response ([MS-OXCRPC] 2.2.2.2.2):
@@ -477,7 +476,7 @@ func pullRpcExt2(stub []byte) (*rpcExt2In, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err = p.Raw(int(auxSize)); err != nil {
+	if err = p.Skip(int(auxSize)); err != nil {
 		return nil, err
 	}
 	return r, nil // cb_auxin / cb_auxout follow but are not needed
