@@ -88,23 +88,19 @@ func (d *SQLDirectory) scanRooms(q string, args ...any) (out []GALEntry, err err
 // stores only such a value, so a row that is not one is corruption and is
 // reported rather than shown as an unknown capacity.
 func parseRoomCapacity(s string) (int, error) {
-	if s == "" {
-		return 0, nil
+	if err := validateRoomCapacity(s); err != nil || s == "" {
+		return 0, err
 	}
-	n, err := strconv.Atoi(s)
-	if err != nil || n < 0 {
-		return 0, fmt.Errorf("room capacity %q is not a non-negative whole number", s)
-	}
-	return n, nil
+	return strconv.Atoi(s)
 }
 
-// validateRoomCapacity reports whether s is a valid stored room capacity.
+// validateRoomCapacity reports whether s is a valid stored room capacity: empty
+// ("not given") or a non-negative whole number.
 func validateRoomCapacity(s string) error {
-	n, err := parseRoomCapacity(s)
-	if err != nil {
-		return err
+	if s == "" {
+		return nil
 	}
-	if n < 0 {
+	if n, err := strconv.Atoi(s); err != nil || n < 0 {
 		return fmt.Errorf("room capacity %q is not a non-negative whole number", s)
 	}
 	return nil
