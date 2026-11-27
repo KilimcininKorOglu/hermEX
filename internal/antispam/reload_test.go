@@ -138,9 +138,15 @@ func TestScoreSafeUnderConcurrentReload(t *testing.T) {
 		close(done)
 	}()
 	for range 500 {
-		s.Score(Input{Raw: raw})
+		v := s.Score(Input{Raw: raw})
+		if v.Score < 0 || v.SPF != AuthNone {
+			t.Errorf("unexpected verdict during concurrent reload: %+v", v)
+		}
 	}
 	<-done
+	final := s.Score(Input{Raw: []byte("Subject: x\r\n\r\nother"), MailFrom: "x@evil.example"})
+	wantEq(t, final.SAScore, 2.0, "final swapped SA rule score")
+	wantEq(t, final.Spam, true, "final swapped access block")
 }
 
 // TestReloadKeepsTheLiveModelOverACorruptFile proves a model file that no longer
@@ -192,7 +198,8 @@ func TestReloadOnceHotSwapsModel(t *testing.T) {
 
 	s := &Scorer{extractText: func(b []byte) string { return string(b) }}
 	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: DefaultThreshold})
-	m0, _ := LoadModelFile(path)
+	m0, err := LoadModelFile(path)
+	mustNoErr(t, err, "load initial model")
 	s.SetModel(m0)
 	r := NewReloader(s, dir, nil)
 
@@ -217,4 +224,39 @@ func TestReloadOnceHotSwapsModel(t *testing.T) {
 	if v := s.Score(Input{Raw: raw}); v.BayesProb < DefaultBayesProb {
 		t.Errorf("retrained model not live: BayesProb = %v, want >= %v", v.BayesProb, DefaultBayesProb)
 	}
+}
+
+// TestReloadRefusesStaleAndUnreadableInputs proves failed or stale reloads leave
+// the live settings, access list, and ruleset unchanged.
+func TestReloadRefusesStaleAndUnreadableInputs(t *testing.T) {
+	dir := t.TempDir()
+	rulesDir := filepath.Join(dir, RulesFileName)
+	mustNoErr(t, os.Mkdir(rulesDir, 0o700), "create unreadable rules directory")
+	setMod(t, rulesDir, time.Now().Add(-time.Hour))
+
+	s := &Scorer{checkSPF: func(net.IP, string, string) AuthResult { return AuthFail }}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: 1})
+	s.SetAccess(NewAccessList(map[string]string{"blocked@evil.example": AccessBlock}))
+	s.SetRules(ParseSARules("body KEEP /keepme/\nscore KEEP 9.0\n"))
+
+	var logged []string
+	r := NewReloader(s, dir, func(format string, _ ...any) { logged = append(logged, format) })
+	ver, okSettings := int64(10), true
+	r.WatchSettings(func() (*Config, int64, bool) {
+		return &Config{Weights: DefaultWeights, Threshold: 100}, ver, okSettings
+	})
+	okAccess := true
+	r.WatchAccess(func() (*AccessList, uint64, bool) {
+		return NewAccessList(nil), 1, okAccess
+	})
+
+	// Regressed settings version, failed access fetch, and unreadable rules path.
+	ver, okAccess = 5, false
+	setMod(t, rulesDir, time.Now())
+	wantEq(t, len(r.reloadOnce()), 0, "reloaded items on stale/unreadable inputs")
+	wantEq(t, len(logged), 1, "unreadable rules reload logged once")
+
+	v := s.Score(Input{Raw: []byte("Subject: x\r\n\r\nkeepme"), ClientIP: net.IPv4(1, 2, 3, 4), MailFrom: "blocked@evil.example"})
+	wantEq(t, v.Spam, true, "live settings and access block retained")
+	wantEq(t, v.SAScore, 9.0, "live ruleset retained")
 }

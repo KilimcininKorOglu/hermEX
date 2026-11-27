@@ -72,8 +72,12 @@ func NewReloader(s *Scorer, dataDir string, log func(string, ...any)) *Reloader 
 		modelPath: filepath.Join(dataDir, ModelFileName),
 		log:       log,
 	}
-	r.rulesMod, _ = fileModTime(r.rulesPath)
-	r.modelMod, _ = fileModTime(r.modelPath)
+	if mod, ok := fileModTime(r.rulesPath); ok {
+		r.rulesMod = mod
+	}
+	if mod, ok := fileModTime(r.modelPath); ok {
+		r.modelMod = mod
+	}
 	return r
 }
 
