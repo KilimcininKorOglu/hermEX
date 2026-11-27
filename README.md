@@ -40,20 +40,20 @@ certificate store with optional ACME issuance (`internal/tlscert`).
 
 ### Components
 
-| Layer             | Packages                                                                                                                                                                                                                                          |
-|-------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| MAPI core         | `internal/mapi` (property model), `internal/ext` (MS-wire serialization), `internal/ndr` (RPC NDR), `internal/lzxpress` (ROP buffer compression)                                                                                                  |
-| Mailbox store     | `internal/objectstore` (sole store), `internal/ics` (IDSET/GLOBSET sync codec), `internal/publicfolder` (public store)                                                                                                                            |
+| Layer             | Packages                                                                                                                                                                                                                                                                                              |
+|-------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| MAPI core         | `internal/mapi` (property model), `internal/ext` (MS-wire serialization), `internal/ndr` (RPC NDR), `internal/lzxpress` (ROP buffer compression)                                                                                                                                                      |
+| Mailbox store     | `internal/objectstore` (sole store), `internal/ics` (IDSET/GLOBSET sync codec), `internal/publicfolder` (public store)                                                                                                                                                                                |
 | Format conversion | `internal/oxcmail` (MIME to MAPI and back), `internal/oxcical` (iCalendar), `internal/oxvcard` (vCard), `internal/oxtask` (tasks), `internal/oxcfg` (master category list), `internal/recurrence`, `internal/conversation`, `internal/mime`, `internal/smime`, `internal/tnef` (winmail.dat decoding) |
-| Protocol servers  | `internal/{smtp,imap,pop3,dav,activesync,ews,mapihttp,nspi,rop}`, transport codecs `internal/{rpchttp,wbxml,oxews,oxmapihttp}`, `internal/easpolicy`, `internal/netline` (bounded pre-authentication line reader)                             |
-| Mail flow         | `internal/mta` (delivery), `internal/relay` + `internal/spooler` (outbound), `internal/meeting`, `internal/itip` (iMIP scheduling mail), `internal/fetchmail`, `internal/mailreport` (inbound DMARC and TLS report parser)                           |
-| Filtering         | `internal/antispam` (SPF/DKIM/DMARC + Bayes + rules), `internal/antivirus` (clamd), `internal/quarantine`                                                                                                                                         |
-| Security & TLS    | `internal/dkimsign`, `internal/mtasts`, `internal/dane`, `internal/tlsrpt`, `internal/tlscert` (per-SNI cert store + ACME), `internal/ssrfguard`                                                                                                  |
-| Abuse control     | `internal/authlimit` (failed-login lockout), `internal/httplimit` (per-client request cap), `internal/connlimit` (total and per-client connection cap); all DB-backed and tunable without a restart                                             |
-| Directory & auth  | `internal/directory` (MariaDB-backed), `internal/crypt` (password hashing), `internal/totp` (second factor), `internal/sendas` (which `From` a caller may use), `internal/ldapauth` + `internal/ldapsync` (AD/LDAP sync)                         |
-| Notifications     | `internal/notify` (publisher/consumer) + `internal/notifyd` (SSE relay), a wake bus for IDLE/Ping/streaming across daemons                                                                                                                        |
-| Platform          | `internal/config`, `internal/serve` (HTTP daemon base), `internal/lifecycle` (graceful shutdown), `internal/logging` (Mongo sink), `internal/health`, `internal/migrate` (schema runner), `internal/buildinfo` (source stamp), test support `internal/tlstest` + `internal/avtest` |
-| Web & admin       | `internal/webmail2` (React SPA) + `internal/webmail2api`, `internal/admin` (operator panel), `internal/gateway` (single-FQDN front door)                                                                                                          |
+| Protocol servers  | `internal/{smtp,imap,pop3,dav,activesync,ews,mapihttp,nspi,rop}`, transport codecs `internal/{rpchttp,wbxml,oxews,oxmapihttp}`, `internal/easpolicy`, `internal/netline` (bounded pre-authentication line reader)                                                                                     |
+| Mail flow         | `internal/mta` (delivery), `internal/relay` + `internal/spooler` (outbound), `internal/meeting`, `internal/itip` (iMIP scheduling mail), `internal/fetchmail`, `internal/mailreport` (inbound DMARC and TLS report parser)                                                                            |
+| Filtering         | `internal/antispam` (SPF/DKIM/DMARC + Bayes + rules), `internal/antivirus` (clamd), `internal/quarantine`                                                                                                                                                                                             |
+| Security & TLS    | `internal/dkimsign`, `internal/mtasts`, `internal/dane`, `internal/tlsrpt`, `internal/tlscert` (per-SNI cert store + ACME), `internal/ssrfguard`                                                                                                                                                      |
+| Abuse control     | `internal/authlimit` (failed-login lockout), `internal/httplimit` (per-client request cap), `internal/connlimit` (total and per-client connection cap); all DB-backed and tunable without a restart                                                                                                   |
+| Directory & auth  | `internal/directory` (MariaDB-backed), `internal/crypt` (password hashing), `internal/totp` (second factor), `internal/sendas` (which `From` a caller may use), `internal/ldapauth` + `internal/ldapsync` (AD/LDAP sync)                                                                              |
+| Notifications     | `internal/notify` (publisher/consumer) + `internal/notifyd` (SSE relay), a wake bus for IDLE/Ping/streaming across daemons                                                                                                                                                                            |
+| Platform          | `internal/config`, `internal/serve` (HTTP daemon base), `internal/lifecycle` (graceful shutdown), `internal/logging` (Mongo sink), `internal/health`, `internal/migrate` (schema runner), `internal/buildinfo` (source stamp), test support `internal/tlstest` + `internal/avtest`                    |
+| Web & admin       | `internal/webmail2` (React SPA) + `internal/webmail2api`, `internal/admin` (operator panel), `internal/gateway` (single-FQDN front door)                                                                                                                                                              |
 
 ## Development
 
@@ -180,11 +180,11 @@ hermEX carries one release number, a plain `x.y.z` in the `VERSION` file at the
 repository root. Releases are tagged `vx.y.z`. Every binary links in that number
 together with the commit and the build time, and shows it as:
 
-| Build | Shown as |
-|-------|----------|
-| The tagged release commit, clean tree | `0.1.0 (adeff8a)` |
-| Any other commit | `0.1.0-dev+adeff8a` |
-| A tree with uncommitted changes | `0.1.0-dev+adeff8a-dirty` |
+| Build                                 | Shown as                  |
+|---------------------------------------|---------------------------|
+| The tagged release commit, clean tree | `0.1.0 (adeff8a)`         |
+| Any other commit                      | `0.1.0-dev+adeff8a`       |
+| A tree with uncommitted changes       | `0.1.0-dev+adeff8a-dirty` |
 
 That one value appears on each daemon's health endpoint (the admin panel's live
 status view), in its `process.start` log event, under the admin panel sidebar, and
@@ -324,29 +324,29 @@ the operator panel. Every invocation takes `-config <file>` (default
 hermex-admin -config config.json <command> [args]
 ```
 
-| Command                                          | Purpose                                                           |
-|--------------------------------------------------|-------------------------------------------------------------------|
-| `ensure-schema`                                  | Apply pending directory migrations and exit                       |
-| `create-domain <domain>`                         | Add a mail domain                                                 |
-| `create-user <email> <password>`                 | Add a mailbox                                                     |
-| `create-alias <alias> <user-email>`              | Point an address at an existing mailbox                           |
-| `set-password <email> <password>`                | Reset a password; forces a change at next login and ends every live session (`--no-force-change`, `--keep-sessions`) |
-| `create-contact <email> <domain> [name]`         | Add an external mail contact to the address list                  |
-| `update-contact <email> <name>`                  | Rename a contact; an empty name clears it                         |
-| `delete-contact <email>`                         | Remove a contact                                                  |
-| `list-contacts`                                  | List every contact                                                |
-| `grant-admin <email> <system\|org\|domain> [id]` | Grant an admin role at the given scope                            |
-| `list-sessions <email>`                          | Show the account's live webmail and panel sessions                |
-| `revoke-sessions <email>`                        | End all of them; the compromise response                          |
-| `ldap-sync <connection-id>`                      | Import each bound domain's LDAP/AD accounts from the connection   |
-| `export-dkim <domain>`                           | Write the domain's DKIM private key to stdout                     |
+| Command                                             | Purpose                                                                                                                                  |
+|-----------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------|
+| `ensure-schema`                                     | Apply pending directory migrations and exit                                                                                              |
+| `create-domain <domain>`                            | Add a mail domain                                                                                                                        |
+| `create-user <email> <password>`                    | Add a mailbox                                                                                                                            |
+| `create-alias <alias> <user-email>`                 | Point an address at an existing mailbox                                                                                                  |
+| `set-password <email> <password>`                   | Reset a password; forces a change at next login and ends every live session (`--no-force-change`, `--keep-sessions`)                     |
+| `create-contact <email> <domain> [name]`            | Add an external mail contact to the address list                                                                                         |
+| `update-contact <email> <name>`                     | Rename a contact; an empty name clears it                                                                                                |
+| `delete-contact <email>`                            | Remove a contact                                                                                                                         |
+| `list-contacts`                                     | List every contact                                                                                                                       |
+| `grant-admin <email> <system\|org\|domain> [id]`    | Grant an admin role at the given scope                                                                                                   |
+| `list-sessions <email>`                             | Show the account's live webmail and panel sessions                                                                                       |
+| `revoke-sessions <email>`                           | End all of them; the compromise response                                                                                                 |
+| `ldap-sync <connection-id>`                         | Import each bound domain's LDAP/AD accounts from the connection                                                                          |
+| `export-dkim <domain>`                              | Write the domain's DKIM private key to stdout                                                                                            |
 | `check-mailbox <email\|all> [--repair] [--recover]` | Report store damage; `--repair` rebuilds the IMAP index, `--recover` rebuilds a damaged database and loses the rows on its damaged pages |
-| `sweep-content <email>`                          | Reclaim orphan content files; refuses while the mailbox is in use |
-| `prune-eml <email\|all> [days]`                  | Drop cached wire copies older than N days (default 30)            |
-| `backfill-previews <email\|all>`                 | Fill the message-list snippet and attachment flag on older index rows |
-| `move-mail <email> <src> <dst> <uid>... [--copy]` | Relocate messages between two folders of one mailbox             |
-| `backup-mail <email\|all> <dest-dir>`            | Consistent copy of mail content; safe on a live mailbox           |
-| `serve`                                          | Run the admin API and panel                                       |
+| `sweep-content <email>`                             | Reclaim orphan content files; refuses while the mailbox is in use                                                                        |
+| `prune-eml <email\|all> [days]`                     | Drop cached wire copies older than N days (default 30)                                                                                   |
+| `backfill-previews <email\|all>`                    | Fill the message-list snippet and attachment flag on older index rows                                                                    |
+| `move-mail <email> <src> <dst> <uid>... [--copy]`   | Relocate messages between two folders of one mailbox                                                                                     |
+| `backup-mail <email\|all> <dest-dir>`               | Consistent copy of mail content; safe on a live mailbox                                                                                  |
+| `serve`                                             | Run the admin API and panel                                                                                                              |
 
 The panel covers domains, users, aliases, mailing lists, delegates, devices, DKIM
 keys, DNS checks, the mail queue, quarantine, inbound DMARC and TLS reports,
@@ -389,11 +389,11 @@ admin panel, not on the command line.
 
 ## Layout
 
-| Path        | Purpose                                                                                                                                                 |
-|-------------|---------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Path        | Purpose                                                                                                                                                                                                                     |
+|-------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `cmd/`      | Service executables (mta, imap, pop3, webmail2, dav, activesync, ews, mapihttp, gateway, notify, admin, fetchmail, antispam-bootstrap, antispam-rules) and `healthcheck`, the probe binary every container healthcheck runs |
-| `internal/` | Shared libraries: MAPI core, mailbox store, format conversion, protocol servers, mail flow, filtering, security/TLS, directory, notifications, platform |
-| `docker/`   | Dev and service container images                                                                                                                        |
+| `internal/` | Shared libraries: MAPI core, mailbox store, format conversion, protocol servers, mail flow, filtering, security/TLS, directory, notifications, platform                                                                     |
+| `docker/`   | Dev and service container images                                                                                                                                                                                            |
 
 ## Key facts
 
