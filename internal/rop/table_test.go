@@ -671,10 +671,14 @@ func TestRestrictNot(t *testing.T) {
 // a regular-expression relop) fails loud rather than returning an unfiltered table.
 func TestRestrictRejectsUnsupported(t *testing.T) {
 	dir := provisionedDir(t)
-	seedInboxMessage(t, dir, "x")
+	seedInboxMessage(t, dir, "Apple")
+	seedInboxMessage(t, dir, "Banana")
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
 	tableH := openInboxContentsTable(t, sess)
+	cols := []mapi.PropTag{mapi.PrSubject}
+	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
+	mustDispatchOK(t, sess, buildRestrict(0, propEq(mapi.PrSubject, "Banana")), []uint32{tableH}, ropRestrict)
 
 	re := &mapi.Restriction{Type: mapi.ResProperty, Value: mapi.PropertyRestriction{
 		Relop: mapi.RelopRE, PropTag: mapi.PrSubject,
@@ -689,6 +693,10 @@ func TestRestrictRejectsUnsupported(t *testing.T) {
 	if ec := mustU32(t, p, "ec"); ec != ecNotSupported {
 		t.Errorf("unsupported relop ec = %#x, want ecNotSupported (%#x)", ec, ecNotSupported)
 	}
+	// The refused restriction leaves the earlier filter in place.
+	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
+	_, rows := queryRowsResponse(t, qr, cols)
+	assertSubjects(t, rows, "Banana")
 }
 
 // TestRestrictThenSort confirms rebuildView filters before sorting: the surviving
