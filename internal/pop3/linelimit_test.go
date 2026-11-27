@@ -12,15 +12,9 @@ import (
 // cappedLineServer serves POP3 with a small command-line cap.
 func cappedLineServer(t *testing.T, limit int64) net.Listener {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
 	srv := &Server{Auth: directory.StaticAccounts{}, Hostname: "mail.test"}
 	srv.SetMaxCommandLine(limit)
-	go func() { _ = srv.Serve(ln) }()
-	return ln
+	return serveOn(t, srv)
 }
 
 // dialPOP3Line opens a connection and reads the greeting.
@@ -30,7 +24,7 @@ func dialPOP3Line(t *testing.T, ln net.Listener) (net.Conn, *bufio.Reader) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	t.Cleanup(func() { _ = conn.Close() })
+	t.Cleanup(func() { mustClose(t, conn) })
 	br := bufio.NewReader(conn)
 	if _, err := br.ReadString('\n'); err != nil {
 		t.Fatalf("greeting: %v", err)
