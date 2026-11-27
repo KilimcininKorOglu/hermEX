@@ -42,7 +42,7 @@ func TestDispatchRecordsSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, "mail.hermex.test")
 	rec := &fakeRecorder{}
 	srv.Sessions = rec
