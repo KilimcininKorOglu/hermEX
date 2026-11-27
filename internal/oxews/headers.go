@@ -28,11 +28,12 @@ func MessageHeaders(props mapi.PropertyValues) *HeaderList {
 	block, _ := v.(string)
 	var list HeaderList
 	for _, field := range headerFields(block) {
-		name, value, _ := strings.Cut(field, ":")
+		name, value, found := strings.Cut(field, ":")
 		name = strings.TrimSpace(name)
-		if name == "" {
-			// A malformed ": value" line names no field, and HeaderName has
-			// nothing to carry for it.
+		if !found || name == "" {
+			// A line without a colon is no header field (RFC 5322 2.2), and a
+			// malformed ": value" line names none; HeaderName has nothing to
+			// carry for either.
 			continue
 		}
 		list.Headers = append(list.Headers, InternetHeader{Name: name, Value: decodeValue(strings.TrimSpace(value))})
