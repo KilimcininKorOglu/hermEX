@@ -1,8 +1,13 @@
 package main
 
 import (
+	"errors"
+	"slices"
 	"strings"
 	"testing"
+
+	"hermex/internal/directory"
+	"hermex/internal/logging"
 )
 
 // TestExpandACMENames proves the certificate allowlist covers the mail/autodiscover/
@@ -51,6 +56,36 @@ func TestExpandACMENamesMTASTS(t *testing.T) {
 		if n == "mta-sts.tenant.com" {
 			t.Error("mta-sts.tenant.com present with MTA-STS disabled")
 		}
+	}
+}
+
+// TestACMENamesRecordAnUnreadableMTASTSSetting proves an MTA-STS settings read
+// failure keeps the mail, autodiscover and autoconfig certificates (a client needs
+// them whatever the MTA-STS state is), leaves out the mta-sts host (RFC 8461 3.3:
+// publishing a policy host is the operator's choice, and it cannot be known), and
+// records the failure, so the missing mta-sts certificate has a cause in the log.
+func TestACMENamesRecordAnUnreadableMTASTSSetting(t *testing.T) {
+	sink := &eventSink{}
+	dir := &fakeMTASTSDir{
+		domains:     []directory.DomainInfo{{Name: "tenant.com"}},
+		settingsErr: errors.New("db down: settings"),
+	}
+
+	names, err := acmeNames(dir, "mail.hermex.test", "", logging.New(sink))
+	if err != nil {
+		t.Fatalf("acmeNames: %v", err)
+	}
+	if !slices.Contains(names, "mail.tenant.com") || slices.Contains(names, "mta-sts.tenant.com") {
+		t.Errorf("names = %v, want the mail host and no mta-sts host", names)
+	}
+	recorded := false
+	for _, e := range sink.events {
+		if e.Name == "settings.read" && e.Fields["error"] == "db down: settings" {
+			recorded = true
+		}
+	}
+	if !recorded {
+		t.Errorf("events = %+v, want a settings.read event naming the error", sink.events)
 	}
 }
 

@@ -61,7 +61,7 @@ func gatewayTLS(cfg *config.Config, dir *directory.SQLDirectory, logger *logging
 // serving so the TLS-ALPN-01 challenge reaches the live listener.
 func acmeMaintain(acme *tlscert.ACMEProvider, dir *directory.SQLDirectory, hostname, adminHost string, logger *logging.Logger) {
 	cycle := func() {
-		names, err := acmeNames(dir, hostname, adminHost)
+		names, err := acmeNames(dir, hostname, adminHost, logger)
 		if err != nil {
 			if logger != nil {
 				logger.Warn(logging.TLS, "acme.allowlist", logging.Fields{"detail": "could not read the domain allowlist", "error": err.Error()})
@@ -140,7 +140,7 @@ func warnMirror(logger *logging.Logger, detail, name string, err error) {
 // (domain_status != 0) is not served, and obtaining a certificate for it would waste
 // the CA's per-account rate limit. The MTA-STS policy host is added only when the
 // operator publishes MTA-STS (see expandACMENames).
-func acmeNames(dir *directory.SQLDirectory, hostname, adminHost string) ([]string, error) {
+func acmeNames(dir mtastsDirectory, hostname, adminHost string, logger *logging.Logger) ([]string, error) {
 	domains, err := dir.ListDomains()
 	if err != nil {
 		return nil, err
@@ -152,8 +152,12 @@ func acmeNames(dir *directory.SQLDirectory, hostname, adminHost string) ([]strin
 	// allowlist: treat it as publishing-off and obtain the mail/autodiscover/autoconfig
 	// certs anyway, mirroring the admin side and the gatewayTLS degrade-to-manual
 	// pattern. The zero value is Enabled:false, so the mta-sts hosts are simply omitted
-	// until the read succeeds.
-	sts, _, _ := dir.GetMTASTSSettings()
+	// until the read succeeds. The failure is recorded, so the missing mta-sts
+	// certificates have a cause in the log.
+	sts, _, err := dir.GetMTASTSSettings()
+	if err != nil && logger != nil {
+		logger.Warn(logging.TLS, "settings.read", logging.Fields{"detail": "MTA-STS settings unreadable; mta-sts hosts left out of the ACME names", "error": err.Error()})
+	}
 	active := make([]string, 0, len(domains))
 	for _, d := range domains {
 		if d.Status == 0 {
