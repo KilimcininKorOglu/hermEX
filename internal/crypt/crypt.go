@@ -105,6 +105,36 @@ func clampRounds(rounds int) int {
 	}
 }
 
+// isAllDigits reports whether s is a non-empty unsigned ASCII decimal integer.
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := range len(s) {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// parseSHA512Rounds parses an optional "rounds=N$" prefix from rest.
+func parseSHA512Rounds(rest string) (rounds int, after string, explicit, ok bool) {
+	digits, hasRounds := strings.CutPrefix(rest, "rounds=")
+	if !hasRounds {
+		return SHA512RoundsDefault, rest, false, true
+	}
+	num, tail, split := strings.Cut(digits, "$")
+	if !split || !isAllDigits(num) {
+		return 0, "", false, false
+	}
+	n, err := strconv.Atoi(num)
+	if err != nil {
+		return 0, "", false, false
+	}
+	return clampRounds(n), tail, true, true
+}
+
 // parseSHA512 splits a stored $6$ hash into its salt and work factor. explicit
 // reports whether the hash carried a rounds section, which the re-derived hash
 // must reproduce exactly for the comparison to be meaningful.
@@ -113,19 +143,14 @@ func parseSHA512(stored string) (salt string, rounds int, explicit bool, ok bool
 	if !found {
 		return "", 0, false, false
 	}
-	rounds = SHA512RoundsDefault
-	if digits, hasRounds := strings.CutPrefix(rest, "rounds="); hasRounds {
-		num, after, split := strings.Cut(digits, "$")
-		if !split {
-			return "", 0, false, false
-		}
-		n, err := strconv.Atoi(num)
-		if err != nil {
-			return "", 0, false, false
-		}
-		rounds, explicit, rest = clampRounds(n), true, after
+	rounds, rest, explicit, ok = parseSHA512Rounds(rest)
+	if !ok {
+		return "", 0, false, false
 	}
-	salt, _, _ = strings.Cut(rest, "$")
+	salt, digest, hasDigest := strings.Cut(rest, "$")
+	if !hasDigest || digest == "" || strings.Contains(digest, "$") {
+		return "", 0, false, false
+	}
 	if len(salt) > sha512SaltLenMax {
 		salt = salt[:sha512SaltLenMax]
 	}
@@ -138,7 +163,10 @@ func parseMD5(stored string) (salt string, ok bool) {
 	if !found {
 		return "", false
 	}
-	salt, _, _ = strings.Cut(rest, "$")
+	salt, digest, hasDigest := strings.Cut(rest, "$")
+	if !hasDigest || digest == "" || strings.Contains(digest, "$") {
+		return "", false
+	}
 	if len(salt) > md5SaltLenMax {
 		salt = salt[:md5SaltLenMax]
 	}

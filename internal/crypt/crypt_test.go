@@ -26,6 +26,11 @@ var sha512Vectors = []struct{ name, salt, password, want string }{
 		"ab", "short salt",
 		"$6$ab$rkMmYTSRxKYBHHm7EfUNl0RmRzR9DsZuuebjDnqzRHTGIrpNKUySqH7UstnePAGpT.4NMHJ7PhCKNmGKxcnPf0",
 	},
+	{
+		"password longer than one SHA-512 block (84 bytes)",
+		"anotherlongsalts", "a very much longer text to encrypt.  This one even stretches over morethan one line.",
+		"$6$anotherlongsalts$zCB2J77iwc/56nB80mcnR6gCDELuiqcwDzPCm3OZnzRQyxT9pVMJ2vfOf0YI0AvrvfVu.AqASga4nxwhEPO7Z0",
+	},
 }
 
 // TestSHA512MatchesAnIndependentImplementation is the core correctness proof: the
@@ -56,6 +61,12 @@ func TestMD5MatchesAnIndependentImplementation(t *testing.T) {
 	for _, tc := range []struct{ salt, password, want string }{
 		{"saltstri", "Hello world!", "$1$saltstri$YMyguxXMBpd2TEZ.vS/3q1"},
 		{"abcd1234", "p@ssw0rd", "$1$abcd1234$fnzJaF8HRJIVA/1c2IUOG1"},
+		{"saltstri", "", "$1$saltstri$ciR2otLVXV8I9sOPWbLTc1"},
+		{
+			"abcd1234",
+			"a very much longer text to encrypt.  This one even stretches over morethan one line.",
+			"$1$abcd1234$xX4ohKtbwQqqJJSnplCv.1",
+		},
 	} {
 		got := MD5Prefix + tc.salt + "$" + string(md5Crypt([]byte(tc.password), []byte(tc.salt)))
 		if got != tc.want {
@@ -174,6 +185,14 @@ func TestRoundsReadsStoredHashes(t *testing.T) {
 		{"empty", "", 0, false},
 		{"unparseable rounds", "$6$rounds=abc$salt$hash", 0, false},
 		{"truncated rounds section", "$6$rounds=600000", 0, false},
+		{"negative rounds refused", "$6$rounds=-1000$salt$hash", 0, false},
+		{"plus-signed rounds refused", "$6$rounds=+5000$salt$hash", 0, false},
+		{"empty rounds refused", "$6$rounds=$salt$hash", 0, false},
+		{"rounds past int64 max refused", "$6$rounds=99999999999999999999999$salt$hash", 0, false},
+		{"missing digest separator refused", "$6$salt", 0, false},
+		{"empty digest refused", "$6$salt$", 0, false},
+		{"extra dollar segment refused", "$6$salt$hash$extra", 0, false},
+		{"rounds with missing digest refused", "$6$rounds=5000$salt", 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, ok := Rounds(tc.stored)
@@ -215,5 +234,119 @@ func TestSaltLimitsMatchTheSchemes(t *testing.T) {
 	cut := sha512Crypt([]byte("pw"), []byte("0123456789abcdef"), SHA512RoundsDefault)
 	if string(full) == string(cut) {
 		t.Error("the derivation ignores the extra salt on its own, so the limit is untested")
+	}
+}
+
+// TestHostileStoredHashesRefused proves forged, malformed, truncated, overflowed,
+// and oversized-salt hashes are refused without leaving partial parse results or
+// altering verification behavior for valid hashes.
+func TestHostileStoredHashesRefused(t *testing.T) {
+	validSHA512 := sha512Vectors[0].want
+	validMD5 := "$1$saltstri$YMyguxXMBpd2TEZ.vS/3q1"
+	forgedSHA512 := validSHA512[:len(validSHA512)-1] + "2"
+	forgedMD5 := validMD5[:len(validMD5)-1] + "2"
+
+	// Oversized salt carrying the valid digest of its truncated prefix must still
+	// be refused by Verify because stored does not match the canonical form.
+	oversizedSHA512 := "$6$YMHsHVYtVGpe3sHzEXTRA$" + strings.Split(sha512Vectors[1].want, "$")[3]
+	oversizedMD5 := "$1$saltstriEXTRA$YMyguxXMBpd2TEZ.vS/3q1"
+
+	for _, tc := range []struct {
+		name, password, stored string
+	}{
+		{"forged sha512 digest", "Hello world!", forgedSHA512},
+		{"forged md5 digest", "Hello world!", forgedMD5},
+		{"oversized sha512 salt", "correct horse battery staple", oversizedSHA512},
+		{"oversized md5 salt", "Hello world!", oversizedMD5},
+		{"negative rounds", "Hello world!", "$6$rounds=-5000$saltstring$digest"},
+		{"plus-signed rounds", "Hello world!", "$6$rounds=+5000$saltstring$digest"},
+		{"empty rounds", "Hello world!", "$6$rounds=$saltstring$digest"},
+		{"overflow rounds past int", "Hello world!", "$6$rounds=99999999999999999999999$saltstring$digest"},
+		{"missing sha512 digest", "Hello world!", "$6$saltstring"},
+		{"empty sha512 digest", "Hello world!", "$6$saltstring$"},
+		{"extra sha512 segment", "Hello world!", validSHA512 + "$extra"},
+		{"missing md5 digest", "Hello world!", "$1$saltstri"},
+		{"empty md5 digest", "Hello world!", "$1$saltstri$"},
+		{"extra md5 segment", "Hello world!", validMD5 + "$extra"},
+		{"nul byte in salt", "Hello world!", "$6$salt\x00str$digest"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if Verify(tc.password, tc.stored) {
+				t.Errorf("Verify accepted hostile stored hash %q", tc.stored)
+			}
+		})
+	}
+
+	assertParseRefused(t)
+
+	// Confirm package verification behavior is unchanged after hostile inputs.
+	if !Verify(sha512Vectors[0].password, validSHA512) {
+		t.Error("valid sha512 hash failed to verify after hostile inputs")
+	}
+	if !Verify("Hello world!", validMD5) {
+		t.Error("valid md5 hash failed to verify after hostile inputs")
+	}
+}
+
+// assertParseRefused confirms malformed hashes return zero values on refusal.
+func assertParseRefused(t *testing.T) {
+	t.Helper()
+	for _, bad := range []string{
+		"", "$6$", "$6$salt", "$6$salt$", "$6$salt$digest$extra",
+		"$6$rounds=-1$salt$digest", "$6$rounds=+5000$salt$digest",
+		"$6$rounds=$salt$digest", "$6$rounds=99999999999999999999999$salt$digest",
+	} {
+		salt, rounds, explicit, ok := parseSHA512(bad)
+		if ok || salt != "" || rounds != 0 || explicit {
+			t.Errorf("parseSHA512(%q) = (%q, %d, %v, %v), want zero values and ok=false", bad, salt, rounds, explicit, ok)
+		}
+	}
+	for _, bad := range []string{"", "$1$", "$1$salt", "$1$salt$", "$1$salt$digest$extra"} {
+		salt, ok := parseMD5(bad)
+		if ok || salt != "" {
+			t.Errorf("parseMD5(%q) = (%q, %v), want empty salt and ok=false", bad, salt, ok)
+		}
+	}
+}
+
+// TestHostilePasswords proves oversized and NUL-bearing passwords are handled
+// without truncation and without mutating caller input slices.
+func TestHostilePasswords(t *testing.T) {
+	longPW := strings.Repeat("aB3$xY9!", 512)
+	longHash := mustHash(t, longPW, SHA512RoundsMin)
+	if !Verify(longPW, longHash) {
+		t.Error("Verify rejected an oversized 4096-byte password")
+	}
+	if Verify(longPW[:len(longPW)-1]+"?", longHash) {
+		t.Error("Verify accepted a 4096-byte password with a modified final byte")
+	}
+	if Verify(longPW[:64], longHash) {
+		t.Error("Verify accepted a 64-byte prefix of an oversized password")
+	}
+
+	nulPW := "pass\x00word"
+	nulHash := mustHash(t, nulPW, SHA512RoundsMin)
+	if !Verify(nulPW, nulHash) || Verify("pass", nulHash) {
+		t.Error("Verify truncated a password at a NUL byte")
+	}
+
+	pwBuf := []byte("immutable-password")
+	saltBuf := []byte("saltstring")
+	sha512Crypt(pwBuf, saltBuf, SHA512RoundsMin)
+	md5Crypt(pwBuf, saltBuf[:md5SaltLenMax])
+	if string(pwBuf) != "immutable-password" || string(saltBuf) != "saltstring" {
+		t.Errorf("derivation mutated caller buffers: pw=%q salt=%q", pwBuf, saltBuf)
+	}
+}
+
+// TestNewSHA512ClampsLowRounds proves out-of-range low rounds are clamped up to
+// SHA512RoundsMin per the SHA-crypt specification.
+func TestNewSHA512ClampsLowRounds(t *testing.T) {
+	for _, low := range []int{-5, 0, SHA512RoundsMin - 1} {
+		h := mustHash(t, "pw", low)
+		gotRounds, ok := Rounds(h)
+		if !ok || gotRounds != SHA512RoundsMin {
+			t.Errorf("NewSHA512(rounds=%d) produced rounds=(%d, %v), want (%d, true)", low, gotRounds, ok, SHA512RoundsMin)
+		}
 	}
 }
