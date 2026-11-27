@@ -41,7 +41,7 @@ func TestLoadModelPrefersDataDir(t *testing.T) {
 	if err := custom.Save(f); err != nil {
 		t.Fatal(err)
 	}
-	_ = f.Close()
+	mustNoErr(t, f.Close(), "close custom model file")
 
 	got, err := LoadModel(dir)
 	if err != nil {
@@ -53,4 +53,27 @@ func TestLoadModelPrefersDataDir(t *testing.T) {
 	if got.SpamMsgs != 1 {
 		t.Errorf("loaded model SpamMsgs = %d, want 1", got.SpamMsgs)
 	}
+}
+
+// TestLoadModelFallsBackOnCorruptFile proves a corrupt model file in data_dir
+// returns an error and falls back to EmbeddedModel without altering the file
+// on disk or mutating the embedded floor.
+func TestLoadModelFallsBackOnCorruptFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ModelFileName)
+	corrupt := `{"spam_msgs":-5,"ham_msgs":1}`
+	mustNoErr(t, os.WriteFile(path, []byte(corrupt), 0o600), "write corrupt model")
+
+	beforeSpam := EmbeddedModel().SpamMsgs
+	got, err := LoadModel(dir)
+	if err == nil {
+		t.Fatal("LoadModel on corrupt file returned nil error, want error")
+	}
+	if got != EmbeddedModel() {
+		t.Error("LoadModel on corrupt file did not fall back to EmbeddedModel")
+	}
+	wantEq(t, EmbeddedModel().SpamMsgs, beforeSpam, "EmbeddedModel SpamMsgs unchanged")
+	onDisk, readErr := os.ReadFile(path)
+	mustNoErr(t, readErr, "read corrupt file back")
+	wantEq(t, string(onDisk), corrupt, "corrupt file on disk left untouched")
 }
