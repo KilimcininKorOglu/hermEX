@@ -40,7 +40,7 @@ func TestTypedPropValKeepsOrdinaryValue(t *testing.T) {
 	if v.Type != mapi.PtLong {
 		t.Fatalf("type = %#x, want PtLong", uint16(v.Type))
 	}
-	if n, _ := v.Value.(int32); n != 7 {
+	if n, ok := v.Value.(int32); !ok || n != 7 {
 		t.Errorf("value = %v, want 7", v.Value)
 	}
 }
