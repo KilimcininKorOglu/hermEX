@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
 )
 
 // This file is the package's assertion vocabulary. A test states one fact per call,
@@ -15,6 +16,14 @@ func mustNoErr(t *testing.T, err error, what string) {
 	t.Helper()
 	if err != nil {
 		t.Fatalf("%s: %v", what, err)
+	}
+}
+
+// mustClose closes st and fails the test if Close returns an error.
+func mustClose(t *testing.T, st *objectstore.Store) {
+	t.Helper()
+	if err := st.Close(); err != nil {
+		t.Errorf("Close: %v", err)
 	}
 }
 

@@ -65,12 +65,17 @@ var ErrBadDomain = errors.New("publicfolder: not a domain name")
 // an admin request parameter, and the directory is the domain root joined with
 // it, so a path separator or a dot segment would open another directory's store.
 // The name must pass directory.ValidateDomain, the rule every domain is created
-// under, so no store can live under a name no domain could have.
+// under, and stay within the RFC 1035 253-octet maximum domain name length, so no
+// store can live under a name no domain could have.
 func (svc *Service) dirFor(domain string) (string, error) {
 	if directory.ValidateDomain(domain) != nil {
 		return "", ErrBadDomain
 	}
-	return svc.paths.HomedirFor(strings.ToLower(strings.TrimSpace(domain))), nil
+	norm := strings.ToLower(strings.TrimSpace(domain))
+	if len(norm) > 253 {
+		return "", ErrBadDomain
+	}
+	return svc.paths.HomedirFor(norm), nil
 }
 
 // Provision ensures the domain's public store exists, creating and seeding it if
@@ -136,24 +141,30 @@ func (svc *Service) OpenForCaller(callerEmail string) (st *objectstore.Store, ok
 	return st, true, nil
 }
 
+// closeStore closes st and records its error in *errp if no earlier error occurred.
+func closeStore(st *objectstore.Store, errp *error) {
+	if cerr := st.Close(); cerr != nil && *errp == nil {
+		*errp = cerr
+	}
+}
+
 // VisibleFolders returns the public folders in the caller's own domain that the
 // caller may see, those on which the caller's effective rights include
 // FrightsVisible, each with those rights. It returns nil when the caller's
 // domain has no public store. This is the shared discovery the EWS, IMAP, and
 // webmail surfaces all render.
-func (svc *Service) VisibleFolders(callerEmail string) ([]Folder, error) {
+func (svc *Service) VisibleFolders(callerEmail string) (out []Folder, err error) {
 	st, ok, err := svc.OpenForCaller(callerEmail)
 	if err != nil || !ok {
 		return nil, err
 	}
-	defer st.Close()
+	defer closeStore(st, &err)
 
 	all, err := st.ListFolders()
 	if err != nil {
 		return nil, err
 	}
 	user := strings.ToLower(callerEmail)
-	var out []Folder
 	for _, f := range all {
 		rights, err := st.ResolvePermission(f.ID, user)
 		if err != nil {
@@ -178,7 +189,7 @@ type FolderWithGrants struct {
 // Folders returns every public folder in a domain with its full permission table,
 // for administrative management. It returns nil when the domain has no public store
 // yet, never creating one (a management read must not provision as a side effect).
-func (svc *Service) Folders(domain string) ([]FolderWithGrants, error) {
+func (svc *Service) Folders(domain string) (out []FolderWithGrants, err error) {
 	st, err := svc.OpenForDomain(domain)
 	if errors.Is(err, objectstore.ErrNotProvisioned) {
 		return nil, nil
@@ -186,13 +197,13 @@ func (svc *Service) Folders(domain string) ([]FolderWithGrants, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer st.Close()
+	defer closeStore(st, &err)
 
 	folders, err := st.ListFolders()
 	if err != nil {
 		return nil, err
 	}
-	out := make([]FolderWithGrants, 0, len(folders))
+	out = make([]FolderWithGrants, 0, len(folders))
 	for _, f := range folders {
 		grants, err := st.ListPermissions(f.ID)
 		if err != nil {
@@ -206,7 +217,7 @@ func (svc *Service) Folders(domain string) ([]FolderWithGrants, error) {
 // CreateFolder provisions the domain's public store if absent and creates a folder
 // named name directly under its IPM subtree, returning the new folder id. Creating
 // the first folder is what enables a domain's public folders.
-func (svc *Service) CreateFolder(domain, name string) (int64, error) {
+func (svc *Service) CreateFolder(domain, name string) (fid int64, err error) {
 	dir, err := svc.dirFor(domain)
 	if err != nil {
 		return 0, err
@@ -215,7 +226,7 @@ func (svc *Service) CreateFolder(domain, name string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer st.Close()
+	defer closeStore(st, &err)
 	return st.CreateFolder(nil, name)
 }
 
@@ -223,7 +234,7 @@ func (svc *Service) CreateFolder(domain, name string) (int64, error) {
 // structural id (below PublicFIDUnassignedStart) with ErrStructuralFolder so a
 // request cannot delete the store's skeleton, and ErrNotProvisioned when the domain
 // has no public store.
-func (svc *Service) DeleteFolder(domain string, fid int64) error {
+func (svc *Service) DeleteFolder(domain string, fid int64) (err error) {
 	if fid < int64(mapi.PublicFIDUnassignedStart) {
 		return ErrStructuralFolder
 	}
@@ -231,18 +242,18 @@ func (svc *Service) DeleteFolder(domain string, fid int64) error {
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer closeStore(st, &err)
 	return st.DeleteFolder(fid)
 }
 
 // Grant applies one permission change (an add/modify/remove the admin has already
 // shaped) to a public folder. The store must already exist; it is never created by
 // a grant.
-func (svc *Service) Grant(domain string, fid int64, change objectstore.PermissionChange) error {
+func (svc *Service) Grant(domain string, fid int64, change objectstore.PermissionChange) (err error) {
 	st, err := svc.OpenForDomain(domain)
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer closeStore(st, &err)
 	return st.ModifyPermissions(fid, false, []objectstore.PermissionChange{change})
 }
