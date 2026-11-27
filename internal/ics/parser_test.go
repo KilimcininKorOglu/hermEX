@@ -11,9 +11,8 @@ import (
 // buildKnownStream assembles a fixed multi-element stream by hand (markers +
 // encoded properties) so the fragmentation tests are independent of the
 // Producer's chunking.
-func buildKnownStream(t *testing.T) (data []byte, wantProps []StreamProp, wantMarkers map[int]uint32) {
+func buildKnownStream(t *testing.T) (data []byte, wantProps []StreamProp) {
 	t.Helper()
-	wantMarkers = map[int]uint32{}
 	add := func(m uint32) {
 		data = binary.LittleEndian.AppendUint32(data, m)
 	}
@@ -30,7 +29,7 @@ func buildKnownStream(t *testing.T) (data []byte, wantProps []StreamProp, wantMa
 	addProp(StreamProp{Tag: tag(0x1002, mapi.PtUnicode), Value: "hello world"})
 	addProp(StreamProp{Tag: tag(0x1003, mapi.PtBinary), Value: []byte{1, 2, 3, 4, 5, 6, 7}})
 	add(markerEndMessage)
-	return data, wantProps, wantMarkers
+	return data, wantProps
 }
 
 // feedInChunks feeds data to a fresh parser in fixed-size pieces, draining every
@@ -86,20 +85,20 @@ func assertStream(t *testing.T, items []Item, wantProps []StreamProp) {
 // length-driven parser must still reconstruct every element. This path is what a
 // real client's upload exercises and our own Producer never triggers.
 func TestParserReassemblesByteByByte(t *testing.T) {
-	data, wantProps, _ := buildKnownStream(t)
+	data, wantProps := buildKnownStream(t)
 	assertStream(t, feedInChunks(t, data, 1), wantProps)
 }
 
 // TestParserReassemblesOddChunks feeds the stream in 3-byte chunks (misaligned
 // to every 2- and 4-byte field and to UTF-16 code-unit boundaries).
 func TestParserReassemblesOddChunks(t *testing.T) {
-	data, wantProps, _ := buildKnownStream(t)
+	data, wantProps := buildKnownStream(t)
 	assertStream(t, feedInChunks(t, data, 3), wantProps)
 }
 
 // TestParserWholeBuffer feeds the entire stream at once.
 func TestParserWholeBuffer(t *testing.T) {
-	data, wantProps, _ := buildKnownStream(t)
+	data, wantProps := buildKnownStream(t)
 	assertStream(t, feedInChunks(t, data, len(data)), wantProps)
 }
 
