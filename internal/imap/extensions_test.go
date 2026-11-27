@@ -228,7 +228,13 @@ func TestIMAPQuota(t *testing.T) {
 	if got := strings.Join(c.mustOK("a3", `GETQUOTA ""`), " "); !strings.Contains(got, "STORAGE") {
 		t.Errorf("GETQUOTA missing STORAGE: %q", got)
 	}
+	checkSetQuotaRefused(t, c)
+}
 
+// checkSetQuotaRefused asserts that SETQUOTA is refused for a client and that the
+// limit it asked for is stored nowhere.
+func checkSetQuotaRefused(t *testing.T, c *testClient) {
+	t.Helper()
 	if _, status := c.do("a4", `SETQUOTA "" (STORAGE 999999)`); status != "NO" {
 		t.Errorf("SETQUOTA = %s, want NO (not permitted for a client)", status)
 	}
