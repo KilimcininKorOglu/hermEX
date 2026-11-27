@@ -32,8 +32,9 @@ func TestLoadRulesSeedsDataDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadRules: %v", err)
 	}
-	if rules, _ := rs.RuleCount(); rules < 100 {
-		t.Errorf("seeded ruleset has %d rules, want the baseline", rules)
+	rules, metas := rs.RuleCount()
+	if rules < 100 || metas < 0 {
+		t.Errorf("seeded ruleset has %d rules / %d metas, want the baseline", rules, metas)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, RulesFileName))
 	if err != nil {
@@ -59,8 +60,8 @@ func TestLoadRulesUsesExistingFileWithoutReseeding(t *testing.T) {
 		t.Fatalf("LoadRules: %v", err)
 	}
 	// Only the operator's single rule loaded, not the hundreds in the baseline.
-	if rules, _ := rs.RuleCount(); rules != 1 {
-		t.Errorf("live rules = %d, want 1 (the operator's file, not the baseline)", rules)
+	if rules, metas := rs.RuleCount(); rules != 1 || metas != 0 {
+		t.Errorf("live rules/metas = %d/%d, want 1/0 (the operator's file, not the baseline)", rules, metas)
 	}
 	// The file was not re-seeded over.
 	data, err := os.ReadFile(path)
@@ -98,11 +99,40 @@ func TestConcatRulesDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConcatRulesDir: %v", err)
 	}
-	if rules, _ := ParseSARules(string(data)).RuleCount(); rules != 2 {
-		t.Errorf("concatenated ruleset has %d rules, want 2 (A and B)", rules)
+	if rules, metas := ParseSARules(string(data)).RuleCount(); rules != 2 || metas != 0 {
+		t.Errorf("concatenated ruleset has %d rules / %d metas, want 2/0 (A and B)", rules, metas)
 	}
 
 	if _, err := ConcatRulesDir(t.TempDir()); err == nil {
 		t.Error("ConcatRulesDir on an empty directory should error")
+	}
+}
+
+// TestRulesLoadRefusesHostilePaths verifies unreadable paths return errors,
+// LoadRules falls back to EmbeddedRules without altering the filesystem, and
+// ConcatRulesDir refuses missing or non-.cf directories.
+func TestRulesLoadRefusesHostilePaths(t *testing.T) {
+	dir := t.TempDir()
+	rulesDir := filepath.Join(dir, RulesFileName)
+	mustNoErr(t, os.Mkdir(rulesDir, 0o700), "create directory at rules path")
+
+	if rs, err := LoadRulesFile(rulesDir); err == nil || rs != nil {
+		t.Errorf("LoadRulesFile(dir) = (%v, %v), want (nil, error)", rs, err)
+	}
+	rs, err := LoadRules(dir)
+	if err == nil {
+		t.Error("LoadRules with directory at rules path should return error")
+	}
+	if rs != EmbeddedRules() {
+		t.Error("LoadRules should fall back to EmbeddedRules on read error")
+	}
+	fi, statErr := os.Stat(rulesDir)
+	mustNoErr(t, statErr, "rules directory preserved")
+	wantEq(t, fi.IsDir(), true, "rules path still a directory")
+
+	nonCFDir := t.TempDir()
+	mustNoErr(t, os.WriteFile(filepath.Join(nonCFDir, "README"), []byte("x"), 0o644), "write non-cf file")
+	if got, err := ConcatRulesDir(nonCFDir); err == nil || got != nil {
+		t.Errorf("ConcatRulesDir(non-cf only) = (%v, %v), want (nil, error)", got, err)
 	}
 }

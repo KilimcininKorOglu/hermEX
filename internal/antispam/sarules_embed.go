@@ -1,7 +1,6 @@
 package antispam
 
 import (
-	"bytes"
 	"embed"
 	"errors"
 	"fmt"
@@ -55,16 +54,23 @@ func EmbeddedRules() *SARuleSet {
 
 // embeddedRulesText concatenates the vendored .cf files in the deterministic
 // order embed.FS reports (sorted by name), so the seeded data_dir file is stable.
+// The files are compiled into the binary, so a read failure means the binary is
+// broken; it panics rather than score every message with an empty rule set.
 func embeddedRulesText() []byte {
-	entries, _ := embeddedRulesFS.ReadDir("sarules")
-	var b bytes.Buffer
-	for _, e := range entries {
-		if data, err := embeddedRulesFS.ReadFile("sarules/" + e.Name()); err == nil {
-			b.Write(data)
-			b.WriteByte('\n')
-		}
+	entries, err := embeddedRulesFS.ReadDir("sarules")
+	if err != nil {
+		panic(fmt.Errorf("antispam: embedded rules: %w", err))
 	}
-	return b.Bytes()
+	var out []byte
+	for _, e := range entries {
+		data, err := embeddedRulesFS.ReadFile("sarules/" + e.Name())
+		if err != nil {
+			panic(fmt.Errorf("antispam: embedded rule file %s: %w", e.Name(), err))
+		}
+		out = append(out, data...)
+		out = append(out, '\n')
+	}
+	return out
 }
 
 // LoadRules returns the live ruleset the MTA scores with. It seeds
@@ -100,17 +106,17 @@ func ConcatRulesDir(dir string) ([]byte, error) {
 		return nil, fmt.Errorf("no .cf files in %s", dir)
 	}
 	sort.Strings(matches)
-	var b bytes.Buffer
+	var out []byte
 	for _, m := range matches {
 		// #nosec G304 -- the rule files are the .cf matches under the operator's own rules directory
 		data, err := os.ReadFile(m)
 		if err != nil {
 			return nil, err
 		}
-		b.Write(data)
-		b.WriteByte('\n')
+		out = append(out, data...)
+		out = append(out, '\n')
 	}
-	return b.Bytes(), nil
+	return out, nil
 }
 
 // LoadRulesFile parses a .cf ruleset file. A missing file returns (nil, nil) so
