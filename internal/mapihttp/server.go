@@ -100,6 +100,7 @@ func (s *Server) RunSessionMaintenance(ctx context.Context) {
 func (s *Server) SetLogger(l *logging.Logger) {
 	s.logger = l
 	s.ems.Logger = l
+	s.nsp.Logger = l
 }
 
 // SetLimiter installs the failed-login throttle. Without one every Basic-Auth

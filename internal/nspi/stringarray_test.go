@@ -23,10 +23,13 @@ func TestAForgedStringCountIsRefusedBeforeAllocating(t *testing.T) {
 		var before, after runtime.MemStats
 		runtime.GC()
 		runtime.ReadMemStats(&before)
-		_, err := read(ext.NewPull(body, abkFlags))
+		got, err := read(ext.NewPull(body, abkFlags))
 		runtime.ReadMemStats(&after)
 		if err == nil {
 			t.Errorf("%s: a count the buffer cannot hold was accepted", name)
+		}
+		if got != nil {
+			t.Errorf("%s: the refused read returned %d strings, want none", name, len(got))
 		}
 		if grew := after.TotalAlloc - before.TotalAlloc; grew > 1<<20 {
 			t.Errorf("%s: reading the forged count allocated %d bytes", name, grew)

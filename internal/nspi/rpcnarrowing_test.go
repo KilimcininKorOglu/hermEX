@@ -19,9 +19,12 @@ func TestNDRRestrictionRejectsWideResType(t *testing.T) {
 	p.Uint32(0) // whatever an AND frame would read next
 	p.UniquePtr(false)
 
-	_, err := pullRestrictionNDR(ndr.NewPull(p.Bytes()))
+	res, err := pullRestrictionNDR(ndr.NewPull(p.Bytes()))
 	if !errors.Is(err, ndr.ErrFormat) {
 		t.Fatalf("restriction type 0x100 gave %v, want a format refusal", err)
+	}
+	if res.Value != nil {
+		t.Errorf("refused restriction carried a decoded value %v", res.Value)
 	}
 }
 
@@ -36,9 +39,12 @@ func TestNDRRestrictionRejectsWideRelop(t *testing.T) {
 	p.Uint32(uint32(mapi.PrDisplayName)) // proptag
 	p.UniquePtr(false)
 
-	_, err := pullRestrictionNDR(ndr.NewPull(p.Bytes()))
+	res, err := pullRestrictionNDR(ndr.NewPull(p.Bytes()))
 	if !errors.Is(err, ndr.ErrFormat) {
 		t.Fatalf("relop 0x100 gave %v, want a format refusal", err)
+	}
+	if res.Value != nil {
+		t.Errorf("refused restriction carried a decoded value %v", res.Value)
 	}
 }
 
@@ -53,8 +59,11 @@ func TestNDRPropValTypeCheckIsFullWidth(t *testing.T) {
 	p.Uint32(0x0001001F)                 // type field: right low half, junk high half
 	p.UniquePtr(true)
 
-	_, err := pullPropValNDR(ndr.NewPull(p.Bytes()))
+	tv, err := pullPropValNDR(ndr.NewPull(p.Bytes()))
 	if !errors.Is(err, ndr.ErrFormat) {
 		t.Fatalf("type field 0x0001001F gave %v, want a format refusal", err)
+	}
+	if tv.Value != nil {
+		t.Errorf("refused property value carried a decoded value %v", tv.Value)
 	}
 }

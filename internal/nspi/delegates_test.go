@@ -72,7 +72,10 @@ func TestGetMatchesPublicDelegatesWithoutReaderIsEmpty(t *testing.T) {
 		{DisplayName: "boss@hermex.test", Address: "boss@hermex.test", DisplayType: rtUser},
 	}, testGUID)
 	g := s.snapshot(testCaller)
-	boss, _ := g.userByAddress("boss@hermex.test")
+	boss, ok := g.userByAddress("boss@hermex.test")
+	if !ok {
+		t.Fatal("boss not in GAL")
+	}
 	r := s.getMatchesCore(getMatchesRequest{
 		stat:     stat{sortType: sortTypeDisplayName, codePage: 1252, containerID: uint32(mapi.PrEmsAbPublicDelegates), curRec: boss.mid},
 		rowCount: 50,

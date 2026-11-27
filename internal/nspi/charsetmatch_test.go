@@ -59,12 +59,15 @@ func TestMatchNodeReadsAnsiStringTags(t *testing.T) {
 func TestGetMatchesReadsAnsiStringTags(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test")
 	f := propEqFilter(mapi.PrSmtpAddress.WithType(mapi.PtString8), "alice@hermex.test")
-	result, mids, _, _ := decodeGetMatches(t, s.GetMatches(buildGetMatches(
+	result, mids, st, rows := decodeGetMatches(t, s.GetMatches(buildGetMatches(
 		stat{sortType: sortTypeDisplayName, curRec: midBeginningOfTable, codePage: 1252}, &f, 50, nil), testCaller))
 	if result != ecSuccess {
 		t.Fatalf("result = %#x, want ecSuccess", result)
 	}
 	if len(mids) != 1 || mids[0] != midBase {
 		t.Fatalf("mids = %#x, want [%#x] (alice)", mids, midBase)
+	}
+	if st.containerID != st.curRec || len(rows) != 1 {
+		t.Fatalf("container_id = %#x, cur_rec = %#x, rows = %d, want bookmark and 1 row", st.containerID, st.curRec, len(rows))
 	}
 }

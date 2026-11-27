@@ -98,7 +98,10 @@ func TestContainerIDDoesNotCrossTalkWithMID(t *testing.T) {
 	}, testGUID)
 	// alice < boardroom by display name, so boardroom is MId midBase+1.
 	st := stat{curRec: midBase + 1, codePage: 1252, containerID: uint32(alContainerUsers)}
-	_, row := decodeGetProps(t, s.GetProps(buildGetProps(st, nil), testCaller))
+	result, row := decodeGetProps(t, s.GetProps(buildGetProps(st, nil), testCaller))
+	if result != ecSuccess {
+		t.Fatalf("result = %#x, want ecSuccess", result)
+	}
 	if got := rowSMTP(t, row); got != "boardroom@hermex.test" {
 		t.Errorf("by-MId GetProps under the All Users container = %q, want boardroom (no cross-talk)", got)
 	}

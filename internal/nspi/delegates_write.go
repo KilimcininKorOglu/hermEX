@@ -143,8 +143,12 @@ func (g gal) applyDelegateEdits(list []string, entryIDs [][]byte, remove bool) [
 
 // inScope reports whether addr is an entry of this caller-scoped GAL snapshot.
 func (g gal) inScope(addr string) bool {
-	_, ok := g.userByAddress(addr)
-	return ok
+	for _, u := range g.users {
+		if strings.EqualFold(u.smtp, addr) {
+			return true
+		}
+	}
+	return false
 }
 
 // entryIDToAddress reverses an address-book EntryID to its SMTP address. An

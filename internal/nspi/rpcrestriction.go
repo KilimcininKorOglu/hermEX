@@ -70,10 +70,12 @@ func pullRestrictionDepth(p *ndr.Pull, depth int) (mapi.Restriction, error) {
 	case mapi.ResExist:
 		r.Value, err = pullExistRestriction(p)
 	default:
-		return r, fmt.Errorf("%w: NSPI restriction type %#x unsupported", ndr.ErrFormat, resType)
+		return mapi.Restriction{}, fmt.Errorf("%w: NSPI restriction type %#x unsupported", ndr.ErrFormat, resType)
 	}
 	if err != nil {
-		return r, err
+		// A refused node answers no restriction at all: the partly decoded
+		// subtree must not reach a caller that reads the value despite the error.
+		return mapi.Restriction{}, err
 	}
 	return r, nil
 }

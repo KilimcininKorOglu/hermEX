@@ -94,8 +94,25 @@ func pullOptionalStat(p *ext.Pull) (stat, error) {
 
 // skipOptionalPropTags consumes a present-flagged proptag array and discards it.
 func skipOptionalPropTags(p *ext.Pull) error {
-	_, _, err := pullOptionalPropTags(p)
-	return err
+	present, err := p.Uint8()
+	if err != nil || present == 0 {
+		return err
+	}
+	n, err := p.Uint32()
+	if err != nil {
+		return err
+	}
+	return p.Skip(int(n) * 4)
+}
+
+// pullOptionalColumns reads a present-flagged proptag array for a caller that
+// needs only the tags: an absent array answers nil.
+func pullOptionalColumns(p *ext.Pull) ([]mapi.PropTag, error) {
+	present, err := p.Uint8()
+	if err != nil || present == 0 {
+		return nil, err
+	}
+	return p.PropTagsLong()
 }
 
 // pullOptionalPropTags reads a present-flagged proptag array, reporting whether
@@ -261,6 +278,17 @@ func (g gal) matchAll(filter *mapi.Restriction, rowCount uint32, st stat, hideMa
 	return mids
 }
 
+// matchExist reports whether the entry carries tag, or its sibling string type
+// as GetAnyCharset reads it, since a client names the string tag it prefers.
+func matchExist(u galUser, tag mapi.PropTag) bool {
+	props := galUserProps(u)
+	if props.Has(tag) {
+		return true
+	}
+	sibling, isString := mapi.CharsetSiblingTag(tag)
+	return isString && props.Has(sibling)
+}
+
 // matchNode evaluates an NSPI search restriction against a GAL user, mirroring
 // the reference address-book match: AND/OR/NOT recurse; a PR_ANR property
 // restriction matches via the shared display/SMTP-substring predicate; a
@@ -288,11 +316,7 @@ func matchNode(u galUser, res *mapi.Restriction) bool {
 		return matchProperty(u, pr)
 	case mapi.ResExist:
 		ex, ok := res.Value.(mapi.ExistRestriction)
-		if !ok {
-			return false
-		}
-		_, present := galUserProps(u).GetAnyCharset(ex.PropTag)
-		return present
+		return ok && matchExist(u, ex.PropTag)
 	default:
 		// RES_CONTENT and the structural kinds are unevaluated for the GAL.
 		return false
@@ -301,7 +325,12 @@ func matchNode(u galUser, res *mapi.Restriction) bool {
 
 // matchAllChildren evaluates an AND node: every child must match.
 func matchAllChildren(u galUser, res *mapi.Restriction) bool {
-	kids, _ := res.Value.([]mapi.Restriction)
+	kids, ok := res.Value.([]mapi.Restriction)
+	if !ok {
+		// An AND node without a child list is malformed; it must not match
+		// every entry the way an empty AND would.
+		return false
+	}
 	for i := range kids {
 		if !matchNode(u, &kids[i]) {
 			return false
@@ -312,7 +341,10 @@ func matchAllChildren(u galUser, res *mapi.Restriction) bool {
 
 // matchAnyChild evaluates an OR node: one matching child is enough.
 func matchAnyChild(u galUser, res *mapi.Restriction) bool {
-	kids, _ := res.Value.([]mapi.Restriction)
+	kids, ok := res.Value.([]mapi.Restriction)
+	if !ok {
+		return false
+	}
 	for i := range kids {
 		if matchNode(u, &kids[i]) {
 			return true
@@ -327,7 +359,10 @@ func matchAnyChild(u galUser, res *mapi.Restriction) bool {
 // ResolveNamesW uses. Any other tag is compared against the entry's value.
 func matchProperty(u galUser, pr mapi.PropertyRestriction) bool {
 	if pr.PropTag == mapi.PrAnr || pr.PropTag == mapi.PrAnrA {
-		token, _ := pr.PropVal.Value.(string)
+		token, ok := pr.PropVal.Value.(string)
+		if !ok {
+			return false
+		}
 		token = stripTypePrefix(token)
 		return token != "" && u.matchesToken(token)
 	}
@@ -429,9 +464,13 @@ func (s *Server) encodeGetMatches(result uint32, st stat, mids []uint32, cols []
 		p.Uint8(0) // row set absent
 	} else {
 		p.Uint8(0xFF)
-		_ = midArray(p, mids)
+		if err := midArray(p, mids); err != nil {
+			return s.encodeGetMatches(ecError, st, nil, nil, nil)
+		}
 		p.Uint8(0xFF)
-		_ = pushColRow(p, cols, rows)
+		if err := pushColRow(p, cols, rows); err != nil {
+			return s.encodeGetMatches(ecError, st, nil, nil, nil)
+		}
 	}
 	p.Uint32(0) // AuxiliaryBufferSize
 	return p.Bytes()

@@ -173,11 +173,16 @@ func (s *Server) snapshot(caller string) gal {
 
 // byMID returns the user at an entry MId.
 func (g gal) byMID(mid uint32) (galUser, bool) {
-	i := int(mid) - int(midBase)
-	if i < 0 || i >= len(g.users) {
+	if !g.hasMID(mid) {
 		return galUser{}, false
 	}
-	return g.users[i], true
+	return g.users[int(mid)-int(midBase)], true
+}
+
+// hasMID reports whether mid addresses an entry of this snapshot.
+func (g gal) hasMID(mid uint32) bool {
+	i := int(mid) - int(midBase)
+	return i >= 0 && i < len(g.users)
 }
 
 // position maps a STAT.cur_rec MId to a 0-based row index: the table-start and

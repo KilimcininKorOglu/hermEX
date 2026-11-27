@@ -21,7 +21,9 @@ func TestGetPropsX509Cert(t *testing.T) {
 	if err := st.SetSmimeIdentity(objectstore.SmimeIdentity{Mode: "browser", Cert: certDER}); err != nil {
 		t.Fatalf("set identity: %v", err)
 	}
-	st.Close()
+	if err := st.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
 
 	s := NewServer(maskedGAL{
 		{DisplayName: "alice@hermex.test", Address: "alice@hermex.test", StorePath: dir},
@@ -49,7 +51,9 @@ func TestGetPropsX509CertAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	st.Close() // no identity
+	if err := st.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	} // no identity
 
 	s := NewServer(maskedGAL{
 		{DisplayName: "alice@hermex.test", Address: "alice@hermex.test", StorePath: dir},
@@ -59,7 +63,7 @@ func TestGetPropsX509CertAbsent(t *testing.T) {
 	if result != ecWarnWithErrors {
 		t.Fatalf("result = %#x, want ecWarnWithErrors", result)
 	}
-	if v, _ := row.Get(errorTag(mapi.PrEmsAbX509Cert)); v != ecNotFound {
-		t.Errorf("absent cert marker = %v, want ecNotFound", v)
+	if v, ok := row.Get(errorTag(mapi.PrEmsAbX509Cert)); !ok || v != ecNotFound {
+		t.Errorf("absent cert marker = %v (ok=%v), want ecNotFound", v, ok)
 	}
 }

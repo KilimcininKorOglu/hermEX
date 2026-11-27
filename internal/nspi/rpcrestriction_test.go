@@ -76,8 +76,8 @@ func TestNDRRestrictionProperty(t *testing.T) {
 	if pr.Relop != mapi.RelopEQ || pr.PropTag != mapi.PrDisplayName {
 		t.Errorf("restriction = {relop %d, tag %#x}, want {EQ, PrDisplayName}", pr.Relop, uint32(pr.PropTag))
 	}
-	if s, _ := pr.PropVal.Value.(string); s != "alice" {
-		t.Errorf("restriction value = %q, want %q", s, "alice")
+	if s, ok := pr.PropVal.Value.(string); !ok || s != "alice" {
+		t.Errorf("restriction value = %q (ok=%v), want %q", s, ok, "alice")
 	}
 }
 
@@ -110,8 +110,8 @@ func TestNDRRestrictionAndTree(t *testing.T) {
 	if kids[1].Type != mapi.ResExist {
 		t.Errorf("child 1 type = %#x, want ResExist", kids[1].Type)
 	}
-	if ex, _ := kids[1].Value.(mapi.ExistRestriction); ex.PropTag != mapi.PrSmtpAddress {
-		t.Errorf("child 1 exist tag = %#x, want PrSmtpAddress", uint32(ex.PropTag))
+	if ex, ok := kids[1].Value.(mapi.ExistRestriction); !ok || ex.PropTag != mapi.PrSmtpAddress {
+		t.Errorf("child 1 exist tag = %#x (ok=%v), want PrSmtpAddress", uint32(ex.PropTag), ok)
 	}
 }
 
@@ -122,7 +122,7 @@ func TestNDRRestrictionUnsupported(t *testing.T) {
 		0x06, 0x00, 0x00, 0x00, // RES_BITMASK
 		0x06, 0x00, 0x00, 0x00,
 	}
-	if _, err := pullRestrictionNDR(ndr.NewPull(buf)); err == nil {
-		t.Error("pull of an unsupported restriction kind succeeded, want error")
+	if res, err := pullRestrictionNDR(ndr.NewPull(buf)); err == nil || res.Value != nil {
+		t.Errorf("pull of an unsupported restriction kind = (%v, %v), want an error and no value", res, err)
 	}
 }

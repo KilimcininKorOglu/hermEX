@@ -20,7 +20,7 @@ func TestGalUserPropsRoomCapacity(t *testing.T) {
 	}
 
 	user := galUser{smtp: "alice@hermex.test", display: "Alice", dt: dtMailuser, dispType: 0, capacity: 0}
-	if _, ok := galUserProps(user).Get(mapi.PrEmsAbRoomCapacity); ok {
+	if galUserProps(user).Has(mapi.PrEmsAbRoomCapacity) {
 		t.Error("a non-resource entry must not carry PR_EMS_AB_ROOM_CAPACITY")
 	}
 }

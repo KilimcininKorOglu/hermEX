@@ -11,6 +11,20 @@ const (
 	propRowFlagged uint8 = 0x01 // a FLAGGED_PROPVAL per column follows
 )
 
+// allValues returns every column's value in column order, and false as soon as
+// one column is missing from the bag.
+func allValues(cols []mapi.PropTag, bag mapi.PropertyValues) ([]any, bool) {
+	vals := make([]any, 0, len(cols))
+	for _, c := range cols {
+		v, ok := bag.Get(c)
+		if !ok {
+			return nil, false
+		}
+		vals = append(vals, v)
+	}
+	return vals, true
+}
+
 // pushPropertyRow serializes one column-projected PROPERTY_ROW ([MS-OXCDATA]
 // 2.8.1) against cols, the shape QueryRows' row set uses: a NONE row (flag 0x00,
 // a bare value per column) when every column is present, else a FLAGGED row
@@ -21,18 +35,10 @@ const (
 // address-book presence marker. A wholly absent row (every column missing, e.g.
 // an unknown MId) collapses to a FLAGGED row of all-error columns.
 func pushPropertyRow(p *ext.Push, cols []mapi.PropTag, bag mapi.PropertyValues) error {
-	allPresent := true
-	for _, c := range cols {
-		if _, ok := bag.Get(c); !ok {
-			allPresent = false
-			break
-		}
-	}
-	if allPresent {
+	if vals, ok := allValues(cols, bag); ok {
 		p.Uint8(propRowNone)
-		for _, c := range cols {
-			v, _ := bag.Get(c)
-			if err := p.PropValue(c.Type(), v); err != nil {
+		for i, c := range cols {
+			if err := p.PropValue(c.Type(), vals[i]); err != nil {
 				return err
 			}
 		}

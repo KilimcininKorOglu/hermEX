@@ -65,7 +65,7 @@ func decodeGetMatches(t *testing.T, resp []byte) (result uint32, mids []uint32, 
 		t.Fatal(err)
 	}
 	if mustU8(t, p, "mids marker") == 0 {
-		mustU8(t, p, "row set marker") // failure carries a second 0
+		wantEq(t, "the row set marker (failure carries a second 0)", mustU8(t, p, "row set marker"), uint8(0))
 		return result, nil, st, nil
 	}
 	mtags, err := p.PropTagsLong()
@@ -76,7 +76,7 @@ func decodeGetMatches(t *testing.T, resp []byte) (result uint32, mids []uint32, 
 	for i, m := range mtags {
 		mids[i] = uint32(m)
 	}
-	mustU8(t, p, "row set marker")
+	wantEq(t, "the row set marker", mustU8(t, p, "row set marker"), uint8(0xFF))
 	cols, err := p.PropTagsLong()
 	if err != nil {
 		t.Fatal(err)
@@ -105,8 +105,8 @@ func TestGetMatchesAnr(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("rows = %d, want 1", len(rows))
 	}
-	if v, _ := rows[0].Get(mapi.PrSmtpAddress); v != "alice@hermex.test" {
-		t.Errorf("row SMTP = %v, want alice", v)
+	if v, ok := rows[0].Get(mapi.PrSmtpAddress); !ok || v != "alice@hermex.test" {
+		t.Errorf("row SMTP = %v (ok=%v), want alice", v, ok)
 	}
 	if st.containerID != st.curRec {
 		t.Errorf("container_id = %#x, want cur_rec %#x (bookmark, point 16)", st.containerID, st.curRec)
@@ -118,10 +118,16 @@ func TestGetMatchesAnr(t *testing.T) {
 func TestGetMatchesRowCountCap(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test", "carol@hermex.test")
 	f := anrFilter("@hermex.test") // matches all three
-	_, mids, _, _ := decodeGetMatches(t, s.GetMatches(buildGetMatches(
+	result, mids, st, rows := decodeGetMatches(t, s.GetMatches(buildGetMatches(
 		stat{sortType: sortTypeDisplayName, codePage: 1252}, &f, 2, nil), testCaller))
-	if len(mids) != 2 {
-		t.Errorf("mids = %d, want 2 (capped at rowCount)", len(mids))
+	if result != ecSuccess {
+		t.Fatalf("result = %#x, want ecSuccess", result)
+	}
+	if len(mids) != 2 || len(rows) != 2 {
+		t.Errorf("mids = %d, rows = %d, want 2 (capped at rowCount)", len(mids), len(rows))
+	}
+	if st.containerID != st.curRec {
+		t.Errorf("container_id = %#x, want cur_rec %#x", st.containerID, st.curRec)
 	}
 }
 
@@ -130,10 +136,16 @@ func TestGetMatchesRowCountCap(t *testing.T) {
 func TestGetMatchesExistAll(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test", "carol@hermex.test")
 	f := mapi.Restriction{Type: mapi.ResExist, Value: mapi.ExistRestriction{PropTag: mapi.PrEntryID}}
-	_, mids, _, _ := decodeGetMatches(t, s.GetMatches(buildGetMatches(
+	result, mids, st, rows := decodeGetMatches(t, s.GetMatches(buildGetMatches(
 		stat{sortType: sortTypeDisplayName, codePage: 1252}, &f, 50, nil), testCaller))
-	if len(mids) != 3 {
-		t.Errorf("mids = %d, want 3 (all entries exist)", len(mids))
+	if result != ecSuccess {
+		t.Fatalf("result = %#x, want ecSuccess", result)
+	}
+	if len(mids) != 3 || len(rows) != 3 {
+		t.Errorf("mids = %d, rows = %d, want 3 (all entries exist)", len(mids), len(rows))
+	}
+	if st.containerID != st.curRec {
+		t.Errorf("container_id = %#x, want cur_rec %#x", st.containerID, st.curRec)
 	}
 }
 
@@ -144,8 +156,14 @@ func TestGetMatchesAnrEqualsResolve(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test", "carol@hermex.test")
 	const token = "carol"
 	f := anrFilter(token)
-	_, mids, _, _ := decodeGetMatches(t, s.GetMatches(buildGetMatches(
+	result, mids, st, rows := decodeGetMatches(t, s.GetMatches(buildGetMatches(
 		stat{sortType: sortTypeDisplayName, codePage: 1252}, &f, 50, nil), testCaller))
+	if result != ecSuccess {
+		t.Fatalf("result = %#x, want ecSuccess", result)
+	}
+	if len(rows) != 1 || st.containerID != st.curRec {
+		t.Errorf("rows = %d, container_id = %#x, cur_rec = %#x", len(rows), st.containerID, st.curRec)
+	}
 
 	wantMID, status := s.snapshot(testCaller).resolve(token)
 	if status != midResolved {
@@ -160,10 +178,13 @@ func TestGetMatchesAnrEqualsResolve(t *testing.T) {
 func TestGetMatchesSortTypeRejected(t *testing.T) {
 	s := testGAL("alice@hermex.test")
 	f := anrFilter("alice")
-	result, _, _, _ := decodeGetMatches(t, s.GetMatches(buildGetMatches(
+	result, mids, st, rows := decodeGetMatches(t, s.GetMatches(buildGetMatches(
 		stat{sortType: 0x99, codePage: 1252}, &f, 50, nil), testCaller))
 	if result != ecNotSupported {
 		t.Errorf("result = %#x, want ecNotSupported", result)
+	}
+	if mids != nil || rows != nil || st.sortType != 0x99 {
+		t.Errorf("unexpected payload on error: mids=%v rows=%v sortType=%#x", mids, rows, st.sortType)
 	}
 }
 
@@ -171,10 +192,13 @@ func TestGetMatchesSortTypeRejected(t *testing.T) {
 func TestGetMatchesUnicodeRejected(t *testing.T) {
 	s := testGAL("alice@hermex.test")
 	f := anrFilter("alice")
-	result, _, _, _ := decodeGetMatches(t, s.GetMatches(buildGetMatches(
+	result, mids, st, rows := decodeGetMatches(t, s.GetMatches(buildGetMatches(
 		stat{sortType: sortTypeDisplayName, codePage: cpWinUnicode}, &f, 50, nil), testCaller))
 	if result != ecNotSupported {
 		t.Errorf("result = %#x, want ecNotSupported", result)
+	}
+	if mids != nil || rows != nil || st.codePage != cpWinUnicode {
+		t.Errorf("unexpected payload on error: mids=%v rows=%v codePage=%#x", mids, rows, st.codePage)
 	}
 }
 

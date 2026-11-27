@@ -166,7 +166,7 @@ func (s *Server) rpcBind(stub []byte) ([]byte, uint32) {
 // reserved word carries nothing actionable.
 func (s *Server) rpcUnbind(stub []byte) ([]byte, uint32) {
 	p := ndr.NewPull(stub)
-	if _, _, err := pullCtxHandleNDR(p); err != nil {
+	if err := skipCtxHandleNDR(p); err != nil {
 		return nil, ndr.FaultNdr
 	}
 	out := ndr.NewPush()

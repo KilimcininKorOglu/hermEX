@@ -45,7 +45,7 @@ func pullQueryRows(body []byte) (queryRowsRequest, error) {
 	if r.count, err = p.Uint32(); err != nil {
 		return r, err
 	}
-	if r.columns, _, err = pullOptionalPropTags(p); err != nil {
+	if r.columns, err = pullOptionalColumns(p); err != nil {
 		return r, err
 	}
 	return r, skipAuxIn(p)
@@ -162,7 +162,9 @@ func (s *Server) encodeQueryRows(result uint32, st stat, cols []mapi.PropTag, ro
 		p.Uint8(0) // no row set
 	} else {
 		p.Uint8(0xFF)
-		_ = pushColRow(p, cols, rows)
+		if err := pushColRow(p, cols, rows); err != nil {
+			return s.encodeQueryRows(ecError, st, nil, nil)
+		}
 	}
 	p.Uint32(0) // AuxiliaryBufferSize
 	return p.Bytes()
@@ -305,7 +307,9 @@ func (s *Server) encodeQueryColumns(result uint32, cols []mapi.PropTag) []byte {
 		p.Uint8(0)
 	} else {
 		p.Uint8(0xFF)
-		_ = p.PropTagsLong(cols)
+		if err := p.PropTagsLong(cols); err != nil {
+			return s.encodeQueryColumns(ecError, nil)
+		}
 	}
 	p.Uint32(0) // AuxiliaryBufferSize
 	return p.Bytes()

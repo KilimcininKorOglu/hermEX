@@ -16,6 +16,7 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/ext"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 )
 
@@ -62,6 +63,11 @@ type Server struct {
 	gal        directory.GAL
 	serverGUID mapi.GUID
 	rpcSeq     atomic.Uint32 // mints distinct NspiBind context handles over RPC/HTTP
+
+	// Logger records the mailbox reads a GAL row serves without (the portrait and
+	// the S/MIME certificate), so a failing store is visible to the operator even
+	// though the row is still answered. Nil disables logging.
+	Logger *logging.Logger
 }
 
 // NewServer builds an NSPI server over the GAL with a stable server GUID.
@@ -111,13 +117,18 @@ func (s *Server) encodeBind(result uint32) []byte {
 	return p.Bytes()
 }
 
-// Unbind handles the NSPI Unbind request ([MS-OXNSPI] 2.2.8). It reports success
-// unconditionally; the transport drops the session keyed by the sid cookie.
+// Unbind handles the NSPI Unbind request ([MS-OXNSPI] 2.2.8). A body that does
+// not decode as Reserved, AuxiliaryBufferSize and the auxiliary buffer answers
+// ecError, as Bind does; a well-formed one reports success. The transport drops
+// the session keyed by the sid cookie.
 func (s *Server) Unbind(body []byte) []byte {
-	_ = pullUnbindRequest(body) // body carries no actionable fields
+	result := ecSuccess
+	if err := pullUnbindRequest(body); err != nil {
+		result = ecError
+	}
 	p := ext.NewPush(abkFlags)
-	p.Uint32(0)         // status
-	p.Uint32(ecSuccess) // result
-	p.Uint32(0)         // AuxiliaryBufferSize
+	p.Uint32(0)      // status
+	p.Uint32(result) // result
+	p.Uint32(0)      // AuxiliaryBufferSize
 	return p.Bytes()
 }

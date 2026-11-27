@@ -37,7 +37,7 @@ func buildSeekEntries(st stat, target string, table []uint32, cols []mapi.PropTa
 func decodeSeek(t *testing.T, resp []byte) (uint32, stat, mapi.PropertyValues) {
 	t.Helper()
 	p := ext.NewPull(resp, abkFlags)
-	mustU32(t, p, "status")
+	wantEq(t, "the status", mustU32(t, p, "status"), uint32(0))
 	result := mustU32(t, p, "result")
 	if m := mustU8(t, p, "STAT marker"); m != 0xFF {
 		t.Fatalf("STAT marker = %#x, want 0xFF", m)
@@ -75,8 +75,8 @@ func TestSeekEntries(t *testing.T) {
 	if out.numPos != 1 {
 		t.Errorf("num_pos = %d, want 1", out.numPos)
 	}
-	if v, _ := row.Get(mapi.PrSmtpAddress); v != "bob@hermex.test" {
-		t.Errorf("row SMTP = %v, want bob", v)
+	if v, ok := row.Get(mapi.PrSmtpAddress); !ok || v != "bob@hermex.test" {
+		t.Errorf("row SMTP = %v (ok=%v), want bob", v, ok)
 	}
 }
 
@@ -84,9 +84,12 @@ func TestSeekEntries(t *testing.T) {
 func TestSeekEntriesPastEnd(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test")
 	st := stat{sortType: sortTypeDisplayName, codePage: 1252}
-	result, _, _ := decodeSeek(t, s.SeekEntries(buildSeekEntries(st, "zzzz", nil, nil), testCaller))
+	result, out, row := decodeSeek(t, s.SeekEntries(buildSeekEntries(st, "zzzz", nil, nil), testCaller))
 	if result != ecNotFound {
 		t.Errorf("result = %#x, want ecNotFound", result)
+	}
+	if row != nil || out.codePage != 1252 {
+		t.Errorf("unexpected payload on not-found: row=%v codePage=%d", row, out.codePage)
 	}
 }
 
@@ -94,9 +97,12 @@ func TestSeekEntriesPastEnd(t *testing.T) {
 func TestSeekEntriesRejectsNonDisplaySort(t *testing.T) {
 	s := testGAL("alice@hermex.test")
 	st := stat{sortType: 0x99, codePage: 1252}
-	result, _, _ := decodeSeek(t, s.SeekEntries(buildSeekEntries(st, "a", nil, nil), testCaller))
+	result, out, row := decodeSeek(t, s.SeekEntries(buildSeekEntries(st, "a", nil, nil), testCaller))
 	if result != ecError {
 		t.Errorf("result = %#x, want ecError", result)
+	}
+	if row != nil || out.sortType != 0x99 {
+		t.Errorf("unexpected payload on error: row=%v sortType=%#x", row, out.sortType)
 	}
 }
 
@@ -116,7 +122,7 @@ func buildCompareMids(mid1, mid2 uint32) []byte {
 func decodeCompareMids(t *testing.T, resp []byte) (cmp int32, result uint32) {
 	t.Helper()
 	p := ext.NewPull(resp, abkFlags)
-	mustU32(t, p, "status")
+	wantEq(t, "the status", mustU32(t, p, "status"), uint32(0))
 	cmp = int32(mustU32(t, p, "cmp"))
 	result = mustU32(t, p, "result")
 	return cmp, result
@@ -135,11 +141,11 @@ func TestCompareMids(t *testing.T) {
 	if cmp, result := decodeCompareMids(t, s.CompareMids(buildCompareMids(carol, alice), testCaller)); result != ecSuccess || cmp <= 0 {
 		t.Errorf("compare(carol, alice) = (cmp %d, result %#x), want positive: MId1 carol comes after alice", cmp, result)
 	}
-	if cmp, _ := decodeCompareMids(t, s.CompareMids(buildCompareMids(alice, alice), testCaller)); cmp != 0 {
-		t.Errorf("compare(alice, alice) cmp = %d, want 0", cmp)
+	if cmp, result := decodeCompareMids(t, s.CompareMids(buildCompareMids(alice, alice), testCaller)); result != ecSuccess || cmp != 0 {
+		t.Errorf("compare(alice, alice) = (cmp %d, result %#x), want (0, ecSuccess)", cmp, result)
 	}
-	if _, result := decodeCompareMids(t, s.CompareMids(buildCompareMids(alice, 0x9999), testCaller)); result != ecError {
-		t.Errorf("compare with an unknown MId result = %#x, want ecError", result)
+	if cmp, result := decodeCompareMids(t, s.CompareMids(buildCompareMids(alice, 0x9999), testCaller)); result != ecError || cmp != 0 {
+		t.Errorf("compare with an unknown MId = (cmp %d, result %#x), want (0, ecError)", cmp, result)
 	}
 }
 
@@ -164,9 +170,9 @@ func buildResort(st stat, inmids []uint32) []byte {
 func decodeResort(t *testing.T, resp []byte) (uint32, stat, []uint32) {
 	t.Helper()
 	p := ext.NewPull(resp, abkFlags)
-	mustU32(t, p, "status")
+	wantEq(t, "the status", mustU32(t, p, "status"), uint32(0))
 	result := mustU32(t, p, "result")
-	mustU8(t, p, "STAT marker")
+	wantEq(t, "the STAT marker", mustU8(t, p, "STAT marker"), uint8(0xFF))
 	st, err := pullStat(p)
 	if err != nil {
 		t.Fatal(err)
@@ -217,7 +223,13 @@ func TestResortRestriction(t *testing.T) {
 func TestResortRestrictionCursorReset(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test")
 	st := stat{codePage: 1252, curRec: 0x9999} // not in the set
-	_, out, _ := decodeResort(t, s.ResortRestriction(buildResort(st, []uint32{midBase, midBase + 1}), testCaller))
+	result, out, mids := decodeResort(t, s.ResortRestriction(buildResort(st, []uint32{midBase, midBase + 1}), testCaller))
+	if result != ecSuccess {
+		t.Fatalf("result = %#x, want ecSuccess", result)
+	}
+	if len(mids) != 2 {
+		t.Errorf("mids = %d, want 2", len(mids))
+	}
 	if out.curRec != midBeginningOfTable {
 		t.Errorf("cur_rec = %#x, want BEGINNING_OF_TABLE (current not in set)", out.curRec)
 	}

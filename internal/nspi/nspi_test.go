@@ -100,7 +100,10 @@ func TestBindRejectsAnonymous(t *testing.T) {
 	if ok {
 		t.Fatal("anonymous Bind ok = true, want false")
 	}
-	_, result, guid := decodeBindResp(t, resp)
+	status, result, guid := decodeBindResp(t, resp)
+	if status != 0 {
+		t.Errorf("status = %#x, want 0", status)
+	}
 	if result != ecNotSupported {
 		t.Errorf("result = %#x, want ecNotSupported", result)
 	}
@@ -113,9 +116,13 @@ func TestBindRejectsAnonymous(t *testing.T) {
 // strings are code-page encoded), guarding the codepage check.
 func TestBindRejectsUnicodeCodepage(t *testing.T) {
 	s := NewServer(nil, testGUID)
-	_, ok := s.Bind(buildBind(0, true, cpWinUnicode))
+	resp, ok := s.Bind(buildBind(0, true, cpWinUnicode))
 	if ok {
 		t.Fatal("Unicode-codepage Bind ok = true, want false")
+	}
+	status, result, guid := decodeBindResp(t, resp)
+	if status != 0 || result != ecNotSupported || (guid != mapi.GUID{}) {
+		t.Errorf("Unicode Bind resp = (status %#x, result %#x, guid %+v), want (0, ecNotSupported, zero)", status, result, guid)
 	}
 }
 
@@ -132,5 +139,25 @@ func TestUnbindSucceeds(t *testing.T) {
 	}
 	if p.Remaining() != 0 {
 		t.Errorf("Unbind response has %d trailing bytes", p.Remaining())
+	}
+}
+
+// TestUnbindRefusesAMalformedBody proves a body that does not decode as the
+// Unbind request ([MS-OXCMAPIHTTP] 2.2.5.2.1: Reserved, AuxiliaryBufferSize and
+// that many auxiliary bytes) answers ecError, as Bind does, rather than success.
+func TestUnbindRefusesAMalformedBody(t *testing.T) {
+	s := NewServer(nil, testGUID)
+	for name, body := range map[string][]byte{
+		"empty":                  nil,
+		"Reserved only":          {0, 0, 0, 0},
+		"auxiliary size too big": {0, 0, 0, 0, 0xFF, 0, 0, 0},
+	} {
+		p := ext.NewPull(s.Unbind(body), abkFlags)
+		status := mustU32(t, p, "status")
+		result := mustU32(t, p, "result")
+		aux := mustU32(t, p, "AuxiliaryBufferSize")
+		if status != 0 || result != ecError || aux != 0 {
+			t.Errorf("%s: Unbind response = (status %#x, result %#x, aux %d), want (0, ecError, 0)", name, status, result, aux)
+		}
 	}
 }

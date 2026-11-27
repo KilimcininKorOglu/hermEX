@@ -108,8 +108,12 @@ func TestRPCQueryRowsExplicit(t *testing.T) {
 		t.Fatalf("fault %#x", fault)
 	}
 	q := ndr.NewPull(out)
-	if _, err := pullStatNDR(q); err != nil {
+	st, err := pullStatNDR(q)
+	if err != nil {
 		t.Fatalf("stat: %v", err)
+	}
+	if st.codePage != 1252 {
+		t.Errorf("stat codePage = %d, want 1252", st.codePage)
 	}
 	ref := ndrU32(t, q, "referent")
 	if ref == 0 {
@@ -139,8 +143,12 @@ func TestRPCQueryRowsInvalid(t *testing.T) {
 		t.Fatalf("fault %#x", fault)
 	}
 	q := ndr.NewPull(out)
-	if _, err := pullStatNDR(q); err != nil {
+	st, err := pullStatNDR(q)
+	if err != nil {
 		t.Fatalf("stat: %v", err)
+	}
+	if st.codePage != 1252 {
+		t.Errorf("stat codePage = %d, want 1252", st.codePage)
 	}
 	ref := ndrU32(t, q, "referent")
 	if ref != 0 {
@@ -223,8 +231,12 @@ func TestRPCResortRestriction(t *testing.T) {
 		t.Fatalf("fault %#x", fault)
 	}
 	q := ndr.NewPull(out)
-	if _, err := pullStatNDR(q); err != nil {
+	st, err := pullStatNDR(q)
+	if err != nil {
 		t.Fatalf("stat: %v", err)
+	}
+	if st.codePage != 1252 {
+		t.Errorf("stat codePage = %d, want 1252", st.codePage)
 	}
 	mids, err := pullPtrMIDs(q)
 	if err != nil {
@@ -459,8 +471,12 @@ func TestRPCGetMatches(t *testing.T) {
 		t.Fatalf("fault %#x", fault)
 	}
 	q := ndr.NewPull(out)
-	if _, err := pullStatNDR(q); err != nil {
+	st, err := pullStatNDR(q)
+	if err != nil {
 		t.Fatalf("stat: %v", err)
+	}
+	if st.codePage != 1252 {
+		t.Errorf("stat codePage = %d, want 1252", st.codePage)
 	}
 	mids, err := pullPtrMIDs(q)
 	if err != nil {
@@ -490,8 +506,12 @@ func TestRPCGetMatchesPropName(t *testing.T) {
 		t.Fatalf("fault %#x", fault)
 	}
 	q := ndr.NewPull(out)
-	if _, err := pullStatNDR(q); err != nil {
+	st, err := pullStatNDR(q)
+	if err != nil {
 		t.Fatalf("stat: %v", err)
+	}
+	if st.codePage != 1252 {
+		t.Errorf("stat codePage = %d, want 1252", st.codePage)
 	}
 	midRef := ndrU32(t, q, "MId referent")
 	rowRef := ndrU32(t, q, "row referent")

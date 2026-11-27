@@ -45,8 +45,14 @@ func delegateWriterServer() (*Server, delegatingGAL) {
 func TestModLinkAttAddsBothEntryIDFormsThenRemoves(t *testing.T) {
 	s, w := delegateWriterServer()
 	g := s.snapshot(testCaller)
-	boss, _ := g.userByAddress("boss@hermex.test")
-	carol, _ := g.userByAddress("carol@hermex.test")
+	boss, ok := g.userByAddress("boss@hermex.test")
+	if !ok {
+		t.Fatal("boss not in GAL")
+	}
+	carol, ok := g.userByAddress("carol@hermex.test")
+	if !ok {
+		t.Fatal("carol not in GAL")
+	}
 
 	// Add alice (permanent EID) and carol (ephemeral EID).
 	add := modLinkAttRequest{
@@ -92,7 +98,10 @@ func TestModLinkAttAddsBothEntryIDFormsThenRemoves(t *testing.T) {
 func TestModLinkAttDeniesEditingAnotherUsersList(t *testing.T) {
 	s, w := delegateWriterServer()
 	g := s.snapshot(testCaller)
-	boss, _ := g.userByAddress("boss@hermex.test")
+	boss, ok := g.userByAddress("boss@hermex.test")
+	if !ok {
+		t.Fatal("boss not in GAL")
+	}
 	req := modLinkAttRequest{
 		proptag:  uint32(mapi.PrEmsAbPublicDelegates),
 		mid:      boss.mid,
@@ -115,7 +124,10 @@ func TestModLinkAttDeniesEditingAnotherUsersList(t *testing.T) {
 func TestModLinkAttKeepsDelegatesInsideTheOrganization(t *testing.T) {
 	s, w := delegateWriterServer()
 	g := s.snapshot(testCaller)
-	boss, _ := g.userByAddress("boss@hermex.test")
+	boss, ok := g.userByAddress("boss@hermex.test")
+	if !ok {
+		t.Fatal("boss not in GAL")
+	}
 	foreign := permanentEntryID(dtMailuser, userDN("mallory@other-org.test"))
 	add := modLinkAttRequest{proptag: uint32(mapi.PrEmsAbPublicDelegates), mid: boss.mid, entryIDs: [][]byte{foreign}}
 	if code := s.modLinkAttCore(add, "boss@hermex.test"); code != ecSuccess {
@@ -142,7 +154,10 @@ func TestModLinkAttKeepsDelegatesInsideTheOrganization(t *testing.T) {
 func TestModLinkAttRejectsBadRequests(t *testing.T) {
 	s, w := delegateWriterServer()
 	g := s.snapshot(testCaller)
-	boss, _ := g.userByAddress("boss@hermex.test")
+	boss, ok := g.userByAddress("boss@hermex.test")
+	if !ok {
+		t.Fatal("boss not in GAL")
+	}
 
 	if code := s.modLinkAttCore(modLinkAttRequest{proptag: uint32(mapi.PrDisplayName), mid: boss.mid}, "boss@hermex.test"); code != ecNotSupported {
 		t.Errorf("wrong proptag = %#x, want ecNotSupported", code)

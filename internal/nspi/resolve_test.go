@@ -44,7 +44,7 @@ func TestDNToMId(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test", "carol@hermex.test")
 	body := buildDNToMId(userDN("bob@hermex.test"), userDN("nobody@x.test"), "not-a-dn")
 	p := ext.NewPull(s.DNToMId(body, testCaller), abkFlags)
-	mustU32(t, p, "status")
+	wantEq(t, "the status", mustU32(t, p, "status"), uint32(0))
 	if r := mustU32(t, p, "result"); r != ecSuccess {
 		t.Fatalf("result = %#x", r)
 	}
@@ -81,7 +81,7 @@ func TestResolveNamesW(t *testing.T) {
 		"SMTP:carol@hermex.test", // prefix-stripped, unique -> resolved
 	)
 	p := ext.NewPull(s.ResolveNamesW(body, testCaller), abkFlags)
-	mustU32(t, p, "status")
+	wantEq(t, "the status", mustU32(t, p, "status"), uint32(0))
 	wantEq(t, "the result", mustU32(t, p, "result"), uint32(ecSuccess))
 	wantEq(t, "the echoed code page", mustU32(t, p, "codepage"), uint32(1252))
 	wantEq(t, "the mids marker", mustU8(t, p, "mids marker"), uint8(0xFF))
@@ -101,6 +101,7 @@ func TestResolveNamesW(t *testing.T) {
 	mustNoErr(t, "decode the columns", err)
 	wantEq(t, "resolved rows (bob + carol)", mustU32(t, p, "row count"), uint32(2))
 	row0 := decodeRow(t, p, cols)
-	v, _ := row0.Get(mapi.PrSmtpAddress)
+	v, ok := row0.Get(mapi.PrSmtpAddress)
+	wantEq(t, "the first resolved row's SMTP present", ok, true)
 	wantEq(t, "the first resolved row's SMTP address", v, any("bob@hermex.test"))
 }

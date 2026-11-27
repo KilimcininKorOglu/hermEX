@@ -46,7 +46,7 @@ func TestGetPropListInvalidMid(t *testing.T) {
 	s := testGAL("alice@hermex.test")
 	for _, mid := range []uint32{0, 0x9999} {
 		p := ext.NewPull(s.GetPropList(buildGetPropList(mid, 1252), testCaller), abkFlags)
-		mustU32(t, p, "status")
+		wantEq(t, "the status", mustU32(t, p, "status"), uint32(0))
 		if result := mustU32(t, p, "result"); result != ecInvalidObject {
 			t.Errorf("MId %#x result = %#x, want ecInvalidObject", mid, result)
 		}

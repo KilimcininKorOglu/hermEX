@@ -137,14 +137,22 @@ func TestNDRPropValRoundTrip(t *testing.T) {
 			if tv.Tag != tag {
 				t.Errorf("tag = %#x, want %#x", uint32(tv.Tag), uint32(tag))
 			}
-			if b, ok := c.value.([]byte); ok {
-				if got, _ := tv.Value.([]byte); !bytes.Equal(got, b) {
-					t.Errorf("binary value = % x, want % x", got, b)
-				}
-			} else if tv.Value != c.value {
-				t.Errorf("value = %#v, want %#v", tv.Value, c.value)
-			}
+			wantPropValue(t, tv.Value, c.value)
 		})
+	}
+}
+
+// wantPropValue compares a pulled value with the pushed one, bytes by content.
+func wantPropValue(t *testing.T, got, want any) {
+	t.Helper()
+	if b, ok := want.([]byte); ok {
+		if g, isBin := got.([]byte); !isBin || !bytes.Equal(g, b) {
+			t.Errorf("binary value = % x (ok=%v), want % x", g, isBin, b)
+		}
+		return
+	}
+	if got != want {
+		t.Errorf("value = %#v, want %#v", got, want)
 	}
 }
 
@@ -202,18 +210,18 @@ func TestNDRRowSetProjection(t *testing.T) {
 	mustU32NDR(t, pl, "crows actual", 1)
 	mustU32NDR(t, pl, "row reserved", 0)
 	mustU32NDR(t, pl, "row cValues", 2) // both columns present in the row, the 2nd an error
-	ndrU32(t, pl, "value-array referent")
+	wantNDRReferent(t, pl, "value-array referent")
 	mustU32NDR(t, pl, "value-array max_count", 2)
 	// First value: PrDisplayName (unicode, present).
 	mustU32NDR(t, pl, "v0 proptag", uint32(mapi.PrDisplayName))
-	ndrU32(t, pl, "v0 reserved")
+	mustU32NDR(t, pl, "v0 reserved", 0)
 	mustU32NDR(t, pl, "v0 ptype", uint32(mapi.PtUnicode))
-	ndrU32(t, pl, "v0 string referent")
+	wantNDRReferent(t, pl, "v0 string referent")
 	// Second value: the absent column rewritten to PT_ERROR.
 	if tag := ndrU32(t, pl, "v1 proptag"); mapi.PropTag(tag).Type() != mapi.PtError {
 		t.Errorf("absent column type = %#x, want PtError", mapi.PropTag(tag).Type())
 	}
-	ndrU32(t, pl, "v1 reserved")
+	mustU32NDR(t, pl, "v1 reserved", 0)
 	mustU32NDR(t, pl, "v1 ptype", uint32(mapi.PtError))
 	mustU32NDR(t, pl, "v1 scode", uint32(ecNotFound))
 }
@@ -306,7 +314,6 @@ func TestNDRCtxHandle(t *testing.T) {
 	}
 }
 
-// mustU32NDR reads a u32 and fails if it does not equal want.
 // ndrU32 reads one NDR uint32 and fails the test when the stream is short, so a
 // truncated reply is never read as a zero.
 func ndrU32(t *testing.T, p *ndr.Pull, label string) uint32 {
@@ -318,6 +325,16 @@ func ndrU32(t *testing.T, p *ndr.Pull, label string) uint32 {
 	return v
 }
 
+// wantNDRReferent reads an NDR unique-pointer referent and fails when it is null:
+// referent ids are message-global, so only their presence is defined.
+func wantNDRReferent(t *testing.T, p *ndr.Pull, label string) {
+	t.Helper()
+	if ndrU32(t, p, label) == 0 {
+		t.Errorf("%s is null, want non-zero", label)
+	}
+}
+
+// mustU32NDR reads a u32 and fails if it does not equal want.
 func mustU32NDR(t *testing.T, p *ndr.Pull, label string, want uint32) {
 	t.Helper()
 	got, err := p.Uint32()

@@ -42,7 +42,10 @@ func rowSMTP(t *testing.T, row mapi.PropertyValues) string {
 	if !ok {
 		t.Fatalf("row has no PR_SMTP_ADDRESS: %+v", row)
 	}
-	s, _ := v.(string)
+	s, ok := v.(string)
+	if !ok {
+		t.Fatalf("PR_SMTP_ADDRESS is %T, want string", v)
+	}
 	return s
 }
 
@@ -135,8 +138,14 @@ func TestResolveIndependentOfGALBit(t *testing.T) {
 func TestGetMatchesHidesGALandResolve(t *testing.T) {
 	s := hidingServer()
 	f := anrFilter("@hermex.test") // matches all four addresses
-	_, mids, _, rows := decodeGetMatches(t, s.GetMatches(buildGetMatches(
+	result, mids, st, rows := decodeGetMatches(t, s.GetMatches(buildGetMatches(
 		stat{sortType: sortTypeDisplayName, codePage: 1252}, &f, 50, nil), testCaller))
+	if result != ecSuccess {
+		t.Fatalf("result = %#x, want ecSuccess", result)
+	}
+	if st.containerID != st.curRec {
+		t.Errorf("container_id = %#x, want cur_rec %#x", st.containerID, st.curRec)
+	}
 	if len(mids) != 1 {
 		t.Fatalf("mids = %d (%v), want 1 (only vis@)", len(mids), mids)
 	}
@@ -179,14 +188,14 @@ func TestDistlistRendersAsDistList(t *testing.T) {
 	for _, u := range g.users {
 		props[u.smtp] = galUserProps(u)
 	}
-	if ot, _ := props["team@hermex.test"].Get(mapi.PrObjectType); ot != int32(mapi.ObjectTypeDistList) {
-		t.Errorf("list object type = %v, want %d (distlist)", ot, mapi.ObjectTypeDistList)
+	if ot, ok := props["team@hermex.test"].Get(mapi.PrObjectType); !ok || ot != int32(mapi.ObjectTypeDistList) {
+		t.Errorf("list object type = %v (ok=%v), want %d (distlist)", ot, ok, mapi.ObjectTypeDistList)
 	}
-	if dt, _ := props["team@hermex.test"].Get(mapi.PrDisplayType); dt != int32(mapi.DisplayTypeDistList) {
-		t.Errorf("list display type = %v, want %d (distlist)", dt, mapi.DisplayTypeDistList)
+	if dt, ok := props["team@hermex.test"].Get(mapi.PrDisplayType); !ok || dt != int32(mapi.DisplayTypeDistList) {
+		t.Errorf("list display type = %v (ok=%v), want %d (distlist)", dt, ok, mapi.DisplayTypeDistList)
 	}
-	if ot, _ := props["alice@hermex.test"].Get(mapi.PrObjectType); ot != int32(mapi.ObjectTypeMailUser) {
-		t.Errorf("user object type = %v, want %d (mailuser)", ot, mapi.ObjectTypeMailUser)
+	if ot, ok := props["alice@hermex.test"].Get(mapi.PrObjectType); !ok || ot != int32(mapi.ObjectTypeMailUser) {
+		t.Errorf("user object type = %v (ok=%v), want %d (mailuser)", ot, ok, mapi.ObjectTypeMailUser)
 	}
 }
 
@@ -196,8 +205,11 @@ func TestDistlistRendersAsDistList(t *testing.T) {
 func TestGetPropsDirectOpenIgnoresHide(t *testing.T) {
 	s := hidingServer()
 	bothMID := midBase // both@ is first, fully hidden
-	_, row := decodeGetProps(t, s.GetProps(buildGetProps(
+	result, row := decodeGetProps(t, s.GetProps(buildGetProps(
 		stat{sortType: sortTypeDisplayName, codePage: 1252, curRec: bothMID}, nil), testCaller))
+	if result != ecSuccess {
+		t.Fatalf("result = %#x, want ecSuccess", result)
+	}
 	if got := rowSMTP(t, row); got != "both@hermex.test" {
 		t.Errorf("direct GetProps of hidden both@ = %q, want both@hermex.test", got)
 	}

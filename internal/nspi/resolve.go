@@ -122,7 +122,9 @@ func (s *Server) encodeDNToMId(result uint32, mids []uint32) []byte {
 		p.Uint8(0)
 	} else {
 		p.Uint8(0xFF)
-		_ = midArray(p, mids)
+		if err := midArray(p, mids); err != nil {
+			return s.encodeDNToMId(ecError, nil)
+		}
 	}
 	p.Uint32(0) // AuxiliaryBufferSize
 	return p.Bytes()
@@ -147,7 +149,7 @@ func pullResolveNames(body []byte) (resolveNamesRequest, error) {
 		return r, err
 	}
 	r.stat = stat
-	if r.columns, _, err = pullOptionalPropTags(p); err != nil {
+	if r.columns, err = pullOptionalColumns(p); err != nil {
 		return r, err
 	}
 	hasNames, err := p.Uint8()
@@ -232,9 +234,13 @@ func (s *Server) encodeResolveNames(result, codePage uint32, mids []uint32, cols
 		p.Uint8(0)
 	} else {
 		p.Uint8(0xFF)
-		_ = midArray(p, mids)
+		if err := midArray(p, mids); err != nil {
+			return s.encodeResolveNames(ecError, codePage, nil, nil, nil)
+		}
 		p.Uint8(0xFF)
-		_ = pushColRow(p, cols, rows)
+		if err := pushColRow(p, cols, rows); err != nil {
+			return s.encodeResolveNames(ecError, codePage, nil, nil, nil)
+		}
 	}
 	p.Uint32(0) // AuxiliaryBufferSize
 	return p.Bytes()

@@ -16,14 +16,14 @@ import (
 // mailbox must answer "no value", not create an empty one on their behalf.
 func TestAddressBookReadsNeverCreateAMailbox(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "gone")
-	if photo := userPhoto(path); photo != nil {
-		t.Errorf("photo of a missing mailbox = %d bytes, want none", len(photo))
+	if photo, err := userPhoto(path); err == nil || photo != nil {
+		t.Errorf("photo of a missing mailbox = (%d bytes, %v), want (nil, error)", len(photo), err)
 	}
-	if cert := userX509Cert(path); cert != nil {
-		t.Errorf("certificate of a missing mailbox = %d bytes, want none", len(cert))
+	if cert, err := userX509Cert(path); err == nil || cert != nil {
+		t.Errorf("certificate of a missing mailbox = (%d bytes, %v), want (nil, error)", len(cert), err)
 	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Errorf("an address-book read created the missing mailbox: %v", err)
+	if info, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("an address-book read created the missing mailbox: %v (%v)", err, info)
 	}
 }
 
@@ -48,13 +48,16 @@ func TestGetPropsProfileFields(t *testing.T) {
 		},
 	}
 	s := NewServer(gal, testGUID)
-	_, row := decodeGetProps(t, s.GetProps(buildGetProps(stat{curRec: midBase, codePage: 1252},
+	result, row := decodeGetProps(t, s.GetProps(buildGetProps(stat{curRec: midBase, codePage: 1252},
 		[]mapi.PropTag{mapi.PrTitle, mapi.PrDepartmentName}), testCaller))
-	if v, _ := row.Get(mapi.PrTitle); v != "Engineer" {
-		t.Errorf("PrTitle = %v, want Engineer", v)
+	if result != ecSuccess {
+		t.Fatalf("result = %#x, want ecSuccess", result)
 	}
-	if v, _ := row.Get(mapi.PrDepartmentName); v != "R&D" {
-		t.Errorf("PrDepartmentName = %v, want R&D", v)
+	if v, ok := row.Get(mapi.PrTitle); !ok || v != "Engineer" {
+		t.Errorf("PrTitle = %v (ok=%v), want Engineer", v, ok)
+	}
+	if v, ok := row.Get(mapi.PrDepartmentName); !ok || v != "R&D" {
+		t.Errorf("PrDepartmentName = %v (ok=%v), want R&D", v, ok)
 	}
 }
 
@@ -110,8 +113,8 @@ func TestGetPropsDefault(t *testing.T) {
 	if len(row) != len(defaultColumns) {
 		t.Errorf("row has %d props, want %d (default bag)", len(row), len(defaultColumns))
 	}
-	if v, _ := row.Get(mapi.PrSmtpAddress); v != "alice@hermex.test" {
-		t.Errorf("SMTP = %v, want alice (cur_rec=midBase resolves to the first entry)", v)
+	if v, ok := row.Get(mapi.PrSmtpAddress); !ok || v != "alice@hermex.test" {
+		t.Errorf("SMTP = %v (ok=%v), want alice (cur_rec=midBase resolves to the first entry)", v, ok)
 	}
 }
 
@@ -120,9 +123,12 @@ func TestGetPropsDefault(t *testing.T) {
 // entry, bob.
 func TestGetPropsByMID(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test", "carol@hermex.test")
-	_, row := decodeGetProps(t, s.GetProps(buildGetProps(stat{curRec: midBase + 1, codePage: 1252}, nil), testCaller))
-	if v, _ := row.Get(mapi.PrSmtpAddress); v != "bob@hermex.test" {
-		t.Errorf("cur_rec=midBase+1 SMTP = %v, want bob", v)
+	result, row := decodeGetProps(t, s.GetProps(buildGetProps(stat{curRec: midBase + 1, codePage: 1252}, nil), testCaller))
+	if result != ecSuccess {
+		t.Fatalf("result = %#x, want ecSuccess", result)
+	}
+	if v, ok := row.Get(mapi.PrSmtpAddress); !ok || v != "bob@hermex.test" {
+		t.Errorf("cur_rec=midBase+1 SMTP = %v (ok=%v), want bob", v, ok)
 	}
 }
 
@@ -135,7 +141,7 @@ func TestGetPropsExplicitError(t *testing.T) {
 	if result != ecWarnWithErrors {
 		t.Fatalf("result = %#x, want ecWarnWithErrors", result)
 	}
-	if _, ok := row.Get(mapi.PrDisplayName); !ok {
+	if !row.Has(mapi.PrDisplayName) {
 		t.Error("present column PrDisplayName missing from row")
 	}
 	errTag := errorTag(mapi.PrContainerFlags)
@@ -159,8 +165,8 @@ func TestGetPropsUnknownEntry(t *testing.T) {
 	if len(row) != len(defaultColumns) {
 		t.Fatalf("error row has %d props, want %d", len(row), len(defaultColumns))
 	}
-	if v, _ := row.Get(errorTag(mapi.PrSmtpAddress)); v != ecNotFound {
-		t.Errorf("error row PrSmtpAddress marker = %v, want ecNotFound", v)
+	if v, ok := row.Get(errorTag(mapi.PrSmtpAddress)); !ok || v != ecNotFound {
+		t.Errorf("error row PrSmtpAddress marker = %v (ok=%v), want ecNotFound", v, ok)
 	}
 }
 
@@ -168,8 +174,24 @@ func TestGetPropsUnknownEntry(t *testing.T) {
 // strings are code-page encoded), consistent with the other ops.
 func TestGetPropsUnicodeRejected(t *testing.T) {
 	s := testGAL("alice@hermex.test")
-	result, _ := decodeGetProps(t, s.GetProps(buildGetProps(stat{curRec: midBase, codePage: cpWinUnicode}, nil), testCaller))
+	result, row := decodeGetProps(t, s.GetProps(buildGetProps(stat{curRec: midBase, codePage: cpWinUnicode}, nil), testCaller))
 	if result != ecNotSupported {
 		t.Errorf("result = %#x, want ecNotSupported", result)
+	}
+	if row != nil {
+		t.Errorf("row = %v, want nil on error", row)
+	}
+}
+
+// TestGetPropsEchoesTheCodePage proves the response CodePage field is the code
+// page of the request STAT ([MS-OXCMAPIHTTP] 2.2.5.7.2: the code page the server
+// used for the string values), for two different code pages.
+func TestGetPropsEchoesTheCodePage(t *testing.T) {
+	s := testGAL("alice@hermex.test")
+	for _, cp := range []uint32{1252, 1254} {
+		p := ext.NewPull(s.GetProps(buildGetProps(stat{curRec: midBase, codePage: cp}, nil), testCaller), abkFlags)
+		wantEq(t, "the status", mustU32(t, p, "status"), uint32(0))
+		wantEq(t, "the result", mustU32(t, p, "result"), uint32(ecSuccess))
+		wantEq(t, "the code page", mustU32(t, p, "codepage"), cp)
 	}
 }

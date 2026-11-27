@@ -21,7 +21,9 @@ func TestGetPropsThumbnailPhoto(t *testing.T) {
 	if err := st.SetUserPhoto(photo); err != nil {
 		t.Fatalf("set photo: %v", err)
 	}
-	st.Close()
+	if err := st.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
 
 	s := NewServer(maskedGAL{
 		{DisplayName: "alice@hermex.test", Address: "alice@hermex.test", StorePath: dir},
@@ -49,7 +51,9 @@ func TestGetPropsThumbnailPhotoAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	st.Close() // no photo set
+	if err := st.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	} // no photo set
 
 	s := NewServer(maskedGAL{
 		{DisplayName: "alice@hermex.test", Address: "alice@hermex.test", StorePath: dir},
@@ -59,7 +63,7 @@ func TestGetPropsThumbnailPhotoAbsent(t *testing.T) {
 	if result != ecWarnWithErrors {
 		t.Fatalf("result = %#x, want ecWarnWithErrors", result)
 	}
-	if v, _ := row.Get(errorTag(mapi.PrEmsAbThumbnailPhoto)); v != ecNotFound {
-		t.Errorf("absent photo marker = %v, want ecNotFound", v)
+	if v, ok := row.Get(errorTag(mapi.PrEmsAbThumbnailPhoto)); !ok || v != ecNotFound {
+		t.Errorf("absent photo marker = %v (ok=%v), want ecNotFound", v, ok)
 	}
 }

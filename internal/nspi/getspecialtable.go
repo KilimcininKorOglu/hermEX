@@ -122,7 +122,9 @@ func (s *Server) encodeGetSpecialTable(result, codePage uint32, rows []mapi.Prop
 		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 		p.Uint32(uint32(len(rows)))
 		for _, row := range rows {
-			_ = p.PropertyValuesLong(row) // TPROPVAL_ARRAY per row (ABK)
+			if err := p.PropertyValuesLong(row); err != nil { // TPROPVAL_ARRAY per row (ABK)
+				return s.encodeGetSpecialTable(ecError, codePage, nil)
+			}
 		}
 	}
 	p.Uint32(0) // AuxiliaryBufferSize

@@ -1,9 +1,11 @@
 package nspi
 
 import (
+	"errors"
 	"slices"
 
 	"hermex/internal/ext"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -88,7 +90,7 @@ func (s *Server) getPropsCore(req getPropsRequest, caller string) getPropsResult
 		if !req.hasTags {
 			tags = defaultColumns
 		}
-		row, _ := projectProps(nil, tags)
+		row := projectRow(nil, tags)
 		return getPropsResult{result: ecWarnWithErrors, codePage: req.stat.codePage, row: row}
 	}
 
@@ -111,18 +113,38 @@ func (s *Server) lazyProps(u galUser, requested []mapi.PropTag) []mapi.TaggedPro
 	var extra []mapi.TaggedPropVal
 	// The portrait comes from the mailbox's cross-protocol user-photo property.
 	if u.storePath != "" && slices.Contains(requested, mapi.PrEmsAbThumbnailPhoto) {
-		if photo := userPhoto(u.storePath); photo != nil {
+		photo, err := userPhoto(u.storePath)
+		s.logMailboxReadFail("photo", u, err)
+		if err == nil && photo != nil {
 			extra = append(extra, mapi.TaggedPropVal{Tag: mapi.PrEmsAbThumbnailPhoto, Value: photo})
 		}
 	}
 	// The published S/MIME certificate lets Outlook encrypt to a GAL recipient.
 	// The value is a multi-value binary carrying the one cert DER.
 	if u.storePath != "" && slices.Contains(requested, mapi.PrEmsAbX509Cert) {
-		if cert := userX509Cert(u.storePath); cert != nil {
+		cert, err := userX509Cert(u.storePath)
+		s.logMailboxReadFail("cert", u, err)
+		if err == nil && cert != nil {
 			extra = append(extra, mapi.TaggedPropVal{Tag: mapi.PrEmsAbX509Cert, Value: [][]byte{cert}})
 		}
 	}
 	return append(extra, s.profileProps(u, requested)...)
+}
+
+// logMailboxReadFail records a failed mailbox read the row is served without. A
+// mailbox that was never provisioned has no portrait and no certificate, which is
+// an answer rather than a failure, so it records nothing.
+func (s *Server) logMailboxReadFail(what string, u galUser, err error) {
+	if err == nil || errors.Is(err, objectstore.ErrNotProvisioned) {
+		return
+	}
+	s.Logger.Emit(logging.Event{
+		Level:     logging.LevelWarn,
+		Subsystem: logging.NSPI,
+		Name:      "gal." + what + ".read.fail",
+		Fields:    logging.Fields{"address": u.smtp},
+		Err:       err.Error(),
+	})
 }
 
 // profileProps reads the directory profile fields (title, department, phones,
@@ -174,14 +196,26 @@ func anyTagRequested(requested, want []mapi.PropTag) bool {
 // hasErr reports whether any marker was produced.
 func projectProps(bag mapi.PropertyValues, tags []mapi.PropTag) (row mapi.PropertyValues, hasErr bool) {
 	for _, tag := range tags {
+		if !bag.Has(tag) {
+			hasErr = true
+			break
+		}
+	}
+	return projectRow(bag, tags), hasErr
+}
+
+// projectRow builds the row projectProps does, for a caller that needs only the
+// row: each requested tag's value, or PT_ERROR(ecNotFound) where the bag lacks it.
+func projectRow(bag mapi.PropertyValues, tags []mapi.PropTag) mapi.PropertyValues {
+	var row mapi.PropertyValues
+	for _, tag := range tags {
 		if v, ok := bag.Get(tag); ok {
 			row = append(row, mapi.TaggedPropVal{Tag: tag, Value: v})
 		} else {
 			row = append(row, mapi.TaggedPropVal{Tag: errorTag(tag), Value: ecNotFound})
-			hasErr = true
 		}
 	}
-	return row, hasErr
+	return row
 }
 
 // errorTag rewrites a proptag's type to PT_ERROR, the form a row carries for a
@@ -191,32 +225,37 @@ func errorTag(tag mapi.PropTag) mapi.PropTag {
 }
 
 // userPhoto reads a mailbox's portrait bytes from its object store, or nil when
-// none is set or the store cannot be opened. A missing mailbox has no photo and
-// is never created by this read.
-func userPhoto(storePath string) []byte {
+// none is set. A store that cannot be opened, read or closed is an error; a
+// missing mailbox answers objectstore.ErrNotProvisioned and is never created by
+// this read.
+func userPhoto(storePath string) (photo []byte, err error) {
 	st, err := objectstore.OpenExisting(storePath)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	defer st.Close()
-	photo, _ := st.UserPhoto()
-	return photo
+	defer func() {
+		err = errors.Join(err, st.Close())
+	}()
+	return st.UserPhoto()
 }
 
 // userX509Cert returns the mailbox's published S/MIME public certificate (raw
-// DER), or nil when none is published. A missing mailbox has no certificate and
+// DER), or nil when none is published. A store that cannot be opened, read or
+// closed is an error; a missing mailbox answers objectstore.ErrNotProvisioned and
 // is never created by this read.
-func userX509Cert(storePath string) []byte {
+func userX509Cert(storePath string) (cert []byte, err error) {
 	st, err := objectstore.OpenExisting(storePath)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	defer st.Close()
+	defer func() {
+		err = errors.Join(err, st.Close())
+	}()
 	id, ok, err := st.GetSmimeIdentity()
 	if err != nil || !ok || len(id.Cert) == 0 {
-		return nil
+		return nil, err
 	}
-	return id.Cert
+	return id.Cert, nil
 }
 
 // encodeGetProps frames a GetProps response: status + result + the echoed code
@@ -232,7 +271,9 @@ func (s *Server) encodeGetProps(result, codePage uint32, row mapi.PropertyValues
 		p.Uint8(0)
 	} else {
 		p.Uint8(0xFF)
-		_ = p.PropertyValuesLong(row)
+		if err := p.PropertyValuesLong(row); err != nil {
+			return s.encodeGetProps(ecError, codePage, nil)
+		}
 	}
 	p.Uint32(0) // AuxiliaryBufferSize
 	return p.Bytes()

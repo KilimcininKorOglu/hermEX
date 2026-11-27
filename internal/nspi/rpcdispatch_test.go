@@ -30,15 +30,26 @@ func buildBindIN(flags, codePage uint32) []byte {
 func bindResult(t *testing.T, out []byte) (uint32, mapi.GUID) {
 	t.Helper()
 	q := ndr.NewPull(out)
-	if _, err := q.Uint32(); err != nil { // server GUID referent
+	ref, err := q.Uint32() // server GUID referent
+	if err != nil {
 		t.Fatalf("referent: %v", err)
 	}
-	if _, err := q.Raw(16); err != nil { // server GUID flat bytes
+	if ref == 0 {
+		t.Fatal("server GUID referent is null, want non-zero")
+	}
+	raw, err := q.Raw(16) // server GUID flat bytes
+	if err != nil {
 		t.Fatalf("server guid: %v", err)
 	}
-	_, g, err := pullCtxHandleNDR(q)
+	if len(raw) != 16 {
+		t.Fatalf("server guid length = %d, want 16", len(raw))
+	}
+	ht, g, err := pullCtxHandleNDR(q)
 	if err != nil {
 		t.Fatalf("handle: %v", err)
+	}
+	if ht != 0 {
+		t.Errorf("handle type = %d, want 0", ht)
 	}
 	r, err := q.Uint32()
 	if err != nil {
@@ -97,7 +108,10 @@ func bindHandleGUID(t *testing.T, s *Server) mapi.GUID {
 	if fault != 0 {
 		t.Fatalf("bind fault %#x", fault)
 	}
-	_, g := bindResult(t, out)
+	result, g := bindResult(t, out)
+	if result != ecSuccess {
+		t.Fatalf("bind result = %#x, want ecSuccess", result)
+	}
 	return g
 }
 
@@ -126,9 +140,12 @@ func TestRPCBindUnicodeRejected(t *testing.T) {
 	if fault != 0 {
 		t.Fatalf("fault %#x", fault)
 	}
-	result, _ := bindResult(t, out)
+	result, handleGUID := bindResult(t, out)
 	if result != ecNotSupported {
 		t.Errorf("unicode result = %#x, want ecNotSupported", result)
+	}
+	if handleGUID != (mapi.GUID{}) {
+		t.Errorf("unicode handle guid = %+v, want zero", handleGUID)
 	}
 }
 

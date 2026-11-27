@@ -21,10 +21,10 @@ func TestGalUserPropsListOwner(t *testing.T) {
 		t.Errorf("PR_EMS_AB_OWNER = %#v, want the owner's permanent EntryID", v)
 	}
 
-	if _, ok := galUserProps(galUser{smtp: "open@hermex.test", dt: dtDistlist}).Get(mapi.PrEmsAbOwner); ok {
+	if galUserProps(galUser{smtp: "open@hermex.test", dt: dtDistlist}).Has(mapi.PrEmsAbOwner) {
 		t.Error("an ownerless list must not carry PR_EMS_AB_OWNER")
 	}
-	if _, ok := galUserProps(galUser{smtp: "alice@hermex.test", dt: dtMailuser, owner: "x@y.test"}).Get(mapi.PrEmsAbOwner); ok {
+	if galUserProps(galUser{smtp: "alice@hermex.test", dt: dtMailuser, owner: "x@y.test"}).Has(mapi.PrEmsAbOwner) {
 		t.Error("a mailbox user must not carry PR_EMS_AB_OWNER")
 	}
 }

@@ -31,9 +31,12 @@ func TestNDRRestrictionRejectsImpossibleChildCount(t *testing.T) {
 	p.UniquePtr(true)    // children referent
 	p.Uint32(0x7FFFFFFF) // conformant count == cres
 
-	_, err := pullRestrictionNDR(ndr.NewPull(p.Bytes()))
+	res, err := pullRestrictionNDR(ndr.NewPull(p.Bytes()))
 	if !errors.Is(err, ndr.ErrUnderflow) {
 		t.Fatalf("impossible child count gave %v, want the underflow refusal before allocation", err)
+	}
+	if res.Value != nil {
+		t.Errorf("refused restriction carried decoded children %v", res.Value)
 	}
 }
 
@@ -48,9 +51,12 @@ func TestNDRRestrictionRejectsDeepNesting(t *testing.T) {
 	}
 	pushExistResForTest(p, mapi.PrSmtpAddress)
 
-	_, err := pullRestrictionNDR(ndr.NewPull(p.Bytes()))
+	res, err := pullRestrictionNDR(ndr.NewPull(p.Bytes()))
 	if err == nil || !strings.Contains(err.Error(), "depth limit") {
 		t.Fatalf("deep NOT chain gave %v, want the depth-limit refusal", err)
+	}
+	if res.Value != nil {
+		t.Errorf("refused NOT chain carried a decoded child %v", res.Value)
 	}
 }
 

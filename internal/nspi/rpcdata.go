@@ -16,8 +16,7 @@ const galTableVersion uint32 = 1
 // carries. The GAL keeps no handle table, so the value is discarded; only its
 // well-formedness is checked.
 func pullHandle(p *ndr.Pull) error {
-	_, _, err := pullCtxHandleNDR(p)
-	return err
+	return skipCtxHandleNDR(p)
 }
 
 // pullPtrProptags reads a unique-pointer proptag array: the referent, then (if
@@ -53,6 +52,21 @@ func pullPtrMIDs(p *ndr.Pull) ([]uint32, error) {
 		return nil, nil
 	}
 	return pullU32ArrayNDR(p)
+}
+
+// skipPtrMIDs passes a unique-pointer MID array the request carries but the
+// operation ignores (a reserved field), decoding its framing as pullPtrMIDs does
+// so a truncated array still fails.
+func skipPtrMIDs(p *ndr.Pull) error {
+	ref, err := p.Uint32()
+	if err != nil || ref == 0 {
+		return err
+	}
+	n, err := pullU32ArrayHeaderNDR(p)
+	if err != nil {
+		return err
+	}
+	return p.Skip(int(n) * 4)
 }
 
 // pushPtrProptags writes a unique-pointer proptag array: present emits the
@@ -125,7 +139,7 @@ func (s *Server) rpcUpdateStat(stub []byte, caller string) ([]byte, uint32) {
 	}
 	deltaRequested := ref != 0
 	if deltaRequested {
-		if _, err := p.Int32(); err != nil { // the in delta value, ignored
+		if err := p.SkipAligned(4); err != nil { // the in delta value, ignored
 			return nil, ndr.FaultNdr
 		}
 	}
@@ -255,7 +269,7 @@ func (s *Server) rpcResortRestriction(stub []byte, caller string) ([]byte, uint3
 	if err != nil {
 		return nil, ndr.FaultNdr
 	}
-	if _, err := pullPtrMIDs(p); err != nil { // reserved outmids, discarded
+	if err := skipPtrMIDs(p); err != nil { // reserved outmids, ignored
 		return nil, ndr.FaultNdr
 	}
 	r := s.resortRestrictionCore(resortRestrictionRequest{stat: st, inmids: inmids}, caller)
@@ -517,7 +531,7 @@ func pullGetMatchesPreludeNDR(p *ndr.Pull) (getMatchesRequest, error) {
 	if err != nil {
 		return req, err
 	}
-	if _, err := pullPtrMIDs(p); err != nil {
+	if err := skipPtrMIDs(p); err != nil { // reserved MID array, ignored
 		return req, err
 	}
 	if err := p.SkipAligned(4); err != nil { // reserved

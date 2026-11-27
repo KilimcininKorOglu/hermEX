@@ -59,7 +59,7 @@ func (s *Server) getPropListCore(req getPropListRequest, caller string) getPropL
 		return getPropListResult{result: ecInvalidObject}
 	}
 	g := s.snapshot(caller)
-	if _, ok := g.byMID(req.mid); !ok {
+	if !g.hasMID(req.mid) {
 		return getPropListResult{result: ecInvalidObject}
 	}
 	return getPropListResult{result: ecSuccess, tags: defaultColumns}
@@ -76,7 +76,9 @@ func (s *Server) encodeGetPropList(result uint32, tags []mapi.PropTag) []byte {
 		p.Uint8(0)
 	} else {
 		p.Uint8(0xFF)
-		_ = p.PropTagsLong(tags)
+		if err := p.PropTagsLong(tags); err != nil {
+			return s.encodeGetPropList(ecError, nil)
+		}
 	}
 	p.Uint32(0) // AuxiliaryBufferSize
 	return p.Bytes()

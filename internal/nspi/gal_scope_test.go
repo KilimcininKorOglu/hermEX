@@ -13,7 +13,7 @@ import (
 // carries the caller through rather than reproving the SQL.
 type tenantGAL []string
 
-func (g tenantGAL) SearchGAL(caller, _ string, _ int, _ uint32) ([]directory.GALEntry, error) {
+func (g tenantGAL) SearchGAL(caller, query string, limit int, flags uint32) ([]directory.GALEntry, error) {
 	dom := domainOf(caller)
 	if dom == "" {
 		return nil, nil
@@ -96,7 +96,7 @@ func TestScopedMIDsAddressTheCallersOwnEntries(t *testing.T) {
 		t.Errorf("the first MId resolved to %+v, want the caller's own entry", u)
 	}
 	// One past the caller's own book must not resolve into anything.
-	if _, ok := g.byMID(midBase + 1); ok {
-		t.Error("an MId past the caller's address book resolved to an entry")
+	if u, ok := g.byMID(midBase + 1); ok {
+		t.Errorf("an MId past the caller's address book resolved to %q", u.smtp)
 	}
 }

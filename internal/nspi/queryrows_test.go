@@ -25,7 +25,7 @@ func TestPushPropertyRowForms(t *testing.T) {
 	b := p.Bytes()
 	wantEq(t, "the NONE row flag", b[0], uint8(propRowNone))
 	pull := ext.NewPull(b, abkFlags)
-	mustU8(t, pull, "flag")
+	wantEq(t, "the pulled NONE row flag", mustU8(t, pull, "flag"), uint8(propRowNone))
 	v, err := pull.PropValue(mapi.PtUnicode)
 	mustNoErr(t, "read the NONE row display name", err)
 	wantEq(t, "the NONE row display name", v, any("Alice"))
@@ -40,7 +40,7 @@ func TestPushPropertyRowForms(t *testing.T) {
 	b2 := p2.Bytes()
 	wantEq(t, "the FLAGGED row flag", b2[0], uint8(propRowFlagged))
 	pull2 := ext.NewPull(b2, abkFlags)
-	mustU8(t, pull2, "flag")
+	wantEq(t, "the pulled FLAGGED row flag", mustU8(t, pull2, "flag"), uint8(propRowFlagged))
 	present, err := pull2.FlaggedPropVal(mapi.PtUnicode)
 	mustNoErr(t, "read the present column", err)
 	wantEq(t, "the present column's flag", present.Flag, mapi.FlaggedAvailable)
@@ -113,23 +113,25 @@ func TestQueryRowsWalk(t *testing.T) {
 	if result := mustU32(t, p, "result"); result != ecSuccess {
 		t.Fatalf("result = %#x, want ecSuccess", result)
 	}
-	mustU8(t, p, "STAT marker")
+	wantEq(t, "the STAT marker", mustU8(t, p, "STAT marker"), uint8(0xFF))
 	outStat, err := pullStat(p)
 	mustNoErr(t, "decode the STAT", err)
 	wantEq(t, "cur_rec (all rows fit the count, so END_OF_TABLE)", outStat.curRec, uint32(midEndOfTable))
 	wantEq(t, "the STAT num_pos", outStat.numPos, uint32(3))
 	wantEq(t, "the STAT total_rec", outStat.totalRec, uint32(3))
 
-	mustU8(t, p, "rows marker")
+	wantEq(t, "the rows marker", mustU8(t, p, "rows marker"), uint8(0xFF))
 	cols, err := p.PropTagsLong()
 	mustNoErr(t, "decode the columns", err)
 	wantEq(t, "the column count (the default set)", len(cols), len(defaultColumns))
 	wantEq(t, "the row count", mustU32(t, p, "row count"), uint32(3))
 
 	row0 := decodeRow(t, p, cols)
-	v, _ := row0.Get(mapi.PrSmtpAddress)
+	v, ok := row0.Get(mapi.PrSmtpAddress)
+	wantEq(t, "row[0] SMTP present", ok, true)
 	wantEq(t, "row[0] SMTP (address-sorted first)", v, any("alice@hermex.test"))
-	v, _ = row0.Get(mapi.PrAddrType)
+	v, ok = row0.Get(mapi.PrAddrType)
+	wantEq(t, "row[0] ADDRTYPE present", ok, true)
 	wantEq(t, "row[0] ADDRTYPE", v, any("SMTP"))
 }
 
@@ -139,25 +141,26 @@ func TestQueryRowsExplicit(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test")
 	body := buildQueryRows(stat{codePage: 1252}, []uint32{midBase + 1, 0x9999}, 10, nil)
 	p := ext.NewPull(s.QueryRows(body, testCaller), abkFlags)
-	mustU32(t, p, "status")
+	wantEq(t, "the status", mustU32(t, p, "status"), uint32(0))
 	if result := mustU32(t, p, "result"); result != ecSuccess {
 		t.Fatalf("result = %#x", result)
 	}
-	mustU8(t, p, "STAT marker")
-	_, err := pullStat(p)
+	wantEq(t, "the STAT marker", mustU8(t, p, "STAT marker"), uint8(0xFF))
+	outStat, err := pullStat(p)
 	mustNoErr(t, "read the STAT", err)
-	mustU8(t, p, "rows marker")
+	wantEq(t, "the STAT code page", outStat.codePage, uint32(1252))
+	wantEq(t, "the rows marker", mustU8(t, p, "rows marker"), uint8(0xFF))
 	cols, err := p.PropTagsLong()
 	mustNoErr(t, "read the columns", err)
 	if n := mustU32(t, p, "row count"); n != 2 {
 		t.Fatalf("row count = %d, want 2 (one per explicit id)", n)
 	}
 	known := decodeRow(t, p, cols)
-	if v, _ := known.Get(mapi.PrSmtpAddress); v != "bob@hermex.test" {
-		t.Errorf("explicit MId 0x11 SMTP = %v, want bob", v)
+	if v, ok := known.Get(mapi.PrSmtpAddress); !ok || v != "bob@hermex.test" {
+		t.Errorf("explicit MId 0x11 SMTP = %v (ok=%v), want bob", v, ok)
 	}
 	unknown := decodeRow(t, p, cols)
-	if _, ok := unknown.Get(mapi.PrSmtpAddress); ok {
+	if unknown.Has(mapi.PrSmtpAddress) {
 		t.Error("unknown MId returned a value, want an all-error row")
 	}
 }
@@ -174,11 +177,11 @@ func TestUpdateStatAdvance(t *testing.T) {
 	p.Uint32(0) // cb_auxin
 
 	pr := ext.NewPull(s.UpdateStat(p.Bytes(), testCaller), abkFlags)
-	mustU32(t, pr, "status")
+	wantEq(t, "the status", mustU32(t, pr, "status"), uint32(0))
 	if result := mustU32(t, pr, "result"); result != ecSuccess {
 		t.Fatalf("result = %#x", result)
 	}
-	mustU8(t, pr, "STAT marker")
+	wantEq(t, "the STAT marker", mustU8(t, pr, "STAT marker"), uint8(0xFF))
 	st, err := pullStat(pr)
 	mustNoErr(t, "read the STAT", err)
 	if st.numPos != 2 {
@@ -201,7 +204,7 @@ func TestQueryColumns(t *testing.T) {
 	s := testGAL("alice@hermex.test")
 	body := []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} // reserved + flags + cb_auxin
 	p := ext.NewPull(s.QueryColumns(body), abkFlags)
-	mustU32(t, p, "status")
+	wantEq(t, "the status", mustU32(t, p, "status"), uint32(0))
 	if result := mustU32(t, p, "result"); result != ecSuccess {
 		t.Fatalf("result = %#x", result)
 	}
@@ -220,7 +223,7 @@ func TestQueryRowsZeroCount(t *testing.T) {
 	s := testGAL("alice@hermex.test")
 	body := buildQueryRows(stat{codePage: 1252}, nil, 0, nil)
 	p := ext.NewPull(s.QueryRows(body, testCaller), abkFlags)
-	mustU32(t, p, "status")
+	wantEq(t, "the status", mustU32(t, p, "status"), uint32(0))
 	if result := mustU32(t, p, "result"); result != ecInvalidParam {
 		t.Errorf("count=0 result = %#x, want ecInvalidParam", result)
 	}

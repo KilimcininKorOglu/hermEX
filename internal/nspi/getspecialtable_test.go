@@ -70,6 +70,20 @@ func TestGetSpecialTable(t *testing.T) {
 	wantEq(t, "the trailing bytes", p.Remaining(), 0)
 }
 
+// TestGetSpecialTableRefusesATruncatedBody proves a request cut short inside its
+// STAT answers ecError with no row set, rather than a hierarchy built from a
+// half-read request.
+func TestGetSpecialTableRefusesATruncatedBody(t *testing.T) {
+	s := NewServer(nil, testGUID)
+	full := buildGetSpecialTable(1252)
+	p := ext.NewPull(s.GetSpecialTable(full[:10]), abkFlags)
+	wantEq(t, "the status", mustU32(t, p, "status"), uint32(0))
+	wantEq(t, "the result", mustU32(t, p, "result"), uint32(ecError))
+	wantEq(t, "the code page", mustU32(t, p, "codepage"), uint32(0))
+	wantEq(t, "the version marker (absent)", mustU8(t, p, "version marker"), uint8(0))
+	wantEq(t, "the HasRows flag", mustU8(t, p, "HasRows"), uint8(0))
+}
+
 // readContainerRows decodes the hierarchy table's rows, requiring the count.
 func readContainerRows(t *testing.T, p *ext.Pull, want int) []mapi.PropertyValues {
 	t.Helper()
@@ -117,15 +131,25 @@ func wantGALRow(t *testing.T, row mapi.PropertyValues) {
 // wantNamedListRow checks one named address list's container row.
 func wantNamedListRow(t *testing.T, row mapi.PropertyValues, al addressList) {
 	t.Helper()
-	id, _ := row.Get(mapi.PrEmsAbContainerID)
+	id, ok := row.Get(mapi.PrEmsAbContainerID)
+	if !ok {
+		t.Fatalf("%q missing PR_EMS_AB_CONTAINERID", al.name)
+	}
 	wantEq(t, al.name+" container id", id, any(al.id))
-	name, _ := row.Get(mapi.PrDisplayName)
+	name, ok := row.Get(mapi.PrDisplayName)
+	if !ok {
+		t.Fatalf("%q missing PR_DISPLAY_NAME", al.name)
+	}
 	wantEq(t, al.name+" display name", name, any(al.name))
 	eid, ok := row.Get(mapi.PrEntryID)
 	if !ok {
 		t.Fatalf("%q missing PR_ENTRYID", al.name)
 	}
-	if b, _ := eid.([]byte); bytes.Equal(b, permanentEntryID(dtContainer, "/")) {
+	b, isBin := eid.([]byte)
+	if !isBin {
+		t.Fatalf("%q PR_ENTRYID is %T, want []byte", al.name, eid)
+	}
+	if bytes.Equal(b, permanentEntryID(dtContainer, "/")) {
 		t.Errorf("%q shares the GAL EntryID; each container needs a distinct one", al.name)
 	}
 }

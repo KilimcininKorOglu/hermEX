@@ -106,6 +106,15 @@ func pullCtxHandleNDR(p *ndr.Pull) (handleType uint32, guid mapi.GUID, err error
 	return handleType, guid, err
 }
 
+// skipCtxHandleNDR passes an NSPI context handle the server keeps no table for:
+// the 4-byte handle type, aligned as reading it would be, then the 16-byte GUID.
+func skipCtxHandleNDR(p *ndr.Pull) error {
+	if err := p.SkipAligned(4); err != nil {
+		return err
+	}
+	return p.Skip(16)
+}
+
 // pushU32ArrayNDR writes a PropertyTagArray_r / MID array ([MS-OXNSPI] 2.3.2):
 // a conformant max_count of N+1, then cValues(N) + offset(0) + length(N) + the N
 // 4-byte elements. The deliberate N+1 conformance size matches the reference and
@@ -280,38 +289,54 @@ func boolByte(v bool) uint8 {
 	return 0
 }
 
+// pushStringContentNDR writes a string value's conformant-varying content:
+// UTF-16LE code units for PtUnicode, 8-bit bytes for PtString8, each with its
+// terminator. A value that is not a string is refused rather than written empty.
+func pushStringContentNDR(p *ndr.Push, pt mapi.PropType, value any) error {
+	v, ok := value.(string)
+	if !ok {
+		return propTypeError(pt.String(), value)
+	}
+	var b []byte
+	var n uint32
+	if pt == mapi.PtUnicode {
+		b = encodeUTF16LE(v)
+		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
+		n = uint32(len(b) / 2) // code units, terminator included
+	} else {
+		b = append([]byte(v), 0) // NUL terminator
+		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
+		n = uint32(len(b))
+	}
+	p.Uint32(n) // max_count
+	p.Uint32(0) // offset
+	p.Uint32(n) // actual_count
+	p.Raw(b)
+	return nil
+}
+
 // pushPropValContentNDR writes the content half of a PROPERTY_VALUE: the
 // deferred bytes of a pointer type (a conformant-varying string or a conformant
 // binary). Scalars wrote everything in the header pass, so they emit nothing.
 func pushPropValContentNDR(p *ndr.Push, tag mapi.PropTag, value any) error {
 	switch tag.Type() {
-	case mapi.PtUnicode:
-		v, _ := value.(string)
-		b := encodeUTF16LE(v)
-		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
-		n := uint32(len(b) / 2) // code units, terminator included
-		p.Uint32(n)             // max_count
-		p.Uint32(0)             // offset
-		p.Uint32(n)             // actual_count
-		p.Raw(b)
-	case mapi.PtString8:
-		v, _ := value.(string)
-		b := append([]byte(v), 0) // NUL terminator
-		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
-		n := uint32(len(b))
-		p.Uint32(n) // max_count
-		p.Uint32(0) // offset
-		p.Uint32(n) // actual_count
-		p.Raw(b)
+	case mapi.PtUnicode, mapi.PtString8:
+		return pushStringContentNDR(p, tag.Type(), value)
 	case mapi.PtBinary:
-		v, _ := value.([]byte)
+		v, ok := value.([]byte)
+		if !ok {
+			return propTypeError("PtBinary", value)
+		}
 		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 		p.Uint32(uint32(len(v))) // conformant max_count
 		p.Raw(v)
 	case mapi.PtMvBinary:
 		// BINARY_ARRAY: max_count, then every entry's header (cb + referent),
 		// then every entry's content (conformant max_count + raw bytes).
-		v, _ := value.([][]byte)
+		v, ok := value.([][]byte)
+		if !ok {
+			return propTypeError("PtMvBinary", value)
+		}
 		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 		p.Uint32(uint32(len(v))) // max_count = count
 		for _, b := range v {
@@ -467,7 +492,7 @@ func pullConfBinaryNDR(p *ndr.Pull) ([]byte, error) {
 func pushRowSetNDR(p *ndr.Push, cols []mapi.PropTag, rows []mapi.PropertyValues) error {
 	projected := make([]mapi.PropertyValues, len(rows))
 	for i, r := range rows {
-		projected[i], _ = projectProps(r, cols)
+		projected[i] = projectRow(r, cols)
 	}
 	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	crows := uint32(len(projected))
@@ -500,7 +525,7 @@ func pushRowSetNDR(p *ndr.Push, cols []mapi.PropTag, rows []mapi.PropertyValues)
 // header (reserved + cValues + referent) then content (the value array). It
 // projects the row against cols like pushRowSetNDR does per row.
 func pushPropertyRowNDR(p *ndr.Push, cols []mapi.PropTag, row mapi.PropertyValues) error {
-	vals, _ := projectProps(row, cols)
+	vals := projectRow(row, cols)
 	p.Uint32(0) // reserved
 	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	p.Uint32(uint32(len(vals))) // cValues

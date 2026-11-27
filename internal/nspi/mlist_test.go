@@ -22,7 +22,7 @@ func (m memberGAL) SearchGAL(string, string, int, uint32) ([]directory.GALEntry,
 	return m.entries, nil
 }
 
-func (m memberGAL) ExpandMList(listAddr, _ string) ([]string, directory.MListResult, error) {
+func (m memberGAL) ExpandMList(listAddr, from string) ([]string, directory.MListResult, error) {
 	mem, ok := m.members[strings.ToLower(listAddr)]
 	if !ok {
 		return nil, directory.MListNone, nil
@@ -85,7 +85,10 @@ func TestGetMatchesMemberOfNonList(t *testing.T) {
 	}
 	s := NewServer(g, testGUID)
 	snap := s.snapshot(testCaller)
-	aliceMID, _ := snap.byAddress("alice@hermex.test")
+	aliceMID, ok := snap.byAddress("alice@hermex.test")
+	if !ok {
+		t.Fatal("alice not found in the GAL")
+	}
 
 	r := s.getMatchesCore(getMatchesRequest{
 		stat: stat{

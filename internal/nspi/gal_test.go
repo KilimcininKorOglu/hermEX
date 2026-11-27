@@ -27,8 +27,8 @@ func TestDNRoundTrip(t *testing.T) {
 			t.Errorf("dnToSMTP(userDN(%q)) = (%q, %v), want (%q, true)", smtp, got, ok, smtp)
 		}
 	}
-	if _, ok := dnToSMTP("garbage-without-cn"); ok {
-		t.Error("dnToSMTP accepted a non-DN string")
+	if addr, ok := dnToSMTP("garbage-without-cn"); ok {
+		t.Errorf("dnToSMTP accepted a non-DN string as %q", addr)
 	}
 }
 
@@ -52,11 +52,11 @@ func TestSnapshotMIDs(t *testing.T) {
 	if u, ok := g.byMID(midBase + 1); !ok || u.smtp != "bob@hermex.test" {
 		t.Errorf("byMID(0x11) = (%v, %v), want bob", u, ok)
 	}
-	if _, ok := g.byMID(0x5); ok {
-		t.Error("byMID resolved a reserved MId")
+	if u, ok := g.byMID(0x5); ok {
+		t.Errorf("byMID resolved a reserved MId to %q", u.smtp)
 	}
-	if _, ok := g.byMID(midBase + 99); ok {
-		t.Error("byMID resolved an out-of-range MId")
+	if u, ok := g.byMID(midBase + 99); ok {
+		t.Errorf("byMID resolved an out-of-range MId to %q", u.smtp)
 	}
 }
 
@@ -129,8 +129,8 @@ func TestGalUserPropsCarryAPrintableName(t *testing.T) {
 		"":             "cagla",
 	} {
 		bag := galUserProps(galUser{mid: midBase, display: display, smtp: "cagla@hermex.test"})
-		if got, _ := bag.Get(mapi.PrAddressBookDisplayNamePrintable); got != want {
-			t.Errorf("display %q: printable name = %v, want %q", display, got, want)
+		if got, ok := bag.Get(mapi.PrAddressBookDisplayNamePrintable); !ok || got != want {
+			t.Errorf("display %q: printable name = %v (ok=%v), want %q", display, got, ok, want)
 		}
 	}
 }

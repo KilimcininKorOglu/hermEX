@@ -24,6 +24,18 @@ func (s *Server) SeekEntries(body []byte, caller string) []byte {
 	return s.encodeSeekEntries(r.result, r.stat, r.cols, r.rows)
 }
 
+// seekTarget reads the display name a SeekEntries target names. The target seeks
+// on the display name, so either the Unicode or the ANSI variant is accepted (same
+// property ID, the reference checks both); any other property, or a display-name
+// tag carrying no string, names no position and reports false.
+func seekTarget(target mapi.TaggedPropVal) (string, bool) {
+	if target.Tag.ID() != mapi.PrDisplayName.ID() {
+		return "", false
+	}
+	name, isText := target.Value.(string)
+	return name, isText
+}
+
 // seekEntriesCore runs the SeekEntries semantics on a decoded request,
 // transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it.
 func (s *Server) seekEntriesCore(req seekEntriesRequest, caller string) rowsetResult {
@@ -34,12 +46,10 @@ func (s *Server) seekEntriesCore(req seekEntriesRequest, caller string) rowsetRe
 	if !isDisplayNameSort(st.sortType) {
 		return rowsetResult{result: ecError, stat: st}
 	}
-	// The target seeks on the display name; accept either the Unicode or the
-	// ANSI variant (same property ID, the reference checks both).
-	if req.target.Tag.ID() != mapi.PrDisplayName.ID() {
+	target, isText := seekTarget(req.target)
+	if !isText {
 		return rowsetResult{result: ecError, stat: st}
 	}
-	target, _ := req.target.Value.(string)
 	cols := req.columns
 	if !req.hasCols || len(cols) == 0 {
 		cols = defaultColumns
@@ -137,7 +147,7 @@ func pullSeekEntries(body []byte) (seekEntriesRequest, error) {
 			return r, err
 		}
 	}
-	tags, _, err := pullOptionalPropTags(p)
+	tags, err := pullOptionalColumns(p)
 	if err != nil {
 		return r, err
 	}
@@ -166,7 +176,9 @@ func (s *Server) encodeSeekEntries(result uint32, st stat, cols []mapi.PropTag, 
 		p.Uint8(0)
 	} else {
 		p.Uint8(0xFF)
-		_ = pushColRow(p, cols, rows)
+		if err := pushColRow(p, cols, rows); err != nil {
+			return s.encodeSeekEntries(ecError, st, nil, nil)
+		}
 	}
 	p.Uint32(0) // AuxiliaryBufferSize
 	return p.Bytes()
@@ -199,8 +211,8 @@ func (s *Server) compareMidsCore(req compareMidsRequest, caller string) compareM
 		return compareMidsResult{result: ecNotSupported}
 	}
 	g := s.snapshot(caller)
-	_, ok1 := g.byMID(req.mid1)
-	_, ok2 := g.byMID(req.mid2)
+	ok1 := g.hasMID(req.mid1)
+	ok2 := g.hasMID(req.mid2)
 	if !ok1 || !ok2 {
 		return compareMidsResult{result: ecError}
 	}
@@ -295,7 +307,7 @@ func (s *Server) resortRestrictionCore(req resortRestrictionRequest, caller stri
 	var out []uint32
 	found := false
 	for _, mid := range req.inmids {
-		if _, ok := g.byMID(mid); ok {
+		if g.hasMID(mid) {
 			out = append(out, mid)
 			if mid == st.curRec {
 				found = true
@@ -364,7 +376,9 @@ func (s *Server) encodeResortRestriction(result uint32, st stat, mids []uint32) 
 		p.Uint8(0)
 	} else {
 		p.Uint8(0xFF)
-		_ = midArray(p, mids)
+		if err := midArray(p, mids); err != nil {
+			return s.encodeResortRestriction(ecError, st, nil)
+		}
 	}
 	p.Uint32(0) // AuxiliaryBufferSize
 	return p.Bytes()
