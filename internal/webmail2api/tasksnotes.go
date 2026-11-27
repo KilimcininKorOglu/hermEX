@@ -284,9 +284,19 @@ func (s *Server) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks})
 }
 
+// validTaskInput reports whether a task's percent complete (0..100, MS-OXOTASK
+// PidLidPercentComplete 0.0..1.0) and importance (0..2, PR_IMPORTANCE) are in
+// range.
+func validTaskInput(in taskJSON) bool {
+	if in.Percent < 0 || in.Percent > 100 {
+		return false
+	}
+	return in.Priority == nil || (*in.Priority >= 0 && *in.Priority <= 2)
+}
+
 func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	var in taskJSON
-	if err := decodeJSON(r, &in); err != nil {
+	if err := decodeJSON(r, &in); err != nil || !validTaskInput(in) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
@@ -309,7 +319,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	var in taskJSON
-	if err := decodeJSON(r, &in); err != nil {
+	if err := decodeJSON(r, &in); err != nil || !validTaskInput(in) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
