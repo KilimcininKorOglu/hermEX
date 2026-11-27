@@ -43,6 +43,7 @@ func TestAnUnreadableGiveUpReportIsReported(t *testing.T) {
 	wantContains(t, err.Error(), "give-up report: read the message", "the object read failure")
 	wantContains(t, err.Error(), "give-up report: read the wire copy", "the wire-copy read failure")
 	wantEq(t, gaveUp, 0, "give-up hook calls with no wire copy to report")
+	wantEq(t, count(t, st, int64(mapi.PrivateFIDDraft)), 0, "Drafts messages after an unreadable give-up")
 }
 
 // TestAReadableGiveUpReportStillReachesTheSender keeps the reporting path intact:
@@ -69,8 +70,6 @@ func TestAReadableGiveUpReportStillReachesTheSender(t *testing.T) {
 	}
 	wantEq(t, gaveUp, 1, "give-up hook calls")
 	wantContains(t, string(gotRaw), "Subject: scheduled", "the report carries the abandoned message")
-	if len(gotRecipients) == 0 {
-		t.Error("the report names no recipient although the message could be read")
-	}
+	wantRecipients(t, gotRecipients, "the give-up report")
 	wantEq(t, count(t, st, int64(mapi.PrivateFIDOutbox)), 0, "Outbox messages after the return")
 }
