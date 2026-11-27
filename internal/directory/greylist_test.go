@@ -2,6 +2,7 @@ package directory
 
 import (
 	"database/sql"
+	"strings"
 	"testing"
 )
 
@@ -58,6 +59,31 @@ func TestGreylistLifecycle(t *testing.T) {
 	other, found := mustGreylistGet(t, d, ip, from, "v@local.example")
 	wantEq(t, "other triplet found", found, true)
 	wantEq(t, "the other recipient's triplet confirmed", other.Confirmed, false)
+}
+
+// TestGreylistDefersAHostileSender gives the triplet a MAIL FROM a spammer
+// controls: bytes that are not UTF-8 and a path longer than the 320-character
+// column. The mta greylister fails open on a store error, so a refused write
+// would let that sender skip the delay; each triplet must be recorded and read
+// back as the same, still unconfirmed, triplet.
+func TestGreylistDefersAHostileSender(t *testing.T) {
+	d, db := setupGreylist(t)
+	const ip, to = "203.0.113.0/24", "u@local.example"
+	for name, from := range map[string]string{
+		"not UTF-8":  "spam\xff\xfe@ext.example",
+		"overlong":   strings.Repeat("a", 400) + "@ext.example",
+		"multi-byte": strings.Repeat("ş", 400) + "@ext.example",
+	} {
+		mustNoErr(t, "record the first contact of a "+name+" sender", d.GreylistUpsertSeen(ip, from, to, 1000))
+		g, found := mustGreylistGet(t, d, ip, from, to)
+		wantEq(t, "the "+name+" triplet is found", found, true)
+		wantEq(t, "the "+name+" triplet", g, Greylisted{FirstSeen: 1000, Confirmed: false})
+		mustNoErr(t, "confirm the "+name+" triplet", d.GreylistConfirm(ip, from, to, 2000))
+		g, found = mustGreylistGet(t, d, ip, from, to)
+		wantEq(t, "the confirmed "+name+" triplet is found", found, true)
+		wantEq(t, "the "+name+" triplet is confirmed", g.Confirmed, true)
+	}
+	wantRows(t, db, "one triplet per hostile sender", 3, `SELECT COUNT(*) FROM greylist_triplets`)
 }
 
 // TestGreylistConfirmNeedsAFirstContact proves a confirm for a triplet that was

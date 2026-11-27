@@ -16,6 +16,7 @@ type Greylisted struct {
 // seen. ipKey is the sender's masked network; sender and recipient are normalised
 // by the caller.
 func (d *SQLDirectory) GreylistGet(ipKey, sender, recipient string) (Greylisted, bool, error) {
+	sender, recipient = greylistAddr(sender), greylistAddr(recipient)
 	var g Greylisted
 	err := d.db.QueryRow(
 		`SELECT first_seen, confirmed FROM greylist_triplets WHERE ip_key = ? AND sender = ? AND recipient = ?`,
@@ -32,6 +33,7 @@ func (d *SQLDirectory) GreylistGet(ipKey, sender, recipient string) (Greylisted,
 // GreylistUpsertSeen records a first contact (or refreshes an existing triplet's
 // last-seen time) without confirming it.
 func (d *SQLDirectory) GreylistUpsertSeen(ipKey, sender, recipient string, now int64) error {
+	sender, recipient = greylistAddr(sender), greylistAddr(recipient)
 	_, err := d.db.Exec(
 		`INSERT INTO greylist_triplets (ip_key, sender, recipient, first_seen, last_seen, confirmed)
 		 VALUES (?, ?, ?, ?, ?, 0)
@@ -43,11 +45,19 @@ func (d *SQLDirectory) GreylistUpsertSeen(ipKey, sender, recipient string, now i
 // GreylistConfirm marks a triplet confirmed (a retry passed the delay) so future
 // mail from it is accepted without deferral.
 func (d *SQLDirectory) GreylistConfirm(ipKey, sender, recipient string, now int64) error {
+	sender, recipient = greylistAddr(sender), greylistAddr(recipient)
 	_, err := d.db.Exec(
 		`UPDATE greylist_triplets SET confirmed = 1, last_seen = ? WHERE ip_key = ? AND sender = ? AND recipient = ?`,
 		now, ipKey, sender, recipient)
 	return err
 }
+
+// greylistAddr fits an envelope address to its VARCHAR(320) column. The sender
+// writes MAIL FROM, and the mta greylister fails open on a store error, so bytes
+// that are not UTF-8 or an overlong path must still key a triplet: otherwise that
+// sender would skip the delay. Get, UpsertSeen and Confirm all apply it, so each
+// reads the key the other two wrote.
+func greylistAddr(s string) string { return clipText(s, 320) }
 
 // PruneGreylist bounds the table: it removes unconfirmed triplets first seen before
 // unconfirmedBefore (a deferral that never retried) and confirmed triplets not seen
