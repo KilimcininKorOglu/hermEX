@@ -73,4 +73,12 @@ func TestRecoveryCodeRefusesAnythingElse(t *testing.T) {
 	if got := MatchRecoveryCode(nil, "ANY"); got != -1 {
 		t.Errorf("an empty code list matched: %d", got)
 	}
+	// A list holding the hash of the empty string, as a corrupted or forged row
+	// would, must still refuse a login that sent no code.
+	poisoned := append(append([]string{}, hashes...), HashRecoveryCode(""))
+	for _, empty := range []string{"", "   "} {
+		if got := MatchRecoveryCode(poisoned, empty); got != -1 {
+			t.Errorf("%q matched the stored empty-string hash at index %d", empty, got)
+		}
+	}
 }
