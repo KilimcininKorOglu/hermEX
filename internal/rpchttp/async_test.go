@@ -112,11 +112,51 @@ func TestAsyncWaitExRejectsForeignHandles(t *testing.T) {
 		t.Errorf("unknown-handle wait = (flags %#x, result %#x), want (0, ecRejected)", flags, result)
 	}
 
-	// Valid handle, wrong user.
-	wout, fault = async.Handle(&Session{User: "bob@hermex.test"}, opEcDoAsyncWaitEx, buildAsyncWaitExStub(acxh))
+	// Valid handle, wrong user with a live transport must be refused without parking.
+	bobVC := testVconn()
+	wout, fault = async.Handle(&Session{User: "bob@hermex.test", vc: bobVC, maxFrag: 4096}, opEcDoAsyncWaitEx, buildAsyncWaitExStub(acxh))
 	wantEq(t, fault, uint32(0), "foreign-user wait fault")
 	if flags, result := parseAsyncWaitExOut(t, wout); flags != 0 || result != ecRejected {
 		t.Errorf("foreign-user wait = (flags %#x, result %#x), want (0, ecRejected)", flags, result)
+	}
+	s, ok := ems.lookup(user, cxh.GUID)
+	wantTrue(t, ok, "alice session remains live after foreign wait")
+	wantFalse(t, s.waiting.Load(), "foreign wait must not park on alice session")
+	select {
+	case pdu := <-bobVC.out:
+		t.Errorf("refused foreign wait sent %d bytes on OUT channel", len(pdu))
+	default:
+	}
+}
+
+// TestAsyncHostileInputs proves AsyncEMSMDB.Handle and EcDoAsyncConnectEx reject
+// unknown opnums and truncated stubs without altering session state.
+func TestAsyncHostileInputs(t *testing.T) {
+	ems := NewEMSMDB(nil)
+	async := NewAsyncEMSMDB(ems)
+	const user = "alice@hermex.test"
+	cxh := connectAt(t, ems, user, provisionedDir(t))
+	s, ok := ems.lookup(user, cxh.GUID)
+	wantTrue(t, ok, "session present before hostile calls")
+
+	vc := testVconn()
+	sess := &Session{User: user, vc: vc, maxFrag: 4096}
+	if _, fault := async.Handle(sess, 99, nil); fault != ndr.FaultOpRngError {
+		t.Errorf("unknown async opnum fault = %#x, want FaultOpRngError", fault)
+	}
+	for _, stub := range [][]byte{nil, make([]byte, 20)} {
+		if _, fault := async.Handle(sess, opEcDoAsyncWaitEx, stub); fault != ndr.FaultNdr {
+			t.Errorf("truncated async wait (%d bytes) fault = %#x, want FaultNdr", len(stub), fault)
+		}
+	}
+	if _, fault := ems.Handle(sess, opEcDoAsyncConnectEx, make([]byte, 12)); fault != ndr.FaultNdr {
+		t.Errorf("truncated async connect fault = %#x, want FaultNdr", fault)
+	}
+	wantFalse(t, s.waiting.Load(), "hostile calls must not set waiting")
+	select {
+	case pdu := <-vc.out:
+		t.Errorf("hostile async calls sent %d bytes on OUT channel", len(pdu))
+	default:
 	}
 }
 
@@ -136,6 +176,14 @@ func TestAsyncWaitExNoNotification(t *testing.T) {
 	}
 	if flags, result := parseAsyncWaitExOut(t, wout); flags != 0 || result != ecSuccess {
 		t.Errorf("quiet-mailbox wait = (flags %#x, result %#x), want (0, ecSuccess)", flags, result)
+	}
+}
+
+// closeStore closes an opened mailbox store and records any close error on t.
+func closeStore(t *testing.T, st *objectstore.Store) {
+	t.Helper()
+	if err := st.Close(); err != nil {
+		t.Errorf("close store: %v", err)
 	}
 }
 
@@ -166,7 +214,7 @@ func TestAsyncWaitExNotificationPending(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer st.Close()
+	defer closeStore(t, st)
 	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0); err != nil {
 		t.Fatalf("append: %v", err)
 	}
@@ -274,7 +322,7 @@ func TestAsyncWaitExParksThenWakesOnDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer st.Close()
+	defer closeStore(t, st)
 	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0); err != nil {
 		t.Fatalf("append: %v", err)
 	}
@@ -363,7 +411,9 @@ func TestAsyncWaitExConcurrentParkAndExecute(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		for range 20 {
-			ems.Handle(&Session{User: user}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, openFolderExecuteBuffer(logonH)))
+			if _, fault := ems.Handle(&Session{User: user}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, openFolderExecuteBuffer(logonH))); fault != 0 {
+				t.Errorf("concurrent Execute fault = %#x", fault)
+			}
 		}
 	})
 	wg.Go(func() {
@@ -372,7 +422,7 @@ func TestAsyncWaitExConcurrentParkAndExecute(t *testing.T) {
 			t.Errorf("open the mailbox to deliver: %v", err)
 			return
 		}
-		defer st.Close()
+		defer closeStore(t, st)
 		if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0); err != nil {
 			t.Errorf("deliver the waking message: %v", err)
 		}
@@ -381,7 +431,10 @@ func TestAsyncWaitExConcurrentParkAndExecute(t *testing.T) {
 
 	// Drain the parked reply if the delivery woke it (either outcome is race-clean).
 	select {
-	case <-vc.out:
+	case pdu := <-vc.out:
+		if _, result := parseAsyncWaitExOut(t, responseStub(t, pdu)); result != ecSuccess {
+			t.Errorf("parked reply result = %#x, want ecSuccess", result)
+		}
 	case <-time.After(time.Second):
 	}
 }
