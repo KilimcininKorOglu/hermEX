@@ -12,18 +12,16 @@ import (
 // mixedWith builds a multipart/mixed message whose parts are given verbatim, in
 // the order given.
 func mixedWith(parts ...string) []byte {
-	var b strings.Builder
-	b.WriteString("From: a@b.com\r\n" +
+	head := "From: a@b.com\r\n" +
 		"Subject: Ordered\r\n" +
 		"MIME-Version: 1.0\r\n" +
 		"Content-Type: multipart/mixed; boundary=\"BB\"\r\n" +
-		"\r\n")
-	for _, p := range parts {
-		b.WriteString("--BB\r\n")
-		b.WriteString(p)
+		"\r\n"
+	var body string
+	if len(parts) > 0 {
+		body = "--BB\r\n" + strings.Join(parts, "--BB\r\n")
 	}
-	b.WriteString("--BB--\r\n")
-	return []byte(b.String())
+	return []byte(head + body + "--BB--\r\n")
 }
 
 const (
@@ -93,8 +91,8 @@ func TestJoinedHTMLPartsAreLabelledUTF8(t *testing.T) {
 	if bytes.Count(html, []byte("grüße")) != 2 {
 		t.Errorf("PR_HTML = %q, want both parts transcoded to UTF-8", html)
 	}
-	if v, _ := propInt32(msg.Props, mapi.PrInternetCodepage); v != 65001 {
-		t.Errorf("PR_INTERNET_CPID = %d, want 65001 (utf-8)", v)
+	if v, ok := propInt32(msg.Props, mapi.PrInternetCodepage); !ok || v != 65001 {
+		t.Errorf("PR_INTERNET_CPID = %d (set %v), want 65001 (utf-8)", v, ok)
 	}
 }
 
