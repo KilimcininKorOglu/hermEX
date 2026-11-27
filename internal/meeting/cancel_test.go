@@ -72,6 +72,21 @@ func theMeeting(t *testing.T, st *objectstore.Store) mapi.PropertyValues {
 	return pv
 }
 
+// bytesProp reads a binary property and stops the test when it is missing or of
+// another type.
+func bytesProp(t *testing.T, pv mapi.PropertyValues, tag mapi.PropTag) []byte {
+	t.Helper()
+	v, ok := pv.Get(tag)
+	if !ok {
+		t.Fatalf("property %#x is not set", uint32(tag))
+	}
+	b, ok := v.([]byte)
+	if !ok {
+		t.Fatalf("property %#x holds %T, want []byte", uint32(tag), v)
+	}
+	return b
+}
+
 // cancelled reports whether the meeting is marked cancelled, and its free/busy.
 func cancelled(t *testing.T, st *objectstore.Store) (bool, int32) {
 	t.Helper()
@@ -172,8 +187,7 @@ func TestInstanceCancellationKeepsTheSeries(t *testing.T) {
 	if isCancelled, _ := cancelled(t, st); isCancelled {
 		t.Error("an instance cancellation cancelled the whole series")
 	}
-	v, _ := theMeeting(t, st).Get(mapi.PrIcalOriginal)
-	ical, _ := v.([]byte)
+	ical := bytesProp(t, theMeeting(t, st), mapi.PrIcalOriginal)
 	for _, want := range []string{"RRULE:FREQ=DAILY;COUNT=3", "RECURRENCE-ID:20260621T100000Z", "STATUS:CANCELLED"} {
 		if !strings.Contains(string(ical), want) {
 			t.Errorf("series lacks %q:\n%s", want, ical)
@@ -189,8 +203,7 @@ func TestCancelledInstanceIsNotRecreated(t *testing.T) {
 	deliverScheduling(t, accounts, "organizer@hermex.test", "CANCEL",
 		"RECURRENCE-ID:20260621T100000Z\r\nDTSTART:20260621T100000Z\r\nDTEND:20260621T110000Z\r\nSEQUENCE:1\r\n")
 
-	v, _ := theMeeting(t, st).Get(mapi.PrIcalOriginal)
-	if ical, _ := v.([]byte); strings.Contains(string(ical), "RECURRENCE-ID") {
+	if ical := bytesProp(t, theMeeting(t, st), mapi.PrIcalOriginal); strings.Contains(string(ical), "RECURRENCE-ID") {
 		t.Errorf("an excluded instance came back as an override:\n%s", ical)
 	}
 }
@@ -238,9 +251,7 @@ func deletedDays(t *testing.T, st *objectstore.Store, id int64) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, _ := pv.Get(tag)
-	blob, _ := v.([]byte)
-	p, err := recurrence.DecodeAppointment(blob)
+	p, err := recurrence.DecodeAppointment(bytesProp(t, pv, tag))
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -260,26 +271,11 @@ func TestInstanceCancellationReachesTheRecurrenceBlob(t *testing.T) {
 	deliverScheduling(t, accounts, "organizer@hermex.test", "CANCEL",
 		"RECURRENCE-ID:20260621T100000Z\r\nDTSTART:20260621T100000Z\r\nDTEND:20260621T110000Z\r\nSEQUENCE:1\r\nSTATUS:CANCELLED\r\n")
 
-	ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{mapi.NameAppointmentRecur})
-	if err != nil || ids[0] == 0 {
-		t.Fatalf("recurrence tag: %v", err)
-	}
 	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
 	if err != nil || len(objs) != 1 {
 		t.Fatalf("calendar holds %d items (err %v), want the one meeting", len(objs), err)
 	}
-	tag := mapi.MakeTag(ids[0], mapi.PtBinary)
-	pv, err := st.GetMessageProperties(objs[0].ID, tag)
-	if err != nil {
-		t.Fatal(err)
-	}
-	v, _ := pv.Get(tag)
-	blob, _ := v.([]byte)
-	p, err := recurrence.DecodeAppointment(blob)
-	if err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(p.DeletedDates) != 1 || recurrence.WallClock(p.DeletedDates[0], time.UTC).Format("2006-01-02") != "2026-06-21" {
-		t.Errorf("deleted dates = %v, want 2026-06-21", p.DeletedDates)
+	if got := deletedDays(t, st, objs[0].ID); len(got) != 1 || got[0] != "2026-06-21" {
+		t.Errorf("deleted dates = %v, want [2026-06-21]", got)
 	}
 }
