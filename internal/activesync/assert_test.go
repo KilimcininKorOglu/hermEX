@@ -18,6 +18,15 @@ func wantEq[T comparable](t *testing.T, label string, got, want T) {
 	}
 }
 
+// mustClose closes a store and fails the test when the close reports an error;
+// use it as `defer mustClose(t, st)`.
+func mustClose(t *testing.T, st interface{ Close() error }) {
+	t.Helper()
+	if err := st.Close(); err != nil {
+		t.Errorf("close: %v", err)
+	}
+}
+
 // mustNoErr fails the test when err is set, naming the operation.
 func mustNoErr(t *testing.T, what string, err error) {
 	t.Helper()

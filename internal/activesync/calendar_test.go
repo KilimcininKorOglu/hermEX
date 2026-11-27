@@ -20,7 +20,7 @@ func TestCalendarAppData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 
 	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{
 		mapi.NameAppointmentStartWhole,
@@ -151,7 +151,7 @@ func TestSyncCalendarClientEdits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar)); err != nil || len(objs) != 0 {
 		t.Errorf("calendar still has %d object(s) after the client delete (err %v)", len(objs), err)
 	}
@@ -170,7 +170,7 @@ func TestSyncCalendarRefusesAnItemOfAnotherFolder(t *testing.T) {
 		{Tag: mapi.PrMessageClass, Value: "IPM.Task"}, {Tag: mapi.PrSubject, Value: "Keep me"},
 	}})
 	mustNoErr(t, "store a task", err)
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 	taskSID := strconv.FormatInt(taskID, 10)
 
 	calID := strconv.FormatInt(int64(mapi.PrivateFIDCalendar), 10)
@@ -185,22 +185,36 @@ func TestSyncCalendarRefusesAnItemOfAnotherFolder(t *testing.T) {
 	change := wbxml.Elem(wbxml.ASChange, wbxml.Str(wbxml.ASServerID, taskSID),
 		wbxml.Elem(wbxml.ASData, wbxml.Str(wbxml.CalSubject, "Overwritten")))
 	del := wbxml.Elem(wbxml.ASDelete, wbxml.Str(wbxml.ASServerID, taskSID))
-	_, root := postCommand(t, ts, "Sync", calReq("1", change, del))
+	// A ServerId that names no object at all is refused the same way.
+	ghost := wbxml.Elem(wbxml.ASChange, wbxml.Str(wbxml.ASServerID, "999999"),
+		wbxml.Elem(wbxml.ASData, wbxml.Str(wbxml.CalSubject, "Ghost")))
+	_, root := postCommand(t, ts, "Sync", calReq("1", change, del, ghost))
 
 	wantEq(t, "the task's subject", storedSubject(t, dir, taskID), "Keep me")
 	resp := respColl(t, root).Child(wbxml.ASResponses)
 	if resp == nil {
 		t.Fatal("the refused commands got no Responses")
 	}
-	for _, tag := range []wbxml.Tag{wbxml.ASChange, wbxml.ASDelete} {
-		r := resp.Child(tag)
-		if r == nil {
-			t.Errorf("no response for the refused %#06x", uint16(tag))
-			continue
-		}
-		wantEq(t, "the refused command's ServerId", r.ChildText(wbxml.ASServerID), taskSID)
-		wantEq(t, "the refused command's Status", r.ChildText(wbxml.ASStatus), "8")
+	got := map[string]int{}
+	for _, r := range resp.Children {
+		key := strconv.Itoa(int(r.Tag)) + "/" + r.ChildText(wbxml.ASServerID)
+		got[key]++
+		wantEq(t, "the refused command's Status for "+key, r.ChildText(wbxml.ASStatus), "8")
 	}
+	for _, want := range []string{
+		strconv.Itoa(int(wbxml.ASChange)) + "/" + taskSID,
+		strconv.Itoa(int(wbxml.ASDelete)) + "/" + taskSID,
+		strconv.Itoa(int(wbxml.ASChange)) + "/999999",
+	} {
+		wantEq(t, "responses for "+want, got[want], 1)
+	}
+	wantEq(t, "the response count", len(resp.Children), 3)
+	st, err = objectstore.Open(dir)
+	mustNoErr(t, "reopen the store", err)
+	defer mustClose(t, st)
+	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
+	mustNoErr(t, "list the calendar", err)
+	wantEq(t, "calendar objects after the refused commands", len(objs), 0)
 }
 
 // TestSyncCalendarClientAdd proves a device-created appointment is stored and
@@ -260,7 +274,7 @@ func storedSubject(t *testing.T, dir string, id int64) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	pv, err := st.GetMessageProperties(id, mapi.PrSubject)
 	if err != nil {
 		t.Fatal(err)
@@ -275,7 +289,7 @@ func seedAppointment(t *testing.T, dir, subject string, start, end time.Time) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{
 		mapi.NameAppointmentStartWhole,
 		mapi.NameAppointmentEndWhole,
@@ -303,7 +317,7 @@ func seedAppointment(t *testing.T, dir, subject string, start, end time.Time) {
 func TestCalendarAppDataRecurring(t *testing.T) {
 	st, err := objectstore.Open(t.TempDir())
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 
 	ical := []byte("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:rec-1\r\nDTSTART:20260601T090000Z\r\n" +
 		"DTEND:20260601T093000Z\r\nSUMMARY:Weekly Sync\r\nRRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=5\r\n" +
@@ -339,7 +353,7 @@ func TestCalendarAppDataNoAppointment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	data, err := calendarAppData(st, 1)
 	if err != nil {
 		t.Fatalf("calendarAppData on a bare store: %v", err)

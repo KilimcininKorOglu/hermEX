@@ -19,7 +19,7 @@ func TestBusyStatusRejectsWiderThanPtLong(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 
 	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameBusyStatus})
 	if err != nil {
