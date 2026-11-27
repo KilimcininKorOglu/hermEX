@@ -36,6 +36,43 @@ func TestWriteAtomic(t *testing.T) {
 	}
 }
 
+// TestWriteAtomicRefusedLeavesTheRulesetAlone aims a write at a path that is a
+// directory, which no rename can replace. The write must fail, and a failed
+// publish must leave the live ruleset beside it byte for byte and no temporary
+// file behind, or the MTA's next poll reads a partial or foreign file.
+func TestWriteAtomicRefusedLeavesTheRulesetAlone(t *testing.T) {
+	dir := t.TempDir()
+	live := filepath.Join(dir, "antispam-rules.cf")
+	if err := writeAtomic(live, []byte("live")); err != nil {
+		t.Fatalf("writeAtomic: %v", err)
+	}
+	blocked := filepath.Join(dir, "blocked")
+	if err := os.Mkdir(blocked, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(blocked, "keep"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("seed the blocking directory: %v", err)
+	}
+
+	if err := writeAtomic(blocked, []byte("partial")); err == nil {
+		t.Fatal("writeAtomic over a non-empty directory succeeded, want an error")
+	}
+	if got := mustRead(t, live); got != "live" {
+		t.Errorf("live ruleset after the refused write = %q, want %q", got, "live")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	if len(entries) != 2 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("directory after the refused write = %v, want only antispam-rules.cf and blocked", names)
+	}
+}
+
 // mustRead returns the file's content and fails the test when it cannot be read,
 // so a missing ruleset is reported as missing, not as empty content.
 func mustRead(t *testing.T, path string) string {
