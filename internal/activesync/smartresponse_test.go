@@ -28,7 +28,7 @@ func seedWithAttachment(t *testing.T, dir string) uint32 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	raw := "From: bob@hermex.test\r\nTo: alice@hermex.test\r\nSubject: Original\r\n" +
 		"Message-ID: <orig@hermex.test>\r\nMIME-Version: 1.0\r\n" +
 		"Content-Type: multipart/mixed; boundary=b\r\n\r\n" +
@@ -48,7 +48,7 @@ func firstRaw(t *testing.T, dir string, fid int64) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(fid)
 	if err != nil || len(msgs) == 0 {
 		t.Fatalf("folder %d holds no message (%v)", fid, err)
