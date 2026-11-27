@@ -1157,20 +1157,36 @@ func (s *Server) handleGetSharedAsOwner(w http.ResponseWriter, r *http.Request) 
 	}
 	owned := []string{}
 	if lister, ok := s.auth.(directory.SharedMailboxLister); ok {
-		if list, err := lister.SharedMailboxes(c.Email); err == nil {
-			for _, b := range list {
-				st, err := objectstore.OpenExisting(b.StorePath)
-				if err != nil {
-					continue
-				}
-				if owner, err := st.IsStoreOwner(c.Email); err == nil && owner {
-					owned = append(owned, b.Address)
-				}
-				closeStore(st)
+		list, err := lister.SharedMailboxes(c.Email)
+		if err != nil {
+			logError("shared-as-owner", err, logging.Fields{"user": c.Email})
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not list shared mailboxes"})
+			return
+		}
+		for _, b := range list {
+			if ownsSharedMailbox(b, c.Email) {
+				owned = append(owned, b.Address)
 			}
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"shared_as_owner": owned})
+}
+
+// ownsSharedMailbox reports whether user is a store owner of b. A mailbox that
+// cannot be read is recorded and counted as not owned.
+func ownsSharedMailbox(b directory.SharedMailbox, user string) bool {
+	st, err := objectstore.OpenExisting(b.StorePath)
+	if err != nil {
+		logError("shared-as-owner", err, logging.Fields{"mailbox": b.Address})
+		return false
+	}
+	defer closeStore(st)
+	owner, err := st.IsStoreOwner(user)
+	if err != nil {
+		logError("shared-as-owner", err, logging.Fields{"mailbox": b.Address})
+		return false
+	}
+	return owner
 }
 
 // handleGetIdentities returns the send-as addresses the caller owns directly: the
