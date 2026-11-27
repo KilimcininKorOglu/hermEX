@@ -50,7 +50,7 @@ func TestOlderReplyDoesNotOverwriteANewerOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := mapi.UnixToNTTime(time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC))
-	if got, _ := row.Get(mapi.PrRecipientTrackStatusTime); got != want {
+	if got := optProp[uint64](t, row, mapi.PrRecipientTrackStatusTime); got != want {
 		t.Errorf("track status time = %v, want the decline's DTSTAMP %v", got, want)
 	}
 
@@ -59,7 +59,7 @@ func TestOlderReplyDoesNotOverwriteANewerOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := row.Get(mapi.PrRecipientTrackStatus); got != ResponseDeclined {
+	if got := optProp[int32](t, row, mapi.PrRecipientTrackStatus); got != ResponseDeclined {
 		t.Errorf("PidTagRecipientTrackStatus = %v, want %d", got, ResponseDeclined)
 	}
 
