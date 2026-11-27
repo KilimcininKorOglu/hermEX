@@ -399,37 +399,23 @@ func (p Pattern) applyEndRange(r *rrule) bool {
 
 // rruleString renders the local rrule to its RRULE text form.
 func rruleString(r rrule) string {
-	var b strings.Builder
-	b.WriteString("FREQ=")
-	b.WriteString(r.Freq)
-	b.WriteString(";INTERVAL=")
-	b.WriteString(strconv.Itoa(r.Interval))
+	parts := []string{"FREQ=" + r.Freq, "INTERVAL=" + strconv.Itoa(r.Interval)}
 	if r.Count > 0 {
-		b.WriteString(";COUNT=")
-		b.WriteString(strconv.Itoa(r.Count))
+		parts = append(parts, "COUNT="+strconv.Itoa(r.Count))
 	}
 	if !r.Until.IsZero() {
-		b.WriteString(";UNTIL=")
-		b.WriteString(r.Until.UTC().Format("20060102T150405Z"))
+		parts = append(parts, "UNTIL="+r.Until.UTC().Format("20060102T150405Z"))
 	}
 	if len(r.Weekdays) > 0 {
-		b.WriteString(";BYDAY=")
-		for i, d := range r.Weekdays {
-			if i > 0 {
-				b.WriteByte(',')
-			}
-			b.WriteString(d)
-		}
+		parts = append(parts, "BYDAY="+strings.Join(r.Weekdays, ","))
 		if r.SetPos != 0 {
-			b.WriteString(";BYSETPOS=")
-			b.WriteString(strconv.Itoa(r.SetPos))
+			parts = append(parts, "BYSETPOS="+strconv.Itoa(r.SetPos))
 		}
 	}
 	if r.MonthDay != 0 {
-		b.WriteString(";BYMONTHDAY=")
-		b.WriteString(strconv.Itoa(r.MonthDay))
+		parts = append(parts, "BYMONTHDAY="+strconv.Itoa(r.MonthDay))
 	}
-	return b.String()
+	return strings.Join(parts, ";")
 }
 
 // bitmaskWeekdays expands a DayOfWeek bitmask (Sunday 1 .. Saturday 64) to BYDAY tokens.
