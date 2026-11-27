@@ -25,11 +25,11 @@ func TestGetAnyCharsetPrefersTheExactTag(t *testing.T) {
 		{Tag: PrSubject.WithType(PtString8), Value: "ansi"},
 		{Tag: PrSubject, Value: "unicode"},
 	}
-	if v, _ := pv.GetAnyCharset(PrSubject); v != "unicode" {
-		t.Errorf("unicode lookup = %v, want unicode", v)
+	if v, ok := pv.GetAnyCharset(PrSubject); !ok || v != "unicode" {
+		t.Errorf("unicode lookup = (%v, %v), want (unicode, true)", v, ok)
 	}
-	if v, _ := pv.GetAnyCharset(PrSubject.WithType(PtString8)); v != "ansi" {
-		t.Errorf("string8 lookup = %v, want ansi", v)
+	if v, ok := pv.GetAnyCharset(PrSubject.WithType(PtString8)); !ok || v != "ansi" {
+		t.Errorf("string8 lookup = (%v, %v), want (ansi, true)", v, ok)
 	}
 }
 
