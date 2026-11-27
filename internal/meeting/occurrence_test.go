@@ -31,7 +31,7 @@ func occurrenceStore(t *testing.T) (*objectstore.Store, Tags) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() { mustClose(t, st, "the store") })
 	tags, err := ResolveTags(st)
 	if err != nil {
 		t.Fatal(err)
@@ -75,8 +75,28 @@ func calendarICal(t *testing.T, st *objectstore.Store, id int64) string {
 	if !ok {
 		t.Fatal("the calendar item carries no iCalendar body")
 	}
-	raw, _ := v.([]byte)
+	raw, ok := v.([]byte)
+	if !ok {
+		t.Fatalf("the iCalendar body holds %T, want []byte", v)
+	}
 	return string(raw)
+}
+
+// storedStart reads a calendar item's start and stops the test when the item
+// carries none or carries it in the wrong type.
+func storedStart(t *testing.T, st *objectstore.Store, id int64, tag mapi.PropTag) uint64 {
+	t.Helper()
+	pv, err := st.GetMessageProperties(id, tag)
+	mustNoErr(t, err, "read the start")
+	v, ok := pv.Get(tag)
+	if !ok {
+		t.Fatal("the calendar item carries no start")
+	}
+	nt, ok := v.(uint64)
+	if !ok {
+		t.Fatalf("the start holds %T, want an NT time", v)
+	}
+	return nt
 }
 
 // TestOccurrenceUpdateKeepsTheSeries is the load-bearing case. An update for one
@@ -125,11 +145,7 @@ func TestOccurrenceUpdateKeepsTheSeriesStart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pv, err := st.GetMessageProperties(apptID, startProp)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if v, _ := pv.Get(startProp); v != start {
+	if v := storedStart(t, st, apptID, startProp); v != start {
 		t.Errorf("series start = %v, want it unchanged at %v", v, start)
 	}
 }
@@ -165,11 +181,7 @@ func TestOccurrenceUpdateLeavesAMAPISeriesAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pv, err := st.GetMessageProperties(apptID, startProp)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if v, _ := pv.Get(startProp); v != seriesStart {
+	if v := storedStart(t, st, apptID, startProp); v != seriesStart {
 		t.Errorf("series start = %v, want it unchanged at %v", v, seriesStart)
 	}
 	if n := folderCount(t, st, int64(mapi.PrivateFIDCalendar)); n != 1 {
@@ -209,11 +221,7 @@ func TestInstanceGOIDRequestLeavesTheSeriesAlone(t *testing.T) {
 	if _, err := Respond(st, nil, nil, "alice@hermex.test", reqID, ResponseAccepted, false); err != nil {
 		t.Fatal(err)
 	}
-	pv, err := st.GetMessageProperties(apptID, startProp)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if v, _ := pv.Get(startProp); v != seriesStart {
+	if v := storedStart(t, st, apptID, startProp); v != seriesStart {
 		t.Errorf("series start = %v, want it unchanged at %v", v, seriesStart)
 	}
 }
