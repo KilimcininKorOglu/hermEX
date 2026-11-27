@@ -379,8 +379,8 @@ func (s *Server) webLoginAllowed(user string) bool {
 	if !ok {
 		return true
 	}
-	privs, _ := pr.Privileges(user)
-	return privs.Web
+	privs, known := pr.Privileges(user)
+	return known && privs.Web
 }
 
 // authenticateForChange verifies credentials for the webmail2 remediation flow

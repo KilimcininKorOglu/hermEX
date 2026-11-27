@@ -177,7 +177,7 @@ func (s *Server) passwordChangeAllowed(user string) bool {
 	if pr, ok := s.auth.(interface {
 		Privileges(string) (directory.ServicePrivileges, bool)
 	}); ok {
-		if privs, _ := pr.Privileges(user); !privs.ChgPasswd {
+		if privs, known := pr.Privileges(user); !known || !privs.ChgPasswd {
 			return false
 		}
 	}
