@@ -2,12 +2,40 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+// closeChecked closes c and reports any unexpected error.
+func closeChecked(t *testing.T, c io.Closer) {
+	t.Helper()
+	if err := c.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+		t.Errorf("close: %v", err)
+	}
+}
+
+// serveForTest registers ln on g, starts Serve on a goroutine, and drains on cleanup.
+func serveForTest(t *testing.T, g *ConnGroup, ln net.Listener, handle func(net.Conn)) {
+	t.Helper()
+	g.AddListener(ln)
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- g.Serve(ln, handle) }()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := g.Shutdown(ctx); err != nil {
+			t.Errorf("shutdown: %v", err)
+		}
+		if err := <-serveErr; err != nil {
+			t.Errorf("serve: %v", err)
+		}
+	})
+}
 
 // dialOnce connects to the listener, writes one byte so the handler runs, and
 // returns the connection.
@@ -17,7 +45,7 @@ func dialOnce(t *testing.T, ln net.Listener) net.Conn {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	t.Cleanup(func() { _ = c.Close() })
+	t.Cleanup(func() { closeChecked(t, c) })
 	if _, err := c.Write([]byte("x")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -53,7 +81,7 @@ func (p *panicReport) read() (string, any, string) {
 
 // echoOrPanic panics on the byte 'x' and echoes anything else, so one test can
 // drive both a failing and a healthy connection through the same group.
-func echoOrPanic(served chan struct{}) func(net.Conn) {
+func echoOrPanic(t *testing.T, served chan struct{}) func(net.Conn) {
 	return func(nc net.Conn) {
 		buf := make([]byte, 1)
 		if _, err := nc.Read(buf); err != nil {
@@ -62,12 +90,14 @@ func echoOrPanic(served chan struct{}) func(net.Conn) {
 		if buf[0] == 'x' {
 			panic("a command the handler could not take")
 		}
-		_, _ = nc.Write([]byte("ok"))
+		if _, err := nc.Write([]byte("ok")); err != nil {
+			t.Errorf("write ok: %v", err)
+		}
 		select {
 		case served <- struct{}{}:
 		default:
 		}
-		_ = nc.Close()
+		closeChecked(t, nc)
 	}
 }
 
@@ -91,13 +121,14 @@ func TestAPanickingHandlerLosesOnlyItsConnection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = ln.Close() })
 
 	report := &panicReport{seen: make(chan struct{}, 1)}
 	served := make(chan struct{}, 4)
 	var g ConnGroup
 	g.SetPanicHandler(report.record)
-	go func() { _ = g.Serve(ln, echoOrPanic(served)) }()
+	g.AddListener(ln)
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- g.Serve(ln, echoOrPanic(t, served)) }()
 
 	// The first client panics its handler.
 	dialOnce(t, ln)
@@ -107,7 +138,8 @@ func TestAPanickingHandlerLosesOnlyItsConnection(t *testing.T) {
 	if remote == "" {
 		t.Error("the report names no client address")
 	}
-	if s, _ := value.(string); !strings.Contains(s, "could not take") {
+	s, ok := value.(string)
+	if !ok || !strings.Contains(s, "could not take") {
 		t.Errorf("the report carries %v, want the panic value", value)
 	}
 	if !strings.Contains(stack, "lifecycle") {
@@ -119,7 +151,7 @@ func TestAPanickingHandlerLosesOnlyItsConnection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the group stopped accepting after a panic: %v", err)
 	}
-	defer c2.Close()
+	defer closeChecked(t, c2)
 	if _, err := c2.Write([]byte("y")); err != nil {
 		t.Fatalf("write to the second connection: %v", err)
 	}
@@ -130,6 +162,9 @@ func TestAPanickingHandlerLosesOnlyItsConnection(t *testing.T) {
 	if err := g.Shutdown(ctx); err != nil {
 		t.Errorf("shutdown after a recovered panic: %v", err)
 	}
+	if err := <-serveErr; err != nil {
+		t.Errorf("serve after shutdown: %v", err)
+	}
 }
 
 // TestAPanickingHandlerClosesItsConnection proves the client is not left hanging on
@@ -139,25 +174,26 @@ func TestAPanickingHandlerClosesItsConnection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = ln.Close() })
 
 	var g ConnGroup
-	go func() {
-		_ = g.Serve(ln, func(nc net.Conn) {
-			buf := make([]byte, 1)
-			if _, err := nc.Read(buf); err != nil {
-				return
-			}
-			panic("boom")
-		})
-	}()
+	serveForTest(t, &g, ln, func(nc net.Conn) {
+		buf := make([]byte, 1)
+		if _, err := nc.Read(buf); err != nil {
+			return
+		}
+		panic("boom")
+	})
 
 	c := dialOnce(t, ln)
-	if err := c.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+	if err := c.SetReadDeadline(time.Now().Add(500 * time.Millisecond)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Read(make([]byte, 1)); err == nil {
+	_, err = c.Read(make([]byte, 1))
+	if err == nil {
 		t.Error("the connection stayed open after its handler panicked")
+	}
+	if !errors.Is(err, io.EOF) {
+		t.Errorf("read after panic = %v, want io.EOF from server close", err)
 	}
 }
 
@@ -168,30 +204,74 @@ func TestAPanicWithNoHandlerStillRecovers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = ln.Close() })
 
 	var g ConnGroup
 	done := make(chan struct{}, 1)
-	go func() {
-		_ = g.Serve(ln, func(nc net.Conn) {
-			defer func() {
-				select {
-				case done <- struct{}{}:
-				default:
-				}
-			}()
-			panic("boom")
-		})
-	}()
+	serveForTest(t, &g, ln, func(nc net.Conn) {
+		defer func() {
+			select {
+			case done <- struct{}{}:
+			default:
+			}
+		}()
+		panic("boom")
+	})
 
 	c, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.Close()
+	defer closeChecked(t, c)
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("the handler never ran")
+	}
+	if err := c.SetReadDeadline(time.Now().Add(500 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
+		t.Errorf("read after panic without reporter = %v, want io.EOF", err)
+	}
+}
+
+// nilAddrConn wraps a net.Conn and returns a nil RemoteAddr to exercise
+// remoteAddr's nil-peer guard during panic recovery.
+type nilAddrConn struct {
+	net.Conn
+}
+
+func (nilAddrConn) RemoteAddr() net.Addr { return nil }
+
+// TestGuardBoundsStackAndHandlesNilRemoteAddr proves a deeply recursive panic on
+// a connection with no peer address is bounded to panicStackBytes and reports an
+// empty remote address without crashing.
+func TestGuardBoundsStackAndHandlesNilRemoteAddr(t *testing.T) {
+	client, server := net.Pipe()
+	defer closeChecked(t, client)
+
+	report := &panicReport{seen: make(chan struct{}, 1)}
+	var g ConnGroup
+	g.SetPanicHandler(report.record)
+
+	var recurse func(int)
+	recurse = func(n int) {
+		if n == 0 {
+			panic("deep conn panic")
+		}
+		recurse(n - 1)
+	}
+	g.guard(func(net.Conn) { recurse(20000) }, nilAddrConn{Conn: server})
+
+	waitFor(t, report.seen, "deep panic was not reported")
+	remote, value, stack := report.read()
+	if remote != "" {
+		t.Errorf("remote = %q, want empty string for nil RemoteAddr", remote)
+	}
+	if value != "deep conn panic" {
+		t.Errorf("value = %v, want %q", value, "deep conn panic")
+	}
+	if len(stack) == 0 || len(stack) > panicStackBytes {
+		t.Errorf("stack length = %d, want 1..%d", len(stack), panicStackBytes)
 	}
 }
