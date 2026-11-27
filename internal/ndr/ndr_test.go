@@ -26,11 +26,15 @@ func TestPushAlignment(t *testing.T) {
 	}
 	// Pull mirrors the alignment.
 	q := NewPull(p.Bytes())
-	if b, _ := q.Uint8(); b != 0xAA {
-		t.Errorf("u8 = %#x, want 0xAA", b)
+	if b, err := q.Uint8(); err != nil || b != 0xAA {
+		t.Errorf("u8 = %#x, %v; want 0xAA", b, err)
 	}
-	if v, _ := q.Uint32(); v != 0xDEADBEEF {
-		t.Errorf("u32 = %#x, want 0xDEADBEEF (alignment skipped the pad)", v)
+	if v, err := q.Uint32(); err != nil || v != 0xDEADBEEF {
+		t.Errorf("u32 = %#x, %v; want 0xDEADBEEF (alignment skipped the pad)", v, err)
+	}
+	// The buffer is spent: a further read must fail, not return a zero.
+	if v, err := q.Uint8(); err == nil {
+		t.Errorf("read past the end = %#x, want an error", v)
 	}
 }
 
