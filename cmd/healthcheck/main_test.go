@@ -14,7 +14,9 @@ func TestProbeAcceptsAHealthyDaemon(t *testing.T) {
 		if r.URL.Path != "/healthz" {
 			t.Errorf("probed %q, want /healthz", r.URL.Path)
 		}
-		_, _ = w.Write([]byte(`{"service":"imap","ok":true}`))
+		if _, err := w.Write([]byte(`{"service":"imap","ok":true}`)); err != nil {
+			t.Errorf("write the health answer: %v", err)
+		}
 	}))
 	defer ts.Close()
 
@@ -29,7 +31,9 @@ func TestProbeAcceptsAHealthyDaemon(t *testing.T) {
 func TestProbeRejectsADegradedDaemon(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte(`{"ok":false,"checks":{"directory":"dial tcp: connection refused"}}`))
+		if _, err := w.Write([]byte(`{"ok":false,"checks":{"directory":"dial tcp: connection refused"}}`)); err != nil {
+			t.Errorf("write the health answer: %v", err)
+		}
 	}))
 	defer ts.Close()
 
