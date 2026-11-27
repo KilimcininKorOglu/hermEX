@@ -16,11 +16,11 @@ func TestVJournalRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ImportVJournal: %v", err)
 	}
-	if v, _ := msg.Props.Get(mapi.PrMessageClass); v != "IPM.Activity" {
-		t.Errorf("message class = %v, want IPM.Activity", v)
+	if v, ok := msg.Props.Get(mapi.PrMessageClass); !ok || v != "IPM.Activity" {
+		t.Errorf("message class = %v (ok=%v), want IPM.Activity", v, ok)
 	}
-	if v, _ := msg.Props.Get(mapi.PrSubject); v != "Trip log" {
-		t.Errorf("PrSubject = %v, want the SUMMARY", v)
+	if v, ok := msg.Props.Get(mapi.PrSubject); !ok || v != "Trip log" {
+		t.Errorf("PrSubject = %v (ok=%v), want the SUMMARY", v, ok)
 	}
 	out := string(ExportVJournal(msg, "j-1"))
 	for _, want := range []string{"BEGIN:VJOURNAL", "SUMMARY:Trip log", "DESCRIPTION:Visited the lab", "DTSTART:20260701T090000Z", "END:VJOURNAL"} {
@@ -30,10 +30,20 @@ func TestVJournalRoundTrip(t *testing.T) {
 	}
 }
 
-// TestImportVJournalRejectsNonJournal confirms a non-journal object is rejected.
+// TestImportVJournalRejectsNonJournal confirms a non-journal or malformed object
+// is rejected without allocating named properties or returning a partial message.
 func TestImportVJournalRejectsNonJournal(t *testing.T) {
-	raw := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:e\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
-	if _, err := ImportVJournal([]byte(raw), newResolver().opt()); err == nil {
-		t.Error("ImportVJournal should reject a calendar with no VJOURNAL")
+	for _, raw := range []string{
+		"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:e\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+		"TRUNCATED-JOURNAL",
+	} {
+		r := newResolver()
+		msg, err := ImportVJournal([]byte(raw), r.opt())
+		if err == nil || msg != nil {
+			t.Errorf("ImportVJournal(%q) = (%v, %v), want (nil, error)", raw, msg, err)
+		}
+		if len(r.ids) != 0 {
+			t.Errorf("refused ImportVJournal allocated %d named properties, want 0", len(r.ids))
+		}
 	}
 }
