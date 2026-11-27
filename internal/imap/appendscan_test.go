@@ -58,14 +58,7 @@ func TestAppendRefusesInfectedContent(t *testing.T) {
 		t.Errorf("APPEND = %q, want NO", reply)
 	}
 	// Nothing was stored: the mailbox still holds the two seeded messages.
-	c.mustOK("a4", "SELECT INBOX")
-	status := c.taggedLine("a5", "STATUS INBOX (MESSAGES)")
-	if !strings.Contains(status, "OK") {
-		t.Fatalf("STATUS failed: %q", status)
-	}
-	if strings.Contains(status, "MESSAGES 3") {
-		t.Error("the infected message was stored anyway")
-	}
+	assertMessageCount(t, c, "a4", "INBOX", 2)
 }
 
 // TestAppendAcceptsCleanContent keeps ordinary APPEND working with the scanner on.
@@ -78,4 +71,5 @@ func TestAppendAcceptsCleanContent(t *testing.T) {
 	if reply := appendMessage(t, c, "a3", "Subject: fine\r\n\r\nbody"); !strings.HasPrefix(reply, "a3 OK") {
 		t.Errorf("clean APPEND = %q, want OK", reply)
 	}
+	assertMessageCount(t, c, "a4", "INBOX", 3)
 }
