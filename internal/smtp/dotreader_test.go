@@ -2,6 +2,7 @@ package smtp
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -16,8 +17,9 @@ func TestDotReaderHoldsABoundedBuffer(t *testing.T) {
 	long := strings.Repeat("x", 1<<20)
 	d := newDotReader(bufio.NewReader(strings.NewReader(long + "\r\n.\r\n")))
 	p := make([]byte, 1)
-	if _, err := d.Read(p); err != nil {
-		t.Fatal(err)
+	n, err := d.Read(p)
+	if err != nil || n != 1 {
+		t.Fatalf("first Read = (%d, %v), want (1, nil)", n, err)
 	}
 	if got := len(d.buf) + 1; got > 64<<10 {
 		t.Errorf("one read buffered %d bytes of a single line, want a bounded chunk", got)
@@ -53,5 +55,41 @@ func TestDotReaderDecodesAcrossChunks(t *testing.T) {
 	}
 	if string(rest) != "AFTER" {
 		t.Errorf("after the terminator the stream holds %q, want AFTER", rest)
+	}
+}
+
+// TestDotReaderEdgeCases covers RFC 5321 §4.1.1.4 and §4.5.2 edge cases:
+// empty bodies, dot-stuffed single dots, triple dots, and truncated streams.
+func TestDotReaderEdgeCases(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		in        string
+		want      string
+		wantAfter string
+	}{
+		{"empty body", ".\r\nAFTER", "", "AFTER"},
+		{"dot-stuffed dot", "..\r\n.\r\n", ".\r\n", ""},
+		{"triple dot", "...x\r\n.\r\n", "..x\r\n", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			br := bufio.NewReader(strings.NewReader(tc.in))
+			got, err := io.ReadAll(newDotReader(br))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			wantEq(t, string(got), tc.want, "decoded body")
+			rest, err := io.ReadAll(br)
+			if err != nil {
+				t.Fatalf("read after terminator: %v", err)
+			}
+			wantEq(t, string(rest), tc.wantAfter, "trailing stream")
+		})
+	}
+
+	for _, trunc := range []string{"line\r\n", "partial", ""} {
+		_, err := io.ReadAll(newDotReader(bufio.NewReader(strings.NewReader(trunc))))
+		if !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Errorf("truncated %q: err = %v, want io.ErrUnexpectedEOF", trunc, err)
+		}
 	}
 }

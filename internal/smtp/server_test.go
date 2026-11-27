@@ -13,8 +13,8 @@ import (
 )
 
 // TestServerRcptTempErrorIsTemporary proves a backend TempError from Rcpt is
-// reported as a 451 temporary failure (the sender retries), the wire behaviour
-// greylisting depends on.
+// reported as a 451 temporary failure (the sender retries), leaving the
+// recipient list empty.
 func TestServerRcptTempErrorIsTemporary(t *testing.T) {
 	sess := &fakeSession{rcptErr: &TempError{Message: "greylisted, retry later"}}
 	r, conn := dialServer(t, sess)
@@ -25,10 +25,13 @@ func TestServerRcptTempErrorIsTemporary(t *testing.T) {
 	expect(t, r, 250)
 	send(t, conn, "RCPT TO:<bob@test>\r\n")
 	expect(t, r, 451)
+	wantEq(t, len(sess.rcpts), 0, "recipients after 451")
+	send(t, conn, "DATA\r\n")
+	expect(t, r, 503)
 }
 
 // TestServerRcptPermErrorIsPermanent proves an ordinary Rcpt error stays a 550
-// permanent rejection.
+// permanent rejection, leaving the recipient list empty.
 func TestServerRcptPermErrorIsPermanent(t *testing.T) {
 	sess := &fakeSession{rcptErr: errors.New("no such mailbox")}
 	r, conn := dialServer(t, sess)
@@ -39,12 +42,14 @@ func TestServerRcptPermErrorIsPermanent(t *testing.T) {
 	expect(t, r, 250)
 	send(t, conn, "RCPT TO:<bob@test>\r\n")
 	expect(t, r, 550)
+	wantEq(t, len(sess.rcpts), 0, "recipients after 550")
+	send(t, conn, "DATA\r\n")
+	expect(t, r, 503)
 }
 
 // TestServerDataTempErrorIsTemporary proves a backend TempError from Data is
 // reported as a 451 (the sender retries) and an ordinary Data error stays a 554
-// permanent rejection. The 451 is the wire behaviour the antivirus
-// scanner-unavailable path depends on.
+// permanent rejection, leaving delivered count at 0 and resetting the transaction.
 func TestServerDataTempErrorIsTemporary(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -68,18 +73,23 @@ func TestServerDataTempErrorIsTemporary(t *testing.T) {
 			expect(t, r, 354)
 			send(t, conn, "Subject: hi\r\n\r\nbody\r\n.\r\n")
 			expect(t, r, tc.code)
+			wantEq(t, sess.delivered, 0, "delivered messages on failure")
+			send(t, conn, "RCPT TO:<bob@test>\r\n")
+			expect(t, r, 503)
 		})
 	}
 }
 
 type fakeSession struct {
-	from     string
-	rcpts    []string
-	data     []byte
-	lastMail MailParams // the parameters of the most recent Mail call
-	lastRcpt RcptParams // the parameters of the most recent Rcpt call
-	rcptErr  error      // when set, Rcpt returns it (to exercise the error→reply mapping)
-	dataErr  error      // when set, Data returns it (to exercise the DATA error→reply mapping)
+	from      string
+	rcpts     []string
+	data      []byte
+	delivered int
+	lastMail  MailParams // the parameters of the most recent Mail call
+	lastRcpt  RcptParams // the parameters of the most recent Rcpt call
+	mailErr   error      // when set, Mail returns it
+	rcptErr   error      // when set, Rcpt returns it (to exercise the error->reply mapping)
+	dataErr   error      // when set, Data returns it (to exercise the DATA error->reply mapping)
 
 	// dataFrom and dataRcpts record the envelope as each Data call saw it, one
 	// entry per accepted message. The transaction boundary clears from and rcpts
@@ -90,6 +100,9 @@ type fakeSession struct {
 }
 
 func (s *fakeSession) Mail(from string, params MailParams) error {
+	if s.mailErr != nil {
+		return s.mailErr
+	}
 	s.from, s.lastMail = from, params
 	return nil
 }
@@ -109,7 +122,11 @@ func (s *fakeSession) Data(r io.Reader) error {
 	if err != nil {
 		return err
 	}
-	return s.dataErr
+	if s.dataErr != nil {
+		return s.dataErr
+	}
+	s.delivered++
+	return nil
 }
 func (s *fakeSession) Reset()        { s.from = ""; s.rcpts = nil }
 func (s *fakeSession) Logout() error { return nil }
@@ -120,18 +137,21 @@ func (b *fakeBackend) NewSession(string) (Session, error) { return b.sess, nil }
 
 func dialServer(t *testing.T, sess *fakeSession) (*textproto.Reader, net.Conn) {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
+	return dialServerWithLimit(t, sess, 0)
+}
+
+func dialServerWithLimit(t *testing.T, sess *fakeSession, maxSize int64) (*textproto.Reader, net.Conn) {
+	t.Helper()
 	srv := &Server{Backend: &fakeBackend{sess: sess}, Hostname: "mail.test"}
-	go func() { _ = srv.Serve(ln) }()
+	if maxSize > 0 {
+		srv.SetMaxSize(maxSize)
+	}
+	ln := serveOn(t, srv)
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
-		_ = ln.Close()
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = conn.Close(); _ = ln.Close() })
+	t.Cleanup(func() { mustClose(t, conn) })
 	return textproto.NewReader(bufio.NewReader(conn)), conn
 }
 
@@ -169,11 +189,13 @@ func TestServerTransaction(t *testing.T) {
 	// "..dotstuffed" on the wire must arrive as ".dotstuffed" after unstuffing.
 	send(t, conn, "Subject: hi\r\n\r\nline one\r\n..dotstuffed\r\n.\r\n")
 	expect(t, r, 250)
+
+	// Null reverse-path (RFC 5321 §4.5.5 bounce sender) is also accepted.
+	send(t, conn, "MAIL FROM:<>\r\n")
+	expect(t, r, 250)
 	send(t, conn, "QUIT\r\n")
 	expect(t, r, 221)
 
-	// The envelope is read as the Data call saw it, because the completed
-	// transaction clears the session's live from and rcpts.
 	if len(sess.dataRcpts) != 1 {
 		t.Fatalf("the server accepted %d messages, want 1", len(sess.dataRcpts))
 	}
@@ -183,9 +205,6 @@ func TestServerTransaction(t *testing.T) {
 	if got := sess.dataRcpts[0]; len(got) != 2 || got[0] != "bob@test" || got[1] != "carol@test" {
 		t.Errorf("rcpts = %v", got)
 	}
-	// Every accepted message is stamped with a Received: trace header (RFC 5321
-	// §4.4) ahead of the body, recording the helo name, the resolved name and IP,
-	// and the SMTP protocol. The dot-unstuffed body must then follow it intact.
 	got := string(sess.data)
 	if !strings.HasPrefix(got, "Received: from client.test (") {
 		t.Errorf("data missing the Received: trace header: %q", got)
@@ -202,24 +221,18 @@ func TestServerTransaction(t *testing.T) {
 	}
 }
 
-// TestServerEnforcesMaxSize proves the size limit set via SetMaxSize is both
-// advertised (EHLO SIZE) and enforced (an over-limit message is rejected 552), the
-// hook the MTA's poll drives so an operator's edit applies without a restart.
-// TestServerMailRequiresGreeting proves RFC 5321 §4.1.4: a mail transaction
-// must be initialized by EHLO/HELO, so MAIL before any greeting is a 503, while
-// a non-mail command (VRFY) is still accepted without the greeting. After EHLO
-// the same MAIL succeeds.
+// TestServerMailRequiresGreeting proves RFC 5321 §4.1.4: MAIL before any
+// greeting is 503 with no transaction opened, while VRFY works without it.
 func TestServerMailRequiresGreeting(t *testing.T) {
-	r, conn := dialServer(t, &fakeSession{})
+	sess := &fakeSession{}
+	r, conn := dialServer(t, sess)
 	expect(t, r, 220)
 
-	// MAIL with no prior greeting is a bad sequence.
 	send(t, conn, "MAIL FROM:<alice@test>\r\n")
 	expect(t, r, 503)
-	// A non-mail command needs no greeting (§4.1.4).
+	wantEq(t, sess.from, "", "sender after pre-greeting MAIL")
 	send(t, conn, "VRFY bob@test\r\n")
 	expect(t, r, 252)
-	// After EHLO the transaction opens normally.
 	send(t, conn, "EHLO client.test\r\n")
 	expect(t, r, 250)
 	send(t, conn, "MAIL FROM:<alice@test>\r\n")
@@ -227,9 +240,7 @@ func TestServerMailRequiresGreeting(t *testing.T) {
 }
 
 // TestServerServiceCommands proves the RFC 5321 service commands return their
-// proper codes instead of the 500 of an unrecognized command: VRFY answers the
-// privacy-preserving 252 (never confirming an address, §7.3), EXPN is disabled
-// with 502 (recognized-but-unimplemented, §4.2.4), and HELP gives a 214.
+// proper codes instead of 500.
 func TestServerServiceCommands(t *testing.T) {
 	r, conn := dialServer(t, &fakeSession{})
 	expect(t, r, 220)
@@ -242,60 +253,57 @@ func TestServerServiceCommands(t *testing.T) {
 	expect(t, r, 502)
 	send(t, conn, "HELP\r\n")
 	expect(t, r, 214)
-	// A genuinely unknown verb still falls through to 500.
 	send(t, conn, "FROBNICATE\r\n")
 	expect(t, r, 500)
 }
 
+// TestServerEnforcesMaxSize proves the size limit set via SetMaxSize is advertised,
+// accepts exact-limit bodies, and rejects over-limit bodies with 552.
 func TestServerEnforcesMaxSize(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv := &Server{Backend: &fakeBackend{sess: &fakeSession{}}, Hostname: "mail.test"}
-	srv.SetMaxSize(64) // 64 bytes
-	go func() { _ = srv.Serve(ln) }()
-	conn, err := net.Dial("tcp", ln.Addr().String())
-	if err != nil {
-		_ = ln.Close()
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = conn.Close(); _ = ln.Close() })
-	r := textproto.NewReader(bufio.NewReader(conn))
+	sess := &fakeSession{}
+	r, conn := dialServerWithLimit(t, sess, 64)
 
 	expect(t, r, 220)
 	send(t, conn, "EHLO client.test\r\n")
-	_, msg, err := r.ReadResponse(250)
-	if err != nil {
-		t.Fatalf("EHLO: %v", err)
-	}
+	msg := readCodedReply(t, r, 250, "EHLO")
 	if !strings.Contains(msg, "SIZE 64") {
 		t.Errorf("EHLO did not advertise the configured size limit: %q", msg)
 	}
+
+	// Exact 64-byte body succeeds (15 + 47 + 2 = 64).
 	send(t, conn, "MAIL FROM:<alice@test>\r\n")
 	expect(t, r, 250)
 	send(t, conn, "RCPT TO:<bob@test>\r\n")
 	expect(t, r, 250)
 	send(t, conn, "DATA\r\n")
 	expect(t, r, 354)
-	// A body well past 64 bytes is rejected with 552, not accepted.
-	send(t, conn, "Subject: hi\r\n\r\n"+strings.Repeat("x", 500)+"\r\n.\r\n")
+	send(t, conn, "Subject: hi\r\n\r\n"+strings.Repeat("a", 47)+"\r\n.\r\n")
+	expect(t, r, 250)
+	wantEq(t, sess.delivered, 1, "delivered at exact 64-byte limit")
+
+	// 65-byte body (15 + 48 + 2 = 65) is rejected with 552.
+	send(t, conn, "MAIL FROM:<alice@test>\r\n")
+	expect(t, r, 250)
+	send(t, conn, "RCPT TO:<bob@test>\r\n")
+	expect(t, r, 250)
+	send(t, conn, "DATA\r\n")
+	expect(t, r, 354)
+	send(t, conn, "Subject: hi\r\n\r\n"+strings.Repeat("x", 48)+"\r\n.\r\n")
 	expect(t, r, 552)
+	wantEq(t, sess.delivered, 1, "delivered unchanged after 552")
+	send(t, conn, "RCPT TO:<bob@test>\r\n")
+	expect(t, r, 503)
 }
 
 // TestServerSMTPUTF8 proves RFC 6531: EHLO advertises SMTPUTF8 and a MAIL FROM
-// carrying the SMTPUTF8 keyword with a UTF-8 envelope address is accepted, with
-// the non-ASCII local/domain bytes reaching the backend intact.
+// carrying the SMTPUTF8 keyword with a UTF-8 envelope address is accepted.
 func TestServerSMTPUTF8(t *testing.T) {
 	sess := &fakeSession{}
 	r, conn := dialServer(t, sess)
 	expect(t, r, 220)
 
 	send(t, conn, "EHLO client.test\r\n")
-	_, ehlo, err := r.ReadResponse(250)
-	if err != nil {
-		t.Fatalf("EHLO: %v", err)
-	}
+	ehlo := readCodedReply(t, r, 250, "EHLO")
 	if !strings.Contains(ehlo, "SMTPUTF8") {
 		t.Errorf("EHLO did not advertise SMTPUTF8: %q", ehlo)
 	}
@@ -303,23 +311,16 @@ func TestServerSMTPUTF8(t *testing.T) {
 	const utf8From = "bücher@例え.test"
 	send(t, conn, "MAIL FROM:<"+utf8From+"> SMTPUTF8\r\n")
 	expect(t, r, 250)
-	if sess.from != utf8From {
-		t.Errorf("UTF-8 sender mangled: from = %q, want %q", sess.from, utf8From)
-	}
+	wantEq(t, sess.from, utf8From, "UTF-8 sender")
 }
 
 // TestServerEnhancedStatusCodes proves RFC 2034: EHLO advertises
-// ENHANCEDSTATUSCODES and replies lead with an RFC 3463 status code. A bare
-// reply gets the class default (a 250 carries 2.0.0, a 503 carries a 5.x.x),
-// while a reply that already embeds a specific code keeps it; the 220 banner and
-// the 354 DATA intermediate stay bare.
+// ENHANCEDSTATUSCODES, 2xx/4xx/5xx replies carry RFC 3463 status codes, and the
+// 220 banner and 354 DATA intermediate stay bare.
 func TestServerEnhancedStatusCodes(t *testing.T) {
 	r, conn := dialServer(t, &fakeSession{})
-	// The banner stays bare so its first token is the domain.
 	banner := readCodedReply(t, r, 220, "banner")
-	if startsWithEnhanced(banner) {
-		t.Errorf("220 banner carries an enhanced code, want bare: %q", banner)
-	}
+	wantEq(t, banner, "mail.test ESMTP hermEX", "bare 220 banner")
 
 	send(t, conn, "EHLO client.test\r\n")
 	ehlo := readCodedReply(t, r, 250, "EHLO")
@@ -327,77 +328,70 @@ func TestServerEnhancedStatusCodes(t *testing.T) {
 		t.Errorf("EHLO did not advertise ENHANCEDSTATUSCODES: %q", ehlo)
 	}
 
-	// A bare 250 gains the class default 2.0.0.
 	send(t, conn, "MAIL FROM:<alice@test>\r\n")
-	wantReplyPrefix(t, readCodedReply(t, r, 250, "MAIL"), "2.0.0 ", "the MAIL reply's enhanced code")
+	wantReplyPrefix(t, readCodedReply(t, r, 250, "MAIL"), "2.0.0 ", "MAIL enhanced code")
 
-	// A bare error reply carries the 5.0.0 class default.
 	send(t, conn, "DATA\r\n")
-	dataMsg := readCodedReply(t, r, 503, "DATA")
-	if !startsWithEnhanced(dataMsg) || dataMsg[0] != '5' {
-		t.Errorf("503 reply missing a 5.x.x enhanced code: %q", dataMsg)
-	}
+	wantReplyPrefix(t, readCodedReply(t, r, 503, "DATA before RCPT"), "5.0.0 ", "DATA 503 enhanced code")
 
-	// A reply that already embeds a specific code is not double-prefixed.
 	send(t, conn, "VRFY bob@test\r\n")
-	wantReplyPrefix(t, readCodedReply(t, r, 252, "VRFY"), "2.1.5 ", "the VRFY reply's specific code")
+	wantReplyPrefix(t, readCodedReply(t, r, 252, "VRFY"), "2.1.5 ", "VRFY enhanced code")
+
+	send(t, conn, "RCPT TO:<bob@test>\r\n")
+	readCodedReply(t, r, 250, "RCPT")
+	send(t, conn, "DATA\r\n")
+	wantEq(t, readCodedReply(t, r, 354, "DATA intermediate"), "end data with <CR><LF>.<CR><LF>", "bare 354 intermediate")
+	send(t, conn, "Subject: hi\r\n\r\nbody\r\n.\r\n")
+	wantReplyPrefix(t, readCodedReply(t, r, 250, "DATA accept"), "2.0.0 ", "DATA accept enhanced code")
 }
 
 // TestServerCommandLineLimit proves RFC 5321 §4.5.3.1.4: a command line past
-// 512 octets is rejected with 500 rather than buffered without bound, and the
-// connection stays framed so the next command parses normally.
+// 512 octets is rejected with 500 without changing greeted state, while an exact
+// 512-octet command is accepted.
 func TestServerCommandLineLimit(t *testing.T) {
 	r, conn := dialServer(t, &fakeSession{})
 	expect(t, r, 220)
 
-	// A command line far past the 512-octet limit is refused.
-	send(t, conn, "EHLO "+strings.Repeat("a", 600)+"\r\n")
+	// 513 payload octets (5 + 508) exceeds DefaultMaxCommandLine (512).
+	send(t, conn, "EHLO "+strings.Repeat("a", 508)+"\r\n")
 	expect(t, r, 500)
-	// The reader drained the overlong line, so a normal command still works.
-	send(t, conn, "EHLO client.test\r\n")
+	send(t, conn, "MAIL FROM:<alice@test>\r\n")
+	expect(t, r, 503)
+
+	// Exact 512 payload octets (5 + 507) is accepted.
+	send(t, conn, "EHLO "+strings.Repeat("a", 507)+"\r\n")
 	expect(t, r, 250)
 }
 
 // TestServerSizeDeclaration proves RFC 1870 early rejection: a MAIL FROM whose
-// declared SIZE exceeds the advertised maximum is refused with 552 before any
-// RCPT or DATA, while a declaration under the limit (or none) opens the
-// transaction normally.
+// declared SIZE exceeds the advertised maximum is refused with 552 without
+// opening a transaction, while the exact limit is accepted.
 func TestServerSizeDeclaration(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv := &Server{Backend: &fakeBackend{sess: &fakeSession{}}, Hostname: "mail.test"}
-	srv.SetMaxSize(1000)
-	go func() { _ = srv.Serve(ln) }()
-	conn, err := net.Dial("tcp", ln.Addr().String())
-	if err != nil {
-		_ = ln.Close()
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = conn.Close(); _ = ln.Close() })
-	r := textproto.NewReader(bufio.NewReader(conn))
+	sess := &fakeSession{}
+	r, conn := dialServerWithLimit(t, sess, 1000)
 
 	expect(t, r, 220)
 	send(t, conn, "EHLO client.test\r\n")
 	expect(t, r, 250)
-	// Over the 1000-byte limit: rejected at MAIL, no transaction opened.
-	send(t, conn, "MAIL FROM:<alice@test> SIZE=5000\r\n")
-	expect(t, r, 552)
-	// Under the limit: accepted.
-	send(t, conn, "MAIL FROM:<alice@test> SIZE=200\r\n")
+
+	for _, bad := range []string{"5000", "1001"} {
+		send(t, conn, "MAIL FROM:<alice@test> SIZE="+bad+"\r\n")
+		expect(t, r, 552)
+		wantEq(t, sess.from, "", "sender after SIZE="+bad)
+		send(t, conn, "RCPT TO:<bob@test>\r\n")
+		expect(t, r, 503)
+	}
+
+	send(t, conn, "MAIL FROM:<alice@test> SIZE=1000\r\n")
 	expect(t, r, 250)
 	send(t, conn, "RSET\r\n")
 	expect(t, r, 250)
-	// No SIZE parameter at all: unaffected.
 	send(t, conn, "MAIL FROM:<alice@test>\r\n")
 	expect(t, r, 250)
 }
 
-// TestBuildReceived covers the reference Received form: the helo name plus the
-// reverse-DNS name and client IP in the from-clause, the SMTP/SMTPS "with" token
-// (SMTPS only over TLS, neither EHLO nor AUTH is recorded there), an empty helo or
-// rDNS degrading to "unknown", and an IPv6 client address carrying the "IPv6:" tag.
+// TestBuildReceived covers the Received form: helo name, rDNS and IP in the
+// from-clause, SMTP/SMTPS protocol token, unknown degradation, and IPv6 tag.
 func TestBuildReceived(t *testing.T) {
 	when := time.Date(2026, 6, 19, 22, 9, 21, 0, time.FixedZone("", 3*3600))
 	cases := []struct {
@@ -431,24 +425,24 @@ func TestBuildReceived(t *testing.T) {
 	}
 }
 
-// TestParseBDAT covers the "BDAT <chunk-size> [LAST]" grammar (RFC 3030): a bare
-// size, a size with LAST (case-insensitive), and the malformed forms (missing,
-// negative, or non-numeric size, an unknown trailing token, too many tokens) that
-// must be refused so a chunk is never misframed off the wire.
+// TestParseBDAT covers the "BDAT <chunk-size> [LAST]" grammar (RFC 3030).
 func TestParseBDAT(t *testing.T) {
 	cases := []struct {
 		arg      string
 		size     int64
 		last, ok bool
 	}{
+		{"0", 0, false, true},
 		{"5", 5, false, true},
 		{"0 LAST", 0, true, true},
 		{"1024 last", 1024, true, true},
 		{"", 0, false, false},
 		{"-1", 0, false, false},
+		{"99999999999999999999999999", 0, false, false},
 		{"abc", 0, false, false},
 		{"5 NOTLAST", 0, false, false},
 		{"5 LAST EXTRA", 0, false, false},
+		{"10 LAST\tEXTRA", 0, false, false},
 	}
 	for _, c := range cases {
 		size, last, ok := parseBDAT(c.arg)
@@ -458,22 +452,14 @@ func TestParseBDAT(t *testing.T) {
 	}
 }
 
-// TestServerBDATChunking proves RFC 3030 CHUNKING end to end: EHLO advertises
-// CHUNKING and BINARYMIME, a BODY=BINARYMIME transaction streams its body as two
-// BDAT chunks (the non-final one acknowledged 250 with the message still open, the
-// LAST one delivering), and the assembled body reaches the backend intact behind
-// the Received: trace header. The chunk octets follow the BDAT line with no
-// dot-stuffing and no terminator, so a literal leading dot survives unchanged.
+// TestServerBDATChunking proves RFC 3030 CHUNKING end to end.
 func TestServerBDATChunking(t *testing.T) {
 	sess := &fakeSession{}
 	r, conn := dialServer(t, sess)
 	expect(t, r, 220)
 
 	send(t, conn, "EHLO client.test\r\n")
-	_, ehlo, err := r.ReadResponse(250)
-	if err != nil {
-		t.Fatalf("EHLO: %v", err)
-	}
+	ehlo := readCodedReply(t, r, 250, "EHLO")
 	if !strings.Contains(ehlo, "CHUNKING") || !strings.Contains(ehlo, "BINARYMIME") {
 		t.Errorf("EHLO did not advertise CHUNKING/BINARYMIME: %q", ehlo)
 	}
@@ -483,11 +469,8 @@ func TestServerBDATChunking(t *testing.T) {
 	send(t, conn, "RCPT TO:<bob@test>\r\n")
 	expect(t, r, 250)
 
-	// First chunk (6 octets, not last): acknowledged, the message stays open. The
-	// leading "." is data here, not a terminator, and must be preserved verbatim.
 	send(t, conn, "BDAT 6\r\n.Hello")
 	expect(t, r, 250)
-	// Final chunk (7 octets): delivers the assembled body.
 	send(t, conn, "BDAT 7 LAST\r\n, World")
 	expect(t, r, 250)
 
@@ -498,20 +481,18 @@ func TestServerBDATChunking(t *testing.T) {
 	if !strings.HasSuffix(got, ".Hello, World") {
 		t.Errorf("assembled BDAT body = %q, want it to end with %q", got, ".Hello, World")
 	}
-	// The envelope is read as the Data call saw it, because the completed BDAT
-	// transaction clears the session's live from and rcpts.
 	if len(sess.dataRcpts) != 1 || sess.dataFrom[0] != "alice@test" ||
 		len(sess.dataRcpts[0]) != 1 || sess.dataRcpts[0][0] != "bob@test" {
 		t.Errorf("envelope not captured: from=%v rcpts=%v", sess.dataFrom, sess.dataRcpts)
 	}
 }
 
-// TestServerBDATSequencing proves the RFC 3030 mixing rules, both 503 sequence
-// errors: DATA after a BDAT in the same transaction is refused, and a
-// BODY=BINARYMIME transaction refuses DATA outright (its body must arrive via BDAT).
+// TestServerBDATSequencing proves the RFC 3030 mixing rules: DATA after BDAT
+// and DATA on a BODY=BINARYMIME transaction are refused 503 without delivering.
 func TestServerBDATSequencing(t *testing.T) {
 	t.Run("data after bdat", func(t *testing.T) {
-		r, conn := dialServer(t, &fakeSession{})
+		sess := &fakeSession{}
+		r, conn := dialServer(t, sess)
 		expect(t, r, 220)
 		send(t, conn, "EHLO client.test\r\n")
 		expect(t, r, 250)
@@ -523,9 +504,13 @@ func TestServerBDATSequencing(t *testing.T) {
 		expect(t, r, 250)
 		send(t, conn, "DATA\r\n")
 		expect(t, r, 503)
+		wantEq(t, sess.delivered, 0, "delivered after refused DATA")
+		send(t, conn, "RSET\r\n")
+		expect(t, r, 250)
 	})
 	t.Run("binarymime refuses data", func(t *testing.T) {
-		r, conn := dialServer(t, &fakeSession{})
+		sess := &fakeSession{}
+		r, conn := dialServer(t, sess)
 		expect(t, r, 220)
 		send(t, conn, "EHLO client.test\r\n")
 		expect(t, r, 250)
@@ -535,28 +520,15 @@ func TestServerBDATSequencing(t *testing.T) {
 		expect(t, r, 250)
 		send(t, conn, "DATA\r\n")
 		expect(t, r, 503)
+		wantEq(t, sess.delivered, 0, "delivered after BINARYMIME DATA")
 	})
 }
 
-// TestServerBDATSizeLimit proves an over-limit BDAT chunk is rejected 552 without
-// buffering the whole declared size, and the connection stays framed: the chunk's
-// octets are drained off the wire, so a following RSET is read as a command and a
-// fresh transaction opens normally.
+// TestServerBDATSizeLimit proves an over-limit BDAT chunk is rejected 552,
+// poisons the transaction until RSET, and leaves the stream framed.
 func TestServerBDATSizeLimit(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv := &Server{Backend: &fakeBackend{sess: &fakeSession{}}, Hostname: "mail.test"}
-	srv.SetMaxSize(64)
-	go func() { _ = srv.Serve(ln) }()
-	conn, err := net.Dial("tcp", ln.Addr().String())
-	if err != nil {
-		_ = ln.Close()
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = conn.Close(); _ = ln.Close() })
-	r := textproto.NewReader(bufio.NewReader(conn))
+	sess := &fakeSession{}
+	r, conn := dialServerWithLimit(t, sess, 64)
 
 	expect(t, r, 220)
 	send(t, conn, "EHLO client.test\r\n")
@@ -565,19 +537,19 @@ func TestServerBDATSizeLimit(t *testing.T) {
 	expect(t, r, 250)
 	send(t, conn, "RCPT TO:<bob@test>\r\n")
 	expect(t, r, 250)
-	// A 100-octet chunk past the 64-byte limit is refused with 552.
 	send(t, conn, "BDAT 100\r\n"+strings.Repeat("x", 100))
 	expect(t, r, 552)
-	// The chunk was drained, so the stream is still at a command boundary.
+	wantEq(t, sess.delivered, 0, "delivered after oversized BDAT")
+	send(t, conn, "BDAT 4 LAST\r\ntest")
+	expect(t, r, 503)
+	wantEq(t, sess.delivered, 0, "delivered after poisoned BDAT")
 	send(t, conn, "RSET\r\n")
 	expect(t, r, 250)
 	send(t, conn, "MAIL FROM:<carol@test>\r\n")
 	expect(t, r, 250)
 }
 
-// TestMTPriorityValid covers RFC 6710 §4.1 MT-PRIORITY validation: a single value
-// in [-9,9] is well-formed; absence is not an error; a value outside the range, a
-// non-integer, an empty value, and a duplicate parameter are present-but-invalid.
+// TestMTPriorityValid covers RFC 6710 §4.1 MT-PRIORITY validation.
 func TestMTPriorityValid(t *testing.T) {
 	cases := []struct {
 		arg         string
@@ -590,9 +562,12 @@ func TestMTPriorityValid(t *testing.T) {
 		{"<a@b> SIZE=10 MT-PRIORITY=4 BODY=8BITMIME", true, true},
 		{"<a@b> MT-PRIORITY=10", true, false},
 		{"<a@b> MT-PRIORITY=-10", true, false},
+		{"<a@b> MT-PRIORITY=99999999999999999999", true, false},
 		{"<a@b> MT-PRIORITY=high", true, false},
 		{"<a@b> MT-PRIORITY=", true, false},
+		{"<a@b> MT-PRIORITY", true, false},
 		{"<a@b> MT-PRIORITY=1 MT-PRIORITY=2", true, false},
+		{"<a@b> mt-priority=1 MT-PRIORITY=2", true, false},
 	}
 	for _, c := range cases {
 		present, ok := mtPriorityValid(c.arg)
@@ -602,41 +577,33 @@ func TestMTPriorityValid(t *testing.T) {
 	}
 }
 
-// TestServerMTPriority proves RFC 6710 on the wire: EHLO advertises MT-PRIORITY, a
-// MAIL FROM with an in-range priority is accepted, and a malformed or out-of-range
-// MT-PRIORITY is refused with 501 before the transaction opens.
+// TestServerMTPriority proves RFC 6710 on the wire.
 func TestServerMTPriority(t *testing.T) {
-	r, conn := dialServer(t, &fakeSession{})
+	sess := &fakeSession{}
+	r, conn := dialServer(t, sess)
 	expect(t, r, 220)
 
 	send(t, conn, "EHLO client.test\r\n")
-	_, ehlo, err := r.ReadResponse(250)
-	if err != nil {
-		t.Fatalf("EHLO: %v", err)
-	}
+	ehlo := readCodedReply(t, r, 250, "EHLO")
 	if !strings.Contains(ehlo, "MT-PRIORITY") {
 		t.Errorf("EHLO did not advertise MT-PRIORITY: %q", ehlo)
 	}
 
-	// An in-range priority is accepted.
 	send(t, conn, "MAIL FROM:<alice@test> MT-PRIORITY=4\r\n")
 	expect(t, r, 250)
 	send(t, conn, "RSET\r\n")
 	expect(t, r, 250)
-	// Out of range is a 501 parameter syntax error.
-	send(t, conn, "MAIL FROM:<alice@test> MT-PRIORITY=42\r\n")
-	expect(t, r, 501)
-	// Non-integer is likewise refused.
-	send(t, conn, "MAIL FROM:<alice@test> MT-PRIORITY=urgent\r\n")
-	expect(t, r, 501)
+
+	for _, bad := range []string{"42", "urgent"} {
+		send(t, conn, "MAIL FROM:<alice@test> MT-PRIORITY="+bad+"\r\n")
+		expect(t, r, 501)
+		wantEq(t, sess.from, "", "sender after MT-PRIORITY="+bad)
+		send(t, conn, "RCPT TO:<bob@test>\r\n")
+		expect(t, r, 503)
+	}
 }
 
-// TestServerBoundsRecipientsPerTransaction sends one recipient more than the
-// per-message limit. RFC 5321 4.5.3.1.8 requires at least 100 and 4.5.3.1.10
-// answers the excess with 452, which tells the client to send the remaining
-// recipients in a later transaction; 1000 is the Postfix smtpd_recipient_limit
-// default. The excess recipient never reaches the session, the accepted ones
-// still deliver, and a new transaction starts its count from zero.
+// TestServerBoundsRecipientsPerTransaction verifies MaxRecipients enforcement.
 func TestServerBoundsRecipientsPerTransaction(t *testing.T) {
 	sess := &fakeSession{}
 	r, conn := dialServer(t, sess)
@@ -673,17 +640,24 @@ func TestServerSequencingAndSyntax(t *testing.T) {
 	expect(t, r, 220)
 	send(t, conn, "EHLO client.test\r\n")
 	expect(t, r, 250)
-	// RCPT before MAIL is a bad sequence.
 	send(t, conn, "RCPT TO:<bob@test>\r\n")
 	expect(t, r, 503)
-	// Malformed MAIL argument is a syntax error.
+	wantEq(t, len(sess.rcpts), 0, "rcpts after 503")
 	send(t, conn, "MAIL FROM:alice@test\r\n")
 	expect(t, r, 501)
+	send(t, conn, "MAIL FROM:<alice@test\r\n")
+	expect(t, r, 501)
+	wantEq(t, sess.from, "", "sender after 501")
+
 	send(t, conn, "MAIL FROM:<alice@test>\r\n")
 	expect(t, r, 250)
-	// DATA before any RCPT is a bad sequence.
+	send(t, conn, "RCPT TO:bob@test\r\n")
+	expect(t, r, 501)
+	wantEq(t, len(sess.rcpts), 0, "rcpts after 501")
 	send(t, conn, "DATA\r\n")
 	expect(t, r, 503)
+	wantEq(t, sess.delivered, 0, "delivered after 503")
+
 	send(t, conn, "RSET\r\n")
 	expect(t, r, 250)
 	send(t, conn, "FOOBAR\r\n")
@@ -693,22 +667,27 @@ func TestServerSequencingAndSyntax(t *testing.T) {
 }
 
 func TestDSNMailParams(t *testing.T) {
+	maxEnv := strings.Repeat("a", 100)
+	tooLongEnv := strings.Repeat("a", 101)
 	cases := []struct {
 		arg   string
 		ret   string
 		envid string
 		ok    bool
 	}{
-		{"<a@b>", "", "", true},                                 // no DSN params
-		{"<a@b> RET=FULL", "FULL", "", true},                    // RET upper-cased through
-		{"<a@b> RET=hdrs", "HDRS", "", true},                    // case-insensitive
-		{"<a@b> ENVID=abc123", "", "abc123", true},              // simple xtext
-		{"<a@b> RET=FULL ENVID=id+2Bx", "FULL", "id+2Bx", true}, // both, +2B is a valid hexchar
-		{"<a@b> RET=PARTIAL", "", "", false},                    // invalid RET keyword
-		{"<a@b> RET=FULL RET=HDRS", "", "", false},              // duplicate RET
-		{"<a@b> ENVID=a ENVID=b", "", "", false},                // duplicate ENVID
-		{"<a@b> ENVID=bad=value", "", "", false},                // '=' is not a valid xchar
-		{"<a@b> ENVID=trunc+2", "", "", false},                  // truncated hexchar
+		{"<a@b>", "", "", true},
+		{"<a@b> RET=FULL", "FULL", "", true},
+		{"<a@b> RET=hdrs", "HDRS", "", true},
+		{"<a@b> ENVID=abc123", "", "abc123", true},
+		{"<a@b> ENVID=" + maxEnv, "", maxEnv, true},
+		{"<a@b> RET=FULL ENVID=id+2Bx", "FULL", "id+2Bx", true},
+		{"<a@b> RET=PARTIAL", "", "", false},
+		{"<a@b> RET=FULL RET=HDRS", "", "", false},
+		{"<a@b> ENVID=a ENVID=b", "", "", false},
+		{"<a@b> ENVID=" + tooLongEnv, "", "", false},
+		{"<a@b> ENVID=id+2bx", "", "", false},
+		{"<a@b> ENVID=bad=value", "", "", false},
+		{"<a@b> ENVID=trunc+2", "", "", false},
 	}
 	for _, c := range cases {
 		p, ok := dsnMailParams(c.arg)
@@ -719,23 +698,31 @@ func TestDSNMailParams(t *testing.T) {
 }
 
 func TestDSNRcptParams(t *testing.T) {
+	maxORCPT := "rfc822;" + strings.Repeat("x", 500-len("rfc822;"))
+	tooLongORCPT := maxORCPT + "x"
 	cases := []struct {
 		arg    string
 		notify string
 		orcpt  string
 		ok     bool
 	}{
-		{"<a@b>", "", "", true},                                       // none
-		{"<a@b> NOTIFY=NEVER", "NEVER", "", true},                     // NEVER alone
-		{"<a@b> NOTIFY=SUCCESS,FAILURE", "SUCCESS,FAILURE", "", true}, // combinable list
-		{"<a@b> ORCPT=rfc822;bob@x", "", "rfc822;bob@x", true},        // addr-type;xtext
+		{"<a@b>", "", "", true},
+		{"<a@b> NOTIFY=NEVER", "NEVER", "", true},
+		{"<a@b> NOTIFY=SUCCESS,FAILURE", "SUCCESS,FAILURE", "", true},
+		{"<a@b> ORCPT=rfc822;bob@x", "", "rfc822;bob@x", true},
+		{"<a@b> ORCPT=" + maxORCPT, "", maxORCPT, true},
 		{"<a@b> NOTIFY=DELAY ORCPT=rfc822;c@x", "DELAY", "rfc822;c@x", true},
-		{"<a@b> NOTIFY=NEVER,SUCCESS", "", "", false},        // NEVER must be alone
-		{"<a@b> NOTIFY=MAYBE", "", "", false},                // unknown keyword
-		{"<a@b> NOTIFY=", "", "", false},                     // empty value invalid
-		{"<a@b> NOTIFY=SUCCESS NOTIFY=DELAY", "", "", false}, // duplicate
-		{"<a@b> ORCPT=bob@x", "", "", false},                 // missing addr-type ';'
-		{"<a@b> ORCPT=rfc822;bad=val", "", "", false},        // '=' breaks the xtext
+		{"<a@b> NOTIFY=NEVER,SUCCESS", "", "", false},
+		{"<a@b> NOTIFY=SUCCESS,NEVER", "", "", false},
+		{"<a@b> NOTIFY=SUCCESS,", "", "", false},
+		{"<a@b> NOTIFY=MAYBE", "", "", false},
+		{"<a@b> NOTIFY=", "", "", false},
+		{"<a@b> NOTIFY=SUCCESS NOTIFY=DELAY", "", "", false},
+		{"<a@b> ORCPT=bob@x", "", "", false},
+		{"<a@b> ORCPT=;bob@x", "", "", false},
+		{"<a@b> ORCPT=rfc(822);bob@x", "", "", false},
+		{"<a@b> ORCPT=" + tooLongORCPT, "", "", false},
+		{"<a@b> ORCPT=rfc822;bad=val", "", "", false},
 	}
 	for _, c := range cases {
 		p, ok := dsnRcptParams(c.arg)
@@ -750,15 +737,18 @@ func TestValidXtext(t *testing.T) {
 		s  string
 		ok bool
 	}{
-		{"", true},       // empty is valid xtext
-		{"abc", true},    // bare xchars
-		{"a+2Bb", true},  // a literal '+' encoded as +2B
-		{"a=b", false},   // '=' is excluded from xchar
-		{"a+b", false},   // '+' not followed by two hex digits
-		{"a+2", false},   // truncated hexchar
-		{"a+2zb", false}, // 'z' is not a hex digit
-		{"a+2bb", false}, // lower-case hex is rejected (upper-case only)
-		{"a b", false},   // space is below the printable range
+		{"", true},
+		{"abc", true},
+		{"a+2Bb", true},
+		{"a=b", false},
+		{"a+b", false},
+		{"a+2", false},
+		{"a+2zb", false},
+		{"a+2bb", false},
+		{"a b", false},
+		{"a\x00b", false},
+		{"a\x7fb", false},
+		{"aöb", false},
 	}
 	for _, c := range cases {
 		if got := validXtext(c.s); got != c.ok {
@@ -767,44 +757,41 @@ func TestValidXtext(t *testing.T) {
 	}
 }
 
-// TestServerDSN proves RFC 3461 on the wire: EHLO advertises DSN, a MAIL/RCPT
-// carrying valid RET/ENVID/NOTIFY/ORCPT is accepted with those parameters
-// delivered to the session, and a malformed DSN parameter is refused with 501
-// without opening the transaction.
+// TestServerDSN proves RFC 3461 on the wire.
 func TestServerDSN(t *testing.T) {
 	sess := &fakeSession{}
 	r, conn := dialServer(t, sess)
 	expect(t, r, 220)
 
 	send(t, conn, "EHLO client.test\r\n")
-	_, ehlo, err := r.ReadResponse(250)
-	if err != nil {
-		t.Fatalf("EHLO: %v", err)
-	}
+	ehlo := readCodedReply(t, r, 250, "EHLO")
 	if !strings.Contains(ehlo, "DSN") {
 		t.Errorf("EHLO did not advertise DSN: %q", ehlo)
 	}
 
-	// Valid RET/ENVID on MAIL reach the session.
 	send(t, conn, "MAIL FROM:<alice@test> RET=HDRS ENVID=id01\r\n")
 	expect(t, r, 250)
-	if sess.lastMail.RET != "HDRS" || sess.lastMail.ENVID != "id01" {
-		t.Errorf("session MailParams = %+v, want RET=HDRS ENVID=id01", sess.lastMail)
-	}
-	// Valid NOTIFY/ORCPT on RCPT reach the session.
+	wantEq(t, sess.lastMail.RET, "HDRS", "MailParams.RET")
+	wantEq(t, sess.lastMail.ENVID, "id01", "MailParams.ENVID")
+
 	send(t, conn, "RCPT TO:<bob@test> NOTIFY=NEVER ORCPT=rfc822;bob@test\r\n")
 	expect(t, r, 250)
-	if sess.lastRcpt.Notify != "NEVER" || sess.lastRcpt.ORCPT != "rfc822;bob@test" {
-		t.Errorf("session RcptParams = %+v, want NOTIFY=NEVER ORCPT=rfc822;bob@test", sess.lastRcpt)
-	}
+	wantEq(t, sess.lastRcpt.Notify, "NEVER", "RcptParams.Notify")
+	wantEq(t, sess.lastRcpt.ORCPT, "rfc822;bob@test", "RcptParams.ORCPT")
 
-	// A malformed DSN parameter is a 501 before the transaction opens.
 	send(t, conn, "RSET\r\n")
 	expect(t, r, 250)
 	send(t, conn, "MAIL FROM:<alice@test> RET=PARTIAL\r\n")
 	expect(t, r, 501)
+	wantEq(t, sess.from, "", "sender after 501 RET=PARTIAL")
+	send(t, conn, "RCPT TO:<bob@test>\r\n")
+	expect(t, r, 503)
+
 	send(t, conn, "MAIL FROM:<alice@test>\r\n")
 	expect(t, r, 250)
 	send(t, conn, "RCPT TO:<bob@test> NOTIFY=NEVER,SUCCESS\r\n")
 	expect(t, r, 501)
+	wantEq(t, len(sess.rcpts), 0, "rcpts after 501 NOTIFY")
+	send(t, conn, "DATA\r\n")
+	expect(t, r, 503)
 }

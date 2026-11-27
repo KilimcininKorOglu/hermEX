@@ -8,18 +8,13 @@ import (
 )
 
 // A transcript test compares the server's replies BYTE FOR BYTE, not by reply
-// code. Every other test in this package asserts a code and lets the text drift,
-// which leaves the wire surface unpinned: the enhanced status code, the reply
-// text, the order of the EHLO capability lines and the "-"/" " continuation
-// separator are all part of what a client parses, and all of them can change
-// without a single code assertion noticing.
-//
-// This exists so the command loop can be restructured with proof that nothing a
-// client reads moved.
+// code, pinning enhanced status codes, reply text, EHLO line order, and
+// continuation separators.
 
 // transcript drives one session and collects each reply verbatim.
 type transcript struct {
 	t    *testing.T
+	sess *fakeSession
 	conn net.Conn
 	br   *bufio.Reader
 }
@@ -28,20 +23,16 @@ type transcript struct {
 // (0 disables it, which also omits the EHLO SIZE line).
 func newTranscript(t *testing.T, maxSize int64) *transcript {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv := &Server{Backend: &fakeBackend{sess: &fakeSession{}}, Hostname: "mail.test"}
+	sess := &fakeSession{}
+	srv := &Server{Backend: &fakeBackend{sess: sess}, Hostname: "mail.test"}
 	srv.SetMaxSize(maxSize)
-	go func() { _ = srv.Serve(ln) }()
+	ln := serveOn(t, srv)
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
-		_ = ln.Close()
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = conn.Close(); _ = ln.Close() })
-	return &transcript{t: t, conn: conn, br: bufio.NewReader(conn)}
+	t.Cleanup(func() { mustClose(t, conn) })
+	return &transcript{t: t, sess: sess, conn: conn, br: bufio.NewReader(conn)}
 }
 
 // readReply reads one complete reply: continuation lines (a "-" in the fourth
@@ -81,12 +72,6 @@ func (x *transcript) banner(want string) {
 	}
 }
 
-// ehloCapabilities is the block greetEHLO emits before the optional SIZE,
-// STARTTLS and AUTH lines, in its own order. The order is nothing a client may
-// depend on, but pinning it is how a reordering shows up as a deliberate change
-// rather than a silent one. Every line carries the "-" continuation separator;
-// the last line of the whole reply is what gets the space, which is why the
-// separator is decided by whether SIZE follows.
 const ehloCapabilities = "250-mail.test Hello client.test\n" +
 	"250-PIPELINING\n" +
 	"250-8BITMIME\n" +
@@ -96,11 +81,8 @@ const ehloCapabilities = "250-mail.test Hello client.test\n" +
 	"250-BINARYMIME\n" +
 	"250-MT-PRIORITY\n"
 
-// ehloReply is the whole reply when no size limit is configured: DSN is last.
 const ehloReply = ehloCapabilities + "250 DSN"
 
-// ehloReplyWithSize is the whole reply when a limit is configured: DSN becomes a
-// continuation line and SIZE is last.
 func ehloReplyWithSize(limit string) string {
 	return ehloCapabilities + "250-DSN\n250 SIZE " + limit
 }
@@ -111,9 +93,8 @@ func TestTranscriptServiceAndSequence(t *testing.T) {
 	x := newTranscript(t, 0)
 	x.banner("220 mail.test ESMTP hermEX")
 
-	// Before any greeting: a mail command is a sequence error, a service command
-	// is not (RFC 5321 §4.1.4).
 	x.exchange("MAIL FROM:<alice@test>\r\n", "503 5.5.1 send HELO/EHLO first")
+	wantEq(x.t, x.sess.from, "", "sender after pre-EHLO MAIL")
 	x.exchange("VRFY bob@test\r\n", "252 2.1.5 Cannot VRFY user, but will accept message and attempt delivery")
 	x.exchange("EXPN staff@test\r\n", "502 5.5.1 EXPN not available")
 	x.exchange("HELP\r\n", "214 2.0.0 hermEX ESMTP; supported: HELO EHLO MAIL RCPT DATA BDAT RSET NOOP QUIT (RFC 5321)")
@@ -123,10 +104,11 @@ func TestTranscriptServiceAndSequence(t *testing.T) {
 	x.exchange("EHLO client.test\r\n", ehloReply)
 	x.exchange("HELO client.test\r\n", "250 2.0.0 mail.test")
 
-	// RCPT before MAIL, and DATA before RCPT.
 	x.exchange("RCPT TO:<bob@test>\r\n", "503 5.0.0 need MAIL before RCPT")
+	wantEq(x.t, len(x.sess.rcpts), 0, "rcpts after pre-MAIL RCPT")
 	x.exchange("MAIL FROM:<alice@test>\r\n", "250 2.0.0 OK")
 	x.exchange("DATA\r\n", "503 5.0.0 need RCPT before DATA")
+	wantEq(x.t, x.sess.delivered, 0, "delivered after pre-RCPT DATA")
 
 	x.exchange("QUIT\r\n", "221 2.0.0 mail.test closing connection")
 }
@@ -143,16 +125,18 @@ func TestTranscriptParameterRejections(t *testing.T) {
 	x.exchange("MAIL FROM:<alice@test> MT-PRIORITY=42\r\n", "501 5.5.2 syntax error in MT-PRIORITY parameter")
 	x.exchange("MAIL FROM:<alice@test> RET=PARTIAL\r\n", "501 5.5.4 syntax error in DSN parameter")
 	x.exchange("MAIL FROM:<posıta@örnek.test>\r\n", "550 5.6.7 non-ASCII address requires the SMTPUTF8 extension")
+	wantEq(x.t, x.sess.from, "", "sender after rejected MAIL parameters")
 
 	x.exchange("MAIL FROM:<alice@test>\r\n", "250 2.0.0 OK")
 	x.exchange("RCPT bob@test\r\n", "501 5.0.0 syntax: RCPT TO:<address>")
 	x.exchange("RCPT TO:<bob@test> NOTIFY=SOMETIMES\r\n", "501 5.5.4 syntax error in DSN parameter")
 	x.exchange("RCPT TO:<alıcı@örnek.test>\r\n", "553 5.6.7 non-ASCII address requires the SMTPUTF8 extension")
+	wantEq(x.t, len(x.sess.rcpts), 0, "rcpts after rejected RCPT parameters")
 	x.exchange("QUIT\r\n", "221 2.0.0 mail.test closing connection")
 }
 
 // TestTranscriptDataPath pins the DATA exchange, including the bare 354
-// intermediate (no enhanced code) and the size rejection after the body.
+// intermediate (no enhanced code).
 func TestTranscriptDataPath(t *testing.T) {
 	x := newTranscript(t, 0)
 	x.banner("220 mail.test ESMTP hermEX")
@@ -161,15 +145,14 @@ func TestTranscriptDataPath(t *testing.T) {
 	x.exchange("RCPT TO:<bob@test>\r\n", "250 2.0.0 OK")
 	x.exchange("DATA\r\n", "354 end data with <CR><LF>.<CR><LF>")
 	x.exchange("Subject: hi\r\n\r\nbody\r\n.\r\n", "250 2.0.0 OK")
+	wantEq(x.t, x.sess.delivered, 1, "delivered after DATA")
 
-	// DATA closed the transaction, so the next one starts from scratch.
 	x.exchange("RCPT TO:<bob@test>\r\n", "503 5.0.0 need MAIL before RCPT")
 	x.exchange("RSET\r\n", "250 2.0.0 OK")
 	x.exchange("QUIT\r\n", "221 2.0.0 mail.test closing connection")
 }
 
-// TestTranscriptDataSizeRejection pins the over-limit body reply, which arrives
-// after the client has already sent every byte.
+// TestTranscriptDataSizeRejection pins the over-limit body reply.
 func TestTranscriptDataSizeRejection(t *testing.T) {
 	x := newTranscript(t, 64)
 	x.banner("220 mail.test ESMTP hermEX")
@@ -178,26 +161,25 @@ func TestTranscriptDataSizeRejection(t *testing.T) {
 	x.exchange("RCPT TO:<bob@test>\r\n", "250 2.0.0 OK")
 	x.exchange("DATA\r\n", "354 end data with <CR><LF>.<CR><LF>")
 	x.exchange("Subject: hi\r\n\r\n"+strings.Repeat("x", 500)+"\r\n.\r\n", "552 5.0.0 message exceeds size limit")
+	wantEq(x.t, x.sess.delivered, 0, "delivered after size rejection")
 	x.exchange("QUIT\r\n", "221 2.0.0 mail.test closing connection")
 }
 
-// TestTranscriptBDATPath pins the CHUNKING exchange: the octet count in a
-// non-final chunk's reply, the sequence errors, and the poisoned-transaction
-// reply an oversized chunk leaves behind.
+// TestTranscriptBDATPath pins the CHUNKING exchange.
 func TestTranscriptBDATPath(t *testing.T) {
 	x := newTranscript(t, 0)
 	x.banner("220 mail.test ESMTP hermEX")
 	x.exchange("EHLO client.test\r\n", ehloReply)
 
-	// BDAT before MAIL/RCPT: the chunk is still read off the wire first, then
-	// refused, or the next command read would parse message bytes.
 	x.exchange("BDAT 5\r\nhello", "503 5.5.1 need MAIL and RCPT before BDAT")
 	x.exchange("BDAT nonsense\r\n", "501 5.5.4 syntax: BDAT <chunk-size> [LAST]")
+	wantEq(x.t, x.sess.delivered, 0, "delivered before valid BDAT")
 
 	x.exchange("MAIL FROM:<alice@test>\r\n", "250 2.0.0 OK")
 	x.exchange("RCPT TO:<bob@test>\r\n", "250 2.0.0 OK")
 	x.exchange("BDAT 6\r\nfirst ", "250 2.0.0 6 octets received")
 	x.exchange("BDAT 5 LAST\r\nchunk", "250 2.0.0 OK")
+	wantEq(x.t, x.sess.delivered, 1, "delivered after BDAT LAST")
 	x.exchange("QUIT\r\n", "221 2.0.0 mail.test closing connection")
 }
 
@@ -213,6 +195,7 @@ func TestTranscriptBDATPoisonedTransaction(t *testing.T) {
 	x.exchange("BDAT 20\r\n"+strings.Repeat("x", 20), "552 5.3.4 message size exceeds limit")
 	x.exchange("BDAT 3\r\nabc", "503 5.5.0 BDAT transaction failed; send RSET")
 	x.exchange("DATA\r\n", "503 5.5.1 DATA not allowed after BDAT; send RSET")
+	wantEq(x.t, x.sess.delivered, 0, "delivered on poisoned BDAT")
 	x.exchange("RSET\r\n", "250 2.0.0 OK")
 	x.exchange("QUIT\r\n", "221 2.0.0 mail.test closing connection")
 }
@@ -226,12 +209,11 @@ func TestTranscriptBinaryMIMERequiresBDAT(t *testing.T) {
 	x.exchange("MAIL FROM:<alice@test> BODY=BINARYMIME\r\n", "250 2.0.0 OK")
 	x.exchange("RCPT TO:<bob@test>\r\n", "250 2.0.0 OK")
 	x.exchange("DATA\r\n", "503 5.5.1 BINARYMIME requires BDAT, not DATA")
+	wantEq(x.t, x.sess.delivered, 0, "delivered when BINARYMIME sent DATA")
 	x.exchange("QUIT\r\n", "221 2.0.0 mail.test closing connection")
 }
 
-// TestTranscriptAuthUnavailable pins the AUTH replies on a session that offers
-// no credentials check and a link with no TLS, the two refusals a client sees
-// before it ever reaches a mechanism.
+// TestTranscriptAuthUnavailable pins the AUTH and STARTTLS refusal replies.
 func TestTranscriptAuthUnavailable(t *testing.T) {
 	x := newTranscript(t, 0)
 	x.banner("220 mail.test ESMTP hermEX")
