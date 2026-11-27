@@ -55,6 +55,28 @@ func TestExportPreservesXSpamHeaders(t *testing.T) {
 	}
 }
 
+// TestExportKeepsSpamFieldsBeforeAMalformedLine stores an arrival header the
+// sender broke with a line that is no header field. The server's own X-Spam-*
+// fields come first (antispam.Tag prepends them), so they must still be emitted,
+// and the line must not make the message unexportable.
+func TestExportKeepsSpamFieldsBeforeAMalformedLine(t *testing.T) {
+	msg := &Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrSubject, Value: "hi"},
+		{Tag: mapi.PrTransportMessageHeaders, Value: "X-Spam-Flag: YES\r\nX-Spam-Score: 9\r\n" +
+			"this line has no colon\r\nSubject: hi\r\n"},
+	}}
+	wire, err := Export(msg, Options{})
+	mustNoErr(t, err, "export a message whose arrival header holds a malformed line")
+	for _, want := range []string{"X-Spam-Flag: YES\r\n", "X-Spam-Score: 9\r\n"} {
+		if !bytes.Contains(wire, []byte(want)) {
+			t.Errorf("%q was dropped by a malformed line after it:\n%s", want, wire)
+		}
+	}
+	if bytes.Contains(wire, []byte("this line has no colon")) {
+		t.Errorf("the malformed line reached the exported header:\n%s", wire)
+	}
+}
+
 // TestExportWellFormed checks that Export produces a message a standard,
 // independent parser (net/mail) accepts, with the key headers decoding to the
 // expected values.
@@ -124,9 +146,6 @@ func checkExportedEnvelope(t *testing.T, m *mail.Message) {
 	}
 }
 
-// TestExportImportRoundTrip checks that Export(Import(raw)) re-imports to the
-// same core property set: the convert path preserves meaning even though the
-// bytes are regenerated.
 // TestEnsureMessageID covers the originating-message Message-ID policy: a
 // submission path calls EnsureMessageID before Export, which assigns a unique id
 // at the sender's domain when absent and preserves an explicit one; Export itself
@@ -180,6 +199,9 @@ func TestEnsureMessageID(t *testing.T) {
 	}
 }
 
+// TestExportImportRoundTrip checks that Export(Import(raw)) re-imports to the
+// same core property set: the convert path preserves meaning even though the
+// bytes are regenerated.
 func TestExportImportRoundTrip(t *testing.T) {
 	msg1, err := Import(plainVector, Options{})
 	mustNoErr(t, err, "first import")
@@ -198,13 +220,17 @@ func TestExportImportRoundTrip(t *testing.T) {
 	}
 
 	for _, tag := range []mapi.PropTag{mapi.PrImportance, mapi.PrSensitivity} {
-		v1, _ := propInt32(msg1.Props, tag)
-		v2, _ := propInt32(msg2.Props, tag)
+		v1, ok1 := propInt32(msg1.Props, tag)
+		v2, ok2 := propInt32(msg2.Props, tag)
+		wantEq(t, ok2, ok1, tag.String()+" presence after the round trip")
 		wantEq(t, v2, v1, tag.String()+" after the round trip")
 	}
 
-	t1, _ := propUint64(msg1.Props, mapi.PrClientSubmitTime)
-	t2, _ := propUint64(msg2.Props, mapi.PrClientSubmitTime)
+	t1, ok1 := propUint64(msg1.Props, mapi.PrClientSubmitTime)
+	t2, ok2 := propUint64(msg2.Props, mapi.PrClientSubmitTime)
+	if !ok1 || !ok2 {
+		t.Fatalf("submit time present before %v, after %v; the Date header must set it both times", ok1, ok2)
+	}
 	wantEq(t, t2, t1, "submit time after the round trip")
 
 	checkRecipientsPreserved(t, msg1, msg2)
@@ -221,8 +247,11 @@ func checkRecipientsPreserved(t *testing.T, msg1, msg2 *Message) {
 		label := "recipient " + strconv.Itoa(i)
 		wantEq(t, propString(msg2.Recipients[i], mapi.PrSmtpAddress),
 			propString(msg1.Recipients[i], mapi.PrSmtpAddress), label+" smtp")
-		want, _ := propInt32(msg1.Recipients[i], mapi.PrRecipientType)
-		got, _ := propInt32(msg2.Recipients[i], mapi.PrRecipientType)
+		want, okWant := propInt32(msg1.Recipients[i], mapi.PrRecipientType)
+		got, okGot := propInt32(msg2.Recipients[i], mapi.PrRecipientType)
+		if !okWant || !okGot {
+			t.Fatalf("%s type present before %v, after %v; every recipient row carries one", label, okWant, okGot)
+		}
 		wantEq(t, got, want, label+" type")
 	}
 }
