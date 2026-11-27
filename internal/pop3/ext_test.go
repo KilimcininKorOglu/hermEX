@@ -62,28 +62,22 @@ func servePOP3(t *testing.T, msg string) net.Conn {
 	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(msg), time.Unix(1, 0), 0); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
-	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test"}).Serve(ln) }()
-
+	ln := serveOn(t, &Server{Auth: auth, Hostname: "mail.test"})
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = conn.Close() })
+	t.Cleanup(func() { mustClose(t, conn) })
 	return conn
 }
 
 // TestPOP3CapaAdvertisesExtensions checks the CAPA list advertises every optional
 // command and extension hermEX implements, in both protocol states.
 func TestPOP3CapaAdvertisesExtensions(t *testing.T) {
-	r, send, wantOK, _, readLines := dialPOP3(t, "Subject: x\r\n\r\nbody\r\n")
+	_, send, wantOK, _, readLines := dialPOP3(t, "Subject: x\r\n\r\nbody\r\n")
 	wantOK() // greeting
 
 	send("CAPA")
@@ -105,7 +99,6 @@ func TestPOP3CapaAdvertisesExtensions(t *testing.T) {
 	if caps := strings.Join(readLines(), " "); !strings.Contains(caps, "UIDL") {
 		t.Errorf("CAPA in TRANSACTION state failed; got: %s", caps)
 	}
-	_ = r
 }
 
 // TestPOP3AuthRespCode checks a failed login carries the RFC 3206 [AUTH] code.
@@ -148,6 +141,8 @@ func TestPOP3Top(t *testing.T) {
 	msg := "Subject: top test\r\nFrom: a@b.test\r\n\r\nLINE_ONE\r\nLINE_TWO\r\nLINE_THREE\r\n"
 	r, send, wantOK, wantERR, _ := dialPOP3(t, msg)
 	wantOK() // greeting
+	send("TOP 1 0")
+	wantERR() // TOP is a TRANSACTION command (RFC 1939), refused before login
 	send("USER alice")
 	wantOK()
 	send("PASS secret")
@@ -180,9 +175,15 @@ func TestPOP3Top(t *testing.T) {
 		}
 	}
 
-	// Error cases: unknown message and a malformed argument count.
-	send("TOP 99 1")
-	wantERR()
-	send("TOP 1")
-	wantERR()
+	// Error cases (RFC 1939 TOP msg n: msg names an existing message, n is a
+	// non-negative number): an unknown message, a malformed argument count, and
+	// arguments that are negative, past int64, zero or not numbers.
+	for _, cmd := range []string{"TOP 99 1", "TOP 1", "TOP 1 -1", "TOP 1 99999999999999999999",
+		"TOP 0 1", "TOP abc 1", "TOP 1 x"} {
+		send(cmd)
+		wantERR()
+	}
+	// The refusals leave the session serving.
+	send("STAT")
+	wantOK()
 }
