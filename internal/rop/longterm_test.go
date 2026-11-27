@@ -80,6 +80,12 @@ func TestLongTermIdRoundTrip(t *testing.T) {
 	if got != objEID {
 		t.Errorf("round-trip id = %#x, want %#x", got, objEID)
 	}
+
+	// A long-term id naming a replica this store does not hold resolves to nothing:
+	// guessing a GUID must not mint a short-term id the client could then address.
+	foreign := mapi.GUID{Data1: 0xBADC0DE}
+	bad, _ := sess.Dispatch(buildIdFromLongTermId(foreign, gc), []uint32{logonH})
+	wantEC(t, bad, ropIdFromLongTermId, ecInvalidParam, "IdFromLongTermId(foreign GUID)")
 }
 
 // TestLogonReplicaGUIDResolves proves the replica GUID the logon pairs with its
