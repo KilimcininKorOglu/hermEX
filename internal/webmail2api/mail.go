@@ -722,6 +722,10 @@ func (s *Server) handleMailDelete(w http.ResponseWriter, r *http.Request) {
 	} else {
 		_, err = st.MoveMessage(fid, uid, mapi.PrivateFIDDeletedItems)
 	}
+	if errors.Is(err, objectstore.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
 	if err != nil {
 		logError("delete-mail", err, logging.Fields{"folder": fid})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delete failed"})
