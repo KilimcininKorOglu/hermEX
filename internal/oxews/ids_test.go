@@ -21,12 +21,12 @@ func TestItemIDRoundTrip(t *testing.T) {
 
 // TestFolderIDRoundTrip confirms a folder id encodes and decodes losslessly.
 func TestFolderIDRoundTrip(t *testing.T) {
-	got, _, err := DecodeFolderID(EncodeFolderID(0x1e))
+	got, mb, err := DecodeFolderID(EncodeFolderID(0x1e))
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got != 0x1e {
-		t.Errorf("round trip = %d, want 30", got)
+	if got != 0x1e || mb != "" {
+		t.Errorf("round trip = %d/%q, want 30 in the own mailbox", got, mb)
 	}
 }
 
@@ -107,5 +107,24 @@ func TestDecodeBadID(t *testing.T) {
 	}
 	if _, _, _, _, err := DecodeAttachmentID("@@@"); err == nil {
 		t.Error("expected error for malformed attachment id")
+	}
+}
+
+// TestDecodeForgedItemID feeds tokens a client built itself: valid base64 around
+// coordinates the server never minted. Each must be refused, not read as a
+// partial id that would address some other item.
+func TestDecodeForgedItemID(t *testing.T) {
+	for _, body := range []string{
+		"13.65546",            // too few fields
+		"13.65546.7.1.2",      // too many fields
+		"13.x.7",              // non-numeric message id
+		"13.65546.4294967296", // uid beyond 32 bits
+		"13.65546.7.0",        // an occurrence id without an instance
+		"",                    // nothing at all
+	} {
+		tok := base64.RawURLEncoding.EncodeToString([]byte(body))
+		if got, err := DecodeAnyItemID(tok); err == nil {
+			t.Errorf("DecodeAnyItemID(%q) = %+v, want an error", body, got)
+		}
 	}
 }
