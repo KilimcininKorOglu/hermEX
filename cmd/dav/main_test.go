@@ -37,7 +37,9 @@ func TestApplyDAVSizeLimits(t *testing.T) {
 	}
 
 	untouched := davLimits{ical: -1, vcard: -1, freeBusyTargets: -1}
-	got = applyWith(func() (directory.SizeLimits, bool, error) { return stored, false, errors.New("db down") })
+	// found is true beside the error, so only the error guard stands between a
+	// half-read row and the setters: the !found guard cannot hide its loss.
+	got = applyWith(func() (directory.SizeLimits, bool, error) { return stored, true, errors.New("db down") })
 	if got != untouched {
 		t.Errorf("a read error applied %+v; every cap must be left unchanged", got)
 	}

@@ -38,8 +38,10 @@ func TestApplyEWSSizeLimit(t *testing.T) {
 		t.Errorf("applied cap = %d, want 8192", got.body)
 	}
 
+	// found is true beside the error, so only the error guard stands between a
+	// half-read row and the setters: the !found guard cannot hide its loss.
 	got = runApply(func() (directory.SizeLimits, bool, error) {
-		return directory.SizeLimits{}, false, errors.New("db down")
+		return directory.SizeLimits{EWSRequestBytes: 8192}, true, errors.New("db down")
 	})
 	if got.body != sentinel {
 		t.Errorf("setter called on read error (got %d); the cap must be left unchanged", got.body)
@@ -83,7 +85,7 @@ func TestApplyEWSFreeBusyTargets(t *testing.T) {
 	}
 
 	got = runApply(func() (directory.SizeLimits, bool, error) {
-		return directory.SizeLimits{FreeBusyMaxTargets: 7}, false, errors.New("db down")
+		return directory.SizeLimits{FreeBusyMaxTargets: 7}, true, errors.New("db down")
 	})
 	if got.targets != sentinel {
 		t.Errorf("free/busy setter called on read error (got %d); it must be left unchanged", got.targets)
@@ -104,7 +106,7 @@ func TestApplyEWSSubscriptionTimeout(t *testing.T) {
 	}
 
 	got = runApply(func() (directory.SizeLimits, bool, error) {
-		return directory.SizeLimits{}, false, errors.New("db down")
+		return directory.SizeLimits{EWSSubscriptionTimeoutMinutes: 720}, true, errors.New("db down")
 	})
 	if got.subTimeout != sentinel {
 		t.Errorf("subscription-timeout setter called on read error (got %d); it must be left unchanged", got.subTimeout)

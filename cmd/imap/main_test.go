@@ -27,10 +27,12 @@ func TestApplyIMAPSizeLimit(t *testing.T) {
 	}
 
 	// A read error must NOT call the setter, the running cap stays as it is.
+	// found is true beside the error, so only the error guard stands between a
+	// half-read row and the setter: the !found guard cannot hide its loss.
 	got = sentinel
 	applyIMAPSizeLimit(nil,
 		func() (directory.SizeLimits, bool, error) {
-			return directory.SizeLimits{}, false, errors.New("db down")
+			return directory.SizeLimits{IMAPLiteralBytes: 4096}, true, errors.New("db down")
 		},
 		func(s directory.SizeLimits) { got = s.IMAPLiteralBytes })
 	if got != sentinel {

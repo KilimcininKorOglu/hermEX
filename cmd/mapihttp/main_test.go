@@ -32,10 +32,12 @@ func TestApplyMapiSizeLimit(t *testing.T) {
 		t.Errorf("applied caps = request %d, upload %d, want 8192 and 65536", got[0], got[1])
 	}
 
+	// found is true beside the error, so only the error guard stands between a
+	// half-read row and the setters: the !found guard cannot hide its loss.
 	got, set = recordingSetters()
 	applyMapiSizeLimit(nil,
 		func() (directory.SizeLimits, bool, error) {
-			return directory.SizeLimits{}, false, errors.New("db down")
+			return directory.SizeLimits{MapiRequestBytes: 8192, MapiUploadMessageBytes: 65536}, true, errors.New("db down")
 		}, set)
 	if *got != [2]int64{-1, -1} {
 		t.Errorf("a setter was called on a read error (%v); the caps must be left unchanged", *got)

@@ -36,8 +36,10 @@ func TestApplyActiveSyncSizeLimit(t *testing.T) {
 	}
 
 	untouched := recordedLimits{requestBody: -1, freeBusyTargets: -1}
+	// found is true beside the error, so only the error guard stands between a
+	// half-read row and the setters: the !found guard cannot hide its loss.
 	got = applyWith(func() (directory.SizeLimits, bool, error) {
-		return stored, false, errors.New("db down")
+		return stored, true, errors.New("db down")
 	})
 	if got != untouched {
 		t.Errorf("a read error applied %+v; both caps must be left unchanged", got)
