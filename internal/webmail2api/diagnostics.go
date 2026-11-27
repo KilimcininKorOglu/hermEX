@@ -5,6 +5,9 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"hermex/internal/logging"
+	"hermex/internal/relay"
 )
 
 // diagnosticJSON is the SPA's DiagnosticEntry shape.
@@ -36,23 +39,36 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]diagnosticJSON, 0)
 	if strings.EqualFold(mailbox, c.Email) && s.spool != nil {
-		if entries, err := s.spool.List(); err == nil {
-			for _, e := range entries {
-				if e.LastError == "" || !strings.EqualFold(e.From, c.Email) {
-					continue
-				}
-				out = append(out, diagnosticJSON{
-					ID:        fmt.Sprintf("delivery-%d-%d", e.MessageID, e.RecipientID),
-					Severity:  "warning",
-					Category:  "delivery",
-					Message:   fmt.Sprintf("Delivery to %s is failing: %s", e.Recipient, e.LastError),
-					Mailbox:   c.Email,
-					Timestamp: e.EnqueuedAt.UTC().Format(time.RFC3339),
-					Retryable: true,
-					NextStep:  "The server will keep retrying (next attempt " + e.NextAttempt.UTC().Format(time.RFC3339) + ")",
-				})
-			}
+		entries, err := s.spool.List()
+		if err != nil {
+			// An empty list would tell the user nothing is stuck.
+			logError("diagnostics-queue", err, logging.Fields{"user": c.Email})
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read the delivery queue"})
+			return
 		}
+		out = ownFailedDeliveries(entries, c.Email)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"errors": out})
+}
+
+// ownFailedDeliveries renders the queue entries the caller sent that have a
+// failed attempt on record.
+func ownFailedDeliveries(entries []relay.QueueEntry, email string) []diagnosticJSON {
+	out := make([]diagnosticJSON, 0)
+	for _, e := range entries {
+		if e.LastError == "" || !strings.EqualFold(e.From, email) {
+			continue
+		}
+		out = append(out, diagnosticJSON{
+			ID:        fmt.Sprintf("delivery-%d-%d", e.MessageID, e.RecipientID),
+			Severity:  "warning",
+			Category:  "delivery",
+			Message:   fmt.Sprintf("Delivery to %s is failing: %s", e.Recipient, e.LastError),
+			Mailbox:   email,
+			Timestamp: e.EnqueuedAt.UTC().Format(time.RFC3339),
+			Retryable: true,
+			NextStep:  "The server will keep retrying (next attempt " + e.NextAttempt.UTC().Format(time.RFC3339) + ")",
+		})
+	}
+	return out
 }
