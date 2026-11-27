@@ -8,7 +8,6 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"hash/fnv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -242,10 +241,19 @@ func (c *Config) maildirRoot(address string) string {
 	if len(c.DataPartitions) == 0 {
 		return c.DataDir
 	}
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(address))
 	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
-	return c.DataPartitions[h.Sum32()%uint32(len(c.DataPartitions))]
+	return c.DataPartitions[fnv1a32(address)%uint32(len(c.DataPartitions))]
+}
+
+// fnv1a32 is the 32-bit FNV-1a hash (offset basis 2166136261, prime 16777619),
+// the placement hash every daemon must agree on, so it never changes.
+func fnv1a32(s string) uint32 {
+	h := uint32(2166136261)
+	for i := 0; i < len(s); i++ {
+		h ^= uint32(s[i])
+		h *= 16777619
+	}
+	return h
 }
 
 // HomedirFor derives a domain's public-store directory: {DataDir}/domain/{domain}.

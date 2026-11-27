@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"hash/fnv"
 	"math/big"
 	"net"
 	"os"
@@ -198,6 +199,31 @@ func TestTLSConfigHandshake(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TLSConfig: %v", err)
 	}
+	checkHardening(t, cfg)
+
+	addr, server := serveTLS(t, cfg)
+	client, err := tls.Dial("tcp", addr, &tls.Config{RootCAs: certPool(t, certPath), ServerName: "localhost"})
+	if err != nil {
+		t.Fatalf("dial (trusting configured cert): %v", err)
+	}
+	if v := client.ConnectionState().Version; v < tls.VersionTLS12 {
+		t.Errorf("negotiated version = %#x, want >= TLS 1.2", v)
+	}
+	if err := serverResult(t, server, "handshake"); err != nil {
+		t.Errorf("server handshake: %v", err)
+	}
+	if err := serverResult(t, server, "close"); err != nil {
+		t.Errorf("server close: %v", err)
+	}
+	if err := client.Close(); err != nil {
+		t.Errorf("client close: %v", err)
+	}
+}
+
+// checkHardening asserts the handshake settings both server builders share: a
+// TLS 1.2 floor (RFC 8996), X25519 preferred, session resumption kept on.
+func checkHardening(t *testing.T, cfg *tls.Config) {
+	t.Helper()
 	if cfg.MinVersion != tls.VersionTLS12 {
 		t.Errorf("MinVersion = %#x, want TLS 1.2 (%#x)", cfg.MinVersion, tls.VersionTLS12)
 	}
@@ -206,16 +232,6 @@ func TestTLSConfigHandshake(t *testing.T) {
 	}
 	if cfg.SessionTicketsDisabled {
 		t.Error("SessionTicketsDisabled = true, want session resumption enabled")
-	}
-
-	addr := serveTLS(t, cfg)
-	client, err := tls.Dial("tcp", addr, &tls.Config{RootCAs: certPool(t, certPath), ServerName: "localhost"})
-	if err != nil {
-		t.Fatalf("dial (trusting configured cert): %v", err)
-	}
-	defer client.Close()
-	if v := client.ConnectionState().Version; v < tls.VersionTLS12 {
-		t.Errorf("negotiated version = %#x, want >= TLS 1.2", v)
 	}
 }
 
@@ -228,37 +244,82 @@ func TestTLSConfigRefusesALegacyClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TLSConfig: %v", err)
 	}
-	addr := serveTLS(t, cfg)
+	addr, server := serveTLS(t, cfg)
 	client, err := tls.Dial("tcp", addr, &tls.Config{
 		RootCAs: certPool(t, certPath), ServerName: "localhost",
 		MinVersion: tls.VersionTLS10, MaxVersion: tls.VersionTLS11,
 	})
 	if err == nil {
 		v := client.ConnectionState().Version
-		_ = client.Close()
+		if cerr := client.Close(); cerr != nil {
+			t.Errorf("client close: %v", cerr)
+		}
 		t.Fatalf("a TLS 1.1 client completed a handshake at version %#x", v)
+	}
+	// The refusal is the server's: its own handshake must fail too, not only the
+	// client's view of it.
+	if err := serverResult(t, server, "handshake"); err == nil {
+		t.Error("the server completed a handshake with a TLS 1.1 client")
+	}
+	if err := serverResult(t, server, "close"); err != nil {
+		t.Errorf("server close: %v", err)
+	}
+}
+
+// TestPartitionHashIsStandardFNV1a: the root a mailbox is placed under must not
+// move between releases, so the placement hash is FNV-1a 32 exactly as the
+// standard library computes it.
+func TestPartitionHashIsStandardFNV1a(t *testing.T) {
+	for _, addr := range []string{"", "alice@example.com", "x@other.test@example.com", "üser@exämple.test"} {
+		ref := fnv.New32a()
+		if _, err := ref.Write([]byte(addr)); err != nil {
+			t.Fatalf("reference hash: %v", err)
+		}
+		if got, want := fnv1a32(addr), ref.Sum32(); got != want {
+			t.Errorf("fnv1a32(%q) = %#x, want %#x", addr, got, want)
+		}
 	}
 }
 
 // serveTLS listens on a loopback port with the built config and drives the server
-// side of one handshake, returning the dial address.
-func serveTLS(t *testing.T, cfg *tls.Config) string {
+// side of one handshake. It returns the dial address and a channel that carries
+// the server's handshake result, then the error of closing that connection.
+func serveTLS(t *testing.T, cfg *tls.Config) (string, <-chan error) {
 	t.Helper()
 	rawLn, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 	ln := tls.NewListener(rawLn, cfg)
-	t.Cleanup(func() { _ = ln.Close() })
+	t.Cleanup(func() {
+		if err := ln.Close(); err != nil {
+			t.Errorf("close listener: %v", err)
+		}
+	})
+	result := make(chan error, 2)
 	go func() {
 		conn, err := ln.Accept()
 		if err != nil {
+			result <- err
 			return
 		}
-		defer conn.Close()
-		_ = conn.(*tls.Conn).Handshake() // drive the server side of the handshake
+		result <- conn.(*tls.Conn).Handshake()
+		result <- conn.Close()
 	}()
-	return ln.Addr().String()
+	return ln.Addr().String(), result
+}
+
+// serverResult reads the next value serveTLS sent, bounded so a server that
+// never finished fails the test instead of hanging it.
+func serverResult(t *testing.T, result <-chan error, what string) error {
+	t.Helper()
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatalf("server %s did not finish within 5s", what)
+		return nil
+	}
 }
 
 // certPool trusts exactly the configured certificate, so the handshake proves the
