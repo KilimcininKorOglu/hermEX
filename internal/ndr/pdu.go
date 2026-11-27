@@ -184,7 +184,7 @@ func pullHeaderPrefix(p *Pull) (Header, error) {
 	if vers != 5 {
 		return h, ErrFormat
 	}
-	if _, err = p.Uint8(); err != nil { // rpc_vers_minor
+	if err = p.Skip(1); err != nil { // rpc_vers_minor
 		return h, err
 	}
 	if h.Type, err = p.Uint8(); err != nil {

@@ -2,6 +2,7 @@ package ndr
 
 import (
 	"bytes"
+	"errors"
 	"slices"
 	"testing"
 
@@ -287,15 +288,38 @@ func TestPullCheckCount(t *testing.T) {
 	}
 }
 
+// TestSkipAlignedPassesAReservedField skips a reserved 32-bit field after one
+// byte: NDR aligns a 32-bit primitive to 4 (C706 14.2.2), so the skip consumes
+// the three padding bytes and the field, and the byte after it (an unaligned
+// uint8) is read from offset 8. A skip past the end or of a negative count is
+// refused and leaves the read position where it was.
+func TestSkipAlignedPassesAReservedField(t *testing.T) {
+	p := NewPull([]byte{0x07, 0, 0, 0, 0xAA, 0xBB, 0xCC, 0xDD, 0x42})
+	mustNoErr(t, p.Skip(1), "skip the leading byte")
+	mustNoErr(t, p.SkipAligned(4), "skip the reserved field")
+	v, err := p.Uint8()
+	mustNoErr(t, err, "read after the reserved field")
+	wantEq(t, v, uint8(0x42), "byte after the reserved field")
+
+	q := NewPull([]byte{1, 2, 3})
+	for _, n := range []int{-1, 4} {
+		if err := q.Skip(n); !errors.Is(err, ErrUnderflow) {
+			t.Errorf("Skip(%d) err = %v, want ErrUnderflow", n, err)
+		}
+		wantEq(t, q.Remaining(), 3, "remaining after a refused skip")
+	}
+	if err := q.SkipAligned(4); !errors.Is(err, ErrUnderflow) {
+		t.Errorf("SkipAligned(4) on 3 bytes err = %v, want ErrUnderflow", err)
+	}
+}
+
 // TestAlignPastTheEndLeavesNothingToRead aligns a 5-byte buffer that has been
 // read to its end. The padding the alignment asks for is not on the wire, so the
 // reader must report no bytes left: Rest returns an empty blob and the next
 // read fails, rather than the read position passing the end of the buffer.
 func TestAlignPastTheEndLeavesNothingToRead(t *testing.T) {
 	p := NewPull([]byte{1, 2, 3, 4, 5})
-	if _, err := p.Raw(5); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, p.Skip(5), "skip to the end")
 	p.Align(8)
 	if n := p.Remaining(); n != 0 {
 		t.Errorf("Remaining after aligning past the end = %d, want 0", n)

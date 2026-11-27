@@ -184,6 +184,24 @@ func (p *Pull) Raw(n int) ([]byte, error) {
 	return out, nil
 }
 
+// Skip advances past n bytes the decoder has no use for, such as a field the
+// specification reserves or tells the receiver to ignore. A negative n or one past
+// the end of the buffer fails with ErrUnderflow and moves nothing.
+func (p *Pull) Skip(n int) error {
+	if err := p.need(n); err != nil {
+		return err
+	}
+	p.off += n
+	return nil
+}
+
+// SkipAligned passes an unused n-byte primitive the way reading it would: it
+// aligns to n first, as Uint16 and Uint32 do, then skips n bytes.
+func (p *Pull) SkipAligned(n int) error {
+	p.Align(n)
+	return p.Skip(n)
+}
+
 // Rest returns a fresh copy of all unread bytes (the NDR_FLAG_REMAINING blob).
 func (p *Pull) Rest() []byte {
 	out := make([]byte, p.Remaining())
