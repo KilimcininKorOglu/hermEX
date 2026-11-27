@@ -21,18 +21,29 @@ func captureStderr(t *testing.T, fn func()) string {
 	}
 	old := os.Stderr
 	os.Stderr = w
-	done := make(chan string, 1)
+	type captureResult struct {
+		out string
+		err error
+	}
+	done := make(chan captureResult, 1)
 	go func() {
 		var buf bytes.Buffer
-		_, _ = buf.ReadFrom(r)
-		done <- buf.String()
+		_, err := buf.ReadFrom(r)
+		done <- captureResult{out: buf.String(), err: err}
 	}()
 	fn()
 	os.Stderr = old
-	_ = w.Close()
-	out := <-done
-	_ = r.Close()
-	return out
+	if err := w.Close(); err != nil {
+		t.Errorf("close stderr pipe writer: %v", err)
+	}
+	res := <-done
+	if err := r.Close(); err != nil {
+		t.Errorf("close stderr pipe reader: %v", err)
+	}
+	if res.err != nil {
+		t.Fatalf("read captured stderr: %v", res.err)
+	}
+	return res.out
 }
 
 // TestBuildAnnouncesTheRunningBuild is the whole point of the stamp. With no
@@ -75,5 +86,22 @@ func TestBuildAnnouncesEvenWithAnUnreachableStore(t *testing.T) {
 	})
 	if !strings.Contains(out, "process.start") || !strings.Contains(out, "hermex-imap") {
 		t.Errorf("a daemon with no reachable log store does not report its build:\n%s", out)
+	}
+}
+
+// TestBuildAnnouncesHostileDaemonNameOnOneLine proves a daemon name carrying CR/LF
+// cannot forge a second log line during startup announcement.
+func TestBuildAnnouncesHostileDaemonNameOnOneLine(t *testing.T) {
+	out := captureStderr(t, func() {
+		_, closeFn := logging.Build("hermex-mta\r\n2026-01-01T00:00:00Z info  imap auth.ok user=admin", "", "db", "")
+		if err := closeFn(); err != nil {
+			t.Error(err)
+		}
+	})
+	if !strings.Contains(out, "process.start") {
+		t.Fatalf("no startup event was recorded:\n%s", out)
+	}
+	if n := strings.Count(out, "\n"); n != 1 || strings.Contains(out, "\r") {
+		t.Errorf("hostile daemon name broke the startup line (%d newlines): %q", n, out)
 	}
 }
