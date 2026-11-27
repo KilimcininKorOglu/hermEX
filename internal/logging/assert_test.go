@@ -2,6 +2,7 @@ package logging
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 
@@ -56,8 +57,12 @@ func openTestMongo(t *testing.T, ctx context.Context, uri, db string) *mongo.Cli
 	raw, err := mongo.Connect(options.Client().ApplyURI(uri))
 	mustNoErr(t, err, "connect")
 	t.Cleanup(func() {
-		_ = raw.Database(db).Drop(ctx)
-		_ = raw.Disconnect(ctx)
+		if err := raw.Database(db).Drop(ctx); err != nil {
+			t.Errorf("drop test database: %v", err)
+		}
+		if err := raw.Disconnect(ctx); err != nil {
+			t.Errorf("disconnect test mongo: %v", err)
+		}
 	})
 	mustNoErr(t, raw.Database(db).Drop(ctx), "drop the leftover test database")
 	return raw
@@ -88,9 +93,35 @@ func wantNoTTLIndex(t *testing.T, idx []bson.M, what string) {
 // hasIndexNamed reports whether the index list holds one with that name.
 func hasIndexNamed(idx []bson.M, name string) bool {
 	for _, m := range idx {
-		if got, _ := m["name"].(string); got == name {
+		if got, ok := m["name"].(string); ok && got == name {
 			return true
 		}
 	}
 	return false
+}
+
+// sinkFunc adapts a function to Sink for small internal tests.
+type sinkFunc func(Event)
+
+func (f sinkFunc) Write(e Event) { f(e) }
+
+// TestSettingsReadFailedRecordsErrorAndFields verifies SettingsReadFailed emits a
+// warn event under System with daemon, settings family, detail, and optional error.
+func TestSettingsReadFailedRecordsErrorAndFields(t *testing.T) {
+	var events []Event
+	l := New(sinkFunc(func(e Event) { events = append(events, e) }))
+
+	SettingsReadFailed(l, "hermex-imap", "log-spill-limit", "keeping prior cap", errors.New("db down"))
+	SettingsReadFailed(l, "hermex-imap", "log-spill-limit", "keeping prior cap", nil)
+
+	wantEq(t, len(events), 2, "recorded settings failure events")
+	wantEq(t, events[0].Level, LevelWarn, "event level")
+	wantEq(t, events[0].Subsystem, System, "event subsystem")
+	wantEq(t, events[0].Name, "settings.read.fail", "event name")
+	wantEq(t, events[0].Fields["daemon"], any("hermex-imap"), "daemon field")
+	wantEq(t, events[0].Fields["settings"], any("log-spill-limit"), "settings field")
+	wantEq(t, events[0].Fields["detail"], any("keeping prior cap"), "detail field")
+	wantEq(t, events[0].Fields["error"], any("db down"), "error field")
+	_, hasErr := events[1].Fields["error"]
+	wantEq(t, hasErr, false, "error field present when err is nil")
 }
