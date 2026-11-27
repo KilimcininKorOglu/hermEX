@@ -188,7 +188,7 @@ func storedOOF(t *testing.T, dir string) objectstore.OOFSettings {
 	t.Helper()
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	cfg, err := st.GetOOFSettings()
 	mustNoErr(t, "read the OOF settings", err)
 	return cfg
@@ -218,9 +218,9 @@ func TestSettingsOofPreservesSubject(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 
-	set := wbxml.Elem(wbxml.STOof, wbxml.Elem(wbxml.STSet,
+	set :=wbxml.Elem(wbxml.STOof, wbxml.Elem(wbxml.STSet,
 		wbxml.Str(wbxml.STOofState, "1"),
 		oofMessageNode(wbxml.STAppliesToInternal, "1", "away")))
 	postCommand(t, ts, "Settings", settingsReq(set))
