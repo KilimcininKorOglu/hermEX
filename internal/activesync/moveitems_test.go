@@ -40,7 +40,7 @@ func TestMoveItems(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if _, err := st.MessageByUID(int64(mapi.PrivateFIDDeletedItems), mustUID(t, dstMsg)); err != nil {
 		t.Errorf("moved message not found in Deleted Items: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestMoveItemsSameFolder(t *testing.T) {
 	}
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	if _, err := st.MessageByUID(int64(mapi.PrivateFIDInbox), mustUID(t, sid)); err != nil {
 		t.Errorf("a same-folder move took the message off its UID: %v", err)
 	}
@@ -102,23 +102,26 @@ func TestMoveItemsRefusesABadTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if _, err := st.MessageByUID(int64(mapi.PrivateFIDInbox), mustUID(t, sid)); err != nil {
 		t.Errorf("a refused move took the message out of the Inbox: %v", err)
 	}
 }
 
-// TestMoveItemsInvalidSource confirms a move of an unknown message reports an
-// invalid-source status.
+// TestMoveItemsInvalidSource confirms a move of an unknown or malformed message id
+// reports the invalid-source status ([MS-ASCMD] 2.2.3.177.10 Status 1) and moves
+// nothing.
 func TestMoveItemsInvalidSource(t *testing.T) {
 	ts, dir := seededServer(t)
-	_, root := postCommand(t, ts, "MoveItems", moveReq("999999", inboxID(), deletedID()))
-	if s := root.Child(wbxml.MOResponse).ChildText(wbxml.MOStatus); s != "1" {
-		t.Errorf("invalid-source move Status = %q, want 1", s)
+	for _, src := range []string{"999999", "-1", "0", "99999999999999999999", "abc", ""} {
+		_, root := postCommand(t, ts, "MoveItems", moveReq(src, inboxID(), deletedID()))
+		if s := root.Child(wbxml.MOResponse).ChildText(wbxml.MOStatus); s != "1" {
+			t.Errorf("source %q: move Status = %q, want 1", src, s)
+		}
 	}
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDDeletedItems))
 	mustNoErr(t, "list Deleted Items", err)
 	wantEq(t, "messages in Deleted Items after a refused move", len(msgs), 0)
@@ -131,7 +134,7 @@ func TestMoveItemsInvalidSource(t *testing.T) {
 func TestMoveItemsReportsAStoreFailureAsRetryable(t *testing.T) {
 	st, err := objectstore.Open(t.TempDir())
 	mustNoErr(t, "open the store", err)
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 	resp := moveOne(st, moveReq("1", inboxID(), deletedID()).Child(wbxml.MOMove))
 	wantEq(t, "Status", resp.ChildText(wbxml.MOStatus), "7")
 }
