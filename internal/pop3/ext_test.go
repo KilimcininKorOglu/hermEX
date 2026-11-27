@@ -15,9 +15,19 @@ import (
 	"hermex/internal/objectstore"
 )
 
+// pop3Client is a connected client: the reader plus send and read helpers. A
+// test takes only the fields it uses, so none is discarded.
+type pop3Client struct {
+	r         *textproto.Reader
+	send      func(string)
+	wantOK    func() string
+	wantERR   func() string
+	readLines func() []string
+}
+
 // dialPOP3 provisions a single-message mailbox, starts a server, and returns a
-// connected textproto reader plus send/read helpers.
-func dialPOP3(t *testing.T, msg string) (*textproto.Reader, func(string), func() string, func() string, func() []string) {
+// connected session.
+func dialPOP3(t *testing.T, msg string) pop3Client {
 	t.Helper()
 	conn := servePOP3(t, msg)
 	r := textproto.NewReader(bufio.NewReader(conn))
@@ -47,7 +57,7 @@ func dialPOP3(t *testing.T, msg string) (*textproto.Reader, func(string), func()
 			lines = append(lines, l)
 		}
 	}
-	return r, send, wantPrefix("+OK"), wantPrefix("-ERR"), readLines
+	return pop3Client{r: r, send: send, wantOK: wantPrefix("+OK"), wantERR: wantPrefix("-ERR"), readLines: readLines}
 }
 
 // servePOP3 provisions a single-message mailbox, starts a server on it, and
@@ -77,7 +87,8 @@ func servePOP3(t *testing.T, msg string) net.Conn {
 // TestPOP3CapaAdvertisesExtensions checks the CAPA list advertises every optional
 // command and extension hermEX implements, in both protocol states.
 func TestPOP3CapaAdvertisesExtensions(t *testing.T) {
-	_, send, wantOK, _, readLines := dialPOP3(t, "Subject: x\r\n\r\nbody\r\n")
+	s := dialPOP3(t, "Subject: x\r\n\r\nbody\r\n")
+	send, wantOK, readLines := s.send, s.wantOK, s.readLines
 	wantOK() // greeting
 
 	send("CAPA")
@@ -103,7 +114,8 @@ func TestPOP3CapaAdvertisesExtensions(t *testing.T) {
 
 // TestPOP3AuthRespCode checks a failed login carries the RFC 3206 [AUTH] code.
 func TestPOP3AuthRespCode(t *testing.T) {
-	_, send, wantOK, wantERR, _ := dialPOP3(t, "Subject: x\r\n\r\nbody\r\n")
+	s := dialPOP3(t, "Subject: x\r\n\r\nbody\r\n")
+	send, wantOK, wantERR := s.send, s.wantOK, s.wantERR
 	wantOK() // greeting
 	send("USER alice")
 	wantOK()
@@ -115,7 +127,8 @@ func TestPOP3AuthRespCode(t *testing.T) {
 
 // TestPOP3UTF8AndLang checks the RFC 6856 UTF8 and LANG commands.
 func TestPOP3UTF8AndLang(t *testing.T) {
-	_, send, wantOK, wantERR, readLines := dialPOP3(t, "Subject: x\r\n\r\nbody\r\n")
+	s := dialPOP3(t, "Subject: x\r\n\r\nbody\r\n")
+	send, wantOK, wantERR, readLines := s.send, s.wantOK, s.wantERR, s.readLines
 	wantOK() // greeting
 
 	send("UTF8")
@@ -139,7 +152,8 @@ func TestPOP3UTF8AndLang(t *testing.T) {
 // TestPOP3Top checks RFC 1939 TOP returns headers plus the requested body lines.
 func TestPOP3Top(t *testing.T) {
 	msg := "Subject: top test\r\nFrom: a@b.test\r\n\r\nLINE_ONE\r\nLINE_TWO\r\nLINE_THREE\r\n"
-	r, send, wantOK, wantERR, _ := dialPOP3(t, msg)
+	s := dialPOP3(t, msg)
+	r, send, wantOK, wantERR := s.r, s.send, s.wantOK, s.wantERR
 	wantOK() // greeting
 	send("TOP 1 0")
 	wantERR() // TOP is a TRANSACTION command (RFC 1939), refused before login

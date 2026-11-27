@@ -3,9 +3,11 @@ package pop3
 import (
 	"bufio"
 	"errors"
+	"io"
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"hermex/internal/connlimit"
 	"hermex/internal/directory"
@@ -50,10 +52,19 @@ func TestConnCapRefusesWithErr(t *testing.T) {
 		t.Fatalf("first connection greeting = %q, want +OK", greeting)
 	}
 
-	second, _, refusal := greetingOf(t, ln)
+	second, secondR, refusal := greetingOf(t, ln)
 	defer mustClose(t, second)
 	if !strings.HasPrefix(refusal, "-ERR") || !strings.Contains(refusal, "too many connections") {
 		t.Errorf("second connection greeting = %q, want an -ERR naming the cap", refusal)
+	}
+	// RFC 1939 section 4: a server that answers the greeting with -ERR closes the
+	// connection, so the refused client reads end of stream and nothing more. The
+	// deadline turns a connection left open into a failure instead of a hang.
+	if err := second.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if l, err := secondR.ReadString('\n'); !errors.Is(err, io.EOF) {
+		t.Errorf("refused connection read %q (err %v) after the -ERR greeting, want EOF", l, err)
 	}
 
 	// The refusal must not disturb the session the cap admitted.

@@ -21,7 +21,13 @@ import (
 
 // startSTLSServer brings up a plaintext POP3 listener whose server has a TLS
 // config, returning the dial address and the cert path for a client trust pool.
-func startSTLSServer(t *testing.T) (addr, certPath string) {
+// stlsServer is a running STLS-capable server: its address and the path of the
+// self-signed certificate a client pins to verify the upgrade.
+type stlsServer struct {
+	addr, certPath string
+}
+
+func startSTLSServer(t *testing.T) stlsServer {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "alice")
 	st, err := objectstore.Open(path)
@@ -40,14 +46,15 @@ func startSTLSServer(t *testing.T) (addr, certPath string) {
 	}
 	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
 	ln := serveOn(t, &Server{Auth: auth, Hostname: "mail.test", TLSConfig: tlsCfg})
-	return ln.Addr().String(), certPath
+	return stlsServer{addr: ln.Addr().String(), certPath: certPath}
 }
 
 // TestSTLSUpgrade proves CAPA advertises STLS, the command upgrades the link,
 // USER/PASS then authenticate over TLS, and STLS is no longer offered once
 // encrypted.
 func TestSTLSUpgrade(t *testing.T) {
-	addr, certPath := startSTLSServer(t)
+	srv := startSTLSServer(t)
+	addr, certPath := srv.addr, srv.certPath
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +98,7 @@ func TestSTLSUpgrade(t *testing.T) {
 // USER, PASS and AUTH with the right password are refused, so the session never
 // leaves AUTHORIZATION.
 func TestPlaintextLoginWaitsForSTLS(t *testing.T) {
-	addr, _ := startSTLSServer(t)
+	addr := startSTLSServer(t).addr
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatal(err)
@@ -156,7 +163,7 @@ func TestImplicitTLSLoginIsAccepted(t *testing.T) {
 // single segment is never executed: the injected CAPA's distinctive listing must
 // never appear (the connection is torn down instead).
 func TestSTLSRejectsPipelinedInjection(t *testing.T) {
-	addr, _ := startSTLSServer(t)
+	addr := startSTLSServer(t).addr
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatal(err)

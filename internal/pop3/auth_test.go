@@ -17,7 +17,8 @@ func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) 
 
 // TestPOP3AuthPlainInline checks AUTH PLAIN with an inline initial response logs in.
 func TestPOP3AuthPlainInline(t *testing.T) {
-	_, send, wantOK, _, _ := dialPOP3(t, "Subject: x\r\n\r\nbody\r\n")
+	c := dialPOP3(t, "Subject: x\r\n\r\nbody\r\n")
+	send, wantOK := c.send, c.wantOK
 	wantOK() // greeting
 	send("AUTH PLAIN " + b64("\x00alice\x00secret"))
 	wantOK() // authenticated, maildrop opened
@@ -28,7 +29,8 @@ func TestPOP3AuthPlainInline(t *testing.T) {
 // TestPOP3AuthPlainContinuation checks AUTH PLAIN without an initial response: the
 // server issues a "+ " continuation and reads the base64 credential.
 func TestPOP3AuthPlainContinuation(t *testing.T) {
-	r, send, wantOK, _, _ := dialPOP3(t, "Subject: x\r\n\r\nbody\r\n")
+	c := dialPOP3(t, "Subject: x\r\n\r\nbody\r\n")
+	r, send, wantOK := c.r, c.send, c.wantOK
 	wantOK() // greeting
 	send("AUTH PLAIN")
 	if l, err := r.ReadLine(); err != nil || !strings.HasPrefix(l, "+ ") {
@@ -51,7 +53,8 @@ func mustReadLine(t *testing.T, r *textproto.Reader) string {
 
 // TestPOP3AuthLogin checks the AUTH LOGIN username/password challenge exchange.
 func TestPOP3AuthLogin(t *testing.T) {
-	r, send, wantOK, _, _ := dialPOP3(t, "Subject: x\r\n\r\nbody\r\n")
+	c := dialPOP3(t, "Subject: x\r\n\r\nbody\r\n")
+	r, send, wantOK := c.r, c.send, c.wantOK
 	wantOK() // greeting
 	send("AUTH LOGIN")
 	if l := mustReadLine(t, r); l != "+ "+b64("Username:") {
@@ -67,7 +70,8 @@ func TestPOP3AuthLogin(t *testing.T) {
 
 // TestPOP3AuthList checks AUTH with no mechanism lists the supported ones.
 func TestPOP3AuthList(t *testing.T) {
-	_, send, wantOK, _, readLines := dialPOP3(t, "Subject: x\r\n\r\nbody\r\n")
+	c := dialPOP3(t, "Subject: x\r\n\r\nbody\r\n")
+	send, wantOK, readLines := c.send, c.wantOK, c.readLines
 	wantOK() // greeting
 	send("AUTH")
 	wantOK()
@@ -79,7 +83,8 @@ func TestPOP3AuthList(t *testing.T) {
 
 // TestPOP3AuthBadPassword checks a wrong password over AUTH PLAIN carries [AUTH].
 func TestPOP3AuthBadPassword(t *testing.T) {
-	_, send, wantOK, wantERR, _ := dialPOP3(t, "Subject: x\r\n\r\nbody\r\n")
+	c := dialPOP3(t, "Subject: x\r\n\r\nbody\r\n")
+	send, wantOK, wantERR := c.send, c.wantOK, c.wantERR
 	wantOK() // greeting
 	send("AUTH PLAIN " + b64("\x00alice\x00wrong"))
 	if l := wantERR(); !strings.Contains(l, "[AUTH]") {
@@ -101,7 +106,8 @@ func TestPOP3AuthPlainRefusesHostileTokens(t *testing.T) {
 		{"acting as another user", b64("bob\x00alice\x00secret")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, send, wantOK, wantERR, _ := dialPOP3(t, "Subject: x\r\n\r\nbody\r\n")
+			c := dialPOP3(t, "Subject: x\r\n\r\nbody\r\n")
+			send, wantOK, wantERR := c.send, c.wantOK, c.wantERR
 			wantOK() // greeting
 			send("AUTH PLAIN " + tc.token)
 			if l := wantERR(); !strings.Contains(l, "[AUTH]") {
