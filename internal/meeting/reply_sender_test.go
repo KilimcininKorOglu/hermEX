@@ -17,7 +17,7 @@ func organizerWithEvent(t *testing.T, uid, attendee string) (*objectstore.Store,
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() { mustClose(t, st, "the store") })
 
 	tags, err := ResolveTags(st)
 	if err != nil {
@@ -72,7 +72,10 @@ func responseOf(t *testing.T, st *objectstore.Store, tags Tags, recipID int64) i
 	if !ok {
 		return 0
 	}
-	n, _ := v.(int32)
+	n, ok := v.(int32)
+	if !ok {
+		t.Fatalf("the tracking status holds %T, want int32", v)
+	}
 	return n
 }
 
