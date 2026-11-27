@@ -14,13 +14,8 @@ import (
 // mailbox session.
 func TestAContextHandleServesOnlyItsOwner(t *testing.T) {
 	ems := NewEMSMDB(nil)
-	alice := &Session{User: "alice@hermex.test", Mailbox: provisionedDir(t)}
 	bob := &Session{User: "bob@hermex.test", Mailbox: provisionedDir(t)}
-	out, fault := ems.Handle(alice, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
-	if fault != 0 {
-		t.Fatalf("connect fault = %#x", fault)
-	}
-	cxh, _ := parseConnectExOut(t, out)
+	cxh := connectAt(t, ems, "alice@hermex.test", provisionedDir(t))
 
 	disc := ndr.NewPush()
 	pushCtxHandle(disc, cxh)
