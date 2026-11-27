@@ -86,7 +86,7 @@ func TestOpenPGPKeepsTheBlindRecipient(t *testing.T) {
 	mustImport(t, err)
 	found := false
 	for _, r := range msg.Recipients {
-		if rt, _ := r.Get(mapi.PrRecipientType); rt == int32(mapi.RecipBcc) {
+		if rt, ok := propInt32(r, mapi.PrRecipientType); ok && rt == int32(mapi.RecipBcc) {
 			found = true
 		}
 	}
