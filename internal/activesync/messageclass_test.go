@@ -93,6 +93,14 @@ func TestParseBodyPrefMIMESupport(t *testing.T) {
 	if pref.mimeSupport != mimeSupportSMIME {
 		t.Errorf("mimeSupport = %d, want %d", pref.mimeSupport, mimeSupportSMIME)
 	}
+	// A value that is not a non-negative number is no MIME support ([MS-ASCMD]
+	// MIMESupport 0), so a forged value cannot force the raw MIME body.
+	for _, v := range []string{"abc", "-1", "99999999999999999999", ""} {
+		c := wbxml.Elem(wbxml.ASCollection, wbxml.Elem(wbxml.ASOptions, wbxml.Str(wbxml.ASMIMESupport, v)))
+		if got := parseBodyPref(c).mimeSupport; got != mimeSupportNever {
+			t.Errorf("MIMESupport %q: mimeSupport = %d, want %d", v, got, mimeSupportNever)
+		}
+	}
 }
 
 // TestEmailAppDataSMIMEForcesMIME is the discriminating case: a clear-signed
