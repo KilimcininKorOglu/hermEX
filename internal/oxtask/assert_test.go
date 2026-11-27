@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"hermex/internal/mapi"
 )
 
 // This file is the package's assertion vocabulary. A test states one fact per call,
@@ -24,6 +26,17 @@ func wantEq[T comparable](t *testing.T, got, want T, what string) {
 	if got != want {
 		t.Errorf("%s = %v, want %v", what, got, want)
 	}
+}
+
+// mustGet returns the value stored for tag, and stops the test when the
+// conversion stored none.
+func mustGet(t *testing.T, props mapi.PropertyValues, tag mapi.PropTag, what string) any {
+	t.Helper()
+	v, ok := props.Get(tag)
+	if !ok {
+		t.Fatalf("%s: property %#x not stored", what, uint32(tag))
+	}
+	return v
 }
 
 // wantTrue fails the test unless the flag is set.

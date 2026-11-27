@@ -76,8 +76,7 @@ func TestTaskMessageClass(t *testing.T) {
 	r := newFakeResolver()
 	props, err := ToProps(Task{Subject: "x", Importance: -1, Sensitivity: -1}, r.resolve)
 	mustNoErr(t, err, "ToProps")
-	v, _ := props.Get(mapi.PrMessageClass)
-	wantEq(t, v, any(MessageClass), "the message class")
+	wantEq(t, mustGet(t, props, mapi.PrMessageClass, "class"), any(MessageClass), "the message class")
 }
 
 // TestTaskRecurrenceBlob proves a recurring task emits the MS-OXOCAL
@@ -96,8 +95,7 @@ func TestTaskRecurrenceBlob(t *testing.T) {
 	mustNoErr(t, err, "ToProps")
 	rruleTag := mapi.MakeTag(r.ids[mapi.NameTaskRecurrenceRule], mapi.PtUnicode)
 	blobTag := mapi.MakeTag(r.ids[mapi.NameTaskRecurrence], mapi.PtBinary)
-	v, _ := props.Get(rruleTag)
-	wantEq(t, v, any(in.RecurrenceRule), "the preserved RRULE text")
+	wantEq(t, mustGet(t, props, rruleTag, "rrule"), any(in.RecurrenceRule), "the preserved RRULE text")
 
 	blob, ok := props.Get(blobTag)
 	wantTrue(t, ok, "the PidLidTaskRecurrence blob of a recurring task")

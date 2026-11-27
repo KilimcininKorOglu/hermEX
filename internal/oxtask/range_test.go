@@ -30,22 +30,25 @@ func TestToPropsStoresOnlyTheDefinedValues(t *testing.T) {
 	if v, ok := props.Get(mapi.PrSensitivity); ok {
 		t.Errorf("sensitivity 4 was stored as %v", v)
 	}
-	status, _ := props.Get(mapi.MakeTag(r.ids[mapi.NameTaskStatus], mapi.PtLong))
-	wantEq(t, status, any(int32(0)), "the status stored for an undefined status on an open task")
-	percent, _ := props.Get(mapi.MakeTag(r.ids[mapi.NamePercentComplete], mapi.PtDouble))
-	wantEq(t, percent, any(0.0), "the percentage stored for an undefined percentage on an open task")
+	statusTag := mapi.MakeTag(r.ids[mapi.NameTaskStatus], mapi.PtLong)
+	percentTag := mapi.MakeTag(r.ids[mapi.NamePercentComplete], mapi.PtDouble)
+	wantEq(t, mustGet(t, props, statusTag, "status"), any(int32(0)), "the status stored for an undefined status on an open task")
+	wantEq(t, mustGet(t, props, percentTag, "percent"), any(0.0), "the percentage stored for an undefined percentage on an open task")
 
 	// The top of each range is still stored as itself.
 	task = New()
 	task.Importance, task.Sensitivity, task.Status, task.PercentComplete = 2, 3, 4, 1.0
 	props, err = ToProps(task, r.resolve)
 	mustNoErr(t, err, "ToProps")
-	imp, _ := props.Get(mapi.PrImportance)
-	wantEq(t, imp, any(int32(2)), "importance 2 (high)")
-	sens, _ := props.Get(mapi.PrSensitivity)
-	wantEq(t, sens, any(int32(3)), "sensitivity 3 (confidential)")
-	status, _ = props.Get(mapi.MakeTag(r.ids[mapi.NameTaskStatus], mapi.PtLong))
-	wantEq(t, status, any(int32(4)), "status 4 (deferred)")
-	percent, _ = props.Get(mapi.MakeTag(r.ids[mapi.NamePercentComplete], mapi.PtDouble))
-	wantEq(t, percent, any(1.0), "percentage 1.0")
+	wantEq(t, mustGet(t, props, mapi.PrImportance, "importance"), any(int32(2)), "importance 2 (high)")
+	wantEq(t, mustGet(t, props, mapi.PrSensitivity, "sensitivity"), any(int32(3)), "sensitivity 3 (confidential)")
+	wantEq(t, mustGet(t, props, statusTag, "status"), any(int32(4)), "status 4 (deferred)")
+	wantEq(t, mustGet(t, props, percentTag, "percent"), any(1.0), "percentage 1.0")
+	// Below each range is as undefined as above it.
+	task = New()
+	task.Status, task.PercentComplete = -1, -0.5
+	props, err = ToProps(task, r.resolve)
+	mustNoErr(t, err, "ToProps")
+	wantEq(t, mustGet(t, props, statusTag, "status"), any(int32(0)), "the status stored for a negative status")
+	wantEq(t, mustGet(t, props, percentTag, "percent"), any(0.0), "the percentage stored for a negative percentage")
 }
