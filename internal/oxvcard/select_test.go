@@ -30,7 +30,10 @@ func TestSelectAddressData(t *testing.T) {
 // TestSelectAddressDataNoValue confirms novalue keeps the name and parameters but drops
 // the value.
 func TestSelectAddressDataNoValue(t *testing.T) {
-	out, _ := SelectAddressData([]byte(selectCardFull), []PropSelect{{Name: "EMAIL", NoValue: true}}, false)
+	out, ok := SelectAddressData([]byte(selectCardFull), []PropSelect{{Name: "EMAIL", NoValue: true}}, false)
+	if !ok {
+		t.Fatal("SelectAddressData returned ok=false")
+	}
 	s := string(out)
 	if !strings.Contains(s, "EMAIL;TYPE=work:\r\n") {
 		t.Errorf("novalue should keep the name and parameters with a bare colon\n%s", s)
@@ -42,9 +45,28 @@ func TestSelectAddressDataNoValue(t *testing.T) {
 
 // TestSelectAddressDataAllProp confirms allprop keeps every property.
 func TestSelectAddressDataAllProp(t *testing.T) {
-	out, _ := SelectAddressData([]byte(selectCardFull), nil, true)
+	out, ok := SelectAddressData([]byte(selectCardFull), nil, true)
+	if !ok {
+		t.Fatal("SelectAddressData returned ok=false")
+	}
 	s := string(out)
 	if !strings.Contains(s, "TEL:+1-555-1234") || !strings.Contains(s, "NOTE:private") {
 		t.Errorf("allprop should keep every property\n%s", s)
+	}
+}
+
+// TestSelectAddressDataRefusesNoCard follows RFC 6352 10.4: address-data is a
+// projection of a stored vCard, so input that holds no BEGIN:VCARD returns
+// nothing rather than an empty card a client would read as the contact.
+func TestSelectAddressDataRefusesNoCard(t *testing.T) {
+	for name, raw := range map[string]string{
+		"empty":          "",
+		"plain text":     "FN:Jane Doe\r\n",
+		"another object": "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n",
+	} {
+		out, ok := SelectAddressData([]byte(raw), nil, true)
+		if ok || out != nil {
+			t.Errorf("%s: SelectAddressData = %q, %v; want nil, false", name, out, ok)
+		}
 	}
 }
