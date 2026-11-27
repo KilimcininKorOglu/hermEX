@@ -327,7 +327,7 @@ func (s *Server) basicAuth(w http.ResponseWriter, r *http.Request) (user, mailbo
 			if s.Limiter != nil {
 				s.Limiter.Succeed(addr, u)
 			}
-			if privs, _ := s.auth.Privileges(u); !privs.DAV {
+			if privs, known := s.auth.Privileges(u); !known || !privs.DAV {
 				http.Error(w, "DAV access is disabled for this account", http.StatusForbidden)
 				return "", "", false
 			}
