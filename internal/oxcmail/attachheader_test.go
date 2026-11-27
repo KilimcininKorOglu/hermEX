@@ -74,6 +74,40 @@ func TestAttachmentMimeTypeCannotInjectHeaders(t *testing.T) {
 	}
 }
 
+// TestAttachmentDescriptionAndIDCannotInjectHeaders covers the two other
+// client-written values that reach the part header: the display name, written as
+// Content-Description, and the content id, written as Content-ID.
+func TestAttachmentDescriptionAndIDCannotInjectHeaders(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tag  mapi.PropTag
+	}{
+		{"display name", mapi.PrDisplayName},
+		{"content id", mapi.PrAttachContentID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var ap mapi.PropertyValues
+			ap.Set(mapi.PrAttachMethod, int32(mapi.AttachByValue))
+			ap.Set(mapi.PrAttachDataBin, []byte("payload"))
+			ap.Set(mapi.PrAttachLongFilename, "r.pdf")
+			ap.Set(mapi.PrAttachMimeTag, "application/pdf")
+			ap.Set(tc.tag, "x\r\nX-Injected: yes\r\n\r\nsmuggled")
+			msg := &Message{Props: mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "s"}, {Tag: mapi.PrBody, Value: "b"}},
+				Attachments: []Attachment{{Props: ap}}}
+			out, err := Export(msg, Options{})
+			mustNoErr(t, err, "export")
+			if injectedHeaderLine(out, "X-Injected") {
+				t.Errorf("the %s injected a header:\n%s", tc.name, out)
+			}
+			for line := range strings.SplitSeq(string(out), "\r\n") {
+				if line == "smuggled" {
+					t.Errorf("the %s injected part body content:\n%s", tc.name, out)
+				}
+			}
+		})
+	}
+}
+
 // TestOrdinaryAttachmentHeadersSurvive is the control: sanitizing must not damage
 // an ordinary filename, which still has to reach the recipient intact.
 func TestOrdinaryAttachmentHeadersSurvive(t *testing.T) {
