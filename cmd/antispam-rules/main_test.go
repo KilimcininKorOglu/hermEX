@@ -18,7 +18,7 @@ func TestWriteAtomic(t *testing.T) {
 	if err := writeAtomic(path, []byte("first")); err != nil {
 		t.Fatalf("writeAtomic: %v", err)
 	}
-	if got, _ := os.ReadFile(path); string(got) != "first" {
+	if got := mustRead(t, path); got != "first" {
 		t.Errorf("content = %q, want %q", got, "first")
 	}
 	// Whatever name the temporary file had, the directory holds only the ruleset
@@ -31,7 +31,18 @@ func TestWriteAtomic(t *testing.T) {
 	if err := writeAtomic(path, []byte("second")); err != nil {
 		t.Fatalf("writeAtomic (overwrite): %v", err)
 	}
-	if got, _ := os.ReadFile(path); string(got) != "second" {
+	if got := mustRead(t, path); got != "second" {
 		t.Errorf("after overwrite content = %q, want %q", got, "second")
 	}
+}
+
+// mustRead returns the file's content and fails the test when it cannot be read,
+// so a missing ruleset is reported as missing, not as empty content.
+func mustRead(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(b)
 }
