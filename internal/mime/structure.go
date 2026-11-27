@@ -211,7 +211,9 @@ func parseMediaType(v, fallback string) (string, map[string]string) {
 	mt, params, err := stdmime.ParseMediaType(v)
 	if err != nil {
 		if fallback != "" {
-			mt, _, _ = stdmime.ParseMediaType(fallback)
+			if fallbackType, fallbackParams, ferr := stdmime.ParseMediaType(fallback); ferr == nil {
+				return strings.ToLower(fallbackType), fallbackParams
+			}
 		}
 		return strings.ToLower(mt), map[string]string{}
 	}

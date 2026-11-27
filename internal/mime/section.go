@@ -82,7 +82,7 @@ func (msg *Part) PartAt(path []int) (*Part, bool) {
 func navigate(msg *Part, path []int) (*Part, bool) {
 	cur := msg
 	for i, n := range path {
-		next, ok := descend(cur, n, i == len(path)-1)
+		next, ok := descend(cur, n, i == 0 && len(path) == 1)
 		if !ok {
 			return nil, false
 		}
@@ -91,9 +91,10 @@ func navigate(msg *Part, path []int) (*Part, bool) {
 	return cur, true
 }
 
-// descend takes one step of a part path. last marks the final step, the only
-// place a single-part "1" may appear.
-func descend(cur *Part, n int, last bool) (*Part, bool) {
+// descend takes one step of a part path. rootOnly is true only when this is
+// the sole step from the message root, the only place a single-part "1" may
+// appear on a non-multipart, non-rfc822 entity (RFC 3501 §6.4.5).
+func descend(cur *Part, n int, rootOnly bool) (*Part, bool) {
 	if n < 1 {
 		return nil, false
 	}
@@ -110,8 +111,8 @@ func descend(cur *Part, n int, last bool) (*Part, bool) {
 		}
 		return nil, false
 	}
-	// single-part: only "1" is valid, and only as the final step
-	if n != 1 || !last {
+	// single-part root message: only "1" is valid, and only as the sole step
+	if n != 1 || !rootOnly {
 		return nil, false
 	}
 	return cur, true
@@ -134,15 +135,15 @@ func filterFields(header []byte, fields []string, exclude bool) []byte {
 	for _, f := range fields {
 		want[strings.ToLower(f)] = true
 	}
-	var out bytes.Buffer
+	var out []byte
 	for _, group := range headerLines(header) {
 		name := fieldName(group)
 		if want[strings.ToLower(name)] != exclude {
-			out.Write(group)
+			out = append(out, group...)
 		}
 	}
-	out.WriteString("\r\n")
-	return out.Bytes()
+	out = append(out, "\r\n"...)
+	return out
 }
 
 // headerLines splits a header block into field groups, each group being a

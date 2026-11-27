@@ -113,9 +113,95 @@ func wantSuffix(t *testing.T, got []byte, suffix, what string) {
 
 func TestExtractMissingPart(t *testing.T) {
 	root := ParseStructure(mixedMsg)
-	if _, ok := root.Extract(Section{Path: []int{9}}); ok {
-		t.Errorf("BODY[9] should not resolve")
+	if b, ok := root.Extract(Section{Path: []int{9}}); ok || b != nil {
+		t.Errorf("BODY[9] = (%q, %v), want (nil, false)", b, ok)
 	}
+}
+
+// TestExtractHostileSections verifies that invalid part paths and unknown
+// specifiers are refused without altering the parsed tree or subsequent fetches.
+func TestExtractHostileSections(t *testing.T) {
+	root := ParseStructure(mixedMsg)
+	nested := ParseStructure(nestedMsg)
+
+	cases := []struct {
+		name string
+		part *Part
+		sec  Section
+	}{
+		{name: "zero part index", part: root, sec: Section{Path: []int{0}}},
+		{name: "negative part index", part: root, sec: Section{Path: []int{-1}}},
+		{name: "descend past leaf part", part: root, sec: Section{Path: []int{1, 1}}},
+		{name: "out of range child on single-part rfc822", part: nested, sec: Section{Path: []int{2, 2}}},
+		{name: "unknown specifier", part: root, sec: Section{Specifier: "BOGUS"}},
+		{name: "traversal specifier", part: root, sec: Section{Specifier: "../HEADER"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b, ok := tc.part.Extract(tc.sec)
+			if ok || b != nil {
+				t.Errorf("Extract(%+v) = (%q, %v), want (nil, false)", tc.sec, b, ok)
+			}
+		})
+	}
+
+	// Refused calls must leave the parsed tree and valid fetches intact.
+	wantEq(t, len(root.Children), 2, "root children count unchanged")
+	wantEq(t, string(mustExtract(t, root, Section{Path: []int{1}}, "BODY[1]")), "Hello body", "BODY[1] after refusals")
+	if p, ok := root.PartAt([]int{0}); ok || p != nil {
+		t.Errorf("PartAt([0]) = (%v, %v), want (nil, false)", p, ok)
+	}
+}
+
+// TestExtractHeaderFieldsFoldedAndCaseInsensitive verifies RFC 5322 section 2.2.3
+// folded header preservation and case-insensitive field matching in HEADER.FIELDS.
+func TestExtractHeaderFieldsFoldedAndCaseInsensitive(t *testing.T) {
+	raw := []byte("Subject: First line\r\n" +
+		"\tcontinued line\r\n" +
+		"From: alice@example.com\r\n" +
+		"\r\nbody")
+	root := ParseStructure(raw)
+
+	got := mustExtract(t, root, Section{Specifier: "HEADER.FIELDS", Fields: []string{"subject"}}, "HEADER.FIELDS")
+	wantEq(t, string(got), "Subject: First line\r\n\tcontinued line\r\n\r\n", "folded Subject preserved")
+
+	not := mustExtract(t, root, Section{Specifier: "HEADER.FIELDS.NOT", Fields: []string{"SUBJECT"}}, "HEADER.FIELDS.NOT")
+	wantEq(t, string(not), "From: alice@example.com\r\n\r\n", "folded Subject excluded")
+}
+
+// TestParseStructureHostileInputs exercises malformed, empty, header-only,
+// missing-boundary, and mid-line-boundary messages.
+func TestParseStructureHostileInputs(t *testing.T) {
+	empty := ParseStructure(nil)
+	wantPartType(t, empty, "text", "plain", "empty input default type")
+	wantEq(t, empty.Encoding, "7bit", "empty input default encoding")
+	wantEq(t, empty.Size, 0, "empty input size")
+
+	hdrOnlyRaw := []byte("Subject: No Blank Line\r\nFrom: a@b.com\r\n")
+	hdrOnly := ParseStructure(hdrOnlyRaw)
+	wantEq(t, hdrOnly.Size, 0, "header-only body size")
+	wantEq(t, string(hdrOnly.RawHeader()), string(hdrOnlyRaw), "header-only RawHeader")
+	wantEq(t, len(hdrOnly.RawBody()), 0, "header-only RawBody")
+
+	badCT := ParseStructure([]byte("Content-Type: ;;;invalid;;;\r\n\r\nhi"))
+	wantPartType(t, badCT, "text", "plain", "malformed Content-Type fallback")
+	wantEq(t, len(badCT.Params), 0, "malformed Content-Type params")
+
+	noBoundary := ParseStructure([]byte("Content-Type: multipart/mixed\r\n\r\n--fake\r\n\r\nbody\r\n--fake--\r\n"))
+	wantEq(t, len(noBoundary.Children), 0, "multipart without boundary stays a leaf")
+
+	// RFC 2046 section 5.1.1: a boundary delimiter is valid only at the start of a line.
+	midLine := ParseStructure([]byte(
+		"Content-Type: multipart/mixed; boundary=\"B\"\r\n\r\n" +
+			"--B\r\n" +
+			"Content-Type: text/plain\r\n\r\n" +
+			"text with --B in the middle\r\n" +
+			"--B--\r\n",
+	))
+	if len(midLine.Children) != 1 {
+		t.Fatalf("mid-line boundary split into %d children, want 1", len(midLine.Children))
+	}
+	wantEq(t, string(midLine.Children[0].RawBody()), "text with --B in the middle", "mid-line boundary kept in body")
 }
 
 var nestedMsg = []byte("Subject: Outer\r\n" +
@@ -165,14 +251,14 @@ func TestParseStructureNestedMessage(t *testing.T) {
 // allocates gigabytes. Dovecot caps a message at 10000 parts and keeps the rest
 // unparsed; the parse must return the same way, enumerating at most maxParts.
 func TestParseStructurePartCountBound(t *testing.T) {
-	var b bytes.Buffer
-	b.WriteString("Content-Type: multipart/mixed; boundary=b\r\n\r\n")
+	var b []byte
+	b = append(b, "Content-Type: multipart/mixed; boundary=b\r\n\r\n"...)
 	for range maxParts * 3 {
-		b.WriteString("--b\r\n\r\n\r\n")
+		b = append(b, "--b\r\n\r\n\r\n"...)
 	}
-	b.WriteString("--b--\r\n")
+	b = append(b, "--b--\r\n"...)
 
-	root := ParseStructure(b.Bytes())
+	root := ParseStructure(b)
 	if n := countParts(root); n > maxParts {
 		t.Errorf("parsed %d parts, want at most %d", n, maxParts)
 	}
@@ -200,16 +286,16 @@ func countParts(p *Part) int {
 func TestParseStructureDepthBound(t *testing.T) {
 	const levels = maxNestingDepth + 40
 
-	var b bytes.Buffer
+	var b []byte
 	for i := range levels {
-		fmt.Fprintf(&b, "Content-Type: multipart/mixed; boundary=\"B%d\"\r\n\r\n--B%d\r\n", i, i)
+		b = fmt.Appendf(b, "Content-Type: multipart/mixed; boundary=\"B%d\"\r\n\r\n--B%d\r\n", i, i)
 	}
-	b.WriteString("Content-Type: text/plain\r\n\r\ninnermost\r\n")
+	b = append(b, "Content-Type: text/plain\r\n\r\ninnermost\r\n"...)
 	for i := levels - 1; i >= 0; i-- {
-		fmt.Fprintf(&b, "--B%d--\r\n", i)
+		b = fmt.Appendf(b, "--B%d--\r\n", i)
 	}
 
-	root := ParseStructure(b.Bytes())
+	root := ParseStructure(b)
 
 	depth := 0
 	for p := root; p != nil; depth++ {
@@ -224,5 +310,31 @@ func TestParseStructureDepthBound(t *testing.T) {
 	}
 	if depth > maxNestingDepth+1 {
 		t.Errorf("tree depth = %d, want at most %d", depth, maxNestingDepth+1)
+	}
+}
+
+// TestParseStructureRFC822DepthBound verifies the nesting depth cap also stops
+// recursive message/rfc822 encapsulation while retaining the leaf line count.
+func TestParseStructureRFC822DepthBound(t *testing.T) {
+	const levels = maxNestingDepth + 20
+
+	var b []byte
+	for range levels {
+		b = append(b, "Content-Type: message/rfc822\r\n\r\n"...)
+	}
+	b = append(b, "Content-Type: text/plain\r\n\r\nleaf line\r\n"...)
+
+	root := ParseStructure(b)
+	depth := 0
+	var last *Part
+	for p := root; p != nil; p = p.MsgBody {
+		last = p
+		depth++
+	}
+	if depth > maxNestingDepth+1 {
+		t.Errorf("rfc822 tree depth = %d, want at most %d", depth, maxNestingDepth+1)
+	}
+	if last == nil || last.Lines == 0 {
+		t.Errorf("leaf rfc822 part should still report its line count, got %v", last)
 	}
 }
