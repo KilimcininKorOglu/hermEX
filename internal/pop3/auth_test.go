@@ -87,43 +87,67 @@ func TestPOP3AuthBadPassword(t *testing.T) {
 	}
 }
 
-// TestPOP3AuthPrivilegeDenied proves the AUTH path hits the same POP3/IMAP
-// privilege gate as PASS, a valid credential with the service disabled is refused,
-// so SASL is not a gate bypass.
-func TestPOP3AuthPrivilegeDenied(t *testing.T) {
+// TestPOP3AuthPlainRefusesHostileTokens proves the RFC 4616 PLAIN token is read
+// strictly: a token that is not base64, one missing the password or the authcid,
+// one with extra fields, and one asking to act as another user (an authzid that
+// is not the authcid) are each refused with [AUTH], and the session stays in the
+// AUTHORIZATION state, so a TRANSACTION command is still refused.
+func TestPOP3AuthPlainRefusesHostileTokens(t *testing.T) {
+	for _, tc := range []struct{ name, token string }{
+		{"not base64", "!!!not-base64!!!"},
+		{"no password", b64("\x00alice\x00")},
+		{"no authcid", b64("\x00\x00secret")},
+		{"extra field", b64("\x00alice\x00secret\x00more")},
+		{"acting as another user", b64("bob\x00alice\x00secret")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, send, wantOK, wantERR, _ := dialPOP3(t, "Subject: x\r\n\r\nbody\r\n")
+			wantOK() // greeting
+			send("AUTH PLAIN " + tc.token)
+			if l := wantERR(); !strings.Contains(l, "[AUTH]") {
+				t.Errorf("AUTH PLAIN %s = %q, want an [AUTH] refusal", tc.name, l)
+			}
+			send("STAT")
+			wantERR() // still unauthenticated
+		})
+	}
+}
+
+// authPlainReply logs in as alice over AUTH PLAIN against a server on auth and
+// returns the server's reply.
+func authPlainReply(t *testing.T, auth privDir) string {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "alice")
 	st, err := objectstore.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
+	auth.StaticAccounts = directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
 
-	auth := privDir{
-		StaticAccounts: directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}},
-		privs:          directory.ServicePrivileges{POP3IMAP: false, SMTP: true},
-	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
-	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test"}).Serve(ln) }()
-
+	ln := serveOn(t, &Server{Auth: auth, Hostname: "mail.test"})
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = conn.Close() })
+	defer mustClose(t, conn)
 	r := textproto.NewReader(bufio.NewReader(conn))
-	if l := mustReadLine(t, r); !strings.HasPrefix(l, "+OK") { // greeting
-		t.Fatalf("greeting = %q", l)
-	}
+	wantReply(t, r, "+OK") // greeting
 	mustSend(t, conn, "AUTH PLAIN %s\r\n", b64("\x00alice\x00secret"))
-	l, err := r.ReadLine()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(l, "-ERR") || !strings.Contains(l, "[AUTH]") {
-		t.Errorf("AUTH with POP3/IMAP disabled = %q, want -ERR [AUTH]", l)
+	return mustReadLine(t, r)
+}
+
+// TestPOP3AuthPrivilegeDenied proves the AUTH path hits the same POP3/IMAP
+// privilege gate as PASS, a valid credential with the service disabled is refused,
+// so SASL is not a gate bypass. A directory that cannot name the account's
+// privileges is refused the same way.
+func TestPOP3AuthPrivilegeDenied(t *testing.T) {
+	for name, auth := range map[string]privDir{
+		"service disabled":   {privs: directory.ServicePrivileges{POP3IMAP: false, SMTP: true}},
+		"privileges unknown": {unknown: true},
+	} {
+		if l := authPlainReply(t, auth); !strings.HasPrefix(l, "-ERR") || !strings.Contains(l, "[AUTH]") {
+			t.Errorf("%s: AUTH = %q, want -ERR [AUTH]", name, l)
+		}
 	}
 }
