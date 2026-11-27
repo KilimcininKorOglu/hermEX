@@ -46,7 +46,7 @@ func TestParseGUIDRoundTrip(t *testing.T) {
 
 // TestParseGUIDInvalid rejects inputs that are not 32 hex digits.
 func TestParseGUIDInvalid(t *testing.T) {
-	for _, s := range []string{"", "1234", "00062002-0000-0000-C000-00000000004", "ZZ062002-0000-0000-C000-000000000046"} {
+	for _, s := range []string{"", "1234", "00062002-0000-0000-C000-00000000004", "00062002-0000-0000-C000-0000000000460", "ZZ062002-0000-0000-C000-000000000046"} {
 		if _, err := ParseGUID(s); err == nil {
 			t.Errorf("ParseGUID(%q) = nil error, want failure", s)
 		}
