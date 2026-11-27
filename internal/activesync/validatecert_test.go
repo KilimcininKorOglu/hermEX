@@ -120,6 +120,25 @@ func TestValidateCertUntrusted(t *testing.T) {
 	}
 }
 
+// TestValidateCertIgnoresAClientSuppliedRoot proves the client cannot supply its
+// own trust: a leaf signed by the caller's self-made CA, with that CA sent in the
+// CertificateChain, still does not chain to a server trust anchor and reports
+// Status 4 ([MS-ASCMD] ValidateCert: the chain carries intermediates only).
+func TestValidateCertIgnoresAClientSuppliedRoot(t *testing.T) {
+	now := time.Now()
+	evil, evilKey, evilDER := genCert(t, "Forged CA", now.Add(-time.Hour), now.Add(24*time.Hour), true, nil, nil)
+	_, _, leafDER := genCert(t, "alice@hermex.test", now.Add(-time.Hour), now.Add(24*time.Hour), false, evil, evilKey)
+	ts := certServer(t, x509.NewCertPool())
+
+	req := validateCertReq(b64DER(leafDER))
+	req.Children = append(req.Children, wbxml.Elem(wbxml.VCCertificateChain,
+		wbxml.Str(wbxml.VCCertificate, b64DER(evilDER))))
+	_, root := postCommand(t, ts, "ValidateCert", req)
+	if s := firstCertStatus(root); s != "4" {
+		t.Errorf("certificate Status = %q, want 4 (a client-supplied root is not a trust anchor)", s)
+	}
+}
+
 // TestValidateCertExpired proves a certificate from a trusted CA that has expired,
 // or is not yet valid, reports Status 7: MS-ASCMD 2.2.3.177.18 gives 7 to "expired
 // or is not yet valid", and 8 only to a chain whose validity periods do not nest.
