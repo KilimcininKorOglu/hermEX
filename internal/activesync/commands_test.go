@@ -25,7 +25,7 @@ func seededServer(t *testing.T) (*httptest.Server, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustNoErr(t, "close the seeded store", st.Close())
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
 	srv := NewServer(accs, accs, "mail.hermex.test")
 	// A Ping heartbeat is at least 60 seconds; tests hold it one second.
@@ -64,7 +64,7 @@ func postCommand(t *testing.T, ts *httptest.Server, cmd string, root *wbxml.Node
 // t.Fatal must not be called (testing.T.FailNow): it returns the failure instead.
 // Cancelling ctx abandons a request the server is holding, which lets the test
 // server close.
-func postCommandErr(ctx context.Context, ts *httptest.Server, cmd string, root *wbxml.Node) (*http.Response, *wbxml.Node, error) {
+func postCommandErr(ctx context.Context, ts *httptest.Server, cmd string, root *wbxml.Node) (_ *http.Response, _ *wbxml.Node, err error) {
 	url := ts.URL + "/Microsoft-Server-ActiveSync?Cmd=" + cmd + "&User=" + testUser + "&DeviceId=dev1&DeviceType=iPhone"
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(wbxml.Marshal(root)))
 	if err != nil {
@@ -76,7 +76,11 @@ func postCommandErr(ctx context.Context, ts *httptest.Server, cmd string, root *
 	if err != nil {
 		return nil, nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("close %s reply: %w", cmd, cerr)
+		}
+	}()
 	out, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read %s reply: %w", cmd, err)
@@ -143,7 +147,7 @@ func rawCommandStatus(t *testing.T, ts *httptest.Server, cmd string, root *wbxml
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	mustNoErr(t, "close the reply", resp.Body.Close())
 	return resp.StatusCode
 }
 
@@ -163,7 +167,7 @@ func TestProvisionRemoteWipe(t *testing.T) {
 		t.Fatal(err)
 	}
 	setDeviceWipe(t, st, "dev1", WipeStatusPending)
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 
 	if code := rawCommandStatus(t, ts, "FolderSync", wbxml.Elem(wbxml.FHFolderSync, wbxml.Str(wbxml.FHSyncKey, "1"))); code != 449 {
 		t.Fatalf("pending-wipe FolderSync status %d, want 449", code)
@@ -179,7 +183,7 @@ func TestProvisionRemoteWipe(t *testing.T) {
 	st, err = objectstore.Open(dir)
 	mustNoErr(t, "reopen the store after the delivery", err)
 	wantDeviceWipe(t, st, "after the delivery", "dev1", WipeStatusRequested)
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 
 	ack := wbxml.Elem(wbxml.PVProvision,
 		wbxml.Elem(wbxml.PVRemoteWipe, wbxml.Str(wbxml.PVStatus, "1")))
@@ -187,7 +191,7 @@ func TestProvisionRemoteWipe(t *testing.T) {
 	st, err = objectstore.Open(dir)
 	mustNoErr(t, "reopen the store after the acknowledgement", err)
 	wantDeviceWipe(t, st, "after the acknowledgement", "dev1", WipeStatusWiped)
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 
 	// A wiped device is terminal: it is no longer forced to re-provision, so an
 	// ordinary command succeeds rather than looping on 449.
@@ -227,7 +231,7 @@ func TestFolderSyncPrime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	raw, err := st.GetActiveSyncState()
 	mustNoErr(t, "read the ActiveSync state", err)
 	if raw == "" {
@@ -255,8 +259,20 @@ func TestFolderSyncInvalidKey(t *testing.T) {
 	ts, _ := seededServer(t)
 	postCommand(t, ts, "FolderSync", wbxml.Elem(wbxml.FHFolderSync, wbxml.Str(wbxml.FHSyncKey, "0")))
 
-	_, root := postCommand(t, ts, "FolderSync", wbxml.Elem(wbxml.FHFolderSync, wbxml.Str(wbxml.FHSyncKey, "99")))
-	if root.ChildText(wbxml.FHStatus) != "9" {
-		t.Errorf("stale-key status = %q, want 9", root.ChildText(wbxml.FHStatus))
+	// The key comes from the device: a stale, a non-numeric, a negative and an
+	// oversized key are all MS-ASCMD FolderSync Status 9 (invalid synchronization
+	// key), and none of them may hand out changes.
+	for _, key := range []string{"99", "abc", "-1", "99999999999999999999999"} {
+		_, root := postCommand(t, ts, "FolderSync", wbxml.Elem(wbxml.FHFolderSync, wbxml.Str(wbxml.FHSyncKey, key)))
+		if root.ChildText(wbxml.FHStatus) != "9" {
+			t.Errorf("key %q: status = %q, want 9", key, root.ChildText(wbxml.FHStatus))
+		}
+		if root.Child(wbxml.FHChanges) != nil {
+			t.Errorf("key %q: an invalid key still received Changes", key)
+		}
 	}
+	// The refusals did not move the device's real key.
+	_, root := postCommand(t, ts, "FolderSync", wbxml.Elem(wbxml.FHFolderSync, wbxml.Str(wbxml.FHSyncKey, "1")))
+	wantEq(t, "status for the real key after the refusals", root.ChildText(wbxml.FHStatus), "1")
+	wantEq(t, "sync key after the refusals", root.ChildText(wbxml.FHSyncKey), "1")
 }
