@@ -42,3 +42,26 @@ func TestVTODORoundTrip(t *testing.T) {
 	wantEq(t, len(out.Categories), 2, "parsed category count")
 	wantEq(t, out.Categories[0], "Work", "the first parsed category")
 }
+
+// TestParseVTODOHostileInputs covers malformed iCalendar, non-VTODO objects, and
+// invalid date values (RFC 5545 section 3.6.2).
+func TestParseVTODOHostileInputs(t *testing.T) {
+	for _, raw := range []string{
+		"TRUNCATED",
+		"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:e1\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+	} {
+		task, uid, ok := ParseVTODO([]byte(raw))
+		if ok || uid != "" || task.Subject != "" || !task.Start.IsZero() || !task.Due.IsZero() {
+			t.Errorf("ParseVTODO(%q) = (%+v, %q, %v), want zero and false", raw, task, uid, ok)
+		}
+	}
+
+	badDates := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:t-bad\r\n" +
+		"SUMMARY:Check\r\nDTSTART:not-a-date\r\nDUE:20260230T999999Z\r\nEND:VTODO\r\nEND:VCALENDAR\r\n"
+	task, uid, ok := ParseVTODO([]byte(badDates))
+	if !ok || uid != "t-bad" {
+		t.Fatalf("ParseVTODO valid VTODO with bad dates = (%q, %v), want (t-bad, true)", uid, ok)
+	}
+	wantTrue(t, task.Start.IsZero(), "invalid DTSTART ignored")
+	wantTrue(t, task.Due.IsZero(), "invalid DUE ignored")
+}
