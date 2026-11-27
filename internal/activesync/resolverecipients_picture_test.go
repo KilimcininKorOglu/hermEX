@@ -29,7 +29,7 @@ func TestResolveRecipientsPicture(t *testing.T) {
 	if err := st.SetUserPhoto(photo); err != nil {
 		t.Fatalf("set photo: %v", err)
 	}
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 
 	_, root := postCommand(t, ts, "ResolveRecipients", pictureRequest("alice"))
 	resp := responseFor(root, "alice")
@@ -70,7 +70,7 @@ func photoServer(t *testing.T, n int) *httptest.Server {
 	if err := st.SetUserPhoto(make([]byte, n)); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 	return ts
 }
 
