@@ -213,3 +213,39 @@ func TestAccessMatchedFlag(t *testing.T) {
 		t.Errorf("a sender with no access rule must not mark AccessMatched, got %+v", v)
 	}
 }
+
+// TestAccessListHostileInputs checks nil receivers, blank/whitespace patterns,
+// whitespace-padded senders, quarantine DMARC enforcement against allowlists,
+// and that lookups do not mutate the rule map.
+func TestAccessListHostileInputs(t *testing.T) {
+	var nilList *AccessList
+	wantEq(t, nilList.Action("a@example.com", "example.com"), "", "nil AccessList action")
+
+	input := map[string]string{
+		"":                AccessBlock,
+		"   ":             AccessAllow,
+		"  Evil.Example ": AccessBlock,
+	}
+	a := NewAccessList(input)
+	wantEq(t, len(a.rules), 1, "blank patterns dropped")
+	wantEq(t, a.Action("  user@evil.example  ", ""), AccessBlock, "trimmed sender matches domain block")
+	wantEq(t, a.Action("", "evil.example"), "", "empty mailFrom refuses domain match")
+	wantEq(t, len(a.rules), 1, "rule count unchanged after lookups")
+
+	s := &Scorer{
+		checkSPF:    func(net.IP, string, string) AuthResult { return AuthFail },
+		checkDKIM:   func([]byte) []DKIMResult { return nil },
+		lookupDMARC: func(string) (DMARCPolicy, bool) { return DMARCPolicy{Policy: "quarantine"}, true },
+	}
+	wantEq(t, s.Allowlisted("vip@partner.example", "partner.example"), false, "Allowlisted with nil list")
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: 1})
+	s.SetAccess(NewAccessList(map[string]string{"partner.example": AccessAllow}))
+	wantEq(t, s.Allowlisted("vip@partner.example", "partner.example"), true, "Allowlisted with matching allow")
+
+	v := s.Score(Input{
+		Raw: []byte("x"), ClientIP: net.IPv4(1, 2, 3, 4),
+		MailFrom: "spoof@evil.example", FromDomain: "partner.example",
+	})
+	wantEq(t, v.DMARCReject, true, "quarantine DMARC sets DMARCReject")
+	wantEq(t, v.Spam, true, "allowlist does not rescue quarantine DMARC failure")
+}
