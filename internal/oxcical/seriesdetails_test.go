@@ -17,11 +17,11 @@ func TestImportedSeriesCarriesItsDetails(t *testing.T) {
 	msg, err := Import([]byte(seriesWithChanges), r.opt())
 	mustNoErr(t, err, "import")
 	p := &msg.Props
-	if got, _ := p.Get(r.tag(mapi.NameAppointmentLocation, mapi.PtUnicode)); got != "Room A" {
-		t.Errorf("location = %v, want Room A", got)
+	if got, ok := p.Get(r.tag(mapi.NameAppointmentLocation, mapi.PtUnicode)); !ok || got != "Room A" {
+		t.Errorf("location = %v (ok=%v), want Room A", got, ok)
 	}
-	if got, _ := p.Get(r.tag(mapi.NameBusyStatus, mapi.PtLong)); got != int32(busyBusy) {
-		t.Errorf("busy status = %v, want busy (%d)", got, busyBusy)
+	if got, ok := p.Get(r.tag(mapi.NameBusyStatus, mapi.PtLong)); !ok || got != int32(busyBusy) {
+		t.Errorf("busy status = %v (ok=%v), want busy (%d)", got, ok, busyBusy)
 	}
 }
 
@@ -43,7 +43,7 @@ func TestImportedSeriesCarriesItsFirstSpan(t *testing.T) {
 		"SUMMARY:Holiday\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
 	msg, err = Import([]byte(allDay), r.opt())
 	mustNoErr(t, err, "import all-day")
-	if got, _ := msg.Props.Get(r.tag(mapi.NameAppointmentSubType, mapi.PtBoolean)); got != true {
-		t.Errorf("all-day flag = %v, want true", got)
+	if got, ok := msg.Props.Get(r.tag(mapi.NameAppointmentSubType, mapi.PtBoolean)); !ok || got != true {
+		t.Errorf("all-day flag = %v (ok=%v), want true", got, ok)
 	}
 }
