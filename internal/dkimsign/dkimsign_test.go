@@ -23,7 +23,9 @@ type fakeKeys struct {
 
 func (f fakeKeys) DKIMKey(domain string) ([]byte, string, bool, error) {
 	if f.err != nil {
-		return nil, "", false, f.err
+		// A key and found=true beside the error, so only the error check stands
+		// between a failed lookup and a signature: !found cannot hide its loss.
+		return f.privPEM, f.selector, true, f.err
 	}
 	if domain == f.domain {
 		return f.privPEM, f.selector, true, nil
@@ -195,7 +197,10 @@ func TestPublicKeyPayloadWithoutTag(t *testing.T) {
 // TestSignFailsOpen proves signing never blocks delivery: a domain with no key, and a
 // stored key that is malformed, both yield the original message unchanged.
 func TestSignFailsOpen(t *testing.T) {
-	privPEM, _, _ := GenerateKey(KeyRSA)
+	privPEM, _, err := GenerateKey(KeyRSA)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	t.Run("no key for domain", func(t *testing.T) {
 		s := &Signer{Keys: fakeKeys{domain: "other.test", privPEM: privPEM, selector: "s"}}
@@ -210,7 +215,7 @@ func TestSignFailsOpen(t *testing.T) {
 		}
 	})
 	t.Run("lookup error", func(t *testing.T) {
-		s := &Signer{Keys: fakeKeys{err: fmt.Errorf("db down")}}
+		s := &Signer{Keys: fakeKeys{privPEM: privPEM, selector: "s", err: fmt.Errorf("db down")}}
 		if got := s.Sign([]byte(testMsg)); !bytes.Equal(got, []byte(testMsg)) {
 			t.Error("a key-lookup error must yield the original message")
 		}
