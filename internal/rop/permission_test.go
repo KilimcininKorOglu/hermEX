@@ -266,6 +266,38 @@ func TestModifyMemberOfAnotherOrganizationSkipped(t *testing.T) {
 	}
 }
 
+// TestReviewerCannotRaiseTheirOwnRights proves a delegate holding Reviewer on the
+// Inbox cannot rewrite its permission table: the ADD that names the delegate as
+// Owner answers ecAccessDenied and the delegate's rights stay Reviewer. The
+// session has no directory, which accepts the member address as given, so a
+// missing gate would store the row.
+func TestReviewerCannotRaiseTheirOwnRights(t *testing.T) {
+	dir := provisionedDir(t)
+	const delegate = "delegate@hermex.test"
+	grantFolderPermission(t, dir, int64(mapi.PrivateFIDInbox), delegate, mapi.RightsReviewer)
+
+	sess, logonH := delegateLogon(t, dir, delegate)
+	defer sess.Close()
+	_, h := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
+	resp, _ := sess.Dispatch(buildModifyPermissions(t, 0, modifyPermIncludeFreeBusy, []permDataRow{{
+		flags: permRowAdd,
+		props: []mapi.TaggedPropVal{
+			{Tag: mapi.PrSmtpAddress, Value: delegate},
+			{Tag: mapi.PrMemberRights, Value: int32(mapi.RightsOwner)},
+		},
+	}}), []uint32{h[1]})
+	if ec := ropResultEC(t, resp); ec != ecAccessDenied {
+		t.Errorf("Reviewer ModifyPermissions(ADD self as Owner) ec = %#x, want AccessDenied", ec)
+	}
+	rights, err := sess.get(logonH).store.ResolvePermission(int64(mapi.PrivateFIDInbox), delegate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rights != mapi.RightsReviewer {
+		t.Errorf("delegate rights after the refused change = %#x, want Reviewer %#x", rights, mapi.RightsReviewer)
+	}
+}
+
 // TestModifyAddMemberViaEntryID drives the primary AddRow path: a real member
 // identified by an address-book PR_ENTRYID whose DN embeds the SMTP address. The
 // member must land in the table at a positive id with the granted rights, proving
