@@ -1,6 +1,7 @@
 package oxcmail
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -26,8 +27,36 @@ func internetHeader(props mapi.PropertyValues, names map[mapi.PropertyName]uint1
 		return "", false
 	}
 	v, ok := props.Get(mapi.MakeTag(id, mapi.PtUnicode))
-	s, _ := v.(string)
-	return s, ok
+	if !ok {
+		return "", false
+	}
+	s, isString := v.(string)
+	return s, isString
+}
+
+// TestImportCapsThePromotedHeaders delivers a message with far more unmapped
+// fields than a mail carries. Each promoted field allocates a named property in
+// the mailbox's bounded name table, so a sender must not be able to spend that
+// table with one message: at most maxPromotedHeaders fields are promoted.
+func TestImportCapsThePromotedHeaders(t *testing.T) {
+	fields := make([]string, 3*maxPromotedHeaders)
+	for i := range fields {
+		fields[i] = "X-Flood-" + strconv.Itoa(i) + ": v\r\n"
+	}
+	resolver, names := namedResolver()
+	_, err := Import([]byte("From: a@example.org\r\nSubject: s\r\n"+strings.Join(fields, "")+"\r\nbody\r\n"), Options{Resolver: resolver})
+	mustImport(t, err)
+	promoted := 0
+	for n := range names {
+		if n.GUID == mapi.PsInternetHeaders && strings.HasPrefix(n.Name, "X-Flood-") {
+			promoted++
+		}
+	}
+	// Every field is eligible, so the cap is reached exactly; fewer would mean the
+	// fields were dropped for another reason and the cap went untested.
+	if promoted != maxPromotedHeaders {
+		t.Errorf("%d fields allocated names, want the cap of %d", promoted, maxPromotedHeaders)
+	}
 }
 
 const unmappedHeadersMail = "From: sender@example.org\r\nTo: recipient@example.org\r\n" +
@@ -45,8 +74,8 @@ func TestImportPromotesUnmappedHeaders(t *testing.T) {
 	msg, err := Import([]byte(unmappedHeadersMail), Options{Resolver: resolver})
 	mustImport(t, err)
 
-	if v, _ := internetHeader(msg.Props, names, "X-Ticket"); v != "café" {
-		t.Errorf("X-Ticket = %q, want the decoded café", v)
+	if v, ok := internetHeader(msg.Props, names, "X-Ticket"); !ok || v != "café" {
+		t.Errorf("X-Ticket = %q (set %v), want the decoded café", v, ok)
 	}
 	if _, ok := internetHeader(msg.Props, names, "X-Ms-Exchange-Organization-Authas"); !ok {
 		t.Error("the organization AuthAs field is one a reader keeps")
