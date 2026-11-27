@@ -1,7 +1,6 @@
 package rop
 
 import (
-	"bytes"
 	"strings"
 	"testing"
 	"unicode/utf16"
@@ -56,14 +55,6 @@ func readStreamChunk(t *testing.T, sess *Session, streamH uint32, byteCount uint
 	return data
 }
 
-func utf16le(s string) []byte {
-	var b []byte
-	for _, u := range utf16.Encode([]rune(s)) {
-		b = append(b, byte(u), byte(u>>8))
-	}
-	return b
-}
-
 func decodeUTF16LE(b []byte) string {
 	u := make([]uint16, 0, len(b)/2)
 	for i := 0; i+1 < len(b); i += 2 {
@@ -116,11 +107,9 @@ func TestOpenReadStream(t *testing.T) {
 	if len(full) != size {
 		t.Errorf("reassembled %d bytes, want StreamSize %d", len(full), size)
 	}
-	if want := utf16le("hello body"); !bytes.Equal(full, want) {
-		// fall back to a contains check (the body may carry trailing whitespace)
-		if !strings.Contains(decodeUTF16LE(full), "hello body") {
-			t.Errorf("stream body = %q, want it to contain \"hello body\"", decodeUTF16LE(full))
-		}
+	// The seeded body is "hello body" and its line ending; nothing else may surround it.
+	if got := strings.TrimRight(decodeUTF16LE(full), "\r\n"); got != "hello body" {
+		t.Errorf("stream body = %q, want \"hello body\"", decodeUTF16LE(full))
 	}
 
 	// A read past the end returns zero bytes.
