@@ -295,7 +295,8 @@ func validTaskInput(in taskJSON) bool {
 }
 
 func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
-	var in taskJSON
+	// Status -1 means "not sent", so the legacy completed flag decides.
+	in := taskJSON{Status: -1}
 	if err := decodeJSON(r, &in); err != nil || !validTaskInput(in) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
@@ -319,7 +320,8 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
-	var in taskJSON
+	// Status -1 means "not sent", so the legacy completed flag decides.
+	in := taskJSON{Status: -1}
 	if err := decodeJSON(r, &in); err != nil || !validTaskInput(in) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
