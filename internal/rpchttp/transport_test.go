@@ -2,9 +2,12 @@ package rpchttp
 
 import (
 	"bytes"
+	"encoding/binary"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"hermex/internal/mapi"
@@ -52,9 +55,11 @@ func TestParseProxyURL(t *testing.T) {
 	if !ok || host != "mail.hermex.test" || port != "6001" {
 		t.Errorf("parseProxyURL = (%q, %q, %v), want (mail.hermex.test, 6001, true)", host, port, ok)
 	}
-	bad := httptest.NewRequest("RPC_OUT_DATA", "/rpc/rpcproxy.dll", nil)
-	if _, _, ok := parseProxyURL(bad); ok {
-		t.Error("parseProxyURL accepted a query without host:port")
+	for _, target := range []string{"/rpc/rpcproxy.dll", "/rpc/rpcproxy.dll?:6001", "/rpc/rpcproxy.dll?mail.hermex.test:"} {
+		bad := httptest.NewRequest("RPC_OUT_DATA", target, nil)
+		if _, _, ok := parseProxyURL(bad); ok {
+			t.Errorf("parseProxyURL(%q) accepted malformed query", target)
+		}
 	}
 }
 
@@ -64,11 +69,14 @@ func TestRTSRoundTrip(t *testing.T) {
 	_, a3, err := parseRTS(buildConnA3(0x10))
 	mustNoErr(t, err, "parse CONN/A3")
 	wantCommands(t, a3, "CONN/A3", rtsConnectionTimeout)
+	wantEq(t, a3[0].U32, connectionTimeoutMS, "CONN/A3 timeout")
 
 	_, c2, err := parseRTS(buildConnC2(0x10, 0x10000))
 	mustNoErr(t, err, "parse CONN/C2")
 	wantCommands(t, c2, "CONN/C2", rtsVersion, rtsReceiveWindowSize, rtsConnectionTimeout)
+	wantEq(t, c2[0].U32, uint32(1), "CONN/C2 version")
 	wantEq(t, c2[1].U32, uint32(0x10000), "CONN/C2 window")
+	wantEq(t, c2[2].U32, connectionTimeoutMS, "CONN/C2 timeout")
 
 	// The cookies helper recovers both cookies from a CONN/A1 in order.
 	_, a1cmds, err := parseRTS(connA1())
@@ -95,7 +103,11 @@ func TestRendezvous(t *testing.T) {
 	outReq := mustReq(t, "RPC_OUT_DATA", url, bytes.NewReader(connA1()))
 	outResp, err := http.DefaultClient.Do(outReq)
 	mustNoErr(t, err, "OUT request")
-	defer outResp.Body.Close()
+	defer func() {
+		if cerr := outResp.Body.Close(); cerr != nil {
+			t.Errorf("close OUT body: %v", cerr)
+		}
+	}()
 	wantEq(t, outResp.StatusCode, http.StatusOK, "OUT status")
 
 	a3, err := readPDU(outResp.Body)
@@ -110,11 +122,13 @@ func TestRendezvous(t *testing.T) {
 	inReq := mustReq(t, "RPC_IN_DATA", url, pr)
 	inDone := make(chan error, 1)
 	go func() {
-		resp, err := http.DefaultClient.Do(inReq)
+		resp, doErr := http.DefaultClient.Do(inReq)
 		if resp != nil {
-			resp.Body.Close()
+			if cerr := resp.Body.Close(); cerr != nil && doErr == nil {
+				doErr = cerr
+			}
 		}
-		inDone <- err
+		inDone <- doErr
 	}()
 	_, err = pw.Write(connB1())
 	mustNoErr(t, err, "write CONN/B1")
@@ -126,22 +140,123 @@ func TestRendezvous(t *testing.T) {
 	mustNoErr(t, err, "parse CONN/C2")
 	wantCommands(t, cmds, "the second OUT PDU", rtsVersion, rtsReceiveWindowSize, rtsConnectionTimeout)
 
-	_ = pw.Close()
+	mustNoErr(t, pw.Close(), "close IN pipe")
 	if err := <-inDone; err != nil {
 		t.Errorf("RPC_IN_DATA request: %v", err)
 	}
 }
 
-// TestUnknownMethodRejected proves a non-RPC verb is refused.
+// TestUnknownMethodRejected proves a non-RPC verb is refused without creating state.
 func TestUnknownMethodRejected(t *testing.T) {
-	srv := httptest.NewServer(NewServer(Config{Auth: okAuth}))
+	s := NewServer(Config{Auth: okAuth})
+	srv := httptest.NewServer(s)
 	defer srv.Close()
 	resp, err := http.DefaultClient.Do(mustReq(t, "GET", srv.URL+"/rpc/rpcproxy.dll?h:6001", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			t.Errorf("close GET body: %v", cerr)
+		}
+	}()
 	if resp.StatusCode != http.StatusMethodNotAllowed {
 		t.Errorf("GET status = %d, want 405", resp.StatusCode)
 	}
+	wantEq(t, resp.Header.Get("Allow"), "RPC_IN_DATA, RPC_OUT_DATA", "Allow header")
+	s.mu.Lock()
+	n := len(s.conns)
+	s.mu.Unlock()
+	wantEq(t, n, 0, "connections after rejected method")
+}
+
+// TestRTSAndPDURejectMalformed proves readPDU and parseRTS refuse truncated
+// frames, frag_length below the 16-byte NCACN header, and unknown RTS commands.
+func TestRTSAndPDURejectMalformed(t *testing.T) {
+	// readPDU refuses a header declaring frag_length < 16 ([C706] 12.6.3.1).
+	shortFrag := make([]byte, 16)
+	shortFrag[0] = 5 // rpc_vers
+	shortFrag[2] = ndr.PktRTS
+	shortFrag[4] = 0x10                               // little-endian NDR data representation
+	binary.LittleEndian.PutUint16(shortFrag[8:10], 8) // frag_length < 16
+	_, err := readPDU(bytes.NewReader(shortFrag))
+	wantTrue(t, errors.Is(err, errMalformedPDU), "frag_length < 16 returns errMalformedPDU")
+
+	// parseRTS refuses a PDU shorter than the 16-byte header.
+	_, _, err = parseRTS([]byte{5, 0, ndr.PktRTS})
+	wantTrue(t, err != nil, "short RTS PDU returns error")
+
+	// parseRTS refuses an unknown RTS command type ([MS-RPCH] 2.2.3.5.1).
+	unknownCmd := ndr.Frame(ndr.PktRTS, ndr.PfcFirstFrag|ndr.PfcLastFrag, 1, buildRTSBody(rtsFlagNone, []rtsCommand{
+		{Type: 99, U32: 0},
+	}))
+	_, _, err = parseRTS(unknownCmd)
+	wantTrue(t, errors.Is(err, ndr.ErrFormat), "unknown RTS command returns ErrFormat")
+
+	// parseRTS refuses a truncated padding command whose length exceeds the body.
+	padBody := ndr.NewPush()
+	padBody.Uint16(rtsFlagNone)
+	padBody.Uint16(1)
+	padBody.Uint32(rtsPadding)
+	padBody.Uint32(64) // declares 64 bytes of padding with 0 following
+	padPDU := ndr.Frame(ndr.PktRTS, ndr.PfcFirstFrag|ndr.PfcLastFrag, 2, padBody.Bytes())
+	_, _, err = parseRTS(padPDU)
+	wantTrue(t, err != nil, "truncated RTS padding returns error")
+}
+
+// TestTransportRefusesHostileRequests proves ServeHTTP refuses unauthenticated,
+// malformed, cookie-less, and over-capacity requests without mutating s.conns.
+func TestTransportRefusesHostileRequests(t *testing.T) {
+	// Unauthenticated request returns 401 and leaves s.conns empty.
+	denyAuth := func(w http.ResponseWriter, _ *http.Request) (string, string, bool) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return "", "", false
+	}
+	sDeny := NewServer(Config{Auth: denyAuth})
+	rec := httptest.NewRecorder()
+	sDeny.ServeHTTP(rec, httptest.NewRequest("RPC_OUT_DATA", "/rpc/rpcproxy.dll?h:6001", bytes.NewReader(connA1())))
+	wantEq(t, rec.Code, http.StatusUnauthorized, "unauthenticated status")
+	sDeny.mu.Lock()
+	wantEq(t, len(sDeny.conns), 0, "unauthenticated conns count")
+	sDeny.mu.Unlock()
+
+	// Malformed requests with valid auth return 400 and leave s.conns empty.
+	noCookie := ndr.Frame(ndr.PktRTS, ndr.PfcFirstFrag|ndr.PfcLastFrag, 1, buildRTSBody(rtsFlagNone, []rtsCommand{
+		{Type: rtsVersion, U32: 1},
+	}))
+	unknownCmd := ndr.Frame(ndr.PktRTS, ndr.PfcFirstFrag|ndr.PfcLastFrag, 1, buildRTSBody(rtsFlagNone, []rtsCommand{
+		{Type: 99, U32: 0},
+	}))
+	s := NewServer(Config{Auth: okAuth})
+	badReqs := []struct {
+		name   string
+		method string
+		target string
+		body   []byte
+	}{
+		{"missing host:port", "RPC_OUT_DATA", "/rpc/rpcproxy.dll", connA1()},
+		{"truncated body", "RPC_OUT_DATA", "/rpc/rpcproxy.dll?h:6001", []byte{5, 0}},
+		{"unknown RTS cmd", "RPC_OUT_DATA", "/rpc/rpcproxy.dll?h:6001", unknownCmd},
+		{"OUT missing cookie", "RPC_OUT_DATA", "/rpc/rpcproxy.dll?h:6001", noCookie},
+		{"IN missing cookie", "RPC_IN_DATA", "/rpc/rpcproxy.dll?h:6001", noCookie},
+	}
+	for _, tc := range badReqs {
+		r := httptest.NewRecorder()
+		s.ServeHTTP(r, httptest.NewRequest(tc.method, tc.target, bytes.NewReader(tc.body)))
+		wantEq(t, r.Code, http.StatusBadRequest, tc.name+" status")
+	}
+	s.mu.Lock()
+	wantEq(t, len(s.conns), 0, "conns count after 400 refusals")
+	s.mu.Unlock()
+
+	// Table at capacity returns 503 and does not admit a new connection.
+	for i := range maxVirtualConnections {
+		s.getOrCreate("cap-"+strconv.Itoa(i), "alice@hermex.test", "/mb/alice", "203.0.113.7:1")
+	}
+	capRec := httptest.NewRecorder()
+	s.ServeHTTP(capRec, httptest.NewRequest("RPC_OUT_DATA", "/rpc/rpcproxy.dll?h:6001", bytes.NewReader(connA1())))
+	wantEq(t, capRec.Code, http.StatusServiceUnavailable, "over-capacity status")
+	s.mu.Lock()
+	wantEq(t, len(s.conns), maxVirtualConnections, "conns count after 503 refusal")
+	s.mu.Unlock()
 }
