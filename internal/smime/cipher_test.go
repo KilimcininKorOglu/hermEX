@@ -103,6 +103,9 @@ func TestDecryptRevealsNothingAboutWhyItFailed(t *testing.T) {
 	if wrongKey == nil || corrupted == nil {
 		t.Fatal("a bad decrypt succeeded")
 	}
+	if wrongKey.Error() != corrupted.Error() {
+		t.Errorf("a wrong key and a corrupted envelope answer differently:\n%v\n%v", wrongKey, corrupted)
+	}
 	if wrongOut != nil || corruptOut != nil {
 		t.Errorf("a failed decrypt returned content: %d and %d bytes", len(wrongOut), len(corruptOut))
 	}

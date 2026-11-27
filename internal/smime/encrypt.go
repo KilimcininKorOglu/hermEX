@@ -53,22 +53,29 @@ func Decrypt(raw []byte, cert *x509.Certificate, key crypto.PrivateKey) ([]byte,
 	}
 	_, body, ok := bytes.Cut(raw, []byte("\r\n\r\n"))
 	if !ok {
-		return nil, errors.New("smime: enveloped message has no body")
+		return nil, ErrUndecryptable
 	}
 	der, err := decodeBase64Body(body)
 	if err != nil {
-		return nil, fmt.Errorf("smime: decode enveloped data: %w", err)
+		return nil, ErrUndecryptable
 	}
 	p7, err := pkcs7.Parse(der)
 	if err != nil {
-		return nil, fmt.Errorf("smime: parse enveloped data: %w", err)
+		return nil, ErrUndecryptable
 	}
 	content, err := decryptEnveloped(p7, cert, key)
 	if err != nil {
-		return nil, fmt.Errorf("smime: decrypt: %w", err)
+		return nil, ErrUndecryptable
 	}
 	return content, nil
 }
+
+// ErrUndecryptable is the one answer Decrypt gives for any envelope it cannot
+// open. A corrupted body, a key that is not the recipient's and bad CBC padding
+// all read the same, because an error that told them apart would hand a sender
+// who alters the ciphertext a padding oracle (RFC 5652 section 6.3) on the first
+// caller that reported it.
+var ErrUndecryptable = errors.New("smime: the enveloped content cannot be decrypted")
 
 // errBadPadding reports enveloped content whose CBC padding does not fit it.
 var errBadPadding = errors.New("smime: enveloped content padding is invalid")
