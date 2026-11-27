@@ -1,6 +1,7 @@
 package rop
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -112,8 +113,9 @@ func TestAnICSUploadIntoAFullMailboxIsQuotaExceeded(t *testing.T) {
 	st, err = objectstore.Open(dir)
 	mustNil(t, err)
 	defer st.Close()
-	if _, err := st.GetMessageProperties(newMid, mapi.PrSubject); err == nil {
-		t.Error("the refused upload was stored")
+	// Only "not found" proves absence; any other error is a failed read, not a refusal.
+	if _, err := st.GetMessageProperties(newMid, mapi.PrSubject); !errors.Is(err, objectstore.ErrNotFound) {
+		t.Errorf("reading the refused upload: err %v, want ErrNotFound (nothing stored)", err)
 	}
 }
 
