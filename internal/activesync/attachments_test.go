@@ -38,9 +38,12 @@ func seedInboxAttachment(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
 	when := time.Date(2026, 6, 15, 9, 0, 0, 0, time.UTC)
-	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(attachmentMIME), when, 0); err != nil {
+	_, err = st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(attachmentMIME), when, 0)
+	if cerr := st.Close(); cerr != nil {
+		t.Fatal(cerr)
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
 }
@@ -149,8 +152,9 @@ func TestItemOperationsFetchAttachment(t *testing.T) {
 // still echoes the reference. The reference arrives from the client, so each
 // case is a forged or broken one: no separators, a non-numeric collection or
 // message id, a message id past uint32, an empty segment, extra colons, a
-// negative index, an index past the last attachment, and a message that does
-// not exist.
+// negative index, an index past the last attachment, an index past int, and a
+// message that does not exist. The reference names no mailbox, so it can only
+// address the caller's own store.
 func TestItemOperationsFetchBadReference(t *testing.T) {
 	ts, dir := seededServer(t)
 	seedInboxAttachment(t, dir)
@@ -173,6 +177,7 @@ func TestItemOperationsFetchBadReference(t *testing.T) {
 		coll + ":" + uid + ":0:9",
 		coll + ":" + uid + ":-1",
 		coll + ":" + uid + ":1",
+		coll + ":" + uid + ":99999999999999999999",
 		coll + ":999999:0",
 	} {
 		req := wbxml.Elem(wbxml.IOItemOperations,
