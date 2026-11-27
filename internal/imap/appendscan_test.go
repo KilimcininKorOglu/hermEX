@@ -1,7 +1,6 @@
 package imap
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
@@ -37,11 +36,11 @@ func withScanner(t *testing.T, verdict string) {
 // appendMessage runs one APPEND and returns the tagged reply.
 func appendMessage(t *testing.T, c *testClient, tag, msg string) string {
 	t.Helper()
-	_, _ = fmt.Fprintf(c.conn, "%s APPEND INBOX {%d}\r\n", tag, len(msg))
+	mustSend(c.t, c.conn, "%s APPEND INBOX {%d}\r\n", tag, len(msg))
 	if cont := c.line(); !strings.HasPrefix(cont, "+") {
 		t.Fatalf("APPEND continuation = %q, want +", cont)
 	}
-	_, _ = fmt.Fprintf(c.conn, "%s\r\n", msg)
+	mustSend(c.t, c.conn, "%s\r\n", msg)
 	return c.collectTagged(tag)
 }
 

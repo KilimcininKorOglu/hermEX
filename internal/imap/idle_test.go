@@ -3,7 +3,6 @@ package imap
 import (
 	"bufio"
 	"errors"
-	"fmt"
 	"net"
 	"path/filepath"
 	"strings"
@@ -89,7 +88,7 @@ func TestIMAPIdle(t *testing.T) {
 	wantContains(t, "CAPABILITY", caps[0], "IDLE")
 
 	// Begin IDLE: the server requests a continuation.
-	_, _ = fmt.Fprintf(c.conn, "a4 IDLE\r\n")
+	mustSend(c.t, c.conn, "a4 IDLE\r\n")
 	wantPrefix(t, "the IDLE continuation", c.line(), "+")
 
 	// A delivery during IDLE, through a separate store handle (a different daemon's
@@ -104,7 +103,7 @@ func TestIMAPIdle(t *testing.T) {
 	mustNoErr(t, "clear the read deadline", conn.SetReadDeadline(time.Time{}))
 
 	// End IDLE with DONE; the server sends the tagged completion.
-	_, _ = fmt.Fprintf(c.conn, "DONE\r\n")
+	mustSend(c.t, c.conn, "DONE\r\n")
 	_, status := c.collect("a4")
 	wantEq(t, "the IDLE termination status", status, "OK")
 

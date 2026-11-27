@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"os"
@@ -198,7 +197,7 @@ func TestLineCapSurvivesStartTLSAndCompress(t *testing.T) {
 	wantLongLineRefused(t, tconn, tc.br, "after STARTTLS")
 
 	tc.mustOK("a2", "LOGIN alice secret")
-	_, _ = fmt.Fprintf(tconn, "a3 COMPRESS DEFLATE\r\n")
+	mustSend(t, tconn, "a3 COMPRESS DEFLATE\r\n")
 	if _, status := tc.collect("a3"); status != "OK" {
 		t.Fatalf("COMPRESS status = %s, want OK", status)
 	}

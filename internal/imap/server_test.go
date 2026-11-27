@@ -176,8 +176,18 @@ func (c *testClient) expectUntagged(word, what string) string {
 // status word (OK/NO/BAD).
 func (c *testClient) do(tag, cmd string) (untagged []string, status string) {
 	c.t.Helper()
-	_, _ = fmt.Fprintf(c.conn, "%s %s\r\n", tag, cmd)
+	mustSend(c.t, c.conn, "%s %s\r\n", tag, cmd)
 	return c.collect(tag)
+}
+
+// mustSend writes a formatted protocol line to w and fails the test when the
+// write fails, so a dead connection is reported instead of a confusing read
+// timeout further on.
+func mustSend(t *testing.T, w io.Writer, format string, args ...any) {
+	t.Helper()
+	if _, err := fmt.Fprintf(w, format, args...); err != nil {
+		t.Fatalf("send %q: %v", format, err)
+	}
 }
 
 // collect reads untagged responses until the tagged completion for tag,
@@ -197,11 +207,11 @@ func (c *testClient) collect(tag string) (untagged []string, status string) {
 // continuation handshake, and returns the tagged status.
 func (c *testClient) appendMsg(tag, mailbox, msg string) string {
 	c.t.Helper()
-	_, _ = fmt.Fprintf(c.conn, "%s APPEND %s {%d}\r\n", tag, mailbox, len(msg))
+	mustSend(c.t, c.conn, "%s APPEND %s {%d}\r\n", tag, mailbox, len(msg))
 	if cont := c.line(); !strings.HasPrefix(cont, "+") {
 		c.t.Fatalf("APPEND continuation = %q, want +", cont)
 	}
-	_, _ = fmt.Fprintf(c.conn, "%s\r\n", msg)
+	mustSend(c.t, c.conn, "%s\r\n", msg)
 	_, status := c.collect(tag)
 	return status
 }

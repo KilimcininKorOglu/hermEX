@@ -2,7 +2,6 @@ package imap
 
 import (
 	"bufio"
-	"fmt"
 	"net"
 	"path/filepath"
 	"strings"
@@ -81,7 +80,7 @@ func dialLogin(t *testing.T, addr, user, pass string) *testClient {
 // completion line (so a test can inspect a response code like [READ-ONLY]).
 func (c *testClient) doFull(tag, cmd string) (untagged []string, tagged string) {
 	c.t.Helper()
-	_, _ = fmt.Fprintf(c.conn, "%s %s\r\n", tag, cmd)
+	mustSend(c.t, c.conn, "%s %s\r\n", tag, cmd)
 	for {
 		l := c.line()
 		if strings.HasPrefix(l, tag+" ") {

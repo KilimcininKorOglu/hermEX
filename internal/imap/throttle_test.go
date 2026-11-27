@@ -2,7 +2,6 @@ package imap
 
 import (
 	"bufio"
-	"fmt"
 	"net"
 	"strings"
 	"testing"
@@ -52,7 +51,7 @@ func TestIMAPLoginThrottle(t *testing.T) {
 	}
 
 	login := func(tag string) string {
-		_, _ = fmt.Fprintf(conn, "%s LOGIN alice wrongpass\r\n", tag)
+		mustSend(t, conn, "%s LOGIN alice wrongpass\r\n", tag)
 		resp, err := br.ReadString('\n')
 		if err != nil {
 			t.Fatalf("read %s: %v", tag, err)
@@ -107,7 +106,7 @@ func TestIMAPThrottleCountsTheAccountToo(t *testing.T) {
 		if _, err := br.ReadString('\n'); err != nil { // greeting
 			t.Fatal(err)
 		}
-		_, _ = fmt.Fprintf(conn, "a LOGIN %s %s\r\n", user, pass)
+		mustSend(t, conn, "a LOGIN %s %s\r\n", user, pass)
 		resp, err := br.ReadString('\n')
 		if err != nil {
 			t.Fatalf("read: %v", err)
