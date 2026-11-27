@@ -30,7 +30,7 @@ func storeObject(t *testing.T, dir string, folder int64, class, subject string) 
 	t.Helper()
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	props := mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: class},
 		{Tag: mapi.PrSubject, Value: subject},
@@ -56,7 +56,7 @@ func liveFolderOf(t *testing.T, dir string, id int64) int64 {
 	t.Helper()
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	// A soft-deleted item keeps its folder, so a lookup error is a failure, not
 	// an item that is not live.
 	fid, err := st.MessageFolder(id)
@@ -112,8 +112,11 @@ func TestMoveItemsShowsTheMoveToOtherDevices(t *testing.T) {
 	_, root := postCommand(t, ts, "Sync", calendarSyncReq(key))
 	key = respColl(t, root).ChildText(wbxml.ASSyncKey)
 
-	status, _ := moveStatus(t, ts, sid, calendarID(), team)
+	status, dst := moveStatus(t, ts, sid, calendarID(), team)
 	wantEq(t, "Status", status, "3")
+	if dst == "" {
+		t.Fatal("a successful move named no DstMsgId")
+	}
 	_, root = postCommand(t, ts, "Sync", calendarSyncReq(key))
 	cmds := respColl(t, root).Child(wbxml.ASCommands)
 	if cmds == nil {
@@ -154,7 +157,7 @@ func TestMoveItemsRefusesAnObjectItHasNoClaimOn(t *testing.T) {
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
 	mustNoErr(t, "soft-delete", st.SoftDeleteObject(deleted))
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 
 	for _, src := range []string{strconv.FormatInt(contact, 10), strconv.FormatInt(deleted, 10),
 		"99999999999999999999", "-5", "0", "abc"} {
