@@ -18,11 +18,18 @@ func importConv(t *testing.T, headers string) (string, []byte) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	topic, _ := msg.Props.Get(mapi.PrConversationTopic)
-	id, _ := msg.Props.Get(mapi.PrConversationId)
-	s, _ := topic.(string)
-	b, _ := id.([]byte)
-	return s, b
+	return propString(msg.Props, mapi.PrConversationTopic), mustBytes(t, msg.Props, mapi.PrConversationId)
+}
+
+// mustBytes reads a binary property every imported message carries, and stops
+// the test when it is missing or of another type.
+func mustBytes(t *testing.T, p mapi.PropertyValues, tag mapi.PropTag) []byte {
+	t.Helper()
+	b, ok := bytesProp(p, tag)
+	if !ok {
+		t.Fatalf("property %#x is missing or not binary", uint32(tag))
+	}
+	return b
 }
 
 // TestImportDerivesTheConversation proves a message without a Thread-Topic takes
@@ -61,9 +68,9 @@ func TestImportReadsTheThreadIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gotIdx, _ := msg.Props.Get(mapi.PrConversationIndex)
-	gotID, _ := msg.Props.Get(mapi.PrConversationId)
-	if !bytes.Equal(gotIdx.([]byte), idx) || !bytes.Equal(gotID.([]byte), idx[6:22]) {
+	gotIdx := mustBytes(t, msg.Props, mapi.PrConversationIndex)
+	gotID := mustBytes(t, msg.Props, mapi.PrConversationId)
+	if !bytes.Equal(gotIdx, idx) || !bytes.Equal(gotID, idx[6:22]) {
 		t.Errorf("index %x, id %x; want the header's index and its GUID", gotIdx, gotID)
 	}
 	raw, err := Export(msg, Options{})
@@ -79,9 +86,31 @@ func TestImportReadsTheThreadIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootIdx, _ := root.Props.Get(mapi.PrConversationIndex)
-	rootID, _ := root.Props.Get(mapi.PrConversationId)
-	if b := rootIdx.([]byte); len(b) != 22 || b[0] != 0x01 || !bytes.Equal(b[6:], rootID.([]byte)) {
+	rootIdx := mustBytes(t, root.Props, mapi.PrConversationIndex)
+	rootID := mustBytes(t, root.Props, mapi.PrConversationId)
+	if len(rootIdx) != 22 || rootIdx[0] != 0x01 || !bytes.Equal(rootIdx[6:], rootID) {
 		t.Errorf("root index %x, id %x; want a 22-byte header carrying the id", rootIdx, rootID)
+	}
+}
+
+// TestImportIgnoresAMalformedThreadIndex feeds Thread-Index values a sender can
+// write that are no conversation index: [MS-OXOMSG] 2.2.1.3 makes one a 22-byte
+// header followed by 5-byte child blocks. Such a value must not become the
+// conversation id; the message gets a root index of its own instead.
+func TestImportIgnoresAMalformedThreadIndex(t *testing.T) {
+	short := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xab}, 21))
+	ragged := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xab}, 25))
+	for _, v := range []string{"not base64 !!", short, ragged} {
+		msg, err := Import([]byte("From: bob@hermex.test\r\nSubject: Plan\r\nThread-Index: "+v+
+			"\r\nContent-Type: text/plain\r\n\r\nbody\r\n"), Options{})
+		mustNoErr(t, err, "import with a malformed Thread-Index")
+		idx := mustBytes(t, msg.Props, mapi.PrConversationIndex)
+		id := mustBytes(t, msg.Props, mapi.PrConversationId)
+		if len(idx) != 22 || !bytes.Equal(idx[6:], id) {
+			t.Errorf("%q: index %x, id %x; want a fresh 22-byte root index carrying the id", v, idx, id)
+		}
+		if bytes.Equal(id, bytes.Repeat([]byte{0xab}, 16)) {
+			t.Errorf("%q: the malformed header named the conversation", v)
+		}
 	}
 }
