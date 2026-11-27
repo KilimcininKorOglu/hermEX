@@ -131,7 +131,10 @@ func startTLS(cfg *config.Config, dir *directory.SQLDirectory, logger *logging.L
 		log.Fatalf("hermex-imap: tls: %v", err)
 	}
 	if provider.TLSEnabled() {
-		tc, _ := provider.TLSConfig()
+		tc, err := provider.TLSConfig()
+		if err != nil {
+			log.Fatalf("hermex-imap: tls config: %v", err)
+		}
 		srv.TLSConfig = tc // enables STARTTLS on the plaintext listener
 		go provider.RunMaintenance()
 	}

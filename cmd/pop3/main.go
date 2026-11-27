@@ -114,7 +114,10 @@ func startTLS(cfg *config.Config, dir *directory.SQLDirectory, logger *logging.L
 		log.Fatalf("hermex-pop3: tls: %v", err)
 	}
 	if provider.TLSEnabled() {
-		tc, _ := provider.TLSConfig()
+		tc, err := provider.TLSConfig()
+		if err != nil {
+			log.Fatalf("hermex-pop3: tls config: %v", err)
+		}
 		srv.TLSConfig = tc // enables STLS on the plaintext listener
 		go provider.RunMaintenance()
 	}

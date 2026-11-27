@@ -375,7 +375,10 @@ func (d *mtaDaemon) startServer(scorer *antispam.Scorer, lim limiters, addr stri
 		log.Fatalf("hermex-mta: tls: %v", err)
 	}
 	if provider.TLSEnabled() {
-		tc, _ := provider.TLSConfig()
+		tc, err := provider.TLSConfig()
+		if err != nil {
+			log.Fatalf("hermex-mta: tls config: %v", err)
+		}
 		srv.TLSConfig = tc // enables STARTTLS on the plaintext listener
 		go provider.RunMaintenance()
 	}
