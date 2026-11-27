@@ -114,9 +114,7 @@ func (d *SQLDirectory) ClaimNextTask() (t TaskInfo, ok bool, err error) {
 // FinishTask records a task's terminal status (done or failed) and its result or
 // error message, which is truncated to the column width.
 func (d *SQLDirectory) FinishTask(id int64, status, message string) error {
-	if len(message) > 512 {
-		message = message[:512]
-	}
+	message = capString(message, 512)
 	_, err := d.db.Exec(
 		`UPDATE admin_tasks SET status = ?, message = ?, updated_at = ? WHERE id = ?`,
 		status, message, time.Now().Unix(), id)

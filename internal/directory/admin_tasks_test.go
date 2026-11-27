@@ -58,4 +58,14 @@ func TestAdminTaskQueue(t *testing.T) {
 	wantEq(t, "truncated task found", ok, true)
 	wantEq(t, "truncated task status", got.Status, TaskFailed)
 	wantEq(t, "truncated task message length", len(got.Message), 512)
+
+	// A failure message from an LDAP server or a mail store may be non-ASCII; a
+	// cut inside a character made MariaDB refuse the update and left the task
+	// running forever.
+	mustNoErr(t, "finish task with a non-ASCII oversized message",
+		d.FinishTask(id, TaskFailed, "x"+strings.Repeat("ş", 300)))
+	got, ok, err = d.GetTask(id)
+	mustNoErr(t, "get the non-ASCII task", err)
+	wantEq(t, "non-ASCII task found", ok, true)
+	wantEq(t, "non-ASCII message cut on a character", got.Message, "x"+strings.Repeat("ş", 255))
 }
