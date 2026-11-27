@@ -385,40 +385,36 @@ func setContactAddresses(c *contactJSON, vcf []byte) {
 // escaped and unescapes each component (RFC 6350 section 3.4).
 func vcardComponents(raw string) []string {
 	var out []string
-	var cur strings.Builder
+	start := 0
 	for i := 0; i < len(raw); i++ {
 		switch {
-		case raw[i] == '\\' && i+1 < len(raw):
-			cur.WriteByte(raw[i])
-			cur.WriteByte(raw[i+1])
-			i++
+		case raw[i] == '\\':
+			i++ // the escaped byte never ends a component
 		case raw[i] == ';':
-			out = append(out, vcardText(cur.String()))
-			cur.Reset()
-		default:
-			cur.WriteByte(raw[i])
+			out = append(out, vcardText(raw[start:i]))
+			start = i + 1
 		}
 	}
-	return append(out, vcardText(cur.String()))
+	return append(out, vcardText(raw[start:]))
 }
 
 // vcardText undoes RFC 6350 text escaping: \n or \N is a line break and any
 // other escaped character stands for itself.
 func vcardText(raw string) string {
-	var b strings.Builder
+	b := make([]byte, 0, len(raw))
 	for i := 0; i < len(raw); i++ {
 		if raw[i] != '\\' || i+1 == len(raw) {
-			b.WriteByte(raw[i])
+			b = append(b, raw[i])
 			continue
 		}
 		i++
 		if raw[i] == 'n' || raw[i] == 'N' {
-			b.WriteByte('\n')
+			b = append(b, '\n')
 		} else {
-			b.WriteByte(raw[i])
+			b = append(b, raw[i])
 		}
 	}
-	return b.String()
+	return string(b)
 }
 
 // fieldAt returns one component of a split vCard value, or "" when the value
