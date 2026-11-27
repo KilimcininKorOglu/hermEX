@@ -18,7 +18,7 @@ func TestRespondDeclineAfterAccept(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st, "the store")
 
 	tags, err := ResolveTags(st)
 	if err != nil {
@@ -57,17 +57,12 @@ func TestRespondDeclineAfterAccept(t *testing.T) {
 // the filed appointment, while the appointment data (the UID) is kept. The same strip
 // lets the organizer response mint its own Message-ID rather than reuse the request's.
 func TestRespondStripsInboundCruft(t *testing.T) {
-	dir := t.TempDir()
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
+	st, err := objectstore.Open(t.TempDir())
+	mustNoErr(t, err, "Open")
+	defer mustClose(t, st, "the store")
 
 	tags, err := ResolveTags(st)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, err, "ResolveTags")
 	reqID, err := st.CreateMessage(int64(mapi.PrivateFIDInbox), &oxcmail.Message{
 		Props: mapi.PropertyValues{
 			{Tag: mapi.PrMessageClass, Value: "IPM.Schedule.Meeting.Request"},
@@ -96,7 +91,7 @@ func TestRespondStripsInboundCruft(t *testing.T) {
 	if props.Has(mapi.PrTransportMessageHeaders) {
 		t.Error("filed appointment kept the inbound transport headers (cruft)")
 	}
-	if v, _ := props.Get(tags.UID); v != "cruft-1" {
-		t.Errorf("filed appointment UID = %v, want cruft-1 (the appointment data is kept)", v)
+	if v, ok := props.Get(tags.UID); !ok || v != "cruft-1" {
+		t.Errorf("filed appointment UID = %v (set: %v), want cruft-1 (the appointment data is kept)", v, ok)
 	}
 }
