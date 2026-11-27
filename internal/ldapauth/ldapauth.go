@@ -41,7 +41,7 @@ func New() *Verifier {
 // unauthenticated (anonymous) bind a server would accept, which must never pass
 // for a password check. A directory or system error is returned as such; a
 // failed user bind or an absent/ambiguous account is a clean false.
-func (v *Verifier) Verify(cfg directory.LDAPConfig, login, password string) (bool, error) {
+func (v *Verifier) Verify(cfg directory.LDAPConfig, login, password string) (ok bool, retErr error) {
 	if password == "" || cfg.URI == "" {
 		return false, nil
 	}
@@ -49,7 +49,12 @@ func (v *Verifier) Verify(cfg directory.LDAPConfig, login, password string) (boo
 	if err != nil {
 		return false, err
 	}
-	defer c.Close()
+	defer func() {
+		if cerr := c.Close(); cerr != nil {
+			ok = false
+			retErr = errors.Join(retErr, cerr)
+		}
+	}()
 
 	// Resolve the login to exactly one distinguished name.
 	res, err := c.Search(ldap.NewSearchRequest(
@@ -90,7 +95,10 @@ func (v *Verifier) connect(cfg directory.LDAPConfig) (conn, error) {
 		return nil, err
 	}
 	if cfg.StartTLS {
-		host, _ := hostOf(cfg.URI)
+		host, err := hostOf(cfg.URI)
+		if err != nil {
+			return nil, errors.Join(err, c.Close())
+		}
 		if err := c.StartTLS(&tls.Config{ServerName: host}); err != nil {
 			return nil, errors.Join(err, c.Close())
 		}
@@ -128,12 +136,12 @@ type SyncedUser struct {
 // searches the base for every entry carrying the login attribute and returns
 // each one's login and stable identifier. An entry with no stable identifier is
 // skipped, there is nothing to bind its externid to.
-func (v *Verifier) Sync(cfg directory.LDAPConfig) ([]SyncedUser, error) {
+func (v *Verifier) Sync(cfg directory.LDAPConfig) (users []SyncedUser, retErr error) {
 	c, err := v.connect(cfg)
 	if err != nil {
 		return nil, err
 	}
-	defer c.Close()
+	defer closeConn(c, &retErr)
 
 	attr := loginAttr(cfg)
 	profile := cfg.EnabledProfileSync() // field key -> LDAP attribute
@@ -249,7 +257,7 @@ type SyncedGroup struct {
 // filter (default: mail-bearing AD groups) and returns each group's address, owner
 // DN, and member DNs. The owner and member DNs are resolved by the caller. Returns
 // nil when group sync is disabled.
-func (v *Verifier) SyncGroups(cfg directory.LDAPConfig) ([]SyncedGroup, error) {
+func (v *Verifier) SyncGroups(cfg directory.LDAPConfig) (groups []SyncedGroup, retErr error) {
 	if !cfg.SyncGroups {
 		return nil, nil
 	}
@@ -257,7 +265,7 @@ func (v *Verifier) SyncGroups(cfg directory.LDAPConfig) ([]SyncedGroup, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer c.Close()
+	defer closeConn(c, &retErr)
 
 	base := cfg.GroupBaseDN
 	if base == "" {
@@ -303,7 +311,7 @@ type SyncedContact struct {
 // display name and stable identifier. An entry with no address, or with no stable
 // identifier to bind its externid to, is skipped. Returns nil when contact sync is
 // disabled.
-func (v *Verifier) SyncContacts(cfg directory.LDAPConfig) ([]SyncedContact, error) {
+func (v *Verifier) SyncContacts(cfg directory.LDAPConfig) (contacts []SyncedContact, retErr error) {
 	if !cfg.SyncContacts {
 		return nil, nil
 	}
@@ -311,7 +319,7 @@ func (v *Verifier) SyncContacts(cfg directory.LDAPConfig) ([]SyncedContact, erro
 	if err != nil {
 		return nil, err
 	}
-	defer c.Close()
+	defer closeConn(c, &retErr)
 
 	base := cfg.ContactBaseDN
 	if base == "" {
@@ -357,6 +365,13 @@ func syncedContact(e *ldap.Entry) (SyncedContact, bool) {
 		name = e.GetAttributeValue("cn")
 	}
 	return SyncedContact{Mail: mail, DisplayName: name, ExternID: id}, true
+}
+
+// closeConn closes c and joins any close error into *errp.
+func closeConn(c conn, errp *error) {
+	if cerr := c.Close(); cerr != nil {
+		*errp = errors.Join(*errp, cerr)
+	}
 }
 
 // hostOf extracts the host (for the TLS ServerName) from an LDAP URI.

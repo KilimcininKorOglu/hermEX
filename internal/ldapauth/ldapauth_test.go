@@ -15,6 +15,7 @@ import (
 // returns canned search results and per-DN bind verdicts, so the verifier's
 // bind/search orchestration is exercised without a live directory.
 type fakeConn struct {
+	dialed      bool
 	startTLSErr error
 	tlsConfigs  []*tls.Config    // the configuration of each StartTLS call
 	binds       []string         // DN of each Bind call, in order
@@ -23,6 +24,7 @@ type fakeConn struct {
 	searchErr   error
 	filters     []string // the filter of each Search call, in order
 	closed      bool
+	closeErr    error
 }
 
 func (f *fakeConn) StartTLS(c *tls.Config) error {
@@ -34,7 +36,7 @@ func (f *fakeConn) Search(r *ldap.SearchRequest) (*ldap.SearchResult, error) {
 	f.filters = append(f.filters, r.Filter)
 	return f.searchRes, f.searchErr
 }
-func (f *fakeConn) Close() error { f.closed = true; return nil }
+func (f *fakeConn) Close() error { f.closed = true; return f.closeErr }
 
 // TestVerifyEscapesTheLoginInTheFilter logs in with a name made of the filter
 // metacharacters. RFC 4515 section 3 writes '*', '(', ')', '\' and NUL in an
@@ -42,12 +44,18 @@ func (f *fakeConn) Close() error { f.closed = true; return nil }
 // match every entry carrying the attribute, so a login name could pick an account.
 func TestVerifyEscapesTheLoginInTheFilter(t *testing.T) {
 	fc := &fakeConn{searchRes: &ldap.SearchResult{}}
-	_, _ = verifierWith(fc).Verify(cfg, "*)(uid=*\\", "pw")
+	ok, err := verifierWith(fc).Verify(cfg, "*)(uid=*\\", "pw")
+	if ok || err != nil {
+		t.Fatalf("Verify = (%v, %v), want (false, nil)", ok, err)
+	}
 	if len(fc.filters) != 1 {
 		t.Fatalf("searches = %d, want 1", len(fc.filters))
 	}
 	if want := `(mail=\2a\29\28uid=\2a\5c)`; fc.filters[0] != want {
 		t.Errorf("filter = %s, want %s", fc.filters[0], want)
+	}
+	if len(fc.binds) != 1 || fc.binds[0] != cfg.BindDN {
+		t.Errorf("binds = %v, want only service bind [%s]", fc.binds, cfg.BindDN)
 	}
 }
 
@@ -90,7 +98,7 @@ func TestStartTLSVerifiesTheDirectorysCertificate(t *testing.T) {
 }
 
 func verifierWith(fc *fakeConn) *Verifier {
-	return &Verifier{dial: func(string) (conn, error) { return fc, nil }}
+	return &Verifier{dial: func(string) (conn, error) { fc.dialed = true; return fc, nil }}
 }
 
 func oneEntry(dn string) *ldap.SearchResult {
@@ -116,8 +124,8 @@ func TestVerifyEmptyPasswordRejected(t *testing.T) {
 	if ok || err != nil {
 		t.Errorf("empty password = (%v, %v), want (false, nil)", ok, err)
 	}
-	if len(fc.binds) != 0 {
-		t.Error("empty password must not reach the directory")
+	if fc.dialed || len(fc.binds) != 0 || len(fc.filters) != 0 {
+		t.Errorf("empty password must not reach the directory: dialed=%v binds=%v filters=%v", fc.dialed, fc.binds, fc.filters)
 	}
 }
 
@@ -171,8 +179,15 @@ func TestVerifyReportsADirectoryFailureDuringTheBind(t *testing.T) {
 // TestVerifyNotFound proves a login with no directory entry does not authenticate.
 func TestVerifyNotFound(t *testing.T) {
 	fc := &fakeConn{searchRes: &ldap.SearchResult{}}
-	if ok, _ := verifierWith(fc).Verify(cfg, "ghost@hermex.test", "x"); ok {
-		t.Error("a login with no entry must not authenticate")
+	ok, err := verifierWith(fc).Verify(cfg, "ghost@hermex.test", "x")
+	if ok || err != nil {
+		t.Errorf("Verify not found = (%v, %v), want (false, nil)", ok, err)
+	}
+	if len(fc.binds) != 1 || fc.binds[0] != cfg.BindDN {
+		t.Errorf("binds = %v, want only service bind [%s]", fc.binds, cfg.BindDN)
+	}
+	if !fc.closed {
+		t.Error("the connection was not closed")
 	}
 }
 
@@ -180,8 +195,15 @@ func TestVerifyNotFound(t *testing.T) {
 // authenticate (it is not safe to pick one).
 func TestVerifyAmbiguous(t *testing.T) {
 	fc := &fakeConn{searchRes: &ldap.SearchResult{Entries: []*ldap.Entry{{DN: "a"}, {DN: "b"}}}}
-	if ok, _ := verifierWith(fc).Verify(cfg, "dup@hermex.test", "x"); ok {
-		t.Error("an ambiguous login must not authenticate")
+	ok, err := verifierWith(fc).Verify(cfg, "dup@hermex.test", "x")
+	if ok || err != nil {
+		t.Errorf("Verify ambiguous = (%v, %v), want (false, nil)", ok, err)
+	}
+	if len(fc.binds) != 1 || fc.binds[0] != cfg.BindDN {
+		t.Errorf("binds = %v, want only service bind [%s]", fc.binds, cfg.BindDN)
+	}
+	if !fc.closed {
+		t.Error("the connection was not closed")
 	}
 }
 
@@ -192,6 +214,15 @@ func TestVerifyServiceBindError(t *testing.T) {
 	ok, err := verifierWith(fc).Verify(cfg, "alice@hermex.test", "x")
 	if ok || err == nil {
 		t.Errorf("service bind failure = (%v, %v), want (false, error)", ok, err)
+	}
+	if len(fc.filters) != 0 {
+		t.Errorf("search ran after failed service bind: filters=%v", fc.filters)
+	}
+	if len(fc.binds) != 1 || fc.binds[0] != cfg.BindDN {
+		t.Errorf("binds = %v, want only failed service bind", fc.binds)
+	}
+	if !fc.closed {
+		t.Error("the connection was not closed")
 	}
 }
 
@@ -289,8 +320,16 @@ func TestSyncGroups(t *testing.T) {
 		t.Errorf("group = %+v, want eng with owner alice and 2 members", groups[0])
 	}
 
-	if got, _ := verifierWith(fc).SyncGroups(directory.LDAPConfig{}); got != nil {
+	fcDisabled := &fakeConn{}
+	got, err := verifierWith(fcDisabled).SyncGroups(directory.LDAPConfig{})
+	if err != nil {
+		t.Fatalf("SyncGroups disabled: %v", err)
+	}
+	if got != nil {
 		t.Errorf("SyncGroups disabled = %v, want nil (no-op)", got)
+	}
+	if fcDisabled.dialed {
+		t.Error("SyncGroups disabled must not dial the directory")
 	}
 }
 
@@ -456,6 +495,9 @@ func TestSyncContactsDisabledIsANoOp(t *testing.T) {
 	if got != nil {
 		t.Errorf("SyncContacts disabled = %v, want nil (no-op)", got)
 	}
+	if fc.dialed {
+		t.Error("SyncContacts disabled must not dial the directory")
+	}
 }
 
 // TestVerifyRefusesPlaintextTransport proves a configuration that would bind in
@@ -471,11 +513,11 @@ func TestVerifyRefusesPlaintextTransport(t *testing.T) {
 	if ok {
 		t.Error("a plaintext configuration authenticated a login")
 	}
-	if err == nil {
-		t.Error("a plaintext configuration must report why it was refused")
+	if !errors.Is(err, directory.ErrInsecureLDAP) {
+		t.Errorf("err = %v, want directory.ErrInsecureLDAP", err)
 	}
-	if len(fc.binds) != 0 {
-		t.Errorf("the password reached the directory anyway: %v", fc.binds)
+	if fc.dialed || len(fc.binds) != 0 {
+		t.Errorf("the password reached the directory anyway: dialed=%v binds=%v", fc.dialed, fc.binds)
 	}
 }
 
@@ -488,5 +530,176 @@ func TestVerifyAcceptsLDAPS(t *testing.T) {
 
 	if ok, err := verifierWith(fc).Verify(secure, "alice@hermex.test", "correct"); !ok || err != nil {
 		t.Errorf("Verify over ldaps = (%v, %v), want (true, nil)", ok, err)
+	}
+}
+
+// TestAFailedCloseIsReported: a connection that will not close is a directory
+// error, so Verify does not answer true over it and every sync reports it
+// instead of returning a result as if the session ended cleanly.
+func TestAFailedCloseIsReported(t *testing.T) {
+	closeErr := errors.New("unbind failed")
+	fc := &fakeConn{searchRes: oneEntry("uid=alice,dc=hermex,dc=test"), closeErr: closeErr}
+	if ok, err := verifierWith(fc).Verify(cfg, "alice@hermex.test", "correct"); ok || !errors.Is(err, closeErr) {
+		t.Errorf("Verify with a failed close = (%v, %v), want (false, the close error)", ok, err)
+	}
+	fc = &fakeConn{searchRes: &ldap.SearchResult{}, closeErr: closeErr}
+	if _, err := verifierWith(fc).Sync(cfg); !errors.Is(err, closeErr) {
+		t.Errorf("Sync with a failed close = %v, want the close error", err)
+	}
+	fc = &fakeConn{searchRes: &ldap.SearchResult{}, closeErr: closeErr}
+	if _, err := verifierWith(fc).SyncGroups(directory.LDAPConfig{BaseDN: "dc=hermex,dc=test", SyncGroups: true, StartTLS: true}); !errors.Is(err, closeErr) {
+		t.Errorf("SyncGroups with a failed close = %v, want the close error", err)
+	}
+	fc = &fakeConn{searchRes: &ldap.SearchResult{}, closeErr: closeErr}
+	if _, err := verifierWith(fc).SyncContacts(contactCfg); !errors.Is(err, closeErr) {
+		t.Errorf("SyncContacts with a failed close = %v, want the close error", err)
+	}
+}
+
+// TestVerifyEmptyURIRejected proves a missing directory URI is refused before
+// dialing or binding.
+func TestVerifyEmptyURIRejected(t *testing.T) {
+	fc := &fakeConn{}
+	noURI := cfg
+	noURI.URI = ""
+
+	ok, err := verifierWith(fc).Verify(noURI, "alice@hermex.test", "secret")
+	if ok || err != nil {
+		t.Errorf("empty URI = (%v, %v), want (false, nil)", ok, err)
+	}
+	if fc.dialed || len(fc.binds) != 0 || len(fc.filters) != 0 {
+		t.Errorf("empty URI must not contact directory: dialed=%v binds=%v filters=%v", fc.dialed, fc.binds, fc.filters)
+	}
+}
+
+// TestVerifyMalformedURIWithStartTLSRejected proves a malformed URI that fails
+// host extraction aborts StartTLS before negotiating TLS with an empty
+// ServerName (RFC 4513 section 3.1.3) and closes the connection.
+func TestVerifyMalformedURIWithStartTLSRejected(t *testing.T) {
+	fc := &fakeConn{searchRes: oneEntry("uid=alice,dc=hermex,dc=test")}
+	bad := cfg
+	bad.URI = "ldap://[::1"
+
+	ok, err := verifierWith(fc).Verify(bad, "alice@hermex.test", "secret")
+	if ok || err == nil {
+		t.Fatalf("malformed URI with StartTLS = (%v, %v), want (false, error)", ok, err)
+	}
+	if len(fc.tlsConfigs) != 0 {
+		t.Errorf("StartTLS was called despite malformed URI: %v", fc.tlsConfigs)
+	}
+	if len(fc.binds) != 0 {
+		t.Errorf("binds occurred despite malformed URI: %v", fc.binds)
+	}
+	if !fc.closed {
+		t.Error("the connection was not closed after URI parse failure")
+	}
+}
+
+// TestVerifyEscapesNULInFilter proves a NUL byte in the login is escaped as
+// \00 per RFC 4515 section 3 and never triggers a user bind on no match.
+func TestVerifyEscapesNULInFilter(t *testing.T) {
+	fc := &fakeConn{searchRes: &ldap.SearchResult{}}
+	ok, err := verifierWith(fc).Verify(cfg, "alice\x00admin", "pw")
+	if ok || err != nil {
+		t.Fatalf("Verify = (%v, %v), want (false, nil)", ok, err)
+	}
+	if len(fc.filters) != 1 {
+		t.Fatalf("searches = %d, want 1", len(fc.filters))
+	}
+	if want := `(mail=alice\00admin)`; fc.filters[0] != want {
+		t.Errorf("filter = %s, want %s", fc.filters[0], want)
+	}
+	if len(fc.binds) != 1 || fc.binds[0] != cfg.BindDN {
+		t.Errorf("binds = %v, want only service bind [%s]", fc.binds, cfg.BindDN)
+	}
+}
+
+// TestVerifySearchErrorRefusesLogin proves a directory search failure returns
+// an error, never attempts a user bind, and closes the connection.
+func TestVerifySearchErrorRefusesLogin(t *testing.T) {
+	fc := &fakeConn{searchErr: errors.New("search timed out")}
+	ok, err := verifierWith(fc).Verify(cfg, "alice@hermex.test", "secret")
+	if ok || err == nil {
+		t.Fatalf("Verify on search error = (%v, %v), want (false, error)", ok, err)
+	}
+	if len(fc.binds) != 1 || fc.binds[0] != cfg.BindDN {
+		t.Errorf("binds = %v, want only service bind [%s]", fc.binds, cfg.BindDN)
+	}
+	if !fc.closed {
+		t.Error("the connection was not closed")
+	}
+}
+
+// TestSyncRefusesPlaintextTransport proves Sync refuses a plaintext LDAP
+// configuration before dialing and returns no accounts.
+func TestSyncRefusesPlaintextTransport(t *testing.T) {
+	fc := &fakeConn{searchRes: &ldap.SearchResult{}}
+	plain := cfg
+	plain.StartTLS = false
+
+	users, err := verifierWith(fc).Sync(plain)
+	if !errors.Is(err, directory.ErrInsecureLDAP) {
+		t.Errorf("err = %v, want directory.ErrInsecureLDAP", err)
+	}
+	if users != nil {
+		t.Errorf("users = %+v, want nil", users)
+	}
+	if fc.dialed || len(fc.binds) != 0 {
+		t.Errorf("plaintext Sync contacted directory: dialed=%v binds=%v", fc.dialed, fc.binds)
+	}
+}
+
+// TestSyncSkipsMissingLoginAndEmptyAliasValues proves entries with an empty
+// login attribute are skipped and empty smtp: alias values are dropped.
+func TestSyncSkipsMissingLoginAndEmptyAliasValues(t *testing.T) {
+	noLogin := dirEntry("uid=ghost,dc=hermex,dc=test", "", []byte{0x02})
+	emptyAlias := aliasEntry("smtp:", "SMTP:", "   ", "")
+	fc := &fakeConn{searchRes: &ldap.SearchResult{Entries: []*ldap.Entry{noLogin, emptyAlias}}}
+
+	users, err := verifierWith(fc).Sync(aliasCfg)
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if len(users) != 1 {
+		t.Fatalf("Sync returned %d users, want 1 (empty login entry skipped)", len(users))
+	}
+	if users[0].Username != "alice@hermex.test" {
+		t.Errorf("Username = %q, want alice@hermex.test", users[0].Username)
+	}
+	if len(users[0].Aliases) != 0 {
+		t.Errorf("Aliases = %v, want none for empty smtp: and blank values", users[0].Aliases)
+	}
+}
+
+// TestSyncGroupsSkipsEntryWithoutMail proves a group entry lacking a mail
+// attribute is skipped because a distribution list requires an address.
+func TestSyncGroupsSkipsEntryWithoutMail(t *testing.T) {
+	noMail := &ldap.Entry{DN: "cn=nomail,dc=hermex,dc=test", Attributes: []*ldap.EntryAttribute{
+		{Name: "member", Values: []string{"uid=bob,dc=hermex,dc=test"}},
+	}}
+	fc := &fakeConn{searchRes: &ldap.SearchResult{Entries: []*ldap.Entry{noMail}}}
+	gcfg := directory.LDAPConfig{BaseDN: "dc=hermex,dc=test", UsernameAttr: "mail", SyncGroups: true, StartTLS: true}
+
+	groups, err := verifierWith(fc).SyncGroups(gcfg)
+	if err != nil {
+		t.Fatalf("SyncGroups: %v", err)
+	}
+	if len(groups) != 0 {
+		t.Errorf("groups = %+v, want none for entry without mail", groups)
+	}
+}
+
+// TestSyncContactsSkipsEntryWithoutMail proves a contact entry lacking a mail
+// attribute is skipped even when it carries a stable identifier.
+func TestSyncContactsSkipsEntryWithoutMail(t *testing.T) {
+	noMail := contactEntry("cn=nomail,dc=hermex,dc=test", "", "No Mail", []byte{0x44})
+	fc := &fakeConn{searchRes: &ldap.SearchResult{Entries: []*ldap.Entry{noMail}}}
+
+	contacts, err := verifierWith(fc).SyncContacts(contactCfg)
+	if err != nil {
+		t.Fatalf("SyncContacts: %v", err)
+	}
+	if len(contacts) != 0 {
+		t.Errorf("contacts = %+v, want none for entry without mail", contacts)
 	}
 }
