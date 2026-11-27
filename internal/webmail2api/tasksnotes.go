@@ -310,6 +310,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := s.storeTask(st, jsonToTask(in))
 	if err != nil {
+		logError("task-create", err, logging.Fields{})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save task"})
 		return
 	}
