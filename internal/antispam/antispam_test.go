@@ -437,7 +437,9 @@ func TestDNSBLHostileInputs(t *testing.T) {
 func TestScoreDMARCQuarantineAndFailOpen(t *testing.T) {
 	raw := []byte("X-Spam-Flag: NO\r\nSubject: hi\r\n\r\nbody")
 	origCopy := append([]byte(nil), raw...)
-	_ = Tag(raw, Verdict{Score: 5, Spam: true})
+	if tagged := Tag(raw, Verdict{Score: 5, Spam: true}); !strings.Contains(string(tagged), "X-Spam-Flag: YES") {
+		t.Errorf("Tag did not write the verdict: %q", tagged)
+	}
 	if string(raw) != string(origCopy) {
 		t.Errorf("Tag mutated caller input slice: got %q, want %q", raw, origCopy)
 	}
