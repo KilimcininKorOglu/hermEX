@@ -164,7 +164,11 @@ func (s *sessionStore) sweep(now time.Time, ttl time.Duration) int {
 // required (e.g. the server GUID). Session cookies use newSessionToken instead.
 func newGUID() string {
 	var b [16]byte
-	_, _ = rand.Read(b[:])
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand documents that Read never fails; an error means the
+		// process has no entropy source, and no identifier can be minted.
+		panic(fmt.Sprintf("mapihttp: read random bytes: %v", err))
+	}
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
@@ -174,6 +178,9 @@ func newGUID() string {
 // approach (OWASP session-id guidance).
 func newSessionToken() string {
 	var b [32]byte
-	_, _ = rand.Read(b[:])
+	if _, err := rand.Read(b[:]); err != nil {
+		// A predictable session token is worse than no session: refuse to mint one.
+		panic(fmt.Sprintf("mapihttp: read random bytes: %v", err))
+	}
 	return fmt.Sprintf("%x", b[:])
 }

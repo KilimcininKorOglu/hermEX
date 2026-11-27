@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"hermex/internal/serve"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"sync/atomic"
@@ -45,7 +46,10 @@ func readBody(r *http.Request) []byte {
 	}
 	// An oversized body reads as empty, which every handler refuses as an invalid
 	// request body, rather than as a prefix cut at the cap.
-	body, _ := serve.ReadBody(r.Body, limit)
+	body, err := serve.ReadBody(r.Body, limit)
+	if err != nil {
+		return nil
+	}
 	return body
 }
 
@@ -87,11 +91,16 @@ func commonHeaders(w http.ResponseWriter, r *http.Request, reqType string) {
 func writeNormal(w http.ResponseWriter, r *http.Request, reqType string, body []byte) {
 	commonHeaders(w, r, reqType)
 	w.WriteHeader(http.StatusOK)
-	_, _ = io.WriteString(w, metaTags)
+	if _, err := io.WriteString(w, metaTags); err != nil {
+		slog.Warn("mapihttp: write response preamble failed", "request", reqType, "err", err)
+		return
+	}
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
-	_, _ = w.Write(body)
+	if _, err := w.Write(body); err != nil {
+		slog.Warn("mapihttp: write response body failed", "request", reqType, "err", err)
+	}
 }
 
 // writeRespError frames an X-ResponseCode failure. Per the protocol the HTTP
@@ -104,7 +113,9 @@ func writeRespError(w http.ResponseWriter, r *http.Request, reqType string, code
 	h.Set("X-ResponseCode", strconv.Itoa(code))
 	h.Set("X-ServerApplication", serverApp)
 	w.WriteHeader(http.StatusOK)
-	_, _ = io.WriteString(w, "X-ResponseCode: "+strconv.Itoa(code))
+	if _, err := io.WriteString(w, "X-ResponseCode: "+strconv.Itoa(code)); err != nil {
+		slog.Warn("mapihttp: write error response failed", "request", reqType, "code", code, "err", err)
+	}
 }
 
 // --- little-endian request/response body cursor ---

@@ -13,6 +13,7 @@ package mapihttp
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -123,7 +124,11 @@ func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostna
 	}
 	// A process-stable GUID identifies this server instance to NSPI clients for
 	// the lifetime of a binding; a restart re-mints it and clients re-bind.
-	serverGUID, _ := mapi.ParseGUID(newGUID())
+	serverGUID, err := mapi.ParseGUID(newGUID())
+	if err != nil {
+		// newGUID always formats a well-formed GUID; a failure is a programming error.
+		panic(fmt.Sprintf("mapihttp: parse minted server GUID: %v", err))
+	}
 	s := &Server{
 		auth:          auth,
 		accounts:      accounts,
