@@ -48,8 +48,12 @@ func (r *resolver) opt() Options { return Options{Resolver: r.resolve} }
 // allocate assigns ids to names the way a store writer would before an export.
 func (r *resolver) allocate(t *testing.T, names []mapi.PropertyName) {
 	t.Helper()
-	if _, err := r.resolve(true, names); err != nil {
+	ids, err := r.resolve(true, names)
+	if err != nil {
 		t.Fatalf("allocate named ids: %v", err)
+	}
+	if len(ids) != len(names) {
+		t.Fatalf("allocated %d ids for %d names", len(ids), len(names))
 	}
 }
 
@@ -652,8 +656,8 @@ func TestImportHostileInputs(t *testing.T) {
 	if got := r.strVal(msg, nameICalUID); got != "hermex-no-uid-event" {
 		t.Errorf("generated UID = %q, want hermex-no-uid-event", got)
 	}
-	if _, ok := r.timeVal(msg, mapi.NameAppointmentStartWhole); ok {
-		t.Error("invalid DTSTART must not store NameAppointmentStartWhole")
+	if v, ok := r.timeVal(msg, mapi.NameAppointmentStartWhole); ok {
+		t.Errorf("invalid DTSTART must not store NameAppointmentStartWhole, stored %d", v)
 	}
 }
 

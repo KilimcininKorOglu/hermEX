@@ -40,10 +40,10 @@ func TestLimitRecurrenceSet(t *testing.T) {
 func TestLimitRecurrenceSetNoOverrides(t *testing.T) {
 	master := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:wk\r\nDTSTART:20260701T140000Z\r\n" +
 		"RRULE:FREQ=WEEKLY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
-	if _, ok := LimitRecurrenceSet([]byte(master),
+	if out, ok := LimitRecurrenceSet([]byte(master),
 		time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC),
-		time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)); ok {
-		t.Error("a master-only object should report ok=false (nothing to trim)")
+		time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)); ok || out != nil {
+		t.Errorf("a master-only object should report ok=false with nothing to serve, got %d bytes", len(out))
 	}
 }
 

@@ -112,8 +112,8 @@ func TestImportWritesNoZoneForUnzonedTimes(t *testing.T) {
 		r := newResolver()
 		msg, err := Import([]byte(body), r.opt())
 		mustNoErr(t, err, "import")
-		if _, ok := msg.Props.Get(r.tag(mapi.NameAppointmentTimeZoneDefStartDisplay, mapi.PtBinary)); ok {
-			t.Errorf("%s got a display zone", dt)
+		if v, ok := msg.Props.Get(r.tag(mapi.NameAppointmentTimeZoneDefStartDisplay, mapi.PtBinary)); ok {
+			t.Errorf("%s got a display zone: %v", dt, v)
 		}
 	}
 }

@@ -34,6 +34,34 @@ func TestCancelledInstancesAreListedApart(t *testing.T) {
 	}
 }
 
+// TestInstanceCancelledNamesOnlyGeneratedInstances stores a STATUS:CANCELLED
+// override at 11:00, an instant the 10:00 daily rule never generates. RFC 5545
+// section 3.8.4.4 makes a RECURRENCE-ID name an instance of the recurrence set, so
+// such an override cancels nothing: the series still answers as a series, and the
+// instant is not reported as a called-off instance of it.
+func TestInstanceCancelledNamesOnlyGeneratedInstances(t *testing.T) {
+	stored := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:c-2\r\n" +
+		"DTSTART:20260620T100000Z\r\nDTEND:20260620T110000Z\r\nRRULE:FREQ=DAILY;COUNT=3\r\nEND:VEVENT\r\n" +
+		"BEGIN:VEVENT\r\nUID:c-2\r\nRECURRENCE-ID:20260620T110000Z\r\nSTATUS:CANCELLED\r\n" +
+		"DTSTART:20260620T110000Z\r\nDTEND:20260620T120000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	cancelled, series := InstanceCancelled([]byte(stored), time.Date(2026, 6, 20, 11, 0, 0, 0, time.UTC))
+	if !series {
+		t.Fatal("a daily series was not read as a series")
+	}
+	if cancelled {
+		t.Error("an override at an instant the rule never generates was reported as a cancelled instance")
+	}
+	// A cancelled override at a generated instant still reports cancelled.
+	at := time.Date(2026, 6, 22, 10, 0, 0, 0, time.UTC)
+	withCancel, ok := CancelInstance([]byte(cancelledSeries), at)
+	if !ok {
+		t.Fatal("CancelInstance refused a live instance")
+	}
+	if cancelled, series := InstanceCancelled(withCancel, at); !cancelled || !series {
+		t.Errorf("InstanceCancelled at a cancelled generated instance = (%v, %v), want (true, true)", cancelled, series)
+	}
+}
+
 // TestCancelInstanceRefusesAnInstanceThatIsNotLive covers the instants a CANCEL
 // may name that the series does not hold live: one an EXDATE removed, one the
 // rule never generates, one past COUNT, and one already cancelled. Each is

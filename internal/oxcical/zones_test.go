@@ -30,6 +30,14 @@ func importedStart(t *testing.T, r *resolver, raw []byte, opt Options) time.Time
 	return mapi.NTTimeToUnix(nt).UTC()
 }
 
+// wantStart imports raw and fails the test unless the event starts at want.
+func wantStart(t *testing.T, r *resolver, raw []byte, opt Options, want time.Time) {
+	t.Helper()
+	if got := importedStart(t, r, raw, opt); !got.Equal(want) {
+		t.Fatalf("start = %s, want %s", got.Format(time.RFC3339), want.Format(time.RFC3339))
+	}
+}
+
 // zoneOpt returns a resolver and an Options that collects every reported zone
 // loss into notes.
 func zoneOpt(notes *[]ZoneNote) (*resolver, Options) {
@@ -90,10 +98,9 @@ func TestImportKeepsIANAZone(t *testing.T) {
 // read as UTC without saying so is a silent loss, so the import names it.
 func TestImportReportsFloatingTime(t *testing.T) {
 	var notes []ZoneNote
-	_, opt := zoneOpt(&notes)
-	if _, err := Import(zoneCal("", ""), opt); err != nil {
-		t.Fatalf("Import: %v", err)
-	}
+	r, opt := zoneOpt(&notes)
+	// With no default zone a floating value is read as UTC (the loss reported).
+	wantStart(t, r, zoneCal("", ""), opt, time.Date(2026, 8, 11, 10, 30, 0, 0, time.UTC))
 	if len(notes) != 2 {
 		t.Fatalf("reported %d times, want 2 (DTSTART and DTEND): %+v", len(notes), notes)
 	}
@@ -122,11 +129,10 @@ func TestImportReadsAFloatingTimeInTheDefaultZone(t *testing.T) {
 // reported or the log fills with events that name nothing wrong.
 func TestDefaultZoneSilencesAFloatingTime(t *testing.T) {
 	var notes []ZoneNote
-	_, opt := zoneOpt(&notes)
+	r, opt := zoneOpt(&notes)
 	opt.DefaultZone = mustZone(t, "Europe/Istanbul")
-	if _, err := Import(zoneCal("", ""), opt); err != nil {
-		t.Fatalf("Import: %v", err)
-	}
+	// Istanbul is UTC+3, so 10:30 there is 07:30Z.
+	wantStart(t, r, zoneCal("", ""), opt, time.Date(2026, 8, 11, 7, 30, 0, 0, time.UTC))
 	if len(notes) != 0 {
 		t.Fatalf("reported %d floating times that were read in the reader's zone: %+v", len(notes), notes)
 	}
@@ -163,10 +169,9 @@ func mustZone(t *testing.T, name string) *time.Location {
 // zone id is reported verbatim, which is the one fact needed to extend the table.
 func TestImportReportsUnresolvableZone(t *testing.T) {
 	var notes []ZoneNote
-	_, opt := zoneOpt(&notes)
-	if _, err := Import(zoneCal(";TZID=Mars/Olympus", ""), opt); err != nil {
-		t.Fatalf("Import: %v", err)
-	}
+	r, opt := zoneOpt(&notes)
+	// An unresolvable TZID leaves the value read as UTC.
+	wantStart(t, r, zoneCal(";TZID=Mars/Olympus", ""), opt, time.Date(2026, 8, 11, 10, 30, 0, 0, time.UTC))
 	if len(notes) == 0 {
 		t.Fatal("an unresolvable TZID was not reported")
 	}
@@ -179,14 +184,11 @@ func TestImportReportsUnresolvableZone(t *testing.T) {
 // that resolved, and a UTC value, are not losses and must not be reported.
 func TestImportReportsNothingForResolvedTimes(t *testing.T) {
 	var notes []ZoneNote
-	_, opt := zoneOpt(&notes)
-	if _, err := Import(zoneCal(";TZID=W. Europe Standard Time", ""), opt); err != nil {
-		t.Fatalf("Import: %v", err)
-	}
+	r, opt := zoneOpt(&notes)
+	// W. Europe Standard Time is Berlin, UTC+2 in August, so 10:30 there is 08:30Z.
+	wantStart(t, r, zoneCal(";TZID=W. Europe Standard Time", ""), opt, time.Date(2026, 8, 11, 8, 30, 0, 0, time.UTC))
 	utc := []byte("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:z\r\nDTSTART:20260811T103000Z\r\nDTEND:20260811T113000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
-	if _, err := Import(utc, opt); err != nil {
-		t.Fatalf("Import: %v", err)
-	}
+	wantStart(t, r, utc, opt, time.Date(2026, 8, 11, 10, 30, 0, 0, time.UTC))
 	if len(notes) != 0 {
 		t.Fatalf("reported %d resolved times, want 0: %+v", len(notes), notes)
 	}
@@ -197,11 +199,10 @@ func TestImportReportsNothingForResolvedTimes(t *testing.T) {
 // and describes the zone, not an instant in it.
 func TestImportReportsNothingForVTimezoneRules(t *testing.T) {
 	var notes []ZoneNote
-	_, opt := zoneOpt(&notes)
+	r, opt := zoneOpt(&notes)
 	vtz := "BEGIN:VTIMEZONE\r\nTZID:Acme/Campus\r\nBEGIN:STANDARD\r\nDTSTART:19700101T000000\r\nTZOFFSETFROM:+0530\r\nTZOFFSETTO:+0530\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n"
-	if _, err := Import(zoneCal(";TZID=Acme/Campus", vtz), opt); err != nil {
-		t.Fatalf("Import: %v", err)
-	}
+	// The zone is +05:30, so 10:30 there is 05:00Z.
+	wantStart(t, r, zoneCal(";TZID=Acme/Campus", vtz), opt, time.Date(2026, 8, 11, 5, 0, 0, 0, time.UTC))
 	if len(notes) != 0 {
 		t.Fatalf("reported %d times inside a VTIMEZONE, want 0: %+v", len(notes), notes)
 	}

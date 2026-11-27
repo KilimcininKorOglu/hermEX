@@ -54,8 +54,8 @@ func TestInstanceCancelDropsOnlyThatInstance(t *testing.T) {
 	if !strings.Contains(string(marked), "STATUS:CANCELLED") || !strings.Contains(string(marked), "RRULE:FREQ=WEEKLY") {
 		t.Errorf("the copy lost its series or does not record the cancellation:\n%s", marked)
 	}
-	if _, again := CancelInstance(marked, march9); again {
-		t.Error("an instance already cancelled was cancelled again")
+	if out, again := CancelInstance(marked, march9); again || out != nil {
+		t.Errorf("an instance already cancelled was cancelled again (%d bytes to store)", len(out))
 	}
 }
 
@@ -67,23 +67,24 @@ func TestInstanceCancelledReadsTheAttendeeCopy(t *testing.T) {
 	if !ok {
 		t.Fatal("CancelInstance refused a live instance")
 	}
-	if cancelled, series := InstanceCancelled(marked, march9); !cancelled || !series {
-		t.Errorf("the cancelled instance reads cancelled=%v series=%v, want both", cancelled, series)
-	}
-	if cancelled, series := InstanceCancelled(marked, march9.Add(7*24*time.Hour)); cancelled || !series {
-		t.Errorf("an instance that is still on reads cancelled=%v series=%v, want false true", cancelled, series)
-	}
+	wantInstanceCancelled(t, marked, march9, true, true, "the cancelled instance")
+	wantInstanceCancelled(t, marked, march9.Add(7*24*time.Hour), false, true, "an instance that is still on")
 	removed, ok := CancelOccurrence(marked, march9)
 	if !ok {
 		t.Fatal("CancelOccurrence refused the cancelled instance")
 	}
-	if cancelled, series := InstanceCancelled(removed, march9); cancelled || !series {
-		t.Errorf("a removed instance reads cancelled=%v series=%v, want a series without it", cancelled, series)
-	}
+	wantInstanceCancelled(t, removed, march9, false, true, "a removed instance")
 	single := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:one\r\n" +
 		"DTSTART:20260309T170000Z\r\nDTEND:20260309T180000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
-	if _, series := InstanceCancelled([]byte(single), march9); series {
-		t.Error("a single event reads as a series")
+	wantInstanceCancelled(t, []byte(single), march9, false, false, "a single event")
+}
+
+// wantInstanceCancelled fails the test unless InstanceCancelled answers the
+// expected pair for the instance at at.
+func wantInstanceCancelled(t *testing.T, stored []byte, at time.Time, wantCancelled, wantSeries bool, what string) {
+	t.Helper()
+	if cancelled, series := InstanceCancelled(stored, at); cancelled != wantCancelled || series != wantSeries {
+		t.Errorf("%s reads cancelled=%v series=%v, want %v %v", what, cancelled, series, wantCancelled, wantSeries)
 	}
 }
 
@@ -128,23 +129,23 @@ func TestCancelBodyCoversTheWholeMeeting(t *testing.T) {
 	if strings.Contains(got, "RECURRENCE-ID") || strings.Count(got, "BEGIN:VEVENT") != 1 {
 		t.Errorf("a whole-meeting cancellation names an instance:\n%s", got)
 	}
-	if _, single := OccurrenceInstant(body); single {
-		t.Error("the attendee would read the whole-meeting cancellation as one instance")
+	if at, single := OccurrenceInstant(body); single || !at.IsZero() {
+		t.Errorf("the attendee would read the whole-meeting cancellation as the instance at %s", at)
 	}
 }
 
 // TestInstanceBodyRefusesAnAbsentInstance keeps a message from naming an instance
 // the series never had or has already removed.
 func TestInstanceBodyRefusesAnAbsentInstance(t *testing.T) {
-	if _, ok := InstanceBody([]byte(seriesICal), march9.Add(time.Hour), "CANCEL", 1); ok {
-		t.Error("an instant the rule never generates was accepted")
+	if out, ok := InstanceBody([]byte(seriesICal), march9.Add(time.Hour), "CANCEL", 1); ok || out != nil {
+		t.Errorf("an instant the rule never generates was accepted (%d bytes)", len(out))
 	}
 	removed, ok := CancelOccurrence([]byte(seriesICal), march9)
 	if !ok {
 		t.Fatal("CancelOccurrence refused a live instance")
 	}
-	if _, ok := InstanceBody(removed, march9, "CANCEL", 1); ok {
-		t.Error("an instance already excluded was accepted")
+	if out, ok := InstanceBody(removed, march9, "CANCEL", 1); ok || out != nil {
+		t.Errorf("an instance already excluded was accepted (%d bytes)", len(out))
 	}
 }
 
@@ -166,8 +167,8 @@ func TestSequenceTracksMasterAndOverride(t *testing.T) {
 	if !ok || Sequence(ov, &march9) != 4 || Sequence(ov, nil) != 2 {
 		t.Errorf("override = %d, master = %d; want 4 and 2", Sequence(ov, &march9), Sequence(ov, nil))
 	}
-	if _, ok := SetSequence([]byte(seriesICal), 1, &march9); ok {
-		t.Error("SetSequence wrote an override that does not exist")
+	if out, ok := SetSequence([]byte(seriesICal), 1, &march9); ok || out != nil {
+		t.Errorf("SetSequence wrote an override that does not exist (%d bytes)", len(out))
 	}
 }
 

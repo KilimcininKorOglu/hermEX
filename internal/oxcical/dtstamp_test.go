@@ -3,6 +3,7 @@ package oxcical
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"hermex/internal/mapi"
 )
@@ -35,8 +36,11 @@ func TestCounterDTSTAMPIsTheAttendees(t *testing.T) {
 		"END:VEVENT\r\nEND:VCALENDAR\r\n"
 	msg, err := Import([]byte(body), r.opt())
 	mustNoErr(t, err, "import")
-	if _, ok := msg.Props.Get(r.tag(mapi.NameAttendeeCriticalChange, mapi.PtSysTime)); !ok {
+	stamp, ok := r.timeVal(msg, mapi.NameAttendeeCriticalChange)
+	if !ok {
 		t.Error("a COUNTER's DTSTAMP is not stored as PidLidAttendeeCriticalChange")
+	} else if want := mapi.UnixToNTTime(time.Date(2026, 6, 2, 8, 0, 0, 0, time.UTC)); stamp != want {
+		t.Errorf("PidLidAttendeeCriticalChange = %d, want the DTSTAMP 2026-06-02T08:00Z (%d)", stamp, want)
 	}
 	raw, err := Export(msg, r.opt())
 	mustNoErr(t, err, "export")

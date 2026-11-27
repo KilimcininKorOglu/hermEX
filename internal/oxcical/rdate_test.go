@@ -98,11 +98,11 @@ func TestExpandRecurrenceRefusesAPlainEvent(t *testing.T) {
 	plain := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n" +
 		"BEGIN:VEVENT\r\nUID:plain-1\r\nDTSTART:20260302T170000Z\r\n" +
 		"DTEND:20260302T180000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
-	if _, ok := ExpandRecurrence([]byte(plain), day(1, 0), day(31, 0)); ok {
-		t.Error("ExpandRecurrence expanded an event that defines no recurrence set")
+	if out, ok := ExpandRecurrence([]byte(plain), day(1, 0), day(31, 0)); ok || out != nil {
+		t.Errorf("ExpandRecurrence expanded an event that defines no recurrence set (%d bytes)", len(out))
 	}
-	if _, ok := OccurrencesIn([]byte(plain), day(1, 0), day(31, 0)); ok {
-		t.Error("OccurrencesIn expanded an event that defines no recurrence set")
+	if spans, ok := OccurrencesIn([]byte(plain), day(1, 0), day(31, 0)); ok || len(spans) != 0 {
+		t.Errorf("OccurrencesIn expanded an event that defines no recurrence set: %v", spans)
 	}
 }
 

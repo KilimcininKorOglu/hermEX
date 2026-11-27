@@ -28,10 +28,14 @@ func TestParseRecurrence(t *testing.T) {
 
 	monthly := []byte("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20260601T100000Z\r\n" +
 		"RRULE:FREQ=MONTHLY;BYDAY=2TU;UNTIL=20261231T000000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
-	_, _, rec2, ok := ParseRecurrence(monthly)
+	start2, end2, rec2, ok := ParseRecurrence(monthly)
 	if !ok {
 		t.Fatal("ParseRecurrence failed on the monthly rule")
 	}
+	// RFC 5545 section 3.6.1: a DATE-TIME DTSTART with no DTEND or DURATION ends
+	// at its start.
+	wantTime(t, start2, time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC), "monthly series start")
+	wantTime(t, end2, time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC), "monthly series end")
 	wantEq(t, rec2.Freq, "MONTHLY", "monthly frequency")
 	wantEq(t, rec2.SetPos, 2, "the nth-weekday ordinal")
 	wantEq(t, len(rec2.Weekdays), 1, "monthly weekday count")

@@ -93,11 +93,11 @@ func TestMergeOverrideReplacesTheSameInstance(t *testing.T) {
 // TestMergeOverrideRefusesWithoutASeries proves the fold never invents a series: an
 // object with no master is left to the caller, which keeps its own behaviour.
 func TestMergeOverrideRefusesWithoutASeries(t *testing.T) {
-	if _, ok := MergeOverride([]byte(occurrenceICal), []byte(occurrenceICal)); ok {
-		t.Error("MergeOverride accepted an object carrying no series master")
+	if out, ok := MergeOverride([]byte(occurrenceICal), []byte(occurrenceICal)); ok || out != nil {
+		t.Errorf("MergeOverride accepted an object carrying no series master (%d bytes)", len(out))
 	}
-	if _, ok := MergeOverride([]byte(seriesICal), []byte(seriesICal)); ok {
-		t.Error("MergeOverride accepted a whole series as an occurrence update")
+	if out, ok := MergeOverride([]byte(seriesICal), []byte(seriesICal)); ok || out != nil {
+		t.Errorf("MergeOverride accepted a whole series as an occurrence update (%d bytes)", len(out))
 	}
 }
 
@@ -122,8 +122,8 @@ func TestOccurrenceInstantReadsTheInstance(t *testing.T) {
 	if want := time.Date(2026, 3, 9, 17, 0, 0, 0, time.UTC); !at.Equal(want) {
 		t.Errorf("instant = %s, want %s", at, want)
 	}
-	if _, ok := OccurrenceInstant([]byte(seriesICal)); ok {
-		t.Error("a series was read as one occurrence")
+	if at, ok := OccurrenceInstant([]byte(seriesICal)); ok || !at.IsZero() {
+		t.Errorf("a series was read as the occurrence at %s", at)
 	}
 }
 

@@ -104,8 +104,8 @@ func TestOccurrencesInDropsACancelledOverride(t *testing.T) {
 // TestOccurrencesInRefusesANonSeries proves a plain event is left to the caller's
 // own start and end.
 func TestOccurrencesInRefusesANonSeries(t *testing.T) {
-	if _, ok := OccurrencesIn([]byte(occurrenceICal), day(9, 0), day(10, 0)); ok {
-		t.Error("OccurrencesIn expanded an object carrying no series master")
+	if spans, ok := OccurrencesIn([]byte(occurrenceICal), day(9, 0), day(10, 0)); ok || len(spans) != 0 {
+		t.Errorf("OccurrencesIn expanded an object carrying no series master: %v", spans)
 	}
 }
 

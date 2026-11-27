@@ -59,7 +59,7 @@ func TestHasInstanceNamesOnlyLiveInstances(t *testing.T) {
 	if HasInstance(cancelled, day(30, 7)) {
 		t.Error("a cancelled instant is accepted")
 	}
-	if _, ok := MoveOccurrence(cancelled, day(30, 7), day(30, 11), day(30, 12)); ok {
-		t.Error("a cancelled instant was moved")
+	if out, ok := MoveOccurrence(cancelled, day(30, 7), day(30, 11), day(30, 12)); ok || out != nil {
+		t.Errorf("a cancelled instant was moved (%d bytes to store)", len(out))
 	}
 }
