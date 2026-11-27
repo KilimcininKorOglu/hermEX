@@ -16,6 +16,9 @@ func TestHTMLText(t *testing.T) {
 		{"entities", "a&nbsp;&amp;&lt;b&gt;", "a &<b>"},
 		{"table cells", "<table><tr><td>a</td><td>b</td></tr><tr><td>c</td></tr></table>", "a b\nc"},
 		{"pre", "<pre>x  y\n  z</pre>", "x  y\n  z"},
+		// A sender can leave a script open; everything after it stays inside it.
+		{"unclosed hidden", "shown<script>document.write('hidden')", "shown"},
+		{"stray close tag", "a</script>b", "ab"},
 	}
 	for _, c := range cases {
 		if got := HTMLText(c.in); got != c.want {
