@@ -56,13 +56,13 @@ func TestInlineDataURIsBecomeCidAttachments(t *testing.T) {
 func assertInlinePNG(t *testing.T, att Attachment, wantCID string) {
 	t.Helper()
 	p := att.Props
-	if got, _ := bytesProp(p, mapi.PrAttachDataBin); string(got) != string(onePixelPNG) {
-		t.Errorf("attachment bytes = % x", got)
+	if got, ok := bytesProp(p, mapi.PrAttachDataBin); !ok || string(got) != string(onePixelPNG) {
+		t.Errorf("attachment bytes = % x (set %v)", got, ok)
 	}
 	if got := propString(p, mapi.PrAttachContentID); got != wantCID {
 		t.Errorf("Content-ID = %q, want %q", got, wantCID)
 	}
-	if flags, _ := propInt32(p, mapi.PrAttachFlags); flags&mapi.AttMhtmlRef == 0 {
+	if flags, ok := propInt32(p, mapi.PrAttachFlags); !ok || flags&mapi.AttMhtmlRef == 0 {
 		t.Error("the attachment is not marked inline, so the exporter would not put it in a multipart/related")
 	}
 	if got := propString(p, mapi.PrAttachMimeTag); got != "image/png" {
