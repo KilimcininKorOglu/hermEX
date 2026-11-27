@@ -105,7 +105,9 @@ func NewGlobalObjectID(created time.Time) []byte {
 	copy(goid, goidClassID)
 	binary.LittleEndian.PutUint64(goid[goidDateOffset+4:], mapi.UnixToNTTime(created))
 	binary.LittleEndian.PutUint32(goid[goidSizeOffset:], goidDataSize)
-	_, _ = rand.Read(goid[goidDataOffset:]) // crypto/rand.Read never returns an error; it aborts the program instead
+	if _, err := rand.Read(goid[goidDataOffset:]); err != nil {
+		panic(err)
+	}
 	return goid
 }
 
@@ -283,19 +285,30 @@ func exceptionBodies(atts []oxcmail.Attachment) map[int64]string {
 	return bodies
 }
 
+// isExceptionAttach reports whether p describes an embedded exception message attachment.
+func isExceptionAttach(p mapi.PropertyValues) bool {
+	f, ok := propInt32(&p, mapi.PrAttachmentFlags)
+	if !ok || f&mapi.AttachmentFlagException == 0 {
+		return false
+	}
+	m, ok := propInt32(&p, mapi.PrAttachMethod)
+	return ok && m == int32(mapi.AttachEmbeddedMsg)
+}
+
 // exceptionAttachment reads an exception attachment: the UTC start of the occurrence
 // it replaces and its embedded message. ok is false for any other attachment.
 func exceptionAttachment(p mapi.PropertyValues) (replaced time.Time, raw []byte, ok bool) {
-	flags, _ := p.Get(mapi.PrAttachmentFlags)
-	method, _ := p.Get(mapi.PrAttachMethod)
-	if f, _ := flags.(int32); f&mapi.AttachmentFlagException == 0 || method != int32(mapi.AttachEmbeddedMsg) {
+	if !isExceptionAttach(p) {
 		return time.Time{}, nil, false
 	}
-	replace, _ := p.Get(mapi.PrExceptionReplaceTime)
+	replace, hasReplace := p.Get(mapi.PrExceptionReplaceTime)
 	nt, isTime := replace.(uint64)
-	data, _ := p.Get(mapi.PrAttachDataBin)
-	raw, _ = data.([]byte)
-	if !isTime || len(raw) == 0 {
+	if !hasReplace || !isTime {
+		return time.Time{}, nil, false
+	}
+	data, hasData := p.Get(mapi.PrAttachDataBin)
+	raw, isBytes := data.([]byte)
+	if !hasData || !isBytes || len(raw) == 0 {
 		return time.Time{}, nil, false
 	}
 	return mapi.NTTimeToUnix(nt), raw, true

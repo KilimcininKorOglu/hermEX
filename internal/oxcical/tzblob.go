@@ -1,7 +1,6 @@
 package oxcical
 
 import (
-	"bytes"
 	"encoding/binary"
 	"time"
 	"unicode/utf16"
@@ -84,9 +83,13 @@ func ruleDate(wall time.Time) systemTime {
 // tzStructBlob renders PidLidTimeZoneStruct ([MS-OXOCAL] 2.2.1.39): the 48-byte
 // TZREG, whose two year fields are zero because its dates are yearly ones.
 func tzStructBlob(r tzReg) []byte {
-	var b bytes.Buffer
-	writeLE(&b, r.bias, r.standardBias, r.daylightBias, uint16(0), r.standardDate, uint16(0), r.daylightDate)
-	return b.Bytes()
+	b := make([]byte, 0, 48)
+	b = appendInt32LE(b, r.bias, r.standardBias, r.daylightBias)
+	b = binary.LittleEndian.AppendUint16(b, 0)
+	b = appendSystemTime(b, r.standardDate)
+	b = binary.LittleEndian.AppendUint16(b, 0)
+	b = appendSystemTime(b, r.daylightDate)
+	return b
 }
 
 // tzDefinitionBlob renders a TZDEFINITION ([MS-OXOCAL] 2.2.1.41): a header naming
@@ -94,13 +97,26 @@ func tzStructBlob(r tzReg) []byte {
 // Exchange writes, with the given flags.
 func tzDefinitionBlob(keyName string, r tzReg, flags uint16) []byte {
 	name := utf16.Encode([]rune(keyName))
-	var b bytes.Buffer
-	b.Write([]byte{0x02, 0x01})
+	b := make([]byte, 0, 8+2*len(name)+2+64)
+	b = append(b, 0x02, 0x01)
 	// #nosec G115 -- a zone name is a few dozen characters
-	writeLE(&b, uint16(6+2*len(name)), tzDefinitionValidKeyName, uint16(len(name)), name, uint16(1))
-	b.Write([]byte{0x02, 0x01})
-	writeLE(&b, uint16(0x003E), flags, uint16(1), [14]byte{}, r.bias, r.standardBias, r.daylightBias, r.standardDate, r.daylightDate)
-	return b.Bytes()
+	b = binary.LittleEndian.AppendUint16(b, uint16(6+2*len(name)))
+	b = binary.LittleEndian.AppendUint16(b, tzDefinitionValidKeyName)
+	// #nosec G115 -- a zone name is a few dozen characters
+	b = binary.LittleEndian.AppendUint16(b, uint16(len(name)))
+	for _, u := range name {
+		b = binary.LittleEndian.AppendUint16(b, u)
+	}
+	b = binary.LittleEndian.AppendUint16(b, 1)
+	b = append(b, 0x02, 0x01)
+	b = binary.LittleEndian.AppendUint16(b, 0x003E)
+	b = binary.LittleEndian.AppendUint16(b, flags)
+	b = binary.LittleEndian.AppendUint16(b, 1)
+	b = append(b, make([]byte, 14)...)
+	b = appendInt32LE(b, r.bias, r.standardBias, r.daylightBias)
+	b = appendSystemTime(b, r.standardDate)
+	b = appendSystemTime(b, r.daylightDate)
+	return b
 }
 
 // DisplayZone returns the zone a stored appointment's start is shown in: the zone
@@ -140,10 +156,24 @@ func tzDefinitionKeyName(b []byte) string {
 	return string(utf16.Decode(units))
 }
 
-// writeLE appends each value in little-endian byte order. Every value is a
-// fixed-size type, so a write into a bytes.Buffer cannot fail.
-func writeLE(b *bytes.Buffer, values ...any) {
+// appendInt32LE appends each signed 32-bit integer in little-endian byte order.
+func appendInt32LE(b []byte, values ...int32) []byte {
 	for _, v := range values {
-		_ = binary.Write(b, binary.LittleEndian, v) // bytes.Buffer writes never fail and every value is fixed-size
+		// #nosec G115 -- bit-preserving two's complement encoding for little-endian wire format
+		b = binary.LittleEndian.AppendUint32(b, uint32(v))
 	}
+	return b
+}
+
+// appendSystemTime appends a 16-byte SYSTEMTIME in little-endian byte order.
+func appendSystemTime(b []byte, st systemTime) []byte {
+	b = binary.LittleEndian.AppendUint16(b, 0)
+	b = binary.LittleEndian.AppendUint16(b, st.month)
+	b = binary.LittleEndian.AppendUint16(b, st.dayOfWeek)
+	b = binary.LittleEndian.AppendUint16(b, st.day)
+	b = binary.LittleEndian.AppendUint16(b, st.hour)
+	b = binary.LittleEndian.AppendUint16(b, st.minute)
+	b = binary.LittleEndian.AppendUint16(b, 0)
+	b = binary.LittleEndian.AppendUint16(b, 0)
+	return b
 }

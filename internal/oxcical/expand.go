@@ -128,17 +128,17 @@ func writeComponent(b *builder, c *icomp) {
 // renderIline serializes a parsed content line back to "NAME;PARAM=v:value", carrying
 // its parameters and the (already-escaped) value.
 func renderIline(l iline) string {
-	var sb strings.Builder
-	sb.WriteString(l.name)
+	var out []byte
+	out = append(out, l.name...)
 	for k, vals := range l.params {
 		for _, v := range vals {
-			sb.WriteString(";")
-			sb.WriteString(k)
-			sb.WriteString("=")
-			sb.WriteString(v)
+			out = append(out, ';')
+			out = append(out, k...)
+			out = append(out, '=')
+			out = append(out, v...)
 		}
 	}
-	sb.WriteString(":")
-	sb.WriteString(l.value)
-	return sb.String()
+	out = append(out, ':')
+	out = append(out, l.value...)
+	return string(out)
 }

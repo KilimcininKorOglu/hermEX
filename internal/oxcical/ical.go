@@ -1,7 +1,6 @@
 package oxcical
 
 import (
-	"bytes"
 	"errors"
 	"math"
 	"strconv"
@@ -398,45 +397,50 @@ func durationUnit(unit byte, inTime bool) time.Duration {
 
 // unescapeValue reverses RFC 5545 TEXT escaping: \\ \, \; and \n/\N (newline).
 func unescapeValue(s string) string {
-	var b strings.Builder
+	out := make([]byte, 0, len(s))
 	for i := 0; i < len(s); i++ {
 		if s[i] == '\\' && i+1 < len(s) {
 			switch s[i+1] {
 			case 'n', 'N':
-				b.WriteByte('\n')
+				out = append(out, '\n')
 			default:
-				b.WriteByte(s[i+1])
+				out = append(out, s[i+1])
 			}
 			i++
 			continue
 		}
-		b.WriteByte(s[i])
+		out = append(out, s[i])
 	}
-	return b.String()
+	return string(out)
 }
 
 // escapeValue applies RFC 5545 TEXT escaping to a value.
 func escapeValue(s string) string {
-	var b strings.Builder
+	out := make([]byte, 0, len(s))
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
 		case '\\', ',', ';':
-			b.WriteByte('\\')
-			b.WriteByte(s[i])
+			out = append(out, '\\', s[i])
 		case '\n':
-			b.WriteString(`\n`)
+			out = append(out, '\\', 'n')
 		case '\r':
 			// drop bare CR; the \n handling carries the line break
 		default:
-			b.WriteByte(s[i])
+			out = append(out, s[i])
 		}
 	}
-	return b.String()
+	return string(out)
 }
+
+// byteBuf accumulates serialized bytes without error-returning writes.
+type byteBuf []byte
+
+// Bytes returns the accumulated bytes.
+func (b *byteBuf) Bytes() []byte { return *b }
 
 // builder accumulates content lines for serialization.
 type builder struct {
-	buf bytes.Buffer
+	buf byteBuf
 }
 
 // add writes one content line verbatim (value already escaped where needed),
@@ -448,13 +452,13 @@ func (b *builder) line(name, value string) { b.add(name + ":" + escapeValue(valu
 
 // fold writes s to buf as one logical line, breaking physical lines at 75 octets
 // with a leading space on each continuation, terminated by CRLF.
-func fold(buf *bytes.Buffer, s string) {
+func fold(buf *byteBuf, s string) {
 	const limit = 75
 	for len(s) > limit {
-		buf.WriteString(s[:limit])
-		buf.WriteString("\r\n ")
+		*buf = append(*buf, s[:limit]...)
+		*buf = append(*buf, "\r\n "...)
 		s = s[limit:]
 	}
-	buf.WriteString(s)
-	buf.WriteString("\r\n")
+	*buf = append(*buf, s...)
+	*buf = append(*buf, "\r\n"...)
 }
