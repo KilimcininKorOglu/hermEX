@@ -18,7 +18,9 @@ import (
 func TestRouteHandlerReachesEachBackend(t *testing.T) {
 	backend := func(name string) string {
 		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = io.WriteString(w, name) // a failed write fails the assertion below
+			if _, err := io.WriteString(w, name); err != nil {
+				t.Errorf("backend %s: write the reply: %v", name, err)
+			}
 		}))
 		t.Cleanup(s.Close)
 		return s.URL
@@ -60,7 +62,9 @@ func TestRouteHandlerReachesEachBackend(t *testing.T) {
 func TestAdminPanelOnlyUnderItsHostName(t *testing.T) {
 	backend := func(name string) string {
 		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = io.WriteString(w, name)
+			if _, err := io.WriteString(w, name); err != nil {
+				t.Errorf("backend %s: write the reply: %v", name, err)
+			}
 		}))
 		t.Cleanup(s.Close)
 		return s.URL

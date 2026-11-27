@@ -24,7 +24,11 @@ func composeServices(t *testing.T) map[string]bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			t.Errorf("close the compose file: %v", err)
+		}
+	}()
 	services := map[string]bool{}
 	inServices := false
 	sc := bufio.NewScanner(f)
