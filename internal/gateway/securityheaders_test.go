@@ -19,7 +19,9 @@ func TestBackendSecurityHeadersAreNotDuplicated(t *testing.T) {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Content-Security-Policy", "frame-ancestors 'none'")
 		h.Set("Content-Type", "text/plain")
-		_, _ = w.Write([]byte("ok"))
+		if _, err := w.Write([]byte("ok")); err != nil {
+			t.Errorf("write backend response: %v", err)
+		}
 	}))
 	defer backend.Close()
 
@@ -41,7 +43,7 @@ func TestBackendSecurityHeadersAreNotDuplicated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 
 	for _, name := range []string{"X-Content-Type-Options", "X-Frame-Options", "Content-Security-Policy"} {
 		if v := resp.Header.Values(name); len(v) != 1 {
@@ -51,5 +53,57 @@ func TestBackendSecurityHeadersAreNotDuplicated(t *testing.T) {
 	// The backend's own headers are untouched, so stripping is surgical.
 	if got := resp.Header.Get("Content-Type"); got != "text/plain" {
 		t.Errorf("Content-Type = %q, want the backend's own", got)
+	}
+}
+
+// TestForgedBackendSecurityHeadersAreStripped proves a backend returning
+// weakened or duplicate security headers cannot alter the front door's stamped
+// security policy.
+func TestForgedBackendSecurityHeadersAreStripped(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Add("X-Content-Type-Options", "sniff")
+		h.Add("X-Content-Type-Options", "bogus")
+		h.Set("X-Frame-Options", "ALLOWALL")
+		h.Set("Content-Security-Policy", "frame-ancestors *")
+		h.Set("Content-Type", "text/plain")
+		if _, err := w.Write([]byte("ok")); err != nil {
+			t.Errorf("write backend response: %v", err)
+		}
+	}))
+	defer backend.Close()
+
+	proxy, err := Handler([]Route{{Prefix: "/", Target: backend.URL}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Content-Security-Policy", "frame-ancestors 'none'")
+		proxy.ServeHTTP(w, r)
+	}))
+	defer front.Close()
+
+	resp, err := http.Get(front.URL + "/anything")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeBody(t, resp)
+
+	want := map[string]string{
+		"X-Content-Type-Options":  "nosniff",
+		"X-Frame-Options":         "DENY",
+		"Content-Security-Policy": "frame-ancestors 'none'",
+	}
+	for name, wantVal := range want {
+		vals := resp.Header.Values(name)
+		if len(vals) != 1 || vals[0] != wantVal {
+			t.Errorf("%s = %v, want [%q]", name, vals, wantVal)
+		}
+	}
+	if got := resp.Header.Get("Content-Type"); got != "text/plain" {
+		t.Errorf("Content-Type = %q, want text/plain", got)
 	}
 }

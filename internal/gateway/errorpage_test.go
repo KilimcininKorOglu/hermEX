@@ -1,9 +1,11 @@
 package gateway
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -130,5 +132,64 @@ func TestErrorPageEscapesTheRequestID(t *testing.T) {
 	}
 	if !strings.Contains(body, "&lt;script&gt;") {
 		t.Errorf("the request id was dropped rather than shown as text: %q", body)
+	}
+}
+
+// TestHostileAcceptAndUnroutedPathDoNotReachBackend proves forged or oversized
+// Accept headers are not treated as text/html and unrouted paths are refused
+// with 502 without forwarding to a live backend.
+func TestHostileAcceptAndUnroutedPathDoNotReachBackend(t *testing.T) {
+	var hits atomic.Int64
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if _, err := io.WriteString(w, "ok"); err != nil {
+			t.Errorf("write backend response: %v", err)
+		}
+	}))
+	defer backend.Close()
+
+	h, err := Handler([]Route{{Prefix: "/ews/", Target: backend.URL}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oversizedAccept := strings.Repeat("application/octet-stream,", 200)
+	cases := []struct {
+		name   string
+		path   string
+		accept string
+	}{
+		{"forged-media-suffix", "/nowhere", "text/htmlx"},
+		{"forged-media-markup", "/ews-admin", "text/html<script>"},
+		{"missing-accept", "/ews", ""},
+		{"oversized-accept", "/" + strings.Repeat("a", 4096), oversizedAccept},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			if tc.accept != "" {
+				req.Header.Set("Accept", tc.accept)
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadGateway {
+				t.Errorf("status = %d, want 502", rec.Code)
+			}
+			if strings.Contains(rec.Body.String(), "<html") {
+				t.Errorf("hostile Accept %q received HTML body", tc.accept)
+			}
+			if got := hits.Load(); got != 0 {
+				t.Errorf("backend hits = %d, want 0 on unrouted request", got)
+			}
+		})
+	}
+
+	// Follow-up valid request confirms the backend is reachable when routed.
+	validReq := httptest.NewRequest(http.MethodGet, "/ews/Exchange.asmx", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, validReq)
+	if rec.Code != http.StatusOK || hits.Load() != 1 {
+		t.Errorf("valid request: status = %d, hits = %d, want 200 and 1", rec.Code, hits.Load())
 	}
 }

@@ -5,8 +5,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
+
+func closeBody(t *testing.T, resp *http.Response) {
+	t.Helper()
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
+}
 
 // TestRoutingByLongestPrefix proves requests reach the backend chosen by the
 // longest case-insensitive prefix match, that the catch-all "/" is the default,
@@ -14,7 +22,9 @@ import (
 func TestRoutingByLongestPrefix(t *testing.T) {
 	echo := func(name string) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_, _ = io.WriteString(w, name+" "+r.URL.Path+" auth="+r.Header.Get("Authorization"))
+			if _, err := io.WriteString(w, name+" "+r.URL.Path+" auth="+r.Header.Get("Authorization")); err != nil {
+				t.Errorf("write %s response: %v", name, err)
+			}
 		}))
 	}
 	mapi := echo("mapi")
@@ -56,7 +66,7 @@ func TestRoutingByLongestPrefix(t *testing.T) {
 			t.Fatalf("GET %s: %v", tc.path, err)
 		}
 		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		closeBody(t, resp)
 		if err != nil {
 			t.Fatalf("read GET %s: %v", tc.path, err)
 		}
@@ -70,14 +80,85 @@ func TestRoutingByLongestPrefix(t *testing.T) {
 	}
 }
 
-// TestHandlerErrors proves construction rejects an empty route set and a target
-// that is not an absolute URL.
+// TestHandlerErrors proves construction rejects an empty route set and any
+// malformed or non-absolute target URL without returning a partial handler.
 func TestHandlerErrors(t *testing.T) {
-	if _, err := Handler(nil); err == nil {
-		t.Error("empty routes should error")
+	cases := []struct {
+		name   string
+		routes []Route
+	}{
+		{"nil-routes", nil},
+		{"empty-routes", []Route{}},
+		{"non-absolute-target", []Route{{Prefix: "/", Target: "not-a-url"}}},
+		{"unparseable-url", []Route{{Prefix: "/", Target: "http://[::1"}}},
+		{"missing-host", []Route{{Prefix: "/", Target: "http://"}}},
+		{"missing-scheme", []Route{{Prefix: "/", Target: "//backend:8080"}}},
+		{"invalid-second-route", []Route{
+			{Prefix: "/ews/", Target: "http://127.0.0.1:8080"},
+			{Prefix: "/bad/", Target: "/relative/only"},
+		}},
 	}
-	if _, err := Handler([]Route{{Prefix: "/", Target: "not-a-url"}}); err == nil {
-		t.Error("non-absolute target should error")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, err := Handler(tc.routes)
+			if err == nil {
+				t.Errorf("%s: expected error, got nil", tc.name)
+			}
+			if h != nil {
+				t.Errorf("%s: expected nil handler on error, got non-nil", tc.name)
+			}
+		})
+	}
+}
+
+// TestUnroutedRequestsDoNotReachBackends proves hostile or unmatched paths
+// receive 502 and never touch any configured backend when no catch-all exists.
+func TestUnroutedRequestsDoNotReachBackends(t *testing.T) {
+	var ewsHits, mapiHits atomic.Int64
+	makeBackend := func(hits *atomic.Int64) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits.Add(1)
+			if _, err := io.WriteString(w, "ok"); err != nil {
+				t.Errorf("write backend response: %v", err)
+			}
+		}))
+	}
+	ews := makeBackend(&ewsHits)
+	defer ews.Close()
+	mapi := makeBackend(&mapiHits)
+	defer mapi.Close()
+
+	h, err := Handler([]Route{
+		{Prefix: "/ews/", Target: ews.URL},
+		{Prefix: "/mapi/", Target: mapi.URL},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	badPaths := []string{
+		"/",
+		"/admin",
+		"/ews",
+		"/ewsx/Exchange.asmx",
+		"/" + strings.Repeat("x", 4096),
+	}
+	for _, p := range badPaths {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, p, nil))
+		if rec.Code != http.StatusBadGateway {
+			t.Errorf("GET %q: status = %d, want 502", p, rec.Code)
+		}
+		if ewsHits.Load() != 0 || mapiHits.Load() != 0 {
+			t.Errorf("GET %q reached backend (ews=%d, mapi=%d), want 0", p, ewsHits.Load(), mapiHits.Load())
+		}
+	}
+
+	// Follow-up valid request confirms routing still works after refusals.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ews/Exchange.asmx", nil))
+	if rec.Code != http.StatusOK || ewsHits.Load() != 1 || mapiHits.Load() != 0 {
+		t.Errorf("valid GET /ews/Exchange.asmx: status=%d ews=%d mapi=%d, want 200/1/0", rec.Code, ewsHits.Load(), mapiHits.Load())
 	}
 }
 
@@ -104,7 +185,7 @@ func TestForwardedForNamesTheClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	closeBody(t, resp)
 	if got == "" {
 		t.Fatal("backend received no X-Forwarded-For, so it cannot tell one client from another")
 	}

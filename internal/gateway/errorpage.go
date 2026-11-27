@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"html/template"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -63,11 +64,13 @@ func writeGatewayError(w http.ResponseWriter, r *http.Request, status int, title
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	_ = errorPage.Execute(w, struct{ Title, Message, RequestID string }{
+	if err := errorPage.Execute(w, struct{ Title, Message, RequestID string }{
 		Title:   title,
 		Message: message,
 		// The access log records this id against the failure, so a user quoting it
 		// leads straight to the line that explains why.
 		RequestID: w.Header().Get("X-Request-Id"),
-	})
+	}); err != nil {
+		slog.Warn("gateway: write error page failed", "status", status, "err", err)
+	}
 }
