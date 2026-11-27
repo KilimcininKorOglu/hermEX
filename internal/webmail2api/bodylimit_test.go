@@ -73,8 +73,9 @@ func TestOversizedRequestBodyIsRefused(t *testing.T) {
 
 	srv, token := boundBodyServer(t)
 	code, read := sendBody(t, srv, token, 8<<20)
-	if code == http.StatusOK {
-		t.Fatalf("oversized send accepted: %d", code)
+	// RFC 9110 section 15.5.14: content larger than the server will process.
+	if code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized send = %d, want 413", code)
 	}
 	if read > 2<<20 {
 		t.Errorf("read %d bytes of an 8 MiB body against a 1 MiB cap, want the read cut short", read)
@@ -114,8 +115,12 @@ func TestRequestBodyCapAppliesWithoutRestart(t *testing.T) {
 	// The built-in default (40 MiB) admits a 4 MiB body: it is read to the end and
 	// answered on its contents, not its size.
 	SetMaxRequestBody(0)
-	if _, read := sendBody(t, srv, token, 4<<20); read != 4<<20 {
+	code, read := sendBody(t, srv, token, 4<<20)
+	if read != 4<<20 {
 		t.Fatalf("read %d of a 4 MiB body under the default cap, want all of it", read)
+	}
+	if code == http.StatusRequestEntityTooLarge {
+		t.Fatalf("a 4 MiB body under the default cap was refused as too large")
 	}
 
 	// The operator lowers the cap; the next request is judged against it.

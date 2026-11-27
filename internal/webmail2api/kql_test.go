@@ -36,8 +36,27 @@ func wantFlag(t *testing.T, label string, got *bool, want bool) {
 // is treated as a general search term, not dropped.
 func TestParseKQLUnknownPrefixFallsBack(t *testing.T) {
 	q := parseKQL("kindle:book hello")
-	if len(q.General) != 2 {
-		t.Errorf("General = %v, want 2 terms", q.General)
+	if len(q.General) != 2 || q.General[0] != "kindle:book" || q.General[1] != "hello" {
+		t.Errorf("General = %v, want [kindle:book hello]", q.General)
+	}
+}
+
+// TestParseKQLHostileInput: an empty query sets no filter, an unclosed quote
+// does not swallow or crash, and a prefix with no value restricts nothing.
+func TestParseKQLHostileInput(t *testing.T) {
+	empty := parseKQL("")
+	if len(empty.From)+len(empty.Subject)+len(empty.General) != 0 || empty.Read != nil || empty.HasAtt != nil {
+		t.Errorf("empty query set a filter: %+v", empty)
+	}
+	open := parseKQL(`subject:"never closed from:bob`)
+	if len(open.From) != 0 {
+		t.Errorf("a from: inside an unclosed quote became a filter: %v", open.From)
+	}
+	bare := parseKQL("from: hello")
+	for _, f := range bare.From {
+		if f == "" {
+			t.Errorf("a bare from: added an empty sender filter that matches everything: %v", bare.From)
+		}
 	}
 }
 

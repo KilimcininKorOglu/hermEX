@@ -3,6 +3,7 @@ package webmail2api
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // TestLogSafeStripsLineBreaks is the defect. The stub handler logged r.URL.Path
@@ -31,10 +32,11 @@ func TestLogSafeStripsLineBreaks(t *testing.T) {
 // reading the log honours escape sequences, so NUL, backspace and ESC are the same
 // problem as CR and LF.
 func TestLogSafeStripsOtherControlCharacters(t *testing.T) {
-	for _, in := range []string{"/a\x00b", "/a\x1b[2Jb", "/a\x08b", "/a\tb", "/a\x7fb"} {
+	// U+0085 (NEL), U+2028 and U+2029 are line breaks to Unicode-aware viewers.
+	for _, in := range []string{"/a\x00b", "/a\x1b[2Jb", "/a\x08b", "/a\tb", "/a\x7fb", "/a\u0085b", "/a b", "/a b", "/a\u009bb"} {
 		got := logSafe(in)
 		for _, r := range got {
-			if r < 0x20 || r == 0x7f {
+			if r < 0x20 || (r >= 0x7f && r <= 0x9f) || r == 0x2028 || r == 0x2029 {
 				t.Errorf("logSafe(%q) = %q still carries control character %#U", in, got, r)
 			}
 		}
@@ -64,5 +66,11 @@ func TestLogSafeBoundsLength(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, "...") {
 		t.Errorf("a truncated value does not say so: %q", got[max(0, len(got)-16):])
+	}
+	// A cut that lands inside a multi-byte character must not leave half of it:
+	// the log line would carry invalid UTF-8.
+	multi := logSafe("/" + strings.Repeat("ş", 400))
+	if !utf8.ValidString(multi) {
+		t.Errorf("truncation split a character: %q", multi[len(multi)-8:])
 	}
 }

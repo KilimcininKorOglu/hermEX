@@ -5,23 +5,12 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-
-	"hermex/internal/directory"
-	"hermex/internal/objectstore"
 )
 
 // contactHarness returns a signed-in browser against one mailbox.
 func contactHarness(t *testing.T) requestFunc {
 	t.Helper()
-	dir := t.TempDir()
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	st.Close()
-	auth := &sfAuth{accounts: directory.StaticAccounts{
-		"alice@hermex.test": {Password: "pw", MailboxPath: dir},
-	}}
+	auth := sfDirectory(t)
 	do := browser(auth, auth.accounts)
 	sfLogin(t, do)
 	return do

@@ -3,13 +3,10 @@ package webmail2api
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
-	"hermex/internal/directory"
 	"hermex/internal/objectstore"
 )
 
@@ -33,7 +30,7 @@ func TestEventFilenameCannotBreakTheHeader(t *testing.T) {
 // surfacing the string iCalendar UID (the meeting identity) would make delete and
 // update fail to parse it, leaving the event uneditable after a refresh.
 func TestCalendarEventUIDIsMessageID(t *testing.T) {
-	do, _ := apiHarness(t)
+	do := apiDo(t)
 
 	// Create an event with no client-supplied uid (the SPA's normal path, which
 	// makes the server mint an iCalendar UID).
@@ -42,9 +39,17 @@ func TestCalendarEventUIDIsMessageID(t *testing.T) {
 
 	// Read it back the way the SPA does after a reload.
 	uid := listOneEvent(t, do, "list").UID
-	if _, err := strconv.ParseInt(uid, 10, 64); err != nil {
-		t.Fatalf("listed event uid %q is not a numeric message id; delete/update would fail to parse it", uid)
+	if id, err := strconv.ParseInt(uid, 10, 64); err != nil || id <= 0 {
+		t.Fatalf("listed event uid %q is not a positive message id; delete/update would fail to parse it", uid)
 	}
+
+	// A uid that is not a message id, or names no event, deletes nothing.
+	for _, bad := range []string{"not-a-number", "999999"} {
+		if rec := do(http.MethodDelete, "/api/v1/calendar/events/"+bad, ""); rec.Code == http.StatusOK {
+			t.Errorf("delete of %q answered 200", bad)
+		}
+	}
+	wantEq(t, "events after the refused deletes", len(listEvents(t, do, "list after refusals")), 1)
 
 	// The delete handler parses that uid back to a store id; it must succeed (a
 	// string iCalendar uid would 400 here).
@@ -80,7 +85,7 @@ func listOneEvent(t *testing.T, do requestFunc, what string) eventJSON {
 // make the form's reminder select a no-op after a refresh, so the assertion is on
 // the exact minute value, not just presence.
 func TestCalendarEventReminderRoundTrip(t *testing.T) {
-	do, _ := apiHarness(t)
+	do := apiDo(t)
 
 	// Create a timed event with a 15-minute reminder.
 	wantStatus(t, "create with reminder", do(http.MethodPost, "/api/v1/calendar/events",
@@ -108,7 +113,7 @@ func TestCalendarEventReminderRoundTrip(t *testing.T) {
 // A silent loss here would regress to a client-only store that does not survive a
 // reload or apply cross-device, the shortcut the user rejected.
 func TestCalendarSettingsRoundTrip(t *testing.T) {
-	do, _ := apiHarness(t)
+	do := apiDo(t)
 	readSettings := func(what string) calendarSettingsJSON {
 		t.Helper()
 		return okBody[calendarSettingsJSON](t, what, do(http.MethodGet, "/api/v1/calendar/settings", ""))
@@ -138,7 +143,7 @@ func TestCalendarEventBusyStatusRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	do := apiHarnessFor(t, dir)
 
@@ -167,7 +172,7 @@ func TestCalendarEventRefusesAnUnknownBusyStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	st.Close()
+	mustClose(t, st)
 	do := apiHarnessFor(t, dir)
 
 	for _, bad := range []string{"5", "9", "-1", "2147483647"} {
@@ -196,7 +201,7 @@ func deleteEvent(t *testing.T, do requestFunc, uid string) {
 // confidential must survive a reload; normal stays unset (absent) so the form
 // shows the default.
 func TestCalendarEventSensitivityRoundTrip(t *testing.T) {
-	do, _ := apiHarness(t)
+	do := apiDo(t)
 
 	for _, want := range []int{2, 3} {
 		wantStatus(t, "create sensitivity", do(http.MethodPost, "/api/v1/calendar/events",
@@ -221,43 +226,10 @@ func TestCalendarEventSensitivityRoundTrip(t *testing.T) {
 // the shared cross-protocol list) round-trips through the direct store accessor.
 // A silent loss here would drop the event's categories after a reload.
 func TestCalendarEventCategoriesRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	st.Close()
-
-	secret := []byte("calendar-categories-test-secret")
-	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
-	do := func(method, target, body string) *httptest.ResponseRecorder {
-		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
-		var req *http.Request
-		if body == "" {
-			req = httptest.NewRequest(method, target, nil)
-		} else {
-			req = httptest.NewRequest(method, target, strings.NewReader(body))
-		}
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
-		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, req)
-		return rec
-	}
-
-	if rec := do(http.MethodPost, "/api/v1/calendar/events", `{"summary":"Meeting","start":"2026-08-02T09:00:00Z","categories":["Work","Urgent"]}`); rec.Code != http.StatusOK {
-		t.Fatalf("create: status %d", rec.Code)
-	}
-	rec := do(http.MethodGet, "/api/v1/calendar/events", "")
-	var listed struct {
-		Events []eventJSON `json:"events"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(listed.Events) != 1 {
-		t.Fatalf("got %d events, want 1", len(listed.Events))
-	}
-	got := listed.Events[0].Categories
+	do := apiDo(t)
+	wantStatus(t, "create", do(http.MethodPost, "/api/v1/calendar/events",
+		`{"summary":"Meeting","start":"2026-08-02T09:00:00Z","categories":["Work","Urgent"]}`), http.StatusOK)
+	got := listOneEvent(t, do, "list").Categories
 	if len(got) != 2 || got[0] != "Work" || got[1] != "Urgent" {
 		t.Fatalf("categories = %v, want [Work Urgent]", got)
 	}
@@ -268,40 +240,12 @@ func TestCalendarEventCategoriesRoundTrip(t *testing.T) {
 // request without a window still returns the whole calendar. This bounds the
 // backend iCal-export cost to the visible range instead of the account's age.
 func TestGetEventsRespectsWindow(t *testing.T) {
-	dir := t.TempDir()
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	st.Close()
-
-	secret := []byte("calendar-window-test-secret")
-	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
-	do := func(method, target, body string) *httptest.ResponseRecorder {
-		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
-		var req *http.Request
-		if body == "" {
-			req = httptest.NewRequest(method, target, nil)
-		} else {
-			req = httptest.NewRequest(method, target, strings.NewReader(body))
-		}
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
-		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, req)
-		return rec
-	}
+	do := apiDo(t)
 	list := func(target string) []eventJSON {
-		rec := do(http.MethodGet, target, "")
-		if rec.Code != http.StatusOK {
-			t.Fatalf("list %q: status %d", target, rec.Code)
-		}
-		var out struct {
+		type listing struct {
 			Events []eventJSON `json:"events"`
 		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-			t.Fatalf("decode %q: %v", target, err)
-		}
-		return out.Events
+		return okBody[listing](t, "list "+target, do(http.MethodGet, target, "")).Events
 	}
 
 	// One appointment inside the window, one far outside it.
@@ -325,12 +269,18 @@ func TestGetEventsRespectsWindow(t *testing.T) {
 	if scoped[0].Summary != "InWindow" {
 		t.Fatalf("windowed event = %q, want InWindow", scoped[0].Summary)
 	}
+
+	// A window the client got wrong (reversed, or not a timestamp) is no window:
+	// it must not hide events the user has.
+	for _, q := range []string{"?start=2026-09-01T00:00:00Z&end=2026-08-01T00:00:00Z", "?start=yesterday&end=today"} {
+		wantEq(t, "events for "+q, len(list("/api/v1/calendar/events"+q)), 2)
+	}
 }
 
 // TestCalendarDescriptionRoundTrip proves a calendar keeps the description the
 // user gave it: create stores it, a rename leaves it, and an empty one clears it.
 func TestCalendarDescriptionRoundTrip(t *testing.T) {
-	do, _ := apiHarness(t)
+	do := apiDo(t)
 	created := okBody[calendarJSON](t, "create", do(http.MethodPost, "/api/v1/calendar/calendars", `{"name":"Team","description":"Shared rota"}`))
 	description := func(what string) string {
 		list := okBody[struct{ Calendars []calendarJSON }](t, what, do(http.MethodGet, "/api/v1/calendar/calendars", ""))
@@ -355,7 +305,7 @@ func TestCalendarDescriptionRoundTrip(t *testing.T) {
 // back as optional, so an edit that sends the event back does not turn it into
 // a required attendee.
 func TestCalendarOptionalAttendeesRoundTrip(t *testing.T) {
-	do, _ := apiHarness(t)
+	do := apiDo(t)
 	wantStatus(t, "create", do(http.MethodPost, "/api/v1/calendar/events",
 		`{"summary":"Review","start":"2026-08-02T09:00:00Z","attendees":["bob@hermex.test"],"optionalAttendees":["carol@hermex.test"]}`), http.StatusOK)
 	listed := listOneEvent(t, do, "list")

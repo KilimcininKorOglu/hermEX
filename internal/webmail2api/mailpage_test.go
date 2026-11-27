@@ -29,11 +29,11 @@ func pagedHarness(t *testing.T, n int) func(query string) map[string]any {
 			flags |= objectstore.FlagSeen
 		}
 		if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), time.Unix(1700000000+int64(i)*60, 0), flags); err != nil {
-			st.Close()
+			mustClose(t, st)
 			t.Fatal(err)
 		}
 	}
-	st.Close()
+	mustClose(t, st)
 
 	secret := []byte("mail-page-test-secret")
 	accounts := directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: mbox}}
@@ -79,6 +79,16 @@ func emailsOf(t *testing.T, body map[string]any) []map[string]any {
 	return out
 }
 
+// numOf reads a JSON number field and fails when it is absent or not a number.
+func numOf(t *testing.T, body map[string]any, key string) float64 {
+	t.Helper()
+	v, ok := body[key].(float64)
+	if !ok {
+		t.Fatalf("%s = %v, want a number", key, body[key])
+	}
+	return v
+}
+
 // TestFolderPageContract proves the endpoint still answers with one page plus the
 // whole-folder counts after the pagination moved into the query.
 func TestFolderPageContract(t *testing.T) {
@@ -88,12 +98,9 @@ func TestFolderPageContract(t *testing.T) {
 	if got := len(emailsOf(t, body)); got != 10 {
 		t.Errorf("page holds %d rows, want 10", got)
 	}
-	if total, _ := body["total"].(float64); total != 25 {
-		t.Errorf("total = %v, want 25", body["total"])
-	}
-	if unread, _ := body["unread"].(float64); unread != 12 {
-		t.Errorf("unread = %v, want 12", body["unread"])
-	}
+	wantEq(t, "total", numOf(t, body, "total"), 25)
+	// Messages 0, 2, ... 24 are read: 13 read, 12 unread.
+	wantEq(t, "unread", numOf(t, body, "unread"), 12)
 
 	// The pages tile the folder: page 2 continues where page 1 stopped.
 	first := emailsOf(t, get("?pageSize=10&page=0"))
@@ -113,22 +120,35 @@ func TestFolderPageFilterAndSort(t *testing.T) {
 	get := pagedHarness(t, 25)
 
 	unread := get("?filter=unread")
-	if total, _ := unread["total"].(float64); total != 12 {
-		t.Errorf("unread total = %v, want 12", unread["total"])
-	}
+	wantEq(t, "unread total", numOf(t, unread, "total"), 12)
 	for _, row := range emailsOf(t, unread) {
-		if read, _ := row["read"].(bool); read {
-			t.Fatalf("a read message came back under filter=unread: %v", row)
+		if read, ok := row["read"].(bool); !ok || read {
+			t.Fatalf("a read or unflagged message came back under filter=unread: %v", row)
 		}
 	}
 
+	// The harness wrote subjects "subject 000" .. "subject 024".
 	asc := emailsOf(t, get("?sort=subject&dir=asc&pageSize=5&page=0"))
 	desc := emailsOf(t, get("?sort=subject&dir=desc&pageSize=5&page=0"))
 	if len(asc) != 5 || len(desc) != 5 {
 		t.Fatalf("sorted pages hold %d/%d rows, want 5 each", len(asc), len(desc))
 	}
-	if asc[0]["subject"] == desc[0]["subject"] {
-		t.Error("ascending and descending subject ordering returned the same first row")
+	wantEq(t, "first ascending subject", asc[0]["subject"], any("subject 000"))
+	wantEq(t, "first descending subject", desc[0]["subject"], any("subject 024"))
+}
+
+// TestFolderPageHostileParameters: a page past the end is empty rather than
+// wrapping, and a negative or absurd page parameter neither fails the request
+// nor hands back more than the folder holds.
+func TestFolderPageHostileParameters(t *testing.T) {
+	get := pagedHarness(t, 25)
+	wantEq(t, "rows past the end", len(emailsOf(t, get("?pageSize=10&page=9"))), 0)
+	for _, q := range []string{"?pageSize=-5&page=0", "?pageSize=10&page=-1", "?pageSize=999999999&page=0", "?pageSize=abc&page=xyz", "?sort=drop%20table&dir=sideways"} {
+		body := get(q)
+		if n := len(emailsOf(t, body)); n > 25 {
+			t.Errorf("%s returned %d rows from a 25-message folder", q, n)
+		}
+		wantEq(t, q+" total", numOf(t, body, "total"), 25)
 	}
 }
 

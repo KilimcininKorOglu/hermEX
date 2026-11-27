@@ -1,6 +1,8 @@
 package webmail2api
 
 import (
+	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -62,6 +64,45 @@ func TestBuildVCardOmitsEmptyFields(t *testing.T) {
 	if got := string(buildVCard(contactJSON{Name: "Yalnız İsim"})); got != want {
 		t.Errorf("vCard mismatch\ngot:\n%q\nwant:\n%q", got, want)
 	}
+}
+
+// TestBuildVCardEscapesValues: RFC 6350 section 3.4 escapes a backslash,
+// comma, semicolon and line break inside a value, so a field cannot add a line
+// of its own or shift the components of a structured value.
+func TestBuildVCardEscapesValues(t *testing.T) {
+	got := string(buildVCard(contactJSON{
+		Name:    "Eve\r\nEMAIL:attacker@evil.test",
+		Company: "A;B",
+		Email:   "eve@example.test",
+	}))
+	for _, line := range strings.Split(got, "\r\n") {
+		if line == "EMAIL:attacker@evil.test" {
+			t.Fatalf("a field injected its own vCard line:\n%s", got)
+		}
+	}
+	wantContains(t, "escaped FN", got, `FN:Eve\nEMAIL:attacker@evil.test`)
+	wantContains(t, "escaped ORG", got, `ORG:A\;B`)
+}
+
+// TestEscapedContactFieldsRoundTrip: values carrying the vCard special
+// characters come back exactly as saved, so the escaping is undone on import.
+func TestEscapedContactFieldsRoundTrip(t *testing.T) {
+	do := apiDo(t)
+	wantStatus(t, "create", do(http.MethodPost, "/api/v1/contacts",
+		`{"name":"Smith, John","company":"A;B","department":"R\\D","email":"j@example.test"}`), http.StatusOK)
+	var list struct {
+		Contacts []contactJSON `json:"contacts"`
+	}
+	rec := do(http.MethodGet, "/api/v1/contacts", "")
+	wantStatus(t, "list", rec, http.StatusOK)
+	mustNoErr(t, "decode", json.Unmarshal(rec.Body.Bytes(), &list))
+	if len(list.Contacts) != 1 {
+		t.Fatalf("got %d contacts, want 1", len(list.Contacts))
+	}
+	c := list.Contacts[0]
+	wantEq(t, "name", c.Name, "Smith, John")
+	wantEq(t, "company", c.Company, "A;B")
+	wantEq(t, "department", c.Department, `R\D`)
 }
 
 // TestBuildVCardStructuredValuesAreGrouped proves the structured properties are

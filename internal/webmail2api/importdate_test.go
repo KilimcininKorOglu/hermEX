@@ -17,7 +17,7 @@ func inboxDates(t *testing.T, mbox string) []time.Time {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
 	if err != nil {
 		t.Fatal(err)
@@ -59,14 +59,19 @@ func TestImportWithoutADateFallsBackToNow(t *testing.T) {
 	srv, token, mbox := importHarness(t)
 
 	before := time.Now().Add(-time.Minute)
-	if code, body := importEML(t, srv, token, "Subject: undated\r\n\r\nbody\r\n"); code != http.StatusOK {
-		t.Fatalf("import status = %d: %s", code, body)
+	// No Date at all, and a Date that is not an RFC 5322 date-time.
+	for _, eml := range []string{"Subject: undated\r\n\r\nbody\r\n", "Subject: garbled\r\nDate: the day before yesterday\r\n\r\nbody\r\n"} {
+		if code, body := importEML(t, srv, token, eml); code != http.StatusOK {
+			t.Fatalf("import status = %d: %s", code, body)
+		}
 	}
 	dates := inboxDates(t, mbox)
-	if len(dates) != 1 {
-		t.Fatalf("inbox holds %d messages, want 1", len(dates))
+	if len(dates) != 2 {
+		t.Fatalf("inbox holds %d messages, want 2", len(dates))
 	}
-	if dates[0].Before(before) {
-		t.Errorf("internal date = %s, want the import time (after %s)", dates[0], before)
+	for _, d := range dates {
+		if d.Before(before) {
+			t.Errorf("internal date = %s, want the import time (after %s)", d, before)
+		}
 	}
 }

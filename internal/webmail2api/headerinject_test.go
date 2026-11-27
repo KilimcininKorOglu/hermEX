@@ -18,23 +18,24 @@ import (
 // composeHarness builds a server with one account and a session token for it.
 func composeHarness(t *testing.T) (*Server, string) {
 	t.Helper()
-	srv, token, _ := composeHarnessWithMailbox(t)
-	return srv, token
+	return composeOver(t, freshMailbox(t))
 }
 
 // composeHarnessWithMailbox is composeHarness that also returns the mailbox
 // directory, for a test that checks what a refused request left in the store.
 func composeHarnessWithMailbox(t *testing.T) (*Server, string, string) {
 	t.Helper()
-	mbox := t.TempDir()
 	// Provision the mailbox, as account creation does, so a request that gets
 	// past the checks can really write and a refusal is the handler's, not a
 	// missing store's.
-	st, err := objectstore.Open(mbox)
-	if err != nil {
-		t.Fatal(err)
-	}
-	st.Close()
+	mbox := freshMailbox(t)
+	srv, token := composeOver(t, mbox)
+	return srv, token, mbox
+}
+
+// composeOver builds the compose server and alice's token over mbox.
+func composeOver(t *testing.T, mbox string) (*Server, string) {
+	t.Helper()
 	secret := []byte("header-inject-test-secret")
 	accounts := directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: mbox}}
 	srv := NewServer(accounts, accounts, nil, "mail.hermex.test", secret, "", false)
@@ -44,7 +45,7 @@ func composeHarnessWithMailbox(t *testing.T) (*Server, string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return srv, token, mbox
+	return srv, token
 }
 
 // post sends one JSON body to a compose endpoint.
@@ -67,7 +68,7 @@ const injected = "attacker@evil.test\r\nBcc: victim@hermex.test"
 // block verbatim.
 func TestComposeRejectsUnparseableRecipient(t *testing.T) {
 	srv, token, mbox := composeHarnessWithMailbox(t)
-	body, _ := json.Marshal(map[string]any{
+	body := mustEncode(t, map[string]any{
 		"to": []string{injected}, "subject": "hi", "body": "text",
 	})
 
@@ -81,7 +82,7 @@ func TestComposeRejectsUnparseableRecipient(t *testing.T) {
 	// must leave both empty, or the injected header reaches the store anyway.
 	st, err := objectstore.Open(mbox)
 	mustNoErr(t, "open the mailbox", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	for _, fid := range []int64{int64(mapi.PrivateFIDSentItems), int64(mapi.PrivateFIDDraft)} {
 		msgs, err := st.ListMessages(fid)
 		mustNoErr(t, "list a folder", err)
@@ -93,22 +94,28 @@ func TestComposeRejectsUnparseableRecipient(t *testing.T) {
 // that returns the built message: no Bcc line appears in what would be sent.
 func TestBuildDoesNotEmitInjectedHeader(t *testing.T) {
 	srv, token := composeHarness(t)
-	body, _ := json.Marshal(map[string]any{
+	body := mustEncode(t, map[string]any{
 		"to": []string{"bob@hermex.test", injected}, "subject": "hi", "body": "text",
 	})
 
-	rec := post(t, srv, token, "/api/v1/mail/build", string(body))
-	if rec.Code == http.StatusOK {
-		var got map[string]string
-		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-			t.Fatal(err)
-		}
-		raw, err := base64.StdEncoding.DecodeString(got["raw"])
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(string(raw), "Bcc:") {
-			t.Errorf("the built message carries an injected header:\n%s", raw)
+	wantStatus(t, "build with an injected recipient", post(t, srv, token, "/api/v1/mail/build", string(body)), http.StatusBadRequest)
+
+	// A line break in the subject must not open a header of its own either
+	// (RFC 5322 section 2.2: a field body holds no bare CR or LF).
+	subj := mustEncode(t, map[string]any{
+		"to": []string{"bob@hermex.test"}, "subject": "hi\r\nBcc: victim@hermex.test", "body": "text",
+	})
+	rec := post(t, srv, token, "/api/v1/mail/build", string(subj))
+	if rec.Code != http.StatusOK {
+		return
+	}
+	var got map[string]string
+	mustNoErr(t, "decode build", json.Unmarshal(rec.Body.Bytes(), &got))
+	raw, err := base64.StdEncoding.DecodeString(got["raw"])
+	mustNoErr(t, "decode raw", err)
+	for line := range strings.SplitSeq(string(raw), "\r\n") {
+		if strings.HasPrefix(line, "Bcc:") {
+			t.Errorf("the built message carries an injected header line %q", line)
 		}
 	}
 }
@@ -117,7 +124,7 @@ func TestBuildDoesNotEmitInjectedHeader(t *testing.T) {
 // including a display name and a non-ASCII address.
 func TestComposeAcceptsOrdinaryAddresses(t *testing.T) {
 	srv, token := composeHarness(t)
-	body, _ := json.Marshal(map[string]any{
+	body := mustEncode(t, map[string]any{
 		"to":      []string{"Bob Smith <bob@hermex.test>", "posta@örnek.test", "carol@hermex.test"},
 		"subject": "hi", "body": "text",
 	})

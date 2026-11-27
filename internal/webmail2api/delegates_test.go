@@ -16,6 +16,14 @@ import (
 // or the admin panel writes her, and dave may send as the mailbox.
 func delegationHarness(t *testing.T) (requestFunc, string) {
 	t.Helper()
+	dir := seedDelegationMailbox(t)
+	return delegationLogin(t, dir), dir
+}
+
+// seedDelegationMailbox provisions alice's mailbox with the grants made outside
+// webmail described above.
+func seedDelegationMailbox(t *testing.T) string {
+	t.Helper()
 	dir := t.TempDir()
 	st, err := objectstore.Open(dir)
 	if err != nil {
@@ -23,15 +31,22 @@ func delegationHarness(t *testing.T) (requestFunc, string) {
 	}
 	for _, set := range []func([]string) error{st.SetDelegates, st.SetSendOnBehalf} {
 		if err := set([]string{"carol@hermex.test"}); err != nil {
-			st.Close()
+			mustClose(t, st)
 			t.Fatal(err)
 		}
 	}
 	if err := st.SetSendAs([]string{"dave@hermex.test"}); err != nil {
-		st.Close()
+		mustClose(t, st)
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
+	return dir
+}
+
+// delegationLogin signs alice in over dir, with the grantees as accounts of
+// her organization.
+func delegationLogin(t *testing.T, dir string) requestFunc {
+	t.Helper()
 	// A delegate must be an account of the owner's organization, so the grantees
 	// the tests add are accounts here; mallory is one of another organization
 	// (static accounts scope by domain).
@@ -39,7 +54,7 @@ func delegationHarness(t *testing.T) (requestFunc, string) {
 	for _, a := range []string{"bob@hermex.test", "carol@hermex.test", "dave@hermex.test", "mallory@other-org.test"} {
 		accounts[a] = directory.Account{Password: "pw", MailboxPath: t.TempDir()}
 	}
-	return loginAs(t, accounts, "alice@hermex.test"), dir
+	return loginAs(t, accounts, "alice@hermex.test")
 }
 
 type delegationRow struct {
@@ -76,7 +91,7 @@ func storeLists(t *testing.T, dir string) (delegates, sendAs, onBehalf []string)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	var e1, e2, e3 error
 	delegates, e1 = st.GetDelegates()
 	sendAs, e2 = st.GetSendAs()
@@ -93,7 +108,7 @@ func storeLists(t *testing.T, dir string) (delegates, sendAs, onBehalf []string)
 // and send grants, the ones Outlook, EWS and the admin panel write, and not only
 // the grants webmail itself made.
 func TestDelegationsShowGrantsMadeElsewhere(t *testing.T) {
-	do, _ := delegationHarness(t)
+	do := delegationLogin(t, seedDelegationMailbox(t))
 	rows := listDelegations(t, do)
 	carol, ok := rows["carol@hermex.test"]
 	if !ok || !carol.CanSendOnBehalf || carol.CanSendAs {
@@ -119,8 +134,8 @@ func TestADelegationStaysInsideTheOrganization(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("POST %s = %d, want 400", grantee, rec.Code)
 		}
-		delegates, _, onBehalf := storeLists(t, dir)
-		if slices.ContainsFunc(append(delegates, onBehalf...), func(a string) bool { return strings.EqualFold(a, grantee) }) {
+		delegates, sendAs, onBehalf := storeLists(t, dir)
+		if slices.ContainsFunc(slices.Concat(delegates, sendAs, onBehalf), func(a string) bool { return strings.EqualFold(a, grantee) }) {
 			t.Errorf("POST %s put it on a store list", grantee)
 		}
 	}
@@ -145,6 +160,22 @@ func TestAddingADelegationKeepsOtherGrants(t *testing.T) {
 	}
 	if !slices.Contains(sendAs, "dave@hermex.test") || !slices.Contains(sendAs, "bob@hermex.test") {
 		t.Errorf("send-as %v, want dave and bob", sendAs)
+	}
+}
+
+// TestRemovingAnUnknownDelegationRemovesNothing: a delete naming no listed
+// delegation (forged or stale) is refused and every store list stays as it was.
+func TestRemovingAnUnknownDelegationRemovesNothing(t *testing.T) {
+	do, dir := delegationHarness(t)
+	d0, s0, o0 := storeLists(t, dir)
+	for _, id := range []string{"not-an-id", "999999", "-1"} {
+		if rec := do(http.MethodDelete, "/api/v1/delegations/"+id, ""); rec.Code == http.StatusOK {
+			t.Errorf("DELETE %s answered 200", id)
+		}
+	}
+	d1, s1, o1 := storeLists(t, dir)
+	if !slices.Equal(d0, d1) || !slices.Equal(s0, s1) || !slices.Equal(o0, o1) {
+		t.Errorf("store lists changed: %v %v %v -> %v %v %v", d0, s0, o0, d1, s1, o1)
 	}
 }
 

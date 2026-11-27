@@ -38,7 +38,20 @@ func TestSharedMailboxReportsItsSendGrant(t *testing.T) {
 	if g := sharedSendGrant(t, f); g != "none" {
 		t.Errorf("without a grant: sendGrant = %q, want none", g)
 	}
+	// Grants to another account, or to a look-alike address, are not alice's.
 	st, err := objectstore.Open(f.shared)
+	mustNoErr(t, "open shared", err)
+	mustNoErr(t, "send-as to bob", st.SetSendAs([]string{"bob@hermex.test", "alice@hermex.test.evil"}))
+	mustNoErr(t, "on-behalf to bob", st.SetSendOnBehalf([]string{"bob@hermex.test"}))
+	mustNoErr(t, "close", st.Close())
+	if g := sharedSendGrant(t, f); g != "none" {
+		t.Errorf("with grants to others: sendGrant = %q, want none", g)
+	}
+	st, err = objectstore.Open(f.shared)
+	mustNoErr(t, "open shared", err)
+	mustNoErr(t, "clear send-as", st.SetSendAs(nil))
+	mustNoErr(t, "close", st.Close())
+	st, err = objectstore.Open(f.shared)
 	mustNoErr(t, "open shared", err)
 	mustNoErr(t, "on-behalf", st.SetSendOnBehalf([]string{"alice@hermex.test"}))
 	mustNoErr(t, "close", st.Close())

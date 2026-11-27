@@ -46,6 +46,25 @@ func TestBuildOutgoingConvertsPastedPictures(t *testing.T) {
 	}
 }
 
+// TestBuildOutgoingIgnoresHostileDataURIs: a data: URI that is not a picture
+// (an HTML document) or whose base64 does not decode never becomes an inline
+// attachment.
+func TestBuildOutgoingIgnoresHostileDataURIs(t *testing.T) {
+	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", []byte("send-inline-secret"), "", false)
+	html := base64.StdEncoding.EncodeToString([]byte("<script>alert(1)</script>"))
+	for _, src := range []string{"data:text/html;base64," + html, "data:image/png;base64,!!!not-base64!!!"} {
+		raw, err := srv.buildOutgoing("alice@hermex.test", "alice@hermex.test", sendRequest{
+			To: []string{"bob@example.org"}, Subject: "s", Body: `<img src="` + src + `">`, IsHTML: true,
+		})
+		if err != nil {
+			continue // refusing the message is also acceptable
+		}
+		if strings.Contains(string(raw), "Content-Id: <img1.") {
+			t.Errorf("%.30s became an inline attachment", src)
+		}
+	}
+}
+
 // TestBuildOutgoingLeavesAPlainBodyAlone keeps the rewrite off a message that has
 // no pasted picture, including a plain-text one where a data: string is just text.
 func TestBuildOutgoingLeavesAPlainBodyAlone(t *testing.T) {

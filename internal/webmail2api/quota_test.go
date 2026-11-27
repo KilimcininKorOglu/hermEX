@@ -48,6 +48,12 @@ func TestAWriteIntoAFullMailboxIsRefused(t *testing.T) {
 	if after := countItems(t, st); after != before {
 		t.Errorf("refused writes changed the mailbox: %d items before, %d after", before, after)
 	}
+	drafts, err := st.ListMessages(mapi.PrivateFIDDraft)
+	mustNoErr(t, "list drafts", err)
+	if len(drafts) != 1 {
+		t.Fatalf("drafts = %d, want the first one only", len(drafts))
+	}
+	wantEq(t, "the surviving draft", drafts[0].Subject, "first")
 	wantStatus(t, "edit a task in a full mailbox", do(http.MethodPut, "/api/v1/tasks/"+task.UID, `{"summary":"Kept"}`), http.StatusOK)
 }
 

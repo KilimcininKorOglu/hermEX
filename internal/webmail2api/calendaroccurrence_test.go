@@ -38,7 +38,7 @@ func wantStartList(t *testing.T, what string, got []string, want ...string) {
 // replaces the first. The listing still names the moved row by its generated
 // instant.
 func TestMoveOccurrenceMovesOneInstance(t *testing.T) {
-	do, _ := apiHarness(t)
+	do := apiDo(t)
 	id := createEvent(t, do, berlinStandup)
 
 	wantStatus(t, "move", do(http.MethodPut, occurrencePath(id),
@@ -59,7 +59,7 @@ func TestMoveOccurrenceMovesOneInstance(t *testing.T) {
 // TestDeleteOccurrenceRemovesOneInstance deletes the 30 March instance: the days
 // around it stay, and deleting it again finds nothing.
 func TestDeleteOccurrenceRemovesOneInstance(t *testing.T) {
-	do, _ := apiHarness(t)
+	do := apiDo(t)
 	id := createEvent(t, do, berlinStandup)
 
 	wantStatus(t, "delete", do(http.MethodDelete, occurrencePath(id)+"?at=2026-03-30T07:00:00Z", ""), http.StatusOK)
@@ -70,7 +70,7 @@ func TestDeleteOccurrenceRemovesOneInstance(t *testing.T) {
 // TestOccurrenceEditRefusesWhatIsNotAnInstance answers 404 for an instant off the
 // pattern, for a single event and for an unknown id, and 400 for a bad instant.
 func TestOccurrenceEditRefusesWhatIsNotAnInstance(t *testing.T) {
-	do, _ := apiHarness(t)
+	do := apiDo(t)
 	series := createEvent(t, do, berlinStandup)
 	single := createEvent(t, do, `{"summary":"Once","start":"2026-03-30T07:00:00Z","end":"2026-03-30T08:00:00Z"}`)
 	move := `{"occurrence":"2026-03-30T07:00:00Z","start":"2026-03-30T11:00:00Z","end":"2026-03-30T11:30:00Z"}`

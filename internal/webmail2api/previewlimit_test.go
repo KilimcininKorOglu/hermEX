@@ -45,7 +45,7 @@ func TestPreviewCapReachesTheClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 	secret := []byte("preview-cap-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
 
@@ -73,7 +73,7 @@ func TestPreviewCapSurvivesASave(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 	secret := []byte("preview-cap-save-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
 	SetMaxPreviewBytes(3 * 1024 * 1024)
@@ -101,5 +101,15 @@ func TestPreviewCapSurvivesASave(t *testing.T) {
 	}
 	if got := string(getAppearance(t, srv, secret, dir)["previewMaxBytes"]); got != "3145728" {
 		t.Errorf("previewMaxBytes after the save = %s, want the operator value", got)
+	}
+	// A client raising or zeroing the cap is ignored the same way.
+	for _, v := range []string{"99999999999", "-1"} {
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/settings/appearance",
+			strings.NewReader(`{"theme":"dark","previewMaxBytes":`+v+`}`))
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+		srv.Handler().ServeHTTP(httptest.NewRecorder(), req)
+		if got := string(getAppearance(t, srv, secret, dir)["previewMaxBytes"]); got != "3145728" {
+			t.Errorf("previewMaxBytes after a client sent %s = %s, want the operator value", v, got)
+		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
 
@@ -17,7 +18,7 @@ func TestScheduleOutboxBounds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 
 	raw := []byte("From: a@hermex.test\r\nTo: b@hermex.test\r\nSubject: x\r\n\r\nbody\r\n")
 
@@ -31,8 +32,21 @@ func TestScheduleOutboxBounds(t *testing.T) {
 		t.Error("far-future send time was accepted, want rejection")
 	}
 
+	for _, bad := range []string{"", "tomorrow", "2026-13-40T99:00:00Z"} {
+		if err := scheduleOutbox(st, raw, bad); err == nil {
+			t.Errorf("send time %q was accepted, want rejection", bad)
+		}
+	}
+	outbox := func() int {
+		msgs, err := st.ListMessages(int64(mapi.PrivateFIDOutbox))
+		mustNoErr(t, "list outbox", err)
+		return len(msgs)
+	}
+	wantEq(t, "outbox after the refused schedules", outbox(), 0)
+
 	ok := time.Now().Add(24 * time.Hour).Format(time.RFC3339)
 	if err := scheduleOutbox(st, raw, ok); err != nil {
 		t.Errorf("valid send time rejected: %v", err)
 	}
+	wantEq(t, "outbox after a valid schedule", outbox(), 1)
 }

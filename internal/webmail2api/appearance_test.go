@@ -20,7 +20,7 @@ func TestAppearanceSettingsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	secret := []byte("appearance-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
@@ -73,6 +73,15 @@ func TestAppearanceSettingsRoundTrip(t *testing.T) {
 	wantEq(t, "showItemData", got.ShowItemData, true)
 	wantEq(t, "filePreview", got.FilePreview, false)
 	wantEq(t, "pdfZoom", got.PdfZoom, "auto")
+
+	// A body that is not JSON is refused and changes nothing.
+	wantStatus(t, "malformed put", do(http.MethodPut, "/api/v1/settings/appearance", `{"theme":`), http.StatusBadRequest)
+	wantEq(t, "theme after a refused put", readAppearance("get after refusal").Theme, "dark")
+	// Without a session the settings are neither read nor written.
+	anon := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(anon, httptest.NewRequest(http.MethodPut, "/api/v1/settings/appearance", strings.NewReader(`{"theme":"light"}`)))
+	wantEq(t, "anonymous put", anon.Code, http.StatusUnauthorized)
+	wantEq(t, "theme after an anonymous put", readAppearance("get after anonymous put").Theme, "dark")
 
 	// A bad enum clamps: theme "neon" → system, dateFormat "us" → iso,
 	// shortcutMode "vim" → extended, iconSet "flat" → breeze.

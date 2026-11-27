@@ -1,6 +1,8 @@
 package webmail2api
 
 import (
+	"bytes"
+	"crypto/ecdh"
 	"encoding/base64"
 	"testing"
 )
@@ -27,8 +29,19 @@ func TestVapidKeysStableAndValid(t *testing.T) {
 	privBytes, err := base64.RawURLEncoding.DecodeString(priv1)
 	mustNoErr(t, "decode private key", err)
 	wantEq(t, "private key length (a P-256 scalar)", len(privBytes), 32)
+	// RFC 8292: the push service verifies the JWT with the public key, so it must
+	// be the point of this private scalar, or every push is refused.
+	key, err := ecdh.P256().NewPrivateKey(privBytes)
+	mustNoErr(t, "private key is a valid P-256 scalar", err)
+	if !bytes.Equal(key.PublicKey().Bytes(), pubBytes) {
+		t.Fatal("the public key is not the point of the private key")
+	}
 
-	pubOther, _, _ := vapidKeys([]byte("secret-two"))
+	pubOther, privOther, err := vapidKeys([]byte("secret-two"))
+	mustNoErr(t, "derive second key pair", err)
+	if privOther == priv1 {
+		t.Fatal("different secrets produced the same private key")
+	}
 	if pubOther == pub1 {
 		t.Fatal("different secrets produced the same public key")
 	}

@@ -14,7 +14,7 @@ import (
 // The user's contact must still be there: an edit that could not be saved must
 // never cost the data it was editing.
 func TestAFailedContactReplaceKeepsTheContact(t *testing.T) {
-	_, dir := apiHarness(t)
+	dir := freshMailbox(t)
 	old := seedObject(t, dir, int64(mapi.PrivateFIDContacts), "IPM.Contact")
 
 	prev := writeContact
@@ -23,11 +23,18 @@ func TestAFailedContactReplaceKeepsTheContact(t *testing.T) {
 
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
-	if _, err := saveContactEdit(st, strconv.FormatInt(old, 10), contactJSON{IsGroup: true, Name: "Team"}); err == nil {
+	defer mustClose(t, st)
+	id, err := saveContactEdit(st, strconv.FormatInt(old, 10), contactJSON{IsGroup: true, Name: "Team"})
+	if err == nil {
 		t.Fatal("the failed write was reported as saved")
 	}
-	if _, err := st.OpenMessage(old); err != nil {
-		t.Errorf("the contact is gone after a failed edit: %v", err)
+	wantEq(t, "id reported for a failed edit", id, int64(0))
+	msg, err := st.OpenMessage(old)
+	if err != nil {
+		t.Fatalf("the contact is gone after a failed edit: %v", err)
 	}
+	wantEq(t, "class after a failed edit", propStr(msg.Props, mapi.PrMessageClass), "IPM.Contact")
+	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDContacts))
+	mustNoErr(t, "list contacts", err)
+	wantEq(t, "objects in Contacts after a failed edit", len(objs), 1)
 }

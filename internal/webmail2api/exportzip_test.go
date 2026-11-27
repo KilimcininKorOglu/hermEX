@@ -28,7 +28,7 @@ func TestExportSelectedAsZip(t *testing.T) {
 	mustNoErr(t, "append 1", err)
 	i2, err := st.AppendMessage(inbox, []byte("From: c@d.test\r\nSubject: second\r\n\r\nbody two\r\n"), time.Now(), 0)
 	mustNoErr(t, "append 2", err)
-	st.Close()
+	mustClose(t, st)
 
 	secret := []byte("export-zip-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
@@ -59,14 +59,28 @@ func TestExportSelectedAsZip(t *testing.T) {
 	// entry, not a swap that happens to normalize alike.
 	st2, err := objectstore.Open(dir)
 	mustNoErr(t, "reopen mailbox", err)
-	defer st2.Close()
-	want1, _ := st2.GetMessageRaw(inbox, i1.UID)
-	want2, _ := st2.GetMessageRaw(inbox, i2.UID)
+	defer mustClose(t, st2)
+	want1, err := st2.GetMessageRaw(inbox, i1.UID)
+	mustNoErr(t, "read message one", err)
+	want2, err := st2.GetMessageRaw(inbox, i2.UID)
+	mustNoErr(t, "read message two", err)
 	wantZipEntry(t, got, "message-"+u1+".eml", want1, "body one")
 	wantZipEntry(t, got, "message-"+u2+".eml", want2, "body two")
 
 	// An empty selection must fail loud BEFORE any zip byte is written.
 	wantStatus(t, "empty selection", get(""), http.StatusBadRequest)
+
+	// An oversized selection is cut at the bulk cap: a client cannot make one
+	// request read an unbounded number of messages.
+	q := ""
+	for range maxBulkExport + 10 {
+		q += "&id=inbox:" + u1
+	}
+	big := get("?" + q[1:])
+	wantStatus(t, "oversized export", big, http.StatusOK)
+	if n := len(zipEntries(t, big)); n > maxBulkExport {
+		t.Errorf("oversized export carries %d entries, cap is %d", n, maxBulkExport)
+	}
 }
 
 // zipEntries reads a zip response into its entries, keyed by name.
@@ -79,7 +93,7 @@ func zipEntries(t *testing.T, rec *httptest.ResponseRecorder) map[string][]byte 
 		rc, err := f.Open()
 		mustNoErr(t, "open entry "+f.Name, err)
 		b, err := io.ReadAll(rc)
-		rc.Close()
+		mustClose(t, rc)
 		mustNoErr(t, "read entry "+f.Name, err)
 		out[f.Name] = b
 	}

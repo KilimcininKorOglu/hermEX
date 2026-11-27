@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/mapi"
 )
 
 // TestScheduleFailureDoesNotEchoInternals proves the send surface answers a
@@ -61,4 +62,9 @@ func TestScheduleFailureDoesNotEchoInternals(t *testing.T) {
 	if e.Err == "" {
 		t.Error("the recorded event carries no error text")
 	}
+	// The refused schedule filed nothing to send later.
+	st := openMailbox(t, mbox)
+	outbox, err := st.ListMessages(int64(mapi.PrivateFIDOutbox))
+	mustNoErr(t, "list outbox", err)
+	wantEq(t, "outbox after the refused schedule", len(outbox), 0)
 }

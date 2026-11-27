@@ -57,7 +57,7 @@ func rsvpHarnessWith(t *testing.T, mail []byte) (func(body string) *httptest.Res
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	secret := []byte("rsvp-test-secret")
 	accs := directory.StaticAccounts{
@@ -87,7 +87,7 @@ func calendarCount(t *testing.T, mbox string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
 	if err != nil {
 		t.Fatal(err)
@@ -184,7 +184,7 @@ func TestRSVPClearsTheRequestWhenConfigured(t *testing.T) {
 	if err := st.SetMeetingConfig(objectstore.MeetingConfig{RemoveRequestOnResponse: true}); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	if rec := do(`{"id":"` + id + `","response":"accept"}`); rec.Code != http.StatusOK {
 		t.Fatalf("accept = %d: %s", rec.Code, rec.Body.String())
@@ -193,7 +193,7 @@ func TestRSVPClearsTheRequestWhenConfigured(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDInbox))
 	if err != nil {
 		t.Fatal(err)
@@ -206,8 +206,9 @@ func TestRSVPClearsTheRequestWhenConfigured(t *testing.T) {
 // TestRSVPReportsTheStatus reports the answer recorded. The status used to be the
 // request word with "ed" glued on, so a tentative answer reported "tentativeed".
 func TestRSVPReportsTheStatus(t *testing.T) {
-	do, _, id := rsvpHarness(t)
+	do, mbox, id := rsvpHarness(t)
 	rec := do(`{"id":"` + id + `","response":"tentative"}`)
+	wantStatus(t, "tentative", rec, http.StatusOK)
 	var out struct {
 		Status string `json:"status"`
 	}
@@ -217,6 +218,27 @@ func TestRSVPReportsTheStatus(t *testing.T) {
 	if out.Status != "tentative" {
 		t.Errorf("status = %q, want tentative", out.Status)
 	}
+	wantEq(t, "appointments after a tentative answer", calendarCount(t, mbox), 1)
+}
+
+// TestRSVPRefusesAnIDItCannotUse: an answer to a mail that is not there, an
+// id that is not one, or no id at all records and sends nothing.
+func TestRSVPRefusesAnIDItCannotUse(t *testing.T) {
+	do, mbox, id := rsvpHarness(t)
+	for _, body := range []string{
+		`{"id":"inbox:999999","response":"accept"}`,
+		`{"id":"nonsense","response":"accept"}`,
+		`{"response":"accept"}`,
+		`{`,
+		// The real invitation with an answer RFC 5546 PARTSTAT has no word for.
+		`{"id":"` + id + `","response":"maybe"}`,
+	} {
+		if rec := do(body); rec.Code == http.StatusOK {
+			t.Errorf("%s answered 200", body)
+		}
+	}
+	wantEq(t, "responses in Sent Items", sentItems(t, mbox), 0)
+	wantEq(t, "appointments on the calendar", calendarCount(t, mbox), 0)
 }
 
 // TestRSVPCarriesTheNote proves the note the reader writes reaches the organizer

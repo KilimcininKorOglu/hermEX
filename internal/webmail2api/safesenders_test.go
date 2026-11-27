@@ -29,6 +29,10 @@ func TestIsSafeSender(t *testing.T) {
 		{[]string{"hermex.test"}, "anyone@sub.hermex.test", false}, // no subdomain widening
 		{[]string{"boss@hermex.test"}, "other@hermex.test", false},
 		{[]string{"hermex.test"}, "", false},
+		// A suffix is not the domain, there is no wildcard, and no prefix match.
+		{[]string{"hermex.test"}, "x@evilhermex.test", false},
+		{[]string{"*"}, "x@hermex.test", false},
+		{[]string{"boss@hermex.test"}, "boss@hermex.test.evil", false},
 		{nil, "boss@hermex.test", false},
 	}
 	for _, c := range cases {
@@ -56,7 +60,7 @@ func TestSafeSendersRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	st.Close()
+	mustClose(t, st)
 	secret := []byte("safesenders-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
 	do := func(method, body string) *httptest.ResponseRecorder {
@@ -92,5 +96,16 @@ func TestSafeSendersRoundTrip(t *testing.T) {
 	want := []string{"boss@hermex.test", "example.com"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("after put, safe senders = %v, want %v", got, want)
+	}
+
+	// A malformed or oversized write is refused and leaves the list as it was.
+	huge := `{"safeSenders":["` + strings.Repeat("a", 2<<20) + `@x.test"]}`
+	for _, body := range []string{`{`, `{"safeSenders":"boss@hermex.test"}`, huge} {
+		if rec := do(http.MethodPut, body); rec.Code == http.StatusOK {
+			t.Errorf("put of %.40q answered 200", body)
+		}
+	}
+	if got := list(do(http.MethodGet, "")); !reflect.DeepEqual(got, want) {
+		t.Errorf("after refused puts, safe senders = %v, want %v", got, want)
 	}
 }

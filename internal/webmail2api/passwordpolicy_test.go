@@ -29,7 +29,7 @@ func postPasswordChange(t *testing.T, srv *Server, secret []byte, mbox, newPassw
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _ := json.Marshal(map[string]string{"currentPassword": "old-password", "newPassword": newPassword})
+	body := mustEncode(t, map[string]string{"currentPassword": "old-password", "newPassword": newPassword})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/account/password", strings.NewReader(string(body)))
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
 	rec := httptest.NewRecorder()
@@ -54,7 +54,7 @@ func TestPasswordChangeHonoursTheStoredMinimum(t *testing.T) {
 		Error     string `json:"error"`
 		MinLength int    `json:"minLength"`
 	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	mustNoErr(t, "decode refusal "+rec.Body.String(), json.Unmarshal(rec.Body.Bytes(), &got))
 	if rec.Code != http.StatusBadRequest || got.MinLength != 12 || !strings.Contains(got.Error, "12") {
 		t.Fatalf("an 11-character password = %d %s, want 400 naming 12", rec.Code, rec.Body.String())
 	}
@@ -78,6 +78,9 @@ func TestPasswordChangeCountsCharacters(t *testing.T) {
 
 	if rec := postPasswordChange(t, srv, secret, mbox, "şifre12"); rec.Code != http.StatusBadRequest {
 		t.Errorf("a 7-character, 9-byte password = %d, want 400", rec.Code)
+	}
+	if rec := postPasswordChange(t, srv, secret, mbox, ""); rec.Code != http.StatusBadRequest {
+		t.Errorf("an empty password = %d, want 400", rec.Code)
 	}
 	if g.changed != "" {
 		t.Errorf("a refused password was stored: %q", g.changed)

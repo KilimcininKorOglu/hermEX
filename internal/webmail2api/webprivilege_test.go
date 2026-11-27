@@ -14,11 +14,26 @@ import (
 type privAuth struct {
 	mailbox string
 	privs   directory.ServicePrivileges
+	unknown bool
 }
 
 func (a privAuth) Authenticate(string, string) (string, bool) { return a.mailbox, true }
 func (a privAuth) Privileges(string) (directory.ServicePrivileges, bool) {
-	return a.privs, true
+	return a.privs, !a.unknown
+}
+
+// TestLoginDeniedForAnAccountWithoutPrivileges: a directory that knows the
+// capability but has no privilege row for the account denies it, fail-closed.
+func TestLoginDeniedForAnAccountWithoutPrivileges(t *testing.T) {
+	auth := privAuth{mailbox: t.TempDir(), privs: directory.ServicePrivileges{Web: true}, unknown: true}
+	srv := NewServer(auth, directory.StaticAccounts{}, nil, "mail.hermex.test", []byte("web-priv-secret"), "", false)
+	rec := login(t, srv)
+	if rec.Code == http.StatusOK {
+		t.Fatalf("login for an account without privileges = 200, want a refusal")
+	}
+	if got := rec.Header().Get("Set-Cookie"); got != "" {
+		t.Errorf("a refused login set a cookie: %q", got)
+	}
 }
 
 // plainAuth exposes no privileges at all, standing in for a directory that

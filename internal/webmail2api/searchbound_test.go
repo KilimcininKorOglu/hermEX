@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,7 +41,7 @@ func seedInbox(t *testing.T, mailbox string, n int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	for i := range n {
 		raw := fmt.Appendf(nil,
 			"From: sender%d@hermex.test\r\nTo: alice@hermex.test\r\nSubject: message %d\r\n"+
@@ -130,6 +131,23 @@ func TestSearchUnderTheCapIsWhole(t *testing.T) {
 	}
 	if got.Truncated {
 		t.Error("a complete answer is reported as truncated")
+	}
+}
+
+// TestSearchTreatsHostileQueriesAsText: LIKE wildcards and a quote match
+// nothing in mail that does not hold them, and an oversized query is not a
+// server fault.
+func TestSearchTreatsHostileQueriesAsText(t *testing.T) {
+	srv, secret, mailbox := searchTestServer(t)
+	seedInbox(t, mailbox, 3)
+	for _, q := range []string{"%25", "_", "%27%20OR%201%3D1--"} {
+		if got := runSearch(t, srv, secret, mailbox, q); len(got.Emails) != 0 {
+			t.Errorf("query %q matched %d messages, want none", q, len(got.Emails))
+		}
+	}
+	rec := authedGetAs(t, srv, secret, "alice@hermex.test", mailbox, "/api/v1/search?q="+strings.Repeat("x", 64<<10))
+	if rec.Code >= 500 {
+		t.Errorf("an oversized query = %d, want a client answer", rec.Code)
 	}
 }
 

@@ -21,7 +21,7 @@ func TestMailFollowupSetsRichFlag(t *testing.T) {
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), raw, time.Now(), 0)
 	mustNoErr(t, "append", err)
 	uid := info.UID
-	st.Close()
+	mustClose(t, st)
 
 	do := apiHarnessFor(t, dir)
 	id := "inbox:" + strconv.FormatUint(uint64(uid), 10)
@@ -44,6 +44,27 @@ func TestMailFollowupSetsRichFlag(t *testing.T) {
 
 	post("clear", `{"id":"`+id+`","action":"clear"}`)
 	wantEq(t, "status after clear", storedFollowup(t, dir, uid).Status, int32(objectstore.FlagStatusNone))
+
+	// A request the flag model cannot carry is refused and the flag stays as it
+	// was: an unknown action, a colour outside MS-OXOFLAG's 1-6 range, a due date
+	// that is no date, and a message that is not there.
+	post("flag again", `{"id":"`+id+`","action":"flag","color":5}`)
+	before := storedFollowup(t, dir, uid)
+	for _, body := range []string{
+		`{"id":"` + id + `","action":"explode"}`,
+		`{"id":"` + id + `","action":"flag","color":99}`,
+		`{"id":"` + id + `","action":"flag","color":-1}`,
+		`{"id":"` + id + `","action":"flag","due":"next tuesday"}`,
+		`{"id":"inbox:999999","action":"flag"}`,
+		`{"id":"not-an-id","action":"flag"}`,
+	} {
+		if rec := do(http.MethodPost, "/api/v1/mail/followup", body); rec.Code == http.StatusOK {
+			t.Errorf("followup %s answered 200", body)
+		}
+	}
+	after := storedFollowup(t, dir, uid)
+	wantEq(t, "status after refused requests", after.Status, before.Status)
+	wantEq(t, "colour after refused requests", after.Color, before.Color)
 }
 
 // storedFollowup reads the follow-up flag the store holds for an inbox message.
@@ -51,7 +72,7 @@ func storedFollowup(t *testing.T, dir string, uid uint32) objectstore.FollowupFl
 	t.Helper()
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "reopen mailbox", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	m, err := st.MessageByUID(int64(mapi.PrivateFIDInbox), uid)
 	mustNoErr(t, "message by uid", err)
 	f, err := st.GetFollowupFlag(m.ID)

@@ -38,7 +38,7 @@ func TestDirectoryOmitsHiddenUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	accs := hidingAccounts{
 		StaticAccounts: directory.StaticAccounts{
@@ -72,4 +72,13 @@ func TestDirectoryOmitsHiddenUser(t *testing.T) {
 	if got := *accs.asked; len(got) != 1 || got[0] != directory.HideFromGAL {
 		t.Errorf("hide bits asked of the directory = %v, want [%d]", got, directory.HideFromGAL)
 	}
+
+	// Without a session the directory names nobody and is never asked.
+	anon := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(anon, httptest.NewRequest(http.MethodGet, "/api/v1/directory?q=al", nil))
+	wantStatus(t, "anonymous directory search", anon, http.StatusUnauthorized)
+	if strings.Contains(anon.Body.String(), "@hermex.test") {
+		t.Errorf("an anonymous search named an account: %s", anon.Body.String())
+	}
+	wantEq(t, "directory searches after the anonymous one", len(*accs.asked), 1)
 }

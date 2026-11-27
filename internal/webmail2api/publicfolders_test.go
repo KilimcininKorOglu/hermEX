@@ -1,6 +1,7 @@
 package webmail2api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -57,7 +58,7 @@ func seedPublicFolder(t *testing.T, svc *publicfolder.Service, domain, folder, u
 	if err != nil {
 		t.Fatalf("open domain store: %v", err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if err := st.ModifyPermissions(fid, false, []objectstore.PermissionChange{
 		{Op: objectstore.PermAdd, Username: user, Rights: mapi.RightsReviewer},
 	}); err != nil {
@@ -150,7 +151,7 @@ func TestPublicFolderReadStatePersists(t *testing.T) {
 	for _, dir := range []string{aliceBox, bobBox} {
 		st, err := objectstore.Open(dir)
 		mustNoErr(t, "create mailbox "+dir, err)
-		st.Close()
+		mustClose(t, st)
 	}
 
 	srv, secret := newTestServer(t)
@@ -182,7 +183,7 @@ func TestPublicFolderReadStatePersists(t *testing.T) {
 	// The shared public store's flag was never written: reading stays per-user.
 	cst, err := svc.OpenForDomain(domain)
 	mustNoErr(t, "reopen domain store", err)
-	defer cst.Close()
+	defer mustClose(t, cst)
 	info, err := cst.MessageByUID(fid, uid)
 	mustNoErr(t, "message by uid", err)
 	if info.Flags&objectstore.FlagSeen != 0 {
@@ -195,7 +196,7 @@ func grantPublicRead(t *testing.T, svc *publicfolder.Service, domain string, fid
 	t.Helper()
 	pst, err := svc.OpenForDomain(domain)
 	mustNoErr(t, "open domain store", err)
-	defer pst.Close()
+	defer mustClose(t, pst)
 	mustNoErr(t, "grant "+user, pst.ModifyPermissions(fid, false, []objectstore.PermissionChange{
 		{Op: objectstore.PermAdd, Username: user, Rights: mapi.RightsReviewer},
 	}))
@@ -254,6 +255,44 @@ func TestPublicFolders(t *testing.T) {
 	wantContains(t, "message detail", rec.Body.String(), "Hello everyone")
 }
 
+// TestADamagedPublicStoreIsRecorded: a public store whose permissions or
+// folder table cannot be read shows the caller nothing (fail closed), and the
+// operator's log is the only trace, so the failure must be recorded.
+func TestADamagedPublicStoreIsRecorded(t *testing.T) {
+	for _, table := range []string{"permissions", "folders"} {
+		t.Run(table, func(t *testing.T) {
+			const domain, alice = "hermex.test", "alice@hermex.test"
+			svc := publicfolder.New(fakePaths{t.TempDir()})
+			fid, uid := seedPublicFolder(t, svc, domain, "Announcements", alice)
+			pst, err := svc.OpenForDomain(domain)
+			mustNoErr(t, "open domain store", err)
+			dbPath := filepath.Join(pst.Dir(), "objects.sqlite3")
+			mustClose(t, pst)
+			db, err := sql.Open("sqlite", dbPath)
+			mustNoErr(t, "open objects db", err)
+			_, err = db.Exec(`DROP TABLE ` + table)
+			mustNoErr(t, "drop "+table, err)
+			mustNoErr(t, "close objects db", db.Close())
+
+			srv, secret := newTestServer(t)
+			srv.Pub = svc
+			sink := withSink(t)
+			list := okBody[struct {
+				Folders []publicFolderJSON `json:"folders"`
+			}](t, "public-folders", authedGet(t, srv, secret, alice, "/api/v1/public-folders"))
+			wantEq(t, "folders shown from a damaged store", len(list.Folders), 0)
+			rec := authedGet(t, srv, secret, alice,
+				"/api/v1/public-message?fid="+strconv.FormatInt(fid, 10)+"&uid="+strconv.FormatUint(uint64(uid), 10))
+			if rec.Code == http.StatusOK {
+				t.Errorf("a message was read from a damaged store")
+			}
+			if len(sink.events) == 0 {
+				t.Errorf("the damaged %s table left no record", table)
+			}
+		})
+	}
+}
+
 // namedPublicFolder returns the listed folder with that display name.
 func namedPublicFolder(t *testing.T, folders []publicFolderJSON, name string) publicFolderJSON {
 	t.Helper()
@@ -292,6 +331,17 @@ func TestPublicFoldersAccessGate(t *testing.T) {
 			"/api/v1/public-message?fid="+strconv.FormatInt(fid, 10)+"&uid="+strconv.FormatUint(uint64(uid), 10))
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("%s read a forbidden message: status %d", who, rec.Code)
+		}
+		rec = authedGet(t, srv, secret, who, "/api/v1/public-folders/"+strconv.FormatInt(fid, 10)+"/messages")
+		if rec.Code == http.StatusOK && len(okBody[struct {
+			Emails []mailJSON `json:"emails"`
+		}](t, who+" messages", rec).Emails) != 0 {
+			t.Errorf("%s listed a forbidden folder's messages", who)
+		}
+	}
+	for _, q := range []string{"fid=abc&uid=1", "fid=-1&uid=1", "fid=" + strconv.FormatInt(fid, 10) + "&uid=x", ""} {
+		if rec := authedGet(t, srv, secret, "alice@hermex.test", "/api/v1/public-message?"+q); rec.Code == http.StatusOK {
+			t.Errorf("public-message?%s answered 200", q)
 		}
 	}
 }

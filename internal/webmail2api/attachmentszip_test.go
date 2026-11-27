@@ -3,6 +3,7 @@ package webmail2api
 import (
 	"archive/zip"
 	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -37,7 +38,7 @@ func zipHarness(t *testing.T) func(query string) *httptest.ResponseRecorder {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	secret := []byte("zip-test-secret")
 	accs := directory.StaticAccounts{"alice@hermex.test": {MailboxPath: dir}}
@@ -90,6 +91,41 @@ func TestAttachmentsZipHoldsEverythingByDefault(t *testing.T) {
 			t.Errorf("archive holds %v, want %v", got, want)
 			break
 		}
+	}
+}
+
+// TestAttachmentsZipCarriesTheDecodedBytes proves each entry holds its part's
+// decoded body (RFC 2045), not the raw MIME or another part's bytes.
+func TestAttachmentsZipCarriesTheDecodedBytes(t *testing.T) {
+	rec := zipHarness(t)("")
+	wantStatus(t, "archive", rec, http.StatusOK)
+	body := rec.Body.Bytes()
+	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	mustNoErr(t, "read the archive", err)
+	want := map[string]string{"first.pdf": "ONE", "second.pdf": "TWO", "third.pdf": "THREE"}
+	for _, f := range zr.File {
+		rc, err := f.Open()
+		mustNoErr(t, "open "+f.Name, err)
+		b, err := io.ReadAll(rc)
+		mustClose(t, rc)
+		mustNoErr(t, "read "+f.Name, err)
+		wantEq(t, f.Name, string(b), want[f.Name])
+	}
+	wantEq(t, "entries in the archive", len(zr.File), len(want))
+}
+
+// TestAttachmentsZipRefusesWithoutAccess: the archive is mail content, so a
+// request with no session, or naming a mail that does not exist, gets none.
+func TestAttachmentsZipRefusesWithoutAccess(t *testing.T) {
+	do := zipHarness(t)
+	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", []byte("zip-test-secret"), "", false)
+	anon := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(anon, httptest.NewRequest(http.MethodGet, "/api/v1/mail/attachments-zip?id="+messageID("inbox", 1), nil))
+	wantEq(t, "archive without a session", anon.Code, http.StatusUnauthorized)
+
+	missing := do("x")
+	if missing.Code == http.StatusOK {
+		t.Errorf("an archive of a mangled id answered 200")
 	}
 }
 
@@ -149,7 +185,7 @@ func inlineHarness(t *testing.T) func(query string) *httptest.ResponseRecorder {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	secret := []byte("inline-test-secret")
 	accs := directory.StaticAccounts{"alice@hermex.test": {MailboxPath: dir}}

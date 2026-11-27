@@ -2,6 +2,7 @@ package webmail2api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,6 +19,7 @@ type prefixAuth struct {
 	accounts directory.StaticAccounts
 	prefix   string
 	found    bool
+	err      error
 }
 
 func (a *prefixAuth) Authenticate(user, password string) (string, bool) {
@@ -25,27 +27,51 @@ func (a *prefixAuth) Authenticate(user, password string) (string, bool) {
 }
 
 func (a *prefixAuth) GetAutoReplySettings() (directory.AutoReplySettings, bool, error) {
-	return directory.AutoReplySettings{SubjectPrefix: a.prefix}, a.found, nil
+	return directory.AutoReplySettings{SubjectPrefix: a.prefix}, a.found, a.err
+}
+
+// TestAFailedPrefixLookupIsRecorded: when the directory cannot answer, the form
+// still shows the built-in fallback, and the failure is recorded.
+func TestAFailedPrefixLookupIsRecorded(t *testing.T) {
+	auth, do := prefixHarness(t)
+	auth.prefix, auth.found, auth.err = "ignored", true, errors.New("directory down")
+	sink := withSink(t)
+	got := readVacation(t, do(http.MethodGet, "/api/v1/vacation", ""))
+	if got["subject_prefix"] != directory.DefaultAutoReplySubjectPrefix {
+		t.Errorf("subject_prefix = %v, want the built-in default", got["subject_prefix"])
+	}
+	if _, ok := sink.find("vacation-prefix"); !ok {
+		t.Error("the failed prefix lookup left no record")
+	}
 }
 
 // prefixHarness seeds a mailbox and returns the directory plus a signed-in
 // browser.
 func prefixHarness(t *testing.T) (*prefixAuth, requestFunc) {
 	t.Helper()
-	auth, do, _ := vacationHarness(t)
+	env := vacationHarness(t)
+	auth, do := env.auth, env.do
 	return auth, do
 }
 
 // vacationHarness is prefixHarness that also returns the mailbox directory, for a
 // test that tampers with the stored settings.
-func vacationHarness(t *testing.T) (*prefixAuth, requestFunc, string) {
+// vacationEnv is what vacationHarness sets up: the directory, a signed-in
+// request function, and the mailbox path.
+type vacationEnv struct {
+	auth *prefixAuth
+	do   requestFunc
+	dir  string
+}
+
+func vacationHarness(t *testing.T) vacationEnv {
 	t.Helper()
 	dir := t.TempDir()
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 	auth := &prefixAuth{accounts: directory.StaticAccounts{
 		"alice@hermex.test": {Password: "pw", MailboxPath: dir},
 	}}
@@ -73,14 +99,15 @@ func vacationHarness(t *testing.T) (*prefixAuth, requestFunc, string) {
 		`{"email":"alice@hermex.test","password":"pw"}`); rec.Code != http.StatusOK {
 		t.Fatalf("login = %d", rec.Code)
 	}
-	return auth, do, dir
+	return vacationEnv{auth: auth, do: do, dir: dir}
 }
 
 // TestAnUnreadableAutoReplyIsNotServedAsEmpty pins the read failure: stored
 // settings that cannot be decoded must answer an error, because an empty answer
 // shows a blank form whose save would overwrite what is stored.
 func TestAnUnreadableAutoReplyIsNotServedAsEmpty(t *testing.T) {
-	_, do, dir := vacationHarness(t)
+	env := vacationHarness(t)
+	do, dir := env.do, env.dir
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -88,7 +115,7 @@ func TestAnUnreadableAutoReplyIsNotServedAsEmpty(t *testing.T) {
 	if err := st.SetStoreProperties(mapi.PropertyValues{{Tag: mapi.PrOOFSettings, Value: "{not json"}}); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	rec := do(http.MethodGet, "/api/v1/vacation", "")
 	if rec.Code != http.StatusInternalServerError {
@@ -103,7 +130,8 @@ func TestAnUnreadableAutoReplyIsNotServedAsEmpty(t *testing.T) {
 // or whose date is not RFC 3339: each is a 400 and nothing is stored, where the
 // unparseable date used to be dropped and the reply saved with no end.
 func TestVacationRefusesABrokenSchedule(t *testing.T) {
-	_, do, dir := vacationHarness(t)
+	env := vacationHarness(t)
+	do, dir := env.do, env.dir
 	for name, dates := range map[string]string{
 		"ends before it starts": `"start_date":"2026-07-10T00:00:00Z","end_date":"2026-07-01T00:00:00Z"`,
 		"unparseable end":       `"start_date":"2026-07-01T00:00:00Z","end_date":"next week"`,
@@ -117,7 +145,7 @@ func TestVacationRefusesABrokenSchedule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	cfg, err := st.GetOOFSettings()
 	mustNoErr(t, "read the OOF settings", err)
 	if cfg.Enabled {

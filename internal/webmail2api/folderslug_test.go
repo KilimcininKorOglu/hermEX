@@ -42,7 +42,7 @@ func newTwinFolders(t *testing.T) twinFolders {
 		_, err := st.AppendMessage(fid, raw, time.Now(), 0)
 		mustNoErr(t, "append "+subj, err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	secret := []byte("folder-slug-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
@@ -79,7 +79,7 @@ func (tf twinFolders) folderName(t *testing.T, fid int64) string {
 	t.Helper()
 	st, err := objectstore.Open(tf.dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	props, err := st.GetFolderProperties(fid, mapi.PrDisplayName)
 	mustNoErr(t, "read the folder name", err)
 	return propStr(props, mapi.PrDisplayName)
@@ -91,6 +91,7 @@ func (tf twinFolders) folderName(t *testing.T, fid int64) string {
 func TestMailboxesTellsSameNamedFoldersApart(t *testing.T) {
 	tf := newTwinFolders(t)
 	rec := tf.call(http.MethodGet, "/api/v1/mailboxes", "")
+	wantStatus(t, "mailboxes", rec, http.StatusOK)
 	var out struct {
 		Folders []userFolderJSON `json:"folders"`
 	}
@@ -135,7 +136,7 @@ func TestASlugNamesOnlyAUserFolder(t *testing.T) {
 	tf := newTwinFolders(t)
 	st, err := objectstore.Open(tf.dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	padded := "f0" + strconv.FormatInt(tf.a2024, 10)
 	for _, slug := range []string{"f" + strconv.Itoa(int(mapi.PrivateFIDInbox)), "f0", "f-1", padded,
 		"f99999999999999999999", "f999999", "f", "F" + strconv.FormatInt(tf.a2024, 10), "f1x"} {
@@ -158,10 +159,11 @@ func TestAListingAnswersWithTheSlug(t *testing.T) {
 	raw := []byte("From: bob@hermex.test\r\nSubject: top\r\nDate: Mon, 01 Jun 2026 10:00:00 +0000\r\n\r\nbody\r\n")
 	_, err = st.AppendMessage(tf.projects, raw, time.Now(), 0)
 	mustNoErr(t, "append to Projects", err)
-	st.Close()
+	mustClose(t, st)
 
 	wantEq(t, "messages listed by the display name", len(tf.subjects(t, "Projects")), 0)
 	rec := tf.call(http.MethodGet, "/api/v1/mail/"+customSlug(tf.projects), "")
+	wantStatus(t, "listing by slug", rec, http.StatusOK)
 	var out struct {
 		Emails []struct {
 			ID     string `json:"id"`
@@ -190,9 +192,10 @@ func TestAFolderNameWithAColonRoundTrips(t *testing.T) {
 	mustNoErr(t, "create Q3: plans", err)
 	_, err = st.AppendMessage(fid, []byte("From: b@hermex.test\r\nSubject: colon\r\n\r\nbody\r\n"), time.Now(), 0)
 	mustNoErr(t, "append", err)
-	st.Close()
+	mustClose(t, st)
 
 	rec := tf.call(http.MethodGet, "/api/v1/mail/"+customSlug(fid), "")
+	wantStatus(t, "listing of Q3: plans", rec, http.StatusOK)
 	var out struct {
 		Emails []struct {
 			ID string `json:"id"`
@@ -215,6 +218,6 @@ func TestAFolderNamedLikeASlugCannotTakeIt(t *testing.T) {
 	mustNoErr(t, "open the store", err)
 	_, err = st.CreateFolder(nil, customSlug(tf.b2024))
 	mustNoErr(t, "create the impostor", err)
-	st.Close()
+	mustClose(t, st)
 	wantEq(t, "listing of the slug", strings.Join(tf.subjects(t, customSlug(tf.b2024)), ","), "in-old")
 }

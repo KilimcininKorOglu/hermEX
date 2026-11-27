@@ -16,7 +16,7 @@ func grantingBox(t *testing.T, onBehalf bool) string {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	grant := st.SetSendAs
 	if onBehalf {
 		grant = st.SetSendOnBehalf
@@ -35,9 +35,9 @@ func TestResolveSenderAuthorizes(t *testing.T) {
 	team := grantingBox(t, false) // grants alice send-as
 	desk := grantingBox(t, true)  // grants alice send-on-behalf-of
 	other := t.TempDir()          // grants nothing
-	if st, err := objectstore.Open(other); err == nil {
-		st.Close()
-	}
+	ost, err := objectstore.Open(other)
+	mustNoErr(t, "open the ungranted mailbox", err)
+	mustClose(t, ost)
 
 	accounts := directory.StaticAccounts{
 		"alice@hermex.test": {MailboxPath: t.TempDir()},
@@ -62,6 +62,10 @@ func TestResolveSenderAuthorizes(t *testing.T) {
 		{"granted on-behalf keeps caller in Sender", "desk@hermex.test", "desk@hermex.test", "alice@hermex.test", true},
 		{"ungranted mailbox denied", "other@hermex.test", "", "", false},
 		{"unknown address denied", "ghost@hermex.test", "", "", false},
+		// Smuggling a header or a second address through the From field.
+		{"header injection denied", "team@hermex.test\r\nBcc: x@evil.test", "", "", false},
+		{"address list denied", "team@hermex.test, other@hermex.test", "", "", false},
+		{"display name around an ungranted address denied", "Team <other@hermex.test>", "", "", false},
 	}
 	for _, tc := range cases {
 		repr, sender, ok := srv.resolveSender("alice@hermex.test", tc.want)
@@ -98,8 +102,11 @@ func TestBuildOutgoingOnBehalfHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("on-behalf build: %v", err)
 	}
-	if h := headerValue(string(behalf), "Sender"); h == "" {
-		t.Error("on-behalf send missing Sender header (should name the real caller)")
+	if h := headerValue(string(behalf), "Sender"); !strings.Contains(h, "alice@hermex.test") {
+		t.Errorf("on-behalf Sender = %q, want the real caller", h)
+	}
+	if h := headerValue(string(behalf), "From"); !strings.Contains(h, "team@hermex.test") || strings.Contains(h, "alice") {
+		t.Errorf("on-behalf From = %q, want only the represented mailbox", h)
 	}
 }
 

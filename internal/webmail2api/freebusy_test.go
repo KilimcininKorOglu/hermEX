@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,7 +23,7 @@ func seedBusyBlock(t *testing.T, mbox string, start, end time.Time, status int32
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{
 		mapi.NameAppointmentStartWhole, mapi.NameAppointmentEndWhole, mapi.NameBusyStatus,
 	})
@@ -52,7 +53,7 @@ func busyBlocks(t *testing.T, status int32) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	day := time.Date(2026, 6, 19, 9, 0, 0, 0, time.UTC)
 	seedBusyBlock(t, dir, day, day.Add(time.Hour), status)
@@ -104,7 +105,7 @@ func TestFreeBusyRefusesAWindowOverTheLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 	secret := []byte("freebusy-test-secret")
 	accs := directory.StaticAccounts{"alice@hermex.test": {MailboxPath: dir}}
 	srv := NewServer(accs, accs, nil, "mail.hermex.test", secret, "", false)
@@ -120,6 +121,7 @@ func TestFreeBusyRefusesAWindowOverTheLimit(t *testing.T) {
 		{start.Add(42 * 24 * time.Hour), http.StatusOK},
 		{start.Add(42*24*time.Hour + time.Second), http.StatusBadRequest},
 		{time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC), http.StatusBadRequest},
+		{start.Add(-time.Hour), http.StatusBadRequest},
 	} {
 		q := url.Values{"users": {"alice@hermex.test"}, "start": {start.Format(time.RFC3339)}, "end": {c.end.Format(time.RFC3339)}}
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/calendar/freebusy?"+q.Encode(), nil)
@@ -130,6 +132,43 @@ func TestFreeBusyRefusesAWindowOverTheLimit(t *testing.T) {
 			t.Errorf("window to %s: status %d, want %d", c.end.Format(time.RFC3339), rec.Code, c.want)
 		}
 	}
+}
+
+// TestFreeBusyHidesACalendarWithoutAGrant: another user's free/busy needs a
+// free/busy right on their calendar (MS-OXCPERM FreeBusySimple), as EWS and
+// CalDAV require. A new calendar's Default member holds it (Exchange's
+// "Free/Busy time" default), so bob's time shows; once bob sets Default to
+// None, it does not. A start that is no time is refused.
+func TestFreeBusyHidesACalendarWithoutAGrant(t *testing.T) {
+	alice, bob := freshMailbox(t), freshMailbox(t)
+	day := time.Date(2026, 6, 19, 9, 0, 0, 0, time.UTC)
+	seedBusyBlock(t, bob, day, day.Add(time.Hour), mapi.BusyBusy)
+	revoke := func() {
+		mustNoErr(t, "set Default to None", openMailbox(t, bob).ModifyPermissions(int64(mapi.PrivateFIDCalendar), false,
+			[]objectstore.PermissionChange{{Op: objectstore.PermModify, MemberID: 0, Rights: 0}}))
+	}
+	secret := []byte("freebusy-test-secret")
+	accs := directory.StaticAccounts{"alice@hermex.test": {MailboxPath: alice}, "bob@hermex.test": {MailboxPath: bob}}
+	srv := NewServer(accs, accs, nil, "mail.hermex.test", secret, "", false)
+	token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: alice, Exp: time.Now().Add(time.Hour).Unix()})
+	get := func(q url.Values) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/calendar/freebusy?"+q.Encode(), nil)
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+	window := url.Values{"users": {"bob@hermex.test"}, "start": {day.Add(-time.Hour).Format(time.RFC3339)}, "end": {day.Add(8 * time.Hour).Format(time.RFC3339)}}
+	rec := get(window)
+	wantStatus(t, "freebusy of bob by default", rec, http.StatusOK)
+	wantContains(t, "bob's default free/busy", rec.Body.String(), "2026-06-19T09:00")
+	revoke()
+	rec = get(window)
+	wantStatus(t, "freebusy of bob", rec, http.StatusOK)
+	if body := rec.Body.String(); strings.Contains(body, "2026-06-19T09:00") {
+		t.Errorf("alice sees bob's busy time without a grant: %s", body)
+	}
+	wantStatus(t, "unreadable start", get(url.Values{"users": {"bob@hermex.test"}, "start": {"yesterday"}, "end": {day.Format(time.RFC3339)}}), http.StatusBadRequest)
 }
 
 // TestFreeBusyReportsOnlyOccupiedTime is what the grid means. An appointment

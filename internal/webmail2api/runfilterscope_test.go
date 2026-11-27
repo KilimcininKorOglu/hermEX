@@ -29,7 +29,7 @@ func TestRunFiltersScope(t *testing.T) {
 		wantEq(t, "affected from Junk", out.Affected, 1)
 		st, err := objectstore.Open(dir)
 		mustNoErr(t, "reopen mailbox", err)
-		defer st.Close()
+		defer mustClose(t, st)
 		fl, err := st.MessageFlags(junk, junkMsg.UID)
 		mustNoErr(t, "read the Junk message flags", err)
 		if fl&objectstore.FlagSeen == 0 {
@@ -44,6 +44,15 @@ func TestRunFiltersScope(t *testing.T) {
 	t.Run("unknown filter", func(t *testing.T) {
 		// A stale selection must not fall back to running everything.
 		wantStatus(t, "unknown filter", do(http.MethodPost, "/api/v1/filters/run", `{"filter":"no-such-filter"}`), http.StatusNotFound)
+		// The Junk-scoped run and both refused runs left the Inbox promo unread.
+		st, err := objectstore.Open(dir)
+		mustNoErr(t, "reopen mailbox", err)
+		defer mustClose(t, st)
+		msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
+		mustNoErr(t, "list inbox", err)
+		if len(msgs) != 1 || msgs[0].Flags&objectstore.FlagSeen != 0 {
+			t.Errorf("inbox = %+v, want the one promo still unread", msgs)
+		}
 	})
 
 	t.Run("empty body still runs the inbox", func(t *testing.T) {
@@ -57,7 +66,7 @@ func seedPromoRule(t *testing.T, dir string) objectstore.MessageInfo {
 	t.Helper()
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open mailbox", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	inbox := int64(mapi.PrivateFIDInbox)
 	promo := []byte("From: news@promo.com\r\nSubject: Weekly promo\r\n\r\nbuy\r\n")
 	_, err = st.AppendMessage(inbox, promo, time.Now(), 0)

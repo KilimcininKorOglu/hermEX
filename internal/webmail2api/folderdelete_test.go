@@ -16,12 +16,19 @@ import (
 // folderHarness returns a request helper plus the mailbox path.
 func folderHarness(t *testing.T) (func(method, target, body string) *httptest.ResponseRecorder, string) {
 	t.Helper()
-	dir := t.TempDir()
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	st.Close()
+	dir := freshMailbox(t)
+	return folderRequests(t, dir), dir
+}
+
+// folderDo is folderHarness for a test that only makes requests.
+func folderDo(t *testing.T) requestFunc {
+	t.Helper()
+	return folderRequests(t, freshMailbox(t))
+}
+
+// folderRequests returns a request helper signed in as alice over dir.
+func folderRequests(t *testing.T, dir string) requestFunc {
+	t.Helper()
 	secret := []byte("folder-delete-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
 	return func(method, target, body string) *httptest.ResponseRecorder {
@@ -40,7 +47,7 @@ func folderHarness(t *testing.T) (func(method, target, body string) *httptest.Re
 		rec := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rec, req)
 		return rec
-	}, dir
+	}
 }
 
 // parentOf reads a folder's stored parent.
@@ -50,7 +57,7 @@ func parentOf(t *testing.T, mbox, name string) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	folders, err := st.ListFolders()
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +107,7 @@ func TestDeleteBuiltinFolderIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	props, err := st.GetFolderProperties(int64(mapi.PrivateFIDInbox), mapi.PrDisplayName)
 	if err != nil {
 		t.Fatalf("the Inbox did not survive the refused delete: %v", err)
@@ -152,7 +159,7 @@ func TestDeleteFolderTwiceOfOneName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	n, err := st.CountChildFolders(trash)
 	if err != nil {
 		t.Fatal(err)
@@ -212,7 +219,7 @@ func TestDeleteFolderFromTrashRemovesIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	folders, err := st.ListFolders()
 	if err != nil {
 		t.Fatal(err)

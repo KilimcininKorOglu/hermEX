@@ -100,7 +100,7 @@ func changePassword(t *testing.T, srv *Server, secret []byte, mbox, jti string) 
 	srv.Handler().ServeHTTP(rec, req)
 
 	var body map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	mustNoErr(t, "decode "+rec.Body.String(), json.Unmarshal(rec.Body.Bytes(), &body))
 	return rec.Code, body
 }
 
@@ -111,7 +111,7 @@ func revokeServer(t *testing.T, a *revokeAuth, mbox string, secret []byte) *Serv
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 	return NewServer(a, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
 }
 
@@ -136,9 +136,26 @@ func TestPasswordChangeRevokesOtherSessions(t *testing.T) {
 	if a.alive("old-phone") {
 		t.Error("another signed-in device survived the password change")
 	}
-	if n, _ := body["revokedSessions"].(float64); n != 2 {
-		t.Errorf("response reports %v sessions revoked, want 2", body["revokedSessions"])
-	}
+	wantEq(t, "revokedSessions", numOf(t, body, "revokedSessions"), 2)
+}
+
+// TestARefusedPasswordChangeRevokesNothing: a change with the wrong current
+// password changes nothing, so it must not sign any device out either.
+func TestARefusedPasswordChangeRevokesNothing(t *testing.T) {
+	mbox := t.TempDir()
+	secret := []byte("password-revoke-secret")
+	g := &guessAuth{revokeAuth: newRevokeAuth(mbox, "mine", "phone")}
+	srv := revokeServer(t, g.revokeAuth, mbox, secret)
+	srv.auth = g
+	token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: mbox, Jti: "mine", Exp: time.Now().Add(time.Hour).Unix()})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/account/password",
+		strings.NewReader(`{"currentPassword":"guess","newPassword":"new-password"}`))
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	wantStatus(t, "wrong current password", rec, http.StatusBadRequest)
+	wantEq(t, "the other device's session", g.alive("phone"), true)
+	wantEq(t, "stored password", g.changed, "")
 }
 
 // TestPasswordChangeKeepsTheCallersOwnSession proves the remediation does not log
@@ -176,7 +193,7 @@ func TestPasswordChangeReportsAFlagItCouldNotClear(t *testing.T) {
 	a := newRevokeAuth(mbox, "mine", "stolen")
 	st, err := objectstore.Open(mbox)
 	mustNoErr(t, "open the mailbox", err)
-	st.Close()
+	mustClose(t, st)
 	srv := NewServer(clearFailAuth{a}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
 
 	code, body := changePassword(t, srv, secret, mbox, "mine")
@@ -205,10 +222,6 @@ func TestPasswordChangeSucceedsWhenRevocationFails(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("change password = %d, want 200 despite a revocation failure", code)
 	}
-	if ok, _ := body["ok"].(bool); !ok {
-		t.Errorf("the password change is not reported as done: %v", body)
-	}
-	if n, _ := body["revokedSessions"].(float64); n != 0 {
-		t.Errorf("a failed revocation reports %v sessions revoked, want 0", body["revokedSessions"])
-	}
+	wantEq(t, "ok", body["ok"], any(true))
+	wantEq(t, "revokedSessions after a failed revocation", numOf(t, body, "revokedSessions"), 0)
 }

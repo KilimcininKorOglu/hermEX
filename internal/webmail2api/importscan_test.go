@@ -2,7 +2,6 @@ package webmail2api
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -45,7 +44,7 @@ func withScanner(t *testing.T, verdict string) {
 // importEML posts an .eml to the import endpoint and returns the status and body.
 func importEML(t *testing.T, srv *Server, token, raw string) (int, string) {
 	t.Helper()
-	body, _ := json.Marshal(map[string]string{"file": base64.StdEncoding.EncodeToString([]byte(raw))})
+	body := mustEncode(t, map[string]string{"file": base64.StdEncoding.EncodeToString([]byte(raw))})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/mail/import", strings.NewReader(string(body)))
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
 	rec := httptest.NewRecorder()
@@ -62,9 +61,7 @@ func provisionedDir(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Close(); err != nil {
-		t.Fatal(err)
-	}
+	mustClose(t, st)
 	return dir
 }
 
@@ -118,7 +115,7 @@ func inboxSubjects(t *testing.T, mbox string) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
 	if err != nil {
 		t.Fatal(err)
@@ -148,6 +145,23 @@ func TestImportRefusesInfectedContent(t *testing.T) {
 			t.Errorf("the infected message was stored anyway (subject %q)", subject)
 		}
 	}
+}
+
+// TestImportRefusesAnUnreadableUpload: a body that is not JSON, a file that is
+// not base64, and an empty file are refused, and nothing reaches the inbox.
+func TestImportRefusesAnUnreadableUpload(t *testing.T) {
+	withScanner(t, avtest.Clean)
+	srv, token, mbox := importHarness(t)
+	for _, body := range []string{`{`, `{"file":"%%% not base64 %%%"}`, `{"file":""}`, `{}`} {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/mail/import", strings.NewReader(body))
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code == http.StatusOK {
+			t.Errorf("import %s answered 200", body)
+		}
+	}
+	wantEq(t, "inbox after the refused imports", len(inboxSubjects(t, mbox)), 0)
 }
 
 // TestImportAcceptsCleanContent keeps the ordinary import working.

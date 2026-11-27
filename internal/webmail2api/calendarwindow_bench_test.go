@@ -15,14 +15,14 @@ import (
 
 // benchCalendar seeds n appointments spread one hour apart across n hours from
 // 2026-01-01 and returns a server plus a request helper bound to that mailbox.
-func benchCalendar(tb testing.TB, n int) (func(string) []eventJSON, string) {
+func benchCalendar(tb testing.TB, n int) func(string) []eventJSON {
 	tb.Helper()
 	dir := tb.TempDir()
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		tb.Fatal(err)
 	}
-	st.Close()
+	mustClose(tb, st)
 
 	secret := []byte("calendar-window-bench-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
@@ -66,7 +66,7 @@ func benchCalendar(tb testing.TB, n int) (func(string) []eventJSON, string) {
 		}
 		return out.Events
 	}
-	return list, dir
+	return list
 }
 
 // BenchmarkGetEventsWindow measures a narrow range request against a large
@@ -75,9 +75,14 @@ func benchCalendar(tb testing.TB, n int) (func(string) []eventJSON, string) {
 func BenchmarkGetEventsWindow(b *testing.B) {
 	for _, n := range []int{500, 2000} {
 		b.Run(fmt.Sprintf("appointments=%d", n), func(b *testing.B) {
-			list, _ := benchCalendar(b, n)
+			list := benchCalendar(b, n)
 			const window = "/api/v1/calendar/events?start=2026-01-01T00:00:00Z&end=2026-01-02T00:00:00Z"
 			got := len(list(window))
+			// Appointments start one an hour from midnight 1 January, so the first
+			// day's window holds exactly 24 of them.
+			if got != 24 {
+				b.Fatalf("window holds %d events, want 24", got)
+			}
 			b.ResetTimer()
 			for b.Loop() {
 				list(window)

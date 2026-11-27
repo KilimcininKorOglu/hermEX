@@ -2,6 +2,7 @@ package webmail2api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -54,11 +55,40 @@ func TestHandleBrandingPerDomain(t *testing.T) {
 	if b := get("other.test"); b["app_name"] != "hermEX" {
 		t.Errorf("unknown-host app_name = %v, want the hermEX default", b["app_name"])
 	}
+	// A look-alike that only ends in the tenant's name, an empty host, a
+	// path-like value and a domain whose parent is the tenant's sibling get
+	// the default, never the tenant's branding.
+	for _, d := range []string{"evilacme.test", "", "..%2Facme.test", "acme.test.evil"} {
+		if b := get(d); b["app_name"] != "hermEX" {
+			t.Errorf("branding(%q) app_name = %v, want the hermEX default", d, b["app_name"])
+		}
+	}
 	// The login page shows no tagline, so none is served, default or branded.
 	for _, domain := range []string{"acme.test", "other.test"} {
 		if v, ok := get(domain)["tagline"]; ok {
 			t.Errorf("branding(%q) serves a tagline %v", domain, v)
 		}
+	}
+}
+
+// failingBranding is a directory whose branding lookup fails.
+type failingBranding struct{ directory.StaticAccounts }
+
+func (failingBranding) GetDomainBranding(string) (directory.DomainBranding, bool, error) {
+	return directory.DomainBranding{}, false, errors.New("directory unreachable")
+}
+
+// TestABrandingLookupFailureIsRecorded: the login page still renders with the
+// default, but the failed lookup is recorded instead of looking like an
+// unbranded tenant.
+func TestABrandingLookupFailureIsRecorded(t *testing.T) {
+	sink := withSink(t)
+	srv := NewServer(failingBranding{directory.StaticAccounts{}}, directory.StaticAccounts{}, nil, "mail.hermex.test", []byte("s"), "", false)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/branding?domain=acme.test", nil))
+	wantStatus(t, "branding", rec, http.StatusOK)
+	if _, ok := sink.find("branding-lookup"); !ok {
+		t.Error("the failed branding lookup was not recorded")
 	}
 }
 

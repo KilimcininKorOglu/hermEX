@@ -44,10 +44,10 @@ func TestProposalReachesTheOrganizer(t *testing.T) {
 	msg, err := st.OpenMessage(msgs[0].ID)
 	mustNoErr(t, "open the proposal", err)
 	wantEq(t, "class", propStr(msg.Props, mapi.PrMessageClass), "IPM.Schedule.Meeting.Resp.Tent")
-	v, _ := msg.Props.Get(namedTag(t, st, mapi.NameAppointmentCounterProposal, mapi.PtBoolean))
-	wantEq(t, "counter proposal", v, any(true))
-	start, _ := msg.Props.Get(namedTag(t, st, mapi.NameAppointmentProposedStartWhole, mapi.PtSysTime))
-	wantEq(t, "proposed start", start, any(mapi.UnixToNTTime(time.Date(2026, 9, 8, 11, 0, 0, 0, time.UTC))))
+	wantEq(t, "counter proposal", mustProp[bool](t, "counter proposal", msg.Props,
+		namedTag(t, st, mapi.NameAppointmentCounterProposal, mapi.PtBoolean)), true)
+	start := mustProp[uint64](t, "proposed start", msg.Props, namedTag(t, st, mapi.NameAppointmentProposedStartWhole, mapi.PtSysTime))
+	wantEq(t, "proposed start", start, mapi.UnixToNTTime(time.Date(2026, 9, 8, 11, 0, 0, 0, time.UTC)))
 }
 
 // TestDeclineWithAProposalTakesTheMeetingOff declines with a new time, Outlook's
@@ -84,7 +84,8 @@ func TestProposalRefusesAnUnreadableTime(t *testing.T) {
 // TestProposalMustBeSent refuses a proposal the reader chose not to send: a time
 // nobody receives proposes nothing.
 func TestProposalMustBeSent(t *testing.T) {
-	do, alice, _ := meetingHarness(t)
+	env := newMeetingEnv(t)
+	do, alice := env.do, env.alice
 	id := counterInvite(t, alice)
 	wantStatus(t, "unsent proposal", do(http.MethodPost, "/api/v1/mail/rsvp", `{"id":"`+id+`","response":"tentative","send":false,`+
 		`"proposeStart":"2026-09-08T11:00:00Z","proposeEnd":"2026-09-08T12:00:00Z"}`), http.StatusBadRequest)

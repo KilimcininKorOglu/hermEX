@@ -2,6 +2,7 @@ package webmail2api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -41,7 +42,7 @@ func (c *accessSink) userFor(path string) (string, bool) {
 // servedWebmail runs a webmail server behind the real access-log middleware and
 // returns its base URL plus the sink. Only a served daemon exercises the
 // attribution: calling the handler directly skips the middleware entirely.
-func servedWebmail(t *testing.T) (string, *accessSink, []byte, string) {
+func servedWebmail(t *testing.T) servedAPI {
 	t.Helper()
 	mbox := t.TempDir()
 	secret := []byte("webmail-accesslog-secret")
@@ -53,9 +54,26 @@ func servedWebmail(t *testing.T) (string, *accessSink, []byte, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() { _ = hs.Start() }()
-	t.Cleanup(func() { _ = hs.Shutdown(context.Background()) })
-	return "http://" + hs.Addr().String(), sink, secret, mbox
+	served := make(chan error, 1)
+	go func() { served <- hs.Start() }()
+	t.Cleanup(func() {
+		if err := hs.Shutdown(context.Background()); err != nil {
+			t.Errorf("shutdown: %v", err)
+		}
+		if err := <-served; !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("serve ended with %v, want http.ErrServerClosed", err)
+		}
+	})
+	return servedAPI{base: "http://" + hs.Addr().String(), sink: sink, secret: secret, mbox: mbox}
+}
+
+// servedAPI is a served webmail daemon: its base URL, the access-log sink, the
+// session secret and alice's mailbox.
+type servedAPI struct {
+	base   string
+	sink   *accessSink
+	secret []byte
+	mbox   string
 }
 
 // TestWebmailAccessLogNamesTheSessionUser proves an authenticated webmail request
@@ -63,7 +81,8 @@ func servedWebmail(t *testing.T) (string, *accessSink, []byte, string) {
 // middleware has no Basic header to read, and without the attribution its
 // password changes, delegate grants and mail sends are logged against nobody.
 func TestWebmailAccessLogNamesTheSessionUser(t *testing.T) {
-	base, sink, secret, mbox := servedWebmail(t)
+	served := servedWebmail(t)
+	base, sink, secret, mbox := served.base, served.sink, served.secret, served.mbox
 	token, err := mintToken(secret, sessionClaims{
 		Email: "alice@hermex.test", Mailbox: mbox, Exp: time.Now().Add(time.Hour).Unix(),
 	})
@@ -79,7 +98,7 @@ func TestWebmailAccessLogNamesTheSessionUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	mustClose(t, resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("folders = %d, want 200; the request must be authenticated for the test to mean anything", resp.StatusCode)
 	}
@@ -93,18 +112,44 @@ func TestWebmailAccessLogNamesTheSessionUser(t *testing.T) {
 	}
 }
 
+// TestWebmailAccessLogIgnoresAForgedSession proves a cookie that does not verify
+// attributes the request to nobody. A session claim is the caller's word until its
+// signature checks, so logging it would let anyone write another account's name
+// into the audit trail.
+func TestWebmailAccessLogIgnoresAForgedSession(t *testing.T) {
+	served := servedWebmail(t)
+	forged := mustMintToken(t, []byte("not-the-server-secret"), sessionClaims{
+		Email: "alice@hermex.test", Mailbox: served.mbox, Exp: time.Now().Add(time.Hour).Unix(),
+	})
+	// An implemented, authenticated route: a stub answers anyone.
+	req, err := http.NewRequest(http.MethodGet, served.base+"/api/v1/signatures", nil)
+	mustNoErr(t, "build the request", err)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: forged})
+	resp, err := http.DefaultClient.Do(req)
+	mustNoErr(t, "send the request", err)
+	mustClose(t, resp.Body)
+	wantEq(t, "status of a forged session", resp.StatusCode, http.StatusUnauthorized)
+
+	user, ok := served.sink.userFor("/api/v1/signatures")
+	if !ok {
+		t.Fatal("no access-log event for the request")
+	}
+	wantEq(t, "logged user of a forged session", user, "")
+}
+
 // TestWebmailAccessLogNamesAFailedLogin proves a rejected sign-in still names the
 // account it was attempted against. That request carries no session at all, and it
 // is the one an auditor investigating a break-in attempt reads first.
 func TestWebmailAccessLogNamesAFailedLogin(t *testing.T) {
-	base, sink, _, _ := servedWebmail(t)
+	served := servedWebmail(t)
+	base, sink := served.base, served.sink
 
 	resp, err := http.Post(base+"/api/v1/auth/login", "application/json",
 		strings.NewReader(`{"email":"alice@hermex.test","password":"wrong"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	mustClose(t, resp.Body)
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("login = %d, want 401", resp.StatusCode)
 	}

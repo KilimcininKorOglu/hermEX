@@ -24,7 +24,7 @@ func TestEmptyFolderMovesToTrashAndDumpstersJunk(t *testing.T) {
 		_, err = st.AppendMessage(fid, raw, time.Now(), 0)
 		mustNoErr(t, "seed a message", err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	do := apiHarnessFor(t, dir)
 	wantStatus(t, "empty custom", do(http.MethodPost, "/api/v1/folders/"+customSlug(cfid)+"/empty", ""), http.StatusOK)
@@ -32,13 +32,30 @@ func TestEmptyFolderMovesToTrashAndDumpstersJunk(t *testing.T) {
 
 	st2, err := objectstore.Open(dir)
 	mustNoErr(t, "reopen mailbox", err)
-	defer st2.Close()
+	defer mustClose(t, st2)
 	wantEq(t, "custom folder messages (moved to trash)", len(mustList(t, st2, cfid)), 0)
 	wantEq(t, "trash messages", len(mustList(t, st2, int64(mapi.PrivateFIDDeletedItems))), 2)
 	wantEq(t, "junk live messages (emptied)", len(mustList(t, st2, int64(mapi.PrivateFIDJunk))), 0)
 	// The emptied Junk message is in the dumpster, not purged: recoverable.
 	wantEq(t, "junk dumpster items (soft-deleted, recoverable)",
 		len(mustListDumpster(t, st2, int64(mapi.PrivateFIDJunk))), 1)
+}
+
+// TestEmptyingAnUnknownFolderTouchesNothing: a folder slug that names no folder
+// is refused and every message stays where it was.
+func TestEmptyingAnUnknownFolderTouchesNothing(t *testing.T) {
+	dir := freshMailbox(t)
+	st := openMailbox(t, dir)
+	_, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("From: a@b.test\r\nSubject: x\r\n\r\nhi\r\n"), time.Now(), 0)
+	mustNoErr(t, "seed a message", err)
+	do := apiHarnessFor(t, dir)
+	for _, slug := range []string{"no-such-folder", customSlug(99999)} {
+		if rec := do(http.MethodPost, "/api/v1/folders/"+slug+"/empty", ""); rec.Code == http.StatusOK {
+			t.Errorf("empty %s answered 200", slug)
+		}
+	}
+	wantEq(t, "inbox after the refused empties", len(mustList(t, st, int64(mapi.PrivateFIDInbox))), 1)
+	wantEq(t, "trash after the refused empties", len(mustList(t, st, int64(mapi.PrivateFIDDeletedItems))), 0)
 }
 
 // TestEmptyMessagesReportsAFailure proves a store write that fails is returned,
@@ -52,7 +69,7 @@ func TestEmptyMessagesReportsAFailure(t *testing.T) {
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), raw, time.Now(), 0)
 	mustNoErr(t, "seed a message", err)
 	msgs := []objectstore.MessageInfo{info}
-	st.Close()
+	mustClose(t, st)
 
 	for _, toDumpster := range []bool{false, true} {
 		n, err := emptyMessages(st, int64(mapi.PrivateFIDInbox), msgs, toDumpster)

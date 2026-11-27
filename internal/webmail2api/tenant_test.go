@@ -30,7 +30,7 @@ func TestFreeBusyStaysInsideTheOrganization(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		st.Close()
+		mustClose(t, st)
 		seedBusyBlock(t, dir, day, day.Add(time.Hour), 2)
 		accs[addr] = directory.Account{MailboxPath: dir}
 	}
@@ -41,7 +41,7 @@ func TestFreeBusyStaysInsideTheOrganization(t *testing.T) {
 		t.Fatal(err)
 	}
 	q := url.Values{
-		"users": {"bob@hermex.test,dave@other.test"},
+		"users": {"bob@hermex.test,dave@other.test,ghost@hermex.test"},
 		"start": {day.Add(-time.Hour).Format(time.RFC3339)},
 		"end":   {day.Add(8 * time.Hour).Format(time.RFC3339)},
 	}
@@ -55,6 +55,7 @@ func TestFreeBusyStaysInsideTheOrganization(t *testing.T) {
 			Busy []json.RawMessage `json:"busy"`
 		} `json:"freeBusy"`
 	}
+	wantStatus(t, "freebusy", rec, http.StatusOK)
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("freebusy = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -62,7 +63,7 @@ func TestFreeBusyStaysInsideTheOrganization(t *testing.T) {
 	for _, e := range out.FreeBusy {
 		got[e.User] = len(e.Busy)
 	}
-	if got["bob@hermex.test"] != 1 || got["dave@other.test"] != 0 {
-		t.Errorf("busy blocks = %v, want bob 1 and dave (another organization) 0", got)
+	if got["bob@hermex.test"] != 1 || got["dave@other.test"] != 0 || got["ghost@hermex.test"] != 0 {
+		t.Errorf("busy blocks = %v, want bob 1; dave (another organization) and ghost (unknown) 0", got)
 	}
 }

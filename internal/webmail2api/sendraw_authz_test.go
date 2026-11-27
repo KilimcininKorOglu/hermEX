@@ -17,17 +17,11 @@ import (
 // line verbatim, so a test can assert what the server does with the identity a
 // client-built message asserts.
 func rawMessage(fromHeader string) string {
-	var b strings.Builder
+	msg := "To: victim@example.org\r\nSubject: hello\r\n\r\nbody\r\n"
 	if fromHeader != "" {
-		b.WriteString("From: ")
-		b.WriteString(fromHeader)
-		b.WriteString("\r\n")
+		msg = "From: " + fromHeader + "\r\n" + msg
 	}
-	b.WriteString("To: victim@example.org\r\n")
-	b.WriteString("Subject: hello\r\n")
-	b.WriteString("\r\n")
-	b.WriteString("body\r\n")
-	return base64.StdEncoding.EncodeToString([]byte(b.String()))
+	return base64.StdEncoding.EncodeToString([]byte(msg))
 }
 
 // sendRawServer builds a server whose only account is alice, so every other
@@ -43,7 +37,7 @@ func sendRawServerWithTarget(t *testing.T) (*Server, string, string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		st.Close()
+		mustClose(t, st)
 	}
 	accounts := directory.StaticAccounts{
 		"alice@hermex.test": {MailboxPath: box},
@@ -117,12 +111,19 @@ func TestSendRawRefusesUnusableFrom(t *testing.T) {
 		// an address beside the one the gate reads.
 		{"second From field after own", "alice@hermex.test\r\nFrom: ceo@hermex.test"},
 		{"second From field before own", "ceo@hermex.test\r\nFrom: alice@hermex.test"},
+		// The caller's name as display text around another mailbox's address, and
+		// the forged address folded onto a continuation line (RFC 5322 2.2.3).
+		{"own address as a display name", `"alice@hermex.test" <ceo@hermex.test>`},
+		{"folded forged address", "Alice\r\n <ceo@hermex.test>"},
 	}
 	for _, tc := range cases {
 		rec := postSendRaw(t, srv, token, rawMessage(tc.from))
 		if rec.Code == http.StatusOK {
 			t.Errorf("%s: accepted with %d, want a refusal", tc.name, rec.Code)
 		}
+	}
+	if rec := postSendRaw(t, srv, token, "%%% not base64 %%%"); rec.Code == http.StatusOK {
+		t.Errorf("a raw body that is not base64 was accepted")
 	}
 	wantEq(t, "messages delivered to the recipient", inboxCount(t, ceoBox), 0)
 }

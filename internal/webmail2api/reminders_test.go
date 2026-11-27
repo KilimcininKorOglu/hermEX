@@ -11,16 +11,16 @@ import (
 	"hermex/internal/objectstore"
 )
 
-// TestRemindersListDismissSnooze proves the reminder backend the reference
-// reminderlistmodule/reminderitemmodule expose: due reminders across the calendar
-// (and Tasks) folders are listed, dismiss clears the flag, snooze advances the time.
+// TestRemindersListDismissSnooze proves the MS-OXORMDR reminder behavior: due
+// reminders across the calendar (and Tasks) folders are listed, dismiss clears
+// PidLidReminderSet, snooze advances PidLidReminderSignalTime.
 func TestRemindersListDismissSnooze(t *testing.T) {
 	dir := t.TempDir()
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	secret := []byte("reminders-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
@@ -75,6 +75,22 @@ func TestRemindersListDismissSnooze(t *testing.T) {
 
 	// Snooze the task reminder by 10 minutes: its due time moves past now, so it also
 	// drops out of the list until the snooze elapses.
+	// A snooze that does not move the reminder forward, or one absurdly far, is
+	// refused and the reminder stays due.
+	for _, body := range []string{`{"minutes":0}`, `{"minutes":-5}`, `{"minutes":999999999}`, `{`} {
+		if rec := do(http.MethodPost, "/api/v1/reminders/"+taskID+"/snooze", body); rec.Code == http.StatusOK {
+			t.Errorf("snooze %s answered 200", body)
+		}
+	}
+	if reminderIDOfType(t, listReminders("list after refused snoozes"), "task") != taskID {
+		t.Error("a refused snooze moved the task reminder")
+	}
+	for _, id := range []string{"999999", "abc"} {
+		if rec := do(http.MethodPost, "/api/v1/reminders/"+id+"/dismiss", ""); rec.Code == http.StatusOK {
+			t.Errorf("dismiss of %s answered 200", id)
+		}
+	}
+
 	wantStatus(t, "snooze", do(http.MethodPost, "/api/v1/reminders/"+taskID+"/snooze", `{"minutes":10}`), http.StatusOK)
 	wantReminderGone(t, listReminders("list after snooze"), taskID, "snoozed task (due time did not advance)")
 }

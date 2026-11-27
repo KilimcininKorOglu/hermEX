@@ -24,11 +24,11 @@ type foreignSeed struct {
 
 // seedForeignObjects stores a task, a note and an Inbox mail message, the
 // objects the forged ids below name.
-func seedForeignObjects(t *testing.T, mbox string) (task, note, mail foreignSeed) {
+func seedForeignObjects(t *testing.T, mbox string) foreignSeeds {
 	t.Helper()
 	st, err := objectstore.Open(mbox)
 	mustNoErr(t, "open the mailbox", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	create := func(fid int64, class, subject string) foreignSeed {
 		id, err := st.CreateMessage(fid, &oxcmail.Message{Props: mapi.PropertyValues{
 			{Tag: mapi.PrMessageClass, Value: class}, {Tag: mapi.PrSubject, Value: subject},
@@ -36,13 +36,19 @@ func seedForeignObjects(t *testing.T, mbox string) (task, note, mail foreignSeed
 		mustNoErr(t, "store "+subject, err)
 		return foreignSeed{id: id, folder: fid, subject: subject}
 	}
-	task = create(mapi.PrivateFIDTasks, "IPM.Task", "Keep the task")
-	note = create(mapi.PrivateFIDNotes, "IPM.StickyNote", "Keep the note")
+	var s foreignSeeds
+	s.task = create(mapi.PrivateFIDTasks, "IPM.Task", "Keep the task")
+	s.note = create(mapi.PrivateFIDNotes, "IPM.StickyNote", "Keep the note")
 	raw := []byte("From: a@b.test\r\nSubject: Keep the mail\r\n\r\nhi\r\n")
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), raw, time.Now(), 0)
 	mustNoErr(t, "store the mail", err)
-	mail = foreignSeed{id: info.ID, folder: int64(mapi.PrivateFIDInbox), subject: "Keep the mail"}
-	return task, note, mail
+	s.mail = foreignSeed{id: info.ID, folder: int64(mapi.PrivateFIDInbox), subject: "Keep the mail"}
+	return s
+}
+
+// foreignSeeds are the three objects seedForeignObjects stores.
+type foreignSeeds struct {
+	task, note, mail foreignSeed
 }
 
 // wantUntouched fails when a seeded object left its folder or lost its subject.
@@ -50,7 +56,7 @@ func wantUntouched(t *testing.T, mbox, route string, seed foreignSeed) {
 	t.Helper()
 	st, err := objectstore.Open(mbox)
 	mustNoErr(t, "reopen the mailbox", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	fid, err := st.MessageFolder(seed.id)
 	if err != nil || fid != seed.folder {
 		t.Errorf("%s: %q is in folder %d (err %v), want %d", route, seed.subject, fid, err, seed.folder)
@@ -67,7 +73,7 @@ func wantUntouched(t *testing.T, mbox, route string, seed foreignSeed) {
 // Inbox keeps its name and its mail, and no event lands in it.
 func TestCalendarIdsNameOnlyCalendars(t *testing.T) {
 	do, mbox := apiHarness(t)
-	_, _, mail := seedForeignObjects(t, mbox)
+	mail := seedForeignObjects(t, mbox).mail
 	inbox := strconv.FormatInt(int64(mapi.PrivateFIDInbox), 10)
 	wantStatus(t, "create in the default calendar", do(http.MethodPost, "/api/v1/calendar/events",
 		`{"summary":"Standup","start":"2026-08-02T09:00:00Z"}`), http.StatusOK)
@@ -88,7 +94,7 @@ func TestCalendarIdsNameOnlyCalendars(t *testing.T) {
 	wantUntouched(t, mbox, "calendar ids", mail)
 	st, err := objectstore.Open(mbox)
 	mustNoErr(t, "reopen the mailbox", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	props, err := st.GetFolderProperties(int64(mapi.PrivateFIDInbox), mapi.PrDisplayName)
 	mustNoErr(t, "read the Inbox name", err)
 	wantEq(t, "the Inbox name", propStr(props, mapi.PrDisplayName), "Inbox")
@@ -106,7 +112,8 @@ func TestCalendarIdsNameOnlyCalendars(t *testing.T) {
 func TestWritesRefuseAnObjectOfAnotherFolder(t *testing.T) {
 	withScanner(t, avtest.Clean)
 	srv, token, mbox := importHarness(t)
-	task, note, mail := seedForeignObjects(t, mbox)
+	seeds := seedForeignObjects(t, mbox)
+	task, note, mail := seeds.task, seeds.note, seeds.mail
 	do := func(method, target, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, target, strings.NewReader(body))
 		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
@@ -159,7 +166,7 @@ func TestDefaultCalendarKeepsItsName(t *testing.T) {
 
 	st, err := objectstore.Open(mbox)
 	mustNoErr(t, "reopen the mailbox", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	props, err := st.GetFolderProperties(int64(mapi.PrivateFIDCalendar), mapi.PrDisplayName)
 	mustNoErr(t, "read the calendar name", err)
 	if propStr(props, mapi.PrDisplayName) == "Renamed" {

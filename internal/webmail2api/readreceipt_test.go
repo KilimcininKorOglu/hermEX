@@ -44,7 +44,8 @@ func receiptsTo(t *testing.T, bob string) int {
 // setting reads back and is what the store holds, and that an unknown response is
 // refused rather than stored.
 func TestReadReceiptSettingsRoundTrip(t *testing.T) {
-	do, alice, _ := meetingHarness(t)
+	env := newMeetingEnv(t)
+	do, alice := env.do, env.alice
 	got := okBody[readReceiptSettingsJSON](t, "get", do(http.MethodGet, "/api/v1/settings/read-receipts", ""))
 	wantEq(t, "the default", got, readReceiptSettingsJSON{Response: "ask"})
 
@@ -56,6 +57,8 @@ func TestReadReceiptSettingsRoundTrip(t *testing.T) {
 	wantEq(t, "the stored setting", cfg, objectstore.ReadReceiptConfig{Response: objectstore.ReadReceiptAlways, SuppressActiveSync: true})
 
 	wantStatus(t, "an unknown response", do(http.MethodPut, "/api/v1/settings/read-receipts", `{"response":"sometimes"}`), http.StatusBadRequest)
+	got = okBody[readReceiptSettingsJSON](t, "get after the refusal", do(http.MethodGet, "/api/v1/settings/read-receipts", ""))
+	wantEq(t, "after the refused PUT", got, readReceiptSettingsJSON{Response: "always", SuppressActiveSync: true})
 }
 
 // TestReadReceiptAskPromptsAndSends proves "ask" sends nothing on open but reports
@@ -74,6 +77,12 @@ func TestReadReceiptAskPromptsAndSends(t *testing.T) {
 	wantContains(t, "the receipt", folderMail(t, bob, int64(mapi.PrivateFIDInbox))[0], "manual-action/MDN-sent-manually")
 	d = okBody[mailDetailJSON](t, "reopen", do(http.MethodGet, "/api/v1/mail/message?id="+id, ""))
 	wantEq(t, "the prompt after sending", d.ReceiptRequested, false)
+	// RFC 8098 3.1: at most one notification per message.
+	do(http.MethodPost, "/api/v1/mail/read-receipt", `{"id":"`+id+`","send":true}`)
+	wantEq(t, "receipts after a second send", receiptsTo(t, bob), 1)
+	if rec := do(http.MethodPost, "/api/v1/mail/read-receipt", `{"id":"not-an-id","send":true}`); rec.Code == http.StatusOK {
+		t.Errorf("a receipt for a malformed id answered 200")
+	}
 }
 
 // TestReadReceiptAskDecline proves declining sends nothing and ends the prompt.

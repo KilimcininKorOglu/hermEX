@@ -18,4 +18,13 @@ func TestHeaderBlock(t *testing.T) {
 	if got := string(headerBlock(noBlank)); got != string(noBlank) {
 		t.Errorf("no-blank headerBlock = %q, want the whole message", got)
 	}
+	// A message that opens with the blank line has no headers (RFC 5322 section
+	// 2.1), and the body after it, even one that looks like headers, is not shown.
+	bodyOnly := []byte("\r\nBcc: hidden@x\r\n")
+	if got := string(headerBlock(bodyOnly)); got != "" {
+		t.Errorf("body-only headerBlock = %q, want empty", got)
+	}
+	if got := string(headerBlock(nil)); got != "" {
+		t.Errorf("empty headerBlock = %q, want empty", got)
+	}
 }

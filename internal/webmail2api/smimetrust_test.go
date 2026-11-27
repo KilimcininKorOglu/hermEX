@@ -18,6 +18,24 @@ import (
 // which is exactly what an attacker can produce with two openssl commands.
 func selfSigned(t *testing.T, address string, notBefore, notAfter time.Time) (*x509.Certificate, *rsa.PrivateKey) {
 	t.Helper()
+	id := mintSelfSigned(t, address, notBefore, notAfter)
+	return id.cert, id.key
+}
+
+// selfSignedCert is selfSigned for a test that needs only the certificate.
+func selfSignedCert(t *testing.T, address string, notBefore, notAfter time.Time) *x509.Certificate {
+	t.Helper()
+	return mintSelfSigned(t, address, notBefore, notAfter).cert
+}
+
+// signingIdentity is a certificate and the key that signs as it.
+type signingIdentity struct {
+	cert *x509.Certificate
+	key  *rsa.PrivateKey
+}
+
+func mintSelfSigned(t *testing.T, address string, notBefore, notAfter time.Time) signingIdentity {
+	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +57,7 @@ func selfSigned(t *testing.T, address string, notBefore, notAfter time.Time) (*x
 	if err != nil {
 		t.Fatal(err)
 	}
-	return cert, key
+	return signingIdentity{cert: cert, key: key}
 }
 
 // signMessage wraps a body in a multipart/signed entity signed with the given identity.
@@ -58,8 +76,14 @@ func signMessage(t *testing.T, cert *x509.Certificate, key *rsa.PrivateKey) []by
 func trustHarness(t *testing.T) (*Server, string) {
 	t.Helper()
 	mbox := t.TempDir()
+	return trustServer(mbox), mbox
+}
+
+// trustServer builds the server trustHarness returns, over mbox as alice's
+// mailbox.
+func trustServer(mbox string) *Server {
 	accounts := directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: mbox}}
-	return NewServer(accounts, accounts, nil, "mail.hermex.test", []byte("smime-trust-secret"), "", false), mbox
+	return NewServer(accounts, accounts, nil, "mail.hermex.test", []byte("smime-trust-secret"), "", false)
 }
 
 // publish stores cert as the mailbox owner's own published S/MIME certificate,
@@ -71,7 +95,7 @@ func publish(t *testing.T, mbox string, cert *x509.Certificate) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if err := st.SetSmimeIdentity(objectstore.SmimeIdentity{Mode: "browser", Cert: cert.Raw}); err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +106,7 @@ func publish(t *testing.T, mbox string, cert *x509.Certificate) {
 // it, and the signature checks out mathematically. Nothing about that ties the key
 // to the victim, so the reader must not be shown a verified badge.
 func TestSmimeSelfSignedUnknownSignerIsNotVerified(t *testing.T) {
-	srv, _ := trustHarness(t)
+	srv := trustServer(t.TempDir())
 	cert, key := selfSigned(t, "alice@hermex.test", time.Now().Add(-time.Hour), time.Now().Add(24*time.Hour))
 
 	verified, signedBy := srv.smimeStatusFor(signMessage(t, cert, key), "alice@hermex.test")
@@ -111,6 +135,22 @@ func TestSmimePinnedCertificateIsVerified(t *testing.T) {
 	}
 }
 
+// TestSmimeImpostorBesideAPinnedCertificateIsNotVerified: alice has published her
+// own certificate; a second self-signed certificate claiming alice must not ride
+// on that pin.
+func TestSmimeImpostorBesideAPinnedCertificateIsNotVerified(t *testing.T) {
+	srv, mbox := trustHarness(t)
+	real := selfSignedCert(t, "alice@hermex.test", time.Now().Add(-time.Hour), time.Now().Add(24*time.Hour))
+	publish(t, mbox, real)
+	fake, key := selfSigned(t, "alice@hermex.test", time.Now().Add(-time.Hour), time.Now().Add(24*time.Hour))
+	verified, signedBy := srv.smimeStatusFor(signMessage(t, fake, key), "alice@hermex.test")
+	if verified {
+		t.Error("an impostor certificate was trusted through alice's published pin")
+	}
+	// The reader still sees whom the certificate claims, labelled unverified.
+	wantEq(t, "claimed signer", signedBy, "alice@hermex.test")
+}
+
 // TestSmimeSignerAddressMismatchIsNotVerified proves the identity bind runs before
 // trust: a certificate that is pinned but asserts a different address still cannot
 // speak for the From address.
@@ -119,9 +159,12 @@ func TestSmimeSignerAddressMismatchIsNotVerified(t *testing.T) {
 	cert, key := selfSigned(t, "mallory@evil.test", time.Now().Add(-time.Hour), time.Now().Add(24*time.Hour))
 	publish(t, mbox, cert)
 
-	if verified, _ := srv.smimeStatusFor(signMessage(t, cert, key), "alice@hermex.test"); verified {
+	verified, signedBy := srv.smimeStatusFor(signMessage(t, cert, key), "alice@hermex.test")
+	if verified {
 		t.Error("a certificate claiming another address was attributed to the From address")
 	}
+	// The reader still shows whom the certificate claims, labelled unverified.
+	wantEq(t, "claimed signer", signedBy, "mallory@evil.test")
 }
 
 // TestSmimeExpiredPinnedCertificateIsNotVerified proves the pinned route enforces
@@ -131,7 +174,8 @@ func TestSmimeExpiredPinnedCertificateIsNotVerified(t *testing.T) {
 	cert, key := selfSigned(t, "alice@hermex.test", time.Now().Add(-48*time.Hour), time.Now().Add(-time.Hour))
 	publish(t, mbox, cert)
 
-	if verified, _ := srv.smimeStatusFor(signMessage(t, cert, key), "alice@hermex.test"); verified {
+	if verified, signedBy := srv.smimeStatusFor(signMessage(t, cert, key), "alice@hermex.test"); verified {
+		t.Logf("signer reported: %q", signedBy)
 		t.Error("an expired certificate was trusted")
 	}
 }
@@ -139,7 +183,7 @@ func TestSmimeExpiredPinnedCertificateIsNotVerified(t *testing.T) {
 // TestSmimeUnparseableSignatureIsNotVerified confirms a failed signature check
 // reports nothing at all, not an empty-but-verified status.
 func TestSmimeUnparseableSignatureIsNotVerified(t *testing.T) {
-	srv, _ := trustHarness(t)
+	srv := trustServer(t.TempDir())
 	verified, signedBy := srv.smimeStatusFor([]byte("Content-Type: text/plain\r\n\r\nnot signed at all\r\n"), "alice@hermex.test")
 	if verified || signedBy != "" {
 		t.Errorf("unsigned content reported verified=%v signedBy=%q", verified, signedBy)
@@ -149,7 +193,7 @@ func TestSmimeUnparseableSignatureIsNotVerified(t *testing.T) {
 // TestCertAssertsAddress pins the matching rules: SAN and address-shaped common
 // names count, a display-name common name never does, and case is ignored.
 func TestCertAssertsAddress(t *testing.T) {
-	cert, _ := selfSigned(t, "alice@hermex.test", time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	cert := selfSignedCert(t, "alice@hermex.test", time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 	if !certAssertsAddress(cert, "ALICE@Hermex.Test") {
 		t.Error("case-insensitive match failed")
 	}

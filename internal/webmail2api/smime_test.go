@@ -8,7 +8,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
-	"encoding/json"
 	"encoding/pem"
 	"math/big"
 	"net/http"
@@ -29,24 +28,45 @@ func TestSmimeServerMode(t *testing.T) {
 	dir := t.TempDir()
 	st0, err := objectstore.Open(dir)
 	mustNoErr(t, "open mailbox", err)
-	st0.Close()
+	mustClose(t, st0)
 
 	secret := []byte("smime-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.test", secret, "", false)
+	p12 := testP12(t)
+	// A wrong passphrase is refused and stores nothing.
+	wrong := smimePost(t, srv, secret, dir, map[string]string{
+		"mode": "server", "p12": base64.StdEncoding.EncodeToString(p12), "passphrase": "not-it",
+	})
+	if wrong.Code == http.StatusOK {
+		t.Error("an upload with the wrong passphrase was accepted")
+	}
+	stw, err := objectstore.Open(dir)
+	mustNoErr(t, "open mailbox", err)
+	_, stored, err := stw.GetSmimeIdentity()
+	mustNoErr(t, "read identity", err)
+	mustClose(t, stw)
+	if stored {
+		t.Error("a refused upload stored an identity")
+	}
+
 	rec := smimePost(t, srv, secret, dir, map[string]string{
-		"mode": "server", "p12": base64.StdEncoding.EncodeToString(testP12(t)), "passphrase": "userpass",
+		"mode": "server", "p12": base64.StdEncoding.EncodeToString(p12), "passphrase": "userpass",
 	})
 	wantStatus(t, "server upload", rec, http.StatusOK)
 
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "reopen mailbox", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	id, ok, err := st.GetSmimeIdentity()
 	mustNoErr(t, "read the stored identity", err)
 	if !ok || len(id.P12) == 0 {
 		t.Fatalf("not stored as server mode: ok=%v p12=%d bytes", ok, len(id.P12))
 	}
 	wantEq(t, "stored mode", id.Mode, "server")
+	// At rest the key is not the uploaded file under the user's own passphrase.
+	if bytes.Equal(id.P12, p12) {
+		t.Error("the uploaded PKCS#12 was stored as is, not re-encrypted at rest")
+	}
 	if _, _, ok := unlockSmimeIdentity(st, secret); !ok {
 		t.Fatal("server identity did not unlock")
 	}
@@ -59,7 +79,8 @@ func TestSmimeServerMode(t *testing.T) {
 // the file a server-mode upload carries.
 func testP12(t *testing.T) []byte {
 	t.Helper()
-	_, certPEM, keyPEM := makeTestIdentity(t)
+	ident := makeTestIdentity(t)
+	certPEM, keyPEM := ident.certPEM, ident.keyPEM
 	pair, err := tls.X509KeyPair([]byte(certPEM), []byte(keyPEM))
 	mustNoErr(t, "build key pair", err)
 	cert, err := x509.ParseCertificate(pair.Certificate[0])
@@ -69,9 +90,8 @@ func testP12(t *testing.T) []byte {
 	return p12
 }
 
-// makeTestIdentity builds a throwaway self-signed identity, returning the cert in
-// DER plus the cert and private key in PEM.
-func makeTestIdentity(t *testing.T) (certDER []byte, certPEM, keyPEM string) {
+// makeTestIdentity builds a throwaway self-signed identity.
+func makeTestIdentity(t *testing.T) pemIdentity {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -93,7 +113,12 @@ func makeTestIdentity(t *testing.T) (certDER []byte, certPEM, keyPEM string) {
 	}
 	cp := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 	kp := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
-	return der, string(cp), string(kp)
+	return pemIdentity{certPEM: string(cp), keyPEM: string(kp)}
+}
+
+// pemIdentity is a throwaway certificate and its private key, both in PEM.
+type pemIdentity struct {
+	certPEM, keyPEM string
 }
 
 // smimePost issues an authenticated POST to the certificate endpoint.
@@ -103,7 +128,7 @@ func smimePost(t *testing.T, srv *Server, secret []byte, dir string, body any) *
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	raw, _ := json.Marshal(body)
+	raw := mustEncode(t, body)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/smime/certificate", bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
@@ -130,17 +155,18 @@ func TestSmimePublishViewDelete(t *testing.T) {
 	if st, err := objectstore.Open(dir); err != nil {
 		t.Fatalf("open: %v", err)
 	} else {
-		st.Close()
+		mustClose(t, st)
 	}
-	_, certPEM, _ := makeTestIdentity(t)
+	certPEM := makeTestIdentity(t).certPEM
 	secret := []byte("smime-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.test", secret, "", false)
 
 	if rec := smimePost(t, srv, secret, dir, map[string]string{"cert": certPEM}); rec.Code != 200 {
 		t.Fatalf("publish = %d: %s", rec.Code, rec.Body.String())
 	}
-	if rec := smimeReq(t, srv, secret, http.MethodGet, dir); rec.Code != 200 {
-		t.Errorf("view = %d", rec.Code)
+	// The view names the certificate that was published (makeTestIdentity's subject).
+	if got := okBody[map[string]any](t, "view", smimeReq(t, srv, secret, http.MethodGet, dir)); got["subject"] != "CN=alice@hermex.test" {
+		t.Errorf("after publish, view = %v, want subject CN=alice@hermex.test", got)
 	}
 	if rec := smimeReq(t, srv, secret, http.MethodDelete, dir); rec.Code != 200 {
 		t.Errorf("delete = %d", rec.Code)
@@ -155,10 +181,22 @@ func TestSmimePublishViewDelete(t *testing.T) {
 // TestSmimeRejectPrivateKey proves the server refuses a request carrying a private
 // key; the key must stay in the browser.
 func TestSmimeRejectPrivateKey(t *testing.T) {
-	_, certPEM, keyPEM := makeTestIdentity(t)
+	ident := makeTestIdentity(t)
+	certPEM, keyPEM := ident.certPEM, ident.keyPEM
 	secret := []byte("smime-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.test", secret, "", false)
-	if rec := smimePost(t, srv, secret, t.TempDir(), map[string]string{"cert": certPEM, "key": keyPEM}); rec.Code != http.StatusBadRequest {
+	dir := freshMailbox(t)
+	if rec := smimePost(t, srv, secret, dir, map[string]string{"cert": certPEM, "key": keyPEM}); rec.Code != http.StatusBadRequest {
 		t.Errorf("request with a private key = %d, want 400", rec.Code)
+	}
+	// Garbage in place of a certificate is refused too.
+	if rec := smimePost(t, srv, secret, dir, map[string]string{"cert": "-----BEGIN CERTIFICATE-----\nnot base64\n-----END CERTIFICATE-----"}); rec.Code == http.StatusOK {
+		t.Errorf("a malformed certificate was accepted")
+	}
+	st := openMailbox(t, dir)
+	_, stored, err := st.GetSmimeIdentity()
+	mustNoErr(t, "read identity", err)
+	if stored {
+		t.Error("a refused request stored an identity")
 	}
 }

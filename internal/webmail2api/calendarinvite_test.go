@@ -19,11 +19,24 @@ import (
 // message alice sends is delivered into bob's mailbox.
 func meetingHarness(t *testing.T) (requestFunc, string, string) {
 	t.Helper()
+	env := newMeetingEnv(t)
+	return env.do, env.alice, env.bob
+}
+
+// meetingEnv is meetingHarness's result, for a test that needs only some of it:
+// a request function signed in as alice, and alice's and bob's mailboxes.
+type meetingEnv struct {
+	do         requestFunc
+	alice, bob string
+}
+
+func newMeetingEnv(t *testing.T) meetingEnv {
+	t.Helper()
 	alice, bob := t.TempDir(), t.TempDir()
 	for _, d := range []string{alice, bob} {
 		st, err := objectstore.Open(d)
 		mustNoErr(t, "open mailbox", err)
-		st.Close()
+		mustClose(t, st)
 	}
 	accs := directory.StaticAccounts{
 		"alice@hermex.test": {MailboxPath: alice},
@@ -31,14 +44,15 @@ func meetingHarness(t *testing.T) (requestFunc, string, string) {
 	}
 	secret := []byte("meeting-test-secret")
 	srv := NewServer(accs, accs, nil, "mail.hermex.test", secret, "", false)
-	return func(method, target, body string) *httptest.ResponseRecorder {
+	do := func(method, target, body string) *httptest.ResponseRecorder {
 		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: alice, Exp: time.Now().Add(time.Hour).Unix()})
 		req := httptest.NewRequest(method, target, strings.NewReader(body))
 		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
 		rec := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rec, req)
 		return rec
-	}, alice, bob
+	}
+	return meetingEnv{do: do, alice: alice, bob: bob}
 }
 
 // folderMail returns the wire form of every message in one of the mailbox's folders.
@@ -95,8 +109,7 @@ func TestInvitationCarriesTheStoredMeeting(t *testing.T) {
 	mustNoErr(t, "accept", err)
 	stored, err := st.OpenMessage(appt)
 	mustNoErr(t, "open bob's meeting", err)
-	ical, _ := stored.Props.Get(mapi.PrIcalOriginal)
-	b, _ := ical.([]byte)
+	b := mustProp[[]byte](t, "bob's meeting", stored.Props, mapi.PrIcalOriginal)
 	wantContains(t, "bob's meeting", string(b), "RRULE:FREQ=DAILY;COUNT=3")
 }
 
@@ -117,7 +130,7 @@ func TestInvitationUpdateAdvancesTheRevision(t *testing.T) {
 	st := openMailbox(t, alice)
 	msg, err := st.OpenMessage(id)
 	mustNoErr(t, "open alice's meeting", err)
-	seq, _ := propInt32(msg.Props, namedTag(t, st, mapi.NameAppointmentSequence, mapi.PtLong))
+	seq := mustProp[int32](t, "alice's revision", msg.Props, namedTag(t, st, mapi.NameAppointmentSequence, mapi.PtLong))
 	wantEq(t, "alice's revision", seq, int32(1))
 }
 
@@ -139,7 +152,8 @@ func TestInvitationDropsInjectedLines(t *testing.T) {
 // accepting it used to file alice's own meeting as one received from someone else
 // and mail her an acceptance from herself.
 func TestOrganizerCannotAnswerTheOwnInvitation(t *testing.T) {
-	do, alice, _ := meetingHarness(t)
+	env := newMeetingEnv(t)
+	do, alice := env.do, env.alice
 	createEvent(t, do, `{"summary":"Review","start":"2026-09-08T09:00:00Z","end":"2026-09-08T10:00:00Z",`+
 		`"attendees":["bob@hermex.test"],"sendInvite":true}`)
 	st := openMailbox(t, alice)
@@ -180,7 +194,7 @@ func seedEvent(t *testing.T, dir string, e eventJSON, organizer string) int64 {
 	t.Helper()
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open alice", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	id, err := storeEvent(st, e, int64(mapi.PrivateFIDCalendar), organizer)
 	mustNoErr(t, "seed event", err)
 	return id
@@ -230,7 +244,8 @@ func TestLegacyMeetingCancelsUnderItsWireUID(t *testing.T) {
 // TestCancellationDropsInjectedLines is the summary injection defect on the
 // cancellation path, which relays to external attendees as well.
 func TestCancellationDropsInjectedLines(t *testing.T) {
-	do, alice, _ := meetingHarness(t)
+	env := newMeetingEnv(t)
+	do, alice := env.do, env.alice
 	id := createEvent(t, do, `{"summary":"`+injectedSummary+`","start":"2026-09-01T10:00:00Z",`+
 		`"end":"2026-09-01T11:00:00Z","attendees":["bob@hermex.test"],"sendInvite":true}`)
 	deleteEvent(t, do, strconv.FormatInt(id, 10))
@@ -257,7 +272,8 @@ func TestUnsentMeetingDeleteSendsNothing(t *testing.T) {
 // TestUnsentSeriesOccurrenceDeleteSendsNothing removes an instance of a series
 // that was saved without sending: nobody holds the series to cancel it in.
 func TestUnsentSeriesOccurrenceDeleteSendsNothing(t *testing.T) {
-	do, _, bob := meetingHarness(t)
+	env := newMeetingEnv(t)
+	do, bob := env.do, env.bob
 	id := createEvent(t, do, strings.Replace(seriesBody, `,"sendInvite":true`, "", 1))
 	wantStatus(t, "delete occurrence", do(http.MethodDelete, occurrencePath(id)+"?at=2026-09-08T06:00:00Z", ""), http.StatusOK)
 	wantEq(t, "bob's inbox", len(folderMail(t, bob, int64(mapi.PrivateFIDInbox))), 0)
@@ -281,7 +297,8 @@ func TestLegacyMeetingKeepsItsWireUID(t *testing.T) {
 // read from, so every resend went out at SEQUENCE:1 and an attendee's client
 // took the second as no newer than the first.
 func TestSeriesUpdateAdvancesTheRevision(t *testing.T) {
-	do, _, bob := meetingHarness(t)
+	env := newMeetingEnv(t)
+	do, bob := env.do, env.bob
 	id := createEvent(t, do, `{"summary":"Standup","start":"2026-09-07T06:00:00Z","end":"2026-09-07T06:30:00Z",`+
 		`"recurrence":"FREQ=DAILY;COUNT=3","attendees":["bob@hermex.test"],"sendInvite":true}`)
 	for _, summary := range []string{"Standup moved", "Standup moved again"} {
@@ -351,12 +368,13 @@ func TestOccurrenceMoveUpdatesThatInstance(t *testing.T) {
 
 	msgs, err = st.ListMessages(int64(mapi.PrivateFIDInbox))
 	mustNoErr(t, "list bob's inbox", err)
-	_, err = meeting.Respond(st, directory.StaticAccounts{}, nil, "bob@hermex.test", msgs[1].ID, meeting.ResponseAccepted, false)
+	moved, err := meeting.Respond(st, directory.StaticAccounts{}, nil, "bob@hermex.test", msgs[1].ID, meeting.ResponseAccepted, false)
 	mustNoErr(t, "accept the move", err)
+	// An update lands on the appointment the request created, not a second one.
+	wantEq(t, "the updated appointment", moved, appt)
 	stored, err := st.OpenMessage(appt)
 	mustNoErr(t, "open bob's series", err)
-	ical, _ := stored.Props.Get(mapi.PrIcalOriginal)
-	b, _ := ical.([]byte)
+	b := mustProp[[]byte](t, "bob's series", stored.Props, mapi.PrIcalOriginal)
 	wantContains(t, "bob's series", string(b), "RRULE:FREQ=DAILY;COUNT=3")
 	wantContains(t, "bob's series", string(b), "DTSTART:20260908T090000Z")
 }
@@ -365,7 +383,8 @@ func TestOccurrenceMoveUpdatesThatInstance(t *testing.T) {
 // mailbox's default, turns it off, and proves a PUT that names only one field
 // leaves the other and the operator's automatic acceptance as they were.
 func TestMeetingSettingsRoundTrip(t *testing.T) {
-	do, alice, _ := meetingHarness(t)
+	env := newMeetingEnv(t)
+	do, alice := env.do, env.alice
 	st := openMailbox(t, alice)
 	mustNoErr(t, "seed operator setting", st.SetMeetingConfig(objectstore.MeetingConfig{AutoAccept: true}))
 
@@ -385,7 +404,8 @@ func TestMeetingSettingsRoundTrip(t *testing.T) {
 // it. The cancellation used to take its revision from the series alone, below the
 // one the moved instance carried, so the attendee read it as older than the move.
 func TestMovedOccurrenceDeleteOutranksTheMove(t *testing.T) {
-	do, _, bob := meetingHarness(t)
+	env := newMeetingEnv(t)
+	do, bob := env.do, env.bob
 	id := createEvent(t, do, seriesBody)
 	for _, start := range []string{"09:00", "10:00"} {
 		wantStatus(t, "move occurrence", do(http.MethodPut, occurrencePath(id), `{"occurrence":"2026-09-08T06:00:00Z",`+

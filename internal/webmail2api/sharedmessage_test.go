@@ -32,7 +32,7 @@ func newSharedMessageFixture(t *testing.T, rights uint32, delegate bool) *shared
 	appendInbox(t, f.shared, f.sharedSubject)
 	st, err := objectstore.Open(f.shared)
 	mustNoErr(t, "open shared", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	if rights != 0 {
 		mustNoErr(t, "grant", st.ModifyPermissions(int64(mapi.PrivateFIDInbox), false, []objectstore.PermissionChange{
 			{Op: objectstore.PermAdd, Username: "alice@hermex.test", Rights: rights},
@@ -56,7 +56,7 @@ func appendInbox(t *testing.T, path, subject string) {
 	t.Helper()
 	st, err := objectstore.Open(path)
 	mustNoErr(t, "open", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	raw := "From: s@hermex.test\r\nSubject: " + subject + "\r\n\r\nbody"
 	_, err = st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), time.Now(), 0)
 	mustNoErr(t, "append", err)
@@ -75,7 +75,7 @@ func inboxCount(t *testing.T, path string) int {
 	t.Helper()
 	st, err := objectstore.Open(path)
 	mustNoErr(t, "open", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
 	mustNoErr(t, "list", err)
 	return len(msgs)
@@ -118,7 +118,7 @@ func TestSharedMessageDeleteActsOnTheSharedMailbox(t *testing.T) {
 	mustNoErr(t, "grant", st.ModifyPermissions(int64(mapi.PrivateFIDDeletedItems), false, []objectstore.PermissionChange{
 		{Op: objectstore.PermAdd, Username: "alice@hermex.test", Rights: mapi.RightsEditor},
 	}))
-	st.Close()
+	mustClose(t, st)
 	rec := f.do(http.MethodDelete, "/api/v1/mail/delete?id=inbox:1&owner=team@hermex.test", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
@@ -149,9 +149,34 @@ func TestSharedMessageMoveNeedsTheDestination(t *testing.T) {
 func TestSharedMessageRefusesADelegateWithoutAGrant(t *testing.T) {
 	f := newSharedMessageFixture(t, 0, true)
 	rec := f.do(http.MethodGet, "/api/v1/mail/source?id=inbox:1&owner=team@hermex.test", "")
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusForbidden || strings.Contains(rec.Body.String(), f.sharedSubject) {
+		t.Errorf("status = %d, want 403 without the message; body=%s", rec.Code, rec.Body.String())
 	}
+}
+
+// TestSharedOwnerMustBeASharedMailboxOfTheCaller: ?owner naming another user's
+// personal mailbox or an unknown address opens nothing (no IDOR), and a delete
+// through it changes nothing.
+func TestSharedOwnerMustBeASharedMailboxOfTheCaller(t *testing.T) {
+	f := newSharedMessageFixture(t, 0, false)
+	bob := t.TempDir()
+	appendInbox(t, bob, "bob private")
+	accounts := directory.StaticAccounts{
+		"alice@hermex.test": {Password: "pw", MailboxPath: f.own},
+		"bob@hermex.test":   {Password: "pw", MailboxPath: bob},
+	}
+	f.srv = NewServer(accounts, accounts, nil, "mail.hermex.test", []byte("shared-message-test-secret"), "", false)
+	for _, owner := range []string{"bob@hermex.test", "ghost@hermex.test", "../../etc"} {
+		rec := f.do(http.MethodGet, "/api/v1/mail/source?id=inbox:1&owner="+owner, "")
+		if rec.Code == http.StatusOK || strings.Contains(rec.Body.String(), "bob private") {
+			t.Errorf("owner=%s read = %d: %s", owner, rec.Code, rec.Body.String())
+		}
+		if rec := f.do(http.MethodDelete, "/api/v1/mail/delete?id=inbox:1&owner="+owner, ""); rec.Code == http.StatusOK {
+			t.Errorf("owner=%s delete answered 200", owner)
+		}
+	}
+	wantEq(t, "bob's inbox after the refused calls", inboxCount(t, bob), 1)
+	wantEq(t, "alice's inbox after the refused calls", inboxCount(t, f.own), 1)
 }
 
 // TestSharedUserFolderBySlugNeedsAGrant proves a user folder of a shared mailbox,
@@ -166,7 +191,7 @@ func TestSharedUserFolderBySlugNeedsAGrant(t *testing.T) {
 	mustNoErr(t, "create Board", err)
 	_, err = st.AppendMessage(fid, []byte("From: s@hermex.test\r\nSubject: board minutes\r\n\r\nbody"), time.Now(), 0)
 	mustNoErr(t, "append", err)
-	st.Close()
+	mustClose(t, st)
 	slug := customSlug(fid)
 	list := "/api/v1/mail/" + slug + "?owner=team@hermex.test"
 	read := "/api/v1/mail/source?id=" + slug + ":1&owner=team@hermex.test"
@@ -205,7 +230,7 @@ func TestSharedMessageOpenMarksReadWithWriteRights(t *testing.T) {
 		st, err := objectstore.Open(f.shared)
 		mustNoErr(t, "open", err)
 		msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
-		st.Close()
+		mustClose(t, st)
 		mustNoErr(t, "list", err)
 		wantEq(t, c.name+" stored read state", msgs[0].Flags&objectstore.FlagSeen != 0, c.read)
 	}
@@ -237,7 +262,7 @@ func TestSharedMessageOpenFollowsTheOwnersReceiptSetting(t *testing.T) {
 		raw := "Return-Path: <bob@hermex.test>\r\nFrom: bob@hermex.test\r\nTo: team@hermex.test\r\nSubject: rr\r\n" +
 			"Disposition-Notification-To: bob@hermex.test\r\n\r\nbody\r\n"
 		info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), time.Now(), 0)
-		st.Close()
+		mustClose(t, st)
 		mustNoErr(t, "append", err)
 		id := "inbox:" + strconv.FormatUint(uint64(info.UID), 10)
 		rec := f.do(http.MethodGet, "/api/v1/mail/message?id="+id+"&owner=team@hermex.test", "")
@@ -260,7 +285,7 @@ func (f *sharedMessageFixture) grantFolder(t *testing.T, fid int64, rights uint3
 	t.Helper()
 	st, err := objectstore.Open(f.shared)
 	mustNoErr(t, "open", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	mustNoErr(t, "grant", st.ModifyPermissions(fid, false, []objectstore.PermissionChange{
 		{Op: objectstore.PermAdd, Username: "alice@hermex.test", Rights: rights},
 	}))
@@ -276,7 +301,7 @@ func TestSharedRecallIsAuthoredByTheSharedMailbox(t *testing.T) {
 	mustNoErr(t, "open", err)
 	raw := "From: team@hermex.test\r\nTo: nobody@example.org\r\nSubject: sent\r\nMessage-ID: <r1@hermex.test>\r\n\r\nbody"
 	_, err = st.AppendMessage(int64(mapi.PrivateFIDSentItems), []byte(raw), time.Now(), objectstore.FlagSeen)
-	st.Close()
+	mustClose(t, st)
 	mustNoErr(t, "append", err)
 	rec := f.do(http.MethodPost, "/api/v1/mail/recall?id=sent:1&owner=team@hermex.test", "")
 	if rec.Code != http.StatusOK {
@@ -317,7 +342,7 @@ func (f *sharedMessageFixture) fileInvite(t *testing.T) string {
 	t.Helper()
 	st, err := objectstore.Open(f.shared)
 	mustNoErr(t, "open", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), inviteMail("shared-invite@hermex.test"), time.Now(), 0)
 	mustNoErr(t, "file the invite", err)
 	return "inbox:" + strconv.FormatUint(uint64(info.UID), 10)
@@ -370,7 +395,7 @@ func TestSharedRSVPNamesTheDelegate(t *testing.T) {
 			st, err := objectstore.Open(f.shared)
 			mustNoErr(t, "open", err)
 			mustNoErr(t, "grant", c.grant(st, []string{"alice@hermex.test"}))
-			st.Close()
+			mustClose(t, st)
 			id := f.fileInvite(t)
 
 			rec := f.do(http.MethodPost, "/api/v1/mail/rsvp?owner=team@hermex.test", `{"id":"`+id+`","response":"accept"`+c.proposal+`}`)

@@ -11,12 +11,18 @@ import (
 )
 
 // fileInAliceInbox delivers raw mail into alice's Inbox and returns its id.
-func fileInAliceInbox(t *testing.T, alice string, raw []byte) (string, int64) {
+func fileInAliceInbox(t *testing.T, alice string, raw []byte) filedMail {
 	t.Helper()
 	st := openMailbox(t, alice)
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), raw, time.Now(), 0)
 	mustNoErr(t, "deliver", err)
-	return "inbox:" + strconv.FormatUint(uint64(info.UID), 10), info.ID
+	return filedMail{id: "inbox:" + strconv.FormatUint(uint64(info.UID), 10), msgID: info.ID}
+}
+
+// filedMail is a delivered message: its webmail id and its store message id.
+type filedMail struct {
+	id    string
+	msgID int64
 }
 
 // inviteView reads what the reader shows about the message id.
@@ -47,8 +53,9 @@ func cancelMail(uid string) []byte {
 // answers it: the reader learns it is a request to answer, and then which answer
 // she gave.
 func TestInviteShowsTheRequestAndTheAnswer(t *testing.T) {
-	do, alice, _ := meetingHarness(t)
-	id, _ := fileInAliceInbox(t, alice, inviteMail("view-1@hermex.test"))
+	env := newMeetingEnv(t)
+	do, alice := env.do, env.alice
+	id := fileInAliceInbox(t, alice, inviteMail("view-1@hermex.test")).id
 
 	v := inviteView(t, do, id)
 	wantEq(t, "kind", v.Kind, "request")
@@ -61,7 +68,8 @@ func TestInviteShowsTheRequestAndTheAnswer(t *testing.T) {
 // TestInviteShowsTheOwnInvitation reads the copy of the invitation alice sent:
 // she organizes the meeting, so it offers nothing to answer.
 func TestInviteShowsTheOwnInvitation(t *testing.T) {
-	do, alice, _ := meetingHarness(t)
+	env := newMeetingEnv(t)
+	do, alice := env.do, env.alice
 	createEvent(t, do, `{"summary":"Review","start":"2026-09-08T09:00:00Z","end":"2026-09-08T10:00:00Z",`+
 		`"attendees":["bob@hermex.test"],"sendInvite":true}`)
 	sent, err := openMailbox(t, alice).ListMessages(int64(mapi.PrivateFIDSentItems))
@@ -77,9 +85,10 @@ func TestInviteShowsTheOwnInvitation(t *testing.T) {
 // TestInviteShowsAnAnswerAndAProposal reads an attendee's answer and a proposal of
 // a new time as the organizer receives them.
 func TestInviteShowsAnAnswerAndAProposal(t *testing.T) {
-	do, alice, _ := meetingHarness(t)
-	replyID, _ := fileInAliceInbox(t, alice, replyMail("view-2@hermex.test"))
-	counterID, _ := fileInAliceInbox(t, alice, counterMail("view-2@hermex.test"))
+	env := newMeetingEnv(t)
+	do, alice := env.do, env.alice
+	replyID := fileInAliceInbox(t, alice, replyMail("view-2@hermex.test")).id
+	counterID := fileInAliceInbox(t, alice, counterMail("view-2@hermex.test")).id
 
 	reply := inviteView(t, do, replyID)
 	wantEq(t, "reply kind", reply.Kind, "response")
@@ -94,12 +103,14 @@ func TestInviteShowsAnAnswerAndAProposal(t *testing.T) {
 // canceled: the cancellation offers the meeting for removal, removing takes it off
 // her calendar, and then nothing is left to remove.
 func TestInviteRemovesACanceledMeeting(t *testing.T) {
-	do, alice, _ := meetingHarness(t)
-	requestID, _ := fileInAliceInbox(t, alice, inviteMail("view-3@hermex.test"))
+	env := newMeetingEnv(t)
+	do, alice := env.do, env.alice
+	requestID := fileInAliceInbox(t, alice, inviteMail("view-3@hermex.test")).id
 	wantStatus(t, "accept", do(http.MethodPost, "/api/v1/mail/rsvp", `{"id":"`+requestID+`","response":"accept"}`), http.StatusOK)
-	cancelID, msgID := fileInAliceInbox(t, alice, cancelMail("view-3@hermex.test"))
+	cancel := fileInAliceInbox(t, alice, cancelMail("view-3@hermex.test"))
+	cancelID := cancel.id
 	// The delivery pass applies a cancellation from the meeting's organizer.
-	if _, err := meeting.ProcessCancellation(openMailbox(t, alice), "bob@hermex.test", msgID); err != nil {
+	if _, err := meeting.ProcessCancellation(openMailbox(t, alice), "bob@hermex.test", cancel.msgID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -113,13 +124,36 @@ func TestInviteRemovesACanceledMeeting(t *testing.T) {
 	wantStatus(t, "remove again", do(http.MethodPost, "/api/v1/mail/remove-from-calendar", remove), http.StatusConflict)
 }
 
+// TestInviteRefusesWhatIsNoInvite: an id naming nothing, a malformed id and a
+// plain mail offer no invite to act on, and removing through them leaves the
+// accepted meeting on the calendar.
+func TestInviteRefusesWhatIsNoInvite(t *testing.T) {
+	env := newMeetingEnv(t)
+	do, alice := env.do, env.alice
+	requestID := fileInAliceInbox(t, alice, inviteMail("view-5@hermex.test")).id
+	wantStatus(t, "accept", do(http.MethodPost, "/api/v1/mail/rsvp", `{"id":"`+requestID+`","response":"accept"}`), http.StatusOK)
+	plainID := fileInAliceInbox(t, alice, []byte("From: bob@hermex.test\r\nSubject: lunch\r\n\r\nhi\r\n")).id
+	for _, id := range []string{"inbox:999999", "not-an-id", plainID} {
+		if rec := do(http.MethodPost, "/api/v1/mail/remove-from-calendar", `{"id":"`+id+`"}`); rec.Code == http.StatusOK {
+			t.Errorf("remove through %s answered 200", id)
+		}
+	}
+	for _, id := range []string{"inbox:999999", "not-an-id"} {
+		if rec := do(http.MethodGet, "/api/v1/mail/invite?id="+id, ""); rec.Code == http.StatusOK {
+			t.Errorf("invite view of %s answered 200", id)
+		}
+	}
+	wantEq(t, "alice's calendar", calendarCount(t, alice), 1)
+}
+
 // TestInviteKeepsAMeetingNobodyCanceled refuses to remove through a cancellation
 // the meeting's organizer never sent: the meeting stays.
 func TestInviteKeepsAMeetingNobodyCanceled(t *testing.T) {
-	do, alice, _ := meetingHarness(t)
-	requestID, _ := fileInAliceInbox(t, alice, inviteMail("view-4@hermex.test"))
+	env := newMeetingEnv(t)
+	do, alice := env.do, env.alice
+	requestID := fileInAliceInbox(t, alice, inviteMail("view-4@hermex.test")).id
 	wantStatus(t, "accept", do(http.MethodPost, "/api/v1/mail/rsvp", `{"id":"`+requestID+`","response":"accept"}`), http.StatusOK)
-	cancelID, _ := fileInAliceInbox(t, alice, cancelMail("view-4@hermex.test"))
+	cancelID := fileInAliceInbox(t, alice, cancelMail("view-4@hermex.test")).id
 
 	wantEq(t, "removable", inviteView(t, do, cancelID).Removable, false)
 	wantStatus(t, "remove", do(http.MethodPost, "/api/v1/mail/remove-from-calendar", `{"id":"`+cancelID+`"}`), http.StatusConflict)

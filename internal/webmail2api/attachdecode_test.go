@@ -1,6 +1,7 @@
 package webmail2api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -83,5 +84,37 @@ func TestDecodableAttachmentStillBuilds(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	built := builtRaw(t, rec)
+	wantContains(t, "the built message", built, "note.txt")
+	wantContains(t, "the built message", built, "aGVsbG8=")
+}
+
+// builtRaw decodes the /mail/build answer to the message bytes it carries.
+func builtRaw(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+	var out struct {
+		Raw string `json:"raw"`
+	}
+	mustNoErr(t, "decode the build answer", json.Unmarshal(rec.Body.Bytes(), &out))
+	raw, err := base64.StdEncoding.DecodeString(out.Raw)
+	mustNoErr(t, "decode the built bytes", err)
+	return string(raw)
+}
+
+// TestAnAttachmentNameCannotAddAHeader: a filename carrying CRLF must not
+// start a new header line in the built message (RFC 5322 2.2).
+func TestAnAttachmentNameCannotAddAHeader(t *testing.T) {
+	srv, token := sendAttachmentServer(t)
+	rec := postBuild(t, srv, token, mailAttachment{
+		Filename:    "a.txt\r\nBcc: spy@evil.test",
+		ContentType: "text/plain",
+		Content:     "aGVsbG8=",
+	})
+	if rec.Code != http.StatusOK {
+		return // refusing the name is also acceptable
+	}
+	if built := builtRaw(t, rec); strings.Contains(built, "\nBcc: spy@evil.test") {
+		t.Errorf("the filename injected a header line:\n%s", built)
 	}
 }

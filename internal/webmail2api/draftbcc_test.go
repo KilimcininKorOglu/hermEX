@@ -57,4 +57,19 @@ func TestDraftKeepsItsBcc(t *testing.T) {
 	if want := "bob@hermex.test|carol@hermex.test|dave@hermex.test"; got != want {
 		t.Fatalf("reopened draft recipients = %q, want %q", got, want)
 	}
+
+	// A Bcc carrying CRLF is refused, or saved without adding a header line.
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/mail/draft", strings.NewReader(
+		`{"to":["bob@hermex.test"],"bcc":["eve@hermex.test\r\nSubject: forged"],"subject":"real","body":"x"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code == http.StatusOK {
+		var hostile struct{ ID string }
+		mustNoErr(t, "decode", json.Unmarshal(rec.Body.Bytes(), &hostile))
+		var m struct{ Subject string }
+		mustNoErr(t, "decode", json.Unmarshal(do(http.MethodGet, "/api/v1/mail/message?id="+hostile.ID, ""), &m))
+		wantEq(t, "subject of the hostile draft", m.Subject, "real")
+	}
 }

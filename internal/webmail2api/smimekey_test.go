@@ -51,12 +51,12 @@ func TestSmimeAtRestPasswordIsPerMailbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer one.Close()
+	defer mustClose(t, one)
 	two, err := objectstore.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer two.Close()
+	defer mustClose(t, two)
 
 	p1, err := smimeStorePassword(one, secret)
 	if err != nil {
@@ -88,23 +88,15 @@ func TestSmimeAtRestPasswordIsPerMailbox(t *testing.T) {
 func TestSmimeIdentityUnlocksUnderThePerMailboxPassword(t *testing.T) {
 	secret := []byte("smime-at-rest-test-secret")
 	st, err := objectstore.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
+	mustNoErr(t, "open", err)
+	defer mustClose(t, st)
 
 	key, cert := testIdentity(t)
 	password, err := smimeStorePassword(st, secret)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "derive password", err)
 	p12, err := pkcs12.Modern.Encode(key, cert, nil, password)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.SetSmimeIdentity(objectstore.SmimeIdentity{Mode: "server", Cert: cert.Raw, P12: p12}); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "encode p12", err)
+	mustNoErr(t, "store identity", st.SetSmimeIdentity(objectstore.SmimeIdentity{Mode: "server", Cert: cert.Raw, P12: p12}))
 
 	got, gotCert, ok := unlockSmimeIdentity(st, secret)
 	if !ok {
@@ -112,6 +104,15 @@ func TestSmimeIdentityUnlocksUnderThePerMailboxPassword(t *testing.T) {
 	}
 	if got == nil || gotCert == nil || gotCert.Subject.CommonName != "alice@hermex.test" {
 		t.Error("the unlocked identity is not the one that was stored")
+	}
+	// A leaked store without the server secret opens nothing.
+	if _, _, ok := unlockSmimeIdentity(st, []byte("some-other-secret")); ok {
+		t.Error("the identity unlocked under a different server secret")
+	}
+	after, stored, err := st.GetSmimeIdentity()
+	mustNoErr(t, "read identity", err)
+	if !stored || string(after.P12) != string(p12) {
+		t.Error("a failed unlock rewrote or dropped the stored identity")
 	}
 }
 
@@ -125,7 +126,7 @@ func TestLegacySmimeIdentityMigratesOnFirstUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 
 	key, cert := testIdentity(t)
 	legacy, err := pkcs12.Modern.Encode(key, cert, nil, legacySmimeP12Password(secret))

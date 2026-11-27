@@ -1,7 +1,6 @@
 package webmail2api
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -145,6 +144,16 @@ func TestGroupsAPI(t *testing.T) {
 	// IDOR guard on write: cannot set members of a non-owned group.
 	wantStatus(t, "put members of non-owned group", do(http.MethodPut, "/api/v1/groups/members",
 		`{"address":"other@hermex.test","members":["z@hermex.test"]}`), http.StatusForbidden)
+	wantEq(t, "list written after the refused put", auth.setUser, "crew@hermex.test")
+	wantEq(t, "members written after the refused put", strings.Join(auth.setMems, ","), "x@hermex.test,y@hermex.test")
+
+	// A body that is no JSON, or names no list, writes nothing.
+	for _, body := range []string{`{`, `{"members":["z@hermex.test"]}`} {
+		if rec := do(http.MethodPut, "/api/v1/groups/members", body); rec.Code == http.StatusOK {
+			t.Errorf("put %s answered 200", body)
+		}
+	}
+	wantEq(t, "members after the malformed puts", strings.Join(auth.setMems, ","), "x@hermex.test,y@hermex.test")
 }
 
 // TestGroupsLDAPMastered proves an AD-synced (LDAP-mastered) group is flagged so the
@@ -173,11 +182,7 @@ func TestGroupsLDAPMastered(t *testing.T) {
 		return rec
 	}
 
-	rec := do(http.MethodGet, "/api/v1/groups", "")
-	var groups []map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &groups); err != nil {
-		t.Fatalf("decode groups: %v (status %d, body %s)", err, rec.Code, rec.Body.String())
-	}
+	groups := okBody[[]map[string]any](t, "get groups", do(http.MethodGet, "/api/v1/groups", ""))
 	if len(groups) != 1 || groups[0]["ldapMastered"] != true {
 		t.Fatalf("get groups = %+v, want ad-grp flagged ldapMastered", groups)
 	}
@@ -185,6 +190,30 @@ func TestGroupsLDAPMastered(t *testing.T) {
 	if rec := do(http.MethodPut, "/api/v1/groups/members", `{"address":"ad-grp@hermex.test","members":["z@hermex.test"]}`); rec.Code != http.StatusForbidden {
 		t.Errorf("put members of mastered group = %d, want 403", rec.Code)
 	}
+	wantEq(t, "list written for the mastered group", auth.setUser, "")
+}
+
+// vanishedListAuth owns a list the directory no longer holds when the write
+// runs, as when the list is deleted between the owner check and the set.
+type vanishedListAuth struct{ groupStoreAuth }
+
+func (a *vanishedListAuth) SetMembers(string, []string) (bool, error) { return false, nil }
+
+// TestGroupsAnswerAVanishedListAsNotFound proves a member set the directory
+// reports as reaching no list answers 404, not 200 for members never stored.
+func TestGroupsAnswerAVanishedListAsNotFound(t *testing.T) {
+	auth := &vanishedListAuth{groupStoreAuth{owned: map[string][]directory.MListInfo{
+		"alice@hermex.test": {{Listname: "crew@hermex.test"}},
+	}}}
+	secret := []byte("groups-vanished-secret")
+	srv := NewServer(auth, groupAccounts, nil, "mail.hermex.test", secret, "", false)
+	token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: t.TempDir(), Exp: time.Now().Add(time.Hour).Unix()})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/groups/members",
+		strings.NewReader(`{"address":"crew@hermex.test","members":["bob@hermex.test"]}`))
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	wantStatus(t, "put members of a vanished list", rec, http.StatusNotFound)
 }
 
 // unroutableAuth refuses every member set the way the directory refuses one holding

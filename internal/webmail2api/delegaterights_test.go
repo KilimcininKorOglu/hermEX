@@ -16,7 +16,7 @@ func folderRightsOf(t *testing.T, dir, user string) map[int64]uint32 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	out := map[int64]uint32{}
 	for _, fid := range objectstore.DelegateFolders {
 		r, err := st.ResolvePermission(fid, user)
@@ -92,15 +92,34 @@ func TestDelegationListShowsAccessGrantedElsewhere(t *testing.T) {
 	err = st.ModifyPermissions(mapi.PrivateFIDCalendar, false, []objectstore.PermissionChange{
 		{Op: objectstore.PermAdd, Username: "carol@hermex.test", Rights: mapi.NormalizeRights(mapi.RightsEditor, true)},
 	})
-	st.Close()
+	mustClose(t, st)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got, found := listedRights(t, do, "carol@hermex.test"); !found || got != "read,write" {
 		t.Errorf("carol listed rights %q (listed %v), want read,write", got, found)
 	}
-	if got, _ := listedRights(t, do, "dave@hermex.test"); got != "" {
-		t.Errorf("dave listed rights %q, want none", got)
+	// dave holds send-as only (granted outside webmail), so he is listed with no
+	// folder access.
+	if got, found := listedRights(t, do, "dave@hermex.test"); !found || got != "" {
+		t.Errorf("dave listed rights %q (listed %v), want listed with none", got, found)
+	}
+}
+
+// TestAnUnknownAccessLevelGrantsNothing: the rights list knows only "read" and
+// "write". Another word is ignored, so asking for "owner" grants no folder, and
+// a rights value that is not a list is refused.
+func TestAnUnknownAccessLevelGrantsNothing(t *testing.T) {
+	do, dir := delegationHarness(t)
+	wantStatus(t, "rights not a list", do(http.MethodPost, "/api/v1/delegations",
+		`{"grantee":"bob@hermex.test","rights":"read"}`), http.StatusBadRequest)
+	if rec := do(http.MethodPost, "/api/v1/delegations", `{"grantee":"bob@hermex.test","rights":["owner"]}`); rec.Code >= 500 {
+		t.Fatalf("POST with an unknown level = %d: %s", rec.Code, rec.Body.String())
+	}
+	for fid, r := range folderRightsOf(t, dir, "bob@hermex.test") {
+		if r&(mapi.FrightsReadAny|mapi.FrightsCreate|mapi.FrightsDeleteAny|mapi.FrightsOwner) != 0 {
+			t.Errorf("folder %#x grants bob %#x after the refused delegations", fid, r)
+		}
 	}
 }
 

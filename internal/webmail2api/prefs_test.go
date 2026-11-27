@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +29,7 @@ func (a prefsAuth) GetUserPrefs(string) (directory.UserPrefs, bool, error) {
 }
 
 func (a prefsAuth) SetUserPrefs(_ string, u directory.UserPrefsUpdate) (bool, error) {
-	if u.Lang != nil && *u.Lang != "" && !slices.Contains(directory.UILanguages, *u.Lang) {
+	if !directory.ValidPrefs(u) {
 		return false, directory.ErrInvalidPref
 	}
 	if u.Theme != nil {
@@ -61,13 +60,13 @@ func TestPrefsRoundTrip(t *testing.T) {
 	code, out = call(http.MethodPut, prefs, `{"theme":"light"}`)
 	wantPrefs(t, "partial PUT", code, out, "light", "tr", false)
 
-	for _, body := range []string{`{"locale":"de"}`, `{}`, `not json`} {
-		if code, _ := call(http.MethodPut, prefs, body); code != http.StatusBadRequest {
-			t.Errorf("PUT %s = %d, want 400", body, code)
+	for _, body := range []string{`{"locale":"de"}`, `{}`, `not json`, `{"theme":"<script>"}`, `{"theme":"neon"}`, `{"locale":"tr\u0000"}`} {
+		if code, out := call(http.MethodPut, prefs, body); code != http.StatusBadRequest {
+			t.Errorf("PUT %s = %d (%v), want 400", body, code, out)
 		}
 	}
-	if stored.Lang != "tr" {
-		t.Errorf("a refused PUT changed the language to %q", stored.Lang)
+	if stored.Lang != "tr" || stored.Theme != "light" {
+		t.Errorf("a refused PUT changed the stored prefs to %q/%q", stored.Lang, stored.Theme)
 	}
 }
 
@@ -86,7 +85,7 @@ func prefsCaller(t *testing.T, stored *directory.UserPrefs) func(method, target,
 		rec := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rec, req)
 		var out map[string]any
-		_ = json.Unmarshal(rec.Body.Bytes(), &out) // a non-JSON body leaves out nil, which wantPrefs reports
+		mustNoErr(t, "decode "+method+" "+target+": "+rec.Body.String(), json.Unmarshal(rec.Body.Bytes(), &out))
 		return rec.Code, out
 	}
 }

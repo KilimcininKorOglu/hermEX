@@ -47,8 +47,12 @@ func TestMarkHasPictureRefusesAMissingContact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if err := markHasPicture(st, 987654); !errors.Is(err, objectstore.ErrNotFound) {
 		t.Errorf("markHasPicture on a missing contact: err = %v, want ErrNotFound", err)
+	}
+	// The refused write did not create the object it was aimed at.
+	if _, err := st.OpenMessage(987654); !errors.Is(err, objectstore.ErrNotFound) {
+		t.Errorf("after the refused write, OpenMessage err = %v, want ErrNotFound", err)
 	}
 }

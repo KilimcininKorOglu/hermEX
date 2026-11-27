@@ -2,6 +2,7 @@ package webmail2api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
 
@@ -22,11 +24,44 @@ import (
 // carries a valid session for it, the shape nearly every endpoint test needs.
 func apiHarness(t *testing.T) (requestFunc, string) {
 	t.Helper()
+	dir := freshMailbox(t)
+	return apiHarnessFor(t, dir), dir
+}
+
+// apiDo is apiHarness for a test that only makes requests.
+func apiDo(t *testing.T) requestFunc {
+	t.Helper()
+	return apiHarnessFor(t, freshMailbox(t))
+}
+
+// freshMailbox provisions an empty mailbox, as account creation does.
+func freshMailbox(t *testing.T) string {
+	t.Helper()
 	dir := t.TempDir()
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open mailbox", err)
-	st.Close()
-	return apiHarnessFor(t, dir), dir
+	mustClose(t, st)
+	return dir
+}
+
+// mustEncode encodes v and fails the test when it cannot, so a request body is
+// never sent as an empty encoding.
+func mustEncode(t testing.TB, v any) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("encode %T: %v", v, err)
+	}
+	return b
+}
+
+// mustClose closes c and fails the test when the close reports an error, so a
+// store or body that cannot be released is a failure rather than a silent leak.
+func mustClose(t testing.TB, c io.Closer) {
+	t.Helper()
+	if err := c.Close(); err != nil {
+		t.Errorf("close: %v", err)
+	}
 }
 
 // apiHarnessFor returns a request function against an existing mailbox
@@ -76,6 +111,21 @@ func mustMintToken(t *testing.T, secret []byte, c sessionClaims) string {
 	token, err := mintToken(secret, c)
 	mustNoErr(t, "mint the session token", err)
 	return token
+}
+
+// mustProp reads tag from pv as a T and stops the test when the property is
+// missing or holds another type.
+func mustProp[T any](t *testing.T, what string, pv mapi.PropertyValues, tag mapi.PropTag) T {
+	t.Helper()
+	v, ok := pv.Get(tag)
+	if !ok {
+		t.Fatalf("%s: property %#x is not set", what, uint32(tag))
+	}
+	got, ok := v.(T)
+	if !ok {
+		t.Fatalf("%s: property %#x holds %T", what, uint32(tag), v)
+	}
+	return got
 }
 
 // mustNoErr fails the test when err is set, naming the operation.

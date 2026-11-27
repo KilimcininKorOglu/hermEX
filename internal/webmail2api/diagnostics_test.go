@@ -17,6 +17,7 @@ import (
 func TestDiagnosticsSurfacesOwnFailedDeliveries(t *testing.T) {
 	spool, err := relay.Open(filepath.Join(t.TempDir(), "spool.sqlite3"))
 	mustNoErr(t, "open spool", err)
+	t.Cleanup(func() { mustNoErr(t, "close spool", spool.Close()) })
 	now := time.Now()
 	mustNoErr(t, "enqueue alice",
 		spool.Enqueue("alice@hermex.test", []string{"nobody@external.test"}, []byte("Subject: x\r\n\r\nhi"), now))
@@ -55,4 +56,24 @@ func TestDiagnosticsSurfacesOwnFailedDeliveries(t *testing.T) {
 	// A request naming another mailbox returns nothing (no cross-mailbox exposure).
 	other := decodeBody[diagnostics](t, "cross-mailbox diagnostics", do("/api/v1/mail/diagnostics?mailbox=bob@hermex.test"))
 	wantEq(t, "cross-mailbox diagnostic entries", len(other.Errors), 0)
+}
+
+// TestDiagnosticsReportsAnUnreadableQueue: when the relay queue cannot be read
+// the answer is a recorded 500, not an empty list that says nothing is stuck.
+func TestDiagnosticsReportsAnUnreadableQueue(t *testing.T) {
+	spool, err := relay.Open(filepath.Join(t.TempDir(), "spool.sqlite3"))
+	mustNoErr(t, "open spool", err)
+	mustNoErr(t, "close spool", spool.Close()) // a closed queue cannot be listed
+	secret := []byte("diagnostics-test-secret")
+	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, spool, "mail.hermex.test", secret, "", false)
+	token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: "/tmp/alice", Exp: time.Now().Add(time.Hour).Unix()})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/mail/diagnostics", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+	rec := httptest.NewRecorder()
+	sink := withSink(t)
+	srv.Handler().ServeHTTP(rec, req)
+	wantStatus(t, "diagnostics over an unreadable queue", rec, http.StatusInternalServerError)
+	if _, ok := sink.find("diagnostics-queue"); !ok {
+		t.Error("the queue failure was not recorded")
+	}
 }

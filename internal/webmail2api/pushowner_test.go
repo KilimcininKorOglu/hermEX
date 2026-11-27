@@ -63,6 +63,18 @@ func TestPushSubscribeRefusesAnotherAccountsEndpoint(t *testing.T) {
 	}
 }
 
+// TestPushUnsubscribeLeavesAnotherAccountsDevice: an endpoint is public to
+// anyone who saw it on the wire, so naming bob's endpoint as alice must not
+// remove bob's subscription.
+func TestPushUnsubscribeLeavesAnotherAccountsDevice(t *testing.T) {
+	const endpoint = "https://fcm.googleapis.com/fcm/send/bob-device"
+	rec := &recordingPushStore{saved: []directory.PushSubscription{
+		{Endpoint: endpoint, Email: "bob@hermex.test", P256dh: "k", Auth: "a"},
+	}}
+	pushRequest(t, takenPushStore{recordingPushStore: rec}, http.MethodDelete, "/api/v1/push/unsubscribe?endpoint="+url.QueryEscape(endpoint), "")
+	wantEq(t, "bob's subscriptions after alice's unsubscribe", len(rec.saved), 1)
+}
+
 // TestPushUnsubscribeReportsAFailedDelete proves a delete that fails is answered as
 // an error and recorded, rather than reported as done while the device keeps
 // receiving notices.

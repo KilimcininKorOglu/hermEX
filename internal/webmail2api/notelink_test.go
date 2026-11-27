@@ -1,9 +1,11 @@
 package webmail2api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -33,7 +35,7 @@ func noteLinkHarness(t *testing.T) func(method, target, body string) *httptest.R
 	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), other, time.Now(), 0); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	secret := []byte("note-link-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
@@ -146,6 +148,42 @@ func TestCreateMailNoteResolvesTheLink(t *testing.T) {
 	}
 }
 
+// TestAnUnreadablePIMObjectIsRecorded: a note or task the store lists but
+// cannot open drops out of the listing, and the operator's log is the only
+// trace of the damage, so it must be recorded.
+func TestAnUnreadablePIMObjectIsRecorded(t *testing.T) {
+	mbox := freshMailbox(t)
+	_, err := openMailbox(t, mbox).AppendMessage(int64(mapi.PrivateFIDInbox), []byte("From: bob@hermex.test\r\nSubject: C\r\nMessage-ID: <c-1@hermex.test>\r\n\r\nx\r\n"), time.Now(), 0)
+	mustNoErr(t, "append", err)
+	do := apiHarnessFor(t, mbox)
+	wantStatus(t, "note", do(http.MethodPost, "/api/v1/notes", `{"title":"n","linkedMessageId":"<c-1@hermex.test>"}`), http.StatusOK)
+	wantStatus(t, "task", do(http.MethodPost, "/api/v1/tasks", `{"title":"t"}`), http.StatusOK)
+
+	// Damage the store so every object open fails while listing still works.
+	db, err := sql.Open("sqlite", filepath.Join(mbox, "objects.sqlite3"))
+	mustNoErr(t, "open objects db", err)
+	_, err = db.Exec(`DROP TABLE recipients`)
+	mustNoErr(t, "drop recipients", err)
+	mustNoErr(t, "close objects db", db.Close())
+
+	for _, tc := range []struct{ path, op string }{
+		{"/api/v1/notes", "note-open"},
+		// Here the object that cannot be opened is the annotated mail itself.
+		{"/api/v1/mail/notes?id=inbox:1", "mail-notes-open"},
+		{"/api/v1/tasks", "task-open"},
+	} {
+		sink := withSink(t)
+		do(http.MethodGet, tc.path, "")
+		if _, ok := sink.find(tc.op); !ok {
+			t.Errorf("GET %s: an object the store could not open left no %s record", tc.path, tc.op)
+		}
+	}
+	// A damaged store is a server fault, not a missing mail; a uid that was never
+	// stored is still a plain 404.
+	wantStatus(t, "damaged mail", do(http.MethodGet, "/api/v1/mail/notes?id=inbox:1", ""), http.StatusInternalServerError)
+	wantStatus(t, "unknown mail", do(http.MethodGet, "/api/v1/mail/notes?id=inbox:999", ""), http.StatusNotFound)
+}
+
 // TestCreateMailNoteRefusesAnUnknownMail keeps the endpoint from writing a note
 // keyed to nothing.
 func TestCreateMailNoteRefusesAnUnknownMail(t *testing.T) {
@@ -156,7 +194,18 @@ func TestCreateMailNoteRefusesAnUnknownMail(t *testing.T) {
 	type listing struct {
 		Notes []noteJSON `json:"notes"`
 	}
+	for _, body := range []string{`{"id":"not-an-id","body":"x"}`, `{"body":"x"}`, `{`} {
+		if rec := do(http.MethodPost, "/api/v1/mail/notes", body); rec.Code == http.StatusOK {
+			t.Errorf("mail note %s answered 200", body)
+		}
+	}
 	if notes := okBody[listing](t, "list notes", do(http.MethodGet, "/api/v1/notes", "")).Notes; len(notes) != 0 {
 		t.Errorf("the refused note was stored: %+v", notes)
+	}
+	// Reading the notes of a mail that is not there is refused, never "every note".
+	for _, id := range []string{"inbox:999", "not-an-id"} {
+		if rec := do(http.MethodGet, "/api/v1/mail/notes?id="+id, ""); rec.Code == http.StatusOK {
+			t.Errorf("notes of %s answered 200: %s", id, rec.Body.String())
+		}
 	}
 }

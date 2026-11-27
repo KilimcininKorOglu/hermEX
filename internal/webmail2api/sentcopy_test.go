@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -20,7 +21,7 @@ func sentCopyHarness(t *testing.T) requestFunc {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 	accounts := directory.StaticAccounts{
 		"alice@hermex.test": {Password: "pw", MailboxPath: dir},
 	}
@@ -88,7 +89,7 @@ func TestSentCopySettingRoundTrips(t *testing.T) {
 		{ForSendAs: true, Exclusive: true},
 		{},
 	} {
-		body, _ := json.Marshal(want)
+		body := mustEncode(t, want)
 		if got := readSentCopy(t, do(http.MethodPut, "/api/v1/account/sent-copy", string(body))); got != want {
 			t.Errorf("PUT echoed %+v, want %+v", got, want)
 		}
@@ -106,7 +107,7 @@ func TestSentCopyNeedsASession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 	accounts := directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: dir}}
 	srv := NewServer(accounts, accounts, nil, "mail.hermex.test", []byte("sent-copy-secret"), "", false)
 
@@ -122,6 +123,44 @@ func TestSentCopyNeedsASession(t *testing.T) {
 			t.Errorf("%s without a session = %d, want 401", c.method, rec.Code)
 		}
 	}
+	st2 := openMailbox(t, dir)
+	cfg, err := st2.GetSentCopyConfig()
+	mustNoErr(t, "read sent-copy config", err)
+	if cfg != (objectstore.SentCopyConfig{}) {
+		t.Errorf("the unauthenticated PUT changed the setting to %+v", cfg)
+	}
+}
+
+// TestSentCopyRecordsAStoreFailure: when the mailbox cannot be opened, read
+// and write answer 500 and record why.
+func TestSentCopyRecordsAStoreFailure(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "never-provisioned")
+	do := loginAs(t, directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: missing}}, "alice@hermex.test")
+	for _, c := range []struct{ method, body, op string }{
+		{http.MethodGet, "", "sent-copy-read"},
+		{http.MethodPut, `{"forSendAs":true}`, "sent-copy-write"},
+	} {
+		sink := withSink(t)
+		wantStatus(t, c.method, do(c.method, "/api/v1/account/sent-copy", c.body), http.StatusInternalServerError)
+		if _, ok := sink.find(c.op); !ok {
+			t.Errorf("%s: the store failure left no %s record", c.method, c.op)
+		}
+	}
+}
+
+// TestSentCopyRefusesAMalformedBody leaves the stored setting as it was.
+func TestSentCopyRefusesAMalformedBody(t *testing.T) {
+	do := sentCopyHarness(t)
+	want := sentCopyJSON{ForSendAs: true}
+	readSentCopy(t, do(http.MethodPut, "/api/v1/account/sent-copy", string(mustEncode(t, want))))
+	for _, body := range []string{`{`, `{"forSendAs":"yes"}`, `[]`} {
+		if rec := do(http.MethodPut, "/api/v1/account/sent-copy", body); rec.Code == http.StatusOK {
+			t.Errorf("PUT %s answered 200", body)
+		}
+	}
+	if got := readSentCopy(t, do(http.MethodGet, "/api/v1/account/sent-copy", "")); got != want {
+		t.Errorf("after refused PUTs the setting reads %+v, want %+v", got, want)
+	}
 }
 
 // exclusiveSharedMailbox provisions alice and a shared mailbox that grants her
@@ -129,14 +168,14 @@ func TestSentCopyNeedsASession(t *testing.T) {
 func exclusiveSharedMailbox(t *testing.T) (accounts directory.StaticAccounts, aliceDir, sharedDir string) {
 	t.Helper()
 	aliceDir, sharedDir = t.TempDir(), t.TempDir()
-	if st, err := objectstore.Open(aliceDir); err == nil {
-		st.Close()
-	}
+	ast, err := objectstore.Open(aliceDir)
+	mustNoErr(t, "open alice's mailbox", err)
+	mustClose(t, ast)
 	shared, err := objectstore.Open(sharedDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer shared.Close()
+	defer mustClose(t, shared)
 	if err := shared.SetSendAs([]string{"alice@hermex.test"}); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +195,7 @@ func sentItems(t *testing.T, dir string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDSentItems))
 	if err != nil {
 		t.Fatal(err)

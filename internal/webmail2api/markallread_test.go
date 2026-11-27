@@ -24,7 +24,7 @@ func sharedInboxFor(t *testing.T, user string, rights uint32) (path string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if err := st.SetStoreOwners([]string{"owner@hermex.test"}); err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func unreadCount(t *testing.T, path string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
 	if err != nil {
 		t.Fatal(err)
@@ -103,6 +103,35 @@ func TestMarkAllReadRefusesAReadOnlyGrantee(t *testing.T) {
 	if got := unreadCount(t, shared); got != 2 {
 		t.Errorf("%d messages left unread, want both: a read-only grantee changed the owner's state", got)
 	}
+}
+
+// TestMarkAllReadRefusesStrangersAndUnknownFolders: a caller with no grant at
+// all, a target that is another user's private mailbox, and a folder that does
+// not exist are all refused, and nothing is marked.
+func TestMarkAllReadRefusesStrangersAndUnknownFolders(t *testing.T) {
+	shared := sharedInboxFor(t, "someone@hermex.test", mapi.RightsEditor)
+	own := t.TempDir()
+	accounts := directory.StaticAccounts{
+		"mallory@hermex.test": {Password: "pw", MailboxPath: own},
+		"team@hermex.test":    {Shared: true, MailboxPath: shared},
+		"bob@hermex.test":     {Password: "pw", MailboxPath: shared},
+	}
+	secret := []byte("mark-all-read-test-secret")
+	srv := NewServer(accounts, accounts, nil, "mail.hermex.test", secret, "", false)
+	for _, owner := range []string{"team@hermex.test", "bob@hermex.test", "nobody@hermex.test"} {
+		if rec := markAllRead(t, srv, secret, "mallory@hermex.test", own, owner); rec.Code == http.StatusOK {
+			t.Errorf("mark-all-read as a stranger on %s answered 200", owner)
+		}
+	}
+	token := mustMintToken(t, secret, sessionClaims{Email: "bob@hermex.test", Mailbox: shared, Exp: time.Now().Add(time.Hour).Unix()})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/mail/mark-all-read", strings.NewReader(`{"folder":"no-such-folder"}`))
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code == http.StatusOK {
+		t.Errorf("mark-all-read on an unknown folder answered 200")
+	}
+	wantEq(t, "unread after the refused passes", unreadCount(t, shared), 2)
 }
 
 // TestMarkAllReadAllowsAWriteGrantee is the negative control: the grant that does
@@ -219,7 +248,7 @@ func TestAvatarKeepsItsPrivateCache(t *testing.T) {
 	if err := st.SetUserPhoto([]byte("\x89PNG\r\n\x1a\nphoto")); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	accounts := directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: own}}
 	secret := []byte("no-store-test-secret")

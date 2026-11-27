@@ -25,7 +25,7 @@ func TestQuarantineRelease(t *testing.T) {
 	raw := []byte("From: spammer@x.test\r\nTo: alice@hermex.test\r\nSubject: Spam\r\n\r\nbuy now\r\n")
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDJunk), raw, time.Now(), 0)
 	mustNoErr(t, "append to junk", err)
-	st.Close()
+	mustClose(t, st)
 
 	secret := []byte("digest-test-secret")
 	accs := directory.StaticAccounts{alice: {Password: "x", MailboxPath: dir}}
@@ -60,7 +60,7 @@ func TestQuarantineRelease(t *testing.T) {
 	// The message is now in the Inbox and gone from Junk.
 	st2, err := objectstore.Open(dir)
 	mustNoErr(t, "reopen mailbox", err)
-	defer st2.Close()
+	defer mustClose(t, st2)
 	inbox, err := st2.ListMessages(int64(mapi.PrivateFIDInbox))
 	mustNoErr(t, "list inbox", err)
 	wantEq(t, "inbox messages after release", len(inbox), 1)
@@ -73,6 +73,40 @@ func TestQuarantineRelease(t *testing.T) {
 	wantContains(t, "bad token page", rec.Body.String(), "invalid or has expired")
 }
 
+// TestARefusedReleaseLeavesTheMessageInJunk: a GET (a link scanner prefetching
+// the digest), a token signed with another key, and an expired token release
+// nothing.
+func TestARefusedReleaseLeavesTheMessageInJunk(t *testing.T) {
+	const alice = "alice@hermex.test"
+	dir := freshMailbox(t)
+	info, err := openMailbox(t, dir).AppendMessage(int64(mapi.PrivateFIDJunk), []byte("From: s@x.test\r\nSubject: Spam\r\n\r\nx\r\n"), time.Now(), 0)
+	mustNoErr(t, "append to junk", err)
+	secret := []byte("digest-test-secret")
+	accs := directory.StaticAccounts{alice: {Password: "x", MailboxPath: dir}}
+	srv := NewServer(accs, accs, nil, "mail.hermex.test", []byte("session-secret"), "", false)
+	srv.DigestSecret = secret
+	mint := func(key []byte, exp time.Time) string {
+		tok, err := quarantine.Mint(key, quarantine.Claims{Mailbox: alice, UID: info.UID, Expiry: exp.Unix()})
+		mustNoErr(t, "mint token", err)
+		return tok
+	}
+	valid := mint(secret, time.Now().Add(time.Hour))
+	srv.Handler().ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/quarantine/release?t="+url.QueryEscape(valid), nil))
+	for name, tok := range map[string]string{
+		"forged":  mint([]byte("attacker-key"), time.Now().Add(time.Hour)),
+		"expired": mint(secret, time.Now().Add(-time.Minute)),
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/quarantine/release", strings.NewReader("t="+url.QueryEscape(tok)))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		wantContains(t, name+" token page", rec.Body.String(), "invalid or has expired")
+	}
+	junk, err := openMailbox(t, dir).ListMessages(int64(mapi.PrivateFIDJunk))
+	mustNoErr(t, "list junk", err)
+	wantEq(t, "junk messages after the refused releases", len(junk), 1)
+}
+
 // TestAFailedReleaseIsRecorded makes the move out of Junk fail for a reason other
 // than the message being gone. The user is only asked to try again, so the
 // operator's record is the one place the cause can be found.
@@ -82,7 +116,7 @@ func TestAFailedReleaseIsRecorded(t *testing.T) {
 	dir := t.TempDir()
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open store", err)
-	st.Close()
+	mustClose(t, st)
 	prev := releaseFromJunk
 	releaseFromJunk = func(*objectstore.Store, uint32) error { return errors.New("disk full") }
 	t.Cleanup(func() { releaseFromJunk = prev })

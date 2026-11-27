@@ -14,8 +14,18 @@ import (
 // oversizedServer builds an API server with a tiny body cap and a session cookie
 // for a real mailbox, so a request reaches a handler that actually decodes a body.
 func oversizedServer(t *testing.T, cap int64) (*Server, string) {
+	srv, token, box := oversizedServerBox(t, cap)
+	if box == "" {
+		t.Fatal("oversizedServerBox provisioned no mailbox")
+	}
+	return srv, token
+}
+
+// oversizedServerBox is oversizedServer that also returns the provisioned
+// mailbox, so a test can see that a refused request stored nothing.
+func oversizedServerBox(t *testing.T, cap int64) (*Server, string, string) {
 	t.Helper()
-	box := t.TempDir()
+	box := freshMailbox(t)
 	accounts := directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: box}}
 	secret := []byte("body-limit-test-secret")
 	srv := NewServer(accounts, accounts, nil, "mail.hermex.test", secret, "", false)
@@ -27,7 +37,7 @@ func oversizedServer(t *testing.T, cap int64) (*Server, string) {
 	}
 	SetMaxRequestBody(cap)
 	t.Cleanup(func() { SetMaxRequestBody(0) })
-	return srv, token
+	return srv, token, box
 }
 
 // post sends a body to an API path with the session cookie.
@@ -93,11 +103,12 @@ func TestAWellSizedBodyIsUntouched(t *testing.T) {
 // of its own: without sharing the overflow state, its own reader would trip first
 // and the answer would fall back to 400.
 func TestTheImportCapAlsoAnswers413(t *testing.T) {
-	srv, token := oversizedServer(t, 512<<20) // shared cap far above the import's own
+	srv, token, box := oversizedServerBox(t, 512<<20) // shared cap far above the import's own
 	big := `{"folder":"inbox","file":"` + strings.Repeat("A", maxImportBytes+1024) + `"}`
 
 	rec := postBody(t, srv, token, "/api/v1/mail/import", big)
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Errorf("oversized import = %d, want 413; body=%s", rec.Code, rec.Body.String())
 	}
+	wantEq(t, "inbox after the refused import", inboxCount(t, box), 0)
 }

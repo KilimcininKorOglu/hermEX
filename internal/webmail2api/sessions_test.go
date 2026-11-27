@@ -1,6 +1,9 @@
 package webmail2api
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestDeviceLabel proves the session list's coarse "Browser on OS" summary, including
 // that iPhone matches iOS before its "like Mac OS X" token trips the macOS branch.
@@ -15,6 +18,17 @@ func TestDeviceLabel(t *testing.T) {
 	for ua, want := range cases {
 		if got := deviceLabel(ua); got != want {
 			t.Errorf("deviceLabel(%q) = %q, want %q", ua, got, want)
+		}
+	}
+	// A client-chosen header is never echoed: markup, control bytes and an
+	// oversized value all reduce to a fixed label.
+	for _, ua := range []string{
+		"<script>alert(1)</script>",
+		"Evil\r\nSet-Cookie: x=1",
+		strings.Repeat("A", 64<<10),
+	} {
+		if got := deviceLabel(ua); got != "Browser" {
+			t.Errorf("deviceLabel(%.30q) = %.40q, want the fixed label", ua, got)
 		}
 	}
 }

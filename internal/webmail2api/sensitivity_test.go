@@ -20,6 +20,10 @@ func TestBuildOutgoingSensitivity(t *testing.T) {
 		{"personal", "Personal"},
 		{"private", "Private"},
 		{"confidential", "Company-Confidential"},
+		// A value outside the four MS-OXCMAIL levels, and one smuggling a
+		// header, carry no marking.
+		{"top-secret", ""},
+		{"private\r\nBcc: spy@evil.test", ""},
 	}
 	for _, tc := range cases {
 		raw, err := srv.buildOutgoing("alice@hermex.test", "alice@hermex.test", sendRequest{
@@ -33,6 +37,9 @@ func TestBuildOutgoingSensitivity(t *testing.T) {
 		}
 		if got := sensitivityHeader(string(raw)); got != tc.header {
 			t.Errorf("sensitivity=%q → header %q, want %q", tc.value, got, tc.header)
+		}
+		if strings.Contains(string(raw), "spy@evil.test") {
+			t.Errorf("sensitivity=%q injected a header", tc.value)
 		}
 	}
 }

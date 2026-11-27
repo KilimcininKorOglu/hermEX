@@ -75,12 +75,15 @@ func contactHasPhoto(t *testing.T, mbox, id string) bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msg, err := st.OpenMessage(mid)
 	if err != nil {
 		t.Fatalf("open contact %d: %v", mid, err)
 	}
-	_, _, has := objectstore.ContactPhotoAttachment(msg)
+	num, data, has := objectstore.ContactPhotoAttachment(msg)
+	if has && (num < 0 || len(data) == 0) {
+		t.Fatalf("contact %d marks photo attachment %d with %d bytes", mid, num, len(data))
+	}
 	return has
 }
 
@@ -99,6 +102,37 @@ func TestContactPhotoRefusesInfectedContent(t *testing.T) {
 	}
 	if contactHasPhoto(t, mbox, id) {
 		t.Error("the infected photo was stored on the contact anyway")
+	}
+}
+
+// TestARefusedPhotoKeepsThePreviousOne: an infected or empty upload is refused
+// and the contact keeps the clean photo it already had, byte for byte.
+func TestARefusedPhotoKeepsThePreviousOne(t *testing.T) {
+	withScanner(t, avtest.Clean)
+	srv, token, mbox := importHarness(t)
+	id := createContact(t, srv, token)
+	clean := []byte("an ordinary photo")
+	wantStatus(t, "clean photo", putPhoto(t, srv, token, id, clean), http.StatusOK)
+
+	if rec := putPhoto(t, srv, token, id, nil); rec.Code == http.StatusOK {
+		t.Errorf("an empty photo was accepted: %s", rec.Body.String())
+	}
+	withScanner(t, avtest.Infected)
+	if rec := putPhoto(t, srv, token, id, []byte("MZ malware bytes")); rec.Code == http.StatusOK {
+		t.Errorf("an infected photo was accepted: %s", rec.Body.String())
+	}
+
+	mid, err := strconv.ParseInt(id, 10, 64)
+	mustNoErr(t, "contact id", err)
+	st, err := objectstore.Open(mbox)
+	mustNoErr(t, "open the mailbox", err)
+	defer mustClose(t, st)
+	msg, err := st.OpenMessage(mid)
+	mustNoErr(t, "open the contact", err)
+	num, data, has := objectstore.ContactPhotoAttachment(msg)
+	wantEq(t, "photo kept", has, true)
+	if num < 0 || !bytes.Equal(data, clean) {
+		t.Errorf("photo attachment %d holds %q, want the earlier clean photo", num, data)
 	}
 }
 

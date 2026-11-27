@@ -2,6 +2,9 @@ package webmail2api
 
 import (
 	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"hermex/internal/directory"
@@ -74,6 +77,37 @@ func TestGetIdentitiesFallsBackToSelf(t *testing.T) {
 	if len(got.Identities) != 1 || got.Identities[0] != "bob@hermex.test" {
 		t.Errorf("identities = %v, want [bob@hermex.test]", got.Identities)
 	}
+}
+
+// failingIdentities is a directory whose alias lookup fails.
+type failingIdentities struct{ directory.StaticAccounts }
+
+func (failingIdentities) Identities(string) ([]string, error) {
+	return nil, errors.New("directory down")
+}
+
+// TestGetIdentitiesRecordsALookupFailure: an alias lookup that fails offers
+// only the caller's own address (never an identity it could not check) and
+// leaves a record, and a request without a session names nobody.
+func TestGetIdentitiesRecordsALookupFailure(t *testing.T) {
+	sink := withSink(t)
+	accounts := failingIdentities{directory.StaticAccounts{"bob@hermex.test": {MailboxPath: t.TempDir()}}}
+	secret := []byte("identities-failing-secret")
+	srv := NewServer(accounts, accounts, nil, "mail.hermex.test", secret, "", false)
+
+	got := okBody[struct {
+		Identities []string `json:"identities"`
+	}](t, "identities", authedGet(t, srv, secret, "bob@hermex.test", "/api/v1/identities"))
+	if len(got.Identities) != 1 || got.Identities[0] != "bob@hermex.test" {
+		t.Errorf("identities = %v, want [bob@hermex.test]", got.Identities)
+	}
+	if _, ok := sink.find("identities"); !ok {
+		t.Error("the failed alias lookup left no record")
+	}
+
+	anon := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(anon, httptest.NewRequest(http.MethodGet, "/api/v1/identities", nil))
+	wantStatus(t, "anonymous identities", anon, http.StatusUnauthorized)
 }
 
 // TestSendingFromAnOwnAliasIsNotADelegateSend is the distinction the sent copy

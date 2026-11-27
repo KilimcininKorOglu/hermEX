@@ -68,7 +68,10 @@ func TestProfileLocaleReadFailure(t *testing.T) {
 	if wrote {
 		t.Error("the locale was written although the stored language could not be read")
 	}
-	srv.userLocale("alice@hermex.test")
+	tz, locale := srv.userLocale("alice@hermex.test")
+	if tz != "" || locale != "" {
+		t.Errorf("an unreadable locale answered %q/%q, want nothing claimed", tz, locale)
+	}
 	if _, ok := sink.find("profile-locale-read"); !ok {
 		t.Error("a failed locale read left no trace")
 	}
@@ -116,6 +119,9 @@ func TestProfileSaveReportsAFailedWrite(t *testing.T) {
 	refusing := NewServer(refused, accounts, nil, "mail.hermex.test", secret, "", false)
 	if rec := putProfile(t, refusing, secret, mbox, `{"timezone":"Mars/Olympus"}`); rec.Code != http.StatusBadRequest {
 		t.Errorf("PUT a refused timezone = %d, want 400", rec.Code)
+	}
+	if rec := putProfile(t, refusing, secret, mbox, `{`); rec.Code != http.StatusBadRequest {
+		t.Errorf("PUT a body that is not JSON = %d, want 400", rec.Code)
 	}
 	// The onboarded flag lives in the mailbox; a missing mailbox cannot hold it.
 	gone := filepath.Join(t.TempDir(), "missing")

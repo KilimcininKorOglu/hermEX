@@ -56,8 +56,7 @@ func (a *appAuth) AuthenticateAppPassword(string, string) (string, bool) { retur
 // appHarness returns the directory plus one browser, signed in.
 func appHarness(t *testing.T) (*appAuth, requestFunc) {
 	t.Helper()
-	base, _ := sfHarness(t)
-	auth := newAppAuth(base)
+	auth := newAppAuth(sfDirectory(t))
 	do := browser(auth, auth.accounts)
 	sfLogin(t, do)
 	return auth, do
@@ -95,7 +94,7 @@ func TestMintingACredentialAsksForThePassword(t *testing.T) {
 // read on every visit to the settings page, and a secret in it would be a
 // credential handed back to any session that reaches the page.
 func TestTheListNeverCarriesASecret(t *testing.T) {
-	_, do := appHarness(t)
+	auth, do := appHarness(t)
 	if rec := do(http.MethodPost, "/api/v1/account/app-passwords", `{"name":"Phone","password":"pw"}`); rec.Code != http.StatusOK {
 		t.Fatalf("mint = %d", rec.Code)
 	}
@@ -107,8 +106,14 @@ func TestTheListNeverCarriesASecret(t *testing.T) {
 	if !strings.Contains(body, `"name":"Phone"`) {
 		t.Fatalf("the listing does not describe the credential: %s", body)
 	}
-	if strings.Contains(body, "SECRET") {
-		t.Errorf("the listing carried the secret: %s", body)
+	// The secret the directory minted, read from the directory itself.
+	if len(auth.items) != 1 {
+		t.Fatalf("the directory holds %d app passwords, want 1", len(auth.items))
+	}
+	for id, secret := range auth.items {
+		if strings.Contains(body, secret) {
+			t.Errorf("the listing carried the secret of %d: %s", id, body)
+		}
 	}
 }
 
@@ -120,6 +125,12 @@ func TestRevokingRemovesTheCredential(t *testing.T) {
 	}
 	if rec := do(http.MethodDelete, "/api/v1/account/app-passwords/999", ""); rec.Code != http.StatusNotFound {
 		t.Errorf("revoking an unknown id = %d, want 404", rec.Code)
+	}
+	if rec := do(http.MethodDelete, "/api/v1/account/app-passwords/not-a-number", ""); rec.Code != http.StatusBadRequest && rec.Code != http.StatusNotFound {
+		t.Errorf("revoking a non-numeric id = %d, want a refusal", rec.Code)
+	}
+	if len(auth.items) != 1 {
+		t.Fatalf("the refused revokes left %d credentials, want the 1 minted", len(auth.items))
 	}
 	if rec := do(http.MethodDelete, "/api/v1/account/app-passwords/1", ""); rec.Code != http.StatusOK {
 		t.Fatalf("revoke = %d: %s", rec.Code, rec.Body.String())

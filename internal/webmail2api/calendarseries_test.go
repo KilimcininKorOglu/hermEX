@@ -23,7 +23,7 @@ func listWindow(t *testing.T, do requestFunc, start, end string) []eventJSON {
 // TestEventKeepsItsRecurrenceAndZone reads back what the editor saved: the rule,
 // the zone and the series' first start.
 func TestEventKeepsItsRecurrenceAndZone(t *testing.T) {
-	do, _ := apiHarness(t)
+	do := apiDo(t)
 	wantStatus(t, "create", do(http.MethodPost, "/api/v1/calendar/events", berlinStandup), http.StatusOK)
 
 	e := listOneEvent(t, do, "list")
@@ -37,7 +37,7 @@ func TestEventKeepsItsRecurrenceAndZone(t *testing.T) {
 // row per instance, all at 09:00 Berlin, so 08:00 UTC before the switch and 07:00
 // UTC after it, each naming its instance and the series it belongs to.
 func TestWindowExpandsASeriesOnItsWallClock(t *testing.T) {
-	do, _ := apiHarness(t)
+	do := apiDo(t)
 	wantStatus(t, "create", do(http.MethodPost, "/api/v1/calendar/events", berlinStandup), http.StatusOK)
 
 	rows := listWindow(t, do, "2026-03-28T00:00:00Z", "2026-03-31T00:00:00Z")
@@ -57,7 +57,7 @@ func TestWindowExpandsASeriesOnItsWallClock(t *testing.T) {
 // March, so its master's own times lie outside the window and only the recurring
 // flag brings it in.
 func TestWindowFindsASeriesThatStartedBefore(t *testing.T) {
-	do, _ := apiHarness(t)
+	do := apiDo(t)
 	wantStatus(t, "create", do(http.MethodPost, "/api/v1/calendar/events", berlinStandup), http.StatusOK)
 
 	rows := listWindow(t, do, "2026-06-01T00:00:00Z", "2026-06-02T00:00:00Z")
@@ -71,7 +71,7 @@ func TestWindowFindsASeriesThatStartedBefore(t *testing.T) {
 // whose export is in UTC and whose zone therefore comes from the stored display
 // time zone.
 func TestSingleEventKeepsItsZone(t *testing.T) {
-	do, _ := apiHarness(t)
+	do := apiDo(t)
 	wantStatus(t, "create", do(http.MethodPost, "/api/v1/calendar/events",
 		`{"summary":"Lunch","start":"2026-08-02T09:00:00Z","end":"2026-08-02T10:00:00Z","timezone":"Europe/Istanbul"}`), http.StatusOK)
 
@@ -83,7 +83,7 @@ func TestSingleEventKeepsItsZone(t *testing.T) {
 // TestSeriesExportCarriesItsZone downloads the series as .ics: the file names the
 // zone and describes it, so the importing client places 09:00 in Berlin.
 func TestSeriesExportCarriesItsZone(t *testing.T) {
-	do, _ := apiHarness(t)
+	do := apiDo(t)
 	wantStatus(t, "create", do(http.MethodPost, "/api/v1/calendar/events", berlinStandup), http.StatusOK)
 	uid := listOneEvent(t, do, "list").UID
 
@@ -100,7 +100,7 @@ func TestSeriesExportCarriesItsZone(t *testing.T) {
 // TestEventRefusesARuleThatIsNotOne keeps a line break in the recurrence from
 // adding lines of the sender's choosing to the stored calendar.
 func TestEventRefusesARuleThatIsNotOne(t *testing.T) {
-	do, _ := apiHarness(t)
+	do := apiDo(t)
 	for _, rule := range []string{`FREQ=DAILY\r\nATTENDEE:mailto:x@example.test`, "FREQ=DAILY;TZID=X:1", "SOMETIMES"} {
 		wantStatus(t, "create "+rule, do(http.MethodPost, "/api/v1/calendar/events",
 			`{"summary":"x","start":"2026-08-02T09:00:00Z","recurrence":"`+rule+`"}`), http.StatusBadRequest)

@@ -36,14 +36,21 @@ func TestTokenRefusesAForgery(t *testing.T) {
 	if _, err := verifyToken([]byte("other-secret"), tok, now); err == nil {
 		t.Error("a token verified under another secret")
 	}
-	_, sig, _ := strings.Cut(tok, ".")
+	_, sig, found := strings.Cut(tok, ".")
+	if !found {
+		t.Fatalf("minted token %q has no payload.signature separator", tok)
+	}
 	forged := base64.RawURLEncoding.EncodeToString(
 		[]byte(`{"email":"bob@hermex.test","mbox":"/mb/bob","exp":9999999999}`))
+	notJSON := base64.RawURLEncoding.EncodeToString([]byte("not json"))
 	for name, bad := range map[string]string{
-		"edited payload": forged + "." + sig,
-		"no signature":   forged + ".",
-		"no separator":   forged,
-		"empty":          "",
+		"edited payload":   forged + "." + sig,
+		"no signature":     forged + ".",
+		"no separator":     forged,
+		"empty":            "",
+		"garbage payload":  notJSON + "." + sig,
+		"extra segment":    tok + ".x",
+		"signature as b64": forged + "." + base64.RawURLEncoding.EncodeToString([]byte("x")),
 	} {
 		if c, err := verifyToken(secret, bad, now); err == nil {
 			t.Errorf("%s verified as %+v", name, c)

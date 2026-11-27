@@ -17,6 +17,10 @@ func TestInboxDelta(t *testing.T) {
 		{"a delete lowers the total", 6, 3, 5, 3, "folder_update"},
 		{"reading lowers unread only", 5, 3, 5, 1, "folder_update"},
 		{"an unchanged poll is silent", 5, 1, 5, 1, ""},
+		// One message deleted and one unread arrival between polls keep the total;
+		// the unread shift still has to wake the SPA.
+		{"a swap that keeps the total", 5, 1, 5, 2, "folder_update"},
+		{"marking unread raises unread only", 5, 1, 5, 2, "folder_update"},
 	}
 	for _, c := range cases {
 		if got := inboxDelta(c.prevTotal, c.prevUnread, c.total, c.unread); got != c.want {

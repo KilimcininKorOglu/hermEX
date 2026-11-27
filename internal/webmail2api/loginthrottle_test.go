@@ -45,6 +45,16 @@ func TestLoginThrottle(t *testing.T) {
 	if code := post(); code != http.StatusTooManyRequests {
 		t.Fatalf("after threshold = %d, want 429", code)
 	}
+	// The same account spelled in another case, or with surrounding space, is
+	// the same account (RFC 5321 domains and this directory's addresses are
+	// case-insensitive), so it cannot reset the lockout.
+	for _, spelled := range []string{"VICTIM@HERMEX.TEST", " victim@hermex.test "} {
+		body := strings.NewReader(`{"email":"` + spelled + `","password":"guess"}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		wantStatus(t, "locked account spelled "+spelled, rec, http.StatusTooManyRequests)
+	}
 }
 
 // TestLoginThrottleCountsTheAddressToo proves the address axis is wired at the

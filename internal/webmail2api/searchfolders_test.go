@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -53,8 +54,9 @@ func TestSavedSearchDaysAreTheCallersDays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, st := savedSearchStore(t)
-	defer st.Close()
+	st, err := objectstore.Open(t.TempDir())
+	mustNoErr(t, "open mailbox", err)
+	defer mustClose(t, st)
 	inbox := int64(mapi.PrivateFIDInbox)
 	appendAt(t, st, inbox, "a@hermex.test", "before", "2026-11-26T04:59:00Z") // 25 Nov 23:59 in New York
 	appendAt(t, st, inbox, "a@hermex.test", "first", "2026-11-26T05:00:00Z")  // 26 Nov 00:00
@@ -113,13 +115,13 @@ func TestSavedSearchIsAStoreSearchFolder(t *testing.T) {
 	appendAt(t, st, int64(mapi.PrivateFIDInbox), "Boss <boss@corp.test>", "Quarterly report", "2026-03-01T10:00:00Z")
 	appendAt(t, st, int64(mapi.PrivateFIDInbox), "friend@else.test", "Quarterly party", "2026-03-02T10:00:00Z")
 	appendAt(t, st, int64(mapi.PrivateFIDSentItems), "me@hermex.test", "Quarterly report reply", "2026-03-03T10:00:00Z")
-	st.Close()
+	mustClose(t, st)
 	do := loginAs(t, directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: dir}}, "alice@hermex.test")
 
 	var made searchFolderJSON
 	readJSON(t, do(http.MethodPost, "/api/v1/search-folders", `{"name":"Boss","from":"boss@corp","subject":"quarterly","base_folders":["inbox"]}`), &made)
 	want := searchFolderJSON{ID: made.ID, Name: "Boss", From: "boss@corp", Subject: "quarterly", BaseFolders: []string{"inbox"}}
-	if list := listSaved(t, do); len(list) != 1 || !sameSearch(list[0], want) {
+	if list := listSaved(t, do); len(list) != 1 || !sameSearch(t, list[0], want) {
 		t.Fatalf("saved searches = %+v, want %+v", list, want)
 	}
 	if got := resultSubjects(t, do, made.ID); len(got) != 1 || !got["Quarterly report"] {
@@ -175,7 +177,7 @@ func finderNames(t *testing.T, dir string) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	finder, err := st.SearchFolderChildren(int64(mapi.PrivateFIDFinder))
 	if err != nil {
 		t.Fatal(err)
@@ -194,7 +196,7 @@ func settingsBlob(t *testing.T, dir string) map[string]json.RawMessage {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	blob, err := st.GetWebmailSettings()
 	if err != nil {
 		t.Fatal(err)
@@ -207,10 +209,9 @@ func settingsBlob(t *testing.T, dir string) map[string]json.RawMessage {
 }
 
 // sameSearch compares the fields a saved search round-trips.
-func sameSearch(a, b searchFolderJSON) bool {
-	aj, _ := json.Marshal(a)
-	bj, _ := json.Marshal(b)
-	return string(aj) == string(bj)
+func sameSearch(t *testing.T, a, b searchFolderJSON) bool {
+	t.Helper()
+	return string(mustEncode(t, a)) == string(mustEncode(t, b))
 }
 
 // TestLegacySavedSearchesBecomeSearchFolders proves a saved search the settings
@@ -222,7 +223,7 @@ func TestLegacySavedSearchesBecomeSearchFolders(t *testing.T) {
 	if err := st.SetWebmailSettings(`{"webmail2SearchFolders":[{"id":"ab12cd34","name":"Invoices","subject":"invoice"}],"theme":"dark"}`); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 	do := loginAs(t, directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: dir}}, "alice@hermex.test")
 
 	list := listSaved(t, do)
@@ -257,7 +258,7 @@ func TestAnotherClientsSearchFolderKeepsItsCriteria(t *testing.T) {
 	if err := st.SetSearchCriteria(fid, objectstore.SearchCriteria{Restriction: &important, Scope: []int64{int64(mapi.PrivateFIDInbox)}, Flags: mapi.SearchRestart}); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 	do := loginAs(t, directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: dir}}, "alice@hermex.test")
 	id := jsonID(fid)
 
@@ -282,25 +283,29 @@ func storedRestriction(t *testing.T, dir string, fid int64) *mapi.Restriction {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
-	c, _, err := st.GetSearchCriteria(fid)
+	defer mustClose(t, st)
+	c, state, err := st.GetSearchCriteria(fid)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// A saved search is a live view, so its search runs ([MS-OXCFOLD] 2.2.1.5.2):
+	// Outlook shows a folder that is not running as empty.
+	if state&mapi.SearchStateRunning == 0 {
+		t.Errorf("search folder %d reports state %#x, want it running", fid, state)
 	}
 	return c.Restriction
 }
 
 // jsonID renders a folder id as the SPA's saved search id.
 func jsonID(fid int64) string {
-	b, _ := json.Marshal(fid)
-	return string(b)
+	return strconv.FormatInt(fid, 10)
 }
 
 // TestSavedSearchIDNamesOnlyASavedSearch proves a client id naming an ordinary
 // folder reads as no saved search, so the endpoint cannot rename or delete one.
 func TestSavedSearchIDNamesOnlyASavedSearch(t *testing.T) {
 	dir, st := savedSearchStore(t)
-	st.Close()
+	mustClose(t, st)
 	do := loginAs(t, directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: dir}}, "alice@hermex.test")
 	inbox := jsonID(int64(mapi.PrivateFIDInbox))
 	for _, c := range []struct{ method, target, body string }{
@@ -311,5 +316,33 @@ func TestSavedSearchIDNamesOnlyASavedSearch(t *testing.T) {
 		if rec := do(c.method, c.target, c.body); rec.Code != http.StatusNotFound {
 			t.Errorf("%s %s = %d, want 404", c.method, c.target, rec.Code)
 		}
+	}
+	st2, err := objectstore.Open(dir)
+	mustNoErr(t, "reopen", err)
+	defer mustClose(t, st2)
+	if _, err := st2.ListMessages(int64(mapi.PrivateFIDInbox)); err != nil {
+		t.Errorf("the Inbox is gone after the refused calls: %v", err)
+	}
+}
+
+// TestSavedSearchRefusesBadCriteria: a saved search with no name, an unreadable
+// date, an unknown base folder or a body that is not JSON is refused and
+// creates no search folder.
+func TestSavedSearchRefusesBadCriteria(t *testing.T) {
+	dir, st := savedSearchStore(t)
+	mustClose(t, st)
+	do := loginAs(t, directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: dir}}, "alice@hermex.test")
+	for _, body := range []string{
+		`{"name":"","subject":"x"}`,
+		`{"name":"d","date_from":"yesterday"}`,
+		`{"name":"b","base_folders":["../../nowhere"]}`,
+		`{`,
+	} {
+		if rec := do(http.MethodPost, "/api/v1/search-folders", body); rec.Code == http.StatusOK {
+			t.Errorf("create %s answered 200", body)
+		}
+	}
+	if names := finderNames(t, dir); len(names) != 0 {
+		t.Errorf("Finder holds %v after the refused creates, want nothing", names)
 	}
 }

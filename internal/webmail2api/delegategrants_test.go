@@ -19,7 +19,7 @@ func TestADelegationMirrorsItsSendGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 
 	err = applyGrants(st, func(g *storeGrants) {
 		g.set("asonly@hermex.test", true, false)
@@ -60,6 +60,30 @@ func TestADelegationMirrorsItsSendGrants(t *testing.T) {
 	}
 }
 
+// TestRemovingAStrangerTouchesNoGrant: removing an address that holds no
+// delegation changes nothing, so a stale or forged id cannot strip a real
+// delegate of access or send rights.
+func TestRemovingAStrangerTouchesNoGrant(t *testing.T) {
+	st := openMailbox(t, freshMailbox(t))
+	mustNoErr(t, "grant", applyGrants(st, func(g *storeGrants) { g.set("kept@hermex.test", true, true) }))
+	mustNoErr(t, "remove a stranger", applyGrants(st, func(g *storeGrants) { g.remove("stranger@hermex.test") }))
+
+	for _, c := range []struct {
+		name string
+		read func() ([]string, error)
+	}{
+		{"delegates", st.GetDelegates},
+		{"send-as", st.GetSendAs},
+		{"send-on-behalf", st.GetSendOnBehalf},
+	} {
+		list, err := c.read()
+		mustNoErr(t, c.name, err)
+		if !slices.Equal(list, []string{"kept@hermex.test"}) {
+			t.Errorf("the %s list = %v after removing a stranger, want [kept@hermex.test]", c.name, list)
+		}
+	}
+}
+
 // TestRemovingADelegationClearsItsGrants proves a revoked delegation takes its
 // send grants with it.
 func TestRemovingADelegationClearsItsGrants(t *testing.T) {
@@ -68,7 +92,7 @@ func TestRemovingADelegationClearsItsGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 
 	if err := applyGrants(st, func(g *storeGrants) { g.set("gone@hermex.test", true, true) }); err != nil {
 		t.Fatal(err)

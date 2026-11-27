@@ -64,7 +64,7 @@ func TestAFolderShareStaysInsideTheOrganization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 	accounts := directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: dir}}
 	for _, a := range []string{"bob@hermex.test", "mallory@other-org.test"} {
 		accounts[a] = directory.Account{Password: "pw", MailboxPath: t.TempDir()}
@@ -80,13 +80,42 @@ func TestAFolderShareStaysInsideTheOrganization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	entries, err := st.ListPermissions(int64(mapi.PrivateFIDCalendar))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
 		if strings.EqualFold(e.Name, "mallory@other-org.test") || strings.EqualFold(e.Name, "ghost@nowhere.test") {
+			t.Errorf("a refused share left a permission row for %s", e.Name)
+		}
+	}
+}
+
+// TestAnotherAccountCannotShareYourFolder: only the owner (or a folder owner per
+// [MS-OXCPERM] frightsOwner) may change a folder's permissions, so a colleague
+// with no grant who posts to alice's calendar ACL is refused, and no row for
+// him or for the account he names appears.
+func TestAnotherAccountCannotShareYourFolder(t *testing.T) {
+	dir := freshMailbox(t)
+	accounts := directory.StaticAccounts{
+		"alice@hermex.test": {Password: "pw", MailboxPath: dir},
+		"bob@hermex.test":   {Password: "pw", MailboxPath: freshMailbox(t)},
+		"carol@hermex.test": {Password: "pw", MailboxPath: freshMailbox(t)},
+	}
+	bob := loginAs(t, accounts, "bob@hermex.test")
+	rec := bob(http.MethodPost, "/api/v1/mailboxes/alice@hermex.test/calendar/acl", `{"grantee":"carol@hermex.test","rights":1}`)
+	if rec.Code == http.StatusOK {
+		t.Fatalf("bob changed alice's calendar ACL: %s", rec.Body.String())
+	}
+
+	st, err := objectstore.OpenExisting(dir)
+	mustNoErr(t, "open alice's mailbox", err)
+	defer mustClose(t, st)
+	entries, err := st.ListPermissions(int64(mapi.PrivateFIDCalendar))
+	mustNoErr(t, "list permissions", err)
+	for _, e := range entries {
+		if strings.EqualFold(e.Name, "carol@hermex.test") || strings.EqualFold(e.Name, "bob@hermex.test") {
 			t.Errorf("a refused share left a permission row for %s", e.Name)
 		}
 	}
@@ -101,7 +130,7 @@ func TestACLResolvesCalendars(t *testing.T) {
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open mailbox", err)
 	mailFolder, err := st.CreateFolder(nil, "Projects")
-	st.Close()
+	mustClose(t, st)
 	mustNoErr(t, "create mail folder", err)
 
 	for _, name := range []string{"calendar", created.ID} {

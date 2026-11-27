@@ -24,10 +24,10 @@ func readDetail(t *testing.T, raw string) map[string]any {
 	}
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), time.Unix(1700000000, 0), 0)
 	if err != nil {
-		st.Close()
+		mustClose(t, st)
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	secret := []byte("body-type-test-secret")
 	accounts := directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: mbox}}
@@ -64,15 +64,26 @@ func TestAPlainBodyIsReportedAsText(t *testing.T) {
 	if got := d["bodyType"]; got != "text" {
 		t.Fatalf("bodyType = %v, want text", got)
 	}
-	body, _ := d["body"].(string)
-	if body == "" {
-		t.Fatal("body is empty")
+	body, ok := d["body"].(string)
+	if !ok || body == "" {
+		t.Fatalf("body = %#v, want the message text", d["body"])
 	}
 	// The body stays the message's own bytes; escaping is the reader's step, so a
 	// search or an export still sees what the sender wrote.
 	if want := "<b>bold</b> and &lt;test&gt; and a < b"; !strings.Contains(body, want) {
 		t.Fatalf("body = %q, want it to carry %q verbatim", body, want)
 	}
+}
+
+// TestAShoutedPlainTypeIsStillText: RFC 2045 section 5.1 makes the type and
+// subtype case-insensitive, so a sender writing TEXT/PLAIN cannot get its body
+// rendered as markup by spelling the type in capitals.
+func TestAShoutedPlainTypeIsStillText(t *testing.T) {
+	raw := "From: bob@hermex.test\r\n" +
+		"Subject: shouted\r\n" +
+		"Content-Type: TEXT/PLAIN; charset=utf-8\r\n\r\n" +
+		"<img src=x onerror=alert(1)>\r\n"
+	wantEq(t, "bodyType", readDetail(t, raw)["bodyType"], any("text"))
 }
 
 // An HTML body is markup and must not be escaped, or every message would display

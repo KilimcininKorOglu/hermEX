@@ -63,11 +63,26 @@ func TestEventStreamEndsWhenSessionIsRevoked(t *testing.T) {
 	// Let the stream open and tick at least once while the session is still valid,
 	// then revoke it: the next tick must end the stream on its own.
 	time.Sleep(60 * time.Millisecond)
+	select {
+	case <-done:
+		t.Fatalf("the stream ended before the revoke (status %d), so the test proves nothing", rec.Code)
+	default:
+	}
 	auth.revoked.Store(true)
 
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("the stream kept running after the session was revoked")
+	}
+	wantContains(t, "stream content type", rec.Header().Get("Content-Type"), "text/event-stream")
+
+	// A session already revoked when the stream is asked for gets no stream.
+	again := httptest.NewRequest(http.MethodGet, "/api/v1/events", nil)
+	again.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+	rec2 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec2, again)
+	if rec2.Code != http.StatusUnauthorized {
+		t.Errorf("a revoked session opening the stream = %d, want 401", rec2.Code)
 	}
 }

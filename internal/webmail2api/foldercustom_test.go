@@ -1,15 +1,30 @@
 package webmail2api
 
 import (
-	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
-
-	"hermex/internal/directory"
-	"hermex/internal/objectstore"
 )
+
+// customFolderMailbox files one message in a user folder "Projects" and
+// returns the mailbox and the folder id.
+func customFolderMailbox(t *testing.T) (string, int64) {
+	t.Helper()
+	dir := freshMailbox(t)
+	st := openMailbox(t, dir)
+	cfid, err := st.CreateFolder(nil, "Projects")
+	mustNoErr(t, "create folder", err)
+	_, err = st.AppendMessage(cfid, []byte("From: a@b.test\r\nSubject: filed away\r\n\r\nhi\r\n"), time.Now(), 0)
+	mustNoErr(t, "append", err)
+	return dir, cfid
+}
+
+type folderListing struct {
+	Emails []struct {
+		ID      string `json:"id"`
+		Subject string `json:"subject"`
+	} `json:"emails"`
+}
 
 // TestCustomFolderRoundTrip proves a message filed into a custom (non-built-in)
 // folder is visible in that folder's list view AND can be opened by its id.
@@ -18,57 +33,35 @@ import (
 // open. resolveFolder now resolves a user folder by its id slug, closing that
 // gap for the list/open/action handlers alike.
 func TestCustomFolderRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	cfid, err := st.CreateFolder(nil, "Projects")
-	if err != nil {
-		t.Fatalf("create folder: %v", err)
-	}
-	raw := []byte("From: a@b.test\r\nSubject: filed away\r\n\r\nhi\r\n")
-	if _, err := st.AppendMessage(cfid, raw, time.Now(), 0); err != nil {
-		t.Fatalf("append: %v", err)
-	}
-	st.Close()
+	dir, cfid := customFolderMailbox(t)
+	do := apiHarnessFor(t, dir)
 
-	secret := []byte("custom-folder-test-secret")
-	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
-	get := func(path string) *httptest.ResponseRecorder {
-		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
-		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, req)
-		return rec
-	}
-
-	// The list view must show the filed message (it used to return empty).
-	listRec := get("/api/v1/mail/" + customSlug(cfid))
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("list: %d %s", listRec.Code, listRec.Body.String())
-	}
-	var list struct {
-		Emails []struct {
-			ID      string `json:"id"`
-			Subject string `json:"subject"`
-		} `json:"emails"`
-	}
-	if err := json.Unmarshal(listRec.Body.Bytes(), &list); err != nil {
-		t.Fatalf("decode list: %v", err)
-	}
+	list := okBody[folderListing](t, "list", do(http.MethodGet, "/api/v1/mail/"+customSlug(cfid), ""))
 	if len(list.Emails) != 1 {
 		t.Fatalf("custom folder list returned %d messages, want 1", len(list.Emails))
 	}
-	if list.Emails[0].Subject != "filed away" {
-		t.Errorf("listed subject = %q, want %q", list.Emails[0].Subject, "filed away")
-	}
+	wantEq(t, "listed subject", list.Emails[0].Subject, "filed away")
+	wantStatus(t, "open "+list.Emails[0].ID, do(http.MethodGet, "/api/v1/mail/message?id="+list.Emails[0].ID, ""), http.StatusOK)
+}
 
-	// Opening the message by the id the list handed back must succeed (it used to
-	// 404 with "unknown folder").
-	openRec := get("/api/v1/mail/message?id=" + list.Emails[0].ID)
-	if openRec.Code != http.StatusOK {
-		t.Fatalf("open %s: %d %s", list.Emails[0].ID, openRec.Code, openRec.Body.String())
+// TestACustomFolderIsReachedOnlyByItsSlug: a user folder is addressed by its
+// f<id> slug alone. Its display name, an unknown id and a malformed slug list
+// nothing of it, and a message id under such a folder does not open.
+func TestACustomFolderIsReachedOnlyByItsSlug(t *testing.T) {
+	dir, cfid := customFolderMailbox(t)
+	do := apiHarnessFor(t, dir)
+	for _, ref := range []string{"Projects", "f999999", customSlug(cfid) + "x"} {
+		rec := do(http.MethodGet, "/api/v1/mail/"+ref, "")
+		if rec.Code != http.StatusOK {
+			continue
+		}
+		if l := decodeBody[folderListing](t, ref, rec); len(l.Emails) != 0 {
+			t.Errorf("folder %q listed %d messages of Projects", ref, len(l.Emails))
+		}
+	}
+	for _, id := range []string{"Projects:1", "f999999:1"} {
+		if rec := do(http.MethodGet, "/api/v1/mail/message?id="+id, ""); rec.Code == http.StatusOK {
+			t.Errorf("open %s answered 200", id)
+		}
 	}
 }

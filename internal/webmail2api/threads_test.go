@@ -17,6 +17,13 @@ func TestNormalizeThreadSubject(t *testing.T) {
 		"  RE: re: Deep ":  "Deep",
 		"FW: Quick":        "Quick",
 		"No prefix":        "No prefix",
+		// RFC 5256 section 2.1 subj-refwd: the colon ends the prefix, white space
+		// after it is optional, and a subject that is only a prefix is empty.
+		"Re:NoSpace": "NoSpace",
+		"Re:":        "",
+		"":           "",
+		// A word that merely starts like a prefix is kept.
+		"Reply needed": "Reply needed",
 	}
 	for in, want := range cases {
 		if got := normalizeThreadSubject(in); got != want {

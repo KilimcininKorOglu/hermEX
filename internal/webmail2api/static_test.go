@@ -90,6 +90,33 @@ func TestRouteFallbackStillServesTheShell(t *testing.T) {
 	}
 }
 
+// TestSPAServesNothingOutsideDist: a traversal path never reaches a file beside
+// the dist directory.
+func TestSPAServesNothingOutsideDist(t *testing.T) {
+	parent := t.TempDir()
+	if err := os.WriteFile(filepath.Join(parent, "secret.txt"), []byte("TOP-SECRET"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dist := filepath.Join(parent, "dist")
+	if err := os.MkdirAll(dist, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dist, "index.html"), []byte("<!doctype html>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := spaHandler(dist)
+	for _, p := range []string{"/../secret.txt", "/%2e%2e/secret.txt", "/assets/../../secret.txt"} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.URL.Path = p
+		req.URL.RawPath = ""
+		h.ServeHTTP(rec, req)
+		if strings.Contains(rec.Body.String(), "TOP-SECRET") {
+			t.Errorf("%s served a file outside dist", p)
+		}
+	}
+}
+
 // TestMissingAssetIs404 proves a bundle that is gone is reported as gone. The
 // route fallback used to answer it with index.html, so a browser asking for a
 // script received an HTML page with a 200 and failed later, somewhere other than

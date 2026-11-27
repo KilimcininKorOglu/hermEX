@@ -83,6 +83,17 @@ func TestLogErrorWithoutALoggerIsSafe(t *testing.T) {
 	logError("file-sent-copy", nil, nil)
 }
 
+// TestLogErrorWithNoErrorRecordsNothing: a nil error is no failure, so it
+// leaves no error event that would send an operator after a problem that never
+// happened.
+func TestLogErrorWithNoErrorRecordsNothing(t *testing.T) {
+	sink := withSink(t)
+	logError("file-sent-copy", nil, logging.Fields{"user": "alice@hermex.test"})
+	if e, ok := sink.find("file-sent-copy"); ok {
+		t.Errorf("a nil error was recorded as a failure: %+v", e)
+	}
+}
+
 // panicPushStore is a pushStore whose subscriber enumeration panics, to drive
 // safePoll's recover path.
 type panicPushStore struct{}

@@ -20,19 +20,48 @@ func (discardSink) Write(logging.Event) {}
 // delivery hooks installed, the way any daemon delivers one.
 func deliverToAlice(t *testing.T, alice, bob, method, uid, vevent string) {
 	t.Helper()
-	raw := "From: bob@hermex.test\r\nTo: alice@hermex.test\r\nSubject: Review\r\nMIME-Version: 1.0\r\n" +
+	deliverITIP(t, directory.StaticAccounts{
+		"alice@hermex.test": {MailboxPath: alice},
+		"bob@hermex.test":   {MailboxPath: bob},
+	}, "bob@hermex.test", method, uid, vevent)
+}
+
+// deliverITIP delivers an iTIP message naming bob as organizer from sender into
+// alice's mailbox, so a test can have someone other than bob send it.
+func deliverITIP(t *testing.T, accounts directory.StaticAccounts, sender, method, uid, vevent string) {
+	t.Helper()
+	raw := "From: " + sender + "\r\nTo: alice@hermex.test\r\nSubject: Review\r\nMIME-Version: 1.0\r\n" +
 		"Content-Type: text/calendar; method=" + method + "; charset=UTF-8\r\n\r\n" +
 		"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//test//EN\r\nMETHOD:" + method + "\r\n" +
 		"BEGIN:VEVENT\r\nUID:" + uid + "\r\nDTSTAMP:20260901T090000Z\r\nSUMMARY:Review\r\n" +
 		"ORGANIZER:mailto:bob@hermex.test\r\nATTENDEE:mailto:alice@hermex.test\r\n" + vevent +
 		"END:VEVENT\r\nEND:VCALENDAR\r\n"
-	accounts := directory.StaticAccounts{
-		"alice@hermex.test": {MailboxPath: alice},
-		"bob@hermex.test":   {MailboxPath: bob},
+	unresolved, err := mta.DeliverAndRelay(accounts, nil, sender, []string{"alice@hermex.test"}, []byte(raw), time.Now())
+	mustNoErr(t, "deliver the "+method, err)
+	wantEq(t, "undelivered recipients of the "+method, len(unresolved), 0)
+}
+
+// TestACancelFromSomeoneElseCancelsNothing: only the organizer cancels a meeting
+// (RFC 5546 section 3.2.5). A CANCEL another account sends, naming bob as
+// organizer and the meeting's UID, must leave alice's meeting standing.
+func TestACancelFromSomeoneElseCancelsNothing(t *testing.T) {
+	env := newMeetingEnv(t)
+	st := openMailbox(t, env.alice)
+	mustNoErr(t, "auto-accept", st.SetMeetingConfig(objectstore.MeetingConfig{AutoAccept: true}))
+	installHooks(t)
+
+	deliverToAlice(t, env.alice, env.bob, "REQUEST", "single@test", "DTSTART:20260910T090000Z\r\nDTEND:20260910T100000Z\r\nSEQUENCE:0\r\n")
+	deliverITIP(t, directory.StaticAccounts{
+		"alice@hermex.test":   {MailboxPath: env.alice},
+		"bob@hermex.test":     {MailboxPath: env.bob},
+		"mallory@hermex.test": {MailboxPath: freshMailbox(t)},
+	}, "mallory@hermex.test", "CANCEL", "single@test", "DTSTART:20260910T090000Z\r\nDTEND:20260910T100000Z\r\nSEQUENCE:1\r\n")
+
+	rows := listWindow(t, env.do, "2026-09-10T00:00:00Z", "2026-09-11T00:00:00Z")
+	if len(rows) != 1 {
+		t.Fatalf("listed %d rows, want the one meeting", len(rows))
 	}
-	if _, err := mta.DeliverAndRelay(accounts, nil, "bob@hermex.test", []string{"alice@hermex.test"}, []byte(raw), time.Now()); err != nil {
-		t.Fatal(err)
-	}
+	wantEq(t, "cancelled by a non-organizer", rows[0].Canceled, false)
 }
 
 // installHooks installs the delivery hooks for the test and restores them after.

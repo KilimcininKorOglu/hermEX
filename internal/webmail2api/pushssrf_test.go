@@ -90,6 +90,11 @@ func TestSubscribeRefusesInternalEndpoint(t *testing.T) {
 		"https://127.0.0.1:8081/push",
 		"https://169.254.169.254/latest/meta-data/",
 		"https://10.0.0.5/push",
+		"https://[::1]/push",
+		"https://[::ffff:127.0.0.1]/push",
+		"https://2130706433/push",
+		"https://localhost/push",
+		"https://fcm.googleapis.com@127.0.0.1/push",
 	} {
 		t.Run(endpoint, func(t *testing.T) {
 			code, store := subscribeWith(t, endpoint)

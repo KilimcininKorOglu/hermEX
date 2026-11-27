@@ -28,6 +28,10 @@ func TestDeclaredTypeIsNotTrustedOverTheBytes(t *testing.T) {
 		{"html claiming to be a pdf", "application/pdf", htmlBody},
 		{"a pdf claiming to be an image", "image/png", pdfBytes},
 		{"an image claiming to be a pdf", "application/pdf", pngBytes},
+		// Case and parameters do not change the decision (RFC 2045 5.1).
+		{"html claiming an upper-case image type", "IMAGE/PNG", htmlBody},
+		{"html claiming an image type with parameters", "image/png; name=x.png", htmlBody},
+		{"html claiming a type with a smuggled line", "image/png\r\nX-Evil: 1", htmlBody},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := servedAttachmentType(tc.declared, tc.body); got != "application/octet-stream" {
@@ -60,6 +64,10 @@ func TestHonestPreviewTypesStillPreview(t *testing.T) {
 		{"application/pdf", string(pdfBytes), "application/pdf"},
 		{"image/png", string(pngBytes), "image/png"},
 		{"image/gif", string(gifBytes), "image/gif"},
+		// Type names are case-insensitive and may carry parameters (RFC 2045
+		// 5.1), so an honest declaration in another case still previews.
+		{"Application/PDF", string(pdfBytes), "application/pdf"},
+		{"IMAGE/PNG; name=a.png", string(pngBytes), "image/png"},
 	} {
 		if got := servedAttachmentType(tc.declared, []byte(tc.body)); got != tc.want {
 			t.Errorf("declared %q served as %q, want %q", tc.declared, got, tc.want)

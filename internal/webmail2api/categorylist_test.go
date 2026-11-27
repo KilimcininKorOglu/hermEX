@@ -3,44 +3,21 @@ package webmail2api
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
-	"time"
 
-	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcfg"
 )
 
 // categoryHarness returns a request helper plus the mailbox path.
-func categoryHarness(t *testing.T) (func(method, target, body string) *httptest.ResponseRecorder, string) {
+func categoryHarness(t *testing.T) (requestFunc, string) {
 	t.Helper()
-	dir := t.TempDir()
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	st.Close()
-	secret := []byte("category-list-test-secret")
-	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
-	return func(method, target, body string) *httptest.ResponseRecorder {
-		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
-		var req *http.Request
-		if body == "" {
-			req = httptest.NewRequest(method, target, nil)
-		} else {
-			req = httptest.NewRequest(method, target, strings.NewReader(body))
-		}
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
-		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, req)
-		return rec
-	}, dir
+	return apiHarness(t)
 }
 
-func readCategories(t *testing.T, do func(string, string, string) *httptest.ResponseRecorder) []categoryJSON {
+// readCategories reads the list the webmail settings page shows.
+func readCategories(t *testing.T, do requestFunc) []categoryJSON {
 	t.Helper()
 	rec := do(http.MethodGet, "/api/v1/categories", "")
 	if rec.Code != http.StatusOK {
@@ -63,7 +40,7 @@ func storedList(t *testing.T, dir string) oxcfg.List {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	id, ok, err := st.FindAssociatedByClass(int64(mapi.PrivateFIDCalendar), oxcfg.CategoryListClass)
 	if err != nil || !ok {
 		t.Fatalf("no configuration message in the Calendar folder (ok=%v err=%v)", ok, err)
@@ -72,9 +49,7 @@ func storedList(t *testing.T, dir string) oxcfg.List {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := props.Get(mapi.PrRoamingXmlStream)
-	b, _ := raw.([]byte)
-	l, err := oxcfg.Decode(b)
+	l, err := oxcfg.Decode(mustProp[[]byte](t, "the roaming XML stream", props, mapi.PrRoamingXmlStream))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +63,7 @@ func seedOutlookList(t *testing.T, dir string, l oxcfg.List) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if err := writeCategoryList(st, l); err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +77,7 @@ func assertCalendarHasNoVisibleObjects(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +179,7 @@ func TestCategoryListSeedsFromTheOlderList(t *testing.T) {
 	if err := saveSharedSettings(st, m); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	cats := readCategories(t, do)
 	if len(cats) != 1 || cats[0].Name != "Old" {
@@ -216,8 +191,23 @@ func TestCategoryListSeedsFromTheOlderList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
-	if _, ok, err := st.FindAssociatedByClass(int64(mapi.PrivateFIDCalendar), oxcfg.CategoryListClass); err != nil || !ok {
-		t.Errorf("the older list was not seeded into the configuration message (ok=%v err=%v)", ok, err)
+	defer mustClose(t, st)
+	if id, ok, err := st.FindAssociatedByClass(int64(mapi.PrivateFIDCalendar), oxcfg.CategoryListClass); err != nil || !ok || id <= 0 {
+		t.Errorf("the older list was not seeded into the configuration message (id=%d ok=%v err=%v)", id, ok, err)
+	}
+}
+
+// TestARefusedCategoryEditKeepsOutlooksList: a body that is not the list's JSON
+// is refused with 400 and the configuration message Outlook reads stays as it was.
+func TestARefusedCategoryEditKeepsOutlooksList(t *testing.T) {
+	do, dir := categoryHarness(t)
+	seedOutlookList(t, dir, oxcfg.List{Categories: []oxcfg.Category{{Name: "Project X", Color: 7, GUID: "{abc}"}}})
+
+	for _, body := range []string{`{"categories":`, `{"categories":"Project Y"}`, `not json`} {
+		wantStatus(t, "put "+body, do(http.MethodPut, "/api/v1/categories", body), http.StatusBadRequest)
+	}
+	l := storedList(t, dir)
+	if len(l.Categories) != 1 || l.Categories[0].Name != "Project X" || l.Categories[0].GUID != "{abc}" {
+		t.Errorf("stored list after refused edits = %+v, want Outlook's Project X untouched", l.Categories)
 	}
 }

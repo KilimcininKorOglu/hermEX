@@ -20,7 +20,10 @@ func TestGetToday(t *testing.T) {
 		time.Now().UTC().Format(time.RFC1123Z) + "\r\n\r\nbody\r\n")
 	_, err = st.AppendMessage(int64(mapi.PrivateFIDInbox), raw, time.Now(), 0)
 	mustNoErr(t, "append inbox", err)
-	st.Close()
+	// A read message does not count as unread.
+	_, err = st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("From: bob@hermex.test\r\nSubject: Old\r\n\r\nx\r\n"), time.Now(), objectstore.FlagSeen)
+	mustNoErr(t, "append read", err)
+	mustClose(t, st)
 
 	do := apiHarnessFor(t, dir)
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -28,6 +31,12 @@ func TestGetToday(t *testing.T) {
 		`{"summary":"Standup today","start":"`+now+`","reminderMinutes":0}`), http.StatusOK)
 	wantStatus(t, "create task", do(http.MethodPost, "/api/v1/tasks",
 		`{"summary":"Due today","due":"`+now+`","completed":false}`), http.StatusOK)
+	// Neither a finished task nor an appointment two days out belongs on today.
+	wantStatus(t, "create done task", do(http.MethodPost, "/api/v1/tasks",
+		`{"summary":"Done already","due":"`+now+`","completed":true}`), http.StatusOK)
+	later := time.Now().UTC().Add(48 * time.Hour).Format(time.RFC3339)
+	wantStatus(t, "create later event", do(http.MethodPost, "/api/v1/calendar/events",
+		`{"summary":"Later","start":"`+later+`","reminderMinutes":0}`), http.StatusOK)
 
 	got := okBody[todayJSON](t, "today", do(http.MethodGet, "/api/v1/today", ""))
 	wantEq(t, "unread", got.Unread, 1)

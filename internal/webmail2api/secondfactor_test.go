@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"hermex/internal/directory"
-	"hermex/internal/objectstore"
 	"hermex/internal/totp"
 )
 
@@ -75,17 +74,23 @@ func (a *sfAuth) RecoveryCodesRemaining(string) (int, error) { return len(a.code
 // sfHarness seeds a mailbox and returns the directory plus one browser.
 func sfHarness(t *testing.T) (*sfAuth, requestFunc) {
 	t.Helper()
-	dir := t.TempDir()
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	st.Close()
-
-	auth := &sfAuth{accounts: directory.StaticAccounts{
-		"alice@hermex.test": {Password: "pw", MailboxPath: dir},
-	}}
+	auth := sfDirectory(t)
 	return auth, browser(auth, auth.accounts)
+}
+
+// sfDo is sfHarness for a test that only needs the browser.
+func sfDo(t *testing.T) requestFunc {
+	t.Helper()
+	auth := sfDirectory(t)
+	return browser(auth, auth.accounts)
+}
+
+// sfDirectory seeds alice's mailbox and returns the directory holding her.
+func sfDirectory(t *testing.T) *sfAuth {
+	t.Helper()
+	return &sfAuth{accounts: directory.StaticAccounts{
+		"alice@hermex.test": {Password: "pw", MailboxPath: freshMailbox(t)},
+	}}
 }
 
 // requestFunc is one browser: it carries its own cookie jar across calls.
@@ -174,7 +179,7 @@ func sfNextCode(t *testing.T, auth *sfAuth) string {
 // TestAnUnenrolledLoginIsUnchanged keeps the second factor invisible to every
 // account that has not asked for one.
 func TestAnUnenrolledLoginIsUnchanged(t *testing.T) {
-	_, do := sfHarness(t)
+	do := sfDo(t)
 	out := sfLogin(t, do)
 	if out["secondFactorRequired"] != nil {
 		t.Errorf("an unenrolled login was told a second factor is required: %v", out)
@@ -247,6 +252,25 @@ func TestAWrongCodeLeavesTheSessionPending(t *testing.T) {
 	}
 	if rec := do(http.MethodGet, "/api/v1/folders", ""); rec.Code != http.StatusForbidden {
 		t.Errorf("the session was upgraded by a refused code: %d", rec.Code)
+	}
+}
+
+// TestMalformedCodesAreRefused: a code that is empty, not digits, oversized or
+// not JSON never upgrades the session, and verify without any session is 401.
+func TestMalformedCodesAreRefused(t *testing.T) {
+	auth, do := sfHarness(t)
+	sfEnroll(t, auth, do)
+	if rec := browser(auth, auth.accounts)(http.MethodPost, "/api/v1/auth/2fa/verify", `{"code":"123456"}`); rec.Code != http.StatusUnauthorized {
+		t.Errorf("verify without a session = %d, want 401", rec.Code)
+	}
+	sfLogin(t, do)
+	for _, body := range []string{`{"code":""}`, `{"code":"abcdef"}`, `{"code":"` + strings.Repeat("1", 4096) + `"}`, `{`} {
+		if rec := do(http.MethodPost, "/api/v1/auth/2fa/verify", body); rec.Code == http.StatusOK {
+			t.Errorf("verify %.30q answered 200", body)
+		}
+	}
+	if rec := do(http.MethodGet, "/api/v1/folders", ""); rec.Code != http.StatusForbidden {
+		t.Errorf("the session was upgraded by a malformed code: %d", rec.Code)
 	}
 }
 

@@ -18,7 +18,7 @@ func openMailbox(t *testing.T, dir string) *objectstore.Store {
 	t.Helper()
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open mailbox", err)
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { mustClose(t, st) })
 	return st
 }
 
@@ -48,12 +48,16 @@ const hobbies = mapi.PropTag(0x3A43001F)
 func seedForeignState(t *testing.T, st *objectstore.Store, id int64) {
 	t.Helper()
 	mustNoErr(t, "set foreign property", st.SetMessageProperties(id, mapi.PropertyValues{{Tag: hobbies, Value: "chess"}}))
-	_, _, err := st.CreateAttachment(id, mapi.PropertyValues{
+	attID, attNum, err := st.CreateAttachment(id, mapi.PropertyValues{
 		{Tag: mapi.PrAttachMethod, Value: int32(mapi.AttachByValue)},
 		{Tag: mapi.PrAttachLongFilename, Value: "agenda.txt"},
 		{Tag: mapi.PrAttachDataBin, Value: []byte("agenda")},
 	})
 	mustNoErr(t, "attach", err)
+	// The meeting had no attachment, so this one is its first (number 0).
+	if attID <= 0 || attNum != 0 {
+		t.Fatalf("attachment id %d number %d, want a real id and number 0", attID, attNum)
+	}
 	resp, err := responseStatusTag(st, true)
 	mustNoErr(t, "response tag", err)
 	recips, err := st.ListRecipients(id)
@@ -103,7 +107,12 @@ func wantAttendeeResponses(t *testing.T, st *objectstore.Store, id int64, want m
 	for _, r := range recips {
 		pv, err := st.GetRecipientProperties(r.ID, resp)
 		mustNoErr(t, "read response", err)
-		got, _ := propInt32(pv, resp)
+		// [MS-OXOCAL]: an attendee with no recorded answer carries no
+		// PidTagRecipientTrackStatus, which reads as respNone (0).
+		got, set := propInt32(pv, resp)
+		if !set {
+			got = 0
+		}
 		wantEq(t, "response of "+r.SmtpAddress, got, want[r.SmtpAddress])
 	}
 }
@@ -167,9 +176,7 @@ func icalOriginal(t *testing.T, st *objectstore.Store, id int64) []byte {
 	t.Helper()
 	pv, err := st.GetMessageProperties(id, mapi.PrIcalOriginal)
 	mustNoErr(t, "read original", err)
-	v, _ := pv.Get(mapi.PrIcalOriginal)
-	b, _ := v.([]byte)
-	return b
+	return mustProp[[]byte](t, "the stored iCalendar", pv, mapi.PrIcalOriginal)
 }
 
 // TestEventEditRefusesWhatIsNotAnEvent answers 404 for an unknown id and for a

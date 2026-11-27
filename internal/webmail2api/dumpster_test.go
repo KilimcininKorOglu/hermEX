@@ -15,7 +15,7 @@ func seedObject(t *testing.T, dir string, fid int64, class string) int64 {
 	t.Helper()
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	id, err := st.CreateMessage(fid, &oxcmail.Message{Props: mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: class},
 		{Tag: mapi.PrSubject, Value: "kept for recovery"},
@@ -30,7 +30,7 @@ func wantRecoverable(t *testing.T, dir string, id int64, what string) {
 	t.Helper()
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	items, err := st.ListAllSoftDeleted()
 	mustNoErr(t, "list the dumpster", err)
 	for _, it := range items {
@@ -63,6 +63,27 @@ func TestWebmailDeletesAreRecoverable(t *testing.T) {
 	}
 }
 
+// TestADeleteThroughTheWrongKindDeletesNothing: a contact id sent to the task,
+// note or event delete is refused, and the contact stays live and out of the
+// dumpster; an unknown id deletes nothing either.
+func TestADeleteThroughTheWrongKindDeletesNothing(t *testing.T) {
+	do, dir := apiHarness(t)
+	id := seedObject(t, dir, int64(mapi.PrivateFIDContacts), "IPM.Contact")
+	sid := strconv.FormatInt(id, 10)
+	for _, path := range []string{"/api/v1/tasks/" + sid, "/api/v1/notes/" + sid, "/api/v1/calendar/events/" + sid, "/api/v1/contacts/999999"} {
+		if rec := do(http.MethodDelete, path, ""); rec.Code == http.StatusOK {
+			t.Errorf("DELETE %s answered 200", path)
+		}
+	}
+	st := openMailbox(t, dir)
+	msg, err := st.OpenMessage(id)
+	mustNoErr(t, "the contact after the refused deletes", err)
+	wantEq(t, "class", propStr(msg.Props, mapi.PrMessageClass), "IPM.Contact")
+	items, err := st.ListAllSoftDeleted()
+	mustNoErr(t, "list the dumpster", err)
+	wantEq(t, "dumpster after the refused deletes", len(items), 0)
+}
+
 // TestDeletingACalendarKeepsItsEventsRecoverable deletes a secondary calendar.
 // The folder goes, but its events must reach Recoverable Items as a folder
 // deleted from any other client's do.
@@ -76,7 +97,7 @@ func TestDeletingACalendarKeepsItsEventsRecoverable(t *testing.T) {
 	mustNoErr(t, "mark it a calendar", st.SetFolderProperties(fid, mapi.PropertyValues{
 		{Tag: mapi.PrContainerClass, Value: "IPF.Appointment"},
 	}))
-	st.Close()
+	mustClose(t, st)
 	id := seedObject(t, dir, fid, "IPM.Appointment")
 
 	wantStatus(t, "delete the calendar",

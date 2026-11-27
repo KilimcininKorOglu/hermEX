@@ -21,7 +21,7 @@ import (
 func TestLabelsSurviveAReload(t *testing.T) {
 	do, id := labelsHarness(t)
 	for _, want := range []string{"Work,Urgent", ""} {
-		body, _ := json.Marshal(map[string]any{"id": id, "labels": splitLabels(want)})
+		body := mustEncode(t, map[string]any{"id": id, "labels": splitLabels(want)})
 		do(http.MethodPost, "/api/v1/mail/labels", string(body))
 		if got := strings.Join(detailLabels(t, do, id), ","); got != want {
 			t.Fatalf("detail labels = %q, want %q", got, want)
@@ -30,6 +30,30 @@ func TestLabelsSurviveAReload(t *testing.T) {
 			t.Fatalf("list labels = %q, want %q", got, want)
 		}
 	}
+}
+
+// TestARefusedLabelChangeKeepsTheLabels: a label write naming no message, or
+// carrying no label list, is refused and the message keeps its labels.
+func TestARefusedLabelChangeKeepsTheLabels(t *testing.T) {
+	mbox := freshMailbox(t)
+	info, err := openMailbox(t, mbox).AppendMessage(int64(mapi.PrivateFIDInbox), []byte("From: bob@hermex.test\r\nSubject: labelled\r\n\r\nhi\r\n"), time.Now(), 0)
+	mustNoErr(t, "append", err)
+	id := messageID("inbox", info.UID)
+	do := apiHarnessFor(t, mbox)
+	wantStatus(t, "label", do(http.MethodPost, "/api/v1/mail/labels", string(mustEncode(t, map[string]any{"id": id, "labels": []string{"Work"}}))), http.StatusOK)
+	for _, body := range []string{
+		`{"id":"inbox:999999","labels":[]}`,
+		`{"id":"not-an-id","labels":[]}`,
+		`{`,
+	} {
+		if rec := do(http.MethodPost, "/api/v1/mail/labels", body); rec.Code == http.StatusOK {
+			t.Errorf("labels %s answered 200", body)
+		}
+	}
+	detail := okBody[struct {
+		Labels []string `json:"labels"`
+	}](t, "detail", do(http.MethodGet, "/api/v1/mail/message?id="+id, ""))
+	wantEq(t, "labels after the refused writes", strings.Join(detail.Labels, ","), "Work")
 }
 
 type labelsRequest func(method, path, body string) *httptest.ResponseRecorder
@@ -44,10 +68,8 @@ func labelsHarness(t *testing.T) (labelsRequest, string) {
 		t.Fatal(err)
 	}
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("From: bob@hermex.test\r\nSubject: labelled\r\n\r\nhi\r\n"), time.Now(), 0)
-	st.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "append", err)
+	mustClose(t, st)
 	secret := []byte("labels-test-secret")
 	accounts := directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: mbox}}
 	srv := NewServer(accounts, accounts, nil, "mail.hermex.test", secret, "", false)

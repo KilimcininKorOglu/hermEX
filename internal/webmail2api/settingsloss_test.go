@@ -31,7 +31,7 @@ func corruptHarness(t *testing.T) (func(method, target, body string) *httptest.R
 	if err := saveSharedSettings(st, m); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	secret := []byte("settings-loss-secret")
 	accs := directory.StaticAccounts{"alice@hermex.test": {MailboxPath: dir}}
@@ -62,33 +62,34 @@ func corruptTheBlob(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	var props mapi.PropertyValues
-	props.Set(mapi.PrWebmailSettings, `{"webmail2Favorites": ["Project X"`) // truncated
+	props.Set(mapi.PrWebmailSettings, truncatedBlob)
 	if err := st.SetStoreProperties(props); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// truncatedBlob is the settings text a half-written save leaves.
+const truncatedBlob = `{"webmail2Favorites": ["Project X"`
+
+// storedBlob reads the settings blob's raw text straight from the store.
+func storedBlob(t *testing.T, dir string) string {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open the mailbox", err)
+	defer mustClose(t, st)
+	props, err := st.GetStoreProperties(mapi.PrWebmailSettings)
+	mustNoErr(t, "read the store properties", err)
+	return mustProp[string](t, "the settings blob", props, mapi.PrWebmailSettings)
 }
 
 // storedKeys lists the keys the settings blob holds, read straight from the
 // store rather than through the API that is under test.
 func storedKeys(t *testing.T, dir string) []string {
 	t.Helper()
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	props, err := st.GetStoreProperties(mapi.PrWebmailSettings)
-	if err != nil {
-		t.Fatal(err)
-	}
-	v, _ := props.Get(mapi.PrWebmailSettings)
-	str, _ := v.(string)
 	var m map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(str), &m); err != nil {
-		return nil // still unparseable, which is what the test wants to see
-	}
+	mustNoErr(t, "decode the settings blob", json.Unmarshal([]byte(storedBlob(t, dir)), &m))
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
@@ -110,9 +111,7 @@ func TestAWriteAfterAnUnreadableSettingsBlobIsRefused(t *testing.T) {
 	}
 	// The stored blob is untouched: still the unparseable one, not a fresh blob
 	// holding only the theme.
-	if keys := storedKeys(t, dir); keys != nil {
-		t.Errorf("the settings were overwritten with %v", keys)
-	}
+	wantEq(t, "the stored blob after the refused save", storedBlob(t, dir), truncatedBlob)
 }
 
 // TestAWriteOnAReadableBlobStillSaves keeps the guard from refusing the ordinary
@@ -146,7 +145,7 @@ func TestAFreshMailboxStillSaves(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	secret := []byte("fresh-mailbox-secret")
 	accs := directory.StaticAccounts{"alice@hermex.test": {MailboxPath: dir}}
@@ -162,5 +161,8 @@ func TestAFreshMailboxStillSaves(t *testing.T) {
 	srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("a fresh mailbox could not save: %d %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(storedBlob(t, dir), "dark") {
+		t.Errorf("the fresh mailbox's settings = %s, want the saved theme", storedBlob(t, dir))
 	}
 }

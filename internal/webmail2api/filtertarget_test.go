@@ -15,7 +15,7 @@ import (
 func TestAnUnconvertedFilterTargetStillDelivers(t *testing.T) {
 	st, err := objectstore.Open(t.TempDir())
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	fid, err := st.CreateFolder(nil, "Project X")
 	mustNoErr(t, "create Project X", err)
 	for _, ref := range []string{"Project X", customSlug(fid)} {
@@ -24,8 +24,10 @@ func TestAnUnconvertedFilterTargetStillDelivers(t *testing.T) {
 			t.Errorf("target %q resolved to %d, %v; want %d", ref, got, ok, fid)
 		}
 	}
-	if got, ok := resolveFilterFolder(st, "Gone"); ok {
-		t.Errorf("target Gone resolved to %d", got)
+	for _, ref := range []string{"Gone", "f999999", "f13x", ""} {
+		if got, ok := resolveFilterFolder(st, ref); ok {
+			t.Errorf("target %q resolved to %d", ref, got)
+		}
 	}
 }
 
@@ -48,11 +50,12 @@ func TestLegacyFilterTargetsBecomeIDs(t *testing.T) {
 	raw, err := json.Marshal(legacy)
 	mustNoErr(t, "marshal", err)
 	mustNoErr(t, "write the legacy blob", saveSharedSettings(st, map[string]json.RawMessage{"webmail2Filters": raw}))
-	st.Close()
+	mustClose(t, st)
 
 	want := []string{customSlug(fid), "trash", "Gone", "Project X"}
 	for _, pass := range []string{"first", "second"} {
 		rec := do(http.MethodGet, "/api/v1/filters", "")
+		wantStatus(t, pass+" read", rec, http.StatusOK)
 		var out struct {
 			Filters []filterJSON `json:"filters"`
 		}

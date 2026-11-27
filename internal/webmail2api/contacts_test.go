@@ -23,28 +23,7 @@ import (
 // reload through the vCard path oxvcard owns, so the form is not a no-op after a
 // refresh. The assertion is on the exact values, not just presence.
 func TestContactRichFieldsRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	st.Close()
-
-	secret := []byte("contacts-rich-test-secret")
-	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
-	do := func(method, target, body string) *httptest.ResponseRecorder {
-		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
-		var req *http.Request
-		if body == "" {
-			req = httptest.NewRequest(method, target, nil)
-		} else {
-			req = httptest.NewRequest(method, target, strings.NewReader(body))
-		}
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
-		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, req)
-		return rec
-	}
+	do := apiDo(t)
 
 	body := `{"name":"Ada Lovelace","prefix":"Dr.","firstName":"Ada","middleName":"Augusta","lastName":"Lovelace","suffix":"Jr.","email":"ada@analytical.test","email2":"ada@home.test","email3":"ada@academy.test","phone":"+1 555 0100","mobilePhone":"+1 555 0101","homePhone":"+1 555 0102","businessFax":"+1 555 0199","company":"Analytical Engine","jobTitle":"Mathematician","department":"Science","birthday":"1815-12-10","nickname":"Ada","fileAs":"Lovelace, Ada","profession":"Mathematician","spouse":"Charles","billing":"Project X-1815","categories":["VIP","Pioneers"],"homeStreet":"221B Baker St","homeCity":"London","homeState":"","homePostal":"NW1","homeCountry":"UK","otherStreet":"10 Downing","otherCity":"Westminster","otherState":"Lon","otherPostal":"SW1","otherCountry":"GB","imAddress":"ada@im.test","webPage":"https://example.test/ada"}`
 	wantStatus(t, "create", do(http.MethodPost, "/api/v1/contacts", body), http.StatusOK)
@@ -109,13 +88,7 @@ func wantContactFields(t *testing.T, got, want map[string]string) {
 // delete cycle: a PUT multipart upload is byte-identical to the GET response,
 // PidLidHasPicture flips on and back off, and a second GET after DELETE is 404.
 func TestContactPhotoRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	st.Close()
-
+	dir := freshMailbox(t)
 	secret := []byte("contacts-photo-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
 	do := func(method, target, body string, contentType string) *httptest.ResponseRecorder {
@@ -172,8 +145,9 @@ func photoUpload(t *testing.T, photo []byte) (body, contentType string) {
 	mw := multipart.NewWriter(&buf)
 	fw, err := mw.CreateFormFile("file", "ContactPicture.jpg")
 	mustNoErr(t, "create form file", err)
-	_, err = fw.Write(photo)
+	n, err := fw.Write(photo)
 	mustNoErr(t, "write photo", err)
+	wantEq(t, "photo bytes written", n, len(photo))
 	mustNoErr(t, "close multipart writer", mw.Close())
 	return buf.String(), mw.FormDataContentType()
 }
@@ -182,27 +156,13 @@ func photoUpload(t *testing.T, photo []byte) (body, contentType string) {
 // same bytes CardDAV/EAS/EWS see, and that the saved filename is derived from
 // the contact's display name.
 func TestContactExport(t *testing.T) {
-	dir := t.TempDir()
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	st.Close()
+	do := apiDo(t)
 
-	secret := []byte("contacts-export-test-secret")
-	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
-	do := func(method, target, body string) *httptest.ResponseRecorder {
-		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
-		var req *http.Request
-		if body == "" {
-			req = httptest.NewRequest(method, target, nil)
-		} else {
-			req = httptest.NewRequest(method, target, strings.NewReader(body))
+	// An id that is not a number, or names no contact, exports nothing.
+	for _, bad := range []string{"not-a-number", "999999"} {
+		if rec := do(http.MethodGet, "/api/v1/contacts/"+bad+"/vcard", ""); rec.Code == http.StatusOK {
+			t.Errorf("export of %q answered 200: %s", bad, rec.Body.String())
 		}
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
-		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, req)
-		return rec
 	}
 
 	rec := do(http.MethodPost, "/api/v1/contacts", `{"name":"Nikola Tesla","email":"nikola@ac.test"}`)
@@ -238,28 +198,7 @@ func TestContactExport(t *testing.T) {
 // TestContactExportDistributionList proves a contact group (IPM.DistList)
 // exports as a multi-vCard document: one minimal vCard per member address.
 func TestContactExportDistributionList(t *testing.T) {
-	dir := t.TempDir()
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	st.Close()
-
-	secret := []byte("contacts-dl-export-test-secret")
-	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
-	do := func(method, target, body string) *httptest.ResponseRecorder {
-		token := mustMintToken(t, secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
-		var req *http.Request
-		if body == "" {
-			req = httptest.NewRequest(method, target, nil)
-		} else {
-			req = httptest.NewRequest(method, target, strings.NewReader(body))
-		}
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
-		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, req)
-		return rec
-	}
+	do := apiDo(t)
 
 	type createResponse struct {
 		Contact contactJSON `json:"contact"`
@@ -360,7 +299,7 @@ func TestContactEditKeepsIdPhotoAndForeignProperties(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msg, err := st.OpenMessage(mid)
 	if err != nil {
 		t.Fatalf("open contact: %v", err)
@@ -384,7 +323,7 @@ func setOnStore(t *testing.T, mbox string, id int64, tag mapi.PropTag, value str
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	var props mapi.PropertyValues
 	props.Set(tag, value)
 	if err := st.SetMessageProperties(id, props); err != nil {

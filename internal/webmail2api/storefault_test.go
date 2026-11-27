@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,5 +50,9 @@ func TestUnopenableStoreIsRecorded(t *testing.T) {
 	}
 	if e.Err == "" {
 		t.Error("the recorded event carries no error text, so the cause is still unknown")
+	}
+	// The client gets a generic answer: no server path, no library error text.
+	if body := rec.Body.String(); strings.Contains(body, notAMailbox) || strings.Contains(body, e.Err) {
+		t.Errorf("the 500 body leaks the internal failure: %s", body)
 	}
 }

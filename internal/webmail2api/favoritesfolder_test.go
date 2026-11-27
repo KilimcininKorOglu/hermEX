@@ -46,7 +46,7 @@ func pin(t *testing.T, do func(string, string, string) *httptest.ResponseRecorde
 // TestRenamingAFolderKeepsItsFavorite proves a pin survives a rename untouched:
 // the pin is the folder's id, which a rename does not change.
 func TestRenamingAFolderKeepsItsFavorite(t *testing.T) {
-	do, _ := folderHarness(t)
+	do := folderDo(t)
 	x := pin(t, do, "Project X")
 	other := pin(t, do, "Other")
 
@@ -63,7 +63,7 @@ func TestRenamingAFolderKeepsItsFavorite(t *testing.T) {
 // folder that is no longer there, and leaves every other pin alone. Removing
 // more than the one folder's pin is the defect this guards.
 func TestDeletingAFolderDropsItsFavorite(t *testing.T) {
-	do, _ := folderHarness(t)
+	do := folderDo(t)
 	x := pin(t, do, "Project X")
 	other := pin(t, do, "Other")
 
@@ -73,6 +73,22 @@ func TestDeletingAFolderDropsItsFavorite(t *testing.T) {
 	got := favorites(t, do)
 	if len(got) != 1 || got[0] != other {
 		t.Errorf("favorites after the first delete = %v, want [%s]", got, other)
+	}
+}
+
+// TestARefusedFolderDeleteKeepsEveryPin: deleting a folder that is not there or
+// a built-in folder is refused and drops no pin.
+func TestARefusedFolderDeleteKeepsEveryPin(t *testing.T) {
+	do := folderDo(t)
+	x := pin(t, do, "Project X")
+	for _, ref := range []string{"f999999", "inbox", "not-a-slug"} {
+		if rec := do(http.MethodDelete, "/api/v1/folders/"+ref, ""); rec.Code == http.StatusOK {
+			t.Errorf("delete %s answered 200", ref)
+		}
+	}
+	got := favorites(t, do)
+	if len(got) != 1 || got[0] != x {
+		t.Errorf("favorites after refused deletes = %v, want [%s]", got, x)
 	}
 }
 
@@ -86,7 +102,7 @@ func TestDeletingAFolderKeepsItsNameInTheTrash(t *testing.T) {
 	}
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	fid, ok := parseCustomSlug(x)
 	if !ok {
 		t.Fatalf("%q is not a folder slug", x)
@@ -111,7 +127,7 @@ func TestLegacyFavoritesBecomeIDs(t *testing.T) {
 		"webmail2Unrelated": json.RawMessage(`{"keep":true}`),
 	}
 	mustNoErr(t, "write the legacy blob", saveSharedSettings(st, m))
-	st.Close()
+	mustClose(t, st)
 
 	want := []string{customSlug(fid), "inbox"}
 	for _, pass := range []string{"first", "second"} {
@@ -122,7 +138,7 @@ func TestLegacyFavoritesBecomeIDs(t *testing.T) {
 	}
 	st, err = objectstore.Open(dir)
 	mustNoErr(t, "reopen the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	after, loaded := sharedSettings(st)
 	wantEq(t, "settings readable", loaded, true)
 	wantEq(t, "the unrelated key", string(after["webmail2Unrelated"]), `{"keep":true}`)
@@ -143,7 +159,7 @@ func TestRenamingABuiltinFolderIsRefused(t *testing.T) {
 	}
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	props, err := st.GetFolderProperties(int64(mapi.PrivateFIDInbox), mapi.PrDisplayName)
 	mustNoErr(t, "read the Inbox name", err)
 	wantEq(t, "the Inbox name", propStr(props, mapi.PrDisplayName), "Inbox")

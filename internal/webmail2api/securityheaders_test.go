@@ -3,6 +3,7 @@ package webmail2api
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"hermex/internal/directory"
@@ -16,19 +17,26 @@ import (
 func TestSecurityHeaders(t *testing.T) {
 	srv := NewServer(flaggedAuth{mbox: t.TempDir()}, directory.StaticAccounts{}, nil, "mail.hermex.test", []byte("sec-hdr-secret"), "", false)
 
-	// An unauthenticated API call still returns headers on the response.
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/favorites", nil)
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, req)
-
 	want := map[string]string{
 		"X-Frame-Options":         "DENY",
 		"Content-Security-Policy": "frame-ancestors 'none'",
 		"X-Content-Type-Options":  "nosniff",
 	}
-	for k, v := range want {
-		if got := rec.Header().Get(k); got != v {
-			t.Errorf("%s = %q, want %q", k, got, v)
+	// An unauthenticated API call, an unknown API route, a refused login with
+	// a malformed body, and the SPA path all carry the headers.
+	for _, c := range []struct{ method, target, body string }{
+		{http.MethodGet, "/api/v1/favorites", ""},
+		{http.MethodGet, "/api/v1/no-such-route", ""},
+		{http.MethodPost, "/api/v1/auth/login", "{"},
+		{http.MethodGet, "/inbox", ""},
+	} {
+		req := httptest.NewRequest(c.method, c.target, strings.NewReader(c.body))
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		for k, v := range want {
+			if got := rec.Header().Get(k); got != v {
+				t.Errorf("%s %s: %s = %q, want %q", c.method, c.target, k, got, v)
+			}
 		}
 	}
 }
