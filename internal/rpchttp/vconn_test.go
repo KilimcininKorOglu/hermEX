@@ -99,6 +99,13 @@ func TestTableCapRefusesANewKeyButAllowsAReplacement(t *testing.T) {
 	if vc := s.getOrCreate("overflow", "alice@hermex.test", "/mb/alice", "203.0.113.7:1"); vc != nil {
 		t.Error("a new key was admitted past the connection ceiling")
 	}
+	if tableEntry(s, "overflow") != nil {
+		t.Error("the refused key holds a table entry")
+	}
+	s.mu.Lock()
+	size := len(s.conns)
+	s.mu.Unlock()
+	wantEq(t, size, maxVirtualConnections, "table size after the refused key")
 
 	const key = "key0"
 	tableEntry(s, key).close()
