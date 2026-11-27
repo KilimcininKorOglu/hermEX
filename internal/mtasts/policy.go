@@ -61,7 +61,11 @@ func parseLines(text string) (p Policy, version string) {
 				p.MX = append(p.MX, strings.ToLower(val))
 			}
 		case "max_age":
-			p.MaxAge, _ = strconv.Atoi(val)
+			if n, err := strconv.Atoi(val); err == nil {
+				p.MaxAge = n
+			} else {
+				p.MaxAge = 0
+			}
 		}
 	}
 	return p, version
@@ -93,20 +97,13 @@ func validate(p Policy, version string) error {
 // is the inverse of Parse, Parse(Build(p)) reproduces p, and is how the server
 // publishes its own policy at /.well-known/mta-sts.txt.
 func Build(p Policy) string {
-	var b strings.Builder
-	b.WriteString("version: STSv1\r\n")
-	b.WriteString("mode: ")
-	b.WriteString(string(p.Mode))
-	b.WriteString("\r\n")
+	lines := make([]string, 0, len(p.MX)+3)
+	lines = append(lines, "version: STSv1", "mode: "+string(p.Mode))
 	for _, mx := range p.MX {
-		b.WriteString("mx: ")
-		b.WriteString(mx)
-		b.WriteString("\r\n")
+		lines = append(lines, "mx: "+mx)
 	}
-	b.WriteString("max_age: ")
-	b.WriteString(strconv.Itoa(p.MaxAge))
-	b.WriteString("\r\n")
-	return b.String()
+	lines = append(lines, "max_age: "+strconv.Itoa(p.MaxAge), "")
+	return strings.Join(lines, "\r\n")
 }
 
 // PolicyID derives the identifier a domain publishes in its _mta-sts TXT record
