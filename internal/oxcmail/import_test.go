@@ -2,6 +2,7 @@ package oxcmail
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -95,12 +96,33 @@ func checkOriginatorIdentity(t *testing.T, msg *Message) {
 	wantEq(t, getString(t, msg.Props, mapi.PrSenderSmtpAddress, "sender smtp"), "alice@example.com", "sender smtp, filled from representing")
 
 	// Sender search key: "SMTP:" + uppercased address + trailing NUL.
-	v, ok := msg.Props.Get(mapi.PrSenderSearchKey)
-	if !ok {
-		t.Fatal("sender search key missing")
-	}
-	key, _ := v.([]byte)
+	key := mustBytes(t, msg.Props, mapi.PrSenderSearchKey)
 	wantEq(t, string(key), "SMTP:ALICE@EXAMPLE.COM\x00", "sender search key")
+}
+
+// getUint64 returns a uint64-typed property or fails the test.
+func getUint64(t *testing.T, props mapi.PropertyValues, tag mapi.PropTag, label string) uint64 {
+	t.Helper()
+	n, ok := propUint64(props, tag)
+	if !ok {
+		t.Fatalf("%s (%s) missing or not a time", label, tag)
+	}
+	return n
+}
+
+// TestImportDatesAnUnparseableMessageByItsArrival delivers a message whose Date a
+// sender broke and whose From names no address. RFC 5322 makes both required, but
+// a delivery cannot refuse a message for them: the import must succeed, date the
+// message by its arrival, and invent no sender address.
+func TestImportDatesAnUnparseableMessageByItsArrival(t *testing.T) {
+	arrival := time.Date(2026, 5, 1, 8, 0, 0, 0, time.UTC)
+	raw := []byte("From: nobody\r\nDate: not a date at all\r\nSubject: s\r\n\r\nbody\r\n")
+	msg, err := Import(raw, Options{ArrivalTime: arrival})
+	mustNoErr(t, err, "import a message with a broken Date and From")
+	wantEq(t, getUint64(t, msg.Props, mapi.PrClientSubmitTime, "submit time"), mapi.UnixToNTTime(arrival), "submit time")
+	if addr := propString(msg.Props, mapi.PrSenderSmtpAddress); strings.Contains(addr, "@") {
+		t.Errorf("sender smtp = %q, want no address invented from %q", addr, "nobody")
+	}
 }
 
 // checkRecipientTable asserts the recipient bags: two To, one Cc, in header order.
@@ -140,19 +162,8 @@ func checkEnvelopeIdentity(t *testing.T, msg *Message) {
 func checkEnvelopeTimes(t *testing.T, msg *Message) {
 	t.Helper()
 	want := mapi.UnixToNTTime(time.Date(2006, 1, 2, 15, 4, 5, 0, time.UTC))
-	submit, ok := msg.Props.Get(mapi.PrClientSubmitTime)
-	if !ok {
-		t.Fatal("submit time missing")
-	}
-	got, _ := submit.(uint64)
-	wantEq(t, got, want, "submit time")
-
-	created, ok := msg.Props.Get(mapi.PrCreationTime)
-	if !ok {
-		t.Fatal("creation time missing")
-	}
-	gotCreated, _ := created.(uint64)
-	wantEq(t, gotCreated, want, "creation time")
+	wantEq(t, getUint64(t, msg.Props, mapi.PrClientSubmitTime, "submit time"), want, "submit time")
+	wantEq(t, getUint64(t, msg.Props, mapi.PrCreationTime, "creation time"), want, "creation time")
 }
 
 // TestImportSenderAndRepresenting checks that an explicit Sender header
