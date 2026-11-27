@@ -47,6 +47,27 @@ func TestImportClearSignedAsOneAttachment(t *testing.T) {
 	}
 }
 
+// TestImportSignedWithoutASignatureKeepsTheEntity imports a multipart/signed a
+// sender built with no signature part, against RFC 1847 2.1. The class follows
+// the Content-Type, and [MS-OXOSMIME] 3.1.4.1.3 keeps the entity byte for byte,
+// so the reader's client finds no signature to verify and reports it; the server
+// must neither repair nor invent one on the way out.
+func TestImportSignedWithoutASignatureKeepsTheEntity(t *testing.T) {
+	const entity = "--s1\r\nContent-Type: text/plain\r\n\r\ntrust me\r\n--s1--\r\n"
+	const unsigned = "From: alice@hermex.test\r\nTo: bob@hermex.test\r\nSubject: Fake\r\nMIME-Version: 1.0\r\n" +
+		"Content-Type: multipart/signed; protocol=\"application/pkcs7-signature\"; micalg=sha-256; boundary=\"s1\"\r\n\r\n" +
+		entity
+	msg, err := Import([]byte(unsigned), Options{})
+	mustNoErr(t, err, "import a signed message with no signature")
+	wantEq(t, propString(msg.Props, mapi.PrMessageClass), classSMIMEMultipartSig, "class")
+	raw, err := Export(msg, Options{})
+	mustNoErr(t, err, "re-export it")
+	if !bytes.HasSuffix(raw, []byte(entity)) {
+		t.Errorf("re-export changed the entity:\n%s", raw)
+	}
+	wantNotContains(t, string(raw), "pkcs7-signature; name", "an invented signature part")
+}
+
 // TestImportEncryptedKeepsItsContentType proves an encrypted message takes the
 // S/MIME class and keeps its Content-Type, so the re-export still names the
 // smime-type a client needs.
