@@ -35,8 +35,8 @@ func TestApplyRecordsAReadFailure(t *testing.T) {
 	if e.Fields["daemon"] != "hermex-test" || e.Fields["settings"] != "login-lockout" {
 		t.Errorf("fields = %v, want the daemon and the settings family named", e.Fields)
 	}
-	if got, _ := e.Fields["error"].(string); got != "directory unreachable" {
-		t.Errorf("error field = %q, want the read error", got)
+	if got, isString := e.Fields["error"].(string); !isString || got != "directory unreachable" {
+		t.Errorf("error field = %v, want the read error as text", e.Fields["error"])
 	}
 }
 
