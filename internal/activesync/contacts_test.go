@@ -22,7 +22,7 @@ func seedContact(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameEmail1Address})
 	if err != nil {
 		t.Fatal(err)
@@ -64,7 +64,7 @@ func TestContactAppData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDContacts))
 	if err != nil || len(objs) != 1 {
 		t.Fatalf("want 1 contact, got %d (err %v)", len(objs), err)
@@ -142,7 +142,7 @@ func TestSyncContactsClientAdd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{mapi.NameEmail1Address})
 	if err != nil {
 		t.Fatal(err)
@@ -188,7 +188,7 @@ func TestContactsCrossProtocolCardDAVToEAS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 
 	vcard := "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Ada Lovelace\r\nN:Lovelace;Ada;;;\r\n" +
 		"EMAIL:ada@analytical.test\r\nORG:Analytical Engine\r\nEND:VCARD\r\n"
@@ -225,7 +225,7 @@ func TestContactsCrossProtocolEASToCardDAV(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 
 	easData := wbxml.Elem(wbxml.ASData,
 		wbxml.Str(wbxml.CFirstName, "Grace"),
@@ -256,7 +256,7 @@ func TestContactCategories(t *testing.T) {
 	_, dir := seededServer(t)
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 
 	kid, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameKeywords})
 	mustNoErr(t, "resolve the keywords property", err)
@@ -278,10 +278,46 @@ func TestContactCategories(t *testing.T) {
 		wbxml.Str(wbxml.CFirstName, "Dana"),
 		wbxml.Elem(wbxml.CCategories, wbxml.Str(wbxml.CCategory, "Family"), wbxml.Str(wbxml.CCategory, "Lead"))))
 	mustNoErr(t, "parse the device's contact", err)
-	got, _ := propValue(parsed, keyTag).([]string)
-	if !slices.Equal(got, []string{"Family", "Lead"}) {
-		t.Errorf("decoded keywords = %v, want [Family Lead]", got)
+	got, ok := propValue(parsed, keyTag).([]string)
+	if !ok || !slices.Equal(got, []string{"Family", "Lead"}) {
+		t.Errorf("decoded keywords = %v (a []string: %v), want [Family Lead]", propValue(parsed, keyTag), ok)
 	}
+}
+
+// TestSyncContactsRefusesAnItemOfAnotherFolder: a Change or Delete in the
+// Contacts collection carries a device-chosen ServerId, so one naming an
+// appointment in the Calendar is answered with Sync Status 8 (MS-ASCMD "Object
+// not found") and leaves the appointment as it was.
+func TestSyncContactsRefusesAnItemOfAnotherFolder(t *testing.T) {
+	ts, dir := seededServer(t)
+	seedAppointment(t, dir, "Keep me",
+		time.Date(2026, 6, 19, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 6, 19, 9, 30, 0, 0, time.UTC))
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open the store", err)
+	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
+	mustNoErr(t, "close the store", st.Close())
+	mustNoErr(t, "list the calendar", err)
+	if len(objs) != 1 {
+		t.Fatalf("calendar holds %d objects, want the one seeded", len(objs))
+	}
+	sid := strconv.FormatInt(objs[0].ID, 10)
+
+	postCommand(t, ts, "Sync", ctReq("0"))
+	change := wbxml.Elem(wbxml.ASChange, wbxml.Str(wbxml.ASServerID, sid),
+		wbxml.Elem(wbxml.ASData, wbxml.Str(wbxml.CFirstName, "Overwritten")))
+	del := wbxml.Elem(wbxml.ASDelete, wbxml.Str(wbxml.ASServerID, sid))
+	_, root := postCommand(t, ts, "Sync", ctReq("1", change, del))
+
+	resp := respColl(t, root).Child(wbxml.ASResponses)
+	if resp == nil || len(resp.Children) != 2 {
+		t.Fatalf("Responses = %+v, want one per refused command", resp)
+	}
+	for _, r := range resp.Children {
+		wantEq(t, "the refused command's ServerId", r.ChildText(wbxml.ASServerID), sid)
+		wantEq(t, "the refused command's Status", r.ChildText(wbxml.ASStatus), "8")
+	}
+	wantEq(t, "the appointment's subject", storedSubject(t, dir, objs[0].ID), "Keep me")
 }
 
 // wantChildTexts checks a container element holds exactly the item texts wanted.
