@@ -324,13 +324,16 @@ func contactFromMessage(st *objectstore.Store, id int64, msg *oxcmail.Message, o
 		return contactJSON{}, false
 	}
 	// ORG is "company;department"; ROLE is Profession (not department).
-	org := strings.Split(vcardField(vcf, "ORG"), ";")
+	org := vcardComponents(vcardField(vcf, "ORG"))
 	// N is the structured name: Family ; Given ; Middle ; Prefix ; Suffix.
-	name := strings.Split(vcardField(vcf, "N"), ";")
+	name := vcardComponents(vcardField(vcf, "N"))
 	emails := vcardAll(vcf, "EMAIL")
+	for i := range emails {
+		emails[i] = vcardText(emails[i])
+	}
 	c := contactJSON{
 		ID:          strconv.FormatInt(id, 10),
-		Name:        vcardField(vcf, "FN"),
+		Name:        vcardText(vcardField(vcf, "FN")),
 		LastName:    fieldAt(name, 0),
 		FirstName:   fieldAt(name, 1),
 		MiddleName:  fieldAt(name, 2),
@@ -339,20 +342,20 @@ func contactFromMessage(st *objectstore.Store, id int64, msg *oxcmail.Message, o
 		Email:       fieldAt(emails, 0),
 		Email2:      fieldAt(emails, 1),
 		Email3:      fieldAt(emails, 2),
-		Phone:       vcardTypedField(vcf, "TEL", "WORK"), // business telephone
-		MobilePhone: vcardTypedField(vcf, "TEL", "CELL"),
-		HomePhone:   vcardTypedField(vcf, "TEL", "HOME"),
-		BusinessFax: vcardTypedField(vcf, "TEL", "FAX"),
+		Phone:       vcardText(vcardTypedField(vcf, "TEL", "WORK")), // business telephone
+		MobilePhone: vcardText(vcardTypedField(vcf, "TEL", "CELL")),
+		HomePhone:   vcardText(vcardTypedField(vcf, "TEL", "HOME")),
+		BusinessFax: vcardText(vcardTypedField(vcf, "TEL", "FAX")),
 		Company:     fieldAt(org, 0),
-		JobTitle:    vcardField(vcf, "TITLE"),
+		JobTitle:    vcardText(vcardField(vcf, "TITLE")),
 		Department:  fieldAt(org, 1),
 		Birthday:    vcardField(vcf, "BDAY"),
-		Nickname:    vcardField(vcf, "NICKNAME"),
+		Nickname:    vcardText(vcardField(vcf, "NICKNAME")),
 		FileAs:      fileAsOf(st, msg),
-		Profession:  vcardField(vcf, "ROLE"),
+		Profession:  vcardText(vcardField(vcf, "ROLE")),
 		Spouse:      propString(msg, mapi.PrSpouseName),
-		IMAddress:   vcardField(vcf, "IMPP"),
-		WebPage:     vcardField(vcf, "URL"),
+		IMAddress:   vcardText(vcardField(vcf, "IMPP")),
+		WebPage:     vcardText(vcardField(vcf, "URL")),
 		Assistant:   propString(msg, mapi.PrAssistant),
 		Manager:     propString(msg, mapi.PrManagerName),
 		Office:      propString(msg, mapi.PrOfficeLocation),
@@ -367,15 +370,55 @@ func contactFromMessage(st *objectstore.Store, id int64, msg *oxcmail.Message, o
 // addresses are separate ADR lines (TYPE=HOME/WORK/OTHER), each semicolon-
 // delimited: pobox ; ext ; street ; city ; state ; postal ; country.
 func setContactAddresses(c *contactJSON, vcf []byte) {
-	home := strings.Split(vcardTypedField(vcf, "ADR", "HOME"), ";")
-	work := strings.Split(vcardTypedField(vcf, "ADR", "WORK"), ";")
-	other := strings.Split(vcardTypedField(vcf, "ADR", "OTHER"), ";")
+	home := vcardComponents(vcardTypedField(vcf, "ADR", "HOME"))
+	work := vcardComponents(vcardTypedField(vcf, "ADR", "WORK"))
+	other := vcardComponents(vcardTypedField(vcf, "ADR", "OTHER"))
 	c.HomeStreet, c.HomeCity, c.HomeState, c.HomePostal, c.HomeCountry =
 		fieldAt(home, 2), fieldAt(home, 3), fieldAt(home, 4), fieldAt(home, 5), fieldAt(home, 6)
 	c.WorkStreet, c.WorkCity, c.WorkState, c.WorkPostal, c.WorkCountry =
 		fieldAt(work, 2), fieldAt(work, 3), fieldAt(work, 4), fieldAt(work, 5), fieldAt(work, 6)
 	c.OtherStreet, c.OtherCity, c.OtherState, c.OtherPostal, c.OtherCountry =
 		fieldAt(other, 2), fieldAt(other, 3), fieldAt(other, 4), fieldAt(other, 5), fieldAt(other, 6)
+}
+
+// vcardComponents splits a structured value on the semicolons that are not
+// escaped and unescapes each component (RFC 6350 section 3.4).
+func vcardComponents(raw string) []string {
+	var out []string
+	var cur strings.Builder
+	for i := 0; i < len(raw); i++ {
+		switch {
+		case raw[i] == '\\' && i+1 < len(raw):
+			cur.WriteByte(raw[i])
+			cur.WriteByte(raw[i+1])
+			i++
+		case raw[i] == ';':
+			out = append(out, vcardText(cur.String()))
+			cur.Reset()
+		default:
+			cur.WriteByte(raw[i])
+		}
+	}
+	return append(out, vcardText(cur.String()))
+}
+
+// vcardText undoes RFC 6350 text escaping: \n or \N is a line break and any
+// other escaped character stands for itself.
+func vcardText(raw string) string {
+	var b strings.Builder
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '\\' || i+1 == len(raw) {
+			b.WriteByte(raw[i])
+			continue
+		}
+		i++
+		if raw[i] == 'n' || raw[i] == 'N' {
+			b.WriteByte('\n')
+		} else {
+			b.WriteByte(raw[i])
+		}
+	}
+	return b.String()
 }
 
 // fieldAt returns one component of a split vCard value, or "" when the value
