@@ -377,6 +377,27 @@ func TestSyncCollectorImportDeletes(t *testing.T) {
 	}
 }
 
+// TestSyncCollectorImportDeletesStaysInItsFolder proves a collector deletes only
+// messages of the folder it was opened on. The source keys come from the client,
+// so an Inbox message named through a Sent Items collector must stay where it is.
+func TestSyncCollectorImportDeletesStaysInItsFolder(t *testing.T) {
+	dir := provisionedDir(t)
+	inboxMsg := seedInboxMessage(t, dir, "NOT YOURS")
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDSentItems))), []uint32{logonH, 0xFFFFFFFF})
+	sentH := h[1]
+	h, _ = mustDispatchOK(t, sess, buildOpenCollector(1, 2, 1), []uint32{logonH, sentH, 0xFFFFFFFF}, ropSyncOpenCollector)
+	sess.Dispatch(buildImportDeletes(2, homeSourceKey(t, dir, uint64(inboxMsg))), []uint32{logonH, sentH, h[2]})
+
+	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), inboxMsg); f == -1 {
+		t.Error("a Sent Items collector deleted a message of the Inbox")
+	}
+}
+
 func buildImportMessageChange(inIdx, outIdx, importFlags uint8, header mapi.PropertyValues) []byte {
 	b := ext.NewPush(ext.FlagUTF16)
 	b.Uint8(ropSyncImportMessageChange)
