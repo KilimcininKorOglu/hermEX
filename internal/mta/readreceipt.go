@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/relay"
@@ -57,8 +58,12 @@ func SendReadReceipt(accounts directory.Accounts, spool *relay.Spool, info ReadR
 	if err != nil {
 		return err
 	}
-	if _, err := SendReport(accounts, spool, info.Reader, []string{info.To}, raw, when); err != nil {
+	unresolved, err := SendReport(accounts, spool, info.Reader, []string{info.To}, raw, when)
+	if err != nil {
 		return err
+	}
+	if len(unresolved) > 0 {
+		logPassFailure("read-receipt", info.Reader, logging.Fields{"unresolved": strings.Join(unresolved, ",")}, "unresolved recipient")
 	}
 	return nil
 }
@@ -173,7 +178,8 @@ func ReceiptPending(st *objectstore.Store, messageID int64) (bool, error) {
 // with a Disposition-Notification-To goes there, not to the From address. The
 // represented sender is the last resort for a message that names no sender.
 func receiptDestination(props mapi.PropertyValues) string {
-	if req, _ := props.Get(mapi.PrReadReceiptRequested); req != true || isMDN(props) {
+	req, ok := props.Get(mapi.PrReadReceiptRequested)
+	if !ok || req != true || isMDN(props) {
 		return ""
 	}
 	for _, tag := range receiptAddressTags {
@@ -235,8 +241,14 @@ func singleNotificationAddress(h mail.Header) bool {
 
 // stringValue reads a string property, empty when it is absent.
 func stringValue(props mapi.PropertyValues, tag mapi.PropTag) string {
-	v, _ := props.GetAnyCharset(tag)
-	s, _ := v.(string)
+	v, ok := props.GetAnyCharset(tag)
+	if !ok {
+		return ""
+	}
+	s, ok := v.(string)
+	if !ok {
+		return ""
+	}
 	return s
 }
 
@@ -259,19 +271,18 @@ func buildReadReceipt(info ReadReceiptInfo, when time.Time) ([]byte, error) {
 		return nil, err
 	}
 
-	var msg bytes.Buffer
-	writeReplyField(&msg, "From", info.Reader)
-	writeReplyField(&msg, "To", info.To)
-	writeReplyField(&msg, "Subject", mime.QEncoding.Encode("utf-8", readReceiptSubject(info.OrigSubject)))
-	writeReplyField(&msg, "Date", when.UTC().Format(dateLayout))
-	writeReplyField(&msg, "Message-ID", "<"+newToken()+"@"+domainOf(info.Reader)+">")
-	writeReplyField(&msg, "X-Auto-Response-Suppress", "All")
-	writeReplyField(&msg, "MIME-Version", "1.0")
-	writeReplyField(&msg, "Content-Type",
+	var msg []byte
+	msg = appendReplyField(msg, "From", info.Reader)
+	msg = appendReplyField(msg, "To", info.To)
+	msg = appendReplyField(msg, "Subject", mime.QEncoding.Encode("utf-8", readReceiptSubject(info.OrigSubject)))
+	msg = appendReplyField(msg, "Date", when.UTC().Format(dateLayout))
+	msg = appendReplyField(msg, "Message-ID", "<"+newToken()+"@"+domainOf(info.Reader)+">")
+	msg = appendReplyField(msg, "X-Auto-Response-Suppress", "All")
+	msg = appendReplyField(msg, "MIME-Version", "1.0")
+	msg = appendReplyField(msg, "Content-Type",
 		`multipart/report; report-type="disposition-notification"; boundary="`+mw.Boundary()+`"`)
-	msg.WriteString("\r\n")
-	msg.Write(parts.Bytes())
-	return msg.Bytes(), nil
+	msg = append(msg, "\r\n"...)
+	return append(msg, parts.Bytes()...), nil
 }
 
 // readReceiptText is the human-readable part, modeled on the reference's
@@ -280,19 +291,17 @@ func buildReadReceipt(info ReadReceiptInfo, when time.Time) ([]byte, error) {
 // and length lines, which need the original recipient table and size, are omitted
 // as non-load-bearing.
 func readReceiptText(info ReadReceiptInfo) string {
-	var b bytes.Buffer
-	fmt.Fprintf(&b, "Your message has been displayed to %q.\r\n\r\n", info.Reader)
-	b.WriteString("Below is the original mail information:\r\n")
+	b := fmt.Appendf(nil, "Your message has been displayed to %q.\r\n\r\nBelow is the original mail information:\r\n", info.Reader)
 	if !info.SubmitTime.IsZero() {
-		fmt.Fprintf(&b, "   Time:    %s\r\n", info.SubmitTime.UTC().Format(dateLayout))
+		b = fmt.Appendf(b, "   Time:    %s\r\n", info.SubmitTime.UTC().Format(dateLayout))
 	}
 	if info.OrigFrom != "" {
-		fmt.Fprintf(&b, "   From:    %s\r\n", info.OrigFrom)
+		b = fmt.Appendf(b, "   From:    %s\r\n", info.OrigFrom)
 	}
 	if info.OrigSubject != "" {
-		fmt.Fprintf(&b, "   Subject: %s\r\n", info.OrigSubject)
+		b = fmt.Appendf(b, "   Subject: %s\r\n", info.OrigSubject)
 	}
-	return b.String()
+	return string(b)
 }
 
 // dispositionNotification is the machine-readable message/disposition-notification
@@ -300,15 +309,14 @@ func readReceiptText(info ReadReceiptInfo) string {
 // disposition is a "displayed" (read) notification, sent automatically or, when
 // the reader agreed to a prompt, manually.
 func dispositionNotification(info ReadReceiptInfo) string {
-	var b bytes.Buffer
-	fmt.Fprintf(&b, "Final-Recipient: rfc822;%s\r\n", info.Reader)
+	b := fmt.Appendf(nil, "Final-Recipient: rfc822;%s\r\n", info.Reader)
 	if info.Manual {
-		b.WriteString("Disposition: manual-action/MDN-sent-manually; displayed\r\n")
+		b = append(b, "Disposition: manual-action/MDN-sent-manually; displayed\r\n"...)
 	} else {
-		b.WriteString("Disposition: automatic-action/MDN-sent-automatically; displayed\r\n")
+		b = append(b, "Disposition: automatic-action/MDN-sent-automatically; displayed\r\n"...)
 	}
 	if info.OrigMsgID != "" {
-		fmt.Fprintf(&b, "Original-Message-ID: %s\r\n", info.OrigMsgID)
+		b = fmt.Appendf(b, "Original-Message-ID: %s\r\n", info.OrigMsgID)
 	}
-	return b.String()
+	return string(b)
 }

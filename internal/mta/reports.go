@@ -111,44 +111,51 @@ const (
 	reportStoreFailed
 )
 
+type storeResult struct {
+	outcome storeOutcome
+	id      int64
+}
+
 // storeReport writes the report under its domain. reportNotHosted means the
 // domain is not one this server hosts; err is set for it and for a failed store.
-func storeReport(rec ReportRecorder, res mailreport.Result, domain string, src directory.ReportSource) (storeOutcome, error) {
-	id, found, err := rec.DomainID(domain)
+func storeReport(rec ReportRecorder, res mailreport.Result, domain string, src directory.ReportSource) (storeResult, error) {
+	domID, found, err := rec.DomainID(domain)
 	if err != nil {
-		return reportStoreFailed, err
+		return storeResult{outcome: reportStoreFailed}, err
 	}
 	if !found {
-		return reportNotHosted, notHosted(domain)
+		return storeResult{outcome: reportNotHosted}, notHosted(domain)
 	}
-	src.DomainID = id
+	src.DomainID = domID
+	var id int64
 	switch res.Kind {
 	case mailreport.KindDMARCAggregate:
-		_, err = rec.StoreDMARCAggregate(src, res.Aggregate)
+		id, err = rec.StoreDMARCAggregate(src, res.Aggregate)
 	case mailreport.KindTLS:
-		_, err = rec.StoreTLSReport(src, res.TLS)
+		id, err = rec.StoreTLSReport(src, res.TLS)
 	case mailreport.KindDMARCFailure:
-		_, err = rec.StoreDMARCFailure(src, res.Failure)
+		id, err = rec.StoreDMARCFailure(src, res.Failure)
 	}
 	switch {
 	case errors.Is(err, directory.ErrDuplicateReport):
-		return reportDuplicate, nil
+		return storeResult{outcome: reportDuplicate}, nil
 	case err != nil:
-		return reportStoreFailed, err
+		return storeResult{outcome: reportStoreFailed}, err
 	}
-	return reportStored, nil
+	return storeResult{outcome: reportStored, id: id}, nil
 }
 
 // storeReport writes the report under its domain and records the outcome.
 func (s *session) storeReport(res mailreport.Result, domain string, src directory.ReportSource) {
 	fields := logging.Fields{"kind": string(res.Kind), "report_id": res.ReportID()}
-	outcome, err := storeReport(s.reports, res, domain, src)
-	switch outcome {
+	sr, err := storeReport(s.reports, res, domain, src)
+	switch sr.outcome {
 	case reportDuplicate:
 		s.emitReport(logging.LevelInfo, "report.duplicate", domain, fields, nil)
 	case reportNotHosted, reportStoreFailed:
 		s.emitReport(logging.LevelError, "report.store_failed", domain, fields, err)
 	default:
+		fields["id"] = sr.id
 		s.emitReport(logging.LevelInfo, "report.stored", domain, fields, nil)
 	}
 }

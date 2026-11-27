@@ -1,7 +1,6 @@
 package mta
 
 import (
-	"bytes"
 	"fmt"
 	"mime"
 	"strings"
@@ -46,18 +45,17 @@ func buildQuarantineNotice(rec directory.QuarantineRecord, to, hostname string, 
 	if hostname == "" {
 		hostname = "localhost"
 	}
-	var b bytes.Buffer
-	writeReplyField(&b, "From", "hermEX Antivirus <postmaster@"+hostname+">")
-	writeReplyField(&b, "To", to)
-	writeReplyField(&b, "Subject", mime.QEncoding.Encode("utf-8", "Karantina bildirimi: virüs tespit edildi"))
-	writeReplyField(&b, "Date", when.UTC().Format(dateLayout))
-	writeReplyField(&b, "Message-ID", "<"+newToken()+"@"+hostname+">")
-	writeReplyField(&b, "Auto-Submitted", "auto-generated")
-	writeReplyField(&b, "MIME-Version", "1.0")
-	writeReplyField(&b, "Content-Type", "text/plain; charset=utf-8")
-	b.WriteString("\r\n")
-	b.WriteString(quarantineNoticeText(rec))
-	return b.Bytes()
+	var b []byte
+	b = appendReplyField(b, "From", "hermEX Antivirus <postmaster@"+hostname+">")
+	b = appendReplyField(b, "To", to)
+	b = appendReplyField(b, "Subject", mime.QEncoding.Encode("utf-8", "Karantina bildirimi: virüs tespit edildi"))
+	b = appendReplyField(b, "Date", when.UTC().Format(dateLayout))
+	b = appendReplyField(b, "Message-ID", "<"+newToken()+"@"+hostname+">")
+	b = appendReplyField(b, "Auto-Submitted", "auto-generated")
+	b = appendReplyField(b, "MIME-Version", "1.0")
+	b = appendReplyField(b, "Content-Type", "text/plain; charset=utf-8")
+	b = append(b, "\r\n"...)
+	return append(b, quarantineNoticeText(rec)...)
 }
 
 // quarantineNoticeText is the Turkish notice body. Untrusted fields (sender,
@@ -72,13 +70,10 @@ func quarantineNoticeText(rec directory.QuarantineRecord) string {
 	if f := oneLine(rec.InfectedFile); f != "" {
 		cause = "'" + f + "' dosyasındaki " + virus + " virüsü"
 	}
-	var b bytes.Buffer
+	lead := fmt.Sprintf("%s adresinden gelen '%s' konulu mail, %s sebebiyle teslim edilmeyip karantinaya alındı.\r\n\r\n",
+		oneLine(rec.MailFrom), subject, cause)
 	if rec.Direction == "outbound" {
-		fmt.Fprintf(&b, "Gönderdiğiniz '%s' konulu mail, %s sebebiyle gönderilmeyip karantinaya alındı.\r\n\r\n", subject, cause)
-	} else {
-		fmt.Fprintf(&b, "%s adresinden gelen '%s' konulu mail, %s sebebiyle teslim edilmeyip karantinaya alındı.\r\n\r\n",
-			oneLine(rec.MailFrom), subject, cause)
+		lead = fmt.Sprintf("Gönderdiğiniz '%s' konulu mail, %s sebebiyle gönderilmeyip karantinaya alındı.\r\n\r\n", subject, cause)
 	}
-	b.WriteString("Lütfen yöneticinize danışınız.\r\n")
-	return b.String()
+	return lead + "Lütfen yöneticinize danışınız.\r\n"
 }

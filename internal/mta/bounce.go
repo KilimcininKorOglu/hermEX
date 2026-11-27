@@ -36,22 +36,21 @@ func Bounce(reportingMTA, sender, failed, reason string, when time.Time) ([]byte
 		return nil, err
 	}
 
-	var b bytes.Buffer
+	var b []byte
 	daemon := "mailer-daemon@" + domainOf(sender)
-	writeReplyField(&b, "From", "Mail Delivery System <"+daemon+">")
-	writeReplyField(&b, "To", sender)
-	writeReplyField(&b, "Subject", mime.QEncoding.Encode("utf-8", "Undelivered Mail Returned to Sender"))
-	writeReplyField(&b, "Date", when.UTC().Format(dateLayout))
-	writeReplyField(&b, "Message-ID", "<"+newToken()+"@"+domainOf(sender)+">")
+	b = appendReplyField(b, "From", "Mail Delivery System <"+daemon+">")
+	b = appendReplyField(b, "To", sender)
+	b = appendReplyField(b, "Subject", mime.QEncoding.Encode("utf-8", "Undelivered Mail Returned to Sender"))
+	b = appendReplyField(b, "Date", when.UTC().Format(dateLayout))
+	b = appendReplyField(b, "Message-ID", "<"+newToken()+"@"+domainOf(sender)+">")
 	// RFC 3834 §5: a bounce is auto-generated; the marker stops downstream
 	// responders (including our own auto-reply) from answering it.
-	writeReplyField(&b, "Auto-Submitted", "auto-generated")
-	writeReplyField(&b, "MIME-Version", "1.0")
-	writeReplyField(&b, "Content-Type",
+	b = appendReplyField(b, "Auto-Submitted", "auto-generated")
+	b = appendReplyField(b, "MIME-Version", "1.0")
+	b = appendReplyField(b, "Content-Type",
 		`multipart/report; report-type="delivery-status"; boundary="`+mw.Boundary()+`"`)
-	b.WriteString("\r\n")
-	b.Write(parts.Bytes())
-	return b.Bytes(), nil
+	b = append(b, "\r\n"...)
+	return append(b, parts.Bytes()...), nil
 }
 
 // writeReportPart writes one multipart/report body part with the given
@@ -67,12 +66,13 @@ func writeReportPart(mw *multipart.Writer, contentType string, data []byte) erro
 
 // bounceText is the human-readable part of the report.
 func bounceText(failed, reason string) string {
-	var b bytes.Buffer
-	b.WriteString("Your message could not be delivered to one or more recipients.\r\n\r\n")
-	fmt.Fprintf(&b, "    %s\r\n\r\n", failed)
-	b.WriteString("The mail system reported:\r\n\r\n")
-	fmt.Fprintf(&b, "    %s\r\n", reason)
-	return b.String()
+	return fmt.Sprintf(
+		"Your message could not be delivered to one or more recipients.\r\n\r\n"+
+			"    %s\r\n\r\n"+
+			"The mail system reported:\r\n\r\n"+
+			"    %s\r\n",
+		failed, reason,
+	)
 }
 
 // deliveryStatus is the machine-readable message/delivery-status part (RFC 3464):
@@ -89,16 +89,17 @@ func deliveryStatus(reportingMTA, failed, reason string, when time.Time) string 
 		reportingMTA = "localhost"
 	}
 	date := when.UTC().Format(dateLayout)
-	var b bytes.Buffer
-	fmt.Fprintf(&b, "Reporting-MTA: dns;%s\r\n", reportingMTA)
-	fmt.Fprintf(&b, "Arrival-Date: %s\r\n", date)
-	b.WriteString("\r\n") // blank line separates the per-message and per-recipient blocks
-	fmt.Fprintf(&b, "Final-Recipient: rfc822;%s\r\n", failed)
-	b.WriteString("Action: failed\r\n")
-	b.WriteString("Status: 5.0.0\r\n")
-	fmt.Fprintf(&b, "Diagnostic-Code: smtp; %s\r\n", oneLine(reason))
-	fmt.Fprintf(&b, "Last-Attempt-Date: %s\r\n", date)
-	return b.String()
+	return fmt.Sprintf(
+		"Reporting-MTA: dns;%s\r\n"+
+			"Arrival-Date: %s\r\n"+
+			"\r\n"+ // blank line separates the per-message and per-recipient blocks
+			"Final-Recipient: rfc822;%s\r\n"+
+			"Action: failed\r\n"+
+			"Status: 5.0.0\r\n"+
+			"Diagnostic-Code: smtp; %s\r\n"+
+			"Last-Attempt-Date: %s\r\n",
+		reportingMTA, date, failed, oneLine(reason), date,
+	)
 }
 
 // oneLine flattens whitespace runs (including CR/LF) to single spaces so an

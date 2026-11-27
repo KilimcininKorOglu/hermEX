@@ -269,12 +269,18 @@ func (av *avConfig) fileQuarantine(accounts directory.Accounts, id int64, entry 
 		})
 }
 
+type avFlags struct {
+	inbound  bool
+	outbound bool
+	id       int64
+}
+
 // gate decides whether to scan and, if so, the scoping domain id and the
 // direction label, applying the per-mode toggle rules.
 func (av *avConfig) gate(mode avMode, from string, recipients []string) (scope int64, direction string, on bool) {
 	if mode == avSubmission {
-		if _, out, id, ok := av.flags(domainOf(from)); ok && out {
-			return id, "outbound", true
+		if f, ok := av.flags(domainOf(from)); ok && f.outbound {
+			return f.id, "outbound", true
 		}
 	}
 	// Stored content is labelled for what it is: it was neither received nor
@@ -296,8 +302,8 @@ func (av *avConfig) gate(mode avMode, from string, recipients []string) (scope i
 // is set, which is the domain a quarantine record is scoped to.
 func (av *avConfig) inboundScope(recipients []string) (int64, bool) {
 	for _, rcpt := range recipients {
-		if in, _, id, ok := av.flags(domainOf(rcpt)); ok && in {
-			return id, true
+		if f, ok := av.flags(domainOf(rcpt)); ok && f.inbound {
+			return f.id, true
 		}
 	}
 	return 0, false
@@ -305,16 +311,16 @@ func (av *avConfig) inboundScope(recipients []string) (int64, bool) {
 
 // flags resolves a domain's scan toggles and id, reporting ok=false when the
 // domain is unknown or both toggles are off (so a lookup error fails open).
-func (av *avConfig) flags(domain string) (inbound, outbound bool, id int64, ok bool) {
+func (av *avConfig) flags(domain string) (avFlags, bool) {
 	in, out, err := av.dir.GetDomainAVScan(domain)
 	if err != nil || (!in && !out) {
-		return false, false, 0, false
+		return avFlags{}, false
 	}
 	id, found, err := av.dir.DomainID(domain)
 	if err != nil || !found {
-		return false, false, 0, false
+		return avFlags{}, false
 	}
-	return in, out, id, true
+	return avFlags{inbound: in, outbound: out, id: id}, true
 }
 
 func (av *avConfig) emit(level logging.Level, name, from string, f logging.Fields) {

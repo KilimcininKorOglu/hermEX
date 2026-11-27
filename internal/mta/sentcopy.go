@@ -44,7 +44,12 @@ func fileRepresentedCopy(accounts directory.Accounts, envelopeFrom string, raw [
 		logSentCopy(envelopeFrom, "open", err)
 		return false
 	}
-	defer st.Close()
+	defer func() {
+		if cerr := closeMailbox(st); cerr != nil {
+			logSentCopy(envelopeFrom, "close", cerr)
+			only = false
+		}
+	}()
 
 	cfg, err := st.GetSentCopyConfig()
 	if err != nil {
@@ -87,8 +92,16 @@ func representedMailbox(accounts directory.Accounts, envelopeFrom string, raw []
 	if ok && senderPath == reprPath {
 		return "", false, false // the sender's own mailbox, alias or not
 	}
-	_, onBehalf = singleAddress(msg.Header.Get("Sender"))
-	return reprPath, onBehalf, true
+	return reprPath, hasSingleAddress(msg.Header.Get("Sender")), true
+}
+
+// hasSingleAddress reports whether a header names exactly one address.
+func hasSingleAddress(field string) bool {
+	if strings.TrimSpace(field) == "" {
+		return false
+	}
+	list, err := mail.ParseAddressList(field)
+	return err == nil && len(list) == 1
 }
 
 // singleAddress returns the bare address of a header that names exactly one, and

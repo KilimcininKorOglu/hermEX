@@ -75,7 +75,7 @@ func (r *DigestRunner) Run() int {
 // digestMailbox summarizes one mailbox's quarantined mail newer than its watermark,
 // delivers the digest to its inbox, and advances the watermark. It reports whether a
 // digest was delivered. Nothing new means no digest (no empty or duplicate summaries).
-func (r *DigestRunner) digestMailbox(email, maildir string) (bool, error) {
+func (r *DigestRunner) digestMailbox(email, maildir string) (delivered bool, err error) {
 	last, err := r.Dir.GetDigestWatermark(maildir)
 	if err != nil {
 		return false, err
@@ -87,7 +87,11 @@ func (r *DigestRunner) digestMailbox(email, maildir string) (bool, error) {
 		r.logErr(email, "digest.open", err)
 		return false, nil
 	}
-	defer st.Close()
+	defer func() {
+		if cerr := closeMailbox(st); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDJunk))
 	if err != nil {
 		// The store opened but the Junk read failed (a transient lock or a damaged
@@ -136,46 +140,51 @@ func messagesAfter(msgs []objectstore.MessageInfo, last uint32) ([]objectstore.M
 // senders are attacker-authored, so the digest is deliberately plain text (no HTML to
 // inject into) and each is flattened to a single line before inclusion.
 func (r *DigestRunner) buildDigest(email string, msgs []objectstore.MessageInfo, when time.Time) ([]byte, error) {
-	from := "postmaster@" + hostOrLocal(r.Hostname)
-	expiry := when.Add(r.TokenTTL)
-
-	var body strings.Builder
-	fmt.Fprintf(&body, "%d message(s) were filed to your Junk folder as suspected spam since your last summary.\r\n", len(msgs))
-	body.WriteString("To move one back to your inbox, open its release link and confirm on the page that opens.\r\n\r\n")
-	for i, m := range msgs {
-		token, err := quarantine.Mint(r.Secret, quarantine.Claims{Mailbox: email, UID: m.UID, Expiry: expiry.Unix()})
-		if err != nil {
-			return nil, err
-		}
-		fmt.Fprintf(&body, "  %d. Subject: %s\r\n", i+1, fieldOr(m.Subject, "(no subject)"))
-		fmt.Fprintf(&body, "     From:    %s\r\n", fieldOr(m.Sender, "(unknown sender)"))
-		fmt.Fprintf(&body, "     Date:    %s\r\n", m.InternalDate.UTC().Format(dateLayout))
-		fmt.Fprintf(&body, "     Release: %s\r\n\r\n", releaseURL(r.BaseURL, token))
+	body, err := r.digestBody(email, msgs, when)
+	if err != nil {
+		return nil, err
 	}
-	fmt.Fprintf(&body, "These release links expire on %s. You can also review your Junk folder in webmail.\r\n",
-		expiry.UTC().Format(dateLayout))
-
-	var b bytes.Buffer
-	writeReplyField(&b, "From", from)
-	writeReplyField(&b, "To", email)
-	writeReplyField(&b, "Subject", mime.QEncoding.Encode("utf-8", fmt.Sprintf("Quarantine summary: %d new message(s)", len(msgs))))
-	writeReplyField(&b, "Date", when.UTC().Format(dateLayout))
-	writeReplyField(&b, "Message-ID", "<"+newToken()+"@"+hostOrLocal(r.Hostname)+">")
+	from := "postmaster@" + hostOrLocal(r.Hostname)
+	var hdr []byte
+	hdr = appendReplyField(hdr, "From", from)
+	hdr = appendReplyField(hdr, "To", email)
+	hdr = appendReplyField(hdr, "Subject", mime.QEncoding.Encode("utf-8", fmt.Sprintf("Quarantine summary: %d new message(s)", len(msgs))))
+	hdr = appendReplyField(hdr, "Date", when.UTC().Format(dateLayout))
+	hdr = appendReplyField(hdr, "Message-ID", "<"+newToken()+"@"+hostOrLocal(r.Hostname)+">")
 	// A system notification, not a reply: mark it auto-generated so no auto-responder
 	// (including ours) replies to it (RFC 3834).
-	writeReplyField(&b, "Auto-Submitted", "auto-generated")
-	writeReplyField(&b, "MIME-Version", "1.0")
-	writeReplyField(&b, "Content-Type", "text/plain; charset=utf-8")
-	writeReplyField(&b, "Content-Transfer-Encoding", "quoted-printable")
-	b.WriteString("\r\n")
-	qp := quotedprintable.NewWriter(&b)
-	if _, err := qp.Write([]byte(body.String())); err != nil {
+	hdr = appendReplyField(hdr, "Auto-Submitted", "auto-generated")
+	hdr = appendReplyField(hdr, "MIME-Version", "1.0")
+	hdr = appendReplyField(hdr, "Content-Type", "text/plain; charset=utf-8")
+	hdr = appendReplyField(hdr, "Content-Transfer-Encoding", "quoted-printable")
+	hdr = append(hdr, "\r\n"...)
+
+	var qpBuf bytes.Buffer
+	qp := quotedprintable.NewWriter(&qpBuf)
+	if _, err := qp.Write(body); err != nil {
 		return nil, err
 	}
 	if err := qp.Close(); err != nil {
 		return nil, err
 	}
-	return b.Bytes(), nil
+	return append(hdr, qpBuf.Bytes()...), nil
+}
+
+func (r *DigestRunner) digestBody(email string, msgs []objectstore.MessageInfo, when time.Time) ([]byte, error) {
+	expiry := when.Add(r.TokenTTL)
+	body := fmt.Appendf(nil, "%d message(s) were filed to your Junk folder as suspected spam since your last summary.\r\n", len(msgs))
+	body = append(body, "To move one back to your inbox, open its release link and confirm on the page that opens.\r\n\r\n"...)
+	for i, m := range msgs {
+		token, err := quarantine.Mint(r.Secret, quarantine.Claims{Mailbox: email, UID: m.UID, Expiry: expiry.Unix()})
+		if err != nil {
+			return nil, err
+		}
+		body = fmt.Appendf(body, "  %d. Subject: %s\r\n     From:    %s\r\n     Date:    %s\r\n     Release: %s\r\n\r\n",
+			i+1, fieldOr(m.Subject, "(no subject)"), fieldOr(m.Sender, "(unknown sender)"),
+			m.InternalDate.UTC().Format(dateLayout), releaseURL(r.BaseURL, token))
+	}
+	return fmt.Appendf(body, "These release links expire on %s. You can also review your Junk folder in webmail.\r\n",
+		expiry.UTC().Format(dateLayout)), nil
 }
 
 // releaseURL builds the release link for a token against the configured webmail root.

@@ -74,8 +74,8 @@ func sendAutoReply(accounts directory.Accounts, st *objectstore.Store, selfAddr,
 	// owner: a sender resolving to another domain is a different tenant and must
 	// get the external (or no) reply, never the internal body, so one domain's OOF
 	// state does not leak across the tenant boundary.
-	_, resolved := accounts.Resolve(to)
-	internal := resolved && sameDomain(to, selfAddr)
+	path, resolved := accounts.Resolve(to)
+	internal := resolved && path != "" && sameDomain(to, selfAddr)
 
 	senderKnown, err := senderIsKnown(st, cfg, to, internal)
 	if err != nil {
@@ -322,39 +322,41 @@ func buildAutoReply(from, to, subject, body, inReplyTo string, when time.Time) (
 	if strings.TrimSpace(subject) == "" {
 		subject = DefaultAutoReplyPrefix
 	}
-	var b bytes.Buffer
-	writeReplyField(&b, "From", from)
-	writeReplyField(&b, "To", to)
-	writeReplyField(&b, "Subject", mime.QEncoding.Encode("utf-8", subject))
-	writeReplyField(&b, "Date", when.UTC().Format(dateLayout))
-	writeReplyField(&b, "Message-ID", "<"+newToken()+"@"+domainOf(from)+">")
+	var hdr []byte
+	hdr = appendReplyField(hdr, "From", from)
+	hdr = appendReplyField(hdr, "To", to)
+	hdr = appendReplyField(hdr, "Subject", mime.QEncoding.Encode("utf-8", subject))
+	hdr = appendReplyField(hdr, "Date", when.UTC().Format(dateLayout))
+	hdr = appendReplyField(hdr, "Message-ID", "<"+newToken()+"@"+domainOf(from)+">")
 	if inReplyTo != "" {
-		writeReplyField(&b, "In-Reply-To", inReplyTo)
-		writeReplyField(&b, "References", inReplyTo)
+		hdr = appendReplyField(hdr, "In-Reply-To", inReplyTo)
+		hdr = appendReplyField(hdr, "References", inReplyTo)
 	}
 	// The loop-break header. RFC 3834 §5: an auto-reply is marked auto-replied so
 	// downstream responders (including ours) do not reply to it.
-	writeReplyField(&b, "Auto-Submitted", "auto-replied")
-	writeReplyField(&b, "MIME-Version", "1.0")
-	writeReplyField(&b, "Content-Type", "text/plain; charset=utf-8")
-	writeReplyField(&b, "Content-Transfer-Encoding", "quoted-printable")
-	b.WriteString("\r\n")
-	qp := quotedprintable.NewWriter(&b)
+	hdr = appendReplyField(hdr, "Auto-Submitted", "auto-replied")
+	hdr = appendReplyField(hdr, "MIME-Version", "1.0")
+	hdr = appendReplyField(hdr, "Content-Type", "text/plain; charset=utf-8")
+	hdr = appendReplyField(hdr, "Content-Transfer-Encoding", "quoted-printable")
+	hdr = append(hdr, "\r\n"...)
+
+	var qpBuf bytes.Buffer
+	qp := quotedprintable.NewWriter(&qpBuf)
 	if _, err := qp.Write([]byte(body)); err != nil {
 		return nil, err
 	}
 	if err := qp.Close(); err != nil {
 		return nil, err
 	}
-	return b.Bytes(), nil
+	return append(hdr, qpBuf.Bytes()...), nil
 }
 
-// writeReplyField writes one "Name: value" header line terminated with CRLF.
-func writeReplyField(b *bytes.Buffer, name, value string) {
-	b.WriteString(name)
-	b.WriteString(": ")
-	b.WriteString(value)
-	b.WriteString("\r\n")
+// appendReplyField appends one "Name: value" header line terminated with CRLF.
+func appendReplyField(dst []byte, name, value string) []byte {
+	dst = append(dst, name...)
+	dst = append(dst, ": "...)
+	dst = append(dst, value...)
+	return append(dst, "\r\n"...)
 }
 
 // domainOf returns the domain part of an address for the synthesized

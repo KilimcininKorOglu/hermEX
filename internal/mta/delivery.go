@@ -159,10 +159,9 @@ func (s *session) Auth(username, password string) bool {
 	}
 	// The SMTP privilege gates authenticated submission only; inbound intake never
 	// authenticates, so a user whose SMTP privilege is revoked can still receive
-	// mail but cannot submit. Fail closed (discard ok) to match every other
-	// protocol's gate: a privilege lookup that fails after a successful
-	// Authenticate denies submission rather than waving it through.
-	if privs, _ := authn.Privileges(username); !privs.SMTP {
+	// mail but cannot submit. Fail closed: a directory that cannot name the
+	// account's privileges grants none.
+	if privs, known := authn.Privileges(username); !known || !privs.SMTP {
 		return false
 	}
 	s.authUser, s.authMailbox = username, path
@@ -452,6 +451,16 @@ func (s *session) routeListMember(m, notify, listDomain string) {
 	s.relayTargets = append(s.relayTargets, rcpt)
 }
 
+// closeMailbox closes an opened mailbox store; tests swap it to inject a close fault.
+var closeMailbox = func(st *objectstore.Store) error { return st.Close() }
+
+func logStoreCloseFailure(op, path string, err error) {
+	defaultLogger.Load().Emit(logging.Event{
+		Level: logging.LevelError, Subsystem: logging.MTA, Name: "store.close.fail",
+		Fields: logging.Fields{"op": op, "mailbox": path}, Err: err.Error(),
+	})
+}
+
 // overReceiveQuota refuses a local recipient whose mailbox already sits at or
 // above its receive quota, so an over-quota mailbox is rejected permanently at
 // RCPT (no message accepted, no bounce backscatter). A store open or read error
@@ -463,8 +472,11 @@ func overReceiveQuota(path string) error {
 	if err != nil {
 		return nil
 	}
-	defer st.Close()
-	if over, err := st.OverReceiveQuota(); err == nil && over {
+	over, qerr := st.OverReceiveQuota()
+	if cerr := closeMailbox(st); cerr != nil {
+		logStoreCloseFailure("over-receive-quota", path, cerr)
+	}
+	if qerr == nil && over {
 		return &smtp.PermError{Message: "5.2.2 mailbox is full (over receive quota)"}
 	}
 	return nil
@@ -484,19 +496,26 @@ func overSendQuota(accounts directory.Accounts, sender string) error {
 	if err != nil {
 		return nil
 	}
-	defer st.Close()
-	q, err := st.GetQuota()
-	if err != nil || q.SendKB == 0 {
-		return nil
+	over := sendQuotaExceeded(st)
+	if cerr := closeMailbox(st); cerr != nil {
+		logStoreCloseFailure("over-send-quota", path, cerr)
 	}
-	size, err := st.MailboxSize()
-	if err != nil {
-		return nil
-	}
-	if size > int64(q.SendKB)*1024 {
+	if over {
 		return &smtp.PermError{Message: "5.2.2 mailbox is full (over send quota)"}
 	}
 	return nil
+}
+
+func sendQuotaExceeded(st *objectstore.Store) bool {
+	q, err := st.GetQuota()
+	if err != nil || q.SendKB == 0 {
+		return false
+	}
+	size, err := st.MailboxSize()
+	if err != nil {
+		return false
+	}
+	return size > int64(q.SendKB)*1024
 }
 
 // isExternalDomain reports whether rcpt's domain lies outside this server's
@@ -940,6 +959,16 @@ func deliverEach(accounts directory.Accounts, from string, recipients []string, 
 	return unresolved, nil
 }
 
+type deliverResult struct {
+	unresolved []string
+	localRaw   []byte
+}
+
+type sendResult struct {
+	unresolved  []string
+	keepOwnCopy bool
+}
+
 // DeliverAndRelay is Deliver plus outbound relay: after local delivery, each
 // recipient with no local mailbox that belongs to a foreign domain is queued in
 // spool for delivery to its mail exchanger, instead of being returned
@@ -949,8 +978,8 @@ func deliverEach(accounts directory.Accounts, from string, recipients []string, 
 // The returned unresolved holds only the genuinely undeliverable, a user-unknown
 // in a local domain, or (when spool is nil) every external address.
 func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from string, recipients []string, raw []byte, received time.Time) (unresolved []string, err error) {
-	unresolved, _, err = SendAndRelay(accounts, spool, from, recipients, raw, received)
-	return unresolved, err
+	res, err := sendAndRelay(accounts, spool, from, recipients, raw, received)
+	return res.unresolved, err
 }
 
 // SendAndRelay is DeliverAndRelay for a path that files the sender's own Sent copy
@@ -959,16 +988,21 @@ func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from strin
 // it is true on every other send, and on every failure, so a failure cannot leave the
 // message filed nowhere.
 func SendAndRelay(accounts directory.Accounts, spool *relay.Spool, from string, recipients []string, raw []byte, received time.Time) (unresolved []string, keepOwnCopy bool, err error) {
-	unresolved, localRaw, err := deliverAndRelay(accounts, spool, from, from, recipients, raw, received)
+	res, err := sendAndRelay(accounts, spool, from, recipients, raw, received)
+	return res.unresolved, res.keepOwnCopy, err
+}
+
+func sendAndRelay(accounts directory.Accounts, spool *relay.Spool, from string, recipients []string, raw []byte, received time.Time) (sendResult, error) {
+	res, err := deliverAndRelay(accounts, spool, from, from, recipients, raw, received)
 	if err != nil {
-		return unresolved, true, err
+		return sendResult{unresolved: res.unresolved, keepOwnCopy: true}, err
 	}
 	// The message is out. A mailbox this was sent in the name of keeps its own record
 	// when it asked for one, so everyone with access to it sees what went out. It runs
 	// last, and reports rather than returns a failure, because the mail has already
 	// left and nothing here can take it back.
-	only := fileRepresentedCopy(accounts, from, localRaw, received)
-	return unresolved, !only, nil
+	only := fileRepresentedCopy(accounts, from, res.localRaw, received)
+	return sendResult{unresolved: res.unresolved, keepOwnCopy: !only}, nil
 }
 
 // SendRenderings is SendAndRelay for a message sent in two renderings: plain MIME
@@ -982,18 +1016,23 @@ func SendRenderings(accounts directory.Accounts, spool *relay.Spool, from string
 		return true, ErrTooManyRecipients
 	}
 	if len(plainTo) == 0 {
-		_, keepOwnCopy, err = SendAndRelay(accounts, spool, from, richTo, rich, received)
-		return keepOwnCopy, err
+		res, err := sendAndRelay(accounts, spool, from, richTo, rich, received)
+		return res.keepOwnCopy, err
 	}
-	if _, keepOwnCopy, err = SendAndRelay(accounts, spool, from, plainTo, plain, received); err != nil {
-		return keepOwnCopy, err
+	res, err := sendAndRelay(accounts, spool, from, plainTo, plain, received)
+	if err != nil {
+		return res.keepOwnCopy, err
 	}
 	if len(richTo) > 0 {
-		if _, _, err = deliverAndRelay(accounts, spool, from, from, richTo, rich, received); err != nil {
-			return keepOwnCopy, err
+		richRes, err := deliverAndRelay(accounts, spool, from, from, richTo, rich, received)
+		if err != nil {
+			return res.keepOwnCopy, err
+		}
+		if len(richRes.unresolved) > 0 {
+			logPassFailure("send-renderings", from, logging.Fields{"unresolved": strings.Join(richRes.unresolved, ",")}, "unresolved recipients")
 		}
 	}
-	return keepOwnCopy, nil
+	return res.keepOwnCopy, nil
 }
 
 // SendReport is DeliverAndRelay for a report an account sends, such as a read
@@ -1001,15 +1040,15 @@ func SendRenderings(accounts directory.Accounts, spool *relay.Spool, from string
 // with the null reverse-path its kind requires (RFC 8098 section 3), so a failed
 // delivery is never reported back.
 func SendReport(accounts directory.Accounts, spool *relay.Spool, account string, recipients []string, raw []byte, received time.Time) (unresolved []string, err error) {
-	unresolved, _, err = deliverAndRelay(accounts, spool, account, "", recipients, raw, received)
-	return unresolved, err
+	res, err := deliverAndRelay(accounts, spool, account, "", recipients, raw, received)
+	return res.unresolved, err
 }
 
 // deliverAndRelay is the body of DeliverAndRelay up to the represented mailbox's
 // copy. from is the account the checks and limits apply to and envelope the
 // reverse-path the message travels with. localRaw is the copy local recipients
 // received, which is what that copy files.
-func deliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from, envelope string, recipients []string, raw []byte, received time.Time) (unresolved []string, localRaw []byte, err error) {
+func deliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from, envelope string, recipients []string, raw []byte, received time.Time) (deliverResult, error) {
 	// Antivirus on the authenticated submission path (webmail, EWS, ROP, ActiveSync,
 	// SMTP MSA via the send-later worker, and the local->local leg). A hit is
 	// quarantined and the sender plus admins notified, and the send is blocked so no
@@ -1018,13 +1057,13 @@ func deliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from, enve
 	// DATA; every other submission path arrives here instead, so the cap is applied
 	// once at the point they all converge on.
 	if err := overSubmissionBounds(raw, len(recipients)); err != nil {
-		return recipients, nil, err
+		return deliverResult{unresolved: recipients}, err
 	}
 	if scanMessage(accounts, avSubmission, from, recipients, raw, received) == avHandled {
-		return nil, nil, ErrVirusBlocked
+		return deliverResult{}, ErrVirusBlocked
 	}
 	if err := overSendQuota(accounts, from); err != nil {
-		return recipients, nil, err
+		return deliverResult{unresolved: recipients}, err
 	}
 	// Outbound abuse limiting for every client that does not go through SMTP
 	// submission (webmail, EWS, ActiveSync, ROP, DAV scheduling, send-later): the
@@ -1033,7 +1072,7 @@ func deliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from, enve
 	// delivered on refusal, an API send fails whole rather than half.
 	if spool != nil {
 		if err := limitOutbound(accounts, from, recipients); err != nil {
-			return recipients, nil, err
+			return deliverResult{unresolved: recipients}, err
 		}
 	}
 	// A distribution-list recipient expands to its members before delivery; a list
@@ -1047,18 +1086,18 @@ func deliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from, enve
 	leaves, dests := applyForwards(accounts, leaves)
 	leaves = append(leaves, dests...)
 	localRaw, relayRaw := outgoingCopies(accounts, from, raw)
-	unresolved, err = Deliver(accounts, envelope, leaves, localRaw, received)
+	unresolved, err := Deliver(accounts, envelope, leaves, localRaw, received)
 	if err != nil {
-		return append(unresolved, refused...), nil, err
+		return deliverResult{unresolved: append(unresolved, refused...)}, err
 	}
 	if spool != nil && len(unresolved) > 0 {
 		stuck, e := relayUnresolved(accounts, spool, envelope, unresolved, relayRaw, received)
 		if e != nil {
-			return append(stuck, refused...), nil, e
+			return deliverResult{unresolved: append(stuck, refused...)}, e
 		}
 		unresolved = stuck
 	}
-	return append(unresolved, refused...), localRaw, nil
+	return deliverResult{unresolved: append(unresolved, refused...), localRaw: localRaw}, nil
 }
 
 // outgoingCopies applies the per-tenant outgoing display name: the From display
@@ -1157,7 +1196,14 @@ func fileDelivery(accounts directory.Accounts, from, rcptAddr, path string, raw,
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	// The message is committed before the store closes, so a close fault is
+	// recorded rather than reported as a failed delivery the sender would retry
+	// into a duplicate.
+	defer func() {
+		if cerr := closeMailbox(st); cerr != nil {
+			logStoreCloseFailure("file-delivery", path, cerr)
+		}
+	}()
 	// A meeting invitation can carry a floating time, which means the reader's own
 	// wall clock; without the owner's zone it would be stored as UTC and land at
 	// the wrong hour for anyone not at UTC.
@@ -1272,8 +1318,8 @@ func runSenderPass(name string, pass func(*objectstore.Store, string, int64) (bo
 	if pass == nil {
 		return
 	}
-	if _, err := pass(st, sender, m.ID); err != nil {
-		logPassFailure(name, "", logging.Fields{"uid": m.UID}, err)
+	if handled, err := pass(st, sender, m.ID); err != nil {
+		logPassFailure(name, "", logging.Fields{"uid": m.UID, "handled": handled}, err)
 	}
 }
 

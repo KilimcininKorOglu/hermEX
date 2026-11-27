@@ -119,9 +119,10 @@ func (h *TLSReportHandler) store(w http.ResponseWriter, r *http.Request, res mai
 		return
 	}
 	src := directory.ReportSource{ReceivedAt: time.Now().Unix(), Via: directory.ViaHTTPS, RemoteAddr: serve.ClientAddr(r)}
-	outcome, err := storeReport(h.reports, res, domain, src)
-	switch outcome {
+	sr, err := storeReport(h.reports, res, domain, src)
+	switch sr.outcome {
 	case reportStored:
+		fields["id"] = sr.id
 		h.emit(r, logging.LevelInfo, "report.stored", domain, fields, nil)
 		w.WriteHeader(http.StatusOK)
 	case reportDuplicate:

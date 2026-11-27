@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 )
 
 // Greylist policy defaults. A first contact is deferred; a retry is accepted only
@@ -103,29 +104,43 @@ func (g *Greylister) ShouldDefer(ip net.IP, sender, recipient string) bool {
 	now := g.now()
 	rec, found, err := g.store.GreylistGet(ipKey, sender, recipient)
 	if err != nil {
+		g.logStoreFailure("get", ipKey, sender, recipient, err)
 		return false // fail open
 	}
 	return g.deferTriplet(ipKey, sender, recipient, rec, found, now)
 }
 
 // deferTriplet decides one triplet's fate against its stored record. Every store
-// failure accepts the message rather than deferring it forever.
+// failure accepts the message rather than deferring it forever, and logs the
+// fault so a broken store does not fail silently.
 func (g *Greylister) deferTriplet(ipKey, sender, recipient string, rec directory.Greylisted, found bool, now int64) bool {
 	switch {
 	case !found:
 		if err := g.store.GreylistUpsertSeen(ipKey, sender, recipient, now); err != nil {
+			g.logStoreFailure("seen", ipKey, sender, recipient, err)
 			return false
 		}
 		return true // first contact
 	case rec.Confirmed:
-		_ = g.store.GreylistUpsertSeen(ipKey, sender, recipient, now) // refresh TTL, best-effort
+		if err := g.store.GreylistUpsertSeen(ipKey, sender, recipient, now); err != nil {
+			g.logStoreFailure("refresh", ipKey, sender, recipient, err)
+		}
 		return false
 	case now-rec.FirstSeen >= g.minDelay.Load():
-		_ = g.store.GreylistConfirm(ipKey, sender, recipient, now)
+		if err := g.store.GreylistConfirm(ipKey, sender, recipient, now); err != nil {
+			g.logStoreFailure("confirm", ipKey, sender, recipient, err)
+		}
 		return false // retried after the delay → accept and confirm
 	default:
 		return true // retried too soon
 	}
+}
+
+func (g *Greylister) logStoreFailure(op, ipKey, sender, recipient string, err error) {
+	defaultLogger.Load().Emit(logging.Event{
+		Level: logging.LevelError, Subsystem: logging.MTA, Name: "greylist.store.fail",
+		User: recipient, Fields: logging.Fields{"op": op, "ip": ipKey, "from": sender}, Err: err.Error(),
+	})
 }
 
 // Prune removes expired triplets; the MTA calls it periodically to bound the table.
