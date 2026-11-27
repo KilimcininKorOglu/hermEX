@@ -109,3 +109,52 @@ func TestADownStoreIsNotRetriedForEveryBatch(t *testing.T) {
 		t.Errorf("spilled %d of %d events (dropped %d), want every event spilled", len(docs), events, s.Dropped())
 	}
 }
+
+// TestReplayMidFailureKeepsAllSpillLines simulates a sink that succeeds on the
+// first replayed batch and fails on the second. The replay must report failure,
+// keep hasSpill set, and leave every line in the replay file intact so a later
+// retry delivers all events with none dropped.
+func TestReplayMidFailureKeepsAllSpillLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "spill.jsonl")
+	s := &MongoSink{spillPath: path}
+	s.writeTimeout.Store(int64(time.Second))
+
+	const total = mongoBatchSize + 5
+	events := make([]Event, total)
+	for i := range events {
+		events[i] = Event{Subsystem: IMAP, Name: "mid.fail"}
+	}
+	s.spill(events)
+
+	var batchNum int
+	s.ins = inserterFunc(func(_ context.Context, _ []any) error {
+		batchNum++
+		if batchNum == 2 {
+			return errors.New("store dropped mid-replay")
+		}
+		return nil
+	})
+
+	if ok := s.replaySpill(); ok {
+		t.Fatal("replaySpill returned true when the second batch failed")
+	}
+	if !s.hasSpill.Load() {
+		t.Error("hasSpill was cleared after a mid-replay failure")
+	}
+	docs, err := readSpill(replayPath(path))
+	if err != nil || len(docs) != total {
+		t.Fatalf("replay file holds %d docs (err %v), want all %d preserved", len(docs), err, total)
+	}
+
+	var recovered fakeInserter
+	s.ins = &recovered
+	if ok := s.replaySpill(); !ok {
+		t.Fatal("second replaySpill failed after store recovered")
+	}
+	if _, got := recovered.totals(); got != total {
+		t.Errorf("recovered replay inserted %d docs, want %d", got, total)
+	}
+	if spillFileHasData(replayPath(path)) {
+		t.Error("replay file was not removed after successful recovery")
+	}
+}
