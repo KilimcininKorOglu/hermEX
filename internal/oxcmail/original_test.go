@@ -67,7 +67,10 @@ func TestAppendOriginalHTMLStaysOneDocument(t *testing.T) {
 	reply := &Message{Props: p}
 	AppendOriginal(reply, originalMessage(), false)
 
-	raw, _ := bytesProp(reply.Props, mapi.PrHTML)
+	raw, ok := bytesProp(reply.Props, mapi.PrHTML)
+	if !ok {
+		t.Fatal("the reply lost its HTML body")
+	}
 	doc := string(raw)
 	if n := strings.Count(strings.ToLower(doc), "<body"); n != 1 {
 		t.Errorf("result holds %d body elements, want 1:\n%s", n, doc)
@@ -90,11 +93,11 @@ func TestAppendOriginalTranscodesTheReplyHTML(t *testing.T) {
 	reply := &Message{Props: p}
 	AppendOriginal(reply, originalMessage(), false)
 
-	raw, _ := bytesProp(reply.Props, mapi.PrHTML)
-	if !utf8.Valid(raw) || !strings.Contains(string(raw), "teşekkürler") {
-		t.Errorf("merged HTML is not the UTF-8 reply: %q", raw)
+	raw, ok := bytesProp(reply.Props, mapi.PrHTML)
+	if !ok || !utf8.Valid(raw) || !strings.Contains(string(raw), "teşekkürler") {
+		t.Errorf("merged HTML is not the UTF-8 reply (set %v): %q", ok, raw)
 	}
-	if cp, _ := reply.Props.Get(mapi.PrInternetCodepage); cp != int32(cpUTF8) {
-		t.Errorf("codepage = %v, want %d", cp, cpUTF8)
+	if cp, ok := propInt32(reply.Props, mapi.PrInternetCodepage); !ok || cp != int32(cpUTF8) {
+		t.Errorf("codepage = %v (set %v), want %d", cp, ok, cpUTF8)
 	}
 }
