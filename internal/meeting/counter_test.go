@@ -53,17 +53,28 @@ func readProposalState(t *testing.T, st *objectstore.Store, recipID int64) propo
 	if err != nil {
 		t.Fatal(err)
 	}
-	var s proposalState
-	s.rowProposed, _ = mustGet(row, mapi.PrRecipientProposed).(bool)
-	s.rowStart, _ = mustGet(row, mapi.PrRecipientProposedStartTime).(uint64)
-	s.eventFlag, _ = mustGet(ev, ct.flag).(bool)
-	s.eventProposed, _ = mustGet(ev, ct.number).(int32)
-	return s
+	return proposalState{
+		rowProposed:   optProp[bool](t, row, mapi.PrRecipientProposed),
+		rowStart:      optProp[uint64](t, row, mapi.PrRecipientProposedStartTime),
+		eventFlag:     optProp[bool](t, ev, ct.flag),
+		eventProposed: optProp[int32](t, ev, ct.number),
+	}
 }
 
-func mustGet(p mapi.PropertyValues, tag mapi.PropTag) any {
-	v, _ := p.Get(tag)
-	return v
+// optProp reads a property that may be absent, giving the zero value then, and
+// stops the test when it is present in another type.
+func optProp[T any](t *testing.T, p mapi.PropertyValues, tag mapi.PropTag) T {
+	t.Helper()
+	var zero T
+	v, ok := p.Get(tag)
+	if !ok {
+		return zero
+	}
+	typed, ok := v.(T)
+	if !ok {
+		t.Fatalf("property %#x holds %T, want %T", uint32(tag), v, zero)
+	}
+	return typed
 }
 
 // mustProcess runs the organizer-side pass on a response bob sent.
