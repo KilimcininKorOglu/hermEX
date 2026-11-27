@@ -3,7 +3,6 @@ package mapihttp
 import (
 	"bytes"
 	"encoding/binary"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -52,7 +51,7 @@ func executeRaw(t *testing.T, ts *httptest.Server, sid string, seq *string, ropB
 	if ns := cookieByName(resp, "sequence"); ns != "" {
 		*seq = ns
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := mustReadAll(t, resp.Body)
 	_, payload, found := bytes.Cut(body, []byte("\r\n\r\n"))
 	if !found || len(payload) < 16 {
 		t.Fatalf("malformed execute response (%d bytes)", len(payload))

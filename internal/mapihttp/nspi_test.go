@@ -3,7 +3,6 @@ package mapihttp
 import (
 	"bytes"
 	"encoding/binary"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -87,7 +86,7 @@ func resolveNamesBody(names ...string) []byte {
 // NSPI response body bytes.
 func nspiPayload(t *testing.T, resp *http.Response) []byte {
 	t.Helper()
-	body, _ := io.ReadAll(resp.Body)
+	body := mustReadAll(t, resp.Body)
 	_, payload, found := bytes.Cut(body, []byte("\r\n\r\n"))
 	if !found {
 		t.Fatal("response missing meta preamble terminator")

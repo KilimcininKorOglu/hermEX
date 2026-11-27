@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -53,7 +52,7 @@ func notificationWaitFlags(t *testing.T, ts *httptest.Server, sid string) uint32
 		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 	})
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := mustReadAll(t, resp.Body)
 	_, payload, found := bytes.Cut(body, []byte("\r\n\r\n"))
 	if !found {
 		t.Fatalf("NotificationWait response missing meta preamble: %q", body)

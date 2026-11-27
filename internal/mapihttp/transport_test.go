@@ -90,9 +90,23 @@ func cookieByName(resp *http.Response, name string) string {
 }
 
 // TestAuthRequired confirms the EMSMDB endpoint rejects an unauthenticated request.
+// mustReadAll reads a whole response body and fails the test when the read fails,
+// so a truncated body is not decoded as a short, wrong one.
+func mustReadAll(t *testing.T, r io.Reader) []byte {
+	t.Helper()
+	b, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read the response body: %v", err)
+	}
+	return b
+}
+
 func TestAuthRequired(t *testing.T) {
 	ts := newTestServer(t)
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/mapi/emsmdb", nil)
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/mapi/emsmdb", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	req.Header.Set("X-RequestType", "PING")
 	resp, err := ts.Client().Do(req)
 	if err != nil {
@@ -142,7 +156,7 @@ func TestConnectFraming(t *testing.T) {
 	if cookieByName(resp, "sid") == "" || cookieByName(resp, "sequence") == "" {
 		t.Errorf("Connect did not set sid + sequence cookies")
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body := mustReadAll(t, resp.Body)
 	if !strings.HasPrefix(string(body), "PROCESSING\r\nDONE\r\n") {
 		t.Errorf("body missing PROCESSING/DONE preamble: %q", body[:min(40, len(body))])
 	}
@@ -262,7 +276,7 @@ func TestExecuteRopFraming(t *testing.T) {
 		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
 	})
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body := mustReadAll(t, resp.Body)
 	// strip the meta preamble; payload = execute_response: Status|Error|Flags|RopBufferSize|RopBuffer|AuxBufSize
 	_, payload, found := bytes.Cut(body, []byte("\r\n\r\n"))
 	if !found {
@@ -333,7 +347,7 @@ func TestExecuteRopLogon(t *testing.T) {
 // decodeExecuteResponse reads an Execute reply body and decodes its ROP buffer.
 func decodeExecuteResponse(t *testing.T, resp *http.Response) (rops []byte, handles []uint32) {
 	t.Helper()
-	body, _ := io.ReadAll(resp.Body)
+	body := mustReadAll(t, resp.Body)
 	_, payload, found := bytes.Cut(body, []byte("\r\n\r\n"))
 	if !found || len(payload) < 16 {
 		t.Fatalf("malformed execute response (%d bytes)", len(payload))
