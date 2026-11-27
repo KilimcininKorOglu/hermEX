@@ -19,6 +19,7 @@ type fakeClamd struct {
 	ln      net.Listener
 	reply   string
 	gotBody chan []byte
+	done    chan error // the serving goroutine's outcome, read at cleanup
 }
 
 func newFakeClamd(t *testing.T, reply string) *fakeClamd {
@@ -27,26 +28,127 @@ func newFakeClamd(t *testing.T, reply string) *fakeClamd {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	f := &fakeClamd{ln: ln, reply: reply, gotBody: make(chan []byte, 1)}
-	go f.serve()
-	t.Cleanup(func() { _ = ln.Close() })
+	f := &fakeClamd{ln: ln, reply: reply, gotBody: make(chan []byte, 1), done: make(chan error, 1)}
+	go func() { f.done <- f.serve() }()
+	t.Cleanup(func() {
+		if err := ln.Close(); err != nil {
+			t.Errorf("close fake clamd listener: %v", err)
+		}
+		// A listener closed before any client dialed ends Accept with ErrClosed,
+		// which is the expected end of a test that never scanned.
+		if err := <-f.done; err != nil && !errors.Is(err, net.ErrClosed) {
+			t.Errorf("fake clamd: %v", err)
+		}
+	})
 	return f
 }
 
 func (f *fakeClamd) addr() string { return "tcp://" + f.ln.Addr().String() }
 
-func (f *fakeClamd) serve() {
+func (f *fakeClamd) serve() (err error) {
 	conn, err := f.ln.Accept()
 	if err != nil {
-		return
+		return err
 	}
-	defer conn.Close()
+	defer func() { err = errors.Join(err, conn.Close()) }()
 	body, err := readInstream(conn)
 	if err != nil {
-		return
+		return err
 	}
 	f.gotBody <- body
-	_, _ = io.WriteString(conn, f.reply)
+	_, err = io.WriteString(conn, f.reply)
+	return err
+}
+
+// mustNew builds a Scanner and fails the test on an address New refuses.
+func mustNew(t *testing.T, addr string) *Scanner {
+	t.Helper()
+	s, err := New(addr)
+	if err != nil {
+		t.Fatalf("New(%q): %v", addr, err)
+	}
+	return s
+}
+
+// faultyConn is a connection whose SetDeadline or Close fails on demand, the
+// failures a real socket reports only under conditions a test cannot arrange.
+type faultyConn struct {
+	net.Conn
+	deadlineErr, closeErr error
+}
+
+func (c faultyConn) SetDeadline(t time.Time) error {
+	if c.deadlineErr != nil {
+		return c.deadlineErr
+	}
+	return c.Conn.SetDeadline(t)
+}
+
+func (c faultyConn) Close() error {
+	return errors.Join(c.Conn.Close(), c.closeErr)
+}
+
+// TestScanRefusesAConnectionWithoutADeadline: a deadline that cannot be set leaves
+// the scan unbounded inside the SMTP DATA phase, so it must fail before any byte
+// reaches clamd, never stream without a bound.
+func TestScanRefusesAConnectionWithoutADeadline(t *testing.T) {
+	s := mustNew(t, "tcp://127.0.0.1:3310")
+	deadlineErr := errors.New("set deadline refused")
+	client, server := net.Pipe()
+	// The clamd side drains whatever stream arrives and then hangs up, so a scan
+	// that wrongly streams ends with an error instead of waiting on the pipe.
+	type drained struct {
+		body []byte
+		err  error
+	}
+	sent := make(chan drained, 1)
+	go func() {
+		body, err := readInstream(server)
+		sent <- drained{body, errors.Join(err, server.Close())}
+	}()
+	s.dial = func(string, string, time.Duration) (net.Conn, error) {
+		return faultyConn{Conn: client, deadlineErr: deadlineErr}, nil
+	}
+	res, err := s.Scan([]byte("payload"))
+	if !errors.Is(err, deadlineErr) || res != (Result{}) {
+		t.Errorf("Scan = %+v, %v; want the deadline error and no verdict", res, err)
+	}
+	// The client hung up before its first byte, so the clamd side reads end of
+	// stream at the command record and holds no payload.
+	if d := <-sent; !errors.Is(d.err, io.EOF) || len(d.body) != 0 {
+		t.Errorf("clamd side read %q, err %v; want no stream and io.EOF", d.body, d.err)
+	}
+}
+
+// TestScanKeepsTheVerdictWhenCloseFails: a connection that fails to close after
+// clamd answered is reported, and the verdict survives it, because a caller that
+// fails open on the error alone would deliver mail clamd found infected.
+func TestScanKeepsTheVerdictWhenCloseFails(t *testing.T) {
+	closeErr := errors.New("close refused")
+	for _, c := range []struct {
+		reply string
+		want  Result
+	}{
+		{"stream: Eicar-Test-Signature FOUND\x00", Result{VirusName: "Eicar-Test-Signature"}},
+		{"stream: OK\x00", Result{Clean: true}},
+	} {
+		f := newFakeClamd(t, c.reply)
+		s := mustNew(t, f.addr())
+		s.dial = func(network, address string, timeout time.Duration) (net.Conn, error) {
+			conn, err := net.DialTimeout(network, address, timeout)
+			if err != nil {
+				return nil, err
+			}
+			return faultyConn{Conn: conn, closeErr: closeErr}, nil
+		}
+		res, err := s.Scan([]byte("payload"))
+		if !errors.Is(err, closeErr) {
+			t.Errorf("reply %q: err %v, want the close error reported", c.reply, err)
+		}
+		if res != c.want {
+			t.Errorf("reply %q: result %+v, want %+v kept beside the close error", c.reply, res, c.want)
+		}
+	}
 }
 
 // readInstream consumes "zINSTREAM\0" then the length-prefixed chunks up to the
@@ -98,7 +200,7 @@ func TestScanClean(t *testing.T) {
 
 func TestScanInfected(t *testing.T) {
 	f := newFakeClamd(t, "stream: Eicar-Test-Signature FOUND\x00")
-	s, _ := New(f.addr())
+	s := mustNew(t, f.addr())
 	res, err := s.Scan([]byte("anything"))
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
@@ -115,7 +217,7 @@ func TestScanInfected(t *testing.T) {
 // received the exact bytes, proving the client's length framing is correct.
 func TestScanChunking(t *testing.T) {
 	f := newFakeClamd(t, "stream: OK\x00")
-	s, _ := New(f.addr())
+	s := mustNew(t, f.addr())
 	payload := make([]byte, chunkSize*2+123)
 	for i := range payload {
 		payload[i] = byte(i)
@@ -136,7 +238,7 @@ func TestScanChunking(t *testing.T) {
 
 func TestScanClamdError(t *testing.T) {
 	f := newFakeClamd(t, "stream: database error ERROR\x00")
-	s, _ := New(f.addr())
+	s := mustNew(t, f.addr())
 	if _, err := s.Scan([]byte("x")); err == nil {
 		t.Fatal("want error on clamd ERROR reply")
 	}
@@ -149,7 +251,7 @@ func TestScanClamdError(t *testing.T) {
 func TestScanNeverReadsAnUnclearReplyAsClean(t *testing.T) {
 	for _, reply := range []string{"", "PONG\x00", "INSTREAM size limit exceeded. ERROR\x00", "stream: \x00"} {
 		f := newFakeClamd(t, reply)
-		s, _ := New(f.addr())
+		s := mustNew(t, f.addr())
 		res, err := s.Scan([]byte("payload"))
 		if err == nil || res.Clean {
 			t.Errorf("reply %q = %+v, err %v; want an error and no clean verdict", reply, res, err)
@@ -166,20 +268,33 @@ func TestScanGivesUpOnASilentClamd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = ln.Close() })
 	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
-	go func() {
-		conn, err := ln.Accept()
-		if err != nil {
-			return
+	served := make(chan error, 1)
+	t.Cleanup(func() {
+		close(release)
+		if err := <-served; err != nil {
+			t.Errorf("silent clamd: %v", err)
 		}
-		defer conn.Close()
-		_, _ = readInstream(conn)
-		<-release // read everything, answer nothing
+		if err := ln.Close(); err != nil {
+			t.Errorf("close silent clamd listener: %v", err)
+		}
+	})
+	go func() {
+		served <- func() (err error) {
+			conn, err := ln.Accept()
+			if err != nil {
+				return err
+			}
+			defer func() { err = errors.Join(err, conn.Close()) }()
+			if _, err := readInstream(conn); err != nil {
+				return err
+			}
+			<-release // read everything, answer nothing
+			return nil
+		}()
 	}()
 
-	s, _ := New("tcp://" + ln.Addr().String())
+	s := mustNew(t, "tcp://"+ln.Addr().String())
 	s.timeout = 200 * time.Millisecond
 	done := make(chan error, 1)
 	go func() { _, err := s.Scan([]byte("payload")); done <- err }()
@@ -195,7 +310,7 @@ func TestScanGivesUpOnASilentClamd(t *testing.T) {
 
 func TestScanDialError(t *testing.T) {
 	// 127.0.0.1:1 is a reserved/unused port; the dial fails fast.
-	s, _ := New("tcp://127.0.0.1:1")
+	s := mustNew(t, "tcp://127.0.0.1:1")
 	if _, err := s.Scan([]byte("x")); err == nil {
 		t.Fatal("want dial error when clamd is unreachable")
 	}

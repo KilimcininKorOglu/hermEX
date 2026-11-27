@@ -1,6 +1,7 @@
 package antivirus
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -24,6 +25,8 @@ type Scanner struct {
 	network string        // "tcp" or "unix"
 	address string        // dial target
 	timeout time.Duration // per-connection dial + I/O deadline; 0 disables
+	// dial opens the connection; New sets net.DialTimeout and tests replace it.
+	dial func(network, address string, timeout time.Duration) (net.Conn, error)
 }
 
 // New builds a Scanner for a clamd address. Accepted forms: "tcp://host:port",
@@ -34,7 +37,7 @@ func New(addr string) (*Scanner, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("antivirus: empty clamd address")
 	}
-	s := &Scanner{timeout: DefaultTimeout}
+	s := &Scanner{timeout: DefaultTimeout, dial: net.DialTimeout}
 	switch {
 	case strings.HasPrefix(addr, "unix://"):
 		s.network, s.address = "unix", strings.TrimPrefix(addr, "unix://")
@@ -53,15 +56,26 @@ func New(addr string) (*Scanner, error) {
 // error means the scan did not complete (dial, I/O, or a clamd ERROR reply) and
 // the caller applies its fail policy. A completed scan returns a Result with a
 // nil error whether or not a virus was found.
-func (s *Scanner) Scan(raw []byte) (Result, error) {
-	conn, err := net.DialTimeout(s.network, s.address, s.timeout)
+//
+// A connection that fails to close after clamd answered joins that failure to the
+// returned error and keeps the verdict in the Result, so a caller that sees a
+// VirusName treats the message as infected even when the error is non-nil.
+func (s *Scanner) Scan(raw []byte) (res Result, err error) {
+	conn, err := s.dial(s.network, s.address, s.timeout)
 	if err != nil {
 		return Result{}, fmt.Errorf("antivirus: dial clamd: %w", err)
 	}
-	defer conn.Close()
+	defer func() {
+		if cerr := conn.Close(); cerr != nil {
+			err = errors.Join(err, fmt.Errorf("antivirus: close clamd connection: %w", cerr))
+		}
+	}()
 	if s.timeout > 0 {
-		// One deadline covers the whole exchange; clamd's own ReadTimeout also applies.
-		_ = conn.SetDeadline(time.Now().Add(s.timeout))
+		// One deadline covers the whole exchange; clamd's own ReadTimeout also
+		// applies. Without it a wedged clamd holds the SMTP DATA phase open.
+		if err := conn.SetDeadline(time.Now().Add(s.timeout)); err != nil {
+			return Result{}, fmt.Errorf("antivirus: set clamd deadline: %w", err)
+		}
 	}
 
 	if err := writeStream(conn, raw); err != nil {
