@@ -42,7 +42,7 @@ func TestPolicyReadFailureIsLogged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 
 	accs := failingPolicyAccounts{
 		StaticAccounts: directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}},
@@ -61,23 +61,33 @@ func TestPolicyReadFailureIsLogged(t *testing.T) {
 	var layers []string
 	for _, e := range sink.events {
 		if e.Name == "policy.read.fail" {
-			if e.Level != logging.LevelWarn {
-				t.Errorf("event level = %s, want warn", e.Level)
-			}
-			if got, _ := e.Fields["error"].(string); got == "" {
-				t.Error("the event carries no error text")
-			}
-			if e.User != testUser {
-				t.Errorf("event user = %q, want the account whose policy failed", e.User)
-			}
-			layer, _ := e.Fields["layer"].(string)
-			layers = append(layers, layer)
+			layers = append(layers, policyFailLayer(t, e))
 		}
 	}
 	if len(layers) < 2 || !strings.Contains(strings.Join(layers, ","), "default") ||
 		!strings.Contains(strings.Join(layers, ","), "domain") {
 		t.Errorf("logged layers = %v, want both the default and the domain read reported", layers)
 	}
+}
+
+// policyFailLayer checks one policy.read.fail event (warn level, the error text,
+// the account) and returns the policy layer it names.
+func policyFailLayer(t *testing.T, e logging.Event) string {
+	t.Helper()
+	if e.Level != logging.LevelWarn {
+		t.Errorf("event level = %s, want warn", e.Level)
+	}
+	if got, ok := e.Fields["error"].(string); !ok || got == "" {
+		t.Error("the event carries no error text")
+	}
+	if e.User != testUser {
+		t.Errorf("event user = %q, want the account whose policy failed", e.User)
+	}
+	layer, ok := e.Fields["layer"].(string)
+	if !ok {
+		t.Errorf("the event names no layer: %+v", e.Fields)
+	}
+	return layer
 }
 
 // TestWipeReadFailureIsLogged proves a remote-wipe state that cannot be read is
@@ -118,7 +128,7 @@ func TestACleanPolicyReadLogsNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 
 	accs := policyAccounts{
 		StaticAccounts: directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}},
