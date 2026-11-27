@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"crypto/tls"
 	"encoding/base64"
-	"fmt"
 	"net"
 	"net/textproto"
 	"strings"
@@ -85,7 +84,7 @@ func TestAuthPlainSuccess(t *testing.T) {
 	addr, certPath := startAuthServer(t, sess)
 	tr, tconn := dialTLS(t, addr, certPath)
 
-	_, _ = fmt.Fprint(tconn, "EHLO c\r\n")
+	send(t, tconn, "EHLO c\r\n")
 	_, msg, err := tr.ReadResponse(250)
 	if err != nil {
 		t.Fatalf("EHLO over TLS: %v", err)
@@ -95,7 +94,7 @@ func TestAuthPlainSuccess(t *testing.T) {
 	}
 
 	cred := base64.StdEncoding.EncodeToString([]byte("\x00alice@test\x00secret"))
-	_, _ = fmt.Fprintf(tconn, "AUTH PLAIN %s\r\n", cred)
+	send(t, tconn, "AUTH PLAIN "+cred+"\r\n")
 	if _, _, err := tr.ReadResponse(235); err != nil {
 		t.Fatalf("AUTH PLAIN valid: want 235: %v", err)
 	}
@@ -111,7 +110,7 @@ func TestAuthPlainFailure(t *testing.T) {
 	tr, tconn := dialTLS(t, addr, certPath)
 
 	cred := base64.StdEncoding.EncodeToString([]byte("\x00alice@test\x00wrong"))
-	_, _ = fmt.Fprintf(tconn, "AUTH PLAIN %s\r\n", cred)
+	send(t, tconn, "AUTH PLAIN "+cred+"\r\n")
 	if _, _, err := tr.ReadResponse(535); err != nil {
 		t.Fatalf("AUTH PLAIN invalid: want 535: %v", err)
 	}
@@ -126,15 +125,15 @@ func TestAuthLoginSuccess(t *testing.T) {
 	addr, certPath := startAuthServer(t, sess)
 	tr, tconn := dialTLS(t, addr, certPath)
 
-	_, _ = fmt.Fprint(tconn, "AUTH LOGIN\r\n")
+	send(t, tconn, "AUTH LOGIN\r\n")
 	if _, _, err := tr.ReadResponse(334); err != nil {
 		t.Fatalf("AUTH LOGIN username challenge: %v", err)
 	}
-	_, _ = fmt.Fprintf(tconn, "%s\r\n", base64.StdEncoding.EncodeToString([]byte("alice@test")))
+	send(t, tconn, base64.StdEncoding.EncodeToString([]byte("alice@test"))+"\r\n")
 	if _, _, err := tr.ReadResponse(334); err != nil {
 		t.Fatalf("AUTH LOGIN password challenge: %v", err)
 	}
-	_, _ = fmt.Fprintf(tconn, "%s\r\n", base64.StdEncoding.EncodeToString([]byte("secret")))
+	send(t, tconn, base64.StdEncoding.EncodeToString([]byte("secret"))+"\r\n")
 	if _, _, err := tr.ReadResponse(235); err != nil {
 		t.Fatalf("AUTH LOGIN valid: want 235: %v", err)
 	}

@@ -2,7 +2,6 @@ package smtp
 
 import (
 	"bufio"
-	"fmt"
 	"net"
 	"net/textproto"
 	"sync"
@@ -62,20 +61,20 @@ func TestInstrumentationLogsTransaction(t *testing.T) {
 		t.Fatalf("greeting: %v", err)
 	}
 
-	send := func(line string, code int) {
-		_, _ = fmt.Fprintf(conn, "%s\r\n", line)
+	exchange := func(line string, code int) {
+		send(t, conn, line+"\r\n")
 		if _, _, err := r.ReadResponse(code); err != nil {
 			t.Fatalf("%q: %v", line, err)
 		}
 	}
-	send("EHLO client.test", 250)
-	send("MAIL FROM:<alice@example.com>", 250)
-	send("RCPT TO:<bob@hermex.test>", 250)
-	_, _ = fmt.Fprint(conn, "DATA\r\n")
+	exchange("EHLO client.test", 250)
+	exchange("MAIL FROM:<alice@example.com>", 250)
+	exchange("RCPT TO:<bob@hermex.test>", 250)
+	send(t, conn, "DATA\r\n")
 	if _, _, err := r.ReadResponse(354); err != nil {
 		t.Fatalf("DATA: %v", err)
 	}
-	_, _ = fmt.Fprint(conn, "Subject: hi\r\n\r\nbody\r\n.\r\n")
+	send(t, conn, "Subject: hi\r\n\r\nbody\r\n.\r\n")
 	if _, _, err := r.ReadResponse(250); err != nil {
 		t.Fatalf("end of DATA: %v", err)
 	}

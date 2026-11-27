@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"crypto/tls"
 	"crypto/x509"
-	"fmt"
 	"io"
 	"net"
 	"net/textproto"
@@ -66,16 +65,16 @@ func TestStartTLSUpgrade(t *testing.T) {
 		t.Fatalf("client handshake: %v", err)
 	}
 	tr := textproto.NewReader(bufio.NewReader(tconn))
-	_, _ = fmt.Fprint(tconn, "EHLO client.test\r\n")
+	send(t, tconn, "EHLO client.test\r\n")
 	msg2 := readCodedReply(t, tr, 250, "EHLO over TLS")
 	if strings.Contains(msg2, "STARTTLS") {
 		t.Errorf("STARTTLS still advertised after TLS:\n%s", msg2)
 	}
-	_, _ = fmt.Fprint(tconn, "MAIL FROM:<alice@test>\r\n")
+	send(t, tconn, "MAIL FROM:<alice@test>\r\n")
 	readCodedReply(t, tr, 250, "MAIL over TLS")
-	_, _ = fmt.Fprint(tconn, "RCPT TO:<bob@test>\r\n")
+	send(t, tconn, "RCPT TO:<bob@test>\r\n")
 	readCodedReply(t, tr, 250, "RCPT over TLS")
-	_, _ = fmt.Fprint(tconn, "QUIT\r\n")
+	send(t, tconn, "QUIT\r\n")
 	readCodedReply(t, tr, 221, "QUIT over TLS")
 
 	wantEq(t, sess.from, "alice@test", "the envelope sender recorded over TLS")
@@ -102,7 +101,12 @@ func TestStartTLSRejectsPipelinedInjection(t *testing.T) {
 	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
 		t.Fatalf("set the read deadline: %v", err)
 	}
-	rest, _ := io.ReadAll(conn)
+	// The server tears the connection down, so the read ends at EOF; a deadline
+	// error would mean it kept the connection open.
+	rest, err := io.ReadAll(conn)
+	if err != nil {
+		t.Fatalf("read after the pipelined STARTTLS: %v (the connection was not torn down)", err)
+	}
 	if strings.Contains(string(rest), "250") {
 		t.Errorf("injected MAIL accepted across the TLS boundary: %q", rest)
 	}

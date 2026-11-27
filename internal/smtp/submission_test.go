@@ -3,7 +3,6 @@ package smtp
 import (
 	"bufio"
 	"encoding/base64"
-	"fmt"
 	"net"
 	"net/textproto"
 	"testing"
@@ -60,21 +59,21 @@ func TestSubmissionRequiresAuthBeforeMail(t *testing.T) {
 	expect(t, r, 530)
 
 	tr, tconn := dialTLS(t, sub, certPath)
-	_, _ = fmt.Fprint(tconn, "EHLO c\r\n")
+	send(t, tconn, "EHLO c\r\n")
 	expect(t, tr, 250)
-	_, _ = fmt.Fprint(tconn, "MAIL FROM:<alice@test>\r\n")
+	send(t, tconn, "MAIL FROM:<alice@test>\r\n")
 	expect(t, tr, 530)
 
 	cred := base64.StdEncoding.EncodeToString([]byte("\x00alice@test\x00wrong"))
-	_, _ = fmt.Fprintf(tconn, "AUTH PLAIN %s\r\n", cred)
+	send(t, tconn, "AUTH PLAIN "+cred+"\r\n")
 	expect(t, tr, 535)
-	_, _ = fmt.Fprint(tconn, "MAIL FROM:<alice@test>\r\n")
+	send(t, tconn, "MAIL FROM:<alice@test>\r\n")
 	expect(t, tr, 530)
 
 	cred = base64.StdEncoding.EncodeToString([]byte("\x00alice@test\x00secret"))
-	_, _ = fmt.Fprintf(tconn, "AUTH PLAIN %s\r\n", cred)
+	send(t, tconn, "AUTH PLAIN "+cred+"\r\n")
 	expect(t, tr, 235)
-	_, _ = fmt.Fprint(tconn, "MAIL FROM:<alice@test>\r\n")
+	send(t, tconn, "MAIL FROM:<alice@test>\r\n")
 	expect(t, tr, 250)
 }
 
