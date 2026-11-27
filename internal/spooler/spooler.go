@@ -461,14 +461,14 @@ func recipientAddrs(msg *oxcmail.Message) []string {
 // wire. It is the inverse of the webmail compose's Bcc splice; the stored
 // Outbox/Sent copy keeps Bcc, only the delivered bytes have it removed. The input
 // is a well-formed CRLF message (oxcmail's re-synthesized wire form); a message
-// with no header/body separator is returned unchanged.
+// with no header/body separator is all header, and its Bcc field goes too.
 func stripBcc(raw []byte) []byte {
 	sep := []byte("\r\n\r\n")
-	i := bytes.Index(raw, sep)
-	if i < 0 {
-		return raw
+	// A message without a body (RFC 5322 3.5) has no empty line: all of it is header.
+	header, body := raw, []byte(nil)
+	if i := bytes.Index(raw, sep); i >= 0 {
+		header, body = raw[:i], raw[i:]
 	}
-	header, body := raw[:i], raw[i:]
 	var kept [][]byte
 	dropping := false
 	for line := range bytes.SplitSeq(header, []byte("\r\n")) {

@@ -33,13 +33,25 @@ func TestStripBccDropsEveryFormOfTheField(t *testing.T) {
 		"Bcc-Note: kept\r\n" +
 		"Subject: s\r\n" +
 		"\r\n" +
-		"body names nobody\r\n"
+		"body names nobody\r\n" +
+		"Bcc: a body line, not a field\r\n"
 	got := string(stripBcc([]byte(raw)))
 	for _, leak := range []string{"one@", "two@", "three@", "four@"} {
 		wantNotContains(t, got, leak, "the delivered copy leaks a blind address")
 	}
-	want := "From: a@example.com\r\nBcc-Note: kept\r\nSubject: s\r\n\r\nbody names nobody\r\n"
+	want := "From: a@example.com\r\nBcc-Note: kept\r\nSubject: s\r\n\r\nbody names nobody\r\nBcc: a body line, not a field\r\n"
 	if got != want {
+		t.Errorf("stripBcc =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// TestStripBccDropsTheFieldFromAMessageWithNoBody: RFC 5322 3.5 makes the body
+// optional, and without one there is no empty line after the header. The whole
+// message is then header, so its Bcc field must still go.
+func TestStripBccDropsTheFieldFromAMessageWithNoBody(t *testing.T) {
+	raw := "From: a@example.com\r\nBcc: hidden@example.com\r\nSubject: s\r\n"
+	got := string(stripBcc([]byte(raw)))
+	if want := "From: a@example.com\r\nSubject: s\r\n"; got != want {
 		t.Errorf("stripBcc =\n%q\nwant\n%q", got, want)
 	}
 }
@@ -81,6 +93,17 @@ func scheduleOutbox(t *testing.T, st *objectstore.Store, when time.Time) {
 	}
 }
 
+// wantRecipients fails unless got is exactly the To, Cc and Bcc addresses of the
+// message scheduleOutbox files, each once.
+func wantRecipients(t *testing.T, got []string, what string) {
+	t.Helper()
+	got = slices.Sorted(slices.Values(got))
+	want := []string{"bcc@example.com", "cc@example.com", "to@example.com"}
+	if !slices.Equal(got, want) {
+		t.Errorf("%s recipients = %v, want %v", what, got, want)
+	}
+}
+
 func count(t *testing.T, st *objectstore.Store, fid int64) int {
 	t.Helper()
 	msgs, err := st.ListMessages(fid)
@@ -110,10 +133,9 @@ func TestProcessDueOutboxReleasesDueMessage(t *testing.T) {
 	mustNoErr(t, err, "release the outbox")
 	wantEq(t, released, 1, "released messages")
 
-	// Every recipient, including the blind Bcc, must be delivered to.
-	for _, want := range []string{"to@example.com", "cc@example.com", "bcc@example.com"} {
-		wantEq(t, slices.Contains(gotRcpts, want), true, "the delivery reaches "+want)
-	}
+	// Every recipient, including the blind Bcc, is delivered to once, and no one
+	// else: the From address is the sender, not a recipient.
+	wantRecipients(t, gotRcpts, "the delivery")
 	// The delivered bytes carry To and Cc but never the blind Bcc address (which
 	// appears only in the Bcc header, so its absence proves the header was cut).
 	dw := string(gotRaw)
@@ -154,6 +176,8 @@ func TestProcessDueOutboxSkipsFutureMessage(t *testing.T) {
 	if n := count(t, st, int64(mapi.PrivateFIDOutbox)); n != 1 {
 		t.Errorf("future message left the Outbox (count=%d, want 1)", n)
 	}
+	wantEq(t, count(t, st, int64(mapi.PrivateFIDSentItems)), 0, "Sent messages after a skipped sweep")
+	wantEq(t, count(t, st, int64(mapi.PrivateFIDDraft)), 0, "Drafts messages after a skipped sweep")
 }
 
 // TestProcessDueOutboxKeepsOnDeliverError checks that a delivery failure leaves
@@ -179,6 +203,7 @@ func TestProcessDueOutboxKeepsOnDeliverError(t *testing.T) {
 	if n := count(t, st, int64(mapi.PrivateFIDSentItems)); n != 0 {
 		t.Errorf("a failed message must not be filed to Sent (count=%d, want 0)", n)
 	}
+	wantEq(t, count(t, st, int64(mapi.PrivateFIDDraft)), 0, "Drafts messages after one failed attempt")
 }
 
 // TestProcessDueOutboxNeverRedeliversWhenFilingFails is the regression that
@@ -257,8 +282,7 @@ func TestProcessDueOutboxGivesUpAfterMaxAttempts(t *testing.T) {
 		t.Fatal("the final attempt should report the abandonment")
 	}
 	wantEq(t, gaveUp, 1, "give-up hook calls")
-	wantEq(t, slices.Contains(gotRecipients, "to@example.com"), true, "the give-up reports the To recipient")
-	wantEq(t, slices.Contains(gotRecipients, "bcc@example.com"), true, "the give-up reports the Bcc recipient")
+	wantRecipients(t, gotRecipients, "the give-up report")
 	wantContains(t, string(gotRaw), "Subject: scheduled", "the give-up hook receives the abandoned message")
 	wantEq(t, count(t, st, int64(mapi.PrivateFIDOutbox)), 0, "Outbox messages after giving up")
 
