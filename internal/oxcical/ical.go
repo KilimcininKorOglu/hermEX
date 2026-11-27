@@ -64,7 +64,7 @@ func parseICal(raw []byte) (*icomp, error) {
 			p.property(iline{name: strings.ToUpper(name), params: params, value: value})
 		}
 	}
-	if p.root == nil {
+	if p.root == nil || p.root.name != "VCALENDAR" {
 		return nil, errNoCalendar
 	}
 	bindZones(p.root)

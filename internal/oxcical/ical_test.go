@@ -1,6 +1,7 @@
 package oxcical
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -24,18 +25,13 @@ func compDepth(c *icomp) int {
 // overflow that no recover() catches.
 func TestParseICalBoundsNesting(t *testing.T) {
 	const levels = maxNestingDepth + 500
-	var b strings.Builder
-	b.WriteString("BEGIN:VCALENDAR\r\n")
-	for range levels {
-		b.WriteString("BEGIN:VEVENT\r\n")
-	}
-	b.WriteString("SUMMARY:deep\r\n")
-	for range levels {
-		b.WriteString("END:VEVENT\r\n")
-	}
-	b.WriteString("END:VCALENDAR\r\n")
+	src := "BEGIN:VCALENDAR\r\n" +
+		strings.Repeat("BEGIN:VEVENT\r\n", levels) +
+		"SUMMARY:deep\r\n" +
+		strings.Repeat("END:VEVENT\r\n", levels) +
+		"END:VCALENDAR\r\n"
 
-	cal, err := parseICal([]byte(b.String()))
+	cal, err := parseICal([]byte(src))
 	if err != nil {
 		t.Fatalf("parseICal: %v", err)
 	}
@@ -55,17 +51,12 @@ func TestParseICalBoundsNesting(t *testing.T) {
 // filterComp/writeComponent on stored bytes).
 func TestParseICalBoundedTreeSerializes(t *testing.T) {
 	const levels = maxNestingDepth + 500
-	var b strings.Builder
-	b.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n")
-	for range levels {
-		b.WriteString("BEGIN:VEVENT\r\n")
-	}
-	for range levels {
-		b.WriteString("END:VEVENT\r\n")
-	}
-	b.WriteString("END:VCALENDAR\r\n")
+	src := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n" +
+		strings.Repeat("BEGIN:VEVENT\r\n", levels) +
+		strings.Repeat("END:VEVENT\r\n", levels) +
+		"END:VCALENDAR\r\n"
 
-	out, ok := SelectCalendarData([]byte(b.String()), CompSelect{Name: "VCALENDAR", AllProp: true, AllComp: true})
+	out, ok := SelectCalendarData([]byte(src), CompSelect{Name: "VCALENDAR", AllProp: true, AllComp: true})
 	if !ok {
 		t.Fatal("SelectCalendarData returned ok=false")
 	}
@@ -99,5 +90,54 @@ func TestParseICalKeepsLegalNesting(t *testing.T) {
 	}
 	if alarm.propText("ACTION") != "DISPLAY" {
 		t.Errorf("ACTION = %q, want DISPLAY", alarm.propText("ACTION"))
+	}
+}
+
+// TestParseICalRefusesMalformedInput covers malformed or truncated input without
+// BEGIN:VCALENDAR: parseICal must return errNoCalendar and a nil component tree.
+func TestParseICalRefusesMalformedInput(t *testing.T) {
+	for _, raw := range []string{
+		"",
+		"SUMMARY:orphan\r\n",
+		"BEGIN:VCAL",
+		" \tcontinuation only without any header",
+	} {
+		cal, err := parseICal([]byte(raw))
+		if !errors.Is(err, errNoCalendar) || cal != nil {
+			t.Errorf("parseICal(%q) = (%v, %v), want (nil, errNoCalendar)", raw, cal, err)
+		}
+	}
+}
+
+// TestParseICalHandlesUnterminatedFoldedLine covers RFC 5545 section 3.1 line
+// unfolding on a folded line that continues to EOF without a closing END or CRLF.
+func TestParseICalHandlesUnterminatedFoldedLine(t *testing.T) {
+	raw := "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:part1" +
+		strings.Repeat("\r\n part", 100)
+	cal, err := parseICal([]byte(raw))
+	if err != nil {
+		t.Fatalf("parseICal: %v", err)
+	}
+	ev := cal.sub("VEVENT")
+	if ev == nil {
+		t.Fatal("VEVENT missing")
+	}
+	want := "part1" + strings.Repeat("part", 100)
+	if got := ev.propText("SUMMARY"); got != want {
+		t.Errorf("unfolded SUMMARY length = %d, want %d", len(got), len(want))
+	}
+}
+
+// TestParseICalTimeRefusesInvalidDates covers RFC 5545 sections 3.3.4 and 3.3.5:
+// invalid dates and date-times must be rejected with zero time and ok=false.
+func TestParseICalTimeRefusesInvalidDates(t *testing.T) {
+	if tm, allDay, ok := parseICalTime(nil); ok || allDay || !tm.IsZero() {
+		t.Errorf("parseICalTime(nil) = (%v, %v, %v), want zero false false", tm, allDay, ok)
+	}
+	for _, val := range []string{"", "not-a-date", "20260230", "20261301T999999Z", "20260612T250000"} {
+		l := &iline{name: "DTSTART", params: map[string][]string{}, value: val}
+		if tm, allDay, ok := parseICalTime(l); ok || allDay || !tm.IsZero() {
+			t.Errorf("parseICalTime(%q) = (%v, %v, %v), want zero false false", val, tm, allDay, ok)
+		}
 	}
 }
