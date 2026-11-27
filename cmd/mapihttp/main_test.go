@@ -61,11 +61,14 @@ func (s *captureSink) Write(e logging.Event) { s.events = append(s.events, e) }
 // operator's only view of a settings row that stopped being read.
 func TestApplyMapiSizeLimitRecordsAReadFailure(t *testing.T) {
 	sink := &captureSink{}
-	_, set := recordingSetters()
+	got, set := recordingSetters()
 	applyMapiSizeLimit(logging.New(sink),
 		func() (directory.SizeLimits, bool, error) {
 			return directory.SizeLimits{}, false, errors.New("db down")
 		}, set)
+	if *got != [2]int64{-1, -1} {
+		t.Errorf("a setter was called on a logged read failure (%v); the caps must be left unchanged", *got)
+	}
 	if len(sink.events) != 1 || sink.events[0].Name != "settings.read.fail" || sink.events[0].Fields["settings"] != "size-limits" {
 		t.Errorf("events = %+v, want one settings.read.fail for size-limits", sink.events)
 	}
