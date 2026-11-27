@@ -223,6 +223,31 @@ func TestModifyRulesBatchAlignment(t *testing.T) {
 	}
 }
 
+// TestReviewerCannotAddARule proves a delegate holding only Reviewer rights on
+// the Inbox cannot plant a rule there. A rule runs on every delivery with the
+// owner's authority (it can forward or delete mail), so the refused ADD must
+// answer ecAccessDenied and leave the owner's rule set empty.
+func TestReviewerCannotAddARule(t *testing.T) {
+	dir := provisionedDir(t)
+	const delegate = "delegate@hermex.test"
+	grantFolderPermission(t, dir, int64(mapi.PrivateFIDInbox), delegate, mapi.RightsReviewer)
+
+	sess, logonH := delegateLogon(t, dir, delegate)
+	defer sess.Close()
+	_, h := sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
+	resp, _ := sess.Dispatch(buildModifyRules(t, 0, 0, []permDataRow{
+		ruleAddRow("planted", "x", mapi.RuleStateEnabled, 1),
+	}), []uint32{h[1]})
+	if ec := ropResultEC(t, resp); ec != ecAccessDenied {
+		t.Errorf("Reviewer ModifyRules(ADD) ec = %#x, want AccessDenied", ec)
+	}
+
+	owner, folderH := openFolderSession(t, dir, nil, mapi.PrivateFIDInbox)
+	if rows := readRuleRows(t, owner, folderH); len(rows) != 0 {
+		t.Errorf("the refused ADD left %d rules in the owner's Inbox, want 0", len(rows))
+	}
+}
+
 // TestDelegateRulesTableRequiresReadAny proves a delegate holding only Visible on a
 // folder cannot read its rules. Opening a folder requires Visible alone, so without
 // its own gate this handler handed over the rules' conditions and actions, which
