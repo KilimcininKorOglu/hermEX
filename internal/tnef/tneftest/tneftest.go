@@ -3,7 +3,6 @@
 package tneftest
 
 import (
-	"bytes"
 	"encoding/binary"
 	"unicode/utf16"
 
@@ -24,8 +23,9 @@ const (
 	AttAttachment     = 0x00069005
 )
 
-// Stream accumulates a TNEF stream.
-type Stream struct{ b bytes.Buffer }
+// Stream accumulates a TNEF stream. It appends to a byte slice, which cannot
+// fail, so no write result is left unchecked.
+type Stream struct{ b []byte }
 
 // New starts a stream with its signature, key, version and code page 1252.
 func New() *Stream {
@@ -48,31 +48,31 @@ func (s *Stream) Attr(level byte, id uint32, data []byte) *Stream {
 
 // RawAttr appends one attribute with the given checksum.
 func (s *Stream) RawAttr(level byte, id uint32, data []byte, sum uint16) *Stream {
-	s.b.WriteByte(level)
+	s.b = append(s.b, level)
 	s.u32(id)
 	s.u32(uint32(len(data)))
-	s.b.Write(data)
+	s.b = append(s.b, data...)
 	s.u16(sum)
 	return s
 }
 
 // Bytes returns the stream.
-func (s *Stream) Bytes() []byte { return s.b.Bytes() }
+func (s *Stream) Bytes() []byte { return s.b }
 
-func (s *Stream) u16(v uint16) { s.b.Write(binary.LittleEndian.AppendUint16(nil, v)) }
-func (s *Stream) u32(v uint32) { s.b.Write(binary.LittleEndian.AppendUint32(nil, v)) }
+func (s *Stream) u16(v uint16) { s.b = binary.LittleEndian.AppendUint16(s.b, v) }
+func (s *Stream) u32(v uint32) { s.b = binary.LittleEndian.AppendUint32(s.b, v) }
 
 // CString is a null-terminated 8-bit string.
 func CString(v string) []byte { return append([]byte(v), 0) }
 
 // Props encodes a property list: count, then each property.
 type Props struct {
-	b bytes.Buffer
+	b []byte
 	n uint32
 }
 
 // Bytes returns the encoded list.
-func (p *Props) Bytes() []byte { return append(le32(p.n), p.b.Bytes()...) }
+func (p *Props) Bytes() []byte { return append(le32(p.n), p.b...) }
 
 // Unicode adds a PtUnicode property.
 func (p *Props) Unicode(tag mapi.PropTag, v string) *Props {
@@ -91,7 +91,7 @@ func (p *Props) Binary(tag mapi.PropTag, v []byte) *Props {
 // Long adds a PtLong property.
 func (p *Props) Long(tag mapi.PropTag, v int32) *Props {
 	p.tag(tag, nil)
-	p.b.Write(le32(uint32(v)))
+	p.b = append(p.b, le32(uint32(v))...)
 	return p
 }
 
@@ -112,30 +112,30 @@ func (p *Props) Object(tag mapi.PropTag, iid mapi.GUID, data []byte) *Props {
 // tag writes a property tag and, for a named property, its name.
 func (p *Props) tag(tag mapi.PropTag, name *mapi.PropertyName) {
 	p.n++
-	p.b.Write(binary.LittleEndian.AppendUint16(nil, uint16(tag.Type())))
-	p.b.Write(binary.LittleEndian.AppendUint16(nil, tag.ID()))
+	p.b = binary.LittleEndian.AppendUint16(p.b, uint16(tag.Type()))
+	p.b = binary.LittleEndian.AppendUint16(p.b, tag.ID())
 	if name == nil {
 		return
 	}
-	p.b.Write(guid(name.GUID))
+	p.b = append(p.b, guid(name.GUID)...)
 	if name.Kind == mapi.MnidID {
-		p.b.Write(le32(0))
-		p.b.Write(le32(name.LID))
+		p.b = append(p.b, le32(0)...)
+		p.b = append(p.b, le32(name.LID)...)
 		return
 	}
 	raw := utf16z(name.Name)
-	p.b.Write(le32(1))
-	p.b.Write(le32(uint32(len(raw))))
-	p.b.Write(raw)
-	p.b.Write(make([]byte, (4-len(raw)%4)%4))
+	p.b = append(p.b, le32(1)...)
+	p.b = append(p.b, le32(uint32(len(raw)))...)
+	p.b = append(p.b, raw...)
+	p.b = append(p.b, make([]byte, (4-len(raw)%4)%4)...)
 }
 
 // variable writes a counted, length-prefixed, padded value.
 func (p *Props) variable(v []byte) {
-	p.b.Write(le32(1))
-	p.b.Write(le32(uint32(len(v))))
-	p.b.Write(v)
-	p.b.Write(make([]byte, (4-len(v)%4)%4))
+	p.b = append(p.b, le32(1)...)
+	p.b = append(p.b, le32(uint32(len(v)))...)
+	p.b = append(p.b, v...)
+	p.b = append(p.b, make([]byte, (4-len(v)%4)%4)...)
 }
 
 // RecipTable encodes attRecipTable from property lists.

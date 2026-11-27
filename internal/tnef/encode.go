@@ -1,7 +1,6 @@
 package tnef
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -39,7 +38,7 @@ func Encode(m *Message) ([]byte, error) {
 		e.attribute(levelAttachment, attAttachRendData, fileRendData())
 		e.attribute(levelAttachment, attAttachment, list)
 	}
-	return e.b.Bytes(), nil
+	return e.b, nil
 }
 
 // fileRendData is the attAttachRendData of a file attachment whose rendering
@@ -50,28 +49,29 @@ func fileRendData() []byte {
 	return append(out, make([]byte, 8)...)
 }
 
-// encoder accumulates little-endian output.
-type encoder struct{ b bytes.Buffer }
+// encoder accumulates little-endian output. It appends to a byte slice, which
+// cannot fail, so no write result is left unchecked.
+type encoder struct{ b []byte }
 
-func (e *encoder) u16(v uint16) { e.b.Write(binary.LittleEndian.AppendUint16(nil, v)) }
-func (e *encoder) u32(v uint32) { e.b.Write(binary.LittleEndian.AppendUint32(nil, v)) }
+func (e *encoder) u16(v uint16) { e.b = binary.LittleEndian.AppendUint16(e.b, v) }
+func (e *encoder) u32(v uint32) { e.b = binary.LittleEndian.AppendUint32(e.b, v) }
 
 // attribute writes one attribute with its length and checksum.
 func (e *encoder) attribute(level byte, id uint32, data []byte) {
-	e.b.WriteByte(level)
+	e.b = append(e.b, level)
 	e.u32(id)
 	e.u32(uint32(len(data))) // #nosec G115 -- a property list is far below 4 GiB
-	e.b.Write(data)
+	e.b = append(e.b, data...)
 	e.u16(checksum(data))
 }
 
 // pad writes the zero bytes that bring a value of n bytes to a 4-byte boundary.
-func (e *encoder) pad(n int) { e.b.Write(make([]byte, (4-n%4)%4)) }
+func (e *encoder) pad(n int) { e.b = append(e.b, make([]byte, (4-n%4)%4)...) }
 
 // variable writes one length-prefixed, padded value.
 func (e *encoder) variable(v []byte) {
 	e.u32(uint32(len(v))) // #nosec G115 -- a value is far below 4 GiB
-	e.b.Write(v)
+	e.b = append(e.b, v...)
 	e.pad(len(v))
 }
 
@@ -89,7 +89,7 @@ func encodePropList(props []Prop) ([]byte, error) {
 		}
 		n++
 	}
-	return append(binary.LittleEndian.AppendUint32(nil, n), body.b.Bytes()...), nil
+	return append(binary.LittleEndian.AppendUint32(nil, n), body.b...), nil
 }
 
 // prop writes one property: its tag, the name of a named property, and the value.
@@ -118,7 +118,7 @@ func (e *encoder) prop(p Prop) error {
 
 // name writes a NamedPropSpec.
 func (e *encoder) name(n mapi.PropertyName) {
-	e.b.Write(guidBytes(n.GUID))
+	e.b = append(e.b, guidBytes(n.GUID)...)
 	if n.Kind == mapi.MnidID {
 		e.u32(0)
 		e.u32(n.LID)
@@ -189,7 +189,7 @@ func (e *encoder) value(tag mapi.PropTag, t mapi.PropType, v any) error {
 		e.variable(raw)
 		return nil
 	}
-	e.b.Write(raw)
+	e.b = append(e.b, raw...)
 	e.pad(len(raw))
 	return nil
 }
