@@ -1179,14 +1179,18 @@ func (s *Server) handleGetIdentities(w http.ResponseWriter, r *http.Request) {
 	}
 	addrs := []string{c.Email}
 	if id, isID := s.accounts.(directory.Identifier); isID {
-		if list, err := id.Identities(c.Email); err == nil {
-			for _, a := range list {
-				a = strings.TrimSpace(a)
-				if a == "" || strings.EqualFold(a, c.Email) {
-					continue
-				}
-				addrs = append(addrs, a)
+		list, err := id.Identities(c.Email)
+		if err != nil {
+			// Offer only the caller's own address: an identity that could not be
+			// checked is never offered, but the failure is recorded.
+			logError("identities", err, logging.Fields{"user": c.Email})
+		}
+		for _, a := range list {
+			a = strings.TrimSpace(a)
+			if a == "" || strings.EqualFold(a, c.Email) {
+				continue
 			}
+			addrs = append(addrs, a)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"identities": addrs})
