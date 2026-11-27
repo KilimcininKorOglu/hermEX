@@ -115,10 +115,22 @@ func TestBindAccept(t *testing.T) {
 func TestBindNakUnknownInterface(t *testing.T) {
 	d := echoDispatcher()
 	other := mapi.GUID{Data1: 0xDEADBEEF}
-	out := d.Dispatch(&Session{}, buildBindPDU(0x10, other, 1, 0))
+	sess := &Session{}
+	out := d.Dispatch(sess, buildBindPDU(0x10, other, 1, 0))
+	if len(out) != 1 {
+		t.Fatalf("refused bind produced %d PDUs, want 1", len(out))
+	}
 	h, err := ndr.ParseHeader(out[0])
 	if err != nil || h.Type != ndr.PktBindNak {
 		t.Errorf("unknown-interface bind reply = (%v, type %#x), want BIND_NAK", err, h.Type)
+	}
+	// The refusal binds nothing, so a later request on context 0 still faults.
+	if sess.contexts[0] != nil {
+		t.Error("a refused bind left context 0 bound on the session")
+	}
+	req := d.Dispatch(sess, buildRequestPDU(0x11, 0, 0, nil, ndr.PfcFirstFrag|ndr.PfcLastFrag))
+	if len(req) != 1 || !isFault(t, req[0]) {
+		t.Error("a request on the refused context was served")
 	}
 }
 
