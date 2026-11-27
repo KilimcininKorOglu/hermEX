@@ -31,7 +31,7 @@ func buildDeleteMessages(inIdx uint8, eids ...uint64) []byte {
 	b.Uint8(inIdx) // folder handle
 	b.Uint8(0)     // WantAsynchronous
 	b.Uint8(0)     // NotifyNonRead
-	_ = b.Uint64ArrayShort(eids)
+	mustBuild(b.Uint64ArrayShort(eids))
 	return b.Bytes()
 }
 
@@ -44,7 +44,7 @@ func buildSetReadFlags(inIdx, readFlags uint8, eids ...uint64) []byte {
 	b.Uint8(inIdx)     // folder handle
 	b.Uint8(0)         // WantAsynchronous
 	b.Uint8(readFlags) // ReadFlags
-	_ = b.Uint64ArrayShort(eids)
+	mustBuild(b.Uint64ArrayShort(eids))
 	return b.Bytes()
 }
 
@@ -56,7 +56,7 @@ func buildMoveCopyMessages(srcIdx, dstIdx, wantCopy uint8, eids ...uint64) []byt
 	b.Uint8(0)      // LogonId
 	b.Uint8(srcIdx) // source folder handle
 	b.Uint8(dstIdx) // DestHandleIndex
-	_ = b.Uint64ArrayShort(eids)
+	mustBuild(b.Uint64ArrayShort(eids))
 	b.Uint8(0)        // WantAsynchronous
 	b.Uint8(wantCopy) // WantCopy (0 = move)
 	return b.Bytes()
@@ -175,7 +175,7 @@ func TestDeleteMessages(t *testing.T) {
 		t.Errorf("untargeted message was also deleted")
 	}
 	// The deleted message went to the dumpster, recoverable, not purged.
-	if dump, _ := sess.get(folderH).store.ListSoftDeleted(int64(mapi.PrivateFIDInbox)); len(dump) != 1 {
+	if dump := mustListSoftDeleted(t, sess.get(folderH).store, int64(mapi.PrivateFIDInbox)); len(dump) != 1 {
 		t.Errorf("dumpster = %d, want 1 (deleted message recoverable)", len(dump))
 	}
 }
@@ -199,7 +199,7 @@ func TestFolderRopsLeaveAMessageOfAnotherFolder(t *testing.T) {
 	hard := ext.NewPush(ext.FlagUTF16)
 	hard.Uint8(0) // WantAsynchronous
 	hard.Uint8(0) // NotifyNonRead
-	_ = hard.Uint64ArrayShort([]uint64{eid})
+	mustBuild(hard.Uint64ArrayShort([]uint64{eid}))
 	cases := []struct {
 		name  string
 		ropID uint8
@@ -347,7 +347,7 @@ func TestMoveCopyMessages(t *testing.T) {
 	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), copyInfo.ID); f == -1 {
 		t.Errorf("copied message was removed from the source folder")
 	}
-	if junk, _ := st2.ListMessages(int64(mapi.PrivateFIDJunk)); len(junk) != 2 {
+	if junk := mustListMessages(t, st2, int64(mapi.PrivateFIDJunk)); len(junk) != 2 {
 		t.Errorf("Junk has %d messages after copy, want 2", len(junk))
 	}
 }

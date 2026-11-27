@@ -179,6 +179,15 @@ func TestDispatchEmpty(t *testing.T) {
 	}
 }
 
+// mustBuild stops a request builder on a push error. The builders take no
+// *testing.T, so it panics; the test still fails, naming the error, instead of
+// sending a request whose body silently lacks the field that failed to encode.
+func mustBuild(err error) {
+	if err != nil {
+		panic("build the test request: " + err.Error())
+	}
+}
+
 // --- pull helpers (fail the test on a short read) ---
 
 func mustU8(t *testing.T, p *ext.Pull, field string) uint8 {

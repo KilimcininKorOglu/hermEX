@@ -128,7 +128,9 @@ func TestSessionConcurrentDispatchPollClose(t *testing.T) {
 	}
 
 	run(func() {
-		_, _ = writer.AppendMessage(inbox, []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0)
+		if _, err := writer.AppendMessage(inbox, []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0); err != nil {
+			t.Errorf("deliver into the polled mailbox: %v", err)
+		}
 	})
 	run(func() { sess.PollForChange() })
 	run(func() { sess.Dispatch(nil, nil) })

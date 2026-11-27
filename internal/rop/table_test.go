@@ -79,10 +79,14 @@ func TestBuildPropertyRowNone(t *testing.T) {
 		t.Fatalf("row flag = %#x, want NONE (%#x)", b[0], propertyRowNone)
 	}
 	p := ext.NewPull(b[1:], ext.FlagUTF16)
-	if subj, _ := p.PropValue(mapi.PrSubject.Type()); subj != "Hi" {
+	subj, err := p.PropValue(mapi.PrSubject.Type())
+	mustNil(t, err)
+	if subj != "Hi" {
 		t.Errorf("column 0 = %v, want \"Hi\"", subj)
 	}
-	if fl, _ := p.PropValue(mapi.PrMessageFlags.Type()); fl != int32(0x09) {
+	fl, err := p.PropValue(mapi.PrMessageFlags.Type())
+	mustNil(t, err)
+	if fl != int32(0x09) {
 		t.Errorf("column 1 = %v, want 9", fl)
 	}
 	if p.Remaining() != 0 {
@@ -376,12 +380,12 @@ func assertFreedBookmarkIsGone(t *testing.T, sess *Session, tableH uint32) {
 	}
 
 	fb := ext.NewPush(ext.FlagUTF16)
-	_ = fb.BinShort(bookmark)
+	mustBuild(fb.BinShort(bookmark))
 	free, _ := sess.Dispatch(toROPRequest(ropFreeBookmark, 0, fb.Bytes()), []uint32{tableH})
 	wantEC(t, free, ropFreeBookmark, ecSuccess, "FreeBookmark")
 
 	srb := ext.NewPush(ext.FlagUTF16)
-	_ = srb.BinShort(bookmark)
+	mustBuild(srb.BinShort(bookmark))
 	srb.Uint32(0) // Offset
 	srb.Uint8(0)  // WantRowMovedCount
 	seek, _ := sess.Dispatch(toROPRequest(ropSeekRowBookmark, 0, srb.Bytes()), []uint32{tableH})
@@ -503,7 +507,7 @@ func buildRestrict(inIdx uint8, r *mapi.Restriction) []byte {
 	var data []byte
 	if r != nil {
 		rd := ext.NewPush(ext.FlagUTF16)
-		_ = rd.Restriction(*r)
+		mustBuild(rd.Restriction(*r))
 		data = rd.Bytes()
 	}
 	b := ext.NewPush(ext.FlagUTF16)
@@ -823,7 +827,7 @@ func buildFindRow(inIdx, flags, seekPos uint8, r *mapi.Restriction) []byte {
 	var data []byte
 	if r != nil {
 		rd := ext.NewPush(ext.FlagUTF16)
-		_ = rd.Restriction(*r)
+		mustBuild(rd.Restriction(*r))
 		data = rd.Bytes()
 	}
 	b := ext.NewPush(ext.FlagUTF16)
@@ -834,7 +838,7 @@ func buildFindRow(inIdx, flags, seekPos uint8, r *mapi.Restriction) []byte {
 	b.Uint16(uint16(len(data)))
 	b.Raw(data)
 	b.Uint8(seekPos)
-	_ = b.BinShort(nil) // empty Bookmark
+	mustBuild(b.BinShort(nil)) // empty Bookmark
 	return b.Bytes()
 }
 
@@ -934,7 +938,7 @@ func buildSeekRowBookmark(inIdx uint8, bookmark []byte, offset int32) []byte {
 	b.Uint8(ropSeekRowBookmark)
 	b.Uint8(0)
 	b.Uint8(inIdx)
-	_ = b.BinShort(bookmark)
+	mustBuild(b.BinShort(bookmark))
 	b.Uint32(uint32(offset))
 	b.Uint8(0) // WantRowMovedCount
 	return b.Bytes()

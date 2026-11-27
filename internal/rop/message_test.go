@@ -34,7 +34,7 @@ func buildGetProps(ropID, inIdx uint8, cols []mapi.PropTag) []byte {
 	b.Uint16(0) // PropertySizeLimit
 	b.Uint16(1) // WantUnicode
 	if ropID == ropGetPropertiesSpecific {
-		_ = b.PropTags(cols)
+		mustBuild(b.PropTags(cols))
 	}
 	return b.Bytes()
 }

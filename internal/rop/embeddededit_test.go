@@ -36,7 +36,7 @@ func embeddedSubject(t *testing.T, sess *Session, logonH uint32, mid int64) stri
 	oem, _ := sess.Dispatch(buildOpenEmbeddedMessage(0, 1, mapiModify), []uint32{h[1], 0xFFFFFFFF})
 	p := ropOK(t, oem, ropOpenEmbeddedMessage, "OpenEmbeddedMessage(read-back)")
 	mustU8(t, p, "Reserved")
-	_, _ = p.Uint64() // MessageId
+	mustU64(t, p, "MessageId")
 	mustU8(t, p, "HasNamedProperties")
 	readTypedString(t, p) // SubjectPrefix
 	return readTypedString(t, p)

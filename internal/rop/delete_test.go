@@ -16,7 +16,7 @@ func buildDeletePropsOp(ropID, inIdx uint8, tags []mapi.PropTag) []byte {
 	b.Uint8(ropID)
 	b.Uint8(0) // LogonId
 	b.Uint8(inIdx)
-	_ = b.PropTags(tags)
+	mustBuild(b.PropTags(tags))
 	return b.Bytes()
 }
 

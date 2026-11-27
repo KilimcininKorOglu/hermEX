@@ -23,7 +23,7 @@ func buildFastCopyTo(inIdx, outIdx uint8, level uint8, copyFlags uint32, exclude
 	b.Uint8(level)
 	b.Uint32(copyFlags)
 	b.Uint8(0) // SendOptions
-	_ = b.PropTags(excluded)
+	mustBuild(b.PropTags(excluded))
 	return b.Bytes()
 }
 
@@ -146,7 +146,7 @@ func buildFastCopyMessages(inIdx, outIdx uint8, mids []int64) []byte {
 	for i, mid := range mids {
 		eids[i] = uint64(mapi.MakeEIDEx(1, uint64(mid)))
 	}
-	_ = b.Uint64ArrayShort(eids)
+	mustBuild(b.Uint64ArrayShort(eids))
 	b.Uint8(0) // CopyFlags
 	b.Uint8(0) // SendOptions
 	return b.Bytes()
@@ -319,7 +319,7 @@ func buildFastCopyProps(inIdx, outIdx uint8, included []mapi.PropTag) []byte {
 	b.Uint8(0) // Level
 	b.Uint8(0) // CopyFlags
 	b.Uint8(0) // SendOptions
-	_ = b.PropTags(included)
+	mustBuild(b.PropTags(included))
 	return b.Bytes()
 }
 

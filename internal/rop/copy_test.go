@@ -20,7 +20,7 @@ func buildCopyProperties(srcIdx, dstIdx, copyFlags uint8, tags []mapi.PropTag) [
 	b.Uint8(dstIdx)
 	b.Uint8(0) // WantAsynchronous
 	b.Uint8(copyFlags)
-	_ = b.PropTags(tags)
+	mustBuild(b.PropTags(tags))
 	return b.Bytes()
 }
 
@@ -35,7 +35,7 @@ func buildCopyTo(srcIdx, dstIdx, copyFlags uint8, excluded []mapi.PropTag) []byt
 	b.Uint8(0) // WantAsynchronous
 	b.Uint8(0) // WantSubObjects
 	b.Uint8(copyFlags)
-	_ = b.PropTags(excluded)
+	mustBuild(b.PropTags(excluded))
 	return b.Bytes()
 }
 
@@ -128,7 +128,7 @@ func TestCopyPropertiesErrors(t *testing.T) {
 	if ec := mustU32(t, p, "ec"); ec != ecDstNullObject {
 		t.Fatalf("null-dest CopyProperties ec = %#x, want ecDstNullObject", ec)
 	}
-	if dh, _ := p.Uint32(); dh != 1 {
+	if dh := mustU32(t, p, "DestHandleIndex"); dh != 1 {
 		t.Errorf("null-dest echoed DestHandleIndex = %d, want 1", dh)
 	}
 
@@ -198,7 +198,7 @@ func buildCopyToWS(srcIdx, dstIdx, wantSub, copyFlags uint8, excluded []mapi.Pro
 	b.Uint8(0) // WantAsynchronous
 	b.Uint8(wantSub)
 	b.Uint8(copyFlags)
-	_ = b.PropTags(excluded)
+	mustBuild(b.PropTags(excluded))
 	return b.Bytes()
 }
 

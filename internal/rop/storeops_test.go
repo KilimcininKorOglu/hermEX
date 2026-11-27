@@ -72,7 +72,11 @@ func wantReceiveFolder(t *testing.T, sess *Session, logonH uint32, class string,
 	resp, _ := sess.Dispatch(buildGetReceiveFolder(0, class), []uint32{logonH})
 	p := ropOK(t, resp, ropGetReceiveFolder, "GetReceiveFolder("+class+")")
 	wantU64(t, p, "GetReceiveFolder("+class+") FolderId", wantEID)
-	if explicit, _ := p.String8(); explicit != wantExplicit {
+	explicit, err := p.String8()
+	if err != nil {
+		t.Fatalf("read ExplicitMessageClass: %v", err)
+	}
+	if explicit != wantExplicit {
 		t.Errorf("GetReceiveFolder(%s) explicit class = %q, want %q", class, explicit, wantExplicit)
 	}
 }

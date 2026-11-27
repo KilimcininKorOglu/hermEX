@@ -14,7 +14,7 @@ func buildWriteStream(inIdx uint8, data []byte) []byte {
 	b.Uint8(ropWriteStream)
 	b.Uint8(0) // LogonId
 	b.Uint8(inIdx)
-	_ = b.BinShort(data)
+	mustBuild(b.BinShort(data))
 	return b.Bytes()
 }
 
@@ -199,7 +199,7 @@ func TestStreamWriteMechanics(t *testing.T) {
 	mustU8(t, p, "RopId")
 	mustU8(t, p, "hindex")
 	mustU32(t, p, "ec")
-	if pos, _ := p.Uint64(); pos != 1 {
+	if pos := mustU64(t, p, "NewPosition"); pos != 1 {
 		t.Errorf("SeekStream(END,0) NewPosition = %d, want 1", pos)
 	}
 }

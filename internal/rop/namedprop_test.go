@@ -15,7 +15,7 @@ func buildGetPropertyIdsFromNames(inIdx, flags uint8, names []mapi.PropertyName)
 	b.Uint8(0) // LogonId
 	b.Uint8(inIdx)
 	b.Uint8(flags)
-	_ = b.PropertyNames(names)
+	mustBuild(b.PropertyNames(names))
 	return b.Bytes()
 }
 
@@ -26,7 +26,7 @@ func buildGetNamesFromPropertyIds(inIdx uint8, ids []uint16) []byte {
 	b.Uint8(ropGetNamesFromPropertyIds)
 	b.Uint8(0) // LogonId
 	b.Uint8(inIdx)
-	_ = b.PropIDs(ids)
+	mustBuild(b.PropIDs(ids))
 	return b.Bytes()
 }
 

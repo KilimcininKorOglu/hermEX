@@ -21,7 +21,7 @@ func buildSyncConfigure(inIdx, outIdx, syncType uint8, syncFlags uint16, extraFl
 	b.Uint16(syncFlags)
 	b.Uint16(0) // RestrictionSize
 	b.Uint32(extraFlags)
-	_ = b.PropTags(propTags)
+	mustBuild(b.PropTags(propTags))
 	return b.Bytes()
 }
 
@@ -166,13 +166,13 @@ func buildImportDeletes(inIdx uint8, key []byte) []byte {
 	b.Uint8(0)
 	b.Uint8(inIdx)
 	b.Uint8(0) // ImportDeleteFlags
-	_ = b.PropertyValues(mapi.PropertyValues{{Tag: mapi.MakeTag(0x0000, mapi.PtMvBinary), Value: [][]byte{key}}})
+	mustBuild(b.PropertyValues(mapi.PropertyValues{{Tag: mapi.MakeTag(0x0000, mapi.PtMvBinary), Value: [][]byte{key}}}))
 	return b.Bytes()
 }
 
 func buildImportReadState(inIdx uint8, key []byte, read bool) []byte {
 	blk := ext.NewPush(ext.FlagUTF16)
-	_ = blk.BinShort(key)
+	mustBuild(blk.BinShort(key))
 	if read {
 		blk.Uint8(1)
 	} else {
@@ -384,7 +384,7 @@ func buildImportMessageChange(inIdx, outIdx, importFlags uint8, header mapi.Prop
 	b.Uint8(inIdx)
 	b.Uint8(outIdx)
 	b.Uint8(importFlags)
-	_ = b.PropertyValues(header)
+	mustBuild(b.PropertyValues(header))
 	return b.Bytes()
 }
 
@@ -404,7 +404,7 @@ func buildDestPutBuffer(inIdx uint8, data []byte) []byte {
 	b.Uint8(ropFastTransferDestPutBuffer)
 	b.Uint8(0)
 	b.Uint8(inIdx)
-	_ = b.BinShort(data)
+	mustBuild(b.BinShort(data))
 	return b.Bytes()
 }
 
@@ -412,8 +412,8 @@ func buildDestPutBuffer(inIdx uint8, data []byte) []byte {
 // no STARTMESSAGE framing) the way a client streams it through PutBuffer.
 func messageContentBody(class, subject string) []byte {
 	pr := &ics.Producer{}
-	_ = pr.WriteProp(ics.StreamProp{Tag: mapi.PrMessageClass, Value: class})
-	_ = pr.WriteProp(ics.StreamProp{Tag: mapi.PrSubject, Value: subject})
+	mustBuild(pr.WriteProp(ics.StreamProp{Tag: mapi.PrMessageClass, Value: class}))
+	mustBuild(pr.WriteProp(ics.StreamProp{Tag: mapi.PrSubject, Value: subject}))
 	var out []byte
 	for {
 		chunk, last := pr.ReadBuffer(1 << 16)

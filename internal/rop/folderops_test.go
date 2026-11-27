@@ -327,7 +327,7 @@ func TestHardDeleteMessagesToDumpster(t *testing.T) {
 	body := ext.NewPush(ext.FlagUTF16)
 	body.Uint8(0)
 	body.Uint8(0)
-	_ = body.Uint64ArrayShort([]uint64{uint64(mapi.MakeEIDEx(1, uint64(midA))), uint64(mapi.MakeEIDEx(1, uint64(msgB)))})
+	mustBuild(body.Uint64ArrayShort([]uint64{uint64(mapi.MakeEIDEx(1, uint64(midA))), uint64(mapi.MakeEIDEx(1, uint64(msgB)))}))
 
 	resp, _ := sess.Dispatch(toROPRequest(ropHardDeleteMessages, 0, body.Bytes()), []uint32{inboxH})
 	if ec := readEC(t, resp, ropHardDeleteMessages); ec != ecSuccess {
@@ -443,7 +443,8 @@ func TestMoveFolder(t *testing.T) {
 	if ec := readEC(t, resp, ropMoveFolder); ec != ecSuccess {
 		t.Fatalf("MoveFolder ec = %#x", ec)
 	}
-	props, _ := store.GetFolderProperties(subFID, mapi.PrDisplayName)
+	props, err := store.GetFolderProperties(subFID, mapi.PrDisplayName)
+	mustNil(t, err)
 	if v, ok := props.Get(mapi.PrDisplayName); !ok || v.(string) != "RenamedSub" {
 		t.Errorf("display name = %v, want RenamedSub", v)
 	}
@@ -461,7 +462,8 @@ func TestMoveFolder(t *testing.T) {
 	if ec := readEC(t, resp, ropMoveFolder); ec != ecDuplicateName {
 		t.Errorf("MoveFolder onto a sibling's name ec = %#x, want ecDuplicateName", ec)
 	}
-	props, _ = store.GetFolderProperties(subFID, mapi.PrDisplayName)
+	props, err = store.GetFolderProperties(subFID, mapi.PrDisplayName)
+	mustNil(t, err)
 	if v, _ := props.Get(mapi.PrDisplayName); v != "RenamedSub" {
 		t.Errorf("display name after the refused move = %v, want RenamedSub", v)
 	}
@@ -591,7 +593,8 @@ func TestMoveFolderOntoANonFolderHandleRenamesInPlace(t *testing.T) {
 	if !found {
 		t.Error("the renamed folder left the Inbox")
 	}
-	props, _ := store.GetFolderProperties(sub, mapi.PrDisplayName)
+	props, err := store.GetFolderProperties(sub, mapi.PrDisplayName)
+	mustNil(t, err)
 	if v, _ := props.Get(mapi.PrDisplayName); v != "Renamed" {
 		t.Errorf("display name = %v, want Renamed", v)
 	}

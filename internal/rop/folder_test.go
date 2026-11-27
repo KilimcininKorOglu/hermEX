@@ -39,7 +39,7 @@ func buildSetColumns(inIdx uint8, cols []mapi.PropTag) []byte {
 	b.Uint8(0)
 	b.Uint8(inIdx)
 	b.Uint8(0) // SetColumnsFlags
-	_ = b.PropTags(cols)
+	mustBuild(b.PropTags(cols))
 	return b.Bytes()
 }
 

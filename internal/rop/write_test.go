@@ -29,7 +29,7 @@ func buildCreateMessage(inIdx, outIdx uint8, folderEID uint64) []byte {
 // in the length-prefixed value region.
 func buildSetProperties(inIdx uint8, props mapi.PropertyValues) []byte {
 	body := ext.NewPush(ext.FlagUTF16)
-	_ = body.PropertyValues(props)
+	mustBuild(body.PropertyValues(props))
 	b := ext.NewPush(ext.FlagUTF16)
 	b.Uint8(ropSetProperties)
 	b.Uint8(0) // LogonId
@@ -49,7 +49,7 @@ func buildSMTPRecipientRow(rowID uint32, rcptType uint8, email, display string) 
 	row.Unicode(display) // pdisplay_name (g_wstr)
 	row.Uint16(1)        // RecipientColumnCount
 	row.Uint8(propertyRowNone)
-	_ = row.PropValue(mapi.PrSmtpAddress.Type(), email)
+	mustBuild(row.PropValue(mapi.PrSmtpAddress.Type(), email))
 	rowBytes := row.Bytes()
 
 	b := ext.NewPush(ext.FlagUTF16)
@@ -67,7 +67,7 @@ func buildModifyRecipients(inIdx uint8, columns []mapi.PropTag, rows ...[]byte) 
 	b.Uint8(ropModifyRecipients)
 	b.Uint8(0) // LogonId
 	b.Uint8(inIdx)
-	_ = b.PropTags(columns)
+	mustBuild(b.PropTags(columns))
 	b.Uint16(uint16(len(rows))) // RowCount
 	for _, r := range rows {
 		b.Raw(r)

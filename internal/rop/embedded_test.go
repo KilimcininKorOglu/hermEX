@@ -110,7 +110,7 @@ func TestOpenEmbeddedMessageRead(t *testing.T) {
 		t.Fatalf("OpenEmbeddedMessage ReturnValue = %#x", ec)
 	}
 	mustU8(t, p, "Reserved")
-	if msgid, _ := p.Uint64(); msgid == 0 {
+	if msgid := mustU64(t, p, "MessageId"); msgid == 0 {
 		t.Error("OpenEmbeddedMessage MessageId = 0, want a non-zero synthesized id")
 	}
 	mustU8(t, p, "HasNamedProperties")
