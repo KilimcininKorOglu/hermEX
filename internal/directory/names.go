@@ -69,11 +69,23 @@ func validRoutableAddress(s, what string) error {
 	if err != nil || a.Name != "" || a.Address != s {
 		return fmt.Errorf("%w: %s %q", ErrUnroutableAddress, what, s)
 	}
-	if err := ValidateDomain(s[strings.LastIndexByte(s, '@')+1:]); err != nil {
+	at := strings.LastIndexByte(s, '@')
+	// RFC 5321 4.5.3.1: a local part holds at most 64 octets and a path at most
+	// 256 (the address plus its angle brackets), so no relay carries a longer one.
+	if at > maxLocalPartOctets || len(s) > maxAddressOctets {
+		return fmt.Errorf("%w: %s %q is longer than SMTP allows", ErrUnroutableAddress, what, s)
+	}
+	if err := ValidateDomain(s[at+1:]); err != nil {
 		return fmt.Errorf("%w: %s %q: %v", ErrUnroutableAddress, what, s, err)
 	}
 	return nil
 }
+
+// RFC 5321 4.5.3.1.1 and 4.5.3.1.3 size limits.
+const (
+	maxLocalPartOctets = 64
+	maxAddressOctets   = 254
+)
 
 // ValidateAccessPattern reports whether an allow/block pattern is one email address
 // or one bare domain. Rules are matched by exact lookup, so anything else (a "*", an
