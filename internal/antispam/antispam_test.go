@@ -33,7 +33,10 @@ func TestTagReplacesSenderSpamHeaders(t *testing.T) {
 		"X-Spam-Flag: NO in the body stays\r\n"
 	out := string(Tag([]byte(orig), Verdict{Score: 9, Spam: true}))
 
-	head, body, _ := strings.Cut(out, "\r\n\r\n")
+	head, body, found := strings.Cut(out, "\r\n\r\n")
+	if !found {
+		t.Fatalf("tagged message missing header/body separator: %q", out)
+	}
 	if body != "X-Spam-Flag: NO in the body stays\r\n" {
 		t.Errorf("body = %q, want it unchanged", body)
 	}
@@ -414,4 +417,38 @@ func TestDNSBLIsListed(t *testing.T) {
 	if isListed(nil) {
 		t.Error("no answer is not a listing")
 	}
+}
+
+// TestDNSBLHostileInputs verifies malformed IPs produce empty query names and
+// non-127.0.0.0/8 answers (including IPv6 loopback and 126/128 boundaries) are
+// refused as listings (RFC 5782).
+func TestDNSBLHostileInputs(t *testing.T) {
+	wantEq(t, dnsblQuery(nil, "zen.example"), "", "nil IP DNSBL query")
+	wantEq(t, dnsblQuery(net.IP{1, 2}, "zen.example"), "", "malformed short IP DNSBL query")
+	for _, ip := range []net.IP{net.ParseIP("::1"), net.IPv4(126, 255, 255, 255), net.IPv4(128, 0, 0, 1)} {
+		if isListed([]net.IP{ip}) {
+			t.Errorf("non-127/8 IP %v must not count as listed", ip)
+		}
+	}
+}
+
+// TestScoreDMARCQuarantineAndFailOpen checks quarantine enforcement, missing
+// DMARC policy fail-open, SPF error fail-open, and Tag input immutability.
+func TestScoreDMARCQuarantineAndFailOpen(t *testing.T) {
+	raw := []byte("X-Spam-Flag: NO\r\nSubject: hi\r\n\r\nbody")
+	origCopy := append([]byte(nil), raw...)
+	_ = Tag(raw, Verdict{Score: 5, Spam: true})
+	if string(raw) != string(origCopy) {
+		t.Errorf("Tag mutated caller input slice: got %q, want %q", raw, origCopy)
+	}
+
+	s := &Scorer{
+		checkSPF:    func(net.IP, string, string) AuthResult { return AuthError },
+		lookupDMARC: func(string) (DMARCPolicy, bool) { return DMARCPolicy{}, false },
+	}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: 5})
+	v := s.Score(Input{ClientIP: net.IPv4(1, 2, 3, 4), MailFrom: "a@x.example", FromDomain: "x.example"})
+	wantEq(t, v.SPF, AuthError, "SPF error recorded")
+	wantEq(t, v.DMARC, AuthNone, "missing DMARC policy")
+	wantEq(t, v.Score, 0, "fail-open score on SPF error and missing DMARC")
 }
