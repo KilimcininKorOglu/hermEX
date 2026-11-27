@@ -554,10 +554,11 @@ func (s *Server) handleMailFollowup(w http.ResponseWriter, r *http.Request) {
 	}
 	f, ok := followupFlagFor(req.Action, req.Color, req.Due)
 	if !ok {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown action"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown action, colour or due date"})
 		return
 	}
 	if err := st.SetFollowupFlag(m.ID, f); err != nil {
+		logError("mail-followup", err, logging.Fields{"folder": fid, "uid": uid})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot set flag"})
 		return
 	}
@@ -565,11 +566,11 @@ func (s *Server) handleMailFollowup(w http.ResponseWriter, r *http.Request) {
 }
 
 // followupFlagFor builds the flag one action sets, reporting false for an
-// action this endpoint does not implement.
+// action this endpoint does not implement or a flag it cannot store.
 func followupFlagFor(action string, color int32, due string) (objectstore.FollowupFlag, bool) {
 	switch action {
 	case "flag":
-		return flaggedFollowup(color, due), true
+		return flaggedFollowup(color, due)
 	case "complete":
 		return objectstore.FollowupFlag{Status: objectstore.FlagStatusComplete}, true
 	case "clear":
@@ -578,21 +579,27 @@ func followupFlagFor(action string, color int32, due string) (objectstore.Follow
 	return objectstore.FollowupFlag{}, false
 }
 
-// flaggedFollowup builds a set follow-up flag. A colour outside the palette
-// falls back to red, and an unparseable due date leaves the flag undated rather
-// than dated at the zero time.
-func flaggedFollowup(color int32, due string) objectstore.FollowupFlag {
-	if color < objectstore.FlagColorPurple || color > objectstore.FlagColorRed {
+// flaggedFollowup builds a set follow-up flag. No colour (0) is Outlook's
+// default red; a colour outside the MS-OXOFLAG palette or a due date that is
+// not RFC 3339 is refused rather than stored as something the client did not ask
+// for.
+func flaggedFollowup(color int32, due string) (objectstore.FollowupFlag, bool) {
+	if color == 0 {
 		color = objectstore.FlagColorRed
+	}
+	if color < objectstore.FlagColorPurple || color > objectstore.FlagColorRed {
+		return objectstore.FollowupFlag{}, false
 	}
 	f := objectstore.FollowupFlag{Status: objectstore.FlagStatusFlagged, Color: color, Request: "Follow up"}
 	if due == "" {
-		return f
+		return f, true
 	}
-	if t, err := time.Parse(time.RFC3339, due); err == nil {
-		f.DueBy = t
+	t, err := time.Parse(time.RFC3339, due)
+	if err != nil {
+		return objectstore.FollowupFlag{}, false
 	}
-	return f
+	f.DueBy = t
+	return f, true
 }
 
 // handleMailMove moves a message to another folder.
