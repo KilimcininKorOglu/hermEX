@@ -489,6 +489,7 @@ func (s *Server) deleteObjectByPath(w http.ResponseWriter, r *http.Request, seg 
 		return
 	}
 	if err := st.SoftDeleteObject(id); err != nil {
+		logError("delete-object", err, logging.Fields{"id": id, "folder": fid})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not delete"})
 		return
 	}
