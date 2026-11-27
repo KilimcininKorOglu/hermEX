@@ -98,6 +98,10 @@ services:
   # would only break the build.
   dev:
     container_name: hermex-dev
+    # PID 1 is sleep, which never reaps an orphan: a test run killed mid-way
+    # (an interrupted make test) left its test binaries as zombies forever.
+    # The init process reaps them.
+    init: true
     security_opt:
       - no-new-privileges:true
     build:
