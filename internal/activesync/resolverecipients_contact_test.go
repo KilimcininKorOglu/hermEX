@@ -21,7 +21,7 @@ func seedAddressedContact(t *testing.T, dir, name, addr string) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameEmail1Address})
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +47,7 @@ func seedContactPhoto(t *testing.T, dir string, id int64, data []byte) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if _, _, err := st.CreateAttachment(id, mapi.PropertyValues{
 		{Tag: mapi.PrAttachDataBin, Value: data},
 		{Tag: mapi.PrAttachFilename, Value: "ContactPicture.jpg"},
@@ -129,7 +129,7 @@ func TestResolveRecipientsKeepsContactsPrivate(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		st.Close()
+		mustNoErr(t, "close the store", st.Close())
 	}
 	seedAddressedContact(t, bobDir, "Ada Lovelace", "ada@partner.example")
 	deleted := seedAddressedContact(t, aliceDir, "Grace Hopper", "grace@partner.example")
@@ -140,7 +140,7 @@ func TestResolveRecipientsKeepsContactsPrivate(t *testing.T) {
 	if err := st.SoftDeleteObject(deleted); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 	seedAddressedContact(t, aliceDir, "Kept Contact", "kept@partner.example")
 	accs := directory.StaticAccounts{
 		testUser:          {Password: testPass, MailboxPath: aliceDir},
