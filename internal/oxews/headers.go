@@ -24,8 +24,14 @@ type InternetHeader struct {
 // (PidTagTransportMessageHeaders) as InternetMessageHeaders, or nil when the item
 // carries none, as a message composed rather than received does.
 func MessageHeaders(props mapi.PropertyValues) *HeaderList {
-	v, _ := props.GetAnyCharset(mapi.PrTransportMessageHeaders)
-	block, _ := v.(string)
+	v, ok := props.GetAnyCharset(mapi.PrTransportMessageHeaders)
+	if !ok {
+		return nil
+	}
+	block, isString := v.(string)
+	if !isString {
+		return nil
+	}
 	var list HeaderList
 	for _, field := range headerFields(block) {
 		name, value, found := strings.Cut(field, ":")
