@@ -162,16 +162,16 @@ func verifySeal(sets []arcSet, i int, lookup LookupTXT) error {
 // three fields in instance order, then the new set's results, message signature
 // and seal, the seal without its b= value and its final CRLF, all relaxed.
 func sealInput(earlier []arcSet, last arcSet) string {
-	var b strings.Builder
+	var buf []byte
 	for _, s := range earlier {
-		b.WriteString(relaxedHeader(s.aar))
-		b.WriteString(relaxedHeader(s.ams))
-		b.WriteString(relaxedHeader(s.as))
+		buf = append(buf, relaxedHeader(s.aar)...)
+		buf = append(buf, relaxedHeader(s.ams)...)
+		buf = append(buf, relaxedHeader(s.as)...)
 	}
-	b.WriteString(relaxedHeader(last.aar))
-	b.WriteString(relaxedHeader(last.ams))
-	b.WriteString(strings.TrimSuffix(relaxedHeader(withoutSignature(last.as)), "\r\n"))
-	return b.String()
+	buf = append(buf, relaxedHeader(last.aar)...)
+	buf = append(buf, relaxedHeader(last.ams)...)
+	buf = append(buf, strings.TrimSuffix(relaxedHeader(withoutSignature(last.as)), "\r\n")...)
+	return string(buf)
 }
 
 // signedHeaders returns the canonical form of the fields a signature's h= list
@@ -179,7 +179,7 @@ func sealInput(earlier []arcSet, last arcSet) string {
 // no instance left contributes nothing (RFC 6376 section 5.4.2).
 func signedHeaders(fields []field, names []string, canon func(string) string) string {
 	used := map[string]int{}
-	var b strings.Builder
+	var buf []byte
 	for _, n := range names {
 		key := strings.ToLower(strings.TrimSpace(n))
 		seen := 0
@@ -188,14 +188,14 @@ func signedHeaders(fields []field, names []string, canon func(string) string) st
 				continue
 			}
 			if seen == used[key] {
-				b.WriteString(canon(f.raw))
+				buf = append(buf, canon(f.raw)...)
 				used[key]++
 				break
 			}
 			seen++
 		}
 	}
-	return b.String()
+	return string(buf)
 }
 
 // canonicalizations returns the header and body algorithms a c= tag names. A

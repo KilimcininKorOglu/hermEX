@@ -9,6 +9,7 @@ package arc
 import (
 	"bytes"
 	"strings"
+	"unicode/utf8"
 )
 
 // field is one header field as it appears in the message: its name and the full
@@ -79,7 +80,7 @@ func relaxedBody(body []byte) []byte {
 // compressWSP reduces each run of spaces and tabs in a line to one space and
 // removes the whitespace at its end.
 func compressWSP(l string) string {
-	var b strings.Builder
+	buf := make([]byte, 0, len(l))
 	space := false
 	for _, r := range l {
 		if r == ' ' || r == '\t' {
@@ -87,10 +88,10 @@ func compressWSP(l string) string {
 			continue
 		}
 		if space {
-			b.WriteByte(' ')
+			buf = append(buf, ' ')
 		}
 		space = false
-		b.WriteRune(r)
+		buf = utf8.AppendRune(buf, r)
 	}
-	return b.String()
+	return string(buf)
 }

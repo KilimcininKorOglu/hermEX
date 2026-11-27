@@ -32,6 +32,9 @@ func TestRelaxedCanonicalizationMatchesRFC6376(t *testing.T) {
 	if got := string(simpleBody(nil)); got != "\r\n" {
 		t.Errorf("simple empty body = %q, want CRLF", got)
 	}
+	if got := string(relaxedBody(nil)); got != "" {
+		t.Errorf("relaxed empty body = %q, want empty", got)
+	}
 }
 
 // keyring publishes test keys the way DNS would, under
@@ -155,8 +158,9 @@ func TestBrokenChainIsRecordedAndNotExtended(t *testing.T) {
 	if got := status(second, ring.lookup); got != cvFail {
 		t.Errorf("a validly sealed cv=fail chain verified as %s", got)
 	}
+	beforeThird := append([]byte(nil), second...)
 	third, err := rsaSealer(t, ring, "third.example").Seal(second, time.Now())
-	if !errors.Is(err, ErrNotSealed) || string(third) != string(second) {
+	if !errors.Is(err, ErrNotSealed) || string(third) != string(beforeThird) || string(second) != string(beforeThird) {
 		t.Errorf("a chain ending in cv=fail was extended (err %v)", err)
 	}
 }
@@ -189,8 +193,9 @@ func TestForgedChainFails(t *testing.T) {
 // later document, and verifiers such as dkimpy accept only rsa-sha256 in an
 // ARC set, so the server seals with RSA only and adds nothing otherwise.
 func TestSealRefusesAnEd25519Key(t *testing.T) {
-	out, err := ed25519Sealer(t, keyring{}, "forward.example").Seal([]byte(inbound), time.Now())
-	if !errors.Is(err, ErrUnsupportedKey) || out != nil {
+	raw := []byte(inbound)
+	out, err := ed25519Sealer(t, keyring{}, "forward.example").Seal(raw, time.Now())
+	if !errors.Is(err, ErrUnsupportedKey) || out != nil || string(raw) != inbound {
 		t.Errorf("an Ed25519 key sealed the message (err %v)", err)
 	}
 }
@@ -208,8 +213,9 @@ func TestAChainStopsAtFiftySets(t *testing.T) {
 	if sealTag(raw, "i") != "50" || status(raw, ring.lookup) != cvPass {
 		t.Fatalf("50 sets: top i=%s status %s, want i=50 pass", sealTag(raw, "i"), status(raw, ring.lookup))
 	}
+	before := append([]byte(nil), raw...)
 	out, err := s.Seal(raw, time.Now())
-	if !errors.Is(err, ErrNotSealed) || string(out) != string(raw) {
+	if !errors.Is(err, ErrNotSealed) || string(out) != string(before) || string(raw) != string(before) {
 		t.Errorf("a 50-set chain took a 51st set (err %v)", err)
 	}
 	// A 51st set on top of the 50 is refused when the sets are read, before any
@@ -224,17 +230,90 @@ func TestAChainStopsAtFiftySets(t *testing.T) {
 	}
 }
 
+// TestResultsFieldIgnoresForeignAuthServID verifies RFC 8617 section 4.1.1: a
+// sealer copies only the Authentication-Results header matching its own
+// authserv-id and ignores forged results from another domain.
+func TestResultsFieldIgnoresForeignAuthServID(t *testing.T) {
+	ring := keyring{}
+	s := rsaSealer(t, ring, "forward.example")
+
+	foreignOnly := "Authentication-Results: evil.example; spf=pass dkim=pass\r\n" +
+		"From: a@origin.example\r\nSubject: hello\r\n\r\nBody\r\n"
+	out, err := s.Seal([]byte(foreignOnly), time.Unix(1700000000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "ARC-Authentication-Results: i=1; mx.forward.example; none\r\n") {
+		t.Errorf("foreign Authentication-Results was copied into AAR:\n%s", out)
+	}
+
+	mixed := "Authentication-Results: evil.example; spf=pass\r\n" +
+		"Authentication-Results: mx.forward.example; spf=fail\r\n" +
+		"From: a@origin.example\r\nSubject: hello\r\n\r\nBody\r\n"
+	outMixed, err := s.Seal([]byte(mixed), time.Unix(1700000000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(outMixed), "ARC-Authentication-Results: i=1; mx.forward.example; spf=fail\r\n") {
+		t.Errorf("sealer did not select its own Authentication-Results:\n%s", outMixed)
+	}
+}
+
+// TestHostileDNSKeyAndSignatureTagsFail checks RFC 6376 section 3.5/3.6.2,
+// RFC 8463, and RFC 8617 section 5.2 against forged DNS key records and
+// malformed ARC header tags.
+func TestHostileDNSKeyAndSignatureTagsFail(t *testing.T) {
+	edRing := keyring{}
+	edGood := string(seal(t, ed25519Sealer(t, edRing, "forward.example"), []byte(inbound)))
+
+	rsaRing := keyring{}
+	rsaS := rsaSealer(t, rsaRing, "forward.example")
+	rsaFirst, err := rsaS.Seal([]byte(inbound), time.Unix(1700000000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rsaSecond, err := rsaSealer(t, rsaRing, "list.example").Seal(rsaFirst, time.Unix(1700000001, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keyName := "arc._domainkey.forward.example"
+	cases := []struct {
+		name string
+		raw  string
+		ring keyring
+	}{
+		{"revoked key", string(rsaFirst), keyring{keyName: "v=DKIM1; k=rsa; p="}},
+		{"bad base64 key", string(rsaFirst), keyring{keyName: "v=DKIM1; k=rsa; p=!!!"}},
+		{"short ed25519 key", edGood, keyring{keyName: "v=DKIM1; k=ed25519; p=AAAA"}},
+		{"rsa key with ed25519 algo", strings.Replace(string(rsaFirst), "a=rsa-sha256", "a=ed25519-sha256", 1), rsaRing},
+		{"ed25519 key with rsa algo", strings.Replace(edGood, "a=ed25519-sha256", "a=rsa-sha256", 1), edRing},
+		{"bad base64 sig", strings.Replace(string(rsaFirst), "cv=none; b=", "cv=none; b=!!!", 1), rsaRing},
+		{"unknown canon", strings.Replace(string(rsaFirst), "c=relaxed/relaxed", "c=bogus/relaxed", 1), rsaRing},
+		{"non-numeric instance", strings.Replace(string(rsaFirst), "ARC-Seal: i=1", "ARC-Seal: i=abc", 1), rsaRing},
+		{"missing AAR", dropField(string(rsaFirst), hdrAAR), rsaRing},
+		{"missing AS", dropField(string(rsaFirst), hdrAS), rsaRing},
+		{"instance gap", strings.ReplaceAll(string(rsaFirst), "i=1;", "i=2;"), rsaRing},
+		{"second seal cv=none", strings.Replace(string(rsaSecond), "cv=pass", "cv=none", 1), rsaRing},
+	}
+	for _, tc := range cases {
+		if got := status([]byte(tc.raw), tc.ring.lookup); got != cvFail {
+			t.Errorf("%s: chain status = %s, want fail", tc.name, got)
+		}
+	}
+}
+
 // dropField removes the first header field with the given name.
 func dropField(raw, name string) string {
 	fields, body := splitMessage([]byte(raw))
-	var b strings.Builder
+	var buf []byte
 	dropped := false
 	for _, f := range fields {
 		if !dropped && strings.EqualFold(f.name, name) {
 			dropped = true
 			continue
 		}
-		b.WriteString(f.raw)
+		buf = append(buf, f.raw...)
 	}
-	return b.String() + "\r\n" + string(body)
+	return string(buf) + "\r\n" + string(body)
 }
