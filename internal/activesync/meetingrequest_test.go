@@ -21,7 +21,7 @@ func invitationAppData(t *testing.T, protocol string) *wbxml.Node {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() { mustClose(t, st) })
 	uid := seedMeetingRequest(t, dir)
 	info, err := st.MessageByUID(int64(mapi.PrivateFIDInbox), uid)
 	if err != nil {
@@ -82,7 +82,7 @@ func TestOrdinaryMailCarriesNoMeetingRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(convMsgRoot), time.Now(), 0)
 	if err != nil {
 		t.Fatal(err)
@@ -112,8 +112,8 @@ func TestInvitationWithoutTimesCarriesNoMeetingRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
-	const ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\n" +
+	defer mustClose(t, st)
+	const ics ="BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\n" +
 		"BEGIN:VEVENT\r\nUID:eas-no-times\r\nSUMMARY:No time\r\n" +
 		"ORGANIZER:mailto:organizer@external.test\r\nATTENDEE:mailto:alice@hermex.test\r\n" +
 		"END:VEVENT\r\nEND:VCALENDAR\r\n"
