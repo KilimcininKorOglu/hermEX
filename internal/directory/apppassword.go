@@ -71,9 +71,7 @@ func (d *SQLDirectory) CreateAppPassword(user, name string) (string, error) {
 	if name == "" {
 		name = "Mail client"
 	}
-	if len(name) > 64 {
-		name = name[:64]
-	}
+	name = capString(name, 64)
 	b := make([]byte, appSecretBytes)
 	if _, err := rand.Read(b); err != nil {
 		return "", err

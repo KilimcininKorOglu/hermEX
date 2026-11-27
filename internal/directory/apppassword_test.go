@@ -2,6 +2,7 @@ package directory
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -220,6 +221,22 @@ func TestTheListingIsNewestFirst(t *testing.T) {
 		t.Fatalf("listing = %+v", list)
 	}
 	wantEq(t, "the older row is the phone's", list[1].ID, phoneID)
+}
+
+// TestALongNonASCIINameIsStored names a credential the way a Turkish user labels
+// a device. The name column holds 64 bytes; a cut inside a character made
+// MariaDB refuse the row, so minting failed for that user.
+func TestALongNonASCIINameIsStored(t *testing.T) {
+	d := twoAccounts(t)
+	secret, err := d.CreateAppPassword("u@acme.test", "x"+strings.Repeat("ş", 40))
+	mustNoErr(t, "mint a credential with a long non-ASCII name", err)
+	wantEq(t, "a secret was shown", secret != "", true)
+	list, err := d.ListAppPasswords("u@acme.test")
+	mustNoErr(t, "list the credentials", err)
+	if len(list) != 1 {
+		t.Fatalf("listing = %+v, want the one credential", list)
+	}
+	wantEq(t, "the name is cut on a character", list[0].Name, "x"+strings.Repeat("ş", 31))
 }
 
 // TestACredentialIsAcceptedAsItWasShown keeps a user who typed it into a client
