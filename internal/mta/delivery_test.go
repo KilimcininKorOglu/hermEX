@@ -41,22 +41,29 @@ func TestSMTPToStoreDelivery(t *testing.T) {
 		}
 	}
 
+	write := func(s string) {
+		t.Helper()
+		if _, err := fmt.Fprint(conn, s); err != nil {
+			t.Fatalf("write %q: %v", s, err)
+		}
+	}
+
 	expect(220)
-	_, _ = fmt.Fprint(conn, "EHLO client\r\n")
+	write("EHLO client\r\n")
 	expect(250)
-	_, _ = fmt.Fprint(conn, "MAIL FROM:<bob@external>\r\n")
+	write("MAIL FROM:<bob@external>\r\n")
 	expect(250)
-	_, _ = fmt.Fprint(conn, "RCPT TO:<alice@test>\r\n")
+	write("RCPT TO:<alice@test>\r\n")
 	expect(250)
 	// Unknown recipient is refused, not relayed.
-	_, _ = fmt.Fprint(conn, "RCPT TO:<nobody@test>\r\n")
+	write("RCPT TO:<nobody@test>\r\n")
 	expect(550)
-	_, _ = fmt.Fprint(conn, "DATA\r\n")
+	write("DATA\r\n")
 	expect(354)
 	msg := "Subject: hello\r\n\r\nhi alice\r\n"
-	_, _ = fmt.Fprintf(conn, "%s.\r\n", msg)
+	write(msg + ".\r\n")
 	expect(250)
-	_, _ = fmt.Fprint(conn, "QUIT\r\n")
+	write("QUIT\r\n")
 	expect(221)
 
 	st, err := objectstore.Open(mboxPath)

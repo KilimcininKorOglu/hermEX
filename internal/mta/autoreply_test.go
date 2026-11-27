@@ -144,7 +144,10 @@ func TestBuildAutoReply(t *testing.T) {
 	if got := msg.Header.Get("Subject"); got != "Away until Monday" {
 		t.Errorf("Subject = %q", got)
 	}
-	body, _ := io.ReadAll(quotedprintable.NewReader(msg.Body))
+	body, err := io.ReadAll(quotedprintable.NewReader(msg.Body))
+	if err != nil {
+		t.Fatalf("decode the quoted-printable body: %v", err)
+	}
 	if string(body) != "I am out of office." {
 		t.Errorf("body = %q, want round-tripped reply text", body)
 	}
