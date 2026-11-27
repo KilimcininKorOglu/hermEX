@@ -18,7 +18,7 @@ func TestImportedPhotoIsTheContactPicture(t *testing.T) {
 	if !ok {
 		t.Fatal("imported contact has no picture")
 	}
-	if v, _ := att.Props.Get(mapi.PrAttachmentContactPhoto); v != true {
+	if v, ok := att.Props.Get(mapi.PrAttachmentContactPhoto); !ok || v != true {
 		t.Error("the photo attachment is not flagged as the contact picture")
 	}
 	out, err := Export(msg, opt)
@@ -51,8 +51,12 @@ func TestPhotoAttachmentSkipsAFile(t *testing.T) {
 		att, ok := PhotoAttachment(&oxcmail.Message{Attachments: c.atts})
 		got := ""
 		if ok {
-			v, _ := att.Props.Get(mapi.PrAttachDataBin)
-			got = string(v.([]byte))
+			v, set := att.Props.Get(mapi.PrAttachDataBin)
+			data, isBytes := v.([]byte)
+			if !set || !isBytes {
+				t.Fatalf("%s: the picture has no data (set: %v, %T)", c.name, set, v)
+			}
+			got = string(data)
 		}
 		if got != c.want {
 			t.Errorf("%s: picture = %q, want %q", c.name, got, c.want)
