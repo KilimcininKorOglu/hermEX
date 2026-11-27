@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -74,7 +75,11 @@ func (s *Server) recallFromRecipient(addr, messageID, sender string) string {
 	}
 	// A recipient in another organization is outside the sender's reach, as a
 	// recall in Exchange works inside the organization only.
-	if reach, err := directory.MayReach(s.accounts, sender, addr); err != nil || !reach {
+	reach, err := directory.MayReach(s.accounts, sender, addr)
+	if err != nil {
+		logError("recall-reach", err, logging.Fields{"recipient": addr})
+	}
+	if err != nil || !reach {
 		return "unavailable"
 	}
 	rst, ok := openOtherMailbox(path, "recall-open", addr)
@@ -84,6 +89,7 @@ func (s *Server) recallFromRecipient(addr, messageID, sender string) string {
 	defer closeStore(rst)
 	objs, err := rst.ListFolderObjects(mapi.PrivateFIDInbox)
 	if err != nil {
+		logError("recall-list", err, logging.Fields{"recipient": addr})
 		return "unavailable"
 	}
 	for _, o := range objs {
@@ -103,6 +109,7 @@ func isRecallTarget(rst *objectstore.Store, id int64, messageID, sender string) 
 		mapi.PrSentRepresentingSmtpAddress, mapi.PrSenderSmtpAddress,
 		mapi.PrSentRepresentingEmailAddress, mapi.PrSenderEmailAddress)
 	if err != nil {
+		logError("recall-match", err, logging.Fields{"store": rst.Dir(), "id": id})
 		return false
 	}
 	if !strings.EqualFold(propStr(props, mapi.PrInternetMessageID), messageID) {
@@ -115,12 +122,14 @@ func isRecallTarget(rst *objectstore.Store, id int64, messageID, sender string) 
 func recallCopy(rst *objectstore.Store, id int64) string {
 	read, err := rst.GetMessageReadState(id)
 	if err != nil {
+		logError("recall-read-state", err, logging.Fields{"store": rst.Dir(), "id": id})
 		return "unavailable"
 	}
 	if read {
 		return "read" // already seen: too late to recall
 	}
 	if err := rst.DeleteObject(id); err != nil {
+		logError("recall-delete", err, logging.Fields{"store": rst.Dir(), "id": id})
 		return "unavailable"
 	}
 	return "recalled"
