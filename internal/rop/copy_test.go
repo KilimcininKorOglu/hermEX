@@ -152,6 +152,11 @@ func TestCopyPropertiesErrors(t *testing.T) {
 	if ec := mustU32(t, p, "ec"); ec != ecNotSupported {
 		t.Errorf("MAPI_MOVE copy ec = %#x, want ecNotSupported", ec)
 	}
+	// The refused copy wrote nothing into the destination.
+	dstID := int64(mapi.EID(saveChangesEID(t, mustDispatch(sess, buildSaveChangesMessage(0, 1), logonH, dstH))).GCValue())
+	if v, ok := mustMessageProps(t, sess.get(logonH).store, dstID, mapi.PrSubject).Get(mapi.PrSubject); ok {
+		t.Errorf("the refused MAPI_MOVE copy left subject %v on the destination", v)
+	}
 }
 
 // TestCopyReflectsBufferedEdits proves CopyTo copies the source's open working
