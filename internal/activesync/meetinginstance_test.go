@@ -73,7 +73,7 @@ func onlyCalendarICal(t *testing.T, dir string) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	cal, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
 	mustNoErr(t, "list the calendar", err)
 	if len(cal) != 1 {
@@ -85,9 +85,12 @@ func onlyCalendarICal(t *testing.T, dir string) []byte {
 	}
 	// An empty body would pass every "has no EXDATE" check, so a missing
 	// iCalendar is a failure, not an unchanged series.
-	stored, _ := pv.Get(mapi.PrIcalOriginal)
-	body, _ := stored.([]byte)
-	if !bytes.Contains(body, []byte("BEGIN:VEVENT")) {
+	stored, ok := pv.Get(mapi.PrIcalOriginal)
+	if !ok {
+		t.Fatal("the series carries no PrIcalOriginal")
+	}
+	body, ok := stored.([]byte)
+	if !ok || !bytes.Contains(body, []byte("BEGIN:VEVENT")) {
 		t.Fatalf("the series carries no iCalendar: %q", body)
 	}
 	return body
@@ -100,7 +103,7 @@ func calendarChangeNumber(t *testing.T, dir, serverID string) uint64 {
 	mustNoErr(t, "parse the calendar item id", err)
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	cn, err := st.MessageChangeNumber(id)
 	mustNoErr(t, "read the change number", err)
 	return cn
