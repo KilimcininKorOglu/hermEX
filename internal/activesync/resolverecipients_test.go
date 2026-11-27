@@ -216,6 +216,29 @@ func TestResolveRecipientsRefusesABadCap(t *testing.T) {
 	}
 }
 
+// TestResolveRecipientsBoundsTheEntryCount proves one request cannot fan out
+// past the operator's target cap: each To can open stores and scan calendars, so
+// a request naming more entries than the cap is answered for the first entries
+// only. The cap is the DB-backed setting, applied without a restart.
+func TestResolveRecipientsBoundsTheEntryCount(t *testing.T) {
+	SetMaxFreeBusyTargets(2)
+	defer SetMaxFreeBusyTargets(0)
+	ts, _ := seededServer(t)
+
+	queries := []string{"q1", "q2", "q3", "q4", "q5"}
+	_, root := postCommand(t, ts, "ResolveRecipients", resolveReq(queries...))
+	n := 0
+	for _, c := range root.Children {
+		if c.Tag == wbxml.RRResponse {
+			n++
+		}
+	}
+	wantEq(t, "Responses for five entries under a cap of 2", n, 2)
+	if responseFor(root, "q3") != nil {
+		t.Error("an entry past the cap was resolved")
+	}
+}
+
 // TestResolveRecipientsEmpty proves a request naming no recipient reports the
 // protocol-error status.
 func TestResolveRecipientsEmpty(t *testing.T) {
