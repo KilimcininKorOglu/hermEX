@@ -11,7 +11,7 @@ func deviceTestStore(t *testing.T) *objectstore.Store {
 	t.Helper()
 	st, err := objectstore.Open(t.TempDir())
 	mustNoErr(t, "open store", err)
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { mustClose(t, st) })
 	return st
 }
 
@@ -156,6 +156,36 @@ func TestDeviceMutations(t *testing.T) {
 
 	mustNoErr(t, "delete the device", DeleteDevice(st, "dev1"))
 	wantEq(t, "devices after the delete", len(mustDevices(t, st)), 0)
+}
+
+// TestCancelWipeCannotUndoAnAcknowledgedWipe: once a device acknowledged a wipe
+// the wipe has happened, so a cancel leaves the recorded status as wiped. A cancel
+// or delete naming a device that was never seen records nothing, and deleting
+// one device leaves the others listed.
+func TestCancelWipeCannotUndoAnAcknowledgedWipe(t *testing.T) {
+	st := deviceTestStore(t)
+	mustRecordContact(t, st, "dev1", "ua", 1000)
+	mustRecordContact(t, st, "dev2", "ua", 1000)
+	for _, account := range []bool{false, true} {
+		mustNoErr(t, "queue the wipe", RequestWipe(st, "dev1", account))
+		mustAdvanceWipe(t, st, "dev1", false)
+		mustAdvanceWipe(t, st, "dev1", true)
+		want := WipeStatusWiped
+		if account {
+			want = WipeStatusAccountWiped
+		}
+		mustNoErr(t, "cancel the acknowledged wipe", CancelWipe(st, "dev1"))
+		wantDeviceWipe(t, st, "after cancelling an acknowledged wipe", "dev1", want)
+		setDeviceWipe(t, st, "dev1", WipeStatusOK)
+	}
+
+	mustNoErr(t, "cancel for an unknown device", CancelWipe(st, "ghost"))
+	mustNoErr(t, "delete an unknown device", DeleteDevice(st, "ghost"))
+	mustNoErr(t, "delete dev1", DeleteDevice(st, "dev1"))
+	devs := mustDevices(t, st)
+	if len(devs) != 1 || devs[0].DeviceID != "dev2" {
+		t.Errorf("devices after deleting dev1 and a ghost = %+v, want only dev2", devs)
+	}
 }
 
 // seedSyncedCollections gives a device a sync state over the named collections.

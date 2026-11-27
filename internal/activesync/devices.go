@@ -313,7 +313,14 @@ func RequestWipe(st *objectstore.Store, deviceID string, accountOnly bool) error
 // CancelWipe clears a queued remote wipe for a device, returning it to OK. It has
 // no effect once the device has acknowledged the wipe.
 func CancelWipe(st *objectstore.Store, deviceID string) error {
-	return setDeviceWipeStatus(st, deviceID, WipeStatusOK)
+	return updateDevices(st, func(m *devicesMeta) bool {
+		d := m.Devices[deviceID]
+		if d == nil || d.WipeStatus == WipeStatusWiped || d.WipeStatus == WipeStatusAccountWiped {
+			return false
+		}
+		d.WipeStatus = WipeStatusOK
+		return true
+	})
 }
 
 // setDeviceWipeStatus sets a recorded device's wipe status, creating the metadata
