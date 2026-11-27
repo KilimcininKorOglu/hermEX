@@ -53,13 +53,28 @@ func TestTNEFExportCorrelatesWithTheMessageID(t *testing.T) {
 	}
 	for _, p := range stream.Props {
 		if p.Tag == mapi.PrTnefCorrelationKey {
-			if key, _ := p.Value.([]byte); !bytes.Equal(key, []byte("<tnef.1@hermex.test>")) {
-				t.Errorf("correlation key = %q", key)
+			if key, ok := p.Value.([]byte); !ok || !bytes.Equal(key, []byte("<tnef.1@hermex.test>")) {
+				t.Errorf("correlation key = %v (binary %v), want the Message-ID bytes", p.Value, ok)
 			}
 			return
 		}
 	}
 	t.Error("the stream carries no correlation key")
+}
+
+// TestTNEFCorrelatorCannotInjectHeaders stores a Message-ID with a line break.
+// The TNEF form repeats it in X-MS-TNEF-Correlator, so a break there would start
+// a header field of the client's choosing (RFC 5322 2.2).
+func TestTNEFCorrelatorCannotInjectHeaders(t *testing.T) {
+	msg := tnefMessage()
+	msg.Props.Set(mapi.PrInternetMessageID, "<tnef.1@hermex.test>\r\nBcc: evil@attacker.example")
+	raw, err := Export(msg, Options{TNEF: true})
+	mustNoErr(t, err, "export")
+	for line := range strings.SplitSeq(string(raw), "\r\n") {
+		if strings.HasPrefix(line, "Bcc:") {
+			t.Errorf("the Message-ID started a header field:\n%s", raw)
+		}
+	}
 }
 
 // TestTNEFExportKeepsAMeetingPlain proves a meeting message is not wrapped in TNEF
