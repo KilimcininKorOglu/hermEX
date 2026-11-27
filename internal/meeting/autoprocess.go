@@ -1,6 +1,7 @@
 package meeting
 
 import (
+	"errors"
 	"time"
 
 	"hermex/internal/directory"
@@ -38,9 +39,12 @@ func AutoProcess(st *objectstore.Store, accounts directory.Accounts, spool *rela
 	if !cfg.AutoAccept {
 		return false, nil // master off: no automatic processing
 	}
-	req, err := st.OpenMessage(messageID)
+	req, err := openMeetingMessage(st, messageID)
+	if errors.Is(err, ErrRequestNotFound) {
+		return false, nil // a message that is gone is not auto-processed
+	}
 	if err != nil {
-		return false, nil // a message that cannot be opened is not auto-processed
+		return false, err
 	}
 	if propStr(req.Props, mapi.PrMessageClass) != requestClass {
 		return false, nil

@@ -2,10 +2,13 @@ package meeting
 
 import (
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcmail"
 
 	_ "modernc.org/sqlite"
 )
@@ -36,6 +39,48 @@ func TestProcessReplyReportsATagResolutionFailure(t *testing.T) {
 	handled, err := ProcessReply(st, nil, "bob@hermex.test", msgID)
 	if !handled || err == nil {
 		t.Fatalf("ProcessReply = %v, %v; want handled with the tag error", handled, err)
+	}
+}
+
+// TestAFailedOpenIsNotAMissingMessage breaks the one read that opens the named
+// message, with the message present, and calls every entry point that opens one.
+// A missing message is ErrRequestNotFound, which the protocol surfaces answer as a
+// client error (404, ErrorItemNotFound); a store failure must reach them as itself,
+// or a broken mailbox reads to the client as a message it named wrongly.
+func TestAFailedOpenIsNotAMissingMessage(t *testing.T) {
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, err, "Open")
+	t.Cleanup(func() { mustClose(t, st, "the store") })
+	mustNoErr(t, st.SetMeetingConfig(objectstore.MeetingConfig{AutoAccept: true}), "enable auto-accept")
+	id, err := st.CreateMessage(int64(mapi.PrivateFIDInbox), &oxcmail.Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: requestClass},
+	}})
+	mustNoErr(t, err, "CreateMessage")
+	_, _, err = Describe(st, id+1000, nil)
+	if !errors.Is(err, ErrRequestNotFound) {
+		t.Fatalf("Describe of a missing message: err = %v, want ErrRequestNotFound", err)
+	}
+
+	db, err := sql.Open("sqlite", filepath.Join(dir, "objects.sqlite3"))
+	mustNoErr(t, err, "open the raw database")
+	defer mustClose(t, db, "the raw database handle")
+	if _, err := db.Exec(`ALTER TABLE recipients RENAME TO recipients_gone`); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, call := range map[string]func() error{
+		"Describe":       func() error { _, _, err := Describe(st, id, nil); return err },
+		"RemoveCanceled": func() error { return RemoveCanceled(st, id, nil) },
+		"Respond": func() error {
+			_, err := Respond(st, nil, nil, "alice@hermex.test", id, ResponseAccepted, false)
+			return err
+		},
+		"AutoProcess": func() error { _, err := AutoProcess(st, nil, nil, "room@hermex.test", id); return err },
+	} {
+		if err := call(); err == nil || errors.Is(err, ErrRequestNotFound) {
+			t.Errorf("%s on an unreadable message: err = %v, want the store's error", name, err)
+		}
 	}
 }
 

@@ -63,9 +63,9 @@ func Describe(st *objectstore.Store, messageID int64, ics []byte) (View, bool, e
 	if err != nil {
 		return View{}, false, err
 	}
-	msg, err := st.OpenMessage(messageID)
+	msg, err := openMeetingMessage(st, messageID)
 	if err != nil {
-		return View{}, false, ErrRequestNotFound
+		return View{}, false, err
 	}
 	class := strings.ToLower(propStr(msg.Props, mapi.PrMessageClass))
 	switch {
@@ -190,9 +190,9 @@ func RemoveCanceled(st *objectstore.Store, messageID int64, ics []byte) error {
 	if err != nil {
 		return err
 	}
-	msg, err := st.OpenMessage(messageID)
+	msg, err := openMeetingMessage(st, messageID)
 	if err != nil {
-		return ErrRequestNotFound
+		return err
 	}
 	if !isClass(strings.ToLower(propStr(msg.Props, mapi.PrMessageClass)), cancelClass) {
 		return ErrNotCanceled

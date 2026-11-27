@@ -49,6 +49,18 @@ const (
 // opened, so a protocol handler can map it to its own not-found status.
 var ErrRequestNotFound = errors.New("meeting: request not found")
 
+// openMeetingMessage opens the message a caller names. A message that does not
+// exist is ErrRequestNotFound, which surfaces answer as a client error; any other
+// failure is the store's and is returned as it is, so it is not reported as a
+// missing message.
+func openMeetingMessage(st *objectstore.Store, messageID int64) (*oxcmail.Message, error) {
+	msg, err := st.OpenMessage(messageID)
+	if errors.Is(err, objectstore.ErrNotFound) {
+		return nil, ErrRequestNotFound
+	}
+	return msg, err
+}
+
 // Errors for a message an attendee cannot answer. A meeting response, a counter
 // proposal and a cancellation carry a calendar part like a request does, and
 // answering one would overwrite the meeting it names with the message's own
@@ -68,9 +80,9 @@ var (
 // can answer it: a meeting request the mailbox received, or the calendar item of a
 // meeting the mailbox was invited to that is still on.
 func openAnswerable(st *objectstore.Store, messageID int64, tags Tags) (*oxcmail.Message, error) {
-	req, err := st.OpenMessage(messageID)
+	req, err := openMeetingMessage(st, messageID)
 	if err != nil {
-		return nil, ErrRequestNotFound
+		return nil, err
 	}
 	class := strings.ToLower(propStr(req.Props, mapi.PrMessageClass))
 	switch {
