@@ -1,7 +1,6 @@
 package serve
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -66,14 +65,13 @@ func TestAPanicReachesTheWireAs500(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() { _ = hs.Start() }()
-	t.Cleanup(func() { _ = hs.Shutdown(context.Background()) })
+	runServer(t, hs)
 
-	resp, err := http.Get("http://" + hs.Addr().String() + "/EWS/Exchange.asmx")
+	resp, err := http.DefaultClient.Do(mustGet(t, "http://"+hs.Addr().String()+"/EWS/Exchange.asmx"))
 	if err != nil {
 		t.Fatalf("the client got no response at all: %v", err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", resp.StatusCode)
 	}
@@ -105,11 +103,9 @@ func TestAPanickingHandlerAnswersAndIsRecorded(t *testing.T) {
 	if !strings.Contains(e.Err, "could not take") {
 		t.Errorf("event err = %q, want the panic value", e.Err)
 	}
-	if got, _ := e.Fields["path"].(string); got != "/EWS/Exchange.asmx" {
-		t.Errorf("event path = %q, want the request path", got)
-	}
-	if stack, _ := e.Fields["stack"].(string); !strings.Contains(stack, "serve") {
-		t.Errorf("event carries no usable stack: %q", stack)
+	wantField(t, e, "path", any("/EWS/Exchange.asmx"), "event path")
+	if stack, isText := e.Fields["stack"].(string); !isText || !strings.Contains(stack, "serve") {
+		t.Errorf("event carries no usable stack: %v", e.Fields["stack"])
 	}
 }
 
@@ -119,7 +115,7 @@ func TestAnOrdinaryHandlerIsUntouched(t *testing.T) {
 	sink := &panicSink{}
 	h := recoverMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
-		_, _ = w.Write([]byte("fine"))
+		writeBody(t, w, "fine")
 	}), logging.New(sink), logging.EWS)
 
 	rec := httptest.NewRecorder()

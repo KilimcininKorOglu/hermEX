@@ -13,14 +13,14 @@ import (
 func TestNosniffReachesTheWire(t *testing.T) {
 	base := startLimited(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
-		_, _ = w.Write([]byte("BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"))
+		writeBody(t, w, "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n")
 	}), nil)
 
-	resp, err := http.Get(base + "dav/calendars/u/default/x.ics")
+	resp, err := http.DefaultClient.Do(mustGet(t, base+"dav/calendars/u/default/x.ics"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 
 	if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Errorf("a served response carries X-Content-Type-Options %q, want nosniff", got)
@@ -36,7 +36,7 @@ func TestNosniffReachesTheWire(t *testing.T) {
 func TestNosniffOnEveryResponse(t *testing.T) {
 	h := securityHeadersMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/vcard; charset=utf-8")
-		_, _ = w.Write([]byte("BEGIN:VCARD\r\nFN:<script>alert(1)</script>\r\nEND:VCARD\r\n"))
+		writeBody(t, w, "BEGIN:VCARD\r\nFN:<script>alert(1)</script>\r\nEND:VCARD\r\n")
 	}))
 
 	rec := httptest.NewRecorder()
@@ -57,7 +57,7 @@ func TestNosniffOnEveryResponse(t *testing.T) {
 func TestNosniffSetBeforeTheBody(t *testing.T) {
 	h := securityHeadersMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("body"))
+		writeBody(t, w, "body")
 	}))
 
 	rec := httptest.NewRecorder()
@@ -91,14 +91,14 @@ func TestNosniffDoesNotOverrideAHandlersOwnValue(t *testing.T) {
 // grant system-admin roles, served with nothing stopping a page from framing it.
 func TestFramingIsRefusedOnEveryResponse(t *testing.T) {
 	base := startLimited(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("<html><form method=post></form></html>"))
+		writeBody(t, w, "<html><form method=post></form></html>")
 	}), nil)
 
-	resp, err := http.Get(base + "admin/ui/users")
+	resp, err := http.DefaultClient.Do(mustGet(t, base+"admin/ui/users"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 
 	if got := resp.Header.Get("X-Frame-Options"); got != "DENY" {
 		t.Errorf("X-Frame-Options = %q, want DENY", got)

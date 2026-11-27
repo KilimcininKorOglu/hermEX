@@ -1,7 +1,6 @@
 package serve
 
 import (
-	"context"
 	"net/http"
 	"strconv"
 	"testing"
@@ -19,9 +18,19 @@ func startLimited(t *testing.T, h http.Handler, limiter *httplimit.Limiter, opts
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() { _ = hs.Start() }()
-	t.Cleanup(func() { _ = hs.Shutdown(context.Background()) })
+	runServer(t, hs)
 	return "http://" + hs.Addr().String() + "/"
+}
+
+// statusOf sends req, closes the response body and returns the status.
+func statusOf(t *testing.T, req *http.Request) int {
+	t.Helper()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", req.Method, req.URL, err)
+	}
+	closeBody(t, resp)
+	return resp.StatusCode
 }
 
 // TestRateLimitRefusesPastBurst proves the limiter reaches requests end to end through
@@ -31,24 +40,19 @@ func TestRateLimitRefusesPastBurst(t *testing.T) {
 	limiter := httplimit.NewLimiter()
 	limiter.SetLimits(2, time.Minute)
 	limiter.SetEnabled(true)
-	url := startLimited(t, okHandler(), limiter)
+	url := startLimited(t, okHandler(t), limiter)
 
 	for i := range 2 {
-		resp, err := http.Get(url)
-		if err != nil {
-			t.Fatalf("request %d: %v", i+1, err)
-		}
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("request %d status = %d, want 200 within the burst", i+1, resp.StatusCode)
+		if got := statusOf(t, mustGet(t, url)); got != http.StatusOK {
+			t.Fatalf("request %d status = %d, want 200 within the burst", i+1, got)
 		}
 	}
 
-	resp, err := http.Get(url)
+	resp, err := http.DefaultClient.Do(mustGet(t, url))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 	if resp.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("status past the burst = %d, want 429", resp.StatusCode)
 	}
@@ -65,45 +69,24 @@ func TestRateLimitAdmitsAfterWindow(t *testing.T) {
 	limiter := httplimit.NewLimiter()
 	limiter.SetLimits(1, 200*time.Millisecond)
 	limiter.SetEnabled(true)
-	url := startLimited(t, okHandler(), limiter)
+	url := startLimited(t, okHandler(t), limiter)
 
-	if resp, err := http.Get(url); err != nil {
-		t.Fatal(err)
-	} else {
-		resp.Body.Close()
-	}
-	resp, err := http.Get(url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("second request = %d, want 429", resp.StatusCode)
+	wantEq(t, statusOf(t, mustGet(t, url)), http.StatusOK, "first request")
+	if got := statusOf(t, mustGet(t, url)); got != http.StatusTooManyRequests {
+		t.Fatalf("second request = %d, want 429", got)
 	}
 
 	time.Sleep(250 * time.Millisecond)
-	resp, err = http.Get(url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("status after the window elapsed = %d, want 200", resp.StatusCode)
-	}
+	wantEq(t, statusOf(t, mustGet(t, url)), http.StatusOK, "status after the window elapsed")
 }
 
 // TestNilLimiterNeverRefuses proves a daemon that passes no limiter behaves exactly as
 // it did before the middleware existed.
 func TestNilLimiterNeverRefuses(t *testing.T) {
-	url := startLimited(t, okHandler(), nil)
+	url := startLimited(t, okHandler(t), nil)
 	for i := range 20 {
-		resp, err := http.Get(url)
-		if err != nil {
-			t.Fatalf("request %d: %v", i+1, err)
-		}
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("request %d status = %d, want 200 with no limiter", i+1, resp.StatusCode)
+		if got := statusOf(t, mustGet(t, url)); got != http.StatusOK {
+			t.Fatalf("request %d status = %d, want 200 with no limiter", i+1, got)
 		}
 	}
 }
@@ -113,15 +96,10 @@ func TestNilLimiterNeverRefuses(t *testing.T) {
 func TestDisabledLimiterNeverRefuses(t *testing.T) {
 	limiter := httplimit.NewLimiter()
 	limiter.SetLimits(1, time.Minute)
-	url := startLimited(t, okHandler(), limiter)
+	url := startLimited(t, okHandler(t), limiter)
 	for i := range 10 {
-		resp, err := http.Get(url)
-		if err != nil {
-			t.Fatalf("request %d: %v", i+1, err)
-		}
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("request %d status = %d, want 200 while disabled", i+1, resp.StatusCode)
+		if got := statusOf(t, mustGet(t, url)); got != http.StatusOK {
+			t.Fatalf("request %d status = %d, want 200 while disabled", i+1, got)
 		}
 	}
 }
@@ -133,18 +111,13 @@ func TestForgedForwardedForEvadesLimiterWithoutFrontDoor(t *testing.T) {
 	limiter := httplimit.NewLimiter()
 	limiter.SetLimits(1, time.Minute)
 	limiter.SetEnabled(true)
-	url := startLimited(t, okHandler(), limiter) // no FrontDoor option
+	url := startLimited(t, okHandler(t), limiter) // no FrontDoor option
 
 	for i := range 5 {
 		req := mustGet(t, url)
 		req.Header.Set("X-Forwarded-For", "203.0.113."+strconv.Itoa(i))
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatalf("request %d: %v", i+1, err)
-		}
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("request %d = %d; the forwarded address is trusted here, so each claim is a fresh budget", i+1, resp.StatusCode)
+		if got := statusOf(t, req); got != http.StatusOK {
+			t.Fatalf("request %d = %d; the forwarded address is trusted here, so each claim is a fresh budget", i+1, got)
 		}
 	}
 }
@@ -157,18 +130,13 @@ func TestRateLimitCountsAnIPv6SubnetAsOneClient(t *testing.T) {
 	limiter := httplimit.NewLimiter()
 	limiter.SetLimits(1, time.Minute)
 	limiter.SetEnabled(true)
-	url := startLimited(t, okHandler(), limiter)
+	url := startLimited(t, okHandler(t), limiter)
 
 	get := func(client string) int {
 		t.Helper()
 		req := mustGet(t, url)
 		req.Header.Set("X-Forwarded-For", client)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		resp.Body.Close()
-		return resp.StatusCode
+		return statusOf(t, req)
 	}
 	wantEq(t, get("2001:db8:1:2::1"), http.StatusOK, "the first request from the /64")
 	wantEq(t, get("2001:db8:1:2::2"), http.StatusTooManyRequests, "a second address of the same /64")
@@ -194,12 +162,7 @@ func TestFrontDoorStripsForgedForwardedFor(t *testing.T) {
 	for i := range 3 {
 		req := mustGet(t, url)
 		req.Header.Set("X-Forwarded-For", "203.0.113."+strconv.Itoa(i))
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatalf("request %d: %v", i+1, err)
-		}
-		resp.Body.Close()
-		statuses = append(statuses, resp.StatusCode)
+		statuses = append(statuses, statusOf(t, req))
 	}
 	if statuses[0] != http.StatusOK {
 		t.Errorf("first request = %d, want 200", statuses[0])
@@ -207,6 +170,8 @@ func TestFrontDoorStripsForgedForwardedFor(t *testing.T) {
 	if statuses[1] != http.StatusTooManyRequests || statuses[2] != http.StatusTooManyRequests {
 		t.Errorf("later requests = %v, want 429: the forged addresses must not each get a budget", statuses[1:])
 	}
+	// The refused requests never reached the handler: only the admitted one is seen.
+	wantEq(t, len(seen), 1, "requests the handler served")
 	for _, xff := range seen {
 		if xff != "" {
 			t.Errorf("handler saw X-Forwarded-For %q, want it stripped at the front door", xff)

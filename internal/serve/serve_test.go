@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"io"
 	"math/big"
 	"net"
@@ -23,27 +24,27 @@ import (
 	"hermex/internal/logging"
 )
 
-func okHandler() http.Handler {
+// okHandler answers every request with the body "ok".
+func okHandler(t *testing.T) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, "ok")
+		writeBody(t, w, "ok")
 	})
 }
 
 // TestServePlaintext proves that with no certificate configured New falls back
 // to plaintext HTTP (backward compatible with the pre-TLS daemons).
 func TestServePlaintext(t *testing.T) {
-	hs, err := New("127.0.0.1:0", okHandler(), &config.Config{}, nil, logging.System, nil) // TLS disabled
+	hs, err := New("127.0.0.1:0", okHandler(t), &config.Config{}, nil, logging.System, nil) // TLS disabled
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() { _ = hs.Start() }()
-	defer func() { _ = hs.Shutdown(context.Background()) }()
+	runServer(t, hs)
 
-	resp, err := http.Get("http://" + hs.Addr().String() + "/")
+	resp, err := http.DefaultClient.Do(mustGet(t, "http://"+hs.Addr().String()+"/"))
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200", resp.StatusCode)
 	}
@@ -56,21 +57,9 @@ func TestServePlaintext(t *testing.T) {
 	}
 }
 
-// TestServeTLS proves that with a certificate configured New terminates TLS,
-// that a client trusting the cert completes the request, and that the TLS 1.2
-// floor rejects an older client.
-func TestServeTLS(t *testing.T) {
-	dir := t.TempDir()
-	certPath, keyPath := writeSelfSignedCert(t, dir)
-	cfg := &config.Config{TLSCert: certPath, TLSKey: keyPath}
-
-	hs, err := New("127.0.0.1:0", okHandler(), cfg, nil, logging.System, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	go func() { _ = hs.Start() }()
-	defer func() { _ = hs.Shutdown(context.Background()) }()
-
+// trustPool returns a pool holding the certificate at certPath.
+func trustPool(t *testing.T, certPath string) *x509.CertPool {
+	t.Helper()
 	pemBytes, err := os.ReadFile(certPath)
 	if err != nil {
 		t.Fatal(err)
@@ -79,14 +68,32 @@ func TestServeTLS(t *testing.T) {
 	if !pool.AppendCertsFromPEM(pemBytes) {
 		t.Fatal("AppendCertsFromPEM: no cert added")
 	}
+	return pool
+}
+
+// TestServeTLS proves that with a certificate configured New terminates TLS,
+// that a client trusting the cert completes the request, and that the TLS 1.2
+// floor rejects an older client.
+func TestServeTLS(t *testing.T) {
+	dir := t.TempDir()
+	certPath, keyPath := writeSelfSignedCert(t, dir)
+	cfg := &config.Config{TLSCert: certPath, TLSKey: keyPath}
+
+	hs, err := New("127.0.0.1:0", okHandler(t), cfg, nil, logging.System, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runServer(t, hs)
+
+	pool := trustPool(t, certPath)
 	url := "https://" + hs.Addr().String() + "/"
 
 	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
-	resp, err := client.Get(url)
+	resp, err := client.Do(mustGet(t, url))
 	if err != nil {
 		t.Fatalf("HTTPS GET (trusting cert): %v", err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200", resp.StatusCode)
 	}
@@ -99,9 +106,31 @@ func TestServeTLS(t *testing.T) {
 		RootCAs:    pool,
 		MaxVersion: tls.VersionTLS11,
 	}}}
-	if _, err := old.Get(url); err == nil {
-		t.Error("TLS 1.1 client should be rejected by the 1.2 floor")
+	if oldResp, err := old.Do(mustGet(t, url)); err == nil {
+		closeBody(t, oldResp)
+		t.Errorf("TLS 1.1 client was served with status %d; the 1.2 floor should reject it", oldResp.StatusCode)
 	}
+}
+
+// drainResult is what the in-flight client of the drain test received.
+type drainResult struct {
+	body string
+	err  error
+}
+
+// getBody fetches url and returns its body, joining a read and a close failure
+// into the error.
+func getBody(url string) drainResult {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return drainResult{err: err}
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return drainResult{err: err}
+	}
+	b, err := io.ReadAll(resp.Body)
+	return drainResult{body: string(b), err: errors.Join(err, resp.Body.Close())}
 }
 
 // TestServerGracefulDrain proves Shutdown drains an in-flight request instead of
@@ -115,29 +144,17 @@ func TestServerGracefulDrain(t *testing.T) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		close(handlerEntered)
 		<-releaseHandler
-		_, _ = io.WriteString(w, "drained")
+		writeBody(t, w, "drained")
 	})
 	hs, err := New("127.0.0.1:0", h, &config.Config{}, nil, logging.System, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() { _ = hs.Start() }()
+	served := make(chan error, 1)
+	go func() { served <- hs.Start() }()
 
-	type result struct {
-		body string
-		err  error
-	}
-	resc := make(chan result, 1)
-	go func() {
-		resp, err := http.Get("http://" + hs.Addr().String() + "/")
-		if err != nil {
-			resc <- result{err: err}
-			return
-		}
-		defer resp.Body.Close()
-		b, err := io.ReadAll(resp.Body)
-		resc <- result{body: string(b), err: err}
-	}()
+	resc := make(chan drainResult, 1)
+	go func() { resc <- getBody("http://" + hs.Addr().String() + "/") }()
 
 	<-handlerEntered // the request is now in-flight inside the handler
 
@@ -160,6 +177,9 @@ func TestServerGracefulDrain(t *testing.T) {
 	if err := <-shutDone; err != nil {
 		t.Errorf("Shutdown = %v, want nil after draining", err)
 	}
+	if err := <-served; !errors.Is(err, http.ErrServerClosed) {
+		t.Errorf("serve ended with %v, want http.ErrServerClosed", err)
+	}
 }
 
 // TestTLSListener proves TLSListener yields a listener that terminates TLS for
@@ -173,31 +193,34 @@ func TestTLSListener(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TLSListener: %v", err)
 	}
-	defer ln.Close()
+	defer func() {
+		if err := ln.Close(); err != nil {
+			t.Errorf("close listener: %v", err)
+		}
+	}()
+	handshake := make(chan error, 1)
 	go func() {
 		conn, err := ln.Accept()
 		if err != nil {
+			handshake <- err
 			return
 		}
-		defer conn.Close()
-		_ = conn.(*tls.Conn).Handshake()
+		hsErr := conn.(*tls.Conn).Handshake()
+		handshake <- errors.Join(hsErr, conn.Close())
 	}()
 
-	pemBytes, err := os.ReadFile(certPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(pemBytes) {
-		t.Fatal("AppendCertsFromPEM: no cert added")
-	}
-	conn, err := tls.Dial("tcp", ln.Addr().String(), &tls.Config{RootCAs: pool})
+	conn, err := tls.Dial("tcp", ln.Addr().String(), &tls.Config{RootCAs: trustPool(t, certPath)})
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer conn.Close()
 	if v := conn.ConnectionState().Version; v < tls.VersionTLS12 {
 		t.Errorf("negotiated version = %#x, want >= TLS 1.2", v)
+	}
+	if err := <-handshake; err != nil {
+		t.Errorf("server side of the handshake: %v", err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Errorf("close client connection: %v", err)
 	}
 
 	if _, err := TLSListener("127.0.0.1:0", &config.Config{}); err == nil {
@@ -254,27 +277,14 @@ func TestTLSHandshakeLogged(t *testing.T) {
 	dir := t.TempDir()
 	certPath, keyPath := writeSelfSignedCert(t, dir)
 	sink := &captureSink{}
-	hs, err := New("127.0.0.1:0", okHandler(), &config.Config{TLSCert: certPath, TLSKey: keyPath}, logging.New(sink), logging.System, nil)
+	hs, err := New("127.0.0.1:0", okHandler(t), &config.Config{TLSCert: certPath, TLSKey: keyPath}, logging.New(sink), logging.System, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() { _ = hs.Start() }()
-	defer func() { _ = hs.Shutdown(context.Background()) }()
+	runServer(t, hs)
 
-	pemBytes, err := os.ReadFile(certPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(pemBytes) {
-		t.Fatal("AppendCertsFromPEM: no cert added")
-	}
-	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
-	resp, err := client.Get("https://" + hs.Addr().String() + "/")
-	if err != nil {
-		t.Fatalf("HTTPS GET: %v", err)
-	}
-	resp.Body.Close()
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: trustPool(t, certPath)}}}
+	wantEq(t, statusOfWith(t, client, mustGet(t, "https://"+hs.Addr().String()+"/")), http.StatusOK, "HTTPS GET status")
 
 	var e logging.Event
 	var ok bool
@@ -292,6 +302,18 @@ func TestTLSHandshakeLogged(t *testing.T) {
 	wantEq(t, e.Fields["cipher"] != nil, true, "the handshake event carries a cipher")
 }
 
+// statusOfWith sends req through client, closes the response body and returns
+// the status.
+func statusOfWith(t *testing.T, client *http.Client, req *http.Request) int {
+	t.Helper()
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", req.Method, req.URL, err)
+	}
+	closeBody(t, resp)
+	return resp.StatusCode
+}
+
 // TestRequestLoggingEmitsEvent proves the serve middleware records one structured
 // event per request, method, path, status (and a 4xx level), the presented
 // Basic-auth user, the real client from X-Forwarded-For, and the inbound request
@@ -307,18 +329,13 @@ func TestRequestLoggingEmitsEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() { _ = hs.Start() }()
-	defer func() { _ = hs.Shutdown(context.Background()) }()
+	runServer(t, hs)
 
 	req := mustGet(t, "http://"+hs.Addr().String()+"/mail/inbox")
 	req.SetBasicAuth("alice@hermex.test", "hunter2")
 	req.Header.Set("X-Forwarded-For", "203.0.113.7, 10.0.0.1")
 	req.Header.Set("X-Request-Id", "req-123")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("GET: %v", err)
-	}
-	resp.Body.Close()
+	wantEq(t, statusOf(t, req), http.StatusTeapot, "status the client received")
 
 	// Emit runs after ServeHTTP returns, which can lag the client's response; poll
 	// briefly for the (synchronous) sink to receive it.
