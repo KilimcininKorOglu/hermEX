@@ -40,7 +40,7 @@ func heldPing(t *testing.T) (string, *fakePingWaker, <-chan pingOutcome) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
 	srv := NewServer(accs, accs, "mail.hermex.test")
 	waker := &fakePingWaker{ch: make(chan struct{}, 1)}
