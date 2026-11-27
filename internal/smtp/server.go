@@ -256,7 +256,12 @@ func (s *Server) handle(conn net.Conn) {
 			RemoteAddr: remote, Fields: logging.Fields{"reason": err.Error()},
 		})
 		reply(&ew{out: bufio.NewWriter(conn)}, 421, s.hostname()+" service not available")
-		_ = conn.Close()
+		if cerr := conn.Close(); cerr != nil && !errors.Is(cerr, net.ErrClosed) {
+			s.Logger.Emit(logging.Event{
+				Level: logging.LevelWarn, Subsystem: logging.SMTP, Name: "conn.close.fail",
+				RemoteAddr: remote, Fields: logging.Fields{"error": cerr.Error()},
+			})
+		}
 		return
 	}
 	// A session that can validate credentials enables AUTH, but only over TLS,
@@ -275,8 +280,8 @@ func (s *Server) handle(conn net.Conn) {
 		canAuth:    canAuth,
 		submission: submission,
 	}
-	defer func() { _ = c.conn.Close() }() // closes the upgraded conn after a STARTTLS swap
-	defer sess.Logout()
+	defer func() { c.closeErr("conn.close.fail", c.conn.Close()) }() // closes the upgraded conn after a STARTTLS swap
+	defer func() { c.closeErr("session.logout.fail", sess.Logout()) }()
 
 	c.reply(220, s.hostname()+" ESMTP hermEX")
 	c.event(logging.LevelInfo, "conn.accept", logging.Fields{"tls": isTLS})
@@ -537,6 +542,16 @@ func (c *smtpConn) cmdDATA(string) bool {
 	c.reportBody(err)
 	c.resetTxn()
 	return true
+}
+
+// closeErr records a failure from closing the connection or ending the session, so
+// a teardown error reaches the log instead of vanishing. A connection the peer or a
+// STARTTLS swap already closed is not a failure.
+func (c *smtpConn) closeErr(name string, err error) {
+	if err == nil || errors.Is(err, net.ErrClosed) {
+		return
+	}
+	c.event(logging.LevelWarn, name, logging.Fields{"error": err.Error()})
 }
 
 // trace builds the Received: header stamped on the body this transaction is

@@ -4,9 +4,12 @@ import (
 	"bufio"
 	"errors"
 	"io"
+	"net"
 	"net/textproto"
 	"strings"
 	"testing"
+
+	"hermex/internal/logging"
 )
 
 // failAfter yields its text and then a read error, like a connection that drops
@@ -77,6 +80,37 @@ func TestTruncatedBodyIsNeverDeliveredWhole(t *testing.T) {
 				t.Fatalf("a body with no terminator was accepted: %q", sess.got)
 			}
 		})
+	}
+}
+
+// failingLogout is a session whose teardown fails, the way a store that cannot
+// flush on close does.
+type failingLogout struct{ fakeSession }
+
+func (s *failingLogout) Logout() error { return errors.New("flush failed") }
+
+// TestSessionTeardownFailureIsRecorded proves a session whose Logout fails leaves
+// a session.logout.fail event, so an operator sees a teardown that lost work
+// instead of a clean disconnect.
+func TestSessionTeardownFailureIsRecorded(t *testing.T) {
+	sink := &captureSink{}
+	srv := &Server{Backend: sessionBackend{&failingLogout{}}, Hostname: "mail.test", Logger: logging.New(sink)}
+	server, client := net.Pipe()
+	done := make(chan struct{})
+	go func() { srv.handle(server); close(done) }()
+
+	r := textproto.NewReader(bufio.NewReader(client))
+	expect(t, r, 220)
+	send(t, client, "QUIT\r\n")
+	expect(t, r, 221)
+	<-done
+	if err := client.Close(); err != nil {
+		t.Fatalf("close the client end: %v", err)
+	}
+
+	e, ok := findEvent(sink.snapshot(), "session.logout.fail")
+	if !ok || e.Fields["error"] != "flush failed" {
+		t.Fatalf("events = %+v, want a session.logout.fail naming the error", sink.snapshot())
 	}
 }
 
