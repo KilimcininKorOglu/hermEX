@@ -383,7 +383,7 @@ func findRequestsByUID(st *objectstore.Store, uidTag mapi.PropTag, uid string) [
 			continue
 		}
 		if v, ok := pv.Get(uidTag); ok {
-			if s, _ := v.(string); s == uid {
+			if s, isStr := v.(string); isStr && s == uid {
 				out = append(out, obj.ID)
 			}
 		}
@@ -463,9 +463,12 @@ func isOccurrenceRequest(st *objectstore.Store, req *oxcmail.Message, update []b
 	if err != nil || ids[0] == 0 {
 		return false
 	}
-	v, _ := req.Props.Get(mapi.MakeTag(ids[0], mapi.PtBinary))
-	goid, _ := v.([]byte)
-	return len(goid) >= 20 && (goid[16] != 0 || goid[17] != 0 || goid[18] != 0 || goid[19] != 0)
+	v, ok := req.Props.Get(mapi.MakeTag(ids[0], mapi.PtBinary))
+	if !ok {
+		return false
+	}
+	goid, ok := v.([]byte)
+	return ok && len(goid) >= 20 && (goid[16] != 0 || goid[17] != 0 || goid[18] != 0 || goid[19] != 0)
 }
 
 // isSeries reports whether a stored calendar item carries a recurrence pattern.
@@ -532,16 +535,18 @@ func cancelOccurrence(st *objectstore.Store, existing int64, req *oxcmail.Messag
 	if !isOccurrenceRequest(st, req, cancel, hasICal) {
 		return false, nil
 	}
-	at, _ := oxcical.OccurrenceInstant(cancel)
+	// isOccurrenceRequest has checked the instant of a request that carries an
+	// iCalendar, so known is false only for a MAPI request without one.
+	at, known := oxcical.OccurrenceInstant(cancel)
 	stored, ok := storedICal(st, existing)
-	if !ok || !hasICal {
+	if !ok || !known {
 		// A MAPI client's series: deleting it would take every other instance with
 		// the one this names. With the instant known, the instance leaves the
 		// recurrence blob; without one it is left for that client to edit.
 		if !isSeries(st, existing) {
 			return false, nil
 		}
-		if !hasICal {
+		if !known {
 			st.LogSwallowedError("meeting.cancel-occurrence", errFoldRefused)
 			return true, nil
 		}
@@ -607,11 +612,7 @@ func ReplaceSeries(st *objectstore.Store, id int64, ical []byte) error {
 
 // uidOf reads the iCalendar UID a scheduling message carries, or "".
 func uidOf(props mapi.PropertyValues, tags Tags) string {
-	if v, ok := props.Get(tags.UID); ok {
-		s, _ := v.(string)
-		return s
-	}
-	return ""
+	return propStr(props, tags.UID)
 }
 
 // inboundCruft is the set of inbound-mail properties that must not ride along when a
@@ -950,8 +951,9 @@ func attendeeRecipient(st *objectstore.Store, eventID int64, attendeeEmail strin
 // propStr reads a string-valued property, or "".
 func propStr(props mapi.PropertyValues, tag mapi.PropTag) string {
 	if v, ok := props.Get(tag); ok {
-		s, _ := v.(string)
-		return s
+		if s, isStr := v.(string); isStr {
+			return s
+		}
 	}
 	return ""
 }

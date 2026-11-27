@@ -82,7 +82,7 @@ func readProposal(st *objectstore.Store, messageID int64) (*Proposal, error) {
 	if err != nil {
 		return nil, err
 	}
-	if flag, _ := props.Get(ct.flag); flag != true {
+	if !boolVal(props, ct.flag) {
 		return nil, nil
 	}
 	start, okStart := sysTime(props, ct.start)
@@ -114,8 +114,7 @@ func trackProposal(st *objectstore.Store, eventID, recipID int64, p *Proposal) e
 	if err != nil {
 		return err
 	}
-	proposed, _ := row.Get(mapi.PrRecipientProposed)
-	was := proposed == true
+	was := boolVal(row, mapi.PrRecipientProposed)
 	if p == nil && !was {
 		return nil
 	}
@@ -152,11 +151,7 @@ func adjustProposals(st *objectstore.Store, ct counterTags, eventID int64, delta
 	if err != nil {
 		return err
 	}
-	var n int32
-	if v, ok := props.Get(ct.number); ok {
-		n, _ = v.(int32)
-	}
-	n = max(n+delta, 0)
+	n := max(longVal(props, ct.number)+delta, 0)
 	return st.ModifyMessageProperties(eventID, mapi.PropertyValues{
 		{Tag: ct.number, Value: n},
 		{Tag: ct.flag, Value: n > 0},

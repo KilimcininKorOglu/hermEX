@@ -78,8 +78,10 @@ func responseSent(st *objectstore.Store, messageID int64) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	t, _ := sysTime(props, tag)
-	return t, nil
+	if t, ok := sysTime(props, tag); ok {
+		return t, nil
+	}
+	return 0, nil
 }
 
 // responseMethods are the iTIP methods an attendee answers with, each with the

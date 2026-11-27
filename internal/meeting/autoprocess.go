@@ -213,18 +213,20 @@ func ntTime(props mapi.PropertyValues, tag mapi.PropTag) (time.Time, bool) {
 
 // boolVal reads a PtBoolean property (false when absent).
 func boolVal(props mapi.PropertyValues, tag mapi.PropTag) bool {
-	if v, ok := props.Get(tag); ok {
-		b, _ := v.(bool)
-		return b
+	v, ok := props.Get(tag)
+	if !ok {
+		return false
 	}
-	return false
+	b, isBool := v.(bool)
+	return isBool && b
 }
 
 // longVal reads a PtLong property (0 when absent).
 func longVal(props mapi.PropertyValues, tag mapi.PropTag) int32 {
 	if v, ok := props.Get(tag); ok {
-		n, _ := v.(int32)
-		return n
+		if n, isLong := v.(int32); isLong {
+			return n
+		}
 	}
 	return 0
 }

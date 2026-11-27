@@ -171,9 +171,10 @@ func findCanceled(st *objectstore.Store, tags Tags, ics []byte) (canceledItem, b
 		return canceledItem{}, false
 	}
 	if at, single := oxcical.OccurrenceInstant(ics); single {
-		body, _ := icalOf(props)
-		if cancelled, series := oxcical.InstanceCancelled(body, at); series {
-			return canceledItem{appt: appt, instance: at, body: body}, cancelled
+		if body, stored := icalOf(props); stored {
+			if cancelled, series := oxcical.InstanceCancelled(body, at); series {
+				return canceledItem{appt: appt, instance: at, body: body}, cancelled
+			}
 		}
 	}
 	return canceledItem{appt: appt}, state&asfCanceled != 0
