@@ -277,10 +277,11 @@ func propOccurrenceMatches(pf propFilter, p icalProp) bool {
 
 // propTimeInRange reports whether a date-valued property falls within a time-range.
 func propTimeInRange(tr *timeRange, p icalProp) bool {
-	t, _, ok := propTime(p)
+	pt, ok := propTime(p)
 	if !ok {
 		return false
 	}
+	t := pt.at
 	if rs, okS := parseFilterTime(tr.Start); okS && t.Before(rs) {
 		return false
 	}
@@ -383,20 +384,20 @@ func eventSpan(c *icalNode) (start, end time.Time, ok bool) {
 	if len(ds) == 0 {
 		return time.Time{}, time.Time{}, false
 	}
-	start, allDay, ok := propTime(ds[0])
+	st, ok := propTime(ds[0])
 	if !ok {
 		return time.Time{}, time.Time{}, false
 	}
-	end = start
+	start, end = st.at, st.at
 	if de := c.propsByName("DTEND"); len(de) > 0 {
-		if e, _, ok := propTime(de[0]); ok {
-			end = e
+		if e, ok := propTime(de[0]); ok {
+			end = e.at
 		}
 	} else if du := c.propsByName("DURATION"); len(du) > 0 {
 		if d, ok := oxcical.ParseDuration(du[0].value); ok {
 			end = start.Add(d)
 		}
-	} else if allDay {
+	} else if st.allDay {
 		end = start.Add(24 * time.Hour)
 	}
 	return start, end, true
@@ -438,19 +439,26 @@ func parseFilterTime(v string) (time.Time, bool) {
 }
 
 // propTime parses a DTSTART/DTEND value to a UTC instant; allDay marks a VALUE=DATE.
-func propTime(p icalProp) (t time.Time, allDay bool, ok bool) {
+func propTime(p icalProp) (icalTime, bool) {
 	v := strings.TrimSpace(p.value)
 	if isDateValue(p, v) {
 		d, err := time.Parse("20060102", v)
 		if err != nil {
-			return time.Time{}, false, false
+			return icalTime{}, false
 		}
-		return d.UTC(), true, true
+		return icalTime{at: d.UTC(), allDay: true}, true
 	}
 	if dt, good := parseDateTime(p, v); good {
-		return dt, false, true
+		return icalTime{at: dt}, true
 	}
-	return time.Time{}, false, false
+	return icalTime{}, false
+}
+
+// icalTime is a parsed DATE or DATE-TIME value: the UTC instant and whether it
+// was a whole day.
+type icalTime struct {
+	at     time.Time
+	allDay bool
 }
 
 // isDateValue reports whether a property value is a date rather than a date-time,

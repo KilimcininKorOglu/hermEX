@@ -355,6 +355,30 @@ func (s *Server) closeStore(st *objectstore.Store) {
 	}
 }
 
+// storedObject reads back the object a PUT just wrote, for its ETag and
+// scheduling tags. The write already succeeded, so a failed lookup is recorded
+// for the operator and the PUT is still answered as done, without the tags.
+func (s *Server) storedObject(st *objectstore.Store, fid int64, ext, name string) (objectstore.FolderObject, bool) {
+	obj, found, err := findObjectByName(st, fid, ext, name)
+	if err != nil {
+		s.Logger.Emit(logging.Event{
+			Level: logging.LevelError, Subsystem: logging.DAV, Name: "put.reread.fail", Err: err.Error(),
+		})
+		return objectstore.FolderObject{}, false
+	}
+	return obj, found
+}
+
+// putDone answers a successful PUT: 204 when it replaced an object, 201 when it
+// created one (RFC 4918 section 9.7.1).
+func putDone(w http.ResponseWriter, replaced bool) {
+	if replaced {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+}
+
 // writeBody sends a response body after the status line. The status is already
 // on the wire, so a failed write (the client went away) is recorded, not answered.
 func (s *Server) writeBody(w http.ResponseWriter, body []byte) {

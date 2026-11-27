@@ -46,10 +46,10 @@ func (s *Server) makeCollection(w http.ResponseWriter, r *http.Request, mailbox 
 
 	// MKCOL/MKCALENDAR on an existing resource (the reserved name or a prior
 	// collection) fails (RFC 4918 §9.3.1, RFC 4791 §5.3.1).
-	if _, exists, err := collectionByKind(st, isCal, coll); err != nil {
+	if ref, err := findCollection(st, isCal, coll); err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
 		return
-	} else if exists {
+	} else if ref.found {
 		w.Header().Set("Allow", allowMethods)
 		http.Error(w, "collection already exists", http.StatusMethodNotAllowed)
 		return

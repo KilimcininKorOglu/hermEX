@@ -185,7 +185,7 @@ func attendeeMessages(owner, organizer string, oldEv, newEv *icalNode) []itipMsg
 	}
 
 	// Deletion of the invite from one's own calendar declines it.
-	if _, ok := ownerAttendeeProp(oldEv, ownerKey); !ok {
+	if !hasOwnerAttendee(oldEv, ownerKey) {
 		return nil
 	}
 	return []itipMsg{replyMessage(nil, oldEv, organizer, owner, "DECLINED")}
@@ -321,12 +321,26 @@ func ownerAttendeeProp(ev *icalNode, ownerKey string) (icalProp, bool) {
 	if ev == nil {
 		return icalProp{}, false
 	}
-	for _, p := range ev.propsByName("ATTENDEE") {
-		if normalizeCalAddr(p.value) == ownerKey {
-			return p, true
-		}
+	props := ev.propsByName("ATTENDEE")
+	if i := ownerAttendeeIndex(props, ownerKey); i >= 0 {
+		return props[i], true
 	}
 	return icalProp{}, false
+}
+
+// hasOwnerAttendee reports whether the event lists the owner as an attendee.
+func hasOwnerAttendee(ev *icalNode, ownerKey string) bool {
+	return ev != nil && ownerAttendeeIndex(ev.propsByName("ATTENDEE"), ownerKey) >= 0
+}
+
+// ownerAttendeeIndex returns the index of the owner's ATTENDEE property, or -1.
+func ownerAttendeeIndex(props []icalProp, ownerKey string) int {
+	for i, p := range props {
+		if normalizeCalAddr(p.value) == ownerKey {
+			return i
+		}
+	}
+	return -1
 }
 
 // attendeePartstat returns an attendee's PARTSTAT, defaulting to NEEDS-ACTION.

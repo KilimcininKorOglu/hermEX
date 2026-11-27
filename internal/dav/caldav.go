@@ -137,16 +137,10 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 		return
 	}
 
-	created, _, cerr := findObjectByName(st, fid, ".ics", name)
-	if cerr == nil {
+	if created, stored := s.storedObject(st, fid, ".ics", name); stored {
 		s.stampCalPutTags(w, st, created, fid, body, user, oldBody)
 	}
-
-	if found {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	w.WriteHeader(http.StatusCreated)
+	putDone(w, found)
 }
 
 // replaceCalObject stores a calendar PUT in place, managing the properties the
@@ -418,6 +412,5 @@ func msgIsScheduling(msg *oxcmail.Message) bool {
 	if len(msg.Recipients) > 0 {
 		return true
 	}
-	_, ok := msg.Props.Get(mapi.PrSentRepresentingSmtpAddress)
-	return ok
+	return msg.Props.Has(mapi.PrSentRepresentingSmtpAddress)
 }

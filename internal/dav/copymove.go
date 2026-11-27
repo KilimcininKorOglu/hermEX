@@ -1,6 +1,7 @@
 package dav
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,9 +18,9 @@ import (
 // rather than duplicating the source's, and for MOVE the source is then removed.
 // Collection-level COPY/MOVE is not supported.
 func (s *Server) handleCopyMove(w http.ResponseWriter, r *http.Request, mailbox string, move bool) {
-	req, failure, status := parseCopyMove(r)
-	if failure != "" {
-		http.Error(w, failure, status)
+	req, refused := parseCopyMove(r)
+	if refused != nil {
+		http.Error(w, refused.text, refused.status)
 		return
 	}
 
@@ -75,7 +76,7 @@ type copyMoveEnds struct {
 
 // parseCopyMove reads the request path and the Destination header. A non-empty
 // failure is the message to answer with, at the given status.
-func parseCopyMove(r *http.Request) (copyMoveRequest, string, int) {
+func parseCopyMove(r *http.Request) (copyMoveRequest, *copyMoveRefusal) {
 	src := classify(r.URL.Path)
 	isCal := strings.HasPrefix(r.URL.Path, "/dav/calendars/")
 	isCard := strings.HasPrefix(r.URL.Path, "/dav/addressbooks/")
@@ -85,11 +86,19 @@ func parseCopyMove(r *http.Request) (copyMoveRequest, string, int) {
 		wantKind, req.ext = kindCalObject, ".ics"
 	}
 	if (!isCal && !isCard) || src.kind != wantKind {
-		return req, "COPY/MOVE is supported only on calendar/contact objects", http.StatusForbidden
+		return req, &copyMoveRefusal{text: "COPY/MOVE is supported only on calendar/contact objects", status: http.StatusForbidden}
 	}
 
-	failure, status := parseDestination(r, &req, wantKind, src.user)
-	return req, failure, status
+	if failure, status := parseDestination(r, &req, wantKind, src.user); failure != "" {
+		return req, &copyMoveRefusal{text: failure, status: status}
+	}
+	return req, nil
+}
+
+// copyMoveRefusal is the answer to a COPY or MOVE request the parser refuses.
+type copyMoveRefusal struct {
+	text   string
+	status int
 }
 
 // parseDestination reads the Destination header into req and checks it names an
@@ -221,7 +230,7 @@ func (s *Server) writeCopy(st *objectstore.Store, ends copyMoveEnds, msg *oxcmai
 	// The copy is written before the object it replaces is removed, so a failed
 	// write leaves the destination as it was; the replaced object goes to
 	// Recoverable Items like any other delete.
-	if _, err := createCopy(st, ends.dstFID, msg); err != nil {
+	if err := createCopy(st, ends.dstFID, msg); err != nil {
 		return err
 	}
 	if ends.dstExists {
@@ -237,8 +246,20 @@ func (s *Server) writeCopy(st *objectstore.Store, ends copyMoveEnds, msg *oxcmai
 
 // createCopy files the copied object; a variable only so a test can make the
 // write fail.
-var createCopy = func(st *objectstore.Store, fid int64, msg *oxcmail.Message) (int64, error) {
-	return st.CreateMessage(fid, msg)
+var createCopy = createObject
+
+// createObject stores msg as a new object in folder fid. A store that answers
+// without an error but with object id 0 has stored nothing addressable, so that
+// is an error too.
+func createObject(st *objectstore.Store, fid int64, msg *oxcmail.Message) error {
+	id, err := st.CreateMessage(fid, msg)
+	if err != nil {
+		return err
+	}
+	if id == 0 {
+		return errors.New("dav: the store created an object with id 0")
+	}
+	return nil
 }
 
 // objectTarget describes the collection an object request must name, and the
@@ -293,8 +314,23 @@ func (s *Server) openObjectCollection(w http.ResponseWriter, r *http.Request, ma
 
 // collectionByKind resolves a collection name in the calendar or contacts root.
 func collectionByKind(st *objectstore.Store, isCal bool, coll string) (int64, bool, error) {
+	ref, err := findCollection(st, isCal, coll)
+	return ref.fid, ref.found, err
+}
+
+// collectionRef is a collection lookup: its folder id, and whether the mailbox
+// holds it at all.
+type collectionRef struct {
+	fid   int64
+	found bool
+}
+
+// findCollection looks a calendar or address-book collection up by name.
+func findCollection(st *objectstore.Store, isCal bool, coll string) (collectionRef, error) {
+	lookup := cardCollectionFID
 	if isCal {
-		return calCollectionFID(st, coll)
+		lookup = calCollectionFID
 	}
-	return cardCollectionFID(st, coll)
+	fid, found, err := lookup(st, coll)
+	return collectionRef{fid: fid, found: found}, err
 }

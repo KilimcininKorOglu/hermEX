@@ -470,8 +470,8 @@ func propTimeValue(n *icalNode, name string) (time.Time, bool) {
 	if len(ps) == 0 {
 		return time.Time{}, false
 	}
-	t, _, ok := propTime(ps[0])
-	return t, ok
+	pt, ok := propTime(ps[0])
+	return pt.at, ok
 }
 
 // addrMatchesOwner reports whether a calendar user address identifies the Outbox

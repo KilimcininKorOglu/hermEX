@@ -126,8 +126,8 @@ func scheduleRequestAllowed(st *objectstore.Store, r *http.Request, user string,
 // (and, for MOVE, deletable) and the destination writable like a PUT. A request
 // the parser refuses is let through for the handler to answer.
 func copyMoveAllowed(st *objectstore.Store, r *http.Request, user string, kind resourceKind, coll string) (bool, error) {
-	req, failure, _ := parseCopyMove(r)
-	if failure != "" {
+	req, refused := parseCopyMove(r)
+	if refused != nil {
 		return true, nil
 	}
 	srcNeed := mapi.FrightsReadAny

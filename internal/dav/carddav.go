@@ -3,6 +3,7 @@ package dav
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"slices"
@@ -71,7 +72,7 @@ func objectName(st *objectstore.Store, id int64, ext string) string {
 	if tag, ok, err := resourceNameTag(st, false); err == nil && ok {
 		if props, err := st.GetMessageProperties(id); err == nil {
 			if v, ok := props.Get(tag); ok {
-				if s, _ := v.(string); s != "" {
+				if s, isString := v.(string); isString && s != "" {
 					return s
 				}
 			}
@@ -178,15 +179,10 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request, mailbox strin
 		return
 	}
 
-	created, _, err := findObjectByName(st, fid, ".vcf", name)
-	if err == nil && created.ChangeNumber != 0 {
+	if created, stored := s.storedObject(st, fid, ".vcf", name); stored && created.ChangeNumber != 0 {
 		w.Header().Set("ETag", etag(created.ChangeNumber))
 	}
-	if found {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	w.WriteHeader(http.StatusCreated)
+	putDone(w, found)
 }
 
 // importVCardBody reads a PUT body as a vCard and stamps the client-chosen resource
@@ -268,8 +264,12 @@ func replacePhoto(st *objectstore.Store, id int64, photos []oxcmail.Attachment) 
 		}
 	}
 	for _, att := range photos {
-		if _, _, err := st.CreateAttachment(id, att.Props); err != nil {
+		attID, attNum, err := st.CreateAttachment(id, att.Props)
+		if err != nil {
 			return err
+		}
+		if attID == 0 {
+			return fmt.Errorf("dav: photo attachment %d stored with id 0", attNum)
 		}
 	}
 	return nil
@@ -281,7 +281,10 @@ func storedPhotoNum(stored *oxcmail.Message) (uint32, bool) {
 	if !ok {
 		return 0, false
 	}
-	v, _ := att.Props.Get(mapi.PrAttachNum)
+	v, has := att.Props.Get(mapi.PrAttachNum)
+	if !has {
+		return 0, false
+	}
 	n, ok := v.(int32)
 	// #nosec G115 -- the signed and unsigned views of the same 32 bits
 	return uint32(n), ok
@@ -297,8 +300,7 @@ func replaceObject(st *objectstore.Store, fid int64, msg *oxcmail.Message, exist
 		if err := checkQuota(st); err != nil {
 			return err
 		}
-		_, err := st.CreateMessage(fid, msg)
-		return err
+		return createObject(st, fid, msg)
 	}
 	var absent []mapi.PropTag
 	for _, tag := range managed {
