@@ -8,6 +8,7 @@ import (
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcical"
 	"hermex/internal/oxcmail"
 	"hermex/internal/oxtask"
 	"hermex/internal/wbxml"
@@ -21,7 +22,7 @@ func seedTask(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	task := oxtask.Task{
 		Subject:     "Ship release",
 		Body:        "cut the tag",
@@ -156,7 +157,37 @@ func storedTask(t *testing.T, dir, serverID string) (oxtask.Task, func()) {
 	mustNoErr(t, "open the stored task", err)
 	task, err := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
 	mustNoErr(t, "read the task properties", err)
-	return task, func() { st.Close() }
+	return task, func() { mustClose(t, st) }
+}
+
+// TestRRuleFromRecurrence pins the RRULE text written back to the store against
+// RFC 5545 3.3.10: parts joined by ';', BYDAY values joined by ',', an ordinal
+// weekday written as the number before the day (2TU), UNTIL in UTC basic form,
+// and INTERVAL omitted when it is the default 1.
+func TestRRuleFromRecurrence(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		in   oxcical.Recurrence
+		want string
+	}{
+		{"second Tuesday every other month, five times",
+			oxcical.Recurrence{Freq: "MONTHLY", Interval: 2, Count: 5, Weekdays: []string{"TU"}, SetPos: 2},
+			"FREQ=MONTHLY;INTERVAL=2;COUNT=5;BYDAY=2TU"},
+		{"last Friday",
+			oxcical.Recurrence{Freq: "MONTHLY", Interval: 1, Weekdays: []string{"FR"}, SetPos: -1},
+			"FREQ=MONTHLY;BYDAY=-1FR"},
+		{"two weekdays until a date",
+			oxcical.Recurrence{Freq: "WEEKLY", Interval: 1, Weekdays: []string{"MO", "WE"},
+				Until: time.Date(2027, 1, 31, 23, 59, 59, 0, time.FixedZone("x", 3*3600))},
+			"FREQ=WEEKLY;UNTIL=20270131T205959Z;BYDAY=MO,WE"},
+		{"a yearly date",
+			oxcical.Recurrence{Freq: "YEARLY", Interval: 1, MonthDay: 15, Month: 3},
+			"FREQ=YEARLY;BYMONTHDAY=15;BYMONTH=3"},
+	} {
+		if got := rruleFromRecurrence(c.in); got != c.want {
+			t.Errorf("%s: rruleFromRecurrence = %q, want %q", c.name, got, c.want)
+		}
+	}
 }
 
 // TestFolderSyncAdvertisesTasks confirms FolderSync exposes the Tasks collection with
@@ -187,7 +218,7 @@ func seedRecurringTask(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	task := oxtask.Task{
 		Subject:        "Weekly status",
 		Start:          time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC),

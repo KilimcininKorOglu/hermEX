@@ -203,42 +203,39 @@ var easRecurFreq = map[string]string{
 // INTERVAL, COUNT/UNTIL, BYDAY, BYMONTHDAY, BYMONTH); nth-weekday round-trips via
 // BYDAY with an ordinal prefix only when SetPos is set, matching how ParseRRule reads it.
 func rruleFromRecurrence(r oxcical.Recurrence) string {
-	var b strings.Builder
-	b.WriteString("FREQ=")
-	b.WriteString(r.Freq)
+	parts := []string{"FREQ=" + r.Freq}
 	if r.Interval > 1 {
-		b.WriteString(";INTERVAL=")
-		b.WriteString(strconv.Itoa(r.Interval))
+		parts = append(parts, "INTERVAL="+strconv.Itoa(r.Interval))
 	}
 	if r.Count > 0 {
-		b.WriteString(";COUNT=")
-		b.WriteString(strconv.Itoa(r.Count))
+		parts = append(parts, "COUNT="+strconv.Itoa(r.Count))
 	}
 	if !r.Until.IsZero() {
-		b.WriteString(";UNTIL=")
-		b.WriteString(r.Until.UTC().Format("20060102T150405Z"))
+		parts = append(parts, "UNTIL="+r.Until.UTC().Format("20060102T150405Z"))
 	}
 	if len(r.Weekdays) > 0 {
-		b.WriteString(";BYDAY=")
-		for i, d := range r.Weekdays {
-			if i > 0 {
-				b.WriteByte(',')
-			}
-			if r.SetPos != 0 {
-				b.WriteString(strconv.Itoa(r.SetPos))
-			}
-			b.WriteString(d)
-		}
+		parts = append(parts, "BYDAY="+byDay(r))
 	}
 	if r.MonthDay != 0 {
-		b.WriteString(";BYMONTHDAY=")
-		b.WriteString(strconv.Itoa(r.MonthDay))
+		parts = append(parts, "BYMONTHDAY="+strconv.Itoa(r.MonthDay))
 	}
 	if r.Month != 0 {
-		b.WriteString(";BYMONTH=")
-		b.WriteString(strconv.Itoa(r.Month))
+		parts = append(parts, "BYMONTH="+strconv.Itoa(r.Month))
 	}
-	return b.String()
+	return strings.Join(parts, ";")
+}
+
+// byDay renders the BYDAY value list, each weekday carrying the SetPos ordinal
+// when one is set.
+func byDay(r oxcical.Recurrence) string {
+	days := make([]string, len(r.Weekdays))
+	for i, d := range r.Weekdays {
+		if r.SetPos != 0 {
+			d = strconv.Itoa(r.SetPos) + d
+		}
+		days[i] = d
+	}
+	return strings.Join(days, ",")
 }
 
 // bitmaskWeekdays expands an EAS DayOfWeek bitmask (Sunday 1 .. Saturday 64) back to
