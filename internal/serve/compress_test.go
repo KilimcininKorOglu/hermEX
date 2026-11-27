@@ -1,7 +1,7 @@
 package serve
 
 import (
-	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -19,23 +19,18 @@ import (
 // that compression is worth measuring, the shape a folder listing or a user
 // directory actually has.
 func jsonBody(entries int) string {
-	var b strings.Builder
-	b.WriteString(`{"data":[`)
+	items := make([]string, entries)
 	for i := range entries {
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		b.WriteString(`{"id":` + strconv.Itoa(i) + `,"name":"user` + strconv.Itoa(i) + `@hermex.test","role":"member"}`)
+		items[i] = `{"id":` + strconv.Itoa(i) + `,"name":"user` + strconv.Itoa(i) + `@hermex.test","role":"member"}`
 	}
-	b.WriteString(`]}`)
-	return b.String()
+	return `{"data":[` + strings.Join(items, ",") + `]}`
 }
 
 // serveCompressed runs one request through the compression middleware and returns
 // the recorder.
 func serveCompressed(h http.HandlerFunc, req *http.Request) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
-	compressMiddleware(h).ServeHTTP(rec, req)
+	compressMiddleware(h, nil, logging.Webmail).ServeHTTP(rec, req)
 	return rec
 }
 
@@ -53,7 +48,7 @@ func TestCompressesLargeJSON(t *testing.T) {
 	body := jsonBody(200)
 	rec := serveCompressed(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, body)
+		writeBody(t, w, body)
 	}, gzipRequest())
 
 	if enc := rec.Header().Get("Content-Encoding"); enc != "gzip" {
@@ -84,7 +79,7 @@ func TestDoesNotCompressWithoutAcceptEncoding(t *testing.T) {
 	body := jsonBody(200)
 	rec := serveCompressed(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, body)
+		writeBody(t, w, body)
 	}, httptest.NewRequest(http.MethodGet, "/api/v1/folders", nil))
 
 	if enc := rec.Header().Get("Content-Encoding"); enc != "" {
@@ -104,12 +99,16 @@ func TestDoesNotCompressOtherTypes(t *testing.T) {
 		"application/zip", "image/png", "text/html; charset=utf-8",
 	} {
 		t.Run(ct, func(t *testing.T) {
+			body := jsonBody(200)
 			rec := serveCompressed(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", ct)
-				_, _ = io.WriteString(w, jsonBody(200))
+				writeBody(t, w, body)
 			}, gzipRequest())
 			if enc := rec.Header().Get("Content-Encoding"); enc != "" {
 				t.Errorf("Content-Encoding = %q, want none for %s", enc, ct)
+			}
+			if rec.Body.String() != body {
+				t.Errorf("the %s body was altered", ct)
 			}
 		})
 	}
@@ -120,7 +119,7 @@ func TestDoesNotCompressOtherTypes(t *testing.T) {
 func TestDoesNotCompressSmallJSON(t *testing.T) {
 	rec := serveCompressed(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"ok":true}`)
+		writeBody(t, w, `{"ok":true}`)
 	}, gzipRequest())
 
 	if enc := rec.Header().Get("Content-Encoding"); enc != "" {
@@ -134,14 +133,18 @@ func TestDoesNotCompressSmallJSON(t *testing.T) {
 // TestDoesNotDoubleEncode proves a handler that encoded its own body keeps its
 // encoding rather than having a second one wrapped around it.
 func TestDoesNotDoubleEncode(t *testing.T) {
+	body := jsonBody(200)
 	rec := serveCompressed(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Encoding", "br")
-		_, _ = io.WriteString(w, jsonBody(200))
+		writeBody(t, w, body)
 	}, gzipRequest())
 
 	if enc := rec.Header().Get("Content-Encoding"); enc != "br" {
 		t.Errorf("Content-Encoding = %q, want the handler's own br", enc)
+	}
+	if rec.Body.String() != body {
+		t.Error("the handler's own encoded body was altered")
 	}
 }
 
@@ -157,13 +160,13 @@ func TestStreamingResponseStillFlushes(t *testing.T) {
 		defer close(done)
 		compressMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "text/event-stream")
-			_, _ = io.WriteString(w, "data: first\n\n")
+			writeBody(t, w, "data: first\n\n")
 			if err := http.NewResponseController(w).Flush(); err != nil {
 				t.Errorf("flush: %v", err)
 			}
 			close(flushed)
 			<-released
-		})).ServeHTTP(rec, gzipRequest())
+		}), nil, logging.Webmail).ServeHTTP(rec, gzipRequest())
 	}()
 
 	// The event must be readable while the handler is still parked. Reading after
@@ -185,11 +188,14 @@ func TestPreservesStatusCode(t *testing.T) {
 	rec := serveCompressed(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		_, _ = io.WriteString(w, `{"error":"not found"}`)
+		writeBody(t, w, `{"error":"not found"}`)
 	}, gzipRequest())
 
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
+	}
+	if rec.Body.String() != `{"error":"not found"}` {
+		t.Errorf("body = %q, want the handler's error body", rec.Body.String())
 	}
 }
 
@@ -208,6 +214,75 @@ func TestEmptyResponseIsUntouched(t *testing.T) {
 	}
 }
 
+// errClientGone is the write failure of a client that dropped the connection.
+var errClientGone = errors.New("client went away")
+
+// brokenWriter is a response whose every body write fails, the shape of a client
+// that disconnected mid-response.
+type brokenWriter struct {
+	*httptest.ResponseRecorder
+	writes int
+}
+
+func (b *brokenWriter) Write([]byte) (int, error) {
+	b.writes++
+	return 0, errClientGone
+}
+
+// TestCompressFailureIsRecorded proves a gzip stream that cannot be sent is not
+// lost silently: the client receives a truncated body, so the operator's log must
+// carry an http.compress.fail event naming the path and the cause.
+func TestCompressFailureIsRecorded(t *testing.T) {
+	sink := &recordSink{}
+	bw := &brokenWriter{ResponseRecorder: httptest.NewRecorder()}
+	body := jsonBody(200)
+	compressMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		writeBodyIgnoringBreak(t, w, body)
+	}), logging.New(sink), logging.Webmail).ServeHTTP(bw, gzipRequest())
+
+	e, ok := sink.last()
+	if !ok {
+		t.Fatal("a failed gzip response recorded no event")
+	}
+	wantEq(t, e.Name, "http.compress.fail", "event name")
+	wantField(t, e, "path", any("/api/v1/folders"), "path field")
+	if msg, isText := e.Fields["error"].(string); !isText || !strings.Contains(msg, errClientGone.Error()) {
+		t.Errorf("error field = %v, want it to carry %q", e.Fields["error"], errClientGone)
+	}
+}
+
+// writeBodyIgnoringBreak writes s and accepts only errClientGone, the failure the
+// test's broken writer is built to return.
+func writeBodyIgnoringBreak(t *testing.T, w io.Writer, s string) {
+	t.Helper()
+	if _, err := io.WriteString(w, s); err != nil && !errors.Is(err, errClientGone) {
+		t.Errorf("write response body: %v", err)
+	}
+}
+
+// TestWriteAfterFailedFlushReportsTheFailure proves a handler learns its stream
+// broke. Flush has no error result, so the failure of the held bytes must come
+// back from the next Write; otherwise a handler keeps producing a body nobody
+// receives, and the writer keeps sending into a dead connection.
+func TestWriteAfterFailedFlushReportsTheFailure(t *testing.T) {
+	bw := &brokenWriter{ResponseRecorder: httptest.NewRecorder()}
+	var after error
+	compressMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		writeBody(t, w, `{"ok":true}`) // held back: under the size floor
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			t.Errorf("flush: %v", err)
+		}
+		_, after = io.WriteString(w, `{"more":true}`)
+	}), nil, logging.Webmail).ServeHTTP(bw, gzipRequest())
+
+	if !errors.Is(after, errClientGone) {
+		t.Errorf("write after a failed flush returned %v, want %v", after, errClientGone)
+	}
+	wantEq(t, bw.writes, 1, "writes attempted on the broken connection")
+}
+
 // TestServedDaemonCompresses proves the middleware is actually installed in the
 // shared HTTP base, not merely written. Every daemon builds its server through
 // New, so this is what makes the change reach webmail and the administration API.
@@ -215,14 +290,13 @@ func TestServedDaemonCompresses(t *testing.T) {
 	body := jsonBody(200)
 	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, body)
+		writeBody(t, w, body)
 	})
 	hs, err := New("127.0.0.1:0", h, &config.Config{}, nil, logging.Webmail, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() { _ = hs.Start() }()
-	defer func() { _ = hs.Shutdown(context.Background()) }()
+	runServer(t, hs)
 
 	req, err := http.NewRequest(http.MethodGet, "http://"+hs.Addr().String()+"/api/v1/folders", nil)
 	if err != nil {
@@ -235,7 +309,7 @@ func TestServedDaemonCompresses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeBody(t, resp)
 
 	if enc := resp.Header.Get("Content-Encoding"); enc != "gzip" {
 		t.Fatalf("Content-Encoding = %q, want gzip; the middleware is not wired into New", enc)

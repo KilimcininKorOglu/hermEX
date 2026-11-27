@@ -102,7 +102,7 @@ func New(addr string, h http.Handler, tlsSrc TLSSource, logger *logging.Logger, 
 	// a panicking request is still logged with the 500 it answered rather than
 	// vanishing from the log the way net/http's own recovery leaves it.
 	handler := securityHeadersMiddleware(logMiddleware(compressMiddleware(
-		rateLimitMiddleware(recoverMiddleware(h, logger, subsystem), limiter)), logger, subsystem))
+		rateLimitMiddleware(recoverMiddleware(h, logger, subsystem), limiter), logger, subsystem), logger, subsystem))
 	if o.frontDoor {
 		handler = stripForwardedFor(handler)
 	}

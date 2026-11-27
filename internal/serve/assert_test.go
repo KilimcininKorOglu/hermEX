@@ -1,11 +1,49 @@
 package serve
 
 import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 
 	"hermex/internal/logging"
 )
+
+// writeBody writes s as a handler body and fails the test when the write fails,
+// so a broken response is not mistaken for a short one.
+func writeBody(t *testing.T, w io.Writer, s string) {
+	t.Helper()
+	if _, err := io.WriteString(w, s); err != nil {
+		t.Errorf("write response body: %v", err)
+	}
+}
+
+// runServer serves hs until the test ends. Cleanup shuts it down and requires the
+// serve loop to end with http.ErrServerClosed, the result of a clean Shutdown;
+// any other end means the server stopped by itself.
+func runServer(t *testing.T, hs *Server) {
+	t.Helper()
+	served := make(chan error, 1)
+	go func() { served <- hs.Start() }()
+	t.Cleanup(func() {
+		if err := hs.Shutdown(context.Background()); err != nil {
+			t.Errorf("shutdown: %v", err)
+		}
+		if err := <-served; !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("serve ended with %v, want http.ErrServerClosed", err)
+		}
+	})
+}
+
+// closeBody closes a client response body and fails the test when that fails.
+func closeBody(t *testing.T, resp *http.Response) {
+	t.Helper()
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
+}
 
 // This file is the package's assertion vocabulary. A test states one fact per call,
 // so a failure names the fact that broke rather than the condition that evaluated.

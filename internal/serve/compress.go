@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/klauspost/compress/gzip"
+
+	"hermex/internal/logging"
 )
 
 // minCompressSize is the smallest body worth compressing. Below it the gzip
@@ -33,19 +35,31 @@ func compressibleType(contentType string) bool {
 // not qualify, is served exactly as before: the wrapper decides at the first
 // write, once the handler has set its Content-Type, and passes the bytes straight
 // through when the answer is no.
-func compressMiddleware(h http.Handler) http.Handler {
+//
+// A failure to send the held bytes or finish the gzip stream reaches the client
+// as a truncated body, so it is recorded as http.compress.fail; a nil logger
+// disables that record as it disables request logging.
+func compressMiddleware(h http.Handler, logger *logging.Logger, subsystem logging.Subsystem) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !acceptsGzip(r.Header.Get("Accept-Encoding")) {
 			h.ServeHTTP(w, r)
 			return
 		}
 		cw := &compressWriter{ResponseWriter: w}
-		defer cw.Close()
 		// Vary tells caches that the body depends on the request's encoding
 		// preference, so a compressed answer is never replayed to a client that
 		// cannot read it.
 		w.Header().Add("Vary", "Accept-Encoding")
 		h.ServeHTTP(cw, r)
+		if err := cw.Close(); err != nil && logger != nil {
+			logger.Emit(logging.Event{
+				Level:      logging.LevelWarn,
+				Subsystem:  subsystem,
+				Name:       "http.compress.fail",
+				RemoteAddr: ClientAddr(r),
+				Fields:     logging.Fields{"path": r.URL.Path, "error": err.Error()},
+			})
+		}
 	})
 }
 
@@ -72,6 +86,16 @@ type compressWriter struct {
 	wrote    bool // WriteHeader has been called on the wrapped writer
 	decided  bool
 	buffered []byte
+	// err is the first failure to send bytes on. Flush has no error result, so a
+	// failure there is kept and returned by the next Write and by Close.
+	err error
+}
+
+// fail keeps the first send failure.
+func (c *compressWriter) fail(err error) {
+	if c.err == nil {
+		c.err = err
+	}
 }
 
 // Unwrap exposes the underlying writer to http.ResponseController, which the
@@ -162,12 +186,34 @@ func (c *compressWriter) sendHeader() {
 	c.ResponseWriter.WriteHeader(c.status)
 }
 
-// write sends bytes through the compressor when one was installed.
+// write sends bytes through the compressor when one was installed. After a
+// failure it sends nothing more, since the stream the client reads is broken.
 func (c *compressWriter) write(b []byte) (int, error) {
-	if c.gz != nil {
-		return c.gz.Write(b)
+	if c.err != nil {
+		return 0, c.err
 	}
-	return c.ResponseWriter.Write(b)
+	var n int
+	var err error
+	if c.gz != nil {
+		n, err = c.gz.Write(b)
+	} else {
+		n, err = c.ResponseWriter.Write(b)
+	}
+	if err != nil {
+		c.fail(err)
+		return n, c.err
+	}
+	return n, nil
+}
+
+// flushHeld sends the bytes held back while the decision was open.
+func (c *compressWriter) flushHeld() {
+	if len(c.buffered) > 0 {
+		if _, err := c.write(c.buffered); err != nil {
+			c.fail(err)
+		}
+		c.buffered = nil
+	}
 }
 
 // Flush pushes whatever is held through to the client, so a streaming handler
@@ -177,13 +223,12 @@ func (c *compressWriter) write(b []byte) (int, error) {
 func (c *compressWriter) Flush() {
 	if !c.decided {
 		c.decide()
-		if len(c.buffered) > 0 {
-			_, _ = c.write(c.buffered)
-			c.buffered = nil
-		}
+		c.flushHeld()
 	}
-	if c.gz != nil {
-		_ = c.gz.Flush()
+	if c.gz != nil && c.err == nil {
+		if err := c.gz.Flush(); err != nil {
+			c.fail(err)
+		}
 	}
 	if f, ok := c.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
@@ -192,19 +237,19 @@ func (c *compressWriter) Flush() {
 
 // Close flushes a response that never reached the size floor and finishes the
 // gzip stream. A handler that wrote nothing at all leaves the response untouched,
-// so an empty 204 stays empty.
-func (c *compressWriter) Close() {
+// so an empty 204 stays empty. It returns the first send failure of the response.
+func (c *compressWriter) Close() error {
 	if !c.decided {
 		if len(c.buffered) == 0 && !c.wrote && c.status == 0 {
-			return
+			return nil
 		}
 		c.decide()
 	}
-	if len(c.buffered) > 0 {
-		_, _ = c.write(c.buffered)
-		c.buffered = nil
+	c.flushHeld()
+	if c.gz != nil && c.err == nil {
+		if err := c.gz.Close(); err != nil {
+			c.fail(err)
+		}
 	}
-	if c.gz != nil {
-		_ = c.gz.Close()
-	}
+	return c.err
 }
