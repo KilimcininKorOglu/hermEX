@@ -654,7 +654,8 @@ func (s *Server) finishAuth(w *ew, conn net.Conn, user, pass string) (*mailbox, 
 	if s.Limiter != nil {
 		s.Limiter.Succeed(addr, user)
 	}
-	if privs, _ := s.Auth.Privileges(user); !privs.POP3IMAP {
+	// A directory that cannot name the account's privileges grants none.
+	if privs, known := s.Auth.Privileges(user); !known || !privs.POP3IMAP {
 		emit(logging.LevelWarn, "auth.denied", logging.Fields{"service": "pop3imap"})
 		errLine(w, "[AUTH] POP3/IMAP access is disabled for this account")
 		return nil, false
