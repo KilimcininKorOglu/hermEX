@@ -3,6 +3,7 @@ package oxmapihttp
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -107,8 +108,8 @@ func TestDecodeXorMagic(t *testing.T) {
 func TestDecodeRequiresLast(t *testing.T) {
 	inner := buildInner([]byte{0x01}, nil)
 	buf := wrap(0, uint16(len(inner)), uint16(len(inner)), inner)
-	if _, _, err := DecodeExecute(buf); err == nil {
-		t.Error("expected ErrMalformed for a header without RHE_FLAG_LAST")
+	if _, _, err := DecodeExecute(buf); !errors.Is(err, ErrMalformed) {
+		t.Errorf("err = %v, want ErrMalformed for a header without RHE_FLAG_LAST", err)
 	}
 }
 
@@ -123,8 +124,12 @@ func TestDecodeMalformed(t *testing.T) {
 		"tail misaligned":  wrap(rheFlagLast, 5, 5, []byte{0x02, 0x00, 0x01, 0x02, 0x03}), // RopSize=2, 3 tail bytes (not %4)
 	}
 	for name, buf := range cases {
-		if _, _, err := DecodeExecute(buf); err == nil {
-			t.Errorf("%s: expected ErrMalformed, got nil", name)
+		rops, handles, err := DecodeExecute(buf)
+		if !errors.Is(err, ErrMalformed) {
+			t.Errorf("%s: err = %v, want ErrMalformed", name, err)
+		}
+		if rops != nil || handles != nil {
+			t.Errorf("%s: a refused buffer still returned rops %x, handles %v", name, rops, handles)
 		}
 	}
 }
