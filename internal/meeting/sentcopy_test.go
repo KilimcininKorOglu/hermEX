@@ -19,13 +19,13 @@ func localMeeting(t *testing.T) (*objectstore.Store, int64, directory.StaticAcco
 	if err != nil {
 		t.Fatal(err)
 	}
-	org.Close()
+	mustClose(t, org, "the organizer's store")
 	attendeeDir := t.TempDir()
 	st, err := objectstore.Open(attendeeDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { mustClose(t, st, "the attendee's store") })
 	reqID, err := st.CreateMessage(int64(mapi.PrivateFIDInbox), &oxcmail.Message{Props: mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: requestClass},
 		{Tag: mapi.PrSubject, Value: "Sync"},
@@ -80,7 +80,7 @@ func TestSentResponseLeavesTheOnlyCopyToTheMailbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delegate.Close()
+	mustClose(t, delegate, "the delegate's store")
 	accs["erin@hermex.test"] = directory.Account{MailboxPath: delegateDir}
 	if err := st.SetSentCopyConfig(objectstore.SentCopyConfig{ForSendOnBehalf: true, Exclusive: true}); err != nil {
 		t.Fatal(err)
