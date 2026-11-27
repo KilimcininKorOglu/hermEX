@@ -33,7 +33,7 @@ func TestJournalPutGetRoundTrip(t *testing.T) {
 // collection with a VJOURNAL supported-calendar-component-set.
 func TestJournalCollectionAdvertised(t *testing.T) {
 	ts := davServerCal(t)
-	_, body := doFull(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/", "", map[string]string{"Depth": "1"})
+	body := doFullBody(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/", "", map[string]string{"Depth": "1"})
 	if !strings.Contains(body, "/journal/") {
 		t.Errorf("calendar home-set does not advertise the journal collection\n%s", body)
 	}

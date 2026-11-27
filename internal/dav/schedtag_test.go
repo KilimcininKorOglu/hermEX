@@ -27,7 +27,7 @@ func putCal(t *testing.T, ts *httptest.Server, name, body, ifSchedule string) *h
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	mustClose(t, resp.Body)
 	return resp
 }
 
@@ -72,7 +72,7 @@ func TestScheduleTagHeaders(t *testing.T) {
 		t.Fatal("PUT of a meeting returned no Schedule-Tag")
 	}
 
-	g, _ := do(t, ts, "GET", "/dav/calendars/"+testUser+"/calendar/st-1.ics", "", true)
+	g := doStatus(t, ts, "GET", "/dav/calendars/"+testUser+"/calendar/st-1.ics", "", true)
 	if g.Header.Get("Schedule-Tag") == "" || g.Header.Get("ETag") == "" {
 		t.Errorf("GET of a meeting lacks Schedule-Tag (%q) or ETag (%q)", g.Header.Get("Schedule-Tag"), g.Header.Get("ETag"))
 	}
@@ -109,7 +109,7 @@ func TestScheduleReplySuppress(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		st.Close()
+		mustClose(t, st)
 	}
 	accs := directory.StaticAccounts{
 		testUser:          {Password: testPass, MailboxPath: aliceDir},
@@ -125,7 +125,7 @@ func TestScheduleReplySuppress(t *testing.T) {
 	if resp, out := bobDav(t, ts, "PUT", "/dav/calendars/bob@hermex.test/calendar/r-1.ics", "", ev); resp.StatusCode != http.StatusCreated {
 		t.Fatalf("attendee accept PUT status %d, want 201\n%s", resp.StatusCode, out)
 	}
-	if n, _, _ := inboxMessage(t, aliceDir); n != 1 {
+	if n := inboxMessage(t, aliceDir).count; n != 1 {
 		t.Fatalf("after accept, alice inbox has %d messages, want 1 (the reply)", n)
 	}
 
@@ -140,11 +140,11 @@ func TestScheduleReplySuppress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	mustClose(t, resp.Body)
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("attendee DELETE status %d, want 204", resp.StatusCode)
 	}
-	if n, _, _ := inboxMessage(t, aliceDir); n != 1 {
+	if n := inboxMessage(t, aliceDir).count; n != 1 {
 		t.Errorf("Schedule-Reply:F still sent a reply: alice inbox has %d, want still 1", n)
 	}
 }

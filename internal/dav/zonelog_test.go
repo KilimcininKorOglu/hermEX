@@ -24,14 +24,15 @@ func zonePut(t *testing.T, body []byte) []logging.Event {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 
 	srv := NewServer(nil, nil, "hermex.test")
 	sink := &scheduleSink{}
 	srv.Logger = logging.New(sink)
 
-	if _, _, err := srv.importCalendarBody(st, int64(mapi.PrivateFIDCalendar), "alice@hermex.test", body); err != nil {
-		t.Fatalf("import: %v", err)
+	msg, status, err := srv.importCalendarBody(st, int64(mapi.PrivateFIDCalendar), "alice@hermex.test", body)
+	if err != nil || msg == nil {
+		t.Fatalf("import: msg=%v status=%d err=%v", msg, status, err)
 	}
 	return sink.events
 }

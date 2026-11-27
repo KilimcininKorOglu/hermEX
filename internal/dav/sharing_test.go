@@ -32,7 +32,7 @@ func authReq(t *testing.T, ts *httptest.Server, method, path, user, body string)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	mustClose(t, resp.Body)
 	return resp.StatusCode
 }
 
@@ -130,7 +130,7 @@ func grantWriteDelegate(t *testing.T, dir, grantee string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if err := st.SetDelegates([]string{grantee}); err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func provisioned(t *testing.T, name string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 	return dir
 }
 
@@ -181,7 +181,7 @@ func TestSharedMailboxInHomeSet(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		st.Close()
+		mustClose(t, st)
 	}
 	tst, err := objectstore.Open(teamDir)
 	if err != nil {
@@ -190,7 +190,7 @@ func TestSharedMailboxInHomeSet(t *testing.T) {
 	if err := tst.SetDelegateFolderRights("bob@hermex.test", mapi.NormalizeRights(mapi.RightsReviewer, true)); err != nil {
 		t.Fatal(err)
 	}
-	tst.Close()
+	mustClose(t, tst)
 
 	accs := directory.StaticAccounts{
 		"team@hermex.test":  {Password: testPass, MailboxPath: teamDir, Shared: true},

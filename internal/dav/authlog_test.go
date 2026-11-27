@@ -22,8 +22,8 @@ func TestFailedLoginIsRecordedWithoutThePassword(t *testing.T) {
 	srv.Logger = logging.New(sink)
 	r := httptest.NewRequest("PROPFIND", "/dav/", nil)
 	r.SetBasicAuth("alice@test", tried)
-	if _, _, ok := srv.basicAuth(httptest.NewRecorder(), r); ok {
-		t.Fatal("a wrong password was accepted")
+	if user, mailbox, ok := srv.basicAuth(httptest.NewRecorder(), r); ok || user != "" || mailbox != "" {
+		t.Fatalf("a wrong password was accepted: user=%q mailbox=%q ok=%v", user, mailbox, ok)
 	}
 	// Basic auth carries the password base64-encoded (RFC 7617), so a logged
 	// Authorization header leaks it without the plain text ever appearing.

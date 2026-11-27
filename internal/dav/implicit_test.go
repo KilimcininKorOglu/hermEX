@@ -9,18 +9,17 @@ import (
 
 // schedEvent builds a VCALENDAR/VEVENT body for broker tests.
 func schedEvent(uid, organizer, summary, dtstart string, seq int, attendees ...string) string {
-	var b strings.Builder
-	b.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\nBEGIN:VEVENT\r\n")
-	fmt.Fprintf(&b, "UID:%s\r\nDTSTAMP:20260101T000000Z\r\nDTSTART:%s\r\nSEQUENCE:%d\r\n", uid, dtstart, seq)
+	b := []byte("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\nBEGIN:VEVENT\r\n")
+	b = fmt.Appendf(b, "UID:%s\r\nDTSTAMP:20260101T000000Z\r\nDTSTART:%s\r\nSEQUENCE:%d\r\n", uid, dtstart, seq)
 	if summary != "" {
-		fmt.Fprintf(&b, "SUMMARY:%s\r\n", summary)
+		b = fmt.Appendf(b, "SUMMARY:%s\r\n", summary)
 	}
-	fmt.Fprintf(&b, "ORGANIZER:mailto:%s\r\n", organizer)
+	b = fmt.Appendf(b, "ORGANIZER:mailto:%s\r\n", organizer)
 	for _, a := range attendees {
-		fmt.Fprintf(&b, "ATTENDEE:mailto:%s\r\n", a)
+		b = fmt.Appendf(b, "ATTENDEE:mailto:%s\r\n", a)
 	}
-	b.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
-	return b.String()
+	b = append(b, "END:VEVENT\r\nEND:VCALENDAR\r\n"...)
+	return string(b)
 }
 
 // msgsTo returns the first scheduling message with the given method.
@@ -190,7 +189,7 @@ func TestSchedulingBrokerAttendeeReply(t *testing.T) {
 // than POSTing it to the Outbox (which would double-send).
 func TestOptionsAutoSchedule(t *testing.T) {
 	ts := davServerCal(t)
-	resp, _ := do(t, ts, "OPTIONS", "/dav/calendars/"+testUser+"/calendar/", "", true)
+	resp := doStatus(t, ts, "OPTIONS", "/dav/calendars/"+testUser+"/calendar/", "", true)
 	if dav := resp.Header.Get("DAV"); !strings.Contains(dav, "calendar-auto-schedule") {
 		t.Errorf("DAV header %q lacks calendar-auto-schedule", dav)
 	}
@@ -208,7 +207,8 @@ func TestImplicitSchedulePutDelivers(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("PUT status %d, want 201\n%s", resp.StatusCode, out)
 	}
-	n, class, subject := inboxMessage(t, bobDir)
+	got := inboxMessage(t, bobDir)
+	n, class, subject := got.count, got.class, got.subject
 	if n != 1 {
 		t.Fatalf("bob's inbox has %d messages, want exactly 1", n)
 	}
@@ -223,7 +223,7 @@ func TestImplicitSchedulePutDelivers(t *testing.T) {
 	if resp2.StatusCode != http.StatusNoContent {
 		t.Fatalf("re-PUT status %d, want 204\n%s", resp2.StatusCode, out2)
 	}
-	if n2, _, _ := inboxMessage(t, bobDir); n2 != 1 {
+	if n2 := inboxMessage(t, bobDir).count; n2 != 1 {
 		t.Fatalf("re-PUT re-delivered: bob's inbox has %d, want still 1", n2)
 	}
 }

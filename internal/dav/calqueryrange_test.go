@@ -50,7 +50,7 @@ func TestCalQueryObjectsAppliesTheRange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	fid := int64(mapi.PrivateFIDCalendar)
 
 	june := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
@@ -80,7 +80,7 @@ func TestCalQueryObjectsKeepsEventsThatCrossTheBounds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	fid := int64(mapi.PrivateFIDCalendar)
 	from := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
@@ -133,7 +133,7 @@ func TestCalQueryObjectsFallsBackOnOtherShapes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	fid := int64(mapi.PrivateFIDCalendar)
 
 	june := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)

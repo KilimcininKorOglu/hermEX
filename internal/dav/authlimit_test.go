@@ -51,7 +51,7 @@ func attempt(t *testing.T, ts *httptest.Server, user, pass string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	mustClose(t, resp.Body)
 	return resp.StatusCode
 }
 
@@ -81,29 +81,47 @@ func TestBasicAuthThrottlesGuessing(t *testing.T) {
 // TestBasicAuthThrottleIsPerAccount proves one account's lockout does not take
 // the whole deployment down with it.
 func TestBasicAuthThrottleIsPerAccount(t *testing.T) {
-	ts, _ := throttledServer(t)
+	ts, calls := throttledServer(t)
 
-	for range authlimit.DefaultMaxFails + 1 {
-		attempt(t, ts, testUser, "wrong")
+	failUntilLocked(t, ts, testUser, authlimit.DefaultMaxFails)
+	if code := attempt(t, ts, testUser, "wrong"); code != http.StatusTooManyRequests {
+		t.Fatalf("the guessed account status = %d, want 429 once locked out", code)
 	}
-	if code := attempt(t, ts, "bob@hermex.test", testPass); code == http.StatusTooManyRequests {
-		t.Error("another account was locked out too")
+	before := *calls
+	if code := attempt(t, ts, "bob@hermex.test", testPass); code == http.StatusTooManyRequests || code == http.StatusUnauthorized {
+		t.Errorf("another account's correct login = %d, want it served", code)
+	}
+	if *calls != before+1 {
+		t.Errorf("another account's password was checked %d times, want 1", *calls-before)
+	}
+}
+
+// failUntilLocked sends n wrong passwords for user and requires each to be
+// refused with 401 before any lockout applies.
+func failUntilLocked(t *testing.T, ts *httptest.Server, user string, n int) {
+	t.Helper()
+	for i := range n {
+		if code := attempt(t, ts, user, "wrong"); code != http.StatusUnauthorized {
+			t.Fatalf("wrong password %d status = %d, want 401", i+1, code)
+		}
 	}
 }
 
 // TestBasicAuthSuccessClearsTheCount proves a working client that mistypes a few
 // times is not locked out later for those old failures.
 func TestBasicAuthSuccessClearsTheCount(t *testing.T) {
-	ts, _ := throttledServer(t)
+	ts, calls := throttledServer(t)
 
-	for range authlimit.DefaultMaxFails - 1 {
-		attempt(t, ts, testUser, "wrong")
+	failUntilLocked(t, ts, testUser, authlimit.DefaultMaxFails-1)
+	if code := attempt(t, ts, testUser, testPass); code == http.StatusTooManyRequests || code == http.StatusUnauthorized {
+		t.Fatalf("the correct password below the cap = %d, want it served", code)
 	}
-	attempt(t, ts, testUser, testPass)
-	for range authlimit.DefaultMaxFails - 1 {
-		attempt(t, ts, testUser, "wrong")
+	failUntilLocked(t, ts, testUser, authlimit.DefaultMaxFails-1)
+	before := *calls
+	if code := attempt(t, ts, testUser, testPass); code == http.StatusTooManyRequests || code == http.StatusUnauthorized {
+		t.Errorf("a successful login did not clear the failure count: status %d", code)
 	}
-	if code := attempt(t, ts, testUser, testPass); code == http.StatusTooManyRequests {
-		t.Error("a successful login did not clear the failure count")
+	if *calls != before+1 {
+		t.Errorf("the password was checked %d times, want 1", *calls-before)
 	}
 }

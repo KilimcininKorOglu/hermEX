@@ -34,7 +34,7 @@ func TestSharedAccessFollowsFolderRights(t *testing.T) {
 		{Op: objectstore.PermAdd, Username: "rita@hermex.test", Rights: mapi.NormalizeRights(mapi.RightsReviewer, true)},
 		{Op: objectstore.PermAdd, Username: "ed@hermex.test", Rights: mapi.NormalizeRights(mapi.RightsEditor, true)},
 	}))
-	st.Close()
+	mustClose(t, st)
 
 	ts := httptest.NewServer(NewServer(accs, accs, "hermex.test").Handler())
 	t.Cleanup(ts.Close)
@@ -112,7 +112,7 @@ func TestSharedPropfindReportsTheGrant(t *testing.T) {
 	mustOK(t, st.ModifyPermissions(int64(mapi.PrivateFIDCalendar), false, []objectstore.PermissionChange{
 		{Op: objectstore.PermAdd, Username: "rita@hermex.test", Rights: mapi.NormalizeRights(mapi.RightsReviewer, true)},
 	}))
-	st.Close()
+	mustClose(t, st)
 	ts := httptest.NewServer(NewServer(accs, accs, "hermex.test").Handler())
 	t.Cleanup(ts.Close)
 
@@ -154,7 +154,7 @@ func moveReq(t *testing.T, ts *httptest.Server, src, dst, user string) int {
 	req.Header.Set("Destination", ts.URL+dst)
 	resp, err := http.DefaultClient.Do(req)
 	mustOK(t, err)
-	resp.Body.Close()
+	mustClose(t, resp.Body)
 	return resp.StatusCode
 }
 
@@ -166,7 +166,7 @@ func putVCard(t *testing.T, ts *httptest.Server, path, user string) int {
 	req.Header.Set("Content-Type", "text/vcard")
 	resp, err := http.DefaultClient.Do(req)
 	mustOK(t, err)
-	resp.Body.Close()
+	mustClose(t, resp.Body)
 	return resp.StatusCode
 }
 
@@ -186,7 +186,7 @@ func TestCopyMoveStaysUnderItsPrincipal(t *testing.T) {
 	mustOK(t, st.ModifyPermissions(int64(mapi.PrivateFIDCalendar), false, []objectstore.PermissionChange{
 		{Op: objectstore.PermAdd, Username: "ed@hermex.test", Rights: mapi.NormalizeRights(mapi.RightsEditor, true)},
 	}))
-	st.Close()
+	mustClose(t, st)
 	ts := httptest.NewServer(NewServer(accs, accs, "hermex.test").Handler())
 	t.Cleanup(ts.Close)
 	cal := "/dav/calendars/" + testUser + "/calendar/"
@@ -201,7 +201,7 @@ func TestCopyMoveStaysUnderItsPrincipal(t *testing.T) {
 		req.Header.Set("Destination", ts.URL+foreign)
 		resp, err := http.DefaultClient.Do(req)
 		mustOK(t, err)
-		resp.Body.Close()
+		mustClose(t, resp.Body)
 		if resp.StatusCode != http.StatusForbidden {
 			t.Errorf("%s to another principal: status %d, want 403", method, resp.StatusCode)
 		}

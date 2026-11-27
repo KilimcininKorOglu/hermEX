@@ -30,7 +30,7 @@ func TestAnotherOrganizationsCalendarIsNotShared(t *testing.T) {
 		{Op: objectstore.PermAdd, Username: "rita@hermex.test", Rights: rights},
 		{Op: objectstore.PermAdd, Username: "omar@other.test", Rights: rights},
 	}))
-	st.Close()
+	mustClose(t, st)
 	ts := httptest.NewServer(NewServer(accs, accs, "hermex.test").Handler())
 	t.Cleanup(ts.Close)
 	cal := "/dav/calendars/" + testUser + "/calendar/"

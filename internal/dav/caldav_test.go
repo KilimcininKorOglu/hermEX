@@ -36,11 +36,9 @@ func seedCalendar(t *testing.T, names ...string) directory.StaticAccounts {
 			{Tag: mapi.PrSubject, Value: name},
 			{Tag: rnTag, Value: name + ".ics"},
 		}}
-		if _, err := st.CreateMessage(mapi.PrivateFIDCalendar, msg); err != nil {
-			t.Fatal(err)
-		}
+		mustCreate(t, st, mapi.PrivateFIDCalendar, msg)
 	}
-	st.Close()
+	mustClose(t, st)
 	return directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
 }
 
@@ -57,7 +55,7 @@ func davServerCal(t *testing.T, names ...string) *httptest.Server {
 // TestOptionsCalendarAccess confirms OPTIONS advertises CalDAV support.
 func TestOptionsCalendarAccess(t *testing.T) {
 	ts := davServerCal(t)
-	resp, _ := do(t, ts, "OPTIONS", "/dav/calendars/"+testUser+"/calendar/", "", true)
+	resp := doStatus(t, ts, "OPTIONS", "/dav/calendars/"+testUser+"/calendar/", "", true)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d, want 200", resp.StatusCode)
 	}
@@ -138,7 +136,7 @@ func TestCalPutGetRoundTrip(t *testing.T) {
 			t.Errorf("GET body missing %q\n%s", want, body)
 		}
 	}
-	_, pf := doFull(t, ts, "PROPFIND", calURL(""), "", map[string]string{"Depth": "1"})
+	pf := doFullBody(t, ts, "PROPFIND", calURL(""), "", map[string]string{"Depth": "1"})
 	if !strings.Contains(pf, "plan.ics") {
 		t.Errorf("PROPFIND lacks the PUT resource name plan.ics\n%s", pf)
 	}
@@ -153,7 +151,7 @@ func TestCalRecurringVerbatim(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("PUT status %d, want 201\n%s", resp.StatusCode, body)
 	}
-	_, get := doFull(t, ts, "GET", url, "", nil)
+	get := doFullBody(t, ts, "GET", url, "", nil)
 	if !strings.Contains(get, "RRULE:FREQ=WEEKLY;BYDAY=MO") {
 		t.Errorf("recurring GET lost its RRULE\n%s", get)
 	}
@@ -164,7 +162,7 @@ func TestCalIfMatchConflict(t *testing.T) {
 	ts := davServerCal(t)
 	url := calURL("plan.ics")
 	doFull(t, ts, "PUT", url, timedEventICS, nil)
-	resp, _ := doFull(t, ts, "PUT", url, timedEventICS, map[string]string{"If-Match": `"99999"`})
+	resp := doFullStatus(t, ts, "PUT", url, timedEventICS, map[string]string{"If-Match": `"99999"`})
 	if resp.StatusCode != http.StatusPreconditionFailed {
 		t.Errorf("stale If-Match: status %d, want 412", resp.StatusCode)
 	}
@@ -176,11 +174,11 @@ func TestCalDelete(t *testing.T) {
 	url := calURL("plan.ics")
 	doFull(t, ts, "PUT", url, timedEventICS, nil)
 
-	resp, _ := doFull(t, ts, "DELETE", url, "", nil)
+	resp := doFullStatus(t, ts, "DELETE", url, "", nil)
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("DELETE status %d, want 204", resp.StatusCode)
 	}
-	resp, _ = doFull(t, ts, "GET", url, "", nil)
+	resp = doFullStatus(t, ts, "GET", url, "", nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("GET after delete: status %d, want 404", resp.StatusCode)
 	}
@@ -273,7 +271,7 @@ func TestCalReportQueryFilter(t *testing.T) {
     <c:prop-filter name="UID"><c:text-match>cal-9</c:text-match></c:prop-filter>
   </c:comp-filter></c:comp-filter></c:filter>
 </c:calendar-query>`
-	_, out = doFull(t, ts, "REPORT", calURL(""), uidFilter, map[string]string{"Depth": "1"})
+	out = doFullBody(t, ts, "REPORT", calURL(""), uidFilter, map[string]string{"Depth": "1"})
 	if !strings.Contains(out, "SUMMARY:Yearend") || strings.Contains(out, "SUMMARY:Planning") {
 		t.Errorf("UID prop-filter returned the wrong set (want cal-9 only)\n%s", out)
 	}
@@ -319,13 +317,13 @@ func TestCalReportSyncDelete(t *testing.T) {
 	doFull(t, ts, "PUT", calURL("plan.ics"), timedEventICS, nil)
 
 	initial := `<d:sync-collection xmlns:d="DAV:"><d:sync-token/><d:sync-level>1</d:sync-level><d:prop><d:getetag/></d:prop></d:sync-collection>`
-	_, out := doFull(t, ts, "REPORT", calURL(""), initial, nil)
+	out := doFullBody(t, ts, "REPORT", calURL(""), initial, nil)
 	token := syncTokenRE.FindString(out)
 	if token == "" {
 		t.Fatalf("initial sync returned no sync-token\n%s", out)
 	}
 
-	if resp, _ := doFull(t, ts, "DELETE", calURL("plan.ics"), "", nil); resp.StatusCode != http.StatusNoContent {
+	if resp := doFullStatus(t, ts, "DELETE", calURL("plan.ics"), "", nil); resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("DELETE status %d, want 204", resp.StatusCode)
 	}
 
@@ -340,7 +338,7 @@ func TestCalReportSyncDelete(t *testing.T) {
 	token2 := syncTokenRE.FindString(out)
 
 	again := `<d:sync-collection xmlns:d="DAV:"><d:sync-token>` + token2 + `</d:sync-token><d:sync-level>1</d:sync-level><d:prop><d:getetag/></d:prop></d:sync-collection>`
-	_, out = doFull(t, ts, "REPORT", calURL(""), again, nil)
+	out = doFullBody(t, ts, "REPORT", calURL(""), again, nil)
 	if strings.Contains(out, "plan.ics") {
 		t.Errorf("tombstone re-reported on the next sync (token did not advance past the delete)\n%s", out)
 	}
@@ -389,7 +387,7 @@ func TestCalFreeBusyCountsEveryInstance(t *testing.T) {
 	body := `<c:free-busy-query xmlns:c="urn:ietf:params:xml:ns:caldav">
   <c:time-range start="20260706T000000Z" end="20260720T000000Z"/>
 </c:free-busy-query>`
-	_, out := doFull(t, ts, "REPORT", calURL(""), body, map[string]string{"Depth": "1"})
+	out := doFullBody(t, ts, "REPORT", calURL(""), body, map[string]string{"Depth": "1"})
 	for _, want := range []string{"20260706T090000Z/20260706T100000Z", "20260713T090000Z/20260713T100000Z"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("free-busy missing the instance %s\n%s", want, out)
@@ -428,16 +426,16 @@ func TestMkCalendarCollection(t *testing.T) {
 	ts := davServerCal(t)
 	work := "/dav/calendars/" + testUser + "/work/"
 
-	resp, _ := doFull(t, ts, "MKCALENDAR", work, "", nil)
+	resp := doFullStatus(t, ts, "MKCALENDAR", work, "", nil)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("MKCALENDAR status %d, want 201", resp.StatusCode)
 	}
-	resp, _ = doFull(t, ts, "MKCALENDAR", work, "", nil)
+	resp = doFullStatus(t, ts, "MKCALENDAR", work, "", nil)
 	if resp.StatusCode != http.StatusMethodNotAllowed {
 		t.Errorf("MKCALENDAR on existing collection: status %d, want 405", resp.StatusCode)
 	}
 
-	resp, _ = doFull(t, ts, "PUT", work+"ev.ics", timedEventICS, nil)
+	resp = doFullStatus(t, ts, "PUT", work+"ev.ics", timedEventICS, nil)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("PUT into new calendar: status %d, want 201", resp.StatusCode)
 	}
@@ -446,11 +444,11 @@ func TestMkCalendarCollection(t *testing.T) {
 		t.Errorf("GET from new calendar: status %d\n%s", resp.StatusCode, body)
 	}
 	// The object must not leak into the well-known calendar.
-	if resp, _ := doFull(t, ts, "GET", calURL("ev.ics"), "", nil); resp.StatusCode != http.StatusNotFound {
+	if resp := doFullStatus(t, ts, "GET", calURL("ev.ics"), "", nil); resp.StatusCode != http.StatusNotFound {
 		t.Errorf("event leaked into the default calendar: status %d, want 404", resp.StatusCode)
 	}
 
-	_, body = doFull(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/", "", map[string]string{"Depth": "1"})
+	body = doFullBody(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/", "", map[string]string{"Depth": "1"})
 	if !strings.Contains(body, "/calendar/") || !strings.Contains(body, "/work/") {
 		t.Errorf("calendar home set did not list both collections\n%s", body)
 	}
@@ -464,7 +462,7 @@ func TestCalProppatch(t *testing.T) {
 	cal := calURL("")
 
 	propfind := func() string {
-		_, out := doFull(t, ts, "PROPFIND", cal, "", map[string]string{"Depth": "0"})
+		out := doFullBody(t, ts, "PROPFIND", cal, "", map[string]string{"Depth": "0"})
 		return out
 	}
 
@@ -482,7 +480,7 @@ func TestCalProppatch(t *testing.T) {
 	wantContains(t, out, "403 Forbidden", "protected property is rejected")
 
 	setName := `<d:propertyupdate xmlns:d="DAV:"><d:set><d:prop><d:displayname>Work Cal</d:displayname></d:prop></d:set></d:propertyupdate>`
-	resp, _ = doFull(t, ts, "PROPPATCH", cal, setName, nil)
+	resp = doFullStatus(t, ts, "PROPPATCH", cal, setName, nil)
 	wantStatus(t, resp, http.StatusMultiStatus, "displayname PROPPATCH")
 	out = propfind()
 	wantContains(t, out, "Work Cal", "PROPFIND serves the stored displayname")
@@ -490,7 +488,7 @@ func TestCalProppatch(t *testing.T) {
 
 	rmColor := `<d:propertyupdate xmlns:d="DAV:" xmlns:x="http://apple.com/ns/ical/">` +
 		`<d:remove><d:prop><x:calendar-color/></d:prop></d:remove></d:propertyupdate>`
-	resp, _ = doFull(t, ts, "PROPPATCH", cal, rmColor, nil)
+	resp = doFullStatus(t, ts, "PROPPATCH", cal, rmColor, nil)
 	wantStatus(t, resp, http.StatusMultiStatus, "remove PROPPATCH")
 	wantNotContains(t, propfind(), "#FF2968", "removed dead property is gone")
 }
@@ -504,31 +502,31 @@ func TestCalCopyMove(t *testing.T) {
 	doFull(t, ts, "MKCALENDAR", work, "", nil)
 	doFull(t, ts, "PUT", calURL("ev.ics"), timedEventICS, nil)
 
-	resp, _ := doFull(t, ts, "COPY", calURL("ev.ics"), "", map[string]string{"Destination": work + "copy.ics"})
+	resp := doFullStatus(t, ts, "COPY", calURL("ev.ics"), "", map[string]string{"Destination": work + "copy.ics"})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("COPY status %d, want 201", resp.StatusCode)
 	}
-	if resp, _ := doFull(t, ts, "GET", calURL("ev.ics"), "", nil); resp.StatusCode != http.StatusOK {
+	if resp := doFullStatus(t, ts, "GET", calURL("ev.ics"), "", nil); resp.StatusCode != http.StatusOK {
 		t.Errorf("COPY removed the source: status %d, want 200", resp.StatusCode)
 	}
 	if resp, body := doFull(t, ts, "GET", work+"copy.ics", "", nil); resp.StatusCode != http.StatusOK || !strings.Contains(body, "Planning") {
 		t.Errorf("COPY destination missing or wrong: status %d\n%s", resp.StatusCode, body)
 	}
 
-	if resp, _ := doFull(t, ts, "COPY", calURL("ev.ics"), "", map[string]string{"Destination": work + "copy.ics", "Overwrite": "F"}); resp.StatusCode != http.StatusPreconditionFailed {
+	if resp := doFullStatus(t, ts, "COPY", calURL("ev.ics"), "", map[string]string{"Destination": work + "copy.ics", "Overwrite": "F"}); resp.StatusCode != http.StatusPreconditionFailed {
 		t.Errorf("COPY Overwrite:F onto existing: status %d, want 412", resp.StatusCode)
 	}
-	if resp, _ := doFull(t, ts, "COPY", calURL("ev.ics"), "", map[string]string{"Destination": calURL("ev.ics")}); resp.StatusCode != http.StatusForbidden {
+	if resp := doFullStatus(t, ts, "COPY", calURL("ev.ics"), "", map[string]string{"Destination": calURL("ev.ics")}); resp.StatusCode != http.StatusForbidden {
 		t.Errorf("COPY to the same resource: status %d, want 403", resp.StatusCode)
 	}
 
-	if resp, _ := doFull(t, ts, "MOVE", calURL("ev.ics"), "", map[string]string{"Destination": work + "moved.ics"}); resp.StatusCode != http.StatusCreated {
+	if resp := doFullStatus(t, ts, "MOVE", calURL("ev.ics"), "", map[string]string{"Destination": work + "moved.ics"}); resp.StatusCode != http.StatusCreated {
 		t.Fatalf("MOVE status %d, want 201", resp.StatusCode)
 	}
-	if resp, _ := doFull(t, ts, "GET", calURL("ev.ics"), "", nil); resp.StatusCode != http.StatusNotFound {
+	if resp := doFullStatus(t, ts, "GET", calURL("ev.ics"), "", nil); resp.StatusCode != http.StatusNotFound {
 		t.Errorf("MOVE did not remove the source: status %d, want 404", resp.StatusCode)
 	}
-	if resp, _ := doFull(t, ts, "GET", work+"moved.ics", "", nil); resp.StatusCode != http.StatusOK {
+	if resp := doFullStatus(t, ts, "GET", work+"moved.ics", "", nil); resp.StatusCode != http.StatusOK {
 		t.Errorf("MOVE destination missing: status %d, want 200", resp.StatusCode)
 	}
 }
@@ -542,10 +540,10 @@ func TestCalCopyRefusesAnotherPrincipal(t *testing.T) {
 	ts := davServerCal(t)
 	doFull(t, ts, "PUT", calURL("ev.ics"), timedEventICS, nil)
 	other := "/dav/calendars/other@hermex.test/calendar/stray.ics"
-	if resp, _ := doFull(t, ts, "COPY", calURL("ev.ics"), "", map[string]string{"Destination": other}); resp.StatusCode != http.StatusForbidden {
+	if resp := doFullStatus(t, ts, "COPY", calURL("ev.ics"), "", map[string]string{"Destination": other}); resp.StatusCode != http.StatusForbidden {
 		t.Errorf("COPY to another principal: status %d, want 403", resp.StatusCode)
 	}
-	if resp, _ := doFull(t, ts, "GET", calURL("stray.ics"), "", nil); resp.StatusCode != http.StatusNotFound {
+	if resp := doFullStatus(t, ts, "GET", calURL("stray.ics"), "", nil); resp.StatusCode != http.StatusNotFound {
 		t.Errorf("COPY to another principal filed the copy in the caller's store: status %d, want 404", resp.StatusCode)
 	}
 }
@@ -558,14 +556,12 @@ func seedTimedCalendar(t *testing.T, dir, ics string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msg, err := oxcical.Import([]byte(ics), icalOptions(st))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.CreateMessage(mapi.PrivateFIDCalendar, msg); err != nil {
-		t.Fatal(err)
-	}
+	mustCreate(t, st, mapi.PrivateFIDCalendar, msg)
 }
 
 // freeBusyRequest is an iTIP free-busy request body for an Outbox POST.
@@ -619,13 +615,13 @@ func TestOutboxFreeBusyNeedsTheRight(t *testing.T) {
 	ts := httptest.NewServer(NewServer(accs, accs, "hermex.test").Handler())
 	t.Cleanup(ts.Close)
 
-	_, out := doFull(t, ts, "POST", "/dav/calendars/"+testUser+"/outbox/", freeBusyRequest(testUser, bob), nil)
+	out := doFullBody(t, ts, "POST", "/dav/calendars/"+testUser+"/outbox/", freeBusyRequest(testUser, bob), nil)
 	if !strings.Contains(out, "3.8;No authority") || strings.Contains(out, "FREEBUSY;FBTYPE=BUSY") {
 		t.Errorf("a calendar with no free/busy right answered:\n%s", out)
 	}
 
 	setCalendarRight(t, bobDir, objectstore.PermissionChange{Op: objectstore.PermAdd, Username: testUser, Rights: mapi.FrightsFreeBusySimple})
-	_, out = doFull(t, ts, "POST", "/dav/calendars/"+testUser+"/outbox/", freeBusyRequest(testUser, bob), nil)
+	out = doFullBody(t, ts, "POST", "/dav/calendars/"+testUser+"/outbox/", freeBusyRequest(testUser, bob), nil)
 	if !strings.Contains(out, "FREEBUSY;FBTYPE=BUSY:20260615T140000Z/20260615T150000Z") {
 		t.Errorf("a granted free/busy right did not answer:\n%s", out)
 	}
@@ -638,7 +634,7 @@ func setCalendarRight(t *testing.T, dir string, change objectstore.PermissionCha
 	if err != nil {
 		t.Fatalf("open %s: %v", dir, err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if err := st.ModifyPermissions(int64(mapi.PrivateFIDCalendar), false, []objectstore.PermissionChange{change}); err != nil {
 		t.Fatalf("set calendar right: %v", err)
 	}
@@ -741,7 +737,7 @@ func TestRequestsNeverCreateAMissingMailbox(t *testing.T) {
 	ts := httptest.NewServer(NewServer(accs, accs, "hermex.test").Handler())
 	t.Cleanup(ts.Close)
 
-	resp, _ := do(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/", "", true)
+	resp := doStatus(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/", "", true)
 	if resp.StatusCode < 400 {
 		t.Errorf("PROPFIND on a missing mailbox = %d, want a failure", resp.StatusCode)
 	}
@@ -752,33 +748,44 @@ func TestRequestsNeverCreateAMissingMailbox(t *testing.T) {
 
 // inboxMessage reports the count, message class, and subject of the first message in
 // a mailbox's Inbox, so a delivery test can confirm what landed there.
-func inboxMessage(t *testing.T, dir string) (count int, class, subject string) {
+func inboxMessage(t *testing.T, dir string) inboxSummary {
 	t.Helper()
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDInbox))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(objs) == 0 {
-		return 0, "", ""
+		return inboxSummary{}
 	}
 	msg, err := st.OpenMessage(objs[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	}
+	sum := inboxSummary{count: len(objs)}
 	for _, p := range msg.Props {
+		s, isString := p.Value.(string)
+		if !isString {
+			continue
+		}
 		switch p.Tag {
 		case mapi.PrMessageClass:
-			class, _ = p.Value.(string)
+			sum.class = s
 		case mapi.PrSubject:
-			subject, _ = p.Value.(string)
+			sum.subject = s
 		}
 	}
-	return len(objs), class, subject
+	return sum
+}
+
+// inboxSummary is what inboxMessage reports about a mailbox's Inbox.
+type inboxSummary struct {
+	count          int
+	class, subject string
 }
 
 func meetingRequestICS(organizer, attendee string) string {
@@ -800,7 +807,8 @@ func TestOutboxDeliverRequest(t *testing.T) {
 	if !strings.Contains(out, "bob@hermex.test") || !strings.Contains(out, "2.0;Success") {
 		t.Errorf("schedule-response did not report bob scheduled\n%s", out)
 	}
-	n, class, subject := inboxMessage(t, bobDir)
+	got := inboxMessage(t, bobDir)
+	n, class, subject := got.count, got.class, got.subject
 	if n != 1 {
 		t.Fatalf("bob's inbox has %d messages, want 1", n)
 	}
@@ -853,7 +861,8 @@ func TestOutboxDeliverReply(t *testing.T) {
 	if !strings.Contains(out, "bob@hermex.test") || !strings.Contains(out, "2.0;Success") {
 		t.Errorf("schedule-response did not report the reply delivered\n%s", out)
 	}
-	n, class, _ := inboxMessage(t, bobDir)
+	got := inboxMessage(t, bobDir)
+	n, class := got.count, got.class
 	if n != 1 {
 		t.Fatalf("organizer's inbox has %d messages, want 1", n)
 	}
@@ -875,7 +884,7 @@ func TestOutboxRefusesAReplyForAnotherAttendee(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("forged REPLY: status %d, want 403\n%s", resp.StatusCode, out)
 	}
-	if n, _, _ := inboxMessage(t, bobDir); n != 0 {
+	if n := inboxMessage(t, bobDir).count; n != 0 {
 		t.Errorf("the organizer received %d messages from a forged REPLY, want 0", n)
 	}
 }
@@ -906,16 +915,16 @@ func TestScheduleDiscovery(t *testing.T) {
 func TestSchedulingCollections(t *testing.T) {
 	ts := davServerCal(t)
 
-	_, in := do(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/inbox/", "0", true)
+	in := doBody(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/inbox/", "0", true)
 	if !strings.Contains(in, "schedule-inbox") || strings.Contains(in, "<C:calendar/>") {
 		t.Errorf("inbox PROPFIND lacks schedule-inbox resourcetype\n%s", in)
 	}
-	_, out := do(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/outbox/", "0", true)
+	out := doBody(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/outbox/", "0", true)
 	if !strings.Contains(out, "schedule-outbox") {
 		t.Errorf("outbox PROPFIND lacks schedule-outbox resourcetype\n%s", out)
 	}
 
-	_, home := doFull(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/", "", map[string]string{"Depth": "1"})
+	home := doFullBody(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/", "", map[string]string{"Depth": "1"})
 	for _, want := range []string{"/inbox/", "/outbox/", "schedule-inbox", "schedule-outbox"} {
 		if !strings.Contains(home, want) {
 			t.Errorf("calendar home set missing %q\n%s", want, home)
@@ -931,13 +940,13 @@ func TestScheduleNameReserved(t *testing.T) {
 		path := "/dav/calendars/" + testUser + "/" + name + "/"
 		// The reserved segment is a scheduling collection, so MKCALENDAR over it is
 		// not allowed (405), the client cannot create a user calendar that shadows it.
-		if resp, _ := doFull(t, ts, "MKCALENDAR", path, "", nil); resp.StatusCode != http.StatusMethodNotAllowed {
+		if resp := doFullStatus(t, ts, "MKCALENDAR", path, "", nil); resp.StatusCode != http.StatusMethodNotAllowed {
 			t.Errorf("MKCALENDAR %s: status %d, want 405", name, resp.StatusCode)
 		}
 	}
 	// A PUT addressing the reserved name as if it were a user calendar must not land
 	// the object (the segment is a scheduling collection, not a calendar).
-	if resp, _ := doFull(t, ts, "PUT", "/dav/calendars/"+testUser+"/inbox/x.ics", timedEventICS, nil); resp.StatusCode == http.StatusCreated {
+	if resp := doFullStatus(t, ts, "PUT", "/dav/calendars/"+testUser+"/inbox/x.ics", timedEventICS, nil); resp.StatusCode == http.StatusCreated {
 		t.Errorf("PUT into the scheduling Inbox as a calendar succeeded (status %d); want rejection", resp.StatusCode)
 	}
 }
@@ -954,11 +963,11 @@ func TestQuotaProps(t *testing.T) {
 	if err := st.SetQuota(objectstore.QuotaLimits{StorageKB: 1024}); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
 	ts := httptest.NewServer(NewServer(accs, accs, "hermex.test").Handler())
 	t.Cleanup(ts.Close)
-	_, body := do(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/calendar/", "0", true)
+	body := doBody(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/calendar/", "0", true)
 	for _, want := range []string{"quota-used-bytes", "quota-available-bytes"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("limited mailbox PROPFIND missing %q\n%s", want, body)
@@ -967,7 +976,7 @@ func TestQuotaProps(t *testing.T) {
 
 	// An unlimited mailbox reports used but omits available.
 	ts2 := davServerCal(t)
-	_, body2 := do(t, ts2, "PROPFIND", "/dav/calendars/"+testUser+"/calendar/", "0", true)
+	body2 := doBody(t, ts2, "PROPFIND", "/dav/calendars/"+testUser+"/calendar/", "0", true)
 	if !strings.Contains(body2, "quota-used-bytes") {
 		t.Errorf("unlimited mailbox missing quota-used-bytes\n%s", body2)
 	}
@@ -1033,7 +1042,7 @@ func TestExpandProperty(t *testing.T) {
 // (RFC 3744 §5.4).
 func TestCurrentUserPrivilegeSet(t *testing.T) {
 	ts := davServerCal(t)
-	_, body := do(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/calendar/", "0", true)
+	body := doBody(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/calendar/", "0", true)
 	for _, want := range []string{
 		"current-user-privilege-set", "write-content", "read-acl", "read-free-busy",
 		"owner", "/dav/principals/" + testUser + "/",
@@ -1070,7 +1079,7 @@ func TestCalDAVTasksVTODO(t *testing.T) {
 		t.Errorf("VTODO missing DUE: %s", body)
 	}
 
-	_, home := do(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/", "1", true)
+	home := doBody(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/", "1", true)
 	if !strings.Contains(home, "/dav/calendars/"+testUser+"/tasks/") {
 		t.Errorf("home set missing tasks collection: %s", home)
 	}
@@ -1084,21 +1093,21 @@ func TestCalDAVTasksVTODO(t *testing.T) {
 func TestSupportedReportSet(t *testing.T) {
 	ts := davServerCal(t)
 
-	_, cal := do(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/calendar/", "0", true)
+	cal := doBody(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/calendar/", "0", true)
 	for _, want := range []string{"supported-report-set", "calendar-query", "calendar-multiget", "free-busy-query", "sync-collection"} {
 		if !strings.Contains(cal, want) {
 			t.Errorf("calendar PROPFIND missing %q: %s", want, cal)
 		}
 	}
 
-	_, card := do(t, ts, "PROPFIND", "/dav/addressbooks/"+testUser+"/contacts/", "0", true)
+	card := doBody(t, ts, "PROPFIND", "/dav/addressbooks/"+testUser+"/contacts/", "0", true)
 	for _, want := range []string{"addressbook-query", "addressbook-multiget"} {
 		if !strings.Contains(card, want) {
 			t.Errorf("addressbook PROPFIND missing %q: %s", want, card)
 		}
 	}
 
-	_, pr := do(t, ts, "PROPFIND", "/dav/principals/"+testUser+"/", "0", true)
+	pr := doBody(t, ts, "PROPFIND", "/dav/principals/"+testUser+"/", "0", true)
 	if !strings.Contains(pr, "principal-property-search") {
 		t.Errorf("principal PROPFIND missing principal-property-search: %s", pr)
 	}

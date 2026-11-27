@@ -31,7 +31,7 @@ func TestValidObjectName(t *testing.T) {
 // is refused with 400 rather than stored as the reflected DavResourceName.
 func TestPutRejectsUnsafeName(t *testing.T) {
 	ts := davServer(t)
-	resp, _ := doFull(t, ts, "PUT", contactURL(`a\b.vcf`), adaVCard,
+	resp := doFullStatus(t, ts, "PUT", contactURL(`a\b.vcf`), adaVCard,
 		map[string]string{"Content-Type": "text/vcard"})
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("PUT unsafe name status %d, want 400", resp.StatusCode)
@@ -46,14 +46,14 @@ func TestCopyMoveRejectUnsafeDestinationName(t *testing.T) {
 	doFull(t, ts, "PUT", contactURL("ada.vcf"), adaVCard, map[string]string{"Content-Type": "text/vcard"})
 	for _, method := range []string{"COPY", "MOVE"} {
 		for _, name := range []string{"page.html", "a%5Cb.vcf"} {
-			resp, _ := doFull(t, ts, method, contactURL("ada.vcf"), "",
+			resp := doFullStatus(t, ts, method, contactURL("ada.vcf"), "",
 				map[string]string{"Destination": contactURL(name)})
 			if resp.StatusCode != http.StatusBadRequest {
 				t.Errorf("%s to %q: status %d, want 400", method, name, resp.StatusCode)
 			}
 		}
 	}
-	if resp, _ := doFull(t, ts, "GET", contactURL("page.html"), "", nil); resp.StatusCode != http.StatusNotFound {
+	if resp := doFullStatus(t, ts, "GET", contactURL("page.html"), "", nil); resp.StatusCode != http.StatusNotFound {
 		t.Errorf("an unsafe destination name was filed: status %d, want 404", resp.StatusCode)
 	}
 }

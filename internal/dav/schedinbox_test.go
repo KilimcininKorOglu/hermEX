@@ -33,23 +33,18 @@ func bobDav(t *testing.T, ts *httptest.Server, method, path, depth, body string)
 // accept-then-delete flow) removes it.
 func TestScheduleInboxReceiving(t *testing.T) {
 	const bob = "bob@hermex.test"
-	ts, _ := davServerWithPeer(t)
+	ts, bobDir := davServerWithPeer(t)
 
 	body := schedEvent("inv-1", testUser, "Review", "20260701T140000Z", 0, bob)
 	if resp, out := doFull(t, ts, "PUT", "/dav/calendars/"+testUser+"/calendar/inv-1.ics", body, nil); resp.StatusCode != http.StatusCreated {
 		t.Fatalf("organizer PUT status %d, want 201\n%s", resp.StatusCode, out)
 	}
+	if n := inboxMessage(t, bobDir).count; n != 1 {
+		t.Fatalf("attendee Inbox holds %d messages after the invite, want 1", n)
+	}
 
 	inbox := "/dav/calendars/" + bob + "/inbox/"
-	resp, listing := bobDav(t, ts, "PROPFIND", inbox, "1", "")
-	if resp.StatusCode != http.StatusMultiStatus {
-		t.Fatalf("inbox PROPFIND status %d, want 207\n%s", resp.StatusCode, listing)
-	}
-	m := regexp.MustCompile(`/inbox/(\d+\.ics)`).FindStringSubmatch(listing)
-	if m == nil {
-		t.Fatalf("scheduling Inbox lists no member after an invite was delivered\n%s", listing)
-	}
-	member := inbox + m[1]
+	member := inbox + inboxMember(t, ts, inbox)
 
 	resp, ics := bobDav(t, ts, "GET", member, "", "")
 	if resp.StatusCode != http.StatusOK {
@@ -59,10 +54,37 @@ func TestScheduleInboxReceiving(t *testing.T) {
 		t.Errorf("inbox object is not a valid iTIP REQUEST:\n%s", ics)
 	}
 
-	if resp, _ := bobDav(t, ts, "DELETE", member, "", ""); resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("inbox DELETE status %d, want 204", resp.StatusCode)
+	if resp, out := bobDav(t, ts, "DELETE", member, "", ""); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("inbox DELETE status %d, want 204\n%s", resp.StatusCode, out)
 	}
-	if _, after := bobDav(t, ts, "PROPFIND", inbox, "1", ""); regexp.MustCompile(`/inbox/\d+\.ics`).MatchString(after) {
-		t.Errorf("scheduling Inbox still lists a member after DELETE:\n%s", after)
+	if listing := inboxListing(t, ts, inbox); inboxMemberRE.MatchString(listing) {
+		t.Errorf("scheduling Inbox still lists a member after DELETE:\n%s", listing)
 	}
+	if n := inboxMessage(t, bobDir).count; n != 0 {
+		t.Errorf("attendee Inbox holds %d messages after DELETE, want 0", n)
+	}
+}
+
+// inboxMemberRE matches a scheduling Inbox member href and captures its name.
+var inboxMemberRE = regexp.MustCompile(`/inbox/(\d+\.ics)`)
+
+// inboxListing PROPFINDs bob's scheduling Inbox and requires a 207.
+func inboxListing(t *testing.T, ts *httptest.Server, inbox string) string {
+	t.Helper()
+	resp, listing := bobDav(t, ts, "PROPFIND", inbox, "1", "")
+	if resp.StatusCode != http.StatusMultiStatus {
+		t.Fatalf("inbox PROPFIND status %d, want 207\n%s", resp.StatusCode, listing)
+	}
+	return listing
+}
+
+// inboxMember returns the name of the one member bob's scheduling Inbox lists.
+func inboxMember(t *testing.T, ts *httptest.Server, inbox string) string {
+	t.Helper()
+	listing := inboxListing(t, ts, inbox)
+	m := inboxMemberRE.FindStringSubmatch(listing)
+	if m == nil {
+		t.Fatalf("scheduling Inbox lists no member after an invite was delivered\n%s", listing)
+	}
+	return m[1]
 }

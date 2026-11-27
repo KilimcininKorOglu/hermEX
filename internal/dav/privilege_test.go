@@ -43,7 +43,7 @@ func TestDAVPrivilegeDenied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer mustClose(t, resp.Body)
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("DAV request with a valid password but no DAV privilege got %d, want 403", resp.StatusCode)
 	}

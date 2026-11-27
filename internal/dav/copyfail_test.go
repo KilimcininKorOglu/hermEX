@@ -19,7 +19,7 @@ func TestAFailedOverwritingCopyKeepsTheDestination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	fid := int64(mapi.PrivateFIDContacts)
 	seed := func(subject string) int64 {
 		id, err := st.CreateMessage(fid, &oxcmail.Message{Props: mapi.PropertyValues{
@@ -33,7 +33,7 @@ func TestAFailedOverwritingCopyKeepsTheDestination(t *testing.T) {
 	src, dst := seed("source"), seed("destination")
 
 	prev := createCopy
-	createCopy = func(*objectstore.Store, int64, *oxcmail.Message) (int64, error) { return 0, errors.New("disk full") }
+	createCopy = func(*objectstore.Store, int64, *oxcmail.Message) error { return errors.New("disk full") }
 	defer func() { createCopy = prev }()
 
 	ends := copyMoveEnds{srcFID: fid, dstFID: fid,

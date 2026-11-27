@@ -36,11 +36,11 @@ func TestAWriteIntoAFullMailboxIsRefusedAs507(t *testing.T) {
 		}
 	}
 	for _, p := range []string{calURL("new.ics"), contactURL("new.vcf"), calURL("copy.ics")} {
-		if resp, _ := doFull(t, ts, "GET", p, "", nil); resp.StatusCode != http.StatusNotFound {
+		if resp := doFullStatus(t, ts, "GET", p, "", nil); resp.StatusCode != http.StatusNotFound {
 			t.Errorf("a refused write was stored at %s: status %d", p, resp.StatusCode)
 		}
 	}
-	if resp, _ := doFull(t, ts, "PUT", calURL("ev.ics"), timedEventICS, nil); resp.StatusCode >= 300 {
+	if resp := doFullStatus(t, ts, "PUT", calURL("ev.ics"), timedEventICS, nil); resp.StatusCode >= 300 {
 		t.Errorf("a PUT over an existing event in a full mailbox: status %d, want success", resp.StatusCode)
 	}
 }
@@ -52,10 +52,11 @@ func fillPastQuota(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	big := "Subject: big\r\n\r\n" + strings.Repeat("x", 4096)
-	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(big), time.Unix(3, 0), 0); err != nil {
-		t.Fatal(err)
+	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(big), time.Unix(3, 0), 0)
+	if err != nil || info.UID == 0 {
+		t.Fatalf("append the filler message: uid=%d err=%v", info.UID, err)
 	}
 	if err := st.SetQuota(objectstore.QuotaLimits{ReceiveKB: 1}); err != nil {
 		t.Fatal(err)
@@ -83,11 +84,11 @@ func TestOversizedBodyIsRefusedAs413(t *testing.T) {
 		{"PROPPATCH", "/dav/calendars/" + testUser + "/calendar/"},
 	}
 	for _, c := range cases {
-		if resp, _ := doFull(t, ts, c.method, c.path, big, nil); resp.StatusCode != http.StatusRequestEntityTooLarge {
+		if resp := doFullStatus(t, ts, c.method, c.path, big, nil); resp.StatusCode != http.StatusRequestEntityTooLarge {
 			t.Errorf("%s %s with a body over the cap: status %d, want 413", c.method, c.path, resp.StatusCode)
 		}
 	}
-	if resp, _ := doFull(t, ts, "GET", calURL("big.ics"), "", nil); resp.StatusCode != http.StatusNotFound {
+	if resp := doFullStatus(t, ts, "GET", calURL("big.ics"), "", nil); resp.StatusCode != http.StatusNotFound {
 		t.Errorf("the refused PUT was stored: status %d, want 404", resp.StatusCode)
 	}
 }

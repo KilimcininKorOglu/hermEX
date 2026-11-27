@@ -56,7 +56,9 @@ func TestSelectAddressDataReport(t *testing.T) {
 	if !strings.Contains(body, "FN:Grace Hopper") || !strings.Contains(body, "grace@navy.test") {
 		t.Errorf("selected properties missing from the projection\n%s", body)
 	}
-	if strings.Contains(body, "TEL:") {
+	// The exporter writes TEL with parameters (TEL;TYPE=voice:...), so the leak is
+	// detected by the unselected number itself rather than by a "TEL:" prefix.
+	if strings.Contains(body, "+1-555-0000") {
 		t.Errorf("unselected property TEL leaked into the projection\n%s", body)
 	}
 }

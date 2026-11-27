@@ -108,7 +108,7 @@ func TestReportQueryFilter(t *testing.T) {
   <d:prop><card:address-data/></d:prop>
   <card:filter><card:prop-filter name="EMAIL"><card:text-match match-type="ends-with">@example.test</card:text-match></card:prop-filter></card:filter>
 </card:addressbook-query>`
-	_, out = doFull(t, ts, "REPORT", contactURL(""), emailFilter, map[string]string{"Depth": "1"})
+	out = doFullBody(t, ts, "REPORT", contactURL(""), emailFilter, map[string]string{"Depth": "1"})
 	if !strings.Contains(out, "Bob Smith") || strings.Contains(out, "Ada Lovelace") {
 		t.Errorf("EMAIL ends-with filter returned the wrong set (want Bob only)\n%s", out)
 	}

@@ -52,7 +52,7 @@ func TestTaskPutReplacesTheStoredUID(t *testing.T) {
 			t.Fatalf("PUT %s status = %d: %s", uid, resp.StatusCode, body)
 		}
 	}
-	_, body := do(t, ts, "GET", taskURL, "", true)
+	body := doBody(t, ts, "GET", taskURL, "", true)
 	if !strings.Contains(body, "UID:second-uid\r\n") || strings.Contains(body, "first-uid") {
 		t.Errorf("GET after the second PUT does not carry only the new UID:\n%s", body)
 	}
@@ -68,7 +68,7 @@ func TestAStoredTaskUIDCannotAddAProperty(t *testing.T) {
 	if resp, body := doFull(t, ts, "PUT", taskURL, taskBody(`evil\nX-INJECTED:1`, "Inject"), map[string]string{"Content-Type": "text/calendar"}); resp.StatusCode != http.StatusCreated {
 		t.Fatalf("PUT status = %d: %s", resp.StatusCode, body)
 	}
-	_, got := do(t, ts, "GET", taskURL, "", true)
+	got := doBody(t, ts, "GET", taskURL, "", true)
 	if strings.Contains(got, "\nX-INJECTED:") || strings.Contains(got, "\rX-INJECTED:") {
 		t.Errorf("the stored UID added a content line:\n%s", got)
 	}
@@ -88,7 +88,7 @@ func TestTaskWithoutAUIDIsServedUnderItsName(t *testing.T) {
 	if resp, rb := doFull(t, ts, "PUT", taskURL, body, map[string]string{"Content-Type": "text/calendar"}); resp.StatusCode != http.StatusCreated {
 		t.Fatalf("PUT status = %d: %s", resp.StatusCode, rb)
 	}
-	_, got := do(t, ts, "GET", taskURL, "", true)
+	got := doBody(t, ts, "GET", taskURL, "", true)
 	if !strings.Contains(got, "UID:nouid.ics\r\n") {
 		t.Errorf("a task stored without a UID is not served under its name:\n%s", got)
 	}

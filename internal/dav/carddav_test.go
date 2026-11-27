@@ -8,8 +8,41 @@ import (
 	"testing"
 )
 
-// doFull issues a request with a body and arbitrary headers.
+// doFull issues a request with a body and arbitrary headers and returns the
+// response with its body read.
 func doFull(t *testing.T, ts *httptest.Server, method, path, body string, headers map[string]string) (*http.Response, string) {
+	t.Helper()
+	resp := sendFull(t, ts, method, path, body, headers)
+	return resp, readBody(t, resp)
+}
+
+// doFullStatus is doFull for a test that reads only the response: the body is
+// drained and closed.
+func doFullStatus(t *testing.T, ts *httptest.Server, method, path, body string, headers map[string]string) *http.Response {
+	t.Helper()
+	resp := sendFull(t, ts, method, path, body, headers)
+	drainBody(t, resp)
+	return resp
+}
+
+// doFullBody is doFull for a test that reads only the body.
+func doFullBody(t *testing.T, ts *httptest.Server, method, path, body string, headers map[string]string) string {
+	t.Helper()
+	return readBody(t, sendFull(t, ts, method, path, body, headers))
+}
+
+// drainBody reads a response body to its end and closes it, failing the test
+// when either step fails.
+func drainBody(t *testing.T, resp *http.Response) {
+	t.Helper()
+	defer mustClose(t, resp.Body)
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		t.Fatalf("drain the response body: %v", err)
+	}
+}
+
+// sendFull issues a request with a body and arbitrary headers as the test user.
+func sendFull(t *testing.T, ts *httptest.Server, method, path, body string, headers map[string]string) *http.Response {
 	t.Helper()
 	req, err := http.NewRequest(method, ts.URL+path, strings.NewReader(body))
 	if err != nil {
@@ -23,14 +56,14 @@ func doFull(t *testing.T, ts *httptest.Server, method, path, body string, header
 	if err != nil {
 		t.Fatal(err)
 	}
-	return resp, readBody(t, resp)
+	return resp
 }
 
 // readBody reads and closes a response body, failing the test when the read fails,
 // so a cut-off body is never asserted on as if it were the whole answer.
 func readBody(t *testing.T, resp *http.Response) string {
 	t.Helper()
-	defer resp.Body.Close()
+	defer mustClose(t, resp.Body)
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read the response body: %v", err)
@@ -77,7 +110,7 @@ func TestPutGetRoundTrip(t *testing.T) {
 	}
 
 	// The chosen resource name round-trips into the collection listing.
-	_, pf := doFull(t, ts, "PROPFIND", contactURL(""), "", map[string]string{"Depth": "1"})
+	pf := doFullBody(t, ts, "PROPFIND", contactURL(""), "", map[string]string{"Depth": "1"})
 	if !strings.Contains(pf, "ada.vcf") {
 		t.Errorf("PROPFIND lacks the PUT resource name ada.vcf\n%s", pf)
 	}
@@ -95,12 +128,12 @@ func TestPutReplace(t *testing.T) {
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("replace PUT status %d, want 204\n%s", resp.StatusCode, body)
 	}
-	_, get := doFull(t, ts, "GET", url, "", nil)
+	get := doFullBody(t, ts, "GET", url, "", nil)
 	if !strings.Contains(get, "Ada A. Lovelace") {
 		t.Errorf("replace did not take effect\n%s", get)
 	}
 	// Still exactly one object.
-	_, pf := doFull(t, ts, "PROPFIND", contactURL(""), "", map[string]string{"Depth": "1"})
+	pf := doFullBody(t, ts, "PROPFIND", contactURL(""), "", map[string]string{"Depth": "1"})
 	if n := strings.Count(pf, ".vcf"); n != 1 {
 		t.Errorf("after replace got %d objects, want 1", n)
 	}
@@ -113,15 +146,15 @@ func TestPutReplace(t *testing.T) {
 func TestPutRefusesWhatIsNotAVCard(t *testing.T) {
 	ts := davServer(t)
 	for _, body := range []string{"", "not a vcard", "BEGIN:VCARD\r\nFN:x\r\n", "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n"} {
-		if resp, _ := doFull(t, ts, "PUT", contactURL("bad.vcf"), body, nil); resp.StatusCode != http.StatusBadRequest {
+		if resp := doFullStatus(t, ts, "PUT", contactURL("bad.vcf"), body, nil); resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("PUT %q: status %d, want 400", body, resp.StatusCode)
 		}
-		if resp, _ := doFull(t, ts, "GET", contactURL("bad.vcf"), "", nil); resp.StatusCode != http.StatusNotFound {
+		if resp := doFullStatus(t, ts, "GET", contactURL("bad.vcf"), "", nil); resp.StatusCode != http.StatusNotFound {
 			t.Errorf("GET after refused PUT %q: status %d, want 404", body, resp.StatusCode)
 		}
 	}
 	for _, name := range []string{"..%2f..%2fx.vcf", "a%00b.vcf"} {
-		if resp, _ := doFull(t, ts, "PUT", contactURL(name), adaVCard, nil); resp.StatusCode < 400 {
+		if resp := doFullStatus(t, ts, "PUT", contactURL(name), adaVCard, nil); resp.StatusCode < 400 {
 			t.Errorf("PUT to resource name %q: status %d, want a refusal", name, resp.StatusCode)
 		}
 	}
@@ -132,7 +165,7 @@ func TestIfNoneMatchCreateOnly(t *testing.T) {
 	ts := davServer(t)
 	url := contactURL("ada.vcf")
 	doFull(t, ts, "PUT", url, adaVCard, nil)
-	resp, _ := doFull(t, ts, "PUT", url, adaVCard, map[string]string{"If-None-Match": "*"})
+	resp := doFullStatus(t, ts, "PUT", url, adaVCard, map[string]string{"If-None-Match": "*"})
 	if resp.StatusCode != http.StatusPreconditionFailed {
 		t.Errorf("If-None-Match on existing: status %d, want 412", resp.StatusCode)
 	}
@@ -143,7 +176,7 @@ func TestIfMatchConflict(t *testing.T) {
 	ts := davServer(t)
 	url := contactURL("ada.vcf")
 	doFull(t, ts, "PUT", url, adaVCard, nil)
-	resp, _ := doFull(t, ts, "PUT", url, adaVCard, map[string]string{"If-Match": `"99999"`})
+	resp := doFullStatus(t, ts, "PUT", url, adaVCard, map[string]string{"If-Match": `"99999"`})
 	if resp.StatusCode != http.StatusPreconditionFailed {
 		t.Errorf("stale If-Match: status %d, want 412", resp.StatusCode)
 	}
@@ -155,11 +188,11 @@ func TestDelete(t *testing.T) {
 	url := contactURL("ada.vcf")
 	doFull(t, ts, "PUT", url, adaVCard, nil)
 
-	resp, _ := doFull(t, ts, "DELETE", url, "", nil)
+	resp := doFullStatus(t, ts, "DELETE", url, "", nil)
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("DELETE status %d, want 204", resp.StatusCode)
 	}
-	resp, _ = doFull(t, ts, "GET", url, "", nil)
+	resp = doFullStatus(t, ts, "GET", url, "", nil)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("GET after delete: status %d, want 404", resp.StatusCode)
 	}
@@ -173,11 +206,11 @@ func TestMkColAddressbook(t *testing.T) {
 	mkcol := `<d:mkcol xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">` +
 		`<d:set><d:prop><d:resourcetype><d:collection/><card:addressbook/></d:resourcetype></d:prop></d:set></d:mkcol>`
 
-	resp, _ := doFull(t, ts, "MKCOL", team, mkcol, nil)
+	resp := doFullStatus(t, ts, "MKCOL", team, mkcol, nil)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("MKCOL status %d, want 201", resp.StatusCode)
 	}
-	resp, _ = doFull(t, ts, "PUT", team+"ada.vcf", adaVCard, nil)
+	resp = doFullStatus(t, ts, "PUT", team+"ada.vcf", adaVCard, nil)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("PUT into new address book: status %d, want 201", resp.StatusCode)
 	}
@@ -186,7 +219,7 @@ func TestMkColAddressbook(t *testing.T) {
 		t.Errorf("GET from new address book: status %d\n%s", resp.StatusCode, body)
 	}
 	// The contact must not leak into the well-known Contacts collection.
-	if resp, _ := doFull(t, ts, "GET", contactURL("ada.vcf"), "", nil); resp.StatusCode != http.StatusNotFound {
+	if resp := doFullStatus(t, ts, "GET", contactURL("ada.vcf"), "", nil); resp.StatusCode != http.StatusNotFound {
 		t.Errorf("contact leaked into the default address book: status %d, want 404", resp.StatusCode)
 	}
 }

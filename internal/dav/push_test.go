@@ -23,7 +23,7 @@ const pushTestSecret = "dav-push-test-secret"
 // a client discovers how to subscribe (#118).
 func TestPushTransportAdvertised(t *testing.T) {
 	ts := davServerCal(t)
-	_, body := doFull(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/calendar/", "", map[string]string{"Depth": "0"})
+	body := doFullBody(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/calendar/", "", map[string]string{"Depth": "0"})
 	for _, want := range []string{"push-transports", "pushkey", "/dav/push"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("calendar PROPFIND lacks %q (calendarserver-push advertising)\n%s", want, body)
@@ -47,7 +47,7 @@ func TestPushPollWakesOnChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: mboxDir}}
 	srv := NewServer(accs, accs, "hermex.test")
 	srv.SetNotify(consumer)
@@ -70,7 +70,7 @@ func TestPushPollWakesOnChange(t *testing.T) {
 			done <- -1
 			return
 		}
-		resp.Body.Close()
+		mustClose(t, resp.Body)
 		done <- resp.StatusCode
 	}()
 

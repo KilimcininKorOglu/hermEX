@@ -28,7 +28,7 @@ func openInPlace(t *testing.T, dir string) *objectstore.Store {
 	t.Helper()
 	st, err := objectstore.Open(dir)
 	must(t, err, "open mailbox")
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { mustClose(t, st) })
 	return st
 }
 
@@ -69,7 +69,7 @@ func wantSameObject(t *testing.T, st *objectstore.Store, before, after int64, ol
 	}
 	pv, err := st.GetMessageProperties(after, hobbies)
 	must(t, err, "read foreign property")
-	if v, _ := pv.Get(hobbies); v != "chess" {
+	if v, found := pv.Get(hobbies); !found || v != "chess" {
 		t.Errorf("foreign property = %v, want chess", v)
 	}
 	if oldTag == newTag {
@@ -108,9 +108,12 @@ func TestContactPutKeepsTheSameObject(t *testing.T) {
 	st := openInPlace(t, dir)
 	id := objectIDOf(t, st, int64(mapi.PrivateFIDContacts), ".vcf", "ada.vcf")
 	must(t, st.SetMessageProperties(id, mapi.PropertyValues{{Tag: hobbies, Value: "chess"}}), "set foreign property")
-	_, _, err := st.CreateAttachment(id, mapi.PropertyValues{
+	attID, attNum, err := st.CreateAttachment(id, mapi.PropertyValues{
 		{Tag: mapi.PrAttachDataBin, Value: []byte("old")}, {Tag: mapi.PrAttachmentContactPhoto, Value: true}})
 	must(t, err, "attach picture")
+	if attID == 0 || attNum != 0 {
+		t.Fatalf("first attachment = id %d num %d, want a real id and number 0", attID, attNum)
+	}
 	picture := namedTagOf(t, st, mapi.NameHasPicture, mapi.PtBoolean)
 	must(t, st.SetMessageProperties(id, mapi.PropertyValues{{Tag: picture, Value: true}}), "set has-picture")
 
@@ -134,9 +137,12 @@ func wantPicture(t *testing.T, st *objectstore.Store, id int64, want string) {
 	if len(msg.Attachments) != 1 {
 		t.Fatalf("contact has %d attachments, want 1", len(msg.Attachments))
 	}
-	_, data, ok := objectstore.ContactPhotoAttachment(msg)
+	num, data, ok := objectstore.ContactPhotoAttachment(msg)
 	if !ok || string(data) != want {
 		t.Errorf("picture = %q (found %v), want %q", data, ok, want)
+	}
+	if want, found := msg.Attachments[0].Props.Get(mapi.PrAttachNum); !found || want != num {
+		t.Errorf("picture attachment number = %d, want the only attachment's %v (found %v)", num, want, found)
 	}
 }
 
@@ -175,7 +181,7 @@ func TestEventPutKeepsTheSameObject(t *testing.T) {
 	for _, r := range recips {
 		pv, err := st.GetRecipientProperties(r.ID, resp)
 		must(t, err, "read response")
-		if v, _ := pv.Get(resp); r.SmtpAddress == "bob@example.test" && v != int32(3) {
+		if v, found := pv.Get(resp); r.SmtpAddress == "bob@example.test" && (!found || v != int32(3)) {
 			t.Errorf("Bob's response = %v, want 3", v)
 		}
 	}

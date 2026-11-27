@@ -32,11 +32,9 @@ func seedMailbox(t *testing.T, names ...string) directory.StaticAccounts {
 			{Tag: mapi.PrMessageClass, Value: "IPM.Contact"},
 			{Tag: mapi.PrDisplayName, Value: name},
 		}}
-		if _, err := st.CreateMessage(mapi.PrivateFIDContacts, msg); err != nil {
-			t.Fatal(err)
-		}
+		mustCreate(t, st, mapi.PrivateFIDContacts, msg)
 	}
-	st.Close()
+	mustClose(t, st)
 	return directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
 }
 
@@ -50,8 +48,30 @@ func davServer(t *testing.T, names ...string) *httptest.Server {
 	return ts
 }
 
-// do issues a DAV request with optional Basic auth and Depth header.
+// do issues a DAV request with optional Basic auth and Depth header and returns
+// the response with its body read.
 func do(t *testing.T, ts *httptest.Server, method, path, depth string, auth bool) (*http.Response, string) {
+	t.Helper()
+	resp := send(t, ts, method, path, depth, auth)
+	return resp, readBody(t, resp)
+}
+
+// doStatus is do for a test that reads only the response.
+func doStatus(t *testing.T, ts *httptest.Server, method, path, depth string, auth bool) *http.Response {
+	t.Helper()
+	resp := send(t, ts, method, path, depth, auth)
+	drainBody(t, resp)
+	return resp
+}
+
+// doBody is do for a test that reads only the body.
+func doBody(t *testing.T, ts *httptest.Server, method, path, depth string, auth bool) string {
+	t.Helper()
+	return readBody(t, send(t, ts, method, path, depth, auth))
+}
+
+// send issues a DAV request with optional Basic auth and Depth header.
+func send(t *testing.T, ts *httptest.Server, method, path, depth string, auth bool) *http.Response {
 	t.Helper()
 	req, err := http.NewRequest(method, ts.URL+path, nil)
 	if err != nil {
@@ -67,13 +87,13 @@ func do(t *testing.T, ts *httptest.Server, method, path, depth string, auth bool
 	if err != nil {
 		t.Fatal(err)
 	}
-	return resp, readBody(t, resp)
+	return resp
 }
 
 // TestRequiresAuth confirms an unauthenticated request is challenged, not served.
 func TestRequiresAuth(t *testing.T) {
 	ts := davServer(t)
-	resp, _ := do(t, ts, "PROPFIND", "/dav/addressbooks/"+testUser+"/contacts/", "1", false)
+	resp := doStatus(t, ts, "PROPFIND", "/dav/addressbooks/"+testUser+"/contacts/", "1", false)
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status %d, want 401", resp.StatusCode)
 	}
@@ -130,7 +150,7 @@ func TestWellKnownRedirect(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		resp.Body.Close()
+		mustClose(t, resp.Body)
 		if resp.StatusCode != http.StatusMovedPermanently {
 			t.Errorf("%s: status %d, want 301", p, resp.StatusCode)
 		}
@@ -144,7 +164,7 @@ func TestWellKnownRedirect(t *testing.T) {
 // methods.
 func TestOptions(t *testing.T) {
 	ts := davServer(t)
-	resp, _ := do(t, ts, "OPTIONS", "/dav/addressbooks/"+testUser+"/contacts/", "", true)
+	resp := doStatus(t, ts, "OPTIONS", "/dav/addressbooks/"+testUser+"/contacts/", "", true)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d, want 200", resp.StatusCode)
 	}
