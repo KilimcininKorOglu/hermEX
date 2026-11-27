@@ -1157,7 +1157,10 @@ func sweepMailbox(ctx context.Context, path string, deliver spooler.DeliverFunc,
 	})
 	budgetSpent := mbCtx.Err() != nil && ctx.Err() == nil
 	cancelMailbox()
-	_ = st.Close()
+	if cerr := st.Close(); cerr != nil {
+		logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.MTA,
+			Name: "sendlater.close.fail", Fields: logging.Fields{"mailbox": path}, Err: cerr.Error()})
+	}
 	if budgetSpent {
 		overBudget = 1
 		logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.MTA,
