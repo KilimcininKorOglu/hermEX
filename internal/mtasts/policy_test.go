@@ -47,21 +47,41 @@ func TestParsePolicy(t *testing.T) {
 		t.Errorf("MaxAge = %d", p.MaxAge)
 	}
 
-	for name, doc := range map[string]string{
-		"no version":   "mode: enforce\nmx: a.example\nmax_age: 1\n",
-		"bad version":  "version: STSv2\nmode: enforce\nmx: a.example\nmax_age: 1\n",
-		"unknown mode": "version: STSv1\nmode: sometimes\nmx: a.example\nmax_age: 1\n",
-		"no mx":        "version: STSv1\nmode: enforce\nmax_age: 1\n",
-		"zero max_age": "version: STSv1\nmode: enforce\nmx: a.example\nmax_age: 0\n",
-	} {
-		if _, err := Parse(doc); err == nil {
-			t.Errorf("Parse(%s) should fail", name)
-		}
-	}
-
 	if _, err := Parse("version: STSv1\nmode: none\nmax_age: 1\n"); err != nil {
 		t.Errorf("mode none should parse without mx: %v", err)
 	}
+}
+
+// TestParsePolicyRejectsInvalid checks every missing, invalid, negative,
+// non-numeric, or overflowing required field is refused with a nil policy.
+func TestParsePolicyRejectsInvalid(t *testing.T) {
+	for name, doc := range map[string]string{
+		"empty":              "",
+		"no version":         "mode: enforce\nmx: a.example\nmax_age: 1\n",
+		"bad version":        "version: STSv2\nmode: enforce\nmx: a.example\nmax_age: 1\n",
+		"unknown mode":       "version: STSv1\nmode: sometimes\nmx: a.example\nmax_age: 1\n",
+		"no mx":              "version: STSv1\nmode: enforce\nmax_age: 1\n",
+		"testing without mx": "version: STSv1\nmode: testing\nmax_age: 1\n",
+		"empty mx value":     "version: STSv1\nmode: enforce\nmx:   \nmax_age: 1\n",
+		"zero max_age":       "version: STSv1\nmode: enforce\nmx: a.example\nmax_age: 0\n",
+		"negative max_age":   "version: STSv1\nmode: enforce\nmx: a.example\nmax_age: -60\n",
+		"non-numeric max":    "version: STSv1\nmode: enforce\nmx: a.example\nmax_age: forever\n",
+		"overflow max_age":   "version: STSv1\nmode: enforce\nmx: a.example\nmax_age: 99999999999999999999999999\n",
+	} {
+		if got, err := Parse(doc); err == nil || got != nil {
+			t.Errorf("Parse(%s) = (%+v, %v), want (nil, error)", name, got, err)
+		}
+	}
+}
+
+// TestParsePolicyIgnoresUnknownKeys checks RFC 8461 3.2 forward compatibility:
+// unknown extension keys must be ignored without rejecting the policy.
+func TestParsePolicyIgnoresUnknownKeys(t *testing.T) {
+	ext, err := Parse("version: STSv1\nmode: enforce\nmx: a.example\nextension: ignored\nmax_age: 60\n")
+	if err != nil {
+		t.Fatalf("Parse with unknown key: %v", err)
+	}
+	wantEq(t, ext.MaxAge, 60, "MaxAge with unknown key")
 }
 
 // TestPolicyID proves the published id is a 32-char alphanumeric string that is
@@ -100,6 +120,9 @@ func TestMatchesMX(t *testing.T) {
 		"foo.example.net":   true,  // one-label wildcard
 		"a.b.example.net":   false, // wildcard is one label only
 		"example.net":       false, // wildcard needs a label
+		".example.net":      false, // wildcard label cannot be empty
+		"":                  false, // empty host
+		"evil-example.net":  false, // missing dot boundary
 		"other.example.org": false, // matches no pattern
 	} {
 		if got := p.MatchesMX(host); got != want {

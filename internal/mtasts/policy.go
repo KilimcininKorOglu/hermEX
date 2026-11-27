@@ -134,8 +134,8 @@ func (p *Policy) MatchesMX(host string) bool {
 
 func matchMX(pattern, host string) bool {
 	if suffix, ok := strings.CutPrefix(pattern, "*."); ok {
-		_, rest, ok := strings.Cut(host, ".")
-		return ok && rest == suffix
+		label, rest, ok := strings.Cut(host, ".")
+		return ok && label != "" && rest == suffix
 	}
 	return pattern == host
 }
