@@ -41,7 +41,28 @@ func TestGetAnyCharsetDoesNotCrossNonStringTypes(t *testing.T) {
 	if v, ok := pv.GetAnyCharset(PrSubject.WithType(PtLong)); ok {
 		t.Errorf("long-typed lookup = (%v, true), want a miss", v)
 	}
-	if _, isString := CharsetSiblingTag(PrSubject.WithType(PtLong)); isString {
-		t.Error("a PtLong tag reported a charset sibling")
+	long := PrSubject.WithType(PtLong)
+	if sibling, isString := CharsetSiblingTag(long); isString || sibling != long {
+		t.Errorf("CharsetSiblingTag(PtLong) = (%#x, %v), want (%#x, false)", uint32(sibling), isString, uint32(long))
+	}
+}
+
+// TestHasMatchesTheExactTagOnly pins Has to the exact tag (MS-OXCDATA keys a
+// property by its full tag): a stored value is found, an absent tag and the
+// sibling string type of a stored one are not, and a stored nil value still
+// counts as present.
+func TestHasMatchesTheExactTagOnly(t *testing.T) {
+	pv := PropertyValues{{Tag: PrSubject, Value: "quarterly"}, {Tag: PrBody, Value: nil}}
+	if !pv.Has(PrSubject) {
+		t.Error("Has(PrSubject) = false for a stored subject")
+	}
+	if !pv.Has(PrBody) {
+		t.Error("Has(PrBody) = false for a property stored with a nil value")
+	}
+	if pv.Has(PrSubject.WithType(PtString8)) {
+		t.Error("Has matched the string8 sibling of a unicode subject")
+	}
+	if pv.Has(PrDisplayName) {
+		t.Error("Has(PrDisplayName) = true for a tag that is not stored")
 	}
 }

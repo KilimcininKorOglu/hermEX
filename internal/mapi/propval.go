@@ -69,8 +69,12 @@ func (pv PropertyValues) GetAnyCharset(tag PropTag) (any, bool) {
 
 // Has reports whether a value is stored for tag.
 func (pv PropertyValues) Has(tag PropTag) bool {
-	_, ok := pv.Get(tag)
-	return ok
+	for i := range pv {
+		if pv[i].Tag == tag {
+			return true
+		}
+	}
+	return false
 }
 
 // Set stores val for tag, replacing any existing value for that tag. A property
