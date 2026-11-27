@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/relay"
 	"hermex/internal/wbxml"
@@ -16,13 +17,22 @@ import (
 // relayServer starts an ActiveSync server for the test user with an outbound relay
 // spool, and returns both.
 func relayServer(t *testing.T) (*httptest.Server, *relay.Spool) {
+	ts, sp, _ := relayServerWithMailbox(t)
+	return ts, sp
+}
+
+// relayServerWithMailbox is relayServer that also returns the test user's mailbox
+// directory, so a test can read what the request left in it.
+func relayServerWithMailbox(t *testing.T) (*httptest.Server, *relay.Spool, string) {
 	t.Helper()
 	aliceDir := filepath.Join(t.TempDir(), "alice")
 	st, err := objectstore.Open(aliceDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
 	accs := directory.StaticAccounts{
 		testUser: {Password: testPass, MailboxPath: aliceDir},
 		bobUser:  {Password: "x", MailboxPath: filepath.Join(t.TempDir(), "bob")},
@@ -40,7 +50,25 @@ func relayServer(t *testing.T) (*httptest.Server, *relay.Spool) {
 	srv.Spool = sp
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	return ts, sp
+	return ts, sp, aliceDir
+}
+
+// sentItemsCount returns how many messages the Sent Items folder of the mailbox
+// at dir holds.
+func sentItemsCount(t *testing.T, dir string) int {
+	t.Helper()
+	st, err := objectstore.OpenExisting(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs, err := st.ListMessages(int64(mapi.PrivateFIDSentItems))
+	if cerr := st.Close(); cerr != nil {
+		t.Fatal(cerr)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(msgs)
 }
 
 // TestSendMailRelaysNothingUnderAForgedFrom proves a From the caller may not use
@@ -64,10 +92,13 @@ func TestSendMailRelaysNothingUnderAForgedFrom(t *testing.T) {
 		// Nor can a From in a header block that does not parse at all.
 		{"a header block that does not parse", "no colon here\r\nFrom: " + bobUser + "\r\n", "119"},
 	} {
-		ts, sp := relayServer(t)
+		ts, sp, aliceDir := relayServerWithMailbox(t)
 		forged := tc.from + "To: carol@external.test\r\nSubject: Out\r\n\r\nhi carol\r\n"
+		// SaveInSentItems asks for a Sent copy, so a refusal that still filed one
+		// would show in the mailbox.
 		sm := wbxml.Elem(wbxml.CMSendMail,
 			wbxml.Str(wbxml.CMClientID, "c1"),
+			wbxml.Empty(wbxml.CMSaveInSentItems),
 			wbxml.Opaque(wbxml.CMMIME, []byte(forged)))
 		resp, out := postRaw(t, ts, "SendMail", wbxml.Marshal(sm))
 		if st := composeStatusOf(t, resp, out); st != tc.want {
@@ -79,6 +110,9 @@ func TestSendMailRelaysNothingUnderAForgedFrom(t *testing.T) {
 		}
 		if len(due) != 0 {
 			t.Errorf("%s: relay spool holds %d messages, want 0", tc.name, len(due))
+		}
+		if n := sentItemsCount(t, aliceDir); n != 0 {
+			t.Errorf("%s: Sent Items holds %d messages after the refusal, want 0", tc.name, n)
 		}
 	}
 }
