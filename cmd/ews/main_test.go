@@ -63,11 +63,17 @@ func (s *captureSink) Write(e logging.Event) { s.events = append(s.events, e) }
 // operator's only view of a settings row that stopped being read.
 func TestApplyEWSSizeLimitRecordsAReadFailure(t *testing.T) {
 	sink := &captureSink{}
+	got := applied{sentinel, sentinel, sentinel}
 	applyEWSSizeLimit(logging.New(sink),
 		func() (directory.SizeLimits, bool, error) {
-			return directory.SizeLimits{}, false, errors.New("db down")
+			return directory.SizeLimits{EWSRequestBytes: 8192, FreeBusyMaxTargets: 7, EWSSubscriptionTimeoutMinutes: 720}, true, errors.New("db down")
 		},
-		func(int64) {}, func(int64) {}, func(int64) {})
+		func(n int64) { got.body = n },
+		func(n int64) { got.targets = n },
+		func(n int64) { got.subTimeout = n })
+	if got != (applied{sentinel, sentinel, sentinel}) {
+		t.Errorf("a setter was called on a logged read failure (%+v); every value must be left unchanged", got)
+	}
 	if len(sink.events) != 1 || sink.events[0].Name != "settings.read.fail" || sink.events[0].Fields["settings"] != "size-limits" {
 		t.Errorf("events = %+v, want one settings.read.fail for size-limits", sink.events)
 	}
@@ -89,6 +95,11 @@ func TestApplyEWSFreeBusyTargets(t *testing.T) {
 	})
 	if got.targets != sentinel {
 		t.Errorf("free/busy setter called on read error (got %d); it must be left unchanged", got.targets)
+	}
+
+	got = runApply(func() (directory.SizeLimits, bool, error) { return directory.SizeLimits{}, false, nil })
+	if got.targets != sentinel {
+		t.Errorf("free/busy setter called with no stored row (got %d); the default must stand", got.targets)
 	}
 }
 
