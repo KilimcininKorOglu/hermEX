@@ -1,6 +1,8 @@
 package meeting
 
 import (
+	"database/sql"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -20,15 +22,18 @@ const weeklySeries = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n" +
 func seedBusySeries(t *testing.T, st *objectstore.Store, tags apptTags, body string) {
 	t.Helper()
 	first := time.Date(2026, 3, 2, 17, 0, 0, 0, time.UTC)
-	if _, err := st.CreateMessage(int64(mapi.PrivateFIDCalendar), &oxcmail.Message{Props: mapi.PropertyValues{
+	props := mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: "IPM.Appointment"},
 		{Tag: tags.uid, Value: "standing-1"},
 		{Tag: tags.start, Value: mapi.UnixToNTTime(first)},
 		{Tag: tags.end, Value: mapi.UnixToNTTime(first.Add(time.Hour))},
 		{Tag: tags.busy, Value: int32(mapi.BusyBusy)},
 		{Tag: tags.recur, Value: true},
-		{Tag: mapi.PrIcalOriginal, Value: []byte(body)},
-	}}); err != nil {
+	}
+	if body != "" {
+		props.Set(mapi.PrIcalOriginal, []byte(body))
+	}
+	if _, err := st.CreateMessage(int64(mapi.PrivateFIDCalendar), &oxcmail.Message{Props: props}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -49,7 +54,7 @@ func conflictStore(t *testing.T) (*objectstore.Store, apptTags) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	t.Cleanup(func() { mustClose(t, st, "the store") })
 	tags, err := resolveApptTags(st)
 	if err != nil {
 		t.Fatal(err)
@@ -103,6 +108,29 @@ func TestImportedSeriesIsAConflict(t *testing.T) {
 	}
 }
 
+// TestMAPISeriesIsAConflict stores the series the way Outlook writes it over MAPI:
+// the PidLidAppointmentRecur blob and no iCalendar copy. A request on a later
+// instance is a conflict like one on an imported series; only the blob says the
+// instance exists.
+func TestMAPISeriesIsAConflict(t *testing.T) {
+	st, tags := conflictStore(t)
+	msg, err := oxcical.Import([]byte(weeklySeries), oxcical.Options{Resolver: st.GetNamedPropIDs})
+	mustNoErr(t, err, "import the series")
+	msg.Props.Remove(mapi.PrIcalOriginal)
+	msg.Props.Set(tags.busy, int32(mapi.BusyBusy))
+	_, err = st.CreateMessage(int64(mapi.PrivateFIDCalendar), msg)
+	mustNoErr(t, err, "store the series")
+
+	req := requestFor(tags, "new-1", time.Date(2026, 3, 16, 17, 0, 0, 0, time.UTC))
+	if !conflicts(t, st, tags, req) {
+		t.Error("a request on a later instance of a MAPI series was not reported in conflict")
+	}
+	free := requestFor(tags, "new-1", time.Date(2026, 3, 17, 17, 0, 0, 0, time.UTC))
+	if conflicts(t, st, tags, free) {
+		t.Error("a day the MAPI series does not occupy was reported in conflict")
+	}
+}
+
 // TestFreeDayOfASeriesIsNoConflict proves the expansion is not a blanket refusal: a
 // day the series does not occupy stays bookable.
 func TestFreeDayOfASeriesIsNoConflict(t *testing.T) {
@@ -147,6 +175,53 @@ func TestSeriesDoesNotConflictWithItself(t *testing.T) {
 
 	if conflicts(t, st, tags, req) {
 		t.Error("a series update was reported in conflict with its own booking")
+	}
+}
+
+// TestUnexpandableSeriesStillBlocksItsOwnSlot stores busy series whose instances
+// cannot be expanded: one written by a MAPI client, which keeps only the
+// PidLidAppointmentRecur blob and no iCalendar copy, and one whose iCalendar body
+// is damaged. Neither can be expanded here, but each still occupies the slot its
+// own start and end name, so a request on that slot must not auto-accept into a
+// double booking ([MS-OXOCAL] 3.1.4.6, a conflicting request is not accepted).
+func TestUnexpandableSeriesStillBlocksItsOwnSlot(t *testing.T) {
+	for name, body := range map[string]string{
+		"no iCalendar copy": "",
+		"damaged iCalendar": "BEGIN:VCALENDAR\r\nnot a calendar",
+	} {
+		t.Run(name, func(t *testing.T) {
+			st, tags := conflictStore(t)
+			seedBusySeries(t, st, tags, body)
+			req := requestFor(tags, "new-1", time.Date(2026, 3, 2, 17, 0, 0, 0, time.UTC))
+			if !conflicts(t, st, tags, req) {
+				t.Error("a request on the series' own slot was not reported in conflict")
+			}
+		})
+	}
+}
+
+// TestUnreadableSeriesIsAnError breaks the read that opens a series for
+// expansion. The check cannot tell whether the series holds the slot, so it
+// reports the failure, which leaves the request for the user instead of
+// auto-accepting it into a possible double booking.
+func TestUnreadableSeriesIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, err, "Open")
+	t.Cleanup(func() { mustClose(t, st, "the store") })
+	tags, err := resolveApptTags(st)
+	mustNoErr(t, err, "resolve the tags")
+	seedBusySeries(t, st, tags, weeklySeries)
+	db, err := sql.Open("sqlite", filepath.Join(dir, "objects.sqlite3"))
+	mustNoErr(t, err, "open the raw database")
+	defer mustClose(t, db, "the raw database handle")
+	if _, err := db.Exec(`ALTER TABLE recipients RENAME TO recipients_gone`); err != nil {
+		t.Fatal(err)
+	}
+
+	req := requestFor(tags, "new-1", time.Date(2026, 3, 17, 17, 0, 0, 0, time.UTC))
+	if busy, err := hasConflict(st, req, tags); err == nil {
+		t.Errorf("hasConflict on an unreadable series = %v with no error", busy)
 	}
 }
 

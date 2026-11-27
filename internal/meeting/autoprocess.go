@@ -128,9 +128,11 @@ func hasConflict(st *objectstore.Store, req *oxcmail.Message, t apptTags) (bool,
 		return false, err
 	}
 	for _, obj := range objs {
+		// A read failure is returned: taking it for a free slot would auto-accept
+		// the request into a slot the appointment may hold.
 		pv, err := st.GetMessageProperties(obj.ID, t.start, t.end, t.busy, t.recur, t.uid)
 		if err != nil {
-			continue
+			return false, err
 		}
 		if blocksWindow(pv, t, reqUID, reqStart, reqEnd) {
 			return true, nil
@@ -148,9 +150,9 @@ func seriesConflict(st *objectstore.Store, t apptTags, reqUID string, reqStart, 
 		return false, err
 	}
 	for _, obj := range objs {
-		pv, err := st.GetMessageProperties(obj.ID, t.busy, t.uid, mapi.PrIcalOriginal)
+		pv, err := st.GetMessageProperties(obj.ID, t.start, t.end, t.busy, t.uid)
 		if err != nil {
-			continue
+			return false, err
 		}
 		if propStr(pv, t.uid) == reqUID && reqUID != "" {
 			continue // the request's own series is not a conflict with itself
@@ -158,27 +160,49 @@ func seriesConflict(st *objectstore.Store, t apptTags, reqUID string, reqStart, 
 		if !mapi.BusyStatusOccupies(longVal(pv, t.busy)) {
 			continue
 		}
-		if seriesOccupies(pv, reqStart, reqEnd) {
+		busy, err := seriesOccupies(st, obj.ID, pv, t, reqStart, reqEnd)
+		if err != nil || busy {
+			return busy, err
+		}
+	}
+	return false, nil
+}
+
+// seriesOccupies reports whether a busy recurring object has an instance in the
+// window that occupies it. The series is expanded from what it stores, the
+// iCalendar copy or the PidLidAppointmentRecur blob a MAPI client writes alone,
+// so an exception that moved an instance or freed it is honoured. A series that
+// cannot be expanded still holds the slot its own start and end name: the window
+// scan leaves every recurring object to this check.
+func seriesOccupies(st *objectstore.Store, id int64, pv mapi.PropertyValues, t apptTags, reqStart, reqEnd time.Time) (bool, error) {
+	msg, err := st.OpenMessage(id)
+	if err != nil {
+		return false, err
+	}
+	occ, ok, err := oxcical.SeriesOccurrences(msg, oxcical.Options{Resolver: st.GetNamedPropIDs}, reqStart, reqEnd)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return slotOverlaps(pv, t, reqStart, reqEnd), nil
+	}
+	for _, o := range occ {
+		if mapi.BusyStatusOccupies(o.BusyStatus) && o.Start.Before(reqEnd) && o.End.After(reqStart) {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-// seriesOccupies reports whether a stored recurring object has an instance in the
-// window. An object whose body cannot be expanded occupies nothing here: its own
-// start and end were already tested by the window scan.
-func seriesOccupies(pv mapi.PropertyValues, reqStart, reqEnd time.Time) bool {
-	v, ok := pv.Get(mapi.PrIcalOriginal)
-	if !ok {
+// slotOverlaps reports whether an object's own start and end overlap the window.
+func slotOverlaps(pv mapi.PropertyValues, t apptTags, reqStart, reqEnd time.Time) bool {
+	start, ok1 := ntTime(pv, t.start)
+	end, ok2 := ntTime(pv, t.end)
+	if !ok1 || !ok2 {
 		return false
 	}
-	raw, ok := v.([]byte)
-	if !ok {
-		return false
-	}
-	spans, ok := oxcical.OccurrencesIn(raw, reqStart, reqEnd)
-	return ok && len(spans) > 0
+	// Overlap, not containment.
+	return start.Before(reqEnd) && end.After(reqStart)
 }
 
 // blocksWindow reports whether one calendar object occupies the request's window.
@@ -196,13 +220,7 @@ func blocksWindow(pv mapi.PropertyValues, t apptTags, reqUID string, reqStart, r
 	if !mapi.BusyStatusOccupies(longVal(pv, t.busy)) {
 		return false // free, and working elsewhere, do not block
 	}
-	start, ok1 := ntTime(pv, t.start)
-	end, ok2 := ntTime(pv, t.end)
-	if !ok1 || !ok2 {
-		return false
-	}
-	// Overlap, not containment.
-	return start.Before(reqEnd) && end.After(reqStart)
+	return slotOverlaps(pv, t, reqStart, reqEnd)
 }
 
 // ntTime reads a PtSysTime property (stored as an NT timestamp) as a UTC time.
