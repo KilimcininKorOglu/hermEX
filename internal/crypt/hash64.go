@@ -1,5 +1,23 @@
 package crypt
 
+import (
+	"hash"
+	"io"
+)
+
+// mustWrite writes data to h and panics if the hash reports an error or short
+// write. Standard library hash.Hash implementations never fail Write, so an
+// error indicates a broken invariant.
+func mustWrite(h hash.Hash, data []byte) {
+	n, err := h.Write(data)
+	if err != nil {
+		panic(err)
+	}
+	if n != len(data) {
+		panic(io.ErrShortWrite)
+	}
+}
+
 // hash64Alphabet is the 64-character alphabet crypt(3) encodes a digest with. It
 // is not RFC 4648 base64: the order is "./" then digits, then upper, then lower.
 const hash64Alphabet = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"

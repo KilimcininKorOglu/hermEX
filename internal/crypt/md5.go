@@ -23,9 +23,9 @@ func md5Crypt(password, salt []byte) []byte {
 	h := md5.New()
 
 	// Digest B over password, salt, password.
-	h.Write(password)
-	h.Write(salt)
-	h.Write(password)
+	mustWrite(h, password)
+	mustWrite(h, salt)
+	mustWrite(h, password)
 	sumB := h.Sum(nil)
 
 	// Digest A over password, the magic prefix, the salt, then len(password)
@@ -34,15 +34,15 @@ func md5Crypt(password, salt []byte) []byte {
 	// first byte where it is clear) and is reproduced because interoperability,
 	// not elegance, is what a stored hash needs.
 	h.Reset()
-	h.Write(password)
-	h.Write([]byte(MD5Prefix))
-	h.Write(salt)
-	h.Write(repeatTo(sumB, len(password)))
+	mustWrite(h, password)
+	mustWrite(h, []byte(MD5Prefix))
+	mustWrite(h, salt)
+	mustWrite(h, repeatTo(sumB, len(password)))
 	for i := len(password); i > 0; i >>= 1 {
 		if i&1 == 1 {
-			h.Write([]byte{0})
+			mustWrite(h, []byte{0})
 		} else {
-			h.Write(password[:1])
+			mustWrite(h, password[:1])
 		}
 	}
 	sumA := h.Sum(nil)
@@ -54,20 +54,20 @@ func md5Crypt(password, salt []byte) []byte {
 	for i := range md5Rounds {
 		h.Reset()
 		if i&1 == 1 {
-			h.Write(password)
+			mustWrite(h, password)
 		} else {
-			h.Write(sumA)
+			mustWrite(h, sumA)
 		}
 		if i%3 != 0 {
-			h.Write(salt)
+			mustWrite(h, salt)
 		}
 		if i%7 != 0 {
-			h.Write(password)
+			mustWrite(h, password)
 		}
 		if i&1 == 1 {
-			h.Write(sumA)
+			mustWrite(h, sumA)
 		} else {
-			h.Write(password)
+			mustWrite(h, password)
 		}
 		copy(sumA, h.Sum(buf[:0]))
 	}

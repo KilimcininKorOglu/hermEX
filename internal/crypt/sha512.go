@@ -52,23 +52,23 @@ func sha512Crypt(password, salt []byte, rounds int) []byte {
 	h := sha512.New()
 
 	// Steps 4-8: digest B over password, salt, password.
-	h.Write(password)
-	h.Write(salt)
-	h.Write(password)
+	mustWrite(h, password)
+	mustWrite(h, salt)
+	mustWrite(h, password)
 	sumB := h.Sum(nil)
 
 	// Steps 1-3 and 9-12: digest A over password and salt, then len(password)
 	// bytes taken from B, then one block per bit of len(password): B where the
 	// bit is set, the password where it is clear.
 	h.Reset()
-	h.Write(password)
-	h.Write(salt)
-	h.Write(repeatTo(sumB, len(password)))
+	mustWrite(h, password)
+	mustWrite(h, salt)
+	mustWrite(h, repeatTo(sumB, len(password)))
 	for i := len(password); i > 0; i >>= 1 {
 		if i&1 == 1 {
-			h.Write(sumB)
+			mustWrite(h, sumB)
 		} else {
-			h.Write(password)
+			mustWrite(h, password)
 		}
 	}
 	sumA := h.Sum(nil)
@@ -78,7 +78,7 @@ func sha512Crypt(password, salt []byte, rounds int) []byte {
 	// repeated len(password) times.
 	h.Reset()
 	for range len(password) {
-		h.Write(password)
+		mustWrite(h, password)
 	}
 	seqP := repeatTo(h.Sum(nil), len(password))
 
@@ -86,7 +86,7 @@ func sha512Crypt(password, salt []byte, rounds int) []byte {
 	// 16 + A[0] times, so the salt's own work depends on the password too.
 	h.Reset()
 	for range 16 + int(sumA[0]) {
-		h.Write(salt)
+		mustWrite(h, salt)
 	}
 	seqS := repeatTo(h.Sum(nil), len(salt))
 
@@ -99,20 +99,20 @@ func sha512Crypt(password, salt []byte, rounds int) []byte {
 	for i := range rounds {
 		h.Reset()
 		if i&1 == 1 {
-			h.Write(seqP)
+			mustWrite(h, seqP)
 		} else {
-			h.Write(sumA)
+			mustWrite(h, sumA)
 		}
 		if i%3 != 0 {
-			h.Write(seqS)
+			mustWrite(h, seqS)
 		}
 		if i%7 != 0 {
-			h.Write(seqP)
+			mustWrite(h, seqP)
 		}
 		if i&1 == 1 {
-			h.Write(sumA)
+			mustWrite(h, sumA)
 		} else {
-			h.Write(seqP)
+			mustWrite(h, seqP)
 		}
 		copy(sumA, h.Sum(buf[:0]))
 	}
