@@ -2,6 +2,7 @@ package logging_test
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -73,12 +74,19 @@ func TestRedactionMasksSensitiveFields(t *testing.T) {
 	}
 }
 
-// TestNilLoggerIsNoOp proves a nil *Logger does nothing instead of panicking, so a
-// not-yet-configured daemon can hold one.
+// TestNilLoggerIsNoOp proves a nil *Logger and a Logger with a nil Sink do nothing
+// instead of panicking and leave caller fields untouched.
 func TestNilLoggerIsNoOp(t *testing.T) {
 	var log *logging.Logger
-	log.Info(logging.System, "startup", logging.Fields{"x": 1})
+	in := logging.Fields{"password": "raw", "x": 1}
+	log.Info(logging.System, "startup", in)
 	log.Emit(logging.Event{Subsystem: logging.System, Name: "x"})
+
+	nilSink := logging.New(nil)
+	nilSink.Info(logging.System, "startup", in)
+	if in["password"] != "raw" || in["x"] != 1 {
+		t.Errorf("no-op logger mutated caller fields: %v", in)
+	}
 }
 
 // TestStderrSinkRedactsOutput proves the full Logger -> StderrSink path renders the
@@ -131,5 +139,46 @@ func TestLevelString(t *testing.T) {
 		if got := lvl.String(); got != want {
 			t.Errorf("Level(%d).String() = %q, want %q", lvl, got, want)
 		}
+	}
+}
+
+// TestRedactionMasksAllSensitiveKeyFamilies verifies every sensitive key family
+// (passwd, secret, cookie, credential, mixed-case password, token) is redacted
+// before reaching the sink while leaving the caller's map unchanged.
+func TestRedactionMasksAllSensitiveKeyFamilies(t *testing.T) {
+	var buf bytes.Buffer
+	log := logging.New(logging.NewStderrSink(&buf))
+	in := logging.Fields{
+		"user_passwd":    "val-passwd",
+		"api_secret":     "val-secret",
+		"session_cookie": "val-cookie",
+		"db_credential":  "val-cred",
+		"User_Password":  "val-mixed-pw",
+		"X-Auth-Token":   "val-token",
+	}
+	log.Info(logging.Auth, "login.attempt", in)
+
+	out := buf.String()
+	for k, secret := range in {
+		if strings.Contains(out, secret.(string)) {
+			t.Errorf("sensitive field %q leaked %q into stderr: %q", k, secret, out)
+		}
+	}
+	if in["user_passwd"] != "val-passwd" || in["db_credential"] != "val-cred" {
+		t.Errorf("redact mutated caller map: %v", in)
+	}
+}
+
+type failingWriter struct{ err error }
+
+func (f failingWriter) Write([]byte) (int, error) { return 0, f.err }
+
+// TestStderrSinkCountsWriteErrors proves StderrSink tracks write errors instead of
+// silently discarding them.
+func TestStderrSinkCountsWriteErrors(t *testing.T) {
+	sink := logging.NewStderrSink(failingWriter{err: errors.New("disk full")})
+	sink.Write(logging.Event{Level: logging.LevelError, Subsystem: logging.System, Name: "disk.fail"})
+	if got := sink.WriteErrors(); got != 1 {
+		t.Errorf("WriteErrors() = %d, want 1", got)
 	}
 }
