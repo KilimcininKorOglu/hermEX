@@ -582,6 +582,13 @@ func seedLogRetention(dir *directory.SQLDirectory, seedDays int) {
 	}
 }
 
+// retentionCutoff is the instant days before now that a prune deletes up to. It
+// uses AddDate, not a Duration: days * 24h overflows int64 nanoseconds past about
+// 106751 days and wraps into a cutoff in the future that deletes everything.
+func retentionCutoff(now time.Time, days int) time.Time {
+	return now.AddDate(0, 0, -days)
+}
+
 // pruneLogs deletes the events older than the stored window. A window of zero or less
 // means keep forever, so nothing is pruned.
 func pruneLogs(ctx context.Context, dir *directory.SQLDirectory, reader *logging.Reader) {
@@ -593,7 +600,7 @@ func pruneLogs(ctx context.Context, dir *directory.SQLDirectory, reader *logging
 	if days <= 0 {
 		return // keep forever, never prune
 	}
-	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	cutoff := retentionCutoff(time.Now(), days)
 	pruneCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if n, err := reader.PruneOlderThan(pruneCtx, cutoff); err != nil {
@@ -672,7 +679,7 @@ const defaultEMLPruneDays = 30
 func pruneEML(dir *directory.SQLDirectory, target string, days int) {
 	maildirs := resolveMaildirs(dir, target)
 
-	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	cutoff := retentionCutoff(time.Now(), days)
 	var files, boxes, opened int
 	var reclaimed int64
 	for _, md := range maildirs {
