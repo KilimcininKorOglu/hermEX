@@ -206,6 +206,32 @@ func execAtLeast(t *testing.T, what string, min int64) func(sql.Result, error) {
 	}
 }
 
+// hideTable renames a table away so every statement reading it fails, which is
+// how a test forces a SELECT failure (a trigger can only fail a write). rename
+// and restore are fixed RENAME TABLE statements; the returned func puts the table
+// back, and t.Cleanup does so too if the test stops first.
+func hideTable(t *testing.T, db *sql.DB, rename, restore string) func() {
+	t.Helper()
+	execRows(t, rename, 0)(db.Exec(rename))
+	var restored bool
+	put := func() {
+		if restored {
+			return
+		}
+		restored = true
+		res, err := db.Exec(restore)
+		if err != nil {
+			t.Errorf("%s: %v", restore, err)
+			return
+		}
+		if n, err := res.RowsAffected(); err != nil || n != 0 {
+			t.Errorf("%s reported %d rows, %v", restore, n, err)
+		}
+	}
+	t.Cleanup(put)
+	return put
+}
+
 // countRows reads a COUNT(*) query's result.
 func countRows(t *testing.T, db *sql.DB, label, query string, args ...any) int64 {
 	t.Helper()

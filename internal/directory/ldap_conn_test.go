@@ -267,6 +267,17 @@ func TestLDAPBindRewrapFailureIsLogged(t *testing.T) {
 	wantEq(t, "the refused rewrite left the row plaintext", storedBindPassword(t, db, id), "plain")
 	e = wantWarnEvent(t, read, "directory.ldap_bind_rewrap.fail")
 	wantEq(t, "the read path's connection", e.Fields["connection_id"], any(id))
+
+	// A startup sweep that cannot list the connections is recorded, and the
+	// daemon still starts.
+	list := &captureSink{}
+	d.SetLogger(logging.New(list))
+	restore := hideTable(t, db, "RENAME TABLE ldap_connections TO ldap_connections_hidden",
+		"RENAME TABLE ldap_connections_hidden TO ldap_connections")
+	d.wrapLDAPBindPasswords()
+	restore()
+	wantWarnEvent(t, list, "directory.ldap_bind_list.fail")
+	wantEq(t, "the unlisted row stays plaintext", storedBindPassword(t, db, id), "plain")
 }
 
 // TestLDAPPresets proves every listed preset resolves and an unknown one does not.

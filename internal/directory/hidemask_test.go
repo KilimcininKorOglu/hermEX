@@ -173,6 +173,16 @@ func TestEnsureSchemaHealsAStaleHideMask(t *testing.T) {
 	wantEq(t, "hide_mask after the refused write", storedHideMask(t, db, shown), uint32(8))
 	execRows(t, "drop the failure trigger", 0)(db.Exec("DROP TRIGGER `test_hide_mask_fail`"))
 
+	// A candidate list that cannot be read is recorded and changes no column.
+	unlisted := &captureSink{}
+	d.SetLogger(logging.New(unlisted))
+	restore := hideTable(t, db, "RENAME TABLE user_properties TO user_properties_hidden",
+		"RENAME TABLE user_properties_hidden TO user_properties")
+	d.syncHideMasks()
+	restore()
+	wantWarnEvent(t, unlisted, "directory.hide_mask_list.fail")
+	wantEq(t, "hide_mask after the unreadable list", storedHideMask(t, db, shown), uint32(8))
+
 	mustNoErr(t, "ensure schema", d.EnsureSchema())
 	wantEq(t, "hide_mask of the user hidden behind the directory", storedHideMask(t, db, hidden), uint32(0x01))
 	wantEq(t, "hide_mask of the user with no property", storedHideMask(t, db, shown), uint32(0))
