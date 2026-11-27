@@ -96,12 +96,15 @@ func TestDecryptRevealsNothingAboutWhyItFailed(t *testing.T) {
 
 	// A wrong key, and a corrupted envelope body, must be indistinguishable to
 	// the caller: same error text, no detail about which check failed.
-	_, wrongKey := Decrypt(enc, other.cert, other.key)
+	wrongOut, wrongKey := Decrypt(enc, other.cert, other.key)
 	corrupt := bytes.Replace(enc, []byte("MIME-Version: 1.0\r\n\r\n"), []byte("MIME-Version: 1.0\r\n\r\nAAAA"), 1)
-	_, corrupted := Decrypt(corrupt, id.cert, id.key)
+	corruptOut, corrupted := Decrypt(corrupt, id.cert, id.key)
 
 	if wrongKey == nil || corrupted == nil {
 		t.Fatal("a bad decrypt succeeded")
+	}
+	if wrongOut != nil || corruptOut != nil {
+		t.Errorf("a failed decrypt returned content: %d and %d bytes", len(wrongOut), len(corruptOut))
 	}
 	for _, e := range []error{wrongKey, corrupted} {
 		for _, leak := range []string{"padding", "pad", "block size", "authentication"} {
