@@ -61,9 +61,12 @@ func TestProducerNeverTearsPrimitive(t *testing.T) {
 	}
 	// Each PtLong element is 8 bytes (4 propdef + 4 value); maxLen 10 fits one.
 	for pr.Pending() {
-		chunk, _ := pr.ReadBuffer(10)
+		chunk, last := pr.ReadBuffer(10)
 		if len(chunk) == 0 {
 			t.Fatal("empty chunk while pending")
+		}
+		if last == pr.Pending() {
+			t.Fatalf("last = %v while Pending = %v, want last only once the stream is drained", last, pr.Pending())
 		}
 		// The chunk must be a whole number of complete elements.
 		it, n, complete, err := decodeElement(chunk)
@@ -86,19 +89,7 @@ func TestProducerTearsLargeBody(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var reassembled []byte
-	chunks := 0
-	for {
-		chunk, last := pr.ReadBuffer(1000) // forces tearing of the 5000-byte body
-		reassembled = append(reassembled, chunk...)
-		if len(chunk) > 1000 {
-			t.Fatalf("chunk %d exceeded maxLen: %d bytes", chunks, len(chunk))
-		}
-		chunks++
-		if last {
-			break
-		}
-	}
+	reassembled, chunks := drainProducer(t, &pr, 1000) // forces tearing of the 5000-byte body
 	if chunks < 2 {
 		t.Fatalf("expected the body to be torn across chunks, got %d chunk(s)", chunks)
 	}
@@ -108,8 +99,28 @@ func TestProducerTearsLargeBody(t *testing.T) {
 	if len(items) != 1 || items[0].Prop == nil {
 		t.Fatalf("reassembled %d items", len(items))
 	}
-	if got, _ := items[0].Prop.Value.([]byte); !bytes.Equal(got, big) {
+	if got, isBinary := items[0].Prop.Value.([]byte); !isBinary || !bytes.Equal(got, big) {
 		t.Errorf("large binary corrupted across chunk boundaries (len %d)", len(got))
+	}
+}
+
+// drainProducer reads pr in chunks of at most maxLen bytes until it reports the
+// stream drained, failing the test on an oversized chunk. It returns the
+// reassembled stream and the number of chunks.
+func drainProducer(t *testing.T, pr *Producer, maxLen int) ([]byte, int) {
+	t.Helper()
+	var reassembled []byte
+	chunks := 0
+	for {
+		chunk, last := pr.ReadBuffer(maxLen)
+		reassembled = append(reassembled, chunk...)
+		if len(chunk) > maxLen {
+			t.Fatalf("chunk %d exceeded maxLen: %d bytes", chunks, len(chunk))
+		}
+		chunks++
+		if last {
+			return reassembled, chunks
+		}
 	}
 }
 
@@ -120,14 +131,17 @@ func TestProducerInterleavedWriteDrain(t *testing.T) {
 	var ps Parser
 
 	pr.WriteMarker(markerIncrSyncChg)
-	chunk, _ := pr.ReadBuffer(4096)
+	chunk, last := pr.ReadBuffer(4096)
+	if !last {
+		t.Fatal("a single marker that fits the buffer did not drain the stream")
+	}
 	ps.Feed(chunk)
 
 	if err := pr.WriteProp(StreamProp{Tag: tag(0x4001, mapi.PtUnicode), Value: "later"}); err != nil {
 		t.Fatalf("WriteProp: %v", err)
 	}
 	pr.WriteMarker(markerIncrSyncEnd)
-	chunk, last := pr.ReadBuffer(4096)
+	chunk, last = pr.ReadBuffer(4096)
 	if !last {
 		t.Fatal("expected drain")
 	}

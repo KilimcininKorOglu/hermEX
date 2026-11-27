@@ -114,7 +114,7 @@ func TestMetaTagIdsetGivenTrap(t *testing.T) {
 	if it.Prop.Tag.ID() != 0x4017 {
 		t.Errorf("trap tag id = %#x, want 0x4017", it.Prop.Tag.ID())
 	}
-	if b, _ := it.Prop.Value.([]byte); !bytes.Equal(b, []byte{0xDE, 0xAD, 0xBE, 0xEF}) {
+	if b, isBinary := it.Prop.Value.([]byte); !isBinary || !bytes.Equal(b, []byte{0xDE, 0xAD, 0xBE, 0xEF}) {
 		t.Errorf("trap body = %x", it.Prop.Value)
 	}
 }
