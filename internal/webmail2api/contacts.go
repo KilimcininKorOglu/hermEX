@@ -926,6 +926,11 @@ func (s *Server) readScannedPhoto(w http.ResponseWriter, r *http.Request) ([]byt
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not read upload"})
 		return nil, false
 	}
+	// An empty file is no photo; storing it would replace a real one with nothing.
+	if len(data) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the photo is empty"})
+		return nil, false
+	}
 	c, ok := s.session(r)
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
