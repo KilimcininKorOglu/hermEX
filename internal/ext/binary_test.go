@@ -101,8 +101,8 @@ func TestBlobConsumesRest(t *testing.T) {
 	p.Blob([]byte{4, 5, 6, 7})
 
 	pull := NewPull(p.Bytes(), 0)
-	if v, _ := pull.Uint16(); v != 0xBEEF {
-		t.Fatalf("prefix = %#x, want 0xBEEF", v)
+	if v, err := pull.Uint16(); err != nil || v != 0xBEEF {
+		t.Fatalf("prefix = %#x, %v; want 0xBEEF", v, err)
 	}
 	got, err := pull.Blob()
 	if err != nil {

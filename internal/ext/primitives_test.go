@@ -22,14 +22,17 @@ func TestIntegerWireBytes(t *testing.T) {
 		t.Fatalf("integers = % x, want % x", p.Bytes(), want)
 	}
 	r := NewPull(p.Bytes(), 0)
-	if v, _ := r.Uint16(); v != 0x0102 {
-		t.Errorf("Uint16 = 0x%04X", v)
+	if v, err := r.Uint16(); err != nil || v != 0x0102 {
+		t.Errorf("Uint16 = 0x%04X, %v", v, err)
 	}
-	if v, _ := r.Uint32(); v != 0x01020304 {
-		t.Errorf("Uint32 = 0x%08X", v)
+	if v, err := r.Uint32(); err != nil || v != 0x01020304 {
+		t.Errorf("Uint32 = 0x%08X, %v", v, err)
 	}
-	if v, _ := r.Uint64(); v != 0x0102030405060708 {
-		t.Errorf("Uint64 = 0x%016X", v)
+	if v, err := r.Uint64(); err != nil || v != 0x0102030405060708 {
+		t.Errorf("Uint64 = 0x%016X, %v", v, err)
+	}
+	if _, err := r.Uint16(); err == nil {
+		t.Error("a read past the end returned no error")
 	}
 	if r.Remaining() != 0 {
 		t.Errorf("remaining = %d, want 0", r.Remaining())
@@ -91,7 +94,9 @@ func TestBinWidthRegimes(t *testing.T) {
 	// Round trip under each regime.
 	for _, fl := range []Flags{0, FlagWCount} {
 		w := NewPush(fl)
-		_ = w.Bin(blob)
+		if err := w.Bin(blob); err != nil {
+			t.Fatalf("Bin flags=%d: %v", fl, err)
+		}
 		got, err := NewPull(w.Bytes(), fl).Bin()
 		if err != nil || !bytes.Equal(got, blob) {
 			t.Errorf("Bin round trip flags=%d = % x (%v)", fl, got, err)
