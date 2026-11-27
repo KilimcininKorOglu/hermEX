@@ -61,6 +61,7 @@ func (s *Server) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "a folder with that name already exists"})
 		return
 	} else if err != nil {
+		logError("create-folder", err, logging.Fields{"folder": body.Name})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not create folder"})
 		return
 	}
@@ -97,6 +98,7 @@ func (s *Server) handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "a folder with that name already exists"})
 			return
 		}
+		logError("rename-folder", err, logging.Fields{"folder": id})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not rename folder"})
 		return
 	}
@@ -190,6 +192,7 @@ func (s *Server) handleEmptyFolder(w http.ResponseWriter, r *http.Request) {
 	toDumpster := fid == trash || fid == int64(mapi.PrivateFIDJunk)
 	msgs, err := st.ListMessages(fid)
 	if err != nil {
+		logError("empty-folder.list", err, logging.Fields{"folder": fid})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot read messages"})
 		return
 	}
