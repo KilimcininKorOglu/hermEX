@@ -118,7 +118,9 @@ func (p *Publisher) post(ev notifyd.Event) {
 	if err != nil {
 		return
 	}
-	_ = resp.Body.Close()
+	if err := resp.Body.Close(); err != nil {
+		log.Printf("notify: close publish response body: %v", err)
+	}
 }
 
 // --- Consumer ---
@@ -261,7 +263,11 @@ func (c *Consumer) stream(first bool) (connected bool) {
 	if !ok {
 		return false
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil && c.logger != nil {
+			c.logger.Debug(logging.Notify, "consumer.stream.close", logging.Fields{"err": err.Error()})
+		}
+	}()
 	if c.logger != nil {
 		c.logger.Info(logging.Notify, "consumer.connected", logging.Fields{"notify": c.endpoint})
 	}
@@ -293,7 +299,9 @@ func (c *Consumer) open() (*http.Response, bool) {
 		if c.logger != nil {
 			c.logger.Warn(logging.Notify, "consumer.stream.status", logging.Fields{"status": resp.StatusCode})
 		}
-		_ = resp.Body.Close()
+		if err := resp.Body.Close(); err != nil && c.logger != nil {
+			c.logger.Debug(logging.Notify, "consumer.stream.close", logging.Fields{"err": err.Error()})
+		}
 		return nil, false
 	}
 	return resp, true
