@@ -73,7 +73,7 @@ func TestFolderCreate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	fid, err := strconv.ParseInt(newID, 10, 64)
 	mustNoErr(t, "parse the new folder id", err)
 	ok, err := st.FolderExists(fid)
@@ -131,7 +131,7 @@ func TestFolderCreateMakesTheKindAsked(t *testing.T) {
 		st, err := objectstore.Open(dir)
 		mustNoErr(t, "open the store", err)
 		cls, err := folderClass(st, fid)
-		st.Close()
+		mustNoErr(t, "close the store", st.Close())
 		mustNoErr(t, "read the class", err)
 		wantEq(t, "the class of Type "+c.typ, cls, c.class)
 		wantEq(t, "the FolderSync Type of "+c.name, folderSyncType(t, ts, id), c.typ)
@@ -166,7 +166,7 @@ func TestSyncServesAUserTaskFolder(t *testing.T) {
 	mustNoErr(t, "parse the task id", err)
 	st, err := objectstore.Open(dir)
 	mustNoErr(t, "open the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	parent, err := st.MessageFolder(mid)
 	mustNoErr(t, "find the task's folder", err)
 	wantEq(t, "the folder the task was stored in", strconv.FormatInt(parent, 10), id)
@@ -243,6 +243,7 @@ func TestFolderCreateRefusesAMalformedRequest(t *testing.T) {
 		{"Type 18", req("0", "Bad6", "18", true, true), "10"},
 		{"Type not a number", req("0", "Bad7", "mail", true, true), "10"},
 		{"a ParentId that is not a number", req("abc", "Bad8", "12", true, true), "5"},
+		{"a negative ParentId", req("-5", "Bad9", "12", true, true), "5"},
 	}
 	for _, c := range cases {
 		key = primeHierarchy(t, ts)
@@ -250,7 +251,7 @@ func TestFolderCreateRefusesAMalformedRequest(t *testing.T) {
 		_, root := postCommand(t, ts, "FolderCreate", c.body)
 		wantEq(t, "the Status for "+c.name, root.ChildText(wbxml.FHStatus), c.want)
 	}
-	for i := 1; i <= 8; i++ {
+	for i := 1; i <= 9; i++ {
 		wantRootFolder(t, dir, "Bad"+strconv.Itoa(i), false)
 	}
 	for _, typ := range []string{"1", "12"} {
