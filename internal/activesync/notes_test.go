@@ -19,7 +19,7 @@ func seedNote(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	kid, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameKeywords})
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +105,7 @@ func wantStoredNote(t *testing.T, dir string, id int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msg, err := st.OpenMessage(id)
 	if err != nil {
 		t.Fatal(err)
@@ -143,7 +143,7 @@ func TestSyncNotesRefusesAnObjectOfAnotherFolder(t *testing.T) {
 		{Tag: mapi.PrMessageClass, Value: "IPM.Appointment"},
 		{Tag: mapi.PrSubject, Value: "Dentist"},
 	}})
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,18 +152,17 @@ func TestSyncNotesRefusesAnObjectOfAnotherFolder(t *testing.T) {
 	change := wbxml.Elem(wbxml.ASChange, wbxml.Str(wbxml.ASServerID, sid),
 		wbxml.Elem(wbxml.ASData, wbxml.Str(wbxml.NTSubject, "Overwritten")))
 	_, root := postCommand(t, ts, "Sync", ntReq("1", change))
-	if got := respColl(t, root).Child(wbxml.ASResponses).Child(wbxml.ASChange).ChildText(wbxml.ASStatus); got != "8" {
-		t.Errorf("Change Status = %q, want 8", got)
-	}
+	wantEq(t, "Change Status", collResponseStatus(t, root, wbxml.ASChange), "8")
 	key := respColl(t, root).ChildText(wbxml.ASSyncKey)
 	del := wbxml.Elem(wbxml.ASDelete, wbxml.Str(wbxml.ASServerID, sid))
-	postCommand(t, ts, "Sync", ntReq(key, del))
+	_, root = postCommand(t, ts, "Sync", ntReq(key, del))
+	wantEq(t, "Delete Status", collResponseStatus(t, root, wbxml.ASDelete), "8")
 
 	st, err = objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msg, err := st.OpenMessage(foreign)
 	if err != nil {
 		t.Fatalf("the Calendar item is gone after a Notes Delete: %v", err)
@@ -171,6 +170,17 @@ func TestSyncNotesRefusesAnObjectOfAnotherFolder(t *testing.T) {
 	if got := contactStr(msg.Props, mapi.PrSubject); got != "Dentist" {
 		t.Errorf("Calendar item Subject = %q, want Dentist", got)
 	}
+}
+
+// collResponseStatus returns the Status of the collection's Responses entry with
+// the given command tag, failing the test when the server sent no such entry.
+func collResponseStatus(t *testing.T, root *wbxml.Node, tag wbxml.Tag) string {
+	t.Helper()
+	resp := respColl(t, root).Child(wbxml.ASResponses)
+	if resp == nil || resp.Child(tag) == nil {
+		t.Fatalf("the Sync answered no Responses entry for the command: %+v", root)
+	}
+	return resp.Child(tag).ChildText(wbxml.ASStatus)
 }
 
 // TestFolderSyncAdvertisesNotes confirms FolderSync exposes the Notes collection with
