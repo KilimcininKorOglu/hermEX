@@ -2,6 +2,7 @@ package tlscert
 
 import (
 	"crypto/tls"
+	"strings"
 	"testing"
 )
 
@@ -28,8 +29,46 @@ func TestWildcardNameServesOneLabel(t *testing.T) {
 		{"example.com", def, "the wildcard's bare parent"},
 	}
 	for _, c := range cases {
-		if got, _ := p.getCertificate(helloFor(c.sni)); got != c.want {
+		got, err := p.getCertificate(helloFor(c.sni))
+		if err != nil {
+			t.Errorf("%s (%q) returned unexpected error: %v", c.what, c.sni, err)
+			continue
+		}
+		if got != c.want {
 			t.Errorf("%s (%q) served the wrong certificate", c.what, c.sni)
 		}
+	}
+}
+
+// TestWildcardRefusesHostileAndUnmatchedSNI proves that without a default or file
+// fallback, wildcard matching refuses single-label TLD wildcards (RFC 6125 6.4.3),
+// multi-label depths, unrelated hosts, empty SNI, and oversized labels without
+// altering the provider snapshot.
+func TestWildcardRefusesHostileAndUnmatchedSNI(t *testing.T) {
+	wild, tldWild := &tls.Certificate{}, &tls.Certificate{}
+	p := &Provider{}
+	p.snap.Store(&snapshot{byName: map[string]*tls.Certificate{
+		"*.example.com": wild,
+		"*.com":         tldWild,
+	}})
+
+	refused := []string{
+		"example.com",
+		"a.b.example.com",
+		"evil.other.net",
+		strings.Repeat("a", 300) + ".other.net",
+		"",
+	}
+	for _, sni := range refused {
+		got, err := p.getCertificate(helloFor(sni))
+		if err == nil || got != nil {
+			t.Errorf("SNI %q must be refused, got (%v, %v)", sni, got, err)
+		}
+	}
+	if len(p.snap.Load().byName) != 2 {
+		t.Errorf("refusal altered snapshot len to %d, want 2", len(p.snap.Load().byName))
+	}
+	if got, err := p.getCertificate(helloFor("mail.example.com")); err != nil || got != wild {
+		t.Errorf("valid wildcard SNI after refusals returned (%v, %v), want wild cert", got, err)
 	}
 }

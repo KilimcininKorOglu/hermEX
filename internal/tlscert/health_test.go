@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -236,8 +237,8 @@ func TestExpiryNoticeWarnsAndThrottles(t *testing.T) {
 	if e.Level != logging.LevelWarn || e.Subsystem != logging.TLS || e.Name != "certificate.expiring" {
 		t.Errorf("event = %s/%s/%s, want warn/tls/certificate.expiring", e.Level, e.Subsystem, e.Name)
 	}
-	if days, _ := e.Fields["days_left"].(int); days != 6 && days != 7 {
-		t.Errorf("days_left = %v, want the remaining week", e.Fields["days_left"])
+	if days, ok := e.Fields["days_left"].(int); !ok || (days != 6 && days != 7) {
+		t.Errorf("days_left = %v (ok=%v), want the remaining week", e.Fields["days_left"], ok)
 	}
 
 	// The next few polls stay silent, the one after the interval speaks again.
@@ -287,5 +288,67 @@ func TestExpiryNoticeSilentOutsideTheWindow(t *testing.T) {
 	bare.noteExpiry(now)
 	if len(empty.events) != 0 {
 		t.Errorf("a provider serving no certificate emitted %d events, want none", len(empty.events))
+	}
+	if !bare.lastExpiryNotice.IsZero() {
+		t.Errorf("empty provider noteExpiry mutated lastExpiryNotice to %v", bare.lastExpiryNotice)
+	}
+}
+
+// TestExpiryIgnoresCorruptCertificateMaterial proves Expiry refuses unparseable
+// DER or empty certificate entries without panicking or mutating the snapshot,
+// while still reporting a valid sibling's NotAfter.
+func TestExpiryIgnoresCorruptCertificateMaterial(t *testing.T) {
+	p := &Provider{}
+	p.snap.Store(&snapshot{byName: map[string]*tls.Certificate{
+		"corrupt.example.com": {Certificate: [][]byte{[]byte("not-der")}},
+		"empty.example.com":   {},
+	}})
+	if got, ok := p.Expiry(); ok {
+		t.Fatalf("Expiry on corrupt/empty certs = (%v, true), want false", got)
+	}
+	if err := ExpiryCheck(p).Probe(context.Background()); err != nil {
+		t.Errorf("probe on unparseable-only snapshot = %v, want nil", err)
+	}
+	if len(p.snap.Load().byName) != 2 {
+		t.Errorf("Expiry mutated snapshot len to %d, want 2", len(p.snap.Load().byName))
+	}
+
+	soon := time.Now().Add(20 * 24 * time.Hour).Truncate(time.Second)
+	certPEM, keyPEM := genCertExpiring(t, "valid.example.com", soon)
+	validCert, err := tls.X509KeyPair([]byte(certPEM), []byte(keyPEM))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.snap.Store(&snapshot{byName: map[string]*tls.Certificate{
+		"corrupt.example.com": {Certificate: [][]byte{[]byte("not-der")}},
+		"valid.example.com":   &validCert,
+	}})
+	got, ok := p.Expiry()
+	if !ok {
+		t.Fatal("Expiry ignored valid sibling alongside corrupt cert")
+	}
+	if got.Unix() != soon.Unix() {
+		t.Errorf("Expiry = %s, want %s", got, soon)
+	}
+}
+
+// TestExpiryNoticeOutsideWindowAndNilLoggerPreserveState proves noteExpiry does
+// not record a throttle timestamp when logger is nil or when the certificate is
+// at or outside the 14-day warning window.
+func TestExpiryNoticeOutsideWindowAndNilLoggerPreserveState(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	p, sink := providerLogging(t, now.Add(expiryWarning))
+	p.noteExpiry(now)
+	if len(sink.events) != 0 {
+		t.Errorf("certificate at exact warning boundary emitted %d events, want 0", len(sink.events))
+	}
+	if !p.lastExpiryNotice.IsZero() {
+		t.Errorf("suppressed notice mutated lastExpiryNotice to %v", p.lastExpiryNotice)
+	}
+
+	noLog := providerWith(t, map[string]time.Time{"a.example.com": now.Add(3 * 24 * time.Hour)})
+	noLog.noteExpiry(now)
+	if !noLog.lastExpiryNotice.IsZero() {
+		t.Errorf("nil-logger noteExpiry mutated lastExpiryNotice to %v", noLog.lastExpiryNotice)
 	}
 }
