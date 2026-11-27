@@ -220,7 +220,7 @@ func TestSettingsOofPreservesSubject(t *testing.T) {
 	}
 	mustNoErr(t, "close the store", st.Close())
 
-	set :=wbxml.Elem(wbxml.STOof, wbxml.Elem(wbxml.STSet,
+	set := wbxml.Elem(wbxml.STOof, wbxml.Elem(wbxml.STSet,
 		wbxml.Str(wbxml.STOofState, "1"),
 		oofMessageNode(wbxml.STAppliesToInternal, "1", "away")))
 	postCommand(t, ts, "Settings", settingsReq(set))
