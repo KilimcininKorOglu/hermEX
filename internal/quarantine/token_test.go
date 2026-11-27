@@ -41,11 +41,25 @@ func mustMint(t *testing.T, c Claims) string {
 	return tok
 }
 
+// splitToken cuts a token into its payload and signature and fails the test
+// when the separator is missing, so a forgery is built from real parts.
+func splitToken(t *testing.T, tok string) (payload, sig string) {
+	t.Helper()
+	payload, sig, found := strings.Cut(tok, ".")
+	if !found || payload == "" || sig == "" {
+		t.Fatalf("token %q is not payload.signature", tok)
+	}
+	return payload, sig
+}
+
 // TestTokenRejectsTamperedSignature proves flipping the signature fails verification,
 // the token cannot be forged without the secret.
 func TestTokenRejectsTamperedSignature(t *testing.T) {
 	tok := mustMint(t, Claims{Mailbox: "alice@hermex.test", UID: 1, Expiry: testNow.Add(time.Hour).Unix()})
-	enc, _, _ := strings.Cut(tok, ".")
+	enc, sig := splitToken(t, tok)
+	if sig == "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" {
+		t.Fatal("the minted signature equals the forgery, so the test proves nothing")
+	}
 	forged := enc + ".AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	if _, err := Verify(testSecret, forged, testNow); !errors.Is(err, ErrBadToken) {
 		t.Errorf("tampered signature err = %v, want ErrBadToken", err)
@@ -57,9 +71,9 @@ func TestTokenRejectsTamperedSignature(t *testing.T) {
 func TestTokenRejectsTamperedPayload(t *testing.T) {
 	tok := mustMint(t, Claims{Mailbox: "alice@hermex.test", UID: 1, Expiry: testNow.Add(time.Hour).Unix()})
 	// Re-sign attempt with a different payload but the original signature.
-	_, sig, _ := strings.Cut(tok, ".")
+	_, sig := splitToken(t, tok)
 	other := mustMint(t, Claims{Mailbox: "victim@hermex.test", UID: 99, Expiry: testNow.Add(time.Hour).Unix()})
-	otherEnc, _, _ := strings.Cut(other, ".")
+	otherEnc, _ := splitToken(t, other)
 	forged := otherEnc + "." + sig
 	if _, err := Verify(testSecret, forged, testNow); !errors.Is(err, ErrBadToken) {
 		t.Errorf("tampered payload err = %v, want ErrBadToken", err)
