@@ -1,6 +1,7 @@
 package rop
 
 import (
+	"errors"
 	"testing"
 
 	"hermex/internal/antivirus"
@@ -78,8 +79,11 @@ func TestSaveChangesAttachmentRefusesInfectedContent(t *testing.T) {
 	}
 	defer st.Close()
 	attID, err := st.AttachmentIDByNumber(int64(mid), num)
-	if err != nil {
+	if errors.Is(err, objectstore.ErrNotFound) {
 		return // no attachment row at all: nothing was stored
+	}
+	if err != nil {
+		t.Fatalf("look up the refused attachment: %v", err)
 	}
 	props, err := st.GetAttachmentProperties(attID, mapi.PrAttachDataBin)
 	if err != nil {
