@@ -157,7 +157,9 @@ func (d *SQLDirectory) SweepRecoverableItems(now time.Time) (int, error) {
 	if days <= 0 {
 		return 0, nil
 	}
-	cutoff := now.Add(-time.Duration(days) * 24 * time.Hour)
+	// AddDate, not a Duration: days * 24h overflows int64 nanoseconds past about
+	// 106751 days and wraps into a cutoff in the future that purges every item.
+	cutoff := now.AddDate(0, 0, -days)
 	maildirs, err := d.AllMaildirs()
 	if err != nil {
 		return 0, err

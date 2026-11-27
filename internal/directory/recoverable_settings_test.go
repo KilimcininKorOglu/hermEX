@@ -80,6 +80,15 @@ func TestSweepRecoverableItemsHonorsRetention(t *testing.T) {
 	n, err = d.SweepRecoverableItems(time.Now())
 	mustNoErr(t, "sweep", err)
 	wantEq(t, "items swept with a 10-year window", n, 0)
+
+	// A window past what time.Duration holds (about 106751 days) keeps everything
+	// too: it must never wrap into a cutoff in the future that purges the dumpster.
+	// 150000 days times 24 h wraps int64 nanoseconds to a negative duration.
+	mustNoErr(t, "set a 150000-day window", d.SetRecoverableSettings(RecoverableSettings{RetentionDays: 150000}))
+	n, err = d.SweepRecoverableItems(time.Now())
+	mustNoErr(t, "sweep with a very wide window", err)
+	wantEq(t, "items swept with a 150000-day window", n, 0)
+	wantEq(t, "dumpster items after the very wide window", len(dumpster(t, maildir)), 1)
 }
 
 // TestMaintenanceReadsNeverCreateAMailbox proves the retention sweep and the
