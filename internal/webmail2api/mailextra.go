@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/mail"
@@ -528,11 +529,17 @@ func (s *Server) handleLabels(w http.ResponseWriter, r *http.Request) {
 	}
 	defer closeStore(st)
 	info, err := st.MessageByUID(fid, uid)
-	if err != nil {
+	if errors.Is(err, objectstore.ErrNotFound) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
+	if err != nil {
+		logError("labels-read", err, logging.Fields{"folder": fid, "uid": uid})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not set labels"})
+		return
+	}
 	if err := st.SetCategories(info.ID, req.Labels); err != nil {
+		logError("labels-write", err, logging.Fields{"folder": fid, "uid": uid})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not set labels"})
 		return
 	}
