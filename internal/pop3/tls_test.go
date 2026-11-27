@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -27,7 +28,7 @@ func startSTLSServer(t *testing.T) (addr, certPath string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close() // provisions the mailbox (built-in folders) for USER/PASS to open
+	mustClose(t, st) // provisions the mailbox (built-in folders) for USER/PASS to open
 
 	certPath, keyPath, err := tlstest.SelfSigned(t.TempDir())
 	if err != nil {
@@ -37,13 +38,8 @@ func startSTLSServer(t *testing.T) (addr, certPath string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
 	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
-	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test", TLSConfig: tlsCfg}).Serve(ln) }()
+	ln := serveOn(t, &Server{Auth: auth, Hostname: "mail.test", TLSConfig: tlsCfg})
 	return ln.Addr().String(), certPath
 }
 
@@ -56,7 +52,7 @@ func TestSTLSUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer mustClose(t, conn)
 	br := bufio.NewReader(conn)
 	mustPrefix(t, br, "+OK") // greeting
 
@@ -78,6 +74,10 @@ func TestSTLSUpgrade(t *testing.T) {
 	if capa := readUntilDot(t, tbr); strings.Contains(capa, "STLS") {
 		t.Errorf("STLS still advertised after TLS:\n%s", capa)
 	}
+	// RFC 2595 §4: STLS is valid only once; a second one on the encrypted link
+	// is refused and the session carries on.
+	mustSend(t, tconn, "%s", "STLS\r\n")
+	mustPrefix(t, tbr, "-ERR")
 	mustSend(t, tconn, "%s", "USER alice\r\n")
 	mustPrefix(t, tbr, "+OK")
 	mustSend(t, tconn, "%s", "PASS secret\r\n")
@@ -96,7 +96,7 @@ func TestPlaintextLoginWaitsForSTLS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer mustClose(t, conn)
 	br := bufio.NewReader(conn)
 	mustPrefix(t, br, "+OK") // greeting
 
@@ -122,7 +122,7 @@ func TestImplicitTLSLoginIsAccepted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 	certPath, keyPath, err := tlstest.SelfSigned(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -131,21 +131,15 @@ func TestImplicitTLSLoginIsAccepted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
 	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
-	go func() {
-		_ = (&Server{Auth: auth, Hostname: "mail.test", TLSConfig: tlsCfg}).Serve(tls.NewListener(ln, tlsCfg))
-	}()
+	ln := serveWrapped(t, &Server{Auth: auth, Hostname: "mail.test", TLSConfig: tlsCfg},
+		func(l net.Listener) net.Listener { return tls.NewListener(l, tlsCfg) })
 
 	conn, err := tls.Dial("tcp", ln.Addr().String(), &tls.Config{RootCAs: certPool(t, certPath), ServerName: "127.0.0.1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer mustClose(t, conn)
 	br := bufio.NewReader(conn)
 	mustPrefix(t, br, "+OK")
 	mustSend(t, conn, "%s", "CAPA\r\n")
@@ -167,7 +161,13 @@ func TestSTLSRejectsPipelinedInjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	// The server tears this connection down, so closing it again may report the
+	// close; only a failure other than an already-closed conn is an error.
+	defer func() {
+		if err := conn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			t.Errorf("close: %v", err)
+		}
+	}()
 	br := bufio.NewReader(conn)
 	if _, err := br.ReadString('\n'); err != nil { // greeting
 		t.Fatal(err)
@@ -212,7 +212,9 @@ func readUntilDot(t *testing.T, br *bufio.Reader) string {
 		if l == ".\r\n" {
 			break
 		}
-		sb.WriteString(l)
+		if _, err := sb.WriteString(l); err != nil {
+			t.Fatalf("collect the listing: %v", err)
+		}
 	}
 	return sb.String()
 }
