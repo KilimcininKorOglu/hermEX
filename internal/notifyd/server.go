@@ -17,6 +17,7 @@ package notifyd
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"io"
 	"net/http"
 	"sync"
 
@@ -178,19 +179,17 @@ func (s *Server) unregister(ch chan Event) {
 	}
 }
 
-// writeEvent serializes one Event as a single SSE `data:` record. It returns false
-// on any write error (the client has gone).
+// writeEvent serializes one Event as a single SSE `data:` record: the encoder
+// writes the JSON and its newline, and a second newline ends the record. It
+// returns false when the event cannot be encoded or written, which ends the
+// stream; the consumer reconnects and its poll cadence covers the event.
 func writeEvent(w http.ResponseWriter, ev Event) bool {
-	body, err := json.Marshal(ev)
-	if err != nil {
-		return true // a malformed event is dropped, not fatal to the stream
-	}
-	if _, err := w.Write([]byte("data: ")); err != nil {
+	if _, err := io.WriteString(w, "data: "); err != nil {
 		return false
 	}
-	if _, err := w.Write(body); err != nil {
+	if err := json.NewEncoder(w).Encode(ev); err != nil {
 		return false
 	}
-	_, err = w.Write([]byte("\n\n"))
+	_, err := io.WriteString(w, "\n")
 	return err == nil
 }

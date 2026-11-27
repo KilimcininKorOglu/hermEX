@@ -216,6 +216,40 @@ func TestPublishReachesConsumer(t *testing.T) {
 	}
 }
 
+// TestEventRecordIsOneDispatchedSSEEvent reads the raw stream: an event reaches
+// an EventSource consumer only when a blank line ends its record (WHATWG HTML,
+// Server-sent events, "dispatch the event" on an empty line), so the record must
+// be exactly "data: <json>" followed by two line feeds, the JSON on one line.
+func TestEventRecordIsOneDispatchedSSEEvent(t *testing.T) {
+	ts := httptest.NewServer(New(testSecret, nil).Handler())
+	defer ts.Close()
+	resp := openStream(t, ts, testSecret)
+	defer closeBody(t, resp)
+
+	ev := Event{Mailbox: "/m/alice", Op: "create", CN: 7, Mid: "3"}
+	if got := publish(t, ts, testSecret, ev); got != http.StatusNoContent {
+		t.Fatalf("publish status = %d, want 204", got)
+	}
+	want := `data: {"mailbox":"/m/alice","op":"create","cn":7,"mid":"3"}` + "\n\n"
+	got := make([]byte, len(want))
+	done := make(chan error, 1)
+	go func() {
+		_, err := io.ReadFull(resp.Body, got)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("read record: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no complete record arrived within 2s")
+	}
+	if string(got) != want {
+		t.Errorf("record = %q, want %q", got, want)
+	}
+}
+
 // TestPublishFanout proves a single publish reaches every connected consumer
 // (broadcast, not point-to-point).
 func TestPublishFanout(t *testing.T) {
