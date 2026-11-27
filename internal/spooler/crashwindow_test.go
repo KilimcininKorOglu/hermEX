@@ -27,8 +27,15 @@ func TestInterruptedReleaseIsNotDeliveredTwice(t *testing.T) {
 		panic("process died after the send")
 	}
 	func() {
-		defer func() { _ = recover() }()
-		_, _ = releaseOutbox(context.Background(), st, crashAfterSending, nil, time.Now())
+		// Only the simulated crash may end this pass: any other panic is a bug
+		// the crash would otherwise hide.
+		defer func() {
+			if r := recover(); r != "process died after the send" {
+				t.Errorf("the first pass ended with %v, want the simulated crash", r)
+			}
+		}()
+		a, b := releaseOutbox(context.Background(), st, crashAfterSending, nil, time.Now())
+		t.Errorf("the first pass returned (%v, %v) instead of crashing in the send", a, b)
 	}()
 	if sends != 1 {
 		t.Fatalf("the first pass sent %d times, want 1", sends)
