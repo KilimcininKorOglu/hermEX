@@ -25,8 +25,8 @@ func TestImportExportReadReceipt(t *testing.T) {
 	if v, ok := msg.Props.Get(mapi.PrReadReceiptRequested); !ok || v != true {
 		t.Errorf("PR_READ_RECEIPT_REQUESTED = %v (ok=%v); want true", v, ok)
 	}
-	if v, _ := msg.Props.Get(mapi.PrReadReceiptSmtpAddress); v != "bob@example.com" {
-		t.Errorf("read-receipt smtp address = %v, want bob@example.com", v)
+	if v, ok := msg.Props.Get(mapi.PrReadReceiptSmtpAddress); !ok || v != "bob@example.com" {
+		t.Errorf("read-receipt smtp address = %v (set %v), want bob@example.com", v, ok)
 	}
 
 	wire, err := Export(msg, Options{})
