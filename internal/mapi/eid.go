@@ -18,8 +18,7 @@ type GlobCnt [6]byte
 // not meaningful on its own.
 type EID uint64
 
-// gcvMask isolates the 48-bit global-counter value after the byte swap
-// (eid_t::GCV_MASK).
+// gcvMask isolates the 48-bit global-counter value after the byte swap.
 const gcvMask uint64 = 0x0000FFFFFFFFFFFF
 
 // AllocatedEIDRange is the width of one EID allocation block and
@@ -31,7 +30,7 @@ const (
 )
 
 // ValueToGC encodes the low 48 bits of value as a 6-byte big-endian GlobCnt
-// (rop_util_value_to_gc).
+// ([MS-OXCDATA] 2.2.1.1).
 func ValueToGC(value uint64) GlobCnt {
 	var b [8]byte
 	binary.BigEndian.PutUint64(b[:], value)
@@ -40,8 +39,7 @@ func ValueToGC(value uint64) GlobCnt {
 	return gc
 }
 
-// GCToValue decodes a 6-byte big-endian GlobCnt into a 48-bit value
-// (rop_util_gc_to_value).
+// GCToValue decodes a 6-byte big-endian GlobCnt into a 48-bit value.
 func GCToValue(gc GlobCnt) uint64 {
 	var b [8]byte
 	copy(b[2:8], gc[:])
@@ -49,27 +47,26 @@ func GCToValue(gc GlobCnt) uint64 {
 }
 
 // MakeEIDEx composes an EID from a replica id and a value already in
-// global-counter-value form (rop_util_make_eid_ex). The value is not masked: the
+// global-counter-value form. The value is not masked: the
 // caller is responsible for keeping it within 48 bits.
 func MakeEIDEx(replid uint16, value uint64) EID {
 	return EID(bits.ReverseBytes64(value) | uint64(replid))
 }
 
-// MakeEID composes an EID from a replica id and a GlobCnt (rop_util_make_eid).
+// MakeEID composes an EID from a replica id and a GlobCnt.
 func MakeEID(replid uint16, gc GlobCnt) EID {
 	return MakeEIDEx(replid, GCToValue(gc))
 }
 
-// ReplID returns the 16-bit replica id (the low 16 bits, eid_t::replid).
+// ReplID returns the 16-bit replica id (the low 16 bits).
 func (e EID) ReplID() uint16 { return uint16(uint64(e) & 0xFFFF) }
 
-// GCValue returns the 48-bit global-counter value (eid_t::gcv /
-// rop_util_get_gc_value).
+// GCValue returns the 48-bit global-counter value.
 func (e EID) GCValue() uint64 { return bits.ReverseBytes64(uint64(e)) & gcvMask }
 
 // GCArray returns the six global-counter bytes as they sit in the EID's
 // little-endian memory image: bytes [2:8] of the little-endian encoding of the
-// raw value (rop_util_get_gc_array). This is a distinct computation from
+// raw value. This is a distinct computation from
 // ValueToGC and is the form embedded in an entry id.
 func (e EID) GCArray() GlobCnt {
 	var b [8]byte

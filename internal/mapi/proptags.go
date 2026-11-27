@@ -442,8 +442,8 @@ const (
 
 // Object/display type and recipient-flag values (MS-OXCDATA / MS-OXOABK).
 const (
-	ObjectTypeMailUser = 6 // mapi_object_type::mailuser
-	ObjectTypeDistList = 8 // mapi_object_type::distlist
+	ObjectTypeMailUser = 6 // MAPI_MAILUSER
+	ObjectTypeDistList = 8 // MAPI_DISTLIST
 
 	DisplayTypeMailUser = 0 // DT_MAILUSER
 	DisplayTypeDistList = 1 // DT_DISTLIST
