@@ -26,7 +26,11 @@ func TestNonASCIIAttachmentNameIsEncoded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	head, _, _ := strings.Cut(string(raw), "%PDF")
+	// The 7bit-clean payload is base64 encoded, so its marker is the encoded form.
+	head, _, found := strings.Cut(string(raw), "JVBERg==")
+	if !found {
+		t.Fatalf("the attachment body is missing from the export:\n%s", raw)
+	}
 	for i := 0; i < len(head); i++ {
 		if head[i] >= 0x80 {
 			t.Fatalf("8-bit byte in the headers:\n%s", raw)
