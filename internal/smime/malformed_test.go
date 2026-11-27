@@ -22,8 +22,12 @@ func TestVerifyRefusesATruncatedSignature(t *testing.T) {
 					t.Errorf("signature % X: Verify panicked: %v", sig, r)
 				}
 			}()
-			if _, err := Verify([]byte(raw)); err == nil {
+			s, err := Verify([]byte(raw))
+			if err == nil {
 				t.Errorf("signature % X: a truncated signature verified", sig)
+			}
+			if s.Signer != nil || s.Content != nil {
+				t.Errorf("signature % X: a refused message still returned a signer or content", sig)
 			}
 		}()
 	}
