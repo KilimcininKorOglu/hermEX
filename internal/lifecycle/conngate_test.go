@@ -1,6 +1,8 @@
 package lifecycle_test
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net"
 	"sync/atomic"
@@ -9,6 +11,23 @@ import (
 
 	"hermex/internal/lifecycle"
 )
+
+// closeOrFail closes c and reports any unexpected error.
+func closeOrFail(t *testing.T, c io.Closer) {
+	t.Helper()
+	if err := c.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+		t.Errorf("close: %v", err)
+	}
+}
+
+// writeAndClose writes msg to nc and closes it, reporting any error.
+func writeAndClose(t *testing.T, nc net.Conn, msg string) {
+	t.Helper()
+	if _, err := nc.Write([]byte(msg)); err != nil {
+		t.Errorf("write %q: %v", msg, err)
+	}
+	closeOrFail(t, nc)
+}
 
 // gatedGroup serves one listener with the given gate and refusal writer, and
 // returns the listener plus a count of the handlers that ran.
@@ -22,14 +41,23 @@ func gatedGroup(t *testing.T, gate lifecycle.Gate, refuse func(net.Conn)) (net.L
 	var g lifecycle.ConnGroup
 	g.AddListener(ln)
 	g.SetGate(gate, refuse)
+	startErr := make(chan error, 1)
 	go func() {
-		_ = g.Start(func(nc net.Conn) {
+		startErr <- g.Start(func(nc net.Conn) {
 			served.Add(1)
-			_, _ = nc.Write([]byte("served"))
-			_ = nc.Close()
+			writeAndClose(t, nc, "served")
 		})
 	}()
-	t.Cleanup(func() { _ = ln.Close() })
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := g.Shutdown(ctx); err != nil {
+			t.Errorf("shutdown: %v", err)
+		}
+		if err := <-startErr; err != nil {
+			t.Errorf("start: %v", err)
+		}
+	})
 	return ln, &served
 }
 
@@ -40,7 +68,7 @@ func readAll(t *testing.T, ln net.Listener) string {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer conn.Close()
+	defer closeOrFail(t, conn)
 	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		t.Fatalf("set the read deadline: %v", err)
 	}
@@ -57,8 +85,7 @@ func readAll(t *testing.T, ln net.Listener) string {
 func TestGateRefusesWithoutAHandler(t *testing.T) {
 	gate := func(net.Conn) (func(), bool) { return nil, false }
 	refuse := func(nc net.Conn) {
-		_, _ = nc.Write([]byte("refused"))
-		_ = nc.Close()
+		writeAndClose(t, nc, "refused")
 	}
 	ln, served := gatedGroup(t, gate, refuse)
 
@@ -110,26 +137,30 @@ func TestNoGateServesEveryConnection(t *testing.T) {
 // one such client shut the daemon to everyone, which is the flood the cap guards.
 func TestAStalledRefusalDoesNotStopTheAcceptLoop(t *testing.T) {
 	stall := make(chan struct{})
-	t.Cleanup(func() { close(stall) })
 	var calls atomic.Int64
 	gate := func(net.Conn) (func(), bool) { return nil, calls.Add(1) > 1 }
 	refuse := func(nc net.Conn) {
 		<-stall
-		_ = nc.Close()
+		closeOrFail(t, nc)
 	}
-	ln, _ := gatedGroup(t, gate, refuse)
+	ln, served := gatedGroup(t, gate, refuse)
+	// Register after gatedGroup so LIFO unblocks the stalled refusal before Shutdown drains.
+	t.Cleanup(func() { close(stall) })
 
 	first, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer first.Close()
+	defer closeOrFail(t, first)
 	for calls.Load() == 0 {
 		time.Sleep(time.Millisecond)
 	}
 
 	if got := readAll(t, ln); got != "served" {
 		t.Errorf("second connection read %q, want it served while the first refusal stalls", got)
+	}
+	if n := served.Load(); n != 1 {
+		t.Errorf("handlers run = %d, want 1", n)
 	}
 }
 
@@ -141,18 +172,28 @@ func TestAPanickingHandlerReleasesItsSlot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = ln.Close() })
 	released := make(chan struct{}, 1)
 	var g lifecycle.ConnGroup
 	g.AddListener(ln)
 	g.SetGate(func(net.Conn) (func(), bool) { return func() { released <- struct{}{} }, true }, nil)
-	go func() { _ = g.Start(func(net.Conn) { panic("bad command") }) }()
+	startErr := make(chan error, 1)
+	go func() { startErr <- g.Start(func(net.Conn) { panic("bad command") }) }()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := g.Shutdown(ctx); err != nil {
+			t.Errorf("shutdown: %v", err)
+		}
+		if err := <-startErr; err != nil {
+			t.Errorf("start: %v", err)
+		}
+	})
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer closeOrFail(t, conn)
 
 	select {
 	case <-released:
@@ -172,5 +213,19 @@ func TestRefusedConnectionClosesWithoutARefusalWriter(t *testing.T) {
 	}
 	if n := served.Load(); n != 0 {
 		t.Errorf("handlers run = %d, want 0", n)
+	}
+}
+
+// TestGateAdmitsWithNilRelease proves a gate that admits a connection with a nil
+// release function does not panic on handler return and still serves the client.
+func TestGateAdmitsWithNilRelease(t *testing.T) {
+	gate := func(net.Conn) (func(), bool) { return nil, true }
+	ln, served := gatedGroup(t, gate, nil)
+
+	if got := readAll(t, ln); got != "served" {
+		t.Errorf("admitted connection read %q, want %q", got, "served")
+	}
+	if n := served.Load(); n != 1 {
+		t.Errorf("handlers run = %d, want 1", n)
 	}
 }
