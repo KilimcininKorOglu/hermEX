@@ -195,10 +195,7 @@ func TestStreamWriteMechanics(t *testing.T) {
 
 	// SeekStream(END,0) positions at the (now 1-byte) end for an append.
 	se, _ := sess.Dispatch(buildSeekStream(0, streamSeekEnd, 0), []uint32{streamH})
-	p = ext.NewPull(se, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "hindex")
-	mustU32(t, p, "ec")
+	p = ropOK(t, se, ropSeekStream, "SeekStream(END,0)")
 	if pos := mustU64(t, p, "NewPosition"); pos != 1 {
 		t.Errorf("SeekStream(END,0) NewPosition = %d, want 1", pos)
 	}
@@ -297,4 +294,8 @@ func TestStreamSizeCapped(t *testing.T) {
 	if ec := mustU32(t, p, "ec"); ec != ecInvalidParam {
 		t.Errorf("SeekStream(SET, 1<<40) ec = %#x, want ecInvalidParam", ec)
 	}
+
+	// The refusals left the new stream at its opening size of 0.
+	gs, _ := sess.Dispatch(buildGetStreamSize(0), []uint32{streamH})
+	wantU32(t, ropOK(t, gs, ropGetStreamSize, "GetStreamSize"), "stream size after refused resizes", 0)
 }
