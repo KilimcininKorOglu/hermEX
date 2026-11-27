@@ -32,16 +32,20 @@ func TestAuthenticateLDAPBranch(t *testing.T) {
 	d, db := freshDirectory(t)
 	root := t.TempDir()
 	domID := mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "local@hermex.test", "localpass")
-	mustCreateUser(t, d, root, "ext@hermex.test", "ignored-local-hash")
+	seedUser(t, d, root, "local@hermex.test", "localpass")
+	seedUser(t, d, root, "ext@hermex.test", "ignored-local-hash")
 	// Master ext@ in LDAP (externid set) and bind its domain to a connection.
-	_, err := db.Exec(`UPDATE users SET externid=? WHERE username=?`, []byte{0x01, 0x02}, "ext@hermex.test")
+	res, err := db.Exec(`UPDATE users SET externid=? WHERE username=?`, []byte{0x01, 0x02}, "ext@hermex.test")
 	mustNoErr(t, "master the account in LDAP", err)
+	wantAffected(t, "accounts mastered in LDAP", res)
 	mustBindDomain(t, d, domID, LDAPConnection{Name: "hq", URI: "ldaps://ad.hermex.test",
 		BaseDN: "dc=hermex,dc=test", UsernameAttr: "mail"})
 	admits := func(login, password string) bool {
 		t.Helper()
-		_, ok := d.Authenticate(login, password)
+		maildir, ok := d.Authenticate(login, password)
+		if !ok && maildir != "" {
+			t.Errorf("denied Authenticate(%s) returned non-empty maildir %q", login, maildir)
+		}
 		return ok
 	}
 
@@ -76,22 +80,23 @@ func TestLDAPLoginRefusesEmptyPasswordAndVerifierErrors(t *testing.T) {
 	d, db := freshDirectory(t)
 	root := t.TempDir()
 	domID := mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "ext@hermex.test", "ignored-local-hash")
-	_, err := db.Exec(`UPDATE users SET externid=? WHERE username=?`, []byte{0x01}, "ext@hermex.test")
+	seedUser(t, d, root, "ext@hermex.test", "ignored-local-hash")
+	res, err := db.Exec(`UPDATE users SET externid=? WHERE username=?`, []byte{0x01}, "ext@hermex.test")
 	mustNoErr(t, "master the account in LDAP", err)
+	wantAffected(t, "accounts mastered in LDAP", res)
 	mustBindDomain(t, d, domID, LDAPConnection{Name: "hq", URI: "ldaps://ad.hermex.test", UsernameAttr: "mail"})
 
 	stub := &stubVerifier{result: true}
 	d.SetLDAPVerifier(stub)
-	if _, ok := d.Authenticate("ext@hermex.test", ""); ok {
-		t.Error("an empty password was admitted through LDAP")
+	if maildir, ok := d.Authenticate("ext@hermex.test", ""); ok || maildir != "" {
+		t.Errorf("an empty password was admitted through LDAP: %q %v", maildir, ok)
 	}
 	if stub.gotLogin != "" {
 		t.Error("an empty password reached the verifier")
 	}
 	d.SetLDAPVerifier(&stubVerifier{result: true, err: errors.New("directory unreachable")})
-	if _, ok := d.Authenticate("ext@hermex.test", "pw"); ok {
-		t.Error("a failing verifier admitted the login")
+	if maildir, ok := d.Authenticate("ext@hermex.test", "pw"); ok || maildir != "" {
+		t.Errorf("a failing verifier admitted the login: %q %v", maildir, ok)
 	}
 }
 
@@ -100,8 +105,9 @@ func mustBindDomain(t *testing.T, d *SQLDirectory, domainID int64, c LDAPConnect
 	t.Helper()
 	cID, err := d.CreateLDAPConnection(c)
 	mustNoErr(t, "create connection "+c.Name, err)
-	_, err = d.CreateLDAPBinding(LDAPBinding{ConnectionID: cID, DomainID: domainID})
+	bID, err := d.CreateLDAPBinding(LDAPBinding{ConnectionID: cID, DomainID: domainID})
 	mustNoErr(t, "bind domain to "+c.Name, err)
+	wantEq(t, "binding id > 0 for "+c.Name, bID > 0, true)
 }
 
 // TestLDAPLoginUsesDomainBinding proves an LDAP-mastered login is verified against
@@ -113,38 +119,42 @@ func TestLDAPLoginUsesDomainBinding(t *testing.T) {
 	root := t.TempDir()
 	aID := mustCreateDomain(t, d, root, "a.test")
 	bID := mustCreateDomain(t, d, root, "b.test")
-	mustCreateDomain(t, d, root, "c.test")
+	seedDomain(t, d, root, "c.test")
 	for _, u := range []string{"u@a.test", "u@b.test", "u@c.test"} {
-		mustCreateUser(t, d, root, u, "ignored-local-hash")
-		_, err := db.Exec(`UPDATE users SET externid=? WHERE username=?`, []byte{0x01}, u)
+		seedUser(t, d, root, u, "ignored-local-hash")
+		res, err := db.Exec(`UPDATE users SET externid=? WHERE username=?`, []byte{0x01}, u)
 		mustNoErr(t, "master "+u+" in LDAP", err)
+		wantAffected(t, "accounts mastered in LDAP for "+u, res)
 	}
-	_, err := db.Exec(`INSERT INTO ldap_config (org_id, uri, username_attr) VALUES (0, 'ldaps://org.test', 'mail')`)
+	res, err := db.Exec(`INSERT INTO ldap_config (org_id, uri, username_attr) VALUES (0, 'ldaps://org.test', 'mail')`)
 	mustNoErr(t, "leave an organization directory row behind", err)
+	wantAffected(t, "organization directory rows", res)
 	mustBindDomain(t, d, aID, LDAPConnection{Name: "a", URI: "ldaps://a-dir.test", UsernameAttr: "mail"})
 	mustBindDomain(t, d, bID, LDAPConnection{Name: "b", URI: "ldaps://b-dir.test", UsernameAttr: "uid"})
 	stub := &stubVerifier{result: true}
 	d.SetLDAPVerifier(stub)
 
 	for login, uri := range map[string]string{"u@a.test": "ldaps://a-dir.test", "u@b.test": "ldaps://b-dir.test"} {
-		_, ok := d.Authenticate(login, "pw")
+		maildir, ok := d.Authenticate(login, "pw")
 		wantEq(t, login+" is admitted", ok, true)
+		wantEq(t, login+" returned non-empty maildir", maildir != "", true)
 		wantEq(t, "the directory "+login+" was verified against", stub.gotCfg.URI, uri)
 		wantEq(t, "the domain of "+login+"'s configuration", stub.gotCfg.Domain, login[2:])
 	}
 	stub.gotCfg = LDAPConfig{}
-	_, ok := d.Authenticate("u@c.test", "pw")
+	maildir, ok := d.Authenticate("u@c.test", "pw")
 	wantEq(t, "a login in an unbound domain is admitted", ok, false)
+	wantEq(t, "unbound login returns empty maildir", maildir, "")
 	wantEq(t, "the verifier was consulted for an unbound domain", stub.gotCfg.URI, "")
 }
 
 // TestUpsertLDAPUser proves a downsync marks an existing user LDAP-mastered (sets
 // its externid) and creates a brand-new user carrying its externid.
 func TestUpsertLDAPUser(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "local-password")
+	seedDomain(t, d, root, "hermex.test")
+	seedUser(t, d, root, "alice@hermex.test", "local-password")
 
 	// An existing user gains its externid (created=false).
 	created, err := d.UpsertLDAPUser("alice@hermex.test", []byte{0x01, 0x02}, "")
@@ -162,11 +172,13 @@ func TestUpsertLDAPUser(t *testing.T) {
 	// creates nothing: the downsync must not mint accounts for domains it does
 	// not serve.
 	for _, bad := range []string{"eve@unhosted.test", "not-an-address", ""} {
-		_, err := d.UpsertLDAPUser(bad, []byte{0x05}, filepath.Join(root, "eve"))
+		badCreated, err := d.UpsertLDAPUser(bad, []byte{0x05}, filepath.Join(root, "eve"))
 		wantErr(t, "an upsert for "+bad+" was accepted", err)
-		_, ok, err := d.resolve(bad)
+		wantEq(t, "refused upsert created flag for "+bad, badCreated, false)
+		row, ok, err := d.resolve(bad)
 		mustNoErr(t, "resolve "+bad, err)
 		wantEq(t, bad+" exists after the refused upsert", ok, false)
+		wantEq(t, bad+" zero resolve id", row.id, int64(0))
 	}
 }
 

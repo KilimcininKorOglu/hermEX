@@ -8,7 +8,7 @@ import "testing"
 // another operator out, and a password change can clear every session an account
 // holds at once.
 func TestAdminSessionRoundTrip(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 
 	const now = int64(1700000000)
 	mk := func(jti, login string) {
@@ -23,9 +23,14 @@ func TestAdminSessionRoundTrip(t *testing.T) {
 		mustNoErr(t, "read session state", err)
 		return a
 	}
+	wantErr(t, "empty jti accepted", d.CreateAdminSession(AdminSession{Jti: "", Login: "op@hermex.test", CreatedAt: now, ExpiresAt: now + 3600}))
+	wantErr(t, "empty login accepted", d.CreateAdminSession(AdminSession{Jti: "adm-empty", Login: "", CreatedAt: now, ExpiresAt: now + 3600}))
+	wantEq(t, "refused empty-login session active", active("adm-empty", now+1), false)
+
 	mk("adm-1", "Op@hermex.test")
 
 	wantEq(t, "active before expiry", active("adm-1", now+1), true)
+	wantEq(t, "active at exact expiry", active("adm-1", now+3600), false)
 	wantEq(t, "active after expiry", active("adm-1", now+3601), false)
 	wantEq(t, "an absent jti is active", active("nope", now+1), false)
 
@@ -53,7 +58,7 @@ func TestAdminSessionRoundTrip(t *testing.T) {
 // session stores existed the only way to end a stolen cookie was to restart every
 // daemon.
 func TestEmergencySessionRevoke(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 
 	const now = int64(1700000000)
 	for _, jti := range []string{"web-1", "web-2"} {
@@ -69,6 +74,9 @@ func TestEmergencySessionRevoke(t *testing.T) {
 			Jti: jti, Login: "victim@hermex.test", CreatedAt: now, ExpiresAt: now + 3600,
 		}))
 	}
+	mustNoErr(t, "create another operator's panel session", d.CreateAdminSession(AdminSession{
+		Jti: "adm-other", Login: "other@hermex.test", CreatedAt: now, ExpiresAt: now + 3600,
+	}))
 
 	// An operator can see what is signed in before ending it.
 	panel, err := d.ListAdminSessions("VICTIM@hermex.test", now)
@@ -95,4 +103,7 @@ func TestEmergencySessionRevoke(t *testing.T) {
 	other, err := d.WebmailSessionActive("web-other", now+1)
 	mustNoErr(t, "read another account's session", err)
 	wantEq(t, "another account's session survived (the revoke must not reach it)", other, true)
+	otherPanel, err := d.AdminSessionActive("adm-other", now+1)
+	mustNoErr(t, "read another operator's panel session", err)
+	wantEq(t, "another operator's panel session survived", otherPanel, true)
 }

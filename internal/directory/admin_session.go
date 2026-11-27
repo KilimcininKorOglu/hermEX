@@ -56,7 +56,7 @@ func (d *SQLDirectory) DeleteAdminSession(login, jti string) error {
 // password change calls: the old credential must not keep a signed-in browser
 // working, wherever that browser is.
 func (d *SQLDirectory) DeleteAdminSessionsFor(login string) error {
-	_, err := d.CountedDeleteAdminSessionsFor(login)
+	_, err := d.db.Exec(`DELETE FROM admin_sessions WHERE login = ?`, strings.ToLower(login))
 	return err
 }
 
@@ -72,7 +72,7 @@ func (d *SQLDirectory) CountedDeleteAdminSessionsFor(login string) (int64, error
 
 // ListAdminSessions returns an account's non-expired panel sessions, so an
 // operator can see what is signed in before deciding to end it.
-func (d *SQLDirectory) ListAdminSessions(login string, now int64) ([]AdminSession, error) {
+func (d *SQLDirectory) ListAdminSessions(login string, now int64) (out []AdminSession, err error) {
 	rows, err := d.db.Query(
 		`SELECT jti, login, created_at, expires_at FROM admin_sessions
 		   WHERE login = ? AND expires_at > ? ORDER BY created_at DESC`,
@@ -80,8 +80,7 @@ func (d *SQLDirectory) ListAdminSessions(login string, now int64) ([]AdminSessio
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []AdminSession
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var s AdminSession
 		if err := rows.Scan(&s.Jti, &s.Login, &s.CreatedAt, &s.ExpiresAt); err != nil {

@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"hermex/internal/logging"
 )
 
 // TLSCertData is a stored serving certificate including its private key, loaded
@@ -45,25 +47,24 @@ func (d *SQLDirectory) SetTLSCert(name, certPEM, keyPEM string, notAfter int64) 
 // LoadTLSCerts returns every stored certificate including its private key, for the
 // in-process certificate provider to parse into a serving snapshot. It is not an
 // admin-facing call, ListTLSCerts returns the display metadata without keys.
-func (d *SQLDirectory) LoadTLSCerts() ([]TLSCertData, error) {
+func (d *SQLDirectory) LoadTLSCerts() (out []TLSCertData, err error) {
 	rows, err := d.db.Query(`SELECT name, cert_pem, key_pem FROM tls_certs`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []TLSCertData
+	defer closeRows(rows, &err)
 	var plaintext []string // rows still stored unwrapped, rewritten after the scan
 	for rows.Next() {
 		var c TLSCertData
 		if err := rows.Scan(&c.Name, &c.CertPEM, &c.KeyPEM); err != nil {
 			return nil, err
 		}
-		key, wrapped, err := d.unwrapKey(wrapTLS, c.KeyPEM)
+		u, err := d.unwrapKey(wrapTLS, c.KeyPEM)
 		if err != nil {
 			return nil, err
 		}
-		c.KeyPEM = key
-		if d.rewrapNeeded(wrapped) {
+		c.KeyPEM = u.plain
+		if d.rewrapNeeded(u.wrapped) {
 			plaintext = append(plaintext, c.Name)
 		}
 		out = append(out, c)
@@ -71,18 +72,26 @@ func (d *SQLDirectory) LoadTLSCerts() ([]TLSCertData, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	// Converge an existing deployment on encryption with nothing to run. Done
-	// after the scan (the rows are still open above) and best-effort: a failed
-	// rewrite must never stop a daemon from serving TLS.
-	for _, c := range out {
+	d.rewrapTLSCerts(out, plaintext)
+	return out, nil
+}
+
+// rewrapTLSCerts writes plaintext serving keys back wrapped after the scan closes.
+// Best-effort: a failed rewrite is recorded but never stops TLS serving.
+func (d *SQLDirectory) rewrapTLSCerts(certs []TLSCertData, plaintext []string) {
+	for _, c := range certs {
 		if !slices.Contains(plaintext, c.Name) {
 			continue
 		}
-		if sealed, err := d.wrapKey(wrapTLS, c.KeyPEM); err == nil {
-			_, _ = d.db.Exec(`UPDATE tls_certs SET key_pem = ? WHERE name = ?`, sealed, c.Name)
+		sealed, err := d.wrapKey(wrapTLS, c.KeyPEM)
+		if err != nil {
+			d.warn("directory.tlscert_rewrap.fail", err, logging.Fields{"name": c.Name})
+			continue
+		}
+		if _, err := d.db.Exec(`UPDATE tls_certs SET key_pem = ? WHERE name = ?`, sealed, c.Name); err != nil {
+			d.warn("directory.tlscert_rewrap.fail", err, logging.Fields{"name": c.Name})
 		}
 	}
-	return out, nil
 }
 
 // TLSCertVersion returns a cheap change probe for the certificate provider's poll:
@@ -96,13 +105,12 @@ func (d *SQLDirectory) TLSCertVersion() (version, count int64, err error) {
 
 // ListTLSCerts returns the stored certificates' display metadata (never the key),
 // newest first, for the admin certificate page.
-func (d *SQLDirectory) ListTLSCerts() ([]TLSCertInfo, error) {
+func (d *SQLDirectory) ListTLSCerts() (out []TLSCertInfo, err error) {
 	rows, err := d.db.Query(`SELECT name, not_after, updated_at FROM tls_certs ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []TLSCertInfo
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var i TLSCertInfo
 		if err := rows.Scan(&i.Name, &i.NotAfter, &i.UpdatedAt); err != nil {

@@ -24,4 +24,6 @@ func TestDMARCReportSettingsRoundTrip(t *testing.T) {
 			t.Fatalf("Get after Set(%v) = %+v found %v err %v", want, got, found, err)
 		}
 	}
+	// The switch is one row: two saves replace it rather than adding a second.
+	wantRows(t, db, "settings rows after two saves", 1, `SELECT COUNT(*) FROM dmarc_report_settings`)
 }

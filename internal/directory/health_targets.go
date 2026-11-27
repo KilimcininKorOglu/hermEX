@@ -42,13 +42,12 @@ func validHealthTarget(t HealthTarget) bool {
 
 // ListHealthTargets returns every stored target in name order. The status page
 // reads it on every probe, so an added or removed target shows at once.
-func (d *SQLDirectory) ListHealthTargets() ([]HealthTarget, error) {
+func (d *SQLDirectory) ListHealthTargets() (out []HealthTarget, err error) {
 	rows, err := d.db.Query(`SELECT id, name, url FROM health_targets ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []HealthTarget
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var t HealthTarget
 		if err := rows.Scan(&t.ID, &t.Name, &t.URL); err != nil {

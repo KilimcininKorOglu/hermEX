@@ -18,10 +18,12 @@ func enrolledUser(t *testing.T) (*SQLDirectory, string) {
 	mustNoErr(t, "ensure the schema", d.EnsureSchema())
 	cleanTables(t, db)
 	root := t.TempDir()
-	_, err := d.CreateDomain("acme.test", filepath.Join(root, "acme.test"))
+	did, err := d.CreateDomain("acme.test", filepath.Join(root, "acme.test"))
 	mustNoErr(t, "create the domain", err)
-	_, err = d.CreateUser("u@acme.test", "password1", filepath.Join(root, "u"))
+	wantEq(t, "created domain id > 0", did > 0, true)
+	uid, err := d.CreateUser("u@acme.test", "password1", filepath.Join(root, "u"))
 	mustNoErr(t, "create the user", err)
+	wantEq(t, "created user id > 0", uid > 0, true)
 	return d, "u@acme.test"
 }
 
@@ -33,21 +35,34 @@ func newSecret(t *testing.T) string {
 	return secret
 }
 
-// beginEnrollment starts an enrollment and returns its secret.
-func beginEnrollment(t *testing.T, d *SQLDirectory, user string) string {
+// beginEnrollmentSecret starts an enrollment and returns its secret.
+func beginEnrollmentSecret(t *testing.T, d *SQLDirectory, user string) string {
 	t.Helper()
 	secret := newSecret(t)
 	mustNoErr(t, "begin the enrollment", d.BeginTOTPEnrollment(user, secret))
 	return secret
 }
 
-// activate turns a pending enrollment on and returns its recovery codes.
-func activate(t *testing.T, d *SQLDirectory, user string, step int64) []string {
+// beginEnrollment starts an enrollment whose secret the test does not need.
+func beginEnrollment(t *testing.T, d *SQLDirectory, user string) {
+	t.Helper()
+	wantEq(t, "a minted secret is set", beginEnrollmentSecret(t, d, user) != "", true)
+}
+
+// activateCodes turns a pending enrollment on and returns its recovery codes.
+func activateCodes(t *testing.T, d *SQLDirectory, user string, step int64) []string {
 	t.Helper()
 	codes, hashes, err := totp.NewRecoveryCodes()
 	mustNoErr(t, "mint recovery codes", err)
 	mustNoErr(t, "activate the enrollment", d.ActivateTOTP(user, step, hashes))
+	wantEq(t, "recovery codes issued", len(codes), totp.RecoveryCodeCount)
 	return codes
+}
+
+// activate turns a pending enrollment on when the test needs no recovery code.
+func activate(t *testing.T, d *SQLDirectory, user string, step int64) {
+	t.Helper()
+	wantEq(t, "recovery codes issued", len(activateCodes(t, d, user, step)), totp.RecoveryCodeCount)
 }
 
 // enrollment reads user's enrollment, requiring the read to succeed.
@@ -87,17 +102,19 @@ func codesRemaining(t *testing.T, d *SQLDirectory, user string) int {
 // enrolled until a code has proved the user can produce one.
 func TestAnEnrollmentIsPendingUntilActivated(t *testing.T) {
 	d, user := enrolledUser(t)
-	_, ok := enrollment(t, d, user)
+	empty, ok := enrollment(t, d, user)
 	wantEq(t, "a fresh account reports an enrollment", ok, false)
+	wantEq(t, "fresh enrollment zero struct", empty, TOTPEnrollment{})
 
-	secret := beginEnrollment(t, d, user)
+	secret := beginEnrollmentSecret(t, d, user)
 	e, ok := enrollment(t, d, user)
 	wantEq(t, "the pending enrollment is found", ok, true)
 	wantEq(t, "the pending secret", e.Secret, secret)
 	wantEq(t, "a pending enrollment reports as enabled", e.Enabled, false)
 
 	activate(t, d, user, 100)
-	e, _ = enrollment(t, d, user)
+	e, ok = enrollment(t, d, user)
+	wantEq(t, "activated enrollment found", ok, true)
 	wantEq(t, "enabled after activation", e.Enabled, true)
 }
 
@@ -143,7 +160,7 @@ func TestOneStepIsSpentOnce(t *testing.T) {
 func TestRecoveryCodeIsSpentOnce(t *testing.T) {
 	d, user := enrolledUser(t)
 	beginEnrollment(t, d, user)
-	codes := activate(t, d, user, 0)
+	codes := activateCodes(t, d, user, 0)
 
 	wantEq(t, "codes before any use", codesRemaining(t, d, user), totp.RecoveryCodeCount)
 	wantEq(t, "a valid code accepted", codeAccepted(t, d, user, codes[2]), true)
@@ -159,10 +176,11 @@ func TestRecoveryCodeIsSpentOnce(t *testing.T) {
 // issued it, so it must open no other account and stay unspent for its owner.
 func TestRecoveryCodeIsBoundToItsAccount(t *testing.T) {
 	d, user := enrolledUser(t)
-	_, err := d.CreateUser("v@acme.test", "password1", filepath.Join(t.TempDir(), "v"))
+	vID, err := d.CreateUser("v@acme.test", "password1", filepath.Join(t.TempDir(), "v"))
 	mustNoErr(t, "create the second user", err)
+	wantEq(t, "second user id > 0", vID > 0, true)
 	beginEnrollment(t, d, user)
-	codes := activate(t, d, user, 0)
+	codes := activateCodes(t, d, user, 0)
 	beginEnrollment(t, d, "v@acme.test")
 	activate(t, d, "v@acme.test", 0)
 
@@ -176,14 +194,15 @@ func TestRecoveryCodeIsBoundToItsAccount(t *testing.T) {
 // changed. Replacing it requires disabling it first, which is a deliberate act.
 func TestAnActiveEnrollmentIsNotSilentlyReplaced(t *testing.T) {
 	d, user := enrolledUser(t)
-	first := beginEnrollment(t, d, user)
+	first := beginEnrollmentSecret(t, d, user)
 	activate(t, d, user, 0)
 
 	second := newSecret(t)
 	if err := d.BeginTOTPEnrollment(user, second); !errors.Is(err, ErrTOTPAlreadyEnabled) {
 		t.Fatalf("BeginTOTPEnrollment over an active one = %v, want ErrTOTPAlreadyEnabled", err)
 	}
-	e, _ := enrollment(t, d, user)
+	e, ok := enrollment(t, d, user)
+	wantEq(t, "active enrollment found", ok, true)
 	wantEq(t, "the active secret after the refused replace", e.Secret, first)
 
 	// A pending enrollment, by contrast, is replaced freely: a user who reloaded
@@ -192,7 +211,8 @@ func TestAnActiveEnrollmentIsNotSilentlyReplaced(t *testing.T) {
 	mustNoErr(t, "begin a new enrollment", d.BeginTOTPEnrollment(user, second))
 	third := newSecret(t)
 	mustNoErr(t, "replace the pending enrollment", d.BeginTOTPEnrollment(user, third))
-	e, _ = enrollment(t, d, user)
+	e, ok = enrollment(t, d, user)
+	wantEq(t, "replaced enrollment found", ok, true)
 	wantEq(t, "the replaced pending secret", e.Secret, third)
 }
 
@@ -201,10 +221,11 @@ func TestAnActiveEnrollmentIsNotSilentlyReplaced(t *testing.T) {
 func TestDisableRemovesTheRecoveryCodes(t *testing.T) {
 	d, user := enrolledUser(t)
 	beginEnrollment(t, d, user)
-	codes := activate(t, d, user, 0)
+	codes := activateCodes(t, d, user, 0)
 	mustNoErr(t, "disable the second factor", d.DisableTOTP(user))
-	_, ok := enrollment(t, d, user)
+	empty, ok := enrollment(t, d, user)
 	wantEq(t, "the enrollment survived disabling", ok, false)
+	wantEq(t, "disabled enrollment zero struct", empty, TOTPEnrollment{})
 	wantEq(t, "codes after disabling", codesRemaining(t, d, user), 0)
 	wantEq(t, "a code from the removed enrollment accepted", codeAccepted(t, d, user, codes[0]), false)
 }
@@ -214,9 +235,14 @@ func TestDisableRemovesTheRecoveryCodes(t *testing.T) {
 // never enrolled does, so the answer says nothing about whether the account
 // exists.
 func TestAnUnknownUserIsNotAnError(t *testing.T) {
-	d, _ := enrolledUser(t)
-	_, ok := enrollment(t, d, "nobody@acme.test")
+	d, user := enrolledUser(t)
+	// The answer for an unknown address equals the answer for the seeded account
+	// that never enrolled.
+	never, neverOK := enrollment(t, d, user)
+	empty, ok := enrollment(t, d, "nobody@acme.test")
+	wantEq(t, "the unknown and never-enrolled answers match", ok == neverOK && empty == never, true)
 	wantEq(t, "an unknown user's enrollment", ok, false)
+	wantEq(t, "unknown user zero struct", empty, TOTPEnrollment{})
 	wantEq(t, "an unknown user's step", stepAccepted(t, d, "nobody@acme.test", 1), false)
 	wantEq(t, "an unknown user's recovery code", codeAccepted(t, d, "nobody@acme.test", "X"), false)
 	mustNoErr(t, "disable for an unknown user", d.DisableTOTP("nobody@acme.test"))

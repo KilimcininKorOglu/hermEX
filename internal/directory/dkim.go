@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"hermex/internal/logging"
 )
 
 // DKIMKeyInfo is a domain's DKIM key metadata for display, never the private key: the
@@ -39,19 +41,23 @@ func (d *SQLDirectory) DKIMKey(domain string) (privPEM []byte, selector string, 
 
 // openDKIMKey decrypts a stored signing key and, when the row is still plaintext
 // and a secret is configured, writes it back wrapped. The rewrite is best-effort:
-// it must never turn a readable key into a signing failure, so its error is
-// swallowed and the key is returned either way.
+// it must never turn a readable key into a signing failure, so its failure is
+// recorded and the key is returned either way.
 func (d *SQLDirectory) openDKIMKey(domain, stored string) (string, error) {
-	pem, wrapped, err := d.unwrapKey(wrapDKIM, stored)
+	u, err := d.unwrapKey(wrapDKIM, stored)
 	if err != nil {
 		return "", err
 	}
-	if d.rewrapNeeded(wrapped) {
-		if sealed, err := d.wrapKey(wrapDKIM, pem); err == nil {
-			_, _ = d.db.Exec(`UPDATE dkim_keys SET private_key = ? WHERE domain = ?`, sealed, strings.ToLower(domain))
+	if d.rewrapNeeded(u.wrapped) {
+		dom := strings.ToLower(domain)
+		sealed, err := d.wrapKey(wrapDKIM, u.plain)
+		if err != nil {
+			d.warn("directory.dkim_rewrap.fail", err, logging.Fields{"domain": dom})
+		} else if _, err := d.db.Exec(`UPDATE dkim_keys SET private_key = ? WHERE domain = ?`, sealed, dom); err != nil {
+			d.warn("directory.dkim_rewrap.fail", err, logging.Fields{"domain": dom})
 		}
 	}
-	return pem, nil
+	return u.plain, nil
 }
 
 // ExportDKIMKey returns a domain's signing key whatever its enabled state, for

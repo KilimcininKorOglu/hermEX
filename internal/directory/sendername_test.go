@@ -1,9 +1,6 @@
 package directory
 
-import (
-	"path/filepath"
-	"testing"
-)
+import "testing"
 
 // TestFormatSenderName proves the template substitution and tidy-up: full values
 // render verbatim, absent values drop the parenthetical group or trim the separator
@@ -30,6 +27,10 @@ func TestFormatSenderName(t *testing.T) {
 			map[string]string{"name": "Ali Veli", "department": "IT"}, "Ali Veli | IT"},
 		{"empty template", "", map[string]string{"name": "Ali Veli"}, ""},
 		{"whitespace template", "   ", map[string]string{"name": "Ali Veli"}, ""},
+		// Only the documented placeholders expand: a template naming any other key
+		// must not pull an arbitrary profile value into the From header.
+		{"unknown placeholder stays literal", "{name} {password}",
+			map[string]string{"name": "Ali Veli", "password": "hunter2"}, "Ali Veli {password}"},
 	}
 	for _, c := range cases {
 		if got := FormatSenderName(c.tpl, c.vals); got != c.want {
@@ -42,42 +43,32 @@ func TestFormatSenderName(t *testing.T) {
 // templates store and read back independently, and an unknown domain yields empty
 // strings (no customization).
 func TestDomainNameTemplatesRoundtrip(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-	if in, ex, err := d.GetDomainNameTemplates("ghost.test"); err != nil || in != "" || ex != "" {
-		t.Fatalf("unknown domain = (%q,%q,%v), want empty", in, ex, err)
-	}
-	if _, err := d.CreateDomain("hermex.test", filepath.Join(t.TempDir(), "dom")); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.SetDomainNameTemplates("hermex.test", "{name} ({department})", "{name} ({company} - {title})"); err != nil {
-		t.Fatal(err)
-	}
-	in, ex, err := d.GetDomainNameTemplates("hermex.test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if in != "{name} ({department})" || ex != "{name} ({company} - {title})" {
-		t.Errorf("templates = (%q, %q), want the internal and external forms", in, ex)
-	}
+	d := freshSQL(t)
+	in, ex, err := d.GetDomainNameTemplates("ghost.test")
+	mustNoErr(t, "unknown domain templates", err)
+	wantEq(t, "unknown domain internal template", in, "")
+	wantEq(t, "unknown domain external template", ex, "")
+	seedDomain(t, d, t.TempDir(), "hermex.test")
+	mustNoErr(t, "set templates", d.SetDomainNameTemplates("hermex.test", "{name} ({department})", "{name} ({company} - {title})"))
+	in, ex, err = d.GetDomainNameTemplates("hermex.test")
+	mustNoErr(t, "get templates", err)
+	wantEq(t, "internal template", in, "{name} ({department})")
+	wantEq(t, "external template", ex, "{name} ({company} - {title})")
 }
 
 // TestOutgoingDisplayNames proves the sender's domain templates and profile combine
 // into the internal and external From display names, and that a domain with no
 // templates yields empty strings (no customization, no profile read needed).
 func TestOutgoingDisplayNames(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "ali@hermex.test", "password1")
-	_, err := d.SetUserProperties("ali@hermex.test", map[uint32]string{
+	seedDomain(t, d, root, "hermex.test")
+	seedUser(t, d, root, "ali@hermex.test", "password1")
+	ok, err := d.SetUserProperties("ali@hermex.test", map[uint32]string{
 		0x3001001F: "Ali Veli", 0x3A16001F: "Acme", 0x3A17001F: "Sales",
 	})
 	mustNoErr(t, "set the profile fields", err)
+	wantEq(t, "SetUserProperties found ali", ok, true)
 	names := func() (internal, external string) {
 		t.Helper()
 		in, ex, err := d.OutgoingDisplayNames("ali@hermex.test")

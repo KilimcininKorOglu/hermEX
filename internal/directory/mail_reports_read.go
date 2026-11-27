@@ -94,13 +94,12 @@ func (d *SQLDirectory) ListTLSReports(f ReportFilter) ([]ReportListing, error) {
 		 GROUP BY p.id ORDER BY p.date_begin DESC, p.id DESC LIMIT ?`, args)
 }
 
-func (d *SQLDirectory) queryListings(q string, args []any) ([]ReportListing, error) {
+func (d *SQLDirectory) queryListings(q string, args []any) (out []ReportListing, err error) {
 	rows, err := d.db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []ReportListing
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var l ReportListing
 		if err := rows.Scan(&l.ID, &l.DomainID, &l.Domain, &l.OrgName, &l.ReportID, &l.Begin, &l.End,
@@ -192,15 +191,14 @@ func (d *SQLDirectory) GetDMARCReport(id int64) (DMARCReport, bool, error) {
 	return r, true, nil
 }
 
-func (d *SQLDirectory) dmarcRecords(reportID int64) ([]DMARCRecordRow, error) {
+func (d *SQLDirectory) dmarcRecords(reportID int64) (out []DMARCRecordRow, err error) {
 	rows, err := d.db.Query(
 		`SELECT source_ip, msg_count, disposition, dkim_eval, spf_eval, header_from, envelope_from, dkim_results, spf_results
 		 FROM dmarc_report_records WHERE dmarc_report_id = ? ORDER BY msg_count DESC, id`, reportID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []DMARCRecordRow
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var r DMARCRecordRow
 		if err := rows.Scan(&r.SourceIP, &r.Count, &r.Disposition, &r.DKIM, &r.SPF, &r.HeaderFrom,
@@ -257,15 +255,14 @@ func (d *SQLDirectory) GetTLSReport(id int64) (TLSReport, bool, error) {
 	return r, true, nil
 }
 
-func (d *SQLDirectory) tlsPolicies(reportID int64) ([]TLSPolicyRow, error) {
+func (d *SQLDirectory) tlsPolicies(reportID int64) (out []TLSPolicyRow, err error) {
 	rows, err := d.db.Query(
 		`SELECT policy_type, policy_domain, mx_host, success_count, failure_count, failure_details
 		 FROM tlsrpt_report_policies WHERE tlsrpt_report_id = ? ORDER BY id`, reportID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []TLSPolicyRow
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var p TLSPolicyRow
 		var details string
@@ -314,7 +311,7 @@ func scanFailure(s rowScanner) (DMARCFailure, error) {
 // ListDMARCFailures lists failure reports, newest first. The period is matched on
 // the time the report arrived here, because a reporter may omit the failed
 // message's arrival date.
-func (d *SQLDirectory) ListDMARCFailures(f ReportFilter) ([]DMARCFailure, error) {
+func (d *SQLDirectory) ListDMARCFailures(f ReportFilter) (out []DMARCFailure, err error) {
 	args, ok := f.scopeArgs()
 	if !ok {
 		return nil, nil
@@ -328,8 +325,7 @@ func (d *SQLDirectory) ListDMARCFailures(f ReportFilter) ([]DMARCFailure, error)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []DMARCFailure
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		rec, err := scanFailure(rows)
 		if err != nil {

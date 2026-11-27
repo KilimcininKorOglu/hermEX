@@ -14,8 +14,10 @@ func TestDecoyPasswordHashValid(t *testing.T) {
 		t.Fatalf("decoy hash is not sha512-crypt ($6$): %q", decoyPasswordHash)
 	}
 	// Wrong password against the decoy must be rejected (never a silent accept).
-	if sqlCryptVerify("definitely-not-the-decoy-password", decoyPasswordHash) {
-		t.Fatal("decoy hash accepted a wrong password")
+	for _, wrong := range []string{"definitely-not-the-decoy-password", "", "decoy-not-a-real-password\x00"} {
+		if sqlCryptVerify(wrong, decoyPasswordHash) {
+			t.Fatalf("decoy hash accepted the wrong password %q", wrong)
+		}
 	}
 	// The decoy hash must round-trip its own seed value, proving the KDF actually
 	// ran and the constant was not corrupted.

@@ -11,11 +11,11 @@ import (
 // one account's alias collide with the other.
 func aliasSyncDir(t *testing.T) *SQLDirectory {
 	t.Helper()
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
-	mustCreateUser(t, d, root, "bob@hermex.test", "password1")
+	seedDomain(t, d, root, "hermex.test")
+	seedUser(t, d, root, "alice@hermex.test", "password1")
+	seedUser(t, d, root, "bob@hermex.test", "password1")
 	return d
 }
 
@@ -32,9 +32,11 @@ func mustSyncAliases(t *testing.T, d *SQLDirectory, user string, aliases []strin
 // exactly what it was handed.
 func TestSyncAliasesReplacesTheSet(t *testing.T) {
 	d := aliasSyncDir(t)
-	mustSyncAliases(t, d, "alice@hermex.test", []string{"sales@hermex.test"})
+	first := mustSyncAliases(t, d, "alice@hermex.test", []string{"sales@hermex.test"})
+	wantEq(t, "addresses skipped by the first sync", len(first), 0)
 
-	mustSyncAliases(t, d, "alice@hermex.test", []string{"office@hermex.test"})
+	second := mustSyncAliases(t, d, "alice@hermex.test", []string{"office@hermex.test"})
+	wantEq(t, "addresses skipped by the second sync", len(second), 0)
 
 	got, err := d.ListAliasesFor("alice@hermex.test")
 	mustNoErr(t, "list the aliases", err)
@@ -47,7 +49,8 @@ func TestSyncAliasesReplacesTheSet(t *testing.T) {
 func TestSyncAliasesSkipsAnAddressInUse(t *testing.T) {
 	d := aliasSyncDir(t)
 
-	mustSyncAliases(t, d, "alice@hermex.test", []string{"bob@hermex.test", "sales@hermex.test"})
+	skipped := mustSyncAliases(t, d, "alice@hermex.test", []string{"bob@hermex.test", "sales@hermex.test"})
+	wantEq(t, "addresses skipped", strings.Join(skipped, ","), "bob@hermex.test")
 
 	got, err := d.ListAliasesFor("alice@hermex.test")
 	mustNoErr(t, "list the aliases", err)
@@ -86,21 +89,22 @@ func TestSyncAliasesSkipsAForeignDomain(t *testing.T) {
 // mail and let the account send under that address. Only the account's own
 // organization may be aliased; a domain outside any organization only itself.
 func TestSyncAliasesStayInTheAccountsOrganization(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
 	home := mustCreateDomain(t, d, root, "hermex.test")
 	sister := mustCreateDomain(t, d, root, "hermex.de")
 	other := mustCreateDomain(t, d, root, "other.test")
-	mustCreateDomain(t, d, root, "loose.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
-	mustCreateUser(t, d, root, "carol@loose.test", "password1")
+	seedDomain(t, d, root, "loose.test")
+	seedUser(t, d, root, "alice@hermex.test", "password1")
+	seedUser(t, d, root, "carol@loose.test", "password1")
 	acme, err := d.CreateOrg("acme", "")
 	mustNoErr(t, "create acme", err)
 	rival, err := d.CreateOrg("rival", "")
 	mustNoErr(t, "create rival", err)
 	for _, a := range []struct{ domain, org int64 }{{home, acme}, {sister, acme}, {other, rival}} {
-		_, err := d.AssignDomainToOrg(a.domain, a.org)
+		ok, err := d.AssignDomainToOrg(a.domain, a.org)
 		mustNoErr(t, "assign a domain", err)
+		wantEq(t, "domain assigned", ok, true)
 	}
 
 	skipped := mustSyncAliases(t, d, "alice@hermex.test",
@@ -120,10 +124,11 @@ func TestSyncAliasesStayInTheAccountsOrganization(t *testing.T) {
 func TestSyncAliasesReportsAnUnknownAccount(t *testing.T) {
 	d := aliasSyncDir(t)
 
-	_, found, err := d.SyncAliasesFor("ghost@hermex.test", []string{"x@hermex.test"})
+	skipped, found, err := d.SyncAliasesFor("ghost@hermex.test", []string{"x@hermex.test"})
 	mustNoErr(t, "sync an unknown account", err)
 
 	wantEq(t, "an unknown account is not found", found, false)
+	wantEq(t, "skipped for unknown account", len(skipped), 0)
 }
 
 // TestSetAliasesStillRefusesTheWholeSet proves the manual path is unchanged: an operator
@@ -131,8 +136,8 @@ func TestSyncAliasesReportsAnUnknownAccount(t *testing.T) {
 func TestSetAliasesStillRefusesTheWholeSet(t *testing.T) {
 	d := aliasSyncDir(t)
 
-	if _, err := d.SetAliasesFor("alice@hermex.test", []string{"bob@hermex.test", "sales@hermex.test"}); err == nil {
-		t.Fatal("SetAliasesFor must refuse a set containing an address already in use")
+	if found, err := d.SetAliasesFor("alice@hermex.test", []string{"bob@hermex.test", "sales@hermex.test"}); err == nil || found {
+		t.Fatalf("SetAliasesFor must refuse a set containing an address already in use (found=%v, err=%v)", found, err)
 	}
 
 	got, err := d.ListAliasesFor("alice@hermex.test")
@@ -146,20 +151,21 @@ func TestSetAliasesStillRefusesTheWholeSet(t *testing.T) {
 // exactly as the LDAP downsync does. A sister domain of the same organization is
 // allowed; another organization's domain and an organizationless one are not.
 func TestManualAliasesStayInTheAccountsOrganization(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
 	home := mustCreateDomain(t, d, root, "hermex.test")
 	sister := mustCreateDomain(t, d, root, "hermex.de")
 	other := mustCreateDomain(t, d, root, "other.test")
-	mustCreateDomain(t, d, root, "loose.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
+	seedDomain(t, d, root, "loose.test")
+	seedUser(t, d, root, "alice@hermex.test", "password1")
 	acme, err := d.CreateOrg("acme", "")
 	mustNoErr(t, "create acme", err)
 	rival, err := d.CreateOrg("rival", "")
 	mustNoErr(t, "create rival", err)
 	for _, a := range []struct{ domain, org int64 }{{home, acme}, {sister, acme}, {other, rival}} {
-		_, err := d.AssignDomainToOrg(a.domain, a.org)
+		ok, err := d.AssignDomainToOrg(a.domain, a.org)
 		mustNoErr(t, "assign a domain", err)
+		wantEq(t, "domain assigned", ok, true)
 	}
 
 	mustNoErr(t, "alias in a sister domain", d.CreateAlias("sales@hermex.de", "alice@hermex.test"))
@@ -167,8 +173,8 @@ func TestManualAliasesStayInTheAccountsOrganization(t *testing.T) {
 		if err := d.CreateAlias(foreign, "alice@hermex.test"); !errors.Is(err, ErrAliasNotLocal) {
 			t.Errorf("CreateAlias(%s) = %v, want ErrAliasNotLocal", foreign, err)
 		}
-		if _, err := d.SetAliasesFor("alice@hermex.test", []string{"sales@hermex.de", foreign}); !errors.Is(err, ErrAliasNotLocal) {
-			t.Errorf("SetAliasesFor with %s = %v, want ErrAliasNotLocal", foreign, err)
+		if found, err := d.SetAliasesFor("alice@hermex.test", []string{"sales@hermex.de", foreign}); !errors.Is(err, ErrAliasNotLocal) || found {
+			t.Errorf("SetAliasesFor with %s = (found %v, %v), want ErrAliasNotLocal", foreign, found, err)
 		}
 	}
 	ids, err := d.Identities("alice@hermex.test")
@@ -185,25 +191,27 @@ func TestManualAliasesStayInTheAccountsOrganization(t *testing.T) {
 // it keeps to the account's organization like an alias. A bare login name and one
 // in a domain this server does not host are login names only and stay allowed.
 func TestAltnamesInAHostedDomainStayInTheAccountsOrganization(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
 	home := mustCreateDomain(t, d, root, "hermex.test")
 	sister := mustCreateDomain(t, d, root, "hermex.de")
 	other := mustCreateDomain(t, d, root, "other.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
+	seedUser(t, d, root, "alice@hermex.test", "password1")
 	acme, err := d.CreateOrg("acme", "")
 	mustNoErr(t, "create acme", err)
 	rival, err := d.CreateOrg("rival", "")
 	mustNoErr(t, "create rival", err)
 	for _, a := range []struct{ domain, org int64 }{{home, acme}, {sister, acme}, {other, rival}} {
-		_, err := d.AssignDomainToOrg(a.domain, a.org)
+		ok, err := d.AssignDomainToOrg(a.domain, a.org)
 		mustNoErr(t, "assign a domain", err)
+		wantEq(t, "domain assigned", ok, true)
 	}
 
-	_, err = d.SetAltnames("alice@hermex.test", []string{"a.legacy", "alice@hermex.de", "alice@old-company.example"})
+	ok, err := d.SetAltnames("alice@hermex.test", []string{"a.legacy", "alice@hermex.de", "alice@old-company.example"})
 	mustNoErr(t, "altnames inside the organization and unhosted ones", err)
-	if _, err := d.SetAltnames("alice@hermex.test", []string{"a.legacy", "ceo@other.test"}); !errors.Is(err, ErrAliasNotLocal) {
-		t.Errorf("an altname in another organization's domain = %v, want ErrAliasNotLocal", err)
+	wantEq(t, "SetAltnames found alice", ok, true)
+	if found, err := d.SetAltnames("alice@hermex.test", []string{"a.legacy", "ceo@other.test"}); !errors.Is(err, ErrAliasNotLocal) || found {
+		t.Errorf("an altname in another organization's domain = (found %v, %v), want ErrAliasNotLocal", found, err)
 	}
 	ids, err := d.Identities("alice@hermex.test")
 	mustNoErr(t, "read alice's identities", err)

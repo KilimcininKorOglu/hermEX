@@ -5,18 +5,19 @@ import "testing"
 // TestAdminRoles proves a login resolves to its user id, admin roles round-trip
 // (grant is idempotent), and an unknown role tier is rejected.
 func TestAdminRoles(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "hermex.test")
+	seedDomain(t, d, root, "hermex.test")
 	uid := mustCreateUser(t, d, root, "admin@hermex.test", "password1")
 
 	id, ok, err := d.UserID("admin@hermex.test")
 	mustNoErr(t, "resolve the login", err)
 	wantEq(t, "UserID found the login", ok, true)
 	wantEq(t, "resolved user id", id, uid)
-	_, found, err := d.UserID("ghost@hermex.test")
+	ghostID, found, err := d.UserID("ghost@hermex.test")
 	mustNoErr(t, "resolve an unknown login", err)
 	wantEq(t, "UserID resolved an unknown login", found, false)
+	wantEq(t, "UserID ghost id", ghostID, int64(0))
 
 	wantEq(t, "roles of a fresh user", len(mustAdminRoles(t, d, uid)), 0)
 
@@ -38,6 +39,20 @@ func TestAdminRoles(t *testing.T) {
 	wantErr(t, "GrantAdminRole accepted a domain role with scope -1", d.GrantAdminRole(uid, AdminDomain, -1))
 	wantErr(t, "GrantAdminRole accepted a system role with a scope", d.GrantAdminRole(uid, AdminSystem, 3))
 	wantEq(t, "grants after the refused ones", len(mustAdminRoles(t, d, uid)), 2)
+
+	// Another account holds the same grant; revoking it from uid leaves theirs.
+	other := mustCreateUser(t, d, root, "deputy@hermex.test", "password1")
+	mustNoErr(t, "grant the deputy org admin", d.GrantAdminRole(other, AdminOrg, 5))
+
+	mustNoErr(t, "revoke unheld role", d.RevokeAdminRole(uid, AdminDomain, 9))
+	wantEq(t, "grants after revoking unheld role", len(mustAdminRoles(t, d, uid)), 2)
+	mustNoErr(t, "revoke org role", d.RevokeAdminRole(uid, AdminOrg, 5))
+	roles = mustAdminRoles(t, d, uid)
+	wantEq(t, "grants after revoking org:5", len(roles), 1)
+	wantEq(t, "system grant still present", hasRole(roles, AdminSystem, 0), true)
+	deputy := mustAdminRoles(t, d, other)
+	wantEq(t, "the deputy's grants after uid's revoke", len(deputy), 1)
+	wantEq(t, "the deputy still holds org:5", hasRole(deputy, AdminOrg, 5), true)
 }
 
 // mustAdminRoles reads a user's direct admin grants.

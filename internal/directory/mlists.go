@@ -165,12 +165,12 @@ func (d *SQLDirectory) listMembers(id int64, listType int, listDomain string) ([
 
 // senderIsSpecified reports whether from (or its domain) is named in the list's
 // specifieds set.
-func (d *SQLDirectory) senderIsSpecified(listID int64, from, fromDomain string) (bool, error) {
+func (d *SQLDirectory) senderIsSpecified(listID int64, from, fromDomain string) (found bool, err error) {
 	rows, err := d.db.Query(`SELECT username FROM specifieds WHERE list_id = ?`, listID)
 	if err != nil {
 		return false, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var s string
 		if err := rows.Scan(&s); err != nil {
@@ -184,13 +184,12 @@ func (d *SQLDirectory) senderIsSpecified(listID int64, from, fromDomain string) 
 }
 
 // listAssociations returns the explicit member addresses of a normal-type list.
-func (d *SQLDirectory) listAssociations(listID int64) ([]string, error) {
+func (d *SQLDirectory) listAssociations(listID int64) (out []string, err error) {
 	rows, err := d.db.Query(`SELECT username FROM associations WHERE list_id = ?`, listID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []string
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var m string
 		if err := rows.Scan(&m); err != nil {
@@ -203,7 +202,7 @@ func (d *SQLDirectory) listAssociations(listID int64) ([]string, error) {
 
 // domainMailusers returns every mailbox user (display_type DT_MAILUSER) in a
 // domain, the membership of a domain-type list.
-func (d *SQLDirectory) domainMailusers(domain string) ([]string, error) {
+func (d *SQLDirectory) domainMailusers(domain string) (out []string, err error) {
 	rows, err := d.db.Query(
 		`SELECT u.username FROM users u JOIN domains d ON u.domain_id = d.id
 		  WHERE d.domainname = ? AND u.display_type = ?`,
@@ -211,8 +210,7 @@ func (d *SQLDirectory) domainMailusers(domain string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []string
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var m string
 		if err := rows.Scan(&m); err != nil {
@@ -226,7 +224,7 @@ func (d *SQLDirectory) domainMailusers(domain string) ([]string, error) {
 // CreateMList creates a distribution list: a users row (display_type DT_DISTLIST,
 // no password or maildir, so it cannot log in) plus its mlists policy row, in one
 // transaction. The list's domain must already exist; the address must be unused.
-func (d *SQLDirectory) CreateMList(listname string, listType, listPriv int) (int64, error) {
+func (d *SQLDirectory) CreateMList(listname string, listType, listPriv int) (id int64, err error) {
 	listname = strings.ToLower(strings.TrimSpace(listname))
 	at := strings.LastIndexByte(listname, '@')
 	if at <= 0 {
@@ -237,7 +235,7 @@ func (d *SQLDirectory) CreateMList(listname string, listType, listPriv int) (int
 	}
 	domain := listname[at+1:]
 	var domainID int64
-	err := d.db.QueryRow(`SELECT id FROM domains WHERE domainname = ?`, domain).Scan(&domainID)
+	err = d.db.QueryRow(`SELECT id FROM domains WHERE domainname = ?`, domain).Scan(&domainID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, fmt.Errorf("directory: domain %q not found", domain)
 	}
@@ -248,7 +246,7 @@ func (d *SQLDirectory) CreateMList(listname string, listType, listPriv int) (int
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	if err := checkAddressUnclaimed(tx, listname); err != nil {
 		return 0, err
 	}
@@ -263,7 +261,7 @@ func (d *SQLDirectory) CreateMList(listname string, listType, listPriv int) (int
 	if err != nil {
 		return 0, err
 	}
-	id, err := res.LastInsertId()
+	id, err = res.LastInsertId()
 	if err != nil {
 		return 0, err
 	}
@@ -286,13 +284,13 @@ func validListKind(listType, listPriv int) error {
 // DeleteMList removes a distribution list. Deleting its users row cascades to the
 // mlists, associations and specifieds rows; aliases (which have no foreign key)
 // are dropped explicitly. It reports whether a list was removed.
-func (d *SQLDirectory) DeleteMList(listname string) (bool, error) {
+func (d *SQLDirectory) DeleteMList(listname string) (removed bool, err error) {
 	listname = strings.ToLower(strings.TrimSpace(listname))
 	tx, err := d.db.Begin()
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	res, err := tx.Exec(`DELETE FROM users WHERE username = ? AND display_type = ?`, listname, dtDistlist)
 	if err != nil {
 		return false, err
@@ -309,14 +307,13 @@ func (d *SQLDirectory) DeleteMList(listname string) (bool, error) {
 
 // ListMLists returns every distribution list, ordered by address, for the admin
 // API.
-func (d *SQLDirectory) ListMLists() ([]MListInfo, error) {
+func (d *SQLDirectory) ListMLists() (out []MListInfo, err error) {
 	rows, err := d.db.Query(
 		`SELECT id, listname, list_type, list_privilege, COALESCE(owner, ''), (externid IS NOT NULL) FROM mlists ORDER BY listname`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []MListInfo
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var m MListInfo
 		if err := rows.Scan(&m.ID, &m.Listname, &m.ListType, &m.ListPriv, &m.Owner, &m.LDAPMastered); err != nil {
@@ -329,14 +326,13 @@ func (d *SQLDirectory) ListMLists() ([]MListInfo, error) {
 
 // ListMListsInDomain returns one domain's distribution lists, ordered by address,
 // for the per-domain admin views.
-func (d *SQLDirectory) ListMListsInDomain(domainID int64) ([]MListInfo, error) {
+func (d *SQLDirectory) ListMListsInDomain(domainID int64) (out []MListInfo, err error) {
 	rows, err := d.db.Query(
 		`SELECT id, listname, list_type, list_privilege, COALESCE(owner, ''), (externid IS NOT NULL) FROM mlists WHERE domain_id = ? ORDER BY listname`, domainID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []MListInfo
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var m MListInfo
 		if err := rows.Scan(&m.ID, &m.Listname, &m.ListType, &m.ListPriv, &m.Owner, &m.LDAPMastered); err != nil {
@@ -349,7 +345,7 @@ func (d *SQLDirectory) ListMListsInDomain(domainID int64) ([]MListInfo, error) {
 
 // ListMListsOwnedBy returns the distribution lists a user owns (by the managedBy
 // owner address), ordered by address, for the webmail group-management surface.
-func (d *SQLDirectory) ListMListsOwnedBy(owner string) ([]MListInfo, error) {
+func (d *SQLDirectory) ListMListsOwnedBy(owner string) (out []MListInfo, err error) {
 	owner = strings.ToLower(strings.TrimSpace(owner))
 	if owner == "" {
 		return nil, nil
@@ -359,8 +355,7 @@ func (d *SQLDirectory) ListMListsOwnedBy(owner string) ([]MListInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []MListInfo
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var m MListInfo
 		if err := rows.Scan(&m.ID, &m.Listname, &m.ListType, &m.ListPriv, &m.Owner, &m.LDAPMastered); err != nil {
@@ -414,10 +409,8 @@ func (d *SQLDirectory) UpsertLDAPGroup(listname string, externid []byte, owner s
 		return false, err
 	}
 	if !ok {
-		if _, err := d.CreateMList(listname, mlistTypeNormal, mlistPrivAll); err != nil {
-			return false, err
-		}
-		if id, ok, err = d.mlistID(listname); err != nil || !ok {
+		id, err = d.CreateMList(listname, mlistTypeNormal, mlistPrivAll)
+		if err != nil {
 			return false, err
 		}
 		created = true
@@ -431,7 +424,7 @@ func (d *SQLDirectory) UpsertLDAPGroup(listname string, externid []byte, owner s
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	if _, err := tx.Exec(`UPDATE mlists SET externid = ?, owner = ? WHERE id = ?`, externid, ownerVal, id); err != nil {
 		return false, err
 	}
@@ -444,7 +437,7 @@ func (d *SQLDirectory) UpsertLDAPGroup(listname string, externid []byte, owner s
 // SetMembers replaces a normal-type list's explicit members with the given set
 // (lowercased, trimmed, de-duplicated, blanks dropped), in one transaction,
 // reporting whether the list existed.
-func (d *SQLDirectory) SetMembers(listname string, members []string) (bool, error) {
+func (d *SQLDirectory) SetMembers(listname string, members []string) (existed bool, err error) {
 	// Each member becomes a recipient of every list message, so one no relay can
 	// route would bounce on every post. The set is refused whole, before anything
 	// is replaced.
@@ -461,7 +454,7 @@ func (d *SQLDirectory) SetMembers(listname string, members []string) (bool, erro
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	if err := replaceAssociations(tx, id, members); err != nil {
 		return false, err
 	}
@@ -476,7 +469,7 @@ func (d *SQLDirectory) ListMembers(listname string) ([]string, error) {
 
 // SetSpecifieds replaces a list's permitted-sender set (for the "specified"
 // posting privilege) with the given addresses or bare domains.
-func (d *SQLDirectory) SetSpecifieds(listname string, senders []string) (bool, error) {
+func (d *SQLDirectory) SetSpecifieds(listname string, senders []string) (existed bool, err error) {
 	id, ok, err := d.mlistID(listname)
 	if err != nil || !ok {
 		return false, err
@@ -486,7 +479,7 @@ func (d *SQLDirectory) SetSpecifieds(listname string, senders []string) (bool, e
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	if _, err := tx.Exec(`DELETE FROM specifieds WHERE list_id = ?`, id); err != nil {
 		return false, err
 	}
@@ -557,7 +550,7 @@ func replaceAssociations(tx *sql.Tx, listID int64, members []string) error {
 // listJoinByName returns the usernames in a list's membership table (associations
 // or specifieds), ordered. The table name is a fixed internal literal, never
 // client input.
-func (d *SQLDirectory) listJoinByName(table, listname string) ([]string, error) {
+func (d *SQLDirectory) listJoinByName(table, listname string) (out []string, err error) {
 	rows, err := d.db.Query(
 		// #nosec G202 -- table is one of two internal literals chosen by the caller, never client input
 		`SELECT t.username FROM `+table+` t JOIN mlists m ON t.list_id = m.id
@@ -566,8 +559,7 @@ func (d *SQLDirectory) listJoinByName(table, listname string) ([]string, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []string
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var u string
 		if err := rows.Scan(&u); err != nil {

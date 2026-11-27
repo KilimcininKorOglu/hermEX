@@ -170,16 +170,16 @@ func (d *SQLDirectory) GetLDAPConnection(id int64) (LDAPConnection, bool, error)
 // best-effort: the password was read, so a failed write must not fail the login or
 // sync that needs it; the failure is logged and the next read retries.
 func (d *SQLDirectory) openLDAPBindPassword(id int64, stored string) (string, error) {
-	password, wrapped, err := d.unwrapKey(wrapLDAPBind, stored)
+	u, err := d.unwrapKey(wrapLDAPBind, stored)
 	if err != nil {
 		return "", err
 	}
-	if d.rewrapNeeded(wrapped) {
-		if err := d.rewrapLDAPBindPassword(id, stored, password); err != nil {
+	if d.rewrapNeeded(u.wrapped) {
+		if err := d.rewrapLDAPBindPassword(id, stored, u.plain); err != nil {
 			log.Printf("directory: could not wrap the bind password of LDAP connection %d: %v", id, err)
 		}
 	}
-	return password, nil
+	return u.plain, nil
 }
 
 // rewrapLDAPBindPassword writes a plaintext bind password back wrapped, only while
@@ -200,7 +200,7 @@ func (d *SQLDirectory) rewrapLDAPBindPassword(id int64, stored, password string)
 // runs from EnsureSchema; a failure is logged rather than returned, because the
 // read path wraps the same rows lazily and a daemon must not refuse to start over it.
 func (d *SQLDirectory) wrapLDAPBindPasswords() {
-	if _, ok := d.wrapping(); !ok {
+	if !d.hasKeySecret() {
 		return
 	}
 	plain, err := d.plaintextLDAPBindPasswords()
@@ -217,15 +217,15 @@ func (d *SQLDirectory) wrapLDAPBindPasswords() {
 
 // plaintextLDAPBindPasswords lists the connections whose bind password is stored
 // without the wrap prefix, keyed by connection id.
-func (d *SQLDirectory) plaintextLDAPBindPasswords() (map[int64]string, error) {
+func (d *SQLDirectory) plaintextLDAPBindPasswords() (out map[int64]string, err error) {
 	rows, err := d.db.Query(
 		`SELECT id, bind_password FROM ldap_connections WHERE bind_password <> '' AND bind_password NOT LIKE ?`,
 		wrapPrefix+"%")
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := make(map[int64]string)
+	defer closeRows(rows, &err)
+	out = make(map[int64]string)
 	for rows.Next() {
 		var id int64
 		var stored string
@@ -240,14 +240,13 @@ func (d *SQLDirectory) plaintextLDAPBindPasswords() (map[int64]string, error) {
 // ListLDAPConnections returns every connection ordered by name. BindPassword is
 // left empty: a listing never needs the secret, and leaving it out keeps a list
 // readable even when one row cannot be unwrapped.
-func (d *SQLDirectory) ListLDAPConnections() ([]LDAPConnection, error) {
+func (d *SQLDirectory) ListLDAPConnections() (out []LDAPConnection, err error) {
 	rows, err := d.db.Query(
 		`SELECT id, name, uri, start_tls, bind_dn, base_dn, username_attr FROM ldap_connections ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []LDAPConnection
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var c LDAPConnection
 		if err := rows.Scan(&c.ID, &c.Name, &c.URI, &c.StartTLS, &c.BindDN, &c.BaseDN, &c.UsernameAttr); err != nil {
@@ -302,20 +301,13 @@ func (d *SQLDirectory) UpdateLDAPBinding(b LDAPBinding) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	n, err := res.RowsAffected()
-	if err != nil || n > 0 {
-		return n > 0, err
-	}
-	_, found, err := d.GetLDAPBinding(b.ID)
-	return found, err
+	return d.updateFound(res, `SELECT 1 FROM ldap_bindings WHERE id = ?`, b.ID)
 }
 
 // bindingSyncJSON validates a binding's preset and encodes its mapping.
 func bindingSyncJSON(b LDAPBinding) (any, error) {
-	if b.Preset != "" {
-		if _, ok := LDAPPreset(b.Preset); !ok {
-			return nil, ErrLDAPPreset
-		}
+	if b.Preset != "" && !validLDAPPreset(b.Preset) {
+		return nil, ErrLDAPPreset
 	}
 	return marshalMapping(b.Mapping)
 }
@@ -373,13 +365,12 @@ func (d *SQLDirectory) LDAPBindingForDomain(domainID int64) (LDAPBinding, bool, 
 
 // ListLDAPBindings returns the bindings of one connection, or of every connection
 // when connectionID is 0, ordered by domain name.
-func (d *SQLDirectory) ListLDAPBindings(connectionID int64) ([]LDAPBinding, error) {
+func (d *SQLDirectory) ListLDAPBindings(connectionID int64) (out []LDAPBinding, err error) {
 	rows, err := d.db.Query(bindingsOfConnection, connectionID, connectionID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []LDAPBinding
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		b, err := scanBinding(rows)
 		if err != nil {

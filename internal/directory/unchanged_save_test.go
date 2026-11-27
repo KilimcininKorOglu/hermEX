@@ -7,10 +7,10 @@ import "testing"
 // already holds affects nothing; found must still report the row, or an operator
 // who saves an unchanged form is told the account or organization does not exist.
 func TestSavingUnchangedValuesStillFindsTheRow(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
 	domID := mustCreateDomain(t, d, root, "same.test")
-	mustCreateUser(t, d, root, "u@same.test", "password1")
+	seedUser(t, d, root, "u@same.test", "password1")
 	orgID, err := d.CreateOrg("Same", "unchanged")
 	mustNoErr(t, "create the organization", err)
 
@@ -42,4 +42,7 @@ func TestSavingUnchangedValuesStillFindsTheRow(t *testing.T) {
 	found, err = d.SetUserLocale("ghost@same.test", "UTC", "en")
 	mustNoErr(t, "set a missing user's locale", err)
 	wantEq(t, "SetUserLocale found a missing user", found, false)
+	found, err = d.RequirePasswordChange("ghost@same.test", true)
+	mustNoErr(t, "flag a missing account", err)
+	wantEq(t, "RequirePasswordChange found a missing user", found, false)
 }

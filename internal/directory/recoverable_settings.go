@@ -54,13 +54,12 @@ func (d *SQLDirectory) SetRecoverableSettings(s RecoverableSettings) error {
 
 // AllMaildirs returns every user's mailbox directory, skipping accounts without one
 // (contacts and similar non-login users carry an empty maildir).
-func (d *SQLDirectory) AllMaildirs() ([]string, error) {
+func (d *SQLDirectory) AllMaildirs() (out []string, err error) {
 	rows, err := d.db.Query(`SELECT maildir FROM users WHERE maildir <> ''`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []string
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var md string
 		if err := rows.Scan(&md); err != nil {

@@ -3,7 +3,6 @@ package directory
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -47,10 +46,39 @@ func (d *SQLDirectory) SetKeySecret(secret []byte) {
 	// Derive rather than use the secret directly: the same shape the S/MIME
 	// at-rest wrapping uses, so one configured secret can key several purposes
 	// without any of them sharing material.
-	h := hmac.New(sha256.New, secret)
-	h.Write([]byte("hermex.directory.keywrap.v1"))
-	key := h.Sum(nil)
+	key := hmacSHA256(secret, []byte("hermex.directory.keywrap.v1"))
 	d.keySecret.Store(&key)
+}
+
+// hmacSHA256 computes RFC 2104 HMAC-SHA256 using sha256.Sum256 so key derivation
+// has no io.Writer error to discard.
+func hmacSHA256(key, msg []byte) []byte {
+	var padded [sha256.BlockSize]byte
+	if len(key) > sha256.BlockSize {
+		sum := sha256.Sum256(key)
+		copy(padded[:], sum[:])
+	} else {
+		copy(padded[:], key)
+	}
+	in := make([]byte, sha256.BlockSize+len(msg))
+	for i := range padded {
+		in[i] = padded[i] ^ 0x36
+	}
+	copy(in[sha256.BlockSize:], msg)
+	inner := sha256.Sum256(in)
+
+	var outBuf [sha256.BlockSize + sha256.Size]byte
+	for i := range padded {
+		outBuf[i] = padded[i] ^ 0x5c
+	}
+	copy(outBuf[sha256.BlockSize:], inner[:])
+	outer := sha256.Sum256(outBuf[:])
+	return outer[:]
+}
+
+// hasKeySecret reports whether an at-rest wrapping secret is currently installed.
+func (d *SQLDirectory) hasKeySecret() bool {
+	return d.keySecret.Load() != nil
 }
 
 // wrapping returns the AEAD for the installed secret, or ok=false when none is.
@@ -85,40 +113,43 @@ func (d *SQLDirectory) wrapKey(context, pem string) (string, error) {
 	return wrapPrefix + base64.StdEncoding.EncodeToString(sealed), nil
 }
 
+// unwrappedKey is the result of unwrapKey: the plaintext key material and
+// whether the stored database value was already wrapped.
+type unwrappedKey struct {
+	plain   string
+	wrapped bool
+}
+
 // unwrapKey returns the PEM behind a stored value. A value with no wrap prefix is
 // a plaintext row and is returned as it is, with wrapped=false so the caller can
 // rewrite it. A wrapped value that will not open is an error: reporting it as
 // plaintext would hand the caller a key-shaped string that is not a key.
-func (d *SQLDirectory) unwrapKey(context, stored string) (pem string, wrapped bool, err error) {
+func (d *SQLDirectory) unwrapKey(context, stored string) (unwrappedKey, error) {
 	if !strings.HasPrefix(stored, wrapPrefix) {
-		return stored, false, nil
+		return unwrappedKey{plain: stored}, nil
 	}
 	gcm, ok := d.wrapping()
 	if !ok {
-		return "", true, errors.New("directory: a stored private key is encrypted but no key secret is configured")
+		return unwrappedKey{wrapped: true}, errors.New("directory: a stored private key is encrypted but no key secret is configured")
 	}
 	sealed, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(stored, wrapPrefix))
 	if err != nil {
-		return "", true, fmt.Errorf("directory: stored private key is malformed: %w", err)
+		return unwrappedKey{wrapped: true}, fmt.Errorf("directory: stored private key is malformed: %w", err)
 	}
 	if len(sealed) < gcm.NonceSize() {
-		return "", true, errors.New("directory: stored private key is truncated")
+		return unwrappedKey{wrapped: true}, errors.New("directory: stored private key is truncated")
 	}
 	nonce, ct := sealed[:gcm.NonceSize()], sealed[gcm.NonceSize():]
 	plain, err := gcm.Open(nil, nonce, ct, []byte(context))
 	if err != nil {
-		return "", true, errors.New("directory: a stored private key could not be decrypted with the configured key secret")
+		return unwrappedKey{wrapped: true}, errors.New("directory: a stored private key could not be decrypted with the configured key secret")
 	}
-	return string(plain), true, nil
+	return unwrappedKey{plain: string(plain), wrapped: true}, nil
 }
 
 // rewrapNeeded reports whether a value just read should be written back wrapped:
 // a secret is installed and the row is still plaintext. The rewrite is what makes
 // an existing deployment converge on encryption with nothing to run.
 func (d *SQLDirectory) rewrapNeeded(wrapped bool) bool {
-	if wrapped {
-		return false
-	}
-	_, ok := d.wrapping()
-	return ok
+	return !wrapped && d.hasKeySecret()
 }

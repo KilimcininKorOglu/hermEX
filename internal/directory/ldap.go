@@ -196,7 +196,7 @@ func (d *SQLDirectory) UpsertLDAPUser(username string, externid []byte, maildir 
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	if err = checkAddressUnclaimed(tx, username); err != nil {
 		return false, err
 	}

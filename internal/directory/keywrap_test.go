@@ -1,6 +1,9 @@
 package directory
 
 import (
+	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
 	"strings"
 	"testing"
 )
@@ -23,12 +26,12 @@ func TestWrapRoundTrip(t *testing.T) {
 	if strings.Contains(sealed, "BEGIN") {
 		t.Errorf("the stored form still shows the key:\n%s", sealed)
 	}
-	got, wrapped, err := d.unwrapKey(wrapDKIM, sealed)
-	if err != nil || !wrapped {
-		t.Fatalf("unwrap = (%v, %v)", wrapped, err)
+	u, err := d.unwrapKey(wrapDKIM, sealed)
+	if err != nil || !u.wrapped {
+		t.Fatalf("unwrap = (%v, %v)", u.wrapped, err)
 	}
-	if got != wrapTestPEM {
-		t.Errorf("unwrapped key = %q, want the original", got)
+	if u.plain != wrapTestPEM {
+		t.Errorf("unwrapped key = %q, want the original", u.plain)
 	}
 }
 
@@ -42,8 +45,8 @@ func TestWrapContextsAreSeparate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := d.unwrapKey(wrapTLS, sealed); err == nil {
-		t.Error("a DKIM key opened as a TLS key")
+	if u, err := d.unwrapKey(wrapTLS, sealed); err == nil || u.plain != "" || !u.wrapped {
+		t.Errorf("a DKIM key opened as a TLS key: (%+v, %v)", u, err)
 	}
 }
 
@@ -59,12 +62,12 @@ func TestWrapWrongSecretFails(t *testing.T) {
 
 	other := &SQLDirectory{}
 	other.SetKeySecret([]byte("a-different-secret"))
-	got, _, err := other.unwrapKey(wrapDKIM, sealed)
+	u, err := other.unwrapKey(wrapDKIM, sealed)
 	if err == nil {
-		t.Fatalf("unwrap with the wrong secret succeeded and returned %q", got)
+		t.Fatalf("unwrap with the wrong secret succeeded and returned %q", u.plain)
 	}
-	if got != "" {
-		t.Errorf("a failed unwrap returned %q, want nothing", got)
+	if u.plain != "" {
+		t.Errorf("a failed unwrap returned %q, want nothing", u.plain)
 	}
 }
 
@@ -85,8 +88,8 @@ func TestWrapRefusesATamperedValue(t *testing.T) {
 	} else {
 		body[i] = 'A'
 	}
-	if got, _, err := d.unwrapKey(wrapDKIM, string(body)); err == nil || got != "" {
-		t.Errorf("a tampered value unwrapped to %q (err %v), want a refusal", got, err)
+	if u, err := d.unwrapKey(wrapDKIM, string(body)); err == nil || u.plain != "" || !u.wrapped {
+		t.Errorf("a tampered value unwrapped to %q (wrapped %v, err %v), want a refusal", u.plain, u.wrapped, err)
 	}
 }
 
@@ -116,17 +119,17 @@ func TestPlaintextRowIsReadable(t *testing.T) {
 	d := &SQLDirectory{}
 	d.SetKeySecret([]byte("a-long-operator-secret"))
 
-	got, wrapped, err := d.unwrapKey(wrapDKIM, wrapTestPEM)
+	u, err := d.unwrapKey(wrapDKIM, wrapTestPEM)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if wrapped {
+	if u.wrapped {
 		t.Error("a plaintext row was reported as wrapped")
 	}
-	if got != wrapTestPEM {
-		t.Errorf("plaintext row = %q, want it unchanged", got)
+	if u.plain != wrapTestPEM {
+		t.Errorf("plaintext row = %q, want it unchanged", u.plain)
 	}
-	if !d.rewrapNeeded(wrapped) {
+	if !d.rewrapNeeded(u.wrapped) {
 		t.Error("a plaintext row with a secret configured must be rewritten")
 	}
 }
@@ -160,8 +163,8 @@ func TestWrappedRowNeedsTheSecret(t *testing.T) {
 	}
 
 	d.SetKeySecret(nil)
-	if got, _, err := d.unwrapKey(wrapDKIM, sealed); err == nil || got != "" {
-		t.Errorf("unwrap without a secret = (%q, %v), want nothing and an error", got, err)
+	if u, err := d.unwrapKey(wrapDKIM, sealed); err == nil || u.plain != "" || !u.wrapped {
+		t.Errorf("unwrap without a secret = (%+v, %v), want nothing, wrapped and an error", u, err)
 	}
 }
 
@@ -172,9 +175,9 @@ func TestWrapRefusesAMalformedValue(t *testing.T) {
 	d := &SQLDirectory{}
 	d.SetKeySecret([]byte("a-long-operator-secret"))
 	for _, stored := range []string{wrapPrefix + "!!not base64!!", wrapPrefix + "AAAA", wrapPrefix} {
-		got, wrapped, err := d.unwrapKey(wrapDKIM, stored)
-		if err == nil || got != "" || !wrapped {
-			t.Errorf("unwrapKey(%q) = (%q, wrapped %v, %v), want nothing, wrapped and an error", stored, got, wrapped, err)
+		u, err := d.unwrapKey(wrapDKIM, stored)
+		if err == nil || u.plain != "" || !u.wrapped {
+			t.Errorf("unwrapKey(%q) = (%q, wrapped %v, %v), want nothing, wrapped and an error", stored, u.plain, u.wrapped, err)
 		}
 	}
 }
@@ -202,7 +205,7 @@ func storedTLSKey(t *testing.T, d *SQLDirectory, name string) string {
 // TestDKIMKeyIsEncryptedAtRest proves the database no longer holds a usable
 // signing key: a dump of it is not enough to sign for the domain.
 func TestDKIMKeyIsEncryptedAtRest(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	d.SetKeySecret([]byte("a-long-operator-secret"))
 
 	mustNoErr(t, "store the DKIM key",
@@ -213,11 +216,13 @@ func TestDKIMKeyIsEncryptedAtRest(t *testing.T) {
 	// The signer and the operator's export both get the real key back.
 	mustNoErr(t, "enable DKIM", d.SetDKIMEnabled("hermex.test", true))
 	wantUnwrappedKey(t, "DKIMKey", func() ([]byte, bool, error) {
-		pem, _, found, err := d.DKIMKey("hermex.test")
+		pem, sel, found, err := d.DKIMKey("hermex.test")
+		wantEq(t, "DKIMKey selector", sel, "sel1")
 		return pem, found, err
 	})
 	wantUnwrappedKey(t, "ExportDKIMKey", func() ([]byte, bool, error) {
-		pem, _, found, err := d.ExportDKIMKey("hermex.test")
+		pem, sel, found, err := d.ExportDKIMKey("hermex.test")
+		wantEq(t, "ExportDKIMKey selector", sel, "sel1")
 		return pem, found, err
 	})
 }
@@ -253,9 +258,9 @@ func TestDKIMPlaintextRowIsRewrapped(t *testing.T) {
 	}
 
 	d.SetKeySecret([]byte("a-long-operator-secret"))
-	pem, _, found, err := d.DKIMKey("hermex.test")
-	if err != nil || !found || string(pem) != wrapTestPEM {
-		t.Fatalf("DKIMKey = (%q, %v, %v), want the original key", pem, found, err)
+	pem, sel, found, err := d.DKIMKey("hermex.test")
+	if err != nil || !found || string(pem) != wrapTestPEM || sel != "sel1" {
+		t.Fatalf("DKIMKey = (%q, %q, %v, %v), want the original key", pem, sel, found, err)
 	}
 	if at := storedDKIM(t, d, "hermex.test"); strings.Contains(at, "BEGIN") {
 		t.Errorf("the plaintext row was not rewritten:\n%s", at)
@@ -300,10 +305,32 @@ func TestTLSPlaintextRowIsRewrapped(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.SetKeySecret([]byte("a-long-operator-secret"))
-	if _, err := d.LoadTLSCerts(); err != nil {
-		t.Fatal(err)
-	}
+	certs, err := d.LoadTLSCerts()
+	mustNoErr(t, "LoadTLSCerts", err)
+	wantEq(t, "loaded cert count", len(certs), 1)
+	wantEq(t, "loaded key matches original", certs[0].KeyPEM, wrapTestPEM)
 	if at := storedTLSKey(t, d, "mail.hermex.test"); strings.Contains(at, "BEGIN") {
 		t.Errorf("the plaintext row was not rewritten:\n%s", at)
+	}
+}
+
+// TestHMACSHA256MatchesCryptoHMAC proves the writer-free RFC 2104 derivation
+// helper produces the exact digest of crypto/hmac for both short and >block-size keys.
+func TestHMACSHA256MatchesCryptoHMAC(t *testing.T) {
+	msg := []byte("hermex.directory.keywrap.v1")
+	for _, secret := range [][]byte{
+		[]byte("short-secret"),
+		bytes.Repeat([]byte("k"), sha256.BlockSize),
+		bytes.Repeat([]byte("x"), sha256.BlockSize+17),
+	} {
+		h := hmac.New(sha256.New, secret)
+		if _, err := h.Write(msg); err != nil {
+			t.Fatal(err)
+		}
+		want := h.Sum(nil)
+		got := hmacSHA256(secret, msg)
+		if !bytes.Equal(got, want) {
+			t.Errorf("hmacSHA256(len=%d) = %x, want %x", len(secret), got, want)
+		}
 	}
 }

@@ -1,7 +1,6 @@
 package directory
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -100,9 +99,9 @@ func TestNeedsRehashCoversEveryWeakerHash(t *testing.T) {
 func TestLoginUpgradesAnOldHash(t *testing.T) {
 	d, db := freshDirectory(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "acme.test")
+	seedDomain(t, d, root, "acme.test")
 	const user, pass = "alice@acme.test", "correct horse battery staple"
-	mustCreateUser(t, d, root, user, pass)
+	seedUser(t, d, root, user, pass)
 
 	// Put the account back on a hash made at the old default, the state every
 	// account created before this change is in.
@@ -111,11 +110,13 @@ func TestLoginUpgradesAnOldHash(t *testing.T) {
 	if !strings.HasPrefix(weak, "$6$") || strings.Contains(weak, "rounds=") {
 		t.Fatalf("the fixture is not an old-style hash: %q", weak)
 	}
-	_, err = db.Exec(`UPDATE users SET password = ? WHERE username = ?`, weak, user)
-	mustNoErr(t, "store the old-style hash", err)
+	execRows(t, "store the old-style hash", 1)(db.Exec(`UPDATE users SET password = ? WHERE username = ?`, weak, user))
 
-	_, ok := d.Authenticate(user, pass)
+	path, ok := d.Authenticate(user, pass)
 	wantEq(t, "the old hash authenticates (raising the factor must not break logins)", ok, true)
+	if path == "" {
+		t.Error("Authenticate succeeded with empty maildir path")
+	}
 
 	var stored string
 	mustNoErr(t, "read the stored hash",
@@ -123,39 +124,33 @@ func TestLoginUpgradesAnOldHash(t *testing.T) {
 	wantEq(t, "the stored hash needs a re-hash after a login", needsRehash(stored), false)
 
 	// The upgrade must not have changed what the password is.
-	_, ok = d.Authenticate(user, pass)
+	path, ok = d.Authenticate(user, pass)
 	wantEq(t, "the re-hashed account accepts its own password", ok, true)
-	_, wrong := d.Authenticate(user, "wrong password")
+	if path == "" {
+		t.Error("re-hashed Authenticate succeeded with empty maildir path")
+	}
+	wrongPath, wrong := d.Authenticate(user, "wrong password")
 	wantEq(t, "the re-hashed account accepts a wrong password", wrong, false)
+	wantEq(t, "wrong password path", wrongPath, "")
 }
 
 // TestWrongPasswordDoesNotUpgrade proves the re-hash is gated on a successful
 // verify. Re-storing on a failed login would be a write an unauthenticated caller
 // can trigger at will, and would need a plaintext nobody proved.
 func TestWrongPasswordDoesNotUpgrade(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-	if _, err := d.CreateDomain("acme.test", filepath.Join(t.TempDir(), "dom")); err != nil {
-		t.Fatal(err)
-	}
+	d, db := freshDirectory(t)
+	root := t.TempDir()
+	seedDomain(t, d, root, "acme.test")
 	const user, pass = "bob@acme.test", "correct horse battery staple"
-	if _, err := d.CreateUser(user, pass, filepath.Join(t.TempDir(), "bob")); err != nil {
-		t.Fatal(err)
-	}
+	seedUser(t, d, root, user, pass)
 	weak, err := crypt.NewSHA512(pass, crypt.SHA512RoundsDefault)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`UPDATE users SET password = ? WHERE username = ?`, weak, user); err != nil {
-		t.Fatal(err)
-	}
+	execRows(t, "store the old-style hash", 1)(db.Exec(`UPDATE users SET password = ? WHERE username = ?`, weak, user))
 
-	if _, ok := d.Authenticate(user, "not the password"); ok {
-		t.Fatal("a wrong password authenticated")
+	if path, ok := d.Authenticate(user, "not the password"); ok || path != "" {
+		t.Fatalf("a wrong password authenticated (%q, %v)", path, ok)
 	}
 	var stored string
 	if err := db.QueryRow(`SELECT password FROM users WHERE username = ?`, user).Scan(&stored); err != nil {
@@ -170,21 +165,13 @@ func TestWrongPasswordDoesNotUpgrade(t *testing.T) {
 // request. The re-hash costs a full hash generation, which on the login path would
 // otherwise be paid forever rather than once.
 func TestUpgradeIsOncePerAccount(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-	if _, err := d.CreateDomain("acme.test", filepath.Join(t.TempDir(), "dom")); err != nil {
-		t.Fatal(err)
-	}
+	d, db := freshDirectory(t)
+	root := t.TempDir()
+	seedDomain(t, d, root, "acme.test")
 	const user, pass = "carol@acme.test", "correct horse battery staple"
-	if _, err := d.CreateUser(user, pass, filepath.Join(t.TempDir(), "carol")); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := d.Authenticate(user, pass); !ok {
-		t.Fatal("login failed")
+	seedUser(t, d, root, user, pass)
+	if path, ok := d.Authenticate(user, pass); !ok || path == "" {
+		t.Fatalf("login failed (%q, %v)", path, ok)
 	}
 	var first string
 	if err := db.QueryRow(`SELECT password FROM users WHERE username = ?`, user).Scan(&first); err != nil {
@@ -197,8 +184,8 @@ func TestUpgradeIsOncePerAccount(t *testing.T) {
 		t.Fatal("the hash stored by the first login still reads as needing a re-hash")
 	}
 
-	if _, ok := d.Authenticate(user, pass); !ok {
-		t.Fatal("second login failed")
+	if path, ok := d.Authenticate(user, pass); !ok || path == "" {
+		t.Fatalf("second login failed (%q, %v)", path, ok)
 	}
 	var second string
 	if err := db.QueryRow(`SELECT password FROM users WHERE username = ?`, user).Scan(&second); err != nil {

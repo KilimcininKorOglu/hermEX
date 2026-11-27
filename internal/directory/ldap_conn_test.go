@@ -20,8 +20,7 @@ func storedBindPassword(t *testing.T, db *sql.DB, id int64) string {
 // and applies them again, as an upgrade from the per-organization table does.
 func rerunLDAPConnectionsMigration(t *testing.T, d *SQLDirectory, db *sql.DB) {
 	t.Helper()
-	_, err := db.Exec(`DELETE FROM schema_migrations WHERE version >= 61`)
-	mustNoErr(t, "mark the migration as not applied", err)
+	execAtLeast(t, "mark the migration as not applied", 1)(db.Exec(`DELETE FROM schema_migrations WHERE version >= 61`))
 	mustNoErr(t, "apply the migration", d.EnsureSchema())
 }
 
@@ -34,12 +33,11 @@ func TestLDAPConnectionsMigrationCopiesOrgConfig(t *testing.T) {
 	root := t.TempDir()
 	aID := mustCreateDomain(t, d, root, "a.test")
 	bID := mustCreateDomain(t, d, root, "b.test")
-	_, err := db.Exec(
+	execRows(t, "seed the organization directories", 2)(db.Exec(
 		`INSERT INTO ldap_config (org_id, uri, start_tls, bind_dn, bind_password, base_dn, username_attr, sync_config)
 		 VALUES (0, 'ldaps://ad.test', 0, 'cn=svc', 'pw', 'dc=test', 'mail', ?),
 		        (5, '', 0, '', '', '', 'mail', NULL)`,
-		`{"aliasAttr":"proxyAddresses","syncContacts":true,"contactDomain":"B.test"}`)
-	mustNoErr(t, "seed the organization directories", err)
+		`{"aliasAttr":"proxyAddresses","syncContacts":true,"contactDomain":"B.test"}`))
 
 	rerunLDAPConnectionsMigration(t, d, db)
 	rerunLDAPConnectionsMigration(t, d, db)
@@ -54,8 +52,9 @@ func TestLDAPConnectionsMigrationCopiesOrgConfig(t *testing.T) {
 	wantEq(t, "a.test domain", a.Domain, "a.test")
 	wantEq(t, "a.test alias attribute", a.AliasAttr, "proxyAddresses")
 	wantEq(t, "a.test contact sync", a.SyncContacts, false)
-	b, _, err := d.LDAPConfigForDomain(bID)
+	b, bOK, err := d.LDAPConfigForDomain(bID)
 	mustNoErr(t, "resolve b.test", err)
+	wantEq(t, "b.test is bound", bOK, true)
 	wantEq(t, "b.test contact sync", b.SyncContacts, true)
 }
 
@@ -78,23 +77,26 @@ func TestLDAPConnectionCRUD(t *testing.T) {
 	wantEq(t, "the connection exists", ok, true)
 	wantEq(t, "the connection", got, want)
 
-	_, err = d.CreateLDAPConnection(want)
+	dupID, err := d.CreateLDAPConnection(want)
 	wantEq(t, "a duplicate name is refused", errors.Is(err, ErrLDAPConnectionName), true)
+	wantEq(t, "refused duplicate conn id", dupID, int64(0))
 
 	want.BaseDN = "ou=people,dc=test"
 	found, err := d.UpdateLDAPConnection(want)
 	mustNoErr(t, "update the connection", err)
 	wantEq(t, "the update found the connection", found, true)
-	got, _, err = d.GetLDAPConnection(id)
+	got, ok, err = d.GetLDAPConnection(id)
 	mustNoErr(t, "read the updated connection", err)
+	wantEq(t, "updated connection found", ok, true)
 	wantEq(t, "the updated base DN", got.BaseDN, want.BaseDN)
 	list, err := d.ListLDAPConnections()
 	mustNoErr(t, "list the connections", err)
 	wantEq(t, "listed connections", len(list), 1)
 	wantEq(t, "a listing carries no password", list[0].BindPassword, "")
 
-	_, err = d.CreateLDAPBinding(LDAPBinding{ConnectionID: id, DomainID: domID, Preset: LDAPPresetAD})
+	bindID, err := d.CreateLDAPBinding(LDAPBinding{ConnectionID: id, DomainID: domID, Preset: LDAPPresetAD})
 	mustNoErr(t, "bind the domain", err)
+	wantEq(t, "binding id > 0", bindID > 0, true)
 	deleted, err := d.DeleteLDAPConnection(id)
 	mustNoErr(t, "delete the connection", err)
 	wantEq(t, "the connection was deleted", deleted, true)
@@ -106,17 +108,20 @@ func TestLDAPConnectionCRUD(t *testing.T) {
 func TestLDAPConnectionRefusesPlaintext(t *testing.T) {
 	d, db := freshDirectory(t)
 	c := LDAPConnection{Name: "clear", URI: "ldap://ad.test"}
-	_, err := d.CreateLDAPConnection(c)
+	badID, err := d.CreateLDAPConnection(c)
 	wantEq(t, "a plaintext create is refused", errors.Is(err, ErrInsecureLDAP), true)
+	wantEq(t, "refused plaintext conn id", badID, int64(0))
 	wantRows(t, db, "connections stored by the refused create", 0, `SELECT COUNT(*) FROM ldap_connections`)
 	c.StartTLS = true
 	id, err := d.CreateLDAPConnection(c)
 	mustNoErr(t, "create with StartTLS", err)
 	c.ID, c.StartTLS = id, false
-	_, err = d.UpdateLDAPConnection(c)
+	updOK, err := d.UpdateLDAPConnection(c)
 	wantEq(t, "a plaintext update is refused", errors.Is(err, ErrInsecureLDAP), true)
-	got, _, err := d.GetLDAPConnection(id)
+	wantEq(t, "refused plaintext update reported found", updOK, false)
+	got, ok, err := d.GetLDAPConnection(id)
 	mustNoErr(t, "read the connection after the refused update", err)
+	wantEq(t, "connection found after refused update", ok, true)
 	wantEq(t, "StartTLS after the refused update", got.StartTLS, true)
 }
 
@@ -124,7 +129,7 @@ func TestLDAPConnectionRefusesPlaintext(t *testing.T) {
 // connection that does not exist (the id comes from the panel form) reports not
 // found and leaves the existing connection as it was.
 func TestLDAPConnectionForgedIDTouchesNothing(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	keep := LDAPConnection{Name: "keep", URI: "ldaps://keep.test", BaseDN: "dc=keep"}
 	id, err := d.CreateLDAPConnection(keep)
 	mustNoErr(t, "create the connection", err)
@@ -146,20 +151,22 @@ func TestLDAPConnectionForgedIDTouchesNothing(t *testing.T) {
 // TestLDAPDomainBindsOnce proves a domain binds to one connection only, an unknown
 // preset is refused, and a binding's mapping and base DN override round-trip.
 func TestLDAPDomainBindsOnce(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	domID := mustCreateDomain(t, d, t.TempDir(), "once.test")
 	c1, err := d.CreateLDAPConnection(LDAPConnection{Name: "one", URI: "ldaps://one.test"})
 	mustNoErr(t, "create the first connection", err)
 	c2, err := d.CreateLDAPConnection(LDAPConnection{Name: "two", URI: "ldaps://two.test"})
 	mustNoErr(t, "create the second connection", err)
 
-	_, err = d.CreateLDAPBinding(LDAPBinding{ConnectionID: c1, DomainID: domID, Preset: "nonesuch"})
+	badPresetID, err := d.CreateLDAPBinding(LDAPBinding{ConnectionID: c1, DomainID: domID, Preset: "nonesuch"})
 	wantEq(t, "an unknown preset is refused", errors.Is(err, ErrLDAPPreset), true)
+	wantEq(t, "refused unknown preset binding id", badPresetID, int64(0))
 	mapping := LDAPMapping{BaseDN: "ou=once,dc=test", AliasAttr: "proxyAddresses"}
 	bID, err := d.CreateLDAPBinding(LDAPBinding{ConnectionID: c1, DomainID: domID, Mapping: mapping})
 	mustNoErr(t, "bind the domain", err)
-	_, err = d.CreateLDAPBinding(LDAPBinding{ConnectionID: c2, DomainID: domID})
+	dupBindID, err := d.CreateLDAPBinding(LDAPBinding{ConnectionID: c2, DomainID: domID})
 	wantEq(t, "a second binding is refused", errors.Is(err, ErrLDAPDomainBound), true)
+	wantEq(t, "refused second binding id", dupBindID, int64(0))
 
 	cfg, ok, err := d.LDAPConfigForBinding(bID)
 	mustNoErr(t, "resolve the binding", err)
@@ -172,8 +179,9 @@ func TestLDAPDomainBindsOnce(t *testing.T) {
 	found, err := d.UpdateLDAPBinding(LDAPBinding{ID: bID, ConnectionID: c2, Mapping: mapping})
 	mustNoErr(t, "move the binding", err)
 	wantEq(t, "the update found the binding", found, true)
-	cfg, _, err = d.LDAPConfigForDomain(domID)
+	cfg, movedOK, err := d.LDAPConfigForDomain(domID)
 	mustNoErr(t, "resolve the moved binding", err)
+	wantEq(t, "moved binding resolves", movedOK, true)
 	wantEq(t, "the moved binding's URI", cfg.URI, "ldaps://two.test")
 }
 
@@ -185,11 +193,11 @@ func TestLDAPBindingRefusesMissingTargets(t *testing.T) {
 	domID := mustCreateDomain(t, d, t.TempDir(), "ghost.test")
 	cID, err := d.CreateLDAPConnection(LDAPConnection{Name: "g", URI: "ldaps://g.test"})
 	mustNoErr(t, "create the connection", err)
-	if _, err := d.CreateLDAPBinding(LDAPBinding{ConnectionID: cID + 999, DomainID: domID}); err == nil {
-		t.Error("a binding to a missing connection was accepted")
+	if badConn, err := d.CreateLDAPBinding(LDAPBinding{ConnectionID: cID + 999, DomainID: domID}); err == nil || badConn != 0 {
+		t.Errorf("a binding to a missing connection was accepted: id=%d err=%v", badConn, err)
 	}
-	if _, err := d.CreateLDAPBinding(LDAPBinding{ConnectionID: cID, DomainID: domID + 999}); err == nil {
-		t.Error("a binding to a missing domain was accepted")
+	if badDom, err := d.CreateLDAPBinding(LDAPBinding{ConnectionID: cID, DomainID: domID + 999}); err == nil || badDom != 0 {
+		t.Errorf("a binding to a missing domain was accepted: id=%d err=%v", badDom, err)
 	}
 	wantRows(t, db, "bindings stored", 0, `SELECT COUNT(*) FROM ldap_bindings`)
 }
@@ -200,10 +208,12 @@ func TestPurgeDomainRemovesLDAPBinding(t *testing.T) {
 	domID := mustCreateDomain(t, d, t.TempDir(), "purge.test")
 	cID, err := d.CreateLDAPConnection(LDAPConnection{Name: "p", URI: "ldaps://p.test"})
 	mustNoErr(t, "create the connection", err)
-	_, err = d.CreateLDAPBinding(LDAPBinding{ConnectionID: cID, DomainID: domID})
+	bID, err := d.CreateLDAPBinding(LDAPBinding{ConnectionID: cID, DomainID: domID})
 	mustNoErr(t, "bind the domain", err)
-	_, err = d.PurgeDomain(domID, false)
+	wantEq(t, "binding id > 0", bID > 0, true)
+	purged, err := d.PurgeDomain(domID, false)
 	mustNoErr(t, "purge the domain", err)
+	wantEq(t, "purged domain", purged, true)
 	wantRows(t, db, "bindings left", 0, `SELECT COUNT(*) FROM ldap_bindings`)
 	wantRows(t, db, "connections left", 1, `SELECT COUNT(*) FROM ldap_connections`)
 }
@@ -222,8 +232,9 @@ func TestLDAPBindPasswordWrappedAtStartup(t *testing.T) {
 	if s := storedBindPassword(t, db, id); !strings.HasPrefix(s, wrapPrefix) {
 		t.Errorf("the bind password is still plaintext after startup: %q", s)
 	}
-	c, _, err := d.GetLDAPConnection(id)
+	c, ok, err := d.GetLDAPConnection(id)
 	mustNoErr(t, "read the connection", err)
+	wantEq(t, "connection found", ok, true)
 	wantEq(t, "the unwrapped bind password", c.BindPassword, "plain")
 }
 
@@ -234,6 +245,7 @@ func TestLDAPPresets(t *testing.T) {
 		wantEq(t, "preset "+name+" resolves", ok, true)
 		wantEq(t, "preset "+name+" enables display name", m.Fields["displayName"].Enabled, true)
 	}
-	_, ok := LDAPPreset("nonesuch")
+	unknown, ok := LDAPPreset("nonesuch")
 	wantEq(t, "an unknown preset resolves", ok, false)
+	wantEq(t, "an unknown preset field count", len(unknown.Fields), 0)
 }

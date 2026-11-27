@@ -10,10 +10,10 @@ import (
 // not reported as an unknown user, and that a value outside the accepted set is
 // refused without touching the record.
 func TestUserPrefsRoundTrip(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "acme.test")
-	mustCreateUser(t, d, root, "u@acme.test", "password1")
+	seedDomain(t, d, root, "acme.test")
+	seedUser(t, d, root, "u@acme.test", "password1")
 	prefs := func(what string) UserPrefs {
 		t.Helper()
 		p, found, err := d.GetUserPrefs("u@acme.test")
@@ -43,10 +43,11 @@ func TestUserPrefsRoundTrip(t *testing.T) {
 	set("choose a time zone", UserPrefsUpdate{Timezone: str("Europe/Istanbul")})
 	wantEq(t, "the stored time zone", prefs("read the time zone").Timezone, "Europe/Istanbul")
 	set("clear the time zone", UserPrefsUpdate{Timezone: str("")})
+	wantEq(t, "the cleared time zone", prefs("read the cleared time zone").Timezone, "")
 
 	for _, u := range []UserPrefsUpdate{{Theme: str("blue")}, {Lang: str("de")}, {Timezone: str("Mars/Olympus")}, {Timezone: str("Local")}} {
-		if _, err := d.SetUserPrefs("u@acme.test", u); !errors.Is(err, ErrInvalidPref) {
-			t.Errorf("SetUserPrefs(%+v) = %v, want ErrInvalidPref", u, err)
+		if ok, err := d.SetUserPrefs("u@acme.test", u); !errors.Is(err, ErrInvalidPref) || ok {
+			t.Errorf("SetUserPrefs(%+v) = %v, %v; want false, ErrInvalidPref", u, ok, err)
 		}
 	}
 	wantEq(t, "the record after the refused writes", prefs("read after refused writes"), UserPrefs{Theme: "dark"})
@@ -54,7 +55,8 @@ func TestUserPrefsRoundTrip(t *testing.T) {
 	found, err := d.SetUserPrefs("ghost@acme.test", UserPrefsUpdate{Theme: str("light")})
 	mustNoErr(t, "write an unknown user", err)
 	wantEq(t, "an unknown user is reported", found, false)
-	_, found, err = d.GetUserPrefs("ghost@acme.test")
+	emptyP, found, err := d.GetUserPrefs("ghost@acme.test")
 	mustNoErr(t, "read an unknown user", err)
 	wantEq(t, "an unknown user reads as absent", found, false)
+	wantEq(t, "absent prefs", emptyP, UserPrefs{})
 }

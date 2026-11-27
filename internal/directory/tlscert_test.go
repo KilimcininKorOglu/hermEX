@@ -1,6 +1,10 @@
 package directory
 
-import "testing"
+import (
+	"testing"
+
+	"hermex/internal/logging"
+)
 
 func setupTLSCerts(t *testing.T) *SQLDirectory {
 	t.Helper()
@@ -8,8 +12,8 @@ func setupTLSCerts(t *testing.T) *SQLDirectory {
 	d := NewSQL(db)
 	mustNoErr(t, "ensure the schema", d.EnsureSchema())
 	cleanTables(t, db)
-	_, err := db.Exec("DELETE FROM tls_certs")
-	mustNoErr(t, "clear the certificates", err)
+	left := countRows(t, db, "certificates", `SELECT COUNT(*) FROM tls_certs`)
+	execRows(t, "clear the certificates", left)(db.Exec("DELETE FROM tls_certs"))
 	return d
 }
 
@@ -74,7 +78,34 @@ func TestTLSCertVersionDetectsWriteAndDelete(t *testing.T) {
 		t.Errorf("version after a write = %d, want above %d", v1, v0)
 	}
 	wantEq(t, "count after a write", c1, int64(1))
+	// A delete naming another certificate must leave this one served.
+	mustNoErr(t, "delete an unknown certificate", d.DeleteTLSCert("other.example.com"))
+	vn, cn := mustTLSCertVersion(t, d)
+	wantEq(t, "count after deleting an unknown name", cn, int64(1))
+	wantEq(t, "version after deleting an unknown name", vn, v1)
 	mustNoErr(t, "delete the certificate", d.DeleteTLSCert(""))
-	_, c2 := mustTLSCertVersion(t, d)
+	v2, c2 := mustTLSCertVersion(t, d)
 	wantEq(t, "count after the delete", c2, int64(0))
+	// The provider reloads when either value changes; a delete may lower the max
+	// (an empty store reports 0), so only a changed pair is required.
+	wantEq(t, "probe changed by the delete", v2 != v1 || c2 != c1, true)
+}
+
+// TestTLSCertRewrapFailureIsLogged proves a failed best-effort key re-wrap
+// still serves the readable certificate and records a directory warning event.
+func TestTLSCertRewrapFailureIsLogged(t *testing.T) {
+	d := setupTLSCerts(t)
+	sink := &captureSink{}
+	d.SetLogger(logging.New(sink))
+
+	mustNoErr(t, "store plaintext cert", d.SetTLSCert("mail.example.com", "CERT-PEM", "KEY-PEM", 1000))
+	d.SetKeySecret([]byte("a-long-operator-secret"))
+	installFailTrigger(t, d.db, "test_tlscert_rewrap_fail", "UPDATE", "tls_certs")
+
+	certs := mustLoadTLSCerts(t, d)
+	wantEq(t, "loaded cert count", len(certs), 1)
+	wantEq(t, "loaded key", certs[0].KeyPEM, "KEY-PEM")
+
+	e := wantWarnEvent(t, sink, "directory.tlscert_rewrap.fail")
+	wantEq(t, "event name", e.Fields["name"], "mail.example.com")
 }

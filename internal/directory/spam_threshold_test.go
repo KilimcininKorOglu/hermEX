@@ -14,12 +14,12 @@ func setupSpamThreshold(t *testing.T) (*SQLDirectory, string) {
 	}
 	cleanTables(t, db)
 	root := t.TempDir()
-	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "dom")); err != nil {
-		t.Fatal(err)
+	if did, err := d.CreateDomain("hermex.test", filepath.Join(root, "dom")); err != nil || did <= 0 {
+		t.Fatalf("CreateDomain = %d, %v", did, err)
 	}
 	maildir := filepath.Join(root, "users", "alice")
-	if _, err := d.CreateUser("alice@hermex.test", "secret-pw1", maildir); err != nil {
-		t.Fatal(err)
+	if uid, err := d.CreateUser("alice@hermex.test", "secret-pw1", maildir); err != nil || uid <= 0 {
+		t.Fatalf("CreateUser = %d, %v", uid, err)
 	}
 	return d, maildir
 }
@@ -36,14 +36,15 @@ func TestSpamThresholdResolution(t *testing.T) {
 		return th, ok
 	}
 
-	// No overrides → not found (the caller uses the global threshold).
-	_, ok := resolve("with no override")
+	// No overrides -> not found (the caller uses the global threshold).
+	th, ok := resolve("with no override")
 	wantEq(t, "a fresh user resolves to an override", ok, false)
+	wantEq(t, "unset override threshold value", th, 0)
 
 	// A domain override applies when the user has none.
 	dom := 12
 	mustNoErr(t, "set the domain override", d.SetDomainSpamThreshold("hermex.test", &dom))
-	th, ok := resolve("with a domain override")
+	th, ok = resolve("with a domain override")
 	wantEq(t, "the domain override was found", ok, true)
 	wantEq(t, "the resolved threshold", th, 12)
 
@@ -64,7 +65,7 @@ func TestSpamThresholdResolution(t *testing.T) {
 // TestSpamThresholdRefusesBelowOne proves a threshold below 1, which flags every
 // message as spam, is refused at both scopes and the stored override kept.
 func TestSpamThresholdRefusesBelowOne(t *testing.T) {
-	d, _ := setupSpamThreshold(t)
+	d, maildir := setupSpamThreshold(t)
 	keep := 6
 	mustNoErr(t, "set the user threshold", d.SetUserSpamThreshold("alice@hermex.test", &keep))
 	mustNoErr(t, "set the domain threshold", d.SetDomainSpamThreshold("hermex.test", &keep))
@@ -78,23 +79,31 @@ func TestSpamThresholdRefusesBelowOne(t *testing.T) {
 	dom, err := d.GetDomainSpamThreshold("hermex.test")
 	mustNoErr(t, "read the domain threshold", err)
 	wantSet(t, "the domain threshold after the refusals", dom, 6)
+	th, ok, err := d.SpamThresholdForMaildir(maildir)
+	mustNoErr(t, "resolve threshold for maildir", err)
+	wantEq(t, "resolved threshold found", ok, true)
+	wantEq(t, "resolved threshold after refusals", th, 6)
 }
 
 // TestSpamThresholdRefusesAnUnknownAccount proves a threshold for an account that
 // does not exist is reported as an error, so the panel cannot show "Saved" for a
 // change that stored nothing; re-saving an existing account's same value is not.
 func TestSpamThresholdRefusesAnUnknownAccount(t *testing.T) {
-	d, _ := setupSpamThreshold(t)
+	d, maildir := setupSpamThreshold(t)
 	n := 6
 	wantErr(t, "a threshold for an unknown account was accepted", d.SetUserSpamThreshold("nobody@hermex.test", &n))
 	mustNoErr(t, "set the user threshold", d.SetUserSpamThreshold("alice@hermex.test", &n))
 	mustNoErr(t, "re-save the same threshold", d.SetUserSpamThreshold("alice@hermex.test", &n))
+	th, ok, err := d.SpamThresholdForMaildir(maildir)
+	mustNoErr(t, "resolve threshold for alice", err)
+	wantEq(t, "resolved threshold found", ok, true)
+	wantEq(t, "resolved threshold value", th, 6)
 }
 
 // TestSpamThresholdGetReflectsSet proves the per-scope getters read back what was set
 // and report nil (inherit) once cleared.
 func TestSpamThresholdGetReflectsSet(t *testing.T) {
-	d, _ := setupSpamThreshold(t)
+	d, maildir := setupSpamThreshold(t)
 	userThreshold := func() *int {
 		t.Helper()
 		v, err := d.GetUserSpamThreshold("alice@hermex.test")
@@ -118,4 +127,37 @@ func TestSpamThresholdGetReflectsSet(t *testing.T) {
 	v, err := d.GetDomainSpamThreshold("hermex.test")
 	mustNoErr(t, "get the domain threshold", err)
 	wantSet(t, "the domain threshold after the set", v, 15)
+	// The getter is keyed by the maildir the delivery path holds.
+	th, ok, err := d.SpamThresholdForMaildir(maildir)
+	mustNoErr(t, "resolve the threshold by maildir", err)
+	wantEq(t, "the domain threshold resolves by maildir", ok, true)
+	wantEq(t, "the threshold resolved by maildir", th, 15)
+}
+
+// TestSpamThresholdStaysOnItsAccount proves one account's and one domain's
+// override never reach another tenant's recipient, and that an unknown maildir
+// resolves to no override.
+func TestSpamThresholdStaysOnItsAccount(t *testing.T) {
+	d, aliceDir := setupSpamThreshold(t)
+	root := t.TempDir()
+	seedDomain(t, d, root, "other.test")
+	other := filepath.Join(root, "users", "bob")
+	bob, err := d.CreateUser("bob@other.test", "secret-pw1", other)
+	mustNoErr(t, "create bob", err)
+	wantNonZeroID(t, "bob's id", bob)
+	n := 3
+	mustNoErr(t, "set alice's threshold", d.SetUserSpamThreshold("alice@hermex.test", &n))
+	mustNoErr(t, "set hermex.test's threshold", d.SetDomainSpamThreshold("hermex.test", &n))
+	// Alice herself resolves to her override, so the negative cases below are
+	// not passing on a resolver that finds nothing.
+	th, ok, err := d.SpamThresholdForMaildir(aliceDir)
+	mustNoErr(t, "resolve alice's threshold", err)
+	wantEq(t, "alice has an override", ok, true)
+	wantEq(t, "alice's threshold", th, 3)
+	for what, md := range map[string]string{"bob": other, "an unknown maildir": filepath.Join(root, "nobody")} {
+		th, ok, err := d.SpamThresholdForMaildir(md)
+		mustNoErr(t, "resolve the threshold of "+what, err)
+		wantEq(t, what+" has an override", ok, false)
+		wantEq(t, what+"'s threshold", th, 0)
+	}
 }

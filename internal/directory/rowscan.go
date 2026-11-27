@@ -10,13 +10,12 @@ import "database/sql"
 // queryRows carries the loop and the closing; the caller supplies only the scan.
 
 // queryRows runs a query and collects one value per row.
-func queryRows[T any](db *sql.DB, query string, args []any, scan func(*sql.Rows) (T, error)) ([]T, error) {
+func queryRows[T any](db *sql.DB, query string, args []any, scan func(*sql.Rows) (T, error)) (out []T, err error) {
 	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []T
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		v, err := scan(rows)
 		if err != nil {

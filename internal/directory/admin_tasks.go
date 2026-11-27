@@ -44,7 +44,7 @@ func (d *SQLDirectory) CreateTask(taskType, params, createdBy string) (int64, er
 
 // ListTasks returns the most recent tasks, newest first, capped at limit (default
 // 100 when limit <= 0).
-func (d *SQLDirectory) ListTasks(limit int) ([]TaskInfo, error) {
+func (d *SQLDirectory) ListTasks(limit int) (out []TaskInfo, err error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -54,8 +54,7 @@ func (d *SQLDirectory) ListTasks(limit int) ([]TaskInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []TaskInfo
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var t TaskInfo
 		if err := rows.Scan(&t.ID, &t.Type, &t.Status, &t.Params, &t.Message, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt); err != nil {
@@ -85,13 +84,12 @@ func (d *SQLDirectory) GetTask(id int64) (TaskInfo, bool, error) {
 // ClaimNextTask atomically takes the oldest pending task, marks it running, and
 // returns it; ok is false when nothing is pending. The SELECT ... FOR UPDATE in a
 // transaction makes the claim safe against a second worker racing for the same row.
-func (d *SQLDirectory) ClaimNextTask() (TaskInfo, bool, error) {
+func (d *SQLDirectory) ClaimNextTask() (t TaskInfo, ok bool, err error) {
 	tx, err := d.db.Begin()
 	if err != nil {
 		return TaskInfo{}, false, err
 	}
-	defer tx.Rollback()
-	var t TaskInfo
+	defer rollbackTx(tx, &err)
 	err = tx.QueryRow(
 		`SELECT id, task_type, status, params, message, created_by, created_at, updated_at
 		   FROM admin_tasks WHERE status = ? ORDER BY id LIMIT 1 FOR UPDATE`, TaskPending).Scan(

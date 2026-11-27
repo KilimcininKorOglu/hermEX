@@ -16,6 +16,14 @@ func storedHideMask(t *testing.T, db *sql.DB, addr string) uint32 {
 	return m
 }
 
+// wantAffected asserts a direct write touched exactly one row.
+func wantAffected(t *testing.T, what string, res sql.Result) {
+	t.Helper()
+	n, err := res.RowsAffected()
+	mustNoErr(t, "count "+what, err)
+	wantEq(t, what, n, int64(1))
+}
+
 // TestHideMaskColumnFollowsTheProperty proves users.hide_mask is always what
 // HideMask decodes from the PR_ATTR_HIDDEN properties, whichever form a writer
 // used: decimal, hex (base-0), the legacy boolean, an unparsable value (visible),
@@ -24,13 +32,15 @@ func storedHideMask(t *testing.T, db *sql.DB, addr string) uint32 {
 func TestHideMaskColumnFollowsTheProperty(t *testing.T) {
 	d, db := freshDirectory(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "hermex.test")
+	seedDomain(t, d, root, "hermex.test")
 	const addr = "hidden@hermex.test"
-	_, err := d.CreateContact(addr, "Hidden", "hermex.test")
+	cID, err := d.CreateContact(addr, "Hidden", "hermex.test")
 	mustNoErr(t, "create contact", err)
+	wantEq(t, "hidden contact id > 0", cID > 0, true)
 	const bystander = "bystander@hermex.test"
-	_, err = d.CreateContact(bystander, "Bystander", "hermex.test")
+	bID, err := d.CreateContact(bystander, "Bystander", "hermex.test")
 	mustNoErr(t, "create the bystander contact", err)
+	wantEq(t, "bystander contact id > 0", bID > 0, true)
 
 	for _, tc := range []struct {
 		name  string
@@ -40,6 +50,8 @@ func TestHideMaskColumnFollowsTheProperty(t *testing.T) {
 		{"decimal mask", map[uint32]string{PropAttrHiddenMask: "9"}, 0x09},
 		{"hex mask", map[uint32]string{PropAttrHiddenMask: "0x03"}, 0x03},
 		{"unparsable mask reads visible", map[uint32]string{PropAttrHiddenMask: "abc"}, 0},
+		// PtLong is 32 bits: a wider value is not a mask and must not wrap.
+		{"mask past 32 bits reads visible", map[uint32]string{PropAttrHiddenMask: "4294967297"}, 0},
 		{"mask removed, legacy boolean set", map[uint32]string{PropAttrHiddenMask: "", PropAttrHidden: "1"}, 0x03},
 		{"both removed", map[uint32]string{PropAttrHidden: ""}, 0},
 	} {
@@ -49,6 +61,10 @@ func TestHideMaskColumnFollowsTheProperty(t *testing.T) {
 		wantEq(t, tc.name+": hide_mask", storedHideMask(t, db, addr), tc.want)
 		wantEq(t, tc.name+": the bystander's hide_mask", storedHideMask(t, db, bystander), uint32(0))
 	}
+	found, err := d.SetUserProperties("ghost@hermex.test", map[uint32]string{PropAttrHiddenMask: "9"})
+	mustNoErr(t, "hide an unknown account", err)
+	wantEq(t, "an unknown account was found", found, false)
+	wantEq(t, "the bystander's hide_mask after the unknown account", storedHideMask(t, db, bystander), uint32(0))
 }
 
 // TestSearchGALHidesBeforeTheLimit proves the hide bits a surface asks for drop
@@ -57,17 +73,19 @@ func TestHideMaskColumnFollowsTheProperty(t *testing.T) {
 // filter applied after the limit would answer with nothing visible. An entry
 // carrying only a bit the caller did not ask for stays.
 func TestSearchGALHidesBeforeTheLimit(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "caller@hermex.test", "password1")
+	seedDomain(t, d, root, "hermex.test")
+	seedUser(t, d, root, "caller@hermex.test", "password1")
 	for _, a := range []string{"aa-hidden@hermex.test", "ab-hidden@hermex.test", "zz-visible@hermex.test"} {
-		_, err := d.CreateContact(a, a, "hermex.test")
+		cid, err := d.CreateContact(a, a, "hermex.test")
 		mustNoErr(t, "create contact "+a, err)
+		wantEq(t, "contact id > 0 for "+a, cid > 0, true)
 	}
 	for _, a := range []string{"aa-hidden@hermex.test", "ab-hidden@hermex.test"} {
-		_, err := d.SetUserProperties(a, map[uint32]string{PropAttrHiddenMask: strconv.Itoa(int(HideFromGAL))})
+		ok, err := d.SetUserProperties(a, map[uint32]string{PropAttrHiddenMask: strconv.Itoa(int(HideFromGAL))})
 		mustNoErr(t, "hide "+a, err)
+		wantEq(t, "hide contact found "+a, ok, true)
 	}
 
 	got, err := d.SearchGAL("caller@hermex.test", "-", 2, HideFromGAL)
@@ -85,16 +103,18 @@ func TestSearchGALHidesBeforeTheLimit(t *testing.T) {
 // pages through, for the same caller, query and hide bits: every match with no
 // limit, hidden entries left out, and nothing for a caller outside the scope.
 func TestCountGALCountsWhatTheSearchFinds(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "caller@hermex.test", "password1")
+	seedDomain(t, d, root, "hermex.test")
+	seedUser(t, d, root, "caller@hermex.test", "password1")
 	for _, a := range []string{"aa-x@hermex.test", "ab-x@hermex.test", "ac-x@hermex.test"} {
-		_, err := d.CreateContact(a, a, "hermex.test")
+		cid, err := d.CreateContact(a, a, "hermex.test")
 		mustNoErr(t, "create contact "+a, err)
+		wantEq(t, "contact id > 0 for "+a, cid > 0, true)
 	}
-	_, err := d.SetUserProperties("aa-x@hermex.test", map[uint32]string{PropAttrHiddenMask: strconv.Itoa(int(HideFromResolve))})
+	ok, err := d.SetUserProperties("aa-x@hermex.test", map[uint32]string{PropAttrHiddenMask: strconv.Itoa(int(HideFromResolve))})
 	mustNoErr(t, "hide aa-x", err)
+	wantEq(t, "hide contact found aa-x", ok, true)
 
 	for _, c := range []struct {
 		caller string
@@ -120,19 +140,22 @@ func TestCountGALCountsWhatTheSearchFinds(t *testing.T) {
 func TestEnsureSchemaHealsAStaleHideMask(t *testing.T) {
 	d, db := freshDirectory(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "hermex.test")
+	seedDomain(t, d, root, "hermex.test")
 	const hidden, shown = "hidden@hermex.test", "shown@hermex.test"
 	for _, a := range []string{hidden, shown} {
-		_, err := d.CreateContact(a, a, "hermex.test")
+		cid, err := d.CreateContact(a, a, "hermex.test")
 		mustNoErr(t, "create contact "+a, err)
+		wantEq(t, "contact id > 0 for "+a, cid > 0, true)
 	}
 	var id int64
 	mustNoErr(t, "user id", db.QueryRow(`SELECT id FROM users WHERE username = ?`, hidden).Scan(&id))
-	_, err := db.Exec(`INSERT INTO user_properties (user_id, proptag, order_id, propval_str) VALUES (?, ?, 1, ?)`,
+	res, err := db.Exec(`INSERT INTO user_properties (user_id, proptag, order_id, propval_str) VALUES (?, ?, 1, ?)`,
 		id, PropAttrHiddenMask, strconv.Itoa(0x01))
 	mustNoErr(t, "write the property behind the directory", err)
-	_, err = db.Exec(`UPDATE users SET hide_mask = 8 WHERE username = ?`, shown)
+	wantAffected(t, "property rows written behind the directory", res)
+	res, err = db.Exec(`UPDATE users SET hide_mask = 8 WHERE username = ?`, shown)
 	mustNoErr(t, "leave a stale column", err)
+	wantAffected(t, "users left with a stale column", res)
 
 	mustNoErr(t, "ensure schema", d.EnsureSchema())
 	wantEq(t, "hide_mask of the user hidden behind the directory", storedHideMask(t, db, hidden), uint32(0x01))

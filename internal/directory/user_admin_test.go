@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"hermex/internal/logging"
 )
 
 // TestSQLDirectoryUserDetailLifecycle exercises the admin detail/edit/delete
@@ -15,10 +17,11 @@ import (
 func TestSQLDirectoryUserDetailLifecycle(t *testing.T) {
 	d, db := freshDirectory(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "hermex.test")
+	seedDomain(t, d, root, "hermex.test")
 	maildir := filepath.Join(root, "users", "alice")
-	_, err := d.CreateUser("alice@hermex.test", "secret-pw1", maildir)
+	uid, err := d.CreateUser("alice@hermex.test", "secret-pw1", maildir)
 	mustNoErr(t, "create user", err)
+	wantEq(t, "created user id > 0", uid > 0, true)
 	mustNoErr(t, "create alias", d.CreateAlias("a.lias@hermex.test", "alice@hermex.test"))
 
 	// GetUser returns the freshly created account (case-insensitive lookup):
@@ -30,9 +33,10 @@ func TestSQLDirectoryUserDetailLifecycle(t *testing.T) {
 	wantEq(t, "SMTP", u.SMTP, true)
 	wantEq(t, "LDAP-mastered", u.LDAP, false)
 	wantEq(t, "status", u.Status, 0)
-	_, ok, err := d.GetUser("ghost@hermex.test")
+	ghostU, ok, err := d.GetUser("ghost@hermex.test")
 	mustNoErr(t, "read an unknown user", err)
 	wantEq(t, "GetUser(unknown) found", ok, false)
+	wantEq(t, "unknown GetUser zero username", ghostU.Username, "")
 
 	// UpdateUser writes the editable subset; identity (username/maildir) is
 	// untouched.
@@ -62,10 +66,10 @@ func TestSQLDirectoryUserDetailLifecycle(t *testing.T) {
 // and a privilege bit hermEX does not define survives a pop3/smtp toggle.
 func wantForeignBitsPreserved(t *testing.T, d *SQLDirectory, db *sql.DB) {
 	t.Helper()
-	_, err := db.Exec(`UPDATE users SET address_status = 0x20 WHERE username = ?`, "alice@hermex.test")
-	mustNoErr(t, "seed the domain-status bits", err)
-	_, err = d.UpdateUser("alice@hermex.test", UserUpdate{Status: afUserSuspended, POP3IMAP: true})
+	execRows(t, "seed the domain-status bits", 1)(db.Exec(`UPDATE users SET address_status = 0x20 WHERE username = ?`, "alice@hermex.test"))
+	found, err := d.UpdateUser("alice@hermex.test", UserUpdate{Status: afUserSuspended, POP3IMAP: true})
 	mustNoErr(t, "update user", err)
+	wantEq(t, "UpdateUser suspended found", found, true)
 	var rawStatus int
 	mustNoErr(t, "read address_status",
 		db.QueryRow(`SELECT address_status FROM users WHERE username = ?`, "alice@hermex.test").Scan(&rawStatus))
@@ -74,18 +78,18 @@ func wantForeignBitsPreserved(t *testing.T, d *SQLDirectory, db *sql.DB) {
 	// A status outside normal/suspended/shared and a display type of a list (1), a
 	// contact (6) or an unknown kind are refused, and the stored row is unchanged.
 	for _, u := range []UserUpdate{{Status: 3}, {Status: -1}, {DisplayType: dtDistlist}, {DisplayType: dtContact}, {DisplayType: -1}, {Homeserver: -1}, {Homeserver: 256}} {
-		if _, err := d.UpdateUser("alice@hermex.test", u); err == nil {
-			t.Errorf("UpdateUser accepted status %d display type %d", u.Status, u.DisplayType)
+		if updOK, err := d.UpdateUser("alice@hermex.test", u); err == nil || updOK {
+			t.Errorf("UpdateUser accepted %+v (ok=%v)", u, updOK)
 		}
 	}
 	mustNoErr(t, "read address_status",
 		db.QueryRow(`SELECT address_status FROM users WHERE username = ?`, "alice@hermex.test").Scan(&rawStatus))
 	wantEq(t, "address_status after refused edits", rawStatus, 0x21)
 
-	_, err = db.Exec(`UPDATE users SET privilege_bits = 0x100 WHERE username = ?`, "alice@hermex.test")
-	mustNoErr(t, "seed a foreign privilege bit", err)
-	_, err = d.UpdateUser("alice@hermex.test", UserUpdate{POP3IMAP: true, SMTP: false})
+	execRows(t, "seed a foreign privilege bit", 1)(db.Exec(`UPDATE users SET privilege_bits = 0x100 WHERE username = ?`, "alice@hermex.test"))
+	foundPriv, err := d.UpdateUser("alice@hermex.test", UserUpdate{POP3IMAP: true, SMTP: false})
 	mustNoErr(t, "update user", err)
+	wantEq(t, "UpdateUser priv bits found", foundPriv, true)
 	var priv int
 	mustNoErr(t, "read privilege_bits",
 		db.QueryRow(`SELECT privilege_bits FROM users WHERE username = ?`, "alice@hermex.test").Scan(&priv))
@@ -101,9 +105,10 @@ func wantUserDeleteFreesAddress(t *testing.T, d *SQLDirectory, db *sql.DB, maild
 	gone, err := d.DeleteUser("alice@hermex.test", true)
 	mustNoErr(t, "delete user", err)
 	wantEq(t, "DeleteUser reported the user existed", gone, true)
-	_, stillThere, err := d.GetUser("alice@hermex.test")
+	deletedU, stillThere, err := d.GetUser("alice@hermex.test")
 	mustNoErr(t, "read the deleted user", err)
 	wantEq(t, "user present after deletion", stillThere, false)
+	wantEq(t, "deleted user zero username", deletedU.Username, "")
 	if _, err := os.Stat(maildir); !os.IsNotExist(err) {
 		t.Errorf("deleteFiles left the maildir at %q (stat err %v)", maildir, err)
 	}
@@ -128,28 +133,14 @@ func mustGetUser(t *testing.T, d *SQLDirectory, login string) UserDetail {
 // TestSQLDirectoryDeleteUserKeepsFiles proves a delete without deleteFiles leaves
 // the maildir on disk, a missing flag must never destroy a mailbox's contents.
 func TestSQLDirectoryDeleteUserKeepsFiles(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-
+	d := freshSQL(t)
 	root := t.TempDir()
-	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "dom")); err != nil {
-		t.Fatal(err)
-	}
-	maildir := filepath.Join(root, "users", "bob")
-	if _, err := d.CreateUser("bob@hermex.test", "secret-pw1", maildir); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(maildir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := d.DeleteUser("bob@hermex.test", false); err != nil {
-		t.Fatal(err)
-	}
+	seedDomain(t, d, root, "hermex.test")
+	seedUser(t, d, root, "bob@hermex.test", "secret-pw1")
+	maildir := mustGetUser(t, d, "bob@hermex.test").Maildir
+	deleted, err := d.DeleteUser("bob@hermex.test", false)
+	mustNoErr(t, "DeleteUser", err)
+	wantEq(t, "DeleteUser found bob", deleted, true)
 	if _, err := os.Stat(maildir); err != nil {
 		t.Errorf("a delete without deleteFiles removed the maildir at %q (stat err %v)", maildir, err)
 	}
@@ -160,11 +151,11 @@ func TestSQLDirectoryDeleteUserKeepsFiles(t *testing.T) {
 // the prior set, an unknown user reports not-found, and a name already owned by
 // another account is rejected with the prior set left intact.
 func TestSQLDirectoryAltnames(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
-	mustCreateUser(t, d, root, "bob@hermex.test", "password1")
+	seedDomain(t, d, root, "hermex.test")
+	seedUser(t, d, root, "alice@hermex.test", "password1")
+	seedUser(t, d, root, "bob@hermex.test", "password1")
 
 	// Set normalizes (lowercase/trim), de-duplicates, and drops blanks.
 	found, err := d.SetAltnames("alice@hermex.test", []string{"  Ali  ", "ali", "", "alice2"})
@@ -173,8 +164,9 @@ func TestSQLDirectoryAltnames(t *testing.T) {
 	wantAltnames(t, d, "normalized, deduped and ordered", "ali", "alice2")
 
 	// A replace overwrites the prior set entirely.
-	_, err = d.SetAltnames("alice@hermex.test", []string{"alice3"})
+	foundReplace, err := d.SetAltnames("alice@hermex.test", []string{"alice3"})
 	mustNoErr(t, "replace altnames", err)
+	wantEq(t, "SetAltnames replace found user", foundReplace, true)
 	wantAltnames(t, d, "after the replace", "alice3")
 
 	// An unknown user is reported not-found.
@@ -184,10 +176,12 @@ func TestSQLDirectoryAltnames(t *testing.T) {
 
 	// A name owned by another account is rejected (the altname UNIQUE key), and
 	// alice's set survives the rolled-back transaction.
-	_, err = d.SetAltnames("bob@hermex.test", []string{"bobalt"})
+	bobFound, err := d.SetAltnames("bob@hermex.test", []string{"bobalt"})
 	mustNoErr(t, "set bob's altnames", err)
-	_, err = d.SetAltnames("alice@hermex.test", []string{"bobalt"})
+	wantEq(t, "SetAltnames found bob", bobFound, true)
+	conflictFound, err := d.SetAltnames("alice@hermex.test", []string{"bobalt"})
 	wantErr(t, "SetAltnames accepted another user's altname", err)
+	wantEq(t, "conflict SetAltnames found", conflictFound, false)
 	wantAltnames(t, d, "after the rejected replace", "alice3")
 }
 
@@ -209,11 +203,11 @@ func wantAltnames(t *testing.T, d *SQLDirectory, what string, want ...string) {
 // unknown user is not-found, an in-use address is rejected with the prior set
 // intact, and that a saved alias actually routes mail (Resolve follows it).
 func TestSQLDirectoryUserAliases(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
-	mustCreateUser(t, d, root, "bob@hermex.test", "password1")
+	seedDomain(t, d, root, "hermex.test")
+	seedUser(t, d, root, "alice@hermex.test", "password1")
+	seedUser(t, d, root, "bob@hermex.test", "password1")
 
 	found, err := d.SetAliasesFor("alice@hermex.test",
 		[]string{"  Sales@Hermex.Test ", "sales@hermex.test", "", "info@hermex.test"})
@@ -221,26 +215,31 @@ func TestSQLDirectoryUserAliases(t *testing.T) {
 	wantEq(t, "SetAliasesFor found the user", found, true)
 	wantAliases(t, d, "normalized, deduped and ordered", "info@hermex.test", "sales@hermex.test")
 	// A saved alias must actually deliver to the user.
-	_, resolves := d.Resolve("sales@hermex.test")
+	salesPath, resolves := d.Resolve("sales@hermex.test")
 	wantEq(t, "a saved alias resolves to the user", resolves, true)
+	wantEq(t, "saved alias maildir non-empty", salesPath != "", true)
 
 	// A replace overwrites entirely; the dropped alias stops resolving.
-	_, err = d.SetAliasesFor("alice@hermex.test", []string{"only@hermex.test"})
+	foundReplace, err := d.SetAliasesFor("alice@hermex.test", []string{"only@hermex.test"})
 	mustNoErr(t, "replace aliases", err)
+	wantEq(t, "SetAliasesFor replace found user", foundReplace, true)
 	wantAliases(t, d, "after the replace", "only@hermex.test")
-	_, stillResolves := d.Resolve("sales@hermex.test")
+	stalePath, stillResolves := d.Resolve("sales@hermex.test")
 	wantEq(t, "a removed alias still resolves", stillResolves, false)
+	wantEq(t, "removed alias maildir empty", stalePath, "")
 
-	// Unknown user → not-found.
+	// Unknown user -> not-found.
 	ghost, err := d.SetAliasesFor("ghost@hermex.test", []string{"x@hermex.test"})
 	mustNoErr(t, "set aliases for an unknown user", err)
 	wantEq(t, "SetAliasesFor(unknown) found a user", ghost, false)
 
 	// An address already in use is rejected and alice's set is preserved.
-	_, err = d.SetAliasesFor("bob@hermex.test", []string{"bobalias@hermex.test"})
+	bobFound, err := d.SetAliasesFor("bob@hermex.test", []string{"bobalias@hermex.test"})
 	mustNoErr(t, "set bob's aliases", err)
-	_, err = d.SetAliasesFor("alice@hermex.test", []string{"bobalias@hermex.test"})
+	wantEq(t, "SetAliasesFor found bob", bobFound, true)
+	conflictFound, err := d.SetAliasesFor("alice@hermex.test", []string{"bobalias@hermex.test"})
 	wantErr(t, "SetAliasesFor accepted an in-use address", err)
+	wantEq(t, "conflict SetAliasesFor found", conflictFound, false)
 	wantAliases(t, d, "after the rejected replace", "only@hermex.test")
 }
 
@@ -264,16 +263,15 @@ func wantAliases(t *testing.T, d *SQLDirectory, what string, want ...string) {
 func TestSQLDirectoryUserProperties(t *testing.T) {
 	d, db := freshDirectory(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
+	seedDomain(t, d, root, "hermex.test")
+	seedUser(t, d, root, "alice@hermex.test", "password1")
 	var uid int64
 	mustNoErr(t, "read alice's user id",
 		db.QueryRow(`SELECT id FROM users WHERE username = ?`, "alice@hermex.test").Scan(&uid))
 	// A property owned by another subsystem, a tag the contact editor never manages.
 	const foreignTag = 0x0FFF001F
-	_, err := db.Exec(`INSERT INTO user_properties (user_id, proptag, order_id, propval_str) VALUES (?, ?, 1, ?)`,
-		uid, foreignTag, "do-not-touch")
-	mustNoErr(t, "seed a foreign property", err)
+	execRows(t, "seed a foreign property", 1)(db.Exec(`INSERT INTO user_properties (user_id, proptag, order_id, propval_str) VALUES (?, ?, 1, ?)`,
+		uid, foreignTag, "do-not-touch"))
 
 	const prDisplayName, prNickname = 0x3001001F, 0x3A4F001F
 	found, err := d.SetUserProperties("alice@hermex.test", map[uint32]string{
@@ -291,8 +289,9 @@ func TestSQLDirectoryUserProperties(t *testing.T) {
 
 	// An empty value clears only that one proptag; the others (and the foreign
 	// one) are untouched.
-	_, err = d.SetUserProperties("alice@hermex.test", map[uint32]string{prNickname: ""})
+	cleared, err := d.SetUserProperties("alice@hermex.test", map[uint32]string{prNickname: ""})
 	mustNoErr(t, "clear the nickname", err)
+	wantEq(t, "SetUserProperties clear found user", cleared, true)
 	got = mustUserProperties(t, d)
 	_, stillSet := got[prNickname]
 	wantEq(t, "nickname present after an empty write", stillSet, false)
@@ -311,4 +310,34 @@ func mustUserProperties(t *testing.T, d *SQLDirectory) map[uint32]string {
 	got, err := d.GetUserProperties("alice@hermex.test")
 	mustNoErr(t, "get user properties", err)
 	return got
+}
+
+// TestDeleteUserLogsMaildirRemoveFailure proves an unremovable maildir leaves
+// DeleteUser succeeding while recording directory.maildir_remove.fail.
+func TestDeleteUserLogsMaildirRemoveFailure(t *testing.T) {
+	d := freshSQL(t)
+	sink := &captureSink{}
+	d.SetLogger(logging.New(sink))
+	root := t.TempDir()
+	seedDomain(t, d, root, "hermex.test")
+	lockedDir := filepath.Join(root, "unremovable")
+	uid, err := d.CreateUser("victim@hermex.test", "secret-pw1", lockedDir)
+	mustNoErr(t, "create victim", err)
+	wantEq(t, "victim id > 0", uid > 0, true)
+	// os.RemoveAll refuses a path ending in "." with EINVAL for every user,
+	// root included (the dev container runs tests as root, where a chmod does
+	// not stop the removal).
+	unremovable := filepath.Join(lockedDir, ".") + "/."
+	execRows(t, "point the maildir at an unremovable path", 1)(d.db.Exec(`UPDATE users SET maildir = ? WHERE id = ?`, unremovable, uid))
+
+	deleted, err := d.DeleteUser("victim@hermex.test", true)
+	mustNoErr(t, "DeleteUser", err)
+	wantEq(t, "DeleteUser deleted", deleted, true)
+	goneU, stillThere, err := d.GetUser("victim@hermex.test")
+	mustNoErr(t, "GetUser after delete", err)
+	wantEq(t, "user present after delete", stillThere, false)
+	wantEq(t, "deleted victim zero username", goneU.Username, "")
+
+	e := wantWarnEvent(t, sink, "directory.maildir_remove.fail")
+	wantEq(t, "event user", e.Fields["user"], "victim@hermex.test")
 }

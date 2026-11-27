@@ -19,9 +19,7 @@ func setupRecoverableSettings(t *testing.T) *SQLDirectory {
 		t.Fatal(err)
 	}
 	cleanTables(t, db)
-	if _, err := db.Exec("DELETE FROM recoverable_settings"); err != nil {
-		t.Fatal(err)
-	}
+	clearSettingsRow(t, db.Exec, "DELETE FROM recoverable_settings")
 	return d
 }
 
@@ -29,8 +27,8 @@ func setupRecoverableSettings(t *testing.T) *SQLDirectory {
 // the sweep uses the default window) and a saved window reads back.
 func TestRecoverableSettingsRoundTrip(t *testing.T) {
 	d := setupRecoverableSettings(t)
-	if _, found, err := d.GetRecoverableSettings(); err != nil || found {
-		t.Fatalf("Get on empty = found %v err %v, want not found", found, err)
+	if empty, found, err := d.GetRecoverableSettings(); err != nil || found || empty != (RecoverableSettings{}) {
+		t.Fatalf("Get on empty = %+v found %v err %v, want zero not found", empty, found, err)
 	}
 	if err := d.SetRecoverableSettings(RecoverableSettings{RetentionDays: 30}); err != nil {
 		t.Fatal(err)
@@ -50,11 +48,13 @@ func TestRecoverableSettingsRoundTrip(t *testing.T) {
 func TestSweepRecoverableItemsHonorsRetention(t *testing.T) {
 	d := setupRecoverableSettings(t)
 	root := t.TempDir()
-	_, err := d.CreateDomain("hermex.test", filepath.Join(root, "domains", "hermex.test"))
+	did, err := d.CreateDomain("hermex.test", filepath.Join(root, "domains", "hermex.test"))
 	mustNoErr(t, "create domain", err)
+	wantEq(t, "domain id > 0", did > 0, true)
 	maildir := filepath.Join(root, "alice")
-	_, err = d.CreateUser("alice@hermex.test", "password1", maildir)
+	uid, err := d.CreateUser("alice@hermex.test", "password1", maildir)
 	mustNoErr(t, "create user", err)
+	wantEq(t, "user id > 0", uid > 0, true)
 	seedAgedDumpster(t, maildir)
 
 	// A 14-day window purges the 40-day-old item and keeps the fresh one.
@@ -89,16 +89,19 @@ func TestSweepRecoverableItemsHonorsRetention(t *testing.T) {
 func TestMaintenanceReadsNeverCreateAMailbox(t *testing.T) {
 	d := setupRecoverableSettings(t)
 	root := t.TempDir()
-	_, err := d.CreateDomain("hermex.test", filepath.Join(root, "domains", "hermex.test"))
+	did, err := d.CreateDomain("hermex.test", filepath.Join(root, "domains", "hermex.test"))
 	mustNoErr(t, "create domain", err)
+	wantEq(t, "domain id > 0", did > 0, true)
 	maildir := filepath.Join(root, "alice")
-	_, err = d.CreateUser("alice@hermex.test", "password1", maildir)
+	uid, err := d.CreateUser("alice@hermex.test", "password1", maildir)
 	mustNoErr(t, "create user", err)
+	wantEq(t, "user id > 0", uid > 0, true)
 	mustNoErr(t, "remove the mailbox", os.RemoveAll(maildir))
 	mustNoErr(t, "set a window", d.SetRecoverableSettings(RecoverableSettings{RetentionDays: 14}))
 
-	_, err = d.SweepRecoverableItems(time.Now())
+	swept, err := d.SweepRecoverableItems(time.Now())
 	mustNoErr(t, "sweep", err)
+	wantEq(t, "swept count on missing mailbox", swept, 0)
 	list, err := d.Delegates("alice@hermex.test")
 	mustNoErr(t, "delegates", err)
 	if len(list) != 0 {
@@ -119,7 +122,7 @@ func seedAgedDumpster(t *testing.T, maildir string) {
 	t.Helper()
 	st, err := objectstore.Open(maildir)
 	mustNoErr(t, "open mailbox", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	trash := int64(mapi.PrivateFIDDeletedItems)
 	raw := []byte("From: a@b.test\r\nSubject: x\r\n\r\nhi\r\n")
 	oldInfo, err := st.AppendMessage(trash, raw, time.Now(), 0)
@@ -139,7 +142,7 @@ func dumpster(t *testing.T, maildir string) []objectstore.SoftDeletedMessage {
 	t.Helper()
 	st, err := objectstore.OpenExisting(maildir)
 	mustNoErr(t, "open mailbox", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	dump, err := st.ListSoftDeleted(int64(mapi.PrivateFIDDeletedItems))
 	mustNoErr(t, "list soft-deleted items", err)
 	return dump

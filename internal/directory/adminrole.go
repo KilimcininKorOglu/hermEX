@@ -70,13 +70,12 @@ func (d *SQLDirectory) RevokeAdminRole(userID int64, role string, scopeID int64)
 
 // AdminRoles returns every administrative role a user holds (empty for a
 // non-admin).
-func (d *SQLDirectory) AdminRoles(userID int64) ([]AdminRole, error) {
+func (d *SQLDirectory) AdminRoles(userID int64) (out []AdminRole, err error) {
 	rows, err := d.db.Query(`SELECT role, scope_id FROM admin_roles WHERE user_id = ?`, userID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []AdminRole
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var r AdminRole
 		if err := rows.Scan(&r.Role, &r.ScopeID); err != nil {

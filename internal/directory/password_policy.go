@@ -64,11 +64,24 @@ func (d *SQLDirectory) SetMinPasswordLength(n int) error {
 	return err
 }
 
+// minPasswordLength returns the effective minimum password length (stored row
+// or DefaultMinPasswordLength).
+func (d *SQLDirectory) minPasswordLength() (int, error) {
+	n, saved, err := d.GetMinPasswordLength()
+	if err != nil {
+		return 0, err
+	}
+	if !saved {
+		return DefaultMinPasswordLength, nil
+	}
+	return n, nil
+}
+
 // checkNewPassword refuses a password below the stored minimum, counted in
 // characters. A minimum that cannot be read refuses the password rather than
 // admitting it with no rule.
 func (d *SQLDirectory) checkNewPassword(password string) error {
-	minLen, _, err := d.GetMinPasswordLength()
+	minLen, err := d.minPasswordLength()
 	if err != nil {
 		return fmt.Errorf("directory: read the password policy: %w", err)
 	}

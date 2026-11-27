@@ -7,10 +7,10 @@ import "testing"
 // own password. A fresh account does not require a change; this is what gates the
 // webmail forced-change screen.
 func TestRequirePasswordChange(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "acme.test")
-	mustCreateUser(t, d, root, "u@acme.test", "password1")
+	seedDomain(t, d, root, "acme.test")
+	seedUser(t, d, root, "u@acme.test", "password1")
 
 	// A fresh account does not require a password change.
 	wantEq(t, "a fresh account requires a password change",
@@ -31,11 +31,11 @@ func TestRequirePasswordChange(t *testing.T) {
 // account only, and that naming an account that does not exist reports not found
 // and flags no one.
 func TestRequirePasswordChangeStaysOnItsAccount(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "acme.test")
-	mustCreateUser(t, d, root, "u@acme.test", "password1")
-	mustCreateUser(t, d, root, "bystander@acme.test", "password1")
+	seedDomain(t, d, root, "acme.test")
+	seedUser(t, d, root, "u@acme.test", "password1")
+	seedUser(t, d, root, "bystander@acme.test", "password1")
 
 	setMustChange(t, d, true)
 	wantEq(t, "the bystander's flag", mustGetUser(t, d, "bystander@acme.test").MustChangePassword, false)
@@ -64,18 +64,24 @@ func setMustChange(t *testing.T, d *SQLDirectory, required bool) {
 // normal authentication. This is what stops a temporary admin-set password from
 // working on IMAP/POP3/SMTP/EWS/ActiveSync/MAPI/DAV.
 func TestAuthenticateDeniesMustChange(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "acme.test")
-	mustCreateUser(t, d, root, "u@acme.test", "password1")
+	seedDomain(t, d, root, "acme.test")
+	seedUser(t, d, root, "u@acme.test", "password1")
 	strict := func(password string) bool {
 		t.Helper()
-		_, ok := d.Authenticate("u@acme.test", password)
+		maildir, ok := d.Authenticate("u@acme.test", password)
+		if !ok && maildir != "" {
+			t.Errorf("denied strict Authenticate returned %q", maildir)
+		}
 		return ok
 	}
 	remediation := func(password string) bool {
 		t.Helper()
-		_, ok := d.AuthenticateAllowingPasswordChange("u@acme.test", password)
+		maildir, ok := d.AuthenticateAllowingPasswordChange("u@acme.test", password)
+		if !ok && maildir != "" {
+			t.Errorf("denied remediation Authenticate returned %q", maildir)
+		}
 		return ok
 	}
 

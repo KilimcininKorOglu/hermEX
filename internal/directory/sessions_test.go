@@ -9,7 +9,7 @@ import (
 // mutable fields (command, last_update, addinfo, push) while preserving the
 // immutable ones (user, device, start) from the initial insert.
 func TestSessionUpsertRefresh(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 
 	const now = int64(1_000_000)
 	mustNoErr(t, "insert the session", d.UpsertSession(SessionRecord{
@@ -43,7 +43,7 @@ func TestSessionUpsertRefresh(t *testing.T) {
 // may: each session must still be written (an EAS one shows in the monitor, a
 // webmail one stays signed in) with the value cut to the column width.
 func TestSessionsKeepAnOverlongClientValue(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	long := strings.Repeat("ş", 1000)
 	const now = int64(1_000_000)
 	mustNoErr(t, "write the EAS session", d.UpsertSession(SessionRecord{
@@ -70,7 +70,7 @@ func TestSessionsKeepAnOverlongClientValue(t *testing.T) {
 // TestSessionStalenessAndPurge proves the age filter hides stale rows and that
 // PurgeStaleSessions deletes exactly them.
 func TestSessionStalenessAndPurge(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 
 	const now = int64(1_000_000)
 	seed := []SessionRecord{

@@ -28,9 +28,11 @@ func twoDomainDir(t *testing.T) (*SQLDirectory, int64) {
 		if dom == "partner.test" {
 			partnerID = id
 		}
-		if _, err := d.CreateUser("user@"+dom, "secret-pw1", filepath.Join(root, "users", dom)); err != nil {
+		uid, err := d.CreateUser("user@"+dom, "secret-pw1", filepath.Join(root, "users", dom))
+		if err != nil {
 			t.Fatal(err)
 		}
+		wantEq(t, "created user id > 0 for "+dom, uid > 0, true)
 	}
 	// One customer runs both domains, so an alias may cross them (an alias
 	// stays inside its account's organization).
@@ -39,9 +41,11 @@ func twoDomainDir(t *testing.T) (*SQLDirectory, int64) {
 		t.Fatal(err)
 	}
 	for _, id := range domainIDs {
-		if _, err := d.AssignDomainToOrg(id, org); err != nil {
+		assigned, err := d.AssignDomainToOrg(id, org)
+		if err != nil {
 			t.Fatal(err)
 		}
+		wantEq(t, "assigned domain to org", assigned, true)
 	}
 	return d, partnerID
 }
@@ -97,17 +101,19 @@ func TestIdentityDropsWhenItsDomainIsPurged(t *testing.T) {
 // path that skipped them, must not become a send-as identity just because it is
 // in the table.
 func TestIdentityIgnoresAnUnhostedDomain(t *testing.T) {
-	d, _ := twoDomainDir(t)
+	d, partnerID := twoDomainDir(t)
+	wantEq(t, "seeded partner id > 0", partnerID > 0, true)
 	const owner = "user@acme.test"
 
 	// Write straight to the tables, the shape a legacy row has.
-	if _, err := d.db.Exec(`INSERT INTO aliases (aliasname, mainname) VALUES (?, ?)`,
-		"ceo@victim.test", owner); err != nil {
-		t.Fatal(err)
-	}
-	_, err := d.db.Exec(`INSERT INTO altnames (user_id, altname) SELECT id, ? FROM users WHERE username = ?`,
+	res, err := d.db.Exec(`INSERT INTO aliases (aliasname, mainname) VALUES (?, ?)`,
+		"ceo@victim.test", owner)
+	mustNoErr(t, "write a legacy alias", err)
+	wantAffected(t, "legacy alias rows", res)
+	res, err = d.db.Exec(`INSERT INTO altnames (user_id, altname) SELECT id, ? FROM users WHERE username = ?`,
 		"cfo@victim.test", owner)
 	mustNoErr(t, "write a legacy altname", err)
+	wantAffected(t, "legacy altname rows", res)
 	ids, err := d.Identities(owner)
 	if err != nil {
 		t.Fatal(err)
@@ -122,7 +128,8 @@ func TestIdentityIgnoresAnUnhostedDomain(t *testing.T) {
 // TestIdentityStaysOnItsAccount proves an alias belongs only to the account it
 // names: another account in the same organization does not gain it as a From.
 func TestIdentityStaysOnItsAccount(t *testing.T) {
-	d, _ := twoDomainDir(t)
+	d, partnerID := twoDomainDir(t)
+	wantEq(t, "seeded partner id > 0", partnerID > 0, true)
 	mustNoErr(t, "alias for the partner account", d.CreateAlias("support@acme.test", "user@partner.test"))
 	ids, err := d.Identities("user@acme.test")
 	mustNoErr(t, "identities of the other account", err)
@@ -135,14 +142,15 @@ func TestIdentityStaysOnItsAccount(t *testing.T) {
 // ordinary alias must survive, and so must a bare alternative login name, which
 // names no domain to claim and exists for the login path.
 func TestIdentityKeepsHostedAndBareValues(t *testing.T) {
-	d, _ := twoDomainDir(t)
+	d, partnerID := twoDomainDir(t)
+	wantEq(t, "seeded partner id > 0", partnerID > 0, true)
 	const owner = "user@acme.test"
 
 	if err := d.CreateAlias("sales@acme.test", owner); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.SetAltnames(owner, []string{"legacy-login", "legacy@partner.test"}); err != nil {
-		t.Fatal(err)
+	if ok, err := d.SetAltnames(owner, []string{"legacy-login", "legacy@partner.test"}); err != nil || !ok {
+		t.Fatalf("SetAltnames = (%v, %v)", ok, err)
 	}
 	ids, err := d.Identities(owner)
 	if err != nil {

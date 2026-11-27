@@ -64,16 +64,20 @@ func TestStoredScopeIsMadeCanonical(t *testing.T) {
 	id, err := d.CreateRole("Legacy", "", []Permission{{Name: PermDomainAdmin, Params: "*"}}, nil)
 	mustNoErr(t, "create role", err)
 	for _, p := range []string{"05", "005", "+7"} {
-		_, err := db.Exec(`INSERT INTO role_permissions (role_id, permission, params) VALUES (?, ?, ?)`, id, PermDomainAdminRO, p)
+		res, err := db.Exec(`INSERT INTO role_permissions (role_id, permission, params) VALUES (?, ?, ?)`, id, PermDomainAdminRO, p)
 		mustNoErr(t, "store scope "+p, err)
+		wantAffected(t, "stored scope rows for "+p, res)
 	}
-	_, err = db.Exec(`DELETE FROM schema_migrations WHERE version >= 66`)
+	res, err := db.Exec(`DELETE FROM schema_migrations WHERE version >= 66`)
 	mustNoErr(t, "mark the migration as not applied", err)
+	unmarked, err := res.RowsAffected()
+	mustNoErr(t, "count the unmarked migrations", err)
+	wantEq(t, "migration 66 and later were unmarked", unmarked >= 1, true)
 	mustNoErr(t, "apply the migration", d.EnsureSchema())
 
 	rows, err := db.Query(`SELECT permission, params FROM role_permissions WHERE role_id = ? ORDER BY permission, params`, id)
 	mustNoErr(t, "read the scopes", err)
-	defer rows.Close()
+	defer mustClose(t, rows)
 	var got []string
 	for rows.Next() {
 		var name, params string
@@ -93,7 +97,7 @@ func TestStoredScopeIsMadeCanonical(t *testing.T) {
 func TestRoleCRUD(t *testing.T) {
 	d, db := freshDirectory(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "acme.test")
+	seedDomain(t, d, root, "acme.test")
 	alice := mustCreateUser(t, d, root, "alice@acme.test", "password1")
 	bob := mustCreateUser(t, d, root, "bob@acme.test", "password1")
 
@@ -107,8 +111,9 @@ func TestRoleCRUD(t *testing.T) {
 	id, err := d.CreateRole("Helpdesk", "Read-only plus password reset", perms, []int64{alice})
 	mustNoErr(t, "create role", err)
 	wantNonZeroID(t, "role id", id)
-	_, err = d.CreateRole("Helpdesk", "", nil, nil)
+	dupID, err := d.CreateRole("Helpdesk", "", nil, nil)
 	wantErr(t, "duplicate role name accepted", err)
+	wantEq(t, "refused duplicate role id", dupID, int64(0))
 
 	got := mustGetRole(t, d, id)
 	wantEq(t, "role name", got.Name, "Helpdesk")
@@ -143,10 +148,12 @@ func TestRoleCRUD(t *testing.T) {
 	wantEq(t, "UpdateRole on an unknown id", unknown, false)
 
 	// A refused update changes nothing: neither the name, the permissions nor the users.
-	_, err = d.UpdateRole(id, "Renamed", "x", []Permission{{Name: "Nonsense"}}, []int64{alice})
+	updOK1, err := d.UpdateRole(id, "Renamed", "x", []Permission{{Name: "Nonsense"}}, []int64{alice})
 	wantErr(t, "an update with an unknown permission accepted", err)
-	_, err = d.UpdateRole(id, "", "x", newPerms, []int64{alice})
+	wantEq(t, "refused unknown perm update reported ok", updOK1, false)
+	updOK2, err := d.UpdateRole(id, "", "x", newPerms, []int64{alice})
 	wantErr(t, "an update to an empty name accepted", err)
+	wantEq(t, "refused empty name update reported ok", updOK2, false)
 	got = mustGetRole(t, d, id)
 	wantEq(t, "name after the refused updates", got.Name, "Helpdesk RO")
 	wantEq(t, "permission count after the refused updates", got.PermCount, 1)
@@ -156,9 +163,10 @@ func TestRoleCRUD(t *testing.T) {
 	deleted, err := d.DeleteRole(id)
 	mustNoErr(t, "delete role", err)
 	wantEq(t, "DeleteRole reported the role existed", deleted, true)
-	_, stillThere, err := d.GetRole(id)
+	goneRole, stillThere, err := d.GetRole(id)
 	mustNoErr(t, "read the deleted role", err)
 	wantEq(t, "role present after delete", stillThere, false)
+	wantEq(t, "deleted role name empty", goneRole.Name, "")
 	// Assignment rows cascade with the role.
 	wantRows(t, db, "user_roles rows after the role delete (cascade)", 0,
 		`SELECT COUNT(*) FROM user_roles WHERE role_id = ?`, id)
@@ -171,12 +179,15 @@ func TestRoleCRUD(t *testing.T) {
 // over-length name, and an unknown permission.
 func wantRoleNameRules(t *testing.T, d *SQLDirectory) {
 	t.Helper()
-	_, err := d.CreateRole("", "x", nil, nil)
+	badID1, err := d.CreateRole("", "x", nil, nil)
 	wantErr(t, "empty role name accepted", err)
-	_, err = d.CreateRole(strings.Repeat("a", 65), "x", nil, nil)
+	wantEq(t, "refused empty role id", badID1, int64(0))
+	badID2, err := d.CreateRole(strings.Repeat("a", 65), "x", nil, nil)
 	wantErr(t, "65-character role name accepted (the limit is 64)", err)
-	_, err = d.CreateRole("Bad", "x", []Permission{{Name: "Nonsense"}}, nil)
+	wantEq(t, "refused long role id", badID2, int64(0))
+	badID3, err := d.CreateRole("Bad", "x", []Permission{{Name: "Nonsense"}}, nil)
 	wantErr(t, "role with an unknown permission accepted", err)
+	wantEq(t, "refused bad perm role id", badID3, int64(0))
 }
 
 // mustGetRole reads a role back, requiring it to exist.
@@ -224,9 +235,9 @@ func wantNonZeroID(t *testing.T, label string, id int64) {
 // this bridge an existing, possibly sole, admin loses access the moment the
 // resolver governs a real check.
 func TestEffectivePermissionsUnionBridge(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "acme.test")
+	seedDomain(t, d, root, "acme.test")
 	mk := func(login string) int64 {
 		t.Helper()
 		return mustCreateUser(t, d, root, login+"@acme.test", "password1")
@@ -259,13 +270,14 @@ func TestEffectivePermissionsUnionBridge(t *testing.T) {
 	// not duplicate the permission.
 	both := mk("both")
 	mustNoErr(t, "grant org admin", d.GrantAdminRole(both, AdminOrg, 9))
-	_, err := d.CreateRole("Extra", "",
+	extraID, err := d.CreateRole("Extra", "",
 		[]Permission{
 			{Name: PermResetPasswd},
 			{Name: PermOrgAdmin, Params: "9"}, // duplicates the legacy org grant scope 9
 		},
 		[]int64{both})
 	mustNoErr(t, "create role", err)
+	wantEq(t, "extra role id > 0", extraID > 0, true)
 	perms = mustEffectivePermissions(t, d, both)
 	wantPermissions(t, perms, []Permission{{Name: PermResetPasswd}})
 	wantEq(t, "OrgAdmin(9) occurrences (the union must dedupe the role/legacy overlap)",

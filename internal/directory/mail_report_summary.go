@@ -17,7 +17,7 @@ type DMARCSourceSummary struct {
 
 // DMARCSummary totals aggregate records by domain, From domain and source
 // address, the sources that sent the most messages first.
-func (d *SQLDirectory) DMARCSummary(f ReportFilter) ([]DMARCSourceSummary, error) {
+func (d *SQLDirectory) DMARCSummary(f ReportFilter) (out []DMARCSourceSummary, err error) {
 	args, ok := f.scopeArgs()
 	if !ok {
 		return nil, nil
@@ -38,8 +38,7 @@ func (d *SQLDirectory) DMARCSummary(f ReportFilter) ([]DMARCSourceSummary, error
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []DMARCSourceSummary
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var s DMARCSourceSummary
 		if err := rows.Scan(&s.Domain, &s.HeaderFrom, &s.SourceIP, &s.Messages, &s.DKIMPass, &s.SPFPass,
@@ -64,7 +63,7 @@ type TLSPolicySummary struct {
 
 // TLSSummary totals TLS report sessions by domain and policy, the policies with
 // the most failed sessions first.
-func (d *SQLDirectory) TLSSummary(f ReportFilter) ([]TLSPolicySummary, error) {
+func (d *SQLDirectory) TLSSummary(f ReportFilter) (out []TLSPolicySummary, err error) {
 	args, ok := f.scopeArgs()
 	if !ok {
 		return nil, nil
@@ -81,8 +80,7 @@ func (d *SQLDirectory) TLSSummary(f ReportFilter) ([]TLSPolicySummary, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []TLSPolicySummary
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var s TLSPolicySummary
 		if err := rows.Scan(&s.Domain, &s.PolicyDomain, &s.PolicyType, &s.MXHost, &s.Success, &s.Failure); err != nil {

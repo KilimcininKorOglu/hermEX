@@ -19,8 +19,8 @@ func setupConnLimitSettings(t *testing.T) *SQLDirectory {
 func TestConnLimitSettingsRoundTrip(t *testing.T) {
 	d := setupConnLimitSettings(t)
 
-	if _, found, err := d.GetConnLimitSettings(); err != nil || found {
-		t.Fatalf("Get on empty = found %v err %v, want not found", found, err)
+	if empty, found, err := d.GetConnLimitSettings(); err != nil || found || empty != (ConnLimitSettings{}) {
+		t.Fatalf("Get on empty = %+v found %v err %v, want zero/not found", empty, found, err)
 	}
 
 	want := ConnLimitSettings{Enabled: true, MaxTotal: 500, MaxPerClient: 10}
@@ -53,4 +53,5 @@ func TestConnLimitSettingsUpsert(t *testing.T) {
 	if got.Enabled || got.MaxTotal != 200 || got.MaxPerClient != 4 {
 		t.Errorf("after upsert = %+v, want disabled / 200 / 4", got)
 	}
+	wantRows(t, d.db, "settings rows after two saves", 1, `SELECT COUNT(*) FROM conn_limit_settings`)
 }

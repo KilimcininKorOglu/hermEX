@@ -55,7 +55,7 @@ func (d *SQLDirectory) QuarantineMessage(e QuarantineEntry) (int64, error) {
 // record is returned (a system admin); otherwise only records whose domain_id is
 // in domainIDs (a domain admin's scope). all=false with no domainIDs returns
 // nothing. limit defaults to 200 when <= 0.
-func (d *SQLDirectory) ListQuarantine(domainIDs []int64, all bool, limit int) ([]QuarantineRecord, error) {
+func (d *SQLDirectory) ListQuarantine(domainIDs []int64, all bool, limit int) (out []QuarantineRecord, err error) {
 	if limit <= 0 {
 		limit = 200
 	}
@@ -81,8 +81,7 @@ func (d *SQLDirectory) ListQuarantine(domainIDs []int64, all bool, limit int) ([
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []QuarantineRecord
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		r, err := scanQuarantine(rows)
 		if err != nil {
@@ -117,7 +116,7 @@ func (d *SQLDirectory) DeleteQuarantine(id int64) error {
 // plus the org admins of that domain's organization, to notify them when a
 // message is quarantined. A domain with no organization (org_id 0) yields just
 // its domain admins.
-func (d *SQLDirectory) DomainOrgAdminEmails(domainID int64) ([]string, error) {
+func (d *SQLDirectory) DomainOrgAdminEmails(domainID int64) (out []string, err error) {
 	rows, err := d.db.Query(
 		`SELECT DISTINCT u.username
 		   FROM admin_roles ar JOIN users u ON u.id = ar.user_id
@@ -127,8 +126,7 @@ func (d *SQLDirectory) DomainOrgAdminEmails(domainID int64) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []string
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var addr string
 		if err := rows.Scan(&addr); err != nil {

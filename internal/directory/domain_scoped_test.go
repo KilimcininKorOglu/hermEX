@@ -14,16 +14,18 @@ func hasUser(us []UserInfo, name string) bool {
 // TestListInDomainScoping proves the per-domain list methods return only the
 // requested domain's rows, the directory backend for the admin domain accordion.
 func TestListInDomainScoping(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
 	id1 := mustCreateDomain(t, d, root, "one.test")
 	id2 := mustCreateDomain(t, d, root, "two.test")
-	mustCreateUser(t, d, root, "a@one.test", "password1")
-	mustCreateUser(t, d, root, "b@two.test", "password1")
-	_, err := d.CreateContact("c@one.test", "C", "one.test")
+	seedUser(t, d, root, "a@one.test", "password1")
+	seedUser(t, d, root, "b@two.test", "password1")
+	cid, err := d.CreateContact("c@one.test", "C", "one.test")
 	mustNoErr(t, "create contact", err)
-	_, err = d.CreateMList("list@two.test", 0, 0)
+	wantEq(t, "created contact id > 0", cid > 0, true)
+	lid, err := d.CreateMList("list@two.test", 0, 0)
 	mustNoErr(t, "create mailing list", err)
+	wantEq(t, "created mlist id > 0", lid > 0, true)
 
 	// Users scoped to their own domain.
 	u1, err := d.ListUsersInDomain(id1)

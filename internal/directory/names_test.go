@@ -121,10 +121,18 @@ func TestValidateContactAddress(t *testing.T) {
 // for: every accepted name joins to a path inside the root it was joined to.
 func TestValidatedAddressStaysUnderRoot(t *testing.T) {
 	const root = "/data/user"
+	accepted := 0
+	defer func() {
+		// alice, a.b and a+b are ordinary local parts, so the property is never vacuous.
+		if accepted < 3 {
+			t.Errorf("only %d local parts were accepted, want at least 3", accepted)
+		}
+	}()
 	for _, local := range []string{"alice", "a.b", "a+b", "..a", "a..b"} {
 		if err := ValidateAddress(local + "@example.com"); err != nil {
 			continue
 		}
+		accepted++
 		joined := filepath.Join(root, "example.com", local)
 		rel, err := filepath.Rel(root, joined)
 		if err != nil || filepath.IsAbs(rel) || rel == ".." || len(rel) > 2 && rel[:3] == "../" {
@@ -148,16 +156,16 @@ func TestCreateUserRefusesEscapingMaildir(t *testing.T) {
 	// up, and a leftover from an earlier run cannot decide the assertion.
 	base := t.TempDir()
 	root := filepath.Join(base, "data")
-	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "domain", "hermex.test")); err != nil {
-		t.Fatal(err)
+	if did, err := d.CreateDomain("hermex.test", filepath.Join(root, "domain", "hermex.test")); err != nil || did <= 0 {
+		t.Fatalf("CreateDomain = %d, %v", did, err)
 	}
 
 	// What an admin API caller can post: the domain is one they administer, the
 	// local part walks out of the data root.
 	address := "../../../escaped@hermex.test"
 	escaped := filepath.Join(root, "user", "hermex.test", "../../../escaped")
-	if _, err := d.CreateUser(address, "password1", escaped); err == nil {
-		t.Fatal("CreateUser accepted an address that escapes the data root")
+	if badUID, err := d.CreateUser(address, "password1", escaped); err == nil || badUID != 0 {
+		t.Fatalf("CreateUser accepted an escaping address: id=%d err=%v", badUID, err)
 	}
 	if _, err := os.Stat(escaped); err == nil {
 		t.Errorf("a directory was created at %q, outside the data root", escaped)
@@ -177,8 +185,8 @@ func TestCreateDomainRefusesEscapingHomedir(t *testing.T) {
 
 	base := t.TempDir()
 	escaped := filepath.Join(base, "data", "domain", "../../escaped-domain")
-	if _, err := d.CreateDomain("../../escaped-domain", escaped); err == nil {
-		t.Fatal("CreateDomain accepted a name that escapes the data root")
+	if badDID, err := d.CreateDomain("../../escaped-domain", escaped); err == nil || badDID != 0 {
+		t.Fatalf("CreateDomain accepted an escaping name: id=%d err=%v", badDID, err)
 	}
 	if _, err := os.Stat(escaped); err == nil {
 		t.Errorf("a directory was created at %q, outside the data root", escaped)

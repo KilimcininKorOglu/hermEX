@@ -52,6 +52,7 @@ func main() {
 	logger, logClose := logging.Build("hermex-gateway", cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 
 	db, dir := openCertStore(cfg)
+	dir.SetLogger(logger)
 	// Serve this server's own MTA-STS policy for mta-sts.<domain> requests before
 	// proxying everything else; the front door is the HTTPS host the policy lives on.
 	h = withMTASTS(cfg, dir, logger, h)

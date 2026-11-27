@@ -62,12 +62,12 @@ var ErrPurgeFilesRemain = errors.New("directory: domain purged, but some of its 
 
 // purgeDomainTx runs the whole cascade in one transaction, so a failure leaves
 // the directory as it was.
-func (d *SQLDirectory) purgeDomainTx(domainID int64, domainname string) error {
+func (d *SQLDirectory) purgeDomainTx(domainID int64, domainname string) (err error) {
 	tx, err := d.db.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback() //nolint:errcheck // rollback after commit is a no-op
+	defer rollbackTx(tx, &err)
 	if err := purgeDomainRows(tx, domainID, domainname); err != nil {
 		return err
 	}
@@ -89,13 +89,12 @@ func removeDomainFiles(maildirs []string, homedir string) error {
 
 // domainMaildirs lists the on-disk mailbox paths of a domain's users, read
 // before the cascade removes the rows that name them.
-func (d *SQLDirectory) domainMaildirs(domainID int64) ([]string, error) {
+func (d *SQLDirectory) domainMaildirs(domainID int64) (maildirs []string, err error) {
 	rows, err := d.db.Query(`SELECT maildir FROM users WHERE domain_id = ? AND maildir <> ''`, domainID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var maildirs []string
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var m string
 		if err := rows.Scan(&m); err != nil {

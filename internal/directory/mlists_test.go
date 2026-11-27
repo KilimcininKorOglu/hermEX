@@ -20,13 +20,13 @@ func mlistTestDir(t *testing.T) *SQLDirectory {
 	cleanTables(t, db)
 	root := t.TempDir()
 	for _, dom := range []string{"hermex.test", "partner.test"} {
-		if _, err := d.CreateDomain(dom, filepath.Join(root, "domains", dom)); err != nil {
-			t.Fatalf("create domain %s: %v", dom, err)
+		if did, err := d.CreateDomain(dom, filepath.Join(root, "domains", dom)); err != nil || did <= 0 {
+			t.Fatalf("create domain %s: id=%d err=%v", dom, did, err)
 		}
 	}
 	for _, u := range []string{"alice@hermex.test", "bob@hermex.test", "carol@hermex.test", "dave@partner.test"} {
-		if _, err := d.CreateUser(u, "password1", filepath.Join(root, "users", u)); err != nil {
-			t.Fatalf("create user %s: %v", u, err)
+		if uid, err := d.CreateUser(u, "password1", filepath.Join(root, "users", u)); err != nil || uid <= 0 {
+			t.Fatalf("create user %s: id=%d err=%v", u, uid, err)
 		}
 	}
 	return d
@@ -35,12 +35,12 @@ func mlistTestDir(t *testing.T) *SQLDirectory {
 // mkList creates a list of the given type and privilege with the given members.
 func mkList(t *testing.T, d *SQLDirectory, addr string, listType, listPriv int, members ...string) {
 	t.Helper()
-	if _, err := d.CreateMList(addr, listType, listPriv); err != nil {
-		t.Fatalf("create list %s: %v", addr, err)
+	if lid, err := d.CreateMList(addr, listType, listPriv); err != nil || lid <= 0 {
+		t.Fatalf("create list %s: id=%d err=%v", addr, lid, err)
 	}
 	if len(members) > 0 {
-		if _, err := d.SetMembers(addr, members); err != nil {
-			t.Fatalf("set members of %s: %v", addr, err)
+		if ok, err := d.SetMembers(addr, members); err != nil || !ok {
+			t.Fatalf("set members of %s: ok=%v err=%v", addr, ok, err)
 		}
 	}
 }
@@ -52,8 +52,8 @@ func TestSetMembersRefusesAnUnroutableMember(t *testing.T) {
 	d := mlistTestDir(t)
 	mkList(t, d, "team@hermex.test", 0, 0, "alice@hermex.test")
 	for _, bad := range []string{"bob", "bob@", "Bob <bob@hermex.test>", "a@b@hermex.test"} {
-		if _, err := d.SetMembers("team@hermex.test", []string{"carol@hermex.test", bad}); err == nil {
-			t.Errorf("SetMembers with %q succeeded, want it refused", bad)
+		if ok, err := d.SetMembers("team@hermex.test", []string{"carol@hermex.test", bad}); err == nil || ok {
+			t.Errorf("SetMembers with %q = (%v, %v), want refused", bad, ok, err)
 		}
 	}
 	got, err := d.ListMembers("team@hermex.test")
@@ -102,8 +102,9 @@ func TestExpandMListPrivilege(t *testing.T) {
 
 	t.Run("specified: only named senders or domains", func(t *testing.T) {
 		mkList(t, d, "spec@hermex.test", mlistTypeNormal, mlistPrivSpecified, members...)
-		_, err := d.SetSpecifieds("spec@hermex.test", []string{"dave@partner.test", "elsewhere.test"})
+		ok, err := d.SetSpecifieds("spec@hermex.test", []string{"dave@partner.test", "elsewhere.test"})
 		mustNoErr(t, "set the specifieds", err)
+		wantEq(t, "SetSpecifieds found list", ok, true)
 		wantExpands(t, d, "spec@hermex.test", "dave@partner.test", members)
 		wantExpands(t, d, "spec@hermex.test", "anyone@elsewhere.test", members) // domain match
 		wantRefuses(t, d, "spec@hermex.test", "carol@hermex.test", MListPrivilSpecified)
@@ -118,8 +119,9 @@ func TestExpandMListPrivilege(t *testing.T) {
 		wantRefuses(t, d, "dom2@hermex.test", "x@nothermex.test", MListPrivilDomain)
 		wantExpands(t, d, "dom2@hermex.test", "Carol@HERMEX.TEST", members)
 		mkList(t, d, "spec2@hermex.test", mlistTypeNormal, mlistPrivSpecified, members...)
-		_, err := d.SetSpecifieds("spec2@hermex.test", []string{"elsewhere.test"})
+		ok, err := d.SetSpecifieds("spec2@hermex.test", []string{"elsewhere.test"})
 		mustNoErr(t, "set the specifieds", err)
+		wantEq(t, "SetSpecifieds found spec2", ok, true)
 		wantRefuses(t, d, "spec2@hermex.test", "x@notelsewhere.test", MListPrivilSpecified)
 		wantRefuses(t, d, "spec2@hermex.test", "x@elsewhere.test.evil.example", MListPrivilSpecified)
 		wantExpands(t, d, "spec2@hermex.test", "X@ElseWhere.Test", members)
@@ -154,12 +156,12 @@ func wantRefuses(t *testing.T, d *SQLDirectory, list, from string, want MListRes
 func TestCreateMListRefusesAnUnknownTypeOrPrivilege(t *testing.T) {
 	d := mlistTestDir(t)
 	for _, c := range []struct{ typ, priv int }{{1, mlistPrivAll}, {-1, mlistPrivAll}, {mlistTypeNormal, 5}, {mlistTypeNormal, -1}} {
-		if _, err := d.CreateMList("bad@hermex.test", c.typ, c.priv); err == nil {
-			t.Errorf("type %d privilege %d was accepted", c.typ, c.priv)
+		if badID, err := d.CreateMList("bad@hermex.test", c.typ, c.priv); err == nil || badID != 0 {
+			t.Errorf("type %d privilege %d returned id=%d err=%v, want error", c.typ, c.priv, badID, err)
 		}
 	}
-	if _, res, err := d.ExpandMList("bad@hermex.test", "x@y.test"); err != nil || res != MListNone {
-		t.Errorf("a refused list exists: result %d err %v", res, err)
+	if got, res, err := d.ExpandMList("bad@hermex.test", "x@y.test"); err != nil || res != MListNone || len(got) != 0 {
+		t.Errorf("a refused list exists: members=%v result=%d err=%v", got, res, err)
 	}
 }
 
@@ -249,9 +251,10 @@ func TestMListCRUD(t *testing.T) {
 		t.Errorf("after delete, ListMLists = %v, want empty", lists)
 	}
 	// The cascade removed membership; expanding the gone address is now "not a list".
-	_, res, err := d.ExpandMList("crew@hermex.test", "x@y.test")
+	goneMembers, res, err := d.ExpandMList("crew@hermex.test", "x@y.test")
 	mustNoErr(t, "expand the deleted list", err)
 	wantEq(t, "expand of the deleted list", res, MListNone)
+	wantEq(t, "members of deleted list", len(goneMembers), 0)
 }
 
 // TestMListOwner proves a distribution list's owner (the Exchange managedBy
@@ -285,8 +288,9 @@ func TestMListOwner(t *testing.T) {
 	mustNoErr(t, "list bob's lists", err)
 	wantEq(t, "lists bob owns", len(notOwned), 0)
 
-	_, err = d.SetMListOwner("crew@hermex.test", "")
+	cleared, err := d.SetMListOwner("crew@hermex.test", "")
 	mustNoErr(t, "clear the owner", err)
+	wantEq(t, "SetMListOwner clear found list", cleared, true)
 	wantEq(t, "owner after clearing", mustOneMList(t, d, "after clearing the owner").Owner, "")
 
 	ghost, err := d.SetMListOwner("ghost@hermex.test", "alice@hermex.test")
@@ -301,19 +305,22 @@ func TestMListOwner(t *testing.T) {
 func TestMListOwnerStaysInTheListsScope(t *testing.T) {
 	d := mlistTestDir(t)
 	mkList(t, d, "crew@hermex.test", mlistTypeNormal, mlistPrivAll)
-	_, err := d.SetMListOwner("crew@hermex.test", "alice@hermex.test")
+	ok, err := d.SetMListOwner("crew@hermex.test", "alice@hermex.test")
 	mustNoErr(t, "set the owner", err)
+	wantEq(t, "set owner found list", ok, true)
 
 	for _, bad := range []string{"dave@partner.test", "ghost@hermex.test", "bob", "Bob <bob@hermex.test>"} {
-		_, err := d.SetMListOwner("crew@hermex.test", bad)
+		badOK, err := d.SetMListOwner("crew@hermex.test", bad)
 		if !errors.Is(err, ErrMListOwnerScope) {
 			t.Errorf("owner %q: err = %v, want ErrMListOwnerScope", bad, err)
 		}
+		wantEq(t, "refused owner "+bad+" reported updated", badOK, false)
 		wantEq(t, "the owner after refusing "+bad, mustOneMList(t, d, "after a refused owner").Owner, "alice@hermex.test")
 	}
 
-	_, err = d.SetMListOwner("crew@hermex.test", "  BOB@Hermex.Test ")
+	ok, err = d.SetMListOwner("crew@hermex.test", "  BOB@Hermex.Test ")
 	mustNoErr(t, "set a padded mixed-case owner", err)
+	wantEq(t, "normalized owner set found list", ok, true)
 	wantEq(t, "the normalized owner", mustOneMList(t, d, "after a padded owner").Owner, "bob@hermex.test")
 }
 
@@ -335,28 +342,31 @@ func mustOneMList(t *testing.T, d *SQLDirectory, what string) MListInfo {
 func TestUpsertLDAPGroup(t *testing.T) {
 	d := mlistTestDir(t)
 	ext := []byte{0x01, 0x02, 0x03}
-	syncGroup := func(members ...string) {
+	syncGroup := func(wantCreated bool, members ...string) {
 		t.Helper()
-		_, err := d.UpsertLDAPGroup("eng@hermex.test", ext, "alice@hermex.test", members)
+		created, err := d.UpsertLDAPGroup("eng@hermex.test", ext, "alice@hermex.test", members)
 		mustNoErr(t, "sync the LDAP group", err)
+		wantEq(t, "LDAP group sync created", created, wantCreated)
 	}
 
-	syncGroup("bob@hermex.test", "carol@hermex.test")
+	syncGroup(true, "bob@hermex.test", "carol@hermex.test")
 	list := mustOneMList(t, d, "after the first sync")
 	wantEq(t, "the list is LDAP-mastered", list.LDAPMastered, true)
 	wantEq(t, "the list owner", list.Owner, "alice@hermex.test")
 	wantMembers(t, d, "after the first sync", "bob@hermex.test", "carol@hermex.test")
 
 	// Manual edits are refused on a mastered list.
-	_, err := d.SetMembers("eng@hermex.test", []string{"x@hermex.test"})
+	okMem, err := d.SetMembers("eng@hermex.test", []string{"x@hermex.test"})
 	wantLDAPMastered(t, "SetMembers on a mastered list", err)
-	_, err = d.SetMListOwner("eng@hermex.test", "bob@hermex.test")
+	wantEq(t, "SetMembers on mastered reported updated", okMem, false)
+	okOwn, err := d.SetMListOwner("eng@hermex.test", "bob@hermex.test")
 	wantLDAPMastered(t, "SetMListOwner on a mastered list", err)
+	wantEq(t, "SetMListOwner on mastered reported updated", okOwn, false)
 	wantMembers(t, d, "after the refused edits", "bob@hermex.test", "carol@hermex.test")
 	wantEq(t, "the owner after the refused edits", mustOneMList(t, d, "after the refused edits").Owner, "alice@hermex.test")
 
 	// A second sync mirrors membership exactly (carol dropped).
-	syncGroup("bob@hermex.test")
+	syncGroup(false, "bob@hermex.test")
 	wantMembers(t, d, "after the re-sync", "bob@hermex.test")
 }
 

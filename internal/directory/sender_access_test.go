@@ -10,9 +10,8 @@ func setupSenderAccess(t *testing.T) *SQLDirectory {
 		t.Fatal(err)
 	}
 	cleanTables(t, db)
-	if _, err := db.Exec("DELETE FROM sender_access"); err != nil {
-		t.Fatal(err)
-	}
+	left := countRows(t, db, "operator sender rules", `SELECT COUNT(*) FROM sender_access`)
+	execRows(t, "clear the operator sender rules", left)(db.Exec("DELETE FROM sender_access"))
 	return d
 }
 

@@ -10,18 +10,21 @@ import (
 // has a mailbox account to be contrasted against.
 func contactTestDir(t *testing.T) *SQLDirectory {
 	t.Helper()
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
+	seedDomain(t, d, root, "hermex.test")
+	seedUser(t, d, root, "alice@hermex.test", "password1")
 	return d
 }
 
 // mustCreateContact files a mail contact under the test domain.
 func mustCreateContact(t *testing.T, d *SQLDirectory, addr, name string) {
 	t.Helper()
-	_, err := d.CreateContact(addr, name, "hermex.test")
+	id, err := d.CreateContact(addr, name, "hermex.test")
 	mustNoErr(t, "create contact "+addr, err)
+	if id <= 0 {
+		t.Fatalf("CreateContact(%q) returned non-positive id %d", addr, id)
+	}
 }
 
 // mustUpdateContact renames a contact and requires the update to have found it.
@@ -73,8 +76,8 @@ func TestCreateContactAppearsInGAL(t *testing.T) {
 // must be refused rather than producing an orphan row.
 func TestCreateContactDomainMustExist(t *testing.T) {
 	d := contactTestDir(t)
-	if _, err := d.CreateContact("x@partner.example", "X", "nope.test"); err == nil {
-		t.Fatal("CreateContact under a nonexistent domain should error")
+	if id, err := d.CreateContact("x@partner.example", "X", "nope.test"); err == nil || id != 0 {
+		t.Fatalf("CreateContact under a nonexistent domain = (%d, %v), want (0, error)", id, err)
 	}
 	wantNoContactRow(t, d, "x@partner.example")
 }
@@ -82,10 +85,10 @@ func TestCreateContactDomainMustExist(t *testing.T) {
 // wantNoContactRow requires that no contact row exists for addr after a refusal.
 func wantNoContactRow(t *testing.T, d *SQLDirectory, addr string) {
 	t.Helper()
-	_, _, found, err := d.contactRowID(strings.ToLower(strings.TrimSpace(addr)))
+	id, dom, found, err := d.contactRowID(strings.ToLower(strings.TrimSpace(addr)))
 	mustNoErr(t, "look up the contact row of "+addr, err)
-	if found {
-		t.Errorf("a contact row exists for %q", addr)
+	if found || id != 0 || dom != "" {
+		t.Errorf("a contact row exists for %q: id=%d dom=%q found=%v", addr, id, dom, found)
 	}
 }
 
@@ -95,13 +98,13 @@ func wantNoContactRow(t *testing.T, d *SQLDirectory, addr string) {
 func TestCreateContactRefusesAnUnroutableAddress(t *testing.T) {
 	d := contactTestDir(t)
 	for _, addr := range []string{"john@", "jo hn@partner.example", "John <john@partner.example>"} {
-		if _, err := d.CreateContact(addr, "X", "hermex.test"); err == nil {
-			t.Errorf("CreateContact(%q) succeeded, want it refused", addr)
+		if id, err := d.CreateContact(addr, "X", "hermex.test"); err == nil || id != 0 {
+			t.Errorf("CreateContact(%q) = (%d, %v), want (0, error)", addr, id, err)
 		}
 		wantNoContactRow(t, d, addr)
 	}
-	if _, err := d.UpsertLDAPContact("john@", []byte{1}, "X", "hermex.test"); err == nil {
-		t.Error("the LDAP sync created a contact for john@, want it refused")
+	if created, err := d.UpsertLDAPContact("john@", []byte{1}, "X", "hermex.test"); err == nil || created {
+		t.Errorf("the LDAP sync created a contact for john@ (created=%v, err=%v)", created, err)
 	}
 }
 
@@ -177,8 +180,8 @@ func TestDeleteContactLeavesMailboxUsers(t *testing.T) {
 	if err != nil || removed {
 		t.Fatalf("DeleteContact on a mailbox user = (%v, %v), want (false, nil)", removed, err)
 	}
-	if _, ok := d.Resolve("alice@hermex.test"); !ok {
-		t.Error("DeleteContact removed a mailbox user it must not touch")
+	if path, ok := d.Resolve("alice@hermex.test"); !ok || path == "" {
+		t.Errorf("DeleteContact removed a mailbox user it must not touch (%q, %v)", path, ok)
 	}
 }
 
@@ -207,7 +210,7 @@ func TestListContacts(t *testing.T) {
 func TestContactCannotAuthenticate(t *testing.T) {
 	d := contactTestDir(t)
 	mustCreateContact(t, d, "john@partner.example", "John")
-	if _, ok := d.Authenticate("john@partner.example", ""); ok {
-		t.Error("a mail contact authenticated; contacts must never be able to log in")
+	if path, ok := d.Authenticate("john@partner.example", ""); ok || path != "" {
+		t.Errorf("a mail contact authenticated (%q, %v); contacts must never be able to log in", path, ok)
 	}
 }

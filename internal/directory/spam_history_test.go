@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"hermex/internal/logging"
 )
 
 func setupSpamHistory(t *testing.T) *SQLDirectory {
@@ -14,9 +16,11 @@ func setupSpamHistory(t *testing.T) *SQLDirectory {
 		t.Fatal(err)
 	}
 	cleanTables(t, db)
-	if _, err := db.Exec("DELETE FROM spam_history"); err != nil {
-		t.Fatal(err)
-	}
+	res, err := db.Exec("DELETE FROM spam_history")
+	mustNoErr(t, "clear the spam history", err)
+	cleared, err := res.RowsAffected()
+	mustNoErr(t, "count the cleared verdicts", err)
+	wantEq(t, "cleared verdict count is not negative", cleared >= 0, true)
 	return d
 }
 
@@ -90,4 +94,22 @@ func TestSpamHistoryRetention(t *testing.T) {
 	for i, want := range []string{"s5@x", "s4@x", "s3@x"} {
 		wantEq(t, fmt.Sprintf("surviving verdict %d", i), got[i].MailFrom, want)
 	}
+}
+
+// TestSpamHistoryPruneFailureIsLogged proves a retention-prune failure does
+// not fail RecordSpamVerdict and records a directory warning event.
+func TestSpamHistoryPruneFailureIsLogged(t *testing.T) {
+	d := setupSpamHistory(t)
+	d.SetSpamHistoryRetain(1)
+	sink := &captureSink{}
+	d.SetLogger(logging.New(sink))
+
+	mustNoErr(t, "record first verdict", d.RecordSpamVerdict(SpamVerdict{Time: 1, MailFrom: "s1@x"}))
+	installFailTrigger(t, d.db, "test_spam_prune_fail", "DELETE", "spam_history")
+	mustNoErr(t, "record second verdict despite prune failure", d.RecordSpamVerdict(SpamVerdict{Time: 2, MailFrom: "s2@x"}))
+
+	got, err := d.RecentSpamVerdicts(10)
+	mustNoErr(t, "list verdicts", err)
+	wantEq(t, "verdicts kept when prune fails", len(got), 2)
+	wantWarnEvent(t, sink, "directory.spam_history_prune.fail")
 }

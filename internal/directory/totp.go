@@ -113,7 +113,7 @@ func (d *SQLDirectory) TOTPEnrollment(user string) (TOTPEnrollment, bool, error)
 // pending one. It refuses to overwrite an ACTIVE enrollment, because that would
 // let anyone holding the session silently swap the second factor for one of
 // their own; disabling it first is a separate, deliberate step.
-func (d *SQLDirectory) BeginTOTPEnrollment(user, secret string) error {
+func (d *SQLDirectory) BeginTOTPEnrollment(user, secret string) (err error) {
 	id, ok, err := d.userIDFor(user)
 	if err != nil {
 		return err
@@ -125,7 +125,7 @@ func (d *SQLDirectory) BeginTOTPEnrollment(user, secret string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackTx(tx, &err)
 	// The row is locked before it is read, so two enrollments started at once
 	// cannot both pass the enabled check and leave the account holding a secret
 	// neither user was shown.
@@ -159,7 +159,7 @@ var ErrTOTPAlreadyEnabled = errors.New("directory: the second factor is already 
 // in one transaction so an account can never end up enrolled with no way back
 // in. step is the code that proved the enrollment, recorded so it cannot be
 // replayed as the first login.
-func (d *SQLDirectory) ActivateTOTP(user string, step int64, recoveryHashes []string) error {
+func (d *SQLDirectory) ActivateTOTP(user string, step int64, recoveryHashes []string) (err error) {
 	id, ok, err := d.userIDFor(user)
 	if err != nil {
 		return err
@@ -171,7 +171,7 @@ func (d *SQLDirectory) ActivateTOTP(user string, step int64, recoveryHashes []st
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackTx(tx, &err)
 	res, err := tx.Exec(`UPDATE user_totp SET enabled = 1, last_step = ? WHERE user_id = ?`, step, id)
 	if err != nil {
 		return err
@@ -197,7 +197,7 @@ func (d *SQLDirectory) ActivateTOTP(user string, step int64, recoveryHashes []st
 // DisableTOTP removes the enrollment and every recovery code. The codes go with
 // it because they are useless without it and would otherwise be reused by a
 // later enrollment that never showed them to the user.
-func (d *SQLDirectory) DisableTOTP(user string) error {
+func (d *SQLDirectory) DisableTOTP(user string) (err error) {
 	id, ok, err := d.userIDFor(user)
 	if err != nil || !ok {
 		return err
@@ -206,7 +206,7 @@ func (d *SQLDirectory) DisableTOTP(user string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackTx(tx, &err)
 	if _, err := tx.Exec(`DELETE FROM user_totp_recovery WHERE user_id = ?`, id); err != nil {
 		return err
 	}
@@ -240,15 +240,13 @@ func (d *SQLDirectory) ConsumeTOTPStep(user string, step int64) (bool, error) {
 // row id and stored hash, so the match runs over every candidate rather than
 // asking the database to find one, which would compare in the database's own
 // time.
-func (d *SQLDirectory) unusedRecoveryCodes(userID int64) ([]int64, []string, error) {
+func (d *SQLDirectory) unusedRecoveryCodes(userID int64) (ids []int64, hashes []string, err error) {
 	rows, err := d.db.Query(
 		`SELECT id, code_hash FROM user_totp_recovery WHERE user_id = ? AND used_at = 0`, userID)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer rows.Close()
-	var ids []int64
-	var hashes []string
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var id int64
 		var h string

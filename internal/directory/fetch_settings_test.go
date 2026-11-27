@@ -8,8 +8,11 @@ import "testing"
 // must not fetch from internal addresses.
 func TestFetchSettingsRoundTrip(t *testing.T) {
 	d, db := freshDirectory(t)
-	_, err := db.Exec("DELETE FROM fetch_settings")
+	res, err := db.Exec("DELETE FROM fetch_settings")
 	mustNoErr(t, "clear the settings row", err)
+	cleared, err := res.RowsAffected()
+	mustNoErr(t, "count the cleared rows", err)
+	wantEq(t, "at most the one settings row was cleared", cleared <= 1, true)
 	read := func() (FetchSettings, bool) {
 		t.Helper()
 		s, found, err := d.GetFetchSettings()

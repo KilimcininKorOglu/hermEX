@@ -1,6 +1,10 @@
 package directory
 
-import "testing"
+import (
+	"testing"
+
+	"hermex/internal/logging"
+)
 
 // TestPrivilegesFromBits proves the privilege_bits decoding: POP3/IMAP, SMTP and
 // CHGPASSWD are plain bits, while WEB/EAS/DAV follow the DETAIL1 opt-out
@@ -74,4 +78,31 @@ func TestPrivilegeBitsRoundTrip(t *testing.T) {
 			t.Errorf("round-trip of %+v = %+v, want %+v", u, got, want)
 		}
 	}
+}
+
+// TestPrivilegesOfAnUnknownAccount proves an address no account owns answers
+// "unknown" with no service granted, so a protocol cannot read the detail-service
+// default as permission for a name that does not exist.
+func TestPrivilegesOfAnUnknownAccount(t *testing.T) {
+	d := freshSQL(t)
+	privs, ok := d.Privileges("ghost@hermex.test")
+	wantEq(t, "Privileges known for an unknown account", ok, false)
+	wantEq(t, "privileges of an unknown account", privs, ServicePrivileges{})
+}
+
+// TestPrivilegesErrorIsLoggedAndReturnsUnknown proves a database error inside
+// Privileges still answers (ServicePrivileges{}, false) while recording the failure.
+func TestPrivilegesErrorIsLoggedAndReturnsUnknown(t *testing.T) {
+	db := openTestDB(t)
+	d := NewSQL(db)
+	sink := &captureSink{}
+	d.SetLogger(logging.New(sink))
+	mustClose(t, db)
+
+	privs, ok := d.Privileges("alice@hermex.test")
+	wantEq(t, "Privileges ok on closed DB", ok, false)
+	wantEq(t, "Privileges zero struct on closed DB", privs, ServicePrivileges{})
+
+	e := wantWarnEvent(t, sink, "directory.privileges.fail")
+	wantEq(t, "event user", e.Fields["user"], "alice@hermex.test")
 }

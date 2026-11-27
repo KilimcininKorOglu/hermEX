@@ -10,9 +10,11 @@ func setupOutboundSettings(t *testing.T) *SQLDirectory {
 		t.Fatal(err)
 	}
 	cleanTables(t, db)
-	if _, err := db.Exec("DELETE FROM outbound_settings"); err != nil {
-		t.Fatal(err)
-	}
+	res, err := db.Exec("DELETE FROM outbound_settings")
+	mustNoErr(t, "clear the outbound settings", err)
+	cleared, err := res.RowsAffected()
+	mustNoErr(t, "count the cleared rows", err)
+	wantEq(t, "at most the one settings row was cleared", cleared <= 1, true)
 	return d
 }
 
@@ -22,8 +24,8 @@ func setupOutboundSettings(t *testing.T) *SQLDirectory {
 func TestOutboundSettingsRoundTrip(t *testing.T) {
 	d := setupOutboundSettings(t)
 
-	if _, found, err := d.GetOutboundSettings(); err != nil || found {
-		t.Fatalf("Get on empty = found %v err %v, want not found", found, err)
+	if empty, found, err := d.GetOutboundSettings(); err != nil || found || empty != (OutboundSettings{}) {
+		t.Fatalf("Get on empty = %+v found %v err %v, want zero not found", empty, found, err)
 	}
 
 	want := OutboundSettings{Enabled: true, RecipientCap: 250, WindowSeconds: 1800}
@@ -77,4 +79,5 @@ func TestOutboundSettingsUpsert(t *testing.T) {
 	if got.Enabled || got.RecipientCap != 100 || got.WindowSeconds != 600 {
 		t.Errorf("after upsert = %+v, want disabled / 100 / 600", got)
 	}
+	wantRows(t, d.db, "settings rows after two saves", 1, `SELECT COUNT(*) FROM outbound_settings`)
 }

@@ -107,7 +107,7 @@ func validRoleName(name string) (string, error) {
 
 // ListRoles returns every named role, ordered by name, each with its current
 // user and permission counts.
-func (d *SQLDirectory) ListRoles() ([]RoleInfo, error) {
+func (d *SQLDirectory) ListRoles() (out []RoleInfo, err error) {
 	rows, err := d.db.Query(
 		`SELECT r.id, r.name, r.description,
 		        (SELECT COUNT(*) FROM user_roles ur WHERE ur.role_id = r.id),
@@ -117,8 +117,7 @@ func (d *SQLDirectory) ListRoles() ([]RoleInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []RoleInfo
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var r RoleInfo
 		if err := rows.Scan(&r.ID, &r.Name, &r.Description, &r.UserCount, &r.PermCount); err != nil {
@@ -182,8 +181,8 @@ func scanPermission(rows *sql.Rows) (Permission, error) {
 // CreateRole inserts a role with its permission set and user assignments in one
 // transaction, returning the new id. The name is required, at most
 // roleNameMaxLen characters, and unique; every permission must validate.
-func (d *SQLDirectory) CreateRole(name, description string, perms []Permission, userIDs []int64) (int64, error) {
-	name, err := validRole(name, perms)
+func (d *SQLDirectory) CreateRole(name, description string, perms []Permission, userIDs []int64) (id int64, err error) {
+	name, err = validRole(name, perms)
 	if err != nil {
 		return 0, err
 	}
@@ -191,12 +190,12 @@ func (d *SQLDirectory) CreateRole(name, description string, perms []Permission, 
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback() //nolint:errcheck // rollback after commit is a no-op
+	defer rollbackTx(tx, &err)
 	res, err := tx.Exec(`INSERT INTO roles (name, description) VALUES (?, ?)`, name, description)
 	if err != nil {
 		return 0, err
 	}
-	id, err := res.LastInsertId()
+	id, err = res.LastInsertId()
 	if err != nil {
 		return 0, err
 	}
@@ -211,8 +210,8 @@ func (d *SQLDirectory) CreateRole(name, description string, perms []Permission, 
 
 // UpdateRole replaces a role's name, description, permission set, and user
 // assignments in one transaction, reporting ok=false for an unknown id.
-func (d *SQLDirectory) UpdateRole(id int64, name, description string, perms []Permission, userIDs []int64) (bool, error) {
-	name, err := validRole(name, perms)
+func (d *SQLDirectory) UpdateRole(id int64, name, description string, perms []Permission, userIDs []int64) (updated bool, err error) {
+	name, err = validRole(name, perms)
 	if err != nil {
 		return false, err
 	}
@@ -220,7 +219,7 @@ func (d *SQLDirectory) UpdateRole(id int64, name, description string, perms []Pe
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback() //nolint:errcheck // rollback after commit is a no-op
+	defer rollbackTx(tx, &err)
 	if _, err := tx.Exec(`UPDATE roles SET name = ?, description = ? WHERE id = ?`, name, description, id); err != nil {
 		return false, err
 	}

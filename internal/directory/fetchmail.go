@@ -1,6 +1,7 @@
 package directory
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -98,8 +99,7 @@ func (d *SQLDirectory) queryFetchmail(query string, args ...any) ([]FetchmailEnt
 	for rows.Next() {
 		e, err := scanFetchmail(rows)
 		if err != nil {
-			rows.Close()
-			return nil, err
+			return nil, errors.Join(err, rows.Close())
 		}
 		out = append(out, e)
 	}
@@ -122,16 +122,16 @@ func (d *SQLDirectory) queryFetchmail(query string, args ...any) ([]FetchmailEnt
 // best-effort: the password was read, so a failed write must not stop the poll;
 // the failure is logged and the next read retries.
 func (d *SQLDirectory) openFetchmailPassword(id int64, stored string) (string, error) {
-	password, wrapped, err := d.unwrapKey(wrapFetchmail, stored)
+	u, err := d.unwrapKey(wrapFetchmail, stored)
 	if err != nil {
 		return "", fmt.Errorf("fetchmail entry %d: %w", id, err)
 	}
-	if d.rewrapNeeded(wrapped) {
-		if err := d.rewrapFetchmailPassword(id, stored, password); err != nil {
+	if d.rewrapNeeded(u.wrapped) {
+		if err := d.rewrapFetchmailPassword(id, stored, u.plain); err != nil {
 			log.Printf("directory: could not wrap the source password of fetchmail entry %d: %v", id, err)
 		}
 	}
-	return password, nil
+	return u.plain, nil
 }
 
 // rewrapFetchmailPassword writes a plaintext source password back wrapped, only
@@ -196,13 +196,13 @@ func (d *SQLDirectory) DeleteFetchmail(id int64) (bool, error) {
 // FetchmailSeen returns the set of source unique-ids already delivered for a kept POP3
 // entry, so the worker can skip them. (IMAP dedup uses the server's \Seen flag, not this
 // table, so only POP3 needs it.)
-func (d *SQLDirectory) FetchmailSeen(configID int64) (map[string]bool, error) {
+func (d *SQLDirectory) FetchmailSeen(configID int64) (seen map[string]bool, err error) {
 	rows, err := d.db.Query(`SELECT uid FROM fetchmail_seen WHERE config_id = ?`, configID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	seen := map[string]bool{}
+	defer closeRows(rows, &err)
+	seen = map[string]bool{}
 	for rows.Next() {
 		var uid string
 		if err := rows.Scan(&uid); err != nil {

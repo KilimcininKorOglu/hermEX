@@ -26,7 +26,7 @@ func sessionActive(t *testing.T, d *SQLDirectory, jti string, at int64) bool {
 // returns the row, and revocation is scoped to the owner email so a forged email
 // cannot revoke another user's session (the IDOR guard the revoke endpoint relies on).
 func TestWebmailSessionRoundTrip(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	mustNoErr(t, "create session", d.CreateWebmailSession(WebmailSession{
 		Jti: "jti-1", Email: "U@hermex.test", DeviceType: "Chrome on macOS",
 		UserAgent: "ua", ClientIP: "1.2.3.4", CreatedAt: sessionNow, LastActive: sessionNow, ExpiresAt: sessionNow + 3600,
@@ -66,7 +66,7 @@ func TestWebmailSessionRoundTrip(t *testing.T) {
 // touched. Scoping by email as well as jti is what stops one user's password change
 // from ending another user's sessions.
 func TestDeleteOtherWebmailSessions(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	mustAddSession(t, d, "mine", "alice@hermex.test")
 	mustAddSession(t, d, "stolen", "alice@hermex.test")
 	mustAddSession(t, d, "old-phone", "alice@hermex.test")
@@ -89,7 +89,7 @@ func TestDeleteOtherWebmailSessions(t *testing.T) {
 // they were. Keeping nothing is the right answer there: the caller's own session is
 // not in the table, so every row that IS in it belongs to some other browser.
 func TestDeleteOtherWebmailSessionsWithNoCurrentSession(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	mustAddSession(t, d, "a", "alice@hermex.test")
 	mustAddSession(t, d, "b", "alice@hermex.test")
 	n, err := d.DeleteOtherWebmailSessions("alice@hermex.test", "")

@@ -10,6 +10,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"hermex/internal/logging"
 )
 
 // MaxAppPasswords bounds how many credentials one account may hold. Every one of
@@ -86,12 +88,12 @@ func (d *SQLDirectory) CreateAppPassword(user, name string) (string, error) {
 // insertAppPassword stores one credential unless the account already holds
 // MaxAppPasswords. The account row is locked for the count and the insert, so
 // concurrent mints cannot all read a count under the cap and all insert.
-func (d *SQLDirectory) insertAppPassword(userID int64, name, hash string) error {
+func (d *SQLDirectory) insertAppPassword(userID int64, name, hash string) (err error) {
 	tx, err := d.db.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	var locked int64
 	if err := tx.QueryRow(`SELECT id FROM users WHERE id = ? FOR UPDATE`, userID).Scan(&locked); err != nil {
 		return err
@@ -113,7 +115,7 @@ func (d *SQLDirectory) insertAppPassword(userID int64, name, hash string) error 
 
 // ListAppPasswords returns the account's credentials, newest first, without
 // their secrets.
-func (d *SQLDirectory) ListAppPasswords(user string) ([]AppPassword, error) {
+func (d *SQLDirectory) ListAppPasswords(user string) (out []AppPassword, err error) {
 	id, ok, err := d.userIDFor(user)
 	if err != nil || !ok {
 		return nil, err
@@ -123,8 +125,7 @@ func (d *SQLDirectory) ListAppPasswords(user string) ([]AppPassword, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []AppPassword
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var p AppPassword
 		if err := rows.Scan(&p.ID, &p.Name, &p.CreatedAt, &p.LastUsedAt); err != nil {
@@ -154,14 +155,13 @@ func (d *SQLDirectory) DeleteAppPassword(user string, id int64) (bool, error) {
 // matchAppPassword returns the id of the account's credential the submitted
 // secret matches, or 0. Every stored hash is compared even after a match, so the
 // answer's timing does not say which credential was used, or how many exist.
-func (d *SQLDirectory) matchAppPassword(userID int64, password string) (int64, error) {
+func (d *SQLDirectory) matchAppPassword(userID int64, password string) (matched int64, err error) {
 	rows, err := d.db.Query(`SELECT id, secret_hash FROM app_passwords WHERE user_id = ?`, userID)
 	if err != nil {
 		return 0, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	want := hashAppSecret(password)
-	var matched int64
 	for rows.Next() {
 		var id int64
 		var h string
@@ -196,7 +196,9 @@ func (d *SQLDirectory) AuthenticateAppPassword(user, password string) (string, b
 	// Best-effort: the login has already succeeded, so a failed write must not
 	// turn it into a failure. It only feeds the "last used" column the user reads
 	// when deciding which credential to revoke.
-	_, _ = d.db.Exec(`UPDATE app_passwords SET last_used_at = ? WHERE id = ?`, time.Now().Unix(), matched)
+	if _, err := d.db.Exec(`UPDATE app_passwords SET last_used_at = ? WHERE id = ?`, time.Now().Unix(), matched); err != nil {
+		d.warn("directory.apppassword_last_used.fail", err, logging.Fields{"id": matched})
+	}
 	return path, true
 }
 

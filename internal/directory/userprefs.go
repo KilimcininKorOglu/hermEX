@@ -75,13 +75,7 @@ func (d *SQLDirectory) SetUserPrefs(username string, u UserPrefsUpdate) (bool, e
 	if err != nil {
 		return false, err
 	}
-	if n, err := res.RowsAffected(); err != nil || n > 0 {
-		return n > 0, err
-	}
-	// MariaDB counts changed rows, so a write that repeats the stored values
-	// affects none; tell that apart from a user that does not exist.
-	_, found, err := d.GetUserPrefs(name)
-	return found, err
+	return d.updateFound(res, userExistsQuery, name)
 }
 
 // ValidPrefs reports whether every value u names is in its accepted set.
@@ -104,6 +98,6 @@ func ValidTimezone(name string) bool {
 	if name == "Local" {
 		return false
 	}
-	_, err := time.LoadLocation(name)
-	return err == nil
+	loc, err := time.LoadLocation(name)
+	return err == nil && loc != nil
 }

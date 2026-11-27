@@ -5,9 +5,9 @@ import "testing"
 // TestDomainAVScan proves the per-domain antivirus toggles default off, persist,
 // and are read case-insensitively, and an unknown domain reads as off.
 func TestDomainAVScan(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "acme.test")
+	seedDomain(t, d, root, "acme.test")
 	scan := func(domain string) (inbound, outbound bool) {
 		t.Helper()
 		in, out, err := d.GetDomainAVScan(domain)
@@ -26,6 +26,16 @@ func TestDomainAVScan(t *testing.T) {
 	in, out = scan("acme.test")
 	wantEq(t, "inbound scanning after the set", in, true)
 	wantEq(t, "outbound scanning after the set", out, false)
+
+	// Another tenant's toggles stay on that tenant.
+	seedDomain(t, d, root, "other.test")
+	mustNoErr(t, "set the other domain's toggles", d.SetDomainAVScan("other.test", false, true))
+	in, out = scan("acme.test")
+	wantEq(t, "acme inbound after the other domain's set", in, true)
+	wantEq(t, "acme outbound after the other domain's set", out, false)
+	in, out = scan("other.test")
+	wantEq(t, "other inbound", in, false)
+	wantEq(t, "other outbound", out, true)
 
 	in, out = scan("nope.test")
 	wantEq(t, "inbound scanning for an unknown domain", in, false)

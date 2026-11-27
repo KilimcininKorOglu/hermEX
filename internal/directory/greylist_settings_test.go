@@ -26,8 +26,11 @@ func TestGreylistEnabledRoundTrip(t *testing.T) {
 func freshGreylist(t *testing.T) *SQLDirectory {
 	t.Helper()
 	d, db := freshDirectory(t)
-	_, err := db.Exec("DELETE FROM greylist_settings")
+	res, err := db.Exec("DELETE FROM greylist_settings")
 	mustNoErr(t, "clear the greylist settings", err)
+	cleared, err := res.RowsAffected()
+	mustNoErr(t, "count the cleared rows", err)
+	wantEq(t, "at most the one settings row was cleared", cleared <= 1, true)
 	return d
 }
 
@@ -53,8 +56,9 @@ func TestGreylistTimingsRoundTrip(t *testing.T) {
 		return got, found
 	}
 
-	_, found := timings()
+	empty, found := timings()
 	wantEq(t, "timings found on an empty table", found, false)
+	wantEq(t, "zero timings on an empty table", empty, GreylistTimings{})
 
 	want := GreylistTimings{MinDelay: 600, UnconfirmedTTL: 7200, ConfirmedTTL: 1000000}
 	mustNoErr(t, "save the timings", d.SetGreylistTimings(want))
@@ -64,10 +68,12 @@ func TestGreylistTimingsRoundTrip(t *testing.T) {
 
 	// Enabling must not reset the saved timings.
 	mustNoErr(t, "enable greylisting", d.SetGreylistEnabled(true))
-	got, _ = timings()
+	got, found = timings()
+	wantEq(t, "timings still found after enabling", found, true)
 	wantEq(t, "the timings after enabling (they must not be clobbered)", got, want)
 	// And saving timings must not flip the enable state.
 	mustNoErr(t, "save new timings",
 		d.SetGreylistTimings(GreylistTimings{MinDelay: 300, UnconfirmedTTL: 86400, ConfirmedTTL: 3110400}))
 	wantEq(t, "the enable state after saving timings", greylistEnabled(t, d), true)
+	wantRows(t, d.db, "settings rows after the partial upserts", 1, `SELECT COUNT(*) FROM greylist_settings`)
 }

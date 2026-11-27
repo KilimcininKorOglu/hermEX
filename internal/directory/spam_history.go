@@ -1,5 +1,7 @@
 package directory
 
+import "hermex/internal/logging"
+
 // SpamVerdict is one inbound message's spam-scoring outcome, recorded for the
 // admin Spam History view. Time is unix seconds; Reasons is the joined list of
 // signals that fired.
@@ -45,16 +47,22 @@ func (d *SQLDirectory) RecordSpamVerdict(v SpamVerdict) error {
 	if err != nil {
 		return err
 	}
-	if id, err := res.LastInsertId(); err == nil {
-		// Best-effort retention prune; a failure here must not fail the record.
-		_, _ = d.db.Exec(`DELETE FROM spam_history WHERE id <= ?`, id-d.spamRetain.Load())
+	id, err := res.LastInsertId()
+	if err != nil {
+		d.warn("directory.spam_history_prune.fail", err, nil)
+		return nil
+	}
+	cutoff := id - d.spamRetain.Load()
+	// Best-effort retention prune; a failure here must not fail the record.
+	if _, err := d.db.Exec(`DELETE FROM spam_history WHERE id <= ?`, cutoff); err != nil {
+		d.warn("directory.spam_history_prune.fail", err, logging.Fields{"cutoff": cutoff})
 	}
 	return nil
 }
 
 // RecentSpamVerdicts returns the most recent verdicts, newest first, capped at
 // limit (default 200 when limit <= 0).
-func (d *SQLDirectory) RecentSpamVerdicts(limit int) ([]SpamVerdict, error) {
+func (d *SQLDirectory) RecentSpamVerdicts(limit int) (out []SpamVerdict, err error) {
 	if limit <= 0 {
 		limit = 200
 	}
@@ -64,8 +72,7 @@ func (d *SQLDirectory) RecentSpamVerdicts(limit int) ([]SpamVerdict, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []SpamVerdict
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var v SpamVerdict
 		if err := rows.Scan(&v.ID, &v.Time, &v.MailFrom, &v.RemoteAddr, &v.Score, &v.Spam, &v.Reasons); err != nil {

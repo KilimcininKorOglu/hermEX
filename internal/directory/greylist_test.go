@@ -11,8 +11,8 @@ func setupGreylist(t *testing.T) (*SQLDirectory, *sql.DB) {
 	d := NewSQL(db)
 	mustNoErr(t, "ensure the schema", d.EnsureSchema())
 	cleanTables(t, db)
-	_, err := db.Exec("DELETE FROM greylist_triplets")
-	mustNoErr(t, "clear the greylist triplets", err)
+	left := countRows(t, db, "greylist triplets", `SELECT COUNT(*) FROM greylist_triplets`)
+	execRows(t, "clear the greylist triplets", left)(db.Exec("DELETE FROM greylist_triplets"))
 	return d, db
 }
 
@@ -37,11 +37,13 @@ func lastSeen(t *testing.T, db *sql.DB, ip string) int64 {
 // new triplet is unseen, recording it stores an unconfirmed first-seen time, and
 // confirming it flips the flag of that triplet only.
 func TestGreylistLifecycle(t *testing.T) {
-	d, _ := setupGreylist(t)
+	d, db := setupGreylist(t)
+	wantRows(t, db, "initial triplets", 0, `SELECT COUNT(*) FROM greylist_triplets`)
 	const ip, from, to = "203.0.113.0/24", "s@ext.example", "u@local.example"
 
-	_, found := mustGreylistGet(t, d, ip, from, to)
+	empty, found := mustGreylistGet(t, d, ip, from, to)
 	wantEq(t, "triplet found on first contact", found, false)
+	wantEq(t, "zero triplet on first contact", empty, Greylisted{})
 	mustNoErr(t, "record the first contact", d.GreylistUpsertSeen(ip, from, to, 1000))
 	// A second recipient from the same sender and network is its own triplet.
 	mustNoErr(t, "record a second recipient", d.GreylistUpsertSeen(ip, from, "v@local.example", 1000))
@@ -50,9 +52,11 @@ func TestGreylistLifecycle(t *testing.T) {
 	wantEq(t, "recorded triplet", g, Greylisted{FirstSeen: 1000, Confirmed: false})
 
 	mustNoErr(t, "confirm the retry", d.GreylistConfirm(ip, from, to, 2000))
-	g, _ = mustGreylistGet(t, d, ip, from, to)
+	g, found = mustGreylistGet(t, d, ip, from, to)
+	wantEq(t, "triplet found after confirm", found, true)
 	wantEq(t, "triplet confirmed after the retry", g.Confirmed, true)
-	other, _ := mustGreylistGet(t, d, ip, from, "v@local.example")
+	other, found := mustGreylistGet(t, d, ip, from, "v@local.example")
+	wantEq(t, "other triplet found", found, true)
 	wantEq(t, "the other recipient's triplet confirmed", other.Confirmed, false)
 }
 
@@ -60,10 +64,12 @@ func TestGreylistLifecycle(t *testing.T) {
 // never deferred creates nothing: otherwise a sender could be allowlisted without
 // ever waiting out the delay.
 func TestGreylistConfirmNeedsAFirstContact(t *testing.T) {
-	d, _ := setupGreylist(t)
+	d, db := setupGreylist(t)
+	wantRows(t, db, "initial triplets", 0, `SELECT COUNT(*) FROM greylist_triplets`)
 	mustNoErr(t, "confirm an unseen triplet", d.GreylistConfirm("192.0.2.0/24", "s@ext.example", "u@local.example", 2000))
-	_, found := mustGreylistGet(t, d, "192.0.2.0/24", "s@ext.example", "u@local.example")
+	empty, found := mustGreylistGet(t, d, "192.0.2.0/24", "s@ext.example", "u@local.example")
 	wantEq(t, "an unseen triplet exists after a confirm", found, false)
+	wantEq(t, "unseen triplet zero value", empty, Greylisted{})
 }
 
 // TestGreylistUpsertKeepsOneRow proves recording the same triplet again refreshes
@@ -75,14 +81,16 @@ func TestGreylistUpsertKeepsOneRow(t *testing.T) {
 	const ip, from, to = "198.51.100.0/24", "s@ext.example", "u@local.example"
 	mustNoErr(t, "record the first contact", d.GreylistUpsertSeen(ip, from, to, 1000))
 	mustNoErr(t, "record it again", d.GreylistUpsertSeen(ip, from, to, 1500))
-	g, _ := mustGreylistGet(t, d, ip, from, to)
+	g, found := mustGreylistGet(t, d, ip, from, to)
+	wantEq(t, "triplet found after two records", found, true)
 	wantEq(t, "triplet after two records", g, Greylisted{FirstSeen: 1000, Confirmed: false})
 	wantEq(t, "last_seen after two records", lastSeen(t, db, ip), int64(1500))
 	wantRows(t, db, "rows for the triplet", 1, `SELECT COUNT(*) FROM greylist_triplets WHERE ip_key = ?`, ip)
 
 	mustNoErr(t, "confirm the retry", d.GreylistConfirm(ip, from, to, 2000))
 	mustNoErr(t, "record a later contact", d.GreylistUpsertSeen(ip, from, to, 3000))
-	g, _ = mustGreylistGet(t, d, ip, from, to)
+	g, found = mustGreylistGet(t, d, ip, from, to)
+	wantEq(t, "triplet found after later contact", found, true)
 	wantEq(t, "confirmation after a later contact", g.Confirmed, true)
 	wantEq(t, "last_seen after a later contact", lastSeen(t, db, ip), int64(3000))
 }
@@ -91,7 +99,8 @@ func TestGreylistUpsertKeepsOneRow(t *testing.T) {
 // unconfirmed triplet is judged by when it was first seen (a deferral that never
 // retried), a confirmed one by when it was last seen, and a cutoff is exclusive.
 func TestGreylistPrune(t *testing.T) {
-	d, _ := setupGreylist(t)
+	d, db := setupGreylist(t)
+	wantRows(t, db, "initial triplets", 0, `SELECT COUNT(*) FROM greylist_triplets`)
 	seen := func(ip string, first, confirmAt int64) {
 		t.Helper()
 		mustNoErr(t, "record "+ip, d.GreylistUpsertSeen(ip, "s@x", "u@y", first))
@@ -113,7 +122,10 @@ func TestGreylistPrune(t *testing.T) {
 		"old-unconfirmed": false, "old-unconfirmed-reseen": false, "stale-confirmed": false,
 		"fresh-unconfirmed": true, "fresh-confirmed": true, "at-cutoff": true,
 	} {
-		_, found := mustGreylistGet(t, d, ip, "s@x", "u@y")
+		row, found := mustGreylistGet(t, d, ip, "s@x", "u@y")
 		wantEq(t, ip+" kept by the prune", found, kept)
+		if !kept {
+			wantEq(t, ip+" pruned zero struct", row, Greylisted{})
+		}
 	}
 }

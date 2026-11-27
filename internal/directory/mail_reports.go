@@ -46,12 +46,12 @@ func (s ReportSource) dkimDomains() string {
 
 // StoreDMARCAggregate stores an aggregate report and its records in one
 // transaction and returns the report's id.
-func (d *SQLDirectory) StoreDMARCAggregate(src ReportSource, a *mailreport.Aggregate) (int64, error) {
+func (d *SQLDirectory) StoreDMARCAggregate(src ReportSource, a *mailreport.Aggregate) (id int64, err error) {
 	tx, err := d.db.Begin()
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	if err := refuseDuplicate(tx, "dmarc_reports", src.DomainID, a.OrgName, a.ReportID); err != nil {
 		return 0, err
 	}
@@ -67,7 +67,7 @@ func (d *SQLDirectory) StoreDMARCAggregate(src ReportSource, a *mailreport.Aggre
 	if err != nil {
 		return 0, err
 	}
-	id, err := res.LastInsertId()
+	id, err = res.LastInsertId()
 	if err != nil {
 		return 0, err
 	}
@@ -78,7 +78,7 @@ func (d *SQLDirectory) StoreDMARCAggregate(src ReportSource, a *mailreport.Aggre
 }
 
 // insertDMARCRecords writes one row per aggregate record.
-func insertDMARCRecords(tx *sql.Tx, reportID int64, records []mailreport.Record) error {
+func insertDMARCRecords(tx *sql.Tx, reportID int64, records []mailreport.Record) (err error) {
 	stmt, err := tx.Prepare(
 		`INSERT INTO dmarc_report_records (dmarc_report_id, source_ip, msg_count, disposition, dkim_eval, spf_eval,
 		   header_from, envelope_from, dkim_results, spf_results)
@@ -86,7 +86,7 @@ func insertDMARCRecords(tx *sql.Tx, reportID int64, records []mailreport.Record)
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer closeInto(stmt, &err)
 	for _, r := range records {
 		if _, err := stmt.Exec(reportID, capString(r.SourceIP, 45), r.Count, capString(r.Disposition, 16),
 			capString(r.DKIM, 16), capString(r.SPF, 16), capString(r.HeaderFrom, 255), capString(r.EnvelopeFrom, 255),
@@ -113,12 +113,12 @@ func formatAuthResults(rs []mailreport.AuthResult) string {
 
 // StoreTLSReport stores a TLS report and its policies in one transaction and
 // returns the report's id.
-func (d *SQLDirectory) StoreTLSReport(src ReportSource, r *tlsrpt.Report) (int64, error) {
+func (d *SQLDirectory) StoreTLSReport(src ReportSource, r *tlsrpt.Report) (id int64, err error) {
 	tx, err := d.db.Begin()
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	if err := refuseDuplicate(tx, "tlsrpt_reports", src.DomainID, r.OrganizationName, r.ReportID); err != nil {
 		return 0, err
 	}
@@ -132,7 +132,7 @@ func (d *SQLDirectory) StoreTLSReport(src ReportSource, r *tlsrpt.Report) (int64
 	if err != nil {
 		return 0, err
 	}
-	id, err := res.LastInsertId()
+	id, err = res.LastInsertId()
 	if err != nil {
 		return 0, err
 	}
@@ -144,7 +144,7 @@ func (d *SQLDirectory) StoreTLSReport(src ReportSource, r *tlsrpt.Report) (int64
 
 // insertTLSPolicies writes one row per evaluated policy. The failure details keep
 // their RFC 8460 JSON form, because the panel shows them as the reporter sent them.
-func insertTLSPolicies(tx *sql.Tx, reportID int64, policies []tlsrpt.PolicyResult) error {
+func insertTLSPolicies(tx *sql.Tx, reportID int64, policies []tlsrpt.PolicyResult) (err error) {
 	stmt, err := tx.Prepare(
 		`INSERT INTO tlsrpt_report_policies (tlsrpt_report_id, policy_type, policy_domain, mx_host,
 		   success_count, failure_count, failure_details)
@@ -152,7 +152,7 @@ func insertTLSPolicies(tx *sql.Tx, reportID int64, policies []tlsrpt.PolicyResul
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer closeInto(stmt, &err)
 	for _, p := range policies {
 		details, err := json.Marshal(p.FailureDetails)
 		if err != nil {

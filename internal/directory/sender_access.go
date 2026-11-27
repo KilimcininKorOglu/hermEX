@@ -57,14 +57,13 @@ func (d *SQLDirectory) DeleteSenderRule(pattern string) (bool, error) {
 
 // ListSenderRules returns every rule, blocks first then allows, alphabetical within
 // each, for the admin page.
-func (d *SQLDirectory) ListSenderRules() ([]SenderRule, error) {
+func (d *SQLDirectory) ListSenderRules() (out []SenderRule, err error) {
 	rows, err := d.db.Query(
 		`SELECT id, pattern, action, created_at FROM sender_access ORDER BY action, pattern`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []SenderRule
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var r SenderRule
 		if err := rows.Scan(&r.ID, &r.Pattern, &r.Action, &r.CreatedAt); err != nil {

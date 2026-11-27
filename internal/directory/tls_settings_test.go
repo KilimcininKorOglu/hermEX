@@ -8,8 +8,11 @@ func setupTLSSettings(t *testing.T) *SQLDirectory {
 	d := NewSQL(db)
 	mustNoErr(t, "ensure the schema", d.EnsureSchema())
 	cleanTables(t, db)
-	_, err := db.Exec("DELETE FROM tls_settings")
+	res, err := db.Exec("DELETE FROM tls_settings")
 	mustNoErr(t, "clear the TLS settings", err)
+	cleared, err := res.RowsAffected()
+	mustNoErr(t, "count the cleared rows", err)
+	wantEq(t, "at most the one settings row was cleared", cleared <= 1, true)
 	return d
 }
 
@@ -38,8 +41,9 @@ func TestTLSSettingsRoundTripAndUpsert(t *testing.T) {
 
 	// Re-save with manual mode and ToS withdrawn: a replacement, not a second row.
 	mustNoErr(t, "save manual mode", d.SetTLSSettings(TLSSettings{Mode: "manual"}))
-	got, _, err = d.GetTLSSettings()
+	got, found, err = d.GetTLSSettings()
 	mustNoErr(t, "read the TLS settings again", err)
+	wantEq(t, "saved row still found", found, true)
 	wantEq(t, "mode after re-save", got.Mode, "manual")
 	wantEq(t, "agreed after re-save", got.ACMEAgreed, false)
 	var n int
@@ -62,8 +66,9 @@ func TestTLSSettingsRefusalKeepsTheStoredOne(t *testing.T) {
 		"acme not agreed":   {Mode: "acme", ACMEEmail: "ops@example.com"},
 	} {
 		wantErr(t, "the "+name+" was accepted", d.SetTLSSettings(bad))
-		got, _, err := d.GetTLSSettings()
+		got, found, err := d.GetTLSSettings()
 		mustNoErr(t, "read the TLS settings after the "+name, err)
+		wantEq(t, "row found after refused "+name, found, true)
 		wantEq(t, "settings after the refused "+name, got, keep)
 	}
 }

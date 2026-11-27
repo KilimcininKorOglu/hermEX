@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"hermex/internal/logging"
 )
 
 // Named advisory locks that serialize the background loops which must run in
@@ -68,10 +70,14 @@ func (d *SQLDirectory) TryLock(ctx context.Context, name string) (release func()
 		}
 		released = true
 		// Release explicitly so the lock frees the moment the pass ends, then close.
-		// A failing RELEASE_LOCK needs no handling: closing the connection releases
-		// the lock too, which is the guarantee this relies on. Use a cancel-free
-		// context so a shutdown mid-pass still runs the release.
-		_, _ = c.ExecContext(context.WithoutCancel(ctx), "SELECT RELEASE_LOCK(?)", name)
-		_ = c.Close() // best-effort teardown; the closed connection releases the lock regardless
+		// A failing RELEASE_LOCK is recorded before closing; closing the connection
+		// releases the lock too, which is the guarantee this relies on. Use a
+		// cancel-free context so a shutdown mid-pass still runs the release.
+		if _, err := c.ExecContext(context.WithoutCancel(ctx), "SELECT RELEASE_LOCK(?)", name); err != nil {
+			d.warn("directory.lock_release.fail", err, logging.Fields{"lock": name})
+		}
+		if err := c.Close(); err != nil {
+			d.warn("directory.lock_close.fail", err, logging.Fields{"lock": name})
+		}
 	}, true, nil
 }

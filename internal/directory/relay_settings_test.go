@@ -10,9 +10,11 @@ func setupRelaySettings(t *testing.T) *SQLDirectory {
 		t.Fatal(err)
 	}
 	cleanTables(t, db)
-	if _, err := db.Exec("DELETE FROM relay_settings"); err != nil {
-		t.Fatal(err)
-	}
+	res, err := db.Exec("DELETE FROM relay_settings")
+	mustNoErr(t, "clear the relay settings", err)
+	cleared, err := res.RowsAffected()
+	mustNoErr(t, "count the cleared rows", err)
+	wantEq(t, "at most the one settings row was cleared", cleared <= 1, true)
 	return d
 }
 
@@ -21,8 +23,8 @@ func setupRelaySettings(t *testing.T) *SQLDirectory {
 func TestRelaySettingsRoundTrip(t *testing.T) {
 	d := setupRelaySettings(t)
 
-	if _, found, err := d.GetRelaySettings(); err != nil || found {
-		t.Fatalf("Get on empty = found %v err %v, want not found", found, err)
+	if empty, found, err := d.GetRelaySettings(); err != nil || found || empty != (RelaySettings{}) {
+		t.Fatalf("Get on empty = %+v found %v err %v, want zero not found", empty, found, err)
 	}
 
 	want := RelaySettings{BackoffSeconds: 120, MaxAttempts: 5}
@@ -75,4 +77,5 @@ func TestRelaySettingsUpsert(t *testing.T) {
 	if got.BackoffSeconds != 60 || got.MaxAttempts != 20 {
 		t.Errorf("after upsert = %+v, want 60 / 20", got)
 	}
+	wantRows(t, d.db, "settings rows after two saves", 1, `SELECT COUNT(*) FROM relay_settings`)
 }

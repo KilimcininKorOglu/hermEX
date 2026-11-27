@@ -9,10 +9,10 @@ import (
 // active-only listing excludes a disabled entry, an unknown protocol is rejected, delete
 // reports existence, and deleting the owning user removes its entries.
 func TestFetchmailCRUD(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
+	seedDomain(t, d, root, "hermex.test")
+	seedUser(t, d, root, "alice@hermex.test", "password1")
 
 	wantEq(t, "entries of a fresh mailbox", len(mustListFetchmail(t, d)), 0)
 
@@ -30,11 +30,12 @@ func TestFetchmailCRUD(t *testing.T) {
 	wantFetchmailRoundTrip(t, list[0])
 
 	// A disabled entry is excluded from the worker's active listing.
-	_, err = d.CreateFetchmail(FetchmailEntry{
+	disID, err := d.CreateFetchmail(FetchmailEntry{
 		Mailbox: "alice@hermex.test", Active: false,
 		SrcServer: "old.example.com", SrcUser: "alice", Protocol: "POP3",
 	})
 	mustNoErr(t, "create a disabled entry", err)
+	wantEq(t, "disabled entry got distinct id", disID > 0 && disID != id, true)
 	active, err := d.ListActiveFetchmail()
 	mustNoErr(t, "list active entries", err)
 	if len(active) != 1 {
@@ -43,10 +44,11 @@ func TestFetchmailCRUD(t *testing.T) {
 	wantEq(t, "the active entry", active[0].ID, id)
 
 	// Validation rejects an unknown protocol before storage.
-	_, err = d.CreateFetchmail(FetchmailEntry{
+	badID, err := d.CreateFetchmail(FetchmailEntry{
 		Mailbox: "alice@hermex.test", SrcServer: "x", SrcUser: "x", Protocol: "FTP",
 	})
 	wantErr(t, "an unknown protocol was accepted", err)
+	wantEq(t, "refused fetchmail id", badID, int64(0))
 	wantEq(t, "entries after the refused create", len(mustListFetchmail(t, d)), 2)
 
 	// Another mailbox sees none of alice's entries.
@@ -63,8 +65,9 @@ func TestFetchmailCRUD(t *testing.T) {
 	wantEq(t, "the second delete", again, false)
 
 	// Deleting the user removes its remaining entries.
-	_, err = d.DeleteUser("alice@hermex.test", false)
+	userDeleted, err := d.DeleteUser("alice@hermex.test", false)
 	mustNoErr(t, "delete user", err)
+	wantEq(t, "user deleted", userDeleted, true)
 	wantEq(t, "fetchmail entries after the user delete", len(mustListFetchmail(t, d)), 0)
 }
 
@@ -73,12 +76,13 @@ func TestFetchmailCRUD(t *testing.T) {
 // so an entry for an unknown address would sit idle until someone is later
 // created under that name and then pull another server's mail into that account.
 func TestFetchmailRefusesAMailboxThatDoesNotExist(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "hermex.test")
+	seedDomain(t, d, root, "hermex.test")
 	for _, mbox := range []string{"ghost@hermex.test", "ghost@unhosted.test", ""} {
-		_, err := d.CreateFetchmail(FetchmailEntry{Mailbox: mbox, SrcServer: "s", SrcUser: "u", Protocol: "IMAP"})
+		badID, err := d.CreateFetchmail(FetchmailEntry{Mailbox: mbox, SrcServer: "s", SrcUser: "u", Protocol: "IMAP"})
 		wantErr(t, "an entry for mailbox "+mbox+" was accepted", err)
+		wantEq(t, "refused fetchmail id for "+mbox, badID, int64(0))
 		list, err := d.ListFetchmail(mbox)
 		mustNoErr(t, "list entries of "+mbox, err)
 		wantEq(t, "entries stored for "+mbox, len(list), 0)
@@ -98,11 +102,11 @@ func storedFetchmailPassword(t *testing.T, d *SQLDirectory, id int64) string {
 // secret installed. The password opens another server's mailbox, so a dump of
 // the directory must not contain it, while the worker still reads it back.
 func TestFetchmailPasswordIsEncryptedAtRest(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	d.SetKeySecret([]byte("test-key-secret"))
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
+	seedDomain(t, d, root, "hermex.test")
+	seedUser(t, d, root, "alice@hermex.test", "password1")
 	long := strings.Repeat("p", maxFetchmailPassword)
 	id, err := d.CreateFetchmail(FetchmailEntry{Mailbox: "alice@hermex.test", Active: true,
 		SrcServer: "s", SrcUser: "u", SrcPassword: long, Protocol: "IMAP"})
@@ -115,19 +119,20 @@ func TestFetchmailPasswordIsEncryptedAtRest(t *testing.T) {
 	if len(active) != 1 || active[0].SrcPassword != long {
 		t.Errorf("the worker did not get the password back")
 	}
-	_, err = d.CreateFetchmail(FetchmailEntry{Mailbox: "alice@hermex.test", SrcServer: "s", SrcUser: "u",
+	badID, err := d.CreateFetchmail(FetchmailEntry{Mailbox: "alice@hermex.test", SrcServer: "s", SrcUser: "u",
 		SrcPassword: long + "p", Protocol: "IMAP"})
 	wantErr(t, "a password over the limit was accepted", err)
+	wantEq(t, "refused overlong-password id", badID, int64(0))
 	wantEq(t, "entries after the refused password", len(mustListFetchmail(t, d)), 1)
 }
 
 // TestFetchmailPlaintextPasswordIsRewrapped proves an entry written before the
 // secret existed converges on encryption at its first read.
 func TestFetchmailPlaintextPasswordIsRewrapped(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
+	seedDomain(t, d, root, "hermex.test")
+	seedUser(t, d, root, "alice@hermex.test", "password1")
 	id, err := d.CreateFetchmail(FetchmailEntry{Mailbox: "alice@hermex.test", Active: true,
 		SrcServer: "s", SrcUser: "u", SrcPassword: "legacy-secret", Protocol: "POP3"})
 	mustNoErr(t, "create a plaintext entry", err)
@@ -167,10 +172,10 @@ func wantFetchmailRoundTrip(t *testing.T, got FetchmailEntry) {
 // TestFetchmailSeen covers the POP3 dedup state: recorded ids read back, a re-record is
 // idempotent, and deleting the owning entry cascades its seen rows away.
 func TestFetchmailSeen(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
+	seedDomain(t, d, root, "hermex.test")
+	seedUser(t, d, root, "alice@hermex.test", "password1")
 	id, err := d.CreateFetchmail(FetchmailEntry{
 		Mailbox: "alice@hermex.test", Active: true, SrcServer: "s", SrcUser: "u", Protocol: "POP3", Keep: true,
 	})
@@ -185,8 +190,9 @@ func TestFetchmailSeen(t *testing.T) {
 	wantEq(t, "uidB seen", seen["uidB"], true)
 
 	// Deleting the entry cascades its seen rows.
-	_, err = d.DeleteFetchmail(id)
+	deleted, err := d.DeleteFetchmail(id)
 	mustNoErr(t, "delete fetchmail entry", err)
+	wantEq(t, "deleted entry", deleted, true)
 	after, err := d.FetchmailSeen(id)
 	mustNoErr(t, "read seen ids", err)
 	wantEq(t, "seen rows after the entry delete (cascade)", len(after), 0)

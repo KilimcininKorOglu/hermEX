@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"hermex/internal/logging"
 )
 
 // TestTryLockExcludesASecondHolder proves the advisory lock does what the
@@ -19,7 +21,7 @@ func TestTryLockExcludesASecondHolder(t *testing.T) {
 		t.Fatalf("first TryLock = ok %v err %v, want the lock", ok, err)
 	}
 
-	if _, ok, err := second.TryLock(ctx, LockSendLater); err != nil || ok {
+	if rel2, ok, err := second.TryLock(ctx, LockSendLater); err != nil || ok || rel2 != nil {
 		t.Fatalf("second TryLock = ok %v err %v, want refused while the first holds it", ok, err)
 	}
 
@@ -78,9 +80,10 @@ func TestTryLockExcludesTheSamePool(t *testing.T) {
 		t.Fatalf("first TryLock = ok %v err %v", ok, err)
 	}
 	defer release()
-	_, ok, err = d.TryLock(ctx, LockSendLater)
+	rel2, ok, err := d.TryLock(ctx, LockSendLater)
 	mustNoErr(t, "second TryLock on the same pool", err)
 	wantEq(t, "the same pool got the held lock twice", ok, false)
+	wantEq(t, "refused same-pool release func nil", rel2 == nil, true)
 }
 
 // TestTryLockNamesAreIndependent proves the two loops do not exclude each other:
@@ -119,4 +122,32 @@ func TestReleaseIsIdempotent(t *testing.T) {
 		t.Fatalf("TryLock after a double release = ok %v err %v, want the lock free", ok, err)
 	}
 	release2()
+}
+
+// TestTryLockReleaseFailureIsLogged proves a killed lock connection records
+// directory.lock_release.fail without panicking when release runs.
+func TestTryLockReleaseFailureIsLogged(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	d := NewSQL(db)
+	sink := &captureSink{}
+	d.SetLogger(logging.New(sink))
+
+	release, ok, err := d.TryLock(ctx, LockSendLater)
+	if err != nil || !ok {
+		t.Fatalf("TryLock = ok %v err %v", ok, err)
+	}
+	var connID int64
+	killer := openTestDB(t)
+	mustNoErr(t, "read lock holder connection id",
+		killer.QueryRow("SELECT IS_USED_LOCK(?)", LockSendLater).Scan(&connID))
+	if connID <= 0 {
+		t.Fatalf("IS_USED_LOCK = %d, want positive connection id", connID)
+	}
+	// KILL changes no table rows, so MariaDB reports 0 affected.
+	execRows(t, "kill the lock holder", 0)(killer.Exec("KILL ?", connID))
+
+	release()
+	e := wantWarnEvent(t, sink, "directory.lock_release.fail")
+	wantEq(t, "event lock", e.Fields["lock"], LockSendLater)
 }

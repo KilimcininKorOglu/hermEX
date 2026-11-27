@@ -22,7 +22,7 @@ type OrgInfo struct {
 
 // ListOrgs returns every organization, ordered by name, each with its current
 // domain count.
-func (d *SQLDirectory) ListOrgs() ([]OrgInfo, error) {
+func (d *SQLDirectory) ListOrgs() (out []OrgInfo, err error) {
 	rows, err := d.db.Query(
 		`SELECT o.id, o.name, o.description, COUNT(dm.id)
 		   FROM orgs o LEFT JOIN domains dm ON dm.org_id = o.id
@@ -31,8 +31,7 @@ func (d *SQLDirectory) ListOrgs() ([]OrgInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []OrgInfo
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var o OrgInfo
 		if err := rows.Scan(&o.ID, &o.Name, &o.Description, &o.DomainCount); err != nil {
@@ -108,7 +107,7 @@ func (d *SQLDirectory) UpdateOrg(id int64, name, description string) (bool, erro
 // binding. It reports ok=false for an unknown id and
 // refuses id 0: that is the reserved "organizationless" sentinel, and a delete
 // scoped to it would wipe shared rows such as the global default sync policy.
-func (d *SQLDirectory) DeleteOrg(id int64) (bool, error) {
+func (d *SQLDirectory) DeleteOrg(id int64) (deleted bool, err error) {
 	if id == 0 {
 		return false, errors.New("directory: cannot delete the reserved organizationless id 0")
 	}
@@ -116,7 +115,7 @@ func (d *SQLDirectory) DeleteOrg(id int64) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback() //nolint:errcheck // rollback after commit is a no-op
+	defer rollbackTx(tx, &err)
 	res, err := tx.Exec(`DELETE FROM orgs WHERE id = ?`, id)
 	if err != nil {
 		return false, err

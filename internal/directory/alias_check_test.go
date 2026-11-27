@@ -11,20 +11,11 @@ import (
 // in which an alias can collide with something real.
 func aliasTestDir(t *testing.T) *SQLDirectory {
 	t.Helper()
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
+	d := freshSQL(t)
 	root := t.TempDir()
-	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "dom")); err != nil {
-		t.Fatal(err)
-	}
+	seedDomain(t, d, root, "hermex.test")
 	for _, u := range []string{"alice@hermex.test", "bob@hermex.test"} {
-		if _, err := d.CreateUser(u, "secret-pw1", filepath.Join(root, u)); err != nil {
-			t.Fatal(err)
-		}
+		seedUser(t, d, root, u, "secret-pw1")
 	}
 	return d
 }
@@ -40,11 +31,11 @@ func TestAliasOverAnAccountIsRefused(t *testing.T) {
 	if err := d.CreateAlias("bob@hermex.test", "alice@hermex.test"); err == nil {
 		t.Fatal("an alias over an existing account was accepted")
 	}
-	if _, ok := d.Resolve("bob@hermex.test"); !ok {
-		t.Error("bob no longer resolves, so the collision was written anyway")
+	if path, ok := d.Resolve("bob@hermex.test"); !ok || path == "" {
+		t.Errorf("bob no longer resolves (%q, %v), so the collision was written anyway", path, ok)
 	}
-	if _, ok := d.Authenticate("bob@hermex.test", "secret-pw1"); !ok {
-		t.Error("bob can no longer sign in, so the collision was written anyway")
+	if path, ok := d.Authenticate("bob@hermex.test", "secret-pw1"); !ok || path == "" {
+		t.Errorf("bob can no longer sign in (%q, %v), so the collision was written anyway", path, ok)
 	}
 }
 
@@ -52,21 +43,19 @@ func TestAliasOverAnAccountIsRefused(t *testing.T) {
 // two resolution keys, which collide exactly the same way.
 func TestAliasOverAnotherAliasIsRefused(t *testing.T) {
 	d := aliasTestDir(t)
-	if err := d.CreateAlias("sales@hermex.test", "alice@hermex.test"); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "create sales alias", d.CreateAlias("sales@hermex.test", "alice@hermex.test"))
 	if err := d.CreateAlias("sales@hermex.test", "bob@hermex.test"); err == nil {
 		t.Error("an alias over another alias was accepted")
 	}
-	if _, err := d.SetAltnames("bob@hermex.test", []string{"bobby@hermex.test"}); err != nil {
-		t.Fatal(err)
-	}
+	found, err := d.SetAltnames("bob@hermex.test", []string{"bobby@hermex.test"})
+	mustNoErr(t, "set altname", err)
+	wantEq(t, "SetAltnames found bob", found, true)
 	if err := d.CreateAlias("bobby@hermex.test", "alice@hermex.test"); err == nil {
 		t.Error("an alias over an alternative name was accepted")
 	}
 	// The alias that was already there still works.
-	if _, ok := d.Resolve("sales@hermex.test"); !ok {
-		t.Error("the pre-existing alias stopped resolving")
+	if path, ok := d.Resolve("sales@hermex.test"); !ok || path == "" {
+		t.Errorf("the pre-existing alias stopped resolving: %q, %v", path, ok)
 	}
 }
 
@@ -76,25 +65,54 @@ func TestAliasOverAnotherAliasIsRefused(t *testing.T) {
 // could no longer sign in and the alias stopped delivering.
 func TestAltnameOverAnAccountOrAliasIsRefused(t *testing.T) {
 	d := aliasTestDir(t)
-	if err := d.CreateAlias("sales@hermex.test", "bob@hermex.test"); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "create sales alias", d.CreateAlias("sales@hermex.test", "bob@hermex.test"))
 	for _, name := range []string{"bob@hermex.test", "alice@hermex.test", "sales@hermex.test"} {
-		if _, err := d.SetAltnames("alice@hermex.test", []string{name}); err == nil {
-			t.Errorf("altname %s was accepted", name)
-		}
+		found, err := d.SetAltnames("alice@hermex.test", []string{name})
+		wantErr(t, "altname "+name+" refused", err)
+		wantEq(t, "refused altname found for "+name, found, false)
 	}
-	if _, ok := d.Authenticate("bob@hermex.test", "secret-pw1"); !ok {
-		t.Error("bob can no longer sign in, so the collision was written")
-	}
-	if _, ok := d.Resolve("sales@hermex.test"); !ok {
-		t.Error("the alias stopped resolving, so the collision was written")
-	}
+	path, ok := d.Authenticate("bob@hermex.test", "secret-pw1")
+	wantEq(t, "bob sign-in ok", ok, true)
+	wantEq(t, "bob sign-in path non-empty", path != "", true)
+	path, ok = d.Resolve("sales@hermex.test")
+	wantEq(t, "alias resolve ok", ok, true)
+	wantEq(t, "alias resolve path non-empty", path != "", true)
 	// Re-saving the account's own altnames still works.
 	for range 2 {
-		if _, err := d.SetAltnames("alice@hermex.test", []string{"ali"}); err != nil {
-			t.Fatalf("re-saving the same altname failed: %v", err)
-		}
+		found, err := d.SetAltnames("alice@hermex.test", []string{"ali"})
+		mustNoErr(t, "re-save altname", err)
+		wantEq(t, "re-save altname found", found, true)
+	}
+}
+
+func aliasCheckCreators(t *testing.T, d *SQLDirectory, root string) map[string]func(addr string) error {
+	t.Helper()
+	return map[string]func(addr string) error{
+		"user": func(a string) error {
+			id, err := d.CreateUser(a, "password1", filepath.Join(root, a))
+			wantEq(t, "refused CreateUser id", id, int64(0))
+			return err
+		},
+		"room": func(a string) error {
+			id, err := d.CreateRoom(a, "R", filepath.Join(root, a), 0, false)
+			wantEq(t, "refused CreateRoom id", id, int64(0))
+			return err
+		},
+		"contact": func(a string) error {
+			id, err := d.CreateContact(a, "C", "hermex.test")
+			wantEq(t, "refused CreateContact id", id, int64(0))
+			return err
+		},
+		"list": func(a string) error {
+			id, err := d.CreateMList(a, 0, 0)
+			wantEq(t, "refused CreateMList id", id, int64(0))
+			return err
+		},
+		"ldap": func(a string) error {
+			created, err := d.UpsertLDAPUser(a, []byte{0x09}, filepath.Join(root, a))
+			wantEq(t, "refused UpsertLDAPUser created", created, false)
+			return err
+		},
 	}
 }
 
@@ -104,41 +122,23 @@ func TestAltnameOverAnAccountOrAliasIsRefused(t *testing.T) {
 // twice, so resolve() answers nothing and the existing route stops working.
 func TestNewAccountRowsCannotTakeAnAliasOrAltname(t *testing.T) {
 	d := aliasTestDir(t)
-	root := t.TempDir()
-	creators := map[string]func(addr string) error{
-		"user":    func(a string) error { _, err := d.CreateUser(a, "password1", filepath.Join(root, a)); return err },
-		"room":    func(a string) error { _, err := d.CreateRoom(a, "R", filepath.Join(root, a), 0, false); return err },
-		"contact": func(a string) error { _, err := d.CreateContact(a, "C", "hermex.test"); return err },
-		"list":    func(a string) error { _, err := d.CreateMList(a, 0, 0); return err },
-		"ldap": func(a string) error {
-			_, err := d.UpsertLDAPUser(a, []byte{0x09}, filepath.Join(root, a))
-			return err
-		},
-	}
+	creators := aliasCheckCreators(t, d, t.TempDir())
 	var altnames []string
 	for name := range creators {
 		altnames = append(altnames, name+"-alt@hermex.test")
-		if err := d.CreateAlias(name+"-alias@hermex.test", "alice@hermex.test"); err != nil {
-			t.Fatal(err)
-		}
+		mustNoErr(t, "seed alias "+name, d.CreateAlias(name+"-alias@hermex.test", "alice@hermex.test"))
 	}
-	if _, err := d.SetAltnames("bob@hermex.test", altnames); err != nil {
-		t.Fatal(err)
-	}
-	// Each creator gets its own alias and altname, so one accepted row cannot
-	// make a later creator fail on the username key instead of on the check.
+	found, err := d.SetAltnames("bob@hermex.test", altnames)
+	mustNoErr(t, "seed altnames", err)
+	wantEq(t, "SetAltnames found bob", found, true)
 	for name, create := range creators {
 		for _, addr := range []string{name + "-alias@hermex.test", name + "-alt@hermex.test"} {
-			if create(addr) == nil {
-				t.Errorf("%s accepted %s", name, addr)
-			}
+			wantErr(t, name+" refused "+addr, create(addr))
 		}
-		if _, ok := d.Resolve(name + "-alias@hermex.test"); !ok {
-			t.Errorf("%s: the alias stopped resolving", name)
-		}
-		if _, ok := d.Authenticate(name+"-alt@hermex.test", "secret-pw1"); !ok {
-			t.Errorf("%s: bob can no longer sign in under his alternative name", name)
-		}
+		path, ok := d.Resolve(name + "-alias@hermex.test")
+		wantEq(t, name+" alias still resolves", ok && path != "", true)
+		authPath, ok := d.Authenticate(name+"-alt@hermex.test", "secret-pw1")
+		wantEq(t, name+" altname still authenticates", ok && authPath != "", true)
 	}
 }
 
@@ -192,8 +192,8 @@ func TestValidAliasStillWorks(t *testing.T) {
 	if err := d.CreateAlias("sales@hermex.test", "alice@hermex.test"); err != nil {
 		t.Fatalf("a legitimate alias was refused: %v", err)
 	}
-	if _, ok := d.Resolve("sales@hermex.test"); !ok {
-		t.Error("the alias does not resolve")
+	if path, ok := d.Resolve("sales@hermex.test"); !ok || path == "" {
+		t.Errorf("the alias does not resolve: %q, %v", path, ok)
 	}
 	ids, err := d.Identities("alice@hermex.test")
 	if err != nil {
@@ -210,11 +210,11 @@ func TestValidAliasStillWorks(t *testing.T) {
 func TestSetAliasesForAppliesTheSameChecks(t *testing.T) {
 	d := aliasTestDir(t)
 
-	if _, err := d.SetAliasesFor("alice@hermex.test", []string{"bob@hermex.test"}); err == nil {
-		t.Error("SetAliasesFor accepted an alias over an existing account")
+	if found, err := d.SetAliasesFor("alice@hermex.test", []string{"bob@hermex.test"}); err == nil || found {
+		t.Errorf("SetAliasesFor accepted an alias over an existing account (found=%v)", found)
 	}
-	if _, err := d.SetAliasesFor("alice@hermex.test", []string{"ceo@victim.test"}); !errors.Is(err, ErrAliasNotLocal) {
-		t.Error("SetAliasesFor accepted an alias in a domain we do not host")
+	if found, err := d.SetAliasesFor("alice@hermex.test", []string{"ceo@victim.test"}); !errors.Is(err, ErrAliasNotLocal) || found {
+		t.Errorf("SetAliasesFor accepted an alias in a domain we do not host (found=%v, err=%v)", found, err)
 	}
 	// Neither refusal may have left a partial write behind.
 	ids, err := d.Identities("alice@hermex.test")
@@ -224,8 +224,8 @@ func TestSetAliasesForAppliesTheSameChecks(t *testing.T) {
 	if len(ids) != 1 || ids[0] != "alice@hermex.test" {
 		t.Errorf("a refused edit left aliases behind: %v", ids)
 	}
-	if _, ok := d.Resolve("bob@hermex.test"); !ok {
-		t.Error("bob stopped resolving after a refused edit")
+	if path, ok := d.Resolve("bob@hermex.test"); !ok || path == "" {
+		t.Errorf("bob stopped resolving after a refused edit: %q, %v", path, ok)
 	}
 }
 

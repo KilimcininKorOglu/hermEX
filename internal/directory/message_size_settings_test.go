@@ -10,9 +10,11 @@ func setupMessageSizeSettings(t *testing.T) *SQLDirectory {
 		t.Fatal(err)
 	}
 	cleanTables(t, db)
-	if _, err := db.Exec("DELETE FROM message_size_settings"); err != nil {
-		t.Fatal(err)
-	}
+	res, err := db.Exec("DELETE FROM message_size_settings")
+	mustNoErr(t, "clear the message size settings", err)
+	cleared, err := res.RowsAffected()
+	mustNoErr(t, "count the cleared rows", err)
+	wantEq(t, "at most the one settings row was cleared", cleared <= 1, true)
 	return d
 }
 
@@ -21,8 +23,8 @@ func setupMessageSizeSettings(t *testing.T) *SQLDirectory {
 func TestMessageSizeSettingsRoundTrip(t *testing.T) {
 	d := setupMessageSizeSettings(t)
 
-	if _, found, err := d.GetMessageSizeSettings(); err != nil || found {
-		t.Fatalf("Get on empty = found %v err %v, want not found", found, err)
+	if empty, found, err := d.GetMessageSizeSettings(); err != nil || found || empty != (MessageSizeSettings{}) {
+		t.Fatalf("Get on empty = %+v found %v err %v, want zero not found", empty, found, err)
 	}
 
 	want := MessageSizeSettings{MaxInboundBytes: 26214400} // 25 MiB
@@ -54,6 +56,7 @@ func TestMessageSizeSettingsUpsert(t *testing.T) {
 	if got.MaxInboundBytes != 52428800 {
 		t.Errorf("after upsert = %+v, want 52428800", got)
 	}
+	wantRows(t, d.db, "settings rows after two saves", 1, `SELECT COUNT(*) FROM message_size_settings`)
 }
 
 // TestMessageSizeZeroIsAStoredChoice proves a saved 0 (no limit) reads back as a

@@ -10,9 +10,11 @@ func setupRateLimitSettings(t *testing.T) *SQLDirectory {
 		t.Fatal(err)
 	}
 	cleanTables(t, db)
-	if _, err := db.Exec("DELETE FROM rate_limit_settings"); err != nil {
-		t.Fatal(err)
-	}
+	res, err := db.Exec("DELETE FROM rate_limit_settings")
+	mustNoErr(t, "clear the rate limit settings", err)
+	cleared, err := res.RowsAffected()
+	mustNoErr(t, "count the cleared rows", err)
+	wantEq(t, "at most the one settings row was cleared", cleared <= 1, true)
 	return d
 }
 
@@ -22,8 +24,8 @@ func setupRateLimitSettings(t *testing.T) *SQLDirectory {
 func TestRateLimitSettingsRoundTrip(t *testing.T) {
 	d := setupRateLimitSettings(t)
 
-	if _, found, err := d.GetRateLimitSettings(); err != nil || found {
-		t.Fatalf("Get on empty = found %v err %v, want not found", found, err)
+	if empty, found, err := d.GetRateLimitSettings(); err != nil || found || empty != (RateLimitSettings{}) {
+		t.Fatalf("Get on empty = %+v found %v err %v, want zero not found", empty, found, err)
 	}
 
 	want := RateLimitSettings{Enabled: true, Burst: 120, WindowSeconds: 30}
@@ -76,4 +78,5 @@ func TestRateLimitSettingsUpsert(t *testing.T) {
 	if got.Enabled || got.Burst != 200 || got.WindowSeconds != 10 {
 		t.Errorf("after upsert = %+v, want disabled / 200 / 10", got)
 	}
+	wantRows(t, d.db, "settings rows after two saves", 1, `SELECT COUNT(*) FROM rate_limit_settings`)
 }

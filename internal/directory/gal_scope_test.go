@@ -39,13 +39,17 @@ func seedScopedPrincipals(t *testing.T, d *SQLDirectory, db *sql.DB, root, dom s
 	t.Helper()
 	for _, local := range []string{"user", "shared", "room"} {
 		addr := local + "@" + dom
-		_, err := d.CreateUser(addr, "secret-pw1", filepath.Join(root, "users", addr))
+		uid, err := d.CreateUser(addr, "secret-pw1", filepath.Join(root, "users", addr))
 		mustNoErr(t, "create "+addr, err)
+		wantEq(t, "created user id > 0", uid > 0, true)
 	}
-	_, err := db.Exec(`UPDATE users SET address_status = ? WHERE username = ?`, afUserSharedMbox, "shared@"+dom)
+	shared, room := "shared@"+dom, "room@"+dom
+	res, err := db.Exec(`UPDATE users SET address_status = ? WHERE username = ?`, afUserSharedMbox, shared)
 	mustNoErr(t, "mark the shared mailbox", err)
-	_, err = db.Exec(`UPDATE users SET display_type = ? WHERE username = ?`, dtRoom, "room@"+dom)
+	wantAffected(t, "shared mailboxes marked in "+dom, res)
+	res, err = db.Exec(`UPDATE users SET display_type = ? WHERE username = ?`, dtRoom, room)
 	mustNoErr(t, "mark the room", err)
+	wantAffected(t, "rooms marked in "+dom, res)
 }
 
 // galAddresses runs an unfiltered GAL search as caller and returns the addresses.
@@ -157,14 +161,18 @@ func TestScopedListsReportAFailedCallerLookup(t *testing.T) {
 	d := scopedDirectory(t)
 	mustNoErr(t, "close the database", d.db.Close())
 	const caller = "user@sales.acme.test"
-	_, err := d.SearchGAL(caller, "", 0, 0)
+	entries, err := d.SearchGAL(caller, "", 0, 0)
 	wantErr(t, "SearchGAL on a closed database", err)
-	_, err = d.CountGAL(caller, "", 0)
+	wantEq(t, "SearchGAL entries on error", len(entries), 0)
+	total, err := d.CountGAL(caller, "", 0)
 	wantErr(t, "CountGAL on a closed database", err)
-	_, err = d.ListRooms(caller)
+	wantEq(t, "CountGAL on error", total, 0)
+	rooms, err := d.ListRooms(caller)
 	wantErr(t, "ListRooms on a closed database", err)
-	_, err = d.SharedMailboxes(caller)
+	wantEq(t, "ListRooms on error", len(rooms), 0)
+	shared, err := d.SharedMailboxes(caller)
 	wantErr(t, "SharedMailboxes on a closed database", err)
+	wantEq(t, "SharedMailboxes on error", len(shared), 0)
 }
 
 // TestListAllRoomsStaysUnscoped proves the operator view is deliberately not
@@ -212,9 +220,9 @@ func TestSharedMailboxesAreScopedToTheCaller(t *testing.T) {
 // being replaced by it.
 func TestScopeSurvivesADisabledOrganizationMember(t *testing.T) {
 	d := scopedDirectory(t)
-	if _, err := d.db.Exec(`UPDATE domains SET domain_status = 1 WHERE domainname = ?`, "eng.acme.test"); err != nil {
-		t.Fatal(err)
-	}
+	res, err := d.db.Exec(`UPDATE domains SET domain_status = 1 WHERE domainname = ?`, "eng.acme.test")
+	mustNoErr(t, "disable eng.acme.test", err)
+	wantAffected(t, "domains disabled", res)
 	got := galAddresses(t, d, "user@sales.acme.test")
 	assertNoDomain(t, "the GAL", got, "eng.acme.test")
 	if !slices.Contains(got, "user@sales.acme.test") {

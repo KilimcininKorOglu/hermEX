@@ -10,9 +10,7 @@ func setupLogSettings(t *testing.T) *SQLDirectory {
 		t.Fatal(err)
 	}
 	cleanTables(t, db)
-	if _, err := db.Exec("DELETE FROM log_settings"); err != nil {
-		t.Fatal(err)
-	}
+	clearSettingsRow(t, db.Exec, "DELETE FROM log_settings")
 	return d
 }
 
@@ -21,8 +19,8 @@ func setupLogSettings(t *testing.T) *SQLDirectory {
 func TestLogRetentionRoundTrip(t *testing.T) {
 	d := setupLogSettings(t)
 
-	if _, found, err := d.GetLogRetentionDays(); err != nil || found {
-		t.Fatalf("Get on empty = found %v err %v, want not found", found, err)
+	if empty, found, err := d.GetLogRetentionDays(); err != nil || found || empty != 0 {
+		t.Fatalf("Get on empty = %d found %v err %v, want 0 not found", empty, found, err)
 	}
 
 	if err := d.SetLogRetentionDays(90); err != nil {
@@ -47,8 +45,9 @@ func TestLogSpillLimitIsItsOwnSetting(t *testing.T) {
 	wantSpillLimit(t, d, DefaultLogSpillLimitMB, "the cap after saving the retention")
 	mustNoErr(t, "save the cap", d.SetLogSpillLimitMB(200))
 	wantSpillLimit(t, d, 200, "the saved cap")
-	days, _, err := d.GetLogRetentionDays()
+	days, found, err := d.GetLogRetentionDays()
 	mustNoErr(t, "read the retention", err)
+	wantEq(t, "retention row found", found, true)
 	if days != 30 {
 		t.Errorf("saving the cap changed retention to %d, want 30", days)
 	}
@@ -101,4 +100,5 @@ func TestLogRetentionUpsert(t *testing.T) {
 	if days != 0 {
 		t.Errorf("after upsert = %d, want 0 (keep forever)", days)
 	}
+	wantRows(t, d.db, "settings rows after two saves", 1, `SELECT COUNT(*) FROM log_settings`)
 }

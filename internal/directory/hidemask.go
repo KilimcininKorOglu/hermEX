@@ -2,6 +2,7 @@ package directory
 
 import (
 	"database/sql"
+	"errors"
 	"log"
 )
 
@@ -25,8 +26,7 @@ func syncHideMask(tx *sql.Tx, userID int64) error {
 		var tag uint32
 		var val sql.NullString
 		if err := rows.Scan(&tag, &val); err != nil {
-			rows.Close()
-			return err
+			return errors.Join(err, rows.Close())
 		}
 		props[tag] = val.String
 	}
@@ -60,7 +60,7 @@ func (d *SQLDirectory) syncHideMasks() {
 }
 
 // hideMaskCandidates lists the users whose hide_mask may be out of step.
-func (d *SQLDirectory) hideMaskCandidates() ([]int64, error) {
+func (d *SQLDirectory) hideMaskCandidates() (ids []int64, err error) {
 	rows, err := d.db.Query(
 		`SELECT id FROM users WHERE hide_mask <> 0
 		 UNION SELECT user_id FROM user_properties WHERE proptag IN (?, ?)`,
@@ -68,8 +68,7 @@ func (d *SQLDirectory) hideMaskCandidates() ([]int64, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var ids []int64
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
@@ -81,12 +80,12 @@ func (d *SQLDirectory) hideMaskCandidates() ([]int64, error) {
 }
 
 // syncHideMaskOf recomputes one user's hide_mask in its own transaction.
-func (d *SQLDirectory) syncHideMaskOf(id int64) error {
+func (d *SQLDirectory) syncHideMaskOf(id int64) (err error) {
 	tx, err := d.db.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	if err := syncHideMask(tx, id); err != nil {
 		return err
 	}

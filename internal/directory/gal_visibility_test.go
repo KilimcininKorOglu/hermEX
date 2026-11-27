@@ -65,8 +65,9 @@ func TestResolvableGALDropsBoth(t *testing.T) {
 // caller that keeps the original set is unaffected, and that nil stays nil.
 func TestFiltersLeaveTheInputAlone(t *testing.T) {
 	in := galSet()
-	VisibleGAL(in)
-	ResolvableGAL(in)
+	// Browse drops only nogal; resolution drops nogal and noanr.
+	wantEq(t, "entries a browse keeps", len(VisibleGAL(in)), 3)
+	wantEq(t, "entries resolution keeps", len(ResolvableGAL(in)), 2)
 	// An in-place filter keeps the caller's length but shifts and zeroes the
 	// elements, so the contents are what is compared.
 	if !slices.Equal(in, galSet()) {

@@ -10,10 +10,12 @@ func setupDigest(t *testing.T) *SQLDirectory {
 		t.Fatal(err)
 	}
 	cleanTables(t, db)
-	for _, tbl := range []string{"digest_settings", "digest_state"} {
-		if _, err := db.Exec("DELETE FROM " + tbl); err != nil {
-			t.Fatal(err)
-		}
+	for _, stmt := range []string{"DELETE FROM digest_settings", "DELETE FROM digest_state"} {
+		res, err := db.Exec(stmt)
+		mustNoErr(t, stmt, err)
+		cleared, err := res.RowsAffected()
+		mustNoErr(t, "count the rows of "+stmt, err)
+		wantEq(t, "rows of "+stmt+" are not negative", cleared >= 0, true)
 	}
 	return d
 }
@@ -23,8 +25,8 @@ func setupDigest(t *testing.T) *SQLDirectory {
 func TestDigestSettingsRoundTrip(t *testing.T) {
 	d := setupDigest(t)
 
-	if _, found, err := d.GetDigestSettings(); err != nil || found {
-		t.Fatalf("Get on empty = found %v err %v, want not found", found, err)
+	if empty, found, err := d.GetDigestSettings(); err != nil || found || empty != (DigestSettings{}) {
+		t.Fatalf("Get on empty = %+v found %v err %v, want zero/not found", empty, found, err)
 	}
 
 	want := DigestSettings{Enabled: true, IntervalHours: 12, BaseURL: "https://mail.example.com"}
@@ -54,6 +56,7 @@ func TestDigestWatermark(t *testing.T) {
 	// Another mailbox keeps its own watermark: one user's digest must not skip
 	// another's quarantined mail.
 	wantWatermark(t, d, "of another mailbox", "/data/mb/bob", 0)
+	wantRows(t, d.db, "watermark rows for alice after the upsert", 1, `SELECT COUNT(*) FROM digest_state WHERE maildir = ?`, mbox)
 }
 
 // wantWatermark reads one mailbox's digest watermark and compares it.

@@ -8,12 +8,15 @@ import "testing"
 // than by an explicit logout left a row behind forever. A live session must survive
 // the sweep, or the prune would log everyone out.
 func TestExpiredSessionsArePruned(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 
 	const now = int64(1700000000)
 	for _, s := range []WebmailSession{
 		{Jti: "jti-live", Email: "u@hermex.test", CreatedAt: now, LastActive: now, ExpiresAt: now + 3600},
 		{Jti: "jti-old", Email: "u@hermex.test", CreatedAt: now - 7200, LastActive: now - 7200, ExpiresAt: now - 60},
+		// Expiring exactly now: the active check already refuses it (expires_at > now),
+		// so the prune must remove it too.
+		{Jti: "jti-edge", Email: "u@hermex.test", CreatedAt: now - 3600, LastActive: now - 3600, ExpiresAt: now},
 	} {
 		mustNoErr(t, "create webmail session "+s.Jti, d.CreateWebmailSession(s))
 	}
@@ -26,7 +29,10 @@ func TestExpiredSessionsArePruned(t *testing.T) {
 
 	n, err := d.PurgeExpiredWebmailSessions(now)
 	mustNoErr(t, "prune webmail sessions", err)
-	wantEq(t, "webmail sessions pruned (only the expired one)", n, int64(1))
+	wantEq(t, "webmail sessions pruned (the two expired ones)", n, int64(2))
+	edge, err := d.WebmailSessionActive("jti-edge", now)
+	mustNoErr(t, "read the session that expired at now", err)
+	wantEq(t, "the session that expired at now is active", edge, false)
 	liveWeb, err := d.WebmailSessionActive("jti-live", now)
 	mustNoErr(t, "read the live webmail session", err)
 	wantEq(t, "the live webmail session survived (the sweep must not log anyone out)", liveWeb, true)

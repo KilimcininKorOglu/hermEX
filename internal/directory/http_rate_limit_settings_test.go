@@ -1,6 +1,9 @@
 package directory
 
-import "testing"
+import (
+	"database/sql"
+	"testing"
+)
 
 func setupHTTPRateLimitSettings(t *testing.T) *SQLDirectory {
 	t.Helper()
@@ -10,9 +13,7 @@ func setupHTTPRateLimitSettings(t *testing.T) *SQLDirectory {
 		t.Fatal(err)
 	}
 	cleanTables(t, db)
-	if _, err := db.Exec("DELETE FROM http_rate_limit_settings"); err != nil {
-		t.Fatal(err)
-	}
+	clearSettingsRow(t, db.Exec, "DELETE FROM http_rate_limit_settings")
 	return d
 }
 
@@ -22,8 +23,8 @@ func setupHTTPRateLimitSettings(t *testing.T) *SQLDirectory {
 func TestHTTPRateLimitSettingsRoundTrip(t *testing.T) {
 	d := setupHTTPRateLimitSettings(t)
 
-	if _, found, err := d.GetHTTPRateLimitSettings(); err != nil || found {
-		t.Fatalf("Get on empty = found %v err %v, want not found", found, err)
+	if empty, found, err := d.GetHTTPRateLimitSettings(); err != nil || found || empty != (HTTPRateLimitSettings{}) {
+		t.Fatalf("Get on empty = %+v found %v err %v, want not found and zero", empty, found, err)
 	}
 
 	want := HTTPRateLimitSettings{Enabled: true, Burst: 900, WindowSeconds: 30}
@@ -56,6 +57,7 @@ func TestHTTPRateLimitSettingsUpsert(t *testing.T) {
 	if got.Enabled || got.Burst != 120 || got.WindowSeconds != 10 {
 		t.Errorf("after upsert = %+v, want disabled / 120 / 10", got)
 	}
+	wantRows(t, d.db, "settings rows after two saves", 1, `SELECT COUNT(*) FROM http_rate_limit_settings`)
 }
 
 // TestHTTPRateLimitSettingsSeparateFromSMTP proves the HTTP limiter's settings live in
@@ -63,9 +65,7 @@ func TestHTTPRateLimitSettingsUpsert(t *testing.T) {
 // operator tunes the two protocols independently.
 func TestHTTPRateLimitSettingsSeparateFromSMTP(t *testing.T) {
 	d := setupHTTPRateLimitSettings(t)
-	if _, err := d.db.Exec("DELETE FROM rate_limit_settings"); err != nil {
-		t.Fatal(err)
-	}
+	clearSettingsRow(t, d.db.Exec, "DELETE FROM rate_limit_settings")
 	smtp := RateLimitSettings{Enabled: true, Burst: 60, WindowSeconds: 60}
 	if err := d.SetRateLimitSettings(smtp); err != nil {
 		t.Fatal(err)
@@ -87,4 +87,15 @@ func TestHTTPRateLimitSettingsSeparateFromSMTP(t *testing.T) {
 	mustNoErr(t, "read the HTTP settings", err)
 	wantEq(t, "HTTP settings found", found, true)
 	wantEq(t, "HTTP settings after an SMTP save", gotHTTP, HTTPRateLimitSettings{Enabled: false, Burst: 1200, WindowSeconds: 120})
+}
+
+// clearSettingsRow runs a single-row settings table's DELETE and requires it to
+// succeed and remove at most that one row.
+func clearSettingsRow(t *testing.T, exec func(string, ...any) (sql.Result, error), stmt string) {
+	t.Helper()
+	res, err := exec(stmt)
+	mustNoErr(t, stmt, err)
+	n, err := res.RowsAffected()
+	mustNoErr(t, "count the rows of "+stmt, err)
+	wantEq(t, "rows removed by "+stmt+" are at most one", n <= 1, true)
 }

@@ -11,7 +11,7 @@ import (
 // container. It resolves the address to its mailbox store and reads the list. An
 // address with no local mailbox (or no delegates set) yields none. The list lives
 // with the mailbox, not in the directory database.
-func (d *SQLDirectory) Delegates(userAddr string) ([]string, error) {
+func (d *SQLDirectory) Delegates(userAddr string) (delegates []string, err error) {
 	maildir, ok := d.Resolve(userAddr)
 	if !ok {
 		return nil, nil
@@ -24,7 +24,7 @@ func (d *SQLDirectory) Delegates(userAddr string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer st.Close()
+	defer closeInto(st, &err)
 	return st.GetDelegates()
 }
 
@@ -33,7 +33,7 @@ func (d *SQLDirectory) Delegates(userAddr string) ([]string, error) {
 // the read and the write is kept. An address with no local mailbox is a no-op
 // (there is no store to write). An account whose mailbox is missing answers
 // objectstore.ErrNotProvisioned; the write never creates it.
-func (d *SQLDirectory) UpdateDelegates(userAddr string, update func([]string) []string) error {
+func (d *SQLDirectory) UpdateDelegates(userAddr string, update func([]string) []string) (err error) {
 	maildir, ok := d.Resolve(userAddr)
 	if !ok {
 		return nil
@@ -42,6 +42,6 @@ func (d *SQLDirectory) UpdateDelegates(userAddr string, update func([]string) []
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	defer closeInto(st, &err)
 	return st.UpdateDelegates(update)
 }

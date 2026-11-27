@@ -55,7 +55,7 @@ func (d *SQLDirectory) SavePushSubscription(s PushSubscription) error {
 }
 
 // ListPushSubscriptions returns a user's subscriptions (their browser devices).
-func (d *SQLDirectory) ListPushSubscriptions(email string) ([]PushSubscription, error) {
+func (d *SQLDirectory) ListPushSubscriptions(email string) (out []PushSubscription, err error) {
 	rows, err := d.db.Query(
 		`SELECT endpoint, email, p256dh, auth, created_at
 		   FROM push_subscriptions WHERE email = ? ORDER BY created_at`,
@@ -63,8 +63,7 @@ func (d *SQLDirectory) ListPushSubscriptions(email string) ([]PushSubscription, 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []PushSubscription
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var s PushSubscription
 		if err := rows.Scan(&s.Endpoint, &s.Email, &s.P256dh, &s.Auth, &s.CreatedAt); err != nil {
@@ -84,13 +83,12 @@ func (d *SQLDirectory) DeletePushSubscription(endpoint string) error {
 
 // PushSubscriberEmails returns the distinct emails that have at least one push
 // subscription, so the poll loop only watches mailboxes a device is listening to.
-func (d *SQLDirectory) PushSubscriberEmails() ([]string, error) {
+func (d *SQLDirectory) PushSubscriberEmails() (out []string, err error) {
 	rows, err := d.db.Query(`SELECT DISTINCT email FROM push_subscriptions`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []string
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var e string
 		if err := rows.Scan(&e); err != nil {

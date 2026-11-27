@@ -9,37 +9,19 @@ import (
 // (DT_ROOM/DT_EQUIPMENT), not ordinary users, so the picker is not polluted with
 // every mailbox.
 func TestListRooms(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
+	d, db := freshDirectory(t)
 	root := t.TempDir()
-	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "dom")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.CreateUser("alice@hermex.test", "secret-pw1", filepath.Join(root, "alice")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.CreateUser("boardroom@hermex.test", "secret-pw1", filepath.Join(root, "room")); err != nil {
-		t.Fatal(err)
-	}
+	seedDomain(t, d, root, "hermex.test")
+	seedUser(t, d, root, "alice@hermex.test", "secret-pw1")
+	seedUser(t, d, root, "boardroom@hermex.test", "secret-pw1")
 	// Promote the boardroom mailbox to a DT_ROOM resource.
-	if _, err := db.Exec("UPDATE users SET display_type = ? WHERE username = ?", dtRoom, "boardroom@hermex.test"); err != nil {
-		t.Fatal(err)
-	}
+	execRows(t, "promote boardroom", 1)(db.Exec("UPDATE users SET display_type = ? WHERE username = ?", dtRoom, "boardroom@hermex.test"))
 
 	rooms, err := d.ListRooms("alice@hermex.test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(rooms) != 1 {
-		t.Fatalf("ListRooms returned %d entries, want 1 (the room only, not alice)", len(rooms))
-	}
-	if rooms[0].Address != "boardroom@hermex.test" || rooms[0].DisplayType != dtRoom {
-		t.Errorf("room = %+v, want boardroom@hermex.test DT_ROOM", rooms[0])
-	}
+	mustNoErr(t, "ListRooms", err)
+	wantEq(t, "room count", len(rooms), 1)
+	wantEq(t, "room address", rooms[0].Address, "boardroom@hermex.test")
+	wantEq(t, "room display type", rooms[0].DisplayType, dtRoom)
 }
 
 // TestCreateRoom proves CreateRoom provisions a bookable resource the picker then
@@ -49,20 +31,23 @@ func TestListRooms(t *testing.T) {
 func TestCreateRoom(t *testing.T) {
 	d, db := freshDirectory(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "hermex.test")
+	seedDomain(t, d, root, "hermex.test")
 	// The room list is scoped to the caller, so the domain needs an account to
 	// ask as; a room is looked up on behalf of a person, never on its own.
-	mustCreateUser(t, d, root, "alice@hermex.test", "secret-pw1")
-	_, err := d.CreateRoom("conf-a@hermex.test", "Conference A", filepath.Join(root, "conf-a"), 8, false)
+	seedUser(t, d, root, "alice@hermex.test", "secret-pw1")
+	confID, err := d.CreateRoom("conf-a@hermex.test", "Conference A", filepath.Join(root, "conf-a"), 8, false)
 	mustNoErr(t, "create the conference room", err)
-	_, err = d.CreateRoom("projector-1@hermex.test", "Projector", filepath.Join(root, "proj"), 0, true)
+	projID, err := d.CreateRoom("projector-1@hermex.test", "Projector", filepath.Join(root, "proj"), 0, true)
 	mustNoErr(t, "create the equipment", err)
+	wantEq(t, "distinct resource ids", confID > 0 && projID > 0 && confID != projID, true)
 	// A negative capacity is refused rather than stored as "not given".
-	_, err = d.CreateRoom("neg@hermex.test", "Neg", filepath.Join(root, "neg"), -3, false)
+	negID, err := d.CreateRoom("neg@hermex.test", "Neg", filepath.Join(root, "neg"), -3, false)
 	wantErr(t, "CreateRoom with a negative capacity succeeded", err)
+	wantEq(t, "refused neg capacity room id", negID, int64(0))
 	// A room must belong to a known domain.
-	_, err = d.CreateRoom("ghost@nope.test", "Ghost", filepath.Join(root, "ghost"), 0, false)
+	ghostID, err := d.CreateRoom("ghost@nope.test", "Ghost", filepath.Join(root, "ghost"), 0, false)
 	wantErr(t, "CreateRoom into an unknown domain succeeded", err)
+	wantEq(t, "refused ghost domain room id", ghostID, int64(0))
 	wantRows(t, db, "rows left by the refused room creates", 0,
 		`SELECT COUNT(*) FROM users WHERE username IN (?, ?)`, "neg@hermex.test", "ghost@nope.test")
 
@@ -81,8 +66,9 @@ func TestCreateRoom(t *testing.T) {
 		db.QueryRow("SELECT password FROM users WHERE username = ?", "conf-a@hermex.test").Scan(&pw))
 	wantEq(t, "room password (a resource cannot sign in)", pw, "")
 	for _, guess := range []string{"", "x"} {
-		_, ok := d.Authenticate("conf-a@hermex.test", guess)
+		path, ok := d.Authenticate("conf-a@hermex.test", guess)
 		wantEq(t, "the room signed in with the password "+guess, ok, false)
+		wantEq(t, "refused room login maildir empty", path, "")
 	}
 }
 
@@ -102,29 +88,18 @@ func wantResource(t *testing.T, byAddr map[string]GALEntry, addr, name string, c
 // book carries a room's seating capacity, so the address book can advertise
 // PR_EMS_AB_ROOM_CAPACITY to Outlook.
 func TestSearchGALRoomCapacity(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
+	d := freshSQL(t)
 	root := t.TempDir()
-	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "dom")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.CreateUser("alice@hermex.test", "secret-pw1", filepath.Join(root, "alice")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.CreateRoom("conf-a@hermex.test", "Conference A", filepath.Join(root, "conf"), 8, false); err != nil {
-		t.Fatal(err)
-	}
+	seedDomain(t, d, root, "hermex.test")
+	seedUser(t, d, root, "alice@hermex.test", "secret-pw1")
+	rid, err := d.CreateRoom("conf-a@hermex.test", "Conference A", filepath.Join(root, "conf"), 8, false)
+	mustNoErr(t, "CreateRoom", err)
+	wantEq(t, "room id > 0", rid > 0, true)
 	entries, err := d.SearchGAL("alice@hermex.test", "conf-a", 20, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 1 || entries[0].Address != "conf-a@hermex.test" || entries[0].Capacity != 8 {
-		t.Errorf("SearchGAL room = %+v, want conf-a@hermex.test with Capacity 8", entries)
-	}
+	mustNoErr(t, "SearchGAL", err)
+	wantEq(t, "GAL room entry count", len(entries), 1)
+	wantEq(t, "GAL room address", entries[0].Address, "conf-a@hermex.test")
+	wantEq(t, "GAL room capacity", entries[0].Capacity, 8)
 }
 
 // TestRoomCapacityMustBeAWholeNumber proves PidTagAddressBookRoomCapacity, a
@@ -133,26 +108,30 @@ func TestSearchGALRoomCapacity(t *testing.T) {
 func TestRoomCapacityMustBeAWholeNumber(t *testing.T) {
 	d, db := freshDirectory(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
-	_, err := d.CreateRoom("conf-a@hermex.test", "Conference A", filepath.Join(root, "conf"), 8, false)
+	seedDomain(t, d, root, "hermex.test")
+	seedUser(t, d, root, "alice@hermex.test", "password1")
+	confID, err := d.CreateRoom("conf-a@hermex.test", "Conference A", filepath.Join(root, "conf"), 8, false)
 	mustNoErr(t, "create the room", err)
+	wantEq(t, "room id > 0", confID > 0, true)
 
 	for _, bad := range []string{"twelve", "-3", "8.5", "99999999999999999999"} {
-		_, err := d.SetUserProperties("conf-a@hermex.test", map[uint32]string{prRoomCapacity: bad})
+		ok, err := d.SetUserProperties("conf-a@hermex.test", map[uint32]string{prRoomCapacity: bad})
 		wantErr(t, "capacity "+bad+" was stored", err)
+		wantEq(t, "refused capacity write reported found for "+bad, ok, false)
 	}
 	rooms, err := d.ListAllRooms()
 	mustNoErr(t, "list rooms after the refused writes", err)
 	wantEq(t, "capacity after the refused writes", rooms[0].Capacity, 8)
 
 	// A row written behind the directory's back is corruption, not "unknown".
-	_, err = db.Exec(`UPDATE user_properties SET propval_str = 'twelve' WHERE proptag = ?`, prRoomCapacity)
-	mustNoErr(t, "corrupt the stored capacity", err)
-	_, err = d.ListAllRooms()
+	execRows(t, "corrupt the stored capacity", 1)(db.Exec(`UPDATE user_properties SET propval_str = 'twelve' WHERE proptag = ?`, prRoomCapacity))
+	allRooms, err := d.ListAllRooms()
 	wantErr(t, "ListAllRooms read a non-numeric capacity", err)
-	_, err = d.ListRooms("alice@hermex.test")
+	wantEq(t, "corrupt ListAllRooms slice len", len(allRooms), 0)
+	userRooms, err := d.ListRooms("alice@hermex.test")
 	wantErr(t, "ListRooms read a non-numeric capacity", err)
-	_, err = d.SearchGAL("alice@hermex.test", "conf-a", 20, 0)
+	wantEq(t, "corrupt ListRooms slice len", len(userRooms), 0)
+	galRooms, err := d.SearchGAL("alice@hermex.test", "conf-a", 20, 0)
 	wantErr(t, "SearchGAL read a non-numeric capacity", err)
+	wantEq(t, "corrupt SearchGAL slice len", len(galRooms), 0)
 }

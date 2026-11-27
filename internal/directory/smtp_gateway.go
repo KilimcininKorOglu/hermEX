@@ -64,11 +64,11 @@ func (d *SQLDirectory) GetSMTPGateway(domain string) (SMTPGateway, bool, error) 
 	if err != nil {
 		return SMTPGateway{}, false, err
 	}
-	password, _, err := d.unwrapKey(wrapGateway, stored)
+	u, err := d.unwrapKey(wrapGateway, stored)
 	if err != nil {
 		return SMTPGateway{}, false, err
 	}
-	g.Password = password
+	g.Password = u.plain
 	return g, true, nil
 }
 
@@ -135,14 +135,14 @@ func (d *SQLDirectory) DeleteSMTPGateway(domain string) (bool, error) {
 // holding the default. The MTA's settings poll reads the whole set in this one call, so a
 // changed gateway applies without a restart. A disabled row is omitted: the poll installs
 // exactly what delivery should use.
-func (d *SQLDirectory) ListSMTPGateways() (map[string]SMTPGateway, error) {
+func (d *SQLDirectory) ListSMTPGateways() (out map[string]SMTPGateway, err error) {
 	rows, err := d.db.Query(
 		`SELECT domain, enabled, host, port, encryption, username, password FROM smtp_gateways`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := make(map[string]SMTPGateway)
+	defer closeRows(rows, &err)
+	out = make(map[string]SMTPGateway)
 	for rows.Next() {
 		var domain, stored string
 		var g SMTPGateway
@@ -152,11 +152,11 @@ func (d *SQLDirectory) ListSMTPGateways() (map[string]SMTPGateway, error) {
 		if !g.Enabled {
 			continue
 		}
-		password, _, err := d.unwrapKey(wrapGateway, stored)
+		u, err := d.unwrapKey(wrapGateway, stored)
 		if err != nil {
 			return nil, err
 		}
-		g.Password = password
+		g.Password = u.plain
 		out[domain] = g
 	}
 	return out, rows.Err()

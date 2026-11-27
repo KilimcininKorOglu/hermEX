@@ -1,17 +1,20 @@
 package directory
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 // catchAllDir builds a directory with two domains and one mailbox user in each, so a test
 // can try to point one domain's catch-all at the other domain's account.
 func catchAllDir(t *testing.T) *SQLDirectory {
 	t.Helper()
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "hermex.test")
-	mustCreateDomain(t, d, root, "other.test")
-	mustCreateUser(t, d, root, "alice@hermex.test", "password1")
-	mustCreateUser(t, d, root, "bob@other.test", "password1")
+	seedDomain(t, d, root, "hermex.test")
+	seedDomain(t, d, root, "other.test")
+	seedUser(t, d, root, "alice@hermex.test", "password1")
+	seedUser(t, d, root, "bob@other.test", "password1")
 	return d
 }
 
@@ -50,8 +53,8 @@ func TestCatchAllResolvesAnUnknownLocalPart(t *testing.T) {
 func TestCatchAllResolvesNothingWithoutOne(t *testing.T) {
 	d := catchAllDir(t)
 
-	if _, ok := d.ResolveCatchAll("nosuchuser@hermex.test"); ok {
-		t.Error("a domain with no catch-all must resolve nothing")
+	if path, ok := d.ResolveCatchAll("nosuchuser@hermex.test"); ok || path != "" {
+		t.Errorf("a domain with no catch-all must resolve nothing (%q, %v)", path, ok)
 	}
 }
 
@@ -61,8 +64,8 @@ func TestCatchAllIsPerDomain(t *testing.T) {
 	d := catchAllDir(t)
 	mustSetCatchAll(t, d, "hermex.test", "alice@hermex.test")
 
-	if _, ok := d.ResolveCatchAll("nosuchuser@other.test"); ok {
-		t.Error("a domain with no catch-all resolved through another domain's one")
+	if path, ok := d.ResolveCatchAll("nosuchuser@other.test"); ok || path != "" {
+		t.Errorf("a domain with no catch-all resolved through another domain's one (%q, %v)", path, ok)
 	}
 }
 
@@ -90,6 +93,22 @@ func TestCatchAllRefusesAnUnknownAccount(t *testing.T) {
 	wantCatchAll(t, d, "hermex.test", "alice@hermex.test")
 }
 
+// TestCatchAllRefusesAResourceMailbox proves a room cannot collect a domain's
+// unknown recipients: a room's mailbox is read by the booking agent, not by a
+// person, so mail poured into it would never be seen.
+func TestCatchAllRefusesAResourceMailbox(t *testing.T) {
+	d := catchAllDir(t)
+	mustSetCatchAll(t, d, "hermex.test", "alice@hermex.test")
+	rid, err := d.CreateRoom("room@hermex.test", "Room", filepath.Join(t.TempDir(), "room"), 4, false)
+	mustNoErr(t, "create the room", err)
+	wantEq(t, "room id > 0", rid > 0, true)
+
+	if err := d.SetDomainCatchAll("hermex.test", "room@hermex.test"); err == nil {
+		t.Error("a room was accepted as the catch-all")
+	}
+	wantCatchAll(t, d, "hermex.test", "alice@hermex.test")
+}
+
 // wantCatchAll requires a domain's stored catch-all to still be want after a
 // refused change.
 func wantCatchAll(t *testing.T, d *SQLDirectory, domain, want string) {
@@ -108,8 +127,8 @@ func TestCatchAllClears(t *testing.T) {
 
 	mustSetCatchAll(t, d, "hermex.test", "")
 
-	if _, ok := d.ResolveCatchAll("nosuchuser@hermex.test"); ok {
-		t.Error("the cleared catch-all still resolves")
+	if path, ok := d.ResolveCatchAll("nosuchuser@hermex.test"); ok || path != "" {
+		t.Errorf("the cleared catch-all still resolves (%q, %v)", path, ok)
 	}
 }
 
@@ -119,13 +138,14 @@ func TestCatchAllGoesWithTheDeletedAccount(t *testing.T) {
 	d := catchAllDir(t)
 	mustSetCatchAll(t, d, "hermex.test", "alice@hermex.test")
 
-	if _, err := d.DeleteUser("alice@hermex.test", false); err != nil {
-		t.Fatal(err)
-	}
+	deleted, err := d.DeleteUser("alice@hermex.test", false)
+	mustNoErr(t, "delete user", err)
+	wantEq(t, "user deleted", deleted, true)
 
-	_, found, err := d.GetDomainCatchAll("hermex.test")
+	cleared, found, err := d.GetDomainCatchAll("hermex.test")
 	mustNoErr(t, "read the catch-all", err)
 	wantEq(t, "the catch-all went with the account", found, false)
+	wantEq(t, "the cleared catch-all address", cleared, "")
 }
 
 // TestCatchAllDoesNotAuthenticate is the security case: the catch-all is a delivery-only
@@ -134,8 +154,8 @@ func TestCatchAllDoesNotAuthenticate(t *testing.T) {
 	d := catchAllDir(t)
 	mustSetCatchAll(t, d, "hermex.test", "alice@hermex.test")
 
-	if _, ok := d.Authenticate("nosuchuser@hermex.test", "password1"); ok {
-		t.Error("an unknown address authenticated through the catch-all")
+	if path, ok := d.Authenticate("nosuchuser@hermex.test", "password1"); ok || path != "" {
+		t.Errorf("an unknown address authenticated through the catch-all (%q, %v)", path, ok)
 	}
 }
 
@@ -145,8 +165,8 @@ func TestCatchAllDoesNotResolveOutsideDelivery(t *testing.T) {
 	d := catchAllDir(t)
 	mustSetCatchAll(t, d, "hermex.test", "alice@hermex.test")
 
-	if _, ok := d.Resolve("nosuchuser@hermex.test"); ok {
-		t.Error("Resolve answered for an address no account owns")
+	if path, ok := d.Resolve("nosuchuser@hermex.test"); ok || path != "" {
+		t.Errorf("Resolve answered for an address no account owns (%q, %v)", path, ok)
 	}
 }
 

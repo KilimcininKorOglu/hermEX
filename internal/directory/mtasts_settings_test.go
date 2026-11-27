@@ -10,9 +10,7 @@ func setupMTASTSSettings(t *testing.T) *SQLDirectory {
 		t.Fatal(err)
 	}
 	cleanTables(t, db)
-	if _, err := db.Exec("DELETE FROM mtasts_settings"); err != nil {
-		t.Fatal(err)
-	}
+	clearSettingsRow(t, db.Exec, "DELETE FROM mtasts_settings")
 	return d
 }
 
@@ -53,11 +51,17 @@ func TestMTASTSSettingsRefuseAnOutOfRangeMaxAge(t *testing.T) {
 			t.Errorf("max_age %d was accepted", bad)
 		}
 	}
-	got, _, err := d.GetMTASTSSettings()
+	got, found, err := d.GetMTASTSSettings()
 	mustNoErr(t, "read the settings after the refusals", err)
+	wantEq(t, "settings row exists after refusals", found, true)
 	if got != want {
 		t.Errorf("after refused writes = %+v, want %+v", got, want)
 	}
+	// The bounds themselves are valid max_age values.
+	for _, edge := range []int{1, MTASTSMaxMaxAge} {
+		mustNoErr(t, "save a max_age at the bound", d.SetMTASTSSettings(MTASTSSettings{Mode: "testing", MaxAge: edge}))
+	}
+	wantEq(t, "the RFC 8461 ceiling", MTASTSMaxMaxAge, 31557600)
 }
 
 // TestMTASTSSettingsRefuseAnUnknownMode writes modes outside RFC 8461 section 3.2's
@@ -71,8 +75,9 @@ func TestMTASTSSettingsRefuseAnUnknownMode(t *testing.T) {
 		if err := d.SetMTASTSSettings(MTASTSSettings{Enabled: true, Mode: bad, MaxAge: 86400}); err == nil {
 			t.Errorf("mode %q was accepted", bad)
 		}
-		got, _, err := d.GetMTASTSSettings()
+		got, found, err := d.GetMTASTSSettings()
 		mustNoErr(t, "read the settings after a refusal", err)
+		wantEq(t, "settings row exists after refusing "+bad, found, true)
 		wantEq(t, "the settings after refusing mode "+bad, got, want)
 	}
 	for _, mode := range []string{"enforce", "testing", "none"} {
@@ -104,8 +109,9 @@ func TestMTASTSSettingsRoundTripAndUpsert(t *testing.T) {
 	if err := d.SetMTASTSSettings(MTASTSSettings{Enabled: false, Mode: "testing", MaxAge: 86400}); err != nil {
 		t.Fatal(err)
 	}
-	got, _, err = d.GetMTASTSSettings()
+	got, found, err = d.GetMTASTSSettings()
 	mustNoErr(t, "read the settings after the re-save", err)
+	wantEq(t, "settings found after re-save", found, true)
 	if got.Enabled || got.Mode != "testing" {
 		t.Errorf("after re-save = %+v, want disabled testing mode", got)
 	}

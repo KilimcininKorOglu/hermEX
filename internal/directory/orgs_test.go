@@ -12,20 +12,23 @@ import (
 // TestOrgCRUD proves organization create/get/list/update, name validation and
 // uniqueness, and the per-domain attach/detach association with its domain count.
 func TestOrgCRUD(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 
-	_, err := d.CreateOrg("", "x")
+	badOrg1, err := d.CreateOrg("", "x")
 	wantErr(t, "empty org name accepted", err)
-	_, err = d.CreateOrg(strings.Repeat("a", 33), "x")
+	wantEq(t, "refused empty org id", badOrg1, int64(0))
+	badOrg2, err := d.CreateOrg(strings.Repeat("a", 33), "x")
 	wantErr(t, "33-character org name accepted (the limit is 32)", err)
+	wantEq(t, "refused long org id", badOrg2, int64(0))
 
 	id, err := d.CreateOrg("Acme", "The Acme organization")
 	mustNoErr(t, "create org", err)
 	if id == 0 {
 		t.Fatal("org id 0 issued, it collides with the reserved organizationless sentinel")
 	}
-	_, err = d.CreateOrg("Acme", "")
+	dupOrg, err := d.CreateOrg("Acme", "")
 	wantErr(t, "duplicate org name accepted", err)
+	wantEq(t, "refused duplicate org id", dupOrg, int64(0))
 
 	got := mustGetOrg(t, d, id)
 	wantEq(t, "org name", got.Name, "Acme")
@@ -48,11 +51,13 @@ func TestOrgCRUD(t *testing.T) {
 
 	// A refused rename keeps the stored name: an empty name, one over the limit,
 	// and another organization's name.
-	_, err = d.CreateOrg("Other", "")
+	otherID, err := d.CreateOrg("Other", "")
 	mustNoErr(t, "create a second org", err)
+	wantEq(t, "other org id > 0", otherID > 0 && otherID != id, true)
 	for _, bad := range []string{"", strings.Repeat("a", 33), "Other"} {
-		_, err := d.UpdateOrg(id, bad, "changed")
+		updOK, err := d.UpdateOrg(id, bad, "changed")
 		wantErr(t, "UpdateOrg accepted the name "+bad, err)
+		wantEq(t, "refused rename reported updated for "+bad, updOK, false)
 		got = mustGetOrg(t, d, id)
 		wantEq(t, "name after a refused rename", got.Name, "Acme Inc")
 		wantEq(t, "description after a refused rename", got.Description, "new desc")
@@ -78,8 +83,9 @@ func wantDomainAttachDetach(t *testing.T, d *SQLDirectory, orgID, domID int64) {
 	wantEq(t, "AssignDomainToOrg found both rows", ok, true)
 	wantEq(t, "domain count after attach", mustGetOrg(t, d, orgID).DomainCount, 1)
 
-	_, err = d.AssignDomainToOrg(domID, 999999)
+	assignOK, err := d.AssignDomainToOrg(domID, 999999)
 	wantErr(t, "assigning a domain to a nonexistent org accepted", err)
+	wantEq(t, "refused org assign reported found", assignOK, false)
 	wantEq(t, "domain count after the refused move", mustGetOrg(t, d, orgID).DomainCount, 1)
 	unknownDomain, err := d.AssignDomainToOrg(888888, orgID)
 	mustNoErr(t, "assign an unknown domain", err)
@@ -117,6 +123,13 @@ func TestDeleteOrgCascade(t *testing.T) {
 	mustNoErr(t, "create org", err)
 	root := t.TempDir()
 	domID, uid := seedOrgScopedConfig(t, d, db, root, id)
+	// Another organization's policy and org-admin grant are not this delete's.
+	otherOrg, err := d.CreateOrg("Other", "")
+	mustNoErr(t, "create the other org", err)
+	res, err := db.Exec(`INSERT INTO sync_policy (org_id, policy) VALUES (?, '{}')`, otherOrg)
+	mustNoErr(t, "insert the other org's sync policy", err)
+	wantAffected(t, "the other org's sync policy rows", res)
+	mustNoErr(t, "grant the other org admin", d.GrantAdminRole(uid, AdminOrg, otherOrg))
 
 	refused, err := d.DeleteOrg(0)
 	wantEq(t, "DeleteOrg(0) removed the reserved sentinel", refused, false)
@@ -127,24 +140,30 @@ func TestDeleteOrgCascade(t *testing.T) {
 	mustNoErr(t, "delete org", err)
 	wantEq(t, "DeleteOrg reported the org existed", deleted, true)
 
-	_, stillThere, err := d.GetOrg(id)
+	emptyOrg, stillThere, err := d.GetOrg(id)
 	mustNoErr(t, "read the deleted org", err)
 	wantEq(t, "org present after delete", stillThere, false)
+	wantEq(t, "deleted org zero name", emptyOrg.Name, "")
 	var domOrg int64
 	mustNoErr(t, "the domain was deleted with its org",
 		db.QueryRow(`SELECT org_id FROM domains WHERE id = ?`, domID).Scan(&domOrg))
 	wantEq(t, "domain org_id after the org delete (detached)", domOrg, int64(0))
-	_, bound, err := d.LDAPBindingForDomain(domID)
+	binding, bound, err := d.LDAPBindingForDomain(domID)
 	mustNoErr(t, "read the domain's binding", err)
 	wantEq(t, "the detached domain keeps its directory binding", bound, true)
+	wantEq(t, "detached domain binding id > 0", binding.ID > 0, true)
 	wantRows(t, db, "org sync_policy rows after delete", 0, `SELECT COUNT(*) FROM sync_policy WHERE org_id = ?`, id)
 	roles, err := d.AdminRoles(uid)
 	mustNoErr(t, "read admin roles", err)
+	otherGrant := false
 	for _, r := range roles {
 		if r.Role == AdminOrg && r.ScopeID == id {
 			t.Error("org-admin grant survived the org delete")
 		}
+		otherGrant = otherGrant || (r.Role == AdminOrg && r.ScopeID == otherOrg)
 	}
+	wantEq(t, "the other org's admin grant survived", otherGrant, true)
+	wantRows(t, db, "the other org's sync_policy rows", 1, `SELECT COUNT(*) FROM sync_policy WHERE org_id = ?`, otherOrg)
 	// The landmine: the global default sync policy (org_id 0) must be untouched.
 	got, err := d.GetDefaultSyncPolicy()
 	mustNoErr(t, "read the default sync policy", err)
@@ -164,11 +183,13 @@ func TestDeleteOrgCascade(t *testing.T) {
 func seedOrgScopedConfig(t *testing.T, d *SQLDirectory, db *sql.DB, root string, orgID int64) (domID, uid int64) {
 	t.Helper()
 	domID = mustCreateDomain(t, d, root, "acme.test")
-	_, err := d.AssignDomainToOrg(domID, orgID)
+	assigned, err := d.AssignDomainToOrg(domID, orgID)
 	mustNoErr(t, "assign domain to org", err)
+	wantEq(t, "AssignDomainToOrg found domain and org", assigned, true)
 	mustBindDomain(t, d, domID, LDAPConnection{Name: "acme", URI: "ldaps://acme"})
-	_, err = db.Exec(`INSERT INTO sync_policy (org_id, policy) VALUES (?, '{}')`, orgID)
+	res, err := db.Exec(`INSERT INTO sync_policy (org_id, policy) VALUES (?, '{}')`, orgID)
 	mustNoErr(t, "insert the org sync policy", err)
+	wantAffected(t, "org sync policy rows", res)
 	uid = mustCreateUser(t, d, root, "admin@acme.test", "password1")
 	mustNoErr(t, "grant org admin", d.GrantAdminRole(uid, AdminOrg, orgID))
 	return domID, uid

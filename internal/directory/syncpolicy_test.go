@@ -10,7 +10,7 @@ import (
 // back nil when unset (no enforcement by default), replaces wholesale on the single
 // global row, and clears.
 func TestDefaultSyncPolicy(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	readPolicy := func() easpolicy.Policy {
 		t.Helper()
 		got, err := d.GetDefaultSyncPolicy()
@@ -36,4 +36,19 @@ func TestDefaultSyncPolicy(t *testing.T) {
 
 	mustNoErr(t, "clear the default policy", d.SetDefaultSyncPolicy(nil))
 	wantEq(t, "policy fields after clearing", len(readPolicy()), 0)
+}
+
+// TestDefaultSyncPolicyRefusesACorruptRow proves a stored policy that does not
+// parse is reported, not read as "no policy": reading it as empty would silently
+// stop enforcing the operator's device rules.
+func TestDefaultSyncPolicyRefusesACorruptRow(t *testing.T) {
+	d := freshSQL(t)
+	res, err := d.db.Exec(`REPLACE INTO sync_policy (org_id, policy) VALUES (?, ?)`, defaultSyncPolicyOrg, `{"DevicePasswordEnabled":`)
+	mustNoErr(t, "store a corrupt policy", err)
+	n, err := res.RowsAffected()
+	mustNoErr(t, "count the stored rows", err)
+	wantEq(t, "a corrupt row was stored", n >= 1, true)
+	got, err := d.GetDefaultSyncPolicy()
+	wantErr(t, "a corrupt policy read without error", err)
+	wantEq(t, "fields read from a corrupt policy", len(got), 0)
 }

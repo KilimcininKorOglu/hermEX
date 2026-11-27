@@ -10,9 +10,11 @@ func setupSizeLimits(t *testing.T) *SQLDirectory {
 		t.Fatal(err)
 	}
 	cleanTables(t, db)
-	if _, err := db.Exec("DELETE FROM size_limits"); err != nil {
-		t.Fatal(err)
-	}
+	res, err := db.Exec("DELETE FROM size_limits")
+	mustNoErr(t, "clear the size limits", err)
+	cleared, err := res.RowsAffected()
+	mustNoErr(t, "count the cleared rows", err)
+	wantEq(t, "at most the one limits row was cleared", cleared <= 1, true)
 	return d
 }
 
@@ -21,8 +23,8 @@ func setupSizeLimits(t *testing.T) *SQLDirectory {
 func TestSizeLimitsRoundTrip(t *testing.T) {
 	d := setupSizeLimits(t)
 
-	if _, found, err := d.GetSizeLimits(); err != nil || found {
-		t.Fatalf("Get on empty = found %v err %v, want not found", found, err)
+	if empty, found, err := d.GetSizeLimits(); err != nil || found || empty != (SizeLimits{}) {
+		t.Fatalf("Get on empty = %+v found %v err %v, want zero not found", empty, found, err)
 	}
 
 	// Every field carries a DISTINCT non-zero value, because the assertion below
@@ -54,10 +56,22 @@ func TestSizeLimitsRefuseANegativeValue(t *testing.T) {
 	d := setupSizeLimits(t)
 	want := SizeLimits{IMAPLiteralBytes: 1048576, FreeBusyMaxTargets: 10}
 	mustNoErr(t, "save the starting limits", d.SetSizeLimits(want))
+	// One case per field, so a field dropped from the check is caught.
 	for _, bad := range []SizeLimits{
 		{IMAPLiteralBytes: -1},
+		{EWSRequestBytes: -1},
+		{ActiveSyncRequestBytes: -1},
+		{DAVICalBytes: -1},
+		{DAVVCardBytes: -1},
+		{WebmailRequestBytes: -1},
+		{MapiRequestBytes: -1},
 		{FreeBusyMaxTargets: -1},
+		{WebmailPreviewMaxBytes: -1},
+		{IMAPCommandLineBytes: -1},
+		{POP3CommandLineBytes: -1},
+		{SMTPCommandLineBytes: -1},
 		{EWSSubscriptionTimeoutMinutes: -5},
+		{TLSReportBytes: -1},
 		{MapiUploadMessageBytes: -1048576},
 	} {
 		wantErr(t, "SetSizeLimits accepted a negative limit", d.SetSizeLimits(bad))
@@ -84,4 +98,5 @@ func TestSizeLimitsUpsert(t *testing.T) {
 	if got.IMAPLiteralBytes != 1048576 || got.EWSRequestBytes != 2097152 || got.ActiveSyncRequestBytes != 3145728 {
 		t.Errorf("after upsert = %+v, want 1048576 / 2097152 / 3145728", got)
 	}
+	wantRows(t, d.db, "limits rows after two saves", 1, `SELECT COUNT(*) FROM size_limits`)
 }

@@ -2,7 +2,6 @@ package directory
 
 import (
 	"bytes"
-	"path/filepath"
 	"testing"
 )
 
@@ -10,15 +9,8 @@ import (
 // belong to.
 func dkimTestDir(t *testing.T) *SQLDirectory {
 	t.Helper()
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-	if _, err := d.CreateDomain("acme.test", filepath.Join(t.TempDir(), "dom")); err != nil {
-		t.Fatal(err)
-	}
+	d := freshSQL(t)
+	seedDomain(t, d, t.TempDir(), "acme.test")
 	return d
 }
 
@@ -38,8 +30,8 @@ func TestExportDKIMKeyReachesAnUnpublishedKey(t *testing.T) {
 
 	// The signing lookup refuses it, which is correct and is why the export path
 	// has to exist.
-	if _, _, found, err := d.DKIMKey("acme.test"); err != nil || found {
-		t.Fatalf("a freshly generated key is signing already (found=%v, err=%v)", found, err)
+	if pem, sel, found, err := d.DKIMKey("acme.test"); err != nil || found || pem != nil || sel != "" {
+		t.Fatalf("a freshly generated key is signing already (pem=%q sel=%q found=%v err=%v)", pem, sel, found, err)
 	}
 
 	got, selector, found, err := d.ExportDKIMKey("acme.test")
@@ -68,9 +60,9 @@ func TestExportDKIMKeyReturnsTheEnabledKeyToo(t *testing.T) {
 	if err := d.SetDKIMEnabled("acme.test", true); err != nil {
 		t.Fatal(err)
 	}
-	got, _, found, err := d.ExportDKIMKey("acme.test")
-	if err != nil || !found || !bytes.Equal(got, testPEM) {
-		t.Errorf("export of an enabled key = (%q, %v, %v), want the stored key", got, found, err)
+	got, sel, found, err := d.ExportDKIMKey("acme.test")
+	if err != nil || !found || sel != "hermex" || !bytes.Equal(got, testPEM) {
+		t.Errorf("export of an enabled key = (%q, %q, %v, %v), want the stored key", got, sel, found, err)
 	}
 }
 
@@ -93,19 +85,17 @@ func TestExportDKIMKeyReportsAbsence(t *testing.T) {
 // must never answer with another tenant's key.
 func TestExportDKIMKeyIsPerDomain(t *testing.T) {
 	d := dkimTestDir(t)
-	if _, err := d.CreateDomain("other.test", filepath.Join(t.TempDir(), "other")); err != nil {
-		t.Fatal(err)
-	}
+	seedDomain(t, d, t.TempDir(), "other.test")
 	if err := d.SetDKIMKey("acme.test", "hermex", testPEM, "v=DKIM1; p=AAAA"); err != nil {
 		t.Fatal(err)
 	}
 	for _, domain := range []string{"other.test", "unhosted.test", "", "%"} {
-		got, _, found, err := d.ExportDKIMKey(domain)
+		got, sel, found, err := d.ExportDKIMKey(domain)
 		if err != nil {
 			t.Fatalf("export %q: %v", domain, err)
 		}
-		if found || got != nil {
-			t.Errorf("export %q returned acme.test's key", domain)
+		if found || got != nil || sel != "" {
+			t.Errorf("export %q returned (%q, %q, %v), want empty", domain, got, sel, found)
 		}
 	}
 }
@@ -122,9 +112,9 @@ func TestExportDKIMKeySurvivesARegeneration(t *testing.T) {
 	if err := d.SetDKIMKey("acme.test", "hermex", second, "v=DKIM1; p=BBBB"); err != nil {
 		t.Fatal(err)
 	}
-	got, _, _, err := d.ExportDKIMKey("acme.test")
-	if err != nil {
-		t.Fatal(err)
+	got, sel, found, err := d.ExportDKIMKey("acme.test")
+	if err != nil || !found || sel != "hermex" {
+		t.Fatalf("ExportDKIMKey = (sel=%q, found=%v, err=%v)", sel, found, err)
 	}
 	if !bytes.Equal(got, second) {
 		t.Errorf("exported key = %q, want the regenerated one", got)

@@ -10,9 +10,11 @@ func setupSpamHistorySettings(t *testing.T) *SQLDirectory {
 		t.Fatal(err)
 	}
 	cleanTables(t, db)
-	if _, err := db.Exec("DELETE FROM spam_history_settings"); err != nil {
-		t.Fatal(err)
-	}
+	res, err := db.Exec("DELETE FROM spam_history_settings")
+	mustNoErr(t, "clear the spam history settings", err)
+	cleared, err := res.RowsAffected()
+	mustNoErr(t, "count the cleared rows", err)
+	wantEq(t, "at most the one settings row was cleared", cleared <= 1, true)
 	return d
 }
 
@@ -21,8 +23,8 @@ func setupSpamHistorySettings(t *testing.T) *SQLDirectory {
 func TestSpamHistorySettingsRoundTrip(t *testing.T) {
 	d := setupSpamHistorySettings(t)
 
-	if _, found, err := d.GetSpamHistorySettings(); err != nil || found {
-		t.Fatalf("Get on empty = found %v err %v, want not found", found, err)
+	if empty, found, err := d.GetSpamHistorySettings(); err != nil || found || empty != (SpamHistorySettings{}) {
+		t.Fatalf("Get on empty = %+v found %v err %v, want zero not found", empty, found, err)
 	}
 
 	want := SpamHistorySettings{Retain: 500}
@@ -55,6 +57,7 @@ func TestSpamHistorySettingsUpsert(t *testing.T) {
 	if got.Retain != 250 {
 		t.Errorf("after upsert = %+v, want retain 250", got)
 	}
+	wantRows(t, d.db, "settings rows after two saves", 1, `SELECT COUNT(*) FROM spam_history_settings`)
 }
 
 // TestSpamHistorySettingsRefuseANonPositiveRetain proves the stored setting holds

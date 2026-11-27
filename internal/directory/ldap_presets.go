@@ -1,5 +1,7 @@
 package directory
 
+import "slices"
+
 // Mapping presets name a starting downsync mapping for a directory schema, so an
 // operator binding a domain picks the schema instead of typing every attribute. A
 // binding records the preset it started from, and resetting it restores exactly
@@ -16,6 +18,11 @@ var ldapPresetNames = []string{LDAPPresetAD, LDAPPresetInetOrgPerson}
 // LDAPPresetNames returns the known preset names in display order.
 func LDAPPresetNames() []string {
 	return append([]string(nil), ldapPresetNames...)
+}
+
+// validLDAPPreset reports whether name names a known LDAP mapping preset.
+func validLDAPPreset(name string) bool {
+	return slices.Contains(ldapPresetNames, name)
 }
 
 // LDAPPreset returns a fresh copy of a preset's mapping, ok=false for an unknown

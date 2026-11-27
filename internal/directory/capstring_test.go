@@ -17,13 +17,17 @@ func TestCapStringKeepsWholeCharacters(t *testing.T) {
 	}
 	wantEq(t, "the capped length", len(got), 254)
 	wantEq(t, "a short string", capString("şş", 10), "şş")
+	wantEq(t, "zero cap", capString("abc", 0), "")
+	wantEq(t, "empty string", capString("", 10), "")
+	// A four-byte character straddling the cap is dropped whole.
+	wantEq(t, "four-byte character at the cap", capString(strings.Repeat("a", 253)+"😀", 255), strings.Repeat("a", 253))
 }
 
 // TestAQuarantineSubjectCutInsideACharacterIsStored is the failure the helper
 // caused: the subject column is capped at 255 bytes, and a subject whose 255th
 // byte falls inside a character made the insert fail.
 func TestAQuarantineSubjectCutInsideACharacterIsStored(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	dom := mustCreateDomain(t, d, t.TempDir(), "acme.test")
 	id, err := d.QuarantineMessage(QuarantineEntry{
 		Direction: "inbound", MailFrom: "a@b.example", Recipients: []string{"x@acme.test"},

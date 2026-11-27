@@ -66,7 +66,7 @@ func (d *SQLDirectory) TouchWebmailSession(jti string, now int64) error {
 
 // ListWebmailSessions returns a user's non-expired sessions, most-recently-active
 // first, for the security UI.
-func (d *SQLDirectory) ListWebmailSessions(email string, now int64) ([]WebmailSession, error) {
+func (d *SQLDirectory) ListWebmailSessions(email string, now int64) (out []WebmailSession, err error) {
 	rows, err := d.db.Query(
 		`SELECT jti, email, device_type, user_agent, client_ip, created_at, last_active, expires_at
 		   FROM webmail_sessions WHERE email = ? AND expires_at > ? ORDER BY last_active DESC`,
@@ -74,8 +74,7 @@ func (d *SQLDirectory) ListWebmailSessions(email string, now int64) ([]WebmailSe
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []WebmailSession
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var s WebmailSession
 		if err := rows.Scan(&s.Jti, &s.Email, &s.DeviceType, &s.UserAgent, &s.ClientIP,

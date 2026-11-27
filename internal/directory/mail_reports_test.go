@@ -58,7 +58,7 @@ func wantSender(t *testing.T, got ReportSender) {
 }
 
 func TestDMARCAggregateRoundTrip(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	dom := mustCreateDomain(t, d, t.TempDir(), "acme.test")
 
 	id, err := d.StoreDMARCAggregate(source(dom, reportDay2), sampleAggregate("r-1", reportDay1))
@@ -81,21 +81,25 @@ func TestDMARCAggregateRoundTrip(t *testing.T) {
 // sure a report arrived sends it again, and storing both would double every count
 // in the summary.
 func TestAResentReportIsStoredOnce(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	dom := mustCreateDomain(t, d, t.TempDir(), "acme.test")
 
-	_, err := d.StoreDMARCAggregate(source(dom, reportDay2), sampleAggregate("r-1", reportDay1))
+	rID, err := d.StoreDMARCAggregate(source(dom, reportDay2), sampleAggregate("r-1", reportDay1))
 	mustNoErr(t, "store the report", err)
-	_, err = d.StoreDMARCAggregate(source(dom, reportDay2), sampleAggregate("r-1", reportDay1))
+	wantEq(t, "aggregate report id > 0", rID > 0, true)
+	dupR, err := d.StoreDMARCAggregate(source(dom, reportDay2), sampleAggregate("r-1", reportDay1))
 	if !errors.Is(err, ErrDuplicateReport) {
 		t.Fatalf("second aggregate store err = %v, want ErrDuplicateReport", err)
 	}
-	_, err = d.StoreTLSReport(source(dom, reportDay2), sampleTLS("t-1", reportDay1))
+	wantEq(t, "refused duplicate aggregate id", dupR, int64(0))
+	tID, err := d.StoreTLSReport(source(dom, reportDay2), sampleTLS("t-1", reportDay1))
 	mustNoErr(t, "store the TLS report", err)
-	_, err = d.StoreTLSReport(source(dom, reportDay2), sampleTLS("t-1", reportDay1))
+	wantEq(t, "TLS report id > 0", tID > 0, true)
+	dupT, err := d.StoreTLSReport(source(dom, reportDay2), sampleTLS("t-1", reportDay1))
 	if !errors.Is(err, ErrDuplicateReport) {
 		t.Fatalf("second TLS store err = %v, want ErrDuplicateReport", err)
 	}
+	wantEq(t, "refused duplicate TLS id", dupT, int64(0))
 
 	sum, err := d.DMARCSummary(ReportFilter{All: true})
 	mustNoErr(t, "summarize", err)
@@ -103,7 +107,7 @@ func TestAResentReportIsStoredOnce(t *testing.T) {
 }
 
 func TestTLSReportRoundTrip(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	dom := mustCreateDomain(t, d, t.TempDir(), "acme.test")
 
 	id, err := d.StoreTLSReport(source(dom, reportDay2), sampleTLS("t-1", reportDay1))
@@ -118,7 +122,7 @@ func TestTLSReportRoundTrip(t *testing.T) {
 }
 
 func TestDMARCFailureRoundTrip(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	dom := mustCreateDomain(t, d, t.TempDir(), "acme.test")
 
 	f := &mailreport.Failure{ArrivalDate: reportDay1, SourceIP: "198.51.100.3", ReportedDomain: "acme.test",
@@ -137,17 +141,20 @@ func TestDMARCFailureRoundTrip(t *testing.T) {
 // TestReportListsFollowTheAdminScope is the tenant boundary of the report pages: a
 // domain admin sees only their own domains' reports.
 func TestReportListsFollowTheAdminScope(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
 	acme := mustCreateDomain(t, d, root, "acme.test")
 	other := mustCreateDomain(t, d, root, "other.test")
 
-	_, err := d.StoreDMARCAggregate(source(acme, reportDay2), sampleAggregate("r-1", reportDay1))
+	aggID, err := d.StoreDMARCAggregate(source(acme, reportDay2), sampleAggregate("r-1", reportDay1))
 	mustNoErr(t, "store acme's report", err)
-	_, err = d.StoreTLSReport(source(acme, reportDay2), sampleTLS("t-1", reportDay1))
+	wantEq(t, "stored aggregate id > 0", aggID > 0, true)
+	tlsID, err := d.StoreTLSReport(source(acme, reportDay2), sampleTLS("t-1", reportDay1))
 	mustNoErr(t, "store acme's TLS report", err)
-	_, err = d.StoreDMARCFailure(source(acme, reportDay2), &mailreport.Failure{ReportedDomain: "acme.test"})
+	wantEq(t, "stored TLS id > 0", tlsID > 0, true)
+	failID, err := d.StoreDMARCFailure(source(acme, reportDay2), &mailreport.Failure{ReportedDomain: "acme.test"})
 	mustNoErr(t, "store acme's failure report", err)
+	wantEq(t, "stored failure id > 0", failID > 0, true)
 
 	for _, c := range []struct {
 		name string
@@ -175,12 +182,13 @@ func TestReportListsFollowTheAdminScope(t *testing.T) {
 }
 
 func TestReportPeriodFilter(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	dom := mustCreateDomain(t, d, t.TempDir(), "acme.test")
-	_, err := d.StoreDMARCAggregate(source(dom, reportDay2), sampleAggregate("day-1", reportDay1))
+	id1, err := d.StoreDMARCAggregate(source(dom, reportDay2), sampleAggregate("day-1", reportDay1))
 	mustNoErr(t, "store day one", err)
-	_, err = d.StoreDMARCAggregate(source(dom, reportDay2), sampleAggregate("day-2", reportDay2))
+	id2, err := d.StoreDMARCAggregate(source(dom, reportDay2), sampleAggregate("day-2", reportDay2))
 	mustNoErr(t, "store day two", err)
+	wantEq(t, "distinct report ids", id1 > 0 && id2 > 0 && id1 != id2, true)
 
 	got, err := d.ListDMARCReports(ReportFilter{All: true, From: reportDay2.Unix()})
 	mustNoErr(t, "list from day two", err)
@@ -193,12 +201,13 @@ func TestReportPeriodFilter(t *testing.T) {
 }
 
 func TestSummaryTotals(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	dom := mustCreateDomain(t, d, t.TempDir(), "acme.test")
-	_, err := d.StoreDMARCAggregate(source(dom, reportDay2), sampleAggregate("r-1", reportDay1))
+	r1, err := d.StoreDMARCAggregate(source(dom, reportDay2), sampleAggregate("r-1", reportDay1))
 	mustNoErr(t, "store day one", err)
-	_, err = d.StoreDMARCAggregate(source(dom, reportDay2), sampleAggregate("r-2", reportDay2))
+	r2, err := d.StoreDMARCAggregate(source(dom, reportDay2), sampleAggregate("r-2", reportDay2))
 	mustNoErr(t, "store day two", err)
+	wantEq(t, "distinct summary report ids", r1 > 0 && r2 > 0 && r1 != r2, true)
 
 	sum, err := d.DMARCSummary(ReportFilter{All: true})
 	mustNoErr(t, "summarize", err)
@@ -209,8 +218,9 @@ func TestSummaryTotals(t *testing.T) {
 	wantEq(t, "the failing source's quarantined messages", sum[1].Quarantined, int64(8))
 	wantEq(t, "the failing source's DMARC passes", sum[1].DMARCPass, int64(0))
 
-	_, err = d.StoreTLSReport(source(dom, reportDay2), sampleTLS("t-1", reportDay1))
+	t1, err := d.StoreTLSReport(source(dom, reportDay2), sampleTLS("t-1", reportDay1))
 	mustNoErr(t, "store a TLS report", err)
+	wantEq(t, "stored TLS report id > 0", t1 > 0, true)
 	tls, err := d.TLSSummary(ReportFilter{All: true})
 	mustNoErr(t, "summarize TLS", err)
 	wantEq(t, "the TLS policy rows", len(tls), 1)
@@ -227,16 +237,18 @@ func TestPruneMailReportsHonoursEachWindow(t *testing.T) {
 
 	aggID, err := d.StoreDMARCAggregate(source(dom, old), sampleAggregate("r-1", reportDay1))
 	mustNoErr(t, "store an aggregate report", err)
-	_, err = d.StoreDMARCFailure(source(dom, old), &mailreport.Failure{ReportedDomain: "acme.test"})
+	failID, err := d.StoreDMARCFailure(source(dom, old), &mailreport.Failure{ReportedDomain: "acme.test"})
 	mustNoErr(t, "store a failure report", err)
+	wantEq(t, "stored failure report id > 0", failID > 0, true)
 
 	// The defaults keep a 40-day-old aggregate report and delete the failure report.
 	n, err := d.PruneMailReports(now)
 	mustNoErr(t, "prune with the defaults", err)
 	wantEq(t, "reports deleted under the defaults", n, int64(1))
-	_, ok, err := d.GetDMARCReport(aggID)
+	kept, ok, err := d.GetDMARCReport(aggID)
 	mustNoErr(t, "read the aggregate report", err)
 	wantEq(t, "the aggregate report kept", ok, true)
+	wantEq(t, "the kept aggregate report id", kept.ReportID, "r-1")
 
 	mustNoErr(t, "shorten the window", d.SetMailReportSettings(MailReportSettings{AggregateDays: 30, FailureDays: 30}))
 	n, err = d.PruneMailReports(now)

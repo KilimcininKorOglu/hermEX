@@ -59,13 +59,12 @@ func (d *SQLDirectory) ListAllRooms() ([]GALEntry, error) {
 }
 
 // scanRooms runs a room query and projects its rows.
-func (d *SQLDirectory) scanRooms(q string, args ...any) ([]GALEntry, error) {
+func (d *SQLDirectory) scanRooms(q string, args ...any) (out []GALEntry, err error) {
 	rows, err := d.db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []GALEntry
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var addr, name, capStr string
 		var dt int
@@ -99,12 +98,24 @@ func parseRoomCapacity(s string) (int, error) {
 	return n, nil
 }
 
+// validateRoomCapacity reports whether s is a valid stored room capacity.
+func validateRoomCapacity(s string) error {
+	n, err := parseRoomCapacity(s)
+	if err != nil {
+		return err
+	}
+	if n < 0 {
+		return fmt.Errorf("room capacity %q is not a non-negative whole number", s)
+	}
+	return nil
+}
+
 // CreateRoom provisions a bookable resource mailbox: a directory user with
 // display_type DT_ROOM (or DT_EQUIPMENT when equipment is set), no password (a
 // resource cannot sign in), its PR_DISPLAY_NAME, and - when positive - its seating
 // capacity, in one transaction. maildir is the resource's object-store path, which
 // the caller derives the same way it does for a user. It reports the new user id.
-func (d *SQLDirectory) CreateRoom(email, displayName, maildir string, capacity int, equipment bool) (int64, error) {
+func (d *SQLDirectory) CreateRoom(email, displayName, maildir string, capacity int, equipment bool) (id int64, err error) {
 	// 0 means the capacity was not given; a negative one is an error, not a silent
 	// "not given".
 	if capacity < 0 {
@@ -123,7 +134,7 @@ func (d *SQLDirectory) CreateRoom(email, displayName, maildir string, capacity i
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	if err := checkAddressUnclaimed(tx, email); err != nil {
 		return 0, err
 	}
@@ -135,7 +146,7 @@ func (d *SQLDirectory) CreateRoom(email, displayName, maildir string, capacity i
 	if err != nil {
 		return 0, err
 	}
-	id, err := res.LastInsertId()
+	id, err = res.LastInsertId()
 	if err != nil {
 		return 0, err
 	}

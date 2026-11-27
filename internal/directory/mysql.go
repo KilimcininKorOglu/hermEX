@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 
 	"hermex/internal/crypt"
+	"hermex/internal/logging"
 	"hermex/internal/migrate"
 	"hermex/internal/objectstore"
 )
@@ -52,6 +53,9 @@ type SQLDirectory struct {
 	// daemon installs it once at startup while nothing else is running, and every
 	// later read is concurrent.
 	keySecret atomic.Pointer[[]byte]
+	// logger records best-effort failures (rewraps, lock teardown, maildir
+	// removal) that do not fail the caller's operation. Nil-safe via Emit.
+	logger atomic.Pointer[logging.Logger]
 }
 
 // NewSQL wraps an open database handle. A user's mailbox store is the object
@@ -60,6 +64,33 @@ func NewSQL(db *sql.DB) *SQLDirectory {
 	d := &SQLDirectory{db: db}
 	d.spamRetain.Store(defaultSpamHistoryRetain)
 	return d
+}
+
+// SetLogger installs the structured logger for best-effort failures that do not
+// fail the caller's operation. Nil clears it.
+func (d *SQLDirectory) SetLogger(l *logging.Logger) {
+	d.logger.Store(l)
+}
+
+// warn records a best-effort failure without changing the caller's outcome.
+func (d *SQLDirectory) warn(name string, err error, fields logging.Fields) {
+	if err == nil {
+		return
+	}
+	l := d.logger.Load()
+	if l == nil {
+		// No daemon logger (an admin CLI command, a test): stderr, so the
+		// failure is still visible rather than dropped by a nil Emit.
+		log.Printf("directory: %s: %v %v", name, err, fields)
+		return
+	}
+	l.Emit(logging.Event{
+		Level:     logging.LevelWarn,
+		Subsystem: logging.Directory,
+		Name:      name,
+		Fields:    fields,
+		Err:       err.Error(),
+	})
 }
 
 // EnsureSchema brings the directory database to the latest schema version,
@@ -109,7 +140,7 @@ func (r loginRow) eligible() bool {
 // resolve runs the three-key resolution: the input must match
 // exactly one of users.username, altnames.altname, or aliases.aliasname. Zero
 // rows (no such address) and more than one (ambiguous) are both a non-match.
-func (d *SQLDirectory) resolve(addr string) (loginRow, bool, error) {
+func (d *SQLDirectory) resolve(addr string) (row loginRow, ok bool, err error) {
 	const q = `
 SELECT u.id, u.password, u.maildir, u.address_status, u.display_type, d.domain_status, u.externid, u.domain_id, d.org_id, u.must_change_password
   FROM users u JOIN domains d ON u.domain_id = d.id
@@ -129,7 +160,7 @@ SELECT u.id, u.password, u.maildir, u.address_status, u.display_type, d.domain_s
 	if err != nil {
 		return loginRow{}, false, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	var out []loginRow
 	for rows.Next() {
 		var r loginRow
@@ -163,7 +194,13 @@ SELECT u.id, u.password, u.maildir, u.address_status, u.display_type, d.domain_s
 // oracle it exists to close.
 const decoyPasswordHash = "$6$rounds=600000$GHkoWOKQaU6pWMTt$x3tHgHwTI/JGcBXzdL1z8X2beEFisrjPQ.CQe0G.UHR5zgXYjDocrjMIefupwYN5w8QCdlgKZWZc3/12pU6F2/"
 
-func (d *SQLDirectory) authenticateRow(user, password string) (path string, mustChange, ok bool) {
+type authResult struct {
+	path       string
+	mustChange bool
+	ok         bool
+}
+
+func (d *SQLDirectory) authenticateRow(user, password string) authResult {
 	login := strings.ToLower(strings.TrimSpace(user))
 	row, found, err := d.resolve(login)
 	// A missing, wrong-type, disabled, or maildir-less account must not short-circuit
@@ -172,12 +209,12 @@ func (d *SQLDirectory) authenticateRow(user, password string) (path string, must
 	usable := err == nil && found && row.eligible()
 	if !usable {
 		sqlCryptVerify(password, decoyPasswordHash)
-		return "", false, false
+		return authResult{}
 	}
 	if !d.verifyPassword(row, login, password) {
-		return "", false, false
+		return authResult{}
 	}
-	return d.storePath(row.maildir), row.mustChange, true
+	return authResult{path: d.storePath(row.maildir), mustChange: row.mustChange, ok: true}
 }
 
 // Authenticate verifies a login for normal service access and returns the user's
@@ -187,11 +224,11 @@ func (d *SQLDirectory) authenticateRow(user, password string) (path string, must
 // remediation flow uses AuthenticateAllowingPasswordChange to let the user reach
 // the forced-change screen and clear the flag.
 func (d *SQLDirectory) Authenticate(user, password string) (string, bool) {
-	path, mustChange, ok := d.authenticateRow(user, password)
-	if !ok || mustChange {
+	res := d.authenticateRow(user, password)
+	if !res.ok || res.mustChange {
 		return "", false
 	}
-	return path, true
+	return res.path, true
 }
 
 // AuthenticateAllowingPasswordChange verifies a login the same way as Authenticate
@@ -199,8 +236,8 @@ func (d *SQLDirectory) Authenticate(user, password string) (string, bool) {
 // current-password check can authenticate the user into the forced-change screen.
 // Only that remediation channel uses it; every other protocol uses Authenticate.
 func (d *SQLDirectory) AuthenticateAllowingPasswordChange(user, password string) (string, bool) {
-	path, _, ok := d.authenticateRow(user, password)
-	return path, ok
+	res := d.authenticateRow(user, password)
+	return res.path, res.ok
 }
 
 // verifyPassword checks a login's password the way its account is mastered: an
@@ -252,8 +289,10 @@ func (d *SQLDirectory) upgradeHash(login, stored, password string) {
 	if !needsRehash(stored) {
 		return
 	}
-	if _, err := d.storePassword(login, password); err != nil {
+	if updated, err := d.storePassword(login, password); err != nil {
 		log.Printf("directory: could not re-hash %s at the current work factor: %v", login, err)
+	} else if !updated {
+		log.Printf("directory: could not re-hash %s at the current work factor: user not updated", login)
 	}
 }
 
@@ -297,11 +336,11 @@ func (d *SQLDirectory) IsLocalDomain(domain string) (bool, error) {
 // (altnames.user_id) bound to that user. login may itself be a username, alias,
 // or altname; an unknown login yields no identities (the webmail then permits
 // send-as-self only).
-func (d *SQLDirectory) Identities(login string) ([]string, error) {
+func (d *SQLDirectory) Identities(login string) (out []string, err error) {
 	login = strings.ToLower(strings.TrimSpace(login))
 	var id int64
 	var username string
-	err := d.db.QueryRow(`
+	err = d.db.QueryRow(`
 SELECT u.id, u.username FROM users u WHERE u.username = ?
 UNION
 SELECT u.id, u.username FROM users u JOIN aliases al ON al.mainname = u.username WHERE al.aliasname = ?
@@ -321,7 +360,7 @@ LIMIT 1`, login, login, login).Scan(&id, &username)
 	// CreateAlias, would let the account keep originating mail claiming an address
 	// the operator no longer has any authority over. A bare value carries no
 	// domain to claim and serves the alternative-login path, so it is kept.
-	out := []string{username}
+	out = []string{username}
 	rows, err := d.db.Query(`
 SELECT aliasname FROM aliases
  WHERE mainname = ?
@@ -335,7 +374,7 @@ SELECT altname FROM altnames
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var a string
 		if err := rows.Scan(&a); err != nil {
@@ -351,7 +390,7 @@ SELECT altname FROM altnames
 // with a maildir. These are exactly the accounts that can schedule a send, so
 // the send-later spooler scans their Outboxes; disabled accounts and non-mailbox
 // objects (distribution lists, rooms) are skipped.
-func (d *SQLDirectory) Maildirs() ([]string, error) {
+func (d *SQLDirectory) Maildirs() (out []string, err error) {
 	const q = `
 SELECT DISTINCT u.maildir
   FROM users u JOIN domains d ON u.domain_id = d.id
@@ -364,8 +403,7 @@ SELECT DISTINCT u.maildir
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []string
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var maildir string
 		if err := rows.Scan(&maildir); err != nil {
@@ -379,7 +417,7 @@ SELECT DISTINCT u.maildir
 // MailboxOwners implements MailboxOwnerLister over the accounts Maildirs lists,
 // each mailbox with the account that owns it. A maildir recorded on two accounts
 // is listed once, under the first username.
-func (d *SQLDirectory) MailboxOwners() ([]MailboxOwner, error) {
+func (d *SQLDirectory) MailboxOwners() (out []MailboxOwner, err error) {
 	const q = `
 SELECT u.username, u.maildir
   FROM users u JOIN domains d ON u.domain_id = d.id
@@ -393,9 +431,8 @@ SELECT u.username, u.maildir
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer closeRows(rows, &err)
 	seen := map[string]bool{}
-	var out []MailboxOwner
 	for rows.Next() {
 		var username, maildir string
 		if err := rows.Scan(&username, &maildir); err != nil {
@@ -417,7 +454,7 @@ SELECT u.username, u.maildir
 // These have no interactive login, so webmail lists the ones the signed-in user
 // has been granted access to. The username column is the mailbox's e-mail
 // address.
-func (d *SQLDirectory) SharedMailboxes(caller string) ([]SharedMailbox, error) {
+func (d *SQLDirectory) SharedMailboxes(caller string) (out []SharedMailbox, err error) {
 	scope, ok, err := d.galScope(caller)
 	if err != nil || !ok {
 		return nil, err
@@ -436,8 +473,7 @@ SELECT u.username, u.maildir
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []SharedMailbox
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var addr, maildir string
 		if err := rows.Scan(&addr, &maildir); err != nil {
@@ -459,7 +495,7 @@ SELECT u.username, u.maildir
 // PR_DISPLAY_NAME from user_properties, falling back to the address when none is
 // set; DisplayType carries the object class (the users.display_type column, not
 // joined from user_properties).
-func (d *SQLDirectory) SearchGAL(caller, query string, limit int, hide uint32) ([]GALEntry, error) {
+func (d *SQLDirectory) SearchGAL(caller, query string, limit int, hide uint32) (out []GALEntry, err error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -490,8 +526,7 @@ SELECT u.username, u.display_type, u.maildir, dn.propval_str, hg.propval_str, hb
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []GALEntry
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		e, err := d.scanGALEntry(rows)
 		if err != nil {
@@ -612,13 +647,12 @@ type DomainInfo struct {
 }
 
 // ListDomains returns every domain, ordered by name, for the admin API.
-func (d *SQLDirectory) ListDomains() ([]DomainInfo, error) {
+func (d *SQLDirectory) ListDomains() (out []DomainInfo, err error) {
 	rows, err := d.db.Query(`SELECT id, domainname, org_id, domain_status FROM domains ORDER BY domainname`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []DomainInfo
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var di DomainInfo
 		if err := rows.Scan(&di.ID, &di.Name, &di.OrgID, &di.Status); err != nil {
@@ -641,14 +675,13 @@ type UserInfo struct {
 }
 
 // ListUsers returns every user, ordered by name, for the admin API.
-func (d *SQLDirectory) ListUsers() ([]UserInfo, error) {
+func (d *SQLDirectory) ListUsers() (out []UserInfo, err error) {
 	rows, err := d.db.Query(
 		`SELECT id, username, domain_id, address_status, externid IS NOT NULL FROM users ORDER BY username`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []UserInfo
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var ui UserInfo
 		var ldap int
@@ -663,14 +696,13 @@ func (d *SQLDirectory) ListUsers() ([]UserInfo, error) {
 
 // ListUsersInDomain returns the users of one domain, ordered by name, for the
 // per-domain admin views.
-func (d *SQLDirectory) ListUsersInDomain(domainID int64) ([]UserInfo, error) {
+func (d *SQLDirectory) ListUsersInDomain(domainID int64) (out []UserInfo, err error) {
 	rows, err := d.db.Query(
 		`SELECT id, username, domain_id, address_status, externid IS NOT NULL FROM users WHERE domain_id = ? ORDER BY username`, domainID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []UserInfo
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var ui UserInfo
 		var ldap int
@@ -798,7 +830,7 @@ func (d *SQLDirectory) UpdateDomain(id int64, u DomainUpdate) (bool, error) {
 // CreateUser inserts a mailbox user (username is its e-mail address) with a
 // freshly crypt(3)-hashed password and the given maildir, creating the maildir
 // on disk. The user's domain must already exist.
-func (d *SQLDirectory) CreateUser(username, password, maildir string) (int64, error) {
+func (d *SQLDirectory) CreateUser(username, password, maildir string) (id int64, err error) {
 	username = strings.ToLower(strings.TrimSpace(username))
 	domainID, err := d.domainWithRoom(username)
 	if err != nil {
@@ -815,7 +847,7 @@ func (d *SQLDirectory) CreateUser(username, password, maildir string) (int64, er
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	if err := checkAddressUnclaimed(tx, username); err != nil {
 		return 0, err
 	}
@@ -827,7 +859,7 @@ func (d *SQLDirectory) CreateUser(username, password, maildir string) (int64, er
 	if err != nil {
 		return 0, err
 	}
-	id, err := res.LastInsertId()
+	id, err = res.LastInsertId()
 	if err != nil {
 		return 0, err
 	}
@@ -1069,7 +1101,11 @@ func privilegesFromBits(priv uint32) ServicePrivileges {
 // privilege_bits; ok is false when no user has that username.
 func (d *SQLDirectory) Privileges(user string) (ServicePrivileges, bool) {
 	u, ok, err := d.GetUser(user)
-	if err != nil || !ok {
+	if err != nil {
+		d.warn("directory.privileges.fail", err, logging.Fields{"user": user})
+		return ServicePrivileges{}, false
+	}
+	if !ok {
 		return ServicePrivileges{}, false
 	}
 	return ServicePrivileges{
@@ -1200,19 +1236,22 @@ func (d *SQLDirectory) DeleteUser(username string, deleteFiles bool) (bool, erro
 		return false, err
 	}
 	if deleteFiles && maildir != "" {
-		_ = os.RemoveAll(maildir) // best-effort: the row is gone; an orphaned maildir is harmless
+		// best-effort: the row is gone; an orphaned maildir is harmless, but record the failure
+		if err := os.RemoveAll(maildir); err != nil {
+			d.warn("directory.maildir_remove.fail", err, logging.Fields{"user": username})
+		}
 	}
 	return true, nil
 }
 
 // deleteUserRows removes, in one transaction, the user row and every row keyed
 // to it by address rather than by a foreign key.
-func (d *SQLDirectory) deleteUserRows(username string) error {
+func (d *SQLDirectory) deleteUserRows(username string) (err error) {
 	tx, err := d.db.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	statements := []string{
 		`DELETE FROM aliases WHERE mainname = ?`,
 		// forwards.username is a plain string with no FK, so the row is removed
@@ -1238,7 +1277,7 @@ func (d *SQLDirectory) deleteUserRows(username string) error {
 
 // ListAltnames returns a user's alternative login names, ordered, for the admin
 // detail view; an unknown user simply has none.
-func (d *SQLDirectory) ListAltnames(username string) ([]string, error) {
+func (d *SQLDirectory) ListAltnames(username string) (out []string, err error) {
 	rows, err := d.db.Query(
 		`SELECT a.altname FROM altnames a JOIN users u ON a.user_id = u.id
 		 WHERE u.username = ? ORDER BY a.altname`,
@@ -1246,8 +1285,7 @@ func (d *SQLDirectory) ListAltnames(username string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []string
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var a string
 		if err := rows.Scan(&a); err != nil {
@@ -1278,10 +1316,10 @@ func cleanAltnames(altnames []string) []string {
 // (lowercased, trimmed, de-duplicated, blanks dropped), reporting whether the
 // user existed. The replace runs in one transaction; the altname UNIQUE key
 // rejects a name already taken by another account, rolling the change back.
-func (d *SQLDirectory) SetAltnames(username string, altnames []string) (bool, error) {
+func (d *SQLDirectory) SetAltnames(username string, altnames []string) (existed bool, err error) {
 	username = strings.ToLower(strings.TrimSpace(username))
 	var id int64
-	err := d.db.QueryRow(`SELECT id FROM users WHERE username = ?`, username).Scan(&id)
+	err = d.db.QueryRow(`SELECT id FROM users WHERE username = ?`, username).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -1293,7 +1331,7 @@ func (d *SQLDirectory) SetAltnames(username string, altnames []string) (bool, er
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	if _, err := tx.Exec(`DELETE FROM altnames WHERE user_id = ?`, id); err != nil {
 		return false, err
 	}
@@ -1316,15 +1354,14 @@ func (d *SQLDirectory) SetAltnames(username string, altnames []string) (bool, er
 
 // ListAliasesFor returns the e-mail aliases that deliver to a user (the aliases
 // whose mainname is the user), ordered, for the admin detail view.
-func (d *SQLDirectory) ListAliasesFor(username string) ([]string, error) {
+func (d *SQLDirectory) ListAliasesFor(username string) (out []string, err error) {
 	rows, err := d.db.Query(
 		`SELECT aliasname FROM aliases WHERE mainname = ? ORDER BY aliasname`,
 		strings.ToLower(strings.TrimSpace(username)))
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []string
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var a string
 		if err := rows.Scan(&a); err != nil {
@@ -1340,8 +1377,8 @@ func (d *SQLDirectory) ListAliasesFor(username string) ([]string, error) {
 // user existed. The replace runs in one transaction; the aliasname UNIQUE key
 // rejects an address already in use, rolling the change back.
 func (d *SQLDirectory) SetAliasesFor(username string, aliases []string) (bool, error) {
-	_, found, err := d.replaceAliases(username, aliases, checkAlias, false)
-	return found, err
+	res, err := d.replaceAliases(username, aliases, checkAlias, false)
+	return res.found, err
 }
 
 // SyncAliasesFor replaces a user's aliases the way SetAliasesFor does, but skips an address
@@ -1353,47 +1390,54 @@ func (d *SQLDirectory) SetAliasesFor(username string, aliases []string) (bool, e
 // The directory it reads belongs to one customer, so an address it publishes must also lie
 // in the account's own organization (checkAliasInOrg): an alias in another customer's
 // domain would take that customer's mail and let the account send under the address.
-func (d *SQLDirectory) SyncAliasesFor(username string, aliases []string) (skipped []string, found bool, err error) {
-	return d.replaceAliases(username, aliases, checkAlias, true)
+func (d *SQLDirectory) SyncAliasesFor(username string, aliases []string) ([]string, bool, error) {
+	res, err := d.replaceAliases(username, aliases, checkAlias, true)
+	return res.skipped, res.found, err
+}
+
+type aliasReplaceResult struct {
+	skipped []string
+	found   bool
 }
 
 // replaceAliases is the shared body: it clears the user's aliases and re-inserts the given
 // set inside one transaction, each address passing check. skipRejected decides what a failed
 // check does, abort the whole replace or skip that one address.
 func (d *SQLDirectory) replaceAliases(username string, aliases []string, check func(rowQuerier, string, string) error,
-	skipRejected bool) (skipped []string, found bool, err error) {
+	skipRejected bool) (res aliasReplaceResult, err error) {
 	username = strings.ToLower(strings.TrimSpace(username))
 	var id int64
 	err = d.db.QueryRow(`SELECT id FROM users WHERE username = ?`, username).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, false, nil
+		return aliasReplaceResult{}, nil
 	}
 	if err != nil {
-		return nil, false, err
+		return aliasReplaceResult{}, err
 	}
 	tx, err := d.db.Begin()
 	if err != nil {
-		return nil, false, err
+		return aliasReplaceResult{}, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	// Clear first, then validate: the user's current aliases are being replaced,
 	// so they must not count as collisions against themselves.
 	if _, err := tx.Exec(`DELETE FROM aliases WHERE mainname = ?`, username); err != nil {
-		return nil, false, err
+		return aliasReplaceResult{}, err
 	}
 	for _, a := range normalizedAliases(aliases) {
 		if err := check(tx, a, username); err != nil {
 			if !skipRejected {
-				return nil, false, err
+				return aliasReplaceResult{}, err
 			}
-			skipped = append(skipped, a)
+			res.skipped = append(res.skipped, a)
 			continue
 		}
 		if _, err := tx.Exec(`INSERT INTO aliases (aliasname, mainname) VALUES (?, ?)`, a, username); err != nil {
-			return nil, false, err
+			return aliasReplaceResult{}, err
 		}
 	}
-	return skipped, true, tx.Commit()
+	res.found = true
+	return res, tx.Commit()
 }
 
 // normalizedAliases lowercases and trims the requested aliases, dropping empties
@@ -1472,7 +1516,7 @@ func (d *SQLDirectory) SetForward(username string, forwardType int, destination 
 // GetUserProperties returns a user's string-valued (PtUnicode) MAPI properties,
 // keyed by full 32-bit proptag, for the admin contact/detail view. Binary
 // properties and multi-valued rows (order_id > 1) are not returned.
-func (d *SQLDirectory) GetUserProperties(username string) (map[uint32]string, error) {
+func (d *SQLDirectory) GetUserProperties(username string) (out map[uint32]string, err error) {
 	rows, err := d.db.Query(
 		`SELECT p.proptag, p.propval_str
 		   FROM user_properties p JOIN users u ON p.user_id = u.id
@@ -1481,8 +1525,8 @@ func (d *SQLDirectory) GetUserProperties(username string) (map[uint32]string, er
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := map[uint32]string{}
+	defer closeRows(rows, &err)
+	out = map[uint32]string{}
 	for rows.Next() {
 		var tag uint32
 		var val string
@@ -1499,10 +1543,10 @@ func (d *SQLDirectory) GetUserProperties(username string) (map[uint32]string, er
 // user_properties is a shared EAV table, so a non-empty value upserts that one
 // proptag and an empty value deletes it, while every other property of the user
 // (creationtime, address-book cloak bits, ...) is left intact. order_id is 1.
-func (d *SQLDirectory) SetUserProperties(username string, props map[uint32]string) (bool, error) {
+func (d *SQLDirectory) SetUserProperties(username string, props map[uint32]string) (existed bool, err error) {
 	username = strings.ToLower(strings.TrimSpace(username))
 	var id int64
-	err := d.db.QueryRow(`SELECT id FROM users WHERE username = ?`, username).Scan(&id)
+	err = d.db.QueryRow(`SELECT id FROM users WHERE username = ?`, username).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -1513,7 +1557,7 @@ func (d *SQLDirectory) SetUserProperties(username string, props map[uint32]strin
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	hide := touchesHideMask(props)
 	if hide {
 		// Lock the user row before the property rows, the order syncHideMasks
@@ -1540,7 +1584,7 @@ func writeUserProperties(tx *sql.Tx, id int64, props map[uint32]string) error {
 	for tag, val := range props {
 		val = strings.TrimSpace(val)
 		if tag == prRoomCapacity {
-			if _, err := parseRoomCapacity(val); err != nil {
+			if err := validateRoomCapacity(val); err != nil {
 				return fmt.Errorf("directory: %w", err)
 			}
 		}
@@ -1584,13 +1628,12 @@ type AliasInfo struct {
 }
 
 // ListAliases returns every alias, ordered by alias address, for the admin API.
-func (d *SQLDirectory) ListAliases() ([]AliasInfo, error) {
+func (d *SQLDirectory) ListAliases() (out []AliasInfo, err error) {
 	rows, err := d.db.Query(`SELECT id, aliasname, mainname FROM aliases ORDER BY aliasname`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []AliasInfo
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var ai AliasInfo
 		if err := rows.Scan(&ai.ID, &ai.Alias, &ai.Main); err != nil {

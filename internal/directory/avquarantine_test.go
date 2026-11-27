@@ -6,7 +6,7 @@ import "testing"
 // reassembled), an unknown id is a clean miss, and the domain-scoped list only
 // returns records a given admin scope may see.
 func TestQuarantineCRUD(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
 	dom := mustCreateDomain(t, d, root, "acme.test")
 	other := mustCreateDomain(t, d, root, "other.test")
@@ -37,9 +37,10 @@ func TestQuarantineCRUD(t *testing.T) {
 	}
 	wantEq(t, "first recipient", rec.Recipients[0], "victim@acme.test")
 
-	_, found, err := d.GetQuarantine(id + 999)
+	missing, found, err := d.GetQuarantine(id + 999)
 	mustNoErr(t, "get an unknown record", err)
 	wantEq(t, "GetQuarantine(unknown) found", found, false)
+	wantEq(t, "GetQuarantine(unknown) id", missing.ID, int64(0))
 
 	// Scoping: system (all) sees it, the owning domain sees it, another domain
 	// and an empty scope see nothing.
@@ -49,9 +50,10 @@ func TestQuarantineCRUD(t *testing.T) {
 	wantEq(t, "records an empty scope sees", len(mustListQuarantine(t, d, nil, false)), 0)
 
 	mustNoErr(t, "delete quarantine record", d.DeleteQuarantine(id))
-	_, stillThere, err := d.GetQuarantine(id)
+	goneRec, stillThere, err := d.GetQuarantine(id)
 	mustNoErr(t, "get the deleted record", err)
 	wantEq(t, "record present after delete", stillThere, false)
+	wantEq(t, "deleted record id", goneRec.ID, int64(0))
 }
 
 // mustListQuarantine lists the quarantine records one admin scope may see.
@@ -65,17 +67,18 @@ func mustListQuarantine(t *testing.T, d *SQLDirectory, domains []int64, all bool
 // TestDomainOrgAdminEmails proves the notification resolver returns a domain's
 // domain admins plus its organization's org admins, and excludes non-admins.
 func TestDomainOrgAdminEmails(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	root := t.TempDir()
 	dom := mustCreateDomain(t, d, root, "acme.test")
 	org, err := d.CreateOrg("acme-org", "")
 	mustNoErr(t, "create org", err)
-	_, err = d.AssignDomainToOrg(dom, org)
+	ok, err := d.AssignDomainToOrg(dom, org)
 	mustNoErr(t, "assign the domain to the org", err)
+	wantEq(t, "domain assigned to org", ok, true)
 
 	dadmin := mustCreateUser(t, d, root, "dadmin@acme.test", "password1")
 	oadmin := mustCreateUser(t, d, root, "oadmin@acme.test", "password1")
-	mustCreateUser(t, d, root, "plain@acme.test", "password1") // no admin role
+	seedUser(t, d, root, "plain@acme.test", "password1") // no admin role
 
 	mustNoErr(t, "grant domain admin", d.GrantAdminRole(dadmin, AdminDomain, dom))
 	mustNoErr(t, "grant org admin", d.GrantAdminRole(oadmin, AdminOrg, org))
@@ -85,8 +88,9 @@ func TestDomainOrgAdminEmails(t *testing.T) {
 	otherDom := mustCreateDomain(t, d, root, "other.test")
 	otherOrg, err := d.CreateOrg("other-org", "")
 	mustNoErr(t, "create the other org", err)
-	_, err = d.AssignDomainToOrg(otherDom, otherOrg)
+	ok, err = d.AssignDomainToOrg(otherDom, otherOrg)
 	mustNoErr(t, "assign the other domain to the other org", err)
+	wantEq(t, "other domain assigned to org", ok, true)
 	odadmin := mustCreateUser(t, d, root, "dadmin@other.test", "password1")
 	ooadmin := mustCreateUser(t, d, root, "oadmin@other.test", "password1")
 	mustNoErr(t, "grant the other domain admin", d.GrantAdminRole(odadmin, AdminDomain, otherDom))

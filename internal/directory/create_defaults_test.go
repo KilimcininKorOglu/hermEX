@@ -9,14 +9,17 @@ import (
 // default language the interface does not ship, with the error a user preference
 // gets, so no caller can hand new accounts a language SetUserPrefs would refuse.
 func TestCreateDefaultsRefuseAnUnknownLanguage(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 	err := d.SetCreateDefaults(0, CreateDefaults{User: UserCreateDefaults{Lang: new("xx")}})
 	if !errors.Is(err, ErrInvalidPref) {
 		t.Fatalf("SetCreateDefaults(lang xx) = %v, want ErrInvalidPref", err)
 	}
-	_, ok, err := d.GetCreateDefaults(0)
+	empty, ok, err := d.GetCreateDefaults(0)
 	mustNoErr(t, "read the system scope", err)
 	wantEq(t, "a refused set stored a row", ok, false)
+	if empty.Domain.MaxUser != 0 || empty.User != (UserCreateDefaults{}) {
+		t.Errorf("unexpected create defaults on refused set: %+v", empty)
+	}
 	for _, lang := range []string{"", "en", "tr"} {
 		mustNoErr(t, "set lang "+lang, d.SetCreateDefaults(0, CreateDefaults{User: UserCreateDefaults{Lang: new(lang)}}))
 	}
@@ -25,11 +28,14 @@ func TestCreateDefaultsRefuseAnUnknownLanguage(t *testing.T) {
 // TestCreateDefaultsRoundTrip proves a scope's defaults store and read back, and
 // that a per-domain scope is independent of the system scope.
 func TestCreateDefaultsRoundTrip(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 
-	_, ok, err := d.GetCreateDefaults(0)
+	empty, ok, err := d.GetCreateDefaults(0)
 	mustNoErr(t, "read the unset system scope", err)
 	wantEq(t, "a scope with nothing stored is found", ok, false)
+	if empty.Domain.MaxUser != 0 || empty.User != (UserCreateDefaults{}) {
+		t.Errorf("unexpected create defaults on empty scope: %+v", empty)
+	}
 
 	mustNoErr(t, "set the system scope", d.SetCreateDefaults(0, CreateDefaults{
 		Domain: DomainCreateDefaults{MaxUser: 50},
@@ -89,22 +95,29 @@ func TestPurgeDomainClearsCreateDefaults(t *testing.T) {
 	if err := d.SetCreateDefaults(id, CreateDefaults{User: UserCreateDefaults{Web: new(false)}}); err != nil {
 		t.Fatal(err)
 	}
+	other := mustCreateDomain(t, d, t.TempDir(), "other.test")
+	wantNonZeroID(t, "the other domain's id", other)
+	mustNoErr(t, "set the other domain's override", d.SetCreateDefaults(other, CreateDefaults{User: UserCreateDefaults{EAS: new(false)}}))
+	mustNoErr(t, "set the system layer", d.SetCreateDefaults(0, CreateDefaults{User: UserCreateDefaults{Lang: new("tr")}}))
 	mustCreateDefaults(t, d, id)
 	if ok, err := d.PurgeDomain(id, false); err != nil || !ok {
 		t.Fatalf("PurgeDomain = %v, %v", ok, err)
 	}
-	_, ok, err := d.GetCreateDefaults(id)
+	gone, ok, err := d.GetCreateDefaults(id)
 	mustNoErr(t, "read the purged domain's defaults", err)
-	if ok {
-		t.Error("create-defaults override survived the domain purge")
+	if ok || gone.Domain.MaxUser != 0 || gone.User != (UserCreateDefaults{}) {
+		t.Errorf("create-defaults override survived the domain purge: %+v, ok=%v", gone, ok)
 	}
+	// The purge removes only that domain's row.
+	wantSet(t, "the other domain's override after the purge", mustCreateDefaults(t, d, other).User.EAS, false)
+	wantSet(t, "the system layer after the purge", mustCreateDefaults(t, d, 0).User.Lang, "tr")
 }
 
 // TestEffectiveUserDefaults proves the three-layer resolution: the built-in
 // baseline, the system layer over it, and the per-domain override on top, merged
 // field by field. It also proves clearing a domain override falls back to system.
 func TestEffectiveUserDefaults(t *testing.T) {
-	d, _ := freshDirectory(t)
+	d := freshSQL(t)
 
 	// Nothing stored: the built-in baseline (the unconfigured-create behaviour).
 	base := mustEffectiveDefaults(t, d, 5)

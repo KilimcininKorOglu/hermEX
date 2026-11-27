@@ -41,14 +41,14 @@ var ErrContactInOtherDomain = errors.New("directory: the contact is filed under 
 // email and unused. The filing domain must already exist; because the GAL is
 // org-wide, it only scopes which active domain the contact rides on, not who can
 // see it.
-func (d *SQLDirectory) CreateContact(email, displayName, domain string) (int64, error) {
+func (d *SQLDirectory) CreateContact(email, displayName, domain string) (id int64, err error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	if err := ValidateContactAddress(email); err != nil {
 		return 0, err
 	}
 	domain = strings.ToLower(strings.TrimSpace(domain))
 	var domainID int64
-	err := d.db.QueryRow(`SELECT id FROM domains WHERE domainname = ?`, domain).Scan(&domainID)
+	err = d.db.QueryRow(`SELECT id FROM domains WHERE domainname = ?`, domain).Scan(&domainID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, fmt.Errorf("directory: domain %q not found", domain)
 	}
@@ -59,7 +59,7 @@ func (d *SQLDirectory) CreateContact(email, displayName, domain string) (int64, 
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer rollbackTx(tx, &err)
 	if err := checkAddressUnclaimed(tx, email); err != nil {
 		return 0, err
 	}
@@ -69,7 +69,7 @@ func (d *SQLDirectory) CreateContact(email, displayName, domain string) (int64, 
 	if err != nil {
 		return 0, err
 	}
-	id, err := res.LastInsertId()
+	id, err = res.LastInsertId()
 	if err != nil {
 		return 0, err
 	}
@@ -93,7 +93,10 @@ func (d *SQLDirectory) UpdateContact(email, displayName string) (bool, error) {
 	if err != nil || !found {
 		return false, err
 	}
-	return d.setContactDisplayName(id, displayName)
+	if err := d.setContactDisplayName(id, displayName); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // editableContactID resolves an address to a contact an operator may change: it reports
@@ -121,19 +124,19 @@ func (d *SQLDirectory) editableContactID(email string) (id int64, found bool, er
 
 // setContactDisplayName writes or clears a contact's PR_DISPLAY_NAME. Clearing it lets the
 // GAL fall back to the address.
-func (d *SQLDirectory) setContactDisplayName(id int64, displayName string) (bool, error) {
+func (d *SQLDirectory) setContactDisplayName(id int64, displayName string) error {
 	var err error
 	if name := strings.TrimSpace(displayName); name != "" {
 		_, err = d.db.Exec(
 			`INSERT INTO user_properties (user_id, proptag, order_id, propval_str, propval_bin) VALUES (?, ?, 1, ?, NULL)
 			 ON DUPLICATE KEY UPDATE propval_str = VALUES(propval_str), propval_bin = NULL`,
 			id, prDisplayName, name)
-		return true, err
+		return err
 	}
 	_, err = d.db.Exec(
 		`DELETE FROM user_properties WHERE user_id = ? AND proptag = ? AND order_id = 1`,
 		id, prDisplayName)
-	return true, err
+	return err
 }
 
 // DeleteContact removes an org mail contact, reporting whether one was removed.
@@ -181,9 +184,8 @@ func (d *SQLDirectory) ListContactsInDomain(domainID int64) ([]ContactInfo, erro
 
 // scanContacts reads a contactSelect result set, falling the display name back to the
 // address and rendering the LDAP id as hex for display.
-func scanContacts(rows *sql.Rows) ([]ContactInfo, error) {
-	defer rows.Close()
-	var out []ContactInfo
+func scanContacts(rows *sql.Rows) (out []ContactInfo, err error) {
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var c ContactInfo
 		var name sql.NullString
@@ -235,8 +237,7 @@ func (d *SQLDirectory) UpsertLDAPContact(email string, externid []byte, displayN
 	if created {
 		return true, nil
 	}
-	_, err = d.setContactDisplayName(id, displayName)
-	return false, err
+	return false, d.setContactDisplayName(id, displayName)
 }
 
 // contactRowID resolves an address to its contact row and the domain it is filed

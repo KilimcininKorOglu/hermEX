@@ -13,19 +13,25 @@ import (
 func TestBrandingTaglineMigration(t *testing.T) {
 	d, db := freshDirectory(t)
 	root := t.TempDir()
-	mustCreateDomain(t, d, root, "only.test")
-	mustCreateDomain(t, d, root, "mixed.test")
+	seedDomain(t, d, root, "only.test")
+	seedDomain(t, d, root, "mixed.test")
 	for domain, blob := range map[string]string{
 		"only.test":  `{"tagline":"Mail by Acme"}`,
 		"mixed.test": `{"app_name":"Acme Mail","tagline":"Mail by Acme"}`,
 	} {
-		_, err := db.Exec(`UPDATE domains SET branding_json = ? WHERE domainname = ?`, blob, domain)
+		res, err := db.Exec(`UPDATE domains SET branding_json = ? WHERE domainname = ?`, blob, domain)
 		mustNoErr(t, "store the old blob of "+domain, err)
+		n, err := res.RowsAffected()
+		mustNoErr(t, "count the stored blob of "+domain, err)
+		wantEq(t, "rows holding the old blob of "+domain, n, int64(1))
 	}
 	// The runner resumes after the highest recorded version, so the migration and
 	// every later one are marked not applied; each of them runs again idempotently.
-	_, err := db.Exec(`DELETE FROM schema_migrations WHERE version >= 59`)
+	res, err := db.Exec(`DELETE FROM schema_migrations WHERE version >= 59`)
 	mustNoErr(t, "mark the migration as not applied", err)
+	unmarked, err := res.RowsAffected()
+	mustNoErr(t, "count the unmarked migrations", err)
+	wantEq(t, "migration 59 and later were unmarked", unmarked >= 1, true)
 	mustNoErr(t, "apply the migration", d.EnsureSchema())
 
 	stored := func(domain string) sql.NullString {
@@ -50,8 +56,8 @@ func TestBrandingTaglineMigration(t *testing.T) {
 // global default), and that clearing every field removes the override rather than
 // persisting an empty record.
 func TestDomainBrandingRoundtrip(t *testing.T) {
-	d, _ := freshDirectory(t)
-	mustCreateDomain(t, d, t.TempDir(), "hermex.test")
+	d := freshSQL(t)
+	seedDomain(t, d, t.TempDir(), "hermex.test")
 	branding := func(what string) (DomainBranding, bool) {
 		t.Helper()
 		got, has, err := d.GetDomainBranding("hermex.test")
@@ -60,8 +66,9 @@ func TestDomainBrandingRoundtrip(t *testing.T) {
 	}
 
 	// A fresh domain has no branding and inherits the default.
-	_, has := branding("read the branding of a fresh domain")
+	empty, has := branding("read the branding of a fresh domain")
 	wantEq(t, "a fresh domain has branding", has, false)
+	wantEq(t, "a fresh domain branding value", empty, DomainBranding{})
 
 	want := DomainBranding{AppName: "Acme Mail", PrimaryColor: "#ff0000", FooterText: "Mail by Acme"}
 	mustNoErr(t, "set the branding", d.SetDomainBranding("hermex.test", want))
@@ -71,21 +78,33 @@ func TestDomainBrandingRoundtrip(t *testing.T) {
 
 	// Clearing every field removes the override so the domain inherits the default.
 	mustNoErr(t, "clear the branding", d.SetDomainBranding("hermex.test", DomainBranding{}))
-	_, has = branding("read the branding after clearing it")
+	cleared, has := branding("read the branding after clearing it")
 	wantEq(t, "the domain still has branding after clearing every field", has, false)
+	wantEq(t, "cleared branding value", cleared, DomainBranding{})
 }
 
 // TestSetDomainBrandingRefusesHostileValues sends a colour carrying CSS and a
 // script logo through the store path, not only Validate: the login page renders
 // what is stored, so a refused save must leave the earlier branding in place.
 func TestSetDomainBrandingRefusesHostileValues(t *testing.T) {
-	d, _ := freshDirectory(t)
-	mustCreateDomain(t, d, t.TempDir(), "hermex.test")
+	d := freshSQL(t)
+	root := t.TempDir()
+	seedDomain(t, d, root, "hermex.test")
+	seedDomain(t, d, root, "other.test")
 	kept := DomainBranding{AppName: "Acme Mail", PrimaryColor: "#ff0000"}
 	mustNoErr(t, "set the branding", d.SetDomainBranding("hermex.test", kept))
 	for name, b := range map[string]DomainBranding{
 		"colour with CSS": {PrimaryColor: "red;}</style><script>x</script>"},
 		"script logo":     {LogoURL: "javascript:alert(1)"},
+		// The login page is HTTPS: an http logo is mixed content, data: is no
+		// image location, and userinfo lets a link show a host it does not open.
+		"http logo":            {LogoURL: "http://cdn.example/logo.png"},
+		"data logo":            {LogoURL: "data:image/svg+xml,<svg onload=alert(1)>"},
+		"userinfo logo":        {LogoURL: "https://cdn.example@evil.example/logo.png"},
+		"app name with CR LF":  {AppName: "Acme\r\nSet-Cookie: x=y"},
+		"app name over limit":  {AppName: strings.Repeat("a", MaxBrandingAppName+1)},
+		"footer not UTF-8":     {FooterText: "Mail \xff by Acme"},
+		"colour named not hex": {PrimaryColor: "red"},
 	} {
 		if err := d.SetDomainBranding("hermex.test", b); !errors.Is(err, ErrInvalidBranding) {
 			t.Errorf("%s: %v, want ErrInvalidBranding", name, err)
@@ -95,4 +114,9 @@ func TestSetDomainBrandingRefusesHostileValues(t *testing.T) {
 	mustNoErr(t, "read the branding back", err)
 	wantEq(t, "the domain keeps its branding", has, true)
 	wantEq(t, "the branding after refused saves", got, kept)
+	// Another tenant's domain inherits the default: one domain's branding is its own.
+	other, has, err := d.GetDomainBranding("other.test")
+	mustNoErr(t, "read the other domain's branding", err)
+	wantEq(t, "the other domain has branding", has, false)
+	wantEq(t, "the other domain's branding", other, DomainBranding{})
 }

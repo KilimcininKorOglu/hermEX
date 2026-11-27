@@ -68,7 +68,7 @@ func clipText(s string, n int) string {
 // running sessions updated within sessionRunningTTL and ended sessions within
 // sessionEndedTTL, most-recently-updated first. The age filter is the source of
 // truth, so a stale row never shows even before the sweep removes it.
-func (d *SQLDirectory) ListActiveSessions(now int64) ([]SessionRecord, error) {
+func (d *SQLDirectory) ListActiveSessions(now int64) (out []SessionRecord, err error) {
 	rows, err := d.db.Query(`
 		SELECT session_id, username, device_id, device_type, user_agent, ip, command, as_version,
 		       start_at, last_update, ended_at, push, addinfo
@@ -79,8 +79,7 @@ func (d *SQLDirectory) ListActiveSessions(now int64) ([]SessionRecord, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []SessionRecord
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var s SessionRecord
 		var push int

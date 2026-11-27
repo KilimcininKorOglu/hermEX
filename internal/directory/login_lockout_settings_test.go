@@ -10,9 +10,11 @@ func lockoutTestDir(t *testing.T) *SQLDirectory {
 	if err := d.EnsureSchema(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("DELETE FROM login_lockout_settings"); err != nil {
-		t.Fatal(err)
-	}
+	res, err := db.Exec("DELETE FROM login_lockout_settings")
+	mustNoErr(t, "clear the lockout settings", err)
+	cleared, err := res.RowsAffected()
+	mustNoErr(t, "count the cleared rows", err)
+	wantEq(t, "at most the one settings row was cleared", cleared <= 1, true)
 	return d
 }
 
@@ -25,8 +27,8 @@ func TestLoginLockoutSettingsDefaultToUnset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if found {
-		t.Errorf("an untouched install reports stored settings: %+v", s)
+	if found || s != (LoginLockoutSettings{}) {
+		t.Errorf("an untouched install reports stored settings: found=%v %+v", found, s)
 	}
 }
 
@@ -60,11 +62,12 @@ func TestLoginLockoutSettingsUpsert(t *testing.T) {
 	if err := d.SetLoginLockoutSettings(loosened); err != nil {
 		t.Fatal(err)
 	}
-	got, _, err := d.GetLoginLockoutSettings()
+	got, found, err := d.GetLoginLockoutSettings()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != loosened {
-		t.Errorf("settings = %+v, want the second save %+v", got, loosened)
+	if !found || got != loosened {
+		t.Errorf("settings = %+v (found=%v), want the second save %+v", got, found, loosened)
 	}
+	wantRows(t, d.db, "settings rows after two saves", 1, `SELECT COUNT(*) FROM login_lockout_settings`)
 }

@@ -21,7 +21,7 @@ type RecipientRule struct {
 // server-wide list, with no risk of the two drifting. The map is empty when the user
 // has no rules or is unknown; the maildir identifies the user, so an alias recipient
 // resolves to the owner's rules. The caller treats an error as no rules (fail-open).
-func (d *SQLDirectory) RecipientRulesForMaildir(maildir string) (map[string]string, error) {
+func (d *SQLDirectory) RecipientRulesForMaildir(maildir string) (out map[string]string, err error) {
 	rows, err := d.db.Query(
 		`SELECT ra.pattern, ra.action
 		   FROM recipient_access ra JOIN users u ON ra.user_id = u.id
@@ -29,8 +29,8 @@ func (d *SQLDirectory) RecipientRulesForMaildir(maildir string) (map[string]stri
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := make(map[string]string)
+	defer closeRows(rows, &err)
+	out = make(map[string]string)
 	for rows.Next() {
 		var pattern, action string
 		if err := rows.Scan(&pattern, &action); err != nil {
@@ -89,7 +89,7 @@ func (d *SQLDirectory) DeleteRecipientRule(username, pattern string) (bool, erro
 
 // ListRecipientRules returns a user's personal rules, blocks first then allows,
 // alphabetical within each, for the management UI.
-func (d *SQLDirectory) ListRecipientRules(username string) ([]RecipientRule, error) {
+func (d *SQLDirectory) ListRecipientRules(username string) (out []RecipientRule, err error) {
 	username = strings.ToLower(strings.TrimSpace(username))
 	rows, err := d.db.Query(
 		`SELECT ra.pattern, ra.action, ra.created_at
@@ -98,8 +98,7 @@ func (d *SQLDirectory) ListRecipientRules(username string) ([]RecipientRule, err
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []RecipientRule
+	defer closeRows(rows, &err)
 	for rows.Next() {
 		var r RecipientRule
 		if err := rows.Scan(&r.Pattern, &r.Action, &r.CreatedAt); err != nil {
