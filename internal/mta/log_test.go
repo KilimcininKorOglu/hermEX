@@ -41,21 +41,35 @@ func TestFailedSubmissionLoginIsRecordedWithoutThePassword(t *testing.T) {
 	if authn.Auth("alice@test", tried) {
 		t.Fatal("a wrong password was accepted")
 	}
+	if sess.(*session).authUser != "" {
+		t.Fatalf("failed AUTH set authUser = %q", sess.(*session).authUser)
+	}
+	if authn.Auth("ghost@test", tried) {
+		t.Fatal("unknown user accepted")
+	}
 
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
-	found := false
+	if !hasAuthFail(sink.events, "alice@test", "203.0.113.5:1234") {
+		t.Error("missing auth.fail for alice@test")
+	}
+	if !hasAuthFail(sink.events, "ghost@test", "203.0.113.5:1234") {
+		t.Error("missing auth.fail for ghost@test")
+	}
 	for _, e := range sink.events {
-		if e.Name == "auth.fail" && e.User == "alice@test" && e.RemoteAddr == "203.0.113.5:1234" {
-			found = true
-		}
 		if strings.Contains(fmt.Sprintf("%+v", e), tried) {
 			t.Errorf("event %q carries the password the client sent", e.Name)
 		}
 	}
-	if !found {
-		t.Error("the failed login recorded no auth.fail event for the user and address")
+}
+
+func hasAuthFail(events []logging.Event, user, addr string) bool {
+	for _, e := range events {
+		if e.Name == "auth.fail" && e.User == user && e.RemoteAddr == addr {
+			return true
+		}
 	}
+	return false
 }
 
 // TestDeliveryLogsRecipient proves the MTA logs a delivery.ok event tagged with
@@ -64,7 +78,7 @@ func TestDeliveryLogsRecipient(t *testing.T) {
 	mbox := filepath.Join(t.TempDir(), "alice")
 	st, err := objectstore.Open(mbox)
 	mustNoErr(t, "open the mailbox", err)
-	st.Close()
+	mustClose(t, st)
 
 	sink := &captureSink{}
 	accounts := directory.StaticAccounts{"alice@test": {MailboxPath: mbox}}

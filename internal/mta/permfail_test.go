@@ -1,6 +1,7 @@
 package mta
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,9 +14,7 @@ import (
 )
 
 // deliveryEvents runs one inbound transaction to a recipient whose mailbox is
-// expected to refuse the delivery, and returns every event it emitted. The
-// transaction's own errors are the point of the test, so they are not asserted
-// here.
+// expected to refuse the delivery, and returns every event it emitted.
 func deliveryEvents(t *testing.T, mbox string) []logging.Event {
 	t.Helper()
 	sink := &captureSink{}
@@ -25,8 +24,15 @@ func deliveryEvents(t *testing.T, mbox string) []logging.Event {
 	mustNoErr(t, "open the session", err)
 	mustNoErr(t, "MAIL FROM", sess.Mail("sender@example.com", smtp.MailParams{}))
 	mustNoErr(t, "RCPT TO", sess.Rcpt("alice@test", smtp.RcptParams{}))
-	if err := sess.Data(strings.NewReader("Subject: hi\r\n\r\nbody\r\n")); err == nil {
+	derr := sess.Data(strings.NewReader("Subject: hi\r\n\r\nbody\r\n"))
+	if derr == nil {
 		t.Fatal("DATA succeeded, so the mailbox did not refuse the delivery")
+	}
+	if _, ok := errors.AsType[*smtp.TempError](derr); !ok {
+		t.Errorf("DATA err = %T (%v), want *smtp.TempError", derr, derr)
+	}
+	if strings.Contains(derr.Error(), mbox) {
+		t.Errorf("DATA err leaked mailbox path %q: %q", mbox, derr.Error())
 	}
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
@@ -51,7 +57,7 @@ func condemnedMailbox(t *testing.T) string {
 	mbox := filepath.Join(t.TempDir(), "alice")
 	st, err := objectstore.Open(mbox)
 	mustNoErr(t, "open the mailbox", err)
-	st.Close()
+	mustClose(t, st)
 	mustNoErr(t, "overwrite the object database",
 		os.WriteFile(filepath.Join(mbox, "objects.sqlite3"), []byte("not a database"), 0o600))
 	return mbox

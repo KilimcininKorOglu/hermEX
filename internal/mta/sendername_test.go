@@ -43,6 +43,15 @@ func TestRewriteFromDisplayName(t *testing.T) {
 	fm, err := mail.ReadMessage(bytes.NewReader(RewriteFromDisplayName(folded, "Bob")))
 	mustNoErr(t, "parse the rewritten folded message", err)
 	wantFromAddress(t, "the rewritten folded From", fm, "Bob", "alice@example.com")
+
+	unparseable := []byte("From: not-an-address\r\n\r\nbody\r\n")
+	if got := RewriteFromDisplayName(unparseable, "Bob"); !bytes.Equal(got, unparseable) {
+		t.Error("unparseable From should be returned unchanged")
+	}
+	bodyFrom := []byte("Subject: hi\r\n\r\nFrom: Alice <alice@example.com>\r\n")
+	if got := RewriteFromDisplayName(bodyFrom, "Bob"); !bytes.Equal(got, bodyFrom) {
+		t.Error("From line inside body must remain untouched")
+	}
 }
 
 // TestRewriteFromDisplayNameCannotAddAHeader feeds a display name carrying CR/LF and
@@ -124,9 +133,7 @@ func TestRewriteFromThenSignVerifies(t *testing.T) {
 	if len(vs) != 1 || vs[0].Err != nil {
 		t.Fatalf("DKIM did not verify the rewritten From: %+v", vs)
 	}
-	sm, _ := mail.ReadMessage(bytes.NewReader(signed))
-	if from, _ := mail.ParseAddress(sm.Header.Get("From")); from == nil ||
-		from.Name != "Ali Veli (Acme - Satış)" || from.Address != "alice@example.com" {
-		t.Errorf("signed From = %+v, want the rewritten Turkish name with the original address", from)
-	}
+	sm, err := mail.ReadMessage(bytes.NewReader(signed))
+	mustNoErr(t, "parse signed message", err)
+	wantFromAddress(t, "signed From", sm, "Ali Veli (Acme - Satış)", "alice@example.com")
 }

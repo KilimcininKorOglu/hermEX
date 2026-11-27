@@ -154,6 +154,9 @@ func TestRecipientRuleReadFailureIsLogged(t *testing.T) {
 		Logger:          logging.New(sink),
 	}
 	deliverInbound(t, b, "buddy@friend.example", "alice@test")
+	if junk, inbox := folderCounts(t, mbox); junk != 1 || inbox != 0 {
+		t.Errorf("rule read error fail-open: junk=%d inbox=%d, want it in Junk per verdict", junk, inbox)
+	}
 
 	sink.mu.Lock()
 	defer sink.mu.Unlock()

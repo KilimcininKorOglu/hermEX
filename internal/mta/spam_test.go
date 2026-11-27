@@ -51,13 +51,23 @@ const forgedResults = "Authentication-Results: mx.hermex.test; dkim=pass header.
 // ownResults counts the Authentication-Results fields under our authserv-id in
 // the header block of a filed copy, and reports whether the forged pass is there.
 func ownResults(raw []byte) (n int, forged bool) {
-	head, _, _ := strings.Cut(string(raw), "\r\n\r\n")
+	head := headerBlock(raw)
 	for line := range strings.SplitSeq(head, "\r\n") {
 		if strings.HasPrefix(line, "Authentication-Results: mx.hermex.test") {
 			n++
 		}
 	}
 	return n, strings.Contains(head, "header.d=bank.example")
+}
+
+// headerBlock returns the header section of a message: everything before the
+// first empty line, or the whole message when it has no body.
+func headerBlock(raw []byte) string {
+	s := string(raw)
+	if i := strings.Index(s, "\r\n\r\n"); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 // TestInboundAuthResultsReplaceTheSendersClaim files inbound mail through a
@@ -79,8 +89,8 @@ func TestInboundAuthResultsReplaceTheSendersClaim(t *testing.T) {
 		t.Errorf("the scored copy does not carry this server's dkim=fail\n%s", sc.raw)
 	}
 	unscored := newSession(nil, "").scoreInbound([]byte(forgedResults), time.Now())
-	if n, _ := ownResults(unscored.raw); n != 0 {
-		t.Errorf("an unscored copy kept %d fields under our id", n)
+	if n, forged := ownResults(unscored.raw); n != 0 || forged {
+		t.Errorf("an unscored copy kept %d fields (forged=%v) under our id", n, forged)
 	}
 	submitted := newSession(nil, "alice@test").scoreInbound([]byte(forgedResults), time.Now())
 	if string(submitted.raw) != forgedResults {
@@ -208,12 +218,13 @@ func TestInboundSpamRecordedToHistory(t *testing.T) {
 	wantEq(t, "the recorded client address", r0.RemoteAddr, "203.0.113.9")
 }
 
-// TestSpamHistoryFailOpen proves a history write error never fails the delivery:
-// the message is still delivered.
+// TestSpamHistoryFailOpen proves a history write error never fails the delivery
+// and emits spam.history.fail: the message is still delivered.
 func TestSpamHistoryFailOpen(t *testing.T) {
 	mbox := filepath.Join(t.TempDir(), "alice")
 	accounts := directory.StaticAccounts{"alice@test": {MailboxPath: mbox}}
-	b := &Backend{Accounts: accounts, Scorer: &recordingScorer{verdict: antispam.Verdict{Score: 1, Spam: false}}, History: errHistory{}}
+	sink := &captureSink{}
+	b := &Backend{Accounts: accounts, Scorer: &recordingScorer{verdict: antispam.Verdict{Score: 1, Spam: false}}, History: errHistory{}, Logger: logging.New(sink)}
 
 	sess, err := b.NewSession("203.0.113.9:1234")
 	if err != nil {
@@ -233,13 +244,18 @@ func TestSpamHistoryFailOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	inbox, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(inbox) != 1 {
 		t.Errorf("inbox has %d messages, want the message delivered despite the history error", len(inbox))
+	}
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if _, ok := findEvent(sink.events, "spam.history.fail"); !ok {
+		t.Error("history failure emitted no spam.history.fail event")
 	}
 }
 
@@ -258,7 +274,7 @@ func TestSpamFiledToJunk(t *testing.T) {
 
 	st, err := objectstore.Open(mbox)
 	mustNoErr(t, "open the mailbox", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	raw, err := st.GetMessageRaw(int64(mapi.PrivateFIDJunk), junk[0].UID)
 	mustNoErr(t, "read the filed spam", err)
 	wantContains(t, "the filed spam (its X-Spam tag must survive the store round-trip)",
@@ -285,9 +301,9 @@ func TestFiledSpamCarriesOnlyTheVerdictFlag(t *testing.T) {
 		st, err := objectstore.Open(mbox)
 		mustNoErr(t, "open the mailbox", err)
 		raw, err := st.GetMessageRaw(int64(mapi.PrivateFIDJunk), junk[0].UID)
-		st.Close()
+		mustClose(t, st)
 		mustNoErr(t, "read the filed spam", err)
-		head, _, _ := strings.Cut(string(raw), "\r\n\r\n")
+		head := headerBlock(raw)
 		if n := strings.Count(strings.ToLower(head), "x-spam-flag:"); n != 1 || !strings.Contains(head, "X-Spam-Flag: YES") {
 			t.Errorf("%s copy carries %d X-Spam-Flag fields, want only the verdict:\n%s", how, n, head)
 		}

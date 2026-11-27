@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 )
 
 // failingNames is a directory whose outgoing display-name lookup fails.
@@ -33,6 +34,9 @@ func TestOutgoingCopiesRecordsAFailedNameLookup(t *testing.T) {
 	e, ok := sink.find("delivery.pass.fail")
 	if !ok {
 		t.Fatal("the failed display-name lookup was not recorded")
+	}
+	if e.Level != logging.LevelError || e.Err != "db down" {
+		t.Errorf("event level=%q err=%q, want error / db down", e.Level, e.Err)
 	}
 	if e.Fields["pass"] != "outgoing-display-name" || e.User != "alice@hermex.test" {
 		t.Errorf("event = pass %v user %q, want the display-name pass for the sender", e.Fields["pass"], e.User)

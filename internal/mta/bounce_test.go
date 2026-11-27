@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/mail"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -58,6 +59,24 @@ func TestBounceMessage(t *testing.T) {
 	} {
 		wantContains(t, "the delivery-status part", parts["message/delivery-status"], want)
 	}
+
+	// Hostile CRLF in reason is flattened, and empty reportingMTA defaults to localhost.
+	injRaw, err := Bounce("", "alice@local", "bob@remote", "550 bad\r\nAction: delivered", time.Unix(1_700_000_000, 0))
+	mustNoErr(t, "build bounce with injected reason", err)
+	injMsg, err := mail.ReadMessage(bytes.NewReader(injRaw))
+	mustNoErr(t, "parse bounce with injected reason", err)
+	injType, injParams, err := mime.ParseMediaType(injMsg.Header.Get("Content-Type"))
+	mustNoErr(t, "parse injected Content-Type", err)
+	wantEq(t, "injected media type", injType, "multipart/report")
+	injParts := reportParts(t, injMsg.Body, injParams["boundary"])
+	ds := injParts["message/delivery-status"]
+	wantContains(t, "default Reporting-MTA", ds, "Reporting-MTA: dns;localhost")
+	wantContains(t, "flattened Diagnostic-Code", ds, "Diagnostic-Code: smtp; 550 bad Action: delivered")
+	for line := range strings.SplitSeq(ds, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "Action: delivered") {
+			t.Errorf("reason injected an Action field of its own:\n%s", ds)
+		}
+	}
 }
 
 // reportParts reads a multipart/report body into its parts, keyed by media type.
@@ -73,7 +92,8 @@ func reportParts(t *testing.T, body io.Reader, boundary string) map[string]strin
 		mustNoErr(t, "read the next report part", err)
 		b, err := io.ReadAll(p)
 		mustNoErr(t, "read the report part body", err)
-		ct, _, _ := mime.ParseMediaType(p.Header.Get("Content-Type"))
+		ct, _, err := mime.ParseMediaType(p.Header.Get("Content-Type"))
+		mustNoErr(t, "parse part Content-Type", err)
 		parts[ct] = string(b)
 	}
 }
@@ -101,7 +121,7 @@ func TestBounceDeliversToSenderInbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	inbox := int64(mapi.PrivateFIDInbox)
 	msgs, err := st.ListMessages(inbox)
 	if err != nil {

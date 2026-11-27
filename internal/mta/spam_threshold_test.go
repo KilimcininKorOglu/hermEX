@@ -1,16 +1,24 @@
 package mta
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"hermex/internal/antispam"
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/smtp"
 )
+
+type errThresholds struct{}
+
+func (errThresholds) SpamThresholdForMaildir(string) (int, bool, error) {
+	return 0, false, errors.New("threshold read failed")
+}
 
 // fixedThresholds is a per-maildir spam-threshold override map; a maildir absent from
 // the map has no override.
@@ -49,7 +57,7 @@ func folderCounts(t *testing.T, mbox string) (junk, inbox int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	j, err := st.ListMessages(int64(mapi.PrivateFIDJunk))
 	if err != nil {
 		t.Fatal(err)
@@ -131,10 +139,43 @@ func TestPerRecipientThresholdFilesEachRecipientIndependently(t *testing.T) {
 	}
 	deliverInbound(t, b, "bob@external.example", "alice@test", "bob@test")
 
-	if junk, inbox := folderCounts(t, aliceMbox); junk != 1 || inbox != 0 {
-		t.Errorf("alice (override 2): junk=%d inbox=%d, want the message junked", junk, inbox)
+	wantFolderCounts(t, "alice (override 2)", aliceMbox, 1, 0)
+	wantFolderCounts(t, "bob (inherits global)", bobMbox, 0, 1)
+
+	// Exact boundary: Score == override -> Junk; Score == override-1 -> Inbox.
+	eqMbox := filepath.Join(t.TempDir(), "eq")
+	ltMbox := filepath.Join(t.TempDir(), "lt")
+	bBound := &Backend{
+		Accounts:   directory.StaticAccounts{"eq@test": {MailboxPath: eqMbox}, "lt@test": {MailboxPath: ltMbox}},
+		Scorer:     &recordingScorer{verdict: antispam.Verdict{Score: 5, Spam: false}},
+		Thresholds: fixedThresholds{eqMbox: 5, ltMbox: 6},
 	}
-	if junk, inbox := folderCounts(t, bobMbox); junk != 0 || inbox != 1 {
-		t.Errorf("bob (inherits global): junk=%d inbox=%d, want the message in the inbox", junk, inbox)
+	deliverInbound(t, bBound, "bob@external.example", "eq@test", "lt@test")
+	wantFolderCounts(t, "exact threshold score=5 override=5", eqMbox, 1, 0)
+	wantFolderCounts(t, "below threshold score=5 override=6", ltMbox, 0, 1)
+
+	// Lookup error fails open to global verdict and logs settings.read.fail.
+	errMbox := filepath.Join(t.TempDir(), "err")
+	sink := &captureSink{}
+	bErr := &Backend{
+		Accounts:   directory.StaticAccounts{"err@test": {MailboxPath: errMbox}},
+		Scorer:     &recordingScorer{verdict: antispam.Verdict{Score: 9, Spam: true}},
+		Thresholds: errThresholds{},
+		Logger:     logging.New(sink),
 	}
+	deliverInbound(t, bErr, "bob@external.example", "err@test")
+	wantFolderCounts(t, "threshold read error fail-open", errMbox, 1, 0)
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	e, ok := findEvent(sink.events, "settings.read.fail")
+	if !ok || e.Fields["settings"] != "spam_threshold" {
+		t.Errorf("expected spam_threshold settings.read.fail, got %+v (ok=%v)", e, ok)
+	}
+}
+
+func wantFolderCounts(t *testing.T, label, mbox string, wantJunk, wantInbox int) {
+	t.Helper()
+	junk, inbox := folderCounts(t, mbox)
+	wantEq(t, label+" junk", junk, wantJunk)
+	wantEq(t, label+" inbox", inbox, wantInbox)
 }

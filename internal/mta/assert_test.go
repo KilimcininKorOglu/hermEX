@@ -53,12 +53,20 @@ func deliverBody(t *testing.T, b *Backend, remoteAddr, from, to, raw string) {
 	mustNoErr(t, "DATA", sess.Data(strings.NewReader(raw)))
 }
 
+// mustClose closes a store or resource and fails the test when closing fails.
+func mustClose(t *testing.T, c interface{ Close() error }) {
+	t.Helper()
+	if err := c.Close(); err != nil {
+		t.Errorf("close: %v", err)
+	}
+}
+
 // folderMessages lists one folder of a mailbox.
 func folderMessages(t *testing.T, mbox string, folderID int64) []objectstore.MessageInfo {
 	t.Helper()
 	st, err := objectstore.Open(mbox)
 	mustNoErr(t, "open the mailbox", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(folderID)
 	mustNoErr(t, "list the folder", err)
 	return msgs

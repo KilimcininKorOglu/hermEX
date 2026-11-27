@@ -25,9 +25,14 @@ func (c catchAllAccounts) ResolveCatchAll(address string) (string, bool) {
 	return c.mailbox, true
 }
 
+type catchAllRig struct {
+	sess      *session
+	aliceMbox string
+}
+
 // catchAllSession builds a session for an unauthenticated inbound sender, the case a
 // catch-all exists for, with the given catch-all mailbox ("" for none).
-func catchAllSession(t *testing.T, catchMailbox string) (*session, string) {
+func catchAllSession(t *testing.T, catchMailbox string) catchAllRig {
 	t.Helper()
 	mbox := filepath.Join(t.TempDir(), "alice")
 	accounts := catchAllAccounts{
@@ -37,45 +42,51 @@ func catchAllSession(t *testing.T, catchMailbox string) (*session, string) {
 	}
 	s := &session{accounts: accounts}
 	mustNoErr(t, "MAIL FROM", s.Mail("sender@remote", smtp.MailParams{}))
-	return s, mbox
+	return catchAllRig{sess: s, aliceMbox: mbox}
 }
 
 // TestCatchAllAcceptsAnUnknownRecipient is the load-bearing case: with a catch-all
 // configured, a local part no account owns is accepted instead of refused.
 func TestCatchAllAcceptsAnUnknownRecipient(t *testing.T) {
 	catchMbox := filepath.Join(t.TempDir(), "catchall")
-	s, _ := catchAllSession(t, catchMbox)
+	rig := catchAllSession(t, catchMbox)
 
-	mustNoErr(t, "RCPT to an unknown local part", s.Rcpt("nosuchuser@local", smtp.RcptParams{}))
+	mustNoErr(t, "RCPT to an unknown local part", rig.sess.Rcpt("nosuchuser@local", smtp.RcptParams{}))
 
-	if len(s.targets) != 1 || s.targets[0].path != catchMbox {
-		t.Errorf("targets = %+v, want one filed into the catch-all mailbox", s.targets)
+	if len(rig.sess.targets) != 1 || rig.sess.targets[0].path != catchMbox {
+		t.Errorf("targets = %+v, want one filed into the catch-all mailbox", rig.sess.targets)
 	}
 }
 
 // TestCatchAllDeliversTheMessage proves the accepted message reaches the catch-all mailbox.
 func TestCatchAllDeliversTheMessage(t *testing.T) {
 	catchMbox := filepath.Join(t.TempDir(), "catchall")
-	s, _ := catchAllSession(t, catchMbox)
-	mustNoErr(t, "RCPT", s.Rcpt("nosuchuser@local", smtp.RcptParams{}))
+	rig := catchAllSession(t, catchMbox)
+	mustNoErr(t, "RCPT", rig.sess.Rcpt("nosuchuser@local", smtp.RcptParams{}))
 
-	mustNoErr(t, "DATA", s.Data(bytes.NewReader([]byte("Subject: hi\r\n\r\nhello\r\n"))))
+	mustNoErr(t, "DATA", rig.sess.Data(bytes.NewReader([]byte("Subject: hi\r\n\r\nhello\r\n"))))
 
 	wantEq(t, "messages in the catch-all inbox", len(inboxMessages(t, catchMbox)), 1)
 }
 
 // TestCatchAllRecordsTheEnvelopeRecipient proves the delivered message names the address it
-// was sent to, which owns no account and need not appear in any header the sender wrote.
+// was sent to, which owns no account and need not appear in any header the sender wrote,
+// and omits Delivered-To when the envelope address contains control characters.
 func TestCatchAllRecordsTheEnvelopeRecipient(t *testing.T) {
 	catchMbox := filepath.Join(t.TempDir(), "catchall")
-	s, _ := catchAllSession(t, catchMbox)
-	mustNoErr(t, "RCPT", s.Rcpt("nosuchuser@local", smtp.RcptParams{}))
-	mustNoErr(t, "DATA", s.Data(bytes.NewReader([]byte("Subject: hi\r\n\r\nhello\r\n"))))
+	rig := catchAllSession(t, catchMbox)
+	mustNoErr(t, "RCPT", rig.sess.Rcpt("nosuchuser@local", smtp.RcptParams{}))
+	mustNoErr(t, "DATA", rig.sess.Data(bytes.NewReader([]byte("Subject: hi\r\n\r\nhello\r\n"))))
 
 	raw := inboxRaw(t, catchMbox, 1)
 
 	if !bytes.Contains(raw, []byte("Delivered-To: nosuchuser@local")) {
 		t.Errorf("the delivered message does not name the envelope recipient:\n%s", raw)
+	}
+
+	plain := []byte("Subject: hi\r\n\r\nhello\r\n")
+	if got := markCatchAll(target{addr: "bad\r\nBcc: x@y", catchAll: true}, plain); !bytes.Equal(got, plain) {
+		t.Errorf("control-byte catch-all address wrote header:\n%s", got)
 	}
 }
 
@@ -83,11 +94,11 @@ func TestCatchAllRecordsTheEnvelopeRecipient(t *testing.T) {
 // the header marks exactly the deliveries whose address would otherwise be lost.
 func TestCatchAllLeavesAKnownRecipientUnmarked(t *testing.T) {
 	catchMbox := filepath.Join(t.TempDir(), "catchall")
-	s, mbox := catchAllSession(t, catchMbox)
-	mustNoErr(t, "RCPT", s.Rcpt("alice@local", smtp.RcptParams{}))
-	mustNoErr(t, "DATA", s.Data(bytes.NewReader([]byte("Subject: hi\r\n\r\nhello\r\n"))))
+	rig := catchAllSession(t, catchMbox)
+	mustNoErr(t, "RCPT", rig.sess.Rcpt("alice@local", smtp.RcptParams{}))
+	mustNoErr(t, "DATA", rig.sess.Data(bytes.NewReader([]byte("Subject: hi\r\n\r\nhello\r\n"))))
 
-	raw := inboxRaw(t, mbox, 1)
+	raw := inboxRaw(t, rig.aliceMbox, 1)
 
 	if bytes.Contains(raw, []byte("Delivered-To:")) {
 		t.Errorf("an ordinary delivery was marked as a catch-all one:\n%s", raw)
@@ -97,20 +108,24 @@ func TestCatchAllLeavesAKnownRecipientUnmarked(t *testing.T) {
 // TestWithoutCatchAllTheUnknownRecipientIsStillRefused proves the setting is off by
 // default: a domain with no catch-all keeps refusing an unknown local part.
 func TestWithoutCatchAllTheUnknownRecipientIsStillRefused(t *testing.T) {
-	s, _ := catchAllSession(t, "")
+	rig := catchAllSession(t, "")
 
-	if err := s.Rcpt("nosuchuser@local", smtp.RcptParams{}); err == nil {
+	if err := rig.sess.Rcpt("nosuchuser@local", smtp.RcptParams{}); err == nil {
 		t.Error("an unknown local part must be refused while the domain has no catch-all")
 	}
+	wantEq(t, "targets after refusal", len(rig.sess.targets), 0)
+	wantEq(t, "relayTargets after refusal", len(rig.sess.relayTargets), 0)
 }
 
 // TestCatchAllDoesNotMakeAForeignAddressLocal proves the fallback is per domain: an address
 // in a domain this server does not host stays refused for an unauthenticated sender.
 func TestCatchAllDoesNotMakeAForeignAddressLocal(t *testing.T) {
 	catchMbox := filepath.Join(t.TempDir(), "catchall")
-	s, _ := catchAllSession(t, catchMbox)
+	rig := catchAllSession(t, catchMbox)
 
-	if err := s.Rcpt("someone@remote", smtp.RcptParams{}); err == nil {
+	if err := rig.sess.Rcpt("someone@remote", smtp.RcptParams{}); err == nil {
 		t.Error("an address in another domain must not reach this domain's catch-all")
 	}
+	wantEq(t, "targets after foreign refusal", len(rig.sess.targets), 0)
+	wantEq(t, "relayTargets after foreign refusal", len(rig.sess.relayTargets), 0)
 }

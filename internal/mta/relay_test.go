@@ -2,6 +2,7 @@ package mta
 
 import (
 	"bytes"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -24,7 +25,7 @@ func TestSubmissionRelayRouting(t *testing.T) {
 	accounts := directory.StaticAccounts{"alice@local": {Password: "pw", MailboxPath: mbox}}
 	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
 	mustNoErr(t, "open the relay spool", err)
-	defer sp.Close()
+	defer mustClose(t, sp)
 
 	// Authenticated submission.
 	s := &session{accounts: accounts, spool: sp, authUser: "alice@local"}
@@ -33,6 +34,8 @@ func TestSubmissionRelayRouting(t *testing.T) {
 	mustNoErr(t, "RCPT to an external user", s.Rcpt("bob@remote", smtp.RcptParams{}))
 	if err := s.Rcpt("ghost@local", smtp.RcptParams{}); err == nil {
 		t.Error("an unknown user in a local domain must be refused, never relayed")
+	} else if _, ok := errors.AsType[*smtp.PermError](err); !ok {
+		t.Errorf("unknown local user err = %T (%v), want *smtp.PermError", err, err)
 	}
 	if len(s.targets) != 1 || len(s.relayTargets) != 1 {
 		t.Fatalf("routing = %d local / %d relay, want one each", len(s.targets), len(s.relayTargets))
@@ -61,7 +64,11 @@ func TestSubmissionRelayRouting(t *testing.T) {
 	u := &session{accounts: accounts, spool: sp}
 	if err := u.Rcpt("bob@remote", smtp.RcptParams{}); err == nil {
 		t.Error("unauthenticated relay to an external recipient must be refused")
+	} else if _, ok := errors.AsType[*smtp.PermError](err); !ok {
+		t.Errorf("unauthenticated relay err = %T (%v), want *smtp.PermError", err, err)
 	}
+	wantEq(t, "unauth targets after refusal", len(u.targets), 0)
+	wantEq(t, "unauth relayTargets after refusal", len(u.relayTargets), 0)
 }
 
 // inboxMessages lists a mailbox's Inbox.
@@ -69,7 +76,7 @@ func inboxMessages(t *testing.T, mbox string) []objectstore.MessageInfo {
 	t.Helper()
 	st, err := objectstore.Open(mbox)
 	mustNoErr(t, "open the mailbox", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
 	mustNoErr(t, "list the inbox", err)
 	return msgs
@@ -84,7 +91,7 @@ func TestDeliverAndRelayRoutesExternal(t *testing.T) {
 	accounts := directory.StaticAccounts{"alice@local": {MailboxPath: mbox}}
 	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
 	mustNoErr(t, "open the relay spool", err)
-	defer sp.Close()
+	defer mustClose(t, sp)
 
 	raw := []byte("Subject: hi\r\n\r\nhello\r\n")
 	unresolved, err := DeliverAndRelay(accounts, sp, "alice@local",
@@ -114,7 +121,7 @@ func TestReadReceiptTravelsWithTheNullSender(t *testing.T) {
 	accounts := directory.StaticAccounts{"alice@local": {MailboxPath: mbox}, "reader@local": {MailboxPath: t.TempDir()}}
 	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
 	mustNoErr(t, "open the relay spool", err)
-	defer sp.Close()
+	defer mustClose(t, sp)
 
 	mustNoErr(t, "send the receipt", SendReadReceipt(accounts, sp, ReadReceiptInfo{Reader: "reader@local", To: "bob@remote"}, time.Now()))
 	due, err := sp.Claim(time.Now(), 10)

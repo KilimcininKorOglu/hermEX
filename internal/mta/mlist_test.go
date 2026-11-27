@@ -2,6 +2,7 @@ package mta
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -46,15 +47,17 @@ func TestExpandMailingListRecursion(t *testing.T) {
 	const from = "sender@out.test"
 
 	t.Run("not a list passes through", func(t *testing.T) {
-		_, isList, _, _ := expandMailingList(fakeExpander{}, from, "alice@local")
-		if isList {
-			t.Error("an ordinary address was treated as a list")
+		leaves, isList, res, err := expandMailingList(fakeExpander{}, from, "alice@local")
+		mustNoErr(t, "expand non-list", err)
+		if isList || res != directory.MListNone || leaves != nil {
+			t.Errorf("got (%v, list=%v, res=%d), want (nil, false, MListNone)", leaves, isList, res)
 		}
 	})
 
 	t.Run("flat list returns members", func(t *testing.T) {
 		f := fakeExpander{"team@local": ok("alice@local", "bob@local")}
-		leaves, isList, res, _ := expandMailingList(f, from, "team@local")
+		leaves, isList, res, err := expandMailingList(f, from, "team@local")
+		mustNoErr(t, "expand flat list", err)
 		wantEq(t, "the address is a list", isList, true)
 		wantEq(t, "the expansion result", res, directory.MListOK)
 		wantMembers(t, "the flat expansion", leaves, "alice@local", "bob@local")
@@ -65,7 +68,10 @@ func TestExpandMailingListRecursion(t *testing.T) {
 			"all@local":  ok("alice@local", "team@local"),
 			"team@local": ok("bob@local", "carol@local"),
 		}
-		leaves, _, _, _ := expandMailingList(f, from, "all@local")
+		leaves, isList, res, err := expandMailingList(f, from, "all@local")
+		mustNoErr(t, "expand nested list", err)
+		wantEq(t, "isList", isList, true)
+		wantEq(t, "res", res, directory.MListOK)
 		wantMembers(t, "the nested expansion", leaves, "alice@local", "bob@local", "carol@local")
 	})
 
@@ -74,13 +80,17 @@ func TestExpandMailingListRecursion(t *testing.T) {
 			"a@local": ok("alice@local", "b@local"),
 			"b@local": ok("bob@local", "a@local", "alice@local"), // loops back + repeats alice
 		}
-		leaves, _, _, _ := expandMailingList(f, from, "a@local")
+		leaves, isList, res, err := expandMailingList(f, from, "a@local")
+		mustNoErr(t, "expand cyclic list", err)
+		wantEq(t, "isList", isList, true)
+		wantEq(t, "res", res, directory.MListOK)
 		wantMembers(t, "the cyclic expansion (no loop, deduped)", leaves, "alice@local", "bob@local")
 	})
 
 	t.Run("top-level posting refusal is reported", func(t *testing.T) {
 		f := fakeExpander{"closed@local": {res: directory.MListPrivilInternal}}
-		leaves, isList, res, _ := expandMailingList(f, from, "closed@local")
+		leaves, isList, res, err := expandMailingList(f, from, "closed@local")
+		mustNoErr(t, "expand refused list", err)
 		if !isList || res != directory.MListPrivilInternal || leaves != nil {
 			t.Errorf("got (%v, list=%v, res=%d), want (nil, list, PRIVIL_INTERNAL)", leaves, isList, res)
 		}
@@ -91,8 +101,23 @@ func TestExpandMailingListRecursion(t *testing.T) {
 			"a@local":      ok("alice@local", "closed@local"),
 			"closed@local": {members: []string{"secret@local"}, res: directory.MListPrivilDomain},
 		}
-		leaves, _, _, _ := expandMailingList(f, from, "a@local")
+		leaves, isList, res, err := expandMailingList(f, from, "a@local")
+		mustNoErr(t, "expand nested refusal", err)
+		wantEq(t, "isList", isList, true)
+		wantEq(t, "res", res, directory.MListOK)
 		wantMembers(t, "the expansion (a refused sub-list contributes nothing)", leaves, "alice@local")
+	})
+
+	t.Run("deep chain stops at maxListDepth", func(t *testing.T) {
+		f := fakeExpander{}
+		for i := range 22 {
+			f[fmt.Sprintf("l%d@local", i)] = ok(fmt.Sprintf("l%d@local", i+1))
+		}
+		leaves, isList, res, err := expandMailingList(f, from, "l0@local")
+		mustNoErr(t, "expand deep chain", err)
+		wantEq(t, "isList", isList, true)
+		wantEq(t, "res", res, directory.MListOK)
+		wantMembers(t, "depth cap leaf", leaves, fmt.Sprintf("l%d@local", maxListDepth))
 	})
 }
 
@@ -111,9 +136,13 @@ func wantMembers(t *testing.T, what string, got []string, want ...string) {
 type mlistDir struct {
 	directory.StaticAccounts
 	lists fakeExpander
+	err   error
 }
 
 func (d mlistDir) ExpandMList(listAddr, from string) ([]string, directory.MListResult, error) {
+	if d.err != nil {
+		return nil, directory.MListNone, d.err
+	}
 	return d.lists.ExpandMList(listAddr, from)
 }
 
@@ -146,12 +175,24 @@ func TestRcptRoutesListMembers(t *testing.T) {
 
 	t.Run("posting refusal is a 550", func(t *testing.T) {
 		s := &session{accounts: accounts, from: "x@out.test"}
-		if err := s.Rcpt("closed@local", smtp.RcptParams{}); err == nil {
-			t.Error("Rcpt to a posting-denied list should be refused")
+		err := s.Rcpt("closed@local", smtp.RcptParams{})
+		if _, ok := errors.AsType[*smtp.PermError](err); !ok {
+			t.Errorf("Rcpt to a posting-denied list = %v, want *smtp.PermError", err)
 		}
-		if len(s.targets) != 0 {
-			t.Errorf("a refused list still produced %d targets", len(s.targets))
+		wantEq(t, "targets", len(s.targets), 0)
+		wantEq(t, "relayTargets", len(s.relayTargets), 0)
+		wantEq(t, "forwards", len(s.forwards), 0)
+	})
+
+	t.Run("expander failure is temporary", func(t *testing.T) {
+		errAccs := mlistDir{StaticAccounts: accounts.StaticAccounts, err: errors.New("db down")}
+		s := &session{accounts: errAccs, from: "x@out.test"}
+		err := s.Rcpt("team@local", smtp.RcptParams{})
+		if _, ok := errors.AsType[*smtp.TempError](err); !ok {
+			t.Errorf("expander failure = %v, want *smtp.TempError", err)
 		}
+		wantEq(t, "targets", len(s.targets), 0)
+		wantEq(t, "relayTargets", len(s.relayTargets), 0)
 	})
 
 	t.Run("a stale member is dropped, not fatal", func(t *testing.T) {
@@ -187,9 +228,9 @@ func (k staticKeys) DKIMKey(domain string) ([]byte, string, bool, error) {
 // SRS secret, resolving no DNS.
 func testForwarding(t *testing.T) *Forwarding {
 	t.Helper()
-	pem, _, err := dkimsign.GenerateKey(dkimsign.KeyRSA)
-	if err != nil {
-		t.Fatal(err)
+	pem, dnsTXT, err := dkimsign.GenerateKey(dkimsign.KeyRSA)
+	if err != nil || dnsTXT == "" {
+		t.Fatalf("GenerateKey: dns=%q err=%v", dnsTXT, err)
 	}
 	return &Forwarding{Keys: staticKeys{domain: "local", pem: pem}, SRSSecret: []byte("srs secret"),
 		AuthServID: "mx.local", Lookup: func(string) ([]string, error) { return nil, errors.New("no DNS in tests") }}

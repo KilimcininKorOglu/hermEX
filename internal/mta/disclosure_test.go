@@ -2,12 +2,17 @@ package mta
 
 import (
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
 	"hermex/internal/directory"
 	"hermex/internal/smtp"
 )
+
+type failingReader struct{ err error }
+
+func (r failingReader) Read([]byte) (int, error) { return 0, r.err }
 
 // errDriverFailure is the shape of a directory outage reaching the routing path: the
 // unwrapped driver error, which names database internals.
@@ -33,6 +38,8 @@ func TestRoutingFailureDefersInsteadOfRejecting(t *testing.T) {
 	if _, ok := errors.AsType[*smtp.TempError](err); !ok {
 		t.Errorf("error is %T (%v), want *smtp.TempError so the sender retries", err, err)
 	}
+	wantEq(t, "targets after temp refusal", len(s.targets), 0)
+	wantEq(t, "relayTargets after temp refusal", len(s.relayTargets), 0)
 }
 
 // TestRoutingFailureWithholdsTheDriverError proves the deferral message carries no
@@ -48,6 +55,20 @@ func TestRoutingFailureWithholdsTheDriverError(t *testing.T) {
 	for _, leak := range []string{"10.0.0.5", "3306", "connection refused"} {
 		if strings.Contains(err.Error(), leak) {
 			t.Errorf("the reply message carries driver detail %q: %q", leak, err)
+		}
+	}
+
+	derr := (&session{}).Data(failingReader{err: io.ErrUnexpectedEOF})
+	if _, ok := errors.AsType[*smtp.TempError](derr); !ok {
+		t.Fatalf("Data read error = %T (%v), want *smtp.TempError", derr, derr)
+	}
+	derr2 := (&session{}).Data(failingReader{err: errDriverFailure})
+	if _, ok := errors.AsType[*smtp.TempError](derr2); !ok {
+		t.Fatalf("Data driver error = %T (%v), want *smtp.TempError", derr2, derr2)
+	}
+	for _, leak := range []string{"10.0.0.5", "3306", "connection refused"} {
+		if strings.Contains(derr2.Error(), leak) {
+			t.Errorf("DATA error carries driver detail %q: %q", leak, derr2)
 		}
 	}
 }
@@ -69,6 +90,8 @@ func TestUnknownRecipientStaysPermanent(t *testing.T) {
 	if !strings.Contains(pe.Message, "bob@local") {
 		t.Errorf("message = %q, want it to name the unknown recipient", pe.Message)
 	}
+	wantEq(t, "targets after unknown refusal", len(s.targets), 0)
+	wantEq(t, "relayTargets after unknown refusal", len(s.relayTargets), 0)
 }
 
 // TestRelayDenialStaysPermanent proves an unauthenticated relay attempt is still a
@@ -83,4 +106,6 @@ func TestRelayDenialStaysPermanent(t *testing.T) {
 	if _, ok := errors.AsType[*smtp.PermError](err); !ok {
 		t.Errorf("error is %T (%v), want *smtp.PermError", err, err)
 	}
+	wantEq(t, "targets after relay denial", len(s.targets), 0)
+	wantEq(t, "relayTargets after relay denial", len(s.relayTargets), 0)
 }

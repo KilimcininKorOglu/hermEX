@@ -1,6 +1,7 @@
 package mta
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -23,6 +24,12 @@ func (splitAccounts) SplitRelayHost(domain string) (string, error) {
 	return "", nil
 }
 
+type failingSplitAccounts struct{ directory.StaticAccounts }
+
+func (failingSplitAccounts) SplitRelayHost(string) (string, error) {
+	return "", errors.New("split lookup failed")
+}
+
 // TestSplitDomainRelaysUnknownLocal proves an authenticated sender's mail to an
 // address of a split domain with no mailbox here is relayed, while postmaster of
 // that domain and every unauthenticated intake stay refused, so the other host
@@ -31,12 +38,15 @@ func TestSplitDomainRelaysUnknownLocal(t *testing.T) {
 	accounts := splitAccounts{directory.StaticAccounts{"alice@local": {Password: "pw", MailboxPath: filepath.Join(t.TempDir(), "alice")}}}
 	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
 	mustNoErr(t, "open the relay spool", err)
-	defer sp.Close()
+	defer mustClose(t, sp)
 
 	s := &session{accounts: accounts, spool: sp, authUser: "alice@local"}
 	mustNoErr(t, "RCPT to an address on the other host", s.Rcpt("ghost@local", smtp.RcptParams{}))
 	if err := s.Rcpt("postmaster@local", smtp.RcptParams{}); err == nil {
 		t.Error("postmaster of a split domain was relayed")
+	}
+	if err := s.Rcpt("POSTMASTER@local", smtp.RcptParams{}); err == nil {
+		t.Error("uppercase POSTMASTER of a split domain was relayed")
 	}
 	wantEq(t, "relay targets", len(s.relayTargets), 1)
 
@@ -44,6 +54,16 @@ func TestSplitDomainRelaysUnknownLocal(t *testing.T) {
 	if err := u.Rcpt("ghost@local", smtp.RcptParams{}); err == nil {
 		t.Error("unauthenticated intake for a split address was accepted")
 	}
+	wantEq(t, "unauth targets after refusal", len(u.targets), 0)
+	wantEq(t, "unauth relayTargets after refusal", len(u.relayTargets), 0)
+
+	sErr := &session{accounts: failingSplitAccounts(accounts), spool: sp, authUser: "alice@local"}
+	if err := sErr.Rcpt("ghost@local", smtp.RcptParams{}); err == nil {
+		t.Fatal("split lookup error accepted recipient")
+	} else if _, ok := errors.AsType[*smtp.TempError](err); !ok {
+		t.Errorf("split lookup error = %T (%v), want *smtp.TempError", err, err)
+	}
+	wantEq(t, "relayTargets after split lookup error", len(sErr.relayTargets), 0)
 
 	unresolved, err := DeliverAndRelay(accounts, sp, "alice@local", []string{"ghost2@local"},
 		[]byte("Subject: hi\r\n\r\nhello\r\n"), time.Now())

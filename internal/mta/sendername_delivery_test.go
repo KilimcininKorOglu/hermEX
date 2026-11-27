@@ -39,20 +39,21 @@ func TestDeliverAndRelayPerTenantName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sp.Close()
+	defer mustClose(t, sp)
 
 	raw := []byte("From: alice@local\r\nTo: bob@remote\r\nSubject: hi\r\n\r\nhello\r\n")
-	if _, err := DeliverAndRelay(accounts, sp, "alice@local",
-		[]string{"alice@local", "bob@remote"}, raw, time.Now()); err != nil {
-		t.Fatal(err)
-	}
+	unresolved, err := DeliverAndRelay(accounts, sp, "alice@local",
+		[]string{"alice@local", "bob@remote"}, raw, time.Now())
+	mustNoErr(t, "DeliverAndRelay", err)
+	wantEq(t, "unresolved recipients", len(unresolved), 0)
 
 	st, err := objectstore.Open(mbox)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
-	msgs, _ := st.ListMessages(int64(mapi.PrivateFIDInbox))
+	defer mustClose(t, st)
+	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
+	mustNoErr(t, "list inbox", err)
 	if len(msgs) != 1 {
 		t.Fatalf("local inbox = %d messages, want 1", len(msgs))
 	}
@@ -64,7 +65,8 @@ func TestDeliverAndRelayPerTenantName(t *testing.T) {
 		t.Errorf("local From name = %q, want the internal %q", got, "Ali Veli (Sales)")
 	}
 
-	due, _ := sp.Claim(time.Now(), 10)
+	due, err := sp.Claim(time.Now(), 10)
+	mustNoErr(t, "claim spool", err)
 	if len(due) != 1 {
 		t.Fatalf("spool = %d items, want 1", len(due))
 	}
@@ -81,7 +83,7 @@ func fromName(t *testing.T, raw []byte) string {
 	}
 	a, err := mail.ParseAddress(m.Header.Get("From"))
 	if err != nil {
-		return ""
+		t.Fatalf("parse From %q: %v", m.Header.Get("From"), err)
 	}
 	return a.Name
 }

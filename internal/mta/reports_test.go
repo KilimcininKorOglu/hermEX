@@ -13,6 +13,7 @@ import (
 	"hermex/internal/mailreport"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/smtp"
 	"hermex/internal/tlsrpt"
 )
 
@@ -74,7 +75,7 @@ func newReportRig(t *testing.T) *reportRig {
 	mbox := filepath.Join(t.TempDir(), "alice")
 	st, err := objectstore.Open(mbox)
 	mustNoErr(t, "open the mailbox", err)
-	st.Close()
+	mustClose(t, st)
 	accounts := directory.StaticAccounts{
 		"alice@hermex.test":      {MailboxPath: mbox},
 		"postmaster@hermex.test": {MailboxPath: mbox},
@@ -194,5 +195,45 @@ func TestADuplicateReportIsNotAFailure(t *testing.T) {
 	}
 	if _, ok := r.eventNamed("report.store_failed"); ok {
 		t.Error("a duplicate report was recorded as a store failure")
+	}
+}
+
+// TestReportHostileAndAuthCases proves authenticated submissions, corrupt
+// report bodies, and multi-domain reports store nothing.
+func TestReportHostileAndAuthCases(t *testing.T) {
+	rAuth := newReportRig(t)
+	s := &session{
+		accounts:   rAuth.backend.Accounts,
+		logger:     rAuth.backend.Logger,
+		reports:    rAuth.reports,
+		authUser:   "alice@hermex.test",
+		remoteAddr: "198.51.100.1:587",
+	}
+	mustNoErr(t, "MAIL", s.Mail("alice@hermex.test", smtp.MailParams{}))
+	mustNoErr(t, "RCPT", s.Rcpt("postmaster@hermex.test", smtp.RcptParams{}))
+	mustNoErr(t, "DATA", s.Data(strings.NewReader("From: alice@hermex.test\r\n"+tlsReportMail("hermex.test")[strings.Index(tlsReportMail("hermex.test"), "Subject:"):])))
+	wantEq(t, "stored from authenticated session", len(rAuth.reports.stored), 0)
+
+	rBad := newReportRig(t)
+	corrupt := "From: tls@reporter.example\r\nSubject: bad\r\nMIME-Version: 1.0\r\nContent-Type: application/tlsrpt+json\r\n\r\n{not-json\r\n"
+	deliverBody(t, rBad.backend, "198.51.100.1:25", "tls@reporter.example", "postmaster@hermex.test", corrupt)
+	wantEq(t, "stored from corrupt body", len(rBad.reports.stored), 0)
+	wantEq(t, "delivered messages for corrupt report", len(folderMessages(t, rBad.mbox, int64(mapi.PrivateFIDInbox))), 1)
+	if _, ok := rBad.eventNamed("report.parse_failed"); !ok {
+		t.Error("corrupt report emitted no report.parse_failed event")
+	}
+
+	rMulti := newReportRig(t)
+	rMulti.reports.domains["victim.test"] = 9
+	multi := "From: tls@reporter.example\r\nSubject: Report\r\nMIME-Version: 1.0\r\n" +
+		"Content-Type: application/tlsrpt+json\r\n\r\n" +
+		`{"organization-name":"Reporter","date-range":{"start-datetime":"2025-09-19T00:00:00Z","end-datetime":"2025-09-19T23:59:59Z"},` +
+		`"contact-info":"tls@reporter.example","report-id":"r-2","policies":[` +
+		`{"policy":{"policy-type":"sts","policy-domain":"hermex.test"},"summary":{"total-successful-session-count":1,"total-failure-session-count":0}},` +
+		`{"policy":{"policy-type":"sts","policy-domain":"victim.test"},"summary":{"total-successful-session-count":1,"total-failure-session-count":0}}]}` + "\r\n"
+	deliverBody(t, rMulti.backend, "198.51.100.1:25", "tls@reporter.example", "postmaster@hermex.test", multi)
+	wantEq(t, "stored from multi-domain report", len(rMulti.reports.stored), 0)
+	if _, ok := rMulti.eventNamed("report.domain_mismatch"); !ok {
+		t.Error("multi-domain report emitted no report.domain_mismatch event")
 	}
 }

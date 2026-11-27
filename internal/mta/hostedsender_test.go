@@ -1,6 +1,7 @@
 package mta
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -17,11 +18,19 @@ import (
 func TestAnUnauthenticatedHostedSenderIsRefused(t *testing.T) {
 	hosted := directory.StaticAccounts{"bob@hosted.test": {Password: "pw", MailboxPath: t.TempDir()}}
 	for _, from := range []string{"bob@hosted.test", "BOB@Hosted.Test", "nobody@hosted.test"} {
-		err := (&session{accounts: hosted}).Mail(from, smtp.MailParams{})
-		if err == nil || !strings.HasPrefix(err.Error(), "5.7.1") {
-			t.Errorf("unauthenticated MAIL FROM:<%s> = %v, want a 5.7.1 refusal", from, err)
+		s := &session{accounts: hosted}
+		err := s.Mail(from, smtp.MailParams{})
+		if _, ok := errors.AsType[*smtp.PermError](err); !ok || !strings.HasPrefix(err.Error(), "5.7.1") {
+			t.Errorf("unauthenticated MAIL FROM:<%s> = %v, want a 5.7.1 PermError", from, err)
 		}
+		wantEq(t, "session from after refusal", s.from, "")
 	}
+	sErr := &session{accounts: brokenDomains{hosted}}
+	err := sErr.Mail("bob@hosted.test", smtp.MailParams{})
+	if _, ok := errors.AsType[*smtp.TempError](err); !ok {
+		t.Errorf("directory outage err = %T (%v), want *smtp.TempError", err, err)
+	}
+	wantEq(t, "session from after temp refusal", sErr.from, "")
 	for _, from := range []string{"", "someone@remote.example"} {
 		if err := (&session{accounts: hosted}).Mail(from, smtp.MailParams{}); err != nil {
 			t.Errorf("unauthenticated MAIL FROM:<%s> refused: %v", from, err)

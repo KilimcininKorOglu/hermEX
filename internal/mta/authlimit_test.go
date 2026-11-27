@@ -49,16 +49,25 @@ func TestSMTPAuthThrottlesGuessing(t *testing.T) {
 	b := &Backend{Accounts: accounts, Limiter: authlimit.New(0, 0, 0)}
 
 	for i := range authlimit.DefaultMaxFails {
-		if authSession(t, b, "198.51.100.7:2525").Auth("alice@acme.test", "wrong") {
+		s := authSession(t, b, "198.51.100.7:2525")
+		if s.Auth("alice@acme.test", "wrong") {
 			t.Fatalf("attempt %d was accepted", i)
 		}
+		wantEq(t, "refused authUser", s.authUser, "")
+		wantEq(t, "refused authMailbox", s.authMailbox, "")
 	}
 	before := calls
-	if authSession(t, b, "198.51.100.7:2525").Auth("alice@acme.test", "secret") {
+	sLocked := authSession(t, b, "198.51.100.7:2525")
+	if sLocked.Auth("alice@acme.test", "secret") {
 		t.Error("the correct password was accepted while the client was locked out")
 	}
+	wantEq(t, "locked authUser", sLocked.authUser, "")
+	wantEq(t, "locked authMailbox", sLocked.authMailbox, "")
 	if calls != before {
 		t.Errorf("the password was checked %d more times while locked out", calls-before)
+	}
+	if authSession(t, b, "198.51.100.7:2525").Auth("ALICE@ACME.TEST", "secret") {
+		t.Error("uppercase locked-out address bypassed lockout")
 	}
 
 	// Moving to a fresh address does not reset the account's counter: that is the
@@ -73,6 +82,31 @@ func TestSMTPAuthThrottlesGuessing(t *testing.T) {
 	}
 }
 
+// TestSMTPAuthSuccessClearsTheCount proves a valid login clears the failure count.
+func TestSMTPAuthSuccessClearsTheCount(t *testing.T) {
+	accounts := directory.StaticAccounts{
+		"alice@acme.test": {Password: "secret", MailboxPath: t.TempDir()},
+	}
+	b := &Backend{Accounts: accounts, Limiter: authlimit.New(0, 0, 0)}
+
+	for range authlimit.DefaultMaxFails - 1 {
+		if authSession(t, b, "198.51.100.7:2525").Auth("alice@acme.test", "wrong") {
+			t.Fatal("wrong password accepted")
+		}
+	}
+	if !authSession(t, b, "198.51.100.7:2525").Auth("alice@acme.test", "secret") {
+		t.Fatal("valid password refused before lockout")
+	}
+	for range authlimit.DefaultMaxFails - 1 {
+		if authSession(t, b, "198.51.100.7:2525").Auth("alice@acme.test", "wrong") {
+			t.Fatal("wrong password accepted after reset")
+		}
+	}
+	if !authSession(t, b, "198.51.100.7:2525").Auth("alice@acme.test", "secret") {
+		t.Error("a successful login did not clear the failure count")
+	}
+}
+
 // TestSMTPAuthWithoutLimiterIsUnchanged covers a backend with no limiter wired:
 // the behaviour must be exactly as before.
 func TestSMTPAuthWithoutLimiterIsUnchanged(t *testing.T) {
@@ -82,7 +116,9 @@ func TestSMTPAuthWithoutLimiterIsUnchanged(t *testing.T) {
 	b := &Backend{Accounts: accounts}
 
 	for range authlimit.DefaultMaxFails + 3 {
-		authSession(t, b, "198.51.100.7:2525").Auth("alice@acme.test", "wrong")
+		if authSession(t, b, "198.51.100.7:2525").Auth("alice@acme.test", "wrong") {
+			t.Fatal("wrong password was accepted")
+		}
 	}
 	if !authSession(t, b, "198.51.100.7:2525").Auth("alice@acme.test", "secret") {
 		t.Error("a backend with no limiter refused a correct password")

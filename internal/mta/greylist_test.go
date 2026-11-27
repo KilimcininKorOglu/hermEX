@@ -11,8 +11,10 @@ import (
 
 // memGreylist is an in-memory triplet store for the greylister unit tests.
 type memGreylist struct {
-	m      map[string]directory.Greylisted
-	getErr error
+	m          map[string]directory.Greylisted
+	getErr     error
+	upsertErr  error
+	confirmErr error
 }
 
 func glKey(ip, s, r string) string { return ip + "|" + s + "|" + r }
@@ -25,6 +27,9 @@ func (g *memGreylist) GreylistGet(ip, s, r string) (directory.Greylisted, bool, 
 	return v, ok, nil
 }
 func (g *memGreylist) GreylistUpsertSeen(ip, s, r string, now int64) error {
+	if g.upsertErr != nil {
+		return g.upsertErr
+	}
 	cur, ok := g.m[glKey(ip, s, r)]
 	if !ok {
 		cur = directory.Greylisted{FirstSeen: now}
@@ -33,6 +38,9 @@ func (g *memGreylist) GreylistUpsertSeen(ip, s, r string, now int64) error {
 	return nil
 }
 func (g *memGreylist) GreylistConfirm(ip, s, r string, now int64) error {
+	if g.confirmErr != nil {
+		return g.confirmErr
+	}
 	cur := g.m[glKey(ip, s, r)]
 	cur.Confirmed = true
 	g.m[glKey(ip, s, r)] = cur
@@ -76,8 +84,11 @@ func TestGreylistRetrySameNetworkDifferentIPPasses(t *testing.T) {
 		t.Fatal("first contact should be deferred")
 	}
 	now += int64(defaultGreylistMinDelay.Seconds()) + 1
-	if g.ShouldDefer(net.IPv4(203, 0, 113, 99), "s@ext.example", "u@local.example") {
-		t.Error("a retry from the same /24 (different IP) after the delay must pass, not defer")
+	if !g.ShouldDefer(net.IPv4(203, 0, 114, 5), "s@ext.example", "u@local.example") {
+		t.Error("a different /24 must still defer as a new triplet")
+	}
+	if g.ShouldDefer(net.IPv4(203, 0, 113, 99), "S@EXT.EXAMPLE", "U@LOCAL.EXAMPLE") {
+		t.Error("a retry from the same /24 (different IP, mixed case) after the delay must pass, not defer")
 	}
 }
 
@@ -90,6 +101,7 @@ func TestGreylistSetTimings(t *testing.T) {
 	g := NewGreylister(store, nil)
 	g.SetEnabled(true)
 	g.SetTimings(600, 0, 0) // 10-minute minimum delay; leave the TTLs unchanged
+	g.SetTimings(0, -1, -5) // non-positive timings leave current values unchanged
 	now := int64(1000)
 	g.now = func() int64 { return now }
 
@@ -115,7 +127,9 @@ func TestGreylistRetryTooSoonDefers(t *testing.T) {
 	now := int64(1000)
 	g.now = func() int64 { return now }
 
-	g.ShouldDefer(net.IPv4(10, 0, 0, 1), "s@ext", "u@local")
+	if !g.ShouldDefer(net.IPv4(10, 0, 0, 1), "s@ext", "u@local") {
+		t.Fatal("first contact should defer")
+	}
 	now += 60 // less than the default min delay
 	if !g.ShouldDefer(net.IPv4(10, 0, 0, 2), "s@ext", "u@local") {
 		t.Error("a retry before the minimum delay must still be deferred")
@@ -123,12 +137,22 @@ func TestGreylistRetryTooSoonDefers(t *testing.T) {
 }
 
 // TestGreylistFailOpenOnStoreError proves a store error accepts the mail rather than
-// deferring it, greylisting never loses mail on its own failure.
+// deferring it, greylisting never loses mail on its own failure, and nil IP fails open.
 func TestGreylistFailOpenOnStoreError(t *testing.T) {
+	sink := withPassLogger(t)
 	g := NewGreylister(&memGreylist{getErr: errors.New("db down")}, nil)
 	g.SetEnabled(true)
 	if g.ShouldDefer(net.IPv4(1, 2, 3, 4), "s@ext", "u@local") {
 		t.Error("a store error must fail open (accept), not defer")
+	}
+	e, ok := sink.find("greylist.store.fail")
+	if !ok || e.Fields["op"] != "get" || e.Err != "db down" {
+		t.Errorf("the failed lookup was not recorded as greylist.store.fail op=get: %+v (ok=%v)", e, ok)
+	}
+	gNil := NewGreylister(&memGreylist{m: map[string]directory.Greylisted{}}, nil)
+	gNil.SetEnabled(true)
+	if gNil.ShouldDefer(nil, "s@ext", "u@local") {
+		t.Error("nil IP must fail open")
 	}
 }
 
@@ -173,6 +197,47 @@ func TestRcptGreylistDefersUnauthenticated(t *testing.T) {
 	err = sess.Rcpt("alice@test", smtp.RcptParams{})
 	if _, ok := errors.AsType[*smtp.TempError](err); !ok {
 		t.Fatalf("first contact should defer with a TempError, got %v", err)
+	}
+	wantEq(t, "targets after greylist deferral", len(sess.(*session).targets), 0)
+}
+
+// TestGreylistRecordsStoreWriteFailures proves store write errors during refresh
+// and confirmation are recorded rather than silently dropped while still admitting.
+func TestGreylistRecordsStoreWriteFailures(t *testing.T) {
+	sink := withPassLogger(t)
+	store := &memGreylist{
+		m: map[string]directory.Greylisted{
+			glKey("203.0.113.0/24", "s@ext.example", "u@local.example"):  {FirstSeen: 100, Confirmed: true},
+			glKey("198.51.100.0/24", "s@ext.example", "u@local.example"): {FirstSeen: 100, Confirmed: false},
+		},
+		upsertErr:  errors.New("refresh failed"),
+		confirmErr: errors.New("confirm failed"),
+	}
+	g := NewGreylister(store, nil)
+	g.SetEnabled(true)
+	g.now = func() int64 { return 100 + int64(defaultGreylistMinDelay.Seconds()) + 1 }
+
+	if g.ShouldDefer(net.IPv4(203, 0, 113, 5), "s@ext.example", "u@local.example") {
+		t.Error("confirmed triplet must pass even when refresh write fails")
+	}
+	if g.ShouldDefer(net.IPv4(198, 51, 100, 5), "s@ext.example", "u@local.example") {
+		t.Error("retried triplet past delay must pass even when confirm write fails")
+	}
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	var ops []string
+	for _, e := range sink.events {
+		if e.Name == "greylist.store.fail" {
+			op, ok := e.Fields["op"].(string)
+			if !ok {
+				t.Fatalf("op field type = %T, want string", e.Fields["op"])
+			}
+			ops = append(ops, op)
+		}
+	}
+	if len(ops) != 2 || ops[0] != "refresh" || ops[1] != "confirm" {
+		t.Errorf("logged greylist store ops = %v, want [refresh confirm]", ops)
 	}
 }
 

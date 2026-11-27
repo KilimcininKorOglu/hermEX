@@ -41,8 +41,13 @@ func submission(t *testing.T) (*session, *relay.Spool, string) {
 // created.
 func inboxMessagesIfAny(t *testing.T, mbox string) []objectstore.MessageInfo {
 	t.Helper()
-	if _, err := os.Stat(mbox); errors.Is(err, fs.ErrNotExist) {
+	info, err := os.Stat(mbox)
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil
+	}
+	mustNoErr(t, "stat mailbox", err)
+	if !info.IsDir() {
+		t.Fatalf("mailbox path %q is not a directory", mbox)
 	}
 	return inboxMessages(t, mbox)
 }
@@ -60,6 +65,7 @@ func TestSubmissionRefusesAForgedHeaderFrom(t *testing.T) {
 		{"a user of another hosted domain", "From: carol@second\r\n"},
 		{"a list naming another user", "From: alice@local, bob@local\r\n"},
 		{"a second From field", "From: alice@local\r\nFrom: carol@second\r\n"},
+		{"unparseable From field", "From: not an address @@@\r\n"},
 	} {
 		s, sp, bob := submission(t)
 		raw := []byte(tc.from + "To: bob@local, dave@remote\r\nSubject: hi\r\n\r\nhello\r\n")

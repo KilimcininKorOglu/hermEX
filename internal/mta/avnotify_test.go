@@ -59,21 +59,35 @@ func TestBuildQuarantineNoticeOutbound(t *testing.T) {
 	}
 }
 
-// TestQuarantineNoticeFlattensUntrusted proves a CRLF-bearing subject is
-// flattened so it cannot disrupt the notice body.
+// TestQuarantineNoticeFlattensUntrusted proves a CRLF-bearing subject, sender,
+// or file name is flattened, an empty subject uses the fallback, and an empty
+// hostname defaults to localhost.
 func TestQuarantineNoticeFlattensUntrusted(t *testing.T) {
 	rec := directory.QuarantineRecord{
 		QuarantineEntry: directory.QuarantineEntry{
-			Direction: "inbound",
-			MailFrom:  "a@b.test",
-			Subject:   "line1\r\nInjected: header",
-			VirusName: "X",
+			Direction:    "inbound",
+			MailFrom:     "a@b.test\r\nEvil: from",
+			Subject:      "line1\r\nInjected: header",
+			InfectedFile: "bad\r\nfile.exe",
+			VirusName:    "X",
 		},
 	}
 	body := quarantineNoticeText(rec)
 	if !strings.Contains(body, "line1 Injected: header") {
 		t.Errorf("subject CRLF not flattened: %q", body)
 	}
+	if !strings.Contains(body, "a@b.test Evil: from") {
+		t.Errorf("sender CRLF not flattened: %q", body)
+	}
+	if !strings.Contains(body, "bad file.exe") {
+		t.Errorf("file CRLF not flattened: %q", body)
+	}
+
+	emptySubj := buildQuarantineNotice(directory.QuarantineRecord{
+		QuarantineEntry: directory.QuarantineEntry{Direction: "inbound", MailFrom: "a@b.test", VirusName: "X"},
+	}, "victim@acme.test", "", time.Unix(1000, 0))
+	wantContains(t, "empty subject fallback", string(emptySubj), "(konusuz)")
+	wantContains(t, "empty hostname fallback", string(emptySubj), "postmaster@localhost")
 }
 
 // TestQuarantineNoticeFailureIsReported proves an undeliverable notice reaches
@@ -94,6 +108,9 @@ func TestQuarantineNoticeFailureIsReported(t *testing.T) {
 	notifyQuarantine(accounts, rec, []string{"victim@acme.test"}, []string{"admin@acme.test"},
 		"mail.acme.test", time.Unix(1000, 0),
 		func(rcpt string, unresolved []string, err error) {
+			if err != nil || len(unresolved) != 1 || unresolved[0] != rcpt {
+				t.Errorf("unexpected report for %s: unresolved=%v err=%v", rcpt, unresolved, err)
+			}
 			reported = append(reported, rcpt)
 		})
 
@@ -108,17 +125,19 @@ func TestQuarantineNoticeFailureIsReported(t *testing.T) {
 }
 
 // TestQuarantineNoticeSuccessIsQuiet holds the other half: the hook fires on
-// failure only, so a working deployment logs nothing per notice.
+// failure only, so a working deployment logs nothing per notice, and duplicate
+// mixed-case recipients receive one copy.
 func TestQuarantineNoticeSuccessIsQuiet(t *testing.T) {
 	mbox := t.TempDir()
 	accounts := directory.StaticAccounts{"victim@acme.test": {Password: "pw", MailboxPath: mbox}}
 	rec := directory.QuarantineRecord{ID: 7, QuarantineEntry: directory.QuarantineEntry{Direction: "inbound"}}
 
 	called := 0
-	notifyQuarantine(accounts, rec, []string{"victim@acme.test"}, nil, "mail.acme.test", time.Unix(1000, 0),
+	notifyQuarantine(accounts, rec, []string{"Victim@Acme.Test"}, []string{"victim@acme.test"}, "mail.acme.test", time.Unix(1000, 0),
 		func(string, []string, error) { called++ })
 
 	if called != 0 {
 		t.Errorf("a delivered notice reported %d failure(s)", called)
 	}
+	wantEq(t, "deduplicated notices in victim inbox", len(listInbox(t, mbox)), 1)
 }

@@ -29,24 +29,31 @@ func TestAutoReplySuppressed(t *testing.T) {
 		{"ordinary person-to-person", mail.Header{}, "bob@example.com", false},
 		{"auto-submitted absent replies", mail.Header{}, "bob@example.com", false},
 		{"auto-submitted no replies", mail.Header{"Auto-Submitted": {"no"}}, "bob@example.com", false},
+		{"auto-submitted no with param replies", mail.Header{"Auto-Submitted": {"no; param=1"}}, "bob@example.com", false},
 		{"auto-submitted auto-replied suppressed", mail.Header{"Auto-Submitted": {"auto-replied"}}, "bob@example.com", true},
+		{"auto-submitted uppercase suppressed", mail.Header{"Auto-Submitted": {"AUTO-REPLIED"}}, "bob@example.com", true},
 		{"auto-submitted auto-generated suppressed", mail.Header{"Auto-Submitted": {"auto-generated"}}, "bob@example.com", true},
 		{"auto-submitted keyword with comment suppressed", mail.Header{"Auto-Submitted": {"auto-generated (rejected)"}}, "bob@example.com", true},
 		{"precedence absent replies", mail.Header{}, "bob@example.com", false},
 		{"precedence bulk suppressed", mail.Header{"Precedence": {"bulk"}}, "bob@example.com", true},
+		{"precedence uppercase bulk suppressed", mail.Header{"Precedence": {"BULK"}}, "bob@example.com", true},
 		{"precedence list suppressed", mail.Header{"Precedence": {"list"}}, "bob@example.com", true},
 		{"precedence junk suppressed", mail.Header{"Precedence": {"junk"}}, "bob@example.com", true},
 		{"precedence other replies", mail.Header{"Precedence": {"first-class"}}, "bob@example.com", false},
 		{"list-id suppressed", mail.Header{"List-Id": {"<list.example.com>"}}, "bob@example.com", true},
 		{"list-unsubscribe suppressed", mail.Header{"List-Unsubscribe": {"<mailto:x@y>"}}, "bob@example.com", true},
+		{"list-post suppressed", mail.Header{"List-Post": {"<mailto:list@example.com>"}}, "bob@example.com", true},
 		{"null sender suppressed", mail.Header{}, "", true},
 		{"angle null sender suppressed", mail.Header{}, "<>", true},
 		{"self suppressed", mail.Header{}, selfAddr, true},
+		{"self uppercase suppressed", mail.Header{}, "ME@HERMEX.TEST", true},
 		{"self with display name suppressed", mail.Header{}, "Me <" + selfAddr + ">", true},
 		{"postmaster suppressed", mail.Header{}, "postmaster@example.com", true},
 		{"mailer-daemon suppressed", mail.Header{}, "MAILER-DAEMON@example.com", true},
 		{"no-reply suppressed", mail.Header{}, "no-reply@example.com", true},
 		{"noreply suppressed", mail.Header{}, "noreply@example.com", true},
+		{"do-not-reply suppressed", mail.Header{}, "do-not-reply@example.com", true},
+		{"donotreply suppressed", mail.Header{}, "donotreply@example.com", true},
 	}
 	for _, c := range cases {
 		if got := autoReplySuppressed(c.hdr, c.sender, selfAddr); got != c.want {
@@ -129,28 +136,17 @@ func TestBuildAutoReply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reply is not a parseable message: %v", err)
 	}
-	if got := msg.Header.Get("Auto-Submitted"); got != "auto-replied" {
-		t.Errorf("Auto-Submitted = %q, want auto-replied (the loop break)", got)
-	}
-	if got := msg.Header.Get("From"); got != "me@hermex.test" {
-		t.Errorf("From = %q", got)
-	}
-	if got := msg.Header.Get("To"); got != "bob@example.com" {
-		t.Errorf("To = %q", got)
-	}
-	if got := msg.Header.Get("In-Reply-To"); got != "<orig@example.com>" {
-		t.Errorf("In-Reply-To = %q", got)
-	}
-	if got := msg.Header.Get("Subject"); got != "Away until Monday" {
-		t.Errorf("Subject = %q", got)
-	}
+	wantEq(t, "Auto-Submitted", msg.Header.Get("Auto-Submitted"), "auto-replied")
+	wantEq(t, "From", msg.Header.Get("From"), "me@hermex.test")
+	wantEq(t, "To", msg.Header.Get("To"), "bob@example.com")
+	wantEq(t, "In-Reply-To", msg.Header.Get("In-Reply-To"), "<orig@example.com>")
+	wantEq(t, "References", msg.Header.Get("References"), "<orig@example.com>")
+	wantEq(t, "Subject", msg.Header.Get("Subject"), "Away until Monday")
 	body, err := io.ReadAll(quotedprintable.NewReader(msg.Body))
 	if err != nil {
 		t.Fatalf("decode the quoted-printable body: %v", err)
 	}
-	if string(body) != "I am out of office." {
-		t.Errorf("body = %q, want round-tripped reply text", body)
-	}
+	wantEq(t, "body", string(body), "I am out of office.")
 }
 
 // TestBuildAutoReplyDefaultsAndEncoding checks an empty subject falls back to a
@@ -167,6 +163,9 @@ func TestBuildAutoReplyDefaultsAndEncoding(t *testing.T) {
 	}
 	if got := msg.Header.Get("Subject"); got != "Automatic reply" {
 		t.Errorf("empty subject did not default: %q", got)
+	}
+	if got := msg.Header.Get("References"); got != "" {
+		t.Errorf("empty inReplyTo emitted References %q", got)
 	}
 
 	raw, err = buildAutoReply("me@hermex.test", "bob@example.com", "Ofis dışındayım", "body", "", when)

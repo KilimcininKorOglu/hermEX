@@ -27,9 +27,7 @@ func srsSession(t *testing.T, sender string) *session {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := sp.Close(); err != nil {
-			t.Error(err)
-		}
+		mustClose(t, sp)
 	})
 	accounts := hostedLocal{directory.StaticAccounts{"alice@local": {MailboxPath: t.TempDir()}}}
 	return &session{accounts: accounts, from: sender, spool: sp, forwarding: testForwarding(t)}
@@ -73,13 +71,23 @@ func TestRewrittenAddressIsNotAnOpenRelay(t *testing.T) {
 	probe := srsSession(t, "")
 	secret := probe.forwarding.SRSSecret
 	good := srsAddress(t, "victim@remote.test", secret, time.Now())
-	cases := map[string]struct{ sender, rcpt string }{
-		"ordinary mail": {"spammer@remote.test", good},
-		"forged hash":   {"", "SRS0=AAAAAAAA" + good[strings.Index(good, "=")+9:]},
-		"expired":       {"", srsAddress(t, "victim@remote.test", secret, time.Now().Add(-srs.MaxAge-48*time.Hour))},
+	foreignSRS, err := srs.Forward("victim@remote.test", "other.test", secret, time.Now())
+	mustNoErr(t, "build foreign SRS", err)
+	cases := map[string]struct {
+		sender, rcpt string
+		nilSpool     bool
+	}{
+		"ordinary mail":     {"spammer@remote.test", good, false},
+		"forged hash":       {"", "SRS0=AAAAAAAA" + good[strings.Index(good, "=")+9:], false},
+		"expired":           {"", srsAddress(t, "victim@remote.test", secret, time.Now().Add(-srs.MaxAge-48*time.Hour)), false},
+		"foreign domain":    {"", foreignSRS, false},
+		"external with nil": {"", good, true},
 	}
 	for name, c := range cases {
 		s := srsSession(t, c.sender)
+		if c.nilSpool {
+			s.spool = nil
+		}
 		var perm *smtp.PermError
 		if err := s.Rcpt(c.rcpt, smtp.RcptParams{}); !errors.As(err, &perm) {
 			t.Errorf("%s: RCPT %s answered %v, want a permanent refusal", name, c.rcpt, err)

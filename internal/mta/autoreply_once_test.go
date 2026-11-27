@@ -10,9 +10,15 @@ import (
 	"hermex/internal/objectstore"
 )
 
+type oofFixtures struct {
+	accounts directory.StaticAccounts
+	pathA    string
+	pathB    string
+}
+
 // oofPair provisions alice and bob, turns bob's out-of-office on, and returns the
 // accounts with both mailbox paths.
-func oofPair(t *testing.T) (directory.StaticAccounts, string, string) {
+func oofPair(t *testing.T) oofFixtures {
 	t.Helper()
 	dir := t.TempDir()
 	pathA, pathB := filepath.Join(dir, "alice"), filepath.Join(dir, "bob")
@@ -20,12 +26,16 @@ func oofPair(t *testing.T) (directory.StaticAccounts, string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 	enableOOF(t, pathB)
-	return directory.StaticAccounts{
-		"alice@hermex.test": {MailboxPath: pathA},
-		"bob@hermex.test":   {MailboxPath: pathB},
-	}, pathA, pathB
+	return oofFixtures{
+		accounts: directory.StaticAccounts{
+			"alice@hermex.test": {MailboxPath: pathA},
+			"bob@hermex.test":   {MailboxPath: pathB},
+		},
+		pathA: pathA,
+		pathB: pathB,
+	}
 }
 
 func mailBob(t *testing.T, accounts directory.Accounts, pathB, subject string) {
@@ -42,7 +52,7 @@ func setBobOOF(t *testing.T, pathB string, cfg objectstore.OOFSettings) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if err := st.SetOOFSettings(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -53,11 +63,11 @@ func setBobOOF(t *testing.T, pathB string, cfg objectstore.OOFSettings) {
 // answers each sender once while out-of-office stays on. Three messages from
 // alice draw one reply.
 func TestOOFRepliesOncePerSender(t *testing.T) {
-	accounts, pathA, pathB := oofPair(t)
+	fx := oofPair(t)
 	for _, s := range []string{"one", "two", "three"} {
-		mailBob(t, accounts, pathB, s)
+		mailBob(t, fx.accounts, fx.pathB, s)
 	}
-	if n := len(listInbox(t, pathA)); n != 1 {
+	if n := len(listInbox(t, fx.pathA)); n != 1 {
 		t.Errorf("alice received %d auto-replies for three messages, want 1", n)
 	}
 }
@@ -67,25 +77,25 @@ func TestOOFRepliesOncePerSender(t *testing.T) {
 // (RFC 5321 2.4 makes the domain case-insensitive, and the server treats the
 // local part the same way).
 func TestOOFHistoryIsPerSender(t *testing.T) {
-	_, pathA, pathB := oofPair(t)
-	pathC := filepath.Join(filepath.Dir(pathA), "carol")
+	fx := oofPair(t)
+	pathC := filepath.Join(filepath.Dir(fx.pathA), "carol")
 	st, err := objectstore.Open(pathC)
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 	accounts := directory.StaticAccounts{
-		"alice@hermex.test": {MailboxPath: pathA},
-		"bob@hermex.test":   {MailboxPath: pathB},
+		"alice@hermex.test": {MailboxPath: fx.pathA},
+		"bob@hermex.test":   {MailboxPath: fx.pathB},
 		"carol@hermex.test": {MailboxPath: pathC},
 	}
 	for _, from := range []string{"alice@hermex.test", "Alice@Hermex.Test", "carol@hermex.test", "carol@hermex.test"} {
 		raw := []byte("From: " + from + "\r\nTo: bob@hermex.test\r\nSubject: hi\r\n\r\nhello\r\n")
-		if err := deliver(accounts, from, "bob@hermex.test", pathB, raw, when, int64(mapi.PrivateFIDInbox)); err != nil {
+		if err := deliver(accounts, from, "bob@hermex.test", fx.pathB, raw, when, int64(mapi.PrivateFIDInbox)); err != nil {
 			t.Fatalf("deliver from %s: %v", from, err)
 		}
 	}
-	if n := len(listInbox(t, pathA)); n != 1 {
+	if n := len(listInbox(t, fx.pathA)); n != 1 {
 		t.Errorf("alice, writing in two cases, received %d replies, want 1", n)
 	}
 	if n := len(listInbox(t, pathC)); n != 1 {
@@ -97,13 +107,13 @@ func TestOOFHistoryIsPerSender(t *testing.T) {
 // is automated, RFC 3834 section 2) must leave the sender unanswered, so their
 // next ordinary message is answered.
 func TestASuppressedMessageDoesNotUseUpTheReply(t *testing.T) {
-	accounts, pathA, pathB := oofPair(t)
+	fx := oofPair(t)
 	auto := []byte("From: alice@hermex.test\r\nTo: bob@hermex.test\r\nAuto-Submitted: auto-generated\r\nSubject: digest\r\n\r\nx\r\n")
-	if err := deliver(accounts, "alice@hermex.test", "bob@hermex.test", pathB, auto, when, int64(mapi.PrivateFIDInbox)); err != nil {
+	if err := deliver(fx.accounts, "alice@hermex.test", "bob@hermex.test", fx.pathB, auto, when, int64(mapi.PrivateFIDInbox)); err != nil {
 		t.Fatal(err)
 	}
-	mailBob(t, accounts, pathB, "a real question")
-	if n := len(listInbox(t, pathA)); n != 1 {
+	mailBob(t, fx.accounts, fx.pathB, "a real question")
+	if n := len(listInbox(t, fx.pathA)); n != 1 {
 		t.Errorf("alice received %d replies, want 1 (to her ordinary message)", n)
 	}
 }
@@ -124,15 +134,18 @@ func TestAVacationRuleRepliesOncePerSender(t *testing.T) {
 			Actions: mapi.RuleActions{Blocks: []mapi.ActionBlock{objectstore.RuleRejectAction("not wanted")}}},
 	} {
 		rule.FolderID, rule.State = int64(mapi.PrivateFIDInbox), mapi.RuleStateEnabled
-		if _, err := st.AddRule(rule); err != nil {
-			t.Fatal(err)
+		id, err := st.AddRule(rule)
+		if err != nil || id == 0 {
+			t.Fatalf("AddRule(%q): id=%d err=%v", rule.Name, id, err)
 		}
 	}
-	st.Close()
+	mustClose(t, st)
 
 	var vacations, rejects int
 	prev := OnRuleSend
-	OnRuleSend = func(_ string, _ []string, raw []byte) {
+	OnRuleSend = func(owner string, to []string, raw []byte) {
+		wantEq(t, "rule send owner", owner, "bob@hermex.test")
+		wantEq(t, "rule send to", strings.Join(to, ","), "carol@example.org")
 		if strings.Contains(string(raw), "Away this week.") {
 			vacations++
 		} else {
@@ -158,19 +171,19 @@ func TestAVacationRuleRepliesOncePerSender(t *testing.T) {
 // a changed reply is a new message the sender has not seen, so each starts the
 // sender list again.
 func TestOOFAnswersAgainInANewPeriod(t *testing.T) {
-	accounts, pathA, pathB := oofPair(t)
-	mailBob(t, accounts, pathB, "one")
+	fx := oofPair(t)
+	mailBob(t, fx.accounts, fx.pathB, "one")
 
-	setBobOOF(t, pathB, objectstore.OOFSettings{})
-	setBobOOF(t, pathB, objectstore.OOFSettings{Enabled: true, InternalSubject: "Away", InternalReply: "Away, back later."})
-	mailBob(t, accounts, pathB, "two")
-	if n := len(listInbox(t, pathA)); n != 2 {
+	setBobOOF(t, fx.pathB, objectstore.OOFSettings{})
+	setBobOOF(t, fx.pathB, objectstore.OOFSettings{Enabled: true, InternalSubject: "Away", InternalReply: "Away, back later."})
+	mailBob(t, fx.accounts, fx.pathB, "two")
+	if n := len(listInbox(t, fx.pathA)); n != 2 {
 		t.Fatalf("after out-of-office was turned off and on, alice has %d replies, want 2", n)
 	}
 
-	setBobOOF(t, pathB, objectstore.OOFSettings{Enabled: true, InternalSubject: "Away", InternalReply: "Back on Monday."})
-	mailBob(t, accounts, pathB, "three")
-	if n := len(listInbox(t, pathA)); n != 3 {
+	setBobOOF(t, fx.pathB, objectstore.OOFSettings{Enabled: true, InternalSubject: "Away", InternalReply: "Back on Monday."})
+	mailBob(t, fx.accounts, fx.pathB, "three")
+	if n := len(listInbox(t, fx.pathA)); n != 3 {
 		t.Errorf("after the reply text changed, alice has %d replies, want 3", n)
 	}
 }

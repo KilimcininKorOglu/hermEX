@@ -19,6 +19,7 @@ func TestRateLimiterAdmitsUntilBurstThenDefers(t *testing.T) {
 	rl := NewRateLimiter()
 	rl.now = func() time.Time { return now }
 	rl.SetLimits(3, time.Minute)
+	rl.SetLimits(0, -time.Second) // non-positive values ignored
 	rl.SetEnabled(true)
 
 	ip := net.ParseIP("198.51.100.7")
@@ -72,6 +73,12 @@ func TestRateLimiterKeysByNetwork(t *testing.T) {
 	if !rl.Allow(net.ParseIP("203.0.114.1")) {
 		t.Error("a different /24 must have its own budget")
 	}
+	if !rl.Allow(net.ParseIP("2001:db8:1::1")) || !rl.Allow(net.ParseIP("2001:db8:1::2")) {
+		t.Fatal("first two IPv6 messages in same /64 must be admitted")
+	}
+	if rl.Allow(net.ParseIP("2001:db8:1::99")) {
+		t.Error("third IPv6 message in same /64 must be deferred")
+	}
 }
 
 // TestRateLimiterNilIPFailsOpen proves an unkeyable client is admitted rather than
@@ -100,10 +107,12 @@ func TestMailRateLimitDefersUnauthenticatedFlood(t *testing.T) {
 			t.Fatalf("message %d within the burst must be accepted, got %v", i+1, err)
 		}
 	}
-	err := newUnauth().Mail("spammer@ext.example", smtp.MailParams{})
+	sOver := newUnauth()
+	err := sOver.Mail("spammer@ext.example", smtp.MailParams{})
 	if _, ok := errors.AsType[*smtp.TempError](err); !ok {
 		t.Fatalf("the message past the burst must defer with a TempError, got %v", err)
 	}
+	wantEq(t, "session from after rate-limit deferral", sOver.from, "")
 }
 
 // TestMailRateLimitSkipsAuthenticated proves authenticated submission is never rate
@@ -138,7 +147,9 @@ func TestRateLimiterFullTableStillLimitsANewcomer(t *testing.T) {
 	rl.SetEnabled(true)
 	for i := range rateLimitMaxKeys {
 		ip := net.ParseIP(fmt.Sprintf("2001:db8:%x:%x::1", i>>16, i&0xffff))
-		rl.Allow(ip)
+		if !rl.Allow(ip) {
+			t.Fatalf("seed IP %d refused", i)
+		}
 	}
 
 	flood := net.ParseIP("198.51.100.7")
@@ -161,7 +172,9 @@ func TestRateLimiterPruneDropsExpired(t *testing.T) {
 	rl.now = func() time.Time { return now }
 	rl.SetLimits(1, time.Minute)
 	rl.SetEnabled(true)
-	rl.Allow(net.ParseIP("203.0.113.1"))
+	if !rl.Allow(net.ParseIP("203.0.113.1")) {
+		t.Fatal("first message refused")
+	}
 	if len(rl.windows) != 1 {
 		t.Fatalf("expected 1 tracked window, got %d", len(rl.windows))
 	}

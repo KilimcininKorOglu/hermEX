@@ -2,7 +2,9 @@ package mta
 
 import (
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"hermex/internal/directory"
 	"hermex/internal/relay"
@@ -101,28 +103,34 @@ func TestInboundForwardIsOneHop(t *testing.T) {
 func TestForwardThatCannotLeaveKeepsTheMail(t *testing.T) {
 	ext := map[string]directory.ForwardInfo{"alice@local": {Type: directory.ForwardRedirect, Destination: "out@remote.test"}}
 	s := forwardSession(t, ext, false)
-	if err := s.Rcpt("alice@local", smtp.RcptParams{}); err != nil {
-		t.Fatal(err)
-	}
-	if locals, fw := routed(s); len(locals) != 1 || locals[0] != "alice@local" || len(fw) != 0 {
-		t.Errorf("no spool: local %v, forwards %v; want alice@local kept", locals, fw)
-	}
+	mustNoErr(t, "Rcpt without spool", s.Rcpt("alice@local", smtp.RcptParams{}))
+	locals, fw := routed(s)
+	wantEq(t, "no-spool locals", strings.Join(locals, ","), "alice@local")
+	wantEq(t, "no-spool forwards", len(fw), 0)
 
 	s = forwardSession(t, ext, true)
-	d := s.accounts.(forwardingDir)
+	d, ok := s.accounts.(forwardingDir)
+	if !ok {
+		t.Fatalf("accounts type = %T, want forwardingDir", s.accounts)
+	}
 	d.broken = true
 	s.accounts = d
-	if err := s.Rcpt("alice@local", smtp.RcptParams{}); err != nil {
-		t.Fatal(err)
-	}
-	if locals, fw := routed(s); len(locals) != 1 || len(fw) != 0 {
-		t.Errorf("unreadable setting: local %v, forwards %v; want alice@local kept", locals, fw)
-	}
+	mustNoErr(t, "Rcpt with broken forward lookup", s.Rcpt("alice@local", smtp.RcptParams{}))
+	locals, fw = routed(s)
+	wantEq(t, "unreadable locals", len(locals), 1)
+	wantEq(t, "unreadable forwards", len(fw), 0)
+
+	// Mixed-case self-forward delivers locally without forwarding loop.
+	locals, fw = rcptAlice(t, map[string]directory.ForwardInfo{
+		"alice@local": {Type: directory.ForwardRedirect, Destination: "ALICE@LOCAL"},
+	})
+	wantEq(t, "self-forward locals", strings.Join(locals, ","), "alice@local")
+	wantEq(t, "self-forward forwards", len(fw), 0)
 }
 
 // TestAuthenticatedForwardIsAuthorSigned: a submission's From passed sendas, so
 // the forwarded copy joins the author-signed relay targets, not the sealed
-// forwards.
+// forwards, and an outbound-limited owner defers without adding targets.
 func TestAuthenticatedForwardIsAuthorSigned(t *testing.T) {
 	ext := map[string]directory.ForwardInfo{"alice@local": {Type: directory.ForwardRedirect, Destination: "out@remote.test"}}
 	s := forwardSession(t, ext, true)
@@ -133,4 +141,20 @@ func TestAuthenticatedForwardIsAuthorSigned(t *testing.T) {
 	if len(s.forwards) != 0 || len(s.relayTargets) != 1 || s.relayTargets[0] != (relay.DSNRecipient{Addr: "out@remote.test"}) {
 		t.Errorf("forwards %v, relay targets %v; want the destination as an author-signed relay", s.forwards, s.relayTargets)
 	}
+
+	ob := NewOutboundLimiter()
+	ob.SetLimits(1, time.Hour)
+	ob.SetEnabled(true)
+	if !ob.Allow("alice@local") {
+		t.Fatal("first allow failed")
+	}
+	sLim := forwardSession(t, ext, true)
+	sLim.authUser = "carol@local"
+	sLim.outbound = ob
+	err := sLim.Rcpt("alice@local", smtp.RcptParams{})
+	if _, ok := errors.AsType[*smtp.TempError](err); !ok {
+		t.Fatalf("outbound-limited forward err = %v, want *smtp.TempError", err)
+	}
+	wantEq(t, "forwards on outbound limit", len(sLim.forwards), 0)
+	wantEq(t, "relayTargets on outbound limit", len(sLim.relayTargets), 0)
 }

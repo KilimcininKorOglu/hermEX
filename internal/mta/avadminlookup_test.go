@@ -35,12 +35,15 @@ func TestQuarantineRecordsAdminLookupFailure(t *testing.T) {
 		t.Fatalf("virus hit gave %d, want avHandled", d)
 	}
 
+	if len(fd.quarantined) != 1 {
+		t.Fatalf("quarantined = %d, want 1", len(fd.quarantined))
+	}
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
-	for _, e := range sink.events {
-		if e.Name == "av.admins.fail" {
-			return
-		}
+	e, ok := findEvent(sink.events, "av.admins.fail")
+	if !ok {
+		t.Fatalf("the admin lookup failure was never recorded; events = %+v", sink.events)
 	}
-	t.Errorf("the admin lookup failure was never recorded; events = %+v", sink.events)
+	wantEq(t, "event level", e.Level, logging.LevelError)
+	wantEq(t, "event err", e.Fields["err"], any("database unavailable"))
 }

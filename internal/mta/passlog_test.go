@@ -152,3 +152,22 @@ func TestMeetingReplySuccessIsSilent(t *testing.T) {
 		t.Error("a successful tracking update emitted a failure event")
 	}
 }
+
+// TestMeetingCancelPanicIsRecorded proves a panicking cancellation pass is
+// recovered and recorded rather than failing delivery.
+func TestMeetingCancelPanicIsRecorded(t *testing.T) {
+	sink := withPassLogger(t)
+	prev := OnMeetingCancel
+	OnMeetingCancel = func(*objectstore.Store, string, int64) (bool, error) {
+		panic("cancel panic")
+	}
+	t.Cleanup(func() { OnMeetingCancel = prev })
+
+	autoProcessCancel(nil, "org@hermex.test", objectstore.MessageInfo{UID: 9})
+	e, ok := sink.find("delivery.pass.fail")
+	if !ok {
+		t.Fatal("a panicking meeting-cancel pass produced no event")
+	}
+	wantEq(t, "pass name", e.Fields["pass"], any("meeting-cancel"))
+	wantEq(t, "panic err", e.Err, "cancel panic")
+}

@@ -85,4 +85,18 @@ func TestScanStoredIsOffWhenTheDomainToggleIsOff(t *testing.T) {
 	if ScanStored(directory.StaticAccounts{}, "victim@acme.test", "x", []byte("MZ"), time.Unix(1000, 0)) {
 		t.Error("content was scanned with the domain's toggle off")
 	}
+
+	// Outbound-only toggle does not scan stored content (stored gates on inbound).
+	storedScanner(t, found, &fakeAVDir{outbound: true, domainID: 7, known: true})
+	if ScanStored(directory.StaticAccounts{}, "victim@acme.test", "x", []byte("MZ"), time.Unix(1000, 0)) {
+		t.Error("content was scanned when only outbound toggle was on")
+	}
+
+	// Unreachable clamd fails open on stored content, leaving zero quarantine records.
+	fdDead := &fakeAVDir{inbound: true, domainID: 7, known: true}
+	storedScanner(t, "tcp://127.0.0.1:1", fdDead)
+	if ScanStored(directory.StaticAccounts{}, "victim@acme.test", "x", []byte("MZ"), time.Unix(1000, 0)) {
+		t.Error("unreachable clamd refused stored content")
+	}
+	wantEq(t, "quarantine records on unreachable clamd", len(fdDead.quarantined), 0)
 }

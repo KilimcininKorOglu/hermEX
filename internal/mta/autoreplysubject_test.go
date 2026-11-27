@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // TestAStoredSubjectIsUsedVerbatim keeps the mailbox's own wording exactly as it
@@ -74,29 +75,40 @@ func TestTheOriginalSubjectCannotSplitTheHeader(t *testing.T) {
 	SetAutoReplyPrefix("Automatic reply")
 	t.Cleanup(func() { SetAutoReplyPrefix("") })
 
-	subject := composeAutoReplySubject("", "hi\r\nBcc: victim@elsewhere.test")
-	if strings.ContainsAny(subject, "\r\n") {
-		t.Fatalf("the composed subject carries a line break: %q", subject)
-	}
+	for _, rawSubj := range []string{
+		"hi\r\nBcc: victim@elsewhere.test",
+		"hi\nBcc: victim@elsewhere.test",
+		"hi\rBcc: victim@elsewhere.test",
+		"hi\x00\x7fBcc: victim@elsewhere.test",
+	} {
+		subject := composeAutoReplySubject("", rawSubj)
+		if strings.ContainsAny(subject, "\r\n\x00\x7f") {
+			t.Fatalf("the composed subject carries control characters: %q", subject)
+		}
 
-	raw, err := buildAutoReply("a@acme.test", "b@acme.test", subject, "away", "", time.Now())
-	if err != nil {
-		t.Fatal(err)
+		raw, err := buildAutoReply("a@acme.test", "b@acme.test", subject, "away", "", time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		msg, err := mail.ReadMessage(strings.NewReader(string(raw)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := msg.Header.Get("Bcc"); got != "" {
+			t.Errorf("the incoming subject injected a Bcc header: %q", got)
+		}
+		// And the text still arrives, minus the control characters.
+		decoded, err := new(mime.WordDecoder).DecodeHeader(msg.Header.Get("Subject"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(decoded, "Bcc: victim@elsewhere.test") {
+			t.Errorf("subject = %q, want the injected text carried as text", decoded)
+		}
 	}
-	msg, err := mail.ReadMessage(strings.NewReader(string(raw)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := msg.Header.Get("Bcc"); got != "" {
-		t.Errorf("the incoming subject injected a Bcc header: %q", got)
-	}
-	// And the text still arrives, minus the control characters.
-	decoded, err := new(mime.WordDecoder).DecodeHeader(msg.Header.Get("Subject"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(decoded, "Bcc: victim@elsewhere.test") {
-		t.Errorf("subject = %q, want the injected text carried as text", decoded)
+	malformed := composeAutoReplySubject("", "=?unknown-cs?b?!!!?=\r\nBcc: evil@test")
+	if strings.ContainsAny(malformed, "\r\n") {
+		t.Errorf("malformed encoded subject kept line breaks: %q", malformed)
 	}
 }
 
@@ -134,5 +146,12 @@ func TestTheOriginalSubjectIsBounded(t *testing.T) {
 	got := composeAutoReplySubject("", strings.Repeat("x", 5000))
 	if len(got) > len("Automatic reply: ")+maxOriginalSubject {
 		t.Errorf("the composed subject is %d bytes", len(got))
+	}
+	mb := composeAutoReplySubject("", strings.Repeat("ğ", 250))
+	if len(mb) > len("Automatic reply: ")+maxOriginalSubject {
+		t.Errorf("multibyte subject is %d bytes", len(mb))
+	}
+	if !utf8.ValidString(mb) {
+		t.Errorf("truncated multibyte subject is invalid UTF-8: %q", mb)
 	}
 }

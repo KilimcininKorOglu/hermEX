@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 )
 
 // TestUnsavedLimitFallsBackToTheBuiltInCeiling is the unbounded-inbound defect.
@@ -12,6 +13,7 @@ import (
 // on a fresh install no size row exists. Treating that as "no limit" left the
 // widest unauthenticated surface open to one anonymous peer.
 func TestUnsavedLimitFallsBackToTheBuiltInCeiling(t *testing.T) {
+	t.Cleanup(func() { SetMaxMessageSize(directory.DefaultMaxInboundBytes) })
 	SetMaxMessageSize(1) // a value the apply must move off
 	ApplyMessageSizeSettings("test", nil, func() (MessageSizeSettings, bool, error) {
 		return MessageSizeSettings{}, false, nil
@@ -26,6 +28,7 @@ func TestUnsavedLimitFallsBackToTheBuiltInCeiling(t *testing.T) {
 // a decision the panel offers, and it must not be overridden by the ceiling that
 // exists only for the case where nothing was ever chosen.
 func TestStoredZeroStaysUnlimited(t *testing.T) {
+	t.Cleanup(func() { SetMaxMessageSize(directory.DefaultMaxInboundBytes) })
 	SetMaxMessageSize(1)
 	ApplyMessageSizeSettings("test", nil, func() (MessageSizeSettings, bool, error) {
 		return MessageSizeSettings{MaxInboundBytes: 0}, true, nil
@@ -37,6 +40,7 @@ func TestStoredZeroStaysUnlimited(t *testing.T) {
 
 // TestStoredLimitIsApplied is the ordinary path.
 func TestStoredLimitIsApplied(t *testing.T) {
+	t.Cleanup(func() { SetMaxMessageSize(directory.DefaultMaxInboundBytes) })
 	const tenMiB = 10 << 20
 	SetMaxMessageSize(1)
 	ApplyMessageSizeSettings("test", nil, func() (MessageSizeSettings, bool, error) {
@@ -50,12 +54,19 @@ func TestStoredLimitIsApplied(t *testing.T) {
 // TestReadFailureLeavesTheLimitAlone keeps a settings outage from changing what
 // the server accepts, in either direction.
 func TestReadFailureLeavesTheLimitAlone(t *testing.T) {
+	t.Cleanup(func() { SetMaxMessageSize(directory.DefaultMaxInboundBytes) })
 	const current = 7 << 20
 	SetMaxMessageSize(current)
-	ApplyMessageSizeSettings("test", nil, func() (MessageSizeSettings, bool, error) {
+	sink := &captureSink{}
+	ApplyMessageSizeSettings("test", logging.New(sink), func() (MessageSizeSettings, bool, error) {
 		return MessageSizeSettings{}, false, errors.New("database unavailable")
 	})
 	if got := maxMessageBytes.Load(); got != current {
 		t.Errorf("a read failure changed the limit to %d, want it left at %d", got, int64(current))
+	}
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if _, ok := findEvent(sink.events, "settings.read.fail"); !ok {
+		t.Error("message-size read failure was not logged")
 	}
 }

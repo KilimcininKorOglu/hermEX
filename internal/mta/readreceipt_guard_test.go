@@ -41,12 +41,13 @@ func (p receiptParties) deliverRequest(t *testing.T, envelope, dnt string) (*obj
 	t.Helper()
 	raw := "From: sender@hermex.test\r\nTo: reader@hermex.test\r\nSubject: read me\r\n" +
 		"Disposition-Notification-To: " + dnt + "\r\n\r\nbody\r\n"
-	_, err := Deliver(p.accounts, envelope, []string{"reader@hermex.test"}, []byte(raw), time.Now())
+	unresolved, err := Deliver(p.accounts, envelope, []string{"reader@hermex.test"}, []byte(raw), time.Now())
 	mustNoErr(t, "deliver the request", err)
+	wantEq(t, "unresolved recipients", len(unresolved), 0)
 	msgs := listInbox(t, p.readerDir)
 	st, err := objectstore.Open(p.readerDir)
 	mustNoErr(t, "open the reader's mailbox", err)
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { mustClose(t, st) })
 	return st, msgs[len(msgs)-1].ID
 }
 
@@ -66,8 +67,10 @@ func TestAutomaticReceiptNeedsTheReturnPath(t *testing.T) {
 		sends               bool
 	}{
 		{"the envelope sender", "sender@hermex.test", "sender@hermex.test", true},
+		{"case-insensitive envelope sender", "sender@hermex.test", "SENDER@HERMEX.TEST", true},
 		{"a third party", "sender@hermex.test", "notify@hermex.test", false},
 		{"two addresses", "sender@hermex.test", "sender@hermex.test, notify@hermex.test", false},
+		{"unparseable DNT", "sender@hermex.test", "not an address @@@", false},
 		{"the null sender", "", "sender@hermex.test", false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -81,6 +84,23 @@ func TestAutomaticReceiptNeedsTheReturnPath(t *testing.T) {
 			wantEq(t, "the request pending afterwards", pending, !c.sends)
 		})
 	}
+
+	// Forged incoming Return-Path header must be replaced by envelope sender.
+	p := newReceiptParties(t)
+	raw := "Return-Path: <notify@hermex.test>\r\nFrom: sender@hermex.test\r\nTo: reader@hermex.test\r\n" +
+		"Subject: forged\r\nDisposition-Notification-To: notify@hermex.test\r\n\r\nbody\r\n"
+	unresolved, err := Deliver(p.accounts, "sender@hermex.test", []string{"reader@hermex.test"}, []byte(raw), time.Now())
+	mustNoErr(t, "deliver forged return-path", err)
+	wantEq(t, "unresolved recipients", len(unresolved), 0)
+	st, err := objectstore.Open(p.readerDir)
+	mustNoErr(t, "open reader", err)
+	defer mustClose(t, st)
+	id := listInbox(t, p.readerDir)[0].ID
+	p.send(t, st, id, ReceiptAutomatic)
+	wantEq(t, "receipts sent to forged Return-Path", len(listInbox(t, p.notify)), 0)
+	pending, err := ReceiptPending(st, id)
+	mustNoErr(t, "read request", err)
+	wantEq(t, "pending after forged Return-Path refusal", pending, true)
 }
 
 // TestReceiptTheReaderChoseIsNotGuarded proves a receipt the reader or their
@@ -113,11 +133,12 @@ func TestNoReceiptAnswersAReceipt(t *testing.T) {
 		"Disposition-Notification-To: sender@hermex.test\r\nMIME-Version: 1.0\r\n" +
 		"Content-Type: multipart/report; report-type=disposition-notification; boundary=b\r\n\r\n" +
 		"--b\r\nContent-Type: text/plain\r\n\r\nread\r\n--b--\r\n"
-	_, err := Deliver(p.accounts, "sender@hermex.test", []string{"reader@hermex.test"}, []byte(raw), time.Now())
+	unresolved, err := Deliver(p.accounts, "sender@hermex.test", []string{"reader@hermex.test"}, []byte(raw), time.Now())
 	mustNoErr(t, "deliver the notification", err)
+	wantEq(t, "unresolved recipients", len(unresolved), 0)
 	st, err := objectstore.Open(p.readerDir)
 	mustNoErr(t, "open the reader's mailbox", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	id := listInbox(t, p.readerDir)[0].ID
 	pending, err := ReceiptPending(st, id)
 	mustNoErr(t, "read the request", err)

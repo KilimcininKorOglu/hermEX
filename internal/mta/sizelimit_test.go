@@ -15,16 +15,16 @@ import (
 
 // sizedSend builds a local account and a spool with the message size limit set to
 // n bytes for one test.
-func sizedSend(t *testing.T, n int64) (directory.Accounts, *relay.Spool) {
+func sizedSend(t *testing.T, n int64) (directory.StaticAccounts, *relay.Spool) {
 	t.Helper()
 	spool, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = spool.Close() })
+	t.Cleanup(func() { mustClose(t, spool) })
 
 	SetMaxMessageSize(n)
-	t.Cleanup(func() { SetMaxMessageSize(0) })
+	t.Cleanup(func() { SetMaxMessageSize(directory.DefaultMaxInboundBytes) })
 
 	return directory.StaticAccounts{"alice@acme.test": {Password: "pw", MailboxPath: t.TempDir()}}, spool
 }
@@ -34,18 +34,28 @@ func sizedSend(t *testing.T, n int64) (directory.Accounts, *relay.Spool) {
 // ROP, DAV scheduling and the send-later release all arrive here.
 func TestDeliverAndRelayRefusesOversizedMessage(t *testing.T) {
 	accounts, spool := sizedSend(t, 1024)
-	raw := []byte("Subject: big\r\n\r\n" + strings.Repeat("x", 2048))
+	raw := make([]byte, 1025)
+	copy(raw, "Subject: big\r\n\r\n")
 
-	_, err := DeliverAndRelay(accounts, spool, "alice@acme.test", []string{"a@far.test"}, raw, time.Unix(1000, 0))
+	unresolved, err := DeliverAndRelay(accounts, spool, "alice@acme.test", []string{"alice@acme.test", "a@far.test"}, raw, time.Unix(1000, 0))
 	if !errors.Is(err, ErrMessageTooLarge) {
 		t.Fatalf("err = %v, want ErrMessageTooLarge", err)
 	}
+	wantEq(t, "unresolved on size refusal", len(unresolved), 2)
+	wantEq(t, "local inbox after size refusal", inboxCount(t, accounts["alice@acme.test"].MailboxPath), 0)
 	entries, err := spool.List()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(entries) != 0 {
 		t.Errorf("%d entries were queued despite the refusal", len(entries))
+	}
+
+	exact := make([]byte, 1024)
+	copy(exact, "Subject: ok\r\n\r\n")
+	unresolved, err = DeliverAndRelay(accounts, spool, "alice@acme.test", []string{"a@far.test"}, exact, time.Unix(1000, 0))
+	if err != nil || len(unresolved) != 0 {
+		t.Fatalf("exact limit send: unresolved=%v err=%v", unresolved, err)
 	}
 }
 
@@ -62,27 +72,39 @@ func TestSubmissionBoundsRecipientsPerMessage(t *testing.T) {
 		recipients[i] = "r" + strconv.Itoa(i) + "@far.test"
 	}
 
-	_, err := DeliverAndRelay(accounts, spool, "alice@acme.test", recipients, raw, time.Unix(1000, 0))
+	unresolved, err := DeliverAndRelay(accounts, spool, "alice@acme.test", recipients, raw, time.Unix(1000, 0))
 	if !errors.Is(err, ErrTooManyRecipients) {
 		t.Fatalf("err = %v, want ErrTooManyRecipients", err)
 	}
-	var terminal interface{ TerminalDelivery() bool }
-	if !errors.As(err, &terminal) || !terminal.TerminalDelivery() {
-		t.Error("the refusal must be terminal: the recipient list will not shrink on a retry")
-	}
-	if entries, err := spool.List(); err != nil || len(entries) != 0 {
-		t.Fatalf("queued %d entries (err %v) despite the refusal", len(entries), err)
-	}
+	wantEq(t, "unresolved on recipient bound refusal", len(unresolved), len(recipients))
+	wantTerminal(t, err)
+	wantSpoolEmpty(t, spool)
 
 	keep, err := SendRenderings(accounts, spool, "alice@acme.test",
 		recipients[:smtp.MaxRecipients/2+1], raw, recipients[smtp.MaxRecipients/2+1:], raw, time.Unix(1000, 0))
 	if !errors.Is(err, ErrTooManyRecipients) || !keep {
 		t.Fatalf("two renderings over the bound: err = %v keep = %v, want ErrTooManyRecipients", err, keep)
 	}
+	wantSpoolEmpty(t, spool)
 
-	if _, err := DeliverAndRelay(accounts, spool, "alice@acme.test", recipients[:smtp.MaxRecipients], raw, time.Unix(1000, 0)); err != nil {
-		t.Fatalf("a message at the bound: %v", err)
+	unresolved, err = DeliverAndRelay(accounts, spool, "alice@acme.test", recipients[:smtp.MaxRecipients], raw, time.Unix(1000, 0))
+	mustNoErr(t, "a message at the bound", err)
+	wantEq(t, "unresolved at bound", len(unresolved), 0)
+}
+
+func wantTerminal(t *testing.T, err error) {
+	t.Helper()
+	var terminal interface{ TerminalDelivery() bool }
+	if !errors.As(err, &terminal) || !terminal.TerminalDelivery() {
+		t.Error("the refusal must be terminal: the recipient list will not shrink on a retry")
 	}
+}
+
+func wantSpoolEmpty(t *testing.T, spool *relay.Spool) {
+	t.Helper()
+	entries, err := spool.List()
+	mustNoErr(t, "list spool", err)
+	wantEq(t, "queued spool entries", len(entries), 0)
 }
 
 // TestOversizedRefusalIsTerminal proves the refusal is not retried: the message
@@ -100,8 +122,9 @@ func TestDeliverAndRelayAdmitsMessageUnderTheLimit(t *testing.T) {
 	accounts, spool := sizedSend(t, 4096)
 	raw := []byte("Subject: fine\r\n\r\n" + strings.Repeat("x", 100))
 
-	if _, err := DeliverAndRelay(accounts, spool, "alice@acme.test", []string{"a@far.test"}, raw, time.Unix(1000, 0)); err != nil {
-		t.Fatalf("send under the limit failed: %v", err)
+	unresolved, err := DeliverAndRelay(accounts, spool, "alice@acme.test", []string{"a@far.test"}, raw, time.Unix(1000, 0))
+	if err != nil || len(unresolved) != 0 {
+		t.Fatalf("send under the limit failed: unresolved=%v err=%v", unresolved, err)
 	}
 }
 
@@ -111,8 +134,9 @@ func TestNoLimitAdmitsEverything(t *testing.T) {
 	accounts, spool := sizedSend(t, 0)
 	raw := []byte("Subject: huge\r\n\r\n" + strings.Repeat("x", 1<<20))
 
-	if _, err := DeliverAndRelay(accounts, spool, "alice@acme.test", []string{"a@far.test"}, raw, time.Unix(1000, 0)); err != nil {
-		t.Fatalf("send with no limit configured failed: %v", err)
+	unresolved, err := DeliverAndRelay(accounts, spool, "alice@acme.test", []string{"a@far.test"}, raw, time.Unix(1000, 0))
+	if err != nil || len(unresolved) != 0 {
+		t.Fatalf("send with no limit configured failed: unresolved=%v err=%v", unresolved, err)
 	}
 }
 
@@ -120,7 +144,7 @@ func TestNoLimitAdmitsEverything(t *testing.T) {
 // no stored row leaves the current limit alone, a stored row applies at once.
 func TestApplyMessageSizeSettings(t *testing.T) {
 	SetMaxMessageSize(0)
-	t.Cleanup(func() { SetMaxMessageSize(0) })
+	t.Cleanup(func() { SetMaxMessageSize(directory.DefaultMaxInboundBytes) })
 
 	ApplyMessageSizeSettings("test", nil, func() (MessageSizeSettings, bool, error) {
 		return MessageSizeSettings{MaxInboundBytes: 4096}, false, nil

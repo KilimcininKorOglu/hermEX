@@ -2,6 +2,7 @@ package mta
 
 import (
 	"database/sql"
+	"errors"
 	"io"
 	"mime/quotedprintable"
 	"os"
@@ -45,7 +46,7 @@ func appendJunk(t *testing.T, maildir, subject string) uint32 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDJunk),
 		[]byte("Subject: "+subject+"\r\nFrom: spam@bad.example\r\n\r\nbuy now"), time.Now(), 0)
 	if err != nil {
@@ -73,7 +74,7 @@ func inboxRaw(t *testing.T, maildir string, want int) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
 	if err != nil {
 		t.Fatal(err)
@@ -94,10 +95,12 @@ func inboxRaw(t *testing.T, maildir string, want int) []byte {
 // decodeBody returns the quoted-printable-decoded body of a digest message.
 func decodeBody(t *testing.T, raw []byte) string {
 	t.Helper()
-	_, body, ok := strings.Cut(string(raw), "\r\n\r\n")
-	if !ok {
+	s := string(raw)
+	i := strings.Index(s, "\r\n\r\n")
+	if i < 0 {
 		t.Fatal("digest has no body separator")
 	}
+	body := s[i+len("\r\n\r\n"):]
 	dec, err := io.ReadAll(quotedprintable.NewReader(strings.NewReader(body)))
 	if err != nil {
 		t.Fatal(err)
@@ -108,12 +111,14 @@ func decodeBody(t *testing.T, raw []byte) string {
 // firstToken extracts the token from the first "Release: ...?t=<token>" line.
 func firstToken(t *testing.T, body string) string {
 	t.Helper()
-	_, after, ok := strings.Cut(body, "?t=")
-	if !ok {
+	i := strings.Index(body, "?t=")
+	if i < 0 {
 		t.Fatal("digest body has no release link")
 	}
-	tok, _, _ := strings.Cut(after, "\r")
-	tok, _, _ = strings.Cut(tok, "\n")
+	tok := body[i+len("?t="):]
+	if j := strings.IndexAny(tok, "\r\n"); j >= 0 {
+		tok = tok[:j]
+	}
 	return strings.TrimSpace(tok)
 }
 
@@ -158,7 +163,7 @@ func TestDigestRunDeliversAndWatermarks(t *testing.T) {
 	if sent := r.Run(); sent != 0 {
 		t.Errorf("second run with nothing new sent %d digests, want 0", sent)
 	}
-	inboxRaw(t, maildir, 1) // still exactly the one digest
+	wantEq(t, "inbox count after no-op run", inboxCount(t, maildir), 1)
 }
 
 // TestDigestOnlyNewSinceWatermark proves a later run summarizes only messages newer
@@ -174,7 +179,7 @@ func TestDigestOnlyNewSinceWatermark(t *testing.T) {
 		watermark: map[string]uint32{},
 	}
 	r := newDigestRunner(dir)
-	r.Run() // first digest covers the two old messages
+	wantEq(t, "first digest run count", r.Run(), 1) // first digest covers the two old messages
 
 	uid3 := appendJunk(t, maildir, "fresh spam three")
 	if sent := r.Run(); sent != 1 {
@@ -207,7 +212,14 @@ func TestDigestDisabledWithoutSecret(t *testing.T) {
 	if sent := r.Run(); sent != 0 {
 		t.Errorf("run without a secret sent %d digests, want 0", sent)
 	}
-	inboxRaw(t, maildir, 0)
+	wantEq(t, "inbox count without secret", inboxCount(t, maildir), 0)
+
+	r = newDigestRunner(dir)
+	r.BaseURL = "   "
+	if sent := r.Run(); sent != 0 {
+		t.Errorf("run with blank BaseURL sent %d digests, want 0", sent)
+	}
+	wantEq(t, "inbox count with blank BaseURL", inboxCount(t, maildir), 0)
 }
 
 // TestDigestSkipsAMissingMailboxWithoutCreatingIt proves the digest run never
@@ -246,10 +258,15 @@ func TestDigestLogsJunkListReadFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`ALTER TABLE messages DROP COLUMN preview`); err != nil {
+	res, err := db.Exec(`ALTER TABLE messages DROP COLUMN preview`)
+	if err != nil {
+		mustClose(t, db)
 		t.Fatal(err)
 	}
-	db.Close()
+	n, err := res.RowsAffected()
+	mustNoErr(t, "drop column RowsAffected", err)
+	wantEq(t, "drop column rows affected", n, int64(0))
+	mustClose(t, db)
 
 	sink := &captureSink{}
 	r := newDigestRunner(&fakeDigestDir{
@@ -276,5 +293,44 @@ func TestDigestLogsJunkListReadFailure(t *testing.T) {
 	}
 	if !found {
 		t.Error("the Junk read failure was not logged; the operator would see a clean run")
+	}
+}
+
+// TestDigestFlattensUntrustedSubjectAndSurfacesCloseError verifies hostile CRLF
+// in Junk subjects is flattened and a store Close failure is surfaced on delivery.
+func TestDigestFlattensUntrustedSubjectAndSurfacesCloseError(t *testing.T) {
+	maildir := filepath.Join(t.TempDir(), "alice")
+	appendJunk(t, maildir, "offer\r\nInjected: bad")
+	dir := &fakeDigestDir{
+		users:     []directory.UserInfo{{Username: "alice@hermex.test"}},
+		maildirs:  map[string]string{"alice@hermex.test": maildir},
+		watermark: map[string]uint32{},
+	}
+	r := newDigestRunner(dir)
+	raw, err := r.buildDigest("alice@hermex.test", []objectstore.MessageInfo{{
+		UID:          1,
+		Subject:      "offer\r\nInjected: bad",
+		Sender:       "bad@x.test\r\nFrom: evil@x.test",
+		InternalDate: time.Unix(1_700_000_000, 0),
+	}}, r.Now())
+	mustNoErr(t, "build digest", err)
+	body := decodeBody(t, raw)
+	wantContains(t, "flattened subject", body, "offer Injected: bad")
+	wantContains(t, "flattened sender", body, "bad@x.test From: evil@x.test")
+
+	prevClose := closeMailbox
+	closeMailbox = func(st *objectstore.Store) error {
+		mustClose(t, st)
+		return errors.New("close failed")
+	}
+	t.Cleanup(func() { closeMailbox = prevClose })
+	sink := &captureSink{}
+	r.Logger = logging.New(sink)
+
+	r.Run()
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if _, ok := findEvent(sink.events, "digest.deliver"); !ok {
+		t.Error("digest close failure emitted no digest.deliver event")
 	}
 }

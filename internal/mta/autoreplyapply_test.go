@@ -3,6 +3,8 @@ package mta
 import (
 	"errors"
 	"testing"
+
+	"hermex/internal/logging"
 )
 
 // TestApplyInstallsTheStoredPrefix is the re-injection proof. A settings row is
@@ -26,6 +28,13 @@ func TestApplyInstallsTheStoredPrefix(t *testing.T) {
 	if got := composeAutoReplySubject("", "Q3 budget"); got != "Out of office: Q3 budget" {
 		t.Errorf("subject = %q, want the edited prefix", got)
 	}
+
+	// Clearing the stored prefix restores the built-in default.
+	stored.SubjectPrefix = ""
+	ApplyAutoReplySettings("test", nil, read)
+	if got := composeAutoReplySubject("", ""); got != DefaultAutoReplyPrefix {
+		t.Errorf("empty stored prefix gave %q, want %q", got, DefaultAutoReplyPrefix)
+	}
 }
 
 // TestApplyKeepsTheRunningPrefixOnAReadError covers the failure the operator
@@ -34,12 +43,18 @@ func TestApplyInstallsTheStoredPrefix(t *testing.T) {
 func TestApplyKeepsTheRunningPrefixOnAReadError(t *testing.T) {
 	t.Cleanup(func() { SetAutoReplyPrefix("") })
 	SetAutoReplyPrefix("Otomatik yanıt")
+	sink := &captureSink{}
 
-	ApplyAutoReplySettings("test", nil, func() (AutoReplySettings, bool, error) {
+	ApplyAutoReplySettings("test", logging.New(sink), func() (AutoReplySettings, bool, error) {
 		return AutoReplySettings{}, false, errors.New("database is down")
 	})
 	if got := composeAutoReplySubject("", ""); got != "Otomatik yanıt" {
 		t.Errorf("subject = %q, want the last applied prefix", got)
+	}
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if _, ok := findEvent(sink.events, "settings.read.fail"); !ok {
+		t.Error("settings read failure was not logged")
 	}
 }
 

@@ -21,6 +21,11 @@ func TestNotifyFailureWanted(t *testing.T) {
 		{"success,failure", true}, // lower case in a list
 		{" FAILURE ", true},       // surrounding space tolerated
 		{"FAILURE,SUCCESS", true}, // order-independent
+		{"BOGUS", false},          // unknown token
+		{"NEVER,SUCCESS", false},  // omits FAILURE
+		{"FAILUREX", false},       // prefix mismatch
+		{" , ", false},            // empty tokens
+		{"   ", true},             // whitespace-only behaves as absent
 	}
 	for _, c := range cases {
 		if got := NotifyFailureWanted(c.notify); got != c.want {

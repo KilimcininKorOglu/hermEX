@@ -67,8 +67,8 @@ func TestBuildReadReceiptMDN(t *testing.T) {
 		wantContains(t, "the disposition-notification", dn, want)
 	}
 
-	if _, err := mr.NextPart(); err != io.EOF {
-		t.Errorf("want exactly two parts, got a third (err=%v)", err)
+	if p, err := mr.NextPart(); err != io.EOF {
+		t.Errorf("want exactly two parts, got a third %v (err=%v)", p, err)
 	}
 }
 
@@ -121,7 +121,7 @@ func TestSendRequestedReceiptSendsOnce(t *testing.T) {
 		"sender@hermex.test": {MailboxPath: senderDir},
 	}
 	st, id := seedRequestedReceipt(t, readerDir, "sender@hermex.test")
-	defer st.Close()
+	defer mustClose(t, st)
 
 	pending, err := ReceiptPending(st, id)
 	mustNoErr(t, "read the request", err)
@@ -140,6 +140,9 @@ func TestSendRequestedReceiptSendsOnce(t *testing.T) {
 	}})
 	mustNoErr(t, "store a second message", err)
 	mustNoErr(t, "decline", ConsumeReceiptRequest(st, declined))
+	pendingDeclined, err := ReceiptPending(st, declined)
+	mustNoErr(t, "read declined request", err)
+	wantEq(t, "pending after decline", pendingDeclined, false)
 	mustNoErr(t, "read after declining", SendRequestedReceipt(accounts, nil, st, declined, "reader@hermex.test", ReceiptClient, time.Now()))
 	wantEq(t, "receipts after a decline", len(listInbox(t, senderDir)), 1)
 }
@@ -158,9 +161,11 @@ func TestBuildReadReceiptOmitsAbsentFields(t *testing.T) {
 		t.Fatalf("receipt does not build: %v", err)
 	}
 
-	if _, err := mail.ReadMessage(strings.NewReader(string(raw))); err != nil {
+	msg, err := mail.ReadMessage(strings.NewReader(string(raw)))
+	if err != nil {
 		t.Fatalf("receipt with absent optional fields does not parse: %v", err)
 	}
+	wantEq(t, "From", msg.Header.Get("From"), "reader@hermex.test")
 	if strings.Contains(string(raw), "Original-Message-ID:") {
 		t.Errorf("Original-Message-ID emitted with no original id")
 	}

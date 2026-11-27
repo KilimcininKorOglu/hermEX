@@ -7,14 +7,18 @@ import "testing"
 // local part up to the last '@': a quoted local part that merely starts with a role
 // name is an ordinary sender.
 func TestIsRoleMailbox(t *testing.T) {
-	for _, addr := range []string{"postmaster@example.com", "MAILER-DAEMON@example.com", "noreply@example.com", "do-not-reply@example.com"} {
+	for _, addr := range []string{
+		"postmaster@example.com", "MAILER-DAEMON@example.com",
+		"noreply@example.com", "no-reply@example.com",
+		"do-not-reply@example.com", "donotreply@example.com",
+	} {
 		if !isRoleMailbox(addr) {
 			t.Errorf("isRoleMailbox(%q) = false, want true", addr)
 		}
 	}
 	// net/mail unquotes a local part, so "postmaster@x"@example.com reaches the check
 	// as postmaster@x@example.com.
-	for _, addr := range []string{"alice@example.com", `"postmaster@x"@example.com`, "postmaster@x@example.com"} {
+	for _, addr := range []string{"alice@example.com", `"postmaster@x"@example.com`, "postmaster@x@example.com", "", "@example.com"} {
 		if isRoleMailbox(addr) {
 			t.Errorf("isRoleMailbox(%q) = true, want false", addr)
 		}

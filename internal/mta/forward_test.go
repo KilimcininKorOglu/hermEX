@@ -1,6 +1,7 @@
 package mta
 
 import (
+	"errors"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -18,9 +19,13 @@ import (
 type forwardingAccounts struct {
 	directory.StaticAccounts
 	forwards map[string]directory.ForwardInfo
+	err      error
 }
 
 func (f forwardingAccounts) GetForward(address string) (directory.ForwardInfo, bool, error) {
+	if f.err != nil {
+		return directory.ForwardInfo{}, false, f.err
+	}
 	fi, ok := f.forwards[strings.ToLower(address)]
 	return fi, ok, nil
 }
@@ -33,7 +38,7 @@ func inboxCount(t *testing.T, mbox string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
 	if err != nil {
 		t.Fatal(err)
@@ -83,8 +88,9 @@ func TestForwardRedirectDropsLocal(t *testing.T) {
 			"alice@local": {Type: directory.ForwardRedirect, Destination: "carol@local"},
 		},
 	}
-	if _, err := DeliverAndRelay(accounts, nil, "sender@remote", []string{"alice@local"}, fwdRaw, time.Now()); err != nil {
-		t.Fatal(err)
+	unresolved, err := DeliverAndRelay(accounts, nil, "sender@remote", []string{"alice@local"}, fwdRaw, time.Now())
+	if err != nil || len(unresolved) != 0 {
+		t.Fatalf("Redirect deliver = unresolved %v, err %v; want none", unresolved, err)
 	}
 	if n := inboxCount(t, alice); n != 0 {
 		t.Errorf("alice inbox = %d, want 0 (Redirect drops the local copy)", n)
@@ -108,15 +114,17 @@ func TestForwardRedirectExternalRelays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sp.Close()
+	defer mustClose(t, sp)
 
-	if _, err := DeliverAndRelay(accounts, sp, "sender@remote", []string{"alice@local"}, fwdRaw, time.Now()); err != nil {
-		t.Fatal(err)
+	unresolved, err := DeliverAndRelay(accounts, sp, "sender@remote", []string{"alice@local"}, fwdRaw, time.Now())
+	if err != nil || len(unresolved) != 0 {
+		t.Fatalf("Redirect external = unresolved %v, err %v; want none", unresolved, err)
 	}
 	if n := inboxCount(t, alice); n != 0 {
 		t.Errorf("alice inbox = %d, want 0 (Redirect drops the local copy)", n)
 	}
-	due, _ := sp.Claim(time.Now(), 10)
+	due, err := sp.Claim(time.Now(), 10)
+	mustNoErr(t, "claim spool", err)
 	if len(due) != 1 || due[0].Recipient != "boss@external.test" {
 		t.Fatalf("spool = %v, want boss@external.test queued for relay", due)
 	}
@@ -145,18 +153,31 @@ func TestForwardRedirectUnreachableNotDropped(t *testing.T) {
 // TestForwardToSelfIsNoOp: a forward whose destination is the recipient itself is
 // ignored, the message is delivered once locally, with no duplicate or loop.
 func TestForwardToSelfIsNoOp(t *testing.T) {
-	alice := filepath.Join(t.TempDir(), "alice")
-	accounts := forwardingAccounts{
-		StaticAccounts: directory.StaticAccounts{"alice@local": {MailboxPath: alice}},
-		forwards: map[string]directory.ForwardInfo{
-			"alice@local": {Type: directory.ForwardRedirect, Destination: "alice@local"},
-		},
-	}
-	if _, err := DeliverAndRelay(accounts, nil, "sender@remote", []string{"alice@local"}, fwdRaw, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if n := inboxCount(t, alice); n != 1 {
-		t.Errorf("alice inbox = %d, want 1 (self-forward is a no-op, delivered once)", n)
+	for _, tc := range []struct {
+		name string
+		accs forwardingAccounts
+	}{
+		{"mixed-case self", forwardingAccounts{
+			forwards: map[string]directory.ForwardInfo{"alice@local": {Type: directory.ForwardRedirect, Destination: "ALICE@LOCAL"}},
+		}},
+		{"empty destination", forwardingAccounts{
+			forwards: map[string]directory.ForwardInfo{"alice@local": {Type: directory.ForwardRedirect, Destination: ""}},
+		}},
+		{"lookup error fail-open", forwardingAccounts{
+			err: errors.New("db down"),
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			alice := filepath.Join(t.TempDir(), "alice")
+			tc.accs.StaticAccounts = directory.StaticAccounts{"alice@local": {MailboxPath: alice}}
+			unresolved, err := DeliverAndRelay(tc.accs, nil, "sender@remote", []string{"alice@local"}, fwdRaw, time.Now())
+			if err != nil || len(unresolved) != 0 {
+				t.Fatalf("deliver = unresolved %v, err %v; want none", unresolved, err)
+			}
+			if n := inboxCount(t, alice); n != 1 {
+				t.Errorf("alice inbox = %d, want 1", n)
+			}
+		})
 	}
 }
 
@@ -175,8 +196,9 @@ func TestDeliverDoesNotForward(t *testing.T) {
 			"alice@local": {Type: directory.ForwardRedirect, Destination: "carol@local"},
 		},
 	}
-	if _, err := Deliver(accounts, "sender@remote", []string{"alice@local"}, fwdRaw, time.Now()); err != nil {
-		t.Fatal(err)
+	unresolved, err := Deliver(accounts, "sender@remote", []string{"alice@local"}, fwdRaw, time.Now())
+	if err != nil || len(unresolved) != 0 {
+		t.Fatalf("Deliver = unresolved %v, err %v; want none", unresolved, err)
 	}
 	if n := inboxCount(t, alice); n != 1 {
 		t.Errorf("alice inbox = %d, want 1 (Deliver does not forward)", n)
@@ -204,8 +226,9 @@ func TestForwardIsOneHop(t *testing.T) {
 			"carol@local": {Type: directory.ForwardRedirect, Destination: "dave@local"},
 		},
 	}
-	if _, err := DeliverAndRelay(accounts, nil, "sender@remote", []string{"alice@local"}, fwdRaw, time.Now()); err != nil {
-		t.Fatal(err)
+	unresolved, err := DeliverAndRelay(accounts, nil, "sender@remote", []string{"alice@local"}, fwdRaw, time.Now())
+	if err != nil || len(unresolved) != 0 {
+		t.Fatalf("DeliverAndRelay = unresolved %v, err %v; want none", unresolved, err)
 	}
 	if n := inboxCount(t, alice); n != 0 {
 		t.Errorf("alice inbox = %d, want 0 (redirected away)", n)

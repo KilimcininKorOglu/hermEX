@@ -1,6 +1,7 @@
 package mta
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,6 +50,7 @@ func TestSubmissionSendAsAuthorization(t *testing.T) {
 		{"owned alias", "sales@test", false},
 		{"case-insensitive", "Alice@Test", false},
 		{"foreign sender", "bob@test", true},
+		{"cross-domain sender", "alice@other.test", true},
 		{"null sender", "", true},
 	}
 	for _, tt := range tests {
@@ -58,7 +60,12 @@ func TestSubmissionSendAsAuthorization(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Mail(%q) error = %v, wantErr %v", tt.from, err, tt.wantErr)
 			}
-			if !tt.wantErr && s.from != tt.from {
+			if tt.wantErr {
+				if _, ok := errors.AsType[*smtp.PermError](err); !ok {
+					t.Errorf("Mail(%q) err = %T (%v), want *smtp.PermError", tt.from, err, err)
+				}
+				wantEq(t, "session from after refusal", s.from, "")
+			} else if s.from != tt.from {
 				t.Errorf("accepted From recorded as %q, want %q", s.from, tt.from)
 			}
 		})
@@ -83,9 +90,11 @@ func TestSendAsFailsClosed(t *testing.T) {
 	if s := (&session{accounts: accounts, authUser: "alice@test"}); s.Mail("alice@test", smtp.MailParams{}) != nil {
 		t.Error("send-as-self refused under fail-closed directory")
 	}
-	if s := (&session{accounts: accounts, authUser: "alice@test"}); s.Mail("sales@test", smtp.MailParams{}) == nil {
+	s := &session{accounts: accounts, authUser: "alice@test"}
+	if s.Mail("sales@test", smtp.MailParams{}) == nil {
 		t.Error("send-as-other allowed under fail-closed directory; must be refused")
 	}
+	wantEq(t, "session from after refusal", s.from, "")
 }
 
 // TestSendAsGrantAuthorizes proves an authenticated user may put another mailbox in
@@ -100,7 +109,7 @@ func TestSendAsGrantAuthorizes(t *testing.T) {
 	if err := st.SetSendAs([]string{"bob@test"}); err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	accounts := fakeIdentifier{
 		StaticAccounts: directory.StaticAccounts{
@@ -118,8 +127,11 @@ func TestSendAsGrantAuthorizes(t *testing.T) {
 		t.Error("granted send-as refused")
 	}
 	// carol, not granted, may not.
-	if s := (&session{accounts: accounts, authUser: "carol@test"}); s.Mail("alice@test", smtp.MailParams{}) == nil {
+	sCarol := &session{accounts: accounts, authUser: "carol@test"}
+	if err := sCarol.Mail("alice@test", smtp.MailParams{}); err == nil {
 		t.Error("ungranted user sent as alice; must be refused")
+	} else if sCarol.from != "" {
+		t.Errorf("refused session kept from=%q", sCarol.from)
 	}
 }
 
@@ -134,7 +146,7 @@ func TestSendAsGrantMatchesGranteeAlias(t *testing.T) {
 	if err := st.SetSendAs([]string{"robert@test"}); err != nil { // bob's alias
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	accounts := fakeIdentifier{
 		StaticAccounts: directory.StaticAccounts{
@@ -158,11 +170,14 @@ func TestSendAsFailsClosedOnUnopenableStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	if st, err := objectstore.Open(blocker); err == nil {
-		st.Close()
+		mustClose(t, st)
 		t.Fatal("precondition: Open succeeded on a file path; cannot exercise the broken-store branch")
 	}
 	accounts := resolveOnly{"victim@test": blocker}
-	if s := (&session{accounts: accounts, authUser: "bob@test"}); s.Mail("victim@test", smtp.MailParams{}) == nil {
+	s := &session{accounts: accounts, authUser: "bob@test"}
+	if err := s.Mail("victim@test", smtp.MailParams{}); err == nil {
 		t.Error("send-as allowed when the target store could not be opened; must fail closed")
+	} else if s.from != "" {
+		t.Errorf("refused session kept from=%q", s.from)
 	}
 }

@@ -3,11 +3,13 @@ package mta
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"hermex/internal/antispam"
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/relay"
 )
 
@@ -81,9 +83,58 @@ func TestDMARCDispositionFollowsJunkFiling(t *testing.T) {
 	}
 }
 
-// TestDMARCRecordFailOpen proves a failed count never fails the delivery.
+// TestDMARCRecordFailOpen proves a failed count never fails the delivery and
+// logs dmarc.record.fail, and checks hostile domain lengths and null senders.
 func TestDMARCRecordFailOpen(t *testing.T) {
 	rec := &recordingDMARC{err: errors.New("spool full")}
-	deliverScored(t, antispam.Verdict{DMARC: antispam.AuthPass, DMARCReports: true}, rec)
+	mbox := filepath.Join(t.TempDir(), "alice")
+	sink := &captureSink{}
+	b := &Backend{
+		Accounts: directory.StaticAccounts{"alice@test": {MailboxPath: mbox}},
+		Scorer:   &recordingScorer{verdict: antispam.Verdict{DMARC: antispam.AuthPass, DMARCReports: true}},
+		DMARC:    rec,
+		Logger:   logging.New(sink),
+	}
+	deliverBody(t, b, "203.0.113.9:1234", "bob@bounce.external.example", "alice@test",
+		"From: Bob <bob@external.example>\r\nSubject: x\r\n\r\nbody")
 	wantEq(t, "observations attempted", len(rec.got), 1)
+	wantEq(t, "delivered messages", len(inboxMessages(t, mbox)), 1)
+	sink.mu.Lock()
+	_, logged := findEvent(sink.events, "dmarc.record.fail")
+	sink.mu.Unlock()
+	if !logged {
+		t.Error("failed DMARC record emitted no dmarc.record.fail event")
+	}
+
+	// Hostile cases: >253 octet domain is capped, null envelope reports none,
+	// and unparseable client IP records nothing.
+	longDom := strings.Repeat("a", 260) + ".example"
+	rec2 := &recordingDMARC{}
+	b2 := &Backend{
+		Accounts: directory.StaticAccounts{"alice@test": {MailboxPath: filepath.Join(t.TempDir(), "alice2")}},
+		Scorer: &recordingScorer{verdict: antispam.Verdict{
+			DMARC: antispam.AuthFail, DMARCReports: true, SPF: antispam.AuthNone,
+			DKIMResults: []antispam.DKIMResult{{Domain: longDom, Valid: false}},
+		}},
+		DMARC: rec2,
+	}
+	deliverBody(t, b2, "203.0.113.9:1234", "", "alice@test",
+		"From: Bob <bob@"+longDom+">\r\nSubject: x\r\n\r\nbody")
+	if len(rec2.got) != 1 {
+		t.Fatalf("observations for long domain = %d, want 1", len(rec2.got))
+	}
+	wantEq(t, "capped policy domain length", len(rec2.got[0].PolicyDomain), maxReportedDomain)
+	wantEq(t, "capped DKIM domain length", len(rec2.got[0].DKIMResults[0].Domain), maxReportedDomain)
+	wantEq(t, "null envelope SPF domain", rec2.got[0].SPFResults[0].Domain, rec2.got[0].PolicyDomain)
+	wantEq(t, "null envelope SPF result", rec2.got[0].SPFResults[0].Result, "none")
+
+	rec3 := &recordingDMARC{}
+	b3 := &Backend{
+		Accounts: directory.StaticAccounts{"alice@test": {MailboxPath: filepath.Join(t.TempDir(), "alice3")}},
+		Scorer:   &recordingScorer{verdict: antispam.Verdict{DMARC: antispam.AuthPass, DMARCReports: true}},
+		DMARC:    rec3,
+	}
+	deliverBody(t, b3, "not-an-ip", "bob@example.com", "alice@test",
+		"From: Bob <bob@example.com>\r\nSubject: x\r\n\r\nbody")
+	wantEq(t, "observations without client IP", len(rec3.got), 0)
 }

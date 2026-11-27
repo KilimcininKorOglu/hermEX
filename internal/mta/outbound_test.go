@@ -20,6 +20,7 @@ func TestOutboundLimiterAdmitsUntilCapThenDefers(t *testing.T) {
 	l := NewOutboundLimiter()
 	l.now = func() time.Time { return now }
 	l.SetLimits(3, time.Hour)
+	l.SetLimits(0, -time.Second) // non-positive ignored
 	l.SetEnabled(true)
 
 	for i := range 3 {
@@ -90,15 +91,25 @@ func TestOutboundLimiterAlertsOncePerWindow(t *testing.T) {
 	l.SetEnabled(true)
 	l.SetAlerter(func(user string, _ int) { alerts = append(alerts, user) })
 
-	l.Allow("alice@local") // count 1 = cap, admitted, no alert
-	l.Allow("alice@local") // over cap → alert fires
-	l.Allow("alice@local") // still over → no second alert
+	if !l.Allow("alice@local") {
+		t.Fatal("count 1 = cap should be admitted")
+	}
+	if l.Allow("alice@local") {
+		t.Fatal("over cap should be deferred")
+	}
+	if l.Allow("alice@local") {
+		t.Fatal("still over cap should be deferred")
+	}
 	if len(alerts) != 1 || alerts[0] != "alice@local" {
 		t.Fatalf("alerts = %v, want exactly one for alice@local", alerts)
 	}
 	now = now.Add(time.Hour)
-	l.Allow("alice@local") // new window, count 1 = cap
-	l.Allow("alice@local") // over cap → alert fires again
+	if !l.Allow("alice@local") {
+		t.Fatal("new window count 1 should be admitted")
+	}
+	if l.Allow("alice@local") {
+		t.Fatal("new window over cap should be deferred")
+	}
 	if len(alerts) != 2 {
 		t.Errorf("alerts after a new window = %d, want 2 (one per window)", len(alerts))
 	}
@@ -113,7 +124,7 @@ func outboundSession(t *testing.T, ob *OutboundLimiter, authUser string) *sessio
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = sp.Close() })
+	t.Cleanup(func() { mustClose(t, sp) })
 	return &session{accounts: accounts, spool: sp, authUser: authUser, outbound: ob}
 }
 
@@ -129,10 +140,12 @@ func TestRcptOutboundDefersAuthenticatedBlast(t *testing.T) {
 			t.Fatalf("external recipient %d within the cap must be accepted, got %v", i+1, err)
 		}
 	}
-	err := outboundSession(t, ob, "alice@local").Rcpt("v9@remote", smtp.RcptParams{})
+	sOver := outboundSession(t, ob, "alice@local")
+	err := sOver.Rcpt("v9@remote", smtp.RcptParams{})
 	if _, ok := errors.AsType[*smtp.TempError](err); !ok {
 		t.Fatalf("the external recipient past the cap must defer with a TempError, got %v", err)
 	}
+	wantEq(t, "relayTargets after outbound deferral", len(sOver.relayTargets), 0)
 }
 
 // TestRcptOutboundSkipsUnauthenticated is the inverted-guard test: an unauthenticated
@@ -144,11 +157,16 @@ func TestRcptOutboundSkipsUnauthenticated(t *testing.T) {
 	ob.SetLimits(1, time.Hour)
 	ob.SetEnabled(true)
 
-	err := outboundSession(t, ob, "").Rcpt("v@remote", smtp.RcptParams{}) // authUser == ""
+	s := outboundSession(t, ob, "")
+	err := s.Rcpt("v@remote", smtp.RcptParams{}) // authUser == ""
 	if err == nil {
 		t.Fatal("unauthenticated relay must be refused")
 	}
 	if _, ok := errors.AsType[*smtp.TempError](err); ok {
 		t.Error("unauthenticated relay must be refused as relay-denied, never an outbound rate-limit TempError")
 	}
+	if _, ok := errors.AsType[*smtp.PermError](err); !ok {
+		t.Errorf("unauthenticated relay err = %T (%v), want *smtp.PermError", err, err)
+	}
+	wantEq(t, "relayTargets after unauthenticated refusal", len(s.relayTargets), 0)
 }

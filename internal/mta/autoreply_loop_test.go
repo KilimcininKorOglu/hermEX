@@ -21,7 +21,7 @@ func listInbox(t *testing.T, path string) []objectstore.MessageInfo {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
 	if err != nil {
 		t.Fatal(err)
@@ -36,7 +36,7 @@ func enableOOF(t *testing.T, path string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	if err := st.SetOOFSettings(objectstore.OOFSettings{
 		Enabled: true, InternalSubject: "Away", InternalReply: "Away, back later.",
 	}); err != nil {
@@ -101,7 +101,7 @@ func TestDeliverNoAutoReplyWhenOff(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		st.Close()
+		mustClose(t, st)
 	}
 	accounts := directory.StaticAccounts{
 		"alice@hermex.test": {MailboxPath: pathA},
@@ -119,8 +119,8 @@ func TestDeliverNoAutoReplyWhenOff(t *testing.T) {
 
 // TestDeliverNoAutoReplyToAutomatedSender proves the suppression is wired into
 // the delivery path, not just the unit: a message that itself carries
-// Auto-Submitted must draw no reply even though the recipient has out-of-office
-// on. This is the rule that prevents two autoresponders from looping.
+// Auto-Submitted or a null return-path must draw no reply even though the
+// recipient has out-of-office on.
 func TestDeliverNoAutoReplyToAutomatedSender(t *testing.T) {
 	dir := t.TempDir()
 	pathA := filepath.Join(dir, "alice")
@@ -131,7 +131,7 @@ func TestDeliverNoAutoReplyToAutomatedSender(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		st.Close()
+		mustClose(t, st)
 	}
 	accounts := directory.StaticAccounts{
 		"alice@hermex.test": {MailboxPath: pathA},
@@ -144,5 +144,15 @@ func TestDeliverNoAutoReplyToAutomatedSender(t *testing.T) {
 	}
 	if a := listInbox(t, pathA); len(a) != 0 {
 		t.Errorf("alice inbox = %d, want 0 (the incoming message was automated)", len(a))
+	}
+	bounce := []byte("From: alice@hermex.test\r\nTo: bob@hermex.test\r\nSubject: DSN\r\n\r\nbody\r\n")
+	if err := deliver(accounts, "", "bob@hermex.test", pathB, bounce, when, int64(mapi.PrivateFIDInbox)); err != nil {
+		t.Fatalf("deliver bounce: %v", err)
+	}
+	if a := listInbox(t, pathA); len(a) != 0 {
+		t.Errorf("alice inbox = %d, want 0 (null return-path)", len(a))
+	}
+	if b := listInbox(t, pathB); len(b) != 2 {
+		t.Errorf("bob inbox = %d, want 2 (both delivered)", len(b))
 	}
 }

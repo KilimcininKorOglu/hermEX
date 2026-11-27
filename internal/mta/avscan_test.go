@@ -14,6 +14,7 @@ import (
 
 	"hermex/internal/antivirus"
 	"hermex/internal/directory"
+	"hermex/internal/relay"
 )
 
 // TestScanIncompleteTrustsANamedVirus: authenticated submission and fetchmail fail
@@ -119,13 +120,17 @@ type fakeAVDir struct {
 	quarantined       []directory.QuarantineEntry
 	// adminsErr makes the admin lookup fail, the case a virus event must still
 	// record rather than treat as "this domain has no admins".
-	adminsErr error
+	adminsErr     error
+	quarantineErr error
 }
 
 func (f *fakeAVDir) GetDomainAVScan(string) (bool, bool, error)   { return f.inbound, f.outbound, nil }
 func (f *fakeAVDir) DomainID(string) (int64, bool, error)         { return f.domainID, f.known, nil }
 func (f *fakeAVDir) DomainOrgAdminEmails(int64) ([]string, error) { return nil, f.adminsErr }
 func (f *fakeAVDir) QuarantineMessage(e directory.QuarantineEntry) (int64, error) {
+	if f.quarantineErr != nil {
+		return 0, f.quarantineErr
+	}
 	f.quarantined = append(f.quarantined, e)
 	return int64(len(f.quarantined)), nil
 }
@@ -188,6 +193,12 @@ func TestScanMessage(t *testing.T) {
 	wantEq(t, "the decision on an outbound hit", submission(), avHandled)
 	wantEq(t, "the outbound quarantine direction", onlyQuarantine(t, "the outbound quarantine", fout).Direction, "outbound")
 
+	// Quarantine DB failure never delivers a known virus.
+	set(found, &fakeAVDir{inbound: true, domainID: 7, known: true, quarantineErr: errors.New("db down")})
+	wantEq(t, "inbound hit when quarantine insert fails", inbound(), avTempFail)
+	set(found, &fakeAVDir{outbound: true, domainID: 7, known: true, quarantineErr: errors.New("db down")})
+	wantEq(t, "submission hit when quarantine insert fails", submission(), avHandled)
+
 	// No scanner installed: proceed.
 	SetScanner(nil, nil, nil, "", nil)
 	wantEq(t, "the decision with no scanner", inbound(), avProceed)
@@ -205,7 +216,8 @@ func onlyQuarantine(t *testing.T, what string, fd *fakeAVDir) directory.Quaranti
 
 // TestDeliverAndRelayBlocksVirus proves an outbound virus is quarantined and the
 // submission returns the terminal ErrVirusBlocked (so callers skip the Sent copy
-// and the send-later sweep drops the scheduled message instead of looping).
+// and the send-later sweep drops the scheduled message instead of looping), with
+// nothing delivered locally or queued in the spool.
 func TestDeliverAndRelayBlocksVirus(t *testing.T) {
 	found := fakeClamd(t, "stream: Win.Test.EICAR FOUND\x00")
 	tmp := t.TempDir()
@@ -218,16 +230,30 @@ func TestDeliverAndRelayBlocksVirus(t *testing.T) {
 	SetScanner(sc, fd, quarPath, "mail.test", nil)
 	t.Cleanup(func() { SetScanner(nil, nil, nil, "", nil) })
 
-	raw := []byte("From: u@acme.test\r\nSubject: x\r\n\r\nbody")
-	_, err = DeliverAndRelay(directory.StaticAccounts{}, nil, "u@acme.test", []string{"ext@far.test"}, raw, time.Unix(1000, 0))
-	if !errors.Is(err, ErrVirusBlocked) {
-		t.Fatalf("err = %v, want ErrVirusBlocked", err)
+	localMbox := filepath.Join(t.TempDir(), "local")
+	accounts := directory.StaticAccounts{
+		"u@acme.test":     {MailboxPath: filepath.Join(t.TempDir(), "u")},
+		"local@acme.test": {MailboxPath: localMbox},
 	}
+	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
+	mustNoErr(t, "open spool", err)
+	defer mustClose(t, sp)
+
+	raw := []byte("From: u@acme.test\r\nSubject: x\r\n\r\nbody")
+	unresolved, dErr := DeliverAndRelay(accounts, sp, "u@acme.test", []string{"local@acme.test", "ext@far.test"}, raw, time.Unix(1000, 0))
+	if !errors.Is(dErr, ErrVirusBlocked) {
+		t.Fatalf("err = %v, want ErrVirusBlocked", dErr)
+	}
+	wantEq(t, "unresolved on virus block", len(unresolved), 0)
 	if len(fd.quarantined) != 1 || fd.quarantined[0].Direction != "outbound" {
 		t.Fatalf("quarantine = %+v", fd.quarantined)
 	}
+	wantEq(t, "local inbox after virus block", len(inboxMessagesIfAny(t, localMbox)), 0)
+	entries, err := sp.List()
+	mustNoErr(t, "list spool", err)
+	wantEq(t, "spool entries after virus block", len(entries), 0)
 	var term interface{ TerminalDelivery() bool }
-	if !errors.As(err, &term) || !term.TerminalDelivery() {
+	if !errors.As(dErr, &term) || !term.TerminalDelivery() {
 		t.Error("ErrVirusBlocked should be a terminal delivery error")
 	}
 }

@@ -30,14 +30,20 @@ func filedReturnPaths(t *testing.T, fn func(directory.Accounts) ([]string, error
 	wantEq(t, "the unresolved recipients", len(unresolved), 0)
 	st, err := objectstore.Open(mbox)
 	mustNoErr(t, "open the mailbox", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
 	mustNoErr(t, "list the inbox", err)
 	wantEq(t, "the inbox size", len(msgs), 1)
 	props, err := st.GetMessageProperties(msgs[0].ID, mapi.PrTransportMessageHeaders)
 	mustNoErr(t, "read the filed headers", err)
-	v, _ := props.GetAnyCharset(mapi.PrTransportMessageHeaders)
-	headers, _ := v.(string)
+	v, ok := props.GetAnyCharset(mapi.PrTransportMessageHeaders)
+	if !ok {
+		t.Fatal("missing PrTransportMessageHeaders")
+	}
+	headers, ok := v.(string)
+	if !ok {
+		t.Fatalf("PrTransportMessageHeaders type = %T, want string", v)
+	}
 	msg, err := mail.ReadMessage(strings.NewReader(headers + "\r\n"))
 	mustNoErr(t, "parse the filed headers", err)
 	return msg.Header["Return-Path"]
@@ -69,14 +75,21 @@ func TestDeliverRetrievedKeepsTheSourceReturnPath(t *testing.T) {
 }
 
 // TestReturnPathRefusesAHeaderBreak proves an envelope sender holding a line break
-// is not written, so it cannot start a header of its own, while the sender's own
-// Return-Path is still removed.
+// or control character is not written, so it cannot start a header of its own,
+// while the sender's own Return-Path is still removed.
 func TestReturnPathRefusesAHeaderBreak(t *testing.T) {
-	out := string(withReturnPath([]byte(forgedReturnPath), "a@x.test\r\nBcc: c@x.test"))
-	if strings.Contains(strings.ToLower(out), "return-path") || strings.Contains(out, "Bcc:") {
-		t.Errorf("the filed copy carries a Return-Path or an injected field:\n%s", out)
-	}
-	if !strings.HasPrefix(out, "From: Bob <bob@x.test>\r\n") {
-		t.Errorf("the header block lost more than the Return-Path fields:\n%s", out)
+	for _, bad := range []string{
+		"a@x.test\r\nBcc: c@x.test",
+		"a@x.test\nBcc: c@x.test",
+		"a@x.test\rBcc: c@x.test",
+		"a@x.test\x00evil",
+	} {
+		out := string(withReturnPath([]byte(forgedReturnPath), bad))
+		if strings.Contains(strings.ToLower(out), "return-path") || strings.Contains(out, "Bcc:") {
+			t.Errorf("sender %q kept a Return-Path or injected field:\n%s", bad, out)
+		}
+		if !strings.HasPrefix(out, "From: Bob <bob@x.test>\r\n") {
+			t.Errorf("sender %q lost headers:\n%s", bad, out)
+		}
 	}
 }
