@@ -118,7 +118,11 @@ func (s *Server) autoReplyPrefix() string {
 		return directory.DefaultAutoReplySubjectPrefix
 	}
 	cfg, found, err := rd.GetAutoReplySettings()
-	if err != nil || !found || cfg.SubjectPrefix == "" {
+	if err != nil {
+		logError("vacation-prefix", err, logging.Fields{})
+		return directory.DefaultAutoReplySubjectPrefix
+	}
+	if !found || cfg.SubjectPrefix == "" {
 		return directory.DefaultAutoReplySubjectPrefix
 	}
 	return cfg.SubjectPrefix
