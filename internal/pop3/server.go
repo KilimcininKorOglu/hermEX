@@ -174,7 +174,6 @@ func (e *ew) flush() {
 }
 
 func (s *Server) handle(conn net.Conn) {
-	defer func() { _ = conn.Close() }() // closes the upgraded conn after an STLS swap
 	_, isTLS := conn.(*tls.Conn)
 	c := &pop3Session{
 		s:     s,
@@ -183,6 +182,13 @@ func (s *Server) handle(conn net.Conn) {
 		tp:    textproto.NewReader(bufio.NewReader(conn)),
 		isTLS: isTLS,
 	}
+	// Closes the accepted conn, which also ends an STLS-upgraded session. A conn
+	// the peer or the upgrade already closed is not a failure.
+	defer func() {
+		if err := conn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			c.event(logging.LevelWarn, "conn.close.fail", logging.Fields{"error": err.Error()})
+		}
+	}()
 	defer c.closeMailbox()
 
 	ok(c.w, "hermEX POP3 ready")
@@ -217,8 +223,11 @@ func (c *pop3Session) event(level logging.Level, name string, f logging.Fields) 
 
 // closeMailbox releases the snapshot the session opened, if any.
 func (c *pop3Session) closeMailbox() {
-	if c.mb != nil {
-		_ = c.mb.st.Close()
+	if c.mb == nil {
+		return
+	}
+	if err := c.mb.st.Close(); err != nil {
+		c.event(logging.LevelError, "mailbox.close.fail", logging.Fields{"error": err.Error()})
 	}
 }
 
@@ -426,8 +435,7 @@ func openMailbox(path string) (*mailbox, error) {
 	// directly by its fixed id.
 	mb := &mailbox{st: st, folder: int64(mapi.PrivateFIDInbox)}
 	if mb.msgs, err = st.ListMessages(mb.folder); err != nil {
-		_ = st.Close()
-		return nil, err
+		return nil, errors.Join(err, st.Close())
 	}
 	mb.deleted = make([]bool, len(mb.msgs))
 	return mb, nil
