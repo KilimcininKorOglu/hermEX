@@ -59,11 +59,15 @@ func (s *captureSink) Write(e logging.Event) { s.events = append(s.events, e) }
 // of this shape, so the class is only covered if a local copy is proven as well.
 func TestApplyPOP3SizeLimitRecordsAReadFailure(t *testing.T) {
 	sink := &captureSink{}
+	got := int64(-1)
 	applyPOP3SizeLimit(logging.New(sink),
 		func() (directory.SizeLimits, bool, error) {
-			return directory.SizeLimits{}, false, errors.New("db down")
+			return directory.SizeLimits{POP3CommandLineBytes: 4096}, true, errors.New("db down")
 		},
-		func(int64) {})
+		func(n int64) { got = n })
+	if got != -1 {
+		t.Errorf("setter called on a logged read failure (got %d); the cap must be left unchanged", got)
+	}
 
 	if len(sink.events) != 1 {
 		t.Fatalf("read failure emitted %d events, want 1", len(sink.events))
