@@ -3,6 +3,7 @@ package dkimsign
 import (
 	"bytes"
 	"crypto/ed25519"
+	"crypto/x509"
 	"encoding/base64"
 	"fmt"
 	"strings"
@@ -12,6 +13,52 @@ import (
 
 	"hermex/internal/logging"
 )
+
+// generated runs GenerateKey and consumes both results: the private key must
+// parse, and the record's p= must be that key's public half (RFC 6376 section
+// 3.6.1; the raw 32 bytes for Ed25519, RFC 8463 section 4), so a record that
+// published another key would fail here rather than at every receiver.
+func generated(t *testing.T, keyType string) (privPEM []byte, dnsTXT string) {
+	t.Helper()
+	privPEM, dnsTXT, err := GenerateKey(keyType)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := parsePrivateKey(privPEM)
+	if err != nil {
+		t.Fatalf("generated private key does not parse: %v", err)
+	}
+	var pub []byte
+	if edPub, ok := signer.Public().(ed25519.PublicKey); ok {
+		pub = edPub
+	} else if pub, err = x509.MarshalPKIXPublicKey(signer.Public()); err != nil {
+		t.Fatalf("marshal the public key: %v", err)
+	}
+	if got, want := PublicKeyPayload(dnsTXT), base64.StdEncoding.EncodeToString(pub); got != want {
+		t.Fatalf("record p= = %q, want the generated key's public half %q", got, want)
+	}
+	return privPEM, dnsTXT
+}
+
+// generatedRecord is generated for a caller that needs only the DNS record.
+func generatedRecord(t *testing.T, keyType string) string {
+	t.Helper()
+	privPEM, dnsTXT := generated(t, keyType)
+	if len(privPEM) == 0 {
+		t.Fatal("GenerateKey returned an empty private key beside its record")
+	}
+	return dnsTXT
+}
+
+// generatedKey is generated for a caller that needs only the private key.
+func generatedKey(t *testing.T, keyType string) []byte {
+	t.Helper()
+	privPEM, dnsTXT := generated(t, keyType)
+	if dnsTXT == "" {
+		t.Fatal("GenerateKey returned an empty record beside its private key")
+	}
+	return privPEM
+}
 
 // fakeKeys serves one domain's key.
 type fakeKeys struct {
@@ -123,10 +170,7 @@ func TestSignVerifiesEd25519(t *testing.T) {
 
 // TestGenerateKeyTagsRSA proves the RSA record names its own algorithm.
 func TestGenerateKeyTagsRSA(t *testing.T) {
-	_, dnsTXT, err := GenerateKey(KeyRSA)
-	if err != nil {
-		t.Fatal(err)
-	}
+	dnsTXT := generatedRecord(t, KeyRSA)
 	if !strings.Contains(dnsTXT, "k=rsa") {
 		t.Errorf("record = %q, want a k=rsa tag", dnsTXT)
 	}
@@ -135,10 +179,7 @@ func TestGenerateKeyTagsRSA(t *testing.T) {
 // TestGenerateKeyDefaultsToRSA proves an empty key type is the interoperable default, so a
 // form that omits the field keeps producing the key every receiver verifies.
 func TestGenerateKeyDefaultsToRSA(t *testing.T) {
-	_, dnsTXT, err := GenerateKey("")
-	if err != nil {
-		t.Fatal(err)
-	}
+	dnsTXT := generatedRecord(t, "")
 	if !strings.Contains(dnsTXT, "k=rsa") {
 		t.Errorf("record = %q, want a k=rsa tag", dnsTXT)
 	}
@@ -146,10 +187,7 @@ func TestGenerateKeyDefaultsToRSA(t *testing.T) {
 
 // TestGenerateKeyTagsEd25519 proves the Ed25519 record names its own algorithm.
 func TestGenerateKeyTagsEd25519(t *testing.T) {
-	_, dnsTXT, err := GenerateKey(KeyEd25519)
-	if err != nil {
-		t.Fatal(err)
-	}
+	dnsTXT := generatedRecord(t, KeyEd25519)
 	if !strings.Contains(dnsTXT, "k=ed25519") {
 		t.Errorf("record = %q, want a k=ed25519 tag", dnsTXT)
 	}
@@ -158,10 +196,7 @@ func TestGenerateKeyTagsEd25519(t *testing.T) {
 // TestGenerateKeyEd25519PublishesRawKey is the shape that a verifier enforces: RFC 8463
 // puts the raw 32-byte public key in p=, and a DER-wrapped one is rejected outright.
 func TestGenerateKeyEd25519PublishesRawKey(t *testing.T) {
-	_, dnsTXT, err := GenerateKey(KeyEd25519)
-	if err != nil {
-		t.Fatal(err)
-	}
+	dnsTXT := generatedRecord(t, KeyEd25519)
 	raw, err := base64.StdEncoding.DecodeString(PublicKeyPayload(dnsTXT))
 	if err != nil {
 		t.Fatalf("p= is not base64: %v", err)
@@ -174,8 +209,12 @@ func TestGenerateKeyEd25519PublishesRawKey(t *testing.T) {
 // TestGenerateKeyRejectsUnknownType proves an unknown algorithm is refused rather than
 // silently answered with an RSA key the operator did not ask for.
 func TestGenerateKeyRejectsUnknownType(t *testing.T) {
-	if _, _, err := GenerateKey("dsa"); err == nil {
+	privPEM, dnsTXT, err := GenerateKey("dsa")
+	if err == nil {
 		t.Error("an unknown key type must be an error")
+	}
+	if len(privPEM) != 0 || dnsTXT != "" {
+		t.Errorf("a refused key type returned a key (%d bytes) or record %q; want neither", len(privPEM), dnsTXT)
 	}
 }
 
@@ -197,10 +236,7 @@ func TestPublicKeyPayloadWithoutTag(t *testing.T) {
 // TestSignFailsOpen proves signing never blocks delivery: a domain with no key, and a
 // stored key that is malformed, both yield the original message unchanged.
 func TestSignFailsOpen(t *testing.T) {
-	privPEM, _, err := GenerateKey(KeyRSA)
-	if err != nil {
-		t.Fatal(err)
-	}
+	privPEM := generatedKey(t, KeyRSA)
 
 	t.Run("no key for domain", func(t *testing.T) {
 		s := &Signer{Keys: fakeKeys{domain: "other.test", privPEM: privPEM, selector: "s"}}
