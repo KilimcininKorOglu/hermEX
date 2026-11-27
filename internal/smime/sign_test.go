@@ -95,10 +95,22 @@ func TestSignVerifyRoundTrip(t *testing.T) {
 		t.Error("Certs is empty; a caller cannot build a chain without the message's certificates")
 	}
 
-	// A tampered body must fail verification.
+	// A tampered body must fail verification, and so must a message that is not
+	// an RFC 5751 3.5 multipart/signed entity at all. A refusal names no signer and
+	// returns no content, so a caller cannot show unverified text as signed.
 	tampered := bytes.Replace(signed, []byte("Hello S/MIME world."), []byte("Hello EVIL world.."), 1)
-	if _, err := Verify(tampered); err == nil {
-		t.Error("Verify accepted a tampered message")
+	for name, raw := range map[string][]byte{
+		"tampered body": tampered,
+		"plain message": content,
+		"empty":         nil,
+	} {
+		sig, err := Verify(raw)
+		if err == nil {
+			t.Errorf("%s: Verify accepted it", name)
+		}
+		if sig.Signer != nil || sig.Content != nil {
+			t.Errorf("%s: a refused message still returned signer %v and %d content bytes", name, sig.Signer, len(sig.Content))
+		}
 	}
 }
 
