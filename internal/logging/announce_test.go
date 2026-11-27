@@ -58,7 +58,9 @@ func TestBuildAnnouncesTheRunningBuild(t *testing.T) {
 	defer func() { buildinfo.Commit, buildinfo.BuildTime, buildinfo.SemVer = oldCommit, oldBuilt, oldSemVer }()
 
 	out := captureStderr(t, func() {
-		_, closeFn := logging.Build("hermex-mta", "", "db", "")
+		logger, closeFn := logging.Build("hermex-mta", "", "db", "")
+		// The returned logger writes to stderr like the startup event does.
+		logger.Emit(logging.Event{Level: logging.LevelInfo, Name: "probe.after.build"})
 		if err := closeFn(); err != nil {
 			t.Error(err)
 		}
@@ -67,7 +69,7 @@ func TestBuildAnnouncesTheRunningBuild(t *testing.T) {
 	if !strings.Contains(out, "process.start") {
 		t.Fatalf("no startup event was recorded:\n%s", out)
 	}
-	for _, want := range []string{"hermex-mta", "0.1.0-dev+abc1234-dirty", "2026-01-02T03:04:05Z"} {
+	for _, want := range []string{"hermex-mta", "0.1.0-dev+abc1234-dirty", "2026-01-02T03:04:05Z", "probe.after.build"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the startup event does not carry %q:\n%s", want, out)
 		}
@@ -79,12 +81,14 @@ func TestBuildAnnouncesTheRunningBuild(t *testing.T) {
 // serves, and its stderr must still say which build is running.
 func TestBuildAnnouncesEvenWithAnUnreachableStore(t *testing.T) {
 	out := captureStderr(t, func() {
-		_, closeFn := logging.Build("hermex-imap", "http://invalid", "db", "")
+		logger, closeFn := logging.Build("hermex-imap", "http://invalid", "db", "")
+		// A daemon whose store is unreachable still logs through stderr.
+		logger.Emit(logging.Event{Level: logging.LevelInfo, Name: "probe.store.down"})
 		if err := closeFn(); err != nil {
 			t.Error(err)
 		}
 	})
-	if !strings.Contains(out, "process.start") || !strings.Contains(out, "hermex-imap") {
+	if !strings.Contains(out, "process.start") || !strings.Contains(out, "hermex-imap") || !strings.Contains(out, "probe.store.down") {
 		t.Errorf("a daemon with no reachable log store does not report its build:\n%s", out)
 	}
 }
@@ -93,7 +97,10 @@ func TestBuildAnnouncesEvenWithAnUnreachableStore(t *testing.T) {
 // cannot forge a second log line during startup announcement.
 func TestBuildAnnouncesHostileDaemonNameOnOneLine(t *testing.T) {
 	out := captureStderr(t, func() {
-		_, closeFn := logging.Build("hermex-mta\r\n2026-01-01T00:00:00Z info  imap auth.ok user=admin", "", "db", "")
+		logger, closeFn := logging.Build("hermex-mta\r\n2026-01-01T00:00:00Z info  imap auth.ok user=admin", "", "db", "")
+		if logger == nil {
+			t.Fatal("Build returned no logger")
+		}
 		if err := closeFn(); err != nil {
 			t.Error(err)
 		}

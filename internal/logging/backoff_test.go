@@ -151,7 +151,7 @@ func TestReplayMidFailureKeepsAllSpillLines(t *testing.T) {
 	if ok := s.replaySpill(); !ok {
 		t.Fatal("second replaySpill failed after store recovered")
 	}
-	if _, got := recovered.totals(); got != total {
+	if got := recovered.docCount(); got != total {
 		t.Errorf("recovered replay inserted %d docs, want %d", got, total)
 	}
 	if spillFileHasData(replayPath(path)) {

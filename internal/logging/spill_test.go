@@ -44,7 +44,7 @@ func TestSpillReplayAcrossRestart(t *testing.T) {
 	}
 	cancel2()
 
-	if _, total := got.totals(); total != 3 {
+	if total := got.docCount(); total != 3 {
 		t.Errorf("run 2 inserted %d docs, want 3 (2 replayed + 1 new)", total)
 	}
 	if spillFileHasData(spillPath) {
@@ -86,7 +86,7 @@ func TestDaemonsSharingASpillDirectoryKeepEachOthersEvents(t *testing.T) {
 
 	var got fakeInserter
 	closeSink(newAsyncSink(readyConn(&got), mustSpillFile(t, dir, "hermex-pop3")))
-	if _, total := got.totals(); total != 1 {
+	if total := got.docCount(); total != 1 {
 		t.Errorf("the pop3 replay inserted %d events, want only its own 1", total)
 	}
 	if docs, err := readSpill(mustSpillFile(t, dir, "hermex-imap")); err != nil || len(docs) != 1 {
@@ -159,7 +159,7 @@ func TestConnectFailureSpillsThenRecovers(t *testing.T) {
 		t.Fatalf("run 2 Close: %v", err)
 	}
 	cancel2()
-	if _, total := got.totals(); total != 1 {
+	if total := got.docCount(); total != 1 {
 		t.Errorf("recovered sink replayed %d docs, want 1", total)
 	}
 	if spillFileHasData(spillPath) {
@@ -188,7 +188,7 @@ func TestSpillReplayHandlesCorruptAndTruncatedLine(t *testing.T) {
 	defer cancel()
 	mustNoErr(t, s.Close(ctx), "Close")
 
-	if _, total := got.totals(); total != 2 {
+	if total := got.docCount(); total != 2 {
 		t.Fatalf("replayed %d docs, want 2 valid events", total)
 	}
 	wantEq(t, got.docs[0].(mongoDoc).Name, "ok.1", "first replayed event")

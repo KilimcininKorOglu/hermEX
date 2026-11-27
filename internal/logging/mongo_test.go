@@ -47,6 +47,13 @@ func (f *fakeInserter) totals() (calls, docs int) {
 	return f.calls, len(f.docs)
 }
 
+// docCount is the number of documents the inserter has received.
+func (f *fakeInserter) docCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.docs)
+}
+
 // TestMongoSinkFlushesBufferedEventsOnClose proves every enqueued event reaches
 // the inserter, Close drains the buffer and makes a final flush.
 func TestMongoSinkFlushesBufferedEventsOnClose(t *testing.T) {
@@ -209,7 +216,7 @@ func TestMongoSinkNeverStoresRawPassword(t *testing.T) {
 	defer cancel()
 	mustNoErr(t, s.Close(ctx), "Close")
 
-	if _, docs := fi.totals(); docs != 1 {
+	if docs := fi.docCount(); docs != 1 {
 		t.Fatalf("inserted %d docs, want 1", docs)
 	}
 	raw, err := json.Marshal(fi.docs[0])
