@@ -32,6 +32,15 @@ func (p *Pull) BinShort() ([]byte, error) {
 	return p.Raw(int(n))
 }
 
+// SkipBinShort passes a blob BinShort would read without keeping its bytes.
+func (p *Pull) SkipBinShort() error {
+	n, err := p.Uint16()
+	if err != nil {
+		return err
+	}
+	return p.Skip(int(n))
+}
+
 // BinEx writes a blob with a 32-bit length prefix regardless of FlagWCount.
 func (p *Push) BinEx(b []byte) {
 	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
@@ -46,6 +55,15 @@ func (p *Pull) BinEx() ([]byte, error) {
 		return nil, err
 	}
 	return p.Raw(int(n))
+}
+
+// SkipBinEx passes a blob BinEx would read without keeping its bytes.
+func (p *Pull) SkipBinEx() error {
+	n, err := p.Uint32()
+	if err != nil {
+		return err
+	}
+	return p.Skip(int(n))
 }
 
 // Blob writes raw bytes with no length prefix; the reader must

@@ -185,21 +185,30 @@ func (p *Push) Bin(b []byte) error {
 
 // Bin reads a length-prefixed blob using the same prefix width as Bin.
 func (p *Pull) Bin() ([]byte, error) {
-	var n int
-	if p.flags&FlagWCount != 0 {
-		v, err := p.Uint32()
-		if err != nil {
-			return nil, err
-		}
-		n = int(v)
-	} else {
-		v, err := p.Uint16()
-		if err != nil {
-			return nil, err
-		}
-		n = int(v)
+	n, err := p.binCount()
+	if err != nil {
+		return nil, err
 	}
 	return p.Raw(n)
+}
+
+// SkipBin passes a blob Bin would read without keeping its bytes.
+func (p *Pull) SkipBin() error {
+	n, err := p.binCount()
+	if err != nil {
+		return err
+	}
+	return p.Skip(n)
+}
+
+// binCount reads Bin's length prefix: 32-bit under FlagWCount, else 16-bit.
+func (p *Pull) binCount() (int, error) {
+	if p.flags&FlagWCount != 0 {
+		v, err := p.Uint32()
+		return int(v), err
+	}
+	v, err := p.Uint16()
+	return int(v), err
 }
 
 // --- strings ---

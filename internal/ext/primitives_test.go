@@ -176,6 +176,36 @@ func TestSkipPassesAReservedField(t *testing.T) {
 	}
 }
 
+// TestSkipBlobsPassTheirPrefixAndBytes skips each length-prefixed blob form
+// (MS-OXCDATA 2.11.1: a 16-bit count, or 32-bit under wide counts; BinShort is
+// always 16-bit and BinEx always 32-bit) and reads the 0x7E marker byte after
+// it. A count past the end of the buffer is refused.
+func TestSkipBlobsPassTheirPrefixAndBytes(t *testing.T) {
+	cases := []struct {
+		name  string
+		buf   []byte
+		flags Flags
+		skip  func(*Pull) error
+	}{
+		{"Bin 16-bit", []byte{2, 0, 0xAA, 0xBB, 0x7E}, 0, (*Pull).SkipBin},
+		{"Bin wide", []byte{2, 0, 0, 0, 0xAA, 0xBB, 0x7E}, FlagWCount, (*Pull).SkipBin},
+		{"BinShort", []byte{1, 0, 0xAA, 0x7E}, FlagWCount, (*Pull).SkipBinShort},
+		{"BinEx", []byte{1, 0, 0, 0, 0xAA, 0x7E}, 0, (*Pull).SkipBinEx},
+	}
+	for _, c := range cases {
+		p := NewPull(c.buf, c.flags)
+		mustNoErr(t, c.skip(p), c.name)
+		v, err := p.Uint8()
+		mustNoErr(t, err, c.name+" marker")
+		wantEq(t, v, uint8(0x7E), c.name+" byte after the blob")
+
+		short := NewPull(c.buf[:len(c.buf)-2], c.flags)
+		if err := c.skip(short); !errors.Is(err, ErrUnderflow) {
+			t.Errorf("%s truncated: err = %v, want ErrUnderflow", c.name, err)
+		}
+	}
+}
+
 func TestPullUnderflow(t *testing.T) {
 	if _, err := NewPull([]byte{0x01, 0x02}, 0).Uint32(); !errors.Is(err, ErrUnderflow) {
 		t.Errorf("short Uint32 err = %v, want ErrUnderflow", err)
