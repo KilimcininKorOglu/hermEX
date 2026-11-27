@@ -2,6 +2,7 @@ package lifecycle_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -53,16 +54,26 @@ func TestLoopCleanupWaitsForTheLoop(t *testing.T) {
 // Silently hanging would turn a slow drain into a hung process.
 func TestLoopShutdownReportsAStuckLoop(t *testing.T) {
 	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
+	startErr := make(chan error, 1)
 
 	comp := lifecycle.Loop(func(context.Context) { <-release })
-	go func() { _ = comp.Start() }()
+	go func() { startErr <- comp.Start() }()
+	t.Cleanup(func() {
+		if err := <-startErr; err != nil {
+			t.Errorf("Start = %v, want nil", err)
+		}
+	})
+	// Register after startErr check so LIFO releases the loop before waiting for Start.
+	t.Cleanup(func() { close(release) })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	err := comp.Shutdown(ctx)
 	if err == nil {
 		t.Fatal("Shutdown reported success for a loop that never returned")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("error = %v, want context.DeadlineExceeded", err)
 	}
 	if !strings.Contains(err.Error(), "drain") {
 		t.Errorf("error = %v, want it to name the failed drain", err)
@@ -72,12 +83,49 @@ func TestLoopShutdownReportsAStuckLoop(t *testing.T) {
 // TestLoopShutdownIsPromptWhenTheLoopReturns proves the join adds no delay of its
 // own: a loop that honours cancellation is shut down immediately.
 func TestLoopShutdownIsPromptWhenTheLoopReturns(t *testing.T) {
+	startErr := make(chan error, 1)
 	comp := lifecycle.Loop(func(ctx context.Context) { <-ctx.Done() })
-	go func() { _ = comp.Start() }()
+	go func() { startErr <- comp.Start() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := comp.Shutdown(ctx); err != nil {
 		t.Fatalf("Shutdown: %v", err)
+	}
+	if err := <-startErr; err != nil {
+		t.Errorf("Start = %v, want nil after Shutdown", err)
+	}
+}
+
+// TestLoopShutdownCanceledContext proves an already-cancelled shutdown context
+// returns context.Canceled while still cancelling the loop's own context.
+func TestLoopShutdownCanceledContext(t *testing.T) {
+	loopCanceled := make(chan struct{}, 1)
+	release := make(chan struct{})
+	startErr := make(chan error, 1)
+
+	comp := lifecycle.Loop(func(ctx context.Context) {
+		<-ctx.Done()
+		loopCanceled <- struct{}{}
+		<-release
+	})
+	go func() { startErr <- comp.Start() }()
+	t.Cleanup(func() {
+		if err := <-startErr; err != nil {
+			t.Errorf("Start = %v, want nil", err)
+		}
+	})
+	t.Cleanup(func() { close(release) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := comp.Shutdown(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Shutdown = %v, want context.Canceled", err)
+	}
+	select {
+	case <-loopCanceled:
+	case <-time.After(time.Second):
+		t.Error("Shutdown with canceled context did not cancel the loop context")
 	}
 }
