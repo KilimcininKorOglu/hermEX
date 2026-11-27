@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -136,7 +137,9 @@ func TestFailedReplacementKeepsTheOldContent(t *testing.T) {
 	t.Run("write", func(t *testing.T) {
 		dir, path := seed(t)
 		err := WriteFunc(path, 0o600, func(w io.Writer) error {
-			_, _ = w.Write([]byte("half"))
+			if _, err := w.Write([]byte("half")); err != nil {
+				return err
+			}
 			return errInjected
 		})
 		if !errors.Is(err, errInjected) {
@@ -149,6 +152,32 @@ func TestFailedReplacementKeepsTheOldContent(t *testing.T) {
 			t.Errorf("temporary files left: %v", left)
 		}
 	})
+}
+
+// TestTempLeftBehindIsReported: a failed write must remove its temporary file,
+// and when that removal fails too the caller is told, beside the write failure,
+// so a stray file is never left without a word. After a rename the temp name is
+// already gone; that absence is not a second failure.
+func TestTempLeftBehindIsReported(t *testing.T) {
+	removeErr := errors.New("remove refused")
+	orig := removeFile
+	t.Cleanup(func() { removeFile = orig })
+	removeFile = func(string) error { return removeErr }
+
+	_, path := seed(t)
+	err := WriteFunc(path, 0o600, func(io.Writer) error { return errInjected })
+	if !errors.Is(err, errInjected) || !errors.Is(err, removeErr) {
+		t.Errorf("err = %v, want both the write failure and the refused removal", err)
+	}
+
+	removeFile = orig
+	_, path = seed(t)
+	l := stepLog{failAt: "sync-dir"}
+	l.install(t)
+	err = WriteFile(path, []byte("new content"), 0o600)
+	if !errors.Is(err, errInjected) || errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("err = %v, want the directory sync failure alone", err)
+	}
 }
 
 // TestFailedDirectorySyncIsReported proves a failed directory sync is an error:

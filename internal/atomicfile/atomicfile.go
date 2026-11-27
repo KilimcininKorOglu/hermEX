@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,7 @@ var (
 	syncFile   = func(f *os.File) error { return f.Sync() }
 	renameFile = os.Rename
 	syncDir    = syncDirectory
+	removeFile = os.Remove
 )
 
 // WriteFile atomically replaces path with data, created with perm.
@@ -47,8 +49,13 @@ func WriteFunc(path string, perm os.FileMode, write func(io.Writer) error) (err 
 	}
 	name := tmp.Name()
 	defer func() {
-		if err != nil {
-			_ = os.Remove(name)
+		if err == nil {
+			return
+		}
+		// A temp file left behind is reported with the failure. It is already
+		// gone when the rename went through and only the directory sync failed.
+		if rerr := removeFile(name); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
+			err = errors.Join(err, fmt.Errorf("atomicfile: remove temp %s: %w", name, rerr))
 		}
 	}()
 	if err := tmp.Chmod(perm); err != nil {
