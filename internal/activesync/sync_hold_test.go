@@ -49,7 +49,7 @@ func TestSyncHoldWakesViaPush(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
 	srv := NewServer(accs, accs, "mail.hermex.test")
 	waker := &fakePingWaker{ch: make(chan struct{}, 1)}
@@ -98,7 +98,7 @@ func TestHoldForSyncTimesOut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
 	srv := NewServer(accs, accs, "mail.hermex.test") // no waker → only cadence + deadline
 	ts := httptest.NewServer(srv.Handler())
@@ -117,7 +117,7 @@ func TestHoldForSyncTimesOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	dev := state.device("dev1")
-	st2.Close()
+	mustNoErr(t, "close the second store", st2.Close())
 
 	collections := hangingSyncReq("2", "60").Child(wbxml.ASCollections)
 	start := time.Now()
@@ -136,7 +136,12 @@ func TestHoldForSyncTimesOut(t *testing.T) {
 func TestSyncHoldOutOfRange(t *testing.T) {
 	for _, tc := range []struct{ heartbeat, limit string }{
 		{"10", "60"},
+		{"-5", "60"},
 		{"3541", "3540"},
+		{"99999999999999999999", "3540"},
+		// 18446744075 seconds wraps a nanosecond Duration to about 1.3s.
+		{"18446744075", "3540"},
+		{"abc", "60"},
 	} {
 		ts, _ := seededServer(t)
 		// A server that accepts the value holds the request for its heartbeat, so the

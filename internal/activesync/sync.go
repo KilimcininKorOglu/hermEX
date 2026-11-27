@@ -2,6 +2,7 @@ package activesync
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sort"
 	"strconv"
@@ -53,23 +54,23 @@ const (
 // parseSyncHeartbeat parses a Sync HeartbeatInterval (seconds). An absent value is
 // a one-shot Sync, so it yields a zero duration and ok. ok is false when the value
 // is present but unparseable or outside [60, 3540]; bound is then the nearest
-// acceptable value for the Status-14 Limit element.
+// acceptable value for the Status-14 Limit element. The range is compared in whole
+// seconds before a Duration is built, so a huge value cannot wrap into the range,
+// and a positive value too large to parse is held to the longest bound.
 func parseSyncHeartbeat(s string) (d, bound time.Duration, ok bool) {
 	if s == "" {
 		return 0, 0, true
 	}
-	n, err := strconv.Atoi(s)
-	if err != nil || n <= 0 {
+	n, err := strconv.ParseInt(s, 10, 64)
+	switch {
+	case errors.Is(err, strconv.ErrRange) && n > 0:
+		return 0, syncMaxHeartbeat, false
+	case err != nil || n < int64(syncMinHeartbeat/time.Second):
 		return 0, syncMinHeartbeat, false
-	}
-	d = time.Duration(n) * time.Second
-	if d < syncMinHeartbeat {
-		return 0, syncMinHeartbeat, false
-	}
-	if d > syncMaxHeartbeat {
+	case n > int64(syncMaxHeartbeat/time.Second):
 		return 0, syncMaxHeartbeat, false
 	}
-	return d, 0, true
+	return time.Duration(n) * time.Second, 0, true
 }
 
 // handleSync answers the Sync command: per collection it applies the client's
