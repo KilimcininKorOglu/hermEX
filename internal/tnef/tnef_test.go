@@ -77,8 +77,8 @@ func checkOneAttachment(t *testing.T, m *tnef.Message) {
 	if v := propValue(a, mapi.PrAttachLongFilename); v != "report.pdf" {
 		t.Errorf("attachment name = %v", v)
 	}
-	if v, _ := propValue(a, mapi.PrAttachDataBin).([]byte); string(v) != "%PDF-1.4" {
-		t.Errorf("attachment data = %q", v)
+	if v, ok := propValue(a, mapi.PrAttachDataBin).([]byte); !ok || string(v) != "%PDF-1.4" {
+		t.Errorf("attachment data = %q (a byte value: %v), want %%PDF-1.4", v, ok)
 	}
 }
 
@@ -98,8 +98,12 @@ func TestDecodeRefusesMalformedStreams(t *testing.T) {
 		"version":       badVersion,
 		"signature":     []byte("not a TNEF stream at all"),
 	} {
-		if _, err := tnef.Decode(data, nil); !errors.Is(err, tnef.ErrMalformed) {
+		m, err := tnef.Decode(data, nil)
+		if !errors.Is(err, tnef.ErrMalformed) {
 			t.Errorf("%s: err = %v, want ErrMalformed", name, err)
+		}
+		if m != nil {
+			t.Errorf("%s: a refused stream still returned a half-read message %+v", name, m)
 		}
 	}
 	if _, err := tnef.Decode(good, nil); err != nil {
