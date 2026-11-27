@@ -37,11 +37,14 @@ func TestEmbeddedContactRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v, _ := got.Get(mapi.MakeTag(0x8456, mapi.PtUnicode)); v != "cagla@example.org" {
-		t.Errorf("email under the reader's id = %v", v)
+	if v, ok := got.Get(mapi.MakeTag(0x8456, mapi.PtUnicode)); !ok || v != "cagla@example.org" {
+		t.Errorf("email under the reader's id = %v (set: %v)", v, ok)
 	}
-	if v, _ := got.Get(mapi.PrDisplayName); v != "Çağla Öztürk" {
-		t.Errorf("display name = %v", v)
+	if v, ok := got.Get(mapi.PrDisplayName); !ok || v != "Çağla Öztürk" {
+		t.Errorf("display name = %v (set: %v)", v, ok)
+	}
+	if _, ok := got.Get(writer); ok {
+		t.Error("the writer's id survived; the email must move to the reader's id")
 	}
 }
 
