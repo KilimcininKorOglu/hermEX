@@ -60,11 +60,15 @@ func (s *captureSink) Write(e logging.Event) { s.events = append(s.events, e) }
 // only covered if a local copy is proven as well.
 func TestApplyIMAPSizeLimitRecordsAReadFailure(t *testing.T) {
 	sink := &captureSink{}
+	got := int64(-1)
 	applyIMAPSizeLimit(logging.New(sink),
 		func() (directory.SizeLimits, bool, error) {
-			return directory.SizeLimits{}, false, errors.New("db down")
+			return directory.SizeLimits{IMAPLiteralBytes: 4096}, true, errors.New("db down")
 		},
-		func(directory.SizeLimits) {})
+		func(s directory.SizeLimits) { got = s.IMAPLiteralBytes })
+	if got != -1 {
+		t.Errorf("setter called on a logged read failure (got %d); the cap must be left unchanged", got)
+	}
 
 	if len(sink.events) != 1 {
 		t.Fatalf("read failure emitted %d events, want 1", len(sink.events))
