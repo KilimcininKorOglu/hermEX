@@ -129,7 +129,11 @@ func (s *Server) busyFor(c sessionClaims, email string, start, end time.Time) []
 	owner := strings.EqualFold(email, c.Email) || targetPath == c.Mailbox
 	if !owner {
 		perm, err := st.ResolvePermission(int64(mapi.PrivateFIDCalendar), c.Email)
-		if err != nil || perm&freeBusyPerms == 0 {
+		if err != nil {
+			logError("freebusy-permission", err, logging.Fields{"user": c.Email, "target": email})
+			return []busyJSON{}
+		}
+		if perm&freeBusyPerms == 0 {
 			return []busyJSON{}
 		}
 	}
@@ -138,6 +142,7 @@ func (s *Server) busyFor(c sessionClaims, email string, start, end time.Time) []
 	// requested even for the owner.
 	events, err := ews.CalendarFreeBusy(st, start, end, false)
 	if err != nil {
+		logError("freebusy-scan", err, logging.Fields{"user": c.Email, "target": email})
 		return []busyJSON{}
 	}
 	busy := make([]busyJSON, 0, len(events))
