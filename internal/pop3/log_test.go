@@ -50,22 +50,16 @@ func TestInstrumentationLogsConnAndAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close()
+	mustClose(t, st)
 
 	sink := &captureSink{}
 	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test", Logger: logging.New(sink)}).Serve(ln) }()
-
+	ln := serveOn(t, &Server{Auth: auth, Hostname: "mail.test", Logger: logging.New(sink)})
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer mustClose(t, conn)
 	r := textproto.NewReader(bufio.NewReader(conn))
 	if _, err := r.ReadLine(); err != nil { // greeting
 		t.Fatalf("greeting: %v", err)
@@ -80,8 +74,12 @@ func TestInstrumentationLogsConnAndAuth(t *testing.T) {
 			t.Fatalf("read response to %q: %v", s, err)
 		}
 	}
+	// A failed SASL PLAIN login carries the password inside a base64 token, so the
+	// token itself must not reach the log either.
+	plain := b64("\x00alice\x00hunter3")
 	send("USER bob")
 	send("PASS hunter2")
+	send("AUTH PLAIN " + plain)
 	send("USER alice")
 	send("PASS secret")
 
@@ -96,6 +94,8 @@ func TestInstrumentationLogsConnAndAuth(t *testing.T) {
 	out := renderEvents(events)
 	wantNoSecret(t, out, "secret")
 	wantNoSecret(t, out, "hunter2")
+	wantNoSecret(t, out, "hunter3")
+	wantNoSecret(t, out, plain)
 }
 
 // wantAuthEvent asserts one auth event was logged with the identity and level it
