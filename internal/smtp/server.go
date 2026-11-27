@@ -267,7 +267,14 @@ func (s *Server) handle(conn net.Conn) {
 			Level: logging.LevelWarn, Subsystem: logging.SMTP, Name: "conn.reject",
 			RemoteAddr: remote, Fields: logging.Fields{"reason": err.Error()},
 		})
-		reply(&ew{out: bufio.NewWriter(conn)}, 421, s.hostname()+" service not available")
+		w := &ew{out: bufio.NewWriter(conn)}
+		reply(w, 421, s.hostname()+" service not available")
+		if w.err != nil {
+			s.Logger.Emit(logging.Event{
+				Level: logging.LevelWarn, Subsystem: logging.SMTP, Name: "conn.reject_reply.fail",
+				RemoteAddr: remote, Fields: logging.Fields{"error": w.err.Error()},
+			})
+		}
 		if cerr := conn.Close(); cerr != nil && !errors.Is(cerr, net.ErrClosed) {
 			s.Logger.Emit(logging.Event{
 				Level: logging.LevelWarn, Subsystem: logging.SMTP, Name: "conn.close.fail",
@@ -742,15 +749,16 @@ func (e *ew) flush() {
 }
 
 func replySessionErr(w *ew, err error, logErr func(error)) {
-	switch {
-	case isTempErr(err):
-		reply(w, 451, tempMessage(err))
-	case isPermErr(err):
-		reply(w, 550, permMessage(err))
-	default:
-		logErr(err)
-		reply(w, 550, "5.3.0 recipient rejected")
+	if te, ok := errors.AsType[*TempError](err); ok {
+		reply(w, 451, te.Message)
+		return
 	}
+	if pe, ok := errors.AsType[*PermError](err); ok {
+		reply(w, 550, pe.Message)
+		return
+	}
+	logErr(err)
+	reply(w, 550, "5.3.0 recipient rejected")
 }
 
 // replyDataErr maps a Session.Data error to the SMTP reply shared by the DATA and
@@ -759,29 +767,19 @@ func replySessionErr(w *ew, err error, logErr func(error)) {
 // 554 with a fixed string. The DATA path already records the error, so this one
 // takes no logErr.
 func replyDataErr(w *ew, err error) {
-	switch {
-	case isTempErr(err):
-		reply(w, 451, tempMessage(err))
-	case errors.Is(err, errTooLarge):
-		reply(w, 552, "message exceeds size limit")
-	case isPermErr(err):
-		reply(w, 554, permMessage(err))
-	default:
-		reply(w, 554, "5.3.0 transaction failed")
+	if te, ok := errors.AsType[*TempError](err); ok {
+		reply(w, 451, te.Message)
+		return
 	}
-}
-
-func isTempErr(err error) bool { _, ok := errors.AsType[*TempError](err); return ok }
-func isPermErr(err error) bool { _, ok := errors.AsType[*PermError](err); return ok }
-
-func tempMessage(err error) string {
-	te, _ := errors.AsType[*TempError](err)
-	return te.Message
-}
-
-func permMessage(err error) string {
-	pe, _ := errors.AsType[*PermError](err)
-	return pe.Message
+	if errors.Is(err, errTooLarge) {
+		reply(w, 552, "message exceeds size limit")
+		return
+	}
+	if pe, ok := errors.AsType[*PermError](err); ok {
+		reply(w, 554, pe.Message)
+		return
+	}
+	reply(w, 554, "5.3.0 transaction failed")
 }
 
 // parseBDAT parses a "BDAT <chunk-size> [LAST]" argument into the decimal octet
@@ -1285,7 +1283,12 @@ type limitedReader struct {
 
 func (lr *limitedReader) Read(p []byte) (int, error) {
 	if lr.remaining <= 0 {
-		return 0, errTooLarge
+		var one [1]byte
+		n, err := lr.r.Read(one[:])
+		if n > 0 {
+			return 0, errTooLarge
+		}
+		return 0, err
 	}
 	if int64(len(p)) > lr.remaining {
 		p = p[:lr.remaining]
