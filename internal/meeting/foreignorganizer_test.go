@@ -30,10 +30,13 @@ func meetingStart(t *testing.T, st *objectstore.Store) time.Time {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, _ := pv.Get(at.start)
-	n, ok := v.(uint64)
+	v, ok := pv.Get(at.start)
 	if !ok {
 		t.Fatal("the meeting has no start")
+	}
+	n, ok := v.(uint64)
+	if !ok {
+		t.Fatalf("the meeting start holds %T, want an NT time", v)
 	}
 	return mapi.NTTimeToUnix(n).UTC()
 }
@@ -98,5 +101,7 @@ func TestDecliningAForeignRequestKeepsTheMeeting(t *testing.T) {
 	if !errors.Is(err, ErrForeignOrganizer) || !errors.Is(err, ErrNotARequest) {
 		t.Errorf("declining a foreign request: err = %v, want ErrForeignOrganizer", err)
 	}
-	meetingStart(t, st)
+	if got, want := meetingStart(t, st), time.Date(2026, 6, 20, 10, 0, 0, 0, time.UTC); !got.Equal(want) {
+		t.Errorf("after the refused decline the meeting starts at %v, want it unchanged at %v", got, want)
+	}
 }
