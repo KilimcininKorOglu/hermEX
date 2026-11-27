@@ -48,12 +48,16 @@ type SQLiteDriver struct {
 }
 
 // Version reads the recorded version without taking the migration lock.
-func (d *SQLiteDriver) Version(ctx context.Context) (int, error) {
+func (d *SQLiteDriver) Version(ctx context.Context) (v int, err error) {
 	c, err := d.DB.Conn(ctx)
 	if err != nil {
 		return 0, err
 	}
-	defer c.Close()
+	defer func() {
+		if cerr := c.Close(); cerr != nil {
+			err = errors.Join(err, cerr)
+		}
+	}()
 	return d.Ver.Read(ctx, c)
 }
 
@@ -70,8 +74,7 @@ func (d *SQLiteDriver) Lock(ctx context.Context) (int, error) {
 	d.conn = c
 	v, err := d.Ver.Read(ctx, c)
 	if err != nil {
-		_ = d.Unlock(ctx, false)
-		return 0, err
+		return 0, errors.Join(err, d.Unlock(ctx, false))
 	}
 	return v, nil
 }

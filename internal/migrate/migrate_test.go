@@ -13,6 +13,22 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func closeDB(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if err := db.Close(); err != nil {
+		t.Errorf("close db: %v", err)
+	}
+}
+
+func sqliteTableCount(t *testing.T, db *sql.DB, name string) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, name).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
 // openSQLite opens a fresh temp SQLite database with the same busy-timeout and
 // WAL settings the real stores use, so the concurrency test exercises the same
 // lock-wait behavior.
@@ -24,7 +40,7 @@ func openSQLite(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { closeDB(t, db) })
 	return db
 }
 
@@ -74,6 +90,9 @@ func TestSQLiteBaselineNoOp(t *testing.T) {
 	if err := Run(context.Background(), &SQLiteDriver{DB: db, Ver: UserVersion()}, 5, migs); err != nil {
 		t.Fatalf("baseline no-op run: %v", err)
 	}
+	if v := userVersion(t, db); v != 5 {
+		t.Fatalf("version after baseline no-op = %d, want 5", v)
+	}
 }
 
 // TestSQLiteDowngradeRefused proves a database newer than the binary is refused
@@ -87,6 +106,12 @@ func TestSQLiteDowngradeRefused(t *testing.T) {
 	err := Run(context.Background(), &SQLiteDriver{DB: db, Ver: UserVersion()}, 0, migs)
 	if !errors.Is(err, ErrDowngrade) {
 		t.Fatalf("downgrade run err = %v, want ErrDowngrade", err)
+	}
+	if v := userVersion(t, db); v != 9 {
+		t.Errorf("user_version = %d after refused downgrade, want 9", v)
+	}
+	if n := sqliteTableCount(t, db, "t"); n != 0 {
+		t.Errorf("table t count = %d after refused downgrade, want 0", n)
 	}
 }
 
@@ -165,15 +190,76 @@ func TestSQLiteConcurrentRunAppliesOnce(t *testing.T) {
 // TestValidateRejectsBadSets proves a malformed migration set is refused before
 // any database work.
 func TestValidateRejectsBadSets(t *testing.T) {
+	step := []string{`CREATE TABLE should_not_exist (id INTEGER PRIMARY KEY)`}
 	bad := [][]Migration{
-		{{Version: 0, Steps: nil}},
-		{{Version: 2}, {Version: 1}},
-		{{Version: 1}, {Version: 1}},
+		{{Version: -1, Steps: step}},
+		{{Version: 0, Steps: step}},
+		{{Version: 2, Steps: step}, {Version: 1, Steps: step}},
+		{{Version: 1, Steps: step}, {Version: 1, Steps: step}},
 	}
 	for i, migs := range bad {
-		if err := Run(context.Background(), &SQLiteDriver{DB: openSQLite(t), Ver: UserVersion()}, 0, migs); err == nil {
+		db := openSQLite(t)
+		if err := Run(context.Background(), &SQLiteDriver{DB: db, Ver: UserVersion()}, 0, migs); err == nil {
 			t.Errorf("set %d: expected validation error, got nil", i)
 		}
+		if v := userVersion(t, db); v != 0 {
+			t.Errorf("set %d: user_version = %d after validation refusal, want 0", i, v)
+		}
+		if n := sqliteTableCount(t, db, "should_not_exist"); n != 0 {
+			t.Errorf("set %d: table created despite validation refusal", i)
+		}
+	}
+}
+
+// TestSQLiteLockedDowngradeRefused proves the authoritative version re-read
+// inside Lock refuses a database upgraded by a racing newer binary between the
+// unlocked check and lock acquisition, leaving schema untouched and lock freed.
+func TestSQLiteLockedDowngradeRefused(t *testing.T) {
+	db := openSQLite(t)
+	db.SetMaxOpenConns(1)
+	reads := 0
+	ver := SQLiteVersion{
+		Read: func(context.Context, *sql.Conn) (int, error) {
+			reads++
+			if reads == 1 {
+				return 0, nil
+			}
+			return 9, nil
+		},
+		Write: UserVersion().Write,
+	}
+	migs := []Migration{{Version: 2, Steps: []string{`CREATE TABLE t (id INTEGER PRIMARY KEY)`}}}
+	err := Run(context.Background(), &SQLiteDriver{DB: db, Ver: ver}, 0, migs)
+	if !errors.Is(err, ErrDowngrade) {
+		t.Fatalf("locked downgrade err = %v, want ErrDowngrade", err)
+	}
+	if n := sqliteTableCount(t, db, "t"); n != 0 {
+		t.Errorf("table t count = %d after locked downgrade refusal, want 0", n)
+	}
+	if _, err := db.Exec(`BEGIN IMMEDIATE`); err != nil {
+		t.Fatalf("lock not released after locked downgrade refusal: %v", err)
+	}
+	if _, err := db.Exec(`ROLLBACK`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestSQLiteCanceledContextRefused proves Run refuses a canceled context and
+// leaves the database schema and version unchanged.
+func TestSQLiteCanceledContextRefused(t *testing.T) {
+	db := openSQLite(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	migs := []Migration{{Version: 1, Steps: []string{`CREATE TABLE t (id INTEGER PRIMARY KEY)`}}}
+	err := Run(ctx, &SQLiteDriver{DB: db, Ver: UserVersion()}, 0, migs)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled context err = %v, want context.Canceled", err)
+	}
+	if v := userVersion(t, db); v != 0 {
+		t.Errorf("user_version = %d after canceled run, want 0", v)
+	}
+	if n := sqliteTableCount(t, db, "t"); n != 0 {
+		t.Errorf("table t count = %d after canceled run, want 0", n)
 	}
 }
 
@@ -198,10 +284,10 @@ func openMySQL(t *testing.T) *sql.DB {
 		t.Fatal(err)
 	}
 	if _, err := adb.Exec("CREATE DATABASE IF NOT EXISTS `" + cfg.DBName + "`"); err != nil {
-		adb.Close()
+		closeDB(t, adb)
 		t.Fatalf("create test db: %v", err)
 	}
-	adb.Close()
+	closeDB(t, adb)
 
 	db, err := sql.Open("mysql", cfg.FormatDSN())
 	if err != nil {
@@ -210,11 +296,11 @@ func openMySQL(t *testing.T) *sql.DB {
 	// Start from a clean slate so each test is independent.
 	for _, tbl := range []string{"schema_migrations", "mt1"} {
 		if _, err := db.Exec("DROP TABLE IF EXISTS " + tbl); err != nil {
-			db.Close()
+			closeDB(t, db)
 			t.Fatalf("drop %s: %v", tbl, err)
 		}
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { closeDB(t, db) })
 	return db
 }
 
@@ -268,7 +354,7 @@ func TestMySQLBaselineAdoption(t *testing.T) {
 }
 
 // TestMySQLDowngradeRefused proves a MariaDB database recorded newer than the
-// binary is refused.
+// binary is refused without changing the recorded version or creating tables.
 func TestMySQLDowngradeRefused(t *testing.T) {
 	db := openMySQL(t)
 	if _, err := db.Exec(schemaMigrationsDDL); err != nil {
@@ -281,5 +367,31 @@ func TestMySQLDowngradeRefused(t *testing.T) {
 	err := Run(context.Background(), &MySQLDriver{DB: db}, 0, migs)
 	if !errors.Is(err, ErrDowngrade) {
 		t.Fatalf("downgrade run err = %v, want ErrDowngrade", err)
+	}
+	var ver, tables int
+	if err := db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&ver); err != nil || ver != 9 {
+		t.Errorf("recorded version = %d (err %v), want 9", ver, err)
+	}
+	if err := db.QueryRow(
+		"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'mt1'",
+	).Scan(&tables); err != nil || tables != 0 {
+		t.Errorf("table mt1 count = %d (err %v), want 0 after refused downgrade", tables, err)
+	}
+}
+
+// TestMySQLFailedStepLeavesVersionUnrecorded proves a failing DDL/DML step in
+// MySQLDriver returns an error and does not record the migration version.
+func TestMySQLFailedStepLeavesVersionUnrecorded(t *testing.T) {
+	db := openMySQL(t)
+	migs := []Migration{{Version: 1, Steps: []string{`INSERT INTO missing_mysql_table VALUES (1)`}}}
+	if err := Run(context.Background(), &MySQLDriver{DB: db}, 0, migs); err == nil {
+		t.Fatal("expected error for failing MySQL migration step, got nil")
+	}
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("schema_migrations row count = %d after failed step, want 0", count)
 	}
 }

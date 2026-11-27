@@ -77,16 +77,15 @@ func parseVersion(name string) (int, error) {
 // inside a comment never splits a statement; comments must therefore occupy their
 // own lines (the documented schema files do).
 func splitStatements(content string) []string {
-	var sql strings.Builder
+	var lines []string
 	for line := range strings.SplitSeq(content, "\n") {
 		if t := strings.TrimSpace(line); t == "" || strings.HasPrefix(t, "--") {
 			continue
 		}
-		sql.WriteString(line)
-		sql.WriteByte('\n')
+		lines = append(lines, line)
 	}
 	var out []string
-	for chunk := range strings.SplitSeq(sql.String(), ";") {
+	for chunk := range strings.SplitSeq(strings.Join(lines, "\n"), ";") {
 		if stmt := strings.TrimSpace(chunk); stmt != "" {
 			out = append(out, stmt)
 		}

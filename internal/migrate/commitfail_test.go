@@ -2,6 +2,8 @@ package migrate
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"testing"
 )
 
@@ -31,6 +33,12 @@ func TestAFailedCommitLeavesNoOpenTransaction(t *testing.T) {
 	if v := userVersion(t, db); v != 0 {
 		t.Errorf("user_version = %d after the failed run, want 0", v)
 	}
+	if n := sqliteTableCount(t, db, "parent"); n != 0 {
+		t.Errorf("parent table count = %d after failed commit, want 0", n)
+	}
+	if n := sqliteTableCount(t, db, "child"); n != 0 {
+		t.Errorf("child table count = %d after failed commit, want 0", n)
+	}
 }
 
 // TestAFailedStepLeavesNoHalfAppliedMigration fails the second statement of a
@@ -55,5 +63,37 @@ func TestAFailedStepLeavesNoHalfAppliedMigration(t *testing.T) {
 	}
 	if v := userVersion(t, db); v != 0 {
 		t.Errorf("user_version = %d after the failed run, want 0", v)
+	}
+}
+
+// TestFailedVersionWriteRollsBackSchema proves a failure while recording the
+// migration version rolls back the DDL executed in the same transaction and
+// leaves no open transaction on the pooled connection.
+func TestFailedVersionWriteRollsBackSchema(t *testing.T) {
+	db := openSQLite(t)
+	db.SetMaxOpenConns(1)
+	writeErr := errors.New("version write refused")
+	ver := SQLiteVersion{
+		Read: UserVersion().Read,
+		Write: func(context.Context, *sql.Conn, int) error {
+			return writeErr
+		},
+	}
+	migs := []Migration{{Version: 1, Steps: []string{`CREATE TABLE orphan (id INTEGER PRIMARY KEY)`}}}
+	err := Run(context.Background(), &SQLiteDriver{DB: db, Ver: ver}, 0, migs)
+	if !errors.Is(err, writeErr) {
+		t.Fatalf("run err = %v, want %v", err, writeErr)
+	}
+	if n := sqliteTableCount(t, db, "orphan"); n != 0 {
+		t.Errorf("orphan table count = %d after version write failure, want 0", n)
+	}
+	if v := userVersion(t, db); v != 0 {
+		t.Errorf("user_version = %d after version write failure, want 0", v)
+	}
+	if _, err := db.Exec(`BEGIN IMMEDIATE`); err != nil {
+		t.Fatalf("new transaction after version write failure: %v", err)
+	}
+	if _, err := db.Exec(`ROLLBACK`); err != nil {
+		t.Fatal(err)
 	}
 }

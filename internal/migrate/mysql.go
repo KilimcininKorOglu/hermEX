@@ -57,13 +57,11 @@ func (d *MySQLDriver) Lock(ctx context.Context) (int, error) {
 	}
 	d.conn = c
 	if _, err := c.ExecContext(ctx, schemaMigrationsDDL); err != nil {
-		_ = d.Unlock(ctx, false)
-		return 0, err
+		return 0, errors.Join(err, d.Unlock(ctx, false))
 	}
 	v, err := maxVersion(ctx, c)
 	if err != nil {
-		_ = d.Unlock(ctx, false)
-		return 0, err
+		return 0, errors.Join(err, d.Unlock(ctx, false))
 	}
 	return v, nil
 }

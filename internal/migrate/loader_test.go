@@ -57,9 +57,108 @@ func TestLoadFSCommentSemicolon(t *testing.T) {
 // error rather than a silently skipped migration.
 func TestLoadFSRejectsUnnumbered(t *testing.T) {
 	fsys := fstest.MapFS{"m/baseline.sql": {Data: []byte("CREATE TABLE a (id INT);")}}
-	if _, err := LoadFS(fsys, "m"); err == nil {
+	migs, err := LoadFS(fsys, "m")
+	if err == nil {
 		t.Fatal("expected an error for an unnumbered migration file")
 	}
+	if migs != nil {
+		t.Fatalf("migs = %v on error, want nil", migs)
+	}
+}
+
+// TestLoadFSRejectsHostileInputs proves malformed, empty, oversized, negative,
+// and missing migration inputs are refused without returning partial migrations.
+func TestLoadFSRejectsHostileInputs(t *testing.T) {
+	cases := []struct {
+		name string
+		dir  string
+		fsys fstest.MapFS
+	}{
+		{
+			name: "missing directory",
+			dir:  "missing",
+			fsys: fstest.MapFS{},
+		},
+		{
+			name: "negative version prefix",
+			dir:  "m",
+			fsys: fstest.MapFS{
+				"m/0001_ok.sql":  {Data: []byte("CREATE TABLE a (id INT);")},
+				"m/-0002_no.sql": {Data: []byte("CREATE TABLE b (id INT);")},
+			},
+		},
+		{
+			name: "oversized version overflows int",
+			dir:  "m",
+			fsys: fstest.MapFS{
+				"m/0001_ok.sql": {Data: []byte("CREATE TABLE a (id INT);")},
+				"m/999999999999999999999999999999_overflow.sql": {Data: []byte("CREATE TABLE b (id INT);")},
+			},
+		},
+		{
+			name: "empty sql file",
+			dir:  "m",
+			fsys: fstest.MapFS{
+				"m/0001_ok.sql":    {Data: []byte("CREATE TABLE a (id INT);")},
+				"m/0002_empty.sql": {Data: []byte("")},
+			},
+		},
+		{
+			name: "comment and whitespace only sql file",
+			dir:  "m",
+			fsys: fstest.MapFS{
+				"m/0001_ok.sql":       {Data: []byte("CREATE TABLE a (id INT);")},
+				"m/0002_comments.sql": {Data: []byte("-- only a comment; with semicolon\n   \n\t\n")},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			migs, err := LoadFS(tc.fsys, tc.dir)
+			if err == nil {
+				t.Fatalf("expected error for %s, got nil", tc.name)
+			}
+			if migs != nil {
+				t.Fatalf("migs = %v on refused %s, want nil", migs, tc.name)
+			}
+		})
+	}
+}
+
+// TestLoadFSSkipsSQLDirectory proves a subdirectory whose name ends in .sql is
+// ignored rather than treated as a migration file.
+func TestLoadFSSkipsSQLDirectory(t *testing.T) {
+	fsys := fstest.MapFS{
+		"m/0001_dir.sql/nested.sql": {Data: []byte("CREATE TABLE ignored (id INT);")},
+		"m/0002_real.sql":           {Data: []byte("CREATE TABLE real_t (id INT);")},
+	}
+	migs, err := LoadFS(fsys, "m")
+	if err != nil {
+		t.Fatalf("LoadFS: %v", err)
+	}
+	if len(migs) != 1 || migs[0].Version != 2 {
+		t.Fatalf("loaded = %+v, want only version 2", migs)
+	}
+}
+
+// TestMustLoadFSPanicsOnError proves MustLoadFS returns valid migrations and
+// panics with an error when LoadFS fails.
+func TestMustLoadFSPanicsOnError(t *testing.T) {
+	valid := fstest.MapFS{"m/0001_init.sql": {Data: []byte("CREATE TABLE a (id INT);")}}
+	migs := MustLoadFS(valid, "m")
+	if len(migs) != 1 || migs[0].Version != 1 {
+		t.Fatalf("MustLoadFS valid = %+v, want version 1", migs)
+	}
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("MustLoadFS on missing directory did not panic")
+		}
+		if _, ok := r.(error); !ok {
+			t.Fatalf("panic value = %T (%v), want error", r, r)
+		}
+	}()
+	MustLoadFS(fstest.MapFS{}, "missing")
 }
 
 // TestLoadFSRunsEndToEnd proves loaded statements apply through the runner: a real
