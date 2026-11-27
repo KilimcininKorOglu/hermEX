@@ -37,7 +37,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request, sess *se
 		s.failRequest(w, r, "settings.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
-	defer st.Close()
+	defer s.closeStore(sess.user, st)
 
 	var getNodes, setNodes []*wbxml.Node
 	for _, sub := range root.Children {

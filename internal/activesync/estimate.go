@@ -35,7 +35,7 @@ func (s *Server) handleGetItemEstimate(w http.ResponseWriter, r *http.Request, s
 		s.failRequest(w, r, "store.open.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
-	defer st.Close()
+	defer s.closeStore(sess.user, st)
 	state, err := loadState(st)
 	if err != nil {
 		s.failRequest(w, r, "state.load.fail", err, http.StatusInternalServerError, "an internal error occurred")

@@ -188,6 +188,21 @@ func (s *Server) recordSwallowed(sess *session, name string, err error) {
 	})
 }
 
+// closeStore closes a mailbox store a request opened and records a failed close.
+// The reply is already decided by then, so the failure goes to the operator's
+// log rather than to the device.
+func (s *Server) closeStore(user string, st *objectstore.Store) {
+	if err := st.Close(); err != nil {
+		s.Logger.Emit(logging.Event{
+			Level:     logging.LevelWarn,
+			Subsystem: logging.ActiveSync,
+			Name:      "store.close.fail",
+			User:      user,
+			Fields:    logging.Fields{"error": err.Error()},
+		})
+	}
+}
+
 // ComposeMail failure statuses ([MS-ASCMD] 2.2.2 Common Status Codes). Every
 // served protocol version is 14.0 or later, where a failure is an HTTP 200 whose
 // body is the command element carrying this Status (2.2.3.177.14, .16).

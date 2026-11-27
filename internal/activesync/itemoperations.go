@@ -30,7 +30,7 @@ func (s *Server) handleItemOperations(w http.ResponseWriter, r *http.Request, se
 		s.failRequest(w, r, "itemoperations.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
-	defer st.Close()
+	defer s.closeStore(sess.user, st)
 
 	var responses []*wbxml.Node
 	for _, op := range root.Children {

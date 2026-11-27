@@ -99,7 +99,7 @@ func (s *Server) handleMeetingResponse(w http.ResponseWriter, r *http.Request, s
 		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
 		return
 	}
-	defer st.Close()
+	defer s.closeStore(sess.user, st)
 
 	var results []*wbxml.Node
 	for _, req := range root.Children {

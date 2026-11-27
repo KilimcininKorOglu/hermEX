@@ -101,7 +101,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, sess *sessio
 		s.failRequest(w, r, "sync.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
-	defer st.Close()
+	defer s.closeStore(sess.user, st)
 
 	state, err := loadState(st)
 	if err != nil {
@@ -328,7 +328,8 @@ func (s *Server) syncCheck(mailbox string, dev *deviceState, collections *wbxml.
 	if err != nil {
 		return false
 	}
-	defer st.Close()
+	// The check has only the mailbox path; the log names no user.
+	defer s.closeStore("", st)
 	return syncHasChanges(st, dev, collections)
 }
 

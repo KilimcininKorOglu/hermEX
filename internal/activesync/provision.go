@@ -107,7 +107,7 @@ func (s *Server) devicePolicy(sess *session) easpolicy.Policy {
 			if override, err = st.GetSyncPolicy(); err != nil {
 				s.logPolicyReadFail("mailbox", sess, err)
 			}
-			_ = st.Close()
+			s.closeStore(sess.user, st)
 		}
 	}
 	return easpolicy.Merge(easpolicy.Merge(def, dom), override)
@@ -226,7 +226,7 @@ func (s *Server) provisionKey(sess *session, root *wbxml.Node, final string) (st
 	if err != nil {
 		return "", 0, err
 	}
-	defer st.Close()
+	defer s.closeStore(sess.user, st)
 	if phaseOne(root) {
 		temp, err := issuePendingKey(st, sess.req.deviceID, final)
 		return temp, 0, err
@@ -283,7 +283,7 @@ func (s *Server) provisionWipe(sess *session, acked bool) int {
 		s.logWipeReadFail(sess, err)
 		return wipeEmitNone
 	}
-	defer st.Close()
+	defer s.closeStore(sess.user, st)
 	emit, err := advanceProvisionWipe(st, sess.req.deviceID, acked)
 	if err != nil {
 		s.logWipeReadFail(sess, err)

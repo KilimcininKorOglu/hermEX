@@ -64,7 +64,7 @@ func (s *Server) handleFind(w http.ResponseWriter, r *http.Request, sess *sessio
 		writeWBXML(w, findStatus(findStatusInvalidRequest))
 		return
 	}
-	defer st.Close()
+	defer s.closeStore(sess.user, st)
 
 	hits := mailboxSearchHits(st, freetext, folderFilter)
 	total := len(hits)

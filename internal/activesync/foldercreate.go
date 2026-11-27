@@ -43,7 +43,7 @@ func (s *Server) handleFolderCreate(w http.ResponseWriter, r *http.Request, sess
 		s.failRequest(w, r, "folder.create.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
-	defer st.Close()
+	defer s.closeStore(sess.user, st)
 
 	state, err := loadState(st)
 	if err != nil {

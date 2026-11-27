@@ -35,7 +35,7 @@ func (s *Server) handleMoveItems(w http.ResponseWriter, r *http.Request, sess *s
 		s.failRequest(w, r, "moveitems.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
-	defer st.Close()
+	defer s.closeStore(sess.user, st)
 
 	var responses []*wbxml.Node
 	for _, mv := range root.Children {

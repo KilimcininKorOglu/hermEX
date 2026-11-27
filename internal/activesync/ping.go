@@ -103,7 +103,7 @@ func (s *Server) pingDevice(sess *session, sent pingParams) (*deviceState, pingP
 	if err != nil {
 		return nil, pingParams{}, 0, err
 	}
-	defer st.Close()
+	defer s.closeStore(sess.user, st)
 	state, err := loadState(st)
 	if err != nil {
 		return nil, pingParams{}, 0, err
@@ -193,7 +193,8 @@ func (s *Server) pingCheck(mailbox string, dev *deviceState, folderIDs []string)
 	if err != nil {
 		return nil
 	}
-	defer st.Close()
+	// The check has only the mailbox path; the log names no user.
+	defer s.closeStore("", st)
 	var changed []string
 	for _, collID := range folderIDs {
 		cstate := dev.Collections[collID]

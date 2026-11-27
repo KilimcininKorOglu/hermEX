@@ -270,6 +270,14 @@ func matchTotal(gal directory.GAL, caller, to string, collected, fromGAL int, ga
 // storeFail records a mailbox read that failed under the named stage.
 type storeFail func(stage string, err error)
 
+// closeOrFail closes a store the lookup opened and reports a failed close
+// through fail under the lookup's stage.
+func closeOrFail(st *objectstore.Store, stage string, fail storeFail) {
+	if err := st.Close(); err != nil {
+		fail(stage+".close", err)
+	}
+}
+
 // ownContacts matches a query against the caller's own Contacts folder. A mailbox
 // that will not open yields nothing rather than failing the query, because the
 // address-book half has already answered; the failure is recorded. A query
@@ -284,7 +292,7 @@ func ownContacts(mailbox, query string, limit int, fail storeFail) []objectstore
 		fail("contacts", err)
 		return nil
 	}
-	defer st.Close()
+	defer closeOrFail(st, "contacts", fail)
 	matches, err := st.SearchContacts(query, limit)
 	if err != nil {
 		fail("contacts", err)
@@ -357,7 +365,7 @@ func recipientPhoto(storePath string, fail storeFail) []byte {
 		fail("photo", err)
 		return nil
 	}
-	defer st.Close()
+	defer closeOrFail(st, "photo", fail)
 	p, err := st.UserPhoto()
 	if err != nil {
 		fail("photo", err)
@@ -377,7 +385,7 @@ func contactPhoto(mailbox, address string, fail storeFail) []byte {
 		fail("contact-photo", err)
 		return nil
 	}
-	defer st.Close()
+	defer closeOrFail(st, "contact-photo", fail)
 	p, err := st.ContactPhotoFor(address)
 	if err != nil {
 		fail("contact-photo", err)

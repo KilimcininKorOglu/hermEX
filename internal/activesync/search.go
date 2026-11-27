@@ -105,7 +105,7 @@ func (s *Server) handleMailboxSearch(w http.ResponseWriter, store *wbxml.Node, s
 		writeWBXML(w, mailboxSearchReply(srStatusServerError, nil, 0, 0, 0))
 		return
 	}
-	defer st.Close()
+	defer s.closeStore(sess.user, st)
 
 	hits := mailboxSearchHits(st, freetext, folderFilter)
 

@@ -40,12 +40,16 @@ func prepareSmartResponse(sess *session, cm *composeMail, r *http.Request) (*rep
 // text ([MS-ASCMD] 2.2.1.19 and 2.2.1.20: the server retrieves and sends the full
 // text of the original). The message goes through oxcmail so the body stays one
 // well-formed MIME tree.
-func withOriginal(mailbox string, device []byte, src *replySource) ([]byte, error) {
+func withOriginal(mailbox string, device []byte, src *replySource) (_ []byte, err error) {
 	st, err := objectstore.OpenExisting(mailbox)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = st.Close() }()
+	defer func() {
+		if cerr := st.Close(); cerr != nil {
+			err = errors.Join(err, fmt.Errorf("close the source mailbox: %w", cerr))
+		}
+	}()
 	id := src.objID
 	if id == 0 {
 		info, err := st.MessageByUID(src.fid, src.uid)

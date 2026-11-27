@@ -321,7 +321,7 @@ func (s *Server) logAuth(r *http.Request, user, name string) {
 func (s *Server) recordDevice(r *http.Request, sess *session) (deviceMeta, error) {
 	st, err := objectstore.OpenExisting(sess.mailbox)
 	if err == nil {
-		defer st.Close()
+		defer s.closeStore(sess.user, st)
 		var dev deviceMeta
 		dev, err = recordDeviceContact(st, sess.req.deviceID, sess.user, sess.req.deviceType,
 			r.Header.Get("User-Agent"), sess.protocol, time.Now().Unix())
