@@ -2,7 +2,6 @@ package logging
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
@@ -15,20 +14,10 @@ import (
 // the cutoff and leaves newer ones, the operation the admin runs to enforce the
 // retention window without a TTL index. Skips without the dev container's mongo.
 func TestReaderPruneOlderThan(t *testing.T) {
-	uri := os.Getenv("HERMEX_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("HERMEX_TEST_MONGO_URI not set (needs the dev container's mongo)")
-	}
+	uri := mustMongoURI(t)
 	const db = "hermex_logprunetest"
 	bg := context.Background()
-
-	raw, err := mongo.Connect(options.Client().ApplyURI(uri))
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	defer func() { _ = raw.Disconnect(bg) }()
-	mustNoErr(t, raw.Database(db).Drop(bg), "drop the leftover test database")
-	defer func() { _ = raw.Database(db).Drop(bg) }()
+	raw := openTestMongo(t, bg, uri, db)
 
 	now := time.Now().UTC()
 	coll := raw.Database(db).Collection("logs")
@@ -44,7 +33,11 @@ func TestReaderPruneOlderThan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewReader: %v", err)
 	}
-	defer reader.Close()
+	defer func() {
+		if err := reader.Close(); err != nil {
+			t.Errorf("close reader: %v", err)
+		}
+	}()
 
 	cutoff := now.Add(-30 * 24 * time.Hour)
 	n, err := reader.PruneOlderThan(bg, cutoff)
@@ -82,7 +75,11 @@ func TestReaderDropLegacyTTLIndex(t *testing.T) {
 
 	reader, err := NewReader(uri, db)
 	mustNoErr(t, err, "NewReader")
-	defer reader.Close()
+	defer func() {
+		if err := reader.Close(); err != nil {
+			t.Errorf("close reader: %v", err)
+		}
+	}()
 
 	mustNoErr(t, reader.DropLegacyTTLIndex(bg), "DropLegacyTTLIndex")
 	// Idempotent: a second call with no TTL index left must also succeed.
@@ -91,4 +88,27 @@ func TestReaderDropLegacyTTLIndex(t *testing.T) {
 	idx := listIndexes(t, bg, coll)
 	wantNoTTLIndex(t, idx, "the indexes after the drop")
 	wantTrue(t, hasIndexNamed(idx, "subsystem_1_ts_-1"), "the ordinary subsystem index survived the drop")
+}
+
+// TestNewReaderRefusesMalformedURIAndDefaultsDatabase checks NewReader without a
+// live Mongo server: a malformed URI is rejected, and an empty database name
+// defaults to "hermex" targeting the "logs" collection.
+func TestNewReaderRefusesMalformedURIAndDefaultsDatabase(t *testing.T) {
+	bad, err := NewReader("http://invalid", "db")
+	if err == nil {
+		t.Fatal("NewReader accepted a malformed URI")
+	}
+	if bad != nil {
+		t.Error("NewReader returned a non-nil reader on error")
+	}
+
+	r, err := NewReader("mongodb://127.0.0.1:27017", "")
+	mustNoErr(t, err, "NewReader with valid URI and default database")
+	defer func() {
+		if err := r.Close(); err != nil {
+			t.Errorf("close reader: %v", err)
+		}
+	}()
+	wantEq(t, r.coll.Database().Name(), "hermex", "default database name")
+	wantEq(t, r.coll.Name(), "logs", "log collection name")
 }
