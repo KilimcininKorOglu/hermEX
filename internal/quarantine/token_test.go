@@ -29,10 +29,22 @@ func TestTokenRoundTrip(t *testing.T) {
 	}
 }
 
+// mustMint mints a token under testSecret and fails the test when minting fails;
+// otherwise an empty token would be refused by Verify and every rejection test
+// below would pass without exercising a real signature.
+func mustMint(t *testing.T, c Claims) string {
+	t.Helper()
+	tok, err := Mint(testSecret, c)
+	if err != nil || tok == "" {
+		t.Fatalf("Mint = %q, %v", tok, err)
+	}
+	return tok
+}
+
 // TestTokenRejectsTamperedSignature proves flipping the signature fails verification,
 // the token cannot be forged without the secret.
 func TestTokenRejectsTamperedSignature(t *testing.T) {
-	tok, _ := Mint(testSecret, Claims{Mailbox: "alice@hermex.test", UID: 1, Expiry: testNow.Add(time.Hour).Unix()})
+	tok := mustMint(t, Claims{Mailbox: "alice@hermex.test", UID: 1, Expiry: testNow.Add(time.Hour).Unix()})
 	enc, _, _ := strings.Cut(tok, ".")
 	forged := enc + ".AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	if _, err := Verify(testSecret, forged, testNow); !errors.Is(err, ErrBadToken) {
@@ -43,10 +55,10 @@ func TestTokenRejectsTamperedSignature(t *testing.T) {
 // TestTokenRejectsTamperedPayload proves editing the payload (e.g. to point at another
 // mailbox or message) invalidates the signature.
 func TestTokenRejectsTamperedPayload(t *testing.T) {
-	tok, _ := Mint(testSecret, Claims{Mailbox: "alice@hermex.test", UID: 1, Expiry: testNow.Add(time.Hour).Unix()})
+	tok := mustMint(t, Claims{Mailbox: "alice@hermex.test", UID: 1, Expiry: testNow.Add(time.Hour).Unix()})
 	// Re-sign attempt with a different payload but the original signature.
 	_, sig, _ := strings.Cut(tok, ".")
-	other, _ := Mint(testSecret, Claims{Mailbox: "victim@hermex.test", UID: 99, Expiry: testNow.Add(time.Hour).Unix()})
+	other := mustMint(t, Claims{Mailbox: "victim@hermex.test", UID: 99, Expiry: testNow.Add(time.Hour).Unix()})
 	otherEnc, _, _ := strings.Cut(other, ".")
 	forged := otherEnc + "." + sig
 	if _, err := Verify(testSecret, forged, testNow); !errors.Is(err, ErrBadToken) {
@@ -57,7 +69,7 @@ func TestTokenRejectsTamperedPayload(t *testing.T) {
 // TestTokenRejectsWrongSecret proves a token signed with one secret does not verify
 // under another, so a leak of one daemon's secret cannot mint links for another.
 func TestTokenRejectsWrongSecret(t *testing.T) {
-	tok, _ := Mint(testSecret, Claims{Mailbox: "alice@hermex.test", UID: 1, Expiry: testNow.Add(time.Hour).Unix()})
+	tok := mustMint(t, Claims{Mailbox: "alice@hermex.test", UID: 1, Expiry: testNow.Add(time.Hour).Unix()})
 	if _, err := Verify([]byte("a-different-secret-entirely-32bytes!"), tok, testNow); !errors.Is(err, ErrBadToken) {
 		t.Errorf("wrong-secret err = %v, want ErrBadToken", err)
 	}
@@ -66,7 +78,7 @@ func TestTokenRejectsWrongSecret(t *testing.T) {
 // TestTokenRejectsExpired proves a token is refused once its expiry has passed, so a
 // stale digest link cannot be used indefinitely.
 func TestTokenRejectsExpired(t *testing.T) {
-	tok, _ := Mint(testSecret, Claims{Mailbox: "alice@hermex.test", UID: 1, Expiry: testNow.Unix()})
+	tok := mustMint(t, Claims{Mailbox: "alice@hermex.test", UID: 1, Expiry: testNow.Unix()})
 	if _, err := Verify(testSecret, tok, testNow); !errors.Is(err, ErrExpired) {
 		t.Errorf("at-expiry err = %v, want ErrExpired", err)
 	}
