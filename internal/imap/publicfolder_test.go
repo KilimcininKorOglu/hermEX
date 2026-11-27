@@ -141,6 +141,7 @@ func TestIMAPPublicFolders(t *testing.T) {
 	wantLine(t, "SELECT Bulletin after the post", selUn, "1 EXISTS")
 	// A poster cannot mutate existing items: STORE is refused on the read-only selection.
 	wantStatus(t, "STORE on a poster's read-only public selection", c, "st", `STORE 1 +FLAGS (\Deleted)`, "NO")
+	wantNoLine(t, "FLAGS after the refused STORE", c.mustOK("sf", "FETCH 1 (FLAGS)"), `\Deleted`)
 	// The posted message still reads back from the public store (cross-store FETCH).
 	wantLine(t, "FETCH from a public folder", c.mustOK("f", "FETCH 1 (BODY[TEXT])"), "hello world")
 
@@ -150,7 +151,9 @@ func TestIMAPPublicFolders(t *testing.T) {
 
 	// STATUS answers for a LIST-advertised public folder (clients poll it for badges).
 	stUn, _ := c.doFull("status", `STATUS "Public Folders/Announcements" (MESSAGES UNSEEN)`)
-	wantLine(t, "STATUS on a public folder", stUn, "MESSAGES")
+	// Announcements was seeded empty and the APPEND to it was refused, so it still
+	// holds nothing.
+	wantLine(t, "STATUS on a public folder", stUn, "MESSAGES 0")
 }
 
 // seedPublicGrants provisions one domain's public store with four folders whose
