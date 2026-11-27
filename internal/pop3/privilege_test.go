@@ -2,7 +2,6 @@ package pop3
 
 import (
 	"bufio"
-	"fmt"
 	"net"
 	"net/textproto"
 	"path/filepath"
@@ -64,9 +63,9 @@ func TestPOP3PrivilegeDenied(t *testing.T) {
 		}
 	}
 	mustOK() // greeting
-	_, _ = fmt.Fprintf(conn, "USER alice\r\n")
+	mustSend(t, conn, "USER alice\r\n")
 	mustOK()
-	_, _ = fmt.Fprintf(conn, "PASS secret\r\n")
+	mustSend(t, conn, "PASS secret\r\n")
 	l, err := r.ReadLine()
 	if err != nil {
 		t.Fatal(err)

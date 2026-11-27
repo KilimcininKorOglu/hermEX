@@ -60,11 +60,11 @@ func TestSTLSUpgrade(t *testing.T) {
 	br := bufio.NewReader(conn)
 	mustPrefix(t, br, "+OK") // greeting
 
-	_, _ = io.WriteString(conn, "CAPA\r\n")
+	mustSend(t, conn, "%s", "CAPA\r\n")
 	if capa := readUntilDot(t, br); !strings.Contains(capa, "STLS") {
 		t.Errorf("CAPA does not advertise STLS:\n%s", capa)
 	}
-	_, _ = io.WriteString(conn, "STLS\r\n")
+	mustSend(t, conn, "%s", "STLS\r\n")
 	mustPrefix(t, br, "+OK")
 
 	tconn := tls.Client(conn, &tls.Config{RootCAs: certPool(t, certPath), ServerName: "127.0.0.1"})
@@ -74,15 +74,15 @@ func TestSTLSUpgrade(t *testing.T) {
 	tbr := bufio.NewReader(tconn)
 	// After STLS the session stays in AUTHORIZATION (RFC 2595); CAPA must no
 	// longer offer STLS now that the link is encrypted.
-	_, _ = io.WriteString(tconn, "CAPA\r\n")
+	mustSend(t, tconn, "%s", "CAPA\r\n")
 	if capa := readUntilDot(t, tbr); strings.Contains(capa, "STLS") {
 		t.Errorf("STLS still advertised after TLS:\n%s", capa)
 	}
-	_, _ = io.WriteString(tconn, "USER alice\r\n")
+	mustSend(t, tconn, "%s", "USER alice\r\n")
 	mustPrefix(t, tbr, "+OK")
-	_, _ = io.WriteString(tconn, "PASS secret\r\n")
+	mustSend(t, tconn, "%s", "PASS secret\r\n")
 	mustPrefix(t, tbr, "+OK")
-	_, _ = io.WriteString(tconn, "QUIT\r\n")
+	mustSend(t, tconn, "%s", "QUIT\r\n")
 	mustPrefix(t, tbr, "+OK")
 }
 
@@ -100,15 +100,15 @@ func TestPlaintextLoginWaitsForSTLS(t *testing.T) {
 	br := bufio.NewReader(conn)
 	mustPrefix(t, br, "+OK") // greeting
 
-	_, _ = io.WriteString(conn, "CAPA\r\n")
+	mustSend(t, conn, "%s", "CAPA\r\n")
 	if capa := readUntilDot(t, br); strings.Contains(capa, "USER\r\n") || strings.Contains(capa, "SASL") {
 		t.Errorf("plaintext CAPA offers a login method:\n%s", capa)
 	}
 	for _, line := range []string{"USER alice", "PASS secret", "AUTH PLAIN AGFsaWNlAHNlY3JldA=="} {
-		_, _ = io.WriteString(conn, line+"\r\n")
+		mustSend(t, conn, "%s", line+"\r\n")
 		mustPrefix(t, br, "-ERR")
 	}
-	_, _ = io.WriteString(conn, "STAT\r\n")
+	mustSend(t, conn, "%s", "STAT\r\n")
 	mustPrefix(t, br, "-ERR")
 }
 
@@ -148,13 +148,13 @@ func TestImplicitTLSLoginIsAccepted(t *testing.T) {
 	defer conn.Close()
 	br := bufio.NewReader(conn)
 	mustPrefix(t, br, "+OK")
-	_, _ = io.WriteString(conn, "CAPA\r\n")
+	mustSend(t, conn, "%s", "CAPA\r\n")
 	if capa := readUntilDot(t, br); !strings.Contains(capa, "USER\r\n") || strings.Contains(capa, "STLS") {
 		t.Errorf("CAPA over implicit TLS:\n%s\nwant USER offered and no STLS", capa)
 	}
-	_, _ = io.WriteString(conn, "USER alice\r\n")
+	mustSend(t, conn, "%s", "USER alice\r\n")
 	mustPrefix(t, br, "+OK")
-	_, _ = io.WriteString(conn, "PASS secret\r\n")
+	mustSend(t, conn, "%s", "PASS secret\r\n")
 	mustPrefix(t, br, "+OK")
 }
 
@@ -175,8 +175,15 @@ func TestSTLSRejectsPipelinedInjection(t *testing.T) {
 	if _, err := conn.Write([]byte("STLS\r\nCAPA\r\n")); err != nil {
 		t.Fatal(err)
 	}
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	rest, _ := io.ReadAll(conn)
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	// The server tears the connection down, so the read ends at EOF; a deadline
+	// error would mean it kept the connection open.
+	rest, err := io.ReadAll(conn)
+	if err != nil {
+		t.Fatalf("read after the pipelined STLS: %v (the connection was not torn down)", err)
+	}
 	if strings.Contains(string(rest), "capabilities") {
 		t.Errorf("injected CAPA executed across the TLS boundary: %q", rest)
 	}

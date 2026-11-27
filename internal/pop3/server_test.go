@@ -16,6 +16,16 @@ import (
 	"hermex/internal/objectstore"
 )
 
+// mustSend writes a formatted protocol line to w and fails the test when the
+// write fails, so a dead connection is reported instead of a confusing read
+// failure further on.
+func mustSend(t *testing.T, w io.Writer, format string, args ...any) {
+	t.Helper()
+	if _, err := fmt.Fprintf(w, format, args...); err != nil {
+		t.Fatalf("send %q: %v", format, err)
+	}
+}
+
 // TestLoginRefusesAnUnprovisionedMailbox proves a read path never creates a
 // mailbox: an account's mailbox is made when the account is created, so a
 // missing one is refused at PASS and stays missing, rather than being replaced
@@ -36,9 +46,9 @@ func TestLoginRefusesAnUnprovisionedMailbox(t *testing.T) {
 	defer conn.Close()
 	r := textproto.NewReader(bufio.NewReader(conn))
 	wantReply(t, r, "+OK")
-	_, _ = fmt.Fprintf(conn, "USER alice\r\n")
+	mustSend(t, conn, "USER alice\r\n")
 	wantReply(t, r, "+OK")
-	_, _ = fmt.Fprintf(conn, "PASS secret\r\n")
+	mustSend(t, conn, "PASS secret\r\n")
 	wantReply(t, r, "-ERR")
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Errorf("PASS created the missing mailbox: %v", err)
@@ -80,7 +90,7 @@ func TestPOP3RetrieveAndDelete(t *testing.T) {
 	defer conn.Close()
 	r := textproto.NewReader(bufio.NewReader(conn))
 
-	send := func(s string) { _, _ = fmt.Fprintf(conn, "%s\r\n", s) }
+	send := func(s string) { mustSend(t, conn, "%s\r\n", s) }
 	wantOK := func() string {
 		t.Helper()
 		return wantReply(t, r, "+OK")
@@ -166,6 +176,9 @@ func checkDeletionCommitted(t *testing.T, path string, inbox int64) {
 		t.Fatalf("after QUIT, messages = %+v, want only UID 2", msgs)
 	}
 	wantEq(t, msgs[0].UID, uint32(2), "the surviving message's uid")
-	dump, _ := st.ListSoftDeleted(inbox)
+	dump, err := st.ListSoftDeleted(inbox)
+	if err != nil {
+		t.Fatal(err)
+	}
 	wantEq(t, len(dump), 1, "dumpster items after POP3 DELE+QUIT (recoverable)")
 }

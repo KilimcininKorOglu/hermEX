@@ -2,7 +2,6 @@ package pop3
 
 import (
 	"bufio"
-	"fmt"
 	"net"
 	"net/textproto"
 	"path/filepath"
@@ -76,7 +75,7 @@ func TestInstrumentationLogsConnAndAuth(t *testing.T) {
 	// event was captured. A failed PASS resets the auth state, so the successful
 	// login still runs on the same connection.
 	send := func(s string) {
-		_, _ = fmt.Fprintf(conn, "%s\r\n", s)
+		mustSend(t, conn, "%s\r\n", s)
 		if _, err := r.ReadLine(); err != nil {
 			t.Fatalf("read response to %q: %v", s, err)
 		}

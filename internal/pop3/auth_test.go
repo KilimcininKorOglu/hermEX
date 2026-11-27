@@ -3,7 +3,6 @@ package pop3
 import (
 	"bufio"
 	"encoding/base64"
-	"fmt"
 	"net"
 	"net/textproto"
 	"path/filepath"
@@ -39,16 +38,27 @@ func TestPOP3AuthPlainContinuation(t *testing.T) {
 	wantOK()
 }
 
+// mustReadLine reads one reply line and fails the test when the read fails, so a
+// closed connection is not read as an empty, mismatching line.
+func mustReadLine(t *testing.T, r *textproto.Reader) string {
+	t.Helper()
+	l, err := r.ReadLine()
+	if err != nil {
+		t.Fatalf("read a reply line: %v", err)
+	}
+	return l
+}
+
 // TestPOP3AuthLogin checks the AUTH LOGIN username/password challenge exchange.
 func TestPOP3AuthLogin(t *testing.T) {
 	r, send, wantOK, _, _ := dialPOP3(t, "Subject: x\r\n\r\nbody\r\n")
 	wantOK() // greeting
 	send("AUTH LOGIN")
-	if l, _ := r.ReadLine(); l != "+ "+b64("Username:") {
+	if l := mustReadLine(t, r); l != "+ "+b64("Username:") {
 		t.Fatalf("want a username challenge, got %q", l)
 	}
 	send(b64("alice"))
-	if l, _ := r.ReadLine(); l != "+ "+b64("Password:") {
+	if l := mustReadLine(t, r); l != "+ "+b64("Password:") {
 		t.Fatalf("want a password challenge, got %q", l)
 	}
 	send(b64("secret"))
@@ -105,10 +115,10 @@ func TestPOP3AuthPrivilegeDenied(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	r := textproto.NewReader(bufio.NewReader(conn))
-	if l, _ := r.ReadLine(); !strings.HasPrefix(l, "+OK") { // greeting
+	if l := mustReadLine(t, r); !strings.HasPrefix(l, "+OK") { // greeting
 		t.Fatalf("greeting = %q", l)
 	}
-	_, _ = fmt.Fprintf(conn, "AUTH PLAIN %s\r\n", b64("\x00alice\x00secret"))
+	mustSend(t, conn, "AUTH PLAIN %s\r\n", b64("\x00alice\x00secret"))
 	l, err := r.ReadLine()
 	if err != nil {
 		t.Fatal(err)

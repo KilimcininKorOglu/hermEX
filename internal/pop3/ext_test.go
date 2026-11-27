@@ -2,7 +2,6 @@ package pop3
 
 import (
 	"bufio"
-	"fmt"
 	"io"
 	"net"
 	"net/textproto"
@@ -23,7 +22,7 @@ func dialPOP3(t *testing.T, msg string) (*textproto.Reader, func(string), func()
 	conn := servePOP3(t, msg)
 	r := textproto.NewReader(bufio.NewReader(conn))
 
-	send := func(s string) { _, _ = fmt.Fprintf(conn, "%s\r\n", s) }
+	send := func(s string) { mustSend(t, conn, "%s\r\n", s) }
 	wantPrefix := func(prefix string) func() string {
 		return func() string {
 			t.Helper()
