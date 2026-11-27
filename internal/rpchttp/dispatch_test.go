@@ -134,12 +134,39 @@ func TestBindNakUnknownInterface(t *testing.T) {
 	}
 }
 
+// mustBind sends a BIND PDU and fails the test unless a single BIND_ACK returns.
+func mustBind(t *testing.T, d *Dispatcher, sess *Session, callID uint32, uuid mapi.GUID, version uint32, ctxID uint16) {
+	t.Helper()
+	out := d.Dispatch(sess, buildBindPDU(callID, uuid, version, ctxID))
+	if len(out) != 1 {
+		t.Fatalf("bind produced %d PDUs, want 1", len(out))
+	}
+	wantEq(t, mustHeader(t, out[0]).Type, uint8(ndr.PktBindAck), "bind reply type")
+}
+
+// buildBindPDUWithTransfer assembles a BIND PDU offering a custom transfer syntax.
+func buildBindPDUWithTransfer(callID uint32, uuid mapi.GUID, version uint32, ctxID uint16, xfer ndr.SyntaxID) []byte {
+	body := ndr.NewPush()
+	body.Uint16(0x16D0)
+	body.Uint16(0x16D0)
+	body.Uint32(0)
+	body.Uint8(1)
+	body.Align(4)
+	body.Uint16(ctxID)
+	body.Uint8(1)
+	body.GUID(uuid)
+	body.Uint32(version)
+	body.GUID(xfer.UUID)
+	body.Uint32(xfer.Version)
+	return ndr.Frame(ndr.PktBind, ndr.PfcFirstFrag|ndr.PfcLastFrag, callID, body.Bytes())
+}
+
 // TestRequestDispatch proves a request after a successful bind reaches the bound
 // handler and the handler's output returns as a single RESPONSE.
 func TestRequestDispatch(t *testing.T) {
 	d := echoDispatcher()
 	sess := &Session{}
-	d.Dispatch(sess, buildBindPDU(0x10, dummyUUID, 1, 0))
+	mustBind(t, d, sess, 0x10, dummyUUID, 1, 0)
 
 	stub := []byte("hello rpc")
 	out := d.Dispatch(sess, buildRequestPDU(0x11, 0, 7, stub, ndr.PfcFirstFrag|ndr.PfcLastFrag))
@@ -172,7 +199,7 @@ func TestRequestUnboundContextFaults(t *testing.T) {
 func TestResponseFragmentation(t *testing.T) {
 	d := echoDispatcher()
 	sess := &Session{}
-	d.Dispatch(sess, buildBindPDU(0x10, dummyUUID, 1, 0))
+	mustBind(t, d, sess, 0x10, dummyUUID, 1, 0)
 
 	// A 12 KiB request echoes back to a >frag (5840) response.
 	big := bytes.Repeat([]byte{0xAB}, 12000)
@@ -209,7 +236,7 @@ func TestResponseFragmentation(t *testing.T) {
 func TestRequestReassembly(t *testing.T) {
 	d := echoDispatcher()
 	sess := &Session{}
-	d.Dispatch(sess, buildBindPDU(0x10, dummyUUID, 1, 0))
+	mustBind(t, d, sess, 0x10, dummyUUID, 1, 0)
 
 	if out := d.Dispatch(sess, buildRequestPDU(0x22, 0, 3, []byte("AAAA"), ndr.PfcFirstFrag)); out != nil {
 		t.Fatalf("first fragment produced %d PDUs, want 0 (awaiting more)", len(out))
@@ -240,7 +267,7 @@ func isFault(t *testing.T, pdu []byte) bool {
 func TestReassemblyStubIsBounded(t *testing.T) {
 	d := echoDispatcher()
 	sess := &Session{}
-	d.Dispatch(sess, buildBindPDU(0x10, dummyUUID, 1, 0))
+	mustBind(t, d, sess, 0x10, dummyUUID, 1, 0)
 
 	chunk := make([]byte, 64<<10)
 	out := d.Dispatch(sess, buildRequestPDU(0x22, 0, 3, chunk, ndr.PfcFirstFrag))
@@ -271,7 +298,7 @@ func TestReassemblyStubIsBounded(t *testing.T) {
 func TestPendingCallsAreBounded(t *testing.T) {
 	d := echoDispatcher()
 	sess := &Session{}
-	d.Dispatch(sess, buildBindPDU(0x10, dummyUUID, 1, 0))
+	mustBind(t, d, sess, 0x10, dummyUUID, 1, 0)
 
 	for i := range maxPendingCalls {
 		if out := d.Dispatch(sess, buildRequestPDU(uint32(0x100+i), 0, 3, []byte("A"), ndr.PfcFirstFrag)); out != nil {
@@ -285,4 +312,27 @@ func TestPendingCallsAreBounded(t *testing.T) {
 	if got := len(sess.reasm); got != maxPendingCalls {
 		t.Errorf("session holds %d pending calls, want %d", got, maxPendingCalls)
 	}
+}
+
+// TestDispatchHostileInputs proves malformed PDUs, wrong interface versions, and
+// non-NDR transfer syntaxes are refused without mutating session state.
+func TestDispatchHostileInputs(t *testing.T) {
+	d := echoDispatcher()
+	sess := &Session{}
+
+	if out := d.Dispatch(sess, []byte{0x05, 0x00, 0x00}); out != nil {
+		t.Errorf("truncated PDU produced %d PDUs, want nil", len(out))
+	}
+	wrongVer := d.Dispatch(sess, buildBindPDU(0x10, dummyUUID, 99, 0))
+	wantEq(t, len(wrongVer), 1, "wrong-version bind PDU count")
+	wantEq(t, mustHeader(t, wrongVer[0]).Type, uint8(ndr.PktBindNak), "wrong-version bind reply")
+
+	badXfer := ndr.SyntaxID{UUID: mapi.GUID{Data1: 0xBAD}, Version: 2}
+	wrongXfer := d.Dispatch(sess, buildBindPDUWithTransfer(0x11, dummyUUID, 1, 0, badXfer))
+	wantEq(t, len(wrongXfer), 1, "wrong-transfer bind PDU count")
+	wantEq(t, mustHeader(t, wrongXfer[0]).Type, uint8(ndr.PktBindNak), "wrong-transfer bind reply")
+
+	wantEq(t, len(sess.contexts), 0, "contexts after refused binds")
+	wantEq(t, sess.assocGroup, uint32(0), "assocGroup after refused binds")
+	wantEq(t, len(sess.reasm), 0, "reasm after hostile inputs")
 }
