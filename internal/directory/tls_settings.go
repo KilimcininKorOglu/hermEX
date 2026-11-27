@@ -3,6 +3,9 @@ package directory
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"net/mail"
+	"net/url"
 	"time"
 )
 
@@ -71,7 +74,24 @@ func validTLSSettings(s TLSSettings) error {
 		if s.ACMEEmail == "" || !s.ACMEAgreed {
 			return errors.New("directory: ACME mode needs a contact email and the accepted terms")
 		}
-		return nil
+		return validACMEAccount(s)
 	}
 	return errors.New("directory: the TLS mode must be manual or acme")
+}
+
+// validACMEAccount refuses a contact that is not one bare addr-spec (RFC 8555
+// section 7.3 sends it as a mailto: URL) and a directory URL that is not HTTPS
+// with a host (section 6.1: every ACME request is HTTPS). An empty URL is the
+// issuer's default CA.
+func validACMEAccount(s TLSSettings) error {
+	if a, err := mail.ParseAddress(s.ACMEEmail); err != nil || a.Name != "" || a.Address != s.ACMEEmail {
+		return fmt.Errorf("directory: ACME contact %q is not one email address", s.ACMEEmail)
+	}
+	if s.ACMECAURL == "" {
+		return nil
+	}
+	if u, err := url.Parse(s.ACMECAURL); err != nil || u.Scheme != "https" || u.Host == "" {
+		return fmt.Errorf("directory: ACME directory URL %q is not an https URL", s.ACMECAURL)
+	}
+	return nil
 }

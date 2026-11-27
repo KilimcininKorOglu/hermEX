@@ -64,6 +64,14 @@ func TestTLSSettingsRefusalKeepsTheStoredOne(t *testing.T) {
 		"mode with newline": {Mode: "manual\n"},
 		"acme without mail": {Mode: "acme", ACMEAgreed: true},
 		"acme not agreed":   {Mode: "acme", ACMEEmail: "ops@example.com"},
+		// RFC 8555 section 6.1: every ACME request is HTTPS, so a directory URL
+		// on any other scheme would send the account key's requests in clear.
+		"http CA URL":     {Mode: "acme", ACMEEmail: "ops@example.com", ACMEAgreed: true, ACMECAURL: "http://acme.example/dir"},
+		"file CA URL":     {Mode: "acme", ACMEEmail: "ops@example.com", ACMEAgreed: true, ACMECAURL: "file:///etc/passwd"},
+		"hostless CA URL": {Mode: "acme", ACMEEmail: "ops@example.com", ACMEAgreed: true, ACMECAURL: "https:///dir"},
+		// RFC 8555 section 7.3: the contact is a mailto: address, one addr-spec.
+		"contact with CRLF": {Mode: "acme", ACMEEmail: "ops@example.com\r\nBcc: x@evil.example", ACMEAgreed: true},
+		"contact not addr":  {Mode: "acme", ACMEEmail: "not an address", ACMEAgreed: true},
 	} {
 		wantErr(t, "the "+name+" was accepted", d.SetTLSSettings(bad))
 		got, found, err := d.GetTLSSettings()
