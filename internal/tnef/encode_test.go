@@ -52,10 +52,38 @@ func TestEncodeRoundTrip(t *testing.T) {
 	}
 }
 
-// TestEncodeRefusesAMistypedValue proves a value whose Go type does not match its
-// property type fails the stream rather than writing bytes a reader misreads.
+// TestEncodeWritesTheMSOXTNEFFraming checks the bytes against [MS-OXTNEF]
+// 2.1.3.1, not against the decoder: the stream opens with the signature
+// 0x223E9F78 and a 2-byte key, both little-endian, and the first attribute is
+// attTnefVersion at the message level (1) whose checksum is the 16-bit sum of
+// its data bytes.
+func TestEncodeWritesTheMSOXTNEFFraming(t *testing.T) {
+	raw, err := Encode(&Message{Props: []Prop{{Tag: mapi.PrSubject, Value: "s"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := []byte{0x78, 0x9F, 0x3E, 0x22, 0, 0, 1, 0x06, 0x90, 0x08, 0x00, 4, 0, 0, 0, 0, 0, 1, 0, 1, 0}
+	if len(raw) < len(head) || !reflect.DeepEqual(raw[:len(head)], head) {
+		t.Errorf("stream head = % x, want % x", raw[:min(len(raw), len(head))], head)
+	}
+}
+
+// TestEncodeRefusesAMistypedValue proves a value that cannot be written as its
+// property type fails the stream rather than writing bytes a reader misreads: a
+// string in a PtLong, a scalar in a multivalue type, and a named-range property
+// (id 0x8000 and above, [MS-OXPROPS]) that carries no name to map it by.
 func TestEncodeRefusesAMistypedValue(t *testing.T) {
-	if _, err := Encode(&Message{Props: []Prop{{Tag: mapi.PrImportance, Value: "high"}}}); err == nil {
-		t.Fatal("a string in a PtLong property was encoded")
+	for name, p := range map[string]Prop{
+		"string in a PtLong":      {Tag: mapi.PrImportance, Value: "high"},
+		"scalar in a list":        {Tag: mapi.MakeTag(0x3FF0, mapi.PtMvUnicode), Value: "one"},
+		"named id without a name": {Tag: mapi.MakeTag(0x8003, mapi.PtUnicode), Value: "x"},
+	} {
+		raw, err := Encode(&Message{Props: []Prop{p}})
+		if err == nil {
+			t.Errorf("%s: encoded", name)
+		}
+		if raw != nil {
+			t.Errorf("%s: a refused message still returned %d bytes", name, len(raw))
+		}
 	}
 }
