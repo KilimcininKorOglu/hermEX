@@ -2,6 +2,7 @@ package oxcmail
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	"hermex/internal/mapi"
@@ -77,11 +78,29 @@ func TestImportCarriesTheVerbatimCalendar(t *testing.T) {
 	msg, err := Import([]byte(meetingMail), Options{CalendarImporter: recurring})
 	mustNoErr(t, err, "import a recurring invitation")
 
-	v, ok := msg.Props.Get(mapi.PrIcalOriginal)
+	raw, ok := bytesProp(msg.Props, mapi.PrIcalOriginal)
 	if !ok {
-		t.Fatal("the delivered message lost the series' verbatim iCalendar")
+		t.Fatal("the delivered message lost the series' verbatim iCalendar, or holds it in another type")
 	}
-	if raw, _ := v.([]byte); !bytes.Equal(raw, body) {
+	if !bytes.Equal(raw, body) {
 		t.Errorf("verbatim iCalendar = %q, want the bytes the invitation carried", raw)
 	}
+}
+
+// TestImportKeepsACalendarItsImporterRefuses delivers an invitation whose
+// calendar a sender broke, so the importer refuses it. The delivery must still
+// file the mail as plain mail, and the calendar part must stay with it as an
+// attachment: dropping it would lose the only copy of what the sender sent.
+func TestImportKeepsACalendarItsImporterRefuses(t *testing.T) {
+	broken := func([]byte) (mapi.PropertyValues, error) {
+		return nil, errors.New("not an iCalendar object")
+	}
+	msg, err := Import([]byte(meetingMail), Options{CalendarImporter: broken})
+	mustNoErr(t, err, "import a message whose calendar the importer refuses")
+	wantEq(t, propString(msg.Props, mapi.PrMessageClass), "IPM.Note", "class after a refused calendar")
+	if len(msg.Attachments) != 1 {
+		t.Fatalf("attachments = %d, want the calendar part kept", len(msg.Attachments))
+	}
+	wantContains(t, string(bytesVal(msg.Attachments[0].Props, mapi.PrAttachDataBin)), "UID:m-1",
+		"the kept calendar part")
 }
