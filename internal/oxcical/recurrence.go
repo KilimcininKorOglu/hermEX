@@ -64,7 +64,7 @@ func ParseRRule(value string) (Recurrence, bool) {
 }
 
 // parseRRule parses an RRULE value (the text after "RRULE:") into a Recurrence. A
-// value with no FREQ is rejected.
+// value with no FREQ, or with a named part whose value is not allowed, is rejected.
 func parseRRule(value string) (Recurrence, bool) {
 	r := Recurrence{Interval: 1}
 	for part := range strings.SplitSeq(value, ";") {
@@ -72,8 +72,9 @@ func parseRRule(value string) (Recurrence, bool) {
 		if !ok {
 			continue
 		}
-		if apply, known := rruleParts[strings.ToUpper(strings.TrimSpace(key))]; known {
-			apply(&r, val)
+		apply, known := rruleParts[strings.ToUpper(strings.TrimSpace(key))]
+		if known && !apply(&r, val) {
+			return Recurrence{}, false
 		}
 	}
 	if r.Freq == "" {
@@ -83,35 +84,60 @@ func parseRRule(value string) (Recurrence, bool) {
 }
 
 // rruleParts is the RRULE parameter vocabulary. A part the table does not name is
-// ignored, so an unrecognized refinement never rejects the rule carrying it.
-var rruleParts = map[string]func(*Recurrence, string){
-	"FREQ":     func(r *Recurrence, v string) { r.Freq = strings.ToUpper(strings.TrimSpace(v)) },
-	"INTERVAL": func(r *Recurrence, v string) { setPositiveInt(v, &r.Interval) },
-	"COUNT":    func(r *Recurrence, v string) { setPositiveInt(v, &r.Count) },
-	"UNTIL": func(r *Recurrence, v string) {
-		if t, ok := parseRRuleUntil(v); ok {
-			r.Until = t
-		}
+// ignored, so an unrecognized refinement never rejects the rule carrying it; a
+// named part whose value RFC 5545 3.3.10 does not allow rejects the rule.
+var rruleParts = map[string]func(*Recurrence, string) bool{
+	"FREQ": func(r *Recurrence, v string) bool {
+		r.Freq = strings.ToUpper(strings.TrimSpace(v))
+		return true
 	},
-	"BYDAY":      func(r *Recurrence, v string) { r.Weekdays, r.SetPos = parseByDay(v) },
-	"BYMONTHDAY": func(r *Recurrence, v string) { setInt(v, &r.MonthDay) },
-	"BYMONTH":    func(r *Recurrence, v string) { setInt(v, &r.Month) },
-	"BYSETPOS":   func(r *Recurrence, v string) { setInt(v, &r.SetPos) },
+	"INTERVAL": func(r *Recurrence, v string) bool { return setPositiveInt(v, &r.Interval) },
+	"COUNT":    func(r *Recurrence, v string) bool { return setPositiveInt(v, &r.Count) },
+	"UNTIL": func(r *Recurrence, v string) bool {
+		t, ok := parseRRuleUntil(v)
+		r.Until = t
+		return ok
+	},
+	"BYDAY":      setByDay,
+	"BYMONTHDAY": func(r *Recurrence, v string) bool { return setInt(v, &r.MonthDay) },
+	"BYMONTH":    func(r *Recurrence, v string) bool { return setInt(v, &r.Month) },
+	"BYSETPOS":   func(r *Recurrence, v string) bool { return setInt(v, &r.SetPos) },
 }
 
-// setInt stores an integer parameter, leaving the field alone when it does not parse.
-func setInt(v string, dst *int) {
-	if n, err := strconv.Atoi(v); err == nil {
-		*dst = n
+// rfc5545Weekdays are the weekday codes a BYDAY value may name (RFC 5545 3.3.10).
+var rfc5545Weekdays = map[string]bool{"SU": true, "MO": true, "TU": true, "WE": true, "TH": true, "FR": true, "SA": true}
+
+// setByDay stores the BYDAY weekdays and ordinal, refusing a token that names no
+// weekday.
+func setByDay(r *Recurrence, v string) bool {
+	days, setPos := parseByDay(v)
+	for _, d := range days {
+		if !rfc5545Weekdays[d] {
+			return false
+		}
 	}
+	r.Weekdays, r.SetPos = days, setPos
+	return true
 }
 
-// setPositiveInt stores a count-like parameter, which is meaningless at zero or below.
-func setPositiveInt(v string, dst *int) {
-	if n, err := strconv.Atoi(v); err == nil && n > 0 {
-		*dst = n
-	}
+// setInt stores an integer parameter, refusing a value that is not an integer.
+func setInt(v string, dst *int) bool {
+	n, err := strconv.Atoi(v)
+	*dst = n
+	return err == nil
 }
+
+// setPositiveInt stores a count-like parameter, which RFC 5545 makes a positive
+// integer; anything else is refused.
+func setPositiveInt(v string, dst *int) bool {
+	n, err := strconv.Atoi(v)
+	*dst = n
+	return err == nil && n > 0
+}
+
+// maxRRuleInterval caps INTERVAL so multiplying by 7 days or 12 months and
+// stepping across periods never overflows signed integer arithmetic.
+const maxRRuleInterval = 100000
 
 // Occurrences enumerates the instance start instants of a recurrence that fall within
 // [windowStart, windowEnd), given the series' first start (seriesStart, the master
@@ -129,6 +155,9 @@ func (r Recurrence) Occurrences(seriesStart, windowStart, windowEnd time.Time, l
 		limit = 4096
 	}
 	interval := max(r.Interval, 1)
+	if interval > maxRRuleInterval {
+		return nil
+	}
 	sink := &occurrenceSink{count: r.Count, until: r.Until, windowStart: windowStart, windowEnd: windowEnd}
 	add := sink.add
 
