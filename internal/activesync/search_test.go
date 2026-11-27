@@ -223,7 +223,7 @@ func seedSearchMessage(t *testing.T, dir, subject, body string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	raw := "From: sender@hermex.test\r\nTo: alice@hermex.test\r\nSubject: " + subject +
 		"\r\nDate: Mon, 15 Jun 2026 09:00:00 +0000\r\nMessage-ID: <s1@hermex.test>\r\n\r\n" + body + "\r\n"
 	when := time.Date(2026, 6, 15, 9, 0, 0, 0, time.UTC)
