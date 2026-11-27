@@ -79,7 +79,7 @@ func runSetMTASTS(c *cmdContext) {
 	if err := setMTASTS(c.dir, c.args[1], maxAge, confirm); err != nil {
 		log.Fatalf("hermex-admin: %v", err)
 	}
-	fmt.Printf("MTA-STS publishing set to %s; publish the records dns-records prints\n", c.args[1])
+	outf("MTA-STS publishing set to %s; publish the records dns-records prints\n", c.args[1])
 }
 
 var errUnknownDomain = errors.New("no such domain")
@@ -191,21 +191,21 @@ func runGenerateDKIM(c *cmdContext) {
 	if err != nil {
 		log.Fatalf("hermex-admin: generate-dkim: %v", err)
 	}
-	fmt.Println(msg)
+	outln(msg)
 }
 
 func runEnableDKIM(c *cmdContext) {
 	if err := enableDKIM(c.dir, c.args[1]); err != nil {
 		log.Fatalf("hermex-admin: enable-dkim: %v", err)
 	}
-	fmt.Printf("DKIM signing enabled for %s\n", c.args[1])
+	outf("DKIM signing enabled for %s\n", c.args[1])
 }
 
 func runSetAVScan(c *cmdContext) {
 	if err := setAVScan(c.dir, c.args[1], c.args[2]); err != nil {
 		log.Fatalf("hermex-admin: %v", err)
 	}
-	fmt.Printf("antivirus scanning %s for %s\n", c.args[2], c.args[1])
+	outf("antivirus scanning %s for %s\n", c.args[2], c.args[1])
 }
 
 func runSetTLSACME(c *cmdContext) {
@@ -213,7 +213,7 @@ func runSetTLSACME(c *cmdContext) {
 	if err := setTLSACME(c.dir, c.args[1], agreed); err != nil {
 		log.Fatalf("hermex-admin: %v", err)
 	}
-	fmt.Println("TLS mode set to acme; restart the gateway to obtain certificates")
+	outln("TLS mode set to acme; restart the gateway to obtain certificates")
 }
 
 func runDNSRecords(c *cmdContext) {

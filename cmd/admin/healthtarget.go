@@ -29,5 +29,5 @@ func runAddHealthTarget(c *cmdContext) {
 	if err != nil {
 		log.Fatalf("hermex-admin: %v", err)
 	}
-	fmt.Println(msg)
+	outln(msg)
 }

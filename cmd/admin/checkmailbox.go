@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"os"
 	"slices"
@@ -39,7 +38,7 @@ func runCheckMailbox(c *cmdContext) {
 		}
 	}
 	requireOpened(checked, maildirs)
-	fmt.Printf("checked %d mailbox(es), %d still carrying a finding\n", checked, withFindings)
+	outf("checked %d mailbox(es), %d still carrying a finding\n", checked, withFindings)
 	if withFindings > 0 {
 		os.Exit(1)
 	}
@@ -76,11 +75,11 @@ func checkOneMailbox(maildir string, repair, recoverDBs bool) ([]objectstore.Fin
 // reportFindings prints one line per surviving finding, or a clean line.
 func reportFindings(maildir string, findings []objectstore.Finding) {
 	if len(findings) == 0 {
-		fmt.Printf("%s: ok\n", maildir)
+		outf("%s: ok\n", maildir)
 		return
 	}
 	for _, f := range findings {
-		fmt.Printf("%s: %s\n", maildir, f)
+		outf("%s: %s\n", maildir, f)
 	}
 }
 
@@ -114,10 +113,10 @@ func recoverDamaged(maildir string, findings []objectstore.Finding) {
 // rows, because a rebuilt database that reads cleanly says nothing about what is
 // no longer in it.
 func reportRecovery(maildir string, r objectstore.RecoverReport) {
-	fmt.Printf("%s: rebuilt %s, damaged file kept at %s, %d row(s) lost\n", maildir, r.Path, r.Backup, r.Lost)
+	outf("%s: rebuilt %s, damaged file kept at %s, %d row(s) lost\n", maildir, r.Path, r.Backup, r.Lost)
 	for _, t := range r.Tables {
 		if t.LostRows > 0 || t.Unreadable {
-			fmt.Printf("%s:   table %s recovered %d row(s), lost %d, unreadable=%t\n",
+			outf("%s:   table %s recovered %d row(s), lost %d, unreadable=%t\n",
 				maildir, t.Name, t.Rows, t.LostRows, t.Unreadable)
 		}
 	}
@@ -141,6 +140,6 @@ func repairMailbox(maildir string) {
 		log.Printf("hermex-admin: repair %s: %v", maildir, err)
 		return
 	}
-	fmt.Printf("%s: reindexed %d folder(s), reclaimed %d content file(s)\n",
+	outf("%s: reindexed %d folder(s), reclaimed %d content file(s)\n",
 		maildir, report.Folders, report.ContentRemoved)
 }

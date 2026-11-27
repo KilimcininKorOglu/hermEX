@@ -8,7 +8,6 @@ import (
 	"database/sql"
 	"errors"
 	"flag"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -68,7 +67,7 @@ type command struct {
 
 var commands = []command{
 	{name: "ensure-schema", note: "apply pending directory migrations; every daemon does this at startup too",
-		run: func(*cmdContext) { fmt.Println("schema ensured") }},
+		run: func(*cmdContext) { outln("schema ensured") }},
 	{name: "create-domain", args: "<domainname>", minArgs: 2, maxArgs: 2, run: runCreateDomain},
 	{name: "create-user", args: "<email> <password>", minArgs: 3, maxArgs: 3, run: runCreateUser},
 	{name: "create-alias", args: "<alias-address> <user-email>", minArgs: 3, maxArgs: 3, run: runCreateAlias},
@@ -159,8 +158,8 @@ func (c command) accepts(n int) bool {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: hermex-admin -config <file> <command> [args]")
-	fmt.Fprintln(os.Stderr, "commands:")
+	errln("usage: hermex-admin -config <file> <command> [args]")
+	errln("commands:")
 	// The notes line up in a column, which is what makes a list this long
 	// readable. The width comes from the table rather than from padding baked
 	// into each string, so adding a command cannot leave the column ragged.
@@ -176,10 +175,13 @@ func usage() {
 	for _, c := range commands {
 		sig := c.signature()
 		if c.note == "" {
-			fmt.Fprintln(os.Stderr, "  "+sig)
+			errln("  " + sig)
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "  %-*s   (%s)\n", width, sig, c.note)
+		errf("  %-*s   (%s)\n", width, sig, c.note)
+	}
+	if err := outputErr(); err != nil {
+		log.Printf("hermex-admin: usage text not delivered: %v", err)
 	}
 	os.Exit(2)
 }
@@ -223,41 +225,44 @@ func main() {
 		usage()
 	}
 	cmd.run(&cmdContext{dir: dir, cfg: cfg, db: db, args: args})
+	if err := outputErr(); err != nil {
+		log.Fatalf("hermex-admin: %s: the report was not delivered: %v", cmd.name, err)
+	}
 }
 
 func runCreateDomain(c *cmdContext) {
 	if _, err := c.dir.CreateDomain(c.args[1], c.cfg.HomedirFor(c.args[1])); err != nil {
 		log.Fatalf("hermex-admin: %v", err)
 	}
-	fmt.Printf("domain %s created\n", c.args[1])
+	outf("domain %s created\n", c.args[1])
 }
 
 func runCreateUser(c *cmdContext) {
 	if _, err := c.dir.CreateUser(c.args[1], c.args[2], c.cfg.MaildirFor(c.args[1])); err != nil {
 		log.Fatalf("hermex-admin: %v", err)
 	}
-	fmt.Printf("user %s created\n", c.args[1])
+	outf("user %s created\n", c.args[1])
 }
 
 func runProvisionMailboxes(c *cmdContext) {
 	created, skipped, err := c.dir.ProvisionMissingMailboxes(c.cfg.MailboxRoots())
 	for _, md := range created {
-		fmt.Printf("mailbox created: %s\n", md)
+		outf("mailbox created: %s\n", md)
 	}
 	for _, md := range skipped {
-		fmt.Printf("skipped, not under a mounted data root: %s\n", md)
+		outf("skipped, not under a mounted data root: %s\n", md)
 	}
 	if err != nil {
 		log.Fatalf("hermex-admin: %v", err)
 	}
-	fmt.Printf("%d mailbox(es) created, %d skipped\n", len(created), len(skipped))
+	outf("%d mailbox(es) created, %d skipped\n", len(created), len(skipped))
 }
 
 func runCreateAlias(c *cmdContext) {
 	if err := c.dir.CreateAlias(c.args[1], c.args[2]); err != nil {
 		log.Fatalf("hermex-admin: %v", err)
 	}
-	fmt.Printf("alias %s -> %s created\n", c.args[1], c.args[2])
+	outf("alias %s -> %s created\n", c.args[1], c.args[2])
 }
 
 func runCreateContact(c *cmdContext) {
@@ -268,7 +273,7 @@ func runCreateContact(c *cmdContext) {
 	if _, err := c.dir.CreateContact(c.args[1], name, c.args[2]); err != nil {
 		log.Fatalf("hermex-admin: %v", err)
 	}
-	fmt.Printf("contact %s created\n", c.args[1])
+	outf("contact %s created\n", c.args[1])
 }
 
 func runUpdateContact(c *cmdContext) {
@@ -279,7 +284,7 @@ func runUpdateContact(c *cmdContext) {
 	if !found {
 		log.Fatalf("hermex-admin: no such contact: %s", c.args[1])
 	}
-	fmt.Printf("contact %s updated\n", c.args[1])
+	outf("contact %s updated\n", c.args[1])
 }
 
 func runDeleteContact(c *cmdContext) {
@@ -290,7 +295,7 @@ func runDeleteContact(c *cmdContext) {
 	if !removed {
 		log.Fatalf("hermex-admin: no such contact: %s", c.args[1])
 	}
-	fmt.Printf("contact %s deleted\n", c.args[1])
+	outf("contact %s deleted\n", c.args[1])
 }
 
 func runListContacts(c *cmdContext) {
@@ -299,7 +304,7 @@ func runListContacts(c *cmdContext) {
 		log.Fatalf("hermex-admin: %v", err)
 	}
 	for _, ct := range contacts {
-		fmt.Printf("%s\t%s\t%s\t%s\n", ct.Address, ct.DisplayName, ct.Domain, ct.LDAPID)
+		outf("%s\t%s\t%s\t%s\n", ct.Address, ct.DisplayName, ct.Domain, ct.LDAPID)
 	}
 }
 
@@ -324,7 +329,7 @@ func runSweepContent(c *cmdContext) {
 	if err != nil {
 		log.Fatalf("hermex-admin: sweep: %v", err)
 	}
-	fmt.Printf("swept %d orphan content file(s) from %s\n", removed, c.args[1])
+	outf("swept %d orphan content file(s) from %s\n", removed, c.args[1])
 }
 
 func runPruneEML(c *cmdContext) {
@@ -358,7 +363,7 @@ func runLDAPSync(c *cmdContext) {
 	summary, err := ldapsync.RunBindings(ids, c.dir, ldapauth.New(), c.dir, c.cfg.MaildirFor,
 		func(f string, a ...any) { log.Printf("hermex-admin: "+f, a...) })
 	if summary != "" {
-		fmt.Printf("ldap-sync connection %d: %s\n", connID, summary)
+		outf("ldap-sync connection %d: %s\n", connID, summary)
 	}
 	if err != nil {
 		log.Fatalf("hermex-admin: ldap sync: %v", err)
@@ -382,7 +387,7 @@ func runGrantAdmin(c *cmdContext) {
 	if err := c.dir.GrantAdminRole(uid, c.args[2], scope); err != nil {
 		log.Fatalf("hermex-admin: %v", err)
 	}
-	fmt.Printf("granted %s the %s admin role (scope %d)\n", c.args[1], c.args[2], scope)
+	outf("granted %s the %s admin role (scope %d)\n", c.args[1], c.args[2], scope)
 }
 
 // attachLogReader gives the panel its log viewer when a log store is
@@ -690,7 +695,7 @@ func pruneEML(dir *directory.SQLDirectory, target string, days int) {
 		}
 	}
 	requireOpened(opened, maildirs)
-	fmt.Printf("pruned %d cached wire copies (%d bytes) from %d mailbox(es)\n", files, reclaimed, boxes)
+	outf("pruned %d cached wire copies (%d bytes) from %d mailbox(es)\n", files, reclaimed, boxes)
 }
 
 // backfillPreviews fills the message-list projections on index rows written
@@ -719,7 +724,7 @@ func backfillPreviews(dir *directory.SQLDirectory, target string) {
 		}
 	}
 	requireOpened(opened, maildirs)
-	fmt.Printf("filled %d message row(s) in %d mailbox(es)\n", rows, boxes)
+	outf("filled %d message row(s) in %d mailbox(es)\n", rows, boxes)
 }
 
 // requireOpened refuses to report success when not one mailbox opened. That is
@@ -764,7 +769,7 @@ func backupMail(dir *directory.SQLDirectory, cfg *config.Config, target, dest st
 	if opened == 0 && len(sources) > 0 {
 		log.Fatalf("hermex-admin: no mailbox opened; the first was %s. Run this where the mailbox paths resolve.", sources[0].dir)
 	}
-	fmt.Printf("backed up %d of %d mailbox(es) to %s\n", done, len(sources), dest)
+	outf("backed up %d of %d mailbox(es) to %s\n", done, len(sources), dest)
 	failed := done < len(sources)
 	// A full-mailbox backup also captures the data_dir artifacts that mailbox stores
 	// do not hold. A single-mailbox backup skips them: they are shared, not part of
@@ -851,7 +856,7 @@ func backupSharedArtifacts(cfg *config.Config, dest string) bool {
 		log.Printf("hermex-admin: back up relay spool: %v", err)
 		ok = false
 	} else {
-		fmt.Printf("backed up the relay spool to %s\n", filepath.Join(dest, "relay.sqlite3"))
+		outf("backed up the relay spool to %s\n", filepath.Join(dest, "relay.sqlite3"))
 	}
 	if err := backupQuarantine(cfg, filepath.Join(dest, "quarantine")); err != nil {
 		log.Printf("hermex-admin: back up quarantine: %v", err)
@@ -936,8 +941,8 @@ func exportDKIM(dir *directory.SQLDirectory, domain string) {
 	if !found {
 		log.Fatalf("hermex-admin: %s has no DKIM key", domain)
 	}
-	fmt.Fprintf(os.Stderr, "selector %s._domainkey.%s\n", selector, domain)
-	fmt.Fprintln(os.Stderr, "this is a private key: store it where the database backup is stored")
+	errf("selector %s._domainkey.%s\n", selector, domain)
+	errln("this is a private key: store it where the database backup is stored")
 	if _, err := os.Stdout.Write(privPEM); err != nil {
 		log.Fatalf("hermex-admin: writing key to stdout: %v", err)
 	}
@@ -956,17 +961,17 @@ func listSessions(dir *directory.SQLDirectory, email string) {
 		log.Fatalf("hermex-admin: list panel sessions: %v", err)
 	}
 	if len(web) == 0 && len(panel) == 0 {
-		fmt.Printf("%s has no live sessions\n", email)
+		outf("%s has no live sessions\n", email)
 		return
 	}
 	for _, s := range web {
-		fmt.Printf("webmail  %s  from %s  last active %s  expires %s\n",
+		outf("webmail  %s  from %s  last active %s  expires %s\n",
 			s.DeviceType, s.ClientIP,
 			time.Unix(s.LastActive, 0).Format(time.RFC3339),
 			time.Unix(s.ExpiresAt, 0).Format(time.RFC3339))
 	}
 	for _, s := range panel {
-		fmt.Printf("panel    signed in %s  expires %s\n",
+		outf("panel    signed in %s  expires %s\n",
 			time.Unix(s.CreatedAt, 0).Format(time.RFC3339),
 			time.Unix(s.ExpiresAt, 0).Format(time.RFC3339))
 	}
@@ -986,7 +991,7 @@ func revokeSessions(dir *directory.SQLDirectory, email string) {
 	if err != nil {
 		log.Fatalf("hermex-admin: revoke panel sessions: %v", err)
 	}
-	fmt.Printf("revoked %d webmail and %d panel session(s) for %s\n", web, panel, email)
+	outf("revoked %d webmail and %d panel session(s) for %s\n", web, panel, email)
 }
 
 // runAdminSessionPrune deletes expired panel session rows once a minute, for the

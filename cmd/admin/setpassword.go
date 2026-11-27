@@ -65,7 +65,7 @@ func runSetPassword(c *cmdContext) {
 	if _, err := c.dir.RequirePasswordChange(req.email, req.forceChange); err != nil {
 		log.Fatalf("hermex-admin: record the must-change-password flag: %v", err)
 	}
-	fmt.Printf("password set for %s (must change at next login: %t)\n", req.email, req.forceChange)
+	outf("password set for %s (must change at next login: %t)\n", req.email, req.forceChange)
 	if req.endSessions {
 		revokeSessions(c.dir, req.email)
 	}

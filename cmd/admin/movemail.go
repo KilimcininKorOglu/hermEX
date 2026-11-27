@@ -104,7 +104,7 @@ func reportRelocation(moved, total int, target string, copyOnly bool) {
 	if copyOnly {
 		verb = "copied"
 	}
-	fmt.Printf("%s %d of %d message(s) in %s\n", verb, moved, total, target)
+	outf("%s %d of %d message(s) in %s\n", verb, moved, total, target)
 	if moved < total {
 		log.Fatal("hermex-admin: some messages were not relocated")
 	}
