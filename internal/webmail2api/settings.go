@@ -636,6 +636,14 @@ func (s *Server) handlePutSafeSenders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	list := normalizeSafeSenders(body.SafeSenders)
+	// RFC 5321 4.5.3.1.3: no address is longer than 254 octets, so a longer
+	// entry can never match a sender and only grows the settings blob.
+	for _, e := range list {
+		if len(e) > 254 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "an entry is longer than an address can be"})
+			return
+		}
+	}
 	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
 		if err := putSetting(m, "safeSenders", list); err != nil {
 			return settingsUnsaved(err), false
