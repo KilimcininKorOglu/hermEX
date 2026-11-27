@@ -58,7 +58,7 @@ func TestFailedLoginNeverLogsThePassword(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	mustNoErr(t, "close the reply", resp.Body.Close())
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("wrong password status = %d, want 401", resp.StatusCode)
 	}

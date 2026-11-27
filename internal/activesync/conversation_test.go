@@ -101,7 +101,7 @@ func TestEmailAppDataCarriesTheStoredConversation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer mustClose(t, st)
 	guid := bytes.Repeat([]byte{0xcd}, 16)
 	idx := append([]byte{0x01, 0xd0, 0x11, 0x22, 0x33, 0x44}, guid...)
 	raw := []byte("Message-ID: <ti@hermex.test>\r\nSubject: Plan\r\nThread-Index: " +
@@ -116,5 +116,27 @@ func TestEmailAppDataCarriesTheStoredConversation(t *testing.T) {
 	}
 	if cidx := data.Child(wbxml.EM2ConversationIndex); cidx == nil || !bytes.Equal(cidx.Opaque, idx) {
 		t.Errorf("ConversationIndex = %#v, want the stored %x", cidx, idx)
+	}
+}
+
+// TestEmailAppDataIgnoresAForgedThreadIndex: Thread-Index is a sender-written
+// header. One that is not base64, or decodes shorter than the 22-byte header
+// MS-OXOMSG 2.2.1.3 defines, cannot carry a conversation, so the device still
+// gets a well-formed 16-byte id and 22-byte index.
+func TestEmailAppDataIgnoresAForgedThreadIndex(t *testing.T) {
+	st, err := objectstore.Open(t.TempDir())
+	mustNoErr(t, "open the store", err)
+	defer mustClose(t, st)
+	for _, ti := range []string{"!!not base64!!", base64.StdEncoding.EncodeToString([]byte{0x01, 0x02, 0x03})} {
+		raw := []byte("Message-ID: <forged@hermex.test>\r\nSubject: Plan\r\nThread-Index: " + ti + "\r\n\r\nbody\r\n")
+		info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), raw, time.Unix(1718200000, 0), 0)
+		mustNoErr(t, "append the message", err)
+		data := emailAppData(mailRender{st: st}, raw, info, "1", "1")
+		if cid := data.Child(wbxml.EM2ConversationId); cid == nil || len(cid.Opaque) != 16 {
+			t.Errorf("Thread-Index %q: ConversationId = %#v, want 16 bytes", ti, cid)
+		}
+		if cidx := data.Child(wbxml.EM2ConversationIndex); cidx == nil || len(cidx.Opaque) != 22 {
+			t.Errorf("Thread-Index %q: ConversationIndex = %#v, want 22 bytes", ti, cidx)
+		}
 	}
 }
