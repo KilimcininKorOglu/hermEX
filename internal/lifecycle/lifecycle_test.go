@@ -131,4 +131,66 @@ func TestRunHonorsShutdownTimeout(t *testing.T) {
 	if err == nil {
 		t.Error("Run = nil, want the shutdown-deadline error surfaced")
 	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Run = %v, want context.DeadlineExceeded", err)
+	}
+}
+
+// TestRunRunsAllCleanupsAndKeepsFirstError proves cleanups run in order even
+// when an earlier cleanup fails, and Run reports the first error.
+func TestRunRunsAllCleanupsAndKeepsFirstError(t *testing.T) {
+	rec := &recorder{}
+	firstErr := errors.New("first cleanup failed")
+	secondErr := errors.New("second cleanup failed")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := lifecycle.Run(
+		ctx,
+		time.Second,
+		nil,
+		func() error { rec.add("c1"); return firstErr },
+		func() error { rec.add("c2"); return secondErr },
+	)
+	if !errors.Is(err, firstErr) {
+		t.Fatalf("Run = %v, want first cleanup error %v", err, firstErr)
+	}
+	wantOrder := []string{"c1", "c2"}
+	if got := rec.snapshot(); !slices.Equal(got, wantOrder) {
+		t.Errorf("cleanup order = %v, want %v", got, wantOrder)
+	}
+}
+
+// TestRunPreservesStartErrorOverShutdownAndCleanup proves a genuine Start
+// failure is not masked by subsequent shutdown or cleanup errors, while all
+// cleanups still execute after shutdown.
+func TestRunPreservesStartErrorOverShutdownAndCleanup(t *testing.T) {
+	startErr := errors.New("bind failed")
+	shutErr := errors.New("shutdown failed")
+	cleanErr := errors.New("cleanup failed")
+	rec := &recorder{}
+
+	comp := lifecycle.Func{
+		StartFn: func() error { return startErr },
+		ShutdownFn: func(context.Context) error {
+			rec.add("shutdown")
+			return shutErr
+		},
+	}
+	err := lifecycle.Run(
+		context.Background(),
+		time.Second,
+		[]lifecycle.Component{comp},
+		func() error {
+			rec.add("cleanup")
+			return cleanErr
+		},
+	)
+	if !errors.Is(err, startErr) {
+		t.Fatalf("Run = %v, want Start error %v", err, startErr)
+	}
+	wantOrder := []string{"shutdown", "cleanup"}
+	if got := rec.snapshot(); !slices.Equal(got, wantOrder) {
+		t.Errorf("events = %v, want %v", got, wantOrder)
+	}
 }
