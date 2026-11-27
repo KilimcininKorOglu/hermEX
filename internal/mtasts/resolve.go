@@ -203,8 +203,12 @@ const maxPolicyBytes = 64 * 1024
 // policy (RFC 8461 3.3), and a body over maxPolicyBytes is refused whole rather
 // than cut, because a cut body is a policy the domain never published; a policy
 // that cannot be fetched for any reason counts as none.
-func readPolicyBody(resp *http.Response, domain string) (string, error) {
-	defer resp.Body.Close()
+func readPolicyBody(resp *http.Response, domain string) (body string, err error) {
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("mtasts: policy fetch for %s: HTTP %d", domain, resp.StatusCode)
 	}
@@ -213,12 +217,12 @@ func readPolicyBody(resp *http.Response, domain string) (string, error) {
 	if mt, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type")); err != nil || mt != "text/plain" {
 		return "", fmt.Errorf("mtasts: policy for %s is not served as text/plain", domain)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxPolicyBytes+1))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxPolicyBytes+1))
 	if err != nil {
 		return "", err
 	}
-	if len(body) > maxPolicyBytes {
+	if len(raw) > maxPolicyBytes {
 		return "", fmt.Errorf("mtasts: policy for %s exceeds %d bytes", domain, maxPolicyBytes)
 	}
-	return string(body), nil
+	return string(raw), nil
 }

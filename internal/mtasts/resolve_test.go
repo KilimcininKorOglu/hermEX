@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -61,9 +62,13 @@ func TestResolverFetchError(t *testing.T) {
 		LookupTXT:   func(string) ([]string, error) { return []string{"v=STSv1; id=x"}, nil },
 		FetchPolicy: func(string) (string, error) { return "", errors.New("boom") },
 	}
-	if _, err := r.Lookup("example.com"); err == nil {
-		t.Error("a fetch failure should be returned, not swallowed")
+	if got, err := r.Lookup("example.com"); err == nil || got != nil {
+		t.Errorf("a fetch failure should return (nil, err), got (%+v, %v)", got, err)
 	}
+	r.mu.Lock()
+	cacheLen := len(r.cache)
+	r.mu.Unlock()
+	wantEq(t, cacheLen, 0, "cache entries after transient fetch failure")
 	called := false
 	r.FetchPolicy = func(string) (string, error) {
 		called = true
@@ -78,16 +83,23 @@ func TestResolverFetchError(t *testing.T) {
 // into this network. The recipient's domain owner controls where mta-sts.<domain>
 // resolves, so an unguarded client would dial whatever they point it at.
 func TestPolicyClientRefusesInternalTarget(t *testing.T) {
+	var reached atomic.Bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("reached"))
+		reached.Store(true)
+		if _, err := w.Write([]byte("reached")); err != nil {
+			t.Errorf("write loopback response: %v", err)
+		}
 	}))
 	defer srv.Close()
 
 	resp, err := policyClient.Get(srv.URL)
 	if err == nil {
-		resp.Body.Close()
+		if cerr := resp.Body.Close(); cerr != nil {
+			t.Errorf("close unexpected response body: %v", cerr)
+		}
 		t.Fatal("the policy client reached a loopback address")
 	}
+	wantEq(t, reached.Load(), false, "loopback handler reached")
 }
 
 // TestPolicyClientRefusesRedirects covers the second half of the guard, which is
@@ -120,7 +132,9 @@ func TestAnOversizedPolicyIsNotFetched(t *testing.T) {
 		rec := httptest.NewRecorder()
 		rec.Header().Set("Content-Type", "text/plain")
 		rec.WriteHeader(http.StatusOK)
-		_, _ = rec.WriteString(body)
+		if _, err := rec.WriteString(body); err != nil {
+			t.Fatalf("write test body: %v", err)
+		}
 		return rec.Result()
 	}
 	if got, err := readPolicyBody(serve(pad(maxPolicyBytes+1)), "example.com"); err == nil {
@@ -145,7 +159,9 @@ func TestAPolicyMustBeServedAsTextPlain(t *testing.T) {
 			rec.Header().Set("Content-Type", ctype)
 		}
 		rec.WriteHeader(http.StatusOK)
-		_, _ = rec.WriteString(doc)
+		if _, err := rec.WriteString(doc); err != nil {
+			t.Fatalf("write test doc: %v", err)
+		}
 		res := rec.Result()
 		if ctype == "" {
 			res.Header.Del("Content-Type")
@@ -253,5 +269,82 @@ func TestResolverEvictsExpiredEntries(t *testing.T) {
 	}
 	if size != 1 {
 		t.Errorf("cache holds %d entries, want only the live one", size)
+	}
+}
+
+// TestReadPolicyBodyRejectsNon200 verifies RFC 8461 3.3: only HTTP 200 is a
+// policy; 3xx redirects, 4xx, and 5xx responses are refused.
+func TestReadPolicyBodyRejectsNon200(t *testing.T) {
+	for _, code := range []int{http.StatusMovedPermanently, http.StatusFound, http.StatusNotFound, http.StatusInternalServerError} {
+		rec := httptest.NewRecorder()
+		rec.Header().Set("Content-Type", "text/plain")
+		rec.WriteHeader(code)
+		if _, err := rec.WriteString("version: STSv1\nmode: enforce\nmx: mx.example\nmax_age: 60\n"); err != nil {
+			t.Fatalf("write status %d body: %v", code, err)
+		}
+		if got, err := readPolicyBody(rec.Result(), "example.com"); err == nil || got != "" {
+			t.Errorf("HTTP %d: got (%q, %v), want empty error", code, got, err)
+		}
+	}
+}
+
+// TestResolverRefusesHostileResponsesWithoutCaching verifies RFC 8461 3.1/3.3
+// refusal paths: DNS SERVFAIL, invalid policy syntax, and forged non-STSv1 TXT
+// records. Refusals must not alter existing cache state.
+func TestResolverRefusesHostileResponsesWithoutCaching(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	var fetchedBadTXT bool
+	r := newHostileResolver(now, &fetchedBadTXT)
+
+	mustNoErr(t, func() error { _, err := r.Lookup("good.example"); return err }(), "seed good.example")
+	for _, domain := range []string{"servfail.example", "badpolicy.example"} {
+		got, err := r.Lookup(domain)
+		if err == nil {
+			t.Errorf("Lookup(%s): expected error, got nil", domain)
+		}
+		wantNoPolicy(t, got, "policy for "+domain)
+		r.mu.Lock()
+		_, present := r.cache[domain]
+		_, goodStill := r.cache["good.example"]
+		size := len(r.cache)
+		r.mu.Unlock()
+		wantEq(t, present, false, domain+" cached on error")
+		wantEq(t, goodStill, true, "good.example retained after "+domain)
+		wantEq(t, size, 1, "cache size after "+domain)
+	}
+
+	// Forged TXT record with wrong version is treated as absent, never fetched.
+	got, err := r.Lookup("forgedtxt.example")
+	mustNoErr(t, err, "Lookup(forgedtxt.example)")
+	wantNoPolicy(t, got, "policy for forged TXT record")
+	wantEq(t, fetchedBadTXT, false, "HTTPS fetch attempted on forged TXT")
+}
+
+func newHostileResolver(now time.Time, fetchedBadTXT *bool) *Resolver {
+	return &Resolver{
+		Now: func() time.Time { return now },
+		LookupTXT: func(name string) ([]string, error) {
+			switch name {
+			case "_mta-sts.good.example":
+				return []string{"v=STSv1; id=1;"}, nil
+			case "_mta-sts.servfail.example":
+				return nil, &net.DNSError{Err: "server misbehaving"}
+			case "_mta-sts.badpolicy.example":
+				return []string{"v=STSv1; id=2;"}, nil
+			case "_mta-sts.forgedtxt.example":
+				return []string{"v=STSv2; id=3;"}, nil
+			default:
+				return nil, &net.DNSError{IsNotFound: true}
+			}
+		},
+		FetchPolicy: func(domain string) (string, error) {
+			if domain == "good.example" {
+				return "version: STSv1\nmode: enforce\nmx: mx.good.example\nmax_age: 3600\n", nil
+			}
+			if domain == "forgedtxt.example" {
+				*fetchedBadTXT = true
+			}
+			return "version: STSv2\nmode: broken\n", nil
+		},
 	}
 }
