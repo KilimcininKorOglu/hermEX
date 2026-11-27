@@ -6,6 +6,7 @@ import (
 
 	"hermex/internal/buildinfo"
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 )
 
 // brandingStore is the optional directory capability for per-domain login branding.
@@ -56,7 +57,11 @@ func (s *Server) handleBranding(w http.ResponseWriter, r *http.Request) {
 // returning the first that has branding set.
 func resolveDomainBranding(store brandingStore, host string) (directory.DomainBranding, bool) {
 	for h := host; h != ""; {
-		if b, has, err := store.GetDomainBranding(h); err == nil && has {
+		b, has, err := store.GetDomainBranding(h)
+		if err != nil {
+			// The login page still renders with the default; record why.
+			logError("branding-lookup", err, logging.Fields{"domain": h})
+		} else if has {
 			return b, true
 		}
 		i := strings.Index(h, ".")
