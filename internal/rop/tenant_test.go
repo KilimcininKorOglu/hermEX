@@ -23,9 +23,13 @@ func TestLogonRefusesAMailboxOfAnotherOrganization(t *testing.T) {
 
 	outsider := NewSession(callerDir, accounts, "delegate@other.test")
 	defer outsider.Close()
-	resp, _ := outsider.Dispatch(delegateLogonRequest(0, 0x01, userDNFor("boss@hermex.test")), []uint32{0xFFFFFFFF})
+	resp, handles := outsider.Dispatch(delegateLogonRequest(0, 0x01, userDNFor("boss@hermex.test")), []uint32{0xFFFFFFFF})
 	if ec, _ := readLogonResponseFlags(t, resp); ec != ecAccessDenied {
 		t.Errorf("logon from another organization ec = %#x, want access denied", ec)
+	}
+	// The refusal opens nothing: no logon handle the outsider could address.
+	if len(handles) != 1 || handles[0] != 0xFFFFFFFF {
+		t.Errorf("refused logon handles = %#x, want the unset handle", handles)
 	}
 
 	peer := NewSession(peerDir, accounts, "peer@hermex.test")
