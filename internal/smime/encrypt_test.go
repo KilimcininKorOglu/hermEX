@@ -28,10 +28,17 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 		t.Errorf("recovered content mismatch:\n got %q\nwant %q", got, inner)
 	}
 
-	// A different identity's key must not decrypt it.
+	// A different identity's key must not decrypt it, and the refusal returns no
+	// content.
 	other := newIdentity(t)
-	if _, err := Decrypt(enc, other.cert, other.key); err == nil {
-		t.Error("Decrypt succeeded with the wrong key")
+	if out, err := Decrypt(enc, other.cert, other.key); err == nil || out != nil {
+		t.Errorf("Decrypt with the wrong key = %d bytes, %v; want nothing and an error", len(out), err)
+	}
+
+	// RFC 5652 6.1: enveloped-data has at least one recipient, so an envelope for
+	// nobody is refused rather than written unreadable.
+	if out, err := Encrypt(inner, nil); err == nil || out != nil {
+		t.Errorf("Encrypt to no recipient = %d bytes, %v; want nothing and an error", len(out), err)
 	}
 }
 
