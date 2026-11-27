@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -96,11 +97,12 @@ func TestDecodeAppointmentReadsAPlainPattern(t *testing.T) {
 func TestDecodeAppointmentRefusesACutBlob(t *testing.T) {
 	full := specBlob(t)
 	for n := range full {
-		if p, err := DecodeAppointment(full[:n]); err != nil && !reflect.DeepEqual(p, AppointmentPattern{}) {
+		// Clipped, so a read past the cut cannot reach the rest of the blob.
+		if p, err := DecodeAppointment(slices.Clip(full[:n])); err != nil && !reflect.DeepEqual(p, AppointmentPattern{}) {
 			t.Errorf("a blob cut to %d bytes was refused (%v) but still returned %+v", n, err, p)
 		}
 	}
-	if _, err := DecodeAppointment(full[:len(full)-30]); !errors.Is(err, errTruncated) {
+	if _, err := DecodeAppointment(slices.Clip(full[:len(full)-30])); !errors.Is(err, errTruncated) {
 		t.Errorf("cut inside the extended exceptions: err = %v, want errTruncated", err)
 	}
 }

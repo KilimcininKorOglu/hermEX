@@ -2,6 +2,7 @@ package recurrence
 
 import (
 	"encoding/binary"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -138,10 +139,12 @@ func TestToRRuleRefusesAMalformedBlob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Each cut is clipped to its own length: a reslice keeps the full blob's
+	// capacity, and a reader that indexes past len would still find the bytes.
 	for name, blob := range map[string][]byte{
 		"nil":        nil,
-		"header cut": good[:6],
-		"body cut":   good[:len(good)-4],
+		"header cut": slices.Clip(good[:6]),
+		"body cut":   slices.Clip(good[:len(good)-4]),
 	} {
 		if rule, ok := ToRRule(blob); ok || rule != "" {
 			t.Errorf("%s: ToRRule = %q, %v, want no rule", name, rule, ok)
