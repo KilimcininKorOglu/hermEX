@@ -165,7 +165,6 @@ func wantOpenAttachment(t *testing.T, sess *Session, msgH uint32, num uint32, wa
 	}
 }
 
-// assertAttachmentCount asserts how many attachments a stored message holds.
 // checkSavedAttachment asserts the stored attachment num of message mid
 // carries the filename and data the client set before saving.
 func checkSavedAttachment(t *testing.T, store *objectstore.Store, mid uint64, num uint32, wantName, wantData string) {
@@ -186,6 +185,7 @@ func checkSavedAttachment(t *testing.T, store *objectstore.Store, mid uint64, nu
 	}
 }
 
+// assertAttachmentCount asserts how many attachments a stored message holds.
 func assertAttachmentCount(t *testing.T, store *objectstore.Store, mid uint64, want int, label string) {
 	t.Helper()
 	msg, err := store.OpenMessage(int64(mid))
