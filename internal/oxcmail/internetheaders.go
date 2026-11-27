@@ -186,11 +186,8 @@ func internetHeaderFields(props mapi.PropertyValues, opt Options) ([]headerField
 // internetHeaderField reads one property as a header field, reporting false for a
 // property that is not an exportable PS_INTERNET_HEADERS string.
 func internetHeaderField(pv mapi.TaggedPropVal, nameOf PropNameResolver) (headerField, bool, error) {
-	if t := pv.Tag.Type(); (t != mapi.PtUnicode && t != mapi.PtString8) || pv.Tag.ID() < 0x8000 {
-		return headerField{}, false, nil
-	}
-	value, _ := pv.Value.(string)
-	if value == "" {
+	value, ok := namedStringValue(pv)
+	if !ok {
 		return headerField{}, false, nil
 	}
 	name, ok, err := nameOf(pv.Tag.ID())
@@ -201,4 +198,14 @@ func internetHeaderField(pv mapi.TaggedPropVal, nameOf PropNameResolver) (header
 		return headerField{}, false, nil
 	}
 	return headerField{name: name.Name, value: value}, true, nil
+}
+
+// namedStringValue returns the value of a named string property that is not
+// empty, reporting false for any other property.
+func namedStringValue(pv mapi.TaggedPropVal) (string, bool) {
+	if t := pv.Tag.Type(); (t != mapi.PtUnicode && t != mapi.PtString8) || pv.Tag.ID() < 0x8000 {
+		return "", false
+	}
+	value, ok := pv.Value.(string)
+	return value, ok && value != ""
 }

@@ -1,6 +1,7 @@
 package oxcmail
 
 import (
+	"bytes"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -58,7 +59,7 @@ func HTMLText(body string) string {
 
 // textWriter accumulates the text of an HTML body.
 type textWriter struct {
-	b      strings.Builder
+	b      []byte
 	space  bool // whitespace separates the next word from the text before it
 	hidden int  // open hidden elements
 	pre    int  // open pre elements
@@ -98,7 +99,7 @@ func (w *textWriter) breakFor(name string) {
 		w.newline()
 	case paragraphElements[name]:
 		w.endLine()
-		if w.b.Len() > 0 && !strings.HasSuffix(w.b.String(), "\n\n") {
+		if len(w.b) > 0 && !bytes.HasSuffix(w.b, []byte("\n\n")) {
 			w.newline()
 		}
 	case lineElements[name]:
@@ -112,7 +113,7 @@ func (w *textWriter) breakFor(name string) {
 // one space, and whitespace at the start of a line is dropped.
 func (w *textWriter) text(s string) {
 	if w.pre > 0 {
-		w.b.WriteString(s)
+		w.b = append(w.b, s...)
 		w.space = false
 		return
 	}
@@ -122,9 +123,9 @@ func (w *textWriter) text(s string) {
 	words := strings.Fields(s)
 	for _, word := range words {
 		if w.space && !w.atLineStart() {
-			w.b.WriteByte(' ')
+			w.b = append(w.b, ' ')
 		}
-		w.b.WriteString(word)
+		w.b = append(w.b, word...)
 		w.space = true
 	}
 	if len(words) > 0 {
@@ -135,7 +136,7 @@ func (w *textWriter) text(s string) {
 
 // newline ends the current line.
 func (w *textWriter) newline() {
-	w.b.WriteByte('\n')
+	w.b = append(w.b, '\n')
 	w.space = false
 }
 
@@ -148,13 +149,12 @@ func (w *textWriter) endLine() {
 
 // atLineStart reports whether the next text starts a line.
 func (w *textWriter) atLineStart() bool {
-	s := w.b.String()
-	return s == "" || strings.HasSuffix(s, "\n")
+	return len(w.b) == 0 || w.b[len(w.b)-1] == '\n'
 }
 
 // String returns the text without the blank lines around it.
 func (w *textWriter) String() string {
-	return strings.TrimSpace(w.b.String())
+	return strings.TrimSpace(string(w.b))
 }
 
 // fillPlainBody gives a message whose only body is HTML a plain text body: the

@@ -10,13 +10,16 @@ import (
 )
 
 // quotedPrintable encodes data as quoted-printable with CRLF line breaks.
-func quotedPrintable(data []byte) []byte {
+func quotedPrintable(data []byte) ([]byte, error) {
 	var buf bytes.Buffer
 	w := quotedprintable.NewWriter(&buf)
-	// A bytes.Buffer never fails a write, so neither does the encoder over it.
-	_, _ = w.Write(data)
-	_ = w.Close() // flushes into the same buffer, which cannot fail
-	return buf.Bytes()
+	if _, err := w.Write(data); err != nil {
+		return nil, err
+	}
+	if err := w.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // vCardType is the media type of a vCard 3.0 attachment ([MS-OXCMAIL] 2.1.3.4.6).

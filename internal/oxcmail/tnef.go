@@ -252,7 +252,7 @@ func (c tnefContext) attachment(a tnef.Attachment) Attachment {
 		}
 	}
 	// An attached message whose stream did not decode has no data to open as one.
-	if method, _ := propInt32(att.Props, mapi.PrAttachMethod); method == 0 ||
+	if method := int32Val(att.Props, mapi.PrAttachMethod); method == 0 ||
 		(method == mapi.AttachEmbeddedMsg && !att.Props.Has(mapi.PrAttachDataBin)) {
 		att.Props.Set(mapi.PrAttachMethod, int32(mapi.AttachByValue))
 	}

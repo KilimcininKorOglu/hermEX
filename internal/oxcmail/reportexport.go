@@ -43,7 +43,7 @@ func reportKind(msg *Message) string {
 // part the message carries as an attachment (an imported report keeps the one it
 // arrived with) is written as it is; otherwise one is built from the report
 // properties.
-func writeReportBody(b *bytes.Buffer, msg *Message, opt Options, kind string) error {
+func writeReportBody(b *mimeWriter, msg *Message, opt Options, kind string) error {
 	innerHdr, innerBytes, err := renderBody(msg, opt)
 	if err != nil {
 		return err
@@ -71,8 +71,8 @@ func writeReportBody(b *bytes.Buffer, msg *Message, opt Options, kind string) er
 		return err
 	}
 	writeField(b, "Content-Type", "multipart/report; report-type="+kind+"; boundary=\""+mw.Boundary()+"\"")
-	b.WriteString("\r\n")
-	b.Write(parts.Bytes())
+	b.str("\r\n")
+	b.raw(parts.Bytes())
 	return nil
 }
 
@@ -104,7 +104,7 @@ func splitStatusAttachment(atts []Attachment, kind string) ([]byte, []Attachment
 
 // buildStatus builds the status part from the report properties.
 func buildStatus(msg *Message, kind string) []byte {
-	var b bytes.Buffer
+	var b mimeWriter
 	if kind == reportDisposition {
 		writeMDNFields(&b, msg)
 		return b.Bytes()
@@ -114,7 +114,7 @@ func buildStatus(msg *Message, kind string) []byte {
 }
 
 // writeMDNFields writes the disposition fields of [MS-OXCMAIL] 2.1.3.6.2.
-func writeMDNFields(b *bytes.Buffer, msg *Message) {
+func writeMDNFields(b *mimeWriter, msg *Message) {
 	t := senderTags
 	if propString(msg.Props, t.smtp) == "" {
 		t = representingTags
@@ -156,7 +156,7 @@ func reportAction(msg *Message) string {
 
 // writeDSNFields writes the RFC 3464 per-message block, then one block for each
 // recipient the report reports on.
-func writeDSNFields(b *bytes.Buffer, msg *Message) {
+func writeDSNFields(b *mimeWriter, msg *Message) {
 	mta := propString(msg.Props, mapi.PrReportingMessageTransferAgent)
 	if mta == "" {
 		mta = "localhost"
@@ -170,13 +170,13 @@ func writeDSNFields(b *bytes.Buffer, msg *Message) {
 		if !isReportedRecipient(r) {
 			continue
 		}
-		b.WriteString("\r\n")
+		b.str("\r\n")
 		writeDSNRecipient(b, r, action)
 	}
 }
 
 // writeDSNRecipient writes one per-recipient block.
-func writeDSNRecipient(b *bytes.Buffer, r mapi.PropertyValues, action string) {
+func writeDSNRecipient(b *mimeWriter, r mapi.PropertyValues, action string) {
 	addr := propString(r, mapi.PrSmtpAddress)
 	if addr == "" {
 		addr = propString(r, mapi.PrEmailAddress)

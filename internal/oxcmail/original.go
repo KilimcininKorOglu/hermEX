@@ -86,30 +86,22 @@ func originalPlain(p mapi.PropertyValues) string {
 }
 
 func appendPlainOriginal(reply, orig *Message, header []string) {
-	var b strings.Builder
-	b.WriteString(propString(reply.Props, mapi.PrBody))
-	b.WriteString("\r\n\r\n" + originalSeparator + "\r\n")
-	b.WriteString(strings.Join(header, "\r\n"))
-	b.WriteString("\r\n\r\n")
-	b.WriteString(originalPlain(orig.Props))
-	reply.Props.Set(mapi.PrBody, b.String())
+	reply.Props.Set(mapi.PrBody, propString(reply.Props, mapi.PrBody)+
+		"\r\n\r\n"+originalSeparator+"\r\n"+
+		strings.Join(header, "\r\n")+"\r\n\r\n"+
+		originalPlain(orig.Props))
 }
 
 // appendHTMLOriginal inserts the quoted original before the reply document's
 // closing body tag (or at its end when it has none), transcoding the reply to
 // UTF-8 so both halves share one charset.
 func appendHTMLOriginal(reply, orig *Message, header []string) {
-	raw, _ := bytesProp(reply.Props, mapi.PrHTML)
-	doc := mime.DecodeCharset(raw, htmlCharset(reply.Props))
-	var b strings.Builder
-	b.WriteString("<hr><div>")
-	for _, line := range header {
-		b.WriteString(html.EscapeString(line))
-		b.WriteString("<br>")
+	doc := mime.DecodeCharset(bytesVal(reply.Props, mapi.PrHTML), htmlCharset(reply.Props))
+	lines := make([]string, len(header))
+	for i, line := range header {
+		lines[i] = html.EscapeString(line) + "<br>"
 	}
-	b.WriteString("</div><br>")
-	b.WriteString(originalHTMLBody(orig.Props))
-	block := b.String()
+	block := "<hr><div>" + strings.Join(lines, "") + "</div><br>" + originalHTMLBody(orig.Props)
 	if i := strings.LastIndex(strings.ToLower(doc), "</body>"); i >= 0 {
 		doc = doc[:i] + block + doc[i:]
 	} else {

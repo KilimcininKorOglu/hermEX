@@ -1,7 +1,6 @@
 package oxcmail
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"strings"
@@ -73,8 +72,7 @@ func openPGPEntity(msg *Message) bool {
 	if len(msg.Attachments) != 1 {
 		return false
 	}
-	data, _ := bytesProp(msg.Attachments[0].Props, mapi.PrAttachDataBin)
-	root := mime.ParseStructure(data)
+	root := mime.ParseStructure(bytesVal(msg.Attachments[0].Props, mapi.PrAttachDataBin))
 	return root.Type == "multipart" && (root.Subtype == "signed" || (root.Subtype == "encrypted" && openPGPProtocol(root)))
 }
 
@@ -86,17 +84,17 @@ func openPGPEntity(msg *Message) bool {
 // is written base64-encoded under the Content-Type the client stored
 // ([MS-OXOSMIME] 3.1.4.1.3 and 3.1.4.2.3). An object without that one attachment
 // is rendered as a notice saying so, the way a stored copy stays readable.
-func writeSMIMEBody(b *bytes.Buffer, msg *Message, opt Options, clearSigned bool) {
+func writeSMIMEBody(b *mimeWriter, msg *Message, opt Options, clearSigned bool) {
 	if len(msg.Attachments) != 1 {
 		writeField(b, "Content-Type", "text/plain; charset=utf-8")
-		b.WriteString("\r\n")
-		fmt.Fprintf(b, "[This message is not a valid S/MIME message: it holds %d attachments, but exactly one is required.]\r\n", len(msg.Attachments))
+		b.str("\r\n")
+		b.str(fmt.Sprintf("[This message is not a valid S/MIME message: it holds %d attachments, but exactly one is required.]\r\n", len(msg.Attachments)))
 		return
 	}
 	att := msg.Attachments[0]
-	data, _ := bytesProp(att.Props, mapi.PrAttachDataBin)
+	data := bytesVal(att.Props, mapi.PrAttachDataBin)
 	if clearSigned {
-		b.Write(data)
+		b.raw(data)
 		return
 	}
 	filename := headerParam(propString(att.Props, mapi.PrAttachLongFilename))
@@ -106,8 +104,8 @@ func writeSMIMEBody(b *bytes.Buffer, msg *Message, opt Options, clearSigned bool
 	writeField(b, "Content-Type", opaqueContentType(msg, opt, att, filename))
 	writeField(b, "Content-Disposition", "attachment"+filenameParam(filename))
 	writeField(b, "Content-Transfer-Encoding", "base64")
-	b.WriteString("\r\n")
-	b.Write(encodeBase64(data))
+	b.str("\r\n")
+	b.raw(encodeBase64(data))
 }
 
 // opaqueContentType is the Content-Type of an opaque S/MIME message: the
@@ -138,6 +136,9 @@ func storedContentType(props mapi.PropertyValues, opt Options) string {
 	if !ok {
 		return ""
 	}
-	s, _ := v.(string)
+	s, ok := v.(string)
+	if !ok {
+		return ""
+	}
 	return headerLineBreaks.Replace(strings.TrimSpace(s))
 }

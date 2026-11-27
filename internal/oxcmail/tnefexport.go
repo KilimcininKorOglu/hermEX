@@ -19,9 +19,7 @@ import (
 // SendsRichInfo reports whether a recipient's PidTagSendRichInfo asks for the TNEF
 // form.
 func SendsRichInfo(bag mapi.PropertyValues) bool {
-	v, _ := bag.Get(mapi.PrSendRichInfo)
-	b, _ := v.(bool)
-	return b
+	return boolVal(bag, mapi.PrSendRichInfo)
 }
 
 // sendsTNEF reports whether Export writes the TNEF form. A meeting message keeps
@@ -32,7 +30,7 @@ func sendsTNEF(msg *Message, opt Options) bool {
 }
 
 // writeTNEFBody writes the TNEF form of a message after its header block.
-func writeTNEFBody(b *bytes.Buffer, msg *Message, opt Options) error {
+func writeTNEFBody(b *mimeWriter, msg *Message, opt Options) error {
 	key := propString(msg.Props, mapi.PrInternetMessageID)
 	stream, err := tnefStream(msg, opt, key)
 	if err != nil {
@@ -63,8 +61,8 @@ func writeTNEFBody(b *bytes.Buffer, msg *Message, opt Options) error {
 		return err
 	}
 	writeField(b, "Content-Type", "multipart/mixed; boundary=\""+mw.Boundary()+"\"")
-	b.WriteString("\r\n")
-	b.Write(parts.Bytes())
+	b.str("\r\n")
+	b.raw(parts.Bytes())
 	return nil
 }
 
@@ -92,7 +90,7 @@ func tnefStream(msg *Message, opt Options, key string) ([]byte, error) {
 // embedded message is stored as its RFC 5322 bytes, not as a message object, so it
 // travels as a message/rfc822 file.
 func tnefAttachment(props mapi.PropertyValues) mapi.PropertyValues {
-	if method, _ := propInt32(props, mapi.PrAttachMethod); method != mapi.AttachEmbeddedMsg {
+	if int32Val(props, mapi.PrAttachMethod) != mapi.AttachEmbeddedMsg {
 		return props
 	}
 	out := append(mapi.PropertyValues(nil), props...)

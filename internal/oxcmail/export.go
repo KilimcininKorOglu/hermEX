@@ -38,7 +38,7 @@ func Export(msg *Message, opt Options) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	var b bytes.Buffer
+	var b mimeWriter
 	writeMailHead(&b, msg, extra)
 	if isSMIME, clearSigned := smimeShape(msg); isSMIME {
 		writeSMIMEBody(&b, msg, opt, clearSigned)
@@ -68,7 +68,7 @@ func Export(msg *Message, opt Options) ([]byte, error) {
 // writeContentBody writes the body of an ordinary message: the body itself,
 // wrapped in multipart/related when it has inline images and then in
 // multipart/mixed when regular attachments follow.
-func writeContentBody(b *bytes.Buffer, msg *Message, opt Options) error {
+func writeContentBody(b *mimeWriter, msg *Message, opt Options) error {
 	inline, regular := splitAttachments(msg.Attachments)
 
 	innerHdr, innerBytes, err := renderBody(msg, opt)
@@ -88,8 +88,8 @@ func writeContentBody(b *bytes.Buffer, msg *Message, opt Options) error {
 		}
 	}
 	writeHeaderFields(b, innerHdr)
-	b.WriteString("\r\n")
-	b.Write(innerBytes)
+	b.str("\r\n")
+	b.raw(innerBytes)
 	return nil
 }
 
@@ -134,7 +134,10 @@ func wrapMultipart(subtype string, innerHdr textproto.MIMEHeader, innerBytes []b
 
 // writeAttachmentPart renders one attachment into an open multipart writer.
 func writeAttachmentPart(mw *multipart.Writer, att Attachment) error {
-	ah, adata := renderAttachment(att)
+	ah, adata, err := renderAttachment(att)
+	if err != nil {
+		return err
+	}
 	aw, err := mw.CreatePart(ah)
 	if err != nil {
 		return err
@@ -146,8 +149,7 @@ func writeAttachmentPart(mw *multipart.Writer, att Attachment) error {
 // isInlineAttachment reports whether an attachment is an HTML-referenced inline
 // image (PR_ATTACH_FLAGS carries ATT_MHTML_REF).
 func isInlineAttachment(att Attachment) bool {
-	flags, _ := propInt32(att.Props, mapi.PrAttachFlags)
-	return flags&mapi.AttMhtmlRef != 0
+	return int32Val(att.Props, mapi.PrAttachFlags)&mapi.AttMhtmlRef != 0
 }
 
 // renderBody renders the message body as a MIME part: its header fields and its
@@ -267,8 +269,8 @@ func renderAlternative(plain string, html []byte, htmlCset string) (textproto.MI
 // renderAttachment renders one attachment as a by-value MIME part: its content
 // type and filename, disposition (inline for an HTML-referenced image), an
 // optional content id, and base64-encoded data.
-func renderAttachment(att Attachment) (textproto.MIMEHeader, []byte) {
-	data, _ := bytesProp(att.Props, mapi.PrAttachDataBin)
+func renderAttachment(att Attachment) (textproto.MIMEHeader, []byte, error) {
+	data := bytesVal(att.Props, mapi.PrAttachDataBin)
 	// These are client-written on every protocol and go straight into part header
 	// lines, which the multipart writer emits verbatim without validating them. A
 	// line break would start a header of the sender's choosing, or end the part
@@ -294,7 +296,11 @@ func renderAttachment(att Attachment) (textproto.MIMEHeader, []byte) {
 	switch {
 	case strings.HasPrefix(mimeType, "text/directory"):
 		// [MS-OXCMAIL] 2.1.3.4.6: a vCard attachment is quoted-printable.
-		cte, body = "quoted-printable", quotedPrintable(data)
+		qp, err := quotedPrintable(data)
+		if err != nil {
+			return nil, nil, err
+		}
+		cte, body = "quoted-printable", qp
 	case strings.HasPrefix(mimeType, "message/"):
 		if is7bitClean(data) {
 			cte = "7bit"
@@ -306,19 +312,19 @@ func renderAttachment(att Attachment) (textproto.MIMEHeader, []byte) {
 	h.Set("Content-Transfer-Encoding", cte)
 
 	disposition := "attachment"
-	if flags, _ := propInt32(att.Props, mapi.PrAttachFlags); flags&mapi.AttMhtmlRef != 0 {
+	if int32Val(att.Props, mapi.PrAttachFlags)&mapi.AttMhtmlRef != 0 {
 		disposition = "inline"
 	}
 	h.Set("Content-Disposition", disposition+filenameParam(filename))
 	if cid := headerParam(propString(att.Props, mapi.PrAttachContentID)); cid != "" {
 		h.Set("Content-ID", "<"+cid+">")
 	}
-	return h, body
+	return h, body, nil
 }
 
 // writeHeaderFields writes a part's header fields in a fixed order; used for the
 // top-level body when the message has no attachments.
-func writeHeaderFields(b *bytes.Buffer, h textproto.MIMEHeader) {
+func writeHeaderFields(b *mimeWriter, h textproto.MIMEHeader) {
 	for _, k := range []string{"Content-Type", "Content-Description", "Content-Transfer-Encoding", "Content-Disposition", "Content-ID"} {
 		if v := h.Get(k); v != "" {
 			writeField(b, k, v)
@@ -329,21 +335,20 @@ func writeHeaderFields(b *bytes.Buffer, h textproto.MIMEHeader) {
 // encodeBase64 base64-encodes data, wrapped at 76 columns with CRLF.
 func encodeBase64(data []byte) []byte {
 	enc := base64.StdEncoding.EncodeToString(data)
-	var buf bytes.Buffer
+	buf := make([]byte, 0, len(enc)+2*(len(enc)/76+1))
 	for len(enc) > 76 {
-		buf.WriteString(enc[:76])
-		buf.WriteString("\r\n")
+		buf = append(buf, enc[:76]...)
+		buf = append(buf, "\r\n"...)
 		enc = enc[76:]
 	}
-	buf.WriteString(enc)
-	buf.WriteString("\r\n")
-	return buf.Bytes()
+	buf = append(buf, enc...)
+	return append(buf, "\r\n"...)
 }
 
 // writeMailHead synthesizes the message header block (no trailing blank line;
 // the body writer appends the content headers and the separator), following the
 // header order of the MS-OXCMAIL export path.
-func writeMailHead(b *bytes.Buffer, msg *Message, extra []headerField) {
+func writeMailHead(b *mimeWriter, msg *Message, extra []headerField) {
 	writeField(b, "MIME-Version", "1.0")
 	writeOriginatorFields(b, msg)
 	writeRecipientFields(b, msg)
@@ -361,7 +366,7 @@ func writeMailHead(b *bytes.Buffer, msg *Message, extra []headerField) {
 
 // writeOriginatorFields emits From, which carries the sent-representing identity,
 // and Sender, which is emitted only when it differs from the representing address.
-func writeOriginatorFields(b *bytes.Buffer, msg *Message) {
+func writeOriginatorFields(b *mimeWriter, msg *Message) {
 	// The representing identity is who the message is from; a message that stores
 	// only a sender is from that sender. Without this fallback such a message went
 	// out with no From header at all, which the CalDAV scheduling path produced for
@@ -384,7 +389,7 @@ func writeOriginatorFields(b *bytes.Buffer, msg *Message) {
 }
 
 // writeRecipientFields emits the three address lists from the stored recipients.
-func writeRecipientFields(b *bytes.Buffer, msg *Message) {
+func writeRecipientFields(b *mimeWriter, msg *Message) {
 	for _, r := range []struct {
 		field string
 		kind  int32
@@ -403,14 +408,14 @@ func writeRecipientFields(b *bytes.Buffer, msg *Message) {
 // its sensitivity, and any read receipt. A requested read receipt re-emits
 // Disposition-Notification-To from the read-receipt identity, falling back to the
 // sender then the representing identity, as the export path does.
-func writeHandlingFields(b *bytes.Buffer, msg *Message) {
+func writeHandlingFields(b *mimeWriter, msg *Message) {
 	if v, ok := propInt32(msg.Props, mapi.PrImportance); ok {
 		writeField(b, "Importance", importanceText(v))
 	}
 	if v, ok := propInt32(msg.Props, mapi.PrSensitivity); ok {
 		writeField(b, "Sensitivity", sensitivityText(v))
 	}
-	if requested, _ := propBool(msg.Props, mapi.PrReadReceiptRequested); !requested {
+	if !boolVal(msg.Props, mapi.PrReadReceiptRequested) {
 		return
 	}
 	for _, t := range []addrTags{readReceiptTags, senderTags, representingTags} {
@@ -422,7 +427,7 @@ func writeHandlingFields(b *bytes.Buffer, msg *Message) {
 }
 
 // writeThreadFields emits the conversation and threading identity.
-func writeThreadFields(b *bytes.Buffer, msg *Message) {
+func writeThreadFields(b *mimeWriter, msg *Message) {
 	if topic := propString(msg.Props, mapi.PrConversationTopic); topic != "" {
 		writeField(b, "Thread-Topic", encodeText(topic))
 	}
@@ -470,13 +475,21 @@ func isPreservedHeader(name string) bool {
 // structured export above does not reconstruct. Outbound messages carry no stored
 // arrival headers, so nothing is emitted for them. Names are emitted in a stable
 // order so the output is reproducible.
-func writePreservedHeaders(b *bytes.Buffer, msg *Message) {
+func writePreservedHeaders(b *mimeWriter, msg *Message) {
 	raw := propString(msg.Props, mapi.PrTransportMessageHeaders)
 	if raw == "" {
 		return
 	}
 	tp := textproto.NewReader(bufio.NewReader(strings.NewReader(raw + "\r\n\r\n")))
-	hdr, _ := tp.ReadMIMEHeader()
+	// The stored block is the sender's header as it arrived, so it can hold a
+	// malformed line, which ends the read. The fields read before it are kept:
+	// the server's own X-Spam-* fields are prepended at delivery (antispam.Tag),
+	// so they always come first, and failing here would leave the message
+	// unservable over a line the sender wrote.
+	hdr, err := tp.ReadMIMEHeader()
+	if err != nil && len(hdr) == 0 {
+		return
+	}
 	names := make([]string, 0, len(hdr))
 	for name := range hdr {
 		if isPreservedHeader(name) {
@@ -613,9 +626,11 @@ func subjectText(props mapi.PropertyValues) string {
 	prefix, hasPrefix := props.Get(mapi.PrSubjectPrefix)
 	normalized, hasNorm := props.Get(mapi.PrNormalizedSubject)
 	if hasPrefix && hasNorm {
-		p, _ := prefix.(string)
-		n, _ := normalized.(string)
-		return p + n
+		p, okPrefix := prefix.(string)
+		n, okNorm := normalized.(string)
+		if okPrefix && okNorm {
+			return p + n
+		}
 	}
 	return propString(props, mapi.PrSubject)
 }
@@ -664,16 +679,28 @@ func is7bitClean(b []byte) bool {
 	return true
 }
 
+// mimeWriter accumulates the bytes of an exported message. It appends to a
+// slice, which cannot fail, so the export path has no write error to carry.
+type mimeWriter struct {
+	buf []byte
+}
+
+// str appends s.
+func (w *mimeWriter) str(s string) { w.buf = append(w.buf, s...) }
+
+// raw appends p.
+func (w *mimeWriter) raw(p []byte) { w.buf = append(w.buf, p...) }
+
+// Bytes returns what was written.
+func (w *mimeWriter) Bytes() []byte { return w.buf }
+
 // writeField writes one "Name: value" header line, CRLF-terminated.
-func writeField(b *bytes.Buffer, name, value string) {
-	b.WriteString(name)
-	b.WriteString(": ")
+func writeField(b *mimeWriter, name, value string) {
 	// A stored property is client-written on every protocol, so a value carrying a
 	// line break would splice headers of the client's choosing into the message (or
 	// end the header block early and push the rest into the body). Folding it back
 	// onto one line keeps the field's content and removes the ability to inject.
-	b.WriteString(headerLineBreaks.Replace(value))
-	b.WriteString("\r\n")
+	b.str(name + ": " + headerLineBreaks.Replace(value) + "\r\n")
 }
 
 // headerLineBreaks flattens the two characters that can end a header line.
@@ -763,4 +790,28 @@ func propBool(props mapi.PropertyValues, tag mapi.PropTag) (bool, bool) {
 		}
 	}
 	return false, false
+}
+
+// int32Val returns an int32-typed property, 0 when it is absent or of another type.
+func int32Val(props mapi.PropertyValues, tag mapi.PropTag) int32 {
+	if n, ok := propInt32(props, tag); ok {
+		return n
+	}
+	return 0
+}
+
+// boolVal returns a bool-typed property, false when it is absent or of another type.
+func boolVal(props mapi.PropertyValues, tag mapi.PropTag) bool {
+	if b, ok := propBool(props, tag); ok {
+		return b
+	}
+	return false
+}
+
+// bytesVal returns a binary property, nil when it is absent or of another type.
+func bytesVal(props mapi.PropertyValues, tag mapi.PropTag) []byte {
+	if b, ok := bytesProp(props, tag); ok {
+		return b
+	}
+	return nil
 }
