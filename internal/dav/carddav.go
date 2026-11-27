@@ -2,6 +2,7 @@ package dav
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"slices"
@@ -31,7 +32,13 @@ func vcardOptions(st *objectstore.Store) oxvcard.Options {
 
 // resourceNameTag resolves the DAV resource-name property to its store proptag.
 func resourceNameTag(st *objectstore.Store, create bool) (mapi.PropTag, bool, error) {
-	ids, err := st.GetNamedPropIDs(create, []mapi.PropertyName{davResourceName})
+	return namedStringTag(st, davResourceName, create)
+}
+
+// namedStringTag resolves a named string property to its store proptag. ok is
+// false when the name has no id yet and create was false.
+func namedStringTag(st *objectstore.Store, name mapi.PropertyName, create bool) (mapi.PropTag, bool, error) {
+	ids, err := st.GetNamedPropIDs(create, []mapi.PropertyName{name})
 	if err != nil {
 		return 0, false, err
 	}
@@ -39,6 +46,22 @@ func resourceNameTag(st *objectstore.Store, create bool) (mapi.PropTag, bool, er
 		return 0, false, nil
 	}
 	return mapi.PropTag(uint32(ids[0])<<16 | uint32(mapi.PtUnicode)), true, nil
+}
+
+// errNoNamedPropID refuses a write whose named property the store would not
+// allocate, rather than writing the value under a zero proptag.
+var errNoNamedPropID = errors.New("dav: the store allocated no id for a named property")
+
+// allocStringTag resolves a named string property, allocating its id, for a write.
+func allocStringTag(st *objectstore.Store, name mapi.PropertyName) (mapi.PropTag, error) {
+	tag, ok, err := namedStringTag(st, name, true)
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, errNoNamedPropID
+	}
+	return tag, nil
 }
 
 // objectName returns an object's DAV resource name: the stored resource-name
@@ -178,7 +201,7 @@ func importVCardBody(st *objectstore.Store, body io.Reader, name string) (*oxcma
 	if err != nil {
 		return nil, http.StatusBadRequest, err
 	}
-	tag, _, err := resourceNameTag(st, true)
+	tag, err := allocStringTag(st, davResourceName)
 	if err != nil {
 		return nil, http.StatusInternalServerError, err
 	}

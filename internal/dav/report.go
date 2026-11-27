@@ -536,7 +536,11 @@ func calendarObjectData(st *objectstore.Store, fid, id int64, uid string) (strin
 		if err != nil {
 			return "", err
 		}
-		return string(oxcical.ExportVTODO(tk, uid, time.Time{})), nil
+		stored, err := taskUID(st, msg, uid)
+		if err != nil {
+			return "", err
+		}
+		return string(oxcical.ExportVTODO(tk, stored, time.Time{})), nil
 	case int64(mapi.PrivateFIDJournal):
 		msg, err := st.OpenMessage(id)
 		if err != nil {

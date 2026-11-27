@@ -80,7 +80,11 @@ func exportCalObject(st *objectstore.Store, fid int64, msg *oxcmail.Message, nam
 		if err != nil {
 			return nil, err
 		}
-		return oxcical.ExportVTODO(tk, name, time.Time{}), nil
+		uid, err := taskUID(st, msg, name)
+		if err != nil {
+			return nil, err
+		}
+		return oxcical.ExportVTODO(tk, uid, time.Time{}), nil
 	case int64(mapi.PrivateFIDJournal):
 		return oxcical.ExportVJournal(msg, name), nil
 	}
@@ -117,7 +121,7 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 		s.davError(w, err, status)
 		return
 	}
-	tag, _, err := resourceNameTag(st, true)
+	tag, err := allocStringTag(st, davResourceName)
 	if err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
 		return
@@ -164,7 +168,7 @@ func replaceCalObject(st *objectstore.Store, fid int64, msg *oxcmail.Message, ex
 func calManagedTags(st *objectstore.Store, fid int64) ([]mapi.PropTag, error) {
 	switch fid {
 	case int64(mapi.PrivateFIDTasks):
-		return oxtask.ManagedTags(st.GetNamedPropIDs)
+		return taskManagedTags(st)
 	case int64(mapi.PrivateFIDJournal):
 		return oxcical.JournalManagedTags(icalOptions(st))
 	}
@@ -237,15 +241,7 @@ func calPutPrecondition(r *http.Request, existing objectstore.FolderObject, foun
 func (s *Server) importCalendarBody(st *objectstore.Store, fid int64, user string, body []byte) (*oxcmail.Message, int, error) {
 	switch fid {
 	case int64(mapi.PrivateFIDTasks):
-		task, _, ok := oxcical.ParseVTODO(body)
-		if !ok {
-			return nil, http.StatusBadRequest, errInvalidVTODO
-		}
-		props, err := oxtask.ToProps(task, st.GetNamedPropIDs)
-		if err != nil {
-			return nil, http.StatusInternalServerError, err
-		}
-		return &oxcmail.Message{Props: props}, 0, nil
+		return importTaskBody(st, body)
 	case int64(mapi.PrivateFIDJournal):
 		msg, err := oxcical.ImportVJournal(body, icalOptions(st))
 		if err != nil {
@@ -265,6 +261,62 @@ func (s *Server) importCalendarBody(st *objectstore.Store, fid int64, user strin
 	}
 	s.logZoneLosses(&zones)
 	return msg, 0, nil
+}
+
+// importTaskBody converts a Tasks PUT body into the shared task model and keeps
+// the VTODO UID, the component's persistent identity (RFC 5545 3.8.4.7), in the
+// same ICalUID named property events and journals use, so a GET answers with it.
+func importTaskBody(st *objectstore.Store, body []byte) (*oxcmail.Message, int, error) {
+	task, uid, ok := oxcical.ParseVTODO(body)
+	if !ok {
+		return nil, http.StatusBadRequest, errInvalidVTODO
+	}
+	props, err := oxtask.ToProps(task, st.GetNamedPropIDs)
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+	if uid != "" {
+		tag, err := allocStringTag(st, mapi.NameICalUID)
+		if err != nil {
+			return nil, http.StatusInternalServerError, err
+		}
+		props.Set(tag, uid)
+	}
+	return &oxcmail.Message{Props: props}, 0, nil
+}
+
+// taskUID is the UID a stored task is served under: the UID its VTODO carried,
+// else the resource name, which is stable for the object.
+func taskUID(st *objectstore.Store, msg *oxcmail.Message, name string) (string, error) {
+	tag, ok, err := namedStringTag(st, mapi.NameICalUID, false)
+	if err != nil || !ok {
+		return name, err
+	}
+	v, has := msg.Props.Get(tag)
+	if !has {
+		return name, nil
+	}
+	if s, isStr := v.(string); isStr && s != "" {
+		return s, nil
+	}
+	return name, nil
+}
+
+// taskManagedTags is the task model's managed set plus the stored UID, so a PUT
+// whose body drops or changes the UID does not leave the previous one behind.
+func taskManagedTags(st *objectstore.Store) ([]mapi.PropTag, error) {
+	tags, err := oxtask.ManagedTags(st.GetNamedPropIDs)
+	if err != nil {
+		return nil, err
+	}
+	tag, ok, err := namedStringTag(st, mapi.NameICalUID, false)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		tags = append(tags, tag)
+	}
+	return tags, nil
 }
 
 // errInvalidVTODO is the body a Tasks PUT is refused with when its VTODO does not

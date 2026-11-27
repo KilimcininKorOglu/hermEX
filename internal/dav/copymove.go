@@ -182,7 +182,7 @@ func copyMoveCollections(st *objectstore.Store, req copyMoveRequest) (srcFID, ds
 // a fresh message rather than a duplicate of the source's identity, and stamps it
 // with the destination resource name.
 func reserializeObject(st *objectstore.Store, req copyMoveRequest, srcID int64) (*oxcmail.Message, error) {
-	tag, _, err := resourceNameTag(st, true)
+	tag, err := allocStringTag(st, davResourceName)
 	if err != nil {
 		return nil, err
 	}
