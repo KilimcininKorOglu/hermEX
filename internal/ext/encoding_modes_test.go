@@ -57,9 +57,11 @@ func TestABKValueSetMultivalue(t *testing.T) {
 }
 
 func TestABKBadValueSet(t *testing.T) {
-	// A value-set byte other than 0x00 or 0xFF is malformed.
-	if _, err := NewPull([]byte{0x01}, FlagABK).PropValue(mapi.PtString8); !errors.Is(err, ErrFormat) {
-		t.Fatalf("err = %v, want ErrFormat", err)
+	// A value-set byte other than 0x00 or 0xFF is malformed. A well-formed string
+	// follows it, so only the value-set check can refuse the buffer.
+	v, err := NewPull([]byte{0x01, 'h', 'i', 0x00}, FlagABK).PropValue(mapi.PtString8)
+	if !errors.Is(err, ErrFormat) || v != nil {
+		t.Fatalf("PropValue = (%v, %v), want (nil, ErrFormat)", v, err)
 	}
 }
 
