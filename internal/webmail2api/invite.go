@@ -84,8 +84,13 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	defer closeStore(st)
 	raw, err := st.GetMessageRaw(fid, uid)
+	if errors.Is(err, objectstore.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
 	if err != nil {
-		writeJSON(w, http.StatusOK, inviteJSON{})
+		logError("invite-read", err, logging.Fields{"folder": fid, "uid": uid})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read the message"})
 		return
 	}
 	ics := findCalendarPart(mime.ParseStructure(raw))
