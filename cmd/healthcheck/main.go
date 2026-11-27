@@ -37,7 +37,7 @@ func main() {
 // probe reports whether the endpoint answered 200. Any other status means the
 // daemon is running but says it is not ready (a failed readiness check answers
 // 503), which is exactly the state a container healthcheck exists to surface.
-func probe(url string) error {
+func probe(url string) (err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
 	defer cancel()
 	// #nosec G704 -- the URL is the probe target the container healthcheck passes on the command line; fetching it is this binary's whole purpose
@@ -50,7 +50,11 @@ func probe(url string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("close the %s response: %w", url, cerr)
+		}
+	}()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("%s reported %s", url, resp.Status)
 	}
