@@ -118,8 +118,10 @@ func TestPingRefusesAMalformedHeartbeat(t *testing.T) {
 		t.Errorf("shortest %q and longest %q are not an allowed range", shortest, longest)
 	}
 	for _, hb := range []string{shortest, longest} {
-		s, _ := status(hb)
+		s, echoed := status(hb)
 		wantEq(t, "the status for the returned bound "+hb, s, "7")
+		// An accepted heartbeat is not answered with a corrected interval.
+		wantEq(t, "the interval echoed for the accepted bound "+hb, echoed, "")
 	}
 	for _, hb := range []string{"abc", "1.5", " 30"} {
 		s, _ := status(hb)
@@ -138,7 +140,7 @@ func postEmptyPing(t *testing.T, ts *httptest.Server) *wbxml.Node {
 	req.Header.Set("Content-Type", "application/vnd.ms-sync.wbxml")
 	resp, err := http.DefaultClient.Do(req)
 	mustNoErr(t, "send the empty Ping", err)
-	defer resp.Body.Close()
+	defer mustClose(t, resp.Body)
 	out, err := io.ReadAll(resp.Body)
 	mustNoErr(t, "read the empty Ping reply", err)
 	if resp.StatusCode != http.StatusOK {
@@ -198,12 +200,12 @@ func TestPingRaisesACachedHeartbeatBelowTheFloor(t *testing.T) {
 		d.PingHeartbeat, d.PingFolders = 30, []string{inboxID()}
 		return true
 	}))
-	st.Close()
+	mustNoErr(t, "close the store", st.Close())
 
 	wantEq(t, "the empty Ping", postEmptyPing(t, ts).ChildText(wbxml.PGStatus), "1")
 	st, err = objectstore.Open(dir)
 	mustNoErr(t, "reopen the store", err)
-	defer st.Close()
+	defer mustClose(t, st)
 	state, err := loadState(st)
 	mustNoErr(t, "load the state", err)
 	wantEq(t, "the cached heartbeat after the Ping", state.device("dev1").PingHeartbeat, int64(60))
