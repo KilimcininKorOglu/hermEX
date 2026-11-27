@@ -2,9 +2,13 @@ package webmail2api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
+
+	"hermex/internal/logging"
+	"hermex/internal/objectstore"
 )
 
 // handleRecoverableList returns a folder's Recoverable Items dumpster: the messages
@@ -31,6 +35,7 @@ func (s *Server) handleRecoverableList(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := mb.st.ListSoftDeleted(fid)
 	if err != nil {
+		logError("recoverable-list", err, logging.Fields{"folder": fid})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot read dumpster"})
 		return
 	}
@@ -68,7 +73,7 @@ func (s *Server) handleRecoverableRecover(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if _, err := mb.st.RecoverMessage(fid, mid); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "recover failed"})
+		answerDumpsterFailure(w, "recoverable-recover", err, fid, mid)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -87,10 +92,22 @@ func (s *Server) handleRecoverablePurge(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := mb.st.PurgeSoftDeletedInFolder(fid, mid); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "purge failed"})
+		answerDumpsterFailure(w, "recoverable-purge", err, fid, mid)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// answerDumpsterFailure answers 404 for an item that is not in the dumpster and
+// records anything else before answering 500, so a store fault is not reported
+// to the user as an item that is gone.
+func answerDumpsterFailure(w http.ResponseWriter, op string, err error, fid, mid int64) {
+	if errors.Is(err, objectstore.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	logError(op, err, logging.Fields{"folder": fid, "id": mid})
+	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "the dumpster could not be changed"})
 }
 
 // recoverableTarget decodes and authorizes a recover/purge body: it resolves the
