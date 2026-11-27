@@ -3,6 +3,8 @@ package logging_test
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -66,11 +68,19 @@ func TestBuildIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer func() { _ = raw.Disconnect(bg) }()
+	defer func() {
+		if err := raw.Disconnect(bg); err != nil {
+			t.Errorf("disconnect: %v", err)
+		}
+	}()
 	if err := raw.Database(db).Drop(bg); err != nil {
 		t.Fatalf("drop the leftover test database: %v", err)
 	}
-	defer func() { _ = raw.Database(db).Drop(bg) }()
+	defer func() {
+		if err := raw.Database(db).Drop(bg); err != nil {
+			t.Errorf("drop test database: %v", err)
+		}
+	}()
 
 	log, closeFn := logging.Build("test", uri, db, t.TempDir())
 	log.Info(logging.System, "startup", logging.Fields{"daemon": "test"})
@@ -86,5 +96,40 @@ func TestBuildIntegration(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("startup events in Mongo = %d, want 1 (Build did not wire the Mongo sink)", n)
+	}
+}
+
+// TestBuildWithUnwritableSpillDirFallsBack proves an unwritable spill directory
+// logs a warning to stderr, leaves the blocking file untouched, and still returns
+// a working stderr logger.
+func TestBuildWithUnwritableSpillDirFallsBack(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var log *logging.Logger
+	var closeFn func() error
+	out := captureStderr(t, func() {
+		log, closeFn = logging.Build("hermex-test", "http://invalid", "db", blocker)
+	})
+	if log == nil {
+		t.Fatal("Build returned a nil logger for an unwritable spill dir")
+	}
+	if err := closeFn(); err != nil {
+		t.Errorf("close: %v", err)
+	}
+	if !strings.Contains(out, "logging.spill.unavailable") {
+		t.Errorf("stderr missing logging.spill.unavailable warning:\n%s", out)
+	}
+	if !strings.Contains(out, "process.start") {
+		t.Errorf("stderr missing process.start announcement:\n%s", out)
+	}
+	raw, err := os.ReadFile(blocker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "keep" {
+		t.Errorf("blocking file content = %q, want %q (state changed)", string(raw), "keep")
 	}
 }
