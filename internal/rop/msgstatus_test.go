@@ -169,6 +169,10 @@ func TestMessageStatusViaFolder(t *testing.T) {
 	// Setting the in-conflict bit is refused: it is server-owned.
 	inConflict, _ := sess.Dispatch(buildSetMessageStatus(0, msgEID, msgStatusInConflict, msgStatusInConflict), []uint32{folderH})
 	wantEC(t, inConflict, ropSetMessageStatus, ecAccessDenied, "SetMessageStatus(IN_CONFLICT)")
+	// The refusal leaves the stored status as it was.
+	if s := getStatus("GetMessageStatus after the refused set"); s != 0x204 {
+		t.Errorf("GetMessageStatus after the refused IN_CONFLICT set = %#x, want 0x204 unchanged", s)
+	}
 	// A non-existent message reports not-found.
 	missing, _ := sess.Dispatch(buildGetMessageStatus(0, uint64(mapi.MakeEIDEx(1, 999999))), []uint32{folderH})
 	wantEC(t, missing, ropGetMessageStatus, ecNotFound, "GetMessageStatus(missing)")
