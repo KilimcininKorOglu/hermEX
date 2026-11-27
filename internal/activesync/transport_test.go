@@ -25,6 +25,11 @@ func TestMaxBodyLimitResolution(t *testing.T) {
 	if got := maxBodyLimit(); got != DefaultMaxRequestBody {
 		t.Errorf("after reset = %d, want the default %d", got, DefaultMaxRequestBody)
 	}
+	// A negative value (a corrupt settings row) must not lift or remove the cap.
+	SetMaxRequestBody(-1)
+	if got := maxBodyLimit(); got != DefaultMaxRequestBody {
+		t.Errorf("after a negative set = %d, want the default %d", got, DefaultMaxRequestBody)
+	}
 }
 
 // TestReadWBXMLRespectsBodyLimit proves the cap is enforced end-to-end: a body over the
