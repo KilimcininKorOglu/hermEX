@@ -80,6 +80,11 @@ func checkHost(host string) error {
 	if numericLabel(host[strings.LastIndexByte(host, '.')+1:]) {
 		return fmt.Errorf("the callback host %q is neither a name nor a dotted-quad address", host)
 	}
+	// RFC 6761 6.3: localhost and every name under it resolve to loopback.
+	name := strings.TrimSuffix(strings.ToLower(host), ".")
+	if name == "localhost" || strings.HasSuffix(name, ".localhost") {
+		return fmt.Errorf("the callback host %q is loopback", host)
+	}
 	return nil
 }
 

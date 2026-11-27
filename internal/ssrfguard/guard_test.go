@@ -95,12 +95,16 @@ func TestValidateURLRejectsDisguisedInternalLiterals(t *testing.T) {
 		"https://0x7f.1/push",
 		"https://0x7f000001/push",
 		"https://017700000001/push",
+		// RFC 6761 6.3: localhost and every name under it resolve to loopback.
+		"https://localhost/push",
+		"https://LOCALHOST./push",
+		"https://api.localhost/push",
 	} {
 		if err := ValidateURL(raw, false); err == nil {
 			t.Errorf("ValidateURL(%s) accepted a disguised internal address", raw)
 		}
 	}
-	for _, raw := range []string{"https://9.9.9.9/push", "https://push1.example.com/x", "https://123.example/x"} {
+	for _, raw := range []string{"https://9.9.9.9/push", "https://push1.example.com/x", "https://123.example/x", "https://localhost.example.com/x", "https://notlocalhost/x"} {
 		if err := ValidateURL(raw, false); err != nil {
 			t.Errorf("ValidateURL(%s) = %v, want accepted", raw, err)
 		}
