@@ -28,15 +28,31 @@ func newTestLimiter(t *testing.T, burst int, period time.Duration) (*Limiter, fu
 	}
 }
 
+// wantAdmitted fails the test unless a request from key is admitted with no retry
+// advertised, which Allow's contract makes zero for every admitted request.
+func wantAdmitted(t *testing.T, l *Limiter, key, what string) {
+	t.Helper()
+	if allowed, retry := l.Allow(key); !allowed || retry != 0 {
+		t.Errorf("%s: Allow(%q) = %v, %v; want admitted with no retry", what, key, allowed, retry)
+	}
+}
+
+// wantRefused fails the test unless a request from key is refused with a retry of
+// at least one second.
+func wantRefused(t *testing.T, l *Limiter, key, what string) {
+	t.Helper()
+	if allowed, retry := l.Allow(key); allowed || retry < time.Second {
+		t.Errorf("%s: Allow(%q) = %v, %v; want refused with a retry", what, key, allowed, retry)
+	}
+}
+
 // TestAllowAdmitsUpToBurst proves the limiter admits exactly the burst within one
 // window and refuses the next request, and that the refusal reports the time left in
 // that window so a client that waits is admitted.
 func TestAllowAdmitsUpToBurst(t *testing.T) {
 	l, advance := newTestLimiter(t, 3, time.Minute)
 	for i := range 3 {
-		if allowed, _ := l.Allow("10.0.0.1"); !allowed {
-			t.Fatalf("request %d refused, want admitted within burst", i+1)
-		}
+		wantAdmitted(t, l, "10.0.0.1", "request "+strconv.Itoa(i+1)+" within the burst")
 	}
 	allowed, retry := l.Allow("10.0.0.1")
 	if allowed {
@@ -47,21 +63,17 @@ func TestAllowAdmitsUpToBurst(t *testing.T) {
 	}
 
 	// A different client keeps its own budget.
-	if allowed, _ := l.Allow("10.0.0.2"); !allowed {
-		t.Error("a second client was refused, want its own budget")
-	}
+	wantAdmitted(t, l, "10.0.0.2", "a second client with its own budget")
 
 	// Partway through the window the retry shrinks to what is left.
 	advance(40 * time.Second)
-	if _, retry := l.Allow("10.0.0.1"); retry != 20*time.Second {
-		t.Errorf("retryAfter mid-window = %v, want 20s", retry)
+	if allowed, retry := l.Allow("10.0.0.1"); allowed || retry != 20*time.Second {
+		t.Errorf("mid-window = %v, %v; want refused with 20s left", allowed, retry)
 	}
 
 	// Once the window elapses the counter resets.
 	advance(21 * time.Second)
-	if allowed, _ := l.Allow("10.0.0.1"); !allowed {
-		t.Error("refused after the window elapsed, want a fresh budget")
-	}
+	wantAdmitted(t, l, "10.0.0.1", "the first request of a fresh window")
 }
 
 // TestAllowNeverAdvertisesZeroRetry proves a refusal at the very end of a window still
@@ -69,12 +81,9 @@ func TestAllowAdmitsUpToBurst(t *testing.T) {
 // refusal immediately.
 func TestAllowNeverAdvertisesZeroRetry(t *testing.T) {
 	l, advance := newTestLimiter(t, 1, time.Minute)
-	l.Allow("10.0.0.1")
+	wantAdmitted(t, l, "10.0.0.1", "the only request of the burst")
 	advance(59*time.Second + 900*time.Millisecond)
-	_, retry := l.Allow("10.0.0.1")
-	if retry < time.Second {
-		t.Errorf("retryAfter = %v, want at least 1s", retry)
-	}
+	wantRefused(t, l, "10.0.0.1", "a request 100ms before the window ends")
 }
 
 // TestDisabledAdmitsEverything proves the limiter is inert until an operator enables
@@ -86,9 +95,7 @@ func TestDisabledAdmitsEverything(t *testing.T) {
 	}
 	l.SetLimits(1, time.Minute)
 	for i := range 50 {
-		if allowed, _ := l.Allow("10.0.0.1"); !allowed {
-			t.Fatalf("request %d refused while disabled, want admitted", i+1)
-		}
+		wantAdmitted(t, l, "10.0.0.1", "request "+strconv.Itoa(i+1)+" while disabled")
 	}
 }
 
@@ -97,9 +104,7 @@ func TestDisabledAdmitsEverything(t *testing.T) {
 func TestAllowFailsOpenOnEmptyKey(t *testing.T) {
 	l, _ := newTestLimiter(t, 1, time.Minute)
 	for i := range 10 {
-		if allowed, _ := l.Allow(""); !allowed {
-			t.Fatalf("request %d with an empty key refused, want fail open", i+1)
-		}
+		wantAdmitted(t, l, "", "request "+strconv.Itoa(i+1)+" with an empty key")
 	}
 }
 
@@ -116,26 +121,16 @@ func TestAFullTableEvictsTheLeastRecentlyUsedClient(t *testing.T) {
 		l.Allow("live-" + strconv.Itoa(i))
 	}
 	// live-0 was the first in, but this request makes it the most recently used.
-	if allowed, _ := l.Allow("live-0"); allowed {
-		t.Fatal("live-0's second request admitted, want it refused past the burst")
-	}
+	wantRefused(t, l, "live-0", "live-0's second request")
 
-	if allowed, _ := l.Allow("newcomer"); !allowed {
-		t.Fatal("newcomer's first request refused, want it admitted")
-	}
-	if allowed, _ := l.Allow("newcomer"); allowed {
-		t.Fatal("newcomer's second request admitted, want it tracked and refused past the burst")
-	}
-	if allowed, _ := l.Allow("live-0"); allowed {
-		t.Error("live-0 was evicted although it was the most recently used client")
-	}
+	wantAdmitted(t, l, "newcomer", "newcomer's first request")
+	wantRefused(t, l, "newcomer", "newcomer's second request, tracked")
+	wantRefused(t, l, "live-0", "live-0, the most recently used client")
 	if got := len(l.windows); got != maxKeys {
 		t.Errorf("table holds %d windows, want it kept at %d", got, maxKeys)
 	}
 	// live-1 was the least recently used, so it is the one that starts over.
-	if allowed, _ := l.Allow("live-1"); !allowed {
-		t.Error("live-1 still refused, want the least recently used client evicted")
-	}
+	wantAdmitted(t, l, "live-1", "live-1, the evicted least recently used client")
 }
 
 // TestAllowReclaimsExpiredWhenTableFull proves a full table of elapsed windows is swept
@@ -146,12 +141,8 @@ func TestAllowReclaimsExpiredWhenTableFull(t *testing.T) {
 		l.Allow("old-" + strconv.Itoa(i))
 	}
 	advance(2 * time.Minute)
-	if allowed, _ := l.Allow("newcomer"); !allowed {
-		t.Fatal("newcomer refused, want admitted into a swept table")
-	}
-	if allowed, _ := l.Allow("newcomer"); allowed {
-		t.Error("newcomer's second request admitted, want it tracked and refused past the burst")
-	}
+	wantAdmitted(t, l, "newcomer", "newcomer into a swept table")
+	wantRefused(t, l, "newcomer", "newcomer's second request, tracked")
 }
 
 // TestPruneDropsElapsedWindows proves the periodic prune frees elapsed windows and
