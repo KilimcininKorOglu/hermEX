@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"io"
 	"strings"
 
@@ -84,8 +85,18 @@ func gunzip(data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer zr.Close()
-	return readBounded(zr)
+	return readAllClosing(zr)
+}
+
+// readAllClosing reads rc within maxReportBytes and closes it. A failed close is
+// a failed read: the decompressor reports a damaged stream there, so a document
+// is never returned beside a close error.
+func readAllClosing(rc io.ReadCloser) ([]byte, error) {
+	b, err := readBounded(rc)
+	if cerr := rc.Close(); cerr != nil {
+		return nil, errors.Join(err, cerr)
+	}
+	return b, err
 }
 
 // unzipXML returns the first XML entry of a zip archive. It examines at most
@@ -113,8 +124,7 @@ func readZipEntry(f *zip.File) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rc.Close()
-	return readBounded(rc)
+	return readAllClosing(rc)
 }
 
 // readBounded reads r to the end, or fails with ErrTooLarge once it passes
