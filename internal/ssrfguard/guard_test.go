@@ -126,18 +126,37 @@ func TestGuardedDialAllowsInternalWhenPermitted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	accepted := make(chan error, 1)
 	go func() {
-		if c, err := ln.Accept(); err == nil {
-			_ = c.Close()
+		c, err := ln.Accept()
+		if err != nil {
+			accepted <- err
+			return
 		}
+		accepted <- c.Close()
 	}()
 
 	conn, err := GuardedDial(true)(context.Background(), "tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatalf("an internal dial was refused with allowInternal set: %v", err)
 	}
-	_ = conn.Close()
+	if err := <-accepted; err != nil {
+		t.Errorf("the listener side of the dial: %v", err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Errorf("close the dialled connection: %v", err)
+	}
+	if err := ln.Close(); err != nil {
+		t.Errorf("close listener: %v", err)
+	}
+}
+
+// closeResponse closes a response the test does not read.
+func closeResponse(t *testing.T, resp *http.Response) {
+	t.Helper()
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
 }
 
 // TestClientRefusesInternalTarget proves the guard reaches real traffic: a request
@@ -146,12 +165,15 @@ func TestClientRefusesInternalTarget(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer ts.Close()
 
-	if _, err := Client(false).Get(ts.URL); err == nil {
+	if resp, err := Client(false).Get(ts.URL); err == nil {
+		closeResponse(t, resp)
 		t.Error("a request to a loopback server was allowed")
 	}
-	if _, err := Client(true).Get(ts.URL); err != nil {
-		t.Errorf("the same request was refused with allowInternal set: %v", err)
+	resp, err := Client(true).Get(ts.URL)
+	if err != nil {
+		t.Fatalf("the same request was refused with allowInternal set: %v", err)
 	}
+	closeResponse(t, resp)
 }
 
 // TestClientDoesNotFollowRedirects proves a redirect cannot be used to escape the
@@ -165,7 +187,7 @@ func TestClientDoesNotFollowRedirects(t *testing.T) {
 
 	resp, err := Client(true).Get(ts.URL)
 	if err == nil {
-		defer resp.Body.Close()
+		defer closeResponse(t, resp)
 		if resp.StatusCode != http.StatusFound {
 			t.Errorf("status = %d, want the redirect returned unfollowed", resp.StatusCode)
 		}
