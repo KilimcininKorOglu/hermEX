@@ -41,7 +41,15 @@ func (f *Forwarding) ReversePath(from, domain string, now time.Time) string {
 	if f == nil || len(f.SRSSecret) == 0 || from == "" || domain == "" {
 		return from
 	}
-	return srs.Forward(from, domain, f.SRSSecret, now)
+	out, err := srs.Forward(from, domain, f.SRSSecret, now)
+	if err != nil {
+		// The forward still goes out, as it does with SRS off; the failure is
+		// recorded so the operator sees why its envelope sender was kept.
+		f.Logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "srs.rewrite.fail",
+			User: from, Fields: logging.Fields{"domain": domain}, Err: err.Error()})
+		return from
+	}
+	return out
 }
 
 // Seal returns raw with an ARC set by domain on top. Mail is never held for a

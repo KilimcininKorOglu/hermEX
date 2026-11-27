@@ -14,6 +14,7 @@ import (
 	"crypto/sha1" // SRS0 names HMAC-SHA1; HMAC does not rely on SHA-1 collision resistance
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -39,18 +40,22 @@ var (
 // Forward rewrites addr as an SRS0 address at forwarder. It returns addr
 // unchanged when there is nothing to rewrite (the null sender), when addr has no
 // domain, or when the result would exceed the local-part limit.
-func Forward(addr, forwarder string, secret []byte, now time.Time) string {
+func Forward(addr, forwarder string, secret []byte, now time.Time) (string, error) {
 	at := strings.LastIndexByte(addr, '@')
 	if at <= 0 || at == len(addr)-1 {
-		return addr
+		return addr, nil
 	}
 	local, domain := addr[:at], addr[at+1:]
 	ts := timestamp(now)
-	out := prefix + hash(secret, ts, domain, local) + "=" + ts + "=" + domain + "=" + local
-	if len(out) > maxLocal {
-		return addr
+	h, err := hash(secret, ts, domain, local)
+	if err != nil {
+		return "", err
 	}
-	return out + "@" + forwarder
+	out := prefix + h + "=" + ts + "=" + domain + "=" + local
+	if len(out) > maxLocal {
+		return addr, nil
+	}
+	return out + "@" + forwarder, nil
 }
 
 // IsSRS reports whether addr has the form of an SRS0 address, in any case.
@@ -71,7 +76,11 @@ func Reverse(addr string, secret []byte, now time.Time) (string, error) {
 		return "", ErrNotSRS
 	}
 	h, ts, domain, local := parts[0], parts[1], parts[2], parts[3]
-	if !hmac.Equal([]byte(strings.ToLower(h)), []byte(strings.ToLower(hash(secret, ts, domain, local)))) {
+	want, err := hash(secret, ts, domain, local)
+	if err != nil {
+		return "", err
+	}
+	if !hmac.Equal([]byte(strings.ToLower(h)), []byte(strings.ToLower(want))) {
 		return "", ErrBadHash
 	}
 	if !fresh(ts, now) {
@@ -82,10 +91,12 @@ func Reverse(addr string, secret []byte, now time.Time) (string, error) {
 
 // hash is the truncated HMAC-SHA1 of the timestamp and the original address,
 // all in lower case so a case change on the way back still verifies.
-func hash(secret []byte, ts, domain, local string) string {
+func hash(secret []byte, ts, domain, local string) (string, error) {
 	m := hmac.New(sha1.New, secret)
-	m.Write([]byte(strings.ToLower(ts + domain + local)))
-	return base64.StdEncoding.EncodeToString(m.Sum(nil))[:hashLen]
+	if _, err := m.Write([]byte(strings.ToLower(ts + domain + local))); err != nil {
+		return "", fmt.Errorf("srs: hash the address: %w", err)
+	}
+	return base64.StdEncoding.EncodeToString(m.Sum(nil))[:hashLen], nil
 }
 
 // timestamp is the day number modulo 1024 in two base32 characters.

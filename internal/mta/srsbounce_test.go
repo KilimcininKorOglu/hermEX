@@ -35,19 +35,29 @@ func srsSession(t *testing.T, sender string) *session {
 	return &session{accounts: accounts, from: sender, spool: sp, forwarding: testForwarding(t)}
 }
 
+// srsAddress rewrites addr at the hosted domain "local" as a forward would.
+func srsAddress(t *testing.T, addr string, secret []byte, at time.Time) string {
+	t.Helper()
+	out, err := srs.Forward(addr, "local", secret, at)
+	if err != nil {
+		t.Fatalf("srs.Forward(%q): %v", addr, err)
+	}
+	return out
+}
+
 // TestBounceToARewrittenSenderReachesTheOriginal sends a delivery status
 // notification (null reverse-path) to the SRS address a forward carried. It is
 // relayed to the original sender, as an external recipient or a local mailbox.
 func TestBounceToARewrittenSenderReachesTheOriginal(t *testing.T) {
 	s := srsSession(t, "")
 	secret := s.forwarding.SRSSecret
-	if err := s.Rcpt(srs.Forward("bob@remote.test", "local", secret, time.Now()), smtp.RcptParams{}); err != nil {
+	if err := s.Rcpt(srsAddress(t, "bob@remote.test", secret, time.Now()), smtp.RcptParams{}); err != nil {
 		t.Fatal(err)
 	}
 	if len(s.relayTargets) != 1 || s.relayTargets[0].Addr != "bob@remote.test" {
 		t.Errorf("relay targets = %+v, want the original sender", s.relayTargets)
 	}
-	if err := s.Rcpt(srs.Forward("alice@local", "local", secret, time.Now()), smtp.RcptParams{}); err != nil {
+	if err := s.Rcpt(srsAddress(t, "alice@local", secret, time.Now()), smtp.RcptParams{}); err != nil {
 		t.Fatal(err)
 	}
 	if len(s.targets) != 1 || s.targets[0].addr != "alice@local" {
@@ -62,11 +72,11 @@ func TestBounceToARewrittenSenderReachesTheOriginal(t *testing.T) {
 func TestRewrittenAddressIsNotAnOpenRelay(t *testing.T) {
 	probe := srsSession(t, "")
 	secret := probe.forwarding.SRSSecret
-	good := srs.Forward("victim@remote.test", "local", secret, time.Now())
+	good := srsAddress(t, "victim@remote.test", secret, time.Now())
 	cases := map[string]struct{ sender, rcpt string }{
 		"ordinary mail": {"spammer@remote.test", good},
 		"forged hash":   {"", "SRS0=AAAAAAAA" + good[strings.Index(good, "=")+9:]},
-		"expired":       {"", srs.Forward("victim@remote.test", "local", secret, time.Now().Add(-srs.MaxAge-48*time.Hour))},
+		"expired":       {"", srsAddress(t, "victim@remote.test", secret, time.Now().Add(-srs.MaxAge-48*time.Hour))},
 	}
 	for name, c := range cases {
 		s := srsSession(t, c.sender)
