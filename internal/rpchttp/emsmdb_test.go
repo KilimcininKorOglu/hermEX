@@ -280,11 +280,25 @@ func TestSessionTouchDefersReclaim(t *testing.T) {
 	cxh, result := parseConnectExOut(t, out)
 	wantEq(t, result, uint32(ecSuccess), "connect result")
 
-	// A touch restamps the session, so a sweep with the same window finds it fresh.
+	// Age the session past the window, as an hour of silence would.
+	ems.mu.Lock()
+	ems.sessions[cxh.GUID].lastSeen = time.Now().Add(-time.Hour)
+	ems.mu.Unlock()
+
+	// Another account naming the handle is refused and must not keep it alive.
+	if _, ok := ems.lookup("bob@hermex.test", cxh.GUID); ok {
+		t.Fatal("another account resolved alice's handle")
+	}
+	ems.mu.Lock()
+	stale := time.Since(ems.sessions[cxh.GUID].lastSeen) >= time.Minute
+	ems.mu.Unlock()
+	wantTrue(t, stale, "a refused lookup by another account left the session stale")
+
+	// The owner's call restamps the session, so a sweep with the window finds it fresh.
 	if _, ok := ems.lookup("alice@hermex.test", cxh.GUID); !ok {
 		t.Fatal("session missing")
 	}
 	if n := ems.Sweep(time.Now(), time.Minute); n != 0 {
-		t.Errorf("swept %d session(s) that were just used", n)
+		t.Errorf("swept %d session(s) the owner just used", n)
 	}
 }
